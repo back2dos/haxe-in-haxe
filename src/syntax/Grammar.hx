@@ -90,7 +90,14 @@ class Grammar {
 		if (acceptKwd(Function) != null) { var name=placedIdent(); var f=functionRest(); return {cffName:name,cffDoc:doc,cffPos:union(start,f.fExpr == null ? name.pos : f.fExpr.pos),cffMeta:meta,cffAccess:accesses,cffKind:FFun(f)}; }
 		fail("Expected class field"); return null;
 	}
-	function functionRest():Func { var params=typeParams(); expect(POpen); var args=[]; if (!is(PClose)) do args.push(functionArg()) while (accept(Comma) != null); expect(PClose); var ret=typeHintOpt(); var body:Null<Expr>; if (accept(Semicolon) != null) body=null; else body=block(); return {fParams:params,fArgs:args,fType:ret,fExpr:body}; }
+	function functionRest():Func {
+		var params=typeParams(); expect(POpen); var args=[]; if (!is(PClose)) do args.push(functionArg()) while (accept(Comma) != null); expect(PClose); var ret=typeHintOpt();
+		var body:Null<Expr>;
+		if (accept(Semicolon) != null) body = null;
+		else if (is(BrOpen)) body = block();
+		else { body = expression(); accept(Semicolon); }
+		return {fParams:params,fArgs:args,fType:ret,fExpr:body};
+	}
 	function functionArg():FuncArg { var meta=metadata(); var optional=accept(Question) != null; var name=placedIdent(); var type=typeHintOpt(); var value=accept(Binop(OpAssign)) == null ? null : expression(); return {name:name,optional:optional,meta:meta,type:type,expr:value}; }
 
 	function expression(?min=0):Expr {

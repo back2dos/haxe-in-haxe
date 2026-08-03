@@ -18,6 +18,8 @@ class GrammarTest {
 		assert(switch property.definition { case EClass(value): switch value.data[0].cffKind { case FProp(get, set, _, _): get.name == "default" && set.name == "null"; case _: false; }; case _: false; });
 		var functionType = Grammar.parse('class Mapper { function map(f:Int->String):Void; }').declarations[0];
 		assert(switch functionType.definition { case EClass(value): switch value.data[0].cffKind { case FFun(func): switch func.fArgs[0].type.type { case CTFunction(_, _): true; case _: false; }; case _: false; }; case _: false; });
+		var expressionBody = Grammar.parse('abstract Any(Dynamic) { extern inline function promote<T>():T return this; }').declarations[0];
+		assert(switch expressionBody.definition { case EAbstract(value): switch value.data[0].cffKind { case FFun(func): func.fExpr != null; case _: false; }; case _: false; });
 	}
 	static function assert(value:Bool):Void if (!value) throw "Grammar assertion failed";
 }
