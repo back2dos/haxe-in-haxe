@@ -26,5 +26,6 @@ class UnitMain {
 		SocketTest.main();
 		DefineTest.main();
 		AstTest.main();
+		LexerTest.main();
 	}
 }
