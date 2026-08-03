@@ -29,5 +29,7 @@ class UnitMain {
 		LexerTest.main();
 		PreprocessorTest.main();
 		GrammarTest.main();
+		TTypeTest.main();
+		MessageTest.main();
 	}
 }
