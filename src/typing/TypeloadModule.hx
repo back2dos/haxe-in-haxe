@@ -54,6 +54,13 @@ class TypeloadModule {
 
 	public function findModule(path:GlobalTypePath):Null<ModuleDef> return modules.get(moduleKey(path));
 
+	/** Modules in the order they were allocated, matching the batch load graph. */
+	public function loadedModules():Array<ModuleDef> {
+		var result = [for (module in modules) module];
+		result.sort(function(a, b) return a.mId - b.mId);
+		return result;
+	}
+
 	function makeModule(path:GlobalTypePath, file:String):ModuleDef {
 		return {
 			mId: nextModuleId++, mPath: path, mTypes: [], mStatics: null,

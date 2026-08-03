@@ -3,11 +3,13 @@ package haxe;
 import compiler.Args;
 import compiler.ParsedArg;
 import compiler.hxb.HxbWriter;
+import compiler.hxb.HxbWriterConfig;
 import core.ClassPath.ClassPathScope;
 import core.ClassPath.DirectoryClassPath;
 import core.ClassPaths;
 import core.Define;
 import core.Globals.GlobalTypePath;
+import core.ZipOutput;
 import haxe.io.Path;
 import sys.FileSystem;
 import sys.io.File;
@@ -34,7 +36,7 @@ class Main {
 		var classPaths = new ClassPaths();
 		var defines = Define.emptyDefines();
 		var main:Null<GlobalTypePath> = null;
-		var output:Null<String> = null;
+		var hxbArgument:Null<String> = null;
 		for (argument in Args.parseArgs(arguments)) {
 			switch argument {
 				case AddClassPath(path): classPaths.push(new DirectoryClassPath(classPathPath(path), User));
@@ -43,19 +45,54 @@ class Main {
 					if (main != null) unsupported("multiple --main options");
 					main = typePath(path, "--main");
 				case SetHxbOut(file):
-					if (output != null) unsupported("multiple --hxb options");
-					output = file;
+					if (hxbArgument != null) unsupported("multiple --hxb options");
+					hxbArgument = file;
 				case _:
 					unsupported(Type.enumConstructor(argument));
 			}
 		}
 		if (main == null) throw "Batch HXB compilation requires --main";
-		if (output == null) throw "Batch HXB compilation requires --hxb";
-		var module = new TypeloadModule(classPaths, defines).loadModule(main);
-		var writer = new HxbWriter();
-		writer.writeModule(module);
-		ensureOutputDirectory(output);
-		File.saveBytes(output, writer.exportModule());
+		if (hxbArgument == null) throw "Batch HXB compilation requires --hxb";
+		var config = HxbWriterConfig.processArgument(hxbArgument);
+		if (config.targetConfig.hxbVersion != compiler.hxb.HxbData.VERSION) throw 'Unsupported HXB version: ${config.targetConfig.hxbVersion}';
+		ensureOutputDirectory(config.archivePath);
+		var loader = new TypeloadModule(classPaths, defines);
+		loader.loadModule(main);
+		var zip = new ZipOutput(config.archivePath, 0);
+		try {
+			if (config.targetConfig.generate) for (module in loader.loadedModules()) {
+				var path = module.mPath.pack.concat([module.mPath.name]);
+				if (shouldExport(path, config.targetConfig)) {
+					var writer = new HxbWriter();
+					writer.writeModule(module);
+					zip.addBytesEntry(writer.exportModule(), "cross/" + path.join("/") + ".hxb");
+				}
+			}
+		} catch (error:Dynamic) {
+			zip.close();
+			throw error;
+		}
+		zip.close();
+	}
+
+	static function shouldExport(path:Array<String>, config:compiler.hxb.HxbWriterConfig.WriterTargetConfig):Bool {
+		for (pattern in config.include) if (matchesPath(path, pattern)) return true;
+		for (pattern in config.exclude) if (matchesPath(path, pattern)) return false;
+		return true;
+	}
+
+	// Direct port of Ast.match_path true for HXB include/exclude patterns.
+	static function matchesPath(path:Array<String>, pattern:Array<String>):Bool {
+		function lowerIdentifier(value:String):Bool return value.length > 0 && value.charCodeAt(0) >= "a".code && value.charCodeAt(0) <= "z".code;
+		function loop(top:Bool, pathIndex:Int, patternIndex:Int):Bool {
+			if (patternIndex == pattern.length) return pathIndex == path.length || !top;
+			var part = pattern[patternIndex];
+			if (part == "**") return patternIndex + 1 == pattern.length || loop(false, pathIndex, patternIndex + 1) || (pathIndex < path.length && loop(false, pathIndex + 1, patternIndex));
+			if (pathIndex == path.length) return false;
+			if (patternIndex + 1 == pattern.length && pathIndex + 1 < path.length && lowerIdentifier(part) && !lowerIdentifier(path[pathIndex + 1])) return path[pathIndex] == part;
+			return (part == "*" || path[pathIndex] == part) && loop(false, pathIndex + 1, patternIndex + 1);
+		}
+		return loop(true, 0, 0);
 	}
 
 	static function typePath(parts:Array<String>, option:String):GlobalTypePath {

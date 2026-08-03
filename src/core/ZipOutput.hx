@@ -34,8 +34,16 @@ class ZipOutput extends AnyOutput {
 	}
 
 	override public function addEntry(content:String, name:String):Void {
+		addBytesEntry(Bytes.ofString(content), name);
+	}
+
+	/**
+		Adds binary data without round-tripping it through a Haxe String. HXB
+		modules are byte streams, so archive generation must retain every byte.
+	**/
+	public function addBytesEntry(content:Bytes, name:String):Void {
 		if (closed) throw "Output is closed";
-		var data = Bytes.ofString(content);
+		var data = content;
 		var fileSize = data.length;
 		var compressed = compressionLevel != 0;
 		var crc32 = haxe.crypto.Crc32.make(data);
