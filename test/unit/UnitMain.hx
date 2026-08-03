@@ -30,6 +30,7 @@ class UnitMain {
 		PreprocessorTest.main();
 		GrammarTest.main();
 		TTypeTest.main();
+		TypeloadModuleTest.main();
 		MessageTest.main();
 	}
 }
