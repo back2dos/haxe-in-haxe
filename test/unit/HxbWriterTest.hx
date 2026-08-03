@@ -2,6 +2,10 @@ package unit;
 
 import compiler.hxb.HxbData.ChunkKind;
 import compiler.hxb.HxbWriter;
+import core.ClassPath.DirectoryClassPath;
+import core.ClassPaths;
+import core.Define;
+import typing.TypeloadModule;
 
 class HxbWriterTest {
 	public static function main():Void {
@@ -25,5 +29,29 @@ class HxbWriterTest {
 		} catch (error:Dynamic) {
 			if (Std.string(error).indexOf("negative ULEB128") < 0) throw error;
 		}
+
+		var paths = new ClassPaths();
+		paths.push(new DirectoryClassPath("test/", core.ClassPath.ClassPathScope.User));
+		var module = new TypeloadModule(paths, Define.emptyDefines()).loadModule({pack:["unit", "moduleload"], name:"Example"});
+		var typedWriter = new HxbWriter();
+		typedWriter.writeModule(module);
+		var typedBytes = typedWriter.exportModule();
+		var kinds = chunkKinds(typedBytes);
+		var expectedKinds = "STR,MDF,MTF,CLR,ENR,ABR,TDR,CLD,END,ABD,TDD,EOT,CFD,EFD,AFD,EOF,EOM";
+		if (kinds.join(",") != expectedKinds) throw 'Unexpected typed HXB chunk layout: ${kinds.join(",")}';
+		if (typedBytes.get(0) != "h".code || typedBytes.get(1) != "x".code || typedBytes.get(2) != "b".code || typedBytes.get(3) != 1) throw "Typed HXB header was not written";
+	}
+
+	static function chunkKinds(bytes:haxe.io.Bytes):Array<String> {
+		var result = [];
+		var offset = 4;
+		while (offset < bytes.length) {
+			var kind = String.fromCharCode(bytes.get(offset)) + String.fromCharCode(bytes.get(offset + 1)) + String.fromCharCode(bytes.get(offset + 2));
+			var length = bytes.get(offset + 3) | (bytes.get(offset + 4) << 8) | (bytes.get(offset + 5) << 16) | (bytes.get(offset + 6) << 24);
+			result.push(kind);
+			offset += 7 + length;
+		}
+		if (offset != bytes.length) throw "Malformed HXB chunk boundaries";
+		return result;
 	}
 }
