@@ -5,6 +5,7 @@ class UnitMain {
 		ArgsTest.main();
 		HxbDataTest.main();
 		HxbWriterConfigTest.main();
+		HelperTest.main();
 		SemVerTest.main();
 	}
 }

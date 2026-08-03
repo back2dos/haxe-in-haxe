@@ -78,7 +78,7 @@ class Args {
 					var resource = requiredArgument(argument, arguments, index++);
 					var at = resource.indexOf("@");
 					parsed.push(at < 0 ? AddResource(resource, resource) : AddResource(resource.substr(0, at), resource.substr(at + 1)));
-				case "--cmd", "-cmd": parsed.push(RunCmd(unquote(requiredArgument(argument, arguments, index++))));
+			case "--cmd", "-cmd": parsed.push(RunCmd(Helper.unquote(requiredArgument(argument, arguments, index++))));
 				case "--prompt", "-prompt": parsed.push(SetPrompt);
 				case "--display": parsed.push(SetDisplayArg(requiredArgument(argument, arguments, index++)));
 				case "--xml", "-xml": parsed.push(SetXmlOut(requiredArgument(argument, arguments, index++)));
@@ -125,12 +125,4 @@ class Args {
 		return {libFile: file, libExtern: isExtern, libKind: kind};
 	}
 
-	static function unquote(value:String):String {
-		if (value.length > 1) {
-			var first = value.charAt(0);
-			var last = value.charAt(value.length - 1);
-			if ((first == '"' && last == '"') || (first == "'" && last == "'")) return value.substr(1, value.length - 2);
-		}
-		return value;
-	}
 }
