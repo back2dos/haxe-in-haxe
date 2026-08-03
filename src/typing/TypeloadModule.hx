@@ -58,6 +58,17 @@ class TypeloadModule {
 		type parameters and abstract typing are available. */
 	public function loadStdTypes():ModuleDef return loadModule({pack: [], name: "StdTypes"});
 
+	/** Initial batch subset of typerEntry.create's standard-library sequence.
+		Enum/iterator/call-stack modules follow once their typed dependencies are
+		available. */
+	public function loadStdBootstrap():Void {
+		loadStdTypes();
+		loadModule({pack: [], name: "String"});
+		loadModule({pack: [], name: "Std"});
+		loadModule({pack: [], name: "Any"});
+		loadModule({pack: [], name: "Array"});
+	}
+
 	/** Modules in the order they were allocated, matching the batch load graph. */
 	public function loadedModules():Array<ModuleDef> {
 		var result = [for (module in modules) module];

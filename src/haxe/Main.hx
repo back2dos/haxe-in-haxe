@@ -63,7 +63,7 @@ class Main {
 		if (config.targetConfig.hxbVersion != compiler.hxb.HxbData.VERSION) throw 'Unsupported HXB version: ${config.targetConfig.hxbVersion}';
 		ensureOutputDirectory(config.archivePath);
 		var loader = new TypeloadModule(classPaths, defines);
-		loader.loadStdTypes();
+		loader.loadStdBootstrap();
 		loader.loadModule(main);
 		var zip = new ZipOutput(config.archivePath, 0);
 		try {
