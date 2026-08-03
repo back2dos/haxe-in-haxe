@@ -29,12 +29,14 @@ typedef NativeLibArg = {
 /** The CLI representation is intentionally separate from compiler context mutation. */
 enum ParsedArg {
 	SetPlatform(platform:Platform, output:String);
+	SetCustomTarget(name:String, path:String);
 	SetCppiaTarget(output:String);
 	AddClassPath(path:String);
 	AddLibClassPath(path:String);
 	AddHxbLib(file:String);
 	SetMain(path:Array<String>);
 	AddLib(name:String);
+	HaxelibGlobal;
 	Define(flag:String, value:Null<String>);
 	Undefine(flag:String);
 	SetVerbose;
@@ -44,6 +46,7 @@ enum ParsedArg {
 	RunX(path:String);
 	AddResource(file:String, name:String);
 	RunCmd(command:String);
+	SetSwfVersion(version:Float);
 	SetDce(mode:String);
 	AddNativeLib(library:NativeLibArg);
 	AddNekoLibPath(path:String);
@@ -58,10 +61,19 @@ enum ParsedArg {
 	SetMeasureTimes;
 	AddWarning(setting:String);
 	AddClass(path:Array<String>);
+	IncludeModule(module:String);
+	SetPrompt;
 	Next;
 	Each;
+	ServerListen(hostPort:String);
+	ServerConnect(hostPort:String);
+	Connect(hostPort:String);
 	Cwd(path:String);
 	HxmlFile(file:String);
 	ShowVersion;
 	ShowHelp;
+	ShowHelpDefines;
+	ShowHelpMetas;
+	ShowHelpUserDefines;
+	ShowHelpUserMetas;
 }

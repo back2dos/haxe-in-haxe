@@ -17,6 +17,17 @@ class ArgsTest {
 			case Run(path, values) if (path == "app.Main" && values.join(",") == "one,two"):
 			case _: throw "--run must consume remaining arguments";
 		}
+
+		var advanced = Args.parseArgs(["-custom", "wasm=out", "--java-lib", "lib.jar", "--remap", "old:new", "lowercase", "--help-metas", "ignored"]);
+		assertCustomTarget(advanced[0]);
+		assertJavaLib(advanced[1]);
+		assertRemap(advanced[2]);
+		assertIncludedModule(advanced[3]);
+		switch (advanced[4]) {
+			case ShowHelpMetas:
+			case _: throw "Expected help metas";
+		}
+		if (advanced.length != 5) throw "Early-exit help must consume remaining arguments";
 	}
 
 	static function assertClassPath(argument:ParsedArg):Void switch (argument) {
@@ -37,5 +48,25 @@ class ArgsTest {
 	static function assertMain(argument:ParsedArg):Void switch (argument) {
 		case SetMain(["app", "Main"]):
 		case _: throw "Expected main path";
+	}
+
+	static function assertCustomTarget(argument:ParsedArg):Void switch (argument) {
+		case SetCustomTarget("wasm", "out"):
+		case _: throw "Expected custom target";
+	}
+
+	static function assertJavaLib(argument:ParsedArg):Void switch (argument) {
+		case AddNativeLib({libFile: "lib.jar", libExtern: false, libKind: JavaLib}):
+		case _: throw "Expected Java native library";
+	}
+
+	static function assertRemap(argument:ParsedArg):Void switch (argument) {
+		case Remap("old", "new"):
+		case _: throw "Expected package remap";
+	}
+
+	static function assertIncludedModule(argument:ParsedArg):Void switch (argument) {
+		case IncludeModule("lowercase"):
+		case _: throw "Expected included module";
 	}
 }
