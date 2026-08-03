@@ -6,6 +6,7 @@ import core.ClassPaths;
 import core.Define;
 import core.TType.ModuleType;
 import core.TType.T;
+import core.TType.TExprDef;
 import typing.TypeloadModule;
 
 class TypeloadModuleTest {
@@ -26,5 +27,18 @@ class TypeloadModuleTest {
 		var choice = switch module.mTypes[1] { case TEnumDecl(value): value; case _: throw "Expected enum"; };
 		if (choice.eNames.join(",") != "One,Many" || choice.eConstrs.get("Many").efIndex != 1) throw "Enum constructor population failed";
 		switch choice.eConstrs.get("Many").efType { case TFun(signature): if (signature.args.length != 2) throw "Enum constructor arguments failed"; case _: throw "Expected enum constructor function"; }
+		var expressions = loader.loadModule({pack:["unit", "moduleload"], name:"Expressions"});
+		var expressionClass = switch expressions.mTypes[0] { case TClassDecl(value): value; case _: throw "Expected expressions class"; };
+		switch expressionClass.clStatics.get("initial").cfExpr.eexpr { case TBinop(_, _, _): case _: throw "Field initializer was not typed"; }
+		var run = expressionClass.clFields.get("run").cfExpr;
+		switch run.eexpr {
+			case TFunction(func): switch func.tfExpr.eexpr {
+				case TBlock(values):
+					switch values[0].eexpr { case TVar(_, _): case _: throw "Local variable was not typed"; }
+					switch values[1].eexpr { case TReturn(value): switch value.eexpr { case TCall(_, _): case _: throw "Direct call was not typed"; }; case _: throw "Return was not typed"; }
+				case _: throw "Function body was not typed";
+			}
+			case _: throw "Function expression was not typed";
+		}
 	}
 }

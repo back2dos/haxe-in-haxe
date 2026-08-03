@@ -22,6 +22,7 @@ class TypeloadModule {
 	var defines:DefineContext;
 	var modules:Map<String, ModuleDef> = new Map();
 	var nextModuleId = 0;
+	var nextVarId = 0;
 
 	public function new(classPaths:ClassPaths, defines:DefineContext) {
 		this.classPaths = classPaths;
@@ -89,7 +90,81 @@ class TypeloadModule {
 				cls.clOrderedFields.push(typed);
 			}
 		}
+		// Signatures have to be installed before bodies are typed: a method body
+		// may call a method declared later in the same class.
+		for (field in fields) {
+			var typed = hasAccess(field, AStatic) ? cls.clStatics.get(field.cffName.name) : (field.cffName.name == "new" ? cls.clConstructor : cls.clFields.get(field.cffName.name));
+			switch field.cffKind {
+				case FVar(_, value) | FProp(_, _, _, value): if (value != null) typed.cfExpr = typeExpr(module, cls, value, new StringMap());
+				case FFun(func): if (func.fExpr != null) typed.cfExpr = typeFunction(module, cls, func, switch typed.cfType { case TFun(signature): signature; case _: {args: [], ret: TDynamic(null)}; });
+			}
+		}
 	}
+
+	// Small batch-only subset of typer.ml. It deliberately preserves an unknown
+	// type as Dynamic until BasicTypes and Typecore are available.
+	function typeFunction(module:ModuleDef, cls:TClass, func:Func, signature:TSignature):TExpr {
+		var locals = new StringMap<TVar>();
+		var args = [];
+		for (index in 0...func.fArgs.length) {
+			var arg = func.fArgs[index];
+			var variable = makeVar(arg.name.name, signature.args[index].type, TVOArgument, arg.name.pos, arg.meta);
+			locals.set(variable.vName, variable);
+			args.push({variable: variable, defaultValue: arg.expr == null ? null : typeExpr(module, cls, arg.expr, locals)});
+		}
+		var body = typeExpr(module, cls, func.fExpr, locals);
+		return typed(TFunction({tfArgs:args, tfType:signature.ret, tfExpr:body}), TFun(signature), func.fExpr.pos);
+	}
+
+	function typeExpr(module:ModuleDef, cls:TClass, source:Expr, locals:StringMap<TVar>):TExpr {
+		var fallback = TDynamic(null);
+		return switch source.expr {
+			case EConst(value): switch value {
+				case Int(v, _): typed(TConst(TInt(Std.parseInt(v))), fallback, source.pos);
+				case Float(v, _): typed(TConst(TFloat(v)), fallback, source.pos);
+				case String(v, _): typed(TConst(TString(v)), fallback, source.pos);
+				case Ident("true"): typed(TConst(TBool(true)), fallback, source.pos);
+				case Ident("false"): typed(TConst(TBool(false)), fallback, source.pos);
+				case Ident("null"): typed(TConst(TNull), fallback, source.pos);
+				case Ident(name): typeIdent(cls, name, locals, source.pos);
+				case Regexp(_, _): typed(TIdent(Ast.sConstant(value)), fallback, source.pos);
+			};
+			case EParenthesis(expr): var value = typeExpr(module, cls, expr, locals); typed(TParenthesis(value), value.etype, source.pos);
+			case EBinop(op, left, right): var l = typeExpr(module, cls, left, locals); var r = typeExpr(module, cls, right, locals); typed(TBinop(op, l, r), op == OpAssign ? l.etype : fallback, source.pos);
+			case EVars(vars): typeVars(module, cls, vars, locals, source.pos);
+			case EBlock(exprs): var values = [for (expr in exprs) typeExpr(module, cls, expr, locals)]; typed(TBlock(values), values.length == 0 ? fallback : values[values.length - 1].etype, source.pos);
+			case ECall(expr, args): var callee = typeExpr(module, cls, expr, locals); var values = [for (arg in args) typeExpr(module, cls, arg, locals)]; var result = switch callee.etype { case TFun(sig): sig.ret; case _: fallback; }; typed(TCall(callee, values), result, source.pos);
+			case EFunction(_, func): var signature:TSignature = {args:[for (arg in func.fArgs) {name:arg.name.name, optional:arg.optional, type:arg.type == null ? fallback : resolveTypeHint(module, arg.type)}], ret:func.fType == null ? fallback : resolveTypeHint(module, func.fType)}; typeFunction(module, cls, func, signature);
+			case EReturn(expr): typed(TReturn(expr == null ? null : typeExpr(module, cls, expr, locals)), fallback, source.pos);
+			case EThrow(expr): typed(TThrow(typeExpr(module, cls, expr, locals)), fallback, source.pos);
+			case EIf(condition, thenExpr, elseExpr): var thenValue = typeExpr(module, cls, thenExpr, locals); typed(TIf(typeExpr(module, cls, condition, locals), thenValue, elseExpr == null ? null : typeExpr(module, cls, elseExpr, locals)), thenValue.etype, source.pos);
+			case EWhile(condition, body, flag): typed(TWhile(typeExpr(module, cls, condition, locals), typeExpr(module, cls, body, locals), flag), fallback, source.pos);
+			case _: typed(TIdent("<untyped>"), fallback, source.pos);
+		};
+	}
+
+	function typeVars(module:ModuleDef, cls:TClass, vars:Array<EVar>, locals:StringMap<TVar>, pos:Pos):TExpr {
+		var result:Array<TExpr> = [];
+		for (value in vars) {
+			var type = value.evType == null ? TDynamic(null) : resolveTypeHint(module, value.evType);
+			var variable = makeVar(value.evName.name, type, TVOLocalVariable, value.evName.pos, value.evMeta);
+			locals.set(variable.vName, variable);
+			result.push(typed(TVar(variable, value.evExpr == null ? null : typeExpr(module, cls, value.evExpr, locals)), type, value.evName.pos));
+		}
+		return result.length == 1 ? result[0] : typed(TBlock(result), TDynamic(null), pos);
+	}
+
+	function typeIdent(cls:TClass, name:String, locals:StringMap<TVar>, pos:Pos):TExpr {
+		var local = locals.get(name);
+		if (local != null) return typed(TLocal(local), local.vType, pos);
+		var field = cls.clFields.get(name);
+		if (field == null) field = cls.clStatics.get(name);
+		if (field != null) return typed(TField(typed(TConst(TThis), cls.clType, pos), FDynamic(name)), field.cfType, pos);
+		return typed(TIdent(name), TDynamic(null), pos);
+	}
+
+	function makeVar(name:String, type:T, origin:TVarOrigin, pos:Pos, meta:Metadata):TVar return {vId:nextVarId++, vName:name, vType:type, vKind:VUser(origin), vExtra:null, vMeta:meta, vFlags:0, vPos:pos};
+	static function typed(expr:TExprDef, type:T, pos:Pos):TExpr return {eexpr:expr, etype:type, epos:pos};
 
 	function populateEnumConstructors(module:ModuleDef, en:TEnum, constructors:Array<EnumConstructor>):Void {
 		for (index in 0...constructors.length) {
