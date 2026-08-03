@@ -7,6 +7,18 @@ enum ChunkKind {
 	STR; DOC; MDF; MTF; IMP; CLR; ENR; ABR; TDR; OFR; OFD; OBD; CLD; END; ABD; TDD; EOT; EFR; CFR; CFD; EFD; AFD; EOF; EXD; EOM;
 }
 
+class HxbFailure {
+	public final message:String;
+
+	public function new(message:String) {
+		this.message = message;
+	}
+
+	public function toString():String {
+		return message;
+	}
+}
+
 class HxbData {
 	public static inline var VERSION = 1;
 
@@ -17,6 +29,22 @@ class HxbData {
 			case CLD: "CLD"; case END: "END"; case ABD: "ABD"; case TDD: "TDD"; case EOT: "EOT"; case EFR: "EFR";
 			case CFR: "CFR"; case CFD: "CFD"; case EFD: "EFD"; case AFD: "AFD"; case EOF: "EOF"; case EXD: "EXD"; case EOM: "EOM";
 		};
+	}
+
+	public static function chunkKindOfString(name:String):ChunkKind {
+		return switch (name) {
+			case "STR": STR; case "DOC": DOC; case "MDF": MDF; case "MTF": MTF; case "IMP": IMP; case "CLR": CLR;
+			case "ENR": ENR; case "ABR": ABR; case "TDR": TDR; case "OFR": OFR; case "OFD": OFD; case "OBD": OBD;
+			case "CLD": CLD; case "END": END; case "ABD": ABD; case "TDD": TDD; case "EOT": EOT; case "EFR": EFR;
+			case "CFR": CFR; case "CFD": CFD; case "EFD": EFD; case "AFD": AFD; case "EOF": EOF; case "EXD": EXD;
+			case "EOM": EOM;
+			case _: throw new HxbFailure('Invalid chunk name: $name');
+		};
+	}
+
+	public static function error(message:String):Void {
+		Sys.stderr().writeString('[error] $message\\n');
+		throw new HxbFailure(message);
 	}
 
 	public static function writeHeader(output:BytesOutput):Void {

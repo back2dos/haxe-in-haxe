@@ -4,7 +4,7 @@ import compiler.Args;
 import compiler.ParsedArg;
 
 class ArgsTest {
-	static function main():Void {
+	public static function main():Void {
 		var arguments = Args.parseArgs(["-cp", "src", "-D", "feature=value", "--hxb", "output.hxb", "-m", "app.Main"]);
 		if (arguments.length != 4) throw "Unexpected parsed argument count";
 		assertClassPath(arguments[0]);
