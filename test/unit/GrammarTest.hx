@@ -20,6 +20,14 @@ class GrammarTest {
 		assert(switch functionType.definition { case EClass(value): switch value.data[0].cffKind { case FFun(func): switch func.fArgs[0].type.type { case CTFunction(_, _): true; case _: false; }; case _: false; }; case _: false; });
 		var expressionBody = Grammar.parse('abstract Any(Dynamic) { extern inline function promote<T>():T return this; }').declarations[0];
 		assert(switch expressionBody.definition { case EAbstract(value): switch value.data[0].cffKind { case FFun(func): func.fExpr != null; case _: false; }; case _: false; });
+		var controlBlock = Grammar.parse('class Main { function run(items:Array<Int>) { for (item in items) { trace(item); } } }').declarations[0];
+		assert(switch controlBlock.definition { case EClass(value): switch value.data[0].cffKind { case FFun(func): func.fExpr != null; case _: false; }; case _: false; });
+		var unaryNegative = Grammar.parse('class Main { static var value = -1; }').declarations[0];
+		assert(switch unaryNegative.definition { case EClass(value): switch value.data[0].cffKind { case FVar(_, {expr:EUnop(Neg, _, _)}): true; case _: false; }; case _: false; });
+		var interval = Grammar.parse('class Main { static function run(items:Array<Int>) { for (i in 0...items.length) {} } }').declarations[0];
+		assert(switch interval.definition { case EClass(value): switch value.data[0].cffKind { case FFun(func): func.fExpr != null; case _: false; }; case _: false; });
+		var switched = Grammar.parse('class Main { static function run(value:Int):Bool { return switch (value) { case 0: true; default: false; } } }').declarations[0];
+		assert(switch switched.definition { case EClass(value): switch value.data[0].cffKind { case FFun(func): func.fExpr != null; case _: false; }; case _: false; });
 	}
 	static function assert(value:Bool):Void if (!value) throw "Grammar assertion failed";
 }

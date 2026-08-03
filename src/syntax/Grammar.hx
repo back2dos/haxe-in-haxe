@@ -108,14 +108,16 @@ class Grammar {
 	}
 	function unary():Expr { var t=current(); return switch t.token {
 		case Unop(op): next(); var e=unary(); expr(EUnop(op,Prefix,e),union(t.pos,e.pos));
+		case Binop(OpSub): next(); var e=unary(); expr(EUnop(Neg,Prefix,e),union(t.pos,e.pos));
 		case Kwd(Return): next(); var e = is(Semicolon)||is(BrClose) ? null : expression(); expr(EReturn(e), e == null ? t.pos : union(t.pos,e.pos));
 		case Kwd(Throw): next(); var e=expression(); expr(EThrow(e),union(t.pos,e.pos));
 		case Kwd(Var) | Kwd(Final): var finalValue=acceptKwd(Final)!=null; if(!finalValue)next(); var vars=[variable(finalValue)]; while(accept(Comma)!=null) vars.push(variable(finalValue)); expr(EVars(vars),union(t.pos,vars[vars.length-1].evExpr == null ? vars[vars.length-1].evName.pos : vars[vars.length-1].evExpr.pos));
-		case Kwd(If): next(); expect(POpen); var c=expression(); expect(PClose); var th=expression(); var el=acceptKwd(Else)==null ? null : expression(); expr(EIf(c,th,el),union(t.pos,el == null ? th.pos : el.pos));
-		case Kwd(While): next(); expect(POpen); var c=expression(); expect(PClose); var b=expression(); expr(EWhile(c,b,NormalWhile),union(t.pos,b.pos));
-		case Kwd(For): next(); expect(POpen); var it=expression(); if(acceptKwd(In)!=null) { var right=expression(); it=expr(EBinop(OpIn,it,right),union(it.pos,right.pos)); } expect(PClose); var b=expression(); expr(EFor(it,b),union(t.pos,b.pos));
-		case Kwd(Do): next(); var b=expression(); expectKwd(While); expect(POpen); var c=expression(); var end=expect(PClose).pos; expr(EWhile(c,b,DoWhile),union(t.pos,end));
-		case Kwd(Try): next(); var body=expression(); var catches=[]; while(acceptKwd(Catch)!=null) { var cp=previous().pos; expect(POpen); var n=placedIdent(); var ty=typeHintOpt(); expect(PClose); var cb=expression(); catches.push({name:n,type:ty,expr:cb,pos:union(cp,cb.pos)}); } if(catches.length==0) fail("Expected catch"); expr(ETry(body,catches),union(t.pos,catches[catches.length-1].pos));
+		case Kwd(If): next(); expect(POpen); var c=expression(); expect(PClose); var th=statementBody(); var el=acceptKwd(Else)==null ? null : statementBody(); expr(EIf(c,th,el),union(t.pos,el == null ? th.pos : el.pos));
+		case Kwd(While): next(); expect(POpen); var c=expression(); expect(PClose); var b=statementBody(); expr(EWhile(c,b,NormalWhile),union(t.pos,b.pos));
+		case Kwd(For): next(); expect(POpen); var it=expression(); if(acceptKwd(In)!=null) { var right=expression(); it=expr(EBinop(OpIn,it,right),union(it.pos,right.pos)); } expect(PClose); var b=statementBody(); expr(EFor(it,b),union(t.pos,b.pos));
+		case Kwd(Do): next(); var b=statementBody(); expectKwd(While); expect(POpen); var c=expression(); var end=expect(PClose).pos; expr(EWhile(c,b,DoWhile),union(t.pos,end));
+		case Kwd(Try): next(); var body=statementBody(); var catches=[]; while(acceptKwd(Catch)!=null) { var cp=previous().pos; expect(POpen); var n=placedIdent(); var ty=typeHintOpt(); expect(PClose); var cb=statementBody(); catches.push({name:n,type:ty,expr:cb,pos:union(cp,cb.pos)}); } if(catches.length==0) fail("Expected catch"); expr(ETry(body,catches),union(t.pos,catches[catches.length-1].pos));
+		case Kwd(Switch): next(); parseSwitch(t.pos);
 		case Kwd(Break): next(); expr(EBreak,t.pos); case Kwd(Continue): next(); expr(EContinue,t.pos);
 		case Kwd(Untyped): next(); var e=expression(); expr(EUntyped(e),union(t.pos,e.pos));
 		case Kwd(Cast): next(); expect(POpen); var e=expression(); var type=accept(Comma)==null ? null : typeHint(); var end=expect(PClose).pos; expr(ECast(e,type),union(t.pos,end));
@@ -123,6 +125,10 @@ class Grammar {
 	function primary():Expr {
 		var t=next(); var e:Expr = switch t.token {
 			case Const(c): expr(EConst(c),t.pos);
+			case IntInterval(value):
+				var left = expr(EConst(Int(value, null)), t.pos);
+				var right = expression(precedence(OpInterval) + 1);
+				expr(EBinop(OpInterval, left, right), union(left.pos, right.pos));
 			case Kwd(True): expr(EConst(Ident("true")),t.pos); case Kwd(False): expr(EConst(Ident("false")),t.pos); case Kwd(Null): expr(EConst(Ident("null")),t.pos); case Kwd(This): expr(EConst(Ident("this")),t.pos);
 			case POpen: var x=expression(); var end=expect(PClose).pos; expr(EParenthesis(x),union(t.pos,end));
 			case BrOpen: index--; objectOrIdentifier();
@@ -132,9 +138,33 @@ class Grammar {
 			case _: index--; objectOrIdentifier();
 		}; return e;
 	}
+	function parseSwitch(start:Pos):Expr {
+		expect(POpen); var subject = expression(); expect(PClose); expect(BrOpen);
+		var cases:Array<SwitchCase> = [];
+		var defaultCase:Null<SwitchDefault> = null;
+		while (!is(BrClose)) {
+			if (acceptKwd(Case) != null) {
+				var caseStart = previous().pos, values = [expression()];
+				while (accept(Comma) != null) values.push(expression());
+				var guard = acceptKwd(If) == null ? null : expression();
+				expect(DblDot);
+				var value = is(Kwd(Case)) || is(Kwd(Default)) || is(BrClose) ? null : expression();
+				accept(Semicolon);
+				cases.push({values:values, guard:guard, expr:value, pos:union(caseStart, value == null ? values[values.length - 1].pos : value.pos)});
+			} else if (acceptKwd(Default) != null) {
+				var defaultStart = previous().pos; expect(DblDot);
+				var value = is(BrClose) ? null : expression(); accept(Semicolon);
+				defaultCase = {expr:value, pos:value == null ? defaultStart : union(defaultStart, value.pos)};
+			} else fail("Expected switch case");
+		}
+		var end = expect(BrClose).pos;
+		return expr(ESwitch(subject, cases, defaultCase), union(start, end));
+	}
 	function objectOrIdentifier():Expr { var t=current(); if(accept(BrOpen)!=null) { var fields=[]; if(!is(BrClose)) do { var n=placedIdent(); expect(DblDot); var value=expression(); fields.push({key:{name:n.name,pos:n.pos,quote:NoQuotes},expr:value}); } while(accept(Comma)!=null); var end=expect(BrClose).pos; return expr(EObjectDecl(fields),union(t.pos,end)); } var n=placedIdent(); return expr(EConst(Ident(n.name)),n.pos); }
 	function postfix(e:Expr):Expr { while (true) { if (accept(Dot) != null || accept(QuestionDot) != null) { var safe=previous().token.match(QuestionDot); var n=placedIdent(); e=expr(EField(e,n.name,safe ? EFSafe : EFNormal),union(e.pos,n.pos)); } else if (accept(POpen) != null) { var args=[]; if (!is(PClose)) do args.push(expression()) while(accept(Comma)!=null); var end=expect(PClose).pos; e=expr(ECall(e,args),union(e.pos,end)); } else if (accept(BkOpen) != null) { var key=expression(); var end=expect(BkClose).pos; e=expr(EArray(e,key),union(e.pos,end)); } else if (switch current().token {case Unop(Increment)|Unop(Decrement):true;case _:false;}) { var op=switch next().token {case Unop(v):v;case _:null;}; e=expr(EUnop(op,Postfix,e),union(e.pos,previous().pos)); } else return e; } return e; }
-	function block():Expr { var begin=expect(BrOpen).pos; var es=[]; while (!is(BrClose)) { es.push(expression()); if (accept(Semicolon)==null && !is(BrClose)) fail("Expected semicolon"); } return expr(EBlock(es),union(begin,expect(BrClose).pos)); }
+	function block():Expr { var begin=expect(BrOpen).pos; var es=[]; while (!is(BrClose)) { var value = expression(); es.push(value); if (accept(Semicolon)==null && !is(BrClose) && requiresSemicolon(value)) fail("Expected semicolon"); } return expr(EBlock(es),union(begin,expect(BrClose).pos)); }
+	function statementBody():Expr return is(BrOpen) ? block() : expression();
+	static function requiresSemicolon(value:Expr):Bool return switch value.expr { case EIf(_, _, _) | EWhile(_, _, _) | EFor(_, _) | ETry(_, _): false; case _: true; }
 	function variable(finalValue=false):EVar { var n=placedIdent(); var type=typeHintOpt(); var value=accept(Binop(OpAssign)) == null ? null : expression(); return Ast.mkEVar(n,finalValue,false,type,value); }
 	function typeHintOpt():Null<TypeHint> return accept(DblDot) == null ? null : typeHint();
 	function typeHint():TypeHint {
