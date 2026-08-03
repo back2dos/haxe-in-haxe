@@ -54,6 +54,9 @@ class TypeloadModule {
 	}
 
 	function createModuleTypes(module:ModuleDef, declarations:Array<TypeDecl>):Void {
+		// Like typeload's first pass, allocate every declaration before looking at
+		// fields. This makes references to later declarations in the same module
+		// available while field signatures are built.
 		for (declaration in declarations) switch declaration.definition {
 			case EClass(value): module.mTypes.push(TClassDecl(makeClass(module, value, declaration.pos)));
 			case EEnum(value): module.mTypes.push(TEnumDecl(makeEnum(module, value, declaration.pos)));
@@ -61,6 +64,105 @@ class TypeloadModule {
 			case EAbstract(value): module.mTypes.push(TAbstractDecl(makeAbstract(module, value, declaration.pos)));
 			case EImport(_) | EUsing(_) | EStatic(_):
 		}
+		for (declaration in declarations) switch declaration.definition {
+			case EClass(value): populateClassFields(module, findClass(module, value.name.name), value.data);
+			case EEnum(value): populateEnumConstructors(module, findEnum(module, value.name.name), value.data);
+			case ETypedef(_) | EAbstract(_) | EImport(_) | EUsing(_) | EStatic(_):
+		}
+	}
+
+	function populateClassFields(module:ModuleDef, cls:TClass, fields:Array<ClassField>):Void {
+		for (field in fields) {
+			var isStatic = hasAccess(field, AStatic);
+			var type = fieldType(module, cls, field);
+			var typed:TClassField = {
+				cfName: field.cffName.name, cfType: type, cfPos: field.cffPos, cfNamePos: field.cffName.pos,
+				cfDoc: field.cffDoc, cfMeta: field.cffMeta, cfKind: fieldKind(field), cfParams: [],
+				cfExpr: null, cfExprUnoptimized: null, cfOverloads: [], cfFlags: fieldFlags(field, isStatic)
+			};
+			if (field.cffName.name == "new" && !isStatic) cls.clConstructor = typed;
+			else if (isStatic) {
+				cls.clStatics.set(typed.cfName, typed);
+				cls.clOrderedStatics.push(typed);
+			} else {
+				cls.clFields.set(typed.cfName, typed);
+				cls.clOrderedFields.push(typed);
+			}
+		}
+	}
+
+	function populateEnumConstructors(module:ModuleDef, en:TEnum, constructors:Array<EnumConstructor>):Void {
+		for (index in 0...constructors.length) {
+			var constructor = constructors[index];
+			var args = [for (arg in constructor.ecArgs) {name: arg.name, optional: arg.optional, type: resolveTypeHint(module, arg.type)}];
+			var typed:TEnumField = {
+				efName: constructor.ecName.name, efType: args.length == 0 ? en.eType : TFun({args: args, ret: en.eType}),
+				efPos: constructor.ecPos, efNamePos: constructor.ecName.pos, efDoc: constructor.ecDoc,
+				efIndex: index, efParams: [], efMeta: constructor.ecMeta
+			};
+			en.eConstrs.set(typed.efName, typed);
+			en.eNames.push(typed.efName);
+		}
+	}
+
+	function fieldType(module:ModuleDef, cls:TClass, field:ClassField):T return switch field.cffKind {
+		case FVar(type, _): type == null ? TDynamic(null) : resolveTypeHint(module, type);
+		case FProp(_, _, type, _): type == null ? TDynamic(null) : resolveTypeHint(module, type);
+		case FFun(func): TFun({args: [for (arg in func.fArgs) {name: arg.name.name, optional: arg.optional, type: arg.type == null ? TDynamic(null) : resolveTypeHint(module, arg.type)}], ret: func.fType == null ? TDynamic(null) : resolveTypeHint(module, func.fType)});
+	}
+
+	function fieldKind(field:ClassField):FieldKind return switch field.cffKind {
+		case FVar(_, _): Var({vRead: AccNormal, vWrite: AccNormal});
+		case FProp(get, set, _, _): Var({vRead: accessKind(get.name), vWrite: accessKind(set.name)});
+		case FFun(_): Method(hasAccess(field, ADynamic) ? MethDynamic : hasAccess(field, AInline) ? MethInline : hasAccess(field, AMacro) ? MethMacro : MethNormal);
+	}
+
+	function resolveTypeHint(module:ModuleDef, hint:TypeHint):T return switch hint.type {
+		case CTPath(path): resolvePath(module, path.path);
+		case CTFunction(args, ret): TFun({args: [for (index in 0...args.length) {name: "arg" + index, optional: false, type: resolveTypeHint(module, args[index])}], ret: resolveTypeHint(module, ret)});
+		case CTParent(type) | CTOptional(type) | CTNamed(_, type): resolveTypeHint(module, type);
+		// Structural, intersection and extension types need Typecore's anonymous
+		// field builder. Keep an explicitly dynamic placeholder until that pass.
+		case CTAnonymous(_) | CTExtend(_, _) | CTIntersection(_): TDynamic(null);
+	}
+
+	function resolvePath(current:ModuleDef, path:TypePath):T {
+		var target = path.tpackage.length == 0 ? current : loadModule({pack: path.tpackage, name: path.tname});
+		var name = path.tpackage.length == 0 ? path.tname : (path.tsub == null ? path.tname : path.tsub);
+		var type = findModuleType(target, name);
+		if (type == null) return TDynamic(null); // built-ins await BasicTypes/Typecore.
+		var params = [for (param in path.tparams) switch param { case TPType(type): resolveTypeHint(current, type); case TPExpr(_): TDynamic(null); }];
+		return switch type {
+			case TClassDecl(cls): TInst(cls, params);
+			case TEnumDecl(en): TEnum(en, params);
+			case TTypeDecl(def): TType(def, params);
+			case TAbstractDecl(abs): TAbstract(abs, params);
+		};
+	}
+
+	function findClass(module:ModuleDef, name:String):TClass return switch findModuleType(module, name) { case TClassDecl(cls): cls; case _: throw 'Class ' + name + ' was not allocated'; };
+	function findEnum(module:ModuleDef, name:String):TEnum return switch findModuleType(module, name) { case TEnumDecl(en): en; case _: throw 'Enum ' + name + ' was not allocated'; };
+	function findModuleType(module:ModuleDef, name:String):Null<ModuleType> {
+		for (type in module.mTypes) if (switch type { case TClassDecl(cls): cls.clPath.name == name; case TEnumDecl(en): en.ePath.name == name; case TTypeDecl(def): def.tPath.name == name; case TAbstractDecl(abs): abs.aPath.name == name; }) return type;
+		return null;
+	}
+
+	static function accessKind(name:String):VarAccess return switch name { case "never": AccNever; case "null": AccNo; case "default": AccNormal; case _: AccCall; };
+	static function fieldFlags(field:ClassField, isStatic:Bool):Int {
+		var flags = flag(CfPublic);
+		if (hasAccess(field, APrivate)) flags = 0;
+		if (isStatic) flags |= flag(CfStatic);
+		if (hasAccess(field, AExtern)) flags |= flag(CfExtern);
+		if (hasAccess(field, AFinal)) flags |= flag(CfFinal);
+		if (hasAccess(field, AOverride)) flags |= flag(CfOverride);
+		if (hasAccess(field, AAbstract)) flags |= flag(CfAbstract);
+		if (hasAccess(field, AOverload)) flags |= flag(CfOverload);
+		return flags;
+	}
+	static function flag(value:FlagTClassField):Int return 1 << core.TType.TType.flagTClassFieldNames.indexOf(Std.string(value));
+	static function hasAccess(field:ClassField, access:Access):Bool {
+		for (value in field.cffAccess) if (value.access == access) return true;
+		return false;
 	}
 
 	function makeClass(module:ModuleDef, value:ClassDefinition, pos:Pos):TClass {
