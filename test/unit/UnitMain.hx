@@ -18,5 +18,7 @@ class UnitMain {
 		AtomicLazyTest.main();
 		ClassPathTest.main();
 		ClassPathsTest.main();
+		PathTest.main();
+		ZipOutputTest.main();
 	}
 }
