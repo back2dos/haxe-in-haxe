@@ -68,6 +68,9 @@ class TypeloadModule {
 		loadModule({pack: [], name: "Any"});
 		loadModule({pack: [], name: "Array"});
 		loadModule({pack: ["haxe"], name: "EnumTools"});
+		loadModule({pack: ["haxe"], name: "Exception"});
+		loadModule({pack: ["haxe"], name: "NativeStackTrace"});
+		loadModule({pack: ["haxe", "iterators"], name: "ArrayKeyValueIterator"});
 	}
 
 	/** Modules in the order they were allocated, matching the batch load graph. */

@@ -2,6 +2,7 @@ package compiler.hxb;
 
 import core.ds.StringPool;
 import core.Ast.Constant;
+import core.Ast.EFieldKind;
 import core.Ast.ExprDef;
 import core.Ast.StringLiteralKind;
 import core.Globals.GlobalTypePath;
@@ -313,8 +314,11 @@ class HxbWriter {
 				chunk.writeU8(2); chunk.writeString(value); chunk.writeU8(switch kind { case SDoubleQuotes: 0; case SSingleQuotes: 1; });
 			case EConst(Ident(value)):
 				chunk.writeU8(3); chunk.writeString(value);
+			case EField(object, field, kind):
+				chunk.writeU8(7); writeMetadataExpr(chunk, object); chunk.writeString(field);
+				chunk.writeU8(switch kind { case EFNormal: 0; case EFSafe: 1; });
 			case _:
-				throw "Metadata expression serialization is not ported for " + Type.enumConstructor(expr.expr);
+				throw "Metadata expression serialization is not ported for " + Type.enumConstructor(expr.expr) + " at " + expr.pos.pfile + ":" + expr.pos.pmin;
 		}
 	}
 	static function writeEmptyTypeParams(chunk:HxbChunk):Void chunk.writeUleb128(0);
