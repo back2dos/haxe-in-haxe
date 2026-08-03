@@ -3,6 +3,7 @@ package core;
 import core.ClassPath.ClassPathScope;
 import core.ClassPath.DirectoryClassPath;
 import core.ClassPath.IClassPath;
+import core.StringHelper;
 
 // Port of haxe/src/core/classPaths.ml.
 typedef ResolvedFile = {
@@ -147,17 +148,17 @@ class ClassPaths {
 				representation = relative;
 				specificity = SpecificityCoreApi;
 			} else {
-				var suffix = extension(relative);
-				var withoutExtension = removeExtension(relative);
-				var secondExtension = extension(withoutExtension);
+				var suffix = StringHelper.extension(relative);
+				var withoutExtension = StringHelper.removeExtension(relative);
+				var secondExtension = StringHelper.extension(withoutExtension);
 				if (customExtension != null && secondExtension == customExtension) {
-					representation = removeExtension(withoutExtension) + suffix;
+					representation = StringHelper.removeExtension(withoutExtension) + suffix;
 					specificity = SpecificityCustomExtension;
 				} else if (platformExtension == secondExtension && secondExtension == ".macro") {
-					representation = removeExtension(withoutExtension) + suffix;
+					representation = StringHelper.removeExtension(withoutExtension) + suffix;
 					specificity = SpecificityMacroSpecific;
 				} else if (platformExtension == secondExtension) {
-					representation = removeExtension(withoutExtension) + suffix;
+					representation = StringHelper.removeExtension(withoutExtension) + suffix;
 					specificity = SpecificityPlatformSpecific;
 				} else {
 					representation = relative;
@@ -181,16 +182,6 @@ class ClassPaths {
 			case SpecificityMacroSpecific: 3;
 			case SpecificityCoreApi: 4;
 		};
-	}
-
-	static function extension(path:String):String {
-		var dot = path.lastIndexOf(".");
-		return dot < 0 ? "" : path.substr(dot);
-	}
-
-	static function removeExtension(path:String):String {
-		var dot = path.lastIndexOf(".");
-		return dot < 0 ? path : path.substr(0, dot);
 	}
 
 	static function isAbsolutePath(path:String):Bool {
