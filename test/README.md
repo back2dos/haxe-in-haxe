@@ -27,6 +27,10 @@ submodule. The harness invokes the port's batch driver and uses `cmp` for a
 byte-for-byte result. It intentionally keeps both generated outputs in a
 temporary directory on failure for diagnosis.
 
+For an immediate local comparison against the `haxe` executable on `PATH`, run
+`haxe test/conformance.hxml`. This target is expected to fail until the port
+matches the host compiler byte-for-byte; it reports the first differing byte.
+
 "Compilable" means the reference invocation exits successfully. Tests that
 require a non-HXB target, a runtime, or external services may be discovered but
 are not in the initial conformance set. Do not treat expected-failure compiler

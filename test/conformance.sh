@@ -16,15 +16,15 @@ reference_output="$conformance_tmpdir/reference.hxb"
 port_output="$conformance_tmpdir/port.hxb"
 
 # Keep this initial case inside the port's currently supported batch subset.
-"$HAXE_REFERENCE" -cp test --main unit.moduleload.Example --hxb "$reference_output"
-haxe -cp src --run haxe.Main -cp test --main unit.moduleload.Example --hxb "$port_output"
+"$HAXE_REFERENCE" -cp test/conformance --main unit.moduleload.Basic --hxb "$reference_output"
+haxe -cp src --run haxe.Main -cp test/conformance --main unit.moduleload.Basic --hxb "$port_output"
 
 if cmp -s "$reference_output" "$port_output"; then
-	echo "HXB conformance passed: unit.moduleload.Example"
+	echo "HXB conformance passed: unit.moduleload.Basic"
 	exit 0
 fi
 
-echo "HXB conformance failed: unit.moduleload.Example" >&2
+echo "HXB conformance failed: unit.moduleload.Basic" >&2
 echo "Reference: $reference_output" >&2
 echo "Port:      $port_output" >&2
 exit 1

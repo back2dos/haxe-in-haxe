@@ -30,6 +30,7 @@ class Main {
 		parser while unsupported compiler phases fail before any compilation work.
 	**/
 	public static function run(arguments:Array<String>):Void {
+		if (arguments.length > 0 && arguments[0] == "--") arguments = arguments.slice(1);
 		var classPaths = new ClassPaths();
 		var defines = Define.emptyDefines();
 		var main:Null<GlobalTypePath> = null;
