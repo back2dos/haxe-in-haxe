@@ -28,6 +28,12 @@ class GrammarTest {
 		assert(switch interval.definition { case EClass(value): switch value.data[0].cffKind { case FFun(func): func.fExpr != null; case _: false; }; case _: false; });
 		var switched = Grammar.parse('class Main { static function run(value:Int):Bool { return switch (value) { case 0: true; default: false; } } }').declarations[0];
 		assert(switch switched.definition { case EClass(value): switch value.data[0].cffKind { case FFun(func): func.fExpr != null; case _: false; }; case _: false; });
+		var switchStatements = Grammar.parse('class Main { static function run(value:Int) { switch (value) { case 0: trace(value); trace("zero"); default: trace("other"); } } }').declarations[0];
+		assert(switch switchStatements.definition { case EClass(value): switch value.data[0].cffKind { case FFun(func): switch func.fExpr.expr { case EBlock([{expr: ESwitch(_, cases, _)}]): switch cases[0].expr.expr { case EBlock(values): values.length == 2; case _: false; }; case _: false; }; case _: false; }; case _: false; });
+		var privateAccess = Grammar.parse('class Main { function run(value:Dynamic) return @:privateAccess value.hidden; }').declarations[0];
+		assert(switch privateAccess.definition { case EClass(value): switch value.data[0].cffKind { case FFun(func): switch func.fExpr.expr { case EReturn({expr: EMeta(entry, _)}): entry.meta == "privateAccess"; case _: false; }; case _: false; }; case _: false; });
+		var callStack = Grammar.parse(sys.io.File.getContent("haxe/std/haxe/CallStack.hx"), core.Define.emptyDefines(), "haxe/std/haxe/CallStack.hx");
+		assert(callStack.declarations.length == 2);
 	}
 	static function assert(value:Bool):Void if (!value) throw "Grammar assertion failed";
 }

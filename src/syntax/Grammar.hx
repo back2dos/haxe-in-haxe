@@ -107,6 +107,17 @@ class Grammar {
 		return left;
 	}
 	function unary():Expr { var t=current(); return switch t.token {
+		case At:
+			// Expression metadata (for example @:privateAccess value) is parsed
+			// in grammar.ml's unary-expression path, rather than only before
+			// declarations and fields.
+			var metas = metadata();
+			var value = unary();
+			for (i in 0...metas.length) {
+				var meta = metas[metas.length - 1 - i];
+				value = expr(EMeta(meta, value), union(meta.pos, value.pos));
+			}
+			value;
 		case Unop(op): next(); var e=unary(); expr(EUnop(op,Prefix,e),union(t.pos,e.pos));
 		case Binop(OpSub): next(); var e=unary(); expr(EUnop(Neg,Prefix,e),union(t.pos,e.pos));
 		case Kwd(Return): next(); var e = is(Semicolon)||is(BrClose) ? null : expression(); expr(EReturn(e), e == null ? t.pos : union(t.pos,e.pos));
@@ -148,17 +159,27 @@ class Grammar {
 				while (accept(Comma) != null) values.push(expression());
 				var guard = acceptKwd(If) == null ? null : expression();
 				expect(DblDot);
-				var value = is(Kwd(Case)) || is(Kwd(Default)) || is(BrClose) ? null : expression();
-				accept(Semicolon);
+				var value = switchBody();
 				cases.push({values:values, guard:guard, expr:value, pos:union(caseStart, value == null ? values[values.length - 1].pos : value.pos)});
 			} else if (acceptKwd(Default) != null) {
 				var defaultStart = previous().pos; expect(DblDot);
-				var value = is(BrClose) ? null : expression(); accept(Semicolon);
+				var value = switchBody();
 				defaultCase = {expr:value, pos:value == null ? defaultStart : union(defaultStart, value.pos)};
 			} else fail("Expected switch case");
 		}
 		var end = expect(BrClose).pos;
 		return expr(ESwitch(subject, cases, defaultCase), union(start, end));
+	}
+	function switchBody():Null<Expr> {
+		var values:Array<Expr> = [];
+		while (!is(Kwd(Case)) && !is(Kwd(Default)) && !is(BrClose)) {
+			var value = expression();
+			values.push(value);
+			if (accept(Semicolon) == null && !is(Kwd(Case)) && !is(Kwd(Default)) && !is(BrClose) && requiresSemicolon(value)) fail("Expected semicolon");
+		}
+		if (values.length == 0) return null;
+		if (values.length == 1) return values[0];
+		return expr(EBlock(values), union(values[0].pos, values[values.length - 1].pos));
 	}
 	function objectOrIdentifier():Expr { var t=current(); if(accept(BrOpen)!=null) { var fields=[]; if(!is(BrClose)) do { var n=placedIdent(); expect(DblDot); var value=expression(); fields.push({key:{name:n.name,pos:n.pos,quote:NoQuotes},expr:value}); } while(accept(Comma)!=null); var end=expect(BrClose).pos; return expr(EObjectDecl(fields),union(t.pos,end)); } var n=placedIdent(); return expr(EConst(Ident(n.name)),n.pos); }
 	function postfix(e:Expr):Expr { while (true) { if (accept(Dot) != null || accept(QuestionDot) != null) { var safe=previous().token.match(QuestionDot); var n=placedIdent(); e=expr(EField(e,n.name,safe ? EFSafe : EFNormal),union(e.pos,n.pos)); } else if (accept(POpen) != null) { var args=[]; if (!is(PClose)) do args.push(expression()) while(accept(Comma)!=null); var end=expect(PClose).pos; e=expr(ECall(e,args),union(e.pos,end)); } else if (accept(BkOpen) != null) { var key=expression(); var end=expect(BkClose).pos; e=expr(EArray(e,key),union(e.pos,end)); } else if (switch current().token {case Unop(Increment)|Unop(Decrement):true;case _:false;}) { var op=switch next().token {case Unop(v):v;case _:null;}; e=expr(EUnop(op,Postfix,e),union(e.pos,previous().pos)); } else return e; } return e; }
