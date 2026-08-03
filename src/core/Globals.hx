@@ -8,7 +8,7 @@ typedef Pos = {
 	var pmax:Int;
 }
 
-typedef TypePath = {
+typedef GlobalTypePath = {
 	var pack:Array<String>;
 	var name:String;
 }
@@ -100,7 +100,7 @@ class Globals {
 	}
 
 	public static function mkZeroRangePos(pos:Pos):Pos return {pfile: pos.pfile, pmin: pos.pmin, pmax: pos.pmin};
-	public static function sTypePath(path:TypePath):String return path.pack.length == 0 ? path.name : path.pack.join(".") + "." + path.name;
+	public static function sTypePath(path:GlobalTypePath):String return path.pack.length == 0 ? path.name : path.pack.join(".") + "." + path.name;
 	public static function startsWith(value:String, char:String):Bool return value.length > 0 && value.charAt(0) == char;
 	public static function patchStringPos(pos:Pos, value:String):Pos return {pfile: pos.pfile, pmin: pos.pmax - value.length, pmax: pos.pmax};
 

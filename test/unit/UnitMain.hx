@@ -24,5 +24,6 @@ class UnitMain {
 		PathTest.main();
 		ZipOutputTest.main();
 		SocketTest.main();
+		AstTest.main();
 	}
 }
