@@ -13,6 +13,7 @@ class UnitMain {
 		StringPoolTest.main();
 		ThreadSafeHashtblTest.main();
 		StringErrorTest.main();
+		StringHelperTest.main();
 		AtomicLazyTest.main();
 		ClassPathTest.main();
 		ClassPathsTest.main();
