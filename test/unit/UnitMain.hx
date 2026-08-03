@@ -14,5 +14,6 @@ class UnitMain {
 		ThreadSafeHashtblTest.main();
 		StringErrorTest.main();
 		AtomicLazyTest.main();
+		ClassPathTest.main();
 	}
 }
