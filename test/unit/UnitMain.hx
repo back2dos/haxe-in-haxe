@@ -12,5 +12,6 @@ class UnitMain {
 		PriorityQueueTest.main();
 		StringPoolTest.main();
 		ThreadSafeHashtblTest.main();
+		StringErrorTest.main();
 	}
 }
