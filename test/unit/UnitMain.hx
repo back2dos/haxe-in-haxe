@@ -15,5 +15,6 @@ class UnitMain {
 		StringErrorTest.main();
 		AtomicLazyTest.main();
 		ClassPathTest.main();
+		ClassPathsTest.main();
 	}
 }
