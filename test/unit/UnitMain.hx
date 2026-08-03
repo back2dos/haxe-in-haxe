@@ -4,6 +4,7 @@ class UnitMain {
 	static function main():Void {
 		ArgsTest.main();
 		HxbDataTest.main();
+		HxbWriterConfigTest.main();
 		SemVerTest.main();
 	}
 }
