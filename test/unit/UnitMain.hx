@@ -15,10 +15,12 @@ class UnitMain {
 		StringErrorTest.main();
 		StringHelperTest.main();
 		NumericTest.main();
+		NowOrLaterTest.main();
 		AtomicLazyTest.main();
 		ClassPathTest.main();
 		ClassPathsTest.main();
 		PathTest.main();
 		ZipOutputTest.main();
+		SocketTest.main();
 	}
 }
