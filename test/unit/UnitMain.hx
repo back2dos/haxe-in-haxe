@@ -11,5 +11,6 @@ class UnitMain {
 		RingTest.main();
 		PriorityQueueTest.main();
 		StringPoolTest.main();
+		ThreadSafeHashtblTest.main();
 	}
 }
