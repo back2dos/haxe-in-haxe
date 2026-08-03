@@ -27,5 +27,6 @@ class UnitMain {
 		DefineTest.main();
 		AstTest.main();
 		LexerTest.main();
+		PreprocessorTest.main();
 	}
 }
