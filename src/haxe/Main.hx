@@ -38,6 +38,9 @@ class Main {
 		if (!FileSystem.exists(stdPath)) throw "Pinned standard library not found at " + stdPath;
 		classPaths.push(new DirectoryClassPath(stdPath, Std));
 		var defines = Define.emptyDefines();
+		// The HXB target is a cross-target compiler artifact. Std.hx uses this
+		// target define to permit loading the shared standard library.
+		Define.rawDefineValue(defines, "cross", "1");
 		var main:Null<GlobalTypePath> = null;
 		var hxbArgument:Null<String> = null;
 		for (argument in Args.parseArgs(arguments)) {
