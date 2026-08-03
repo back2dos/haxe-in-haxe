@@ -14,5 +14,6 @@ class ClassPathsTest {
 		if (paths.asStringList().join(",") != "src/" || paths.getStdPaths().length != 0) throw "Class path collection metadata failed";
 		paths.add(new DirectoryClassPath("haxe/std/", Std));
 		if (paths.getStdPaths().length != 1 || paths.asStringList()[0] != "haxe/std/") throw "Class path ordering failed";
+		if (paths.findFile("StdTypes.hx").file != "haxe/std/StdTypes.hx") throw "Root-level standard module resolution failed";
 	}
 }
