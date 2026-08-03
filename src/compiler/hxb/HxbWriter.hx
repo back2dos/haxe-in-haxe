@@ -1,6 +1,9 @@
 package compiler.hxb;
 
 import core.ds.StringPool;
+import core.Ast.Constant;
+import core.Ast.ExprDef;
+import core.Ast.StringLiteralKind;
 import core.Globals.GlobalTypePath;
 import core.Globals.Pos;
 import core.TType;
@@ -292,13 +295,26 @@ class HxbWriter {
 		chunk.writeUleb128(entries.length);
 		for (entry in entries) {
 			// write_metadata in hxbWriter.ml stores the original AST metadata,
-			// including its source position. Argument expressions need the source
-			// expression writer, which has not been ported yet.
-			var exprs:Array<Dynamic> = cast entry.exprs;
-			if (exprs.length != 0) throw "Metadata expression serialization is not ported";
+			// including its source position.
+			var exprs:Array<core.Ast.Expr> = cast entry.exprs;
 			chunk.writeString(Std.string(entry.meta));
 			writePos(chunk, entry.pos);
-			chunk.writeUleb128(0);
+			chunk.writeList(exprs, function(expr) writeMetadataExpr(chunk, expr));
+		}
+	}
+	static function writeMetadataExpr(chunk:HxbChunk, expr:core.Ast.Expr):Void {
+		writePos(chunk, expr.pos);
+		switch expr.expr {
+			case EConst(Int(value, suffix)):
+				chunk.writeU8(0); chunk.writeString(value); chunk.writeOption(suffix, chunk.writeString);
+			case EConst(Float(value, suffix)):
+				chunk.writeU8(1); chunk.writeString(value); chunk.writeOption(suffix, chunk.writeString);
+			case EConst(String(value, kind)):
+				chunk.writeU8(2); chunk.writeString(value); chunk.writeU8(switch kind { case SDoubleQuotes: 0; case SSingleQuotes: 1; });
+			case EConst(Ident(value)):
+				chunk.writeU8(3); chunk.writeString(value);
+			case _:
+				throw "Metadata expression serialization is not ported for " + Type.enumConstructor(expr.expr);
 		}
 	}
 	static function writeEmptyTypeParams(chunk:HxbChunk):Void chunk.writeUleb128(0);
