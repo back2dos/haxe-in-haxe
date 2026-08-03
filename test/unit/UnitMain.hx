@@ -8,6 +8,7 @@ class UnitMain {
 		HelperTest.main();
 		SemVerTest.main();
 		RingTest.main();
+		PriorityQueueTest.main();
 		StringPoolTest.main();
 	}
 }
