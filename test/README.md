@@ -16,6 +16,17 @@ The harness must use separate temporary output directories and a stable working
 `test/reference/` only when deliberately cached; generated artifacts belong in
 `test/generated/`. Both are ignored by Git.
 
+The first concrete comparison case is available through:
+
+```sh
+HAXE_REFERENCE=/absolute/path/to/pinned/haxe sh test/conformance.sh
+```
+
+`HAXE_REFERENCE` must be the executable built from this checkout's `haxe/`
+submodule. The harness invokes the port's batch driver and uses `cmp` for a
+byte-for-byte result. It intentionally keeps both generated outputs in a
+temporary directory on failure for diagnosis.
+
 "Compilable" means the reference invocation exits successfully. Tests that
 require a non-HXB target, a runtime, or external services may be discovered but
 are not in the initial conformance set. Do not treat expected-failure compiler
