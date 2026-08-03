@@ -6,6 +6,7 @@ class UnitMain {
 		HxbDataTest.main();
 		HxbWriterConfigTest.main();
 		HelperTest.main();
+		JsonDataApiTest.main();
 		SemVerTest.main();
 		RingTest.main();
 		PriorityQueueTest.main();
