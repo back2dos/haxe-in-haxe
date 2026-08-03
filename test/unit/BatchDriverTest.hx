@@ -13,7 +13,7 @@ class BatchDriverTest {
 		var input = File.read(output, true);
 		var entries = new Reader(input).read();
 		input.close();
-		if (entries.length != 12) throw "Batch driver archive entry count failed";
+		if (entries.length != 13) throw "Batch driver archive entry count failed";
 		var entry = null;
 		var hasStdTypes = false;
 		for (value in entries) {

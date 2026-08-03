@@ -78,6 +78,10 @@ class Grammar {
 	function access():Array<PlacedAccess> { var result=[]; while (true) { var t=current(); var a:Null<Access> = switch t.token { case Kwd(Public): APublic; case Kwd(Private): APrivate; case Kwd(Static): AStatic; case Kwd(Override): AOverride; case Kwd(Dynamic): ADynamic; case Kwd(Inline): AInline; case Kwd(Macro): AMacro; case Kwd(Final): AFinal; case Kwd(Extern): AExtern; case _: null; }; if (a == null) return result; next(); result.push({access:a,pos:t.pos}); } }
 	function classField():ClassField {
 		var doc=documentation(), meta=metadata(); var start=current().pos; var accesses=access();
+		if (hasAccess(accesses, AFinal) && !is(Kwd(Var)) && !is(Kwd(Function))) {
+			var name = placedIdent(); var type = typeHintOpt(); var value = accept(Binop(OpAssign)) == null ? null : expression(); var end = expect(Semicolon).pos;
+			return {cffName:name,cffDoc:doc,cffPos:union(start,end),cffMeta:meta,cffAccess:accesses,cffKind:FVar(type,value)};
+		}
 		if (acceptKwd(Var) != null) {
 			var name = placedIdent();
 			if (accept(POpen) != null) {
