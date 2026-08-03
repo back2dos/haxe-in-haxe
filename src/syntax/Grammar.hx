@@ -122,7 +122,36 @@ class Grammar {
 	function block():Expr { var begin=expect(BrOpen).pos; var es=[]; while (!is(BrClose)) { es.push(expression()); if (accept(Semicolon)==null && !is(BrClose)) fail("Expected semicolon"); } return expr(EBlock(es),union(begin,expect(BrClose).pos)); }
 	function variable(finalValue=false):EVar { var n=placedIdent(); var type=typeHintOpt(); var value=accept(Binop(OpAssign)) == null ? null : expression(); return Ast.mkEVar(n,finalValue,false,type,value); }
 	function typeHintOpt():Null<TypeHint> return accept(DblDot) == null ? null : typeHint();
-	function typeHint():TypeHint { var p=current().pos; var optional=accept(Question)!=null; var ct=CTPath(typePath()); return {type:optional ? CTOptional({type:ct,pos:p}) : ct,pos:p}; }
+	function typeHint():TypeHint {
+		var start = current().pos;
+		var optional = accept(Question) != null;
+		var complex:ComplexType;
+		if (accept(BrOpen) != null) {
+			// parse_type_anonymous in grammar.ml uses the ordinary class-field
+			// grammar. This is needed by StdTypes' Iterator/Iterable typedefs.
+			var fields = [];
+			while (!is(BrClose)) {
+				fields.push(anonymousField());
+				accept(Comma);
+			}
+			var end = expect(BrClose).pos;
+			complex = CTAnonymous(fields);
+			return {type: optional ? CTOptional({type:complex, pos:union(start, end)}) : complex, pos:union(start, end)};
+		}
+		complex = CTPath(typePath());
+		return {type: optional ? CTOptional({type:complex,pos:start}) : complex,pos:start};
+	}
+	function anonymousField():ClassField {
+		var doc = documentation(), meta = metadata(), start = current().pos, accesses = access();
+		if (acceptKwd(Function) != null) {
+			var name = placedIdent(), func = functionRest();
+			return {cffName:name, cffDoc:doc, cffPos:union(start, func.fExpr == null ? name.pos : func.fExpr.pos), cffMeta:meta, cffAccess:accesses, cffKind:FFun(func)};
+		}
+		var name = placedIdent();
+		expect(DblDot);
+		var type = typeHint();
+		return {cffName:name, cffDoc:doc, cffPos:union(start, type.pos), cffMeta:meta, cffAccess:accesses, cffKind:FVar(type, null)};
+	}
 	function typePath():PlacedTypePath { var names=placedPath(); var last=names.pop(); var params=[]; if(accept(Binop(OpLt))!=null) { if(!is(Binop(OpGt))) do params.push(TPType(typeHint())) while(accept(Comma)!=null); expect(Binop(OpGt)); } return Ast.makePtp(Ast.mkTypePath([for(n in names)n.name],last.name,params), names.length == 0 ? last.pos : union(names[0].pos,previous().pos)); }
 	function path():Array<String> return [for(n in placedPath())n.name];
 	function placedPath():Array<PlacedName> { var result=[placedIdent()]; while(accept(Dot)!=null) result.push(placedIdent()); return result; }
