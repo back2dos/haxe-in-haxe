@@ -7,5 +7,6 @@ class UnitMain {
 		HxbWriterConfigTest.main();
 		HelperTest.main();
 		SemVerTest.main();
+		StringPoolTest.main();
 	}
 }
