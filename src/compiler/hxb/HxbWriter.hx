@@ -228,7 +228,20 @@ class HxbWriter {
 
 	function writeCommon(chunk:HxbChunk, privateType:Bool, doc:Dynamic, meta:Dynamic, usingTypes:Array<{var cls:TClass; var pos:Pos;}>):Void { chunk.writeBool(privateType); writeDocumentation(chunk, doc); writeMetadata(chunk, meta); writeEmptyTypeParamsData(chunk); chunk.writeList(usingTypes, function(value) { writeClassRef(chunk, value.cls); writePos(chunk, value.pos); }); }
 	function writeClassKind(chunk:HxbChunk, kind:TClassKind):Void switch kind { case KNormal: chunk.writeU8(0); case KGeneric: chunk.writeU8(3); case KGenericInstance(cls, params): chunk.writeU8(4); writeClassRef(chunk, cls); writeTypes(chunk, params); case KMacroType: chunk.writeU8(5); case KModuleFields(_): chunk.writeU8(8); case _: throw "Class kind serialization is not ported"; }
-	function writeFieldKind(chunk:HxbChunk, kind:FieldKind):Void switch kind { case Method(MethNormal): chunk.writeU8(0); case Method(MethInline): chunk.writeU8(1); case Method(MethDynamic): chunk.writeU8(2); case Method(MethMacro): chunk.writeU8(3); case Var(value): if (value.vRead != AccNormal || value.vWrite != AccNormal) throw "Property access serialization is not ported"; chunk.writeU8(10); }
+	function writeFieldKind(chunk:HxbChunk, kind:FieldKind):Void switch kind {
+		case Method(MethNormal): chunk.writeU8(0);
+		case Method(MethInline): chunk.writeU8(1);
+		case Method(MethDynamic): chunk.writeU8(2);
+		case Method(MethMacro): chunk.writeU8(3);
+		case Var(value):
+			var kind = switch [value.vRead, value.vWrite] {
+				case [AccNormal, AccNormal]: 10; case [AccNormal, AccNo]: 11; case [AccNormal, AccNever]: 12; case [AccNormal, AccCtor]: 13; case [AccNormal, AccCall]: 14;
+				case [AccInline, AccNever]: 20;
+				case [AccCall, AccNormal]: 30; case [AccCall, AccNo]: 31; case [AccCall, AccNever]: 32; case [AccCall, AccCtor]: 33; case [AccCall, AccCall]: 34;
+				case _: throw "Unsupported property access serialization";
+			};
+			chunk.writeU8(kind);
+	}
 
 	function writeType(chunk:HxbChunk, type:T):Void switch type {
 		case TAbstract(value, params) if (value.aPath.pack.length == 0 && params.length == 0): switch value.aPath.name { case "Void": chunk.writeU8(100); case "Int": chunk.writeU8(101); case "Float": chunk.writeU8(102); case "Bool": chunk.writeU8(103); case "String": chunk.writeU8(104); case _: writeReferenceType(chunk, 70, function() return addAbstract(value, false), params); }

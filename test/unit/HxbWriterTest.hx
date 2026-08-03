@@ -44,6 +44,10 @@ class HxbWriterTest {
 		var metadataWriter = new HxbWriter();
 		metadataWriter.writeModule(metadataModule);
 		if (metadataWriter.exportModule().length <= 4) throw "Metadata-bearing module was not serialized";
+		var propertyModule = new TypeloadModule(paths, Define.emptyDefines()).loadModule({pack:["unit", "moduleload"], name:"Property"});
+		var propertyWriter = new HxbWriter();
+		propertyWriter.writeModule(propertyModule);
+		if (propertyWriter.exportModule().length <= 4) throw "Property module was not serialized";
 	}
 
 	static function chunkKinds(bytes:haxe.io.Bytes):Array<String> {

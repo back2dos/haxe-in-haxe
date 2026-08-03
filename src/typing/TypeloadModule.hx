@@ -257,7 +257,13 @@ class TypeloadModule {
 		if (path.tpackage.length == 0 && path.tname == "Dynamic") return TDynamic(null);
 		var target = current;
 		if (path.tpackage.length != 0) target = loadModule({pack: path.tpackage, name: path.tname});
-		else if (findModuleType(current, path.tname) == null) target = loadModule({pack: current.mPath.pack, name: path.tname});
+		else if (findModuleType(current, path.tname) == null) {
+			// Until typed type-parameter classes are constructed, an unqualified
+			// parameter such as Array<T>'s T is indistinguishable from a local type
+			// path here. Preserve batch loading by treating an absent local module as
+			// the existing dynamic placeholder rather than failing module bootstrap.
+			try target = loadModule({pack: current.mPath.pack, name: path.tname}) catch (_:Dynamic) return TDynamic(null);
+		}
 		var name = path.tpackage.length == 0 ? path.tname : (path.tsub == null ? path.tname : path.tsub);
 		if (path.tpackage.length == 0 && path.tsub != null) name = path.tsub;
 		var type = findModuleType(target, name);
