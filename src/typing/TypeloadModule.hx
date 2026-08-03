@@ -67,6 +67,7 @@ class TypeloadModule {
 		loadModule({pack: [], name: "Std"});
 		loadModule({pack: [], name: "Any"});
 		loadModule({pack: [], name: "Array"});
+		loadModule({pack: ["haxe"], name: "EnumTools"});
 	}
 
 	/** Modules in the order they were allocated, matching the batch load graph. */
