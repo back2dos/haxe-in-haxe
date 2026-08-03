@@ -21,12 +21,20 @@ class TypeloadModule {
 	var classPaths:ClassPaths;
 	var defines:DefineContext;
 	var modules:Map<String, ModuleDef> = new Map();
+	var basicTypes:Map<String, T> = new Map();
+	var basicModule:ModuleDef;
 	var nextModuleId = 0;
 	var nextVarId = 0;
 
 	public function new(classPaths:ClassPaths, defines:DefineContext) {
 		this.classPaths = classPaths;
 		this.defines = defines;
+		basicModule = {
+			mId: -1, mPath: {pack: [], name: "StdTypes"}, mTypes: [], mStatics: null,
+			mExtra: {mFile: "<built-in>", mSign: "", mDisplay: {mInlineCalls: [], mTypeHints: [], mImportPositions: new Map()}, mCheckPolicy: [], mTime: 0,
+				mCacheState: MSUnknown, mAdded: 0, mChecked: 0, mProcessed: 0, mDeps: new IntMap(), mDisplayDeps: null, mKind: MFake, mCacheBoundObjects: [], mFeatures: new Map()}
+		};
+		for (name in ["Void", "Int", "Float", "Bool", "String"]) basicTypes.set(name, makeBasicType(name));
 	}
 
 	public function resolveModuleFile(path:GlobalTypePath):ResolvedFile {
@@ -120,13 +128,13 @@ class TypeloadModule {
 		var fallback = TDynamic(null);
 		return switch source.expr {
 			case EConst(value): switch value {
-				case Int(v, _): typed(TConst(TInt(Std.parseInt(v))), fallback, source.pos);
-				case Float(v, _): typed(TConst(TFloat(v)), fallback, source.pos);
-				case String(v, _): typed(TConst(TString(v)), fallback, source.pos);
-				case Ident("true"): typed(TConst(TBool(true)), fallback, source.pos);
-				case Ident("false"): typed(TConst(TBool(false)), fallback, source.pos);
+				case Int(v, _): typed(TConst(TInt(Std.parseInt(v))), basic("Int"), source.pos);
+				case Float(v, _): typed(TConst(TFloat(v)), basic("Float"), source.pos);
+				case String(v, _): typed(TConst(TString(v)), basic("String"), source.pos);
+				case Ident("true"): typed(TConst(TBool(true)), basic("Bool"), source.pos);
+				case Ident("false"): typed(TConst(TBool(false)), basic("Bool"), source.pos);
 				case Ident("null"): typed(TConst(TNull), fallback, source.pos);
-				case Ident(name): typeIdent(cls, name, locals, source.pos);
+				case Ident(name): typeIdent(module, cls, name, locals, source.pos);
 				case Regexp(_, _): typed(TIdent(Ast.sConstant(value)), fallback, source.pos);
 			};
 			case EParenthesis(expr): var value = typeExpr(module, cls, expr, locals); typed(TParenthesis(value), value.etype, source.pos);
@@ -134,6 +142,8 @@ class TypeloadModule {
 			case EVars(vars): typeVars(module, cls, vars, locals, source.pos);
 			case EBlock(exprs): var values = [for (expr in exprs) typeExpr(module, cls, expr, locals)]; typed(TBlock(values), values.length == 0 ? fallback : values[values.length - 1].etype, source.pos);
 			case ECall(expr, args): var callee = typeExpr(module, cls, expr, locals); var values = [for (arg in args) typeExpr(module, cls, arg, locals)]; var result = switch callee.etype { case TFun(sig): sig.ret; case _: fallback; }; typed(TCall(callee, values), result, source.pos);
+			case EField(expr, name, _): typeField(typeExpr(module, cls, expr, locals), name, source.pos);
+			case ENew(path, args): typeNew(module, path.path, args, cls, locals, source.pos);
 			case EFunction(_, func): var signature:TSignature = {args:[for (arg in func.fArgs) {name:arg.name.name, optional:arg.optional, type:arg.type == null ? fallback : resolveTypeHint(module, arg.type)}], ret:func.fType == null ? fallback : resolveTypeHint(module, func.fType)}; typeFunction(module, cls, func, signature);
 			case EReturn(expr): typed(TReturn(expr == null ? null : typeExpr(module, cls, expr, locals)), fallback, source.pos);
 			case EThrow(expr): typed(TThrow(typeExpr(module, cls, expr, locals)), fallback, source.pos);
@@ -154,13 +164,43 @@ class TypeloadModule {
 		return result.length == 1 ? result[0] : typed(TBlock(result), TDynamic(null), pos);
 	}
 
-	function typeIdent(cls:TClass, name:String, locals:StringMap<TVar>, pos:Pos):TExpr {
+	function typeIdent(module:ModuleDef, cls:TClass, name:String, locals:StringMap<TVar>, pos:Pos):TExpr {
 		var local = locals.get(name);
 		if (local != null) return typed(TLocal(local), local.vType, pos);
 		var field = cls.clFields.get(name);
 		if (field == null) field = cls.clStatics.get(name);
-		if (field != null) return typed(TField(typed(TConst(TThis), cls.clType, pos), FDynamic(name)), field.cfType, pos);
+		if (field != null) return typed(TField(typed(TConst(TThis), cls.clType, pos), FInstance(cls, [], field)), field.cfType, pos);
+		var moduleType = findModuleType(module, name);
+		if (moduleType == null && name.length > 0 && name.charAt(0) == name.charAt(0).toUpperCase()) {
+			try moduleType = findModuleType(loadModule({pack: module.mPath.pack, name: name}), name) catch (_:Dynamic) {}
+		}
+		if (moduleType != null) return typed(TTypeExpr(moduleType), TDynamic(null), pos);
 		return typed(TIdent(name), TDynamic(null), pos);
+	}
+
+	function typeField(object:TExpr, name:String, pos:Pos):TExpr {
+		switch object.eexpr {
+			case TTypeExpr(TClassDecl(cls)):
+				var field = cls.clStatics.get(name);
+				if (field != null) return typed(TField(object, FStatic(cls, field)), field.cfType, pos);
+			case _:
+		}
+		switch object.etype {
+			case TInst(cls, params):
+				var field = cls.clFields.get(name);
+				if (field != null) return typed(TField(object, FInstance(cls, params, field)), field.cfType, pos);
+			case _:
+		}
+		return typed(TField(object, FDynamic(name)), TDynamic(null), pos);
+	}
+
+	function typeNew(module:ModuleDef, path:TypePath, args:Array<Expr>, cls:TClass, locals:StringMap<TVar>, pos:Pos):TExpr {
+		var type = resolvePath(module, path);
+		var values = [for (arg in args) typeExpr(module, cls, arg, locals)];
+		return switch type {
+			case TInst(target, params): typed(TNew(target, params, values), type, pos);
+			case _: typed(TIdent("<new>"), TDynamic(null), pos);
+		};
 	}
 
 	function makeVar(name:String, type:T, origin:TVarOrigin, pos:Pos, meta:Metadata):TVar return {vId:nextVarId++, vName:name, vType:type, vKind:VUser(origin), vExtra:null, vMeta:meta, vFlags:0, vPos:pos};
@@ -202,8 +242,13 @@ class TypeloadModule {
 	}
 
 	function resolvePath(current:ModuleDef, path:TypePath):T {
-		var target = path.tpackage.length == 0 ? current : loadModule({pack: path.tpackage, name: path.tname});
+		if (path.tpackage.length == 0 && path.tsub == null && basicTypes.exists(path.tname)) return basic(path.tname);
+		if (path.tpackage.length == 0 && path.tname == "Dynamic") return TDynamic(null);
+		var target = current;
+		if (path.tpackage.length != 0) target = loadModule({pack: path.tpackage, name: path.tname});
+		else if (findModuleType(current, path.tname) == null) target = loadModule({pack: current.mPath.pack, name: path.tname});
 		var name = path.tpackage.length == 0 ? path.tname : (path.tsub == null ? path.tname : path.tsub);
+		if (path.tpackage.length == 0 && path.tsub != null) name = path.tsub;
 		var type = findModuleType(target, name);
 		if (type == null) return TDynamic(null); // built-ins await BasicTypes/Typecore.
 		var params = [for (param in path.tparams) switch param { case TPType(type): resolveTypeHint(current, type); case TPExpr(_): TDynamic(null); }];
@@ -213,6 +258,13 @@ class TypeloadModule {
 			case TTypeDecl(def): TType(def, params);
 			case TAbstractDecl(abs): TAbstract(abs, params);
 		};
+	}
+
+	function basic(name:String):T return basicTypes.get(name);
+	function makeBasicType(name:String):T {
+		var abs:TAbstract = {aPath:{pack:[], name:name}, aModule:basicModule, aPos:{pfile:"<built-in>",pmin:0,pmax:0}, aNamePos:{pfile:"<built-in>",pmin:0,pmax:0}, aPrivate:false, aDoc:null, aMeta:[], aParams:[], aUsing:[], aRestore:function(){}, aOps:[], aUnops:[], aImpl:null, aThis:TDynamic(null), aFrom:[], aFromField:[], aTo:[], aToField:[], aArray:[], aRead:null, aWrite:null, aCall:null, aConstructor:null, aExtern:true, aEnum:false};
+		abs.aThis = TAbstract(abs, []);
+		return abs.aThis;
 	}
 
 	function findClass(module:ModuleDef, name:String):TClass return switch findModuleType(module, name) { case TClassDecl(cls): cls; case _: throw 'Class ' + name + ' was not allocated'; };

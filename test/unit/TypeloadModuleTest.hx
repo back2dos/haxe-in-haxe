@@ -40,5 +40,33 @@ class TypeloadModuleTest {
 			}
 			case _: throw "Function expression was not typed";
 		}
+		var resolver = loader.loadModule({pack:["unit", "moduleload"], name:"Resolver"});
+		var resolvedClass = switch resolver.mTypes[0] { case TClassDecl(value): value; case _: throw "Expected resolver class"; };
+		assertBasic("Int", resolvedClass.clFields.get("count").cfType);
+		assertBasic("Float", resolvedClass.clFields.get("ratio").cfType);
+		assertBasic("Bool", resolvedClass.clFields.get("enabled").cfType);
+		assertBasic("String", resolvedClass.clFields.get("label").cfType);
+		assertBasic("Void", resolvedClass.clFields.get("nothing").cfType);
+		switch resolvedClass.clFields.get("anything").cfType { case TDynamic(_): case _: throw "Dynamic hint was not resolved"; }
+		switch resolvedClass.clFields.get("helper").cfType { case TInst(value, _): if (value.clPath.name != "ResolverHelper") throw "Module type hint was not resolved"; case _: throw "Expected module class hint"; }
+		switch resolvedClass.clFields.get("run").cfExpr.eexpr {
+			case TFunction(func): switch func.tfExpr.eexpr {
+				case TBlock([ {eexpr: TVar(_, _)}, {eexpr: TReturn(value)} ]): switch value.eexpr { case TCall({eexpr:TField(_, FInstance(_, _, field))}, _): if (field.cfName != "value") throw "Method lookup failed"; case _: throw "Instance method was not resolved"; }
+				case _: throw "Expected return";
+			}
+			case _: throw "Expected resolver function";
+		}
+		switch resolvedClass.clFields.get("fromStatic").cfExpr.eexpr {
+			case TFunction(func): switch func.tfExpr.eexpr {
+				case TBlock([ {eexpr: TReturn(value)} ]): switch value.eexpr { case TCall({eexpr:TField(_, FStatic(_, field))}, _): if (field.cfName != "create") throw "Static method lookup failed"; case _: throw "Static method was not resolved"; }
+				case _: throw "Expected static lookup return";
+			}
+			case _: throw "Expected static lookup function";
+		}
+	}
+
+	static function assertBasic(name:String, type:T):Void switch type {
+		case TAbstract(value, _): if (value.aPath.name != name) throw 'Expected $name basic type';
+		case _: throw 'Expected $name basic type';
 	}
 }
