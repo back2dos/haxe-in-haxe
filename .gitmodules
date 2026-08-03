@@ -1,0 +1,3 @@
+[submodule "haxe"]
+	path = haxe
+	url = https://github.com/haxefoundation/haxe.git

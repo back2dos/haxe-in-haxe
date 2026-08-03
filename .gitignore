@@ -1,0 +1,4 @@
+/bin/
+/test/generated/
+/test/reference/
+/.haxelib/
