@@ -40,6 +40,10 @@ class HxbWriterTest {
 		var expectedKinds = "STR,MDF,MTF,CLR,ENR,ABR,TDR,CLD,END,ABD,TDD,EOT,CFD,EFD,AFD,EOF,EOM";
 		if (kinds.join(",") != expectedKinds) throw 'Unexpected typed HXB chunk layout: ${kinds.join(",")}';
 		if (typedBytes.get(0) != "h".code || typedBytes.get(1) != "x".code || typedBytes.get(2) != "b".code || typedBytes.get(3) != 1) throw "Typed HXB header was not written";
+		var metadataModule = new TypeloadModule(paths, Define.emptyDefines()).loadModule({pack:["unit", "moduleload"], name:"Metadata"});
+		var metadataWriter = new HxbWriter();
+		metadataWriter.writeModule(metadataModule);
+		if (metadataWriter.exportModule().length <= 4) throw "Metadata-bearing module was not serialized";
 	}
 
 	static function chunkKinds(bytes:haxe.io.Bytes):Array<String> {

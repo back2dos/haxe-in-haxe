@@ -274,7 +274,20 @@ class HxbWriter {
 	static function writePos(chunk:HxbChunk, pos:Pos):Void { chunk.writeString(pos.pfile); chunk.writeLeb128(pos.pmin); chunk.writeLeb128(pos.pmax); }
 	static function writePosPair(chunk:HxbChunk, first:Pos, second:Pos):Void { writePos(chunk, first); chunk.writeLeb128(second.pmin - first.pmin); chunk.writeLeb128(second.pmax - first.pmin); }
 	static function writeDocumentation(chunk:HxbChunk, doc:Dynamic):Void chunk.writeU8(0);
-	static function writeMetadata(chunk:HxbChunk, meta:Dynamic):Void { if (meta != null && (cast meta:Array<Dynamic>).length != 0) throw "Metadata serialization is not ported"; chunk.writeUleb128(0); }
+	static function writeMetadata(chunk:HxbChunk, meta:Dynamic):Void {
+		var entries:Array<Dynamic> = meta == null ? [] : cast meta;
+		chunk.writeUleb128(entries.length);
+		for (entry in entries) {
+			// write_metadata in hxbWriter.ml stores the original AST metadata,
+			// including its source position. Argument expressions need the source
+			// expression writer, which has not been ported yet.
+			var exprs:Array<Dynamic> = cast entry.exprs;
+			if (exprs.length != 0) throw "Metadata expression serialization is not ported";
+			chunk.writeString(Std.string(entry.meta));
+			writePos(chunk, entry.pos);
+			chunk.writeUleb128(0);
+		}
+	}
 	static function writeEmptyTypeParams(chunk:HxbChunk):Void chunk.writeUleb128(0);
 	static function writeEmptyTypeParamsData(chunk:HxbChunk):Void {}
 	function writeTypes(chunk:HxbChunk, types:TParams):Void chunk.writeList(types, function(type) writeType(chunk, type));
