@@ -1,3 +1,4 @@
 -cp src
 -main haxe.Main
+-D haxe_in_haxe_bootstrap
 --hxb bin/haxe-in-haxe.hxb

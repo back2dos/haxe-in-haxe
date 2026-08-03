@@ -32,6 +32,7 @@ class UnitMain {
 		GrammarTest.main();
 		TTypeTest.main();
 		TypeloadModuleTest.main();
+		BatchDriverTest.main();
 		MessageTest.main();
 	}
 }
