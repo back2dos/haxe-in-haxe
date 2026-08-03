@@ -34,12 +34,15 @@ class Main {
 	public static function run(arguments:Array<String>):Void {
 		if (arguments.length > 0 && arguments[0] == "--") arguments = arguments.slice(1);
 		var classPaths = new ClassPaths();
+		var stdPath = "haxe/std/";
+		if (!FileSystem.exists(stdPath)) throw "Pinned standard library not found at " + stdPath;
+		classPaths.push(new DirectoryClassPath(stdPath, Std));
 		var defines = Define.emptyDefines();
 		var main:Null<GlobalTypePath> = null;
 		var hxbArgument:Null<String> = null;
 		for (argument in Args.parseArgs(arguments)) {
 			switch argument {
-				case AddClassPath(path): classPaths.push(new DirectoryClassPath(classPathPath(path), User));
+				case AddClassPath(path): classPaths.add(new DirectoryClassPath(classPathPath(path), User));
 				case Define(key, value): Define.rawDefineValue(defines, key, value == null ? "1" : value);
 				case SetMain(path):
 					if (main != null) unsupported("multiple --main options");
@@ -57,6 +60,7 @@ class Main {
 		if (config.targetConfig.hxbVersion != compiler.hxb.HxbData.VERSION) throw 'Unsupported HXB version: ${config.targetConfig.hxbVersion}';
 		ensureOutputDirectory(config.archivePath);
 		var loader = new TypeloadModule(classPaths, defines);
+		loader.loadStdTypes();
 		loader.loadModule(main);
 		var zip = new ZipOutput(config.archivePath, 0);
 		try {

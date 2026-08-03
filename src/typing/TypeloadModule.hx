@@ -54,6 +54,10 @@ class TypeloadModule {
 
 	public function findModule(path:GlobalTypePath):Null<ModuleDef> return modules.get(moduleKey(path));
 
+	/** First step of typerEntry.load_std_types. Basic-type rebinding follows once
+		type parameters and abstract typing are available. */
+	public function loadStdTypes():ModuleDef return loadModule({pack: [], name: "StdTypes"});
+
 	/** Modules in the order they were allocated, matching the batch load graph. */
 	public function loadedModules():Array<ModuleDef> {
 		var result = [for (module in modules) module];

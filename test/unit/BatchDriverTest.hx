@@ -13,9 +13,15 @@ class BatchDriverTest {
 		var input = File.read(output, true);
 		var entries = new Reader(input).read();
 		input.close();
-		if (entries.length != 1) throw "Batch driver archive entry count failed";
-		var entry = entries.first();
-		if (entry.fileName != "cross/unit/moduleload/Example.hxb") throw 'Batch driver archive path is invalid: ${entry.fileName}';
+		if (entries.length != 2) throw "Batch driver archive entry count failed";
+		var entry = null;
+		var hasStdTypes = false;
+		for (value in entries) {
+			if (value.fileName == "cross/unit/moduleload/Example.hxb") entry = value;
+			if (value.fileName == "cross/StdTypes.hxb") hasStdTypes = true;
+		}
+		if (entry == null) throw "Batch driver main archive entry is missing";
+		if (!hasStdTypes) throw "Batch driver standard archive entry is missing";
 		var bytes = entry.data;
 		if (bytes.length < 4 || bytes.get(0) != "h".code || bytes.get(1) != "x".code || bytes.get(2) != "b".code || bytes.get(3) != 1) throw "Batch driver HXB header is invalid";
 		var kinds = chunkKinds(bytes);
