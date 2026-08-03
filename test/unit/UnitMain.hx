@@ -28,5 +28,6 @@ class UnitMain {
 		AstTest.main();
 		LexerTest.main();
 		PreprocessorTest.main();
+		GrammarTest.main();
 	}
 }
