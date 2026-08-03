@@ -14,6 +14,10 @@ class GrammarTest {
 		assert(switch expr.definition { case EClass(c): switch c.data[0].cffKind { case FFun(f): f.fExpr != null; case _: false; }; case _: false; });
 		var structural = Grammar.parse('typedef Cursor<T> = { function hasNext():Bool; function next():T; }').declarations[0];
 		assert(switch structural.definition { case ETypedef(value): switch value.data.type { case CTAnonymous(fields): fields.length == 2; case _: false; }; case _: false; });
+		var property = Grammar.parse('extern class Value { var length(default, null):Int; }').declarations[0];
+		assert(switch property.definition { case EClass(value): switch value.data[0].cffKind { case FProp(get, set, _, _): get.name == "default" && set.name == "null"; case _: false; }; case _: false; });
+		var functionType = Grammar.parse('class Mapper { function map(f:Int->String):Void; }').declarations[0];
+		assert(switch functionType.definition { case EClass(value): switch value.data[0].cffKind { case FFun(func): switch func.fArgs[0].type.type { case CTFunction(_, _): true; case _: false; }; case _: false; }; case _: false; });
 	}
 	static function assert(value:Bool):Void if (!value) throw "Grammar assertion failed";
 }

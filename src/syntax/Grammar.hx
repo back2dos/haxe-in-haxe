@@ -78,7 +78,15 @@ class Grammar {
 	function access():Array<PlacedAccess> { var result=[]; while (true) { var t=current(); var a:Null<Access> = switch t.token { case Kwd(Public): APublic; case Kwd(Private): APrivate; case Kwd(Static): AStatic; case Kwd(Override): AOverride; case Kwd(Dynamic): ADynamic; case Kwd(Inline): AInline; case Kwd(Macro): AMacro; case Kwd(Final): AFinal; case Kwd(Extern): AExtern; case _: null; }; if (a == null) return result; next(); result.push({access:a,pos:t.pos}); } }
 	function classField():ClassField {
 		var doc=documentation(), meta=metadata(); var start=current().pos; var accesses=access();
-		if (acceptKwd(Var) != null) { var name=placedIdent(); var type=typeHintOpt(); var value=accept(Binop(OpAssign)) == null ? null : expression(); var end=expect(Semicolon).pos; return {cffName:name,cffDoc:doc,cffPos:union(start,end),cffMeta:meta,cffAccess:accesses,cffKind:FVar(type,value)}; }
+		if (acceptKwd(Var) != null) {
+			var name = placedIdent();
+			if (accept(POpen) != null) {
+				var get = placedIdent(); expect(Comma); var set = placedIdent(); expect(PClose);
+				var type = typeHintOpt(); var value = accept(Binop(OpAssign)) == null ? null : expression(); var end = expect(Semicolon).pos;
+				return {cffName:name,cffDoc:doc,cffPos:union(start,end),cffMeta:meta,cffAccess:accesses,cffKind:FProp(get,set,type,value)};
+			}
+			var type=typeHintOpt(); var value=accept(Binop(OpAssign)) == null ? null : expression(); var end=expect(Semicolon).pos; return {cffName:name,cffDoc:doc,cffPos:union(start,end),cffMeta:meta,cffAccess:accesses,cffKind:FVar(type,value)};
+		}
 		if (acceptKwd(Function) != null) { var name=placedIdent(); var f=functionRest(); return {cffName:name,cffDoc:doc,cffPos:union(start,f.fExpr == null ? name.pos : f.fExpr.pos),cffMeta:meta,cffAccess:accesses,cffKind:FFun(f)}; }
 		fail("Expected class field"); return null;
 	}
@@ -139,6 +147,11 @@ class Grammar {
 			return {type: optional ? CTOptional({type:complex, pos:union(start, end)}) : complex, pos:union(start, end)};
 		}
 		complex = CTPath(typePath());
+		if (accept(Arrow) != null) {
+			var result = typeHint();
+			complex = CTFunction([ {type:complex, pos:start} ], result);
+			return {type: optional ? CTOptional({type:complex,pos:union(start,result.pos)}) : complex,pos:union(start,result.pos)};
+		}
 		return {type: optional ? CTOptional({type:complex,pos:start}) : complex,pos:start};
 	}
 	function anonymousField():ClassField {
