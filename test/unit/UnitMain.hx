@@ -2,6 +2,7 @@ package unit;
 
 class UnitMain {
 	static function main():Void {
+		GlobalsTest.main();
 		ArgsTest.main();
 		HxbDataTest.main();
 		HxbWriterConfigTest.main();
