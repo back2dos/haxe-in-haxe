@@ -13,6 +13,7 @@ class TypeloadModuleTest {
 	public static function main():Void {
 		var paths = new ClassPaths();
 		paths.push(new DirectoryClassPath("test/", User));
+		paths.push(new DirectoryClassPath("haxe/std/", Std));
 		var loader = new TypeloadModule(paths, Define.emptyDefines());
 		var module = loader.loadModule({pack:["unit", "moduleload"], name:"Example"});
 		if (module.mId != 0 || module.mTypes.length != 5 || module.mExtra.mFile != sys.FileSystem.fullPath("test/unit/moduleload/Example.hx")) throw "Module loading failed";
@@ -73,6 +74,15 @@ class TypeloadModuleTest {
 		}
 		if (derived.clImplements.length != 1 || derived.clImplements[0].cls != iface) throw "Implemented interface was not resolved";
 		if ((iface.clFlags & classFlag("CInterface")) == 0) throw "Interface class flag was not installed";
+		var accessors = loader.loadModule({pack:["unit", "moduleload"], name:"Accessors"});
+		var accessorClass = switch accessors.mTypes[0] { case TClassDecl(value): value; case _: throw "Expected accessors class"; };
+		switch accessorClass.clStatics.get("read").cfExpr.eexpr {
+			case TFunction(func): switch func.tfExpr.eexpr {
+				case TReturn({eexpr: TCall({eexpr:TField(_, FInstance(_, _, field))}, [])}): if (field.cfName != "get_message") throw "Property getter was not selected";
+				case _: throw "Nullable property access was not typed as a getter call";
+			}
+			case _: throw "Expected property reader function";
+		}
 		var count = switch module.mTypes[3] { case TAbstractDecl(value): value; case _: throw "Expected Count abstract"; };
 		if (count.aImpl == null || count.aImpl.clPath.pack.join(".") != "unit.moduleload._Example" || count.aImpl.clPath.name != "Count_Impl_") throw "Abstract implementation class was not installed";
 		switch count.aThis { case TAbstract(value, _): if (value.aPath.name != "Int") throw "Abstract underlying type was not resolved"; case _: throw "Expected abstract underlying type"; }

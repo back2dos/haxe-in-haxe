@@ -14,6 +14,11 @@ class Grammar {
 		var tokens = defines == null ? Lexer.lex(source, file) : Preprocessor.process(source, defines, file);
 		return new Grammar(tokens).parseFile();
 	}
+	static function parseEmbeddedExpression(source:String, file:String, offset:Int):Expr {
+		var tokens = Lexer.lex(source, file);
+		for (token in tokens) { token.pos.pmin += offset; token.pos.pmax += offset; }
+		return new Grammar(tokens).expression();
+	}
 
 	final tokens:Array<LexedToken>;
 	var index = 0;
@@ -161,6 +166,7 @@ class Grammar {
 		case _: postfix(primary()); }; }
 	function primary():Expr {
 		var t=next(); var e:Expr = switch t.token {
+			case Const(String(value, SSingleQuotes)) if (value.indexOf("$") != -1): interpolatedString(value, t.pos);
 			case Const(c): expr(EConst(c),t.pos);
 			case IntInterval(value):
 				var left = expr(EConst(Int(value, null)), t.pos);
@@ -174,6 +180,37 @@ class Grammar {
 			case Kwd(Function): var name:Null<PlacedName> = is(POpen) ? null : placedIdent(); var f=functionRest(); expr(EFunction(name == null ? FKAnonymous : FKNamed(name,false),f), union(t.pos,f.fExpr == null ? t.pos : f.fExpr.pos));
 			case _: index--; objectOrIdentifier();
 		}; return e;
+	}
+	function interpolatedString(value:String, pos:Pos):Expr {
+		var parts:Array<Expr> = [];
+		var literalStart = 0;
+		var index = 0;
+		function addLiteral(end:Int):Void if (end > literalStart) parts.push(expr(EConst(String(value.substring(literalStart, end), SDoubleQuotes)), {pfile:pos.pfile, pmin:pos.pmin + 1 + literalStart, pmax:pos.pmin + 1 + end}));
+		while (index < value.length) {
+			if (value.charAt(index) != "$") { index++; continue; }
+			addLiteral(index);
+			if (index + 1 < value.length && value.charAt(index + 1) == "{") {
+				var depth = 1;
+				var end = index + 2;
+				while (end < value.length && depth > 0) { if (value.charAt(end) == "{") depth++; else if (value.charAt(end) == "}") depth--; end++; }
+				if (depth != 0) fail("Unclosed string interpolation", pos);
+				var contentStart = index + 2;
+				parts.push(parseEmbeddedExpression(value.substring(contentStart, end - 1), pos.pfile, pos.pmin + 1 + contentStart));
+				index = end;
+			} else {
+				var end = index + 1;
+				while (end < value.length) { var c = value.charAt(end); if (!((c >= "a" && c <= "z") || (c >= "A" && c <= "Z") || (c >= "0" && c <= "9") || c == "_")) break; end++; }
+				parts.push(parseEmbeddedExpression(value.substring(index + 1, end), pos.pfile, pos.pmin + 2 + index));
+				index = end;
+			}
+			literalStart = index;
+		}
+		addLiteral(value.length);
+		if (parts.length == 0) return expr(EConst(String("", SDoubleQuotes)), pos);
+		var result = parts[0];
+		for (partIndex in 1...parts.length) result = expr(EBinop(OpAdd, result, parts[partIndex]), union(result.pos, parts[partIndex].pos));
+		result.pos = pos;
+		return result;
 	}
 	function parseSwitch(start:Pos):Expr {
 		expect(POpen); var subject = expression(); expect(PClose); expect(BrOpen);

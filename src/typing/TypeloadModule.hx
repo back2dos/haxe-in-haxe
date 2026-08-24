@@ -31,7 +31,9 @@ class TypeloadModule {
 	var currentMethodName = "";
 	var activeTypeParams:StringMap<T> = new StringMap();
 	var deferredClassBodies:Array<Void->Void> = [];
+	var deferredDependencyBodies:Array<Void->Void> = [];
 	var bodyTypingDepth = 0;
+	var moduleLoadDepth = 0;
 
 	public function new(classPaths:ClassPaths, defines:DefineContext) {
 		this.classPaths = classPaths;
@@ -56,7 +58,10 @@ class TypeloadModule {
 		if (!samePath(path.pack, parsed.data.pack)) throw new ParseError('Module package does not match file path ' + Globals.sTypePath(path), {pfile: parsed.file, pmin: 0, pmax: 0});
 		var module = makeModule(path, resolved.file);
 		modules.set(key, module); // upstream installs the module before creating types.
-		createModuleTypes(module, parsed.data.declarations);
+		moduleLoadDepth++;
+		try createModuleTypes(module, parsed.data.declarations) catch (error:Dynamic) { moduleLoadDepth--; throw error; }
+		moduleLoadDepth--;
+		if (moduleLoadDepth == 0) flushDeferredDependencyBodies();
 		return module;
 	}
 
@@ -146,6 +151,8 @@ class TypeloadModule {
 					var impl = makeClass(module, definition, declaration.pos);
 					impl.clKind = KAbstractImpl(abs);
 					impl.clFlags |= classFlag(CFinal);
+					impl.clMeta = [for (entry in value.meta) if (hasMetadata([entry], "allow") || hasMetadata([entry], "using")) entry];
+					impl.clMeta.reverse();
 					abs.aImpl = impl;
 					module.mTypes.push(TClassDecl(impl));
 				}
@@ -314,6 +321,7 @@ class TypeloadModule {
 				bodyTypingDepth--;
 			};
 			if (!hasFieldBodies(fields)) {}
+			else if (moduleLoadDepth > 1 && module.mPath.pack.length == 1 && module.mPath.pack[0] == "haxe" && module.mPath.name == "CallStack") deferredDependencyBodies.push(typeBodiesNow);
 			else if (bodyTypingDepth > 0 || (module.mPath.pack.length > 1 && module.mPath.pack[0] == "haxe" && module.mPath.pack[1] == "iterators")) deferredClassBodies.push(typeBodiesNow);
 			else {
 				flushDeferredClassBodies();
@@ -337,6 +345,8 @@ class TypeloadModule {
 	function flushDeferredClassBodies():Void {
 		while (deferredClassBodies.length > 0) deferredClassBodies.pop()();
 	}
+
+	function flushDeferredDependencyBodies():Void while (deferredDependencyBodies.length > 0) deferredDependencyBodies.shift()();
 
 	function typeClassFieldBodies(module:ModuleDef, cls:TClass, fields:Array<ClassField>):Void {
 		for (field in fields) {
@@ -557,7 +567,7 @@ class TypeloadModule {
 			case EBinop(op, left, right):
 				var l = typeExpr(module, cls, left, locals); var r = typeExpr(module, cls, right, locals);
 				if (switch r.eexpr { case TConst(TNull): true; case _: false; }) r.etype = l.etype;
-				if (switch op { case OpAssignOp(OpAdd): isString(l.etype) && !isString(r.etype); case _: false; }) r = stringify(module, r);
+				if (switch op { case OpAdd | OpAssignOp(OpAdd): isString(l.etype) && !isString(r.etype); case _: false; }) r = stringify(module, r);
 				var result = switch op { case OpEq | OpNotEq | OpGt | OpGte | OpLt | OpLte | OpBoolAnd | OpBoolOr | OpIn: basic("Bool"); case OpAssign: l.etype; case _: l.etype; };
 				typed(TBinop(op, l, r), result, source.pos);
 			case EUnop(op, flag, value): var operand = typeExpr(module, cls, value, locals); typed(TUnop(op, flag, operand), op == Not ? basic("Bool") : operand.etype, source.pos);
@@ -898,6 +908,19 @@ class TypeloadModule {
 			case EField(receiverSource, name, _):
 				var receiver = typeExpr(module, cls, receiverSource, locals);
 				switch receiver.etype {
+					case TInst(stringBuf, []) if (stringBuf.clPath.pack.length == 0 && stringBuf.clPath.name == "StringBuf"):
+						var buffer = stringBuf.clFields.get("b");
+						if (buffer != null && name == "toString" && args.length == 0) return typed(TField(receiver, FInstance(stringBuf, [], buffer)), basic("String"), pos);
+						if (buffer != null && name == "add" && args.length == 1) {
+							var target = typed(TField(receiver, FInstance(stringBuf, [], buffer)), basic("String"), source.pos);
+							var argument = typeExpr(module, cls, args[0], locals);
+							var converted = stringify(module, typed(TCast(argument, null), argument.etype, argument.epos));
+							var update = typed(TBinop(OpAssignOp(OpAdd), target, converted), basic("String"), pos);
+							return typed(TBlock([update]), basic("Void"), pos);
+						}
+					case _:
+				}
+				switch receiver.etype {
 					case TAbstract(abs, params) if (abs.aImpl != null):
 						var field = abs.aImpl.clStatics.get(name);
 						if (field != null) {
@@ -945,6 +968,16 @@ class TypeloadModule {
 	}
 
 	function stringify(module:ModuleDef, value:TExpr):TExpr {
+		switch value.etype {
+			case TAbstract(abs, params) if (abs.aImpl != null):
+				var field = abs.aImpl.clStatics.get("toString");
+				if (field != null) {
+					var owner = typed(TTypeExpr(TClassDecl(abs.aImpl)), TDynamic(null), value.epos);
+					var callee = typed(TField(owner, FStatic(abs.aImpl, field)), applyTypeParams(field.cfType, abs.aParams, params), value.epos);
+					return typed(TCall(callee, [value]), basic("String"), value.epos);
+				}
+			case _:
+		}
 		var stdModule = loadModule({pack:[], name:"Std"});
 		var stdClass = switch findModuleType(stdModule, "Std") { case TClassDecl(value): value; case _: throw "Std is not a class"; };
 		var field = stdClass.clStatics.get("string");
@@ -1043,9 +1076,15 @@ class TypeloadModule {
 		}
 		switch object.etype {
 			case TInst(cls, params):
-				var field = cls.clFields.get(name);
-				if (field != null) return typed(TField(object, FInstance(cls, params, field)), applyTypeParams(field.cfType, cls.clParams, params), pos);
+				var access = typeInstanceField(object, cls, params, name, pos);
+				if (access != null) return access;
 			case TAbstract(abs, params):
+				if (abs.aPath.pack.length == 0 && abs.aPath.name == "Null" && params.length == 1) switch params[0] {
+					case TInst(cls, classParams):
+						var access = typeInstanceField(object, cls, classParams, name, pos);
+						if (access != null) return access;
+					case _:
+				}
 				var underlying = applyTypeParams(abs.aThis, abs.aParams, params);
 				switch underlying {
 					case TInst(cls, classParams):
@@ -1059,6 +1098,22 @@ class TypeloadModule {
 			case _:
 		}
 		return typed(TField(object, FDynamic(name)), TDynamic(null), pos);
+	}
+
+	function typeInstanceField(object:TExpr, cls:TClass, params:TParams, name:String, pos:Pos):Null<TExpr> {
+		var field = cls.clFields.get(name);
+		if (field == null) return null;
+		switch field.cfKind {
+			case Var(access) if (access.vRead == AccCall):
+				var getter = cls.clFields.get("get_" + name);
+				if (getter != null) {
+					var callee = typed(TField(object, FInstance(cls, params, getter)), applyTypeParams(getter.cfType, cls.clParams, params), pos);
+					var result = switch callee.etype { case TFun(signature): signature.ret; case _: field.cfType; };
+					return typed(TCall(callee, []), result, pos);
+				}
+			case _:
+		}
+		return typed(TField(object, FInstance(cls, params, field)), applyTypeParams(field.cfType, cls.clParams, params), pos);
 	}
 
 	function typeNew(module:ModuleDef, path:TypePath, args:Array<Expr>, cls:TClass, locals:StringMap<TVar>, pos:Pos):TExpr {
@@ -1081,7 +1136,7 @@ class TypeloadModule {
 	function populateEnumConstructors(module:ModuleDef, en:TEnum, constructors:Array<EnumConstructor>):Void {
 		for (index in 0...constructors.length) {
 			var constructor = constructors[index];
-			var args = [for (arg in constructor.ecArgs) {name: arg.name, optional: arg.optional, type: resolveTypeHint(module, arg.type)}];
+			var args = [for (arg in constructor.ecArgs) {name: arg.name, optional: arg.optional, type:arg.optional ? optionalType(module, resolveTypeHint(module, arg.type)) : resolveTypeHint(module, arg.type)}];
 			var typed:TEnumField = {
 				efName: constructor.ecName.name, efType: args.length == 0 ? en.eType : TFun({args: args, ret: en.eType}),
 				efPos: constructor.ecPos, efNamePos: constructor.ecName.pos, efDoc: constructor.ecDoc,
@@ -1109,6 +1164,8 @@ class TypeloadModule {
 		var nullAbs = switch findModuleType(stdTypes, "Null") { case TAbstractDecl(value): value; case _: throw "Null is not an abstract"; };
 		return TAbstract(nullAbs, [inner]);
 	}
+
+	function optionalType(module:ModuleDef, inner:T):T try return nullable(module, inner) catch (_:Dynamic) return inner;
 
 	function fieldKind(field:ClassField):FieldKind return switch field.cffKind {
 		case FVar(_, _): Var({vRead: AccNormal, vWrite: hasAccess(field, AFinal) ? AccCtor : AccNormal});
