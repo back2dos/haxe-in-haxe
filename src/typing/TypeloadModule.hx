@@ -338,6 +338,23 @@ class TypeloadModule {
 			typedParam.ttpType = cls.clType;
 			result.push(typedParam);
 		}
+		var previousTypeParams = activeTypeParams;
+		activeTypeParams = new StringMap<T>();
+		for (name => type in previousTypeParams) activeTypeParams.set(name, type);
+		for (param in result) activeTypeParams.set(param.ttpName, param.ttpType);
+		for (index in 0...params.length) {
+			var source = params[index];
+			var target = result[index];
+			if (source.tpConstraints != null) {
+				var constraints = switch source.tpConstraints.type {
+					case CTIntersection(types): [for (type in types) resolveTypeHint(module, type)];
+					case _: [resolveTypeHint(module, source.tpConstraints)];
+				};
+				target.ttpConstraints = core.ds.AtomicLazy.fromVal(constraints);
+			}
+			if (source.tpDefault != null) target.ttpDefault = resolveTypeHint(module, source.tpDefault);
+		}
+		activeTypeParams = previousTypeParams;
 		return result;
 	}
 

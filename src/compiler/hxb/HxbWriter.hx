@@ -756,7 +756,7 @@ class HxbWriter {
 		writeTypeParamsForward(chunk, params);
 		for (param in params) {
 			writeMetadata(chunk, param.ttpClass.clMeta);
-			chunk.writeUleb128(0); // constraints are installed lazily by the full typer
+			writeTypes(chunk, param.ttpConstraints == null ? [] : param.ttpConstraints.force());
 			chunk.writeOption(param.ttpDefault, function(type) writeType(chunk, type));
 		}
 	}
@@ -767,7 +767,7 @@ class HxbWriter {
 	});
 	function writeTypeParamsData(chunk:HxbChunk, params:TypeParams):Void for (param in params) {
 		writeMetadata(chunk, param.ttpClass.clMeta);
-		chunk.writeUleb128(0);
+		writeTypes(chunk, param.ttpConstraints == null ? [] : param.ttpConstraints.force());
 		chunk.writeOption(param.ttpDefault, function(type) writeType(chunk, type));
 	}
 	function writeTypes(chunk:HxbChunk, types:TParams):Void chunk.writeList(types, function(type) writeType(chunk, type));
