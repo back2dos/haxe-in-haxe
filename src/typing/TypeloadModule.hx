@@ -621,6 +621,12 @@ class TypeloadModule {
 		};
 	}
 
+	function applyTypeParams(type:T, definitions:TypeParams, values:TParams):T {
+		var result = type;
+		for (index in 0...definitions.length) if (index < values.length) result = substituteType(result, definitions[index].ttpType, values[index]);
+		return result;
+	}
+
 	function makeGeneratedVar(name:String, type:T, pos:Pos):TVar return {vId:nextVarId++, vName:name, vType:type, vKind:VGenerated, vExtra:null, vMeta:[], vFlags:0, vPos:pos};
 	static function realPathMetadata(name:String):MetadataEntry return {meta:":realPath", exprs:[{expr:EConst(String(name, SDoubleQuotes)), pos:Globals.nullPos}], pos:Globals.nullPos};
 	static function generatedLoopMetadata(name:String, forLoop:Bool):Metadata {
@@ -709,7 +715,7 @@ class TypeloadModule {
 		if (field == null) field = cls.clStatics.get(name);
 		if (field != null) {
 			var params = switch cls.clType { case TInst(_, values): values; case _: []; };
-			return typed(TField(typed(TConst(TThis), cls.clType, pos), FInstance(cls, params, field)), field.cfType, pos);
+			return typed(TField(typed(TConst(TThis), cls.clType, pos), FInstance(cls, params, field)), applyTypeParams(field.cfType, cls.clParams, params), pos);
 		}
 		var moduleType = findModuleType(module, name);
 		if (moduleType == null && name.length > 0 && name.charAt(0) == name.charAt(0).toUpperCase()) {
@@ -729,7 +735,7 @@ class TypeloadModule {
 		switch object.etype {
 			case TInst(cls, params):
 				var field = cls.clFields.get(name);
-				if (field != null) return typed(TField(object, FInstance(cls, params, field)), field.cfType, pos);
+				if (field != null) return typed(TField(object, FInstance(cls, params, field)), applyTypeParams(field.cfType, cls.clParams, params), pos);
 			case _:
 		}
 		return typed(TField(object, FDynamic(name)), TDynamic(null), pos);

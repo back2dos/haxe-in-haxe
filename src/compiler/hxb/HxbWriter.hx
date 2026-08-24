@@ -49,6 +49,7 @@ class HxbChunk {
 	public inline function writeUi16(value:Int):Void { writeU8(value); writeU8(value >>> 8); }
 
 	public function writeUleb128(value:Int):Void {
+		if (value == null) throw 'Cannot encode a null ULEB128 value in $kind';
 		if (value < 0) throw "Cannot encode a negative ULEB128 value";
 		do {
 			var byte = value & 0x7F;
@@ -371,8 +372,14 @@ class HxbWriter {
 	}
 	function writeReferenceType(chunk:HxbChunk, base:Int, getIndex:Void->Int, params:TParams):Void { if (params.length > 2) { chunk.writeU8(base + 9); chunk.writeUleb128(getIndex()); writeTypes(chunk, params); } else { chunk.writeU8(base + params.length); chunk.writeUleb128(getIndex()); for (type in params) writeType(chunk, type); } }
 	function writeTypeParameterRef(chunk:HxbChunk, param:TypedTypeParam):Void switch param.ttpHost {
-		case TPHType: chunk.writeU8(1); chunk.writeUleb128(typeTypeParamIndices.get(param.ttpName));
-		case TPHConstructor | TPHMethod | TPHEnumConstructor | TPHAnonField: chunk.writeU8(2); chunk.writeUleb128(fieldTypeParamIndices.get(param));
+		case TPHType:
+			var index = typeTypeParamIndices.get(param.ttpName);
+			if (index == null) throw 'Unselected type parameter ${param.ttpName}';
+			chunk.writeU8(1); chunk.writeUleb128(index);
+		case TPHConstructor | TPHMethod | TPHEnumConstructor | TPHAnonField:
+			var index = fieldTypeParamIndices.get(param);
+			if (index == null) throw 'Unselected field type parameter ${param.ttpName}';
+			chunk.writeU8(2); chunk.writeUleb128(index);
 		case TPHLocal: throw "Local type parameter serialization is not ported";
 		case TPHUnbound: throw "Unbound type parameter cannot be serialized";
 	}
@@ -496,7 +503,10 @@ class HxbWriter {
 					case TSuper: chunk.writeU8(2); writesConstantType = true;
 				};
 				writesConstantType;
-			case TLocal(variable): chunk.writeU8(20); chunk.writeUleb128(expressionVarIndices.get(variable)); true;
+			case TLocal(variable):
+				var index = expressionVarIndices.get(variable);
+				if (index == null) throw 'Undeclared expression variable ${variable.vName}#${variable.vId}';
+				chunk.writeU8(20); chunk.writeUleb128(index); true;
 			case TVar(variable, value): if (value == null) { chunk.writeU8(21); declareVar(chunk, variable); } else { chunk.writeU8(22); declareVar(chunk, variable); writeTExpr(chunk, value, root, typePool, pos); } false;
 			case TBlock(values):
 				switch values.length {
