@@ -100,3 +100,5 @@ is the intermediate typing/emission lane. Each listed source-only case must be
 accepted by the reference compiler, compile through the port, and produce an
 archive the reference compiler can consume. Payload differences remain visible
 work and do not become conformance passes merely because consumption succeeds.
+Discovered exclusions and their current reasons are recorded in
+`test/upstream-hxb-exclusions.md`.

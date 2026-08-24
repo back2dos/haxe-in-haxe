@@ -821,6 +821,8 @@ class HxbWriter {
 				});
 			case EArrayDecl(values):
 				chunk.writeU8(10); chunk.writeList(values, function(value) writeMetadataExpr(chunk, value));
+			case ECall(callee, args):
+				chunk.writeU8(11); writeMetadataExpr(chunk, callee); chunk.writeList(args, function(arg) writeMetadataExpr(chunk, arg));
 			case ENew(path, args):
 				chunk.writeU8(12); writeMetadataPlacedTypePath(chunk, path); chunk.writeList(args, function(arg) writeMetadataExpr(chunk, arg));
 			case _:
