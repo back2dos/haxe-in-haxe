@@ -82,6 +82,13 @@ class Grammar {
 			expect(BrOpen); var fields=classFields(); var end=expect(BrClose).pos;
 			return decl(EAbstract({name:name,doc:doc,params:params,meta:meta,flags:flags,data:fields}),union(start,end));
 		}
+		if (acceptKwd(Var) != null || hasAccess(accesses, AFinal)) {
+			pendingDeclarationDoc = null;
+			var name = placedIdent(), type = typeHintOpt();
+			var value = accept(Binop(OpAssign)) == null ? null : expression();
+			var end = expect(Semicolon).pos;
+			return decl(EStatic({name:name, doc:doc, params:[], meta:meta, flags:accesses, data:FVar(type, value)}), union(start, end));
+		}
 		if (acceptKwd(Function) != null) {
 			start = previous().pos; pendingDeclarationDoc = null;
 			var name = placedIdent(); var func = functionRest(); var end = func.fExpr == null ? name.pos : func.fExpr.pos;

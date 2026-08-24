@@ -83,6 +83,19 @@ class TypeloadModuleTest {
 			}
 			case _: throw "Expected property reader function";
 		}
+		var moduleFields = loader.loadModule({pack:["unit", "moduleload"], name:"ModuleFields"});
+		if (moduleFields.mStatics == null) throw "Module fields class was not created";
+		var hasModuleFieldsType = false;
+		for (type in moduleFields.mTypes) switch type { case TClassDecl(value) if (value == moduleFields.mStatics): hasModuleFieldsType = true; case _: }
+		if (!hasModuleFieldsType) throw "Module fields class was not added to module types";
+		if (!moduleFields.mStatics.clStatics.exists("initial") || !moduleFields.mStatics.clStatics.exists("answer")) throw "Module fields were not populated";
+		switch moduleFields.mStatics.clStatics.get("answer").cfExpr.eexpr {
+			case TFunction(func): switch func.tfExpr.eexpr {
+				case TReturn({eexpr:TBinop(OpAdd, {eexpr:TField(_, FStatic(_, field))}, _)}): if (field.cfName != "initial") throw "Module field reference selected the wrong field";
+				case _: throw "Module field function body was not typed";
+			}
+			case _: throw "Expected module field function";
+		}
 		var count = switch module.mTypes[3] { case TAbstractDecl(value): value; case _: throw "Expected Count abstract"; };
 		if (count.aImpl == null || count.aImpl.clPath.pack.join(".") != "unit.moduleload._Example" || count.aImpl.clPath.name != "Count_Impl_") throw "Abstract implementation class was not installed";
 		switch count.aThis { case TAbstract(value, _): if (value.aPath.name != "Int") throw "Abstract underlying type was not resolved"; case _: throw "Expected abstract underlying type"; }

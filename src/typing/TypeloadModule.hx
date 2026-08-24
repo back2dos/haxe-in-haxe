@@ -158,6 +158,37 @@ class TypeloadModule {
 				}
 			case EImport(_) | EUsing(_) | EStatic(_):
 		}
+		var moduleFields:Array<ClassField> = [];
+		var moduleFieldsPos:Null<Pos> = null;
+		for (declaration in declarations) switch declaration.definition {
+			case EStatic(value):
+				if (moduleFieldsPos == null) moduleFieldsPos = declaration.pos;
+				moduleFields.push({
+					cffName:value.name,
+					cffDoc:value.doc,
+					cffPos:declaration.pos,
+					cffMeta:value.meta,
+					cffAccess:[{access:AStatic, pos:Globals.nullPos}].concat(value.flags),
+					cffKind:value.data
+				});
+			case _:
+		}
+		if (moduleFields.length > 0) {
+			var position = moduleFieldsPos;
+			var definition:ClassDefinition = {
+				name:{name:module.mPath.name + "_Fields_", pos:Globals.nullPos},
+				doc:null,
+				params:[],
+				meta:[],
+				flags:[HPrivate],
+				data:moduleFields
+			};
+			var fieldsClass = makeClass(module, definition, {pfile:position.pfile, pmin:position.pmin, pmax:position.pmin});
+			fieldsClass.clKind = KModuleFields(module);
+			fieldsClass.clFlags |= classFlag(CFinal);
+			module.mStatics = fieldsClass;
+			module.mTypes.push(TClassDecl(fieldsClass));
+		}
 		// typeloadModule.ml initializes all module-level type parameters after the
 		// shells exist, so recursive constraints can resolve sibling declarations.
 		for (declaration in declarations) switch declaration.definition {
@@ -220,6 +251,7 @@ class TypeloadModule {
 			case EAbstract(value): initializeAbstract(module, findAbstract(module, value.name.name), value, typeBodies);
 			case ETypedef(_) | EImport(_) | EUsing(_) | EStatic(_):
 		}
+		if (module.mStatics != null) populateClassFields(module, module.mStatics, moduleFields, typeBodies);
 	}
 
 	function initializeAbstract(module:ModuleDef, abs:TAbstract, definition:AbstractDefinition, typeBodies:Bool):Void {
