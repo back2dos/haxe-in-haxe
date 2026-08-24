@@ -265,7 +265,8 @@ class HxbWriter {
 	function writeTypedef(chunk:HxbChunk, value:TDef):Void { selectTypeParams(value.tParams); writeCommon(chunk, value.tPrivate, value.tDoc, value.tMeta, value.tParams, value.tUsing); writeType(chunk, value.tType); }
 	function writeAbstract(chunk:HxbChunk, value:TAbstract):Void {
 		selectTypeParams(value.aParams); writeCommon(chunk, value.aPrivate, value.aDoc, value.aMeta, value.aParams, value.aUsing); chunk.writeOption(value.aImpl, function(cls) writeClassRef(chunk, cls));
-		chunk.writeU8(1); writeType(chunk, value.aThis); writeTypes(chunk, value.aFrom); writeTypes(chunk, value.aTo); chunk.writeBool(value.aExtern); chunk.writeBool(value.aEnum);
+		if (hasMetadataName(value.aMeta, "coreType")) chunk.writeU8(0) else { chunk.writeU8(1); writeType(chunk, value.aThis); }
+		writeTypes(chunk, value.aFrom); writeTypes(chunk, value.aTo); chunk.writeBool(value.aExtern); chunk.writeBool(value.aEnum);
 	}
 	function writeAbstractFields(chunk:HxbChunk, value:TAbstract):Void {
 		var impl = value.aImpl;
@@ -705,6 +706,7 @@ class HxbWriter {
 		chunk.writeString(metadataName(entry.meta)); writePos(chunk, entry.pos); chunk.writeList(entry.exprs, function(expr) writeMetadataExpr(chunk, expr));
 	}
 	static function metadataName(value:Dynamic):String { var name = Std.string(value); return StringTools.startsWith(name, ":") ? name : ":" + name; }
+	static function hasMetadataName(metadata:Dynamic, name:String):Bool { var entries:Array<Dynamic> = metadata == null ? [] : cast metadata; for (entry in entries) if (metadataName(entry.meta) == ":" + name) return true; return false; }
 	static function writeEmptyTypeParamsData(chunk:HxbChunk):Void {}
 	function writeFieldTypeParamsData(chunk:HxbChunk, params:TypeParams):Void {
 		chunk.writeUleb128(params.length);
