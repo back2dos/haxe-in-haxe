@@ -14,6 +14,7 @@ import core.TType;
 import compiler.hxb.HxbData.ChunkKind;
 import haxe.io.Bytes;
 import haxe.io.BytesOutput;
+import haxe.ds.ObjectMap;
 
 // Low-level portion of haxe/src/compiler/hxb/hxbWriter.ml.  Module/type
 // serialization intentionally remains separate until the typed writer is ported.
@@ -112,6 +113,9 @@ class HxbWriter {
 	var anonymousTypeIndices:Map<TAnon, Int> = new Map();
 	var anonymousFields:Array<TClassField> = [];
 	var anonymousFieldIndices:Map<TClassField, Int> = new Map();
+	var expressionVars:Array<TVar> = [];
+	var expressionVarIndices:ObjectMap<TVar, Int> = new ObjectMap();
+	var fieldTypeParamIndices:ObjectMap<TypedTypeParam, Int> = new ObjectMap();
 
 	public function new() {
 		strings = new StringPool();
@@ -154,13 +158,18 @@ class HxbWriter {
 			chunk = startChunk(CFD); chunk.writeList(ownClasses, function(value) writeClassFields(chunk, value, expressions));
 			if (expressions.length > 0) {
 				chunk = startChunk(EXD);
-				chunk.writeUleb128(expressions.length);
-				for (expression in expressions) {
-					writeClassRef(chunk, expression.cls);
-					chunk.writeUleb128(1);
-					chunk.writeUleb128(writeFieldRef(expression.cls, expression.field, 0));
-					chunk.writeUleb128(expression.bytes.length);
-					chunk.writeBytes(expression.bytes);
+				var owners:Array<TClass> = [];
+				for (expression in expressions) if (owners.indexOf(expression.cls) == -1) owners.push(expression.cls);
+				chunk.writeUleb128(owners.length);
+				for (owner in owners) {
+					writeClassRef(chunk, owner);
+					var fields = [for (expression in expressions) if (expression.cls == owner) expression];
+					chunk.writeUleb128(fields.length);
+					for (expression in fields) {
+						chunk.writeUleb128(writeFieldRef(expression.cls, expression.field, 0));
+						chunk.writeUleb128(expression.bytes.length);
+						chunk.writeBytes(expression.bytes);
+					}
 				}
 			}
 		}
@@ -269,8 +278,15 @@ class HxbWriter {
 	function writeClassFieldData(chunk:HxbChunk, owner:TClass, field:TClassField, expressions:Array<{var cls:TClass; var field:TClassField; var bytes:Bytes;}>):Void {
 		var all = [field].concat(field.cfOverloads); chunk.writeUleb128(all.length);
 		for (value in all) {
-			writeFieldTypeParamsData(chunk); writeType(chunk, value.cfType); chunk.writeUleb128(value.cfFlags); writeDocumentation(chunk, value.cfDoc); writeFieldKind(chunk, value.cfKind);
-			if (value.cfExpr == null || !canWriteExpression(value.cfExpr)) chunk.writeU8(0) else { chunk.writeU8(2); expressions.push({cls:owner, field:value, bytes:writeExpression(value.cfExpr)}); }
+			fieldTypeParamIndices = new ObjectMap();
+			for (index in 0...value.cfParams.length) fieldTypeParamIndices.set(value.cfParams[index], index);
+			// Upstream stages field data before committing its type-parameter prefix.
+			// Besides framing nested scopes, this fixes reference-pool insertion order.
+			var data = new HxbChunk(EOM, strings);
+			writeType(data, value.cfType); data.writeUleb128(value.cfFlags); writeDocumentation(data, value.cfDoc); writeFieldKind(data, value.cfKind);
+			if (value.cfExpr == null || !canWriteExpression(value.cfExpr)) data.writeU8(0) else { data.writeU8(2); expressions.push({cls:owner, field:value, bytes:writeExpression(value.cfExpr, value.cfExprUnoptimized)}); }
+			writeFieldTypeParamsData(chunk, value.cfParams);
+			chunk.writeBytes(data.getBytes());
 		}
 	}
 
@@ -292,6 +308,7 @@ class HxbWriter {
 	}
 
 	function writeType(chunk:HxbChunk, type:T):Void switch type {
+		case TInst(value, []) if (switch value.clKind { case KTypeParameter(_): true; case _: false; }): switch value.clKind { case KTypeParameter(param): writeTypeParameterRef(chunk, param); case _: };
 		case TAbstract(value, params) if (value.aPath.pack.length == 0 && params.length == 0): switch value.aPath.name { case "Void": chunk.writeU8(100); case "Int": chunk.writeU8(101); case "Float": chunk.writeU8(102); case "Bool": chunk.writeU8(103); case "String": chunk.writeU8(104); case _: writeReferenceType(chunk, 70, function() return addAbstract(value, false), params); }
 		case TInst(value, params): writeReferenceType(chunk, 40, function() return addClass(value, false), params);
 		case TEnum(value, params): writeReferenceType(chunk, 50, function() return addEnum(value, false), params);
@@ -310,6 +327,12 @@ class HxbWriter {
 		case TAnon(anon): chunk.writeU8(anon.aFields.keys().hasNext() ? 81 : 80); if (anon.aFields.keys().hasNext()) chunk.writeUleb128(addAnonymousType(anon));
 	}
 	function writeReferenceType(chunk:HxbChunk, base:Int, getIndex:Void->Int, params:TParams):Void { if (params.length > 2) { chunk.writeU8(base + 9); chunk.writeUleb128(getIndex()); writeTypes(chunk, params); } else { chunk.writeU8(base + params.length); chunk.writeUleb128(getIndex()); for (type in params) writeType(chunk, type); } }
+	function writeTypeParameterRef(chunk:HxbChunk, param:TypedTypeParam):Void switch param.ttpHost {
+		case TPHType: throw "Type-level type parameter serialization is not ported";
+		case TPHConstructor | TPHMethod | TPHEnumConstructor | TPHAnonField: chunk.writeU8(2); chunk.writeUleb128(fieldTypeParamIndices.get(param));
+		case TPHLocal: throw "Local type parameter serialization is not ported";
+		case TPHUnbound: throw "Unbound type parameter cannot be serialized";
+	}
 	function writeClassRef(chunk:HxbChunk, value:TClass):Void chunk.writeUleb128(addClass(value, false));
 	function isVoid(type:T):Bool return switch type { case TAbstract(value, params): value.aPath.pack.length == 0 && value.aPath.name == "Void" && params.length == 0; case _: false; }
 
@@ -322,31 +345,67 @@ class HxbWriter {
 		return index;
 	}
 
-	function writeExpression(root:TExpr):Bytes {
+	function writeExpression(root:TExpr, unoptimized:Null<TExpr>):Bytes {
 		var expression = new HxbChunk(EOM, strings);
 		var typePool:Array<Bytes> = [];
+		expressionVars = [];
+		expressionVarIndices = new ObjectMap();
 		var pos = {file:root.epos.pfile, min:root.epos.pmin, max:root.epos.pmax};
 		writePos(expression, root.epos);
 		writeTExpr(expression, root, root, typePool, pos);
-		expression.writeU8(0); // no unoptimized expression
+		if (unoptimized == null || !canWriteExpression(unoptimized)) expression.writeU8(0) else { expression.writeU8(1); writeTExpr(expression, unoptimized, root, typePool, pos); }
 		var context = new HxbChunk(EOM, strings);
 		context.writeU8(1); // top-level expression scope
 		context.writeUleb128(0); // local type parameters
 		context.writeU8(0); // `this` type
 		context.writeUleb128(typePool.length);
 		for (index in 0...typePool.length) {
-			// The upstream writer reserves the anonymous expression's unresolved
-			// type slot before the concrete Void/function entries.
-			if (index == 2) context.writeU8(0);
 			context.writeBytes(typePool[index]);
 		}
-		context.writeUleb128(0); // local variables
+		context.writeUleb128(expressionVars.length);
+		for (variable in expressionVars) writeVar(context, variable);
 		context.writeBytes(expression.getBytes());
 		return context.getBytes();
 	}
 
+	function declareVar(chunk:HxbChunk, variable:TVar):Void {
+		var index = expressionVarIndices.get(variable);
+		if (index == null) {
+			index = expressionVars.length;
+			expressionVars.push(variable);
+			expressionVarIndices.set(variable, index);
+		}
+		chunk.writeUleb128(index);
+		chunk.writeU8(0); // v_extra
+		writeType(chunk, variable.vType);
+	}
+
+	function writeVar(chunk:HxbChunk, variable:TVar):Void {
+		chunk.writeUleb128(variable.vId);
+		chunk.writeString(variable.vName);
+		writeVarKind(chunk, variable.vKind);
+		chunk.writeUleb128(variable.vFlags);
+		writeMetadata(chunk, variable.vMeta);
+		writePos(chunk, variable.vPos);
+	}
+
+	function writeVarKind(chunk:HxbChunk, kind:TVarKind):Void switch kind {
+		case VUser(TVOLocalVariable): chunk.writeU8(0);
+		case VUser(TVOArgument): chunk.writeU8(1);
+		case VUser(TVOForVariable): chunk.writeU8(2);
+		case VUser(TVOPatternVariable): chunk.writeU8(3);
+		case VUser(TVOCatchVariable): chunk.writeU8(4);
+		case VUser(TVOLocalFunction): chunk.writeU8(5);
+		case VGenerated: chunk.writeU8(6);
+		case VInlined: chunk.writeU8(7);
+		case VInlinedConstructorVariable(fields): chunk.writeU8(8); chunk.writeList(fields, chunk.writeString);
+		case VExtractorVariable: chunk.writeU8(9);
+		case VAbstractThis: chunk.writeU8(10);
+	}
+
 	function canWriteExpression(expr:TExpr):Bool return switch expr.eexpr {
 		case TConst(_): true;
+		case TLocal(_): true;
 		case TBlock(values): [for (value in values) if (!canWriteExpression(value)) value].length == 0;
 		case TFunction(func): [for (arg in func.tfArgs) if (arg.defaultValue != null && !canWriteExpression(arg.defaultValue)) arg].length == 0 && canWriteExpression(func.tfExpr);
 		case TReturn(value): value == null || canWriteExpression(value);
@@ -376,6 +435,7 @@ class HxbWriter {
 					case TSuper: chunk.writeU8(2);
 				};
 				false;
+			case TLocal(variable): chunk.writeU8(20); chunk.writeUleb128(expressionVarIndices.get(variable)); true;
 			case TBlock(values):
 				switch values.length {
 					case 0: chunk.writeU8(30);
@@ -385,7 +445,7 @@ class HxbWriter {
 				true;
 			case TFunction(func):
 				chunk.writeU8(50); chunk.writeUleb128(func.tfArgs.length);
-				for (arg in func.tfArgs) { chunk.writeUleb128(arg.variable.vId); chunk.writeU8(0); if (arg.defaultValue != null) { chunk.writeU8(1); writeTExpr(chunk, arg.defaultValue, root, typePool, pos); } }
+				for (arg in func.tfArgs) { declareVar(chunk, arg.variable); if (arg.defaultValue != null) { chunk.writeU8(1); writeTExpr(chunk, arg.defaultValue, root, typePool, pos); } else chunk.writeU8(0); }
 				writeType(chunk, func.tfType); writeTExpr(chunk, func.tfExpr, root, typePool, pos);
 				true;
 			case TReturn(value):
@@ -574,7 +634,7 @@ class HxbWriter {
 			// write_metadata in hxbWriter.ml stores the original AST metadata,
 			// including its source position.
 			var exprs:Array<core.Ast.Expr> = cast entry.exprs;
-			chunk.writeString(Std.string(entry.meta));
+			chunk.writeString(metadataName(entry.meta));
 			writePos(chunk, entry.pos);
 			chunk.writeList(exprs, function(expr) writeMetadataExpr(chunk, expr));
 		}
@@ -598,11 +658,26 @@ class HxbWriter {
 		}
 	}
 	static function writeMetadataEntry(chunk:HxbChunk, entry:core.Ast.MetadataEntry):Void {
-		chunk.writeString(Std.string(entry.meta)); writePos(chunk, entry.pos); chunk.writeList(entry.exprs, function(expr) writeMetadataExpr(chunk, expr));
+		chunk.writeString(metadataName(entry.meta)); writePos(chunk, entry.pos); chunk.writeList(entry.exprs, function(expr) writeMetadataExpr(chunk, expr));
 	}
+	static function metadataName(value:Dynamic):String { var name = Std.string(value); return StringTools.startsWith(name, ":") ? name : ":" + name; }
 	static function writeEmptyTypeParams(chunk:HxbChunk):Void chunk.writeUleb128(0);
 	static function writeEmptyTypeParamsData(chunk:HxbChunk):Void {}
-	static function writeFieldTypeParamsData(chunk:HxbChunk):Void { chunk.writeUleb128(0); chunk.writeU8(1); chunk.writeUleb128(0); }
+	function writeFieldTypeParamsData(chunk:HxbChunk, params:TypeParams):Void {
+		chunk.writeUleb128(params.length);
+		chunk.writeU8(1); // top-level field scope
+		writeTypeParamsForward(chunk, params);
+		for (param in params) {
+			writeMetadata(chunk, param.ttpClass.clMeta);
+			chunk.writeUleb128(0); // constraints are installed lazily by the full typer
+			chunk.writeOption(param.ttpDefault, function(type) writeType(chunk, type));
+		}
+	}
+	function writeTypeParamsForward(chunk:HxbChunk, params:TypeParams):Void chunk.writeList(params, function(param) {
+		writePath(chunk, param.ttpClass.clPath);
+		writePos(chunk, param.ttpClass.clNamePos);
+		chunk.writeU8(switch param.ttpHost { case TPHType:0; case TPHConstructor:1; case TPHMethod:2; case TPHEnumConstructor:3; case TPHAnonField:4; case TPHLocal:5; case TPHUnbound:6; });
+	});
 	function writeTypes(chunk:HxbChunk, types:TParams):Void chunk.writeList(types, function(type) writeType(chunk, type));
 	static function chunkOrder(kind:ChunkKind):Int return switch kind { case STR: 0; case DOC: 1; case MDF: 2; case MTF: 3; case IMP: 4; case CLR: 5; case ENR: 6; case ABR: 7; case TDR: 8; case OFR: 9; case OFD: 10; case OBD: 11; case CLD: 12; case END: 13; case ABD: 14; case TDD: 15; case EOT: 16; case EFR: 17; case CFR: 18; case CFD: 19; case EFD: 20; case AFD: 21; case EOF: 22; case EXD: 23; case EOM: 24; }
 }

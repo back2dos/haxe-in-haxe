@@ -70,6 +70,7 @@ class Main {
 		loader.loadStdBootstrap();
 		var mainModule = loader.loadModule(main);
 		markMainKept(mainModule);
+		for (module in loader.loadedModules()) markFieldsPostProcessed(module);
 		var zip = new ZipOutput(config.archivePath, 0);
 		try {
 			if (config.targetConfig.generate) for (module in loader.loadedModules()) {
@@ -104,6 +105,19 @@ class Main {
 				field.cfFlags |= 1 << core.TType.TType.flagTClassFieldNames.indexOf("CfPostProcessed");
 			}
 		}
+	}
+
+	static function markFieldsPostProcessed(module:core.TType.ModuleDef):Void {
+		var bit = 1 << core.TType.TType.flagTClassFieldNames.indexOf("CfPostProcessed");
+		for (type in module.mTypes) switch type {
+			case TClassDecl(cls):
+				if (cls.clConstructor != null) cls.clConstructor.cfFlags |= bit;
+				if (cls.clInit != null) cls.clInit.cfFlags |= bit;
+				for (field in cls.clOrderedFields) { field.cfFlags |= bit; if (field.cfExpr != null) field.cfExprUnoptimized = field.cfExpr; }
+				for (field in cls.clOrderedStatics) { field.cfFlags |= bit; if (field.cfExpr != null) field.cfExprUnoptimized = field.cfExpr; }
+			case _:
+		}
+		if (module.mStatics != null) for (field in module.mStatics.clOrderedStatics) field.cfFlags |= bit;
 	}
 
 	static function shouldExport(path:Array<String>, config:compiler.hxb.HxbWriterConfig.WriterTargetConfig):Bool {

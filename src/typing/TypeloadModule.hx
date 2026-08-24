@@ -24,8 +24,10 @@ class TypeloadModule {
 	var basicTypes:Map<String, T> = new Map();
 	var basicModule:ModuleDef;
 	var nextModuleId = 0;
-	var nextVarId = 0;
+	// tFunctions.ml's alloc_var uses Atomic.fetch_and_add + 1.
+	var nextVarId = 1;
 	var currentMethodName = "";
+	var activeTypeParams:StringMap<T> = new StringMap();
 
 	public function new(classPaths:ClassPaths, defines:DefineContext) {
 		this.classPaths = classPaths;
@@ -65,10 +67,9 @@ class TypeloadModule {
 		available. */
 	public function loadStdBootstrap():Void {
 		loadStdTypes();
+		loadModule({pack: [], name: "Any"});
 		loadModule({pack: [], name: "String"});
 		loadModule({pack: [], name: "Std"});
-		loadModule({pack: [], name: "Any"});
-		loadModule({pack: ["haxe"], name: "Unit"});
 		loadModule({pack: [], name: "Array"});
 		loadModule({pack: ["haxe"], name: "EnumTools"});
 		loadModule({pack: ["haxe"], name: "Exception"});
@@ -210,10 +211,14 @@ class TypeloadModule {
 	function populateClassFields(module:ModuleDef, cls:TClass, fields:Array<ClassField>, typeBodies:Bool):Void {
 		for (field in fields) {
 			var isStatic = hasAccess(field, AStatic);
+			var params = switch field.cffKind { case FFun(func): makeTypeParams(module, field.cffName.name, func.fParams, TPHMethod); case _: []; };
+			var previousTypeParams = activeTypeParams;
+			activeTypeParams = typeParamMap(params);
 			var type = fieldType(module, cls, field);
+			activeTypeParams = previousTypeParams;
 			var typed:TClassField = {
 				cfName: field.cffName.name, cfType: type, cfPos: field.cffPos, cfNamePos: field.cffName.pos,
-				cfDoc: field.cffDoc, cfMeta: field.cffMeta, cfKind: fieldKind(field), cfParams: [],
+				cfDoc: field.cffDoc, cfMeta: field.cffMeta, cfKind: fieldKind(field), cfParams: params,
 				cfExpr: null, cfExprUnoptimized: null, cfOverloads: [], cfFlags: fieldFlags(field, isStatic)
 			};
 			if (field.cffName.name == "new" && !isStatic) cls.clConstructor = typed;
@@ -229,11 +234,41 @@ class TypeloadModule {
 		// may call a method declared later in the same class.
 		if (typeBodies) for (field in fields) {
 			var typed = hasAccess(field, AStatic) ? cls.clStatics.get(field.cffName.name) : (field.cffName.name == "new" ? cls.clConstructor : cls.clFields.get(field.cffName.name));
+			var previousTypeParams = activeTypeParams;
+			activeTypeParams = typeParamMap(typed.cfParams);
 			switch field.cffKind {
 				case FVar(_, value) | FProp(_, _, _, value): if (value != null) typed.cfExpr = typeExpr(module, cls, value, new StringMap());
 				case FFun(func): if (func.fExpr != null) typed.cfExpr = typeFunction(module, cls, field.cffName.name, func, switch typed.cfType { case TFun(signature): signature; case _: {args: [], ret: TDynamic(null)}; });
 			}
+			activeTypeParams = previousTypeParams;
 		}
+	}
+
+	function makeTypeParams(module:ModuleDef, hostName:String, params:Array<TypeParam>, host:TypeParamHost):TypeParams {
+		var result:TypeParams = [];
+		for (param in params) {
+			var cls:TClass = null;
+			var typedParam:TypedTypeParam = null;
+			cls = {
+				clPath:{pack:[hostName], name:param.tpName.name}, clModule:module, clPos:param.tpName.pos, clNamePos:param.tpName.pos,
+				clPrivate:false, clDoc:null, clMeta:param.tpMeta, clParams:[], clUsing:[], clRestore:function(){}, clType:TDynamic(null),
+				clKind:KNormal, clFlags:0, clSuper:null, clImplements:[], clFields:new StringMap(), clStatics:new StringMap(),
+				clOrderedStatics:[], clOrderedFields:[], clDynamic:null, clArrayAccess:null, clConstructor:null, clInit:null,
+				clBuild:function() return Built, clDescendants:[]
+			};
+			typedParam = {ttpName:param.tpName.name, ttpClass:cls, ttpHost:host, ttpType:TDynamic(null), ttpConstraints:null, ttpDefault:null};
+			cls.clKind = KTypeParameter(typedParam);
+			cls.clType = TInst(cls, []);
+			typedParam.ttpType = cls.clType;
+			result.push(typedParam);
+		}
+		return result;
+	}
+
+	static function typeParamMap(params:TypeParams):StringMap<T> {
+		var result = new StringMap<T>();
+		for (param in params) result.set(param.ttpName, param.ttpType);
+		return result;
 	}
 
 	// Small batch-only subset of typer.ml. It deliberately preserves an unknown
@@ -246,6 +281,7 @@ class TypeloadModule {
 		for (index in 0...func.fArgs.length) {
 			var arg = func.fArgs[index];
 			var variable = makeVar(arg.name.name, signature.args[index].type, TVOArgument, arg.name.pos, arg.meta);
+			if (hasMetadata(arg.meta, "this")) variable.vKind = VAbstractThis;
 			locals.set(variable.vName, variable);
 			args.push({variable: variable, defaultValue: arg.expr == null ? null : typeExpr(module, cls, arg.expr, locals)});
 		}
@@ -403,7 +439,13 @@ class TypeloadModule {
 	function fieldType(module:ModuleDef, cls:TClass, field:ClassField):T return switch field.cffKind {
 		case FVar(type, _): type == null ? TDynamic(null) : resolveTypeHint(module, type);
 		case FProp(_, _, type, _): type == null ? TDynamic(null) : resolveTypeHint(module, type);
-		case FFun(func): TFun({args: [for (arg in func.fArgs) {name: arg.name.name, optional: arg.optional, type: arg.type == null ? TDynamic(null) : (arg.optional ? nullable(module, resolveTypeHint(module, arg.type)) : resolveTypeHint(module, arg.type))}], ret: func.fType == null ? basic("Void") : resolveTypeHint(module, func.fType)});
+		case FFun(func): TFun({args: [for (arg in func.fArgs) {name: arg.name.name, optional: arg.optional, type: functionArgType(module, cls, arg)}], ret: func.fType == null ? basic("Void") : resolveTypeHint(module, func.fType)});
+	}
+
+	function functionArgType(module:ModuleDef, cls:TClass, arg:FuncArg):T {
+		if (hasMetadata(arg.meta, "this") && cls != null) switch cls.clKind { case KAbstractImpl(abs): return abs.aThis; case _: }
+		var type = arg.type == null ? TDynamic(null) : resolveTypeHint(module, arg.type);
+		return arg.optional ? nullable(module, type) : type;
 	}
 
 	function nullable(module:ModuleDef, inner:T):T {
@@ -453,6 +495,7 @@ class TypeloadModule {
 	}
 
 	function resolvePath(current:ModuleDef, path:TypePath):T {
+		if (path.tpackage.length == 0 && path.tsub == null && path.tparams.length == 0 && activeTypeParams.exists(path.tname)) return activeTypeParams.get(path.tname);
 		if (path.tpackage.length == 0 && path.tsub == null && basicTypes.exists(path.tname)) return basic(path.tname);
 		if (path.tpackage.length == 0 && path.tname == "Dynamic") return TDynamic(null);
 		var target = current;
