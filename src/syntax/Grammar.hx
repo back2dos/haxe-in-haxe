@@ -199,7 +199,10 @@ class Grammar {
 				}
 			case BrOpen: index--; objectOrIdentifier();
 			case Kwd(New): var p=typePath(); expect(POpen); var args=[]; if(!is(PClose)) do args.push(expression()) while(accept(Comma)!=null); var end=expect(PClose).pos; expr(ENew(p,args),union(t.pos,end));
-			case BkOpen: var values=[]; if (!is(BkClose)) do values.push(expression()) while (accept(Comma)!=null); var end=expect(BkClose).pos; expr(EArrayDecl(values),union(t.pos,end));
+			case BkOpen:
+				var values=[];
+				while (!is(BkClose)) { values.push(expression()); if (accept(Comma) == null) break; }
+				var end=expect(BkClose).pos; expr(EArrayDecl(values),union(t.pos,end));
 			case Kwd(Function): var name:Null<PlacedName> = is(POpen) ? null : placedIdent(); var f=functionRest(); expr(EFunction(name == null ? FKAnonymous : FKNamed(name,false),f), union(t.pos,f.fExpr == null ? t.pos : f.fExpr.pos));
 			case _: index--; objectOrIdentifier();
 		}; return e;
@@ -297,6 +300,19 @@ class Grammar {
 		var start = current().pos;
 		var optional = accept(Question) != null;
 		var complex:ComplexType;
+		if (accept(POpen) != null) {
+			var args:Array<TypeHint> = [];
+			if (!is(PClose)) do args.push(typeHint()) while (accept(Comma) != null);
+			var close = expect(PClose).pos;
+			if (accept(Arrow) != null) {
+				var result = typeHint();
+				complex = CTFunction(args, result);
+				return {type:optional ? CTOptional({type:complex, pos:union(start, result.pos)}) : complex, pos:union(start, result.pos)};
+			}
+			if (args.length != 1) fail("Expected function type arrow", close);
+			complex = CTParent(args[0]);
+			return {type:optional ? CTOptional({type:complex, pos:union(start, close)}) : complex, pos:union(start, close)};
+		}
 		if (accept(BrOpen) != null) {
 			// parse_type_anonymous in grammar.ml uses the ordinary class-field
 			// grammar. This is needed by StdTypes' Iterator/Iterable typedefs.

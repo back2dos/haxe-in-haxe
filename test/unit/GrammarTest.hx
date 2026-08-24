@@ -18,6 +18,8 @@ class GrammarTest {
 		assert(switch property.definition { case EClass(value): switch value.data[0].cffKind { case FProp(get, set, _, _): get.name == "default" && set.name == "null"; case _: false; }; case _: false; });
 		var functionType = Grammar.parse('class Mapper { function map(f:Int->String):Void; }').declarations[0];
 		assert(switch functionType.definition { case EClass(value): switch value.data[0].cffKind { case FFun(func): switch func.fArgs[0].type.type { case CTFunction(_, _): true; case _: false; }; case _: false; }; case _: false; });
+		var zeroArgFunctionType = Grammar.parse('class Mapper { var callback:() -> Void; }').declarations[0];
+		assert(switch zeroArgFunctionType.definition { case EClass(value): switch value.data[0].cffKind { case FVar({type:CTFunction(args, _)}, _): args.length == 0; case _: false; }; case _: false; });
 		var expressionBody = Grammar.parse('abstract Any(Dynamic) { extern inline function promote<T>():T return this; }').declarations[0];
 		assert(switch expressionBody.definition { case EAbstract(value): switch value.data[0].cffKind { case FFun(func): func.fExpr != null; case _: false; }; case _: false; });
 		var controlBlock = Grammar.parse('class Main { function run(items:Array<Int>) { for (item in items) { trace(item); } } }').declarations[0];
@@ -40,6 +42,8 @@ class GrammarTest {
 		assert(switch arrows.definition { case EClass(value): switch value.data[0].cffKind { case FFun(func): switch func.fExpr.expr { case EBlock([{expr:ECall(_, [{expr:EFunction(FKArrow, first)}])}, {expr:ECall(_, [{expr:EFunction(FKArrow, second)}])}]): first.fArgs.length == 1 && first.fArgs[0].type == null && second.fArgs.length == 1 && second.fArgs[0].type != null; case _: false; }; case _: false; }; case _: false; });
 		var moduleFields = Grammar.parse('final values = new Array<Int>(); var enabled:Bool = true; function main() {}');
 		assert(moduleFields.declarations.length == 3 && switch moduleFields.declarations[0].definition { case EStatic({data:FVar(_, _), flags:flags}): flags[0].access == AFinal; case _: false; });
+		var trailingArrayComma = Grammar.parse('class Main { var values = [1, 2,]; }').declarations[0];
+		assert(switch trailingArrayComma.definition { case EClass(value): switch value.data[0].cffKind { case FVar(_, {expr:EArrayDecl(values)}): values.length == 2; case _: false; }; case _: false; });
 		var callStack = Grammar.parse(sys.io.File.getContent("haxe/std/haxe/CallStack.hx"), core.Define.emptyDefines(), "haxe/std/haxe/CallStack.hx");
 		assert(callStack.declarations.length == 2);
 	}
