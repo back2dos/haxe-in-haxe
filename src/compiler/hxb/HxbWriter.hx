@@ -740,6 +740,12 @@ class HxbWriter {
 			case EField(object, field, kind):
 				chunk.writeU8(7); writeMetadataExpr(chunk, object); chunk.writeString(field);
 				chunk.writeU8(switch kind { case EFNormal: 0; case EFSafe: 1; });
+			case EObjectDecl(fields):
+				chunk.writeU8(9); chunk.writeList(fields, function(field) {
+					chunk.writeString(field.key.name); writePos(chunk, field.key.pos);
+					chunk.writeU8(switch field.key.quote { case NoQuotes: 0; case DoubleQuotes: 1; });
+					writeMetadataExpr(chunk, field.expr);
+				});
 			case _:
 				throw "Metadata expression serialization is not ported for " + Type.enumConstructor(expr.expr) + " at " + expr.pos.pfile + ":" + expr.pos.pmin;
 		}

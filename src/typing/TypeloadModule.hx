@@ -21,7 +21,7 @@ class TypeloadModule {
 	var classPaths:ClassPaths;
 	var defines:DefineContext;
 	var modules:Map<String, ModuleDef> = new Map();
-	var moduleImports:Map<String, StringMap<GlobalTypePath>> = new Map();
+	var moduleImports:Map<String, StringMap<{var modulePath:GlobalTypePath; var typeName:String;}>> = new Map();
 	var basicTypes:Map<String, T> = new Map();
 	var basicModule:ModuleDef;
 	var nextModuleId = 0;
@@ -100,13 +100,18 @@ class TypeloadModule {
 	}
 
 	function createModuleTypes(module:ModuleDef, declarations:Array<TypeDecl>):Void {
-		var imports = new StringMap<GlobalTypePath>();
+		var imports = new StringMap<{var modulePath:GlobalTypePath; var typeName:String;}>();
 		for (declaration in declarations) switch declaration.definition {
 			case EImport(value) if (value.path.length > 0):
 				var names = [for (part in value.path) part.name];
-				var moduleName = names.pop();
-				var alias = switch value.mode { case INormal: moduleName; case IAsName(name): name.name; case IAll: null; };
-				if (alias != null) imports.set(alias, {pack:names, name:moduleName});
+				var moduleIndex = 0;
+				while (moduleIndex < names.length - 1 && Ast.isLowerIdent(names[moduleIndex])) moduleIndex++;
+				var importedType = names[names.length - 1];
+				var alias = switch value.mode { case INormal: importedType; case IAsName(name): name.name; case IAll: null; };
+				if (alias != null) imports.set(alias, {
+					modulePath:{pack:names.slice(0, moduleIndex), name:names[moduleIndex]},
+					typeName:importedType
+				});
 			case _:
 		}
 		moduleImports.set(moduleKey(module.mPath), imports);
@@ -256,6 +261,13 @@ class TypeloadModule {
 			switch field.cffKind {
 				case FVar(_, value) | FProp(_, _, _, value) if (value != null):
 					metadata.unshift({meta:":value", exprs:[value], pos:{pfile:field.cffPos.pfile, pmin:field.cffPos.pmin, pmax:field.cffPos.pmin}});
+				case FFun(func):
+					var defaults = [for (arg in func.fArgs) if (arg.expr != null) {key:{name:arg.name.name, pos:arg.name.pos, quote:NoQuotes}, expr:arg.expr}];
+					if (defaults.length > 0) metadata.unshift({
+						meta:":value",
+						exprs:[{expr:EObjectDecl(defaults), pos:Globals.nullPos}],
+						pos:Globals.nullPos
+					});
 				case _:
 			}
 			var typed:TClassField = {
@@ -448,7 +460,7 @@ class TypeloadModule {
 				isTrace && args.length > 0 ? typeTrace(module, cls, args, locals, source.pos) : typeCall(module, cls, expr, args, locals, source.pos);
 			case EField(expr, name, _): typeField(typeExpr(module, cls, expr, locals), name, source.pos);
 			case ENew(path, args): typeNew(module, path.path, args, cls, locals, source.pos);
-			case EFunction(_, func): var signature:TSignature = {args:[for (arg in func.fArgs) {name:arg.name.name, optional:arg.optional, type:arg.type == null ? fallback : (arg.optional ? nullable(module, resolveTypeHint(module, arg.type)) : resolveTypeHint(module, arg.type))}], ret:func.fType == null ? fallback : resolveTypeHint(module, func.fType)}; typeFunction(module, cls, "", func, signature);
+			case EFunction(_, func): var signature:TSignature = {args:[for (arg in func.fArgs) {name:arg.name.name, optional:arg.optional || arg.expr != null, type:arg.type == null ? fallback : (arg.optional ? nullable(module, resolveTypeHint(module, arg.type)) : resolveTypeHint(module, arg.type))}], ret:func.fType == null ? fallback : resolveTypeHint(module, func.fType)}; typeFunction(module, cls, "", func, signature);
 			case EReturn(expr): typed(TReturn(expr == null ? null : typeExpr(module, cls, expr, locals)), fallback, source.pos);
 			case EThrow(expr): typed(TThrow(typeExpr(module, cls, expr, locals)), fallback, source.pos);
 			case EIf(condition, thenExpr, elseExpr): var thenValue = typeExpr(module, cls, thenExpr, locals); typed(TIf(typeExpr(module, cls, condition, locals), thenValue, elseExpr == null ? null : typeExpr(module, cls, elseExpr, locals)), thenValue.etype, source.pos);
@@ -684,7 +696,7 @@ class TypeloadModule {
 	function fieldType(module:ModuleDef, cls:TClass, field:ClassField):T return switch field.cffKind {
 		case FVar(type, _): type == null ? TDynamic(null) : resolveTypeHint(module, type);
 		case FProp(_, _, type, _): type == null ? TDynamic(null) : resolveTypeHint(module, type);
-		case FFun(func): TFun({args: [for (arg in func.fArgs) {name: arg.name.name, optional: arg.optional, type: functionArgType(module, cls, arg)}], ret: func.fType == null ? basic("Void") : resolveTypeHint(module, func.fType)});
+		case FFun(func): TFun({args: [for (arg in func.fArgs) {name: arg.name.name, optional: arg.optional || arg.expr != null, type: functionArgType(module, cls, arg)}], ret: func.fType == null ? basic("Void") : resolveTypeHint(module, func.fType)});
 	}
 
 	function functionArgType(module:ModuleDef, cls:TClass, arg:FuncArg):T {
@@ -750,7 +762,7 @@ class TypeloadModule {
 		if (path.tpackage.length != 0) target = loadModule({pack: path.tpackage, name: path.tname});
 		else if (findModuleType(current, path.tname) == null) {
 			var imported = moduleImports.get(moduleKey(current.mPath)).get(path.tname);
-			if (imported != null) try { target = loadModule(imported); resolvedName = imported.name; } catch (_:Dynamic) imported = null;
+			if (imported != null) try { target = loadModule(imported.modulePath); resolvedName = imported.typeName; } catch (_:Dynamic) imported = null;
 			if (imported == null)
 			// Unqualified standard types resolve from root standard modules even
 			// while loading a package-scoped standard module such as haxe.PosInfos.
