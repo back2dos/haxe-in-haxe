@@ -29,6 +29,7 @@ class TypeloadModule {
 	var nextVarId = 1;
 	var currentMethodName = "";
 	var activeTypeParams:StringMap<T> = new StringMap();
+	var deferredClassBodies:Array<Void->Void> = [];
 
 	public function new(classPaths:ClassPaths, defines:DefineContext) {
 		this.classPaths = classPaths;
@@ -273,7 +274,29 @@ class TypeloadModule {
 		}
 		// Signatures have to be installed before bodies are typed: a method body
 		// may call a method declared later in the same class.
-		if (typeBodies) for (field in fields) {
+		if (typeBodies) {
+			var typeBodiesNow = function() typeClassFieldBodies(module, cls, fields);
+			if (module.mPath.pack.length > 1 && module.mPath.pack[0] == "haxe" && module.mPath.pack[1] == "iterators") deferredClassBodies.push(typeBodiesNow);
+			else {
+				flushDeferredClassBodies();
+				typeBodiesNow();
+			}
+		}
+		else for (field in fields) switch field.cffKind {
+			case FFun(func) if (func.fExpr != null):
+				// The upstream typer allocates argument IDs even for bodies which this
+				// batch slice defers. Keep the global ID stream deterministic for HXB.
+				for (arg in func.fArgs) makeVar(arg.name.name, TDynamic(null), TVOArgument, arg.name.pos, arg.meta);
+			case _:
+		}
+	}
+
+	function flushDeferredClassBodies():Void {
+		while (deferredClassBodies.length > 0) deferredClassBodies.pop()();
+	}
+
+	function typeClassFieldBodies(module:ModuleDef, cls:TClass, fields:Array<ClassField>):Void {
+		for (field in fields) {
 			var typed = hasAccess(field, AStatic) ? cls.clStatics.get(field.cffName.name) : (field.cffName.name == "new" ? cls.clConstructor : cls.clFields.get(field.cffName.name));
 			var previousTypeParams = activeTypeParams;
 			activeTypeParams = typeParamMap(cls.clParams.concat(typed.cfParams));
@@ -294,13 +317,6 @@ class TypeloadModule {
 				}
 			}
 			activeTypeParams = previousTypeParams;
-		}
-		else for (field in fields) switch field.cffKind {
-			case FFun(func) if (func.fExpr != null):
-				// The upstream typer allocates argument IDs even for bodies which this
-				// batch slice defers. Keep the global ID stream deterministic for HXB.
-				for (arg in func.fArgs) makeVar(arg.name.name, TDynamic(null), TVOArgument, arg.name.pos, arg.meta);
-			case _:
 		}
 	}
 
@@ -589,7 +605,10 @@ class TypeloadModule {
 		if (name == "this") return typed(TConst(TThis), cls.clType, pos);
 		var field = cls.clFields.get(name);
 		if (field == null) field = cls.clStatics.get(name);
-		if (field != null) return typed(TField(typed(TConst(TThis), cls.clType, pos), FInstance(cls, [], field)), field.cfType, pos);
+		if (field != null) {
+			var params = switch cls.clType { case TInst(_, values): values; case _: []; };
+			return typed(TField(typed(TConst(TThis), cls.clType, pos), FInstance(cls, params, field)), field.cfType, pos);
+		}
 		var moduleType = findModuleType(module, name);
 		if (moduleType == null && name.length > 0 && name.charAt(0) == name.charAt(0).toUpperCase()) {
 			try moduleType = findModuleType(loadModule({pack: module.mPath.pack, name: name}), name) catch (_:Dynamic) {}
@@ -664,7 +683,7 @@ class TypeloadModule {
 	}
 
 	function fieldKind(field:ClassField):FieldKind return switch field.cffKind {
-		case FVar(_, _): Var({vRead: AccNormal, vWrite: AccNormal});
+		case FVar(_, _): Var({vRead: AccNormal, vWrite: hasAccess(field, AFinal) ? AccCtor : AccNormal});
 		case FProp(get, set, _, _): Var({vRead: accessKind(get.name), vWrite: accessKind(set.name)});
 		case FFun(_): Method(hasAccess(field, ADynamic) ? MethDynamic : hasAccess(field, AInline) ? MethInline : hasAccess(field, AMacro) ? MethMacro : MethNormal);
 	}

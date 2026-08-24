@@ -123,6 +123,7 @@ class HxbWriter {
 	var expressionVarIndices:ObjectMap<TVar, Int> = new ObjectMap();
 	var expressionThisType:Null<T> = null;
 	var optimizedExpressionPositions = false;
+	var skipOptimizedSingleBlocks = false;
 	var writingUnoptimizedExpression = false;
 	var fieldTypeParamIndices:ObjectMap<TypedTypeParam, Int> = new ObjectMap();
 	var typeTypeParamIndices:Map<String, Int> = new Map();
@@ -301,11 +302,9 @@ class HxbWriter {
 			if (value.cfExpr == null || !canWriteExpression(value.cfExpr)) data.writeU8(0) else {
 				data.writeU8(2);
 				var coreAbstractImpl = switch owner.clKind { case KAbstractImpl(abs): hasMetadataName(abs.aMeta, "coreType"); case _: false; };
-				var optimizePositions = switch owner.clKind {
-					case KAbstractImpl(_): coreAbstractImpl;
-					case _: owner.clPath.pack.length == 0;
-				};
-				expressions.push({cls:owner, field:value, bytes:writeExpression(value.cfExpr, coreAbstractImpl ? null : value.cfExprUnoptimized, optimizePositions)});
+				var optimizePositions = switch owner.clKind { case KAbstractImpl(_): coreAbstractImpl; case _: true; };
+				var skipSingleBlocks = switch owner.clKind { case KAbstractImpl(_): coreAbstractImpl; case _: owner.clPath.pack.length == 0; };
+				expressions.push({cls:owner, field:value, bytes:writeExpression(value.cfExpr, coreAbstractImpl ? null : value.cfExprUnoptimized, optimizePositions, skipSingleBlocks)});
 			}
 			writeFieldTypeParamsData(chunk, value.cfParams);
 			chunk.writeBytes(data.getBytes());
@@ -378,7 +377,7 @@ class HxbWriter {
 		return index;
 	}
 
-	function writeExpression(root:TExpr, unoptimized:Null<TExpr>, optimizePositions:Bool):Bytes {
+	function writeExpression(root:TExpr, unoptimized:Null<TExpr>, optimizePositions:Bool, skipSingleBlocks:Bool):Bytes {
 		var expression = new HxbChunk(EOM, strings);
 		var typePool:Array<Bytes> = [];
 		expressionVars = [];
@@ -387,9 +386,10 @@ class HxbWriter {
 		var pos = {file:root.epos.pfile, min:root.epos.pmin, max:root.epos.pmax};
 		writePos(expression, root.epos);
 		optimizedExpressionPositions = optimizePositions;
+		skipOptimizedSingleBlocks = skipSingleBlocks;
 		writingUnoptimizedExpression = false;
 		writeTExpr(expression, root, root, typePool, pos);
-		if (unoptimized == null || !canWriteExpression(unoptimized)) expression.writeU8(0) else { expression.writeU8(1); optimizedExpressionPositions = false; writingUnoptimizedExpression = true; writeTExpr(expression, unoptimized, root, typePool, pos); }
+		if (unoptimized == null || !canWriteExpression(unoptimized)) expression.writeU8(0) else { expression.writeU8(1); optimizedExpressionPositions = false; skipOptimizedSingleBlocks = false; writingUnoptimizedExpression = true; writeTExpr(expression, unoptimized, root, typePool, pos); }
 		var context = new HxbChunk(EOM, strings);
 		context.writeU8(1); // top-level expression scope
 		context.writeUleb128(0); // local type parameters
@@ -465,7 +465,7 @@ class HxbWriter {
 
 	function writeTExpr(chunk:HxbChunk, expr:TExpr, root:TExpr, typePool:Array<Bytes>, pos:{var file:String; var min:Int; var max:Int;}):Void {
 		if (writingUnoptimizedExpression) switch expr.eexpr { case TParenthesis(value): writeTExpr(chunk, value, root, typePool, pos); return; case _: }
-		if (optimizedExpressionPositions) switch expr.eexpr {
+		if (skipOptimizedSingleBlocks) switch expr.eexpr {
 			case TBlock([value]) if (switch expr.etype { case TDynamic(_): false; case _: true; }): writeTExpr(chunk, value, root, typePool, pos); return;
 			case _:
 		}
