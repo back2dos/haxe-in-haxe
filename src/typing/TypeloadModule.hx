@@ -104,7 +104,26 @@ class TypeloadModule {
 			case EClass(value): module.mTypes.push(TClassDecl(makeClass(module, value, declaration.pos)));
 			case EEnum(value): module.mTypes.push(TEnumDecl(makeEnum(module, value, declaration.pos)));
 			case ETypedef(value): module.mTypes.push(TTypeDecl(makeDef(module, value, declaration.pos)));
-			case EAbstract(value): module.mTypes.push(TAbstractDecl(makeAbstract(module, value, declaration.pos)));
+			case EAbstract(value):
+				var abs = makeAbstract(module, value, declaration.pos);
+				module.mTypes.push(TAbstractDecl(abs));
+				// typeloadModule.ml creates a private implementation class for every
+				// abstract except a fieldless @:coreType declaration.
+				if (value.data.length != 0 || !hasMetadata(value.meta, "coreType")) {
+					var definition:ClassDefinition = {
+						name:{name:value.name.name + "_Impl_", pos:value.name.pos},
+						doc:null,
+						params:[],
+						meta:[],
+						flags:[HPrivate],
+						data:[]
+					};
+					var impl = makeClass(module, definition, declaration.pos);
+					impl.clKind = KAbstractImpl(abs);
+					impl.clFlags |= classFlag(CFinal);
+					abs.aImpl = impl;
+					module.mTypes.push(TClassDecl(impl));
+				}
 			case EImport(_) | EUsing(_) | EStatic(_):
 		}
 		// The upstream loader installs inheritance after all module type shells
@@ -132,7 +151,59 @@ class TypeloadModule {
 		for (declaration in declarations) switch declaration.definition {
 			case EClass(value): populateClassFields(module, findClass(module, value.name.name), value.data, typeBodies);
 			case EEnum(value): populateEnumConstructors(module, findEnum(module, value.name.name), value.data);
-			case ETypedef(_) | EAbstract(_) | EImport(_) | EUsing(_) | EStatic(_):
+			case EAbstract(value): initializeAbstract(module, findAbstract(module, value.name.name), value, typeBodies);
+			case ETypedef(_) | EImport(_) | EUsing(_) | EStatic(_):
+		}
+	}
+
+	function initializeAbstract(module:ModuleDef, abs:TAbstract, definition:AbstractDefinition, typeBodies:Bool):Void {
+		var hasUnderlying = false;
+		for (abstractFlag in definition.flags) switch abstractFlag {
+			case AbOver(type): abs.aThis = resolveTypeHint(module, type); hasUnderlying = true;
+			case AbFrom(type): abs.aFrom.push(resolveTypeHint(module, type));
+			case AbTo(type): abs.aTo.push(resolveTypeHint(module, type));
+			case AbPrivate | AbExtern | AbEnum:
+		}
+		if (!hasUnderlying && hasMetadata(definition.meta, "coreType")) abs.aThis = TAbstract(abs, []);
+		if (abs.aImpl != null) populateAbstractFields(module, abs, definition.data, typeBodies);
+	}
+
+	function populateAbstractFields(module:ModuleDef, abs:TAbstract, fields:Array<ClassField>, typeBodies:Bool):Void {
+		var transformed:Array<ClassField> = [];
+		for (field in fields) {
+			var isMember = !hasAccess(field, AStatic);
+			var accesses = field.cffAccess.copy();
+			if (isMember) accesses.push({access:AStatic, pos:Globals.nullPos});
+			var kind = switch field.cffKind {
+				case FFun(func) if (isMember && field.cffName.name != "new"):
+					var args = func.fArgs.copy();
+					args.unshift({
+						name:{name:"this", pos:Globals.nullPos},
+						optional:false,
+						meta:[{meta:"this", exprs:[], pos:Globals.nullPos}],
+						type:{type:CTPath(Ast.makePtp(Ast.mkTypePath(abs.aPath.pack, abs.aPath.name), Globals.nullPos)), pos:Globals.nullPos},
+						expr:null
+					});
+					FFun({fParams:func.fParams, fArgs:args, fType:func.fType, fExpr:func.fExpr});
+				case other: other;
+			};
+			transformed.push({
+				cffName:field.cffName,
+				cffDoc:field.cffDoc,
+				cffPos:field.cffPos,
+				cffMeta:field.cffMeta,
+				cffAccess:accesses,
+				cffKind:kind
+			});
+		}
+		populateClassFields(module, abs.aImpl, transformed, typeBodies);
+		for (index in 0...fields.length) {
+			var source = fields[index];
+			var typed = abs.aImpl.clStatics.get(source.cffName.name);
+			if (typed == null) continue;
+			if (!hasAccess(source, AStatic)) typed.cfFlags |= flag(CfImpl);
+			if (hasMetadata(source.cffMeta, "to")) abs.aToField.push({type:switch typed.cfType { case TFun(signature): signature.ret; case other: other; }, field:typed});
+			if (hasMetadata(source.cffMeta, "from")) abs.aFromField.push({type:switch typed.cfType { case TFun(signature): signature.args.length == 0 ? TDynamic(null) : signature.args[signature.args.length - 1].type; case other: other; }, field:typed});
 		}
 	}
 
@@ -418,12 +489,17 @@ class TypeloadModule {
 
 	function findClass(module:ModuleDef, name:String):TClass return switch findModuleType(module, name) { case TClassDecl(cls): cls; case _: throw 'Class ' + name + ' was not allocated'; };
 	function findEnum(module:ModuleDef, name:String):TEnum return switch findModuleType(module, name) { case TEnumDecl(en): en; case _: throw 'Enum ' + name + ' was not allocated'; };
+	function findAbstract(module:ModuleDef, name:String):TAbstract return switch findModuleType(module, name) { case TAbstractDecl(abs): abs; case _: throw 'Abstract ' + name + ' was not allocated'; };
 	function findModuleType(module:ModuleDef, name:String):Null<ModuleType> {
 		for (type in module.mTypes) if (switch type { case TClassDecl(cls): cls.clPath.name == name; case TEnumDecl(en): en.ePath.name == name; case TTypeDecl(def): def.tPath.name == name; case TAbstractDecl(abs): abs.aPath.name == name; }) return type;
 		return null;
 	}
 
 	static function accessKind(name:String):VarAccess return switch name { case "never": AccNever; case "null": AccNo; case "default": AccNormal; case _: AccCall; };
+	static function hasMetadata(metadata:Metadata, name:String):Bool {
+		for (entry in metadata) if (Std.string(entry.meta) == name || Std.string(entry.meta) == ":" + name) return true;
+		return false;
+	}
 	static function fieldFlags(field:ClassField, isStatic:Bool):Int {
 		var flags = hasAccess(field, APublic) ? flag(CfPublic) : 0;
 		if (hasAccess(field, APrivate)) flags = 0;

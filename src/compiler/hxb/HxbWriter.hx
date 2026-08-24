@@ -3,6 +3,8 @@ package compiler.hxb;
 import core.ds.StringPool;
 import core.Ast.Constant;
 import core.Ast.Binop;
+import core.Ast.Unop;
+import core.Ast.UnopFlag;
 import core.Ast.EFieldKind;
 import core.Ast.ExprDef;
 import core.Ast.StringLiteralKind;
@@ -246,9 +248,21 @@ class HxbWriter {
 		chunk.writeU8(1); writeType(chunk, value.aThis); writeTypes(chunk, value.aFrom); writeTypes(chunk, value.aTo); chunk.writeBool(value.aExtern); chunk.writeBool(value.aEnum);
 	}
 	function writeAbstractFields(chunk:HxbChunk, value:TAbstract):Void {
-		// Field references are deliberately deferred until the field-reference pool is ported.
-		if (value.aArray.length != 0 || value.aRead != null || value.aWrite != null || value.aCall != null || value.aConstructor != null || value.aOps.length != 0 || value.aUnops.length != 0 || value.aFromField.length != 0 || value.aToField.length != 0) throw "Abstract field serialization is not ported";
-		chunk.writeUleb128(0); for (_ in 0...4) chunk.writeU8(0); chunk.writeUleb128(0); chunk.writeUleb128(0); chunk.writeUleb128(0); chunk.writeUleb128(0);
+		var impl = value.aImpl;
+		if (impl == null) {
+			if (value.aArray.length != 0 || value.aRead != null || value.aWrite != null || value.aCall != null || value.aConstructor != null || value.aOps.length != 0 || value.aUnops.length != 0 || value.aFromField.length != 0 || value.aToField.length != 0) throw "Abstract fields require an implementation class";
+			chunk.writeUleb128(0); for (_ in 0...4) chunk.writeU8(0); chunk.writeUleb128(0); chunk.writeUleb128(0); chunk.writeUleb128(0); chunk.writeUleb128(0);
+			return;
+		}
+		chunk.writeList(value.aArray, function(field) chunk.writeUleb128(writeFieldRef(impl, field, 0)));
+		chunk.writeOption(value.aRead, function(field) chunk.writeUleb128(writeFieldRef(impl, field, 0)));
+		chunk.writeOption(value.aWrite, function(field) chunk.writeUleb128(writeFieldRef(impl, field, 0)));
+		chunk.writeOption(value.aCall, function(field) chunk.writeUleb128(writeFieldRef(impl, field, 0)));
+		chunk.writeOption(value.aConstructor, function(field) chunk.writeUleb128(writeFieldRef(impl, field, 0)));
+		chunk.writeList(value.aOps, function(item) { chunk.writeU8(binopIndex(item.op)); chunk.writeUleb128(writeFieldRef(impl, item.field, 0)); });
+		chunk.writeList(value.aUnops, function(item) { chunk.writeU8(unopIndex(item.op, item.flag)); chunk.writeUleb128(writeFieldRef(impl, item.field, 0)); });
+		chunk.writeList(value.aFromField, function(item) chunk.writeUleb128(writeFieldRef(impl, item.field, 0)));
+		chunk.writeList(value.aToField, function(item) chunk.writeUleb128(writeFieldRef(impl, item.field, 0)));
 	}
 
 	function writeClassFieldForward(chunk:HxbChunk, field:TClassField):Void { chunk.writeString(field.cfName); writePosPair(chunk, field.cfPos, field.cfNamePos); writeMetadata(chunk, field.cfMeta); chunk.writeUleb128(field.cfOverloads.length); for (other in field.cfOverloads) writeClassFieldForward(chunk, other); }
@@ -261,7 +275,7 @@ class HxbWriter {
 	}
 
 	function writeCommon(chunk:HxbChunk, privateType:Bool, doc:Dynamic, meta:Dynamic, usingTypes:Array<{var cls:TClass; var pos:Pos;}>):Void { chunk.writeBool(privateType); writeDocumentation(chunk, doc); writeMetadata(chunk, meta); writeEmptyTypeParamsData(chunk); chunk.writeList(usingTypes, function(value) { writeClassRef(chunk, value.cls); writePos(chunk, value.pos); }); }
-	function writeClassKind(chunk:HxbChunk, kind:TClassKind):Void switch kind { case KNormal: chunk.writeU8(0); case KGeneric: chunk.writeU8(3); case KGenericInstance(cls, params): chunk.writeU8(4); writeClassRef(chunk, cls); writeTypes(chunk, params); case KMacroType: chunk.writeU8(5); case KModuleFields(_): chunk.writeU8(8); case _: throw "Class kind serialization is not ported"; }
+	function writeClassKind(chunk:HxbChunk, kind:TClassKind):Void switch kind { case KNormal: chunk.writeU8(0); case KGeneric: chunk.writeU8(3); case KGenericInstance(cls, params): chunk.writeU8(4); writeClassRef(chunk, cls); writeTypes(chunk, params); case KMacroType: chunk.writeU8(5); case KAbstractImpl(abs): chunk.writeU8(7); chunk.writeUleb128(addAbstract(abs, false)); case KModuleFields(_): chunk.writeU8(8); case _: throw "Class kind serialization is not ported"; }
 	function writeFieldKind(chunk:HxbChunk, kind:FieldKind):Void switch kind {
 		case Method(MethNormal): chunk.writeU8(0);
 		case Method(MethInline): chunk.writeU8(1);
@@ -430,7 +444,8 @@ class HxbWriter {
 		else chunk.writeU8(0);
 	}
 
-	function binopIndex(op:Binop):Int return switch op { case OpAdd:0; case OpMult:1; case OpDiv:2; case OpSub:3; case OpAssign:4; case OpEq:5; case OpNotEq:6; case OpGt:7; case OpGte:8; case OpLt:9; case OpLte:10; case OpAnd:11; case OpOr:12; case OpXor:13; case OpBoolAnd:14; case OpBoolOr:15; case OpShl:16; case OpShr:17; case OpUShr:18; case OpMod:19; case OpAssignOp(_):20; case OpInterval:21; case OpArrow:22; case OpIn:23; case OpNullCoal:24; };
+	function binopIndex(op:Binop):Int return switch op { case OpAdd:0; case OpMult:1; case OpDiv:2; case OpSub:3; case OpAssign:4; case OpEq:5; case OpNotEq:6; case OpGt:7; case OpGte:8; case OpLt:9; case OpLte:10; case OpAnd:11; case OpOr:12; case OpXor:13; case OpBoolAnd:14; case OpBoolOr:15; case OpShl:16; case OpShr:17; case OpUShr:18; case OpMod:19; case OpInterval:20; case OpArrow:21; case OpIn:22; case OpNullCoal:23; case OpAssignOp(inner):30 + binopIndex(inner); };
+	function unopIndex(op:Unop, flag:UnopFlag):Int return switch [op, flag] { case [Increment, Prefix]:0; case [Decrement, Prefix]:1; case [Not, Prefix]:2; case [Neg, Prefix]:3; case [NegBits, Prefix]:4; case [Spread, Prefix]:5; case [Increment, Postfix]:6; case [Decrement, Postfix]:7; case [Not, Postfix]:8; case [Neg, Postfix]:9; case [NegBits, Postfix]:10; case [Spread, Postfix]:11; };
 
 	function addAnonymousType(value:TAnon):Int {
 		if (anonymousTypeIndices.exists(value)) return anonymousTypeIndices.get(value);

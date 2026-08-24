@@ -15,10 +15,10 @@ class TypeloadModuleTest {
 		paths.push(new DirectoryClassPath("test/", User));
 		var loader = new TypeloadModule(paths, Define.emptyDefines());
 		var module = loader.loadModule({pack:["unit", "moduleload"], name:"Example"});
-		if (module.mId != 0 || module.mTypes.length != 4 || module.mExtra.mFile != sys.FileSystem.fullPath("test/unit/moduleload/Example.hx")) throw "Module loading failed";
+		if (module.mId != 0 || module.mTypes.length != 5 || module.mExtra.mFile != sys.FileSystem.fullPath("test/unit/moduleload/Example.hx")) throw "Module loading failed";
 		if (loader.loadModule({pack:["unit", "moduleload"], name:"Example"}) != module) throw "Module cache failed";
 		var names = [for (type in module.mTypes) switch type { case TClassDecl(value): value.clPath.name; case TEnumDecl(value): value.ePath.name; case TTypeDecl(value): value.tPath.name; case TAbstractDecl(value): value.aPath.name; }];
-		if (names.join(",") != "Example,Choice,Alias,Count") throw "Module shells failed";
+		if (names.join(",") != "Example,Choice,Alias,Count,Count_Impl_") throw "Module shells failed";
 		var cls = switch module.mTypes[0] { case TClassDecl(value): value; case _: throw "Expected class"; };
 		if (cls.clOrderedFields.length != 3 || cls.clOrderedStatics.length != 1 || cls.clConstructor != null) throw "Class field population failed";
 		if (cls.clStatics.get("value").cfName != "value" || cls.clFields.get("choice").cfName != "choice") throw "Class field maps failed";
@@ -73,6 +73,9 @@ class TypeloadModuleTest {
 		}
 		if (derived.clImplements.length != 1 || derived.clImplements[0].cls != iface) throw "Implemented interface was not resolved";
 		if ((iface.clFlags & classFlag("CInterface")) == 0) throw "Interface class flag was not installed";
+		var count = switch module.mTypes[3] { case TAbstractDecl(value): value; case _: throw "Expected Count abstract"; };
+		if (count.aImpl == null || count.aImpl.clPath.pack.join(".") != "unit.moduleload._Example" || count.aImpl.clPath.name != "Count_Impl_") throw "Abstract implementation class was not installed";
+		switch count.aThis { case TAbstract(value, _): if (value.aPath.name != "Int") throw "Abstract underlying type was not resolved"; case _: throw "Expected abstract underlying type"; }
 	}
 
 	static function assertBasic(name:String, type:T):Void switch type {
