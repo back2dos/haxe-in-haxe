@@ -9,6 +9,7 @@ import core.ClassPath.DirectoryClassPath;
 import core.ClassPaths;
 import core.Define;
 import core.Globals.GlobalTypePath;
+import core.TType.ModuleType;
 import core.ZipOutput;
 import haxe.io.Path;
 import sys.FileSystem;
@@ -64,7 +65,8 @@ class Main {
 		ensureOutputDirectory(config.archivePath);
 		var loader = new TypeloadModule(classPaths, defines);
 		loader.loadStdBootstrap();
-		loader.loadModule(main);
+		var mainModule = loader.loadModule(main);
+		markMainKept(mainModule);
 		var zip = new ZipOutput(config.archivePath, 0);
 		try {
 			if (config.targetConfig.generate) for (module in loader.loadedModules()) {
@@ -80,6 +82,25 @@ class Main {
 			throw error;
 		}
 		zip.close();
+	}
+
+	static function markMainKept(module:core.TType.ModuleDef):Void {
+		for (type in module.mTypes) switch type {
+			case TClassDecl(cls):
+				var field = cls.clStatics.get("main");
+				if (field != null && field.cfMeta.length == 0) {
+					field.cfMeta.unshift({meta:":keep", exprs:[], pos:{pfile:field.cfPos.pfile, pmin:field.cfPos.pmin, pmax:field.cfPos.pmin}});
+					field.cfFlags |= 1 << core.TType.TType.flagTClassFieldNames.indexOf("CfPostProcessed");
+				}
+			case _:
+		}
+		if (module.mStatics != null) {
+			var field = module.mStatics.clStatics.get("main");
+			if (field != null && field.cfMeta.length == 0) {
+				field.cfMeta.unshift({meta:":keep", exprs:[], pos:{pfile:field.cfPos.pfile, pmin:field.cfPos.pmin, pmax:field.cfPos.pmin}});
+				field.cfFlags |= 1 << core.TType.TType.flagTClassFieldNames.indexOf("CfPostProcessed");
+			}
+		}
 	}
 
 	static function shouldExport(path:Array<String>, config:compiler.hxb.HxbWriterConfig.WriterTargetConfig):Bool {

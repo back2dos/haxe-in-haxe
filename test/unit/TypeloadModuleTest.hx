@@ -15,7 +15,7 @@ class TypeloadModuleTest {
 		paths.push(new DirectoryClassPath("test/", User));
 		var loader = new TypeloadModule(paths, Define.emptyDefines());
 		var module = loader.loadModule({pack:["unit", "moduleload"], name:"Example"});
-		if (module.mId != 0 || module.mTypes.length != 4 || module.mExtra.mFile != "test/unit/moduleload/Example.hx") throw "Module loading failed";
+		if (module.mId != 0 || module.mTypes.length != 4 || module.mExtra.mFile != sys.FileSystem.fullPath("test/unit/moduleload/Example.hx")) throw "Module loading failed";
 		if (loader.loadModule({pack:["unit", "moduleload"], name:"Example"}) != module) throw "Module cache failed";
 		var names = [for (type in module.mTypes) switch type { case TClassDecl(value): value.clPath.name; case TEnumDecl(value): value.ePath.name; case TTypeDecl(value): value.tPath.name; case TAbstractDecl(value): value.aPath.name; }];
 		if (names.join(",") != "Example,Choice,Alias,Count") throw "Module shells failed";
@@ -63,10 +63,22 @@ class TypeloadModuleTest {
 			}
 			case _: throw "Expected static lookup function";
 		}
+		var inheritance = loader.loadModule({pack:["unit", "moduleload"], name:"Inheritance"});
+		var base = switch inheritance.mTypes[0] { case TClassDecl(value): value; case _: throw "Expected base class"; };
+		var iface = switch inheritance.mTypes[1] { case TClassDecl(value): value; case _: throw "Expected interface"; };
+		var derived = switch inheritance.mTypes[2] { case TClassDecl(value): value; case _: throw "Expected derived class"; };
+		switch derived.clSuper {
+			case {cls:value}: if (value != base) throw "Superclass was not resolved";
+			case null: throw "Superclass was not installed";
+		}
+		if (derived.clImplements.length != 1 || derived.clImplements[0].cls != iface) throw "Implemented interface was not resolved";
+		if ((iface.clFlags & classFlag("CInterface")) == 0) throw "Interface class flag was not installed";
 	}
 
 	static function assertBasic(name:String, type:T):Void switch type {
 		case TAbstract(value, _): if (value.aPath.name != name) throw 'Expected $name basic type';
 		case _: throw 'Expected $name basic type';
 	}
+
+	static function classFlag(name:String):Int return 1 << core.TType.TType.flagTClassNames.indexOf(name);
 }

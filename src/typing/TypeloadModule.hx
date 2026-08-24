@@ -88,7 +88,7 @@ class TypeloadModule {
 	function makeModule(path:GlobalTypePath, file:String):ModuleDef {
 		return {
 			mId: nextModuleId++, mPath: path, mTypes: [], mStatics: null,
-			mExtra: {mFile: file, mSign: Define.getSignature(defines), mDisplay: {mInlineCalls: [], mTypeHints: [], mImportPositions: new Map()}, mCheckPolicy: [], mTime: 0,
+			mExtra: {mFile: sys.FileSystem.fullPath(file), mSign: Define.getSignature(defines), mDisplay: {mInlineCalls: [], mTypeHints: [], mImportPositions: new Map()}, mCheckPolicy: [], mTime: 0,
 				mCacheState: MSUnknown, mAdded: 0, mChecked: 0, mProcessed: 0, mDeps: new IntMap(), mDisplayDeps: null, mKind: MCode, mCacheBoundObjects: [], mFeatures: new Map()}
 		};
 	}
@@ -103,6 +103,22 @@ class TypeloadModule {
 			case ETypedef(value): module.mTypes.push(TTypeDecl(makeDef(module, value, declaration.pos)));
 			case EAbstract(value): module.mTypes.push(TAbstractDecl(makeAbstract(module, value, declaration.pos)));
 			case EImport(_) | EUsing(_) | EStatic(_):
+		}
+		// The upstream loader installs inheritance after all module type shells
+		// exist, so references to later declarations in the same module work too.
+		for (declaration in declarations) switch declaration.definition {
+			case EClass(value):
+				var cls = findClass(module, value.name.name);
+				for (flag in value.flags) switch flag {
+					case HExtends(path):
+						var parent = resolvePath(module, path.path);
+						switch parent { case TInst(parentClass, params): cls.clSuper = {cls: parentClass, params: params}; case _: throw 'Superclass of ${cls.clPath.name} must be a class'; }
+					case HImplements(path):
+						var implemented = resolvePath(module, path.path);
+						switch implemented { case TInst(interfaceClass, params): cls.clImplements.push({cls: interfaceClass, params: params}); case _: throw 'Implemented type of ${cls.clPath.name} must be a class'; }
+					case _:
+				}
+			case _:
 		}
 		for (declaration in declarations) switch declaration.definition {
 			case EClass(value): populateClassFields(module, findClass(module, value.name.name), value.data);
@@ -171,7 +187,7 @@ class TypeloadModule {
 			case EParenthesis(expr): var value = typeExpr(module, cls, expr, locals); typed(TParenthesis(value), value.etype, source.pos);
 			case EBinop(op, left, right): var l = typeExpr(module, cls, left, locals); var r = typeExpr(module, cls, right, locals); typed(TBinop(op, l, r), op == OpAssign ? l.etype : fallback, source.pos);
 			case EVars(vars): typeVars(module, cls, vars, locals, source.pos);
-			case EBlock(exprs): var values = [for (expr in exprs) typeExpr(module, cls, expr, locals)]; typed(TBlock(values), values.length == 0 ? fallback : values[values.length - 1].etype, source.pos);
+		case EBlock(exprs): var values = [for (expr in exprs) typeExpr(module, cls, expr, locals)]; typed(TBlock(values), values.length == 0 ? basic("Void") : values[values.length - 1].etype, source.pos);
 			case ECall(expr, args): var callee = typeExpr(module, cls, expr, locals); var values = [for (arg in args) typeExpr(module, cls, arg, locals)]; var result = switch callee.etype { case TFun(sig): sig.ret; case _: fallback; }; typed(TCall(callee, values), result, source.pos);
 			case EField(expr, name, _): typeField(typeExpr(module, cls, expr, locals), name, source.pos);
 			case ENew(path, args): typeNew(module, path.path, args, cls, locals, source.pos);
@@ -254,7 +270,7 @@ class TypeloadModule {
 	function fieldType(module:ModuleDef, cls:TClass, field:ClassField):T return switch field.cffKind {
 		case FVar(type, _): type == null ? TDynamic(null) : resolveTypeHint(module, type);
 		case FProp(_, _, type, _): type == null ? TDynamic(null) : resolveTypeHint(module, type);
-		case FFun(func): TFun({args: [for (arg in func.fArgs) {name: arg.name.name, optional: arg.optional, type: arg.type == null ? TDynamic(null) : resolveTypeHint(module, arg.type)}], ret: func.fType == null ? TDynamic(null) : resolveTypeHint(module, func.fType)});
+		case FFun(func): TFun({args: [for (arg in func.fArgs) {name: arg.name.name, optional: arg.optional, type: arg.type == null ? TDynamic(null) : resolveTypeHint(module, arg.type)}], ret: func.fType == null ? basic("Void") : resolveTypeHint(module, func.fType)});
 	}
 
 	function fieldKind(field:ClassField):FieldKind return switch field.cffKind {
@@ -313,7 +329,7 @@ class TypeloadModule {
 
 	static function accessKind(name:String):VarAccess return switch name { case "never": AccNever; case "null": AccNo; case "default": AccNormal; case _: AccCall; };
 	static function fieldFlags(field:ClassField, isStatic:Bool):Int {
-		var flags = flag(CfPublic);
+		var flags = hasAccess(field, APublic) ? flag(CfPublic) : 0;
 		if (hasAccess(field, APrivate)) flags = 0;
 		if (isStatic) flags |= flag(CfStatic);
 		if (hasAccess(field, AExtern)) flags |= flag(CfExtern);
@@ -332,10 +348,24 @@ class TypeloadModule {
 	function makeClass(module:ModuleDef, value:ClassDefinition, pos:Pos):TClass {
 		var path = typePath(module, value.name.name, has(value.flags, HPrivate));
 		var cls:TClass = null;
-		cls = {clPath:path, clModule:module, clPos:pos, clNamePos:value.name.pos, clPrivate:has(value.flags,HPrivate), clDoc:value.doc, clMeta:value.meta, clParams:[], clUsing:[], clRestore:function(){}, clType:TDynamic(null), clKind:KNormal, clFlags:0, clSuper:null, clImplements:[], clFields:new StringMap(), clStatics:new StringMap(), clOrderedStatics:[], clOrderedFields:[], clDynamic:null, clArrayAccess:null, clConstructor:null, clInit:null, clBuild:function() return Built, clDescendants:[]};
+		cls = {clPath:path, clModule:module, clPos:pos, clNamePos:value.name.pos, clPrivate:has(value.flags,HPrivate), clDoc:value.doc, clMeta:value.meta, clParams:[], clUsing:[], clRestore:function(){}, clType:TDynamic(null), clKind:KNormal, clFlags:classFlags(value.flags), clSuper:null, clImplements:[], clFields:new StringMap(), clStatics:new StringMap(), clOrderedStatics:[], clOrderedFields:[], clDynamic:null, clArrayAccess:null, clConstructor:null, clInit:null, clBuild:function() return Built, clDescendants:[]};
 		cls.clType = TInst(cls, []);
 		return cls;
 	}
+
+	static function classFlags(flags:Array<ClassFlag>):Int {
+		var result = 0;
+		for (value in flags) switch value {
+			case HExtern: result |= classFlag(CExtern);
+			case HFinal: result |= classFlag(CFinal);
+			case HInterface: result |= classFlag(CInterface);
+			case HAbstract: result |= classFlag(CAbstract);
+			case HPrivate | HExtends(_) | HImplements(_):
+		}
+		return result;
+	}
+
+	static function classFlag(value:FlagTClass):Int return 1 << core.TType.TType.flagTClassNames.indexOf(Std.string(value));
 
 	function makeEnum(module:ModuleDef, value:EnumDefinition, pos:Pos):TEnum {
 		var en:TEnum = {ePath:typePath(module,value.name.name,has(value.flags,EPrivate)), eModule:module, ePos:pos, eNamePos:value.name.pos, ePrivate:has(value.flags,EPrivate), eDoc:value.doc, eMeta:value.meta, eParams:[], eUsing:[], eRestore:function(){}, eType:TDynamic(null), eFlags:0, eConstrs:new StringMap(), eNames:[]};
