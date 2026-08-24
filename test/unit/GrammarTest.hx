@@ -20,6 +20,8 @@ class GrammarTest {
 		assert(switch functionType.definition { case EClass(value): switch value.data[0].cffKind { case FFun(func): switch func.fArgs[0].type.type { case CTFunction(_, _): true; case _: false; }; case _: false; }; case _: false; });
 		var zeroArgFunctionType = Grammar.parse('class Mapper { var callback:() -> Void; }').declarations[0];
 		assert(switch zeroArgFunctionType.definition { case EClass(value): switch value.data[0].cffKind { case FVar({type:CTFunction(args, _)}, _): args.length == 0; case _: false; }; case _: false; });
+		var namedFunctionType = Grammar.parse('class Mapper { var callback:(value:Int) -> Void; }').declarations[0];
+		assert(switch namedFunctionType.definition { case EClass(value): switch value.data[0].cffKind { case FVar({type:CTFunction([{type:CTNamed(name, _)}], _)}, _): name.name == "value"; case _: false; }; case _: false; });
 		var expressionBody = Grammar.parse('abstract Any(Dynamic) { extern inline function promote<T>():T return this; }').declarations[0];
 		assert(switch expressionBody.definition { case EAbstract(value): switch value.data[0].cffKind { case FFun(func): func.fExpr != null; case _: false; }; case _: false; });
 		var controlBlock = Grammar.parse('class Main { function run(items:Array<Int>) { for (item in items) { trace(item); } } }').declarations[0];
@@ -48,6 +50,16 @@ class GrammarTest {
 		assert(switch functionVariableWithoutSemicolon.definition { case EClass(value): switch value.data[0].cffKind { case FFun(func): switch func.fExpr.expr { case EBlock(values): values.length == 2; case _: false; }; case _: false; }; case _: false; });
 		var functionFieldWithSemicolon = Grammar.parse('class Main { function new() {}; function run() {}; }').declarations[0];
 		assert(switch functionFieldWithSemicolon.definition { case EClass(value): value.data.length == 2; case _: false; });
+		var localFunctionWithoutSemicolon = Grammar.parse('class Main { function run() { function local() {} local(); } }').declarations[0];
+		assert(switch localFunctionWithoutSemicolon.definition { case EClass(value): switch value.data[0].cffKind { case FFun(func): switch func.fExpr.expr { case EBlock(values): values.length == 2; case _: false; }; case _: false; }; case _: false; });
+		var unparenthesizedSwitch = Grammar.parse('class Main { function run(value:Int) return switch value { case 1: true; default: false; } }').declarations[0];
+		assert(switch unparenthesizedSwitch.definition { case EClass(value): switch value.data[0].cffKind { case FFun(func): switch func.fExpr.expr { case EReturn({expr:ESwitch(_, _, _)}): true; case _: false; }; case _: false; }; case _: false; });
+		var checkedExpression = Grammar.parse('class Main { function run(value:Dynamic) return (value : String); }').declarations[0];
+		assert(switch checkedExpression.definition { case EClass(value): switch value.data[0].cffKind { case FFun(func): switch func.fExpr.expr { case EReturn({expr:EParenthesis({expr:ECheckType(_, _)})}): true; case _: false; }; case _: false; }; case _: false; });
+		var arrowBlock = Grammar.parse('package; class Main { function run() return () -> { return 1; }; }').declarations[0];
+		assert(switch arrowBlock.definition { case EClass(value): switch value.data[0].cffKind { case FFun(func): switch func.fExpr.expr { case EReturn({expr:EFunction(FKArrow, {fExpr:{expr:EMeta(_, {expr:EReturn({expr:EBlock(_)})})}})}): true; case _: false; }; case _: false; }; case _: false; });
+		var dollarCall = Grammar.parse("class Main { function run(value:Dynamic) $type(value); }").declarations[0];
+		assert(switch dollarCall.definition { case EClass(value): switch value.data[0].cffKind { case FFun(func): switch func.fExpr.expr { case ECall({expr:EConst(Ident("$type"))}, _): true; case _: false; }; case _: false; }; case _: false; });
 		var literalDollar = Grammar.parse("class Main { var value = 'cost: $'; }").declarations[0];
 		assert(switch literalDollar.definition { case EClass(value): switch value.data[0].cffKind { case FVar(_, {expr:EConst(String(text, _))}): text == "cost: $"; case _: false; }; case _: false; });
 		var callStack = Grammar.parse(sys.io.File.getContent("haxe/std/haxe/CallStack.hx"), core.Define.emptyDefines(), "haxe/std/haxe/CallStack.hx");

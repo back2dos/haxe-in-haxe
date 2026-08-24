@@ -819,6 +819,8 @@ class HxbWriter {
 					chunk.writeU8(switch field.key.quote { case NoQuotes: 0; case DoubleQuotes: 1; });
 					writeMetadataExpr(chunk, field.expr);
 				});
+			case EArrayDecl(values):
+				chunk.writeU8(10); chunk.writeList(values, function(value) writeMetadataExpr(chunk, value));
 			case ENew(path, args):
 				chunk.writeU8(12); writeMetadataPlacedTypePath(chunk, path); chunk.writeList(args, function(arg) writeMetadataExpr(chunk, arg));
 			case _:

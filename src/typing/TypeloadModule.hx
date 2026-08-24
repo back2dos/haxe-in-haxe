@@ -426,14 +426,14 @@ class TypeloadModule {
 		case EWhile(condition, body, _): canTypeExpression(condition) && canTypeExpression(body);
 		case EReturn(value): value == null || canTypeExpression(value);
 		case EBreak | EContinue: true;
-		case ECast(value, _): canTypeExpression(value);
+		case ECast(value, _) | ECheckType(value, _): canTypeExpression(value);
 		case EFor(iterator, body): canTypeExpression(iterator) && canTypeExpression(body);
 		case EMeta(_, value): canTypeExpression(value);
 		case ESwitch(subject, cases, defaultCase):
 			canTypeExpression(subject)
 			&& Lambda.foreach(cases, function(item) return item.guard == null && Lambda.foreach(item.values, isSupportedPattern) && (item.expr == null || canTypeExpression(item.expr)))
 			&& (defaultCase == null || defaultCase.expr == null || canTypeExpression(defaultCase.expr));
-		case EUntyped(_) | ETry(_, _) | EIs(_, _) | EDisplay(_, _) | ECheckType(_, _): false;
+		case EUntyped(_) | ETry(_, _) | EIs(_, _) | EDisplay(_, _): false;
 	};
 
 	static function isSupportedPattern(value:Expr):Bool return switch value.expr {
@@ -572,7 +572,9 @@ class TypeloadModule {
 			case EArrayDecl([forExpr]) if (switch forExpr.expr { case EFor(_, _): true; case _: false; }): typeArrayComprehension(module, cls, forExpr, locals, source.pos);
 			case EArrayDecl(values):
 				var typedValues = [for (value in values) typeExpr(module, cls, value, locals)];
-				typed(TArrayDecl(typedValues), TInst(cls, [typedValues.length == 0 ? TDynamic(null) : typedValues[0].etype]), source.pos);
+				var arrayModule = loadModule({pack:[], name:"Array"});
+				var arrayClass = switch findModuleType(arrayModule, "Array") { case TClassDecl(value): value; case _: throw "Array is not a class"; };
+				typed(TArrayDecl(typedValues), TInst(arrayClass, [typedValues.length == 0 ? TDynamic(null) : typedValues[0].etype]), source.pos);
 			case EArray(array, index):
 				var arrayExpr = typeExpr(module, cls, array, locals);
 				var indexExpr = typeExpr(module, cls, index, locals);
@@ -622,6 +624,10 @@ class TypeloadModule {
 				var value = typeExpr(module, cls, expr, locals);
 				var targetType = hint == null ? value.etype : resolveTypeHint(module, hint);
 				typed(TCast(value, hint == null ? null : moduleTypeOf(targetType)), targetType, source.pos);
+			case ECheckType(expr, hint):
+				var value = typeExpr(module, cls, expr, locals);
+				var targetType = resolveTypeHint(module, hint);
+				typed(TCast(value, null), targetType, source.pos);
 			case EMeta(meta, expr):
 				var value = typeExpr(module, cls, expr, locals);
 				typed(TMeta(meta, value), value.etype, source.pos);

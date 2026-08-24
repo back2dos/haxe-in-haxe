@@ -26,7 +26,7 @@ class Grammar {
 
 	public function parseFile():Package {
 		var pack:Array<String> = [];
-		if (acceptKwd(Package) != null) { pack = path(); expect(Semicolon); }
+		if (acceptKwd(Package) != null) { if (!is(Semicolon)) pack = path(); expect(Semicolon); }
 		var declarations:Array<TypeDecl> = [];
 		while (!is(Eof)) declarations.push(declaration());
 		return {pack: pack, declarations: declarations};
@@ -183,6 +183,7 @@ class Grammar {
 		var t=next(); var e:Expr = switch t.token {
 			case Const(String(value, SSingleQuotes)) if (value.indexOf("$") != -1): interpolatedString(value, t.pos);
 			case Const(c): expr(EConst(c),t.pos);
+			case Dollar(name): expr(EConst(Ident("$" + name)), t.pos);
 			case IntInterval(value):
 				var left = expr(EConst(Int(value, null)), t.pos);
 				var right = expression(precedence(OpInterval) + 1);
@@ -195,7 +196,9 @@ class Grammar {
 					expect(PClose);
 					arrowFunction(t.pos, args);
 				} else {
-					var x=expression(); var end=expect(PClose).pos; expr(EParenthesis(x),union(t.pos,end));
+					var x=expression();
+					if (accept(DblDot) != null) { var hint = typeHint(); x = expr(ECheckType(x, hint), union(x.pos, hint.pos)); }
+					var end=expect(PClose).pos; expr(EParenthesis(x),union(t.pos,end));
 				}
 			case BrOpen: index--; objectOrIdentifier();
 			case Kwd(New): var p=typePath(); expect(POpen); var args=[]; if(!is(PClose)) do args.push(expression()) while(accept(Comma)!=null); var end=expect(PClose).pos; expr(ENew(p,args),union(t.pos,end));
@@ -221,7 +224,7 @@ class Grammar {
 	}
 	function arrowFunction(start:Pos, args:Array<FuncArg>):Expr {
 		expect(Arrow);
-		var body = expression();
+		var body = is(BrOpen) ? block() : expression();
 		var returned = expr(EReturn(body), body.pos);
 		var implicit = expr(EMeta({meta:"implicitReturn", exprs:[], pos:body.pos}, returned), body.pos);
 		return expr(EFunction(FKArrow, {fParams:[], fArgs:args, fType:null, fExpr:implicit}), union(start, body.pos));
@@ -261,7 +264,10 @@ class Grammar {
 		return result;
 	}
 	function parseSwitch(start:Pos):Expr {
-		expect(POpen); var subject = expression(); expect(PClose); expect(BrOpen);
+		var subject:Expr;
+		if (accept(POpen) != null) { subject = expression(); expect(PClose); }
+		else subject = expression();
+		expect(BrOpen);
 		var cases:Array<SwitchCase> = [];
 		var defaultCase:Null<SwitchDefault> = null;
 		while (!is(BrClose)) {
@@ -297,7 +303,7 @@ class Grammar {
 	function block():Expr { var begin=expect(BrOpen).pos; var es=[]; while (!is(BrClose)) { var value = expression(); es.push(value); if (accept(Semicolon)==null && !is(BrClose) && requiresSemicolon(value)) fail("Expected semicolon"); } return expr(EBlock(es),union(begin,expect(BrClose).pos)); }
 	function statementBody():Expr return is(BrOpen) ? block() : expression();
 	static function requiresSemicolon(value:Expr):Bool return switch value.expr {
-		case EIf(_, _, _) | EWhile(_, _, _) | EFor(_, _) | ETry(_, _): false;
+		case EIf(_, _, _) | EWhile(_, _, _) | EFor(_, _) | ETry(_, _) | EFunction(_, _): false;
 		case EVars(vars) if (vars.length > 0 && switch vars[vars.length - 1].evExpr { case {expr:EFunction(_, _)}: true; case _: false; }): false;
 		case _: true;
 	}
@@ -309,7 +315,12 @@ class Grammar {
 		var complex:ComplexType;
 		if (accept(POpen) != null) {
 			var args:Array<TypeHint> = [];
-			if (!is(PClose)) do args.push(typeHint()) while (accept(Comma) != null);
+			if (!is(PClose)) do {
+				if (identText() != null && index + 1 < tokens.length && tokens[index + 1].token.match(DblDot)) {
+					var name = placedIdent(); expect(DblDot); var value = typeHint();
+					args.push({type:CTNamed(name, value), pos:union(name.pos, value.pos)});
+				} else args.push(typeHint());
+			} while (accept(Comma) != null);
 			var close = expect(PClose).pos;
 			if (accept(Arrow) != null) {
 				var result = typeHint();
