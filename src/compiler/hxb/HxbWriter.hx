@@ -235,8 +235,8 @@ class HxbWriter {
 				for (i in 0...value.clOrderedStatics.length) writeClassFieldForward(chunk, value.clOrderedStatics[value.clOrderedStatics.length - 1 - i]);
 			case TEnumDecl(value):
 				addEnum(value, true); chunk.writeU8(1); writePath(chunk, value.ePath); writePosPair(chunk, value.ePos, value.eNamePos); writeTypeParamsForward(chunk, value.eParams);
-				chunk.writeUleb128(value.eNames.length);
-				for (name in value.eNames) { var field = value.eConstrs.get(name); chunk.writeString(name); writePosPair(chunk, field.efPos, field.efNamePos); chunk.writeUleb128(field.efIndex); }
+				var names = enumMapNames(value); chunk.writeUleb128(names.length);
+				for (name in names) { var field = value.eConstrs.get(name); chunk.writeString(name); writePosPair(chunk, field.efPos, field.efNamePos); chunk.writeUleb128(field.efIndex); }
 			case TTypeDecl(value): addTypedef(value, true); chunk.writeU8(2); writePath(chunk, value.tPath); writePosPair(chunk, value.tPos, value.tNamePos); writeTypeParamsForward(chunk, value.tParams);
 			case TAbstractDecl(value): addAbstract(value, true); chunk.writeU8(3); writePath(chunk, value.aPath); writePosPair(chunk, value.aPos, value.aNamePos); writeTypeParamsForward(chunk, value.aParams);
 		}
@@ -262,9 +262,10 @@ class HxbWriter {
 
 	function writeEnum(chunk:HxbChunk, value:TEnum):Void { selectTypeParams(value.eParams); writeCommon(chunk, value.ePrivate, value.eDoc, value.eMeta, value.eParams, value.eUsing); chunk.writeUleb128(value.eFlags); chunk.writeList(value.eNames, chunk.writeString); }
 	function writeEnumFields(chunk:HxbChunk, value:TEnum):Void {
-		chunk.writeUleb128(value.eNames.length);
-		for (name in value.eNames) { var field = value.eConstrs.get(name); chunk.writeString(name); writeType(chunk, field.efType); writeEmptyTypeParamsData(chunk); writeDocumentation(chunk, field.efDoc); writeMetadata(chunk, field.efMeta); }
+		var names = enumMapNames(value); chunk.writeUleb128(names.length);
+		for (name in names) { var field = value.eConstrs.get(name); chunk.writeString(name); writeEmptyTypeParamsData(chunk); writeType(chunk, field.efType); writeDocumentation(chunk, field.efDoc); writeMetadata(chunk, field.efMeta); }
 	}
+	function enumMapNames(value:TEnum):Array<String> { var names = value.eNames.copy(); names.sort(function(a, b) return a < b ? 1 : a > b ? -1 : 0); return names; }
 	function writeTypedef(chunk:HxbChunk, value:TDef):Void { selectTypeParams(value.tParams); writeCommon(chunk, value.tPrivate, value.tDoc, value.tMeta, value.tParams, value.tUsing); writeType(chunk, value.tType); }
 	function writeAbstract(chunk:HxbChunk, value:TAbstract):Void {
 		selectTypeParams(value.aParams); writeCommon(chunk, value.aPrivate, value.aDoc, value.aMeta, value.aParams, value.aUsing); chunk.writeOption(value.aImpl, function(cls) writeClassRef(chunk, cls));
@@ -755,7 +756,7 @@ class HxbWriter {
 	}
 	static function metadataName(value:Dynamic):String { var name = Std.string(value); return StringTools.startsWith(name, ":") ? name : ":" + name; }
 	static function hasMetadataName(metadata:Dynamic, name:String):Bool { var entries:Array<Dynamic> = metadata == null ? [] : cast metadata; for (entry in entries) if (metadataName(entry.meta) == ":" + name) return true; return false; }
-	static function writeEmptyTypeParamsData(chunk:HxbChunk):Void {}
+	static function writeEmptyTypeParamsData(chunk:HxbChunk):Void { chunk.writeUleb128(0); chunk.writeU8(1); chunk.writeUleb128(0); }
 	function writeFieldTypeParamsData(chunk:HxbChunk, params:TypeParams):Void {
 		chunk.writeUleb128(params.length);
 		chunk.writeU8(1); // top-level field scope
