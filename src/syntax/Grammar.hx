@@ -9,6 +9,7 @@ import syntax.Lexer.LexedToken;
 // haxe/src/syntax/grammar.ml.  Display recovery and XML remain parser-entry
 // responsibilities and are intentionally not represented here.
 class Grammar {
+	var pendingDeclarationDoc:Documentation = null;
 	public static function parse(source:String, ?defines:core.Define.DefineContext, ?file = "?"):Package {
 		var tokens = defines == null ? Lexer.lex(source, file) : Preprocessor.process(source, defines, file);
 		return new Grammar(tokens).parseFile();
@@ -28,8 +29,10 @@ class Grammar {
 
 	function declaration():TypeDecl {
 		var doc = documentation(); var meta = metadata();
+		if (doc == null && pendingDeclarationDoc != null) doc = pendingDeclarationDoc;
 		var start = current().pos;
 		if (acceptKwd(Import) != null) {
+			if (doc != null) pendingDeclarationDoc = doc;
 			var names = [placedIdent()]; var mode:ImportMode = INormal;
 			while (accept(Dot) != null) {
 				if (is(Binop(OpMult))) { next(); mode = IAll; break; }
@@ -38,9 +41,10 @@ class Grammar {
 			if (identText() == "as") { next(); mode = IAsName(placedIdent()); }
 			expect(Semicolon); return decl(EImport({path:names, mode:mode}), start);
 		}
-		if (acceptKwd(Using) != null) { var p = placedPath(); expect(Semicolon); return decl(EUsing(p), start); }
+		if (acceptKwd(Using) != null) { if (doc != null) pendingDeclarationDoc = doc; var p = placedPath(); expect(Semicolon); return decl(EUsing(p), start); }
 		var accesses = access();
 		if (acceptKwd(Class) != null || acceptKwd(Interface) != null) {
+			start = previous().pos; pendingDeclarationDoc = null;
 			var interfaceValue = previousKwd == Interface;
 			var name = placedIdent(); var params = typeParams(); var flags:Array<ClassFlag> = interfaceValue ? [HInterface] : [];
 			if (hasAccess(accesses, AExtern)) flags.push(HExtern); if (hasAccess(accesses, APrivate)) flags.push(HPrivate); if (hasAccess(accesses, AFinal)) flags.push(HFinal);
@@ -49,17 +53,20 @@ class Grammar {
 			return decl(EClass({name:name, doc:doc, params:params, meta:meta, flags:flags, data:fields}), union(start,end));
 		}
 		if (acceptKwd(Enum) != null) {
+			start = previous().pos; pendingDeclarationDoc = null;
 			var name = placedIdent(), params = typeParams(), flags:Array<EnumFlag> = [];
 			if (hasAccess(accesses, AExtern)) flags.push(EExtern); if (hasAccess(accesses, APrivate)) flags.push(EPrivate);
 			expect(BrOpen); var data = []; while (!is(BrClose)) data.push(enumConstructor()); var end = expect(BrClose).pos;
 			return decl(EEnum({name:name, doc:doc, params:params, meta:meta, flags:flags, data:data}), union(start,end));
 		}
 		if (acceptKwd(Typedef) != null) {
+			start = previous().pos; pendingDeclarationDoc = null;
 			var name=placedIdent(), params=typeParams(); expect(Binop(OpAssign)); var data=typeHint(); var end=accept(Semicolon);
 			var flags:Array<TypedefFlag>=[]; if(hasAccess(accesses,AExtern)) flags.push(TDExtern); if(hasAccess(accesses,APrivate)) flags.push(TDPrivate);
 			return decl(ETypedef({name:name,doc:doc,params:params,meta:meta,flags:flags,data:data}),union(start,end == null ? data.pos : end.pos));
 		}
 		if (acceptKwd(Abstract) != null) {
+			start = previous().pos; pendingDeclarationDoc = null;
 			var name=placedIdent(), params=typeParams(); var flags:Array<AbstractFlag>=[];
 			if(hasAccess(accesses,AExtern))flags.push(AbExtern); if(hasAccess(accesses,APrivate))flags.push(AbPrivate);
 			if(accept(POpen)!=null) { flags.push(AbOver(typeHint())); expect(PClose); }
@@ -68,6 +75,7 @@ class Grammar {
 			return decl(EAbstract({name:name,doc:doc,params:params,meta:meta,flags:flags,data:fields}),union(start,end));
 		}
 		if (acceptKwd(Function) != null) {
+			start = previous().pos; pendingDeclarationDoc = null;
 			var name = placedIdent(); var func = functionRest(); var end = func.fExpr == null ? name.pos : func.fExpr.pos;
 			return decl(EStatic({name:name, doc:doc, params:func.fParams, meta:meta, flags:accesses, data:FFun(func)}), union(start,end));
 		}
@@ -102,7 +110,7 @@ class Grammar {
 			}
 			var type=typeHintOpt(); var value=accept(Binop(OpAssign)) == null ? null : expression(); var end=expect(Semicolon).pos; return {cffName:name,cffDoc:doc,cffPos:union(start,end),cffMeta:meta,cffAccess:accesses,cffKind:FVar(type,value)};
 		}
-		if (acceptKwd(Function) != null) { var name=placedIdent(); var f=functionRest(); return {cffName:name,cffDoc:doc,cffPos:union(start,f.fExpr == null ? name.pos : f.fExpr.pos),cffMeta:meta,cffAccess:accesses,cffKind:FFun(f)}; }
+		if (acceptKwd(Function) != null) { var name=placedIdent(); var f=functionRest(); var end = f.fExpr == null ? previous().pos : f.fExpr.pos; return {cffName:name,cffDoc:doc,cffPos:union(start,end),cffMeta:meta,cffAccess:accesses,cffKind:FFun(f)}; }
 		fail("Expected class field"); return null;
 	}
 	function functionRest():Func {
@@ -222,7 +230,10 @@ class Grammar {
 		complex = CTPath(typePath());
 		if (accept(Arrow) != null) {
 			var result = typeHint();
-			complex = CTFunction([ {type:complex, pos:start} ], result);
+			complex = switch result.type {
+				case CTFunction(args, ret): CTFunction([{type:complex, pos:start}].concat(args), ret);
+				case _: CTFunction([{type:complex, pos:start}], result);
+			};
 			return {type: optional ? CTOptional({type:complex,pos:union(start,result.pos)}) : complex,pos:union(start,result.pos)};
 		}
 		return {type: optional ? CTOptional({type:complex,pos:start}) : complex,pos:start};

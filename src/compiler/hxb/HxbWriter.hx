@@ -99,10 +99,14 @@ class HxbWriter {
 	final documentation:StringPool;
 	var hasDocumentation = false;
 	final chunks:Array<HxbChunk>;
-	var classes:Map<String, TClass> = new Map();
-	var enums:Map<String, TEnum> = new Map();
-	var typedefs:Map<String, TDef> = new Map();
-	var abstracts:Map<String, TAbstract> = new Map();
+	var classIndices:Map<String, Int> = new Map();
+	var enumIndices:Map<String, Int> = new Map();
+	var typedefIndices:Map<String, Int> = new Map();
+	var abstractIndices:Map<String, Int> = new Map();
+	var classOrder:Array<TClass> = [];
+	var enumOrder:Array<TEnum> = [];
+	var typedefOrder:Array<TDef> = [];
+	var abstractOrder:Array<TAbstract> = [];
 	var ownClasses:Array<TClass> = [];
 	var ownEnums:Array<TEnum> = [];
 	var ownTypedefs:Array<TDef> = [];
@@ -116,6 +120,7 @@ class HxbWriter {
 	var expressionVars:Array<TVar> = [];
 	var expressionVarIndices:ObjectMap<TVar, Int> = new ObjectMap();
 	var fieldTypeParamIndices:ObjectMap<TypedTypeParam, Int> = new ObjectMap();
+	var typeTypeParamIndices:Map<String, Int> = new Map();
 
 	public function new() {
 		strings = new StringPool();
@@ -215,23 +220,24 @@ class HxbWriter {
 	function forwardType(chunk:HxbChunk, type:ModuleType):Void {
 		switch type {
 			case TClassDecl(value):
-				addClass(value, true); chunk.writeU8(0); writePath(chunk, value.clPath); writePosPair(chunk, value.clPos, value.clNamePos); writeEmptyTypeParams(chunk);
+				addClass(value, true); chunk.writeU8(0); writePath(chunk, value.clPath); writePosPair(chunk, value.clPos, value.clNamePos); writeTypeParamsForward(chunk, value.clParams);
 				chunk.writeUleb128(value.clFlags); chunk.writeOption(value.clConstructor, function(field) writeClassFieldForward(chunk, field)); chunk.writeOption(value.clInit, function(field) writeClassFieldForward(chunk, field));
 				chunk.writeUleb128(value.clOrderedFields.length); chunk.writeUleb128(value.clOrderedStatics.length);
 				// hxbReader reads these tail-recursively, hence upstream writes reverse order.
 				for (i in 0...value.clOrderedFields.length) writeClassFieldForward(chunk, value.clOrderedFields[value.clOrderedFields.length - 1 - i]);
 				for (i in 0...value.clOrderedStatics.length) writeClassFieldForward(chunk, value.clOrderedStatics[value.clOrderedStatics.length - 1 - i]);
 			case TEnumDecl(value):
-				addEnum(value, true); chunk.writeU8(1); writePath(chunk, value.ePath); writePosPair(chunk, value.ePos, value.eNamePos); writeEmptyTypeParams(chunk);
+				addEnum(value, true); chunk.writeU8(1); writePath(chunk, value.ePath); writePosPair(chunk, value.ePos, value.eNamePos); writeTypeParamsForward(chunk, value.eParams);
 				chunk.writeUleb128(value.eNames.length);
 				for (name in value.eNames) { var field = value.eConstrs.get(name); chunk.writeString(name); writePosPair(chunk, field.efPos, field.efNamePos); chunk.writeUleb128(field.efIndex); }
-			case TTypeDecl(value): addTypedef(value, true); chunk.writeU8(2); writePath(chunk, value.tPath); writePosPair(chunk, value.tPos, value.tNamePos); writeEmptyTypeParams(chunk);
-			case TAbstractDecl(value): addAbstract(value, true); chunk.writeU8(3); writePath(chunk, value.aPath); writePosPair(chunk, value.aPos, value.aNamePos); writeEmptyTypeParams(chunk);
+			case TTypeDecl(value): addTypedef(value, true); chunk.writeU8(2); writePath(chunk, value.tPath); writePosPair(chunk, value.tPos, value.tNamePos); writeTypeParamsForward(chunk, value.tParams);
+			case TAbstractDecl(value): addAbstract(value, true); chunk.writeU8(3); writePath(chunk, value.aPath); writePosPair(chunk, value.aPos, value.aNamePos); writeTypeParamsForward(chunk, value.aParams);
 		}
 	}
 
 	function writeClass(chunk:HxbChunk, value:TClass):Void {
-		writeCommon(chunk, value.clPrivate, value.clDoc, value.clMeta, value.clUsing);
+		selectTypeParams(value.clParams);
+		writeCommon(chunk, value.clPrivate, value.clDoc, value.clMeta, value.clParams, value.clUsing);
 		writeClassKind(chunk, value.clKind);
 		chunk.writeOption(value.clSuper, function(parent) { writeClassRef(chunk, parent.cls); writeTypes(chunk, parent.params); });
 		chunk.writeList(value.clImplements, function(parent) { writeClassRef(chunk, parent.cls); writeTypes(chunk, parent.params); });
@@ -240,20 +246,21 @@ class HxbWriter {
 	}
 
 	function writeClassFields(chunk:HxbChunk, value:TClass, expressions:Array<{var cls:TClass; var field:TClassField; var bytes:Bytes;}>):Void {
+		selectTypeParams(value.clParams);
 		chunk.writeOption(value.clConstructor, function(field) writeClassFieldData(chunk, value, field, expressions));
 		chunk.writeOption(value.clInit, function(field) writeClassFieldData(chunk, value, field, expressions));
 		chunk.writeList(value.clOrderedFields, function(field) writeClassFieldData(chunk, value, field, expressions));
 		chunk.writeList(value.clOrderedStatics, function(field) writeClassFieldData(chunk, value, field, expressions));
 	}
 
-	function writeEnum(chunk:HxbChunk, value:TEnum):Void { writeCommon(chunk, value.ePrivate, value.eDoc, value.eMeta, value.eUsing); chunk.writeUleb128(value.eFlags); chunk.writeList(value.eNames, chunk.writeString); }
+	function writeEnum(chunk:HxbChunk, value:TEnum):Void { selectTypeParams(value.eParams); writeCommon(chunk, value.ePrivate, value.eDoc, value.eMeta, value.eParams, value.eUsing); chunk.writeUleb128(value.eFlags); chunk.writeList(value.eNames, chunk.writeString); }
 	function writeEnumFields(chunk:HxbChunk, value:TEnum):Void {
 		chunk.writeUleb128(value.eNames.length);
 		for (name in value.eNames) { var field = value.eConstrs.get(name); chunk.writeString(name); writeType(chunk, field.efType); writeEmptyTypeParamsData(chunk); writeDocumentation(chunk, field.efDoc); writeMetadata(chunk, field.efMeta); }
 	}
-	function writeTypedef(chunk:HxbChunk, value:TDef):Void { writeCommon(chunk, value.tPrivate, value.tDoc, value.tMeta, value.tUsing); writeType(chunk, value.tType); }
+	function writeTypedef(chunk:HxbChunk, value:TDef):Void { selectTypeParams(value.tParams); writeCommon(chunk, value.tPrivate, value.tDoc, value.tMeta, value.tParams, value.tUsing); writeType(chunk, value.tType); }
 	function writeAbstract(chunk:HxbChunk, value:TAbstract):Void {
-		writeCommon(chunk, value.aPrivate, value.aDoc, value.aMeta, value.aUsing); chunk.writeOption(value.aImpl, function(cls) writeClassRef(chunk, cls));
+		selectTypeParams(value.aParams); writeCommon(chunk, value.aPrivate, value.aDoc, value.aMeta, value.aParams, value.aUsing); chunk.writeOption(value.aImpl, function(cls) writeClassRef(chunk, cls));
 		chunk.writeU8(1); writeType(chunk, value.aThis); writeTypes(chunk, value.aFrom); writeTypes(chunk, value.aTo); chunk.writeBool(value.aExtern); chunk.writeBool(value.aEnum);
 	}
 	function writeAbstractFields(chunk:HxbChunk, value:TAbstract):Void {
@@ -290,7 +297,7 @@ class HxbWriter {
 		}
 	}
 
-	function writeCommon(chunk:HxbChunk, privateType:Bool, doc:Dynamic, meta:Dynamic, usingTypes:Array<{var cls:TClass; var pos:Pos;}>):Void { chunk.writeBool(privateType); writeDocumentation(chunk, doc); writeMetadata(chunk, meta); writeEmptyTypeParamsData(chunk); chunk.writeList(usingTypes, function(value) { writeClassRef(chunk, value.cls); writePos(chunk, value.pos); }); }
+	function writeCommon(chunk:HxbChunk, privateType:Bool, doc:Dynamic, meta:Dynamic, params:TypeParams, usingTypes:Array<{var cls:TClass; var pos:Pos;}>):Void { chunk.writeBool(privateType); writeDocumentation(chunk, doc); writeMetadata(chunk, meta); writeTypeParamsData(chunk, params); chunk.writeList(usingTypes, function(value) { writeClassRef(chunk, value.cls); writePos(chunk, value.pos); }); }
 	function writeClassKind(chunk:HxbChunk, kind:TClassKind):Void switch kind { case KNormal: chunk.writeU8(0); case KGeneric: chunk.writeU8(3); case KGenericInstance(cls, params): chunk.writeU8(4); writeClassRef(chunk, cls); writeTypes(chunk, params); case KMacroType: chunk.writeU8(5); case KAbstractImpl(abs): chunk.writeU8(7); chunk.writeUleb128(addAbstract(abs, false)); case KModuleFields(_): chunk.writeU8(8); case _: throw "Class kind serialization is not ported"; }
 	function writeFieldKind(chunk:HxbChunk, kind:FieldKind):Void switch kind {
 		case Method(MethNormal): chunk.writeU8(0);
@@ -328,11 +335,12 @@ class HxbWriter {
 	}
 	function writeReferenceType(chunk:HxbChunk, base:Int, getIndex:Void->Int, params:TParams):Void { if (params.length > 2) { chunk.writeU8(base + 9); chunk.writeUleb128(getIndex()); writeTypes(chunk, params); } else { chunk.writeU8(base + params.length); chunk.writeUleb128(getIndex()); for (type in params) writeType(chunk, type); } }
 	function writeTypeParameterRef(chunk:HxbChunk, param:TypedTypeParam):Void switch param.ttpHost {
-		case TPHType: throw "Type-level type parameter serialization is not ported";
+		case TPHType: chunk.writeU8(1); chunk.writeUleb128(typeTypeParamIndices.get(param.ttpName));
 		case TPHConstructor | TPHMethod | TPHEnumConstructor | TPHAnonField: chunk.writeU8(2); chunk.writeUleb128(fieldTypeParamIndices.get(param));
 		case TPHLocal: throw "Local type parameter serialization is not ported";
 		case TPHUnbound: throw "Unbound type parameter cannot be serialized";
 	}
+	function selectTypeParams(params:TypeParams):Void { typeTypeParamIndices = new Map(); for (index in 0...params.length) typeTypeParamIndices.set(params[index].ttpName, index); }
 	function writeClassRef(chunk:HxbChunk, value:TClass):Void chunk.writeUleb128(addClass(value, false));
 	function isVoid(type:T):Bool return switch type { case TAbstract(value, params): value.aPath.pack.length == 0 && value.aPath.name == "Void" && params.length == 0; case _: false; }
 
@@ -410,6 +418,7 @@ class HxbWriter {
 		case TFunction(func): [for (arg in func.tfArgs) if (arg.defaultValue != null && !canWriteExpression(arg.defaultValue)) arg].length == 0 && canWriteExpression(func.tfExpr);
 		case TReturn(value): value == null || canWriteExpression(value);
 		case TCall(callee, args): canWriteExpression(callee) && [for (value in args) if (!canWriteExpression(value)) value].length == 0;
+		case TNew(_, _, args): [for (value in args) if (!canWriteExpression(value)) value].length == 0;
 		case TIdent(_): true;
 		case TParenthesis(value): canWriteExpression(value);
 		case TMeta(_, value): canWriteExpression(value);
@@ -483,6 +492,7 @@ class HxbWriter {
 			case TTypeExpr(TEnumDecl(en)): chunk.writeU8(121); chunk.writeUleb128(addEnum(en, false)); false;
 			case TTypeExpr(TTypeDecl(def)): chunk.writeU8(123); chunk.writeUleb128(addTypedef(def, false)); true;
 			case TTypeExpr(TAbstractDecl(abs)): chunk.writeU8(122); chunk.writeUleb128(addAbstract(abs, false)); true;
+			case TNew(cls, params, args): chunk.writeU8(126); writeClassRef(chunk, cls); writeTypes(chunk, params); chunk.writeList(args, function(arg) writeTExpr(chunk, arg, root, typePool, pos)); true;
 			case TBinop(op, left, right): chunk.writeU8(160 + binopIndex(op)); writeTExpr(chunk, left, root, typePool, pos); writeTExpr(chunk, right, root, typePool, pos); true;
 			case _: throw "Expression serialization is not ported for " + Type.enumConstructor(expr.eexpr);
 		};
@@ -588,10 +598,10 @@ class HxbWriter {
 	}
 
 	function writeReferences():Void {
-		if (classes.keys().hasNext()) { var chunk = startChunk(CLR); chunk.writeUleb128(count(classes)); for (value in ordered(classes)) writeFullPath(chunk, value.clModule.mPath, value.clPath.name); }
-		if (abstracts.keys().hasNext()) { var chunk = startChunk(ABR); chunk.writeUleb128(count(abstracts)); for (value in ordered(abstracts)) writeFullPath(chunk, value.aModule.mPath, value.aPath.name); }
-		if (enums.keys().hasNext()) { var chunk = startChunk(ENR); chunk.writeUleb128(count(enums)); for (value in ordered(enums)) writeFullPath(chunk, value.eModule.mPath, value.ePath.name); }
-		if (typedefs.keys().hasNext()) { var chunk = startChunk(TDR); chunk.writeUleb128(count(typedefs)); for (value in ordered(typedefs)) writeFullPath(chunk, value.tModule.mPath, value.tPath.name); }
+		if (classOrder.length > 0) { var chunk = startChunk(CLR); chunk.writeUleb128(classOrder.length); for (value in classOrder) writeFullPath(chunk, value.clModule.mPath, value.clPath.name); }
+		if (abstractOrder.length > 0) { var chunk = startChunk(ABR); chunk.writeUleb128(abstractOrder.length); for (value in abstractOrder) writeFullPath(chunk, value.aModule.mPath, value.aPath.name); }
+		if (enumOrder.length > 0) { var chunk = startChunk(ENR); chunk.writeUleb128(enumOrder.length); for (value in enumOrder) writeFullPath(chunk, value.eModule.mPath, value.ePath.name); }
+		if (typedefOrder.length > 0) { var chunk = startChunk(TDR); chunk.writeUleb128(typedefOrder.length); for (value in typedefOrder) writeFullPath(chunk, value.tModule.mPath, value.tPath.name); }
 	}
 	function writeStringPool():Void writePool(STR, strings);
 	function writeDocumentationPool():Void {
@@ -604,14 +614,18 @@ class HxbWriter {
 		values.iter(function(value) chunk.writeLengthPrefixedBytes(Bytes.ofString(value)));
 	}
 
-	function addClass(value:TClass, own:Bool):Int return add(classes, pathKey(value.clPath), value, own ? ownClasses : null);
-	function addEnum(value:TEnum, own:Bool):Int return add(enums, pathKey(value.ePath), value, own ? ownEnums : null);
-	function addTypedef(value:TDef, own:Bool):Int return add(typedefs, pathKey(value.tPath), value, own ? ownTypedefs : null);
-	function addAbstract(value:TAbstract, own:Bool):Int return add(abstracts, pathKey(value.aPath), value, own ? ownAbstracts : null);
-	function add<T>(pool:Map<String, T>, key:String, value:T, own:Array<T>):Int { var index = indexOf(pool, key); if (index >= 0) return index; var result = count(pool); pool.set(key, value); if (own != null) own.push(value); return result; }
-	function indexOf<T>(pool:Map<String, T>, key:String):Int { var index = 0; for (existing in pool.keys()) { if (existing == key) return index; index++; } return -1; }
-	function ordered<T>(pool:Map<String, T>):Array<T> { var result = []; for (key in pool.keys()) result.push(pool.get(key)); return result; }
-	function count<T>(pool:Map<String, T>):Int { var result = 0; for (_ in pool.keys()) result++; return result; }
+	function addClass(value:TClass, own:Bool):Int return addOrdered(classIndices, classOrder, pathKey(value.clPath), value, own ? ownClasses : null);
+	function addEnum(value:TEnum, own:Bool):Int return addOrdered(enumIndices, enumOrder, pathKey(value.ePath), value, own ? ownEnums : null);
+	function addTypedef(value:TDef, own:Bool):Int return addOrdered(typedefIndices, typedefOrder, pathKey(value.tPath), value, own ? ownTypedefs : null);
+	function addAbstract(value:TAbstract, own:Bool):Int return addOrdered(abstractIndices, abstractOrder, pathKey(value.aPath), value, own ? ownAbstracts : null);
+	function addOrdered<T>(indices:Map<String, Int>, order:Array<T>, key:String, value:T, own:Array<T>):Int {
+		if (indices.exists(key)) return indices.get(key);
+		var index = order.length;
+		indices.set(key, index);
+		order.push(value);
+		if (own != null) own.push(value);
+		return index;
+	}
 	static function pathKey(path:GlobalTypePath):String return path.pack.join(".") + ":" + path.name;
 	static function writePath(chunk:HxbChunk, path:GlobalTypePath):Void { chunk.writeList(path.pack, chunk.writeString); chunk.writeString(path.name); }
 	static function writeFullPath(chunk:HxbChunk, modulePath:GlobalTypePath, typeName:String):Void { chunk.writeList(modulePath.pack, chunk.writeString); chunk.writeString(modulePath.name); chunk.writeString(typeName); }
@@ -661,7 +675,6 @@ class HxbWriter {
 		chunk.writeString(metadataName(entry.meta)); writePos(chunk, entry.pos); chunk.writeList(entry.exprs, function(expr) writeMetadataExpr(chunk, expr));
 	}
 	static function metadataName(value:Dynamic):String { var name = Std.string(value); return StringTools.startsWith(name, ":") ? name : ":" + name; }
-	static function writeEmptyTypeParams(chunk:HxbChunk):Void chunk.writeUleb128(0);
 	static function writeEmptyTypeParamsData(chunk:HxbChunk):Void {}
 	function writeFieldTypeParamsData(chunk:HxbChunk, params:TypeParams):Void {
 		chunk.writeUleb128(params.length);
@@ -678,6 +691,11 @@ class HxbWriter {
 		writePos(chunk, param.ttpClass.clNamePos);
 		chunk.writeU8(switch param.ttpHost { case TPHType:0; case TPHConstructor:1; case TPHMethod:2; case TPHEnumConstructor:3; case TPHAnonField:4; case TPHLocal:5; case TPHUnbound:6; });
 	});
+	function writeTypeParamsData(chunk:HxbChunk, params:TypeParams):Void for (param in params) {
+		writeMetadata(chunk, param.ttpClass.clMeta);
+		chunk.writeUleb128(0);
+		chunk.writeOption(param.ttpDefault, function(type) writeType(chunk, type));
+	}
 	function writeTypes(chunk:HxbChunk, types:TParams):Void chunk.writeList(types, function(type) writeType(chunk, type));
 	static function chunkOrder(kind:ChunkKind):Int return switch kind { case STR: 0; case DOC: 1; case MDF: 2; case MTF: 3; case IMP: 4; case CLR: 5; case ENR: 6; case ABR: 7; case TDR: 8; case OFR: 9; case OFD: 10; case OBD: 11; case CLD: 12; case END: 13; case ABD: 14; case TDD: 15; case EOT: 16; case EFR: 17; case CFR: 18; case CFD: 19; case EFD: 20; case AFD: 21; case EOF: 22; case EXD: 23; case EOM: 24; }
 }

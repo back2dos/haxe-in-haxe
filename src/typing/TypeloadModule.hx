@@ -21,6 +21,7 @@ class TypeloadModule {
 	var classPaths:ClassPaths;
 	var defines:DefineContext;
 	var modules:Map<String, ModuleDef> = new Map();
+	var moduleImports:Map<String, StringMap<GlobalTypePath>> = new Map();
 	var basicTypes:Map<String, T> = new Map();
 	var basicModule:ModuleDef;
 	var nextModuleId = 0;
@@ -98,6 +99,16 @@ class TypeloadModule {
 	}
 
 	function createModuleTypes(module:ModuleDef, declarations:Array<TypeDecl>):Void {
+		var imports = new StringMap<GlobalTypePath>();
+		for (declaration in declarations) switch declaration.definition {
+			case EImport(value) if (value.path.length > 0):
+				var names = [for (part in value.path) part.name];
+				var moduleName = names.pop();
+				var alias = switch value.mode { case INormal: moduleName; case IAsName(name): name.name; case IAll: null; };
+				if (alias != null) imports.set(alias, {pack:names, name:moduleName});
+			case _:
+		}
+		moduleImports.set(moduleKey(module.mPath), imports);
 		// Like typeload's first pass, allocate every declaration before looking at
 		// fields. This makes references to later declarations in the same module
 		// available while field signatures are built.
@@ -125,6 +136,26 @@ class TypeloadModule {
 					abs.aImpl = impl;
 					module.mTypes.push(TClassDecl(impl));
 				}
+			case EImport(_) | EUsing(_) | EStatic(_):
+		}
+		// typeloadModule.ml initializes all module-level type parameters after the
+		// shells exist, so recursive constraints can resolve sibling declarations.
+		for (declaration in declarations) switch declaration.definition {
+			case EClass(value):
+				var cls = findClass(module, value.name.name);
+				cls.clParams = makeTypeParams(module, cls.clPath, value.params, TPHType);
+				cls.clType = TInst(cls, [for (param in cls.clParams) param.ttpType]);
+			case EEnum(value):
+				var en = findEnum(module, value.name.name);
+				en.eParams = makeTypeParams(module, en.ePath, value.params, TPHType);
+				en.eType = TEnum(en, [for (param in en.eParams) param.ttpType]);
+			case ETypedef(value):
+				var def = switch findModuleType(module, value.name.name) { case TTypeDecl(value): value; case _: throw "Expected typedef"; };
+				def.tParams = makeTypeParams(module, def.tPath, value.params, TPHType);
+			case EAbstract(value):
+				var abs = findAbstract(module, value.name.name);
+				abs.aParams = makeTypeParams(module, abs.aPath, value.params, TPHType);
+				if (abs.aImpl != null) { abs.aImpl.clParams = abs.aParams; abs.aImpl.clType = TInst(abs.aImpl, [for (param in abs.aParams) param.ttpType]); }
 			case EImport(_) | EUsing(_) | EStatic(_):
 		}
 		// The upstream loader installs inheritance after all module type shells
@@ -158,6 +189,8 @@ class TypeloadModule {
 	}
 
 	function initializeAbstract(module:ModuleDef, abs:TAbstract, definition:AbstractDefinition, typeBodies:Bool):Void {
+		var previousTypeParams = activeTypeParams;
+		activeTypeParams = typeParamMap(abs.aParams);
 		var hasUnderlying = false;
 		for (abstractFlag in definition.flags) switch abstractFlag {
 			case AbOver(type): abs.aThis = resolveTypeHint(module, type); hasUnderlying = true;
@@ -167,6 +200,7 @@ class TypeloadModule {
 		}
 		if (!hasUnderlying && hasMetadata(definition.meta, "coreType")) abs.aThis = TAbstract(abs, []);
 		if (abs.aImpl != null) populateAbstractFields(module, abs, definition.data, typeBodies);
+		activeTypeParams = previousTypeParams;
 	}
 
 	function populateAbstractFields(module:ModuleDef, abs:TAbstract, fields:Array<ClassField>, typeBodies:Bool):Void {
@@ -211,15 +245,15 @@ class TypeloadModule {
 	function populateClassFields(module:ModuleDef, cls:TClass, fields:Array<ClassField>, typeBodies:Bool):Void {
 		for (field in fields) {
 			var isStatic = hasAccess(field, AStatic);
-			var params = switch field.cffKind { case FFun(func): makeTypeParams(module, field.cffName.name, func.fParams, TPHMethod); case _: []; };
+			var params = switch field.cffKind { case FFun(func): makeTypeParams(module, {pack:[], name:field.cffName.name}, func.fParams, TPHMethod); case _: []; };
 			var previousTypeParams = activeTypeParams;
-			activeTypeParams = typeParamMap(params);
+			activeTypeParams = typeParamMap(cls.clParams.concat(params));
 			var type = fieldType(module, cls, field);
 			activeTypeParams = previousTypeParams;
 			var typed:TClassField = {
 				cfName: field.cffName.name, cfType: type, cfPos: field.cffPos, cfNamePos: field.cffName.pos,
 				cfDoc: field.cffDoc, cfMeta: field.cffMeta, cfKind: fieldKind(field), cfParams: params,
-				cfExpr: null, cfExprUnoptimized: null, cfOverloads: [], cfFlags: fieldFlags(field, isStatic)
+				cfExpr: null, cfExprUnoptimized: null, cfOverloads: [], cfFlags: fieldFlags(field, isStatic, (cls.clFlags & classFlag(CExtern)) != 0)
 			};
 			if (field.cffName.name == "new" && !isStatic) cls.clConstructor = typed;
 			else if (isStatic) {
@@ -235,7 +269,7 @@ class TypeloadModule {
 		if (typeBodies) for (field in fields) {
 			var typed = hasAccess(field, AStatic) ? cls.clStatics.get(field.cffName.name) : (field.cffName.name == "new" ? cls.clConstructor : cls.clFields.get(field.cffName.name));
 			var previousTypeParams = activeTypeParams;
-			activeTypeParams = typeParamMap(typed.cfParams);
+			activeTypeParams = typeParamMap(cls.clParams.concat(typed.cfParams));
 			switch field.cffKind {
 				case FVar(_, value) | FProp(_, _, _, value): if (value != null) typed.cfExpr = typeExpr(module, cls, value, new StringMap());
 				case FFun(func): if (func.fExpr != null) typed.cfExpr = typeFunction(module, cls, field.cffName.name, func, switch typed.cfType { case TFun(signature): signature; case _: {args: [], ret: TDynamic(null)}; });
@@ -244,13 +278,13 @@ class TypeloadModule {
 		}
 	}
 
-	function makeTypeParams(module:ModuleDef, hostName:String, params:Array<TypeParam>, host:TypeParamHost):TypeParams {
+	function makeTypeParams(module:ModuleDef, hostPath:GlobalTypePath, params:Array<TypeParam>, host:TypeParamHost):TypeParams {
 		var result:TypeParams = [];
 		for (param in params) {
 			var cls:TClass = null;
 			var typedParam:TypedTypeParam = null;
 			cls = {
-				clPath:{pack:[hostName], name:param.tpName.name}, clModule:module, clPos:param.tpName.pos, clNamePos:param.tpName.pos,
+				clPath:{pack:hostPath.pack.concat([hostPath.name]), name:param.tpName.name}, clModule:module, clPos:param.tpName.pos, clNamePos:param.tpName.pos,
 				clPrivate:false, clDoc:null, clMeta:param.tpMeta, clParams:[], clUsing:[], clRestore:function(){}, clType:TDynamic(null),
 				clKind:KNormal, clFlags:0, clSuper:null, clImplements:[], clFields:new StringMap(), clStatics:new StringMap(),
 				clOrderedStatics:[], clOrderedFields:[], clDynamic:null, clArrayAccess:null, clConstructor:null, clInit:null,
@@ -383,6 +417,7 @@ class TypeloadModule {
 	function typeIdent(module:ModuleDef, cls:TClass, name:String, locals:StringMap<TVar>, pos:Pos):TExpr {
 		var local = locals.get(name);
 		if (local != null) return typed(TLocal(local), local.vType, pos);
+		if (name == "this") return typed(TConst(TThis), cls.clType, pos);
 		var field = cls.clFields.get(name);
 		if (field == null) field = cls.clStatics.get(name);
 		if (field != null) return typed(TField(typed(TConst(TThis), cls.clType, pos), FInstance(cls, [], field)), field.cfType, pos);
@@ -462,7 +497,7 @@ class TypeloadModule {
 
 	function resolveTypeHint(module:ModuleDef, hint:TypeHint):T return switch hint.type {
 		case CTPath(path): resolvePath(module, path.path);
-		case CTFunction(args, ret): TFun({args: [for (index in 0...args.length) {name: "arg" + index, optional: false, type: resolveTypeHint(module, args[index])}], ret: resolveTypeHint(module, ret)});
+		case CTFunction(args, ret): TFun({args: [for (arg in args) {name: "", optional: false, type: resolveTypeHint(module, arg)}], ret: resolveTypeHint(module, ret)});
 		case CTParent(type) | CTNamed(_, type): resolveTypeHint(module, type);
 		case CTOptional(type):
 			var stdTypes = loadModule({pack:[], name:"StdTypes"});
@@ -499,8 +534,12 @@ class TypeloadModule {
 		if (path.tpackage.length == 0 && path.tsub == null && basicTypes.exists(path.tname)) return basic(path.tname);
 		if (path.tpackage.length == 0 && path.tname == "Dynamic") return TDynamic(null);
 		var target = current;
+		var resolvedName = path.tname;
 		if (path.tpackage.length != 0) target = loadModule({pack: path.tpackage, name: path.tname});
 		else if (findModuleType(current, path.tname) == null) {
+			var imported = moduleImports.get(moduleKey(current.mPath)).get(path.tname);
+			if (imported != null) try { target = loadModule(imported); resolvedName = imported.name; } catch (_:Dynamic) imported = null;
+			if (imported == null)
 			// Unqualified standard types resolve from root standard modules even
 			// while loading a package-scoped standard module such as haxe.PosInfos.
 			try target = loadModule({pack:[], name:path.tname}) catch (_:Dynamic) {
@@ -510,7 +549,7 @@ class TypeloadModule {
 				}
 			}
 		}
-		var name = path.tpackage.length == 0 ? path.tname : (path.tsub == null ? path.tname : path.tsub);
+		var name = path.tpackage.length == 0 ? resolvedName : (path.tsub == null ? path.tname : path.tsub);
 		if (path.tpackage.length == 0 && path.tsub != null) name = path.tsub;
 		var type = findModuleType(target, name);
 		if (type == null) return TDynamic(null); // built-ins await BasicTypes/Typecore.
@@ -543,8 +582,8 @@ class TypeloadModule {
 		for (entry in metadata) if (Std.string(entry.meta) == name || Std.string(entry.meta) == ":" + name) return true;
 		return false;
 	}
-	static function fieldFlags(field:ClassField, isStatic:Bool):Int {
-		var flags = hasAccess(field, APublic) ? flag(CfPublic) : 0;
+	static function fieldFlags(field:ClassField, isStatic:Bool, externClass:Bool = false):Int {
+		var flags = hasAccess(field, APublic) || (externClass && !hasAccess(field, APrivate)) ? flag(CfPublic) : 0;
 		if (hasAccess(field, APrivate)) flags = 0;
 		if (isStatic) flags |= flag(CfStatic);
 		if (hasAccess(field, AExtern)) flags |= flag(CfExtern);
