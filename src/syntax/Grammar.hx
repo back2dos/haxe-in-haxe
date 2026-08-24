@@ -135,6 +135,14 @@ class Grammar {
 		var left=unary();
 		while (true) { var op=binop(current().token); if (op == null || precedence(op) < min) break; next(); var right=expression(precedence(op)+1); left=expr(EBinop(op,left,right),union(left.pos,right.pos)); }
 		if (min == 0 && accept(Question) != null) { var thenExpr=expression(); expect(DblDot); var elseExpr=expression(); left=expr(ETernary(left,thenExpr,elseExpr),union(left.pos,elseExpr.pos)); }
+		if (min == 0 && is(Arrow)) {
+			var argument = switch left.expr {
+				case EConst(Ident(name)): {name:{name:name, pos:left.pos}, optional:false, meta:[], type:null, expr:null};
+				case EParenthesis({expr:EConst(Ident(name)), pos:argumentPos}): {name:{name:name, pos:argumentPos}, optional:false, meta:[], type:null, expr:null};
+				case _: fail("Invalid arrow function argument", left.pos); null;
+			};
+			left = arrowFunction(left.pos, [argument]);
+		}
 		return left;
 	}
 	function unary():Expr { var t=current(); return switch t.token {
@@ -173,13 +181,40 @@ class Grammar {
 				var right = expression(precedence(OpInterval) + 1);
 				expr(EBinop(OpInterval, left, right), union(left.pos, right.pos));
 			case Kwd(True): expr(EConst(Ident("true")),t.pos); case Kwd(False): expr(EConst(Ident("false")),t.pos); case Kwd(Null): expr(EConst(Ident("null")),t.pos); case Kwd(This): expr(EConst(Ident("this")),t.pos);
-			case POpen: var x=expression(); var end=expect(PClose).pos; expr(EParenthesis(x),union(t.pos,end));
+			case POpen:
+				if (parenthesizedArrowAhead()) {
+					var args:Array<FuncArg> = [];
+					if (!is(PClose)) do args.push(functionArg()) while (accept(Comma) != null);
+					expect(PClose);
+					arrowFunction(t.pos, args);
+				} else {
+					var x=expression(); var end=expect(PClose).pos; expr(EParenthesis(x),union(t.pos,end));
+				}
 			case BrOpen: index--; objectOrIdentifier();
 			case Kwd(New): var p=typePath(); expect(POpen); var args=[]; if(!is(PClose)) do args.push(expression()) while(accept(Comma)!=null); var end=expect(PClose).pos; expr(ENew(p,args),union(t.pos,end));
 			case BkOpen: var values=[]; if (!is(BkClose)) do values.push(expression()) while (accept(Comma)!=null); var end=expect(BkClose).pos; expr(EArrayDecl(values),union(t.pos,end));
 			case Kwd(Function): var name:Null<PlacedName> = is(POpen) ? null : placedIdent(); var f=functionRest(); expr(EFunction(name == null ? FKAnonymous : FKNamed(name,false),f), union(t.pos,f.fExpr == null ? t.pos : f.fExpr.pos));
 			case _: index--; objectOrIdentifier();
 		}; return e;
+	}
+	function parenthesizedArrowAhead():Bool {
+		var depth = 0;
+		var cursor = index;
+		while (cursor < tokens.length) switch tokens[cursor++].token {
+			case POpen: depth++;
+			case PClose if (depth == 0): return cursor < tokens.length && tokens[cursor].token.match(Arrow);
+			case PClose: depth--;
+			case Eof: return false;
+			case _:
+		}
+		return false;
+	}
+	function arrowFunction(start:Pos, args:Array<FuncArg>):Expr {
+		expect(Arrow);
+		var body = expression();
+		var returned = expr(EReturn(body), body.pos);
+		var implicit = expr(EMeta({meta:"implicitReturn", exprs:[], pos:body.pos}, returned), body.pos);
+		return expr(EFunction(FKArrow, {fParams:[], fArgs:args, fType:null, fExpr:implicit}), union(start, body.pos));
 	}
 	function interpolatedString(value:String, pos:Pos):Expr {
 		var parts:Array<Expr> = [];

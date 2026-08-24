@@ -75,3 +75,22 @@ require a non-HXB target, a runtime, or external services may be discovered but
 are not in the initial conformance set. Macro-bearing tests are likewise
 excluded, with their reason recorded, until the Eval macro milestone. Do not
 treat expected-failure compiler tests as HXB comparison cases.
+
+## Reusing upstream tests before full conformance
+
+The upstream suite is useful in three distinct lanes; do not merge their pass
+criteria:
+
+- `haxe test/upstream-parser-corpus.hxml` parses every pinned upstream unit
+  source and guards the current breadth floor. It includes macro and
+  expected-failure sources because parsing them does not execute or validate
+  them. Its score is a directional parser metric, not compiler conformance.
+- Source-only, macro-free cases may become HXB conformance cases only after the
+  pinned reference compiler accepts their effective HXB invocation. Compare
+  those archives member-by-member with `test/compare-hxb.sh`.
+- Macro, target-runtime, display/server, external-library, and expected-failure
+  cases remain explicitly excluded until their corresponding milestone exists.
+
+The initial parser-corpus floor is 808 of 1,366 source files. Increasing that
+number is useful progress; it does not mean those files type or emit conforming
+HXB.
