@@ -383,7 +383,18 @@ class TypeloadModule {
 		case ETernary(condition, thenExpr, elseExpr): canTypeExpression(condition) && canTypeExpression(thenExpr) && canTypeExpression(elseExpr);
 		case EWhile(condition, body, _): canTypeExpression(condition) && canTypeExpression(body);
 		case EReturn(value): value == null || canTypeExpression(value);
-		case EBreak | EContinue | EUntyped(_) | EFor(_, _) | ESwitch(_, _, _) | ETry(_, _) | ECast(_, _) | EIs(_, _) | EDisplay(_, _) | ECheckType(_, _) | EMeta(_, _): false;
+		case EBreak | EContinue: true;
+		case ECast(value, _): canTypeExpression(value);
+		case EFor(iterator, body): canTypeExpression(iterator) && canTypeExpression(body);
+		case EUntyped(_) | ESwitch(_, _, _) | ETry(_, _) | EIs(_, _) | EDisplay(_, _) | ECheckType(_, _) | EMeta(_, _): false;
+	};
+
+	static function moduleTypeOf(type:T):Null<ModuleType> return switch type {
+		case TInst(value, _): TClassDecl(value);
+		case TEnum(value, _): TEnumDecl(value);
+		case TType(value, _): TTypeDecl(value);
+		case TAbstract(value, _): TAbstractDecl(value);
+		case _: null;
 	};
 
 	function optimizeExpression(expression:TExpr):TExpr {
@@ -511,6 +522,12 @@ class TypeloadModule {
 			case EArray(array, index):
 				var arrayExpr = typeExpr(module, cls, array, locals);
 				var indexExpr = typeExpr(module, cls, index, locals);
+				switch arrayExpr.etype {
+					case TAbstract(abs, params):
+						var underlying = applyTypeParams(abs.aThis, abs.aParams, params);
+						arrayExpr = typed(TCast(arrayExpr, null), underlying, arrayExpr.epos);
+					case _:
+				}
 				var elementType = switch arrayExpr.etype {
 					case TInst(arrayClass, [element]) if (arrayClass.clPath.pack.length == 0 && arrayClass.clPath.name == "Array"): element;
 					case _: fallback;
@@ -545,6 +562,12 @@ class TypeloadModule {
 			case EFunction(_, func): var signature:TSignature = {args:[for (arg in func.fArgs) {name:arg.name.name, optional:arg.optional || arg.expr != null, type:arg.type == null ? fallback : (arg.optional ? nullable(module, resolveTypeHint(module, arg.type)) : resolveTypeHint(module, arg.type))}], ret:func.fType == null ? fallback : resolveTypeHint(module, func.fType)}; typeFunction(module, cls, "", func, signature);
 			case EReturn(expr): typed(TReturn(expr == null ? null : typeExpr(module, cls, expr, locals)), fallback, source.pos);
 			case EThrow(expr): typed(TThrow(typeExpr(module, cls, expr, locals)), fallback, source.pos);
+			case EBreak: typed(TBreak, fallback, source.pos);
+			case EContinue: typed(TContinue, fallback, source.pos);
+			case ECast(expr, hint):
+				var value = typeExpr(module, cls, expr, locals);
+				var targetType = hint == null ? value.etype : resolveTypeHint(module, hint);
+				typed(TCast(value, hint == null ? null : moduleTypeOf(targetType)), targetType, source.pos);
 			case EIf(condition, thenExpr, elseExpr): var thenValue = typeExpr(module, cls, thenExpr, locals); typed(TIf(typeExpr(module, cls, condition, locals), thenValue, elseExpr == null ? null : typeExpr(module, cls, elseExpr, locals)), thenValue.etype, source.pos);
 			case ETernary(condition, thenExpr, elseExpr):
 				var thenValue = typeExpr(module, cls, thenExpr, locals);
@@ -555,6 +578,7 @@ class TypeloadModule {
 					typed(TBlock([elseValue]), elseValue.etype, elseExpr.pos)
 				), thenValue.etype, source.pos);
 			case EWhile(condition, body, flag): typed(TWhile(typeExpr(module, cls, condition, locals), typeExpr(module, cls, body, locals), flag), fallback, source.pos);
+			case EFor(iterator, body): typeForLoop(module, cls, iterator, body, locals, source.pos);
 			case _: typed(TIdent("<untyped>"), fallback, source.pos);
 		};
 	}
@@ -569,6 +593,70 @@ class TypeloadModule {
 		case TIf(_, thenExpr, elseExpr): var result = inferReturnType(thenExpr); result == null && elseExpr != null ? inferReturnType(elseExpr) : result;
 		case _: null;
 	};
+
+	function typeForLoop(module:ModuleDef, cls:TClass, iterator:Expr, body:Expr, locals:StringMap<TVar>, pos:Pos):TExpr {
+		var loopName:PlacedName;
+		var source:Expr;
+		switch iterator.expr {
+			case EBinop(OpIn, {expr:EConst(Ident(name)), pos:namePos}, value): loopName = {name:name, pos:namePos}; source = value;
+			case _: throw "Only value iteration is supported";
+		}
+		var bodyLocals = new StringMap<TVar>();
+		for (name => value in locals) bodyLocals.set(name, value);
+		var loopType:T;
+		var declarations:Array<TExpr> = [];
+		var condition:TExpr;
+		var valueExpr:TExpr;
+		var increment:TExpr;
+		switch source.expr {
+			case EBinop(OpInterval, startSource, endSource):
+				loopType = basic("Int");
+				var start = typeExpr(module, cls, startSource, locals);
+				var end = typeExpr(module, cls, endSource, locals);
+				var counter = makeGeneratedVar("`", loopType, startSource.pos);
+				var bound = makeGeneratedVar("`", loopType, endSource.pos);
+				counter.vMeta = generatedLoopMetadata("`", false); bound.vMeta = generatedLoopMetadata("`", false);
+				var counterLocal = typed(TLocal(counter), loopType, iterator.pos);
+				var boundLocal = typed(TLocal(bound), loopType, iterator.pos);
+				declarations.push(typed(TVar(counter, start), loopType, startSource.pos));
+				declarations.push(typed(TVar(bound, end), loopType, endSource.pos));
+				condition = typed(TBinop(OpLt, counterLocal, boundLocal), basic("Bool"), iterator.pos);
+				valueExpr = typed(TUnop(Increment, Postfix, counterLocal), loopType, iterator.pos);
+				increment = null;
+			case _:
+				var sourceExpr = typeExpr(module, cls, source, locals);
+				switch sourceExpr.etype {
+					case TAbstract(abs, params):
+						var underlying = applyTypeParams(abs.aThis, abs.aParams, params);
+						sourceExpr = typed(TCast(sourceExpr, null), underlying, sourceExpr.epos);
+					case _:
+				}
+				var arrayClass:TClass = null;
+				loopType = switch sourceExpr.etype { case TInst(value, [element]) if (value.clPath.name == "Array"): arrayClass = value; element; case _: TDynamic(null); };
+				var counter = makeGeneratedVar("`", basic("Int"), iterator.pos);
+				var sourceVar = makeGeneratedVar("`", sourceExpr.etype, source.pos);
+				counter.vMeta = generatedLoopMetadata("`", false); sourceVar.vMeta = generatedLoopMetadata("`", false);
+				var counterLocal = typed(TLocal(counter), basic("Int"), iterator.pos);
+				var sourceLocal = typed(TLocal(sourceVar), sourceExpr.etype, source.pos);
+				declarations.push(typed(TVar(counter, typed(TConst(TInt(0)), basic("Int"), iterator.pos)), basic("Int"), iterator.pos));
+				declarations.push(typed(TVar(sourceVar, sourceExpr), sourceExpr.etype, source.pos));
+				if (arrayClass == null) throw "Only Array and integer-range iteration are supported";
+				var lengthField = arrayClass.clFields.get("length");
+				var length = typed(TField(sourceLocal, FInstance(arrayClass, [loopType], lengthField)), basic("Int"), iterator.pos);
+				condition = typed(TBinop(OpLt, counterLocal, length), basic("Bool"), iterator.pos);
+				valueExpr = typed(TArray(sourceLocal, counterLocal), loopType, iterator.pos);
+				increment = typed(TUnop(Increment, Prefix, counterLocal), basic("Int"), iterator.pos);
+		}
+		var loopVar = makeVar(loopName.name, loopType, TVOForVariable, loopName.pos, [realPathMetadata(loopName.name)]);
+		loopVar.vFlags |= 1 << core.TType.TType.flagTVarNames.indexOf("VUsedByTyper");
+		bodyLocals.set(loopName.name, loopVar);
+		var loopValues = [typed(TVar(loopVar, valueExpr), loopType, loopName.pos)];
+		if (increment != null) loopValues.push(increment);
+		loopValues.push(typeExpr(module, cls, body, bodyLocals));
+		var whileBody = typed(TBlock(loopValues), basic("Void"), body.pos);
+		declarations.push(typed(TWhile(condition, whileBody, NormalWhile), basic("Void"), pos));
+		return typed(TBlock(declarations), basic("Void"), pos);
+	}
 
 	function typeArrayComprehension(module:ModuleDef, cls:TClass, forExpr:Expr, locals:StringMap<TVar>, arrayPos:Pos):TExpr {
 		var iterator:Expr;
@@ -669,6 +757,24 @@ class TypeloadModule {
 	}
 
 	function typeCall(module:ModuleDef, cls:TClass, source:Expr, args:Array<Expr>, locals:StringMap<TVar>, pos:Pos):TExpr {
+		switch source.expr {
+			case EField(receiverSource, name, _):
+				var receiver = typeExpr(module, cls, receiverSource, locals);
+				switch receiver.etype {
+					case TAbstract(abs, params) if (abs.aImpl != null):
+						var field = abs.aImpl.clStatics.get(name);
+						if (field != null) {
+							var owner = typed(TTypeExpr(TClassDecl(abs.aImpl)), TDynamic(null), source.pos);
+							var callee = typed(TField(owner, FStatic(abs.aImpl, field)), applyTypeParams(field.cfType, abs.aParams, params), source.pos);
+							var values = [receiver].concat([for (arg in args) typeExpr(module, cls, arg, locals)]);
+							if (field.cfParams.length > 0) callee.etype = inferMethodType(field, values);
+							var result = switch callee.etype { case TFun(signature): signature.ret; case _: TDynamic(null); };
+							return typed(TCall(callee, values), result, pos);
+						}
+					case _:
+				}
+			case _:
+		}
 		var callee = typeExpr(module, cls, source, locals);
 		var values = [for (arg in args) typeExpr(module, cls, arg, locals)];
 		var field = switch callee.eexpr {
@@ -758,10 +864,11 @@ class TypeloadModule {
 	function typeVars(module:ModuleDef, cls:TClass, vars:Array<EVar>, locals:StringMap<TVar>, pos:Pos):TExpr {
 		var result:Array<TExpr> = [];
 		for (value in vars) {
-			var type = value.evType == null ? TDynamic(null) : resolveTypeHint(module, value.evType);
+			var initializer = value.evExpr == null ? null : typeExpr(module, cls, value.evExpr, locals);
+			var type = value.evType == null ? (initializer == null ? TDynamic(null) : initializer.etype) : resolveTypeHint(module, value.evType);
 			var variable = makeVar(value.evName.name, type, TVOLocalVariable, value.evName.pos, value.evMeta);
 			locals.set(variable.vName, variable);
-			result.push(typed(TVar(variable, value.evExpr == null ? null : typeExpr(module, cls, value.evExpr, locals)), type, value.evName.pos));
+			result.push(typed(TVar(variable, initializer), type, value.evName.pos));
 		}
 		return result.length == 1 ? result[0] : typed(TBlock(result), TDynamic(null), pos);
 	}
@@ -801,6 +908,17 @@ class TypeloadModule {
 			case TInst(cls, params):
 				var field = cls.clFields.get(name);
 				if (field != null) return typed(TField(object, FInstance(cls, params, field)), applyTypeParams(field.cfType, cls.clParams, params), pos);
+			case TAbstract(abs, params):
+				var underlying = applyTypeParams(abs.aThis, abs.aParams, params);
+				switch underlying {
+					case TInst(cls, classParams):
+						var field = cls.clFields.get(name);
+						if (field != null) {
+							var castExpr = typed(TCast(object, null), underlying, object.epos);
+							return typed(TField(castExpr, FInstance(cls, classParams, field)), applyTypeParams(field.cfType, cls.clParams, classParams), pos);
+						}
+					case _:
+				}
 			case _:
 		}
 		return typed(TField(object, FDynamic(name)), TDynamic(null), pos);

@@ -467,6 +467,8 @@ class HxbWriter {
 		case TBlock(values): [for (value in values) if (!canWriteExpression(value)) value].length == 0;
 		case TFunction(func): [for (arg in func.tfArgs) if (arg.defaultValue != null && !canWriteExpression(arg.defaultValue)) arg].length == 0 && canWriteExpression(func.tfExpr);
 		case TReturn(value): value == null || canWriteExpression(value);
+		case TBreak | TContinue: true;
+		case TThrow(value) | TCast(value, _): canWriteExpression(value);
 		case TIf(condition, thenExpr, elseExpr): canWriteExpression(condition) && canWriteExpression(thenExpr) && (elseExpr == null || canWriteExpression(elseExpr));
 		case TWhile(condition, body, _): canWriteExpression(condition) && canWriteExpression(body);
 		case TCall(callee, args): canWriteExpression(callee) && [for (value in args) if (!canWriteExpression(value)) value].length == 0;
@@ -524,6 +526,9 @@ class HxbWriter {
 			case TReturn(value):
 				if (value == null) chunk.writeU8(90) else { chunk.writeU8(91); writeTExpr(chunk, value, root, typePool, pos); }
 				true;
+			case TContinue: chunk.writeU8(92); true;
+			case TBreak: chunk.writeU8(93); true;
+			case TThrow(value): chunk.writeU8(94); writeTExpr(chunk, value, root, typePool, pos); true;
 			case TIf(condition, thenExpr, elseExpr):
 				if (elseExpr == null) { chunk.writeU8(80); writeTExpr(chunk, condition, root, typePool, pos); writeTExpr(chunk, thenExpr, root, typePool, pos); false; }
 				else { chunk.writeU8(81); writeTExpr(chunk, condition, root, typePool, pos); writeTExpr(chunk, thenExpr, root, typePool, pos); writeTExpr(chunk, elseExpr, root, typePool, pos); true; }
@@ -562,8 +567,10 @@ class HxbWriter {
 				true;
 			case TTypeExpr(TClassDecl(cls)): chunk.writeU8(120); writeClassRef(chunk, cls); false;
 			case TTypeExpr(TEnumDecl(en)): chunk.writeU8(121); chunk.writeUleb128(addEnum(en, false)); false;
-			case TTypeExpr(TTypeDecl(def)): chunk.writeU8(123); chunk.writeUleb128(addTypedef(def, false)); true;
 			case TTypeExpr(TAbstractDecl(abs)): chunk.writeU8(122); chunk.writeUleb128(addAbstract(abs, false)); true;
+			case TTypeExpr(TTypeDecl(def)): chunk.writeU8(123); chunk.writeUleb128(addTypedef(def, false)); true;
+			case TCast(value, null): chunk.writeU8(124); writeTExpr(chunk, value, root, typePool, pos); true;
+			case TCast(value, type): chunk.writeU8(125); writeTExpr(chunk, value, root, typePool, pos); writeModuleTypePath(chunk, type); true;
 			case TNew(cls, params, args): chunk.writeU8(126); writeClassRef(chunk, cls); writeTypes(chunk, params); chunk.writeList(args, function(arg) writeTExpr(chunk, arg, root, typePool, pos)); true;
 			case TBinop(op, left, right): chunk.writeU8(160 + binopIndex(op)); writeTExpr(chunk, left, root, typePool, pos); writeTExpr(chunk, right, root, typePool, pos); true;
 			case TUnop(op, flag, value): chunk.writeU8(140 + unopIndex(op, flag)); writeTExpr(chunk, value, root, typePool, pos); true;
@@ -732,6 +739,12 @@ class HxbWriter {
 	static function pathKey(path:GlobalTypePath):String return path.pack.join(".") + ":" + path.name;
 	static function writePath(chunk:HxbChunk, path:GlobalTypePath):Void { chunk.writeList(path.pack, chunk.writeString); chunk.writeString(path.name); }
 	static function writeFullPath(chunk:HxbChunk, modulePath:GlobalTypePath, typeName:String):Void { chunk.writeList(modulePath.pack, chunk.writeString); chunk.writeString(modulePath.name); chunk.writeString(typeName); }
+	static function writeModuleTypePath(chunk:HxbChunk, type:ModuleType):Void switch type {
+		case TClassDecl(value): writeFullPath(chunk, value.clModule.mPath, value.clPath.name);
+		case TEnumDecl(value): writeFullPath(chunk, value.eModule.mPath, value.ePath.name);
+		case TTypeDecl(value): writeFullPath(chunk, value.tModule.mPath, value.tPath.name);
+		case TAbstractDecl(value): writeFullPath(chunk, value.aModule.mPath, value.aPath.name);
+	}
 	static function writePos(chunk:HxbChunk, pos:Pos):Void { chunk.writeString(pos.pfile); chunk.writeLeb128(pos.pmin); chunk.writeLeb128(pos.pmax); }
 	static function writePosPair(chunk:HxbChunk, first:Pos, second:Pos):Void { writePos(chunk, first); chunk.writeLeb128(second.pmin - first.pmin); chunk.writeLeb128(second.pmax - first.pmin); }
 	function writeDocumentation(chunk:HxbChunk, doc:core.Ast.Documentation):Void {
