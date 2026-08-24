@@ -117,6 +117,7 @@ class HxbWriter {
 	var anonymousTypeIndices:Map<TAnon, Int> = new Map();
 	var inlineAnonymousTypes:ObjectMap<TAnon, Bool> = new ObjectMap();
 	var anonymousFields:Array<TClassField> = [];
+	var anonymousFieldData:Array<Bytes> = [];
 	var anonymousFieldIndices:Map<TClassField, Int> = new Map();
 	var inlineAnonymousFields:ObjectMap<TClassField, Bool> = new ObjectMap();
 	var expressionVars:Array<TVar> = [];
@@ -186,11 +187,6 @@ class HxbWriter {
 				}
 			}
 		}
-		// Field references are discovered while writing expressions. Emit this
-		// pool before anonymous-field metadata so its strings retain upstream
-		// insertion order.
-		writeFieldReferences();
-		writeAnonymousPools();
 		if (ownEnums.length > 0) {
 			var chunk = startChunk(END); chunk.writeList(ownEnums, function(value) writeEnum(chunk, value));
 			chunk = startChunk(EFD); chunk.writeList(ownEnums, function(value) writeEnumFields(chunk, value));
@@ -198,6 +194,10 @@ class HxbWriter {
 		if (ownTypedefs.length > 0) {
 			var chunk = startChunk(TDD); chunk.writeList(ownTypedefs, function(value) writeTypedef(chunk, value));
 		}
+		// References and anonymous fields are finalized only after every owned
+		// declaration has been serialized because typedef bodies can discover both.
+		writeFieldReferences();
+		writeAnonymousPools();
 
 		writeReferences();
 		var mdf = startChunk(MDF);
@@ -597,11 +597,15 @@ class HxbWriter {
 	function writeAnonymousFieldRef(chunk:HxbChunk, value:TClassField):Void {
 		var known = anonymousFieldIndices.exists(value);
 		var index = addAnonymousField(value);
+		// Upstream serializes a newly discovered field into a temporary chunk
+		// immediately, even when its bytes are emitted later through OFD. Besides
+		// handling nested references, this fixes string/document pool order.
+		if (!known) anonymousFieldData[index] = writeAnonymousFieldData(value);
 		var inlineMode = !known && typeNeedsLocalContext(value.cfType);
 		if (inlineMode) inlineAnonymousFields.set(value, true);
 		chunk.writeU8(inlineMode ? 1 : 0);
 		chunk.writeUleb128(index);
-		if (inlineMode) chunk.writeBytes(writeAnonymousFieldData(value));
+		if (inlineMode) chunk.writeBytes(anonymousFieldData[index]);
 	}
 
 	function anonymousNeedsLocalContext(value:TAnon):Bool {
@@ -636,9 +640,7 @@ class HxbWriter {
 	function writeAnonymousFieldData(value:TClassField):Bytes {
 		var chunk = new HxbChunk(EOM, strings);
 		chunk.writeUleb128(1);
-		// Anonymous fields are written from a nested field scope: the upstream
-		// commit_field_type_parameters framing is count=0 followed by nested=0.
-		chunk.writeUleb128(0); chunk.writeU8(0);
+		writeEmptyTypeParamsData(chunk);
 		writeType(chunk, value.cfType);
 		chunk.writeUleb128(value.cfFlags);
 		writeDocumentation(chunk, value.cfDoc);
@@ -667,7 +669,7 @@ class HxbWriter {
 			chunk.writeUleb128(definitions.length);
 			for (index in definitions) {
 				chunk.writeUleb128(index);
-				chunk.writeBytes(writeAnonymousFieldData(anonymousFields[index]));
+				chunk.writeBytes(anonymousFieldData[index]);
 			}
 		}
 		if (definitions.length > 0) {

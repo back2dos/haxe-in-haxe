@@ -63,7 +63,10 @@ class Grammar {
 			start = previous().pos; pendingDeclarationDoc = null;
 			var name=placedIdent(), params=typeParams(); expect(Binop(OpAssign)); var data=typeHint(); var end=accept(Semicolon);
 			var flags:Array<TypedefFlag>=[]; if(hasAccess(accesses,AExtern)) flags.push(TDExtern); if(hasAccess(accesses,APrivate)) flags.push(TDPrivate);
-			return decl(ETypedef({name:name,doc:doc,params:params,meta:meta,flags:flags,data:data}),union(start,end == null ? data.pos : end.pos));
+			// grammar.ml consumes an optional semicolon but excludes it from the
+			// declaration range.
+			var declarationEnd = end == null ? data.pos : {pfile:end.pos.pfile, pmin:end.pos.pmin, pmax:end.pos.pmin};
+			return decl(ETypedef({name:name,doc:doc,params:params,meta:meta,flags:flags,data:data}),union(start,declarationEnd));
 		}
 		if (acceptKwd(Abstract) != null) {
 			start = previous().pos; pendingDeclarationDoc = null;
@@ -243,7 +246,8 @@ class Grammar {
 		if (is(Kwd(Var))) next();
 		if (acceptKwd(Function) != null) {
 			var name = placedIdent(), func = functionRest();
-			return {cffName:name, cffDoc:doc, cffPos:union(start, func.fExpr == null ? name.pos : func.fExpr.pos), cffMeta:meta, cffAccess:accesses, cffKind:FFun(func)};
+			var end = func.fExpr == null ? previous().pos : func.fExpr.pos;
+			return {cffName:name, cffDoc:doc, cffPos:union(start, end), cffMeta:meta, cffAccess:accesses, cffKind:FFun(func)};
 		}
 		var optional = accept(Question) != null;
 		var name = placedIdent();

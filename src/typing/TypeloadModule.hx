@@ -169,6 +169,18 @@ class TypeloadModule {
 				if (abs.aImpl != null) { abs.aImpl.clParams = abs.aParams; abs.aImpl.clType = TInst(abs.aImpl, [for (param in abs.aParams) param.ttpType]); }
 			case EImport(_) | EUsing(_) | EStatic(_):
 		}
+		// Typedef bodies are loaded after every declaration and type parameter shell
+		// exists. This is required for recursive/sibling aliases and keeps their
+		// parameter references (such as Iterator<T>) structural instead of Dynamic.
+		for (declaration in declarations) switch declaration.definition {
+			case ETypedef(value):
+				var def = switch findModuleType(module, value.name.name) { case TTypeDecl(value): value; case _: throw "Expected typedef"; };
+				var previousTypeParams = activeTypeParams;
+				activeTypeParams = typeParamMap(def.tParams);
+				def.tType = resolveTypeHint(module, value.data);
+				activeTypeParams = previousTypeParams;
+			case _:
+		}
 		// The upstream loader installs inheritance after all module type shells
 		// exist, so references to later declarations in the same module work too.
 		for (declaration in declarations) switch declaration.definition {
@@ -914,7 +926,6 @@ class TypeloadModule {
 	function makeDef(module:ModuleDef, value:TypedefDefinition, pos:Pos):TDef {
 		var def:TDef = {tPath:typePath(module,value.name.name,has(value.flags,TDPrivate)), tModule:module, tPos:pos, tNamePos:value.name.pos, tPrivate:has(value.flags,TDPrivate), tDoc:value.doc, tMeta:value.meta, tParams:[], tUsing:[], tRestore:function(){}, tType:TDynamic(null)};
 		def.tType = TType(def, []);
-		if (switch value.data.type { case CTAnonymous(_): true; case _: false; }) def.tType = resolveTypeHint(module, value.data);
 		return def;
 	}
 
