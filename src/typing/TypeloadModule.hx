@@ -206,7 +206,7 @@ class TypeloadModule {
 		// into a batch module.
 		var typeBodies = module.mPath.pack.length == 0 || module.mPath.pack[0] != "haxe"
 			|| (module.mPath.pack.length > 1 && module.mPath.pack[1] == "iterators")
-			|| (module.mPath.pack.length == 1 && module.mPath.name == "EnumTools");
+			|| (module.mPath.pack.length == 1 && (module.mPath.name == "EnumTools" || module.mPath.name == "CallStack"));
 		for (declaration in declarations) switch declaration.definition {
 			case EClass(value): populateClassFields(module, findClass(module, value.name.name), value.data, typeBodies);
 			case EEnum(value): populateEnumConstructors(module, findEnum(module, value.name.name), value.data);
@@ -264,6 +264,7 @@ class TypeloadModule {
 			var typed = abs.aImpl.clStatics.get(source.cffName.name);
 			if (typed == null) continue;
 			if (!hasAccess(source, AStatic)) typed.cfFlags |= flag(CfImpl);
+			if (hasMetadata(source.cffMeta, "arrayAccess")) abs.aArray.push(typed);
 			if (hasMetadata(source.cffMeta, "to")) abs.aToField.push({type:switch typed.cfType { case TFun(signature): signature.ret; case other: other; }, field:typed});
 			if (hasMetadata(source.cffMeta, "from")) abs.aFromField.push({type:switch typed.cfType { case TFun(signature): signature.args.length == 0 ? TDynamic(null) : signature.args[signature.args.length - 1].type; case other: other; }, field:typed});
 		}
@@ -344,7 +345,7 @@ class TypeloadModule {
 			activeTypeParams = typeParamMap(cls.clParams.concat(typed.cfParams));
 			switch field.cffKind {
 				case FVar(_, value) | FProp(_, _, _, value): if (value != null) typed.cfExpr = typeExpr(module, cls, value, new StringMap());
-				case FFun(func): if (func.fExpr != null) {
+				case FFun(func): if (func.fExpr != null && canTypeExpression(func.fExpr)) {
 					var signature = switch typed.cfType { case TFun(value): value; case _: {args: [], ret: TDynamic(null)}; };
 					typed.cfExpr = typeFunction(module, cls, field.cffName.name, func, signature);
 					if (func.fType == null && field.cffName.name != "new") {
@@ -356,7 +357,7 @@ class TypeloadModule {
 							switch typed.cfExpr.eexpr { case TFunction(value): value.tfType = inferred; case _: }
 						}
 					}
-				}
+				} else if (func.fExpr != null) for (arg in func.fArgs) makeVar(arg.name.name, TDynamic(null), TVOArgument, arg.name.pos, arg.meta);
 			}
 			if (typed.cfExpr != null && switch typed.cfKind { case Method(MethInline): true; case _: false; }) {
 				typed.cfExprUnoptimized = typed.cfExpr;
@@ -365,6 +366,25 @@ class TypeloadModule {
 			activeTypeParams = previousTypeParams;
 		}
 	}
+
+	function canTypeExpression(source:Expr):Bool return switch source.expr {
+		case EConst(_): true;
+		case EParenthesis(value) | EThrow(value): canTypeExpression(value);
+		case EArray(array, index) | EBinop(_, array, index): canTypeExpression(array) && canTypeExpression(index);
+		case EField(value, _, _) | EUnop(_, _, value): canTypeExpression(value);
+		case EObjectDecl(fields): Lambda.foreach(fields, function(field) return canTypeExpression(field.expr));
+		case EArrayDecl([value]) if (switch value.expr { case EFor(_, _): true; case _: false; }): true;
+		case EArrayDecl(values) | EBlock(values): Lambda.foreach(values, canTypeExpression);
+		case ECall(value, args): canTypeExpression(value) && Lambda.foreach(args, canTypeExpression);
+		case ENew(_, args): Lambda.foreach(args, canTypeExpression);
+		case EFunction(_, func): func.fExpr == null || canTypeExpression(func.fExpr);
+		case EVars(vars): Lambda.foreach(vars, function(value) return value.evExpr == null || canTypeExpression(value.evExpr));
+		case EIf(condition, thenExpr, elseExpr): canTypeExpression(condition) && canTypeExpression(thenExpr) && (elseExpr == null || canTypeExpression(elseExpr));
+		case ETernary(condition, thenExpr, elseExpr): canTypeExpression(condition) && canTypeExpression(thenExpr) && canTypeExpression(elseExpr);
+		case EWhile(condition, body, _): canTypeExpression(condition) && canTypeExpression(body);
+		case EReturn(value): value == null || canTypeExpression(value);
+		case EBreak | EContinue | EUntyped(_) | EFor(_, _) | ESwitch(_, _, _) | ETry(_, _) | ECast(_, _) | EIs(_, _) | EDisplay(_, _) | ECheckType(_, _) | EMeta(_, _): false;
+	};
 
 	function optimizeExpression(expression:TExpr):TExpr {
 		function optimize(value:TExpr):TExpr return switch value.eexpr {
@@ -751,10 +771,14 @@ class TypeloadModule {
 		if (local != null) { switch local.vKind { case VAbstractThis: case _: local.vFlags |= 1 << core.TType.TType.flagTVarNames.indexOf("VUsedByTyper"); } return typed(TLocal(local), local.vType, pos); }
 		if (name == "this") return typed(TConst(TThis), cls.clType, pos);
 		var field = cls.clFields.get(name);
-		if (field == null) field = cls.clStatics.get(name);
 		if (field != null) {
 			var params = switch cls.clType { case TInst(_, values): values; case _: []; };
 			return typed(TField(typed(TConst(TThis), cls.clType, pos), FInstance(cls, params, field)), applyTypeParams(field.cfType, cls.clParams, params), pos);
+		}
+		field = cls.clStatics.get(name);
+		if (field != null) {
+			var owner = typed(TTypeExpr(TClassDecl(cls)), TDynamic(null), pos);
+			return typed(TField(owner, FStatic(cls, field)), field.cfType, pos);
 		}
 		var moduleType = findModuleType(module, name);
 		if (moduleType == null && name.length > 0 && name.charAt(0) == name.charAt(0).toUpperCase()) {
