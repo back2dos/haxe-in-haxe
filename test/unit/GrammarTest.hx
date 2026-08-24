@@ -46,6 +46,10 @@ class GrammarTest {
 		assert(switch trailingArrayComma.definition { case EClass(value): switch value.data[0].cffKind { case FVar(_, {expr:EArrayDecl(values)}): values.length == 2; case _: false; }; case _: false; });
 		var functionVariableWithoutSemicolon = Grammar.parse('class Main { function run() { var callback = function() {} var next = 1; } }').declarations[0];
 		assert(switch functionVariableWithoutSemicolon.definition { case EClass(value): switch value.data[0].cffKind { case FFun(func): switch func.fExpr.expr { case EBlock(values): values.length == 2; case _: false; }; case _: false; }; case _: false; });
+		var functionFieldWithSemicolon = Grammar.parse('class Main { function new() {}; function run() {}; }').declarations[0];
+		assert(switch functionFieldWithSemicolon.definition { case EClass(value): value.data.length == 2; case _: false; });
+		var literalDollar = Grammar.parse("class Main { var value = 'cost: $'; }").declarations[0];
+		assert(switch literalDollar.definition { case EClass(value): switch value.data[0].cffKind { case FVar(_, {expr:EConst(String(text, _))}): text == "cost: $"; case _: false; }; case _: false; });
 		var callStack = Grammar.parse(sys.io.File.getContent("haxe/std/haxe/CallStack.hx"), core.Define.emptyDefines(), "haxe/std/haxe/CallStack.hx");
 		assert(callStack.declarations.length == 2);
 	}

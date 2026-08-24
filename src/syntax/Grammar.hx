@@ -125,7 +125,7 @@ class Grammar {
 			}
 			var type=typeHintOpt(); var value=accept(Binop(OpAssign)) == null ? null : expression(); var end=expect(Semicolon).pos; return {cffName:name,cffDoc:doc,cffPos:union(start,end),cffMeta:meta,cffAccess:accesses,cffKind:FVar(type,value)};
 		}
-		if (acceptKwd(Function) != null) { var name=placedIdent(); var f=functionRest(); var end = f.fExpr == null ? previous().pos : f.fExpr.pos; return {cffName:name,cffDoc:doc,cffPos:union(start,end),cffMeta:meta,cffAccess:accesses,cffKind:FFun(f)}; }
+		if (acceptKwd(Function) != null) { var name=placedIdent(); var f=functionRest(); var end = f.fExpr == null ? previous().pos : f.fExpr.pos; accept(Semicolon); return {cffName:name,cffDoc:doc,cffPos:union(start,end),cffMeta:meta,cffAccess:accesses,cffKind:FFun(f)}; }
 		fail("Expected class field"); return null;
 	}
 	function functionRest():Func {
@@ -233,6 +233,9 @@ class Grammar {
 		function addLiteral(end:Int):Void if (end > literalStart) parts.push(expr(EConst(String(value.substring(literalStart, end), SDoubleQuotes)), {pfile:pos.pfile, pmin:pos.pmin + 1 + literalStart, pmax:pos.pmin + 1 + end}));
 		while (index < value.length) {
 			if (value.charAt(index) != "$") { index++; continue; }
+			var next = index + 1 < value.length ? value.charAt(index + 1) : "";
+			var interpolationStart = next == "{" || (next >= "a" && next <= "z") || (next >= "A" && next <= "Z") || next == "_";
+			if (!interpolationStart) { index++; continue; }
 			addLiteral(index);
 			if (index + 1 < value.length && value.charAt(index + 1) == "{") {
 				var depth = 1;

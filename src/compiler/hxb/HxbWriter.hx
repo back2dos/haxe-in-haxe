@@ -607,7 +607,7 @@ class HxbWriter {
 		else chunk.writeU8(0);
 	}
 
-	function binopIndex(op:Binop):Int return switch op { case OpAdd:0; case OpMult:1; case OpDiv:2; case OpSub:3; case OpAssign:4; case OpEq:5; case OpNotEq:6; case OpGt:7; case OpGte:8; case OpLt:9; case OpLte:10; case OpAnd:11; case OpOr:12; case OpXor:13; case OpBoolAnd:14; case OpBoolOr:15; case OpShl:16; case OpShr:17; case OpUShr:18; case OpMod:19; case OpInterval:20; case OpArrow:21; case OpIn:22; case OpNullCoal:23; case OpAssignOp(inner):30 + binopIndex(inner); };
+	static function binopIndex(op:Binop):Int return switch op { case OpAdd:0; case OpMult:1; case OpDiv:2; case OpSub:3; case OpAssign:4; case OpEq:5; case OpNotEq:6; case OpGt:7; case OpGte:8; case OpLt:9; case OpLte:10; case OpAnd:11; case OpOr:12; case OpXor:13; case OpBoolAnd:14; case OpBoolOr:15; case OpShl:16; case OpShr:17; case OpUShr:18; case OpMod:19; case OpInterval:20; case OpArrow:21; case OpIn:22; case OpNullCoal:23; case OpAssignOp(inner):30 + binopIndex(inner); };
 	function unopIndex(op:Unop, flag:UnopFlag):Int return switch [op, flag] { case [Increment, Prefix]:0; case [Decrement, Prefix]:1; case [Not, Prefix]:2; case [Neg, Prefix]:3; case [NegBits, Prefix]:4; case [Spread, Prefix]:5; case [Increment, Postfix]:6; case [Decrement, Postfix]:7; case [Not, Postfix]:8; case [Neg, Postfix]:9; case [NegBits, Postfix]:10; case [Spread, Postfix]:11; };
 
 	function addAnonymousType(value:TAnon):Int {
@@ -808,6 +808,8 @@ class HxbWriter {
 				chunk.writeU8(2); chunk.writeString(value); chunk.writeU8(switch kind { case SDoubleQuotes: 0; case SSingleQuotes: 1; });
 			case EConst(Ident(value)):
 				chunk.writeU8(3); chunk.writeString(value);
+			case EBinop(op, left, right):
+				chunk.writeU8(6); chunk.writeU8(binopIndex(op)); writeMetadataExpr(chunk, left); writeMetadataExpr(chunk, right);
 			case EField(object, field, kind):
 				chunk.writeU8(7); writeMetadataExpr(chunk, object); chunk.writeString(field);
 				chunk.writeU8(switch kind { case EFNormal: 0; case EFSafe: 1; });
