@@ -174,7 +174,7 @@ class HxbWriter {
 					var fields = [for (expression in expressions) if (expression.cls == owner) expression];
 					chunk.writeUleb128(fields.length);
 					for (expression in fields) {
-						var kind = expression.cls.clStatics.get(expression.field.cfName) == expression.field ? 0 : 1;
+						var kind = expression.cls.clConstructor == expression.field ? 2 : expression.cls.clInit == expression.field ? 3 : expression.cls.clStatics.get(expression.field.cfName) == expression.field ? 0 : 1;
 						chunk.writeUleb128(writeFieldRef(expression.cls, expression.field, kind));
 						chunk.writeUleb128(expression.bytes.length);
 						chunk.writeBytes(expression.bytes);
@@ -298,9 +298,9 @@ class HxbWriter {
 			writeType(data, value.cfType); data.writeUleb128(value.cfFlags); writeDocumentation(data, value.cfDoc); writeFieldKind(data, value.cfKind);
 			if (value.cfExpr == null || !canWriteExpression(value.cfExpr)) data.writeU8(0) else {
 				data.writeU8(2);
-				var externClass = (owner.clFlags & (1 << core.TType.TType.flagTClassNames.indexOf("CExtern"))) != 0;
 				var coreAbstractImpl = switch owner.clKind { case KAbstractImpl(abs): hasMetadataName(abs.aMeta, "coreType"); case _: false; };
-				expressions.push({cls:owner, field:value, bytes:writeExpression(value.cfExpr, coreAbstractImpl ? null : value.cfExprUnoptimized, externClass || coreAbstractImpl)});
+				var optimizePositions = switch owner.clKind { case KAbstractImpl(_): coreAbstractImpl; case _: true; };
+				expressions.push({cls:owner, field:value, bytes:writeExpression(value.cfExpr, coreAbstractImpl ? null : value.cfExprUnoptimized, optimizePositions)});
 			}
 			writeFieldTypeParamsData(chunk, value.cfParams);
 			chunk.writeBytes(data.getBytes());
@@ -513,7 +513,10 @@ class HxbWriter {
 							case _:
 								chunk.writeU8(103); writeTExpr(chunk, object, root, typePool, pos); writeClassRef(chunk, cls); chunk.writeUleb128(writeFieldRef(cls, field, 0));
 						}
-					case FInstance(cls, params, field): chunk.writeU8(102); writeTExpr(chunk, object, root, typePool, pos); writeClassRef(chunk, cls); writeTypes(chunk, params); chunk.writeUleb128(writeFieldRef(cls, field, 1));
+					case FInstance(cls, params, field):
+						if (expressionThisType != null && switch object.eexpr { case TConst(TThis): true; case _: false; }) {
+							chunk.writeU8(111); writeRelativePos(chunk, object.epos, pos); writeClassRef(chunk, cls); writeTypes(chunk, params); chunk.writeUleb128(writeFieldRef(cls, field, 1));
+						} else { chunk.writeU8(102); writeTExpr(chunk, object, root, typePool, pos); writeClassRef(chunk, cls); writeTypes(chunk, params); chunk.writeUleb128(writeFieldRef(cls, field, 1)); }
 					case FDynamic(name): chunk.writeU8(108); writeTExpr(chunk, object, root, typePool, pos); chunk.writeString(name);
 					case _: throw "Unsupported expression field access";
 				};

@@ -9,6 +9,8 @@ import core.ClassPath.DirectoryClassPath;
 import core.ClassPaths;
 import core.Define;
 import core.Globals.GlobalTypePath;
+import core.TType.TClass;
+import core.TType.TClassField;
 import core.TType.ModuleType;
 import core.ZipOutput;
 import haxe.io.Path;
@@ -111,13 +113,25 @@ class Main {
 		var bit = 1 << core.TType.TType.flagTClassFieldNames.indexOf("CfPostProcessed");
 		for (type in module.mTypes) switch type {
 			case TClassDecl(cls):
-				if (cls.clConstructor != null) cls.clConstructor.cfFlags |= bit;
+				if (cls.clConstructor != null) {
+					cls.clConstructor.cfFlags |= bit;
+					preserveUnoptimizedExpression(cls, cls.clConstructor);
+				}
 				if (cls.clInit != null) cls.clInit.cfFlags |= bit;
-				for (field in cls.clOrderedFields) { field.cfFlags |= bit; if (field.cfExpr != null) field.cfExprUnoptimized = field.cfExpr; }
-				for (field in cls.clOrderedStatics) { field.cfFlags |= bit; if (field.cfExpr != null) field.cfExprUnoptimized = field.cfExpr; }
+				for (field in cls.clOrderedFields) { field.cfFlags |= bit; preserveUnoptimizedExpression(cls, field); }
+				for (field in cls.clOrderedStatics) { field.cfFlags |= bit; preserveUnoptimizedExpression(cls, field); }
 			case _:
 		}
 		if (module.mStatics != null) for (field in module.mStatics.clOrderedStatics) field.cfFlags |= bit;
+	}
+
+	static function preserveUnoptimizedExpression(cls:TClass, field:TClassField):Void {
+		var generic = (field.cfFlags & (1 << core.TType.TType.flagTClassFieldNames.indexOf("CfGeneric"))) != 0;
+		var needed = switch [field.cfKind, cls.clKind] {
+			case [Method(MethInline), _] | [_, KGeneric]: true;
+			case _: generic;
+		};
+		if (needed && field.cfExpr != null && field.cfExprUnoptimized == null) field.cfExprUnoptimized = field.cfExpr;
 	}
 
 	static function shouldExport(path:Array<String>, config:compiler.hxb.HxbWriterConfig.WriterTargetConfig):Bool {

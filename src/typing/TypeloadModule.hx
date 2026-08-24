@@ -272,7 +272,19 @@ class TypeloadModule {
 			activeTypeParams = typeParamMap(cls.clParams.concat(typed.cfParams));
 			switch field.cffKind {
 				case FVar(_, value) | FProp(_, _, _, value): if (value != null) typed.cfExpr = typeExpr(module, cls, value, new StringMap());
-				case FFun(func): if (func.fExpr != null) typed.cfExpr = typeFunction(module, cls, field.cffName.name, func, switch typed.cfType { case TFun(signature): signature; case _: {args: [], ret: TDynamic(null)}; });
+				case FFun(func): if (func.fExpr != null) {
+					var signature = switch typed.cfType { case TFun(value): value; case _: {args: [], ret: TDynamic(null)}; };
+					typed.cfExpr = typeFunction(module, cls, field.cffName.name, func, signature);
+					if (func.fType == null && field.cffName.name != "new") {
+						var inferred = inferReturnType(typed.cfExpr);
+						if (inferred != null) {
+							signature.ret = inferred;
+							typed.cfType = TFun(signature);
+							typed.cfExpr.etype = typed.cfType;
+							switch typed.cfExpr.eexpr { case TFunction(value): value.tfType = inferred; case _: }
+						}
+					}
+				}
 			}
 			activeTypeParams = previousTypeParams;
 		}
@@ -352,7 +364,11 @@ class TypeloadModule {
 			case EArrayDecl(values):
 				var typedValues = [for (value in values) typeExpr(module, cls, value, locals)];
 				typed(TArrayDecl(typedValues), TInst(cls, [typedValues.length == 0 ? TDynamic(null) : typedValues[0].etype]), source.pos);
-			case EBinop(op, left, right): var l = typeExpr(module, cls, left, locals); var r = typeExpr(module, cls, right, locals); typed(TBinop(op, l, r), op == OpAssign ? l.etype : fallback, source.pos);
+			case EBinop(op, left, right):
+				var l = typeExpr(module, cls, left, locals); var r = typeExpr(module, cls, right, locals);
+				var result = switch op { case OpEq | OpNotEq | OpGt | OpGte | OpLt | OpLte | OpBoolAnd | OpBoolOr | OpIn: basic("Bool"); case OpAssign: l.etype; case _: l.etype; };
+				typed(TBinop(op, l, r), result, source.pos);
+			case EUnop(op, flag, value): var operand = typeExpr(module, cls, value, locals); typed(TUnop(op, flag, operand), op == Not ? basic("Bool") : operand.etype, source.pos);
 		case EVars(vars): typeVars(module, cls, vars, locals, source.pos);
 		case EBlock(exprs):
 			var values = [for (expr in exprs) typeExpr(module, cls, expr, locals)];
@@ -371,6 +387,17 @@ class TypeloadModule {
 			case _: typed(TIdent("<untyped>"), fallback, source.pos);
 		};
 	}
+
+	function inferReturnType(expression:TExpr):Null<T> return switch expression.eexpr {
+		case TFunction(value): inferReturnType(value.tfExpr);
+		case TReturn(value): value == null ? basic("Void") : value.etype;
+		case TBlock(values):
+			var result:Null<T> = null;
+			for (value in values) { var found = inferReturnType(value); if (found != null) { result = found; break; } }
+			result;
+		case TIf(_, thenExpr, elseExpr): var result = inferReturnType(thenExpr); result == null && elseExpr != null ? inferReturnType(elseExpr) : result;
+		case _: null;
+	};
 
 	function typeArrayComprehension(module:ModuleDef, cls:TClass, forExpr:Expr, locals:StringMap<TVar>, arrayPos:Pos):TExpr {
 		var iterator:Expr;
