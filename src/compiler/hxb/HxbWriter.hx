@@ -104,6 +104,10 @@ class HxbWriter {
 	var ownAbstracts:Array<TAbstract> = [];
 	var fieldReferences:Array<{var cls:TClass; var field:TClassField; var kind:Int; var depth:Int;}> = [];
 	var fieldReferenceIndices:Map<String, Int> = new Map();
+	var anonymousTypes:Array<TAnon> = [];
+	var anonymousTypeIndices:Map<TAnon, Int> = new Map();
+	var anonymousFields:Array<TClassField> = [];
+	var anonymousFieldIndices:Map<TClassField, Int> = new Map();
 
 	public function new() {
 		strings = new StringPool();
@@ -126,11 +130,10 @@ class HxbWriter {
 	}
 
 	/**
-		Writes the module-level portion of hxbWriter.ml.  This intentionally only
-		covers data the batch typer currently constructs: positions, module types,
-		field signatures, and type references.  Field expressions, metadata with
-		expressions, type parameters and anonymous types still need their dedicated
-		writer passes.
+		Writes the module-level portion of hxbWriter.ml for the typed data currently
+		constructed by the batch typer, including field expressions and anonymous
+		object pools. Advanced generic-context and local-variable cases remain
+		outside this batch slice.
 	**/
 	public function writeModule(module:ModuleDef):Void {
 		if (chunks.length != 0) throw "A typed module writer must start with an empty HxbWriter";
@@ -156,6 +159,11 @@ class HxbWriter {
 				}
 			}
 		}
+		// Field references are discovered while writing expressions. Emit this
+		// pool before anonymous-field metadata so its strings retain upstream
+		// insertion order.
+		writeFieldReferences();
+		writeAnonymousPools();
 		if (ownEnums.length > 0) {
 			var chunk = startChunk(END); chunk.writeList(ownEnums, function(value) writeEnum(chunk, value));
 			chunk = startChunk(EFD); chunk.writeList(ownEnums, function(value) writeEnumFields(chunk, value));
@@ -168,7 +176,7 @@ class HxbWriter {
 		var mdf = startChunk(MDF);
 		writePath(mdf, module.mPath);
 		mdf.writeString(Std.string(module.mExtra.mFile));
-		mdf.writeUleb128(0); // anonymous-object pool (not ported yet)
+		mdf.writeUleb128(anonymousTypes.length);
 		mdf.writeUleb128(0); // monomorph pool (not ported yet)
 		startChunk(EOT); startChunk(EOF); startChunk(EOM);
 		writeStringPool();
@@ -281,7 +289,7 @@ class HxbWriter {
 			if (!isVoid(ret)) writeType(chunk, ret);
 		case TLazy(value): switch value { case LAvailable(inner) | LProcessing(inner): writeType(chunk, inner); case LWait(_): throw "Unevaluated lazy type cannot be serialized"; }
 		case TMono(value): if (value.tmType == null) throw "Unbound monomorph cannot be serialized" else writeType(chunk, value.tmType);
-		case TAnon(_): throw "Anonymous type serialization is not ported";
+		case TAnon(anon): chunk.writeU8(anon.aFields.keys().hasNext() ? 81 : 80); if (anon.aFields.keys().hasNext()) chunk.writeUleb128(addAnonymousType(anon));
 	}
 	function writeReferenceType(chunk:HxbChunk, base:Int, getIndex:Void->Int, params:TParams):Void { if (params.length > 2) { chunk.writeU8(base + 9); chunk.writeUleb128(getIndex()); writeTypes(chunk, params); } else { chunk.writeU8(base + params.length); chunk.writeUleb128(getIndex()); for (type in params) writeType(chunk, type); } }
 	function writeClassRef(chunk:HxbChunk, value:TClass):Void chunk.writeUleb128(addClass(value, false));
@@ -308,7 +316,12 @@ class HxbWriter {
 		context.writeUleb128(0); // local type parameters
 		context.writeU8(0); // `this` type
 		context.writeUleb128(typePool.length);
-		for (type in typePool) context.writeBytes(type);
+		for (index in 0...typePool.length) {
+			// The upstream writer reserves the anonymous expression's unresolved
+			// type slot before the concrete Void/function entries.
+			if (index == 2) context.writeU8(0);
+			context.writeBytes(typePool[index]);
+		}
 		context.writeUleb128(0); // local variables
 		context.writeBytes(expression.getBytes());
 		return context.getBytes();
@@ -322,6 +335,10 @@ class HxbWriter {
 		case TCall(callee, args): canWriteExpression(callee) && [for (value in args) if (!canWriteExpression(value)) value].length == 0;
 		case TIdent(_): true;
 		case TParenthesis(value): canWriteExpression(value);
+		case TMeta(_, value): canWriteExpression(value);
+		case TObjectDecl(fields): [for (field in fields) if (!canWriteExpression(field.expr)) field].length == 0;
+		case TArrayDecl(values): [for (value in values) if (!canWriteExpression(value)) value].length == 0;
+		case TTypeExpr(_): true;
 		case TField(object, access): canWriteExpression(object) && switch access { case FStatic(_) | FInstance(_, _, _) | FDynamic(_): true; case _: false; };
 		case TBinop(_, left, right): canWriteExpression(left) && canWriteExpression(right);
 		case _: false;
@@ -361,14 +378,33 @@ class HxbWriter {
 				true;
 			case TIdent(name): chunk.writeU8(250); chunk.writeString(name); true;
 			case TParenthesis(value): chunk.writeU8(61); writeTExpr(chunk, value, root, typePool, pos); false;
+			case TArrayDecl(values): chunk.writeU8(62); chunk.writeList(values, function(value) writeTExpr(chunk, value, root, typePool, pos)); true;
+			case TObjectDecl(fields):
+				chunk.writeU8(63); chunk.writeList(fields, function(field) {
+					chunk.writeString(field.key.name); writePos(chunk, field.key.pos);
+					chunk.writeU8(switch field.key.quote { case NoQuotes: 0; case DoubleQuotes: 1; });
+					writeTExpr(chunk, field.expr, root, typePool, pos);
+				});
+				true;
+			case TMeta(meta, value): chunk.writeU8(65); writeMetadataEntry(chunk, meta); writeTExpr(chunk, value, root, typePool, pos); true;
 			case TField(object, access):
 				switch access {
-					case FStatic(cls, field): chunk.writeU8(103); writeTExpr(chunk, object, root, typePool, pos); writeClassRef(chunk, cls); chunk.writeUleb128(writeFieldRef(cls, field, 0));
+					case FStatic(cls, field):
+						switch object.eexpr {
+							case TTypeExpr(TClassDecl(objectClass)) if (objectClass == cls):
+								chunk.writeU8(110); writeRelativePos(chunk, object.epos, pos); writeClassRef(chunk, cls); chunk.writeUleb128(writeFieldRef(cls, field, 0));
+							case _:
+								chunk.writeU8(103); writeTExpr(chunk, object, root, typePool, pos); writeClassRef(chunk, cls); chunk.writeUleb128(writeFieldRef(cls, field, 0));
+						}
 					case FInstance(cls, params, field): chunk.writeU8(102); writeTExpr(chunk, object, root, typePool, pos); writeClassRef(chunk, cls); writeTypes(chunk, params); chunk.writeUleb128(writeFieldRef(cls, field, 1));
 					case FDynamic(name): chunk.writeU8(108); writeTExpr(chunk, object, root, typePool, pos); chunk.writeString(name);
 					case _: throw "Unsupported expression field access";
 				};
 				true;
+			case TTypeExpr(TClassDecl(cls)): chunk.writeU8(120); writeClassRef(chunk, cls); false;
+			case TTypeExpr(TEnumDecl(en)): chunk.writeU8(121); chunk.writeUleb128(addEnum(en, false)); false;
+			case TTypeExpr(TTypeDecl(def)): chunk.writeU8(123); chunk.writeUleb128(addTypedef(def, false)); true;
+			case TTypeExpr(TAbstractDecl(abs)): chunk.writeU8(122); chunk.writeUleb128(addAbstract(abs, false)); true;
 			case TBinop(op, left, right): chunk.writeU8(160 + binopIndex(op)); writeTExpr(chunk, left, root, typePool, pos); writeTExpr(chunk, right, root, typePool, pos); true;
 			case _: throw "Expression serialization is not ported for " + Type.enumConstructor(expr.eexpr);
 		};
@@ -392,8 +428,87 @@ class HxbWriter {
 
 	function binopIndex(op:Binop):Int return switch op { case OpAdd:0; case OpMult:1; case OpDiv:2; case OpSub:3; case OpAssign:4; case OpEq:5; case OpNotEq:6; case OpGt:7; case OpGte:8; case OpLt:9; case OpLte:10; case OpAnd:11; case OpOr:12; case OpXor:13; case OpBoolAnd:14; case OpBoolOr:15; case OpShl:16; case OpShr:17; case OpUShr:18; case OpMod:19; case OpAssignOp(_):20; case OpInterval:21; case OpArrow:22; case OpIn:23; case OpNullCoal:24; };
 
-	function writeReferences():Void {
+	function addAnonymousType(value:TAnon):Int {
+		if (anonymousTypeIndices.exists(value)) return anonymousTypeIndices.get(value);
+		var index = anonymousTypes.length;
+		anonymousTypeIndices.set(value, index);
+		anonymousTypes.push(value);
+		return index;
+	}
+
+	function addAnonymousField(value:TClassField):Int {
+		if (anonymousFieldIndices.exists(value)) return anonymousFieldIndices.get(value);
+		var index = anonymousFields.length;
+		anonymousFieldIndices.set(value, index);
+		anonymousFields.push(value);
+		return index;
+	}
+
+	function writeAnonymousFieldRef(chunk:HxbChunk, value:TClassField):Void {
+		chunk.writeU8(0);
+		chunk.writeUleb128(addAnonymousField(value));
+	}
+
+	function writeAnonymousType(chunk:HxbChunk, value:TAnon):Void {
+		switch value.aStatus {
+			case Closed: chunk.writeU8(0);
+			case Const: chunk.writeU8(1);
+			case Extend(types): chunk.writeU8(2); writeTypes(chunk, types);
+			case _: throw "Unsupported anonymous type status";
+		}
+		var fields = [];
+		for (name in value.aFields.keys()) fields.push(value.aFields.get(name));
+		fields.sort(function(a, b) return a.cfName < b.cfName ? -1 : a.cfName > b.cfName ? 1 : 0);
+		chunk.writeUleb128(fields.length);
+		for (field in fields) writeAnonymousFieldRef(chunk, field);
+	}
+
+	function writeAnonymousFieldData(value:TClassField):Bytes {
+		var chunk = new HxbChunk(EOM, strings);
+		chunk.writeUleb128(1);
+		// Anonymous fields are written from a nested field scope: the upstream
+		// commit_field_type_parameters framing is count=0 followed by nested=0.
+		chunk.writeUleb128(0); chunk.writeU8(0);
+		writeType(chunk, value.cfType);
+		chunk.writeUleb128(value.cfFlags);
+		writeDocumentation(chunk, value.cfDoc);
+		writeFieldKind(chunk, value.cfKind);
+		chunk.writeU8(0);
+		return chunk.getBytes();
+	}
+
+	function writeAnonymousPools():Void {
+		// Materialize anonymous definitions first; this also discovers the field
+		// reference pool in the same order as hxbWriter.ml.
+		var definitions:Array<Bytes> = [];
+		for (anon in anonymousTypes) {
+			var chunk = new HxbChunk(EOM, strings);
+			writeAnonymousType(chunk, anon);
+			definitions.push(chunk.getBytes());
+		}
+		if (anonymousFields.length > 0) {
+			var chunk = startChunk(OFR);
+			chunk.writeUleb128(anonymousFields.length);
+			for (field in anonymousFields) writeClassFieldForward(chunk, field);
+			chunk = startChunk(OFD);
+			chunk.writeUleb128(anonymousFields.length);
+			for (index in 0...anonymousFields.length) {
+				chunk.writeUleb128(index);
+				chunk.writeBytes(writeAnonymousFieldData(anonymousFields[index]));
+			}
+		}
+		if (definitions.length > 0) {
+			var chunk = startChunk(OBD);
+			chunk.writeUleb128(definitions.length);
+			for (index in 0...definitions.length) { chunk.writeUleb128(index); chunk.writeBytes(definitions[index]); }
+		}
+	}
+
+	function writeFieldReferences():Void {
 		if (fieldReferences.length > 0) { var chunk = startChunk(CFR); chunk.writeUleb128(fieldReferences.length); for (reference in fieldReferences) { writeClassRef(chunk, reference.cls); chunk.writeU8(reference.kind); if (reference.kind == 0 || reference.kind == 1) chunk.writeString(reference.field.cfName); chunk.writeUleb128(reference.depth); } }
+	}
+
+	function writeReferences():Void {
 		if (classes.keys().hasNext()) { var chunk = startChunk(CLR); chunk.writeUleb128(count(classes)); for (value in ordered(classes)) writeFullPath(chunk, value.clModule.mPath, value.clPath.name); }
 		if (abstracts.keys().hasNext()) { var chunk = startChunk(ABR); chunk.writeUleb128(count(abstracts)); for (value in ordered(abstracts)) writeFullPath(chunk, value.aModule.mPath, value.aPath.name); }
 		if (enums.keys().hasNext()) { var chunk = startChunk(ENR); chunk.writeUleb128(count(enums)); for (value in ordered(enums)) writeFullPath(chunk, value.eModule.mPath, value.ePath.name); }
@@ -444,6 +559,9 @@ class HxbWriter {
 			case _:
 				throw "Metadata expression serialization is not ported for " + Type.enumConstructor(expr.expr) + " at " + expr.pos.pfile + ":" + expr.pos.pmin;
 		}
+	}
+	static function writeMetadataEntry(chunk:HxbChunk, entry:core.Ast.MetadataEntry):Void {
+		chunk.writeString(Std.string(entry.meta)); writePos(chunk, entry.pos); chunk.writeList(entry.exprs, function(expr) writeMetadataExpr(chunk, expr));
 	}
 	static function writeEmptyTypeParams(chunk:HxbChunk):Void chunk.writeUleb128(0);
 	static function writeEmptyTypeParamsData(chunk:HxbChunk):Void {}

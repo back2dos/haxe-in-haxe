@@ -35,7 +35,7 @@ class Main {
 	public static function run(arguments:Array<String>):Void {
 		if (arguments.length > 0 && arguments[0] == "--") arguments = arguments.slice(1);
 		var classPaths = new ClassPaths();
-		var stdPath = "haxe/std/";
+		var stdPath = FileSystem.fullPath("haxe/std") + "/";
 		if (!FileSystem.exists(stdPath)) throw "Pinned standard library not found at " + stdPath;
 		classPaths.push(new DirectoryClassPath(stdPath, Std));
 		var defines = Define.emptyDefines();

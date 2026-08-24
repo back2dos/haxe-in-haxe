@@ -218,14 +218,18 @@ class Grammar {
 	}
 	function anonymousField():ClassField {
 		var doc = documentation(), meta = metadata(), start = current().pos, accesses = access();
+		if (is(Kwd(Var))) next();
 		if (acceptKwd(Function) != null) {
 			var name = placedIdent(), func = functionRest();
 			return {cffName:name, cffDoc:doc, cffPos:union(start, func.fExpr == null ? name.pos : func.fExpr.pos), cffMeta:meta, cffAccess:accesses, cffKind:FFun(func)};
 		}
+		var optional = accept(Question) != null;
 		var name = placedIdent();
 		expect(DblDot);
 		var type = typeHint();
-		return {cffName:name, cffDoc:doc, cffPos:union(start, type.pos), cffMeta:meta, cffAccess:accesses, cffKind:FVar(type, null)};
+		if (optional) type = {type:CTOptional(type), pos:type.pos};
+		var end = accept(Semicolon);
+		return {cffName:name, cffDoc:doc, cffPos:end == null ? union(start, type.pos) : union(start, end.pos), cffMeta:meta, cffAccess:accesses, cffKind:FVar(type, null)};
 	}
 	function typePath():PlacedTypePath { var names=placedPath(); var last=names.pop(); var params=[]; if(accept(Binop(OpLt))!=null) { if(!is(Binop(OpGt))) do params.push(TPType(typeHint())) while(accept(Comma)!=null); expect(Binop(OpGt)); } return Ast.makePtp(Ast.mkTypePath([for(n in names)n.name],last.name,params), names.length == 0 ? last.pos : union(names[0].pos,previous().pos)); }
 	function path():Array<String> return [for(n in placedPath())n.name];

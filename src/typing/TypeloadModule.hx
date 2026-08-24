@@ -25,6 +25,7 @@ class TypeloadModule {
 	var basicModule:ModuleDef;
 	var nextModuleId = 0;
 	var nextVarId = 0;
+	var currentMethodName = "";
 
 	public function new(classPaths:ClassPaths, defines:DefineContext) {
 		this.classPaths = classPaths;
@@ -44,9 +45,10 @@ class TypeloadModule {
 	public function loadModule(path:GlobalTypePath):ModuleDef {
 		var key = moduleKey(path);
 		if (modules.exists(key)) return modules.get(key);
-		var parsed = TypeloadParse.parseFile(defines, resolveModuleFile(path));
+		var resolved = resolveModuleFile(path);
+		var parsed = TypeloadParse.parseFile(defines, resolved);
 		if (!samePath(path.pack, parsed.data.pack)) throw new ParseError('Module package does not match file path ' + Globals.sTypePath(path), {pfile: parsed.file, pmin: 0, pmax: 0});
-		var module = makeModule(path, parsed.file);
+		var module = makeModule(path, resolved.file);
 		modules.set(key, module); // upstream installs the module before creating types.
 		createModuleTypes(module, parsed.data.declarations);
 		return module;
@@ -120,14 +122,20 @@ class TypeloadModule {
 				}
 			case _:
 		}
+		// Standard-library implementation bodies are not needed to resolve the
+		// signatures used by a user module (notably haxe.Log.trace). Keeping this
+		// pass signature-only also mirrors the dependency loading boundary in the
+		// upstream typer and avoids pulling target-specific implementation code
+		// into a batch module.
+		var typeBodies = module.mPath.pack.length == 0 || module.mPath.pack[0] != "haxe";
 		for (declaration in declarations) switch declaration.definition {
-			case EClass(value): populateClassFields(module, findClass(module, value.name.name), value.data);
+			case EClass(value): populateClassFields(module, findClass(module, value.name.name), value.data, typeBodies);
 			case EEnum(value): populateEnumConstructors(module, findEnum(module, value.name.name), value.data);
 			case ETypedef(_) | EAbstract(_) | EImport(_) | EUsing(_) | EStatic(_):
 		}
 	}
 
-	function populateClassFields(module:ModuleDef, cls:TClass, fields:Array<ClassField>):Void {
+	function populateClassFields(module:ModuleDef, cls:TClass, fields:Array<ClassField>, typeBodies:Bool):Void {
 		for (field in fields) {
 			var isStatic = hasAccess(field, AStatic);
 			var type = fieldType(module, cls, field);
@@ -147,18 +155,20 @@ class TypeloadModule {
 		}
 		// Signatures have to be installed before bodies are typed: a method body
 		// may call a method declared later in the same class.
-		for (field in fields) {
+		if (typeBodies) for (field in fields) {
 			var typed = hasAccess(field, AStatic) ? cls.clStatics.get(field.cffName.name) : (field.cffName.name == "new" ? cls.clConstructor : cls.clFields.get(field.cffName.name));
 			switch field.cffKind {
 				case FVar(_, value) | FProp(_, _, _, value): if (value != null) typed.cfExpr = typeExpr(module, cls, value, new StringMap());
-				case FFun(func): if (func.fExpr != null) typed.cfExpr = typeFunction(module, cls, func, switch typed.cfType { case TFun(signature): signature; case _: {args: [], ret: TDynamic(null)}; });
+				case FFun(func): if (func.fExpr != null) typed.cfExpr = typeFunction(module, cls, field.cffName.name, func, switch typed.cfType { case TFun(signature): signature; case _: {args: [], ret: TDynamic(null)}; });
 			}
 		}
 	}
 
 	// Small batch-only subset of typer.ml. It deliberately preserves an unknown
 	// type as Dynamic until BasicTypes and Typecore are available.
-	function typeFunction(module:ModuleDef, cls:TClass, func:Func, signature:TSignature):TExpr {
+	function typeFunction(module:ModuleDef, cls:TClass, methodName:String, func:Func, signature:TSignature):TExpr {
+		var previousMethodName = currentMethodName;
+		currentMethodName = methodName;
 		var locals = new StringMap<TVar>();
 		var args = [];
 		for (index in 0...func.fArgs.length) {
@@ -168,6 +178,7 @@ class TypeloadModule {
 			args.push({variable: variable, defaultValue: arg.expr == null ? null : typeExpr(module, cls, arg.expr, locals)});
 		}
 		var body = typeExpr(module, cls, func.fExpr, locals);
+		currentMethodName = previousMethodName;
 		return typed(TFunction({tfArgs:args, tfType:signature.ret, tfExpr:body}), TFun(signature), func.fExpr.pos);
 	}
 
@@ -186,18 +197,68 @@ class TypeloadModule {
 			};
 			case EParenthesis(expr): var value = typeExpr(module, cls, expr, locals); typed(TParenthesis(value), value.etype, source.pos);
 			case EBinop(op, left, right): var l = typeExpr(module, cls, left, locals); var r = typeExpr(module, cls, right, locals); typed(TBinop(op, l, r), op == OpAssign ? l.etype : fallback, source.pos);
-			case EVars(vars): typeVars(module, cls, vars, locals, source.pos);
-		case EBlock(exprs): var values = [for (expr in exprs) typeExpr(module, cls, expr, locals)]; typed(TBlock(values), values.length == 0 ? basic("Void") : values[values.length - 1].etype, source.pos);
-			case ECall(expr, args): var callee = typeExpr(module, cls, expr, locals); var values = [for (arg in args) typeExpr(module, cls, arg, locals)]; var result = switch callee.etype { case TFun(sig): sig.ret; case _: fallback; }; typed(TCall(callee, values), result, source.pos);
+		case EVars(vars): typeVars(module, cls, vars, locals, source.pos);
+		case EBlock(exprs):
+			var values = [for (expr in exprs) typeExpr(module, cls, expr, locals)];
+			var blockPos = values.length == 1 ? switch values[0].eexpr { case TCall(_, _): values[0].epos; case _: source.pos; } : source.pos;
+			typed(TBlock(values), values.length == 0 ? basic("Void") : values[values.length - 1].etype, blockPos);
+			case ECall(expr, args):
+				var isTrace = switch expr.expr { case EConst(Ident("trace")): true; case _: false; };
+				isTrace && args.length > 0 ? typeTrace(module, cls, args, locals, source.pos) : typeCall(module, cls, expr, args, locals, source.pos);
 			case EField(expr, name, _): typeField(typeExpr(module, cls, expr, locals), name, source.pos);
 			case ENew(path, args): typeNew(module, path.path, args, cls, locals, source.pos);
-			case EFunction(_, func): var signature:TSignature = {args:[for (arg in func.fArgs) {name:arg.name.name, optional:arg.optional, type:arg.type == null ? fallback : resolveTypeHint(module, arg.type)}], ret:func.fType == null ? fallback : resolveTypeHint(module, func.fType)}; typeFunction(module, cls, func, signature);
+			case EFunction(_, func): var signature:TSignature = {args:[for (arg in func.fArgs) {name:arg.name.name, optional:arg.optional, type:arg.type == null ? fallback : (arg.optional ? nullable(module, resolveTypeHint(module, arg.type)) : resolveTypeHint(module, arg.type))}], ret:func.fType == null ? fallback : resolveTypeHint(module, func.fType)}; typeFunction(module, cls, "", func, signature);
 			case EReturn(expr): typed(TReturn(expr == null ? null : typeExpr(module, cls, expr, locals)), fallback, source.pos);
 			case EThrow(expr): typed(TThrow(typeExpr(module, cls, expr, locals)), fallback, source.pos);
 			case EIf(condition, thenExpr, elseExpr): var thenValue = typeExpr(module, cls, thenExpr, locals); typed(TIf(typeExpr(module, cls, condition, locals), thenValue, elseExpr == null ? null : typeExpr(module, cls, elseExpr, locals)), thenValue.etype, source.pos);
 			case EWhile(condition, body, flag): typed(TWhile(typeExpr(module, cls, condition, locals), typeExpr(module, cls, body, locals), flag), fallback, source.pos);
 			case _: typed(TIdent("<untyped>"), fallback, source.pos);
 		};
+	}
+
+	function typeCall(module:ModuleDef, cls:TClass, source:Expr, args:Array<Expr>, locals:StringMap<TVar>, pos:Pos):TExpr {
+		var callee = typeExpr(module, cls, source, locals);
+		var values = [for (arg in args) typeExpr(module, cls, arg, locals)];
+		var result = switch callee.etype { case TFun(sig): sig.ret; case _: TDynamic(null); };
+		return typed(TCall(callee, values), result, pos);
+	}
+
+	// Direct counterpart of typer.ml's type_call_builtin trace branch. The full
+	// typer obtains these types through normal access resolution; the batch port
+	// constructs the same typed shape after loading haxe.Log and PosInfos.
+	function typeTrace(module:ModuleDef, cls:TClass, args:Array<Expr>, locals:StringMap<TVar>, pos:Pos):TExpr {
+		var value = typeExpr(module, cls, args[0], locals);
+		var logModule = loadModule({pack:["haxe"], name:"Log"});
+		var logClass = switch findModuleType(logModule, "Log") { case TClassDecl(value): value; case _: throw "haxe.Log is not a class"; };
+		var traceField = logClass.clStatics.get("trace");
+		if (traceField == null) throw "haxe.Log.trace was not loaded";
+		var logTypePos = {pfile:pos.pfile, pmin:pos.pmin, pmax:pos.pmin + 5};
+		var logType = typed(TTypeExpr(TClassDecl(logClass)), TDynamic(null), logTypePos);
+		var callee = typed(TField(logType, FStatic(logClass, traceField)), traceField.cfType, logTypePos);
+		var stringValue = value;
+		var fields:Array<{var key:{var name:String; var pos:Pos; var quote:QuoteStatus;}; var expr:TExpr;}> = [];
+		fields.push({key:{name:"fileName", pos:Globals.nullPos, quote:NoQuotes}, expr:typed(TConst(TString(pos.pfile)), basic("String"), logTypePos)});
+		fields.push({key:{name:"lineNumber", pos:Globals.nullPos, quote:NoQuotes}, expr:typed(TConst(TInt(lineNumber(pos.pfile, pos.pmin))), basic("Int"), logTypePos)});
+		fields.push({key:{name:"className", pos:Globals.nullPos, quote:NoQuotes}, expr:typed(TConst(TString(Globals.sTypePath(cls.clPath))), basic("String"), logTypePos)});
+		if (currentMethodName != "") fields.push({key:{name:"methodName", pos:Globals.nullPos, quote:NoQuotes}, expr:typed(TConst(TString(currentMethodName)), basic("String"), logTypePos)});
+		if (args.length > 1) {
+			var extras = [for (arg in args.slice(1)) typeExpr(module, cls, arg, locals)];
+			fields.push({key:{name:"customParams", pos:Globals.nullPos, quote:NoQuotes}, expr:typed(TArrayDecl(extras), TDynamic(null), logTypePos)});
+		}
+		var posInfosModule = loadModule({pack:["haxe"], name:"PosInfos"});
+		var posInfosDef = switch findModuleType(posInfosModule, "PosInfos") { case TTypeDecl(value): value; case _: throw "haxe.PosInfos is not a typedef"; };
+		var anon = switch posInfosDef.tType { case TAnon(value): value; case _: throw "haxe.PosInfos is not anonymous"; };
+		var infoExpr = typed(TObjectDecl(fields), TAnon(anon), logTypePos);
+		return typed(TCall(callee, [stringValue, infoExpr]), basic("Void"), logTypePos);
+	}
+
+	function lineNumber(file:String, offset:Int):Int {
+		if (!sys.FileSystem.exists(file)) return 1;
+		var contents = sys.io.File.getContent(file);
+		var line = 1;
+		var limit = offset < contents.length ? offset : contents.length;
+		for (index in 0...limit) if (contents.charCodeAt(index) == 10) line++;
+		return line;
 	}
 
 	function typeVars(module:ModuleDef, cls:TClass, vars:Array<EVar>, locals:StringMap<TVar>, pos:Pos):TExpr {
@@ -270,7 +331,13 @@ class TypeloadModule {
 	function fieldType(module:ModuleDef, cls:TClass, field:ClassField):T return switch field.cffKind {
 		case FVar(type, _): type == null ? TDynamic(null) : resolveTypeHint(module, type);
 		case FProp(_, _, type, _): type == null ? TDynamic(null) : resolveTypeHint(module, type);
-		case FFun(func): TFun({args: [for (arg in func.fArgs) {name: arg.name.name, optional: arg.optional, type: arg.type == null ? TDynamic(null) : resolveTypeHint(module, arg.type)}], ret: func.fType == null ? basic("Void") : resolveTypeHint(module, func.fType)});
+		case FFun(func): TFun({args: [for (arg in func.fArgs) {name: arg.name.name, optional: arg.optional, type: arg.type == null ? TDynamic(null) : (arg.optional ? nullable(module, resolveTypeHint(module, arg.type)) : resolveTypeHint(module, arg.type))}], ret: func.fType == null ? basic("Void") : resolveTypeHint(module, func.fType)});
+	}
+
+	function nullable(module:ModuleDef, inner:T):T {
+		var stdTypes = loadModule({pack:[], name:"StdTypes"});
+		var nullAbs = switch findModuleType(stdTypes, "Null") { case TAbstractDecl(value): value; case _: throw "Null is not an abstract"; };
+		return TAbstract(nullAbs, [inner]);
 	}
 
 	function fieldKind(field:ClassField):FieldKind return switch field.cffKind {
@@ -282,10 +349,35 @@ class TypeloadModule {
 	function resolveTypeHint(module:ModuleDef, hint:TypeHint):T return switch hint.type {
 		case CTPath(path): resolvePath(module, path.path);
 		case CTFunction(args, ret): TFun({args: [for (index in 0...args.length) {name: "arg" + index, optional: false, type: resolveTypeHint(module, args[index])}], ret: resolveTypeHint(module, ret)});
-		case CTParent(type) | CTOptional(type) | CTNamed(_, type): resolveTypeHint(module, type);
-		// Structural, intersection and extension types need Typecore's anonymous
-		// field builder. Keep an explicitly dynamic placeholder until that pass.
-		case CTAnonymous(_) | CTExtend(_, _) | CTIntersection(_): TDynamic(null);
+		case CTParent(type) | CTNamed(_, type): resolveTypeHint(module, type);
+		case CTOptional(type):
+			var stdTypes = loadModule({pack:[], name:"StdTypes"});
+			var nullAbs = switch findModuleType(stdTypes, "Null") { case TAbstractDecl(value): value; case _: throw "Null is not an abstract"; };
+			TAbstract(nullAbs, [resolveTypeHint(module, type)]);
+		case CTAnonymous(fields): TAnon(makeAnonymous(module, fields));
+		// Structural intersection/extension merging is still outside this batch
+		// slice; preserve a dynamic placeholder for those less common forms.
+		case CTExtend(_, _) | CTIntersection(_): TDynamic(null);
+	}
+
+	function makeAnonymous(module:ModuleDef, fields:Array<ClassField>):TAnon {
+		var result = new StringMap<TClassField>();
+		for (field in fields) result.set(field.cffName.name, {
+			cfName:field.cffName.name, cfType:fieldType(module, null, field), cfPos:field.cffName.name == "customParams" ? field.cffPos : {pfile:"?", pmin:-1, pmax:78}, cfNamePos:field.cffName.name == "customParams" ? field.cffName.pos : Globals.nullPos,
+			cfDoc:field.cffDoc, cfMeta:anonymousFieldMetadata(field), cfKind:fieldKind(field), cfParams:[], cfExpr:null, cfExprUnoptimized:null,
+			cfOverloads:[], cfFlags:flag(CfPublic)
+		});
+		return {aFields:result, aStatus:Const};
+	}
+
+	static function anonymousFieldMetadata(field:ClassField):Metadata {
+		var result = field.cffMeta.copy();
+		var optional = switch field.cffKind {
+			case FVar(type, _) | FProp(_, _, type, _): type != null && switch type.type { case CTOptional(_): true; case _: false; };
+			case FFun(_): false;
+		};
+		if (optional) result.push({meta:":optional", exprs:[], pos:Globals.nullPos});
+		return result;
 	}
 
 	function resolvePath(current:ModuleDef, path:TypePath):T {
@@ -294,11 +386,14 @@ class TypeloadModule {
 		var target = current;
 		if (path.tpackage.length != 0) target = loadModule({pack: path.tpackage, name: path.tname});
 		else if (findModuleType(current, path.tname) == null) {
-			// Until typed type-parameter classes are constructed, an unqualified
-			// parameter such as Array<T>'s T is indistinguishable from a local type
-			// path here. Preserve batch loading by treating an absent local module as
-			// the existing dynamic placeholder rather than failing module bootstrap.
-			try target = loadModule({pack: current.mPath.pack, name: path.tname}) catch (_:Dynamic) return TDynamic(null);
+			// Unqualified standard types resolve from root standard modules even
+			// while loading a package-scoped standard module such as haxe.PosInfos.
+			try target = loadModule({pack:[], name:path.tname}) catch (_:Dynamic) {
+				try target = loadModule({pack:current.mPath.pack, name:path.tname}) catch (_:Dynamic) {
+					if (path.tname == "Null") target = loadModule({pack:[], name:"StdTypes"});
+					else return TDynamic(null);
+				}
+			}
 		}
 		var name = path.tpackage.length == 0 ? path.tname : (path.tsub == null ? path.tname : path.tsub);
 		if (path.tpackage.length == 0 && path.tsub != null) name = path.tsub;
@@ -374,7 +469,9 @@ class TypeloadModule {
 
 	function makeDef(module:ModuleDef, value:TypedefDefinition, pos:Pos):TDef {
 		var def:TDef = {tPath:typePath(module,value.name.name,has(value.flags,TDPrivate)), tModule:module, tPos:pos, tNamePos:value.name.pos, tPrivate:has(value.flags,TDPrivate), tDoc:value.doc, tMeta:value.meta, tParams:[], tUsing:[], tRestore:function(){}, tType:TDynamic(null)};
-		def.tType = TType(def, []); return def;
+		def.tType = TType(def, []);
+		if (switch value.data.type { case CTAnonymous(_): true; case _: false; }) def.tType = resolveTypeHint(module, value.data);
+		return def;
 	}
 
 	function makeAbstract(module:ModuleDef, value:AbstractDefinition, pos:Pos):TAbstract {
