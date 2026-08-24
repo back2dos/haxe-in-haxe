@@ -114,6 +114,8 @@ class HxbWriter {
 	var ownAbstracts:Array<TAbstract> = [];
 	var fieldReferences:Array<{var cls:TClass; var field:TClassField; var kind:Int; var depth:Int;}> = [];
 	var fieldReferenceIndices:Map<String, Int> = new Map();
+	var enumFieldReferences:Array<{var en:TEnum; var field:TEnumField;}> = [];
+	var enumFieldReferenceIndices:Map<String, Int> = new Map();
 	var anonymousTypes:Array<TAnon> = [];
 	var anonymousTypeIndices:Map<TAnon, Int> = new Map();
 	var inlineAnonymousTypes:ObjectMap<TAnon, Bool> = new ObjectMap();
@@ -199,6 +201,7 @@ class HxbWriter {
 		// References and anonymous fields are finalized only after every owned
 		// declaration has been serialized because typedef bodies can discover both.
 		writeFieldReferences();
+		writeEnumFieldReferences();
 		writeAnonymousPools();
 
 		writeReferences();
@@ -469,7 +472,9 @@ class HxbWriter {
 		case TReturn(value): value == null || canWriteExpression(value);
 		case TBreak | TContinue: true;
 		case TThrow(value) | TCast(value, _): canWriteExpression(value);
+		case TEnumIndex(value) | TEnumParameter(value, _, _): canWriteExpression(value);
 		case TIf(condition, thenExpr, elseExpr): canWriteExpression(condition) && canWriteExpression(thenExpr) && (elseExpr == null || canWriteExpression(elseExpr));
+		case TSwitch(value): canWriteExpression(value.switchSubject) && Lambda.foreach(value.switchCases, function(item) return Lambda.foreach(item.casePatterns, canWriteExpression) && canWriteExpression(item.caseExpr)) && (value.switchDefault == null || canWriteExpression(value.switchDefault));
 		case TWhile(condition, body, _): canWriteExpression(condition) && canWriteExpression(body);
 		case TCall(callee, args): canWriteExpression(callee) && [for (value in args) if (!canWriteExpression(value)) value].length == 0;
 		case TNew(_, _, args): [for (value in args) if (!canWriteExpression(value)) value].length == 0;
@@ -532,7 +537,14 @@ class HxbWriter {
 			case TIf(condition, thenExpr, elseExpr):
 				if (elseExpr == null) { chunk.writeU8(80); writeTExpr(chunk, condition, root, typePool, pos); writeTExpr(chunk, thenExpr, root, typePool, pos); false; }
 				else { chunk.writeU8(81); writeTExpr(chunk, condition, root, typePool, pos); writeTExpr(chunk, thenExpr, root, typePool, pos); writeTExpr(chunk, elseExpr, root, typePool, pos); true; }
+			case TSwitch(value):
+				chunk.writeU8(82); writeTExpr(chunk, value.switchSubject, root, typePool, pos);
+				chunk.writeList(value.switchCases, function(item) { chunk.writeList(item.casePatterns, function(pattern) writeTExpr(chunk, pattern, root, typePool, pos)); writeTExpr(chunk, item.caseExpr, root, typePool, pos); });
+				chunk.writeOption(value.switchDefault, function(defaultExpr) writeTExpr(chunk, defaultExpr, root, typePool, pos));
+				true;
 			case TWhile(condition, body, flag): chunk.writeU8(flag == NormalWhile ? 84 : 85); writeTExpr(chunk, condition, root, typePool, pos); writeTExpr(chunk, body, root, typePool, pos); false;
+			case TEnumIndex(value): chunk.writeU8(100); writeTExpr(chunk, value, root, typePool, pos); false;
+			case TEnumParameter(value, field, index): chunk.writeU8(101); writeTExpr(chunk, value, root, typePool, pos); chunk.writeUleb128(writeEnumFieldRef(enumOfField(field), field)); chunk.writeUleb128(index); true;
 			case TCall(callee, args):
 				chunk.writeU8(70 + args.length); writeTExpr(chunk, callee, root, typePool, pos); for (arg in args) writeTExpr(chunk, arg, root, typePool, pos);
 				true;
@@ -707,6 +719,10 @@ class HxbWriter {
 		if (fieldReferences.length > 0) { var chunk = startChunk(CFR); chunk.writeUleb128(fieldReferences.length); for (reference in fieldReferences) { writeClassRef(chunk, reference.cls); chunk.writeU8(reference.kind); if (reference.kind == 0 || reference.kind == 1) chunk.writeString(reference.field.cfName); chunk.writeUleb128(reference.depth); } }
 	}
 
+	function writeEnumFieldReferences():Void {
+		if (enumFieldReferences.length > 0) { var chunk = startChunk(EFR); chunk.writeUleb128(enumFieldReferences.length); for (reference in enumFieldReferences) { chunk.writeUleb128(addEnum(reference.en, false)); chunk.writeString(reference.field.efName); } }
+	}
+
 	function writeReferences():Void {
 		if (classOrder.length > 0) { var chunk = startChunk(CLR); chunk.writeUleb128(classOrder.length); for (value in classOrder) writeFullPath(chunk, value.clModule.mPath, value.clPath.name); }
 		if (abstractOrder.length > 0) { var chunk = startChunk(ABR); chunk.writeUleb128(abstractOrder.length); for (value in abstractOrder) writeFullPath(chunk, value.aModule.mPath, value.aPath.name); }
@@ -728,6 +744,18 @@ class HxbWriter {
 	function addEnum(value:TEnum, own:Bool):Int return addOrdered(enumIndices, enumOrder, pathKey(value.ePath), value, own ? ownEnums : null);
 	function addTypedef(value:TDef, own:Bool):Int return addOrdered(typedefIndices, typedefOrder, pathKey(value.tPath), value, own ? ownTypedefs : null);
 	function addAbstract(value:TAbstract, own:Bool):Int return addOrdered(abstractIndices, abstractOrder, pathKey(value.aPath), value, own ? ownAbstracts : null);
+	function writeEnumFieldRef(en:TEnum, field:TEnumField):Int {
+		var key = pathKey(en.ePath) + ":" + field.efName;
+		if (enumFieldReferenceIndices.exists(key)) return enumFieldReferenceIndices.get(key);
+		var index = enumFieldReferences.length;
+		enumFieldReferenceIndices.set(key, index); enumFieldReferences.push({en:en, field:field});
+		return index;
+	}
+	static function enumOfField(field:TEnumField):TEnum return switch field.efType {
+		case TFun(signature): switch signature.ret { case TEnum(value, _): value; case _: throw "Enum field return type is not an enum"; };
+		case TEnum(value, _): value;
+		case _: throw "Enum field type is not an enum";
+	};
 	function addOrdered<T>(indices:Map<String, Int>, order:Array<T>, key:String, value:T, own:Array<T>):Int {
 		if (indices.exists(key)) return indices.get(key);
 		var index = order.length;

@@ -386,7 +386,19 @@ class TypeloadModule {
 		case EBreak | EContinue: true;
 		case ECast(value, _): canTypeExpression(value);
 		case EFor(iterator, body): canTypeExpression(iterator) && canTypeExpression(body);
-		case EUntyped(_) | ESwitch(_, _, _) | ETry(_, _) | EIs(_, _) | EDisplay(_, _) | ECheckType(_, _) | EMeta(_, _): false;
+		case EMeta(_, value): canTypeExpression(value);
+		case ESwitch(subject, cases, defaultCase):
+			canTypeExpression(subject)
+			&& Lambda.foreach(cases, function(item) return item.guard == null && Lambda.foreach(item.values, isSupportedPattern) && (item.expr == null || canTypeExpression(item.expr)))
+			&& (defaultCase == null || defaultCase.expr == null || canTypeExpression(defaultCase.expr));
+		case EUntyped(_) | ETry(_, _) | EIs(_, _) | EDisplay(_, _) | ECheckType(_, _): false;
+	};
+
+	static function isSupportedPattern(value:Expr):Bool return switch value.expr {
+		case EConst(Ident(_)): true;
+		case ECall({expr:EConst(Ident(_))}, args): Lambda.foreach(args, function(arg) return switch arg.expr { case EConst(Ident(_)): true; case _: false; });
+		case EArrayDecl(values): Lambda.foreach(values, isSupportedPattern);
+		case _: false;
 	};
 
 	static function moduleTypeOf(type:T):Null<ModuleType> return switch type {
@@ -568,6 +580,13 @@ class TypeloadModule {
 				var value = typeExpr(module, cls, expr, locals);
 				var targetType = hint == null ? value.etype : resolveTypeHint(module, hint);
 				typed(TCast(value, hint == null ? null : moduleTypeOf(targetType)), targetType, source.pos);
+			case EMeta(meta, expr):
+				var value = typeExpr(module, cls, expr, locals);
+				typed(TMeta(meta, value), value.etype, source.pos);
+			case ESwitch(subject, cases, defaultCase): switch subject.expr {
+				case EArrayDecl(subjects): typeArrayPatternSwitch(module, cls, subjects, cases, defaultCase, locals, source.pos);
+				case _: typeSimpleEnumSwitch(module, cls, subject, cases, defaultCase, locals, source.pos);
+			};
 			case EIf(condition, thenExpr, elseExpr): var thenValue = typeExpr(module, cls, thenExpr, locals); typed(TIf(typeExpr(module, cls, condition, locals), thenValue, elseExpr == null ? null : typeExpr(module, cls, elseExpr, locals)), thenValue.etype, source.pos);
 			case ETernary(condition, thenExpr, elseExpr):
 				var thenValue = typeExpr(module, cls, thenExpr, locals);
@@ -582,6 +601,124 @@ class TypeloadModule {
 			case _: typed(TIdent("<untyped>"), fallback, source.pos);
 		};
 	}
+
+	function typeArrayPatternSwitch(module:ModuleDef, cls:TClass, subjectSources:Array<Expr>, cases:Array<SwitchCase>, defaultCase:Null<SwitchDefault>, locals:StringMap<TVar>, pos:Pos):TExpr {
+		var subjects = [for (source in subjectSources) typeExpr(module, cls, source, locals)];
+		var fallback = defaultCase == null || defaultCase.expr == null ? typed(TConst(TBool(false)), basic("Bool"), pos) : typeExpr(module, cls, defaultCase.expr, locals);
+		var result:TExpr = fallback;
+		for (reverseIndex in 0...cases.length) {
+			var item = cases[cases.length - 1 - reverseIndex];
+			var caseLocals = new StringMap<TVar>(); for (name => value in locals) caseLocals.set(name, value);
+			var declarations:Array<TExpr> = [];
+			var condition:Null<TExpr> = null;
+			for (pattern in item.values) {
+				var patternCondition = typePatternCondition(module, pattern, subjects, caseLocals, declarations);
+				condition = condition == null ? patternCondition : typed(TBinop(OpBoolOr, condition, patternCondition), basic("Bool"), pattern.pos);
+			}
+			var body = item.expr == null ? typed(TBlock([]), basic("Void"), item.pos) : typeExpr(module, cls, item.expr, caseLocals);
+			if (declarations.length > 0) { declarations.push(body); body = typed(TBlock(declarations), body.etype, item.pos); }
+			result = typed(TIf(condition, typed(TBlock([body]), body.etype, item.pos), typed(TBlock([result]), result.etype, result.epos)), body.etype, item.pos);
+		}
+		return result;
+	}
+
+	function typePatternCondition(module:ModuleDef, pattern:Expr, subjects:Array<TExpr>, locals:StringMap<TVar>, declarations:Array<TExpr>):TExpr {
+		return switch pattern.expr {
+			case EArrayDecl(patterns):
+				var condition = typed(TConst(TBool(true)), basic("Bool"), pattern.pos);
+				for (index in 0...patterns.length) if (index < subjects.length) condition = typed(TBinop(OpBoolAnd, condition, typeSinglePatternCondition(module, patterns[index], subjects[index], locals, declarations)), basic("Bool"), patterns[index].pos);
+				condition;
+			case _: typeSinglePatternCondition(module, pattern, subjects[0], locals, declarations);
+		};
+	}
+
+	function typeSinglePatternCondition(module:ModuleDef, pattern:Expr, subject:TExpr, locals:StringMap<TVar>, declarations:Array<TExpr>):TExpr {
+		var name = enumPatternName(pattern);
+		if (name == "_") return typed(TConst(TBool(true)), basic("Bool"), pattern.pos);
+		if (name == "null") return typed(TBinop(OpEq, subject, typed(TConst(TNull), subject.etype, pattern.pos)), basic("Bool"), pattern.pos);
+		var en = enumFromType(subject.etype);
+		if (en == null) for (type in module.mTypes) switch type { case TEnumDecl(candidate) if (candidate.eConstrs.exists(name)): en = candidate; case _: }
+		if (en == null) throw 'Could not resolve enum pattern $name';
+		var field = en.eConstrs.get(name);
+		if (field == null) throw 'Unknown enum constructor $name';
+		switch pattern.expr {
+			case ECall(_, args):
+				var signatureArgs = switch field.efType { case TFun(signature): signature.args; case _: []; };
+				for (index in 0...args.length) switch args[index].expr {
+					case EConst(Ident(variableName)) if (variableName != "_"):
+						var argType = index < signatureArgs.length ? signatureArgs[index].type : TDynamic(null);
+						var variable = makeVar(variableName, argType, TVOPatternVariable, args[index].pos, [realPathMetadata(variableName)]);
+						variable.vFlags |= 1 << core.TType.TType.flagTVarNames.indexOf("VUsedByTyper");
+						locals.set(variableName, variable);
+						declarations.push(typed(TVar(variable, typed(TEnumParameter(subject, field, index), argType, args[index].pos)), argType, args[index].pos));
+					case _:
+				}
+			case _:
+		}
+		var nonNull = typed(TBinop(OpNotEq, subject, typed(TConst(TNull), subject.etype, pattern.pos)), basic("Bool"), pattern.pos);
+		var indexCheck = typed(TBinop(OpEq, typed(TEnumIndex(subject), basic("Int"), pattern.pos), typed(TConst(TInt(field.efIndex)), basic("Int"), pattern.pos)), basic("Bool"), pattern.pos);
+		return typed(TBinop(OpBoolAnd, nonNull, indexCheck), basic("Bool"), pattern.pos);
+	}
+
+	function typeSimpleEnumSwitch(module:ModuleDef, cls:TClass, subjectSource:Expr, cases:Array<SwitchCase>, defaultCase:Null<SwitchDefault>, locals:StringMap<TVar>, pos:Pos):TExpr {
+		var subject = typeExpr(module, cls, subjectSource, locals);
+		var en = enumFromType(subject.etype);
+		if (en == null) {
+			for (type in module.mTypes) switch type {
+				case TEnumDecl(candidate):
+					var matches = true;
+					for (item in cases) for (pattern in item.values) { var name = enumPatternName(pattern); if (name != "_" && !candidate.eConstrs.exists(name)) matches = false; }
+					if (matches) { en = candidate; break; }
+				case _:
+			}
+		}
+		if (en == null) throw "Could not resolve enum switch subject";
+		if (switch subject.etype { case TDynamic(_): true; case _: false; }) subject.etype = en.eType;
+		var typedCases:Array<TSwitchCase> = [];
+		var typedDefault:Null<TExpr> = defaultCase == null || defaultCase.expr == null ? null : typeExpr(module, cls, defaultCase.expr, locals);
+		var resultType:T = typedDefault == null ? basic("Void") : typedDefault.etype;
+		for (item in cases) {
+			var caseLocals = new StringMap<TVar>(); for (name => value in locals) caseLocals.set(name, value);
+			var declarations:Array<TExpr> = [];
+			var patterns:Array<TExpr> = [];
+			for (patternIndex in 0...item.values.length) {
+				var pattern = item.values[patternIndex];
+				var constructorName = enumPatternName(pattern);
+				if (constructorName == "_") continue;
+				var field = en.eConstrs.get(constructorName);
+				if (field == null) throw 'Unknown enum constructor $constructorName';
+				patterns.push(typed(TConst(TInt(field.efIndex)), basic("Int"), pattern.pos));
+				if (patternIndex == 0) switch pattern.expr {
+					case ECall(_, args):
+						var signatureArgs = switch field.efType { case TFun(signature): signature.args; case _: []; };
+						for (index in 0...args.length) switch args[index].expr {
+							case EConst(Ident(name)) if (name != "_"):
+								var argType = index < signatureArgs.length ? signatureArgs[index].type : TDynamic(null);
+								var variable = makeVar(name, argType, TVOPatternVariable, args[index].pos, [realPathMetadata(name)]);
+								variable.vFlags |= 1 << core.TType.TType.flagTVarNames.indexOf("VUsedByTyper");
+								caseLocals.set(name, variable);
+								var parameter = typed(TEnumParameter(subject, field, index), argType, args[index].pos);
+								declarations.push(typed(TVar(variable, parameter), argType, args[index].pos));
+							case _:
+						}
+					case _:
+				}
+			}
+			var body = item.expr == null ? typed(TBlock([]), basic("Void"), item.pos) : typeExpr(module, cls, item.expr, caseLocals);
+			if (declarations.length > 0) { declarations.push(body); body = typed(TBlock(declarations), body.etype, item.pos); }
+			if (typedCases.length == 0) resultType = body.etype;
+			typedCases.push({casePatterns:patterns, caseExpr:body});
+		}
+		var exhaustive = typedDefault == null && typedCases.length == en.eNames.length;
+		return typed(TSwitch({switchSubject:typed(TEnumIndex(subject), basic("Int"), subjectSource.pos), switchCases:typedCases, switchDefault:typedDefault, switchExhaustive:exhaustive}), resultType, pos);
+	}
+
+	static function enumPatternName(pattern:Expr):String return switch pattern.expr { case EConst(Ident(name)): name; case ECall({expr:EConst(Ident(name))}, _): name; case _: ""; };
+	static function enumFromType(type:T):Null<TEnum> return switch type {
+		case TEnum(value, _): value;
+		case TAbstract(abs, [inner]) if (abs.aPath.pack.length == 0 && abs.aPath.name == "Null"): enumFromType(inner);
+		case _: null;
+	};
 
 	function inferReturnType(expression:TExpr):Null<T> return switch expression.eexpr {
 		case TFunction(value): inferReturnType(value.tfExpr);
