@@ -93,6 +93,8 @@ class HxbChunk {
 
 class HxbWriter {
 	public final strings:StringPool;
+	final documentation:StringPool;
+	var hasDocumentation = false;
 	final chunks:Array<HxbChunk>;
 	var classes:Map<String, TClass> = new Map();
 	var enums:Map<String, TEnum> = new Map();
@@ -111,6 +113,7 @@ class HxbWriter {
 
 	public function new() {
 		strings = new StringPool();
+		documentation = new StringPool();
 		chunks = [];
 	}
 
@@ -180,6 +183,7 @@ class HxbWriter {
 		mdf.writeUleb128(0); // monomorph pool (not ported yet)
 		startChunk(EOT); startChunk(EOF); startChunk(EOM);
 		writeStringPool();
+		writeDocumentationPool();
 	}
 
 	public function exportModule():Bytes {
@@ -514,7 +518,16 @@ class HxbWriter {
 		if (enums.keys().hasNext()) { var chunk = startChunk(ENR); chunk.writeUleb128(count(enums)); for (value in ordered(enums)) writeFullPath(chunk, value.eModule.mPath, value.ePath.name); }
 		if (typedefs.keys().hasNext()) { var chunk = startChunk(TDR); chunk.writeUleb128(count(typedefs)); for (value in ordered(typedefs)) writeFullPath(chunk, value.tModule.mPath, value.tPath.name); }
 	}
-	function writeStringPool():Void { var values = strings.finalize(); var chunk = startChunk(STR); chunk.writeUleb128(values.length); values.iter(function(value) chunk.writeLengthPrefixedBytes(Bytes.ofString(value))); }
+	function writeStringPool():Void writePool(STR, strings);
+	function writeDocumentationPool():Void {
+		if (hasDocumentation) writePool(DOC, documentation);
+	}
+	function writePool(kind:ChunkKind, pool:StringPool):Void {
+		var values = pool.finalize();
+		var chunk = startChunk(kind);
+		chunk.writeUleb128(values.length);
+		values.iter(function(value) chunk.writeLengthPrefixedBytes(Bytes.ofString(value)));
+	}
 
 	function addClass(value:TClass, own:Bool):Int return add(classes, pathKey(value.clPath), value, own ? ownClasses : null);
 	function addEnum(value:TEnum, own:Bool):Int return add(enums, pathKey(value.ePath), value, own ? ownEnums : null);
@@ -529,7 +542,16 @@ class HxbWriter {
 	static function writeFullPath(chunk:HxbChunk, modulePath:GlobalTypePath, typeName:String):Void { chunk.writeList(modulePath.pack, chunk.writeString); chunk.writeString(modulePath.name); chunk.writeString(typeName); }
 	static function writePos(chunk:HxbChunk, pos:Pos):Void { chunk.writeString(pos.pfile); chunk.writeLeb128(pos.pmin); chunk.writeLeb128(pos.pmax); }
 	static function writePosPair(chunk:HxbChunk, first:Pos, second:Pos):Void { writePos(chunk, first); chunk.writeLeb128(second.pmin - first.pmin); chunk.writeLeb128(second.pmax - first.pmin); }
-	static function writeDocumentation(chunk:HxbChunk, doc:Dynamic):Void chunk.writeU8(0);
+	function writeDocumentation(chunk:HxbChunk, doc:core.Ast.Documentation):Void {
+		if (doc == null) {
+			chunk.writeU8(0);
+			return;
+		}
+		hasDocumentation = true;
+		chunk.writeU8(1);
+		chunk.writeOption(doc.docOwn, function(value) chunk.writeUleb128(documentation.getOrAdd(value)));
+		chunk.writeList(doc.docInherited, function(value) chunk.writeUleb128(documentation.getOrAdd(value)));
+	}
 	static function writeMetadata(chunk:HxbChunk, meta:Dynamic):Void {
 		var entries:Array<Dynamic> = meta == null ? [] : cast meta;
 		chunk.writeUleb128(entries.length);

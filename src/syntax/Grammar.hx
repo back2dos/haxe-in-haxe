@@ -45,7 +45,7 @@ class Grammar {
 			var name = placedIdent(); var params = typeParams(); var flags:Array<ClassFlag> = interfaceValue ? [HInterface] : [];
 			if (hasAccess(accesses, AExtern)) flags.push(HExtern); if (hasAccess(accesses, APrivate)) flags.push(HPrivate); if (hasAccess(accesses, AFinal)) flags.push(HFinal);
 			while (true) { if (acceptKwd(Extends) != null) flags.push(HExtends(typePath())); else if (acceptKwd(Implements) != null) flags.push(HImplements(typePath())); else break; }
-			expect(BrOpen); var fields = []; while (!is(BrClose)) fields.push(classField()); var end = expect(BrClose).pos;
+			expect(BrOpen); var fields = classFields(); var end = expect(BrClose).pos;
 			return decl(EClass({name:name, doc:doc, params:params, meta:meta, flags:flags, data:fields}), union(start,end));
 		}
 		if (acceptKwd(Enum) != null) {
@@ -64,7 +64,7 @@ class Grammar {
 			if(hasAccess(accesses,AExtern))flags.push(AbExtern); if(hasAccess(accesses,APrivate))flags.push(AbPrivate);
 			if(accept(POpen)!=null) { flags.push(AbOver(typeHint())); expect(PClose); }
 			while(true) { if(identText()=="from") {next();flags.push(AbFrom(typeHint()));} else if(identText()=="to") {next();flags.push(AbTo(typeHint()));} else break; }
-			expect(BrOpen); var fields=[]; while(!is(BrClose)) fields.push(classField()); var end=expect(BrClose).pos;
+			expect(BrOpen); var fields=classFields(); var end=expect(BrClose).pos;
 			return decl(EAbstract({name:name,doc:doc,params:params,meta:meta,flags:flags,data:fields}),union(start,end));
 		}
 		if (acceptKwd(Function) != null) {
@@ -76,8 +76,19 @@ class Grammar {
 
 	var previousKwd:Null<Keyword>;
 	function access():Array<PlacedAccess> { var result=[]; while (true) { var t=current(); var a:Null<Access> = switch t.token { case Kwd(Public): APublic; case Kwd(Private): APrivate; case Kwd(Static): AStatic; case Kwd(Override): AOverride; case Kwd(Dynamic): ADynamic; case Kwd(Inline): AInline; case Kwd(Macro): AMacro; case Kwd(Final): AFinal; case Kwd(Extern): AExtern; case _: null; }; if (a == null) return result; next(); result.push({access:a,pos:t.pos}); } }
-	function classField():ClassField {
+	function classFields():Array<ClassField> {
+		var fields:Array<ClassField> = [];
+		while (!is(BrClose)) {
+			var field = classField();
+			if (field != null) fields.push(field);
+		}
+		return fields;
+	}
+	function classField():Null<ClassField> {
 		var doc=documentation(), meta=metadata(); var start=current().pos; var accesses=access();
+		// Conditional compilation can leave a documentation comment immediately
+		// before the closing brace after its documented field is removed.
+		if (is(BrClose)) return null;
 		if (hasAccess(accesses, AFinal) && !is(Kwd(Var)) && !is(Kwd(Function))) {
 			var name = placedIdent(); var type = typeHintOpt(); var value = accept(Binop(OpAssign)) == null ? null : expression(); var end = expect(Semicolon).pos;
 			return {cffName:name,cffDoc:doc,cffPos:union(start,end),cffMeta:meta,cffAccess:accesses,cffKind:FVar(type,value)};
@@ -247,7 +258,18 @@ class Grammar {
 	}
 	function documentation():Documentation {
 		var value:Null<String>=null;
-		while(true) switch(current().token) { case Comment(v): next(); if(StringTools.startsWith(v,"*")) value=v.substr(1); case CommentLine(_): next(); case _: return Ast.docFromStringOpt(value); }
+		while(true) switch(current().token) {
+			case Comment(v):
+				next();
+				if(StringTools.startsWith(v,"*")) {
+					value=v.substr(1);
+					// Haxe accepts the common `**/` closing style and excludes its
+					// extra star from the documentation text.
+					if(StringTools.endsWith(value,"*")) value=value.substr(0,value.length-1);
+				}
+			case CommentLine(_): next();
+			case _: return Ast.docFromStringOpt(value);
+		}
 	}
 	function metadata():Metadata {
 		var result=[];

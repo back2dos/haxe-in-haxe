@@ -102,8 +102,12 @@ class Preprocessor {
 					// source offsets, so consume the argument and leave positions untouched.
 					if (isActive(frames) && index < tokens.length) index++;
 				case Sharp(name): fail(UnknownDirective(name), item.pos);
-				case Comment(_) | CommentLine(_):
-					// parserEntry removes comments before passing tokens to Grammar.
+				case Comment(value):
+					// Preserve documentation comments for Grammar.documentation(). Other
+					// comments are trivia and would otherwise appear inside expressions.
+					if (isActive(frames) && StringTools.startsWith(value, "*")) output.push(item);
+				case CommentLine(_):
+					// Line comments are trivia.
 				case Eof:
 					if (frames.length != 0) fail(UnclosedConditional, frames[frames.length - 1].pos);
 					output.push(item);

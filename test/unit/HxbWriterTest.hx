@@ -48,6 +48,13 @@ class HxbWriterTest {
 		var propertyWriter = new HxbWriter();
 		propertyWriter.writeModule(propertyModule);
 		if (propertyWriter.exportModule().length <= 4) throw "Property module was not serialized";
+		var documentationModule = new TypeloadModule(paths, Define.emptyDefines()).loadModule({pack:["unit", "moduleload"], name:"Documentation"});
+		var documentationClass = switch documentationModule.mTypes[0] { case TClassDecl(value): value; case _: throw "Expected documented class"; };
+		if (documentationClass.clDoc == null || documentationClass.clDoc.docOwn != " Module type documentation. ") throw "Module documentation was not parsed";
+		var documentationWriter = new HxbWriter();
+		documentationWriter.writeModule(documentationModule);
+		var documentationKinds = chunkKinds(documentationWriter.exportModule());
+		if (documentationKinds.indexOf("DOC") < 0) throw "Documentation pool was not serialized";
 	}
 
 	static function chunkKinds(bytes:haxe.io.Bytes):Array<String> {

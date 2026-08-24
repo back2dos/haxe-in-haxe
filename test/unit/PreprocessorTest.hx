@@ -12,6 +12,9 @@ class PreprocessorTest {
 		assertNames('#if feature >= 2\nclass Selected {}\n#elseif feature\nclass Wrong {}\n#else\nclass Fallback {}\n#end', defines, ["Selected"]);
 		assertNames('#if missing\nclass Wrong {}\n#else\n#if platform.js\nclass Nested {}\n#end\n#end', defines, ["Nested"]);
 		assertNames('#if version("4.3.0") > "4.2.9"\nclass Versioned {}\n#end', defines, ["Versioned"]);
+		var documented = Preprocessor.process('/** Kept. */ class Documented {} // discarded', defines, "Test.hx");
+		if (!Lambda.exists(documented, function(item) return switch item.token { case Comment(value): value == "* Kept. "; case _: false; })) throw "Documentation comment was discarded";
+		if (Lambda.exists(documented, function(item) return switch item.token { case CommentLine(_): true; case _: false; })) throw "Line comment was preserved";
 		assertThrows('#end', defines, InvalidEnd);
 		assertThrows('#if feature\nclass Open {}', defines, UnclosedConditional);
 	}
