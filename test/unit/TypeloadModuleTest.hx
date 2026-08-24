@@ -96,6 +96,15 @@ class TypeloadModuleTest {
 			}
 			case _: throw "Expected module field function";
 		}
+		var valueSwitch = loader.loadModule({pack:["unit", "moduleload"], name:"ValueSwitch"});
+		var valueSwitchClass = switch valueSwitch.mTypes[0] { case TClassDecl(value): value; case _: throw "Expected value-switch class"; };
+		switch valueSwitchClass.clStatics.get("select").cfExpr.eexpr {
+			case TFunction(func): switch func.tfExpr.eexpr {
+				case TReturn({eexpr:TSwitch({switchSubject:{eexpr:TLocal(_)}, switchCases:[{casePatterns:[{eexpr:TField(_, FStatic(_, field))}]}], switchDefault:{eexpr:TConst(TString("no"))}})}): if (field.cfName != "expected") throw "Value-switch pattern selected the wrong field";
+				case _: throw "Value switch was not typed as a direct switch";
+			}
+			case _: throw "Expected value-switch function";
+		}
 		var count = switch module.mTypes[3] { case TAbstractDecl(value): value; case _: throw "Expected Count abstract"; };
 		if (count.aImpl == null || count.aImpl.clPath.pack.join(".") != "unit.moduleload._Example" || count.aImpl.clPath.name != "Count_Impl_") throw "Abstract implementation class was not installed";
 		switch count.aThis { case TAbstract(value, _): if (value.aPath.name != "Int") throw "Abstract underlying type was not resolved"; case _: throw "Expected abstract underlying type"; }

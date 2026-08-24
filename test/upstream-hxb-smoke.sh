@@ -26,7 +26,7 @@ run_case() {
 		-cp "$class_path" --main "$main" --hxb "$port_output"
 	"$HAXE_REFERENCE" --hxb-lib "$port_output" -cp "$class_path" --main "$main" \
 		--no-output -D dump=record -D dump-path="$dump_path"
-	echo "HXB smoke passed: $main"
+	echo "HXB smoke passed: $name ($main)"
 }
 
 run_case module-fields test unit.moduleload.ModuleFields
@@ -35,3 +35,5 @@ run_case issue-6015 haxe/tests/optimization/src issues.Issue6015
 run_case issue-6093 haxe/tests/optimization/src issues.Issue6093
 run_case issue-5931 haxe/tests/optimization/src issues.Issue5931
 run_case issue-3524 haxe/tests/optimization/src issues.Issue3524
+run_case issue-11005 haxe/tests/misc/eval/projects/Issue11005 Main
+run_case issue-9204 haxe/tests/misc/eval/projects/Issue9204 Main

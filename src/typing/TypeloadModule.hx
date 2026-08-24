@@ -627,7 +627,7 @@ class TypeloadModule {
 				typed(TMeta(meta, value), value.etype, source.pos);
 			case ESwitch(subject, cases, defaultCase): switch subject.expr {
 				case EArrayDecl(subjects): typeArrayPatternSwitch(module, cls, subjects, cases, defaultCase, locals, source.pos);
-				case _: typeSimpleEnumSwitch(module, cls, subject, cases, defaultCase, locals, source.pos);
+				case _: typeGeneralSwitch(module, cls, subject, cases, defaultCase, locals, source.pos);
 			};
 			case EIf(condition, thenExpr, elseExpr): var thenValue = typeExpr(module, cls, thenExpr, locals); typed(TIf(typeExpr(module, cls, condition, locals), thenValue, elseExpr == null ? null : typeExpr(module, cls, elseExpr, locals)), thenValue.etype, source.pos);
 			case ETernary(condition, thenExpr, elseExpr):
@@ -642,6 +642,43 @@ class TypeloadModule {
 			case EFor(iterator, body): typeForLoop(module, cls, iterator, body, locals, source.pos);
 			case _: typed(TIdent("<untyped>"), fallback, source.pos);
 		};
+	}
+
+	function typeGeneralSwitch(module:ModuleDef, cls:TClass, subjectSource:Expr, cases:Array<SwitchCase>, defaultCase:Null<SwitchDefault>, locals:StringMap<TVar>, pos:Pos):TExpr {
+		var subject = typeExpr(module, cls, subjectSource, locals);
+		if (enumFromType(subject.etype) != null || findPatternEnum(module, cases) != null) return typeSimpleEnumSwitch(module, cls, subjectSource, cases, defaultCase, locals, pos);
+		var typedCases:Array<TSwitchCase> = [];
+		var typedDefault:Null<TExpr> = defaultCase == null || defaultCase.expr == null ? null : typeExpr(module, cls, defaultCase.expr, locals);
+		var resultType:T = typedDefault == null ? basic("Void") : typedDefault.etype;
+		for (item in cases) {
+			var wildcard = false;
+			var patterns:Array<TExpr> = [];
+			for (pattern in item.values) switch pattern.expr {
+				case EConst(Ident("_")): wildcard = true;
+				case _: patterns.push(typeExpr(module, cls, pattern, locals));
+			}
+			var body = item.expr == null ? typed(TBlock([]), basic("Void"), item.pos) : typeExpr(module, cls, item.expr, locals);
+			if (wildcard) typedDefault = body;
+			else {
+				if (typedCases.length == 0) resultType = body.etype;
+				typedCases.push({casePatterns:patterns, caseExpr:body});
+			}
+		}
+		return typed(TSwitch({switchSubject:subject, switchCases:typedCases, switchDefault:typedDefault, switchExhaustive:false}), resultType, pos);
+	}
+
+	function findPatternEnum(module:ModuleDef, cases:Array<SwitchCase>):Null<TEnum> {
+		for (type in module.mTypes) switch type {
+			case TEnumDecl(candidate):
+				var found = false, matches = true;
+				for (item in cases) for (pattern in item.values) {
+					var name = enumPatternName(pattern);
+					if (name != "" && name != "_") { found = true; if (!candidate.eConstrs.exists(name)) matches = false; }
+				}
+				if (found && matches) return candidate;
+			case _:
+		}
+		return null;
 	}
 
 	function typeArrayPatternSwitch(module:ModuleDef, cls:TClass, subjectSources:Array<Expr>, cases:Array<SwitchCase>, defaultCase:Null<SwitchDefault>, locals:StringMap<TVar>, pos:Pos):TExpr {

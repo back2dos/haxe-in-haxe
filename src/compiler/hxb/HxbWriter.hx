@@ -819,9 +819,19 @@ class HxbWriter {
 					chunk.writeU8(switch field.key.quote { case NoQuotes: 0; case DoubleQuotes: 1; });
 					writeMetadataExpr(chunk, field.expr);
 				});
+			case ENew(path, args):
+				chunk.writeU8(12); writeMetadataPlacedTypePath(chunk, path); chunk.writeList(args, function(arg) writeMetadataExpr(chunk, arg));
 			case _:
 				throw "Metadata expression serialization is not ported for " + Type.enumConstructor(expr.expr) + " at " + expr.pos.pfile + ":" + expr.pos.pmin;
 		}
+	}
+	static function writeMetadataPlacedTypePath(chunk:HxbChunk, path:core.Ast.PlacedTypePath):Void {
+		chunk.writeList(path.path.tpackage, chunk.writeString);
+		chunk.writeString(path.path.tname);
+		if (path.path.tparams.length != 0) throw "Metadata type-parameter serialization is not ported";
+		chunk.writeUleb128(0);
+		chunk.writeOption(path.path.tsub, chunk.writeString);
+		writePosPair(chunk, path.posFull, path.posPath);
 	}
 	static function writeMetadataEntry(chunk:HxbChunk, entry:core.Ast.MetadataEntry):Void {
 		chunk.writeString(metadataName(entry.meta)); writePos(chunk, entry.pos); chunk.writeList(entry.exprs, function(expr) writeMetadataExpr(chunk, expr));
