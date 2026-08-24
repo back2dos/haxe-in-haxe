@@ -276,6 +276,13 @@ class TypeloadModule {
 			}
 			activeTypeParams = previousTypeParams;
 		}
+		else for (field in fields) switch field.cffKind {
+			case FFun(func) if (func.fExpr != null):
+				// The upstream typer allocates argument IDs even for bodies which this
+				// batch slice defers. Keep the global ID stream deterministic for HXB.
+				for (arg in func.fArgs) makeVar(arg.name.name, TDynamic(null), TVOArgument, arg.name.pos, arg.meta);
+			case _:
+		}
 	}
 
 	function makeTypeParams(module:ModuleDef, hostPath:GlobalTypePath, params:Array<TypeParam>, host:TypeParamHost):TypeParams {
@@ -316,6 +323,7 @@ class TypeloadModule {
 			var arg = func.fArgs[index];
 			var variable = makeVar(arg.name.name, signature.args[index].type, TVOArgument, arg.name.pos, arg.meta);
 			if (hasMetadata(arg.meta, "this")) variable.vKind = VAbstractThis;
+			else { variable.vFlags |= 1 << core.TType.TType.flagTVarNames.indexOf("VUsedByTyper"); variable.vMeta.push(realPathMetadata(variable.vName)); }
 			locals.set(variable.vName, variable);
 			args.push({variable: variable, defaultValue: arg.expr == null ? null : typeExpr(module, cls, arg.expr, locals)});
 		}
@@ -338,6 +346,10 @@ class TypeloadModule {
 				case Regexp(_, _): typed(TIdent(Ast.sConstant(value)), fallback, source.pos);
 			};
 			case EParenthesis(expr): var value = typeExpr(module, cls, expr, locals); typed(TParenthesis(value), value.etype, source.pos);
+			case EArrayDecl([forExpr]) if (switch forExpr.expr { case EFor(_, _): true; case _: false; }): typeArrayComprehension(module, cls, forExpr, locals, source.pos);
+			case EArrayDecl(values):
+				var typedValues = [for (value in values) typeExpr(module, cls, value, locals)];
+				typed(TArrayDecl(typedValues), TInst(cls, [typedValues.length == 0 ? TDynamic(null) : typedValues[0].etype]), source.pos);
 			case EBinop(op, left, right): var l = typeExpr(module, cls, left, locals); var r = typeExpr(module, cls, right, locals); typed(TBinop(op, l, r), op == OpAssign ? l.etype : fallback, source.pos);
 		case EVars(vars): typeVars(module, cls, vars, locals, source.pos);
 		case EBlock(exprs):
@@ -356,6 +368,98 @@ class TypeloadModule {
 			case EWhile(condition, body, flag): typed(TWhile(typeExpr(module, cls, condition, locals), typeExpr(module, cls, body, locals), flag), fallback, source.pos);
 			case _: typed(TIdent("<untyped>"), fallback, source.pos);
 		};
+	}
+
+	function typeArrayComprehension(module:ModuleDef, cls:TClass, forExpr:Expr, locals:StringMap<TVar>, arrayPos:Pos):TExpr {
+		var iterator:Expr;
+		var body:Expr;
+		switch forExpr.expr { case EFor(value, valueBody): iterator = value; body = valueBody; case _: throw "Expected comprehension for-expression"; }
+		var loopName:PlacedName;
+		var source:Expr;
+		switch iterator.expr {
+			case EBinop(OpIn, {expr:EConst(Ident(name)), pos:pos}, value): loopName = {name:name, pos:pos}; source = value;
+			case _: throw "Only value iteration is supported in array comprehensions";
+		}
+		var sourceExpr = typeExpr(module, cls, source, locals);
+		var elementType = switch sourceExpr.etype { case TInst(arrayClass, [element]) if (arrayClass.clPath.name == "Array"): element; case _: TDynamic(null); };
+		var isFilter = false;
+		var loopBodyPos = body.pos;
+		switch body.expr {
+			case EIf(_, thenExpr, null): isFilter = true; body = thenExpr;
+			case _:
+		}
+		var loopVar = makeVar(loopName.name, elementType, TVOForVariable, loopName.pos, [{meta:":forLoopVariable", exprs:[], pos:Globals.nullPos}]);
+		loopVar.vFlags |= 1 << core.TType.TType.flagTVarNames.indexOf("VUsedByTyper");
+		var bodyLocals = new StringMap<TVar>(); for (name => value in locals) bodyLocals.set(name, value); bodyLocals.set(loopVar.vName, loopVar);
+		var pushedValue = typeExpr(module, cls, body, bodyLocals);
+		var resultElement = isFilter ? elementType : pushedValue.etype;
+		var resultType = TInst(cls, [resultElement]);
+		var resultVar = makeGeneratedVar("_g", resultType, arrayPos);
+		// The loop variable is allocated before the iterator temporaries upstream,
+		// but declarations are emitted in result/counter/source/value order.
+		var resultId = resultVar.vId; resultVar.vId = loopVar.vId; loopVar.vId = resultId;
+		resultVar.vMeta = generatedLoopMetadata("_g", false);
+		var counterVar = makeGeneratedVar("_g1", basic("Int"), loopName.pos);
+		counterVar.vMeta = generatedLoopMetadata("_g", true);
+		var sourceVar = makeGeneratedVar("_g2", sourceExpr.etype, source.pos);
+		sourceVar.vMeta = generatedLoopMetadata("_g", false);
+		loopVar.vMeta = [realPathMetadata(loopVar.vName)];
+		var resultLocal = typed(TLocal(resultVar), resultType, arrayPos);
+		var counterLocal = typed(TLocal(counterVar), basic("Int"), forExpr.pos);
+		var sourceLocal = typed(TLocal(sourceVar), sourceExpr.etype, source.pos);
+		var lengthField = cls.clFields.get("length");
+		var length = typed(TField(sourceLocal, FInstance(cls, cls.clParams.length == 0 ? [] : [elementType], lengthField)), basic("Int"), forExpr.pos);
+		var comparison = typed(TBinop(OpLt, counterLocal, length), basic("Bool"), forExpr.pos);
+		var condition = typed(TParenthesis(comparison), basic("Bool"), forExpr.pos);
+		var valueExpr = typed(TArray(sourceLocal, counterLocal), elementType, forExpr.pos);
+		var declareValue = typed(TVar(loopVar, valueExpr), elementType, loopName.pos);
+		var increment = typed(TUnop(Increment, Prefix, counterLocal), basic("Int"), forExpr.pos);
+		var pushField = cls.clFields.get("push");
+		var pushType = cls.clParams.length == 0 ? pushField.cfType : substituteType(pushField.cfType, cls.clParams[0].ttpType, resultElement);
+		var pushCallee = typed(TField(resultLocal, FInstance(cls, [resultElement], pushField)), pushType, arrayPos);
+		var push = typed(TCall(pushCallee, [pushedValue]), basic("Int"), body.pos);
+		var loopTail:TExpr = push;
+		if (isFilter) switch forExpr.expr {
+			case EFor(_, originalBody): switch originalBody.expr {
+				case EIf(test, _, null):
+					var testExpr = typeExpr(module, cls, test, bodyLocals);
+					loopTail = typed(TIf(typed(TParenthesis(testExpr), basic("Bool"), test.pos), typed(TBlock([push]), basic("Int"), push.epos), null), basic("Void"), originalBody.pos);
+				case _:
+			}
+			case _:
+		}
+		var whileBody = typed(TBlock([declareValue, increment, loopTail]), basic("Void"), loopBodyPos);
+		var loop = typed(TWhile(condition, whileBody, NormalWhile), basic("Void"), forExpr.pos);
+		var setup = typed(TBlock([
+			typed(TVar(counterVar, typed(TConst(TInt(0)), basic("Int"), forExpr.pos)), basic("Int"), forExpr.pos),
+			typed(TVar(sourceVar, sourceExpr), sourceExpr.etype, forExpr.pos),
+			loop
+		]), basic("Void"), forExpr.pos);
+		return typed(TBlock([
+			typed(TVar(resultVar, typed(TArrayDecl([]), resultType, arrayPos)), resultType, arrayPos),
+			setup,
+			resultLocal
+		]), resultType, arrayPos);
+	}
+
+	function substituteType(type:T, from:T, to:T):T {
+		if (type == from) return to;
+		return switch type {
+			case TInst(value, params): TInst(value, [for (param in params) substituteType(param, from, to)]);
+			case TEnum(value, params): TEnum(value, [for (param in params) substituteType(param, from, to)]);
+			case TType(value, params): TType(value, [for (param in params) substituteType(param, from, to)]);
+			case TAbstract(value, params): TAbstract(value, [for (param in params) substituteType(param, from, to)]);
+			case TFun(signature): TFun({args:[for (arg in signature.args) {name:arg.name, optional:arg.optional, type:substituteType(arg.type, from, to)}], ret:substituteType(signature.ret, from, to)});
+			case other: other;
+		};
+	}
+
+	function makeGeneratedVar(name:String, type:T, pos:Pos):TVar return {vId:nextVarId++, vName:name, vType:type, vKind:VGenerated, vExtra:null, vMeta:[], vFlags:0, vPos:pos};
+	static function realPathMetadata(name:String):MetadataEntry return {meta:":realPath", exprs:[{expr:EConst(String(name, SDoubleQuotes)), pos:Globals.nullPos}], pos:Globals.nullPos};
+	static function generatedLoopMetadata(name:String, forLoop:Bool):Metadata {
+		var result = [realPathMetadata(name), realPathMetadata("`")];
+		if (forLoop) result.push({meta:":forLoopVariable", exprs:[], pos:Globals.nullPos});
+		return result;
 	}
 
 	function typeCall(module:ModuleDef, cls:TClass, source:Expr, args:Array<Expr>, locals:StringMap<TVar>, pos:Pos):TExpr {
@@ -449,7 +553,12 @@ class TypeloadModule {
 		var type = resolvePath(module, path);
 		var values = [for (arg in args) typeExpr(module, cls, arg, locals)];
 		return switch type {
-			case TInst(target, params): typed(TNew(target, params, values), type, pos);
+			case TInst(target, params):
+				if (params.length == 0 && target.clParams.length == 1 && values.length > 0) switch values[0].etype {
+					case TInst(arrayClass, [element]) if (arrayClass.clPath.name == "Array"): params = [element]; type = TInst(target, params);
+					case _:
+				}
+				typed(TNew(target, params, values), type, pos);
 			case _: typed(TIdent("<new>"), TDynamic(null), pos);
 		};
 	}

@@ -119,6 +119,9 @@ class HxbWriter {
 	var anonymousFieldIndices:Map<TClassField, Int> = new Map();
 	var expressionVars:Array<TVar> = [];
 	var expressionVarIndices:ObjectMap<TVar, Int> = new ObjectMap();
+	var expressionThisType:Null<T> = null;
+	var optimizedExpressionPositions = false;
+	var writingUnoptimizedExpression = false;
 	var fieldTypeParamIndices:ObjectMap<TypedTypeParam, Int> = new ObjectMap();
 	var typeTypeParamIndices:Map<String, Int> = new Map();
 
@@ -171,7 +174,8 @@ class HxbWriter {
 					var fields = [for (expression in expressions) if (expression.cls == owner) expression];
 					chunk.writeUleb128(fields.length);
 					for (expression in fields) {
-						chunk.writeUleb128(writeFieldRef(expression.cls, expression.field, 0));
+						var kind = expression.cls.clStatics.get(expression.field.cfName) == expression.field ? 0 : 1;
+						chunk.writeUleb128(writeFieldRef(expression.cls, expression.field, kind));
 						chunk.writeUleb128(expression.bytes.length);
 						chunk.writeBytes(expression.bytes);
 					}
@@ -291,7 +295,11 @@ class HxbWriter {
 			// Besides framing nested scopes, this fixes reference-pool insertion order.
 			var data = new HxbChunk(EOM, strings);
 			writeType(data, value.cfType); data.writeUleb128(value.cfFlags); writeDocumentation(data, value.cfDoc); writeFieldKind(data, value.cfKind);
-			if (value.cfExpr == null || !canWriteExpression(value.cfExpr)) data.writeU8(0) else { data.writeU8(2); expressions.push({cls:owner, field:value, bytes:writeExpression(value.cfExpr, value.cfExprUnoptimized)}); }
+			if (value.cfExpr == null || !canWriteExpression(value.cfExpr)) data.writeU8(0) else {
+				data.writeU8(2);
+				var externClass = (owner.clFlags & (1 << core.TType.TType.flagTClassNames.indexOf("CExtern"))) != 0;
+				expressions.push({cls:owner, field:value, bytes:writeExpression(value.cfExpr, value.cfExprUnoptimized, externClass)});
+			}
 			writeFieldTypeParamsData(chunk, value.cfParams);
 			chunk.writeBytes(data.getBytes());
 		}
@@ -353,19 +361,22 @@ class HxbWriter {
 		return index;
 	}
 
-	function writeExpression(root:TExpr, unoptimized:Null<TExpr>):Bytes {
+	function writeExpression(root:TExpr, unoptimized:Null<TExpr>, optimizePositions:Bool):Bytes {
 		var expression = new HxbChunk(EOM, strings);
 		var typePool:Array<Bytes> = [];
 		expressionVars = [];
 		expressionVarIndices = new ObjectMap();
+		expressionThisType = null;
 		var pos = {file:root.epos.pfile, min:root.epos.pmin, max:root.epos.pmax};
 		writePos(expression, root.epos);
+		optimizedExpressionPositions = optimizePositions;
+		writingUnoptimizedExpression = false;
 		writeTExpr(expression, root, root, typePool, pos);
-		if (unoptimized == null || !canWriteExpression(unoptimized)) expression.writeU8(0) else { expression.writeU8(1); writeTExpr(expression, unoptimized, root, typePool, pos); }
+		if (unoptimized == null || !canWriteExpression(unoptimized)) expression.writeU8(0) else { expression.writeU8(1); optimizedExpressionPositions = false; writingUnoptimizedExpression = true; writeTExpr(expression, unoptimized, root, typePool, pos); }
 		var context = new HxbChunk(EOM, strings);
 		context.writeU8(1); // top-level expression scope
 		context.writeUleb128(0); // local type parameters
-		context.writeU8(0); // `this` type
+		context.writeOption(expressionThisType, function(type) writeType(context, type));
 		context.writeUleb128(typePool.length);
 		for (index in 0...typePool.length) {
 			context.writeBytes(typePool[index]);
@@ -414,9 +425,13 @@ class HxbWriter {
 	function canWriteExpression(expr:TExpr):Bool return switch expr.eexpr {
 		case TConst(_): true;
 		case TLocal(_): true;
+		case TArray(array, index): canWriteExpression(array) && canWriteExpression(index);
+		case TVar(_, value): value == null || canWriteExpression(value);
 		case TBlock(values): [for (value in values) if (!canWriteExpression(value)) value].length == 0;
 		case TFunction(func): [for (arg in func.tfArgs) if (arg.defaultValue != null && !canWriteExpression(arg.defaultValue)) arg].length == 0 && canWriteExpression(func.tfExpr);
 		case TReturn(value): value == null || canWriteExpression(value);
+		case TIf(condition, thenExpr, elseExpr): canWriteExpression(condition) && canWriteExpression(thenExpr) && (elseExpr == null || canWriteExpression(elseExpr));
+		case TWhile(condition, body, _): canWriteExpression(condition) && canWriteExpression(body);
 		case TCall(callee, args): canWriteExpression(callee) && [for (value in args) if (!canWriteExpression(value)) value].length == 0;
 		case TNew(_, _, args): [for (value in args) if (!canWriteExpression(value)) value].length == 0;
 		case TIdent(_): true;
@@ -427,10 +442,16 @@ class HxbWriter {
 		case TTypeExpr(_): true;
 		case TField(object, access): canWriteExpression(object) && switch access { case FStatic(_) | FInstance(_, _, _) | FDynamic(_): true; case _: false; };
 		case TBinop(_, left, right): canWriteExpression(left) && canWriteExpression(right);
+		case TUnop(_, _, value): canWriteExpression(value);
 		case _: false;
 	};
 
 	function writeTExpr(chunk:HxbChunk, expr:TExpr, root:TExpr, typePool:Array<Bytes>, pos:{var file:String; var min:Int; var max:Int;}):Void {
+		if (writingUnoptimizedExpression) switch expr.eexpr { case TParenthesis(value): writeTExpr(chunk, value, root, typePool, pos); return; case _: }
+		if (optimizedExpressionPositions) switch expr.eexpr {
+			case TBlock([value]) if (switch expr.etype { case TDynamic(_): false; case _: true; }): writeTExpr(chunk, value, root, typePool, pos); return;
+			case _:
+		}
 		var writesType = switch expr.eexpr {
 			case TConst(value):
 				switch value {
@@ -440,15 +461,17 @@ class HxbWriter {
 					case TBool(false): chunk.writeU8(3);
 					case TBool(true): chunk.writeU8(4);
 					case TNull: chunk.writeU8(0);
-					case TThis: chunk.writeU8(1);
+					case TThis: expressionThisType = expr.etype; chunk.writeU8(1);
 					case TSuper: chunk.writeU8(2);
 				};
 				false;
 			case TLocal(variable): chunk.writeU8(20); chunk.writeUleb128(expressionVarIndices.get(variable)); true;
+			case TVar(variable, value): if (value == null) { chunk.writeU8(21); declareVar(chunk, variable); } else { chunk.writeU8(22); declareVar(chunk, variable); writeTExpr(chunk, value, root, typePool, pos); } false;
 			case TBlock(values):
 				switch values.length {
 					case 0: chunk.writeU8(30);
 					case 1: chunk.writeU8(31); writeTExpr(chunk, values[0], root, typePool, pos);
+					case 2 | 3 | 4 | 5: chunk.writeU8(30 + values.length); for (value in values) writeTExpr(chunk, value, root, typePool, pos);
 					default: chunk.writeU8(36); chunk.writeU8(values.length); for (value in values) writeTExpr(chunk, value, root, typePool, pos);
 				};
 				true;
@@ -460,11 +483,16 @@ class HxbWriter {
 			case TReturn(value):
 				if (value == null) chunk.writeU8(90) else { chunk.writeU8(91); writeTExpr(chunk, value, root, typePool, pos); }
 				true;
+			case TIf(condition, thenExpr, elseExpr):
+				if (elseExpr == null) { chunk.writeU8(80); writeTExpr(chunk, condition, root, typePool, pos); writeTExpr(chunk, thenExpr, root, typePool, pos); false; }
+				else { chunk.writeU8(81); writeTExpr(chunk, condition, root, typePool, pos); writeTExpr(chunk, thenExpr, root, typePool, pos); writeTExpr(chunk, elseExpr, root, typePool, pos); true; }
+			case TWhile(condition, body, flag): chunk.writeU8(flag == NormalWhile ? 84 : 85); writeTExpr(chunk, condition, root, typePool, pos); writeTExpr(chunk, body, root, typePool, pos); false;
 			case TCall(callee, args):
 				chunk.writeU8(70 + args.length); writeTExpr(chunk, callee, root, typePool, pos); for (arg in args) writeTExpr(chunk, arg, root, typePool, pos);
 				true;
 			case TIdent(name): chunk.writeU8(250); chunk.writeString(name); true;
 			case TParenthesis(value): chunk.writeU8(61); writeTExpr(chunk, value, root, typePool, pos); false;
+			case TArray(array, index): chunk.writeU8(60); writeTExpr(chunk, array, root, typePool, pos); writeTExpr(chunk, index, root, typePool, pos); true;
 			case TArrayDecl(values): chunk.writeU8(62); chunk.writeList(values, function(value) writeTExpr(chunk, value, root, typePool, pos)); true;
 			case TObjectDecl(fields):
 				chunk.writeU8(63); chunk.writeList(fields, function(field) {
@@ -494,10 +522,12 @@ class HxbWriter {
 			case TTypeExpr(TAbstractDecl(abs)): chunk.writeU8(122); chunk.writeUleb128(addAbstract(abs, false)); true;
 			case TNew(cls, params, args): chunk.writeU8(126); writeClassRef(chunk, cls); writeTypes(chunk, params); chunk.writeList(args, function(arg) writeTExpr(chunk, arg, root, typePool, pos)); true;
 			case TBinop(op, left, right): chunk.writeU8(160 + binopIndex(op)); writeTExpr(chunk, left, root, typePool, pos); writeTExpr(chunk, right, root, typePool, pos); true;
+			case TUnop(op, flag, value): chunk.writeU8(140 + unopIndex(op, flag)); writeTExpr(chunk, value, root, typePool, pos); true;
 			case _: throw "Expression serialization is not ported for " + Type.enumConstructor(expr.eexpr);
 		};
 		if (writesType) chunk.writeUleb128(addExprType(typePool, expr.etype));
-		writeRelativePos(chunk, expr.epos, pos);
+		var outputPos = optimizedExpressionPositions ? switch expr.eexpr { case TBlock([value]): value.epos; case _: expr.epos; } : expr.epos;
+		writeRelativePos(chunk, outputPos, pos);
 	}
 
 	function addExprType(pool:Array<Bytes>, type:T):Int {
