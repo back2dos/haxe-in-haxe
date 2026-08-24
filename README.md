@@ -3,9 +3,13 @@
 An in-progress, close-to-line-by-line port of the Haxe compiler from OCaml to
 Haxe.
 
-The only current deliverable is an HXB-emitting compiler. JavaScript, C++,
-HashLink, Eval, and every other code-generation target are explicitly out of
-scope until that goal is complete.
+The only current code-generation deliverable is an HXB-emitting compiler.
+JavaScript, C++, HashLink, Eval, and every ordinary output target are explicitly
+out of scope until that goal is complete. During development, the pinned Haxe
+compiler can compile the port to Eval-flavoured HXB and execute it through
+`--hxb-lib`; this is a host strategy, not an Eval generator in the port. The
+Eval machinery eventually required for macro execution is likewise separate
+from exposing Eval as a user target.
 
 ## Repository layout
 
@@ -37,15 +41,40 @@ haxe haxe-in-haxe.hxml
 ```
 
 This currently validates the bootstrap entry point and writes
-`bin/haxe-in-haxe.hxb`. As compiler modules are ported, this command remains
+`bin/haxe-in-haxe.hxb`. HXB is a serialized compiler artifact rather than an
+executable, so this build is not by itself a self-hosting or conformance test.
+
+## Execute the compiler from HXB
+
+The shortest functional feedback loop uses the pinned compiler as the Eval HXB
+loader and runtime:
+
+```sh
+HAXE_REFERENCE=/absolute/path/to/pinned/haxe \
+  sh test/eval-hxb-execution.sh
+```
+
+The test first asks the pinned compiler to compile the port's source to an
+Eval-target archive containing `eval/haxe/Main.hxb`. It executes the source form
+to compile a fixture, then loads that archive with `--hxb-lib`, executes
+`haxe.Main` again, and verifies that both runs emit identical HXB member sets
+and payloads. This proves that the compiler can run from HXB without requiring
+HashLink, Go, or another independent host.
 
 ## Conformance contract
 
-Correctness is measured against the HXB produced by the actual compiler, not
-against program execution. The eventual test harness must discover every
-compilable example in the upstream Haxe test suite, compile each one with both
-compilers using identical effective arguments, and compare the resulting HXB
-files byte-for-byte.
+Correctness has two immediate checks. Eval-HXB execution must behave identically
+to executing the same port directly from source. Compiler conformance must
+match the HXB produced by the pinned compiler for the same effective
+invocation. The eventual harness must discover every compilable example in the
+upstream Haxe test suite and apply both checks. `test/conformance.sh` already
+produces its candidate output by loading the compiler through `--hxb-lib`, so a
+future passing result covers execution and serialization together.
+
+HXB comparisons normalize archive member names and compare each uncompressed
+`.hxb` member payload byte-for-byte. The ZIP containers themselves are not
+compared because timestamps, member ordering, headers, and compression output
+are not HXB semantics.
 
 `test/README.md` specifies the harness behavior and artifact policy. A test
 that cannot be compiled by the reference compiler is not an HXB comparison
