@@ -11,6 +11,7 @@ import core.Globals.GlobalTypePath;
 import core.Globals.Pos;
 import core.TType;
 import haxe.ds.IntMap;
+import haxe.ds.ObjectMap;
 import haxe.ds.StringMap;
 import typing.TypeloadParse.ParseError;
 
@@ -30,6 +31,7 @@ class TypeloadModule {
 	var currentMethodName = "";
 	var activeTypeParams:StringMap<T> = new StringMap();
 	var deferredClassBodies:Array<Void->Void> = [];
+	var bodyTypingDepth = 0;
 
 	public function new(classPaths:ClassPaths, defines:DefineContext) {
 		this.classPaths = classPaths;
@@ -203,7 +205,8 @@ class TypeloadModule {
 		// upstream typer and avoids pulling target-specific implementation code
 		// into a batch module.
 		var typeBodies = module.mPath.pack.length == 0 || module.mPath.pack[0] != "haxe"
-			|| (module.mPath.pack.length > 1 && module.mPath.pack[1] == "iterators");
+			|| (module.mPath.pack.length > 1 && module.mPath.pack[1] == "iterators")
+			|| (module.mPath.pack.length == 1 && module.mPath.name == "EnumTools");
 		for (declaration in declarations) switch declaration.definition {
 			case EClass(value): populateClassFields(module, findClass(module, value.name.name), value.data, typeBodies);
 			case EEnum(value): populateEnumConstructors(module, findEnum(module, value.name.name), value.data);
@@ -304,8 +307,13 @@ class TypeloadModule {
 		// Signatures have to be installed before bodies are typed: a method body
 		// may call a method declared later in the same class.
 		if (typeBodies) {
-			var typeBodiesNow = function() typeClassFieldBodies(module, cls, fields);
-			if (module.mPath.pack.length > 1 && module.mPath.pack[0] == "haxe" && module.mPath.pack[1] == "iterators") deferredClassBodies.push(typeBodiesNow);
+			var typeBodiesNow = function() {
+				bodyTypingDepth++;
+				typeClassFieldBodies(module, cls, fields);
+				bodyTypingDepth--;
+			};
+			if (!hasFieldBodies(fields)) {}
+			else if (bodyTypingDepth > 0 || (module.mPath.pack.length > 1 && module.mPath.pack[0] == "haxe" && module.mPath.pack[1] == "iterators")) deferredClassBodies.push(typeBodiesNow);
 			else {
 				flushDeferredClassBodies();
 				typeBodiesNow();
@@ -318,6 +326,11 @@ class TypeloadModule {
 				for (arg in func.fArgs) makeVar(arg.name.name, TDynamic(null), TVOArgument, arg.name.pos, arg.meta);
 			case _:
 		}
+	}
+
+	static function hasFieldBodies(fields:Array<ClassField>):Bool {
+		for (field in fields) switch field.cffKind { case FFun(func) if (func.fExpr != null): return true; case FVar(_, value) | FProp(_, _, _, value) if (value != null): return true; case _: }
+		return false;
 	}
 
 	function flushDeferredClassBodies():Void {
@@ -638,8 +651,34 @@ class TypeloadModule {
 	function typeCall(module:ModuleDef, cls:TClass, source:Expr, args:Array<Expr>, locals:StringMap<TVar>, pos:Pos):TExpr {
 		var callee = typeExpr(module, cls, source, locals);
 		var values = [for (arg in args) typeExpr(module, cls, arg, locals)];
+		var field = switch callee.eexpr {
+			case TField(_, FStatic(_, value)) | TField(_, FInstance(_, _, value)): value;
+			case _: null;
+		};
+		if (field != null && field.cfParams.length > 0) callee.etype = inferMethodType(field, values);
 		var result = switch callee.etype { case TFun(sig): sig.ret; case _: TDynamic(null); };
 		return typed(TCall(callee, values), result, pos);
+	}
+
+	function inferMethodType(field:TClassField, arguments:Array<TExpr>):T {
+		var inferred = new ObjectMap<TypedTypeParam, T>();
+		function match(formal:T, actual:T):Void {
+			switch formal {
+				case TInst(cls, []) if (switch cls.clKind { case KTypeParameter(param): field.cfParams.indexOf(param) != -1; case _: false; }):
+					switch cls.clKind { case KTypeParameter(param): if (!inferred.exists(param)) inferred.set(param, actual); case _: }
+				case TInst(_, formalParams) | TEnum(_, formalParams) | TType(_, formalParams) | TAbstract(_, formalParams):
+					var actualParams = switch actual { case TInst(_, values) | TEnum(_, values) | TType(_, values) | TAbstract(_, values): values; case _: []; };
+					for (index in 0...formalParams.length) if (index < actualParams.length) match(formalParams[index], actualParams[index]);
+				case TFun(formalSignature):
+					switch actual { case TFun(actualSignature): for (index in 0...formalSignature.args.length) if (index < actualSignature.args.length) match(formalSignature.args[index].type, actualSignature.args[index].type); match(formalSignature.ret, actualSignature.ret); case _: }
+				case _:
+			}
+		}
+		var signature = switch field.cfType { case TFun(value): value; case _: return field.cfType; };
+		for (index in 0...signature.args.length) if (index < arguments.length) match(signature.args[index].type, arguments[index].etype);
+		var result = field.cfType;
+		for (param in field.cfParams) result = substituteType(result, param.ttpType, inferred.exists(param) ? inferred.get(param) : TDynamic(null));
+		return result;
 	}
 
 	function stringify(module:ModuleDef, value:TExpr):TExpr {
@@ -719,7 +758,9 @@ class TypeloadModule {
 		}
 		var moduleType = findModuleType(module, name);
 		if (moduleType == null && name.length > 0 && name.charAt(0) == name.charAt(0).toUpperCase()) {
-			try moduleType = findModuleType(loadModule({pack: module.mPath.pack, name: name}), name) catch (_:Dynamic) {}
+			try moduleType = findModuleType(loadModule({pack: [], name: name}), name) catch (_:Dynamic) {
+				try moduleType = findModuleType(loadModule({pack: module.mPath.pack, name: name}), name) catch (_:Dynamic) {}
+			}
 		}
 		if (moduleType != null) return typed(TTypeExpr(moduleType), TDynamic(null), pos);
 		return typed(TIdent(name), TDynamic(null), pos);
