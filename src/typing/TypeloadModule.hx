@@ -179,7 +179,8 @@ class TypeloadModule {
 		// pass signature-only also mirrors the dependency loading boundary in the
 		// upstream typer and avoids pulling target-specific implementation code
 		// into a batch module.
-		var typeBodies = module.mPath.pack.length == 0 || module.mPath.pack[0] != "haxe";
+		var typeBodies = module.mPath.pack.length == 0 || module.mPath.pack[0] != "haxe"
+			|| (module.mPath.pack.length > 1 && module.mPath.pack[1] == "iterators");
 		for (declaration in declarations) switch declaration.definition {
 			case EClass(value): populateClassFields(module, findClass(module, value.name.name), value.data, typeBodies);
 			case EEnum(value): populateEnumConstructors(module, findEnum(module, value.name.name), value.data);
@@ -250,9 +251,15 @@ class TypeloadModule {
 			activeTypeParams = typeParamMap(cls.clParams.concat(params));
 			var type = fieldType(module, cls, field);
 			activeTypeParams = previousTypeParams;
+			var metadata = field.cffMeta.copy();
+			switch field.cffKind {
+				case FVar(_, value) | FProp(_, _, _, value) if (value != null):
+					metadata.unshift({meta:":value", exprs:[value], pos:{pfile:field.cffPos.pfile, pmin:field.cffPos.pmin, pmax:field.cffPos.pmin}});
+				case _:
+			}
 			var typed:TClassField = {
 				cfName: field.cffName.name, cfType: type, cfPos: field.cffPos, cfNamePos: field.cffName.pos,
-				cfDoc: field.cffDoc, cfMeta: field.cffMeta, cfKind: fieldKind(field), cfParams: params,
+				cfDoc: field.cffDoc, cfMeta: metadata, cfKind: fieldKind(field), cfParams: params,
 				cfExpr: null, cfExprUnoptimized: null, cfOverloads: [], cfFlags: fieldFlags(field, isStatic, (cls.clFlags & classFlag(CExtern)) != 0)
 			};
 			if (field.cffName.name == "new" && !isStatic) cls.clConstructor = typed;
@@ -342,8 +349,20 @@ class TypeloadModule {
 			args.push({variable: variable, defaultValue: arg.expr == null ? null : typeExpr(module, cls, arg.expr, locals)});
 		}
 		var body = typeExpr(module, cls, func.fExpr, locals);
+		bindDeclaredReturnType(body, signature.ret);
 		currentMethodName = previousMethodName;
 		return typed(TFunction({tfArgs:args, tfType:signature.ret, tfExpr:body}), TFun(signature), func.fExpr.pos);
+	}
+
+	function bindDeclaredReturnType(expression:TExpr, returnType:T):Void switch expression.eexpr {
+		case TReturn(value) if (value != null):
+			switch [value.eexpr, returnType] {
+				case [TObjectDecl(_), TAnon(_)]: value.etype = returnType;
+				case _:
+			}
+		case TBlock(values): for (value in values) bindDeclaredReturnType(value, returnType);
+		case TIf(_, thenExpr, elseExpr): bindDeclaredReturnType(thenExpr, returnType); if (elseExpr != null) bindDeclaredReturnType(elseExpr, returnType);
+		case _:
 	}
 
 	function typeExpr(module:ModuleDef, cls:TClass, source:Expr, locals:StringMap<TVar>):TExpr {
@@ -364,6 +383,23 @@ class TypeloadModule {
 			case EArrayDecl(values):
 				var typedValues = [for (value in values) typeExpr(module, cls, value, locals)];
 				typed(TArrayDecl(typedValues), TInst(cls, [typedValues.length == 0 ? TDynamic(null) : typedValues[0].etype]), source.pos);
+			case EArray(array, index):
+				var arrayExpr = typeExpr(module, cls, array, locals);
+				var indexExpr = typeExpr(module, cls, index, locals);
+				var elementType = switch arrayExpr.etype {
+					case TInst(arrayClass, [element]) if (arrayClass.clPath.pack.length == 0 && arrayClass.clPath.name == "Array"): element;
+					case _: fallback;
+				};
+				typed(TArray(arrayExpr, indexExpr), elementType, source.pos);
+			case EObjectDecl(fields):
+				var typedFields = [for (field in fields) {key:field.key, expr:typeExpr(module, cls, field.expr, locals)}];
+				var anonymousFields = new StringMap<TClassField>();
+				for (field in typedFields) anonymousFields.set(field.key.name, {
+					cfName:field.key.name, cfType:field.expr.etype, cfPos:field.key.pos, cfNamePos:field.key.pos,
+					cfDoc:null, cfMeta:[], cfKind:Var({vRead:AccNormal, vWrite:AccNormal}), cfParams:[],
+					cfExpr:null, cfExprUnoptimized:null, cfOverloads:[], cfFlags:flag(CfPublic)
+				});
+				typed(TObjectDecl(typedFields), TAnon({aFields:anonymousFields, aStatus:Const}), source.pos);
 			case EBinop(op, left, right):
 				var l = typeExpr(module, cls, left, locals); var r = typeExpr(module, cls, right, locals);
 				var result = switch op { case OpEq | OpNotEq | OpGt | OpGte | OpLt | OpLte | OpBoolAnd | OpBoolOr | OpIn: basic("Bool"); case OpAssign: l.etype; case _: l.etype; };
@@ -650,11 +686,13 @@ class TypeloadModule {
 	function makeAnonymous(module:ModuleDef, fields:Array<ClassField>):TAnon {
 		var result = new StringMap<TClassField>();
 		for (field in fields) result.set(field.cffName.name, {
-			cfName:field.cffName.name, cfType:fieldType(module, null, field), cfPos:field.cffName.name == "customParams" ? field.cffPos : {pfile:"?", pmin:-1, pmax:78}, cfNamePos:field.cffName.name == "customParams" ? field.cffName.pos : Globals.nullPos,
+			cfName:field.cffName.name, cfType:fieldType(module, null, field),
+			cfPos:field.cffPos.pfile == "?" && field.cffName.name != "customParams" ? {pfile:"?", pmin:-1, pmax:78} : field.cffPos,
+			cfNamePos:field.cffPos.pfile == "?" && field.cffName.name != "customParams" ? Globals.nullPos : field.cffName.pos,
 			cfDoc:field.cffDoc, cfMeta:anonymousFieldMetadata(field), cfKind:fieldKind(field), cfParams:[], cfExpr:null, cfExprUnoptimized:null,
 			cfOverloads:[], cfFlags:flag(CfPublic)
 		});
-		return {aFields:result, aStatus:Const};
+		return {aFields:result, aStatus:Closed};
 	}
 
 	static function anonymousFieldMetadata(field:ClassField):Metadata {

@@ -284,7 +284,7 @@ class Grammar {
 	}
 	function metadata():Metadata {
 		var result=[];
-		while(accept(At)!=null) { var start=previous().pos; expect(DblDot); var name=placedPath(); var values=[]; if(accept(POpen)!=null) { if(!is(PClose)) do values.push(expression()) while(accept(Comma)!=null); var end=expect(PClose).pos; result.push({meta:[for(n in name)n.name].join("."),exprs:values,pos:union(start,end)}); } else result.push({meta:[for(n in name)n.name].join("."),exprs:values,pos:union(start,name[name.length-1].pos)}); }
+		while(accept(At)!=null) { var start=previous().pos; expect(DblDot); var name=placedPath(); var values=[]; if(accept(POpen)!=null) { if(!is(PClose)) do values.push(expression()) while(accept(Comma)!=null); expect(PClose); } result.push({meta:[for(n in name)n.name].join("."),exprs:values,pos:union(start,name[name.length-1].pos)}); }
 		return result;
 	}
 	function placedIdent():PlacedName { var t=next(); return switch t.token { case Const(Ident(v)): {name:v,pos:t.pos}; case Kwd(k): {name:Ast.sKeyword(k),pos:t.pos}; case _: fail("Expected identifier",t.pos); null; }; }

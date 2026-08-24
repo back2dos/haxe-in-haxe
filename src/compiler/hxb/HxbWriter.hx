@@ -115,8 +115,10 @@ class HxbWriter {
 	var fieldReferenceIndices:Map<String, Int> = new Map();
 	var anonymousTypes:Array<TAnon> = [];
 	var anonymousTypeIndices:Map<TAnon, Int> = new Map();
+	var inlineAnonymousTypes:ObjectMap<TAnon, Bool> = new ObjectMap();
 	var anonymousFields:Array<TClassField> = [];
 	var anonymousFieldIndices:Map<TClassField, Int> = new Map();
+	var inlineAnonymousFields:ObjectMap<TClassField, Bool> = new ObjectMap();
 	var expressionVars:Array<TVar> = [];
 	var expressionVarIndices:ObjectMap<TVar, Int> = new ObjectMap();
 	var expressionThisType:Null<T> = null;
@@ -299,7 +301,10 @@ class HxbWriter {
 			if (value.cfExpr == null || !canWriteExpression(value.cfExpr)) data.writeU8(0) else {
 				data.writeU8(2);
 				var coreAbstractImpl = switch owner.clKind { case KAbstractImpl(abs): hasMetadataName(abs.aMeta, "coreType"); case _: false; };
-				var optimizePositions = switch owner.clKind { case KAbstractImpl(_): coreAbstractImpl; case _: true; };
+				var optimizePositions = switch owner.clKind {
+					case KAbstractImpl(_): coreAbstractImpl;
+					case _: owner.clPath.pack.length == 0;
+				};
 				expressions.push({cls:owner, field:value, bytes:writeExpression(value.cfExpr, coreAbstractImpl ? null : value.cfExprUnoptimized, optimizePositions)});
 			}
 			writeFieldTypeParamsData(chunk, value.cfParams);
@@ -341,7 +346,17 @@ class HxbWriter {
 			if (!isVoid(ret)) writeType(chunk, ret);
 		case TLazy(value): switch value { case LAvailable(inner) | LProcessing(inner): writeType(chunk, inner); case LWait(_): throw "Unevaluated lazy type cannot be serialized"; }
 		case TMono(value): if (value.tmType == null) throw "Unbound monomorph cannot be serialized" else writeType(chunk, value.tmType);
-		case TAnon(anon): chunk.writeU8(anon.aFields.keys().hasNext() ? 81 : 80); if (anon.aFields.keys().hasNext()) chunk.writeUleb128(addAnonymousType(anon));
+		case TAnon(anon):
+			if (!anon.aFields.keys().hasNext()) chunk.writeU8(80) else {
+				chunk.writeU8(81);
+				var known = anonymousTypeIndices.exists(anon);
+				var index = addAnonymousType(anon);
+				var inlineMode = !known && anonymousNeedsLocalContext(anon);
+				if (inlineMode) inlineAnonymousTypes.set(anon, true);
+				chunk.writeU8(inlineMode ? 1 : 0);
+				chunk.writeUleb128(index);
+				if (inlineMode) writeAnonymousType(chunk, anon);
+			}
 	}
 	function writeReferenceType(chunk:HxbChunk, base:Int, getIndex:Void->Int, params:TParams):Void { if (params.length > 2) { chunk.writeU8(base + 9); chunk.writeUleb128(getIndex()); writeTypes(chunk, params); } else { chunk.writeU8(base + params.length); chunk.writeUleb128(getIndex()); for (type in params) writeType(chunk, type); } }
 	function writeTypeParameterRef(chunk:HxbChunk, param:TypedTypeParam):Void switch param.ttpHost {
@@ -569,9 +584,29 @@ class HxbWriter {
 	}
 
 	function writeAnonymousFieldRef(chunk:HxbChunk, value:TClassField):Void {
-		chunk.writeU8(0);
-		chunk.writeUleb128(addAnonymousField(value));
+		var known = anonymousFieldIndices.exists(value);
+		var index = addAnonymousField(value);
+		var inlineMode = !known && typeNeedsLocalContext(value.cfType);
+		if (inlineMode) inlineAnonymousFields.set(value, true);
+		chunk.writeU8(inlineMode ? 1 : 0);
+		chunk.writeUleb128(index);
+		if (inlineMode) chunk.writeBytes(writeAnonymousFieldData(value));
 	}
+
+	function anonymousNeedsLocalContext(value:TAnon):Bool {
+		for (field in value.aFields) if (typeNeedsLocalContext(field.cfType)) return true;
+		return false;
+	}
+
+	function typeNeedsLocalContext(type:T):Bool return switch type {
+		case TInst(cls, _) if (switch cls.clKind { case KTypeParameter(param): param.ttpHost == TPHType; case _: false; }): true;
+		case TInst(_, params) | TEnum(_, params) | TType(_, params) | TAbstract(_, params): Lambda.exists(params, typeNeedsLocalContext);
+		case TFun(signature): Lambda.exists(signature.args, function(arg) return typeNeedsLocalContext(arg.type)) || typeNeedsLocalContext(signature.ret);
+		case TDynamic(inner): inner != null && typeNeedsLocalContext(inner);
+		case TAnon(anon): anonymousNeedsLocalContext(anon);
+		case TLazy(value): switch value { case LAvailable(inner) | LProcessing(inner): typeNeedsLocalContext(inner); case LWait(_): false; };
+		case TMono(value): value.tmType != null && typeNeedsLocalContext(value.tmType);
+	};
 
 	function writeAnonymousType(chunk:HxbChunk, value:TAnon):Void {
 		switch value.aStatus {
@@ -604,19 +639,22 @@ class HxbWriter {
 	function writeAnonymousPools():Void {
 		// Materialize anonymous definitions first; this also discovers the field
 		// reference pool in the same order as hxbWriter.ml.
-		var definitions:Array<Bytes> = [];
-		for (anon in anonymousTypes) {
+		var definitions:Array<{var index:Int; var bytes:Bytes;}> = [];
+		for (index in 0...anonymousTypes.length) {
+			var anon = anonymousTypes[index];
+			if (inlineAnonymousTypes.exists(anon)) continue;
 			var chunk = new HxbChunk(EOM, strings);
 			writeAnonymousType(chunk, anon);
-			definitions.push(chunk.getBytes());
+			definitions.push({index:index, bytes:chunk.getBytes()});
 		}
 		if (anonymousFields.length > 0) {
 			var chunk = startChunk(OFR);
 			chunk.writeUleb128(anonymousFields.length);
 			for (field in anonymousFields) writeClassFieldForward(chunk, field);
+			var definitions = [for (index in 0...anonymousFields.length) if (!inlineAnonymousFields.exists(anonymousFields[index])) index];
 			chunk = startChunk(OFD);
-			chunk.writeUleb128(anonymousFields.length);
-			for (index in 0...anonymousFields.length) {
+			chunk.writeUleb128(definitions.length);
+			for (index in definitions) {
 				chunk.writeUleb128(index);
 				chunk.writeBytes(writeAnonymousFieldData(anonymousFields[index]));
 			}
@@ -624,7 +662,7 @@ class HxbWriter {
 		if (definitions.length > 0) {
 			var chunk = startChunk(OBD);
 			chunk.writeUleb128(definitions.length);
-			for (index in 0...definitions.length) { chunk.writeUleb128(index); chunk.writeBytes(definitions[index]); }
+			for (definition in definitions) { chunk.writeUleb128(definition.index); chunk.writeBytes(definition.bytes); }
 		}
 	}
 
