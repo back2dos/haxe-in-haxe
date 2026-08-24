@@ -129,6 +129,7 @@ class HxbWriter {
 	var skipUnoptimizedParentheses = false;
 	var fieldTypeParamIndices:ObjectMap<TypedTypeParam, Int> = new ObjectMap();
 	var typeTypeParamIndices:Map<String, Int> = new Map();
+	var fieldScopeDepth = 0;
 
 	public function new() {
 		strings = new StringPool();
@@ -295,6 +296,7 @@ class HxbWriter {
 	function writeClassFieldData(chunk:HxbChunk, owner:TClass, field:TClassField, expressions:Array<{var cls:TClass; var field:TClassField; var bytes:Bytes;}>):Void {
 		var all = [field].concat(field.cfOverloads); chunk.writeUleb128(all.length);
 		for (value in all) {
+			fieldScopeDepth++;
 			fieldTypeParamIndices = new ObjectMap();
 			for (index in 0...value.cfParams.length) fieldTypeParamIndices.set(value.cfParams[index], index);
 			// Upstream stages field data before committing its type-parameter prefix.
@@ -316,6 +318,7 @@ class HxbWriter {
 			}
 			writeFieldTypeParamsData(chunk, value.cfParams);
 			chunk.writeBytes(data.getBytes());
+			fieldScopeDepth--;
 		}
 	}
 
@@ -639,13 +642,17 @@ class HxbWriter {
 
 	function writeAnonymousFieldData(value:TClassField):Bytes {
 		var chunk = new HxbChunk(EOM, strings);
+		var nested = fieldScopeDepth > 0;
+		fieldScopeDepth++;
 		chunk.writeUleb128(1);
-		writeEmptyTypeParamsData(chunk);
+		if (nested) { chunk.writeUleb128(0); chunk.writeU8(0); }
+		else writeEmptyTypeParamsData(chunk);
 		writeType(chunk, value.cfType);
 		chunk.writeUleb128(value.cfFlags);
 		writeDocumentation(chunk, value.cfDoc);
 		writeFieldKind(chunk, value.cfKind);
 		chunk.writeU8(0);
+		fieldScopeDepth--;
 		return chunk.getBytes();
 	}
 
