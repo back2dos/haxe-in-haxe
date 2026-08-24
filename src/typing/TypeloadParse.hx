@@ -28,10 +28,7 @@ class TypeloadParse {
 	public static function parseFile(defines:DefineContext, rfile:ResolvedFile):ParsedFile {
 		var source:String;
 		try source = sys.io.File.getContent(rfile.file) catch (_:Dynamic) throw new ParseError('Could not open ' + rfile.file, {pfile: rfile.file, pmin: 0, pmax: 0});
-		// The native compiler marks standard-library source positions with the
-		// unique-key `=` prefix while retaining the real path for module files.
-		var positionFile = rfile.classPath.isStdPath() ? "=" + sys.FileSystem.fullPath(rfile.file) : rfile.file;
-		return parseString(defines, positionFile, source);
+		return parseString(defines, rfile.file, source);
 	}
 
 	public static function parseString(defines:DefineContext, file:String, source:String):ParsedFile {

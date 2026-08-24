@@ -68,6 +68,7 @@ class TypeloadModule {
 		loadModule({pack: [], name: "String"});
 		loadModule({pack: [], name: "Std"});
 		loadModule({pack: [], name: "Any"});
+		loadModule({pack: ["haxe"], name: "Unit"});
 		loadModule({pack: [], name: "Array"});
 		loadModule({pack: ["haxe"], name: "EnumTools"});
 		loadModule({pack: ["haxe"], name: "Exception"});
