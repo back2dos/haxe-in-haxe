@@ -68,9 +68,14 @@ class TypeloadModule {
 		Enum/iterator/call-stack modules follow once their typed dependencies are
 		available. */
 	public function loadStdBootstrap():Void {
-		loadStdTypes();
+		var stdTypes = loadStdTypes();
+		for (name in ["Void", "Int", "Float", "Bool"]) switch findModuleType(stdTypes, name) {
+			case TAbstractDecl(abs): basicTypes.set(name, TAbstract(abs, []));
+			case _:
+		}
 		loadModule({pack: [], name: "Any"});
-		loadModule({pack: [], name: "String"});
+		var stringModule = loadModule({pack: [], name: "String"});
+		switch findModuleType(stringModule, "String") { case TClassDecl(cls): basicTypes.set("String", TInst(cls, [])); case _: }
 		loadModule({pack: [], name: "Std"});
 		loadModule({pack: [], name: "Array"});
 		loadModule({pack: ["haxe"], name: "EnumTools"});
@@ -328,8 +333,35 @@ class TypeloadModule {
 					}
 				}
 			}
+			if (typed.cfExpr != null && switch typed.cfKind { case Method(MethInline): true; case _: false; }) {
+				typed.cfExprUnoptimized = typed.cfExpr;
+				typed.cfExpr = optimizeExpression(typed.cfExpr);
+			}
 			activeTypeParams = previousTypeParams;
 		}
+	}
+
+	function optimizeExpression(expression:TExpr):TExpr {
+		function optimize(value:TExpr):TExpr return switch value.eexpr {
+			case TFunction(func): typed(TFunction({tfArgs:func.tfArgs, tfType:func.tfType, tfExpr:optimize(func.tfExpr)}), value.etype, value.epos);
+			case TBlock(values): typed(TBlock([for (item in values) optimize(item)]), value.etype, value.epos);
+			case TBinop(op, left, right): typed(TBinop(op, optimize(left), optimize(right)), value.etype, value.epos);
+			case TParenthesis(inner):
+				switch inner.eexpr {
+					case TIf(condition, thenExpr, elseExpr):
+						var optimizedThen = optimize(thenExpr);
+						var optimizedElse = elseExpr == null ? null : optimize(elseExpr);
+						var thenValue = switch optimizedThen.eexpr { case TBlock([item]): item; case _: optimizedThen; };
+						var elseValue = optimizedElse == null ? null : switch optimizedElse.eexpr { case TBlock([item]): item; case _: optimizedElse; };
+						var optimizedCondition = optimize(condition);
+						var parenthesized = typed(TParenthesis(optimizedCondition), optimizedCondition.etype, optimizedCondition.epos);
+						typed(TIf(parenthesized, thenValue, elseValue), inner.etype, value.epos);
+					case _: typed(TParenthesis(optimize(inner)), value.etype, value.epos);
+				}
+			case TIf(condition, thenExpr, elseExpr): typed(TIf(optimize(condition), optimize(thenExpr), elseExpr == null ? null : optimize(elseExpr)), value.etype, value.epos);
+			case _: value;
+		};
+		return optimize(expression);
 	}
 
 	function makeTypeParams(module:ModuleDef, hostPath:GlobalTypePath, params:Array<TypeParam>, host:TypeParamHost):TypeParams {
@@ -391,7 +423,10 @@ class TypeloadModule {
 				switch cls.clKind { case KAbstractImpl(abs) if (hasMetadata(abs.aMeta, "coreType")): variable.vName = "this1"; variable.vMeta.unshift(realPathMetadata("this")); case _: }
 			} else variable.vMeta.push(realPathMetadata(variable.vName));
 			locals.set(arg.name.name, variable);
-			args.push({variable: variable, defaultValue: arg.expr == null ? null : typeExpr(module, cls, arg.expr, locals)});
+			var defaultValue = arg.expr == null
+				? (arg.optional ? typed(TConst(TNull), signature.args[index].type, Globals.nullPos) : null)
+				: typeExpr(module, cls, arg.expr, locals);
+			args.push({variable: variable, defaultValue: defaultValue});
 		}
 		var body = typeExpr(module, cls, func.fExpr, locals);
 		bindDeclaredReturnType(body, signature.ret);
@@ -447,6 +482,8 @@ class TypeloadModule {
 				typed(TObjectDecl(typedFields), TAnon({aFields:anonymousFields, aStatus:Const}), source.pos);
 			case EBinop(op, left, right):
 				var l = typeExpr(module, cls, left, locals); var r = typeExpr(module, cls, right, locals);
+				if (switch r.eexpr { case TConst(TNull): true; case _: false; }) r.etype = l.etype;
+				if (switch op { case OpAssignOp(OpAdd): isString(l.etype) && !isString(r.etype); case _: false; }) r = stringify(module, r);
 				var result = switch op { case OpEq | OpNotEq | OpGt | OpGte | OpLt | OpLte | OpBoolAnd | OpBoolOr | OpIn: basic("Bool"); case OpAssign: l.etype; case _: l.etype; };
 				typed(TBinop(op, l, r), result, source.pos);
 			case EUnop(op, flag, value): var operand = typeExpr(module, cls, value, locals); typed(TUnop(op, flag, operand), op == Not ? basic("Bool") : operand.etype, source.pos);
@@ -464,6 +501,14 @@ class TypeloadModule {
 			case EReturn(expr): typed(TReturn(expr == null ? null : typeExpr(module, cls, expr, locals)), fallback, source.pos);
 			case EThrow(expr): typed(TThrow(typeExpr(module, cls, expr, locals)), fallback, source.pos);
 			case EIf(condition, thenExpr, elseExpr): var thenValue = typeExpr(module, cls, thenExpr, locals); typed(TIf(typeExpr(module, cls, condition, locals), thenValue, elseExpr == null ? null : typeExpr(module, cls, elseExpr, locals)), thenValue.etype, source.pos);
+			case ETernary(condition, thenExpr, elseExpr):
+				var thenValue = typeExpr(module, cls, thenExpr, locals);
+				var elseValue = typeExpr(module, cls, elseExpr, locals);
+				typed(TIf(
+					typeExpr(module, cls, condition, locals),
+					typed(TBlock([thenValue]), thenValue.etype, thenExpr.pos),
+					typed(TBlock([elseValue]), elseValue.etype, elseExpr.pos)
+				), thenValue.etype, source.pos);
 			case EWhile(condition, body, flag): typed(TWhile(typeExpr(module, cls, condition, locals), typeExpr(module, cls, body, locals), flag), fallback, source.pos);
 			case _: typed(TIdent("<untyped>"), fallback, source.pos);
 		};
@@ -577,6 +622,22 @@ class TypeloadModule {
 		var values = [for (arg in args) typeExpr(module, cls, arg, locals)];
 		var result = switch callee.etype { case TFun(sig): sig.ret; case _: TDynamic(null); };
 		return typed(TCall(callee, values), result, pos);
+	}
+
+	function stringify(module:ModuleDef, value:TExpr):TExpr {
+		var stdModule = loadModule({pack:[], name:"Std"});
+		var stdClass = switch findModuleType(stdModule, "Std") { case TClassDecl(value): value; case _: throw "Std is not a class"; };
+		var field = stdClass.clStatics.get("string");
+		var zeroPos = {pfile:value.epos.pfile, pmin:value.epos.pmin, pmax:value.epos.pmin};
+		var stdExpr = typed(TTypeExpr(TClassDecl(stdClass)), TDynamic(null), zeroPos);
+		var callee = typed(TField(stdExpr, FStatic(stdClass, field)), field.cfType, zeroPos);
+		return typed(TCall(callee, [value]), basic("String"), value.epos);
+	}
+
+	static function isString(type:T):Bool return switch type {
+		case TInst(cls, params): cls.clPath.pack.length == 0 && cls.clPath.name == "String" && params.length == 0;
+		case TAbstract(abs, params): abs.aPath.pack.length == 0 && abs.aPath.name == "String" && params.length == 0;
+		case _: false;
 	}
 
 	// Direct counterpart of typer.ml's type_call_builtin trace branch. The full

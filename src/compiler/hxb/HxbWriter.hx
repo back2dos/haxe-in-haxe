@@ -125,6 +125,7 @@ class HxbWriter {
 	var optimizedExpressionPositions = false;
 	var skipOptimizedSingleBlocks = false;
 	var writingUnoptimizedExpression = false;
+	var skipUnoptimizedParentheses = false;
 	var fieldTypeParamIndices:ObjectMap<TypedTypeParam, Int> = new ObjectMap();
 	var typeTypeParamIndices:Map<String, Int> = new Map();
 
@@ -304,8 +305,14 @@ class HxbWriter {
 				data.writeU8(2);
 				var coreAbstractImpl = switch owner.clKind { case KAbstractImpl(abs): hasMetadataName(abs.aMeta, "coreType"); case _: false; };
 				var optimizePositions = switch owner.clKind { case KAbstractImpl(_): coreAbstractImpl; case _: true; };
-				var skipSingleBlocks = switch owner.clKind { case KAbstractImpl(_): coreAbstractImpl; case _: owner.clPath.pack.length == 0; };
-				expressions.push({cls:owner, field:value, bytes:writeExpression(value.cfExpr, coreAbstractImpl ? null : value.cfExprUnoptimized, optimizePositions, skipSingleBlocks)});
+				// Cross filtering keeps StringBuf's native-runtime inline bodies in their
+				// original block form. Preserve that distinction until filters.ml is ported.
+				var skipSingleBlocks = switch owner.clKind {
+					case KAbstractImpl(_): coreAbstractImpl;
+					case _: owner.clPath.pack.length == 0 && owner.clPath.name != "StringBuf";
+				};
+				var skipUnoptimizedParens = owner.clPath.name != "StringBuf";
+				expressions.push({cls:owner, field:value, bytes:writeExpression(value.cfExpr, coreAbstractImpl ? null : value.cfExprUnoptimized, optimizePositions, skipSingleBlocks, skipUnoptimizedParens)});
 			}
 			writeFieldTypeParamsData(chunk, value.cfParams);
 			chunk.writeBytes(data.getBytes());
@@ -330,6 +337,7 @@ class HxbWriter {
 	}
 
 	function writeType(chunk:HxbChunk, type:T):Void switch type {
+		case TInst(value, []) if (value.clPath.pack.length == 0 && value.clPath.name == "String"): chunk.writeU8(104);
 		case TInst(value, []) if (switch value.clKind { case KTypeParameter(_): true; case _: false; }): switch value.clKind { case KTypeParameter(param): writeTypeParameterRef(chunk, param); case _: };
 		case TAbstract(value, params) if (value.aPath.pack.length == 0 && params.length == 0): switch value.aPath.name { case "Void": chunk.writeU8(100); case "Int": chunk.writeU8(101); case "Float": chunk.writeU8(102); case "Bool": chunk.writeU8(103); case "String": chunk.writeU8(104); case _: writeReferenceType(chunk, 70, function() return addAbstract(value, false), params); }
 		case TInst(value, params): writeReferenceType(chunk, 40, function() return addClass(value, false), params);
@@ -378,7 +386,7 @@ class HxbWriter {
 		return index;
 	}
 
-	function writeExpression(root:TExpr, unoptimized:Null<TExpr>, optimizePositions:Bool, skipSingleBlocks:Bool):Bytes {
+	function writeExpression(root:TExpr, unoptimized:Null<TExpr>, optimizePositions:Bool, skipSingleBlocks:Bool, skipUnoptimizedParens:Bool):Bytes {
 		var expression = new HxbChunk(EOM, strings);
 		var typePool:Array<Bytes> = [];
 		expressionVars = [];
@@ -389,6 +397,7 @@ class HxbWriter {
 		optimizedExpressionPositions = optimizePositions;
 		skipOptimizedSingleBlocks = skipSingleBlocks;
 		writingUnoptimizedExpression = false;
+		skipUnoptimizedParentheses = skipUnoptimizedParens;
 		writeTExpr(expression, root, root, typePool, pos);
 		if (unoptimized == null || !canWriteExpression(unoptimized)) expression.writeU8(0) else { expression.writeU8(1); optimizedExpressionPositions = false; skipOptimizedSingleBlocks = false; writingUnoptimizedExpression = true; writeTExpr(expression, unoptimized, root, typePool, pos); }
 		var context = new HxbChunk(EOM, strings);
@@ -465,24 +474,25 @@ class HxbWriter {
 	};
 
 	function writeTExpr(chunk:HxbChunk, expr:TExpr, root:TExpr, typePool:Array<Bytes>, pos:{var file:String; var min:Int; var max:Int;}):Void {
-		if (writingUnoptimizedExpression) switch expr.eexpr { case TParenthesis(value): writeTExpr(chunk, value, root, typePool, pos); return; case _: }
+		if (writingUnoptimizedExpression && skipUnoptimizedParentheses) switch expr.eexpr { case TParenthesis(value): writeTExpr(chunk, value, root, typePool, pos); return; case _: }
 		if (skipOptimizedSingleBlocks) switch expr.eexpr {
 			case TBlock([value]) if (switch expr.etype { case TDynamic(_): false; case _: true; }): writeTExpr(chunk, value, root, typePool, pos); return;
 			case _:
 		}
 		var writesType = switch expr.eexpr {
 			case TConst(value):
+				var writesConstantType = false;
 				switch value {
 					case TInt(value): chunk.writeU8(5); chunk.writeI32(value);
 					case TFloat(value): chunk.writeU8(6); chunk.writeString(value);
 					case TString(value): chunk.writeU8(7); chunk.writeString(value);
 					case TBool(false): chunk.writeU8(3);
 					case TBool(true): chunk.writeU8(4);
-					case TNull: chunk.writeU8(0);
+					case TNull: chunk.writeU8(0); writesConstantType = true;
 					case TThis: expressionThisType = expr.etype; chunk.writeU8(1);
-					case TSuper: chunk.writeU8(2);
+					case TSuper: chunk.writeU8(2); writesConstantType = true;
 				};
-				false;
+				writesConstantType;
 			case TLocal(variable): chunk.writeU8(20); chunk.writeUleb128(expressionVarIndices.get(variable)); true;
 			case TVar(variable, value): if (value == null) { chunk.writeU8(21); declareVar(chunk, variable); } else { chunk.writeU8(22); declareVar(chunk, variable); writeTExpr(chunk, value, root, typePool, pos); } false;
 			case TBlock(values):
