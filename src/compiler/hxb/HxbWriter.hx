@@ -299,7 +299,8 @@ class HxbWriter {
 			if (value.cfExpr == null || !canWriteExpression(value.cfExpr)) data.writeU8(0) else {
 				data.writeU8(2);
 				var externClass = (owner.clFlags & (1 << core.TType.TType.flagTClassNames.indexOf("CExtern"))) != 0;
-				expressions.push({cls:owner, field:value, bytes:writeExpression(value.cfExpr, value.cfExprUnoptimized, externClass)});
+				var coreAbstractImpl = switch owner.clKind { case KAbstractImpl(abs): hasMetadataName(abs.aMeta, "coreType"); case _: false; };
+				expressions.push({cls:owner, field:value, bytes:writeExpression(value.cfExpr, coreAbstractImpl ? null : value.cfExprUnoptimized, externClass || coreAbstractImpl)});
 			}
 			writeFieldTypeParamsData(chunk, value.cfParams);
 			chunk.writeBytes(data.getBytes());

@@ -322,9 +322,11 @@ class TypeloadModule {
 		for (index in 0...func.fArgs.length) {
 			var arg = func.fArgs[index];
 			var variable = makeVar(arg.name.name, signature.args[index].type, TVOArgument, arg.name.pos, arg.meta);
-			if (hasMetadata(arg.meta, "this")) variable.vKind = VAbstractThis;
-			else { variable.vFlags |= 1 << core.TType.TType.flagTVarNames.indexOf("VUsedByTyper"); variable.vMeta.push(realPathMetadata(variable.vName)); }
-			locals.set(variable.vName, variable);
+			if (hasMetadata(arg.meta, "this")) {
+				variable.vKind = VAbstractThis;
+				switch cls.clKind { case KAbstractImpl(abs) if (hasMetadata(abs.aMeta, "coreType")): variable.vName = "this1"; variable.vMeta.unshift(realPathMetadata("this")); case _: }
+			} else variable.vMeta.push(realPathMetadata(variable.vName));
+			locals.set(arg.name.name, variable);
 			args.push({variable: variable, defaultValue: arg.expr == null ? null : typeExpr(module, cls, arg.expr, locals)});
 		}
 		var body = typeExpr(module, cls, func.fExpr, locals);
@@ -520,7 +522,7 @@ class TypeloadModule {
 
 	function typeIdent(module:ModuleDef, cls:TClass, name:String, locals:StringMap<TVar>, pos:Pos):TExpr {
 		var local = locals.get(name);
-		if (local != null) return typed(TLocal(local), local.vType, pos);
+		if (local != null) { switch local.vKind { case VAbstractThis: case _: local.vFlags |= 1 << core.TType.TType.flagTVarNames.indexOf("VUsedByTyper"); } return typed(TLocal(local), local.vType, pos); }
 		if (name == "this") return typed(TConst(TThis), cls.clType, pos);
 		var field = cls.clFields.get(name);
 		if (field == null) field = cls.clStatics.get(name);
