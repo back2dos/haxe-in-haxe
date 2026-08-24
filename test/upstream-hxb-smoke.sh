@@ -4,6 +4,10 @@
 
 set -eu
 
+repository_root=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)
+HAXE_STD_PATH="$repository_root/haxe/std"
+export HAXE_STD_PATH
+
 if [ -z "${HAXE_REFERENCE:-}" ] || [ ! -x "$HAXE_REFERENCE" ]; then
 	echo "HAXE_REFERENCE must be the executable built from the pinned haxe/ submodule." >&2
 	exit 2
@@ -50,3 +54,8 @@ run_case issue-10825 haxe/tests/misc/eval/projects/Issue10825 Main
 run_case issue-10832 haxe/tests/misc/eval/projects/Issue10832 Main
 run_case issue-10959 haxe/tests/misc/eval/projects/Issue10959 Main
 run_case issue-10980 haxe/tests/misc/eval/projects/Issue10980 Main
+run_case issue-11152 haxe/tests/misc/eval/projects/Issue11152 Main
+run_case issue-11176 haxe/tests/misc/eval/projects/Issue11176 Main
+run_case issue-11180 haxe/tests/misc/eval/projects/Issue11180 Main
+run_case issue-11286 haxe/tests/misc/eval/projects/Issue11286 Main
+run_case issue-11323 haxe/tests/misc/eval/projects/Issue11323 Main

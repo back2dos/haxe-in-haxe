@@ -6,6 +6,10 @@
 
 set -eu
 
+repository_root=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)
+HAXE_STD_PATH="$repository_root/haxe/std"
+export HAXE_STD_PATH
+
 if [ -z "${HAXE_REFERENCE:-}" ] || [ ! -x "$HAXE_REFERENCE" ]; then
 	echo "HAXE_REFERENCE must be the executable built from the pinned haxe/ submodule." >&2
 	exit 2
