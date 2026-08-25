@@ -102,8 +102,8 @@ HAXE_REFERENCE="$PWD/haxe/haxe" sh test/conformance.sh
 ```
 
 These are different goalposts: unit tests check ported subsystems; the parser
-lane currently accepts 1,339/1,366 upstream sources; smoke requires 123 direct
-roots and 10 HXML configurations to emit loadable HXB; only the final command
+lane currently accepts 1,339/1,366 upstream sources; smoke requires 112 direct
+roots and 9 HXML configurations to emit loadable HXB; only the final command
 requires exact member sets and uncompressed member payloads. Macro, runtime,
 target-specific, and expected-failure tests remain recorded exclusions rather
 than simulated passes.

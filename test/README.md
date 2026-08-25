@@ -118,7 +118,7 @@ work and do not become conformance passes merely because consumption succeeds.
 Discovered exclusions and their current reasons are recorded in
 `test/upstream-hxb-exclusions.md`.
 
-The current breadth set contains 123 direct source roots and 10 effective HXML
+The current breadth set contains 112 direct source roots and 9 effective HXML
 configurations. A retained pass must type every non-extern field body; an
 unsupported expression is a failure, never an omitted body or placeholder.
 Reference consumption is still only a smoke check while source classpaths are
@@ -138,3 +138,8 @@ enum-pattern lowering: upstream allocates matcher temporaries which the port
 does not yet create, shifting later IDs (including otherwise matching simple
 fixtures). Implement matcher parity; never seed or offset the global counter to
 hide this gap.
+
+Abstract construction is also not ordinary `TNew`: upstream resolves the
+abstract's constructor field and lowers/inlines it through the implementation
+class. Until that path exists, such roots are explicit smoke exclusions; never
+serialize an unresolved constructor placeholder.

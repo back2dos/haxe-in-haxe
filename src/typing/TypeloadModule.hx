@@ -651,7 +651,15 @@ class TypeloadModule {
 				case Ident("false"): typed(TConst(TBool(false)), basic("Bool"), source.pos);
 				case Ident("null"): typed(TConst(TNull), fallback, source.pos);
 				case Ident(name): typeIdent(module, cls, name, locals, source.pos);
-				case Regexp(_, _): typed(TIdent(Ast.sConstant(value)), fallback, source.pos);
+				case Regexp(pattern, options):
+					var type = resolvePath(module, {tpackage:[], tname:"EReg", tparams:[], tsub:null});
+					switch type {
+						case TInst(target, []):
+							var patternExpr = typed(TConst(TString(pattern)), basic("String"), source.pos);
+							var optionsExpr = typed(TConst(TString(options)), basic("String"), source.pos);
+							typed(TNew(target, [], [patternExpr, optionsExpr]), type, source.pos);
+						case _: throw "EReg is not a class";
+					}
 			};
 			case EParenthesis(expr): var value = typeExpr(module, cls, expr, locals); typed(TParenthesis(value), value.etype, source.pos);
 			case EArrayDecl([forExpr]) if (switch forExpr.expr { case EFor(_, _): true; case _: false; }): typeArrayComprehension(module, cls, forExpr, locals, source.pos);
@@ -1494,7 +1502,7 @@ class TypeloadModule {
 					type = TInst(target, params);
 				}
 				typed(TNew(target, params, values), type, pos);
-			case _: typed(TIdent("<new>"), TDynamic(null), pos);
+			case _: throw 'Unsupported constructor target ${path.tpackage.concat([path.tname]).join(".")}';
 		};
 	}
 

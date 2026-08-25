@@ -52,6 +52,11 @@ class TypeloadModuleTest {
 				if (field.cfName != "isOfType") throw "Type test did not call Std.isOfType";
 			case _: throw "Type test expression was not typed";
 		}
+		switch expressionClass.clFields.get("regexp").cfExpr.eexpr {
+			case TFunction({tfExpr:{eexpr:TReturn({eexpr:TNew(target, [], [{eexpr:TConst(TString("value"))}, {eexpr:TConst(TString("gi"))}])})}}):
+				if (target.clPath.pack.length != 0 || target.clPath.name != "EReg") throw "Regex literal selected the wrong class";
+			case _: throw "Regex literal was not lowered to EReg construction";
+		}
 		switch expressionClass.clFields.get("guarded").cfExpr.eexpr {
 			case TFunction({tfExpr:{eexpr:TTry(_, [{variable:variable, expr:_}])}}):
 				if (variable.vName != "error") throw "Catch variable was not typed";

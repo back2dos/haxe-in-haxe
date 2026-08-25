@@ -9,6 +9,7 @@ class Expressions {
 	function helper(value:Dynamic):Dynamic { return value; }
 	function unchecked(value:Dynamic):Dynamic return untyped value.missing();
 	function typeTest(value:Dynamic):Bool return value is String;
+	function regexp():EReg return ~/value/gi;
 	function conditions(value:Int):Void {
 		while (value > 0) value--;
 		if (value == 0) value++;
