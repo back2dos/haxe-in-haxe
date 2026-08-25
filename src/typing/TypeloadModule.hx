@@ -584,7 +584,6 @@ class TypeloadModule {
 			args.push({variable: variable, defaultValue: defaultValue});
 		}
 		var body = typeExpr(module, cls, func.fExpr, locals);
-		if (!switch body.eexpr { case TBlock(_): true; case _: false; }) body = typed(TBlock([body]), body.etype, body.epos);
 		bindDeclaredReturnType(body, signature.ret);
 		currentMethodName = previousMethodName;
 		return typed(TFunction({tfArgs:args, tfType:signature.ret, tfExpr:body}), TFun(signature), func.fExpr.pos);

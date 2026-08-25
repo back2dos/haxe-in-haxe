@@ -48,12 +48,12 @@ class TypeloadModuleTest {
 		var run = expressionClass.clFields.get("run").cfExpr;
 		if (expressionClass.clFields.get("unchecked").cfExpr == null) throw "Untyped expression body was not typed";
 		switch expressionClass.clFields.get("typeTest").cfExpr.eexpr {
-			case TFunction({tfExpr:{eexpr:TBlock([{eexpr:TReturn({eexpr:TCall({eexpr:TField(_, FStatic(_, field))}, [_, {eexpr:TTypeExpr(_)}])})}])}}):
+			case TFunction({tfExpr:{eexpr:TReturn({eexpr:TCall({eexpr:TField(_, FStatic(_, field))}, [_, {eexpr:TTypeExpr(_)}])})}}):
 				if (field.cfName != "isOfType") throw "Type test did not call Std.isOfType";
 			case _: throw "Type test expression was not typed";
 		}
 		switch expressionClass.clFields.get("guarded").cfExpr.eexpr {
-			case TFunction({tfExpr:{eexpr:TBlock([{eexpr:TTry(_, [{variable:variable, expr:_}])}])}}):
+			case TFunction({tfExpr:{eexpr:TTry(_, [{variable:variable, expr:_}])}}):
 				if (variable.vName != "error") throw "Catch variable was not typed";
 			case _: throw "Try/catch expression was not typed";
 		}
@@ -113,7 +113,7 @@ class TypeloadModuleTest {
 		var accessorClass = switch accessors.mTypes[0] { case TClassDecl(value): value; case _: throw "Expected accessors class"; };
 		switch accessorClass.clStatics.get("read").cfExpr.eexpr {
 			case TFunction(func): switch func.tfExpr.eexpr {
-				case TBlock([{eexpr:TReturn({eexpr: TCall({eexpr:TField(_, FInstance(_, _, field))}, [])})}]): if (field.cfName != "get_message") throw "Property getter was not selected";
+				case TReturn({eexpr: TCall({eexpr:TField(_, FInstance(_, _, field))}, [])}): if (field.cfName != "get_message") throw "Property getter was not selected";
 				case _: throw "Nullable property access was not typed as a getter call";
 			}
 			case _: throw "Expected property reader function";
@@ -126,7 +126,7 @@ class TypeloadModuleTest {
 		if (!moduleFields.mStatics.clStatics.exists("initial") || !moduleFields.mStatics.clStatics.exists("answer")) throw "Module fields were not populated";
 		switch moduleFields.mStatics.clStatics.get("answer").cfExpr.eexpr {
 			case TFunction(func): switch func.tfExpr.eexpr {
-				case TBlock([{eexpr:TReturn({eexpr:TBinop(OpAdd, {eexpr:TField(_, FStatic(_, field))}, _)})}]): if (field.cfName != "initial") throw "Module field reference selected the wrong field";
+				case TReturn({eexpr:TBinop(OpAdd, {eexpr:TField(_, FStatic(_, field))}, _)}): if (field.cfName != "initial") throw "Module field reference selected the wrong field";
 				case _: throw "Module field function body was not typed";
 			}
 			case _: throw "Expected module field function";
@@ -162,7 +162,7 @@ class TypeloadModuleTest {
 		var valueSwitchClass = switch valueSwitch.mTypes[0] { case TClassDecl(value): value; case _: throw "Expected value-switch class"; };
 		switch valueSwitchClass.clStatics.get("select").cfExpr.eexpr {
 			case TFunction(func): switch func.tfExpr.eexpr {
-				case TBlock([{eexpr:TReturn({eexpr:TSwitch({switchSubject:{eexpr:TLocal(_)}, switchCases:[{casePatterns:[{eexpr:TField(_, FStatic(_, field))}]}], switchDefault:{eexpr:TConst(TString("no"))}})})}]): if (field.cfName != "expected") throw "Value-switch pattern selected the wrong field";
+				case TReturn({eexpr:TSwitch({switchSubject:{eexpr:TLocal(_)}, switchCases:[{casePatterns:[{eexpr:TField(_, FStatic(_, field))}]}], switchDefault:{eexpr:TConst(TString("no"))}})}): if (field.cfName != "expected") throw "Value-switch pattern selected the wrong field";
 				case _: throw "Value switch was not typed as a direct switch";
 			}
 			case _: throw "Expected value-switch function";
