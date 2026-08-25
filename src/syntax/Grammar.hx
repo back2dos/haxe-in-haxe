@@ -106,7 +106,7 @@ class Grammar {
 	}
 
 	var previousKwd:Null<Keyword>;
-	function access():Array<PlacedAccess> { var result=[]; while (true) { var t=current(); var a:Null<Access> = switch t.token { case Kwd(Public): APublic; case Kwd(Private): APrivate; case Kwd(Static): AStatic; case Kwd(Override): AOverride; case Kwd(Dynamic): ADynamic; case Kwd(Inline): AInline; case Kwd(Macro): AMacro; case Kwd(Final): AFinal; case Kwd(Extern): AExtern; case Kwd(Overload): AOverload; case _: null; }; if (a == null) return result; next(); result.push({access:a,pos:t.pos}); } }
+	function access(?field=false):Array<PlacedAccess> { var result=[]; while (true) { var t=current(); var a:Null<Access> = switch t.token { case Kwd(Public): APublic; case Kwd(Private): APrivate; case Kwd(Static): AStatic; case Kwd(Override): AOverride; case Kwd(Dynamic): ADynamic; case Kwd(Inline): AInline; case Kwd(Macro): AMacro; case Kwd(Final): AFinal; case Kwd(Extern): AExtern; case Kwd(Abstract) if (field || (index + 1 < tokens.length && tokens[index + 1].token.match(Kwd(Class)))): AAbstract; case Kwd(Overload): AOverload; case _: null; }; if (a == null) return result; next(); result.push({access:a,pos:t.pos}); } }
 	function classFields():Array<ClassField> {
 		var fields:Array<ClassField> = [];
 		while (!is(BrClose)) {
@@ -116,7 +116,7 @@ class Grammar {
 		return fields;
 	}
 	function classField():Null<ClassField> {
-		var doc=documentation(), meta=metadata(); var start=current().pos; var accesses=access();
+		var doc=documentation(), meta=metadata(); var start=current().pos; var accesses=access(true);
 		// Conditional compilation can leave a documentation comment immediately
 		// before the closing brace after its documented field is removed.
 		if (is(BrClose)) return null;
@@ -428,7 +428,7 @@ class Grammar {
 		return {type: optional ? CTOptional({type:complex,pos:start}) : complex,pos:start};
 	}
 	function anonymousField():ClassField {
-		var doc = documentation(), meta = metadata(), start = current().pos, accesses = access();
+		var doc = documentation(), meta = metadata(), start = current().pos, accesses = access(true);
 		if (is(Kwd(Var))) next();
 		if (acceptKwd(Function) != null) {
 			var name = placedIdent(), func = functionRest();
