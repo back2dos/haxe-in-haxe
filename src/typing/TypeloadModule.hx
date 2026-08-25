@@ -1139,6 +1139,10 @@ class TypeloadModule {
 
 	function substituteType(type:T, from:T, to:T):T {
 		if (type == from) return to;
+		switch [type, from] {
+			case [TInst(typeClass, []), TInst(fromClass, [])] if (typeClass == fromClass): return to;
+			case _:
+		}
 		return switch type {
 			case TInst(value, params): TInst(value, [for (param in params) substituteType(param, from, to)]);
 			case TEnum(value, params): TEnum(value, [for (param in params) substituteType(param, from, to)]);

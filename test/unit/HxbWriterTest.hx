@@ -48,6 +48,10 @@ class HxbWriterTest {
 		var propertyWriter = new HxbWriter();
 		propertyWriter.writeModule(propertyModule);
 		if (propertyWriter.exportModule().length <= 4) throw "Property module was not serialized";
+		var genericMethodModule = new TypeloadModule(paths, Define.emptyDefines()).loadModule({pack:["unit", "moduleload"], name:"GenericMethodInference"});
+		var genericMethodWriter = new HxbWriter();
+		genericMethodWriter.writeModule(genericMethodModule);
+		if (genericMethodWriter.exportModule().length <= 4) throw "Inferred generic method call was not serialized";
 		var metadataFunctionModule = new TypeloadModule(paths, Define.emptyDefines()).loadModule({pack:["unit", "moduleload"], name:"MetadataFunction"});
 		var metadataFunctionWriter = new HxbWriter();
 		metadataFunctionWriter.writeModule(metadataFunctionModule);

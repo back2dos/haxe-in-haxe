@@ -154,3 +154,6 @@ run_case issue-4660 haxe/tests/misc/eval/projects/Issue4660 Test
 run_case issue-8088 haxe/tests/misc/eval/projects/Issue8088 Success
 run_case issue-9197 haxe/tests/misc/eval/projects/Issue9197 MainGood
 run_case issue-12945 haxe/tests/misc/eval/projects/Issue12945 OptSkipFunctionBody
+run_case issue-3361-main3 haxe/tests/misc/eval/projects/Issue3361 Main3
+run_case issue-10198-main4 haxe/tests/misc/eval/projects/Issue10198 Main4
+run_case issue-10198-main5 haxe/tests/misc/eval/projects/Issue10198 Main5

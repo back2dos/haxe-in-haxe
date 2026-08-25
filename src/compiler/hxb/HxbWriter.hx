@@ -306,7 +306,8 @@ class HxbWriter {
 			// Upstream stages field data before committing its type-parameter prefix.
 			// Besides framing nested scopes, this fixes reference-pool insertion order.
 			var data = new HxbChunk(EOM, strings);
-			writeType(data, value.cfType); data.writeUleb128(value.cfFlags); writeDocumentation(data, value.cfDoc); writeFieldKind(data, value.cfKind);
+			try writeType(data, value.cfType) catch (error:Dynamic) throw 'Could not serialize field type ${owner.clPath.name}.${value.cfName}: $error';
+			data.writeUleb128(value.cfFlags); writeDocumentation(data, value.cfDoc); writeFieldKind(data, value.cfKind);
 			if (value.cfExpr == null || !canWriteExpression(value.cfExpr)) data.writeU8(0) else {
 				data.writeU8(2);
 				var coreAbstractImpl = switch owner.clKind { case KAbstractImpl(abs): hasMetadataName(abs.aMeta, "coreType"); case _: false; };
@@ -318,7 +319,8 @@ class HxbWriter {
 					case _: owner.clPath.pack.length == 0 && owner.clPath.name != "StringBuf";
 				};
 				var skipUnoptimizedParens = owner.clPath.name != "StringBuf";
-				expressions.push({cls:owner, field:value, bytes:writeExpression(value.cfExpr, coreAbstractImpl ? null : value.cfExprUnoptimized, optimizePositions, skipSingleBlocks, skipUnoptimizedParens)});
+				try expressions.push({cls:owner, field:value, bytes:writeExpression(value.cfExpr, coreAbstractImpl ? null : value.cfExprUnoptimized, optimizePositions, skipSingleBlocks, skipUnoptimizedParens)})
+				catch (error:Dynamic) throw 'Could not serialize field expression ${owner.clPath.name}.${value.cfName}: $error';
 			}
 			writeFieldTypeParamsData(chunk, value.cfParams);
 			chunk.writeBytes(data.getBytes());
@@ -338,9 +340,21 @@ class HxbWriter {
 				case [AccNormal, AccNormal]: 10; case [AccNormal, AccNo]: 11; case [AccNormal, AccNever]: 12; case [AccNormal, AccCtor]: 13; case [AccNormal, AccCall]: 14;
 				case [AccInline, AccNever]: 20;
 				case [AccCall, AccNormal]: 30; case [AccCall, AccNo]: 31; case [AccCall, AccNever]: 32; case [AccCall, AccCtor]: 33; case [AccCall, AccCall]: 34;
-				case _: throw "Unsupported property access serialization";
+				case _: 100;
 			};
 			chunk.writeU8(kind);
+			if (kind == 100) { writeVarAccess(chunk, value.vRead); writeVarAccess(chunk, value.vWrite); }
+	}
+
+	static function writeVarAccess(chunk:HxbChunk, access:VarAccess):Void switch access {
+		case AccNormal: chunk.writeU8(0);
+		case AccNo: chunk.writeU8(1);
+		case AccNever: chunk.writeU8(2);
+		case AccCtor: chunk.writeU8(3);
+		case AccCall: chunk.writeU8(4);
+		case AccInline: chunk.writeU8(5);
+		case AccRequire(condition, message): chunk.writeU8(6); chunk.writeString(condition); chunk.writeOption(message, chunk.writeString);
+		case AccPrivateCall: chunk.writeU8(7);
 	}
 
 	function writeType(chunk:HxbChunk, type:T):Void switch type {
@@ -381,7 +395,7 @@ class HxbWriter {
 			chunk.writeU8(1); chunk.writeUleb128(index);
 		case TPHConstructor | TPHMethod | TPHEnumConstructor | TPHAnonField:
 			var index = fieldTypeParamIndices.get(param);
-			if (index == null) throw 'Unselected field type parameter ${param.ttpName}';
+			if (index == null) throw 'Unselected field type parameter ${param.ttpName} (selected: ${[for (selected in fieldTypeParamIndices.keys()) selected.ttpName].join(", ")})';
 			chunk.writeU8(2); chunk.writeUleb128(index);
 		case TPHLocal: throw "Local type parameter serialization is not ported";
 		case TPHUnbound: throw "Unbound type parameter cannot be serialized";
@@ -644,7 +658,7 @@ class HxbWriter {
 			case TUnop(op, flag, value): chunk.writeU8(140 + unopIndex(op, flag)); writeTExpr(chunk, value, root, typePool, pos); true;
 			case _: throw "Expression serialization is not ported for " + Type.enumConstructor(expr.eexpr);
 		};
-		if (writesType) chunk.writeUleb128(addExprType(typePool, expr.etype));
+		if (writesType) try chunk.writeUleb128(addExprType(typePool, expr.etype)) catch (error:Dynamic) throw '${Type.enumConstructor(expr.eexpr)} expression type: $error';
 		var outputPos = optimizedExpressionPositions ? switch expr.eexpr { case TBlock([value]): value.epos; case _: expr.epos; } : expr.epos;
 		writeRelativePos(chunk, outputPos, pos);
 	}
