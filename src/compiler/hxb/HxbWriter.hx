@@ -581,12 +581,16 @@ class HxbWriter {
 					case _: throw "Unsupported expression field access";
 				};
 				true;
+			case TTypeExpr(TClassDecl(cls)) if (switch cls.clKind { case KTypeParameter(_): true; case _: false; }):
+				chunk.writeU8(128); switch cls.clKind { case KTypeParameter(param): writeTypeParameterRef(chunk, param); case _: } true;
 			case TTypeExpr(TClassDecl(cls)): chunk.writeU8(120); writeClassRef(chunk, cls); false;
 			case TTypeExpr(TEnumDecl(en)): chunk.writeU8(121); chunk.writeUleb128(addEnum(en, false)); false;
 			case TTypeExpr(TAbstractDecl(abs)): chunk.writeU8(122); chunk.writeUleb128(addAbstract(abs, false)); true;
 			case TTypeExpr(TTypeDecl(def)): chunk.writeU8(123); chunk.writeUleb128(addTypedef(def, false)); true;
 			case TCast(value, null): chunk.writeU8(124); writeTExpr(chunk, value, root, typePool, pos); true;
 			case TCast(value, type): chunk.writeU8(125); writeTExpr(chunk, value, root, typePool, pos); writeModuleTypePath(chunk, type); true;
+			case TNew(cls, params, args) if (switch cls.clKind { case KTypeParameter(_): true; case _: false; }):
+				chunk.writeU8(127); switch cls.clKind { case KTypeParameter(param): writeTypeParameterRef(chunk, param); case _: } writeTypes(chunk, params); chunk.writeList(args, function(arg) writeTExpr(chunk, arg, root, typePool, pos)); true;
 			case TNew(cls, params, args): chunk.writeU8(126); writeClassRef(chunk, cls); writeTypes(chunk, params); chunk.writeList(args, function(arg) writeTExpr(chunk, arg, root, typePool, pos)); true;
 			case TBinop(op, left, right): chunk.writeU8(160 + binopIndex(op)); writeTExpr(chunk, left, root, typePool, pos); writeTExpr(chunk, right, root, typePool, pos); true;
 			case TUnop(op, flag, value): chunk.writeU8(140 + unopIndex(op, flag)); writeTExpr(chunk, value, root, typePool, pos); true;
