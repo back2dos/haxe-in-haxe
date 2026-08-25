@@ -15,7 +15,7 @@ class Grammar {
 		return new Grammar(tokens).parseFile();
 	}
 	static function parseEmbeddedExpression(source:String, file:String, offset:Int):Expr {
-		var tokens = Lexer.lex(source, file);
+		var tokens = Lexer.lex(source, file).filter(function(token) return switch token.token { case Comment(_) | CommentLine(_): false; case _: true; });
 		for (token in tokens) { token.pos.pmin += offset; token.pos.pmax += offset; }
 		return new Grammar(tokens).expression();
 	}
@@ -202,7 +202,7 @@ class Grammar {
 		case Unop(op): next(); var e=unary(); expr(EUnop(op,Prefix,e),union(t.pos,e.pos));
 		case Spread: next(); var e=unary(); expr(EUnop(Spread,Prefix,e),union(t.pos,e.pos));
 		case Binop(OpSub): next(); var e=unary(); expr(EUnop(Neg,Prefix,e),union(t.pos,e.pos));
-		case Kwd(Return): next(); var e = is(Semicolon)||is(BrClose) ? null : expression(); expr(EReturn(e), e == null ? t.pos : union(t.pos,e.pos));
+		case Kwd(Return): next(); var e = expressionEnded() ? null : expression(); expr(EReturn(e), e == null ? t.pos : union(t.pos,e.pos));
 		case Kwd(Throw): next(); var e=expression(); expr(EThrow(e),union(t.pos,e.pos));
 		case Kwd(Var) | Kwd(Final): var finalValue=acceptKwd(Final)!=null; if(!finalValue)next(); var vars=[variable(finalValue)]; while(accept(Comma)!=null) vars.push(variable(finalValue)); expr(EVars(vars),union(t.pos,vars[vars.length-1].evExpr == null ? vars[vars.length-1].evName.pos : vars[vars.length-1].evExpr.pos));
 		case Kwd(Static):
@@ -357,8 +357,8 @@ class Grammar {
 		var defaultCase:Null<SwitchDefault> = null;
 		while (!is(BrClose)) {
 			if (acceptKwd(Case) != null) {
-				var caseStart = previous().pos, values = [expression()];
-				while (accept(Comma) != null) values.push(expression());
+				var caseStart = previous().pos, values = [switchPattern()];
+				while (accept(Comma) != null) values.push(switchPattern());
 				var guard = acceptKwd(If) == null ? null : expression();
 				expect(DblDot);
 				var value = switchBody();
@@ -371,6 +371,13 @@ class Grammar {
 		}
 		var end = expect(BrClose).pos;
 		return expr(ESwitch(subject, cases, defaultCase), union(start, end));
+	}
+	function switchPattern():Expr {
+		if (!is(Kwd(Var))) return expression();
+		var start = next().pos;
+		var name = placedIdent();
+		var variable = Ast.mkEVar(name, false, false, null, null);
+		return expr(EVars([variable]), union(start, name.pos));
 	}
 	function switchBody():Null<Expr> {
 		var values:Array<Expr> = [];
@@ -428,6 +435,11 @@ class Grammar {
 		return expr(EBlock(es),union(begin,expect(BrClose).pos));
 	}
 	function statementBody():Expr return is(BrOpen) ? block() : expression();
+	function expressionEnded():Bool return switch current().token {
+		case Semicolon | BrClose | BkClose | PClose | Comma | DblDot | Eof: true;
+		case Kwd(Case) | Kwd(Default) | Kwd(Else): true;
+		case _: false;
+	};
 	static function requiresSemicolon(value:Expr):Bool return switch value.expr {
 		case EBlock(_) | EIf(_, _, _) | EWhile(_, _, _) | EFor(_, _) | ESwitch(_, _, _) | ETry(_, _) | EFunction(_, _): false;
 		case EBinop(OpAssign | OpAssignOp(_), _, {expr:EFunction(_, {fExpr:{expr:EBlock(_) | EMeta(_, {expr:EReturn({expr:EBlock(_)})})}})}): false;

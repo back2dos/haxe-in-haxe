@@ -38,6 +38,8 @@ class GrammarTest {
 		assert(switch variableInterval.definition { case EClass(value): switch value.data[0].cffKind { case FFun(func): func.fExpr != null; case _: false; }; case _: false; });
 		var switched = Grammar.parse('class Main { static function run(value:Int):Bool { return switch (value) { case 0: true; default: false; } } }').declarations[0];
 		assert(switch switched.definition { case EClass(value): switch value.data[0].cffKind { case FFun(func): func.fExpr != null; case _: false; }; case _: false; });
+		var boundSwitch = Grammar.parse('class Main { function run(value:Null<Int>) return switch value { case var bound if (bound > 0): bound; case null: 0; } }').declarations[0];
+		assert(switch boundSwitch.definition { case EClass(value): switch value.data[0].cffKind { case FFun(func): switch func.fExpr.expr { case EReturn({expr:ESwitch(_, cases, _)}): cases.length == 2 && switch cases[0] { case {values:[{expr:EVars(_)}], guard:guard}: guard != null; case _: false; }; case _: false; }; case _: false; }; case _: false; });
 		var finalField = Grammar.parse('class Holder { final value:Int; }').declarations[0];
 		assert(switch finalField.definition { case EClass(value): switch value.data[0].cffKind { case FVar(type, _): type != null; case _: false; }; case _: false; });
 		var switchStatements = Grammar.parse('class Main { static function run(value:Int) { switch (value) { case 0: trace(value); trace("zero"); default: trace("other"); } } }').declarations[0];
@@ -60,6 +62,7 @@ class GrammarTest {
 		assert(switch legacyMetadata.definition { case EClass(value): value.meta[0].meta == "legacy"; case _: false; });
 		var interpolation = Grammar.parse("class Main { function render(value:String) return 'before $value after'; }").declarations[0];
 		assert(switch interpolation.definition { case EClass(value): switch value.data[0].cffKind { case FFun(func): switch func.fExpr.expr { case EReturn({expr: EBinop(OpAdd, {expr: EBinop(OpAdd, _, {expr: EConst(Ident("value"))})}, _)}): true; case _: false; }; case _: false; }; case _: false; });
+		Grammar.parse("class Main { function render() return 'value: ${/* note */ 1}'; }");
 		var arrows = Grammar.parse('class Main { function map(values:Array<Int>) { values.map(value -> value + 1); values.map((value:Int) -> value + 1); } }').declarations[0];
 		assert(switch arrows.definition { case EClass(value): switch value.data[0].cffKind { case FFun(func): switch func.fExpr.expr { case EBlock([{expr:ECall(_, [{expr:EFunction(FKArrow, first)}])}, {expr:ECall(_, [{expr:EFunction(FKArrow, second)}])}]): first.fArgs.length == 1 && first.fArgs[0].type == null && second.fArgs.length == 1 && second.fArgs[0].type != null; case _: false; }; case _: false; }; case _: false; });
 		var assignedArrow = Grammar.parse('class Main { function run() callback = value -> value; }').declarations[0];
@@ -68,6 +71,7 @@ class GrammarTest {
 		assert(switch assignedFunctions.definition { case EClass(value): switch value.data[0].cffKind { case FFun(func): switch func.fExpr.expr { case EBlock(values): values.length == 3; case _: false; }; case _: false; }; case _: false; });
 		var nullCoalescing = Grammar.parse('class Main { function run(value:Null<Int>) return value ?? 1; }').declarations[0];
 		assert(switch nullCoalescing.definition { case EClass(value): switch value.data[0].cffKind { case FFun(func): switch func.fExpr.expr { case EReturn({expr:EBinop(OpNullCoal, _, _)}): true; case _: false; }; case _: false; }; case _: false; });
+		Grammar.parse('class Main { function run(value:Null<Int>) consume(value ?? return); }');
 		var coalescedArrow = Grammar.parse('class Main { function run(f:Dynamic) return f ?? value -> value; }').declarations[0];
 		assert(switch coalescedArrow.definition { case EClass(value): switch value.data[0].cffKind { case FFun(func): switch func.fExpr.expr { case EReturn({expr:EBinop(OpNullCoal, _, {expr:EFunction(FKArrow, _)})}): true; case _: false; }; case _: false; }; case _: false; });
 		var restArgument = Grammar.parse('class Main { function rest(...values:Int) return call(...values); }').declarations[0];

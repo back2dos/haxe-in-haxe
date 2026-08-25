@@ -124,6 +124,15 @@ class Lexer {
 					if (!isHexDigit(peek(1)) || !isHexDigit(peek(2))) fail(InvalidEscape("x"), escapePos);
 					buffer.add(String.fromCharCode(Std.parseInt("0x" + peek(1) + peek(2))));
 					index += 3;
+				} else if (current() == "u" && peek(1) == "{") {
+					index += 2;
+					var digitsStart = index;
+					while (isHexDigit(current()) && index - digitsStart < 6) index++;
+					if (index == digitsStart || current() != "}") fail(InvalidEscape("u"), escapePos);
+					var code = Std.parseInt("0x" + source.substr(digitsStart, index - digitsStart));
+					if (code == null || code > 0x10FFFF) fail(InvalidEscape("u"), escapePos);
+					buffer.add(String.fromCharCode(code));
+					index++;
 				} else { buffer.add(unescape(current(), escapePos)); index++; }
 			}
 			else { buffer.add(current()); index++; }
