@@ -32,7 +32,13 @@ git submodule update --init --recursive
 The project needs a Haxe compiler capable of emitting HXB and, for conformance
 testing, a native reference compiler built from the pinned `haxe/` submodule.
 Follow the upstream build instructions in `haxe/README.md` to build that
-reference compiler.
+reference compiler. With its OCaml/Dune dependencies installed, the direct
+compiler-only build is:
+
+```sh
+make -C haxe haxe
+export HAXE_REFERENCE="$PWD/haxe/haxe"
+```
 
 ## Build
 
@@ -85,6 +91,22 @@ are not HXB semantics.
 `test/README.md` specifies the harness behavior and artifact policy. A test
 that cannot be compiled by the reference compiler is not an HXB comparison
 case; target-specific tests are likewise outside the initial scope.
+
+## Test lanes
+
+```sh
+haxe test/unit.hxml
+haxe test/upstream-parser-corpus.hxml
+HAXE_REFERENCE="$PWD/haxe/haxe" sh test/upstream-hxb-smoke.sh
+HAXE_REFERENCE="$PWD/haxe/haxe" sh test/conformance.sh
+```
+
+These are different goalposts: unit tests check ported subsystems; the parser
+lane currently accepts 1,339/1,366 upstream sources; smoke requires 123 direct
+roots and 10 HXML configurations to emit loadable HXB; only the final command
+requires exact member sets and uncompressed member payloads. Macro, runtime,
+target-specific, and expected-failure tests remain recorded exclusions rather
+than simulated passes.
 
 ## Porting approach
 
