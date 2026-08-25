@@ -34,7 +34,7 @@ class Lexer {
 	public function new(source:String, ?file = "?") {
 		this.source = source;
 		this.file = file;
-		index = 0;
+		index = source.charCodeAt(0) == 0xFEFF ? 1 : 0;
 	}
 
 	public static function lex(source:String, ?file = "?"):Array<LexedToken> {

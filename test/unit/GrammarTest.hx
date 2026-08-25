@@ -18,6 +18,8 @@ class GrammarTest {
 		assert(switch structuralExtension.definition { case ETypedef(value): switch value.data.type { case CTExtend(paths, fields): paths.length == 1 && paths[0].path.tname == "Base" && fields.length == 1; case _: false; }; case _: false; });
 		var property = Grammar.parse('extern class Value { var length(default, null):Int; }').declarations[0];
 		assert(switch property.definition { case EClass(value): switch value.data[0].cffKind { case FProp(get, set, _, _): get.name == "default" && set.name == "null"; case _: false; }; case _: false; });
+		var structuralProperty = Grammar.parse('typedef Value = { var length(default, null):Int; }').declarations[0];
+		assert(switch structuralProperty.definition { case ETypedef(value): switch value.data.type { case CTAnonymous([{cffKind:FProp(get, set, _, _)}]): get.name == "default" && set.name == "null"; case _: false; }; case _: false; });
 		var functionType = Grammar.parse('class Mapper { function map(f:Int->String):Void; }').declarations[0];
 		assert(switch functionType.definition { case EClass(value): switch value.data[0].cffKind { case FFun(func): switch func.fArgs[0].type.type { case CTFunction(_, _): true; case _: false; }; case _: false; }; case _: false; });
 		var zeroArgFunctionType = Grammar.parse('class Mapper { var callback:() -> Void; }').declarations[0];
@@ -42,6 +44,8 @@ class GrammarTest {
 		assert(switch switchStatements.definition { case EClass(value): switch value.data[0].cffKind { case FFun(func): switch func.fExpr.expr { case EBlock([{expr: ESwitch(_, cases, _)}]): switch cases[0].expr.expr { case EBlock(values): values.length == 2; case _: false; }; case _: false; }; case _: false; }; case _: false; });
 		var privateAccess = Grammar.parse('class Main { function run(value:Dynamic) return @:privateAccess value.hidden; }').declarations[0];
 		assert(switch privateAccess.definition { case EClass(value): switch value.data[0].cffKind { case FFun(func): switch func.fExpr.expr { case EReturn({expr: EMeta(entry, _)}): entry.meta == "privateAccess"; case _: false; }; case _: false; }; case _: false; });
+		var legacyMetadata = Grammar.parse('@legacy class Main {}').declarations[0];
+		assert(switch legacyMetadata.definition { case EClass(value): value.meta[0].meta == "legacy"; case _: false; });
 		var interpolation = Grammar.parse("class Main { function render(value:String) return 'before $value after'; }").declarations[0];
 		assert(switch interpolation.definition { case EClass(value): switch value.data[0].cffKind { case FFun(func): switch func.fExpr.expr { case EReturn({expr: EBinop(OpAdd, {expr: EBinop(OpAdd, _, {expr: EConst(Ident("value"))})}, _)}): true; case _: false; }; case _: false; }; case _: false; });
 		var arrows = Grammar.parse('class Main { function map(values:Array<Int>) { values.map(value -> value + 1); values.map((value:Int) -> value + 1); } }').declarations[0];

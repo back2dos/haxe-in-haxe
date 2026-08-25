@@ -91,9 +91,12 @@ criteria:
 - Macro, target-runtime, display/server, external-library, and expected-failure
   cases remain explicitly excluded until their corresponding milestone exists.
 
-The current parser-corpus floor is 1,056 of 1,366 source files. Increasing that
+The current parser-corpus floor is 1,072 of 1,366 source files. Increasing that
 number is useful progress; it does not mean those files type or emit conforming
 HXB.
+
+Set `HAXE_PARSER_REPORT_FAILURES=1` to list each rejected source and its first
+parser error while keeping the same coverage assertion.
 
 `HAXE_REFERENCE=/absolute/path/to/pinned/haxe sh test/upstream-hxb-smoke.sh`
 is the intermediate typing/emission lane. Each listed source-only case must be
