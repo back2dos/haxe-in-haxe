@@ -105,3 +105,7 @@ archive the reference compiler can consume. Payload differences remain visible
 work and do not become conformance passes merely because consumption succeeds.
 Discovered exclusions and their current reasons are recorded in
 `test/upstream-hxb-exclusions.md`.
+
+The current breadth set contains 122 direct source roots and 10 effective HXML
+configurations. A retained pass must type every non-extern field body; an
+unsupported expression is a failure, never an omitted body or placeholder.

@@ -194,7 +194,7 @@ class Grammar {
 			if (op == null || precedence(op) < min) break;
 			next();
 			var right = switch op {
-				case OpAssign | OpAssignOp(_): expression();
+				case OpAssign | OpAssignOp(_) | OpIn: expression();
 				case _: expression(precedence(op) + 1);
 			};
 			left=expr(EBinop(op,left,right),union(left.pos,right.pos));
@@ -641,7 +641,7 @@ class Grammar {
 	inline function is(t:Token):Bool return Type.enumEq(current().token,t);
 	inline function current():LexedToken return tokens[index]; inline function previous():LexedToken return tokens[index-1]; inline function next():LexedToken return tokens[index++];
 	static function binop(t:Token):Null<Binop> return switch t {case Binop(o):o;case Spread:OpInterval;case _:null;};
-	static function precedence(o:Binop):Int return switch o {case OpInterval|OpArrow:0;case OpAssign|OpAssignOp(_):1;case OpBoolOr:2;case OpBoolAnd:3;case OpOr:4;case OpXor:5;case OpAnd:6;case OpNullCoal|OpEq|OpNotEq:7;case OpGt|OpGte|OpLt|OpLte|OpIn:8;case OpShl|OpShr|OpUShr:9;case OpAdd|OpSub:10;case OpMult|OpDiv|OpMod:11;case _: -1;};
+	static function precedence(o:Binop):Int return switch o {case OpInterval|OpArrow|OpIn:0;case OpAssign|OpAssignOp(_):1;case OpBoolOr:2;case OpBoolAnd:3;case OpOr:4;case OpXor:5;case OpAnd:6;case OpNullCoal|OpEq|OpNotEq:7;case OpGt|OpGte|OpLt|OpLte:8;case OpShl|OpShr|OpUShr:9;case OpAdd|OpSub:10;case OpMult|OpDiv|OpMod:11;case _: -1;};
 	static function hasAccess(a:Array<PlacedAccess>, v:Access):Bool { for(x in a) if(x.access==v)return true; return false; }
 	static function union(a:Pos,b:Pos):Pos return Ast.punion(a,b);
 	function fail(message:String, ?pos:Pos):Void throw new GrammarError(message,pos == null ? current().pos : pos);

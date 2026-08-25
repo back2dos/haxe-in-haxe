@@ -7,4 +7,5 @@ class Expressions {
 		return helper(value + 2);
 	}
 	function helper(value:Dynamic):Dynamic { return value; }
+	function unchecked(value:Dynamic):Dynamic return untyped value.missing();
 }

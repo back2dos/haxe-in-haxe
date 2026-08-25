@@ -44,6 +44,7 @@ class TypeloadModuleTest {
 		var expressionClass = switch expressions.mTypes[0] { case TClassDecl(value): value; case _: throw "Expected expressions class"; };
 		switch expressionClass.clStatics.get("initial").cfExpr.eexpr { case TBinop(_, _, _): case _: throw "Field initializer was not typed"; }
 		var run = expressionClass.clFields.get("run").cfExpr;
+		if (expressionClass.clFields.get("unchecked").cfExpr == null) throw "Untyped expression body was not typed";
 		switch run.eexpr {
 			case TFunction(func): switch func.tfExpr.eexpr {
 				case TBlock(values):

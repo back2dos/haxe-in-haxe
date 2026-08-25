@@ -15,9 +15,8 @@ import haxe.ds.ObjectMap;
 import haxe.ds.StringMap;
 import typing.TypeloadParse.ParseError;
 
-// Initial, batch-only structure port of haxe/src/typing/typeloadModule.ml.
-// It deliberately stops after atomically allocating module/type shells: field
-// typing, imports, dependencies, caching and display require Typecore/Common.
+// Batch-only port of the module-loading and typing path rooted in
+// haxe/src/typing/typeloadModule.ml and typer.ml.
 class TypeloadModule {
 	var classPaths:ClassPaths;
 	var defines:DefineContext;
@@ -441,7 +440,7 @@ class TypeloadModule {
 							switch typed.cfExpr.eexpr { case TFunction(value): value.tfType = inferred; case _: }
 						}
 					}
-				} else if (func.fExpr != null) for (arg in func.fArgs) makeVar(arg.name.name, TDynamic(null), TVOArgument, arg.name.pos, arg.meta);
+				} else if (func.fExpr != null) throw 'Unsupported expression in ${Globals.sTypePath(module.mPath)}.${field.cffName.name}';
 			}
 			if (typed.cfExpr != null && switch typed.cfKind { case Method(MethInline): true; case _: false; }) {
 				typed.cfExprUnoptimized = typed.cfExpr;
@@ -471,15 +470,16 @@ class TypeloadModule {
 		case ECast(value, _) | ECheckType(value, _): canTypeExpression(value);
 		case EFor(iterator, body): canTypeExpression(iterator) && canTypeExpression(body);
 		case EMeta(_, value): canTypeExpression(value);
+		case EUntyped(value): canTypeExpression(value);
 		case ESwitch(subject, cases, defaultCase):
 			canTypeExpression(subject)
 			&& Lambda.foreach(cases, function(item) return item.guard == null && Lambda.foreach(item.values, isSupportedPattern) && (item.expr == null || canTypeExpression(item.expr)))
 			&& (defaultCase == null || defaultCase.expr == null || canTypeExpression(defaultCase.expr));
-		case EUntyped(_) | ETry(_, _) | EIs(_, _) | EDisplay(_, _): false;
+		case ETry(_, _) | EIs(_, _) | EDisplay(_, _): false;
 	};
 
 	static function isSupportedPattern(value:Expr):Bool return switch value.expr {
-		case EConst(Ident(_)): true;
+		case EConst(_): true;
 		case ECall({expr:EConst(Ident(_))}, args): Lambda.foreach(args, function(arg) return switch arg.expr { case EConst(Ident(_)): true; case _: false; });
 		case EArrayDecl(values): Lambda.foreach(values, isSupportedPattern);
 		case _: false;
@@ -717,6 +717,7 @@ class TypeloadModule {
 			case EMeta(meta, expr):
 				var value = typeExpr(module, cls, expr, locals);
 				typed(TMeta(meta, value), value.etype, source.pos);
+			case EUntyped(expr): typeExpr(module, cls, expr, locals);
 			case ESwitch(subject, cases, defaultCase):
 				var unwrapped = subject;
 				while (true) switch unwrapped.expr { case EParenthesis(value): unwrapped = value; case _: break; }
@@ -735,7 +736,7 @@ class TypeloadModule {
 				), thenValue.etype, source.pos);
 			case EWhile(condition, body, flag): typed(TWhile(typeExpr(module, cls, condition, locals), typeExpr(module, cls, body, locals), flag), fallback, source.pos);
 			case EFor(iterator, body): typeForLoop(module, cls, iterator, body, locals, source.pos);
-			case _: typed(TIdent("<untyped>"), fallback, source.pos);
+			case _: throw 'Unsupported expression at ${source.pos.pfile}:${source.pos.pmin}';
 		};
 	}
 
@@ -932,7 +933,7 @@ class TypeloadModule {
 				return typeKeyValueForLoop(module, cls, {name:key, pos:keyPos}, {name:value, pos:valuePos}, source, body, locals, pos);
 			case EBinop(OpArrow, {expr:EConst(Ident(key)), pos:keyPos}, {expr:EBinop(OpIn, {expr:EConst(Ident(value)), pos:valuePos}, source)}):
 				return typeKeyValueForLoop(module, cls, {name:key, pos:keyPos}, {name:value, pos:valuePos}, source, body, locals, pos);
-			case _: throw "Only value iteration is supported";
+			case _: throw 'Only value iteration is supported at ${iterator.pos.pfile}:${iterator.pos.pmin} (got ${Type.enumConstructor(iterator.expr)})';
 		}
 		var bodyLocals = new StringMap<TVar>();
 		for (name => value in locals) bodyLocals.set(name, value);
