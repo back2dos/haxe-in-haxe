@@ -963,7 +963,11 @@ class TypeloadModule {
 			case _: throw "Only value iteration is supported in array comprehensions";
 		}
 		var sourceExpr = typeExpr(module, cls, source, locals);
-		var elementType = switch sourceExpr.etype { case TInst(arrayClass, [element]) if (arrayClass.clPath.name == "Array"): element; case _: TDynamic(null); };
+		var arrayClass:TClass;
+		var elementType = switch sourceExpr.etype {
+			case TInst(value, [element]) if (value.clPath.pack.length == 0 && value.clPath.name == "Array"): arrayClass = value; element;
+			case _: throw "Only Array iteration is supported in array comprehensions";
+		};
 		var isFilter = false;
 		var loopBodyPos = body.pos;
 		switch body.expr {
@@ -975,7 +979,7 @@ class TypeloadModule {
 		var bodyLocals = new StringMap<TVar>(); for (name => value in locals) bodyLocals.set(name, value); bodyLocals.set(loopVar.vName, loopVar);
 		var pushedValue = typeExpr(module, cls, body, bodyLocals);
 		var resultElement = isFilter ? elementType : pushedValue.etype;
-		var resultType = TInst(cls, [resultElement]);
+		var resultType = TInst(arrayClass, [resultElement]);
 		var resultVar = makeGeneratedVar("_g", resultType, arrayPos);
 		// The loop variable is allocated before the iterator temporaries upstream,
 		// but declarations are emitted in result/counter/source/value order.
@@ -989,16 +993,16 @@ class TypeloadModule {
 		var resultLocal = typed(TLocal(resultVar), resultType, arrayPos);
 		var counterLocal = typed(TLocal(counterVar), basic("Int"), forExpr.pos);
 		var sourceLocal = typed(TLocal(sourceVar), sourceExpr.etype, source.pos);
-		var lengthField = cls.clFields.get("length");
-		var length = typed(TField(sourceLocal, FInstance(cls, cls.clParams.length == 0 ? [] : [elementType], lengthField)), basic("Int"), forExpr.pos);
+		var lengthField = arrayClass.clFields.get("length");
+		var length = typed(TField(sourceLocal, FInstance(arrayClass, [elementType], lengthField)), basic("Int"), forExpr.pos);
 		var comparison = typed(TBinop(OpLt, counterLocal, length), basic("Bool"), forExpr.pos);
 		var condition = typed(TParenthesis(comparison), basic("Bool"), forExpr.pos);
 		var valueExpr = typed(TArray(sourceLocal, counterLocal), elementType, forExpr.pos);
 		var declareValue = typed(TVar(loopVar, valueExpr), elementType, loopName.pos);
 		var increment = typed(TUnop(Increment, Prefix, counterLocal), basic("Int"), forExpr.pos);
-		var pushField = cls.clFields.get("push");
-		var pushType = cls.clParams.length == 0 ? pushField.cfType : substituteType(pushField.cfType, cls.clParams[0].ttpType, resultElement);
-		var pushCallee = typed(TField(resultLocal, FInstance(cls, [resultElement], pushField)), pushType, arrayPos);
+		var pushField = arrayClass.clFields.get("push");
+		var pushType = arrayClass.clParams.length == 0 ? pushField.cfType : substituteType(pushField.cfType, arrayClass.clParams[0].ttpType, resultElement);
+		var pushCallee = typed(TField(resultLocal, FInstance(arrayClass, [resultElement], pushField)), pushType, arrayPos);
 		var push = typed(TCall(pushCallee, [pushedValue]), basic("Int"), body.pos);
 		var loopTail:TExpr = push;
 		if (isFilter) switch forExpr.expr {

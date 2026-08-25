@@ -120,6 +120,9 @@ class TypeloadModuleTest {
 			}
 			case _: throw "Expected local-statics function";
 		}
+		var arrayComprehension = loader.loadModule({pack:["unit", "moduleload"], name:"ArrayComprehension"});
+		var arrayComprehensionClass = switch arrayComprehension.mTypes[0] { case TClassDecl(value): value; case _: throw "Expected array-comprehension class"; };
+		if (arrayComprehensionClass.clStatics.get("collect").cfExpr == null) throw "Array comprehension was not typed";
 		var valueSwitch = loader.loadModule({pack:["unit", "moduleload"], name:"ValueSwitch"});
 		var valueSwitchClass = switch valueSwitch.mTypes[0] { case TClassDecl(value): value; case _: throw "Expected value-switch class"; };
 		switch valueSwitchClass.clStatics.get("select").cfExpr.eexpr {
