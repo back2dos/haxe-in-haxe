@@ -79,9 +79,11 @@ run_case issue-12977 haxe/tests/misc/eval/projects/Issue12977 Main
 run_case issue-2938 haxe/tests/misc/eval/projects/Issue2938 Main
 run_case issue-2991 haxe/tests/misc/eval/projects/Issue2991 Main
 run_case issue-2995 haxe/tests/misc/eval/projects/Issue2995 Main
+run_case issue-2997 haxe/tests/misc/eval/projects/Issue2997 Main
 run_case issue-3310 haxe/tests/misc/eval/projects/Issue3310 Main
 run_case issue-3756 haxe/tests/misc/eval/projects/Issue3756 Main
 run_case issue-4070 haxe/tests/misc/eval/projects/Issue4070 Main
 run_case issue-4265 haxe/tests/misc/eval/projects/Issue4265 Main
 run_case issue-4399 haxe/tests/misc/eval/projects/Issue4399 Main
 run_case issue-4458 haxe/tests/misc/eval/projects/Issue4458 Main
+run_case issue-2508 haxe/tests/misc/eval/projects/Issue2508 Main
