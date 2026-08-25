@@ -47,12 +47,15 @@ class Grammar {
 			expect(Semicolon); return decl(EImport({path:names, mode:mode}), start);
 		}
 		if (acceptKwd(Using) != null) { if (doc != null) pendingDeclarationDoc = doc; var p = placedPath(); expect(Semicolon); return decl(EUsing(p), start); }
-		var accesses = access();
+		var accesses = if (is(Kwd(Abstract)) && index + 1 < tokens.length && tokens[index + 1].token.match(Kwd(Class))) {
+			var abstractToken = next();
+			[{access:AAbstract, pos:abstractToken.pos}];
+		} else access();
 		if (acceptKwd(Class) != null || acceptKwd(Interface) != null) {
 			start = previous().pos; pendingDeclarationDoc = null;
 			var interfaceValue = previousKwd == Interface;
 			var name = placedIdent(); var params = typeParams(); var flags:Array<ClassFlag> = interfaceValue ? [HInterface] : [];
-			if (hasAccess(accesses, AExtern)) flags.push(HExtern); if (hasAccess(accesses, APrivate)) flags.push(HPrivate); if (hasAccess(accesses, AFinal)) flags.push(HFinal);
+			if (hasAccess(accesses, AExtern)) flags.push(HExtern); if (hasAccess(accesses, APrivate)) flags.push(HPrivate); if (hasAccess(accesses, AFinal)) flags.push(HFinal); if (hasAccess(accesses, AAbstract)) flags.push(HAbstract);
 			while (true) { if (acceptKwd(Extends) != null) flags.push(HExtends(typePath())); else if (acceptKwd(Implements) != null) flags.push(HImplements(typePath())); else break; }
 			expect(BrOpen); var fields = classFields(); var end = expect(BrClose).pos;
 			return decl(EClass({name:name, doc:doc, params:params, meta:meta, flags:flags, data:fields}), union(start,end));
@@ -103,7 +106,7 @@ class Grammar {
 	}
 
 	var previousKwd:Null<Keyword>;
-	function access():Array<PlacedAccess> { var result=[]; while (true) { var t=current(); var a:Null<Access> = switch t.token { case Kwd(Public): APublic; case Kwd(Private): APrivate; case Kwd(Static): AStatic; case Kwd(Override): AOverride; case Kwd(Dynamic): ADynamic; case Kwd(Inline): AInline; case Kwd(Macro): AMacro; case Kwd(Final): AFinal; case Kwd(Extern): AExtern; case _: null; }; if (a == null) return result; next(); result.push({access:a,pos:t.pos}); } }
+	function access():Array<PlacedAccess> { var result=[]; while (true) { var t=current(); var a:Null<Access> = switch t.token { case Kwd(Public): APublic; case Kwd(Private): APrivate; case Kwd(Static): AStatic; case Kwd(Override): AOverride; case Kwd(Dynamic): ADynamic; case Kwd(Inline): AInline; case Kwd(Macro): AMacro; case Kwd(Final): AFinal; case Kwd(Extern): AExtern; case Kwd(Overload): AOverload; case _: null; }; if (a == null) return result; next(); result.push({access:a,pos:t.pos}); } }
 	function classFields():Array<ClassField> {
 		var fields:Array<ClassField> = [];
 		while (!is(BrClose)) {
@@ -174,15 +177,29 @@ class Grammar {
 		case Kwd(Return): next(); var e = is(Semicolon)||is(BrClose) ? null : expression(); expr(EReturn(e), e == null ? t.pos : union(t.pos,e.pos));
 		case Kwd(Throw): next(); var e=expression(); expr(EThrow(e),union(t.pos,e.pos));
 		case Kwd(Var) | Kwd(Final): var finalValue=acceptKwd(Final)!=null; if(!finalValue)next(); var vars=[variable(finalValue)]; while(accept(Comma)!=null) vars.push(variable(finalValue)); expr(EVars(vars),union(t.pos,vars[vars.length-1].evExpr == null ? vars[vars.length-1].evName.pos : vars[vars.length-1].evExpr.pos));
-		case Kwd(If): next(); expect(POpen); var c=expression(); expect(PClose); var th=statementBody(); var el=acceptKwd(Else)==null ? null : statementBody(); expr(EIf(c,th,el),union(t.pos,el == null ? th.pos : el.pos));
+		case Kwd(If):
+			next(); expect(POpen); var c=expression(); expect(PClose); var th=statementBody();
+			if (!th.expr.match(EBlock(_))) accept(Semicolon);
+			var el=acceptKwd(Else)==null ? null : statementBody();
+			expr(EIf(c,th,el),union(t.pos,el == null ? th.pos : el.pos));
 		case Kwd(While): next(); expect(POpen); var c=expression(); expect(PClose); var b=statementBody(); expr(EWhile(c,b,NormalWhile),union(t.pos,b.pos));
 		case Kwd(For): next(); expect(POpen); var it=expression(); if(acceptKwd(In)!=null) { var right=expression(); it=expr(EBinop(OpIn,it,right),union(it.pos,right.pos)); } expect(PClose); var b=statementBody(); expr(EFor(it,b),union(t.pos,b.pos));
 		case Kwd(Do): next(); var b=statementBody(); expectKwd(While); expect(POpen); var c=expression(); var end=expect(PClose).pos; expr(EWhile(c,b,DoWhile),union(t.pos,end));
 		case Kwd(Try): next(); var body=statementBody(); var catches=[]; while(acceptKwd(Catch)!=null) { var cp=previous().pos; expect(POpen); var n=placedIdent(); var ty=typeHintOpt(); expect(PClose); var cb=statementBody(); catches.push({name:n,type:ty,expr:cb,pos:union(cp,cb.pos)}); } if(catches.length==0) fail("Expected catch"); expr(ETry(body,catches),union(t.pos,catches[catches.length-1].pos));
 		case Kwd(Switch): next(); parseSwitch(t.pos);
 		case Kwd(Break): next(); expr(EBreak,t.pos); case Kwd(Continue): next(); expr(EContinue,t.pos);
-		case Kwd(Untyped): next(); var e=expression(); expr(EUntyped(e),union(t.pos,e.pos));
-		case Kwd(Cast): next(); expect(POpen); var e=expression(); var type=accept(Comma)==null ? null : typeHint(); var end=expect(PClose).pos; expr(ECast(e,type),union(t.pos,end));
+		case Kwd(Untyped): next(); var e=is(BrOpen) ? block() : expression(); expr(EUntyped(e),union(t.pos,e.pos));
+		case Kwd(Cast):
+			next();
+			if (accept(POpen) != null) {
+				var e = expression();
+				var type = accept(Comma) == null ? null : typeHint();
+				var end = expect(PClose).pos;
+				expr(ECast(e, type), union(t.pos, end));
+			} else {
+				var e = unary();
+				expr(ECast(e, null), union(t.pos, e.pos));
+			}
 		case _: postfix(primary()); }; }
 	function primary():Expr {
 		var t=next(); var e:Expr = switch t.token {
@@ -303,12 +320,25 @@ class Grammar {
 		if (values.length == 1) return values[0];
 		return expr(EBlock(values), union(values[0].pos, values[values.length - 1].pos));
 	}
-	function objectOrIdentifier():Expr { var t=current(); if(accept(BrOpen)!=null) { var fields=[]; if(!is(BrClose)) do { var n=placedIdent(); expect(DblDot); var value=expression(); fields.push({key:{name:n.name,pos:n.pos,quote:NoQuotes},expr:value}); } while(accept(Comma)!=null); var end=expect(BrClose).pos; return expr(EObjectDecl(fields),union(t.pos,end)); } var n=placedIdent(); return expr(EConst(Ident(n.name)),n.pos); }
+	function objectOrIdentifier():Expr {
+		var t=current();
+		if(accept(BrOpen)!=null) {
+			var fields=[];
+			while (!is(BrClose)) {
+				var n=placedIdent(); expect(DblDot); var value=expression();
+				fields.push({key:{name:n.name,pos:n.pos,quote:NoQuotes},expr:value});
+				if (accept(Comma) == null) break;
+			}
+			var end=expect(BrClose).pos;
+			return expr(EObjectDecl(fields),union(t.pos,end));
+		}
+		var n=placedIdent(); return expr(EConst(Ident(n.name)),n.pos);
+	}
 	function postfix(e:Expr):Expr { while (true) { if (accept(Dot) != null || accept(QuestionDot) != null) { var safe=previous().token.match(QuestionDot); var n=placedIdent(); e=expr(EField(e,n.name,safe ? EFSafe : EFNormal),union(e.pos,n.pos)); } else if (accept(POpen) != null) { var args=[]; if (!is(PClose)) do args.push(expression()) while(accept(Comma)!=null); var end=expect(PClose).pos; e=expr(ECall(e,args),union(e.pos,end)); } else if (accept(BkOpen) != null) { var key=expression(); var end=expect(BkClose).pos; e=expr(EArray(e,key),union(e.pos,end)); } else if (switch current().token {case Unop(Increment)|Unop(Decrement):true;case _:false;}) { var op=switch next().token {case Unop(v):v;case _:null;}; e=expr(EUnop(op,Postfix,e),union(e.pos,previous().pos)); } else return e; } return e; }
 	function block():Expr { var begin=expect(BrOpen).pos; var es=[]; while (!is(BrClose)) { var value = expression(); es.push(value); if (accept(Semicolon)==null && !is(BrClose) && requiresSemicolon(value)) fail("Expected semicolon"); } return expr(EBlock(es),union(begin,expect(BrClose).pos)); }
 	function statementBody():Expr return is(BrOpen) ? block() : expression();
 	static function requiresSemicolon(value:Expr):Bool return switch value.expr {
-		case EIf(_, _, _) | EWhile(_, _, _) | EFor(_, _) | ETry(_, _) | EFunction(_, _): false;
+		case EIf(_, _, _) | EWhile(_, _, _) | EFor(_, _) | ESwitch(_, _, _) | ETry(_, _) | EFunction(_, _): false;
 		case EVars(vars) if (vars.length > 0 && switch vars[vars.length - 1].evExpr { case {expr:EFunction(_, _)}: true; case _: false; }): false;
 		case _: true;
 	}
@@ -380,13 +410,13 @@ class Grammar {
 		var end = accept(Semicolon);
 		return {cffName:name, cffDoc:doc, cffPos:end == null ? union(start, type.pos) : union(start, end.pos), cffMeta:meta, cffAccess:accesses, cffKind:FVar(type, null)};
 	}
-	function typePath():PlacedTypePath { var names=placedPath(); var last=names.pop(); var params=[]; if(accept(Binop(OpLt))!=null) { if(!is(Binop(OpGt))) do params.push(TPType(typeHint())) while(accept(Comma)!=null); expect(Binop(OpGt)); } return Ast.makePtp(Ast.mkTypePath([for(n in names)n.name],last.name,params), names.length == 0 ? last.pos : union(names[0].pos,previous().pos)); }
+	function typePath():PlacedTypePath { var names=placedPath(); var last=names.pop(); var params=[]; var end=last.pos; if(accept(Binop(OpLt))!=null) { if(!isTypeGt()) do params.push(TPType(typeHint())) while(accept(Comma)!=null); end=expectTypeGt().pos; } return Ast.makePtp(Ast.mkTypePath([for(n in names)n.name],last.name,params), names.length == 0 ? union(last.pos,end) : union(names[0].pos,end)); }
 	function path():Array<String> return [for(n in placedPath())n.name];
 	function placedPath():Array<PlacedName> { var result=[placedIdent()]; while(accept(Dot)!=null) result.push(placedIdent()); return result; }
 	function typeParams():Array<TypeParam> {
 		if (accept(Binop(OpLt)) == null) return [];
-		var result=[]; if(!is(Binop(OpGt))) do { var meta=metadata(); var name=placedIdent(); var constraints=typeHintOpt(); var defaultValue=accept(Binop(OpAssign)) == null ? null : typeHint(); result.push({tpName:name,tpParams:[],tpConstraints:constraints,tpDefault:defaultValue,tpMeta:meta}); } while(accept(Comma)!=null);
-		expect(Binop(OpGt)); return result;
+		var result=[]; if(!isTypeGt()) do { var meta=metadata(); var name=placedIdent(); var constraints=typeHintOpt(); var defaultValue=accept(Binop(OpAssign)) == null ? null : typeHint(); result.push({tpName:name,tpParams:[],tpConstraints:constraints,tpDefault:defaultValue,tpMeta:meta}); } while(accept(Comma)!=null);
+		expectTypeGt(); return result;
 	}
 	function enumConstructor():EnumConstructor {
 		var doc=documentation(), meta=metadata(), name=placedIdent(), params=typeParams(), args=[];
@@ -421,11 +451,21 @@ class Grammar {
 	function accept(t:Token):Null<LexedToken> { if(is(t)) return next(); return null; }
 	function acceptKwd(k:Keyword):Null<LexedToken> { if (switch current().token {case Kwd(v): v==k; case _:false;}) { previousKwd=k; return next(); } return null; }
 	function expect(t:Token):LexedToken { var r=accept(t); if(r==null) fail("Expected token " + Std.string(t)); return r; }
+	function isTypeGt():Bool return switch current().token { case Binop(OpGt | OpShr | OpUShr): true; case _: false; };
+	function expectTypeGt():LexedToken {
+		var token = current();
+		return switch token.token {
+			case Binop(OpGt): next();
+			case Binop(OpShr): tokens[index] = {token:Binop(OpGt), pos:{pfile:token.pos.pfile, pmin:token.pos.pmin + 1, pmax:token.pos.pmax}}; {token:Binop(OpGt), pos:{pfile:token.pos.pfile, pmin:token.pos.pmin, pmax:token.pos.pmin + 1}};
+			case Binop(OpUShr): tokens[index] = {token:Binop(OpShr), pos:{pfile:token.pos.pfile, pmin:token.pos.pmin + 1, pmax:token.pos.pmax}}; {token:Binop(OpGt), pos:{pfile:token.pos.pfile, pmin:token.pos.pmin, pmax:token.pos.pmin + 1}};
+			case _: fail("Expected type-parameter close", token.pos); null;
+		};
+	}
 	function expectKwd(k:Keyword):LexedToken { var r=acceptKwd(k); if(r==null) fail("Expected keyword " + Ast.sKeyword(k)); return r; }
 	inline function is(t:Token):Bool return Type.enumEq(current().token,t);
 	inline function current():LexedToken return tokens[index]; inline function previous():LexedToken return tokens[index-1]; inline function next():LexedToken return tokens[index++];
-	static function binop(t:Token):Null<Binop> return switch t {case Binop(o):o;case _:null;};
-	static function precedence(o:Binop):Int return switch o {case OpAssign|OpAssignOp(_):1;case OpBoolOr:2;case OpBoolAnd:3;case OpOr:4;case OpXor:5;case OpAnd:6;case OpEq|OpNotEq:7;case OpGt|OpGte|OpLt|OpLte:8;case OpShl|OpShr|OpUShr:9;case OpAdd|OpSub:10;case OpMult|OpDiv|OpMod:11;case _: -1;};
+	static function binop(t:Token):Null<Binop> return switch t {case Binop(o):o;case Spread:OpInterval;case _:null;};
+	static function precedence(o:Binop):Int return switch o {case OpInterval:0;case OpAssign|OpAssignOp(_):1;case OpBoolOr:2;case OpBoolAnd:3;case OpOr:4;case OpXor:5;case OpAnd:6;case OpEq|OpNotEq:7;case OpGt|OpGte|OpLt|OpLte:8;case OpShl|OpShr|OpUShr:9;case OpAdd|OpSub:10;case OpMult|OpDiv|OpMod:11;case _: -1;};
 	static function hasAccess(a:Array<PlacedAccess>, v:Access):Bool { for(x in a) if(x.access==v)return true; return false; }
 	static function union(a:Pos,b:Pos):Pos return Ast.punion(a,b);
 	function fail(message:String, ?pos:Pos):Void throw new GrammarError(message,pos == null ? current().pos : pos);

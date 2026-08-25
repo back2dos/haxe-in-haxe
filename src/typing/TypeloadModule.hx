@@ -59,13 +59,22 @@ class TypeloadModule {
 		var module = makeModule(path, resolved.file);
 		modules.set(key, module); // upstream installs the module before creating types.
 		moduleLoadDepth++;
-		try createModuleTypes(module, parsed.data.declarations) catch (error:Dynamic) { moduleLoadDepth--; throw error; }
+		try createModuleTypes(module, parsed.data.declarations) catch (error:Dynamic) {
+			modules.remove(key);
+			moduleImports.remove(key);
+			moduleLoadDepth--;
+			throw error;
+		}
 		moduleLoadDepth--;
 		if (moduleLoadDepth == 0) flushDeferredDependencyBodies();
 		return module;
 	}
 
 	public function findModule(path:GlobalTypePath):Null<ModuleDef> return modules.get(moduleKey(path));
+	function tryLoadModule(path:GlobalTypePath):Null<ModuleDef> try return loadModule(path) catch (error:Dynamic) {
+		if (Std.string(error) == "Not_found") return null;
+		throw error;
+	}
 
 	/** First step of typerEntry.load_std_types. Basic-type rebinding follows once
 		type parameters and abstract typing are available. */
@@ -244,6 +253,7 @@ class TypeloadModule {
 		// into a batch module.
 		var typeBodies = module.mPath.pack.length == 0 || module.mPath.pack[0] != "haxe"
 			|| (module.mPath.pack.length > 1 && module.mPath.pack[1] == "iterators")
+			|| (module.mPath.pack.length > 1 && module.mPath.pack[1] == "zip")
 			|| (module.mPath.pack.length == 1 && (module.mPath.name == "EnumTools" || module.mPath.name == "CallStack"));
 		for (declaration in declarations) switch declaration.definition {
 			case EClass(value): populateClassFields(module, findClass(module, value.name.name), value.data, typeBodies);
@@ -354,7 +364,7 @@ class TypeloadModule {
 			};
 			if (!hasFieldBodies(fields)) {}
 			else if (moduleLoadDepth > 1 && module.mPath.pack.length == 1 && module.mPath.pack[0] == "haxe" && module.mPath.name == "CallStack") deferredDependencyBodies.push(typeBodiesNow);
-			else if (bodyTypingDepth > 0 || (module.mPath.pack.length > 1 && module.mPath.pack[0] == "haxe" && module.mPath.pack[1] == "iterators")) deferredClassBodies.push(typeBodiesNow);
+			else if ((bodyTypingDepth > 0 && !(module.mPath.pack.length > 1 && module.mPath.pack[0] == "haxe" && module.mPath.pack[1] == "zip")) || (module.mPath.pack.length > 1 && module.mPath.pack[0] == "haxe" && module.mPath.pack[1] == "iterators")) deferredClassBodies.push(typeBodiesNow);
 			else {
 				flushDeferredClassBodies();
 				typeBodiesNow();
@@ -387,7 +397,8 @@ class TypeloadModule {
 			activeTypeParams = typeParamMap(cls.clParams.concat(typed.cfParams));
 			switch field.cffKind {
 				case FVar(_, value) | FProp(_, _, _, value): if (value != null) typed.cfExpr = typeExpr(module, cls, value, new StringMap());
-				case FFun(func): if (func.fExpr != null && canTypeExpression(func.fExpr)) {
+				case FFun(func):
+					if (func.fExpr != null && canTypeExpression(func.fExpr)) {
 					var signature = switch typed.cfType { case TFun(value): value; case _: {args: [], ret: TDynamic(null)}; };
 					typed.cfExpr = typeFunction(module, cls, field.cffName.name, func, signature);
 					if (func.fType == null && field.cffName.name != "new") {
@@ -613,7 +624,9 @@ class TypeloadModule {
 			case ECall(expr, args):
 				var isTrace = switch expr.expr { case EConst(Ident("trace")): true; case _: false; };
 				isTrace && args.length > 0 ? typeTrace(module, cls, args, locals, source.pos) : typeCall(module, cls, expr, args, locals, source.pos);
-			case EField(expr, name, _): typeField(typeExpr(module, cls, expr, locals), name, source.pos);
+			case EField(expr, name, _):
+				var receiver = tryTypeExpression(module, expr);
+				typeField(receiver == null ? typeExpr(module, cls, expr, locals) : receiver, name, source.pos);
 			case ENew(path, args): typeNew(module, path.path, args, cls, locals, source.pos);
 			case EFunction(_, func): var signature:TSignature = {args:[for (arg in func.fArgs) {name:arg.name.name, optional:arg.optional || arg.expr != null, type:arg.type == null ? fallback : (arg.optional ? nullable(module, resolveTypeHint(module, arg.type)) : resolveTypeHint(module, arg.type))}], ret:func.fType == null ? fallback : resolveTypeHint(module, func.fType)}; typeFunction(module, cls, "", func, signature);
 			case EReturn(expr): typed(TReturn(expr == null ? null : typeExpr(module, cls, expr, locals)), fallback, source.pos);
@@ -648,6 +661,24 @@ class TypeloadModule {
 			case EFor(iterator, body): typeForLoop(module, cls, iterator, body, locals, source.pos);
 			case _: typed(TIdent("<untyped>"), fallback, source.pos);
 		};
+	}
+
+	function tryTypeExpression(module:ModuleDef, source:Expr):Null<TExpr> {
+		var names:Array<String> = [];
+		var cursor = source;
+		while (true) switch cursor.expr {
+			case EField(parent, name, EFNormal): names.unshift(name); cursor = parent;
+			case EConst(Ident(name)): names.unshift(name); break;
+			case _: return null;
+		}
+		var moduleIndex = -1;
+		for (index in 0...names.length) if (!Ast.isLowerIdent(names[index])) { moduleIndex = index; break; }
+		if (moduleIndex < 0) return null;
+		var loaded = tryLoadModule({pack:names.slice(0, moduleIndex), name:names[moduleIndex]});
+		if (loaded == null) return null;
+		var typeName = names[names.length - 1];
+		var moduleType = findModuleType(loaded, typeName);
+		return moduleType == null ? null : typed(TTypeExpr(moduleType), TDynamic(null), source.pos);
 	}
 
 	function typeGeneralSwitch(module:ModuleDef, cls:TClass, subjectSource:Expr, cases:Array<SwitchCase>, defaultCase:Null<SwitchDefault>, locals:StringMap<TVar>, pos:Pos):TExpr {
@@ -853,21 +884,40 @@ class TypeloadModule {
 						sourceExpr = typed(TCast(sourceExpr, null), underlying, sourceExpr.epos);
 					case _:
 				}
-				var arrayClass:TClass = null;
-				loopType = switch sourceExpr.etype { case TInst(value, [element]) if (value.clPath.name == "Array"): arrayClass = value; element; case _: TDynamic(null); };
-				var counter = makeGeneratedVar("`", basic("Int"), iterator.pos);
-				var sourceVar = makeGeneratedVar("`", sourceExpr.etype, source.pos);
-				counter.vMeta = generatedLoopMetadata("`", false); sourceVar.vMeta = generatedLoopMetadata("`", false);
-				var counterLocal = typed(TLocal(counter), basic("Int"), iterator.pos);
-				var sourceLocal = typed(TLocal(sourceVar), sourceExpr.etype, source.pos);
-				declarations.push(typed(TVar(counter, typed(TConst(TInt(0)), basic("Int"), iterator.pos)), basic("Int"), iterator.pos));
-				declarations.push(typed(TVar(sourceVar, sourceExpr), sourceExpr.etype, source.pos));
-				if (arrayClass == null) throw "Only Array and integer-range iteration are supported";
-				var lengthField = arrayClass.clFields.get("length");
-				var length = typed(TField(sourceLocal, FInstance(arrayClass, [loopType], lengthField)), basic("Int"), iterator.pos);
-				condition = typed(TBinop(OpLt, counterLocal, length), basic("Bool"), iterator.pos);
-				valueExpr = typed(TArray(sourceLocal, counterLocal), loopType, iterator.pos);
-				increment = typed(TUnop(Increment, Prefix, counterLocal), basic("Int"), iterator.pos);
+				switch sourceExpr.etype {
+					case TInst(arrayClass, [element]) if (arrayClass.clPath.pack.length == 0 && arrayClass.clPath.name == "Array"):
+						loopType = element;
+						var counter = makeGeneratedVar("`", basic("Int"), iterator.pos);
+						var sourceVar = makeGeneratedVar("`", sourceExpr.etype, source.pos);
+						counter.vMeta = generatedLoopMetadata("`", false); sourceVar.vMeta = generatedLoopMetadata("`", false);
+						var counterLocal = typed(TLocal(counter), basic("Int"), iterator.pos);
+						var sourceLocal = typed(TLocal(sourceVar), sourceExpr.etype, source.pos);
+						declarations.push(typed(TVar(counter, typed(TConst(TInt(0)), basic("Int"), iterator.pos)), basic("Int"), iterator.pos));
+						declarations.push(typed(TVar(sourceVar, sourceExpr), sourceExpr.etype, source.pos));
+						var lengthField = arrayClass.clFields.get("length");
+						var length = typed(TField(sourceLocal, FInstance(arrayClass, [loopType], lengthField)), basic("Int"), iterator.pos);
+						condition = typed(TBinop(OpLt, counterLocal, length), basic("Bool"), iterator.pos);
+						valueExpr = typed(TArray(sourceLocal, counterLocal), loopType, iterator.pos);
+						increment = typed(TUnop(Increment, Prefix, counterLocal), basic("Int"), iterator.pos);
+					case TInst(iterableClass, iterableParams):
+						var iteratorField = iterableClass.clFields.get("iterator");
+						if (iteratorField == null) throw "Iterable type does not define iterator()";
+						var iteratorCallee = typed(TField(sourceExpr, FInstance(iterableClass, iterableParams, iteratorField)), applyTypeParams(iteratorField.cfType, iterableClass.clParams, iterableParams), source.pos);
+						var iteratorType = switch iteratorCallee.etype { case TFun(signature): signature.ret; case _: throw "iterator is not a method"; };
+						var iteratorValue = typed(TCall(iteratorCallee, []), iteratorType, source.pos);
+						var iteratorVar = makeGeneratedVar("`", iteratorType, iterator.pos);
+						iteratorVar.vMeta = generatedLoopMetadata("`", false);
+						var iteratorLocal = typed(TLocal(iteratorVar), iteratorType, iterator.pos);
+						declarations.push(typed(TVar(iteratorVar, iteratorValue), iteratorType, source.pos));
+						var hasNext = typeField(iteratorLocal, "hasNext", iterator.pos);
+						condition = typed(TCall(hasNext, []), basic("Bool"), iterator.pos);
+						var next = typeField(iteratorLocal, "next", iterator.pos);
+						loopType = switch next.etype { case TFun(signature): signature.ret; case _: TDynamic(null); };
+						valueExpr = typed(TCall(next, []), loopType, iterator.pos);
+						increment = null;
+					case TAbstract(abs, _): throw "Only Array, iterable, and integer-range iteration are supported (got abstract " + Globals.sTypePath(abs.aPath) + ") at " + source.pos.pfile + ":" + source.pos.pmin;
+					case other: throw "Only Array, iterable, and integer-range iteration are supported (got " + Type.enumConstructor(other) + ") at " + source.pos.pfile + ":" + source.pos.pmin;
+				}
 		}
 		var loopVar = makeVar(loopName.name, loopType, TVOForVariable, loopName.pos, [realPathMetadata(loopName.name)]);
 		loopVar.vFlags |= 1 << core.TType.TType.flagTVarNames.indexOf("VUsedByTyper");
@@ -981,7 +1031,8 @@ class TypeloadModule {
 	function typeCall(module:ModuleDef, cls:TClass, source:Expr, args:Array<Expr>, locals:StringMap<TVar>, pos:Pos):TExpr {
 		switch source.expr {
 			case EField(receiverSource, name, _):
-				var receiver = typeExpr(module, cls, receiverSource, locals);
+				var resolvedReceiver = tryTypeExpression(module, receiverSource);
+				var receiver = resolvedReceiver == null ? typeExpr(module, cls, receiverSource, locals) : resolvedReceiver;
 				switch receiver.etype {
 					case TInst(stringBuf, []) if (stringBuf.clPath.pack.length == 0 && stringBuf.clPath.name == "StringBuf"):
 						var buffer = stringBuf.clFields.get("b");
@@ -1200,6 +1251,10 @@ class TypeloadModule {
 					case TInst(arrayClass, [element]) if (arrayClass.clPath.name == "Array"): params = [element]; type = TInst(target, params);
 					case _:
 				}
+				if (params.length == 0 && target.clParams.length > 0) {
+					params = [for (_ in target.clParams) TDynamic(null)];
+					type = TInst(target, params);
+				}
 				typed(TNew(target, params, values), type, pos);
 			case _: typed(TIdent("<new>"), TDynamic(null), pos);
 		};
@@ -1293,15 +1348,22 @@ class TypeloadModule {
 		if (path.tpackage.length != 0) target = loadModule({pack: path.tpackage, name: path.tname});
 		else if (findModuleType(current, path.tname) == null) {
 			var imported = moduleImports.get(moduleKey(current.mPath)).get(path.tname);
-			if (imported != null) try { target = loadModule(imported.modulePath); resolvedName = imported.typeName; } catch (_:Dynamic) imported = null;
-			if (imported == null)
+			if (imported != null) {
+				var importedModule = tryLoadModule(imported.modulePath);
+				if (importedModule == null) imported = null else { target = importedModule; resolvedName = imported.typeName; }
+			}
+			if (imported == null) {
 			// Unqualified standard types resolve from root standard modules even
 			// while loading a package-scoped standard module such as haxe.PosInfos.
-			try target = loadModule({pack:[], name:path.tname}) catch (_:Dynamic) {
-				try target = loadModule({pack:current.mPath.pack, name:path.tname}) catch (_:Dynamic) {
-					if (path.tname == "Null") target = loadModule({pack:[], name:"StdTypes"});
-					else return TDynamic(null);
+				var found = tryLoadModule({pack:[], name:path.tname});
+				var depth = current.mPath.pack.length;
+				while (found == null && depth > 0) {
+					found = tryLoadModule({pack:current.mPath.pack.slice(0, depth), name:path.tname});
+					depth--;
 				}
+				if (found != null) target = found;
+				else if (path.tname == "Null") target = loadModule({pack:[], name:"StdTypes"});
+				else return TDynamic(null);
 			}
 		}
 		var name = path.tpackage.length == 0 ? resolvedName : (path.tsub == null ? path.tname : path.tsub);

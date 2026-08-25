@@ -6,7 +6,8 @@ set -eu
 
 repository_root=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)
 HAXE_STD_PATH="$repository_root/haxe/std"
-export HAXE_STD_PATH
+HAXE_IN_HAXE_STD_PATH="$HAXE_STD_PATH"
+export HAXE_STD_PATH HAXE_IN_HAXE_STD_PATH
 
 if [ -z "${HAXE_REFERENCE:-}" ] || [ ! -x "$HAXE_REFERENCE" ]; then
 	echo "HAXE_REFERENCE must be the executable built from the pinned haxe/ submodule." >&2
@@ -50,6 +51,7 @@ run_case issue-10623 haxe/tests/misc/eval/projects/Issue10623 Main
 run_case issue-10591 haxe/tests/misc/eval/projects/Issue10591 Main
 run_case issue-10739 haxe/tests/misc/eval/projects/Issue10739 Main
 run_case issue-10782 haxe/tests/misc/eval/projects/Issue10782 Main
+run_case issue-10804 haxe/tests/misc/eval/projects/Issue10804 Main
 run_case issue-10819 haxe/tests/misc/eval/projects/Issue10819 Main
 run_case issue-10825 haxe/tests/misc/eval/projects/Issue10825 Main
 run_case issue-10832 haxe/tests/misc/eval/projects/Issue10832 Main
@@ -66,6 +68,7 @@ run_case issue-11396 haxe/tests/misc/eval/projects/Issue11396 Main
 run_case issue-11545 haxe/tests/misc/eval/projects/Issue11545 Main
 run_case issue-11661 haxe/tests/misc/eval/projects/Issue11661 Main
 run_case issue-11676 haxe/tests/misc/eval/projects/Issue11676 Main
+run_case issue-11686 haxe/tests/misc/eval/projects/Issue11686 Main
 run_case issue-11688 haxe/tests/misc/eval/projects/Issue11688 Main
 run_case issue-11813 haxe/tests/misc/eval/projects/Issue11813 Main
 run_case issue-12177 haxe/tests/misc/eval/projects/Issue12177 Main

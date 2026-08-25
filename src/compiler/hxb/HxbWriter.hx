@@ -608,7 +608,7 @@ class HxbWriter {
 	}
 
 	static function binopIndex(op:Binop):Int return switch op { case OpAdd:0; case OpMult:1; case OpDiv:2; case OpSub:3; case OpAssign:4; case OpEq:5; case OpNotEq:6; case OpGt:7; case OpGte:8; case OpLt:9; case OpLte:10; case OpAnd:11; case OpOr:12; case OpXor:13; case OpBoolAnd:14; case OpBoolOr:15; case OpShl:16; case OpShr:17; case OpUShr:18; case OpMod:19; case OpInterval:20; case OpArrow:21; case OpIn:22; case OpNullCoal:23; case OpAssignOp(inner):30 + binopIndex(inner); };
-	function unopIndex(op:Unop, flag:UnopFlag):Int return switch [op, flag] { case [Increment, Prefix]:0; case [Decrement, Prefix]:1; case [Not, Prefix]:2; case [Neg, Prefix]:3; case [NegBits, Prefix]:4; case [Spread, Prefix]:5; case [Increment, Postfix]:6; case [Decrement, Postfix]:7; case [Not, Postfix]:8; case [Neg, Postfix]:9; case [NegBits, Postfix]:10; case [Spread, Postfix]:11; };
+	static function unopIndex(op:Unop, flag:UnopFlag):Int return switch [op, flag] { case [Increment, Prefix]:0; case [Decrement, Prefix]:1; case [Not, Prefix]:2; case [Neg, Prefix]:3; case [NegBits, Prefix]:4; case [Spread, Prefix]:5; case [Increment, Postfix]:6; case [Decrement, Postfix]:7; case [Not, Postfix]:8; case [Neg, Postfix]:9; case [NegBits, Postfix]:10; case [Spread, Postfix]:11; };
 
 	function addAnonymousType(value:TAnon):Int {
 		if (anonymousTypeIndices.exists(value)) return anonymousTypeIndices.get(value);
@@ -808,6 +808,10 @@ class HxbWriter {
 				chunk.writeU8(2); chunk.writeString(value); chunk.writeU8(switch kind { case SDoubleQuotes: 0; case SSingleQuotes: 1; });
 			case EConst(Ident(value)):
 				chunk.writeU8(3); chunk.writeString(value);
+			case EConst(Regexp(pattern, options)):
+				chunk.writeU8(4); chunk.writeString(pattern); chunk.writeString(options);
+			case EArray(array, index):
+				chunk.writeU8(5); writeMetadataExpr(chunk, array); writeMetadataExpr(chunk, index);
 			case EBinop(op, left, right):
 				chunk.writeU8(6); chunk.writeU8(binopIndex(op)); writeMetadataExpr(chunk, left); writeMetadataExpr(chunk, right);
 			case EField(object, field, kind):
@@ -827,6 +831,10 @@ class HxbWriter {
 				chunk.writeU8(11); writeMetadataExpr(chunk, callee); chunk.writeList(args, function(arg) writeMetadataExpr(chunk, arg));
 			case ENew(path, args):
 				chunk.writeU8(12); writeMetadataPlacedTypePath(chunk, path); chunk.writeList(args, function(arg) writeMetadataExpr(chunk, arg));
+			case EUnop(op, flag, value):
+				chunk.writeU8(13); chunk.writeU8(unopIndex(op, flag)); writeMetadataExpr(chunk, value);
+			case EMeta(metadata, value):
+				chunk.writeU8(36); writeMetadataEntry(chunk, metadata); writeMetadataExpr(chunk, value);
 			case _:
 				throw "Metadata expression serialization is not ported for " + Type.enumConstructor(expr.expr) + " at " + expr.pos.pfile + ":" + expr.pos.pmin;
 		}

@@ -32,6 +32,8 @@ class GrammarTest {
 		assert(switch unaryNegative.definition { case EClass(value): switch value.data[0].cffKind { case FVar(_, {expr:EUnop(Neg, _, _)}): true; case _: false; }; case _: false; });
 		var interval = Grammar.parse('class Main { static function run(items:Array<Int>) { for (i in 0...items.length) {} } }').declarations[0];
 		assert(switch interval.definition { case EClass(value): switch value.data[0].cffKind { case FFun(func): func.fExpr != null; case _: false; }; case _: false; });
+		var variableInterval = Grammar.parse('class Main { static function run(pos:Int, len:Int) { for (i in pos...pos + len) {} } }').declarations[0];
+		assert(switch variableInterval.definition { case EClass(value): switch value.data[0].cffKind { case FFun(func): func.fExpr != null; case _: false; }; case _: false; });
 		var switched = Grammar.parse('class Main { static function run(value:Int):Bool { return switch (value) { case 0: true; default: false; } } }').declarations[0];
 		assert(switch switched.definition { case EClass(value): switch value.data[0].cffKind { case FFun(func): func.fExpr != null; case _: false; }; case _: false; });
 		var finalField = Grammar.parse('class Holder { final value:Int; }').declarations[0];
@@ -64,6 +66,16 @@ class GrammarTest {
 		assert(switch dollarCall.definition { case EClass(value): switch value.data[0].cffKind { case FFun(func): switch func.fExpr.expr { case ECall({expr:EConst(Ident("$type"))}, _): true; case _: false; }; case _: false; }; case _: false; });
 		var enumAbstract = Grammar.parse('enum abstract Status(Int) from Int to Int { var Ready = 1; }').declarations[0];
 		assert(switch enumAbstract.definition { case EAbstract(value): value.flags.indexOf(AbEnum) != -1 && value.data.length == 1; case _: false; });
+		var abstractClass = Grammar.parse('abstract class Input { public function read():Int; }').declarations[0];
+		assert(switch abstractClass.definition { case EClass(value): value.flags.indexOf(HAbstract) != -1; case _: false; });
+		var overloadedConstructor = Grammar.parse('abstract Vector<T>(Array<T>) { extern overload public inline function new(length:Int) {} }').declarations[0];
+		assert(switch overloadedConstructor.definition { case EAbstract(value): value.data[0].cffAccess.filter(function(access) return access.access == AOverload).length == 1; case _: false; });
+		var unparenthesizedCast = Grammar.parse('class Main { function run() return cast readByte(); }').declarations[0];
+		assert(switch unparenthesizedCast.definition { case EClass(value): switch value.data[0].cffKind { case FFun(func): switch func.fExpr.expr { case EReturn({expr:ECast({expr:ECall(_, [])}, null)}): true; case _: false; }; case _: false; }; case _: false; });
+		var untypedBlock = Grammar.parse('class Main { function run():Void untyped { value(); } }').declarations[0];
+		assert(switch untypedBlock.definition { case EClass(value): switch value.data[0].cffKind { case FFun(func): switch func.fExpr.expr { case EUntyped({expr:EBlock(_)}): true; case _: false; }; case _: false; }; case _: false; });
+		var terminatedIfBranch = Grammar.parse('class Main { function run(v:Int) { if (v < 0) first(); else if (v > 0) second(); else third(); } }').declarations[0];
+		assert(switch terminatedIfBranch.definition { case EClass(value): switch value.data[0].cffKind { case FFun(func): switch func.fExpr.expr { case EBlock([{expr:EIf(_, _, {expr:EIf(_, _, _)})}]): true; case _: false; }; case _: false; }; case _: false; });
 		var literalDollar = Grammar.parse("class Main { var value = 'cost: $'; }").declarations[0];
 		assert(switch literalDollar.definition { case EClass(value): switch value.data[0].cffKind { case FVar(_, {expr:EConst(String(text, _))}): text == "cost: $"; case _: false; }; case _: false; });
 		var callStack = Grammar.parse(sys.io.File.getContent("haxe/std/haxe/CallStack.hx"), core.Define.emptyDefines(), "haxe/std/haxe/CallStack.hx");

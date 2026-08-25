@@ -37,7 +37,8 @@ class Main {
 	public static function run(arguments:Array<String>):Void {
 		if (arguments.length > 0 && arguments[0] == "--") arguments = arguments.slice(1);
 		var classPaths = new ClassPaths();
-		var configuredStdPath = Sys.getEnv("HAXE_STD_PATH");
+		var configuredStdPath = Sys.getEnv("HAXE_IN_HAXE_STD_PATH");
+		if (configuredStdPath == null || configuredStdPath == "") configuredStdPath = Sys.getEnv("HAXE_STD_PATH");
 		var stdPath = configuredStdPath == null || configuredStdPath == ""
 			? FileSystem.fullPath("haxe/std") + "/"
 			: classPathPath(configuredStdPath);
@@ -79,7 +80,7 @@ class Main {
 				var path = module.mPath.pack.concat([module.mPath.name]);
 				if (shouldExport(path, config.targetConfig)) {
 					var writer = new HxbWriter();
-					writer.writeModule(module);
+					try writer.writeModule(module) catch (error:Dynamic) throw 'Could not serialize ${path.join(".")}: $error';
 					zip.addBytesEntry(writer.exportModule(), "cross/" + path.join("/") + ".hxb");
 				}
 			}
