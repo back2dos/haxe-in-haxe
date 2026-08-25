@@ -123,6 +123,9 @@ class TypeloadModuleTest {
 		var arrayComprehension = loader.loadModule({pack:["unit", "moduleload"], name:"ArrayComprehension"});
 		var arrayComprehensionClass = switch arrayComprehension.mTypes[0] { case TClassDecl(value): value; case _: throw "Expected array-comprehension class"; };
 		if (arrayComprehensionClass.clStatics.get("collect").cfExpr == null) throw "Array comprehension was not typed";
+		var overloads = loader.loadModule({pack:["unit", "moduleload"], name:"Overloads"});
+		var overloadClass = switch overloads.mTypes[0] { case TClassDecl(value): value; case _: throw "Expected overload class"; };
+		if (overloadClass.clOrderedStatics.length != 1 || overloadClass.clStatics.get("call").cfOverloads.length != 2) throw "Overload fields were not grouped";
 		var valueSwitch = loader.loadModule({pack:["unit", "moduleload"], name:"ValueSwitch"});
 		var valueSwitchClass = switch valueSwitch.mTypes[0] { case TClassDecl(value): value; case _: throw "Expected value-switch class"; };
 		switch valueSwitchClass.clStatics.get("select").cfExpr.eexpr {

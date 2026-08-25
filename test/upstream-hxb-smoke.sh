@@ -116,6 +116,7 @@ run_case issue-8530 haxe/tests/misc/eval/projects/Issue8530 Main
 run_case issue-8574 haxe/tests/misc/eval/projects/Issue8574 Main
 run_case issue-8650 haxe/tests/misc/eval/projects/Issue8650 Main
 run_case issue-8946 haxe/tests/misc/eval/projects/Issue8946 Main
+run_case issue-9069 haxe/tests/misc/eval/projects/Issue9069 Main
 run_case issue-9192 haxe/tests/misc/eval/projects/Issue9192 Main
 run_case issue-9286 haxe/tests/misc/eval/projects/Issue9286 Main
 run_case issue-9359 haxe/tests/misc/eval/projects/Issue9359 Main

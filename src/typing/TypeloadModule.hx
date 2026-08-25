@@ -369,11 +369,13 @@ class TypeloadModule {
 			};
 			if (field.cffName.name == "new" && !isStatic) cls.clConstructor = typed;
 			else if (isStatic) {
-				cls.clStatics.set(typed.cfName, typed);
-				cls.clOrderedStatics.push(typed);
+				var existing = cls.clStatics.get(typed.cfName);
+				if (existing != null && hasAccess(field, AOverload)) existing.cfOverloads.push(typed);
+				else { cls.clStatics.set(typed.cfName, typed); cls.clOrderedStatics.push(typed); }
 			} else {
-				cls.clFields.set(typed.cfName, typed);
-				cls.clOrderedFields.push(typed);
+				var existing = cls.clFields.get(typed.cfName);
+				if (existing != null && hasAccess(field, AOverload)) existing.cfOverloads.push(typed);
+				else { cls.clFields.set(typed.cfName, typed); cls.clOrderedFields.push(typed); }
 			}
 		}
 		// Signatures have to be installed before bodies are typed: a method body
@@ -413,8 +415,15 @@ class TypeloadModule {
 	function flushDeferredDependencyBodies():Void while (deferredDependencyBodies.length > 0) deferredDependencyBodies.shift()();
 
 	function typeClassFieldBodies(module:ModuleDef, cls:TClass, fields:Array<ClassField>):Void {
+		var overloadIndices = new StringMap<Int>();
 		for (field in fields) {
-			var typed = hasAccess(field, AStatic) ? cls.clStatics.get(field.cffName.name) : (field.cffName.name == "new" ? cls.clConstructor : cls.clFields.get(field.cffName.name));
+			var primary = hasAccess(field, AStatic) ? cls.clStatics.get(field.cffName.name) : (field.cffName.name == "new" ? cls.clConstructor : cls.clFields.get(field.cffName.name));
+			if (primary == null) throw 'Typed field ${cls.clPath.name}.${field.cffName.name} was not installed';
+			var overloadKey = (hasAccess(field, AStatic) ? "static:" : "member:") + field.cffName.name;
+			var overloadIndex = overloadIndices.exists(overloadKey) ? overloadIndices.get(overloadKey) : 0;
+			var typed = overloadIndex == 0 ? primary : primary.cfOverloads[overloadIndex - 1];
+			if (typed == null) throw 'Typed overload ${cls.clPath.name}.${field.cffName.name}[$overloadIndex] was not installed';
+			overloadIndices.set(overloadKey, overloadIndex + 1);
 			var previousTypeParams = activeTypeParams;
 			activeTypeParams = typeParamMap(cls.clParams.concat(typed.cfParams));
 			switch field.cffKind {

@@ -113,7 +113,7 @@ class HxbWriter {
 	var ownTypedefs:Array<TDef> = [];
 	var ownAbstracts:Array<TAbstract> = [];
 	var fieldReferences:Array<{var cls:TClass; var field:TClassField; var kind:Int; var depth:Int;}> = [];
-	var fieldReferenceIndices:Map<String, Int> = new Map();
+	var fieldReferenceIndices:ObjectMap<TClassField, Int> = new ObjectMap();
 	var enumFieldReferences:Array<{var en:TEnum; var field:TEnumField;}> = [];
 	var enumFieldReferenceIndices:Map<String, Int> = new Map();
 	var anonymousTypes:Array<TAnon> = [];
@@ -183,7 +183,7 @@ class HxbWriter {
 					var fields = [for (expression in expressions) if (expression.cls == owner) expression];
 					chunk.writeUleb128(fields.length);
 					for (expression in fields) {
-						var kind = expression.cls.clConstructor == expression.field ? 2 : expression.cls.clInit == expression.field ? 3 : expression.cls.clStatics.get(expression.field.cfName) == expression.field ? 0 : 1;
+						var kind = classFieldKind(expression.cls, expression.field);
 						chunk.writeUleb128(writeFieldRef(expression.cls, expression.field, kind));
 						chunk.writeUleb128(expression.bytes.length);
 						chunk.writeBytes(expression.bytes);
@@ -391,12 +391,60 @@ class HxbWriter {
 	function isVoid(type:T):Bool return switch type { case TAbstract(value, params): value.aPath.pack.length == 0 && value.aPath.name == "Void" && params.length == 0; case _: false; }
 
 	function writeFieldRef(cls:TClass, field:TClassField, kind:Int):Int {
-		var key = pathKey(cls.clPath) + ":" + kind + ":" + field.cfName;
-		if (fieldReferenceIndices.exists(key)) return fieldReferenceIndices.get(key);
+		if (fieldReferenceIndices.exists(field)) return fieldReferenceIndices.get(field);
+		var resolved = resolveFieldRef(cls, field, kind);
 		var index = fieldReferences.length;
-		fieldReferenceIndices.set(key, index);
-		fieldReferences.push({cls:cls, field:field, kind:kind, depth:0});
+		fieldReferenceIndices.set(field, index);
+		fieldReferences.push({cls:resolved.cls, field:field, kind:kind, depth:resolved.depth});
 		return index;
+	}
+
+	static function overloadDepth(primary:Null<TClassField>, field:TClassField):Null<Int> {
+		if (primary == null) return null;
+		if (primary == field) return 0;
+		for (index in 0...primary.cfOverloads.length) if (primary.cfOverloads[index] == field) return index + 1;
+		return null;
+	}
+
+	static function classFieldKind(cls:TClass, field:TClassField):Int {
+		if (cls.clConstructor == field) return 2;
+		if (cls.clInit == field) return 3;
+		if (overloadDepth(cls.clStatics.get(field.cfName), field) != null) return 0;
+		return 1;
+	}
+
+	static function resolveFieldRef(cls:TClass, field:TClassField, kind:Int):{cls:TClass, depth:Int} {
+		if (kind == 3) return {cls:cls, depth:0};
+		var primary = kind == 2 ? cls.clConstructor : kind == 0 ? cls.clStatics.get(field.cfName) : cls.clFields.get(field.cfName);
+		var depth = overloadDepth(primary, field);
+		if (depth != null) return {cls:cls, depth:depth};
+		if (kind == 1) {
+			if (cls.clSuper != null) {
+				var resolved = resolveMemberFieldRef(cls.clSuper.cls, field);
+				if (resolved != null) return resolved;
+			}
+			for (implemented in cls.clImplements) {
+				var resolved = resolveMemberFieldRef(implemented.cls, field);
+				if (resolved != null) return resolved;
+			}
+		}
+		// Match upstream's recovery behavior: retain a usable reference and let
+		// the reader report an unresolved field instead of corrupting the pool.
+		return {cls:cls, depth:0};
+	}
+
+	static function resolveMemberFieldRef(cls:TClass, field:TClassField):Null<{cls:TClass, depth:Int}> {
+		var depth = overloadDepth(cls.clFields.get(field.cfName), field);
+		if (depth != null) return {cls:cls, depth:depth};
+		if (cls.clSuper != null) {
+			var resolved = resolveMemberFieldRef(cls.clSuper.cls, field);
+			if (resolved != null) return resolved;
+		}
+		for (implemented in cls.clImplements) {
+			var resolved = resolveMemberFieldRef(implemented.cls, field);
+			if (resolved != null) return resolved;
+		}
+		return null;
 	}
 
 	function writeExpression(root:TExpr, unoptimized:Null<TExpr>, optimizePositions:Bool, skipSingleBlocks:Bool, skipUnoptimizedParens:Bool):Bytes {
