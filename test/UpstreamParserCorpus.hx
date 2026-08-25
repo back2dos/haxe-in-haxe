@@ -7,7 +7,7 @@ import syntax.Grammar;
 **/
 class UpstreamParserCorpus {
 	static final expectedFileCount = 1366;
-	static final minimumParsedCount = 1171;
+	static final minimumParsedCount = 1187;
 
 	static function main():Void {
 		var root = "haxe/tests/unit/src";

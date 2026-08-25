@@ -351,6 +351,7 @@ class Grammar {
 	function objectOrIdentifier():Expr {
 		var t=current();
 		if(accept(BrOpen)!=null) {
+			if (!is(BrClose) && (index + 1 >= tokens.length || !tokens[index + 1].token.match(DblDot))) return blockContents(t.pos);
 			var fields=[];
 			while (!is(BrClose)) {
 				var key = switch current() {
@@ -367,10 +368,21 @@ class Grammar {
 		var n=placedIdent(); return expr(EConst(Ident(n.name)),n.pos);
 	}
 	function postfix(e:Expr):Expr { while (true) { if (accept(Dot) != null || accept(QuestionDot) != null) { var safe=previous().token.match(QuestionDot); var n=placedIdent(); e=expr(EField(e,n.name,safe ? EFSafe : EFNormal),union(e.pos,n.pos)); } else if (accept(POpen) != null) { var args=[]; if (!is(PClose)) do args.push(expression()) while(accept(Comma)!=null); var end=expect(PClose).pos; e=expr(ECall(e,args),union(e.pos,end)); } else if (accept(BkOpen) != null) { var key=expression(); var end=expect(BkClose).pos; e=expr(EArray(e,key),union(e.pos,end)); } else if (switch current().token {case Unop(Increment)|Unop(Decrement):true;case _:false;}) { var op=switch next().token {case Unop(v):v;case _:null;}; e=expr(EUnop(op,Postfix,e),union(e.pos,previous().pos)); } else return e; } return e; }
-	function block():Expr { var begin=expect(BrOpen).pos; var es=[]; while (!is(BrClose)) { var value = expression(); es.push(value); if (accept(Semicolon)==null && !is(BrClose) && requiresSemicolon(value)) fail("Expected semicolon"); } return expr(EBlock(es),union(begin,expect(BrClose).pos)); }
+	function block():Expr return blockContents(expect(BrOpen).pos);
+	function blockContents(begin:Pos):Expr {
+		var es=[];
+		while (!is(BrClose)) {
+			documentation();
+			if (is(BrClose)) break;
+			var value = expression();
+			es.push(value);
+			if (accept(Semicolon)==null && !is(BrClose) && requiresSemicolon(value)) fail("Expected semicolon");
+		}
+		return expr(EBlock(es),union(begin,expect(BrClose).pos));
+	}
 	function statementBody():Expr return is(BrOpen) ? block() : expression();
 	static function requiresSemicolon(value:Expr):Bool return switch value.expr {
-		case EIf(_, _, _) | EWhile(_, _, _) | EFor(_, _) | ESwitch(_, _, _) | ETry(_, _) | EFunction(_, _): false;
+		case EBlock(_) | EIf(_, _, _) | EWhile(_, _, _) | EFor(_, _) | ESwitch(_, _, _) | ETry(_, _) | EFunction(_, _): false;
 		case EBinop(OpAssign | OpAssignOp(_), _, {expr:EFunction(_, {fExpr:{expr:EBlock(_) | EMeta(_, {expr:EReturn({expr:EBlock(_)})})}})}): false;
 		case EVars(vars) if (vars.length > 0 && switch vars[vars.length - 1].evExpr { case {expr:EFunction(_, _)}: true; case _: false; }): false;
 		case _: true;
