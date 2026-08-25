@@ -50,6 +50,10 @@ class GrammarTest {
 		assert(switch localStatics.definition { case EClass(value): switch value.data[0].cffKind { case FFun(func): switch func.fExpr.expr { case EBlock([{expr:EVars([first])}, {expr:EVars([second])}]): first.evStatic && !first.evFinal && second.evStatic && second.evFinal; case _: false; }; case _: false; }; case _: false; });
 		var privateAccess = Grammar.parse('class Main { function run(value:Dynamic) return @:privateAccess value.hidden; }').declarations[0];
 		assert(switch privateAccess.definition { case EClass(value): switch value.data[0].cffKind { case FFun(func): switch func.fExpr.expr { case EReturn({expr: EMeta(entry, _)}): entry.meta == "privateAccess"; case _: false; }; case _: false; }; case _: false; });
+		var spacedMetadata = Grammar.parse('class Main { function run(value:Dynamic) return @:privateAccess (value : String); }').declarations[0];
+		assert(switch spacedMetadata.definition { case EClass(value): switch value.data[0].cffKind { case FFun(func): switch func.fExpr.expr { case EReturn({expr:EMeta(entry, {expr:EParenthesis({expr:ECheckType(_, _)})})}): entry.exprs.length == 0; case _: false; }; case _: false; }; case _: false; });
+		var metadataArguments = Grammar.parse('class Main { function run(value:Dynamic) return @:custom("one",) value; }').declarations[0];
+		assert(switch metadataArguments.definition { case EClass(value): switch value.data[0].cffKind { case FFun(func): switch func.fExpr.expr { case EReturn({expr:EMeta(entry, _)}): entry.exprs.length == 1; case _: false; }; case _: false; }; case _: false; });
 		var legacyMetadata = Grammar.parse('@legacy class Main {}').declarations[0];
 		assert(switch legacyMetadata.definition { case EClass(value): value.meta[0].meta == "legacy"; case _: false; });
 		var interpolation = Grammar.parse("class Main { function render(value:String) return 'before $value after'; }").declarations[0];
