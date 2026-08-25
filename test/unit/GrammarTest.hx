@@ -56,6 +56,8 @@ class GrammarTest {
 		assert(moduleFields.declarations.length == 3 && switch moduleFields.declarations[0].definition { case EStatic({data:FVar(_, _), flags:flags}): flags[0].access == AFinal; case _: false; });
 		var trailingArrayComma = Grammar.parse('class Main { var values = [1, 2,]; }').declarations[0];
 		assert(switch trailingArrayComma.definition { case EClass(value): switch value.data[0].cffKind { case FVar(_, {expr:EArrayDecl(values)}): values.length == 2; case _: false; }; case _: false; });
+		var quotedObjectField = Grammar.parse('class Main { var value = { "new": 1 }; }').declarations[0];
+		assert(switch quotedObjectField.definition { case EClass(value): switch value.data[0].cffKind { case FVar(_, {expr:EObjectDecl([{key:key, expr:_}])}): key.name == "new" && key.quote == DoubleQuotes; case _: false; }; case _: false; });
 		var mapLiteral = Grammar.parse('class Main { var values = [1 => "one"]; }').declarations[0];
 		assert(switch mapLiteral.definition { case EClass(value): switch value.data[0].cffKind { case FVar(_, {expr:EArrayDecl([{expr:EBinop(OpArrow, _, _)}])}): true; case _: false; }; case _: false; });
 		var functionVariableWithoutSemicolon = Grammar.parse('class Main { function run() { var callback = function() {} var next = 1; } }').declarations[0];

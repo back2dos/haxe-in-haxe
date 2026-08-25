@@ -348,8 +348,12 @@ class Grammar {
 		if(accept(BrOpen)!=null) {
 			var fields=[];
 			while (!is(BrClose)) {
-				var n=placedIdent(); expect(DblDot); var value=expression();
-				fields.push({key:{name:n.name,pos:n.pos,quote:NoQuotes},expr:value});
+				var key = switch current() {
+					case {token:Const(String(name, _)), pos:pos}: next(); {name:name, pos:pos, quote:DoubleQuotes};
+					case _: var n=placedIdent(); {name:n.name, pos:n.pos, quote:NoQuotes};
+				};
+				expect(DblDot); var value=expression();
+				fields.push({key:key,expr:value});
 				if (accept(Comma) == null) break;
 			}
 			var end=expect(BrClose).pos;
