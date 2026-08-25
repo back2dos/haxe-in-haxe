@@ -229,9 +229,21 @@ class Grammar {
 			next();
 			if (accept(POpen) != null) {
 				var e = expression();
-				var type = accept(Comma) == null ? null : typeHint();
-				var end = expect(PClose).pos;
-				expr(ECast(e, type), union(t.pos, end));
+				if (accept(Comma) != null) {
+					var type = typeHint();
+					var end = expect(PClose).pos;
+					expr(ECast(e, type), union(t.pos, end));
+				} else if (accept(DblDot) != null) {
+					var type = typeHint();
+					var end = expect(PClose).pos;
+					var checked = expr(ECheckType(e, type), union(e.pos, type.pos));
+					var parenthesized = expr(EParenthesis(checked), union(e.pos, end));
+					expr(ECast(parenthesized, null), union(t.pos, end));
+				} else {
+					var end = expect(PClose).pos;
+					var parenthesized = expr(EParenthesis(e), union(e.pos, end));
+					expr(ECast(parenthesized, null), union(t.pos, end));
+				}
 			} else {
 				var e = unary();
 				expr(ECast(e, null), union(t.pos, e.pos));
@@ -265,10 +277,14 @@ class Grammar {
 				while (!is(BkClose)) { values.push(expression()); if (accept(Comma) == null) break; }
 				var end=expect(BkClose).pos; expr(EArrayDecl(values),union(t.pos,end));
 			case Kwd(Inline):
-				expectKwd(Function);
-				var name:Null<PlacedName> = is(POpen) ? null : placedIdent();
-				var f = functionRest();
-				expr(EFunction(name == null ? FKAnonymous : FKNamed(name, true), f), union(t.pos, f.fExpr == null ? t.pos : f.fExpr.pos));
+				if (acceptKwd(Function) != null) {
+					var name:Null<PlacedName> = is(POpen) ? null : placedIdent();
+					var f = functionRest();
+					expr(EFunction(name == null ? FKAnonymous : FKNamed(name, true), f), union(t.pos, f.fExpr == null ? t.pos : f.fExpr.pos));
+				} else {
+					var value = unary();
+					expr(EMeta({meta:"inline", exprs:[], pos:t.pos}, value), union(t.pos, value.pos));
+				}
 			case Kwd(Macro):
 				// Macro fields are rejected by the source-only typer, but their bodies
 				// still have to parse so the declaration can reach that boundary.

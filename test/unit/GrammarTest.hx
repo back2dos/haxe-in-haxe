@@ -116,6 +116,10 @@ class GrammarTest {
 		assert(switch overloadedConstructor.definition { case EAbstract(value): value.data[0].cffAccess.filter(function(access) return access.access == AOverload).length == 1; case _: false; });
 		var unparenthesizedCast = Grammar.parse('class Main { function run() return cast readByte(); }').declarations[0];
 		assert(switch unparenthesizedCast.definition { case EClass(value): switch value.data[0].cffKind { case FFun(func): switch func.fExpr.expr { case EReturn({expr:ECast({expr:ECall(_, [])}, null)}): true; case _: false; }; case _: false; }; case _: false; });
+		var checkedCast = Grammar.parse('class Main { function run() return cast (value : String); }').declarations[0];
+		assert(switch checkedCast.definition { case EClass(value): switch value.data[0].cffKind { case FFun(func): switch func.fExpr.expr { case EReturn({expr:ECast({expr:EParenthesis({expr:ECheckType(_, _)})}, null)}): true; case _: false; }; case _: false; }; case _: false; });
+		var inlineLoop = Grammar.parse('class Main { function run() inline for (i in 0...3) trace(i); }').declarations[0];
+		assert(switch inlineLoop.definition { case EClass(value): switch value.data[0].cffKind { case FFun(func): switch func.fExpr.expr { case EMeta(entry, {expr:EFor(_, _)}): entry.meta == "inline"; case _: false; }; case _: false; }; case _: false; });
 		var untypedBlock = Grammar.parse('class Main { function run():Void untyped { value(); } }').declarations[0];
 		assert(switch untypedBlock.definition { case EClass(value): switch value.data[0].cffKind { case FFun(func): switch func.fExpr.expr { case EUntyped({expr:EBlock(_)}): true; case _: false; }; case _: false; }; case _: false; });
 		var terminatedIfBranch = Grammar.parse('class Main { function run(v:Int) { if (v < 0) first(); else if (v > 0) second(); else third(); } }').declarations[0];
