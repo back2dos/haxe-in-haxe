@@ -205,6 +205,14 @@ class Grammar {
 		case Kwd(Return): next(); var e = is(Semicolon)||is(BrClose) ? null : expression(); expr(EReturn(e), e == null ? t.pos : union(t.pos,e.pos));
 		case Kwd(Throw): next(); var e=expression(); expr(EThrow(e),union(t.pos,e.pos));
 		case Kwd(Var) | Kwd(Final): var finalValue=acceptKwd(Final)!=null; if(!finalValue)next(); var vars=[variable(finalValue)]; while(accept(Comma)!=null) vars.push(variable(finalValue)); expr(EVars(vars),union(t.pos,vars[vars.length-1].evExpr == null ? vars[vars.length-1].evName.pos : vars[vars.length-1].evExpr.pos));
+		case Kwd(Static):
+			next();
+			var finalValue = acceptKwd(Final) != null;
+			if (!finalValue) expectKwd(Var);
+			var vars = [variable(finalValue)];
+			while (accept(Comma) != null) vars.push(variable(finalValue));
+			for (variable in vars) variable.evStatic = true;
+			expr(EVars(vars), union(t.pos, vars[vars.length - 1].evExpr == null ? vars[vars.length - 1].evName.pos : vars[vars.length - 1].evExpr.pos));
 		case Kwd(If):
 			next(); expect(POpen); var c=expression(); expect(PClose); var th=statementBody();
 			if (!th.expr.match(EBlock(_))) accept(Semicolon);

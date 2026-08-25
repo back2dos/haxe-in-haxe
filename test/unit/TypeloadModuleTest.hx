@@ -102,6 +102,18 @@ class TypeloadModuleTest {
 			}
 			case _: throw "Expected module field function";
 		}
+		var localStatics = loader.loadModule({pack:["unit", "moduleload"], name:"LocalStatics"});
+		var localStaticsClass = switch localStatics.mTypes[0] { case TClassDecl(value): value; case _: throw "Expected local-statics class"; };
+		switch localStaticsClass.clStatics.get("run").cfExpr.eexpr {
+			case TFunction(func): switch func.tfExpr.eexpr {
+				case TBlock([{eexpr:TVar(first, _)}, {eexpr:TVar(second, _)}, _]):
+					var staticFlag = 1 << core.TType.TType.flagTVarNames.indexOf("VStatic");
+					var finalFlag = 1 << core.TType.TType.flagTVarNames.indexOf("VFinal");
+					if ((first.vFlags & staticFlag) == 0 || (second.vFlags & staticFlag) == 0 || (second.vFlags & finalFlag) == 0) throw "Local static flags were not typed";
+				case _: throw "Expected local static declarations";
+			}
+			case _: throw "Expected local-statics function";
+		}
 		var valueSwitch = loader.loadModule({pack:["unit", "moduleload"], name:"ValueSwitch"});
 		var valueSwitchClass = switch valueSwitch.mTypes[0] { case TClassDecl(value): value; case _: throw "Expected value-switch class"; };
 		switch valueSwitchClass.clStatics.get("select").cfExpr.eexpr {

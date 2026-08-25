@@ -1167,6 +1167,8 @@ class TypeloadModule {
 			var initializer = value.evExpr == null ? null : typeExpr(module, cls, value.evExpr, locals);
 			var type = value.evType == null ? (initializer == null ? TDynamic(null) : initializer.etype) : resolveTypeHint(module, value.evType);
 			var variable = makeVar(value.evName.name, type, TVOLocalVariable, value.evName.pos, value.evMeta);
+			if (value.evFinal) variable.vFlags |= 1 << core.TType.TType.flagTVarNames.indexOf("VFinal");
+			if (value.evStatic) variable.vFlags |= 1 << core.TType.TType.flagTVarNames.indexOf("VStatic");
 			locals.set(variable.vName, variable);
 			result.push(typed(TVar(variable, initializer), type, value.evName.pos));
 		}
