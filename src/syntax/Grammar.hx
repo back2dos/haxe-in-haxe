@@ -57,8 +57,10 @@ class Grammar {
 			expect(BrOpen); var fields = classFields(); var end = expect(BrClose).pos;
 			return decl(EClass({name:name, doc:doc, params:params, meta:meta, flags:flags, data:fields}), union(start,end));
 		}
-		if (acceptKwd(Enum) != null) {
-			start = previous().pos; pendingDeclarationDoc = null;
+		var enumToken = acceptKwd(Enum);
+		if (enumToken != null) {
+			start = enumToken.pos; pendingDeclarationDoc = null;
+			if (acceptKwd(Abstract) != null) return abstractDeclaration(start, doc, meta, accesses, true);
 			var name = placedIdent(), params = typeParams(), flags:Array<EnumFlag> = [];
 			if (hasAccess(accesses, AExtern)) flags.push(EExtern); if (hasAccess(accesses, APrivate)) flags.push(EPrivate);
 			expect(BrOpen); var data = []; while (!is(BrClose)) data.push(enumConstructor()); var end = expect(BrClose).pos;
@@ -75,12 +77,7 @@ class Grammar {
 		}
 		if (acceptKwd(Abstract) != null) {
 			start = previous().pos; pendingDeclarationDoc = null;
-			var name=placedIdent(), params=typeParams(); var flags:Array<AbstractFlag>=[];
-			if(hasAccess(accesses,AExtern))flags.push(AbExtern); if(hasAccess(accesses,APrivate))flags.push(AbPrivate);
-			if(accept(POpen)!=null) { flags.push(AbOver(typeHint())); expect(PClose); }
-			while(true) { if(identText()=="from") {next();flags.push(AbFrom(typeHint()));} else if(identText()=="to") {next();flags.push(AbTo(typeHint()));} else break; }
-			expect(BrOpen); var fields=classFields(); var end=expect(BrClose).pos;
-			return decl(EAbstract({name:name,doc:doc,params:params,meta:meta,flags:flags,data:fields}),union(start,end));
+			return abstractDeclaration(start, doc, meta, accesses, false);
 		}
 		if (acceptKwd(Var) != null || hasAccess(accesses, AFinal)) {
 			pendingDeclarationDoc = null;
@@ -95,6 +92,14 @@ class Grammar {
 			return decl(EStatic({name:name, doc:doc, params:func.fParams, meta:meta, flags:accesses, data:FFun(func)}), union(start,end));
 		}
 		fail("Expected a type declaration"); return null;
+	}
+	function abstractDeclaration(start:Pos, doc:Documentation, meta:Metadata, accesses:Array<PlacedAccess>, enumAbstract:Bool):TypeDecl {
+		var name=placedIdent(), params=typeParams(); var flags:Array<AbstractFlag>=[];
+		if(hasAccess(accesses,AExtern))flags.push(AbExtern); if(hasAccess(accesses,APrivate))flags.push(AbPrivate); if(enumAbstract) flags.push(AbEnum);
+		if(accept(POpen)!=null) { flags.push(AbOver(typeHint())); expect(PClose); }
+		while(true) { if(identText()=="from") {next();flags.push(AbFrom(typeHint()));} else if(identText()=="to") {next();flags.push(AbTo(typeHint()));} else break; }
+		expect(BrOpen); var fields=classFields(); var end=expect(BrClose).pos;
+		return decl(EAbstract({name:name,doc:doc,params:params,meta:meta,flags:flags,data:fields}),union(start,end));
 	}
 
 	var previousKwd:Null<Keyword>;
@@ -334,13 +339,18 @@ class Grammar {
 		if (accept(BrOpen) != null) {
 			// parse_type_anonymous in grammar.ml uses the ordinary class-field
 			// grammar. This is needed by StdTypes' Iterator/Iterable typedefs.
+			var extensions:Array<PlacedTypePath> = [];
+			while (accept(Binop(OpGt)) != null) {
+				extensions.push(typePath());
+				if (accept(Comma) == null) break;
+			}
 			var fields = [];
 			while (!is(BrClose)) {
 				fields.push(anonymousField());
 				accept(Comma);
 			}
 			var end = expect(BrClose).pos;
-			complex = CTAnonymous(fields);
+			complex = extensions.length == 0 ? CTAnonymous(fields) : CTExtend(extensions, fields);
 			return {type: optional ? CTOptional({type:complex, pos:union(start, end)}) : complex, pos:union(start, end)};
 		}
 		complex = CTPath(typePath());

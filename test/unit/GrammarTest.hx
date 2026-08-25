@@ -14,6 +14,8 @@ class GrammarTest {
 		assert(switch expr.definition { case EClass(c): switch c.data[0].cffKind { case FFun(f): f.fExpr != null; case _: false; }; case _: false; });
 		var structural = Grammar.parse('typedef Cursor<T> = { function hasNext():Bool; function next():T; }').declarations[0];
 		assert(switch structural.definition { case ETypedef(value): switch value.data.type { case CTAnonymous(fields): fields.length == 2; case _: false; }; case _: false; });
+		var structuralExtension = Grammar.parse('typedef Base = { var id:Int; } typedef Child = { > Base, var name:String; }').declarations[1];
+		assert(switch structuralExtension.definition { case ETypedef(value): switch value.data.type { case CTExtend(paths, fields): paths.length == 1 && paths[0].path.tname == "Base" && fields.length == 1; case _: false; }; case _: false; });
 		var property = Grammar.parse('extern class Value { var length(default, null):Int; }').declarations[0];
 		assert(switch property.definition { case EClass(value): switch value.data[0].cffKind { case FProp(get, set, _, _): get.name == "default" && set.name == "null"; case _: false; }; case _: false; });
 		var functionType = Grammar.parse('class Mapper { function map(f:Int->String):Void; }').declarations[0];
@@ -60,6 +62,8 @@ class GrammarTest {
 		assert(switch arrowBlock.definition { case EClass(value): switch value.data[0].cffKind { case FFun(func): switch func.fExpr.expr { case EReturn({expr:EFunction(FKArrow, {fExpr:{expr:EMeta(_, {expr:EReturn({expr:EBlock(_)})})}})}): true; case _: false; }; case _: false; }; case _: false; });
 		var dollarCall = Grammar.parse("class Main { function run(value:Dynamic) $type(value); }").declarations[0];
 		assert(switch dollarCall.definition { case EClass(value): switch value.data[0].cffKind { case FFun(func): switch func.fExpr.expr { case ECall({expr:EConst(Ident("$type"))}, _): true; case _: false; }; case _: false; }; case _: false; });
+		var enumAbstract = Grammar.parse('enum abstract Status(Int) from Int to Int { var Ready = 1; }').declarations[0];
+		assert(switch enumAbstract.definition { case EAbstract(value): value.flags.indexOf(AbEnum) != -1 && value.data.length == 1; case _: false; });
 		var literalDollar = Grammar.parse("class Main { var value = 'cost: $'; }").declarations[0];
 		assert(switch literalDollar.definition { case EClass(value): switch value.data[0].cffKind { case FVar(_, {expr:EConst(String(text, _))}): text == "cost: $"; case _: false; }; case _: false; });
 		var callStack = Grammar.parse(sys.io.File.getContent("haxe/std/haxe/CallStack.hx"), core.Define.emptyDefines(), "haxe/std/haxe/CallStack.hx");

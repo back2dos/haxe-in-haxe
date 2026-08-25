@@ -43,6 +43,7 @@ run_case issue-11005 haxe/tests/misc/eval/projects/Issue11005 Main
 run_case issue-9204 haxe/tests/misc/eval/projects/Issue9204 Main
 run_case global-metadata-wildcard haxe/tests/misc/eval/projects/GlobalMetadataWildcard Main
 run_case hxb-wildcard-exclude haxe/tests/misc/eval/projects/HxbWildcardExclude/src Main
+run_case issue-10107 haxe/tests/misc/eval/projects/Issue10107 Main
 run_case issue-10152 haxe/tests/misc/eval/projects/Issue10152 Main
 run_case issue-10171 haxe/tests/misc/eval/projects/Issue10171 Main
 run_case issue-10623 haxe/tests/misc/eval/projects/Issue10623 Main
@@ -57,6 +58,7 @@ run_case issue-10980 haxe/tests/misc/eval/projects/Issue10980 Main
 run_case issue-11152 haxe/tests/misc/eval/projects/Issue11152 Main
 run_case issue-11176 haxe/tests/misc/eval/projects/Issue11176 Main
 run_case issue-11180 haxe/tests/misc/eval/projects/Issue11180 Main
+run_case issue-11102 haxe/tests/misc/eval/projects/Issue11102 Main
 run_case issue-11286 haxe/tests/misc/eval/projects/Issue11286 Main
 run_case issue-11323 haxe/tests/misc/eval/projects/Issue11323 Main
 run_case issue-11392 haxe/tests/misc/eval/projects/Issue11392 Main

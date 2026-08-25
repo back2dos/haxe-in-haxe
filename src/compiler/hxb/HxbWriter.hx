@@ -813,6 +813,8 @@ class HxbWriter {
 			case EField(object, field, kind):
 				chunk.writeU8(7); writeMetadataExpr(chunk, object); chunk.writeString(field);
 				chunk.writeU8(switch kind { case EFNormal: 0; case EFSafe: 1; });
+			case EParenthesis(value):
+				chunk.writeU8(8); writeMetadataExpr(chunk, value);
 			case EObjectDecl(fields):
 				chunk.writeU8(9); chunk.writeList(fields, function(field) {
 					chunk.writeString(field.key.name); writePos(chunk, field.key.pos);

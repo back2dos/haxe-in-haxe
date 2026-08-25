@@ -1257,9 +1257,9 @@ class TypeloadModule {
 			var nullAbs = switch findModuleType(stdTypes, "Null") { case TAbstractDecl(value): value; case _: throw "Null is not an abstract"; };
 			TAbstract(nullAbs, [resolveTypeHint(module, type)]);
 		case CTAnonymous(fields): TAnon(makeAnonymous(module, fields));
-		// Structural intersection/extension merging is still outside this batch
-		// slice; preserve a dynamic placeholder for those less common forms.
-		case CTExtend(_, _) | CTIntersection(_): TDynamic(null);
+		case CTExtend(paths, fields): TAnon({aFields:makeAnonymous(module, fields).aFields, aStatus:Extend([for (path in paths) resolvePath(module, path.path)])});
+		// Structural intersection merging is still outside this batch slice.
+		case CTIntersection(_): TDynamic(null);
 	}
 
 	function makeAnonymous(module:ModuleDef, fields:Array<ClassField>):TAnon {
