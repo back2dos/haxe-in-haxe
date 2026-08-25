@@ -133,6 +133,10 @@ class Lexer {
 					if (code == null || code > 0x10FFFF) fail(InvalidEscape("u"), escapePos);
 					buffer.add(String.fromCharCode(code));
 					index++;
+				} else if (current() == "u") {
+					if (!isHexDigit(peek(1)) || !isHexDigit(peek(2)) || !isHexDigit(peek(3)) || !isHexDigit(peek(4))) fail(InvalidEscape("u"), escapePos);
+					buffer.add(String.fromCharCode(Std.parseInt("0x" + peek(1) + peek(2) + peek(3) + peek(4))));
+					index += 5;
 				} else { buffer.add(unescape(current(), escapePos)); index++; }
 			}
 			else { buffer.add(current()); index++; }

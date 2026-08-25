@@ -187,7 +187,10 @@ private class ConditionParser {
 		if (Type.enumEq(peek(), expected)) { index++; return true; }
 		return false;
 	}
-	inline function peek():Token return index < tokens.length ? tokens[index].token : Eof;
+	function peek():Token {
+		while (index < tokens.length) switch tokens[index].token { case Comment(_) | CommentLine(_): index++; case _: break; }
+		return index < tokens.length ? tokens[index].token : Eof;
+	}
 	function invalid():Void Preprocessor.fail(InvalidCondition, index < tokens.length ? tokens[index].pos : tokens[tokens.length - 1].pos);
 
 	static function binop(token:Token):Null<Binop> return switch token { case Binop(op): op; case _: null; }

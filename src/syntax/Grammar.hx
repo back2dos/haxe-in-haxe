@@ -84,7 +84,13 @@ class Grammar {
 		}
 		if (acceptKwd(Var) != null || hasAccess(accesses, AFinal)) {
 			pendingDeclarationDoc = null;
-			var name = placedIdent(), type = typeHintOpt();
+			var name = placedIdent();
+			if (accept(POpen) != null) {
+				var get = placedIdent(); expect(Comma); var set = placedIdent(); expect(PClose);
+				var type = typeHintOpt(); var value = accept(Binop(OpAssign)) == null ? null : expression(); var end = semicolon().pos;
+				return decl(EStatic({name:name, doc:doc, params:[], meta:meta, flags:accesses, data:FProp(get, set, type, value)}), union(start, end));
+			}
+			var type = typeHintOpt();
 			var value = accept(Binop(OpAssign)) == null ? null : expression();
 			var end = semicolon().pos;
 			return decl(EStatic({name:name, doc:doc, params:[], meta:meta, flags:accesses, data:FVar(type, value)}), union(start, end));
@@ -424,7 +430,7 @@ class Grammar {
 			var end = expect(BrClose).pos;
 			var name = switch e.expr { case EConst(Ident(value)): value; case _: ""; };
 			e = expr(EMeta({meta:name, exprs:[], pos:e.pos}, parameter), union(begin, end));
-		} else if (accept(Dot) != null || accept(QuestionDot) != null) { var safe=previous().token.match(QuestionDot); var n=placedIdent(); e=expr(EField(e,n.name,safe ? EFSafe : EFNormal),union(e.pos,n.pos)); }
+		} else if (accept(Dot) != null || accept(QuestionDot) != null) { var safe=previous().token.match(QuestionDot); var n=placedFieldName(); e=expr(EField(e,n.name,safe ? EFSafe : EFNormal),union(e.pos,n.pos)); }
 		else if (accept(POpen) != null) { var args=[]; if (!is(PClose)) while (true) { args.push(expression()); if (accept(Comma) == null || is(PClose)) break; } var end=expect(PClose).pos; e=expr(ECall(e,args),union(e.pos,end)); }
 		else if (accept(BkOpen) != null) { var key=expression(); var end=expect(BkClose).pos; e=expr(EArray(e,key),union(e.pos,end)); }
 		else if (switch current().token {case Unop(Increment)|Unop(Decrement)|Unop(Not):true;case _:false;}) { var op=switch next().token {case Unop(v):v;case _:null;}; e=expr(EUnop(op,Postfix,e),union(e.pos,previous().pos)); }
@@ -481,7 +487,11 @@ class Grammar {
 		if (accept(POpen) != null) {
 			var args:Array<TypeHint> = [];
 			if (!is(PClose)) while (true) {
-				if (is(Question) && index + 2 < tokens.length && switch tokens[index + 1].token { case Const(Ident(_)): tokens[index + 2].token.match(DblDot); case _: false; }) {
+				if (is(Spread)) {
+					var spread = next(); var name = placedIdent(); expect(DblDot); var value = typeHint();
+					var rest = Ast.makePtpTh(Ast.mkTypePath(["haxe"], "Rest", [TPType(value)]), union(spread.pos, value.pos));
+					args.push({type:CTNamed(name, rest), pos:union(spread.pos, value.pos)});
+				} else if (is(Question) && index + 2 < tokens.length && switch tokens[index + 1].token { case Const(Ident(_)): tokens[index + 2].token.match(DblDot); case _: false; }) {
 					var optionalStart = next().pos;
 					var name = placedIdent(); expect(DblDot); var value = typeHint();
 					var named = {type:CTNamed(name, value), pos:union(name.pos, value.pos)};
@@ -600,6 +610,7 @@ class Grammar {
 		return result;
 	}
 	function placedIdent():PlacedName { var t=next(); return switch t.token { case Const(Ident(v)): {name:v,pos:t.pos}; case Kwd(k): {name:Ast.sKeyword(k),pos:t.pos}; case _: fail("Expected identifier",t.pos); null; }; }
+	function placedFieldName():PlacedName { var t=current(); return switch t.token { case Dollar(name): next(); {name:"$" + name, pos:t.pos}; case _: placedIdent(); }; }
 	function identText():Null<String> return switch current().token { case Const(Ident(v)): v; case _: null; }
 	function decl(d:TypeDef,p:Pos):TypeDecl return {definition:d,pos:p};
 	function expr(d:ExprDef,p:Pos):Expr return {expr:d,pos:p};

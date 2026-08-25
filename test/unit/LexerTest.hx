@@ -20,6 +20,7 @@ class LexerTest {
 		assert(switch Lexer.lex('"a\\n\\\"b" ~/a\\/b/g', "T.hx")[0].token { case Const(String("a\n\"b", SDoubleQuotes)): true; case _: false; });
 		assert(switch Lexer.lex('"a\\x21"')[0].token { case Const(String("a!", SDoubleQuotes)): true; case _: false; });
 		assert(switch Lexer.lex('"\\u{1F604}"')[0].token { case Const(String("😄", SDoubleQuotes)): true; case _: false; });
+		assert(switch Lexer.lex('"\\u00E9\\u3042"')[0].token { case Const(String("éあ", SDoubleQuotes)): true; case _: false; });
 		var shifts = Lexer.lex("a >> 1; b >>> 2; a >>= 1; b >>>= 2;");
 		assert(shifts[1].token.match(Binop(OpShr)) && shifts[5].token.match(Binop(OpUShr)) && shifts[9].token.match(Binop(OpAssignOp(OpShr))) && shifts[13].token.match(Binop(OpAssignOp(OpUShr))));
 		assert(Lexer.lex("\uFEFFclass Main {}")[0].token.match(Kwd(Class)));
