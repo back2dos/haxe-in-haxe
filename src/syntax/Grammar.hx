@@ -540,7 +540,11 @@ class Grammar {
 		var end = accept(Semicolon);
 		return {cffName:name, cffDoc:doc, cffPos:end == null ? union(start, type.pos) : union(start, end.pos), cffMeta:meta, cffAccess:accesses, cffKind:FVar(type, null)};
 	}
-	function typePath():PlacedTypePath { var names=placedPath(); var last=names.pop(); var params=[]; var end=last.pos; if(accept(Binop(OpLt))!=null) { if(!isTypeGt()) do params.push(TPType(typeHint())) while(accept(Comma)!=null); end=expectTypeGt().pos; } return Ast.makePtp(Ast.mkTypePath([for(n in names)n.name],last.name,params), names.length == 0 ? union(last.pos,end) : union(names[0].pos,end)); }
+	function typePath():PlacedTypePath { var names=placedPath(); var last=names.pop(); var params=[]; var end=last.pos; if(accept(Binop(OpLt))!=null) { if(!isTypeGt()) do params.push(typePathParameter()) while(accept(Comma)!=null); end=expectTypeGt().pos; } return Ast.makePtp(Ast.mkTypePath([for(n in names)n.name],last.name,params), names.length == 0 ? union(last.pos,end) : union(names[0].pos,end)); }
+	function typePathParameter():TypeParamOrConst return switch current().token {
+		case Const(Int(_, _) | Float(_, _) | String(_, _) | Regexp(_, _)) | Kwd(True | False | Null) | Binop(OpSub) | BkOpen | Dollar(_): TPExpr(expression(9));
+		case _: TPType(typeHint());
+	};
 	function path():Array<String> return [for(n in placedPath())n.name];
 	function placedPath():Array<PlacedName> { var result=[placedIdent()]; while(accept(Dot)!=null) result.push(placedIdent()); return result; }
 	function typeParams():Array<TypeParam> {

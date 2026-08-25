@@ -120,6 +120,8 @@ class GrammarTest {
 		assert(switch structuralFunctionType.definition { case ETypedef(value): switch value.data.type { case CTFunction([{type:CTAnonymous(_)}], _): true; case _: false; }; case _: false; });
 		var overloadedConstructor = Grammar.parse('abstract Vector<T>(Array<T>) { extern overload public inline function new(length:Int) {} }').declarations[0];
 		assert(switch overloadedConstructor.definition { case EAbstract(value): value.data[0].cffAccess.filter(function(access) return access.access == AOverload).length == 1; case _: false; });
+		var constantTypeArguments = Grammar.parse('class Main { var one:Const<10>; var negative:Const<-3>; var values:Const<["test", 1]>; var pattern:Const<~/foo/i>; }').declarations[0];
+		assert(switch constantTypeArguments.definition { case EClass(value): Lambda.foreach(value.data, function(field) return switch field.cffKind { case FVar({type:CTPath({path:{tparams:[TPExpr(_)]}})}, _): true; case _: false; }); case _: false; });
 		var unparenthesizedCast = Grammar.parse('class Main { function run() return cast readByte(); }').declarations[0];
 		assert(switch unparenthesizedCast.definition { case EClass(value): switch value.data[0].cffKind { case FFun(func): switch func.fExpr.expr { case EReturn({expr:ECast({expr:ECall(_, [])}, null)}): true; case _: false; }; case _: false; }; case _: false; });
 		var checkedCast = Grammar.parse('class Main { function run() return cast (value : String); }').declarations[0];
