@@ -40,6 +40,7 @@ class GrammarTest {
 		var switched = Grammar.parse('class Main { static function run(value:Int):Bool { return switch (value) { case 0: true; default: false; } } }').declarations[0];
 		assert(switch switched.definition { case EClass(value): switch value.data[0].cffKind { case FFun(func): func.fExpr != null; case _: false; }; case _: false; });
 		Grammar.parse('class Main { function run(value:Dynamic) return switch (value : String) { case value: value; } }');
+		Grammar.parse('class Main { function run(value:Bool) return if (value) {field: 1} else {field: 2}; }');
 		var boundSwitch = Grammar.parse('class Main { function run(value:Null<Int>) return switch value { case var bound if (bound > 0): bound; case null: 0; } }').declarations[0];
 		assert(switch boundSwitch.definition { case EClass(value): switch value.data[0].cffKind { case FFun(func): switch func.fExpr.expr { case EReturn({expr:ESwitch(_, cases, _)}): cases.length == 2 && switch cases[0] { case {values:[{expr:EVars(_)}], guard:guard}: guard != null; case _: false; }; case _: false; }; case _: false; }; case _: false; });
 		var finalField = Grammar.parse('class Holder { final value:Int; }').declarations[0];
@@ -98,6 +99,7 @@ class GrammarTest {
 		assert(switch functionFieldWithSemicolon.definition { case EClass(value): value.data.length == 2; case _: false; });
 		var localFunctionWithoutSemicolon = Grammar.parse('class Main { function run() { function local() {} local(); } }').declarations[0];
 		assert(switch localFunctionWithoutSemicolon.definition { case EClass(value): switch value.data[0].cffKind { case FFun(func): switch func.fExpr.expr { case EBlock(values): values.length == 2; case _: false; }; case _: false; }; case _: false; });
+		Grammar.parse('class Main { function run() { function local() {} ++value.x; var selected = if (value) 1; var next = 2; } }');
 		var macroPrefixedExpression = Grammar.parse('class Main { macro static function build(value) return macro new Result($$value); }').declarations[0];
 		assert(switch macroPrefixedExpression.definition { case EClass(value): switch value.data[0].cffKind { case FFun(func): switch func.fExpr.expr { case EReturn({expr:ENew(_, _)}): true; case _: false; }; case _: false; }; case _: false; });
 		var unparenthesizedSwitch = Grammar.parse('class Main { function run(value:Int) return switch value { case 1: true; default: false; } }').declarations[0];
@@ -132,6 +134,8 @@ class GrammarTest {
 		assert(switch overloadedConstructor.definition { case EAbstract(value): value.data[0].cffAccess.filter(function(access) return access.access == AOverload).length == 1; case _: false; });
 		var constantTypeArguments = Grammar.parse('class Main { var one:Const<10>; var negative:Const<-3>; var values:Const<["test", 1]>; var pattern:Const<~/foo/i>; }').declarations[0];
 		assert(switch constantTypeArguments.definition { case EClass(value): Lambda.foreach(value.data, function(field) return switch field.cffKind { case FVar({type:CTPath({path:{tparams:[TPExpr(_)]}})}, _): true; case _: false; }); case _: false; });
+		Grammar.parse('class Main<T> { var values:Array<T>=[]; var nested:Array<Array<T>>=[]; }');
+		Grammar.parse('class Main { function run() { try { return; } value(); } }');
 		var unparenthesizedCast = Grammar.parse('class Main { function run() return cast readByte(); }').declarations[0];
 		assert(switch unparenthesizedCast.definition { case EClass(value): switch value.data[0].cffKind { case FFun(func): switch func.fExpr.expr { case EReturn({expr:ECast({expr:ECall(_, [])}, null)}): true; case _: false; }; case _: false; }; case _: false; });
 		var checkedCast = Grammar.parse('class Main { function run() return cast (value : String); }').declarations[0];

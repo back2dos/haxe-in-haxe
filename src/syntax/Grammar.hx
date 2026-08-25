@@ -236,7 +236,7 @@ class Grammar {
 		case Kwd(While): next(); expect(POpen); var c=expression(); expect(PClose); var b=statementBody(); expr(EWhile(c,b,NormalWhile),union(t.pos,b.pos));
 		case Kwd(For): next(); expect(POpen); var it=expression(); if(acceptKwd(In)!=null) { var right=expression(); it=expr(EBinop(OpIn,it,right),union(it.pos,right.pos)); } expect(PClose); var b=statementBody(); expr(EFor(it,b),union(t.pos,b.pos));
 		case Kwd(Do): next(); var b=statementBody(); expectKwd(While); expect(POpen); var c=expression(); var end=expect(PClose).pos; expr(EWhile(c,b,DoWhile),union(t.pos,end));
-		case Kwd(Try): next(); var body=statementBody(); var catches=[]; while(acceptKwd(Catch)!=null) { var cp=previous().pos; expect(POpen); var n=placedIdent(); var ty=typeHintOpt(); expect(PClose); var cb=statementBody(); catches.push({name:n,type:ty,expr:cb,pos:union(cp,cb.pos)}); } if(catches.length==0) fail("Expected catch"); expr(ETry(body,catches),union(t.pos,catches[catches.length-1].pos));
+		case Kwd(Try): next(); var body=statementBody(); var catches=[]; while(acceptKwd(Catch)!=null) { var cp=previous().pos; expect(POpen); var n=placedIdent(); var ty=typeHintOpt(); expect(PClose); var cb=statementBody(); catches.push({name:n,type:ty,expr:cb,pos:union(cp,cb.pos)}); } expr(ETry(body,catches),union(t.pos,catches.length == 0 ? body.pos : catches[catches.length-1].pos));
 		case Kwd(Switch): next(); parseSwitch(t.pos);
 		case Kwd(Break): next(); expr(EBreak,t.pos); case Kwd(Continue): next(); expr(EContinue,t.pos);
 		case Kwd(Untyped): next(); var e=is(BrOpen) ? block() : expression(); expr(EUntyped(e),union(t.pos,e.pos));
@@ -398,7 +398,7 @@ class Grammar {
 		while (!is(Kwd(Case)) && !is(Kwd(Default)) && !is(BrClose)) {
 			var value = expression();
 			values.push(value);
-			if (accept(Semicolon) == null && !is(Kwd(Case)) && !is(Kwd(Default)) && !is(BrClose) && requiresSemicolon(value)) fail("Expected semicolon");
+			if (accept(Semicolon) == null && !previous().token.match(Semicolon) && !is(Kwd(Case)) && !is(Kwd(Default)) && !is(BrClose) && requiresSemicolon(value)) fail("Expected semicolon");
 		}
 		if (values.length == 0) return null;
 		if (values.length == 1) return values[0];
@@ -433,7 +433,7 @@ class Grammar {
 		} else if (accept(Dot) != null || accept(QuestionDot) != null) { var safe=previous().token.match(QuestionDot); var n=placedFieldName(); e=expr(EField(e,n.name,safe ? EFSafe : EFNormal),union(e.pos,n.pos)); }
 		else if (accept(POpen) != null) { var args=[]; if (!is(PClose)) while (true) { args.push(expression()); if (accept(Comma) == null || is(PClose)) break; } var end=expect(PClose).pos; e=expr(ECall(e,args),union(e.pos,end)); }
 		else if (accept(BkOpen) != null) { var key=expression(); var end=expect(BkClose).pos; e=expr(EArray(e,key),union(e.pos,end)); }
-		else if (switch current().token {case Unop(Increment)|Unop(Decrement)|Unop(Not):true;case _:false;}) { var op=switch next().token {case Unop(v):v;case _:null;}; e=expr(EUnop(op,Postfix,e),union(e.pos,previous().pos)); }
+		else if (!e.expr.match(EFunction(_, _)) && switch current().token {case Unop(Increment)|Unop(Decrement)|Unop(Not):true;case _:false;}) { var op=switch next().token {case Unop(v):v;case _:null;}; e=expr(EUnop(op,Postfix,e),union(e.pos,previous().pos)); }
 		else return e;
 	} return e; }
 	function block():Expr return blockContents(expect(BrOpen).pos);
@@ -444,11 +444,11 @@ class Grammar {
 			if (is(BrClose)) break;
 			var value = expression();
 			es.push(value);
-			if (accept(Semicolon)==null && !is(BrClose) && !previous().token.match(BrClose) && requiresSemicolon(value)) fail("Expected semicolon");
+			if (accept(Semicolon)==null && !is(BrClose) && !previous().token.match(BrClose) && !previous().token.match(Semicolon) && requiresSemicolon(value)) fail("Expected semicolon");
 		}
 		return expr(EBlock(es),union(begin,expect(BrClose).pos));
 	}
-	function statementBody():Expr return is(BrOpen) ? block() : expression();
+	function statementBody():Expr return expression();
 	function expressionEnded():Bool return switch current().token {
 		case Semicolon | BrClose | BkClose | PClose | Comma | DblDot | Eof: true;
 		case Kwd(Case) | Kwd(Default) | Kwd(Else): true;
@@ -624,13 +624,16 @@ class Grammar {
 		}
 		return expect(Semicolon);
 	}
-	function isTypeGt():Bool return switch current().token { case Binop(OpGt | OpShr | OpUShr): true; case _: false; };
+	function isTypeGt():Bool return switch current().token { case Binop(OpGt | OpGte | OpShr | OpUShr | OpAssignOp(OpShr) | OpAssignOp(OpUShr)): true; case _: false; };
 	function expectTypeGt():LexedToken {
 		var token = current();
 		return switch token.token {
 			case Binop(OpGt): next();
+			case Binop(OpGte): tokens[index] = {token:Binop(OpAssign), pos:{pfile:token.pos.pfile, pmin:token.pos.pmin + 1, pmax:token.pos.pmax}}; {token:Binop(OpGt), pos:{pfile:token.pos.pfile, pmin:token.pos.pmin, pmax:token.pos.pmin + 1}};
 			case Binop(OpShr): tokens[index] = {token:Binop(OpGt), pos:{pfile:token.pos.pfile, pmin:token.pos.pmin + 1, pmax:token.pos.pmax}}; {token:Binop(OpGt), pos:{pfile:token.pos.pfile, pmin:token.pos.pmin, pmax:token.pos.pmin + 1}};
 			case Binop(OpUShr): tokens[index] = {token:Binop(OpShr), pos:{pfile:token.pos.pfile, pmin:token.pos.pmin + 1, pmax:token.pos.pmax}}; {token:Binop(OpGt), pos:{pfile:token.pos.pfile, pmin:token.pos.pmin, pmax:token.pos.pmin + 1}};
+			case Binop(OpAssignOp(OpShr)): tokens[index] = {token:Binop(OpGte), pos:{pfile:token.pos.pfile, pmin:token.pos.pmin + 1, pmax:token.pos.pmax}}; {token:Binop(OpGt), pos:{pfile:token.pos.pfile, pmin:token.pos.pmin, pmax:token.pos.pmin + 1}};
+			case Binop(OpAssignOp(OpUShr)): tokens[index] = {token:Binop(OpAssignOp(OpShr)), pos:{pfile:token.pos.pfile, pmin:token.pos.pmin + 1, pmax:token.pos.pmax}}; {token:Binop(OpGt), pos:{pfile:token.pos.pfile, pmin:token.pos.pmin, pmax:token.pos.pmin + 1}};
 			case _: fail("Expected type-parameter close", token.pos); null;
 		};
 	}
