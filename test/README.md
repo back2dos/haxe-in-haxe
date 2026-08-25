@@ -106,6 +106,13 @@ work and do not become conformance passes merely because consumption succeeds.
 Discovered exclusions and their current reasons are recorded in
 `test/upstream-hxb-exclusions.md`.
 
-The current breadth set contains 122 direct source roots and 10 effective HXML
+The current breadth set contains 123 direct source roots and 10 effective HXML
 configurations. A retained pass must type every non-extern field body; an
 unsupported expression is a failure, never an omitted body or placeholder.
+Reference consumption is still only a smoke check while source classpaths are
+present: the reference compiler may load a dependency omitted from the archive
+from source. Conformance still requires the complete reference member set.
+
+Expression-local IDs and generated temporaries are serialized semantics. If a
+payload differs only in these values, fix typer allocation and transformation
+order; do not canonicalize the payload before comparing it.

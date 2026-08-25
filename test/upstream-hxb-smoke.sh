@@ -53,6 +53,7 @@ run_hxml_case() {
 }
 
 run_case module-fields test unit.moduleload.ModuleFields
+run_case try-catch test unit.moduleload.TryCatch
 run_case issue-7237 haxe/tests/optimization/src issues.Issue7237
 run_case issue-6015 haxe/tests/optimization/src issues.Issue6015
 run_case issue-6093 haxe/tests/optimization/src issues.Issue6093

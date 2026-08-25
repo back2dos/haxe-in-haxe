@@ -537,6 +537,7 @@ class HxbWriter {
 		case TEnumIndex(value) | TEnumParameter(value, _, _): canWriteExpression(value);
 		case TIf(condition, thenExpr, elseExpr): canWriteExpression(condition) && canWriteExpression(thenExpr) && (elseExpr == null || canWriteExpression(elseExpr));
 		case TSwitch(value): canWriteExpression(value.switchSubject) && Lambda.foreach(value.switchCases, function(item) return Lambda.foreach(item.casePatterns, canWriteExpression) && canWriteExpression(item.caseExpr)) && (value.switchDefault == null || canWriteExpression(value.switchDefault));
+		case TTry(body, catches): canWriteExpression(body) && Lambda.foreach(catches, function(item) return canWriteExpression(item.expr));
 		case TWhile(condition, body, _): canWriteExpression(condition) && canWriteExpression(body);
 		case TCall(callee, args): canWriteExpression(callee) && [for (value in args) if (!canWriteExpression(value)) value].length == 0;
 		case TNew(_, _, args): [for (value in args) if (!canWriteExpression(value)) value].length == 0;
@@ -603,6 +604,10 @@ class HxbWriter {
 				chunk.writeU8(82); writeTExpr(chunk, value.switchSubject, root, typePool, pos);
 				chunk.writeList(value.switchCases, function(item) { chunk.writeList(item.casePatterns, function(pattern) writeTExpr(chunk, pattern, root, typePool, pos)); writeTExpr(chunk, item.caseExpr, root, typePool, pos); });
 				chunk.writeOption(value.switchDefault, function(defaultExpr) writeTExpr(chunk, defaultExpr, root, typePool, pos));
+				true;
+			case TTry(body, catches):
+				chunk.writeU8(83); writeTExpr(chunk, body, root, typePool, pos);
+				chunk.writeList(catches, function(item) { declareVar(chunk, item.variable); writeTExpr(chunk, item.expr, root, typePool, pos); });
 				true;
 			case TWhile(condition, body, flag): chunk.writeU8(flag == NormalWhile ? 84 : 85); writeTExpr(chunk, condition, root, typePool, pos); writeTExpr(chunk, body, root, typePool, pos); false;
 			case TEnumIndex(value): chunk.writeU8(100); writeTExpr(chunk, value, root, typePool, pos); false;

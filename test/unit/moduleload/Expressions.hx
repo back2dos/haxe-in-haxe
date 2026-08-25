@@ -8,4 +8,9 @@ class Expressions {
 	}
 	function helper(value:Dynamic):Dynamic { return value; }
 	function unchecked(value:Dynamic):Dynamic return untyped value.missing();
+	function guarded(value:Dynamic):Dynamic try {
+		return value.missing();
+	} catch (error:Dynamic) {
+		return error;
+	}
 }

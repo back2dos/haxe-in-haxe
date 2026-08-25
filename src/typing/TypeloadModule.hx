@@ -475,7 +475,8 @@ class TypeloadModule {
 			canTypeExpression(subject)
 			&& Lambda.foreach(cases, function(item) return item.guard == null && Lambda.foreach(item.values, isSupportedPattern) && (item.expr == null || canTypeExpression(item.expr)))
 			&& (defaultCase == null || defaultCase.expr == null || canTypeExpression(defaultCase.expr));
-		case ETry(_, _) | EIs(_, _) | EDisplay(_, _): false;
+		case ETry(body, catches): canTypeExpression(body) && Lambda.foreach(catches, function(item) return canTypeExpression(item.expr));
+		case EIs(_, _) | EDisplay(_, _): false;
 	};
 
 	static function isSupportedPattern(value:Expr):Bool return switch value.expr {
@@ -736,8 +737,25 @@ class TypeloadModule {
 				), thenValue.etype, source.pos);
 			case EWhile(condition, body, flag): typed(TWhile(typeExpr(module, cls, condition, locals), typeExpr(module, cls, body, locals), flag), fallback, source.pos);
 			case EFor(iterator, body): typeForLoop(module, cls, iterator, body, locals, source.pos);
+			case ETry(body, catches):
+				if (catches.length == 0) typeExpr(module, cls, body, locals) else {
+					var typedBody = typeExpr(module, cls, body, locals);
+					var typedCatches = [for (item in catches) {
+						var catchLocals = copyLocals(locals);
+						var variable = makeVar(item.name.name, item.type == null ? fallback : resolveTypeHint(module, item.type), TVOCatchVariable, item.name.pos, []);
+						catchLocals.set(variable.vName, variable);
+						{variable:variable, expr:typeExpr(module, cls, item.expr, catchLocals)};
+					}];
+					typed(TTry(typedBody, typedCatches), typedBody.etype, source.pos);
+				}
 			case _: throw 'Unsupported expression at ${source.pos.pfile}:${source.pos.pmin}';
 		};
+	}
+
+	static function copyLocals(locals:StringMap<TVar>):StringMap<TVar> {
+		var result = new StringMap<TVar>();
+		for (name => variable in locals) result.set(name, variable);
+		return result;
 	}
 
 	function tryTypeExpression(module:ModuleDef, source:Expr):Null<TExpr> {
