@@ -46,6 +46,8 @@ class GrammarTest {
 		assert(switch nestedBlock.definition { case EClass(value): switch value.data[0].cffKind { case FFun(func): switch func.fExpr.expr { case EBlock([{expr:EBlock(_)}, {expr:ECall(_, _)}]): true; case _: false; }; case _: false; }; case _: false; });
 		var braceTerminatedVariables = Grammar.parse('class Main { function run(value:Int) { var object = { field: value } trace(object); var selected = switch value { case 0: false; default: true; } trace(selected); } }').declarations[0];
 		assert(switch braceTerminatedVariables.definition { case EClass(value): switch value.data[0].cffKind { case FFun(func): switch func.fExpr.expr { case EBlock(values): values.length == 4; case _: false; }; case _: false; }; case _: false; });
+		var braceTerminatedFields = Grammar.parse('final moduleValue = { field: 1 } class Main { final field = { nested: true } }');
+		assert(braceTerminatedFields.declarations.length == 2);
 		var localStatics = Grammar.parse('class Main { function run() { static var count = 0; static final label = "ok"; } }').declarations[0];
 		assert(switch localStatics.definition { case EClass(value): switch value.data[0].cffKind { case FFun(func): switch func.fExpr.expr { case EBlock([{expr:EVars([first])}, {expr:EVars([second])}]): first.evStatic && !first.evFinal && second.evStatic && second.evFinal; case _: false; }; case _: false; }; case _: false; });
 		var privateAccess = Grammar.parse('class Main { function run(value:Dynamic) return @:privateAccess value.hidden; }').declarations[0];

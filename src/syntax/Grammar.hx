@@ -86,7 +86,7 @@ class Grammar {
 			pendingDeclarationDoc = null;
 			var name = placedIdent(), type = typeHintOpt();
 			var value = accept(Binop(OpAssign)) == null ? null : expression();
-			var end = expect(Semicolon).pos;
+			var end = semicolon().pos;
 			return decl(EStatic({name:name, doc:doc, params:[], meta:meta, flags:accesses, data:FVar(type, value)}), union(start, end));
 		}
 		if (acceptKwd(Function) != null) {
@@ -121,17 +121,17 @@ class Grammar {
 		// before the closing brace after its documented field is removed.
 		if (is(BrClose)) return null;
 		if (hasAccess(accesses, AFinal) && !is(Kwd(Var)) && !is(Kwd(Function))) {
-			var name = placedIdent(); var type = typeHintOpt(); var value = accept(Binop(OpAssign)) == null ? null : expression(); var end = expect(Semicolon).pos;
+			var name = placedIdent(); var type = typeHintOpt(); var value = accept(Binop(OpAssign)) == null ? null : expression(); var end = semicolon().pos;
 			return {cffName:name,cffDoc:doc,cffPos:union(start,end),cffMeta:meta,cffAccess:accesses,cffKind:FVar(type,value)};
 		}
 		if (acceptKwd(Var) != null) {
 			var name = placedIdent();
 			if (accept(POpen) != null) {
 				var get = placedIdent(); expect(Comma); var set = placedIdent(); expect(PClose);
-				var type = typeHintOpt(); var value = accept(Binop(OpAssign)) == null ? null : expression(); var end = expect(Semicolon).pos;
+				var type = typeHintOpt(); var value = accept(Binop(OpAssign)) == null ? null : expression(); var end = semicolon().pos;
 				return {cffName:name,cffDoc:doc,cffPos:union(start,end),cffMeta:meta,cffAccess:accesses,cffKind:FProp(get,set,type,value)};
 			}
-			var type=typeHintOpt(); var value=accept(Binop(OpAssign)) == null ? null : expression(); var end=expect(Semicolon).pos; return {cffName:name,cffDoc:doc,cffPos:union(start,end),cffMeta:meta,cffAccess:accesses,cffKind:FVar(type,value)};
+			var type=typeHintOpt(); var value=accept(Binop(OpAssign)) == null ? null : expression(); var end=semicolon().pos; return {cffName:name,cffDoc:doc,cffPos:union(start,end),cffMeta:meta,cffAccess:accesses,cffKind:FVar(type,value)};
 		}
 		if (acceptKwd(Function) != null) { var name=placedIdent(); var f=functionRest(); var end = f.fExpr == null ? previous().pos : f.fExpr.pos; accept(Semicolon); return {cffName:name,cffDoc:doc,cffPos:union(start,end),cffMeta:meta,cffAccess:accesses,cffKind:FFun(f)}; }
 		fail("Expected class field"); return null;
@@ -537,6 +537,13 @@ class Grammar {
 	function accept(t:Token):Null<LexedToken> { if(is(t)) return next(); return null; }
 	function acceptKwd(k:Keyword):Null<LexedToken> { if (switch current().token {case Kwd(v): v==k; case _:false;}) { previousKwd=k; return next(); } return null; }
 	function expect(t:Token):LexedToken { var r=accept(t); if(r==null) fail("Expected token " + Std.string(t)); return r; }
+	function semicolon():LexedToken {
+		if (previous().token.match(BrClose)) {
+			var token = accept(Semicolon);
+			return token == null ? previous() : token;
+		}
+		return expect(Semicolon);
+	}
 	function isTypeGt():Bool return switch current().token { case Binop(OpGt | OpShr | OpUShr): true; case _: false; };
 	function expectTypeGt():LexedToken {
 		var token = current();
