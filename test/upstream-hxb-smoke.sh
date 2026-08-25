@@ -129,3 +129,12 @@ run_case issue-9712 haxe/tests/misc/eval/projects/Issue9712 Main
 run_case issue-9811 haxe/tests/misc/eval/projects/Issue9811 Main
 run_case issue-9919 haxe/tests/misc/eval/projects/Issue9919 Main
 run_case semver haxe/tests/misc/eval/projects/_semver Main
+run_case call-super haxe/tests/misc/eval/projects/callSuper Main
+run_case coro-ctor haxe/tests/misc/eval/projects/coro_ctor Main
+run_case display-type haxe/tests/misc/eval/projects/display-type Main
+run_case empty-hxml-inclusion haxe/tests/misc/eval/projects/empty_hxml_inclusion Main
+run_case if-display haxe/tests/misc/eval/projects/if-display Main
+run_case process-nonexistent haxe/tests/misc/eval/projects/process-nonexistent Main
+run_case recursive-callbacks haxe/tests/misc/eval/projects/recursive-callbacks Main
+run_case run-vs-hxml haxe/tests/misc/eval/projects/run-vs-hxml Main
+run_case trailing-commas haxe/tests/misc/eval/projects/trailing-commas Main

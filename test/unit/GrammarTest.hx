@@ -76,6 +76,8 @@ class GrammarTest {
 		assert(moduleFields.declarations.length == 3 && switch moduleFields.declarations[0].definition { case EStatic({data:FVar(_, _), flags:flags}): flags[0].access == AFinal; case _: false; });
 		var trailingArrayComma = Grammar.parse('class Main { var values = [1, 2,]; }').declarations[0];
 		assert(switch trailingArrayComma.definition { case EClass(value): switch value.data[0].cffKind { case FVar(_, {expr:EArrayDecl(values)}): values.length == 2; case _: false; }; case _: false; });
+		var trailingCommas = Grammar.parse('class Main { static function call(a:Int, b:Int,) { call(1, 2,); var arrow = (a:Int, b:Int,) -> a; var typed:(a:Int, b:Int,) -> Int; } } enum Pair { Value(a:Int, b:Int,); }');
+		assert(trailingCommas.declarations.length == 2);
 		var quotedObjectField = Grammar.parse('class Main { var value = { "new": 1 }; }').declarations[0];
 		assert(switch quotedObjectField.definition { case EClass(value): switch value.data[0].cffKind { case FVar(_, {expr:EObjectDecl([{key:key, expr:_}])}): key.name == "new" && key.quote == DoubleQuotes; case _: false; }; case _: false; });
 		var mapLiteral = Grammar.parse('class Main { var values = [1 => "one"]; }').declarations[0];

@@ -137,7 +137,7 @@ class Grammar {
 		fail("Expected class field"); return null;
 	}
 	function functionRest():Func {
-		var params=typeParams(); expect(POpen); var args=[]; if (!is(PClose)) do args.push(functionArg()) while (accept(Comma) != null); expect(PClose); var ret=typeHintOpt();
+		var params=typeParams(); expect(POpen); var args=[]; if (!is(PClose)) while (true) { args.push(functionArg()); if (accept(Comma) == null || is(PClose)) break; } expect(PClose); var ret=typeHintOpt();
 		var body:Null<Expr>;
 		if (accept(Semicolon) != null) body = null;
 		else if (is(BrOpen)) body = block();
@@ -250,7 +250,7 @@ class Grammar {
 			case POpen:
 				if (parenthesizedArrowAhead()) {
 					var args:Array<FuncArg> = [];
-					if (!is(PClose)) do args.push(functionArg()) while (accept(Comma) != null);
+					if (!is(PClose)) while (true) { args.push(functionArg()); if (accept(Comma) == null || is(PClose)) break; }
 					expect(PClose);
 					arrowFunction(t.pos, args);
 				} else {
@@ -259,7 +259,7 @@ class Grammar {
 					var end=expect(PClose).pos; expr(EParenthesis(x),union(t.pos,end));
 				}
 			case BrOpen: index--; objectOrIdentifier();
-			case Kwd(New): var p=typePath(); expect(POpen); var args=[]; if(!is(PClose)) do args.push(expression()) while(accept(Comma)!=null); var end=expect(PClose).pos; expr(ENew(p,args),union(t.pos,end));
+			case Kwd(New): var p=typePath(); expect(POpen); var args=[]; if(!is(PClose)) while (true) { args.push(expression()); if (accept(Comma) == null || is(PClose)) break; } var end=expect(PClose).pos; expr(ENew(p,args),union(t.pos,end));
 			case BkOpen:
 				var values=[];
 				while (!is(BkClose)) { values.push(expression()); if (accept(Comma) == null) break; }
@@ -380,7 +380,7 @@ class Grammar {
 		}
 		var n=placedIdent(); return expr(EConst(Ident(n.name)),n.pos);
 	}
-	function postfix(e:Expr):Expr { while (true) { if (accept(Dot) != null || accept(QuestionDot) != null) { var safe=previous().token.match(QuestionDot); var n=placedIdent(); e=expr(EField(e,n.name,safe ? EFSafe : EFNormal),union(e.pos,n.pos)); } else if (accept(POpen) != null) { var args=[]; if (!is(PClose)) do args.push(expression()) while(accept(Comma)!=null); var end=expect(PClose).pos; e=expr(ECall(e,args),union(e.pos,end)); } else if (accept(BkOpen) != null) { var key=expression(); var end=expect(BkClose).pos; e=expr(EArray(e,key),union(e.pos,end)); } else if (switch current().token {case Unop(Increment)|Unop(Decrement):true;case _:false;}) { var op=switch next().token {case Unop(v):v;case _:null;}; e=expr(EUnop(op,Postfix,e),union(e.pos,previous().pos)); } else return e; } return e; }
+	function postfix(e:Expr):Expr { while (true) { if (accept(Dot) != null || accept(QuestionDot) != null) { var safe=previous().token.match(QuestionDot); var n=placedIdent(); e=expr(EField(e,n.name,safe ? EFSafe : EFNormal),union(e.pos,n.pos)); } else if (accept(POpen) != null) { var args=[]; if (!is(PClose)) while (true) { args.push(expression()); if (accept(Comma) == null || is(PClose)) break; } var end=expect(PClose).pos; e=expr(ECall(e,args),union(e.pos,end)); } else if (accept(BkOpen) != null) { var key=expression(); var end=expect(BkClose).pos; e=expr(EArray(e,key),union(e.pos,end)); } else if (switch current().token {case Unop(Increment)|Unop(Decrement):true;case _:false;}) { var op=switch next().token {case Unop(v):v;case _:null;}; e=expr(EUnop(op,Postfix,e),union(e.pos,previous().pos)); } else return e; } return e; }
 	function block():Expr return blockContents(expect(BrOpen).pos);
 	function blockContents(begin:Pos):Expr {
 		var es=[];
@@ -426,12 +426,13 @@ class Grammar {
 		var complex:ComplexType;
 		if (accept(POpen) != null) {
 			var args:Array<TypeHint> = [];
-			if (!is(PClose)) do {
+			if (!is(PClose)) while (true) {
 				if (identText() != null && index + 1 < tokens.length && tokens[index + 1].token.match(DblDot)) {
 					var name = placedIdent(); expect(DblDot); var value = typeHint();
 					args.push({type:CTNamed(name, value), pos:union(name.pos, value.pos)});
 				} else args.push(typeHint());
-			} while (accept(Comma) != null);
+				if (accept(Comma) == null || is(PClose)) break;
+			}
 			var close = expect(PClose).pos;
 			if (accept(Arrow) != null) {
 				var result = typeHint();
@@ -503,7 +504,7 @@ class Grammar {
 	}
 	function enumConstructor():EnumConstructor {
 		var doc=documentation(), meta=metadata(), name=placedIdent(), params=typeParams(), args=[];
-		if(accept(POpen)!=null) { if(!is(PClose)) do { var optional=accept(Question)!=null; var n=placedIdent(); var t=typeHintOpt(); if(t==null) fail("Expected enum parameter type",n.pos); args.push({name:n.name,optional:optional,type:t}); } while(accept(Comma)!=null); expect(PClose); }
+		if(accept(POpen)!=null) { if(!is(PClose)) while (true) { var optional=accept(Question)!=null; var n=placedIdent(); var t=typeHintOpt(); if(t==null) fail("Expected enum parameter type",n.pos); args.push({name:n.name,optional:optional,type:t}); if (accept(Comma) == null || is(PClose)) break; } expect(PClose); }
 		var type=typeHintOpt(); var end=expect(Semicolon).pos;
 		return {ecName:name,ecDoc:doc,ecMeta:meta,ecArgs:args,ecPos:union(name.pos,end),ecParams:params,ecType:type};
 	}

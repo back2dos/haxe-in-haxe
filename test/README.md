@@ -91,7 +91,7 @@ criteria:
 - Macro, target-runtime, display/server, external-library, and expected-failure
   cases remain explicitly excluded until their corresponding milestone exists.
 
-The current parser-corpus floor is 1,131 of 1,366 source files. Increasing that
+The current parser-corpus floor is 1,240 of 1,366 source files. Increasing that
 number is useful progress; it does not mean those files type or emit conforming
 HXB.
 
