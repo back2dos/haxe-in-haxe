@@ -125,3 +125,9 @@ Variable IDs come from a compiler-wide stream, so the alphabetically first
 differing member may only expose an earlier module-scheduling or lowering
 difference. Compare typed dumps as well as the first binary offset before
 assigning the defect to that member.
+
+The current allocation stream first diverges in `haxe.CallStack`'s complex
+enum-pattern lowering: upstream allocates matcher temporaries which the port
+does not yet create, shifting later IDs (including otherwise matching simple
+fixtures). Implement matcher parity; never seed or offset the global counter to
+hide this gap.
