@@ -91,7 +91,7 @@ class Grammar {
 		}
 		if (acceptKwd(Function) != null) {
 			start = previous().pos; pendingDeclarationDoc = null;
-			var name = placedIdent(); var func = functionRest(); var end = func.fExpr == null ? name.pos : func.fExpr.pos;
+			var name = placedIdent(); var func = functionRest(); var end = func.fExpr == null ? name.pos : func.fExpr.pos; accept(Semicolon);
 			return decl(EStatic({name:name, doc:doc, params:func.fParams, meta:meta, flags:accesses, data:FFun(func)}), union(start,end));
 		}
 		fail("Expected a type declaration"); return null;
@@ -141,7 +141,7 @@ class Grammar {
 		var body:Null<Expr>;
 		if (accept(Semicolon) != null) body = null;
 		else if (is(BrOpen)) body = block();
-		else { body = expression(); accept(Semicolon); }
+		else body = expression();
 		return {fParams:params,fArgs:args,fType:ret,fExpr:body};
 	}
 	function functionArg():FuncArg {
@@ -161,6 +161,14 @@ class Grammar {
 
 	function expression(?min=0):Expr {
 		var left=unary();
+		if (is(Arrow)) {
+			var argument = switch left.expr {
+				case EConst(Ident(name)): {name:{name:name, pos:left.pos}, optional:false, meta:[], type:null, expr:null};
+				case EParenthesis({expr:EConst(Ident(name)), pos:argumentPos}): {name:{name:name, pos:argumentPos}, optional:false, meta:[], type:null, expr:null};
+				case _: fail("Invalid arrow function argument", left.pos); null;
+			};
+			left = arrowFunction(left.pos, [argument]);
+		}
 		while (true) {
 			if (current().token.match(Const(Ident("is")))) {
 				if (8 < min) break;
@@ -177,14 +185,6 @@ class Grammar {
 			left=expr(EBinop(op,left,right),union(left.pos,right.pos));
 		}
 		if (min == 0 && accept(Question) != null) { var thenExpr=expression(); expect(DblDot); var elseExpr=expression(); left=expr(ETernary(left,thenExpr,elseExpr),union(left.pos,elseExpr.pos)); }
-		if (min == 0 && is(Arrow)) {
-			var argument = switch left.expr {
-				case EConst(Ident(name)): {name:{name:name, pos:left.pos}, optional:false, meta:[], type:null, expr:null};
-				case EParenthesis({expr:EConst(Ident(name)), pos:argumentPos}): {name:{name:name, pos:argumentPos}, optional:false, meta:[], type:null, expr:null};
-				case _: fail("Invalid arrow function argument", left.pos); null;
-			};
-			left = arrowFunction(left.pos, [argument]);
-		}
 		return left;
 	}
 	function unary():Expr { var t=current(); return switch t.token {
@@ -371,6 +371,7 @@ class Grammar {
 	function statementBody():Expr return is(BrOpen) ? block() : expression();
 	static function requiresSemicolon(value:Expr):Bool return switch value.expr {
 		case EIf(_, _, _) | EWhile(_, _, _) | EFor(_, _) | ESwitch(_, _, _) | ETry(_, _) | EFunction(_, _): false;
+		case EBinop(OpAssign | OpAssignOp(_), _, {expr:EFunction(_, {fExpr:{expr:EBlock(_) | EMeta(_, {expr:EReturn({expr:EBlock(_)})})}})}): false;
 		case EVars(vars) if (vars.length > 0 && switch vars[vars.length - 1].evExpr { case {expr:EFunction(_, _)}: true; case _: false; }): false;
 		case _: true;
 	}
