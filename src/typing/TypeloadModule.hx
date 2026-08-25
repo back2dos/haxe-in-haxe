@@ -575,7 +575,8 @@ class TypeloadModule {
 			var variable = makeVar(arg.name.name, signature.args[index].type, TVOArgument, arg.name.pos, arg.meta);
 			if (hasMetadata(arg.meta, "this")) {
 				variable.vKind = VAbstractThis;
-				switch cls.clKind { case KAbstractImpl(abs) if (hasMetadata(abs.aMeta, "coreType")): variable.vName = "this1"; variable.vMeta.unshift(realPathMetadata("this")); case _: }
+				variable.vName = "this1";
+				variable.vMeta.unshift(realPathMetadata("this"));
 			} else variable.vMeta.push(realPathMetadata(variable.vName));
 			locals.set(arg.name.name, variable);
 			var defaultValue = arg.expr == null
@@ -596,7 +597,7 @@ class TypeloadModule {
 			args:[for (arg in func.fArgs) {
 				name:arg.name.name,
 				optional:arg.optional || arg.expr != null,
-				type:arg.type == null ? fallback : (arg.optional ? nullable(module, resolveTypeHint(module, arg.type)) : resolveTypeHint(module, arg.type))
+				type:functionArgType(module, cls, arg)
 			}],
 			ret:func.fType == null ? fallback : resolveTypeHint(module, func.fType)
 		};
@@ -704,7 +705,7 @@ class TypeloadModule {
 				typeField(receiver == null ? typeExpr(module, cls, expr, locals) : receiver, name, source.pos);
 			case ENew(path, args): typeNew(module, path.path, args, cls, locals, source.pos);
 			case EFunction(FKNamed(name, inlineValue), func): typeLocalFunction(module, cls, name, inlineValue, func, locals, source.pos);
-			case EFunction(_, func): var signature:TSignature = {args:[for (arg in func.fArgs) {name:arg.name.name, optional:arg.optional || arg.expr != null, type:arg.type == null ? fallback : (arg.optional ? nullable(module, resolveTypeHint(module, arg.type)) : resolveTypeHint(module, arg.type))}], ret:func.fType == null ? fallback : resolveTypeHint(module, func.fType)}; typeFunction(module, cls, "", func, signature);
+			case EFunction(_, func): var signature:TSignature = {args:[for (arg in func.fArgs) {name:arg.name.name, optional:arg.optional || arg.expr != null, type:functionArgType(module, cls, arg)}], ret:func.fType == null ? fallback : resolveTypeHint(module, func.fType)}; typeFunction(module, cls, "", func, signature);
 			case EReturn(expr): typed(TReturn(expr == null ? null : typeExpr(module, cls, expr, locals)), fallback, source.pos);
 			case EThrow(expr): typed(TThrow(typeExpr(module, cls, expr, locals)), fallback, source.pos);
 			case EBreak: typed(TBreak, fallback, source.pos);
@@ -1247,9 +1248,8 @@ class TypeloadModule {
 						if (buffer != null && name == "add" && args.length == 1) {
 							var target = typed(TField(receiver, FInstance(stringBuf, [], buffer)), basic("String"), source.pos);
 							var argument = typeExpr(module, cls, args[0], locals);
-							var converted = stringify(module, typed(TCast(argument, null), argument.etype, argument.epos));
-							var update = typed(TBinop(OpAssignOp(OpAdd), target, converted), basic("String"), pos);
-							return typed(TBlock([update]), basic("Void"), pos);
+							var converted = isString(argument.etype) ? argument : stringify(module, typed(TCast(argument, null), argument.etype, argument.epos));
+							return typed(TBinop(OpAssignOp(OpAdd), target, converted), basic("String"), pos);
 						}
 					case _:
 				}
@@ -1511,9 +1511,17 @@ class TypeloadModule {
 
 	function functionArgType(module:ModuleDef, cls:TClass, arg:FuncArg):T {
 		if (hasMetadata(arg.meta, "this") && cls != null) switch cls.clKind { case KAbstractImpl(abs): return abs.aThis; case _: }
-		var type = arg.type == null ? TDynamic(null) : resolveTypeHint(module, arg.type);
+		var type = arg.type == null ? inferDefaultArgumentType(arg.expr) : resolveTypeHint(module, arg.type);
 		return arg.optional ? nullable(module, type) : type;
 	}
+
+	function inferDefaultArgumentType(value:Null<Expr>):T return value == null ? TDynamic(null) : switch value.expr {
+		case EConst(Int(_, _)): basic("Int");
+		case EConst(Float(_, _)): basic("Float");
+		case EConst(String(_, _)): basic("String");
+		case EConst(Ident("true" | "false")): basic("Bool");
+		case _: TDynamic(null);
+	};
 
 	function nullable(module:ModuleDef, inner:T):T {
 		var stdTypes = loadModule({pack:[], name:"StdTypes"});

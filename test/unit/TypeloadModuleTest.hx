@@ -164,6 +164,20 @@ class TypeloadModuleTest {
 		var balancedTreeClass = switch balancedTree.mTypes[0] { case TClassDecl(value): value; case _: throw "Expected BalancedTree class"; };
 		if (balancedTreeClass.clImplements.length != 1 || balancedTreeClass.clImplements[0].cls.clModule.mPath.name != "Constraints" || balancedTreeClass.clImplements[0].cls.clPath.name != "IMap") throw "Qualified secondary type was not resolved";
 		switch balancedTreeClass.clImplements[0].params[0] { case TInst(typeParam, []) if (typeParam == balancedTreeClass.clParams[0].ttpClass): case _: throw "Class inheritance captured the wrong type-parameter scope"; }
+		var callStack = loader.loadModule({pack:["haxe"], name:"CallStack"});
+		var callStackAbstract:core.TType.TAbstract = null;
+		for (type in callStack.mTypes) switch type { case TAbstractDecl(value) if (value.aPath.name == "CallStack"): callStackAbstract = value; case _: }
+		if (callStackAbstract == null) throw "Expected CallStack abstract";
+		var getLength = callStackAbstract.aImpl.clStatics.get("get_length");
+		switch getLength.cfExpr.eexpr {
+			case TFunction({tfArgs:[{variable:variable}]}):
+				if (variable.vName != "this1") throw "Abstract this argument was not cross-target renamed";
+			case _: throw "CallStack length getter was not typed";
+		}
+		switch callStackAbstract.aImpl.clStatics.get("exceptionStack").cfType {
+			case TFun({args:[{type:TAbstract(type, [])}]}): if (type.aPath.name != "Bool") throw "Default argument type was not inferred";
+			case _: throw "CallStack default argument was not typed as Bool";
+		}
 	}
 
 	static function assertBasic(name:String, type:T):Void switch type {
