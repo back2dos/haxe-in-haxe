@@ -64,7 +64,9 @@ HAXE_REFERENCE=/absolute/path/to/pinned/haxe sh test/conformance.sh
 `HAXE_REFERENCE` must be the executable built from this checkout's `haxe/`
 submodule. The harness invokes the port's batch driver from Eval HXB, normalizes
 member names, and uses `cmp` on extracted member payloads. On failure it reports
-the first differing member.
+the first differing member, byte offset, and module root for a record dump. The
+focused `cross/unit/moduleload/Basic.hxb` payload currently matches exactly;
+the required whole-archive comparison remains red.
 
 Both harnesses use `test/compare-hxb.sh`. It compares the complete normalized
 member-name set and the uncompressed payload of each `.hxb` member; it never
