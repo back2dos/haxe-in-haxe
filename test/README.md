@@ -102,6 +102,9 @@ The current parser-corpus floor is 1,339 of 1,366 source files. Increasing that
 number is useful progress; it does not mean those files type or emit conforming
 HXB.
 
+`test/upstream-parser-exclusions.md` classifies the 27-source remainder so
+macro-only and target-specific syntax does not displace first-milestone work.
+
 Set `HAXE_PARSER_REPORT_FAILURES=1` to list each rejected source and its first
 parser error while keeping the same coverage assertion.
 
