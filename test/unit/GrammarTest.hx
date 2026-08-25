@@ -44,6 +44,8 @@ class GrammarTest {
 		assert(switch switchStatements.definition { case EClass(value): switch value.data[0].cffKind { case FFun(func): switch func.fExpr.expr { case EBlock([{expr: ESwitch(_, cases, _)}]): switch cases[0].expr.expr { case EBlock(values): values.length == 2; case _: false; }; case _: false; }; case _: false; }; case _: false; });
 		var nestedBlock = Grammar.parse('class Main { function run() { { var value = 1; } /** local note */ trace("done"); } }').declarations[0];
 		assert(switch nestedBlock.definition { case EClass(value): switch value.data[0].cffKind { case FFun(func): switch func.fExpr.expr { case EBlock([{expr:EBlock(_)}, {expr:ECall(_, _)}]): true; case _: false; }; case _: false; }; case _: false; });
+		var braceTerminatedVariables = Grammar.parse('class Main { function run(value:Int) { var object = { field: value } trace(object); var selected = switch value { case 0: false; default: true; } trace(selected); } }').declarations[0];
+		assert(switch braceTerminatedVariables.definition { case EClass(value): switch value.data[0].cffKind { case FFun(func): switch func.fExpr.expr { case EBlock(values): values.length == 4; case _: false; }; case _: false; }; case _: false; });
 		var privateAccess = Grammar.parse('class Main { function run(value:Dynamic) return @:privateAccess value.hidden; }').declarations[0];
 		assert(switch privateAccess.definition { case EClass(value): switch value.data[0].cffKind { case FFun(func): switch func.fExpr.expr { case EReturn({expr: EMeta(entry, _)}): entry.meta == "privateAccess"; case _: false; }; case _: false; }; case _: false; });
 		var legacyMetadata = Grammar.parse('@legacy class Main {}').declarations[0];

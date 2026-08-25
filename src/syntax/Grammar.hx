@@ -376,7 +376,7 @@ class Grammar {
 			if (is(BrClose)) break;
 			var value = expression();
 			es.push(value);
-			if (accept(Semicolon)==null && !is(BrClose) && requiresSemicolon(value)) fail("Expected semicolon");
+			if (accept(Semicolon)==null && !is(BrClose) && !previous().token.match(BrClose) && requiresSemicolon(value)) fail("Expected semicolon");
 		}
 		return expr(EBlock(es),union(begin,expect(BrClose).pos));
 	}
