@@ -175,7 +175,7 @@ class Grammar {
 				next(); var type = typeHint(); left = expr(EIs(left, type), union(left.pos, type.pos));
 				continue;
 			}
-			var op=binop(current().token);
+			var op = current().token.match(Kwd(In)) ? OpIn : binop(current().token);
 			if (op == null || precedence(op) < min) break;
 			next();
 			var right = switch op {
@@ -227,7 +227,7 @@ class Grammar {
 		case Kwd(Untyped): next(); var e=is(BrOpen) ? block() : expression(); expr(EUntyped(e),union(t.pos,e.pos));
 		case Kwd(Cast):
 			next();
-			if (accept(POpen) != null) {
+			var casted = if (accept(POpen) != null) {
 				var e = expression();
 				if (accept(Comma) != null) {
 					var type = typeHint();
@@ -247,7 +247,8 @@ class Grammar {
 			} else {
 				var e = unary();
 				expr(ECast(e, null), union(t.pos, e.pos));
-			}
+			};
+			postfix(casted);
 		case _: postfix(primary()); }; }
 	function primary():Expr {
 		var t=next(); var e:Expr = switch t.token {
@@ -419,7 +420,7 @@ class Grammar {
 		} else if (accept(Dot) != null || accept(QuestionDot) != null) { var safe=previous().token.match(QuestionDot); var n=placedIdent(); e=expr(EField(e,n.name,safe ? EFSafe : EFNormal),union(e.pos,n.pos)); }
 		else if (accept(POpen) != null) { var args=[]; if (!is(PClose)) while (true) { args.push(expression()); if (accept(Comma) == null || is(PClose)) break; } var end=expect(PClose).pos; e=expr(ECall(e,args),union(e.pos,end)); }
 		else if (accept(BkOpen) != null) { var key=expression(); var end=expect(BkClose).pos; e=expr(EArray(e,key),union(e.pos,end)); }
-		else if (switch current().token {case Unop(Increment)|Unop(Decrement):true;case _:false;}) { var op=switch next().token {case Unop(v):v;case _:null;}; e=expr(EUnop(op,Postfix,e),union(e.pos,previous().pos)); }
+		else if (switch current().token {case Unop(Increment)|Unop(Decrement)|Unop(Not):true;case _:false;}) { var op=switch next().token {case Unop(v):v;case _:null;}; e=expr(EUnop(op,Postfix,e),union(e.pos,previous().pos)); }
 		else return e;
 	} return e; }
 	function block():Expr return blockContents(expect(BrOpen).pos);
@@ -473,7 +474,12 @@ class Grammar {
 		if (accept(POpen) != null) {
 			var args:Array<TypeHint> = [];
 			if (!is(PClose)) while (true) {
-				if (identText() != null && index + 1 < tokens.length && tokens[index + 1].token.match(DblDot)) {
+				if (is(Question) && index + 2 < tokens.length && switch tokens[index + 1].token { case Const(Ident(_)): tokens[index + 2].token.match(DblDot); case _: false; }) {
+					var optionalStart = next().pos;
+					var name = placedIdent(); expect(DblDot); var value = typeHint();
+					var named = {type:CTNamed(name, value), pos:union(name.pos, value.pos)};
+					args.push({type:CTOptional(named), pos:union(optionalStart, value.pos)});
+				} else if (identText() != null && index + 1 < tokens.length && tokens[index + 1].token.match(DblDot)) {
 					var name = placedIdent(); expect(DblDot); var value = typeHint();
 					args.push({type:CTNamed(name, value), pos:union(name.pos, value.pos)});
 				} else args.push(typeHint());
@@ -614,7 +620,7 @@ class Grammar {
 	inline function is(t:Token):Bool return Type.enumEq(current().token,t);
 	inline function current():LexedToken return tokens[index]; inline function previous():LexedToken return tokens[index-1]; inline function next():LexedToken return tokens[index++];
 	static function binop(t:Token):Null<Binop> return switch t {case Binop(o):o;case Spread:OpInterval;case _:null;};
-	static function precedence(o:Binop):Int return switch o {case OpInterval|OpArrow:0;case OpAssign|OpAssignOp(_):1;case OpBoolOr:2;case OpBoolAnd:3;case OpOr:4;case OpXor:5;case OpAnd:6;case OpNullCoal|OpEq|OpNotEq:7;case OpGt|OpGte|OpLt|OpLte:8;case OpShl|OpShr|OpUShr:9;case OpAdd|OpSub:10;case OpMult|OpDiv|OpMod:11;case _: -1;};
+	static function precedence(o:Binop):Int return switch o {case OpInterval|OpArrow:0;case OpAssign|OpAssignOp(_):1;case OpBoolOr:2;case OpBoolAnd:3;case OpOr:4;case OpXor:5;case OpAnd:6;case OpNullCoal|OpEq|OpNotEq:7;case OpGt|OpGte|OpLt|OpLte|OpIn:8;case OpShl|OpShr|OpUShr:9;case OpAdd|OpSub:10;case OpMult|OpDiv|OpMod:11;case _: -1;};
 	static function hasAccess(a:Array<PlacedAccess>, v:Access):Bool { for(x in a) if(x.access==v)return true; return false; }
 	static function union(a:Pos,b:Pos):Pos return Ast.punion(a,b);
 	function fail(message:String, ?pos:Pos):Void throw new GrammarError(message,pos == null ? current().pos : pos);

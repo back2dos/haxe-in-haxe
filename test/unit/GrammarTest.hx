@@ -26,6 +26,7 @@ class GrammarTest {
 		assert(switch zeroArgFunctionType.definition { case EClass(value): switch value.data[0].cffKind { case FVar({type:CTFunction(args, _)}, _): args.length == 0; case _: false; }; case _: false; });
 		var namedFunctionType = Grammar.parse('class Mapper { var callback:(value:Int) -> Void; }').declarations[0];
 		assert(switch namedFunctionType.definition { case EClass(value): switch value.data[0].cffKind { case FVar({type:CTFunction([{type:CTNamed(name, _)}], _)}, _): name.name == "value"; case _: false; }; case _: false; });
+		Grammar.parse('class Mapper { var callback:(?value:Int) -> Void; }');
 		var expressionBody = Grammar.parse('abstract Any(Dynamic) { extern inline function promote<T>():T return this; }').declarations[0];
 		assert(switch expressionBody.definition { case EAbstract(value): switch value.data[0].cffKind { case FFun(func): func.fExpr != null; case _: false; }; case _: false; });
 		var controlBlock = Grammar.parse('class Main { function run(items:Array<Int>) { for (item in items) { trace(item); } } }').declarations[0];
@@ -100,6 +101,7 @@ class GrammarTest {
 		assert(switch checkedExpression.definition { case EClass(value): switch value.data[0].cffKind { case FFun(func): switch func.fExpr.expr { case EReturn({expr:EParenthesis({expr:ECheckType(_, _)})}): true; case _: false; }; case _: false; }; case _: false; });
 		var isExpression = Grammar.parse('class Main { function run(value:Dynamic) return value is String; }').declarations[0];
 		assert(switch isExpression.definition { case EClass(value): switch value.data[0].cffKind { case FFun(func): switch func.fExpr.expr { case EReturn({expr:EIs(_, _)}): true; case _: false; }; case _: false; }; case _: false; });
+		Grammar.parse('abstract Contains(Int) { @:op(a in b) static function contains(a:Int, b:Int):Bool; @:op(A!) function suffix():Int; }');
 		var arrowBlock = Grammar.parse('package; class Main { function run() return () -> { return 1; }; }').declarations[0];
 		assert(switch arrowBlock.definition { case EClass(value): switch value.data[0].cffKind { case FFun(func): switch func.fExpr.expr { case EReturn({expr:EFunction(FKArrow, {fExpr:{expr:EMeta(_, {expr:EReturn({expr:EBlock(_)})})}})}): true; case _: false; }; case _: false; }; case _: false; });
 		var dollarCall = Grammar.parse("class Main { function run(value:Dynamic) $type(value); }").declarations[0];
@@ -126,6 +128,8 @@ class GrammarTest {
 		assert(switch unparenthesizedCast.definition { case EClass(value): switch value.data[0].cffKind { case FFun(func): switch func.fExpr.expr { case EReturn({expr:ECast({expr:ECall(_, [])}, null)}): true; case _: false; }; case _: false; }; case _: false; });
 		var checkedCast = Grammar.parse('class Main { function run() return cast (value : String); }').declarations[0];
 		assert(switch checkedCast.definition { case EClass(value): switch value.data[0].cffKind { case FFun(func): switch func.fExpr.expr { case EReturn({expr:ECast({expr:EParenthesis({expr:ECheckType(_, _)})}, null)}): true; case _: false; }; case _: false; }; case _: false; });
+		var castField = Grammar.parse('class Main { function run(value:Base) return cast(value, Child).field; }').declarations[0];
+		assert(switch castField.definition { case EClass(value): switch value.data[0].cffKind { case FFun(func): switch func.fExpr.expr { case EReturn({expr:EField({expr:ECast(_, _)}, "field", _)}): true; case _: false; }; case _: false; }; case _: false; });
 		var inlineLoop = Grammar.parse('class Main { function run() inline for (i in 0...3) trace(i); }').declarations[0];
 		assert(switch inlineLoop.definition { case EClass(value): switch value.data[0].cffKind { case FFun(func): switch func.fExpr.expr { case EMeta(entry, {expr:EFor(_, _)}): entry.meta == "inline"; case _: false; }; case _: false; }; case _: false; });
 		var untypedBlock = Grammar.parse('class Main { function run():Void untyped { value(); } }').declarations[0];

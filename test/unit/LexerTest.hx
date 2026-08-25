@@ -14,6 +14,8 @@ class LexerTest {
 		assert(switch tokens[11].token { case Const(Float(".5", "f64")): true; case _: false; });
 		assert(switch Lexer.lex("12f64 12_f64")[0].token { case Const(Float("12", "f64")): true; case _: false; });
 		assert(switch Lexer.lex("12f64 12_f64")[1].token { case Const(Float("12", "f64")): true; case _: false; });
+		var numericField = Lexer.lex("5.foo 1.");
+		assert(numericField[0].token.match(Const(Int("5", null))) && numericField[1].token.match(Dot) && numericField[3].token.match(Const(Float("1.", null))));
 		assert(tokens[0].pos.pfile == "Test.hx" && tokens[0].pos.pmin == 0 && tokens[0].pos.pmax == 5);
 		assert(switch Lexer.lex('"a\\n\\\"b" ~/a\\/b/g', "T.hx")[0].token { case Const(String("a\n\"b", SDoubleQuotes)): true; case _: false; });
 		assert(switch Lexer.lex('"a\\x21"')[0].token { case Const(String("a!", SDoubleQuotes)): true; case _: false; });

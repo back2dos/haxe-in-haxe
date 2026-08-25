@@ -75,7 +75,7 @@ class Lexer {
 		else {
 			consumeDigits(isDigit);
 			if (starts("...")) { var value = source.substr(start, index - start); index += 3; return make(IntInterval(value), start); }
-			if (current() == "." && !starts("...")) { isFloat = true; index++; consumeDigits(isDigit); }
+			if (current() == "." && !starts("...") && !isIdentStart(peek(1))) { isFloat = true; index++; consumeDigits(isDigit); }
 		}
 		if (current() == "e" || current() == "E") { isFloat = true; index++; if (current() == "+" || current() == "-") index++; consumeDigits(isDigit); }
 		return suffix(start, isFloat);
