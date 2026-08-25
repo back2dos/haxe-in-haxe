@@ -841,11 +841,41 @@ class HxbWriter {
 				chunk.writeU8(12); writeMetadataPlacedTypePath(chunk, path); chunk.writeList(args, function(arg) writeMetadataExpr(chunk, arg));
 			case EUnop(op, flag, value):
 				chunk.writeU8(13); chunk.writeU8(unopIndex(op, flag)); writeMetadataExpr(chunk, value);
+			case EFunction(kind, func):
+				chunk.writeU8(15);
+				switch kind {
+					case FKAnonymous: chunk.writeU8(0);
+					case FKNamed(name, inlineValue): chunk.writeU8(1); writeMetadataPlacedName(chunk, name); chunk.writeBool(inlineValue);
+					case FKArrow: chunk.writeU8(2);
+				}
+				writeMetadataFunc(chunk, func);
+			case EBlock(values):
+				chunk.writeU8(16); chunk.writeList(values, function(value) writeMetadataExpr(chunk, value));
 			case EMeta(metadata, value):
 				chunk.writeU8(36); writeMetadataEntry(chunk, metadata); writeMetadataExpr(chunk, value);
 			case _:
 				throw "Metadata expression serialization is not ported for " + Type.enumConstructor(expr.expr) + " at " + expr.pos.pfile + ":" + expr.pos.pmin;
 		}
+	}
+	static function writeMetadataPlacedName(chunk:HxbChunk, name:core.Ast.PlacedName):Void {
+		chunk.writeString(name.name); writePos(chunk, name.pos);
+	}
+	static function writeMetadataTypeParam(chunk:HxbChunk, param:core.Ast.TypeParam):Void {
+		writeMetadataPlacedName(chunk, param.tpName);
+		chunk.writeList(param.tpParams, function(value) writeMetadataTypeParam(chunk, value));
+		chunk.writeOption(param.tpConstraints, function(value) writeMetadataTypeHint(chunk, value));
+		chunk.writeOption(param.tpDefault, function(value) writeMetadataTypeHint(chunk, value));
+		writeMetadata(chunk, param.tpMeta);
+	}
+	static function writeMetadataFunc(chunk:HxbChunk, func:core.Ast.Func):Void {
+		chunk.writeList(func.fParams, function(param) writeMetadataTypeParam(chunk, param));
+		chunk.writeList(func.fArgs, function(arg) {
+			writeMetadataPlacedName(chunk, arg.name); chunk.writeBool(arg.optional); writeMetadata(chunk, arg.meta);
+			chunk.writeOption(arg.type, function(value) writeMetadataTypeHint(chunk, value));
+			chunk.writeOption(arg.expr, function(value) writeMetadataExpr(chunk, value));
+		});
+		chunk.writeOption(func.fType, function(value) writeMetadataTypeHint(chunk, value));
+		chunk.writeOption(func.fExpr, function(value) writeMetadataExpr(chunk, value));
 	}
 	static function writeMetadataPlacedTypePath(chunk:HxbChunk, path:core.Ast.PlacedTypePath):Void {
 		chunk.writeList(path.path.tpackage, chunk.writeString);

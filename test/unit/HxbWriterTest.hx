@@ -48,6 +48,10 @@ class HxbWriterTest {
 		var propertyWriter = new HxbWriter();
 		propertyWriter.writeModule(propertyModule);
 		if (propertyWriter.exportModule().length <= 4) throw "Property module was not serialized";
+		var metadataFunctionModule = new TypeloadModule(paths, Define.emptyDefines()).loadModule({pack:["unit", "moduleload"], name:"MetadataFunction"});
+		var metadataFunctionWriter = new HxbWriter();
+		metadataFunctionWriter.writeModule(metadataFunctionModule);
+		if (metadataFunctionWriter.exportModule().length <= 4) throw "Function-valued metadata was not serialized";
 		var documentationModule = new TypeloadModule(paths, Define.emptyDefines()).loadModule({pack:["unit", "moduleload"], name:"Documentation"});
 		var documentationClass = switch documentationModule.mTypes[0] { case TClassDecl(value): value; case _: throw "Expected documented class"; };
 		if (documentationClass.clDoc == null || documentationClass.clDoc.docOwn != " Module type documentation. ") throw "Module documentation was not parsed";
