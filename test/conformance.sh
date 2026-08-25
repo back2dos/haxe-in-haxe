@@ -46,6 +46,9 @@ fi
 sh test/compare-hxb.sh "$source_run_output" "$port_output"
 echo "Eval HXB execution passed inside conformance harness"
 
+sh test/compare-hxb.sh "$reference_output" "$port_output" cross/unit/moduleload/Basic.hxb
+echo "Root HXB payload conformance passed: unit.moduleload.Basic"
+
 sh test/compare-hxb.sh "$reference_output" "$port_output"
 
 echo "HXB conformance passed: unit.moduleload.Basic"

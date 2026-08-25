@@ -3,13 +3,14 @@
 
 set -eu
 
-if [ "$#" -ne 2 ]; then
-	echo "usage: sh test/compare-hxb.sh <expected.hxb> <actual.hxb>" >&2
+if [ "$#" -lt 2 ] || [ "$#" -gt 3 ]; then
+	echo "usage: sh test/compare-hxb.sh <expected.hxb> <actual.hxb> [member]" >&2
 	exit 2
 fi
 
 expected=$1
 actual=$2
+selected_member=${3:-}
 
 if [ ! -f "$expected" ] || [ ! -f "$actual" ]; then
 	echo "Both HXB archives must exist." >&2
@@ -18,6 +19,24 @@ fi
 
 compare_tmpdir=$(mktemp -d "${TMPDIR:-/tmp}/haxe-in-haxe-compare.XXXXXX")
 trap 'rm -rf "$compare_tmpdir"' EXIT INT TERM
+
+if [ -n "$selected_member" ]; then
+	if ! unzip -Z1 "$expected" | LC_ALL=C grep -Fqx "$selected_member" || ! unzip -Z1 "$actual" | LC_ALL=C grep -Fqx "$selected_member"; then
+		echo "HXB member is missing: $selected_member" >&2
+		exit 1
+	fi
+	unzip -p "$expected" "$selected_member" > "$compare_tmpdir/expected.member"
+	unzip -p "$actual" "$selected_member" > "$compare_tmpdir/actual.member"
+	if ! cmp -s "$compare_tmpdir/expected.member" "$compare_tmpdir/actual.member"; then
+		first_difference=$(cmp -l "$compare_tmpdir/expected.member" "$compare_tmpdir/actual.member" 2>/dev/null | sed -n '1p' || true)
+		echo "HXB payload differs: $selected_member" >&2
+		if [ -n "$first_difference" ]; then
+			echo "First differing byte (offset, expected, actual): $first_difference" >&2
+		fi
+		exit 1
+	fi
+	exit 0
+fi
 
 expected_entries="$compare_tmpdir/expected.entries"
 actual_entries="$compare_tmpdir/actual.entries"

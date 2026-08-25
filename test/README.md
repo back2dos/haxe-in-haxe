@@ -68,7 +68,9 @@ the first differing member.
 
 Both harnesses use `test/compare-hxb.sh`. It compares the complete normalized
 member-name set and the uncompressed payload of each `.hxb` member; it never
-compares ZIP container bytes.
+compares ZIP container bytes. An optional third argument selects one member for
+a focused payload check; this is diagnostic coverage and does not replace the
+subsequent whole-archive comparison.
 
 For an immediate local comparison against the `haxe` executable on `PATH`, run
 `haxe test/conformance.hxml`. This target is expected to fail until the port
