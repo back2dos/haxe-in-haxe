@@ -126,6 +126,9 @@ class TypeloadModuleTest {
 		var overloads = loader.loadModule({pack:["unit", "moduleload"], name:"Overloads"});
 		var overloadClass = switch overloads.mTypes[0] { case TClassDecl(value): value; case _: throw "Expected overload class"; };
 		if (overloadClass.clOrderedStatics.length != 1 || overloadClass.clStatics.get("call").cfOverloads.length != 2) throw "Overload fields were not grouped";
+		var keyValueLoop = loader.loadModule({pack:["unit", "moduleload"], name:"KeyValueLoop"});
+		var keyValueLoopClass = switch keyValueLoop.mTypes[0] { case TClassDecl(value): value; case _: throw "Expected key/value-loop class"; };
+		if (keyValueLoopClass.clStatics.get("visit").cfExpr == null) throw "Key/value loop was not typed";
 		var valueSwitch = loader.loadModule({pack:["unit", "moduleload"], name:"ValueSwitch"});
 		var valueSwitchClass = switch valueSwitch.mTypes[0] { case TClassDecl(value): value; case _: throw "Expected value-switch class"; };
 		switch valueSwitchClass.clStatics.get("select").cfExpr.eexpr {

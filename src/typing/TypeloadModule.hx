@@ -883,6 +883,10 @@ class TypeloadModule {
 		var source:Expr;
 		switch iterator.expr {
 			case EBinop(OpIn, {expr:EConst(Ident(name)), pos:namePos}, value): loopName = {name:name, pos:namePos}; source = value;
+			case EBinop(OpIn, {expr:EBinop(OpArrow, {expr:EConst(Ident(key)), pos:keyPos}, {expr:EConst(Ident(value)), pos:valuePos})}, source):
+				return typeKeyValueForLoop(module, cls, {name:key, pos:keyPos}, {name:value, pos:valuePos}, source, body, locals, pos);
+			case EBinop(OpArrow, {expr:EConst(Ident(key)), pos:keyPos}, {expr:EBinop(OpIn, {expr:EConst(Ident(value)), pos:valuePos}, source)}):
+				return typeKeyValueForLoop(module, cls, {name:key, pos:keyPos}, {name:value, pos:valuePos}, source, body, locals, pos);
 			case _: throw "Only value iteration is supported";
 		}
 		var bodyLocals = new StringMap<TVar>();
@@ -959,6 +963,41 @@ class TypeloadModule {
 		var whileBody = typed(TBlock(loopValues), basic("Void"), body.pos);
 		declarations.push(typed(TWhile(condition, whileBody, NormalWhile), basic("Void"), pos));
 		return typed(TBlock(declarations), basic("Void"), pos);
+	}
+
+	function typeKeyValueForLoop(module:ModuleDef, cls:TClass, keyName:PlacedName, valueName:PlacedName, source:Expr, body:Expr, locals:StringMap<TVar>, pos:Pos):TExpr {
+		var method:Expr = {expr:EField(source, "keyValueIterator", EFNormal), pos:source.pos};
+		var iteratorExpr = typeCall(module, cls, method, [], locals, source.pos);
+		var iteratorVar = makeGeneratedVar("`", iteratorExpr.etype, source.pos);
+		iteratorVar.vMeta = generatedLoopMetadata("`", false);
+		var iteratorLocal = typed(TLocal(iteratorVar), iteratorExpr.etype, source.pos);
+		var hasNext = typeField(iteratorLocal, "hasNext", pos);
+		var condition = typed(TCall(hasNext, []), basic("Bool"), pos);
+		var next = typeField(iteratorLocal, "next", pos);
+		var entryType = switch next.etype { case TFun(signature): signature.ret; case _: TDynamic(null); };
+		var nextValue = typed(TCall(next, []), entryType, pos);
+		var entryVar = makeGeneratedVar("`", entryType, pos);
+		entryVar.vMeta = generatedLoopMetadata("`", false);
+		var entryLocal = typed(TLocal(entryVar), entryType, pos);
+		var keyExpr = typeField(entryLocal, "key", keyName.pos);
+		var valueExpr = typeField(entryLocal, "value", valueName.pos);
+		var keyVar = makeVar(keyName.name, keyExpr.etype, TVOForVariable, keyName.pos, [realPathMetadata(keyName.name)]);
+		var valueVar = makeVar(valueName.name, valueExpr.etype, TVOForVariable, valueName.pos, [realPathMetadata(valueName.name)]);
+		var usedByTyper = 1 << core.TType.TType.flagTVarNames.indexOf("VUsedByTyper");
+		keyVar.vFlags |= usedByTyper; valueVar.vFlags |= usedByTyper;
+		var bodyLocals = new StringMap<TVar>();
+		for (name => value in locals) bodyLocals.set(name, value);
+		bodyLocals.set(keyName.name, keyVar); bodyLocals.set(valueName.name, valueVar);
+		var whileBody = typed(TBlock([
+			typed(TVar(entryVar, nextValue), basic("Void"), pos),
+			typed(TVar(keyVar, keyExpr), basic("Void"), keyName.pos),
+			typed(TVar(valueVar, valueExpr), basic("Void"), valueName.pos),
+			typeExpr(module, cls, body, bodyLocals)
+		]), basic("Void"), body.pos);
+		return typed(TBlock([
+			typed(TVar(iteratorVar, iteratorExpr), basic("Void"), source.pos),
+			typed(TWhile(condition, whileBody, NormalWhile), basic("Void"), pos)
+		]), basic("Void"), pos);
 	}
 
 	function typeArrayComprehension(module:ModuleDef, cls:TClass, forExpr:Expr, locals:StringMap<TVar>, arrayPos:Pos):TExpr {
