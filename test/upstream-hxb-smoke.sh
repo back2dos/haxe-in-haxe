@@ -16,6 +16,8 @@ fi
 
 smoke_tmpdir=$(mktemp -d "${TMPDIR:-/tmp}/haxe-in-haxe-upstream-smoke.XXXXXX")
 trap 'rm -rf "$smoke_tmpdir"' EXIT INT TERM
+direct_count=0
+hxml_count=0
 
 run_case() {
 	name=$1
@@ -31,6 +33,7 @@ run_case() {
 		-cp "$class_path" --main "$main" --hxb "$port_output"
 	"$HAXE_REFERENCE" --hxb-lib "$port_output" -cp "$class_path" --main "$main" \
 		--no-output -D dump=record -D dump-path="$dump_path"
+	direct_count=$((direct_count + 1))
 	echo "HXB smoke passed: $name ($main)"
 }
 
@@ -49,6 +52,7 @@ run_hxml_case() {
 		"$hxml" --hxb "$port_output")
 	"$HAXE_REFERENCE" --hxb-lib "$port_output" -cp "$project" --main "$main" \
 		--no-output -D dump=record -D dump-path="$dump_path"
+	hxml_count=$((hxml_count + 1))
 	echo "HXB HXML smoke passed: $name ($hxml)"
 }
 
@@ -185,3 +189,9 @@ run_hxml_case issue-4458-pass2-config haxe/tests/misc/eval/projects/Issue4458 co
 run_hxml_case issue-4456-config haxe/tests/misc/eval/projects/Issue4456 compile.hxml Main
 run_hxml_case issue-4265-config haxe/tests/misc/eval/projects/Issue4265 compile.hxml Main
 run_hxml_case issue-4399-config haxe/tests/misc/eval/projects/Issue4399 compile.hxml Main
+
+if [ "$direct_count" -lt 123 ] || [ "$hxml_count" -lt 10 ]; then
+	echo "HXB smoke breadth regressed: $direct_count direct, $hxml_count HXML" >&2
+	exit 1
+fi
+echo "HXB smoke breadth passed: $direct_count direct roots, $hxml_count HXML configurations"
