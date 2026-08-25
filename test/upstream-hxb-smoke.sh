@@ -122,3 +122,6 @@ run_case issue-9359 haxe/tests/misc/eval/projects/Issue9359 Main
 run_case issue-9455 haxe/tests/misc/eval/projects/Issue9455 Main
 run_case issue-9514 haxe/tests/misc/eval/projects/Issue9514 Main
 run_case issue-9571 haxe/tests/misc/eval/projects/Issue9571 Main
+run_case issue-9811 haxe/tests/misc/eval/projects/Issue9811 Main
+run_case issue-9919 haxe/tests/misc/eval/projects/Issue9919 Main
+run_case semver haxe/tests/misc/eval/projects/_semver Main
