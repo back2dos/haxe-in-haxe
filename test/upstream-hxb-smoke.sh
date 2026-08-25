@@ -94,6 +94,7 @@ run_case issue-4720 haxe/tests/misc/eval/projects/Issue4720 Main
 run_case issue-4982 haxe/tests/misc/eval/projects/Issue4982 Main
 run_case issue-5005 haxe/tests/misc/eval/projects/Issue5005 Main
 run_case issue-5118 haxe/tests/misc/eval/projects/Issue5118 Main
+run_case issue-5122 haxe/tests/misc/eval/projects/Issue5122 Main
 run_case issue-5125 haxe/tests/misc/eval/projects/Issue5125 Main
 run_case issue-5128 haxe/tests/misc/eval/projects/Issue5128 Main
 run_case issue-5152 haxe/tests/misc/eval/projects/Issue5152 Main

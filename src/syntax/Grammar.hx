@@ -264,6 +264,11 @@ class Grammar {
 				var values=[];
 				while (!is(BkClose)) { values.push(expression()); if (accept(Comma) == null) break; }
 				var end=expect(BkClose).pos; expr(EArrayDecl(values),union(t.pos,end));
+			case Kwd(Inline):
+				expectKwd(Function);
+				var name:Null<PlacedName> = is(POpen) ? null : placedIdent();
+				var f = functionRest();
+				expr(EFunction(name == null ? FKAnonymous : FKNamed(name, true), f), union(t.pos, f.fExpr == null ? t.pos : f.fExpr.pos));
 			case Kwd(Function): var name:Null<PlacedName> = is(POpen) ? null : placedIdent(); var f=functionRest(); expr(EFunction(name == null ? FKAnonymous : FKNamed(name,false),f), union(t.pos,f.fExpr == null ? t.pos : f.fExpr.pos));
 			case _: index--; objectOrIdentifier();
 		}; return e;

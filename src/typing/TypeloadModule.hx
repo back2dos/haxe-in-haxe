@@ -562,10 +562,11 @@ class TypeloadModule {
 
 	// Small batch-only subset of typer.ml. It deliberately preserves an unknown
 	// type as Dynamic until BasicTypes and Typecore are available.
-	function typeFunction(module:ModuleDef, cls:TClass, methodName:String, func:Func, signature:TSignature):TExpr {
+	function typeFunction(module:ModuleDef, cls:TClass, methodName:String, func:Func, signature:TSignature, ?outerLocals:StringMap<TVar>):TExpr {
 		var previousMethodName = currentMethodName;
 		currentMethodName = methodName;
 		var locals = new StringMap<TVar>();
+		if (outerLocals != null) for (name => value in outerLocals) locals.set(name, value);
 		var args = [];
 		for (index in 0...func.fArgs.length) {
 			var arg = func.fArgs[index];
@@ -585,6 +586,46 @@ class TypeloadModule {
 		currentMethodName = previousMethodName;
 		return typed(TFunction({tfArgs:args, tfType:signature.ret, tfExpr:body}), TFun(signature), func.fExpr.pos);
 	}
+
+	function typeLocalFunction(module:ModuleDef, cls:TClass, name:PlacedName, inlineValue:Bool, func:Func, locals:StringMap<TVar>, pos:Pos):TExpr {
+		var fallback = TDynamic(null);
+		var signature:TSignature = {
+			args:[for (arg in func.fArgs) {
+				name:arg.name.name,
+				optional:arg.optional || arg.expr != null,
+				type:arg.type == null ? fallback : (arg.optional ? nullable(module, resolveTypeHint(module, arg.type)) : resolveTypeHint(module, arg.type))
+			}],
+			ret:func.fType == null ? fallback : resolveTypeHint(module, func.fType)
+		};
+		var variable = makeVar(name.name, TFun(signature), TVOLocalFunction, name.pos, [realPathMetadata(name.name)]);
+		locals.set(name.name, variable);
+		var functionExpr = typeFunction(module, cls, currentMethodName, func, signature, locals);
+		if (func.fType == null) {
+			var inferred = inferReturnType(functionExpr);
+			if (inferred != null) {
+				signature.ret = inferred;
+				variable.vType = TFun(signature);
+				functionExpr.etype = variable.vType;
+				switch functionExpr.eexpr { case TFunction(value): value.tfType = inferred; case _: }
+			}
+		}
+		var inlineResult = inlineValue && func.fArgs.length == 0 ? simpleInlineResult(functionExpr) : null;
+		if (inlineResult != null) {
+			variable.vExtra = {vParams:[], vExpr:functionExpr};
+			var empty = typed(TBlock([]), basic("Void"), pos);
+			return typed(TMeta({meta:":mergeBlock", exprs:[], pos:Globals.nullPos}, empty), basic("Void"), pos);
+		}
+		return typed(TVar(variable, functionExpr), basic("Void"), pos);
+	}
+
+	static function simpleInlineResult(expression:TExpr):Null<TExpr> return switch expression.eexpr {
+		case TFunction(func): switch func.tfExpr.eexpr {
+			case TBlock([{eexpr:TReturn(value)}]) if (value != null): value;
+			case TReturn(value) if (value != null): value;
+			case _: null;
+		}
+		case _: null;
+	};
 
 	function bindDeclaredReturnType(expression:TExpr, returnType:T):Void switch expression.eexpr {
 		case TReturn(value) if (value != null):
@@ -659,6 +700,7 @@ class TypeloadModule {
 				var receiver = tryTypeExpression(module, expr);
 				typeField(receiver == null ? typeExpr(module, cls, expr, locals) : receiver, name, source.pos);
 			case ENew(path, args): typeNew(module, path.path, args, cls, locals, source.pos);
+			case EFunction(FKNamed(name, inlineValue), func): typeLocalFunction(module, cls, name, inlineValue, func, locals, source.pos);
 			case EFunction(_, func): var signature:TSignature = {args:[for (arg in func.fArgs) {name:arg.name.name, optional:arg.optional || arg.expr != null, type:arg.type == null ? fallback : (arg.optional ? nullable(module, resolveTypeHint(module, arg.type)) : resolveTypeHint(module, arg.type))}], ret:func.fType == null ? fallback : resolveTypeHint(module, func.fType)}; typeFunction(module, cls, "", func, signature);
 			case EReturn(expr): typed(TReturn(expr == null ? null : typeExpr(module, cls, expr, locals)), fallback, source.pos);
 			case EThrow(expr): typed(TThrow(typeExpr(module, cls, expr, locals)), fallback, source.pos);
@@ -1137,6 +1179,12 @@ class TypeloadModule {
 		}
 		var callee = typeExpr(module, cls, source, locals);
 		var values = [for (arg in args) typeExpr(module, cls, arg, locals)];
+		switch callee.eexpr {
+			case TLocal(variable) if (values.length == 0 && variable.vExtra != null && variable.vExtra.vExpr != null):
+				var result = simpleInlineResult(variable.vExtra.vExpr);
+				if (result != null) return typed(result.eexpr, result.etype, pos);
+			case _:
+		}
 		var field = switch callee.eexpr {
 			case TField(_, FStatic(_, value)) | TField(_, FInstance(_, _, value)): value;
 			case _: null;
