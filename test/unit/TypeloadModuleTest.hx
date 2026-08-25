@@ -21,6 +21,12 @@ class TypeloadModuleTest {
 		} catch (error:Dynamic) {
 			if ('$error'.indexOf("requires the Eval macro milestone") == -1) throw error;
 		}
+		try {
+			new TypeloadModule(paths, Define.emptyDefines()).loadModule({pack:["unit", "moduleload"], name:"BuildMetadata"});
+			throw "Expected build metadata rejection";
+		} catch (error:Dynamic) {
+			if ('$error'.indexOf("requires the Eval macro milestone") == -1) throw error;
+		}
 		var module = loader.loadModule({pack:["unit", "moduleload"], name:"Example"});
 		if (module.mId != 0 || module.mTypes.length != 5 || module.mExtra.mFile != sys.FileSystem.fullPath("test/unit/moduleload/Example.hx")) throw "Module loading failed";
 		if (loader.loadModule({pack:["unit", "moduleload"], name:"Example"}) != module) throw "Module cache failed";

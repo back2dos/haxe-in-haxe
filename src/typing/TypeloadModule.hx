@@ -56,6 +56,7 @@ class TypeloadModule {
 		var resolved = resolveModuleFile(path);
 		var parsed = TypeloadParse.parseFile(defines, resolved);
 		if (!samePath(path.pack, parsed.data.pack)) throw new ParseError('Module package does not match file path ' + Globals.sTypePath(path), {pfile: parsed.file, pmin: 0, pmax: 0});
+		rejectMacroMetadata(parsed.data.declarations);
 		var module = makeModule(path, resolved.file);
 		modules.set(key, module); // upstream installs the module before creating types.
 		moduleLoadDepth++;
@@ -71,6 +72,23 @@ class TypeloadModule {
 	}
 
 	public function findModule(path:GlobalTypePath):Null<ModuleDef> return modules.get(moduleKey(path));
+	function rejectMacroMetadata(declarations:Array<TypeDecl>):Void {
+		for (declaration in declarations) {
+			var metadata = switch declaration.definition {
+				case EClass(value): value.meta;
+				case EEnum(value): value.meta;
+				case ETypedef(value): value.meta;
+				case EAbstract(value): value.meta;
+				case EStatic(value): value.meta;
+				case EImport(_) | EUsing(_): [];
+			};
+			for (entry in metadata) {
+				var name = Std.string(entry.meta);
+				if (name == "build" || name == ":build" || name == "autoBuild" || name == ":autoBuild" || name == "genericBuild" || name == ":genericBuild")
+					throw 'Macro metadata @$name requires the Eval macro milestone';
+			}
+		}
+	}
 	function tryLoadModule(path:GlobalTypePath):Null<ModuleDef> try return loadModule(path) catch (error:Dynamic) {
 		if (Std.string(error) == "Not_found") return null;
 		throw error;
