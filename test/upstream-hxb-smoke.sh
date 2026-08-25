@@ -34,6 +34,24 @@ run_case() {
 	echo "HXB smoke passed: $name ($main)"
 }
 
+run_hxml_case() {
+	name=$1
+	project=$2
+	hxml=$3
+	main=$4
+	reference_output="$smoke_tmpdir/$name-reference.hxb"
+	port_output="$smoke_tmpdir/$name-port.hxb"
+	dump_path="$smoke_tmpdir/$name-dump"
+	mkdir -p "$dump_path"
+
+	(cd "$project" && "$HAXE_REFERENCE" "$hxml" --hxb "$reference_output")
+	(cd "$project" && "$HAXE_REFERENCE" -cp "$repository_root/src" -D haxe_in_haxe_bootstrap --run haxe.Main -- \
+		"$hxml" --hxb "$port_output")
+	"$HAXE_REFERENCE" --hxb-lib "$port_output" -cp "$project" --main "$main" \
+		--no-output -D dump=record -D dump-path="$dump_path"
+	echo "HXB HXML smoke passed: $name ($hxml)"
+}
+
 run_case module-fields test unit.moduleload.ModuleFields
 run_case issue-7237 haxe/tests/optimization/src issues.Issue7237
 run_case issue-6015 haxe/tests/optimization/src issues.Issue6015
@@ -157,3 +175,5 @@ run_case issue-12945 haxe/tests/misc/eval/projects/Issue12945 OptSkipFunctionBod
 run_case issue-3361-main3 haxe/tests/misc/eval/projects/Issue3361 Main3
 run_case issue-10198-main4 haxe/tests/misc/eval/projects/Issue10198 Main4
 run_case issue-10198-main5 haxe/tests/misc/eval/projects/Issue10198 Main5
+run_hxml_case run-vs-hxml-config haxe/tests/misc/eval/projects/run-vs-hxml compile.hxml Main
+run_hxml_case empty-hxml-config haxe/tests/misc/eval/projects/empty_hxml_inclusion compile.hxml Main

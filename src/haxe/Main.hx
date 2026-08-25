@@ -30,7 +30,7 @@ class Main {
 
 	/**
 		The deliberately narrow batch entry point currently supported by the
-		port: source class paths, raw defines, one main module and an HXB output.
+		port: source class paths, raw defines, HXML expansion, source roots and an HXB output.
 		Keeping this separate from Args lets the latter remain a faithful CLI
 		parser while unsupported compiler phases fail before any compilation work.
 	**/
@@ -44,35 +44,48 @@ class Main {
 			: classPathPath(configuredStdPath);
 		if (!FileSystem.exists(stdPath)) throw "Pinned standard library not found at " + stdPath;
 		classPaths.push(new DirectoryClassPath(stdPath, Std));
+		classPaths.add(new DirectoryClassPath(classPathPath("."), User));
 		var defines = Define.emptyDefines();
 		// The HXB target is a cross-target compiler artifact. Std.hx uses this
 		// target define to permit loading the shared standard library.
 		Define.rawDefineValue(defines, "cross", "1");
 		var main:Null<GlobalTypePath> = null;
+		var roots:Array<GlobalTypePath> = [];
 		var hxbArgument:Null<String> = null;
-		for (argument in Args.parseArgs(arguments)) {
+		var parsedArguments = Args.expandHxml(Args.parseArgs(arguments));
+		var hasHxbOutput = Lambda.exists(parsedArguments, function(argument) return switch argument { case SetHxbOut(_): true; case _: false; });
+		for (argument in parsedArguments) {
 			switch argument {
 				case AddClassPath(path): classPaths.add(new DirectoryClassPath(classPathPath(path), User));
 				case Define(key, value): Define.rawDefineValue(defines, key, value == null ? "1" : value);
+				case Undefine(key): Define.rawUndefine(defines, key);
+				case SetDebug: Define.rawDefineValue(defines, "debug", "1");
 				case SetMain(path):
 					if (main != null) unsupported("multiple --main options");
 					main = typePath(path, "--main");
+					roots.push(main);
+				case AddClass(path): roots.push(typePath(path, "class root"));
+				case IncludeModule(path) if (path.indexOf("*") == -1): roots.push(typePath(path.split("."), "module root"));
+				case Run(path, runtimeArguments) if (runtimeArguments.length == 0):
+					if (main != null) unsupported("multiple --main options");
+					main = typePath(path.split("."), "--run"); roots.push(main);
 				case SetHxbOut(file):
 					if (hxbArgument != null) unsupported("multiple --hxb options");
 					hxbArgument = file;
+				case Interp | SetNoOutput | SetDce(_) | AddWarning(_) | Cwd(_) if (hasHxbOutput):
 				case _:
 					unsupported(Type.enumConstructor(argument));
 			}
 		}
-		if (main == null) throw "Batch HXB compilation requires --main";
+		if (roots.length == 0) throw "Batch HXB compilation requires --main or a module root";
 		if (hxbArgument == null) throw "Batch HXB compilation requires --hxb";
 		var config = HxbWriterConfig.processArgument(hxbArgument);
 		if (config.targetConfig.hxbVersion != compiler.hxb.HxbData.VERSION) throw 'Unsupported HXB version: ${config.targetConfig.hxbVersion}';
 		ensureOutputDirectory(config.archivePath);
 		var loader = new TypeloadModule(classPaths, defines);
 		loader.loadStdBootstrap();
-		var mainModule = loader.loadModule(main);
-		markMainKept(mainModule);
+		var loadedRoots = [for (root in roots) loader.loadModule(root)];
+		if (main != null) for (module in loadedRoots) if (module.mPath.pack.join(".") == main.pack.join(".") && module.mPath.name == main.name) markMainKept(module);
 		for (module in loader.loadedModules()) markFieldsPostProcessed(module);
 		var zip = new ZipOutput(config.archivePath, 0);
 		try {

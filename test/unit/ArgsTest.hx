@@ -28,6 +28,12 @@ class ArgsTest {
 			case _: throw "Expected help metas";
 		}
 		if (advanced.length != 5) throw "Early-exit help must consume remaining arguments";
+
+		var expanded = Args.expandHxml(Args.parseArgs(["test/unit/args/root.hxml", "--hxb", "out.hxb"]));
+		if (expanded.length != 3) throw "Unexpected expanded HXML argument count";
+		switch expanded[0] { case AddClassPath("test"): case _: throw "Expected HXML class path"; }
+		switch expanded[1] { case Define("nested", "yes"): case _: throw "Expected nested HXML define"; }
+		switch expanded[2] { case SetHxbOut("out.hxb"): case _: throw "Expected trailing HXB output"; }
 	}
 
 	static function assertClassPath(argument:ParsedArg):Void switch (argument) {

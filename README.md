@@ -61,6 +61,12 @@ to compile a fixture, then loads that archive with `--hxb-lib`, executes
 and payloads. This proves that the compiler can run from HXB without requiring
 HashLink, Go, or another independent host.
 
+The batch compiler also expands nested `.hxml` files, including their class
+paths, defines, main class or bare module roots. When an HXB output is present,
+ordinary execution markers such as `--interp` and `--no-output` are accepted as
+configuration input but do not add another output target. Multi-part builds,
+libraries, macros, and display/server options still fail explicitly.
+
 ## Conformance contract
 
 Correctness has two immediate checks. Eval-HXB execution must behave identically
