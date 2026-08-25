@@ -106,7 +106,16 @@ class Grammar {
 	}
 
 	var previousKwd:Null<Keyword>;
-	function access(?field=false):Array<PlacedAccess> { var result=[]; while (true) { var t=current(); var a:Null<Access> = switch t.token { case Kwd(Public): APublic; case Kwd(Private): APrivate; case Kwd(Static): AStatic; case Kwd(Override): AOverride; case Kwd(Dynamic): ADynamic; case Kwd(Inline): AInline; case Kwd(Macro): AMacro; case Kwd(Final): AFinal; case Kwd(Extern): AExtern; case Kwd(Abstract) if (field || (index + 1 < tokens.length && tokens[index + 1].token.match(Kwd(Class)))): AAbstract; case Kwd(Overload): AOverload; case _: null; }; if (a == null) return result; next(); result.push({access:a,pos:t.pos}); } }
+	function access(?field=false):Array<PlacedAccess> { var result=[]; while (true) { var t=current(); var a:Null<Access> = switch t.token { case Kwd(Public): APublic; case Kwd(Private): APrivate; case Kwd(Static): AStatic; case Kwd(Override): AOverride; case Kwd(Dynamic): ADynamic; case Kwd(Inline): AInline; case Kwd(Macro): AMacro; case Kwd(Final): AFinal; case Kwd(Extern): AExtern; case Kwd(Abstract) if (field || classDeclarationAhead()): AAbstract; case Kwd(Overload): AOverload; case _: null; }; if (a == null) return result; next(); result.push({access:a,pos:t.pos}); } }
+	function classDeclarationAhead():Bool {
+		var cursor = index;
+		while (cursor < tokens.length) switch tokens[cursor++].token {
+			case Kwd(Public | Private | Extern | Final | Abstract):
+			case Kwd(Class): return true;
+			case _: return false;
+		}
+		return false;
+	}
 	function classFields():Array<ClassField> {
 		var fields:Array<ClassField> = [];
 		while (!is(BrClose)) {
@@ -292,7 +301,7 @@ class Grammar {
 				var value = unary();
 				value.pos = union(t.pos, value.pos);
 				value;
-			case Kwd(Function): var name:Null<PlacedName> = is(POpen) ? null : placedIdent(); var f=functionRest(); expr(EFunction(name == null ? FKAnonymous : FKNamed(name,false),f), union(t.pos,f.fExpr == null ? t.pos : f.fExpr.pos));
+			case Kwd(Function): var name:Null<PlacedName> = is(POpen) || is(Binop(OpLt)) ? null : placedIdent(); var f=functionRest(); expr(EFunction(name == null ? FKAnonymous : FKNamed(name,false),f), union(t.pos,f.fExpr == null ? t.pos : f.fExpr.pos));
 			case _: index--; objectOrIdentifier();
 		}; return e;
 	}
@@ -350,9 +359,7 @@ class Grammar {
 		return result;
 	}
 	function parseSwitch(start:Pos):Expr {
-		var subject:Expr;
-		if (accept(POpen) != null) { subject = expression(); expect(PClose); }
-		else subject = expression();
+		var subject = expression();
 		expect(BrOpen);
 		var cases:Array<SwitchCase> = [];
 		var defaultCase:Null<SwitchDefault> = null;

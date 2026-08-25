@@ -39,6 +39,7 @@ class GrammarTest {
 		assert(switch variableInterval.definition { case EClass(value): switch value.data[0].cffKind { case FFun(func): func.fExpr != null; case _: false; }; case _: false; });
 		var switched = Grammar.parse('class Main { static function run(value:Int):Bool { return switch (value) { case 0: true; default: false; } } }').declarations[0];
 		assert(switch switched.definition { case EClass(value): switch value.data[0].cffKind { case FFun(func): func.fExpr != null; case _: false; }; case _: false; });
+		Grammar.parse('class Main { function run(value:Dynamic) return switch (value : String) { case value: value; } }');
 		var boundSwitch = Grammar.parse('class Main { function run(value:Null<Int>) return switch value { case var bound if (bound > 0): bound; case null: 0; } }').declarations[0];
 		assert(switch boundSwitch.definition { case EClass(value): switch value.data[0].cffKind { case FFun(func): switch func.fExpr.expr { case EReturn({expr:ESwitch(_, cases, _)}): cases.length == 2 && switch cases[0] { case {values:[{expr:EVars(_)}], guard:guard}: guard != null; case _: false; }; case _: false; }; case _: false; }; case _: false; });
 		var finalField = Grammar.parse('class Holder { final value:Int; }').declarations[0];
@@ -89,6 +90,7 @@ class GrammarTest {
 		assert(switch mapLiteral.definition { case EClass(value): switch value.data[0].cffKind { case FVar(_, {expr:EArrayDecl([{expr:EBinop(OpArrow, _, _)}])}): true; case _: false; }; case _: false; });
 		var functionVariableWithoutSemicolon = Grammar.parse('class Main { function run() { var callback = function() {} var next = 1; } }').declarations[0];
 		assert(switch functionVariableWithoutSemicolon.definition { case EClass(value): switch value.data[0].cffKind { case FFun(func): switch func.fExpr.expr { case EBlock(values): values.length == 2; case _: false; }; case _: false; }; case _: false; });
+		Grammar.parse('class Main { function run() { var callback = function<T>(value:T):T return value; } }');
 		var functionFieldWithSemicolon = Grammar.parse('class Main { function new() {}; function run() {}; }').declarations[0];
 		assert(switch functionFieldWithSemicolon.definition { case EClass(value): value.data.length == 2; case _: false; });
 		var localFunctionWithoutSemicolon = Grammar.parse('class Main { function run() { function local() {} local(); } }').declarations[0];
@@ -114,6 +116,8 @@ class GrammarTest {
 		assert(switch abstractClass.definition { case EClass(value): value.flags.indexOf(HAbstract) != -1; case _: false; });
 		var privateAbstractClass = Grammar.parse('private abstract class Input { public function read():Int; }').declarations[0];
 		assert(switch privateAbstractClass.definition { case EClass(value): value.flags.indexOf(HPrivate) != -1 && value.flags.indexOf(HAbstract) != -1; case _: false; });
+		var reorderedAbstractClass = Grammar.parse('abstract private class Input { public function read():Int; }').declarations[0];
+		assert(switch reorderedAbstractClass.definition { case EClass(value): value.flags.indexOf(HPrivate) != -1 && value.flags.indexOf(HAbstract) != -1; case _: false; });
 		var abstractField = Grammar.parse('abstract class Input { abstract public function read():Int; }').declarations[0];
 		assert(switch abstractField.definition { case EClass(value): value.data[0].cffAccess.filter(function(access) return access.access == AAbstract).length == 1; case _: false; });
 		var intersectionConstraint = Grammar.parse('class Input<T:Readable & { function close():Void; }> {}').declarations[0];

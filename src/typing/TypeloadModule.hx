@@ -717,10 +717,13 @@ class TypeloadModule {
 			case EMeta(meta, expr):
 				var value = typeExpr(module, cls, expr, locals);
 				typed(TMeta(meta, value), value.etype, source.pos);
-			case ESwitch(subject, cases, defaultCase): switch subject.expr {
-				case EArrayDecl(subjects): typeArrayPatternSwitch(module, cls, subjects, cases, defaultCase, locals, source.pos);
-				case _: typeGeneralSwitch(module, cls, subject, cases, defaultCase, locals, source.pos);
-			};
+			case ESwitch(subject, cases, defaultCase):
+				var unwrapped = subject;
+				while (true) switch unwrapped.expr { case EParenthesis(value): unwrapped = value; case _: break; }
+				switch unwrapped.expr {
+					case EArrayDecl(subjects): typeArrayPatternSwitch(module, cls, subjects, cases, defaultCase, locals, source.pos);
+					case _: typeGeneralSwitch(module, cls, unwrapped, cases, defaultCase, locals, source.pos);
+				};
 			case EIf(condition, thenExpr, elseExpr): var thenValue = typeExpr(module, cls, thenExpr, locals); typed(TIf(typeExpr(module, cls, condition, locals), thenValue, elseExpr == null ? null : typeExpr(module, cls, elseExpr, locals)), thenValue.etype, source.pos);
 			case ETernary(condition, thenExpr, elseExpr):
 				var thenValue = typeExpr(module, cls, thenExpr, locals);
