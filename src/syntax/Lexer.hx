@@ -82,7 +82,8 @@ class Lexer {
 	}
 
 	function suffix(start:Int, isFloat:Bool):LexedToken {
-		if ((current() == "_" && (peek(1) == "i" || peek(1) == "u" || (!isFloat && false) || (isFloat && peek(1) == "f"))) || current() == "i" || current() == "u" || (isFloat && current() == "f")) {
+		var hasFloatSuffix = current() == "f" || (current() == "_" && peek(1) == "f");
+		if ((current() == "_" && (peek(1) == "i" || peek(1) == "u" || peek(1) == "f")) || current() == "i" || current() == "u" || current() == "f") {
 			if (current() == "_") index++;
 			var prefix = current();
 			index++;
@@ -91,10 +92,10 @@ class Lexer {
 		}
 		var raw = source.substr(start, index - start);
 		var pivot = -1;
-		for (i in 0...raw.length) { var c = raw.charAt(i); if (c == "i" || c == "u" || (isFloat && c == "f")) { pivot = i; break; } }
+		for (i in 0...raw.length) { var c = raw.charAt(i); if (c == "i" || c == "u" || ((isFloat || hasFloatSuffix) && c == "f")) { pivot = i; break; } }
 		var literal = pivot < 0 ? raw : raw.substr(0, pivot > 0 && raw.charAt(pivot - 1) == "_" ? pivot - 1 : pivot);
 		var ending:Null<String> = pivot < 0 ? null : raw.substr(pivot);
-		return make(isFloat ? Const(core.Ast.Constant.Float(literal, ending)) : Const(core.Ast.Constant.Int(literal, ending)), start);
+		return make(isFloat || hasFloatSuffix ? Const(core.Ast.Constant.Float(literal, ending)) : Const(core.Ast.Constant.Int(literal, ending)), start);
 	}
 
 	function identifier(start:Int):LexedToken {

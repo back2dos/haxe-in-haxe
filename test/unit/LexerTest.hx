@@ -12,6 +12,8 @@ class LexerTest {
 		assert(switch tokens[8].token { case CommentLine(" note"): true; case _: false; });
 		assert(switch tokens[10].token { case Binop(OpAssignOp(OpAdd)): true; case _: false; });
 		assert(switch tokens[11].token { case Const(Float(".5", "f64")): true; case _: false; });
+		assert(switch Lexer.lex("12f64 12_f64")[0].token { case Const(Float("12", "f64")): true; case _: false; });
+		assert(switch Lexer.lex("12f64 12_f64")[1].token { case Const(Float("12", "f64")): true; case _: false; });
 		assert(tokens[0].pos.pfile == "Test.hx" && tokens[0].pos.pmin == 0 && tokens[0].pos.pmax == 5);
 		assert(switch Lexer.lex('"a\\n\\\"b" ~/a\\/b/g', "T.hx")[0].token { case Const(String("a\n\"b", SDoubleQuotes)): true; case _: false; });
 		assert(switch Lexer.lex('"a\\x21"')[0].token { case Const(String("a!", SDoubleQuotes)): true; case _: false; });
