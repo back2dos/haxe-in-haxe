@@ -33,6 +33,8 @@ if [ -n "$selected_member" ]; then
 		if [ -n "$first_difference" ]; then
 			echo "First differing byte (offset, expected, actual): $first_difference" >&2
 		fi
+		module_root=$(printf '%s' "$selected_member" | sed 's|^[^/]*/||; s|\.hxb$||; s|/|.|g')
+		echo "Typed-dump diagnostic root: $module_root" >&2
 		exit 1
 	fi
 	exit 0
@@ -60,6 +62,8 @@ while IFS= read -r entry; do
 				if [ -n "$first_difference" ]; then
 					echo "First differing byte (offset, expected, actual): $first_difference" >&2
 				fi
+				module_root=$(printf '%s' "$entry" | sed 's|^[^/]*/||; s|\.hxb$||; s|/|.|g')
+				echo "Typed-dump diagnostic root: $module_root" >&2
 				exit 1
 			fi
 			;;
