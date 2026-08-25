@@ -104,6 +104,8 @@ class GrammarTest {
 		assert(switch abstractField.definition { case EClass(value): value.data[0].cffAccess.filter(function(access) return access.access == AAbstract).length == 1; case _: false; });
 		var intersectionConstraint = Grammar.parse('class Input<T:Readable & { function close():Void; }> {}').declarations[0];
 		assert(switch intersectionConstraint.definition { case EClass(value): switch value.params[0].tpConstraints.type { case CTIntersection(types): types.length == 2; case _: false; }; case _: false; });
+		var structuralFunctionType = Grammar.parse('typedef Callback = { value:String } -> String;').declarations[0];
+		assert(switch structuralFunctionType.definition { case ETypedef(value): switch value.data.type { case CTFunction([{type:CTAnonymous(_)}], _): true; case _: false; }; case _: false; });
 		var overloadedConstructor = Grammar.parse('abstract Vector<T>(Array<T>) { extern overload public inline function new(length:Int) {} }').declarations[0];
 		assert(switch overloadedConstructor.definition { case EAbstract(value): value.data[0].cffAccess.filter(function(access) return access.access == AOverload).length == 1; case _: false; });
 		var unparenthesizedCast = Grammar.parse('class Main { function run() return cast readByte(); }').declarations[0];

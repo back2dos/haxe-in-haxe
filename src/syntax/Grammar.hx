@@ -399,6 +399,14 @@ class Grammar {
 	function typeHintOpt():Null<TypeHint> return accept(DblDot) == null ? null : typeHint();
 	function typeHint():TypeHint {
 		var first = typeHintInner();
+		if (accept(Arrow) != null) {
+			var rest = typeHint();
+			var functionType = switch rest.type {
+				case CTFunction(args, ret): CTFunction([first].concat(args), ret);
+				case _: CTFunction([first], rest);
+			};
+			return {type:functionType, pos:union(first.pos, rest.pos)};
+		}
 		if (accept(Binop(OpAnd)) == null) return first;
 		var rest = typeHint();
 		var types = switch rest.type {
