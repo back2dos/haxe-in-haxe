@@ -177,3 +177,6 @@ run_case issue-10198-main4 haxe/tests/misc/eval/projects/Issue10198 Main4
 run_case issue-10198-main5 haxe/tests/misc/eval/projects/Issue10198 Main5
 run_hxml_case run-vs-hxml-config haxe/tests/misc/eval/projects/run-vs-hxml compile.hxml Main
 run_hxml_case empty-hxml-config haxe/tests/misc/eval/projects/empty_hxml_inclusion compile.hxml Main
+run_hxml_case issue-8574-no-optimization-config haxe/tests/misc/eval/projects/Issue8574 noOptimization.hxml Main
+run_hxml_case issue-8574-constant-iterator-config haxe/tests/misc/eval/projects/Issue8574 constIntIterator.hxml Main
+run_hxml_case issue-8574-unrolled-loop-config haxe/tests/misc/eval/projects/Issue8574 unrolledLoop.hxml Main
