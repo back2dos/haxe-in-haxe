@@ -324,6 +324,7 @@ class TypeloadModule {
 
 	function populateClassFields(module:ModuleDef, cls:TClass, fields:Array<ClassField>, typeBodies:Bool):Void {
 		for (field in fields) {
+			if (hasAccess(field, AMacro)) throw 'Macro field ${cls.clPath.name}.${field.cffName.name} requires the Eval macro milestone';
 			var isStatic = hasAccess(field, AStatic);
 			var params = switch field.cffKind { case FFun(func): makeTypeParams(module, {pack:[], name:field.cffName.name}, func.fParams, TPHMethod); case _: []; };
 			var previousTypeParams = activeTypeParams;

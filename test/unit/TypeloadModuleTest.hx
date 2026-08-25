@@ -15,6 +15,12 @@ class TypeloadModuleTest {
 		paths.push(new DirectoryClassPath("test/", User));
 		paths.push(new DirectoryClassPath("haxe/std/", Std));
 		var loader = new TypeloadModule(paths, Define.emptyDefines());
+		try {
+			new TypeloadModule(paths, Define.emptyDefines()).loadModule({pack:["unit", "moduleload"], name:"MacroField"});
+			throw "Expected macro field rejection";
+		} catch (error:Dynamic) {
+			if ('$error'.indexOf("requires the Eval macro milestone") == -1) throw error;
+		}
 		var module = loader.loadModule({pack:["unit", "moduleload"], name:"Example"});
 		if (module.mId != 0 || module.mTypes.length != 5 || module.mExtra.mFile != sys.FileSystem.fullPath("test/unit/moduleload/Example.hx")) throw "Module loading failed";
 		if (loader.loadModule({pack:["unit", "moduleload"], name:"Example"}) != module) throw "Module cache failed";
