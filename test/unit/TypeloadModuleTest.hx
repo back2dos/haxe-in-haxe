@@ -64,7 +64,13 @@ class TypeloadModuleTest {
 		switch run.eexpr {
 			case TFunction(func): switch func.tfExpr.eexpr {
 				case TBlock(values):
-					switch values[0].eexpr { case TVar(_, _): case _: throw "Local variable was not typed"; }
+					switch values[0].eexpr {
+						case TVar(variable, _):
+							if (!switch values[0].etype { case TAbstract(type, []) if (type.aPath.name == "Void"): true; case _: false; }) throw "Local declaration expression was not typed as Void";
+							if (values[0].epos.pmax <= variable.vPos.pmax) throw "Local declaration position does not include its semicolon";
+							if (variable.vMeta.length == 0 || variable.vMeta[0].meta != ":realPath") throw "Local variable real path was not preserved";
+						case _: throw "Local variable was not typed";
+					}
 					switch values[1].eexpr { case TReturn(value): switch value.eexpr { case TCall(_, _): case _: throw "Direct call was not typed"; }; case _: throw "Return was not typed"; }
 				case _: throw "Function body was not typed";
 			}
@@ -175,7 +181,7 @@ class TypeloadModuleTest {
 		var getLength = callStackAbstract.aImpl.clStatics.get("get_length");
 		switch getLength.cfExpr.eexpr {
 			case TFunction({tfArgs:[{variable:variable}]}):
-				if (variable.vName != "this1") throw "Abstract this argument was not cross-target renamed";
+				if (variable.vName != "this") throw "Abstract this argument was renamed before HXB finalization";
 			case _: throw "CallStack length getter was not typed";
 		}
 		switch callStackAbstract.aImpl.clStatics.get("exceptionStack").cfType {

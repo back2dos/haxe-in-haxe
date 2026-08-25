@@ -575,9 +575,8 @@ class TypeloadModule {
 			var variable = makeVar(arg.name.name, signature.args[index].type, TVOArgument, arg.name.pos, arg.meta);
 			if (hasMetadata(arg.meta, "this")) {
 				variable.vKind = VAbstractThis;
-				variable.vName = "this1";
-				variable.vMeta.unshift(realPathMetadata("this"));
-			} else variable.vMeta.push(realPathMetadata(variable.vName));
+				switch cls.clKind { case KAbstractImpl(abs) if (hasMetadata(abs.aMeta, "coreType")): variable.vName = "this1"; variable.vMeta.unshift(realPathMetadata("this")); case _: }
+			} else variable.vMeta.unshift(realPathMetadata(variable.vName));
 			locals.set(arg.name.name, variable);
 			var defaultValue = arg.expr == null
 				? (arg.optional ? typed(TConst(TNull), signature.args[index].type, Globals.nullPos) : null)
@@ -730,7 +729,10 @@ class TypeloadModule {
 					case EArrayDecl(subjects): typeArrayPatternSwitch(module, cls, subjects, cases, defaultCase, locals, source.pos);
 					case _: typeGeneralSwitch(module, cls, unwrapped, cases, defaultCase, locals, source.pos);
 				};
-			case EIf(condition, thenExpr, elseExpr): var thenValue = typeExpr(module, cls, thenExpr, locals); typed(TIf(typeCondition(module, cls, condition, locals), thenValue, elseExpr == null ? null : typeExpr(module, cls, elseExpr, locals)), thenValue.etype, source.pos);
+			case EIf(condition, thenExpr, elseExpr):
+				var thenValue = typeExpr(module, cls, thenExpr, locals);
+				var elseValue = elseExpr == null ? null : typeExpr(module, cls, elseExpr, locals);
+				typed(TIf(typeCondition(module, cls, condition, locals), thenValue, elseValue), elseValue == null ? basic("Void") : thenValue.etype, source.pos);
 			case ETernary(condition, thenExpr, elseExpr):
 				var thenValue = typeExpr(module, cls, thenExpr, locals);
 				var elseValue = typeExpr(module, cls, elseExpr, locals);
@@ -739,14 +741,14 @@ class TypeloadModule {
 					typed(TBlock([thenValue]), thenValue.etype, thenExpr.pos),
 					typed(TBlock([elseValue]), elseValue.etype, elseExpr.pos)
 				), thenValue.etype, source.pos);
-			case EWhile(condition, body, flag): typed(TWhile(typeCondition(module, cls, condition, locals), typeExpr(module, cls, body, locals), flag), fallback, source.pos);
+			case EWhile(condition, body, flag): typed(TWhile(typeCondition(module, cls, condition, locals), typeExpr(module, cls, body, locals), flag), basic("Void"), source.pos);
 			case EFor(iterator, body): typeForLoop(module, cls, iterator, body, locals, source.pos);
 			case ETry(body, catches):
 				if (catches.length == 0) typeExpr(module, cls, body, locals) else {
 					var typedBody = typeExpr(module, cls, body, locals);
 					var typedCatches = [for (item in catches) {
 						var catchLocals = copyLocals(locals);
-						var variable = makeVar(item.name.name, item.type == null ? fallback : resolveTypeHint(module, item.type), TVOCatchVariable, item.name.pos, []);
+						var variable = makeVar(item.name.name, item.type == null ? fallback : resolveTypeHint(module, item.type), TVOCatchVariable, item.name.pos, [realPathMetadata(item.name.name)]);
 						catchLocals.set(variable.vName, variable);
 						{variable:variable, expr:typeExpr(module, cls, item.expr, catchLocals)};
 					}];
@@ -1161,7 +1163,7 @@ class TypeloadModule {
 			case EIf(_, thenExpr, null): isFilter = true; body = thenExpr;
 			case _:
 		}
-		var loopVar = makeVar(loopName.name, elementType, TVOForVariable, loopName.pos, [{meta:":forLoopVariable", exprs:[], pos:Globals.nullPos}]);
+		var loopVar = makeVar(loopName.name, elementType, TVOForVariable, loopName.pos, [realPathMetadata(loopName.name), {meta:":forLoopVariable", exprs:[], pos:Globals.nullPos}]);
 		loopVar.vFlags |= 1 << core.TType.TType.flagTVarNames.indexOf("VUsedByTyper");
 		var bodyLocals = new StringMap<TVar>(); for (name => value in locals) bodyLocals.set(name, value); bodyLocals.set(loopVar.vName, loopVar);
 		var pushedValue = typeExpr(module, cls, body, bodyLocals);
@@ -1384,11 +1386,13 @@ class TypeloadModule {
 		for (value in vars) {
 			var initializer = value.evExpr == null ? null : typeExpr(module, cls, value.evExpr, locals);
 			var type = value.evType == null ? (initializer == null ? TDynamic(null) : initializer.etype) : resolveTypeHint(module, value.evType);
-			var variable = makeVar(value.evName.name, type, TVOLocalVariable, value.evName.pos, value.evMeta);
+			var metadata = value.evMeta.copy();
+			metadata.unshift(realPathMetadata(value.evName.name));
+			var variable = makeVar(value.evName.name, type, TVOLocalVariable, value.evName.pos, metadata);
 			if (value.evFinal) variable.vFlags |= 1 << core.TType.TType.flagTVarNames.indexOf("VFinal");
 			if (value.evStatic) variable.vFlags |= 1 << core.TType.TType.flagTVarNames.indexOf("VStatic");
 			locals.set(variable.vName, variable);
-			result.push(typed(TVar(variable, initializer), type, value.evName.pos));
+			result.push(typed(TVar(variable, initializer), basic("Void"), pos));
 		}
 		return result.length == 1 ? result[0] : typed(TBlock(result), TDynamic(null), pos);
 	}

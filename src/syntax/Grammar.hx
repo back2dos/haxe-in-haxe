@@ -444,7 +444,9 @@ class Grammar {
 			if (is(BrClose)) break;
 			var value = expression();
 			es.push(value);
-			if (accept(Semicolon)==null && !is(BrClose) && !previous().token.match(BrClose) && !previous().token.match(Semicolon) && requiresSemicolon(value)) fail("Expected semicolon");
+			var terminator = accept(Semicolon);
+			if (terminator != null && value.expr.match(EVars(_))) value.pos = union(value.pos, terminator.pos);
+			if (terminator==null && !is(BrClose) && !previous().token.match(BrClose) && !previous().token.match(Semicolon) && requiresSemicolon(value)) fail("Expected semicolon");
 		}
 		return expr(EBlock(es),union(begin,expect(BrClose).pos));
 	}
