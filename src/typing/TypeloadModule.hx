@@ -476,7 +476,8 @@ class TypeloadModule {
 			&& Lambda.foreach(cases, function(item) return item.guard == null && Lambda.foreach(item.values, isSupportedPattern) && (item.expr == null || canTypeExpression(item.expr)))
 			&& (defaultCase == null || defaultCase.expr == null || canTypeExpression(defaultCase.expr));
 		case ETry(body, catches): canTypeExpression(body) && Lambda.foreach(catches, function(item) return canTypeExpression(item.expr));
-		case EIs(_, _) | EDisplay(_, _): false;
+		case EIs(value, _): canTypeExpression(value);
+		case EDisplay(_, _): false;
 	};
 
 	static function isSupportedPattern(value:Expr):Bool return switch value.expr {
@@ -583,6 +584,7 @@ class TypeloadModule {
 			args.push({variable: variable, defaultValue: defaultValue});
 		}
 		var body = typeExpr(module, cls, func.fExpr, locals);
+		if (!switch body.eexpr { case TBlock(_): true; case _: false; }) body = typed(TBlock([body]), body.etype, body.epos);
 		bindDeclaredReturnType(body, signature.ret);
 		currentMethodName = previousMethodName;
 		return typed(TFunction({tfArgs:args, tfType:signature.ret, tfExpr:body}), TFun(signature), func.fExpr.pos);
@@ -715,6 +717,7 @@ class TypeloadModule {
 				var value = typeExpr(module, cls, expr, locals);
 				var targetType = resolveTypeHint(module, hint);
 				typed(TCast(value, null), targetType, source.pos);
+			case EIs(expr, hint): typeIs(module, cls, expr, hint, locals, source.pos);
 			case EMeta(meta, expr):
 				var value = typeExpr(module, cls, expr, locals);
 				typed(TMeta(meta, value), value.etype, source.pos);
@@ -750,6 +753,21 @@ class TypeloadModule {
 				}
 			case _: throw 'Unsupported expression at ${source.pos.pfile}:${source.pos.pmin}';
 		};
+	}
+
+	function typeIs(module:ModuleDef, cls:TClass, source:Expr, hint:TypeHint, locals:StringMap<TVar>, pos:Pos):TExpr {
+		var value = typeExpr(module, cls, source, locals);
+		var targetType = resolveTypeHint(module, hint);
+		var targetModuleType = moduleTypeOf(targetType);
+		if (targetModuleType == null) throw 'Unsupported type for `is` operator at ${hint.pos.pfile}:${hint.pos.pmin}';
+		var target = typed(TTypeExpr(targetModuleType), TDynamic(null), hint.pos);
+		var stdModule = loadModule({pack:[], name:"Std"});
+		var stdClass = switch findModuleType(stdModule, "Std") { case TClassDecl(value): value; case _: throw "Std is not a class"; };
+		var field = stdClass.clStatics.get("isOfType");
+		if (field == null) throw "Std.isOfType was not loaded";
+		var owner = typed(TTypeExpr(TClassDecl(stdClass)), TDynamic(null), pos);
+		var callee = typed(TField(owner, FStatic(stdClass, field)), field.cfType, pos);
+		return typed(TCall(callee, [value, target]), basic("Bool"), pos);
 	}
 
 	static function copyLocals(locals:StringMap<TVar>):StringMap<TVar> {

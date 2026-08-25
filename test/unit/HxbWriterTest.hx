@@ -32,6 +32,7 @@ class HxbWriterTest {
 
 		var paths = new ClassPaths();
 		paths.push(new DirectoryClassPath("test/", core.ClassPath.ClassPathScope.User));
+		paths.push(new DirectoryClassPath("haxe/std/", core.ClassPath.ClassPathScope.Std));
 		var module = new TypeloadModule(paths, Define.emptyDefines()).loadModule({pack:["unit", "moduleload"], name:"Example"});
 		var typedWriter = new HxbWriter();
 		typedWriter.writeModule(module);
@@ -52,7 +53,9 @@ class HxbWriterTest {
 		var genericMethodWriter = new HxbWriter();
 		genericMethodWriter.writeModule(genericMethodModule);
 		if (genericMethodWriter.exportModule().length <= 4) throw "Inferred generic method call was not serialized";
-		var expressionsModule = new TypeloadModule(paths, Define.emptyDefines()).loadModule({pack:["unit", "moduleload"], name:"Expressions"});
+		var expressionsDefines = Define.emptyDefines();
+		Define.rawDefineValue(expressionsDefines, "cross", "1");
+		var expressionsModule = new TypeloadModule(paths, expressionsDefines).loadModule({pack:["unit", "moduleload"], name:"Expressions"});
 		var expressionsWriter = new HxbWriter();
 		expressionsWriter.writeModule(expressionsModule);
 		if (expressionsWriter.exportModule().length <= 4) throw "Try/catch expression was not serialized";

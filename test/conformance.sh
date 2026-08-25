@@ -23,7 +23,10 @@ source_run_output="$conformance_tmpdir/source-run.hxb"
 port_output="$conformance_tmpdir/port.hxb"
 
 # Keep this initial case inside the port's currently supported batch subset.
-"$HAXE_REFERENCE" -cp test/conformance --main unit.moduleload.Basic --hxb "$reference_output"
+# Native Haxe embeds its installation's std path and does not honor
+# HAXE_STD_PATH for this lookup. Select the pinned checkout explicitly so file
+# positions and source contents match the port's effective standard library.
+"$HAXE_REFERENCE" -cp "$HAXE_STD_PATH" -cp test/conformance --main unit.moduleload.Basic --hxb "$reference_output"
 
 # Build the port as Eval HXB. This also executes its source form once because
 # --run arguments belong to haxe.Main after the compiler archive is written.

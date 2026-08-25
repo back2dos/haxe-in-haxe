@@ -4,6 +4,11 @@ The oracle and initial execution host are the same executable: `haxe` built
 from the sibling `haxe/` submodule at the pinned revision. Do not substitute an
 unrelated system release when recording results.
 
+The exact conformance harness also passes the checkout's `haxe/std` explicitly
+to the reference. Setting `HAXE_STD_PATH` alone is insufficient for native
+Haxe: its compiled-in installation path can otherwise leak into serialized
+source positions and produce a false first payload mismatch.
+
 ## Eval-HXB execution
 
 Run:

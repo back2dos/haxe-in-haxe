@@ -11,7 +11,7 @@ class HostConformanceTest {
 	static function main():Void {
 		var reference = "/private/tmp/haxe-in-haxe-reference-basic.hxb";
 		var port = "/private/tmp/haxe-in-haxe-port-basic.hxb";
-		var code = Sys.command("haxe", ["-cp", "test/conformance", "--main", "unit.moduleload.Basic", "--hxb", reference]);
+		var code = Sys.command("haxe", ["-cp", Sys.getCwd() + "haxe/std", "-cp", "test/conformance", "--main", "unit.moduleload.Basic", "--hxb", reference]);
 		if (code != 0) throw 'Host Haxe reference compilation failed with exit code $code';
 		Main.run(["-cp", "test/conformance", "--main", "unit.moduleload.Basic", "--hxb", port]);
 		assertArchivesEqual(reference, port);

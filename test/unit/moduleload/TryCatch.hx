@@ -5,9 +5,11 @@ class TryCatch {
 		try {
 			throw "failure";
 		} catch (error:String) {
-			trace(error);
+			trace(isString(error));
 		} catch (error:Dynamic) {
 			trace(error);
 		}
 	}
+
+	static function isString(value:Dynamic):Bool return value is String;
 }
