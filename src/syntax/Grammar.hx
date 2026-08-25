@@ -402,7 +402,19 @@ class Grammar {
 		}
 		var n=placedIdent(); return expr(EConst(Ident(n.name)),n.pos);
 	}
-	function postfix(e:Expr):Expr { while (true) { if (accept(Dot) != null || accept(QuestionDot) != null) { var safe=previous().token.match(QuestionDot); var n=placedIdent(); e=expr(EField(e,n.name,safe ? EFSafe : EFNormal),union(e.pos,n.pos)); } else if (accept(POpen) != null) { var args=[]; if (!is(PClose)) while (true) { args.push(expression()); if (accept(Comma) == null || is(PClose)) break; } var end=expect(PClose).pos; e=expr(ECall(e,args),union(e.pos,end)); } else if (accept(BkOpen) != null) { var key=expression(); var end=expect(BkClose).pos; e=expr(EArray(e,key),union(e.pos,end)); } else if (switch current().token {case Unop(Increment)|Unop(Decrement):true;case _:false;}) { var op=switch next().token {case Unop(v):v;case _:null;}; e=expr(EUnop(op,Postfix,e),union(e.pos,previous().pos)); } else return e; } return e; }
+	function postfix(e:Expr):Expr { while (true) {
+		if (is(BrOpen) && switch e.expr { case EConst(Ident(name)): StringTools.startsWith(name, "$"); case _: false; }) {
+			var begin = next().pos;
+			var parameter = expression();
+			var end = expect(BrClose).pos;
+			var name = switch e.expr { case EConst(Ident(value)): value; case _: ""; };
+			e = expr(EMeta({meta:name, exprs:[], pos:e.pos}, parameter), union(begin, end));
+		} else if (accept(Dot) != null || accept(QuestionDot) != null) { var safe=previous().token.match(QuestionDot); var n=placedIdent(); e=expr(EField(e,n.name,safe ? EFSafe : EFNormal),union(e.pos,n.pos)); }
+		else if (accept(POpen) != null) { var args=[]; if (!is(PClose)) while (true) { args.push(expression()); if (accept(Comma) == null || is(PClose)) break; } var end=expect(PClose).pos; e=expr(ECall(e,args),union(e.pos,end)); }
+		else if (accept(BkOpen) != null) { var key=expression(); var end=expect(BkClose).pos; e=expr(EArray(e,key),union(e.pos,end)); }
+		else if (switch current().token {case Unop(Increment)|Unop(Decrement):true;case _:false;}) { var op=switch next().token {case Unop(v):v;case _:null;}; e=expr(EUnop(op,Postfix,e),union(e.pos,previous().pos)); }
+		else return e;
+	} return e; }
 	function block():Expr return blockContents(expect(BrOpen).pos);
 	function blockContents(begin:Pos):Expr {
 		var es=[];

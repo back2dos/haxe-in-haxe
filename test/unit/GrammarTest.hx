@@ -100,6 +100,8 @@ class GrammarTest {
 		assert(switch arrowBlock.definition { case EClass(value): switch value.data[0].cffKind { case FFun(func): switch func.fExpr.expr { case EReturn({expr:EFunction(FKArrow, {fExpr:{expr:EMeta(_, {expr:EReturn({expr:EBlock(_)})})}})}): true; case _: false; }; case _: false; }; case _: false; });
 		var dollarCall = Grammar.parse("class Main { function run(value:Dynamic) $type(value); }").declarations[0];
 		assert(switch dollarCall.definition { case EClass(value): switch value.data[0].cffKind { case FFun(func): switch func.fExpr.expr { case ECall({expr:EConst(Ident("$type"))}, _): true; case _: false; }; case _: false; }; case _: false; });
+		var dollarReification = Grammar.parse('class Main { macro static function run(value:Dynamic) return macro $' + 'v{value}; }').declarations[0];
+		assert(switch dollarReification.definition { case EClass(value): switch value.data[0].cffKind { case FFun(func): switch func.fExpr.expr { case EReturn({expr:EMeta(entry, _)}): entry.meta == "$v"; case _: false; }; case _: false; }; case _: false; });
 		var enumAbstract = Grammar.parse('enum abstract Status(Int) from Int to Int { var Ready = 1; }').declarations[0];
 		assert(switch enumAbstract.definition { case EAbstract(value): value.flags.indexOf(AbEnum) != -1 && value.data.length == 1; case _: false; });
 		var abstractClass = Grammar.parse('abstract class Input { public function read():Int; }').declarations[0];
