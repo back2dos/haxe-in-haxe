@@ -980,19 +980,7 @@ class TypeloadModule {
 		var increment:TExpr;
 		switch source.expr {
 			case EBinop(OpInterval, startSource, endSource):
-				loopType = basic("Int");
-				var start = typeExpr(module, cls, startSource, locals);
-				var end = typeExpr(module, cls, endSource, locals);
-				var counter = makeGeneratedVar("`", loopType, startSource.pos);
-				var bound = makeGeneratedVar("`", loopType, endSource.pos);
-				counter.vMeta = generatedLoopMetadata("`", false); bound.vMeta = generatedLoopMetadata("`", false);
-				var counterLocal = typed(TLocal(counter), loopType, iterator.pos);
-				var boundLocal = typed(TLocal(bound), loopType, iterator.pos);
-				declarations.push(typed(TVar(counter, start), loopType, startSource.pos));
-				declarations.push(typed(TVar(bound, end), loopType, endSource.pos));
-				condition = typed(TBinop(OpLt, counterLocal, boundLocal), basic("Bool"), iterator.pos);
-				valueExpr = typed(TUnop(Increment, Postfix, counterLocal), loopType, iterator.pos);
-				increment = null;
+				return typeIntRangeForLoop(module, cls, loopName, startSource, endSource, body, locals, iterator.pos, pos);
 			case _:
 				var sourceExpr = typeExpr(module, cls, source, locals);
 				switch followTypeAliases(sourceExpr.etype) {
@@ -1010,19 +998,7 @@ class TypeloadModule {
 				}
 				switch followTypeAliases(sourceExpr.etype) {
 					case TInst(arrayClass, [element]) if (arrayClass.clPath.pack.length == 0 && arrayClass.clPath.name == "Array"):
-						loopType = element;
-						var counter = makeGeneratedVar("`", basic("Int"), iterator.pos);
-						var sourceVar = makeGeneratedVar("`", sourceExpr.etype, source.pos);
-						counter.vMeta = generatedLoopMetadata("`", false); sourceVar.vMeta = generatedLoopMetadata("`", false);
-						var counterLocal = typed(TLocal(counter), basic("Int"), iterator.pos);
-						var sourceLocal = typed(TLocal(sourceVar), sourceExpr.etype, source.pos);
-						declarations.push(typed(TVar(counter, typed(TConst(TInt(0)), basic("Int"), iterator.pos)), basic("Int"), iterator.pos));
-						declarations.push(typed(TVar(sourceVar, sourceExpr), sourceExpr.etype, source.pos));
-						var lengthField = arrayClass.clFields.get("length");
-						var length = typed(TField(sourceLocal, FInstance(arrayClass, [loopType], lengthField)), basic("Int"), iterator.pos);
-						condition = typed(TBinop(OpLt, counterLocal, length), basic("Bool"), iterator.pos);
-						valueExpr = typed(TArray(sourceLocal, counterLocal), loopType, iterator.pos);
-						increment = typed(TUnop(Increment, Prefix, counterLocal), basic("Int"), iterator.pos);
+						return typeArrayForLoop(module, cls, loopName, sourceExpr, source, body, locals, arrayClass, element, iterator.pos, pos);
 					case TAnon(anon) if (anon.aFields.get("hasNext") != null && anon.aFields.get("next") != null):
 						var iteratorType = sourceExpr.etype;
 						var iteratorVar = makeGeneratedVar("`", iteratorType, iterator.pos);
@@ -1064,6 +1040,58 @@ class TypeloadModule {
 		var whileBody = typed(TBlock(loopValues), basic("Void"), body.pos);
 		declarations.push(typed(TWhile(condition, whileBody, NormalWhile), basic("Void"), pos));
 		return typed(TBlock(declarations), basic("Void"), pos);
+	}
+
+	function typeArrayForLoop(module:ModuleDef, cls:TClass, loopName:PlacedName, sourceExpr:TExpr, source:Expr, body:Expr, locals:StringMap<TVar>, arrayClass:TClass, element:T, iteratorPos:Pos, pos:Pos):TExpr {
+		var loopVar = makeVar(loopName.name, element, TVOForVariable, loopName.pos, [realPathMetadata(loopName.name)]);
+		loopVar.vFlags |= 1 << core.TType.TType.flagTVarNames.indexOf("VUsedByTyper");
+		var bodyLocals = copyLocals(locals);
+		bodyLocals.set(loopName.name, loopVar);
+		var typedBody = typeExpr(module, cls, body, bodyLocals);
+		var counter = makeGeneratedVar("_g", basic("Int"), loopName.pos);
+		var sourceVar = makeGeneratedVar("_g1", sourceExpr.etype, source.pos);
+		counter.vMeta = generatedLoopMetadata("_g", false);
+		sourceVar.vMeta = generatedLoopMetadata("_g", false);
+		var counterLocal = typed(TLocal(counter), basic("Int"), iteratorPos);
+		var sourceLocal = typed(TLocal(sourceVar), sourceExpr.etype, source.pos);
+		var lengthField = arrayClass.clFields.get("length");
+		var length = typed(TField(sourceLocal, FInstance(arrayClass, [element], lengthField)), basic("Int"), iteratorPos);
+		var condition = typed(TBinop(OpLt, counterLocal, length), basic("Bool"), iteratorPos);
+		var values = [
+			typed(TVar(loopVar, typed(TArray(sourceLocal, counterLocal), element, iteratorPos)), basic("Void"), loopName.pos),
+			typed(TUnop(Increment, Prefix, counterLocal), basic("Int"), iteratorPos)
+		];
+		switch typedBody.eexpr { case TBlock(bodyValues): values = values.concat(bodyValues); case _: values.push(typedBody); }
+		return typed(TBlock([
+			typed(TVar(counter, typed(TConst(TInt(0)), basic("Int"), iteratorPos)), basic("Void"), iteratorPos),
+			typed(TVar(sourceVar, sourceExpr), basic("Void"), source.pos),
+			typed(TWhile(condition, typed(TBlock(values), basic("Void"), body.pos), NormalWhile), basic("Void"), pos)
+		]), basic("Void"), pos);
+	}
+
+	function typeIntRangeForLoop(module:ModuleDef, cls:TClass, loopName:PlacedName, startSource:Expr, endSource:Expr, body:Expr, locals:StringMap<TVar>, iteratorPos:Pos, pos:Pos):TExpr {
+		var intType = basic("Int");
+		var start = typeExpr(module, cls, startSource, locals);
+		var end = typeExpr(module, cls, endSource, locals);
+		var loopVar = makeVar(loopName.name, intType, TVOForVariable, loopName.pos, [realPathMetadata(loopName.name)]);
+		loopVar.vFlags |= 1 << core.TType.TType.flagTVarNames.indexOf("VUsedByTyper");
+		var bodyLocals = copyLocals(locals);
+		bodyLocals.set(loopName.name, loopVar);
+		var typedBody = typeExpr(module, cls, body, bodyLocals);
+		var counter = makeGeneratedVar("_g", intType, startSource.pos);
+		var bound = makeGeneratedVar("_g1", intType, endSource.pos);
+		counter.vMeta = generatedLoopMetadata("_g", false);
+		bound.vMeta = generatedLoopMetadata("_g", false);
+		var counterLocal = typed(TLocal(counter), intType, iteratorPos);
+		var boundLocal = typed(TLocal(bound), intType, iteratorPos);
+		var condition = typed(TBinop(OpLt, counterLocal, boundLocal), basic("Bool"), iteratorPos);
+		var values = [typed(TVar(loopVar, typed(TUnop(Increment, Postfix, counterLocal), intType, iteratorPos)), basic("Void"), loopName.pos)];
+		switch typedBody.eexpr { case TBlock(bodyValues): values = values.concat(bodyValues); case _: values.push(typedBody); }
+		return typed(TBlock([
+			typed(TVar(counter, start), basic("Void"), startSource.pos),
+			typed(TVar(bound, end), basic("Void"), endSource.pos),
+			typed(TWhile(condition, typed(TBlock(values), basic("Void"), body.pos), NormalWhile), basic("Void"), pos)
+		]), basic("Void"), pos);
 	}
 
 	function typeKeyValueForLoop(module:ModuleDef, cls:TClass, keyName:PlacedName, valueName:PlacedName, source:Expr, body:Expr, locals:StringMap<TVar>, pos:Pos):TExpr {

@@ -143,6 +143,8 @@ class TypeloadModuleTest {
 		var keyValueLoopClass = switch keyValueLoop.mTypes[0] { case TClassDecl(value): value; case _: throw "Expected key/value-loop class"; };
 		if (keyValueLoopClass.clStatics.get("visit").cfExpr == null) throw "Key/value loop was not typed";
 		if (keyValueLoopClass.clStatics.get("visitMap").cfExpr == null) throw "Map value loop was not typed";
+		assertLoopAllocationOrder(keyValueLoopClass.clStatics.get("visitArray").cfExpr, "array");
+		assertLoopAllocationOrder(keyValueLoopClass.clStatics.get("visitRange").cfExpr, "range");
 		var inlineLocal = loader.loadModule({pack:["unit", "moduleload"], name:"InlineLocalFunction"});
 		var inlineLocalClass = switch inlineLocal.mTypes[0] { case TClassDecl(value): value; case _: throw "Expected inline-local-function class"; };
 		if (inlineLocalClass.clStatics.get("value").cfExpr == null) throw "Inline local function was not typed";
@@ -170,4 +172,16 @@ class TypeloadModuleTest {
 	}
 
 	static function classFlag(name:String):Int return 1 << core.TType.TType.flagTClassNames.indexOf(name);
+
+	static function assertLoopAllocationOrder(expression:core.TType.TExpr, label:String):Void switch expression.eexpr {
+		case TFunction({tfExpr:{eexpr:TBlock([{eexpr:TBlock(values)}])}}):
+			var counter = switch values[0].eexpr { case TVar(variable, _): variable; case _: throw '$label counter declaration was not lowered'; };
+			var loopVariable = switch values[2].eexpr {
+				case TWhile(_, {eexpr:TBlock(body)}, _): switch body[0].eexpr { case TVar(variable, _): variable; case _: throw '$label loop variable declaration was not lowered'; };
+				case _: throw '$label while loop was not lowered';
+			};
+			if (loopVariable.vId >= counter.vId) throw '$label loop variable must be allocated before generated iterator temporaries';
+			if (counter.vName != "_g") throw '$label loop temporary was not cross-target renamed';
+		case _: throw '$label loop lowering shape did not match upstream';
+	}
 }

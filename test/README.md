@@ -121,3 +121,7 @@ from source. Conformance still requires the complete reference member set.
 Expression-local IDs and generated temporaries are serialized semantics. If a
 payload differs only in these values, fix typer allocation and transformation
 order; do not canonicalize the payload before comparing it.
+Variable IDs come from a compiler-wide stream, so the alphabetically first
+differing member may only expose an earlier module-scheduling or lowering
+difference. Compare typed dumps as well as the first binary offset before
+assigning the defect to that member.
