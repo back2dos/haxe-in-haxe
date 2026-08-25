@@ -50,10 +50,14 @@ class GrammarTest {
 		assert(switch interpolation.definition { case EClass(value): switch value.data[0].cffKind { case FFun(func): switch func.fExpr.expr { case EReturn({expr: EBinop(OpAdd, {expr: EBinop(OpAdd, _, {expr: EConst(Ident("value"))})}, _)}): true; case _: false; }; case _: false; }; case _: false; });
 		var arrows = Grammar.parse('class Main { function map(values:Array<Int>) { values.map(value -> value + 1); values.map((value:Int) -> value + 1); } }').declarations[0];
 		assert(switch arrows.definition { case EClass(value): switch value.data[0].cffKind { case FFun(func): switch func.fExpr.expr { case EBlock([{expr:ECall(_, [{expr:EFunction(FKArrow, first)}])}, {expr:ECall(_, [{expr:EFunction(FKArrow, second)}])}]): first.fArgs.length == 1 && first.fArgs[0].type == null && second.fArgs.length == 1 && second.fArgs[0].type != null; case _: false; }; case _: false; }; case _: false; });
+		var restArgument = Grammar.parse('class Main { function rest(...values:Int) return call(...values); }').declarations[0];
+		assert(switch restArgument.definition { case EClass(value): switch value.data[0].cffKind { case FFun(func): switch [func.fArgs[0].type.type, func.fExpr.expr] { case [CTPath(path), EReturn({expr:ECall(_, [{expr:EUnop(Spread, Prefix, _)}])})]: path.path.tpackage.join(".") == "haxe" && path.path.tname == "Rest"; case _: false; }; case _: false; }; case _: false; });
 		var moduleFields = Grammar.parse('final values = new Array<Int>(); var enabled:Bool = true; function main() {}');
 		assert(moduleFields.declarations.length == 3 && switch moduleFields.declarations[0].definition { case EStatic({data:FVar(_, _), flags:flags}): flags[0].access == AFinal; case _: false; });
 		var trailingArrayComma = Grammar.parse('class Main { var values = [1, 2,]; }').declarations[0];
 		assert(switch trailingArrayComma.definition { case EClass(value): switch value.data[0].cffKind { case FVar(_, {expr:EArrayDecl(values)}): values.length == 2; case _: false; }; case _: false; });
+		var mapLiteral = Grammar.parse('class Main { var values = [1 => "one"]; }').declarations[0];
+		assert(switch mapLiteral.definition { case EClass(value): switch value.data[0].cffKind { case FVar(_, {expr:EArrayDecl([{expr:EBinop(OpArrow, _, _)}])}): true; case _: false; }; case _: false; });
 		var functionVariableWithoutSemicolon = Grammar.parse('class Main { function run() { var callback = function() {} var next = 1; } }').declarations[0];
 		assert(switch functionVariableWithoutSemicolon.definition { case EClass(value): switch value.data[0].cffKind { case FFun(func): switch func.fExpr.expr { case EBlock(values): values.length == 2; case _: false; }; case _: false; }; case _: false; });
 		var functionFieldWithSemicolon = Grammar.parse('class Main { function new() {}; function run() {}; }').declarations[0];
@@ -64,6 +68,8 @@ class GrammarTest {
 		assert(switch unparenthesizedSwitch.definition { case EClass(value): switch value.data[0].cffKind { case FFun(func): switch func.fExpr.expr { case EReturn({expr:ESwitch(_, _, _)}): true; case _: false; }; case _: false; }; case _: false; });
 		var checkedExpression = Grammar.parse('class Main { function run(value:Dynamic) return (value : String); }').declarations[0];
 		assert(switch checkedExpression.definition { case EClass(value): switch value.data[0].cffKind { case FFun(func): switch func.fExpr.expr { case EReturn({expr:EParenthesis({expr:ECheckType(_, _)})}): true; case _: false; }; case _: false; }; case _: false; });
+		var isExpression = Grammar.parse('class Main { function run(value:Dynamic) return value is String; }').declarations[0];
+		assert(switch isExpression.definition { case EClass(value): switch value.data[0].cffKind { case FFun(func): switch func.fExpr.expr { case EReturn({expr:EIs(_, _)}): true; case _: false; }; case _: false; }; case _: false; });
 		var arrowBlock = Grammar.parse('package; class Main { function run() return () -> { return 1; }; }').declarations[0];
 		assert(switch arrowBlock.definition { case EClass(value): switch value.data[0].cffKind { case FFun(func): switch func.fExpr.expr { case EReturn({expr:EFunction(FKArrow, {fExpr:{expr:EMeta(_, {expr:EReturn({expr:EBlock(_)})})}})}): true; case _: false; }; case _: false; }; case _: false; });
 		var dollarCall = Grammar.parse("class Main { function run(value:Dynamic) $type(value); }").declarations[0];

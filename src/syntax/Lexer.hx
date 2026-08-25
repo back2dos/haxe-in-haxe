@@ -116,7 +116,15 @@ class Lexer {
 	function quotedString(start:Int, single:Bool):LexedToken {
 		var quote = current(); index++; var buffer = new StringBuf();
 		while (!eof() && current() != quote) {
-			if (current() == "\\") { var escapePos = index++; if (eof()) fail(UnterminatedString, start); buffer.add(unescape(current(), escapePos)); index++; }
+			if (current() == "\\") {
+				var escapePos = index++;
+				if (eof()) fail(UnterminatedString, start);
+				if (current() == "x") {
+					if (!isHexDigit(peek(1)) || !isHexDigit(peek(2))) fail(InvalidEscape("x"), escapePos);
+					buffer.add(String.fromCharCode(Std.parseInt("0x" + peek(1) + peek(2))));
+					index += 3;
+				} else { buffer.add(unescape(current(), escapePos)); index++; }
+			}
 			else { buffer.add(current()); index++; }
 		}
 		if (eof()) fail(UnterminatedString, start);

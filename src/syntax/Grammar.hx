@@ -144,11 +144,33 @@ class Grammar {
 		else { body = expression(); accept(Semicolon); }
 		return {fParams:params,fArgs:args,fType:ret,fExpr:body};
 	}
-	function functionArg():FuncArg { var meta=metadata(); var optional=accept(Question) != null; var name=placedIdent(); var type=typeHintOpt(); var value=accept(Binop(OpAssign)) == null ? null : expression(); return {name:name,optional:optional,meta:meta,type:type,expr:value}; }
+	function functionArg():FuncArg {
+		var meta=metadata();
+		var spread=accept(Spread);
+		var optional=spread == null && accept(Question) != null;
+		var name=placedIdent();
+		var type=typeHintOpt();
+		if (spread != null) {
+			var inner = type == null ? {type:Ast.ctMono(), pos:core.Globals.nullPos} : type;
+			var restPos = union(spread.pos, inner.pos);
+			type = Ast.makePtpTh(Ast.mkTypePath(["haxe"], "Rest", [TPType(inner)]), restPos);
+		}
+		var value=accept(Binop(OpAssign)) == null ? null : expression();
+		return {name:name,optional:optional,meta:meta,type:type,expr:value};
+	}
 
 	function expression(?min=0):Expr {
 		var left=unary();
-		while (true) { var op=binop(current().token); if (op == null || precedence(op) < min) break; next(); var right=expression(precedence(op)+1); left=expr(EBinop(op,left,right),union(left.pos,right.pos)); }
+		while (true) {
+			if (current().token.match(Const(Ident("is")))) {
+				if (8 < min) break;
+				next(); var type = typeHint(); left = expr(EIs(left, type), union(left.pos, type.pos));
+				continue;
+			}
+			var op=binop(current().token);
+			if (op == null || precedence(op) < min) break;
+			next(); var right=expression(precedence(op)+1); left=expr(EBinop(op,left,right),union(left.pos,right.pos));
+		}
 		if (min == 0 && accept(Question) != null) { var thenExpr=expression(); expect(DblDot); var elseExpr=expression(); left=expr(ETernary(left,thenExpr,elseExpr),union(left.pos,elseExpr.pos)); }
 		if (min == 0 && is(Arrow)) {
 			var argument = switch left.expr {
@@ -173,6 +195,7 @@ class Grammar {
 			}
 			value;
 		case Unop(op): next(); var e=unary(); expr(EUnop(op,Prefix,e),union(t.pos,e.pos));
+		case Spread: next(); var e=unary(); expr(EUnop(Spread,Prefix,e),union(t.pos,e.pos));
 		case Binop(OpSub): next(); var e=unary(); expr(EUnop(Neg,Prefix,e),union(t.pos,e.pos));
 		case Kwd(Return): next(); var e = is(Semicolon)||is(BrClose) ? null : expression(); expr(EReturn(e), e == null ? t.pos : union(t.pos,e.pos));
 		case Kwd(Throw): next(); var e=expression(); expr(EThrow(e),union(t.pos,e.pos));
@@ -472,7 +495,7 @@ class Grammar {
 	inline function is(t:Token):Bool return Type.enumEq(current().token,t);
 	inline function current():LexedToken return tokens[index]; inline function previous():LexedToken return tokens[index-1]; inline function next():LexedToken return tokens[index++];
 	static function binop(t:Token):Null<Binop> return switch t {case Binop(o):o;case Spread:OpInterval;case _:null;};
-	static function precedence(o:Binop):Int return switch o {case OpInterval:0;case OpAssign|OpAssignOp(_):1;case OpBoolOr:2;case OpBoolAnd:3;case OpOr:4;case OpXor:5;case OpAnd:6;case OpEq|OpNotEq:7;case OpGt|OpGte|OpLt|OpLte:8;case OpShl|OpShr|OpUShr:9;case OpAdd|OpSub:10;case OpMult|OpDiv|OpMod:11;case _: -1;};
+	static function precedence(o:Binop):Int return switch o {case OpInterval|OpArrow:0;case OpAssign|OpAssignOp(_):1;case OpBoolOr:2;case OpBoolAnd:3;case OpOr:4;case OpXor:5;case OpAnd:6;case OpEq|OpNotEq:7;case OpGt|OpGte|OpLt|OpLte:8;case OpShl|OpShr|OpUShr:9;case OpAdd|OpSub:10;case OpMult|OpDiv|OpMod:11;case _: -1;};
 	static function hasAccess(a:Array<PlacedAccess>, v:Access):Bool { for(x in a) if(x.access==v)return true; return false; }
 	static function union(a:Pos,b:Pos):Pos return Ast.punion(a,b);
 	function fail(message:String, ?pos:Pos):Void throw new GrammarError(message,pos == null ? current().pos : pos);
