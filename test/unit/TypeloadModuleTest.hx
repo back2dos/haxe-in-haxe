@@ -57,6 +57,10 @@ class TypeloadModuleTest {
 				if (variable.vName != "error") throw "Catch variable was not typed";
 			case _: throw "Try/catch expression was not typed";
 		}
+		switch expressionClass.clFields.get("conditions").cfExpr.eexpr {
+			case TFunction({tfExpr:{eexpr:TBlock([{eexpr:TWhile({eexpr:TParenthesis(_)}, _, _)}, {eexpr:TIf({eexpr:TParenthesis(_)}, _, _)}])}}):
+			case _: throw "Control-flow conditions were not parenthesized";
+		}
 		switch run.eexpr {
 			case TFunction(func): switch func.tfExpr.eexpr {
 				case TBlock(values):
@@ -191,7 +195,7 @@ class TypeloadModuleTest {
 		case TFunction({tfExpr:{eexpr:TBlock([{eexpr:TBlock(values)}])}}):
 			var counter = switch values[0].eexpr { case TVar(variable, _): variable; case _: throw '$label counter declaration was not lowered'; };
 			var loopVariable = switch values[2].eexpr {
-				case TWhile(_, {eexpr:TBlock(body)}, _): switch body[0].eexpr { case TVar(variable, _): variable; case _: throw '$label loop variable declaration was not lowered'; };
+				case TWhile({eexpr:TParenthesis(_)}, {eexpr:TBlock(body)}, _): switch body[0].eexpr { case TVar(variable, _): variable; case _: throw '$label loop variable declaration was not lowered'; };
 				case _: throw '$label while loop was not lowered';
 			};
 			if (loopVariable.vId >= counter.vId) throw '$label loop variable must be allocated before generated iterator temporaries';

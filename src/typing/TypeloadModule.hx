@@ -730,16 +730,16 @@ class TypeloadModule {
 					case EArrayDecl(subjects): typeArrayPatternSwitch(module, cls, subjects, cases, defaultCase, locals, source.pos);
 					case _: typeGeneralSwitch(module, cls, unwrapped, cases, defaultCase, locals, source.pos);
 				};
-			case EIf(condition, thenExpr, elseExpr): var thenValue = typeExpr(module, cls, thenExpr, locals); typed(TIf(typeExpr(module, cls, condition, locals), thenValue, elseExpr == null ? null : typeExpr(module, cls, elseExpr, locals)), thenValue.etype, source.pos);
+			case EIf(condition, thenExpr, elseExpr): var thenValue = typeExpr(module, cls, thenExpr, locals); typed(TIf(typeCondition(module, cls, condition, locals), thenValue, elseExpr == null ? null : typeExpr(module, cls, elseExpr, locals)), thenValue.etype, source.pos);
 			case ETernary(condition, thenExpr, elseExpr):
 				var thenValue = typeExpr(module, cls, thenExpr, locals);
 				var elseValue = typeExpr(module, cls, elseExpr, locals);
 				typed(TIf(
-					typeExpr(module, cls, condition, locals),
+					typeCondition(module, cls, condition, locals),
 					typed(TBlock([thenValue]), thenValue.etype, thenExpr.pos),
 					typed(TBlock([elseValue]), elseValue.etype, elseExpr.pos)
 				), thenValue.etype, source.pos);
-			case EWhile(condition, body, flag): typed(TWhile(typeExpr(module, cls, condition, locals), typeExpr(module, cls, body, locals), flag), fallback, source.pos);
+			case EWhile(condition, body, flag): typed(TWhile(typeCondition(module, cls, condition, locals), typeExpr(module, cls, body, locals), flag), fallback, source.pos);
 			case EFor(iterator, body): typeForLoop(module, cls, iterator, body, locals, source.pos);
 			case ETry(body, catches):
 				if (catches.length == 0) typeExpr(module, cls, body, locals) else {
@@ -754,6 +754,11 @@ class TypeloadModule {
 				}
 			case _: throw 'Unsupported expression at ${source.pos.pfile}:${source.pos.pmin}';
 		};
+	}
+
+	function typeCondition(module:ModuleDef, cls:TClass, source:Expr, locals:StringMap<TVar>):TExpr {
+		var condition = typeExpr(module, cls, source, locals);
+		return typed(TParenthesis(condition), condition.etype, condition.epos);
 	}
 
 	function typeIs(module:ModuleDef, cls:TClass, source:Expr, hint:TypeHint, locals:StringMap<TVar>, pos:Pos):TExpr {
@@ -1039,6 +1044,7 @@ class TypeloadModule {
 		if (increment != null) loopValues.push(increment);
 		loopValues.push(typeExpr(module, cls, body, bodyLocals));
 		var whileBody = typed(TBlock(loopValues), basic("Void"), body.pos);
+		condition = typed(TParenthesis(condition), basic("Bool"), condition.epos);
 		declarations.push(typed(TWhile(condition, whileBody, NormalWhile), basic("Void"), pos));
 		return typed(TBlock(declarations), basic("Void"), pos);
 	}
@@ -1057,7 +1063,8 @@ class TypeloadModule {
 		var sourceLocal = typed(TLocal(sourceVar), sourceExpr.etype, source.pos);
 		var lengthField = arrayClass.clFields.get("length");
 		var length = typed(TField(sourceLocal, FInstance(arrayClass, [element], lengthField)), basic("Int"), iteratorPos);
-		var condition = typed(TBinop(OpLt, counterLocal, length), basic("Bool"), iteratorPos);
+		var comparison = typed(TBinop(OpLt, counterLocal, length), basic("Bool"), iteratorPos);
+		var condition = typed(TParenthesis(comparison), basic("Bool"), iteratorPos);
 		var values = [
 			typed(TVar(loopVar, typed(TArray(sourceLocal, counterLocal), element, iteratorPos)), basic("Void"), loopName.pos),
 			typed(TUnop(Increment, Prefix, counterLocal), basic("Int"), iteratorPos)
@@ -1085,7 +1092,8 @@ class TypeloadModule {
 		bound.vMeta = generatedLoopMetadata("_g", false);
 		var counterLocal = typed(TLocal(counter), intType, iteratorPos);
 		var boundLocal = typed(TLocal(bound), intType, iteratorPos);
-		var condition = typed(TBinop(OpLt, counterLocal, boundLocal), basic("Bool"), iteratorPos);
+		var comparison = typed(TBinop(OpLt, counterLocal, boundLocal), basic("Bool"), iteratorPos);
+		var condition = typed(TParenthesis(comparison), basic("Bool"), iteratorPos);
 		var values = [typed(TVar(loopVar, typed(TUnop(Increment, Postfix, counterLocal), intType, iteratorPos)), basic("Void"), loopName.pos)];
 		switch typedBody.eexpr { case TBlock(bodyValues): values = values.concat(bodyValues); case _: values.push(typedBody); }
 		return typed(TBlock([
@@ -1102,7 +1110,8 @@ class TypeloadModule {
 		iteratorVar.vMeta = generatedLoopMetadata("`", false);
 		var iteratorLocal = typed(TLocal(iteratorVar), iteratorExpr.etype, source.pos);
 		var hasNext = typeField(iteratorLocal, "hasNext", pos);
-		var condition = typed(TCall(hasNext, []), basic("Bool"), pos);
+		var hasNextCall = typed(TCall(hasNext, []), basic("Bool"), pos);
+		var condition = typed(TParenthesis(hasNextCall), basic("Bool"), pos);
 		var next = typeField(iteratorLocal, "next", pos);
 		var entryType = switch next.etype { case TFun(signature): signature.ret; case _: TDynamic(null); };
 		var nextValue = typed(TCall(next, []), entryType, pos);
