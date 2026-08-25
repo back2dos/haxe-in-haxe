@@ -69,6 +69,9 @@ class Main {
 				case Run(path, runtimeArguments) if (runtimeArguments.length == 0):
 					if (main != null) unsupported("multiple --main options");
 					main = typePath(path.split("."), "--run"); roots.push(main);
+				case RunX(path) if (hasHxbOutput):
+					if (main != null) unsupported("multiple --main options");
+					main = typePath(path.split("."), "-x"); roots.push(main);
 				case SetHxbOut(file):
 					if (hxbArgument != null) unsupported("multiple --hxb options");
 					hxbArgument = file;

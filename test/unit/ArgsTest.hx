@@ -17,6 +17,7 @@ class ArgsTest {
 			case Run(path, values) if (path == "app.Main" && values.join(",") == "one,two"):
 			case _: throw "--run must consume remaining arguments";
 		}
+		switch Args.parseArgs(["-x", "app.Main"])[0] { case RunX("app.Main"): case _: throw "Expected -x run root"; }
 
 		var advanced = Args.parseArgs(["-custom", "wasm=out", "--java-lib", "lib.jar", "--remap", "old:new", "lowercase", "--help-metas", "ignored"]);
 		assertCustomTarget(advanced[0]);

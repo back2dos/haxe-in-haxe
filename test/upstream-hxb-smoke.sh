@@ -180,3 +180,8 @@ run_hxml_case empty-hxml-config haxe/tests/misc/eval/projects/empty_hxml_inclusi
 run_hxml_case issue-8574-no-optimization-config haxe/tests/misc/eval/projects/Issue8574 noOptimization.hxml Main
 run_hxml_case issue-8574-constant-iterator-config haxe/tests/misc/eval/projects/Issue8574 constIntIterator.hxml Main
 run_hxml_case issue-8574-unrolled-loop-config haxe/tests/misc/eval/projects/Issue8574 unrolledLoop.hxml Main
+run_hxml_case issue-4458-pass1-config haxe/tests/misc/eval/projects/Issue4458 compile-pass1.hxml Main
+run_hxml_case issue-4458-pass2-config haxe/tests/misc/eval/projects/Issue4458 compile-pass2.hxml Main
+run_hxml_case issue-4456-config haxe/tests/misc/eval/projects/Issue4456 compile.hxml Main
+run_hxml_case issue-4265-config haxe/tests/misc/eval/projects/Issue4265 compile.hxml Main
+run_hxml_case issue-4399-config haxe/tests/misc/eval/projects/Issue4399 compile.hxml Main
