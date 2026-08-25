@@ -546,7 +546,11 @@ class HxbWriter {
 			case TEnumIndex(value): chunk.writeU8(100); writeTExpr(chunk, value, root, typePool, pos); false;
 			case TEnumParameter(value, field, index): chunk.writeU8(101); writeTExpr(chunk, value, root, typePool, pos); chunk.writeUleb128(writeEnumFieldRef(enumOfField(field), field)); chunk.writeUleb128(index); true;
 			case TCall(callee, args):
-				chunk.writeU8(70 + args.length); writeTExpr(chunk, callee, root, typePool, pos); for (arg in args) writeTExpr(chunk, arg, root, typePool, pos);
+				if (args.length <= 4) {
+					chunk.writeU8(70 + args.length); writeTExpr(chunk, callee, root, typePool, pos); for (arg in args) writeTExpr(chunk, arg, root, typePool, pos);
+				} else {
+					chunk.writeU8(79); writeTExpr(chunk, callee, root, typePool, pos); chunk.writeList(args, function(arg) writeTExpr(chunk, arg, root, typePool, pos));
+				}
 				true;
 			case TIdent(name): chunk.writeU8(250); chunk.writeString(name); true;
 			case TParenthesis(value): chunk.writeU8(61); writeTExpr(chunk, value, root, typePool, pos); false;
@@ -842,10 +846,29 @@ class HxbWriter {
 	static function writeMetadataPlacedTypePath(chunk:HxbChunk, path:core.Ast.PlacedTypePath):Void {
 		chunk.writeList(path.path.tpackage, chunk.writeString);
 		chunk.writeString(path.path.tname);
-		if (path.path.tparams.length != 0) throw "Metadata type-parameter serialization is not ported";
-		chunk.writeUleb128(0);
+		chunk.writeList(path.path.tparams, function(param) switch param {
+			case TPType(type): chunk.writeU8(0); writeMetadataTypeHint(chunk, type);
+			case TPExpr(expr): chunk.writeU8(1); writeMetadataExpr(chunk, expr);
+		});
 		chunk.writeOption(path.path.tsub, chunk.writeString);
 		writePosPair(chunk, path.posFull, path.posPath);
+	}
+	static function writeMetadataTypeHint(chunk:HxbChunk, hint:core.Ast.TypeHint):Void {
+		switch hint.type {
+			case CTPath(path): chunk.writeU8(0); writeMetadataPlacedTypePath(chunk, path);
+			case CTFunction(args, ret): chunk.writeU8(1); chunk.writeList(args, function(arg) writeMetadataTypeHint(chunk, arg)); writeMetadataTypeHint(chunk, ret);
+			case CTParent(type): chunk.writeU8(3); writeMetadataTypeHint(chunk, type);
+			case CTOptional(type): chunk.writeU8(5); writeMetadataTypeHint(chunk, type);
+			case CTNamed(name, type): chunk.writeU8(6); chunk.writeString(name.name); writePos(chunk, name.pos); writeMetadataTypeHint(chunk, type);
+			case CTIntersection(types): chunk.writeU8(7); chunk.writeList(types, function(type) writeMetadataTypeHint(chunk, type));
+			case CTAnonymous(fields):
+				if (fields.length != 0) throw "Non-empty structural metadata type-hint serialization is not ported";
+				chunk.writeU8(2); chunk.writeUleb128(0);
+			case CTExtend(paths, fields):
+				if (fields.length != 0) throw "Structural-extension metadata fields are not ported";
+				chunk.writeU8(4); chunk.writeList(paths, function(path) writeMetadataPlacedTypePath(chunk, path)); chunk.writeUleb128(0);
+		}
+		writePos(chunk, hint.pos);
 	}
 	static function writeMetadataEntry(chunk:HxbChunk, entry:core.Ast.MetadataEntry):Void {
 		chunk.writeString(metadataName(entry.meta)); writePos(chunk, entry.pos); chunk.writeList(entry.exprs, function(expr) writeMetadataExpr(chunk, expr));

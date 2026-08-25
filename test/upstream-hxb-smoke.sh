@@ -58,6 +58,7 @@ run_case issue-10832 haxe/tests/misc/eval/projects/Issue10832 Main
 run_case issue-10959 haxe/tests/misc/eval/projects/Issue10959 Main
 run_case issue-10980 haxe/tests/misc/eval/projects/Issue10980 Main
 run_case issue-11152 haxe/tests/misc/eval/projects/Issue11152 Main
+run_case issue-11164 haxe/tests/misc/eval/projects/Issue11164 Main
 run_case issue-11176 haxe/tests/misc/eval/projects/Issue11176 Main
 run_case issue-11180 haxe/tests/misc/eval/projects/Issue11180 Main
 run_case issue-11102 haxe/tests/misc/eval/projects/Issue11102 Main

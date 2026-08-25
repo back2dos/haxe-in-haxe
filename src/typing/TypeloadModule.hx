@@ -235,6 +235,8 @@ class TypeloadModule {
 		for (declaration in declarations) switch declaration.definition {
 			case EClass(value):
 				var cls = findClass(module, value.name.name);
+				var previousTypeParams = activeTypeParams;
+				activeTypeParams = typeParamMap(cls.clParams);
 				for (flag in value.flags) switch flag {
 					case HExtends(path):
 						var parent = resolvePath(module, path.path);
@@ -244,6 +246,7 @@ class TypeloadModule {
 						switch implemented { case TInst(interfaceClass, params): cls.clImplements.push({cls: interfaceClass, params: params}); case _: throw 'Implemented type of ${cls.clPath.name} must be a class'; }
 					case _:
 				}
+				activeTypeParams = previousTypeParams;
 			case _:
 		}
 		// Standard-library implementation bodies are not needed to resolve the
@@ -1345,7 +1348,15 @@ class TypeloadModule {
 		if (path.tpackage.length == 0 && path.tname == "Dynamic") return TDynamic(null);
 		var target = current;
 		var resolvedName = path.tname;
-		if (path.tpackage.length != 0) target = loadModule({pack: path.tpackage, name: path.tname});
+		if (path.tpackage.length != 0) {
+			var moduleIndex = -1;
+			for (index in 0...path.tpackage.length) if (!Ast.isLowerIdent(path.tpackage[index])) { moduleIndex = index; break; }
+			if (moduleIndex < 0) target = loadModule({pack:path.tpackage, name:path.tname});
+			else {
+				target = loadModule({pack:path.tpackage.slice(0, moduleIndex), name:path.tpackage[moduleIndex]});
+				resolvedName = path.tname;
+			}
+		}
 		else if (findModuleType(current, path.tname) == null) {
 			var imported = moduleImports.get(moduleKey(current.mPath)).get(path.tname);
 			if (imported != null) {
@@ -1366,7 +1377,7 @@ class TypeloadModule {
 				else return TDynamic(null);
 			}
 		}
-		var name = path.tpackage.length == 0 ? resolvedName : (path.tsub == null ? path.tname : path.tsub);
+		var name = path.tpackage.length == 0 ? resolvedName : (path.tsub == null ? resolvedName : path.tsub);
 		if (path.tpackage.length == 0 && path.tsub != null) name = path.tsub;
 		var type = findModuleType(target, name);
 		if (type == null) return TDynamic(null); // built-ins await BasicTypes/Typecore.

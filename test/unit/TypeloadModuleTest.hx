@@ -108,6 +108,10 @@ class TypeloadModuleTest {
 		var count = switch module.mTypes[3] { case TAbstractDecl(value): value; case _: throw "Expected Count abstract"; };
 		if (count.aImpl == null || count.aImpl.clPath.pack.join(".") != "unit.moduleload._Example" || count.aImpl.clPath.name != "Count_Impl_") throw "Abstract implementation class was not installed";
 		switch count.aThis { case TAbstract(value, _): if (value.aPath.name != "Int") throw "Abstract underlying type was not resolved"; case _: throw "Expected abstract underlying type"; }
+		var balancedTree = loader.loadModule({pack:["haxe", "ds"], name:"BalancedTree"});
+		var balancedTreeClass = switch balancedTree.mTypes[0] { case TClassDecl(value): value; case _: throw "Expected BalancedTree class"; };
+		if (balancedTreeClass.clImplements.length != 1 || balancedTreeClass.clImplements[0].cls.clModule.mPath.name != "Constraints" || balancedTreeClass.clImplements[0].cls.clPath.name != "IMap") throw "Qualified secondary type was not resolved";
+		switch balancedTreeClass.clImplements[0].params[0] { case TInst(typeParam, []) if (typeParam == balancedTreeClass.clParams[0].ttpClass): case _: throw "Class inheritance captured the wrong type-parameter scope"; }
 	}
 
 	static function assertBasic(name:String, type:T):Void switch type {
