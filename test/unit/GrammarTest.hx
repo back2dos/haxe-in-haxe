@@ -92,6 +92,8 @@ class GrammarTest {
 		assert(switch privateAbstractClass.definition { case EClass(value): value.flags.indexOf(HPrivate) != -1 && value.flags.indexOf(HAbstract) != -1; case _: false; });
 		var abstractField = Grammar.parse('abstract class Input { abstract public function read():Int; }').declarations[0];
 		assert(switch abstractField.definition { case EClass(value): value.data[0].cffAccess.filter(function(access) return access.access == AAbstract).length == 1; case _: false; });
+		var intersectionConstraint = Grammar.parse('class Input<T:Readable & { function close():Void; }> {}').declarations[0];
+		assert(switch intersectionConstraint.definition { case EClass(value): switch value.params[0].tpConstraints.type { case CTIntersection(types): types.length == 2; case _: false; }; case _: false; });
 		var overloadedConstructor = Grammar.parse('abstract Vector<T>(Array<T>) { extern overload public inline function new(length:Int) {} }').declarations[0];
 		assert(switch overloadedConstructor.definition { case EAbstract(value): value.data[0].cffAccess.filter(function(access) return access.access == AOverload).length == 1; case _: false; });
 		var unparenthesizedCast = Grammar.parse('class Main { function run() return cast readByte(); }').declarations[0];

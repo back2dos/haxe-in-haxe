@@ -378,6 +378,16 @@ class Grammar {
 	function variable(finalValue=false):EVar { var n=placedIdent(); var type=typeHintOpt(); var value=accept(Binop(OpAssign)) == null ? null : expression(); return Ast.mkEVar(n,finalValue,false,type,value); }
 	function typeHintOpt():Null<TypeHint> return accept(DblDot) == null ? null : typeHint();
 	function typeHint():TypeHint {
+		var first = typeHintInner();
+		if (accept(Binop(OpAnd)) == null) return first;
+		var rest = typeHint();
+		var types = switch rest.type {
+			case CTIntersection(types): [first].concat(types);
+			case _: [first, rest];
+		};
+		return {type:CTIntersection(types), pos:union(first.pos, rest.pos)};
+	}
+	function typeHintInner():TypeHint {
 		var start = current().pos;
 		var optional = accept(Question) != null;
 		var complex:ComplexType;
