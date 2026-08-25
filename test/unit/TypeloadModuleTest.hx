@@ -129,6 +129,7 @@ class TypeloadModuleTest {
 		var keyValueLoop = loader.loadModule({pack:["unit", "moduleload"], name:"KeyValueLoop"});
 		var keyValueLoopClass = switch keyValueLoop.mTypes[0] { case TClassDecl(value): value; case _: throw "Expected key/value-loop class"; };
 		if (keyValueLoopClass.clStatics.get("visit").cfExpr == null) throw "Key/value loop was not typed";
+		if (keyValueLoopClass.clStatics.get("visitMap").cfExpr == null) throw "Map value loop was not typed";
 		var inlineLocal = loader.loadModule({pack:["unit", "moduleload"], name:"InlineLocalFunction"});
 		var inlineLocalClass = switch inlineLocal.mTypes[0] { case TClassDecl(value): value; case _: throw "Expected inline-local-function class"; };
 		if (inlineLocalClass.clStatics.get("value").cfExpr == null) throw "Inline local function was not typed";

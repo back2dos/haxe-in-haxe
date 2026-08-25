@@ -955,13 +955,20 @@ class TypeloadModule {
 				increment = null;
 			case _:
 				var sourceExpr = typeExpr(module, cls, source, locals);
-				switch sourceExpr.etype {
+				switch followTypeAliases(sourceExpr.etype) {
+					case TAbstract(abs, params) if (abs.aImpl != null && abs.aImpl.clStatics.get("iterator") != null):
+						var field = abs.aImpl.clStatics.get("iterator");
+						var owner = typed(TTypeExpr(TClassDecl(abs.aImpl)), TDynamic(null), source.pos);
+						var calleeType = applyTypeParams(field.cfType, abs.aParams, params);
+						var callee = typed(TField(owner, FStatic(abs.aImpl, field)), calleeType, source.pos);
+						var iteratorType = switch calleeType { case TFun(signature): signature.ret; case _: TDynamic(null); };
+						sourceExpr = typed(TCall(callee, [sourceExpr]), iteratorType, source.pos);
 					case TAbstract(abs, params):
 						var underlying = applyTypeParams(abs.aThis, abs.aParams, params);
 						sourceExpr = typed(TCast(sourceExpr, null), underlying, sourceExpr.epos);
 					case _:
 				}
-				switch sourceExpr.etype {
+				switch followTypeAliases(sourceExpr.etype) {
 					case TInst(arrayClass, [element]) if (arrayClass.clPath.pack.length == 0 && arrayClass.clPath.name == "Array"):
 						loopType = element;
 						var counter = makeGeneratedVar("`", basic("Int"), iterator.pos);
@@ -976,6 +983,18 @@ class TypeloadModule {
 						condition = typed(TBinop(OpLt, counterLocal, length), basic("Bool"), iterator.pos);
 						valueExpr = typed(TArray(sourceLocal, counterLocal), loopType, iterator.pos);
 						increment = typed(TUnop(Increment, Prefix, counterLocal), basic("Int"), iterator.pos);
+					case TAnon(anon) if (anon.aFields.get("hasNext") != null && anon.aFields.get("next") != null):
+						var iteratorType = sourceExpr.etype;
+						var iteratorVar = makeGeneratedVar("`", iteratorType, iterator.pos);
+						iteratorVar.vMeta = generatedLoopMetadata("`", false);
+						var iteratorLocal = typed(TLocal(iteratorVar), iteratorType, iterator.pos);
+						declarations.push(typed(TVar(iteratorVar, sourceExpr), iteratorType, source.pos));
+						var hasNext = typeField(iteratorLocal, "hasNext", iterator.pos);
+						condition = typed(TCall(hasNext, []), basic("Bool"), iterator.pos);
+						var next = typeField(iteratorLocal, "next", iterator.pos);
+						loopType = switch next.etype { case TFun(signature): signature.ret; case _: TDynamic(null); };
+						valueExpr = typed(TCall(next, []), loopType, iterator.pos);
+						increment = null;
 					case TInst(iterableClass, iterableParams):
 						var iteratorField = iterableClass.clFields.get("iterator");
 						if (iteratorField == null) throw "Iterable type does not define iterator()";
@@ -1325,6 +1344,12 @@ class TypeloadModule {
 			case _:
 		}
 		switch object.etype {
+			case TType(def, params):
+				var underlying = applyTypeParams(def.tType, def.tParams, params);
+				return typeField(typed(TCast(object, null), underlying, object.epos), name, pos);
+			case TAnon(anon):
+				var field = anon.aFields.get(name);
+				if (field != null) return typed(TField(object, FAnon(field)), field.cfType, pos);
 			case TInst(cls, params):
 				var access = typeInstanceField(object, cls, params, name, pos);
 				if (access != null) return access;
@@ -1348,6 +1373,11 @@ class TypeloadModule {
 			case _:
 		}
 		return typed(TField(object, FDynamic(name)), TDynamic(null), pos);
+	}
+
+	function followTypeAliases(type:T):T return switch type {
+		case TType(def, params): followTypeAliases(applyTypeParams(def.tType, def.tParams, params));
+		case other: other;
 	}
 
 	function typeInstanceField(object:TExpr, cls:TClass, params:TParams, name:String, pos:Pos):Null<TExpr> {
@@ -1494,8 +1524,11 @@ class TypeloadModule {
 					depth--;
 				}
 				if (found != null) target = found;
-				else if (path.tname == "Null") target = loadModule({pack:[], name:"StdTypes"});
-				else return TDynamic(null);
+				else {
+					var stdTypes = current.mPath.pack.length == 0 && current.mPath.name == "StdTypes" ? null : tryLoadModule({pack:[], name:"StdTypes"});
+					if (stdTypes != null && findModuleType(stdTypes, path.tname) != null) target = stdTypes;
+					else return TDynamic(null);
+				}
 			}
 		}
 		var name = path.tpackage.length == 0 ? resolvedName : (path.tsub == null ? resolvedName : path.tsub);
