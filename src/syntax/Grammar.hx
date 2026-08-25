@@ -269,6 +269,12 @@ class Grammar {
 				var name:Null<PlacedName> = is(POpen) ? null : placedIdent();
 				var f = functionRest();
 				expr(EFunction(name == null ? FKAnonymous : FKNamed(name, true), f), union(t.pos, f.fExpr == null ? t.pos : f.fExpr.pos));
+			case Kwd(Macro):
+				// Macro fields are rejected by the source-only typer, but their bodies
+				// still have to parse so the declaration can reach that boundary.
+				var value = unary();
+				value.pos = union(t.pos, value.pos);
+				value;
 			case Kwd(Function): var name:Null<PlacedName> = is(POpen) ? null : placedIdent(); var f=functionRest(); expr(EFunction(name == null ? FKAnonymous : FKNamed(name,false),f), union(t.pos,f.fExpr == null ? t.pos : f.fExpr.pos));
 			case _: index--; objectOrIdentifier();
 		}; return e;
