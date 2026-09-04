@@ -17,15 +17,15 @@ class DumpConfig {
 		dumpPrintIds:false, dumpDependencies:false
 	};
 	public static function updateFromDefines(conf:DumpConfiguration, def:DefineContext):Void {
-		conf.dumpMode = switch Define.rawDefinedValueSafe(def, "dump") {
+		conf.dumpMode = switch Define.definedValueSafe(def, Define.Dump) {
 			case "1": Ast;
 			case "pretty": Pretty;
 			case "record": Record;
 			case "position": Position;
 			case _: NoDump;
 		};
-		conf.dumpPath = Define.rawDefinedValueSafe(def, "dump-path", "dump");
-		conf.dumpStage = switch Define.rawDefinedValueSafe(def, "dump-stage") {
+		conf.dumpPath = Define.definedValueSafe(def, Define.DumpPath, "dump");
+		conf.dumpStage = switch Define.definedValueSafe(def, Define.DumpStage) {
 			case "typing": AfterTyping;
 			case "casting": AfterCasting;
 			case "inlining": AfterInlining;
@@ -34,8 +34,8 @@ class DumpConfig {
 			case "dce": AfterDce;
 			case _: AfterDce;
 		};
-		conf.dumpPrintIds = !Define.rawDefined(def, "dump-ignore-var-ids");
-		conf.dumpDependencies = Define.rawDefined(def, "dump-dependencies");
+		conf.dumpPrintIds = !Define.defined(def, Define.DumpIgnoreVarIds);
+		conf.dumpDependencies = Define.defined(def, Define.DumpDependencies);
 	}
 	public static function stringOfDumpStage(stage:DumpStage):String return switch stage {
 		case AfterTyping: "AfterTyping";

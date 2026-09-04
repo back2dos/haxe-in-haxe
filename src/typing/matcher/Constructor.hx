@@ -1,6 +1,7 @@
 package typing.matcher;
 
 import core.TType;
+import core.ds.Hashtbl;
 import core.Globals;
 import core.Globals.Pos;
 import core.TFunctions.*;

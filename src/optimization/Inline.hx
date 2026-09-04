@@ -1,4 +1,6 @@
 package optimization;
+import String as StdString;
+import context.SafeCom.SafeContext;
 import core.Globals;
 import core.Ast;
 import core.TType;
@@ -12,7 +14,7 @@ import core.Meta;
 import core.Error;
 import optimization.OptimizerTexpr.*;
 // haxe/src/optimization/inline.ml — mechanical draft; not compiled or validated.
-typedef InlineContext = {var scom:Dynamic; var typer:Dynamic;}
+typedef InlineContext = {var scom:SafeContext; var typer:Dynamic;}
 typedef InLocal = {var iVar:TVar; var iSubst:TVar; var iOutside:Bool; var iAbstractThis:Bool; var iCaptured:Bool; var iWrite:Bool; var iRead:Int; var iCalled:Int; var iForceTemp:Bool; var iDefaultValue:Null<TExpr>;}
 enum VarInlineKind { VIInline; VIInlineIfCalled; VIDoNotInline; }
 typedef InlineConfig = {var hasParams:Bool; var mapType:T->T;}
@@ -24,7 +26,7 @@ class Inline {
    case ["Type","enumIndex",[{eexpr:TField(_,FEnum(_,f))}]]:mk(TConst(TInt(f.efIndex)),b.tint,p);
    case ["Type","enumIndex",[{eexpr:TCall({eexpr:TField(_,FEnum(_,f))},pl)}]] if (all(e -> !hasSideEffect(e),pl)):mk(TConst(TInt(f.efIndex)),b.tint,p);
    case ["Std","int",[e = {eexpr:TConst(TInt(_))}]]:{eexpr:e.eexpr,etype:e.etype,epos:p};
-   case ["String","fromCharCode",[{eexpr:TConst(TInt(i))}]] if (i > 0 && i < 128):mk(TConst(TString(String.fromCharCode(i))),b.tstring,p);
+   case ["String","fromCharCode",[{eexpr:TConst(TInt(i))}]] if (i > 0 && i < 128):mk(TConst(TString(StdString.fromCharCode(i))),b.tstring,p);
    case ["Std","string",[{eexpr:TCast(e = {eexpr:TConst(ct)},null)}]] | ["Std","string",[e = {eexpr:TConst(ct)}]]:switch ct {case TString(_):{eexpr:e.eexpr,etype:e.etype,epos:p}; case TInt(i):mk(TConst(TString(Std.string(i))),b.tstring,p); case TBool(v):mk(TConst(TString(v ? "true" : "false")),b.tstring,p); case _:null;}
    case ["Std","string",[e = {eexpr:TIf(_,{eexpr:TConst(TString(_))},{eexpr:TConst(TString(_))})}]]:e;
    case ["Std","string",[ev = {eexpr:TLocal(v) | TField({eexpr:TLocal(v)},_)}]] if ((platform == Js || platform == Flash) && switch v.vKind {case VUser(_):true; case _:false;}):
@@ -38,8 +40,8 @@ class Inline {
   };
  }
  public static function contextOfTyper(typer:Dynamic):InlineContext return {scom:context.SafeCom.ofTyper(typer),typer:typer};
- public static function contextOfScom(scom:Dynamic):InlineContext return {scom:scom,typer:null};
- public static function apiInline(scom:Dynamic,c:TClass,field:String,params:Array<TExpr>,p:Pos):Null<TExpr> {
+ public static function contextOfScom(scom:SafeContext):InlineContext return {scom:scom,typer:null};
+ public static function apiInline(scom:SafeContext,c:TClass,field:String,params:Array<TExpr>,p:Pos):Null<TExpr> {
   function mkTypeexpr(path:GlobalTypePath):TExpr {var m:ModuleDef = try scom.findModule(path) catch (_:NotFound) {throw "Inline.mkTypeexpr";}; addDependency(scom.curclass.clModule,m,MDepFromTyping); for (mt in m.mTypes) switch mt {case TClassDecl(cl) if (Globals.sTypePath(cl.clPath) == Globals.sTypePath(path)):return Texpr.Builder.makeStaticThis(cl,p); case _:} throw "Invalid_argument: Option.get";}
   function jsSyntax():TExpr return mkTypeexpr({pack:["js"],name:"Syntax"}); function jsBoot():TExpr return mkTypeexpr({pack:["js"],name:"Boot"}); var b = scom.basic;
   return switch [Globals.sTypePath(c.clPath),field,params] {
@@ -52,7 +54,7 @@ class Inline {
      case TTypeExpr(TAbstractDecl({aPath:{pack:[],name:"Bool"}})):typeof("boolean");
      case TTypeExpr(TAbstractDecl({aPath:{pack:[],name:"Float"}})):typeof("number");
      case TTypeExpr(TAbstractDecl({aPath:{pack:[],name:"Int"}})) if (trivial(o)):var lhs = mk(TBinop(OpOr,o,mk(TConst(TInt(0)),b.tint,p)),b.tint,p); var check = Texpr.Builder.fcall(jsSyntax(),"strictEq",[lhs,o],b.tbool,p); mk(TBinop(OpBoolAnd,typeof("number"),check),b.tbool,p);
-     case TTypeExpr(TClassDecl({clPath:{pack:[],name:"Array"}})):var iof = Texpr.Builder.fcall(jsSyntax(),"instanceof",[o,t],b.tbool,p); if (!core.Define.defined(scom.defines,JsEnumsAsArrays)) iof; else {var en = mk(TField(o,FDynamic("__enum__")),tDynamic,p); var notEnum = mk(TBinop(OpEq,en,mk(TConst(TNull),tDynamic,p)),b.tbool,p); mk(TBinop(OpBoolAnd,iof,notEnum),b.tbool,p);}
+     case TTypeExpr(TClassDecl({clPath:{pack:[],name:"Array"}})):var iof = Texpr.Builder.fcall(jsSyntax(),"instanceof",[o,t],b.tbool,p); if (!core.Define.defined(scom.defines,core.Define.JsEnumsAsArrays)) iof; else {var en = mk(TField(o,FDynamic("__enum__")),tDynamic,p); var notEnum = mk(TBinop(OpEq,en,mk(TConst(TNull),tDynamic,p)),b.tbool,p); mk(TBinop(OpBoolAnd,iof,notEnum),b.tbool,p);}
      case TTypeExpr(TClassDecl(cls)):hasClassFlag(cls,CInterface) ? Texpr.Builder.fcall(jsBoot(),"__implements",[o,t],b.tbool,p) : Texpr.Builder.fcall(jsSyntax(),"instanceof",[o,t],b.tbool,p);
      case _:null;
     }
@@ -74,15 +76,15 @@ class Inline {
    case _:null;
   };
  }
- public static function inlineMetadata(e:TExpr,meta:Metadata):TExpr {for (m in meta) switch m {case {meta:Pure,exprs:[{expr:EConst(Ident("inferredPure"))}]}:case {meta:Deprecated | Pure | NullSafety}:e = mk(TMeta(m,e),e.etype,e.epos); case _:} return e;}
+ public static function inlineMetadata(e:TExpr,meta:Metadata):TExpr {for (m in meta) switch m {case {meta:core.MetaList.StrictMeta.Pure,exprs:[{expr:EConst(Ident("inferredPure"))}]}:case {meta:core.MetaList.StrictMeta.Deprecated | core.MetaList.StrictMeta.Pure | core.MetaList.StrictMeta.NullSafety}:e = mk(TMeta(m,e),e.etype,e.epos); case _:} return e;}
  public static function typeInline(ictx:InlineContext,cf:TClassField,f:TFunc,ethis:TExpr,params:Array<TExpr>,tret:T,config:Null<InlineConfig>,p:Pos,force:Bool,selfCallingClosure:Bool = false):TExpr {
-  var scom = ictx.scom;
+  var scom:SafeContext = ictx.scom;
   try {var c = switch follow(ethis.etype) {case TInst(c,_):c; case TAnon(a):switch a.aStatus {case ClassStatics(c):c; case _:throw new TypeExit();} case _:throw new TypeExit();}; var result = apiInline(scom,c,cf.cfName,params,p); if (result == null) throw new TypeExit(); return result;} catch (_:TypeExit) {}
   if (config == null) config = inlineDefaultConfig(cf,ethis.etype); var hasParams = config.hasParams; var mapType = config.mapType; if (ictx.typer != null) params = inlineRestParams(ictx.typer,f,params,mapType,p);
   var state = new InlineState(ictx,ethis,params,cf,f,p); var vthis = state.initialize(); var inLoop = false;
-  function returnType(t:T,el:Array<TExpr>):T {if (follow(f.tfType) == tDynamic || core.ExtType.isVoid(follow(f.tfType))) return f.tfType; if (core.ExtType.isVoid(t)) return typing.UnifyMin.unifyMinRaise(scom.basic,el); return t;}
-  function mapPos(e:TExpr):TExpr return selfCallingClosure || core.Define.defined(scom.defines,KeepInlinePositions) ? e : {eexpr:e.eexpr,etype:e.etype,epos:p};
-  function saveLocals():Void->Void return ictx.typer == null ? function() {} : typing.Typecore.saveLocals(ictx.typer);
+  function returnType(t:T,el:Array<TExpr>):T {if (follow(f.tfType) == tDynamic || core.TOther.ExtType.isVoid(follow(f.tfType))) return f.tfType; if (core.TOther.ExtType.isVoid(t)) return typing.UnifyMin.unifyMinRaise(scom.basic,el); return t;}
+  function mapPos(e:TExpr):TExpr return selfCallingClosure || core.Define.defined(scom.defines,core.Define.KeepInlinePositions) ? e : {eexpr:e.eexpr,etype:e.etype,epos:p};
+  function saveLocals():Void->Void return ictx.typer == null ? function() {} : context.Typecore.saveLocals(ictx.typer);
   function hasTermReturn(e:TExpr):Bool {
    function loop(e:TExpr):Void {var r = switch e.eexpr {
     case TReturn(_):true; case TFunction(_):false;
@@ -109,7 +111,7 @@ class Inline {
       case []:if (term) {t = mkMono(); [mk(TConst(TNull),t,p)];} else [];
       case [a]:var a = map(term,false,a); if (term) t = a.etype; [a];
       case _:var first = el[0]; var rest = el.slice(1); switch first.eexpr {
-       case TIf(cond,a,null) if (term && hasTermReturn(a)):block([{eexpr:TIf(cond,a,mk(TBlock(rest),first.etype,first.epos)),etype:first.etype,epos:Globals.punion(first.epos,rest[rest.length - 1].epos)}]);
+       case TIf(cond,a,null) if (term && hasTermReturn(a)):block([{eexpr:TIf(cond,a,mk(TBlock(rest),first.etype,first.epos)),etype:first.etype,epos:core.Ast.punion(first.epos,rest[rest.length - 1].epos)}]);
        case _:var a = map(false,false,first); [a].concat(block(rest));
       }
      }; var result = block(el); restore(); {eexpr:TBlock(result),etype:t,epos:e.epos};
@@ -122,7 +124,7 @@ class Inline {
     case TCall({eexpr:TConst(TSuper),etype:t},el):state.hadSideEffect = true; switch follow(t) {case TInst(c = {clConstructor:cf = {cfKind:Method(MethInline),cfExpr:{eexpr:TFunction(tf)}}},_):map(term,false,typeInlineCtor(ictx,c,cf,tf,ethis,el,po)); case _:Error.raiseTypingError("Cannot inline function containing super",po);}
     case TCall(e1,el):state.hadSideEffect = true; var e1 = map(false,true,e1); withExpr(e,TCall(e1,el.map(e -> map(false,false,e))));
     case TConst(TSuper):Error.raiseTypingError("Cannot inline function containing super",po);
-    case TMeta(m = {meta:Ast},e1) if (term):var e1 = map(term,inCall,e1); {eexpr:TMeta(m,e1),etype:e1.etype,epos:e.epos};
+    case TMeta(m = {meta:core.MetaList.StrictMeta.Ast},e1) if (term):var e1 = map(term,inCall,e1); {eexpr:TMeta(m,e1),etype:e1.etype,epos:e.epos};
     case TMeta(m,e1):withExpr(e,TMeta(m,map(term,inCall,e1)));
     case TNew(_,_,_) | TBinop(OpAssignOp(_) | OpAssign,_,_) | TUnop(Increment | Decrement,_,_):state.hadSideEffect = true; mapExpr(e -> map(false,false,e),e);
     case _:mapExpr(e -> map(false,false,e),e);
@@ -136,17 +138,17 @@ class Inline {
  }
  public static function typeInlineCtor(ictx:InlineContext,c:TClass,cf:TClassField,tf:TFunc,ethis:TExpr,el:Array<TExpr>,po:Pos):TExpr {
   var cparams = extractParamTypes(c.clParams); var thisExpr = mk(TConst(TThis),TInst(c,cparams),c.clPos); var inits = [];
-  for (cf in c.clOrderedFields) switch [cf.cfKind,cf.cfExpr] {case [Var(_,_),e] if (e != null):var lhs = mk(TField(thisExpr,FInstance(c,cparams,cf)),cf.cfType,e.epos); inits.push(mk(TBinop(OpAssign,lhs,e),cf.cfType,e.epos)); case _:}
+  for (cf in c.clOrderedFields) switch [cf.cfKind,cf.cfExpr] {case [Var({vRead:_,vWrite:_}),e] if (e != null):var lhs = mk(TField(thisExpr,FInstance(c,cparams,cf)),cf.cfType,e.epos); inits.push(mk(TBinop(OpAssign,lhs,e),cf.cfType,e.epos)); case _:}
   if (inits.length > 0) {var body = switch tf.tfExpr.eexpr {case TBlock(el):el; case _:[tf.tfExpr];}; tf = {tfArgs:tf.tfArgs,tfType:tf.tfType,tfExpr:mk(TBlock(inits.concat(body)),ictx.scom.basic.tvoid,c.clPos)};}
   return typeInline(ictx,cf,tf,ethis,el,ictx.scom.basic.tvoid,null,po,true);
  }
  public static function inlineRestParams(ctx:Dynamic,f:TFunc,params:Array<TExpr>,mapType:T->T,p:Pos):Array<TExpr> {
   if (!ctx.com.config.pfSupportsRestArgs) return params;
   function loop(args:Array<{variable:TVar,defaultValue:Null<TExpr>}>,params:Array<TExpr>):Array<TExpr> {
-   if (args.length == 1 && core.ExtType.isRest(follow(args[0].variable.vType))) {
+   if (args.length == 1 && core.TOther.ExtType.isRest(follow(args[0].variable.vType))) {
     switch params {case [{eexpr:TUnop(Spread,Prefix,e)}]:return [e]; case _:}
     var v = args[0].variable; return switch follow(mapType(v.vType)) {
-     case TAbstract(a = {aPath:{pack:["haxe"],name:"Rest"},aImpl:c},[t]) if (c != null):var cf = c.clStatics.get("of"); if (cf == null) throw "Can't find haxe.Rest.of function"; var pos = punionEl(p,params); var paramType = switch follow(t) {case TMono(_):typing.Typecore.unifyMin(ctx,params); case _:t;}; var array = mk(TArrayDecl(params),ctx.t.tarray(paramType),pos); [typing.CallUnification.makeStaticCallBetter(ctx,c,cf,[t],[array],TAbstract(a,[paramType]),pos)];
+     case TAbstract(a = {aPath:{pack:["haxe"],name:"Rest"},aImpl:c},[t]) if (c != null):var cf = c.clStatics.get("of"); if (cf == null) throw "Can't find haxe.Rest.of function"; var pos = punionEl(p,params); var paramType = switch follow(t) {case TMono(_):context.Typecore.unifyMin(ctx,params); case _:t;}; var array = mk(TArrayDecl(params),ctx.t.tarray(paramType),pos); [typing.CallUnification.makeStaticCallBetter(ctx,c,cf,[t],[array],TAbstract(a,[paramType]),pos)];
      case _:throw "Unexpected rest arguments type";
     };
    }
@@ -155,7 +157,7 @@ class Inline {
  }
 }
 class InlineState {
- var ictx:InlineContext; var scom:Dynamic; var ethis:TExpr; var params:Array<TExpr>; var cf:TClassField; var f:TFunc; var p:Pos;
+ var ictx:InlineContext; var scom:SafeContext; var ethis:TExpr; var params:Array<TExpr>; var cf:TClassField; var f:TFunc; var p:Pos;
  var locals = new haxe.ds.IntMap<InLocal>(); var checker:Dynamic;
  public var inlinedVars:Array<{local:InLocal,expr:TExpr}> = []; public var inLocalFun = false; public var hadSideEffect = false; public var hasReturnValue = false;
  public function new(ictx:InlineContext,ethis:TExpr,params:Array<TExpr>,cf:TClassField,f:TFunc,p:Pos) {this.ictx = ictx; scom = ictx.scom; this.ethis = ethis; this.params = params; this.cf = cf; this.f = f; this.p = p; checker = createAffectionChecker();}
@@ -164,7 +166,7 @@ class InlineState {
  public function mightBeAffected(e:TExpr):Bool return checker.mightBeAffected(e);
  function local(v:TVar,subst:TVar,outside:Bool):InLocal return {iVar:v,iSubst:subst,iOutside:outside,iAbstractThis:Meta.has(This,v.vMeta),iCaptured:false,iWrite:false,iCalled:0,iForceTemp:false,iRead:0,iDefaultValue:null};
  public function declare(v:TVar):InLocal {
-  if (locals.exists(v.vId)) return locals.get(v.vId); var name = getMetaString(v.vMeta,RealPath); if (name == null) name = v.vName; var w = allocVar(switch v.vKind {case VUser(_):VInlined; case k:k;},name,v.vType,v.vPos); w.vExtra = v.vExtra; var i = local(v,w,false); w.vMeta = v.vMeta.filter(m -> m.meta != This); locals.set(v.vId,i); locals.set(w.vId,i); return i;
+  if (locals.exists(v.vId)) return locals.get(v.vId); var name = core.Ast.getMetaString(v.vMeta,core.MetaList.StrictMeta.RealPath); if (name == null) name = v.vName; var w = allocVar(switch v.vKind {case VUser(_):VInlined; case k:k;},name,v.vType,v.vPos); w.vExtra = v.vExtra; var i = local(v,w,false); w.vMeta = v.vMeta.filter(m -> m.meta != This); locals.set(v.vId,i); locals.set(w.vId,i); return i;
  }
  public function read(v:TVar):InLocal {var l = locals.exists(v.vId) ? locals.get(v.vId) : local(v,v,true); if (inLocalFun) l.iCaptured = true; return l;}
  function getSubstitutions(p:Pos):{vars:Array<{variable:TVar,expr:Null<TExpr>}>,subst:haxe.ds.IntMap<{kind:VarInlineKind,expr:TExpr}>} {
@@ -196,7 +198,7 @@ class InlineState {
      if ((follow(v.vType) == tDynamic) != (follow(e.etype) == tDynamic)) e = mk(TCast(e,null),v.vType,e.epos);
      switch [e.eexpr,opt] {
       case [TConst(TNull),c] if (c != null):e = {eexpr:c.eexpr,etype:c.etype,epos:e.epos};
-      case [_,c] if (c != null && switch c.eexpr {case TConst(TNull):false; case _:true;} && (!scom.platformConfig.pfStatic || isNullable(v.vType))):l.iForceTemp = true; l.iDefaultValue = {eexpr:c.eexpr,etype:c.etype,epos:e.epos};
+      case [_,c] if (c != null && (switch c.eexpr {case TConst(TNull):false; case _:true;}) && (!scom.platformConfig.pfStatic || isNullable(v.vType))):l.iForceTemp = true; l.iDefaultValue = {eexpr:c.eexpr,etype:c.etype,epos:e.epos};
       case _:
      }
      if (hasSideEffect(e)) {collectModifiedLocals(e); hadSideEffect = true; l.iForceTemp = true;}
@@ -208,7 +210,7 @@ class InlineState {
   return switch ethis.eexpr {case TConst(TNull):setVars(params,f.tfArgs); null; case _:var self = switch ethis.eexpr {case TConst(TSuper):withExpr(ethis,TConst(TThis)); case _:ethis;}; var v = allocVar(VInlined,"_this",self.etype,self.epos); setVars([self].concat(params),[{variable:v,defaultValue:null}].concat(f.tfArgs)); v;};
  }
  public function finalize(e:TExpr,tl:Array<{name:String,optional:Bool,type:T}>,tret:T,hasParams:Bool,mapType:T->T,p:Pos):TExpr {
-  if (hadSideEffect) for (item in inlinedVars) if (mightBeAffected(item.expr) && !core.ExtType.hasValueSemantics(item.expr.etype)) item.local.iForceTemp = true;
+  if (hadSideEffect) for (item in inlinedVars) if (mightBeAffected(item.expr) && !core.TOther.ExtType.hasValueSemantics(item.expr.etype)) item.local.iForceTemp = true;
   var substitutions = getSubstitutions(p); var vars = substitutions.vars; var subst = substitutions.subst;
   function inlineParams(inCall:Bool,inAssignment:Bool,e:TExpr):TExpr return switch e.eexpr {
    case TLocal(v):var sub = subst.get(v.vId); if (sub == null) e; else switch sub.kind {case VIInline:switch sub.expr.eexpr {case TFunction(_):duplicateTvars(eIdentity,sub.expr); case TCast(e1,null) if (inAssignment):e1; case _:sub.expr;} case VIInlineIfCalled if (inCall):duplicateTvars(eIdentity,sub.expr); case _:e;}
@@ -218,16 +220,16 @@ class InlineState {
    case TUnop(op = Increment | Decrement,flag,e1):withExpr(e,TUnop(op,flag,inlineParams(false,true,e1)));
    case _:mapExpr(e -> inlineParams(false,false,e),e);
   };
-  if (subst.iterator().hasNext()) e = inlineParams(false,false,e); var md = scom.curclass.clModule.mExtra.mDisplay; var endPos:Pos = Reflect.copy(p); endPos.pmax = p.pmin + cf.cfName.length; md.mInlineCalls.unshift({definition:cf.cfNamePos,call:endPos});
+  if (subst.iterator().hasNext()) e = inlineParams(false,false,e); var md = scom.curclass.clModule.mExtra.mDisplay; var endPos:Pos = Reflect.copy(p); endPos.pmax = p.pmin + cf.cfName.length; md.mInlineCalls.unshift({definitionPos:cf.cfNamePos,callPos:endPos});
   function wrap(e:TExpr):TExpr {var etype = hasParams ? mapType(e.etype) : e.etype; try {switch follow(e.etype) {
-   case TMono(_) | TInst({clKind:KTypeParameter(_)},_):switch follow(tret) {case TAbstract({aPath:{pack:[],name:"Void"}},_):case _:throw new core.TUnification.UnifyError([]);}
+   case TMono(_) | TInst({clKind:KTypeParameter(_)},_):switch follow(tret) {case TAbstract({aPath:{pack:[],name:"Void"}},_):case _:throw new core.TUnification.Unify_error([]);}
    case _:var uctx = defaultUnificationContext(); uctx.equalityKind = EqStrict; uctx.nullFollowMode = scom.platformConfig.pfStatic ? NeverFollow : AlwaysFollow; typeEqCustom(uctx,etype,tret);
   } return e;} catch (_:core.TUnification.UnifyError) return mk(TCast(e,null),tret,e.epos);}
   if (vars.length == 0 && !hasReturnValue) e = switch e.eexpr {case TBlock(_):{eexpr:e.eexpr,etype:tret,epos:e.epos}; case _:mk(TBlock([e]),tret,e.epos);};
   else if (vars.length == 0) e = switch e.eexpr {case TBlock([inner]):wrap(inner); case _:wrap(e);};
   else {var el = []; for (v in vars) el.push(mk(TVar(v.variable,v.expr),scom.basic.tvoid,e.epos)); for (item in inlinedVars) {var l = item.local; if (l.iDefaultValue != null && l.iRead > 0) {var de = l.iDefaultValue; el.push(setDefault(scom.basic,l.iSubst,duplicateTvars(eIdentity,de),de.epos));}} switch e.eexpr {case TBlock(body):el = el.concat(body); case _:el.push(e);} e = mk(TBlock(el),tret,e.epos);}
   e = Inline.inlineMetadata(e,cf.cfMeta);
-  if (hasParams) {var mt = mapType(cf.cfType); function unifyFunc():Void typing.Typecore.unifyRaise(mt,TFun({args:tl,ret:tret}),p); switch follow(ethis.etype) {case TAnon(a):switch a.aStatus {case ClassStatics({clKind:KAbstractImpl(a)}) if (hasClassFieldFlag(cf,CfImpl)):if (!hasClassFieldFlag(cf,CfAbstractConstructor)) {if (tl.length == 0) throw "Failure: tl"; var args = [{name:"",optional:false,type:mapType(a.aThis)}].concat(tl.slice(1)); typing.Typecore.unifyRaise(mt,TFun({args:args,ret:tret}),p);} case _:unifyFunc();} case _:unifyFunc();}}
+  if (hasParams) {var mt = mapType(cf.cfType); function unifyFunc():Void context.Typecore.unifyRaise(mt,TFun({args:tl,ret:tret}),p); switch follow(ethis.etype) {case TAnon(a):switch a.aStatus {case ClassStatics({clKind:KAbstractImpl(a)}) if (hasClassFieldFlag(cf,CfImpl)):if (!hasClassFieldFlag(cf,CfAbstractConstructor)) {if (tl.length == 0) throw "Failure: tl"; var args = [{name:"",optional:false,type:mapType(a.aThis)}].concat(tl.slice(1)); context.Typecore.unifyRaise(mt,TFun({args:args,ret:tret}),p);} case _:unifyFunc();} case _:unifyFunc();}}
   var mappedVars = new haxe.ds.IntMap<Bool>(); var mapExpression:T->T->TExpr; var mapExprTypeLocal:(T->T)->TExpr->TExpr = null;
   function mapVar(mapType:T->T,v:TVar):TVar {if (!mappedVars.exists(v.vId)) {mappedVars.set(v.vId,true); if (!read(v).iOutside) {v.vType = mapType(v.vType); if (v.vExtra != null && v.vExtra.vExpr != null) v.vExtra = varExtra(v.vExtra.vParams,mapExprTypeLocal(mapType,v.vExtra.vExpr));}} return v;}
   mapExprTypeLocal = function(mapType:T->T,e:TExpr):TExpr {var mapper = params.contains(e) ? t -> t : mapType; var e = Texpr.mapExprType(e -> mapExprTypeLocal(mapper,e),mapper,v -> mapVar(mapper,v),e); return typing.OverloadResolution.maybeReapplyOverloadCall(e);};

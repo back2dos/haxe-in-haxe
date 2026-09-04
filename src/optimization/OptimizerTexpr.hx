@@ -2,10 +2,10 @@ package optimization;
 
 import core.Ast;
 import core.TType;
-import core.Type as TypeOps;
+import core.TFunctions as TypeOps;
 import core.Numeric;
-import typing.Error;
-import typing.PurityState;
+import core.Error;
+import context.PurityState.PurityStateTools as PurityState;
 import haxe.ds.IntMap;
 import haxe.Int64;
 
@@ -20,7 +20,7 @@ class OptimizerTexpr {
 			case TNew(_, _, _) | TCall(_, _) | TBinop(OpAssignOp(_) | OpAssign, _, _) | TUnop(Increment | Decrement, _, _): true;
 			case TReturn(_) | TBreak | TContinue | TThrow(_): true;
 			case TCast(_, mt) if (mt != null): true;
-			case _: TypeOps.checkExpr(hasSideEffect, e);
+			case _: core.Texpr.checkExpr(hasSideEffect, e);
 		};
 	}
 	public static function isReadOnlyFieldAccess(e:TExpr, fa:TFieldAccess):Bool {
@@ -41,12 +41,12 @@ class OptimizerTexpr {
 			case TLocal(v) if (modifiedLocals.exists(v.vId)): true;
 			case TField(e1, fa) if (!isReadOnlyFieldAccess(e1, fa)): true;
 			case TCall(_, _) | TNew(_, _, _): true;
-			case _: TypeOps.checkExpr(mightBeAffected, e);
+			case _: core.Texpr.checkExpr(mightBeAffected, e);
 		};
 		function collectModifiedLocals(e:TExpr):Void switch e.eexpr {
 			case TUnop(Increment | Decrement, _, {eexpr:TLocal(v)}): modifiedLocals.set(v.vId, true);
 			case TBinop(OpAssign | OpAssignOp(_), {eexpr:TLocal(v)}, e2): collectModifiedLocals(e2); modifiedLocals.set(v.vId, true);
-			case _: TypeOps.iter(collectModifiedLocals, e);
+			case _: core.Texpr.iter(collectModifiedLocals, e);
 		}
 		return {mightBeAffected:mightBeAffected, collectModifiedLocals:collectModifiedLocals};
 	}

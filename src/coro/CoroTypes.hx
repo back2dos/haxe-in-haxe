@@ -21,7 +21,7 @@ typedef CoroCatch = {var ccCb:CoroBlock; var ccCatches:Array<{v:TVar,cb:CoroBloc
 typedef CoroSuspend = {var csFun:TExpr; var csArgs:Array<TExpr>; var csPos:Pos; var csResult:SuspendExpr; var csKind:CoroOutcome;}
 typedef CoroDeferredApi = {var makeInlineReturn:Null<TExpr>->Pos->TExpr; var makeInlineTailCall:CoroSuspend->TExpr; var makeSyncCall:CoroSuspend->Null<TExpr>->TExpr; var makeThis:TExpr->TExpr; var makeSuperField:TExpr->TExpr;}
 typedef CoroCtx = {
- var builder:TexprBuilder; var typer:Dynamic; var config:CoroConfigData; var coroType:CoroFor; var classNamePos:Pos;
+ var builder:TexprBuilder; var typer:context.Typecore.Typer; var config:CoroConfigData; var coroType:CoroFor; var classNamePos:Pos;
  var deferredExprs:Map<Int,Void->TExpr>; var hasCaptureVars:Bool; var capturesThis:Bool; var nextBlockId:Int;
  var currentCatch:Null<CoroBlock>; var hasCatch:Bool; var numStates:Int;
 }

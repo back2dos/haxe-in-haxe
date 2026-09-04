@@ -1,8 +1,14 @@
 package syntax;
+import core.display.DisplayPosition;
+import core.DisplayTypes;
+import core.DisplayTypes.DisplayModeValue;
 import core.Ast;
 import core.Globals;
 import core.Globals.Pos;
 import core.Define.DefineContext;
+import core.ds.Stream;
+import core.Message.WarningCode;
+import syntax.Lexer.LexerContext;
 // Draft mechanical translation of haxe/src/syntax/parser.ml; unvalidated.
 // Display branches retain calls to the upstream-shaped display hooks.
 enum ParserPreprocessorError { InvalidEnd; InvalidElse; InvalidElseif; UnclosedConditional; }
@@ -42,17 +48,17 @@ typedef ParserConfiguration = {
 	var defines:DefineContext;
 	var inDisplay:Bool;
 	var inDisplayFile:Bool;
-	var displayMode:Dynamic;
+	var displayMode:DisplayModeValue;
 	var wasAutoTriggered:Bool;
 	var specialIdentifierFiles:Null<Dynamic>;
 }
 typedef ParserContext = {
-	var lexerCtx:Dynamic;
+	var lexerCtx:LexerContext;
 	var syntaxErrors:Array<ParseErrorInfo>;
 	var syntaxWarnings:Array<ParseWarning>;
 	var lastDoc:Null<{doc:String,position:Int}>;
 	var inMacro:Bool;
-	var code:Dynamic;
+	var code:Lexer;
 	var hadResume:Bool;
 	var delayedSyntaxCompletion:Null<SyntaxCompletionOn>;
 	var cache:Array<ParserToken>;
@@ -61,7 +67,7 @@ typedef ParserContext = {
 typedef ParserToken = { var token:Token; var pos:Pos; }
 typedef ParseData = Package;
 typedef ParseErrorInfo = { var message:ErrorMsg; var pos:Pos; }
-typedef ParseWarning = { var warning:Dynamic; var pos:Pos; }
+typedef ParseWarning = { var warning:WarningCode; var pos:Pos; }
 typedef ParserDisplayInformation = {
 	var pdErrors:Array<ParseErrorInfo>;
 	var pdWarnings:Array<ParseWarning>;
@@ -92,11 +98,11 @@ class Parser {
 		case Expected(sl): "Expected " + sl.join(" or ");
 		case StreamError(s),Custom(s): s;
 	};
-	public static function createContext(lexerCtx:Dynamic,config:ParserConfiguration,inMacro:Bool,code:Dynamic):ParserContext return {
+	public static function createContext(lexerCtx:LexerContext,config:ParserConfiguration,inMacro:Bool,code:Lexer):ParserContext return {
 		lexerCtx:lexerCtx,syntaxErrors:[],syntaxWarnings:[],lastDoc:null,inMacro:inMacro,code:code,
 		hadResume:false,delayedSyntaxCompletion:null,cache:[],config:config
 	};
-	public static function createConfig(defines:DefineContext,inDisplay:Bool,inDisplayFile:Bool,displayMode:Dynamic,wasAutoTriggered:Bool,specialIdentifierFiles:Null<Dynamic>):ParserConfiguration return {
+	public static function createConfig(defines:DefineContext,inDisplay:Bool,inDisplayFile:Bool,displayMode:DisplayModeValue,wasAutoTriggered:Bool,specialIdentifierFiles:Null<Dynamic>):ParserConfiguration return {
 		defines:defines,inDisplay:inDisplay,inDisplayFile:inDisplayFile,displayMode:displayMode,
 		wasAutoTriggered:wasAutoTriggered,specialIdentifierFiles:specialIdentifierFiles
 	};
@@ -106,27 +112,27 @@ class Parser {
 	};
 	public static function syntaxCompletion(kind:SyntaxCompletion,so:Null<String>,p:Pos):Dynamic throw new SyntaxCompletionException({kind:kind,subject:DisplayTypes.makeSubject(so,p)});
 	public static function error(m:ErrorMsg,p:Pos):Dynamic throw new ParserError(m,p);
-	public static function lastToken(ctx:ParserContext,s:Dynamic):ParserToken { var n:Int=s.count(); return ctx.cache[n == 0 ? 0 : n-1]; }
-	public static function lastPos(ctx:ParserContext,s:Dynamic):Pos return lastToken(ctx,s).pos;
-	public static function nextToken(ctx:ParserContext,s:Dynamic):ParserToken { var tk:ParserToken=s.peek(); return tk == null ? {token:Eof,pos:lastToken(ctx,s).pos} : tk; }
-	public static function nextPos(ctx:ParserContext,s:Dynamic):Pos return nextToken(ctx,s).pos;
+	public static function lastToken(ctx:ParserContext,s:Stream<ParserToken>):ParserToken { var n:Int=s.count(); return ctx.cache[n == 0 ? 0 : n-1]; }
+	public static function lastPos(ctx:ParserContext,s:Stream<ParserToken>):Pos return lastToken(ctx,s).pos;
+	public static function nextToken(ctx:ParserContext,s:Stream<ParserToken>):ParserToken { var tk:ParserToken=s.peek(); return tk == null ? {token:Eof,pos:lastToken(ctx,s).pos} : tk; }
+	public static function nextPos(ctx:ParserContext,s:Stream<ParserToken>):Pos return nextToken(ctx,s).pos;
 	public static function resetState():Void DisplayPosition.displayPosition.reset();
 	public static function syntaxErrorWithPos<T>(ctx:ParserContext,message:ErrorMsg,p:Pos,v:T):T {
 		if (p.pmax == 0x7FFFFFFF) p = {pfile:p.pfile,pmin:p.pmin,pmax:p.pmin+1};
 		if (!ctx.config.inDisplay) error(message,p);
 		ctx.syntaxErrors.unshift({message:message,pos:p}); return v;
 	}
-	public static function syntaxError<T>(ctx:ParserContext,message:ErrorMsg,s:Dynamic,v:T,?pos:Pos):T return syntaxErrorWithPos(ctx,message,pos == null ? nextPos(ctx,s) : pos,v);
-	public static function syntaxWarningWithPos(ctx:ParserContext,warning:Dynamic,p:Pos):Void {
+	public static function syntaxError<T>(ctx:ParserContext,message:ErrorMsg,s:Stream<ParserToken>,v:T,?pos:Pos):T return syntaxErrorWithPos(ctx,message,pos == null ? nextPos(ctx,s) : pos,v);
+	public static function syntaxWarningWithPos(ctx:ParserContext,warning:WarningCode,p:Pos):Void {
 		if (p.pmax == 0x7FFFFFFF) p = {pfile:p.pfile,pmin:p.pmin,pmax:p.pmin+1};
 		ctx.syntaxWarnings.unshift({warning:warning,pos:p});
 	}
-	public static function syntaxWarning(ctx:ParserContext,warning:Dynamic,s:Dynamic,?pos:Pos):Void syntaxWarningWithPos(ctx,warning,pos == null ? nextPos(ctx,s) : pos);
-	public static function handleStreamError(ctx:ParserContext,msg:String,s:Dynamic):Void {
+	public static function syntaxWarning(ctx:ParserContext,warning:WarningCode,s:Stream<ParserToken>,?pos:Pos):Void syntaxWarningWithPos(ctx,warning,pos == null ? nextPos(ctx,s) : pos);
+	public static function handleStreamError(ctx:ParserContext,msg:String,s:Stream<ParserToken>):Void {
 		if (msg == "Parse error.") { var next = nextToken(ctx,s); syntaxError(ctx,Unexpected(next.token),s,null,next.pos); }
 		else syntaxError(ctx,StreamError(msg),s,null);
 	}
-	public static function getDoc(ctx:ParserContext,s:Dynamic):Null<String> {
+	public static function getDoc(ctx:ParserContext,s:Stream<ParserToken>):Null<String> {
 		if (s.peek() == null || ctx.lastDoc == null) return null;
 		var doc = ctx.lastDoc.doc; ctx.lastDoc = null; return doc;
 	}
@@ -164,7 +170,7 @@ class Parser {
 		if (sl.length > 0 && sl[0].charAt(0) >= "A" && sl[0].charAt(0) <= "Z") { reversed.pop(); throw new TypePathCompletion(reversed,{name:sl[0],isSub:false},inImport,p); }
 		throw new TypePathCompletion(reversed,null,inImport,p);
 	}
-	public static function wouldSkipDisplayPosition(ctx:ParserContext,p1:Pos,plusOne:Bool,s:Dynamic):Bool {
+	public static function wouldSkipDisplayPosition(ctx:ParserContext,p1:Pos,plusOne:Bool,s:Stream<ParserToken>):Bool {
 		if (!ctx.config.inDisplayFile) return false;
 		var peek:Array<ParserToken> = s.npeek(1);
 		if (peek.length != 1) return false;
@@ -184,9 +190,9 @@ class Parser {
 	public static function isHigherThanTernary(op:Binop):Bool return switch op { case OpAssign,OpAssignOp(_),OpArrow:false; case _:true; };
 	public static function swap(op1:Binop,op2:Binop):Bool { var p1=precedence(op1); var p2=precedence(op2); return p1.left && p1.priority <= p2.priority; }
 	public static function makeBinop(op:Binop,e:Expr,e2:Expr):Expr return switch e2.expr {
-		case EBinop(other,left,right) if (swap(op,other)): var left=makeBinop(op,e,left); {expr:EBinop(other,left,right),pos:Globals.punion(left.pos,right.pos)};
-		case ETernary(e1,e2,e3) if (isHigherThanTernary(op)): var e=makeBinop(op,e,e1); {expr:ETernary(e,e2,e3),pos:Globals.punion(e.pos,e3.pos)};
-		case _:{expr:EBinop(op,e,e2),pos:Globals.punion(e.pos,e2.pos)};
+		case EBinop(other,left,right) if (swap(op,other)): var left=makeBinop(op,e,left); {expr:EBinop(other,left,right),pos:Ast.punion(left.pos,right.pos)};
+		case ETernary(e1,e2,e3) if (isHigherThanTernary(op)): var e=makeBinop(op,e,e1); {expr:ETernary(e,e2,e3),pos:Ast.punion(e.pos,e3.pos)};
+		case _:{expr:EBinop(op,e,e2),pos:Ast.punion(e.pos,e2.pos)};
 	};
 	public static function makeUnop(op:Unop,e:Expr,p1:Pos):Expr {
 		function neg(s:String):String return s.charAt(0) == "-" ? s.substr(1) : "-"+s;
@@ -198,7 +204,7 @@ class Parser {
 			case EConst(Float(j,suffix)) if (op == Neg):EConst(Float(neg(j),suffix));
 			case _:EUnop(op,Prefix,e);
 		};
-		return {expr:expr,pos:Globals.punion(p1,e.pos)};
+		return {expr:expr,pos:Ast.punion(p1,e.pos)};
 	}
 	public static function makeMeta(name:Dynamic,params:Array<Expr>,e:Expr,p1:Pos):Expr {
 		var expr = switch e.expr {
@@ -207,7 +213,7 @@ class Parser {
 			case ETernary(e1,e2,e3): ETernary(makeMeta(name,params,e1,p1),e2,e3);
 			case _: EMeta({meta:name,exprs:params,pos:p1},e);
 		};
-		return {expr:expr,pos:Globals.punion(p1,e.pos)};
+		return {expr:expr,pos:Ast.punion(p1,e.pos)};
 	}
 	public static function handleXmlLiteral(ctx:ParserContext,p1:Pos):Expr {
 		Lexer.reset(ctx.lexerCtx);
@@ -215,7 +221,7 @@ class Parser {
 		var xml = Lexer.contents(ctx.lexerCtx);
 		return makeMeta(core.Meta.Markup,[],{expr:EConst(String(xml,SDoubleQuotes)),pos:{pfile:p1.pfile,pmin:p1.pmin,pmax:end}},p1);
 	}
-	public static function punionNext(ctx:ParserContext,p1:Pos,s:Dynamic):Pos return {pfile:p1.pfile,pmin:p1.pmin,pmax:nextToken(ctx,s).pos.pmax-1};
+	public static function punionNext(ctx:ParserContext,p1:Pos,s:Stream<ParserToken>):Pos return {pfile:p1.pfile,pmin:p1.pmin,pmax:nextToken(ctx,s).pos.pmax-1};
 	public static function mkNullExpr(p:Pos):Expr return {expr:EConst(Ident("null")),pos:p};
 	public static function mkDisplayExpr(e:Expr,dk:DisplayKind):Expr return {expr:EDisplay(e,dk),pos:e.pos};
 	public static function isCompletion(ctx:ParserContext):Bool return ctx.config.displayMode == DMDefault;
@@ -224,11 +230,11 @@ class Parser {
 		if (isCompletion(ctx) && ctx.config.inDisplayFile && p.pmax == DisplayPosition.displayPosition.get().pmin) { ctx.hadResume=true; return fyes(); }
 		return fno();
 	}
-	public static function checkResumeRange<T>(ctx:ParserContext,p:Pos,s:Dynamic,fyes:Pos->T,fno:Void->T):T {
+	public static function checkResumeRange<T>(ctx:ParserContext,p:Pos,s:Stream<ParserToken>,fyes:Pos->T,fno:Void->T):T {
 		if (isCompletion(ctx) && ctx.config.inDisplayFile) { var next=nextPos(ctx,s); var display=DisplayPosition.displayPosition.get(); if (p.pmin < display.pmin && next.pmin >= display.pmax) return fyes(next); }
 		return fno();
 	}
-	public static function checkCompletion(ctx:ParserContext,p0:Pos,plusOne:Bool,s:Dynamic):Null<{name:Null<String>,pos:Pos}> {
+	public static function checkCompletion(ctx:ParserContext,p0:Pos,plusOne:Bool,s:Stream<ParserToken>):Null<{name:Null<String>,pos:Pos}> {
 		var next:ParserToken=s.peek();
 		if (next != null) switch next.token {
 			case Const(Ident(name)) if (DisplayPosition.displayPosition.enclosedIn(next.pos)): s.junk(); return {name:name,pos:next.pos};
@@ -236,7 +242,7 @@ class Parser {
 		}
 		return wouldSkipDisplayPosition(ctx,p0,plusOne,s) ? {name:null,pos:DisplayPosition.displayPosition.withPos(p0)} : null;
 	}
-	public static function checkTypeDeclFlagCompletion(ctx:ParserContext,mode:TypeDeclCompletionMode,flags:Array<{flag:DeclFlag,pos:Pos}>,s:Dynamic):Void {
+	public static function checkTypeDeclFlagCompletion(ctx:ParserContext,mode:TypeDeclCompletionMode,flags:Array<{flag:DeclFlag,pos:Pos}>,s:Stream<ParserToken>):Void {
 		if (!ctx.config.inDisplayFile || !isCompletion(ctx)) throw new core.ds.Stream.StreamFailure();
 		var next:ParserToken = s.peek();
 		if (next != null) switch next.token {
@@ -247,7 +253,7 @@ class Parser {
 		if (flags.length > 0 && wouldSkipDisplayPosition(ctx,flags[0].pos,true,s)) syntaxCompletion(SCAfterTypeFlag(flags.map(function(entry) return entry.flag)),null,DisplayPosition.displayPosition.withPos(flags[0].pos));
 		else throw new core.ds.Stream.StreamFailure();
 	}
-	public static function checkTypeDeclCompletion(ctx:ParserContext,mode:TypeDeclCompletionMode,pmax:Int,s:Dynamic):Void {
+	public static function checkTypeDeclCompletion(ctx:ParserContext,mode:TypeDeclCompletionMode,pmax:Int,s:Stream<ParserToken>):Void {
 		if (!ctx.config.inDisplayFile || !isCompletion(ctx)) return;
 		var next:ParserToken=s.peek();
 		var pmin = next == null || next.token == Eof ? 0x7FFFFFFF : next.pos.pmin;
@@ -260,14 +266,14 @@ class Parser {
 	}
 	public static function checkSignatureMark(ctx:ParserContext,e:Expr,p1:Pos,p2:Pos):Expr {
 		if (!isSignatureDisplay(ctx)) return e;
-		var p=Globals.punion(p1,p2);
+		var p=Ast.punion(p1,p2);
 		if (true || !ctx.config.wasAutoTriggered) return DisplayPosition.enclosesPositionGt(DisplayPosition.displayPosition.get(),p) ? mkDisplayExpr(e,DKMarked) : e;
 		return DisplayPosition.displayPosition.get().pmin == p1.pmax ? mkDisplayExpr(e,DKMarked) : e;
 	}
 	public static function convertAbstractFlags(ctx:ParserContext,flags:Array<{flag:DeclFlag,pos:Pos}>):Array<AbstractFlag> {
 		var out=[]; for (flag in flags) { var value=declFlagToAbstractFlag(ctx,flag); if (value != null) out.push(value); } return out;
 	}
-	public static function noKeyword(what:String,s:Dynamic):Dynamic {
+	public static function noKeyword(what:String,s:Stream<ParserToken>):Dynamic {
 		var next:ParserToken=s.peek();
 		if (next != null) switch next.token { case Kwd(kwd):return error(Custom("Keyword "+Ast.sKeyword(kwd)+" cannot be used as "+what),next.pos); case _: }
 		throw new core.ds.Stream.StreamFailure();

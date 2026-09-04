@@ -7,6 +7,8 @@ import core.Define;
 import core.Timer;
 import core.StringError;
 import context.SafeCom;
+import core.Globals;
+import core.Message;
 
 enum DebugKind { DebugNone; DebugDot; DebugFull; }
 typedef AnalyzerConfigData = {
@@ -33,24 +35,24 @@ class AnalyzerConfig {
 			result = [flag, "no_" + flag].concat(result);
 		return result;
 	}
-	public static function hasAnalyzerOption(meta:Metadata, s:String):Bool return Ast.hasMetaOption(meta, Analyzer, s);
+	public static function hasAnalyzerOption(meta:Metadata, s:String):Bool return Ast.hasMetaOption(meta, core.MetaList.StrictMeta.Analyzer, s);
 	public static function isIgnored(meta:Metadata):Bool return hasAnalyzerOption(meta, flagIgnore);
-	public static function getBaseConfig(com:Dynamic):AnalyzerConfigData {
+	public static function getBaseConfig(com:SafeContext):AnalyzerConfigData {
 		var fusionAllowed = switch com.platform { case Flash | Jvm: false; case _: true; };
-		return {optimize:Define.defined(com.defines, AnalyzerOptimize),
+		return {optimize:Define.defined(com.defines, Define.AnalyzerOptimize),
 			constPropagation:!Define.rawDefined(com.defines, "analyzer_no_const_propagation"),
 			copyPropagation:!Define.rawDefined(com.defines, "analyzer_no_copy_propagation"),
 			localDce:!Define.rawDefined(com.defines, "analyzer_no_local_dce"), fusion:!Define.rawDefined(com.defines, "analyzer_no_fusion"),
 			purityInference:!Define.rawDefined(com.defines, "analyzer_no_purity_inference"), debugKind:DebugNone,
-			detailTimes:Timer.levelFromDefine(com.defines, AnalyzerTimes),
+			detailTimes:Timer.levelFromDefine(com.defines, Define.AnalyzerTimes),
 			userVarFusion:fusionAllowed && (Define.rawDefined(com.defines, "analyzer_user_var_fusion") || !com.debug && !Define.rawDefined(com.defines, "analyzer_no_user_var_fusion")), fusionDebug:false};
 	}
-	public static function updateConfigFromMeta(com:Dynamic, config:AnalyzerConfigData, ml:Metadata):AnalyzerConfigData {
+	public static function updateConfigFromMeta(com:SafeContext, config:AnalyzerConfigData, ml:Metadata):AnalyzerConfigData {
 		config = Reflect.copy(config);
 		for (meta in ml) switch meta {
-			case {name:Analyzer, params:el}:
+			case {meta:core.MetaList.StrictMeta.Analyzer,exprs:el}:
 				for (e in el) switch e.expr {
-					case EConst(CIdent(s)):
+					case EConst(Ident(s)):
 						switch s {
 							case "optimize": config.optimize = true;
 							case "no_optimize": config.optimize = false;
@@ -71,14 +73,14 @@ class AnalyzerConfig {
 							case _: SafeCom.addWarning(com, WOptimizer, StringError.stringError(s, allFlags, "Unrecognized analyzer option: " + s), e.pos);
 						}
 					case _:
-						var s = Ast.Printer.sExpr(e);
+						var s = core.AstPrinter.sExpr(e);
 						SafeCom.addWarning(com, WOptimizer, StringError.stringError(s, allFlags, "Unrecognized analyzer option: " + s), e.pos);
 				}
-			case {name:HasUntyped}: config.optimize = false;
+			case {meta:core.MetaList.StrictMeta.HasUntyped}: config.optimize = false;
 			case _:
 		}
 		return config;
 	}
-	public static function getClassConfig(com:Dynamic, c:TClass):AnalyzerConfigData return updateConfigFromMeta(com, getBaseConfig(com), c.clMeta);
-	public static function getFieldConfig(com:Dynamic, c:TClass, cf:TClassField):AnalyzerConfigData return updateConfigFromMeta(com, getClassConfig(com, c), cf.cfMeta);
+	public static function getClassConfig(com:SafeContext, c:TClass):AnalyzerConfigData return updateConfigFromMeta(com, getBaseConfig(com), c.clMeta);
+	public static function getFieldConfig(com:SafeContext, c:TClass, cf:TClassField):AnalyzerConfigData return updateConfigFromMeta(com, getClassConfig(com, c), cf.cfMeta);
 }

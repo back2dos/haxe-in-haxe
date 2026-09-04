@@ -1,19 +1,21 @@
 package filters.exception;
 
 import core.TType;
-import core.Type as TypeOps;
+import core.TFunctions as TypeOps;
 import core.Globals;
 import core.Meta;
+import context.SafeCom;
+import context.PlatformConfig;
 import core.ds.AtomicLazy;
-import typing.Error;
-import typing.Abstract;
+import core.Error;
+import core.Abstract;
 import typing.TyperBase;
 import filters.exception.ExceptionFunctions;
 
 typedef ExceptionContext = {
-	var scom:Dynamic;
+	var scom:SafeContext;
 	var basic:BasicTypes;
-	var config:Dynamic;
+	var config:ExceptionsConfig;
 	var wildcardCatchType:T;
 	var baseThrowType:T;
 	var throwsAnything:Bool;
@@ -61,14 +63,14 @@ class Exceptions {
 				var efield = TypeOps.mk(TField(hx, access), cf.cfType, p);
 				var rt = switch TypeOps.follow(cf.cfType) {
 					case TFun(sig): sig.ret;
-					case _: Error.raiseTypingError(TypeOps.sType(TypeOps.printContext(), hx.etype) + "." + name + " is not a function and cannot be called", p);
+					case _: Error.raiseTypingError(core.TPrinting.sType(core.TPrinting.printContext(), hx.etype) + "." + name + " is not a function and cannot be called", p);
 				};
 				ExceptionFunctions.makeCall(ctx.scom, efield, args, rt, p);
-			case _: Error.raiseTypingError(TypeOps.sType(TypeOps.printContext(), hx.etype) + "." + name + " is expected to be an instance method", p);
+			case _: Error.raiseTypingError(core.TPrinting.sType(core.TPrinting.printContext(), hx.etype) + "." + name + " is expected to be an instance method", p);
 		};
 	}
 	public static function addMetaExceptionTypeCheck(e:TExpr):TExpr {
-		return TypeOps.mk(TMeta({name:ExceptionTypeCheck, params:[], pos:e.epos}, e), e.etype, e.epos);
+		return TypeOps.mk(TMeta({meta:core.MetaList.StrictMeta.ExceptionTypeCheck,exprs:[], pos:e.epos}, e), e.etype, e.epos);
 	}
 	public static function stdIs(ctx:ExceptionContext, e:TExpr, t:T, p:Pos):TExpr {
 		var typeExpr = TyperBase.typeModuleTypeSimple(TypeOps.moduleTypeOfType(TypeOps.follow(t)), p);
@@ -87,11 +89,11 @@ class Exceptions {
 	public static function isNativeThrow(ctx:ExceptionContext, t:T):Bool return ctx.throwsAnything || isInList(t, ctx.config.ecNativeThrows);
 	public static function isNativeCatch(ctx:ExceptionContext, t:T):Bool return ctx.catchesAnything || isInList(t, ctx.config.ecNativeCatches);
 	public static function isHaxeWildcardCatch(ctx:ExceptionContext, t:T):Bool {
-		var t = Abstract.followWithAbstracts(t); return t == TypeOps.tDynamic || TypeOps.fastEq(haxeExceptionType(ctx), t);
+		var t = Abstract.followWithAbstracts(t); return t == TypeOps.tDynamic || core.TUnification.fastEq(haxeExceptionType(ctx), t);
 	}
-	public static function isVarUsed(v:TVar, e:TExpr):Bool return switch e.eexpr { case TLocal(v2): v == v2; case _: TypeOps.checkExpr(e -> isVarUsed(v, e), e); };
-	public static function containsThrowOrTry(e:TExpr):Bool return switch e.eexpr { case TThrow(_) | TTry(_, _): true; case _: TypeOps.checkExpr(containsThrowOrTry, e); };
-	public static function isWrappedException(e:TExpr):Bool return switch e.eexpr { case TMeta({name:WrappedException}, _): true; case _: false; };
+	public static function isVarUsed(v:TVar, e:TExpr):Bool return switch e.eexpr { case TLocal(v2): v == v2; case _: core.Texpr.checkExpr(e -> isVarUsed(v, e), e); };
+	public static function containsThrowOrTry(e:TExpr):Bool return switch e.eexpr { case TThrow(_) | TTry(_, _): true; case _: core.Texpr.checkExpr(containsThrowOrTry, e); };
+	public static function isWrappedException(e:TExpr):Bool return switch e.eexpr { case TMeta({meta:core.MetaList.StrictMeta.WrappedException}, _): true; case _: false; };
 	public static function requiresWrappedThrow(ctx:ExceptionContext, e:TExpr):Bool {
 		if (ctx.throwsAnything || isWrappedException(e) || ctx.config.ecSpecialThrow(e)) return false;
 		var stored = ExceptionFunctions.isHaxeException(e.etype, false) && switch e.eexpr { case TNew(_, _, _): false; case _: true; };
@@ -101,14 +103,14 @@ class Exceptions {
 		if (!requiresWrappedThrow(ctx, eThrown)) return eThrown;
 		var thrown = haxeExceptionStaticCall(ctx, "thrown", [eThrown], p);
 		var wrapped = ExceptionFunctions.isDynamic(ctx.baseThrowType) ? thrown : TypeOps.mkCast(thrown, ctx.baseThrowType, p);
-		return TypeOps.mk(TMeta({name:WrappedException, params:[], pos:p}, wrapped), wrapped.etype, p);
+		return TypeOps.mk(TMeta({meta:core.MetaList.StrictMeta.WrappedException,exprs:[], pos:p}, wrapped), wrapped.etype, p);
 	}
 	public static function setNeedsExceptionStack(v:TVar):Void {
-		if (!Meta.has(NeedsExceptionStack, v.vMeta)) v.vMeta = [{name:NeedsExceptionStack, params:[], pos:Globals.nullPos}].concat(v.vMeta);
+		if (!Meta.has(NeedsExceptionStack, v.vMeta)) v.vMeta = [{meta:core.MetaList.StrictMeta.NeedsExceptionStack,exprs:[], pos:Globals.nullPos}].concat(v.vMeta);
 	}
 	public static function catchesToIfs(ctx:ExceptionContext, catches:Array<CatchClause>, t:T, p:Pos):Array<CatchClause> {
 		if (catches.length == 0) return [];
-		var catchVar = TypeOps.allocVar(VGenerated, TypeOps.genLocalPrefix, ctx.wildcardCatchType, catches[0].variable.vPos);
+		var catchVar = TypeOps.allocVar(VGenerated, core.Globals.genLocalPrefix, ctx.wildcardCatchType, catches[0].variable.vPos);
 		TypeOps.addVarFlag(catchVar, VCaught);
 		var catchLocal = TypeOps.mk(TLocal(catchVar), catchVar.vType, catchVar.vPos);
 		var caught = new ExceptionCatch(ctx, catchLocal, p);
@@ -119,7 +121,7 @@ class Exceptions {
 			var varUsed = isVarUsed(v, body);
 			var condition:TExpr;
 			if (ExceptionFunctions.isHaxeException(currentT)) {
-				condition = TypeOps.fastEq(haxeExceptionType(ctx), currentT)
+				condition = core.TUnification.fastEq(haxeExceptionType(ctx), currentT)
 					? addMetaExceptionTypeCheck(TypeOps.mk(TConst(TBool(true)), ctx.basic.tbool, v.vPos))
 					: stdIs(ctx, caught.getHaxeException(v.vPos), v.vType, v.vPos);
 				if (varUsed) body = TypeOps.mk(TBlock([TypeOps.mk(TVar(v, TypeOps.mkCast(caught.getHaxeException(v.vPos), v.vType, v.vPos)), ctx.basic.tvoid, v.vPos), body]), body.etype, body.epos);
@@ -128,7 +130,7 @@ class Exceptions {
 				condition = TypeOps.mk(TConst(TBool(true)), ctx.basic.tbool, v.vPos);
 				var decl = varUsed ? TypeOps.mk(TVar(v, ctx.catchesAnything ? catchLocal : caught.unwrap(v.vPos)), ctx.basic.tvoid, v.vPos) : TypeOps.mk(TBlock([]), ctx.basic.tvoid, v.vPos);
 				body = TypeOps.mk(TBlock([decl, body]), body.etype, body.epos);
-			} else if (TypeOps.fastEq(ctx.wildcardCatchType, currentT)) {
+			} else if (core.TUnification.fastEq(ctx.wildcardCatchType, currentT)) {
 				setNeedsExceptionStack(catchVar);
 				condition = TypeOps.mk(TConst(TBool(true)), ctx.basic.tbool, v.vPos);
 				var decl = varUsed ? TypeOps.mk(TVar(v, catchLocal), ctx.basic.tvoid, v.vPos) : TypeOps.mk(TBlock([]), ctx.basic.tvoid, v.vPos);
@@ -154,7 +156,7 @@ class Exceptions {
 		}
 		var catchVar:TVar;
 		if (valueCatch != null) catchVar = valueCatch.variable;
-		else { catchVar = TypeOps.allocVar(VGenerated, TypeOps.genLocalPrefix, valueExceptionType(ctx), nonValue[0].variable.vPos); TypeOps.addVarFlag(catchVar, VCaught); }
+		else { catchVar = TypeOps.allocVar(VGenerated, core.Globals.genLocalPrefix, valueExceptionType(ctx), nonValue[0].variable.vPos); TypeOps.addVarFlag(catchVar, VCaught); }
 		var catchLocal = TypeOps.mk(TLocal(catchVar), catchVar.vType, catchVar.vPos);
 		var fields = valueExceptionClass(ctx).clFields;
 		if (!fields.exists("value")) throw 'haxe.ValueException is missing field "value"';
@@ -183,7 +185,7 @@ class Exceptions {
 				if (handleAsValue.length == 0) return catchesToIfs(ctx, valueCatch == null ? catches : [valueCatch].concat(catches), t, p);
 				return [catchesAsValueException(ctx, handleAsValue, null, t, p)].concat(catchesToIfs(ctx, catches, t, p));
 			}
-			if (ctx.catchesAnything && TypeOps.fastEq(valueExceptionType(ctx), Abstract.followWithAbstracts(v.vType)))
+			if (ctx.catchesAnything && core.TUnification.fastEq(valueExceptionType(ctx), Abstract.followWithAbstracts(v.vType)))
 				return [catchesAsValueException(ctx, handleAsValue, current, t, p)].concat(transform([], valueCatch == null ? current : valueCatch, rest));
 			if (isNativeCatch(ctx, v.vType)) {
 				if (ctx.catchesAnything && !ExceptionFunctions.isHaxeException(v.vType)) handleAsValue = [current].concat(handleAsValue);
@@ -201,7 +203,7 @@ class Exceptions {
 			case TTry(e1, catches):
 				var catches = catchNative(ctx, catches.map(c -> {variable:c.variable, expr:run(c.expr)}), e.etype, e.epos);
 				TypeOps.mk(TTry(run(e1), catches), e.etype, e.epos);
-			case _: TypeOps.mapExpr(run, e);
+			case _: core.Texpr.mapExpr(run, e);
 		};
 		return e -> containsThrowOrTry(e) ? run(e) : e;
 	}
@@ -215,11 +217,11 @@ class ExceptionCatch {
 	var unwrappedVar:Null<TVar> = null;
 	public function new(ctx:ExceptionContext, catchLocal:TExpr, catchPos:Pos) { this.ctx = ctx; this.catchLocal = catchLocal; this.catchPos = catchPos; }
 	public function getHaxeException(p:Pos):TExpr {
-		if (hxExceptionVar == null) hxExceptionVar = TypeOps.allocVar(VGenerated, TypeOps.genLocalPrefix, Exceptions.haxeExceptionType(ctx), p);
+		if (hxExceptionVar == null) hxExceptionVar = TypeOps.allocVar(VGenerated, core.Globals.genLocalPrefix, Exceptions.haxeExceptionType(ctx), p);
 		return TypeOps.mk(TLocal(hxExceptionVar), hxExceptionVar.vType, p);
 	}
 	public function unwrap(p:Pos):TExpr {
-		if (unwrappedVar == null) unwrappedVar = TypeOps.allocVar(VGenerated, TypeOps.genLocalPrefix, TypeOps.tDynamic, p);
+		if (unwrappedVar == null) unwrappedVar = TypeOps.allocVar(VGenerated, core.Globals.genLocalPrefix, TypeOps.tDynamic, p);
 		return TypeOps.mk(TLocal(unwrappedVar), unwrappedVar.vType, p);
 	}
 	public function declareHaxeException(p:Pos):TExpr {

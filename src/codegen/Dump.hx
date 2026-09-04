@@ -1,10 +1,12 @@
 package codegen;
 import core.TType;
+import core.Ast.Metadata;
 import core.TFunctions.*;
 import core.TOther.*;
 import core.TOther.TClassTools;
 import core.TPrinting;
 import core.TPrinting.Printer;
+import core.Globals;
 import core.Globals.*;
 import core.Path;
 import core.Meta;
@@ -23,7 +25,7 @@ class Dump {
   function params(tl:TypeParams):String return tl.length==0?"":"<"+tl.map(tp).join(", ")+">";
   function emit(mt:ModuleType):Void {
    var path=tPath(mt),out=createDumpfileFromPath(com,path),buf=out.buffer;
-   function metas(ml:Metadata,tabs:String):String {if (ml.length==0) return "";return ml.map(function(m) return "@"+Meta.toString(m.meta)+(m.exprs.length==0?"":"("+m.exprs.map(core.Ast.Printer.sExpr).join(", ")+")")).join(" ")+"\n"+tabs;}
+   function metas(ml:Metadata,tabs:String):String {if (ml.length==0) return "";return ml.map(function(m) return "@"+Meta.toString(m.meta)+(m.exprs.length==0?"":"("+m.exprs.map(core.AstPrinter.sExpr).join(", ")+")")).join(" ")+"\n"+tabs;}
    switch mt {
     case TClassDecl(c):
      function cfExpr(f:TClassField):String return f.cfExpr==null?"":se(f.cfExpr);
@@ -36,7 +38,7 @@ class Dump {
       switch f.cfKind {
        case Var(_):buf.add(":"+st(f.cfType)+(f.cfExpr==null?"":" = "+cfExpr(f))+";");
        case Method(_):if (hasClassFlag(c,CExtern)||hasClassFlag(c,CInterface)) switch f.cfType {case TFun(s):buf.add("("+s.args.map(function(a) return a.name+":"+st(a.type)).join(", ")+"):"+st(s.ret)+";");case _:}else buf.add(cfExpr(f));
-      }buf.add("\n");for (overload in f.cfOverloads) printField(stat,overload);
+      }buf.add("\n");for (overloadedField in f.cfOverloads) printField(stat,overloadedField);
      }
      buf.add(metas(c.clMeta,"")+(c.clPrivate?"private ":"")+(hasClassFlag(c,CExtern)?"extern ":"")+(hasClassFlag(c,CInterface)?"interface":"class")+" "+sTypePath(path)+params(c.clParams));
      if (c.clSuper!=null) buf.add(" extends "+st(TInst(c.clSuper.cls,c.clSuper.params)));for (parent in c.clImplements) buf.add(" implements "+st(TInst(parent.cls,parent.params)));if (c.clArrayAccess!=null) buf.add(" implements ArrayAccess<"+st(c.clArrayAccess)+">");buf.add(" {\n");
@@ -70,5 +72,5 @@ class Dump {
   // Upstream uses Hashtbl iteration here; this diagnostic does not affect HXB ordering.
   for (file in deps.keys()) {out.buffer.add(file+":\n");for (m in deps.get(file)) out.buffer.add("\t"+Path.UniqueKey.lazyPath(m.mExtra.mFile)+"\n");}out.close();
  }
- public static function maybeGenerateDump(com:CommonContext,stage:Dynamic):Void {if (com.partScope.dumpConfig.dumpMode!=NoDump&&com.partScope.dumpConfig.dumpStage==stage) core.Timer.time(com.timerCtx,["generate","dump"],function() {dumpTypes(com);var macros=com.getMacros();if (macros!=null) dumpTypes(macros);});}
+ public static function maybeGenerateDump(com:CommonContext,stage:DumpStage):Void {if (com.partScope.dumpConfig.dumpMode!=NoDump&&com.partScope.dumpConfig.dumpStage==stage) core.Timer.time(com.timerCtx,["generate","dump"],function(_:Null<Bool>) {dumpTypes(com);var macros=com.getMacros();if (macros!=null) dumpTypes(macros);},null);}
 }

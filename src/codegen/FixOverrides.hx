@@ -2,6 +2,7 @@ package codegen;
 import core.TType;
 import core.TFunctions.*;
 import core.TUnification.*;
+import core.TUnification;
 import core.TOther.*;
 import context.Common;
 // haxe/src/codegen/fixOverrides.ml — mechanical shared-filter draft; not compile-validated.
@@ -20,7 +21,7 @@ class FixOverrides {
  public static function fixOverride(com:CommonContext,c:TClass,f:TClassField,fd:Null<TFunc>):Void {
   var f2=try findField(com,c,f) catch (e:Dynamic) {if (e!="Not_found") throw e;null;};
   if (f2!=null&&fd!=null) {
-   var signature=switch followWithCoro(f2.cfType) {case Coro(args,ret):Common.expandCoroType(com.basic,args,ret);case NotCoro(TFun(s)):s;case _:throw "Invalid override type";};
+   var signature=switch followWithCoro(f2.cfType) {case Coro(s):Common.expandCoroType(com.basic,s.args,s.ret);case NotCoro(TFun(s)):s;case _:throw "Invalid override type";};
    var changed:Array<{original:TVar,replacement:TVar}>=[];
    if (fd.tfArgs.length!=signature.args.length) throw "Invalid_argument: List.map2";
    var nargs=[];for (i in 0...fd.tfArgs.length) {
@@ -28,10 +29,10 @@ class FixOverrides {
     try {
      typeEq(EqStrict,monomorphs(c.clParams,monomorphs(f.cfParams,v.vType)),t2);
      switch follow(v.vType) {case TInst(cp={clKind:KTypeParameter(ttp)},_) if (com.platform==Flash):
-      if (getConstraints(ttp).length==1&&Lambda.exists(c.clParams,function(tp) return tp.ttpName==cp.clPath.name)) throw new UnifyError([]);
+      if (getConstraints(ttp).length==1&&Lambda.exists(c.clParams,function(tp) return tp.ttpName==cp.clPath.name)) throw new Unify_error([]);
       case _:
      }
-    }catch (_:UnifyError) {var v2=allocVar(VGenerated,"_tmp_"+v.vName,t2,v.vPos);changed.unshift({original:v,replacement:v2});next={variable:v2,defaultValue:cur.defaultValue};}
+    }catch (_:Unify_error) {var v2=allocVar(VGenerated,"_tmp_"+v.vName,t2,v.vPos);changed.unshift({original:v,replacement:v2});next={variable:v2,defaultValue:cur.defaultValue};}
     nargs.push(next);
    }
    changed.reverse();var expr=fd.tfExpr;
@@ -43,7 +44,7 @@ class FixOverrides {
    var fd2={tfArgs:nargs,tfType:signature.ret,tfExpr:expr};var args=nargs.map(function(arg) return {name:arg.variable.vName,optional:arg.defaultValue!=null,type:arg.variable.vType});
    var fde=f.cfExpr;if (fde==null) throw "Missing override expression";f.cfExpr={eexpr:TFunction(fd2),etype:fde.etype,epos:fde.epos};f.cfType=TFun({args:args,ret:signature.ret});
   }else if (f2!=null&&fd==null&&hasClassFlag(c,CInterface)) {
-   var s=switch followWithCoro(f2.cfType) {case Coro(args,ret):Common.expandCoroType(com.basic,args,ret);case NotCoro(TFun(s)):s;case _:throw "Invalid override type";};f.cfType=TFun(s);
+   var s=switch followWithCoro(f2.cfType) {case Coro(s):Common.expandCoroType(com.basic,s.args,s.ret);case NotCoro(TFun(s)):s;case _:throw "Invalid override type";};f.cfType=TFun(s);
   }
  }
  public static function fixOverrides(com:CommonContext,t:ModuleType):Void switch t {

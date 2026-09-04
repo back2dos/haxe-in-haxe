@@ -147,7 +147,7 @@ class Graph {
   while (bb != g.gUnreachable && bb != edge.cfgTo && bb != edge.cfgTo.bbDominator) {if (edge.cfgTo != g.gExit) bb.bbDf.unshift(edge.cfgTo); if (bb.bbDominator == bb) break; bb = bb.bbDominator;}
  });
  public static function inferVarWrites(g:GraphData):Void iterDomTree(g,function(bb) {
-  switch bb.bbKind {case BKCatch(v):declareVar(g,v,bb); addVarDef(g,bb,v); case BKFunctionBegin(tf):for (arg in tf.tfArgs) {declareVar(g,arg.v,bb); addVarDef(g,bb,arg.v);} case _:}
+  switch bb.bbKind {case BKCatch(v):declareVar(g,v,bb); addVarDef(g,bb,v); case BKFunctionBegin(tf):for (arg in tf.tfArgs) {declareVar(g,arg.variable,bb); addVarDef(g,bb,arg.variable);} case _:}
   function infer(e:TExpr):Void switch e.eexpr {case TVar(v,eo):declareVar(g,v,bb); if (eo != null) addVarDef(g,bb,v); case TBinop(OpAssign,{eexpr:TLocal(v)},_):addVarDef(g,bb,v); case _:}
   for (e in bb.bbEl) infer(e); BasicBlock.terminatorIter(infer,bb.bbTerminator);
  });

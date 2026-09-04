@@ -10,6 +10,8 @@ import core.TFunctions.NotFound;
 import core.Meta;
 import core.Error;
 import context.SafeCom;
+import context.SafeCom.*;
+import optimization.Inline as InlineOps;
 // haxe/src/optimization/inlineConstructors.ml — mechanical draft; not compiled or validated.
 typedef InlineObjectCtor = {var iocClass:TClass; var iocTparams:TParams; var iocField:TClassField; var iocForced:Bool;}
 enum InlineObjectKind { IOKCtor(ctor:InlineObjectCtor); IOKStructure; IOKArray(length:Int); }
@@ -21,11 +23,11 @@ enum InlineObjectField { IOFInlineMethod(io:InlineObject,iv:InlineVar,c:TClass,t
 enum InlineExpressionHandled { IEHCaptured; IEHIgnored; IEHNotHandled; }
 private typedef FinalMapResult = {var exprs:Array<TExpr>; var object:Null<InlineObject>;}
 class InlineConstructors {
- public static function inlineConstructors(scom:Dynamic,e:TExpr):TExpr return new ConstructorInlining(scom).run(e);
+ public static function inlineConstructors(scom:SafeContext,e:TExpr):TExpr return new ConstructorInlining(scom).run(e);
 }
 private class ConstructorInlining {
- var scom:Dynamic; var inlineObjs = new haxe.ds.IntMap<InlineObject>(); var vars = new haxe.ds.IntMap<InlineVar>(); var markedVars = new haxe.ds.IntMap<Bool>(); var scopedIvs:Array<InlineVar> = []; var currIoId = 0; var includedUntyped = false;
- public function new(scom:Dynamic) this.scom = scom;
+ var scom:SafeContext; var inlineObjs = new haxe.ds.IntMap<InlineObject>(); var vars = new haxe.ds.IntMap<InlineVar>(); var markedVars = new haxe.ds.IntMap<Bool>(); var scopedIvs:Array<InlineVar> = []; var currIoId = 0; var includedUntyped = false;
+ public function new(scom:SafeContext) this.scom = scom;
  function abs(i:Int):Int return i < 0 ? -i : i;
  function isMarked(id:Int):Bool return markedVars.exists(abs(id));
  function toggleMark(id:Int):Void {id = abs(id); if (markedVars.exists(id)) markedVars.remove(id); else markedVars.set(id,true);}
@@ -54,7 +56,7 @@ private class ConstructorInlining {
  function checkForCtors(e:TExpr,forceInline:Bool = false):Bool {
   var isCtor = false; var metaInline = false;
   switch e.eexpr {
-   case TMeta({meta:Inline},_):metaInline = true;
+   case TMeta({meta:core.MetaList.StrictMeta.Inline},_):metaInline = true;
    case TObjectDecl(_) | TArrayDecl(_):isCtor = true;
    case TNew(_,_,_) if (forceInline):isCtor = true;
    case TNew(c = {clConstructor:cf = {cfKind:Method(MethInline),cfExpr:{eexpr:TFunction(_)}}},_,_):isCtor = needsInline(scom,c,cf);
@@ -62,15 +64,15 @@ private class ConstructorInlining {
   } return isCtor || checkExpr(e -> checkForCtors(e,metaInline),e);
  }
  function markCtors(e:TExpr,forceInline:Bool = false):TExpr {
-  switch e.eexpr {case TMeta({meta:InlineConstructorArgument(_,_)},_):return e; case _:}
-  var isInline = switch e.eexpr {case TMeta({meta:Inline},_):true; case _:false;}; e = mapExpr(e -> markCtors(e,isInline),e);
-  function mark():TExpr {currIoId++; var id:Expr = {expr:EConst(Int(Std.string(currIoId),null)),pos:e.epos}; return mk(TMeta({meta:InlineObject,exprs:[id],pos:e.epos},e),e.etype,e.epos);}
+  switch e.eexpr {case TMeta({meta:core.MetaList.StrictMeta.InlineConstructorArgument(_,_)},_):return e; case _:}
+  var isInline = switch e.eexpr {case TMeta({meta:core.MetaList.StrictMeta.Inline},_):true; case _:false;}; e = mapExpr(e -> markCtors(e,isInline),e);
+  function mark():TExpr {currIoId++; var id:Expr = {expr:EConst(Int(Std.string(currIoId),null)),pos:e.epos}; return mk(TMeta({meta:core.MetaList.StrictMeta.InlineObject,exprs:[id],pos:e.epos},e),e.etype,e.epos);}
   return switch e.eexpr {case TObjectDecl(_) | TArrayDecl(_):mark(); case TNew(_,_,_) if (forceInline):mark(); case TNew(c = {clConstructor:cf = {cfKind:Method(MethInline),cfExpr:{eexpr:TFunction(_)}}},_,_):needsInline(scom,c,cf) ? mark() : e; case _:e;};
  }
  function analyzeAliases(seen:Array<TClassField>,captured:InlineExpressionHandled,isLvalue:Bool,e:TExpr):Null<InlineVar> {
   function analyze(cap:InlineExpressionHandled,e:TExpr):Null<InlineVar> return analyzeAliases(seen,cap,false,e);
   function mkIo(kind:InlineObjectKind,id:Int,expr:TExpr,hasUntyped:Bool = false):InlineObject {var io:InlineObject = {ioKind:kind,ioExpr:expr,ioPos:expr.epos,ioCancelled:false,ioDeclared:false,ioFields:new haxe.ds.StringMap(),ioAliases:[],ioHasUntyped:hasUntyped,ioInlineMethods:[],ioDependentVars:[]}; inlineObjs.set(id,io); return io;}
-  function getInlineMethod(io:InlineObject,name:String):Dynamic return switch io.ioKind {
+  function getInlineMethod(io:InlineObject,name:String):Null<{c:TClass,tl:TParams,cf:TClassField,tf:TFunc}> return switch io.ioKind {
    case IOKCtor(ctor):var f = ctor.iocClass.clFields.get(name); if (f == null) null; else switch [f.cfParams,f.cfKind,f.cfExpr] {case [[],Method(MethInline),{eexpr:TFunction(tf)}]:needsInline(scom,ctor.iocClass,f) ? {c:ctor.iocClass,tl:ctor.iocTparams,cf:f,tf:tf} : null; case _:null;}
    case _:null;
   };
@@ -90,12 +92,12 @@ private class ConstructorInlining {
   }
   function noMethods(ef:TExpr,ethis:TExpr,name:String,validate:InlineObject->Bool):Null<InlineVar> return switch handleField(ef,ethis,name,validate,captured,isLvalue) {case IOFInlineMethod(io,_,_,_,_,_):cancelIo(io,ef.epos); null; case IOFInlineVar(iv):iv; case IOFNone:null;};
   function defaultCase(e:TExpr):Null<InlineVar> {var old = scopedIvs; scopedIvs = []; iter(function(e) {analyze(IEHNotHandled,e);},e); for (iv in scopedIvs) iv.ivClosed = true; scopedIvs = old; return null;}
-  function analyzeCallArgs(el:Array<TExpr>):{vars:Array<TVar>,exprs:Array<TExpr>} {var vs = []; var es = []; for (e in el) switch e.eexpr {case TConst(_):es.push(e); case _:var v = allocVar(VGenerated,"arg",e.etype,e.epos); analyze(IEHIgnored,mk(TVar(v,e),scom.basic.tvoid,e.epos)); var m:MetadataEntry = {meta:InlineConstructorArgument(v.vId,0),exprs:[],pos:e.epos}; vs.unshift(v); es.push(mk(TMeta(m,e),e.etype,e.epos));} return {vars:vs,exprs:es};}
+  function analyzeCallArgs(el:Array<TExpr>):{vars:Array<TVar>,exprs:Array<TExpr>} {var vs = []; var es = []; for (e in el) switch e.eexpr {case TConst(_):es.push(e); case _:var v = allocVar(VGenerated,"arg",e.etype,e.epos); analyze(IEHIgnored,mk(TVar(v,e),scom.basic.tvoid,e.epos)); var m:MetadataEntry = {meta:core.MetaList.StrictMeta.InlineConstructorArgument(v.vId,0),exprs:[],pos:e.epos}; vs.unshift(v); es.push(mk(TMeta(m,e),e.etype,e.epos));} return {vars:vs,exprs:es};}
   function handleObject(id:Int,force:Bool,e:TExpr):Null<InlineVar> return switch [e.eexpr,e.etype] {
    case [TNew(c = {clConstructor:cf = {cfExpr:{eexpr:TFunction(tf)}}},tl,pl),_] if (captured != IEHNotHandled && !seen.contains(cf)):
-    var args = analyzeCallArgs(pl); var v = allocVar(VGenerated,"inl" + c.clPath.name,e.etype,e.epos); var inlined = Inline.typeInlineCtor(Inline.contextOfScom(scom),c,cf,tf,mk(TLocal(v),TInst(c,tl),e.epos),args.exprs,e.epos); inlined = markCtors(inlined);
+    var args = analyzeCallArgs(pl); var v = allocVar(VGenerated,"inl" + c.clPath.name,e.etype,e.epos); var inlined = InlineOps.typeInlineCtor(InlineOps.contextOfScom(scom),c,cf,tf,mk(TLocal(v),TInst(c,tl),e.epos),args.exprs,e.epos); inlined = markCtors(inlined);
     var io = mkIo(IOKCtor({iocClass:c,iocTparams:tl,iocField:cf,iocForced:isExternCtor(c,cf) || force}),id,inlined,Meta.has(HasUntyped,cf.cfMeta)); io.ioDependentVars = args.vars;
-    function fields(c:TClass,tl:TParams):Void {function apply(t:T):T return applyParams(c.clParams,tl,t); for (cf in c.clOrderedFields) switch cf.cfKind {case Var(_,_):allocIoField(io,cf.cfName,apply(cf.cfType),v.vPos); case _:} if (c.clSuper != null) fields(c.clSuper.cls,c.clSuper.params.map(apply));} fields(c,tl);
+    function fields(c:TClass,tl:TParams):Void {function apply(t:T):T return applyParams(c.clParams,tl,t); for (cf in c.clOrderedFields) switch cf.cfKind {case Var(_):allocIoField(io,cf.cfName,apply(cf.cfType),v.vPos); case _:} if (c.clSuper != null) fields(c.clSuper.cls,c.clSuper.params.map(apply));} fields(c,tl);
     var iv = add(v,IVKLocal); setIvAlias(iv,io); analyzeAliases([cf].concat(seen),IEHIgnored,false,io.ioExpr); iv;
    case [TNew(c = {clConstructor:cf = {cfKind:Method(MethInline),cfExpr:expr}},_,_),_] if (expr != null && isExternCtor(c,cf)):Error.raiseTypingError("Extern constructor could not be inlined",e.epos);
    case [TObjectDecl(fl),_] if (captured != IEHNotHandled && fl.length > 0 && all(f -> syntax.Lexer.isValidIdentifier(f.key.name),fl)):
@@ -107,8 +109,8 @@ private class ConstructorInlining {
    case _:defaultCase(e);
   };
   return switch e.eexpr {
-   case TMeta({meta:Inline},{eexpr:TMeta({meta:InlineObject,exprs:[{expr:EConst(Int(id,null))}]},inner)}):handleObject(Std.parseInt(id),true,inner);
-   case TMeta({meta:InlineObject,exprs:[{expr:EConst(Int(id,null))}]},inner):handleObject(Std.parseInt(id),false,inner);
+   case TMeta({meta:core.MetaList.StrictMeta.Inline},{eexpr:TMeta({meta:core.MetaList.StrictMeta.InlineObject,exprs:[{expr:EConst(Int(id,null))}]},inner)}):handleObject(Std.parseInt(id),true,inner);
+   case TMeta({meta:core.MetaList.StrictMeta.InlineObject,exprs:[{expr:EConst(Int(id,null))}]},inner):handleObject(Std.parseInt(id),false,inner);
    case TVar(v,null):add(v,IVKLocal); null;
    case TVar(v,rve):var rhs = analyze(IEHCaptured,rve); if (rhs != null) switch rhs.ivState {case IVSAliasing(io):setIvAlias(add(v,IVKLocal),io); case _:} null;
    case TBinop(OpAssign,lve,rve):var lhs = analyzeAliases(seen,captured,true,lve); if (lhs == null) {analyze(IEHNotHandled,rve); null;} else switch lhs.ivState {
@@ -119,10 +121,10 @@ private class ConstructorInlining {
    case TArray(ethis,{eexpr:TConst(TInt(i))}):noMethods(e,ethis,intFieldName(i),io -> switch io.ioKind {case IOKArray(l):i >= 0 && i < l; case _:false;});
    case TLocal(v) if (isMarked(v.vId)):var iv = getIv(v.vId); if (iv.ivClosed || captured == IEHNotHandled) cancelIv(iv,e.epos); iv;
    case TBlock(el):for (e in el.slice(0,el.length - 1)) analyze(IEHIgnored,e); el.length == 0 ? null : analyze(captured,el[el.length - 1]);
-   case TMeta({meta:InlineConstructorArgument(id,_)},_):try {var iv = getIv(id); if (iv.ivClosed || captured == IEHNotHandled) cancelIv(iv,e.epos); getIv(id);} catch (_:NotFound) {null;}
+   case TMeta({meta:core.MetaList.StrictMeta.InlineConstructorArgument(id,_)},_):try {var iv = getIv(id); if (iv.ivClosed || captured == IEHNotHandled) cancelIv(iv,e.epos); getIv(id);} catch (_:NotFound) {null;}
    case TParenthesis(inner) | TMeta(_,inner) | TCast(inner,null):analyze(captured,inner);
    case TCall(ef = {eexpr:TField(ethis,fa)},callArgs):switch handleField(ef,ethis,fieldName(fa),_ -> true) {
-    case IOFInlineMethod(io,ioVar,c,tl,cf,tf):var args = analyzeCallArgs(callArgs); io.ioDependentVars = io.ioDependentVars.concat(args.vars); io.ioHasUntyped = io.ioHasUntyped || Meta.has(HasUntyped,cf.cfMeta); var inlined = Inline.typeInline(Inline.contextOfScom(scom),cf,tf,mk(TLocal(ioVar.ivVar),TInst(c,tl),e.epos),args.exprs,e.etype,null,e.epos,true); inlined = markCtors(inlined); io.ioInlineMethods.push(inlined); var iv = analyze(captured,inlined); if (iv != null) {if (io.ioCancelled) {cancelIv(iv,inlined.epos); null;} else {io.ioDependentVars.unshift(iv.ivVar); iv;}} else null;
+    case IOFInlineMethod(io,ioVar,c,tl,cf,tf):var args = analyzeCallArgs(callArgs); io.ioDependentVars = io.ioDependentVars.concat(args.vars); io.ioHasUntyped = io.ioHasUntyped || Meta.has(HasUntyped,cf.cfMeta); var inlined = InlineOps.typeInline(InlineOps.contextOfScom(scom),cf,tf,mk(TLocal(ioVar.ivVar),TInst(c,tl),e.epos),args.exprs,e.etype,null,e.epos,true); inlined = markCtors(inlined); io.ioInlineMethods.push(inlined); var iv = analyze(captured,inlined); if (iv != null) {if (io.ioCancelled) {cancelIv(iv,inlined.epos); null;} else {io.ioDependentVars.unshift(iv.ivVar); iv;}} else null;
     case IOFInlineVar(iv):cancelIv(iv,e.epos); for (ca in callArgs) analyze(IEHNotHandled,ca); null;
     case IOFNone:for (ca in callArgs) analyze(IEHNotHandled,ca); null;
    }
@@ -146,7 +148,7 @@ private class ConstructorInlining {
    return {exprs:[mk(TField(makeExprForRevList(tr.exprs,ethis.etype,ethis.epos),fa),ef.etype,ef.epos)],object:null,method:false};
   }
   return switch e.eexpr {
-   case TMeta({meta:InlineObject,exprs:[{expr:EConst(Int(id,_))}]},inner):try {var io = getIo(Std.parseInt(id)); if (io.ioCancelled) throw new NotFound(); if (io.ioHasUntyped) includedUntyped = true; var r = finalMap(io.ioExpr,true); {exprs:r.exprs.concat(getIoVarDecls(io)),object:io};} catch (_:NotFound) {defaultCase(inner);}
+   case TMeta({meta:core.MetaList.StrictMeta.InlineObject,exprs:[{expr:EConst(Int(id,_))}]},inner):try {var io = getIo(Std.parseInt(id)); if (io.ioCancelled) throw new NotFound(); if (io.ioHasUntyped) includedUntyped = true; var r = finalMap(io.ioExpr,true); {exprs:r.exprs.concat(getIoVarDecls(io)),object:io};} catch (_:NotFound) {defaultCase(inner);}
    case TVar(v,null) if (isMarked(v.vId)):var iv = getIv(v.vId); {exprs:iv.ivState == IVSUnassigned ? [e] : getIvVarDecls(iv),object:null};
    case TVar(v,inner) if (isMarked(v.vId)):var decls = getIvVarDecls(getIv(v.vId)); var r = finalMap(inner,true); {exprs:r.exprs.concat(decls),object:null};
    case TBinop(OpAssign,lve,rve):var lhs = finalMap(lve); var rhs = finalMap(rve,true); if (lhs.object != null) {exprs:rhs.exprs.concat(lhs.exprs),object:lhs.object}; else {var rve = makeExprForRevList(rhs.exprs,rve.etype,rve.epos); if (lhs.exprs.length == 0) throw "InlineConstructors.empty assignment lhs"; var first = lhs.exprs[0]; {exprs:[mk(TBinop(OpAssign,first,rve),first.etype,first.epos)].concat(lhs.exprs.slice(1)),object:null};}
@@ -155,7 +157,7 @@ private class ConstructorInlining {
    case TArray(ethis,index = {eexpr:TConst(TInt(i))}):var tr = finalMap(ethis); if (tr.object != null) {var iv = getIoField(tr.object,intFieldName(i)); switch iv.ivState {case IVSAliasing(io):{exprs:tr.exprs,object:io}; case _:{exprs:[mk(TLocal(iv.ivVar),e.etype,e.epos)].concat(tr.exprs),object:null};}} else {exprs:[mk(TArray(makeExprForRevList(tr.exprs,ethis.etype,ethis.epos),index),e.etype,e.epos)],object:null};
    case TLocal(v) if (isMarked(v.vId)):var iv = getIv(v.vId); switch iv.ivState {case IVSAliasing(io):{exprs:[],object:io}; case _:{exprs:[mk(TLocal(iv.ivVar),e.etype,e.epos)],object:null};}
    case TBlock(el):var acc = []; var io = null; for (i in 0...el.length) {var r = finalMap(el[i],unwrapBlock); acc = r.exprs.concat(acc); if (i == el.length - 1) io = r.object;} if (!unwrapBlock && io == null) {var ordered = acc.copy(); ordered.reverse(); acc = [mk(TBlock(ordered),e.etype,e.epos)];} {exprs:acc,object:io};
-   case TMeta({meta:InlineConstructorArgument(_,_)},inner):finalMap(inner);
+   case TMeta({meta:core.MetaList.StrictMeta.InlineConstructorArgument(_,_)},inner):finalMap(inner);
    case TParenthesis(inner) | TCast(inner,null) | TMeta(_,inner):var r = finalMap(inner); if (r.object != null) r; else {var replacement = makeExprForRevList(r.exprs,inner.etype,inner.epos); {exprs:[mapExpr(_ -> replacement,e)],object:null};}
    case _:defaultCase(e);
   };
@@ -168,7 +170,7 @@ private class ConstructorInlining {
  function wasUser(iv:InlineVar):Bool return switch iv.ivKind {case IVKField(io,_,_):var selected = null; for (a in io.ioAliases) if (isUser(a)) {selected = a; break;} if (selected == null) {if (io.ioAliases.length == 0) throw "Failure: hd"; selected = io.ioAliases[0];} wasUser(selected); case _:isUser(iv);};
  public function run(original:TExpr):TExpr {
   if (!checkForCtors(original)) return original; var e = markCtors(original); analyzeAliases([],IEHNotHandled,false,e); var allCancelled = true; for (io in inlineObjs) if (!io.ioCancelled) {allCancelled = false; break;} if (allCancelled) return original;
-  var result = finalMap(e); var cf:TClassField = scom.curfield; if (includedUntyped && !Meta.has(HasUntyped,cf.cfMeta)) cf.cfMeta.unshift({meta:HasUntyped,exprs:[],pos:Globals.mkZeroRangePos(e.epos)}); e = makeExprForRevList(result.exprs,e.etype,e.epos);
+  var result = finalMap(e); var cf:TClassField = scom.curfield; if (includedUntyped && !Meta.has(HasUntyped,cf.cfMeta)) cf.cfMeta.unshift({meta:core.MetaList.StrictMeta.HasUntyped,exprs:[],pos:Globals.mkZeroRangePos(e.epos)}); e = makeExprForRevList(result.exprs,e.etype,e.epos);
   var ids = [for (id in vars.keys()) id]; ids.sort((a,b) -> a - b); for (id in ids) {var iv = vars.get(id); var v = iv.ivVar; if (isMarked(v.vId)) {var names = getPrettyName(iv); names.reverse(); v.vName = names.join("_"); if (wasUser(iv)) v.vKind = VInlinedConstructorVariable(names);}}
   return e;
  }

@@ -4,15 +4,18 @@ import core.TType;
 import core.Message;
 import context.PlatformConfig;
 import context.DumpConfig;
-import typing.Type;
-import typing.Error;
+import core.TFunctions as TypeOps;
+import core.TOther.TClassTools;
+import core.Warning as WarningTools;
+import context.Typecore;
+import core.Error;
 import filters.FilterContext;
 import sys.thread.Mutex;
 // Draft mechanical translation of haxe/src/context/safeCom.ml; unvalidated.
 typedef SavedWarning = {
 	var wModule:ModuleDef;
-	var wWarning:Dynamic;
-	var wOptions:Array<Array<Dynamic>>;
+	var wWarning:WarningCode;
+	var wOptions:Array<Array<WarningOption>>;
 	var wMsg:String;
 	var wPos:core.Globals.Pos;
 }
@@ -46,7 +49,7 @@ class SafeCom {
 		exceptions:{value:[]}, exceptionsMutex:new Mutex(), warnings:{value:[]}, warningsMutex:new Mutex(),
 		errors:{value:[]}, errorsMutex:new Mutex(), timerCtx:com.timerCtx,
 		findModule:com.moduleLut.find, findModuleByType:com.moduleLut.findByType,
-		curclass:Type.nullClass, curfield:Type.nullField
+		curclass:TypeOps.nullClass, curfield:TypeOps.nullField
 	};
 	public static function ofTyper(ctx:Dynamic):SafeContext {
 		var out = ofCom(ctx.com);
@@ -82,12 +85,12 @@ class SafeCom {
 		protect(scom.errorsMutex,function() { scom.errors.value.unshift(err); return null; });
 	}
 	public static function addExn(scom:SafeContext, exn:Dynamic):Void {
-		if (Std.isOfType(exn, typing.Error.CompilerError)) addError(scom,exn.error);
+		if (Std.isOfType(exn, core.Error.TypingError)) addError(scom,exn.error);
 		else protect(scom.exceptionsMutex,function() { scom.exceptions.value.unshift(exn); return null; });
 	}
-	public static function addWarning(scom:SafeContext, w:Dynamic, msg:String, p:core.Globals.Pos):Void {
-		var options = Warning.fromMeta(scom.curfield.cfMeta).concat(Warning.fromMeta(scom.curclass.clMeta));
-		switch Warning.getMode(w,options) {
+	public static function addWarning(scom:SafeContext, w:WarningCode, msg:String, p:core.Globals.Pos):Void {
+		var options = WarningTools.fromMeta(scom.curfield.cfMeta).concat(WarningTools.fromMeta(scom.curclass.clMeta));
+		switch WarningTools.getMode(w,options) {
 			case WMEnable:
 				protect(scom.warningsMutex,function() {
 					scom.warnings.value.unshift({wModule:scom.curclass.clModule,wWarning:w,wOptions:options,wMsg:msg,wPos:p});
@@ -96,13 +99,13 @@ class SafeCom {
 			case WMDisable:
 		}
 	}
-	public static function runExpressionFiltersSafe(scom:SafeContext, detailTimes:Bool, filters:Array<{name:String, run:SafeContext->TExpr->TExpr}>, t:ModuleType, ignoreProcessedStatus:Bool = false):Void {
+	public static function runExpressionFiltersSafe(scom:SafeContext, detailTimes:Int, filters:Array<{name:String, run:SafeContext->TExpr->TExpr}>, t:ModuleType, ignoreProcessedStatus:Bool = false):Void {
 		function run(local:SafeContext, identifier:Null<String>, e:TExpr):TExpr {
 			try {
 				var next = e;
 				for (filter in filters) {
-					try next = FilterContext.withTimer(local.timerCtx,detailTimes,filter.name,identifier,function() return filter.run(local,next));
-					catch (failure:core.StringError.Failure) Error.raiseTypingError(failure.message,next.epos);
+					try next = FilterContext.withTimer(local.timerCtx,detailTimes,filter.name,identifier,function() return filter.run(local,next))
+					catch (failure:core.ds.Failure) Error.raiseTypingError(failure.message,next.epos);
 				}
 				return next;
 			} catch (exc:Dynamic) { addExn(local,exc); return e; }
@@ -113,19 +116,19 @@ class SafeCom {
 				var local:SafeContext = Reflect.copy(scom);
 				local.curclass = c;
 				function processField(cf:TClassField):Void {
-					if (ignoreProcessedStatus || !Type.hasClassFieldFlag(cf,CfPostProcessed)) {
+					if (ignoreProcessedStatus || !TypeOps.hasClassFieldFlag(cf,CfPostProcessed)) {
 						var fieldContext:SafeContext = Reflect.copy(local);
 						fieldContext.curfield = cf;
 						if (cf.cfExpr != null && !FilterContext.isRemovableField(fieldContext.isMacroContext,cf))
 							cf.cfExpr = run(fieldContext,Globals.sTypePath(c.clPath)+"."+cf.cfName,cf.cfExpr);
 					}
-					for (overload in cf.cfOverloads) processField(overload);
+					for (overloadField in cf.cfOverloads) processField(overloadField);
 				}
 				for (cf in c.clOrderedFields) processField(cf);
 				for (cf in c.clOrderedStatics) processField(cf);
 				if (c.clConstructor != null) processField(c.clConstructor);
-				var init = typing.TClass.getClInit(c);
-				if (init != null) typing.TClass.setClInit(c,run(local,Globals.sTypePath(c.clPath)+".__init__",init));
+				var init = TClassTools.getClInit(c);
+				if (init != null) TClassTools.setClInit(c,run(local,Globals.sTypePath(c.clPath)+".__init__",init));
 			case TEnumDecl(_), TTypeDecl(_), TAbstractDecl(_):
 		}
 	}

@@ -1,5 +1,7 @@
 package core;
 
+import Type as StdType;
+
 import core.Globals;
 import core.Ast;
 import core.TType;
@@ -8,6 +10,7 @@ import core.TFunctions.NotFound;
 import core.TUnification.*;
 import core.TPrinting.*;
 import core.Error;
+import core.Abstract as AbstractTools;
 
 // haxe/src/core/texpr.ml — mechanical draft; not compiled or validated.
 class Texpr {
@@ -41,7 +44,7 @@ class Texpr {
  };
  public static function withExpr(e:TExpr,def:TExprDef):TExpr return {eexpr:def,etype:e.etype,epos:e.epos};
  public static function mapExpr(f:TExpr->TExpr,e:TExpr):TExpr {
-  var def = switch e.eexpr {
+  var def:TExprDef = switch e.eexpr {
    case TConst(_) | TLocal(_) | TBreak | TContinue | TTypeExpr(_) | TIdent(_):return e;
    case TArray(a,b):var a = f(a); TArray(a,f(b));
    case TBinop(op,a,b):var a = f(a); TBinop(op,a,f(b));
@@ -93,10 +96,10 @@ class Texpr {
   case _:false;
  };
  public static function equal(e:TExpr,f:TExpr):Bool return switch [e.eexpr,f.eexpr] {
-  case [TConst(c),TConst(d)]:std.Type.enumEq(c,d);
+  case [TConst(c),TConst(d)]:StdType.enumEq(c,d);
   case [TLocal(v),TLocal(w)]:v == w;
   case [TArray(a,b),TArray(c,d)]:equal(a,c) && equal(b,d);
-  case [TBinop(op,a,b),TBinop(oq,c,d)]:std.Type.enumEq(op,oq) && equal(a,c) && equal(b,d);
+  case [TBinop(op,a,b),TBinop(oq,c,d)]:StdType.enumEq(op,oq) && equal(a,c) && equal(b,d);
   case [TField(a,fa),TField(b,fb)]:equal(a,b) && equalFa(fa,fb);
   case [TTypeExpr(TClassDecl(c)),TTypeExpr(TClassDecl(d))]:c == d;
   case [TTypeExpr(TEnumDecl(c)),TTypeExpr(TEnumDecl(d))]:c == d;
@@ -123,7 +126,7 @@ class Texpr {
   case [TThrow(a),TThrow(b)]:equal(a,b);
   case [TCast(a,null),TCast(b,null)]:equal(a,b);
   case [TCast(a,mt),TCast(b,nt)] if (mt != null && nt != null):equal(a,b) && mt == nt;
-  case [TMeta(a,e),TMeta(b,f)]:std.Type.enumEq(a.meta,b.meta) && all2((e,f) -> Ast.Printer.sExpr(e) == Ast.Printer.sExpr(f),a.exprs,b.exprs) && equal(e,f);
+  case [TMeta(a,e),TMeta(b,f)]:StdType.enumEq(a.meta,b.meta) && all2((e,f) -> core.AstPrinter.sExpr(e) == core.AstPrinter.sExpr(f),a.exprs,b.exprs) && equal(e,f);
   case [TBreak,TBreak] | [TContinue,TContinue]:true;
   case [TEnumParameter(a,ef,i),TEnumParameter(b,ff,j)]:equal(a,b) && ef == ff && i == j;
   case _:false;
@@ -161,11 +164,32 @@ class Texpr {
   case _:checkExpr(constructorSideEffects,e);
  };
  public static function replaceSeparators(s:String,c:String):String return s.split("_").join(c);
+ // OCaml Int32.of_string accepts unsigned bit patterns for explicit base prefixes.
+ static function int32OfString(source:String):Int {
+  var s=source.split("_").join("");var i=0;var negative=false;
+  if(s.charAt(i)=="-"||s.charAt(i)=="+"){negative=s.charAt(i)=="-";i++;}
+  var radix=10;var unsigned=false;
+  if(s.charAt(i)=="0")switch s.charAt(i+1).toLowerCase(){
+   case "x":radix=16;unsigned=true;i+=2;
+   case "o":radix=8;unsigned=true;i+=2;
+   case "b":radix=2;unsigned=true;i+=2;
+   case "u":unsigned=true;i+=2;
+   case _:
+  }
+  if(i==s.length)throw "Int32.of_string";
+  var value:Float=0;var limit:Float=unsigned?4294967295.0:(negative?2147483648.0:2147483647.0);
+  while(i<s.length){var c=s.charCodeAt(i++);var digit=c>=48&&c<=57?c-48:c>=65&&c<=70?c-55:c>=97&&c<=102?c-87:-1;
+   if(digit<0||digit>=radix)throw "Int32.of_string";
+   value=value*radix+digit;if(value>limit)throw "Int32.of_string";
+  }
+  if(value>2147483647.0)value-=4294967296.0;
+  var result=Std.int(value);return negative?-result:result;
+ }
  public static function typeConstant(b:Dynamic,c:Constant,p:Pos):TExpr return switch c {
   case Int(s,_):
    if (s.length > 10 && s.substr(0,2) == "0x") Error.raiseTypingError("Invalid hexadecimal integer",p);
    if (s.length > 34 && s.substr(0,2) == "0b") Error.raiseTypingError("Invalid binary integer",p);
-   try {mk(TConst(TInt(core.Numeric.Int32.ofString(s))),b.tint,p);} catch (_:Dynamic) {mk(TConst(TFloat(s)),b.tfloat,p);}
+   try {mk(TConst(TInt(int32OfString(s))),b.tint,p);} catch (_:Dynamic) {mk(TConst(TFloat(s)),b.tfloat,p);}
   case Float(s,_):mk(TConst(TFloat(s)),b.tfloat,p);
   case String(s,_):mk(TConst(TString(s)),b.tstring,p);
   case Ident("true"):mk(TConst(TBool(true)),b.tbool,p); case Ident("false"):mk(TConst(TBool(false)),b.tbool,p);
@@ -179,9 +203,9 @@ class Texpr {
   case EArrayDecl(el):mk(TArrayDecl(el.map(a -> typeConstantValue(b,a))),b.tarray(tDynamic),e.pos);
   case _:Error.raiseTypingError("Constant value expected",e.pos);
  };
- public static function isConstantValue(b:Dynamic,e:Expr):Bool {try {typeConstantValue(b,e); return true;} catch (err:core.Error.Error) {switch err.error.errMessage {case Custom(_):return false; case _:throw err;}}}
+ public static function isConstantValue(b:Dynamic,e:Expr):Bool {try {typeConstantValue(b,e); return true;} catch (err:core.Error.TypingError) {switch err.error.errMessage {case Custom(_):return false; case _:throw err;}}}
  public static function forRemap(b:Dynamic,v:TVar,etype:T,e1:TExpr,e2:TExpr,p:Pos):TExpr {
-  var v2 = allocVar(v.vKind,v.vName,etype,e1.epos); var ev = mk(TLocal(v2),etype,e1.epos); var t = Abstract.followWithAbstracts(etype);
+  var v2 = allocVar(v.vKind,v.vName,etype,e1.epos); var ev = mk(TLocal(v2),etype,e1.epos); var t = AbstractTools.followWithAbstracts(etype);
   var fa = try quickField(t,"hasNext") catch (_:NotFound) Error.raiseTypingError(sType(printContext(),t) + " has no field hasNext()",p);
   var hasNext = mk(TField(ev,fa),tfun([],b.tbool),e1.epos); hasNext = mk(TCall(hasNext,[]),b.tbool,hasNext.epos);
   var next = mk(TField(ev,quickField(t,"next")),tfun([],v.vType),e1.epos); next = mk(TCall(next,[]),v.vType,e1.epos);
@@ -255,7 +279,7 @@ class Texpr {
  public static function punionEl(defaultPos:Pos,el:Array<TExpr>):Pos {
   if (el.length == 0) return defaultPos; if (el.length == 1) return el[0].epos;
   var first = el[0].epos; var last = el[1].epos; var i = 2; while (i < el.length) {if (i == el.length - 1) last = el[i].epos; i++;}
-  return first.pfile != last.pfile ? defaultPos : Globals.punion(first,last);
+  return first.pfile != last.pfile ? defaultPos : Ast.punion(first,last);
  }
  public static function isExhaustive(s:TSwitch):Bool return s.switchExhaustive;
  public static function mkSwitch(subject:TExpr,cases:Array<TSwitchCase>,def:Null<TExpr>,exhaustive:Bool):TSwitch return {switchSubject:subject,switchCases:cases,switchDefault:def,switchExhaustive:exhaustive};

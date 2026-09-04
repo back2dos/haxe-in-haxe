@@ -1,7 +1,7 @@
 package filters;
 
 import core.TType;
-import core.Type as TypeOps;
+import core.TFunctions as TypeOps;
 import context.Common;
 import context.SafeCom;
 import core.Define;
@@ -20,13 +20,12 @@ class FiltersCommon {
 		}
 		return Lambda.exists(cls.clDescendants, loopInheritance);
 	}
-	public static function isCached(com:Dynamic, t:ModuleType):Bool {
+	public static function isCached(com:CommonContext, t:ModuleType):Bool {
 		var m = TypeOps.tInfos(t).mtModule.mExtra;
 		return m.mProcessed != 0 && m.mProcessed < com.partScope.compilationStep;
 	}
-	public static function applyFiltersOnce(ctx:Dynamic, scom:Dynamic, filters:Dynamic, t:ModuleType):Void {
-		var detailTimes = Std.parseInt(Common.definedValueSafe(ctx.com, FilterTimes, "0"));
-		if (detailTimes == null) detailTimes = 0;
+	public static function applyFiltersOnce(ctx:context.Typecore.Typer, scom:SafeContext, filters:Array<{name:String,run:SafeContext->TExpr->TExpr}>, t:ModuleType):Void {
+		var detailTimes = try core.ds.OcamlInt.ofString(Common.definedValueSafe(ctx.com, Define.FilterTimes, "0")) catch (_:Dynamic) 0;
 		if (!isCached(ctx.com, t)) SafeCom.runExpressionFiltersSafe(scom, detailTimes, filters, t);
 	}
 }

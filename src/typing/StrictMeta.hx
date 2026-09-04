@@ -1,4 +1,12 @@
 package typing;
+import core.WithType as WithTypeTools;
+import core.WithType.WithTypeValue;
+import core.MetaList.StrictMeta as MetaTag;
+import core.Globals.Pos;
+import core.Globals.Platform;
+import context.Common.CommonContext;
+import context.Common.*;
+import context.Typecore.Typer as TyperContext;
 
 import core.Ast;
 import core.Ast.*;
@@ -6,24 +14,27 @@ import core.TType;
 import core.TType.*;
 import core.TFunctions.*;
 import core.TOther.*;
+import core.TOther;
 import core.Globals;
 import core.Meta;
 import core.WithType;
 import context.Typecore.*;
+import context.Typecore;
 import context.TyperPass;
 
 // haxe/src/typing/strictMeta.ml — mechanical draft; not compile-validated.
 class StrictMeta {
- public static function getNativeRepr(md:Dynamic, pos:Dynamic):Dynamic {
+ static function efield(e:Expr,name:String):ExprDef return EField(e,name,EFNormal);
+ public static function getNativeRepr(md:ModuleType, pos:Pos):Expr {
   var info = switch md {case TClassDecl(c): {path:c.clPath, meta:c.clMeta}; case TEnumDecl(e): {path:e.ePath, meta:e.eMeta}; case TTypeDecl(t): {path:t.tPath, meta:t.tMeta}; case TAbstractDecl(a): {path:a.aPath, meta:a.aMeta};};
   var path = info.path;
-  for (m in (cast info.meta:Array<Dynamic>)) switch m {case {meta:Meta.Native, exprs:[{expr:EConst(String(name,_))}]}: path = Ast.parsePath(name); case _:}
+  for (m in info.meta) switch m {case {meta:MetaTag.Native, exprs:[{expr:EConst(String(name,_))}]}: path = Ast.parsePath(name); case _:}
   if (path.pack.length == 0) return {expr:EConst(Ident(path.name)), pos:pos};
-  var expr:Dynamic = {expr:EConst(Ident(path.pack[0])), pos:pos};
-  for (part in (cast path.pack:Array<String>).slice(1)) expr = {expr:efield(expr,part),pos:pos};
+  var expr:Expr = {expr:EConst(Ident(path.pack[0])), pos:pos};
+  for (part in path.pack.slice(1)) expr = {expr:efield(expr,part),pos:pos};
   return {expr:efield(expr,path.name),pos:pos};
  }
- public static function processMetaArgument(ctx:Dynamic, expr:Dynamic, toplevel:Bool = true):Dynamic {
+ public static function processMetaArgument(ctx:TyperContext, expr:TExpr, toplevel:Bool = true):Expr {
   var p = expr.epos;
   return switch expr.eexpr {
    case TField(e,f): {expr:efield(processMetaArgument(ctx,e,false),fieldName(f)),pos:p};
@@ -39,77 +50,77 @@ class StrictMeta {
    case _: displayError(ctx.com,"This expression is too complex to be a strict metadata argument",p); {expr:EConst(Ident("null")),pos:p};
   };
  }
- public static function kindOfTypeAgainst(ctx:Dynamic,tWant:Dynamic,eHave:Dynamic):Dynamic {
+ public static function kindOfTypeAgainst(ctx:TyperContext,tWant:T,eHave:Expr):TExpr {
   return switch follow(tWant) {
    case TInst({clPath:{pack:["java","lang"],name:"Class"}},[t1]):
-    var e = typeExpr(ctx,eHave,WithType.withType(tWant));
+    var e = typeExpr(ctx,eHave,WithTypeTools.withType(tWant));
     switch follow(e.etype) {
      case TAbstract({aPath:{pack:[],name:"Class"}},[t2]): unify(ctx,t2,t1,e.epos);
-     case TAnon(an): switch an.aStatus.value {case ClassStatics(c): unify(ctx,TInst(c,extractParamTypes(c.clParams)),t1,e.epos); case AbstractStatics(a): unify(ctx,TAbstract(a,extractParamTypes(a.aParams)),t1,e.epos); case _: unify(ctx,e.etype,tWant,e.epos);}
+     case TAnon(an): switch an.aStatus {case ClassStatics(c): unify(ctx,TInst(c,extractParamTypes(c.clParams)),t1,e.epos); case AbstractStatics(a): unify(ctx,TAbstract(a,extractParamTypes(a.aParams)),t1,e.epos); case _: unify(ctx,e.etype,tWant,e.epos);}
      case _: unify(ctx,e.etype,tWant,e.epos);
     } e;
    case TInst({clPath:{pack:["jvm"],name:"NativeArray"}},[t1]): switch eHave.expr {
     case EArrayDecl(el): mk(TArrayDecl(el.map(e -> kindOfTypeAgainst(ctx,t1,e))),t1,eHave.pos);
-    case _: var e = typeExpr(ctx,eHave,WithType.withType(tWant)); unify(ctx,e.etype,tWant,e.epos); e;
+    case _: var e = typeExpr(ctx,eHave,WithTypeTools.withType(tWant)); unify(ctx,e.etype,tWant,e.epos); e;
    }
-   case t1: var e = typeExpr(ctx,eHave,WithType.withType(t1)); unify(ctx,e.etype,t1,e.epos); e;
+   case t1: var e = typeExpr(ctx,eHave,WithTypeTools.withType(t1)); unify(ctx,e.etype,t1,e.epos); e;
   };
  }
- public static function handleFields(ctx:Dynamic,fields:Array<Dynamic>,withTypeExpr:Dynamic):Array<Dynamic> return fields.map(function(f) {
+ public static function handleFields(ctx:TyperContext,fields:Array<ObjectField>,withTypeExpr:Expr):Array<Expr> return fields.map(function(f) {
   var expr=f.expr, pos=expr.pos;
-  var field={expr:efield(withTypeExpr,f.name.name),pos:pos};
-  var fieldexpr={expr:EConst(Ident(f.name.name)),pos:pos};
+  var field={expr:efield(withTypeExpr,f.key.name),pos:pos};
+  var fieldexpr={expr:EConst(Ident(f.key.name)),pos:pos};
   var left=typeExpr(ctx,{expr:ECall(field,[]),pos:pos},NoValue);
   var right=kindOfTypeAgainst(ctx,left.etype,expr);
   return {expr:EBinop(OpAssign,fieldexpr,processMetaArgument(ctx,right)),pos:pos};
  });
- public static function makeMeta(ctx:Dynamic,texpr:Dynamic,extra:Array<Dynamic>):Dynamic return switch texpr.eexpr {
+ public static function makeMeta(ctx:TyperContext,texpr:TExpr,extra:Array<Expr>):Expr return switch texpr.eexpr {
   case TNew(c,_,el): {expr:ECall(getNativeRepr(TClassDecl(c),texpr.epos),el.map(e -> processMetaArgument(ctx,e)).concat(extra)),pos:texpr.epos};
   case TTypeExpr(md): {expr:ECall(getNativeRepr(md,texpr.epos),extra),pos:texpr.epos};
   case _: displayError(ctx.com,"Unexpected expression",texpr.epos); throw "Unexpected strict metadata expression";
  };
- public static function fieldToTypePath(com:Dynamic,e:Dynamic):Dynamic {
-  function loop(e:Dynamic,pack:Array<String>,name:Array<String>):Dynamic return switch e.expr {
+ public static function fieldToTypePath(com:CommonContext,e:Expr):core.Ast.TypePath {
+  function loop(e:Expr,pack:Array<String>,name:Array<String>):core.Ast.TypePath return switch e.expr {
    case EField(inner,f,_) if(f.charAt(0).toLowerCase()!=f.charAt(0)):
-    if(name.length > 1) {displayError(com,"Unexpected "+f,e.pos); throw "Exit";}
+    if(name.length > 1) {displayError(com,"Unexpected "+f,e.pos); throw new core.ds.Exit();}
     loop(inner,pack,[f].concat(name));
    case EField(inner,f,_): loop(inner,[f].concat(pack),name);
    case EConst(Ident(f)):
     var n:String, sub:Null<String>=null;
     switch name {
-     case []: if(f.charAt(0).toUpperCase()!=f.charAt(0)) {displayError(com,"A class name must start with an uppercase letter",e.pos); throw "Exit";} n=f;
+     case []: if(f.charAt(0).toUpperCase()!=f.charAt(0)) {displayError(com,"A class name must start with an uppercase letter",e.pos); throw new core.ds.Exit();} n=f;
      case [nm]: pack=[f].concat(pack); n=nm;
      case [nm,s]: pack=[f].concat(pack); n=nm; sub=s;
      case _: throw "Invalid strict metadata path";
     }
-    {tpackage:pack,tname:n,tparams:[],tsub:sub};
-   case _: displayError(com,"Unexpected expression when building strict meta",e.pos); throw "Exit";
+    mkTypePath(pack,n,[],sub);
+   case _: displayError(com,"Unexpected expression when building strict meta",e.pos); throw new core.ds.Exit();
   };
   return loop(e,[],[]);
  }
- public static function getStrictMeta(ctx:Dynamic,meta:Dynamic,params:Array<Dynamic>,pos:Dynamic):Dynamic {
-  var changedExpr:Dynamic, fields:Array<Dynamic>, ctype:Dynamic;
+ public static function getStrictMeta(ctx:TyperContext,meta:MetaTag,params:Array<Expr>,pos:Pos):MetadataEntry {
+  var changedExpr:Expr, fields:Array<ObjectField>, ctype:ComplexType;
   switch params {
    case [{expr:ECall(ef,el),pos:p}]:
     var path=fieldToTypePath(ctx.com,ef);
     fields=switch el {case [{expr:EObjectDecl(f)}]: f; case []: []; case _: displayError(ctx.com,"Object declaration expected",el[0].pos); [];};
     changedExpr=ef; ctype=CTPath(makePtp(path,ef.pos));
-   case [({expr:EConst(Ident(i)),pos:p} => e)]: changedExpr=e; fields=[]; ctype=CTPath(makePtp({tpackage:[],tname:i,tparams:[],tsub:null},p));
-   case [({expr:EField(_),pos:p} => field)]: changedExpr=field; fields=[]; ctype=CTPath(makePtp(fieldToTypePath(ctx.com,field),p));
-   case _: displayError(ctx.com,"A @:strict metadata must contain exactly one parameter. Please check the documentation for more information",pos); throw "Exit";
+   case [e={expr:EConst(Ident(i)),pos:p}]: changedExpr=e; fields=[]; ctype=CTPath(makePtp(mkTypePath([],i),p));
+   case [field={expr:EField(_),pos:p}]: changedExpr=field; fields=[]; ctype=CTPath(makePtp(fieldToTypePath(ctx.com,field),p));
+   case _: displayError(ctx.com,"A @:strict metadata must contain exactly one parameter. Please check the documentation for more information",pos); throw new core.ds.Exit();
   }
   var t=Typeload.loadComplexType(ctx,false,LoadNormal,{type:ctype,pos:pos});
   flushPass(ctx.g,PBuildClass,"get_strict_meta");
   var texpr=typeExpr(ctx,changedExpr,NoValue);
   var withTypeExpr={expr:ECheckType({expr:EConst(Ident("null")),pos:pos},{type:ctype,pos:Globals.nullPos}),pos:pos};
   var args=[makeMeta(ctx,texpr,handleFields(ctx,fields,withTypeExpr))];
-  switch t {case TInst(c,_): var v=getMetaString(c.clMeta,Meta.Annotation); args.push({expr:EConst(String(v==null?"CLASS":v,SDoubleQuotes)),pos:pos}); case _:}
+  switch t {case TInst(c,_): var v=getMetaString(c.clMeta,MetaTag.Annotation); args.push({expr:EConst(String(v==null?"CLASS":v,SDoubleQuotes)),pos:pos}); case _:}
   return {meta:meta,exprs:args,pos:pos};
  }
- public static function checkStrictMeta(ctx:Dynamic,metas:Array<Dynamic>):Array<Dynamic> {
+ public static function checkStrictMeta(ctx:TyperContext,metas:Metadata):Metadata {
   if(ctx.com.platform!=Jvm) return [];
   var ret=[];
-  for(m in metas) if(m.meta==Meta.Strict) try {ret.unshift(getStrictMeta(ctx,Meta.Meta,m.exprs,m.pos));} catch(e:Dynamic) {if(e!="Exit") throw e;}
+  for(m in metas) if(m.meta==MetaTag.Strict) try {ret.unshift(getStrictMeta(ctx,MetaTag.Meta,m.exprs,m.pos));} catch(_:core.ds.Exit) {}
   return ret;
  }
 }

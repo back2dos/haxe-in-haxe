@@ -1,8 +1,10 @@
 package typing.matcher;
+import core.MetaList.StrictMeta as MetaTag;
 
 import core.TType;
 import core.TFunctions.*;
 import core.TOther.*;
+import core.TOther;
 import core.TPrinting;
 import core.Meta;
 import core.Abstract;
@@ -20,7 +22,7 @@ class MatcherGlobals {
 	public static function isExplicitNullOrAbstractOverThat(t:T):Bool return switch t {
 		case TMono(r): r.tmType != null && isExplicitNullOrAbstractOverThat(r.tmType);
 		case TAbstract(a, [_]) if (a.aPath.pack.length == 0 && a.aPath.name == "Null"): true;
-		case TAbstract(a, tl) if (!Meta.has(Meta.CoreType, a.aMeta)): isExplicitNullOrAbstractOverThat(Abstract.getUnderlyingType(a, tl));
+		case TAbstract(a, tl) if (!Meta.has(MetaTag.CoreType, a.aMeta)): isExplicitNullOrAbstractOverThat(Abstract.getUnderlyingType(a, tl));
 		case TLazy(f): isExplicitNullOrAbstractOverThat(lazyType(f));
 		case TType(t, tl): isExplicitNullOrAbstractOverThat(applyTypedef(t, tl));
 		case _: false;

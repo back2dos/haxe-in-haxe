@@ -1,7 +1,7 @@
 package filters;
 
 import core.TType;
-import core.Type as TypeOps;
+import core.TFunctions as TypeOps;
 import core.Meta;
 import core.Timer;
 
@@ -9,13 +9,13 @@ import core.Timer;
 class FilterContext {
 	public static function withTimer<T>(timerCtx:Dynamic, level:Int, label:String, identifier:Dynamic, f:Void->T):T {
 		var id = Timer.determineId(level, ["filters"], [label], identifier);
-		return Timer.time(timerCtx, id, f);
+		return Timer.time(timerCtx, id, function(_:Null<Bool>) return f(), null);
 	}
 	public static function isRemovableClass(c:TClass):Bool {
 		return switch c.clKind {
 			case KGeneric:
-				Meta.has(Remove, c.clMeta) || (c.clSuper != null && isRemovableClass(c.clSuper.cls))
-					|| Lambda.exists(c.clParams, tp -> TypeOps.hasCtorConstraint(tp.ttpClass) || Meta.has(Const, tp.ttpClass.clMeta));
+				Meta.has(core.MetaList.StrictMeta.Remove, c.clMeta) || (c.clSuper != null && isRemovableClass(c.clSuper.cls))
+					|| Lambda.exists(c.clParams, tp -> TypeOps.hasCtorConstraint(tp.ttpClass) || Meta.has(core.MetaList.StrictMeta.Const, tp.ttpClass.clMeta));
 			case KTypeParameter(_): true; // Upstream: investigate why this happens (#4092).
 			case _: false;
 		};

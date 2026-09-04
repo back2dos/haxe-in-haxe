@@ -1,5 +1,13 @@
 package context;
+import Std as StdTools;
+import core.ds.Cancelled;
 import core.Globals;
+import core.DisplayTypes;
+import core.Json.JsonValue;
+import core.ClassPath.ClassPathScope;
+import core.ds.NotFound;
+import core.ds.ArgumentError;
+import context.HxbReaderStats;
 import core.Globals.*;
 import core.Ast;
 import core.TType;
@@ -35,7 +43,7 @@ class CompilerCallbacks {
  public function addAfterGeneration(f:Void->Void):Void afterGeneration.value.unshift(f);
  public function addNullSafetyReport(f:Dynamic):Void nullSafetyReport.unshift(f);
  public function run(handleError:Dynamic->Void,r:CallbackList):Void {
-  while (r.value.length>0) {var l=r.value; r.value=[]; var ordered=l.copy(); ordered.reverse(); for (f in ordered) try f() catch (e:core.Error.Error) handleError(e.error);}
+  while (r.value.length>0) {var l=r.value; r.value=[]; var ordered=l.copy(); ordered.reverse(); for (f in ordered) try f() catch (e:core.Error.TypingError) handleError(e.error);}
  }
  public function getBeforeTyperCreate():CallbackList return beforeTyperCreate;
  public function getAfterInitMacros():CallbackList return afterInitMacros;
@@ -62,13 +70,14 @@ class ModuleLut extends HashtblLookup<GlobalTypePath,ModuleDef> {
   try {
    var path2=typeLut.find(t.mtPath), p=t.mtPos;
    if (!Common.samePath(m.mPath,path2) && sTypePath(path2).toLowerCase()==sTypePath(m.mPath).toLowerCase()) Error.raiseTypingError("Module "+sTypePath(path2)+" is loaded with a different case than "+sTypePath(m.mPath),p);
-   var m2=find(path2),hex1=Digest.toHex(m.mExtra.mSign),hex2=Digest.toHex(m2.mExtra.mSign);
+   // Digest signatures are already hexadecimal in the Haxe port.
+   var m2=find(path2),hex1=m.mExtra.mSign,hex2=m2.mExtra.mSign;
    var s=hex1==hex2 ? hex1 : "was "+hex2+", is "+hex1;
    Error.raiseTypingError("Type name "+sTypePath(t.mtPath)+" is redefined from module "+sTypePath(path2)+" ("+s+")",p);
-  } catch (e:Dynamic) {if (e!="Not_found") throw e; typeLut.add(t.mtPath,m.mPath);}
+  } catch (_:NotFound) { typeLut.add(t.mtPath,m.mPath);}
  }
  override public function add(path:GlobalTypePath,m:ModuleDef):Void {super.add(path,m); for (mt in m.mTypes) addModuleType(m,mt);}
- override public function remove(path:GlobalTypePath):Void {try {for (mt in find(path).mTypes) typeLut.remove(tPath(mt)); super.remove(path);} catch (e:Dynamic) {if (e!="Not_found") throw e;}}
+ override public function remove(path:GlobalTypePath):Void {try {for (mt in find(path).mTypes) typeLut.remove(tPath(mt)); super.remove(path);} catch (_:NotFound) {}}
  public function findByType(path:GlobalTypePath):ModuleDef return find(typeLut.find(path));
  override public function clear():Void {super.clear(); typeLut.clear();}
  public function getTypeLut():Dynamic return typeLut;
@@ -93,8 +102,8 @@ private class NullLocalWrapper implements LocalWrapperApi {
  public function mkInit(av:TVar,v:TVar,p:Pos):TExpr return mk(TVar(av,mk(TLocal(v),v.vType,p)),tDynamic,p);
 }
 typedef PartScope = {
- var runtimeArgs:Array<String>;var warnedPositions:Dynamic;var hasNext:Bool;var messages:Array<Dynamic>;var hasError:Bool;var reportMode:ReportMode;
- var messageCapture:Null<{value:Array<Dynamic>}>;var compilationStep:Int;var passDebugMessages:Array<String>;var dumpConfig:Dynamic;var parserState:ParserState;
+ var runtimeArgs:Array<String>;var warnedPositions:Dynamic;var hasNext:Bool;var messages:Array<CompilerMessage>;var hasError:Bool;var reportMode:ReportMode;
+ var messageCapture:Null<{value:Array<CompilerMessage>}>;var compilationStep:Int;var passDebugMessages:Array<String>;var dumpConfig:Dynamic;var parserState:ParserState;
  var fileKeys:FileKeys;var storedTypedExprs:Dynamic;var cachedMacros:Dynamic;
 }
 enum ParseInputResult { NeedsTyping;NoCompletionPointFound;Completed; }
@@ -102,15 +111,15 @@ typedef RequestScope = {var stats:StatsData;var timerCtx:Dynamic;var cancellatio
 typedef ResultHandler = {var sendResult:Dynamic->Void;var sendResultRaise:Dynamic->Dynamic;var sendError:Array<Dynamic>->Void;var sendErrorRaise:Array<Dynamic>->Dynamic;var flushMessages:Bool->CommonContext->Void;var setCom:CommonContext->ParseInputResult;}
 typedef CommonContext = {
  var requestScope:RequestScope;var partScope:PartScope;var stage:CompilerStage;var sctx:Dynamic;var cs:Dynamic;var cache:Dynamic;var isMacroContext:Bool;var timerCtx:Dynamic;
- var parsedArgs:Array<Dynamic>;var display:Dynamic;var debug:Bool;var verbose:Bool;var foptimize:Bool;var doinline:Bool;var platform:Platform;var config:PlatformConfig;var customExt:Null<String>;
- var emptyClassPath:Dynamic;var classPaths:Dynamic;var main:{mainPath:Null<GlobalTypePath>,mainFile:Dynamic,mainExpr:Null<TExpr>};var packageRules:Dynamic;
- var error:String->Pos->Void;var errorExt:Dynamic->Void;var info:Dynamic;var warning:Dynamic;var warningOptions:Array<Dynamic>;var getMessages:Void->Array<Dynamic>;
+ var parsedArgs:Array<compiler.ParsedArg>;var display:DisplaySettings;var debug:Bool;var verbose:Bool;var foptimize:Bool;var doinline:Bool;var platform:Platform;var config:PlatformConfig;var customExt:Null<String>;
+ var emptyClassPath:Dynamic;var classPaths:Dynamic;var main:{mainPath:Null<GlobalTypePath>,mainFile:Dynamic,mainExpr:Null<TExpr>};var packageRules:haxe.ds.StringMap<PackageRule>;
+ var error:String->Pos->Void;var errorExt:Dynamic->Void;var info:Dynamic;var warning:Dynamic;var warningOptions:Array<Array<WarningOption>>;var getMessages:Void->Array<Dynamic>;
  var filterMessages:(Dynamic->Bool)->Void;var runCommand:String->Int;var runCommandArgs:String->Array<String>->Int;
- var loadExternType:Array<Dynamic>;var callbacks:CompilerCallbacks;var defines:Dynamic;var userDefines:Dynamic;var userMetas:Dynamic;var getMacros:Void->Null<CommonContext>;var localWrapper:LocalWrapperApi;
+ var loadExternType:Array<Dynamic>;var callbacks:CompilerCallbacks;var defines:DefineContext;var userDefines:haxe.ds.StringMap<core.Define.UserDefine>;var userMetas:haxe.ds.StringMap<core.Meta.UserMeta>;var getMacros:Void->Null<CommonContext>;var localWrapper:LocalWrapperApi;
  var std:TClass;var globalMetadata:Array<Dynamic>;var fileContents:Array<Dynamic>;var parserCache:Dynamic;var moduleToFile:Dynamic;var overloadCache:Dynamic;
- var moduleLut:ModuleLut;var moduleNonexistentLut:Dynamic;var fakeModules:Dynamic;var file:String;var features:Map<String,Bool>;var modules:Array<ModuleDef>;var types:Array<ModuleType>;var resources:Dynamic;
+ var moduleLut:ModuleLut;var moduleNonexistentLut:Dynamic;var fakeModules:haxe.ds.StringMap<ModuleDef>;var file:String;var features:Map<String,Bool>;var modules:Array<ModuleDef>;var types:Array<ModuleType>;var resources:haxe.ds.StringMap<String>;
  var flashVersion:Float;var nekoLibPaths:Array<String>;var includeFiles:Array<Dynamic>;var nativeLibs:Dynamic;var hxbLibs:Array<AbstractHxbLib>;var jsGen:Null<Void->Void>;
- var basic:BasicTypes;var memoryMarker:Array<Float>;var hxbReaderApi:Dynamic;var hxbReaderStats:Dynamic;var hxbWriterConfig:Dynamic;
+ var basic:BasicTypes;var memoryMarker:Array<Float>;var hxbReaderApi:Dynamic;var hxbReaderStats:HxbReaderStatsData;var hxbWriterConfig:Dynamic;
 }
 class Common {
  public static function samePath(a:GlobalTypePath,b:GlobalTypePath):Bool return a.name==b.name && a.pack.length==b.pack.length && a.pack.join(".")==b.pack.join(".");
@@ -123,7 +132,7 @@ class Common {
  };
  public static function enterStage(com:CommonContext,stage:CompilerStage):Void com.stage=stage;
  public static function ignoreError(com:CommonContext):Bool {var b=com.display.dmsErrorPolicy==EPIgnore;if (b) com.partScope.hasError=true;return b;}
- public static function moduleWarning(com:CommonContext,m:ModuleDef,w:Dynamic,options:Array<Dynamic>,msg:String,p:Pos):Void {
+ public static function moduleWarning(com:CommonContext,m:ModuleDef,w:WarningCode,options:Array<Array<WarningOption>>,msg:String,p:Pos):Void {
   if (com.display.dmsFullTyping) m.mExtra.mCacheBoundObjects.push(Message(Message.makeMessage(com.isMacroContext,msg,p,0,MKWarning(w,options))));
   com.warning(w,options,msg,p);
  }
@@ -143,8 +152,8 @@ class Common {
  public static final reservedFlagNamespaces=["target"];
  public static function convertAndValidate(k:String):String {
   var converted=convertDefine(k);
-  if (reservedFlags.contains(converted)) throw new Arg.Bad("`"+k+"` is a reserved compiler flag and cannot be defined from the command line");
-  for (ns in reservedFlagNamespaces) if (StringTools.startsWith(converted,ns+".")) throw new Arg.Bad("`"+k+"` uses the reserved compiler flag namespace `"+ns+".*` and cannot be defined from the command line");
+  if (reservedFlags.contains(converted)) throw new ArgumentError("`"+k+"` is a reserved compiler flag and cannot be defined from the command line");
+  for (ns in reservedFlagNamespaces) if (StringTools.startsWith(converted,ns+".")) throw new ArgumentError("`"+k+"` uses the reserved compiler flag namespace `"+ns+".*` and cannot be defined from the command line");
   return converted;
  }
  public static function externalDefineValue(com:CommonContext,k:String,v:String):Void Define.rawDefineValue(com.defines,convertAndValidate(k),v);
@@ -161,9 +170,9 @@ class Common {
   if (com.platform==Cross) return defaultConfig;
   var c:PlatformConfig=cast Reflect.copy(defaultConfig);c.pfExceptions=cast Reflect.copy(defaultConfig.pfExceptions);c.pfScoping=cast Reflect.copy(defaultConfig.pfScoping);
   switch com.platform {
-   case Cross:return defaultConfig;case CustomTarget(_):throw "Exit";
+   case Cross:return defaultConfig;case CustomTarget(_):throw new core.ds.Exit();
    case Js:
-    var es6=Gctx.getEsVersion(com.defines)>=6;c.pfStatic=false;c.pfSys=false;c.pfCapturePolicy=es6?CPNone:CPLoopVars;c.pfReservedTypePaths=[path([],"Object"),path([],"Error")];c.pfThisBeforeSuper=!es6;c.pfSupportsRestArgs=true;
+    var es6=getEsVersion(com.defines)>=6;c.pfStatic=false;c.pfSys=false;c.pfCapturePolicy=es6?CPNone:CPLoopVars;c.pfReservedTypePaths=[path([],"Object"),path([],"Error")];c.pfThisBeforeSuper=!es6;c.pfSupportsRestArgs=true;
     c.pfExceptions.ecNativeThrows=[path(["js","lib"],"Error"),path(["haxe"],"Exception")];c.pfExceptions.ecAvoidWrapping=false;
     c.pfScoping={vsScope:es6?BlockScope:FunctionScope,vsFlags:[defined(com,Define.JsUnflatten)?ReserveAllTopLevelSymbols:ReserveAllTypesFlat].concat(es6?[NoShadowing,SwitchCasesNoBlocks]:[VarHoisting,NoCatchVarShadowing])};c.pfSupportsAtomics=true;
    case Lua:c.pfStatic=false;c.pfCapturePolicy=CPLoopVars;c.pfUsesUtf16=false;c.pfSupportsRestArgs=true;c.pfExceptions.ecAvoidWrapping=false;
@@ -181,21 +190,25 @@ class Common {
    case Eval:c.pfStatic=false;c.pfPadNulls=true;c.pfUsesUtf16=false;c.pfSupportsThreads=true;c.pfCapturePolicy=CPWrapRef;c.pfExceptions.ecAvoidWrapping=false;c.pfSupportsAtomics=true;
   }return c;
  }
+ // Shared configuration helper from haxe/src/generators/gctx.ml, get_es_version.
+ static function getEsVersion(defines:DefineContext):Int {
+  try {var version=StdTools.parseInt(Define.definedValue(defines,Define.JsEs));return version==null?0:version;}catch(_:Dynamic)return 0;
+ }
  public static final memoryMarker=[Sys.time()];
  static function newBasicTypes():BasicTypes return {
   tvoid:mkMono(),tany:mkMono(),tint:mkMono(),tfloat:mkMono(),tbool:mkMono(),tstring:mkMono(),texception:mkMono(),
   tnull:function(_) throw "Could use locate abstract Null<T> (was it redefined?)",tarray:function(_) throw "Could not locate class Array<T> (was it redefined?)",titerator:function(_) throw "Could not locate typedef Iterator<T> (was it redefined?)",tunit:mkMono(),
-  tcoro:{tcoro:AtomicLazy.fromFun(function() return function(_) throw "Could not locate abstract Coroutine<T> (was it redefined?)"),continuation:AtomicLazy.fromFun(function() return mkMono()),suspensionResultClass:AtomicLazy.fromFun(function() return nullClass),tasyncIterator:AtomicLazy.fromFun(function() return function(_) throw "Could not locate typedef AsyncIterator<T> (was it redefined?)")}
+  tcoro:{tcoro:AtomicLazy.fromFun(function():TSignature->T return function(_:TSignature):T throw "Could not locate abstract Coroutine<T> (was it redefined?)"),continuation:AtomicLazy.fromFun(function() return mkMono()),suspensionResultClass:AtomicLazy.fromFun(function() return nullClass),tasyncIterator:AtomicLazy.fromFun(function():T->T return function(_:T):T throw "Could not locate typedef AsyncIterator<T> (was it redefined?)")}
  };
- public static function create(sctx:Dynamic,requestScope:RequestScope,partScope:PartScope,displayMode:Dynamic):CommonContext {
+ public static function create(sctx:Dynamic,requestScope:RequestScope,partScope:PartScope,displayMode:DisplaySettings):CommonContext {
   var com:CommonContext=null;
   com={requestScope:requestScope,partScope:partScope,sctx:sctx,cs:sctx.cs,cache:null,timerCtx:requestScope.timerCtx,stage:CCreated,
    parsedArgs:[],debug:false,display:displayMode,verbose:false,foptimize:true,doinline:true,features:new Map(),platform:Cross,config:defaultConfig,customExt:null,
    runCommand:function(cmd) return Sys.command(cmd),runCommandArgs:function(s,args) return com.runCommand(s+" "+args.join(" ")),
-   emptyClassPath:new core.ClassPath.DirectoryClassPath("",User),classPaths:new core.ClassPaths(),main:{mainPath:null,mainFile:null,mainExpr:null},packageRules:new Map(),file:"",types:[],callbacks:new CompilerCallbacks(),globalMetadata:[],modules:[],moduleLut:new ModuleLut(),moduleNonexistentLut:new HashtblLookup(),fakeModules:new Map(),flashVersion:10.0,resources:new Map(),
-   nativeLibs:NativeLibraries.createNativeLibs(),hxbLibs:[],nekoLibPaths:[],includeFiles:[],jsGen:null,loadExternType:[],defines:Define.emptyDefines(),userDefines:new Map(),userMetas:new Map(),getMacros:function() return null,localWrapper:LocalWrapper.nullWrapper,
+   emptyClassPath:new core.ClassPath.DirectoryClassPath("",User),classPaths:new core.ClassPaths(),main:{mainPath:null,mainFile:null,mainExpr:null},packageRules:new haxe.ds.StringMap(),file:"",types:[],callbacks:new CompilerCallbacks(),globalMetadata:[],modules:[],moduleLut:new ModuleLut(),moduleNonexistentLut:new HashtblLookup(),fakeModules:new haxe.ds.StringMap(),flashVersion:10.0,resources:new haxe.ds.StringMap(),
+   nativeLibs:NativeLibraries.createNativeLibs(),hxbLibs:[],nekoLibPaths:[],includeFiles:[],jsGen:null,loadExternType:[],defines:Define.emptyDefines(),userDefines:new haxe.ds.StringMap(),userMetas:new haxe.ds.StringMap(),getMacros:function() return null,localWrapper:LocalWrapper.nullWrapper,
    info:function(?depth,_,_) throw "Uninitialized info handler",warning:function(?depth,_,_,_) throw "Uninitialized warning handler",warningOptions:[WarningList.disabledWarnings.map(function(w) return {woWarning:w,woMode:WMDisable})],error:function(_,_) throw "Uninitialized error handler",errorExt:function(_) throw "Uninitialized error handler",getMessages:function() return [],filterMessages:function(_) {},
-   basic:newBasicTypes(),std:nullClass,fileContents:[],moduleToFile:new HashtblLookup(),memoryMarker:memoryMarker,parserCache:new HashtblLookup(),overloadCache:new HashtblLookup(),isMacroContext:false,hxbReaderApi:null,hxbReaderStats:HxbReader.createHxbReaderStats(),hxbWriterConfig:null
+   basic:newBasicTypes(),std:nullClass,fileContents:[],moduleToFile:new HashtblLookup(),memoryMarker:memoryMarker,parserCache:new HashtblLookup(),overloadCache:new HashtblLookup(),isMacroContext:false,hxbReaderApi:null,hxbReaderStats:HxbReaderStats.create(),hxbWriterConfig:null
   };return com;
  }
  public static function isDiagnostics(com:CommonContext):Bool return switch com.partScope.reportMode {case RMDiagnostics(_):true;case _:false;};
@@ -204,7 +217,7 @@ class Common {
   var reportable=Lambda.exists(com.partScope.messages,function(cm) return switch cm.cmDiagnosticsKind {case DKMissingFields|DKUnresolvedIdentifier:false;case _:true;});
   return com.partScope.hasError && (isCompilation(com)||reportable);
  }
- public static function activateMessageCapture(com:CommonContext,buf:{value:Array<Dynamic>}):Void->Void {
+ public static function activateMessageCapture(com:CommonContext,buf:{value:Array<CompilerMessage>}):Void->Void {
   var oldCapture=com.partScope.messageCapture; var oldHook=core.TFunctions.lazyForceHook;
   com.partScope.messageCapture=buf;
   core.TFunctions.lazyForceHook=function(f) {
@@ -214,10 +227,10 @@ class Common {
   };
   return function() {com.partScope.messageCapture=oldCapture;core.TFunctions.lazyForceHook=oldHook;};
  }
- public static function commitCapturedMessages(com:CommonContext,buf:Array<Dynamic>):Void {
+ public static function commitCapturedMessages(com:CommonContext,buf:Array<CompilerMessage>):Void {
   var ordered=buf.copy();ordered.reverse();for (cm in ordered) {
    if (com.partScope.messageCapture!=null) com.partScope.messageCapture.value.unshift(cm);else {
-    if (Message.cmSeverity(cm)==Error) com.partScope.hasError=true;com.partScope.messages.unshift(cm);
+    if (Message.severity(cm)==MessageSeverity.Error) com.partScope.hasError=true;com.partScope.messages.unshift(cm);
    }
   }
  }
@@ -227,10 +240,11 @@ class Common {
   // Shallow copy preserves the explicitly retained references; every upstream reinit follows.
   var out:CommonContext=cast Reflect.copy(com);
   out.defines={values:com.defines.values,definesSignature:com.defines.definesSignature};out.cache=null;out.stage=CCreated;out.features=new Map();
-  out.emptyClassPath=new core.ClassPath.DirectoryClassPath("",User);out.classPaths=new core.ClassPaths();out.main={mainPath:null,mainFile:null,mainExpr:null};out.types=[];out.callbacks=new CompilerCallbacks();out.modules=[];out.moduleLut=new ModuleLut();out.moduleNonexistentLut=new HashtblLookup();out.fakeModules=new Map();out.loadExternType=[];out.basic=newBasicTypes();out.localWrapper=LocalWrapper.nullWrapper;out.std=nullClass;out.moduleToFile=new HashtblLookup();out.parserCache=new HashtblLookup();out.overloadCache=new HashtblLookup();out.isMacroContext=isMacroContext;out.hxbReaderApi=null;out.hxbReaderStats=HxbReader.createHxbReaderStats();return out;
+  out.emptyClassPath=new core.ClassPath.DirectoryClassPath("",User);out.classPaths=new core.ClassPaths();out.main={mainPath:null,mainFile:null,mainExpr:null};out.types=[];out.callbacks=new CompilerCallbacks();out.modules=[];out.moduleLut=new ModuleLut();out.moduleNonexistentLut=new HashtblLookup();out.fakeModules=new haxe.ds.StringMap();out.loadExternType=[];out.basic=newBasicTypes();out.localWrapper=LocalWrapper.nullWrapper;out.std=nullClass;out.moduleToFile=new HashtblLookup();out.parserCache=new HashtblLookup();out.overloadCache=new HashtblLookup();out.isMacroContext=isMacroContext;out.hxbReaderApi=null;out.hxbReaderStats=HxbReaderStats.create();return out;
  }
- public static function fileTime(file:String):Float return Extc.filetime(file);
- public static final flashVersions=[9.,10.,10.1,10.2,10.3,11.,11.1,11.2,11.3,11.4,11.5,11.6,11.7,11.8,11.9,12.,13.,14.,15.,16.,17.,18.,19.,20.,21.,22.,23.,24.,25.,26.,27.,28.,29.,31.,32.].map(function(v) {var major=Std.int(v),minor=Std.int((v*10.)%10.);return {version:v,define:Std.string(major)+(minor==0?"":"_"+minor)};});
+ // Extc.sys_filetime returns zero when stat fails (including absent import.hx).
+ public static function fileTime(file:String):Float return try sys.FileSystem.stat(file).mtime.getTime()/1000.0 catch(_:Dynamic) 0.;
+ public static final flashVersions=[9.,10.,10.1,10.2,10.3,11.,11.1,11.2,11.3,11.4,11.5,11.6,11.7,11.8,11.9,12.,13.,14.,15.,16.,17.,18.,19.,20.,21.,22.,23.,24.,25.,26.,27.,28.,29.,31.,32.].map(function(v) {var major=StdTools.int(v),minor=StdTools.int((v*10.)%10.);return {version:v,define:StdTools.string(major)+(minor==0?"":"_"+minor)};});
  public static function updatePlatformConfig(com:CommonContext):Void switch com.platform {case CustomTarget(_):case _:com.config=getConfig(com);};
  public static function initPlatform(com:CommonContext):Void {
   var name=Globals.platformName(com.platform);
@@ -249,12 +263,12 @@ class Common {
  static function copyStringMap<A>(m:haxe.ds.StringMap<A>):haxe.ds.StringMap<A> {var out=new haxe.ds.StringMap<A>();for (k in m.keys()) out.set(k,m.get(k));return out;}
  public static function setPlatform(com:CommonContext,pf:Platform,file:String):Void {if (com.platform!=Cross) throw "Multiple targets";com.platform=pf;com.file=file;}
  public static function setCustomTarget(com:CommonContext,name:String,path:String):Void {
-  if (Lambda.exists(Globals.platforms,function(pf) return Globals.platformName(pf)==name)) throw new Arg.Bad("--custom-target cannot use reserved name "+name);
-  if (name.length>maxCustomTargetLen) throw new Arg.Bad("--custom-target name "+name+" exceeds the maximum of "+maxCustomTargetLen+" characters");
-  if (~/^[a-zA-Z0-9_]+$/.match(name)) setPlatform(com,CustomTarget(name),path);else throw new Arg.Bad("--custom-target name "+name+" may only contain alphanumeric or underscore characters");
+  if (Lambda.exists(Globals.platforms,function(pf) return Globals.platformName(pf)==name)) throw new ArgumentError("--custom-target cannot use reserved name "+name);
+  if (name.length>maxCustomTargetLen) throw new ArgumentError("--custom-target name "+name+" exceeds the maximum of "+maxCustomTargetLen+" characters");
+  if (~/^[a-zA-Z0-9_]+$/.match(name)) setPlatform(com,CustomTarget(name),path);else throw new ArgumentError("--custom-target name "+name+" may only contain alphanumeric or underscore characters");
  }
  public static function addFeature(com:CommonContext,f:String):Void com.features.set(f,true);
- public static function hasDce(com:CommonContext):Bool {try return definedValue(com,Define.Dce)!="no" catch (e:Dynamic) {if (e!="Not_found") throw e;return false;}}
+ public static function hasDce(com:CommonContext):Bool {try return definedValue(com,Define.Dce)!="no" catch (_:NotFound) {return false;}}
  public static function isDirectlyUsed(com:CommonContext,meta:Metadata):Bool return !hasDce(com)||Meta.has(Meta.DirectlyUsed,meta);
  public static function hasFeature(com:CommonContext,f:String):Bool {
   if (com.features.exists(f)) return com.features.get(f);
@@ -263,51 +277,50 @@ class Common {
   var field=parts[0],cl=parts[1],pack=parts.slice(2);pack.reverse();var result=false;
   try {
    var found:Null<ModuleType>=null;for (t in com.types) if (samePath(tPath(t),{pack:pack,name:cl})&&!Meta.has(Meta.RealPath,tInfos(t).mtMeta)) {found=t;break;}
-   if (found==null) throw "Not_found";
+   if (found==null) throw new NotFound();
    if (field=="*") result=!hasDce(com)||switch found {case TClassDecl(c):hasClassFlag(c,CUsed);case TAbstractDecl(a):Meta.has(Meta.ValueUsed,a.aMeta);case _:Meta.has(Meta.Used,tInfos(found).mtMeta);};
    else switch found {
     case TClassDecl(c) if (hasClassFlag(c,CExtern)&&(com.platform!=Js||(cl!="Array"&&cl!="Math"))):
-     if (!hasDce(com)) result=true;else {var cf=c.clStatics.get(field);if (cf==null) cf=c.clFields.get(field);if (cf==null) throw "Not_found";result=hasClassFieldFlag(cf,CfUsed);}
+     if (!hasDce(com)) result=true;else {var cf=c.clStatics.get(field);if (cf==null) cf=c.clFields.get(field);if (cf==null) throw new NotFound();result=hasClassFieldFlag(cf,CfUsed);}
     case TClassDecl(c):result=c.clStatics.exists(field)||c.clFields.exists(field);
     case _:result=false;
    }
-  } catch (e:Dynamic) {if (e!="Not_found") throw e;result=false;}
+  } catch (_:NotFound) {result=false;}
   com.features.set(f,result);return result;
  }
  public static function allowPackage(com:CommonContext,s:String):Void {if (com.packageRules.get(s)==Forbidden) {var rules=copyStringMap(com.packageRules);rules.remove(s);com.packageRules=rules;}}
  public static function platform(com:CommonContext,p:Platform):Bool return com.platform==p;
  public static function platformNameMacro(com:CommonContext):String return defined(com,Define.Macro)?"macro":Globals.platformName(com.platform);
  public static function findFile(com:CommonContext,f:String):String return com.classPaths.findFile(f).file;
- // Object-size diagnostics remain a later runtime adapter, not an HXB implementation.
- public static function memSize(v:Dynamic):Int return Objsize.sizeWithHeaders(Objsize.objsize(v,[],[]));
+ // memSize is preserved in deferred/diagnostics/CommonMemory.hx for the later diagnostics milestone.
  public static function hash(f:String):Int {var h=0;for (i in 0...f.length) h=h*223+f.charCodeAt(i);return (h<<1)>>1;}
  public static function addDiagnosticsMessage(com:CommonContext,s:String,p:Pos,kind:Dynamic,depth:Int=0,?diagnosticsKind:Dynamic):Void {
   if (diagnosticsKind==null) diagnosticsKind=DKCompilerMessage;
   var cm=Message.makeDiagnostic(com.isMacroContext,diagnosticsKind,JString(s),p,depth,kind);
-  if (com.partScope.messageCapture!=null) com.partScope.messageCapture.value.unshift(cm);else {if (Message.messageKindSeverity(kind)==Error) com.partScope.hasError=true;com.partScope.messages.unshift(cm);}
+  if (com.partScope.messageCapture!=null) com.partScope.messageCapture.value.unshift(cm);else {if (Message.messageKindSeverity(kind)==MessageSeverity.Error) com.partScope.hasError=true;com.partScope.messages.unshift(cm);}
  }
  public static function displayErrorExt(com:CommonContext,err:Dynamic):Void {
   if (isDiagnostics(com)) Error.recurseError(function(depth,err) addDiagnosticsMessage(com,Error.errorMsg(err.errMessage),err.errPos,MKError,depth),err);else com.errorExt(err);
  }
- public static function displayError(com:CommonContext,msg:String,pos:Pos,?sub:Array<Dynamic>):Void displayErrorExt(com,Error.convertError({msg:msg,pos:pos,sub:sub==null?[]:sub}));
- public static function adaptDefinesToMacroContext(defines:Dynamic):Dynamic {
+ public static function displayError(com:CommonContext,msg:String,pos:Pos,?sub:Array<core.Error.MacroError>):Void displayErrorExt(com,Error.convertError({msg:msg,pos:pos,sub:sub==null?[]:sub}));
+ public static function adaptDefinesToMacroContext(defines:DefineContext):DefineContext {
   var remove=["java"].concat(Globals.platforms.map(Globals.platformName));for (d in [Define.NoTraces]) remove.unshift(Define.getDefineKey(d));for (v in flashVersions) remove.unshift("flash"+v.define);
   var values=new haxe.ds.StringMap<String>();var keys:Array<String>=[for (k in defines.values.keys()) k];keys.sort(Reflect.compare);for (k in keys) if (!remove.contains(k)) values.set(k,defines.values.get(k));
   var result={values:values,definesSignature:null};Define.define(result,Define.Macro);Define.rawDefine(result,Globals.platformName(Eval));return result;
  }
- public static function adaptDefinesToDisplayContext(defines:Dynamic):Dynamic {var result=adaptDefinesToMacroContext(defines);Define.define(result,Define.Display);return result;}
+ public static function adaptDefinesToDisplayContext(defines:DefineContext):DefineContext {var result=adaptDefinesToMacroContext(defines);Define.define(result,Define.Display);return result;}
  public static function getEntryPoint(com:CommonContext):Null<{name:String,cls:TClass,expr:TExpr}> {
-  var path=com.main.mainPath;if (path==null) return null;var m:ModuleDef=null;for (candidate in com.modules) if (samePath(candidate.mPath,path)) {m=candidate;break;}if (m==null) throw "Not_found";
+  var path=com.main.mainPath;if (path==null) return null;var m:ModuleDef=null;for (candidate in com.modules) if (samePath(candidate.mPath,path)) {m=candidate;break;}if (m==null) throw new NotFound();
   var c=m.mStatics;if (c==null||!c.clStatics.exists("main")) {c=null;for (t in m.mTypes) switch t {case TClassDecl(cls) if (samePath(cls.clPath,path)):c=cls;break;case _:}if (c==null) throw "Invalid_argument: option is None";}
   if (com.main.mainExpr==null) throw "Invalid_argument: option is None";return {name:path.name,cls:c,expr:com.main.mainExpr};
  }
  public static function expandCoroType(basic:BasicTypes,args:Array<{name:String,optional:Bool,type:T}>,ret:T):TSignature {
-  var args=[{name:"_hx_continuation",optional:false,type:AtomicLazy.force(basic.tcoro.continuation)}].concat(args);if (ExtType.isVoid(follow(ret))) ret=basic.tunit;
-  return {args:args,ret:TInst(AtomicLazy.force(basic.tcoro.suspensionResultClass),[ret])};
+  var args=[{name:"_hx_continuation",optional:false,type:basic.tcoro.continuation.force()}].concat(args);if (ExtType.isVoid(follow(ret))) ret=basic.tunit;
+  return {args:args,ret:TInst(basic.tcoro.suspensionResultClass.force(),[ret])};
  }
- public static function makeUnforcedLazy(tProc:T,f:Void->T,where:String):Dynamic {
+ public static function makeUnforcedLazy(tProc:T,f:Void->T,where:String):{value:TLazy} {
   var r={value:lazyAvailable(tDynamic)};
-  r.value=lazyWait(function() {try {r.value=lazyProcessing(tProc);var t=f();r.value=lazyAvailable(t);return t;} catch (e:core.Error.Error) {throw new core.Error.FatalError(e.error);}});return r;
+  r.value=lazyWait(function() {try {r.value=lazyProcessing(tProc);var t=f();r.value=lazyAvailable(t);return t;} catch (e:core.Error.TypingError) {throw new core.Error.FatalError(e.error);}});return r;
  }
  public static function checkCancellation(com:CommonContext):Void {if (com.requestScope.cancellationRequested) throw new Cancelled();}
 }

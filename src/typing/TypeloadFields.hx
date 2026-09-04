@@ -1,4 +1,8 @@
 package typing;
+import core.WithType as WithTypeTools;
+import core.WithType.WithTypeValue;
+import core.Globals.Pos;
+import core.display.DisplayPosition;
 
 import core.Ast;
 import core.TType;
@@ -7,14 +11,49 @@ import core.TUnification;
 import core.TUnification.*;
 import core.TPrinting.*;
 import core.TOther.*;
+import core.TOther;
 import core.Globals;
-import core.Meta;
+import core.Globals.*;
+import core.Ast.*;
+import core.Texpr;
+import core.Texpr.*;
+import core.TPrinting;
+import core.TPrinting.Printer;
+import core.Message.WarningCode;
+import core.ds.NotFound;
+import core.ds.Exit;
+import core.ds.PMap;
+import core.ds.AtomicLazy;
+import core.ds.OcamlInt;
+import core.ds.Record;
+import core.Path;
+import core.DisplayTypes.DisplayModeValue;
+import core.InheritDoc as InheritDocTools;
+import context.Common;
+import context.CoreApiConfig;
+import context.AbstractCast;
+import context.display.DeprecationCheck;
+import context.display.ImportHandling;
+import context.DeferredServices;
+import coro.CoroConfig;
+import typing.TypeloadCheck;
+import core.TOther.TExprToExpr;
+import core.Meta as MetadataTools;
+import core.Ast as AstTools;
+import core.Naming;
+import codegen.Overloads;
+import syntax.ParserEntry;
+import coro.Coro;
+import coro.CoroTypes;
+import typing.Typeload.LoadInstanceMode;
 import core.MetaList.StrictMeta;
 import core.Error.*;
+import core.Error;
 import core.WithType;
 import context.Typecore.*;
+import context.Typecore;
 import context.Common.*;
-import context.TyperManager;
+import context.Typecore.TyperManager;
 import context.TyperPass;
 import typing.Typeload.*;
 import typing.TypeloadFields.FieldError.*;
@@ -23,8 +62,8 @@ import typing.TypeloadFields.TypeloadFields.*;
 // haxe/src/typing/typeloadFields.ml — mechanical draft; not compile-validated.
 // Display/macro hooks are retained at their source call sites; their services are deferred.
 typedef ClassInitCtx = {
- var tclass:TClass; var isLib:Bool; var coreApiCheck:Dynamic; var isClassDebug:Bool; var extendsPublic:Bool;
- var abstractType:Null<TAbstract>; var hasDisplayField:Bool; var delayedExpr:Array<{ctx:Dynamic,lazy:Dynamic}>;
+ var tclass:TClass; var isLib:Bool; var coreApiCheck:CoreApiCheck; var isClassDebug:Bool; var extendsPublic:Bool;
+ var abstractType:Null<TAbstract>; var hasDisplayField:Bool; var delayedExpr:Array<{ctx:Typer,lazy:Null<TLazy>}>;
  var forceConstructor:Bool; var uninitializedFinal:Array<TClassField>;
 }
 typedef FieldInitCtx = {
@@ -35,23 +74,22 @@ typedef FieldInitCtx = {
 }
 enum MethodKind { MKNormal; MKGetter; MKSetter; }
 enum EnumAbstractMode { EAString; EAInt(counter:{value:Int}); EAOther; }
-enum EnumConstructorVisibility { VUnknown; VPublic(access:Dynamic); VPrivate(access:Dynamic); }
+enum EnumConstructorVisibility { VUnknown; VPublic(access:PlacedAccess); VPrivate(access:PlacedAccess); }
 class FieldError {
- public static function maybeDisplayError(com:Dynamic,fctx:FieldInitCtx,s:String,p:Dynamic):Void {if(!fctx.hadError) {fctx.hadError=true;displayError(com,s,p);}}
+ public static function maybeDisplayError(com:CommonContext,fctx:FieldInitCtx,s:String,p:Pos):Void {if(!fctx.hadError) {fctx.hadError=true;displayError(com,s,p);}}
  // Preserve the source's duplicated fctx parameter.
- public static function invalidModifierCombination(first:FieldInitCtx,com:Dynamic,fctx:FieldInitCtx,a:String,b:String,p:Dynamic):Void maybeDisplayError(com,fctx,"Invalid modifier combination: "+a+" + "+b,p);
- public static function invalidModifier(com:Dynamic,fctx:FieldInitCtx,m:String,c:String,p:Dynamic):Void maybeDisplayError(com,fctx,"Invalid modifier: "+m+" on "+c,p);
- public static function invalidModifierOnly(com:Dynamic,fctx:FieldInitCtx,m:String,c:String,p:Dynamic):Void maybeDisplayError(com,fctx,"Invalid modifier: "+m+" is only supported "+c,p);
- public static function invalidModifierOnProperty(com:Dynamic,fctx:FieldInitCtx,m:String,p:Dynamic):Void maybeDisplayError(com,fctx,"Invalid modifier: "+m+" is not supported on properties",p);
- public static function missingExpression(com:Dynamic,fctx:FieldInitCtx,reason:String,p:Dynamic):Void maybeDisplayError(com,fctx,reason,p);
- public static function unexpectedExpression(com:Dynamic,fctx:FieldInitCtx,reason:String,p:Dynamic):Void maybeDisplayError(com,fctx,reason,p);
+ public static function invalidModifierCombination(first:FieldInitCtx,com:CommonContext,fctx:FieldInitCtx,a:String,b:String,p:Pos):Void maybeDisplayError(com,fctx,"Invalid modifier combination: "+a+" + "+b,p);
+ public static function invalidModifier(com:CommonContext,fctx:FieldInitCtx,m:String,c:String,p:Pos):Void maybeDisplayError(com,fctx,"Invalid modifier: "+m+" on "+c,p);
+ public static function invalidModifierOnly(com:CommonContext,fctx:FieldInitCtx,m:String,c:String,p:Pos):Void maybeDisplayError(com,fctx,"Invalid modifier: "+m+" is only supported "+c,p);
+ public static function invalidModifierOnProperty(com:CommonContext,fctx:FieldInitCtx,m:String,p:Pos):Void maybeDisplayError(com,fctx,"Invalid modifier: "+m+" is not supported on properties",p);
+ public static function missingExpression(com:CommonContext,fctx:FieldInitCtx,reason:String,p:Pos):Void maybeDisplayError(com,fctx,reason,p);
+ public static function unexpectedExpression(com:CommonContext,fctx:FieldInitCtx,reason:String,p:Pos):Void maybeDisplayError(com,fctx,reason,p);
 }
 class TypeloadFields {
- public static function updated(v:Dynamic,changes:Dynamic):Dynamic {var result=Reflect.copy(v);for(n in Reflect.fields(changes)) Reflect.setField(result,n,Reflect.field(changes,n));return result;}
- public static function hasAccess(a:Dynamic,access:Dynamic):Bool return Lambda.exists(cast access,function(v:Dynamic) return v.access==a);
- public static function accessPos(a:Dynamic,access:Dynamic):Dynamic {for(v in (cast access:Array<Dynamic>)) if(v.access==a) return v.pos;throw new NotFound();}
- public static function meta(m:Dynamic,?p:Dynamic):Dynamic return {name:m,params:[],pos:p==null ? Globals.nullPos : p};
- public static function ae(e:Dynamic,p:Dynamic):Dynamic return {expr:e,pos:p};
+ public static function hasAccess(a:Access,access:Array<PlacedAccess>):Bool return Lambda.exists(cast access,function(v:PlacedAccess) return v.access==a);
+ public static function accessPos(a:Access,access:Array<PlacedAccess>):Dynamic {for(v in access) if(v.access==a) return v.pos;throw new NotFound();}
+ public static function meta(m:StrictMeta,?p:Pos):MetadataEntry return {meta:m,exprs:[],pos:p==null ? Globals.nullPos : p};
+ public static function ae(e:ExprDef,p:Pos):Expr return {expr:e,pos:p};
  public static function dumpClassContext(cctx:ClassInitCtx):String return Printer.sRecordFields("",[
   {name:"tclass",value:Printer.sTclass("\t",cctx.tclass)},{name:"is_lib",value:Std.string(cctx.isLib)},
   {name:"core_api_check",value:CoreApiConfig.sCoreApiCheck(cctx.coreApiCheck)},{name:"is_class_debug",value:Std.string(cctx.isClassDebug)},
@@ -63,64 +101,64 @@ class TypeloadFields {
   {name:"is_abstract_member",value:Std.string(fctx.isAbstractMember)},{name:"is_display_field",value:Std.string(fctx.isDisplayField)},
   {name:"is_field_debug",value:Std.string(fctx.isFieldDebug)},{name:"field_kind",value:sClassFieldRefKind(fctx.fieldKind)},
   {name:"do_bind",value:Std.string(fctx.doBind)},{name:"expr_presence_matters",value:Std.string(fctx.exprPresenceMatters)}]);
- public static function getCoroConfig(ctx:Dynamic,metadata:Dynamic):Dynamic return TyperManager.isCoroutineContext(ctx) ? CoroConfig.getCoroutineConfig(metadata) : null;
- public static function isJavaNativeFunction(ctx:Dynamic,metadata:Dynamic,pos:Dynamic):Bool {
-  try {var m=Meta.get(Native,metadata);if(m.params.length==0) {warning(ctx,WDeprecated,"@:native metadata for jni functions is deprecated. Use @:java.native instead.",pos);return true;}return false;}
-  catch(_:NotFound) {return Meta.has(NativeJni,metadata);}
+ public static function getCoroConfig(ctx:Typer,metadata:Metadata):Dynamic return TyperManager.isCoroutineContext(ctx) ? CoroConfig.getCoroutineConfig(metadata) : null;
+ public static function isJavaNativeFunction(ctx:Typer,metadata:Metadata,pos:Pos):Bool {
+  try {var m=MetadataTools.get(Native,metadata);if(m.exprs.length==0) {warning(ctx,WDeprecated,"@:native metadata for jni functions is deprecated. Use @:java.native instead.",pos);return true;}return false;}
+  catch(_:NotFound) {return MetadataTools.has(NativeJni,metadata);}
  }
- public static function getMethodArgs(field:TClassField):Dynamic return switch field.cfExpr {case {eexpr:TFunction(f)}:f.tfArgs;case _:throw new NotFound();};
- public static function getStructInitSuperInfo(ctx:Dynamic,c:TClass,p:Dynamic):Dynamic {
+ public static function getMethodArgs(field:TClassField):Array<{variable:TVar,defaultValue:Null<TExpr>}> return switch field.cfExpr {case {eexpr:TFunction(f)}:f.tfArgs;case _:throw new NotFound();};
+ public static function getStructInitSuperInfo(ctx:Typer,c:TClass,p:Pos):{args:Array<{variable:TVar,defaultValue:Null<TExpr>}>,expr:Null<TExpr>,types:Array<{name:String,optional:Bool,type:T}>} {
   if(c.clSuper==null || c.clSuper.cls.clConstructor==null) return {args:[],expr:null,types:[]};
-  var s=c.clSuper,ctor=s.cls.clConstructor,args:Array<Dynamic>=try {getMethodArgs(ctor);} catch(_:NotFound) {[];};
-  var argsRev:Array<Dynamic>=[],typesRev:Array<Dynamic>=[],exprsRev:Array<TExpr>=[];
-  for(arg in args) {var v=arg.v,value=arg.value,opt=value!=null || Meta.has(Optional,v.vMeta),t=opt ? ctx.t.tnull(v.vType) : v.vType,v2=copyVar(v);argsRev.unshift({v:v2,value:value});typesRev.unshift({name:v.vName,optional:opt,type:t});exprsRev.unshift(mk(TLocal(v2),v.vType,p));}
+  var s=c.clSuper,ctor=s.cls.clConstructor,args:Array<{variable:TVar,defaultValue:Null<TExpr>}>=try {getMethodArgs(ctor);} catch(_:NotFound) {[];};
+  var argsRev:Array<{variable:TVar,defaultValue:Null<TExpr>}>=[],typesRev:Array<{name:String,optional:Bool,type:T}>=[],exprsRev:Array<TExpr>=[];
+  for(arg in args) {var v=arg.variable,value=arg.defaultValue,opt=value!=null || MetadataTools.has(Optional,v.vMeta),t=opt ? ctx.t.tnull(v.vType) : v.vType,v2=copyVar(v);argsRev.unshift({variable:v2,defaultValue:value});typesRev.unshift({name:v.vName,optional:opt,type:t});exprsRev.unshift(mk(TLocal(v2),v.vType,p));}
   argsRev.reverse();typesRev.reverse();exprsRev.reverse();
   return {args:argsRev,expr:mk(TCall(mk(TConst(TSuper),TInst(s.cls,s.params),p),exprsRev),ctx.t.tvoid,p),types:typesRev};
  }
- public static function ensureStructInitConstructor(ctx:Dynamic,c:TClass,astFields:Array<Dynamic>,p:Dynamic):Void {
+ public static function ensureStructInitConstructor(ctx:Typer,c:TClass,astFields:Array<ClassField>,p:Pos):Void {
   if(c.clConstructor!=null) return;
   function fieldHasDefault(name:String):Bool return Lambda.exists(astFields,function(f) {if(f.cffName.name!=name) return false;return switch f.cffKind {case FVar(_,e),FProp(_,_,_,e):e!=null;case _:false;};});
   var sup=getStructInitSuperInfo(ctx,c,p),params=extractParamTypes(c.clParams),ethis=mk(TConst(TThis),TInst(c,params),p),doc=new StringBuf();
-  var args:Array<Dynamic>=[],el:Array<TExpr>=[],tl:Array<Dynamic>=[],ordered=c.clOrderedFields.copy();ordered.reverse();
+  var args:Array<{variable:TVar,defaultValue:Null<TExpr>}>=[],el:Array<TExpr>=[],tl:Array<{name:String,optional:Bool,type:T}>=[],ordered=c.clOrderedFields.copy();ordered.reverse();
   for(cf in ordered) if(isPhysicalVarField(cf)) {
-   var hasDefault=fieldHasDefault(cf.cfName),opt=hasDefault || Meta.has(Optional,cf.cfMeta),t=opt ? ctx.t.tnull(cf.cfType) : cf.cfType;
+   var hasDefault=fieldHasDefault(cf.cfName),opt=hasDefault || MetadataTools.has(Optional,cf.cfMeta),t=opt ? ctx.t.tnull(cf.cfType) : cf.cfType;
    var v=allocVar(VGenerated,cf.cfName,t,cf.cfNamePos),ef=mk(TField(ethis,FInstance(c,params,cf)),cf.cfType,p),ev=mk(TLocal(v),v.vType,p);
-   if(opt && !Meta.has(Optional,v.vMeta)) v.vMeta.unshift(meta(Optional));
+   if(opt && !MetadataTools.has(Optional,v.vMeta)) v.vMeta.unshift(meta(Optional));
    var assign=mk(TBinop(OpAssign,ef,ev),cf.cfType,p),e=hasDefault ? mk(TIf(mk(TBinop(OpNotEq,ev,nullExpr(t,p)),ctx.t.tbool,p),assign,null),ctx.t.tvoid,p) : assign;
    var text=genDocTextOpt(cf.cfDoc);if(text!=null) {doc.add("@param ");doc.add(cf.cfName);doc.add(" ");doc.add(StringTools.trim(text));doc.add("\n");}
-   args.unshift({v:v,value:null});el.unshift(e);tl.unshift({name:cf.cfName,optional:opt,type:t});
+   args.unshift({variable:v,defaultValue:null});el.unshift(e);tl.unshift({name:cf.cfName,optional:opt,type:t});
   }
   if(sup.expr!=null) el.unshift(sup.expr);
   var tf={tfArgs:args.concat(sup.args),tfType:ctx.t.tvoid,tfExpr:mk(TBlock(el),ctx.t.tvoid,p)};
   var e=mk(TFunction(tf),TFun({args:tl.concat(sup.types),ret:ctx.t.tvoid}),p),cf=mkField("new",e.etype,p,Globals.nullPos);
   cf.cfDoc=docFromString(doc.toString());cf.cfExpr=e;cf.cfType=e.etype;cf.cfMeta=[meta(CompilerGenerated),meta(InheritDoc)];cf.cfKind=Method(MethNormal);c.clConstructor=cf;
-  delay(ctx.g,PTypeField,function() InheritDoc.buildClassFieldDoc(ctx,c,cf));
+  delay(ctx.g,PTypeField,function() InheritDocTools.buildClassFieldDoc(ctx,c,cf));
  }
- public static function transformAbstractField(com:Dynamic,thisT:Dynamic,aT:Dynamic,a:TAbstract,f:Dynamic):Dynamic {
+ public static function transformAbstractField(com:CommonContext,thisT:TypeHint,aT:TypeHint,a:TAbstract,f:ClassField):ClassField {
   var stat=hasAccess(AStatic,f.cffAccess),p=f.cffPos;
   return switch f.cffKind {
    case FProp(get,set,_,_) if(!stat && ["get","never"].indexOf(get.name)>=0 && ["set","never"].indexOf(set.name)>=0):f;
    case FProp(_,_,_,_) if(!stat && !hasAccess(AEnum,f.cffAccess)):raiseTypingError("Member property accessors must be get/set or never",p);
    case FFun(fu) if(f.cffName.name=="new" && !stat):
-    function init(p:Dynamic):Dynamic return ae(EVars([mkEvar({name:"this",pos:Globals.nullPos},thisT,null,[meta(This)])]),p);
-    function ret(p:Dynamic):Dynamic return ae(EReturn(ae(ECast(ae(EConst(Ident("this")),p),null),p)),p);
+    function init(p:Pos):Expr return ae(EVars([mkEvar({name:"this",pos:Globals.nullPos},thisT,null,[meta(This)])]),p);
+    function ret(p:Pos):Expr return ae(EReturn(ae(ECast(ae(EConst(Ident("this")),p),null),p)),p);
     var metadata=[meta(NoCompletion)].concat(f.cffMeta);
-    if(Meta.has(MultiType,a.aMeta)) {if(hasAccess(AInline,f.cffAccess)) raiseTypingError("inline on MultiType constructor",f.cffPos);if(fu.fExpr!=null) displayError(com,"MultiType constructors cannot have a body",f.cffPos);f.cffAccess.unshift({access:AExtern,pos:Globals.nullPos});}
+    if(MetadataTools.has(MultiType,a.aMeta)) {if(hasAccess(AInline,f.cffAccess)) raiseTypingError("inline on MultiType constructor",f.cffPos);if(fu.fExpr!=null) displayError(com,"MultiType constructors cannot have a body",f.cffPos);f.cffAccess.unshift({access:AExtern,pos:Globals.nullPos});}
     try {var pos=accessPos(AMacro,f.cffAccess);raiseTypingError("Invalid modifier: macro on abstract constructor",pos);} catch(_:NotFound) {}
-    p=updated(p,{pmax:p.pmin});
+    p=Record.withFields(p,{pmax:p.pmin});
     var expr=fu.fExpr==null ? null : switch fu.fExpr.expr {case EBlock(el):ae(EBlock([init(p)].concat(el).concat([ret(p)])),p);case _:ae(EBlock([init(p),fu.fExpr,ret(p)]),p);};
-    updated(f,{cffName:{name:"_hx_new",pos:f.cffName.pos},cffKind:FFun(updated(fu,{fExpr:expr,fType:aT})),cffMeta:metadata});
-   case FFun(fu) if(!stat):if(Meta.has(From,f.cffMeta)) raiseTypingError("@:from cast functions must be static",f.cffPos);updated(f,{cffKind:FFun(fu)});
+    Record.withFields(f,{cffName:{name:"_hx_new",pos:f.cffName.pos},cffKind:FFun(Record.withFields(fu,{fExpr:expr,fType:aT})),cffMeta:metadata});
+   case FFun(fu) if(!stat):if(MetadataTools.has(From,f.cffMeta)) raiseTypingError("@:from cast functions must be static",f.cffPos);Record.withFields(f,{cffKind:FFun(fu)});
    case _:f;
   }
  }
- public static function buildEnumAbstract(ctx:Dynamic,c:TClass,a:TAbstract,fields:Array<Dynamic>,p:Dynamic):Dynamic {
+ public static function buildEnumAbstract(ctx:Typer,c:TClass,a:TAbstract,fields:Array<ClassField>,p:Pos):Dynamic {
   var mode=doesUnify(a.aThis,ctx.t.tint) ? EAInt({value:0}) : doesUnify(a.aThis,ctx.t.tstring) ? EAString : EAOther;
-  function setField(f:Dynamic,ct:Dynamic,e:Dynamic):Void {f.cffAccess.unshift({access:AInline,pos:Globals.nullPos});f.cffKind=FVar(ct,ae(ECast(e,null),e.pos));}
-  function fieldIsSet(f:Dynamic):Bool return switch f.cffKind {case FVar(ct,{expr:ECast(_,_)}):ct!=null && hasAccess(AInline,f.cffAccess);case _:false;};
+  function setField(f:ClassField,ct:Null<TypeHint>,e:Expr):Void {f.cffAccess.unshift({access:AInline,pos:Globals.nullPos});f.cffKind=FVar(ct,ae(ECast(e,null),e.pos));}
+  function fieldIsSet(f:ClassField):Bool return switch f.cffKind {case FVar(ct,{expr:ECast(_,_)}):ct!=null && hasAccess(AInline,f.cffAccess);case _:false;};
   for(f in fields) switch f.cffKind {
    case FVar(ct,eo) if(!hasAccess(AStatic,f.cffAccess) && !fieldIsSet(f)):
-    function conflict(visibility:EnumConstructorVisibility,p1:Dynamic):Void switch visibility {case VUnknown:case VPublic(access),VPrivate(access):displayErrorExt(ctx.com,makeError(Custom("Conflicting access modifier "+Ast.sAccess(access.access)),p1,[makeError(Custom(complMsg("Conflicts with this")),access.pos)]));}
+    function conflict(visibility:EnumConstructorVisibility,p1:Pos):Void switch visibility {case VUnknown:case VPublic(access),VPrivate(access):displayErrorExt(ctx.com,makeError(Custom("Conflicting access modifier "+AstTools.sAccess(access.access)),p1,[makeError(Custom(complMsg("Conflicts with this")),access.pos)]));}
     var visibility=VUnknown;
     for(access in (cast f.cffAccess:Array<Dynamic>)) switch access.access {
      case AExtern:displayError(ctx.com,"Invalid modifier: extern on field of enum abstract",access.pos);
@@ -138,14 +176,14 @@ class TypeloadFields {
   }
   return ae(EVars([mkEvar({name:"",pos:Globals.nullPos},{type:CTAnonymous(fields),pos:p})]),p);
  }
- public static function resolveTypeImport(ctx:Dynamic,p:Dynamic,i:String):Array<String> {
+ public static function resolveTypeImport(ctx:Typer,p:Pos,i:String):Array<String> {
   try {var found=ctx.m.importResolution.findTypeImport(i),path=tPath(found.type),pack=path.pack.copy();pack.reverse();return [path.name].concat(pack);} catch(_:NotFound) {return [i];}
  }
- public static function buildModuleDef(ctx:Dynamic,mt:ModuleType,metadata:Array<Dynamic>,fvars:Void->Array<Dynamic>,fbuild:Dynamic->Void):Void {
+ public static function buildModuleDef(ctx:Typer,mt:ModuleType,metadata:Metadata,fvars:Void->Array<ClassField>,fbuild:Expr->Void):Void {
   var isTypedef=false,ti=switch mt {case TClassDecl({clKind:KAbstractImpl(a)}):tInfos(TAbstractDecl(a));case TTypeDecl(_):isTypedef=true;tInfos(mt);case _:tInfos(mt);};
   var builds:Array<Void->Void>=[];
-  for(m in metadata) if(m.name==Build && !isTypedef) builds.unshift(function() {
-   var call=switch m.params {case [{expr:ECall(path,args)}]:{path:path,args:args};case _:raiseTypingError("Invalid build parameters",m.pos);};
+  for(m in metadata) if(m.meta==Build && !isTypedef) builds.unshift(function() {
+   var call=switch m.exprs {case [{expr:ECall(path,args)}]:{path:path,args:args};case _:raiseTypingError("Invalid build parameters",m.pos);};
    var sl:Array<String>=try {stringListOfExprPathRaise(call.path,function(i) return resolveTypeImport(ctx,m.pos,i));} catch(_:Exit) {raiseTypingError("Build call parameter must be a class path",m.pos);};
    if(sl.length<2) raiseTypingError("Invalid macro path",m.pos);
    var pack=sl.slice(2);pack.reverse();var cpath={pack:pack,name:sl[1]},meth=sl[0];
@@ -162,38 +200,38 @@ class TypeloadFields {
    case _:null;
   };
   builds.reverse();for(f in builds) f();
-  for(m in (cast ti.mtMeta:Array<Dynamic>)) if(m.name==Using) for(e in (cast m.params:Array<Dynamic>)) try {
+  for(m in ti.mtMeta) if(m.meta==Using) for(e in m.exprs) try {
    var path=stringPosListOfExprPathRaise(e);path.reverse();var r=ImportHandling.handleUsing(ctx,path,e.pos);
    delayLate(ctx.g,PConnectField,function() ti.mtUsing=r.filterClasses(r.types).concat(ti.mtUsing));
   } catch(_:Exit) {raiseTypingError("dot path expected",e.pos);}
   if(fenum!=null) fenum();
  }
- public static function createClassContext(c:TClass,p:Dynamic):ClassInitCtx {
-  function extendsPublic(c:TClass):Bool return Meta.has(PublicFields,c.clMeta) || (c.clSuper!=null && extendsPublic(c.clSuper.cls));
-  return {tclass:c,isLib:Meta.has(LibType,c.clMeta),coreApiCheck:CoreApiConfig.getCoreApiCheck(c.clMeta,Path.UniqueKey.lazyPath(c.clModule.mExtra.mFile)),isClassDebug:Meta.has(Custom(":debug.typeload"),c.clMeta),extendsPublic:extendsPublic(c),abstractType:switch c.clKind {case KAbstractImpl(a):a;case _:null;},forceConstructor:false,uninitializedFinal:[],delayedExpr:[],hasDisplayField:false};
+ public static function createClassContext(c:TClass,p:Pos):ClassInitCtx {
+  function extendsPublic(c:TClass):Bool return MetadataTools.has(PublicFields,c.clMeta) || (c.clSuper!=null && extendsPublic(c.clSuper.cls));
+  return {tclass:c,isLib:MetadataTools.has(LibType,c.clMeta),coreApiCheck:CoreApiConfig.getCoreApiCheck(c.clMeta,Path.UniqueKey.lazyPath(c.clModule.mExtra.mFile)),isClassDebug:MetadataTools.has(Custom(":debug.typeload"),c.clMeta),extendsPublic:extendsPublic(c),abstractType:switch c.clKind {case KAbstractImpl(a):a;case _:null;},forceConstructor:false,uninitializedFinal:[],delayedExpr:[],hasDisplayField:false};
  }
- public static function createTyperContextForClass(ctx:Dynamic,cctx:ClassInitCtx,p:Dynamic):Dynamic {
+ public static function createTyperContextForClass(ctx:Typer,cctx:ClassInitCtx,p:Pos):Typer {
   ctx.com.requestScope.stats.sClassesBuilt++;var c=cctx.tclass;if(cctx.isLib && !hasClassFlag(c,CExtern)) ctx.com.error("@:libType can only be used in extern classes",c.clPos);return TyperManager.cloneForClass(ctx,c);
  }
- public static function createFieldContext(ctx:Dynamic,cctx:ClassInitCtx,cff:Dynamic,isDisplayFile:Bool,displayModifier:Dynamic):FieldInitCtx {
+ public static function createFieldContext(ctx:Typer,cctx:ClassInitCtx,cff:ClassField,isDisplayFile:Bool,displayModifier:Dynamic):FieldInitCtx {
   var isStatic=hasAccess(AStatic,cff.cffAccess),isAbstractMember=cctx.abstractType!=null && !isStatic;if(isAbstractMember) isStatic=true;
   var isExtern=hasAccess(AExtern,cff.cffAccess),isAbstract=hasAccess(AAbstract,cff.cffAccess),isFinal=hasAccess(AFinal,cff.cffAccess);
-  for(m in (cast cff.cffMeta:Array<Dynamic>)) switch m.name {
+  for(m in cff.cffMeta) switch m.meta {
    case Final:isFinal=true;if(m.pos!=Globals.nullPos) warning(ctx,WDeprecated,"`@:final` is deprecated in favor of `final`",m.pos);
    case Extern:if(m.pos!=Globals.nullPos) warning(ctx,WDeprecated,"`@:extern` is deprecated in favor of `extern`",m.pos);isExtern=true;
    case _:
   }
   var isInline=hasAccess(AInline,cff.cffAccess),overridePos=try {accessPos(AOverride,cff.cffAccess);} catch(_:NotFound) {null;},overloadPos=try {accessPos(AOverload,cff.cffAccess);} catch(_:NotFound) {null;};
   var isMacro=hasAccess(AMacro,cff.cffAccess),kind=switch cff.cffName.name {case "new":CfrConstructor;case "__init__" if(isStatic):CfrInit;case _:isStatic ? CfrStatic : CfrMember;};
-  var defaultPos=try {Meta.get(JavaDefault,cff.cffMeta).pos;} catch(_:NotFound) {null;},c=cctx.tclass;
-  var fc:FieldInitCtx={isInline:isInline,isStatic:isStatic,defaultPos:defaultPos,overridePos:overridePos,overloadPos:overloadPos,isMacro:isMacro,isExtern:isExtern,isAbstract:isAbstract,isFinal:isFinal,isDisplayField:isDisplayFile && DisplayPosition.displayPosition.enclosedIn(cff.cffPos),isFieldDebug:cctx.isClassDebug || Meta.has(Custom(":debug.typeload"),cff.cffMeta),displayModifier:displayModifier,isAbstractMember:isAbstractMember,isAbstractConstructor:isAbstractMember && cff.cffName.name=="_hx_new",isGeneric:Meta.has(Generic,cff.cffMeta),fieldKind:kind,doBind:((!(hasClassFlag(c,CExtern)||isExtern)||isInline)&&!isAbstract&&!hasClassFlag(c,CInterface))||kind==CfrInit,exprPresenceMatters:false,hadError:false};
+  var defaultPos=try {MetadataTools.get(JavaDefault,cff.cffMeta).pos;} catch(_:NotFound) {null;},c=cctx.tclass;
+  var fc:FieldInitCtx={isInline:isInline,isStatic:isStatic,defaultPos:defaultPos,overridePos:overridePos,overloadPos:overloadPos,isMacro:isMacro,isExtern:isExtern,isAbstract:isAbstract,isFinal:isFinal,isDisplayField:isDisplayFile && DisplayPosition.displayPosition.enclosedIn(cff.cffPos),isFieldDebug:cctx.isClassDebug || MetadataTools.has(Custom(":debug.typeload"),cff.cffMeta),displayModifier:displayModifier,isAbstractMember:isAbstractMember,isAbstractConstructor:isAbstractMember && cff.cffName.name=="_hx_new",isGeneric:MetadataTools.has(Generic,cff.cffMeta),fieldKind:kind,doBind:((!(hasClassFlag(c,CExtern)||isExtern)||isInline)&&!isAbstract&&!hasClassFlag(c,CInterface))||kind==CfrInit,exprPresenceMatters:false,hadError:false};
   if(fc.isDisplayField) cctx.hasDisplayField=true;return fc;
  }
- public static function createTyperContextForField(ctx:Dynamic,cctx:ClassInitCtx,fctx:FieldInitCtx,cff:Dynamic,cf:TClassField):Dynamic {
+ public static function createTyperContextForField(ctx:Typer,cctx:ClassInitCtx,fctx:FieldInitCtx,cff:ClassField,cf:TClassField):Typer {
   DeprecationCheck.checkIs(ctx.com,ctx.m.curmod,ctx.c.curclass.clMeta,cff.cffMeta,cff.cffName.name,cff.cffMeta,cff.cffName.pos);
-  var params=fctx.isStatic&&!fctx.isAbstractMember&&!Meta.has(LibType,cctx.tclass.clMeta) ? [] : ctx.typeParams;
+  var params=fctx.isStatic&&!fctx.isAbstractMember&&!MetadataTools.has(LibType,cctx.tclass.clMeta) ? [] : ctx.typeParams;
   ctx=TyperManager.cloneForField(ctx,cf,params);var c=cctx.tclass;
-  if(fctx.isAbstract && !Meta.has(LibType,c.clMeta)) {
+  if(fctx.isAbstract && !MetadataTools.has(LibType,c.clMeta)) {
    if(fctx.isStatic) invalidModifierCombination(fctx,ctx.com,fctx,"abstract","static",cff.cffName.pos);
    else if(fctx.isFinal) invalidModifierCombination(fctx,ctx.com,fctx,"abstract","final",cff.cffName.pos);
    else if(fctx.isInline) invalidModifierCombination(fctx,ctx.com,fctx,"abstract","inline",cff.cffName.pos);
@@ -201,45 +239,39 @@ class TypeloadFields {
   }
   return ctx;
  }
- public static function isPublic(cctx:ClassInitCtx,access:Dynamic,parent:Null<TClassField>):Bool {
+ public static function isPublic(cctx:ClassInitCtx,access:Array<PlacedAccess>,parent:Null<TClassField>):Bool {
   var c=cctx.tclass;if(hasAccess(APrivate,access)) return false;if(hasAccess(APublic,access)) return true;if(parent!=null) return hasClassFieldFlag(parent,CfPublic);
   return hasClassFlag(c,CExtern)||hasClassFlag(c,CInterface)||cctx.extendsPublic||switch c.clKind {case KModuleFields(_):true;case _:false;};
  }
  public static function getParent(c:TClass,name:String):Null<TClassField> {if(c.clSuper==null) return null;try {return PMap.find(name,c.clSuper.cls.clFields);} catch(_:NotFound) {return getParent(c.clSuper.cls,name);}}
- public static function transformAbstractField2(ctx:Dynamic,a:TAbstract,cff:Dynamic):Dynamic return transformAbstractField(ctx.com,TExprToExpr.convertTypePrime(a.aThis),TExprToExpr.convertTypePrime(TAbstract(a,extractParamTypes(a.aParams))),a,cff);
- public static function transformField(ctx:Dynamic,cctx:ClassInitCtx,c:TClass,f:Dynamic,fields:Array<Dynamic>,p:Dynamic):Dynamic {
+ public static function transformAbstractField2(ctx:Typer,a:TAbstract,cff:ClassField):Dynamic return transformAbstractField(ctx.com,TExprToExpr.convertTypeHint(a.aThis),TExprToExpr.convertTypeHint(TAbstract(a,extractParamTypes(a.aParams))),a,cff);
+ public static function transformField(ctx:Typer,cctx:ClassInitCtx,c:TClass,f:ClassField,fields:Array<ClassField>,p:Pos):ClassField {
   if(cctx.abstractType!=null) f=transformAbstractField2(ctx,cctx.abstractType,f);
-  if(hasAccess(AMacro,f.cffAccess) && ctx.g.macros!=null && ctx.g.macros.ctx.com.moduleLut.getTypeLut().mem(c.clPath)) {
+  if(hasAccess(AMacro,f.cffAccess) && ctx.g.macros!=null && ctx.g.macros.typer.com.moduleLut.getTypeLut().mem(c.clPath)) {
    if(!Lambda.exists(fields,function(f2) return f2.cffName==f.cffName && hasAccess(AMacro,f2.cffAccess))) raiseTypingError("Class build macro cannot return a macro function when the class has already been compiled into the macro context",p);
   }
   return f;
  }
- public static function typeVarField(ctx:Dynamic,t:T,e:Dynamic,stat:Bool,doDisplay:Bool,p:Dynamic):TExpr {
+ public static function typeVarField(ctx:Typer,t:T,e:Expr,stat:Bool,doDisplay:Bool,p:Pos):TExpr {
   var save=TypeloadFunction.saveFieldState(ctx);
-  try {if(doDisplay) e=Display.preprocessExpr(ctx.com,e);var result=AbstractCast.castOrUnify(ctx,t,typeExpr(ctx,e,WithType.withType(t)),p);save();return result;} catch(err:Dynamic) {save();throw err;}
+  try {if(doDisplay && ctx.m.isDisplayFile) DeferredServices.display();var result=AbstractCast.castOrUnify(ctx,t,typeExpr(ctx,e,WithTypeTools.withType(t)),p);save();return result;} catch(err:Dynamic) {save();throw err;}
  }
- public static function buildFields(ctx:Dynamic,cctx:ClassInitCtx,c:TClass,fields:Array<Dynamic>):Array<Dynamic> {
-  var pending={value:[]};c.clBuild=function() return BuildMacro(pending);
+ public static function buildFields(ctx:Typer,cctx:ClassInitCtx,c:TClass,fields:Array<ClassField>):Array<ClassField> {
+  var pending:Array<Void->Void>=[];c.clBuild=function() return BuildMacro(pending);
   buildModuleDef(ctx,TClassDecl(c),c.clMeta,function() return fields,function(e) switch e.expr {
    case EVars([{evType:{type:CTAnonymous(f),pos:p},evExpr:null}]):fields=f.map(function(v) return transformField(ctx,cctx,c,v,fields,p));
    case _:raiseTypingError("Class build macro must return a single variable with anonymous fields",e.pos);
   });
-  c.clBuild=function() return Building([c]);for(f in (cast pending.value:Array<Void->Void>)) f();return fields;
+  c.clBuild=function() return Building([c]);for(f in pending) f();return fields;
  }
- public static function checkFieldDisplay(ctx:Dynamic,fctx:FieldInitCtx,c:TClass,cf:TClassField):Void {
-  if(!fctx.isDisplayField) return;
-  var scope=switch c.clKind {
-   case KAbstractImpl(_):if(hasClassFieldFlag(cf,CfImpl)) {if(fctx.isAbstractConstructor) {cf=updated(cf,{cfName:"new"});CFSConstructor;}else CFSMember;}else CFSStatic;
-   case _:fctx.isStatic ? CFSStatic : fctx.fieldKind==CfrConstructor ? CFSConstructor : CFSMember;
-  };
-  var origin=switch c.clKind {case KAbstractImpl(a):Self(TAbstractDecl(a));case _:Self(TClassDecl(c));};
-  DisplayEmitter.maybeDisplayField(ctx,origin,scope,cf,cf.cfNamePos);DisplayEmitter.checkFieldModifiers(ctx,c,cf,fctx.overridePos,fctx.displayModifier);
+ public static function checkFieldDisplay(ctx:Typer,fctx:FieldInitCtx,c:TClass,cf:TClassField):Void {
+  if(fctx.isDisplayField) DeferredServices.display();
  }
- public static function loadVariableTypeHint(ctx:Dynamic,fctx:FieldInitCtx,eo:Dynamic,p:Dynamic,t:Dynamic):T {
+ public static function loadVariableTypeHint(ctx:Typer,fctx:FieldInitCtx,eo:Dynamic,p:Pos,t:Dynamic):T {
   if(t==null && eo==null) {missingExpression(ctx.com,fctx,"Variable requires type-hint or initialization",p);return tDynamic;}
   if(t==null) return mkMono();return loadTypeHint(ctx,p,LoadNormal,t);
  }
- public static function createVariable(ctx:Dynamic,cctx:ClassInitCtx,fctx:FieldInitCtx,c:TClass,f:Dynamic,cf:TClassField,t:Dynamic,eo:Dynamic,p:Dynamic):TClassField {
+ public static function createVariable(ctx:Typer,cctx:ClassInitCtx,fctx:FieldInitCtx,c:TClass,f:ClassField,cf:TClassField,t:Dynamic,eo:Dynamic,p:Pos):TClassField {
   var isEnum=hasAccess(AEnum,f.cffAccess);
   if(fctx.isAbstractMember && !isEnum) raiseTypingError("Cannot declare member variable in abstract",p);
   if(fctx.isInline && !fctx.isStatic) invalidModifier(ctx.com,fctx,"inline","non-static variable",p);
@@ -255,10 +287,10 @@ class TypeloadFields {
   if(isEnum) addClassFieldFlag(cf,CfEnum);
   TypeBinding.bindVar(ctx,cctx,fctx,cf,eo);return cf;
  }
- public static function checkAbstract(ctx:Dynamic,cctx:ClassInitCtx,fctx:FieldInitCtx,a:TAbstract,c:TClass,cf:TClassField,fd:Dynamic,t:T,ret:T,p:Dynamic):Void {
+ public static function checkAbstract(ctx:Typer,cctx:ClassInitCtx,fctx:FieldInitCtx,a:TAbstract,c:TClass,cf:TClassField,fd:Func,t:T,ret:T,p:Pos):Void {
   if(fctx.isAbstractConstructor && a.aConstructor==null) a.aConstructor=cf;
-  var m=mkMono(),ta=TAbstract(a,a.aParams.map(function(_) return mkMono())),tthis=fctx.isAbstractMember||Meta.has(To,cf.cfMeta) ? monomorphs(a.aParams,a.aThis) : a.aThis;
-  var allowsNoExpr=Meta.has(CoreType,a.aMeta);
+  var m=mkMono(),ta=TAbstract(a,a.aParams.map(function(_) return mkMono())),tthis=fctx.isAbstractMember||MetadataTools.has(To,cf.cfMeta) ? monomorphs(a.aParams,a.aThis) : a.aThis;
+  var allowsNoExpr=MetadataTools.has(CoreType,a.aMeta);
   function allowNoExpr():Void {if(!hasClassFieldFlag(cf,CfExtern)) {allowsNoExpr=true;fctx.exprPresenceMatters=true;}}
   function handleFrom():Void {
    var r=makeLazy(ctx.g,t,function() {
@@ -275,17 +307,17 @@ class TypeloadFields {
    function validArgs(args:Array<Dynamic>):Bool return args.length==1 || (args.length==2 && args[1].optional && isPosInfos(args[1].type));
    switch [cf.cfKind,cf.cfType] {
     case [Var(_),_]:raiseTypingError("Invalid metadata: @:to must be used on method of abstract",p);
-    case [Method(_),TFun(s)] if(!fctx.isAbstractMember && !validArgs(s.args)):if(!Meta.has(MultiType,a.aMeta)) raiseTypingError("static @:to method should have one argument",p);
-    case [Method(_),TFun(s)] if(fctx.isAbstractMember && !validArgs(s.args)):if(!Meta.has(MultiType,a.aMeta)) raiseTypingError("@:to method should have no arguments",p);
+    case [Method(_),TFun(s)] if(!fctx.isAbstractMember && !validArgs(s.args)):if(!MetadataTools.has(MultiType,a.aMeta)) raiseTypingError("static @:to method should have one argument",p);
+    case [Method(_),TFun(s)] if(fctx.isAbstractMember && !validArgs(s.args)):if(!MetadataTools.has(MultiType,a.aMeta)) raiseTypingError("@:to method should have no arguments",p);
     case _:
    }
    if(!hasClassFieldFlag(cf,CfImpl)) addClassFieldFlag(cf,CfImpl);
    function resolveM(args:Array<T>):T {
-    try {unifyRaise(t,tfun([tthis].concat(args),m),cf.cfPos);} catch(e:Error) {switch e.error.errMessage {case Unify(_):raiseTypingErrorExt(e.error);case _:throw e;}}
+    try {unifyRaise(t,tfun([tthis].concat(args),m),cf.cfPos);} catch(e:core.Error.TypingError) {switch e.error.errMessage {case Unify(_):raiseTypingErrorExt(e.error);case _:throw e;}}
     return switch follow(m) {case TMono(_) if(switch t {case TFun(s):s.ret==tDynamic;case _:false;}):tDynamic;case m:m;};
    }
-   var isMulti=Meta.has(MultiType,a.aMeta)&&!fctx.isAbstractMember;
-   if(isMulti && !Meta.has(MultiType,cf.cfMeta)) cf.cfMeta.unshift(meta(MultiType));
+   var isMulti=MetadataTools.has(MultiType,a.aMeta)&&!fctx.isAbstractMember;
+   if(isMulti && !MetadataTools.has(MultiType,cf.cfMeta)) cf.cfMeta.unshift(meta(MultiType));
    var r=makeLazy(ctx.g,t,function() {
     var args:Array<T>;
     if(isMulti) {
@@ -324,7 +356,7 @@ class TypeloadFields {
      case _:raiseTypingError(fctx.isAbstractMember ? "Member @:op functions must accept exactly one argument" : "Static @:op functions must accept exactly two arguments",cf.cfPos);
     };
     if(!(eq.left||eq.right)) raiseTypingError("The left or right argument type must be "+sType(printContext(),targ),cf.cfPos);
-    if(eq.right && Meta.has(Commutative,cf.cfMeta)) raiseTypingError("Invalid metadata: @:commutative is only allowed if the right argument is not "+sType(printContext(),targ),cf.cfPos);
+    if(eq.right && MetadataTools.has(Commutative,cf.cfMeta)) raiseTypingError("Invalid metadata: @:commutative is only allowed if the right argument is not "+sType(printContext(),targ),cf.cfPos);
     a.aOps.unshift({op:op,field:cf});allowNoExpr();
    case EUnop(op,flag,_):
     if(fctx.isMacro) invalidModifier(ctx.com,fctx,"macro","operator function",p);
@@ -335,67 +367,67 @@ class TypeloadFields {
    case EField(_,_,_):handleResolve();
    case _:raiseTypingError("Invalid @:op expresssions, should be an operator or a call",e.pos);
   }
-  for(entry in cf.cfMeta) switch entry.name {
-   case From:handleFrom();case To:handleTo();case Op:if(entry.params.length==1) handleOp(entry.params[0]);
+  for(entry in cf.cfMeta) switch entry.meta {
+   case From:handleFrom();case To:handleTo();case Op:if(entry.exprs.length==1) handleOp(entry.exprs[0]);
    case ArrayAccess:handleArrayAccess();case Resolve:handleResolve();case _:
   }
-  if(fctx.isAbstractConstructor && Meta.has(MultiType,a.aMeta)) fctx.doBind=false;
+  if(fctx.isAbstractConstructor && MetadataTools.has(MultiType,a.aMeta)) fctx.doBind=false;
   if(fd.fExpr==null) {
    if(fctx.isInline) missingExpression(ctx.com,fctx,"Inline functions must have an expression",cf.cfPos);
    if(fd.fType==null) raiseTypingError("Functions without expressions must have an explicit return type",cf.cfPos);
    if(allowsNoExpr) {cf.cfMeta.unshift(meta(NoExpr));fctx.doBind=false;}
   }
  }
- public static function typeOpt(ctx:Dynamic,cctx:ClassInitCtx,fctx:FieldInitCtx,p:Dynamic,mode:Dynamic,t:Dynamic):Dynamic {
+ public static function typeOpt(ctx:Typer,cctx:ClassInitCtx,fctx:FieldInitCtx,p:Pos,mode:LoadInstanceMode,t:Null<TypeHint>):T {
   var c=cctx.tclass,trulyExtern=(hasClassFlag(c,CExtern)||fctx.isExtern)&&!fctx.isInline;
   if(t==null&&(trulyExtern||hasClassFlag(c,CInterface))) {displayError(ctx.com,"Type required for extern classes and interfaces",p);return tDynamic;}
-  if(t==null&&cctx.coreApiCheck==CoreApiConfig.On) {displayError(ctx.com,"Type required for core api classes",p);return tDynamic;}
+  if(t==null&&cctx.coreApiCheck==CoreApiCheck.On) {displayError(ctx.com,"Type required for core api classes",p);return tDynamic;}
   if(t==null&&fctx.isAbstract) {displayError(ctx.com,"Type required for abstract functions",p);return tDynamic;}
   return Typeload.loadTypeHint(ctx,p,mode,t);
  }
- public static function setupArgsRet(ctx:Dynamic,cctx:ClassInitCtx,fctx:FieldInitCtx,name:String,fd:Dynamic,p:Dynamic):Dynamic {
+ public static function setupArgsRet(ctx:Typer,cctx:ClassInitCtx,fctx:FieldInitCtx,name:String,fd:Func,p:Pos):{args:FunctionArguments,ret:T} {
   var c=cctx.tclass,kind=AtomicLazy.fromFun(function() {
    if(name.length<4) return MKNormal;
    return switch name.substr(0,4) {case "get_":fd.fArgs.length==0?MKGetter:MKNormal;case "set_":fd.fArgs.length==1?MKSetter:MKNormal;case _:MKNormal;};
   });
   function propertyType():Dynamic {
    var property=name.substr(4),cf=PMap.find(property,fctx.isStatic?c.clStatics:c.clFields);
-   return switch [AtomicLazy.force(kind),cf.cfKind] {case [MKGetter,Var({vRead:AccCall|AccPrivateCall})]|[MKSetter,Var({vWrite:AccCall|AccPrivateCall})]:cf.cfType;case _:throw new NotFound();};
+   return switch [kind.force(),cf.cfKind] {case [MKGetter,Var({vRead:AccCall|AccPrivateCall})]|[MKSetter,Var({vWrite:AccCall|AccPrivateCall})]:cf.cfType;case _:throw new NotFound();};
   }
   function maybeProperty(th:Dynamic,check:Void->Bool,def:Void->Dynamic):Dynamic {if(th==null&&check()) {try return propertyType() catch(_:NotFound) return def();}return def();}
-  var ret=fctx.fieldKind==CfrConstructor?ctx.t.tvoid:maybeProperty(fd.fType,function() return switch AtomicLazy.force(kind) {case MKGetter|MKSetter:true;case _:false;},() -> typeOpt(ctx,cctx,fctx,p,LoadReturn,fd.fType));
+  var ret=fctx.fieldKind==CfrConstructor?ctx.t.tvoid:maybeProperty(fd.fType,function() return switch kind.force() {case MKGetter|MKSetter:true;case _:false;},() -> typeOpt(ctx,cctx,fctx,p,LoadReturn,fd.fType));
   var abstractThis=cctx.abstractType!=null&&fctx.isAbstractMember&&!fctx.isAbstractConstructor&&!fctx.isMacro?cctx.abstractType.aThis:null;
   var isExtern=fctx.isExtern||hasClassFlag(ctx.c.curclass,CExtern);
-  function typeArg(i:Int,opt:Bool,cto:Dynamic,p:Dynamic):Dynamic {
+  function typeArg(i:Int,opt:Bool,cto:Dynamic,p:Pos):Dynamic {
    function def():Dynamic return typeOpt(ctx,cctx,fctx,p,LoadNormal,cto);
-   return i==0?maybeProperty(cto,() -> AtomicLazy.force(kind)==MKSetter,def):def();
+   return i==0?maybeProperty(cto,() -> kind.force()==MKSetter,def):def();
   }
   var args=new FunctionArguments(ctx.com,typeArg,isExtern,fctx.isDisplayField,abstractThis,fd.fArgs);
   return {args:args,ret:ret};
  }
- public static function createMethod(ctx:Dynamic,cctx:ClassInitCtx,fctx:FieldInitCtx,c:Dynamic,f:Dynamic,cf:Dynamic,fd:Dynamic,p:Dynamic):Dynamic {
-  var name=f.cffName.name,params=TypeloadFunction.typeFunctionParams(ctx,fd,TPHMethod,name);
+ public static function createMethod(ctx:Typer,cctx:ClassInitCtx,fctx:FieldInitCtx,c:TClass,f:ClassField,cf:TClassField,fd:Func,p:Pos):TClassField {
+  var name=f.cffName.name;var params:TypeParams=TypeloadFunction.typeFunctionParams(ctx,fd,TPHMethod,name);
   if(fctx.isGeneric&&params.length==0) raiseTypingError("Generic functions must have type parameters",p);
-  if(fctx.isMacro&&!ctx.com.isMacroContext&&!fctx.isStatic) fd=updated(fd,{fArgs:fd.fArgs.length==0?[]:fd.fArgs.slice(1)});
+  if(fctx.isMacro&&!ctx.com.isMacroContext&&!fctx.isStatic) fd=Record.withFields(fd,{fArgs:fd.fArgs.length==0?[]:fd.fArgs.slice(1)});
   if(fctx.isMacro) {
    if(ctx.com.isMacroContext) {
     removeClassFlag(c,CExtern);
-    var texpr=makePtpCt(mkTypePath({pack:["haxe","macro"],name:"Expr"}),Globals.nullPos);
-    function noExprOf(th:Dynamic):Dynamic return switch th.type {
+    var texpr=makePtpCt(mkTypePath(["haxe","macro"],"Expr"),Globals.nullPos);
+    function noExprOf(th:TypeHint):TypeHint return switch th.type {
      case CTPath({path:{tpackage:["haxe","macro"],tname:"Expr",tsub:"ExprOf",tparams:[TPType(_)]}})|CTPath({path:{tpackage:[],tname:"ExprOf",tsub:null,tparams:[TPType(_)]}}):{type:texpr,pos:th.pos};
      case _:th;
     };
-    function convert(th:Dynamic):Dynamic return th==null?{type:texpr,pos:Globals.nullPos}:noExprOf(th);
-    fd={fParams:fd.fParams,fType:convert(fd.fType),fArgs:(cast fd.fArgs:Array<Dynamic>).map(arg -> updated(arg,{type:convert(arg.type)})),fExpr:fd.fExpr};
+    function convert(th:Null<TypeHint>):TypeHint return th==null?{type:texpr,pos:Globals.nullPos}:noExprOf(th);
+    fd={fParams:fd.fParams,fType:convert(fd.fType),fArgs:fd.fArgs.map(arg -> Record.withFields(arg,{type:convert(arg.type)})),fExpr:fd.fExpr};
    } else {
-    var dynamicHint=makePtpTh(mkTypePath({pack:[],name:"Dynamic"}),Globals.nullPos);
-    function toDynamic(p:Dynamic,ptp:Dynamic):Dynamic return switch ptp.path {
+    var dynamicHint=makePtpTh(mkTypePath([],"Dynamic"),Globals.nullPos);
+    function toDynamic(p:Pos,ptp:PlacedTypePath):TypeHint return switch ptp.path {
      case {tpackage:["haxe","macro"],tname:"Expr",tsub:"ExprOf",tparams:[TPType(t)]}|{tpackage:[],tname:"ExprOf",tsub:null,tparams:[TPType(t)]}:t;
      case {tpackage:["haxe"],tname:"PosInfos",tsub:null,tparams:[]}:raiseTypingError("haxe.PosInfos is not allowed on macro functions, use Context.currentPos() instead",p);
      case _:dynamicHint;
     };
-    function convert(th:Dynamic):Dynamic return th==null?dynamicHint:switch th.type {case CTPath(ptp):toDynamic(th.pos,ptp);case _:dynamicHint;};
-    fd={fParams:fd.fParams,fType:convert(fd.fType),fArgs:(cast fd.fArgs:Array<Dynamic>).map(arg -> updated(arg,{type:convert(arg.type),expr:null})),fExpr:null};
+    function convert(th:Null<TypeHint>):TypeHint return th==null?dynamicHint:switch th.type {case CTPath(ptp):toDynamic(th.pos,ptp);case _:dynamicHint;};
+    fd={fParams:fd.fParams,fType:convert(fd.fType),fArgs:fd.fArgs.map(arg -> Record.withFields(arg,{type:convert(arg.type),expr:null})),fExpr:null};
    }
   }
   if(hasClassFlag(c,CInterface)) {
@@ -404,14 +436,14 @@ class TypeloadFields {
    if(fctx.isInline&&hasClassFlag(c,CInterface)) invalidModifier(ctx.com,fctx,"inline","method of interface",p);
   } else if(fctx.fieldKind==CfrConstructor) {
    if(fctx.isStatic) invalidModifier(ctx.com,fctx,"static","constructor",p);
-   if(Meta.has(Coroutine,f.cffMeta)) raiseTypingError("Invalid modifier: @:coroutine on constructor",p);
+   if(MetadataTools.has(Coroutine,f.cffMeta)) raiseTypingError("Invalid modifier: @:coroutine on constructor",p);
    if(fd.fType!=null) switch fd.fType {
     case {type:CTPath({path:tp}),pos:p} if(tp.tpackage.length==0&&tp.tname=="Void"):
      if(ctx.m.isDisplayFile&&DisplayPosition.displayPosition.enclosedIn(p)) Typeload.loadInstance(ctx,makePtp(tp,p),ParamNormal,LoadReturn,true);
     case _:raiseTypingError("A class constructor can't have a return type",p);
    }
   }
-  var parent=fctx.isStatic?null:getParent(c,name),isDynamic=hasAccess(ADynamic,f.cffAccess)||(parent!=null&&parent.cfKind==Method(MethDynamic));
+  var parent=fctx.isStatic?null:getParent(c,name),isDynamic=hasAccess(ADynamic,f.cffAccess)||(parent!=null&&(switch parent.cfKind {case Method(MethDynamic):true;case _:false;}));
   if(isDynamic) {
    if(fctx.isAbstract) invalidModifierCombination(fctx,ctx.com,fctx,"abstract","dynamic",p);
    if(fctx.isInline) invalidModifierCombination(fctx,ctx.com,fctx,"dynamic","inline",p);
@@ -419,20 +451,20 @@ class TypeloadFields {
   }
   if(fctx.overridePos!=null) {if(fctx.isStatic) invalidModifierCombination(fctx,ctx.com,fctx,"override","static",p);addClassFieldFlag(cf,CfOverride);}
   ctx.typeParams=params.concat(ctx.typeParams);
-  var setup=setupArgsRet(ctx,cctx,fctx,name,fd,p),args=setup.args,ret=setup.ret,isCoroutine=Meta.has(Coroutine,f.cffMeta),functionMode=isCoroutine?FunCoroutine:FunFunction,targs=args.forType(),t:Dynamic;
+  var setup=setupArgsRet(ctx,cctx,fctx,name,fd,p),args=setup.args,ret=setup.ret,isCoroutine=MetadataTools.has(Coroutine,f.cffMeta),functionMode=isCoroutine?FunCoroutine:FunFunction,targs=args.forType(),t:Dynamic;
   if(!isCoroutine) t=TFun({args:targs,ret:ret});
   else if(CoroConfig.ofMetaList(cf.cfMeta).transformed) {
    if(targs.length==0) throw new haxe.Exception("Invalid transformed coroutine signature");
    var tail=targs.slice(1),actualRet=switch follow(ret) {case TInst({clPath:{pack:["haxe","coro"],name:"SuspensionResult"}},[ret]):ret;case t:raiseTypingError("Return type of @:coroutine(transformed) functions must be SuspensionResult (found "+sType(printContext(),t)+")",p);};
-   tail.reverse();t=AtomicLazy.force(ctx.t.tcoro.tcoro)(tail,actualRet);
-  } else t=AtomicLazy.force(ctx.t.tcoro.tcoro)(targs,ret);
+   tail.reverse();t=ctx.t.tcoro.tcoro.force()({args:tail,ret:actualRet});
+  } else t=ctx.t.tcoro.tcoro.force()({args:targs,ret:ret});
   cf.cfType=t;cf.cfKind=Method(fctx.isMacro?MethMacro:fctx.isInline?MethInline:isDynamic?MethDynamic:MethNormal);cf.cfParams=params;
   if(isPublic(cctx,f.cffAccess,parent)) addClassFieldFlag(cf,CfPublic);
   if(fctx.isFinal) addClassFieldFlag(cf,CfFinal);
   if(fctx.isExtern) addClassFieldFlag(cf,CfExtern);
   if(fctx.isAbstract) {
    if(fctx.fieldKind==CfrConstructor) {var position=try accessPos(AAbstract,f.cffAccess) catch(_:NotFound) p;invalidModifier(ctx.com,fctx,"abstract","constructor",position);}
-   addClassFieldFlag(cf,CfAbstract);if(Meta.has(CallSuper,cf.cfMeta)) invalidModifier(ctx.com,fctx,"@:callSuper","abstract method",cf.cfNamePos);
+   addClassFieldFlag(cf,CfAbstract);if(MetadataTools.has(CallSuper,cf.cfMeta)) invalidModifier(ctx.com,fctx,"@:callSuper","abstract method",cf.cfNamePos);
   }
   if(fctx.isAbstractMember) addClassFieldFlag(cf,CfImpl);
   if(fctx.isAbstractConstructor) addClassFieldFlag(cf,CfAbstractConstructor);
@@ -446,10 +478,10 @@ class TypeloadFields {
    else if(fctx.fieldKind==CfrConstructor) {if((hasClassFlag(c,CExtern)||fctx.isExtern)&&!fctx.isInline) addClassFieldFlag(cf,CfOverload);else invalidModifierOnly(ctx.com,fctx,"overload","on extern non-inline constructors",fctx.overloadPos);}
    else {addClassFieldFlag(cf,CfOverload);if(!(hasClassFlag(c,CExtern)||fctx.isExtern)) invalidModifierOnly(ctx.com,fctx,"overload","on extern functions",fctx.overloadPos);}
   }
-  cf.cfMeta=(cast cf.cfMeta:Array<Dynamic>).map(m -> m.name==AstSource&&m.params.length==0?updated(m,{params:fd.fExpr==null?[]:[fd.fExpr]}):m);
-  if(parent!=null&&!Meta.has(Native,cf.cfMeta)) try cf.cfMeta.unshift(Meta.get(Native,parent.cfMeta)) catch(_:NotFound) {}
+  cf.cfMeta=cf.cfMeta.map(m -> m.meta==AstSource&&m.exprs.length==0?Record.withFields(m,{exprs:fd.fExpr==null?[]:[fd.fExpr]}):m);
+  if(parent!=null&&!MetadataTools.has(Native,cf.cfMeta)) try cf.cfMeta.unshift(MetadataTools.get(Native,parent.cfMeta)) catch(_:NotFound) {}
   Typeload.generateArgsMeta(ctx.com,c,m -> cf.cfMeta.unshift(m),fd.fArgs);
-  var fmode:Dynamic;
+  var fmode:CurrentFun;
   if(cctx.abstractType!=null) {checkAbstract(ctx,cctx,fctx,cctx.abstractType,c,cf,fd,t,ret,p);fmode=fctx.isAbstractMember?FunMemberAbstract:FunStatic;}
   else fmode=fctx.fieldKind==CfrConstructor?FunConstructor:fctx.isStatic?FunStatic:FunMember;
   Typeload.initMetaOverloads(ctx,c,cf);
@@ -462,17 +494,17 @@ class TypeloadFields {
   }
   return cf;
  }
- public static function createProperty(ctx:Dynamic,cctx:ClassInitCtx,fctx:FieldInitCtx,c:Dynamic,f:Dynamic,cf:Dynamic,get:Dynamic,set:Dynamic,t:Dynamic,eo:Dynamic,p:Dynamic):Dynamic {
+ public static function createProperty(ctx:Typer,cctx:ClassInitCtx,fctx:FieldInitCtx,c:TClass,f:ClassField,cf:TClassField,get:Dynamic,set:Dynamic,t:Dynamic,eo:Dynamic,p:Pos):TClassField {
   var name=f.cffName.name,ret:Dynamic;
   if(t==null&&eo==null) ret=raiseTypingError("Property requires type-hint or initialization",p);else if(t==null) ret=mkMono();else ret=Typeload.loadTypeHint(ctx,p,LoadNormal,t);
   cf.cfType=ret;
   var tget:Dynamic,tset:Dynamic;
   if(cctx.abstractType!=null&&fctx.isAbstractMember) {
-   var a=cctx.abstractType;if(Meta.has(IsVar,f.cffMeta)) raiseTypingError("Abstract properties cannot be real variables",f.cffPos);
+   var a=cctx.abstractType;if(MetadataTools.has(IsVar,f.cffMeta)) raiseTypingError("Abstract properties cannot be real variables",f.cffPos);
    var ta=applyParams(a.aParams,extractParamTypes(a.aParams),a.aThis);tget=tfun([ta],ret);tset=tfun([ta,ret],ret);
   } else {tget=tfun([],ret);tset=TFun({args:[{name:"value",optional:false,type:ret}],ret:ret});}
   function findAccessor(name:String):Array<Dynamic> {
-   if(fctx.isStatic) {var cf=PMap.find(name,c.clStatics);return [{type:cf.cfType,field:cf}].concat((cast cf.cfOverloads:Array<Dynamic>).map(cf -> {type:cf.cfType,field:cf}));}
+   if(fctx.isStatic) {var cf=PMap.find(name,c.clStatics);return [{type:cf.cfType,field:cf}].concat(cf.cfOverloads.map(cf -> {type:cf.cfType,field:cf}));}
    return getOverloads(ctx.com,c,name);
   }
   if(fctx.isAbstractMember) addClassFieldFlag(cf,CfImpl);
@@ -482,22 +514,18 @@ class TypeloadFields {
     for(i in 0...overloads.length) if(i==overloads.length-1||typeIseq(t,overloads[i].type)) {found=overloads[i];break;}
     if(found==null) throw new NotFound();
     var t2=found.type,f2=found.field;
-    for(m in (cast f.cffMeta:Array<Dynamic>)) if(m.name==Deprecated) f2.cfMeta.unshift(m);
+    for(m in f.cffMeta) if(m.meta==Deprecated) f2.cfMeta.unshift(m);
     delay(ctx.g,PForce,function() {
      try {
       switch f2.cfKind {case Method(MethMacro):displayErrorExt(ctx.com,makeError(Custom(f2.cfName+": Macro methods cannot be used as property accessor"),p,[makeError(Custom(complMsg(f2.cfName+": Accessor method is here")),f2.cfPos)]));case _:}
       unifyRaise(t2,t,f2.cfPos);
       if((fctx.isAbstractMember&&!hasClassFieldFlag(f2,CfImpl))||(hasClassFieldFlag(f2,CfImpl)&&!fctx.isAbstractMember)) displayError(ctx.com,"Mixing abstract implementation and static properties/accessors is not allowed",f2.cfPos);
-     } catch(exc:Dynamic) {switch exc {case Error(err):switch err.errMessage {case Unify(_):raiseError(makeError(Custom("In method "+m+" required by property "+name),err.errPos,[err]));case _:throw exc;}case _:throw exc;}}
+     } catch(exc:Dynamic) {switch exc {case (core.ds.ExceptionTools.typing(_) => Some(err)):switch err.errMessage {case Unify(_):raiseError(makeError(Custom("In method "+m+" required by property "+name),err.errPos,[err]));case _:throw exc;}case _:throw exc;}}
     });
    } catch(_:NotFound) {
     function generate():Dynamic {var cf=mkField(m,t,p,Globals.nullPos);cf.cfMeta=[meta(CompilerGenerated),meta(NoCompletion)];cf.cfKind=Method(MethNormal);return cf;}
     if(hasClassFlag(c,CInterface)) {var cf=generate();c.clFields=PMap.add(cf.cfName,cf,c.clFields);c.clOrderedFields.unshift(cf);}
-    else if(Diagnostics.errorInDiagnosticsRun(ctx.com,f.cffPos)) {
-     var accessor=generate();removeClassFieldFlag(accessor,CfPublic);if(fctx.isStatic) addClassFieldFlag(accessor,CfStatic);
-     var diag={mfPos:f.cffName.pos,mfOn:TClassDecl(c),mfFields:[{field:accessor,type:t,completion:CompletionItem.CompletionType.fromType(Display.getImportStatus(ctx),t)}],mfCause:PropertyAccessor(cf,isGetter)};
-     CompilerMessage.addModuleDiagnostic(ctx.com,c.clModule,DiagnosticsPrinter.makeMissingFieldsMessage(diag));
-    } else if(!hasClassFlag(c,CExtern)) {
+    else if(Common.isDiagnostics(ctx.com)) { DeferredServices.display(); } else if(!hasClassFlag(c,CExtern)) {
      try {
       var f2=fctx.isStatic?classField(c,extractParamTypes(c.clParams),m).field:PMap.find(m,c.clStatics);
       displayError(ctx.com,"Method "+m+" is no valid accessor for "+name+" because it is "+(fctx.isStatic?"not ":"")+"static",f2.cfPos);
@@ -505,8 +533,8 @@ class TypeloadFields {
     }
    }
   }
-  function displayAccessor(m:String,p:Dynamic):Void {
-   try {var accessors=findAccessor(m);if(accessors.length!=1) throw new NotFound();DisplayEmitter.displayField(ctx,Self(TClassDecl(c)),fctx.isStatic?CFSStatic:CFSMember,accessors[0].field,p);}catch(_:NotFound) {}
+  function displayAccessor(m:String,p:Pos):Void {
+   DeferredServices.display();
   }
   function resolvedAccessor(part:Dynamic,getter:Bool,privateCall:Bool):Dynamic {
    var m=(getter?"get_":"set_")+name;
@@ -530,26 +558,26 @@ class TypeloadFields {
   cf.cfKind=Var({vRead:getAccess,vWrite:setAccess});if(fctx.isExtern) addClassFieldFlag(cf,CfExtern);if(hasAccess(AEnum,f.cffAccess)) addClassFieldFlag(cf,CfEnum);
   TypeBinding.bindVar(ctx,cctx,fctx,cf,eo);return cf;
  }
- public static function rejectFinalStaticMethod(ctx:Dynamic,cctx:ClassInitCtx,fctx:FieldInitCtx,f:Dynamic):Void {
+ public static function rejectFinalStaticMethod(ctx:Typer,cctx:ClassInitCtx,fctx:FieldInitCtx,f:ClassField):Void {
   if(fctx.isStatic&&fctx.isFinal&&!hasClassFlag(cctx.tclass,CExtern)) {
-   var p:Dynamic;
-   try p=accessPos(AFinal,f.cffAccess) catch(_:NotFound) {try p=Meta.get(Final,f.cffMeta).pos catch(_:NotFound) {try p=accessPos(AStatic,f.cffAccess) catch(_:NotFound) p=f.cffPos;}}
+   var p:Pos;
+   try p=accessPos(AFinal,f.cffAccess) catch(_:NotFound) {try p=MetadataTools.get(Final,f.cffMeta).pos catch(_:NotFound) {try p=accessPos(AStatic,f.cffAccess) catch(_:NotFound) p=f.cffPos;}}
    invalidModifierCombination(fctx,ctx.com,fctx,"final","static",p);
   }
  }
- public static function initField(ctx:Dynamic,cctx:ClassInitCtx,fctx:FieldInitCtx,f:Dynamic,cf:Dynamic):Void {
+ public static function initField(ctx:Typer,cctx:ClassInitCtx,fctx:FieldInitCtx,f:ClassField,cf:TClassField):Void {
   var c=cctx.tclass,name=f.cffName.name,p=f.cffPos;
   TypeloadCheck.checkGlobalMetadata(ctx,f.cffMeta,m -> cf.cfMeta.unshift(m),c.clModule.mPath,c.clPath,name);
-  if(!hasClassFlag(c,CExtern)&&!Meta.has(Native,f.cffMeta)) Naming.checkFieldName(ctx.com,name,p);
+  if(!hasClassFlag(c,CExtern)&&!MetadataTools.has(Native,f.cffMeta)) Naming.checkFieldName(ctx.com,name,p);
   for(acc in (cast f.cffAccess:Array<Dynamic>)) switch [acc.access,f.cffKind] {
-   case [AFinal,FProp(_)] if(!hasClassFlag(c,CExtern)&&ctx.com.platform!=Jvm):invalidModifierOnProperty(ctx.com,fctx,Ast.sPlacedAccess(acc),acc.pos);
+   case [AFinal,FProp(_)] if(!hasClassFlag(c,CExtern)&&ctx.com.platform!=Jvm):invalidModifierOnProperty(ctx.com,fctx,AstTools.sPlacedAccess(acc),acc.pos);
    case [APublic|APrivate|AStatic|AFinal|AExtern,_]:
    case [ADynamic|AOverride|AMacro|AInline|AAbstract|AOverload,FFun(_)]:
    case [AInline,FVar(_)]:
    case [AEnum,FVar(_)|FProp(_)]:
-   case [_,FVar(_)]:displayError(ctx.com,"Invalid accessor '"+Ast.sPlacedAccess(acc)+"' for variable "+name,acc.pos);
-   case [_,FProp(_)]:displayError(ctx.com,"Invalid accessor '"+Ast.sPlacedAccess(acc)+"' for property "+name,acc.pos);
-   case [_,FFun(_)]:displayError(ctx.com,"Invalid accessor '"+Ast.sPlacedAccess(acc)+"' for function "+name,acc.pos);
+   case [_,FVar(_)]:displayError(ctx.com,"Invalid accessor '"+AstTools.sPlacedAccess(acc)+"' for variable "+name,acc.pos);
+   case [_,FProp(_)]:displayError(ctx.com,"Invalid accessor '"+AstTools.sPlacedAccess(acc)+"' for property "+name,acc.pos);
+   case [_,FFun(_)]:displayError(ctx.com,"Invalid accessor '"+AstTools.sPlacedAccess(acc)+"' for function "+name,acc.pos);
   }
   if(fctx.overridePos!=null&&c.clSuper==null) {var position=try accessPos(AOverride,f.cffAccess) catch(_:NotFound) p;invalidModifier(ctx.com,fctx,"override","field of class that has no parent",position);}
   cf=switch f.cffKind {
@@ -559,9 +587,9 @@ class TypeloadFields {
    case FProp(get,set,t,eo):createProperty(ctx,cctx,fctx,c,f,cf,get,set,t,eo,p);
   };
   if(fctx.isStatic||(fctx.isMacro&&ctx.com.isMacroContext)) addClassFieldFlag(cf,CfStatic);
-  if(Meta.has(InheritDoc,cf.cfMeta)) delay(ctx.g,PTypeField,() -> InheritDoc.buildClassFieldDoc(ctx,c,cf));
+  if(MetadataTools.has(InheritDoc,cf.cfMeta)) delay(ctx.g,PTypeField,() -> InheritDocTools.buildClassFieldDoc(ctx,c,cf));
  }
- public static function checkOverload(ctx:Dynamic,f:Dynamic,fs:Array<Dynamic>,externClass:Bool):Bool {
+ public static function checkOverload(ctx:Typer,f:Dynamic,fs:Array<Dynamic>,externClass:Bool):Bool {
   for(f2 in fs) if(f!=f2&&Overloads.sameOverloadArgs(f.cfType,f2.cfType,f,f2)) {
    displayErrorExt(ctx.com,makeError(Custom("Another overloaded field of same signature was already declared : "+f.cfName),f.cfPos,[makeError(Custom(complMsg("The second field is declared here")),f2.cfPos)]));return false;
   }
@@ -572,7 +600,7 @@ class TypeloadFields {
   }
   return true;
  }
- public static function checkOverloads(ctx:Dynamic,c:Dynamic):Void {
+ public static function checkOverloads(ctx:Typer,c:TClass):Void {
   var isExtern=hasClassFlag(c,CExtern);
   function checkField(f:Dynamic):Void {if(hasClassFieldFlag(f,CfOverload)) {var all:Array<Dynamic>=[f].concat(f.cfOverloads),ok=true;for(candidate in all) ok=ok&&checkOverload(ctx,candidate,all,isExtern);}}
   for(f in (cast c.clOrderedFields:Array<Dynamic>)) checkField(f);for(f in (cast c.clOrderedStatics:Array<Dynamic>)) checkField(f);if(c.clConstructor!=null) checkField(c.clConstructor);
@@ -580,19 +608,19 @@ class TypeloadFields {
  public static function finalizeClass(cctx:ClassInitCtx):Void {
   for(pair in cctx.delayedExpr) if(pair.lazy!=null) delay(pair.ctx.g,PTypeField,function() {lazyType(pair.lazy);});
  }
- public static function createClassField(cctx:ClassInitCtx,f:Dynamic):Dynamic {
+ public static function createClassField(cctx:ClassInitCtx,f:ClassField):TClassField {
   var cf=mkField(f.cffName.name,tDynamic,f.cffPos,f.cffName.pos,isPublic(cctx,f.cffAccess,null));cf.cfDoc=f.cffDoc;cf.cfMeta=f.cffMeta;return cf;
  }
- public static function initClass(ctxC:Dynamic,cctx:ClassInitCtx,c:Dynamic,p:Dynamic,herits:Dynamic,fields:Array<Dynamic>):Void {
-  var com=ctxC.com;
+ public static function initClass(ctxC:Typer,cctx:ClassInitCtx,c:TClass,p:Pos,herits:Dynamic,fields:Array<ClassField>):Void {
+  var com:CommonContext=ctxC.com;
   if(cctx.isClassDebug) Sys.println("Created class context: "+dumpClassContext(cctx));
   fields=buildFields(ctxC,cctx,c,fields);
   switch cctx.coreApiCheck {
-   case CoreApiConfig.On:if(com.display.dmsCheckCoreApi) delay(ctxC.g,PForce,() -> Typeload.initCoreApi(ctxC,c));
-   case CoreApiConfig.Implied:if(com.display.dmsCheckCoreApi) delay(ctxC.g,PForce,function() {
-    try Typeload.initCoreApi(ctxC,c) catch(exc:Dynamic) {switch exc {case Error(err):switch err.errMessage {case ModuleNotFound(_)|TypeNotFound(_):case _:com.errorExt(err);}case _:throw exc;}}
+   case CoreApiCheck.On:if(com.display.dmsCheckCoreApi) delay(ctxC.g,PForce,() -> Typeload.initCoreApi(ctxC,c));
+   case CoreApiCheck.Implied:if(com.display.dmsCheckCoreApi) delay(ctxC.g,PForce,function() {
+    try Typeload.initCoreApi(ctxC,c) catch(exc:Dynamic) {switch exc {case (core.ds.ExceptionTools.typing(_) => Some(err)):switch err.errMessage {case ModuleNotFound(_)|TypeNotFound(_):case _:com.errorExt(err);}case _:throw exc;}}
    });
-   case CoreApiConfig.Off:
+   case CoreApiCheck.Off:
   }
   if(!cctx.isLib) {
    delay(ctxC.g,PForce,() -> checkOverloads(ctxC,c));
@@ -603,9 +631,9 @@ class TypeloadFields {
    if(PMap.exists(name,c.clFields)||hasField(name,c.clSuper)) return true;
    for(pair in (cast c.clImplements:Array<Dynamic>)) if(hasField(name,pair)) return true;return false;
   }
-  function checkRequire(metadata:Array<Dynamic>):Dynamic {
-   for(m in metadata) if(m.name==Require) {
-    var conditions:Array<Dynamic>=m.params;
+  function checkRequire(metadata:Metadata):Dynamic {
+   for(m in metadata) if(m.meta==Require) {
+    var conditions:Array<Dynamic>=m.exprs;
     for(i in 0...conditions.length) {
      var e=conditions[i],sc=switch e.expr {
       case EConst(Ident(s)):s;
@@ -650,7 +678,7 @@ class TypeloadFields {
       var duplicate=fctx.isStatic?(PMap.exists(cf.cfName,c.clFields)||hasField(cf.cfName,c.clSuper)):PMap.exists(cf.cfName,c.clStatics);
       if(!hasClassFlag(c,CExtern)&&duplicate) raiseTypingError("Same field name can't be used for both static and instance : "+cf.cfName,p);
       if(fctx.overridePos!=null) addClassFieldFlag(cf,CfOverride);
-      function isVar(cf:Dynamic):Bool return switch cf.cfKind {case Var({vRead:AccRequire(_),vWrite:AccRequire(_)}):false;case Var(_):true;case _:false;};
+      function isVar(cf:TClassField):Bool return switch cf.cfKind {case Var({vRead:AccRequire(_),vWrite:AccRequire(_)}):false;case Var(_):true;case _:false;};
       var table=fctx.isStatic?c.clStatics:c.clFields;
       if(PMap.mem(cf.cfName,table)) {
        if(hasClassFieldFlag(cf,CfOverload)&&!isVar(cf)) {
@@ -661,22 +689,19 @@ class TypeloadFields {
         var desc=switch c.clKind {case KAbstractImpl(a):{kind:"abstract",path:a.aPath};case KModuleFields(m):{kind:"module",path:m.mPath};case _:{kind:"class",path:c.clPath};};
         displayError(ctx.com,"Duplicate "+desc.kind+" field declaration : "+Globals.sTypePath(desc.path)+"."+cf.cfName,cf.cfNamePos);
        }
-      } else TClass.addField(c,cf);
+      } else TClassTools.addField(c,cf);
     }
-   } catch(exc:Dynamic) {switch exc {case Error(err):switch err.errMessage {case Custom(_) if(err.errPos==p):displayErrorExt(ctx.com,err);case _:throw exc;}case _:throw exc;}}
+   } catch(exc:Dynamic) {switch exc {case (core.ds.ExceptionTools.typing(_) => Some(err)):switch err.errMessage {case Custom(_) if(err.errPos==p):displayErrorExt(ctx.com,err);case _:throw exc;}case _:throw exc;}}
   }
   if(cctx.abstractType!=null) {var a=cctx.abstractType;a.aToField.reverse();a.aFromField.reverse();a.aOps.reverse();a.aUnops.reverse();a.aArray.reverse();}
   c.clOrderedStatics.reverse();c.clOrderedFields.reverse();
   delay(ctxC.g,PConnectField,function() switch follow(c.clType) {case TAnon(an):an.aFields=c.clStatics;case _:throw new haxe.Exception("Invalid class static type");});
   var hasStructInit=false,structInitPos=Globals.nullPos;
-  try {structInitPos=Meta.get(StructInit,c.clMeta).pos;hasStructInit=true;}catch(_:NotFound) {}
+  try {structInitPos=MetadataTools.get(StructInit,c.clMeta).pos;hasStructInit=true;}catch(_:NotFound) {}
   if(hasStructInit) {if(hasClassFlag(c,CInterface)) displayError(com,"@:structInit is not allowed on interfaces",structInitPos);else ensureStructInitConstructor(ctxC,c,fields,p);}
   if(cctx.uninitializedFinal.length>0&&c.clConstructor==null&&!hasClassFlag(c,CAbstract)) {
    var cf=cctx.uninitializedFinal[0];
-   if(Diagnostics.errorInDiagnosticsRun(com,cf.cfNamePos)) {
-    var diag={mfPos:c.clNamePos,mfOn:TClassDecl(c),mfFields:[],mfCause:FinalFields(cctx.uninitializedFinal)};
-    CompilerMessage.addModuleDiagnostic(com,c.clModule,DiagnosticsPrinter.makeMissingFieldsMessage(diag));
-   } else displayErrorExt(com,makeError(Custom("This class has uninitialized final vars, which requires a constructor"),p,[makeError(Custom("Example of an uninitialized final var"),cf.cfNamePos)]));
+   if(Common.isDiagnostics(com)) { DeferredServices.display(); } else displayErrorExt(com,makeError(Custom("This class has uninitialized final vars, which requires a constructor"),p,[makeError(Custom("Example of an uninitialized final var"),cf.cfNamePos)]));
   }
   if(!hasStructInit&&!com.config.pfOverload) delayLate(ctxC.g,PConnectField,() -> TypeloadFunction.addConstructor(ctxC,c,cctx.forceConstructor,p));
   finalizeClass(cctx);
@@ -684,8 +709,9 @@ class TypeloadFields {
 }
 // haxe/src/typing/typeloadFields.ml:664-894, TypeBinding — mechanical draft.
 class TypeBinding {
- public static function bindType(ctx:Dynamic,cctx:ClassInitCtx,fctx:FieldInitCtx,cf:TClassField,r:Dynamic,p:Dynamic):Void {
+ public static function bindType(ctx:Typer,cctx:ClassInitCtx,fctx:FieldInitCtx,cf:TClassField,r:{value:TLazy},p:Pos):Void {
   var c = cctx.tclass;
+  var deferred:TLazy = LWait(() -> lazyType(r.value));
   function isFullType(t:T):Bool return switch t {
    case TFun(signature):isFullType(signature.ret) && Lambda.foreach(signature.args,function(arg) return isFullType(arg.type));
    case TMono(mono):mono.tmType != null && isFullType(mono.tmType);
@@ -698,17 +724,17 @@ class TypeBinding {
   });
   function handleDisplayField():Void {
    if (fctx.isMacro && !ctx.com.isMacroContext) forceMacro(true);
-   else {cf.cfType = TLazy(r); cctx.delayedExpr.unshift({ctx:ctx,lazy:r});}
+   else {cf.cfType = TLazy(deferred); cctx.delayedExpr.unshift({ctx:ctx,lazy:deferred});}
   }
   if (ctx.com.display.dmsFullTyping) {
    if (fctx.isMacro && !ctx.com.isMacroContext) forceMacro(false);
-   else {cf.cfType = TLazy(r); cctx.delayedExpr.unshift({ctx:ctx,lazy:r});}
+   else {cf.cfType = TLazy(deferred); cctx.delayedExpr.unshift({ctx:ctx,lazy:deferred});}
   } else if (ctx.com.display.dmsForceMacroTyping && fctx.isMacro && !ctx.com.isMacroContext) forceMacro(true);
   else if (fctx.isDisplayField) handleDisplayField();
-  else if (!isFullType(cf.cfType)) {cctx.delayedExpr.unshift({ctx:ctx,lazy:null}); cf.cfType = TLazy(r);}
+  else if (!isFullType(cf.cfType)) {cctx.delayedExpr.unshift({ctx:ctx,lazy:null}); cf.cfType = TLazy(deferred);}
   else if (fctx.exprPresenceMatters) cf.cfExpr = mk(TConst(TNull),tDynamic,Globals.nullPos);
  }
- public static function checkRedefinition(ctx:Dynamic,cctx:ClassInitCtx,fctx:FieldInitCtx,cf:TClassField):Void {
+ public static function checkRedefinition(ctx:Typer,cctx:ClassInitCtx,fctx:FieldInitCtx,cf:TClassField):Void {
   var c = cctx.tclass;
   function getDeclared(name:String,superType:Null<{cls:TClass,params:TParams}>):Null<{cls:TClass,params:TParams}> {
    if (superType == null) return null;
@@ -719,15 +745,15 @@ class TypeBinding {
   }
   if (!fctx.isStatic && !cctx.isLib) {var declared = getDeclared(cf.cfName,c.clSuper); if (declared != null) displayError(ctx.com,"Redefinition of variable " + cf.cfName + " in subclass is not allowed. Previously declared at " + Globals.sTypePath(declared.cls.clPath),cf.cfNamePos);}
  }
- public static function bindVarExpression(ctxField:Dynamic,cctx:ClassInitCtx,fctx:FieldInitCtx,cf:TClassField,astExpr:Dynamic):Void {
+ public static function bindVarExpression(ctxField:Typer,cctx:ClassInitCtx,fctx:FieldInitCtx,cf:TClassField,astExpr:Expr):Void {
   var c = cctx.tclass; var t = cf.cfType; var p = cf.cfPos;
   var ctx = TyperManager.cloneForExpr(ctxField,fctx.isStatic ? FunStatic : FunMember,FunNotFunction);
   if (hasClassFlag(c,CInterface)) unexpectedExpression(ctx.com,fctx,"Initialization on field of interface",astExpr.pos);
-  cf.cfMeta.unshift({name:Value,params:[astExpr],pos:Globals.mkZeroRangePos(cf.cfPos)});
+  cf.cfMeta.unshift({meta:Value,exprs:[astExpr],pos:Globals.mkZeroRangePos(cf.cfPos)});
   function checkCast(e:TExpr):TExpr {
    if (typeIseq(e.etype,cf.cfType)) return e;
    return switch [e.eexpr,follow(cf.cfType)] {
-    case [TConst(TInt(i)),TAbstract({aPath:{pack:[],name:"Float"}},_)]:updated(e,{eexpr:TConst(TFloat(Std.string(i))),etype:cf.cfType});
+    case [TConst(TInt(i)),TAbstract({aPath:{pack:[],name:"Float"}},_)]:Record.withFields(e,{eexpr:TConst(TFloat(Std.string(i))),etype:cf.cfType});
     case _:mkCast(e,cf.cfType,e.epos);
    };
   }
@@ -776,11 +802,11 @@ class TypeBinding {
   if (!fctx.isStatic) cctx.forceConstructor = true;
   bindType(ctx,cctx,fctx,cf,r,astExpr.pos);
  }
- public static function bindVar(ctx:Dynamic,cctx:ClassInitCtx,fctx:FieldInitCtx,cf:TClassField,e:Dynamic):Void {
+ public static function bindVar(ctx:Typer,cctx:ClassInitCtx,fctx:FieldInitCtx,cf:TClassField,e:Null<Expr>):Void {
   var c = cctx.tclass; checkRedefinition(ctx,cctx,fctx,cf);
   if (e == null) checkFieldDisplay(ctx,fctx,c,cf); else bindVarExpression(ctx,cctx,fctx,cf,e);
  }
- public static function bindMethod(ctxField:Dynamic,cctx:ClassInitCtx,fctx:FieldInitCtx,fmode:Dynamic,cf:TClassField,t:T,args:Dynamic,ret:T,e:Dynamic,functionMode:Dynamic,p:Dynamic):Void {
+ public static function bindMethod(ctxField:Typer,cctx:ClassInitCtx,fctx:FieldInitCtx,fmode:CurrentFun,cf:TClassField,t:T,args:FunctionArguments,ret:T,e:Null<Expr>,functionMode:FunctionMode,p:Pos):Void {
   var c = cctx.tclass; var ctx = TyperManager.cloneForExpr(ctxField,fmode,functionMode);
   function bind():Void {
    ctxField.com.requestScope.stats.sMethodsTyped++;
@@ -790,15 +816,15 @@ class TypeBinding {
      if (e != null) warning(ctx,WDeprecated,"@:java.native function definitions shouldn't include an expression. This behaviour is deprecated.",cf.cfPos);
      cf.cfExpr = null; cf.cfType = t;
     case _:
-     if (Meta.has(DisplayOverride,cf.cfMeta)) DisplayEmitter.checkFieldModifiers(ctx,c,cf,fctx.overridePos,fctx.displayModifier);
+     if (MetadataTools.has(DisplayOverride,cf.cfMeta)) DeferredServices.display();
      var checkResult = fctx.fieldKind == CfrMember ? TypeloadCheck.checkOverriding(ctx,c,cf) : NothingToDo;
      function check():Void switch checkResult {case NothingToDo:case NormalOverride(rctx):TypeloadCheck.checkOverrideField(ctx,cf.cfNamePos,rctx); case OverloadOverride(f):f();}
      var body = TypeloadFunction.typeFunction(ctx,args,ret,e,fctx.isDisplayField,p);
      check(); switch checkResult {case NormalOverride(rctx):TypeloadCheck.checkCallSuper(ctx.com,rctx,body); case _:}
      var tf:TFunc = {tfArgs:args.forExpr(ctx),tfType:ret,tfExpr:body};
-     if (fctx.fieldKind == CfrInit) switch body.eexpr {case TBlock([]) | TBlock([{eexpr:TConst(_)}]) | TConst(_) | TObjectDecl([]):case _:TClass.setClInit(c,body);}
+     if (fctx.fieldKind == CfrInit) switch body.eexpr {case TBlock([]) | TBlock([{eexpr:TConst(_)}]) | TConst(_) | TObjectDecl([]):case _:TClassTools.setClInit(c,body);}
      var expression = mk(TFunction(tf),t,p); var config = getCoroConfig(ctx,cf.cfMeta);
-     if (config != null) expression = Coro.funToCoro(Coro.createCoroContext(ctx,config,CoroTypes.ClassField(c,cf,tf,p)));
+     if (config != null) expression = Coro.funToCoro(Coro.createCoroContext(ctx,config,coro.CoroTypes.CoroFor.ClassField(c,cf,tf,p)));
      cf.cfExpr = expression; cf.cfType = t; checkFieldDisplay(ctx,fctx,c,cf);
    }
   }

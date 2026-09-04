@@ -2,7 +2,7 @@ package filters;
 
 import core.Ast;
 import core.TType;
-import core.Type as TypeOps;
+import core.TFunctions as TypeOps;
 
 // haxe/src/filters/localUsage.ml — mechanical draft; not compiled or validated.
 enum Usage {
@@ -29,11 +29,11 @@ class LocalUsage {
 					localUsage(f, tf.tfExpr);
 				}));
 			case TBlock(l): f(Block(function(f) { for (e in l) localUsage(f, e); }));
-			case TWhile(_, _, _): f(Loop(function(f) { TypeOps.iter(e -> localUsage(f, e), e); }));
+			case TWhile(_, _, _): f(Loop(function(f) { core.Texpr.iter(e -> localUsage(f, e), e); }));
 			case TTry(body, catches):
 				localUsage(f, body);
 				for (c in catches) f(Block(function(f) { f(Declare(c.variable)); localUsage(f, c.expr); }));
-			case _: TypeOps.iter(e -> localUsage(f, e), e);
+			case _: core.Texpr.iter(e -> localUsage(f, e), e);
 		}
 	}
 }

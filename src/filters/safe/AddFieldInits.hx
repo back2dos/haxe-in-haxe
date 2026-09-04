@@ -2,7 +2,7 @@ package filters.safe;
 
 import core.Ast;
 import core.TType;
-import core.Type as TypeOps;
+import core.TFunctions as TypeOps;
 import core.Globals;
 import optimization.AnalyzerConfig;
 import optimization.Analyzer;

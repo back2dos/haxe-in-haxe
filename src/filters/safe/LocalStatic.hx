@@ -1,11 +1,11 @@
 package filters.safe;
 
 import core.TType;
-import core.Type as TypeOps;
+import core.TFunctions as TypeOps;
 import core.Globals;
 import core.Meta;
 import core.Texpr;
-import typing.Error;
+import core.Error;
 import haxe.ds.IntMap;
 
 typedef LsContext = {var scom:Dynamic; var lut:IntMap<TClassField>; var addedFields:Array<TClassField>;}
@@ -22,7 +22,7 @@ class LocalStatic {
 			return;
 		}
 		var cf = TypeOps.mkField(name, v.vType, v.vPos, v.vPos, true);
-		cf.cfMeta = [{name:NoCompletion, params:[], pos:Globals.nullPos}].concat(v.vMeta);
+		cf.cfMeta = [{meta:core.MetaList.StrictMeta.NoCompletion,exprs:[], pos:Globals.nullPos}].concat(v.vMeta);
 		TypeOps.addClassFieldFlag(cf, CfNoLookup);
 		if (eo != null) {
 			var declaredVars = new IntMap<Bool>();
@@ -52,7 +52,7 @@ class LocalStatic {
 						return Error.raiseTypingError("This kind of control flow in static initialization is not allowed", e.epos);
 					case TBreak | TContinue if (!inLoop):
 						return Error.raiseTypingError("This kind of control flow in static initialization is not allowed", e.epos);
-					case _: return TypeOps.mapExpr(loopHere, e);
+					case _: return core.Texpr.mapExpr(loopHere, e);
 				};
 				return {eexpr:result, etype:e.etype, epos:e.epos};
 			}
@@ -81,7 +81,7 @@ class LocalStatic {
 				case TLocal(v) if (TypeOps.hasVarFlag(v, VStatic)):
 					if (!lsctx.lut.exists(v.vId)) Error.raiseTypingError("Could not find local static " + v.vName + " (id " + v.vId + ")", e.epos);
 					Texpr.Builder.makeStaticField(c, findLocalStatic(lsctx.lut, v), e.epos);
-				case _: TypeOps.mapExpr(run, e);
+				case _: core.Texpr.mapExpr(run, e);
 			};
 		}
 		var e = run(e);

@@ -10,7 +10,7 @@ import core.Texpr.*;
 import core.Meta;
 import optimization.AnalyzerTypes;
 import optimization.OptimizerTexpr.*;
-import optimization.OptimizerTexpr.PurityState;
+import context.PurityState;
 import optimization.AnalyzerConfig;
 // haxe/src/optimization/analyzerTexpr.ml — mechanical draft; not compiled or validated.
 class AnalyzerTexpr {
@@ -23,7 +23,7 @@ class AnalyzerTexpr {
    case TIf(e1,e2,e3) if (e3 != null):branching = true; var e2 = loop(true,e2); var e3 = loop(true,e3); withExpr(e,TIf(e1,e2,e3));
    case TSwitch(s):branching = true; var cases = s.switchCases.map(c -> {casePatterns:c.casePatterns,caseExpr:loop(true,c.caseExpr)}); var def = s.switchDefault == null ? null : loop(true,s.switchDefault); withExpr(e,TSwitch(mkSwitch(s.switchSubject,cases,def,s.switchExhaustive)));
    case TBlock([e1]):loop(complex,e1);
-   case TBlock(el):if (el.length > 0) {var last = loop(true,el[el.length - 1]); var block = withExpr(e,TBlock(el.slice(0,el.length - 1).concat([last]))); withExpr(block,TMeta({meta:MergeBlock,exprs:[],pos:block.epos},block));} else {if (!complex) throw new TypeExit(); value(e);}
+   case TBlock(el):if (el.length > 0) {var last = loop(true,el[el.length - 1]); var block = withExpr(e,TBlock(el.slice(0,el.length - 1).concat([last]))); withExpr(block,TMeta({meta:core.MetaList.StrictMeta.MergeBlock,exprs:[],pos:block.epos},block));} else {if (!complex) throw new TypeExit(); value(e);}
    case TTry(e1,catches):branching = true; var e1 = loop(true,e1); withExpr(e,TTry(e1,catches.map(c -> {variable:c.variable,expr:loop(true,c.expr)})));
    case TMeta(m,e1):withExpr(e,TMeta(m,loop(complex,e1))); case TParenthesis(e1):withExpr(e,TParenthesis(loop(complex,e1)));
    case TBreak | TContinue | TThrow(_) | TReturn(_):if (!allowControlFlow) throw new TypeExit(); e;
@@ -33,13 +33,13 @@ class AnalyzerTexpr {
  public static function canThrow(e:TExpr):Bool return switch e.eexpr {case TConst(_) | TLocal(_) | TTypeExpr(_) | TFunction(_) | TBlock(_):false; case TCall(_,_) | TNew(_,_,_) | TThrow(_) | TField(_,_) | TArray(_,_):true; case TCast(_,mt) if (mt != null):true; case _:checkExpr(canThrow,e);};
  public static function canBeInlined(e:TExpr):Bool return switch e.eexpr {case TConst(_):true; case TParenthesis(e1) | TMeta(_,e1):canBeInlined(e1); case _:false;};
  public static function targetHandlesUnops(com:Dynamic):Bool return switch com.platform {case Lua | Python:false; case _:true;};
- public static function targetHandlesAssignOps(com:Dynamic,e2:TExpr):Bool return switch com.platform {case Php:!hasSideEffect(e2); case Lua:false; case Cpp if (!core.Define.defined(com.defines,Cppia)):!hasSideEffect(e2); case _:true;};
- public static function targetHandlesSideEffectOrder(com:Dynamic):Bool return switch com.platform {case Cpp:core.Define.defined(com.defines,Cppia); case Php:false; case _:true;};
+ public static function targetHandlesAssignOps(com:Dynamic,e2:TExpr):Bool return switch com.platform {case Php:!hasSideEffect(e2); case Lua:false; case Cpp if (!core.Define.defined(com.defines,core.Define.Cppia)):!hasSideEffect(e2); case _:true;};
+ public static function targetHandlesSideEffectOrder(com:Dynamic):Bool return switch com.platform {case Cpp:core.Define.defined(com.defines,core.Define.Cppia); case Php:false; case _:true;};
  public static function canBeUsedAsValue(com:Dynamic,e:TExpr):Bool {
   function loop(e:TExpr):Bool return switch e.eexpr {case TBlock([e]):loop(e); case TBlock(_) | TSwitch(_) | TTry(_,_) | TReturn(_) | TThrow(_) | TBreak | TContinue:false; case TCall({eexpr:TConst(TString("phi"))},_):false; case TUnop(Increment | Decrement,_,_) if (!targetHandlesUnops(com)):false; case TFunction(_):true; case _:!checkExpr(e -> !loop(e),e);};
   switch [com.platform,e.eexpr] {case [Cpp | Jvm | Flash | Lua,TConst(TNull)]:return false; case _:} return loop(e);
  }
- public static function wrapMeta(s:String,e:TExpr):TExpr return mk(TMeta({meta:Custom(s),exprs:[],pos:e.epos},e),e.etype,e.epos);
+ public static function wrapMeta(s:String,e:TExpr):TExpr return mk(TMeta({meta:core.MetaList.StrictMeta.Custom(s),exprs:[],pos:e.epos},e),e.etype,e.epos);
  public static function isReallyUnbound(s:String):Bool return s != "`trace" && s != "__int__";
  static var r = ~/^[A-Za-z0-9_]+$/;
  public static function isUnboundCallThatMightHaveSideEffects(s:String,el:Array<TExpr>):Bool return switch [s,el] {case ["__js__",[{eexpr:TConst(TString(code))}]] if (r.match(code)):false; case _:true;};
@@ -101,9 +101,9 @@ class InterferenceReport {
    case TBinop(OpAssignOp(_),{eexpr:TArray(e1,e2)},e3):setStateRead(ir); setStateWrite(ir); loop(e1); loop(e2); loop(e3);
    case TUnop(Increment | Decrement,_,{eexpr:TArray(e1,e2)}):setStateRead(ir); setStateWrite(ir); loop(e1); loop(e2);
    case TCall({eexpr:TIdent(s)},el) if (!AnalyzerTexpr.isUnboundCallThatMightHaveSideEffects(s,el)):for (e in el) loop(e);
-   case TNew(c,_,el) if (c.clConstructor != null && PurityState.isPure(c,c.clConstructor)):setStateRead(ir); for (e in el) loop(e);
+   case TNew(c,_,el) if (c.clConstructor != null && PurityStateTools.isPure(c,c.clConstructor)):setStateRead(ir); for (e in el) loop(e);
    case TCall({eexpr:TField(e1,FEnum(_,_))},el):loop(e1); for (e in el) loop(e);
-   case TCall({eexpr:TField(e1,fa)},el) if (PurityState.isPureFieldAccess(fa)):setStateRead(ir); loop(e1); for (e in el) loop(e);
+   case TCall({eexpr:TField(e1,fa)},el) if (PurityStateTools.isPureFieldAccess(fa)):setStateRead(ir); loop(e1); for (e in el) loop(e);
    case TCall(e1,el):setStateRead(ir); setStateWrite(ir); loop(e1); for (e in el) loop(e);
    case TNew(_,_,el):setStateRead(ir); setStateWrite(ir); for (e in el) loop(e);
    case TBinop(OpAssign,e1,e2):setStateWrite(ir); loop(e1); loop(e2);
@@ -148,7 +148,7 @@ class Fusion {
     case TIf(e1,e2,eo):var e1 = replace(e1); if (!found && (ir.irStateWrite || InterferenceReport.hasAnyFieldWrite(ir) || InterferenceReport.hasAnyVarWrite(ir))) throw new TypeExit(); var e2 = replace(e2); withExpr(e,TIf(e1,e2,eo == null ? null : replace(eo)));
     case TSwitch(s):var subject = switch com.platform {case Lua | Python:explore(s.switchSubject); case _:replace(s.switchSubject);}; if (!found) throw new TypeExit(); withExpr(e,TSwitch(mkSwitch(subject,s.switchCases,s.switchDefault,s.switchExhaustive)));
     case TLocal(v2) if (v1 == v2 && !blocked):found = true; AnalyzerTexpr.typeChangeOk(com,v1.vType,value.etype) ? value : mk(TCast(value,null),v1.vType,e.epos);
-    case TLocal(v):if (ir.irVarWrites.exists(v.vId) || (hasVarFlag(v,VCaptured) || core.ExtType.hasReferenceSemantics(v.vType)) && ir.irStateWrite) throw new TypeExit(); e;
+    case TLocal(v):if (ir.irVarWrites.exists(v.vId) || (hasVarFlag(v,VCaptured) || core.TOther.ExtType.hasReferenceSemantics(v.vType)) && ir.irStateWrite) throw new TypeExit(); e;
     case TBinop(OpAssign,e1 = {eexpr:TLocal(v)},e2):var e2 = replace(e2); if (!found && ir.irVarReads.exists(v.vId)) throw new TypeExit(); withExpr(e,TBinop(OpAssign,e1,e2));
     case TBinop(OpAssignOp(_),{eexpr:TLocal(v)},_) | TUnop(Increment | Decrement,_,{eexpr:TLocal(v)}) if (v1 == v):throw new TypeExit();
     case TBinop(op = OpAssignOp(_),e1 = {eexpr:TLocal(v)},e2):var e2 = replace(e2); if (!found && (ir.irVarReads.exists(v.vId) || ir.irVarWrites.exists(v.vId))) throw new TypeExit(); withExpr(e,TBinop(op,e1,e2));
@@ -162,10 +162,10 @@ class Fusion {
     case TBinop(op = OpAssignOp(_),ef = {eexpr:TArray(e1,e2)},e3):var e1 = replace(e1); var e2 = replace(e2); if (!found && ir.irStateWrite) throw new TypeExit(); var e3 = replace(e3); if (!found && ir.irStateRead) throw new TypeExit(); withExpr(e,TBinop(op,withExpr(ef,TArray(e1,e2)),e3));
     case TUnop(Increment | Decrement,_,{eexpr:TArray(_,_)}) if (ir.irStateRead || ir.irStateWrite):throw new TypeExit();
     case TCall({eexpr:TIdent(s)},el) if (!AnalyzerTexpr.isUnboundCallThatMightHaveSideEffects(s,el)):e;
-    case TNew(c,tl,el) if (c.clConstructor != null && PurityState.isPure(c,c.clConstructor)):var el = handleEl(el); if (!found && (ir.irStateWrite || InterferenceReport.hasAnyFieldWrite(ir))) throw new TypeExit(); withExpr(e,TNew(c,tl,el));
+    case TNew(c,tl,el) if (c.clConstructor != null && PurityStateTools.isPure(c,c.clConstructor)):var el = handleEl(el); if (!found && (ir.irStateWrite || InterferenceReport.hasAnyFieldWrite(ir))) throw new TypeExit(); withExpr(e,TNew(c,tl,el));
     case TNew(c,tl,el):var el = handleEl(el); if (!found && (ir.irStateWrite || ir.irStateRead || InterferenceReport.hasAnyFieldRead(ir) || InterferenceReport.hasAnyFieldWrite(ir))) throw new TypeExit(); withExpr(e,TNew(c,tl,el));
     case TCall(ef = {eexpr:TField(_,FEnum(_,_))},el):withExpr(e,TCall(ef,handleEl(el)));
-    case TCall(ef = {eexpr:TField(_,fa)},el) if (PurityState.isPureFieldAccess(fa)):var r = handleCall(ef,el); if (!found && (ir.irStateWrite || InterferenceReport.hasAnyFieldWrite(ir))) throw new TypeExit(); withExpr(e,TCall(r.expr,r.args));
+    case TCall(ef = {eexpr:TField(_,fa)},el) if (PurityStateTools.isPureFieldAccess(fa)):var r = handleCall(ef,el); if (!found && (ir.irStateWrite || InterferenceReport.hasAnyFieldWrite(ir))) throw new TypeExit(); withExpr(e,TCall(r.expr,r.args));
     case TCall(e1,el):var r = switch e1.eexpr {case TIdent(s) if (s != "`trace" && s != "__int__"):{expr:e1,args:el}; case _:handleCall(e1,el);}; if (!found && (ir.irStateRead || InterferenceReport.hasAnyFieldRead(ir) || ir.irStateWrite || InterferenceReport.hasAnyFieldWrite(ir))) throw new TypeExit(); withExpr(e,TCall(r.expr,r.args));
     case TObjectDecl(fl):var el = handleEl(fl.map(f -> f.expr)); if (!found && (ir.irStateWrite || InterferenceReport.hasAnyFieldWrite(ir))) throw new TypeExit(); if (fl.length != el.length) throw "Invalid_argument: List.map2"; withExpr(e,TObjectDecl([for (i in 0...fl.length) {key:fl[i].key,expr:el[i]}]));
     case TArrayDecl(el):withExpr(e,TArrayDecl(handleEl(el)));
@@ -183,11 +183,11 @@ class Fusion {
     case TBinop(OpAssign | OpAssignOp(_),_,_) | TUnop(Increment | Decrement,_,_):loop([e].concat(acc),rest);
     case TLocal(_) if (!config.localDce):loop([e].concat(acc),rest);
     case TLocal(v):state.decReads(v); loop(acc,rest);
-    case TField(_,fa) if (PurityState.isExplicitlyImpure(fa)):loop([e].concat(acc),rest);
+    case TField(_,fa) if (PurityStateTools.isExplicitlyImpure(fa)):loop([e].concat(acc),rest);
     case TFunction(_) | TConst(_) | TTypeExpr(_):loop(acc,rest);
-    case TMeta(meta = {meta:Pure},_) if (PurityState.getPurityFromMeta([meta]) == Pure):loop(acc,rest);
-    case TCall({eexpr:TField(e1,fa)},args) if (PurityState.isPureFieldAccess(fa) && config.localDce):loop(acc,[e1].concat(args).concat(rest));
-    case TNew(c,tl,args) if (c.clConstructor != null && PurityState.isPure(c,c.clConstructor) && config.localDce):loop(acc,args.concat(rest));
+    case TMeta(meta = {meta:core.MetaList.StrictMeta.Pure},_) if (PurityStateTools.getPurityFromMeta([meta]) == Pure):loop(acc,rest);
+    case TCall({eexpr:TField(e1,fa)},args) if (PurityStateTools.isPureFieldAccess(fa) && config.localDce):loop(acc,[e1].concat(args).concat(rest));
+    case TNew(c,tl,args) if (c.clConstructor != null && PurityStateTools.isPure(c,c.clConstructor) && config.localDce):loop(acc,args.concat(rest));
     case TIf({eexpr:TConst(TBool(t))},a,b):loop(acc,t ? [a].concat(rest) : b == null ? rest : [b].concat(rest));
     case TSwitch(s):var folded = Optimizer.checkConstantSwitch(s); folded == null ? loop([e].concat(acc),rest) : loop(acc,[folded].concat(rest));
     case TParenthesis(e1) | TMeta(_,e1) | TCast(e1,null) | TField(e1,_) | TUnop(_,_,e1) | TEnumIndex(e1) | TEnumParameter(e1,_,_):loop(acc,[e1].concat(rest));
@@ -207,8 +207,8 @@ class Fusion {
   function blockElementTimed(bottom:Bool,acc:Array<TExpr>,el:Array<TExpr>):Array<TExpr> return actx.withTimer(["<-","fusion","block_element"],function() return blockElement(config,state,bottom,acc,el));
   function canBeFused(v:TVar,e:TExpr):Bool {
    var uses = state.getReads(v); var writes = state.getWrites(v); var asValue = AnalyzerTexpr.canBeUsedAsValue(com,e); var generated = switch v.vKind {case VUser(_) | VInlined | VInlinedConstructorVariable(_):false; case _:true;}; var typeParams = v.vExtra != null && v.vExtra.vParams.length > 0;
-   function impure(e:TExpr):Bool return switch e.eexpr {case TField(_,FStatic(cl,cf) | FInstance(cl,_,cf)) if (hasClassFlag(cl,CExtern)):!(Meta.has(CoreApi,cl.clMeta) || PurityState.isPure(cl,cf)); case _:checkExpr(impure,e);};
-   var impureExtern = impure(e); var variableSemantics = core.ExtType.hasVariableSemantics(v.vType); var variableExpr = switch e.eexpr {case TLocal({vKind:VUser(_)}):false; case _:true;};
+   function impure(e:TExpr):Bool return switch e.eexpr {case TField(_,FStatic(cl,cf) | FInstance(cl,_,cf)) if (hasClassFlag(cl,CExtern)):!(Meta.has(CoreApi,cl.clMeta) || PurityStateTools.isPure(cl,cf)); case _:checkExpr(impure,e);};
+   var impureExtern = impure(e); var variableSemantics = core.TOther.ExtType.hasVariableSemantics(v.vType); var variableExpr = switch e.eexpr {case TLocal({vKind:VUser(_)}):false; case _:true;};
    var b = uses <= 1 && writes == 0 && asValue && !(variableSemantics && variableExpr) && (generated || config.optimize && config.fusion && config.userVarFusion && !typeParams && !impureExtern);
    if (config.fusionDebug) {Sys.println('\nFUSION: $b\n\tvar ${v.vName}<${v.vId}> = ' + AnalyzerTexpr.sExprPretty(e)); Sys.println('CONDITION:\n\tnum_uses:$uses <= 1 && num_writes:$writes = 0 && can_be_used_as_value:$asValue && not (has_variable_semantics:$variableSemantics && e.eexpr=TLocal:$variableExpr) (is_compiler_generated:$generated || config.optimize:${config.optimize} && config.fusion:${config.fusion} && config.user_var_fusion:${config.userVarFusion} && not has_type_params:$typeParams && not is_impuare_extern:$impureExtern)');} return b;
   }
@@ -219,7 +219,7 @@ class Fusion {
     case _:
    }
    switch first.eexpr {
-    case TIf(_,_,eelse) if (eelse != null && AnalyzerTexpr.canBeUsedAsValue(com,first) && !core.ExtType.isVoid(first.etype) && !(com.platform == Cpp && !core.Define.defined(com.defines,Cppia))):
+    case TIf(_,_,eelse) if (eelse != null && AnalyzerTexpr.canBeUsedAsValue(com,first) && !core.TOther.ExtType.isVoid(first.etype) && !(com.platform == Cpp && !core.Define.defined(com.defines,core.Define.Cppia))):
      try {var count = 0; var lhs:Null<TExpr> = null; var wrap:TExpr->TExpr = null; function checkAssign(e:TExpr):TExpr return switch e.eexpr {case TBinop(OpAssign,e1,e2):count++; if (lhs == null) {lhs = e1; wrap = other -> withExpr(e,TBinop(OpAssign,e1,other)); e2;} else if (Texpr.equal(lhs,e1)) e2; else throw new TypeExit(); case _:throw new TypeExit();}; var result = AnalyzerTexpr.mapValues(checkAssign,first).expr; if (lhs == null) throw "AnalyzerTexpr.fuse missing assignment"; switch lhs.eexpr {case TLocal(v):state.changeWrites(v,-count + 1); case _:} result = wrap(result); state.markChanged(); return fuse([result].concat(acc),rest);} catch (_:TypeExit) return fuse([first].concat(acc),rest);
     case TVar(v,e1) if (e1 != null && config.optimize && config.localDce && state.getReads(v) == 0 && state.getWrites(v) == 0):return fuse(acc,[e1].concat(rest));
     case TVar(v1,null) if (!hasVarFlag(v1,VCaptured)):
@@ -284,17 +284,17 @@ class Cleanup {
     }
    case TField(e1,FAnon({cfName:s}) | FDynamic(s)):var e1 = loop(e1); withExpr(e,TField(e1,quickFieldDynamic(e1.etype,s)));
    case TField({eexpr:TTypeExpr(_)},_):e; case TTypeExpr(TClassDecl(_)):e;
-   case TMeta({meta:Ast},e1) if (switch e1.eexpr {case TSwitch(_):false; case _:true;}):loop(e1);
+   case TMeta({meta:core.MetaList.StrictMeta.Ast},e1) if (switch e1.eexpr {case TSwitch(_):false; case _:true;}):loop(e1);
    case _:mapExpr(loop,e);
   }; return loop(e);
  }
 }
-typedef PurityNode = {var pnClass:TClass; var pnField:TClassField; var pnPurity:Dynamic; var pnDependents:Array<PurityNode>;}
+typedef PurityNode = {var pnClass:TClass; var pnField:TClassField; var pnPurity:PurityState; var pnDependents:Array<PurityNode>;}
 class PurityConflict {public var node:PurityNode; public var pos:Pos; public function new(node:PurityNode,pos:Pos) {this.node = node; this.pos = pos;}}
 class Purity {
  public static var nodeLut = new haxe.ds.StringMap<PurityNode>();
  public static function getFieldId(c:TClass,cf:TClassField):String return Globals.sTypePath(c.clPath) + "." + cf.cfName;
- public static function getNode(c:TClass,cf:TClassField):PurityNode {var id = getFieldId(c,cf); if (nodeLut.exists(id)) return nodeLut.get(id); var node:PurityNode = {pnClass:c,pnField:cf,pnPurity:PurityState.getPurity(c,cf),pnDependents:[]}; nodeLut.set(id,node); return node;}
+ public static function getNode(c:TClass,cf:TClassField):PurityNode {var id = getFieldId(c,cf); if (nodeLut.exists(id)) return nodeLut.get(id); var node:PurityNode = {pnClass:c,pnField:cf,pnPurity:PurityStateTools.getPurity(c,cf),pnDependents:[]}; nodeLut.set(id,node); return node;}
  public static function taint(node:PurityNode):Void switch node.pnPurity {
   case Impure:
   case ExpectPure(p):throw new PurityConflict(node,p);
@@ -306,9 +306,9 @@ class Purity {
  public static function applyToField(isCtor:Bool,isStatic:Bool,c:TClass,cf:TClassField):Void {
   var node = getNode(c,cf);
   function checkField(c:TClass,cf:TClassField):Void {var other = getNode(c,cf); switch other.pnPurity {case Pure | InferredPure | ExpectPure(_):case Impure:taintRaise(node); case MaybePure:other.pnDependents.unshift(node);}}
-  function checkWrite(e:TExpr):Void switch e.eexpr {case TLocal(v):if (core.ExtType.hasReferenceSemantics(v.vType)) taintRaise(node); case TField({eexpr:TConst(TThis)},_) if (isCtor):case _:taintRaise(node);}
+  function checkWrite(e:TExpr):Void switch e.eexpr {case TLocal(v):if (core.TOther.ExtType.hasReferenceSemantics(v.vType)) taintRaise(node); case TField({eexpr:TConst(TThis)},_) if (isCtor):case _:taintRaise(node);}
   function loop(e:TExpr):Void switch e.eexpr {
-   case TMeta(m = {meta:Pure},_):if (PurityState.getPurityFromMeta([m]) == Impure) taintRaise(node);
+   case TMeta(m = {meta:core.MetaList.StrictMeta.Pure},_):if (PurityStateTools.getPurityFromMeta([m]) == Impure) taintRaise(node);
    case TThrow(_):taintRaise(node);
    case TBinop(OpAssign | OpAssignOp(_),e1,e2):checkWrite(e1); loop(e2);
    case TUnop(Increment | Decrement,_,e1):checkWrite(e1);
@@ -320,17 +320,17 @@ class Purity {
    case _:iter(loop,e);
   }
   switch cf.cfKind {
-   case Method(MethDynamic) | Var(_,_):taint(node);
+   case Method(MethDynamic) | Var(_):taint(node);
    case Method(MethNormal) if (!(isStatic || isCtor || hasClassFieldFlag(cf,CfFinal))):taint(node);
    case _:
-    if (cf.cfExpr == null) {if (!PurityState.isPure(c,cf)) taint(node);}
-    else if (hasClassFieldFlag(cf,CfExtern) || Meta.has(FunctionCode,cf.cfMeta) || Meta.has(HlNative,cf.cfMeta) || Meta.has(HlNative,c.clMeta)) {if (!PurityState.isPure(c,cf)) taint(node);}
+    if (cf.cfExpr == null) {if (!PurityStateTools.isPure(c,cf)) taint(node);}
+    else if (hasClassFieldFlag(cf,CfExtern) || Meta.has(FunctionCode,cf.cfMeta) || Meta.has(HlNative,cf.cfMeta) || Meta.has(HlNative,c.clMeta)) {if (!PurityStateTools.isPure(c,cf)) taint(node);}
     else try {switch node.pnPurity {case Impure:taintRaise(node); case Pure:throw new TypeExit(); case _:loop(cf.cfExpr);}} catch (_:TypeExit) {}
   }
  }
  public static function applyToClass(c:TClass):Void {for (cf in c.clOrderedFields) applyToField(false,false,c,cf); for (cf in c.clOrderedStatics) applyToField(false,true,c,cf); if (c.clConstructor != null) applyToField(true,false,c,c.clConstructor);}
  public static function infer(types:Array<ModuleType>):Void {
-  nodeLut.clear(); for (mt in types) switch mt {case TClassDecl(c):try applyToClass(c) catch (conflict:PurityConflict) {core.Error.raiseTypingErrorExt(core.Error.makeError(Custom("Impure field overrides/implements field which was explicitly marked as @:pure"),conflict.node.pnField.cfPos,[core.Error.makeError(Custom(core.Error.complMsg("Pure field is here")),conflict.pos)]));} case _:}
-  for (node in nodeLut) switch node.pnPurity {case Pure | MaybePure if (!exists(m -> m.meta == Pure,node.pnField.cfMeta)):var p = Globals.mkZeroRangePos(node.pnField.cfPos); node.pnField.cfMeta.unshift({meta:Pure,exprs:[{expr:EConst(Ident("inferredPure")),pos:p}],pos:p}); case _:}
+  nodeLut.clear(); for (mt in types) switch mt {case TClassDecl(c):try applyToClass(c) catch (conflict:PurityConflict) {core.Error.raiseTypingErrorExt(core.Error.makeError(core.Error.ErrorMsg.Custom("Impure field overrides/implements field which was explicitly marked as @:pure"),conflict.node.pnField.cfPos,[core.Error.makeError(core.Error.ErrorMsg.Custom(core.Error.complMsg("Pure field is here")),conflict.pos)]));} case _:}
+  for (node in nodeLut) switch node.pnPurity {case Pure | MaybePure if (!exists(m -> m.meta == core.MetaList.StrictMeta.Pure,node.pnField.cfMeta)):var p = Globals.mkZeroRangePos(node.pnField.cfPos); node.pnField.cfMeta.unshift({meta:core.MetaList.StrictMeta.Pure,exprs:[{expr:EConst(Ident("inferredPure")),pos:p}],pos:p}); case _:}
  }
 }

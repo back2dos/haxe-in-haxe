@@ -1,7 +1,8 @@
 package filters.safe;
+import context.PlatformConfig;
 
 import core.TType;
-import core.Type as TypeOps;
+import core.TFunctions as TypeOps;
 import core.Texpr;
 import filters.LocalUsage;
 import haxe.ds.IntMap;
@@ -17,7 +18,7 @@ class CapturedVars {
 			v2.vMeta = v.vMeta; return v2;
 		}
 		function wrap(used:IntMap<T>, e:TExpr):TExpr {
-			var def = switch e.eexpr {
+			var def:TExprDef = switch e.eexpr {
 				case TVar(v, ve):
 					var ve = ve == null ? null : wrap(used, ve);
 					TVar(v, used.exists(v.vId) ? impl.mkRef(v, ve, e.epos) : ve);
@@ -56,14 +57,14 @@ class CapturedVars {
 							var vnew:Null<TVar> = null;
 							for (entry in newVars) if (entry.id == v.vId) { vnew = entry.variable; break; }
 							if (vnew == null) e; else { TypeOps.addVarFlag(vnew, VCaptured); TypeOps.mk(TLocal(vnew), e.etype, e.epos); }
-						case _: TypeOps.mapExpr(loop, e);
+						case _: core.Texpr.mapExpr(loop, e);
 					};
 					e = loop(e);
 					var fn = {tfArgs:newVars.map(a -> {variable:a.variable, defaultValue:null}), tfType:e.etype,
 						tfExpr:TypeOps.mkBlock(TypeOps.mk(TReturn(e), e.etype, e.epos))};
 					var ft = TFun({args:newVars.map(a -> {name:a.variable.vName, optional:false, type:a.variable.vType}), ret:e.etype});
 					return TypeOps.mk(TCall(Texpr.Builder.mkParent(TypeOps.mk(TFunction(fn), ft, e.epos)), vars.map(v -> TypeOps.mk(TLocal(v), v.vType, e.epos))), e.etype, e.epos);
-				case _: return TypeOps.mapExpr(e -> wrap(used, e), e);
+				case _: return core.Texpr.mapExpr(e -> wrap(used, e), e);
 			};
 			return TypeOps.mk(def, e.etype, e.epos);
 		}
@@ -92,7 +93,7 @@ class CapturedVars {
 					}
 					LocalUsage.localUsage(u -> collectVars(false, u), e);
 					return doWrap(used, e);
-				case _: return TypeOps.mapExpr(outLoop, e);
+				case _: return core.Texpr.mapExpr(outLoop, e);
 			}
 		}
 		function allVars(e:TExpr):IntMap<TVar> {

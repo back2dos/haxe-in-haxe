@@ -1,9 +1,9 @@
 package filters.exception;
 
 import core.TType;
-import core.Type as TypeOps;
+import core.TFunctions as TypeOps;
 import core.Meta;
-import typing.Error;
+import core.Error;
 import filters.exception.Exceptions;
 import filters.exception.ExceptionFunctions;
 
@@ -14,7 +14,7 @@ class SaveStacks {
 			case TTry(body, catches):
 				Lambda.exists(catches, c -> Meta.has(NeedsExceptionStack, c.variable.vMeta)) || containsInsertionPoints(body)
 					|| Lambda.exists(catches, c -> containsInsertionPoints(c.expr));
-			case _: TypeOps.checkExpr(containsInsertionPoints, e);
+			case _: core.Texpr.checkExpr(containsInsertionPoints, e);
 		};
 		function saveExceptionStack(catchVar:TVar):TExpr {
 			var cls = ectx.haxeNativeStackTrace.force();
@@ -29,14 +29,14 @@ class SaveStacks {
 		}
 		function run(e:TExpr):TExpr return switch e.eexpr {
 			case TTry(e1, catches):
-				var e1 = TypeOps.mapExpr(run, e1);
+				var e1 = core.Texpr.mapExpr(run, e1);
 				var catches = catches.map(function(c) {
 					if (!Meta.has(NeedsExceptionStack, c.variable.vMeta)) return c;
 					var exprs = switch c.expr.eexpr { case TBlock(exprs): [saveExceptionStack(c.variable)].concat(exprs); case _: [saveExceptionStack(c.variable), c.expr]; };
 					return {variable:c.variable, expr:TypeOps.mk(TBlock(exprs), c.expr.etype, c.expr.epos)};
 				});
 				TypeOps.mk(TTry(e1, catches), e.etype, e.epos);
-			case _: TypeOps.mapExpr(run, e);
+			case _: core.Texpr.mapExpr(run, e);
 		};
 		return e -> containsInsertionPoints(e) ? run(e) : e;
 	}
@@ -73,7 +73,7 @@ class SaveStacks {
 						function add(e:TExpr):TExpr return switch e.eexpr {
 							case TFunction(_): e;
 							case TReturn(_): TypeOps.mk(TBlock([shiftStack(e.epos), e]), e.etype, e.epos);
-							case _: TypeOps.mapExpr(add, e);
+							case _: core.Texpr.mapExpr(add, e);
 						};
 						var eCtor = ctor.cfExpr;
 						ctor.cfExpr = switch eCtor.eexpr {

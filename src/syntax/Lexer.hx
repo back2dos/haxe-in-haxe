@@ -16,6 +16,7 @@ enum LexerErrorMsg {
 	UnclosedComment;
 	InvalidEscape(value:String);
 	InvalidRegexpOption;
+	UnterminatedMarkup;
 }
 
 class LexerError {
@@ -25,8 +26,139 @@ class LexerError {
 }
 
 typedef LexedToken = { var token:Token; var pos:Pos; }
+typedef LexerFile = {var lfile:String; var lline:Int; var lmaxline:Int; var llines:Array<{offset:Int,line:Int}>; var lalines:Array<{offset:Int,line:Int}>; var llast:Int; var llastindex:Int;}
+typedef LexerContext = {var file:LexerFile; var buf:StringBuf;}
 
 class Lexer {
+	public static function isWhitespace(value:String):Bool return value==" "||value=="\n"||value=="\r"||value=="\t";
+	public static function stringIsWhitespace(value:String):Bool {for(i in 0...value.length) if(" \n\r\t".indexOf(value.charAt(i))<0)return false;return true;}
+	static var allFiles = new haxe.ds.StringMap<LexerFile>();
+	public static function createFileCtx(file:String):LexerContext {var ctx=createTempCtx(file);allFiles.set(file,ctx.file);return ctx;}
+	public static function resolveFileContentPos(file:String,content:String):LexerFile {
+		var f=createTempCtx(file).file;
+		// Upstream consumes UTF-8 bytes, but stores character offsets.
+		var bytes=haxe.io.Bytes.ofString(content),i=0,p=0;
+		while(i<bytes.length) {
+			var c=bytes.get(i++),inc=1;
+			if(c==10 || c==13) {
+				if(c==13) {i++;inc=2;}
+				f.lline++;f.llines.unshift({offset:p+inc,line:f.lline});
+			} else if(c>=0xC0) i+=c<0xE0?1:c<0xF0?2:3;
+			p+=inc;
+		}
+		return f;
+	}
+	public static function findFile(file:String):LexerFile {
+		var f=allFiles.get(file);
+		if(f==null) {try f=resolveFileContentPos(file,sys.io.File.getContent(file)) catch(_:Dynamic) f=createTempCtx(file).file;allFiles.set(file,f);}
+		return f;
+	}
+	public static function findLine(p:Int,f:LexerFile):{line:Int,column:Int} {
+		if(f.lmaxline!=f.lline) {f.lmaxline=f.lline;f.lalines=f.llines.copy();f.lalines.reverse();f.llast=0x7FFFFFFF;f.llastindex=0;}
+		function loop(min:Int,max:Int):{line:Int,column:Int} {
+			var med=(min+max)>>>1,entry=f.lalines[med];
+			if(med==min) {f.llast=p;f.llastindex=med;return {line:entry.line,column:p-entry.offset};}
+			return entry.offset>p?loop(min,med):loop(med,max);
+		}
+		if(p>=f.llast) {var entry=f.lalines[f.llastindex],next=f.llastindex==f.lalines.length-1?0x7FFFFFFF:f.lalines[f.llastindex+1].offset;if(p>=entry.offset&&p<next)return {line:entry.line,column:p-entry.offset};}
+		return loop(0,f.lalines.length);
+	}
+	public static function findPos(p:Pos):{line:Int,column:Int} return findLine(p.pmin,findFile(p.pfile));
+	public static function getErrorLine(p:Pos):Int return findPos(p).line;
+	public static function getPosCoords(p:Pos):{lineStart:Int,columnStart:Int,lineEnd:Int,columnEnd:Int} {var file=findFile(p.pfile),a=findLine(p.pmin,file),b=findLine(p.pmax,file);return {lineStart:a.line,columnStart:a.column+1,lineEnd:b.line,columnEnd:b.column+1};}
+	public static function getErrorPos(printer:String->Int->String,p:Pos):String {
+		if(p.pmin == -1) return "(unknown)";
+		var c=getPosCoords(p),prefix=printer(p.pfile,c.lineStart);
+		return c.lineStart==c.lineEnd?prefix+" character"+(c.columnStart==c.columnEnd?" "+c.columnStart:"s "+c.columnStart+"-"+c.columnEnd):prefix+" lines "+c.lineStart+"-"+c.lineEnd;
+	}
+	public static function isValidIdentifier(value:String):Bool {
+		if(value.length==0) return false;
+		for(i in 0...value.length) if(!isIdentStart(value.charAt(i)) && !(i>0 && isDigit(value.charAt(i)))) return false;
+		return switch keyword(value) {case Const(Ident(_)):true;case _:false;};
+	}
+	public static function createTempCtx(file:String):LexerContext return {file:{lfile:file,lline:1,lmaxline:1,llines:[{offset:0,line:1}],lalines:[{offset:0,line:1}],llast:0x7FFFFFFF,llastindex:0},buf:new StringBuf()};
+	public static function lexbufFromUtf8String(source:String):Lexer return new Lexer(source);
+	public static function reset(ctx:LexerContext):Void ctx.buf=new StringBuf();
+	public static function contents(ctx:LexerContext):String return ctx.buf.toString();
+	public static function skipHeader(code:Lexer):Void {
+		while (true) {
+			if (code.current()==String.fromCharCode(0xFEFF)) code.index++;
+			else if (code.starts("#!")) while (!code.eof() && code.current()!="\n" && code.current()!="\r") code.index++;
+			else return;
+		}
+	}
+	static function updateLines(ctx:LexerContext,code:Lexer,start:Int):Void {
+		var i=start;
+		while (i<code.index) {
+			var c=code.source.charAt(i++);
+			if (c=="\r" && code.source.charAt(i)=="\n") i++;
+			if (c=="\r" || c=="\n") {ctx.file.lline++;ctx.file.llines.unshift({offset:i,line:ctx.file.lline});}
+		}
+	}
+	public static function readToken(ctx:LexerContext,code:Lexer):LexedToken {
+		code.file=ctx.file.lfile;
+		var start=code.index;
+		var result=code.token();
+		updateLines(ctx,code,start);
+		return result;
+	}
+	public static function sharpToken(ctx:LexerContext,code:Lexer):LexedToken {
+		code.file=ctx.file.lfile;
+		var start=code.index;
+		code.skipWhitespace();
+		while (code.starts("/*")) {code.comment(code.index);code.skipWhitespace();}
+		var tokenStart=code.index;
+		var result:LexedToken;
+		if (isIdentStart(code.current())) {
+			code.index++;
+			while (isIdentPart(code.current()) || (code.current()=="." && isIdentStart(code.peek(1)))) code.index++;
+			result=code.make(Const(core.Ast.Constant.Ident(code.source.substr(tokenStart,code.index-tokenStart))),tokenStart);
+		} else result=code.token();
+		updateLines(ctx,code,start);
+		return result;
+	}
+	static function xmlNameStart(code:Int):Bool return code==36 || code==58 || code==95 || (code>=65&&code<=90) || (code>=97&&code<=122) || (code>=0xC0&&code<=0xD6) || (code>=0xD8&&code<=0xF6) || (code>=0xF8&&code<=0x2FF) || (code>=0x370&&code<=0x37D) || (code>=0x37F&&code<=0x1FFF) || (code>=0x200C&&code<=0x200D) || (code>=0x2070&&code<=0x218F) || (code>=0x2C00&&code<=0x2FEF) || (code>=0x3001&&code<=0xD7FF) || (code>=0xF900&&code<=0xFDCF) || (code>=0xFDF0&&code<=0xFFFD) || (code>=0x10000&&code<=0xEFFFF);
+	function xmlName():String {
+		var start=index;
+		if (!eof() && xmlNameStart(current().charCodeAt(0))) {
+			index++;
+			while (!eof()) {var c=current().charCodeAt(0);if (!(xmlNameStart(c)||c==45||c==46||(c>=48&&c<=57)||c==0xB7||(c>=0x300&&c<=0x36F)||(c>=0x203F&&c<=0x2040))) break;index++;}
+		}
+		return source.substr(start,index-start);
+	}
+	public static function lexXml(ctx:LexerContext,p:Int,code:Lexer):Int {
+		code.file=ctx.file.lfile;
+		if (p+1!=code.index) code.fail(InvalidCharacter(code.current().charCodeAt(0)),code.index);
+		var start=code.index, name=code.xmlName();
+		ctx.buf.add("<"+name);
+		var open="<"+name, close="</"+name+">", depth=0, inOpen=name!="";
+		while (!code.eof()) {
+			var offset=code.index;
+			if (code.starts("</")) {
+				code.index+=2;code.xmlName();
+				if (code.current()==">") {
+					code.index++;
+					var tag=code.source.substr(offset,code.index-offset);ctx.buf.add(tag);
+					if (tag==close) {if (depth==0) {updateLines(ctx,code,start);return code.index;} depth--;}
+					inOpen=false;continue;
+				}
+				code.index=offset;
+			}
+			if (code.current()=="<") {
+				code.index++;code.xmlName();var tag=code.source.substr(offset,code.index-offset);ctx.buf.add(tag);
+				if (tag==open) {depth++;inOpen=true;} else inOpen=false;
+			} else if (code.starts("/>")) {
+				code.index+=2;ctx.buf.add("/>");if (inOpen) depth--;
+				if (depth<0) {updateLines(ctx,code,start);return code.index;} inOpen=false;
+			} else {ctx.buf.add(code.current());code.index++;}
+		}
+		code.fail(UnterminatedMarkup,p);return 0;
+	}
+	public static function errorMsg(error:LexerErrorMsg):String return switch error {
+		case InvalidCharacter(c):c>32&&c<128?"Invalid character '"+String.fromCharCode(c)+"'":"Invalid character 0x"+StringTools.hex(c,2);
+		case UnterminatedString:"Unterminated string";case UnterminatedRegexp:"Unterminated regular expression";case UnclosedComment:"Unclosed comment";
+		case InvalidEscape(value):"Invalid escape sequence \\"+value;case InvalidRegexpOption:"Invalid regular expression option";case UnterminatedMarkup:"Unterminated markup literal";
+	};
 	var source:String;
 	var file:String;
 	var index:Int;

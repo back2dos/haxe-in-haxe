@@ -1,0 +1,8 @@
+# Compile every source module, including drafts unreachable from haxe.Main.
+-cp src
+-main haxe.Main
+--macro include("", true, ["haxe"], ["src"])
+# Select the intended host runtime without executing the compiler entry point.
+--interp
+--no-output
+--hxb bin/haxe-in-haxe.all.eval.hxb

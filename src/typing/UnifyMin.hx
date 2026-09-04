@@ -1,12 +1,17 @@
 package typing;
+import core.MetaList.StrictMeta as MetaTag;
+import core.Globals.Pos;
 
 import core.TType;
 import core.Globals.*;
 import core.TFunctions.*;
 import core.TUnification.*;
+import core.TUnification;
 import core.TUnification.UnifyMinT;
 import core.TOther.*;
+import core.TOther;
 import core.Error.*;
+import core.Error;
 import core.Meta;
 import haxe.ds.StringMap;
 
@@ -36,11 +41,11 @@ class UnifyMin {
 			try {
 				unify(e.etype, t);
 				return loop(t, rest);
-			} catch (_:UnifyError) {
+			} catch (_:Unify_error) {
 				try {
 					unify(t, e.etype);
 					return loop(isNull(t) ? basic.tnull(e.etype) : e.etype, rest);
-				} catch (_:UnifyError) {return {hasError:true, type:t};}
+				} catch (_:Unify_error) {return {hasError:true, type:t};}
 			}
 		}
 		var first = loop(null, el);
@@ -71,7 +76,7 @@ class UnifyMin {
 			var names = [for (name in fields.keys()) name]; names.sort(Reflect.compare);
 			for (name in names) {
 				var values = fields.get(name);
-				var t = try unifyMinRaise(basic, values) catch (_:UnifyError) {throw "Not_found";};
+				var t = try unifyMinRaise(basic, values) catch (_:Unify_error) {throw "Not_found";};
 				result.set(name, mkField(name, t, values[0].epos, nullPos));
 			}
 			return mkAnon(Closed, result);
@@ -101,7 +106,7 @@ class UnifyMin {
 		} catch (_:UnifyMinExit) {
 			var commonTypes = UnifyMinT.collectBaseTypes(first.type);
 			var dynTypes:Array<T> = [];
-			function hasDynamic(c:TClass):Bool return Meta.has(Meta.UnifyMinDynamic, c.clMeta) || (c.clSuper != null && hasDynamic(c.clSuper.cls));
+			function hasDynamic(c:TClass):Bool return Meta.has(MetaTag.UnifyMinDynamic, c.clMeta) || (c.clSuper != null && hasDynamic(c.clSuper.cls));
 			for (t in commonTypes) switch t {
 				case TInst(c, params) if (params.length > 0 && hasDynamic(c)): dynTypes.unshift(TInst(c, params.map(function(_) return tDynamic)));
 				case _:

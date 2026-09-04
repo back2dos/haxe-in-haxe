@@ -1,4 +1,7 @@
 package typing;
+import core.WithType as WithTypeTools;
+import core.WithType.WithTypeValue;
+import core.MetaList.StrictMeta as MetaTag;
 
 import core.TType;
 import core.Ast;
@@ -7,10 +10,12 @@ import core.Globals;
 import core.Globals.Pos;
 import core.TFunctions.*;
 import core.TOther.*;
+import core.TOther;
 import core.TOther.ExtType;
 import core.Meta;
 import core.WithType;
 import context.Typecore.*;
+import context.Typecore;
 import typing.matcher.Case;
 import typing.matcher.Pattern;
 import typing.matcher.Compile;
@@ -24,16 +29,16 @@ typedef MatchCase = {var patterns:Array<Expr>; var guard:Null<Expr>; var expr:Nu
 typedef MatchDefault = {var expr:Null<Expr>; var pos:Pos;}
 
 class Matcher {
-	static function matchExprImpl(ctx:Dynamic, e:Expr, cases:Array<MatchCase>, def:Null<MatchDefault>, withType:WithType, postfixMatch:Bool, p:Pos):TExpr {
-		var matchDebug = Meta.has(Meta.Custom(":debug.match"), ctx.f.curfield.cfMeta);
+	static function matchExprImpl(ctx:Dynamic, e:Expr, cases:Array<MatchCase>, def:Null<MatchDefault>, withType:WithTypeValue, postfixMatch:Bool, p:Pos):TExpr {
+		var matchDebug = Meta.has(MetaTag.Custom(":debug.match"), ctx.f.curfield.cfMeta);
 		function loop(e:Expr):{type:T, subjects:Array<TExpr>} {
 			return switch e.expr {
 				case EArrayDecl(el) if (!(el.length == 1 && switch el[0].expr {case EFor(_, _) | EWhile(_, _, _): true; case _: false;})):
-					var typed = el.map(function(e) return typeExpr(ctx, e, WithType.value));
+					var typed = el.map(function(e) return typeExpr(ctx, e, WithTypeTools.value));
 					{type:ExprToPattern.tupleType(typed.map(function(e) return e.etype)), subjects:typed};
 				case EParenthesis(e): loop(e);
 				case _:
-					var e = typeExpr(ctx, e, WithType.value);
+					var e = typeExpr(ctx, e, WithTypeTools.value);
 					{type:e.etype, subjects:[e]};
 			};
 		}
@@ -46,7 +51,7 @@ class Matcher {
 					case [TMono(_), ImplicitReturn]: tmono = t; withType = Value(source); allowMinVoid = true;
 					case [TAbstract(a, _), ImplicitReturn] if (a.aPath.pack.length == 0 && a.aPath.name == "Void"):
 						tmono = t; withType = Value(source); allowMinVoid = true;
-					case [TMono(_), _]: tmono = t; withType = WithType.value;
+					case [TMono(_), _]: tmono = t; withType = WithTypeTools.value;
 					case _:
 				}
 			case _:
@@ -84,8 +89,8 @@ class Matcher {
 		if (matchDebug) {Sys.println("TEXPR BEGIN"); Sys.println(MatcherGlobals.sExprPretty(result)); Sys.println("TEXPR END");}
 		return {eexpr:result.eexpr, etype:result.etype, epos:p};
 	}
-	public static function matchExpr(ctx:Dynamic, e:Expr, cases:Array<MatchCase>, def:Null<MatchDefault>, withType:WithType, postfixMatch:Bool, p:Pos):TExpr {
-		if (cases.length == 0 && def == null && withType == NoValue) return typeExpr(ctx, e, WithType.value);
+	public static function matchExpr(ctx:Dynamic, e:Expr, cases:Array<MatchCase>, def:Null<MatchDefault>, withType:WithTypeValue, postfixMatch:Bool, p:Pos):TExpr {
+		if (cases.length == 0 && def == null && withType == NoValue) return typeExpr(ctx, e, WithTypeTools.value);
 		return matchExprImpl(ctx, e, cases, def, withType, postfixMatch, p);
 	}
 }

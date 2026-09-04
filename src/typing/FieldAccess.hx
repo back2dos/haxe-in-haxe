@@ -4,11 +4,16 @@ import core.TType;
 import core.Globals.Pos;
 import core.TFunctions.*;
 import core.TOther.*;
-import core.TOther.TClass;
+import core.TOther;
+import core.TOther.TClassTools;
 import core.Abstract;
 import core.Texpr.Builder;
 import core.Error.*;
+import core.Error;
 import context.Typecore;
+import context.Typecore.FieldHost as FieldAccessHost;
+import context.Typecore.FieldAccess as FieldAccessData;
+import core.ds.NotFound;
 
 // haxe/src/typing/fieldAccess.ml — mechanical draft; not compile-validated.
 enum FieldHost { FGet; FCall; FRead; FWrite; }
@@ -33,11 +38,11 @@ class FieldAccess {
 	}
 	public static function getHostClassRaise(host:FieldAccessHost):TClass return switch host {
 		case FHStatic(c) | FHInstance(c, _) | FHAbstract(_, _, c): c;
-		case FHAnon: throw "Not_found";
+		case FHAnon: throw new NotFound();
 	};
 	public static function getMapFunction(fa:FieldAccessData):T->T return switch fa.faHost {
 		case FHStatic(_) | FHAnon: function(t) return t;
-		case FHInstance(c, tl): TClass.getMapFunction(c, tl);
+		case FHInstance(c, tl): TClassTools.getMapFunction(c, tl);
 		case FHAbstract(a, tl, _): function(t) return applyParams(a.aParams, tl, t);
 	};
 	public static function getFieldExpr(fa:FieldAccessData, mode:FieldHost):TExpr {
@@ -46,7 +51,7 @@ class FieldAccess {
 		var access:TFieldAccess = switch fa.faHost {
 			case FHStatic(c): FStatic(c, cf);
 			case FHInstance(c, tl):
-				t = TClass.getMapFunction(c, tl)(t);
+				t = TClassTools.getMapFunction(c, tl)(t);
 				switch cf.cfKind {case Method(_) if (mode == FRead): FClosure({cls:c, params:tl}, cf); case _: FInstance(c, tl, cf);}
 			case FHAbstract(a, tl, c):
 				t = applyParams(a.aParams, tl, t);
@@ -71,10 +76,9 @@ class FieldAccess {
 								try {
 									var actual = switch follow(t) {case TInst(c, tl): {cls:c, params:tl}; case _: {cls:c, params:tl};};
 									var found = rawClassField(function(f) return f.cfType, actual.cls, actual.params, name);
-									var newHost = found.host == null ? FHAnon : FHInstance(found.host.cls, found.host.params);
+									var newHost = found.owner == null ? FHAnon : FHInstance(found.owner.cls, found.owner.params);
 									AccessorFound({field:found.field, host:newHost});
-								} catch (error:Dynamic) {
-									if (error != "Not_found") throw error;
+								} catch (error:NotFound) {
 									hasClassFlag(c, CExtern) ? AccessorAnon : AccessorNotFound;
 								}
 							case FHAbstract(a, tl, c):
@@ -109,7 +113,7 @@ class FieldAccess {
 			var host:FieldAccessHost;
 			var cf = switch actual.cls.clKind {
 				case KAbstractImpl(a):
-					if (a.aConstructor == null) throw "Not_found";
+					if (a.aConstructor == null) throw new NotFound();
 					host = FHAbstract(a, actual.params, actual.cls);
 					a.aConstructor;
 				case _:
@@ -117,8 +121,7 @@ class FieldAccess {
 					getConstructor(actual.cls);
 			};
 			return create(eStatic, cf, host, false, p);
-		} catch (error:Dynamic) {
-			if (error != "Not_found") throw error;
+		} catch (error:NotFound) {
 			return raiseTypingErrorExt(makeError(NoConstructor(switch c.clKind {case KAbstractImpl(a): TAbstractDecl(a); case _: TClassDecl(c);}), p));
 		}
 	}

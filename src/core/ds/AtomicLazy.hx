@@ -1,17 +1,6 @@
 package core.ds;
 
-#if haxe_in_haxe_bootstrap
-// HXB is a compiler cache format rather than a runnable target and exposes no
-// thread primitives. The bootstrap compiler executes only after being loaded
-// by a host compiler, so its lazy values need no target-level synchronization.
-private class AtomicLazyMutex {
-	public inline function new() {}
-	public inline function acquire():Void {}
-	public inline function release():Void {}
-}
-#else
 private typedef AtomicLazyMutex = sys.thread.Mutex;
-#end
 
 // Port of haxe/src/core/ds/atomicLazy.ml.
 private enum AtomicLazyState<T> {

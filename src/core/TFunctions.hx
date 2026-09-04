@@ -1,9 +1,13 @@
 package core;
 
+import Type as StdType;
+
 import core.Globals;
 import core.Ast;
 import core.TType;
 import core.MetaList.StrictMeta;
+import core.Meta as MetadataTools;
+import core.Ast as AstTools;
 import core.ds.AtomicLazy;
 import haxe.ds.StringMap;
 import haxe.ds.IntMap;
@@ -11,7 +15,7 @@ import sys.thread.Mutex;
 
 // Mechanical translation of haxe/src/core/tFunctions.ml. Draft; not compiled or tested.
 // Mutex-protected counters replace OCaml Atomic.fetch_and_add.
-class NotFound { public function new() {} }
+typedef NotFound = core.ds.NotFound;
 class TypeExit { public function new() {} }
 class ApplyParamsRecursion { public function new() {} }
 class ApplyParamsMismatch { public function new() {} }
@@ -22,24 +26,24 @@ class TFunctions {
 	public static var monomorphCreateRef:Void->TMono = function() throw "monomorphCreateRef is uninitialized";
 	public static var monomorphBindRef:TMono->T->Void = function(_,_) throw "monomorphBindRef is uninitialized";
 	public static var monomorphClassifyConstraintsRef:TMono->TMonoConstraintKind = function(_) throw "monomorphClassifyConstraintsRef is uninitialized";
-	public static function hasMeta(m:StrictMeta,ml:Metadata):Bool return Meta.has(m,ml);
-	public static function getMeta(m:StrictMeta,ml:Metadata):MetadataEntry return Meta.get(m,ml);
+	public static function hasMeta(m:StrictMeta,ml:Metadata):Bool return MetadataTools.has(m,ml);
+	public static function getMeta(m:StrictMeta,ml:Metadata):MetadataEntry return MetadataTools.get(m,ml);
 	public static function hasFlag(flags:Int,flag:Int):Bool return flags & (1 << flag) > 0;
 	public static function setFlag(flags:Int,flag:Int):Int return flags | (1 << flag);
 	public static function unsetFlag(flags:Int,flag:Int):Int return flags & ~(1 << flag);
-	public static function intOfClassFlag(flag:FlagTClass):Int return Type.enumIndex(flag);
+	public static function intOfClassFlag(flag:FlagTClass):Int return StdType.enumIndex(flag);
 	public static function addClassFlag(c:TClass,flag:FlagTClass):Void c.clFlags = setFlag(c.clFlags,intOfClassFlag(flag));
 	public static function removeClassFlag(c:TClass,flag:FlagTClass):Void c.clFlags = unsetFlag(c.clFlags,intOfClassFlag(flag));
 	public static function hasClassFlag(c:TClass,flag:FlagTClass):Bool return hasFlag(c.clFlags,intOfClassFlag(flag));
-	public static function intOfClassFieldFlag(flag:FlagTClassField):Int return Type.enumIndex(flag);
+	public static function intOfClassFieldFlag(flag:FlagTClassField):Int return StdType.enumIndex(flag);
 	public static function addClassFieldFlag(cf:TClassField,flag:FlagTClassField):Void cf.cfFlags = setFlag(cf.cfFlags,intOfClassFieldFlag(flag));
 	public static function removeClassFieldFlag(cf:TClassField,flag:FlagTClassField):Void cf.cfFlags = unsetFlag(cf.cfFlags,intOfClassFieldFlag(flag));
 	public static function hasClassFieldFlag(cf:TClassField,flag:FlagTClassField):Bool return hasFlag(cf.cfFlags,intOfClassFieldFlag(flag));
-	public static function intOfEnumFlag(flag:FlagTEnum):Int return Type.enumIndex(flag);
+	public static function intOfEnumFlag(flag:FlagTEnum):Int return StdType.enumIndex(flag);
 	public static function addEnumFlag(e:TEnum,flag:FlagTEnum):Void e.eFlags = setFlag(e.eFlags,intOfEnumFlag(flag));
 	public static function removeEnumFlag(e:TEnum,flag:FlagTEnum):Void e.eFlags = unsetFlag(e.eFlags,intOfEnumFlag(flag));
 	public static function hasEnumFlag(e:TEnum,flag:FlagTEnum):Bool return hasFlag(e.eFlags,intOfEnumFlag(flag));
-	public static function intOfVarFlag(flag:FlagTVar):Int return Type.enumIndex(flag);
+	public static function intOfVarFlag(flag:FlagTVar):Int return StdType.enumIndex(flag);
 	public static function addVarFlag(v:TVar,flag:FlagTVar):Void v.vFlags = setFlag(v.vFlags,intOfVarFlag(flag));
 	public static function removeVarFlag(v:TVar,flag:FlagTVar):Void v.vFlags = unsetFlag(v.vFlags,intOfVarFlag(flag));
 	public static function hasVarFlag(v:TVar,flag:FlagTVar):Bool return hasFlag(v.vFlags,intOfVarFlag(flag));
@@ -232,8 +236,8 @@ class TFunctions {
 		case TLazy(f):switch f {case LAvailable(t):isNullable(t,noLazy);case _ if (noLazy):throw new TypeExit();case _:isNullable(lazyType(f));}
 		case TType(td,tl):isNullable(applyTypedef(td,tl),noLazy);
 		case TFun(_):false;
-		case TAbstract(a,_) if (Meta.has(Meta.CoreType,a.aMeta)):!Meta.has(Meta.NotNull,a.aMeta);
-		case TAbstract(a,tl):!Meta.has(Meta.NotNull,a.aMeta) && isNullable(applyParams(a.aParams,tl,a.aThis));
+		case TAbstract(a,_) if (MetadataTools.has(MetadataTools.CoreType,a.aMeta)):!MetadataTools.has(MetadataTools.NotNull,a.aMeta);
+		case TAbstract(a,tl):!MetadataTools.has(MetadataTools.NotNull,a.aMeta) && isNullable(applyParams(a.aParams,tl,a.aThis));
 		case _:true;
 	};
 	public static function isNull(t:T,noLazy:Bool = false):Bool return switch t {
@@ -260,7 +264,7 @@ class TFunctions {
 	};
 	public static function concat(e1:TExpr,e2:TExpr):TExpr {
 		var e = switch [e1.eexpr,e2.eexpr] {case [TBlock(el1),TBlock(el2)]:TBlock(el1.concat(el2));case [TBlock(el),_]:TBlock(el.concat([e2]));case [_,TBlock(el)]:TBlock([e1].concat(el));case _:TBlock([e1,e2]);};
-		return mk(e,e2.etype,Ast.punion(e1.epos,e2.epos));
+		return mk(e,e2.etype,AstTools.punion(e1.epos,e2.epos));
 	}
 	public static function extractParamType(tp:TypedTypeParam):T return tp.ttpType;
 	public static function extractParamTypes(params:TypeParams):TParams return params.map(extractParamType);
@@ -289,7 +293,7 @@ class TFunctions {
 	public static function fieldName(f:TFieldAccess):String return switch f {case FAnon(f) | FInstance(_,_,f) | FStatic(_,f) | FClosure(_,f):f.cfName;case FEnum(_,f):f.efName;case FDynamic(n):n;};
 	public static function extractField(f:TFieldAccess):Null<TClassField> return switch f {case FAnon(f) | FInstance(_,_,f) | FStatic(_,f) | FClosure(_,f):f;case _:null;};
 	public static function isPhysicalVarField(f:TClassField):Bool return switch f.cfKind {
-		case Var(v):switch [v.vRead,v.vWrite] {case [AccNormal | AccInline | AccNo,_] | [_,AccNormal | AccNo]:true;case _:Meta.has(Meta.IsVar,f.cfMeta);}
+		case Var(v):switch [v.vRead,v.vWrite] {case [AccNormal | AccInline | AccNo,_] | [_,AccNormal | AccNo]:true;case _:MetadataTools.has(MetadataTools.IsVar,f.cfMeta);}
 		case _:false;
 	};
 	public static function isPhysicalField(f:TClassField):Bool return f.cfKind.match(Method(_)) || isPhysicalVarField(f);

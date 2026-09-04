@@ -2,7 +2,8 @@ package context;
 import core.Globals;
 import core.Ast;
 import core.Meta;
-import typing.Error;
+import core.data.MetaDataApi;
+import core.Error;
 // Draft mechanical translation of haxe/src/context/coreApiConfig.ml; unvalidated.
 enum CoreApiCheck { On; Off; Implied; }
 typedef CoreApiConfiguration = { var check:CoreApiCheck; }
@@ -19,7 +20,7 @@ class CoreApiConfigReader {
 		function read(data:Dynamic):Void {
 			var fields:Array<Dynamic> = api.readObject(data);
 			for (field in fields) switch field.name {
-				case "check": config.check = readCoreApiCheck(field.data);
+				case "check": config.check = readCoreApiCheck(field.value);
 				case s: Error.raiseTypingError("Unknown key for coreApi config: " + s, Globals.nullPos);
 			}
 		}
@@ -30,7 +31,7 @@ class CoreApiConfig {
 	public static function defaultCoreApiConfig():CoreApiConfiguration return {check:On};
 	public static function ofCoreApiMetadataEntry(entry:MetadataEntry):CoreApiConfiguration {
 		var config = defaultCoreApiConfig();
-		new CoreApiConfigReader(MetaDataApi.MetaReaderApi).readCoreApiConfig(config, MetaDataApi.ofMetadataEntry(entry));
+		new CoreApiConfigReader(MetaReaderApi).readCoreApiConfig(config, MetaDataApi.ofMetadataEntry(entry));
 		return config;
 	}
 	public static function isImpliedCoreApiFile(filePath:String):Bool {
@@ -42,7 +43,7 @@ class CoreApiConfig {
 		return afterStd.indexOf("/") == -1 || StringTools.startsWith(afterStd, "haxe/") || StringTools.startsWith(afterStd, "sys/");
 	}
 	public static function getCoreApiCheck(meta:Metadata, filePath:String):CoreApiCheck {
-		var entry = Meta.getOptional(Meta.CoreApi, meta);
+		var entry = try Meta.get(Meta.CoreApi, meta) catch (_:core.Meta.MetaNotFound) null;
 		return entry != null ? ofCoreApiMetadataEntry(entry).check : isImpliedCoreApiFile(filePath) ? Implied : Off;
 	}
 	public static function sCoreApiCheck(value:CoreApiCheck):String return switch value {

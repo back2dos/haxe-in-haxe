@@ -3,7 +3,15 @@ import core.Globals;
 import core.Globals.Pos;
 import core.TType;
 import core.Meta;
-import typing.Type;
+import core.TFunctions as TypeOps;
+import core.TUnification;
+import core.TUnification.Monomorph;
+import core.MetaList.StrictMeta;
+import core.Meta as MetadataTools;
+import core.Texpr;
+import core.Warning;
+import core.WarningList;
+import Type as StdType;
 // Draft mechanical translation of haxe/src/context/resolution.ml; unvalidated.
 enum ResolutionKind {
 	RTypeImport(alias:String, type:ModuleType);
@@ -19,7 +27,7 @@ typedef ResolvedImport = { var rKind:ResolutionKind; var rPos:Pos; }
 class Resolution {
 	public static function mkResolution(kind:ResolutionKind, p:Pos):ResolvedImport return {rKind:kind, rPos:p};
 	public static function lazyResolution(f:Void->Null<ResolvedImport>):ResolvedImport return mkResolution(RLazy(f), Globals.nullPos);
-	public static function moduleTypeResolution(mt:ModuleType, alias:Null<String>, p:Pos):ResolvedImport return mkResolution(RTypeImport(alias == null ? Type.tName(mt) : alias, mt), p);
+	public static function moduleTypeResolution(mt:ModuleType, alias:Null<String>, p:Pos):ResolvedImport return mkResolution(RTypeImport(alias == null ? core.TFunctions.tName(mt) : alias, mt), p);
 	public static function staticFieldResolution(c:TClass, cf:TClassField, alias:Null<String>, p:Pos):ResolvedImport return mkResolution(RClassFieldImport(alias == null ? cf.cfName : alias, c, cf), p);
 	public static function staticAbstractFieldResolution(a:TAbstract, c:TClass, cf:TClassField, alias:Null<String>, p:Pos):ResolvedImport return mkResolution(RAbstractFieldImport(alias == null ? cf.cfName : alias, a, c, cf), p);
 	public static function enumConstructorResolution(en:TEnum, ef:TEnumField, alias:Null<String>, p:Pos):ResolvedImport return mkResolution(REnumConstructorImport(alias == null ? ef.efName : alias, en, ef), p);
@@ -27,15 +35,15 @@ class Resolution {
 	public static function enumStaticsResolution(en:TEnum, p:Pos):ResolvedImport return mkResolution(REnumStatics(en), p);
 	public static function wildcardPackageResolution(pack:Array<String>, p:Pos):ResolvedImport return mkResolution(RWildcardPackage(pack), p);
 	public static function asImportableStatic(c:TClass, cf:TClassField, p:Pos):Null<{name:String, resolution:ResolvedImport}> {
-		if (Type.hasMeta(Meta.NoImportGlobal, cf.cfMeta)) return null;
+		if (core.TFunctions.hasMeta(StrictMeta.NoImportGlobal, cf.cfMeta)) return null;
 		return switch c.clKind {
 			case KAbstractImpl(a):
-				a.aEnum && !Type.hasClassFieldFlag(cf, CfEnum) ? null : {name:cf.cfName, resolution:staticAbstractFieldResolution(a,c,cf,null,p)};
+				a.aEnum && !core.TFunctions.hasClassFieldFlag(cf, CfEnum) ? null : {name:cf.cfName, resolution:staticAbstractFieldResolution(a,c,cf,null,p)};
 			case _: {name:cf.cfName, resolution:staticFieldResolution(c,cf,null,p)};
 		};
 	}
 	public static function sResolutionKind(kind:ResolutionKind):String return switch kind {
-		case RTypeImport(_,mt): "RTypeImport(" + Globals.sTypePath(Type.tInfos(mt).mtPath) + ")";
+		case RTypeImport(_,mt): "RTypeImport(" + Globals.sTypePath(core.TFunctions.tInfos(mt).mtPath) + ")";
 		case RClassFieldImport(_,c,cf): "RClassFieldImport(" + Globals.sTypePath(c.clPath) + ", " + cf.cfName + ")";
 		case RAbstractFieldImport(_,a,_,cf): "RAbstractFieldImport(" + Globals.sTypePath(a.aPath) + ", " + cf.cfName + ")";
 		case REnumConstructorImport(_,en,ef): "REnumConstructorImport(" + Globals.sTypePath(en.ePath) + ", " + ef.efName + ")";
@@ -90,12 +98,12 @@ class ResolutionList {
 				}
 			case REnumStatics(en):
 				var ef = en.eConstrs.get(i);
-				if (ef != null && !Type.hasMeta(Meta.NoImportGlobal, ef.efMeta)) return Resolution.enumConstructorResolution(en,ef,null,res.rPos);
+				if (ef != null && !core.TFunctions.hasMeta(StrictMeta.NoImportGlobal, ef.efMeta)) return Resolution.enumConstructorResolution(en,ef,null,res.rPos);
 			case RTypeImport(alias,_), RClassFieldImport(alias,_,_), RAbstractFieldImport(alias,_,_,_), REnumConstructorImport(alias,_,_):
 				if (alias == i) return res;
 			case RLazy(_), RWildcardPackage(_):
 		}
-		throw core.ds.NotFound;
+		throw new core.ds.NotFound();
 	}
 	public function resolve(i:String):ResolvedImport { resolveLazies(); return resolveUnforced(i); }
 	public function expandEnumConstructors(mt:ModuleType):Null<ResolvedImport> return switch mt {
@@ -103,7 +111,7 @@ class ResolutionList {
 		case TEnumDecl(en): Resolution.enumStaticsResolution(en, Globals.nullPos);
 		case TTypeDecl(t):
 			resolvedLazies = false;
-			Resolution.lazyResolution(function() return switch Type.follow(t.tType) {
+			Resolution.lazyResolution(function() return switch core.TFunctions.follow(t.tType) {
 				case TEnum(e,_): expandEnumConstructors(TEnumDecl(e));
 				case TAbstract(a,_) if (a.aEnum): expandEnumConstructors(TAbstractDecl(a));
 				case _: null;
@@ -139,7 +147,7 @@ class ResolutionList {
 	}
 	public function findTypeImport(alias:String):{type:ModuleType, pos:Pos} {
 		cacheTypeImports();
-		if (!typeImportCache.exists(alias)) throw core.ds.NotFound;
+		if (!typeImportCache.exists(alias)) throw new core.ds.NotFound();
 		return typeImportCache.get(alias);
 	}
 	public function extractTypeImports():Array<{type:ModuleType, pos:Pos}> {
@@ -150,9 +158,9 @@ class ResolutionList {
 		}
 		return out;
 	}
-	public function extractFieldImports():core.ds.PMap<String,{type:ModuleType, name:String, pos:Pos}> {
+	public function extractFieldImports():core.ds.PersistentMap<String,{type:ModuleType, name:String, pos:Pos}> {
 		resolveLazies();
-		var out = core.ds.PMap.empty();
+		var out = core.ds.PersistentMap.empty();
 		for (res in list) switch res.rKind {
 			case RClassFieldImport(alias,c,cf): out = out.add(alias, {type:TClassDecl(c), name:cf.cfName, pos:res.rPos});
 			case RClassStatics(c):

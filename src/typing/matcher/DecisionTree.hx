@@ -90,5 +90,5 @@ class DecisionTree {
 		case _: false;
 	};
 	// Structural hashing is retained as an unresolved runtime dependency.
-	public static function hash(dt:DecisionTreeKind):Int return Hashtbl.hash(dt);
+	public static function hash(dt:DecisionTreeKind):Int return core.ds.Hashtbl.hash(dt);
 }

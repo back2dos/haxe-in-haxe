@@ -38,6 +38,7 @@ enum Platform {
 }
 
 class Globals {
+	public static final genLocalPrefix = "`";
 	public static final version = 5000;
 	public static final versionMajor = Std.int(version / 1000);
 	public static final versionMinor = Std.int((version % 1000) / 100);
@@ -106,4 +107,18 @@ class Globals {
 
 	// Like globals.ml, this only appends the build portion of the supplied version.
 	public static function sVersionFull(version:CompilerVersion):String return version.extra == null ? sVersion : sVersion + "+" + version.extra.build;
+	// globals.ml:195: preserve the failure payload and source location with a Haxe stack.
+	public static function die(msg:String,source:String,?p:Pos):Dynamic {
+		var prefix=p==null ? "" : p.pfile+":"+p.pmin+": ";
+		var message=prefix+"Compiler failure"+(msg=="" ? "" : ": "+msg)+"\n"
+			+prefix+"Please submit an issue at https://github.com/HaxeFoundation/haxe/issues/new\n"
+			+prefix+"Attach "+(p==null ? "" : "the expression example and ")+"the following information:";
+		throw new InternalCompilerError(message,source+"\n"+haxe.CallStack.toString(haxe.CallStack.callStack().slice(1,21)));
+	}
+
+}
+
+class InternalCompilerError extends haxe.Exception {
+ public final backtrace:String;
+ public function new(message:String,backtrace:String) {super(message);this.backtrace=backtrace;}
 }

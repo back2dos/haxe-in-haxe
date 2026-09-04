@@ -1,21 +1,31 @@
 package typing;
+import core.WithType as WithTypeTools;
+import core.WithType.WithTypeValue;
+import core.MetaList.StrictMeta as MetaTag;
 
 import core.TType;
 import core.Ast;
+import context.Typecore.Typer as TyperContext;
+import context.Common.CommonContext;
+import core.Globals.Platform;
 import core.Ast.Expr;
 import core.Ast.FuncArg;
 import core.Ast.TypeHint;
 import core.Globals;
 import core.Globals.Pos;
+import core.display.DisplayPosition;
 import core.TFunctions.*;
 import core.TOther.*;
+import core.TOther;
 import core.TOther.ExtType;
 import core.TPrinting.*;
 import core.Error.*;
+import core.Error;
 import core.Meta;
 import core.Naming;
 import core.WithType;
 import context.Typecore.*;
+import context.Typecore;
 import context.TyperPass;
 import context.AbstractCast;
 import context.SafeCom;
@@ -33,17 +43,17 @@ class FunctionArguments {
 		case TEnum(e, _): e.ePath.pack.length == 0 && e.ePath.name == "Bool";
 		case _: false;
 	};
-	public static function typeFunctionArg(com:Dynamic, t:T, e:Null<Expr>, opt:Bool, p:Pos):{type:T, expr:Null<Expr>} {
+	public static function typeFunctionArg(com:CommonContext, t:T, e:Null<Expr>, opt:Bool, p:Pos):{type:T, expr:Null<Expr>} {
 		if (opt) return {type:com.basic.tnull(t), expr:e == null ? {expr:EConst(Ident("null")), pos:Globals.nullPos} : e};
 		// null_pos in this OCaml pattern is a binding, not a position comparison.
 		if (e != null) switch e.expr {case EConst(Ident("null")): t = com.basic.tnull(t); case _:}
 		return {type:t, expr:e};
 	}
-	public static function typeFunctionArgValue(ctx:Dynamic, t:T, c:Null<Expr>, doDisplay:Bool):Null<TExpr> {
+	public static function typeFunctionArgValue(ctx:TyperContext, t:T, c:Null<Expr>, doDisplay:Bool):Null<TExpr> {
 		if (c == null) return null;
 		var p = c.pos;
-		var input = doDisplay ? Display.preprocessExpr(ctx.com, c) : c;
-		var e = typeExpr(ctx, input, WithType.withType(t));
+		var input = doDisplay ? context.DeferredServices.display() : c;
+		var e = typeExpr(ctx, input, WithTypeTools.withType(t));
 		e = AbstractCast.castOrUnify(ctx, t, e, p);
 		e = Optimizer.reduceExpression(SafeCom.ofTyper(ctx), e);
 		function runAnalyzer(e:TExpr):TExpr return analyzerRunOnExprRef(ctx.com, Globals.sTypePath(ctx.c.curclass.clPath) + "." + ctx.f.curfield.cfName, e);
@@ -52,7 +62,7 @@ class FunctionArguments {
 				switch e.eexpr {
 					case TConst(TThis): raiseTypingError("Cannot access this in a constructor's default argument value", e.epos);
 					case TLocal(v) if (ctx.f.vthis != null && v == ctx.f.vthis): raiseTypingError("Cannot access this in a constructor's default argument value", e.epos);
-					case _: iter(checkThis, e);
+					case _: core.Texpr.iter(checkThis, e);
 				}
 			}
 			checkThis(e);
@@ -62,8 +72,8 @@ class FunctionArguments {
 			function loop(e:TExpr):Void {
 				if (found) return;
 				switch e.eexpr {
-					case TLocal(v) if (ctx.f.locals.get(v.vName) == v): found = true;
-					case _: iter(loop, e);
+					case TLocal(v) if (ctx.f.locals.findOpt(v.vName) == v): found = true;
+					case _: core.Texpr.iter(loop, e);
 				}
 			}
 			loop(e); return found;
@@ -80,7 +90,7 @@ class FunctionArguments {
 		};
 		return loop(false, e);
 	}
-	final com:Dynamic;
+	final com:CommonContext;
 	final isExtern:Bool;
 	final doDisplay:Bool;
 	final abstractThis:Null<T>;
@@ -88,7 +98,7 @@ class FunctionArguments {
 	final withDefault:Array<ArgumentWithDefault>;
 	var typeRepr:Null<Array<{name:String, optional:Bool, type:T}>> = null;
 	var exprRepr:Null<Array<{variable:TVar, defaultValue:Null<TExpr>}>> = null;
-	public function new(com:Dynamic, typeArg:Int->Bool->Null<TypeHint>->Pos->T, isExtern:Bool, doDisplay:Bool, abstractThis:Null<T>, syntax:Array<FuncArg>) {
+	public function new(com:CommonContext, typeArg:Int->Bool->Null<TypeHint>->Pos->T, isExtern:Bool, doDisplay:Bool, abstractThis:Null<T>, syntax:Array<FuncArg>) {
 		this.com = com; this.isExtern = isExtern; this.doDisplay = doDisplay; this.abstractThis = abstractThis; this.syntax = syntax;
 		withDefault = [];
 		for (i in 0...syntax.length) {
@@ -107,7 +117,7 @@ class FunctionArguments {
 				addVarFlag(v, VCoroScope);
 				if (config.restrictedSuspension) addVarFlag(v, VCoroRestrictedSuspension);
 			}
-		} catch (error:Dynamic) {if (error != "Exit") throw error;}
+		} catch (_:core.ds.Exit) {}
 	}
 	public function forType():Array<{name:String, optional:Bool, type:T}> {
 		if (typeRepr == null) typeRepr = withDefault.map(function(arg) return {name:arg.name, optional:arg.expr != null, type:arg.type});
@@ -119,7 +129,7 @@ class FunctionArguments {
 		if (eo != null) raiseTypingError("Rest argument cannot have default value", eo.pos);
 		if (!isLast) raiseTypingError("Rest should only be used for the last function argument", pn);
 	}
-	public function forExpr(ctx:Dynamic):Array<{variable:TVar, defaultValue:Null<TExpr>}> {
+	public function forExpr(ctx:TyperContext):Array<{variable:TVar, defaultValue:Null<TExpr>}> {
 		if (exprRepr != null) return exprRepr;
 		function makeLocal(name:String, kind:TVarKind, t:T, meta:Metadata, pn:Pos):TVar {
 			var v = allocVar(kind, name, t, pn);
@@ -132,7 +142,7 @@ class FunctionArguments {
 			var typed = withDefault[i];
 			if (i == 0 && offset == 1) {
 				var v = makeLocal(typed.name, VAbstractThis, typed.type, [], Globals.nullPos);
-				v.vMeta.unshift({meta:Meta.This, exprs:[], pos:Globals.nullPos});
+				v.vMeta.unshift({meta:MetaTag.This, exprs:[], pos:Globals.nullPos});
 				acc.unshift({variable:v, defaultValue:null}); continue;
 			}
 			if (i - offset >= syntax.length) throw "Invalid function argument lists";
@@ -145,15 +155,15 @@ class FunctionArguments {
 			}
 			var eo = typeFunctionArgValue(ctx, typed.type, typed.expr, doDisplay);
 			var v = makeLocal(typed.name, VUser(TVOArgument), typed.type, arg.meta, pn);
-			if (doDisplay && DisplayPosition.displayPosition.enclosedIn(pn)) DisplayEmitter.displayVariable(ctx, v, pn);
+			if (doDisplay && DisplayPosition.displayPosition.enclosedIn(pn)) context.DeferredServices.display();
 			if (acc.length == 0 && TyperManager.isCoroutineContext(ctx)) checkCoroutineScope(v);
-			if (typed.name != "_") ctx.f.locals.set(v.vName, v);
+			if (typed.name != "_") ctx.f.locals = ctx.f.locals.add(v.vName, v);
 			acc.unshift({variable:v, defaultValue:eo});
 		}
 		if (syntax.length + offset != withDefault.length) throw "Invalid function argument lists";
 		acc.reverse(); exprRepr = acc; return acc;
 	}
-	public function verifyExtern(ctx:Dynamic):Void {
+	public function verifyExtern(ctx:TyperContext):Void {
 		var offset = abstractThis == null ? 0 : 1;
 		if (syntax.length + offset != withDefault.length) throw "Invalid function argument lists";
 		for (i in offset...withDefault.length) {
@@ -162,7 +172,7 @@ class FunctionArguments {
 			typeFunctionArgValue(ctx, typed.type, typed.expr, doDisplay);
 		}
 	}
-	public function bringIntoContext(ctx:Dynamic):Void {
-		for (arg in forExpr(ctx)) ctx.f.locals.set(arg.variable.vName, arg.variable);
+	public function bringIntoContext(ctx:TyperContext):Void {
+		for (arg in forExpr(ctx)) ctx.f.locals = ctx.f.locals.add(arg.variable.vName, arg.variable);
 	}
 }

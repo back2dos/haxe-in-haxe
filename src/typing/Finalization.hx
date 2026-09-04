@@ -1,17 +1,28 @@
 package typing;
+import core.MetaList.StrictMeta as MetaTag;
+import core.Globals.Pos;
+import core.Globals.GlobalTypePath;
+import core.Message.WarningCode;
+import core.Texpr;
+import core.ds.NotFound;
+import context.Common.CommonContext;
+import context.Common.ModuleLut;
 
 import core.TType;
 import core.Globals;
 import core.Globals.*;
 import core.TFunctions.*;
 import core.TOther.*;
+import core.TOther;
 import core.TOther.ExtType;
-import core.TOther.TClass;
+import core.TOther.TClassTools;
 import core.TPrinting.*;
 import core.Texpr.Builder;
 import core.Error.*;
+import core.Error;
 import core.Meta;
 import context.Typecore.*;
+import context.Typecore;
 import context.Common;
 import context.TyperPass;
 import typing.TyperBase.*;
@@ -21,10 +32,10 @@ import optimization.Dce;
 enum FinalizationState { Generating; Done; NotYet; }
 
 class Finalization {
-	public static function maybeLoadMain(tctx:Dynamic):Null<ModuleDef> {
+	public static function maybeLoadMain(tctx:Typer):Null<ModuleDef> {
 		return tctx.com.main.mainPath == null ? null : Typeload.loadModule(tctx, tctx.com.main.mainPath, nullPos);
 	}
-	public static function maybeAddEntrypoint(com:Dynamic):Void {
+	public static function maybeAddEntrypoint(com:CommonContext):Void {
 		var main:Null<TExpr> = com.main.mainExpr;
 		if (main == null) return;
 		var types:Array<ModuleType> = com.types;
@@ -41,7 +52,7 @@ class Finalization {
 		var e = mk(TCall(mk(TField(typeExpr, FStatic(ec, ef)), ef.cfType, nullPos), []), com.basic.tvoid, nullPos);
 		com.main.mainExpr = mk(TBlock([main, e]), com.basic.tvoid, main.epos);
 	}
-	public static function getMain(ctx:Dynamic, mainModule:Null<ModuleDef>, types:Array<ModuleType>):{expr:Null<TExpr>, path:Dynamic} {
+	public static function getMain(ctx:Typer, mainModule:Null<ModuleDef>, types:Array<ModuleType>):{expr:Null<TExpr>, path:Null<String>} {
 		if (mainModule == null) return {expr:null, path:null};
 		var path = mainModule.mPath;
 		var p = nullPos;
@@ -59,9 +70,8 @@ class Finalization {
 					case TEnumDecl(_) | TTypeDecl(_) | TAbstractDecl(_): raiseTypingError("Invalid -main : " + sTypePath(path) + " is not a class", nullPos);
 					case TClassDecl(cls): c = cls; p = c.clNamePos; f = c.clStatics.get("main");
 				}
-				if (f == null) throw "Not_found";
-			} catch (error:Dynamic) {
-				if (error != "Not_found") throw error;
+				if (f == null) throw new NotFound();
+			} catch (error:NotFound) {
 				raiseTypingError("Invalid -main : " + sTypePath(path) + " does not have static function main", p);
 			}
 		}
@@ -71,14 +81,14 @@ class Finalization {
 			case _: raiseTypingError("Invalid -main : " + sTypePath(path) + " has invalid main function", c.clPos);
 		};
 		if (!ExtType.isVoid(follow(r))) raiseTypingError("Return type of main function should be Void (found " + sType(printContext(), r) + ")", f.cfNamePos);
-		if (!Meta.has(Meta.Keep, f.cfMeta)) f.cfMeta.unshift(Dce.mkKeepMeta(f.cfPos));
+		if (!Meta.has(MetaTag.Keep, f.cfMeta)) f.cfMeta.unshift(Dce.mkKeepMeta(f.cfPos));
 		var emain = typeModuleType(ctx, TClassDecl(c), nullPos);
 		return {
 			expr:mk(TCall(mk(TField(emain, FStatic(c, f)), ft, nullPos), []), r, nullPos),
-			path:core.Path.UniqueKey.lazyPath(mainModule.mExtra.mFile)
+			path:mainModule.mExtra.mFile
 		};
 	}
-	public static function finalize(ctx:Dynamic):Void {
+	public static function finalize(ctx:Typer):Void {
 		flushPass(ctx.g, PFinal, {name:"final", args:[]});
 		var callbacks:Array<Array<ModuleType>->Void> = ctx.com.callbacks.getAfterTyping();
 		if (callbacks.length == 0) return;
@@ -96,7 +106,7 @@ class Finalization {
 			handledTypes = allTypes;
 		}
 	}
-	public static function sortTypes(com:Dynamic, modules:Dynamic):{types:Array<ModuleType>, modules:Array<ModuleDef>} {
+	public static function sortTypes(com:CommonContext, modules:ModuleLut):{types:Array<ModuleType>, modules:Array<ModuleDef>} {
 		var types:Array<ModuleType> = [];
 		var states:Map<String, FinalizationState> = [];
 		var statics:Map<String, Bool> = [];
@@ -122,7 +132,7 @@ class Finalization {
 					case TTypeDecl(_): throw "Typedef in static initialization";
 				}
 				case TNew(c, _, _):
-					iter(function(e) walkExpr(p, e), e);
+					Texpr.iter(function(e) walkExpr(p, e), e);
 					loopClass(p, c);
 					function walkConstructor(c:TClass):Void {
 						var k = staticKey(c, "new");
@@ -133,13 +143,13 @@ class Finalization {
 					}
 					walkConstructor(c);
 				case TField(e1, FStatic(c, cf)): walkExpr(p, e1); walkStaticField(p, c, cf);
-				case _: iter(function(e) walkExpr(p, e), e);
+				case _: Texpr.iter(function(e) walkExpr(p, e), e);
 			}
 		};
 		function walkClass(p:GlobalTypePath, c:TClass):Void {
 			if (c.clSuper != null) loopClass(p, c.clSuper.cls);
 			for (parent in c.clImplements) loopClass(p, parent.cls);
-			var init = TClass.getClInit(c);
+			var init = TClassTools.getClInit(c);
 			if (init != null) walkExpr(p, init);
 			// Upstream PMap.iter is key-ordered, not insertion/hash order.
 			var names = [for (name in c.clStatics.keys()) name];
@@ -177,7 +187,7 @@ class Finalization {
 		types.reverse();
 		return {types:types, modules:sortedModules};
 	}
-	public static function generate(ctx:Dynamic, mainPath:Null<ModuleDef>):Dynamic {
+	public static function generate(ctx:Typer, mainPath:Null<ModuleDef>):Dynamic {
 		var sorted = sortTypes(ctx.com, ctx.com.moduleLut);
 		return {main:getMain(ctx, mainPath, sorted.types), types:sorted.types, modules:sorted.modules};
 	}

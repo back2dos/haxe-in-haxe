@@ -2,10 +2,10 @@ package filters;
 
 import core.Ast;
 import core.TType;
-import core.Type as TypeOps;
+import core.TFunctions as TypeOps;
 import core.Globals;
 import core.Meta;
-import core.ExtType;
+import core.TOther.ExtType;
 import core.Define;
 
 // haxe/src/filters/tre.ml — mechanical draft; not compiled or validated.
@@ -31,20 +31,20 @@ class Tre {
 		collected.declarations.reverse(); collected.values.reverse();
 		var next = TypeOps.mk(TContinue, ctx.basic.tvoid, Globals.nullPos);
 		var block = TypeOps.mk(TBlock(collected.declarations.concat(assignArgs(fn.tfArgs, collected.values)).concat([next])), ctx.basic.tvoid, p);
-		return TypeOps.mk(TMeta({name:TailRecursion, params:[], pos:Globals.nullPos}, block), ctx.basic.tvoid, p);
+		return TypeOps.mk(TMeta({meta:core.MetaList.StrictMeta.TailRecursion,exprs:[], pos:Globals.nullPos}, block), ctx.basic.tvoid, p);
 	}
 	public static function collectCapturedArgs(args:Array<TVar>, e:TExpr):Array<TVar> {
 		var result = [];
 		function loop(inClosure:Bool, e:TExpr):Void switch e.eexpr {
 			case TLocal(v = {vKind:VUser(TVOArgument)}) if (inClosure && !result.contains(v) && args.contains(v)): result.unshift(v);
 			case TFunction(fn): loop(true, fn.tfExpr);
-			case _: TypeOps.iter(e -> loop(inClosure, e), e);
+			case _: core.Texpr.iter(e -> loop(inClosure, e), e);
 		}
 		loop(false, e); return result;
 	}
 	public static function redeclareVars(ctx:Dynamic, vars:Array<TVar>, declarations:Array<TExpr>, replaceList:Array<{old:TVar, replacement:TVar}>):{declarations:Array<TExpr>, replaceList:Array<{old:TVar, replacement:TVar}>} {
 		for (v in vars) {
-			var newV = TypeOps.allocVar(VGenerated, TypeOps.genLocalPrefix + v.vName, v.vType, v.vPos);
+			var newV = TypeOps.allocVar(VGenerated, core.Globals.genLocalPrefix + v.vName, v.vType, v.vPos);
 			declarations.unshift(TypeOps.mk(TVar(newV, TypeOps.mk(TLocal(v), v.vType, v.vPos)), ctx.basic.tvoid, v.vPos));
 			replaceList.unshift({old:v, replacement:newV});
 		}
@@ -58,8 +58,8 @@ class Tre {
 				var replaced = v;
 				for (entry in replaceList) if (entry.old == v) { replaced = entry.replacement; break; }
 				replaced == v ? e : TypeOps.mk(TLocal(replaced), e.etype, e.epos);
-			case TMeta({name:TailRecursion}, _): TypeOps.mapExpr(e -> replaceVars(replaceList, true, e), e);
-			case _: TypeOps.mapExpr(e -> replaceVars(replaceList, inTailRecursion, e), e);
+			case TMeta({meta:core.MetaList.StrictMeta.TailRecursion}, _): core.Texpr.mapExpr(e -> replaceVars(replaceList, true, e), e);
+			case _: core.Texpr.mapExpr(e -> replaceVars(replaceList, inTailRecursion, e), e);
 		};
 	}
 	public static function wrapLoop(ctx:Dynamic, args:Array<TVar>, body:TExpr):TExpr {
@@ -86,7 +86,7 @@ class Tre {
 		var addLoop = false;
 		function transformExpr(cancelTre:Bool, functionEnd:Bool, e:TExpr):TExpr {
 			return switch e.eexpr {
-				case TWhile(_, _, _): TypeOps.mapExpr(e -> transformExpr(true, false, e), e);
+				case TWhile(_, _, _): core.Texpr.mapExpr(e -> transformExpr(true, false, e), e);
 				case TTry(eTry, catches):
 					var eTry = transformExpr(true, functionEnd, eTry);
 					var catches = catches.map(c -> {variable:c.variable, expr:transformExpr(cancelTre, functionEnd, c.expr)});
@@ -114,7 +114,7 @@ class Tre {
 						return [transformExpr(cancelTre, functionEnd && exprs.length == 1, head)].concat(loop(exprs.slice(1)));
 					}
 					TypeOps.mk(TBlock(loop(exprs)), e.etype, e.epos);
-				case _: TypeOps.mapExpr(e -> transformExpr(cancelTre, functionEnd, e), e);
+				case _: core.Texpr.mapExpr(e -> transformExpr(cancelTre, functionEnd, e), e);
 			};
 		}
 		var body = transformExpr(false, true, fn.tfExpr);
@@ -126,7 +126,7 @@ class Tre {
 	}
 	public static function hasTailRecursion(isRecursiveCall:TExpr->Array<TExpr>->Bool, cancelTre:Bool, functionEnd:Bool, e:TExpr):Bool {
 		return switch e.eexpr {
-			case TWhile(_, _, _): TypeOps.checkExpr(e -> hasTailRecursion(isRecursiveCall, true, false, e), e);
+			case TWhile(_, _, _): core.Texpr.checkExpr(e -> hasTailRecursion(isRecursiveCall, true, false, e), e);
 			case TTry(body, catches): hasTailRecursion(isRecursiveCall, true, functionEnd, body) || Lambda.exists(catches, c -> hasTailRecursion(isRecursiveCall, cancelTre, functionEnd, c.expr));
 			case TBinop(OpAssign, {eexpr:TLocal(v = {vKind:VUser(TVOLocalFunction)})}, {eexpr:TFunction(fn)}):
 				hasTailRecursion((callee, args) -> isRecursiveNamedLocalCall(v, callee, args), false, true, fn.tfExpr);
@@ -144,11 +144,11 @@ class Tre {
 					return hasTailRecursion(isRecursiveCall, cancelTre, functionEnd && exprs.length == 1, exprs[0]) || loop(exprs.slice(1));
 				}
 				loop(exprs);
-			case _: TypeOps.checkExpr(e -> hasTailRecursion(isRecursiveCall, cancelTre, functionEnd, e), e);
+			case _: core.Texpr.checkExpr(e -> hasTailRecursion(isRecursiveCall, cancelTre, functionEnd, e), e);
 		};
 	}
 	public static function run(ctx:Dynamic):TExpr->TExpr {
-		if (Define.defined(ctx.defines, NoTre)) return e -> e;
+		if (Define.defined(ctx.defines, Define.NoTre)) return e -> e;
 		return function(e) {
 			return switch e.eexpr {
 				case TFunction(fn):

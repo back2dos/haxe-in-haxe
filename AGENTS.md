@@ -35,19 +35,18 @@ commit inside it, or update its revision as part of ordinary porting work.
 
 ## Implementation rules
 
-### Current phase: translation first
+### Current phase: compilation and integration
 
-Translate the remaining HXB-path OCaml modules to Haxe mechanically before
-attempting compilation or integration. Read each upstream module, preserve its
-declarations, branch order, and behavior, and keep unresolved dependencies
-visible for the later compile phase. Do not replace untranslated behavior with
-successful no-ops or empty stubs. Independent file groups may be translated by
-subagents.
+The translation snapshot is committed. Reconcile the HXB-path drafts against
+the compiler's diagnostics, preserving upstream declarations, branch order,
+and behavior. Do not replace untranslated behavior with successful no-ops or
+empty stubs, and do not exclude in-scope modules to obtain a passing build.
+Independent file groups may be handled by subagents.
 
-During this phase, do not write or run tests, run the bootstrap build, or spend
-time fixing compilation. The build and conformance requirements below resume
-after the translation pass is complete. Draft translations are not evidence of
-working compiler behavior. Track remaining modules in `TRANSLATION.md`.
+Compilation is now authorized. Include the drafts explicitly in compilation;
+the existing bootstrap entry point alone does not reach them. Draft translations
+and successful compilation are not evidence of compiler conformance. Track
+remaining work in `TRANSLATION.md`.
 
 - Read the corresponding upstream OCaml module before adding or changing a
   ported Haxe module.

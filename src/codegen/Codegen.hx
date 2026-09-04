@@ -1,22 +1,25 @@
 package codegen;
 import core.TType;
+import core.ds.OcamlInt;
+import core.ds.OcamlInt.IntParseFailure;
 import core.TFunctions.*;
 import core.TOther.*;
 import core.Texpr.Builder;
 import core.Meta;
 import core.Globals.Pos;
 // haxe/src/codegen/codegen.ml — mechanical draft; not compile-validated.
+private enum CodePart {Text(value:String); Delim(value:String);}
 class Codegen {
  public static function hasProperties(c:TClass):Bool {
   for (f in c.clOrderedFields) switch f.cfKind {
    case Var({vRead:AccCall|AccPrivateCall}) | Var({vWrite:AccCall|AccPrivateCall}): return true;
-   case _: if (Meta.has(Meta.Accessor,f.cfMeta)) return true;
+   case _: if (Meta.has(core.MetaList.StrictMeta.Accessor,f.cfMeta)) return true;
   }
   return c.clSuper!=null && hasProperties(c.clSuper.cls);
  }
  public static function getProperties(fields:Array<TClassField>):Array<{name:String,field:String}> {
   var acc=[]; for (f in fields) {
-   if (Meta.has(Meta.Accessor,f.cfMeta)) acc.unshift({name:f.cfName,field:f.cfName}); else {
+   if (Meta.has(core.MetaList.StrictMeta.Accessor,f.cfMeta)) acc.unshift({name:f.cfName,field:f.cfName}); else {
     switch f.cfKind {case Var({vRead:AccCall|AccPrivateCall}): acc.unshift({name:"get_"+f.cfName,field:"get_"+f.cfName}); case _:}
     switch f.cfKind {case Var({vWrite:AccCall|AccPrivateCall}): acc.unshift({name:"set_"+f.cfName,field:"set_"+f.cfName}); case _:}
    }
@@ -37,17 +40,22 @@ class Codegen {
   return mk(TBlock([decl,check,ve]),t,p);
  }
  public static function interpolateCode<A>(error:String->Pos->Void,code:String,tl:Array<A>,fString:String->Void,fExpr:A->Void,p:Pos):Void {
-  // Preserve Str.full_split token boundaries and OCaml int_of_string semantics through adapters.
-  var parts=Str.fullSplit(Str.regexp("[{}]"),code), i=0, index=0;
+  // Str.full_split does not insert empty Text tokens between delimiters.
+  var parts:Array<CodePart>=[], start=0;
+  for (j in 0...code.length) if (code.charAt(j)=="{" || code.charAt(j)=="}") {
+   if (j>start) parts.push(Text(code.substring(start,j)));
+   parts.push(Delim(code.charAt(j))); start=j+1;
+  }
+  if (start<code.length) parts.push(Text(code.substr(start)));
+  var i=0, index=0;
   while (index<parts.length) switch parts[index] {
    case Text(txt): i+=txt.length; fString(txt); index++;
    case Delim("{") if (index+2<parts.length):
     switch [parts[index+1],parts[index+2]] {
      case [Text(n),Delim("}")]:
       try {
-       var k=OcamlInt.ofString(n); if (k<0 || k>=tl.length) throw new InvalidArgument(); fExpr(tl[k]);
-      } catch (_:Failure) {fString("{"+n+"}");}
-        catch (_:InvalidArgument) {error("Out-of-bounds special parameter: "+n,{pfile:p.pfile,pmin:p.pmin+i,pmax:p.pmax});}
+       var k=OcamlInt.parse(n); if (k<0 || k>=tl.length) error("Out-of-bounds special parameter: "+n,{pfile:p.pfile,pmin:p.pmin+i,pmax:p.pmax}); else fExpr(tl[k.low]);
+      } catch (_:IntParseFailure) {fString("{"+n+"}");}
       i+=2+n.length; index+=3;
      case _: fString("{"); i++; index++;
     }

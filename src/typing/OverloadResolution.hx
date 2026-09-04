@@ -4,7 +4,9 @@ import core.TType;
 import core.TFunctions.*;
 import core.TUnification.*;
 import core.TOther.*;
-import core.TOther.TClass;
+import core.TOther;
+import core.TOther.TClassTools;
+import core.TUnification.Unify_error;
 import core.TOther.ExtType;
 import typing.FieldCallCandidate;
 import typing.FieldCallCandidate.FieldCallCandidateData;
@@ -17,11 +19,11 @@ class OverloadResolution {
 	public static function tryFunctionalInterfaceMatch(tParam:T, tArg:T):Bool {
 		return switch [follow(tParam), follow(tArg)] {
 			case [TInst(c, tl), TFun(_)] if (hasClassFlag(c, CFunctionalInterface)):
-				var cf = TClass.getSingularInterfaceField(c.clOrderedFields);
+				var cf = TClassTools.getSingularInterfaceField(c.clOrderedFields);
 				if (cf == null) false else {
 					var monos = cf.cfParams.map(function(_) return mkMono());
 					var expected = applyParams(c.clParams, tl, applyParams(cf.cfParams, monos, cf.cfType));
-					try {unify(tArg, expected); true;} catch (_:UnifyError) {false;}
+					try {unify(tArg, expected); true;} catch (_:Unify_error) {false;}
 				}
 			case _: false;
 		};
@@ -36,7 +38,7 @@ class OverloadResolution {
 					if (expressions.length > 0 && tl.length > 0) {
 						var e = expressions[0], rest = expressions.slice(1), t = tl[0].type;
 						try {
-							try unify(e.etype, t) catch (error:UnifyError) {
+							try unify(e.etype, t) catch (error:Unify_error) {
 								if (!tryFunctionalInterfaceMatch(t, e.etype)) throw error;
 							}
 							return loop2([e].concat(acc), rest, tl.slice(1));
@@ -75,7 +77,7 @@ class OverloadResolution {
 	}
 
 	public static function filterOverloads<A>(candidates:Array<FieldCallCandidateData<A>>):Null<A> {
-		var reduced = Overloads.Resolution.reduceCompatible(candidates);
+		var reduced = codegen.Overloads.Resolution.reduceCompatible(candidates);
 		return reduced.length == 0 ? null : reduced[0].fcData;
 	}
 

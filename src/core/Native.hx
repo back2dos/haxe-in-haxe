@@ -22,7 +22,7 @@ class Native {
     function field(cf:TClassField):Void {
      try {
       var r = real(cf.cfMeta,cf.cfName); cf.cfName = r.name; cf.cfMeta.unshift(r.meta);
-      for (overload in cf.cfOverloads) overload.cfName = r.name;
+      for (overloadField in cf.cfOverloads) overloadField.cfName = r.name;
       changed = true;
      } catch (e:Dynamic) {if (e != "Not_found") throw e;}
     }

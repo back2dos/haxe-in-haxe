@@ -1,21 +1,26 @@
 package core;
 
 import core.TType;
+import core.ds.PMap;
+import core.ds.List;
+import core.ds.NotFound;
+import Type as StdType;
 import core.TFunctions;
 import core.TFunctions.*;
 import core.TPrinting.*;
 import core.TUnification.TUnification.*;
 import core.MetaList.StrictMeta;
+import core.Meta as MetadataTools;
 
 // haxe/src/core/tUnification.ml — mechanical draft; not compile-validated.
 // OCaml record updates copy the context but share all recursion-stack cells.
 enum UnifyError {
- Cannot_unify(a:T,b:T); Cannot_unify_implementation(a:T,b:T); Invalid_field_type(name:String);
- Has_no_field(t:T,name:String); Has_no_runtime_field(t:T,name:String); Has_extra_field(t:T,name:String);
- Invalid_kind(name:String,a:FieldKind,b:FieldKind); Invalid_visibility(name:String);
- Not_matching_optional(actual:Bool,expected:Bool,name:String); Invariant_parameter(index:Int);
- Constraint_failure(name:String); Missing_overload(field:TClassField,t:T); FinalInvariance(actual:Bool,expected:Bool);
- Invalid_function_argument(index:Int,total:Int); Invalid_return_type; Unify_custom(message:String);
+ CannotUnify(a:T,b:T); CannotUnifyImplementation(a:T,b:T); InvalidFieldType(name:String);
+ HasNoField(t:T,name:String); HasNoRuntimeField(t:T,name:String); HasExtraField(t:T,name:String);
+ InvalidKind(name:String,a:FieldKind,b:FieldKind); InvalidVisibility(name:String);
+ NotMatchingOptional(actual:Bool,expected:Bool,name:String); InvariantParameter(index:Int);
+ ConstraintFailure(name:String); MissingOverload(field:TClassField,t:T); FinalInvariance(actual:Bool,expected:Bool);
+ InvalidFunctionArgument(index:Int,total:Int); InvalidReturnType; UnifyCustom(message:String);
 }
 class Unify_error { public var errors:Array<UnifyError>; public function new(errors) this.errors=errors; }
 enum EqKind { EqStrict; EqCoreType; EqRightDynamic; EqBothDynamic; EqStricter; }
@@ -33,6 +38,10 @@ typedef UnificationContext = {
  var abstractCastStack:RecStack<TypePair>; var unifyNewMonos:RecStack<T>; var applyParamsStack:ApplyParamsStack;
 }
 enum UnifyMinResult { UnifyMinOk(t:T); UnifyMinError(errors:Array<UnifyError>,index:Int); }
+class TypeRecursion extends haxe.Exception {
+ public var type:T;
+ public function new(type:T) {super("Recursive type");this.type=type;}
+}
 class Monomorph {
  public static function create():TMono return {tmType:null,tmDownConstraints:[],tmUpConstraints:[],tmModifiers:[]};
  public static function addModifier(m:TMono,mod:TMonoModifier):Void m.tmModifiers.unshift(mod);
@@ -46,7 +55,7 @@ class Monomorph {
  }
  public static function constraintOfType(name:Null<String>,t:T):Array<TMonoConstraint> return switch follow(t) {
   case TMono(m):[MMono(m,name)];
-  case TAnon(an) if(!PMap.isEmpty(an.aFields)):PMap.fold(function(cf,l) {l.unshift(MField(cf));return l;},an.aFields,[]);
+  case TAnon(an) if(!PMap.isEmpty(an.aFields)):PMap.fold(function(cf,l:Array<TMonoConstraint>) {l.unshift(MField(cf));return l;},an.aFields,[]);
   case TAnon(_):[MEmptyStructure];
   case _:[MType(t,name)];
  }
@@ -107,8 +116,8 @@ class Monomorph {
  public static function close(m:TMono):Void {
   if(m.tmType!=null) return;
   function getRecursion(t:T):Null<T> {
-   function loop(t:T):Void switch t {case TMono(m2) if(m==m2):throw new Type_exception(t);case _:TFunctions.iter(loop,t);}
-   try {loop(t);return null;} catch(e:Type_exception) {return e.type;}
+   function loop(t:T):Void switch t {case TMono(m2) if(m==m2):throw new TypeRecursion(t);case _:TFunctions.iter(loop,t);}
+   try {loop(t);return null;} catch(e:TypeRecursion) {return e.type;}
   }
   switch classifyDownConstraints(m) {
    case CUnknown:if(isDynamic(m)) doBind(m,tDynamic);
@@ -117,7 +126,7 @@ class Monomorph {
    case CStructural(fields,_):
     PMap.iter(function(_,cf) {
      var t=getRecursion(cf.cfType);
-     if(t!=null) {var pctx=printContext();var s=sType(pctx,t)+" appears in { "+cf.cfName+": "+sType(pctx,cf.cfType)+" }";throw new Unify_error([Unify_custom("Recursive type"),Unify_custom(s)]);}
+     if(t!=null) {var pctx=printContext();var s=sType(pctx,t)+" appears in { "+cf.cfName+": "+sType(pctx,cf.cfType)+" }";throw new Unify_error([UnifyCustom("Recursive type"),UnifyCustom(s)]);}
     },fields);
     doBind(m,mkAnon(Closed,fields));
   }
@@ -134,7 +143,7 @@ class Monomorph {
 
 class TUnification {
  public static function error(l:Array<UnifyError>):Dynamic throw new Unify_error(l);
- public static function checkConstraint(name:String,f:Void->Void):Void try {f();} catch(e:Unify_error) {error([Constraint_failure(name)].concat(e.errors));}
+ public static function checkConstraint(name:String,f:Void->Void):Void try {f();} catch(e:Unify_error) {error([ConstraintFailure(name)].concat(e.errors));}
  // These reference cells are initialized below, as in upstream's trailing assignments.
  public static var unifyRef:UnificationContext->T->T->Void=unifyCustom;
  public static var unifyMinRef:UnificationContext->T->Array<T>->UnifyMinResult=UnifyMinT.unifyMin;
@@ -199,7 +208,7 @@ class TUnification {
    case [TMono({tmType:null}),TMono({tmType:null})]:true;
    case [TAnon(a1),TAnon(a2)]:
     function fieldsEq():Bool {
-     var f1=PMap.fold(function(f,l) {l.unshift(f);return l;},a1.aFields,[]),f2=PMap.fold(function(f,l) {l.unshift(f);return l;},a2.aFields,[]);
+     var f1=PMap.fold(function(f,l:Array<TClassField>) {l.unshift(f);return l;},a1.aFields,[]),f2=PMap.fold(function(f,l:Array<TClassField>) {l.unshift(f);return l;},a2.aFields,[]);
      var cmp=function(a:TClassField,b:TClassField) return Reflect.compare(a.cfName,b.cfName);f1.sort(cmp);f2.sort(cmp);
      if(f1.length!=f2.length) return false;
      for(i in 0...f1.length) {if(f1[i].cfName!=f2[i].cfName) return false;try {if(!shallowEq(f1[i].cfType,f2[i].cfType)) return false;} catch(_:NotFound) {return false;}}
@@ -209,12 +218,12 @@ class TUnification {
    case _:false;
   }
  }
- public static function cannotUnify(a:T,b:T):UnifyError return Cannot_unify(a,b);
- public static function invalidField(n:String):UnifyError return Invalid_field_type(n);
- public static function invalidKind(n:String,a:FieldKind,b:FieldKind):UnifyError return Invalid_kind(n,a,b);
- public static function invalidVisibility(n:String):UnifyError return Invalid_visibility(n);
- public static function hasNoField(t:T,n:String):UnifyError return Has_no_field(t,n);
- public static function hasExtraField(t:T,n:String):UnifyError return Has_extra_field(t,n);
+ public static function cannotUnify(a:T,b:T):UnifyError return CannotUnify(a,b);
+ public static function invalidField(n:String):UnifyError return InvalidFieldType(n);
+ public static function invalidKind(n:String,a:FieldKind,b:FieldKind):UnifyError return InvalidKind(n,a,b);
+ public static function invalidVisibility(n:String):UnifyError return InvalidVisibility(n);
+ public static function hasNoField(t:T,n:String):UnifyError return HasNoField(t,n);
+ public static function hasExtraField(t:T,n:String):UnifyError return HasExtraField(t,n);
  public static function directAccess(a:VarAccess):Bool return switch a {case AccNo,AccNever,AccNormal,AccInline,AccRequire(_,_),AccCtor:true;case AccCall,AccPrivateCall:false;};
  public static function unifyVarAccess(c:UnificationContext,a:VarAccess,b:VarAccess):Bool {
   if(StdType.enumEq(a,b)) return true;
@@ -276,8 +285,8 @@ class TUnification {
     var i=0;
     try {
      typeEqCustom(c,s1.ret,s2.ret);
-     List.iter2(function(v1,v2) {i++;if(!c.allowArgNameMismatch && v1.name!=v2.name) error([Unify_custom("Arg name mismatch: "+v2.name+" should be "+v1.name)]);if(v1.optional!=v2.optional) error([Not_matching_optional(v1.optional,v2.optional,v1.name)]);typeEqCustom(c,v1.type,v2.type);},s1.args,s2.args);
-    } catch(e:Unify_error) {var msg=i==0 ? Invalid_return_type : Invalid_function_argument(i,s1.args.length);error([cannotUnify(a,b),msg].concat(e.errors));}
+     List.iter2(function(v1,v2) {i++;if(!c.allowArgNameMismatch && v1.name!=v2.name) error([UnifyCustom("Arg name mismatch: "+v2.name+" should be "+v1.name)]);if(v1.optional!=v2.optional) error([NotMatchingOptional(v1.optional,v2.optional,v1.name)]);typeEqCustom(c,v1.type,v2.type);},s1.args,s2.args);
+    } catch(e:Unify_error) {var msg=i==0 ? InvalidReturnType : InvalidFunctionArgument(i,s1.args.length);error([cannotUnify(a,b),msg].concat(e.errors));}
    case [TAbstract(a1,tl1),TAbstract(a2,tl2)] if(a1==a2 || (param==EqCoreType && pathEq(a1.aPath,a2.aPath))):typeEqParams(c,a,b,tl1,tl2);
    case [TAbstract(ab,tl),_] if(canFollowAbstract(ab)):typeEqCustom(c,applyParams(ab.aParams,tl,ab.aThis),b);
    case [_,TAbstract(ab,tl)] if(canFollowAbstract(ab)):typeEqCustom(c,a,applyParams(ab.aParams,tl,ab.aThis));
@@ -312,7 +321,7 @@ class TUnification {
   }
  }
  public static function typeEqParams(c:UnificationContext,a:T,b:T,tl1:Array<T>,tl2:Array<T>):Void {
-  var i=0;List.iter2(function(t1,t2) {i++;try {typeEqCustom(c,t1,t2);} catch(e:Unify_error) {error([cannotUnify(a,b),Invariant_parameter(i)].concat(e.errors));}},tl1,tl2);
+  var i=0;List.iter2(function(t1,t2) {i++;try {typeEqCustom(c,t1,t2);} catch(e:Unify_error) {error([cannotUnify(a,b),InvariantParameter(i)].concat(e.errors));}},tl1,tl2);
  }
  public static function typeIseqCustom(c:UnificationContext,a:T,b:T):Bool {try {typeEqCustom(c,a,b);return true;} catch(_:Unify_error) {return false;}}
  public static function typeIseqStrict(a:T,b:T):Bool return typeIseqCustom(updated(defaultUnificationContext(),{equalityKind:EqStricter}),a,b);
@@ -365,8 +374,8 @@ class TUnification {
     try {
      switch follow(s2.ret) {case TAbstract(ab,_) if(pathIs(ab.aPath,"","Void")):i++;case _:unifyCustom(nested,s1.ret,s2.ret);i++;}
      // Source iterates the second argument list first for contravariance.
-     List.iter2(function(v1,v2) {if(v1.optional && !v2.optional) error([Cannot_unify(v1.type,v2.type),Not_matching_optional(v1.optional,v2.optional,v1.name)]);unifyCustom(nested,v1.type,v2.type);i++;},s2.args,s1.args);
-    } catch(e:Unify_error) {error([cannotUnify(a,b),i==0 ? Invalid_return_type : Invalid_function_argument(i,s1.args.length)].concat(e.errors));}
+     List.iter2(function(v1,v2) {if(v1.optional && !v2.optional) error([CannotUnify(v1.type,v2.type),NotMatchingOptional(v1.optional,v2.optional,v1.name)]);unifyCustom(nested,v1.type,v2.type);i++;},s2.args,s1.args);
+    } catch(e:Unify_error) {error([cannotUnify(a,b),i==0 ? InvalidReturnType : InvalidFunctionArgument(i,s1.args.length)].concat(e.errors));}
    case [TInst(cl,tl),TAnon(an)]:
     if(PMap.isEmpty(an.aFields)) switch cl.clKind {
      case KTypeParameter(p):if(!Lambda.exists(getConstraints(p),function(t) return switch follow(t) {case TInst(_,_),TAnon(_):true;case _:false;})) error([cannotUnify(a,b)]);
@@ -395,7 +404,7 @@ class TUnification {
         c.unifyNewMonos.recStack=old;
        case _:try {unifyWithAccess(c,f1,ft,f2);} catch(e:Unify_error) {error([invalidField(n)].concat(e.errors));}
       }
-      for(f2o in f2.cfOverloads) if(!Lambda.exists([f1].concat(f1.cfOverloads),function(f1o) return typeIseqCustom(c,f1o.cfType,f2o.cfType))) error([Missing_overload(f1,f2o.cfType)]);
+      for(f2o in f2.cfOverloads) if(!Lambda.exists([f1].concat(f1.cfOverloads),function(f1o) return typeIseqCustom(c,f1o.cfType,f2o.cfType))) error([MissingOverload(f1,f2o.cfType)]);
       if(!hasClassFieldFlag(f1,CfMaybeUsed)) {
        addClassFieldFlag(f1,CfMaybeUsed);
        switch f2.cfKind {
@@ -406,7 +415,7 @@ class TUnification {
         case _:
        }
       }
-      switch f1.cfKind {case Method(MethInline):if((hasClassFlag(cl,CExtern)||hasClassFieldFlag(f1,CfExtern)) && !Meta.has(Runtime,f1.cfMeta)) error([Has_no_runtime_field(a,n)]);case _:}
+      switch f1.cfKind {case Method(MethInline):if((hasClassFlag(cl,CExtern)||hasClassFieldFlag(f1,CfExtern)) && !MetadataTools.has(Runtime,f1.cfMeta)) error([HasNoRuntimeField(a,n)]);case _:}
      },an.aFields);
      switch an.aStatus {case ClassStatics(_),EnumStatics(_),AbstractStatics(_):error([]);case Closed,Extend(_),Const:}
     } catch(e:Unify_error) {error([cannotUnify(a,b)].concat(e.errors));}
@@ -416,7 +425,7 @@ class TUnification {
    case [TAnon(an),TAbstract(ab,[pt])] if(pathIs(ab.aPath,"","Enum")):
     switch an.aStatus {case EnumStatics(en):unifyCustom(c,TEnum(en,en.eParams.map(function(_) return mkMono())),pt);case _:error([cannotUnify(a,b)]);}
    case [TEnum(_,_),TAbstract(ab,[])] if(pathIs(ab.aPath,"","EnumValue")):
-   case [TEnum(en,_),TAbstract(ab,[])] if(pathIs(ab.aPath,"haxe","FlatEnum") && Meta.has(FlatEnum,en.eMeta)):
+   case [TEnum(en,_),TAbstract(ab,[])] if(pathIs(ab.aPath,"haxe","FlatEnum") && MetadataTools.has(FlatEnum,en.eMeta)):
    case [TFun(_),TAbstract(ab,[])] if(pathIs(ab.aPath,"haxe","Function")):
    case [TInst(cl,tl),TAbstract(ab,[t1])] if(pathIs(ab.aPath,"haxe","Constructible")):
     try {
@@ -465,7 +474,7 @@ class TUnification {
    case [ClassStatics(c1),ClassStatics(c2)] if(c1==c2):
    case [EnumStatics(e1),EnumStatics(e2)] if(e1==e2):
    case [AbstractStatics(ab1),AbstractStatics(ab2)] if(ab1==ab2):
-   case [Const,_]:unifyFields(a1.aFields,function(_) {},function(f2) {if(Meta.has(Optional,f2.cfMeta)) {a1.aFields=PMap.add(f2.cfName,f2,a1.aFields);return true;}return false;});
+   case [Const,_]:unifyFields(a1.aFields,function(_) {},function(f2) {if(MetadataTools.has(Optional,f2.cfMeta)) {a1.aFields=PMap.add(f2.cfName,f2,a1.aFields);return true;}return false;});
    case [ClassStatics(c1),_]:unifyFields(c1.clStatics,function(f1) addClassFieldFlag(f1,CfMaybeUsed),function(_) return false);
    case _:unifyFields(a1.aFields,function(_) {},function(_) return false);
   }
@@ -473,7 +482,7 @@ class TUnification {
  public static function doesFuncUnify(f:Void->Void):Bool {try {f();return true;} catch(_:Unify_error) {return false;}}
  public static function doesFuncUnifyArg<A>(f:A->Void,arg:A):Bool {try {f(arg);return true;} catch(_:Unify_error) {return false;}}
  public static function getAbstractContext(c:UnificationContext,a:T,b:T,ab:TAbstract):UnificationContext {
-  if(Meta.has(CoreType,ab.aMeta)||Meta.has(Transitive,ab.aMeta)) return c;
+  if(MetadataTools.has(CoreType,ab.aMeta)||MetadataTools.has(Transitive,ab.aMeta)) return c;
   if(c.allowAbstractCast) return updated(c,{allowAbstractCast:false});
   return error([cannotUnify(a,b)]);
  }
@@ -505,7 +514,7 @@ class TUnification {
     var ta=s.args[0].type,baseMap=function(t) return applyParams(ab.aParams,tl,t),map=baseMap;
     if(!c.opaqueFieldParams) {var monos=Monomorph.spawnConstrainedMonos(baseMap,cf.cfParams);map=function(t) return baseMap(applyParams(cf.cfParams,monos,t));}
     var c=getAbstractContext(c,a,b,ab),f=getAbstractUnifyFunc(c,EqStrict),athis=map(ab.aThis);
-    if(Meta.has(MultiType,ab.aMeta)&&hasMono(athis)) throw new Unify_error([]);
+    if(MetadataTools.has(MultiType,ab.aMeta)&&hasMono(athis)) throw new Unify_error([]);
     withVariance(c,function(a,b) typeEqCustom(updated(c,{equalityKind:EqStrict}),a,b),athis,map(ta));f(map(entry.type),b);
    case _:Globals.die("","tUnification.ml");
   }
@@ -534,8 +543,8 @@ class TUnification {
    case [TType(td1,tl1),TType(td2,tl2)] if(td1==td2):unifyTls(tl1,tl2);
    case [TType(td,tl),_]:unifyRec(function() unifyWithVariance(c,f,definedType(td,tl),t2));
    case [_,TType(td,tl)]:unifyRec(function() unifyWithVariance(c,f,t1,definedType(td,tl)));
-   case [TAbstract(ab,tl),_] if(Meta.has(ForwardVariance,ab.aMeta)):withVariance(c,f,thisType(ab,tl),t2);
-   case [_,TAbstract(ab,tl)] if(Meta.has(ForwardVariance,ab.aMeta)):withVariance(c,f,t1,thisType(ab,tl));
+   case [TAbstract(ab,tl),_] if(MetadataTools.has(ForwardVariance,ab.aMeta)):withVariance(c,f,thisType(ab,tl),t2);
+   case [_,TAbstract(ab,tl)] if(MetadataTools.has(ForwardVariance,ab.aMeta)):withVariance(c,f,t1,thisType(ab,tl));
    case [TAbstract(a1,tl1),TAbstract(a2,tl2)]:if(!unifiesAbstract(c,t1,t2,a1,tl1,a1.aTo)&&!unifiesAbstract(c,t1,t2,a2,tl2,a2.aFrom)) fail();compareUnderlying();
    case [TAbstract(ab,tl),_]:if(!unifiesAbstract(c,t1,t2,ab,tl,ab.aTo)) fail();compareUnderlying();
    case [_,TAbstract(ab,tl)]:if(!unifiesAbstract(c,t1,t2,ab,tl,ab.aFrom)) fail();compareUnderlying();
@@ -546,7 +555,7 @@ class TUnification {
  }
  public static function unifyTypeParams(c:UnificationContext,a:T,b:T,tl1:Array<T>,tl2:Array<T>):Void {
   var c=getNestedContext(c),i=0;
-  List.iter2(function(t1,t2) {i++;try {withVariance(c,function(a,b) typeEqCustom(updated(c,{equalityKind:EqRightDynamic}),a,b),t1,t2);} catch(e:Unify_error) {error([cannotUnify(a,b),Invariant_parameter(i)].concat(e.errors));}},tl1,tl2);
+  List.iter2(function(t1,t2) {i++;try {withVariance(c,function(a,b) typeEqCustom(updated(c,{equalityKind:EqRightDynamic}),a,b),t1,t2);} catch(e:Unify_error) {error([cannotUnify(a,b),InvariantParameter(i)].concat(e.errors));}},tl1,tl2);
  }
  public static function withVariance(c:UnificationContext,f:T->T->Void,t1:T,t2:T):Void {
   try {f(t1,t2);} catch(first:Unify_error) {try {unifyWithVariance(c,f,t1,t2);} catch(_:Unify_error) {throw first;}}
@@ -557,7 +566,7 @@ class TUnification {
    case Var({vRead:AccNo}),Var({vRead:AccNever}):unifyCustom(c,f2.cfType,t1);
    case Method(MethNormal),Method(MethInline),Var({vWrite:AccNo}),Var({vWrite:AccNever}):
     var final1=hasClassFieldFlag(f1,CfFinal),final2=hasClassFieldFlag(f2,CfFinal);
-    if(final1!=final2 && !c.allowFinalInvariance) throw new Unify_error([Cannot_unify(f2.cfType,f1.cfType),FinalInvariance(final2,final1)]);
+    if(final1!=final2 && !c.allowFinalInvariance) throw new Unify_error([CannotUnify(f2.cfType,f1.cfType),FinalInvariance(final2,final1)]);
     unifyCustom(c,t1,f2.cfType);
    case _:withVariance(c,function(a,b) typeEqCustom(updated(c,{equalityKind:EqBothDynamic}),a,b),t1,f2.cfType);
   }
@@ -592,7 +601,7 @@ class UnifyMinT {
    index++;
   }
   if(commonTypes.length>0) return UnifyMinOk(commonTypes[0]);
-  return first==null ? UnifyMinError([Unify_custom("Could not determine common type, please add a type-hint")],0) : UnifyMinError(first.errors,first.index);
+  return first==null ? UnifyMinError([UnifyCustom("Could not determine common type, please add a type-hint")],0) : UnifyMinError(first.errors,first.index);
  }
  public static function unifyMin(c:UnificationContext,t0:T,tl:Array<T>):UnifyMinResult return tl.length==0 ? UnifyMinOk(t0) : unifyMinPrime(c,collectBaseTypes(t0),tl);
 }

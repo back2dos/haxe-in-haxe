@@ -1,5 +1,9 @@
 package coro;
 import core.TType;
+import core.TFunctions.NotFound;
+import core.ds.AtomicLazy;
+import core.ds.PMap;
+import core.Globals;
 import core.Globals.*;
 import coro.ContTypes;
 // haxe/src/coro/coroInit.ml — mechanical draft; not compile-validated.
@@ -15,8 +19,8 @@ class CoroInit {
  public static function makeContinuationApi(ctx:Dynamic):ContinuationApi {
   var base=loadModuleClass(ctx,{pack:["haxe","coro"],name:"BaseContinuation"});
   var state=TAbstract(loadModuleAbstract(ctx,{pack:["haxe","coro"],name:"SuspensionState"}),[]);
-  var result=AtomicLazy.force(ctx.t.tcoro.suspensionResultClass);
-  var api=ContTypes.createContinuationApi(base,state,result,AtomicLazy.force(ctx.t.tcoro.continuation),result.clStatics.find("suspended"),result.clFields.find("state"),result.clFields.find("result"),result.clFields.find("error"),base.clFields.find("completion"),base.clFields.find("context"),base.clFields.find("gotoLabel"));
+  var result=(ctx.t.tcoro.suspensionResultClass).force();
+  var api=ContTypes.createContinuationApi(base,state,result,(ctx.t.tcoro.continuation).force(),PMap.find("suspended",result.clStatics),PMap.find("state",result.clFields),PMap.find("result",result.clFields),PMap.find("error",result.clFields),PMap.find("completion",base.clFields),PMap.find("context",base.clFields),PMap.find("gotoLabel",base.clFields));
   ctx.g.continuationApi=api; return api;
  }
 }

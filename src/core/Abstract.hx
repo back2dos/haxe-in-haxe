@@ -2,10 +2,12 @@ package core;
 
 import core.Ast;
 import core.TType;
+import core.ds.NotFound;
 import core.TFunctions.*;
 import core.TUnification.*;
 import core.TPrinting.*;
 import core.MetaList.StrictMeta;
+import core.Meta as MetadataTools;
 
 // Mechanical translation of haxe/src/core/abstract.ml. Draft; not compiled or tested.
 class Abstract {
@@ -32,7 +34,7 @@ class Abstract {
 		buildAbstract(a1); buildAbstract(a2);
 		return findCastField(uctx,function(uctx) {
 			if (unifiesAbstracts(uctx,a,b,a1,tl1,a2,tl2)) return null;
-			try return {abs:a1,params:tl1,field:findFieldTo(uctx,a,b,a1,tl1)};
+			try return {abs:a1,params:tl1,field:findFieldTo(uctx,a,b,a1,tl1)}
 			catch (_:NotFound) return {abs:a2,params:tl2,field:findFieldFrom(uctx,a,b,a2,tl2)};
 		});
 	}
@@ -55,7 +57,7 @@ class Abstract {
 		return findCastField(uctx,function(uctx) return unifiesTo(uctx,a,b,ab,tl) ? null : findFieldTo(uctx,a,b,ab,tl));
 	}
 	public static function findMultitypeParams(a:TAbstract,pl:TParams):{types:TParams,definitiveTypes:TParams} {
-		var meta = Meta.get(Meta.MultiType,a.aMeta);
+		var meta = MetadataTools.get(MetadataTools.MultiType,a.aMeta);
 		if (meta.exprs.length == 0) return {types:pl,definitiveTypes:pl};
 		var relevant = new haxe.ds.StringMap<T->T>();
 		for (e in meta.exprs) {
@@ -91,7 +93,7 @@ class Abstract {
 				case TLazy(f): loop(lazyType(f));
 				case TAbstract(a,[t1]) if (a.aPath.pack.length == 0 && a.aPath.name == "Null"): TAbstract(a,[loop(t1)]);
 				case TType(t,tl): loop(applyTypedef(t,tl));
-				case TAbstract(a,tl) if (!Meta.has(Meta.CoreType,a.aMeta)):
+				case TAbstract(a,tl) if (!MetadataTools.has(MetadataTools.CoreType,a.aMeta)):
 					if (recStackExists(function(t2) return fastEq(t,t2),stack)) {
 						var pctx = printContext();
 						var chain:Array<T> = [t].concat(stack.recStack); chain.reverse();
@@ -105,27 +107,27 @@ class Abstract {
 			return returnFirst ? t : result;
 		}
 		try {
-			if (!Meta.has(Meta.MultiType,a.aMeta)) throw new NotFound();
+			if (!MetadataTools.has(MetadataTools.MultiType,a.aMeta)) throw new NotFound();
 			return findMultitypeSpecializationType(a,pl);
 		} catch (_:NotFound) {
-			return Meta.has(Meta.CoreType,a.aMeta) ? tDynamic : maybeRecurse(applyParams(a.aParams,pl,a.aThis));
+			return MetadataTools.has(MetadataTools.CoreType,a.aMeta) ? tDynamic : maybeRecurse(applyParams(a.aParams,pl,a.aThis));
 		}
 	}
 	public static function getUnderlyingType(a:TAbstract,pl:TParams,returnFirst:Bool = false):T return getUnderlyingTypeWithStack(newRecStack(),a,pl,returnFirst);
 	public static function followWithAbstracts(t:T):T return switch follow(t) {
-		case TAbstract(a,tl) if (!Meta.has(Meta.CoreType,a.aMeta)): followWithAbstracts(getUnderlyingType(a,tl));
+		case TAbstract(a,tl) if (!MetadataTools.has(MetadataTools.CoreType,a.aMeta)): followWithAbstracts(getUnderlyingType(a,tl));
 		case t: t;
 	};
 	public static function followWithForwardCtor(t:T,build:Bool = false):T return switch follow(t) {
 		case TAbstract(a,tl):
 			if (build) buildAbstract(a);
-			if (Meta.has(Meta.ForwardNew,a.aMeta) && !(a.aImpl != null && a.aConstructor != null)) followWithForwardCtor(getUnderlyingType(a,tl,true));
+			if (MetadataTools.has(MetadataTools.ForwardNew,a.aMeta) && !(a.aImpl != null && a.aConstructor != null)) followWithForwardCtor(getUnderlyingType(a,tl,true))
 			else TAbstract(a,tl);
 		case t: t;
 	};
 	public static function followWithAbstractsWithoutNull(t:T):T return switch followWithoutNull(t) {
 		case TAbstract(a,_) if (a.aPath.pack.length == 0 && a.aPath.name == "Null"): t;
-		case TAbstract(a,tl) if (!Meta.has(Meta.CoreType,a.aMeta)): followWithAbstractsWithoutNull(getUnderlyingType(a,tl));
+		case TAbstract(a,tl) if (!MetadataTools.has(MetadataTools.CoreType,a.aMeta)): followWithAbstractsWithoutNull(getUnderlyingType(a,tl));
 		case t: t;
 	};
 }

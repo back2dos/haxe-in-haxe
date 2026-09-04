@@ -1,12 +1,13 @@
 package filters.safe;
+import core.Globals.Platform;
 
 import core.Ast;
 import core.TType;
-import core.Type as TypeOps;
-import core.ExtType;
+import core.TFunctions as TypeOps;
+import core.TOther.ExtType;
 import core.Meta;
-import typing.Abstract;
-import typing.Error;
+import core.Abstract;
+import core.Error;
 
 // haxe/src/filters/safe/sanitize.ml — mechanical draft; not compiled or validated.
 class Sanitize {
@@ -52,7 +53,7 @@ class Sanitize {
 							case TAbstract(a, tl) if (Meta.has(FromNull, a.aMeta)): TypeOps.mk(TCast(e, null), e.etype, e.epos);
 							case TAbstract(a, tl) if (!Meta.has(CoreType, a.aMeta)): loop(TypeOps.applyParams(a.aParams, tl, a.aThis));
 							case _ if (scom.platform == Cross): e;
-							case _: Error.raiseTypingError("On static platforms, null can't be used as basic type " + TypeOps.sType(TypeOps.printContext(), e.etype), e.epos);
+							case _: Error.raiseTypingError("On static platforms, null can't be used as basic type " + core.TPrinting.sType(core.TPrinting.printContext(), e.etype), e.epos);
 						};
 					}
 					return loop(e.etype);
@@ -122,6 +123,6 @@ class Sanitize {
 		};
 	}
 	public static function sanitize(scom:Dynamic, e:TExpr):TExpr {
-		return sanitizeExpr(scom, reduceExpr(scom.platformConfig, TypeOps.mapExpr(e -> sanitize(scom, e), e)));
+		return sanitizeExpr(scom, reduceExpr(scom.platformConfig, core.Texpr.mapExpr(e -> sanitize(scom, e), e)));
 	}
 }

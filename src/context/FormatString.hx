@@ -5,7 +5,7 @@ import core.Ast;
 import syntax.Parser;
 import syntax.ParserEntry;
 import syntax.Lexer;
-import typing.Error;
+import core.Error as CompilerError;
 // Draft mechanical translation of haxe/src/context/formatString.ml; unvalidated.
 class FormatString {
 	public static function formatString(config:Dynamic, s:String, p:Pos, processExpr:ExprDef->Pos->Expr):Expr {
@@ -17,7 +17,7 @@ class FormatString {
 			min += len;
 			var processed = processExpr(next.expr, next.pos);
 			if (result == null) result = processed;
-			else result = {expr:EBinop(OpAdd,result,processed), pos:Globals.punion(result.pos,next.pos)};
+			else result = {expr:EBinop(OpAdd,result,processed), pos:Ast.punion(result.pos,next.pos)};
 		}
 		function add(next:ExprDef, len:Int):Void addExpr({expr:next, pos:positioned(min,min+len)},len);
 		function addSub(start:Int, pos:Int):Void {
@@ -35,7 +35,7 @@ class FormatString {
 				if (send == len) {
 					if (groups.length == 0) throw "formatString: impossible empty group stack";
 					var g = groups[0];
-					Error.raiseTypingError("Unclosed " + gname, positioned(pmin+g+1,pmin+g+2));
+					CompilerError.raiseTypingError("Unclosed " + gname, positioned(pmin+g+1,pmin+g+2));
 				}
 				var c = s.charAt(send);
 				if (c == gopen) groups.unshift(send);
@@ -51,8 +51,8 @@ class FormatString {
 			var ep = positioned(pmin+pos+2,pmin+send+1);
 			function error(msg:String, pos:Pos):Dynamic {
 				return Lexer.stringIsWhitespace(scode)
-					? Error.raiseTypingError("Expression cannot be empty",ep)
-					: Error.raiseTypingError(msg,pos);
+					? CompilerError.raiseTypingError("Expression cannot be empty",ep)
+					: CompilerError.raiseTypingError(msg,pos);
 			}
 			var expr = switch ParserEntry.parseExprString(config,scode,ep,error,true) {
 				case ParseSuccess(data,_): data;

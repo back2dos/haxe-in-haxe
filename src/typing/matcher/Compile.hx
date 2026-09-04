@@ -1,10 +1,20 @@
 package typing.matcher;
+import core.Globals.Pos;
 import core.TType;
 import core.Ast;
+import core.Ast.*;
+import core.Error;
+import core.Texpr;
+import core.TUnification;
+import core.ds.NotFound;
+import core.ds.Exit;
+import context.Common;
 import core.Globals.*;
 import core.TFunctions.*;
 import core.TOther.*;
+import core.TOther;
 import context.Typecore.*;
+import context.Typecore;
 import typing.matcher.Pattern;
 import typing.matcher.Constructor;
 import typing.matcher.DecisionTree;
@@ -12,9 +22,11 @@ import typing.matcher.DecisionTree.*;
 import typing.matcher.Case;
 import typing.matcher.Bind;
 import typing.matcher.MatcherGlobals.*;
+import typing.matcher.MatcherGlobals;
+import core.TUnification.typeIseq;
 // haxe/src/typing/matcher/compile.ml — mechanical draft; not compile-validated.
 private class ExtractorFound extends haxe.Exception {public function new()super("Extractor");}
-typedef MatcherContext={var ctx:Dynamic;var dtTable:Array<DecisionTreeData>;var matchPos:Pos;var matchDebug:Bool;var dtCount:Int;}
+typedef MatcherContext={var ctx:Typer;var dtTable:Array<DecisionTreeData>;var matchPos:Pos;var matchDebug:Bool;var dtCount:Int;}
 class Compile {
  public static function hashcons(m:MatcherContext,dt:DecisionTreeKind,p:Pos):DecisionTreeData {for(existing in m.dtTable)if(DecisionTree.equal(existing.dtT,dt))return existing;var d={dtT:dt,dtI:m.dtCount++,dtPos:p,dtGotoTarget:false,dtTexpr:null};m.dtTable.push(d);return d;}
  static function leaf(m:MatcherContext,c:CaseData):DecisionTreeData return hashcons(m,Leaf(c),c.casePos);
@@ -24,7 +36,7 @@ class Compile {
  static function guard(m:MatcherContext,e:TExpr,a:DecisionTreeData,b:DecisionTreeData):DecisionTreeData return hashcons(m,Guard(e,a,b),punion(a.dtPos,b.dtPos));
  static function guardNull(m:MatcherContext,e:TExpr,a:DecisionTreeData,b:DecisionTreeData):DecisionTreeData return hashcons(m,GuardNull(e,a,b),punion(a.dtPos,b.dtPos));
  static function getSubSubjects(m:MatcherContext,e:TExpr,con:ConstructorData,positions:Array<Pos>):Array<{name:String,e:TExpr}> return switch con.kind {
-  case ConEnum(en,ef):var tl=Monomorph.spawnConstrainedMonos(function(t)return t,en.eParams);var ten=TEnum(en,tl);if(!typeIseq(ten,e.etype))e=mk(TCast(e,null),ten,e.epos);switch follow(ef.efType){case TFun(s):[for(i in 0...s.args.length){var a=s.args[i];var p=i<positions.length?positions[i]:e.epos;{name:a.name,e:mk(TEnumParameter({...e,epos:p},ef,i),applyParams(en.eParams,tl,monomorphs(ef.efParams,a.type)),p)};}];case _:[];}
+  case ConEnum(en,ef):var tl=Monomorph.spawnConstrainedMonos(function(t)return t,en.eParams);var ten=TEnum(en,tl);if(!typeIseq(ten,e.etype))e=mk(TCast(e,null),ten,e.epos);switch follow(ef.efType){case TFun(s):[for(i in 0...s.args.length){var a=s.args[i];var p=i<positions.length?positions[i]:e.epos;{name:a.name,e:mk(TEnumParameter(core.ds.Record.withFields(e,{epos:p}),ef,i),applyParams(en.eParams,tl,monomorphs(ef.efParams,a.type)),p)};}];case _:[];}
   case ConFields(sl):sl.map(function(s)return {name:s,e:ExprToPattern.typeFieldAccess(m.ctx,e,s)});
   case ConArray(i):[for(i in 0...i){var ei=Texpr.Builder.makeInt(m.ctx.com.basic,i,e.epos);{name:'a$i',e:Calls.accGet(m.ctx,Calls.arrayAccess(m.ctx,e,ei,MGet,e.epos))};}];
   case ConConst(_)|ConTypeExpr(_)|ConStatic(_,_):[];
@@ -90,13 +102,13 @@ class Compile {
   var count=0;var extracted:Array<Dynamic>=[];for(row in cases){var ex:Dynamic=null;function loop(bs:Array<Bind>,p:PatternData):Void switch p.kind{case PatExtractor(e):ex={extractor:e,i:++count,bindings:bs};case PatBind(v,p1):loop([makeBind(v,p.pos,subject)].concat(bs),p1);case _:};loop([],row.patterns[0]);extracted.push({row:row,ex:ex});}
   var any:PatternData={kind:PatAny,pos:nullPos};var result:Array<CaseRow>=[],ss:Array<Subject>=[],bs:Array<Bind>=[],lut:Array<Dynamic>=[];
   for(item in extracted){var row:CaseRow=item.row;if(row.patterns.length==0)throw "assert";var p=row.patterns[0],tail=row.patterns.slice(1);if(item.ex==null){result.push({caseData:row.caseData,bindings:row.bindings,patterns:makeOffsetList(0,count,p,any).concat(tail)});continue;}
-   var ex:Extractor=item.ex.extractor;function replace(e:TExpr):TExpr return switch e.eexpr{case TLocal(v) if(v==ex.exVar):subject;case _:core.Type.mapExpr(replace,e);};var e=replace(ex.exExpr);var bindings=item.ex.bindings.concat(row.bindings);var found:Dynamic=null;for(entry in lut)if(Texpr.equal(e,entry.e)){found=entry;break;}
+   var ex:Extractor=item.ex.extractor;function replace(e:TExpr):TExpr return switch e.eexpr{case TLocal(v) if(v==ex.exVar):subject;case _:core.Texpr.mapExpr(replace,e);};var e=replace(ex.exExpr);var bindings=item.ex.bindings.concat(row.bindings);var found:Dynamic=null;for(entry in lut)if(Texpr.equal(e,entry.e)){found=entry;break;}
    var i:Int=item.ex.i;var sub:Subject;if(found==null){var v=allocVar(VExtractorVariable,"_hx_tmp",e.etype,e.epos);var ev=mk(TLocal(v),v.vType,e.epos);var binding=makeBindGen(v,v.vPos,e,BindDeferred);sub=new Subject(ev,binding);bs.push(binding);lut.unshift({e:e,subject:sub,i:i});}else{i=found.i;sub=found.subject;}
    ss.push(sub);result.push({caseData:row.caseData,bindings:bindings,patterns:makeOffsetList(i,count-i,ex.exPattern,any).concat(tail)});
   }
   var dt=compileRows(m,[new Subject(subject,null)].concat(ss).concat(subjects),result);return bind(m,bs,dt);
  }
- public static function compile(ctx:Dynamic,debug:Bool,expressions:Array<TExpr>,cases:Array<CaseRow>,p:Pos):DecisionTreeData {
+ public static function compile(ctx:Typer,debug:Bool,expressions:Array<TExpr>,cases:Array<CaseRow>,p:Pos):DecisionTreeData {
   var m:MatcherContext={ctx:ctx,matchDebug:debug,dtTable:[],matchPos:p,dtCount:0};var subjects=[],vars=[];
   for(e in expressions)switch e.eexpr{case TConst(_)|TLocal(_):subjects.push(new Subject(e,null));case _:var v=genLocal(ctx,e.etype,e.epos);var ev=mk(TLocal(v),e.etype,e.epos);var b=makeBind(v,e.epos,e);subjects.push(new Subject(ev,b));vars.push(b);}
   if(cases.length==0&&subjects.length>0){var dt=fail(m,subjects[0].getPos());return switchTree(m,subjects[0].getExpr(),[],dt);}var dt=compileRows(m,subjects,cases);Useless.check(ctx,cases);return vars.length==0?dt:bind(m,vars,dt);

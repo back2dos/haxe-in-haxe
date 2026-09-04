@@ -1,7 +1,7 @@
 package filters.safe;
 
 import core.TType;
-import core.Type as TypeOps;
+import core.TFunctions as TypeOps;
 
 // haxe/src/filters/safe/addFinalReturn.ml — mechanical draft; not compiled or validated.
 class AddFinalReturn {
@@ -27,7 +27,7 @@ class AddFinalReturn {
 				case _: {eexpr:TBlock([e, defReturn(e.epos)]), etype:e.etype, epos:e.epos};
 			};
 		}
-		e = TypeOps.mapExpr(addFinalReturn, e);
+		e = core.Texpr.mapExpr(addFinalReturn, e);
 		return switch e.eexpr {
 			case TFunction(f):
 				var body = switch TypeOps.follow(f.tfType) {

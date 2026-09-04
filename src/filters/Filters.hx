@@ -2,24 +2,26 @@ package filters;
 
 import core.Ast;
 import core.TType;
-import core.Type as TypeOps;
+import core.TFunctions as TypeOps;
 import core.Globals;
 import core.Meta;
 import core.Define;
 import core.Timer;
 import core.Texpr;
 import context.Common;
+import context.DumpConfig.DumpStage;
 import context.SafeCom;
+import core.ds.TaskPool;
 import context.Parallel;
-import typing.Error;
-import typing.Monomorph;
-import typing.AbstractCast;
+import core.Error;
+import core.TUnification.Monomorph;
+import context.AbstractCast;
 import typing.Finalization;
-import typing.DeprecationCheck;
+import context.display.DeprecationCheck;
 import typing.NullSafety;
-import generators.Native;
-import generators.Genxml;
-import compiler.Dump;
+import core.Native;
+import codegen.Genxml;
+import codegen.Dump;
 import filters.safe.AddFieldInits;
 import filters.safe.AddFinalReturn;
 import filters.safe.CapturedVars;
@@ -44,21 +46,21 @@ class Filters {
 		case TEnumDecl(e) if (TypeOps.hasEnumFlag(e, EnExcluded)): TypeOps.addEnumFlag(e, EnExtern);
 		case _:
 	}
-	public static function removeExternFields(scom:Dynamic, t:ModuleType):Void switch t {
+	public static function removeExternFields(scom:SafeContext, t:ModuleType):Void switch t {
 		case TClassDecl(c):
-			if (!Define.defined(scom.defines, DocGen)) {
+			if (!Define.defined(scom.defines, Define.DocGen)) {
 				c.clOrderedFields = c.clOrderedFields.filter(function(f) { var b = FilterContext.isRemovableField(scom.isMacroContext, f); if (b) c.clFields.remove(f.cfName); return !b; });
 				c.clOrderedStatics = c.clOrderedStatics.filter(function(f) { var b = FilterContext.isRemovableField(scom.isMacroContext, f); if (b) c.clStatics.remove(f.cfName); return !b; });
 			}
 		case _:
 	}
-	public static function checkPrivatePath(com:Dynamic, t:ModuleType):Void switch t {
+	public static function checkPrivatePath(com:CommonContext, t:ModuleType):Void switch t {
 		case TClassDecl(c) if (c.clPrivate):
 			var rpath = {pack:c.clModule.mPath.pack, name:"_" + c.clModule.mPath.name};
-			if (com.moduleLut.getTypeLut().mem(rpath)) Error.raiseTypingError("This private class name will clash with " + Ast.sTypePath(rpath), c.clPos);
+			if (com.moduleLut.getTypeLut().mem(rpath)) Error.raiseTypingError("This private class name will clash with " + Globals.sTypePath(rpath), c.clPos);
 		case _:
 	}
-	public static function addRtti(scom:Dynamic, t:ModuleType):Void {
+	public static function addRtti(scom:SafeContext, t:ModuleType):Void {
 		function hasRtti(c:TClass):Bool return Meta.has(Rtti, c.clMeta) || c.clSuper != null && hasRtti(c.clSuper.cls);
 		switch t {
 			case TClassDecl(c) if (hasRtti(c) && !c.clStatics.exists("__rtti")):
@@ -69,7 +71,7 @@ class Filters {
 			case _:
 		}
 	}
-	public static function addMetaField(com:Dynamic, t:ModuleType):Void switch t {
+	public static function addMetaField(com:CommonContext, t:ModuleType):Void switch t {
 		case TClassDecl(c):
 			var e = Texpr.buildMetadata(com.basic, t);
 			if (e != null) {
@@ -80,7 +82,7 @@ class Filters {
 					var ncls = TypeOps.mkClass(c.clModule, path, c.clPos, Globals.nullPos);
 					ncls.clOrderedStatics.unshift(cf); ncls.clStatics.set(cf.cfName, cf);
 					com.types = (cast com.types:Array<ModuleType>).concat([TClassDecl(ncls)]);
-					c.clMeta = [{name:Custom(":hasMetadata"), params:[], pos:e.epos}].concat(c.clMeta);
+					c.clMeta = [{meta:Custom(":hasMetadata"),exprs:[], pos:e.epos}].concat(c.clMeta);
 				} else { c.clOrderedStatics.unshift(cf); c.clStatics.set(cf.cfName, cf); }
 			}
 		case _:
@@ -98,14 +100,14 @@ class Filters {
 			}
 		case _:
 	}
-	public static function commitFeatures(com:Dynamic, t:ModuleType):Void {
+	public static function commitFeatures(com:CommonContext, t:ModuleType):Void {
 		for (k in TypeOps.tInfos(t).mtModule.mExtra.mFeatures.keys()) Common.addFeature(com, k);
 	}
-	public static function checkReservedTypePaths(scom:Dynamic, t:ModuleType):Void {
+	public static function checkReservedTypePaths(scom:SafeContext, t:ModuleType):Void {
 		function check(path:GlobalTypePath, pos:Pos):Void {
 			var paths:Array<GlobalTypePath> = scom.platformConfig.pfReservedTypePaths;
 			if (Lambda.exists(paths, p -> p.name == path.name && p.pack.join(".") == path.pack.join(".")))
-				SafeCom.addWarning(scom, WReservedTypePath, "Type path " + Ast.sTypePath(path) + " is reserved on this target", pos);
+				SafeCom.addWarning(scom, WReservedTypePath, "Type path " + Globals.sTypePath(path) + " is reserved on this target", pos);
 		}
 		switch t { case TClassDecl(c) if (!TypeOps.hasClassFlag(c, CExtern)): check(c.clPath, c.clPos); case TEnumDecl(e) if (!TypeOps.hasEnumFlag(e, EnExtern)): check(e.ePath, e.ePos); case _: }
 	}
@@ -115,12 +117,12 @@ class Filters {
 			for (cf in c.clOrderedStatics) field(cf); for (cf in c.clOrderedFields) field(cf); if (c.clConstructor != null) field(c.clConstructor);
 		case _:
 	}
-	public static function destructionBeforeDce(pool:Dynamic, scom:Dynamic, allTypes:Array<ModuleType>):Void {
+	public static function destructionBeforeDce(pool:Null<TaskPool>, scom:SafeContext, allTypes:Array<ModuleType>):Void {
 		var filters:Array<ModuleType->Void> = [FiltersCommon.removeGenericBase, scom.platform == Hl ? function(_) {} : applyMacroExclude,
 			t -> removeExternFields(scom, t), checkRemoveMetadata];
 		Parallel.ParallelArray.iter(pool, function(mt) { for (f in filters) f(mt); }, allTypes);
 	}
-	public static function destructionOnScom(pool:Dynamic, scom:Dynamic, ectx:Null<ExceptionContext>, rename:RenameVars.RenameInit, allTypes:Array<ModuleType>):Void {
+	public static function destructionOnScom(pool:Null<TaskPool>, scom:SafeContext, ectx:Null<ExceptionContext>, rename:RenameVars.RenameInit, allTypes:Array<ModuleType>):Void {
 		Parallel.ParallelArray.iter(pool, function(mt) {
 			var scom = SafeCom.adaptScomToMt(scom, mt);
 			SaveStacks.patchConstructors(ectx, scom)(mt); Native.applyNativePaths(mt);
@@ -133,20 +135,20 @@ class Filters {
 			if (scom.platformConfig.pfReservedTypePaths.length != 0) checkReservedTypePaths(scom, mt);
 		}, allTypes);
 	}
-	public static function destructionOnCom(scom:Dynamic, com:Dynamic, types:Array<ModuleType>):Void {
-		var filters:Array<Dynamic->ModuleType->Void> = [(_, mt) -> addRtti(scom, mt), (_, mt) -> checkPrivatePath(com, mt),
+	public static function destructionOnCom(scom:SafeContext, com:CommonContext, types:Array<ModuleType>):Void {
+		var filters:Array<SafeContext->ModuleType->Void> = [(_, mt) -> addRtti(scom, mt), (_, mt) -> checkPrivatePath(com, mt),
 			(_, mt) -> { if (com.platform != Hl) addMetaField(com, mt); }, (_, mt) -> commitFeatures(com, mt)];
 		SafeCom.runTypeFiltersSafe(scom, filters, types);
 	}
-	public static function destruction(com:Dynamic, scom:Dynamic, ectx:Null<ExceptionContext>, detailTimes:Int, rename:RenameVars.RenameInit, allTypes:Array<ModuleType>, allTypesArray:Array<ModuleType>):Void {
+	public static function destruction(com:CommonContext, scom:SafeContext, ectx:Null<ExceptionContext>, detailTimes:Int, rename:RenameVars.RenameInit, allTypes:Array<ModuleType>, allTypesArray:Array<ModuleType>):Void {
 		allTypes = Parallel.runWithPool(com.sctx.pool, function(pool) {
 			FilterContext.withTimer(scom.timerCtx, detailTimes, "type 2", null, function() {
 				SafeCom.runWithScom(com, scom, function() { destructionBeforeDce(pool, scom, allTypesArray); });
 			});
 			Common.enterStage(com, CDceStart);
 			var allTypes = FilterContext.withTimer(scom.timerCtx, detailTimes, "dce", null, function() {
-				var mode:String; try mode = Define.definedValue(scom.defines, Dce) catch (_:Dynamic) mode = "no";
-				var mode = switch mode { case "full": Define.defined(scom.defines, Interp) ? DceNo : DceFull; case "std": DceStd; case "no": DceNo; case _: throw "Unknown DCE mode " + mode; };
+				var mode:String; try mode = Define.definedValue(scom.defines, Define.Dce) catch (_:Dynamic) mode = "no";
+				var mode = switch mode { case "full": Define.defined(scom.defines, Define.Interp) ? DceNo : DceFull; case "std": DceStd; case "no": DceNo; case _: throw "Unknown DCE mode " + mode; };
 				var stdPaths = com.classPaths.getStdPaths();
 				var macros = com.getMacros(); var mscom = macros == null ? null : SafeCom.ofCom(macros);
 				return Dce.run(pool, scom, mscom, com.main.mainExpr, mode, stdPaths, allTypes);
@@ -154,7 +156,7 @@ class Filters {
 			var allTypesArray = allTypes.copy(); Common.enterStage(com, CDceDone);
 			Finalization.maybeAddEntrypoint(com);
 			if (ectx != null && Common.hasFeature(com, "haxe.NativeStackTrace.exceptionStack"))
-				Parallel.ParallelArray.iter(pool, mt -> SafeCom.runExpressionFiltersSafe(scom, detailTimes, [{name:"insert_save_stacks", filter:scom -> SaveStacks.insertSaveStacks(ectx, scom)}], mt, true), allTypesArray);
+				Parallel.ParallelArray.iter(pool, mt -> SafeCom.runExpressionFiltersSafe(scom, detailTimes, [{name:"insert_save_stacks", run:(scom,e) -> SaveStacks.insertSaveStacks(ectx,scom)(e)}], mt, true), allTypesArray);
 			FilterContext.withTimer(scom.timerCtx, detailTimes, "type 3", null, function() {
 				SafeCom.runWithScom(com, scom, function() { destructionOnScom(pool, scom, ectx, rename, allTypesArray); });
 			});
@@ -164,7 +166,7 @@ class Filters {
 		FilterContext.withTimer(scom.timerCtx, detailTimes, "type 4", null, function() { SafeCom.runWithScom(com, scom, function() { destructionOnCom(scom, com, allTypes); }); });
 		com.callbacks.run(com.errorExt, com.callbacks.getAfterFilters()); Common.enterStage(com, CFilteringDone);
 	}
-	public static function updateCacheDependencies(closeMonomorphs:Bool, scom:Dynamic, t:ModuleType):Void {
+	public static function updateCacheDependencies(closeMonomorphs:Bool, scom:SafeContext, t:ModuleType):Void {
 		var visitedAnons:Array<TAnon> = [];
 		function checkT(m:ModuleDef, t:T):Void switch t {
 			case TInst(c, tl): TypeOps.addDependency(m, c.clModule, MDepFromTyping); for (t in tl) checkT(m, t);
@@ -193,7 +195,7 @@ class Filters {
 				var vars:Array<{variable:TVar, type:T}> = [];
 				function saveVars(e:TExpr):Void {
 					function add(v:TVar):Void vars.unshift({variable:v, type:v.vType});
-					switch e.eexpr { case TFunction(fn): for (a in fn.tfArgs) add(a.variable); saveVars(fn.tfExpr); case TVar(v, eo): add(v); if (eo != null) saveVars(eo); case _: TypeOps.iter(saveVars, e); }
+					switch e.eexpr { case TFunction(fn): for (a in fn.tfArgs) add(a.variable); saveVars(fn.tfExpr); case TVar(v, eo): add(v); if (eo != null) saveVars(eo); case _: core.Texpr.iter(saveVars, e); }
 				}
 				function mkOverloadRestore(f:TClassField):Dynamic {
 					TypeOps.addClassFieldFlag(f, CfPostProcessed);
@@ -227,30 +229,30 @@ class Filters {
 				var path = en.ePath;
 				en.eRestore = function() {
 					for (i in 0...en.eMeta.length) switch en.eMeta[i] {
-						case {name:RealPath, params:[{expr:EConst(CString(path, _))}]}:
+						case {meta:core.MetaList.StrictMeta.RealPath,exprs:[{expr:EConst(String(path, _))}]}:
 							en.ePath = Ast.parsePath(path); en.eMeta = en.eMeta.slice(0, i).concat(en.eMeta.slice(i + 1)); return;
 						case _:
 					}
 					en.ePath = path;
 				};
 			case TTypeDecl(td): var path = td.tPath; td.tRestore = function() { td.tPath = path; };
-			case TAbstractDecl(a): var path = a.aPath; a.aRestore = function() { a.aPath = path; a.aMeta = a.aMeta.filter(m -> m.name != ValueUsed); };
+			case TAbstractDecl(a): var path = a.aPath; a.aRestore = function() { a.aPath = path; a.aMeta = a.aMeta.filter(m -> m.meta != core.MetaList.StrictMeta.ValueUsed); };
 		}
 	}
 	public static function mightNeedCfUnoptimized(c:TClass, cf:TClassField):Bool return switch [cf.cfKind, c.clKind] { case [Method(MethInline), _] | [_, KGeneric]: true; case _: TypeOps.hasClassFieldFlag(cf, CfGeneric); };
-	public static function runSafeFilters(ectx:Null<ExceptionContext>, com:Dynamic, scom:Dynamic, allTypes:Array<ModuleType>, newTypes:Array<ModuleType>, rename:RenameVars.RenameInit):Void {
-		var detailTimes = Timer.levelFromDefine(scom.defines, FilterTimes);
+	public static function runSafeFilters(ectx:Null<ExceptionContext>, com:CommonContext, scom:SafeContext, allTypes:Array<ModuleType>, newTypes:Array<ModuleType>, rename:RenameVars.RenameInit):Void {
+		var detailTimes = Timer.levelFromDefine(scom.defines, Define.FilterTimes);
 		var wrapper = com.localWrapper;
-		var beforeInlining = [{name:"handle_abstract_casts", filter:AbstractCast.handleAbstractCasts}];
-		var beforeParallel = [{name:"local_statics", filter:LocalStatic.run}, {name:"fix_return_dynamic_from_void_function", filter:SafeFilters.fixReturnDynamicFromVoidFunction},
-			{name:"check_local_vars_init", filter:CheckVarInit.checkLocalVarsInit}, {name:"check_abstract_as_value", filter:SafeFilters.checkAbstractAsValue},
-			{name:"Tre", filter:(scom, e) -> Define.defined(scom.defines, AnalyzerOptimize) ? Tre.run(scom)(e) : e}];
-		var beforeAnalyzer = [{name:"reduce_expression", filter:Optimizer.reduceExpression}, {name:"inline_constructors", filter:InlineConstructors.inlineConstructors},
-			{name:"Exceptions_filter", filter:(scom, e) -> Exceptions.filter(ectx, scom)(e)}, {name:"captured_vars", filter:(scom, e) -> CapturedVars.capturedVars(scom, wrapper, false, e)}];
-		var afterAnalyzer = [{name:"sanitize", filter:Sanitize.sanitize}, {name:"add_final_return", filter:(_, e) -> scom.platformConfig.pfAddFinalReturn ? AddFinalReturn.addFinalReturn(e) : e},
-			{name:"RenameVars", filter:(scom, e) -> scom.platform == Eval ? e : RenameVars.run(scom.curclass.clPath, rename, e)}, {name:"mark_switch_break_loops", filter:SafeFilters.markSwitchBreakLoops}];
+		var beforeInlining:Array<{name:String,run:SafeContext->TExpr->TExpr}> = [{name:"handle_abstract_casts", run:AbstractCast.handleAbstractCasts}];
+		var beforeParallel:Array<{name:String,run:SafeContext->TExpr->TExpr}> = [{name:"local_statics", run:LocalStatic.run}, {name:"fix_return_dynamic_from_void_function", run:SafeFilters.fixReturnDynamicFromVoidFunction},
+			{name:"check_local_vars_init", run:CheckVarInit.checkLocalVarsInit}, {name:"check_abstract_as_value", run:SafeFilters.checkAbstractAsValue},
+			{name:"Tre", run:(scom, e) -> Define.defined(scom.defines, Define.AnalyzerOptimize) ? Tre.run(scom)(e) : e}];
+		var beforeAnalyzer:Array<{name:String,run:SafeContext->TExpr->TExpr}> = [{name:"reduce_expression", run:Optimizer.reduceExpression}, {name:"inline_constructors", run:InlineConstructors.inlineConstructors},
+			{name:"Exceptions_filter", run:(scom, e) -> Exceptions.filter(ectx, scom)(e)}, {name:"captured_vars", run:(scom, e) -> CapturedVars.capturedVars(scom, wrapper, false, e)}];
+		var afterAnalyzer:Array<{name:String,run:SafeContext->TExpr->TExpr}> = [{name:"sanitize", run:Sanitize.sanitize}, {name:"add_final_return", run:(_, e) -> scom.platformConfig.pfAddFinalReturn ? AddFinalReturn.addFinalReturn(e) : e},
+			{name:"RenameVars", run:(scom, e) -> scom.platform == Eval ? e : RenameVars.run(scom.curclass.clPath, rename, e)}, {name:"mark_switch_break_loops", run:SafeFilters.markSwitchBreakLoops}];
 		Parallel.runWithPool(com.sctx.pool, function(pool) {
-			var castPool = Common.defined(com, EnableParallelAbstractCast) ? pool : null;
+			var castPool = Common.defined(com, Define.EnableParallelAbstractCast) ? pool : null;
 			Parallel.ParallelArray.iter(castPool, mt -> SafeCom.runExpressionFiltersSafe(scom, detailTimes, beforeInlining, mt), newTypes);
 			Parallel.ParallelArray.iter(pool, mt -> SafeCom.runExpressionFiltersSafe(scom, detailTimes, beforeParallel, mt), newTypes);
 			Dump.maybeGenerateDump(com, AfterCasting);
@@ -262,8 +264,8 @@ class Filters {
 			Dump.maybeGenerateDump(com, AfterSanitizing);
 		});
 	}
-	public static function run(com:Dynamic, ectx:Null<ExceptionContext>, beforeDestruction:Void->Void):Void {
-		var scom = SafeCom.ofCom(com); var detailTimes = Timer.levelFromDefine(com.defines, FilterTimes);
+	public static function run(com:CommonContext, ectx:Null<ExceptionContext>, beforeDestruction:Void->Void):Void {
+		var scom = SafeCom.ofCom(com); var detailTimes = Timer.levelFromDefine(com.defines, Define.FilterTimes);
 		var newTypes = (cast com.types:Array<ModuleType>).filter(function(t) {
 			var cached = FiltersCommon.isCached(com, t);
 			switch t {

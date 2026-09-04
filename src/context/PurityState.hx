@@ -3,14 +3,14 @@ import core.Globals.Pos;
 import core.Ast;
 import core.TType;
 import core.Meta;
-import typing.Error;
+import core.Error;
 // Draft mechanical translation of haxe/src/context/purityState.ml; unvalidated.
 // Fields begin MaybePure unless metadata specifies otherwise; inherited promises
 // become ExpectPure and are checked by the later purity inference pass.
 enum PurityState { Pure; Impure; MaybePure; InferredPure; ExpectPure(pos:Pos); }
 class PurityStateTools {
 	public static function getPurityFromMeta(meta:Metadata):PurityState {
-		var entry = Meta.getOptional(Meta.Pure, meta);
+		var entry = try Meta.get(Meta.Pure, meta) catch (_:core.Meta.MetaNotFound) null;
 		if (entry == null) return MaybePure;
 		if (entry.exprs.length == 0) return Pure;
 		if (entry.exprs.length == 1) switch entry.exprs[0] {

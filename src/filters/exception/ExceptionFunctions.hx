@@ -1,10 +1,10 @@
 package filters.exception;
 
 import core.TType;
-import core.Type as TypeOps;
+import core.TFunctions as TypeOps;
 import core.Globals;
 import core.Texpr;
-import typing.Abstract;
+import core.Abstract;
 import context.SafeCom;
 import optimization.Inline;
 

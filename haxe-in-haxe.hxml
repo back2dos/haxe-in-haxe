@@ -1,4 +1,6 @@
 -cp src
 -main haxe.Main
--D haxe_in_haxe_bootstrap
+# Select the host runtime while producing HXB; do not execute Main during build.
+--interp
+--no-output
 --hxb bin/haxe-in-haxe.hxb

@@ -2,29 +2,30 @@ package filters.exception;
 
 import core.Ast;
 import core.TType;
-import core.Type as TypeOps;
+import core.TFunctions as TypeOps;
 import core.Globals;
 import core.ds.AtomicLazy;
-import typing.Error;
+import core.Error;
 import typing.Typeload;
 import context.SafeCom;
+import context.Typecore;
 import filters.exception.Exceptions;
 import filters.exception.ExceptionFunctions;
 
 // haxe/src/filters/exception/exceptionInit.ml — mechanical draft; not compiled or validated.
 class ExceptionInit {
-	public static function createExceptionContext(tctx:Dynamic):Null<ExceptionContext> {
+	public static function createExceptionContext(tctx:Typer):Null<ExceptionContext> {
 		switch tctx.com.platform {
 			case Cross | CustomTarget(_): return null;
 			case Php | Js | Jvm | Python | Lua | Eval | Neko | Flash | Hl | Cpp:
 		}
 		var config = tctx.com.config.pfExceptions;
-		function tp(path:GlobalTypePath):Dynamic {
+		function tp(path:GlobalTypePath):PlacedTypePath {
 			var pack = path.pack;
 			var name = path.name;
 			var tp = if (pack.length > 0 && !Ast.isLowerIdent(pack[pack.length - 1]))
-				Ast.mkTypePath({pack:pack.slice(0, pack.length - 1), name:pack[pack.length - 1]}, name);
-			else Ast.mkTypePath(path);
+				Ast.mkTypePath(pack.slice(0, pack.length - 1),pack[pack.length - 1],null,name);
+			else Ast.mkTypePath(path.pack,path.name);
 			return Ast.makePtp(tp, Globals.nullPos);
 		}
 		function load(path:GlobalTypePath):T return Typeload.loadInstance(tctx, tp(path), ParamSpawnMonos, LoadNormal);

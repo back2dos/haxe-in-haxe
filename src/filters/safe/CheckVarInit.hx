@@ -2,9 +2,9 @@ package filters.safe;
 
 import core.Ast;
 import core.TType;
-import core.Type as TypeOps;
+import core.TFunctions as TypeOps;
 import core.Texpr;
-import typing.Error;
+import core.Error;
 import context.SafeCom;
 import haxe.ds.IntMap;
 
@@ -101,7 +101,7 @@ class CheckVarInit {
 					var old = outsideVars.copy();
 					for (i in vars.keys()) outsideVars.set(i, true);
 					loop(tf.tfExpr); outsideVars = old;
-				case _: TypeOps.iter(loop, e);
+				case _: core.Texpr.iter(loop, e);
 			}
 		}
 		loop(e);

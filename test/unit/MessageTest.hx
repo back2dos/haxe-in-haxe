@@ -5,7 +5,7 @@ import core.Message;
 import core.Message.CompilerMessageKind;
 import core.Message.MessageKind;
 import core.Message.MessageSeverity;
-import core.Message.Warning;
+import core.Message.WarningCode as Warning;
 import core.Json.JsonValue;
 
 class MessageTest {

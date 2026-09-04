@@ -1,4 +1,6 @@
 package typing.matcher;
+import core.WithType as WithTypeTools;
+import core.WithType.WithTypeValue;
 
 import core.TType;
 import core.Ast;
@@ -7,10 +9,13 @@ import core.Globals;
 import core.Globals.Pos;
 import core.TFunctions.*;
 import core.TOther.*;
-import core.TOther.Monomorph;
+import core.TOther;
+import core.TUnification.Monomorph;
 import core.Error.*;
+import core.Error;
 import core.WithType;
 import context.Typecore.*;
+import context.Typecore;
 import context.AbstractCast;
 import typing.matcher.Pattern;
 import typing.matcher.Bind;
@@ -53,7 +58,7 @@ class Case {
 		collectTop(follow(t));
 		return acc;
 	}
-	public static function makeSubst(ctx:Dynamic, freeMonos:Array<TMono>):{subst:T->T, rebindUnrefined:Void->Void, unsubst:T->T} {
+	public static function makeSubst(ctx:Typer, freeMonos:Array<TMono>):{subst:T->T, rebindUnrefined:Void->Void, unsubst:T->T} {
 		var params:TypeParams = ctx.typeParams;
 		var tpClasses = params.map(function(ttp) return ttp.ttpClass);
 		var tpMemo:Array<{original:TClass, mono:TMono}> = [];
@@ -91,37 +96,37 @@ class Case {
 		}
 		return {subst:subst, rebindUnrefined:rebindUnrefined, unsubst:unsubst};
 	}
-	public static function make(ctx:Dynamic, t:T, freeMonos:Array<TMono>, el:Array<Expr>, eg:Null<Expr>, eoAst:Null<Expr>, withType:WithType, postfixMatch:Bool, p:Pos):{caseData:CaseData, bindings:Array<Bind>, pattern:PatternData} {
+	public static function make(ctx:Typer, t:T, freeMonos:Array<TMono>, el:Array<Expr>, eg:Null<Expr>, eoAst:Null<Expr>, withType:WithTypeValue, postfixMatch:Bool, p:Pos):{caseData:CaseData, bindings:Array<Bind>, pattern:PatternData} {
 		function collapseCase(values:Array<Expr>):Expr {
 			if (values.length == 0) return raiseTypingError("case without pattern", p);
 			if (values.length == 1) return values[0];
 			var e = values[0], e2 = collapseCase(values.slice(1));
-			return {expr:EBinop(OpOr, e, e2), pos:Globals.punion(e.pos, e2.pos)};
+			return {expr:EBinop(OpOr, e, e2), pos:core.Ast.punion(e.pos, e2.pos)};
 		}
 		var e = collapseCase(el);
 		var substitution = makeSubst(ctx, freeMonos), subst = substitution.subst;
 		var save = saveLocals(ctx);
-		var locals:haxe.ds.StringMap<TVar> = ctx.f.locals;
+		var locals:core.ds.PersistentMap<String,TVar> = ctx.f.locals;
 		var names = [for (name in locals.keys()) name]; names.sort(Reflect.compare);
 		var oldTypes:Array<{variable:TVar, type:T}> = [];
 		for (name in names) {
-			var v = locals.get(name), old = v.vType;
+			var v = locals.find(name), old = v.vType;
 			v.vType = subst(v.vType); oldTypes.unshift({variable:v, type:old});
 		}
 		var oldRet = ctx.e.ret;
 		ctx.e.ret = subst(ctx.e.ret);
-		var pctx = {ctx:ctx, currentLocals:new haxe.ds.StringMap<TVar>(), ctxLocals:ctx.f.locals, orLocals:null, inReification:false, isPostfixMatch:postfixMatch, unsubst:substitution.unsubst};
+		var pctx = {ctx:ctx, currentLocals:new haxe.ds.StringMap<{v:TVar,p:Pos}>(), ctxLocals:ctx.f.locals, orLocals:null, inReification:false, isPostfixMatch:postfixMatch, unsubst:substitution.unsubst};
 		var pat = ExprToPattern.make(pctx, true, subst(t), e);
 		substitution.rebindUnrefined();
 		var guard = if (eg == null) null else {
-			var e = typeExpr(ctx, eg, WithType.value);
+			var e = typeExpr(ctx, eg, WithTypeTools.value);
 			AbstractCast.castOrUnify(ctx, ctx.t.tbool, e, e.epos);
 		};
 		var body = switch [eoAst, withType] {
 			case [null, WithType(t, _)]: unify(ctx, ctx.t.tvoid, t, e.pos); null;
 			case [null, _]: null;
 			case [e, WithType(t, _)]:
-				var e = typeExpr(ctx, e, WithType.withType(subst(t)));
+				var e = typeExpr(ctx, e, WithTypeTools.withType(subst(t)));
 				AbstractCast.castOrUnify(ctx, subst(t), e, e.epos);
 			case [e, _]: typeExpr(ctx, e, withType);
 		};

@@ -4,11 +4,55 @@ import core.Ast;
 import core.Ast.*;
 import core.Globals.Pos;
 import syntax.Lexer.LexedToken;
+import syntax.Parser;
+import core.ds.Stream;
+import core.Warning.Warning;
 
 // Batch-only recursive descent port of the declaration/expression path in
 // haxe/src/syntax/grammar.ml.  Display recovery and XML remain parser-entry
 // responsibilities and are intentionally not represented here.
 class Grammar {
+ public static function parseFileStream(ctx:ParserContext,s:Stream<LexedToken>):Package {
+  var grammar=new Grammar([]);grammar.sourceStream=s;grammar.parserContext=ctx;
+  var result=grammar.parseFile();
+  for(_ in 0...grammar.index)s.junk();
+  return result;
+ }
+ public static function parseExpressionStream(ctx:ParserContext,s:Stream<LexedToken>):Expr {
+  var grammar=new Grammar([]);grammar.sourceStream=s;grammar.parserContext=ctx;
+  var result=grammar.expression();
+  for (_ in 0...grammar.index) s.junk();
+  return result;
+ }
+ static function parseMacroIdent(ctx:ParserContext,name:String,p:Pos,s:Stream<LexedToken>):Expr {
+  if(name=="display") {
+   Parser.syntaxWarningWithPos(ctx,core.WarningList.fromString("WIfDisplay"),p);
+   if(ctx.config.specialIdentifierFiles!=null) ctx.config.specialIdentifierFiles.replace(core.Path.UniqueKey.create(p.pfile),name);
+  }
+  return {expr:EConst(Ident(name)),pos:p};
+ }
+ static function validateMacroCond(ctx:ParserContext,s:Stream<LexedToken>,e:Expr):Expr return switch e.expr {
+  case EConst(String(_,_)),EConst(Int(_,_)),EConst(Float(_,_)):e;
+  case EConst(Ident(name)):parseMacroIdent(ctx,name,e.pos,s);
+  case EUnop(op,flag,e1):{expr:EUnop(op,flag,validateMacroCond(ctx,s,e1)),pos:e.pos};
+  case EBinop(op,e1,e2):{expr:EBinop(op,validateMacroCond(ctx,s,e1),validateMacroCond(ctx,s,e2)),pos:e.pos};
+  case EParenthesis(e1):{expr:EParenthesis(validateMacroCond(ctx,s,e1)),pos:e.pos};
+  case EField(e1,name,kind):{expr:EField(validateMacroCond(ctx,s,e1),name,kind),pos:e.pos};
+  case ECall({expr:EConst(Ident(_))},args):switch e.expr {case ECall(callee,_):{expr:ECall(callee,args.map(function(arg)return validateMacroCond(ctx,s,arg))),pos:e.pos};case _:throw "unreachable";}
+  case _:Parser.syntaxError(ctx,Custom("Invalid conditional expression"),s,{expr:EConst(Ident("false")),pos:e.pos},e.pos);
+ };
+ public static function parseMacroCond(ctx:ParserContext,s:Stream<LexedToken>):{token:Null<ParserToken>,expr:Expr} {
+  var token=s.next();
+  return switch token.token {
+   case Const(Ident(name)):{token:null,expr:parseMacroIdent(ctx,name,token.pos,s)};
+   case Const(String(_,_)),Const(Int(_,_)),Const(Float(_,_)):switch token.token {case Const(c):{token:null,expr:{expr:EConst(c),pos:token.pos}};case _:throw "unreachable";}
+   case Kwd(k):{token:null,expr:parseMacroIdent(ctx,Ast.sKeyword(k),token.pos,s)};
+   case Unop(op):var result=parseMacroCond(ctx,s);{token:result.token,expr:Parser.makeUnop(op,result.expr,token.pos)};
+   case POpen:var e=parseExpressionStream(ctx,s);var close=s.next();if(close.token!=PClose) throw new StreamError("Parse error.");{token:null,expr:{expr:EParenthesis(validateMacroCond(ctx,s,e)),pos:Ast.punion(token.pos,close.pos)}};
+   case _:throw new StreamFailure();
+  };
+ }
+
 	var pendingDeclarationDoc:Documentation = null;
 	public static function parse(source:String, ?defines:core.Define.DefineContext, ?file = "?"):Package {
 		var tokens = defines == null ? Lexer.lex(source, file) : Preprocessor.process(source, defines, file);
@@ -21,6 +65,13 @@ class Grammar {
 	}
 
 	final tokens:Array<LexedToken>;
+	var sourceStream:Null<Stream<LexedToken>>;
+	var parserContext:Null<ParserContext>;
+	function tokenAt(n:Int):LexedToken {
+		if(sourceStream!=null && n>=tokens.length) {var prefix=sourceStream.npeek(n+1);while(tokens.length<prefix.length) tokens.push(prefix[tokens.length]);}
+		return n<tokens.length?tokens[n]:{token:Eof,pos:tokens.length==0?core.Globals.nullPos:tokens[tokens.length-1].pos};
+	}
+	function hasToken(n:Int):Bool {tokenAt(n);return n<tokens.length;}
 	var index = 0;
 	public function new(tokens) this.tokens = tokens;
 
@@ -47,7 +98,7 @@ class Grammar {
 			expect(Semicolon); return decl(EImport({path:names, mode:mode}), start);
 		}
 		if (acceptKwd(Using) != null) { if (doc != null) pendingDeclarationDoc = doc; var p = placedPath(); expect(Semicolon); return decl(EUsing(p), start); }
-		var accesses = if (is(Kwd(Abstract)) && index + 1 < tokens.length && tokens[index + 1].token.match(Kwd(Class))) {
+		var accesses = if (is(Kwd(Abstract)) && hasToken(index+1) && tokenAt(index+1).token.match(Kwd(Class))) {
 			var abstractToken = next();
 			[{access:AAbstract, pos:abstractToken.pos}];
 		} else access();
@@ -115,7 +166,7 @@ class Grammar {
 	function access(?field=false):Array<PlacedAccess> { var result=[]; while (true) { var t=current(); var a:Null<Access> = switch t.token { case Kwd(Public): APublic; case Kwd(Private): APrivate; case Kwd(Static): AStatic; case Kwd(Override): AOverride; case Kwd(Dynamic): ADynamic; case Kwd(Inline): AInline; case Kwd(Macro): AMacro; case Kwd(Final): AFinal; case Kwd(Extern): AExtern; case Kwd(Abstract) if (field || classDeclarationAhead()): AAbstract; case Kwd(Overload): AOverload; case _: null; }; if (a == null) return result; next(); result.push({access:a,pos:t.pos}); } }
 	function classDeclarationAhead():Bool {
 		var cursor = index;
-		while (cursor < tokens.length) switch tokens[cursor++].token {
+		while (hasToken(cursor)) switch tokenAt(cursor++).token {
 			case Kwd(Public | Private | Extern | Final | Abstract):
 			case Kwd(Class): return true;
 			case _: return false;
@@ -314,9 +365,9 @@ class Grammar {
 	function parenthesizedArrowAhead():Bool {
 		var depth = 0;
 		var cursor = index;
-		while (cursor < tokens.length) switch tokens[cursor++].token {
+		while (hasToken(cursor)) switch tokenAt(cursor++).token {
 			case POpen: depth++;
-			case PClose if (depth == 0): return cursor < tokens.length && tokens[cursor].token.match(Arrow);
+			case PClose if (depth == 0): return hasToken(cursor) && tokenAt(cursor).token.match(Arrow);
 			case PClose: depth--;
 			case Eof: return false;
 			case _:
@@ -407,7 +458,7 @@ class Grammar {
 	function objectOrIdentifier():Expr {
 		var t=current();
 		if(accept(BrOpen)!=null) {
-			if (!is(BrClose) && (index + 1 >= tokens.length || !tokens[index + 1].token.match(DblDot))) return blockContents(t.pos);
+			if (!is(BrClose) && (!hasToken(index+1) || !tokenAt(index+1).token.match(DblDot))) return blockContents(t.pos);
 			var fields=[];
 			while (!is(BrClose)) {
 				var key = switch current() {
@@ -493,12 +544,12 @@ class Grammar {
 					var spread = next(); var name = placedIdent(); expect(DblDot); var value = typeHint();
 					var rest = Ast.makePtpTh(Ast.mkTypePath(["haxe"], "Rest", [TPType(value)]), union(spread.pos, value.pos));
 					args.push({type:CTNamed(name, rest), pos:union(spread.pos, value.pos)});
-				} else if (is(Question) && index + 2 < tokens.length && switch tokens[index + 1].token { case Const(Ident(_)): tokens[index + 2].token.match(DblDot); case _: false; }) {
+				} else if (is(Question) && hasToken(index+2) && switch tokenAt(index+1).token { case Const(Ident(_)): tokenAt(index+2).token.match(DblDot); case _: false; }) {
 					var optionalStart = next().pos;
 					var name = placedIdent(); expect(DblDot); var value = typeHint();
 					var named = {type:CTNamed(name, value), pos:union(name.pos, value.pos)};
 					args.push({type:CTOptional(named), pos:union(optionalStart, value.pos)});
-				} else if (identText() != null && index + 1 < tokens.length && tokens[index + 1].token.match(DblDot)) {
+				} else if (identText() != null && hasToken(index+1) && tokenAt(index+1).token.match(DblDot)) {
 					var name = placedIdent(); expect(DblDot); var value = typeHint();
 					args.push({type:CTNamed(name, value), pos:union(name.pos, value.pos)});
 				} else args.push(typeHint());
@@ -584,6 +635,7 @@ class Grammar {
 		return {ecName:name,ecDoc:doc,ecMeta:meta,ecArgs:args,ecPos:union(name.pos,end),ecParams:params,ecType:type};
 	}
 	function documentation():Documentation {
+		if(parserContext!=null) {current();return Ast.docFromStringOpt(Parser.getDoc(parserContext,sourceStream));}
 		var value:Null<String>=null;
 		while(true) switch(current().token) {
 			case Comment(v):
@@ -641,7 +693,7 @@ class Grammar {
 	}
 	function expectKwd(k:Keyword):LexedToken { var r=acceptKwd(k); if(r==null) fail("Expected keyword " + Ast.sKeyword(k)); return r; }
 	inline function is(t:Token):Bool return Type.enumEq(current().token,t);
-	inline function current():LexedToken return tokens[index]; inline function previous():LexedToken return tokens[index-1]; inline function next():LexedToken return tokens[index++];
+	inline function current():LexedToken return tokenAt(index); inline function previous():LexedToken return tokenAt(index-1); inline function next():LexedToken return tokenAt(index++);
 	static function binop(t:Token):Null<Binop> return switch t {case Binop(o):o;case Spread:OpInterval;case _:null;};
 	static function precedence(o:Binop):Int return switch o {case OpInterval|OpArrow|OpIn:0;case OpAssign|OpAssignOp(_):1;case OpBoolOr:2;case OpBoolAnd:3;case OpOr:4;case OpXor:5;case OpAnd:6;case OpNullCoal|OpEq|OpNotEq:7;case OpGt|OpGte|OpLt|OpLte:8;case OpShl|OpShr|OpUShr:9;case OpAdd|OpSub:10;case OpMult|OpDiv|OpMod:11;case _: -1;};
 	static function hasAccess(a:Array<PlacedAccess>, v:Access):Bool { for(x in a) if(x.access==v)return true; return false; }

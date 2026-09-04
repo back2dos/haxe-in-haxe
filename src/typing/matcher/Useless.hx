@@ -1,4 +1,5 @@
 package typing.matcher;
+import core.Message;
 
 import core.Globals;
 import core.Globals.Pos;
@@ -120,7 +121,7 @@ class Useless {
 					var extended = mat.concat([rest]);
 					var et2 = uPrime(col.concat([[pat1]]), extended, copy(extended), [pat2], rest, []);
 					var et3 = combine({result:et1, pos:pat1.pos}, {result:et2, pos:pat2.pos});
-					var pos = Globals.punion(pat1.pos, pat2.pos);
+					var pos = core.Ast.punion(pat1.pos, pat2.pos);
 					et = combine({result:et, pos:pos}, {result:et3, pos:pos});
 				case _: throw "Expected or-pattern";
 			}

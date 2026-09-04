@@ -1,10 +1,14 @@
 package syntax;
+import core.display.DisplayPosition;
+import core.DisplayTypes;
+import core.DisplayTypes.DisplayModeValue;
 import core.Globals;
 import core.Globals.Pos;
 import core.Ast;
 import core.Define;
 import core.Define.DefineContext;
 import syntax.Parser;
+import syntax.Lexer.LexerContext;
 import syntax.SemVer;
 import core.ds.Stream;
 // Draft mechanical translation of haxe/src/syntax/parserEntry.ml; unvalidated.
@@ -26,7 +30,7 @@ class ConditionHandler {
 		case EBinop(OpBoolOr,e1,e2):{expr:EBinop(OpBoolAnd,negate(e1),negate(e2)),pos:e.pos};
 		case _:{expr:EUnop(Not,Prefix,e),pos:e.pos};
 	};
-	function conjoin(lhs:Expr,rhs:Expr):Expr { lhs=maybeParent(true,lhs); rhs=maybeParent(true,rhs); return {expr:EBinop(OpBoolAnd,lhs,rhs),pos:Globals.punion(lhs.pos,rhs.pos)}; }
+	function conjoin(lhs:Expr,rhs:Expr):Expr { lhs=maybeParent(true,lhs); rhs=maybeParent(true,rhs); return {expr:EBinop(OpBoolAnd,lhs,rhs),pos:Ast.punion(lhs.pos,rhs.pos)}; }
 	function condIfInner(e:Expr):Void { conditionalExpressions.unshift(e); conditionalStack.unshift({expr:e,elseSeen:false}); }
 	public function condIf(e:Expr):Void { condIfInner(e); depths.unshift(1); }
 	public function condElse(p:Pos):Void {
@@ -133,7 +137,7 @@ class ParserEntry {
 		}
 		return {left:v1,right:v2};
 	}
-	public static function parse<T>(config:ParserConfiguration,entry:ParserContext->Dynamic->T,lctx:Dynamic,code:Dynamic,file:String):ParseResult<T> {
+	public static function parse<T>(config:ParserConfiguration,entry:ParserContext->Stream<ParserToken>->T,lctx:LexerContext,code:Lexer,file:String):ParseResult<T> {
 		var defines=config.defines;
 		var ctx=Parser.createContext(lctx,config,Define.rawDefined(defines,"macro"),code);
 		var parseEntry=entry.bind(ctx);
@@ -147,7 +151,7 @@ class ParserEntry {
 		var enterMacro:Bool->Pos->ParserToken=null;
 		var skipTokensLoop:Pos->Bool->ParserToken->ParserToken=null;
 		var skipTokens:Pos->Bool->ParserToken=null;
-		nextToken=function() return processToken(Lexer.token(lctx,code));
+		nextToken=function() return processToken(Lexer.readToken(lctx,code));
 		processToken=function(tk:ParserToken):ParserToken return switch tk.token {
 			case Comment(s):
 				var len=s.length;
@@ -167,7 +171,7 @@ class ParserEntry {
 			case Sharp("else"):conds.condElse(tk.pos); dbc.openDeadBlock(tk.pos); processToken(skipTokens(tk.pos,false));
 			case Sharp("if"):processToken(enterMacro(true,tk.pos));
 			case Sharp("error"):
-				var token:ParserToken=Lexer.token(lctx,code);
+				var token:ParserToken=Lexer.readToken(lctx,code);
 				switch token.token { case Const(String(s,_)):Parser.error(Custom(s),token.pos); case _:Parser.error(Unimplemented,tk.pos); }
 			case Sharp("line"):
 				var token=nextToken();
@@ -182,17 +186,17 @@ class ParserEntry {
 		enterMacro=function(isIf:Bool,p:Pos):ParserToken {
 			var condition=Grammar.parseMacroCond(ctx,sraw);
 			if (isIf) conds.condIf(condition.expr); else conds.condElseif(condition.expr,p);
-			var tk:ParserToken=condition.token == null ? Lexer.token(lctx,code) : condition.token;
+			var tk:ParserToken=condition.token == null ? Lexer.readToken(lctx,code) : condition.token;
 			if (isTrue(eval(defines,condition.expr))) return tk;
 			dbc.openDeadBlock(condition.expr.pos); return skipTokensLoop(p,true,tk);
 		};
 		skipTokensLoop=function(p:Pos,test:Bool,tk:ParserToken):ParserToken return switch tk.token {
-			case Sharp("end"):conds.condEnd(tk.pos); dbc.closeDeadBlock(tk.pos); Lexer.token(lctx,code);
+			case Sharp("end"):conds.condEnd(tk.pos); dbc.closeDeadBlock(tk.pos); Lexer.readToken(lctx,code);
 			case Sharp("elseif") if (!test):
 				dbc.closeDeadBlock(tk.pos); var condition=Grammar.parseMacroCond(ctx,sraw);
 				conds.condElseif(condition.expr,tk.pos); dbc.openDeadBlock(condition.expr.pos); skipTokens(p,test);
 			case Sharp("else") if (!test):conds.condElse(tk.pos); dbc.closeDeadBlock(tk.pos); dbc.openDeadBlock(tk.pos); skipTokens(p,test);
-			case Sharp("else"):conds.condElse(tk.pos); dbc.closeDeadBlock(tk.pos); Lexer.token(lctx,code);
+			case Sharp("else"):conds.condElse(tk.pos); dbc.closeDeadBlock(tk.pos); Lexer.readToken(lctx,code);
 			case Sharp("elseif"):dbc.closeDeadBlock(tk.pos); enterMacro(false,tk.pos);
 			case Sharp("if"):
 				var condition=Grammar.parseMacroCond(ctx,sraw); conds.condIf(condition.expr); dbc.openDeadBlock(condition.expr.pos);
@@ -202,7 +206,7 @@ class ParserEntry {
 			case Eof:preprocessorError(UnclosedConditional,p,tk);
 			case _:skipTokens(p,test);
 		};
-		skipTokens=function(p,test) return skipTokensLoop(p,test,Lexer.token(lctx,code));
+		skipTokens=function(p,test) return skipTokensLoop(p,test,Lexer.readToken(lctx,code));
 		var stream=Stream.from(function(_) { var token=nextToken(); ctx.cache.push(token); return token; });
 		try {
 			var data=parseEntry(stream);
@@ -218,7 +222,7 @@ class ParserEntry {
 			var last:ParserToken=stream.peek(); if (last==null) last=Parser.lastToken(ctx,stream); return Parser.error(Unexpected(last.token),last.pos);
 		}
 	}
-	public static function parseString<T>(config:ParserConfiguration,entry:ParserContext->Dynamic->T,s:String,p:Pos,error:String->Pos->ParseResult<T>,inlined:Bool):ParseResult<T> {
+	public static function parseString<T>(config:ParserConfiguration,entry:ParserContext->Stream<ParserToken>->T,s:String,p:Pos,error:String->Pos->ParseResult<T>,inlined:Bool):ParseResult<T> {
 		var oldDisplay=DisplayPosition.displayPosition.get();
 		function restore():Void { if (!inlined) DisplayPosition.displayPosition.set(oldDisplay); }
 		var lctx=Lexer.createTempCtx(p.pfile);
@@ -226,13 +230,13 @@ class ParserEntry {
 		var result:ParseResult<T>;
 		try result=parse(config,entry,lctx,Lexer.lexbufFromUtf8String(s),p.pfile)
 		catch (err:ParserError) { restore(); result=error(Parser.errorMsg(err.error),inlined ? err.pos : p); }
-		catch (err:syntax.Lexer.LexerError) { restore(); result=error(Lexer.errorMsg(err.error),inlined ? err.pos : p); }
+		catch (err:syntax.Lexer.LexerError) { restore(); result=error(Lexer.errorMsg(err.message),inlined ? err.pos : p); }
 		catch (err:Dynamic) { restore(); throw err; }
 		restore(); return result;
 	}
-	public static function parseExprString(config:ParserConfiguration,s:String,p:Pos,error:Dynamic,inlined:Bool):ParseResult<Expr> {
+	public static function parseExprString(config:ParserConfiguration,s:String,p:Pos,error:String->Pos->ParseResult<Expr>,inlined:Bool):ParseResult<Expr> {
 		if (p.pmin>0) s=StringTools.lpad(s," ",s.length+p.pmin);
-		var result=parseString(config,Grammar.expr,s,p,error,inlined);
+		var result=parseString(config,Grammar.parseExpressionStream,s,p,error,inlined);
 		if (inlined) return result;
 		function loop(e:Expr):Expr { var mapped=Ast.mapExpr(loop,e); return {expr:mapped.expr,pos:p}; }
 		return switch result { case ParseSuccess(data,display):ParseSuccess(loop(data),display); case ParseError(data,error,errors):ParseError(loop(data),error,errors); };

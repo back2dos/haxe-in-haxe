@@ -5,7 +5,7 @@ import core.Define;
 // haxe/src/context/dotGraph.ml — mechanical draft; not compile-validated.
 class DotGraph {
  public static function platformNameMacro(com:Dynamic):String return Define.defined(com.defines,Define.Macro) ? "macro" : Globals.platformName(com.platform);
- public static function getDumpPath(com:Dynamic,path:Globals.GlobalTypePath,name:String):Array<String> return [com.dumpConfig.dumpPath,platformNameMacro(com)].concat(path.pack).concat([path.name+"."+name]);
+ public static function getDumpPath(com:Dynamic,path:core.Globals.GlobalTypePath,name:String):Array<String> return [com.dumpConfig.dumpPath,platformNameMacro(com)].concat(path.pack).concat([path.name+"."+name]);
  public static function startGraph(basePath:Array<String>,suffix:String,?graphConfig:Array<String>):{channel:haxe.io.Output,close:Void->Void} {
   if (graphConfig==null) graphConfig=[];
   var ch=Path.createFile(false,suffix,[],basePath); ch.writeString("digraph graphname {\n");

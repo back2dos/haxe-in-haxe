@@ -3,10 +3,10 @@ package filters.safe;
 import core.Ast;
 import core.TType;
 import core.Globals;
-import core.Type as TypeOps;
-import core.ExtType;
+import core.TFunctions as TypeOps;
+import core.TOther.ExtType;
 import core.Meta;
-import typing.Error;
+import core.Error;
 
 // haxe/src/filters/safe/safeFilters.ml — mechanical draft; not compiled or validated.
 class SafeFilters {
@@ -19,8 +19,8 @@ class SafeFilters {
 				case TReturn(returnExpr) if (returnExpr != null && returnIsVoid && TypeOps.tDynamic == TypeOps.follow(returnExpr.etype)):
 					var p = {pfile:e.epos.pfile, pmin:e.epos.pmin, pmax:returnExpr.epos.pmin - 1};
 					var exprs = [loop(returnIsVoid, returnExpr), {eexpr:TReturn(null), etype:e.etype, epos:p}];
-					{eexpr:TMeta({name:MergeBlock, params:[], pos:Globals.nullPos}, TypeOps.mk(TBlock(exprs), e.etype, e.epos)), etype:e.etype, epos:e.epos};
-				case _: TypeOps.mapExpr(e -> loop(returnIsVoid, e), e);
+					{eexpr:TMeta({meta:core.MetaList.StrictMeta.MergeBlock,exprs:[], pos:Globals.nullPos}, TypeOps.mk(TBlock(exprs), e.etype, e.epos)), etype:e.etype, epos:e.epos};
+				case _: core.Texpr.mapExpr(e -> loop(returnIsVoid, e), e);
 			};
 		}
 		return loop(true, e);
@@ -31,14 +31,14 @@ class SafeFilters {
 				case TField({eexpr:TTypeExpr(_)}, _):
 				case TTypeExpr(TClassDecl({clKind:KAbstractImpl(a)})) if (!Meta.has(RuntimeValue, a.aMeta)):
 					Error.raiseTypingError("Cannot use abstract as value", e.epos);
-				case _: TypeOps.iter(loop, e);
+				case _: core.Texpr.iter(loop, e);
 			}
 		}
 		loop(e); return e;
 	}
 	public static function markSwitchBreakLoops(_:Dynamic, e:TExpr):TExpr {
 		function addLoopLabel(n:Int, e:TExpr):TExpr {
-			return {eexpr:TMeta({name:LoopLabel, params:[{expr:EConst(CInt(Std.string(n), null)), pos:e.epos}], pos:e.epos}, e), etype:e.etype, epos:e.epos};
+			return {eexpr:TMeta({meta:core.MetaList.StrictMeta.LoopLabel,exprs:[{expr:EConst(Int(Std.string(n), null)), pos:e.epos}], pos:e.epos}, e), etype:e.etype, epos:e.epos};
 		}
 		var inSwitch = false;
 		var didFound = -1;
@@ -48,19 +48,19 @@ class SafeFilters {
 			return switch e.eexpr {
 				case TFunction(_):
 					var oldNum = num; num = 0;
-					var ret = TypeOps.mapExpr(run, e); num = oldNum; ret;
+					var ret = core.Texpr.mapExpr(run, e); num = oldNum; ret;
 				case TWhile(_, _, _):
 					var lastSwitch = inSwitch; var lastFound = didFound; var lastNum = curNum;
 					inSwitch = false; ++num; curNum = num; didFound = -1;
-					var newE = TypeOps.mapExpr(run, e);
+					var newE = core.Texpr.mapExpr(run, e);
 					if (didFound != -1) newE = addLoopLabel(didFound, newE);
 					didFound = lastFound; inSwitch = lastSwitch; curNum = lastNum; newE;
 				case TSwitch(_):
 					var lastSwitch = inSwitch; inSwitch = true;
-					var newE = TypeOps.mapExpr(run, e); inSwitch = lastSwitch; newE;
+					var newE = core.Texpr.mapExpr(run, e); inSwitch = lastSwitch; newE;
 				case TBreak:
 					if (inSwitch) { didFound = curNum; addLoopLabel(curNum, e); } else e;
-				case _: TypeOps.mapExpr(run, e);
+				case _: core.Texpr.mapExpr(run, e);
 			};
 		}
 		return run(e);

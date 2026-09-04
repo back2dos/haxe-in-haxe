@@ -2,12 +2,12 @@ package optimization;
 
 import core.Ast;
 import core.TType;
-import core.Type as TypeOps;
+import core.TFunctions as TypeOps;
 import core.Globals;
 import core.Texpr;
 import context.SafeCom;
-import typing.Abstract;
-import typing.Error;
+import core.Abstract;
+import core.Error;
 import optimization.OptimizerTexpr;
 import optimization.Inline;
 import filters.safe.Sanitize;
@@ -69,7 +69,7 @@ class Optimizer {
 		};
 	}
 	public static function reduceLoop(scom:Dynamic, stack:Dynamic, e:TExpr):TExpr {
-		e = TypeOps.mapExpr(e -> reduceLoop(scom, stack, e), e);
+		e = core.Texpr.mapExpr(e -> reduceLoop(scom, stack, e), e);
 		var reduced:TExpr;
 		switch e.eexpr {
 			case TCall(e1, el):
@@ -82,19 +82,19 @@ class Optimizer {
 						try {
 							var inlined = Inline.typeInline(Inline.contextOfScom(scom), cf, func, ethis, el, rt, null, e.epos, false, true);
 							reduced = reduceLoop(scom, stack, inlined);
-						} catch (err:Dynamic) {
-							switch err { case Error({errMessage:Custom(_)}): reduced = Sanitize.reduceExpr(scom, e); case _: throw err; }
+						} catch (err:core.Error.TypingError) {
+							switch err.error.errMessage { case Custom(_): reduced = Sanitize.reduceExpr(scom, e); case _: throw err; }
 						}
-					case TField(ef, FStatic(cl, cf) | FInstance(cl, _, cf)) if (SafeCom.needsInline(scom, cl, cf) && !Globals.recStackMemq(cf, stack)):
+					case TField(ef, FStatic(cl, cf) | FInstance(cl, _, cf)) if (SafeCom.needsInline(scom, cl, cf) && !core.TUnification.recStackMemq(cf, stack)):
 						switch cf.cfExpr {
 							case {eexpr:TFunction(tf)}:
 								var config = Inline.inlineConfig(cl, cf, el, e.etype);
 								var rt = switch Abstract.followWithAbstracts(e1.etype) { case TFun(sig): sig.ret; case _: throw "optimizer: inline function type"; };
 								try {
 									var inlined = Inline.typeInline(Inline.contextOfScom(scom), cf, tf, ef, el, rt, config, e.epos, false);
-									reduced = Globals.recStackDefault(stack, cf, cf2 -> cf2 == cf, () -> reduceLoop(scom, stack, inlined), inlined);
-								} catch (err:Dynamic) {
-									switch err { case Error({errMessage:Custom(_)}): reduced = Sanitize.reduceExpr(scom, e); case _: throw err; }
+									reduced = core.TUnification.recStackDefault(stack, cf, cf2 -> cf2 == cf, () -> reduceLoop(scom, stack, inlined), inlined);
+								} catch (err:core.Error.TypingError) {
+									switch err.error.errMessage { case Custom(_): reduced = Sanitize.reduceExpr(scom, e); case _: throw err; }
 								}
 							case _: reduced = Sanitize.reduceExpr(scom, e);
 						}
@@ -109,8 +109,8 @@ class Optimizer {
 	}
 	public static function reduceExpression(scom:Dynamic, e:TExpr):TExpr {
 		if (!scom.foptimize) return e;
-		var stack = Globals.newRecStack();
-		return Globals.recStackDefault(stack, scom.curfield, cf -> cf == scom.curfield, () -> reduceLoop(scom, stack, e), e);
+		var stack = core.TUnification.newRecStack();
+		return core.TUnification.recStackDefault(stack, scom.curfield, cf -> cf == scom.curfield, () -> reduceLoop(scom, stack, e), e);
 	}
 	public static function makeConstantExpressionWithStack(scom:Dynamic, stack:Dynamic, e:TExpr, concatStrings:Bool = false):Null<TExpr> {
 		e = reduceLoop(scom, stack, e);
@@ -122,7 +122,7 @@ class Optimizer {
 				var c2 = makeConstantExpressionWithStack(scom, stack, e2);
 				if (c1 == null || c2 == null) null;
 				else switch [c1.eexpr, c2.eexpr] {
-					case [TConst(TString(s1)), TConst(TString(s2))] if (concatStrings): TypeOps.mk(TConst(TString(s1 + s2)), scom.basic.tstring, Globals.punion(e1.epos, e2.epos));
+					case [TConst(TString(s1)), TConst(TString(s2))] if (concatStrings): TypeOps.mk(TConst(TString(s1 + s2)), scom.basic.tstring, core.Ast.punion(e1.epos, e2.epos));
 					case _: TypeOps.mk(TBinop(op, c1, c2), e.etype, e.epos);
 				}
 			case TUnop(op = Neg | NegBits, Prefix, e1):
@@ -143,6 +143,6 @@ class Optimizer {
 		};
 	}
 	public static function makeConstantExpression(ctx:Dynamic, e:TExpr, concatStrings:Bool = false):Null<TExpr> {
-		return makeConstantExpressionWithStack(ctx, Globals.newRecStack(), e, concatStrings);
+		return makeConstantExpressionWithStack(ctx, core.TUnification.newRecStack(), e, concatStrings);
 	}
 }

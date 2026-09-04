@@ -96,6 +96,7 @@ class HxbChunk {
 }
 
 class HxbWriter {
+	final generateDocumentation:Bool;
 	public final strings:StringPool;
 	final documentation:StringPool;
 	var hasDocumentation = false;
@@ -134,7 +135,8 @@ class HxbWriter {
 	var typeTypeParamIndices:Map<String, Int> = new Map();
 	var fieldScopeDepth = 0;
 
-	public function new() {
+	public function new(generateDocumentation:Bool = true) {
+		this.generateDocumentation = generateDocumentation;
 		strings = new StringPool();
 		documentation = new StringPool();
 		chunks = [];
@@ -851,7 +853,7 @@ class HxbWriter {
 	static function writePos(chunk:HxbChunk, pos:Pos):Void { chunk.writeString(pos.pfile); chunk.writeLeb128(pos.pmin); chunk.writeLeb128(pos.pmax); }
 	static function writePosPair(chunk:HxbChunk, first:Pos, second:Pos):Void { writePos(chunk, first); chunk.writeLeb128(second.pmin - first.pmin); chunk.writeLeb128(second.pmax - first.pmin); }
 	function writeDocumentation(chunk:HxbChunk, doc:core.Ast.Documentation):Void {
-		if (doc == null) {
+		if (doc == null || !generateDocumentation) {
 			chunk.writeU8(0);
 			return;
 		}

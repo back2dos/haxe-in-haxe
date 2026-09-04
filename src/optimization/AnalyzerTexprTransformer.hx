@@ -53,7 +53,7 @@ class AnalyzerTexprTransformer {
     var valid = switch op {case OpAdd | OpMult | OpDiv | OpSub | OpAnd | OpOr | OpXor | OpShl | OpShr | OpUShr | OpMod:true; case OpAssignOp(_) | OpInterval | OpArrow | OpIn | OpNullCoal | OpAssign | OpEq | OpNotEq | OpGt | OpGte | OpLt | OpLte | OpBoolAnd | OpBoolOr:false;};
     switch [e1.eexpr,e2.eexpr] {
      case [TLocal(v1),TLocal(v2)] if (v1 == v2 && !hasVarFlag(v1,VCaptured) && valid):
-      switch [op,e3.eexpr] {case [OpAdd | OpSub,TConst(TInt(1))] if (core.ExtType.isNumeric(core.Abstract.followWithAbstracts(v1.vType))):withExpr(e,TUnop(op == OpAdd ? Increment : Decrement,Prefix,e1)); case _:withExpr(e,TBinop(OpAssignOp(op),e1,e3));}
+      switch [op,e3.eexpr] {case [OpAdd | OpSub,TConst(TInt(1))] if (core.TOther.ExtType.isNumeric(core.Abstract.followWithAbstracts(v1.vType))):withExpr(e,TUnop(op == OpAdd ? Increment : Decrement,Prefix,e1)); case _:withExpr(e,TBinop(OpAssignOp(op),e1,e3));}
      case _:withExpr(e,TBinop(OpAssign,e1,withExpr(e4,TBinop(op,e2,e3))));
     }
    case TCall({eexpr:TConst(TString("fun"))},[{eexpr:TConst(TInt(i))}]):func(ctx,i);
@@ -77,16 +77,17 @@ private class FunctionGraphBuilder {
  function beginTry(bb:BasicBlockData):Void->Void {tryStack = [bb].concat(tryStack); return function() tryStack = tryStack.slice(1);}
  function addTerminator(bb:BasicBlockData,term:TerminatorKind):BasicBlockData {bb.bbTerminator = term; closeNode(bb); return g.gUnreachable;}
  function checkUnboundCall(s:String,el:Array<TExpr>):Void {if (s == "$ref") switch el {case [{eexpr:TLocal(v)}]:addVarFlag(v,VCaptured); case _:} if (isUnboundCallThatMightHaveSideEffects(s,el)) ctx.hasUnbound = true;}
- function noVoid(t:T,p:Pos):Void if (core.ExtType.isVoid(follow(t))) core.Error.raiseTypingError("Cannot use Void as value",p);
+ function noVoid(t:T,p:Pos):Void if (core.TOther.ExtType.isVoid(follow(t))) core.Error.raiseTypingError("Cannot use Void as value",p);
  function pushName(s:String):Void->Void {ctx.nameStack = [s].concat(ctx.nameStack); return function() ctx.nameStack = ctx.nameStack.slice(1);}
- function checkRef(v:TVar,e:TExpr):Void if (core.ExtType.hasReferenceSemantics(v.vType)) switch Texpr.skip(e).eexpr {case TLocal(w):addVarFlag(w,VCaptured); case _:}
+ function checkRef(v:TVar,e:TExpr):Void if (core.TOther.ExtType.hasReferenceSemantics(v.vType)) switch Texpr.skip(e).eexpr {case TLocal(w):addVarFlag(w,VCaptured); case _:}
  function valueRaw(bb:BasicBlockData,e:TExpr):BlockValue {
   function result(def:TExprDef):BlockValue return {bb:bb,value:withExpr(e,def)};
   return switch e.eexpr {
    case TLocal(_) | TIdent(_):{bb:bb,value:e};
    case TBinop(OpAssign,e1 = {eexpr:TLocal(v)},e2):{bb:blockElement(bb,e),value:e1};
    case TBlock([e1]):value(bb,e1);
-   case TBlock(_) | TIf(_,_,_) | TSwitch(_) | TTry(_) if (switch e.eexpr {case TIf(_,_,null):false; case _:true;}):bindToTemp(bb,e);
+   case TBlock(_) | TSwitch(_) | TTry(_,_):bindToTemp(bb,e);
+   case TIf(_,_,otherwise) if (otherwise != null):bindToTemp(bb,e);
    case TCall({eexpr:TIdent(s)},el) if (isReallyUnbound(s)):checkUnboundCall(s,el); {bb:bb,value:e};
    case TCall(e1,el):call(bb,e,e1,el);
    case TBinop(OpAssignOp(op),ea = {eexpr:TArray(e1,e2)},e3):arrayAssignOp(bb,op,e,ea,e1,e2,e3);
@@ -120,7 +121,7 @@ private class FunctionGraphBuilder {
  }
  function bindToTemp(bb:BasicBlockData,e:TExpr,?v:TVar):BlockValue {
   function unaffected(e:TExpr,e1:TExpr,fa:TFieldAccess):Bool return switch fa {
-   case FAnon(cf) | FInstance(_,_,cf) | FStatic(_,cf) | FClosure(_,cf) if (cf.cfKind == Method(MethNormal)):true;
+   case FAnon(cf) | FInstance(_,_,cf) | FStatic(_,cf) | FClosure(_,cf) if (switch cf.cfKind {case Method(MethNormal):true;case _:false;}):true;
    case FStatic(_,{cfKind:Method(MethDynamic)}):false;
    case FEnum(_,_):true; case FDynamic("cca" | "__Index" | "__s"):true;
    case _:switch [follow(e.etype),follow(e1.etype)] {case [TFun(_),TInst(_,_)]:false; case [TFun(_),_]:true; case _:false;}
@@ -153,8 +154,8 @@ private class FunctionGraphBuilder {
  function blockElementValue(bb:BasicBlockData,e:TExpr,f:TExpr->TExpr):BasicBlockData return blockElementPlus(bb,mapValues(f,e),f);
  function call(bb:BasicBlockData,e:TExpr,e1:TExpr,el:Array<TExpr>):BlockValue {
   function check(e:TExpr,t:T):TExpr return switch e.eexpr {
-   case TLocal(v) if (core.ExtType.hasReferenceSemantics(t)):addVarFlag(v,VCaptured); e;
-   case _:if (core.ExtType.hasVariableSemantics(t)) {var v = allocVar(VGenerated,"tmp",t,e.epos); var r = bindToTemp(bb,e,v); bb = r.bb; r.value;} else e;
+   case TLocal(v) if (core.TOther.ExtType.hasReferenceSemantics(t)):addVarFlag(v,VCaptured); e;
+   case _:if (core.TOther.ExtType.hasVariableSemantics(t)) {var v = allocVar(VGenerated,"tmp",t,e.epos); var r = bindToTemp(bb,e,v); bb = r.bb; r.value;} else e;
   }; el = codegen.Codegen.UnificationCallback.checkCall(check,el,e1.etype); var r = orderedValueList(bb,[e1].concat(el)); if (r.values.length == 0) throw "AnalyzerTexprTransformer.call"; return {bb:r.bb,value:withExpr(e,TCall(r.values[0],r.values.slice(1)))};
  }
  function arrayAssignOp(bb:BasicBlockData,op:Binop,e:TExpr,ea:TExpr,e1:TExpr,e2:TExpr,e3:TExpr):BlockValue {
@@ -169,8 +170,8 @@ private class FunctionGraphBuilder {
   case TVar(v,e1):checkRef(v,e1); declareVarAndAssign(bb,v,e1,e.epos);
   case TBinop(OpAssign,e1 = {eexpr:TLocal(v)},e2):
    checkRef(v,e2); var close = pushName(v.vName); try {bb = blockElementValue(bb,e2,e -> mk(TBinop(OpAssign,e1,e),e.etype,e.epos));} catch (_:TypeExit) {var r = value(bb,e2); bb = r.bb; addTexpr(bb,withExpr(e,TBinop(OpAssign,e1,r.value)));} close(); bb;
-  case TMeta({meta:MergeBlock},{eexpr:TBlock(el)}):blockEl(true,bb,el);
-  case TBlock([]) if (core.ExtType.isVoid(follow(e.etype))):bb;
+  case TMeta({meta:core.MetaList.StrictMeta.MergeBlock},{eexpr:TBlock(el)}):blockEl(true,bb,el);
+  case TBlock([]) if (core.TOther.ExtType.isVoid(follow(e.etype))):bb;
   case TBlock(el):
    var sub = createNode(BKSub,e.etype,e.epos); addCfgEdge(bb,sub,CFGGoto); closeNode(bb); var subNext = blockEl(true,sub,el);
    if (subNext != g.gUnreachable) {var next = createNode(BKNormal,bb.bbType,bb.bbPos); setSyntaxEdge(bb,SESubBlock(sub,next)); addCfgEdge(subNext,next,CFGGoto); closeNode(subNext); next;} else {setSyntaxEdge(bb,SEMerge(sub)); closeNode(subNext); subNext;}
@@ -201,7 +202,7 @@ private class FunctionGraphBuilder {
    var next = reachable ? createNode(BKNormal,bb.bbType,bb.bbPos) : g.gUnreachable;
    var finalCatches = cs.map(c -> {if (c.next != g.gUnreachable) addCfgEdge(c.next,next,CFGGoto); closeNode(c.next); return {v:c.v,bb:c.bb};}); setSyntaxEdge(bb,SETry(bt,bx,finalCatches,next,e.epos)); if (tn != g.gUnreachable) addCfgEdge(tn,next,CFGGoto); closeNode(tn); closeNode(bx); closeNode(bb); next;
   case TReturn(null):addCfgEdge(bb,exit,CFGGoto); addTerminator(bb,TermReturn(e.epos));
-  case TReturn(e1) if (core.ExtType.isVoid(follow(e1.etype))):blockElement(blockElement(bb,e1),mk(TReturn(null),tDynamic,e.epos));
+  case TReturn(e1) if (core.TOther.ExtType.isVoid(follow(e1.etype))):blockElement(blockElement(bb,e1),mk(TReturn(null),tDynamic,e.epos));
   case TReturn(e1):try {blockElementValue(bb,e1,e -> mk(TReturn(e),tDynamic,e.epos));} catch (_:TypeExit) {var r = value(bb,e1); addCfgEdge(r.bb,exit,CFGGoto); addTerminator(r.bb,TermReturnValue(r.value,e.epos));}
   case TBreak:breaks.unshift(bb); addTerminator(bb,TermBreak(e.epos));
   case TContinue:if (continueBlock == null) throw "AnalyzerTexprTransformer.continue"; addCfgEdge(bb,continueBlock,CFGGoto); addTerminator(bb,TermContinue(e.epos));
@@ -209,7 +210,8 @@ private class FunctionGraphBuilder {
   case TCall({eexpr:TIdent(s)},el) if (isReallyUnbound(s)):checkUnboundCall(s,el); addTexpr(bb,e); bb;
   case TCall(e1,el):var r = call(bb,e,e1,el); addTexpr(r.bb,r.value); r.bb;
   case TNew(c,tl,el):var r = orderedValueList(bb,el); addTexpr(r.bb,withExpr(e,TNew(c,tl,r.values))); r.bb;
-  case TCast(e1,mt) if (mt != null):var r = value(bb,e1); addTexpr(r.bb,withExpr(e,TCast(r.value,mt))); r.bb;
+  case TCast(e1,null):blockElement(bb,e1);
+  case TCast(e1,mt):var r = value(bb,e1); addTexpr(r.bb,withExpr(e,TCast(r.value,mt))); r.bb;
   case TBinop(OpAssignOp(op),ea = {eexpr:TArray(e1,e2)},e3):arrayAssignOp(bb,op,e,ea,e1,e2,e3).bb;
   case TBinop(OpAssignOp(op),ef = {eexpr:TField(e1,fa)},e2):fieldAssignOp(bb,op,e,ef,e1,fa,e2).bb;
   case TBinop(OpAssign,ea = {eexpr:TArray(e1,e2)},e3):var r = orderedValueList(bb,[e1,e2,e3]); switch r.values {case [e1,e2,e3]:addTexpr(r.bb,withExpr(e,TBinop(OpAssign,withExpr(ea,TArray(e1,e2)),e3))); case _:throw "AnalyzerTexprTransformer.array assign";} r.bb;
@@ -218,7 +220,7 @@ private class FunctionGraphBuilder {
   case TLocal(_) if (!ctx.config.localDce):addTexpr(bb,e); bb;
   case TField(e1,fa) if (hasSideEffect(e)):var r = value(bb,e1); addTexpr(r.bb,withExpr(e,TField(r.value,fa))); r.bb;
   case TEnumParameter(_,_,_) | TEnumIndex(_) | TFunction(_) | TConst(_) | TTypeExpr(_) | TLocal(_) | TIdent(_):bb;
-  case TParenthesis(e1) | TMeta(_,e1) | TCast(e1,null) | TField(e1,_) | TUnop(_,_,e1):blockElement(bb,e1);
+  case TParenthesis(e1) | TMeta(_,e1) | TField(e1,_) | TUnop(_,_,e1):blockElement(bb,e1);
   case TArray(e1,e2) | TBinop(_,e1,e2):blockElement(blockElement(bb,e1),e2);
   case TArrayDecl(el):blockEl(false,bb,el); case TObjectDecl(fl):blockEl(false,bb,fl.map(f -> f.expr));
   case TWhile(_,_,DoWhile):throw "AnalyzerTexprTransformer.unlowered do-while";

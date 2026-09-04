@@ -1,32 +1,53 @@
 package typing;
+import core.WithType as WithTypeTools;
+import core.WithType.WithTypeValue;
+import core.MetaList.StrictMeta as MetaTag;
+import core.Globals.Pos;
+import core.display.DisplayPosition;
 import core.Ast;
 import core.Ast.*;
 import core.TType;
 import core.TType.*;
 import core.TFunctions.*;
 import core.TOther.*;
+import core.TOther;
 import core.TPrinting.*;
 import core.Globals;
 import core.Meta;
 import core.WithType;
 import core.Error.*;
+import core.Error;
 import context.Typecore.*;
+import context.Typecore;
 import context.TyperPass;
-import context.TyperManager;
+import context.Typecore.TyperManager;
 import context.Common;
-import context.Define;
+import context.Common.*;
+import core.TUnification;
+import core.TUnification.*;
+import core.Message.WarningCode;
+import core.Globals.*;
+import core.DisplayTypes;
+import core.ds.AtomicLazy;
+import core.ds.PMap;
+import core.ds.NotFound;
+import syntax.Parser;
+import context.display.ImportHandling;
+import context.DeferredServices;
+using Lambda;
+import core.Define;
 
 // haxe/src/typing/typeload.ml — mechanical draft; not compile-validated.
-enum LoadInstanceParamMode {ParamNormal; ParamSpawnMonos; ParamCustom(f:Dynamic->Null<Array<Dynamic>>->Array<Dynamic>);}
+enum LoadInstanceParamMode {ParamNormal; ParamSpawnMonos; ParamCustom(f:BuildInfo->Null<TParams>->TParams);}
 enum LoadInstanceMode {LoadNormal; LoadReturn; LoadAny;}
 class Typeload {
- public static var typeFunctionParamsRef:Dynamic=function(_:Dynamic,_:Dynamic,_:Dynamic,_:Dynamic):Dynamic {throw "Uninitialized typeFunctionParamsRef";};
- public static function checkFieldAccess(ctx:Dynamic,cff:Dynamic):Dynamic {
-  var displayed:Dynamic=null,acc:Array<Dynamic>=[],p0=Reflect.copy(cff.cffPos); p0.pmax=p0.pmin;
+ public static var typeFunctionParamsRef:Typer->Func->TypeParamHost->String->TypeParams=function(_:Typer,_:Func,_:TypeParamHost,_:String):TypeParams {throw "Uninitialized typeFunctionParamsRef";};
+ public static function checkFieldAccess(ctx:Typer,cff:ClassField):Dynamic {
+  var displayed:Null<PlacedAccess>=null,acc:Array<PlacedAccess>=[],p0=Reflect.copy(cff.cffPos); p0.pmax=p0.pmin;
   function checkDisplay(p1:Dynamic):Void {var pmid=Reflect.copy(p0); pmid.pmin=p0.pmax; pmid.pmax=p1.pmin; if(DisplayPosition.displayPosition.enclosedIn(pmid)&&acc.length>0) displayed=acc[0];}
-  for(entry in (cast cff.cffAccess:Array<Dynamic>)) {
+  for(entry in cff.cffAccess) {
    var access=entry.access,p1=entry.pos; checkDisplay(p1);
-   var prior:Dynamic=null;
+   var prior:Null<PlacedAccess>=null;
    for(a in acc) if(a.access==access) {prior=a; break;}
    if(prior!=null) {
     if(p1!=Globals.nullPos&&prior.pos!=Globals.nullPos) displayErrorExt(ctx.com,makeError(Custom("Duplicate access modifier "+Ast.sAccess(access)),p1,[makeError(Custom(complMsg("Previously defined here")),prior.pos)]));
@@ -43,76 +64,76 @@ class Typeload {
   }
   checkDisplay(cff.cffName.pos); return displayed;
  }
- public static function findTypeInModule(m:Dynamic,name:String):Dynamic {for(mt in (cast m.mTypes:Array<Dynamic>)) {var info=tInfos(mt); if(!info.mtPrivate&&info.mtPath.name==name) return mt;} throw "Not_found";}
- public static function findTypeInModuleRaise(ctx:Dynamic,m:Dynamic,name:String,p:Dynamic):Dynamic {
-  for(mt in (cast m.mTypes:Array<Dynamic>)) {var info=tInfos(mt); if(info.mtPath.name==name) {if(ctx.m.curmod!=info.mtModule&&info.mtPrivate) raiseTypingErrorExt(makeError(TypeNotFound(m.mPath,name,PrivateType),p)); return mt;}}
+ public static function findTypeInModule(m:ModuleDef,name:String):Dynamic {for(mt in m.mTypes) {var info=tInfos(mt); if(!info.mtPrivate&&info.mtPath.name==name) return mt;} throw new NotFound();}
+ public static function findTypeInModuleRaise(ctx:Typer,m:ModuleDef,name:String,p:Pos):Dynamic {
+  for(mt in m.mTypes) {var info=tInfos(mt); if(info.mtPath.name==name) {if(ctx.m.curmod!=info.mtModule&&info.mtPrivate) raiseTypingErrorExt(makeError(TypeNotFound(m.mPath,name,PrivateType),p)); return mt;}}
   return raiseTypingErrorExt(makeError(TypeNotFound(m.mPath,name,NotDefined),p));
  }
- public static function findTypeInCurrentModuleContext(ctx:Dynamic,pack:Array<String>,name:String):Dynamic {
+ public static function findTypeInCurrentModuleContext(ctx:Typer,pack:Array<String>,name:String):Dynamic {
   if(pack.length==0) {
-   for(mt in (cast ctx.m.curmod.mTypes:Array<Dynamic>)) if(tName(mt)==name) return mt;
+   for(mt in ctx.m.curmod.mTypes) if(tName(mt)==name) return mt;
    var found=ctx.m.importResolution.findTypeImport(name); ImportHandling.markImportPosition(ctx,found.pos); return found.type;
   }
-  for(mt in (cast ctx.m.curmod.mTypes:Array<Dynamic>)) if(tPath(mt)=={pack:pack,name:name}) return mt;
-  throw "Not_found";
+  for(mt in ctx.m.curmod.mTypes) if(Common.samePath(tPath(mt),{pack:pack,name:name})) return mt;
+  throw new NotFound();
  }
- public static function findInWildcardImports(ctx:Dynamic,mname:String,p:Dynamic,f:Dynamic->Dynamic):Dynamic {
+ public static function findInWildcardImports<R>(ctx:Typer,mname:String,p:Pos,f:ModuleDef->R):R {
   for(entry in (cast ctx.m.importResolution.extractWildcardPackages():Array<Dynamic>)) try {
    var path={pack:entry.pack,name:mname},m:Dynamic;
-   try m=ctx.g.doLoadModule(ctx,path,p) catch(exc:Dynamic) {switch exc {case Error({errMessage:ModuleNotFound(mpath)}) if(mpath==path):throw "Not_found"; case _:throw exc;}}
+   try m=ctx.g.doLoadModule(ctx,path,p) catch(exc:Dynamic) {switch exc {case (core.ds.ExceptionTools.typing(_) => Some({errMessage:ModuleNotFound(mpath)})) if(Common.samePath(mpath,path)):throw new NotFound(); case _:throw exc;}}
    var result=f(m); ImportHandling.markImportPosition(ctx,entry.pos); return result;
-  } catch(exc:Dynamic) {if(exc!="Not_found") throw exc;}
-  throw "Not_found";
+  } catch(exc:Dynamic) {if(!Std.isOfType(exc,NotFound)) throw exc;}
+  throw new NotFound();
  }
- public static function findInModulesStartingFromCurrentPackage(ctx:Dynamic,mname:String,p:Dynamic,f:Dynamic->Dynamic):Dynamic {
-  var pack:Array<String>=ctx.m.curmod.mPath.pack.copy(),m:Dynamic;
+ public static function findInModulesStartingFromCurrentPackage<R>(ctx:Typer,mname:String,p:Pos,f:ModuleDef->R):R {
+  var pack:Array<String>=ctx.m.curmod.mPath.pack.copy(),m:ModuleDef=null;
   while(true) {
    var path={pack:pack,name:mname};
-   try {m=ctx.g.doLoadModule(ctx,path,p); break;} catch(exc:Dynamic) {switch exc {case Error({errMessage:ModuleNotFound(mpath)}) if(mpath==path):if(pack.length==0) throw "Not_found"; pack=pack.slice(0,pack.length-1); case _:throw exc;}}
+   try {m=ctx.g.doLoadModule(ctx,path,p); break;} catch(exc:Dynamic) {switch exc {case (core.ds.ExceptionTools.typing(_) => Some({errMessage:ModuleNotFound(mpath)})) if(Common.samePath(mpath,path)):if(pack.length==0) throw new NotFound(); pack=pack.slice(0,pack.length-1); case _:throw exc;}}
   }
   return f(m);
  }
- public static function findInUnqualifiedModules(ctx:Dynamic,name:String,p:Dynamic,f:Dynamic->Dynamic):Dynamic {try return findInWildcardImports(ctx,name,p,f) catch(exc:Dynamic) {if(exc!="Not_found") throw exc; return findInModulesStartingFromCurrentPackage(ctx,name,p,f);}}
- public static function loadUnqualifiedTypeDef(ctx:Dynamic,mname:String,tname:String,p:Dynamic):Dynamic {try return findInUnqualifiedModules(ctx,mname,p,m -> findTypeInModuleRaise(ctx,m,tname,p)) catch(exc:Dynamic) {if(exc!="Not_found") throw exc; return raiseErrorMsg(ModuleNotFound({pack:[],name:mname}),p);}}
- public static function loadModule(ctx:Dynamic,path:Dynamic,p:Dynamic):Dynamic {
-  try return ctx.g.doLoadModule(ctx,path,p) catch(exc:Dynamic) {switch exc {case Error({errMessage:ModuleNotFound(mpath)}) if(mpath==path&&path.pack.length>0&&path.pack[0]=="std"):return ctx.g.doLoadModule(ctx,{pack:path.pack.slice(1),name:path.name},p); case _:throw exc;}}
+ public static function findInUnqualifiedModules<R>(ctx:Typer,name:String,p:Pos,f:ModuleDef->R):R {try return findInWildcardImports(ctx,name,p,f) catch(exc:Dynamic) {if(!Std.isOfType(exc,NotFound)) throw exc; return findInModulesStartingFromCurrentPackage(ctx,name,p,f);}}
+ public static function loadUnqualifiedTypeDef(ctx:Typer,mname:String,tname:String,p:Pos):Dynamic {try return findInUnqualifiedModules(ctx,mname,p,m -> findTypeInModuleRaise(ctx,m,tname,p)) catch(exc:Dynamic) {if(!Std.isOfType(exc,NotFound)) throw exc; return raiseErrorMsg(ModuleNotFound({pack:[],name:mname}),p);}}
+ public static function loadModule(ctx:Typer,path:GlobalTypePath,p:Pos):Dynamic {
+  try return ctx.g.doLoadModule(ctx,path,p) catch(exc:Dynamic) {switch exc {case (core.ds.ExceptionTools.typing(_) => Some({errMessage:ModuleNotFound(mpath)})) if(Common.samePath(mpath,path)&&path.pack.length>0&&path.pack[0]=="std"):return ctx.g.doLoadModule(ctx,{pack:path.pack.slice(1),name:path.name},p); case _:throw exc;}}
  }
- public static function loadQualifiedTypeDef(ctx:Dynamic,pack:Array<String>,mname:String,tname:String,p:Dynamic):Dynamic return findTypeInModuleRaise(ctx,loadModule(ctx,{pack:pack,name:mname},p),tname,p);
- public static function loadTypeDefPrime(ctx:Dynamic,pack:Array<String>,mname:String,tname:String,p:Dynamic):Dynamic return pack.length==0?loadUnqualifiedTypeDef(ctx,mname,tname,p):loadQualifiedTypeDef(ctx,pack,mname,tname,p);
- public static function loadTypeDef(ctx:Dynamic,p:Dynamic,t:Dynamic):Dynamic {
-  if(t==Parser.magicTypePath) raiseFields(DisplayToplevel.collect(ctx,TKType,NoValue,true),CRTypeHint,DisplayTypes.makeSubject(null,p));
+ public static function loadQualifiedTypeDef(ctx:Typer,pack:Array<String>,mname:String,tname:String,p:Pos):Dynamic return findTypeInModuleRaise(ctx,loadModule(ctx,{pack:pack,name:mname},p),tname,p);
+ public static function loadTypeDefPrime(ctx:Typer,pack:Array<String>,mname:String,tname:String,p:Pos):Dynamic return pack.length==0?loadUnqualifiedTypeDef(ctx,mname,tname,p):loadQualifiedTypeDef(ctx,pack,mname,tname,p);
+ public static function loadTypeDef(ctx:Typer,p:Pos,t:Dynamic):Dynamic {
+  if(core.ds.Key.compare(t,Parser.magicTypePath)==0) DeferredServices.display();
   var name=t.tsub==null?t.tname:t.tsub;
-  try {if(t.tsub!=null) throw "Not_found"; return findTypeInCurrentModuleContext(ctx,t.tpackage,name);} catch(exc:Dynamic) {if(exc!="Not_found") throw exc; return loadTypeDefPrime(ctx,t.tpackage,t.tname,name,p);}
+  try {if(t.tsub!=null) throw new NotFound(); return findTypeInCurrentModuleContext(ctx,t.tpackage,name);} catch(exc:Dynamic) {if(!Std.isOfType(exc,NotFound)) throw exc; return loadTypeDefPrime(ctx,t.tpackage,t.tname,name,p);}
  }
- public static function generateArgsMeta(com:Dynamic,cls:Dynamic,addMeta:Dynamic->Void,args:Array<Dynamic>):Void {
-  var values=[];
-  for(arg in args) if(arg.expr!=null) values.unshift({name:{name:arg.name.name,pos:arg.name.pos,quotes:NoQuotes},expr:arg.expr});
-  if(values.length>0) addMeta({meta:Meta.Value,exprs:[{expr:EObjectDecl(values),pos:Globals.nullPos}],pos:Globals.nullPos});
-  if(args.exists(arg -> arg.meta.length>0)) addMeta({meta:Meta.HaxeArguments,exprs:[{expr:EFunction(FKAnonymous,{fParams:[],fArgs:args,fType:null,fExpr:null}),pos:Globals.nullPos}],pos:Globals.nullPos});
+ public static function generateArgsMeta(com:Dynamic,cls:Dynamic,addMeta:MetadataEntry->Void,args:Array<FuncArg>):Void {
+  var values:Array<ObjectField>=[];
+  for(arg in args) if(arg.expr!=null) values.unshift({key:{name:arg.name.name,pos:arg.name.pos,quote:NoQuotes},expr:arg.expr});
+  if(values.length>0) addMeta({meta:MetaTag.Value,exprs:[{expr:EObjectDecl(values),pos:Globals.nullPos}],pos:Globals.nullPos});
+  if(args.exists(arg -> arg.meta.length>0)) addMeta({meta:MetaTag.HaxeArguments,exprs:[{expr:EFunction(FKAnonymous,{fParams:[],fArgs:args,fType:null,fExpr:null}),pos:Globals.nullPos}],pos:Globals.nullPos});
  }
- public static function isRedefined(ctx:Dynamic,cf1:Dynamic,fields:Dynamic,p:Dynamic):Bool {
+ public static function isRedefined(ctx:Typer,cf1:TClassField,fields:TypeMap<TClassField>,p:Pos):Bool {
   if(!fields.exists(cf1.cfName)) return false;
   var cf2=fields.get(cf1.cfName),pc=printContext();
   if(!typeIseq(cf1.cfType,cf2.cfType)) raiseTypingErrorExt(makeError(Custom("Cannot redefine field "+cf1.cfName+" with different type"),p,[makeError(Custom(complMsg("Second type was "+sType(pc,cf2.cfType))),cf2.cfPos),makeError(Custom(complMsg("First type was "+sType(pc,cf1.cfType))),cf1.cfPos)]));
   return true;
  }
- public static function makeExtensionType(ctx:Dynamic,tl:Array<Dynamic>):Dynamic {
-  var fields=PMap.empty();
+ public static function makeExtensionType(ctx:Typer,tl:Array<{type:T,pos:Pos}>):T {
+  var fields:TypeMap<TClassField>=PMap.empty();
   for(pair in tl) switch follow(pair.type) {
-   case TAnon(a):a.aFields.iter(function(_:String,cf:Dynamic) {if(!isRedefined(ctx,cf,fields,pair.pos)) fields=fields.add(cf.cfName,cf);});
+   case TAnon(a):PMap.iter(function(_:String,cf:TClassField) {if(!isRedefined(ctx,cf,fields,pair.pos)) fields=PMap.add(cf.cfName,cf,fields);},a.aFields);
    case _:displayError(ctx.com,"Can only extend structures",pair.pos); fields=PMap.empty();
   }
-  return mkAnon({value:Extend(tl.map(pair -> pair.type))},fields);
+  return mkAnon(Extend(tl.map(pair -> pair.type)),fields);
  }
- public static function checkParamConstraints(ctx:Dynamic,t:Dynamic,map:Dynamic->Dynamic,ttp:Dynamic,p:Dynamic):Void {
+ public static function checkParamConstraints(ctx:Typer,t:T,map:T->T,ttp:TypedTypeParam,p:Pos):Void {
   for(ti in (cast getConstraints(ttp):Array<Dynamic>)) {
    var mapped=map(ti);
    try unifyRaise(t,mapped,p) catch(exc:Dynamic) {switch exc {
-    case Error(err):switch err.errMessage {
+    case (core.ds.ExceptionTools.typing(_) => Some(err)):switch err.errMessage {
      case Unify(l):
-      function fail():Void {if(!ctx.f.untyped) {var copy=Reflect.copy(err); copy.errMessage=Unify([ConstraintFailure(Globals.sTypePath(ttp.ttpClass.clPath))].concat(l)); displayErrorExt(ctx.com,copy);}}
+      function fail():Void {if(!ctx.f.isUntyped) {var copy=Reflect.copy(err); copy.errMessage=Unify([ConstraintFailure(Globals.sTypePath(ttp.ttpClass.clPath))].concat(l)); displayErrorExt(ctx.com,copy);}}
       switch follow(t) {
-       case TInst({clKind:KExpr(e)},_):var local=TyperManager.cloneForTypeParameterExpression(ctx),e=typeExpr(local,e,WithType.withType(mapped)); try unifyRaise(e.etype,mapped,p) catch(exc:Dynamic) {switch exc {case Error({errMessage:Unify(_)}):fail(); case _:throw exc;}}
+       case TInst({clKind:KExpr(e)},_):var local=TyperManager.cloneForTypeParameterExpression(ctx),e=typeExpr(local,e,WithTypeTools.withType(mapped)); try unifyRaise(e.etype,mapped,p) catch(exc:Dynamic) {switch exc {case (core.ds.ExceptionTools.typing(_) => Some({errMessage:Unify(_)})):fail(); case _:throw exc;}}
        case _:fail();
       }
      case _:throw exc;
@@ -121,20 +142,20 @@ class Typeload {
    }}
   }
  }
- public static function maybeBuildInstance(ctx:Dynamic,t0:Dynamic,getParams:LoadInstanceParamMode,p:Dynamic):Dynamic {
-  function loop(t:Dynamic):Dynamic return switch t {
-   case TInst(({clKind:KGeneric} => c),tl):var info=ctx.g.getBuildInfo(ctx,TClassDecl(c),p); var params=switch getParams {case ParamNormal|ParamSpawnMonos:tl; case ParamCustom(f):f(info,tl);}; maybeBuildInstance(ctx,info.buildApply(params),getParams,p);
+ public static function maybeBuildInstance(ctx:Typer,t0:T,getParams:LoadInstanceParamMode,p:Pos):T {
+  function loop(t:T):T return switch t {
+   case TInst(c,tl) if(c.clKind==KGeneric):var info=ctx.g.getBuildInfo(ctx,TClassDecl(c),p); var params=switch getParams {case ParamNormal|ParamSpawnMonos:tl; case ParamCustom(f):f(info,tl);}; maybeBuildInstance(ctx,info.buildApply(params),getParams,p);
    case TType(td,tl):loop(applyTypedef(td,tl));
    case TMono(m) if(m.tmType!=null):loop(m.tmType);
    case _:t0;
   };
   return loop(t0);
  }
- public static function loadParams(ctx:Dynamic,info:Dynamic,params:Array<Dynamic>,p:Dynamic):Array<Dynamic> {
+ public static function loadParams(ctx:Typer,info:BuildInfo,params:Array<TypeParamOrConst>,p:Pos):TParams {
   var rest=info.buildKind==BuildGenericBuild&&info.buildParams.length==1&&info.buildParams[0].ttpName=="Rest",javaRest=ctx.com.platform==Jvm&&info.buildExtern; rest=rest||javaRest;
-  function loadParam(param:Dynamic,ttp:Dynamic):Dynamic return switch param {
+  function loadParam(param:TypeParamOrConst,ttp:Null<TypedTypeParam>):{type:T,pos:Pos} return switch param {
    case TPExpr(e):
-    var name=switch e.expr {case EConst(String(s,_)):"S"+s; case EConst((Int(_) => c)):"I"+sConstant(c); case EConst((Float(_) => c)):"F"+sConstant(c); case EDisplay(_):typeExpr(ctx,e,WithType.value); "Expr"; case _:"Expr";};
+    var name=switch e.expr {case EConst(String(s,_)):"S"+s; case EConst(Int(value,suffix)):"I"+Ast.sConstant(Int(value,suffix)); case EConst(Float(value,suffix)):"F"+Ast.sConstant(Float(value,suffix)); case EDisplay(_):typeExpr(ctx,e,WithTypeTools.value); "Expr"; case _:"Expr";};
     var c=mkClass(ctx.m.curmod,{pack:[],name:name},p,e.pos); c.clKind=KExpr(e); {type:TInst(c,[]),pos:e.pos};
    case TPType({type:CTPath({path:{tpackage:["$"],tname:"_hx_default"}}),pos:p}):
     if(ttp!=null&&ttp.ttpDefault!=null) {type:ttp.ttpDefault,pos:p};
@@ -144,10 +165,10 @@ class Typeload {
    case TPType(t):{type:loadComplexType(ctx,true,LoadNormal,t),pos:t.pos};
   };
   var checks=[];
-  function loop(inputs:Array<Dynamic>,expected:Array<Dynamic>,isRest:Bool):Array<Dynamic> {
+  function loop(inputs:Array<TypeParamOrConst>,expected:TypeParams,isRest:Bool):TParams {
    if(inputs.length>0&&expected.length>0) {
     var ttp=expected[0],name=ttp.ttpName,loaded=loadParam(inputs[0],ttp),t=loaded.type;
-    var expression=switch t {case TInst({clKind:KExpr(_)},_):true; case _:false;},expects=name=="Const"||Meta.has(Meta.Const,ttp.ttpClass.clMeta),accepts=name=="Rest";
+    var expression=switch t {case TInst({clKind:KExpr(_)},_):true; case _:false;},expects=name=="Const"||Meta.has(MetaTag.Const,ttp.ttpClass.clMeta),accepts=name=="Rest";
     if(expression) {if(!expects&&!accepts) raiseTypingError("Constant value unexpected here",p);} else if(expects) raiseTypingError("Type parameter is expected to be a constant value",p);
     isRest=isRest||(name=="Rest"&&info.buildKind==BuildGenericBuild);
     var generic=switch info.buildKind {case BuildGeneric(_):true; case _:false;};
@@ -157,7 +178,7 @@ class Typeload {
    if(inputs.length==0&&expected.length==0) return [];
    if(inputs.length==0) {
     if(expected.length==1&&expected[0].ttpName=="Rest"&&info.buildKind==BuildGenericBuild) return [];
-    var ttp=expected[0],t:Dynamic;
+    var ttp=expected[0],t:T;
     if(javaRest) t=tDynamic; else if(ttp.ttpDefault!=null) t=ttp.ttpDefault; else if(ignoreError(ctx.com)) t=ttp.ttpType; else return raiseTypingError("Not enough type parameters for "+Globals.sTypePath(info.buildPath),p);
     return [t].concat(loop([],expected.slice(1),isRest));
    }
@@ -168,17 +189,17 @@ class Typeload {
   }
   var result=loop(params,info.buildParams,false);
   if(!rest) {
-   function map(t:Dynamic):Dynamic return maybeBuildInstance(ctx,applyParams(info.buildParams,result,t),ParamNormal,p);
+   function map(t:T):T return maybeBuildInstance(ctx,applyParams(info.buildParams,result,t),ParamNormal,p);
    delay(ctx.g,PCheckConstraint,function() {for(check in checks) checkParamConstraints(ctx,check.type,map,check.param,check.pos);});
   }
   return result;
  }
- public static function loadInstancePrime(ctx:Dynamic,ptp:Dynamic,getParams:LoadInstanceParamMode,mode:LoadInstanceMode):Dynamic {
+ public static function loadInstancePrime(ctx:Typer,ptp:PlacedTypePath,getParams:LoadInstanceParamMode,mode:LoadInstanceMode):T {
   var t=ptp.path;
   try {
-   if(t.tpackage.length!=0||t.tsub!=null) throw "Not_found";
+   if(t.tpackage.length!=0||t.tsub!=null) throw new NotFound();
    var pt=lookupParam(t.tname,ctx.typeParams); if(t.tparams.length!=0) raiseTypingError("Class type parameter "+t.tname+" can't have parameters",ptp.posFull); return pt;
-  } catch(exc:Dynamic) {if(exc!="Not_found") throw exc;}
+  } catch(exc:Dynamic) {if(!Std.isOfType(exc,NotFound)) throw exc;}
   var mt=loadTypeDef(ctx,ptp.posPath,t),info=ctx.g.getBuildInfo(ctx,mt,ptp.posFull);
   if(info.buildPath.pack.length==0&&info.buildPath.name=="Dynamic") return switch t.tparams {case []:tDynamic; case [TPType(t)]:TDynamic(loadComplexType(ctx,true,LoadNormal,t)); case _:raiseTypingError("Too many parameters for Dynamic",ptp.posFull);};
   if(info.buildParams.length==0) {
@@ -189,17 +210,16 @@ class Typeload {
   var tl=if(t.tparams.length==0&&!rest) switch getParams {case ParamNormal:loadParams(ctx,info,t.tparams,ptp.posFull); case ParamSpawnMonos:Monomorph.spawnConstrainedMonos(t -> t,info.buildParams); case ParamCustom(f):f(info,null);} else loadParams(ctx,info,t.tparams,ptp.posFull);
   return maybeBuildInstance(ctx,info.buildApply(tl),getParams,ptp.posFull);
  }
- public static function loadInstance(ctx:Dynamic,ptp:Dynamic,getParams:LoadInstanceParamMode,mode:LoadInstanceMode,allowDisplay:Bool=false):Dynamic {
-  try {var t=loadInstancePrime(ctx,ptp,getParams,mode); if(allowDisplay) DisplayEmitter.checkDisplayType(ctx,t,ptp); return t;}
+ public static function loadInstance(ctx:Typer,ptp:PlacedTypePath,getParams:LoadInstanceParamMode,mode:LoadInstanceMode,allowDisplay:Bool=false):T {
+  try {var t=loadInstancePrime(ctx,ptp,getParams,mode); if(allowDisplay && ctx.m.isDisplayFile) DeferredServices.display(); return t;}
   catch(exc:Dynamic) {switch exc {
-   case Error({errMessage:ModuleNotFound(path)}) if(ctx.e.macroDepth<=0&&ctx.com.display.dmsKind==DMDefault&&DisplayPosition.displayPosition.enclosedIn(ptp.posPath)):return DisplayToplevel.collectAndRaise(ctx,TKType,NoValue,CRTypeHint,{name:Globals.sTypePath(path),pos:ptp.posFull},ptp.posPath);
+   case (core.ds.ExceptionTools.typing(_) => Some({errMessage:ModuleNotFound(path)})) if(ctx.e.macroDepth<=0&&ctx.com.display.dmsKind==DMDefault&&DisplayPosition.displayPosition.enclosedIn(ptp.posPath)):return DeferredServices.display();
    case _:throw exc;
   }}
  }
- static function structCompletion(e:Dynamic,intersection:Bool):Dynamic {
-  switch e {case DisplayException(DisplayFields(({fkind:CRTypeHint} => r))):var items=(cast r.fitems:Array<Dynamic>).filter(item -> switch item.ciKind {case ITType({kind:Struct},_):true; case _:false;}); return raiseFields(items,CRStructExtension(intersection),r.fsubject); case _:throw e;}
- }
- public static function loadComplexTypePrime(ctx:Dynamic,allowDisplay:Bool,mode:LoadInstanceMode,hint:Dynamic):Dynamic {
+ static function structCompletion(e:Dynamic,intersection:Bool):Dynamic {throw e;}
+
+ public static function loadComplexTypePrime(ctx:Typer,allowDisplay:Bool,mode:LoadInstanceMode,hint:TypeHint):T {
   var p=hint.pos;
   return switch hint.type {
    case CTParent(t):loadComplexType(ctx,allowDisplay,mode,t);
@@ -209,7 +229,7 @@ class Typeload {
    case CTOptional(_):raiseTypingError("Optional type not allowed here",p);
    case CTNamed(_):raiseTypingError("Named type not allowed here",p);
    case CTIntersection(tl):
-    var loaded=tl.map(function(t) {try return {type:loadComplexType(ctx,allowDisplay,LoadNormal,t),pos:t.pos} catch(e:Dynamic) return structCompletion(e,true);});
+    var loaded:Array<{type:T,pos:Pos}>=tl.map(function(t) {try return {type:loadComplexType(ctx,allowDisplay,LoadNormal,t),pos:t.pos} catch(e:Dynamic) return structCompletion(e,true);});
     var tr=Monomorph.create(),t=TMono(tr),r=makeLazy(ctx.g,t,function() {var ta=makeExtensionType(ctx,loaded); Monomorph.bind(tr,ta); return ta;},"constraint"); TLazy(r);
    case CTExtend(tl,fields):
     var ta=loadComplexType(ctx,allowDisplay,LoadNormal,{type:CTAnonymous(fields),pos:p});
@@ -218,26 +238,26 @@ class Typeload {
      case TInst({clKind:KTypeParameter(_)},_):raiseTypingError("Cannot structurally extend type parameters",pair.pos);
      case TMono(_):raiseTypingError("Loop found in cascading signatures definitions. Please change order/import",pair.pos);
      case TAnon(a2):
-      a.aFields.iter(function(_:String,cf:Dynamic) isRedefined(ctx,cf,a2.aFields,pair.pos));
-      var fields=a2.aFields; a.aFields.iter(function(name:String,cf:Dynamic) {fields=fields.add(name,cf);}); mkAnon({value:Extend([pair.type])},fields);
+      PMap.iter(function(_:String,cf:TClassField) {isRedefined(ctx,cf,a2.aFields,pair.pos);},a.aFields);
+      var fields=a2.aFields; PMap.iter(function(name:String,cf:TClassField) {fields=PMap.add(name,cf,fields);},a.aFields); mkAnon(Extend([pair.type]),fields);
      case _:raiseTypingError("Can only extend structures",pair.pos);
     };
-    function merge(pair:Dynamic):Void switch follow(pair.type) {case TAnon(a2):a2.aFields.iter(function(name:String,cf:Dynamic) {if(!isRedefined(ctx,cf,a.aFields,pair.pos)) a.aFields=a.aFields.add(name,cf);}); case _:raiseTypingError("Can only extend structures",pair.pos);}
-    var instances=tl.map(function(ptp) {try return {type:loadInstance(ctx,ptp,ParamNormal,LoadNormal,allowDisplay),pos:ptp.posFull} catch(e:Dynamic) return structCompletion(e,false);});
+    function merge(pair:Dynamic):Void switch follow(pair.type) {case TAnon(a2):PMap.iter(function(name:String,cf:TClassField) {if(!isRedefined(ctx,cf,a.aFields,pair.pos)) a.aFields=PMap.add(name,cf,a.aFields);},a2.aFields); case _:raiseTypingError("Can only extend structures",pair.pos);}
+    var instances:Array<{type:T,pos:Pos}>=tl.map(function(ptp) {try return {type:loadInstance(ctx,ptp,ParamNormal,LoadNormal,allowDisplay),pos:ptp.posFull} catch(e:Dynamic) return structCompletion(e,false);});
     var tr=Monomorph.create(),t=TMono(tr),r=makeLazy(ctx.g,t,function() {
      var result:Dynamic;
-     if(instances.length==1) result=extension(instances[0]); else {for(instance in instances) merge(instance); a.aStatus.value=Extend(instances.map(pair -> pair.type)); result=ta;}
+     if(instances.length==1) result=extension(instances[0]); else {for(instance in instances) merge(instance); a.aStatus=Extend(instances.map(pair -> pair.type)); result=ta;}
      Monomorph.bind(tr,result); return t;
     },"constraint"); TLazy(r);
    case CTAnonymous(list):
-    var displayed:Dynamic=null,fields=PMap.empty();
+    var displayed:Null<TClassField>=null,fields:TypeMap<TClassField>=PMap.empty();
     for(f in list) {
      var name=f.cffName.name,pf=f.cffName.pos,p=f.cffPos;
      if(fields.exists(name)) raiseTypingError("Duplicate field declaration : "+name,pf);
-     function optionalType(mode:LoadInstanceMode,t:Dynamic):Dynamic {if(t==null) return raiseTypingError("Explicit type required for field "+name,p); return loadComplexType(ctx,allowDisplay,mode,t);}
+     function optionalType(mode:LoadInstanceMode,t:Null<TypeHint>):T {if(t==null) return raiseTypingError("Explicit type required for field "+name,p); return loadComplexType(ctx,allowDisplay,mode,t);}
      if(name=="new") warning(ctx,WDeprecated,"Structures with new are deprecated, use haxe.Constraints.Constructible instead",p);
      function noExpr(e:Dynamic):Void {if(e!=null) raiseTypingError("Expression not allowed here",e.pos);}
-     var pub=true,dyn=false,params:Array<Dynamic>=[],isFinal=false;
+     var pub=true,dyn=false,params:TypeParams=[],isFinal=false;
      checkFieldAccess(ctx,f);
      for(access in (cast f.cffAccess:Array<Dynamic>)) switch access.access {
       case APublic:
@@ -246,18 +266,18 @@ class Typeload {
       case AFinal:isFinal=true;
       case a:raiseTypingError("Invalid access "+Ast.sAccess(a),p);
      }
-     var t:Dynamic,kind:Dynamic;
+     var t:T,kind:FieldKind;
      switch f.cffKind {
       case FVar(type,e) if(isFinal):noExpr(e); if(type==null) raiseTypingError("Type required for structure property",p); t=loadComplexType(ctx,allowDisplay,LoadNormal,type); kind=Var({vRead:AccNormal,vWrite:AccNever});
-      case FVar({type:CTPath({path:{tpackage:[],tname:"Void"}})},_)|FProp(_,_,{type:CTPath({path:{tpackage:[],tname:"Void"}})},_):raiseTypingError("Fields of type Void are not allowed in structures",p);
+      case FVar({type:CTPath({path:{tpackage:[],tname:"Void"}})},_)|FProp(_,_,{type:CTPath({path:{tpackage:[],tname:"Void"}})},_):t=raiseTypingError("Fields of type Void are not allowed in structures",p);kind=Var({vRead:AccNormal,vWrite:AccNormal});
       case FVar(type,e):noExpr(e); t=optionalType(LoadNormal,type); kind=Var({vRead:AccNormal,vWrite:AccNormal});
       case FFun(fd):
        params=typeFunctionParamsRef(ctx,fd,TPHAnonField,name); noExpr(fd.fExpr); var old=ctx.typeParams; ctx.typeParams=params.concat(old);
        var args=fd.fArgs.map(function(arg) {noExpr(arg.expr); return {name:arg.name.name,optional:arg.optional,type:optionalType(LoadNormal,arg.type)};});
-       var ret=optionalType(LoadReturn,fd.fType); t=Meta.has(Meta.Coroutine,f.cffMeta)?AtomicLazy.force(ctx.t.tcoro.tcoro)(args,ret):TFun(args,ret); ctx.typeParams=old; kind=Method(dyn?MethDynamic:MethNormal);
+       var ret=optionalType(LoadReturn,fd.fType); t=Meta.has(MetaTag.Coroutine,f.cffMeta)?ctx.t.tcoro.tcoro.force()({args:args,ret:ret}):TFun({args:args,ret:ret}); ctx.typeParams=old; kind=Method(dyn?MethDynamic:MethNormal);
       case FProp(i1,i2,type,e):
        noExpr(e);
-       function property(part:Dynamic,get:Bool):Dynamic return switch part.name {
+       function property(part:PlacedName,get:Bool):VarAccess return switch part.name {
         case "null":AccNo; case "never":AccNever; case "default":AccNormal; case "dynamic":AccCall;
         case "get" if(get):AccCall; case "set" if(!get):AccCall; case "private get" if(get):AccPrivateCall; case "private set" if(!get):AccPrivateCall;
         case x if((get&&x=="get_"+name)||(!get&&x=="set_"+name)):AccCall;
@@ -266,18 +286,18 @@ class Typeload {
        if(type==null) raiseTypingError("Type required for structure property",p);
        t=loadComplexType(ctx,allowDisplay,LoadNormal,type); kind=Var({vRead:property(i1,true),vWrite:property(i2,false)});
      }
-     if(Meta.has(Meta.Optional,f.cffMeta)) t=ctx.t.tnull(t);
+     if(Meta.has(MetaTag.Optional,f.cffMeta)) t=ctx.t.tnull(t);
      var cf=mkField(name,t,p,f.cffName.pos,pub); cf.cfKind=kind; cf.cfParams=params; cf.cfDoc=f.cffDoc; cf.cfMeta=f.cffMeta;
      if(isFinal) addClassFieldFlag(cf,CfFinal); initMetaOverloads(ctx,null,cf);
-     if(ctx.m.isDisplayFile) {DisplayEmitter.checkDisplayMetadata(ctx,cf.cfMeta); if(DisplayPosition.displayPosition.enclosedIn(cf.cfNamePos)) displayed=cf;}
-     fields=fields.add(name,cf);
+     if(ctx.m.isDisplayFile) {DeferredServices.display(); if(DisplayPosition.displayPosition.enclosedIn(cf.cfNamePos)) displayed=cf;}
+     fields=PMap.add(name,cf,fields);
     }
-    var a={aFields:fields,aStatus:{value:Closed}};
-    if(displayed!=null) {var cf=displayed; delay(ctx.g,PBuildClass,function() DisplayEmitter.displayField(ctx,AnonymousStructure(a),CFSMember,cf,cf.cfNamePos));}
+    var a={aFields:fields,aStatus:Closed};
+    if(displayed!=null) {var cf=displayed; delay(ctx.g,PBuildClass,function() DeferredServices.display());}
     TAnon(a);
    case CTFunction(args,ret):
     var voidArg=args.length==1&&switch args[0].type {case CTPath({path:{tpackage:[],tparams:[],tname:"Void"}}):true; case _:false;};
-    if(voidArg) TFun([],loadComplexType(ctx,allowDisplay,LoadReturn,ret));
+    if(voidArg) TFun({args:[],ret:loadComplexType(ctx,allowDisplay,LoadReturn,ret)});
     else {
      var typed=args.map(function(t) {
       var opt=false,name="";
@@ -285,50 +305,50 @@ class Typeload {
       switch t.type {case CTNamed(n,inner):name=n.name; t=inner; case _:}
       return {name:name,optional:opt,type:loadComplexType(ctx,allowDisplay,LoadNormal,t)};
      });
-     TFun(typed,loadComplexType(ctx,allowDisplay,LoadReturn,ret));
+     TFun({args:typed,ret:loadComplexType(ctx,allowDisplay,LoadReturn,ret)});
     }
   };
  }
- public static function loadComplexType(ctx:Dynamic,allowDisplay:Bool,mode:LoadInstanceMode,hint:Dynamic):Dynamic {
+ public static function loadComplexType(ctx:Typer,allowDisplay:Bool,mode:LoadInstanceMode,hint:TypeHint):T {
   try return loadComplexTypePrime(ctx,allowDisplay,mode,hint) catch(exc:Dynamic) {switch exc {
-   case Error(err):switch err.errMessage {
-    case ModuleNotFound({pack:[],name:name}) if(Diagnostics.errorInDiagnosticsRun(ctx.com,err.errPos)):delay(ctx.g,PForce,function() DisplayToplevel.handleUnresolvedIdentifier(ctx,name,err.errPos,true)); return tDynamic;
+   case (core.ds.ExceptionTools.typing(_) => Some(err)):switch err.errMessage {
+    case ModuleNotFound({pack:[],name:name}) if(Common.isDiagnostics(ctx.com)):return DeferredServices.display();
     case _:throw exc;
    }
    case _:throw exc;
   }}
  }
- public static function initMetaOverloads(ctx:Dynamic,co:Dynamic,cf:Dynamic):Void {
-  var overloads=[],baseMeta=(cast cf.cfMeta:Array<Dynamic>).filter(m -> m.meta!=Meta.Overload&&m.meta!=Meta.Value),kept=[];
-  for(m in (cast cf.cfMeta:Array<Dynamic>)) switch m {
-   case {meta:Meta.Overload,exprs:[{expr:EFunction(kind,f),pos:p}]}:
+ public static function initMetaOverloads(ctx:Typer,co:Null<TClass>,cf:TClassField):Void {
+  var overloads:Array<TClassField>=[],baseMeta=cf.cfMeta.filter(m -> m.meta!=MetaTag.Overload&&m.meta!=MetaTag.Value),kept:Metadata=[];
+  for(m in cf.cfMeta) switch m {
+   case {meta:MetaTag.Overload,exprs:[{expr:EFunction(kind,f),pos:p}]}:
     switch kind {case FKNamed(_):raiseTypingError("Function name must not be part of @:overload",p); case _:}
     switch f.fExpr {case {expr:EBlock([])}: case _:raiseTypingError("Overload must only declare an empty method body {}",p);}
     switch cf.cfKind {case Method(MethInline):raiseTypingError("Cannot @:overload inline function",p); case _:}
-    var old=ctx.typeParams; if(cf.cfParams.length>0) ctx.typeParams=(cast ctx.typeParams:Array<Dynamic>).filter(ttp -> ttp.ttpHost!=TPHMethod);
+    var old=ctx.typeParams; if(cf.cfParams.length>0) ctx.typeParams=ctx.typeParams.filter(ttp -> ttp.ttpHost!=TPHMethod);
     var params=typeFunctionParamsRef(ctx,f,TPHMethod,cf.cfName); ctx.typeParams=params.concat(ctx.typeParams);
-    function optionalType(mode:LoadInstanceMode,t:Dynamic):Dynamic {if(t==null) return raiseTypingError("Explicit type required",p); return loadComplexType(ctx,true,mode,t);}
+    function optionalType(mode:LoadInstanceMode,t:Null<TypeHint>):T {if(t==null) return raiseTypingError("Explicit type required",p); return loadComplexType(ctx,true,mode,t);}
     var args=f.fArgs.map(function(arg) {var t=optionalType(LoadNormal,arg.type); if(arg.optional) t=ctx.t.tnull(t); return {name:arg.name.name,optional:arg.optional||arg.expr!=null,type:t};});
-    var overload=Reflect.copy(cf); overload.cfType=TFun(args,optionalType(LoadReturn,f.fType)); overload.cfParams=params; overload.cfMeta=baseMeta.copy();
-    generateArgsMeta(ctx.com,co,m -> overload.cfMeta.unshift(m),f.fArgs); overloads.unshift(overload); ctx.typeParams=old;
-   case {meta:Meta.Overload,exprs:[]} if(ctx.com.config.pfOverload):
+    var overloadField=Reflect.copy(cf); overloadField.cfType=TFun({args:args,ret:optionalType(LoadReturn,f.fType)}); overloadField.cfParams=params; overloadField.cfMeta=baseMeta.copy();
+    generateArgsMeta(ctx.com,co,m -> overloadField.cfMeta.unshift(m),f.fArgs); overloads.unshift(overloadField); ctx.typeParams=old;
+   case {meta:MetaTag.Overload,exprs:[]} if(ctx.com.config.pfOverload):
     addClassFieldFlag(cf,CfOverload);
-    switch follow(cf.cfType) {case TFun(args,_):for(arg in args) switch arg.type {case TMono(t) if(t.tmType==null):raiseTypingError("Explicit type required for overload functions\n... For function argument '"+arg.name+"'",cf.cfPos); case _:} case _:}
+    switch follow(cf.cfType) {case TFun({args:args,ret:_}):for(arg in args) switch arg.type {case TMono(t) if(t.tmType==null):raiseTypingError("Explicit type required for overload functions\n... For function argument '"+arg.name+"'",cf.cfPos); case _:} case _:}
     kept.push(m);
-   case {meta:Meta.Overload,exprs:[],pos:p}:raiseTypingError("This platform does not support this kind of overload declaration. Try @:overload(function()... {}) instead",p);
-   case {meta:Meta.Overload,pos:p}:raiseTypingError("Invalid @:overload metadata format",p);
+   case {meta:MetaTag.Overload,exprs:[],pos:p}:raiseTypingError("This platform does not support this kind of overload declaration. Try @:overload(function()... {}) instead",p);
+   case {meta:MetaTag.Overload,pos:p}:raiseTypingError("Invalid @:overload metadata format",p);
    case _:kept.push(m);
   }
   cf.cfMeta=kept; overloads.reverse(); cf.cfOverloads=overloads;
  }
- public static function tIterator(ctx:Dynamic,p:Dynamic):Dynamic return switch loadQualifiedTypeDef(ctx,[],"StdTypes","Iterator",p) {case TTypeDecl(t):addDependency(ctx.m.curmod,t.tModule,MDepFromTyping); var pt=spawnMonomorph(ctx,p); {type:applyTypedef(t,[pt]),parameter:pt}; case _:throw "Iterator is not a typedef";};
- public static function loadTypeHint(ctx:Dynamic,pcur:Dynamic,mode:LoadInstanceMode,t:Dynamic,opt:Bool=false):Dynamic {var type=t==null?spawnMonomorph(ctx,pcur):loadComplexType(ctx,true,mode,t); return opt?ctx.t.tnull(type):type;}
- public static function typeTypeParam(ctx:Dynamic,host:Dynamic,path:Dynamic,tp:Dynamic):Dynamic {
+ public static function tIterator(ctx:Typer,p:Pos):Dynamic return switch loadQualifiedTypeDef(ctx,[],"StdTypes","Iterator",p) {case TTypeDecl(t):addDependency(ctx.m.curmod,t.tModule,MDepFromTyping); var pt=spawnMonomorph(ctx,p); {type:applyTypedef(t,[pt]),parameter:pt}; case _:throw "Iterator is not a typedef";};
+ public static function loadTypeHint(ctx:Typer,pcur:Dynamic,mode:LoadInstanceMode,t:Dynamic,opt:Bool=false):Dynamic {var type=t==null?spawnMonomorph(ctx,pcur):loadComplexType(ctx,true,mode,t); return opt?ctx.t.tnull(type):type;}
+ public static function typeTypeParam(ctx:Typer,host:TypeParamHost,path:GlobalTypePath,tp:TypeParam):TypedTypeParam {
   var name=tp.tpName.name,c=mkClass(ctx.m.curmod,{pack:path.pack.concat([path.name]),name:name},tp.tpName.pos,tp.tpName.pos);
   c.clParams=typeTypeParams(ctx,host,c.clPath,tp.tpParams); c.clMeta=tp.tpMeta; var ttp=mkTypeParam(c,host,null,null);
-  if(ctx.m.isDisplayFile&&DisplayPosition.displayPosition.enclosedIn(tp.tpName.pos)) DisplayEmitter.displayType(ctx,ttp.ttpType,tp.tpName.pos); return ttp;
+  if(ctx.m.isDisplayFile&&DisplayPosition.displayPosition.enclosedIn(tp.tpName.pos)) DeferredServices.display(); return ttp;
  }
- public static function typeTypeParams(ctx:Dynamic,host:Dynamic,path:Dynamic,tpl:Array<Dynamic>):Array<Dynamic> {
+ public static function typeTypeParams(ctx:Typer,host:TypeParamHost,path:GlobalTypePath,tpl:Array<TypeParam>):TypeParams {
   var names:Array<String>=[],pairs=[];
   for(tp in tpl) {if(names.contains(tp.tpName.name)) displayError(ctx.com,"Duplicate type parameter name: "+tp.tpName.name,tp.tpName.pos); names.unshift(tp.tpName.name); pairs.push({syntax:tp,param:typeTypeParam(ctx,host,path,tp)});}
   var params=pairs.map(pair -> pair.param),local=TyperManager.cloneForTypeParams(ctx,params.concat(ctx.typeParams));
@@ -343,26 +363,27 @@ class Typeload {
    }
    if(tp.tpConstraints!=null) {
     var th=tp.tpConstraints,constraints=AtomicLazy.fromFun(function() {
-     function load(th:Dynamic):Array<Dynamic> return switch th.type {case CTIntersection(tl):tl.map(t -> loadComplexType(local,true,LoadNormal,t)); case CTParent(ct):load(ct); case _:[loadComplexType(local,true,LoadNormal,th)];};
+     function load(th:TypeHint):TParams return switch th.type {case CTIntersection(tl):tl.map(t -> loadComplexType(local,true,LoadNormal,t)); case CTParent(ct):load(ct); case _:[loadComplexType(local,true,LoadNormal,th)];};
      var constr=load(th);
      function check(t:Dynamic):Void switch follow(t) {case TInst(c2,_) if(ttp.ttpClass==c2):raiseTypingError("Recursive constraint parameter is not allowed",th.pos); case TInst({clKind:KTypeParameter(param)},_):delay(local.g,PConnectField,function() {for(t in (cast getConstraints(param):Array<Dynamic>)) check(t);}); case _:}
      for(t in constr) check(t); return constr;
     });
-    delay(local.g,PConnectField,function() {AtomicLazy.force(constraints);}); ttp.ttpConstraints=constraints;
+    delay(local.g,PConnectField,function() {constraints.force();}); ttp.ttpConstraints=constraints;
    }
   }
   return params;
  }
- public static function loadCoreClass(ctx:Dynamic,c:Dynamic):Dynamic {
+ public static function loadCoreClass(ctx:Typer,c:TClass):TClass {
   var ctx2=ctx.g.coreApi;
   if(ctx2==null) {
    var com2=Common.clone(ctx.com,ctx.com.isMacroContext); enterStage(com2,CInitMacrosDone); com2.defines.values=PMap.empty();
    Common.define(com2,Define.CoreApi); Common.define(com2,Define.Sys); allowPackage(com2,"sys"); Define.rawDefineValue(com2.defines,"target.threaded","true");
    if(ctx.com.isMacroContext) Common.define(com2,Define.Macro);
    com2.classPaths.lockContext(ctx.com.customExt,platformNameMacro(ctx.com),true);
-   com2.classPaths.modify(function(cp) return switch cp.scope {case Std:[cp.clone()]; case _:[];},ctx.com.classPaths.asList());
+   com2.classPaths.modify(function(cp) return switch cp.scope() {case core.ClassPath.ClassPathScope.Std:[cp.clone()]; case _:[];},ctx.com.classPaths.asList());
    if(com2.display.dmsCheckCoreApi) {var copy=Reflect.copy(com2.display); copy.dmsCheckCoreApi=false; com2.display=copy;}
-   CommonCache.lockSignature(com2,"load_core_class"); CommonCache.getCache(ctx.com).addChild(CommonCache.getCacheSign(com2));
+   // Server cache linking is deferred; define-signature computation still occurs.
+   Define.getSignature(com2.defines);
    ctx2=createContextRef(com2,ctx.g.macros); ctx.g.coreApi=ctx2;
   }
   var path=switch c.clKind {case KAbstractImpl(a):a.aPath; case _:c.clPath;};
@@ -370,36 +391,36 @@ class Typeload {
   flushPass(ctx2.g,PFinal,{name:"core_final",path:c.clPath.pack.concat([c.clPath.name])});
   return switch t {case TClassDecl(ccore):ccore; case TAbstractDecl(a) if(a.aImpl!=null):a.aImpl; case _:throw "Invalid core class";};
  }
- public static function initCoreApi(ctx:Dynamic,c:Dynamic):Void {
-  var core=loadCoreClass(ctx,c),cp:Array<Dynamic>=core.clParams,params:Array<Dynamic>=c.clParams;
+ public static function initCoreApi(ctx:Typer,c:TClass):Void {
+  var ccore=loadCoreClass(ctx,c),cp:TypeParams=ccore.clParams,params:TypeParams=c.clParams;
   if(cp.length!=params.length) raiseTypingError("Class must have the same number of type parameters as core type",c.clPos);
   for(i in 0...cp.length) {
    var a:Array<Dynamic>=getConstraints(cp[i]),b:Array<Dynamic>=getConstraints(params[i]);
    if(a.length!=b.length) raiseTypingError("Type parameters must have the same number of constraints as core type",c.clPos);
-   try for(j in 0...a.length) typeEq(EqCoreType,b[j],a[j]) catch(exc:Dynamic) {switch exc {case UnifyError(l):displayErrorExt(ctx.com,makeError(Custom("Type parameter "+params[i].ttpName+" has different constraint than in core type"),c.clPos,[makeError(Custom(complMsg(errorMsg(Unify(l)))),c.clPos)])); case _:throw exc;}}
+   try for(j in 0...a.length) typeEq(EqCoreType,b[j],a[j]) catch(exc:Dynamic) {switch exc {case (core.ds.ExceptionTools.unification(_) => Some(l)):displayErrorExt(ctx.com,makeError(Custom("Type parameter "+params[i].ttpName+" has different constraint than in core type"),c.clPos,[makeError(Custom(complMsg(errorMsg(Unify(l)))),c.clPos)])); case _:throw exc;}}
   }
-  if(c.clDoc==null) c.clDoc=core.clDoc;
-  function compare(f:Dynamic,f2:Dynamic):Void {
+  if(c.clDoc==null) c.clDoc=ccore.clDoc;
+  function compare(f:TClassField,f2:TClassField):Void {
    var p=f2.cfExpr==null?c.clPos:f2.cfExpr.epos;
-   try typeEq(EqCoreType,applyParams(core.clParams,extractParamTypes(c.clParams),f.cfType),f2.cfType) catch(exc:Dynamic) {switch exc {case UnifyError(l):displayErrorExt(ctx.com,makeError(Custom("Field "+f.cfName+" has different type than in core type"),p,[makeError(Custom(complMsg(errorMsg(Unify(l)))),p)])); case _:throw exc;}}
+   try typeEq(EqCoreType,applyParams(ccore.clParams,extractParamTypes(c.clParams),f.cfType),f2.cfType) catch(exc:Dynamic) {switch exc {case (core.ds.ExceptionTools.unification(_) => Some(l)):displayErrorExt(ctx.com,makeError(Custom("Field "+f.cfName+" has different type than in core type"),p,[makeError(Custom(complMsg(errorMsg(Unify(l)))),p)])); case _:throw exc;}}
    if(hasClassFieldFlag(f2,CfPublic)!=hasClassFieldFlag(f,CfPublic)) raiseTypingError("Field "+f.cfName+" has different visibility than core type",p);
    if(f2.cfDoc==null) f2.cfDoc=f.cfDoc;
    if(f2.cfKind!=f.cfKind) switch [f2.cfKind,f.cfKind] {case [Method(MethInline),Method(MethNormal)]|[Method(MethNormal),Method(MethInline)]: case _:raiseTypingError("Field "+f.cfName+" has different property access than core type",p);}
    switch [followWithCoro(f.cfType),followWithCoro(f2.cfType)] {
     case [Coro(_),NotCoro(_)]:raiseTypingError("Method should be coroutine",p);
     case [NotCoro(_),Coro(_)]:raiseTypingError("Method should not be coroutine",p);
-    case [NotCoro(TFun(pl1,_)),NotCoro(TFun(pl2,_))]|[Coro(pl1,_),Coro(pl2,_)]:
+    case [NotCoro(TFun({args:pl1,ret:_})),NotCoro(TFun({args:pl2,ret:_}))]|[Coro({args:pl1,ret:_}),Coro({args:pl2,ret:_})]:
      if(pl1.length!=pl2.length) raiseTypingError("Argument count mismatch",p);
      for(i in 0...pl1.length) if(pl1[i].name!=pl2[i].name) raiseTypingError("Method parameter name '"+pl2[i].name+"' should be '"+pl1[i].name+"'",p);
     case _:
    }
   }
-  function checkFields(expected:Dynamic,actual:Dynamic):Void {
-   expected.iter(function(name:String,f:Dynamic) {if(hasClassFieldFlag(f,CfPublic)) {var f2=actual.get(f.cfName); if(f2==null) raiseTypingError("Missing field "+name+" required by core type",c.clPos); compare(f,f2);}});
-   actual.iter(function(name:String,f:Dynamic) {var p=f.cfExpr==null?c.clPos:f.cfExpr.epos; if(hasClassFieldFlag(f,CfPublic)&&!Meta.has(Meta.Hack,f.cfMeta)&&!expected.exists(f.cfName)&&!hasClassFieldFlag(f,CfOverride)) raiseTypingError("Public field "+name+" is not part of core type",p);});
+  function checkFields(expected:TypeMap<TClassField>,actual:TypeMap<TClassField>):Void {
+   PMap.iter(function(name:String,f:TClassField) {if(hasClassFieldFlag(f,CfPublic)) {var f2=actual.get(f.cfName); if(f2==null) raiseTypingError("Missing field "+name+" required by core type",c.clPos); compare(f,f2);}},expected);
+   PMap.iter(function(name:String,f:TClassField) {var p=f.cfExpr==null?c.clPos:f.cfExpr.epos; if(hasClassFieldFlag(f,CfPublic)&&!Meta.has(MetaTag.Hack,f.cfMeta)&&!expected.exists(f.cfName)&&!hasClassFieldFlag(f,CfOverride)) raiseTypingError("Public field "+name+" is not part of core type",p);},actual);
   }
-  checkFields(core.clFields,c.clFields); checkFields(core.clStatics,c.clStatics);
-  var a=core.clConstructor,b=c.clConstructor;
+  checkFields(ccore.clFields,c.clFields); checkFields(ccore.clStatics,c.clStatics);
+  var a=ccore.clConstructor,b=c.clConstructor;
   if(a==null&&b==null) return;
   if(a!=null&&!hasClassFieldFlag(a,CfPublic)) return;
   if(a!=null&&b!=null) {compare(a,b); return;}

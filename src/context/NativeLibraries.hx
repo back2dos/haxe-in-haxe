@@ -17,7 +17,12 @@ interface NativeLibrary<A,Data> {
  public function addFlag(flag:NativeLibFlags):Void;public function hasFlag(flag:NativeLibFlags):Bool;public function getName():String;public function getFilePath():String;
  public function build(path:GlobalTypePath,pos:Pos):Null<Package>;public function close():Void;public function listModules():Array<GlobalTypePath>;public function load():Void;public function lookup(path:GlobalTypePath):A;public function getData():Data;
 }
-typedef JavaLibType=Null<{cls:JClass.Jclass,source:String,library:String}>;
-typedef SwfLibType=Null<As3hl.HlClass>;
-typedef NativeLibrariesData={var javaLibs:Array<NativeLibrary<JavaLibType,Void>>;var swfLibs:Array<NativeLibrary<SwfLibType,Swf.Swf>>;var allLibs:Array<String>;}
+// Opaque payloads owned by the deferred native-library loaders. No backend API
+// is exposed to the source-only HXB path.
+interface JavaClassData {}
+interface SwfClassData {}
+interface SwfData {}
+typedef JavaLibType=Null<{cls:JavaClassData,source:String,library:String}>;
+typedef SwfLibType=Null<SwfClassData>;
+typedef NativeLibrariesData={var javaLibs:Array<NativeLibrary<JavaLibType,Void>>;var swfLibs:Array<NativeLibrary<SwfLibType,SwfData>>;var allLibs:Array<String>;}
 class NativeLibraries {public static function createNativeLibs():NativeLibrariesData return {javaLibs:[],swfLibs:[],allLibs:[]};}

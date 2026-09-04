@@ -1,19 +1,22 @@
-# Translation-first pass
+# Translation and compilation status
 
 Snapshot: 2026-09-04. Pinned upstream source:
 `b10fa6e93c0206cc0dc8f7abba98534e3edac248`.
 
-The current phase is mechanical source translation. Do not compile, run or write
-tests, reconcile APIs, or integrate the drafts until the translation pass is
-complete. Keep unresolved names and dependencies visible rather than replacing
-them with successful stubs. The HXB-only milestone and pinned-upstream rules in
-`AGENTS.md` still apply.
+The translation snapshot was committed and pushed as `2fcd217`. The current
+phase is compilation and integration, explicitly authorized after that snapshot.
+`compile-all.hxml` includes every in-scope source module, including drafts which
+the existing bootstrap entry point does not reach. Both `haxe haxe-in-haxe.hxml` and `haxe compile-all.hxml` now compile.
+These checks used the installed Haxe `5.0.0-preview.1`, not a locally built
+executable from the pinned submodule. No runtime or conformance tests were run;
+compilation alone does not validate the draft behavior.
 
-## Status
+## Translation snapshot
 
-**The pending counterpart batch is complete.** This inventory records file coverage,
-not compilation or behavioral correctness. No builds or tests were run for these
-batches. Existing working entry points have not been switched to the new drafts.
+**The pending counterpart batch was completed in `2fcd217`.** This inventory records file coverage,
+not compilation or behavioral correctness. No builds or tests were run for the translation-first
+batches. The bootstrap entry point still uses its existing loader; the new
+compiler pipeline is included separately by `compile-all.hxml`.
 
 - 126 new draft/support Haxe files across the translation-first batches.
 - 124 upstream ML files have new draft counterparts.
@@ -31,7 +34,37 @@ and batch-used helpers inside otherwise deferred areas still need extraction
 when required. An existing counterpart may combine several upstream modules or
 implement only a subset: file presence does not close that work.
 
-## Draft conventions and later reconciliation
+## Compilation work
+
+The compile phase reconciles enum/record layouts, callback signatures, persistent
+maps, typed exceptions, and Haxe secondary-type imports. New runtime adapters
+provide OCaml-style lists/maps/tables, fixed-width integer parsing, streams, and
+thread scheduling. `Record.withFields` preserves shallow record updates.
+`TaskPool` uses bounded host threads per operation instead of a persistent
+work-stealing pool; `CompilerIo` uses byte queues instead of OCaml Unix pipes.
+
+Shared HXB-path helpers were extracted from otherwise deferred areas:
+
+- `context/display/DeprecationCheck.hx`: compiler deprecation warnings.
+- `context/display/ImportHandling.hx`: imports, aliases, wildcard imports, using
+  resolution, and bookkeeping; interactive completion branches fail explicitly.
+- `core/display/DisplayPosition.hx` and `Javadoc.hx`: shared positions and
+  documentation parsing required by typing.
+- `codegen/Genxml.hx`: RTTI type serialization before HXB save; the standalone
+  XML output backend remains deferred.
+- `context/HxbReaderStats.hx`: shared statistics declarations, without HXB input.
+- `typing/ModuleTyping.hx` and `SourceParser.hx`: source-backed module creation,
+  loading, package rules/remapping, import.hx processing, and parser integration
+  required by `TyperEntry`; the existing bootstrap loader remains separate.
+
+Display, server, macro-runtime, native-library, and other target dispatch bodies
+remain under `deferred/` outside the build classpath. Their call sites reject
+unsupported services explicitly. In-scope typing and filtering paths remain in
+the all-module build. Compilation does not establish runtime correctness,
+conformance, or completion of the pre-existing HXB writer. No tests have been
+run in this compile phase.
+
+## Draft conventions and reconciliation
 
 - Each new source translation names its upstream file and is marked unvalidated.
 - OCaml tuples/records become Haxe records, lists become arrays, and modules become classes or secondary types.
@@ -195,13 +228,23 @@ implement only a subset: file presence does not close that work.
 | `typing/typeloadCheck.ml` | `src/typing/TypeloadCheck.hx` | Draft translated |
 | `typing/typeloadFields.ml` | `src/typing/TypeloadFields.hx` | Draft translated |
 | `typing/typeloadFunction.ml` | `src/typing/TypeloadFunction.hx` | Draft translated |
-| `typing/typeloadModule.ml` | `src/typing/TypeloadModule.hx` | Existing, unaudited |
-| `typing/typeloadParse.ml` | `src/typing/TypeloadParse.hx` | Existing, unaudited |
+| `typing/typeloadModule.ml` | `src/typing/ModuleTyping.hx`; legacy `TypeloadModule.hx` | Source pipeline integrated during compile phase |
+| `typing/typeloadParse.ml` | `src/typing/SourceParser.hx`; legacy `TypeloadParse.hx` | Source pipeline integrated during compile phase |
 | `typing/typer.ml` | `src/typing/Typer.hx` | Draft translated |
 | `typing/typerBase.ml` | `src/typing/TyperBase.hx` | Draft translated |
 | `typing/typerDotPath.ml` | `src/typing/TyperDotPath.hx` | Draft translated |
 | `typing/typerEntry.ml` | `src/typing/TyperEntry.hx` | Draft translated |
 | `typing/unifyMin.ml` | `src/typing/UnifyMin.hx` | Draft translated |
+
+## Additional shared source coverage
+
+| Upstream under `haxe/src/` | Haxe counterpart | Scope |
+| --- | --- | --- |
+| `context/display/deprecationCheck.ml` | `src/context/display/DeprecationCheck.hx` | Compiler warnings |
+| `context/display/importHandling.ml` | `src/context/display/ImportHandling.hx` | Batch imports and using resolution |
+| `core/display/displayPosition.ml` | `src/core/display/DisplayPosition.hx` | Shared position state |
+| `core/display/javadoc.ml` | `src/core/display/Javadoc.hx` | Documentation parsing |
+| `codegen/genxml.ml` | `src/codegen/Genxml.hx` | RTTI serializer |
 
 ## Deferred or scope-review areas
 
@@ -210,7 +253,7 @@ A scope-review entry is not a blanket exclusion of shared batch-compiler helpers
 
 | Upstream under `haxe/src/` | Reason |
 | --- | --- |
-| `codegen/genxml.ml` | Other target/library support |
+| `codegen/genxml.ml` | Standalone XML output deferred; RTTI serializer is in scope and compiled |
 | `codegen/jClass.ml` | Other target/library support |
 | `codegen/javaModern.ml` | Other target/library support |
 | `codegen/swfLoader.ml` | Other target/library support |
@@ -229,7 +272,6 @@ A scope-review entry is not a blanket exclusion of shared batch-compiler helpers
 | `compiler/server/serverMessage.ml` | Server milestone |
 | `compiler/tasks.ml` | Server maintenance task scheduling |
 | `context/commonCache.ml` | Cache/server integration; shared batch pieces may need extraction |
-| `context/display/deprecationCheck.ml` | Display/service area; batch-used helpers and shared declarations need scope review |
 | `context/display/diagnostics.ml` | Display/service area; batch-used helpers and shared declarations need scope review |
 | `context/display/diagnosticsPrinter.ml` | Display/service area; batch-used helpers and shared declarations need scope review |
 | `context/display/display.ml` | Display/service area; batch-used helpers and shared declarations need scope review |
@@ -244,15 +286,12 @@ A scope-review entry is not a blanket exclusion of shared batch-compiler helpers
 | `context/display/documentSymbols.ml` | Display/service area; batch-used helpers and shared declarations need scope review |
 | `context/display/exprPreprocessing.ml` | Display/service area; batch-used helpers and shared declarations need scope review |
 | `context/display/findReferences.ml` | Display/service area; batch-used helpers and shared declarations need scope review |
-| `context/display/importHandling.ml` | Display/service area; batch-used helpers and shared declarations need scope review |
 | `context/display/statistics.ml` | Display/service area; batch-used helpers and shared declarations need scope review |
 | `context/display/syntaxExplorer.ml` | Display/service area; batch-used helpers and shared declarations need scope review |
 | `context/memory.ml` | Server cache/object-size/leak diagnostics |
 | `context/nativeLibraryHandler.ml` | SWF/JVM library and HXB input handlers; later milestones |
 | `context/sourcemaps.ml` | Ordinary output-target source maps |
 | `core/display/completionItem.ml` | Display/service area; batch-used helpers and shared declarations need scope review |
-| `core/display/displayPosition.ml` | Display/service area; batch-used helpers and shared declarations need scope review |
-| `core/display/javadoc.ml` | Display/service area; batch-used helpers and shared declarations need scope review |
 | `core/json/genjson.ml` | Auxiliary typed JSON dump/display serialization; retained hooks unresolved |
 | `core/json/jsonRpc.ml` | Display/server JSON-RPC protocol |
 | `core/json/jsonRpcSocket.ml` | Display/server JSON-RPC transport |

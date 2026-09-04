@@ -18,6 +18,11 @@ import typing.TypeloadParse.ParseError;
 // Batch-only port of the module-loading and typing path rooted in
 // haxe/src/typing/typeloadModule.ml and typer.ml.
 class TypeloadModule {
+ // haxe/src/typing/typeloadModule.ml: make_curmod.
+ public static function makeCurmod(com:context.Common.CommonContext,g:context.Typecore.TyperGlobals,m:ModuleDef):context.Typecore.TyperModule {
+  return {curmod:m,importResolution:g.rootTyper.m.importResolution.cloneAs(["import",Globals.sTypePath(m.mPath)]),ownResolution:null,enumWithType:null,moduleUsing:[],importStatements:[],isDisplayFile:com.display.dmsKind!=core.DisplayTypes.DisplayModeValue.DMNone && core.display.DisplayPosition.displayPosition.isInFile(core.Path.UniqueKey.create(m.mExtra.mFile))};
+ }
+
 	var classPaths:ClassPaths;
 	var defines:DefineContext;
 	var modules:Map<String, ModuleDef> = new Map();

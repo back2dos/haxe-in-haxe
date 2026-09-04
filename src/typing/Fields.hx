@@ -1,18 +1,38 @@
 package typing;
+import core.MetaList.StrictMeta as MetaTag;
+import core.Globals.Pos;
+import core.display.DisplayPosition;
 import core.Ast;
 import core.Ast.*;
 import core.TType;
 import core.TType.*;
 import core.TFunctions.*;
+import core.TFunctions;
 import core.TOther.*;
+import core.TOther;
 import core.TPrinting.*;
 import core.Globals;
+import core.Globals.*;
+import context.display.ImportHandling;
 import core.Meta;
 import core.WithType;
 import core.Error.*;
+import core.Error;
 import context.Typecore.*;
+import context.Typecore;
 import context.Common;
-import context.Define;
+import core.Define;
+import core.Abstract;
+import core.TUnification;
+import core.TUnification.*;
+import core.ds.NotFound;
+import core.ds.Exit;
+import core.StringError;
+import core.Message;
+import context.Common.*;
+import context.Typecore.FieldHost as AccessHost;
+import context.Typecore.FieldAccess as AccessData;
+import core.display.Javadoc;
 import typing.TyperBase;
 import typing.TyperBase.*;
 import typing.FieldAccess;
@@ -30,48 +50,50 @@ class TypeFieldConfig {
  public static function withResume(cfg:TypeFieldConfig):TypeFieldConfig {var result=new TypeFieldConfig(); result.allowResolve=cfg.allowResolve; result.allowDynamic=cfg.allowDynamic; result.allowOpenMono=cfg.allowOpenMono; result.doResume=true; return result;}
 }
 class Fields {
- public static function removeConstantFlag(t:Dynamic,callback:Bool->Dynamic):Dynamic {
-  var temporary:Array<Dynamic>=[];
-  function loop(t:Dynamic):Void switch follow(t) {
-   case TAnon(a):if(a.aStatus.value==Const) {a.aStatus.value=Closed; temporary.unshift(a);} a.aFields.iter(function(_:String,f:Dynamic) loop(f.cfType));
+ static function some<V>(v:Null<V>):V {if(v==null) throw new NotFound();return v;}
+ static function byList<V>(f:V->AccessKind,list:Array<V>):AccessKind {for(x in list) try return f(x) catch(_:NotFound) {} throw new NotFound();}
+ public static function removeConstantFlag<A>(t:T,callback:Bool->A):A {
+  var temporary:Array<TAnon>=[];
+  function loop(t:T):Void switch follow(t) {
+   case TAnon(a):if(a.aStatus==Const) {a.aStatus=Closed; temporary.unshift(a);} for(f in a.aFields) loop(f.cfType);
    case _:
   }
-  function restore():Void {for(a in temporary) a.aStatus.value=Const;}
+  function restore():Void {for(a in temporary) a.aStatus=Const;}
   try {loop(t); var ret=callback(temporary.length!=0); restore(); return ret;} catch(e:Dynamic) {restore(); throw e;}
  }
- public static function enumFieldType(ctx:Dynamic,en:Dynamic,ef:Dynamic,p:Dynamic):Dynamic {
+ public static function enumFieldType(ctx:Typer,en:TEnum,ef:TEnumField,p:Pos):T {
   var enTypes=Monomorph.spawnConstrainedMonos(t -> t,en.eParams),map=t -> applyParams(en.eParams,enTypes,t),efTypes=Monomorph.spawnConstrainedMonos(map,ef.efParams);
   return map(applyParams(ef.efParams,efTypes,ef.efType));
  }
- public static function fieldType(ctx:Dynamic,c:Dynamic,pl:Array<Dynamic>,f:Dynamic,p:Dynamic):Dynamic {
+ public static function fieldType(ctx:Typer,c:TClass,pl:TParams,f:TClassField,p:Pos):T {
   if(f.cfParams.length==0) return f.cfType;
-  var map:Dynamic->Dynamic=pl.length==0?(t -> t):(t -> applyParams(c.clParams,pl,t));
+  var map:T->T=pl.length==0?(t -> t):(t -> applyParams(c.clParams,pl,t));
   var monos=Monomorph.spawnConstrainedMonos(map,f.cfParams); return applyParams(f.cfParams,monos,f.cfType);
  }
- public static function noAbstractConstructor(c:Dynamic,p:Dynamic):Void {if(hasClassFlag(c,CAbstract)) raiseTypingErrorExt(makeError(AbstractClass(TClassDecl(c)),p));}
- public static function checkConstructorAccess(ctx:Dynamic,c:Dynamic,f:Dynamic,p:Dynamic):Void {
-  if(Meta.has(Meta.CompilerGenerated,f.cfMeta)) displayError(ctx.com,errorMsg(NoConstructor(TClassDecl(c))),p);
-  if(!(canAccess(ctx,c,f,true)||extendsClass(ctx.c.curclass,c))&&!ctx.f.untyped) displayError(ctx.com,"Cannot access private constructor of "+sClassPath(c),p);
+ public static function noAbstractConstructor(c:TClass,p:Pos):Void {if(hasClassFlag(c,CAbstract)) raiseTypingErrorExt(makeError(AbstractClass(TClassDecl(c)),p));}
+ public static function checkConstructorAccess(ctx:Typer,c:TClass,f:TClassField,p:Pos):Void {
+  if(Meta.has(MetaTag.CompilerGenerated,f.cfMeta)) displayError(ctx.com,errorMsg(NoConstructor(TClassDecl(c))),p);
+  if(!(canAccess(ctx,c,f,true)||extendsClass(ctx.c.curclass,c))&&!ctx.f.isUntyped) displayError(ctx.com,"Cannot access private constructor of "+sClassPath(c),p);
  }
- public static function checkNoClosureMeta(ctx:Dynamic,cf:Dynamic,fa:Dynamic,mode:Dynamic,p:Dynamic):Void switch mode {
+ public static function checkNoClosureMeta(ctx:Typer,cf:TClassField,fa:AccessHost,mode:AccessMode,p:Pos):Void switch mode {
   case MGet | MSet(_) if(!DisplayPosition.displayPosition.enclosedIn(p)):
    switch cf.cfKind {
     case Method(_):var meta=switch fa {case FHStatic(c)|FHInstance(c,_)|FHAbstract(_,_,c):c.clMeta; case _:[];};
-     if(Meta.has(Meta.NoClosure,meta)||Meta.has(Meta.NoClosure,cf.cfMeta)) raiseTypingError("Method "+cf.cfName+" cannot be used as a value",p);
+     if(Meta.has(MetaTag.NoClosure,meta)||Meta.has(MetaTag.NoClosure,cf.cfMeta)) raiseTypingError("Method "+cf.cfName+" cannot be used as a value",p);
     case _:
    }
   case _:
  }
- public static function fieldAccess(ctx:Dynamic,mode:Dynamic,f:Dynamic,fh:Dynamic,e:Dynamic,pfield:Dynamic):AccessKind {
-  var pfull=Globals.punion(e.epos,pfield),isSet=switch mode {case MSet(_):true; case _:false;};
+ public static function fieldAccess(ctx:Typer,mode:AccessMode,f:TClassField,fh:AccessHost,e:TExpr,pfield:Pos):AccessKind {
+  var pfull=Ast.punion(e.epos,pfield),isSet=switch mode {case MSet(_):true; case _:false;};
   checkNoClosureMeta(ctx,f,fh,mode,pfield);
   function bypass():Bool {if(ctx.e.bypassAccessor>0) {ctx.e.bypassAccessor--; return true;} return false;}
-  function makeAccess(inlineValue:Bool):Dynamic return FieldAccess.create(e,f,fh,inlineValue&&ctx.allowInline,pfull,pfield);
+  function makeAccess(inlineValue:Bool):AccessData return FieldAccess.create(e,f,fh,inlineValue&&ctx.allowInline,pfull,pfield);
   return switch f.cfKind {
    case Method(m):
     function normal():AccessKind return AKField(makeAccess(false));
-    if(isSet&&m!=MethDynamic&&!ctx.f.untyped) raiseTypingError("Cannot rebind this method : please use 'dynamic' before method declaration",pfield);
-    function visibility(c:Dynamic,isStatic:Bool):Void switch mode {case MCall(_) if(hasClassFieldFlag(f,CfOverload)): case _:checkFieldAccess(ctx,c,f,isStatic,pfield);}
+    if(isSet&&m!=MethDynamic&&!ctx.f.isUntyped) raiseTypingError("Cannot rebind this method : please use 'dynamic' before method declaration",pfield);
+    function visibility(c:TClass,isStatic:Bool):Void switch mode {case MCall(_) if(hasClassFieldFlag(f,CfOverload)): case _:checkFieldAccess(ctx,c,f,isStatic,pfield);}
     function defaultAccess():AccessKind return switch [m,mode] {
      case [MethInline,_] if(ctx.com.doinline&&ctx.allowInline):AKField(makeAccess(true));
      case [MethMacro,MGet]:displayError(ctx.com,"Macro functions must be called immediately",pfield); normal();
@@ -80,7 +102,7 @@ class Fields {
     };
     switch fh {
      case FHInstance(c,tl):
-      if(e.eexpr==TConst(TSuper)) switch mode {case MSet(_)|MGet:displayError(ctx.com,"Cannot create closure on super method",pfield); case MCall(_):}
+      if(e.eexpr.match(TConst(TSuper))) switch mode {case MSet(_)|MGet:displayError(ctx.com,"Cannot create closure on super method",pfield); case MCall(_):}
       switch follow(e.etype) {case TInst(c,_):visibility(c,false); case _:}
       defaultAccess();
      case FHStatic(c):visibility(c,true); defaultAccess();
@@ -88,8 +110,8 @@ class Fields {
      case FHAbstract(a,tl,c):visibility(c,true); AKUsingField(makeAbstractStaticExtensionAccess(a,tl,c,f,e,false,pfull));
     }
    case Var(v):
-    function prop(access:Dynamic):Bool return switch access {case AccCall|AccPrivateCall:ctx.e.bypassAccessor==0; case _:false;};
-    function checkMode(c:Dynamic,isStatic:Bool):Void switch mode {
+    function prop(access:VarAccess):Bool return switch access {case AccCall|AccPrivateCall:ctx.e.bypassAccessor==0; case _:false;};
+    function checkMode(c:TClass,isStatic:Bool):Void switch mode {
      case MGet if(prop(v.vRead)):if(!canAccess(ctx,c,f,isStatic,true,false)) raiseTypingError("This property cannot be accessed for reading",pfield);
      case MSet(_) if(prop(v.vWrite)):if(!canAccess(ctx,c,f,isStatic,true,true)) raiseTypingError("This property cannot be accessed for writing",pfield);
      case _:checkFieldAccess(ctx,c,f,isStatic,pfield);
@@ -98,25 +120,25 @@ class Fields {
      case FHStatic(c)|FHAbstract(_,_,c):checkMode(c,true);
      case FHInstance(_):
       switch follow(e.etype) {case TInst(c,_):checkMode(c,false); case _:}
-      if(e.eexpr==TConst(TSuper)) switch mode {
+      if(e.eexpr.match(TConst(TSuper))) switch mode {
        case MGet|MCall(_) if(v.vRead==AccCall||v.vRead==AccPrivateCall):
        case MSet(_) if(v.vWrite==AccCall||v.vWrite==AccPrivateCall):
        case _:displayError(ctx.com,"Normal variables cannot be accessed with 'super', use 'this' instead",pfield);
       }
      case FHAnon:
-      function privateAccess(a:Dynamic):Bool return a==AccPrivateCall&&!Meta.has(Meta.PrivateAccess,ctx.f.meta)&&ctx.e.bypassAccessor==0;
+      function privateAccess(a:VarAccess):Bool return a==AccPrivateCall&&!Meta.has(MetaTag.PrivateAccess,ctx.f.meta)&&ctx.e.bypassAccessor==0;
       switch mode {case MGet if(privateAccess(v.vRead)):raiseTypingError("This property cannot be accessed for reading",pfield); case MSet(_) if(privateAccess(v.vWrite)):raiseTypingError("This property cannot be accessed for writing",pfield); case _:}
     }
     function normal(inlineValue:Bool):AccessKind return AKField(makeAccess(inlineValue));
     function failure():AccessKind return AKNo(normal(false),pfield);
     var access=isSet?v.vWrite:v.vRead;
     switch access {
-     case AccNo if(!Meta.has(Meta.PrivateAccess,ctx.f.meta)):
-      var privateField=Reflect.copy(f); privateField.cfFlags=unsetFlag(f.cfFlags,intOfClassFieldFlag(CfPublic));
+     case AccNo if(!Meta.has(MetaTag.PrivateAccess,ctx.f.meta)):
+      var privateField:TClassField=Reflect.copy(f); removeClassFieldFlag(privateField,CfPublic);
       switch follow(e.etype) {
        case TInst(c,_) if(extendsClass(ctx.c.curclass,c)||canAccess(ctx,c,privateField,false)):normal(false);
-       case TAnon(a):switch a.aStatus.value {case ClassStatics(c) if(ctx.c.curclass==c||canAccess(ctx,c,privateField,true)):normal(false); case _:ctx.f.untyped?normal(false):failure();}
-       case _:ctx.f.untyped?normal(false):failure();
+       case TAnon(a):switch a.aStatus {case ClassStatics(c) if(ctx.c.curclass==c||canAccess(ctx,c,privateField,true)):normal(false); case _:ctx.f.isUntyped?normal(false):failure();}
+       case _:ctx.f.isUntyped?normal(false):failure();
       }
      case AccNormal|AccNo:normal(false);
      case AccCall|AccPrivateCall if(!ctx.allowTransform||(ctx.f.inDisplay&&DisplayPosition.displayPosition.enclosedIn(pfull))):normal(false);
@@ -129,180 +151,179 @@ class Fields {
        if(!isPhysicalField(f)) displayErrorExt(ctx.com,makeError(Custom("This field cannot be accessed because it is not a real variable"),pfield,[makeError(Custom("Add @:isVar here to enable it"),f.cfPos)]));
        normal(false);
       } else switch fh {case FHAbstract(a,tl,c):AKUsingAccessor(makeAbstractStaticExtensionAccess(a,tl,c,f,e,false,pfull)); case _:AKAccessor(makeAccess(false));}
-     case AccNever:ctx.f.untyped?normal(false):failure();
+     case AccNever:ctx.f.isUntyped?normal(false):failure();
      case AccInline:normal(true);
      case AccCtor:switch [ctx.e.curfun,fh] {case [FunConstructor,FHInstance(c,_)] if(c==ctx.c.curclass||(hasClassFlag(c,CAbstract)&&extendsClass(ctx.c.curclass,c))):normal(false); case _:failure();}
      case AccRequire(r,msg):msg==null?errorRequire(r,pfield):raiseTypingError(msg,pfield);
     }
   };
  }
- public static function classField(ctx:Dynamic,c:Dynamic,tl:Array<Dynamic>,name:String,p:Dynamic):Dynamic return rawClassField(f -> fieldType(ctx,c,tl,f,p),c,tl,name);
- public static function typeField(cfg:TypeFieldConfig,ctx:Dynamic,e:Dynamic,i:String,p:Dynamic,mode:Dynamic,withType:Dynamic):AccessKind {
+ public static function classField(ctx:Typer,c:TClass,tl:TParams,name:String,p:Pos):RawClassField return rawClassField(f -> fieldType(ctx,c,tl,f,p),c,tl,name);
+ public static function typeField(cfg:TypeFieldConfig,ctx:Typer,e:TExpr,i:String,p:Pos,mode:AccessMode,withType:WithTypeValue):AccessKind {
   var pfield=e.epos==p?p:patchStringPos(p,i),isSet=switch mode {case MSet(_):true; case _:false;};
-  function access(e:Dynamic,f:Dynamic,host:Dynamic):AccessKind return fieldAccess(ctx,mode,f,host,e,pfield);
-  function classAccess(e:Dynamic,c:Dynamic,tl:Array<Dynamic>):Dynamic {var raw=classField(ctx,c,tl,i,p),host=raw.host==null?FHAnon:FHInstance(raw.host.c,raw.host.params); return {field:raw.field,access:access(e,raw.field,host)};}
-  function some(v:Dynamic):Dynamic {if(v==null) throw "Not_found"; return v;}
-  function byET(f:Dynamic,e:Dynamic,t:Dynamic):AccessKind return f(mk(TCast(e,null),t,e.epos),followWithoutType(t));
-  function byE(f:Dynamic,e:Dynamic):AccessKind return f(e,followWithoutType(e.etype));
-  function byList(f:Dynamic,list:Array<Dynamic>):AccessKind {for(x in list) try return f(x) catch(err:Dynamic) {if(err!="Not_found") throw err;} throw "Not_found";}
-  function byForward(f:Void->AccessKind,meta:Dynamic,a:Dynamic):AccessKind {
-   var m=Meta.get(meta,a.aMeta),el:Array<Dynamic>=m.exprs;
+  function access(e:TExpr,f:TClassField,host:AccessHost):AccessKind return fieldAccess(ctx,mode,f,host,e,pfield);
+  function classAccess(e:TExpr,c:TClass,tl:TParams):{field:TClassField,access:AccessKind} {var raw=classField(ctx,c,tl,i,p),host=raw.owner==null?FHAnon:FHInstance(raw.owner.cls,raw.owner.params); return {field:raw.field,access:access(e,raw.field,host)};}
+  function byET(f:TExpr->T->AccessKind,e:TExpr,t:T):AccessKind return f(mk(TCast(e,null),t,e.epos),followWithoutType(t));
+  function byE(f:TExpr->T->AccessKind,e:TExpr):AccessKind return f(e,followWithoutType(e.etype));
+  function byForward(f:Void->AccessKind,meta:MetaTag,a:TAbstract):AccessKind {
+   var m=Meta.get(meta,a.aMeta),el:Array<Expr>=m.exprs;
    if(el.length!=0) {
     var found=false;
     for(e in el) {var name=switch e.expr {case EConst(Ident(s)|String(s,_)):s; case _:raiseTypingError("Identifier or string expected as argument to @:forward",e.pos);}; if(name==i) {found=true; break;}}
-    if(!found) throw "Not_found";
+    if(!found) throw new NotFound();
    }
    return f();
   }
-  function forwardStatic(f:Void->AccessKind,a:Dynamic):AccessKind return byForward(f,Meta.ForwardStatics,a);
-  function forwardMember(f:Dynamic,e:Dynamic,a:Dynamic,tl:Array<Dynamic>):AccessKind return byForward(() -> byET(f,e,Abstract.getUnderlyingType(a,tl,true)),Meta.Forward,a);
-  function byTypedef(f:Dynamic,e:Dynamic,td:Dynamic,tl:Array<Dynamic>):AccessKind return f(e,followWithoutType(applyTypedef(td,tl)));
-  function byInterfaces(e:Dynamic,c:Dynamic):AccessKind {
-   if(!(hasClassFlag(c,CExtern)&&Meta.has(Meta.LibType,c.clMeta))) throw "Not_found";
-   return byList(function(pair) {var result=classAccess(e,pair.c,pair.params); TClass.addField(c,result.field); return result.access;},c.clImplements);
+  function forwardStatic(f:Void->AccessKind,a:TAbstract):AccessKind return byForward(f,MetaTag.ForwardStatics,a);
+  function forwardMember(f:TExpr->T->AccessKind,e:TExpr,a:TAbstract,tl:TParams):AccessKind return byForward(() -> byET(f,e,Abstract.getUnderlyingType(a,tl,true)),MetaTag.Forward,a);
+  function byTypedef(f:TExpr->T->AccessKind,e:TExpr,td:TDef,tl:TParams):AccessKind return f(e,followWithoutType(applyTypedef(td,tl)));
+  function byInterfaces(e:TExpr,c:TClass):AccessKind {
+   if(!(hasClassFlag(c,CExtern)&&Meta.has(MetaTag.LibType,c.clMeta))) throw new NotFound();
+   return byList(function(pair) {var result=classAccess(e,pair.cls,pair.params); TClassTools.addField(c,result.field); return result.access;},c.clImplements);
   }
-  function noNoLookup(cf:Dynamic):Void {if(hasClassFieldFlag(cf,CfNoLookup)) displayError(ctx.com,"This field cannot be accessed explicitly",pfield);}
-  function byType(e:Dynamic,t:Dynamic):AccessKind return switch t {
+  function noNoLookup(cf:TClassField):Void {if(hasClassFieldFlag(cf,CfNoLookup)) displayError(ctx.com,"This field cannot be accessed explicitly",pfield);}
+  function byType(e:TExpr,t:T):AccessKind return switch t {
    case TType(td,tl):byTypedef(byType,e,td,tl);
    case TInst(c,tl):
     try classAccess(e,c,tl).access catch(err:Dynamic) {
-     if(err!="Not_found") throw err;
-     try switch c.clKind {case KTypeParameter(ttp):byList(function(t) return switch follow(t) {case TAbstract(_):byE(byType,mkCast(e,t,p)); case _:throw "Not_found";},getConstraints(ttp)); case _:throw "Not_found";}
-     catch(err:Dynamic) {if(err!="Not_found") throw err; byInterfaces(e,c);}
+     if(!Std.isOfType(err,NotFound)) throw err;
+     try switch c.clKind {case KTypeParameter(ttp):byList(function(t) return switch follow(t) {case TAbstract(_):byE(byType,mkCast(e,t,p)); case _:throw new NotFound();},getConstraints(ttp)); case _:throw new NotFound();}
+     catch(err:Dynamic) {if(!Std.isOfType(err,NotFound)) throw err; byInterfaces(e,c);}
     }
-   case TAnon(a):switch a.aStatus.value {
+   case TAnon(a):switch a.aStatus {
     case ClassStatics(c):
      try {
       var cf=some(c.clStatics.get(i)); if(hasClassFieldFlag(cf,CfImpl)&&!hasClassFieldFlag(cf,CfEnum)) displayError(ctx.com,"Cannot access non-static abstract field statically",pfield); noNoLookup(cf); access(e,cf,FHStatic(c));
      } catch(err:Dynamic) {
-      if(err!="Not_found") throw err;
-      switch c.clKind {case KAbstractImpl(a):forwardStatic(function() {var mt:Dynamic; try mt=moduleTypeOfType(a.aThis) catch(err:Dynamic) {if(err!="Exit") throw err; throw "Not_found";} return byE(byType,TyperBase.typeModuleType(ctx,mt,p));},a); case _:throw "Not_found";}
+      if(!Std.isOfType(err,NotFound)) throw err;
+      switch c.clKind {case KAbstractImpl(a):forwardStatic(function() {var mt:ModuleType; try mt=moduleTypeOfType(a.aThis) catch(err:Dynamic) {if(!Std.isOfType(err,Exit)) throw err; throw new NotFound();} return byE(byType,TyperBase.typeModuleType(ctx,mt,p));},a); case _:throw new NotFound();}
      }
     case EnumStatics(en):var c=some(en.eConstrs.get(i)); AKExpr(mk(TField(e,FEnum(en,c)),enumFieldType(ctx,en,c,p),p));
     case _:access(e,some(a.aFields.get(i)),FHAnon);
    }
    case TMono(r):
-    function makeField():Dynamic {var f=mkField(i,spawnMonomorph(ctx,p),p,Globals.nullPos); f.cfKind=Var({vRead:AccNormal,vWrite:isSet?AccNormal:AccNo}); return f;}
-    function checkConstraint(constr:Dynamic):AccessKind return switch constr {
+    function makeField():TClassField {var f=mkField(i,spawnMonomorph(ctx,p),p,Globals.nullPos); f.cfKind=Var({vRead:AccNormal,vWrite:isSet?AccNormal:AccNo}); return f;}
+    function checkConstraint(constr:TMonoConstraintKind):AccessKind return switch constr {
      case CStructural(fields,isOpen):
       try {var f=some(fields.get(i)); switch f.cfKind {case Var(acc) if(acc.vWrite==AccNo&&isOpen&&isSet):var copy=Reflect.copy(acc); copy.vWrite=AccNormal; f.cfKind=Var(copy); case _:} access(e,f,FHAnon);}
-      catch(err:Dynamic) {if(err!="Not_found"||!isOpen||!cfg.allowOpenMono) throw err; var f=makeField(); Monomorph.addDownConstraint(r,MField(f)); access(e,f,FHAnon);}
+      catch(err:Dynamic) {if(!Std.isOfType(err,NotFound)||!isOpen||!cfg.allowOpenMono) throw err; var f=makeField(); Monomorph.addDownConstraint(r,MField(f)); access(e,f,FHAnon);}
      case CTypes(tl):byList(pair -> byET(byType,e,pair.type),tl);
-     case CUnknown if(!cfg.allowOpenMono):throw "Not_found";
+     case CUnknown if(!cfg.allowOpenMono):throw new NotFound();
      case CUnknown:
-      if(!(cast ctx.e.monomorphs:Array<Dynamic>).exists(pair -> pair.mono==r)&&!(ctx.f.untyped&&ctx.com.platform==Neko)) ctx.e.monomorphs.unshift({mono:r,pos:p});
+      if(!Lambda.exists(ctx.e.monomorphs,pair -> pair.mono==r)&&!(ctx.f.isUntyped&&ctx.com.platform==Neko)) ctx.e.monomorphs.unshift({mono:r,pos:p});
       var f=makeField(); Monomorph.addDownConstraint(r,MField(f)); Monomorph.addModifier(r,MOpenStructure); access(e,f,FHAnon);
      case CMixed(l):byList(checkConstraint,l);
     };
     checkConstraint(Monomorph.classifyDownConstraints(r));
    case TAbstract(a,tl):
-    try {var c=some(a.aImpl),f=some(c.clStatics.get(i)); if(!hasClassFieldFlag(f,CfImpl)) throw "Not_found"; noNoLookup(f); access(e,f,FHAbstract(a,tl,c));}
-    catch(err:Dynamic) {if(err!="Not_found") throw err; forwardMember(byType,e,a,tl);}
-   case _:throw "Not_found";
+    try {var c=some(a.aImpl),f=some(c.clStatics.get(i)); if(!hasClassFieldFlag(f,CfImpl)) throw new NotFound(); noNoLookup(f); access(e,f,FHAbstract(a,tl,c));}
+    catch(err:Dynamic) {if(!Std.isOfType(err,NotFound)) throw err; forwardMember(byType,e,a,tl);}
+   case _:throw new NotFound();
   };
-  function byExtension(f:Dynamic,t:Dynamic,e:Dynamic):AccessKind {
+  function byExtension(f:(Array<{cls:TClass,pos:Pos}>->AccessKind)->AccessKind,t:T,e:TExpr):AccessKind {
    var constantStruct=false;
-   switch t {case TInst(_) if(e.eexpr==TConst(TSuper)):e=mk(TCast(mk(TConst(TThis),mkMono(),e.epos),null),e.etype,e.epos); case _:}
-   function lookup(list:Array<Dynamic>):AccessKind return byList(function(pair) {
-    var c=pair.c,pc=pair.pos,cf0=some(c.clStatics.get(i));
-    function check(fields:Array<Dynamic>):AccessKind {
-     if(fields.length==0) throw "Not_found";
+   switch t {case TInst(_) if(e.eexpr.match(TConst(TSuper))):e=mk(TCast(mk(TConst(TThis),mkMono(),e.epos),null),e.etype,e.epos); case _:}
+   function lookup(list:Array<{cls:TClass,pos:Pos}>):AccessKind return byList(function(pair) {
+    var c=pair.cls,pc=pair.pos,cf0=some(c.clStatics.get(i));
+    function check(fields:Array<TClassField>):AccessKind {
+     if(fields.length==0) throw new NotFound();
      var cf=fields[0],rest=fields.slice(1);
-     if(Meta.has(Meta.NoUsing,cf.cfMeta)||!canAccess(ctx,c,cf,true)||hasClassFieldFlag(cf,CfImpl)) return check(rest);
+     if(Meta.has(MetaTag.NoUsing,cf.cfMeta)||!canAccess(ctx,c,cf,true)||hasClassFieldFlag(cf,CfImpl)) return check(rest);
      var current=ctx.e.monomorphs;
      function next():AccessKind {ctx.e.monomorphs=current; return check(rest);}
      try {
       var monos=Monomorph.spawnConstrainedMonos(t -> t,cf.cfParams),cft=follow(applyParams(cf.cfParams,monos,cf.cfType));
-      var args:Array<Dynamic>=switch followWithCoro(cft) {case NotCoro(TFun(args,_))|Coro(args,_):args; case _:[];};
+      var args:Array<{name:String,optional:Bool,type:T}>=switch followWithCoro(cft) {case NotCoro(TFun({args:args,ret:_}))|Coro({args:args}):args; case _:[];};
       if(args.length==0) return next();
       var t0=switch args[0].type {case TType({tPath:{pack:["haxe","macro"],name:"ExprOf"}},[t]):t; case t:t;};
       if(t==tDynamic&&follow(t0)!=t) return next();
       var casted=TyperBase.unifyStaticExtension(ctx,e,t0,p); ImportHandling.markImportPosition(ctx,pc); ctx.e.monomorphs=current;
       return AKUsingField(makeStaticExtensionAccess(c,cf,casted,false,p));
-     } catch(err:Dynamic) {switch err {
-      case UnifyError(el)|Error({errMessage:Unify(el)}):
-       constantStruct=constantStruct||el.exists(function(err) return switch err {case HasExtraField(_):true; case _:false;}); return next();
-      case _:throw err;
-     }}
+     } catch(err:Unify_error) {
+      constantStruct=constantStruct||Lambda.exists(err.errors,function(err) return switch err {case HasExtraField(_):true;case _:false;});return next();
+     } catch(err:TypingError) {
+      switch err.error.errMessage {case Unify(el):constantStruct=constantStruct||Lambda.exists(el,function(err) return switch err {case HasExtraField(_):true;case _:false;});return next();case _:throw err;}
+     }
     }
     return check([cf0].concat(cf0.cfOverloads));
    },list);
-   try return f(lookup) catch(err:Dynamic) {if(err!="Not_found"||!constantStruct) throw err; return removeConstantFlag(t,function(changed) {if(changed) return f(lookup); throw "Not_found";});}
+   try return f(lookup) catch(err:Dynamic) {if(!Std.isOfType(err,NotFound)||!constantStruct) throw err; return removeConstantFlag(t,function(changed) {if(changed) return f(lookup); throw new NotFound();});}
   }
-  function byTypeExtension(e:Dynamic,t:Dynamic):AccessKind {
-   if(isSet) throw "Not_found";
-   function extension():AccessKind return byExtension(function(lookup) {var mt:Dynamic; try mt=moduleTypeOfType(t) catch(err:Dynamic) {if(err!="Exit") throw err; throw "Not_found";} return lookup(tInfos(mt).mtUsing);},t,e);
+  function byTypeExtension(e:TExpr,t:T):AccessKind {
+   if(isSet) throw new NotFound();
+   function extension():AccessKind return byExtension(function(lookup) {var mt:ModuleType; try mt=moduleTypeOfType(t) catch(err:Dynamic) {if(!Std.isOfType(err,Exit)) throw err; throw new NotFound();} return lookup(tInfos(mt).mtUsing);},t,e);
    return switch t {
-    case TType(td,tl):try extension() catch(err:Dynamic) {if(err!="Not_found") throw err; byTypedef(byTypeExtension,e,td,tl);}
-    case TMono(_):throw "Not_found";
-    case TAbstract(a,tl):try extension() catch(err:Dynamic) {if(err!="Not_found") throw err; forwardMember(byTypeExtension,e,a,tl);}
+    case TType(td,tl):try extension() catch(err:Dynamic) {if(!Std.isOfType(err,NotFound)) throw err; byTypedef(byTypeExtension,e,td,tl);}
+    case TMono(_):throw new NotFound();
+    case TAbstract(a,tl):try extension() catch(err:Dynamic) {if(!Std.isOfType(err,NotFound)) throw err; forwardMember(byTypeExtension,e,a,tl);}
     case _:extension();
    };
   }
-  function byModuleExtension(e:Dynamic,t:Dynamic):AccessKind {
-   if(isSet) throw "Not_found";
+  function byModuleExtension(e:TExpr,t:T):AccessKind {
+   if(isSet) throw new NotFound();
    function extension():AccessKind return byExtension(function(lookup) {
-    try return lookup(ctx.m.moduleUsing) catch(err:Dynamic) {if(err!="Not_found") throw err; var acc=lookup(ctx.g.globalUsing); return switch acc {case AKUsingField({seAccess:{faHost:FHStatic(c)}}):addDependency(ctx.m.curmod,c.clModule,MDepFromTyping); acc; case _:throw "Invalid global using access";};}
+    try return lookup(ctx.m.moduleUsing) catch(err:Dynamic) {if(!Std.isOfType(err,NotFound)) throw err; var acc=lookup(ctx.g.globalUsing); return switch acc {case AKUsingField({seAccess:{faHost:FHStatic(c)}}):addDependency(ctx.m.curmod,c.clModule,MDepFromTyping); acc; case _:throw "Invalid global using access";};}
    },t,e);
    return switch t {
     case TType(td,tl):byTypedef(byModuleExtension,e,td,tl);
-    case TMono(r):switch Monomorph.classifyDownConstraints(r) {case CStructural(_,false):extension(); case _:throw "Not_found";}
-    case TAbstract(a,tl):try extension() catch(err:Dynamic) {if(err!="Not_found") throw err; forwardMember(byModuleExtension,e,a,tl);}
+    case TMono(r):switch Monomorph.classifyDownConstraints(r) {case CStructural(_,false):extension(); case _:throw new NotFound();}
+    case TAbstract(a,tl):try extension() catch(err:Dynamic) {if(!Std.isOfType(err,NotFound)) throw err; forwardMember(byModuleExtension,e,a,tl);}
     case _:extension();
    };
   }
-  function byFallback(e:Dynamic,t:Dynamic):AccessKind return switch t {
+  function byFallback(e:TExpr,t:T):AccessKind return switch t {
    case TType(td,tl):byTypedef(byFallback,e,td,tl);
    case TInst(c,tl):
-    function loop(c:Dynamic,tl:Array<Dynamic>):AccessKind {
+    function loop(c:TClass,tl:TParams):AccessKind {
      if(c.clDynamic!=null) return AKExpr(mk(TField(e,FDynamic(i)),applyParams(c.clParams,tl,c.clDynamic),p));
-     if(c.clSuper!=null) return loop(c.clSuper.c,c.clSuper.params); throw "Not_found";
+     if(c.clSuper!=null) return loop(c.clSuper.cls,c.clSuper.params); throw new NotFound();
     }
-    try loop(c,tl) catch(err:Dynamic) {if(err!="Not_found"||!c.clStatics.exists(i)) throw err; raiseTypingError("Cannot access static field "+i+" from a class instance",pfield);}
+    try loop(c,tl) catch(err:Dynamic) {if(!Std.isOfType(err,NotFound)||!c.clStatics.exists(i)) throw err; raiseTypingError("Cannot access static field "+i+" from a class instance",pfield);}
    case TDynamic(t) if(cfg.allowDynamic):AKExpr(mk(TField(e,FDynamic(i)),t==null?tDynamic:t,p));
    case TAbstract(a,tl):
-    try {if(!cfg.allowResolve) throw "Not_found"; var c=some(a.aImpl),f=some(isSet?a.aWrite:a.aRead); AKResolve(makeAbstractStaticExtensionAccess(a,tl,c,f,e,false,p),i);}
+    try {if(!cfg.allowResolve) throw new NotFound(); var c=some(a.aImpl),f=some(isSet?a.aWrite:a.aRead); AKResolve(makeAbstractStaticExtensionAccess(a,tl,c,f,e,false,p),i);}
     catch(err:Dynamic) {
-     if(err!="Not_found") throw err;
-     try forwardMember(byFallback,e,a,tl) catch(err:Dynamic) {if(err!="Not_found") throw err; var f=some(some(a.aImpl).clStatics.get(i)); if(!hasClassFieldFlag(f,CfImpl)) raiseTypingError("Invalid call to static function "+i+" through abstract instance",pfield); else throw err;}
+     if(!Std.isOfType(err,NotFound)) throw err;
+     try forwardMember(byFallback,e,a,tl) catch(err:Dynamic) {if(!Std.isOfType(err,NotFound)) throw err; var f=some(some(a.aImpl).clStatics.get(i)); if(!hasClassFieldFlag(f,CfImpl)) raiseTypingError("Invalid call to static function "+i+" through abstract instance",pfield); else throw err;}
     }
-   case _:throw "Not_found";
+   case _:throw new NotFound();
   };
-  function byModule(e:Dynamic,t:Dynamic):AccessKind return switch e.eexpr {
+  function byModule(e:TExpr,t:T):AccessKind return switch e.eexpr {
    case TTypeExpr(mt):
-    var infos=tInfos(mt); if(infos.mtPath.name!=infos.mtModule.mPath.name) throw "Not_found";
+    var infos=tInfos(mt); if(infos.mtPath.name!=infos.mtModule.mPath.name) throw new NotFound();
     var c=infos.mtModule.mStatics;
     if(c!=null&&c.clStatics.exists(i)) {var cf=c.clStatics.get(i); access(TyperBase.typeModuleType(ctx,TClassDecl(c),e.epos),cf,FHStatic(c));}
     else TyperBase.mkModuleTypeAccess(ctx,Typeload.findTypeInModule(infos.mtModule,i),p);
-   case _:throw "Not_found";
+   case _:throw new NotFound();
   };
   var t=followWithoutType(e.etype);
-  for(strategy in [byType,byTypeExtension,byModuleExtension,byFallback,byModule]) try return strategy(e,t) catch(err:Dynamic) {if(err!="Not_found") throw err;}
-  if(cfg.doResume) throw "Not_found";
-  if(!ctx.f.untyped) {
-   function special(a:Dynamic):Bool return (cast a.aOps:Array<Dynamic>).exists(pair -> pair.field.cfName==i)||(cast a.aUnops:Array<Dynamic>).exists(pair -> pair.field.cfName==i)||(cast a.aArray:Array<Dynamic>).exists(cf -> cf.cfName==i);
+  for(strategy in [byType,byTypeExtension,byModuleExtension,byFallback,byModule]) try return strategy(e,t) catch(err:Dynamic) {if(!Std.isOfType(err,NotFound)) throw err;}
+  if(cfg.doResume) throw new NotFound();
+  if(!ctx.f.isUntyped) {
+   function special(a:TAbstract):Bool return Lambda.exists(a.aOps,pair -> pair.field.cfName==i)||Lambda.exists(a.aUnops,pair -> pair.field.cfName==i)||Lambda.exists(a.aArray,cf -> cf.cfName==i);
    switch follow(t) {
-    case TAnon({aStatus:{value:ClassStatics({clKind:KAbstractImpl(a)})}})|TInst({clKind:KAbstractImpl(a)},_)|TAbstract(a,_) if(special(a)):displayError(ctx.com,"Field "+i+" cannot be called directly because it has no expression",pfield);
-    case TAnon({aStatus:{value:ClassStatics(c)}}) if(c.clFields.exists(i)):displayError(ctx.com,"Static access to instance field "+i+" is not allowed",pfield);
+    case TAnon({aStatus:ClassStatics({clKind:KAbstractImpl(a)})})|TInst({clKind:KAbstractImpl(a)},_)|TAbstract(a,_) if(special(a)):displayError(ctx.com,"Field "+i+" cannot be called directly because it has no expression",pfield);
+    case TAnon({aStatus:ClassStatics(c)}) if(c.clFields.exists(i)):displayError(ctx.com,"Static access to instance field "+i+" is not allowed",pfield);
     case _:
-     try {if(!Diagnostics.errorInDiagnosticsRun(ctx.com,pfield)) throw "Exit"; DisplayFields.handleMissingFieldRaise(ctx,e.etype,i,mode,withType,pfield);}
-     catch(err:Dynamic) {if(err!="Exit") throw err; displayError(ctx.com,StringError.stringError(i,stringSource(e.etype),sType(printContext(),e.etype)+" has no field "+i),pfield);}
+     // Display diagnostics are a later milestone; ordinary missing-field errors retain the source path.
+     if(Common.isDiagnostics(ctx.com)) throw new haxe.Exception("Display diagnostics are not supported by the source-only HXB compiler");
+     displayError(ctx.com,StringError.stringError(i,stringSource(e.etype),sType(printContext(),e.etype)+" has no field "+i),pfield);
    }
   }
   return AKExpr(mk(TField(e,FDynamic(i)),spawnMonomorph(ctx,p),p));
  }
- public static function typeFieldDefaultCfg(ctx:Dynamic,e:Dynamic,i:String,p:Dynamic,mode:Dynamic,withType:Dynamic):AccessKind return typeField(TypeFieldConfig.defaultConfig,ctx,e,i,p,mode,withType);
- public static function getStructInitAnonFields(c:Dynamic,tl:Array<Dynamic>):Dynamic {
-  var args:Null<Array<Dynamic>>=null,cf=c.clConstructor;
+ public static function typeFieldDefaultCfg(ctx:Typer,e:TExpr,i:String,p:Pos,mode:AccessMode,withType:WithTypeValue):AccessKind return typeField(TypeFieldConfig.defaultConfig,ctx,e,i,p,mode,withType);
+ public static function getStructInitAnonFields(c:TClass,tl:TParams):haxe.ds.StringMap<TClassField> {
+  var args:Null<Array<{name:String,optional:Bool,type:T,pos:Pos,doc:Null<String>}>>=null,cf=c.clConstructor;
   if(cf!=null) {
-   var doc=genDocTextOpt(cf.cfDoc),javadoc:Dynamic=doc==null?null:new Javadoc(doc);
-   function paramInfo(name:String):Dynamic return javadoc==null?null:javadoc.getParamInfo(name);
+   var doc=genDocTextOpt(cf.cfDoc),javadoc:Null<Javadoc>=doc==null?null:new Javadoc(doc);
+   function paramInfo(name:String):Null<String> return javadoc==null?null:javadoc.getParamInfo(name);
    switch follow(cf.cfType) {
-    case TFun(list,_):
+    case TFun({args:list,ret:_}):
      args=list.map(function(arg) {
       var name=arg.name,t=applyParams(c.clParams,tl,arg.type),p=cf.cfNamePos,doc=paramInfo(name);
       switch cf.cfExpr {
-       case {eexpr:TFunction(fn)}:for(pair in (cast fn.tfArgs:Array<Dynamic>)) if(pair.variable.vName==name) {p=pair.variable.vPos; break;}
+       case {eexpr:TFunction(fn)}:for(pair in fn.tfArgs) if(pair.variable.vName==name) {p=pair.variable.vPos; break;}
        case _:if(c.clFields.exists(name)) {var field=c.clFields.get(name); p=field.cfNamePos; doc=genDocTextOpt(field.cfDoc);}
       }
       return {name:name,optional:arg.optional,type:t,pos:p,doc:doc};
@@ -310,9 +331,9 @@ class Fields {
     case _:
    }
   }
-  var fields=PMap.empty();
-  if(args!=null) for(arg in args) {var cf=mkField(arg.name,arg.type,arg.pos,arg.pos); if(arg.optional) cf.cfMeta=[{meta:Meta.Optional,exprs:[],pos:Globals.nullPos}]; cf.cfDoc=docFromStringOpt(arg.doc); fields=fields.add(cf.cfName,cf);}
-  else c.clFields.iter(function(_:String,cf:Dynamic) switch cf.cfKind {case Var(_):var copy=Reflect.copy(cf); copy.cfType=applyParams(c.clParams,tl,cf.cfType); fields=fields.add(copy.cfName,copy); case _:});
+  var fields=new haxe.ds.StringMap<TClassField>();
+  if(args!=null) for(arg in args) {var cf=mkField(arg.name,arg.type,arg.pos,arg.pos); if(arg.optional) cf.cfMeta=[{meta:MetaTag.Optional,exprs:[],pos:Globals.nullPos}]; cf.cfDoc=docFromStringOpt(arg.doc); fields.set(cf.cfName,cf);}
+  else for(cf in c.clFields) switch cf.cfKind {case Var(_):var copy:TClassField=Reflect.copy(cf); copy.cfType=applyParams(c.clParams,tl,cf.cfType); fields.set(copy.cfName,copy); case _:}
   return fields;
  }
 }

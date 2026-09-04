@@ -1,4 +1,6 @@
 package coro;
+import context.DotGraph;
+import core.StringHelper;
 import coro.CoroTypes;
 import coro.CoroFunctions.*;
 // haxe/src/coro/coroDebug.ml — mechanical draft; not compile-validated.

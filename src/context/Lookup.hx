@@ -1,5 +1,5 @@
 package context;
-import core.ds.PMap;
+import core.ds.PersistentMap;
 import core.ds.Hashtbl;
 // Draft mechanical translation of haxe/src/context/lookup.ml; unvalidated.
 interface Lookup<K,V> {
@@ -13,8 +13,8 @@ interface Lookup<K,V> {
 	public function clear():Void;
 }
 class PmapLookup<K,V> implements Lookup<K,V> {
-	var lut:PMap<K,V>;
-	public function new() lut = PMap.empty();
+	var lut:PersistentMap<K,V>;
+	public function new() lut = PersistentMap.empty();
 	public function add(key:K, value:V):Void lut = lut.add(key, value);
 	public function remove(key:K):Void lut = lut.remove(key);
 	public function find(key:K):V return lut.find(key);
@@ -22,7 +22,7 @@ class PmapLookup<K,V> implements Lookup<K,V> {
 	public function iter(f:K->V->Void):Void lut.iter(f);
 	public function fold<A>(f:K->V->A->A, acc:A):A return lut.foldi(f, acc);
 	public function mem(key:K):Bool return lut.mem(key);
-	public function clear():Void lut = PMap.empty();
+	public function clear():Void lut = PersistentMap.empty();
 }
 class HashtblLookup<K,V> implements Lookup<K,V> {
 	final lut:Hashtbl<K,V>;

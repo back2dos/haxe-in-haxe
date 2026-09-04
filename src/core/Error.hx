@@ -1,5 +1,7 @@
 package core;
 
+import Type as StdType;
+
 import core.Globals;
 import core.TType;
 import core.TFunctions;
@@ -57,8 +59,8 @@ class Error {
 		case InvalidKind(f,a,b):switch [a,b] {
 			case [Var(va),Var(vb)]:
 				var name,stra,strb;
-				if (Type.enumEq(va.vRead,vb.vRead)) {name = "setter";stra = sAccess(false,va.vWrite);strb = sAccess(false,vb.vWrite);}
-				else if (Type.enumEq(va.vWrite,vb.vWrite)) {name = "getter";stra = sAccess(true,va.vRead);strb = sAccess(true,vb.vRead);}
+				if (StdType.enumEq(va.vRead,vb.vRead)) {name = "setter";stra = sAccess(false,va.vWrite);strb = sAccess(false,vb.vWrite);}
+				else if (StdType.enumEq(va.vWrite,vb.vWrite)) {name = "getter";stra = sAccess(true,va.vRead);strb = sAccess(true,vb.vRead);}
 				else {name = "access";stra = "(" + sAccess(true,va.vRead) + "," + sAccess(false,va.vWrite) + ")";strb = "(" + sAccess(true,vb.vRead) + "," + sAccess(false,vb.vWrite) + ")";}
 				"Inconsistent " + name + " for field " + f + " : " + stra + " should be " + strb;
 			case _:"Field " + f + " is " + sKind(a) + " but should be " + sKind(b);
@@ -139,7 +141,7 @@ class BetterErrors {
 	public static function sType(ctx:Dynamic,t:T):String return switch t {
 		case TMono(r):core.TPrinting.MonomorphPrinting.sMono(sType,ctx,false,r);
 		case TEnum(e,tl):Globals.sTypePath(e.ePath) + sTypeParams(ctx,tl);
-		case TInst(c,tl):switch c.clKind {case KExpr(e):syntax.Printer.sExpr(e);case _:Globals.sTypePath(c.clPath) + sTypeParams(ctx,tl);}
+		case TInst(c,tl):switch c.clKind {case KExpr(e):core.AstPrinter.sExpr(e);case _:Globals.sTypePath(c.clPath) + sTypeParams(ctx,tl);}
 		case TType(t,tl):Globals.sTypePath(t.tPath) + sTypeParams(ctx,tl);
 		case TAbstract(a,tl):Globals.sTypePath(a.aPath) + (a.aPath.pack.length == 0 && a.aPath.name == "Null" ? sTypeParamsExpanded(ctx,tl) : sTypeParams(ctx,tl));
 		case TFun({args:[]}):"() -> ...";

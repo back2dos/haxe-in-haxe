@@ -12,10 +12,10 @@ import context.SafeCom;
 // haxe/src/optimization/dce.ml — mechanical draft; not compiled or validated.
 enum DceMode { DceNo; DceStd; DceFull; }
 typedef DceData = {
- var scom:Dynamic; var mscom:Dynamic; var full:Bool; var stdDirs:Array<String>; var debug:Bool; var followExpr:DceData->TExpr->Void; var curclass:TClass;
+ var scom:SafeContext; var mscom:Null<SafeContext>; var full:Bool; var stdDirs:Array<String>; var debug:Bool; var followExpr:DceData->TExpr->Void; var curclass:TClass;
  var addedFields:Array<{cls:TClass,field:TClassField,kind:ClassFieldRefKind}>; var markedFields:{value:Array<TClassField>};
  var features:haxe.ds.StringMap<Array<ClassFieldRef>>; var checkedFeatures:haxe.ds.StringMap<Bool>;
- var mergeMutex:sys.thread.Mutex; var fieldMarkerMutex:sys.thread.Mutex; var usedMutex:sys.thread.Mutex; var featureMutex:sys.thread.Mutex; var addFeatureManager:Dynamic;
+ var mergeMutex:sys.thread.Mutex; var fieldMarkerMutex:sys.thread.Mutex; var usedMutex:sys.thread.Mutex; var featureMutex:sys.thread.Mutex; var addFeatureManager:core.ds.NowOrLater;
 }
 class Dce {
  public static function pushClass(dce:DceData,c:TClass):DceData {var copy:DceData = Reflect.copy(dce); copy.curclass = c; return copy;}
@@ -26,7 +26,7 @@ class Dce {
  public static function superForcesKeep(c:TClass):Bool return Meta.has(KeepSub,c.clMeta) || exists(ct -> superForcesKeep(ct.cls),c.clImplements) || c.clSuper != null && superForcesKeep(c.clSuper.cls);
  public static function overridesExternField(cf:TClassField,c:TClass):Bool {if (c.clSuper == null) return false; var sup = c.clSuper.cls; var field = sup.clFields.get(cf.cfName); if (field == null) return false; return hasClassFlag(sup,CExtern) && field.cfExpr == null || overridesExternField(field,sup);}
  public static function isStdFile(dce:DceData,file:String):Bool return exists(dir -> StringTools.startsWith(file,dir),dce.stdDirs);
- public static var keepMetas = [Keep,Expose];
+ public static var keepMetas:Array<core.MetaList.StrictMeta> = [Keep,Expose];
  public static function keepWholeClass(dce:DceData,c:TClass):Bool return Meta.hasOneOf(keepMetas,c.clMeta) || !(dce.full || isStdFile(dce,core.Path.UniqueKey.lazyPath(c.clModule.mExtra.mFile)) || Meta.has(Dce,c.clMeta)) || superForcesKeep(c) || switch c.clPath {
   case {pack:[],name:"Math" | "Array"} if (dce.scom.platform == Js):false;
   case {pack:["flash","_Boot"],name:"RealBoot"}:true;
@@ -37,19 +37,19 @@ class Dce {
  public static function keepWholeEnum(dce:DceData,en:TEnum):Bool return Meta.hasOneOf(keepMetas,en.eMeta) || !(dce.full || isStdFile(dce,core.Path.UniqueKey.lazyPath(en.eModule.mExtra.mFile)) || Meta.has(Dce,en.eMeta));
  public static function fieldForcesDce(cf:TClassField):Bool return Meta.has(Dce,cf.cfMeta);
  public static function classHasDceField(c:TClass):Bool return exists(fieldForcesDce,c.clOrderedFields) || exists(fieldForcesDce,c.clOrderedStatics) || c.clConstructor != null && fieldForcesDce(c.clConstructor);
- public static function mkUsedMeta(p:Pos):MetadataEntry return {meta:Used,exprs:[],pos:Globals.mkZeroRangePos(p)};
- public static function mkKeepMeta(p:Pos):MetadataEntry return {meta:Keep,exprs:[],pos:Globals.mkZeroRangePos(p)};
+ public static function mkUsedMeta(p:Pos):MetadataEntry return {meta:core.MetaList.StrictMeta.Used,exprs:[],pos:Globals.mkZeroRangePos(p)};
+ public static function mkKeepMeta(p:Pos):MetadataEntry return {meta:core.MetaList.StrictMeta.Keep,exprs:[],pos:Globals.mkZeroRangePos(p)};
  public static function keepField(dce:DceData,cf:TClassField,c:TClass,kind:ClassFieldRefKind):Bool {
   var stat = kind == CfrStatic;
   if (Meta.hasOneOf(keepMetas,cf.cfMeta) || hasClassFieldFlag(cf,CfUsed) || cf.cfName == "__init__" || hasClassFieldFlag(cf,CfExtern) || !stat && overridesExternField(cf,c)) return true;
   if (kind == CfrConstructor && c.clSuper != null && c.clSuper.cls.clConstructor != null && keepField(dce,c.clSuper.cls.clConstructor,c.clSuper.cls,CfrConstructor)) return true;
   function accessor(prefix:String):Bool {var field = (stat ? c.clStatics : c.clFields).get(prefix + cf.cfName); return field != null && keepField(dce,field,c,kind);}
-  return switch cf.cfKind {case Var(AccCall | AccPrivateCall,_):accessor("get_"); case Var(_,AccCall | AccPrivateCall):accessor("set_"); case _:false;};
+  return switch cf.cfKind {case Var({vRead:AccCall | AccPrivateCall,vWrite:_}):accessor("get_"); case Var({vRead:_,vWrite:AccCall | AccPrivateCall}):accessor("set_"); case _:false;};
  }
  public static function checkFeature(dce:DceData,s:String):Void {
   try {var refs = dce.features.get(s); if (refs == null) throw new NotFound(); dce.featureMutex.acquire(); if (!dce.checkedFeatures.exists(s)) {dce.checkedFeatures.set(s,true); dce.featureMutex.release(); for (ref in refs) {var resolved = resolveClassFieldRef(dce,ref); markField(dce,resolved.cls,resolved.field,ref.cfrKind);}} else dce.featureMutex.release();} catch (_:NotFound) {}
  }
- public static function checkAndAddFeature(dce:DceData,s:String):Void {checkFeature(dce,s); var c = dce.curclass; if (c == nullClass) throw "assert: missing DCE class"; core.ds.NowOrLater.tryNow(dce.addFeatureManager,function() c.clModule.mExtra.mFeatures.set(s,true));}
+ public static function checkAndAddFeature(dce:DceData,s:String):Void {checkFeature(dce,s); var c = dce.curclass; if (c == nullClass) throw "assert: missing DCE class"; dce.addFeatureManager.tryNow(function() c.clModule.mExtra.mFeatures.set(s,true));}
  public static function markField(dce:DceData,c:TClass,cf:TClassField,kind:ClassFieldRefKind):Void {
   function add(owner:TClass,cf:TClassField):Void if (!hasClassFieldFlag(cf,CfUsed)) {
    dce.fieldMarkerMutex.acquire(); if (!hasClassFieldFlag(cf,CfUsed)) {addClassFieldFlag(cf,CfUsed); dce.addedFields.push({cls:owner,field:cf,kind:kind}); dce.markedFields.value.unshift(cf); dce.fieldMarkerMutex.release(); checkFeature(dce,Globals.sTypePath(c.clPath) + "." + cf.cfName);} else dce.fieldMarkerMutex.release();
@@ -64,7 +64,7 @@ class Dce {
  }
  public static function updateMarkedClassFields(dce:DceData,c:TClass):Void {
   dce = pushClass(dce,c); for (cf in c.clOrderedStatics) if (hasClassFieldFlag(cf,CfMaybeUsed)) markField(dce,c,cf,CfrStatic); for (cf in c.clOrderedFields) if (hasClassFieldFlag(cf,CfMaybeUsed)) markField(dce,c,cf,CfrMember);
-  var init = core.TType.TClass.getClInit(c); if (init != null) dce.followExpr(dce,init); for (ct in c.clImplements) markClass(dce,ct.cls); if (c.clSuper != null) markClass(dce,c.clSuper.cls);
+  var init = core.TOther.TClassTools.getClInit(c); if (init != null) dce.followExpr(dce,init); for (ct in c.clImplements) markClass(dce,ct.cls); if (c.clSuper != null) markClass(dce,c.clSuper.cls);
  }
  public static function markClass(dce:DceData,c:TClass):Void if (!hasClassFlag(c,CUsed)) {dce.usedMutex.acquire(); if (!hasClassFlag(c,CUsed)) {addClassFlag(c,CUsed); dce.usedMutex.release(); checkFeature(dce,Globals.sTypePath(c.clPath) + ".*"); updateMarkedClassFields(dce,c);} else dce.usedMutex.release();}
  static function sortedKeys<V>(map:haxe.ds.StringMap<V>):Array<String> {var keys = [for (key in map.keys()) key]; keys.sort(Reflect.compare); return keys;}
@@ -77,13 +77,13 @@ class Dce {
     case TInst(c,pl):markClass(dce,c); for (t in pl) loop(stack,t);
     case TFun(sig):for (a in sig.args) loop(stack,a.type); loop(stack,sig.ret);
     case TEnum(en,pl):markEnum(dce,en); for (t in pl) loop(stack,t);
-    case TAbstract(a,pl) if (Meta.has(MultiType,a.aMeta)):try loop(stack,typing.AbstractCast.findMultitypeSpecialization(dce.scom.platform,a,pl,p).type) catch (_:core.Error.Error) {}
+    case TAbstract(a,pl) if (Meta.has(MultiType,a.aMeta)):try loop(stack,context.AbstractCast.findMultitypeSpecialization(dce.scom.platform,a,pl,p).type) catch (_:core.Error.TypingError) {}
     case TAbstract(a,pl):markAbstract(dce,a); for (t in pl) loop(stack,t); if (!Meta.has(CoreType,a.aMeta)) loop(stack,core.Abstract.getUnderlyingType(a,pl));
     case TLazy(_) | TDynamic(_) | TType(_,_) | TAnon(_) | TMono(_):
    }
   } loop([],t);
  }
- public static function markMt(dce:DceData,mt:ModuleType):Void switch mt {case TClassDecl(c):markClass(dce,c); case TEnumDecl(en):markEnum(dce,en); case TAbstractDecl(a):if (!Meta.has(ValueUsed,a.aMeta)) a.aMeta.unshift({meta:ValueUsed,exprs:[],pos:Globals.mkZeroRangePos(a.aPos)}); markAbstract(dce,a); case TTypeDecl(_):}
+ public static function markMt(dce:DceData,mt:ModuleType):Void switch mt {case TClassDecl(c):markClass(dce,c); case TEnumDecl(en):markEnum(dce,en); case TAbstractDecl(a):if (!Meta.has(ValueUsed,a.aMeta)) a.aMeta.unshift({meta:core.MetaList.StrictMeta.ValueUsed,exprs:[],pos:Globals.mkZeroRangePos(a.aPos)}); markAbstract(dce,a); case TTypeDecl(_):}
  public static function markDependentFields(dce:DceData,sup:TClass,name:String,kind:ClassFieldRefKind):Void {
   function loop(c:TClass):Void {
    var cf = (kind == CfrStatic ? c.clStatics : c.clFields).get(name); if (cf == null) {if (c.clSuper != null) loop(c.clSuper.cls); return;}
@@ -109,13 +109,13 @@ class Dce {
  public static function field(dce:DceData,c:TClass,name:String,kind:ClassFieldRefKind):Void {try {var r = resolveField(dce,c,name,kind); markField(dce,r.cls,r.field,kind);} catch (_:NotFound) {if (dce.debug) Sys.stderr().writeString("[DCE] Field " + name + " not found on " + Globals.sTypePath(c.clPath) + "\n");}}
  public static function keepToString(dce:DceData,c:TClass):Void {try {var r = resolveField(dce,c,"toString",CfrMember); if (!fieldForcesDce(r.field)) markField(dce,r.cls,r.field,CfrMember);} catch (_:NotFound) {}}
  static function protect(mutex:sys.thread.Mutex,f:Void->Void):Void {mutex.acquire(); try f() catch (e:Dynamic) {mutex.release(); throw e;} mutex.release();}
- public static function markDirectlyUsedClass(dce:DceData,c:TClass):Void if (c != dce.curclass && !Meta.has(DirectlyUsed,c.clMeta)) protect(dce.usedMutex,function() {if (!Meta.has(DirectlyUsed,c.clMeta)) c.clMeta.unshift({meta:DirectlyUsed,exprs:[],pos:Globals.mkZeroRangePos(c.clPos)});});
- public static function markDirectlyUsedEnum(dce:DceData,en:TEnum):Void if (!Meta.has(DirectlyUsed,en.eMeta)) protect(dce.usedMutex,function() {if (!Meta.has(DirectlyUsed,en.eMeta)) en.eMeta.unshift({meta:DirectlyUsed,exprs:[],pos:Globals.mkZeroRangePos(en.ePos)});});
+ public static function markDirectlyUsedClass(dce:DceData,c:TClass):Void if (c != dce.curclass && !Meta.has(DirectlyUsed,c.clMeta)) protect(dce.usedMutex,function() {if (!Meta.has(DirectlyUsed,c.clMeta)) c.clMeta.unshift({meta:core.MetaList.StrictMeta.DirectlyUsed,exprs:[],pos:Globals.mkZeroRangePos(c.clPos)});});
+ public static function markDirectlyUsedEnum(dce:DceData,en:TEnum):Void if (!Meta.has(DirectlyUsed,en.eMeta)) protect(dce.usedMutex,function() {if (!Meta.has(DirectlyUsed,en.eMeta)) en.eMeta.unshift({meta:core.MetaList.StrictMeta.DirectlyUsed,exprs:[],pos:Globals.mkZeroRangePos(en.ePos)});});
  public static function markDirectlyUsedMt(dce:DceData,mt:ModuleType):Void switch mt {case TClassDecl(c):markDirectlyUsedClass(dce,c); case TEnumDecl(en):markDirectlyUsedEnum(dce,en); case _:}
  public static function markDirectlyUsedT(dce:DceData,p:Pos,t:T):Void switch follow(t) {
   case TInst(c = {clKind:KNormal},pl):markDirectlyUsedClass(dce,c); for (t in pl) markDirectlyUsedT(dce,p,t);
   case TEnum(en,pl):markDirectlyUsedEnum(dce,en); for (t in pl) markDirectlyUsedT(dce,p,t);
-  case TAbstract(a,pl) if (Meta.has(MultiType,a.aMeta)):try markDirectlyUsedT(dce,p,typing.AbstractCast.findMultitypeSpecialization(dce.scom.platform,a,pl,p).type) catch (_:core.Error.Error) {}
+  case TAbstract(a,pl) if (Meta.has(MultiType,a.aMeta)):try markDirectlyUsedT(dce,p,context.AbstractCast.findMultitypeSpecialization(dce.scom.platform,a,pl,p).type) catch (_:core.Error.TypingError) {}
   case TAbstract(a,pl):for (t in pl) markDirectlyUsedT(dce,p,t); if (!Meta.has(CoreType,a.aMeta)) markDirectlyUsedT(dce,p,core.Abstract.getUnderlyingType(a,pl));
   case _:
  }
@@ -168,9 +168,9 @@ class Dce {
    case TBinop(OpAssignOp(op),e1 = {eexpr:TField(_,fa = FDynamic(_))},e2):checkOp(dce,op); checkDynamicWrite(dce,fa); pair(e1,e2);
    case TBinop(OpAssignOp(op),e1 = {eexpr:TField(_,fa = FAnon(cf))},e2):checkOp(dce,op); if (Meta.has(Optional,cf.cfMeta)) checkAnonOptionalWrite(dce,fa); else checkAnonWrite(dce,fa); pair(e1,e2);
    case TBinop(OpEq,e1,e2) if (isDynamic(e1.etype) || isDynamic(e2.etype)):checkAndAddFeature(dce,"dynamic_binop_=="); pair(e1,e2);
-   case TBinop(OpEq,e1,e2) if (core.ExtType.isTypeParam(follow(e1.etype)) || core.ExtType.isTypeParam(follow(e2.etype))):checkAndAddFeature(dce,"type_param_binop_=="); pair(e1,e2);
+   case TBinop(OpEq,e1,e2) if (core.TOther.ExtType.isTypeParam(follow(e1.etype)) || core.TOther.ExtType.isTypeParam(follow(e2.etype))):checkAndAddFeature(dce,"type_param_binop_=="); pair(e1,e2);
    case TBinop(OpNotEq,e1,e2) if (isDynamic(e1.etype) || isDynamic(e2.etype)):checkAndAddFeature(dce,"dynamic_binop_!="); pair(e1,e2);
-   case TBinop(OpNotEq,e1,e2) if (core.ExtType.isTypeParam(follow(e1.etype)) || core.ExtType.isTypeParam(follow(e2.etype))):checkAndAddFeature(dce,"type_param_binop_!="); pair(e1,e2);
+   case TBinop(OpNotEq,e1,e2) if (core.TOther.ExtType.isTypeParam(follow(e1.etype)) || core.TOther.ExtType.isTypeParam(follow(e2.etype))):checkAndAddFeature(dce,"type_param_binop_!="); pair(e1,e2);
    case TBinop(op,e1,e2):checkOp(dce,op); pair(e1,e2);
    case TCall(e2 = {eexpr:TField(ef,fa)},el):markT(dce,e2.epos,e2.etype); exprField(dce,ef,fa,true); for (a in el) visit(a);
    case TField(inner,fa):exprField(dce,inner,fa,false);
@@ -183,11 +183,11 @@ class Dce {
   case TClassDecl(c = {clKind:KAbstractImpl(a)}) if (a.aEnum):if (!exists(cf -> !hasClassFieldFlag(cf,CfEnum),c.clOrderedStatics)) addClassFlag(c,CExtern);
   case TClassDecl(c):
    function hasAccessor(c:TClass,name:String,stat:Bool):Bool return (stat ? c.clStatics : c.clFields).exists(name) || c.clSuper != null && hasAccessor(c.clSuper.cls,name,stat);
-   function checkProp(stat:Bool,cf:TClassField):Void {switch cf.cfKind {case Var(read = AccCall | AccPrivateCall,write):cf.cfKind = Var(hasAccessor(c,"get_" + cf.cfName,stat) ? read : AccNever,write); case _:} switch cf.cfKind {case Var(read,write = AccCall | AccPrivateCall):cf.cfKind = Var(read,hasAccessor(c,"set_" + cf.cfName,stat) ? write : AccNever); case _:}}
+   function checkProp(stat:Bool,cf:TClassField):Void {switch cf.cfKind {case Var({vRead:read = AccCall | AccPrivateCall,vWrite:write}):cf.cfKind = Var({vRead:hasAccessor(c,"get_" + cf.cfName,stat) ? read : AccNever,vWrite:write}); case _:} switch cf.cfKind {case Var({vRead:read,vWrite:write = AccCall | AccPrivateCall}):cf.cfKind = Var({vRead:read,vWrite:hasAccessor(c,"set_" + cf.cfName,stat) ? write : AccNever}); case _:}}
    for (cf in c.clOrderedStatics) checkProp(true,cf); for (cf in c.clOrderedFields) checkProp(false,cf);
   case _:
  }
- public static function extractIfFeature(meta:Metadata):Array<String> {for (m in meta) if (m.meta == IfFeature) return m.exprs.map(e -> switch e.expr {case EConst(String(s,_)):s; case _:core.Error.raiseTypingError("String expected",e.pos);}); return [];}
+ public static function extractIfFeature(meta:Metadata):Array<String> {for (m in meta) if (m.meta == core.MetaList.StrictMeta.IfFeature) return m.exprs.map(e -> switch e.expr {case EConst(String(s,_)):s; case _:core.Error.raiseTypingError("String expected",e.pos);}); return [];}
  public static function collectEntryPoints(dce:DceData,types:Array<ModuleType>):Void {
   var delayed:Array<Void->Void> = [];
   function feature(ref:ClassFieldRef,names:Array<String>):Void for (s in names) {if (dce.features.exists(s)) dce.features.get(s).unshift(ref); else dce.features.set(s,[ref]);}
@@ -201,29 +201,29 @@ class Dce {
   for (f in delayed) f(); if (dce.debug) for (item in dce.addedFields) if (item.field.cfExpr != null) Sys.println("[DCE] Entry point: " + Globals.sTypePath(item.cls.clPath) + "." + item.field.cfName);
  }
  public static function mark(pool:Dynamic,dce:DceData):Void while (dce.addedFields.length > 0) {
-  var cfl = dce.addedFields.copy(); dce.addedFields.resize(0); for (k in dce.checkedFeatures.keys()) dce.features.remove(k); dce.checkedFeatures.clear(); core.ds.NowOrLater.handleLater(dce.addFeatureManager);
-  core.Parallel.ParallelArray.iter(pool,function(item) {var c:TClass = item.cls; var cf:TClassField = item.field; var kind:ClassFieldRefKind = item.kind; markDependentFields(dce,c,cf.cfName,kind); var local = pushClass(dce,c); if (isPhysicalField(cf)) markClass(local,c); markField(local,c,cf,kind); markT(local,cf.cfPos,cf.cfType); if (!hasClassFlag(c,CExtern)) {opt(expr.bind(local),cf.cfExpr); for (overload in cf.cfOverloads) if (overload.cfExpr != null) opt(expr.bind(local),overload.cfExpr);}},cfl);
+  var cfl = dce.addedFields.copy(); dce.addedFields.resize(0); for (k in dce.checkedFeatures.keys()) dce.features.remove(k); dce.checkedFeatures.clear(); dce.addFeatureManager.handleLater();
+  context.Parallel.ParallelArray.iter(pool,function(item) {var c:TClass = item.cls; var cf:TClassField = item.field; var kind:ClassFieldRefKind = item.kind; markDependentFields(dce,c,cf.cfName,kind); var local = pushClass(dce,c); if (isPhysicalField(cf)) markClass(local,c); markField(local,c,cf,kind); markT(local,cf.cfPos,cf.cfType); if (!hasClassFlag(c,CExtern)) {opt(expr.bind(local),cf.cfExpr); for (overloadedField in cf.cfOverloads) if (overloadedField.cfExpr != null) opt(expr.bind(local),overloadedField.cfExpr);}},cfl);
  }
  public static function sweep(dce:DceData,types:Array<ModuleType>):Array<ModuleType> {
   var acc = []; var reverse = types.copy(); reverse.reverse();
   for (mt in reverse) switch mt {
    case TClassDecl(c) if (keepWholeClass(dce,c) && !classHasDceField(c)):acc.unshift(mt);
    case TClassDecl(c):
-    function checkProperty(cf:TClassField,stat:Bool):Void {function addAccessor(name:String):Void {var cf = (stat ? c.clStatics : c.clFields).get(name); if (cf != null && !Meta.has(Accessor,cf.cfMeta)) cf.cfMeta.unshift({meta:Accessor,exprs:[],pos:Globals.mkZeroRangePos(c.clPos)});} switch cf.cfKind {case Var(AccCall | AccPrivateCall,_):addAccessor("get_" + cf.cfName); case _:} switch cf.cfKind {case Var(_,AccCall | AccPrivateCall):addAccessor("set_" + cf.cfName); case _:}}
+    function checkProperty(cf:TClassField,stat:Bool):Void {function addAccessor(name:String):Void {var cf = (stat ? c.clStatics : c.clFields).get(name); if (cf != null && !Meta.has(Accessor,cf.cfMeta)) cf.cfMeta.unshift({meta:core.MetaList.StrictMeta.Accessor,exprs:[],pos:Globals.mkZeroRangePos(c.clPos)});} switch cf.cfKind {case Var({vRead:AccCall | AccPrivateCall,vWrite:_}):addAccessor("get_" + cf.cfName); case _:} switch cf.cfKind {case Var({vRead:_,vWrite:AccCall | AccPrivateCall}):addAccessor("set_" + cf.cfName); case _:}}
     var classKept = keepWholeClass(dce,c); function keep(cf:TClassField,kind:ClassFieldRefKind):Bool return classKept && !fieldForcesDce(cf) || keepField(dce,cf,c,kind); c.clMeta.unshift(mkKeepMeta(c.clPos));
     function filter(cf:TClassField,kind:ClassFieldRefKind):Bool {var b = keep(cf,kind); if (!b) {if (dce.debug) Sys.println("[DCE] Removed field " + Globals.sTypePath(c.clPath) + "." + cf.cfName); var stat = kind == CfrStatic; checkProperty(cf,stat); (stat ? c.clStatics : c.clFields).remove(cf.cfName);} return b;}
     c.clOrderedStatics = c.clOrderedStatics.filter(cf -> filter(cf,CfrStatic)); c.clOrderedFields = c.clOrderedFields.filter(cf -> filter(cf,CfrMember)); if (c.clConstructor != null && !keep(c.clConstructor,CfrConstructor)) c.clConstructor = null;
     var nonExtern = exists(isPhysicalField,c.clOrderedFields) || exists(isPhysicalField,c.clOrderedStatics);
-    if (classKept || hasClassFlag(c,CUsed) || nonExtern) acc.unshift(mt); else if (core.TType.TClass.getClInit(c) != null && Meta.has(KeepInit,c.clMeta)) {addClassFlag(c,CExtern); acc.unshift(mt);} else if (dce.debug) Sys.println("[DCE] Removed class " + Globals.sTypePath(c.clPath));
+    if (classKept || hasClassFlag(c,CUsed) || nonExtern) acc.unshift(mt); else if (core.TOther.TClassTools.getClInit(c) != null && Meta.has(KeepInit,c.clMeta)) {addClassFlag(c,CExtern); acc.unshift(mt);} else if (dce.debug) Sys.println("[DCE] Removed class " + Globals.sTypePath(c.clPath));
    case TEnumDecl(en) if (Meta.has(Used,en.eMeta) || hasEnumFlag(en,EnExtern) || keepWholeEnum(dce,en)):acc.unshift(mt);
    case TEnumDecl(en):if (dce.debug) Sys.println("[DCE] Removed enum " + Globals.sTypePath(en.ePath));
    case _:acc.unshift(mt);
   } return acc;
  }
- public static function run(pool:Dynamic,scom:Dynamic,mscom:Dynamic,main:Dynamic,mode:DceMode,stdPaths:Array<Dynamic>,types:Array<ModuleType>):Array<ModuleType> {
-  var full = mode == DceFull; var dce:DceData = {scom:scom,mscom:mscom,full:full,stdDirs:full ? [] : stdPaths.map(path -> core.Path.getFullPath(path.path)),debug:core.Define.defined(scom.defines,DceDebug),addedFields:[],followExpr:expr,markedFields:{value:[]},features:new haxe.ds.StringMap(),checkedFeatures:new haxe.ds.StringMap(),curclass:nullClass,mergeMutex:new sys.thread.Mutex(),fieldMarkerMutex:new sys.thread.Mutex(),usedMutex:new sys.thread.Mutex(),featureMutex:new sys.thread.Mutex(),addFeatureManager:core.ds.NowOrLater.create()};
-  core.Timer.time(scom.timerCtx,["filters","dce","collect"],function() collectEntryPoints(dce,types)); core.Timer.time(scom.timerCtx,["filters","dce","mark"],function() mark(pool,dce)); if (mode != DceNo) types = core.Timer.time(scom.timerCtx,["filters","dce","sweep"],function() return sweep(dce,types));
-  core.Timer.time(scom.timerCtx,["filters","dce","cleanup"],function() {
+ public static function run(pool:Dynamic,scom:SafeContext,mscom:Null<SafeContext>,main:Dynamic,mode:DceMode,stdPaths:Array<Dynamic>,types:Array<ModuleType>):Array<ModuleType> {
+  var full = mode == DceFull; var dce:DceData = {scom:scom,mscom:mscom,full:full,stdDirs:full ? [] : stdPaths.map(path -> core.Path.getFullPath(path.path)),debug:core.Define.defined(scom.defines,core.Define.DceDebug),addedFields:[],followExpr:expr,markedFields:{value:[]},features:new haxe.ds.StringMap(),checkedFeatures:new haxe.ds.StringMap(),curclass:nullClass,mergeMutex:new sys.thread.Mutex(),fieldMarkerMutex:new sys.thread.Mutex(),usedMutex:new sys.thread.Mutex(),featureMutex:new sys.thread.Mutex(),addFeatureManager:new core.ds.NowOrLater()};
+  core.Timer.time(scom.timerCtx,["filters","dce","collect"],function(_:Null<Bool>) collectEntryPoints(dce,types),null); core.Timer.time(scom.timerCtx,["filters","dce","mark"],function(_:Null<Bool>) mark(pool,dce),null); if (mode != DceNo) types = core.Timer.time(scom.timerCtx,["filters","dce","sweep"],function(_:Null<Bool>) return sweep(dce,types),null);
+  core.Timer.time(scom.timerCtx,["filters","dce","cleanup"],function(_:Null<Bool>) {
    fixAccessors(types); for (mt in types) switch mt {case TClassDecl(c):for (cf in c.clOrderedFields) if (hasClassFieldFlag(cf,CfOverride)) {var cur = c; var found = false; while (cur.clSuper != null) {cur = cur.clSuper.cls; if (cur.clFields.exists(cf.cfName)) {found = true; break;}} if (!found) removeClassFieldFlag(cf,CfOverride);} case _:}
    for (mt in types) switch mt {
     case TClassDecl(c) if (c.clSuper != null && !hasClassFlag(c,CExtern) && hasClassFlag(c.clSuper.cls,CExtern)):markDirectlyUsedClass(dce,c.clSuper.cls);
@@ -231,6 +231,6 @@ class Dce {
     case _:
    }
    for (cf in dce.markedFields.value) removeClassFieldFlag(cf,CfUsed);
-  }); return types;
+  },null); return types;
  }
 }

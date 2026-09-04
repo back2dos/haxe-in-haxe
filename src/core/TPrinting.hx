@@ -1,11 +1,14 @@
 package core;
 
+import Type as StdType;
+
 import core.Globals;
 import core.Ast;
 import core.TType;
+import core.TType as TypeModel;
 import core.TFunctions;
 import core.TFunctions.*;
-import syntax.Printer as AstPrinter;
+import core.AstPrinter;
 
 // Mechanical translation of haxe/src/core/tPrinting.ml. Draft; not compiled or tested.
 typedef PrintContext = Array<{mono:TMono,id:Int}>;
@@ -69,7 +72,7 @@ class TPrinting {
 	public static function sTypeParam(print:T->String,ttp:TypedTypeParam):String {var constraints = getConstraints(ttp);var s = constraints.length == 0 ? ttp.ttpName : ttp.ttpName + ":" + constraints.map(print).join(" & ");return ttp.ttpDefault == null ? s : s + " = " + print(ttp.ttpDefault);}
 	public static function sAccess(isRead:Bool,a:VarAccess):String return switch a {case AccNormal:"default";case AccNo:"null";case AccNever:"never";case AccCall:isRead ? "get" : "set";case AccPrivateCall:isRead ? "private get" : "private set";case AccInline:"inline";case AccRequire(n,_):"require " + n;case AccCtor:"ctor";};
 	public static function sKind(k:FieldKind):String return switch k {case Var({vRead:AccNormal,vWrite:AccNormal}):"var";case Var(v):"(" + sAccess(true,v.vRead) + "," + sAccess(false,v.vWrite) + ")";case Method(m):switch m {case MethNormal:"method";case MethDynamic:"dynamic method";case MethInline:"inline method";case MethMacro:"macro method";}};
-	public static function sExprKind(e:TExpr):String {var name = Type.enumConstructor(e.eexpr);return name == "TVar" ? "Vars" : name.substr(1);}
+	public static function sExprKind(e:TExpr):String {var name = StdType.enumConstructor(e.eexpr);return name == "TVar" ? "Vars" : name.substr(1);}
 	public static function sConst(c:TConstant):String return switch c {case TInt(i):Std.string(i);case TFloat(s):s;case TString(s):'"' + StringHelper.sEscape(s) + '"';case TBool(b):b ? "true" : "false";case TNull:"null";case TThis:"this";case TSuper:"super";};
 	public static function sFieldAccess(print:T->String,fa:TFieldAccess):String return switch fa {case FStatic(c,f):'static(${Globals.sTypePath(c.clPath)}.${f.cfName})';case FInstance(c,_,f):'inst(${Globals.sTypePath(c.clPath)}.${f.cfName} : ${print(f.cfType)})';case FClosure(c,f):"closure(" + (c == null ? f.cfName : Globals.sTypePath(c.cls.clPath) + "." + f.cfName) + ")";case FAnon(f):'anon(${f.cfName})';case FEnum(en,f):'enum(${Globals.sTypePath(en.ePath)}.${f.efName})';case FDynamic(f):'dynamic($f)';};
 	static function key(name:String,quote:QuoteStatus):String return quote == NoQuotes ? name : '"' + StringHelper.sEscape(name) + '"';
@@ -109,7 +112,7 @@ class TPrinting {
 		function tag(s:String,sl:Array<String>,?t:T,extraTabs:String = ""):String return '[$s:${print(t == null ? e.etype : t)}]' + tagArgs(tabs + extraTabs,sl);
 		function varId(v:TVar):Int return printVarIds ? v.vId : 0;
 		function local(v:TVar,?t:T):String return '[Local ${v.vName}(${varId(v)}):${print(v.vType)}${t == null ? "" : ":" + print(t)}]';
-		function variable(tag:String,v:TVar,sl:Array<String>):String return '[$tag ${v.vName}<${varId(v)}>${v.vFlags == 0 ? "" : "(" + sFlags(v.vFlags,TType.flagTVarNames) + ")"}:${print(v.vType)}]' + tagArgs(tabs,sl);
+		function variable(tag:String,v:TVar,sl:Array<String>):String return '[$tag ${v.vName}<${varId(v)}>${v.vFlags == 0 ? "" : "(" + sFlags(v.vFlags,TypeModel.flagTVarNames) + ")"}:${print(v.vType)}]' + tagArgs(tabs,sl);
 		function moduleType(mt:ModuleType):String return '[TypeExpr ${Globals.sTypePath(tPath(mt))}:${print(e.etype)}]';
 		function loops(el:Array<TExpr>):Array<String> return [for (e in el) loop(e)];
 		return switch e.eexpr {
@@ -143,7 +146,7 @@ class TPrinting {
 	public static function sExprDebug(e:TExpr):String {var ctx = printContext();return sExprPretty(false,"  ",false,function(t) return sType(ctx,t),e);}
 	public static function sTypes(tl:TParams,sep:String = ", "):String {var ctx = printContext();return [for (t in tl) sType(ctx,t)].join(sep);}
 	public static function sClassKind(k:TClassKind):String return switch k {case KNormal:"KNormal";case KTypeParameter(ttp):'KTypeParameter [${sTypes(getConstraints(ttp))}]';case KExpr(_):"KExpr";case KGeneric:"KGeneric";case KGenericInstance(c,tl):'KGenericInstance ${Globals.sTypePath(c.clPath)}<${sTypes(tl)}>';case KMacroType:"KMacroType";case KGenericBuild(_):"KGenericBuild";case KAbstractImpl(a):'KAbstractImpl ${Globals.sTypePath(a.aPath)}';case KModuleFields(m):'KModuleFields ${Globals.sTypePath(m.mPath)}';};
-	public static function sClassFieldRefKind(k:ClassFieldRefKind):String return Type.enumConstructor(k);
+	public static function sClassFieldRefKind(k:ClassFieldRefKind):String return StdType.enumConstructor(k);
 }
 class Printer {
 	public static function sType(t:T):String return TPrinting.sType(TPrinting.printContext(),t);
@@ -161,13 +164,13 @@ class Printer {
 	public static function sDoc(doc:Documentation):String return doc == null ? "None" : Ast.genDocText(doc);
 	public static function sMetadataEntry(m:MetadataEntry):String return "@" + Meta.toString(m.meta) + (m.exprs.length == 0 ? "" : "(" + m.exprs.map(AstPrinter.sExpr).join(", ") + ")");
 	public static function sMetadata(metadata:Metadata):String return sList(" ",sMetadataEntry,metadata);
-	public static function sTtpHost(host:TypeParamHost):String return Type.enumConstructor(host);
+	public static function sTtpHost(host:TypeParamHost):String return StdType.enumConstructor(host);
 	public static function sTypeParam(tabs:String,ttp:TypedTypeParam):String return record(tabs,[
 		["name",ttp.ttpName],["class",Globals.sTypePath(ttp.ttpClass.clPath)],["host",sTtpHost(ttp.ttpHost)],["type",TPrinting.sTypeKind(ttp.ttpType)],
 		["constraints",sList(", ",TPrinting.sTypeKind,getConstraints(ttp))],["default",sOpt(TPrinting.sTypeKind,ttp.ttpDefault)]
 	]);
 	public static function sTypeParams(tabs:String,tl:TypeParams):String return sList(", ",function(t) return sTypeParam(tabs,t),tl);
-	public static function sTclassFieldFlags(flags:Int):String return TPrinting.sFlags(flags,TType.flagTClassFieldNames);
+	public static function sTclassFieldFlags(flags:Int):String return TPrinting.sFlags(flags,TypeModel.flagTClassFieldNames);
 	public static function sTclassField(tabs:String,cf:TClassField):String return record(tabs,[
 		["cf_name",cf.cfName],["cf_doc",sDoc(cf.cfDoc)],["cf_type",TPrinting.sTypeKind(followLazyAndMono(cf.cfType))],["cf_pos",sPos(cf.cfPos)],["cf_name_pos",sPos(cf.cfNamePos)],
 		["cf_meta",sMetadata(cf.cfMeta)],["cf_kind",TPrinting.sKind(cf.cfKind)],["cf_params",sTypeParams(tabs + "\t",cf.cfParams)],
@@ -176,7 +179,7 @@ class Printer {
 	]);
 	public static function sTclass(tabs:String,c:TClass):String return record(tabs,[
 		["cl_path",Globals.sTypePath(c.clPath)],["cl_module",Globals.sTypePath(c.clModule.mPath)],["cl_pos",sPos(c.clPos)],["cl_name_pos",sPos(c.clNamePos)],
-		["cl_private",Std.string(c.clPrivate)],["cl_doc",sDoc(c.clDoc)],["cl_meta",sMetadata(c.clMeta)],["cl_flags",TPrinting.sFlags(c.clFlags,TType.flagTClassNames)],
+		["cl_private",Std.string(c.clPrivate)],["cl_doc",sDoc(c.clDoc)],["cl_meta",sMetadata(c.clMeta)],["cl_flags",TPrinting.sFlags(c.clFlags,TypeModel.flagTClassNames)],
 		["cl_params",sTypeParams(tabs + "\t",c.clParams)],["cl_kind",TPrinting.sClassKind(c.clKind)],
 		["cl_super",sOpt(function(p) return sType(TInst(p.cls,p.params)),c.clSuper)],
 		["cl_implements",sList(", ",function(p) return sType(TInst(p.cls,p.params)),c.clImplements)],
@@ -216,15 +219,15 @@ class Printer {
 	]);
 	public static function sTvarExtra(ve:TVarExtra):String return 'Some(${sTypeParams("",ve.vParams)}, ${sOpt(function(e) return TPrinting.sExprAst(true,"",sType,e),ve.vExpr)})';
 	public static function sTvarKind(kind:TVarKind):String return switch kind {
-		case VUser(origin):"VUser(" + Type.enumConstructor(origin) + ")";case VGenerated:"VGenerated";case VInlined:"VInlined";
+		case VUser(origin):"VUser(" + StdType.enumConstructor(origin) + ")";case VGenerated:"VGenerated";case VInlined:"VInlined";
 		case VInlinedConstructorVariable(sl):"VInlinedConstructorVariable(" + sl.join(", ") + ")";case VExtractorVariable:"VExtractorVariable";case VAbstractThis:"VAbstractThis";
 	};
 	public static function sTvar(v:TVar):String return record("",[
 		["v_id",Std.string(v.vId)],["v_name",v.vName],["v_type",sType(v.vType)],["v_kind",sTvarKind(v.vKind)],["v_capture",Std.string(hasVarFlag(v,VCaptured))],
-		["v_extra",sOpt(sTvarExtra,v.vExtra)],["v_meta",sMetadata(v.vMeta)],["v_flags",v.vFlags == 0 ? "" : "(" + TPrinting.sFlags(v.vFlags,TType.flagTVarNames) + ")"],["v_pos",sPos(v.vPos)]
+		["v_extra",sOpt(sTvarExtra,v.vExtra)],["v_meta",sMetadata(v.vMeta)],["v_flags",v.vFlags == 0 ? "" : "(" + TPrinting.sFlags(v.vFlags,TypeModel.flagTVarNames) + ")"],["v_pos",sPos(v.vPos)]
 	]);
-	public static function sModuleKind(kind:ModuleKind):String return Type.enumConstructor(kind);
-	public static function sModuleOrigin(origin:ModuleDepOrigin):String return Type.enumConstructor(origin);
+	public static function sModuleKind(kind:ModuleKind):String return StdType.enumConstructor(kind);
+	public static function sModuleOrigin(origin:ModuleDepOrigin):String return StdType.enumConstructor(origin);
 	public static function sModuleTaintingReason(reason:ModuleTaintingReason):String return switch reason {
 		case CheckDisplayFile:"check_display_file";case DefineType:"define_type";case DefineModule:"define_module";case ServerInvalidate:"server/invalidate";case ServerInvalidateFiles:"server_invalidate_files";case ServerInvalidateModule:"server_invalidate_module";
 	};

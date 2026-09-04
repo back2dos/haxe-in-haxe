@@ -19,6 +19,8 @@ from exposing Eval as a user target.
   `haxe/src/`.
 - `haxe-in-haxe.hxml` builds the bootstrap compiler to
   `bin/haxe-in-haxe.hxb`.
+- `compile-all.hxml` includes all port modules, including the new compiler pipeline.
+- `deferred/` preserves drafts for services and targets outside the HXB milestone.
 - `test/` defines the HXB conformance harness and its ignored artifacts.
 
 ## Setup
@@ -44,10 +46,13 @@ export HAXE_REFERENCE="$PWD/haxe/haxe"
 
 ```sh
 haxe haxe-in-haxe.hxml
+haxe compile-all.hxml
 ```
 
-This currently validates the bootstrap entry point and writes
-`bin/haxe-in-haxe.hxb`. HXB is a serialized compiler artifact rather than an
+The first command compiles the bootstrap entry point to
+`bin/haxe-in-haxe.hxb`. The second also includes every translated source module
+and writes `bin/haxe-in-haxe.all.eval.hxb`. Both builds pass with the installed
+Haxe `5.0.0-preview.1`; runtime and conformance validation remain separate. HXB is a serialized compiler artifact rather than an
 executable, so this build is not by itself a self-hosting or conformance test.
 
 ## Execute the compiler from HXB
@@ -110,11 +115,11 @@ than simulated passes.
 
 ## Porting approach
 
-The current phase is translation first: mechanically translate the remaining
-HXB-path modules before compiling, integrating, or testing them. New draft
-modules may contain unresolved dependencies. Build and conformance work resumes
-after this pass; existing test results do not validate these drafts. See
-`TRANSLATION.md` for coverage and remaining work.
+The translation snapshot is committed. Compilation and integration now reconcile
+the HXB-path drafts. `haxe compile-all.hxml` explicitly includes source modules
+which the bootstrap entry point does not reach. Both builds compile; existing
+test results do not validate these drafts. See `TRANSLATION.md` for
+coverage and remaining work.
 
 Keep each port mechanically close to its counterpart in `haxe/src/`. Preserve
 control flow, data representation, error behavior, and module boundaries unless

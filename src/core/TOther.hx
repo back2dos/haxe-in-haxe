@@ -1,5 +1,7 @@
 package core;
 
+import Type as StdType;
+
 import core.Globals;
 import core.Ast;
 import core.TType;
@@ -110,7 +112,7 @@ class TExprToExpr {
 					try convertTypeHint(t) catch (_:TypeExit) throw "Unconvertible cast type";
 				};
 				ECast(convertExpr(e),ct);
-			case TMeta(m,_) if (Type.enumEq(m.meta,Meta.Ast) && m.exprs.length == 1):m.exprs[0].expr;
+			case TMeta(m,_) if (StdType.enumEq(m.meta,Meta.Ast) && m.exprs.length == 1):m.exprs[0].expr;
 			case TMeta(m,e):EMeta(m,convertExpr(e));
 			case TIdent(s):EConst(Ident(s));
 		};

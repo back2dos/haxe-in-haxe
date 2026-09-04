@@ -1,4 +1,6 @@
 package core;
+
+import Type as StdType;
 import core.Globals.Pos;
 import core.Ast;
 import core.TType;
@@ -6,34 +8,15 @@ import core.TFunctions.*;
 // haxe/src/core/displayTypes.ml — mechanical shared-model draft; not compile-validated.
 // Completion serialization remains references to deferred display/JSON helpers.
 enum SymbolKindValue { Class;Interface;Enum;TypeAlias;Abstract;Field;Property;Method;Constructor;Function;Variable;Struct;EnumAbstract;Operator;EnumMember;Constant;Module; }
-class SymbolKind {public static function toInt(kind:SymbolKindValue):Int return Type.enumIndex(kind)+1;}
+class SymbolKind {public static function toInt(kind:SymbolKindValue):Int return StdType.enumIndex(kind)+1;}
 typedef SymbolInformationData={var name:String;var kind:SymbolKindValue;var pos:Pos;var containerName:Null<String>;var deprecated:Bool;}
 class SymbolInformation {public static function make(name:String,kind:SymbolKindValue,pos:Pos,containerName:Null<String>,deprecated:Bool):SymbolInformationData return {name:name,kind:kind,pos:pos,containerName:containerName,deprecated:deprecated};}
 typedef ExpectedTypeCompletion={var expectedType:Dynamic;var expectedTypeFollowed:Dynamic;var compatibleTypes:Array<Dynamic>;}
 enum CompletionResultKindValue {
  CRField(item:Dynamic,pos:Pos,iterator:Null<T>,keyValueIterator:Null<{key:T,value:T}>);CRStructureField;CRToplevel(expected:Null<ExpectedTypeCompletion>);CRMetadata;CRTypeHint;CRExtends;CRImplements;CRStructExtension(intersection:Bool);CRImport;CRUsing;CRNew;CRPattern(expected:Null<ExpectedTypeCompletion>,outermost:Bool);CROverride;CRTypeRelation;CRTypeDecl;
 }
-class CompletionResultKind {
- public static function toJson(ctx:Dynamic,kind:CompletionResultKindValue):Dynamic {
-  function expectedTypeFields(t:Null<ExpectedTypeCompletion>):Array<Dynamic> return t==null?[]:[{name:"expectedType",value:CompletionItem.CompletionType.toJson(ctx,t.expectedType)},{name:"expectedTypeFollowed",value:CompletionItem.CompletionType.toJson(ctx,t.expectedTypeFollowed)},{name:"compatibleTypes",value:JArray(t.compatibleTypes.map(function(t) return CompletionItem.CompletionType.toJson(ctx,t)))}];
-  var i:Int;var args:Dynamic=null;
-  switch kind {
-   case CRField(item,p,iterator,keyValueIterator):
-    var type=CompletionItem.getType(item),converted:Dynamic=null;
-    if (type!=null) try {
-     var mt=moduleTypeOfType(type.type),context=Reflect.copy(ctx);context.generateAbstractImpl=true;
-     var jmt=Genjson.generateModuleType(context,mt);var followed=type.type==follow(type.type)?JNull:Genjson.generateModuleType(context,moduleTypeOfType(follow(type.type)));
-     converted={moduleType:jmt,followed:followed,type:CompletionItem.CompletionType.toJson(context,type.completion)};
-    }catch (_:Dynamic) {}
-    var fields:Array<Dynamic>=[{name:"item",value:CompletionItem.toJson(ctx,null,item)},{name:"range",value:Genjson.generatePosAsRange(p)},{name:"iterator",value:iterator==null?JNull:JObject([{name:"type",value:Genjson.generateType(ctx,iterator)}])},{name:"keyValueIterator",value:keyValueIterator==null?JNull:JObject([{name:"key",value:Genjson.generateType(ctx,keyValueIterator.key)},{name:"value",value:Genjson.generateType(ctx,keyValueIterator.value)}])}];
-    if (converted!=null) fields=fields.concat([{name:"type",value:converted.type},{name:"moduleType",value:converted.moduleType},{name:"moduleTypeFollowed",value:converted.followed}]);i=0;args=JObject(fields);
-   case CRStructureField:i=1;case CRToplevel(t):i=2;args=JObject(expectedTypeFields(t));case CRMetadata:i=3;case CRTypeHint:i=4;case CRExtends:i=5;case CRImplements:i=6;
-   case CRStructExtension(intersection):i=7;args=JObject([{name:"isIntersectionType",value:JBool(intersection)}]);case CRImport:i=8;case CRUsing:i=9;case CRNew:i=10;
-   case CRPattern(t,outermost):i=11;args=JObject([{name:"isOutermostPattern",value:JBool(outermost)}].concat(expectedTypeFields(t)));case CROverride:i=12;case CRTypeRelation:i=13;case CRTypeDecl:i=14;
-  }
-  return JObject([{name:"kind",value:JInt(i)}].concat(args==null?[]:[{name:"args",value:args}]));
- }
-}
+// CompletionResultKind.toJson is preserved in deferred/display/CompletionResultKind.hx.
+// It serves display protocol serialization and has no HXB-path callers.
 enum DisplayModeValue { DMNone;DMDefault;DMUsage(definition:Bool,descendants:Bool,base:Bool);DMDefinition;DMTypeDefinition;DMImplementation;DMPackage;DMHover;DMModuleSymbols(filter:Null<String>);DMSignature; }
 enum ErrorPolicy { EPIgnore;EPShow; }
 enum DisplayFilePolicy { DFPOnly;DFPAlso;DFPNo; }

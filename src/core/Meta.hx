@@ -1,5 +1,7 @@
 package core;
 
+import Type as StdType;
+
 import core.Ast.Metadata;
 import core.Ast.MetadataEntry;
 import core.Globals.Platform;
@@ -14,27 +16,27 @@ typedef MetaInfos = {
 	var mInternal:Bool; var mDoc:String; var mParams:Array<String>; var mPlatforms:Array<Platform>;
 	var mUsedOn:Array<MetaUsage>; var mOrigin:MetaOrigin; var mLinks:Array<String>;
 }
-class MetaNotFound { public function new() {} }
+class MetaNotFound extends core.ds.NotFound { public function new() super(); }
 class Meta {
-	public static function has(m:StrictMeta,ml:Metadata):Bool { for (entry in ml) if (Type.enumEq(m,entry.meta)) return true; return false; }
+	public static function has(m:StrictMeta,ml:Metadata):Bool { for (entry in ml) if (StdType.enumEq(m,entry.meta)) return true; return false; }
 	public static function hasOneOf(ml1:Array<StrictMeta>,ml2:Metadata):Bool {
-		for (entry in ml2) for (meta in ml1) if (Type.enumEq(meta,entry.meta)) return true;
+		for (entry in ml2) for (meta in ml1) if (StdType.enumEq(meta,entry.meta)) return true;
 		return false;
 	}
 	public static function get(m:StrictMeta,ml:Metadata):MetadataEntry {
-		for (entry in ml) if (Type.enumEq(m,entry.meta)) return entry;
+		for (entry in ml) if (StdType.enumEq(m,entry.meta)) return entry;
 		throw new MetaNotFound();
 	}
 	public static function remove(m:StrictMeta,ml:Metadata):Metadata {
 		if (ml.length == 0) return [];
-		if (Type.enumEq(m,ml[0].meta)) return ml.slice(1);
+		if (StdType.enumEq(m,ml[0].meta)) return ml.slice(1);
 		return [ml[0]].concat(remove(m,ml.slice(1)));
 	}
 	public static function registerUserMeta(userMetas:StringMap<UserMeta>,s:String,data:UserMeta):Void userMetas.set(s,data);
 	public static function getInfo(m:StrictMeta,?userMetas:StringMap<UserMeta>):{name:String,info:MetaInfos} {
 		var origin:MetaOrigin = Compiler;
 		var raw = switch m {
-			case Custom(s) if (userMetas != null && userMetas.exists(s)):
+			case StrictMeta.Custom(s) if (userMetas != null && userMetas.exists(s)):
 				var data = userMetas.get(s);
 				origin = UserDefined(data.source);
 				{name:s,doc:data.doc,flags:data.flags};

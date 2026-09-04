@@ -2,7 +2,8 @@ package core;
 
 import core.Ast;
 import core.Globals.Pos;
-import core.Message.Warning as WarningCode;
+import core.Message.WarningCode;
+import core.WarningList.WarningParseFailure;
 import core.Message.WarningMode;
 import core.Message.WarningOption;
 import syntax.Lexer;

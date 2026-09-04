@@ -2,7 +2,7 @@ package core.data;
 
 import core.Ast;
 import core.Error;
-import syntax.Printer;
+import core.AstPrinter as Printer;
 
 // Mechanical translation of haxe/src/core/data/metaDataApi.ml. Draft; not compiled or tested.
 class MetaDataApi {

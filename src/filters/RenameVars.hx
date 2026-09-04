@@ -1,12 +1,13 @@
 package filters;
+import context.PlatformConfig;
 
 import core.Ast;
 import core.TType;
-import core.Type as TypeOps;
+import core.TFunctions as TypeOps;
 import core.Globals;
 import core.Meta;
 import core.Path;
-import generators.Native;
+import core.Native;
 import haxe.ds.IntMap;
 import haxe.ds.StringMap;
 
@@ -161,7 +162,7 @@ class RenameVars {
 				collect(scope, body);
 				if (flag == DoWhile) collect(scope, condition);
 			});
-			case _: TypeOps.iter(e -> collect(scope, e), e);
+			case _: core.Texpr.iter(e -> collect(scope, e), e);
 		}
 	}
 	public static function collectIgnoreBlock(rc:RenameContext, scope:RenameScope, e:TExpr, inBlock:Bool = false):Void {
@@ -171,10 +172,10 @@ class RenameVars {
 	public static function maybeRenameVar(rc:RenameContext, reserved:StringMap<Bool>, entry:{variable:TVar, overlaps:Overlaps}):Void {
 		var v = entry.variable;
 		function commit(name:String):Void {
-			v.vMeta = [{name:RealPath, params:[{expr:EConst(CString(v.vName, SDoubleQuotes)), pos:Globals.nullPos}], pos:Globals.nullPos}].concat(v.vMeta);
+			v.vMeta = [{meta:core.MetaList.StrictMeta.RealPath,exprs:[{expr:EConst(String(v.vName, SDoubleQuotes)), pos:Globals.nullPos}], pos:Globals.nullPos}].concat(v.vMeta);
 			v.vName = name;
 		}
-		if (v.vName.charAt(0) == TypeOps.genLocalPrefix.charAt(0)) commit("_g" + trailingNumbers.replace(v.vName.substr(1), ""));
+		if (v.vName.charAt(0) == core.Globals.genLocalPrefix.charAt(0)) commit("_g" + trailingNumbers.replace(v.vName.substr(1), ""));
 		var name = v.vName; var count = 0;
 		while (reserved.exists(name) || entry.overlaps.hasName(name)) { ++count; name = v.vName + count; }
 		commit(name); if (willBeReserved(rc, v)) reserve(reserved, v.vName);

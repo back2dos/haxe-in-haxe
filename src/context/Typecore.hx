@@ -1,17 +1,27 @@
 package context;
+import core.Message.WarningCode;
 import core.Globals;
 import core.Globals.Pos;
 import core.Globals.GlobalTypePath;
 import core.Ast;
 import core.TType;
 import core.Meta;
-import core.ds.PMap;
+import core.ds.PersistentMap;
 import core.ds.NotFound;
 import context.TyperPass;
 import context.Resolution;
-import typing.Type;
-import typing.Error;
-import typing.Monomorph;
+import core.TFunctions as TypeOps;
+import core.TUnification;
+import core.TUnification.Monomorph;
+import core.MetaList.StrictMeta;
+import core.Meta as MetadataTools;
+import core.Texpr;
+import core.Warning;
+import core.WarningList;
+import Type as StdType;
+import core.Error.Error;
+import core.Error.ErrorMsg;
+
 // Draft mechanical translation of haxe/src/context/typecore.ml; unvalidated.
 // Macro and display callbacks retain their shape; their runtimes are not implemented here.
 typedef TypePatch = { var tpType:Null<ComplexType>; var tpRemove:Bool; var tpMeta:Metadata; }
@@ -39,7 +49,7 @@ typedef BuildInfo = {
 enum MacroResult { MSuccess(expr:Expr); MError; MMacroInMacro; }
 typedef TyperPassTasks = { var tasks:Array<Void->Void>; var tasksLate:Array<Void->Void>; }
 enum FunctionMode { FunFunction; FunCoroutine; FunNotFunction; }
-typedef CallArgContext = { var cacInOverload:Bool; var cacBodyCapture:{value:Array<Dynamic>}; }
+typedef CallArgContext = { var cacInOverload:Bool; var cacBodyCapture:{value:Array<core.Message.CompilerMessage>}; }
 typedef TyperGlobals = {
 	var delayed:Array<TyperPassTasks>;
 	var delayedMinIndex:Int;
@@ -61,7 +71,7 @@ typedef TyperGlobals = {
 	var continuationApi:Null<Dynamic>;
 	var doMacro:Typer->MacroMode->GlobalTypePath->String->Array<Expr>->Pos->MacroResult;
 	var doLoadMacro:Typer->Bool->GlobalTypePath->String->Pos->Dynamic;
-	var doLoadModule:Typer->GlobalTypePath->Pos->Null<ModuleDepOrigin>->ModuleDef;
+	var doLoadModule:(ctx:Typer,path:GlobalTypePath,p:Pos,?origin:ModuleDepOrigin)->ModuleDef;
 	var doLoadTypeDef:Typer->Pos->TypePath->ModuleType;
 	var getBuildInfo:Typer->ModuleType->Pos->BuildInfo;
 	var doFormatString:Typer->String->Pos->Expr;
@@ -71,7 +81,7 @@ typedef TyperExpr = {
 	var curfun:CurrentFun;
 	var functionMode:FunctionMode;
 	var ret:T;
-	var opened:Array<{value:AnonStatus}>;
+	var opened:Array<TAnon>;
 	var monomorphs:Array<{mono:TMono,pos:Pos}>;
 	var inLoop:Bool;
 	var bypassAccessor:Int;
@@ -81,9 +91,9 @@ typedef TyperExpr = {
 }
 typedef TyperField = {
 	var curfield:TClassField;
-	var locals:PMap<String,TVar>;
+	var locals:PersistentMap<String,TVar>;
 	var vthis:Null<TVar>;
-	var untyped:Bool;
+	var isUntyped:Bool;
 	var meta:Metadata;
 	var inDisplay:Bool;
 	var inCallArgs:Bool;
@@ -133,16 +143,16 @@ class TyperManager {
 	public static function createCtxC(c:TClass):TyperClass return {
 		curclass:c,
 		tthis:switch c.clKind {
-			case KAbstractImpl(a): switch a.aThis { case TMono(r) if (r.tmType == null): TAbstract(a,Type.extractParamTypes(c.clParams)); case t: t; }
-			case _: TInst(c,Type.extractParamTypes(c.clParams));
+			case KAbstractImpl(a): switch a.aThis { case TMono(r) if (r.tmType == null): TAbstract(a,core.TFunctions.extractParamTypes(c.clParams)); case t: t; }
+			case _: TInst(c,core.TFunctions.extractParamTypes(c.clParams));
 		},
 		getBuildInfos:function() return null
 	};
 	public static function createCtxF(cf:TClassField):TyperField return {
-		locals:PMap.empty(),curfield:cf,vthis:null,untyped:false,meta:[],inDisplay:false,inCallArgs:false
+		locals:PersistentMap.empty(),curfield:cf,vthis:null,isUntyped:false,meta:[],inDisplay:false,inCallArgs:false
 	};
 	public static function createCtxE(curfun:CurrentFun,functionMode:FunctionMode):TyperExpr return {
-		curfun:curfun,functionMode:functionMode,ret:Type.tDynamic,opened:[],monomorphs:[],inLoop:false,
+		curfun:curfun,functionMode:functionMode,ret:core.TFunctions.tDynamic,opened:[],monomorphs:[],inLoop:false,
 		bypassAccessor:0,withTypeStack:[],callArgumentStack:[],macroDepth:0
 	};
 	public static function cloneForModule(ctx:Typer,m:TyperModule):Typer {
@@ -154,11 +164,11 @@ class TyperManager {
 		var params = switch cls.clKind { case KAbstractImpl(a): a.aParams; case _: cls.clParams; };
 		return create(ctx,ctx.m,c,ctx.f,ctx.e,PBuildClass,params);
 	}
-	public static function cloneForEnum(ctx:Typer,en:TEnum):Typer return create(ctx,ctx.m,createCtxC(Type.nullClass),ctx.f,ctx.e,PBuildClass,en.eParams);
-	public static function cloneForTypedef(ctx:Typer,td:TDef):Typer return create(ctx,ctx.m,createCtxC(Type.nullClass),ctx.f,ctx.e,PBuildClass,td.tParams);
-	public static function cloneForAbstract(ctx:Typer,a:TAbstract):Typer return create(ctx,ctx.m,createCtxC(Type.nullClass),ctx.f,ctx.e,PBuildClass,a.aParams);
+	public static function cloneForEnum(ctx:Typer,en:TEnum):Typer return create(ctx,ctx.m,createCtxC(core.TFunctions.nullClass),ctx.f,ctx.e,PBuildClass,en.eParams);
+	public static function cloneForTypedef(ctx:Typer,td:TDef):Typer return create(ctx,ctx.m,createCtxC(core.TFunctions.nullClass),ctx.f,ctx.e,PBuildClass,td.tParams);
+	public static function cloneForAbstract(ctx:Typer,a:TAbstract):Typer return create(ctx,ctx.m,createCtxC(core.TFunctions.nullClass),ctx.f,ctx.e,PBuildClass,a.aParams);
 	public static function cloneForField(ctx:Typer,cf:TClassField,params:TypeParams):Typer return create(ctx,ctx.m,ctx.c,createCtxF(cf),ctx.e,PBuildClass,params);
-	public static function cloneForEnumField(ctx:Typer,params:TypeParams):Typer return create(ctx,ctx.m,ctx.c,createCtxF(Type.nullField),ctx.e,PBuildClass,params);
+	public static function cloneForEnumField(ctx:Typer,params:TypeParams):Typer return create(ctx,ctx.m,ctx.c,createCtxF(core.TFunctions.nullField),ctx.e,PBuildClass,params);
 	public static function cloneForExpr(ctx:Typer,curfun:CurrentFun,inFunction:FunctionMode):Typer {
 		var e = createCtxE(curfun,inFunction);
 		switch curfun {
@@ -184,7 +194,7 @@ class Typecore {
 	public static var castOrUnifyRaiseRef:Dynamic = function(ctx,t,e,p,?uctx) throw "castOrUnifyRaiseRef is not initialized";
 	public static var typeGenericFunctionRef:Dynamic = function(ctx,access,candidate,withType,p) throw "typeGenericFunctionRef is not initialized";
 	public static var createContextRef:Dynamic = function(com,macros) throw "createContextRef is not initialized";
-	public static function passIndex(p:TyperPass):Int return std.Type.enumIndex(p);
+	public static function passIndex(p:TyperPass):Int return StdType.enumIndex(p);
 	public static function passName(p:TyperPass):String return switch p {
 		case PBuildModule: "build-module";
 		case PBuildClass: "build-class";
@@ -219,7 +229,7 @@ class Typecore {
 			ctx.e.monomorphs = current;
 		};
 	}
-	public static function makeStaticFieldAccess(c:TClass,cf:TClassField,t:T,p:Pos):TExpr return Type.mk(TField(typing.Texpr.Builder.makeStaticThis(c,p),FStatic(c,cf)),t,p);
+	public static function makeStaticFieldAccess(c:TClass,cf:TClassField,t:T,p:Pos):TExpr return core.TFunctions.mk(TField(core.Texpr.Builder.makeStaticThis(c,p),FStatic(c,cf)),t,p);
 	public static function enterCallArgs(ctx:Typer,inOverload:Bool):Void->Void {
 		var oldInCallArgs = ctx.f.inCallArgs;
 		var oldContext = ctx.g.callArgContext;
@@ -228,18 +238,18 @@ class Typecore {
 		return function() { ctx.f.inCallArgs = oldInCallArgs; ctx.g.callArgContext = oldContext; };
 	}
 	public static function inOverloadCallArgs(ctx:Typer):Bool return ctx.g.callArgContext != null && ctx.g.callArgContext.cacInOverload;
-	public static function resetCallArgBodyCapture(ctx:Typer):{value:Array<Dynamic>} {
+	public static function resetCallArgBodyCapture(ctx:Typer):{value:Array<core.Message.CompilerMessage>} {
 		var buf = {value:[]}; if (ctx.g.callArgContext != null) ctx.g.callArgContext.cacBodyCapture = buf; return buf;
 	}
-	public static function callArgBodyCapture(ctx:Typer):Null<{value:Array<Dynamic>}> return ctx.g.callArgContext == null ? null : ctx.g.callArgContext.cacBodyCapture;
+	public static function callArgBodyCapture(ctx:Typer):Null<{value:Array<core.Message.CompilerMessage>}> return ctx.g.callArgContext == null ? null : ctx.g.callArgContext.cacBodyCapture;
 	public static function raiseWithTypeError(msg:String,p:Pos):Dynamic throw new WithTypeError(Error.makeError(Custom(msg),p));
 	public static function raiseOrDisplay(ctx:Typer,l:Dynamic,p:Pos):Void {
-		if (ctx.f.untyped) return;
+		if (ctx.f.isUntyped) return;
 		if (ctx.f.inCallArgs) throw new WithTypeError(Error.makeError(Unify(l),p));
 		Common.displayErrorExt(ctx.com,Error.makeError(Unify(l),p));
 	}
 	public static function raiseOrDisplayError(ctx:Typer,err:Dynamic):Void {
-		if (ctx.f.untyped) return;
+		if (ctx.f.isUntyped) return;
 		if (ctx.f.inCallArgs) throw new WithTypeError(err);
 		Common.displayErrorExt(ctx.com,err);
 	}
@@ -247,15 +257,15 @@ class Typecore {
 		if (ctx.f.inCallArgs) raiseWithTypeError(msg,p); else Common.displayError(ctx.com,msg,p);
 	}
 	public static function unify(ctx:Typer,t1:T,t2:T,p:Pos):Void {
-		try Type.unify(t1,t2) catch (err:typing.Type.UnifyError) raiseOrDisplay(ctx,err.errors,p);
+		try TUnification.unify(t1,t2) catch (err:core.TUnification.Unify_error) raiseOrDisplay(ctx,err.errors,p);
 	}
 	public static function unifyRaiseCustom(uctx:Dynamic,t1:T,t2:T,p:Pos):Void {
-		try Type.unifyCustom(uctx,t1,t2) catch (err:typing.Type.UnifyError) Error.raiseErrorMsg(Unify(err.errors),p);
+		try TUnification.unifyCustom(uctx,t1,t2) catch (err:core.TUnification.Unify_error) Error.raiseErrorMsg(Unify(err.errors),p);
 	}
-	public static function unifyRaise(a:T,b:T,p:Pos):Void unifyRaiseCustom(Type.defaultUnificationContext(),a,b,p);
+	public static function unifyRaise(a:T,b:T,p:Pos):Void unifyRaiseCustom(TUnification.defaultUnificationContext(),a,b,p);
 	public static function saveLocals(ctx:Typer):Void->Void { var locals = ctx.f.locals; return function() ctx.f.locals = locals; }
 	public static function addLocal(ctx:Typer,k:TVarKind,n:String,t:T,p:Pos):TVar {
-		var v = Type.allocVar(k,n,t,p);
+		var v = core.TFunctions.allocVar(k,n,t,p);
 		if (n != "_") switch k {
 			case VUser(_):
 				try {
@@ -264,7 +274,7 @@ class Typecore {
 					for (path in (cast ctx.com.classPaths.getStdPaths():Array<Dynamic>)) if (StringTools.startsWith(p.pfile,path.path)) { inStd = true; break; }
 					if (!inStd) {
 						warning(ctx,WVarShadow,"This variable shadows a previously declared variable",p);
-						warning(ctx,WVarShadow,Common.complMsg("Previous variable was here"),previous.vPos,1);
+						warning(ctx,WVarShadow,core.Error.complMsg("Previous variable was here"),previous.vPos,1);
 					}
 				} catch (_:NotFound) {}
 			case _:
@@ -272,8 +282,8 @@ class Typecore {
 		ctx.f.locals = ctx.f.locals.add(n,v);
 		return v;
 	}
-	public static function addLocalWithOrigin(ctx:Typer,origin:TVarOrigin,n:String,t:T,p:Pos):TVar { typing.Naming.checkLocalVariableName(ctx.com,n,origin,p); return addLocal(ctx,VUser(origin),n,t,p); }
-	public static function genLocal(ctx:Typer,t:T,p:Pos):TVar return addLocal(ctx,VGenerated,Type.genLocalPrefix,t,p);
+	public static function addLocalWithOrigin(ctx:Typer,origin:TVarOrigin,n:String,t:T,p:Pos):TVar { core.Naming.checkLocalVariableName(ctx.com,n,origin,p); return addLocal(ctx,VUser(origin),n,t,p); }
+	public static function genLocal(ctx:Typer,t:T,p:Pos):TVar return addLocal(ctx,VGenerated,Globals.genLocalPrefix,t,p);
 	public static function isGenLocal(v:TVar):Bool return switch v.vKind { case VGenerated: true; case _: false; };
 	public static function delay(g:TyperGlobals,p:TyperPass,f:Void->Void):Void {
 		var index = passIndex(p); var tasks = g.delayed[index]; tasks.tasks.unshift(f); if (index < g.delayedMinIndex) g.delayedMinIndex = index;
@@ -281,7 +291,7 @@ class Typecore {
 	public static function delayLate(g:TyperGlobals,p:TyperPass,f:Void->Void):Void {
 		var index = passIndex(p); var tasks = g.delayed[index]; tasks.tasksLate.unshift(f); if (index < g.delayedMinIndex) g.delayedMinIndex = index;
 	}
-	public static function delayIfMono(g:TyperGlobals,p:TyperPass,t:T,f:Void->Void):Void switch Type.follow(t) { case TMono(_): delay(g,p,f); case _: f(); }
+	public static function delayIfMono(g:TyperGlobals,p:TyperPass,t:T,f:Void->Void):Void switch core.TFunctions.follow(t) { case TMono(_): delay(g,p,f); case _: f(); }
 	public static function flushPass(g:TyperGlobals,p:TyperPass,where:Dynamic):Void {
 		var index = g.delayedMinIndex;
 		while (index <= passIndex(p)) {
@@ -296,11 +306,13 @@ class Typecore {
 	public static function makePass<T>(ctx:Typer,f:T):T return f;
 	public static function enterFieldTypingPass(g:TyperGlobals,info:Dynamic):Void flushPass(g,PConnectField,info);
 	public static function makeLazy(ctx:TyperGlobals,tProc:T,f:Void->T,where:Dynamic):TLazy {
-		var r = Type.makeUnforcedLazy(tProc,f,where); delay(ctx,PForce,function() { Type.lazyType(r); }); return r;
+		var r = Common.makeUnforcedLazy(tProc,f,where);
+		var lazy:TLazy = LWait(function() return core.TFunctions.lazyType(r.value));
+		delay(ctx,PForce,function() { core.TFunctions.lazyType(lazy); }); return lazy;
 	}
 	public static function isForcedInline(c:Null<TClass>,cf:TClassField):Bool {
-		if (c != null) { switch c.clKind { case KAbstractImpl(_): return true; case _: } if (Type.hasClassFlag(c,CExtern)) return true; }
-		return Type.hasClassFieldFlag(cf,CfExtern);
+		if (c != null) { switch c.clKind { case KAbstractImpl(_): return true; case _: } if (core.TFunctions.hasClassFlag(c,CExtern)) return true; }
+		return core.TFunctions.hasClassFieldFlag(cf,CfExtern);
 	}
 	public static function needsInline(ctx:Typer,c:Null<TClass>,cf:TClassField):Bool return switch cf.cfKind { case Method(MethInline): ctx.allowInline && (ctx.com.doinline || isForcedInline(c,cf)); case _: false; };
 	public static function canAccess(ctx:Typer,c:TClass,cf:TClassField,stat:Bool,checkProp:Bool=false,isSetter:Bool=false):Bool {
@@ -309,7 +321,7 @@ class Typecore {
 			case Var({vWrite:AccPrivateCall}) if (isSetter): true;
 			case _: false;
 		};
-		if (!isPrivateProp && Type.hasClassFieldFlag(cf,CfPublic)) return true;
+		if (!isPrivateProp && core.TFunctions.hasClassFieldFlag(cf,CfPublic)) return true;
 		if (c == ctx.c.curclass) return true;
 		if (ctx.m.curmod.mStatics != null && c == ctx.m.curmod.mStatics) return true;
 		function makePath(c:TClass,f:TClassField):Array<String> return switch c.clKind {
@@ -351,10 +363,10 @@ class Typecore {
 		var isConstr = cf.cfName == "new";
 		function loop(c:TClass):Bool {
 			try {
-				if (has(Meta.Access,ctx.c.curclass,ctx.f.curfield,{path:makePath(c,cf),isCurrent:true})) return true;
+				if (has(StrictMeta.Access,ctx.c.curclass,ctx.f.curfield,{path:makePath(c,cf),isCurrent:true})) return true;
 				function allowed(f:TClassField):Bool {
-					if (Type.extends(ctx.c.curclass,c)) return true;
-					for (p in curPaths) if (has(Meta.Allow,c,f,p)) return true;
+					if (core.TFunctions.extendsClass(ctx.c.curclass,c)) return true;
+					for (p in curPaths) if (has(StrictMeta.Allow,c,f,p)) return true;
 					return false;
 				}
 				var found = false;
@@ -374,22 +386,22 @@ class Typecore {
 		if (loop(c)) return true;
 		switch c.clKind {
 			case KTypeParameter(ttp):
-				for (t in Type.getConstraints(ttp)) switch Type.follow(t) { case TInst(c,_): if (loop(c)) return true; case _: }
+				for (t in core.TFunctions.getConstraints(ttp)) switch core.TFunctions.follow(t) { case TInst(c,_): if (loop(c)) return true; case _: }
 			case _:
 		}
-		return Meta.has(Meta.PrivateAccess,ctx.f.meta);
+		return MetadataTools.has(StrictMeta.PrivateAccess,ctx.f.meta);
 	}
 	public static function checkFieldAccess(ctx:Typer,c:TClass,f:TClassField,stat:Bool,p:Pos):Void {
-		if (!ctx.f.untyped && !canAccess(ctx,c,f,stat)) Common.displayError(ctx.com,"Cannot access private field " + f.cfName,p);
+		if (!ctx.f.isUntyped && !canAccess(ctx,c,f,stat)) Common.displayError(ctx.com,"Cannot access private field " + f.cfName,p);
 	}
-	public static function prepareUsingField(cf:TClassField):TClassField return switch Type.follow(cf.cfType) {
+	public static function prepareUsingField(cf:TClassField):TClassField return switch core.TFunctions.follow(cf.cfType) {
 		case TFun(sig) if (sig.args.length > 0):
 			var tf = sig.args[0].type;
 			var overloads:Array<TClassField> = [];
 			for (cfo in cf.cfOverloads) switch cfo.cfType {
 				case TFun(overloadSig) if (overloadSig.args.length > 0):
-					var tfo = Type.applyParams(cfo.cfParams,Type.extractParamTypes(cfo.cfParams),overloadSig.args[0].type);
-					if (Type.typeIseq(tf,tfo)) {
+					var tfo = core.TFunctions.applyParams(cfo.cfParams,core.TFunctions.extractParamTypes(cfo.cfParams),overloadSig.args[0].type);
+					if (TUnification.typeIseq(tf,tfo)) {
 						var copy:TClassField = Reflect.copy(cfo);
 						copy.cfType = TFun({args:overloadSig.args.slice(1),ret:overloadSig.ret});
 						overloads.unshift(copy);
@@ -404,7 +416,7 @@ class Typecore {
 	};
 	public static function mergeCoreDoc(ctx:Typer,mt:ModuleType):Void {
 		var c:Null<TClass> = switch mt { case TClassDecl(c): c; case TAbstractDecl(a): a.aImpl; case _: null; };
-		if (c == null || !Meta.has(Meta.CoreApi,c.clMeta)) return;
+		if (c == null || !MetadataTools.has(StrictMeta.CoreApi,c.clMeta)) return;
 		var core = ctx.g.doLoadCoreClass(ctx,c);
 		if (c.clDoc == null) c.clDoc = core.clDoc;
 		function maybeMerge(map:TypeMap<TClassField>,cf:TClassField):Void {
@@ -415,23 +427,23 @@ class Typecore {
 		if (c.clConstructor != null && c.clConstructor.cfDoc == null && core.clConstructor != null) c.clConstructor.cfDoc = core.clConstructor.cfDoc;
 	}
 	public static function safeMonoClose(ctx:Typer,m:TMono,p:Pos):Void {
-		try Monomorph.close(m) catch (err:typing.Type.UnifyError) raiseOrDisplay(ctx,err.errors,p);
+		try Monomorph.close(m) catch (err:core.TUnification.Unify_error) raiseOrDisplay(ctx,err.errors,p);
 	}
 	public static function relativePath(ctx:Typer,file:String):String return ctx.com.classPaths.relativePath(file);
 	public static function mkInfosT(ctx:Typer,p:Pos,params:Array<{key:{name:String,pos:Pos,quote:QuoteStatus},expr:TExpr}>,t:T):TExpr {
-		var file = ctx.com.isMacroContext ? p.pfile : Common.defined(ctx.com,AbsolutePath) ? core.Path.getFullPath(p.pfile) : relativePath(ctx,p.pfile);
+		var file = ctx.com.isMacroContext ? p.pfile : Common.defined(ctx.com,core.Define.AbsolutePath) ? core.Path.getFullPath(p.pfile) : relativePath(ctx,p.pfile);
 		var line = syntax.Lexer.getErrorLine(p);
 		var className = Globals.sTypePath(ctx.c.curclass.clPath);
 		var fields = [
-			{key:{name:"fileName",pos:Globals.nullPos,quote:NoQuotes},expr:typing.Texpr.Builder.makeString(ctx.com.basic,file,p)},
-			{key:{name:"lineNumber",pos:Globals.nullPos,quote:NoQuotes},expr:typing.Texpr.Builder.makeInt(ctx.com.basic,line,p)},
-			{key:{name:"className",pos:Globals.nullPos,quote:NoQuotes},expr:typing.Texpr.Builder.makeString(ctx.com.basic,className,p)}
+			{key:{name:"fileName",pos:Globals.nullPos,quote:NoQuotes},expr:core.Texpr.Builder.makeString(ctx.com.basic,file,p)},
+			{key:{name:"lineNumber",pos:Globals.nullPos,quote:NoQuotes},expr:core.Texpr.Builder.makeInt(ctx.com.basic,line,p)},
+			{key:{name:"className",pos:Globals.nullPos,quote:NoQuotes},expr:core.Texpr.Builder.makeString(ctx.com.basic,className,p)}
 		];
-		if (ctx.f.curfield.cfName != "") fields.push({key:{name:"methodName",pos:Globals.nullPos,quote:NoQuotes},expr:typing.Texpr.Builder.makeString(ctx.com.basic,ctx.f.curfield.cfName,p)});
-		return Type.mk(TObjectDecl(fields.concat(params)),t,p);
+		if (ctx.f.curfield.cfName != "") fields.push({key:{name:"methodName",pos:Globals.nullPos,quote:NoQuotes},expr:core.Texpr.Builder.makeString(ctx.com.basic,ctx.f.curfield.cfName,p)});
+		return core.TFunctions.mk(TObjectDecl(fields.concat(params)),t,p);
 	}
 	public static function mkInfos(ctx:Typer,p:Pos,params:Array<ObjectField>):Expr {
-		var file = ctx.com.isMacroContext ? p.pfile : Common.defined(ctx.com,AbsolutePath) ? core.Path.getFullPath(p.pfile) : relativePath(ctx,p.pfile);
+		var file = ctx.com.isMacroContext ? p.pfile : Common.defined(ctx.com,core.Define.AbsolutePath) ? core.Path.getFullPath(p.pfile) : relativePath(ctx,p.pfile);
 		var fields:Array<ObjectField> = [
 			{key:{name:"fileName",pos:Globals.nullPos,quote:NoQuotes},expr:{expr:EConst(String(file,SDoubleQuotes)),pos:p}},
 			{key:{name:"lineNumber",pos:Globals.nullPos,quote:NoQuotes},expr:{expr:EConst(Int(Std.string(syntax.Lexer.getErrorLine(p)),null)),pos:p}},
@@ -442,9 +454,9 @@ class Typecore {
 	}
 	public static function isPosInfos(t:T):Bool return switch t {
 		case TMono(r): r.tmType != null && isPosInfos(r.tmType);
-		case TLazy(f): isPosInfos(Type.lazyType(f));
+		case TLazy(f): isPosInfos(core.TFunctions.lazyType(f));
 		case TType(td,[]) if (td.tPath.pack.length == 1 && td.tPath.pack[0] == "haxe" && td.tPath.name == "PosInfos"): true;
-		case TType(td,tl): isPosInfos(Type.applyTypedef(td,tl));
+		case TType(td,tl): isPosInfos(core.TFunctions.applyTypedef(td,tl));
 		case TAbstract(a,[inner]) if (a.aPath.pack.length == 0 && a.aPath.name == "Null"): isPosInfos(inner);
 		case _: false;
 	};
@@ -454,23 +466,23 @@ class Typecore {
 	public static function makeStoredIdExpr(id:Int,p:Pos):Expr return {expr:EConst(Int(Std.string(id),null)),pos:p};
 	public static function storeTypedExpr(com:Dynamic,te:TExpr,p:Pos):{id:Int,expr:Expr} {
 		var id = getNextStoredTypedExprId(); com.partScope.storedTypedExprs.add(id,te);
-		return {id:id,expr:{expr:EMeta({meta:Meta.StoredTypedExpr,exprs:[],pos:Globals.nullPos},makeStoredIdExpr(id,p)),pos:p}};
+		return {id:id,expr:{expr:EMeta({meta:StrictMeta.StoredTypedExpr,exprs:[],pos:Globals.nullPos},makeStoredIdExpr(id,p)),pos:p}};
 	}
 	public static function pushThis(ctx:Typer,e:TExpr):{expr:Expr,restore:Void->Void} return switch e.eexpr {
 		case TConst(ct = TInt(_)),TConst(ct = TFloat(_)),TConst(ct = TString(_)),TConst(ct = TBool(_)):
-			{expr:{expr:EConst(Type.tconstToConst(ct)),pos:e.epos},restore:function() {}};
+			{expr:{expr:EConst(core.TFunctions.tconstToConst(ct)),pos:e.epos},restore:function() {}};
 		case _:
 			var stored = storeTypedExpr(ctx.com,e,e.epos);
 			{expr:stored.expr,restore:function() ctx.com.partScope.storedTypedExprs.remove(stored.id)};
 	};
 	public static function createDeprecationContext(ctx:Typer):Dynamic {
-		var out = typing.DeprecationCheck.createContext(ctx.com);
+		var out = context.display.DeprecationCheck.createContext(ctx.com);
 		out.classMeta = ctx.c.curclass.clMeta; out.fieldMeta = ctx.f.curfield.cfMeta; out.curmod = ctx.m.curmod; return out;
 	}
 	public static function getOverloads(com:Dynamic,c:TClass,i:String):Dynamic {
 		var key = {path:c.clPath,name:i};
 		try return com.overloadCache.find(key) catch (_:NotFound) {
-			var overloads = typing.Overloads.collectOverloads(function(t) return t,c,i);
+			var overloads = codegen.Overloads.collectOverloads(function(t) return t,c,i);
 			com.overloadCache.add(key,overloads); return overloads;
 		}
 	}

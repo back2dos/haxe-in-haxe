@@ -1,5 +1,7 @@
 package core;
 
+import Type as StdType;
+
 import core.Ast;
 import core.Globals;
 import core.TType;
@@ -34,8 +36,8 @@ class InheritDoc {
 			return getClassField(c.clSuper.cls,fieldName);
 		}
 	}
-	public static function findType(ctx:Dynamic,mode:Dynamic,tp:TypePath,p:Pos):T {
-		try return Typeload.loadInstance(ctx,Ast.makePtp(tp,p),ParamSpawnMonos,mode);
+	public static function findType(ctx:Dynamic,mode:LoadInstanceMode,tp:TypePath,p:Pos):T {
+		try return Typeload.loadInstancePrime(ctx,Ast.makePtp(tp,p),ParamSpawnMonos,mode)
 		catch (_:Dynamic) throw new NotFound();
 	}
 	public static function buildDoc(ctx:Dynamic,doc:{value:Documentation},meta:Metadata,?noArgsCb:(Documentation->Void)->Void):Void {
@@ -46,7 +48,7 @@ class InheritDoc {
 			if (doc.value == null) doc.value = {docOwn:null,docInherited:[s]};
 			else doc.value.docInherited.unshift(s);
 		}
-		for (m in meta) if (Type.enumEq(m.meta,Meta.InheritDoc)) {
+		for (m in meta) if (StdType.enumEq(m.meta,Meta.InheritDoc)) {
 			if (m.exprs.length == 0) {if (noArgsCb != null) noArgsCb(add);}
 			else for (t in m.exprs) add(getTargetDoc(ctx,t));
 		}
@@ -108,7 +110,7 @@ class InheritDoc {
 		try {
 			if (target.sub == null) return resolveTypeT(findType(ctx,LoadNormal,Ast.mkTypePath(path.pack,path.name),eTarget.pos));
 			if (Ast.isLowerIdent(target.sub)) return resolveField(target.sub);
-			try return resolveTypeT(findType(ctx,LoadNormal,Ast.mkTypePath(path.pack,path.name,[],target.sub),eTarget.pos));
+			try return resolveTypeT(findType(ctx,LoadNormal,Ast.mkTypePath(path.pack,path.name,[],target.sub),eTarget.pos))
 			catch (_:NotFound) return resolveField(target.sub);
 		} catch (_:NotFound) return null;
 	}
