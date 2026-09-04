@@ -1,0 +1,133 @@
+package typing.matcher;
+
+import core.TType;
+import core.Ast;
+import core.Ast.Expr;
+import core.Globals;
+import core.Globals.Pos;
+import core.TFunctions.*;
+import core.TOther.*;
+import core.TOther.Monomorph;
+import core.Error.*;
+import core.WithType;
+import context.Typecore.*;
+import context.AbstractCast;
+import typing.matcher.Pattern;
+import typing.matcher.Bind;
+
+// haxe/src/typing/matcher/case.ml — mechanical draft; not compile-validated.
+typedef CaseData = {var caseGuard:Null<TExpr>; var caseExpr:Null<TExpr>; var casePos:Pos;}
+typedef CaseRow = {var caseData:CaseData; var bindings:Array<Bind>; var patterns:Array<PatternData>;}
+
+class Case {
+	public static function collectFreeMonos(t:T):Array<TMono> {
+		var acc:Array<TMono> = [];
+		function walk(ty:T):Void {
+			switch ty {
+				case TMono(m):
+					if (m.tmType != null) walk(m.tmType);
+					else if (!Lambda.exists(acc, function(other) return m == other)) acc.unshift(m);
+				case TEnum(_, tl) | TInst(_, tl) | TAbstract(_, tl): for (t in tl) walk(t);
+				case TType(t, tl): walk(applyTypedef(t, tl));
+				case TFun(s): for (arg in s.args) walk(arg.type); walk(s.ret);
+				case TAnon(a):
+					var names = [for (name in a.aFields.keys()) name]; names.sort(Reflect.compare);
+					for (name in names) walk(a.aFields.get(name).cfType);
+				case TLazy(f): walk(lazyType(f));
+				case TDynamic(t): if (t != null) walk(t);
+			}
+		}
+		function collectOne(ty:T):Void switch ty {
+			case TAbstract(a, tl) if (a.aEnum): for (t in tl) walk(t);
+			case TEnum(_, tl): for (t in tl) walk(t);
+			case TMono(m): if (m.tmType != null) collectOne(m.tmType);
+			case TType(t, tl): collectOne(applyTypedef(t, tl));
+			case _:
+		};
+		function collectTop(ty:T):Void switch ty {
+			case TFun(s) if (s.ret == ExprToPattern.fakeTupleType): for (arg in s.args) collectOne(follow(arg.type));
+			case TMono(m): if (m.tmType != null) collectTop(m.tmType);
+			case TType(t, tl): collectTop(applyTypedef(t, tl));
+			case _: collectOne(ty);
+		};
+		collectTop(follow(t));
+		return acc;
+	}
+	public static function makeSubst(ctx:Dynamic, freeMonos:Array<TMono>):{subst:T->T, rebindUnrefined:Void->Void, unsubst:T->T} {
+		var params:TypeParams = ctx.typeParams;
+		var tpClasses = params.map(function(ttp) return ttp.ttpClass);
+		var tpMemo:Array<{original:TClass, mono:TMono}> = [];
+		var fmMemo:Array<{original:TMono, mono:TMono}> = [];
+		function getOrCreateTp(c:TClass):TMono {
+			for (entry in tpMemo) if (entry.original == c) return entry.mono;
+			var m = Monomorph.create(); tpMemo.unshift({original:c, mono:m}); return m;
+		}
+		function getOrCreateFree(original:TMono):TMono {
+			for (entry in fmMemo) if (entry.original == original) return entry.mono;
+			var m = Monomorph.create(); fmMemo.unshift({original:original, mono:m}); return m;
+		}
+		function subst(ty:T):T return switch ty {
+			case TMono(m):
+				if (m.tmType != null) subst(m.tmType);
+				else if (Lambda.exists(freeMonos, function(other) return m == other)) TMono(getOrCreateFree(m));
+				else ty;
+			case TInst(c = {clKind:KTypeParameter(_)}, []) if (Lambda.exists(tpClasses, function(other) return c == other)): TMono(getOrCreateTp(c));
+			case _: map(subst, ty);
+		};
+		function rebindUnrefined():Void {
+			for (entry in tpMemo) if (entry.mono.tmType == null) Monomorph.doBind(entry.mono, TInst(entry.original, []));
+		}
+		function unsubst(ty:T):T {
+			return switch ty {
+				case TMono(m):
+					if (m.tmType != null) unsubst(m.tmType) else {
+						var original:Null<T> = null;
+						for (entry in tpMemo) if (m == entry.mono) {original = TInst(entry.original, []); break;}
+						if (original == null) for (entry in fmMemo) if (m == entry.mono) {original = TMono(entry.original); break;}
+						original == null ? ty : original;
+					}
+				case _: map(unsubst, ty);
+			};
+		}
+		return {subst:subst, rebindUnrefined:rebindUnrefined, unsubst:unsubst};
+	}
+	public static function make(ctx:Dynamic, t:T, freeMonos:Array<TMono>, el:Array<Expr>, eg:Null<Expr>, eoAst:Null<Expr>, withType:WithType, postfixMatch:Bool, p:Pos):{caseData:CaseData, bindings:Array<Bind>, pattern:PatternData} {
+		function collapseCase(values:Array<Expr>):Expr {
+			if (values.length == 0) return raiseTypingError("case without pattern", p);
+			if (values.length == 1) return values[0];
+			var e = values[0], e2 = collapseCase(values.slice(1));
+			return {expr:EBinop(OpOr, e, e2), pos:Globals.punion(e.pos, e2.pos)};
+		}
+		var e = collapseCase(el);
+		var substitution = makeSubst(ctx, freeMonos), subst = substitution.subst;
+		var save = saveLocals(ctx);
+		var locals:haxe.ds.StringMap<TVar> = ctx.f.locals;
+		var names = [for (name in locals.keys()) name]; names.sort(Reflect.compare);
+		var oldTypes:Array<{variable:TVar, type:T}> = [];
+		for (name in names) {
+			var v = locals.get(name), old = v.vType;
+			v.vType = subst(v.vType); oldTypes.unshift({variable:v, type:old});
+		}
+		var oldRet = ctx.e.ret;
+		ctx.e.ret = subst(ctx.e.ret);
+		var pctx = {ctx:ctx, currentLocals:new haxe.ds.StringMap<TVar>(), ctxLocals:ctx.f.locals, orLocals:null, inReification:false, isPostfixMatch:postfixMatch, unsubst:substitution.unsubst};
+		var pat = ExprToPattern.make(pctx, true, subst(t), e);
+		substitution.rebindUnrefined();
+		var guard = if (eg == null) null else {
+			var e = typeExpr(ctx, eg, WithType.value);
+			AbstractCast.castOrUnify(ctx, ctx.t.tbool, e, e.epos);
+		};
+		var body = switch [eoAst, withType] {
+			case [null, WithType(t, _)]: unify(ctx, ctx.t.tvoid, t, e.pos); null;
+			case [null, _]: null;
+			case [e, WithType(t, _)]:
+				var e = typeExpr(ctx, e, WithType.withType(subst(t)));
+				AbstractCast.castOrUnify(ctx, subst(t), e, e.epos);
+			case [e, _]: typeExpr(ctx, e, withType);
+		};
+		ctx.e.ret = oldRet;
+		for (old in oldTypes) old.variable.vType = old.type;
+		save();
+		return {caseData:{caseGuard:guard, caseExpr:body, casePos:p}, bindings:[], pattern:pat};
+	}
+}

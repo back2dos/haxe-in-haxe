@@ -1,0 +1,91 @@
+package typing;
+
+import core.TType;
+import core.Ast;
+import core.Ast.Expr;
+import core.Globals;
+import core.Globals.Pos;
+import core.TFunctions.*;
+import core.TOther.*;
+import core.TOther.ExtType;
+import core.Meta;
+import core.WithType;
+import context.Typecore.*;
+import typing.matcher.Case;
+import typing.matcher.Pattern;
+import typing.matcher.Compile;
+import typing.matcher.DecisionTree;
+import typing.matcher.ExprToPattern;
+import typing.matcher.TexprConverter;
+import typing.matcher.MatcherGlobals;
+
+// haxe/src/typing/matcher.ml (module Match) — mechanical draft; not compile-validated.
+typedef MatchCase = {var patterns:Array<Expr>; var guard:Null<Expr>; var expr:Null<Expr>; var pos:Pos;}
+typedef MatchDefault = {var expr:Null<Expr>; var pos:Pos;}
+
+class Matcher {
+	static function matchExprImpl(ctx:Dynamic, e:Expr, cases:Array<MatchCase>, def:Null<MatchDefault>, withType:WithType, postfixMatch:Bool, p:Pos):TExpr {
+		var matchDebug = Meta.has(Meta.Custom(":debug.match"), ctx.f.curfield.cfMeta);
+		function loop(e:Expr):{type:T, subjects:Array<TExpr>} {
+			return switch e.expr {
+				case EArrayDecl(el) if (!(el.length == 1 && switch el[0].expr {case EFor(_, _) | EWhile(_, _, _): true; case _: false;})):
+					var typed = el.map(function(e) return typeExpr(ctx, e, WithType.value));
+					{type:ExprToPattern.tupleType(typed.map(function(e) return e.etype)), subjects:typed};
+				case EParenthesis(e): loop(e);
+				case _:
+					var e = typeExpr(ctx, e, WithType.value);
+					{type:e.etype, subjects:[e]};
+			};
+		}
+		var subject = loop(e);
+		if (def != null) cases = cases.concat([{patterns:[{expr:EConst(Ident("_")), pos:def.pos}], guard:null, expr:def.expr, pos:def.pos}]);
+		var tmono:Null<T> = null, allowMinVoid = false;
+		switch withType {
+			case WithType(t, source):
+				switch [follow(t), source] {
+					case [TMono(_), ImplicitReturn]: tmono = t; withType = Value(source); allowMinVoid = true;
+					case [TAbstract(a, _), ImplicitReturn] if (a.aPath.pack.length == 0 && a.aPath.name == "Void"):
+						tmono = t; withType = Value(source); allowMinVoid = true;
+					case [TMono(_), _]: tmono = t; withType = WithType.value;
+					case _:
+				}
+			case _:
+		}
+		// collect_free_monos is disabled in the pinned upstream entry point too.
+		var rows:Array<CaseRow> = cases.map(function(c) {
+			var cp = c.pos;
+			if (c.expr != null && cp.pfile == Globals.nullPos.pfile && cp.pmin == Globals.nullPos.pmin && cp.pmax == Globals.nullPos.pmax) cp = c.expr.pos;
+			var row = Case.make(ctx, subject.type, [], c.patterns, c.guard, c.expr, withType, postfixMatch, cp);
+			return {caseData:row.caseData, bindings:row.bindings, patterns:[row.pattern]};
+		});
+		function inferSwitchType():T return switch withType {
+			case NoValue: ctx.t.tvoid;
+			case Value(_):
+				if (rows.length == 0) ctx.t.tvoid else {
+					var el = rows.map(function(row) {
+						var e = row.caseData.caseExpr;
+						return e == null ? mk(TBlock([]), ctx.t.tvoid, row.caseData.casePos) : switch e.eexpr {
+							case TBlock(values) if (values.length > 0): values[values.length - 1];
+							case _: e;
+						};
+					});
+					allowMinVoid ? unifyMinForTypeSource(ctx, el, ImplicitReturn) : unifyMin(ctx, el);
+				}
+			case WithType(t, _): t;
+		};
+		if (matchDebug) {
+			Sys.println("CASES BEGIN"); for (row in rows) Sys.println(row.patterns.map(Pattern.toString).join("")); Sys.println("CASES END");
+		}
+		var dt = Compile.compile(ctx, matchDebug, subject.subjects, rows, p);
+		if (matchDebug) {Sys.println("DECISION TREE BEGIN"); Sys.println(DecisionTree.toString(dt)); Sys.println("DECISION TREE END");}
+		var tSwitch = inferSwitchType();
+		if (tmono != null && !(allowMinVoid && ExtType.isVoid(follow(tmono)))) unify(ctx, tSwitch, tmono, p);
+		var result = TexprConverter.toTexpr(ctx, tSwitch, withType, dt);
+		if (matchDebug) {Sys.println("TEXPR BEGIN"); Sys.println(MatcherGlobals.sExprPretty(result)); Sys.println("TEXPR END");}
+		return {eexpr:result.eexpr, etype:result.etype, epos:p};
+	}
+	public static function matchExpr(ctx:Dynamic, e:Expr, cases:Array<MatchCase>, def:Null<MatchDefault>, withType:WithType, postfixMatch:Bool, p:Pos):TExpr {
+		if (cases.length == 0 && def == null && withType == NoValue) return typeExpr(ctx, e, WithType.value);
+		return matchExprImpl(ctx, e, cases, def, withType, postfixMatch, p);
+	}
+}

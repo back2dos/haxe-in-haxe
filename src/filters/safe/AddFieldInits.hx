@@ -1,0 +1,63 @@
+package filters.safe;
+
+import core.Ast;
+import core.TType;
+import core.Type as TypeOps;
+import core.Globals;
+import optimization.AnalyzerConfig;
+import optimization.Analyzer;
+import filters.RenameVars;
+
+// haxe/src/filters/safe/addFieldInits.ml — mechanical draft; not compiled or validated.
+class AddFieldInits {
+	public static function addFieldInits(clPath:Dynamic, locals:Dynamic, scom:Dynamic, t:ModuleType):Void {
+		function apply(c:TClass):Void {
+			var ethis = TypeOps.mk(TConst(TThis), TInst(c, TypeOps.extractParamTypes(c.clParams)), c.clPos);
+			var v = TypeOps.allocVar(VGenerated, "_g", ethis.etype, ethis.epos);
+			var needThis = false;
+			var inits:Array<TClassField> = [];
+			var fields:Array<TClassField> = [];
+			for (cf in c.clOrderedFields) {
+				switch [cf.cfKind, cf.cfExpr] { case [Var(_), expr] if (expr != null): inits.unshift(cf); case _: }
+				fields.unshift(cf);
+			}
+			fields.reverse(); c.clOrderedFields = fields;
+			if (inits.length == 0) return;
+			var el = inits.map(function(cf) {
+				var e = cf.cfExpr;
+				if (e == null) throw "addFieldInits: missing field initializer";
+				var lhs = TypeOps.mk(TField({eexpr:ethis.eexpr, etype:ethis.etype, epos:cf.cfPos}, FInstance(c, TypeOps.extractParamTypes(c.clParams), cf)), cf.cfType, cf.cfPos);
+				cf.cfExpr = null;
+				return TypeOps.mk(TBinop(OpAssign, lhs, e), cf.cfType, e.epos);
+			});
+			if (needThis) el.unshift(TypeOps.mk(TVar(v, ethis), ethis.etype, ethis.epos));
+			var cf:TClassField;
+			if (c.clConstructor == null) {
+				var ct = TFun({args:[], ret:scom.basic.tvoid});
+				var ce = TypeOps.mk(TFunction({tfArgs:[], tfType:scom.basic.tvoid, tfExpr:TypeOps.mk(TBlock(el), scom.basic.tvoid, c.clPos)}), ct, c.clPos);
+				cf = TypeOps.mkField("new", ct, c.clPos, Globals.nullPos);
+				cf.cfKind = Method(MethNormal); cf.cfExpr = ce;
+			} else {
+				cf = Reflect.copy(c.clConstructor);
+				switch cf.cfExpr {
+					case {eexpr:TFunction(f)}:
+						var bl = switch f.tfExpr.eexpr { case TBlock(b): b; case _: [f.tfExpr]; };
+						cf.cfExpr = TypeOps.mk(TFunction({tfArgs:f.tfArgs, tfType:f.tfType, tfExpr:TypeOps.mk(TBlock(el.concat(bl)), scom.basic.tvoid, c.clPos)}), cf.cfType, cf.cfPos);
+					case _: throw "addFieldInits: constructor is not a function";
+				}
+			}
+			var config = AnalyzerConfig.getFieldConfig(scom, c, cf);
+			TypeOps.removeClassFieldFlag(cf, CfPostProcessed);
+			Analyzer.Run.runOnField(scom, config, c, cf);
+			TypeOps.addClassFieldFlag(cf, CfPostProcessed);
+			if (cf.cfExpr != null) {
+				var e = RenameVars.run(clPath, locals, cf.cfExpr);
+				e = Sanitize.sanitize(scom, e);
+				if (scom.platformConfig.pfAddFinalReturn) e = AddFinalReturn.addFinalReturn(e);
+				cf.cfExpr = e;
+			}
+			c.clConstructor = cf;
+		}
+		switch t { case TClassDecl(c): apply(c); case _: }
+	}
+}

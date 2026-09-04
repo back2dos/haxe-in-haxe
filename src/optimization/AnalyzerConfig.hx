@@ -1,0 +1,84 @@
+package optimization;
+
+import core.Ast;
+import core.TType;
+import core.Meta;
+import core.Define;
+import core.Timer;
+import core.StringError;
+import context.SafeCom;
+
+enum DebugKind { DebugNone; DebugDot; DebugFull; }
+typedef AnalyzerConfigData = {
+	var optimize:Bool; var constPropagation:Bool; var copyPropagation:Bool; var localDce:Bool; var fusion:Bool;
+	var purityInference:Bool; var debugKind:DebugKind; var detailTimes:Int; var userVarFusion:Bool; var fusionDebug:Bool;
+}
+
+// haxe/src/optimization/analyzerConfig.ml — mechanical draft; not compiled or validated.
+class AnalyzerConfig {
+	public static final flagOptimize = "optimize";
+	public static final flagConstPropagation = "const_propagation";
+	public static final flagCopyPropagation = "copy_propagation";
+	public static final flagLocalDce = "local_dce";
+	public static final flagFusion = "fusion";
+	public static final flagIgnore = "ignore";
+	public static final flagDotDebug = "dot_debug";
+	public static final flagFullDebug = "full_debug";
+	public static final flagUserVarFusion = "user_var_fusion";
+	public static final flagFusionDebug = "fusion_debug";
+	public static final allFlags = makeAllFlags();
+	static function makeAllFlags():Array<String> {
+		var result = [];
+		for (flag in [flagOptimize, flagConstPropagation, flagCopyPropagation, flagLocalDce, flagFusion, flagIgnore, flagDotDebug, flagUserVarFusion])
+			result = [flag, "no_" + flag].concat(result);
+		return result;
+	}
+	public static function hasAnalyzerOption(meta:Metadata, s:String):Bool return Ast.hasMetaOption(meta, Analyzer, s);
+	public static function isIgnored(meta:Metadata):Bool return hasAnalyzerOption(meta, flagIgnore);
+	public static function getBaseConfig(com:Dynamic):AnalyzerConfigData {
+		var fusionAllowed = switch com.platform { case Flash | Jvm: false; case _: true; };
+		return {optimize:Define.defined(com.defines, AnalyzerOptimize),
+			constPropagation:!Define.rawDefined(com.defines, "analyzer_no_const_propagation"),
+			copyPropagation:!Define.rawDefined(com.defines, "analyzer_no_copy_propagation"),
+			localDce:!Define.rawDefined(com.defines, "analyzer_no_local_dce"), fusion:!Define.rawDefined(com.defines, "analyzer_no_fusion"),
+			purityInference:!Define.rawDefined(com.defines, "analyzer_no_purity_inference"), debugKind:DebugNone,
+			detailTimes:Timer.levelFromDefine(com.defines, AnalyzerTimes),
+			userVarFusion:fusionAllowed && (Define.rawDefined(com.defines, "analyzer_user_var_fusion") || !com.debug && !Define.rawDefined(com.defines, "analyzer_no_user_var_fusion")), fusionDebug:false};
+	}
+	public static function updateConfigFromMeta(com:Dynamic, config:AnalyzerConfigData, ml:Metadata):AnalyzerConfigData {
+		config = Reflect.copy(config);
+		for (meta in ml) switch meta {
+			case {name:Analyzer, params:el}:
+				for (e in el) switch e.expr {
+					case EConst(CIdent(s)):
+						switch s {
+							case "optimize": config.optimize = true;
+							case "no_optimize": config.optimize = false;
+							case "const_propagation": config.constPropagation = true;
+							case "no_const_propagation": config.constPropagation = false;
+							case "copy_propagation": config.copyPropagation = true;
+							case "no_copy_propagation": config.copyPropagation = false;
+							case "local_dce": config.localDce = true;
+							case "no_local_dce": config.localDce = false;
+							case "fusion": config.fusion = true;
+							case "no_fusion": config.fusion = false;
+							case "user_var_fusion": config.userVarFusion = true;
+							case "no_user_var_fusion": config.userVarFusion = false;
+							case "dot_debug": config.debugKind = DebugDot;
+							case "full_debug": config.debugKind = DebugFull;
+							case "fusion_debug": config.fusionDebug = true;
+							case "as_var":
+							case _: SafeCom.addWarning(com, WOptimizer, StringError.stringError(s, allFlags, "Unrecognized analyzer option: " + s), e.pos);
+						}
+					case _:
+						var s = Ast.Printer.sExpr(e);
+						SafeCom.addWarning(com, WOptimizer, StringError.stringError(s, allFlags, "Unrecognized analyzer option: " + s), e.pos);
+				}
+			case {name:HasUntyped}: config.optimize = false;
+			case _:
+		}
+		return config;
+	}
+	public static function getClassConfig(com:Dynamic, c:TClass):AnalyzerConfigData return updateConfigFromMeta(com, getBaseConfig(com), c.clMeta);
+	public static function getFieldConfig(com:Dynamic, c:TClass, cf:TClassField):AnalyzerConfigData return updateConfigFromMeta(com, getClassConfig(com, c), cf.cfMeta);
+}

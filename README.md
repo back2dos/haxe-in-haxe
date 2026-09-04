@@ -110,6 +110,12 @@ than simulated passes.
 
 ## Porting approach
 
+The current phase is translation first: mechanically translate the remaining
+HXB-path modules before compiling, integrating, or testing them. New draft
+modules may contain unresolved dependencies. Build and conformance work resumes
+after this pass; existing test results do not validate these drafts. See
+`TRANSLATION.md` for coverage and remaining work.
+
 Keep each port mechanically close to its counterpart in `haxe/src/`. Preserve
 control flow, data representation, error behavior, and module boundaries unless
 a documented language difference requires a deviation. Reference the upstream
