@@ -85,7 +85,7 @@ class Finalization {
 		var emain = typeModuleType(ctx, TClassDecl(c), nullPos);
 		return {
 			expr:mk(TCall(mk(TField(emain, FStatic(c, f)), ft, nullPos), []), r, nullPos),
-			path:mainModule.mExtra.mFile
+			path:core.Path.UniqueKey.lazyPath(mainModule.mExtra.mFile)
 		};
 	}
 	public static function finalize(ctx:Typer):Void {

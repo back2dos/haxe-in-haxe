@@ -125,6 +125,7 @@ class TyperEntry {
   for(mt in m.mTypes) switch mt {case TClassDecl(cl={clPath:{pack:["haxe"],name:"Exception"}}): ctx.t.texception=TInst(cl,[]); case _:}
  }
  public static function create(com:CommonContext,macros:Null<{finalize:Void->Void,typer:TyperContext}>):TyperContext {
+  typing.Typer.initialize();
   if(macros!=null||com.isMacroContext) Error.raiseTypingError("Macro execution is outside the source-only HXB milestone",Globals.nullPos);
   var ctx:TyperContext={com:com,t:com.basic,g:null,
    m:{curmod:nullModule,importResolution:new ResolutionList(["import","typer"]),ownResolution:null,enumWithType:null,moduleUsing:[],importStatements:[],isDisplayFile:false},

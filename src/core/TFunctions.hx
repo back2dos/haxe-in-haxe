@@ -91,7 +91,8 @@ class TFunctions {
 		var f = switch kind {case CfrConstructor:c.clConstructor;case CfrStatic:findMap(c.clStatics,name);case CfrMember:findMap(c.clFields,name);case CfrInit:c.clInit;};
 		if (f == null) throw new NotFound(); return f;
 	}
-	public static final nullModule:ModuleDef = {mId:allocMid(),mPath:{pack:[],name:""},mTypes:[],mStatics:null,mExtra:moduleExtra("",haxe.crypto.Md5.make(haxe.io.Bytes.ofString("")).toString(),0,MFake,0,[])};
+	// Digest values use hexadecimal strings in this port (see Define.getSignature).
+	public static final nullModule:ModuleDef = {mId:allocMid(),mPath:{pack:[],name:""},mTypes:[],mStatics:null,mExtra:moduleExtra("",haxe.crypto.Md5.encode(""),0,MFake,0,[])};
 	public static final nullClass:TClass = makeNullClass();
 	static function makeNullClass():TClass { var c = mkClass(nullModule,{pack:[],name:""},Globals.nullPos,Globals.nullPos); c.clPrivate = true; return c; }
 	public static final nullTypedef:TDef = makeNullTypedef();

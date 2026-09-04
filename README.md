@@ -102,9 +102,16 @@ case; target-specific tests are likewise outside the initial scope.
 ```sh
 haxe test/unit.hxml
 haxe test/upstream-parser-corpus.hxml
+python3 test/development-hxb-smoke.py
+HAXEDEBUG=1 haxe test/translated-pipeline.hxml
 HAXE_REFERENCE="$PWD/haxe/haxe" sh test/upstream-hxb-smoke.sh
 HAXE_REFERENCE="$PWD/haxe/haxe" sh test/conformance.sh
 ```
+
+The first post-translation runtime baseline and open failures are recorded in
+[`test/TESTING.md`](test/TESTING.md). The development-host breadth check exercises
+the existing bootstrap. `translated-pipeline.hxml` exercises the newly translated
+compiler path separately and currently fails during typing.
 
 These are different goalposts: unit tests check ported subsystems; the parser
 lane currently accepts 1,339/1,366 upstream sources; smoke requires 112 direct

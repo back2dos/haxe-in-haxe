@@ -271,7 +271,7 @@ class Typecore {
 				try {
 					var previous = ctx.f.locals.find(n);
 					var inStd = false;
-					for (path in (cast ctx.com.classPaths.getStdPaths():Array<Dynamic>)) if (StringTools.startsWith(p.pfile,path.path)) { inStd = true; break; }
+					for (path in (cast ctx.com.classPaths.getStdPaths():Array<core.ClassPath.IClassPath>)) if (StringTools.startsWith(p.pfile,path.path)) { inStd = true; break; }
 					if (!inStd) {
 						warning(ctx,WVarShadow,"This variable shadows a previously declared variable",p);
 						warning(ctx,WVarShadow,core.Error.complMsg("Previous variable was here"),previous.vPos,1);

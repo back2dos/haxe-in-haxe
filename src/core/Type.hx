@@ -10,8 +10,9 @@ import core.TUnification;
 import core.Texpr;
 import core.TOther;
 class Type {
- static function __init__():Void {
+ public static function initialize():Void {
   TFunctions.monomorphBindRef = TUnification.Monomorph.bind;
   TFunctions.monomorphCreateRef = TUnification.Monomorph.create;
  }
+ static function __init__():Void initialize();
 }

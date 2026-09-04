@@ -201,6 +201,9 @@ class Common {
   tcoro:{tcoro:AtomicLazy.fromFun(function():TSignature->T return function(_:TSignature):T throw "Could not locate abstract Coroutine<T> (was it redefined?)"),continuation:AtomicLazy.fromFun(function() return mkMono()),suspensionResultClass:AtomicLazy.fromFun(function() return nullClass),tasyncIterator:AtomicLazy.fromFun(function():T->T return function(_:T):T throw "Could not locate typedef AsyncIterator<T> (was it redefined?)")}
  };
  public static function create(sctx:Dynamic,requestScope:RequestScope,partScope:PartScope,displayMode:DisplaySettings):CommonContext {
+  // OCaml links Type's reference initialization before constructing basic types.
+  // Explicit setup retains that step when callers import the split modules.
+  core.Type.initialize();
   var com:CommonContext=null;
   com={requestScope:requestScope,partScope:partScope,sctx:sctx,cs:sctx.cs,cache:null,timerCtx:requestScope.timerCtx,stage:CCreated,
    parsedArgs:[],debug:false,display:displayMode,verbose:false,foptimize:true,doinline:true,features:new Map(),platform:Cross,config:defaultConfig,customExt:null,

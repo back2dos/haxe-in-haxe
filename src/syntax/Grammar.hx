@@ -13,13 +13,13 @@ import core.Warning.Warning;
 // responsibilities and are intentionally not represented here.
 class Grammar {
  public static function parseFileStream(ctx:ParserContext,s:Stream<LexedToken>):Package {
-  var grammar=new Grammar([]);grammar.sourceStream=s;grammar.parserContext=ctx;
+  var grammar=new Grammar([]);grammar.sourceStream=s;grammar.parserContext=ctx;grammar.canonicalMetadata=true;
   var result=grammar.parseFile();
   for(_ in 0...grammar.index)s.junk();
   return result;
  }
  public static function parseExpressionStream(ctx:ParserContext,s:Stream<LexedToken>):Expr {
-  var grammar=new Grammar([]);grammar.sourceStream=s;grammar.parserContext=ctx;
+  var grammar=new Grammar([]);grammar.sourceStream=s;grammar.parserContext=ctx;grammar.canonicalMetadata=true;
   var result=grammar.expression();
   for (_ in 0...grammar.index) s.junk();
   return result;
@@ -58,15 +58,15 @@ class Grammar {
 		var tokens = defines == null ? Lexer.lex(source, file) : Preprocessor.process(source, defines, file);
 		return new Grammar(tokens).parseFile();
 	}
-	static function parseEmbeddedExpression(source:String, file:String, offset:Int):Expr {
+	function parseEmbeddedExpression(source:String, file:String, offset:Int):Expr {
 		var tokens = Lexer.lex(source, file).filter(function(token) return switch token.token { case Comment(_) | CommentLine(_): false; case _: true; });
 		for (token in tokens) { token.pos.pmin += offset; token.pos.pmax += offset; }
-		return new Grammar(tokens).expression();
+		var grammar = new Grammar(tokens); grammar.canonicalMetadata = canonicalMetadata; return grammar.expression();
 	}
 
 	final tokens:Array<LexedToken>;
 	var sourceStream:Null<Stream<LexedToken>>;
-	var parserContext:Null<ParserContext>;
+	var parserContext:Null<ParserContext>;	var canonicalMetadata = false;
 	function tokenAt(n:Int):LexedToken {
 		if(sourceStream!=null && n>=tokens.length) {var prefix=sourceStream.npeek(n+1);while(tokens.length<prefix.length) tokens.push(prefix[tokens.length]);}
 		return n<tokens.length?tokens[n]:{token:Eof,pos:tokens.length==0?core.Globals.nullPos:tokens[tokens.length-1].pos};
@@ -350,7 +350,7 @@ class Grammar {
 					expr(EFunction(name == null ? FKAnonymous : FKNamed(name, true), f), union(t.pos, f.fExpr == null ? t.pos : f.fExpr.pos));
 				} else {
 					var value = unary();
-					expr(EMeta({meta:"inline", exprs:[], pos:t.pos}, value), union(t.pos, value.pos));
+					expr(EMeta({meta:metadataTag("inline",true), exprs:[], pos:t.pos}, value), union(t.pos, value.pos));
 				}
 			case Kwd(Macro):
 				// Macro fields are rejected by the source-only typer, but their bodies
@@ -378,7 +378,7 @@ class Grammar {
 		expect(Arrow);
 		var body = is(BrOpen) ? block() : expression();
 		var returned = expr(EReturn(body), body.pos);
-		var implicit = expr(EMeta({meta:"implicitReturn", exprs:[], pos:body.pos}, returned), body.pos);
+		var implicit = expr(EMeta({meta:metadataTag("implicitReturn",true), exprs:[], pos:body.pos}, returned), body.pos);
 		return expr(EFunction(FKArrow, {fParams:[], fArgs:args, fType:null, fExpr:implicit}), union(start, body.pos));
 	}
 	function interpolatedString(value:String, pos:Pos):Expr {
@@ -480,7 +480,7 @@ class Grammar {
 			var parameter = expression();
 			var end = expect(BrClose).pos;
 			var name = switch e.expr { case EConst(Ident(value)): value; case _: ""; };
-			e = expr(EMeta({meta:name, exprs:[], pos:e.pos}, parameter), union(begin, end));
+			e = expr(EMeta({meta:metadataTag(name,false), exprs:[], pos:e.pos}, parameter), union(begin, end));
 		} else if (accept(Dot) != null || accept(QuestionDot) != null) { var safe=previous().token.match(QuestionDot); var n=placedFieldName(); e=expr(EField(e,n.name,safe ? EFSafe : EFNormal),union(e.pos,n.pos)); }
 		else if (accept(POpen) != null) { var args=[]; if (!is(PClose)) while (true) { args.push(expression()); if (accept(Comma) == null || is(PClose)) break; } var end=expect(PClose).pos; e=expr(ECall(e,args),union(e.pos,end)); }
 		else if (accept(BkOpen) != null) { var key=expression(); var end=expect(BkClose).pos; e=expr(EArray(e,key),union(e.pos,end)); }
@@ -650,16 +650,21 @@ class Grammar {
 			case _: return Ast.docFromStringOpt(value);
 		}
 	}
+	// The old batch loader consumes string metadata; parser-entry consumers use upstream StrictMeta.
+	function metadataTag(name:String,strict:Bool):Dynamic {
+		if(!canonicalMetadata) return name;
+		return strict ? core.Meta.parse(name) : core.Meta.fromString(name);
+	}
 	function metadata():Metadata {
 		var result=[];
 		while(accept(At)!=null) {
-			var start=previous().pos; accept(DblDot); var name=placedPath(); var values=[]; var end=name[name.length-1].pos;
+			var start=previous().pos; var strict=accept(DblDot)!=null; var name=placedPath(); var values=[]; var end=name[name.length-1].pos;
 			if(is(POpen) && current().pos.pmin == end.pmax) {
 				next();
 				while(!is(PClose)) { values.push(expression()); if(accept(Comma)==null) break; }
 				end=expect(PClose).pos;
 			}
-			result.push({meta:[for(n in name)n.name].join("."),exprs:values,pos:union(start,end)});
+			result.push({meta:metadataTag([for(n in name)n.name].join("."),strict),exprs:values,pos:union(start,end)});
 		}
 		return result;
 	}

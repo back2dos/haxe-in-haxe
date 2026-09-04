@@ -8,8 +8,9 @@ phase is compilation and integration, explicitly authorized after that snapshot.
 `compile-all.hxml` includes every in-scope source module, including drafts which
 the existing bootstrap entry point does not reach. Both `haxe haxe-in-haxe.hxml` and `haxe compile-all.hxml` now compile.
 These checks used the installed Haxe `5.0.0-preview.1`, not a locally built
-executable from the pinned submodule. No runtime or conformance tests were run;
-compilation alone does not validate the draft behavior.
+executable from the pinned submodule. The first runtime test results and fixes are recorded in `test/TESTING.md`;
+the new full-pipeline integration test is still failing. Pinned-reference
+conformance remains unverified.
 
 ## Translation snapshot
 
@@ -61,8 +62,8 @@ Display, server, macro-runtime, native-library, and other target dispatch bodies
 remain under `deferred/` outside the build classpath. Their call sites reject
 unsupported services explicitly. In-scope typing and filtering paths remain in
 the all-module build. Compilation does not establish runtime correctness,
-conformance, or completion of the pre-existing HXB writer. No tests have been
-run in this compile phase.
+conformance, or completion of the pre-existing HXB writer. The subsequent runtime test phase is tracked in
+`test/TESTING.md`.
 
 ## Draft conventions and reconciliation
 

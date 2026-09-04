@@ -880,8 +880,9 @@ class Typer {
    }
   };
  }
- static function __init__():Void {
+ public static function initialize():Void {
   unifyMinRef=unifyMin; unifyMinForTypeSourceRef=unifyMinForTypeSource; makeCallRef=Calls.makeCall;
   TyperBase.typeCallTargetRef=typeCallTarget; TyperBase.typeAccessRef=typeAccess; typeBlockRef=typeBlock; typeExprRef=typeExpr;
  }
+ static function __init__():Void initialize();
 }

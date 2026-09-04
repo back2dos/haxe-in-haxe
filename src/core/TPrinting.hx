@@ -242,7 +242,7 @@ class Printer {
 	}
 	public static function sModuleCacheState(state:ModuleCacheState):String return switch state {case MSGood:"Good";case MSBad(reason):"Bad: " + sModuleSkipReason(reason);case MSUnknown:"Unknown";};
 	public static function sModuleDefExtra(tabs:String,me:ModuleDefExtra):String return record(tabs,[
-		["m_file",core.Path.UniqueKey.lazyPath(me.mFile)],["m_sign",haxe.io.Bytes.ofString(me.mSign).toHex()],["m_time",Std.string(me.mTime)],
+		["m_file",core.Path.UniqueKey.lazyPath(me.mFile)],["m_sign",me.mSign],["m_time",Std.string(me.mTime)],
 		["m_cache_state",sModuleCacheState(me.mCacheState)],["m_added",Std.string(me.mAdded)],["m_checked",Std.string(me.mChecked)],
 		["m_deps",sPmap(Std.string,function(mdep:ModuleDep) return mdep.mdPath.name,me.mDeps)],["m_processed",Std.string(me.mProcessed)],
 		["m_kind",sModuleKind(me.mKind)],["m_binded_res",""],["m_features",""] // The last two are also TODOs upstream.

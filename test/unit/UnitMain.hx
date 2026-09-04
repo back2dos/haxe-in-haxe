@@ -20,6 +20,7 @@ class UnitMain {
 		NumericTest.main();
 		NowOrLaterTest.main();
 		AtomicLazyTest.main();
+		PortRuntimeTest.main();
 		ClassPathTest.main();
 		ClassPathsTest.main();
 		PathTest.main();

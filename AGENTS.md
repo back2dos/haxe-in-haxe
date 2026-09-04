@@ -35,18 +35,19 @@ commit inside it, or update its revision as part of ordinary porting work.
 
 ## Implementation rules
 
-### Current phase: compilation and integration
+### Current phase: runtime testing and integration
 
-The translation snapshot is committed. Reconcile the HXB-path drafts against
-the compiler's diagnostics, preserving upstream declarations, branch order,
-and behavior. Do not replace untranslated behavior with successful no-ops or
+The translation snapshot and compilation fixes are committed. The bootstrap
+and all-module builds pass. Exercise the translated HXB pipeline at runtime,
+preserving upstream declarations, branch order, and behavior. Do not replace untranslated behavior with successful no-ops or
 empty stubs, and do not exclude in-scope modules to obtain a passing build.
 Independent file groups may be handled by subagents.
 
-Compilation is now authorized. Include the drafts explicitly in compilation;
-the existing bootstrap entry point alone does not reach them. Draft translations
-and successful compilation are not evidence of compiler conformance. Track
-remaining work in `TRANSLATION.md`.
+Testing is now authorized. Keep `test/translated-pipeline.hxml` distinct from
+the legacy bootstrap lanes: the existing bootstrap entry point does not execute
+the new typer. Draft translations and successful compilation are not evidence
+of compiler conformance. Track test results in `test/TESTING.md` and source
+coverage in `TRANSLATION.md`.
 
 - Read the corresponding upstream OCaml module before adding or changing a
   ported Haxe module.

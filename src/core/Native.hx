@@ -3,13 +3,14 @@ import core.Ast;
 import core.TType;
 import core.Globals;
 import core.Globals.Pos;
+import core.ds.NotFound;
 // haxe/src/core/native.ml — mechanical draft; not compile-validated.
 class Native {
  public static function getNativeName(meta:Metadata):{name:String,pos:Pos} {
   for (entry in meta) if (entry.meta == Meta.Native && entry.exprs.length == 1) {
    return switch entry.exprs {case [{expr:EConst(String(name,_)),pos:p}]: {name:name,pos:p}; case _: Error.raiseTypingError("String expected",entry.pos);};
   }
-  throw "Not_found";
+  throw new NotFound();
  }
  public static function applyNativePaths(t:ModuleType):Void {
   function real(meta:Metadata,name:String):{meta:MetadataEntry,name:String} {
@@ -24,7 +25,7 @@ class Native {
       var r = real(cf.cfMeta,cf.cfName); cf.cfName = r.name; cf.cfMeta.unshift(r.meta);
       for (overloadField in cf.cfOverloads) overloadField.cfName = r.name;
       changed = true;
-     } catch (e:Dynamic) {if (e != "Not_found") throw e;}
+     } catch (_:NotFound) {}
     }
     function fields(cfs:Array<TClassField>,old:haxe.ds.StringMap<TClassField>):haxe.ds.StringMap<TClassField> {
      changed = false; for (cf in cfs) field(cf);
@@ -37,7 +38,7 @@ class Native {
     var changed = false; var keys = [for (k in e.eConstrs.keys()) k]; keys.sort(Reflect.compare);
     for (k in keys) {var ef=e.eConstrs.get(k); try {
      var r=real(ef.efMeta,ef.efName); ef.efName=r.name; ef.efMeta.unshift(r.meta); changed=true;
-    } catch (error:Dynamic) {if (error != "Not_found") throw error;}}
+    } catch (_:NotFound) {}}
     if (changed) {
      var names=[]; var result=new haxe.ds.StringMap<TEnumField>();
      for (k in keys) {var ef=e.eConstrs.get(k); names.unshift(ef.efName); result.set(ef.efName,ef);}
@@ -45,6 +46,6 @@ class Native {
     }
     var r=real(e.eMeta,Globals.sTypePath(e.ePath)); e.eMeta.unshift(r.meta); e.ePath=Ast.parsePath(r.name);
    case _:
-  } catch (e:Dynamic) {if (e != "Not_found") throw e;}
+  } catch (_:NotFound) {}
  }
 }

@@ -15,6 +15,7 @@ import compiler.hxb.HxbData.ChunkKind;
 import haxe.io.Bytes;
 import haxe.io.BytesOutput;
 import haxe.ds.ObjectMap;
+import String as StdString;
 
 // Low-level portion of haxe/src/compiler/hxb/hxbWriter.ml.  Module/type
 // serialization intentionally remains separate until the typed writer is ported.
@@ -209,7 +210,10 @@ class HxbWriter {
 		writeReferences();
 		var mdf = startChunk(MDF);
 		writePath(mdf, module.mPath);
-		mdf.writeString(Std.string(module.mExtra.mFile));
+		// The bootstrap loader still stores a string; the translated loader uses
+		// Path.UniqueKey's lazy record, whose original path is serialized upstream.
+		var moduleFile:Dynamic = module.mExtra.mFile;
+		mdf.writeString(Std.isOfType(moduleFile, StdString) ? moduleFile : core.Path.UniqueKey.lazyPath(moduleFile));
 		mdf.writeUleb128(anonymousTypes.length);
 		mdf.writeUleb128(0); // monomorph pool (not ported yet)
 		startChunk(EOT); startChunk(EOF); startChunk(EOM);

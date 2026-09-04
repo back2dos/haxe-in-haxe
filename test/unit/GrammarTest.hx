@@ -150,6 +150,17 @@ class GrammarTest {
 		assert(switch terminatedIfBranch.definition { case EClass(value): switch value.data[0].cffKind { case FFun(func): switch func.fExpr.expr { case EBlock([{expr:EIf(_, _, {expr:EIf(_, _, _)})}]): true; case _: false; }; case _: false; }; case _: false; });
 		var literalDollar = Grammar.parse("class Main { var value = 'cost: $'; }").declarations[0];
 		assert(switch literalDollar.definition { case EClass(value): switch value.data[0].cffKind { case FVar(_, {expr:EConst(String(text, _))}): text == "cost: $"; case _: false; }; case _: false; });
+		var streamResult = syntax.ParserEntry.parseString(syntax.ParserConfig.defaultConfig(core.Define.emptyDefines()), Grammar.parseFileStream,
+			'@:coreType @coreType @:custom.flag class Metadata { function f() inline call(); }', core.Globals.nullPos,
+			function(message, _) {throw message;}, false);
+		var streamPackage = switch streamResult {case ParseSuccess(value, _): value; case _: throw "Expected successful stream parse";};
+		assert(switch streamPackage.declarations[0].definition {
+			case EClass(value): core.Meta.has(core.MetaList.StrictMeta.CoreType, value.meta)
+				&& Type.enumEq(value.meta[1].meta, core.MetaList.StrictMeta.Custom("coreType"))
+				&& Type.enumEq(value.meta[2].meta, core.MetaList.StrictMeta.Custom(":custom.flag"))
+				&& switch value.data[0].cffKind {case FFun({fExpr:{expr:EMeta(entry, _)}}): Type.enumEq(entry.meta, core.MetaList.StrictMeta.Inline); case _: false;};
+			case _: false;
+		});
 		var callStack = Grammar.parse(sys.io.File.getContent("haxe/std/haxe/CallStack.hx"), core.Define.emptyDefines(), "haxe/std/haxe/CallStack.hx");
 		assert(callStack.declarations.length == 2);
 	}

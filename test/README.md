@@ -1,5 +1,8 @@
 # HXB Execution and Conformance Tests
 
+See [TESTING.md](TESTING.md) for the first post-translation runtime baseline,
+the separate full-pipeline integration test, and current failures.
+
 The oracle and initial execution host are the same executable: `haxe` built
 from the sibling `haxe/` submodule at the pinned revision. Do not substitute an
 unrelated system release when recording results.
