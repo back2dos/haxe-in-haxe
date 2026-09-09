@@ -36,6 +36,7 @@ class TranslatedPipeline {
   try code=HighLevel.entry(sctx,request,Args.expandArgs(Args.parseArgs(arguments))) catch(e:Dynamic) {
    var stack=Std.isOfType(e,haxe.Exception)?(cast(e,haxe.Exception)).stack:haxe.CallStack.exceptionStack();
    Sys.stderr().writeString(haxe.CallStack.toString(stack)+"\n"+Std.string(e)+"\n");
+   switch core.ds.ExceptionTools.unification(e) {case Some(errors): for(error in errors) Sys.stderr().writeString(core.Error.unifyErrorMsg(core.TPrinting.printContext(),error)+"\n"); case None:}
    Sys.stderr().writeString("Before failure: parsed="+request.stats.sFilesParsed+" typed="+request.stats.sModulesTyped+" classes="+request.stats.sClassesBuilt+" methods="+request.stats.sMethodsTyped+"\n");
    ManagedPool.release(pool);Sys.exit(1);return;
   }

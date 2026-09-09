@@ -323,7 +323,7 @@ class Common {
  }
  public static function makeUnforcedLazy(tProc:T,f:Void->T,where:String):{value:TLazy} {
   var r={value:lazyAvailable(tDynamic)};
-  r.value=lazyWait(function() {try {r.value=lazyProcessing(tProc);var t=f();r.value=lazyAvailable(t);return t;} catch (e:core.Error.TypingError) {throw new core.Error.FatalError(e.error);}});return r;
+		r.value=lazyWait(function() {try {r.value=lazyProcessing(tProc);var t=f();r.value=lazyAvailable(t);return t;} catch (e:core.Error.TypingError) {throw new core.Error.FatalError(e.error);}});return r;
  }
  public static function checkCancellation(com:CommonContext):Void {if (com.requestScope.cancellationRequested) throw new Cancelled();}
 }

@@ -11,6 +11,8 @@ import core.Ast.StringLiteralKind;
 import core.Globals.GlobalTypePath;
 import core.Globals.Pos;
 import core.TType;
+import core.TFunctions;
+import core.TUnification.Monomorph;
 import compiler.hxb.HxbData.ChunkKind;
 import haxe.io.Bytes;
 import haxe.io.BytesOutput;
@@ -255,7 +257,7 @@ class HxbWriter {
 	}
 
 	function writeClass(chunk:HxbChunk, value:TClass):Void {
-		selectTypeParams(value.clParams);
+		selectTypeParams(switch value.clKind { case KAbstractImpl(abs): abs.aParams; case _: value.clParams; });
 		writeCommon(chunk, value.clPrivate, value.clDoc, value.clMeta, value.clParams, value.clUsing);
 		writeClassKind(chunk, value.clKind);
 		chunk.writeOption(value.clSuper, function(parent) { writeClassRef(chunk, parent.cls); writeTypes(chunk, parent.params); });
@@ -265,7 +267,7 @@ class HxbWriter {
 	}
 
 	function writeClassFields(chunk:HxbChunk, value:TClass, expressions:Array<{var cls:TClass; var field:TClassField; var bytes:Bytes;}>):Void {
-		selectTypeParams(value.clParams);
+		selectTypeParams(switch value.clKind { case KAbstractImpl(abs): abs.aParams; case _: value.clParams; });
 		chunk.writeOption(value.clConstructor, function(field) writeClassFieldData(chunk, value, field, expressions));
 		chunk.writeOption(value.clInit, function(field) writeClassFieldData(chunk, value, field, expressions));
 		chunk.writeList(value.clOrderedFields, function(field) writeClassFieldData(chunk, value, field, expressions));
@@ -379,8 +381,8 @@ class HxbWriter {
 			if (args.length > 4) { chunk.writeU8((ret == null || isVoid(ret)) ? 29 : 39); chunk.writeUleb128(args.length); } else chunk.writeU8((ret == null || isVoid(ret)) ? 20 + args.length : 30 + args.length);
 			for (arg in args) { chunk.writeString(arg.name); chunk.writeBool(arg.optional); writeType(chunk, arg.type); }
 			if (!isVoid(ret)) writeType(chunk, ret);
-		case TLazy(value): switch value { case LAvailable(inner) | LProcessing(inner): writeType(chunk, inner); case LWait(_): throw "Unevaluated lazy type cannot be serialized"; }
-		case TMono(value): if (value.tmType == null) throw "Unbound monomorph cannot be serialized" else writeType(chunk, value.tmType);
+		case TLazy(value): writeType(chunk, TFunctions.lazyType(value));
+		case TMono(value): Monomorph.close(value); if (value.tmType == null) throw "Unbound monomorph cannot be serialized" else writeType(chunk, value.tmType);
 		case TAnon(anon):
 			if (!anon.aFields.keys().hasNext()) chunk.writeU8(80) else {
 				chunk.writeU8(81);
@@ -980,7 +982,13 @@ class HxbWriter {
 	static function writeMetadataEntry(chunk:HxbChunk, entry:core.Ast.MetadataEntry):Void {
 		chunk.writeString(metadataName(entry.meta)); writePos(chunk, entry.pos); chunk.writeList(entry.exprs, function(expr) writeMetadataExpr(chunk, expr));
 	}
-	static function metadataName(value:Dynamic):String { var name = Std.string(value); return StringTools.startsWith(name, ":") ? name : ":" + name; }
+	static function metadataName(value:Dynamic):String {
+		if (Std.isOfType(value, StdString)) {
+			var name:String = value;
+			return StringTools.startsWith(name, ":") ? name : ":" + name;
+		}
+		return core.Meta.toString(cast value);
+	}
 	static function hasMetadataName(metadata:Dynamic, name:String):Bool { var entries:Array<Dynamic> = metadata == null ? [] : cast metadata; for (entry in entries) if (metadataName(entry.meta) == ":" + name) return true; return false; }
 	static function writeEmptyTypeParamsData(chunk:HxbChunk):Void { chunk.writeUleb128(0); chunk.writeU8(1); chunk.writeUleb128(0); }
 	function writeFieldTypeParamsData(chunk:HxbChunk, params:TypeParams):Void {

@@ -664,7 +664,7 @@ class Typer {
     var t=terminatorType(ctx,withType,p); return mk(TBlock([e,mk(TReturn(null),t,p)]),t,e.epos);
    }
    return mk(TReturn(e),terminatorType(ctx,withType,p),p);
-  } catch(exc:Dynamic) {switch exc {case (core.ds.ExceptionTools.typing(_) => Some(err)):var p=err.errPos; checkError(ctx,err); return mk(TReturn(mk(TConst(TNull),mkMono(),p)),terminatorType(ctx,withType,p),p); case _:throw exc;}}
+		} catch(exc:Dynamic) {switch exc {case (core.ds.ExceptionTools.typing(_) => Some(err)):var p=err.errPos; checkError(ctx,err); return mk(TReturn(mk(TConst(TNull),mkMono(),p)),terminatorType(ctx,withType,p),p); case _:throw exc;}}
  }
  public static function typeCast(ctx:TyperContext,e:Expr,hint:TypeHint,p:Pos):TExpr {
   var tpos=hint.pos,t=Typeload.loadComplexType(ctx,true,LoadNormal,hint);

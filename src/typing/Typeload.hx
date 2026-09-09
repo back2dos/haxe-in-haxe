@@ -380,7 +380,7 @@ class Typeload {
    Common.define(com2,Define.CoreApi); Common.define(com2,Define.Sys); allowPackage(com2,"sys"); Define.rawDefineValue(com2.defines,"target.threaded","true");
    if(ctx.com.isMacroContext) Common.define(com2,Define.Macro);
    com2.classPaths.lockContext(ctx.com.customExt,platformNameMacro(ctx.com),true);
-   com2.classPaths.modify(function(cp) return switch cp.scope() {case core.ClassPath.ClassPathScope.Std:[cp.clone()]; case _:[];},ctx.com.classPaths.asList());
+   com2.classPaths.modify(function(cp:core.ClassPath.IClassPath) return switch cp.scope {case core.ClassPath.ClassPathScope.Std:[cp.clone()]; case _:[];},ctx.com.classPaths.asList());
    if(com2.display.dmsCheckCoreApi) {var copy=Reflect.copy(com2.display); copy.dmsCheckCoreApi=false; com2.display=copy;}
    // Server cache linking is deferred; define-signature computation still occurs.
    Define.getSignature(com2.defines);
@@ -397,15 +397,15 @@ class Typeload {
   for(i in 0...cp.length) {
    var a:Array<Dynamic>=getConstraints(cp[i]),b:Array<Dynamic>=getConstraints(params[i]);
    if(a.length!=b.length) raiseTypingError("Type parameters must have the same number of constraints as core type",c.clPos);
-   try for(j in 0...a.length) typeEq(EqCoreType,b[j],a[j]) catch(exc:Dynamic) {switch exc {case (core.ds.ExceptionTools.unification(_) => Some(l)):displayErrorExt(ctx.com,makeError(Custom("Type parameter "+params[i].ttpName+" has different constraint than in core type"),c.clPos,[makeError(Custom(complMsg(errorMsg(Unify(l)))),c.clPos)])); case _:throw exc;}}
+   try for(j in 0...a.length) typeEq(EqCoreType,b[j],a[j]) catch(exc:Unify_error) displayErrorExt(ctx.com,makeError(Custom("Type parameter "+params[i].ttpName+" has different constraint than in core type"),c.clPos,[makeError(Custom(complMsg(errorMsg(Unify(exc.errors)))),c.clPos)]));
   }
   if(c.clDoc==null) c.clDoc=ccore.clDoc;
   function compare(f:TClassField,f2:TClassField):Void {
    var p=f2.cfExpr==null?c.clPos:f2.cfExpr.epos;
-   try typeEq(EqCoreType,applyParams(ccore.clParams,extractParamTypes(c.clParams),f.cfType),f2.cfType) catch(exc:Dynamic) {switch exc {case (core.ds.ExceptionTools.unification(_) => Some(l)):displayErrorExt(ctx.com,makeError(Custom("Field "+f.cfName+" has different type than in core type"),p,[makeError(Custom(complMsg(errorMsg(Unify(l)))),p)])); case _:throw exc;}}
+   try typeEq(EqCoreType,applyParams(ccore.clParams,extractParamTypes(c.clParams),f.cfType),f2.cfType) catch(exc:Unify_error) displayErrorExt(ctx.com,makeError(Custom("Field "+f.cfName+" has different type than in core type"),p,[makeError(Custom(complMsg(errorMsg(Unify(exc.errors)))),p)]));
    if(hasClassFieldFlag(f2,CfPublic)!=hasClassFieldFlag(f,CfPublic)) raiseTypingError("Field "+f.cfName+" has different visibility than core type",p);
    if(f2.cfDoc==null) f2.cfDoc=f.cfDoc;
-   if(!Type.enumEq(f2.cfKind,f.cfKind)) switch [f2.cfKind,f.cfKind] {case [Method(MethInline),Method(MethNormal)]|[Method(MethNormal),Method(MethInline)]: case _:raiseTypingError("Field "+f.cfName+" has different property access than core type",p);}
+   if(!fieldKindEq(f2.cfKind,f.cfKind)) switch [f2.cfKind,f.cfKind] {case [Method(MethInline),Method(MethNormal)]|[Method(MethNormal),Method(MethInline)]: case _:raiseTypingError("Field "+f.cfName+" has different property access than core type",p);}
    switch [followWithCoro(f.cfType),followWithCoro(f2.cfType)] {
     case [Coro(_),NotCoro(_)]:raiseTypingError("Method should be coroutine",p);
     case [NotCoro(_),Coro(_)]:raiseTypingError("Method should not be coroutine",p);

@@ -134,8 +134,8 @@ class Operators {
      if(left||!left&&swapped){core.TUnification.typeEq(EqStrict,impl?core.Abstract.followWithAbstracts(e1.etype):e1.etype,t1);e2=context.AbstractCast.castOrUnifyRaise(ctx,t2,e2,p);}else{core.TUnification.typeEq(EqStrict,e2.etype,t2);e1=context.AbstractCast.castOrUnifyRaise(ctx,t1,e1,p);}
      function checkNull(e:TExpr,t:T):Void if(eq)switch e.eexpr{case TConst(TNull) if(!isExplicitNull(t)):throw new UnificationFailure([]);case _:}if(eq){checkNull(e2,t2);checkNull(e1,t1);}return make(opCf,cf,e1,e2,ret,isAssign&&Type.enumEq(opCf,op),swapped);
     }
-    try{return check(e1,e2,false);}catch(ex:Dynamic){if(!unificationError(ex)&&!Std.isOfType(ex,UnificationFailure))throw ex;}
-    try{if(!core.Meta.has(MetaTag.Commutative,cf.cfMeta))throw new NotFound();return check(e2,e1,true);}catch(ex:Dynamic){if(!Std.isOfType(ex,NotFound)&&!unificationError(ex)&&!Std.isOfType(ex,UnificationFailure))throw ex;}
+    try{return check(e1,e2,false);}catch(_:UnificationFailure){}catch(ex:Dynamic){if(!unificationError(ex))throw ex;}
+    try{if(!core.Meta.has(MetaTag.Commutative,cf.cfMeta))throw new NotFound();return check(e2,e1,true);}catch(_:NotFound){}catch(_:UnificationFailure){}catch(ex:Dynamic){if(!unificationError(ex))throw ex;}
    }throw new NotFound();
   }
   var ops:Array<Dynamic>=left?a.aOps:a.aOps.filter(function(o)return !hasClassFieldFlag(o.field,CfImpl)||core.Meta.has(MetaTag.Commutative,o.field.cfMeta));if(isAssign)try{return loop(OpAssignOp(op),ops);}catch(ex:NotFound){}return loop(op,ops);

@@ -224,7 +224,7 @@ class InlineState {
   function wrap(e:TExpr):TExpr {var etype = hasParams ? mapType(e.etype) : e.etype; try {switch follow(e.etype) {
    case TMono(_) | TInst({clKind:KTypeParameter(_)},_):switch follow(tret) {case TAbstract({aPath:{pack:[],name:"Void"}},_):case _:throw new core.TUnification.Unify_error([]);}
    case _:var uctx = defaultUnificationContext(); uctx.equalityKind = EqStrict; uctx.nullFollowMode = scom.platformConfig.pfStatic ? NeverFollow : AlwaysFollow; typeEqCustom(uctx,etype,tret);
-  } return e;} catch (_:core.TUnification.UnifyError) return mk(TCast(e,null),tret,e.epos);}
+		} return e;} catch (_:core.TUnification.Unify_error) return mk(TCast(e,null),tret,e.epos);}
   if (vars.length == 0 && !hasReturnValue) e = switch e.eexpr {case TBlock(_):{eexpr:e.eexpr,etype:tret,epos:e.epos}; case _:mk(TBlock([e]),tret,e.epos);};
   else if (vars.length == 0) e = switch e.eexpr {case TBlock([inner]):wrap(inner); case _:wrap(e);};
   else {var el = []; for (v in vars) el.push(mk(TVar(v.variable,v.expr),scom.basic.tvoid,e.epos)); for (item in inlinedVars) {var l = item.local; if (l.iDefaultValue != null && l.iRead > 0) {var de = l.iDefaultValue; el.push(setDefault(scom.basic,l.iSubst,duplicateTvars(eIdentity,de),de.epos));}} switch e.eexpr {case TBlock(body):el = el.concat(body); case _:el.push(e);} e = mk(TBlock(el),tret,e.epos);}

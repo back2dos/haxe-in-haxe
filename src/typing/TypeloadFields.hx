@@ -618,9 +618,9 @@ class TypeloadFields {
   if(cctx.isClassDebug) Sys.println("Created class context: "+dumpClassContext(cctx));
   fields=buildFields(ctxC,cctx,c,fields);
   switch cctx.coreApiCheck {
-   case CoreApiCheck.On:if(com.display.dmsCheckCoreApi) delay(ctxC.g,PForce,() -> Typeload.initCoreApi(ctxC,c));
+			case CoreApiCheck.On:if(com.display.dmsCheckCoreApi) delay(ctxC.g,PForce,() -> Typeload.initCoreApi(ctxC,c));
    case CoreApiCheck.Implied:if(com.display.dmsCheckCoreApi) delay(ctxC.g,PForce,function() {
-    try Typeload.initCoreApi(ctxC,c) catch(exc:Dynamic) {switch exc {case (core.ds.ExceptionTools.typing(_) => Some(err)):switch err.errMessage {case ModuleNotFound(_)|TypeNotFound(_):case _:com.errorExt(err);}case _:throw exc;}}
+		try Typeload.initCoreApi(ctxC,c) catch(exc:Dynamic) {switch exc {case (core.ds.ExceptionTools.typing(_) => Some(err)):switch err.errMessage {case ModuleNotFound(_)|TypeNotFound(_):case _:com.errorExt(err);}case _:throw exc;}}
    });
    case CoreApiCheck.Off:
   }
@@ -751,7 +751,7 @@ class TypeBinding {
   var c = cctx.tclass; var t = cf.cfType; var p = cf.cfPos;
   var ctx = TyperManager.cloneForExpr(ctxField,fctx.isStatic ? FunStatic : FunMember,FunNotFunction);
   if (hasClassFlag(c,CInterface)) unexpectedExpression(ctx.com,fctx,"Initialization on field of interface",astExpr.pos);
-  cf.cfMeta.unshift({meta:Value,exprs:[astExpr],pos:Globals.mkZeroRangePos(cf.cfPos)});
+  cf.cfMeta.unshift({meta:StrictMeta.Value,exprs:[astExpr],pos:Globals.mkZeroRangePos(cf.cfPos)});
   function checkCast(e:TExpr):TExpr {
    if (typeIseq(e.etype,cf.cfType)) return e;
    return switch [e.eexpr,follow(cf.cfType)] {
@@ -831,6 +831,6 @@ class TypeBinding {
    }
   }
   function maybeBind():T {if (!ctx.g.returnPartialType) bind(); return t;}
-  var r = makeUnforcedLazy(t,maybeBind,"type_fun"); bindType(ctx,cctx,fctx,cf,r,p);
+		var r = makeUnforcedLazy(t,maybeBind,"type_fun"); bindType(ctx,cctx,fctx,cf,r,p);
  }
 }

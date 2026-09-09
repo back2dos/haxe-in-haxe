@@ -182,6 +182,7 @@ class ModuleTyping {
   var m=makeModule(com,g,path,file,p);com.moduleLut.add(path,m);var all=handleImportHx(com,g,m,decls,p);typeTypesIntoModule(com,g,m,all,p);if(isExtern)m.mExtra.mKind=MExtern;else if(!dontCheckPath)Naming.checkModulePath(com,m.mPath,p);com.requestScope.stats.sModulesTyped++;return m;
  }
  public static function loadModulePrime(com:CommonContext,g:TyperGlobals,path:GlobalTypePath,p:Pos):ModuleDef {
+  if(Sys.getEnv("HIH_TRACE_FAIL")!=null) Sys.stderr().writeString("load "+sTypePath(path)+"\n");
   Common.checkCancellation(com);try{return com.moduleLut.find(path);}catch(_:NotFound){}
   if(com.hxbLibs.length>0)Error.raiseTypingError("HXB library input is outside the source-only HXB milestone",p);
   function missing():Dynamic return Error.raiseErrorMsg(ModuleNotFound(path),p);

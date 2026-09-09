@@ -20,6 +20,10 @@ class GrammarTest {
 		assert(switch property.definition { case EClass(value): switch value.data[0].cffKind { case FProp(get, set, _, _): get.name == "default" && set.name == "null"; case _: false; }; case _: false; });
 		var structuralProperty = Grammar.parse('typedef Value = { var length(default, null):Int; }').declarations[0];
 		assert(switch structuralProperty.definition { case ETypedef(value): switch value.data.type { case CTAnonymous([{cffKind:FProp(get, set, _, _)}]): get.name == "default" && set.name == "null"; case _: false; }; case _: false; });
+		var optionalStructuralField = Grammar.parse('typedef Value = { var ?label:String; }').declarations[0];
+		assert(switch optionalStructuralField.definition { case ETypedef(value): switch value.data.type { case CTAnonymous([{cffKind:FVar({type:CTPath(_)}, _), cffMeta:[entry]}]): entry.meta == "optional"; case _: false; }; case _: false; });
+		var qualifiedSubtype = Grammar.parse('class Value implements haxe.Constraints.IMap<String, Int> {}').declarations[0];
+		assert(switch qualifiedSubtype.definition { case EClass({flags:[HImplements({path:path})]}): path.tpackage.join(".") == "haxe" && path.tname == "Constraints" && path.tsub == "IMap" && path.tparams.length == 2; case _: false; });
 		var functionType = Grammar.parse('class Mapper { function map(f:Int->String):Void; }').declarations[0];
 		assert(switch functionType.definition { case EClass(value): switch value.data[0].cffKind { case FFun(func): switch func.fArgs[0].type.type { case CTFunction(_, _): true; case _: false; }; case _: false; }; case _: false; });
 		var zeroArgFunctionType = Grammar.parse('class Mapper { var callback:() -> Void; }').declarations[0];
@@ -64,7 +68,7 @@ class GrammarTest {
 		var legacyMetadata = Grammar.parse('@legacy class Main {}').declarations[0];
 		assert(switch legacyMetadata.definition { case EClass(value): value.meta[0].meta == "legacy"; case _: false; });
 		var interpolation = Grammar.parse("class Main { function render(value:String) return 'before $value after'; }").declarations[0];
-		assert(switch interpolation.definition { case EClass(value): switch value.data[0].cffKind { case FFun(func): switch func.fExpr.expr { case EReturn({expr: EBinop(OpAdd, {expr: EBinop(OpAdd, _, {expr: EConst(Ident("value"))})}, _)}): true; case _: false; }; case _: false; }; case _: false; });
+		assert(switch interpolation.definition { case EClass(value): switch value.data[0].cffKind { case FFun(func): switch func.fExpr.expr { case EReturn({expr:EConst(String("before $value after", SSingleQuotes))}): true; case _: false; }; case _: false; }; case _: false; });
 		Grammar.parse("class Main { function render() return 'value: ${/* note */ 1}'; }");
 		var arrows = Grammar.parse('class Main { function map(values:Array<Int>) { values.map(value -> value + 1); values.map((value:Int) -> value + 1); } }').declarations[0];
 		assert(switch arrows.definition { case EClass(value): switch value.data[0].cffKind { case FFun(func): switch func.fExpr.expr { case EBlock([{expr:ECall(_, [{expr:EFunction(FKArrow, first)}])}, {expr:ECall(_, [{expr:EFunction(FKArrow, second)}])}]): first.fArgs.length == 1 && first.fArgs[0].type == null && second.fArgs.length == 1 && second.fArgs[0].type != null; case _: false; }; case _: false; }; case _: false; });

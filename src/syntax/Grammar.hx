@@ -324,7 +324,6 @@ class Grammar {
 	}; }
 	function primary():Expr {
 		var t=next(); var e:Expr = switch t.token {
-			case Const(String(value, SSingleQuotes)) if (value.indexOf("$") != -1): interpolatedString(value, t.pos);
 			case Const(c): expr(EConst(c),t.pos);
 			case Dollar(name): expr(EConst(Ident("$" + name)), t.pos);
 			case IntInterval(value):
@@ -386,40 +385,6 @@ class Grammar {
 		var returned = expr(EReturn(body), body.pos);
 		var implicit = expr(EMeta({meta:metadataTag("implicitReturn",true), exprs:[], pos:body.pos}, returned), body.pos);
 		return expr(EFunction(FKArrow, {fParams:[], fArgs:args, fType:null, fExpr:implicit}), union(start, body.pos));
-	}
-	function interpolatedString(value:String, pos:Pos):Expr {
-		var parts:Array<Expr> = [];
-		var literalStart = 0;
-		var index = 0;
-		function addLiteral(end:Int):Void if (end > literalStart) parts.push(expr(EConst(String(value.substring(literalStart, end), SDoubleQuotes)), {pfile:pos.pfile, pmin:pos.pmin + 1 + literalStart, pmax:pos.pmin + 1 + end}));
-		while (index < value.length) {
-			if (value.charAt(index) != "$") { index++; continue; }
-			var next = index + 1 < value.length ? value.charAt(index + 1) : "";
-			var interpolationStart = next == "{" || (next >= "a" && next <= "z") || (next >= "A" && next <= "Z") || next == "_";
-			if (!interpolationStart) { index++; continue; }
-			addLiteral(index);
-			if (index + 1 < value.length && value.charAt(index + 1) == "{") {
-				var depth = 1;
-				var end = index + 2;
-				while (end < value.length && depth > 0) { if (value.charAt(end) == "{") depth++; else if (value.charAt(end) == "}") depth--; end++; }
-				if (depth != 0) fail("Unclosed string interpolation", pos);
-				var contentStart = index + 2;
-				parts.push(parseEmbeddedExpression(value.substring(contentStart, end - 1), pos.pfile, pos.pmin + 1 + contentStart));
-				index = end;
-			} else {
-				var end = index + 1;
-				while (end < value.length) { var c = value.charAt(end); if (!((c >= "a" && c <= "z") || (c >= "A" && c <= "Z") || (c >= "0" && c <= "9") || c == "_")) break; end++; }
-				parts.push(parseEmbeddedExpression(value.substring(index + 1, end), pos.pfile, pos.pmin + 2 + index));
-				index = end;
-			}
-			literalStart = index;
-		}
-		addLiteral(value.length);
-		if (parts.length == 0) return expr(EConst(String("", SDoubleQuotes)), pos);
-		var result = parts[0];
-		for (partIndex in 1...parts.length) result = expr(EBinop(OpAdd, result, parts[partIndex]), union(result.pos, parts[partIndex].pos));
-		result.pos = pos;
-		return result;
 	}
 	function parseSwitch(start:Pos):Expr {
 		var subject = expression();
@@ -609,20 +574,28 @@ class Grammar {
 		}
 		var optional = accept(Question) != null;
 		var name = placedIdent();
+		if (optional) meta.unshift({meta:metadataTag("optional", true),exprs:[],pos:core.Globals.nullPos});
 		if (accept(POpen) != null) {
 			var get = placedIdent(); expect(Comma); var set = placedIdent(); expect(PClose); expect(DblDot);
 			var type = typeHint();
-			if (optional) type = {type:CTOptional(type), pos:type.pos};
 			var end = accept(Semicolon);
 			return {cffName:name, cffDoc:doc, cffPos:end == null ? union(start, type.pos) : union(start, end.pos), cffMeta:meta, cffAccess:accesses, cffKind:FProp(get, set, type, null)};
 		}
 		expect(DblDot);
 		var type = typeHint();
-		if (optional) type = {type:CTOptional(type), pos:type.pos};
 		var end = accept(Semicolon);
 		return {cffName:name, cffDoc:doc, cffPos:end == null ? union(start, type.pos) : union(start, end.pos), cffMeta:meta, cffAccess:accesses, cffKind:FVar(type, null)};
 	}
-	function typePath():PlacedTypePath { var names=placedPath(); var last=names.pop(); var params=[]; var end=last.pos; if(accept(Binop(OpLt))!=null) { if(!isTypeGt()) do params.push(typePathParameter()) while(accept(Comma)!=null); end=expectTypeGt().pos; } return Ast.makePtp(Ast.mkTypePath([for(n in names)n.name],last.name,params), names.length == 0 ? union(last.pos,end) : union(names[0].pos,end)); }
+	function typePath():PlacedTypePath {
+		var names=placedPath(), moduleIndex=-1;
+		for(index in 0...names.length) if(!Ast.isLowerIdent(names[index].name)) { moduleIndex=index; break; }
+		if(moduleIndex<0) { fail("Type name should start with an uppercase letter",names[names.length-1].pos); moduleIndex=names.length-1; }
+		if(names.length>moduleIndex+2 || names.length==moduleIndex+2 && Ast.isLowerIdent(names[moduleIndex+1].name)) fail("Invalid type path",names[moduleIndex+1].pos);
+		var module=names[moduleIndex], sub=names.length==moduleIndex+2 ? names[moduleIndex+1] : null;
+		var params=[], pathEnd=sub==null ? module.pos : sub.pos, end=pathEnd;
+		if(accept(Binop(OpLt))!=null) { if(!isTypeGt()) do params.push(typePathParameter()) while(accept(Comma)!=null); end=expectTypeGt().pos; }
+		return Ast.makePtp(Ast.mkTypePath([for(index in 0...moduleIndex) names[index].name],module.name,params,sub==null ? null : sub.name),union(names[0].pos,end),union(names[0].pos,pathEnd));
+	}
 	function typePathParameter():TypeParamOrConst return switch current().token {
 		case Const(Int(_, _) | Float(_, _) | String(_, _) | Regexp(_, _)) | Kwd(True | False | Null) | Binop(OpSub) | BkOpen | Dollar(_): TPExpr(expression(9));
 		case _: TPType(typeHint());

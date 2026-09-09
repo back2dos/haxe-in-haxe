@@ -47,6 +47,11 @@ class TFunctions {
 	public static function addVarFlag(v:TVar,flag:FlagTVar):Void v.vFlags = setFlag(v.vFlags,intOfVarFlag(flag));
 	public static function removeVarFlag(v:TVar,flag:FlagTVar):Void v.vFlags = unsetFlag(v.vFlags,intOfVarFlag(flag));
 	public static function hasVarFlag(v:TVar,flag:FlagTVar):Bool return hasFlag(v.vFlags,intOfVarFlag(flag));
+	public static function fieldKindEq(a:FieldKind,b:FieldKind):Bool return switch [a,b] {
+		case [Var(a),Var(b)]: StdType.enumEq(a.vRead,b.vRead) && StdType.enumEq(a.vWrite,b.vWrite);
+		case [Method(a),Method(b)]: StdType.enumEq(a,b);
+		case _: false;
+	}
 	public static var varUid = 0;
 	static var moduleUid = 0;
 	static final counterMutex = new Mutex();
