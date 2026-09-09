@@ -127,8 +127,10 @@ class HxbWriter {
 	var anonymousFieldData:Array<Bytes> = [];
 	var anonymousFieldIndices:Map<TClassField, Int> = new Map();
 	var inlineAnonymousFields:ObjectMap<TClassField, Bool> = new ObjectMap();
+	var monomorphIndices:ObjectMap<TMono, Int> = new ObjectMap();
+	var monomorphs:Array<TMono> = [];
 	var expressionVars:Array<TVar> = [];
-	var expressionVarIndices:ObjectMap<TVar, Int> = new ObjectMap();
+	var expressionVarIndices:Map<Int, Int> = new Map();
 	var expressionThisType:Null<T> = null;
 	var optimizedExpressionPositions = false;
 	var skipOptimizedSingleBlocks = false;
@@ -217,7 +219,7 @@ class HxbWriter {
 		var moduleFile:Dynamic = module.mExtra.mFile;
 		mdf.writeString(Std.isOfType(moduleFile, StdString) ? moduleFile : core.Path.UniqueKey.lazyPath(moduleFile));
 		mdf.writeUleb128(anonymousTypes.length);
-		mdf.writeUleb128(0); // monomorph pool (not ported yet)
+		mdf.writeUleb128(monomorphs.length);
 		startChunk(EOT); startChunk(EOF); startChunk(EOM);
 		writeStringPool();
 		writeDocumentationPool();
@@ -382,7 +384,14 @@ class HxbWriter {
 			for (arg in args) { chunk.writeString(arg.name); chunk.writeBool(arg.optional); writeType(chunk, arg.type); }
 			if (!isVoid(ret)) writeType(chunk, ret);
 		case TLazy(value): writeType(chunk, TFunctions.lazyType(value));
-		case TMono(value): Monomorph.close(value); if (value.tmType == null) throw "Unbound monomorph cannot be serialized" else writeType(chunk, value.tmType);
+		case TMono(value):
+			Monomorph.close(value);
+			if (value.tmType == null) {
+				chunk.writeU8(0);
+				var index = monomorphIndices.get(value);
+				if (index == null) {index = monomorphs.length; monomorphIndices.set(value, index); monomorphs.push(value);}
+				chunk.writeUleb128(index);
+			} else writeType(chunk, value.tmType);
 		case TAnon(anon):
 			if (!anon.aFields.keys().hasNext()) chunk.writeU8(80) else {
 				chunk.writeU8(81);
@@ -473,7 +482,7 @@ class HxbWriter {
 		var expression = new HxbChunk(EOM, strings);
 		var typePool:Array<Bytes> = [];
 		expressionVars = [];
-		expressionVarIndices = new ObjectMap();
+		expressionVarIndices = new Map();
 		expressionThisType = null;
 		var pos = {file:root.epos.pfile, min:root.epos.pmin, max:root.epos.pmax};
 		writePos(expression, root.epos);
@@ -498,11 +507,11 @@ class HxbWriter {
 	}
 
 	function declareVar(chunk:HxbChunk, variable:TVar):Void {
-		var index = expressionVarIndices.get(variable);
+		var index = expressionVarIndices.get(variable.vId);
 		if (index == null) {
 			index = expressionVars.length;
 			expressionVars.push(variable);
-			expressionVarIndices.set(variable, index);
+			expressionVarIndices.set(variable.vId, index);
 		}
 		chunk.writeUleb128(index);
 		chunk.writeU8(0); // v_extra
@@ -582,7 +591,7 @@ class HxbWriter {
 				};
 				writesConstantType;
 			case TLocal(variable):
-				var index = expressionVarIndices.get(variable);
+				var index = expressionVarIndices.get(variable.vId);
 				if (index == null) throw 'Undeclared expression variable ${variable.vName}#${variable.vId}';
 				chunk.writeU8(20); chunk.writeUleb128(index); true;
 			case TVar(variable, value): if (value == null) { chunk.writeU8(21); declareVar(chunk, variable); } else { chunk.writeU8(22); declareVar(chunk, variable); writeTExpr(chunk, value, root, typePool, pos); } false;
@@ -868,7 +877,7 @@ class HxbWriter {
 		chunk.writeOption(doc.docOwn, function(value) chunk.writeUleb128(documentation.getOrAdd(value)));
 		chunk.writeList(doc.docInherited, function(value) chunk.writeUleb128(documentation.getOrAdd(value)));
 	}
-	static function writeMetadata(chunk:HxbChunk, meta:Dynamic):Void {
+	function writeMetadata(chunk:HxbChunk, meta:Dynamic):Void {
 		var entries:Array<Dynamic> = meta == null ? [] : cast meta;
 		chunk.writeUleb128(entries.length);
 		for (entry in entries) {
@@ -880,7 +889,7 @@ class HxbWriter {
 			chunk.writeList(exprs, function(expr) writeMetadataExpr(chunk, expr));
 		}
 	}
-	static function writeMetadataExpr(chunk:HxbChunk, expr:core.Ast.Expr):Void {
+	function writeMetadataExpr(chunk:HxbChunk, expr:core.Ast.Expr):Void {
 		writePos(chunk, expr.pos);
 		switch expr.expr {
 			case EConst(Int(value, suffix)):
@@ -916,6 +925,13 @@ class HxbWriter {
 				chunk.writeU8(12); writeMetadataPlacedTypePath(chunk, path); chunk.writeList(args, function(arg) writeMetadataExpr(chunk, arg));
 			case EUnop(op, flag, value):
 				chunk.writeU8(13); chunk.writeU8(unopIndex(op, flag)); writeMetadataExpr(chunk, value);
+			case EVars(vars):
+				chunk.writeU8(14); chunk.writeList(vars, function(variable) {
+					writeMetadataPlacedName(chunk, variable.evName); chunk.writeBool(variable.evFinal); chunk.writeBool(variable.evStatic);
+					chunk.writeOption(variable.evType, function(value) writeMetadataTypeHint(chunk, value));
+					chunk.writeOption(variable.evExpr, function(value) writeMetadataExpr(chunk, value));
+					writeMetadata(chunk, variable.evMeta);
+				});
 			case EFunction(kind, func):
 				chunk.writeU8(15);
 				switch kind {
@@ -926,23 +942,63 @@ class HxbWriter {
 				writeMetadataFunc(chunk, func);
 			case EBlock(values):
 				chunk.writeU8(16); chunk.writeList(values, function(value) writeMetadataExpr(chunk, value));
+			case EFor(iterator, body):
+				chunk.writeU8(17); writeMetadataExpr(chunk, iterator); writeMetadataExpr(chunk, body);
+			case EIf(condition, thenExpr, null):
+				chunk.writeU8(18); writeMetadataExpr(chunk, condition); writeMetadataExpr(chunk, thenExpr);
+			case EIf(condition, thenExpr, elseExpr):
+				chunk.writeU8(19); writeMetadataExpr(chunk, condition); writeMetadataExpr(chunk, thenExpr); writeMetadataExpr(chunk, elseExpr);
+			case EWhile(condition, body, NormalWhile):
+				chunk.writeU8(20); writeMetadataExpr(chunk, condition); writeMetadataExpr(chunk, body);
+			case EWhile(condition, body, DoWhile):
+				chunk.writeU8(21); writeMetadataExpr(chunk, condition); writeMetadataExpr(chunk, body);
+			case ESwitch(subject, cases, defaultCase):
+				chunk.writeU8(22); writeMetadataExpr(chunk, subject);
+				chunk.writeList(cases, function(item) {
+					chunk.writeList(item.values, function(value) writeMetadataExpr(chunk, value));
+					chunk.writeOption(item.guard, function(value) writeMetadataExpr(chunk, value));
+					chunk.writeOption(item.expr, function(value) writeMetadataExpr(chunk, value));
+					writePos(chunk, item.pos);
+				});
+				chunk.writeOption(defaultCase, function(item) {chunk.writeOption(item.expr, function(value) writeMetadataExpr(chunk, value)); writePos(chunk, item.pos);});
+			case ETry(value, catches):
+				chunk.writeU8(23); writeMetadataExpr(chunk, value); chunk.writeList(catches, function(item) {
+					writeMetadataPlacedName(chunk, item.name);
+					chunk.writeOption(item.type, function(value) writeMetadataTypeHint(chunk, value));
+					writeMetadataExpr(chunk, item.expr); writePos(chunk, item.pos);
+				});
+			case EReturn(null): chunk.writeU8(24);
+			case EReturn(value): chunk.writeU8(25); writeMetadataExpr(chunk, value);
+			case EBreak: chunk.writeU8(26);
+			case EContinue: chunk.writeU8(27);
+			case EUntyped(value): chunk.writeU8(28); writeMetadataExpr(chunk, value);
+			case EThrow(value): chunk.writeU8(29); writeMetadataExpr(chunk, value);
+			case ECast(value, null): chunk.writeU8(30); writeMetadataExpr(chunk, value);
+			case ECast(value, type): chunk.writeU8(31); writeMetadataExpr(chunk, value); writeMetadataTypeHint(chunk, type);
+			case EIs(value, type): chunk.writeU8(32); writeMetadataExpr(chunk, value); writeMetadataTypeHint(chunk, type);
+			case EDisplay(value, kind):
+				chunk.writeU8(33); writeMetadataExpr(chunk, value); switch kind {
+					case DKCall: chunk.writeU8(0); case DKDot: chunk.writeU8(1); case DKStructure: chunk.writeU8(2); case DKMarked: chunk.writeU8(3);
+					case DKPattern(isOuter): chunk.writeU8(4); chunk.writeBool(isOuter);
+				}
+			case ETernary(condition, thenExpr, elseExpr):
+				chunk.writeU8(34); writeMetadataExpr(chunk, condition); writeMetadataExpr(chunk, thenExpr); writeMetadataExpr(chunk, elseExpr);
+			case ECheckType(value, type): chunk.writeU8(35); writeMetadataExpr(chunk, value); writeMetadataTypeHint(chunk, type);
 			case EMeta(metadata, value):
 				chunk.writeU8(36); writeMetadataEntry(chunk, metadata); writeMetadataExpr(chunk, value);
-			case _:
-				throw "Metadata expression serialization is not ported for " + Type.enumConstructor(expr.expr) + " at " + expr.pos.pfile + ":" + expr.pos.pmin;
 		}
 	}
-	static function writeMetadataPlacedName(chunk:HxbChunk, name:core.Ast.PlacedName):Void {
+	function writeMetadataPlacedName(chunk:HxbChunk, name:core.Ast.PlacedName):Void {
 		chunk.writeString(name.name); writePos(chunk, name.pos);
 	}
-	static function writeMetadataTypeParam(chunk:HxbChunk, param:core.Ast.TypeParam):Void {
+	function writeMetadataTypeParam(chunk:HxbChunk, param:core.Ast.TypeParam):Void {
 		writeMetadataPlacedName(chunk, param.tpName);
 		chunk.writeList(param.tpParams, function(value) writeMetadataTypeParam(chunk, value));
 		chunk.writeOption(param.tpConstraints, function(value) writeMetadataTypeHint(chunk, value));
 		chunk.writeOption(param.tpDefault, function(value) writeMetadataTypeHint(chunk, value));
 		writeMetadata(chunk, param.tpMeta);
 	}
-	static function writeMetadataFunc(chunk:HxbChunk, func:core.Ast.Func):Void {
+	function writeMetadataFunc(chunk:HxbChunk, func:core.Ast.Func):Void {
 		chunk.writeList(func.fParams, function(param) writeMetadataTypeParam(chunk, param));
 		chunk.writeList(func.fArgs, function(arg) {
 			writeMetadataPlacedName(chunk, arg.name); chunk.writeBool(arg.optional); writeMetadata(chunk, arg.meta);
@@ -952,7 +1008,7 @@ class HxbWriter {
 		chunk.writeOption(func.fType, function(value) writeMetadataTypeHint(chunk, value));
 		chunk.writeOption(func.fExpr, function(value) writeMetadataExpr(chunk, value));
 	}
-	static function writeMetadataPlacedTypePath(chunk:HxbChunk, path:core.Ast.PlacedTypePath):Void {
+	function writeMetadataPlacedTypePath(chunk:HxbChunk, path:core.Ast.PlacedTypePath):Void {
 		chunk.writeList(path.path.tpackage, chunk.writeString);
 		chunk.writeString(path.path.tname);
 		chunk.writeList(path.path.tparams, function(param) switch param {
@@ -962,7 +1018,7 @@ class HxbWriter {
 		chunk.writeOption(path.path.tsub, chunk.writeString);
 		writePosPair(chunk, path.posFull, path.posPath);
 	}
-	static function writeMetadataTypeHint(chunk:HxbChunk, hint:core.Ast.TypeHint):Void {
+	function writeMetadataTypeHint(chunk:HxbChunk, hint:core.Ast.TypeHint):Void {
 		switch hint.type {
 			case CTPath(path): chunk.writeU8(0); writeMetadataPlacedTypePath(chunk, path);
 			case CTFunction(args, ret): chunk.writeU8(1); chunk.writeList(args, function(arg) writeMetadataTypeHint(chunk, arg)); writeMetadataTypeHint(chunk, ret);
@@ -971,15 +1027,25 @@ class HxbWriter {
 			case CTNamed(name, type): chunk.writeU8(6); chunk.writeString(name.name); writePos(chunk, name.pos); writeMetadataTypeHint(chunk, type);
 			case CTIntersection(types): chunk.writeU8(7); chunk.writeList(types, function(type) writeMetadataTypeHint(chunk, type));
 			case CTAnonymous(fields):
-				if (fields.length != 0) throw "Non-empty structural metadata type-hint serialization is not ported";
-				chunk.writeU8(2); chunk.writeUleb128(0);
+				chunk.writeU8(2); chunk.writeList(fields, function(field) writeMetadataClassField(chunk, field));
 			case CTExtend(paths, fields):
-				if (fields.length != 0) throw "Structural-extension metadata fields are not ported";
-				chunk.writeU8(4); chunk.writeList(paths, function(path) writeMetadataPlacedTypePath(chunk, path)); chunk.writeUleb128(0);
+				chunk.writeU8(4); chunk.writeList(paths, function(path) writeMetadataPlacedTypePath(chunk, path)); chunk.writeList(fields, function(field) writeMetadataClassField(chunk, field));
 		}
 		writePos(chunk, hint.pos);
 	}
-	static function writeMetadataEntry(chunk:HxbChunk, entry:core.Ast.MetadataEntry):Void {
+	function writeMetadataClassField(chunk:HxbChunk, field:core.Ast.ClassField):Void {
+		writeMetadataPlacedName(chunk, field.cffName); writeDocumentation(chunk, field.cffDoc); writePos(chunk, field.cffPos);
+		writeMetadata(chunk, field.cffMeta); chunk.writeList(field.cffAccess, function(access) {
+			chunk.writeU8(switch access.access {case APublic:0; case APrivate:1; case AStatic:2; case AOverride:3; case ADynamic:4; case AInline:5; case AMacro:6; case AFinal:7; case AExtern:8; case AAbstract:9; case AOverload:10; case AEnum:11;});
+			writePos(chunk, access.pos);
+		});
+		switch field.cffKind {
+			case FVar(type, expr): chunk.writeU8(0); chunk.writeOption(type, function(value) writeMetadataTypeHint(chunk, value)); chunk.writeOption(expr, function(value) writeMetadataExpr(chunk, value));
+			case FFun(func): chunk.writeU8(1); writeMetadataFunc(chunk, func);
+			case FProp(get, set, type, expr): chunk.writeU8(2); writeMetadataPlacedName(chunk, get); writeMetadataPlacedName(chunk, set); chunk.writeOption(type, function(value) writeMetadataTypeHint(chunk, value)); chunk.writeOption(expr, function(value) writeMetadataExpr(chunk, value));
+		}
+	}
+	function writeMetadataEntry(chunk:HxbChunk, entry:core.Ast.MetadataEntry):Void {
 		chunk.writeString(metadataName(entry.meta)); writePos(chunk, entry.pos); chunk.writeList(entry.exprs, function(expr) writeMetadataExpr(chunk, expr));
 	}
 	static function metadataName(value:Dynamic):String {

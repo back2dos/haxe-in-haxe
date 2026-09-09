@@ -302,7 +302,7 @@ class TUnification {
      PMap.iter(function(n,f1) {
       try {
        var f2=PMap.find(n,a2.aFields),kindShouldMatch=param==EqStrict || param==EqCoreType || param==EqStricter;
-       if(!StdType.enumEq(f1.cfKind,f2.cfKind) && (kindShouldMatch || !unifyKind(c,f1.cfKind,f2.cfKind))) error([invalidKind(n,f1.cfKind,f2.cfKind)]);
+       if(!fieldKindEq(f1.cfKind,f2.cfKind) && (kindShouldMatch || !unifyKind(c,f1.cfKind,f2.cfKind))) error([invalidKind(n,f1.cfKind,f2.cfKind)]);
        try {typeEqCustom(c,f1.cfType,f2.cfType);} catch(e:Unify_error) {error([invalidField(n)].concat(e.errors));}
        if(hasClassFieldFlag(f1,CfPublic)!=hasClassFieldFlag(f2,CfPublic)) error([invalidVisibility(n)]);
       } catch(_:NotFound) {error([hasNoField(b,n)]);}

@@ -124,7 +124,9 @@ HAXE_REFERENCE="$PWD/haxe/haxe" sh test/conformance.sh
 The first post-translation runtime baseline and open failures are recorded in
 [`test/TESTING.md`](test/TESTING.md). The development-host breadth check exercises
 the existing bootstrap. `translated-pipeline.hxml` exercises the newly translated
-compiler path separately and currently fails during typing.
+compiler path separately; its default `Basic` fixture emits a loadable HXB,
+while broader exception-heavy coverage is blocked on generated catch-variable
+scoping during expression serialization.
 
 These are different goalposts: unit tests check ported subsystems; the parser
 lane currently accepts 1,339/1,366 upstream sources; smoke requires 112 direct

@@ -9,7 +9,9 @@ phase is compilation and integration, explicitly authorized after that snapshot.
 the existing bootstrap entry point does not reach. Both `haxe haxe-in-haxe.hxml` and `haxe compile-all.hxml` now compile.
 These checks used the installed Haxe `5.0.0-preview.1`, not a locally built
 executable from the pinned submodule. The first runtime test results and fixes are recorded in `test/TESTING.md`;
-the new full-pipeline integration test is still failing. Pinned-reference
+the new full-pipeline integration test passes its default `Basic` fixture and a
+focused Eval `Int64` fixture. Broader `TryCatch` coverage currently reaches HXB
+serialization before failing on generated catch-variable scope. Pinned-reference
 conformance remains unverified.
 
 ## Translation snapshot

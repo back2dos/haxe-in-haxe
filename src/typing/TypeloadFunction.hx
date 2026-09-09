@@ -32,7 +32,6 @@ class TypeloadFunction {
  public static function saveFieldState(ctx:TyperContext):Void->Void {var locals=ctx.f.locals; return function() {ctx.f.locals=locals;};}
  public static function typeFunctionParams(ctx:TyperContext,fd:Func,host:TypeParamHost,fname:String):TypeParams return Typeload.typeTypeParams(ctx,host,{pack:[],name:fname},fd.fParams);
  static function typeFunctionInner(ctx:TyperContext,args:FunctionArguments,ret:T,syntax:Null<Expr>,doDisplay:Bool,p:Pos):TExpr {
-  if(Sys.getEnv("HIH_TRACE_FAIL")!=null) Sys.stderr().writeString("start "+Globals.sTypePath(ctx.c.curclass.clPath)+"."+ctx.f.curfield.cfName+"\n");
   ctx.e.ret=ret; ctx.e.opened=[];
   enterFieldTypingPass(ctx.g,{name:"type_function",path:ctx.c.curclass.clPath.pack.concat([ctx.c.curclass.clPath.name,ctx.f.curfield.cfName])});
   args.bringIntoContext(ctx);
@@ -41,7 +40,6 @@ class TypeloadFunction {
    else if(ctx.e.curfun==FunMember && hasClassFlag(ctx.c.curclass,CAbstract)) raiseTypingError("Function body or abstract modifier required",p);
    else raiseTypingError("Function body required",p);
   }
-  if(Sys.getEnv("HIH_TRACE_FAIL")!=null) Sys.stderr().writeString("body "+Globals.sTypePath(ctx.c.curclass.clPath)+"."+ctx.f.curfield.cfName+"\n");
   var positionDebug=Meta.has(MetaTag.Custom(":debug.position"),ctx.f.curfield.cfMeta);
   var e:TExpr;
   if(!doDisplay) {
@@ -54,23 +52,15 @@ class TypeloadFunction {
    if(displayDebug) Sys.println("after processing:\n"+Ast.dumpWithPos(syntax));
    e=typeExpr(ctx,syntax,NoValue);
   }
-  if(Sys.getEnv("HIH_TRACE_FAIL")!=null) Sys.stderr().writeString("normalize body\n");
   switch e.eexpr {case TMeta({meta:MetaTag.MergeBlock},e1={eexpr:TBlock(_)}): e=e1; case _:}
-  if(Sys.getEnv("HIH_TRACE_FAIL")!=null) Sys.stderr().writeString("normalized body\n");
   function hasReturn(e:TExpr):Bool {
    function loop(e:TExpr):Void switch e.eexpr {case TReturn(v) if(v!=null): throw new core.ds.Exit(); case TFunction(_): case _: Texpr.iter(loop,e);}
    try {loop(e); return false;} catch(_:core.ds.Exit) { return true;}
   }
-  if(Sys.getEnv("HIH_TRACE_FAIL")!=null) Sys.stderr().writeString("follow return\n");
-  var followedReturn = follow(ret);
-  if(Sys.getEnv("HIH_TRACE_FAIL")!=null) Sys.stderr().writeString("followed return\n");
-  switch followedReturn {
+  switch follow(ret) {
    case TAbstract({aPath:{pack:[],name:"Void"}},_):
    case TMono(_) if(!hasReturn(e)): unify(ctx,ctx.t.tvoid,ret,p);
-   case _:
-    if(Sys.getEnv("HIH_TRACE_FAIL")!=null) Sys.stderr().writeString("return flow\n");
-    try TypeloadCheck.returnFlow(ctx,e) catch(_:core.ds.Exit) {}
-    if(Sys.getEnv("HIH_TRACE_FAIL")!=null) Sys.stderr().writeString("returned flow\n");
+   case _: try TypeloadCheck.returnFlow(ctx,e) catch(_:core.ds.Exit) {}
   }
   function findSuper(e:TExpr):Void switch e.eexpr {case TCall({eexpr:TConst(TSuper)},_): throw new core.ds.Exit(); case TFunction(_): case _: Texpr.iter(findSuper,e);}
   function superConstructor():Null<{wasForced:Bool,type:T}> {
@@ -118,24 +108,13 @@ class TypeloadFunction {
    }
    Sys.println("CHANGED:");
    for(m in monos) {var s=printMono(m.index,m.mono); if(s!=m.text) Sys.println(s);}
-		} else {
-   var monoIndex = 0;
-   for(m in ctx.e.monomorphs) {
-    if(Sys.getEnv("HIH_TRACE_FAIL")!=null) Sys.stderr().writeString("close mono "+monoIndex+"\n");
-    safeMonoClose(ctx,m.mono,m.pos);
-    monoIndex++;
-   }
-  }
-  if(Sys.getEnv("HIH_TRACE_FAIL")!=null) Sys.stderr().writeString("closed "+Globals.sTypePath(ctx.c.curclass.clPath)+"."+ctx.f.curfield.cfName+"\n");
+		} else for(m in ctx.e.monomorphs) safeMonoClose(ctx,m.mono,m.pos);
   if(positionDebug) Sys.println("typing:\n"+Texpr.dumpWithPos("",e));
   return e;
  }
  public static function typeFunction(ctx:TyperContext,args:FunctionArguments,ret:T,e:Null<Expr>,doDisplay:Bool,p:Pos):TExpr {
   var save=saveFieldState(ctx);
-  try {var result=typeFunctionInner(ctx,args,ret,e,doDisplay,p); save(); return result;} catch(err:Dynamic) {
-   if(Sys.getEnv("HIH_TRACE_FAIL")!=null) Sys.stderr().writeString("while typing "+Globals.sTypePath(ctx.c.curclass.clPath)+"."+ctx.f.curfield.cfName+": "+Std.string(err)+"\n");
-   save(); throw err;
-  }
+  try {var result=typeFunctionInner(ctx,args,ret,e,doDisplay,p); save(); return result;} catch(err:Dynamic) {save(); throw err;}
  }
  public static function addConstructor(ctxC:TyperContext,c:TClass,forceConstructor:Bool,p:Pos):Void {
   if(c.clConstructor!=null) return;

@@ -5,21 +5,39 @@ The parser corpus remains at 1,339/1,366. Three examples under `examples/` now
 compile through the bootstrap compiler loaded from HXB; host-built Eval HXB
 archives for the same sources execute without source class paths.
 
-The translated pipeline still stops after 22 parsed and typed modules and 72
-typed methods, but two false diagnostics were removed:
+The translated pipeline now compiles the default `Basic` fixture and the focused
+`Int64Basic` fixture to HXB. The latter reaches 67 parsed/typed modules and 408
+typed methods, and the development host can consume the resulting archive.
+Source execution and execution from an Eval HXB of the translated compiler also
+produce matching `Basic` payloads when parallelism is disabled. Eval-hosted
+integration runs need `-D eval-call-stack-depth=10000` for larger standard-library
+loads; the default Eval call-depth can overflow while parsing `StringTools.hx`
+from an already-deep typer call.
+
+The broader `TryCatch` fixture reaches 119 parsed/typed modules and 675 methods.
+Its current blocker is HXB expression scoping after exception filtering:
+generated catch variables (for example in `BalancedTree.remove`) can be referenced
+without a matching declaration in the serialized expression tree. The writer
+correctly rejects this instead of emitting a corrupt archive.
+
+Repairs in this checkpoint include:
 
 - statement blocks no longer absorb a following prefix `++` or `--` as a
   postfix operator; the `haxe.CallStack.subtract` invalid-assignment error is
   gone and a grammar regression test covers this boundary;
-- class-field kinds now use Haxe structural enum comparison where upstream uses
-  OCaml structural equality; the false `ValueException.unwrap` override-kind
-  mismatch is gone.
+- class-field kinds and nested property access records now use structural
+  comparison where upstream uses OCaml structural equality;
+- inline return wrapping catches the actual `Unify_error` exception, allowing
+  Eval `Int64` abstract conversions to proceed;
+- metadata AST serialization now covers the complete upstream expression tag
+  set and structural type hints;
+- unbound monomorphs are assigned HXB pool references instead of being rejected.
 
 The missing abstract-extension errors were traced to another projection issue:
 assigning `mtUsing` on the temporary `tInfos` record did not update the source
 type. Mutating its shared ordered array restores `@:using(haxe.CallStack)` and
 removes all three `CallStack` `toString` errors. The remaining translated-pipeline
-failure is now the isolated `Cannot call null` while flushing the `PForce` pass.
+former `Cannot call null` failure while flushing `PForce` is resolved.
 
 # Initial runtime test results — 2026-09-04
 
