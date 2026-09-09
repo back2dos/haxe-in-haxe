@@ -315,7 +315,13 @@ class Grammar {
 				expr(ECast(e, null), union(t.pos, e.pos));
 			};
 			postfix(casted);
-		case _: postfix(primary()); }; }
+		case _:
+			var value = primary();
+			// Upstream returns statement blocks directly and only continues into
+			// postfix parsing for object literals. Otherwise a following prefix
+			// `++`/`--` statement is attached to the preceding `}`.
+			switch value.expr {case EBlock(_): value; case _: postfix(value);}
+	}; }
 	function primary():Expr {
 		var t=next(); var e:Expr = switch t.token {
 			case Const(String(value, SSingleQuotes)) if (value.indexOf("$") != -1): interpolatedString(value, t.pos);

@@ -1,3 +1,26 @@
+# Runtime checkpoint — 2026-09-09
+
+The bootstrap build, all-module build, unit suite, and parser corpus still pass.
+The parser corpus remains at 1,339/1,366. Three examples under `examples/` now
+compile through the bootstrap compiler loaded from HXB; host-built Eval HXB
+archives for the same sources execute without source class paths.
+
+The translated pipeline still stops after 22 parsed and typed modules and 72
+typed methods, but two false diagnostics were removed:
+
+- statement blocks no longer absorb a following prefix `++` or `--` as a
+  postfix operator; the `haxe.CallStack.subtract` invalid-assignment error is
+  gone and a grammar regression test covers this boundary;
+- class-field kinds now use Haxe structural enum comparison where upstream uses
+  OCaml structural equality; the false `ValueException.unwrap` override-kind
+  mismatch is gone.
+
+The missing abstract-extension errors were traced to another projection issue:
+assigning `mtUsing` on the temporary `tInfos` record did not update the source
+type. Mutating its shared ordered array restores `@:using(haxe.CallStack)` and
+removes all three `CallStack` `toString` errors. The remaining translated-pipeline
+failure is now the isolated `Cannot call null` while flushing the `PForce` pass.
+
 # Initial runtime test results — 2026-09-04
 
 Baseline: `9943ab5`, followed by the runtime fixes in this checkpoint.

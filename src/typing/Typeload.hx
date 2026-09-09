@@ -405,7 +405,7 @@ class Typeload {
    try typeEq(EqCoreType,applyParams(ccore.clParams,extractParamTypes(c.clParams),f.cfType),f2.cfType) catch(exc:Dynamic) {switch exc {case (core.ds.ExceptionTools.unification(_) => Some(l)):displayErrorExt(ctx.com,makeError(Custom("Field "+f.cfName+" has different type than in core type"),p,[makeError(Custom(complMsg(errorMsg(Unify(l)))),p)])); case _:throw exc;}}
    if(hasClassFieldFlag(f2,CfPublic)!=hasClassFieldFlag(f,CfPublic)) raiseTypingError("Field "+f.cfName+" has different visibility than core type",p);
    if(f2.cfDoc==null) f2.cfDoc=f.cfDoc;
-   if(f2.cfKind!=f.cfKind) switch [f2.cfKind,f.cfKind] {case [Method(MethInline),Method(MethNormal)]|[Method(MethNormal),Method(MethInline)]: case _:raiseTypingError("Field "+f.cfName+" has different property access than core type",p);}
+   if(!Type.enumEq(f2.cfKind,f.cfKind)) switch [f2.cfKind,f.cfKind] {case [Method(MethInline),Method(MethNormal)]|[Method(MethNormal),Method(MethInline)]: case _:raiseTypingError("Field "+f.cfName+" has different property access than core type",p);}
    switch [followWithCoro(f.cfType),followWithCoro(f2.cfType)] {
     case [Coro(_),NotCoro(_)]:raiseTypingError("Method should be coroutine",p);
     case [NotCoro(_),Coro(_)]:raiseTypingError("Method should not be coroutine",p);

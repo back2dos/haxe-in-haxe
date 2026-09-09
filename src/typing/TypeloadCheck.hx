@@ -114,7 +114,9 @@ class TypeloadCheck {
   else if(!hasClassFieldFlag(r.cfNew,CfPublic)&&hasClassFieldFlag(r.cfOld,CfPublic)) displayError(ctx.com,"Field "+i+" has less visibility (public/private) than superclass one",p);
   else switch [r.cfNew.cfKind,r.cfOld.cfKind] {
    case [_,Method(MethInline)]:displayError(ctx.com,"Field "+i+" is inlined and cannot be overridden",p);
-   case [a,b] if(a==b):
+   // OCaml's structural equality compares enum payloads here. Haxe's `==`
+   // only compares their object identity, so use the enum equivalent.
+   case [a,b] if(Type.enumEq(a,b)):
    case [Method(MethInline),Method(MethNormal)]:
    case _:displayError(ctx.com,"Field "+i+" has different property access than in superclass",p);
   }

@@ -99,6 +99,8 @@ class GrammarTest {
 		assert(switch functionFieldWithSemicolon.definition { case EClass(value): value.data.length == 2; case _: false; });
 		var localFunctionWithoutSemicolon = Grammar.parse('class Main { function run() { function local() {} local(); } }').declarations[0];
 		assert(switch localFunctionWithoutSemicolon.definition { case EClass(value): switch value.data[0].cffKind { case FFun(func): switch func.fExpr.expr { case EBlock(values): values.length == 2; case _: false; }; case _: false; }; case _: false; });
+		var prefixAfterBlock = Grammar.parse('class Main { function run() { if (ready) { reset(); } ++index; } }').declarations[0];
+		assert(switch prefixAfterBlock.definition {case EClass(value): switch value.data[0].cffKind {case FFun(func): switch func.fExpr.expr {case EBlock([{expr:EIf(_, {expr:EBlock(_)}, _)}, {expr:EUnop(Increment, Prefix, {expr:EConst(Ident("index"))})}]): true; case _: false;}; case _: false;}; case _: false;});
 		Grammar.parse('class Main { function run() { function local() {} ++value.x; var selected = if (value) 1; var next = 2; } }');
 		var macroPrefixedExpression = Grammar.parse('class Main { macro static function build(value) return macro new Result($$value); }').declarations[0];
 		assert(switch macroPrefixedExpression.definition { case EClass(value): switch value.data[0].cffKind { case FFun(func): switch func.fExpr.expr { case EReturn({expr:ENew(_, _)}): true; case _: false; }; case _: false; }; case _: false; });

@@ -1,4 +1,5 @@
 /bin/
 /test/generated/
 /test/reference/
+/examples/generated/
 /.haxelib/

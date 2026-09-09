@@ -195,14 +195,16 @@ class TypeloadFields {
   var fenum:Null<Void->Void>=switch mt {
    case TClassDecl(c) if(switch c.clKind {case KAbstractImpl(a):a.aEnum;case _:false;}):var a=switch c.clKind {case KAbstractImpl(a):a;case _:throw new NotFound();};function() fbuild(buildEnumAbstract(ctx,c,a,fvars(),a.aNamePos));
    case TClassDecl(c):
-    function inheritUsing(s:Dynamic):Void ti.mtUsing=ti.mtUsing.concat(tInfos(TClassDecl(s.cls)).mtUsing);
+    // tInfos is a projection object in Haxe, so assigning mtUsing on it would
+    // only replace the projected field. Mutate the shared array instead.
+    function inheritUsing(s:Dynamic):Void for(entry in tInfos(TClassDecl(s.cls)).mtUsing) ti.mtUsing.push(entry);
     delayLate(ctx.g,PConnectField,function() {if(c.clSuper!=null) inheritUsing(c.clSuper);for(s in c.clImplements) inheritUsing(s);});null;
    case _:null;
   };
   builds.reverse();for(f in builds) f();
   for(m in ti.mtMeta) if(m.meta==Using) for(e in m.exprs) try {
    var path=stringPosListOfExprPathRaise(e);path.reverse();var r=ImportHandling.handleUsing(ctx,path,e.pos);
-   delayLate(ctx.g,PConnectField,function() ti.mtUsing=r.filterClasses(r.types).concat(ti.mtUsing));
+   delayLate(ctx.g,PConnectField,function() {var filtered=r.filterClasses(r.types);filtered.reverse();for(entry in filtered)ti.mtUsing.unshift(entry);});
   } catch(_:Exit) {raiseTypingError("dot path expected",e.pos);}
   if(fenum!=null) fenum();
  }

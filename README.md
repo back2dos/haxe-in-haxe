@@ -78,6 +78,19 @@ ordinary execution markers such as `--interp` and `--no-output` are accepted as
 configuration input but do not add another output target. Multi-part builds,
 libraries, macros, and display/server options still fail explicitly.
 
+## Play with examples
+
+Three small programs now have a single-command compile-and-run loop:
+
+```sh
+sh examples/run.sh hello
+sh examples/run.sh shapes
+sh examples/run.sh fibonacci
+```
+
+The loop exercises the compiler port from its HXB archive and keeps the current
+host-runtime boundary explicit. See [`examples/README.md`](examples/README.md).
+
 ## Conformance contract
 
 Correctness has two immediate checks. Eval-HXB execution must behave identically
