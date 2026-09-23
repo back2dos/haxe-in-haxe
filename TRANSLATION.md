@@ -9,9 +9,15 @@ phase is compilation and integration, explicitly authorized after that snapshot.
 the existing bootstrap entry point does not reach. Both `haxe haxe-in-haxe.hxml` and `haxe compile-all.hxml` now compile.
 These checks used the installed Haxe `5.0.0-preview.1`, not a locally built
 executable from the pinned submodule. The first runtime test results and fixes are recorded in `test/TESTING.md`;
-the new full-pipeline integration test passes its default `Basic` fixture and a
-focused Eval `Int64` fixture. Broader `TryCatch` coverage currently reaches HXB
-serialization before failing on generated catch-variable scope. Pinned-reference
+the new full-pipeline integration test passes its default `Basic` fixture, a
+focused Eval `Int64` fixture, and the broader exception-heavy `TryCatch` and
+`HelloWorld` (trace) fixtures after three repairs: bitwise/comparison operator
+precedence in the Pratt parser, explicit declaration sequencing for
+generated catch variables in exception filtering, and statics-module alias
+tags in the HXB writer. The broader archives load and type-check on the
+host; executing size-calling code on the installed host fails from host/std
+version skew (it rejects `StringMap.size` even from source), so execution
+needs the pinned runtime. Pinned-reference
 conformance remains unverified.
 
 ## Translation snapshot

@@ -373,6 +373,17 @@ class HxbWriter {
 		case TAbstract(value, params) if (value.aPath.pack.length == 0 && params.length == 0): switch value.aPath.name { case "Void": chunk.writeU8(100); case "Int": chunk.writeU8(101); case "Float": chunk.writeU8(102); case "Bool": chunk.writeU8(103); case "String": chunk.writeU8(104); case _: writeReferenceType(chunk, 70, function() return addAbstract(value, false), params); }
 		case TInst(value, params): writeReferenceType(chunk, 40, function() return addClass(value, false), params);
 		case TEnum(value, params): writeReferenceType(chunk, 50, function() return addEnum(value, false), params);
+		case TType(value, []):
+			// Upstream writes statics-module aliases (tags 10/11/12) instead of
+			// a typedef reference when the aliased type is a statics anon.
+			// Without this, `Enum<...>`/`Class<...>` aliases are recorded as
+			// unresolvable typedef references.
+			switch value.tType {
+				case TAnon({aStatus:ClassStatics(c)}): chunk.writeU8(10); chunk.writeUleb128(addClass(c, false));
+				case TAnon({aStatus:EnumStatics(en)}): chunk.writeU8(11); chunk.writeUleb128(addEnum(en, false));
+				case TAnon({aStatus:AbstractStatics(a)}): chunk.writeU8(12); chunk.writeUleb128(addAbstract(a, false));
+				case _: writeReferenceType(chunk, 60, function() return addTypedef(value, false), []);
+			}
 		case TType(value, params): writeReferenceType(chunk, 60, function() return addTypedef(value, false), params);
 		case TAbstract(value, params): writeReferenceType(chunk, 70, function() return addAbstract(value, false), params);
 		case TDynamic(null): chunk.writeU8(4);

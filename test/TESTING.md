@@ -1,3 +1,111 @@
+# Goal: complete everything up to macro functionality — 2026-09-23
+
+Finish the HXB-only milestone so the Eval macro milestone can start. Macro
+execution, the Macro API bridge, and the macro context are explicitly out of
+scope; macro-bearing cases stay recorded exclusions.
+
+Done when all of the following hold:
+
+1. The translated pipeline emits HXB for every macro-free,
+   non-target-specific upstream-suite case the reference compiler accepts.
+   The only exclusions are expected-failure, non-HXB-target, macro,
+   haxelib, and display/server cases, each recorded with its reason.
+2. Every emitted archive is consumable by the reference compiler without
+   source classpaths (proves dependency completeness, not just emission).
+3. Source-executed and Eval-HXB-executed port output identical member sets
+   and uncompressed member payloads for the same coverage set.
+4. Pinned-reference payload conformance: same normalized member set and
+   byte-for-byte equal uncompressed `.hxb` members for every covered case.
+
+Phases (in order; each must stay green before the next expands scope):
+
+- Phase 1 — HXB writer fidelity. Fixed: statics-module aliases (`Class<...>` /
+  `Enum<...>` / abstract equivalents) are written with tags 10/11/12 instead
+  of bogus typedef references (this unblocked host consumption of broader
+  archives: `haxe.io.Error` while loading `haxe.io.Bytes`). Any further
+  member-level gaps found while expanding coverage go here.
+- Phase 2 — Coverage expansion. Drive the translated pipeline over the
+  smoke inventory (112 direct roots, 9 HXML configurations) plus the
+  `test/unit/moduleload/` fixtures; record per-case status. Known gaps to
+  close or explicitly exclude: pattern-matcher parity (`Issue2508`),
+  abstract-constructor typing/inlining, `TIdent` confinement, inherited/
+  `super`/import resolution (see `test/README.md`).
+- Phase 3 — Host-execution parity and dependency completeness for the
+  Phase 2 set (criteria 2 and 3).
+- Phase 4 — Pinned-reference conformance (criterion 4). Blocked on
+  environment: no OCaml/dune/opam toolchain here, so no `haxe/haxe`
+  reference build exists. Everything else proceeds without it; conformance
+  runs once a reference is available.
+
+Rules throughout: no successful no-ops or omitted bodies, no faked passes,
+exclusions recorded with reasons, results tracked here and coverage in
+`TRANSLATION.md`.
+
+# Runtime checkpoint — 2026-09-23
+
+The translated pipeline now emits the previously blocked fixtures. `TryCatch`
+exits 0 with 119 parsed/typed modules and 675 methods; `HelloWorld` (trace)
+exits 0 with 119/119/674. `Basic` (40/40/115) and `Int64Basic` (67/67/408)
+remain green, and source-vs-Eval-HXB execution still matches for `Basic`.
+Bootstrap/all-module builds, the unit suite, and the parser corpus
+(1,339/1,366) pass unchanged.
+
+Three repairs in this checkpoint:
+
+- `src/syntax/Grammar.hx` Pratt levels had bitwise operators binding looser
+  than equality/comparison operators, inverting `haxe/src/syntax/parser.ml`.
+  `n & 0x800000 != 0` parsed as `n & (0x800000 != 0)`, which surfaced as
+  `Int should be Bool` / `Bool should be Int` errors in `haxe/io/Input.hx`.
+  Equality/comparison operators now bind looser than `??`, which binds looser
+  than `|`/`^`/`&`. Retained deviations from upstream are documented next to
+  the table (`|`/`^`/`&` keep distinct C-like levels, `%` stays grouped with
+  `*`/`/`, `in` stays loosest for the existing for-loop shape).
+- `src/filters/exception/Exceptions.hx` `catchesToIfs` built
+  `[declare_haxe_exception; declare_unwrap; transformed]` in one array
+  literal. Upstream relies on OCaml right-to-left evaluation, so
+  `declare_unwrap` runs first and the `haxe.Exception` temporary allocated
+  while building the unwrap declaration is already known when
+  `declare_haxe_exception` emits its declaration. Haxe evaluates array
+  literals left-to-right, leaving generated catch variables (for example in
+  `BalancedTree.remove`) referenced without a declaration; the HXB writer
+  rejected the archive. The two declarations are now sequenced explicitly,
+  keeping the same document order.
+- `src/compiler/hxb/HxbWriter.hx` wrote statics-module aliases
+  (`Class<...>` / `Enum<...>` / abstract equivalents) as typedef references
+  instead of upstream's tags 10/11/12. The host reader could not resolve
+  them (`Cannot resolve type haxe.io.Error.Enum<haxe.io.Error>` while
+  loading `haxe.io.Bytes`). Decoded on the wire with a throwaway member
+  inspector before fixing.
+
+Current limits:
+
+- Larger standard-library loads still need `-D eval-call-stack-depth=10000`
+  on the host invocation (now baked into `test/translated-pipeline.hxml`);
+  without it, typing fails with host stack overflow instead of a diagnostic.
+- Host consumption of the newly emitted archives is partial: `Basic` and
+  `Int64Basic` archives load and execute; `TryCatch`/`HelloWorld` archives
+  load and type-check (`--no-output` passes) but executing them on the
+  installed host fails at `StringMap.size`. That is host/std skew, not a
+  port defect: the installed Haxe `5.0.0-preview.1` rejects `map.size()`
+  even from source (`haxe.ds.StringMap<Int> has no field size`), while the
+  pinned submodule std declares it. Executing size-calling code needs the
+  pinned runtime; until a reference is built, load/type consumption (plus
+  execution where the host supports it) is the bar. This is exactly why the
+  reference must be the pinned-submodule build, never the system Haxe.
+- Development-host breadth is 120/121: `issue-11164` fails identically on the
+  clean tree, so it is pre-existing environment drift rather than a
+  regression from this checkpoint.
+- Pinned-reference execution and payload conformance remain unverified: no
+  executable built from the pinned submodule was available.
+
+Broader fixtures can be exercised with (exit code is the pipeline's; use a
+file redirect rather than a pipe to preserve it):
+
+```sh
+haxe -D eval-call-stack-depth=10000 -cp src -cp test --run TranslatedPipeline \
+  -cp test --main unit.moduleload.TryCatch --interp --no-output --hxb /tmp/trycatch.hxb
+```
+
 # Runtime checkpoint — 2026-09-09
 
 The bootstrap build, all-module build, unit suite, and parser corpus still pass.

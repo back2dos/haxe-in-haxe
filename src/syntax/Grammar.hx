@@ -679,7 +679,14 @@ class Grammar {
 	inline function is(t:Token):Bool return Type.enumEq(current().token,t);
 	inline function current():LexedToken return tokenAt(index); inline function previous():LexedToken return tokenAt(index-1); inline function next():LexedToken return tokenAt(index++);
 	static function binop(t:Token):Null<Binop> return switch t {case Binop(o):o;case Spread:OpInterval;case _:null;};
-	static function precedence(o:Binop):Int return switch o {case OpInterval|OpArrow|OpIn:0;case OpAssign|OpAssignOp(_):1;case OpBoolOr:2;case OpBoolAnd:3;case OpOr:4;case OpXor:5;case OpAnd:6;case OpNullCoal|OpEq|OpNotEq:7;case OpGt|OpGte|OpLt|OpLte:8;case OpShl|OpShr|OpUShr:9;case OpAdd|OpSub:10;case OpMult|OpDiv|OpMod:11;case _: -1;};
+	// Pratt levels (higher binds tighter) mirror haxe/src/syntax/parser.ml's
+	// precedence order: bitwise operators bind tighter than equality/comparison
+	// operators, so `n & mask != 0` parses as `(n & mask) != 0`. Deliberate
+	// deviations retained from the previous table: OpOr/OpXor/OpAnd keep
+	// distinct C-like levels instead of upstream's shared level, OpMod stays
+	// grouped with OpMult/OpDiv, and OpIn stays loosest to preserve the
+	// existing for-loop `it` shape consumed below.
+	static function precedence(o:Binop):Int return switch o {case OpInterval|OpArrow|OpIn:0;case OpAssign|OpAssignOp(_):1;case OpBoolOr:2;case OpBoolAnd:3;case OpEq|OpNotEq|OpGt|OpGte|OpLt|OpLte:4;case OpNullCoal:5;case OpOr:6;case OpXor:7;case OpAnd:8;case OpShl|OpShr|OpUShr:9;case OpAdd|OpSub:10;case OpMult|OpDiv|OpMod:11;case _: -1;};
 	static function hasAccess(a:Array<PlacedAccess>, v:Access):Bool { for(x in a) if(x.access==v)return true; return false; }
 	static function union(a:Pos,b:Pos):Pos return Ast.punion(a,b);
 	function fail(message:String, ?pos:Pos):Void throw new GrammarError(message,pos == null ? current().pos : pos);

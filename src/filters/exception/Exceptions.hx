@@ -146,7 +146,17 @@ class Exceptions {
 			return TypeOps.mk(TIf(condition, body, elseBody), t, p);
 		}
 		var transformed = transform(catches);
-		var exprs = [caught.declareHaxeException(catchVar.vPos), caught.declareUnwrap(catchVar.vPos), transformed];
+		// Upstream builds `[declare_haxe_exception; declare_unwrap; transformed]`
+		// and relies on OCaml right-to-left evaluation: declare_unwrap runs
+		// first, so the haxe.Exception temporary allocated through
+		// get_haxe_exception while building the unwrap declaration is already
+		// known when declare_haxe_exception emits its declaration. Haxe
+		// evaluates array literals left-to-right, so sequence explicitly to
+		// keep document order `[declHx, declUnwrap, ifs]` with all generated
+		// variables declared before use.
+		var declUnwrap = caught.declareUnwrap(catchVar.vPos);
+		var declHx = caught.declareHaxeException(catchVar.vPos);
+		var exprs = [declHx, declUnwrap, transformed];
 		return [{variable:catchVar, expr:TypeOps.mk(TBlock(exprs), t, p)}];
 	}
 	public static function catchesAsValueException(ctx:ExceptionContext, nonValue:Array<CatchClause>, valueCatch:Null<CatchClause>, t:T, p:Pos):CatchClause {
