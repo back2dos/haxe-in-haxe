@@ -16,6 +16,7 @@ import sys.thread.Mutex;
 // Mechanical translation of haxe/src/core/tFunctions.ml. Draft; not compiled or tested.
 // Mutex-protected counters replace OCaml Atomic.fetch_and_add.
 typedef NotFound = core.ds.NotFound;
+typedef Exit = core.ds.Exit;
 class TypeExit { public function new() {} }
 class ApplyParamsRecursion { public function new() {} }
 class ApplyParamsMismatch { public function new() {} }
@@ -284,9 +285,10 @@ class TFunctions {
 	public static function moduleTypeOfType(t:T):ModuleType return switch t {
 		case TInst(c,_):TClassDecl(c); case TEnum(e,_):TEnumDecl(e); case TType(t,_):TTypeDecl(t); case TAbstract(a,_):TAbstractDecl(a);
 		case TLazy(f):moduleTypeOfType(lazyType(f));
-		case TMono(r):if (r.tmType == null) throw new TypeExit(); moduleTypeOfType(r.tmType);
-		case TAnon(a):switch a.aStatus {case ClassStatics(c):TClassDecl(c);case EnumStatics(e):TEnumDecl(e);case AbstractStatics(a):TAbstractDecl(a);case _:throw new TypeExit();}
-		case _:throw new TypeExit();
+		// Upstream raises Exit (not TypeExit) here; callers convert it to Not_found.
+		case TMono(r):if (r.tmType == null) throw new Exit(); moduleTypeOfType(r.tmType);
+		case TAnon(a):switch a.aStatus {case ClassStatics(c):TClassDecl(c);case EnumStatics(e):TEnumDecl(e);case AbstractStatics(a):TAbstractDecl(a);case _:throw new Exit();}
+		case _:throw new Exit();
 	};
 	public static function tconstToConst(c:TConstant):Constant return switch c {
 		case TInt(i):Int(Std.string(i),null);case TFloat(s):Float(s,null);case TString(s):String(s,SDoubleQuotes);case TBool(b):Ident(b ? "true" : "false");case TNull:Ident("null");case TThis:Ident("this");case TSuper:Ident("super");

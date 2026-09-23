@@ -255,11 +255,12 @@ class Grammar {
 	}
 	function unary():Expr { var t=current(); return switch t.token {
 		case At:
-			// Expression metadata (for example @:privateAccess value) is parsed
-			// in grammar.ml's unary-expression path, rather than only before
-			// declarations and fields.
+			// Expression metadata (for example @:privateAccess value) wraps the
+			// full following expression in grammar.ml (`make_meta ... secure_expr`),
+			// including postfix access and assignment. Parsing only a unary
+			// would drop `.field` continuations (`@:privateAccess host.top = prev`).
 			var metas = metadata();
-			var value = unary();
+			var value = expression();
 			for (i in 0...metas.length) {
 				var meta = metas[metas.length - 1 - i];
 				value = expr(EMeta(meta, value), union(meta.pos, value.pos));
@@ -429,7 +430,13 @@ class Grammar {
 	function objectOrIdentifier():Expr {
 		var t=current();
 		if(accept(BrOpen)!=null) {
-			if (!is(BrClose) && (!hasToken(index+1) || !tokenAt(index+1).token.match(DblDot))) return blockContents(t.pos);
+			// Upstream tries an object key (`$ident`, plain ident, or string
+			// literal) followed by `:` first and parses a block otherwise, so
+			// `{ @:meta ... }` is a block. Only treating the brace as an
+			// object when the *key-shaped* token is followed by `:` keeps
+			// metadata-led blocks out of the object path.
+			var keyLike=switch current().token {case Const(Ident(_)) | Const(String(_, _)) | Dollar(_):true;case _:false;};
+			if (!is(BrClose) && !(keyLike && hasToken(index+1) && tokenAt(index+1).token.match(DblDot))) return blockContents(t.pos);
 			var fields=[];
 			while (!is(BrClose)) {
 				var key = switch current() {

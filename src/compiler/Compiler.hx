@@ -104,7 +104,10 @@ class Compiler {
   try f()
   catch(e:core.Error.FatalError)errorExt(com,e.error)
   catch(e:syntax.Lexer.LexerError)error(com,syntax.Lexer.errorMsg(e.message),e.pos)
-  catch(e:syntax.Parser.ParserError)error(com,syntax.Parser.errorMsg(e.error),e.pos)
+   catch(e:syntax.Parser.ParserError)error(com,syntax.Parser.errorMsg(e.error),e.pos)
+   // The Pratt grammar raises GrammarError where upstream raises Parser.Error;
+   // report it with the same message-and-position shape.
+   catch(e:syntax.Grammar.GrammarError)error(com,e.message,e.pos)
   catch(e:context.Typecore.ForbidPackage){var sub=e.positions.map(p->Error.makeError(Custom(Error.complMsg("referenced here")),p));errorExt(com,Error.makeError(Custom("You cannot access the "+e.forbidden.name+" package while "+(e.reason=="macro"?"in a macro":"targeting "+e.reason)+" (for "+sTypePath(e.forbidden.path)+")"),e.forbidden.pos,sub));}
   catch(e:core.Error.TypingError)errorExt(com,e.error)
   catch(e:ArgumentError)error(com,"Error: "+e.message,nullPos)
