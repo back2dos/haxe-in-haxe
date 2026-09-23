@@ -560,6 +560,14 @@ class Grammar {
 			complex = extensions.length == 0 ? CTAnonymous(fields) : CTExtend(extensions, fields);
 			return {type: optional ? CTOptional({type:complex, pos:union(start, end)}) : complex, pos:union(start, end)};
 		}
+		// `default` in type position means "use the default type argument"
+		// (grammar.ml maps it to `$._hx_default`).
+		var defaultToken = acceptKwd(Default);
+		if (defaultToken != null) {
+			var path = Ast.mkTypePath(["$"], "_hx_default");
+			complex = CTPath(Ast.makePtp(path, union(start, defaultToken.pos)));
+			return {type: optional ? CTOptional({type:complex, pos:union(start, defaultToken.pos)}) : complex, pos:union(start, defaultToken.pos)};
+		}
 		complex = CTPath(typePath());
 		if (accept(Arrow) != null) {
 			var result = typeHint();
