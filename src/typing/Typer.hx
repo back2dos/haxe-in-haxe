@@ -302,7 +302,7 @@ class Typer {
     var t=Typeload.loadTypeHint(ctx,p,LoadNormal,ev.evType),e:Null<TExpr>=null;
     if(ev.evExpr!=null) {
      var old=ctx.e.inLoop; if(ev.evStatic) ctx.e.inLoop=false;
-     try {e=typeExpr(ctx,ev.evExpr,WithTypeTools.withLocalVariable(t,name)); ctx.e.inLoop=old;} catch(exc:Dynamic) {ctx.e.inLoop=old; throw exc;}
+     try {e=typeExpr(ctx,ev.evExpr,WithTypeTools.withLocalVariable(t,name)); ctx.e.inLoop=old;} catch(exc:haxe.Exception){ctx.e.inLoop=old; throw exc;}
      e=AbstractCast.castOrUnify(ctx,t,e,p);
     }
     var v=Meta.has(MetaTag.This,ev.evMeta)?addLocal(ctx,VAbstractThis,name,t,pv):addLocalWithOrigin(ctx,TVOLocalVariable,name,t,pv); v.vMeta=ev.evMeta;
@@ -439,7 +439,7 @@ class Typer {
   ctx.e.callArgumentStack.unshift(el); ctx.e.withTypeStack.unshift(withType);
   function restore():Void {ctx.e.withTypeStack.shift(); ctx.e.callArgumentStack.shift();}
   var t:T;
-  try t=Typeload.loadInstance(ctx,ptp,ParamCustom(getParams),LoadNormal) catch(exc:Dynamic) {restore(); if(Lambda.exists(el,e -> DisplayPosition.displayPosition.enclosedIn(e.pos))) for(e in el) typeExpr(ctx,e,WithTypeTools.value); throw exc;}
+  try t=Typeload.loadInstance(ctx,ptp,ParamCustom(getParams),LoadNormal) catch(exc:haxe.Exception){restore(); if(Lambda.exists(el,e -> DisplayPosition.displayPosition.enclosedIn(e.pos))) for(e in el) typeExpr(ctx,e,WithTypeTools.value); throw exc;}
   checkDisplayType(ctx,t,ptp); t=follow(t);
   function buildConstructor(ao:Null<TAbstract>,c:TClass,tl:TParams):FieldCallCandidateData<Void->TExpr> {
    var fa=FieldAccessTools.getConstructorAccess(c,tl,p); if(forceInline) {fa=Reflect.copy(fa); fa.faInline=true;}
@@ -583,7 +583,7 @@ class Typer {
   try {
    try body=TypeloadFunction.typeFunction(ctx,args,rt,f.fExpr,ctx.f.inDisplay,p) catch(exc:Dynamic) {switch exc {case (core.ds.ExceptionTools.typing(_) => Some(err)) if(resets):checkError(ctx,err); body=mk(TBlock([]),ctx.t.tvoid,p); case _:throw exc;}}
    deactivate(); ctx.f.inCallArgs=oldInArgs;
-  } catch(exc:Dynamic) {deactivate(); ctx.f.inCallArgs=oldInArgs; throw exc;}
+  } catch(exc:haxe.Exception){deactivate(); ctx.f.inCallArgs=oldInArgs; throw exc;}
   var tf={tfArgs:args.forExpr(ctx),tfType:rt,tfExpr:body},e=mk(TFunction(tf),ft,p),config=TypeloadFields.getCoroConfig(ctx,ctx.f.meta);
   if(config!=null) {if(v==null) throw "No_value"; e=CoroTools.funToCoro(CoroTools.createCoroContext(ctx,config,coro.CoroTypes.CoroFor.LocalFunc(tf,v)));}
   if(v==null) return e;

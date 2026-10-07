@@ -231,7 +231,7 @@ class ParserEntry {
 		try result=parse(config,entry,lctx,Lexer.lexbufFromUtf8String(s),p.pfile)
 		catch (err:ParserError) { restore(); result=error(Parser.errorMsg(err.error),inlined ? err.pos : p); }
 		catch (err:syntax.Lexer.LexerError) { restore(); result=error(Lexer.errorMsg(err.message),inlined ? err.pos : p); }
-		catch (err:Dynamic) { restore(); throw err; }
+		catch(err:haxe.Exception){ restore(); throw err;}
 		restore(); return result;
 	}
 	public static function parseExprString(config:ParserConfiguration,s:String,p:Pos,error:String->Pos->ParseResult<Expr>,inlined:Bool):ParseResult<Expr> {

@@ -101,10 +101,9 @@ class LegacyMain {
 					zip.addBytesEntry(writer.exportModule(), "cross/" + path.join("/") + ".hxb");
 				}
 			}
-		} catch (error:Dynamic) {
+		} catch(error:haxe.Exception){
 			zip.close();
-			throw error;
-		}
+			throw error;}
 		zip.close();
 	}
 

@@ -114,7 +114,7 @@ class TypeloadFunction {
  }
  public static function typeFunction(ctx:TyperContext,args:FunctionArguments,ret:T,e:Null<Expr>,doDisplay:Bool,p:Pos):TExpr {
   var save=saveFieldState(ctx);
-  try {var result=typeFunctionInner(ctx,args,ret,e,doDisplay,p); save(); return result;} catch(err:Dynamic) {save(); throw err;}
+  try {var result=typeFunctionInner(ctx,args,ret,e,doDisplay,p); save(); return result;} catch(err:haxe.Exception){save(); throw err;}
  }
  public static function addConstructor(ctxC:TyperContext,c:TClass,forceConstructor:Bool,p:Pos):Void {
   if(c.clConstructor!=null) return;
@@ -168,5 +168,6 @@ class TypeloadFunction {
    cf.cfExpr=constr; cf.cfType=constr.etype; cf.cfMeta=[{meta:MetaTag.CompilerGenerated,exprs:[],pos:Globals.nullPos}]; cf.cfKind=Method(MethNormal); c.clConstructor=cf;
   }
  }
- static function __init__():Void {Typeload.typeFunctionParamsRef=typeFunctionParams;}
+ public static function initHooks():Void {Typeload.typeFunctionParamsRef=typeFunctionParams;}
+ static function __init__():Void initHooks();
 }

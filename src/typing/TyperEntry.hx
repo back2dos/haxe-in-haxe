@@ -136,7 +136,8 @@ class TyperEntry {
   loadStdTypes(ctx); loadString(ctx); loadStd(ctx); loadAny(ctx); loadUnit(ctx); loadArray(ctx); loadEnumTools(ctx); loadCoro(ctx);
   ctx.com.localWrapper=loadLocalWrapper(ctx); ctx.g.complete=true; return ctx;
  }
- static function __init__():Void {createContextRef=create;}
+ public static function initHooks():Void {createContextRef=create;}
+ static function __init__():Void initHooks();
 }
 
 // OCaml objects in load_local_wrapper share captured compiler basic types.

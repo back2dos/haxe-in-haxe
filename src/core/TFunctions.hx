@@ -115,7 +115,7 @@ class TFunctions {
 		if (m != nullModule && mdep != nullModule && (m.mPath != mdep.mPath || m.mExtra.mSign != mdep.mExtra.mSign)) {
 			addDependencyMutex.acquire();
 			try { m.mExtra.mDeps.set(mdep.mId,createDependency(mdep,origin)); if (!skipPostprocess) m.mExtra.mProcessed = 0; }
-			catch (e:Dynamic) { addDependencyMutex.release(); throw e; }
+			catch(e:haxe.Exception){ addDependencyMutex.release(); throw e;}
 			addDependencyMutex.release();
 		}
 	}
@@ -214,7 +214,7 @@ class TFunctions {
 		stack.value = oldStack.copy();
 		try success(applyParams(cparams,params,t,stack))
 		catch (_:ApplyParamsRecursion) { stack.value = oldStack; return; }
-		catch (e:Dynamic) { stack.value = oldStack; throw e; }
+		catch(e:haxe.Exception){ stack.value = oldStack; throw e;}
 		stack.value = oldStack;
 	}
 	static function isNullPath(a:TAbstract):Bool return a.aPath.pack.length == 0 && a.aPath.name == "Null";

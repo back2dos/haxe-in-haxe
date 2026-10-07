@@ -70,7 +70,7 @@ class ExprToPattern {
    var old=ctx.com.errorExt;var restore=Common.disableReportMode(ctx.com);ctx.com.errorExt=function(err){var ep=err.errPos;if(ep.pfile!=p.pfile||ep.pmax<p.pmin||ep.pmin>p.pmax)old(err);else throw new Exit();};return function(){restore();ctx.com.errorExt=old;};
   }
   function tryTyping(e:Expr):PatternKind {
-   var old=ctx.f.isUntyped;ctx.f.isUntyped=true;var restore=catchErrors(e.pos);var typed:TExpr;try{typed=typeExpr(ctx,e,WithTypeTools.withType(t));}catch(ex:Dynamic){restore();ctx.f.isUntyped=old;throw ex;}restore();ctx.f.isUntyped=old;
+   var old=ctx.f.isUntyped;ctx.f.isUntyped=true;var restore=catchErrors(e.pos);var typed:TExpr;try{typed=typeExpr(ctx,e,WithTypeTools.withType(t));}catch(ex:haxe.Exception){restore();ctx.f.isUntyped=old;throw ex;}restore();ctx.f.isUntyped=old;
    var pat=checkExpr(typed);switch pat{case PatConstructor({kind:ConTypeExpr(mt)},_):unifyTypePattern(ctx,mt,t,typed.epos);case _:unify(ctx,typed.etype,t,p);}return pat;
   }
   function handleIdent(s:String,p:Pos):PatternKind {

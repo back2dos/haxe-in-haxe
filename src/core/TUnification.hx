@@ -110,7 +110,7 @@ class Monomorph {
   }
   case _:
    checkUpConstraints(m,t);m.tmType=t;var kind=classifyDownConstraints(m);
-   try {checkDownConstraints(kind,t);} catch(e:Dynamic) {m.tmType=null;throw e;}
+   try {checkDownConstraints(kind,t);} catch(e:haxe.Exception){m.tmType=null;throw e;}
    m.tmType=null;doBind(m,t);
  }
  public static function close(m:TMono):Void {
@@ -242,12 +242,12 @@ class TUnification {
  public static function recStackExists<A>(f:A->Bool,s:RecStack<A>):Bool return Lambda.exists(s.recStack,f);
  public static function recStackMemq<A>(v:A,s:RecStack<A>):Bool return s.recStack.indexOf(v)>=0;
  public static function recStackLoop<A,B,R>(s:RecStack<A>,v:A,f:B->R,arg:B):R {
-  s.recStack.unshift(v);try {var r=f(arg);s.recStack.shift();return r;} catch(e:Dynamic) {s.recStack.shift();throw e;}
+  s.recStack.unshift(v);try {var r=f(arg);s.recStack.shift();return r;} catch(e:haxe.Exception){s.recStack.shift();throw e;}
  }
  public static function recStack<A>(s:RecStack<A>,v:A,check:A->Bool,run:Void->Void,onError:Array<UnifyError>->Void):Void {
   if(!recStackExists(check,s)) {
    s.recStack.unshift(v);
-   try {run();} catch(e:Unify_error) {s.recStack.shift();onError(e.errors);return;} catch(e:Dynamic) {s.recStack.shift();throw e;}
+   try {run();} catch(e:Unify_error) {s.recStack.shift();onError(e.errors);return;} catch(e:haxe.Exception){s.recStack.shift();throw e;}
    s.recStack.shift();
   }
  }
@@ -396,11 +396,11 @@ class TUnification {
       switch f2.cfKind {
        case Var({vRead:AccNo}),Var({vRead:AccNever}):
         var old=c.unifyNewMonos.recStack;c.unifyNewMonos.recStack=monos.concat(old);
-        recStack(c.unifyStack,pair(ft,f2.cfType),function(p) return fastEq(p.b,f2.cfType)&&fastEqMono(c.unifyNewMonos.recStack,ft,p.a),function() {try {unifyWithAccess(c,f1,ft,f2);} catch(e:Dynamic) {c.unifyNewMonos.recStack=old;throw e;}},function(l) error([invalidField(n)].concat(l)));
+        recStack(c.unifyStack,pair(ft,f2.cfType),function(p) return fastEq(p.b,f2.cfType)&&fastEqMono(c.unifyNewMonos.recStack,ft,p.a),function() {try {unifyWithAccess(c,f1,ft,f2);} catch(e:haxe.Exception){c.unifyNewMonos.recStack=old;throw e;}},function(l) error([invalidField(n)].concat(l)));
         c.unifyNewMonos.recStack=old;
        case Method(MethNormal),Method(MethInline),Var({vWrite:AccNo}),Var({vWrite:AccNever}):
         var old=c.unifyNewMonos.recStack;c.unifyNewMonos.recStack=monos.concat(old);
-        recStack(c.unifyStack,pair(f2.cfType,ft),function(p) return fastEqMono(c.unifyNewMonos.recStack,p.b,ft)&&fastEq(f2.cfType,p.a),function() {try {unifyWithAccess(c,f1,ft,f2);} catch(e:Dynamic) {c.unifyNewMonos.recStack=old;throw e;}},function(l) error([invalidField(n)].concat(l)));
+        recStack(c.unifyStack,pair(f2.cfType,ft),function(p) return fastEqMono(c.unifyNewMonos.recStack,p.b,ft)&&fastEq(f2.cfType,p.a),function() {try {unifyWithAccess(c,f1,ft,f2);} catch(e:haxe.Exception){c.unifyNewMonos.recStack=old;throw e;}},function(l) error([invalidField(n)].concat(l)));
         c.unifyNewMonos.recStack=old;
        case _:try {unifyWithAccess(c,f1,ft,f2);} catch(e:Unify_error) {error([invalidField(n)].concat(e.errors));}
       }
@@ -575,7 +575,8 @@ class TUnification {
  public static function unify(a:T,b:T):Void unifyCustom(defaultUnificationContext(),a,b);
  public static function typeEq(kind:EqKind,a:T,b:T):Void typeEqCustom(updated(defaultUnificationContext(),{equalityKind:kind}),a,b);
  public static function typeIseq(a:T,b:T):Bool return typeIseqCustom(defaultUnificationContext(),a,b);
- static function __init__():Void TFunctions.monomorphClassifyConstraintsRef=Monomorph.classifyDownConstraints;
+ public static function initHooks():Void TFunctions.monomorphClassifyConstraintsRef=Monomorph.classifyDownConstraints;
+ static function __init__():Void initHooks();
 }
 
 class UnifyMinT {

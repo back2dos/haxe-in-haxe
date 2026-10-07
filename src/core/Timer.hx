@@ -51,9 +51,10 @@ class Timer {
 		return function() {};
 	}
 	public static function time<A,R>(ctx:TimerContext,id:Array<String>,f:A->R,arg:A):R {
+		if (ctx.measureTimes == No) return f(arg);
 		var close = startTimer(ctx,id);
 		var result:R;
-		try result = f(arg) catch (e:Dynamic) { close(); throw e; }
+		try result = f(arg) catch (e:haxe.Exception) { close(); throw e; }
 		close();
 		return result;
 	}

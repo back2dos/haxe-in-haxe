@@ -38,7 +38,7 @@ class TanonIdentification<A> {
  }
  public function findCompatible(uctx:UnificationContext,arity:Int,tc:T):PathFieldMapping<A> {if(arity>=pfmByArity.length)throw new NotFound();for(pfm in pfmByArity[arity])try{unify(uctx,tc,pfm);return pfm;}catch(e:Unify_error){}throw new NotFound();}
  public function identifyTypedef(td:TDef):Void {function loop(t:T):Void switch t{case TAnon(an) if((an.aStatus==Closed||an.aStatus==Const)&&countFields(an.aFields)>0):addPfm(td.tPath,pfmOfTypedef(td));case TMono({tmType:t}) if(t!=null):loop(t);case TLazy(f):loop(lazyType(f));case _:};loop(td.tType);}
- function protect<B>(f:Void->B):B {pfmMutex.acquire();try{var r=f();pfmMutex.release();return r;}catch(e:Dynamic){pfmMutex.release();throw e;}}
+ function protect<B>(f:Void->B):B {pfmMutex.acquire();try{var r=f();pfmMutex.release();return r;}catch(e:haxe.Exception){pfmMutex.release();throw e;}}
  public function identifyAnon(uctx:UnificationContext,an:TAnon):PathFieldMapping<A> {
   function makePfm(path:core.Globals.GlobalTypePath):PathFieldMapping<A> return {pfmPath:path,pfmParams:[],pfmFields:an.aFields,pfmConverted:null,pfmArity:countFields(an.aFields)};
   var path:Null<core.Globals.GlobalTypePath>=switch an.aStatus{case ClassStatics(c):c.clPath;case EnumStatics(e):e.ePath;case AbstractStatics(a):a.aPath;case _:null;};

@@ -17,7 +17,7 @@ class Parallel {
   var pool=Timer.time(timerCtx,["domainslib","setup"],function(_) return new TaskPool(TaskPool.recommendedDomainCount()-1),null);
   function cleanup():Void Timer.time(timerCtx,["domainslib","teardown"],function(_) {pool.close();return null;},null);
   var result:A;
-  try result=pool.run(function() return f(pool)) catch (e:Dynamic) {cleanup(); throw e;}
+  try result=pool.run(function() return f(pool)) catch(e:haxe.Exception){cleanup(); throw e;}
   cleanup(); return result;
  }
  public static function runWithPool<A>(mp:ManagedPoolData,f:Null<TaskPool>->A):A {
@@ -41,7 +41,7 @@ class ParallelSeq {
 class ManagedPool {
  public static function create(setup:Void->TaskPool):ManagedPoolData return {setup:setup,pool:null,mutex:new Mutex()};
  static function protect<A>(mp:ManagedPoolData,f:Void->A):A {
-  mp.mutex.acquire(); var result:A; try result=f() catch (e:Dynamic) {mp.mutex.release(); throw e;}
+  mp.mutex.acquire(); var result:A; try result=f() catch(e:haxe.Exception){mp.mutex.release(); throw e;}
   mp.mutex.release(); return result;
  }
  public static function acquire(mp:ManagedPoolData):TaskPool return protect(mp,function() {if (mp.pool==null) mp.pool=mp.setup(); return mp.pool;});

@@ -17,7 +17,21 @@ class Main {
 		Sys.exit(run(Sys.args()));
 	}
 
+	// Upstream assigns these forward references during OCaml module
+	// initialization. Static initialization order differs between Haxe
+	// targets, so they are (re)assigned once all statics are initialized.
+	public static function initHooks():Void {
+		core.Type.initialize();
+		core.TUnification.initHooks();
+		typing.Typer.initialize();
+		typing.TyperEntry.initHooks();
+		typing.TypeloadFunction.initHooks();
+		typing.Generic.initHooks();
+		optimization.Analyzer.initHooks();
+	}
+
 	public static function run(args:Array<String>):Int {
+		initHooks();
 		// The port is executed by a host compiler, so the std location of the
 		// executable is not meaningful; HAXE_IN_HAXE_STD_PATH overrides the
 		// HAXE_STD_PATH the host may have rewritten for --run.

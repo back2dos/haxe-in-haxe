@@ -64,12 +64,11 @@ class TypeloadModule {
 		var module = makeModule(path, resolved.file);
 		modules.set(key, module); // upstream installs the module before creating types.
 		moduleLoadDepth++;
-		try createModuleTypes(module, parsed.data.declarations) catch (error:Dynamic) {
+		try createModuleTypes(module, parsed.data.declarations) catch(error:haxe.Exception){
 			modules.remove(key);
 			moduleImports.remove(key);
 			moduleLoadDepth--;
-			throw error;
-		}
+			throw error;}
 		moduleLoadDepth--;
 		if (moduleLoadDepth == 0) flushDeferredDependencyBodies();
 		return module;

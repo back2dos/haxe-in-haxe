@@ -37,7 +37,7 @@ private class PipeOutput extends Output {
   sys.thread.Thread.create(function() {
    try {
     while(true) {var bytes=queue.pop(true);if(bytes==null) break;writeFn(bytes.toString());}
-   } catch(_:haxe.io.Eof) {} catch(e:Dynamic) {done.release();throw e;}
+   } catch(_:haxe.io.Eof) {} catch(e:haxe.Exception){done.release();throw e;}
    done.release();
   });
  }

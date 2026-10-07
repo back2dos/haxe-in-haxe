@@ -70,14 +70,14 @@ class SafeCom {
 	}
 	public static function runWithScom<T>(com:Dynamic, scom:SafeContext, f:Void->T):T {
 		var result:T;
-		try result = f() catch (exn:Dynamic) { finalize(scom,com); throw exn; }
+		try result = f() catch(exn:haxe.Exception){ finalize(scom,com); throw exn;}
 		finalize(scom,com);
 		return result;
 	}
 	static function protect<T>(mutex:Mutex, f:Void->T):T {
 		mutex.acquire();
 		var result:T;
-		try result = f() catch (exn:Dynamic) { mutex.release(); throw exn; }
+		try result = f() catch(exn:haxe.Exception){ mutex.release(); throw exn;}
 		mutex.release();
 		return result;
 	}

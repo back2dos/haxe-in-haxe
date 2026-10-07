@@ -128,7 +128,7 @@ class Unificator {
    case [TAbstract(ab,tl),_] if(!core.Meta.has(MetaTag.CoreType,ab.aMeta)):unify(applyParams(ab.aParams,tl,ab.aThis),b);case [_,TAbstract(ab,tl)] if(!core.Meta.has(MetaTag.CoreType,ab.aMeta)):unify(a,applyParams(ab.aParams,tl,ab.aThis));case _:
   }
  }
- public function unifyRec(a:T,b:T,run:Void->Void):Void {if(stack.exists(function(p)return fastEq(a,p.a)&&fastEq(b,p.b)))return;stack.unshift({a:a,b:b});try{run();stack.shift();}catch(e:Dynamic){stack.shift();throw e;}}
+ public function unifyRec(a:T,b:T,run:Void->Void):Void {if(stack.exists(function(p)return fastEq(a,p.a)&&fastEq(b,p.b)))return;stack.unshift({a:a,b:b});try{run();stack.shift();}catch(e:haxe.Exception){stack.shift();throw e;}}
  function unifyAnonToAnon(a:TAnon,b:TAnon):Void {var names=[for(n in b.aFields.keys())n];names.sort(Reflect.compare);for(n in names){var fa=a.aFields.get(n);if(fa!=null)unify(fa.cfType,b.aFields.get(n).cfType,Field(n));}}
  function unifyClassToAnon(a:TClass,params:Array<T>,b:TAnon):Void {var names=[for(n in b.aFields.keys())n];names.sort(Reflect.compare);for(n in names){var fa=a.clFields.get(n);if(fa!=null)unify(applyParams(a.clParams,params,fa.cfType),b.aFields.get(n).cfType,Field(n));}}
  function unifyFunctions(a:TSignature,b:TSignature):Void {switch (b.ret:T){case TAbstract({aPath:{pack:[],name:"Void"}},[]):case _:unify(a.ret,b.ret,FunctionReturn);}for(i in 0...Std.int(Math.min(a.args.length,b.args.length)))unify(b.args[i].type,a.args[i].type,FunctionArgument(i+1,a.args.length));}

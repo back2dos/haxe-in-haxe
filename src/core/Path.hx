@@ -180,10 +180,9 @@ class Path {
 		mkdirMutex.acquire();
 		try {
 			if (!FileSystem.exists(removeTrailingSlash(dir))) FileSystem.createDirectory(dir);
-		} catch (error:Dynamic) {
+		} catch(error:haxe.Exception){
 			mkdirMutex.release();
-			throw error;
-		}
+			throw error;}
 		mkdirMutex.release();
 		acc.push(directory);
 		return createFile(binary, extension, acc, parts);

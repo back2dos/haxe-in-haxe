@@ -131,10 +131,10 @@ class CallUnification {
       commit(); if(skipped.length==0) return argError(ul,name,opt); var first=skipped[skipped.length-1]; return argError(first.error,first.name,true);
      case _:throw exc;
     }}
-   } catch(exc:Dynamic) {commit(); throw exc;}
+   } catch(exc:haxe.Exception){commit(); throw exc;}
   }
   var restore=enterCallArgs(ctx,inOverload);
-  try {var result=loop(el,args); restore(); return result;} catch(exc:Dynamic) {restore(); throw exc;}
+  try {var result=loop(el,args); restore(); return result;} catch(exc:haxe.Exception){restore(); throw exc;}
  }
  public static function unifyTypedArgs(tmap:T->T,args:Array<CallParameter>,typed:Array<TExpr>,callPos:Pos):{typed:Array<CallParameter>,remaining:Array<CallParameter>} {
   var consumed=[];

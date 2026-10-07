@@ -4,21 +4,26 @@
 For every case in test/conformance-cases.txt:
 
 1. The pinned reference compiles the case to HXB.
-2. The port, compiled to an Eval HXB archive by the reference and executed
-   through --hxb-lib, compiles the same invocation.
+2. The port (HashLink build, see below) compiles the same invocation.
 3. Both archives must have the same member set and byte-identical
    uncompressed .hxb payloads (ZIP container bytes are never compared).
 4. The reference must consume the port's archive without the case's source
    class path.
-5. Unless --no-source-run is given, the port executed from source must produce
-   the same member set and payloads as the port executed from HXB.
+5. With --eval, the port executed from Eval HXB and from source on Eval must
+   produce the same member set and payloads.
 
 A case the reference rejects is an expected-failure case: the port must reject
 it as well. Both invocations use -D disable-parallelism: the reference
 allocates variable IDs from a global counter shared by parallel filter
 workers, so its own output is otherwise not reproducible run to run.
 
-Usage: HAXE_REFERENCE=haxe/haxe python3 test/conformance.py [-j N] [--no-source-run] [name-substring ...]
+By default the port is compiled to HashLink bytecode and executed with `hl`
+(HAXE_HL selects the VM), which is an order of magnitude faster than Eval.
+--eval additionally executes the port from an Eval HXB archive built by the
+reference and from source on Eval, and requires both to reproduce the
+HashLink output exactly (Eval-HXB host execution parity).
+
+Usage: HAXE_REFERENCE=haxe/haxe python3 test/conformance.py [-j N] [--eval] [name-substring ...]
 """
 import argparse, concurrent.futures, os, pathlib, shlex, shutil, subprocess, sys, tempfile, time, zipfile
 
@@ -39,12 +44,12 @@ def parse_cases():
         parts = shlex.split(line)
         kind, name = parts[0], parts[1]
         if kind == "direct":
-            cases.append(dict(kind=kind, name=name, cwd=ROOT, args=["-cp", parts[2], "--main", parts[3]], consume=["--main", parts[3]]))
+            cases.append(dict(kind=kind, name=name, cwd=ROOT, args=["-cp", parts[2], "--main", parts[3]]))
         elif kind == "module":
-            cases.append(dict(kind=kind, name=name, cwd=ROOT, args=["-cp", parts[2], parts[3]], consume=[parts[3]]))
+            cases.append(dict(kind=kind, name=name, cwd=ROOT, args=["-cp", parts[2], parts[3]]))
         elif kind == "hxml":
             # HXML configurations select their own target; only defines and the output are added.
-            cases.append(dict(kind=kind, name=name, cwd=ROOT / parts[2], args=[parts[3]], consume=["--main", parts[4]], hxml=True))
+            cases.append(dict(kind=kind, name=name, cwd=ROOT / parts[2], args=[parts[3]], hxml=True))
         else:
             raise SystemExit("Unknown case kind: " + line)
     return cases
@@ -102,7 +107,7 @@ def compare(expected, actual):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("-j", type=int, default=os.cpu_count() or 2)
-    ap.add_argument("--no-source-run", action="store_true")
+    ap.add_argument("--eval", action="store_true")
     ap.add_argument("filters", nargs="*")
     opts = ap.parse_args()
     reference = os.environ.get("HAXE_REFERENCE")
@@ -115,12 +120,20 @@ def main():
 
     cases = [c for c in parse_cases() if not opts.filters or any(f in c["name"] for f in opts.filters)]
     GENERATED.mkdir(parents=True, exist_ok=True)
-    compiler = GENERATED / "haxe-in-haxe.eval.hxb"
-    code, _ = run([reference, "-cp", str(ROOT / "src"), "-main", "haxe.Main", "--interp", "--no-output", "--hxb", str(compiler)], ROOT, GENERATED / "build.log", env)
+    hl = os.environ.get("HAXE_HL") or shutil.which("hl")
+    if not hl:
+        raise SystemExit("HashLink (hl) not found; set HAXE_HL")
+    port_hl = GENERATED / "haxe-in-haxe.hl"
+    code, _ = run([reference, "-cp", str(ROOT / "src"), "-main", "haxe.Main", "-hl", str(port_hl)], ROOT, GENERATED / "build-hl.log", env)
     if code != 0:
-        raise SystemExit("Building the port as Eval HXB failed; see " + str(GENERATED / "build.log"))
-    if "eval/haxe/Main.hxb" not in zipfile.ZipFile(compiler).namelist():
-        raise SystemExit("Compiler archive does not contain eval/haxe/Main.hxb")
+        raise SystemExit("Building the port for HashLink failed; see " + str(GENERATED / "build-hl.log"))
+    compiler = GENERATED / "haxe-in-haxe.eval.hxb"
+    if opts.eval:
+        code, _ = run([reference, "-cp", str(ROOT / "src"), "-main", "haxe.Main", "--interp", "--no-output", "--hxb", str(compiler)], ROOT, GENERATED / "build.log", env)
+        if code != 0:
+            raise SystemExit("Building the port as Eval HXB failed; see " + str(GENERATED / "build.log"))
+        if "eval/haxe/Main.hxb" not in zipfile.ZipFile(compiler).namelist():
+            raise SystemExit("Compiler archive does not contain eval/haxe/Main.hxb")
 
     def run_case(case):
         out = GENERATED / case["name"]
@@ -137,7 +150,7 @@ def main():
                 return ["--hxb", str(hxb), "-D", "disable-parallelism", "--no-output"] + case["args"]
             return COMMON + case["args"] + ["--hxb", str(hxb)]
         rc, rt = run([reference] + invocation(ref_hxb), cwd, out / "reference.log", env)
-        pc, pt = run([reference] + STACK + ["--hxb-lib", str(compiler), "--run", "haxe.Main"] + invocation(port_hxb), cwd, out / "port.log", env)
+        pc, pt = run([hl, str(port_hl)] + invocation(port_hxb), cwd, out / "port.log", env)
         result = dict(name=case["name"], seconds=round(rt + pt, 1))
         if rc != 0:
             if pc == 0:
@@ -152,22 +165,28 @@ def main():
         if diff:
             result.update(status="FAIL", detail=diff)
             return result
-        names = zipfile.ZipFile(port_hxb).namelist()
+        # Every module of the archive is a root: the reference must load all of
+        # them from the archive alone, without the case's source class path.
+        names = [n for n in zipfile.ZipFile(port_hxb).namelist() if n.endswith(".hxb")]
         target = ["--interp", "--no-output"] if any(n.startswith("eval/") for n in names) else ["--no-output"]
-        cc, _ = run([reference, "--hxb-lib", str(port_hxb)] + case["consume"] + target, ROOT, out / "consume.log", env)
+        roots = [n.split("/", 1)[1][:-4].replace("/", ".") for n in names]
+        cc, _ = run([reference, "--hxb-lib", str(port_hxb)] + target + roots, ROOT, out / "consume.log", env)
         if cc != 0:
             result.update(status="FAIL", detail="reference cannot consume port archive: " + first_error(out / "consume.log"))
             return result
-        if not opts.no_source_run:
+        if opts.eval:
+            eval_hxb = out / "eval-hxb.hxb"
+            ec, et = run([reference] + STACK + ["--hxb-lib", str(compiler), "--run", "haxe.Main"] + invocation(eval_hxb), cwd, out / "eval-hxb.log", env)
             sc, st = run([reference] + STACK + ["-cp", str(ROOT / "src"), "--run", "haxe.Main"] + invocation(src_hxb), cwd, out / "source.log", env)
-            result["seconds"] = round(result["seconds"] + st, 1)
-            if sc != 0:
-                result.update(status="FAIL", detail="source-executed port failed: " + first_error(out / "source.log"))
-                return result
-            diff = compare(port_hxb, src_hxb)
-            if diff:
-                result.update(status="FAIL", detail="source vs Eval-HXB execution: " + diff)
-                return result
+            result["seconds"] = round(result["seconds"] + et + st, 1)
+            for code, hxb, what, log in [(ec, eval_hxb, "Eval-HXB-executed", "eval-hxb.log"), (sc, src_hxb, "source-executed", "source.log")]:
+                if code != 0:
+                    result.update(status="FAIL", detail="%s port failed: %s" % (what, first_error(out / log)))
+                    return result
+                diff = compare(port_hxb, hxb)
+                if diff:
+                    result.update(status="FAIL", detail="%s port differs from HashLink-executed port: %s" % (what, diff))
+                    return result
         members = len(zipfile.ZipFile(ref_hxb).namelist())
         result.update(status="PASS", detail="%d members identical" % members)
         return result

@@ -21,7 +21,7 @@ class LocalStatic {
 				[Error.makeError(Custom("Conflicting field was found here"), conflicting.cfNamePos)]));
 			return;
 		}
-		var cf = TypeOps.mkField(name, v.vType, v.vPos, v.vPos, true);
+		var cf = TypeOps.mkField(name, v.vType, v.vPos, v.vPos, true, true);
 		cf.cfMeta = [{meta:core.MetaList.StrictMeta.NoCompletion,exprs:[], pos:Globals.nullPos}].concat(v.vMeta);
 		TypeOps.addClassFieldFlag(cf, CfNoLookup);
 		if (eo != null) {

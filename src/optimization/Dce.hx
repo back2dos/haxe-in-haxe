@@ -108,7 +108,7 @@ class Dce {
  }
  public static function field(dce:DceData,c:TClass,name:String,kind:ClassFieldRefKind):Void {try {var r = resolveField(dce,c,name,kind); markField(dce,r.cls,r.field,kind);} catch (_:NotFound) {if (dce.debug) Sys.stderr().writeString("[DCE] Field " + name + " not found on " + Globals.sTypePath(c.clPath) + "\n");}}
  public static function keepToString(dce:DceData,c:TClass):Void {try {var r = resolveField(dce,c,"toString",CfrMember); if (!fieldForcesDce(r.field)) markField(dce,r.cls,r.field,CfrMember);} catch (_:NotFound) {}}
- static function protect(mutex:sys.thread.Mutex,f:Void->Void):Void {mutex.acquire(); try f() catch (e:Dynamic) {mutex.release(); throw e;} mutex.release();}
+ static function protect(mutex:sys.thread.Mutex,f:Void->Void):Void {mutex.acquire(); try f() catch(e:haxe.Exception){mutex.release(); throw e;} mutex.release();}
  public static function markDirectlyUsedClass(dce:DceData,c:TClass):Void if (c != dce.curclass && !Meta.has(DirectlyUsed,c.clMeta)) protect(dce.usedMutex,function() {if (!Meta.has(DirectlyUsed,c.clMeta)) c.clMeta.unshift({meta:core.MetaList.StrictMeta.DirectlyUsed,exprs:[],pos:Globals.mkZeroRangePos(c.clPos)});});
  public static function markDirectlyUsedEnum(dce:DceData,en:TEnum):Void if (!Meta.has(DirectlyUsed,en.eMeta)) protect(dce.usedMutex,function() {if (!Meta.has(DirectlyUsed,en.eMeta)) en.eMeta.unshift({meta:core.MetaList.StrictMeta.DirectlyUsed,exprs:[],pos:Globals.mkZeroRangePos(en.ePos)});});
  public static function markDirectlyUsedMt(dce:DceData,mt:ModuleType):Void switch mt {case TClassDecl(c):markDirectlyUsedClass(dce,c); case TEnumDecl(en):markDirectlyUsedEnum(dce,en); case _:}

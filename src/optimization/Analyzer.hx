@@ -20,10 +20,11 @@ import optimization.AnalyzerConfig;
 import optimization.OptimizerTexpr.*;
 // haxe/src/optimization/analyzer.ml — mechanical draft; not compiled or validated.
 class Analyzer {
- static function __init__():Void context.Typecore.analyzerRunOnExprRef = function(com,identifier,e) {
+ public static function initHooks():Void context.Typecore.analyzerRunOnExprRef = function(com,identifier,e) {
   var scom = context.SafeCom.ofCom(com); var config = AnalyzerConfig.getBaseConfig(scom); config.optimize = true;
   return Run.runOnExpr(Run.createAnalyzerContext(scom,config,identifier,e),e);
  };
+ static function __init__():Void initHooks();
 }
 class Ssa {
  public static function addPhi(g:GraphData,bb:BasicBlockData,v:TVar):Void {var p = bb.bbPos; var ev = mk(TLocal(v),v.vType,p); var el = bb.bbIncoming.map(_ -> ev); var phi = mk(TConst(TString("phi")),tDynamic,p); var call = mk(TCall(phi,el),tDynamic,p); bb.bbPhi.push(mk(TBinop(OpAssign,ev,call),tDynamic,p));}

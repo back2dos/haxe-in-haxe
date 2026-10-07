@@ -113,7 +113,7 @@ typedef CommonContext = {
  var requestScope:RequestScope;var partScope:PartScope;var stage:CompilerStage;var sctx:Dynamic;var cs:Dynamic;var cache:Dynamic;var isMacroContext:Bool;var timerCtx:Dynamic;
  var parsedArgs:Array<compiler.ParsedArg>;var display:DisplaySettings;var debug:Bool;var verbose:Bool;var foptimize:Bool;var doinline:Bool;var platform:Platform;var config:PlatformConfig;var customExt:Null<String>;
  var emptyClassPath:Dynamic;var classPaths:Dynamic;var main:{mainPath:Null<GlobalTypePath>,mainFile:Dynamic,mainExpr:Null<TExpr>};var packageRules:haxe.ds.StringMap<PackageRule>;
- var error:String->Pos->Void;var errorExt:Dynamic->Void;var info:Dynamic;var warning:Dynamic;var warningOptions:Array<Array<WarningOption>>;var getMessages:Void->Array<Dynamic>;
+ var error:String->Pos->Void;var errorExt:Dynamic->Void;var info:(msg:String,p:Pos,?depth:Int)->Void;var warning:(w:Dynamic,options:Array<Array<WarningOption>>,msg:String,p:Pos,?depth:Int)->Void;var warningOptions:Array<Array<WarningOption>>;var getMessages:Void->Array<Dynamic>;
  var filterMessages:(Dynamic->Bool)->Void;var runCommand:String->Int;var runCommandArgs:String->Array<String>->Int;
  var loadExternType:Array<Dynamic>;var callbacks:CompilerCallbacks;var defines:DefineContext;var userDefines:haxe.ds.StringMap<core.Define.UserDefine>;var userMetas:haxe.ds.StringMap<core.Meta.UserMeta>;var getMacros:Void->Null<CommonContext>;var localWrapper:LocalWrapperApi;
  var std:TClass;var globalMetadata:Array<Dynamic>;var fileContents:Array<Dynamic>;var parserCache:Dynamic;var moduleToFile:Dynamic;var overloadCache:Dynamic;
@@ -210,7 +210,7 @@ class Common {
    runCommand:function(cmd) return Sys.command(cmd),runCommandArgs:function(s,args) return com.runCommand(s+" "+args.join(" ")),
    emptyClassPath:new core.ClassPath.DirectoryClassPath("",User),classPaths:new core.ClassPaths(),main:{mainPath:null,mainFile:null,mainExpr:null},packageRules:new haxe.ds.StringMap(),file:"",types:[],callbacks:new CompilerCallbacks(),globalMetadata:[],modules:[],moduleLut:new ModuleLut(),moduleNonexistentLut:new HashtblLookup(),fakeModules:new haxe.ds.StringMap(),flashVersion:10.0,resources:new haxe.ds.StringMap(),
    nativeLibs:NativeLibraries.createNativeLibs(),hxbLibs:[],nekoLibPaths:[],includeFiles:[],jsGen:null,loadExternType:[],defines:Define.emptyDefines(),userDefines:new haxe.ds.StringMap(),userMetas:new haxe.ds.StringMap(),getMacros:function() return null,localWrapper:LocalWrapper.nullWrapper,
-   info:function(?depth,_,_) throw "Uninitialized info handler",warning:function(?depth,_,_,_) throw "Uninitialized warning handler",warningOptions:[WarningList.disabledWarnings.map(function(w) return {woWarning:w,woMode:WMDisable})],error:function(_,_) throw "Uninitialized error handler",errorExt:function(_) throw "Uninitialized error handler",getMessages:function() return [],filterMessages:function(_) {},
+   info:function(_,_,?depth) throw "Uninitialized info handler",warning:function(_,_,_,_,?depth) throw "Uninitialized warning handler",warningOptions:[WarningList.disabledWarnings.map(function(w) return {woWarning:w,woMode:WMDisable})],error:function(_,_) throw "Uninitialized error handler",errorExt:function(_) throw "Uninitialized error handler",getMessages:function() return [],filterMessages:function(_) {},
    basic:newBasicTypes(),std:nullClass,fileContents:[],moduleToFile:new HashtblLookup(),memoryMarker:memoryMarker,parserCache:new HashtblLookup(),overloadCache:new HashtblLookup(),isMacroContext:false,hxbReaderApi:null,hxbReaderStats:HxbReaderStats.create(),hxbWriterConfig:null
   };return com;
  }
@@ -225,7 +225,7 @@ class Common {
   com.partScope.messageCapture=buf;
   core.TFunctions.lazyForceHook=function(f) {
    var saved=com.partScope.messageCapture; com.partScope.messageCapture=null;
-   var r:Dynamic;try r=f() catch (e:Dynamic) {com.partScope.messageCapture=saved;throw e;}
+   var r:Dynamic;try r=f() catch(e:haxe.Exception){com.partScope.messageCapture=saved;throw e;}
    com.partScope.messageCapture=saved;return r;
   };
   return function() {com.partScope.messageCapture=oldCapture;core.TFunctions.lazyForceHook=oldHook;};

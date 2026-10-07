@@ -73,7 +73,7 @@ class Args {
    addPart(current,[]);
   }
   var cwd=Sys.getCwd();
-  try loop([],args) catch (e:Dynamic) {Sys.setCwd(cwd);throw e;}
+  try loop([],args) catch(e:haxe.Exception){Sys.setCwd(cwd);throw e;}
   Sys.setCwd(cwd);
   return {parts:parts,serverMode:serverMode,connectArg:connectArg,displayArg:displayArg};
  }

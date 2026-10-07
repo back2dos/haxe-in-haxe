@@ -185,13 +185,13 @@ class TyperManager {
 }
 class Typecore {
 	public static final memoryMarker:Array<Float> = [Sys.time()];
-	public static var makeCallRef:Dynamic = function(ctx,e,el,t,p,?forceInline) throw "makeCallRef is not initialized";
-	public static var typeExprRef:Dynamic = function(ctx,e,withType,?mode) throw "typeExprRef is not initialized";
+	public static var makeCallRef:(ctx:Dynamic,e:TExpr,el:Array<TExpr>,t:T,p:Pos,?forceInline:Bool)->TExpr = function(ctx,e,el,t,p,?forceInline) throw "makeCallRef is not initialized";
+	public static var typeExprRef:(ctx:Dynamic,e:core.Ast.Expr,withType:Dynamic,?mode:Dynamic)->TExpr = function(ctx,e,withType,?mode) throw "typeExprRef is not initialized";
 	public static var typeBlockRef:Dynamic = function(ctx,el,withType,p) throw "typeBlockRef is not initialized";
 	public static var unifyMinRef:Dynamic = function(ctx,el) throw "unifyMinRef is not initialized";
 	public static var unifyMinForTypeSourceRef:Dynamic = function(ctx,el,src) throw "unifyMinForTypeSourceRef is not initialized";
 	public static var analyzerRunOnExprRef:Dynamic = function(com,name,e) throw "analyzerRunOnExprRef is not initialized";
-	public static var castOrUnifyRaiseRef:Dynamic = function(ctx,t,e,p,?uctx) throw "castOrUnifyRaiseRef is not initialized";
+	public static var castOrUnifyRaiseRef:(ctx:Dynamic,t:T,e:TExpr,p:Pos,?uctx:Dynamic)->TExpr = function(ctx,t,e,p,?uctx) throw "castOrUnifyRaiseRef is not initialized";
 	public static var typeGenericFunctionRef:Dynamic = function(ctx,access,candidate,withType,p) throw "typeGenericFunctionRef is not initialized";
 	public static var createContextRef:Dynamic = function(com,macros) throw "createContextRef is not initialized";
 	public static function passIndex(p:TyperPass):Int return StdType.enumIndex(p);

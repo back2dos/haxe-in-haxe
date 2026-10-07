@@ -43,7 +43,8 @@ import typing.CallUnification.*;
 
 // haxe/src/typing/calls.ml — mechanical draft; not compile-validated.
 class Calls {
- public static function makeCall(ctx:TyperContext,e:TExpr,params:Array<TExpr>,t:T,p:Pos,forceInline:Bool=false):TExpr {
+ public static function makeCall(ctx:TyperContext,e:TExpr,params:Array<TExpr>,t:T,p:Pos,?forceInline:Bool):TExpr {
+  if(forceInline==null) forceInline=false;
   switch follow(e.etype) {case TFun({args:args,ret:_}):if(args.length>0) {var last=args[args.length-1]; if(last.optional&&isPosInfos(last.type)&&args.length-1==params.length) params=params.concat([mkInfosT(ctx,p,[],last.type)]);} case _:}
   try {
    var ethis:TExpr,cl:Null<TClass>,f:TClassField;

@@ -2892,10 +2892,9 @@ class Grammar {
 			var cond = parseMacroCond2(ctx, s);
 			parsingMacroCond = false;
 			return cond;
-		} catch (e:Dynamic) {
+		} catch(e:haxe.Exception){
 			parsingMacroCond = false;
-			throw e;
-		}
+			throw e;}
 	}
 
 	static function parseMacroCond2(ctx:ParserContext, s:S):{token:Null<ParserToken>, expr:Expr} {

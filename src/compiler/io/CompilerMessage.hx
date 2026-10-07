@@ -34,11 +34,11 @@ class CompilerMessage {
   Error.recurseError(function(depth,err) addMessage(com,Error.errorMsg(err.errMessage),err.errPos,depth,MKError),err);
   if (com.partScope.messageCapture==null) {com.partScope.hasError=true;if (Common.failFast(com)) throw new Abort();}
  };
- public static function defaultWarningHandler(com:CommonContext):Dynamic return function(w,options:Array<Array<core.Message.WarningOption>>,msg:String,p:Pos,depth:Int=0) {
+ public static function defaultWarningHandler(com:CommonContext):(w:Dynamic,options:Array<Array<core.Message.WarningOption>>,msg:String,p:Pos,?depth:Int)->Void return function(w:Dynamic,options:Array<Array<core.Message.WarningOption>>,msg:String,p:Pos,?depth:Int) {if(depth==null)depth=0;
   switch Warning.getMode(w,options.concat(com.warningOptions)) {
    case WMEnable:var obj=WarningList.warningObj(w);if (!obj.wGeneric) msg="("+obj.wName+") "+msg;addMessage(com,msg,p,depth,MKWarning(w,options));
    case WMDisable:
   }
  };
- public static function defaultInfoHandler(com:CommonContext):Dynamic return function(msg:String,p:Pos,depth:Int=0) addMessage(com,msg,p,depth,MKInfo);
+ public static function defaultInfoHandler(com:CommonContext):(msg:String,p:Pos,?depth:Int)->Void return function(msg:String,p:Pos,?depth:Int) addMessage(com,msg,p,depth==null?0:depth,MKInfo);
 }

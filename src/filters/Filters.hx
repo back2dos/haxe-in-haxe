@@ -64,7 +64,7 @@ class Filters {
 		function hasRtti(c:TClass):Bool return Meta.has(Rtti, c.clMeta) || c.clSuper != null && hasRtti(c.clSuper.cls);
 		switch t {
 			case TClassDecl(c) if (hasRtti(c) && !c.clStatics.exists("__rtti")):
-				var f = TypeOps.mkField("__rtti", scom.basic.tstring, c.clPos, Globals.nullPos, true);
+				var f = TypeOps.mkField("__rtti", scom.basic.tstring, c.clPos, Globals.nullPos, true, true);
 				var str = Genxml.genTypeString(t);
 				f.cfExpr = TypeOps.mk(TConst(TString(str)), f.cfType, c.clPos);
 				c.clOrderedStatics.unshift(f); c.clStatics.set(f.cfName, f);
@@ -76,7 +76,7 @@ class Filters {
 			var e = Texpr.buildMetadata(com.basic, t);
 			if (e != null) {
 				Common.addFeature(com, "has_metadata");
-				var cf = TypeOps.mkField("__meta__", e.etype, e.epos, Globals.nullPos, true); cf.cfExpr = e;
+				var cf = TypeOps.mkField("__meta__", e.etype, e.epos, Globals.nullPos, true, true); cf.cfExpr = e;
 				if (TypeOps.hasClassFlag(c, CInterface) && com.platform == Jvm) {
 					var path = {pack:c.clPath.pack, name:c.clPath.name + "_HxMeta"};
 					var ncls = TypeOps.mkClass(c.clModule, path, c.clPos, Globals.nullPos);

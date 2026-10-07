@@ -121,12 +121,13 @@ class Generic {
     if(cf.cfExpr==null){var mappings=[for(i in 0...cf.cfParams.length)cf.cfParams[i].ttpName+" = "+core.TPrinting.sType(core.TPrinting.printContext(),monos[i])];Common.displayErrorExt(ctx.com,Error.makeError(Custom("Recursive @:generic function"),p,[Error.makeError(Custom("Mapping: "+mappings.join(", ")),p),Error.makeError(Custom("For function "+sTypePath(cls.clPath)+"."+cf.cfName),p)]));field.cfExpr=null;}else{var e=genericSubstituteExpr(g,cf.cfExpr);check(e);field.cfExpr=e;}
     field.cfKind=cf.cfKind;if(!hasClassFieldFlag(cf,CfPublic))removeClassFieldFlag(field,CfPublic);var meta=cf.cfMeta.filter(function(m)return !Type.enumEq(m.meta,MetaTag.Generic));var zero=mkZeroRangePos(p);field.cfMeta=[{meta:MetaTag.NoCompletion,exprs:[],pos:zero},{meta:MetaTag.NoUsing,exprs:[],pos:zero},{meta:MetaTag.GenericInstance,exprs:[],pos:zero}].concat(meta);field.cfParams=params;
    }
-   function makeField(name:String):TClassField return mkField(name,type,cf.cfPos,cf.cfNamePos,stat);
+   function makeField(name:String):TClassField return mkField(name,type,cf.cfPos,cf.cfNamePos,true,stat);
    if(stat&&core.Meta.has(MetaTag.GenericClassPerMethod,c.clMeta)){var container=staticMethodContainer(g,c,cf,p);setTypeParameterDependencies(container.clModule,monos);var field=container.clStatics.get(cf.cfName);if(field!=null)unifyExisting(field.cfType,field.cfPos);else{field=makeField(cf.cfName);container.clStatics.set(field.cfName,field);container.clOrderedStatics.unshift(field);finalize(container,field);}fa=core.ds.Record.withFields(fa,{faHost:FHStatic(container),faField:field,faOn:Texpr.Builder.makeStaticThis(container,p)});}
    else if(stat){setTypeParameterDependencies(c.clModule,monos);var field=makeField(name);c.clStatics.set(field.cfName,field);c.clOrderedStatics.unshift(field);finalize(c,field);fa=core.ds.Record.withFields(fa,{faField:field});}
    else{setTypeParameterDependencies(c.clModule,monos);var field=makeField(name);if(hasClassFieldFlag(cf,CfOverride))addClassFieldFlag(field,CfOverride);c.clFields.set(field.cfName,field);c.clOrderedFields.unshift(field);finalize(c,field);fa=core.ds.Record.withFields(fa,{faField:field});}
   }
   return new CallUnification.CallDispatcher(ctx,MCall([]),withType,p).fieldCall(fa,args,[]);
  }
- static function __init__():Void context.Typecore.typeGenericFunctionRef=typeGenericFunction;
+ public static function initHooks():Void context.Typecore.typeGenericFunctionRef=typeGenericFunction;
+ static function __init__():Void initHooks();
 }

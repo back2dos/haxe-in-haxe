@@ -51,7 +51,7 @@ class AbstractCast {
 			if (cf == ctx.f.curfield || castStack.indexOf(cf) != -1) Error.raiseTypingError("Recursive implicit cast",p);
 			castStack.unshift(cf);
 			var result:TExpr;
-			try result = f() catch (err:Dynamic) { castStack.shift(); throw err; }
+			try result = f() catch(err:haxe.Exception){ castStack.shift(); throw err;}
 			castStack.shift();
 			return result;
 		}

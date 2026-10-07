@@ -102,7 +102,7 @@ class ModuleTyping {
     c.clBuild=function()return Building([c]);
     try{for(f in inheritance)f();TypeloadFields.initClass(local,cctx,c,p,d.flags,d.data);c.clBuild=function()return Built;local.g.buildCount++;for(tp in c.clParams)follow(tp.ttpType);return Built;}
     catch(e:BuildCanceled){c.clBuild=makePass(local,perform);function rebuild():Void delayLate(local.g,PBuildClass,function(){c.clBuild();});var state:BuildState=e.state;return switch state{case Built:throw "Unexpected built cancellation";case Building(classes):if(local.g.buildCount==previous)Error.raiseTypingError("Loop in class building prevent compiler termination ("+classes.map(function(c)return sTypePath(c.clPath)).join(",")+")",c.clPos);previous=local.g.buildCount;rebuild();Building([c].concat(classes));case BuildMacro(callbacks):callbacks.unshift(rebuild);state;};}
-    catch(e:Dynamic){c.clBuild=function()return Built;throw e;}
+    catch(e:haxe.Exception){c.clBuild=function()return Built;throw e;}
    }return perform();
   }
   c.clBuild=makePass(ctx,build);delay(ctx.g,PBuildClass,function(){c.clBuild();});if(MetadataTools.has(MetaTag.InheritDoc,c.clMeta))delay(ctx.g,PConnectField,function()InheritDoc.buildClassDoc(ctx,c));

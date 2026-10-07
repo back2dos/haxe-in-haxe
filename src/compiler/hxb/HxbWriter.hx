@@ -273,7 +273,6 @@ class Chunk {
 	public function getBytes():Bytes return ch.contents();
 
 	public function writeUleb128(v:Int):Void {
-		if (v == null) throw 'Cannot encode a null ULEB128 value in $kind';
 		var b = v & 0x7F;
 		var rest = v >>> 7;
 		if (rest == 0) writeU8(b) else {
@@ -449,10 +448,9 @@ class HxbWriter {
 	function catchUnboundTtp<R>(f:Void->R, source:Void->String, p:Null<Pos>):R {
 		unboundFrames.push({source: source, p: p});
 		var r;
-		try r = f() catch (e:Dynamic) {
+		try r = f() catch(e:haxe.Exception){
 			unboundFrames.pop();
-			throw e;
-		}
+			throw e;}
 		unboundFrames.pop();
 		return r;
 	}

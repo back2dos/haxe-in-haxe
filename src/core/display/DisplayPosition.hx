@@ -32,7 +32,7 @@ class DisplayPositionContainer {
 	public function cut(p:Pos):Pos return {pfile:p.pfile,pmin:p.pmin,pmax:lastPos.pmax};
 	public function runOutside<T>(fn:Void->T):T {
 		var saved=get(); reset();
-		try {var result=fn();set(saved);return result;} catch(error:Dynamic) {set(saved);throw error;}
+		try {var result=fn();set(saved);return result;} catch(error:haxe.Exception){set(saved);throw error;}
 	}
 	public function withPos(p:Pos):Pos return {pfile:p.pfile,pmin:lastPos.pmin,pmax:lastPos.pmax};
 }

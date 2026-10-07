@@ -189,7 +189,7 @@ class TypeloadFields {
    var pack=sl.slice(2);pack.reverse();var cpath={pack:pack,name:sl[1]},meth=sl[0];
    if(ctx.com.isMacroContext) raiseTypingError("You cannot use @:build inside a macro : make sure that your type is not used in macro",m.pos);
    var old=ctx.c.getBuildInfos;ctx.c.getBuildInfos=function() return {type:mt,params:extractParamTypes(ti.mtParams),fields:fvars()};
-   var r=try {ctx.g.doMacro(ctx,MBuild,cpath,meth,call.args,m.pos);} catch(e:Dynamic) {ctx.c.getBuildInfos=old;throw e;};ctx.c.getBuildInfos=old;
+   var r=try {ctx.g.doMacro(ctx,MBuild,cpath,meth,call.args,m.pos);} catch(e:haxe.Exception){ctx.c.getBuildInfos=old;throw e;};ctx.c.getBuildInfos=old;
    switch r {case MError,MMacroInMacro:raiseTypingError("Build failure ("+Globals.sTypePath(cpath)+"."+meth+")",m.pos);case MSuccess(e):fbuild(e);}
   });
   var fenum:Null<Void->Void>=switch mt {
@@ -256,7 +256,7 @@ class TypeloadFields {
  }
  public static function typeVarField(ctx:Typer,t:T,e:Expr,stat:Bool,doDisplay:Bool,p:Pos):TExpr {
   var save=TypeloadFunction.saveFieldState(ctx);
-  try {if(doDisplay && ctx.m.isDisplayFile) DeferredServices.display();var result=AbstractCast.castOrUnify(ctx,t,typeExpr(ctx,e,WithTypeTools.withType(t)),p);save();return result;} catch(err:Dynamic) {save();throw err;}
+  try {if(doDisplay && ctx.m.isDisplayFile) DeferredServices.display();var result=AbstractCast.castOrUnify(ctx,t,typeExpr(ctx,e,WithTypeTools.withType(t)),p);save();return result;} catch(err:haxe.Exception){save();throw err;}
  }
  public static function buildFields(ctx:Typer,cctx:ClassInitCtx,c:TClass,fields:Array<ClassField>):Array<ClassField> {
   var pending:Array<Void->Void>=[];c.clBuild=function() return BuildMacro(pending);

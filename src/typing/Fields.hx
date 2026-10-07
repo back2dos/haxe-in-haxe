@@ -59,7 +59,7 @@ class Fields {
    case _:
   }
   function restore():Void {for(a in temporary) a.aStatus=Const;}
-  try {loop(t); var ret=callback(temporary.length!=0); restore(); return ret;} catch(e:Dynamic) {restore(); throw e;}
+  try {loop(t); var ret=callback(temporary.length!=0); restore(); return ret;} catch(e:haxe.Exception){restore(); throw e;}
  }
  public static function enumFieldType(ctx:Typer,en:TEnum,ef:TEnumField,p:Pos):T {
   var enTypes=Monomorph.spawnConstrainedMonos(t -> t,en.eParams),map=t -> applyParams(en.eParams,enTypes,t),efTypes=Monomorph.spawnConstrainedMonos(map,ef.efParams);
