@@ -34,6 +34,7 @@ def runners(reference):
         "reference": [reference],
         "hl": ["hl", str(BIN / "hih.hl")],
         "cpp": [str(BIN / "cpp/Main")],
+        "hlc": [str(BIN / "hih-hlc")],
         "jvm": ["java", "-Xss512m", "-XX:+UnlockDiagnosticVMOptions", "-XX:-BytecodeVerificationRemote", "-XX:-BytecodeVerificationLocal", "-jar", str(BIN / "hih.jar")],
         "js": ["node", "--stack-size=65500", str(BIN / "hih.js")],
         # The port throws OCaml-style control-flow exceptions (Not_found, Exit,

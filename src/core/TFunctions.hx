@@ -14,7 +14,6 @@ import haxe.ds.IntMap;
 import sys.thread.Mutex;
 
 // Mechanical translation of haxe/src/core/tFunctions.ml. Draft; not compiled or tested.
-// Mutex-protected counters replace OCaml Atomic.fetch_and_add.
 typedef NotFound = core.ds.NotFound;
 typedef Exit = core.ds.Exit;
 class TypeExit { public function new() {} }
@@ -53,14 +52,14 @@ class TFunctions {
 		case [Method(a),Method(b)]: StdType.enumEq(a,b);
 		case _: false;
 	}
-	public static var varUid = 0;
-	static var moduleUid = 0;
-	static final counterMutex = new Mutex();
+	// Atomic.fetch_and_add counters, as upstream.
+	static final varUid = new haxe.atomic.AtomicInt(0);
+	static final moduleUid = new haxe.atomic.AtomicInt(0);
 	public static function allocVar(kind:TVarKind,n:String,t:T,p:Pos):TVar {
-		counterMutex.acquire(); var id = ++varUid; counterMutex.release();
+		var id = varUid.add(1) + 1;
 		return {vKind:kind,vName:n,vType:t,vId:id,vExtra:null,vMeta:[],vPos:p,vFlags:switch kind {case VUser(TVOLocalFunction):intOfVarFlag(VFinal);case _:0;}};
 	}
-	public static function allocMid():Int { counterMutex.acquire(); var id = ++moduleUid; counterMutex.release(); return id; }
+	public static function allocMid():Int return moduleUid.add(1) + 1;
 	public static function mk(e:TExprDef,t:T,p:Pos):TExpr return {eexpr:e,etype:t,epos:p};
 	public static function mkBlock(e:TExpr):TExpr return switch e.eexpr {case TBlock(_):e;case _:mk(TBlock([e]),e.etype,e.epos);};
 	public static function mkCast(e:TExpr,t:T,p:Pos):TExpr return mk(TCast(e,null),t,p);
