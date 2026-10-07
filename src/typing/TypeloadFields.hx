@@ -712,9 +712,9 @@ class TypeloadFields {
 }
 // haxe/src/typing/typeloadFields.ml:664-894, TypeBinding — mechanical draft.
 class TypeBinding {
- public static function bindType(ctx:Typer,cctx:ClassInitCtx,fctx:FieldInitCtx,cf:TClassField,r:{value:TLazy},p:Pos):Void {
+ public static function bindType(ctx:Typer,cctx:ClassInitCtx,fctx:FieldInitCtx,cf:TClassField,r:TLazy,p:Pos):Void {
   var c = cctx.tclass;
-  var deferred:TLazy = LWait(() -> lazyType(r.value));
+  var deferred:TLazy = r;
   function isFullType(t:T):Bool return switch t {
    case TFun(signature):isFullType(signature.ret) && Lambda.foreach(signature.args,function(arg) return isFullType(arg.type));
    case TMono(mono):mono.tmType != null && isFullType(mono.tmType);

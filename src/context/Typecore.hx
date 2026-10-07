@@ -307,8 +307,7 @@ class Typecore {
 	public static function enterFieldTypingPass(g:TyperGlobals,info:Dynamic):Void flushPass(g,PConnectField,info);
 	public static function makeLazy(ctx:TyperGlobals,tProc:T,f:Void->T,where:Dynamic):TLazy {
 		var r = Common.makeUnforcedLazy(tProc,f,where);
-		var lazy:TLazy = LWait(function() return core.TFunctions.lazyType(r.value));
-		delay(ctx,PForce,function() { core.TFunctions.lazyType(lazy); }); return lazy;
+		delay(ctx,PForce,function() { core.TFunctions.lazyType(r); }); return r;
 	}
 	public static function isForcedInline(c:Null<TClass>,cf:TClassField):Bool {
 		if (c != null) { switch c.clKind { case KAbstractImpl(_): return true; case _: } if (core.TFunctions.hasClassFlag(c,CExtern)) return true; }

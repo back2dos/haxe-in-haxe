@@ -49,9 +49,9 @@ class TyperEntry {
       ctx.t.tnull=function(t:T):T {
        try {return !isNull(t,true) && !isExplicitNull(t)?TAbstract(a,[t]):t;}
        catch(err:TypeExit) {
-        var r:{state:TLazy}={state:lazyAvailable(tDynamic)};
-        r.state=lazyWait(function() {var t1=!isNull(t)?TAbstract(a,[t]):t; r.state=lazyAvailable(t1); return t1;});
-        return TLazy(LWait(function()return lazyType(r.state)));
+        var r=new TLazy(lazyAvailable(tDynamic));
+        r.value=lazyWait(function() {var t1=!isNull(t)?TAbstract(a,[t]):t; r.value=lazyAvailable(t1); return t1;});
+        return TLazy(r);
        }
       };
      case _:

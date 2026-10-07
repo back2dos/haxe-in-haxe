@@ -77,9 +77,10 @@ class Texpr {
     et = ft(e.etype); var t = switch c.clKind {case KTypeParameter(_) | KGeneric:et; case _:ft(TInst(c,pl));};
     switch follow(t) {case TInst(c2,pl2):c = c2; pl = pl2; case TAbstract({aImpl:c2},pl2) if (c2 != null):c = c2; pl = pl2; case t:TUnification.error([hasNoField(t,"new")]);}
     return {eexpr:TNew(c,pl,el.map(f)),etype:et,epos:e.epos};
-   case TVar(v,eo):var v = fv(v); def = TVar(v,eo == null ? null : f(eo));
-   case TFunction(fu):var body = f(fu.tfExpr); var args = fu.tfArgs.map(a -> {variable:fv(a.variable),defaultValue:a.defaultValue == null ? null : f(a.defaultValue)}); var ret = ft(fu.tfType); def = TFunction({tfArgs:args,tfType:ret,tfExpr:body});
-   case TTry(a,catches):var a = f(a); def = TTry(a,catches.map(c -> {variable:fv(c.variable),expr:f(c.expr)}));
+   // OCaml evaluates constructor and tuple arguments right-to-left.
+   case TVar(v,eo):var eo = eo == null ? null : f(eo); def = TVar(fv(v),eo);
+   case TFunction(fu):var body = f(fu.tfExpr); var args = fu.tfArgs.map(a -> {var d = a.defaultValue == null ? null : f(a.defaultValue); {variable:fv(a.variable),defaultValue:d};}); var ret = ft(fu.tfType); def = TFunction({tfArgs:args,tfType:ret,tfExpr:body});
+   case TTry(a,catches):var a = f(a); def = TTry(a,catches.map(c -> {var ce = f(c.expr); {variable:fv(c.variable),expr:ce};}));
    case _:def = mapExpr(f,e).eexpr;
   }
   return {eexpr:def,etype:ft(e.etype),epos:e.epos};
@@ -227,12 +228,12 @@ class Texpr {
    case TTypeDecl(d):p = d.tPos; meta = [{name:"",meta:d.tMeta}]; fields = []; switch follow(d.tType) {case TAnon(a):var keys = [for (k in a.aFields.keys()) k]; keys.sort(Reflect.compare); for (k in keys) {var f = a.aFields.get(k); fields.unshift({name:f.cfName,meta:f.cfMeta});} case _:} statics = [];
    case TAbstractDecl(a):p = a.aPos; meta = [{name:"",meta:a.aMeta}]; fields = []; statics = [];
   }
-  function filter(l:Array<{name:String,meta:Metadata}>):Array<{name:String,meta:Metadata}> return l.map(a -> {name:a.name,meta:a.meta.filter(m -> switch m.meta {case Custom(s):s.length > 0 && s.charAt(0) != ":"; case _:false;})}).filter(a -> a.meta.length > 0);
+  function filter(l:Array<{name:String,meta:Metadata}>):Array<{name:String,meta:Metadata}> return l.map(a -> {name:a.name,meta:a.meta.filter(m -> switch m.meta {case core.MetaList.StrictMeta.Custom(s):s.length > 0 && s.charAt(0) != ":"; case _:false;})}).filter(a -> a.meta.length > 0);
   meta = filter(meta); fields = filter(fields); statics = filter(statics);
   function key(n:String):Dynamic return {name:n,pos:Globals.nullPos,quote:NoQuotes};
   function makeMetaField(ml:Metadata):TExpr {
    var seen = new haxe.ds.StringMap<Bool>();
-   return mk(TObjectDecl(ml.map(m -> {var name = switch m.meta {case Custom(s):s; case _:throw "Texpr.buildMetadata";}; if (seen.exists(name)) Error.raiseTypingError("Duplicate metadata '" + name + "'",m.pos); seen.set(name,true); return {key:key(name),expr:mk(m.exprs.length == 0 ? TConst(TNull) : TArrayDecl(m.exprs.map(e -> typeConstantValue(api,e))),api.tarray(tDynamic),m.pos)};})),tDynamic,p);
+   return mk(TObjectDecl(ml.map(m -> {var name = switch m.meta {case core.MetaList.StrictMeta.Custom(s):s; case _:throw "Texpr.buildMetadata";}; if (seen.exists(name)) Error.raiseTypingError("Duplicate metadata '" + name + "'",m.pos); seen.set(name,true); return {key:key(name),expr:mk(m.exprs.length == 0 ? TConst(TNull) : TArrayDecl(m.exprs.map(e -> typeConstantValue(api,e))),api.tarray(tDynamic),m.pos)};})),tDynamic,p);
   }
   function makeMeta(l:Array<{name:String,meta:Metadata}>):TExpr return mk(TObjectDecl(l.map(a -> {key:key(a.name),expr:makeMetaField(a.meta)})),tDynamic,p);
   if (meta.length == 0 && fields.length == 0 && statics.length == 0) return null;

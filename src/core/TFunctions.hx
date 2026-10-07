@@ -136,10 +136,10 @@ class TFunctions {
 	}
 	public static function addDescendant(c:TClass,descendant:TClass):Void c.clDescendants.unshift(descendant);
 	public static var lazyForceHook:(Void->T)->T = function(f) return f();
-	public static function lazyType(f:TLazy):T return switch f {case LAvailable(t) | LProcessing(t):t;case LWait(f):lazyForceHook(f);};
-	public static function lazyAvailable(t:T):TLazy return LAvailable(t);
-	public static function lazyProcessing(t:T):TLazy return LProcessing(t);
-	public static function lazyWait(f:Void->T):TLazy return LWait(f);
+	public static function lazyType(f:TLazy):T return switch f.value {case LAvailable(t) | LProcessing(t):t;case LWait(f):lazyForceHook(f);};
+	public static function lazyAvailable(t:T):TLazyState return LAvailable(t);
+	public static function lazyProcessing(t:T):TLazyState return LProcessing(t);
+	public static function lazyWait(f:Void->T):TLazyState return LWait(f);
 	public static function map(loop:T->T,t:T):T return switch t {
 		case TMono(r):r.tmType == null ? t : loop(r.tmType);
 		case TEnum(_,[]) | TInst(_,[]) | TType(_,[]) | TAbstract(_,[]):t;
@@ -240,7 +240,7 @@ class TFunctions {
 	public static function isNullable(t:T,noLazy:Bool = false):Bool return switch t {
 		case TMono(r):r.tmType == null ? isNullableMono(r) : isNullable(r.tmType,noLazy);
 		case TAbstract(a,[_]) if (isNullPath(a)):true;
-		case TLazy(f):switch f {case LAvailable(t):isNullable(t,noLazy);case _ if (noLazy):throw new TypeExit();case _:isNullable(lazyType(f));}
+		case TLazy(f):switch f.value {case LAvailable(t):isNullable(t,noLazy);case _ if (noLazy):throw new TypeExit();case _:isNullable(lazyType(f));}
 		case TType(td,tl):isNullable(applyTypedef(td,tl),noLazy);
 		case TFun(_):false;
 		case TAbstract(a,_) if (MetadataTools.has(MetadataTools.CoreType,a.aMeta)):!MetadataTools.has(MetadataTools.NotNull,a.aMeta);
@@ -250,7 +250,7 @@ class TFunctions {
 	public static function isNull(t:T,noLazy:Bool = false):Bool return switch t {
 		case TMono(r):r.tmType == null ? isNullableMono(r) : isNull(r.tmType,noLazy);
 		case TAbstract(a,[t]) if (isNullPath(a)):!isNullable(follow(t),noLazy);
-		case TLazy(f):switch f {case LAvailable(t):isNull(t,noLazy);case _ if (noLazy):throw new TypeExit();case _:isNull(lazyType(f));}
+		case TLazy(f):switch f.value {case LAvailable(t):isNull(t,noLazy);case _ if (noLazy):throw new TypeExit();case _:isNull(lazyType(f));}
 		case TType(td,tl):isNull(applyTypedef(td,tl),noLazy);
 		case _:false;
 	};

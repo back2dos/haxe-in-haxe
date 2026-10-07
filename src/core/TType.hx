@@ -37,7 +37,12 @@ typedef TMono = { var tmType:Null<T>; var tmDownConstraints:Array<TMonoConstrain
 enum TMonoConstraint { MMono(mono:TMono, name:Null<String>); MField(field:TClassField); MType(type:T, name:Null<String>); MEmptyStructure; }
 enum TMonoConstraintKind { CUnknown; CStructural(fields:TypeMap<TClassField>, open:Bool); CMixed(kinds:Array<TMonoConstraintKind>); CTypes(types:Array<{var type:T; var name:Null<String>;}>); }
 enum TMonoModifier { MNullable(callback:T->T); MOpenStructure; MDynamic; }
-enum TLazy { LAvailable(type:T); LProcessing(type:T); LWait(callback:Void->T); }
+enum TLazyState { LAvailable(type:T); LProcessing(type:T); LWait(callback:Void->T); }
+// tlazy ref: forcing a lazy type updates the cell that every TLazy sharing it sees.
+class TLazy {
+	public var value:TLazyState;
+	public function new(value:TLazyState) this.value = value;
+}
 typedef TSignature = { var args:Array<{var name:String; var optional:Bool; var type:T;}>; var ret:T; }
 typedef TParams = Array<T>;
 typedef TypedTypeParam = { var ttpName:String; var ttpClass:TClass; var ttpHost:TypeParamHost; var ttpType:T; var ttpConstraints:Null<AtomicLazy<Array<T>>>; var ttpDefault:Null<T>; }

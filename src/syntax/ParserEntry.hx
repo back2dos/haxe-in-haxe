@@ -105,10 +105,13 @@ class ParserEntry {
 		case EParenthesis(e):eval(ctx,e);
 		case EBinop(op,e1,e2):
 			var values=evalBinopExprs(ctx,e1,e2);
+			// A single try: HashLink mishandles returning from a nested try here.
 			function compare(op:Int->Int->Bool):SmallType {
-				try {
-					try return TBool(op(cmp(values.left,values.right),0)) catch (_:ComparisonExit) return TBool(false);
-				} catch (err:ComparisonError) return Parser.error(Custom(err.message),e.pos);
+				var c:Int;
+				try c = cmp(values.left,values.right)
+				catch (_:ComparisonExit) return TBool(false)
+				catch (err:ComparisonError) return Parser.error(Custom(err.message),e.pos);
+				return TBool(op(c,0));
 			}
 			switch op {
 				case OpEq:compare(function(a,b) return a==b);

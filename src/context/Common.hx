@@ -321,8 +321,8 @@ class Common {
   var args=[{name:"_hx_continuation",optional:false,type:basic.tcoro.continuation.force()}].concat(args);if (ExtType.isVoid(follow(ret))) ret=basic.tunit;
   return {args:args,ret:TInst(basic.tcoro.suspensionResultClass.force(),[ret])};
  }
- public static function makeUnforcedLazy(tProc:T,f:Void->T,where:String):{value:TLazy} {
-  var r={value:lazyAvailable(tDynamic)};
+ public static function makeUnforcedLazy(tProc:T,f:Void->T,where:String):TLazy {
+  var r=new TLazy(lazyAvailable(tDynamic));
 		r.value=lazyWait(function() {try {r.value=lazyProcessing(tProc);var t=f();r.value=lazyAvailable(t);return t;} catch (e:core.Error.TypingError) {throw new core.Error.FatalError(e.error);}});return r;
  }
  public static function checkCancellation(com:CommonContext):Void {if (com.requestScope.cancellationRequested) throw new Cancelled();}
