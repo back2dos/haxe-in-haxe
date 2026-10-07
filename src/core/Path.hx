@@ -14,6 +14,11 @@ typedef FilePathData = {
 }
 
 class Path {
+	// Unix.chdir back to a saved directory. Skips the call when the directory did
+	// not change, so hosts without chdir support (JVM) can run the batch driver.
+	public static function restoreCwd(cwd:String):Void {
+		if (Sys.getCwd() != cwd) Sys.setCwd(cwd);
+	}
 	// Globals.platforms is not ported yet; this is its current fixed target-name list.
 	static final platformNames = ["js", "lua", "neko", "flash", "php", "cpp", "jvm", "python", "hl", "eval"];
 	public static final isWindows = Sys.systemName() == "Windows";

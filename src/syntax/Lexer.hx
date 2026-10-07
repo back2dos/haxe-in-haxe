@@ -389,12 +389,14 @@ class Lexer {
 		return -1;
 	}
 
+	// "??=" is spelled as a join: gencpp emits string literals unescaped and
+	// "??=" is the C++ trigraph for "#".
 	static final operators:Array<{text:String, token:Token}> = [
 		{text: "++", token: Unop(Increment)}, {text: "--", token: Unop(Decrement)}, {text: "~", token: Unop(NegBits)},
 		{text: "%=", token: Binop(OpAssignOp(OpMod))}, {text: "&=", token: Binop(OpAssignOp(OpAnd))}, {text: "|=", token: Binop(OpAssignOp(OpOr))},
 		{text: "^=", token: Binop(OpAssignOp(OpXor))}, {text: "+=", token: Binop(OpAssignOp(OpAdd))}, {text: "-=", token: Binop(OpAssignOp(OpSub))},
 		{text: "*=", token: Binop(OpAssignOp(OpMult))}, {text: "/=", token: Binop(OpAssignOp(OpDiv))}, {text: "<<=", token: Binop(OpAssignOp(OpShl))},
-		{text: "||=", token: Binop(OpAssignOp(OpBoolOr))}, {text: "&&=", token: Binop(OpAssignOp(OpBoolAnd))}, {text: "??=", token: Binop(OpAssignOp(OpNullCoal))},
+		{text: "||=", token: Binop(OpAssignOp(OpBoolOr))}, {text: "&&=", token: Binop(OpAssignOp(OpBoolAnd))}, {text: ["??", "="].join(""), token: Binop(OpAssignOp(OpNullCoal))},
 		{text: "==", token: Binop(OpEq)}, {text: "!=", token: Binop(OpNotEq)}, {text: "<=", token: Binop(OpLte)},
 		{text: "&&", token: Binop(OpBoolAnd)}, {text: "||", token: Binop(OpBoolOr)}, {text: "<<", token: Binop(OpShl)},
 		{text: "->", token: Arrow}, {text: "...", token: Spread}, {text: "=>", token: Binop(OpArrow)},

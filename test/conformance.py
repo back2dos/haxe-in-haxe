@@ -19,6 +19,8 @@ workers, so its own output is otherwise not reproducible run to run.
 
 By default the port is compiled to HashLink bytecode and executed with `hl`
 (HAXE_HL selects the VM), which is an order of magnitude faster than Eval.
+HAXE_IN_HAXE_PORT replaces that with another prebuilt port command, for
+example "node bin/bench/hih.js" from bench/build.sh.
 --eval additionally executes the port from an Eval HXB archive built by the
 reference and from source on Eval, and requires both to reproduce the
 HashLink output exactly (Eval-HXB host execution parity).
@@ -120,13 +122,18 @@ def main():
 
     cases = [c for c in parse_cases() if not opts.filters or any(f in c["name"] for f in opts.filters)]
     GENERATED.mkdir(parents=True, exist_ok=True)
-    hl = os.environ.get("HAXE_HL") or shutil.which("hl")
-    if not hl:
-        raise SystemExit("HashLink (hl) not found; set HAXE_HL")
-    port_hl = GENERATED / "haxe-in-haxe.hl"
-    code, _ = run([reference, "-cp", str(ROOT / "src"), "-main", "haxe.Main", "-hl", str(port_hl)], ROOT, GENERATED / "build-hl.log", env)
-    if code != 0:
-        raise SystemExit("Building the port for HashLink failed; see " + str(GENERATED / "build-hl.log"))
+    if os.environ.get("HAXE_IN_HAXE_PORT"):
+        # Another build of the port, e.g. "node --stack-size=65500 bin/bench/hih.js" (see bench/build.sh).
+        port_cmd = [str(ROOT / a) if (ROOT / a).is_file() else a for a in shlex.split(os.environ["HAXE_IN_HAXE_PORT"])]
+    else:
+        hl = os.environ.get("HAXE_HL") or shutil.which("hl")
+        if not hl:
+            raise SystemExit("HashLink (hl) not found; set HAXE_HL")
+        port_hl = GENERATED / "haxe-in-haxe.hl"
+        code, _ = run([reference, "-cp", str(ROOT / "src"), "-main", "haxe.Main", "-hl", str(port_hl)], ROOT, GENERATED / "build-hl.log", env)
+        if code != 0:
+            raise SystemExit("Building the port for HashLink failed; see " + str(GENERATED / "build-hl.log"))
+        port_cmd = [hl, str(port_hl)]
     compiler = GENERATED / "haxe-in-haxe.eval.hxb"
     if opts.eval:
         code, _ = run([reference, "-cp", str(ROOT / "src"), "-main", "haxe.Main", "--interp", "--no-output", "--hxb", str(compiler)], ROOT, GENERATED / "build.log", env)
@@ -150,7 +157,7 @@ def main():
                 return ["--hxb", str(hxb), "-D", "disable-parallelism", "--no-output"] + case["args"]
             return COMMON + case["args"] + ["--hxb", str(hxb)]
         rc, rt = run([reference] + invocation(ref_hxb), cwd, out / "reference.log", env)
-        pc, pt = run([hl, str(port_hl)] + invocation(port_hxb), cwd, out / "port.log", env)
+        pc, pt = run(port_cmd + invocation(port_hxb), cwd, out / "port.log", env)
         result = dict(name=case["name"], seconds=round(rt + pt, 1))
         if rc != 0:
             if pc == 0:

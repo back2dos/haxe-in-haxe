@@ -16,7 +16,7 @@ class HighLevel {
  }
  public static function entry(sctx:Dynamic,requestScope:RequestScope,requestArgs:RequestArgs):Int {
   var cwd=Sys.getCwd(),hasDisplay=requestArgs.displayArg!=null,parts:Array<PartArgs>=requestArgs.parts,code=0;
-  for (i in 0...parts.length) {var com=createContextFromPart(sctx,requestScope,hasDisplay,i+1<parts.length,parts[i]);code=Compiler.compileCtx(sctx,com);Sys.setCwd(cwd);if (code!=0||i+1==parts.length||hasDisplay) break;}
-  Sys.setCwd(cwd);return code;
+  for (i in 0...parts.length) {var com=createContextFromPart(sctx,requestScope,hasDisplay,i+1<parts.length,parts[i]);code=Compiler.compileCtx(sctx,com);core.Path.restoreCwd(cwd);if (code!=0||i+1==parts.length||hasDisplay) break;}
+  core.Path.restoreCwd(cwd);return code;
  }
 }

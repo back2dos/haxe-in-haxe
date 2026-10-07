@@ -42,15 +42,19 @@ typedef SafeContext = {
 	var curfield:TClassField;
 }
 class SafeCom {
-	public static function ofCom(com:Dynamic):SafeContext return {
+	public static function ofCom(com:Dynamic):SafeContext {
+		// Typed so the method values are bound closures (read through Dynamic they are unbound on JS).
+		var moduleLut:context.Common.ModuleLut = com.moduleLut;
+		return {
 		basic:com.basic, platform:com.platform, defines:com.defines, platformConfig:com.config,
 		debug:com.debug, isMacroContext:com.isMacroContext, foptimize:com.foptimize,
 		doinline:com.doinline, dumpConfig:com.partScope.dumpConfig,
 		exceptions:{value:[]}, exceptionsMutex:new Mutex(), warnings:{value:[]}, warningsMutex:new Mutex(),
 		errors:{value:[]}, errorsMutex:new Mutex(), timerCtx:com.timerCtx,
-		findModule:com.moduleLut.find, findModuleByType:com.moduleLut.findByType,
+		findModule:moduleLut.find, findModuleByType:moduleLut.findByType,
 		curclass:TypeOps.nullClass, curfield:TypeOps.nullField
 	};
+	}
 	public static function ofTyper(ctx:Dynamic):SafeContext {
 		var out = ofCom(ctx.com);
 		out.curclass = ctx.c.curclass;

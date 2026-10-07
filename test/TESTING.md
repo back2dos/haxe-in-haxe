@@ -37,6 +37,11 @@ archive, 1 times out). The other upstream suites (`tests/unit`,
 `tests/server`, `tests/sys`, target `misc` folders) need `--macro`, haxelib
 libraries, display/server services, or a non-HXB target.
 
+The same suite also runs on other builds of the port through
+`HAXE_IN_HAXE_PORT` (see `bench/README.md`): the JS build passes all 282
+cases. The C++ build passes 281; the other one hit an intermittent hxcpp
+segfault (about 1 run in 30, under investigation).
+
 Other lanes, all passing:
 
 - `haxe haxe-in-haxe.hxml` (bootstrap build) and `haxe compile-all.hxml`
