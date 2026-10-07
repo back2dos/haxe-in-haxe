@@ -25,7 +25,6 @@ the reference.
 | JVM (OpenJDK 21) | 3.85 | 3.61 | 5.40 | 23× |
 | JS (Node 22) | 3.60 | 3.70 | 7.15 | 31× |
 | HashLink (JIT) | 3.93 | 4.17 | 7.62 | 33× |
-| Eval (HXB through `--hxb-lib`) | 87.5 | 85.1 | 167.8 | 730× |
 
 Workloads:
 

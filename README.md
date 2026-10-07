@@ -110,7 +110,6 @@ are byte-identical to the pinned reference compiler's for every case in
 ```sh
 make -C haxe haxe
 HAXE_REFERENCE=haxe/haxe python3 test/conformance.py -j 8          # port on HashLink
-HAXE_REFERENCE=haxe/haxe python3 test/conformance.py -j 8 --eval   # + Eval-HXB parity
 ```
 
 Comparisons look at normalized archive member names and the uncompressed

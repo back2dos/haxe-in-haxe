@@ -12,7 +12,6 @@ reference compiler byte for byte across the whole conformance set.
 export OPAMROOTISOK=1; eval $(opam env --switch=5.2.1)   # or any OCaml setup
 make -C haxe haxe                                          # pinned reference
 HAXE_REFERENCE=haxe/haxe python3 test/conformance.py -j 8          # HL host
-HAXE_REFERENCE=haxe/haxe python3 test/conformance.py -j 8 --eval   # + Eval parity
 ```
 
 Results (`test/conformance-cases.txt`, 282 cases):
@@ -22,7 +21,6 @@ Results (`test/conformance-cases.txt`, 282 cases):
 | Same member set and byte-identical uncompressed `.hxb` payloads as the reference | 275/275 accepted cases |
 | Reference consumes every port archive through `--hxb-lib` without the case's class path | 275/275 |
 | Cases the reference rejects are rejected by the port too (expected failures) | 7/7 |
-| Eval-HXB-executed and Eval-source-executed port produce the HashLink output (`--eval`) | see the latest `--eval` run below |
 
 The case list holds the smoke inventory (optimization issues, `misc/eval`
 projects, `test/unit/moduleload` fixtures) plus every configuration found by
@@ -55,9 +53,6 @@ Other lanes, all passing:
   and run with `hl`, which is roughly ten times faster than Eval. `HAXE_HL`
   selects the VM. HashLink 1.15 fails with "Invalid opcode", so build HashLink
   from master.
-- `--eval` also builds `eval/haxe/Main.hxb` with the reference, runs it with
-  `--hxb-lib ... --run haxe.Main`, and runs the port from source on Eval. Both
-  must produce exactly what the HashLink build produced.
 - Every invocation uses `-D disable-parallelism`. With parallel filters the
   reference takes variable IDs from a global counter shared between workers,
   so even the reference doesn't produce the same output twice.

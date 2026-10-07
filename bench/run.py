@@ -30,8 +30,6 @@ WORKLOADS = {
 
 
 def runners(reference):
-    eval_hxb = BIN / "hih.eval.hxb"
-    stack = ["-D", "eval-call-stack-depth=10000"]
     return {
         "reference": [reference],
         "hl": ["hl", str(BIN / "hih.hl")],
@@ -41,7 +39,6 @@ def runners(reference):
         # The port throws OCaml-style control-flow exceptions (Not_found, Exit,
         # stream failures); V8 spends about half the run capturing their stacks.
         "js-nostack": ["node", "--stack-size=65500", "--stack-trace-limit=0", str(BIN / "hih.js")],
-        "eval": [reference] + stack + ["--hxb-lib", str(eval_hxb), "--run", "haxe.Main"],
     }
 
 
@@ -62,9 +59,6 @@ def main():
     names = opts.runners or list(table)
     # The reference output is what every other runner is checked against.
     names = ["reference"] + [n for n in names if n != "reference"]
-    if "eval" in names and not (BIN / "hih.eval.hxb").exists():
-        subprocess.run([reference, "-cp", "src", "-main", "haxe.Main", "--interp", "--no-output",
-                        "--hxb", str(BIN / "hih.eval.hxb")], cwd=ROOT, check=True)
     env = dict(os.environ, HAXE_STD_PATH=str(STD), HAXE_IN_HAXE_STD_PATH=str(STD))
     tmp = pathlib.Path(tempfile.mkdtemp(prefix="hih-bench-"))
     results = {}
