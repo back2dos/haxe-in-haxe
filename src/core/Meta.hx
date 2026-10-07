@@ -18,18 +18,21 @@ typedef MetaInfos = {
 }
 class MetaNotFound extends core.ds.NotFound { public static final instance = new MetaNotFound(); public function new() super(); }
 class Meta {
-	public static function has(m:StrictMeta,ml:Metadata):Bool { for (entry in ml) if (StdType.enumEq(m,entry.meta)) return true; return false; }
+	// Structural equality (OCaml's =); comparing indices first avoids the deep
+	// comparison for the common mismatch.
+	static inline function metaEq(a:StrictMeta,b:StrictMeta):Bool return StdType.enumIndex(a) == StdType.enumIndex(b) && StdType.enumEq(a,b);
+	public static function has(m:StrictMeta,ml:Metadata):Bool { for (entry in ml) if (metaEq(m,entry.meta)) return true; return false; }
 	public static function hasOneOf(ml1:Array<StrictMeta>,ml2:Metadata):Bool {
-		for (entry in ml2) for (meta in ml1) if (StdType.enumEq(meta,entry.meta)) return true;
+		for (entry in ml2) for (meta in ml1) if (metaEq(meta,entry.meta)) return true;
 		return false;
 	}
 	public static function get(m:StrictMeta,ml:Metadata):MetadataEntry {
-		for (entry in ml) if (StdType.enumEq(m,entry.meta)) return entry;
+		for (entry in ml) if (metaEq(m,entry.meta)) return entry;
 		throw MetaNotFound.instance;
 	}
 	public static function remove(m:StrictMeta,ml:Metadata):Metadata {
 		if (ml.length == 0) return [];
-		if (StdType.enumEq(m,ml[0].meta)) return ml.slice(1);
+		if (metaEq(m,ml[0].meta)) return ml.slice(1);
 		return [ml[0]].concat(remove(m,ml.slice(1)));
 	}
 	public static function registerUserMeta(userMetas:StringMap<UserMeta>,s:String,data:UserMeta):Void userMetas.set(s,data);

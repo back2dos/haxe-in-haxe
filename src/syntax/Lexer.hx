@@ -182,7 +182,13 @@ class Lexer {
 	inline function current():String return eof() ? "" : source.charAt(index);
 	inline function peek(offset:Int):String return index + offset >= source.length ? "" : source.charAt(index + offset);
 	inline function codeAt(i:Int):Int return i < source.length ? StringTools.fastCodeAt(source, i) : -1;
-	inline function starts(value:String):Bool return source.substr(index, value.length) == value;
+	// Compares in place: called for every operator candidate of every token.
+	function starts(value:String):Bool {
+		var n = value.length;
+		if (index + n > source.length) return false;
+		for (i in 0...n) if (StringTools.fastCodeAt(source, index + i) != StringTools.fastCodeAt(value, i)) return false;
+		return true;
+	}
 	function make(token:Token, start:Int):LexedToken return {token: token, pos: {pfile: file, pmin: start, pmax: index}};
 	function fail(message:LexerErrorMsg, at:Int):Dynamic throw new LexerError(message, {pfile: file, pmin: at, pmax: at});
 	function skipWhitespace():Void while (!eof() && (current() == " " || current() == "\t" || current() == "\n" || current() == "\r")) index++;
@@ -429,7 +435,7 @@ class Lexer {
 			// Find the longest fixed-text operator.
 			var opLen = 0, opTok:Token = null;
 			for (entry in operators) {
-				if (entry.text.length > opLen && starts(entry.text)) {
+				if (StringTools.fastCodeAt(entry.text, 0) == c && entry.text.length > opLen && starts(entry.text)) {
 					opLen = entry.text.length;
 					opTok = entry.token;
 				}
