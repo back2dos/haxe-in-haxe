@@ -43,7 +43,14 @@ macros, which are outside the first milestone.
   them. `js-nostack` is the same build run with `node --stack-trace-limit=0`,
   and it's 2–2.7× faster. HashLink and the JVM probably pay a similar cost.
   Exceptions that don't capture a stack would be the cheapest broad speedup.
-- **Go** has no Haxe target in the pinned compiler, so it isn't benchmarked.
+- **Go** isn't benchmarked. The pinned compiler has no Go target, and the
+  [hx2go](https://github.com/go2hx/hx2go) custom target (git `2739b6c`)
+  compiles a hello world but not the port. First, its `haxe.Exception`
+  defines `error()` for Go's error interface, which clashes with the port's
+  `ParserError.error` and `WithTypeError.error` fields. With those renamed,
+  the generated Go still has 40 compile errors: `break`/`continue` outside
+  their loop, missing `HxArray` methods (`concat`, `slice`, `join`), generic
+  variance (`HxArray[T]` vs `HxArray[any]`) and missing returns.
 - **HL/C** isn't benchmarked: the pinned compiler's `hl2c` generator fails on
   the port (`Globals.die` in `hl2c.ml` `rassign`).
 - **JVM.** The pinned `genjvm` takes about 8 minutes on the port and emits a
