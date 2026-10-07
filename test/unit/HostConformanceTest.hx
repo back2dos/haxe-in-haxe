@@ -1,6 +1,6 @@
 package unit;
 
-import haxe.Main;
+import haxe.LegacyMain;
 import haxe.ds.StringMap;
 import haxe.io.Bytes;
 import haxe.zip.Reader;
@@ -13,7 +13,7 @@ class HostConformanceTest {
 		var port = "/private/tmp/haxe-in-haxe-port-basic.hxb";
 		var code = Sys.command("haxe", ["-cp", Sys.getCwd() + "haxe/std", "-cp", "test/conformance", "--main", "unit.moduleload.Basic", "--hxb", reference]);
 		if (code != 0) throw 'Host Haxe reference compilation failed with exit code $code';
-		Main.run(["-cp", "test/conformance", "--main", "unit.moduleload.Basic", "--hxb", port]);
+		LegacyMain.run(["-cp", "test/conformance", "--main", "unit.moduleload.Basic", "--hxb", port]);
 		assertArchivesEqual(reference, port);
 	}
 

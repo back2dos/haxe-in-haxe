@@ -1,6 +1,6 @@
 package unit;
 
-import haxe.Main;
+import haxe.LegacyMain;
 import sys.FileSystem;
 import sys.io.File;
 import haxe.zip.Reader;
@@ -8,7 +8,7 @@ import haxe.zip.Reader;
 class BatchDriverTest {
 	public static function main():Void {
 		var output = "test/generated/batch-driver.hxb";
-		Main.run(["-cp", "test", "-D", "batch_driver", "--main", "unit.moduleload.Example", "--hxb", output]);
+		LegacyMain.run(["-cp", "test", "-D", "batch_driver", "--main", "unit.moduleload.Example", "--hxb", output]);
 		if (!FileSystem.exists(output)) throw "Batch driver did not create HXB archive";
 		var input = File.read(output, true);
 		var entries = new Reader(input).read();
@@ -27,7 +27,7 @@ class BatchDriverTest {
 		var kinds = chunkKinds(bytes);
 		if (kinds.indexOf("MTF") < 0 || kinds.indexOf("MDF") < 0 || kinds.indexOf("EOM") < 0) throw 'Batch driver HXB chunks are incomplete: ${kinds.join(",")}';
 		try {
-			Main.run(["--interp"]);
+			LegacyMain.run(["--interp"]);
 			throw "Unsupported option must fail";
 		} catch (error:Dynamic) {
 			if (Std.string(error).indexOf("Unsupported batch HXB compiler option") < 0) throw error;

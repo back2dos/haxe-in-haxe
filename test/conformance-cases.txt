@@ -1,0 +1,155 @@
+# Conformance cases for test/conformance.py.
+#   direct <name> <class-path> <main>
+#   module <name> <class-path> <module>     (bare module root, no --main)
+#   hxml   <name> <project-dir> <hxml> <main>
+# Cases whose reference invocation fails are expected-failure cases: the port
+# must reject them as well. Their reasons are recorded in upstream-hxb-exclusions.md.
+
+direct module-fields test unit.moduleload.ModuleFields
+direct try-catch test unit.moduleload.TryCatch
+direct issue-7237 haxe/tests/optimization/src issues.Issue7237
+direct issue-6015 haxe/tests/optimization/src issues.Issue6015
+direct issue-6093 haxe/tests/optimization/src issues.Issue6093
+direct issue-5931 haxe/tests/optimization/src issues.Issue5931
+direct issue-3524 haxe/tests/optimization/src issues.Issue3524
+direct issue-9204 haxe/tests/misc/eval/projects/Issue9204 Main
+direct global-metadata-wildcard haxe/tests/misc/eval/projects/GlobalMetadataWildcard Main
+direct hxb-wildcard-exclude haxe/tests/misc/eval/projects/HxbWildcardExclude/src Main
+direct issue-10107 haxe/tests/misc/eval/projects/Issue10107 Main
+direct issue-10152 haxe/tests/misc/eval/projects/Issue10152 Main
+direct issue-10171 haxe/tests/misc/eval/projects/Issue10171 Main
+direct issue-10623 haxe/tests/misc/eval/projects/Issue10623 Main
+direct issue-10591 haxe/tests/misc/eval/projects/Issue10591 Main
+direct issue-10782 haxe/tests/misc/eval/projects/Issue10782 Main
+direct issue-10819 haxe/tests/misc/eval/projects/Issue10819 Main
+direct issue-10825 haxe/tests/misc/eval/projects/Issue10825 Main
+direct issue-10832 haxe/tests/misc/eval/projects/Issue10832 Main
+direct issue-10959 haxe/tests/misc/eval/projects/Issue10959 Main
+direct issue-10980 haxe/tests/misc/eval/projects/Issue10980 Main
+direct issue-11152 haxe/tests/misc/eval/projects/Issue11152 Main
+direct issue-11164 haxe/tests/misc/eval/projects/Issue11164 Main
+direct issue-11176 haxe/tests/misc/eval/projects/Issue11176 Main
+direct issue-11180 haxe/tests/misc/eval/projects/Issue11180 Main
+direct issue-11102 haxe/tests/misc/eval/projects/Issue11102 Main
+direct issue-11286 haxe/tests/misc/eval/projects/Issue11286 Main
+direct issue-11323 haxe/tests/misc/eval/projects/Issue11323 Main
+direct issue-11392 haxe/tests/misc/eval/projects/Issue11392 Main
+direct issue-11396 haxe/tests/misc/eval/projects/Issue11396 Main
+direct issue-11661 haxe/tests/misc/eval/projects/Issue11661 Main
+direct issue-11688 haxe/tests/misc/eval/projects/Issue11688 Main
+direct issue-11813 haxe/tests/misc/eval/projects/Issue11813 Main
+direct issue-12526 haxe/tests/misc/eval/projects/Issue12526 Main
+direct issue-12957 haxe/tests/misc/eval/projects/Issue12957 Main
+direct issue-12977 haxe/tests/misc/eval/projects/Issue12977 Main
+direct issue-2991 haxe/tests/misc/eval/projects/Issue2991 Main
+direct issue-2995 haxe/tests/misc/eval/projects/Issue2995 Main
+direct issue-2997 haxe/tests/misc/eval/projects/Issue2997 Main
+direct issue-3310 haxe/tests/misc/eval/projects/Issue3310 Main
+direct issue-3756 haxe/tests/misc/eval/projects/Issue3756 Main
+direct issue-4070 haxe/tests/misc/eval/projects/Issue4070 Main
+direct issue-4265 haxe/tests/misc/eval/projects/Issue4265 Main
+direct issue-4399 haxe/tests/misc/eval/projects/Issue4399 Main
+direct issue-4458 haxe/tests/misc/eval/projects/Issue4458 Main
+direct issue-3956 haxe/tests/misc/eval/projects/Issue3956 Main
+direct issue-4563 haxe/tests/misc/eval/projects/Issue4563 Main
+direct issue-4662 haxe/tests/misc/eval/projects/Issue4662 Main
+direct issue-4982 haxe/tests/misc/eval/projects/Issue4982 Main
+direct issue-5005 haxe/tests/misc/eval/projects/Issue5005 Main
+direct issue-5118 haxe/tests/misc/eval/projects/Issue5118 Main
+direct issue-5122 haxe/tests/misc/eval/projects/Issue5122 Main
+direct issue-5125 haxe/tests/misc/eval/projects/Issue5125 Main
+direct issue-5128 haxe/tests/misc/eval/projects/Issue5128 Main
+direct issue-5152 haxe/tests/misc/eval/projects/Issue5152 Main
+direct issue-5214 haxe/tests/misc/eval/projects/Issue5214 Main
+direct issue-5321 haxe/tests/misc/eval/projects/Issue5321 Main
+direct issue-5458 haxe/tests/misc/eval/projects/Issue5458 Main
+direct issue-5854 haxe/tests/misc/eval/projects/Issue5854 Main
+direct issue-6066 haxe/tests/misc/eval/projects/Issue6066 Main
+direct issue-6226 haxe/tests/misc/eval/projects/Issue6226 Main
+direct issue-6427 haxe/tests/misc/eval/projects/Issue6427 Main
+direct issue-6772 haxe/tests/misc/eval/projects/Issue6772 Main
+direct issue-6810 haxe/tests/misc/eval/projects/Issue6810 Main
+direct issue-6846 haxe/tests/misc/eval/projects/Issue6846 Main
+direct issue-7017 haxe/tests/misc/eval/projects/Issue7017 Main
+direct issue-7096 haxe/tests/misc/eval/projects/Issue7096 Main
+direct issue-7660 haxe/tests/misc/eval/projects/Issue7660 Main
+direct issue-8364 haxe/tests/misc/eval/projects/Issue8364 Main
+direct issue-8472 haxe/tests/misc/eval/projects/Issue8472 Main
+direct issue-8574 haxe/tests/misc/eval/projects/Issue8574 Main
+direct issue-8650 haxe/tests/misc/eval/projects/Issue8650 Main
+direct issue-8946 haxe/tests/misc/eval/projects/Issue8946 Main
+direct issue-9069 haxe/tests/misc/eval/projects/Issue9069 Main
+direct issue-9192 haxe/tests/misc/eval/projects/Issue9192 Main
+direct issue-9286 haxe/tests/misc/eval/projects/Issue9286 Main
+direct issue-9359 haxe/tests/misc/eval/projects/Issue9359 Main
+direct issue-9455 haxe/tests/misc/eval/projects/Issue9455 Main
+direct issue-9514 haxe/tests/misc/eval/projects/Issue9514 Main
+direct issue-9571 haxe/tests/misc/eval/projects/Issue9571 Main
+direct issue-9712 haxe/tests/misc/eval/projects/Issue9712 Main
+direct issue-9811 haxe/tests/misc/eval/projects/Issue9811 Main
+direct issue-9919 haxe/tests/misc/eval/projects/Issue9919 Main
+direct semver haxe/tests/misc/eval/projects/_semver Main
+direct call-super haxe/tests/misc/eval/projects/callSuper Main
+direct coro-ctor haxe/tests/misc/eval/projects/coro_ctor Main
+direct display-type haxe/tests/misc/eval/projects/display-type Main
+direct empty-hxml-inclusion haxe/tests/misc/eval/projects/empty_hxml_inclusion Main
+direct if-display haxe/tests/misc/eval/projects/if-display Main
+direct process-nonexistent haxe/tests/misc/eval/projects/process-nonexistent Main
+direct recursive-callbacks haxe/tests/misc/eval/projects/recursive-callbacks Main
+direct run-vs-hxml haxe/tests/misc/eval/projects/run-vs-hxml Main
+direct trailing-commas haxe/tests/misc/eval/projects/trailing-commas Main
+direct issue-7447-main1 haxe/tests/misc/eval/projects/Issue7447 Main1
+direct issue-7447-main2 haxe/tests/misc/eval/projects/Issue7447 Main2
+direct issue-6922 haxe/tests/misc/eval/projects/Issue6922 Test
+direct issue-8550 haxe/tests/misc/eval/projects/Issue8550 Success
+direct issue-11411-argument haxe/tests/misc/eval/projects/Issue11411 MainArgumentVarianceGood
+direct issue-11411-argument-missing haxe/tests/misc/eval/projects/Issue11411 MainArgumentVarianceMissingGood
+direct issue-11411-interface-union haxe/tests/misc/eval/projects/Issue11411 MainInterfaceUnion
+direct issue-11411-no-variance haxe/tests/misc/eval/projects/Issue11411 MainNoVariance
+direct issue-11411-return haxe/tests/misc/eval/projects/Issue11411 MainReturnVarianceGood
+direct issue-11411-return-missing haxe/tests/misc/eval/projects/Issue11411 MainReturnVarianceMissingGood
+direct issue-11624 haxe/tests/misc/eval/projects/Issue11624 MainBaz
+direct issue-8354 haxe/tests/misc/eval/projects/Issue8354 Success
+direct issue-4660 haxe/tests/misc/eval/projects/Issue4660 Test
+direct issue-8088 haxe/tests/misc/eval/projects/Issue8088 Success
+direct issue-9197 haxe/tests/misc/eval/projects/Issue9197 MainGood
+direct issue-12945 haxe/tests/misc/eval/projects/Issue12945 OptSkipFunctionBody
+direct issue-3361-main3 haxe/tests/misc/eval/projects/Issue3361 Main3
+direct issue-10198-main4 haxe/tests/misc/eval/projects/Issue10198 Main4
+direct issue-10198-main5 haxe/tests/misc/eval/projects/Issue10198 Main5
+hxml run-vs-hxml-config haxe/tests/misc/eval/projects/run-vs-hxml compile.hxml Main
+hxml empty-hxml-config haxe/tests/misc/eval/projects/empty_hxml_inclusion compile.hxml Main
+hxml issue-8574-no-optimization-config haxe/tests/misc/eval/projects/Issue8574 noOptimization.hxml Main
+hxml issue-8574-constant-iterator-config haxe/tests/misc/eval/projects/Issue8574 constIntIterator.hxml Main
+hxml issue-8574-unrolled-loop-config haxe/tests/misc/eval/projects/Issue8574 unrolledLoop.hxml Main
+hxml issue-4458-pass1-config haxe/tests/misc/eval/projects/Issue4458 compile-pass1.hxml Main
+hxml issue-4458-pass2-config haxe/tests/misc/eval/projects/Issue4458 compile-pass2.hxml Main
+hxml issue-4265-config haxe/tests/misc/eval/projects/Issue4265 compile.hxml Main
+hxml issue-4399-config haxe/tests/misc/eval/projects/Issue4399 compile.hxml Main
+
+# Module-load fixtures (bare module roots)
+module moduleload-Accessors test unit.moduleload.Accessors
+module moduleload-ArrayComprehension test unit.moduleload.ArrayComprehension
+module moduleload-BuildMetadata test unit.moduleload.BuildMetadata
+module moduleload-Documentation test unit.moduleload.Documentation
+module moduleload-Example test unit.moduleload.Example
+module moduleload-Expressions test unit.moduleload.Expressions
+module moduleload-GenericMethodInference test unit.moduleload.GenericMethodInference
+module moduleload-Inheritance test unit.moduleload.Inheritance
+module moduleload-InlineLocalFunction test unit.moduleload.InlineLocalFunction
+module moduleload-Int64Basic test unit.moduleload.Int64Basic
+module moduleload-KeyValueLoop test unit.moduleload.KeyValueLoop
+module moduleload-LocalStatics test unit.moduleload.LocalStatics
+module moduleload-MacroField test unit.moduleload.MacroField
+module moduleload-Metadata test unit.moduleload.Metadata
+module moduleload-MetadataFunction test unit.moduleload.MetadataFunction
+module moduleload-ModuleFields test unit.moduleload.ModuleFields
+module moduleload-Overloads test unit.moduleload.Overloads
+module moduleload-Property test unit.moduleload.Property
+module moduleload-Resolver test unit.moduleload.Resolver
+module moduleload-ResolverHelper test unit.moduleload.ResolverHelper
+module moduleload-Structural test unit.moduleload.Structural
+module moduleload-TryCatch test unit.moduleload.TryCatch
+module moduleload-ValueSwitch test unit.moduleload.ValueSwitch
+direct moduleload-Basic test/conformance unit.moduleload.Basic
+direct moduleload-HelloWorld test/conformance unit.moduleload.HelloWorld

@@ -166,7 +166,7 @@ class InlineState {
  public function mightBeAffected(e:TExpr):Bool return checker.mightBeAffected(e);
  function local(v:TVar,subst:TVar,outside:Bool):InLocal return {iVar:v,iSubst:subst,iOutside:outside,iAbstractThis:Meta.has(This,v.vMeta),iCaptured:false,iWrite:false,iCalled:0,iForceTemp:false,iRead:0,iDefaultValue:null};
  public function declare(v:TVar):InLocal {
-  if (locals.exists(v.vId)) return locals.get(v.vId); var name = core.Ast.getMetaString(v.vMeta,core.MetaList.StrictMeta.RealPath); if (name == null) name = v.vName; var w = allocVar(switch v.vKind {case VUser(_):VInlined; case k:k;},name,v.vType,v.vPos); w.vExtra = v.vExtra; var i = local(v,w,false); w.vMeta = v.vMeta.filter(m -> m.meta != This); locals.set(v.vId,i); locals.set(w.vId,i); return i;
+  if (locals.exists(v.vId)) return locals.get(v.vId); var name = core.Ast.getMetaString(v.vMeta,core.MetaList.StrictMeta.RealPath); if (name == null) name = v.vName; var w = allocVar(switch v.vKind {case VUser(_):VInlined; case k:k;},name,v.vType,v.vPos); w.vExtra = v.vExtra; var i = local(v,w,false); w.vMeta = v.vMeta.filter(m -> m.meta != core.MetaList.StrictMeta.This); locals.set(v.vId,i); locals.set(w.vId,i); return i;
  }
  public function read(v:TVar):InLocal {var l = locals.exists(v.vId) ? locals.get(v.vId) : local(v,v,true); if (inLocalFun) l.iCaptured = true; return l;}
  function getSubstitutions(p:Pos):{vars:Array<{variable:TVar,expr:Null<TExpr>}>,subst:haxe.ds.IntMap<{kind:VarInlineKind,expr:TExpr}>} {

@@ -171,7 +171,8 @@ private class ConstructorInlining {
  public function run(original:TExpr):TExpr {
   if (!checkForCtors(original)) return original; var e = markCtors(original); analyzeAliases([],IEHNotHandled,false,e); var allCancelled = true; for (io in inlineObjs) if (!io.ioCancelled) {allCancelled = false; break;} if (allCancelled) return original;
   var result = finalMap(e); var cf:TClassField = scom.curfield; if (includedUntyped && !Meta.has(HasUntyped,cf.cfMeta)) cf.cfMeta.unshift({meta:core.MetaList.StrictMeta.HasUntyped,exprs:[],pos:Globals.mkZeroRangePos(e.epos)}); e = makeExprForRevList(result.exprs,e.etype,e.epos);
-  var ids = [for (id in vars.keys()) id]; ids.sort((a,b) -> a - b); for (id in ids) {var iv = vars.get(id); var v = iv.ivVar; if (isMarked(v.vId)) {var names = getPrettyName(iv); names.reverse(); v.vName = names.join("_"); if (wasUser(iv)) v.vKind = VInlinedConstructorVariable(names);}}
+  // Globals.IntMap compares keys in reverse (compare i1 i2 = i2 - i1): iterate descending.
+  var ids = [for (id in vars.keys()) id]; ids.sort((a,b) -> b - a); for (id in ids) {var iv = vars.get(id); var v = iv.ivVar; if (isMarked(v.vId)) {var names = getPrettyName(iv); names.reverse(); v.vName = names.join("_"); if (wasUser(iv)) v.vKind = VInlinedConstructorVariable(names);}}
   return e;
  }
 }

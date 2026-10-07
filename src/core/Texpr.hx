@@ -177,7 +177,7 @@ class Texpr {
    case _:
   }
   if(i==s.length)throw "Int32.of_string";
-  var value:Float=0;var limit:Float=unsigned?4294967295.0:(negative?2147483648.0:2147483647.0);
+  var value:Float=0.0;var limit:Float=unsigned?4294967295.0:(negative?2147483648.0:2147483647.0);
   while(i<s.length){var c=s.charCodeAt(i++);var digit=c>=48&&c<=57?c-48:c>=65&&c<=70?c-55:c>=97&&c<=102?c-87:-1;
    if(digit<0||digit>=radix)throw "Int32.of_string";
    value=value*radix+digit;if(value>limit)throw "Int32.of_string";

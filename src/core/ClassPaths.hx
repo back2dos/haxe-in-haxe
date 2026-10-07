@@ -139,13 +139,9 @@ class ClassPaths {
 
 	function cacheDirectory(classPath:IClassPath, directory:String, search:String, listing:Array<String>):Null<FileLookup> {
 		var found:Null<FileLookup> = null;
-		var searchDirectory = haxe.io.Path.directory(search);
+		var searchDirectory = core.ClassPath.DirectoryClassPath.ocamlDirname(search);
 		for (ownName in listing) {
-			// haxe.io.Path.directory returns an empty string for a root-level file
-			// (e.g. StdTypes.hx), while the OCaml Path helper represents it as
-			// ".". Treat both forms as the class-path root so standard modules can
-			// be resolved through haxe/std.
-			var relative = searchDirectory == "." || searchDirectory == "" ? ownName : searchDirectory + "/" + ownName;
+			var relative = searchDirectory == "." ? ownName : searchDirectory + "/" + ownName;
 			var representation:String;
 			var specificity:FileResolutionSpecificity;
 			if (isLoadingCoreApi) {

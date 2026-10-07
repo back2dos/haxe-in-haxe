@@ -148,7 +148,7 @@ class Resolution {
 	public static function reduceCompatible<A>(compatible:Array<FieldCallCandidateData<A>>):Array<FieldCallCandidateData<A>> {
 		compatible=fewerOptionals([],rmDuplicates([],compatible)); if(compatible.length<2) return compatible;
 		function rateArg(t:T,e:TExpr):ConversionRate return switch e.eexpr {
-			case TMeta(m,_) if(m.meta==ImplicitCast): rate(0x7fffffff-1,0);
+			case TMeta(m,_) if(m.meta==core.MetaList.StrictMeta.ImplicitCast): rate(0x7fffffff-1,0);
 			case _: rateConv(0,t,e.etype);
 		}
 		function mkRate(acc:Array<ConversionRate>,el:Array<TExpr>,args:Array<{name:String,optional:Bool,type:T}>):{rates:Array<ConversionRate>,rest:Bool} {

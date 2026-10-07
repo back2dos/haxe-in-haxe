@@ -182,7 +182,7 @@ class TypeloadFields {
  public static function buildModuleDef(ctx:Typer,mt:ModuleType,metadata:Metadata,fvars:Void->Array<ClassField>,fbuild:Expr->Void):Void {
   var isTypedef=false,ti=switch mt {case TClassDecl({clKind:KAbstractImpl(a)}):tInfos(TAbstractDecl(a));case TTypeDecl(_):isTypedef=true;tInfos(mt);case _:tInfos(mt);};
   var builds:Array<Void->Void>=[];
-  for(m in metadata) if(m.meta==Build && !isTypedef) builds.unshift(function() {
+  for(m in metadata) if(m.meta==core.MetaList.StrictMeta.Build && !isTypedef) builds.unshift(function() {
    var call=switch m.exprs {case [{expr:ECall(path,args)}]:{path:path,args:args};case _:raiseTypingError("Invalid build parameters",m.pos);};
    var sl:Array<String>=try {stringListOfExprPathRaise(call.path,function(i) return resolveTypeImport(ctx,m.pos,i));} catch(_:Exit) {raiseTypingError("Build call parameter must be a class path",m.pos);};
    if(sl.length<2) raiseTypingError("Invalid macro path",m.pos);
@@ -202,7 +202,7 @@ class TypeloadFields {
    case _:null;
   };
   builds.reverse();for(f in builds) f();
-  for(m in ti.mtMeta) if(m.meta==Using) for(e in m.exprs) try {
+  for(m in ti.mtMeta) if(m.meta==core.MetaList.StrictMeta.Using) for(e in m.exprs) try {
    var path=stringPosListOfExprPathRaise(e);path.reverse();var r=ImportHandling.handleUsing(ctx,path,e.pos);
    delayLate(ctx.g,PConnectField,function() {var filtered=r.filterClasses(r.types);filtered.reverse();for(entry in filtered)ti.mtUsing.unshift(entry);});
   } catch(_:Exit) {raiseTypingError("dot path expected",e.pos);}
@@ -369,7 +369,8 @@ class TypeloadFields {
    case EField(_,_,_):handleResolve();
    case _:raiseTypingError("Invalid @:op expresssions, should be an operator or a call",e.pos);
   }
-  for(entry in cf.cfMeta) switch entry.meta {
+  // Iterate a snapshot: handleTo may prepend @:multiType, and upstream iterates an immutable list.
+  for(entry in cf.cfMeta.copy()) switch entry.meta {
    case From:handleFrom();case To:handleTo();case Op:if(entry.exprs.length==1) handleOp(entry.exprs[0]);
    case ArrayAccess:handleArrayAccess();case Resolve:handleResolve();case _:
   }
@@ -480,7 +481,7 @@ class TypeloadFields {
    else if(fctx.fieldKind==CfrConstructor) {if((hasClassFlag(c,CExtern)||fctx.isExtern)&&!fctx.isInline) addClassFieldFlag(cf,CfOverload);else invalidModifierOnly(ctx.com,fctx,"overload","on extern non-inline constructors",fctx.overloadPos);}
    else {addClassFieldFlag(cf,CfOverload);if(!(hasClassFlag(c,CExtern)||fctx.isExtern)) invalidModifierOnly(ctx.com,fctx,"overload","on extern functions",fctx.overloadPos);}
   }
-  cf.cfMeta=cf.cfMeta.map(m -> m.meta==AstSource&&m.exprs.length==0?Record.withFields(m,{exprs:fd.fExpr==null?[]:[fd.fExpr]}):m);
+  cf.cfMeta=cf.cfMeta.map(m -> m.meta==core.MetaList.StrictMeta.AstSource&&m.exprs.length==0?Record.withFields(m,{exprs:fd.fExpr==null?[]:[fd.fExpr]}):m);
   if(parent!=null&&!MetadataTools.has(Native,cf.cfMeta)) try cf.cfMeta.unshift(MetadataTools.get(Native,parent.cfMeta)) catch(_:NotFound) {}
   Typeload.generateArgsMeta(ctx.com,c,m -> cf.cfMeta.unshift(m),fd.fArgs);
   var fmode:CurrentFun;
@@ -516,7 +517,7 @@ class TypeloadFields {
     for(i in 0...overloads.length) if(i==overloads.length-1||typeIseq(t,overloads[i].type)) {found=overloads[i];break;}
     if(found==null) throw new NotFound();
     var t2=found.type,f2=found.field;
-    for(m in f.cffMeta) if(m.meta==Deprecated) f2.cfMeta.unshift(m);
+    for(m in f.cffMeta) if(m.meta==core.MetaList.StrictMeta.Deprecated) f2.cfMeta.unshift(m);
     delay(ctx.g,PForce,function() {
      try {
       switch f2.cfKind {case Method(MethMacro):displayErrorExt(ctx.com,makeError(Custom(f2.cfName+": Macro methods cannot be used as property accessor"),p,[makeError(Custom(complMsg(f2.cfName+": Accessor method is here")),f2.cfPos)]));case _:}
@@ -634,7 +635,7 @@ class TypeloadFields {
    for(pair in (cast c.clImplements:Array<Dynamic>)) if(hasField(name,pair)) return true;return false;
   }
   function checkRequire(metadata:Metadata):Dynamic {
-   for(m in metadata) if(m.meta==Require) {
+   for(m in metadata) if(m.meta==core.MetaList.StrictMeta.Require) {
     var conditions:Array<Dynamic>=m.exprs;
     for(i in 0...conditions.length) {
      var e=conditions[i],sc=switch e.expr {
