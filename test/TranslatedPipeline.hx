@@ -14,7 +14,8 @@ import core.ds.TaskPool;
 class TranslatedPipeline {
  static function main():Void {
   // The development host can rewrite HAXE_STD_PATH while launching --run.
-  Sys.putEnv("HAXE_STD_PATH",sys.FileSystem.fullPath("haxe/std"));
+  var std=Sys.getEnv("HAXE_IN_HAXE_STD_PATH");
+  Sys.putEnv("HAXE_STD_PATH",std!=null&&std!=""?std:sys.FileSystem.fullPath("haxe/std"));
   var output="test/generated/testing/translated-basic.hxb";
   var arguments=Sys.args();
   var defaultCase=arguments.length==0;

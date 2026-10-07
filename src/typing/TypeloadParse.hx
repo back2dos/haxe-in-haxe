@@ -4,7 +4,7 @@ import core.ClassPaths.ResolvedFile;
 import core.Define.DefineContext;
 import core.Globals.Pos;
 import core.Ast.Package;
-import syntax.Grammar;
+import syntax.LegacyGrammar;
 
 // Batch-only portion of haxe/src/typing/typeloadParse.ml.  Display parser
 // state, parser caches and stdin replacement are intentionally left to the
@@ -32,8 +32,8 @@ class TypeloadParse {
 	}
 
 	public static function parseString(defines:DefineContext, file:String, source:String):ParsedFile {
-		try return {file: file, data: Grammar.parse(source, defines, file)}
-		catch (error:syntax.Grammar.GrammarError) throw new ParseError(error.message, error.pos)
+		try return {file: file, data: LegacyGrammar.parse(source, defines, file)}
+		catch (error:syntax.LegacyGrammar.GrammarError) throw new ParseError(error.message, error.pos)
 		catch (error:syntax.Lexer.LexerError) throw new ParseError(Std.string(error.message), error.pos)
 		catch (error:Dynamic) throw error;
 	}

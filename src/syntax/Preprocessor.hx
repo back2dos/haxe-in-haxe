@@ -54,7 +54,7 @@ private typedef Frame = {
 
 class Preprocessor {
 	public static function process(source:String, defines:DefineContext, ?file = "?"):Array<LexedToken> {
-		return processTokens(Lexer.lex(source, file), defines);
+		return processTokens(LegacyLexer.lex(source, file), defines);
 	}
 
 	public static function processTokens(tokens:Array<LexedToken>, defines:DefineContext):Array<LexedToken> {

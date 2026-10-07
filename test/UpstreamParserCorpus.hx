@@ -1,4 +1,7 @@
 import syntax.Grammar;
+import syntax.Lexer;
+import syntax.Parser;
+import syntax.ParserEntry;
 
 /**
 	A breadth probe over the pinned upstream unit sources. This is parser
@@ -7,7 +10,7 @@ import syntax.Grammar;
 **/
 class UpstreamParserCorpus {
 	static final expectedFileCount = 1366;
-	static final minimumParsedCount = 1339;
+	static final minimumParsedCount = 1355;
 
 	static function main():Void {
 		var root = "haxe/tests/unit/src";
@@ -19,8 +22,11 @@ class UpstreamParserCorpus {
 		var parsed = 0;
 		var reportFailures = Sys.getEnv("HAXE_PARSER_REPORT_FAILURES") == "1";
 		for (file in files) try {
-			Grammar.parse(sys.io.File.getContent(file), core.Define.emptyDefines(), file);
-			parsed++;
+			var config = Parser.createConfig(core.Define.emptyDefines(), false, false, DMNone, false, null);
+			switch ParserEntry.parse(config, Grammar.parseFileStream, Lexer.createTempCtx(file), new Lexer(sys.io.File.getContent(file), file), file) {
+				case ParseSuccess(_, _): parsed++;
+				case ParseError(_, error, _): throw new ParserError(error.message, error.pos);
+			}
 		} catch (error:Dynamic) {
 			if (reportFailures) Sys.println('$file: ${formatError(error)}');
 		}
@@ -30,6 +36,7 @@ class UpstreamParserCorpus {
 	}
 
 	static function formatError(error:Dynamic):String {
+		if (Std.isOfType(error, ParserError)) return Parser.errorMsg((error:ParserError).error) + " at " + (error:ParserError).pos.pfile + ":" + (error:ParserError).pos.pmin;
 		var message = Reflect.hasField(error, "message") ? Std.string(Reflect.field(error, "message")) : Std.string(error);
 		var pos:Dynamic = Reflect.field(error, "pos");
 		return pos == null ? message : '$message at ${pos.pfile}:${pos.pmin}';

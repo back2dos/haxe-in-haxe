@@ -99,17 +99,24 @@ class Path {
 	public static function getFullPath(file:String):String {
 		if (isWindows) return try FileSystem.fullPath(file) catch (_:Dynamic) file;
 		var length = file.length;
-		var absolutePath = length > 0 && file.charCodeAt(0) == "/".code ? file : length == 0 ? Sys.getCwd() : Sys.getCwd() + "/" + file;
+		// Unix.getcwd has no trailing slash, unlike Sys.getCwd.
+		var cwd = Sys.getCwd();
+		if (cwd.length > 1 && cwd.charCodeAt(cwd.length - 1) == "/".code) cwd = cwd.substr(0, cwd.length - 1);
+		var absolutePath = length > 0 && file.charCodeAt(0) == "/".code ? file : length == 0 ? cwd : cwd + "/" + file;
 		var needsNormalization = length > 0 && file.charCodeAt(length - 1) == "/".code;
+		// has_dots_or_double_slash: only the first character of each segment is inspected.
 		var index = 0;
 		while (!needsNormalization && index < length) {
-			if (file.charCodeAt(index) == "/".code && index > 0 && file.charCodeAt(index - 1) == "/".code) needsNormalization = true;
-			else if (file.charCodeAt(index) == ".".code) {
+			var c = file.charCodeAt(index);
+			if (c == ".".code) {
 				if (index + 2 < length) needsNormalization = (file.charCodeAt(index + 1) == ".".code && file.charCodeAt(index + 2) == "/".code) || file.charCodeAt(index + 1) == "/".code;
 				else if (index + 1 < length) needsNormalization = file.charCodeAt(index + 1) == "/".code || file.charCodeAt(index + 1) == ".".code;
 				else needsNormalization = true;
+			} else if (c == "/".code && index > 0) needsNormalization = true;
+			if (!needsNormalization) {
+				while (index < length && file.charCodeAt(index) != "/".code) index++;
+				index++;
 			}
-			index++;
 		}
 		if (!needsNormalization) return absolutePath;
 		var parts = absolutePath.split("/");

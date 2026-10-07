@@ -14,7 +14,8 @@ enum LexerErrorMsg {
 	UnterminatedString;
 	UnterminatedRegexp;
 	UnclosedComment;
-	InvalidEscape(value:String);
+	InvalidEscape(value:String, ?msg:String);
+	UnclosedCode;
 	InvalidRegexpOption;
 	UnterminatedMarkup;
 }
@@ -105,15 +106,7 @@ class Lexer {
 	public static function sharpToken(ctx:LexerContext,code:Lexer):LexedToken {
 		code.file=ctx.file.lfile;
 		var start=code.index;
-		code.skipWhitespace();
-		while (code.starts("/*")) {code.comment(code.index);code.skipWhitespace();}
-		var tokenStart=code.index;
-		var result:LexedToken;
-		if (isIdentStart(code.current())) {
-			code.index++;
-			while (isIdentPart(code.current()) || (code.current()=="." && isIdentStart(code.peek(1)))) code.index++;
-			result=code.make(Const(core.Ast.Constant.Ident(code.source.substr(tokenStart,code.index-tokenStart))),tokenStart);
-		} else result=code.token();
+		var result=code.sharpTokenRaw();
 		updateLines(ctx,code,start);
 		return result;
 	}
@@ -157,8 +150,13 @@ class Lexer {
 	public static function errorMsg(error:LexerErrorMsg):String return switch error {
 		case InvalidCharacter(c):c>32&&c<128?"Invalid character '"+String.fromCharCode(c)+"'":"Invalid character 0x"+StringTools.hex(c,2);
 		case UnterminatedString:"Unterminated string";case UnterminatedRegexp:"Unterminated regular expression";case UnclosedComment:"Unclosed comment";
-		case InvalidEscape(value):"Invalid escape sequence \\"+value;case InvalidRegexpOption:"Invalid regular expression option";case UnterminatedMarkup:"Unterminated markup literal";
+		case InvalidEscape(value,null):"Invalid escape sequence \\"+value;case InvalidEscape(value,msg):"Invalid escape sequence \\"+value+". "+msg;case UnclosedCode:"Unclosed code string";case InvalidRegexpOption:"Invalid regular expression option";case UnterminatedMarkup:"Unterminated markup literal";
 	};
+	// Tokenizer: translation of `token`, `sharp_token`, `comment`, `string`,
+	// `string2`, `code_string` and `regexp` from haxe/src/syntax/lexer.ml.
+	// Sedlex longest-match semantics are reproduced by hand: where several
+	// rules apply at the current position, the longest lexeme wins and ties go
+	// to the earlier rule. Positions are character offsets, as in sedlex.
 	var source:String;
 	var file:String;
 	var index:Int;
@@ -166,11 +164,12 @@ class Lexer {
 	public function new(source:String, ?file = "?") {
 		this.source = source;
 		this.file = file;
-		index = source.charCodeAt(0) == 0xFEFF ? 1 : 0;
+		index = 0;
 	}
 
 	public static function lex(source:String, ?file = "?"):Array<LexedToken> {
 		var lexer = new Lexer(source, file);
+		skipHeader(lexer);
 		var result = [];
 		while (true) {
 			var value = lexer.token();
@@ -179,138 +178,668 @@ class Lexer {
 		}
 	}
 
-	public function token():LexedToken {
-		skipWhitespace();
-		var start = index;
-		if (eof()) return make(Eof, start);
-		var c = current();
-		if (isDigit(c) || (c == "." && isDigit(peek(1)))) return number(start);
-		if (isIdentStart(c) || (c == "_" && isDigit(peek(1)))) return identifier(start);
-		if (c == "/" && peek(1) == "/") return lineComment(start);
-		if (c == "/" && peek(1) == "*") return comment(start);
-		if (c == '"') return quotedString(start, false);
-		if (c == "'") return quotedString(start, true);
-		if (c == "~" && peek(1) == "/") return regexp(start);
-		if (c == "#" && isIdentStart(peek(1))) { index += 2; while (isIdentPart(current())) index++; return make(Sharp(source.substr(start + 1, index - start - 1)), start); }
-		if (c == "$") { index++; while (isIdentPart(current())) index++; return make(Dollar(source.substr(start + 1, index - start - 1)), start); }
-
-		for (entry in operators) if (starts(entry.text)) { index += entry.text.length; return make(entry.token, start); }
-		fail(InvalidCharacter(c.charCodeAt(0)), start);
-		return null;
-	}
-
-	function number(start:Int):LexedToken {
-		var isFloat = false;
-		if (starts("0x") || starts("0X")) { index += 2; consumeDigits(isHexDigit); return suffix(start, false); }
-		if (starts("0b") || starts("0B")) { index += 2; consumeDigits(function(c) return c == "0" || c == "1"); return suffix(start, false); }
-		if (current() == ".") { isFloat = true; index++; consumeDigits(isDigit); }
-		else {
-			consumeDigits(isDigit);
-			if (starts("...")) { var value = source.substr(start, index - start); index += 3; return make(IntInterval(value), start); }
-			if (current() == "." && !starts("...") && !isIdentStart(peek(1))) { isFloat = true; index++; consumeDigits(isDigit); }
-		}
-		if (current() == "e" || current() == "E") { isFloat = true; index++; if (current() == "+" || current() == "-") index++; consumeDigits(isDigit); }
-		return suffix(start, isFloat);
-	}
-
-	function suffix(start:Int, isFloat:Bool):LexedToken {
-		var hasFloatSuffix = current() == "f" || (current() == "_" && peek(1) == "f");
-		if ((current() == "_" && (peek(1) == "i" || peek(1) == "u" || peek(1) == "f")) || current() == "i" || current() == "u" || current() == "f") {
-			if (current() == "_") index++;
-			var prefix = current();
-			index++;
-			while (isDigit(current())) index++;
-			if ((prefix != "i" && prefix != "u" && prefix != "f") || index == start) fail(InvalidCharacter(prefix.charCodeAt(0)), start);
-		}
-		var raw = source.substr(start, index - start);
-		var pivot = -1;
-		for (i in 0...raw.length) { var c = raw.charAt(i); if (c == "i" || c == "u" || ((isFloat || hasFloatSuffix) && c == "f")) { pivot = i; break; } }
-		var literal = pivot < 0 ? raw : raw.substr(0, pivot > 0 && raw.charAt(pivot - 1) == "_" ? pivot - 1 : pivot);
-		var ending:Null<String> = pivot < 0 ? null : raw.substr(pivot);
-		return make(isFloat || hasFloatSuffix ? Const(core.Ast.Constant.Float(literal, ending)) : Const(core.Ast.Constant.Int(literal, ending)), start);
-	}
-
-	function identifier(start:Int):LexedToken {
-		index++;
-		while (isIdentPart(current())) index++;
-		var value = source.substr(start, index - start);
-		return make(keyword(value), start);
-	}
-
-	function lineComment(start:Int):LexedToken { index += 2; var content = index; while (!eof() && current() != "\n" && current() != "\r") index++; return make(CommentLine(source.substr(content, index - content)), start); }
-	function comment(start:Int):LexedToken {
-		index += 2; var content = index;
-		while (!eof() && !(current() == "*" && peek(1) == "/")) index++;
-		if (eof()) fail(UnclosedComment, start);
-		var value = source.substr(content, index - content); index += 2;
-		return make(Comment(value), start);
-	}
-
-	function quotedString(start:Int, single:Bool):LexedToken {
-		var quote = current(); index++; var buffer = new StringBuf();
-		while (!eof() && current() != quote) {
-			if (current() == "\\") {
-				var escapePos = index++;
-				if (eof()) fail(UnterminatedString, start);
-				if (current() == "x") {
-					if (!isHexDigit(peek(1)) || !isHexDigit(peek(2))) fail(InvalidEscape("x"), escapePos);
-					buffer.add(String.fromCharCode(Std.parseInt("0x" + peek(1) + peek(2))));
-					index += 3;
-				} else if (current() == "u" && peek(1) == "{") {
-					index += 2;
-					var digitsStart = index;
-					while (isHexDigit(current()) && index - digitsStart < 6) index++;
-					if (index == digitsStart || current() != "}") fail(InvalidEscape("u"), escapePos);
-					var code = Std.parseInt("0x" + source.substr(digitsStart, index - digitsStart));
-					if (code == null || code > 0x10FFFF) fail(InvalidEscape("u"), escapePos);
-					buffer.add(String.fromCharCode(code));
-					index++;
-				} else if (current() == "u") {
-					if (!isHexDigit(peek(1)) || !isHexDigit(peek(2)) || !isHexDigit(peek(3)) || !isHexDigit(peek(4))) fail(InvalidEscape("u"), escapePos);
-					buffer.add(String.fromCharCode(Std.parseInt("0x" + peek(1) + peek(2) + peek(3) + peek(4))));
-					index += 5;
-				} else { buffer.add(unescape(current(), escapePos)); index++; }
-			}
-			else { buffer.add(current()); index++; }
-		}
-		if (eof()) fail(UnterminatedString, start);
-		index++;
-		return make(Const(core.Ast.Constant.String(buffer.toString(), single ? SSingleQuotes : SDoubleQuotes)), start);
-	}
-
-	function regexp(start:Int):LexedToken {
-		index += 2; var buffer = new StringBuf();
-		while (!eof() && current() != "/" && current() != "\n" && current() != "\r") {
-			if (current() == "\\") { buffer.add(current()); index++; if (eof()) fail(UnterminatedRegexp, start); }
-			buffer.add(current()); index++;
-		}
-		if (eof() || current() != "/") fail(UnterminatedRegexp, start);
-		index++; var options = "";
-		while (!eof() && current() >= "a" && current() <= "z") { var c = current(); if ("gimsu".indexOf(c) < 0) fail(InvalidRegexpOption, index); options += c; index++; }
-		return make(Const(core.Ast.Constant.Regexp(buffer.toString(), options)), start);
-	}
-
-	function unescape(c:String, pos:Int):String return switch c { case "n": "\n"; case "r": "\r"; case "t": "\t"; case "b": String.fromCharCode(8); case "f": String.fromCharCode(12); case "v": String.fromCharCode(11); case "\\" | "\"" | "'": c; default: fail(InvalidEscape(c), pos); ""; }
-	function skipWhitespace():Void while (!eof() && (current() == " " || current() == "\t" || current() == "\n" || current() == "\r")) index++;
-	function consumeDigits(check:String->Bool):Void { if (!check(current())) return; index++; while (check(current()) || (current() == "_" && check(peek(1)))) index++; }
-	function make(token:Token, start:Int):LexedToken return {token: token, pos: {pfile: file, pmin: start, pmax: index}};
-	function fail(message:LexerErrorMsg, at:Int):Void throw new LexerError(message, {pfile: file, pmin: at, pmax: at});
 	inline function eof():Bool return index >= source.length;
 	inline function current():String return eof() ? "" : source.charAt(index);
 	inline function peek(offset:Int):String return index + offset >= source.length ? "" : source.charAt(index + offset);
+	inline function codeAt(i:Int):Int return i < source.length ? StringTools.fastCodeAt(source, i) : -1;
 	inline function starts(value:String):Bool return source.substr(index, value.length) == value;
+	function make(token:Token, start:Int):LexedToken return {token: token, pos: {pfile: file, pmin: start, pmax: index}};
+	function fail(message:LexerErrorMsg, at:Int):Dynamic throw new LexerError(message, {pfile: file, pmin: at, pmax: at});
+	function skipWhitespace():Void while (!eof() && (current() == " " || current() == "\t" || current() == "\n" || current() == "\r")) index++;
+
+	static inline function isDigitC(c:Int):Bool return c >= "0".code && c <= "9".code;
+	static inline function isHexC(c:Int):Bool return isDigitC(c) || (c >= "a".code && c <= "f".code) || (c >= "A".code && c <= "F".code);
+	static inline function isLowerC(c:Int):Bool return c >= "a".code && c <= "z".code;
+	static inline function isUpperC(c:Int):Bool return c >= "A".code && c <= "Z".code;
+	static inline function isIdentPartC(c:Int):Bool return c == "_".code || isLowerC(c) || isUpperC(c) || isDigitC(c);
 	static inline function isDigit(c:String):Bool return c >= "0" && c <= "9";
-	static inline function isHexDigit(c:String):Bool return isDigit(c) || (c >= "a" && c <= "f") || (c >= "A" && c <= "F");
 	static inline function isIdentStart(c:String):Bool return (c >= "a" && c <= "z") || (c >= "A" && c <= "Z") || c == "_";
 	static inline function isIdentPart(c:String):Bool return isIdentStart(c) || isDigit(c);
+
+	// Regexp fragments: each returns the end index of a match starting at i, or -1.
+
+	// integer = ('1'..'9', Star sep_digit) | '0'
+	function mInteger(i:Int):Int {
+		var c = codeAt(i);
+		if (c == "0".code) return i + 1;
+		if (c >= "1".code && c <= "9".code) return mSepDigits(i + 1, isDigitC);
+		return -1;
+	}
+
+	// Star (Opt '_', digit-class)
+	function mSepDigits(i:Int, cls:Int->Bool):Int {
+		while (true) {
+			var c = codeAt(i);
+			if (cls(c)) i++;
+			else if (c == "_".code && cls(codeAt(i + 1))) i += 2;
+			else return i;
+		}
+	}
+
+	// Plus (digit-class, Star sep_digit-class), which is digit-class (Opt '_' digit-class)*
+	function mPlusDigits(i:Int, cls:Int->Bool):Int {
+		if (!cls(codeAt(i))) return -1;
+		return mSepDigits(i + 1, cls);
+	}
+
+	// Plus integer
+	function mPlusInteger(i:Int):Int {
+		var e = mInteger(i);
+		if (e < 0) return -1;
+		while (true) {
+			var e2 = mInteger(e);
+			if (e2 < 0) return e;
+			e = e2;
+		}
+	}
+
+	// Opt '_', (chars), Plus integer   (returns i when absent)
+	function mOptSuffix(i:Int, chars:String):Int {
+		var j = i;
+		if (codeAt(j) == "_".code) j++;
+		var c = codeAt(j);
+		if (c < 0 || chars.indexOf(String.fromCharCode(c)) < 0) return i;
+		var e = mPlusInteger(j + 1);
+		return e < 0 ? i : e;
+	}
+
+	function mReqSuffix(i:Int, chars:String):Int {
+		var e = mOptSuffix(i, chars);
+		return e == i ? -1 : e;
+	}
+
+	// ('e'|'E'), Opt ('+'|'-'), Plus integer_digits, Opt float_suffix
+	function mExponent(i:Int):Int {
+		var c = codeAt(i);
+		if (c != "e".code && c != "E".code) return -1;
+		var j = i + 1;
+		c = codeAt(j);
+		if (c == "+".code || c == "-".code) j++;
+		var e = mPlusDigits(j, isDigitC);
+		if (e < 0) return -1;
+		return mOptSuffix(e, "f");
+	}
+
+	function numberToken(start:Int):Null<LexedToken> {
+		// candidates in rule order; kind 0 = int, 1 = float, 2 = interval
+		var bestEnd = -1, bestKind = 0;
+		function cand(end:Int, kind:Int) {
+			if (end > bestEnd) {
+				bestEnd = end;
+				bestKind = kind;
+			}
+		}
+		// "0x", Plus hex_digits, Opt integer_suffix
+		if (starts("0x")) {
+			var e = mPlusDigits(start + 2, isHexC);
+			if (e >= 0) cand(mOptSuffix(e, "iu"), 0);
+		}
+		// "0b", Plus bin_digits, Opt integer_suffix
+		if (starts("0b")) {
+			var e = mPlusDigits(start + 2, function(c) return c == "0".code || c == "1".code);
+			if (e >= 0) cand(mOptSuffix(e, "iu"), 0);
+		}
+		var ei = mInteger(start);
+		if (ei >= 0) {
+			// integer, Opt integer_suffix
+			cand(mOptSuffix(ei, "iu"), 0);
+			// integer, float_suffix
+			var e = mReqSuffix(ei, "f");
+			if (e >= 0) cand(e, 1);
+			// integer, '.', Plus integer_digits, Opt float_suffix
+			if (codeAt(ei) == ".".code) {
+				var e = mPlusDigits(ei + 1, isDigitC);
+				if (e >= 0) cand(mOptSuffix(e, "f"), 1);
+			}
+		}
+		// '.', Plus integer_digits, Opt float_suffix
+		if (codeAt(start) == ".".code) {
+			var e = mPlusDigits(start + 1, isDigitC);
+			if (e >= 0) cand(mOptSuffix(e, "f"), 1);
+		}
+		if (ei >= 0) {
+			// integer, ('e'|'E'), Opt ('+'|'-'), Plus integer_digits, Opt float_suffix
+			var e = mExponent(ei);
+			if (e >= 0) cand(e, 1);
+			// integer, '.', Star digit, ('e'|'E'), ...
+			if (codeAt(ei) == ".".code) {
+				var j = ei + 1;
+				while (isDigitC(codeAt(j))) j++;
+				var e = mExponent(j);
+				if (e >= 0) cand(e, 1);
+			}
+			// integer, "..."
+			if (source.substr(ei, 3) == "...") cand(ei + 3, 2);
+		}
+		if (bestEnd < 0) return null;
+		// "." and "..." can only compete with the '.'-led float rule
+		if (codeAt(start) == ".".code && source.substr(start, 3) == "..." && 3 > bestEnd - start) return null;
+		index = bestEnd;
+		var s = source.substring(start, bestEnd);
+		return switch bestKind {
+			case 0: make(splitIntSuffix(s), start);
+			case 1: make(splitFloatSuffix(s), start);
+			case _: make(IntInterval(s.substr(0, s.length - 3)), start);
+		}
+	}
+
+	static function splitSuffix(s:String, isInt:Bool):{literal:String, suffix:Null<String>} {
+		var pivot = -1;
+		for (i in 0...s.length) {
+			switch s.charAt(i) {
+				case "i" | "u": pivot = i;
+				case "f" if (!isInt): pivot = i;
+				case _:
+			}
+		}
+		if (pivot < 0) return {literal: s, suffix: null};
+		// There might be a _ at the end of the literal because we allow _f64 and such
+		var literalLength = s.charAt(pivot - 1) == "_" ? pivot - 1 : pivot;
+		return {literal: s.substr(0, literalLength), suffix: s.substr(pivot)};
+	}
+
+	static function splitIntSuffix(s:String):Token {
+		var r = splitSuffix(s, true);
+		return Const(core.Ast.Constant.Int(r.literal, r.suffix));
+	}
+
+	static function splitFloatSuffix(s:String):Token {
+		var r = splitSuffix(s, false);
+		return Const(core.Ast.Constant.Float(r.literal, r.suffix));
+	}
+
+	// ident | idtype (end index or -1)
+	function mIdent(i:Int):Int {
+		var j = i;
+		while (codeAt(j) == "_".code) j++;
+		var c = codeAt(j);
+		if (isLowerC(c) || isUpperC(c)) {
+			j++;
+			while (isIdentPartC(codeAt(j))) j++;
+			return j;
+		}
+		if (j > i) {
+			// Plus '_' | Plus '_', '0'..'9', Star (...)
+			if (isDigitC(c)) {
+				j++;
+				while (isIdentPartC(codeAt(j))) j++;
+			}
+			return j;
+		}
+		return -1;
+	}
+
+	// `ident` only (used by '#', ident): lowercase start after underscores, or underscores.
+	function mLowerIdent(i:Int):Int {
+		var j = i;
+		while (codeAt(j) == "_".code) j++;
+		var c = codeAt(j);
+		if (isLowerC(c)) {
+			j++;
+			while (isIdentPartC(codeAt(j))) j++;
+			return j;
+		}
+		if (j > i) {
+			if (isDigitC(c)) {
+				j++;
+				while (isIdentPartC(codeAt(j))) j++;
+			}
+			return j;
+		}
+		return -1;
+	}
+
+	static final operators:Array<{text:String, token:Token}> = [
+		{text: "++", token: Unop(Increment)}, {text: "--", token: Unop(Decrement)}, {text: "~", token: Unop(NegBits)},
+		{text: "%=", token: Binop(OpAssignOp(OpMod))}, {text: "&=", token: Binop(OpAssignOp(OpAnd))}, {text: "|=", token: Binop(OpAssignOp(OpOr))},
+		{text: "^=", token: Binop(OpAssignOp(OpXor))}, {text: "+=", token: Binop(OpAssignOp(OpAdd))}, {text: "-=", token: Binop(OpAssignOp(OpSub))},
+		{text: "*=", token: Binop(OpAssignOp(OpMult))}, {text: "/=", token: Binop(OpAssignOp(OpDiv))}, {text: "<<=", token: Binop(OpAssignOp(OpShl))},
+		{text: "||=", token: Binop(OpAssignOp(OpBoolOr))}, {text: "&&=", token: Binop(OpAssignOp(OpBoolAnd))}, {text: "??=", token: Binop(OpAssignOp(OpNullCoal))},
+		{text: "==", token: Binop(OpEq)}, {text: "!=", token: Binop(OpNotEq)}, {text: "<=", token: Binop(OpLte)},
+		{text: "&&", token: Binop(OpBoolAnd)}, {text: "||", token: Binop(OpBoolOr)}, {text: "<<", token: Binop(OpShl)},
+		{text: "->", token: Arrow}, {text: "...", token: Spread}, {text: "=>", token: Binop(OpArrow)},
+		{text: "!", token: Unop(Not)}, {text: "<", token: Binop(OpLt)}, {text: ">", token: Binop(OpGt)},
+		{text: ";", token: Semicolon}, {text: ":", token: DblDot}, {text: ",", token: Comma}, {text: ".", token: Dot}, {text: "?.", token: QuestionDot},
+		{text: "%", token: Binop(OpMod)}, {text: "&", token: Binop(OpAnd)}, {text: "|", token: Binop(OpOr)}, {text: "^", token: Binop(OpXor)},
+		{text: "+", token: Binop(OpAdd)}, {text: "*", token: Binop(OpMult)}, {text: "/", token: Binop(OpDiv)}, {text: "-", token: Binop(OpSub)},
+		{text: "=", token: Binop(OpAssign)}, {text: "[", token: BkOpen}, {text: "]", token: BkClose}, {text: "{", token: BrOpen}, {text: "}", token: BrClose},
+		{text: "(", token: POpen}, {text: ")", token: PClose}, {text: "??", token: Binop(OpNullCoal)}, {text: "?", token: Question}, {text: "@", token: At}
+	];
+
+	public function token():LexedToken {
+		while (true) {
+			var start = index;
+			if (eof()) return make(Eof, start);
+			var c = codeAt(index);
+			if (c == " ".code || c == "\t".code) {
+				while (codeAt(index) == " ".code || codeAt(index) == "\t".code) index++;
+				continue;
+			}
+			if (c == "\r".code) {
+				index++;
+				if (codeAt(index) == "\n".code) index++;
+				continue;
+			}
+			if (c == "\n".code) {
+				index++;
+				continue;
+			}
+			// Find the longest fixed-text operator.
+			var opLen = 0, opTok:Token = null;
+			for (entry in operators) {
+				if (entry.text.length > opLen && starts(entry.text)) {
+					opLen = entry.text.length;
+					opTok = entry.token;
+				}
+			}
+			if (isDigitC(c) || c == ".".code) {
+				var save = index;
+				var r = numberToken(start);
+				if (r != null && r.pos.pmax - start >= opLen) return r;
+				index = save;
+			}
+			if (starts("//")) {
+				var content = index + 2;
+				index = content;
+				while (!eof() && codeAt(index) != "\n".code && codeAt(index) != "\r".code) index++;
+				return make(CommentLine(source.substring(content, index)), start);
+			}
+			if (starts("/*")) {
+				var buf = new StringBuf();
+				var pmax = comment(buf, start);
+				return {token: Comment(buf.toString()), pos: {pfile: file, pmin: start, pmax: pmax}};
+			}
+			if (starts("~/")) {
+				index += 2;
+				var buf = new StringBuf();
+				var r = regexp(buf, start);
+				return {token: Const(core.Ast.Constant.Regexp(buf.toString(), r.options)), pos: {pfile: file, pmin: start, pmax: r.pmax}};
+			}
+			if (c == '"'.code) {
+				index++;
+				var buf = new StringBuf();
+				var pmax = string(buf, start);
+				var str = try unescape(buf.toString()) catch (e:InvalidEscapeSequence) fail(InvalidEscape(e.c, e.msg), start + e.i);
+				return {token: Const(core.Ast.Constant.String(str, SDoubleQuotes)), pos: {pfile: file, pmin: start, pmax: pmax}};
+			}
+			if (c == "'".code) {
+				index++;
+				var fmt:FormatContext = {buffer: new StringBuf(), quoteOpen: false, quotePmin: start};
+				var buf = new StringBuf();
+				var pmax = try string2(buf, fmt) catch (_:LexExit) fail(UnterminatedString, start);
+				return {token: Const(core.Ast.Constant.String(fmt.buffer.toString(), SSingleQuotes)), pos: {pfile: file, pmin: start, pmax: pmax}};
+			}
+			if (c == "#".code) {
+				var e = mLowerIdent(index + 1);
+				if (e >= 0) {
+					index = e;
+					return make(Sharp(source.substring(start + 1, e)), start);
+				}
+			}
+			if (c == "$".code) {
+				index++;
+				while (isIdentPartC(codeAt(index))) index++;
+				return make(Dollar(source.substring(start + 1, index)), start);
+			}
+			var ie = mIdent(index);
+			if (ie >= 0 && ie - start >= opLen) {
+				index = ie;
+				return make(keyword(source.substring(start, ie)), start);
+			}
+			if (opTok != null) {
+				index += opLen;
+				return make(opTok, start);
+			}
+			return fail(InvalidCharacter(c), start);
+		}
+	}
+
+	// sharp_token (without the file context handled by the static wrapper).
+	function sharpTokenRaw():LexedToken {
+		while (true) {
+			var start = index;
+			var c = codeAt(index);
+			// sharp_ident
+			if (isLowerC(c) || isUpperC(c) || c == "_".code) {
+				var j = index + 1;
+				while (true) {
+					while (isIdentPartC(codeAt(j))) j++;
+					var d = codeAt(j + 1);
+					if (codeAt(j) == ".".code && (isLowerC(d) || isUpperC(d) || d == "_".code)) j += 2 else break;
+				}
+				index = j;
+				return make(Const(core.Ast.Constant.Ident(source.substring(start, j))), start);
+			}
+			if (c == " ".code || c == "\t".code) {
+				while (codeAt(index) == " ".code || codeAt(index) == "\t".code) index++;
+				continue;
+			}
+			if (c == "\r".code) {
+				index++;
+				if (codeAt(index) == "\n".code) index++;
+				continue;
+			}
+			if (c == "\n".code) {
+				index++;
+				continue;
+			}
+			if (starts("/*")) {
+				comment(new StringBuf(), start);
+				continue;
+			}
+			return token();
+		}
+	}
+
+	// comment: stores the content, returns the end of "*/".
+	function comment(buf:StringBuf, pmin:Int):Int {
+		index += 2;
+		while (true) {
+			if (eof()) return fail(UnclosedComment, pmin);
+			if (starts("*/")) {
+				index += 2;
+				return index;
+			}
+			buf.add(current());
+			index++;
+		}
+	}
+
+	// string: stores the raw content of a double-quoted string, returns the end of the closing quote.
+	function string(buf:StringBuf, pmin:Int):Int {
+		while (true) {
+			if (eof()) return fail(UnterminatedString, pmin);
+			var c = codeAt(index);
+			if (c == "\\".code) {
+				var d = codeAt(index + 1);
+				if (d == '"'.code || d == "\\".code) {
+					buf.add(source.substr(index, 2));
+					index += 2;
+				} else {
+					buf.add("\\");
+					index++;
+				}
+				continue;
+			}
+			if (c == '"'.code) {
+				index++;
+				return index;
+			}
+			buf.add(current());
+			index++;
+		}
+	}
+
+	function consumeBuffer(buf:StringBuf, fmt:FormatContext, f:String->String):StringBuf {
+		var s = buf.toString();
+		fmt.buffer.add(f(s));
+		return new StringBuf();
+	}
+
+	function unescapeFormat(fmt:FormatContext, s:String):String {
+		return try unescape(s) catch (e:InvalidEscapeSequence) fail(InvalidEscape(e.c, e.msg), fmt.quotePmin + e.i);
+	}
+
+	// string2: single-quoted (format) string. Throws LexExit on eof.
+	function string2(buf:StringBuf, fmt:FormatContext):Int {
+		while (true) {
+			if (eof()) throw new LexExit();
+			var c = codeAt(index);
+			if (c == "\\".code) {
+				var d = codeAt(index + 1);
+				if (d == "\\".code || d == "'".code || d == "$".code) {
+					buf.add(source.substr(index, 2));
+					index += 2;
+				} else {
+					buf.add("\\");
+					index++;
+				}
+				continue;
+			}
+			if (c == "'".code) {
+				index++;
+				buf = consumeBuffer(buf, fmt, function(s) return fmt.quoteOpen ? s : unescapeFormat(fmt, s));
+				if (fmt.quoteOpen) fmt.buffer.add("'");
+				return index;
+			}
+			if (c == "$".code) {
+				var d = codeAt(index + 1);
+				if (d == "{".code) {
+					var pmin = index;
+					index += 2;
+					buf = consumeBuffer(buf, fmt, function(s) return fmt.quoteOpen ? s : unescapeFormat(fmt, s));
+					fmt.buffer.add("${");
+					buf = try codeString(buf, fmt) catch (_:LexExit) fail(UnclosedCode, pmin);
+					continue;
+				}
+				if (d == "$".code) {
+					buf.add("$$");
+					index += 2;
+					continue;
+				}
+				buf.add("$");
+				index++;
+				continue;
+			}
+			buf.add(current());
+			index++;
+		}
+	}
+
+	// code_string: the `${...}` part of a format string. Returns the (reset) store buffer.
+	function codeString(buf:StringBuf, fmt:FormatContext):StringBuf {
+		var openBraces = 0;
+		while (true) {
+			if (eof()) throw new LexExit();
+			var c = codeAt(index);
+			if (c == "{".code) {
+				buf.add("{");
+				index++;
+				openBraces++;
+				continue;
+			}
+			if (c == "}".code) {
+				index++;
+				if (openBraces > 0) {
+					buf.add("}");
+					openBraces--;
+					continue;
+				}
+				buf = consumeBuffer(buf, fmt, function(s) return s);
+				fmt.buffer.add("}");
+				return buf;
+			}
+			if (c == '"'.code) {
+				var pmin = index;
+				index++;
+				buf.add('"');
+				var inner = new StringBuf();
+				try string(inner, pmin) catch (e:LexerError) fail(UnterminatedString, pmin);
+				buf.add(inner.toString());
+				buf.add('"');
+				continue;
+			}
+			if (c == "'".code) {
+				var pmin = index;
+				index++;
+				buf = consumeBuffer(buf, fmt, function(s) return s);
+				fmt.buffer.add("'");
+				var oldQuote = fmt.quoteOpen, oldPmin = fmt.quotePmin;
+				fmt.quoteOpen = true;
+				fmt.quotePmin = pmin;
+				try string2(buf, fmt) catch (_:LexExit) fail(UnterminatedString, pmin);
+				buf = new StringBuf();
+				fmt.quoteOpen = oldQuote;
+				fmt.quotePmin = oldPmin;
+				continue;
+			}
+			if (starts("/*")) {
+				var pmin = index;
+				// comments are dropped from the code part
+				comment(new StringBuf(), pmin);
+				continue;
+			}
+			if (starts("//")) {
+				var s = index;
+				while (!eof() && codeAt(index) != "\n".code && codeAt(index) != "\r".code) index++;
+				buf.add(source.substring(s, index));
+				continue;
+			}
+			buf.add(current());
+			index++;
+		}
+	}
+
+	// regexp: stores the processed pattern; pmax is the end of the closing '/'
+	// (upstream evaluates `lexeme_end` before parsing the options).
+	function regexp(buf:StringBuf, pmin:Int):{options:String, pmax:Int} {
+		while (true) {
+			if (eof()) return fail(UnterminatedRegexp, pmin);
+			var c = codeAt(index);
+			if (c == "\n".code || c == "\r".code) return fail(UnterminatedRegexp, pmin);
+			if (c == "\\".code) {
+				var d = codeAt(index + 1);
+				if (d == "/".code) {
+					buf.add("/");
+					index += 2;
+				} else if (d == "r".code) {
+					buf.add("\r");
+					index += 2;
+				} else if (d == "n".code) {
+					buf.add("\n");
+					index += 2;
+				} else if (d == "t".code) {
+					buf.add("\t");
+					index += 2;
+				} else if (d >= 0 && "\\$.*+^|{}[]()?-0123456789wWbBsSdDx".indexOf(String.fromCharCode(d)) >= 0) {
+					buf.add(source.substr(index, 2));
+					index += 2;
+				} else if ((d == "u".code || d == "U".code) && isHexC(codeAt(index + 2)) && isHexC(codeAt(index + 3)) && isHexC(codeAt(index + 4)) && isHexC(codeAt(index + 5))) {
+					buf.add(source.substr(index, 6));
+					index += 6;
+				} else if (d < 0 || d == "\n".code || d == "\r".code) {
+					// '\\' followed by eof/newline: the backslash alone is stored by the Plus(Compl ..) rule? No:
+					// Plus (Compl ('\\' | ...)) cannot match '\\', so this is `'\\', Compl '\\'` (newline) or die.
+					return fail(InvalidCharacter("\\".code), index + 1);
+				} else {
+					return fail(InvalidCharacter("\\".code), index + 1);
+				}
+				continue;
+			}
+			if (c == "/".code) {
+				index++;
+				var pmax = index;
+				var options = regexpOptions();
+				return {options: options, pmax: pmax};
+			}
+			buf.add(current());
+			index++;
+		}
+	}
+
+	function regexpOptions():String {
+		var options = "";
+		while (true) {
+			var c = codeAt(index);
+			if (c == "g".code || c == "i".code || c == "m".code || c == "s".code || c == "u".code) {
+				options += String.fromCharCode(c);
+				index++;
+			} else if (isLowerC(c)) {
+				return fail(InvalidRegexpOption, index);
+			} else return options;
+		}
+	}
+
+	// haxe/src/core/ast.ml: unescape
+	public static function unescape(s:String):String {
+		var b = new StringBuf();
+		var i = 0;
+		var n = s.length;
+		while (i < n) {
+			var c = s.charAt(i);
+			if (c != "\\") {
+				b.add(c);
+				i++;
+				continue;
+			}
+			i++;
+			if (i >= n) break;
+			c = s.charAt(i);
+			var fail = function(msg:Null<String>):Dynamic throw new InvalidEscapeSequence(c, i, msg);
+			var inext = i + 1;
+			switch c {
+				case "n": b.add("\n");
+				case "r": b.add("\r");
+				case "t": b.add("\t");
+				case '"' | "'" | "\\": b.add(c);
+				case "0" | "1" | "2" | "3":
+					var oct = s.substr(i, 3);
+					var u = 0;
+					if (oct.length != 3) fail(null);
+					for (k in 0...3) {
+						var d = oct.charCodeAt(k) - "0".code;
+						if (d < 0 || d > 7) fail(null);
+						u = u * 8 + d;
+					}
+					if (u > 127) fail("Values greater than \\177 are not allowed. Use \\u00" + StringTools.hex(u, 2).toLowerCase() + " instead.");
+					b.addChar(u);
+					inext += 2;
+				case "x":
+					var hex = s.substr(i + 1, 2);
+					if (hex.length != 2 || !isHexC(hex.charCodeAt(0)) || !isHexC(hex.charCodeAt(1))) fail("Must be followed by a hexadecimal sequence.");
+					var u = Std.parseInt("0x" + hex);
+					if (u > 127) fail("Values greater than \\x7f are not allowed. Use \\u00" + hex + " instead.");
+					b.addChar(u);
+					inext += 2;
+				case "u":
+					var failNoHex = function():Dynamic return fail("Must be followed by a hexadecimal sequence enclosed in curly brackets.");
+					var u:Int, a:Int;
+					var h4 = s.substr(i + 1, 4);
+					if (h4.length == 4 && isHexC(h4.charCodeAt(0)) && isHexC(h4.charCodeAt(1)) && isHexC(h4.charCodeAt(2)) && isHexC(h4.charCodeAt(3))) {
+						u = Std.parseInt("0x" + h4);
+						a = 4;
+					} else {
+						if (s.charAt(i + 1) != "{") failNoHex();
+						var close = s.indexOf("}", i + 3);
+						if (close < 0) failNoHex();
+						var l = close - (i + 2);
+						var hex = s.substr(i + 2, l);
+						for (k in 0...hex.length) if (!isHexC(hex.charCodeAt(k))) failNoHex();
+						if (hex.length == 0) failNoHex();
+						u = Std.parseInt("0x" + hex);
+						if (u > 0x10FFFF) fail("Maximum allowed value for unicode escape sequence is \\u{10FFFF}");
+						a = l + 2;
+					}
+					if (u >= 0xD800 && u < 0xE000) fail("UTF-16 surrogates are not allowed in strings.");
+					b.addChar(u);
+					inext += a;
+				case _:
+					fail(null);
+			}
+			i = inext;
+		}
+		return b.toString();
+	}
 
 	static function keyword(value:String):Token return switch value {
 		case "function": Kwd(Function); case "class": Kwd(Class); case "var": Kwd(Var); case "if": Kwd(If); case "else": Kwd(Else); case "while": Kwd(While); case "do": Kwd(Do); case "for": Kwd(For); case "break": Kwd(Break); case "continue": Kwd(Continue); case "return": Kwd(Return); case "extends": Kwd(Extends); case "implements": Kwd(Implements); case "import": Kwd(Import); case "switch": Kwd(Switch); case "case": Kwd(Case); case "default": Kwd(Default); case "static": Kwd(Static); case "public": Kwd(Public); case "private": Kwd(Private); case "try": Kwd(Try); case "catch": Kwd(Catch); case "new": Kwd(New); case "this": Kwd(This); case "throw": Kwd(Throw); case "extern": Kwd(Extern); case "enum": Kwd(Enum); case "in": Kwd(In); case "interface": Kwd(Interface); case "untyped": Kwd(Untyped); case "cast": Kwd(Cast); case "override": Kwd(Override); case "typedef": Kwd(Typedef); case "dynamic": Kwd(Dynamic); case "package": Kwd(Package); case "inline": Kwd(Inline); case "using": Kwd(Using); case "null": Kwd(Null); case "true": Kwd(True); case "false": Kwd(False); case "abstract": Kwd(Abstract); case "macro": Kwd(Macro); case "final": Kwd(Final); case "operator": Kwd(Operator); case "overload": Kwd(Overload); case _: Const(core.Ast.Constant.Ident(value));
 	}
+}
 
-	static final operators:Array<{text:String, token:Token}> = [
-		{text: ">>>=", token: Binop(OpAssignOp(OpUShr))}, {text: "<<=", token: Binop(OpAssignOp(OpShl))}, {text: ">>=", token: Binop(OpAssignOp(OpShr))}, {text: "||=", token: Binop(OpAssignOp(OpBoolOr))}, {text: "&&=", token: Binop(OpAssignOp(OpBoolAnd))}, {text: "??=", token: Binop(OpAssignOp(OpNullCoal))}, {text: "%=", token: Binop(OpAssignOp(OpMod))}, {text: "&=", token: Binop(OpAssignOp(OpAnd))}, {text: "|=", token: Binop(OpAssignOp(OpOr))}, {text: "^=", token: Binop(OpAssignOp(OpXor))}, {text: "+=", token: Binop(OpAssignOp(OpAdd))}, {text: "-=", token: Binop(OpAssignOp(OpSub))}, {text: "*=", token: Binop(OpAssignOp(OpMult))}, {text: "/=", token: Binop(OpAssignOp(OpDiv))},
-		{text: ">>>", token: Binop(OpUShr)}, {text: "++", token: Unop(Increment)}, {text: "--", token: Unop(Decrement)}, {text: "==", token: Binop(OpEq)}, {text: "!=", token: Binop(OpNotEq)}, {text: "<=", token: Binop(OpLte)}, {text: ">=", token: Binop(OpGte)}, {text: "&&", token: Binop(OpBoolAnd)}, {text: "||", token: Binop(OpBoolOr)}, {text: "<<", token: Binop(OpShl)}, {text: ">>", token: Binop(OpShr)}, {text: "->", token: Arrow}, {text: "...", token: Spread}, {text: "=>", token: Binop(OpArrow)}, {text: "?.", token: QuestionDot}, {text: "??", token: Binop(OpNullCoal)},
-		{text: "~", token: Unop(NegBits)}, {text: "!", token: Unop(Not)}, {text: "<", token: Binop(OpLt)}, {text: ">", token: Binop(OpGt)}, {text: ";", token: Semicolon}, {text: ":", token: DblDot}, {text: ",", token: Comma}, {text: ".", token: Dot}, {text: "%", token: Binop(OpMod)}, {text: "&", token: Binop(OpAnd)}, {text: "|", token: Binop(OpOr)}, {text: "^", token: Binop(OpXor)}, {text: "+", token: Binop(OpAdd)}, {text: "*", token: Binop(OpMult)}, {text: "/", token: Binop(OpDiv)}, {text: "-", token: Binop(OpSub)}, {text: "=", token: Binop(OpAssign)}, {text: "[", token: BkOpen}, {text: "]", token: BkClose}, {text: "{", token: BrOpen}, {text: "}", token: BrClose}, {text: "(", token: POpen}, {text: ")", token: PClose}, {text: "?", token: Question}, {text: "@", token: At}
-	];
+typedef FormatContext = {var buffer:StringBuf; var quoteOpen:Bool; var quotePmin:Int;}
+
+private class LexExit extends haxe.Exception {
+	public function new() super("Exit");
+}
+
+class InvalidEscapeSequence extends haxe.Exception {
+	public final c:String;
+	public final i:Int;
+	public final msg:Null<String>;
+	public function new(c:String, i:Int, msg:Null<String>) {
+		super("Invalid_escape_sequence");
+		this.c = c;
+		this.i = i;
+		this.msg = msg;
+	}
 }

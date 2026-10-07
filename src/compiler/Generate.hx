@@ -21,7 +21,9 @@ class Generate {
  }
  public static function createWriter(com:CommonContext,config:WriterTargetConfig):{writer:HxbWriter,close:Void->haxe.io.Bytes} {
   if (config.hxbVersion!=HxbData.VERSION) throw new Failure("Unsupported HXB version: "+config.hxbVersion);
-  var writer=new HxbWriter(config.generateDocumentation);
+  var anonIdentification=new typing.TanonIdentification<Dynamic>();
+  function warn(w:Dynamic,s:String,p:Pos):Void com.warning(w,com.warningOptions,s,p);
+  var writer=new HxbWriter(config.generateDocumentation,warn,anonIdentification);
   return {writer:writer,close:writer.exportModule};
  }
  public static function exportHxb(fromCache:Bool,com:CommonContext,config:WriterTargetConfig,cc:Dynamic,platform:String,m:ModuleDef):Null<{path:String,bytes:haxe.io.Bytes}> {
