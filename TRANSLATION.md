@@ -3,22 +3,16 @@
 Snapshot: 2026-09-04. Pinned upstream source:
 `b10fa6e93c0206cc0dc8f7abba98534e3edac248`.
 
-The translation snapshot was committed and pushed as `2fcd217`. The current
-phase is compilation and integration, explicitly authorized after that snapshot.
-`compile-all.hxml` includes every in-scope source module, including drafts which
-the existing bootstrap entry point does not reach. Both `haxe haxe-in-haxe.hxml` and `haxe compile-all.hxml` now compile.
-These checks used the installed Haxe `5.0.0-preview.1`, not a locally built
-executable from the pinned submodule. The first runtime test results and fixes are recorded in `test/TESTING.md`;
-the new full-pipeline integration test passes its default `Basic` fixture, a
-focused Eval `Int64` fixture, and the broader exception-heavy `TryCatch` and
-`HelloWorld` (trace) fixtures after three repairs: bitwise/comparison operator
-precedence in the Pratt parser, explicit declaration sequencing for
-generated catch variables in exception filtering, and statics-module alias
-tags in the HXB writer. The broader archives load and type-check on the
-host; executing size-calling code on the installed host fails from host/std
-version skew (it rejects `StringMap.size` even from source), so execution
-needs the pinned runtime. Pinned-reference
-conformance remains unverified.
+Status 2026-10-07: the first milestone is reached. The translated batch
+compiler (`haxe.Main`) emits HXB byte-identical to the pinned reference for
+all 275 accepted conformance cases, and rejects the 7 cases the reference
+rejects; see `test/TESTING.md`. Since the snapshot below, `hxbWriter.ml`,
+`grammar.ml` and `lexer.ml` were retranslated directly
+(`src/compiler/hxb/HxbWriter.hx`, `src/syntax/Grammar.hx`,
+`src/syntax/Lexer.hx`), and the batch entry in `haxe.ml` became
+`src/haxe/Main.hx`. The earlier hand-written versions remain as
+`LegacyGrammar`, `LegacyLexer` and `LegacyMain`, used only by the bootstrap
+unit tests. Macro execution remains the next milestone.
 
 ## Translation snapshot
 

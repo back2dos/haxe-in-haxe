@@ -1,7 +1,9 @@
 # HXB Execution and Conformance Tests
 
-See [TESTING.md](TESTING.md) for the first post-translation runtime baseline,
-the separate full-pipeline integration test, and current failures.
+See [TESTING.md](TESTING.md) for current results. The main harness is
+`conformance.py` (case list `conformance-cases.txt`, discovery
+`discover-cases.py`, exclusions `upstream-hxb-exclusions.md`); the shell
+scripts below are single-fixture versions of the same checks.
 
 The oracle and initial execution host are the same executable: `haxe` built
 from the sibling `haxe/` submodule at the pinned revision. Do not substitute an

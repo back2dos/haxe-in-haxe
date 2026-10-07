@@ -85,7 +85,7 @@ class PortRuntimeTest {
  }
  static function deferredTypes():Void {
   var calls=0,r=context.Common.makeUnforcedLazy(core.TFunctions.tDynamic,function(){calls++;return core.TFunctions.tDynamic;},"runtime-test");
-  var proxy:core.TType.T=TLazy(LWait(()->core.TFunctions.lazyType(r.value)));
+  var proxy:core.TType.T=TLazy(new core.TType.TLazy(LWait(()->core.TFunctions.lazyType(r))));
   core.TFunctions.follow(proxy);core.TFunctions.follow(proxy);
   check(calls==1,"Deferred typer evaluation was not cached through its shared reference");
   check(core.TFunctions.nullModule.mExtra.mSign==haxe.crypto.Md5.encode(""),"Empty module signature must use the port's hexadecimal digest representation");
