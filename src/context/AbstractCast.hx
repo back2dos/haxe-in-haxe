@@ -33,7 +33,7 @@ class AbstractCast {
 				};
 				ctx.e.withTypeStack.shift();
 				try e = castOrUnifyRaise(ctx,t,e,p) catch (err:core.Error.TypingError) {
-					switch err.error.errMessage { case Unify(_): throw new NotFound(); case _: throw err; }
+					switch err.error.errMessage { case Unify(_): throw NotFound.instance; case _: throw err; }
 				}
 				pushed.restore();
 				return e;
@@ -68,7 +68,7 @@ class AbstractCast {
 		}
 		if (core.TUnification.typeIseqCustom(uctx,tleft,eright.etype)) return eright;
 		function loop(stack:Array<{left:T,right:T}>, left:T, right:T):TExpr {
-			for (pair in stack) if (core.TUnification.fastEq(left,pair.left) && core.TUnification.fastEq(right,pair.right)) throw new NotFound();
+			for (pair in stack) if (core.TUnification.fastEq(left,pair.left) && core.TUnification.fastEq(right,pair.right)) throw NotFound.instance;
 			var next = [{left:left,right:right}].concat(stack);
 			return switch [core.TFunctions.follow(left),core.TFunctions.follow(right)] {
 				case [TAbstract(a1,tl1),TAbstract(a2,tl2)]: make(Abstract.findToFrom(uctx,eright.etype,left,a2,tl2,a1,tl1));
@@ -79,7 +79,7 @@ class AbstractCast {
 							found = loop(next,core.TFunctions.applyParams(a.aParams,tl,tc),right);
 							break;
 						}
-						if (found == null) throw new NotFound();
+						if (found == null) throw NotFound.instance;
 						found;
 					}
 				case [_,TAbstract(a,tl)]:
@@ -89,18 +89,18 @@ class AbstractCast {
 							found = loop(next,left,core.TFunctions.applyParams(a.aParams,tl,tc));
 							break;
 						}
-						if (found == null) throw new NotFound();
+						if (found == null) throw NotFound.instance;
 						found;
 					}
 				case [TInst(c,tl),TFun(_)] if (core.TFunctions.hasClassFlag(c,CFunctionalInterface)):
 					var cf = core.TOther.TClassTools.getSingularInterfaceField(c.clOrderedFields);
-					if (cf == null) throw new NotFound();
+					if (cf == null) throw NotFound.instance;
 					function map(t:T):T return core.TFunctions.applyParams(c.clParams,tl,t);
 					var monos = Monomorph.spawnConstrainedMonos(map,cf.cfParams);
 					Typecore.unifyRaiseCustom(core.TUnification.nativeUnificationContext,eright.etype,map(core.TFunctions.applyParams(cf.cfParams,monos,cf.cfType)),p);
 					if (core.TFunctions.hasMono(right)) Error.raiseTypingError("Cannot use this function as a functional interface because it has unknown types: " + core.TPrinting.sType(core.TPrinting.printContext(),right),p);
 					core.TFunctions.mkCast(eright,left,p);
-				case _: throw new NotFound();
+				case _: throw NotFound.instance;
 			};
 		}
 		return loop([],tleft,eright.etype);
@@ -155,7 +155,7 @@ class AbstractCast {
 				case _:
 			}
 		}
-		throw new NotFound();
+		throw NotFound.instance;
 	}
 	public static function findArrayWriteAccessRaise(ctx:Dynamic, a:TAbstract, pl:TParams, e1:TExpr, e2:TExpr, p:Pos):Dynamic {
 		for (cf in a.aArray) {
@@ -175,7 +175,7 @@ class AbstractCast {
 				case _:
 			}
 		}
-		throw new NotFound();
+		throw NotFound.instance;
 	}
 	public static function findArrayReadAccess(ctx:Dynamic, a:TAbstract, tl:TParams, e1:TExpr, p:Pos):Dynamic {
 		try return findArrayReadAccessRaise(ctx,a,tl,e1,p) catch (_:NotFound) {
@@ -207,7 +207,7 @@ class AbstractCast {
 			case _: throw "abstractCast: invalid to-field type";
 		};
 		for (entry in ab.aToField) try return check(entry.type,entry.field) catch (_:core.TUnification.Unify_error) {}
-		throw new NotFound();
+		throw NotFound.instance;
 	}
 	public static function findMultitypeSpecializationFull(platform:core.Globals.Platform,a:TAbstract,pl:TParams,p:Pos):Dynamic {
 		var uctx = core.TUnification.defaultUnificationContext();
@@ -281,9 +281,9 @@ class AbstractCast {
 								var original = v.vExtra.vExpr;
 								switch core.TFunctions.follow(original.etype) {
 									case TAbstract(a,pl) if (MetadataTools.has(StrictMeta.MultiType,a.aMeta)): {abs:a,params:pl,expr:core.TFunctions.mk(TCast(e,null),original.etype,e.epos)};
-									case _: throw new NotFound();
+									case _: throw NotFound.instance;
 								}
-							case _: throw new NotFound();
+							case _: throw NotFound.instance;
 						};
 					}
 					function findField(e1:TExpr):TExpr return switch e1.eexpr {
@@ -300,13 +300,13 @@ class AbstractCast {
 								var fa = core.TFunctions.quickField(m,fname);
 								function getFunType(t:T):{type:T,signature:TSignature} return switch core.TFunctions.follow(t) {
 									case TFun(sig): {type:TFun(sig),signature:sig};
-									case _: throw new NotFound();
+									case _: throw NotFound.instance;
 								};
 								var funType = switch fa {
 									case FStatic(_,cf): getFunType(cf.cfType);
 									case FInstance(c,tl,cf): getFunType(core.TFunctions.applyParams(c.clParams,tl,cf.cfType));
 									case FAnon(cf): getFunType(cf.cfType);
-									case _: throw new NotFound();
+									case _: throw NotFound.instance;
 								};
 								function maybeCast(e:TExpr,t:T,p:Pos):TExpr return core.TUnification.typeIseq(e.etype,t) ? e : core.TFunctions.mk(TCast(e,null),t,p);
 								var ef = core.TFunctions.mk(TField({eexpr:e2.eexpr,etype:m,epos:e2.epos},fa),funType.type,e2.epos);
@@ -333,12 +333,12 @@ class AbstractCast {
 									case TAbstract(a,pl) if (a.aImpl != null):
 										var c = a.aImpl;
 										var cf = c.clStatics.get(fname);
-										if (cf == null) throw new NotFound();
+										if (cf == null) throw NotFound.instance;
 										filters.exception.ExceptionFunctions.makeStaticCall(scom,c,cf,[e2].concat(el),e.etype,e.epos);
-									case _: throw new NotFound();
+									case _: throw NotFound.instance;
 								}
 							}
-						case _: throw new NotFound();
+						case _: throw NotFound.instance;
 					};
 					findField(e1);
 				} catch (_:NotFound) core.Texpr.mapExpr(loop,e);

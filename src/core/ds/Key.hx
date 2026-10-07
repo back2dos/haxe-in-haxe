@@ -5,6 +5,9 @@ class Key {
  public static function compare(a:Dynamic,b:Dynamic):Int {
   if(a==b) return 0;
   if(a==null) return -1;if(b==null) return 1;
+  // Fast paths for the common scalar keys; same result as Reflect.compare.
+  if((a is String) && (b is String)) return (a:String) > (b:String) ? 1 : -1;
+  if((a is Int) && (b is Int)) return (a:Int) > (b:Int) ? 1 : -1;
   if(Std.isOfType(a,Array)&&Std.isOfType(b,Array)) {
    var aa:Array<Dynamic>=a,bb:Array<Dynamic>=b,n=Std.int(Math.min(aa.length,bb.length));
    for(i in 0...n) {var c=compare(aa[i],bb[i]);if(c!=0) return c;}return Reflect.compare(aa.length,bb.length);
@@ -15,5 +18,34 @@ class Key {
    case [TFunction,_],[_,TFunction]:throw new haxe.Exception("compare: functional value");
    case _:Reflect.compare(a,b);
   }
+ }
+
+ /**
+  A string that is equal for two keys exactly when `compare` returns 0, used to
+  index hash tables. Returns null for keys outside the plain-data subset
+  (class instances, functions, large values): tables then fall back to a
+  linear scan with `compare`.
+ **/
+ public static function canonical(value:Dynamic):Null<String> {
+  if(value is String) return "s" + (value:String);
+  var buf=new StringBuf(),budget=64;
+  function visit(v:Dynamic):Bool {
+   if(--budget<0) return false;
+   if(v==null) {buf.add("n");return true;}
+   if(v is String) {var s:String=v;buf.add("s");buf.add(s.length);buf.add(":");buf.add(s);return true;}
+   if(v is Int) {buf.add("i");buf.add((v:Int));buf.add(";");return true;}
+   if(Std.isOfType(v,Array)) {var a:Array<Dynamic>=v;buf.add("a");buf.add(a.length);buf.add("[");for(x in a) if(!visit(x)) return false;return true;}
+   return switch StdType.typeof(v) {
+    case TBool:buf.add((v:Bool) ? "T" : "F");true;
+    case TEnum(_):
+     var params=StdType.enumParameters(v);buf.add("e");buf.add(StdType.enumIndex(v));buf.add("(");buf.add(params.length);
+     for(x in params) if(!visit(x)) return false;true;
+    case TObject:
+     var names=Reflect.fields(v);names.sort(Reflect.compare);buf.add("o");buf.add(names.length);
+     for(name in names) {buf.add(name.length);buf.add(":");buf.add(name);if(!visit(Reflect.field(v,name))) return false;}true;
+    case _:false; // floats, class instances and functions keep the linear path
+   }
+  }
+  return visit(value) ? buf.toString() : null;
  }
 }

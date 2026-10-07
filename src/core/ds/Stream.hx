@@ -25,15 +25,17 @@ class Stream<T> {
 	}
 	public function next():T {
 		var value = peek();
-		if (value == null) throw new StreamFailure();
+		if (value == null) throw StreamFailure.instance;
 		junk();
 		return value;
 	}
-	public function empty():Void if (peek() != null) throw new StreamFailure();
+	public function empty():Void if (peek() != null) throw StreamFailure.instance;
 	public function iter(f:T->Void):Void while (peek() != null) f(next());
 }
 
 class StreamFailure extends haxe.Exception {
+	// Shared instance; see NotFound. The parser backtracks through this constantly.
+	public static final instance = new StreamFailure();
 	public function new() super("Stream.Failure");
 }
 

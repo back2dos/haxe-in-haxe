@@ -26,7 +26,7 @@ class TanonIdentification<A> {
  public function getPfms():Dynamic return pfms;
  public function addPfm(path:core.Globals.GlobalTypePath,pfm:PathFieldMapping<A>):Void {addPfmMutex.acquire();while(pfmByArity.length<=pfm.pfmArity)pfmByArity.push([]);pfmByArity[pfm.pfmArity].push(pfm);pfms.replace(path,pfm);addPfmMutex.release();}
  public function unify(uctx:UnificationContext,tc:T,pfm:PathFieldMapping<A>):Void {
-  function pairs(fields:Dynamic):Array<Dynamic> {var acc=[];var names=[for(n in (pfm.pfmFields.keys():Iterator<String>))n];names.sort(Reflect.compare);for(n in names){var cf=pfm.pfmFields.get(n);var other=fields.get(cf.cfName);if(other==null)throw new NotFound();acc.unshift({cf:cf,other:other});}return acc;}
+  function pairs(fields:Dynamic):Array<Dynamic> {var acc=[];var names=[for(n in (pfm.pfmFields.keys():Iterator<String>))n];names.sort(Reflect.compare);for(n in names){var cf=pfm.pfmFields.get(n);var other=fields.get(cf.cfName);if(other==null)throw NotFound.instance;acc.unshift({cf:cf,other:other});}return acc;}
   function fieldType(cf:TClassField):T return uctx.opaqueFieldParams?cf.cfType:monomorphs(cf.cfParams,cf.cfType);
   try {
    var monos:Array<T>=switch follow(tc) {
@@ -36,7 +36,7 @@ class TanonIdentification<A> {
    };for(t in monos)switch follow(t){case TMono(r):Monomorph.bind(r,tDynamic);case t:if(ExtType.isVoid(t))throw new Unify_error([UnifyCustom("return mono")]);}
   }catch(e:NotFound){throw new Unify_error([]);}
  }
- public function findCompatible(uctx:UnificationContext,arity:Int,tc:T):PathFieldMapping<A> {if(arity>=pfmByArity.length)throw new NotFound();for(pfm in pfmByArity[arity])try{unify(uctx,tc,pfm);return pfm;}catch(e:Unify_error){}throw new NotFound();}
+ public function findCompatible(uctx:UnificationContext,arity:Int,tc:T):PathFieldMapping<A> {if(arity>=pfmByArity.length)throw NotFound.instance;for(pfm in pfmByArity[arity])try{unify(uctx,tc,pfm);return pfm;}catch(e:Unify_error){}throw NotFound.instance;}
  public function identifyTypedef(td:TDef):Void {function loop(t:T):Void switch t{case TAnon(an) if((an.aStatus==Closed||an.aStatus==Const)&&countFields(an.aFields)>0):addPfm(td.tPath,pfmOfTypedef(td));case TMono({tmType:t}) if(t!=null):loop(t);case TLazy(f):loop(lazyType(f));case _:};loop(td.tType);}
  function protect<B>(f:Void->B):B {pfmMutex.acquire();try{var r=f();pfmMutex.release();return r;}catch(e:haxe.Exception){pfmMutex.release();throw e;}}
  public function identifyAnon(uctx:UnificationContext,an:TAnon):PathFieldMapping<A> {

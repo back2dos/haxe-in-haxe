@@ -79,18 +79,18 @@ class Typer {
  public static function terminatorType(ctx:TyperContext,withType:WithTypeValue,p:Pos):T return switch withType {case NoValue:tDynamic; case WithType(t,_):t; case Value(_):spawnMonomorph(ctx,p);};
  public static function getIteratorParam(t:T):T return switch follow(t) {
   case TAnon(a):
-   if(a.aStatus!=Closed) throw new core.ds.NotFound();
-   var hasNext=a.aFields.get("hasNext"),next=a.aFields.get("next"); if(hasNext==null||next==null) throw new core.ds.NotFound();
+   if(a.aStatus!=Closed) throw core.ds.NotFound.instance;
+   var hasNext=a.aFields.get("hasNext"),next=a.aFields.get("next"); if(hasNext==null||next==null) throw core.ds.NotFound.instance;
    switch [follow(hasNext.cfType),follow(next.cfType)] {
-    case [TFun({args:[],ret:tb}),TFun({args:[],ret:t})]:switch follow(tb) {case TAbstract({aPath:{pack:[],name:"Bool"}},[]):if(Lambda.count(a.aFields)!=2) throw new core.ds.NotFound(); t; case _:throw new core.ds.NotFound();}
-    case _:throw new core.ds.NotFound();
+    case [TFun({args:[],ret:tb}),TFun({args:[],ret:t})]:switch follow(tb) {case TAbstract({aPath:{pack:[],name:"Bool"}},[]):if(Lambda.count(a.aFields)!=2) throw core.ds.NotFound.instance; t; case _:throw core.ds.NotFound.instance;}
+    case _:throw core.ds.NotFound.instance;
    }
-  case _:throw new core.ds.NotFound();
+  case _:throw core.ds.NotFound.instance;
  };
  public static function getIterableParam(t:T):T return switch follow(t) {
-  case TAnon(a):if(a.aStatus!=Closed) throw new core.ds.NotFound(); var field=a.aFields.get("iterator"); if(field==null) throw new core.ds.NotFound();
-   switch follow(field.cfType) {case TFun({args:[],ret:it}):var t=getIteratorParam(it); if(Lambda.count(a.aFields)!=1) throw new core.ds.NotFound(); t; case _:throw new core.ds.NotFound();}
-  case _:throw new core.ds.NotFound();
+  case TAnon(a):if(a.aStatus!=Closed) throw core.ds.NotFound.instance; var field=a.aFields.get("iterator"); if(field==null) throw core.ds.NotFound.instance;
+   switch follow(field.cfType) {case TFun({args:[],ret:it}):var t=getIteratorParam(it); if(Lambda.count(a.aFields)!=1) throw core.ds.NotFound.instance; t; case _:throw core.ds.NotFound.instance;}
+  case _:throw core.ds.NotFound.instance;
  };
  public static function getOwnResolution(ctx:TyperContext):ResolutionList {
   if(ctx.m.ownResolution!=null) return ctx.m.ownResolution;
@@ -106,8 +106,8 @@ class Typer {
      case TEnum(en,_):{isEnum:true,path:en.ePath,fields:en.eNames,type:TEnumDecl(en)};
      case TAbstract(a,_) if(a.aImpl!=null&&a.aEnum):{isEnum:false,path:a.aPath,fields:a.aImpl.clOrderedStatics.filter(cf -> hasClassFieldFlag(cf,CfEnum)).map(cf -> cf.cfName),type:TAbstractDecl(a)};
      case TAbstract(a,pl) if(!Meta.has(MetaTag.CoreType,a.aMeta)):
-      var froms=TyperBase.getAbstractFroms(ctx,a,pl); if(froms.length!=1||Lambda.exists(stack,t2 -> shallowEq(t,t2))) throw new core.ds.Exit(); loop([t].concat(stack),froms[0].type);
-     case _:throw new core.ds.Exit();
+      var froms=TyperBase.getAbstractFroms(ctx,a,pl); if(froms.length!=1||Lambda.exists(stack,t2 -> shallowEq(t,t2))) throw core.ds.Exit.instance; loop([t].concat(stack),froms[0].type);
+     case _:throw core.ds.Exit.instance;
     };
     var expected=loop([],t),old=ctx.m.enumWithType; ctx.m.enumWithType=expected.type;
     var access:AccessKind;
@@ -118,7 +118,7 @@ class Typer {
     ctx.m.enumWithType=old;
     switch access {case AKExpr(e):switch follow(e.etype) {case TFun({args:_,ret:ret}) if(expected.isEnum):try core.TUnification.unify(ret,t) catch(exc:Dynamic) {switch exc {case (core.ds.ExceptionTools.unification(_) => Some(_)): case _:throw exc;}} case _:} case _:}
     access;
-   case _:throw new core.ds.Exit();
+   case _:throw core.ds.Exit.instance;
   } catch(_:core.ds.Exit) { return f();}
  }
  public static function unifyMinRaise(ctx:TyperContext,el:Array<TExpr>):T {try return UnifyMin.unifyMinRaise(ctx.t,el) catch(_:typing.UnifyMin.NoValue) { return spawnMonomorph(ctx,Globals.nullPos);}}
@@ -130,12 +130,12 @@ class Typer {
  }
  public static function resolveAgainstExpectedEnum(ctx:TyperContext,i:String):ResolvedImport {
   function loop(mt:ModuleType):ResolvedImport return switch mt {
-   case TAbstractDecl(a) if(a.aImpl!=null&&a.aEnum):var cf=a.aImpl.clStatics.get(i); if(cf==null||!hasClassFieldFlag(cf,CfEnum)) throw new core.ds.NotFound(); staticAbstractFieldResolution(a,a.aImpl,cf,null,Globals.nullPos);
-   case TClassDecl(_)|TAbstractDecl(_):throw new core.ds.NotFound();
-   case TTypeDecl(t):switch follow(t.tType) {case TEnum(e,_):loop(TEnumDecl(e)); case TAbstract(a,_) if(a.aEnum):loop(TAbstractDecl(a)); case _:throw new core.ds.NotFound();}
-   case TEnumDecl(en):var ef=en.eConstrs.get(i); if(ef==null) throw new core.ds.NotFound(); enumConstructorResolution(en,ef,null,Globals.nullPos);
+   case TAbstractDecl(a) if(a.aImpl!=null&&a.aEnum):var cf=a.aImpl.clStatics.get(i); if(cf==null||!hasClassFieldFlag(cf,CfEnum)) throw core.ds.NotFound.instance; staticAbstractFieldResolution(a,a.aImpl,cf,null,Globals.nullPos);
+   case TClassDecl(_)|TAbstractDecl(_):throw core.ds.NotFound.instance;
+   case TTypeDecl(t):switch follow(t.tType) {case TEnum(e,_):loop(TEnumDecl(e)); case TAbstract(a,_) if(a.aEnum):loop(TAbstractDecl(a)); case _:throw core.ds.NotFound.instance;}
+   case TEnumDecl(en):var ef=en.eConstrs.get(i); if(ef==null) throw core.ds.NotFound.instance; enumConstructorResolution(en,ef,null,Globals.nullPos);
   };
-  if(ctx.m.enumWithType==null) throw new core.ds.NotFound(); return loop(ctx.m.enumWithType);
+  if(ctx.m.enumWithType==null) throw core.ds.NotFound.instance; return loop(ctx.m.enumWithType);
  }
  public static function typeIdentRaise(ctx:TyperContext,i:String,p:Pos,mode:AccessMode,withType:WithTypeValue):AccessKind {
   function resolve(res:ResolvedImport):AccessKind {
@@ -185,7 +185,7 @@ class Typer {
    };
   }
   try {
-   if(ctx.e.curfun==FunStatic) throw new core.ds.NotFound();
+   if(ctx.e.curfun==FunStatic) throw core.ds.NotFound.instance;
    var raw=classField(ctx,ctx.c.curclass,extractParamTypes(ctx.c.curclass.clParams),i,p);
    return fieldAccess(ctx,mode,raw.field,raw.owner==null?FHAnon:FHInstance(raw.owner.cls,raw.owner.params),TyperBase.getThis(ctx,p),p);
   } catch(_:core.ds.NotFound) {}
@@ -206,8 +206,8 @@ class Typer {
  public static function typeIdent(ctx:TyperContext,i:String,p:Pos,mode:AccessMode,withType:WithTypeValue):AccessKind {
   try return typeIdentRaise(ctx,i,p,mode,withType) catch(_:core.ds.NotFound) {}
   try {
-   if(TyperBase.isLowerIdent(i,p)) throw new core.ds.NotFound();
-   var e:TExpr; try e=TyperBase.typeModuleType(ctx,Typeload.loadTypeDefPrime(ctx,[],i,i,p),p) catch(exc:Dynamic) {switch exc {case (core.ds.ExceptionTools.typing(_) => Some({errMessage:ModuleNotFound({pack:[],name:name})})) if(name==i):throw new core.ds.NotFound(); case _:throw exc;}}
+   if(TyperBase.isLowerIdent(i,p)) throw core.ds.NotFound.instance;
+   var e:TExpr; try e=TyperBase.typeModuleType(ctx,Typeload.loadTypeDefPrime(ctx,[],i,i,p),p) catch(exc:Dynamic) {switch exc {case (core.ds.ExceptionTools.typing(_) => Some({errMessage:ModuleNotFound({pack:[],name:name})})) if(name==i):throw core.ds.NotFound.instance; case _:throw exc;}}
    return AKExpr(e);
   } catch(_:core.ds.NotFound) {}
   var resolved=false;
@@ -240,7 +240,7 @@ class Typer {
         if(part.caseKind==PLowercase) {if(upper==null) pack.push(part.name); else {position=upper.pos; break;}}
         else if(upper==null) {upper=part; position=part.pos;} else {sub=part.name; position=part.pos; break;}
        }
-       if(upper==null) throw new core.ds.NotFound();
+       if(upper==null) throw core.ds.NotFound.instance;
        var mpath={pack:pack,name:upper.name};
        if(ctx.com.moduleLut.mem(mpath)) return raiseErrorMsg(TypeNotFound(mpath,sub==null?upper.name:sub,NotDefined),position);
        return raiseErrorMsg(ModuleNotFound(mpath),position);
@@ -351,7 +351,7 @@ class Typer {
     try {
      var t:T;
      if(dynamicParameter!=null) t=dynamicParameter;
-     else {original=fieldMap.get(n); if(original==null) throw new core.ds.NotFound(); if(ctx.f.inDisplay&&DisplayPosition.displayPosition.enclosedIn(pn)) context.DeferredServices.display(); t=original.cfType;}
+     else {original=fieldMap.get(n); if(original==null) throw core.ds.NotFound.instance; if(ctx.f.inDisplay&&DisplayPosition.displayPosition.enclosedIn(pn)) context.DeferredServices.display(); t=original.cfType;}
      e=typeExpr(ctx,field.expr,WithTypeTools.withStructureField(t,n)); e=AbstractCast.castOrUnify(ctx,t,e,e.epos);
      if(isNull(t)&&!isNull(e.etype)) e=mk(TCast(e,null),ctx.t.tnull(e.etype),e.epos);
      try typeEq(EqStrict,e.etype,t) catch(exc:Dynamic) {switch exc {case (core.ds.ExceptionTools.unification(_) => Some(_)):e=mk(TCast(e,null),t,e.epos); case _:throw exc;}}
@@ -523,7 +523,7 @@ class Typer {
   var m=Typeload.loadModule(ctx,{pack:["haxe","ds"],name:"Map"},Globals.nullPos),a:Null<TAbstract>,c:Null<TClass>;
   if(m.mTypes.length>0) switch m.mTypes[0] {case TAbstractDecl(abstractType) if(abstractType.aImpl!=null):a=abstractType; c=abstractType.aImpl; case _:a=null; c=null;} else {a=null; c=null;}
   if(a==null) raiseTypingError("Module haxe.ds.Map is expected to contain an abstract type with an implementation, but found ["+m.mTypes.map(sModuleTypeKind).join(", ")+"]",p);
-  var tmap=TAbstract(a,[tk,tv]),cf=c.clStatics.get("set"); if(cf==null) throw new core.ds.NotFound();
+  var tmap=TAbstract(a,[tk,tv]),cf=c.clStatics.get("set"); if(cf==null) throw core.ds.NotFound.instance;
   var v=genLocal(ctx,tmap,p),ev=mk(TLocal(v),tmap,p),ec=TyperBase.typeModuleType(ctx,TClassDecl(c),p),ef=mk(TField(ec,FStatic(c,cf)),tfun([tk,tv],ctx.t.tvoid),p);
   var result=[ev]; for(i in 0...keyExprs.length) result.push(makeCall(ctx,ef,[ev,keyExprs[i],valueExprs[i]],ctx.com.basic.tvoid,p)); result.reverse();
   result.unshift(mk(TVar(v,mk(TNew(c,[tk,tv],[]),tmap,p)),tDynamic,p)); return mk(TBlock(result),tmap,p);
@@ -590,7 +590,7 @@ class Typer {
   Typeload.generateArgsMeta(ctx.com,null,m -> v.vMeta.unshift(m),f.fArgs);
   if(params.length>0||inlined) v.vExtra=varExtra(params,inlined?e:null);
   if(ctx.f.inDisplay&&DisplayPosition.displayPosition.enclosedIn(v.vPos)) context.DeferredServices.display();
-  function usage(event:Usage):Void switch event {case Usage.Block(f)|Usage.Loop(f)|Usage.Function(f):f(usage); case Usage.Use(v2)|Usage.Assign(v2) if(v==v2):throw new core.ds.Exit(); case Usage.Use(_)|Usage.Assign(_)|Usage.Declare(_):}
+  function usage(event:Usage):Void switch event {case Usage.Block(f)|Usage.Loop(f)|Usage.Function(f):f(usage); case Usage.Use(v2)|Usage.Assign(v2) if(v==v2):throw core.ds.Exit.instance; case Usage.Use(_)|Usage.Assign(_)|Usage.Declare(_):}
   var recursive=false;
   try LocalUsage.localUsage(usage,e) catch(_:core.ds.Exit) { recursive=true;}
   var exprs=withType!=NoValue&&!inlined?[mk(TLocal(v),v.vType,p)]:[];
@@ -760,8 +760,8 @@ class Typer {
      typeExpr(ctx,{expr:ECall(trace,[toStringMeta(first),infos]),pos:p},NoValue);
     }
    }
-  case EField({expr:EConst(Ident("super"))},_,_):throw new core.ds.Exit();
-  case EField(on,"bind",kind):var typed=typeExpr(ctx,on,WithTypeTools.value); switch follow(typed.etype) {case TFun({args:args,ret:ret}):typeBind(ctx,typed,{args:args,ret:ret},el,kind==EFSafe,e.pos); case _:throw new core.ds.Exit();}
+  case EField({expr:EConst(Ident("super"))},_,_):throw core.ds.Exit.instance;
+  case EField(on,"bind",kind):var typed=typeExpr(ctx,on,WithTypeTools.value); switch follow(typed.etype) {case TFun({args:args,ret:ret}):typeBind(ctx,typed,{args:args,ret:ret},el,kind==EFSafe,e.pos); case _:throw core.ds.Exit.instance;}
   case EConst(Ident("$type")) if(el.length>0):
    var expected=el.length==2&&(switch el[1].expr {case EConst(Ident("_")):true; case _:false;})?WithTypeTools.toString(withType):null;
    var value=typeExpr(ctx,el[0],withType),s=sType(printContext(),value.etype); if(expected!=null) s+=" (expected: "+expected+")"; warning(ctx,WInfo,s,value.epos); value;
@@ -773,7 +773,7 @@ class Typer {
     case TAbstract(a,tl) if(Meta.has(MetaTag.Forward,a.aMeta)&&!Meta.has(MetaTag.CoreType,a.aMeta)):if(a.aImpl!=null&&a.aImpl.clStatics.exists("match")&&hasClassFieldFlag(a.aImpl.clStatics.get("match"),CfImpl)) false; else hasEnumMatch(AbstractTools.getUnderlyingType(a,tl,true));
     case _:false;
    };
-   if(!hasEnumMatch(typed.etype)) throw new core.ds.Exit();
+   if(!hasEnumMatch(typed.etype)) throw core.ds.Exit.instance;
    Matcher.matchExpr(ctx,on,[{patterns:[el[0]],guard:null,expr:{expr:EConst(Ident("true")),pos:e.pos},pos:e.pos}],{expr:{expr:EConst(Ident("false")),pos:e.pos},pos:e.pos},WithTypeTools.withType(ctx.t.tbool),true,e.pos);
   case EConst(Ident("__unprotect__")) if(el.length==1&&switch el[0].expr {case EConst(String(_)):true; case _:false;}):
    var value=typeExpr(ctx,el[0],WithTypeTools.value);
@@ -786,7 +786,7 @@ class Typer {
    if(Meta.has(MetaTag.CompilerGenerated,cf.cfMeta)) displayError(ctx.com,errorMsg(NoConstructor(TClassDecl(c))),p);
    fa=FieldAccessTools.create(on,cf,FHInstance(c,params),false,p); var fcc=unifyFieldCall(ctx,fa,[],el,p,false);
    mk(TCall(mk(TConst(TSuper),t,e.pos),fcc.fcArgs),ctx.t.tvoid,p);
-  case _:throw new core.ds.Exit();
+  case _:throw core.ds.Exit.instance;
  };
  public static function typeExpr(ctx:TyperContext,syntax:Expr,withType:WithTypeValue,?mode:AccessMode):TExpr {
   if(mode==null) mode=MGet;

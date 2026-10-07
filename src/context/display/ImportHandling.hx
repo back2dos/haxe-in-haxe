@@ -53,7 +53,7 @@ class ImportHandling {
    var lower=name.charAt(0)>="a"&&name.charAt(0)<="z",candidates=lower?staticNames():types.map(mt->tInfos(mt).mtPath.name);
    return raiseTypingError(StringError.stringError(name,candidates,"Module "+Globals.sTypePath(md.mPath)+" does not define "+(lower?"field":"type")+" "+name),p);
   }
-  function findType(name:String):ModuleType {for(mt in types) if(tInfos(mt).mtPath.name==name) return mt;throw new NotFound();}
+  function findType(name:String):ModuleType {for(mt in types) if(tInfos(mt).mtPath.name==name) return mt;throw NotFound.instance;}
   function getType(name:String):ModuleType {var t=try findType(name) catch(_:NotFound) failUsefully(name,pType);checkPrivate(t,pType);return t;}
   function checkAlias(mt:ModuleType,name:String,pname:Pos):Void {
    if(!(name.charAt(0)>="A"&&name.charAt(0)<="Z")) raiseTypingError("Type aliases must start with an uppercase letter",pname);
@@ -63,7 +63,7 @@ class ImportHandling {
    case TClassDecl(c):c.clBuild();staticFieldResolution(c,PMap.find(s,c.clStatics),name,p);
    case TAbstractDecl(a) if(a.aImpl!=null):var c=a.aImpl;c.clBuild();staticAbstractFieldResolution(a,c,PMap.find(s,c.clStatics),name,p);
    case TEnumDecl(en):enumConstructorResolution(en,PMap.find(s,en.eConstrs),name,p);
-   case _:throw new NotFound();
+   case _:throw NotFound.instance;
   };
   function addLazyResolution(f:Void->Null<ResolvedImport>):Void ctx.m.importResolution.add(lazyResolution(f));
   switch mode {
@@ -105,7 +105,7 @@ class ImportHandling {
         try {
          c.clBuild();
          for(cf in c.clOrderedStatics) if(cf.cfName==subName) {if(!hasClassFieldFlag(cf,CfPublic)) errorPrivate(p);return staticFieldResolution(c,cf,alias,p);}
-         throw new NotFound();
+         throw NotFound.instance;
         } catch(_:NotFound) return findMainTypeStatic();
        }
        return findMainTypeStatic();

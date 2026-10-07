@@ -89,16 +89,16 @@ class SourceParser {
   }
   // The pre-existing ClassPaths API signals absence as null through this method.
   var lookup=classPaths.findFileNoRaise(pack.concat([path.name]).join("/")+".hx");
-  if(lookup==null) throw new NotFound();
+  if(lookup==null) throw NotFound.instance;
   var rfile=lookup.resolvedFile;
   if(Sys.systemName()=="Windows") switch path.name.toLowerCase() {
    case "con","aux","prn","nul","com1","com2","com3","lpt1","lpt2","lpt3":
-    var size=try sys.FileSystem.stat(rfile.file).size catch(_:Dynamic) 0;if(size<=0) throw new NotFound();
+    var size=try sys.FileSystem.stat(rfile.file).size catch(_:Dynamic) 0;if(size<=0) throw NotFound.instance;
    case _:
   }
   if(path.pack.length>0&&path.pack[0]=="std") {
    var key=com.partScope.fileKeys.get(rfile.file);
-   for(cp in classPaths.getStdPaths()) if(UniqueKey.startsWith(key,com.partScope.fileKeys.get(cp.path))) throw new NotFound();
+   for(cp in classPaths.getStdPaths()) if(UniqueKey.startsWith(key,com.partScope.fileKeys.get(cp.path))) throw NotFound.instance;
   }
   if(forbidden) {
    var meta:Metadata=[];

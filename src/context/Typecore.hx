@@ -373,7 +373,7 @@ class Typecore {
 					var constructor = c.clConstructor;
 					if (constructor != null) {
 						if (allowed(constructor)) found = true;
-						else if (constructor.cfExpr != null) throw new NotFound();
+						else if (constructor.cfExpr != null) throw NotFound.instance;
 					}
 				} else {
 					var field = (stat ? c.clStatics : c.clFields).get(cf.cfName);

@@ -243,7 +243,7 @@ class Parser {
 		return wouldSkipDisplayPosition(ctx,p0,plusOne,s) ? {name:null,pos:DisplayPosition.displayPosition.withPos(p0)} : null;
 	}
 	public static function checkTypeDeclFlagCompletion(ctx:ParserContext,mode:TypeDeclCompletionMode,flags:Array<{flag:DeclFlag,pos:Pos}>,s:Stream<ParserToken>):Void {
-		if (!ctx.config.inDisplayFile || !isCompletion(ctx)) throw new core.ds.Stream.StreamFailure();
+		if (!ctx.config.inDisplayFile || !isCompletion(ctx)) throw core.ds.Stream.StreamFailure.instance;
 		var next:ParserToken = s.peek();
 		if (next != null) switch next.token {
 			case Const(Ident(name)) if (DisplayPosition.displayPosition.enclosedIn(next.pos)):
@@ -251,7 +251,7 @@ class Parser {
 			case _:
 		}
 		if (flags.length > 0 && wouldSkipDisplayPosition(ctx,flags[0].pos,true,s)) syntaxCompletion(SCAfterTypeFlag(flags.map(function(entry) return entry.flag)),null,DisplayPosition.displayPosition.withPos(flags[0].pos));
-		else throw new core.ds.Stream.StreamFailure();
+		else throw core.ds.Stream.StreamFailure.instance;
 	}
 	public static function checkTypeDeclCompletion(ctx:ParserContext,mode:TypeDeclCompletionMode,pmax:Int,s:Stream<ParserToken>):Void {
 		if (!ctx.config.inDisplayFile || !isCompletion(ctx)) return;
@@ -276,6 +276,6 @@ class Parser {
 	public static function noKeyword(what:String,s:Stream<ParserToken>):Dynamic {
 		var next:ParserToken=s.peek();
 		if (next != null) switch next.token { case Kwd(kwd):return error(Custom("Keyword "+Ast.sKeyword(kwd)+" cannot be used as "+what),next.pos); case _: }
-		throw new core.ds.Stream.StreamFailure();
+		throw core.ds.Stream.StreamFailure.instance;
 	}
 }

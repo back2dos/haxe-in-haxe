@@ -31,7 +31,7 @@ import typing.matcher.Constructor;
 typedef PatternContext={var ctx:Typer;var orLocals:Null<haxe.ds.StringMap<{v:TVar,p:Pos}>>;var ctxLocals:core.ds.PersistentMap<String,TVar>;var currentLocals:haxe.ds.StringMap<{v:TVar,p:Pos}>;var inReification:Bool;var isPostfixMatch:Bool;var unsubst:T->T;}
 class BadPattern extends haxe.Exception {public function new(s:String)super(s);}
 class ExprToPattern {
- static function fieldAssoc(name:String,fields:Array<ObjectField>):Expr {for(field in fields)if(field.key.name==name)return field.expr;throw new NotFound();}
+ static function fieldAssoc(name:String,fields:Array<ObjectField>):Expr {for(field in fields)if(field.key.name==name)return field.expr;throw NotFound.instance;}
  // Display requests are excluded from the source-only HXB milestone.
  static function displayDeferred(ctx:Typer,e:Expr,kind:DisplayKind,mode:AccessMode,withType:WithTypeValue):Void throw new haxe.Exception("Pattern display services are not supported by the source-only HXB compiler");
  static function displayExprDeferred(ctx:Typer,e:Expr,typed:TExpr,kind:DisplayKind,mode:AccessMode,withType:WithTypeValue,p:Pos):Void throw new haxe.Exception("Pattern display services are not supported by the source-only HXB compiler");
@@ -63,11 +63,11 @@ class ExprToPattern {
    case TField(_,f):var similar=StringError.getSimilar(fieldName(f),enumerable());if(similar.length>0){var path=switch follow(t){case TEnum(en,_):sTypePath(en.ePath)+".";case TAbstract(a,_):sTypePath(a.aPath)+".";case _:"";};warning(ctx,WTyper,"Potential typo detected (expected similar values are "+similar.map(function(s)return path+s).join(", ")+")",p);}throw new BadPattern("Only inline or read-only (default, never) fields can be used as a pattern");
    case TTypeExpr(mt):PatConstructor({kind:ConTypeExpr(mt),pos:e.epos},[]);
    case TMeta(meta={meta:MetaTag.Deprecated},e1):DeprecationCheck.checkMeta(createDeprecationContext(ctx),[meta],"field",e1.epos);checkExpr(e1);
-   case _:throw new Exit();
+   case _:throw Exit.instance;
   };
   function displayMode():DisplayKind return pctx.isPostfixMatch?DKMarked:DKPattern(toplevel);
   function catchErrors(p:Pos):Void->Void {
-   var old=ctx.com.errorExt;var restore=Common.disableReportMode(ctx.com);ctx.com.errorExt=function(err){var ep=err.errPos;if(ep.pfile!=p.pfile||ep.pmax<p.pmin||ep.pmin>p.pmax)old(err);else throw new Exit();};return function(){restore();ctx.com.errorExt=old;};
+   var old=ctx.com.errorExt;var restore=Common.disableReportMode(ctx.com);ctx.com.errorExt=function(err){var ep=err.errPos;if(ep.pfile!=p.pfile||ep.pmax<p.pmin||ep.pmin>p.pmax)old(err);else throw Exit.instance;};return function(){restore();ctx.com.errorExt=old;};
   }
   function tryTyping(e:Expr):PatternKind {
    var old=ctx.f.isUntyped;ctx.f.isUntyped=true;var restore=catchErrors(e.pos);var typed:TExpr;try{typed=typeExpr(ctx,e,WithTypeTools.withType(t));}catch(ex:haxe.Exception){restore();ctx.f.isUntyped=old;throw ex;}restore();ctx.f.isUntyped=old;

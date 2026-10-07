@@ -11,8 +11,8 @@ for t in $targets; do
 	start=$(date +%s)
 	case $t in
 		js) "$HAXE" -cp bench/js-shims -cp src -main haxe.Main -lib hxnodejs --js "$OUT/hih.js" ;;
-		hl) "$HAXE" -cp src -main haxe.Main --hl "$OUT/hih.hl" ;;
-		hlc) "$HAXE" -cp src -main haxe.Main --hl "$OUT/hlc/main.c" &&
+		hl) "$HAXE" -cp runtime/hl -cp src -main haxe.Main --hl "$OUT/hih.hl" ;;
+		hlc) "$HAXE" -cp runtime/hl -cp src -main haxe.Main --hl "$OUT/hlc/main.c" &&
 			cc -O2 -std=c11 -o "$OUT/hih-hlc" -I "$OUT/hlc" -I /usr/local/include "$OUT/hlc/main.c" -L/usr/local/lib -lhl -lm -Wl,-rpath,/usr/local/lib ;;
 		jvm) "$HAXE" -cp src -main haxe.Main -lib hxjava --jvm "$OUT/hih.jar" ;;
 		cpp) "$HAXE" -cp src -main haxe.Main -lib hxcpp -D HXCPP_M64 --cpp "$OUT/cpp" ;;

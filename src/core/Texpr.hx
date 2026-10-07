@@ -68,10 +68,10 @@ class Texpr {
    case TLocal(v):def = TLocal(fv(v));
    case TField(a,FClosure(null,cf)):
     var a = f(a); var fa:TFieldAccess = FClosure(null,cf);
-    try {switch quickField(a.etype,cf.cfName) {case FInstance(c,tl,cf):fa = FClosure({cls:c,params:tl},cf); case _:throw new NotFound();}} catch (_:NotFound) {}
+    try {switch quickField(a.etype,cf.cfName) {case FInstance(c,tl,cf):fa = FClosure({cls:c,params:tl},cf); case _:throw NotFound.instance;}} catch (_:NotFound) {}
     def = TField(a,fa);
    case TField(a,fa):
-    var a = f(a); try {var name = switch fa {case FClosure(_,_):throw new NotFound(); case FAnon(cf) | FInstance(_,_,cf) | FStatic(_,cf):cf.cfName; case FEnum(_,ef):ef.efName; case FDynamic(s):s;}; fa = quickField(a.etype,name);} catch (_:NotFound) {}
+    var a = f(a); try {var name = switch fa {case FClosure(_,_):throw NotFound.instance; case FAnon(cf) | FInstance(_,_,cf) | FStatic(_,cf):cf.cfName; case FEnum(_,ef):ef.efName; case FDynamic(s):s;}; fa = quickField(a.etype,name);} catch (_:NotFound) {}
     def = TField(a,fa);
    case TNew(c,pl,el):
     et = ft(e.etype); var t = switch c.clKind {case KTypeParameter(_) | KGeneric:et; case _:ft(TInst(c,pl));};
@@ -141,7 +141,7 @@ class Texpr {
    case TVar(v,eo):var w = copy(v); withExpr(e,TVar(w,eo == null ? null : build(eo)));
    case TTry(a,cl):var cl = cl.map(c -> {variable:copy(c.variable),expr:build(c.expr)}); withExpr(e,TTry(build(a),cl));
    case TFunction(f):var args = f.tfArgs.map(a -> {variable:copy(a.variable),defaultValue:a.defaultValue == null ? null : build(a.defaultValue)}); withExpr(e,TFunction({tfArgs:args,tfType:f.tfType,tfExpr:build(f.tfExpr)}));
-   case TLocal(v):try {if (!vars.exists(v.vId)) throw new NotFound(); withExpr(e,TLocal(vars.get(v.vId)));} catch (_:Dynamic) {e;}
+   case TLocal(v):try {if (!vars.exists(v.vId)) throw NotFound.instance; withExpr(e,TLocal(vars.get(v.vId)));} catch (_:Dynamic) {e;}
    case TConst(TThis):fThis(e);
    case _:mapExpr(build,e);
   }; return build(e);

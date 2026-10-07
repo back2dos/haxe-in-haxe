@@ -104,7 +104,7 @@ class TypeloadCheck {
  public static function checkOverrideField(ctx:Typer,p:Pos,r:RedefinitionContext):Void {
   var i=r.cfNew.cfName, hasOverride=hasClassFieldFlag(r.cfNew,CfOverride);
   checkNativeNameOverride(ctx,r.cfNew,r.cfOld);
-  switch r.cfNew.cfKind {case Var({vRead:AccRequire(_)}):throw new NotFound(); case _:}
+  switch r.cfNew.cfKind {case Var({vRead:AccRequire(_)}):throw NotFound.instance; case _:}
   if(hasClassFieldFlag(r.cfOld,CfAbstract)) {
    if(hasOverride) displayError(ctx.com,"Field "+i+" is declared 'override' but parent field "+i+" is 'abstract' and does not provide any implementation to override",p);
    else addClassFieldFlag(r.cfNew,CfOverride);
@@ -163,7 +163,7 @@ class TypeloadCheck {
    var overloads:Array<Dynamic>=getOverloads(ctx.com,csup,i);
    for(pair in overloads) switch pair.field.cfKind {case Var(_):displayError(ctx.com,"A variable named '"+pair.field.cfName+"' was already declared in a superclass",f.cfPos); case _:}
    return OverloadOverride(function() {
-    var r=findOverrideField(ctx,c,f,csup,params,function(csup:TClass,i:String):Dynamic {for(pair in overloads) if(Overloads.sameOverloadArgs(f.cfType,applyParams(csup.clParams,params,pair.type),f,pair.field)) return pair; throw new NotFound();},true,p);
+    var r=findOverrideField(ctx,c,f,csup,params,function(csup:TClass,i:String):Dynamic {for(pair in overloads) if(Overloads.sameOverloadArgs(f.cfType,applyParams(csup.clParams,params,pair.type),f,pair.field)) return pair; throw NotFound.instance;},true,p);
     if(r!=null) checkOverrideField(ctx,p,r);
    });
   }
@@ -172,12 +172,12 @@ class TypeloadCheck {
  }
  public static function classFieldNoInterf(c:TClass,i:String):Dynamic {
   if(c.clFields.exists(i)) {var f=c.clFields.get(i); return {map:function(t:T) return t,type:f.cfType,field:f};}
-  var sup=c.clSuper; if(sup==null) throw new NotFound();
+  var sup=c.clSuper; if(sup==null) throw NotFound.instance;
   var raw=rawClassField(f -> f.cfType,sup.cls,sup.params,i),map=TClassTools.getMapFunction(sup.cls,sup.params);
   return {map:map,type:applyParams(sup.cls.clParams,sup.params,raw.type),field:raw.field};
  }
  public static function returnFlow(ctx:Typer,e:TExpr):Void {
-  function error():Void {displayError(ctx.com,"Missing return: "+sType(printContext(),ctx.e.ret),e.epos); throw new Exit();}
+  function error():Void {displayError(ctx.com,"Missing return: "+sType(printContext(),ctx.e.ret),e.epos); throw Exit.instance;}
   switch e.eexpr {
    case TReturn(_) | TThrow(_):
    case TParenthesis(e) | TMeta(_,e):returnFlow(ctx,e);
@@ -239,7 +239,7 @@ class Inheritance {
     if(f2.cfOverloads.length!=0 || hasClassFieldFlag(f2,CfOverload)) {
      var overloads:Array<Dynamic>=getOverloads(com,c,f.cfName); isOverload=true; var found=false;
      for(pair in overloads) if(Overloads.sameOverloadArgs(t,pair.type,f,pair.field)) {t2=pair.type; f2=pair.field; found=true; break;}
-     if(!found) throw new NotFound();
+     if(!found) throw NotFound.instance;
     }
     delay(g,PForce,function() {
      follow(f2.cfType); var p=f2.cfNamePos;

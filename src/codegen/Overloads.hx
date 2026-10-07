@@ -51,7 +51,7 @@ class Overloads {
 			}
 			try {
 				var cf=c.clFields.get(name);
-				if(cf == null) throw new NotFound();
+				if(cf == null) throw NotFound.instance;
 				switch cf.cfKind { case Var(_): case Method(_): add(cf); for(f in cf.cfOverloads) add(f); }
 			} catch(_:NotFound) {}
 			if(c.clSuper != null) {
@@ -92,7 +92,7 @@ class Resolution {
 			var cur={acc:0,c:ca,tl:tla}, stack=[cur];
 			while(true) {
 				if(stack.length==0) {
-					var s=cur.c.clSuper; if(s==null) throw new NotFound();
+					var s=cur.c.clSuper; if(s==null) throw NotFound.instance;
 					cur={acc:cur.acc+1,c:s.cls,tl:s.params.map(function(t) return applyParams(cur.c.clParams,cur.tl,t))};
 					stack=[cur];
 				} else {
@@ -101,12 +101,12 @@ class Resolution {
 					for(s in v.c.clImplements) stack.push({acc:v.acc+1,c:s.cls,tl:s.params.map(function(t) return applyParams(v.c.clParams,v.tl,t))});
 				}
 			}
-			throw new NotFound();
+			throw NotFound.instance;
 		case [TInst(cf,tlf),TInst(ca,tla)]:
 			var acc=0;
-			while(cf!=ca) {var s=ca.clSuper; if(s==null) throw new NotFound(); tla=s.params.map(function(t) return applyParams(ca.clParams,tla,t)); ca=s.cls; acc++;}
+			while(cf!=ca) {var s=ca.clSuper; if(s==null) throw NotFound.instance; tla=s.params.map(function(t) return applyParams(ca.clParams,tla,t)); ca=s.cls; acc++;}
 			rate(cacc+acc,rateTp(tlf,tla));
-		case [TEnum(ef,tlf),TEnum(ea,tla)]: if(ef!=ea) throw new NotFound(); rate(cacc,rateTp(tlf,tla));
+		case [TEnum(ef,tlf),TEnum(ea,tla)]: if(ef!=ea) throw NotFound.instance; rate(cacc,rateTp(tlf,tla));
 		case [TDynamic(_),TDynamic(_)]: rate(cacc,0);
 		case [TDynamic(_),_]: rate(0x7fffffff,0);
 		case [TAbstract(a,_),TDynamic(_)] if(CoreMeta.has(CoreType,a.aMeta) && !nullAbstract(a)): rate(cacc+2,0);
@@ -118,14 +118,14 @@ class Resolution {
 			if(af==aa) rate(cacc,rateTp(tlf,tla)); else {
 				for(t in af.aFrom) try {return rateConv(cacc+1,applyParams(af.aParams,tlf,t),targ);} catch(_:NotFound) {}
 				for(t in aa.aTo) try {return rateConv(cacc+1,tfun,applyParams(aa.aParams,tla,t));} catch(_:NotFound) {}
-				throw new NotFound();
+				throw NotFound.instance;
 			}
 		case [TFun(_),TFun(_)]: rate(cacc,0);
 		case [TInst(cf,tlf),TFun(_)] if(hasClassFlag(cf,CFunctionalInterface)):
 			var sam=core.TOther.TClassTools.getSingularInterfaceField(cf.clOrderedFields);
-			if(sam==null) throw new NotFound();
+			if(sam==null) throw NotFound.instance;
 			rateConv(cacc+1,applyParams(cf.clParams,tlf,sam.cfType),targ);
-		case _: throw new NotFound();
+		case _: throw NotFound.instance;
 	}
 	static function compareRate(a:ConversionRate,b:ConversionRate):Int return a.conversions<b.conversions ? -1 : a.conversions>b.conversions ? 1 : a.params<b.params ? -1 : a.params>b.params ? 1 : 0;
 	public static function isBest(a:Array<ConversionRate>,b:Array<ConversionRate>):Bool {

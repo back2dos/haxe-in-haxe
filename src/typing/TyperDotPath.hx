@@ -25,10 +25,10 @@ class TyperDotPath {
 	}
 	public static function sDotPath(parts:Array<DotPathPart>):String return parts.map(function(p) return p.name).join(".");
 	public static function resolveModuleField(ctx:Typer, m:ModuleDef, path:Array<DotPathPart>, p:Pos, mode:AccessMode, withType:WithTypeValue):DotPathResolution {
-		if (path.length == 0 || m.mStatics == null) throw new NotFound();
+		if (path.length == 0 || m.mStatics == null) throw NotFound.instance;
 		var first = path[0], c = m.mStatics;
 		var f = c.clStatics.get(first.name);
-		if (f == null) throw new NotFound();
+		if (f == null) throw NotFound.instance;
 		var e = typeModuleType(ctx, TClassDecl(c), first.pos);
 		return {access:fieldAccess(ctx, mode, f, FHStatic(c), e, first.pos), rest:path.slice(1)};
 	}
@@ -84,6 +84,6 @@ class TyperDotPath {
 			} else resolveUnqualified(ctx, part.name, path, part.pos, useMode, useType);
 			return fieldChain(ctx, resolved.rest, resolved.access, mode, withType);
 		}
-		throw new NotFound();
+		throw NotFound.instance;
 	}
 }

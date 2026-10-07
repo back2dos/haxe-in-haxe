@@ -14,6 +14,12 @@ import core.ds.TaskPool;
 // (--connect, --wait, --server-connect) belong to the display/server milestone.
 class Main {
 	static function main():Void {
+		#if js
+		// Like OCaml, only record backtraces with OCAMLRUNPARAM=b: the compiler
+		// throws exceptions for ordinary control flow (see runtime/hl for HashLink).
+		var ocamlrunparam = Sys.getEnv("OCAMLRUNPARAM");
+		if (ocamlrunparam == null || ocamlrunparam.indexOf("b") < 0) js.Syntax.code("Error.stackTraceLimit = 0");
+		#end
 		Sys.exit(run(Sys.args()));
 	}
 

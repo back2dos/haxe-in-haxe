@@ -99,7 +99,7 @@ class Ast {
   walk("",e);return buf.toString();
  }
  public static function mkEvar(name:PlacedName,?type:TypeHint,?expr:Expr,?meta:Metadata,isFinal:Bool=false,isStatic:Bool=false):EVar return {evName:name,evFinal:isFinal,evStatic:isStatic,evType:type,evExpr:expr,evMeta:meta==null?[]:meta};
- public static function stringPosListOfExprPathRaise(e:Expr):Array<PlacedName> return switch e.expr {case EConst(Ident(name)):[{name:name,pos:e.pos}];case EField(inner,name,_):[{name:name,pos:e.pos}].concat(stringPosListOfExprPathRaise(inner));case _:throw new core.ds.Exit();};
+ public static function stringPosListOfExprPathRaise(e:Expr):Array<PlacedName> return switch e.expr {case EConst(Ident(name)):[{name:name,pos:e.pos}];case EField(inner,name,_):[{name:name,pos:e.pos}].concat(stringPosListOfExprPathRaise(inner));case _:throw core.ds.Exit.instance;};
  public static function fullDotPath2(mpath:GlobalTypePath,tpath:GlobalTypePath):Array<String> return core.ds.Key.compare(mpath,tpath)==0?tpath.pack.concat([tpath.name]):mpath.pack.concat([mpath.name,tpath.name]);
  public static function iterExpr(loop:Expr->Void,e:Expr):Void {
   function opt(e:Null<Expr>):Void if(e!=null) loop(e);
@@ -118,7 +118,7 @@ class Ast {
   }
  }
  public static function exists(check:ExprDef->Bool,e:Expr):Bool {
-  function loop(e:Expr):Void {if(check(e.expr))throw new core.ds.Exit();iterExpr(loop,e);}
+  function loop(e:Expr):Void {if(check(e.expr))throw core.ds.Exit.instance;iterExpr(loop,e);}
   try {loop(e);return false;}catch(_:core.ds.Exit){return true;}
  }
  public static function removeDuplicates<T>(keep:T->T->Bool,items:Array<T>):Array<T> {
@@ -191,7 +191,7 @@ class Ast {
  public static function stringListOfExprPathRaise(e:Expr,?rootCb:String->Array<String>):Array<String> return switch e.expr {
   case EConst(Ident(i)):rootCb==null?[i]:rootCb(i);
   case EField(e,f,_):[f].concat(stringListOfExprPathRaise(e,rootCb));
-  case _:throw new core.ds.Exit();
+  case _:throw core.ds.Exit.instance;
  };
 
  public static function exprOfTypePath(path:GlobalTypePath,p:Pos):Expr {

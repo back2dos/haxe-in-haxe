@@ -82,19 +82,19 @@ class StrictMeta {
  public static function fieldToTypePath(com:CommonContext,e:Expr):core.Ast.TypePath {
   function loop(e:Expr,pack:Array<String>,name:Array<String>):core.Ast.TypePath return switch e.expr {
    case EField(inner,f,_) if(f.charAt(0).toLowerCase()!=f.charAt(0)):
-    if(name.length > 1) {displayError(com,"Unexpected "+f,e.pos); throw new core.ds.Exit();}
+    if(name.length > 1) {displayError(com,"Unexpected "+f,e.pos); throw core.ds.Exit.instance;}
     loop(inner,pack,[f].concat(name));
    case EField(inner,f,_): loop(inner,[f].concat(pack),name);
    case EConst(Ident(f)):
     var n:String, sub:Null<String>=null;
     switch name {
-     case []: if(f.charAt(0).toUpperCase()!=f.charAt(0)) {displayError(com,"A class name must start with an uppercase letter",e.pos); throw new core.ds.Exit();} n=f;
+     case []: if(f.charAt(0).toUpperCase()!=f.charAt(0)) {displayError(com,"A class name must start with an uppercase letter",e.pos); throw core.ds.Exit.instance;} n=f;
      case [nm]: pack=[f].concat(pack); n=nm;
      case [nm,s]: pack=[f].concat(pack); n=nm; sub=s;
      case _: throw "Invalid strict metadata path";
     }
     mkTypePath(pack,n,[],sub);
-   case _: displayError(com,"Unexpected expression when building strict meta",e.pos); throw new core.ds.Exit();
+   case _: displayError(com,"Unexpected expression when building strict meta",e.pos); throw core.ds.Exit.instance;
   };
   return loop(e,[],[]);
  }
@@ -107,7 +107,7 @@ class StrictMeta {
     changedExpr=ef; ctype=CTPath(makePtp(path,ef.pos));
    case [e={expr:EConst(Ident(i)),pos:p}]: changedExpr=e; fields=[]; ctype=CTPath(makePtp(mkTypePath([],i),p));
    case [field={expr:EField(_),pos:p}]: changedExpr=field; fields=[]; ctype=CTPath(makePtp(fieldToTypePath(ctx.com,field),p));
-   case _: displayError(ctx.com,"A @:strict metadata must contain exactly one parameter. Please check the documentation for more information",pos); throw new core.ds.Exit();
+   case _: displayError(ctx.com,"A @:strict metadata must contain exactly one parameter. Please check the documentation for more information",pos); throw core.ds.Exit.instance;
   }
   var t=Typeload.loadComplexType(ctx,false,LoadNormal,{type:ctype,pos:pos});
   flushPass(ctx.g,PBuildClass,"get_strict_meta");

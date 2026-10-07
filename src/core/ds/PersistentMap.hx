@@ -4,14 +4,21 @@ class PersistentMap<K,V> {
  final entries:Array<{key:K,value:V}>;
  public function new(?entries:Array<{key:K,value:V}>) this.entries=entries==null ? [] : entries;
  public static function empty<K,V>():PersistentMap<K,V> return new PersistentMap();
+ // Entries are sorted by Key.compare with unique keys: index of the first entry not below key.
+ function lowerBound(key:K):Int {
+  var lo=0,hi=entries.length;
+  while(lo<hi) {var mid=(lo+hi)>>1;if(Key.compare(entries[mid].key,key)<0) lo=mid+1;else hi=mid;}
+  return lo;
+ }
+ inline function indexOf(key:K):Int {var i=lowerBound(key);return i<entries.length && Key.compare(entries[i].key,key)==0 ? i : -1;}
  public function add(key:K,value:V):PersistentMap<K,V> {
-  var out=entries.copy(),i=0;while(i<out.length && Key.compare(out[i].key,key)<0) i++;
+  var i=lowerBound(key),out=entries.copy();
   if(i<out.length && Key.compare(out[i].key,key)==0) out[i]={key:key,value:value};else out.insert(i,{key:key,value:value});return new PersistentMap(out);
  }
  public function remove(key:K):PersistentMap<K,V> return new PersistentMap(entries.filter(function(e) return Key.compare(e.key,key)!=0));
- public function find(key:K):V {for(e in entries) if(Key.compare(e.key,key)==0) return e.value;throw new NotFound();}
- public function findOpt(key:K):Null<V> {for(e in entries) if(Key.compare(e.key,key)==0) return e.value;return null;}
- public function mem(key:K):Bool {for(e in entries) if(Key.compare(e.key,key)==0) return true;return false;}
+ public function find(key:K):V {var i=indexOf(key);if(i<0) throw NotFound.instance;return entries[i].value;}
+ public function findOpt(key:K):Null<V> {var i=indexOf(key);return i<0 ? null : entries[i].value;}
+ public function mem(key:K):Bool return indexOf(key)>=0;
  public function iter(f:K->V->Void):Void for(e in entries) f(e.key,e.value);
  public function foldi<A>(f:K->V->A->A,acc:A):A {for(e in entries) acc=f(e.key,e.value,acc);return acc;}
  public function keys():Iterator<K> return entries.map(function(e) return e.key).iterator();

@@ -44,7 +44,7 @@ class AnalyzerTexprTransformer {
  }
  public static function blockToTexpr(ctx:AnalyzerContext,bb:BasicBlockData):TExpr {if (!bb.bbClosed) throw "assert: block not closed"; return mk(TBlock(blockToTexprEl(ctx,bb)),bb.bbType,bb.bbPos);}
  public static function func(ctx:AnalyzerContext,i:Int):TExpr {
-  var info = ctx.graph.gFunctions.get(i); if (info == null) throw new core.TFunctions.NotFound(); var e = blockToTexpr(ctx,info.bb);
+  var info = ctx.graph.gFunctions.get(i); if (info == null) throw core.TFunctions.NotFound.instance; var e = blockToTexpr(ctx,info.bb);
   function loop(e:TExpr):TExpr return switch e.eexpr {
    case TLocal(v):withExpr(e,TLocal(getVarOrigin(ctx.graph,v)));
    case TVar(v,eo):var eo = eo == null ? null : loop(eo); var origin = getVarOrigin(ctx.graph,v); maybeInheritVarName(origin,v); withExpr(e,TVar(origin,eo));

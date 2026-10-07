@@ -130,7 +130,7 @@ def main():
         if not hl:
             raise SystemExit("HashLink (hl) not found; set HAXE_HL")
         port_hl = GENERATED / "haxe-in-haxe.hl"
-        code, _ = run([reference, "-cp", str(ROOT / "src"), "-main", "haxe.Main", "-hl", str(port_hl)], ROOT, GENERATED / "build-hl.log", env)
+        code, _ = run([reference, "-cp", str(ROOT / "runtime/hl"), "-cp", str(ROOT / "src"), "-main", "haxe.Main", "-hl", str(port_hl)], ROOT, GENERATED / "build-hl.log", env)
         if code != 0:
             raise SystemExit("Building the port for HashLink failed; see " + str(GENERATED / "build-hl.log"))
         port_cmd = [hl, str(port_hl)]

@@ -51,7 +51,7 @@ class Grammar {
 		try return {v: f()} catch (_:StreamFailure) return null;
 	}
 
-	static function fail<T>():T throw new StreamFailure();
+	static function fail<T>():T throw StreamFailure.instance;
 
 	static function serror<T>():T throw new StreamError("Parse error.");
 

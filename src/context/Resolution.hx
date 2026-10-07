@@ -103,7 +103,7 @@ class ResolutionList {
 				if (alias == i) return res;
 			case RLazy(_), RWildcardPackage(_):
 		}
-		throw new core.ds.NotFound();
+		throw core.ds.NotFound.instance;
 	}
 	public function resolve(i:String):ResolvedImport { resolveLazies(); return resolveUnforced(i); }
 	public function expandEnumConstructors(mt:ModuleType):Null<ResolvedImport> return switch mt {
@@ -147,7 +147,7 @@ class ResolutionList {
 	}
 	public function findTypeImport(alias:String):{type:ModuleType, pos:Pos} {
 		cacheTypeImports();
-		if (!typeImportCache.exists(alias)) throw new core.ds.NotFound();
+		if (!typeImportCache.exists(alias)) throw core.ds.NotFound.instance;
 		return typeImportCache.get(alias);
 	}
 	public function extractTypeImports():Array<{type:ModuleType, pos:Pos}> {

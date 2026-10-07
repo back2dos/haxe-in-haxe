@@ -49,7 +49,7 @@ class LegacyGrammar {
    case Kwd(k):{token:null,expr:parseMacroIdent(ctx,Ast.sKeyword(k),token.pos,s)};
    case Unop(op):var result=parseMacroCond(ctx,s);{token:result.token,expr:Parser.makeUnop(op,result.expr,token.pos)};
    case POpen:var e=parseExpressionStream(ctx,s);var close=s.next();if(close.token!=PClose) throw new StreamError("Parse error.");{token:null,expr:{expr:EParenthesis(validateMacroCond(ctx,s,e)),pos:Ast.punion(token.pos,close.pos)}};
-   case _:throw new StreamFailure();
+   case _:throw StreamFailure.instance;
   };
  }
 

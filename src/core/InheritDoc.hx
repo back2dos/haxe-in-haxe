@@ -24,7 +24,7 @@ class InheritDoc {
 	}
 	public static function getConstructor(c:TClass):{cls:Null<TClass>,field:TClassField} {
 		if (c.clConstructor != null) return {cls:c,field:c.clConstructor};
-		if (c.clSuper == null) throw new NotFound();
+		if (c.clSuper == null) throw NotFound.instance;
 		return getConstructor(c.clSuper.cls);
 	}
 	public static function getClassField(c:TClass,fieldName:String):{cls:Null<TClass>,field:TClassField} {
@@ -32,13 +32,13 @@ class InheritDoc {
 			var cf = try findMap(c.clFields,fieldName) catch (_:NotFound) findMap(c.clStatics,fieldName);
 			return {cls:c,field:cf};
 		} catch (_:NotFound) {
-			if (c.clSuper == null) throw new NotFound();
+			if (c.clSuper == null) throw NotFound.instance;
 			return getClassField(c.clSuper.cls,fieldName);
 		}
 	}
 	public static function findType(ctx:Dynamic,mode:LoadInstanceMode,tp:TypePath,p:Pos):T {
 		try return Typeload.loadInstancePrime(ctx,Ast.makePtp(tp,p),ParamSpawnMonos,mode)
-		catch (_:Dynamic) throw new NotFound();
+		catch (_:Dynamic) throw NotFound.instance;
 	}
 	public static function buildDoc(ctx:Dynamic,doc:{value:Documentation},meta:Metadata,?noArgsCb:(Documentation->Void)->Void):Void {
 		function add(d:Documentation):Void {
@@ -98,14 +98,14 @@ class InheritDoc {
 				case TAnon(a):var cf = findMap(a.aFields,fieldName);buildClassFieldDoc(ctx,null,cf);cf.cfDoc;
 				case TEnum(en,_):var ef = findMap(en.eConstrs,fieldName);buildEnumFieldDoc(ctx,ef);ef.efDoc;
 				case TAbstract(a,_) if (a.aImpl != null):var r = getClassField(a.aImpl,fieldName == "new" ? "_hx_new" : fieldName);buildClassFieldDoc(ctx,r.cls,r.field);r.field.cfDoc;
-				case _:throw new NotFound();
+				case _:throw NotFound.instance;
 			} catch (_:NotFound) return null;
 		}
 		function resolveTypeT(t:T):Documentation return switch follow(t) {
 			case TInst(c,_):buildClassDoc(ctx,c);c.clDoc;
 			case TAbstract(a,_):buildAbstractDoc(ctx,a);a.aDoc;
 			case TEnum(en,_):buildEnumDoc(ctx,en);en.eDoc;
-			case _:throw new NotFound();
+			case _:throw NotFound.instance;
 		};
 		try {
 			if (target.sub == null) return resolveTypeT(findType(ctx,LoadNormal,Ast.mkTypePath(path.pack,path.name),eTarget.pos));

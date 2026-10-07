@@ -207,7 +207,7 @@ class Define {
 	/** Throws when the define is absent, like PMap.find in the OCaml source. */
 	public static function rawDefinedValue(ctx:DefineContext, key:String):String {
 		var value = ctx.values.get(key);
-		if (value == null && !ctx.values.exists(key)) throw new core.ds.NotFound();
+		if (value == null && !ctx.values.exists(key)) throw core.ds.NotFound.instance;
 		return value;
 	}
 

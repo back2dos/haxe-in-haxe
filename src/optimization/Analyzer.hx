@@ -129,13 +129,13 @@ class ConstPropagationImpl implements DataFlowApi<ConstLattice,haxe.ds.IntMap<Co
  public function init(ctx:AnalyzerContext):haxe.ds.IntMap<ConstLattice> return new haxe.ds.IntMap();
  public function commit(actx:AnalyzerContext,ctx:haxe.ds.IntMap<ConstLattice>):Void {
   function inlineValue(e:TExpr,id:Int):TExpr return switch getCell(ctx,id) {
-   case Top | Bottom | EnumValue(_,_) | NullValue(_):throw new NotFound();
-   case ConstValue(ct,t):var replacement = Texpr.typeConstant(actx.com.basic,tconstToConst(ct),e.epos); replacement = {eexpr:replacement.eexpr,etype:t,epos:replacement.epos}; if (!typeChangeOk(actx.com,replacement.etype,e.etype)) throw new NotFound(); replacement;
-   case ModuleValue(mt,t):if (!typeChangeOk(actx.com,t,e.etype)) throw new NotFound(); mk(TTypeExpr(mt),t,e.epos);
+   case Top | Bottom | EnumValue(_,_) | NullValue(_):throw NotFound.instance;
+   case ConstValue(ct,t):var replacement = Texpr.typeConstant(actx.com.basic,tconstToConst(ct),e.epos); replacement = {eexpr:replacement.eexpr,etype:t,epos:replacement.epos}; if (!typeChangeOk(actx.com,replacement.etype,e.etype)) throw NotFound.instance; replacement;
+   case ModuleValue(mt,t):if (!typeChangeOk(actx.com,t,e.etype)) throw NotFound.instance; mk(TTypeExpr(mt),t,e.epos);
   };
   function commit(e:TExpr):TExpr return switch e.eexpr {
    case TLocal(v) if (!(hasVarFlag(v,VCaptured) || core.TOther.ExtType.hasVariableSemantics(v.vType))):try inlineValue(e,v.vId) catch (_:NotFound) e;
-   case TBinop(op = OpAssign | OpAssignOp(_),e1 = {eexpr:TLocal(v)},e2):var e2 = try {if (hasSideEffect(e2)) throw new NotFound(); inlineValue(e2,v.vId);} catch (_:NotFound) {commit(e2);}; withExpr(e,TBinop(op,e1,e2));
+   case TBinop(op = OpAssign | OpAssignOp(_),e1 = {eexpr:TLocal(v)},e2):var e2 = try {if (hasSideEffect(e2)) throw NotFound.instance; inlineValue(e2,v.vId);} catch (_:NotFound) {commit(e2);}; withExpr(e,TBinop(op,e1,e2));
    case TVar(v,e1) if (e1 != null && !hasSideEffect(e1)):var e1 = try inlineValue(e1,v.vId) catch (_:NotFound) commit(e1); withExpr(e,TVar(v,e1));
    case _:mapExpr(commit,e);
   };
@@ -158,7 +158,7 @@ class CopyPropagationImpl implements DataFlowApi<CopyLattice,haxe.ds.IntMap<Copy
  public function commit(actx:AnalyzerContext,ctx:haxe.ds.IntMap<CopyLattice>):Void {
   function commit(bb:BasicBlockData,e:TExpr):TExpr return switch e.eexpr {
    case TLocal(v) if (!hasVarFlag(v,VCaptured)):try {
-    function leave():Dynamic {ctx.remove(v.vId); throw new NotFound();}
+    function leave():Dynamic {ctx.remove(v.vId); throw NotFound.instance;}
     switch getCell(ctx,v.vId) {
      case Local(w):if (!typeChangeOk(actx.com,w.vType,v.vType)) leave(); var origin = getVarOrigin(actx.graph,w); switch getVarInfo(actx.graph,origin).viWrites {case [decl] if (inScope(bb,decl)):case _:leave();} maybeInheritVarName(w,v); commit(bb,withExpr(e,TLocal(w)));
      case ThisValue(t):if (!typeChangeOk(actx.com,t,v.vType)) leave(); mk(TConst(TThis),t,e.epos);

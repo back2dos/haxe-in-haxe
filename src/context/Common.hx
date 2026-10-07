@@ -170,7 +170,7 @@ class Common {
   if (com.platform==Cross) return defaultConfig;
   var c:PlatformConfig=cast Reflect.copy(defaultConfig);c.pfExceptions=cast Reflect.copy(defaultConfig.pfExceptions);c.pfScoping=cast Reflect.copy(defaultConfig.pfScoping);
   switch com.platform {
-   case Cross:return defaultConfig;case CustomTarget(_):throw new core.ds.Exit();
+   case Cross:return defaultConfig;case CustomTarget(_):throw core.ds.Exit.instance;
    case Js:
     var es6=getEsVersion(com.defines)>=6;c.pfStatic=false;c.pfSys=false;c.pfCapturePolicy=es6?CPNone:CPLoopVars;c.pfReservedTypePaths=[path([],"Object"),path([],"Error")];c.pfThisBeforeSuper=!es6;c.pfSupportsRestArgs=true;
     c.pfExceptions.ecNativeThrows=[path(["js","lib"],"Error"),path(["haxe"],"Exception")];c.pfExceptions.ecAvoidWrapping=false;
@@ -280,11 +280,11 @@ class Common {
   var field=parts[0],cl=parts[1],pack=parts.slice(2);pack.reverse();var result=false;
   try {
    var found:Null<ModuleType>=null;for (t in com.types) if (samePath(tPath(t),{pack:pack,name:cl})&&!Meta.has(Meta.RealPath,tInfos(t).mtMeta)) {found=t;break;}
-   if (found==null) throw new NotFound();
+   if (found==null) throw NotFound.instance;
    if (field=="*") result=!hasDce(com)||switch found {case TClassDecl(c):hasClassFlag(c,CUsed);case TAbstractDecl(a):Meta.has(Meta.ValueUsed,a.aMeta);case _:Meta.has(Meta.Used,tInfos(found).mtMeta);};
    else switch found {
     case TClassDecl(c) if (hasClassFlag(c,CExtern)&&(com.platform!=Js||(cl!="Array"&&cl!="Math"))):
-     if (!hasDce(com)) result=true;else {var cf=c.clStatics.get(field);if (cf==null) cf=c.clFields.get(field);if (cf==null) throw new NotFound();result=hasClassFieldFlag(cf,CfUsed);}
+     if (!hasDce(com)) result=true;else {var cf=c.clStatics.get(field);if (cf==null) cf=c.clFields.get(field);if (cf==null) throw NotFound.instance;result=hasClassFieldFlag(cf,CfUsed);}
     case TClassDecl(c):result=c.clStatics.exists(field)||c.clFields.exists(field);
     case _:result=false;
    }
@@ -313,7 +313,7 @@ class Common {
  }
  public static function adaptDefinesToDisplayContext(defines:DefineContext):DefineContext {var result=adaptDefinesToMacroContext(defines);Define.define(result,Define.Display);return result;}
  public static function getEntryPoint(com:CommonContext):Null<{name:String,cls:TClass,expr:TExpr}> {
-  var path=com.main.mainPath;if (path==null) return null;var m:ModuleDef=null;for (candidate in com.modules) if (samePath(candidate.mPath,path)) {m=candidate;break;}if (m==null) throw new NotFound();
+  var path=com.main.mainPath;if (path==null) return null;var m:ModuleDef=null;for (candidate in com.modules) if (samePath(candidate.mPath,path)) {m=candidate;break;}if (m==null) throw NotFound.instance;
   var c=m.mStatics;if (c==null||!c.clStatics.exists("main")) {c=null;for (t in m.mTypes) switch t {case TClassDecl(cls) if (samePath(cls.clPath,path)):c=cls;break;case _:}if (c==null) throw "Invalid_argument: option is None";}
   if (com.main.mainExpr==null) throw "Invalid_argument: option is None";return {name:path.name,cls:c,expr:com.main.mainExpr};
  }

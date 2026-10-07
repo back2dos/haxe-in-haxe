@@ -70,7 +70,7 @@ class Finalization {
 					case TEnumDecl(_) | TTypeDecl(_) | TAbstractDecl(_): raiseTypingError("Invalid -main : " + sTypePath(path) + " is not a class", nullPos);
 					case TClassDecl(cls): c = cls; p = c.clNamePos; f = c.clStatics.get("main");
 				}
-				if (f == null) throw new NotFound();
+				if (f == null) throw NotFound.instance;
 			} catch (error:NotFound) {
 				raiseTypingError("Invalid -main : " + sTypePath(path) + " does not have static function main", p);
 			}

@@ -38,7 +38,7 @@ class FieldAccess {
 	}
 	public static function getHostClassRaise(host:FieldAccessHost):TClass return switch host {
 		case FHStatic(c) | FHInstance(c, _) | FHAbstract(_, _, c): c;
-		case FHAnon: throw new NotFound();
+		case FHAnon: throw NotFound.instance;
 	};
 	public static function getMapFunction(fa:FieldAccessData):T->T return switch fa.faHost {
 		case FHStatic(_) | FHAnon: function(t) return t;
@@ -113,7 +113,7 @@ class FieldAccess {
 			var host:FieldAccessHost;
 			var cf = switch actual.cls.clKind {
 				case KAbstractImpl(a):
-					if (a.aConstructor == null) throw new NotFound();
+					if (a.aConstructor == null) throw NotFound.instance;
 					host = FHAbstract(a, actual.params, actual.cls);
 					a.aConstructor;
 				case _:

@@ -19,16 +19,16 @@ class Abstract {
 			context.allowTransitiveCast = false;
 			found = find(context);
 		} catch (_:NotFound) { found = find(uctx); }
-		if (found == null) throw new NotFound();
+		if (found == null) throw NotFound.instance;
 		return found;
 	}
 	public static function findFieldFrom(uctx:Dynamic,a:T,b:T,ab:TAbstract,tl:TParams):Dynamic {
 		for (field in ab.aFromField) if (unifiesFromField(uctx,a,b,ab,tl,field)) return field;
-		throw new NotFound();
+		throw NotFound.instance;
 	}
 	public static function findFieldTo(uctx:Dynamic,a:T,b:T,ab:TAbstract,tl:TParams):Dynamic {
 		for (field in ab.aToField) if (unifiesToField(uctx,a,b,ab,tl,field)) return field;
-		throw new NotFound();
+		throw NotFound.instance;
 	}
 	public static function findToFrom(uctx:Dynamic,a:T,b:T,a1:TAbstract,tl1:TParams,a2:TAbstract,tl2:TParams):Dynamic {
 		buildAbstract(a1); buildAbstract(a2);
@@ -42,7 +42,7 @@ class Abstract {
 		buildAbstract(ab);
 		if (follow(a) == tDynamic) {
 			for (field in ab.aFromField) if (follow(field.type) == tDynamic) return field;
-			throw new NotFound();
+			throw NotFound.instance;
 		}
 		var b = TAbstract(ab,tl);
 		return findCastField(uctx,function(uctx) return unifiesFrom(uctx,a,b,ab,tl) ? null : findFieldFrom(uctx,a,b,ab,tl));
@@ -51,7 +51,7 @@ class Abstract {
 		buildAbstract(ab);
 		if (follow(b) == tDynamic) {
 			for (field in ab.aToField) if (follow(field.type) == tDynamic) return field;
-			throw new NotFound();
+			throw NotFound.instance;
 		}
 		var a = TAbstract(ab,tl);
 		return findCastField(uctx,function(uctx) return unifiesTo(uctx,a,b,ab,tl) ? null : findFieldTo(uctx,a,b,ab,tl));
@@ -83,7 +83,7 @@ class Abstract {
 		var m = mkMono();
 		var result = findMultitypeParams(a,pl);
 		findTo(uctx,m,a,result.types);
-		for (t in result.definitiveTypes) if (hasMono(t)) throw new NotFound();
+		for (t in result.definitiveTypes) if (hasMono(t)) throw NotFound.instance;
 		return follow(m);
 	}
 	public static function getUnderlyingTypeWithStack(stack:Dynamic,a:TAbstract,pl:TParams,returnFirst:Bool = false):T {
@@ -107,7 +107,7 @@ class Abstract {
 			return returnFirst ? t : result;
 		}
 		try {
-			if (!MetadataTools.has(MetadataTools.MultiType,a.aMeta)) throw new NotFound();
+			if (!MetadataTools.has(MetadataTools.MultiType,a.aMeta)) throw NotFound.instance;
 			return findMultitypeSpecializationType(a,pl);
 		} catch (_:NotFound) {
 			return MetadataTools.has(MetadataTools.CoreType,a.aMeta) ? tDynamic : maybeRecurse(applyParams(a.aParams,pl,a.aThis));
