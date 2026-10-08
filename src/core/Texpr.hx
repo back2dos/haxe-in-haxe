@@ -44,23 +44,61 @@ class Texpr {
   case TTry(a,catches):f(a) || exists(c -> f(c.expr),catches);
  };
  public static function withExpr(e:TExpr,def:TExprDef):TExpr return {eexpr:def,etype:e.etype,epos:e.epos};
+ // Deviation: upstream rebuilds every node; here a node whose children all come back
+ // unchanged is returned as is (texprs are immutable; this saves most allocations
+ // of identity-like passes). Evaluation order is unchanged.
+ static function mapList(f:TExpr->TExpr,el:Array<TExpr>):Array<TExpr> {
+  for (i in 0...el.length) {
+   var x = el[i], y = f(x);
+   if (y != x) {
+    var r = el.slice(0,i); r.push(y);
+    for (j in i + 1...el.length) r.push(f(el[j]));
+    return r;
+   }
+  }
+  return el;
+ }
  public static function mapExpr(f:TExpr->TExpr,e:TExpr):TExpr {
   var def:TExprDef = switch e.eexpr {
    case TConst(_) | TLocal(_) | TBreak | TContinue | TTypeExpr(_) | TIdent(_):return e;
-   case TArray(a,b):var a = f(a); TArray(a,f(b));
-   case TBinop(op,a,b):var a = f(a); TBinop(op,a,f(b));
-   case TWhile(a,b,flag):var a = f(a); TWhile(a,f(b),flag);
-   case TThrow(a):TThrow(f(a)); case TEnumParameter(a,ef,i):TEnumParameter(f(a),ef,i); case TEnumIndex(a):TEnumIndex(f(a));
-   case TField(a,fa):TField(f(a),fa); case TParenthesis(a):TParenthesis(f(a)); case TUnop(op,flag,a):TUnop(op,flag,f(a));
-   case TArrayDecl(el):TArrayDecl(el.map(f)); case TNew(c,pl,el):TNew(c,pl,el.map(f)); case TBlock(el):TBlock(el.map(f));
-   case TObjectDecl(fl):TObjectDecl(fl.map(a -> {key:a.key,expr:f(a.expr)}));
-   case TCall(a,el):var a = f(a); TCall(a,el.map(f));
-   case TVar(v,eo):TVar(v,eo == null ? null : f(eo));
-   case TFunction(fu):var args = fu.tfArgs.map(a -> {variable:a.variable,defaultValue:a.defaultValue == null ? null : f(a.defaultValue)}); TFunction({tfArgs:args,tfType:fu.tfType,tfExpr:f(fu.tfExpr)});
-   case TIf(c,a,b):var c = f(c); var a = f(a); TIf(c,a,b == null ? null : f(b));
-   case TSwitch(s):var subject = f(s.switchSubject); var cases = s.switchCases.map(c -> ({casePatterns:c.casePatterns.map(f),caseExpr:f(c.caseExpr)} : core.TType.TSwitchCase)); var def = s.switchDefault == null ? null : f(s.switchDefault); TSwitch(mkSwitch(subject,cases,def,s.switchExhaustive));
-   case TTry(a,catches):var a = f(a); TTry(a,catches.map(c -> {variable:c.variable,expr:f(c.expr)}));
-   case TReturn(eo):TReturn(eo == null ? null : f(eo)); case TCast(a,mt):TCast(f(a),mt); case TMeta(m,a):TMeta(m,f(a));
+   case TArray(a,b):var a2 = f(a); var b2 = f(b); if (a2 == a && b2 == b) return e; TArray(a2,b2);
+   case TBinop(op,a,b):var a2 = f(a); var b2 = f(b); if (a2 == a && b2 == b) return e; TBinop(op,a2,b2);
+   case TWhile(a,b,flag):var a2 = f(a); var b2 = f(b); if (a2 == a && b2 == b) return e; TWhile(a2,b2,flag);
+   case TThrow(a):var a2 = f(a); if (a2 == a) return e; TThrow(a2);
+   case TEnumParameter(a,ef,i):var a2 = f(a); if (a2 == a) return e; TEnumParameter(a2,ef,i);
+   case TEnumIndex(a):var a2 = f(a); if (a2 == a) return e; TEnumIndex(a2);
+   case TField(a,fa):var a2 = f(a); if (a2 == a) return e; TField(a2,fa);
+   case TParenthesis(a):var a2 = f(a); if (a2 == a) return e; TParenthesis(a2);
+   case TUnop(op,flag,a):var a2 = f(a); if (a2 == a) return e; TUnop(op,flag,a2);
+   case TArrayDecl(el):var el2 = mapList(f,el); if (el2 == el) return e; TArrayDecl(el2);
+   case TNew(c,pl,el):var el2 = mapList(f,el); if (el2 == el) return e; TNew(c,pl,el2);
+   case TBlock(el):var el2 = mapList(f,el); if (el2 == el) return e; TBlock(el2);
+   case TObjectDecl(fl):
+    var changed = false;
+    var fl2 = fl.map(a -> {var x = f(a.expr); if (x != a.expr) changed = true; {key:a.key,expr:x};});
+    if (!changed) return e; TObjectDecl(fl2);
+   case TCall(a,el):var a2 = f(a); var el2 = mapList(f,el); if (a2 == a && el2 == el) return e; TCall(a2,el2);
+   case TVar(v,eo):if (eo == null) return e; var eo2 = f(eo); if (eo2 == eo) return e; TVar(v,eo2);
+   case TFunction(fu):
+    var changed = false;
+    var args = fu.tfArgs.map(a -> {var d = a.defaultValue == null ? null : f(a.defaultValue); if (d != a.defaultValue) changed = true; {variable:a.variable,defaultValue:d};});
+    var body = f(fu.tfExpr);
+    if (!changed && body == fu.tfExpr) return e;
+    TFunction({tfArgs:args,tfType:fu.tfType,tfExpr:body});
+   case TIf(c,a,b):var c2 = f(c); var a2 = f(a); var b2 = b == null ? null : f(b); if (c2 == c && a2 == a && b2 == b) return e; TIf(c2,a2,b2);
+   case TSwitch(s):
+    var subject = f(s.switchSubject); var changed = subject != s.switchSubject;
+    var cases = s.switchCases.map(c -> {var ps = mapList(f,c.casePatterns); var ce = f(c.caseExpr); if (ps != c.casePatterns || ce != c.caseExpr) changed = true; ({casePatterns:ps,caseExpr:ce} : core.TType.TSwitchCase);});
+    var def = s.switchDefault == null ? null : f(s.switchDefault); if (def != s.switchDefault) changed = true;
+    if (!changed) return e;
+    TSwitch(mkSwitch(subject,cases,def,s.switchExhaustive));
+   case TTry(a,catches):
+    var a2 = f(a); var changed = a2 != a;
+    var cs = catches.map(c -> {var x = f(c.expr); if (x != c.expr) changed = true; {variable:c.variable,expr:x};});
+    if (!changed) return e; TTry(a2,cs);
+   case TReturn(eo):if (eo == null) return e; var eo2 = f(eo); if (eo2 == eo) return e; TReturn(eo2);
+   case TCast(a,mt):var a2 = f(a); if (a2 == a) return e; TCast(a2,mt);
+   case TMeta(m,a):var a2 = f(a); if (a2 == a) return e; TMeta(m,a2);
   }; return withExpr(e,def);
  }
  public static function mapExprType(f:TExpr->TExpr,ft:T->T,fv:TVar->TVar,e:TExpr):TExpr {

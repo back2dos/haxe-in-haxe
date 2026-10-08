@@ -394,7 +394,7 @@ index d338518..e75e1e8 100644
  	return emscripten_builtin_memalign(GC_PAGE_SIZE, size);
  #else
 +#	ifdef GC_HUGE_CHUNKS
-+	// Carve pages out of 2MB-aligned chunks marked MADV_HUGEPAGE: one fault
++	// Carve pages out of 2MB-aligned chunks, marked MADV_HUGEPAGE with HL_HUGEPAGES=1 (where THP defrag is synchronous, faults then compact memory and cost more than the TLB saves): one fault
 +	// then maps 2MB instead of 4KB, and the TLB covers far more of the heap.
 +	// Freed pages are unmapped as usual; chunk memory is never reused.
 +	if( size <= GC_HUGE_CHUNK / 8 ) {
@@ -407,7 +407,7 @@ index d338518..e75e1e8 100644
 +				char *start = (char*)(((int_val)raw + GC_HUGE_ALIGN - 1) & ~(int_val)(GC_HUGE_ALIGN - 1));
 +				if( start > raw ) munmap(raw, start - raw);
 +				if( start + GC_HUGE_CHUNK < raw + len ) munmap(start + GC_HUGE_CHUNK, (raw + len) - (start + GC_HUGE_CHUNK));
-+				madvise(start, GC_HUGE_CHUNK, MADV_HUGEPAGE);
++				{ static int hp = -1; if( hp < 0 ) hp = getenv("HL_HUGEPAGES") != NULL; if( hp ) madvise(start, GC_HUGE_CHUNK, MADV_HUGEPAGE); }
 +				chunk_cur = start;
 +				chunk_end = start + GC_HUGE_CHUNK;
 +			}
