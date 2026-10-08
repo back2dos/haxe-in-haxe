@@ -100,7 +100,7 @@ class LegacyGrammar {
 		if (acceptKwd(Using) != null) { if (doc != null) pendingDeclarationDoc = doc; var p = placedPath(); expect(Semicolon); return decl(EUsing(p), start); }
 		var accesses = if (is(Kwd(Abstract)) && hasToken(index+1) && tokenAt(index+1).token.match(Kwd(Class))) {
 			var abstractToken = next();
-			[{access:AAbstract, pos:abstractToken.pos}];
+			([{access:AAbstract, pos:abstractToken.pos}] : Array<PlacedAccess>);
 		} else access();
 		if (acceptKwd(Class) != null || acceptKwd(Interface) != null) {
 			start = previous().pos; pendingDeclarationDoc = null;
@@ -163,7 +163,7 @@ class LegacyGrammar {
 	}
 
 	var previousKwd:Null<Keyword>;
-	function access(?field=false):Array<PlacedAccess> { var result=[]; while (true) { var t=current(); var a:Null<Access> = switch t.token { case Kwd(Public): APublic; case Kwd(Private): APrivate; case Kwd(Static): AStatic; case Kwd(Override): AOverride; case Kwd(Dynamic): ADynamic; case Kwd(Inline): AInline; case Kwd(Macro): AMacro; case Kwd(Final): AFinal; case Kwd(Extern): AExtern; case Kwd(Abstract) if (field || classDeclarationAhead()): AAbstract; case Kwd(Overload): AOverload; case _: null; }; if (a == null) return result; next(); result.push({access:a,pos:t.pos}); } }
+	function access(?field=false):Array<PlacedAccess> { var result:Array<PlacedAccess>=[]; while (true) { var t=current(); var a:Null<Access> = switch t.token { case Kwd(Public): APublic; case Kwd(Private): APrivate; case Kwd(Static): AStatic; case Kwd(Override): AOverride; case Kwd(Dynamic): ADynamic; case Kwd(Inline): AInline; case Kwd(Macro): AMacro; case Kwd(Final): AFinal; case Kwd(Extern): AExtern; case Kwd(Abstract) if (field || classDeclarationAhead()): AAbstract; case Kwd(Overload): AOverload; case _: null; }; if (a == null) return result; next(); result.push({access:a,pos:t.pos}); } }
 	function classDeclarationAhead():Bool {
 		var cursor = index;
 		while (hasToken(cursor)) switch tokenAt(cursor++).token {
@@ -217,7 +217,7 @@ class LegacyGrammar {
 		var name=placedIdent();
 		var type=typeHintOpt();
 		if (spread != null) {
-			var inner = type == null ? {type:Ast.ctMono(), pos:core.Globals.nullPos} : type;
+			var inner:TypeHint = type == null ? {type:Ast.ctMono(), pos:core.Globals.nullPos} : type;
 			var restPos = union(spread.pos, inner.pos);
 			type = Ast.makePtpTh(Ast.mkTypePath(["haxe"], "Rest", [TPType(inner)]), restPos);
 		}
@@ -229,8 +229,8 @@ class LegacyGrammar {
 		var left=unary();
 		if (is(Arrow)) {
 			var argument = switch left.expr {
-				case EConst(Ident(name)): {name:{name:name, pos:left.pos}, optional:false, meta:[], type:null, expr:null};
-				case EParenthesis({expr:EConst(Ident(name)), pos:argumentPos}): {name:{name:name, pos:argumentPos}, optional:false, meta:[], type:null, expr:null};
+				case EConst(Ident(name)): ({name:{name:name, pos:left.pos}, optional:false, meta:[], type:null, expr:null} : FuncArg);
+				case EParenthesis({expr:EConst(Ident(name)), pos:argumentPos}): ({name:{name:name, pos:argumentPos}, optional:false, meta:[], type:null, expr:null} : FuncArg);
 				case _: fail("Invalid arrow function argument", left.pos); null;
 			};
 			left = arrowFunction(left.pos, [argument]);
@@ -525,8 +525,8 @@ class LegacyGrammar {
 				} else if (is(Question) && hasToken(index+2) && switch tokenAt(index+1).token { case Const(Ident(_)): tokenAt(index+2).token.match(DblDot); case _: false; }) {
 					var optionalStart = next().pos;
 					var name = placedIdent(); expect(DblDot); var value = typeHint();
-					var named = {type:CTNamed(name, value), pos:union(name.pos, value.pos)};
-					args.push({type:CTOptional(named), pos:union(optionalStart, value.pos)});
+					var named:TypeHint = {type:CTNamed(name, value), pos:union(name.pos, value.pos)};
+					args.push(({type:CTOptional(named), pos:union(optionalStart, value.pos)} : TypeHint));
 				} else if (identText() != null && hasToken(index+1) && tokenAt(index+1).token.match(DblDot)) {
 					var name = placedIdent(); expect(DblDot); var value = typeHint();
 					args.push({type:CTNamed(name, value), pos:union(name.pos, value.pos)});
@@ -572,7 +572,7 @@ class LegacyGrammar {
 		if (accept(Arrow) != null) {
 			var result = typeHint();
 			complex = switch result.type {
-				case CTFunction(args, ret): CTFunction([{type:complex, pos:start}].concat(args), ret);
+				case CTFunction(args, ret): CTFunction(([{type:complex, pos:start}] : Array<core.Ast.TypeHint>).concat(args), ret);
 				case _: CTFunction([{type:complex, pos:start}], result);
 			};
 			return {type: optional ? CTOptional({type:complex,pos:union(start,result.pos)}) : complex,pos:union(start,result.pos)};
@@ -650,7 +650,7 @@ class LegacyGrammar {
 		return strict ? core.Meta.parse(name) : core.Meta.fromString(name);
 	}
 	function metadata():Metadata {
-		var result=[];
+		var result:Array<MetadataEntry>=[];
 		while(accept(At)!=null) {
 			var start=previous().pos; var strict=accept(DblDot)!=null; var name=placedPath(); var values=[]; var end=name[name.length-1].pos;
 			if(is(POpen) && current().pos.pmin == end.pmax) {

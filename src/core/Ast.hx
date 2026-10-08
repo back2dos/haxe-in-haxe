@@ -26,11 +26,27 @@ enum AbstractFlag { AbPrivate; AbFrom(type:TypeHint); AbTo(type:TypeHint); AbOve
 enum TypedefFlag { TDPrivate; TDExtern; }
 enum ImportMode { INormal; IAsName(name:PlacedName); IAll; }
 
-typedef PlacedName = { var name:String; var pos:Pos; }
+@:structInit class PlacedName {
+	public var name:String;
+	public var pos:Pos;
+	public inline function new(name:String, pos:Pos) { this.name = name; this.pos = pos; }
+	public inline function clone():PlacedName return new PlacedName(name, pos);
+}
 typedef TypePath = { var tpackage:Array<String>; var tname:String; var tparams:Array<TypeParamOrConst>; var tsub:Null<String>; }
 typedef PlacedTypePath = { var path:TypePath; var posFull:Pos; var posPath:Pos; }
-typedef TypeHint = { var type:ComplexType; var pos:Pos; }
-typedef MetadataEntry = { var meta:Dynamic; var exprs:Array<Expr>; var pos:Pos; }
+@:structInit class TypeHint {
+	public var type:ComplexType;
+	public var pos:Pos;
+	public inline function new(type:ComplexType, pos:Pos) { this.type = type; this.pos = pos; }
+	public inline function clone():TypeHint return new TypeHint(type, pos);
+}
+@:structInit class MetadataEntry {
+	public var meta:Dynamic;
+	public var exprs:Array<Expr>;
+	public var pos:Pos;
+	public inline function new(meta:Dynamic, exprs:Array<Expr>, pos:Pos) { this.meta = meta; this.exprs = exprs; this.pos = pos; }
+	public inline function clone():MetadataEntry return new MetadataEntry(meta, exprs, pos);
+}
 typedef Metadata = Array<MetadataEntry>;
 typedef Documentation = Null<DocBlock>;
 typedef DocBlock = { var docOwn:Null<String>; var docInherited:Array<String>; }
@@ -38,7 +54,12 @@ typedef Func = { var fParams:Array<TypeParam>; var fArgs:Array<FuncArg>; var fTy
 typedef FuncArg = { var name:PlacedName; var optional:Bool; var meta:Metadata; var type:Null<TypeHint>; var expr:Null<Expr>; }
 typedef TypeParam = { var tpName:PlacedName; var tpParams:Array<TypeParam>; var tpConstraints:Null<TypeHint>; var tpDefault:Null<TypeHint>; var tpMeta:Metadata; }
 typedef ClassField = { var cffName:PlacedName; var cffDoc:Documentation; var cffPos:Pos; var cffMeta:Metadata; var cffAccess:Array<PlacedAccess>; var cffKind:ClassFieldKind; }
-typedef PlacedAccess = { var access:Access; var pos:Pos; }
+@:structInit class PlacedAccess {
+	public var access:Access;
+	public var pos:Pos;
+	public inline function new(access:Access, pos:Pos) { this.access = access; this.pos = pos; }
+	public inline function clone():PlacedAccess return new PlacedAccess(access, pos);
+}
 typedef EVar = { var evName:PlacedName; var evFinal:Bool; var evStatic:Bool; var evType:Null<TypeHint>; var evExpr:Null<Expr>; var evMeta:Metadata; }
 typedef EnumConstructor = { var ecName:PlacedName; var ecDoc:Documentation; var ecMeta:Metadata; var ecArgs:Array<EnumConstructorArg>; var ecPos:Pos; var ecParams:Array<TypeParam>; var ecType:Null<TypeHint>; }
 typedef EnumConstructorArg = { var name:String; var optional:Bool; var type:TypeHint; }
@@ -104,7 +125,7 @@ class Ast {
   walk("",e);return buf.toString();
  }
  public static function mkEvar(name:PlacedName,?type:TypeHint,?expr:Expr,?meta:Metadata,isFinal:Bool=false,isStatic:Bool=false):EVar return {evName:name,evFinal:isFinal,evStatic:isStatic,evType:type,evExpr:expr,evMeta:meta==null?[]:meta};
- public static function stringPosListOfExprPathRaise(e:Expr):Array<PlacedName> return switch e.expr {case EConst(Ident(name)):[{name:name,pos:e.pos}];case EField(inner,name,_):[{name:name,pos:e.pos}].concat(stringPosListOfExprPathRaise(inner));case _:throw core.ds.Exit.raise();};
+ public static function stringPosListOfExprPathRaise(e:Expr):Array<PlacedName> return switch e.expr {case EConst(Ident(name)):([{name:name,pos:e.pos}] : Array<core.Ast.PlacedName>);case EField(inner,name,_):([{name:name,pos:e.pos}] : Array<core.Ast.PlacedName>).concat(stringPosListOfExprPathRaise(inner));case _:throw core.ds.Exit.raise();};
  public static function fullDotPath2(mpath:GlobalTypePath,tpath:GlobalTypePath):Array<String> return core.ds.Key.compare(mpath,tpath)==0?tpath.pack.concat([tpath.name]):mpath.pack.concat([mpath.name,tpath.name]);
  public static function iterExpr(loop:Expr->Void,e:Expr):Void {
   function opt(e:Null<Expr>):Void if(e!=null) loop(e);

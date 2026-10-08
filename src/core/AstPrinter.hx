@@ -65,7 +65,7 @@ class AstPrinter {
  public static function sClassField(tabs:String,f:ClassField):String {
   var doc=f.cffDoc==null?"":"/**\n\t"+tabs+AstTools.genDocText(f.cffDoc)+"\n**/\n";
   function metas(ml:Metadata):String return separated(m->sMetadata(tabs,m),"\n"+tabs,ml);
-  function access(al:Array<PlacedAccess>):String return separated(a->AstTools.sAccess(a.access)," ",al);
+  function access(al:Array<PlacedAccess>):String return separated((a:PlacedAccess)->AstTools.sAccess(a.access)," ",al);
   return switch f.cffKind {
    case FVar(t,e):
     var keyword="var ",question="";

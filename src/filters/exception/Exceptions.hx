@@ -106,7 +106,7 @@ class Exceptions {
 		return TypeOps.mk(TMeta({meta:core.MetaList.StrictMeta.WrappedException,exprs:[], pos:p}, wrapped), wrapped.etype, p);
 	}
 	public static function setNeedsExceptionStack(v:TVar):Void {
-		if (!Meta.has(NeedsExceptionStack, v.vMeta)) v.vMeta = [{meta:core.MetaList.StrictMeta.NeedsExceptionStack,exprs:[], pos:Globals.nullPos}].concat(v.vMeta);
+		if (!Meta.has(NeedsExceptionStack, v.vMeta)) v.vMeta = ([{meta:core.MetaList.StrictMeta.NeedsExceptionStack,exprs:[], pos:Globals.nullPos}] : Array<core.Ast.MetadataEntry>).concat(v.vMeta);
 	}
 	public static function catchesToIfs(ctx:ExceptionContext, catches:Array<CatchClause>, t:T, p:Pos):Array<CatchClause> {
 		if (catches.length == 0) return [];

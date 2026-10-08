@@ -1047,7 +1047,7 @@ class Grammar {
 		if (tk.token != At) return fail();
 		var p1 = tk.pos;
 		s.junk();
-		var meta:Null<MetadataEntry> = Parser.checkResume(ctx, p1, function() return {meta: StrictMeta.HxCompletion, exprs: [], pos: p1}, function() return null);
+		var meta:Null<MetadataEntry> = Parser.checkResume(ctx, p1, function():MetadataEntry return {meta: StrictMeta.HxCompletion, exprs: [], pos: p1}, function() return null);
 		var r = tryHead(function() return parseMetaName(ctx, p1, s));
 		if (r != null) {
 			var params = tail(function() return parseMetaParams(ctx, r.v.pos, s));
@@ -1457,7 +1457,7 @@ class Grammar {
 			return [
 				{
 					cffName: pn(name, p1),
-					cffMeta: opt ? [{meta: StrictMeta.Optional, exprs: [], pos: Globals.nullPos}] : [],
+					cffMeta: opt ? ([{meta: StrictMeta.Optional, exprs: [], pos: Globals.nullPos}] : Array<MetadataEntry>) : [],
 					cffAccess: [],
 					cffDoc: null,
 					cffKind: FVar(t, null),
@@ -1580,7 +1580,7 @@ class Grammar {
 		function checkOptional(opt:Bool, name:PlacedName):Metadata {
 			if (opt) {
 				if (!tdecl) Parser.syntaxError(ctx, Custom("?var syntax is only allowed in structures"), s, null, name.pos);
-				return [{meta: StrictMeta.Optional, exprs: [], pos: Globals.nullPos}].concat(meta);
+				return ([{meta: StrictMeta.Optional, exprs: [], pos: Globals.nullPos}] : Array<core.Ast.MetadataEntry>).concat(meta);
 			}
 			return meta;
 		}
@@ -1655,7 +1655,7 @@ class Grammar {
 								pos: punion(po, c.pos),
 								kind: FFun(f),
 								access: al,
-								meta: [{meta: StrictMeta.DisplayOverride, exprs: [], pos: Globals.nullPos}].concat(meta)
+								meta: ([{meta: StrictMeta.DisplayOverride, exprs: [], pos: Globals.nullPos}] : Array<core.Ast.MetadataEntry>).concat(meta)
 							};
 						case _:
 							return serror();

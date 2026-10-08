@@ -198,7 +198,7 @@ class TypeloadModule {
 					cffDoc:value.doc,
 					cffPos:declaration.pos,
 					cffMeta:value.meta,
-					cffAccess:[{access:AStatic, pos:Globals.nullPos}].concat(value.flags),
+					cffAccess:([{access:AStatic, pos:Globals.nullPos}] : Array<core.Ast.PlacedAccess>).concat(value.flags),
 					cffKind:value.data
 				});
 			case _:

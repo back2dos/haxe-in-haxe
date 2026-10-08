@@ -297,7 +297,7 @@ class Inheritance {
   var isLib=Meta.has(MetaTag.LibType,c.clMeta),oldMeta=c.clMeta,hasInterf=false;
   function processMeta(csup:TClass):Void {
    var list:Array<Dynamic>=csup.clMeta.copy(); list.reverse();
-   for(m in list) if(m.meta==MetaTag.AutoBuild) c.clMeta=[{meta:MetaTag.Build,exprs:m.exprs,pos:mkZeroRangePos(c.clPos)},m].concat(c.clMeta);
+   for(m in list) if(m.meta==MetaTag.AutoBuild) c.clMeta=([{meta:MetaTag.Build,exprs:m.exprs,pos:mkZeroRangePos(c.clPos)},m] : Array<core.Ast.MetadataEntry>).concat(c.clMeta);
    var isParam=switch c.clKind {case KTypeParameter(_):true; case _:false;};
    if(hasClassFlag(csup,CFinal)&&!((hasClassFlag(csup,CExtern)&&Meta.has(MetaTag.Hack,c.clMeta))||isParam)) raiseTypingError("Cannot extend a final "+(hasClassFlag(c,CInterface)?"interface":"class"),p);
   }

@@ -127,7 +127,7 @@ class SourceParser {
   }
   var declarations=parsed.data.declarations;
   if(!same(remap.value,path.pack)) {
-   var redirected:Array<TypeDecl>=[{definition:EImport({path:remap.value.concat([path.name]).map(s->{name:s,pos:Globals.nullPos}),mode:INormal}),pos:Globals.nullPos}];
+   var redirected:Array<TypeDecl>=[{definition:EImport({path:remap.value.concat([path.name]).map(s->({name:s,pos:Globals.nullPos}:core.Ast.PlacedName)),mode:INormal}),pos:Globals.nullPos}];
    function build(name:PlacedName,params:Array<TypeParam>,priv:Bool,p:Pos):Void {
     var tp=priv?AstTools.mkTypePath([],"Dynamic"):AstTools.mkTypePath(remap.value,path.name,params.map(tp->TPType(AstTools.makePtpTh(AstTools.mkTypePath([],tp.tpName.name),Globals.nullPos))),name.name);
     redirected.push({definition:ETypedef({name:name,doc:null,meta:[],params:params,flags:priv?[TDPrivate]:[],data:AstTools.makePtpTh(tp,name.pos)}),pos:p});

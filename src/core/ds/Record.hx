@@ -34,6 +34,10 @@ class Record {
 		if (o is core.TType.TMono) return cast (cast o : core.TType.TMono).clone();
 		if (o is core.TUnification.UnificationContext) return cast (cast o : core.TUnification.UnificationContext).clone();
 		if (o is syntax.Lexer.LexedToken) return cast (cast o : syntax.Lexer.LexedToken).clone();
+		if (o is core.Ast.MetadataEntry) return cast (cast o : core.Ast.MetadataEntry).clone();
+		if (o is core.Ast.PlacedName) return cast (cast o : core.Ast.PlacedName).clone();
+		if (o is core.Ast.PlacedAccess) return cast (cast o : core.Ast.PlacedAccess).clone();
+		if (o is core.Ast.TypeHint) return cast (cast o : core.Ast.TypeHint).clone();
 		#end
 		return Reflect.copy(o);
 	}

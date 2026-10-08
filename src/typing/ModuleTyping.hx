@@ -40,7 +40,7 @@ typedef TypedDeclaration = {var declaration:TypeDecl;var type:ModuleType;}
 class ModuleTyping {
  public static function getPolicy(g:TyperGlobals,path:GlobalTypePath):Array<ModuleCheckPolicy> {var parts=AstTools.fullDotPath2(path,path),out=[];for(entry in g.moduleCheckPolicies)if(AstTools.matchPath(entry.recursive,parts,entry.pack))out=entry.policies.concat(out);return out;}
  public static function makeModule(com:CommonContext,g:TyperGlobals,path:GlobalTypePath,file:String,p:Pos):ModuleDef return {mId:allocMid(),mPath:path,mTypes:[],mStatics:null,mExtra:moduleExtra(core.Path.getFullPath(file),Define.getSignature(com.defines),Common.fileTime(file),com.isMacroContext?MMacro:MCode,com.partScope.compilationStep,getPolicy(g,path))};
- public static function fieldOfStaticDefinition(d:StaticDefinition,p:Pos):ClassField return {cffName:d.name,cffDoc:d.doc,cffPos:p,cffMeta:d.meta,cffAccess:[{access:AStatic,pos:nullPos}].concat(d.flags),cffKind:d.data};
+ public static function fieldOfStaticDefinition(d:StaticDefinition,p:Pos):ClassField return {cffName:d.name,cffDoc:d.doc,cffPos:p,cffMeta:d.meta,cffAccess:([{access:AStatic,pos:nullPos}] : Array<core.Ast.PlacedAccess>).concat(d.flags),cffKind:d.data};
  public static function createModuleTypes(ctx:TyperContext,m:ModuleDef,decls:Array<TypeDecl>,loadp:Pos):{imports:Array<TypeDecl>,declarations:Array<TypedDeclaration>} {
   var com:CommonContext=ctx.com;var imports:Array<TypeDecl>=[],types:Array<ModuleType>=[],declarations:Array<TypedDeclaration>=[],statics:Array<{definition:StaticDefinition,pos:Pos}>=[],hasDeclaration=false;
   function add(decl:TypeDecl,t:ModuleType):Void {declarations.push({declaration:decl,type:t});com.moduleLut.addModuleType(m,t);types.push(t);}

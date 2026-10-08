@@ -137,7 +137,7 @@ class Calls {
    case AKResolve(sea,name):dispatcher(sea.seAccess.faPos).resolveCall(sea,name);
    case AKUsingAccessor(sea) | AKUsingField(sea) if(ctx.f.inDisplay):
     var field=FieldAccess.getFieldExpr(sea.seAccess,FGet),stored=storeTypedExpr(ctx.com,sea.seThis,field.epos);
-    var meta={meta:MetaTag.StaticExtension,exprs:[makeStoredIdExpr(stored.id,field.epos)],pos:Globals.nullPos};
+    var meta:core.Ast.MetadataEntry={meta:MetaTag.StaticExtension,exprs:[makeStoredIdExpr(stored.id,field.epos)],pos:Globals.nullPos};
     var t=switch follow(field.etype) {case TFun({args:args,ret:ret}) if(args.length>0):TFun({args:args.slice(1),ret:ret}); case t:t;};
     mk(TMeta(meta,field),t,field.epos);
    case AKField(fa):switch fa.faField.cfKind {

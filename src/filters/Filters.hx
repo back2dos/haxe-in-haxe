@@ -82,7 +82,7 @@ class Filters {
 					var ncls = TypeOps.mkClass(c.clModule, path, c.clPos, Globals.nullPos);
 					ncls.clOrderedStatics.unshift(cf); ncls.clStatics.set(cf.cfName, cf);
 					com.types = (cast com.types:Array<ModuleType>).concat([TClassDecl(ncls)]);
-					c.clMeta = [{meta:Custom(":hasMetadata"),exprs:[], pos:e.epos}].concat(c.clMeta);
+					c.clMeta = ([{meta:Custom(":hasMetadata"),exprs:[], pos:e.epos}] : Array<core.Ast.MetadataEntry>).concat(c.clMeta);
 				} else { c.clOrderedStatics.unshift(cf); c.clStatics.set(cf.cfName, cf); }
 			}
 		case _:

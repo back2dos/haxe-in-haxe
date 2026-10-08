@@ -22,7 +22,7 @@ class LocalStatic {
 			return;
 		}
 		var cf = TypeOps.mkField(name, v.vType, v.vPos, v.vPos, true, true);
-		cf.cfMeta = [{meta:core.MetaList.StrictMeta.NoCompletion,exprs:[], pos:Globals.nullPos}].concat(v.vMeta);
+		cf.cfMeta = ([{meta:core.MetaList.StrictMeta.NoCompletion,exprs:[], pos:Globals.nullPos}] : Array<core.Ast.MetadataEntry>).concat(v.vMeta);
 		TypeOps.addClassFieldFlag(cf, CfNoLookup);
 		if (eo != null) {
 			var declaredVars = new IntMap<Bool>();
