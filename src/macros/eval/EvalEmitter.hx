@@ -571,11 +571,11 @@ class EvalEmitter {
 
 	public static function emitCaptureRead(i:Int):Emitter return env -> env.envCaptures[i];
 
-	public static function emitArrayLengthRead(exec:Emitter, p:Pos):Emitter return env -> VInt32(asArray(p, exec(env)).alength);
+	public static function emitArrayLengthRead(exec:Emitter, p:Pos):Emitter return env -> EvalValueTools.vint32(asArray(p, exec(env)).alength);
 
-	public static function emitVectorLengthRead(exec:Emitter, p:Pos):Emitter return env -> VInt32(asVector(p, exec(env)).length);
+	public static function emitVectorLengthRead(exec:Emitter, p:Pos):Emitter return env -> EvalValueTools.vint32(asVector(p, exec(env)).length);
 
-	public static function emitBytesLengthRead(exec:Emitter, p:Pos):Emitter return env -> VInt32(asBytes(p, exec(env)).length);
+	public static function emitBytesLengthRead(exec:Emitter, p:Pos):Emitter return env -> EvalValueTools.vint32(asBytes(p, exec(env)).length);
 
 	public static function emitProtoFieldRead(proto:Vprototype, i:Int):Emitter return _ -> proto.pfields[i];
 
@@ -583,7 +583,7 @@ class EvalEmitter {
 		return function(env:Env):Value {
 			return switch exec(env) {
 				case VInstance(vi): vi.ifields[i];
-				case VString(s): VInt32(s.slength);
+				case VString(s): EvalValueTools.vint32(s.slength);
 				case VNull: EvalMisc.throwString("field access on null", p);
 				case v: unexpectedValueP(v, "instance", p);
 			}
@@ -650,7 +650,7 @@ class EvalEmitter {
 		}
 	}
 
-	public static function emitEnumIndex(exec:Emitter, p:Pos):Emitter return env -> VInt32(asEnumValue(p, exec(env)).eindex);
+	public static function emitEnumIndex(exec:Emitter, p:Pos):Emitter return env -> EvalValueTools.vint32(asEnumValue(p, exec(env)).eindex);
 
 	public static function emitEnumParameterRead(exec:Emitter, i:Int):Emitter {
 		return function(env:Env):Value {
@@ -666,7 +666,7 @@ class EvalEmitter {
 			var s = EvalDecode.decodeVstring(exec1(env));
 			var index = decodeIntP(exec2(env), p);
 			if (index < 0 || index >= s.slength) return VNull;
-			else return VInt32(EvalString.charAt(s, index));
+			else return EvalValueTools.vint32(EvalString.charAt(s, index));
 		}
 	}
 
@@ -674,7 +674,7 @@ class EvalEmitter {
 		return function(env:Env):Value {
 			var s = EvalDecode.decodeVstring(exec1(env));
 			var index = decodeIntP(exec2(env), p);
-			return VInt32(EvalString.charAt(s, index));
+			return EvalValueTools.vint32(EvalString.charAt(s, index));
 		}
 	}
 
@@ -782,7 +782,7 @@ class EvalEmitter {
 
 	public static function doIncr(v:Value, p:Pos):Value {
 		return switch v {
-			case VInt32(i32): VInt32(i32 + 1);
+			case VInt32(i32): EvalValueTools.vint32(i32 + 1);
 			case VInt64(i64): VInt64(i64 + 1);
 			case VFloat(f): VFloat(f + 1.);
 			case v: unexpectedValueP(v, "number", p);
@@ -1098,7 +1098,7 @@ class EvalEmitter {
 		return function(env:Env):Value {
 			return switch exec(env) {
 				case VFloat(f): VFloat(-f);
-				case VInt32(i): VInt32(-i);
+				case VInt32(i): EvalValueTools.vint32(-i);
 				case VInt64(i): VInt64(-i);
 				case _: EvalMisc.throwString("Invalid operation", p);
 			}

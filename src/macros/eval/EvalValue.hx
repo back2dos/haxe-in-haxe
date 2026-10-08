@@ -478,9 +478,13 @@ class EvalValueTools {
 
 	public static inline function vobject(o:Vobject):Value return VObject(o);
 
-	public static inline function vint(i:Int):Value return VInt32(i);
+	// Small ints are shared: values are immutable and identity is not observable,
+	// and HashLink allocations cost more than OCaml's (deviation: upstream boxes each).
+	static final smallInts:Array<Value> = [for (i in -128...1024) VInt32(i)];
 
-	public static inline function vint32(i:Int):Value return VInt32(i);
+	public static inline function vint(i:Int):Value return vint32(i);
+
+	public static inline function vint32(i:Int):Value return i >= -128 && i < 1024 ? smallInts[i + 128] : VInt32(i);
 
 	public static inline function vint64(i:haxe.Int64):Value return VInt64(i);
 

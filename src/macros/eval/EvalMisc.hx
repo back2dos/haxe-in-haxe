@@ -221,7 +221,7 @@ class EvalMisc {
 
 	public static function opAdd(p:Pos, v1:Value, v2:Value):Value {
 		return switch [v1, v2] {
-			case [VInt32(i1), VInt32(i2)]: VInt32(i1 + i2);
+			case [VInt32(i1), VInt32(i2)]: EvalValueTools.vint32(i1 + i2);
 			case [VInt64(i1), VInt64(i2)]: VInt64(Int64.add(i1, i2));
 			// These two cases should technically not exist, but the analyzer emits code like this because
 			// our TConst only knows Int32 at the moment.
@@ -243,7 +243,7 @@ class EvalMisc {
 
 	public static function opMult(p:Pos, v1:Value, v2:Value):Value {
 		return switch [v1, v2] {
-			case [VInt32(i1), VInt32(i2)]: VInt32(i1 * i2);
+			case [VInt32(i1), VInt32(i2)]: EvalValueTools.vint32(i1 * i2);
 			case [VInt64(i1), VInt64(i2)]: VInt64(Int64.mul(i1, i2));
 			case [VFloat(f1), VFloat(f2)]: VFloat(f1 * f2);
 			case [VInt32(i), VFloat(f)] | [VFloat(f), VInt32(i)]: VFloat((i : Float) * f);
@@ -263,7 +263,7 @@ class EvalMisc {
 
 	public static function opSub(p:Pos, v1:Value, v2:Value):Value {
 		return switch [v1, v2] {
-			case [VInt32(i1), VInt32(i2)]: VInt32(i1 - i2);
+			case [VInt32(i1), VInt32(i2)]: EvalValueTools.vint32(i1 - i2);
 			case [VInt64(i1), VInt64(i2)]: VInt64(Int64.sub(i1, i2));
 			// See op_add remark.
 			case [VInt64(i1), VInt32(i2)]: VInt64(Int64.sub(i1, Int64.ofInt(i2)));
@@ -295,21 +295,21 @@ class EvalMisc {
 
 	public static function opAnd(p:Pos, v1:Value, v2:Value):Value {
 		return switch [v1, v2] {
-			case [VInt32(i1), VInt32(i2)]: VInt32(i1 & i2);
+			case [VInt32(i1), VInt32(i2)]: EvalValueTools.vint32(i1 & i2);
 			case _: invalidBinop(OpAnd, v1, v2, p);
 		}
 	}
 
 	public static function opOr(p:Pos, v1:Value, v2:Value):Value {
 		return switch [v1, v2] {
-			case [VInt32(i1), VInt32(i2)]: VInt32(i1 | i2);
+			case [VInt32(i1), VInt32(i2)]: EvalValueTools.vint32(i1 | i2);
 			case _: invalidBinop(OpOr, v1, v2, p);
 		}
 	}
 
 	public static function opXor(p:Pos, v1:Value, v2:Value):Value {
 		return switch [v1, v2] {
-			case [VInt32(i1), VInt32(i2)]: VInt32(i1 ^ i2);
+			case [VInt32(i1), VInt32(i2)]: EvalValueTools.vint32(i1 ^ i2);
 			case _: invalidBinop(OpXor, v1, v2, p);
 		}
 	}
@@ -318,7 +318,7 @@ class EvalMisc {
 		return switch [v1, v2] {
 			case [VInt32(i1), VInt32(i2)]:
 				var i2 = i2 & 31;
-				VInt32(i1 << i2);
+				EvalValueTools.vint32(i1 << i2);
 			case _: invalidBinop(OpShl, v1, v2, p);
 		}
 	}
@@ -327,7 +327,7 @@ class EvalMisc {
 		return switch [v1, v2] {
 			case [VInt32(i1), VInt32(i2)]:
 				var i2 = i2 & 31;
-				VInt32(i1 >> i2);
+				EvalValueTools.vint32(i1 >> i2);
 			case _: invalidBinop(OpShr, v1, v2, p);
 		}
 	}
@@ -336,7 +336,7 @@ class EvalMisc {
 		return switch [v1, v2] {
 			case [VInt32(i1), VInt32(i2)]:
 				var i2 = i2 & 31;
-				VInt32(i1 >>> i2);
+				EvalValueTools.vint32(i1 >>> i2);
 			case _: invalidBinop(OpUShr, v1, v2, p);
 		}
 	}
@@ -344,7 +344,7 @@ class EvalMisc {
 	public static function opMod(p:Pos, v1:Value, v2:Value):Value {
 		return switch [v1, v2] {
 			// Int32.rem: Division_by_zero gives nan; min_int rem -1 is 0 (avoids the host's overflow trap)
-			case [VInt32(i1), VInt32(i2)]: if (i2 == 0) VFloat(Math.NaN) else if (i2 == -1) VInt32(0) else VInt32(i1 % i2);
+			case [VInt32(i1), VInt32(i2)]: if (i2 == 0) VFloat(Math.NaN) else if (i2 == -1) EvalValueTools.vint32(0) else EvalValueTools.vint32(i1 % i2);
 			case [VFloat(f1), VFloat(f2)]: VFloat(f1 % f2);
 			case [VInt32(i1), VFloat(f2)]: VFloat((i1 : Float) % f2);
 			case [VFloat(f1), VInt32(i2)]: VFloat(f1 % (i2 : Float));
