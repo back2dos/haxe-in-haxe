@@ -48,7 +48,7 @@ class Resolution {
 		};
 	}
 	public static function sResolutionKind(kind:ResolutionKind):String return switch kind {
-		case RTypeImport(_,mt): "RTypeImport(" + Globals.sTypePath(core.TFunctions.tInfos(mt).mtPath) + ")";
+		case RTypeImport(_,mt): "RTypeImport(" + Globals.sTypePath(core.TFunctions.tPath(mt)) + ")";
 		case RClassFieldImport(_,c,cf): "RClassFieldImport(" + Globals.sTypePath(c.clPath) + ", " + cf.cfName + ")";
 		case RAbstractFieldImport(_,a,_,cf): "RAbstractFieldImport(" + Globals.sTypePath(a.aPath) + ", " + cf.cfName + ")";
 		case REnumConstructorImport(_,en,ef): "REnumConstructorImport(" + Globals.sTypePath(en.ePath) + ", " + ef.efName + ")";

@@ -742,8 +742,8 @@ class MacroContext {
 				let's save the minimal amount of information we need
 			*/
 			function minimalRestore(t:ModuleType):Void {
-				if (tInfos(t).mtModule.mExtra.mProcessed == 0)
-					tInfos(t).mtModule.mExtra.mProcessed = mctx.com.partScope.compilationStep;
+				if (tModule(t).mExtra.mProcessed == 0)
+					tModule(t).mExtra.mProcessed = mctx.com.partScope.compilationStep;
 
 				switch t {
 					case TClassDecl(c):
@@ -947,7 +947,7 @@ class MacroContext {
 					var path:GlobalTypePath = {pack: mpath.pack, name: name};
 					var mt:Null<ModuleType> = null;
 					for (t2 in mloaded.mTypes)
-						if (Common.samePath(tInfos(t2).mtPath, path)) {
+						if (Common.samePath(tPath(t2), path)) {
 							mt = t2;
 							break;
 						}

@@ -143,6 +143,18 @@ class TFunctions {
 		case TTypeDecl(t): t.tPath;
 		case TAbstractDecl(a): a.aPath;
 	};
+	public static function tModule(t:ModuleType):ModuleDef return switch t {
+		case TClassDecl(c): c.clModule;
+		case TEnumDecl(e): e.eModule;
+		case TTypeDecl(t): t.tModule;
+		case TAbstractDecl(a): a.aModule;
+	};
+	public static function tPrivate(t:ModuleType):Bool return switch t {
+		case TClassDecl(c): c.clPrivate;
+		case TEnumDecl(e): e.ePrivate;
+		case TTypeDecl(t): t.tPrivate;
+		case TAbstractDecl(a): a.aPrivate;
+	};
 	public static function tName(t:ModuleType):String return tPath(t).name;
 	public static function extendsClass(c:TClass,csup:TClass):Bool {
 		if (c == csup) return true;

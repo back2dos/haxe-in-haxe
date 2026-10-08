@@ -87,48 +87,49 @@ class Calls {
   return makeCall(ctx,ef,[ebase,access.index,access.value],access.ret,p);
  }
  public static function abstractUsingParamType(sea:StaticExtensionAccess):T return switch follow(sea.seThis.etype) {case TAbstract(a,tl) if(hasClassFieldFlag(sea.seAccess.faField,CfImpl)):applyParams(a.aParams,tl,a.aThis); case _:sea.seThis.etype;};
- public static function accGet(ctx:TyperContext,g:AccessKind):TExpr {
-  function inlineRead(fa:FieldAccessData):TExpr {
-   var cf=fa.faField,p=fa.faPos;
-   var apply:T->T=switch fa.faHost {
-    case FHStatic(_) | FHInstance(_,_): t -> t;
-    case FHAbstract(a,_,_):if(a.aEnum) {var monos=Monomorph.spawnConstrainedMonos(t -> t,a.aParams); t -> applyParams(a.aParams,monos,t);} else t -> t;
-    case _:throw "Invalid inline field host";
-   };
-   follow(cf.cfType);
-   if(!ctx.com.display.dmsInline) return FieldAccess.getFieldExpr(fa,FRead);
-   return switch [cf.cfKind,cf.cfExpr] {
-    case [Method(_),_]:
-     function checkClass(c:TClass):Bool return (hasClassFlag(c,CExtern)||hasClassFieldFlag(cf,CfExtern))&&!Meta.has(MetaTag.Runtime,cf.cfMeta);
-     function wrapExtern(c:TClass):TExpr {
-      var m=c.clModule,path:core.Globals.GlobalTypePath={pack:c.clModule.mPath.pack.concat(["_"+c.clModule.mPath.name]),name:c.clModule.mPath.name+"_Impl_"};
-      var c2:Null<TClass>=null;
-      for(mt in m.mTypes) switch mt {case TClassDecl(c) if(core.ds.Key.compare(c.clPath,path)==0):c2=c; break; case _:}
-      if(c2==null) {c2=mkClass(m,path,c.clPos,Globals.nullPos); m.mTypes.unshift(TClassDecl(c2));}
-      var wrapper:TClassField=c2.clStatics.get(cf.cfName);
-      if(wrapper==null) {wrapper=core.ds.Record.copy(cf); wrapper.cfKind=Method(MethNormal); c2.clStatics.set(wrapper.cfName,wrapper); c2.clOrderedStatics.unshift(wrapper);}
-      var et=TyperBase.typeModuleType(ctx,TClassDecl(c2),p);
-      return FieldAccess.getFieldExpr(FieldAccess.create(et,wrapper,FHStatic(c2),true,p),FRead);
-     }
-     var edef=FieldAccess.getFieldExpr(fa,FRead);
-     switch follow(fa.faOn.etype) {
-      case TInst(c,_) if(checkClass(c)):displayError(ctx.com,"Can't create closure on an extern inline member method",p); edef;
-      case TAnon(a):switch a.aStatus {
-       case ClassStatics(c) if(hasClassFieldFlag(cf,CfExtern)):displayError(ctx.com,"Cannot create closure on @:extern inline method",p); edef;
-       case ClassStatics(c) if(checkClass(c)):wrapExtern(c);
-       case _:edef;
-      }
+ // accGet's local inline_read; a static function, so accGet allocates no closure for it.
+ static function accGetInlineRead(ctx:TyperContext,fa:FieldAccessData):TExpr {
+  var cf=fa.faField,p=fa.faPos;
+  var apply:T->T=switch fa.faHost {
+   case FHStatic(_) | FHInstance(_,_): t -> t;
+   case FHAbstract(a,_,_):if(a.aEnum) {var monos=Monomorph.spawnConstrainedMonos(t -> t,a.aParams); t -> applyParams(a.aParams,monos,t);} else t -> t;
+   case _:throw "Invalid inline field host";
+  };
+  follow(cf.cfType);
+  if(!ctx.com.display.dmsInline) return FieldAccess.getFieldExpr(fa,FRead);
+  return switch [cf.cfKind,cf.cfExpr] {
+   case [Method(_),_]:
+    function checkClass(c:TClass):Bool return (hasClassFlag(c,CExtern)||hasClassFieldFlag(cf,CfExtern))&&!Meta.has(MetaTag.Runtime,cf.cfMeta);
+    function wrapExtern(c:TClass):TExpr {
+     var m=c.clModule,path:core.Globals.GlobalTypePath={pack:c.clModule.mPath.pack.concat(["_"+c.clModule.mPath.name]),name:c.clModule.mPath.name+"_Impl_"};
+     var c2:Null<TClass>=null;
+     for(mt in m.mTypes) switch mt {case TClassDecl(c) if(core.ds.Key.compare(c.clPath,path)==0):c2=c; break; case _:}
+     if(c2==null) {c2=mkClass(m,path,c.clPos,Globals.nullPos); m.mTypes.unshift(TClassDecl(c2));}
+     var wrapper:TClassField=c2.clStatics.get(cf.cfName);
+     if(wrapper==null) {wrapper=core.ds.Record.copy(cf); wrapper.cfKind=Method(MethNormal); c2.clStatics.set(wrapper.cfName,wrapper); c2.clOrderedStatics.unshift(wrapper);}
+     var et=TyperBase.typeModuleType(ctx,TClassDecl(c2),p);
+     return FieldAccess.getFieldExpr(FieldAccess.create(et,wrapper,FHStatic(c2),true,p),FRead);
+    }
+    var edef=FieldAccess.getFieldExpr(fa,FRead);
+    switch follow(fa.faOn.etype) {
+     case TInst(c,_) if(checkClass(c)):displayError(ctx.com,"Can't create closure on an extern inline member method",p); edef;
+     case TAnon(a):switch a.aStatus {
+      case ClassStatics(c) if(hasClassFieldFlag(cf,CfExtern)):displayError(ctx.com,"Cannot create closure on @:extern inline method",p); edef;
+      case ClassStatics(c) if(checkClass(c)):wrapExtern(c);
       case _:edef;
      }
-    case [Var(_),expression] if(expression!=null):
-     function loop(e:TExpr):TExpr return Texpr.mapExpr(loop,mk(e.eexpr,apply(e.etype),p));
-     var e=InlineTools.inlineMetadata(loop(expression),cf.cfMeta),tf=apply(cf.cfType);
-     !typeIseq(tf,e.etype)?mk(TCast(e,null),tf,e.epos):e;
-    case [Var(_),null]:raiseTypingError("Recursive inline is not supported",p);
-    case _:throw "Invalid inline field";
-   };
-  }
-  function dispatcher(p:Pos):CallDispatcher return new CallDispatcher(ctx,MGet,WithTypeTools.value,p);
+     case _:edef;
+    }
+   case [Var(_),expression] if(expression!=null):
+    function loop(e:TExpr):TExpr return Texpr.mapExpr(loop,mk(e.eexpr,apply(e.etype),p));
+    var e=InlineTools.inlineMetadata(loop(expression),cf.cfMeta),tf=apply(cf.cfType);
+    !typeIseq(tf,e.etype)?mk(TCast(e,null),tf,e.epos):e;
+   case [Var(_),null]:raiseTypingError("Recursive inline is not supported",p);
+   case _:throw "Invalid inline field";
+  };
+ }
+ public static function accGet(ctx:TyperContext,g:AccessKind):TExpr {
+  inline function dispatcher(p:Pos):CallDispatcher return new CallDispatcher(ctx,MGet,WithTypeTools.value,p);
   return switch g {
    case AKNo(acc,p):if(!Common.ignoreError(ctx.com)) raiseTypingError("This expression cannot be accessed for reading",p); else accGet(ctx,acc);
    case AKExpr(e):e;
@@ -142,7 +143,7 @@ class Calls {
     mk(TMeta(meta,field),t,field.epos);
    case AKField(fa):switch fa.faField.cfKind {
     case Method(MethMacro):ctx.f.inDisplay?FieldAccess.getFieldExpr(fa,FRead):raiseTypingError("Invalid macro access",fa.faPos);
-    case _:fa.faInline?inlineRead(fa):FieldAccess.getFieldExpr(fa,FRead);
+    case _:fa.faInline?accGetInlineRead(ctx,fa):FieldAccess.getFieldExpr(fa,FRead);
    }
    case AKAccessor(fa):dispatcher(fa.faPos).fieldCall(fa,[],[]);
    case AKUsingAccessor(sea):dispatcher(sea.seAccess.faPos).fieldCall(sea.seAccess,[sea.seThis],[]);

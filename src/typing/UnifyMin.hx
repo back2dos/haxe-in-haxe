@@ -62,45 +62,45 @@ class UnifyMin {
 						fcount = names.length;
 						for (name in names) fields.set(name, [expr(a.aFields.get(name))]);
 					} else {
-						if (fcount != names.length) throw "Not_found";
+						if (fcount != names.length) throw core.ds.FastThrow.of("Not_found");
 						var previous = [for (name in fields.keys()) name]; previous.sort(Reflect.compare);
 						for (name in previous) {
 							var f = a.aFields.get(name);
-							if (f == null) throw "Not_found";
+							if (f == null) throw core.ds.FastThrow.of("Not_found");
 							fields.set(name, [expr(f)].concat(fields.get(name)));
 						}
 					}
-				case _: throw "Not_found";
+				case _: throw core.ds.FastThrow.of("Not_found");
 			}
 			var result = new StringMap<TClassField>();
 			var names = [for (name in fields.keys()) name]; names.sort(Reflect.compare);
 			for (name in names) {
 				var values = fields.get(name);
-				var t = try unifyMinRaise(basic, values) catch (_:Unify_error) {throw "Not_found";};
+				var t = try unifyMinRaise(basic, values) catch (_:Unify_error) {throw core.ds.FastThrow.of("Not_found");};
 				result.set(name, mkField(name, t, values[0].epos, nullPos));
 			}
 			return mkAnon(Closed, result);
 		} catch (error:Dynamic) {if (error != "Not_found") throw error;}
 		try {
 			// Function argument types are contravariant; return types have a common base.
-			var signature = switch follow(el[0].etype) {case TFun(s): s; case _: throw new UnifyMinExit();};
+			var signature = switch follow(el[0].etype) {case TFun(s): s; case _: throw core.ds.FastThrow.of(new UnifyMinExit());};
 			var args = signature.args.copy(), arity = args.length;
 			var rets:Array<T> = [];
 			for (e in el.slice(1)) switch follow(e.etype) {
 				case TFun(s):
-					if (s.args.length != arity) throw new UnifyMinExit();
+					if (s.args.length != arity) throw core.ds.FastThrow.of(new UnifyMinExit());
 					for (i in 0...arity) {
 						var tcur = args[i].type, tnew = s.args[i].type;
 						if (doesUnify(tnew, tcur)) args[i] = s.args[i];
-						else if (!doesUnify(tcur, tnew)) throw new UnifyMinExit();
+						else if (!doesUnify(tcur, tnew)) throw core.ds.FastThrow.of(new UnifyMinExit());
 					}
 					rets.push(s.ret);
-				case _: throw new UnifyMinExit();
+				case _: throw core.ds.FastThrow.of(new UnifyMinExit());
 			}
 			var commonTypes = UnifyMinT.collectBaseTypes(signature.ret);
 			var ret = switch UnifyMinT.unifyMinPrime(defaultUnificationContext(), commonTypes, rets) {
 				case UnifyMinOk(t): t;
-				case UnifyMinError(_, _): throw new UnifyMinExit();
+				case UnifyMinError(_, _): throw core.ds.FastThrow.of(new UnifyMinExit());
 			};
 			return TFun({args:args, ret:ret});
 		} catch (_:UnifyMinExit) {

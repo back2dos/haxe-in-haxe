@@ -65,9 +65,9 @@ class Typeload {
   }
   checkDisplay(cff.cffName.pos); return displayed;
  }
- public static function findTypeInModule(m:ModuleDef,name:String):Dynamic {for(mt in m.mTypes) {var info=tInfos(mt); if(!info.mtPrivate&&info.mtPath.name==name) return mt;} throw NotFound.raise();}
+ public static function findTypeInModule(m:ModuleDef,name:String):Dynamic {for(mt in m.mTypes) if(!tPrivate(mt)&&tPath(mt).name==name) return mt; throw NotFound.raise();}
  public static function findTypeInModuleRaise(ctx:Typer,m:ModuleDef,name:String,p:Pos):Dynamic {
-  for(mt in m.mTypes) {var info=tInfos(mt); if(info.mtPath.name==name) {if(ctx.m.curmod!=info.mtModule&&info.mtPrivate) raiseTypingErrorExt(makeError(TypeNotFound(m.mPath,name,PrivateType),p)); return mt;}}
+  for(mt in m.mTypes) {if(tPath(mt).name==name) {if(ctx.m.curmod!=tModule(mt)&&tPrivate(mt)) raiseTypingErrorExt(makeError(TypeNotFound(m.mPath,name,PrivateType),p)); return mt;}}
   return raiseTypingErrorExt(makeError(TypeNotFound(m.mPath,name,NotDefined),p));
  }
  public static function findTypeInCurrentModuleContext(ctx:Typer,pack:Array<String>,name:String):Dynamic {

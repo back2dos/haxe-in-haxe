@@ -21,7 +21,7 @@ class FiltersCommon {
 		return core.ds.ArrayTools.exists(cls.clDescendants, loopInheritance);
 	}
 	public static function isCached(com:CommonContext, t:ModuleType):Bool {
-		var m = TypeOps.tInfos(t).mtModule.mExtra;
+		var m = TypeOps.tModule(t).mExtra;
 		return m.mProcessed != 0 && m.mProcessed < com.partScope.compilationStep;
 	}
 	public static function applyFiltersOnce(ctx:context.Typecore.Typer, scom:SafeContext, filters:Array<{name:String,run:SafeContext->TExpr->TExpr}>, t:ModuleType):Void {

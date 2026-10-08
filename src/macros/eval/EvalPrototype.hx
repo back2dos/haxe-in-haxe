@@ -256,7 +256,7 @@ class EvalPrototype {
 	static function compareString(a:String, b:String):Int return a == b ? 0 : (a < b ? -1 : 1);
 
 	public static function createStaticPrototype(ctx:Context, mt:ModuleType):{init:ProtoInit, delays:Array<StaticDelay>} {
-		var path = TFunctions.tInfos(mt).mtPath;
+		var path = TFunctions.tPath(mt);
 		var key = EvalHash.pathHash(path);
 		var com = if (ctx.isMacro) ctx.curapi.getMacroCom() else ctx.curapi.getCom();
 		var meta = core.Texpr.buildMetadata(com.basic, mt);

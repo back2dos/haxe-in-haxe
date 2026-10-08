@@ -87,7 +87,7 @@ class Compile {
    case PatBind(_,{kind:PatAny}):
    case PatBind(v,p1):loop([makeBind(v,p.pos,subject)].concat(bs),p1);
    case PatAny:
-   case PatExtractor(_):throw new ExtractorFound();
+   case PatExtractor(_):throw core.ds.FastThrow.of(new ExtractorFound());
    case _:Error.raiseTypingError("Unexpected pattern: "+Pattern.toString(p),row.caseData.casePos);
   };loop(row.bindings,row.patterns[0]);}
   sigma.sort(function(a,b)return a.con.pos.pmin-b.con.pos.pmin);if(m.matchDebug)Sys.println('compile_switch:\n\tsubject: ${sExprPretty(subject)}\n\ttsubjects: ${sSubjects(subjects)}\n\tcases: ${sCases(cases)}');

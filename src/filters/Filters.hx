@@ -101,7 +101,7 @@ class Filters {
 		case _:
 	}
 	public static function commitFeatures(com:CommonContext, t:ModuleType):Void {
-		for (k in TypeOps.tInfos(t).mtModule.mExtra.mFeatures.keys()) Common.addFeature(com, k);
+		for (k in TypeOps.tModule(t).mExtra.mFeatures.keys()) Common.addFeature(com, k);
 	}
 	public static function checkReservedTypePaths(scom:SafeContext, t:ModuleType):Void {
 		function check(path:GlobalTypePath, pos:Pos):Void {
@@ -189,7 +189,7 @@ class Filters {
 		switch t { case TClassDecl(c): for (cf in c.clOrderedStatics) checkField(c.clModule, cf); for (cf in c.clOrderedFields) checkField(c.clModule, cf); if (c.clConstructor != null) checkField(c.clModule, c.clConstructor); case _: }
 	}
 	public static function saveClassState(compilationStep:Int, t:ModuleType):Void {
-		TypeOps.tInfos(t).mtModule.mExtra.mProcessed = compilationStep;
+		TypeOps.tModule(t).mExtra.mProcessed = compilationStep;
 		switch t {
 			case TClassDecl(c):
 				var vars:Array<{variable:TVar, type:T}> = [];

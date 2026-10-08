@@ -1927,7 +1927,7 @@ class HxbWriter {
 				writeTypeInstance(t);
 				return null;
 			}, function() {
-				var tPath = try core.Globals.sTypePath(TFunctions.tInfos(TFunctions.moduleTypeOfType(t)).mtPath) catch (_:Dynamic) core.TPrinting.sType(core.TPrinting.printContext(), t);
+				var tPath = try core.Globals.sTypePath(TFunctions.tPath(TFunctions.moduleTypeOfType(t))) catch (_:Dynamic) core.TPrinting.sType(core.TPrinting.printContext(), t);
 				return '`$source` type `$tPath` for abstract `${core.Globals.sTypePath(a.aPath)}`';
 			}, a.aPos);
 		}

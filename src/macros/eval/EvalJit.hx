@@ -279,7 +279,7 @@ class EvalJit {
 					var execs = [for (e in el) jitExprRec(jit, false, e)];
 					return EvalEmitter.emitArrayDeclaration(execs);
 				case TTypeExpr(mt):
-					var key = EvalHash.pathHash(tInfos(mt).mtPath);
+					var key = EvalHash.pathHash(tPath(mt));
 					var proto = EvalContext.getStaticPrototypeAsValue(jit.ctx, key, e.epos);
 					return EvalEmitter.emitTypeExpr(proto);
 				case TFunction(tf):

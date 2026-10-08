@@ -32,7 +32,7 @@ class InvalidExpr extends haxe.Exception {
 
 	public function new() super("Invalid_expr");
 
-	public static inline function raise():InvalidExpr return instance;
+	public static inline function raise():InvalidExpr return core.ds.FastThrow.of(instance);
 }
 
 class Abort extends haxe.Exception {

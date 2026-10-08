@@ -95,8 +95,8 @@ class Error {
 		case UnknownIdent(s):"Unknown identifier : " + s;
 		case Custom(s):s;
 		case CallError(err):sCallError(err);
-		case NoConstructor(mt):Globals.sTypePath(tInfos(mt).mtPath) + " does not have a constructor";
-		case AbstractClass(mt):Globals.sTypePath(tInfos(mt).mtPath) + " is abstract and cannot be constructed";
+		case NoConstructor(mt):Globals.sTypePath(tPath(mt)) + " does not have a constructor";
+		case AbstractClass(mt):Globals.sTypePath(tPath(mt)) + " is abstract and cannot be constructed";
 	};
 	public static function sCallError(err:CallError):String return switch err {
 		case NotEnoughArguments(tl):var ctx = printContext();"Not enough arguments, expected " + [for (a in tl) a.name + ":" + shortType(ctx,a.type)].join(", ");

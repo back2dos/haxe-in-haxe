@@ -54,7 +54,7 @@ class Genxml {
   case TDynamic(inner):node("d",[],[genType(inner)]);
   case TLazy(l):genType(lazyType(l));
  }
- static function genTypeRef(name:String,t:ModuleType,params:TParams):RttiXml return node(name,[genPath(tpath(t),tInfos(t).mtPrivate)],params.map(t->genType(t)));
+ static function genTypeRef(name:String,t:ModuleType,params:TParams):RttiXml return node(name,[genPath(tpath(t),tPrivate(t))],params.map(t->genType(t)));
  static function genField(attributes:Array<Attribute>,f:TClassField):RttiXml {
   function addGetSet(access:VarAccess,name:String,attrs:Array<Attribute>):Array<Attribute> return switch access {
    case AccNormal|AccRequire(_,_)|AccCtor:attrs;
@@ -95,7 +95,7 @@ class Genxml {
  static function genClassPath(name:String,ct:{cls:TClass,params:TParams}):RttiXml return node(name,[attr("path",Globals.sTypePath(tpath(TClassDecl(ct.cls))))],ct.params.map(t->genType(t)));
  static function fieldExists(f:TClassField,c:TClass):Bool return c.clFields.exists(f.cfName) || c.clSuper!=null && fieldExists(f,c.clSuper.cls);
  static function genTypeDecl(includePos:Bool,t:ModuleType):RttiXml {
-  var m=tInfos(t).mtModule;
+  var m=tModule(t);
   return switch t {
    case TClassDecl(c):
     function visible(cf:TClassField):Bool return !Meta.has(Meta.GenericInstance,cf.cfMeta)&&!Meta.has(Meta.NoDoc,cf.cfMeta);

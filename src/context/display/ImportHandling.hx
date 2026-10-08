@@ -47,13 +47,13 @@ class ImportHandling {
   var p1=pack.length==0?p2:pack[0].pos,pType=Ast.punion(p1,p2);
   var md=ctx.g.doLoadModule(ctx,{pack:pack.map(part->part.name),name:tname},pType,MDepFromImport),types=md.mTypes;
   function errorPrivate(p:Pos):Void raiseTypingError("Importing private declarations from a module is not allowed",p);
-  function checkPrivate(t:ModuleType,p:Pos):Void {var ti=tInfos(t);if(ctx.m.curmod!=ti.mtModule&&ti.mtPrivate) errorPrivate(p);}
+  function checkPrivate(t:ModuleType,p:Pos):Void {if(ctx.m.curmod!=tModule(t)&&tPrivate(t)) errorPrivate(p);}
   function staticNames():Array<String> {if(md.mStatics==null) return [];var names=PMap.keys(md.mStatics.clStatics);names.reverse();return names;}
   function failUsefully<R>(name:String,p:Pos):R {
-   var lower=name.charAt(0)>="a"&&name.charAt(0)<="z",candidates=lower?staticNames():types.map(mt->tInfos(mt).mtPath.name);
+   var lower=name.charAt(0)>="a"&&name.charAt(0)<="z",candidates=lower?staticNames():types.map(mt->tPath(mt).name);
    return raiseTypingError(StringError.stringError(name,candidates,"Module "+Globals.sTypePath(md.mPath)+" does not define "+(lower?"field":"type")+" "+name),p);
   }
-  function findType(name:String):ModuleType {for(mt in types) if(tInfos(mt).mtPath.name==name) return mt;throw NotFound.raise();}
+  function findType(name:String):ModuleType {for(mt in types) if(tPath(mt).name==name) return mt;throw NotFound.raise();}
   function getType(name:String):ModuleType {var t=try findType(name) catch(_:NotFound) failUsefully(name,pType);checkPrivate(t,pType);return t;}
   function checkAlias(mt:ModuleType,name:String,pname:Pos):Void {
    if(!(name.charAt(0)>="A"&&name.charAt(0)<="Z")) raiseTypingError("Type aliases must start with an uppercase letter",pname);
@@ -72,7 +72,7 @@ class ImportHandling {
     var alias=name==null?null:name.name;
     if(rest.length==0) {
      if(name==null) {
-      var rev=types.copy();rev.reverse();for(mt in rev) if(!tInfos(mt).mtPrivate) ctx.m.importResolution.add(moduleTypeResolution(mt,null,p));
+      var rev=types.copy();rev.reverse();for(mt in rev) if(!tPrivate(mt)) ctx.m.importResolution.add(moduleTypeResolution(mt,null,p));
       if(md.mStatics!=null) ctx.m.importResolution.add(classStaticsResolution(md.mStatics,p));
      } else {var mt=getType(tname);checkAlias(mt,name.name,name.pos);ctx.m.importResolution.add(moduleTypeResolution(mt,name.name,p));}
     } else if(rest.length==1) {
@@ -115,7 +115,7 @@ class ImportHandling {
      if(rest.length>2) raiseTypingError("Unexpected "+rest[2].name,rest[2].pos);
      var sub=getType(rest[0].name),fname=rest[1].name,p3=rest[1].pos;
      addLazyResolution(function() {
-      try return addStaticInit(sub,alias,fname) catch(_:NotFound) {displayError(ctx.com,Globals.sTypePath(tInfos(sub).mtPath)+" has no field "+fname,Ast.punion(p,p3));return null;}
+      try return addStaticInit(sub,alias,fname) catch(_:NotFound) {displayError(ctx.com,Globals.sTypePath(tPath(sub))+" has no field "+fname,Ast.punion(p,p3));return null;}
      });
     }
    case IAll:
@@ -140,7 +140,7 @@ class ImportHandling {
   var types:Array<ModuleType>;
   if(t.tsub==null) {
    var md=ctx.g.doLoadModule(ctx,{pack:t.tpackage,name:t.tname},p,MDepFromImport);
-   types=md.mTypes.filter(mt->!tInfos(mt).mtPrivate);
+   types=md.mTypes.filter(mt->!tPrivate(mt));
    if(md.mStatics!=null) types.unshift(TClassDecl(md.mStatics));
   } else types=[ctx.g.doLoadTypeDef(ctx,p,t)];
   function filterClasses(types:Array<ModuleType>):Array<{cls:TClass,pos:Pos}> {

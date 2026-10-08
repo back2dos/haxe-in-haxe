@@ -521,7 +521,7 @@ class Texpr {
   function walk(tabs:String,e:TExpr):Void {
    function add(s:String) line(tabs,e.epos,s); function loop(e:TExpr) walk(tabs + "  ",e);
    switch e.eexpr {
-    case TConst(c):add(sConst(c)); case TLocal(v):add("TLocal " + v.vName); case TTypeExpr(mt):add("TTypeExpr " + Globals.sTypePath(tInfos(mt).mtPath)); case TIdent(s):add("TIdent " + s);
+    case TConst(c):add(sConst(c)); case TLocal(v):add("TLocal " + v.vName); case TTypeExpr(mt):add("TTypeExpr " + Globals.sTypePath(tPath(mt))); case TIdent(s):add("TIdent " + s);
     case TEnumParameter(a,ef,_):add("TEnumParameter " + ef.efName); loop(a); case TEnumIndex(a):add("TEnumIndex"); loop(a);
     case TArray(a,b):add("TArray"); loop(a); loop(b); case TBinop(op,a,b):add("TBinop " + Ast.sBinop(op)); loop(a); loop(b);
     case TField(a,fa):add("TField " + fieldName(fa)); loop(a); case TParenthesis(a):add("TParenthesis"); loop(a);

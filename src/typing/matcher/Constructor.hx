@@ -27,7 +27,7 @@ class Constructor {
 		case ConConst(ct): sConst(ct);
 		case ConEnum(en, ef): ef.efName;
 		case ConStatic(c, cf): Globals.sTypePath(switch c.clKind {case KAbstractImpl(a): a.aPath; case _: c.clPath;}) + "." + cf.cfName;
-		case ConTypeExpr(mt): Globals.sTypePath(tInfos(mt).mtPath);
+		case ConTypeExpr(mt): Globals.sTypePath(tPath(mt));
 		case ConFields(fields): "{ " + fields.join(", ") + " }";
 		case ConArray(i): "<array " + i + ">";
 	};
@@ -60,7 +60,7 @@ class Constructor {
 		case [ConEnum(_, ef1), ConEnum(_, ef2)]: Reflect.compare(ef1.efIndex, ef2.efIndex);
 		case [ConStatic(_, cf1), ConStatic(_, cf2)]: Reflect.compare(cf1.cfName, cf2.cfName);
 		case [ConTypeExpr(mt1), ConTypeExpr(mt2)]:
-			var p1 = tInfos(mt1).mtPath, p2 = tInfos(mt2).mtPath;
+			var p1 = tPath(mt1), p2 = tPath(mt2);
 			var r = 0;
 			for (i in 0...Std.int(Math.min(p1.pack.length, p2.pack.length))) {r = Reflect.compare(p1.pack[i], p2.pack[i]); if (r != 0) break;}
 			if (r != 0) r else if (p1.pack.length != p2.pack.length) p1.pack.length - p2.pack.length else Reflect.compare(p1.name, p2.name);

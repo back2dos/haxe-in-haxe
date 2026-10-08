@@ -165,7 +165,7 @@ class Finalization {
 			switch state {
 				case Done:
 				case Generating:
-					Common.moduleWarning(com, tInfos(t).mtModule, WStaticInitOrder, [], "Warning : maybe loop in static generation of " + sTypePath(p), tInfos(t).mtPos);
+					Common.moduleWarning(com, tModule(t), WStaticInitOrder, [], "Warning : maybe loop in static generation of " + sTypePath(p), tInfos(t).mtPos);
 				case NotYet:
 					states.set(k, Generating);
 					switch t {case TClassDecl(c): walkClass(p, c); case _:}

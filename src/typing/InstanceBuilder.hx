@@ -45,7 +45,7 @@ class InstanceBuilder {
 				else {
 					var imported = ctx.m.importResolution.extractFieldImports().findOpt(i);
 					if (imported == null) raiseTypingError("Invalid macro call", p);
-					resolved = tInfos(imported.type).mtPath;
+					resolved = tPath(imported.type);
 				}
 				[i, resolved.name].concat(resolved.pack);
 			case _: loop(e);
