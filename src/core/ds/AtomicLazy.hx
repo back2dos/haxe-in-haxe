@@ -12,9 +12,17 @@ private enum AtomicLazyState<T> {
 class AtomicLazy<T> {
 	var state:AtomicLazyState<T>;
 	var mutex:AtomicLazyMutex = new AtomicLazyMutex();
+	var ready = false;
+	var value:Null<T> = null;
 
 	function new(state:AtomicLazyState<T>) {
 		this.state = state;
+		switch state {
+			case Set(v):
+				value = v;
+				ready = true;
+			case _:
+		}
 	}
 
 	public static function fromFun<T>(callback:Void->T):AtomicLazy<T> {
@@ -36,6 +44,8 @@ class AtomicLazy<T> {
 	}
 
 	public function force():T {
+		// Lock-free fast path, like upstream's Atomic.get: Set is final once published.
+		if (ready) return value;
 		while (true) {
 			mutex.acquire();
 			switch (state) {
@@ -48,11 +58,13 @@ class AtomicLazy<T> {
 				case Unset(callback):
 					state = Computing;
 					mutex.release();
-					var value = callback();
+					var v = callback();
 					mutex.acquire();
-					state = Set(value);
+					state = Set(v);
+					value = v;
+					ready = true;
 					mutex.release();
-					return value;
+					return v;
 			}
 		}
 		throw "Unreachable";

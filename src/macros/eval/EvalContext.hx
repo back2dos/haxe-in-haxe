@@ -362,13 +362,27 @@ class EvalContext {
 	static final currentEval = new sys.thread.Tls<Eval>();
 
 	/** The current thread's eval state (Thread_local_storage.get_exn upstream). **/
+	// Thread-local reads are a native call and a cast on HashLink. While a single
+	// thread has set an eval, it is also kept in a static; a second thread switches
+	// to the thread-local value for good (which is always set).
+	static var singleEval:Null<Eval> = null;
+	static var singleThread:Null<sys.thread.Thread> = null;
+	static var multiThreaded = false;
+
 	public static function getEval(ctx:Context):Eval {
-		var e = currentEval.value;
+		var e = multiThreaded ? currentEval.value : singleEval;
 		if (e == null) throw NotFound.raise();
 		return e;
 	}
 
-	public static function setEval(ctx:Context, e:Eval):Void currentEval.value = e;
+	public static function setEval(ctx:Context, e:Eval):Void {
+		currentEval.value = e;
+		if (!multiThreaded) {
+			var t = sys.thread.Thread.current();
+			if (singleThread == null) singleThread = t;
+			if (singleThread == t) singleEval = e else multiThreaded = true;
+		}
+	}
 
 	public static function currentThreadId(ctx:Context):Int return getEval(ctx).thread.threadId;
 
