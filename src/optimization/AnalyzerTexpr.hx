@@ -36,9 +36,11 @@ class AnalyzerTexpr {
  public static function targetHandlesAssignOps(com:context.SafeCom.SafeContext,e2:TExpr):Bool return switch com.platform {case Php:!hasSideEffect(e2); case Lua:false; case Cpp if (!core.Define.defined(com.defines,core.Define.Cppia)):!hasSideEffect(e2); case _:true;};
  public static function targetHandlesSideEffectOrder(com:context.SafeCom.SafeContext):Bool return switch com.platform {case Cpp:core.Define.defined(com.defines,core.Define.Cppia); case Php:false; case _:true;};
  public static function canBeUsedAsValue(com:context.SafeCom.SafeContext,e:TExpr):Bool {
-  function loop(e:TExpr):Bool return switch e.eexpr {case TBlock([e]):loop(e); case TBlock(_) | TSwitch(_) | TTry(_,_) | TReturn(_) | TThrow(_) | TBreak | TContinue:false; case TCall({eexpr:TConst(TString("phi"))},_):false; case TUnop(Increment | Decrement,_,_) if (!targetHandlesUnops(com)):false; case TFunction(_):true; case _:!checkExpr(e -> !loop(e),e);};
-  switch [com.platform,e.eexpr] {case [Cpp | Jvm | Flash | Lua,TConst(TNull)]:return false; case _:} return loop(e);
+  switch e.eexpr {case TConst(TNull):switch com.platform {case Cpp | Jvm | Flash | Lua:return false; case _:} case _:} return canBeUsedAsValueLoop(com,e);
  }
+ // static, with com passed along: a closure per call and per node otherwise
+ static function canBeUsedAsValueLoop(com:context.SafeCom.SafeContext,e:TExpr):Bool return switch e.eexpr {case TBlock([e]):canBeUsedAsValueLoop(com,e); case TBlock(_) | TSwitch(_) | TTry(_,_) | TReturn(_) | TThrow(_) | TBreak | TContinue:false; case TCall({eexpr:TConst(TString("phi"))},_):false; case TUnop(Increment | Decrement,_,_) if (!targetHandlesUnops(com)):false; case TFunction(_):true; case _:!checkExprWith(cannotBeUsedAsValue,com,e);};
+ static function cannotBeUsedAsValue(com:context.SafeCom.SafeContext,e:TExpr):Bool return !canBeUsedAsValueLoop(com,e);
  public static function wrapMeta(s:String,e:TExpr):TExpr return mk(TMeta({meta:core.MetaList.StrictMeta.Custom(s),exprs:[],pos:e.epos},e),e.etype,e.epos);
  public static function isReallyUnbound(s:String):Bool return s != "`trace" && s != "__int__";
  static var r = ~/^[A-Za-z0-9_]+$/;

@@ -473,6 +473,18 @@ class HxbWriter {
 		return r;
 	}
 
+	// catchUnboundTtp(() -> writeTexprTypeInstance(fctx, e.etype), () -> "texpr type", e.epos)
+	// without a closure per expression node.
+	static function texprTypeSource():String return "texpr type";
+	function writeTexprTypeInstanceCatching(fctx:FieldWriterContext, e:TExpr):Void {
+		unboundFrames.push({source: texprTypeSource, p: e.epos});
+		try writeTexprTypeInstance(fctx, e.etype) catch (ex:haxe.Exception) {
+			unboundFrames.pop();
+			throw ex;
+		}
+		unboundFrames.pop();
+	}
+
 	function performUnboundTtp():{source:String, p:Pos} {
 		var n = unboundFrames.length;
 		if (n == 0) return {source: "module " + core.Globals.sTypePath(currentModule.mPath), p: moduleFilePos()};
@@ -1616,10 +1628,7 @@ class HxbWriter {
 			};
 			if (writeType) {
 				// Unbound TTP in top level expr type will be caught be calling site with a better position
-				if (e == e1) writeTexprTypeInstance(fctx, e.etype) else catchUnboundTtp(function() {
-					writeTexprTypeInstance(fctx, e1.etype);
-					return null;
-				}, function() return "texpr type", e1.epos);
+				if (e == e1) writeTexprTypeInstance(fctx, e.etype) else writeTexprTypeInstanceCatching(fctx, e1);
 			}
 			fctx.posWriter.writePos(chunk, true, 0, e1.epos);
 		}

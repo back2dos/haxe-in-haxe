@@ -58,6 +58,25 @@ class Texpr {
   case TSwitch(s):f(s.switchSubject) || exists((c:TSwitchCase) -> exists(f,c.casePatterns) || f(c.caseExpr),s.switchCases) || s.switchDefault != null && f(s.switchDefault);
   case TTry(a,catches):f(a) || exists(c -> f(c.expr),catches);
  };
+ // checkExpr with an argument passed through (see iterWith).
+ public static function checkExprWith<A>(f:A->TExpr->Bool,x:A,e:TExpr):Bool {
+  switch e.eexpr {
+   case TConst(_) | TLocal(_) | TBreak | TContinue | TTypeExpr(_) | TIdent(_):return false;
+   case TArray(a,b) | TBinop(_,a,b) | TWhile(a,b,_):return f(x,a) || f(x,b);
+   case TThrow(a) | TField(a,_) | TEnumParameter(a,_,_) | TEnumIndex(a) | TParenthesis(a) | TCast(a,_) | TUnop(_,_,a) | TMeta(_,a):return f(x,a);
+   case TArrayDecl(el) | TNew(_,_,el) | TBlock(el):for (a in el) if (f(x,a)) return true; return false;
+   case TObjectDecl(fl):for (a in fl) if (f(x,a.expr)) return true; return false;
+   case TCall(a,el):if (f(x,a)) return true; for (a in el) if (f(x,a)) return true; return false;
+   case TVar(_,eo) | TReturn(eo):return eo != null && f(x,eo);
+   case TFunction(fu):for (a in fu.tfArgs) if (a.defaultValue != null && f(x,a.defaultValue)) return true; return f(x,fu.tfExpr);
+   case TIf(c,a,b):return f(x,c) || f(x,a) || b != null && f(x,b);
+   case TSwitch(s):
+    if (f(x,s.switchSubject)) return true;
+    for (c in s.switchCases) {for (p in c.casePatterns) if (f(x,p)) return true; if (f(x,c.caseExpr)) return true;}
+    return s.switchDefault != null && f(x,s.switchDefault);
+   case TTry(a,catches):if (f(x,a)) return true; for (c in catches) if (f(x,c.expr)) return true; return false;
+  }
+ }
  public static function withExpr(e:TExpr,def:TExprDef):TExpr return {eexpr:def,etype:e.etype,epos:e.epos};
  // Deviation: upstream rebuilds every node; here a node whose children all come back
  // unchanged is returned as is (texprs are immutable; this saves most allocations
