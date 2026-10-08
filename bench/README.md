@@ -159,6 +159,26 @@ In rough order of impact:
    collections, zeroing reused memory, and first writes to fresh memory,
    which OCaml's cache-resident minor heap avoids.
 
+13. **Dynamic typing and boxing** (seventh round). HashLink compiles an
+   `Array<T>` of a type parameter to `ArrayDyn` and a structure to a virtual,
+   so generic helpers boxed every array argument (an allocation and a dynamic
+   call per element access) and generic structures went through
+   `hl_to_virtual` on every use. `Stream` is now `@:generic`; the generic
+   `List`/`Texpr`/HXB-writer list helpers and the parser combinators
+   (`tryHead`, `plist`, `psep*`) are inline; two hot private structures
+   became classes. `tryHead` tests the shared `Stream.Failure` by identity
+   instead of a typed catch, and string tests use the type pointer instead
+   of `Std.downcast`. Runtime side: `runtime/hl` overrides `StringBuf.add`
+   (the same string test) and `ArrayObj.__expand` (grow from 4 and double
+   while small, instead of reallocating at 1, 2, 3, 4, 6, 9, 13…), and
+   `hlc.h` gains an inline `hl_dyn_castp` fast path for exact-type casts.
+   HL/C `stdlib`: 1.81G → 1.57G instructions (reference 1.10G). Minimum CPU
+   time over 21 runs: 0.37s (reference 0.24s); with collection disabled
+   (`HAXE_IN_HAXE_GC_FACTOR=1e9`) its user time is 0.22s against the
+   reference's 0.20s. What is left is memory management: the major
+   collections, and zeroing recycled memory when slices are refilled
+   (about 80M instructions of `memset`).
+
 Where the time went after the first round (HL/C, callgrind): libhl allocation and GC were about
 45% of the run. libhl takes a global lock and a TLS lookup on every
 allocation, which is far more expensive than OCaml's pointer bump. The rest is
