@@ -26,11 +26,8 @@ class Unify_error { public var errors:Array<UnifyError>; public function new(err
 enum EqKind { EqStrict; EqCoreType; EqRightDynamic; EqBothDynamic; EqStricter; }
 typedef TypeParamUnificationContext = {var knownTypeParams:Array<TypedTypeParam>; var typeParamPairs:Array<{a:TypedTypeParam,b:TypedTypeParam}>;}
 enum TypeParamMode { TpDefault; TpDefinition(context:TypeParamUnificationContext); }
-@:structInit class RecStack<A> {
-	public var recStack:Array<A>;
-	public inline function new(recStack:Array<A>) { this.recStack = recStack; }
-	public inline function clone():RecStack<A> return new RecStack(recStack);
-}
+// Upstream wraps a mutable list in a record; the array itself is the stack here.
+typedef RecStack<A> = Array<A>;
 enum NullFollowMode { NeverFollow; AlwaysFollow; FollowIfNullable; }
 typedef TypePair = {var a:T; var b:T;}
 @:structInit class UnificationContext {
@@ -165,7 +162,7 @@ class TUnification {
  // These reference cells are initialized below, as in upstream's trailing assignments.
  public static var unifyRef:UnificationContext->T->T->Void=unifyCustom;
  public static var unifyMinRef:UnificationContext->T->Array<T>->UnifyMinResult=UnifyMinT.unifyMin;
- public static function newRecStack<A>():RecStack<A> return {recStack:[]};
+ public static function newRecStack<A>():RecStack<A> return [];
  public static function defaultUnificationContext():UnificationContext return {
   allowTransitiveCast:true,allowAbstractCast:true,allowDynamicToCast:true,allowArgNameMismatch:true,allowOptionalMismatch:true,
   equalityKind:EqStrict,equalityUnderlying:false,strictFieldKind:false,opaqueFieldParams:false,allowFinalInvariance:false,
@@ -257,16 +254,16 @@ class TUnification {
    case _:false;
   }
  }
- public static function recStackExists<A>(f:A->Bool,s:RecStack<A>):Bool return Lambda.exists(s.recStack,f);
- public static function recStackMemq<A>(v:A,s:RecStack<A>):Bool return s.recStack.indexOf(v)>=0;
+ public static function recStackExists<A>(f:A->Bool,s:RecStack<A>):Bool {for(x in s) if(f(x)) return true;return false;}
+ public static function recStackMemq<A>(v:A,s:RecStack<A>):Bool return s.indexOf(v)>=0;
  public static function recStackLoop<A,B,R>(s:RecStack<A>,v:A,f:B->R,arg:B):R {
-  s.recStack.unshift(v);try {var r=f(arg);s.recStack.shift();return r;} catch(e:haxe.Exception){s.recStack.shift();throw e;}
+  s.unshift(v);try {var r=f(arg);s.shift();return r;} catch(e:haxe.Exception){s.shift();throw e;}
  }
  public static function recStack<A>(s:RecStack<A>,v:A,check:A->Bool,run:Void->Void,onError:Array<UnifyError>->Void):Void {
   if(!recStackExists(check,s)) {
-   s.recStack.unshift(v);
-   try {run();} catch(e:Unify_error) {s.recStack.shift();onError(e.errors);return;} catch(e:haxe.Exception){s.recStack.shift();throw e;}
-   s.recStack.shift();
+   s.unshift(v);
+   try {run();} catch(e:Unify_error) {s.shift();onError(e.errors);return;} catch(e:haxe.Exception){s.shift();throw e;}
+   s.shift();
   }
  }
  public static function recStackDefault<A,R>(s:RecStack<A>,v:A,check:A->Bool,run:Void->R,def:R):R return !recStackExists(check,s) ? recStackLoop(s,v,function(_) return run(),null) : def;
@@ -345,10 +342,10 @@ class TUnification {
  public static function typeIseqStrict(a:T,b:T):Bool return typeIseqCustom(updated(defaultUnificationContext(),{equalityKind:EqStricter}),a,b);
  public static function printStacks(c:UnificationContext):Void {
   var ctx=printContext(),st=function(t) return sType(ctx,t);
-  Sys.println("unify_stack");for(p in c.unifyStack.recStack) Sys.println("\t"+st(p.a)+" , "+st(p.b));
-  Sys.println("variance_stack");for(p in c.varianceStack.recStack) Sys.println("\t"+st(p.a)+" , "+st(p.b));
-  Sys.println("monos");for(m in c.unifyNewMonos.recStack) Sys.println("\t"+st(m));
-  Sys.println("abstract_cast_stack");for(p in c.abstractCastStack.recStack) Sys.println("\t"+st(p.a)+" , "+st(p.b));
+  Sys.println("unify_stack");for(p in c.unifyStack) Sys.println("\t"+st(p.a)+" , "+st(p.b));
+  Sys.println("variance_stack");for(p in c.varianceStack) Sys.println("\t"+st(p.a)+" , "+st(p.b));
+  Sys.println("monos");for(m in c.unifyNewMonos) Sys.println("\t"+st(m));
+  Sys.println("abstract_cast_stack");for(p in c.abstractCastStack) Sys.println("\t"+st(p.a)+" , "+st(p.b));
  }
  public static function fieldTypeForUnification(c:UnificationContext,f:TClassField):T return c.opaqueFieldParams ? f.cfType : fieldType(f);
  public static function unifyCustom(c:UnificationContext,a:T,b:T):Void {
@@ -413,13 +410,13 @@ class TUnification {
       if(hasClassFieldFlag(f2,CfPublic) && !hasClassFieldFlag(f1,CfPublic)) error([invalidVisibility(n)]);
       switch f2.cfKind {
        case Var({vRead:AccNo}),Var({vRead:AccNever}):
-        var old=c.unifyNewMonos.recStack;c.unifyNewMonos.recStack=monos.concat(old);
-        recStack(c.unifyStack,pair(ft,f2.cfType),function(p) return fastEq(p.b,f2.cfType)&&fastEqMono(c.unifyNewMonos.recStack,ft,p.a),function() {try {unifyWithAccess(c,f1,ft,f2);} catch(e:haxe.Exception){c.unifyNewMonos.recStack=old;throw e;}},function(l) error([invalidField(n)].concat(l)));
-        c.unifyNewMonos.recStack=old;
+        var old=c.unifyNewMonos;c.unifyNewMonos=monos.concat(old);
+        recStack(c.unifyStack,pair(ft,f2.cfType),function(p) return fastEq(p.b,f2.cfType)&&fastEqMono(c.unifyNewMonos,ft,p.a),function() {try {unifyWithAccess(c,f1,ft,f2);} catch(e:haxe.Exception){c.unifyNewMonos=old;throw e;}},function(l) error([invalidField(n)].concat(l)));
+        c.unifyNewMonos=old;
        case Method(MethNormal),Method(MethInline),Var({vWrite:AccNo}),Var({vWrite:AccNever}):
-        var old=c.unifyNewMonos.recStack;c.unifyNewMonos.recStack=monos.concat(old);
-        recStack(c.unifyStack,pair(f2.cfType,ft),function(p) return fastEqMono(c.unifyNewMonos.recStack,p.b,ft)&&fastEq(f2.cfType,p.a),function() {try {unifyWithAccess(c,f1,ft,f2);} catch(e:haxe.Exception){c.unifyNewMonos.recStack=old;throw e;}},function(l) error([invalidField(n)].concat(l)));
-        c.unifyNewMonos.recStack=old;
+        var old=c.unifyNewMonos;c.unifyNewMonos=monos.concat(old);
+        recStack(c.unifyStack,pair(f2.cfType,ft),function(p) return fastEqMono(c.unifyNewMonos,p.b,ft)&&fastEq(f2.cfType,p.a),function() {try {unifyWithAccess(c,f1,ft,f2);} catch(e:haxe.Exception){c.unifyNewMonos=old;throw e;}},function(l) error([invalidField(n)].concat(l)));
+        c.unifyNewMonos=old;
        case _:try {unifyWithAccess(c,f1,ft,f2);} catch(e:Unify_error) {error([invalidField(n)].concat(e.errors));}
       }
       for(f2o in f2.cfOverloads) if(!Lambda.exists([f1].concat(f1.cfOverloads),function(f1o) return typeIseqCustom(c,f1o.cfType,f2o.cfType))) error([MissingOverload(f1,f2o.cfType)]);

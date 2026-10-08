@@ -13,7 +13,7 @@ class GcPolicy {
 	static var enabled = false;
 	static var allocatedAtMajor = 0.;
 	static var heapAtMajor = 0.;
-	static var factor = 0.5;
+	static var factor = 1.0;
 
 	public static function init():Void {
 		var v = Sys.getEnv("HAXE_IN_HAXE_GC_FACTOR");

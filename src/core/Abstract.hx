@@ -96,7 +96,7 @@ class Abstract {
 				case TAbstract(a,tl) if (!MetadataTools.has(MetadataTools.CoreType,a.aMeta)):
 					if (recStackExists(function(t2) return fastEq(t,t2),stack)) {
 						var pctx = printContext();
-						var chain:Array<T> = [t].concat(stack.recStack); chain.reverse();
+						var chain:Array<T> = [t].concat(stack); chain.reverse();
 						Error.raiseTypingError("Abstract chain detected: " + [for (t in chain) sType(pctx,t)].join(" -> "),a.aPos);
 					}
 					getUnderlyingTypeWithStack(stack,a,tl);
