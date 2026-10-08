@@ -19,6 +19,60 @@ HL_STATIC="libhl.a fmt.o dxt.o sha1.o" sh bench/build.sh hlc   # static link
 LD_LIBRARY_PATH=/path/to/patched/hashlink HAXE_REFERENCE=haxe/haxe python3 bench/run.py -n 7
 ```
 
+## Results — 2026-10-08 night (performance pass)
+
+Same container; HL/C linked statically against the patched libhl
+(`libhl-allocator.patch`). Median of 3 runs; every archive byte-identical.
+
+| Workload | reference | HL/C | ratio | earlier today |
+| --- | ---: | ---: | ---: | ---: |
+| self, `-D disable-parallelism` | 4.01s / 405 MB | 6.73s / 1083 MB | 1.7× | 8.68s / 1.80 GB (2.0×) |
+| self, parallel | 2.73s / 462 MB | 5.55s / 1593 MB | 2.0× | 6.06s |
+
+| Eval (`bench/interp.py`) | reference Eval | port Eval (HL/C) | ratio | earlier today |
+| --- | ---: | ---: | ---: | ---: |
+| Empty (startup) | 0.05s | 0.05s | 1.0× | 0.09s |
+| Fib | 0.31s | 0.50s | 1.6× | 0.92s |
+| NBody | 0.56s | 0.90s | 1.6× | 0.98s |
+| Strings | 0.29s | 0.38s | 1.3× | 0.35s |
+| Objects | 1.40s | 2.08s | 1.5× | 9.24s |
+| Json | 0.15s | 0.26s | 1.7× | 0.63s |
+
+What changed, roughly by effect:
+
+- **Eval exceptions without native backtraces.** On HashLink, throwing an
+  exception object captures a native backtrace unless the throw goes through
+  `hl.Api.rethrow` (`core.ds.FastThrow`). Eval's `Return`/`Break`/`Continue`
+  and the sort's `Bottom` were thrown directly. That was 65% of `Objects`.
+- **GC during Eval.** `GcPolicy` only ticked from typed-expression
+  construction, so programs run with `--interp` never collected (2 GB peak).
+  Eval calls and loops tick now.
+- **libhl pages.** `MADV_HUGEPAGE` made page faults compact memory
+  synchronously (THP defrag is `madvise` here; now opt-in with
+  `HL_HUGEPAGES=1`). Pages freed by a sweep are kept for reuse (up to 512 MB)
+  instead of being unmapped. Small zeroings are inlined.
+- **Fewer allocations in the compiler.** `Texpr.mapExpr` returns unchanged
+  nodes as is. Recursive walkers use `mapExprWith`/`iterWith` instead of a
+  closure per node. Local helper functions in hot paths are `inline`, because
+  HashLink allocates every local closure at its definition. Several string
+  keys are cached or verified instead of rebuilt.
+- **Quadratic array use.** The typer's pass queue used `unshift`/`shift` at the
+  front of arrays (cons/head upstream). Pass stacks now keep their top at the
+  end of the array.
+- **Eval calls.** No per-call `try` (a `setjmp` on HL/C; frames are popped
+  where an exception is caught, which is the state upstream's `finally`
+  leaves). Environment slots are native arrays and argument arrays are
+  preallocated. `AtomicLazy` reads without a lock once set, as upstream's
+  `Atomic.get`. The current Eval is a static while single-threaded.
+- **Parallel DCE race.** It showed up once runs went without
+  `-D disable-parallelism`. Metadata arrays are replaced, not mutated, while
+  readers don't lock.
+
+What remains is mostly the runtime itself: allocation and GC marking are over
+half of the self-compilation's instructions. Live data is about 2.5× the
+reference's (1.08 GB vs 405 MB), and libhl's collector is not generational.
+Each phase is now 1.6–2× the reference, with no single hot spot.
+
 ## Results — 2026-10-08 (Eval vs. Eval vs. host)
 
 `bench/interp.py` runs small programs (`bench/interp/`) with `--interp` on
