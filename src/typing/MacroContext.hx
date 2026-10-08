@@ -233,7 +233,7 @@ class MacroContext {
 								return null;
 							else {
 								var d = MacroApiImpl.decodeTypeDef(td);
-								return {pack: d.path.pack, declarations: [{definition: d.tdef, pos: d.pos}]};
+								return {pack: d.path.pack, declarations: [{definition: d.def, pos: d.pos}]};
 							}
 						}
 					}
@@ -558,7 +558,7 @@ class MacroContext {
 			var ttype = Typeload.loadInstance(mctx, makePtp(cttype, p), ParamNormal, LoadNormal);
 			function f() return MacroApiImpl.decodeTypeDef(v);
 			var decoded = safeDecode(ctx.com, v, "TypeDefinition", ttype, p, f);
-			var mpath = decoded.path, tdef = decoded.tdef, pos = decoded.pos;
+			var mpath = decoded.path, tdef = decoded.def, pos = decoded.pos;
 			var hasNativeMeta = switch tdef {
 				case EClass(d): MetaTools.has(MetaTag.Native, d.meta);
 				case EEnum(d): MetaTools.has(MetaTag.Native, d.meta);
@@ -594,7 +594,7 @@ class MacroContext {
 		api.defineModule = function(m, types, imports, usings) {
 			var types:Array<TypeDecl> = types.map(function(v):TypeDecl {
 				var d = try MacroApiImpl.decodeTypeDef(v) catch (_:InvalidExpr) macros.eval.EvalContext.excString("Invalid type definition");
-				return {definition: d.tdef, pos: d.pos};
+				return {definition: d.def, pos: d.pos};
 			});
 			var pos = types.length == 0 ? Globals.nullPos : types[0].pos;
 			var imports:Array<TypeDecl> = imports.map(function(i):TypeDecl return {definition: EImport({path: i.path, mode: i.mode}), pos: pos});
