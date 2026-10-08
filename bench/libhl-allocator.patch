@@ -1,5 +1,5 @@
 diff --git a/src/allocator.c b/src/allocator.c
-index e8ab99f..7999564 100644
+index e8ab99f..53efe30 100644
 --- a/src/allocator.c
 +++ b/src/allocator.c
 @@ -44,18 +44,18 @@ static inline unsigned int TRAILING_ZEROES( unsigned int x ) {
@@ -125,16 +125,33 @@ index e8ab99f..7999564 100644
  		fl_cursor count;
  		if( p->sizes ) {
  			count = p->sizes[bid];
-@@ -276,7 +346,7 @@ static void flush_free_list( gc_pheader *ph ) {
+@@ -276,7 +346,11 @@ static void flush_free_list( gc_pheader *ph ) {
  	free_freelist(&old_fl);
  }
  
 -static void *gc_alloc_fixed( int part, int kind, int max_count, int *count ) {
++#ifndef GC_MIN_RUN_BYTES
++#	define GC_MIN_RUN_BYTES 256
++#endif
++
 +static void *gc_alloc_fixed( int part, int kind, int max_count, int *count, bool *zeroed, bool can_grow ) {
  	int pid = (part << PAGE_KIND_BITS) | kind;
  	gc_pheader *ph = gc_free_pages[pid];
  	gc_allocator_page_data *p = NULL;
-@@ -300,6 +370,7 @@ static void *gc_alloc_fixed( int part, int kind, int max_count, int *count ) {
+@@ -288,6 +362,12 @@ static void *gc_alloc_fixed( int part, int kind, int max_count, int *count ) {
+ 		if( p->need_flush )
+ 			flush_free_list(ph);
+ 		gc_freelist *fl = &p->free;
++#		if GC_MIN_RUN_BYTES > 0
++		// skip short free runs: refilling a slice from a run of a few blocks
++		// costs more than the memory it reuses (they are reused after the next sweep)
++		while( fl->current < fl->count && GET_FL(fl,fl->current)->count * p->block_size < GC_MIN_RUN_BYTES )
++			fl->current++;
++#		endif
+ 		if( fl->current < fl->count ) {
+ 			c = GET_FL(fl,fl->current);
+ 			bid = c->pos;
+@@ -300,6 +380,7 @@ static void *gc_alloc_fixed( int part, int kind, int max_count, int *count ) {
  		ph = ph->next_page;
  	}
  	if( ph == NULL ) {
@@ -142,7 +159,7 @@ index e8ab99f..7999564 100644
  		ph = gc_allocator_new_page(pid, GC_SIZES[part], GC_PAGE_SIZE, kind, false);
  		p = &ph->alloc;
  		c = p->free.data;
-@@ -324,6 +395,8 @@ static void *gc_alloc_fixed( int part, int kind, int max_count, int *count ) {
+@@ -324,6 +405,8 @@ static void *gc_alloc_fixed( int part, int kind, int max_count, int *count ) {
  #	endif
  	gc_free_pages[pid] = ph;
  	*count = n;
@@ -151,7 +168,7 @@ index e8ab99f..7999564 100644
  	return ptr;
  }
  
-@@ -408,7 +481,7 @@ static void *gc_allocator_alloc( int *size, int page_kind ) {
+@@ -408,7 +491,7 @@ static void *gc_allocator_alloc( int *size, int page_kind ) {
  		int part = (sz >> GC_ALIGN_BITS) - 1;
  		int count;
  		*size = GC_SIZES[part];
