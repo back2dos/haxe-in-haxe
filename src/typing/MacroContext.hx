@@ -1319,7 +1319,6 @@ class MacroContext {
 	/** Eval-target execution (`--interp`/`--eval`); not reachable from the HXB driver. **/
 	public static function interpret(ctx:TyperContext, args:Array<String>):Void {
 		context.Parallel.ManagedPool.release(ctx.com.sctx.pool);
-		core.ds.GcPolicy.enterProgram();
 		var mctx = getMacroContext(ctx);
 		var mctx = macros.eval.EvalMain.create(ctx.com, makeMacroComApi(ctx.com, mctx.com, Globals.nullPos), false, args);
 		macros.eval.EvalMain.addTypes(mctx, ctx.com.types, function(t) {});

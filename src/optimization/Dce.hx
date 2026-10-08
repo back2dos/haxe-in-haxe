@@ -86,8 +86,10 @@ class Dce {
  }
  public static function markClass(dce:DceData,c:TClass):Void if (!hasClassFlag(c,CUsed)) {dce.usedMutex.acquire(); if (!hasClassFlag(c,CUsed)) {addClassFlag(c,CUsed); dce.usedMutex.release(); checkFeature(dce,Globals.sTypePath(c.clPath) + ".*"); updateMarkedClassFields(dce,c);} else dce.usedMutex.release();}
  static function sortedKeys<V>(map:haxe.ds.StringMap<V>):Array<String> {var keys = [for (key in map.keys()) key]; keys.sort(Reflect.compare); return keys;}
- public static function markEnum(dce:DceData,en:TEnum):Void if (!Meta.has(Used,en.eMeta)) {dce.usedMutex.acquire(); if (!Meta.has(Used,en.eMeta)) {en.eMeta.unshift(mkUsedMeta(en.ePos)); dce.usedMutex.release(); checkAndAddFeature(dce,"has_enum"); checkFeature(dce,Globals.sTypePath(en.ePath) + ".*"); for (key in sortedKeys(en.eConstrs)) {var ef = en.eConstrs.get(key); markT(dce,ef.efPos,ef.efType);}} else dce.usedMutex.release();}
- public static function markAbstract(dce:DceData,a:TAbstract):Void if (!Meta.has(Used,a.aMeta)) {dce.usedMutex.acquire(); if (!Meta.has(Used,a.aMeta)) {a.aMeta.unshift(mkUsedMeta(a.aPos)); dce.usedMutex.release(); checkFeature(dce,Globals.sTypePath(a.aPath) + ".*");} else dce.usedMutex.release();}
+ // Metadata is replaced, never changed in place: marking runs in parallel and readers
+ // don't lock (upstream conses onto immutable lists).
+ public static function markEnum(dce:DceData,en:TEnum):Void if (!Meta.has(Used,en.eMeta)) {dce.usedMutex.acquire(); if (!Meta.has(Used,en.eMeta)) {en.eMeta = [mkUsedMeta(en.ePos)].concat(en.eMeta); dce.usedMutex.release(); checkAndAddFeature(dce,"has_enum"); checkFeature(dce,Globals.sTypePath(en.ePath) + ".*"); for (key in sortedKeys(en.eConstrs)) {var ef = en.eConstrs.get(key); markT(dce,ef.efPos,ef.efType);}} else dce.usedMutex.release();}
+ public static function markAbstract(dce:DceData,a:TAbstract):Void if (!Meta.has(Used,a.aMeta)) {dce.usedMutex.acquire(); if (!Meta.has(Used,a.aMeta)) {a.aMeta = [mkUsedMeta(a.aPos)].concat(a.aMeta); dce.usedMutex.release(); checkFeature(dce,Globals.sTypePath(a.aPath) + ".*");} else dce.usedMutex.release();}
  // The stack is pushed and popped instead of rebuilt per level (upstream conses onto a list).
  public static function markT(dce:DceData,p:Pos,t:T):Void {var stack = dce.typeStack; markTLoop(dce,p,stack,stack.length,t);}
  static function markTLoop(dce:DceData,p:Pos,stack:Array<T>,base:Int,t:T):Void {
@@ -104,7 +106,7 @@ class Dce {
   }
   stack.pop();
  }
- public static function markMt(dce:DceData,mt:ModuleType):Void switch mt {case TClassDecl(c):markClass(dce,c); case TEnumDecl(en):markEnum(dce,en); case TAbstractDecl(a):if (!Meta.has(ValueUsed,a.aMeta)) a.aMeta.unshift({meta:core.MetaList.StrictMeta.ValueUsed,exprs:[],pos:Globals.mkZeroRangePos(a.aPos)}); markAbstract(dce,a); case TTypeDecl(_):}
+ public static function markMt(dce:DceData,mt:ModuleType):Void switch mt {case TClassDecl(c):markClass(dce,c); case TEnumDecl(en):markEnum(dce,en); case TAbstractDecl(a):if (!Meta.has(ValueUsed,a.aMeta)) a.aMeta = [({meta:core.MetaList.StrictMeta.ValueUsed,exprs:[],pos:Globals.mkZeroRangePos(a.aPos)} : core.Ast.MetadataEntry)].concat(a.aMeta); markAbstract(dce,a); case TTypeDecl(_):}
  public static function markDependentFields(dce:DceData,sup:TClass,name:String,kind:ClassFieldRefKind):Void {
   function loop(c:TClass):Void {
    var cf = (kind == CfrStatic ? c.clStatics : c.clFields).get(name); if (cf == null) {if (c.clSuper != null) loop(c.clSuper.cls); return;}
@@ -130,8 +132,8 @@ class Dce {
  public static function field(dce:DceData,c:TClass,name:String,kind:ClassFieldRefKind):Void {try {var r = resolveField(dce,c,name,kind); markField(dce,r.cls,r.field,kind);} catch (_:NotFound) {if (dce.debug) Sys.stderr().writeString("[DCE] Field " + name + " not found on " + Globals.sTypePath(c.clPath) + "\n");}}
  public static function keepToString(dce:DceData,c:TClass):Void {try {var r = resolveField(dce,c,"toString",CfrMember); if (!fieldForcesDce(r.field)) markField(dce,r.cls,r.field,CfrMember);} catch (_:NotFound) {}}
  static function protect(mutex:sys.thread.Mutex,f:Void->Void):Void {mutex.acquire(); try f() catch(e:haxe.Exception){mutex.release(); throw e;} mutex.release();}
- public static function markDirectlyUsedClass(dce:DceData,c:TClass):Void if (c != dce.curclass && !Meta.has(DirectlyUsed,c.clMeta)) protect(dce.usedMutex,function() {if (!Meta.has(DirectlyUsed,c.clMeta)) c.clMeta.unshift({meta:core.MetaList.StrictMeta.DirectlyUsed,exprs:[],pos:Globals.mkZeroRangePos(c.clPos)});});
- public static function markDirectlyUsedEnum(dce:DceData,en:TEnum):Void if (!Meta.has(DirectlyUsed,en.eMeta)) protect(dce.usedMutex,function() {if (!Meta.has(DirectlyUsed,en.eMeta)) en.eMeta.unshift({meta:core.MetaList.StrictMeta.DirectlyUsed,exprs:[],pos:Globals.mkZeroRangePos(en.ePos)});});
+ public static function markDirectlyUsedClass(dce:DceData,c:TClass):Void if (c != dce.curclass && !Meta.has(DirectlyUsed,c.clMeta)) protect(dce.usedMutex,function() {if (!Meta.has(DirectlyUsed,c.clMeta)) c.clMeta = [({meta:core.MetaList.StrictMeta.DirectlyUsed,exprs:[],pos:Globals.mkZeroRangePos(c.clPos)} : core.Ast.MetadataEntry)].concat(c.clMeta);});
+ public static function markDirectlyUsedEnum(dce:DceData,en:TEnum):Void if (!Meta.has(DirectlyUsed,en.eMeta)) protect(dce.usedMutex,function() {if (!Meta.has(DirectlyUsed,en.eMeta)) en.eMeta = [({meta:core.MetaList.StrictMeta.DirectlyUsed,exprs:[],pos:Globals.mkZeroRangePos(en.ePos)} : core.Ast.MetadataEntry)].concat(en.eMeta);});
  public static function markDirectlyUsedMt(dce:DceData,mt:ModuleType):Void switch mt {case TClassDecl(c):markDirectlyUsedClass(dce,c); case TEnumDecl(en):markDirectlyUsedEnum(dce,en); case _:}
  public static function markDirectlyUsedT(dce:DceData,p:Pos,t:T):Void switch follow(t) {
   case TInst(c = {clKind:KNormal},pl):markDirectlyUsedClass(dce,c); for (t in pl) markDirectlyUsedT(dce,p,t);

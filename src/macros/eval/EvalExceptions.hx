@@ -169,8 +169,10 @@ class EvalExceptions {
 		} catch (e:RunTimeException) {
 			var v = e.value, evalStack = e.envs, p2 = e.pos;
 			eval.caughtException = VNull;
-			if (env != null) buildExceptionStack(eval, env);
+			// Restored before the stack is built: frames are not popped during unwinding
+			// (EvalEmitter.createFunction), upstream's finally popped them.
 			eval.env = env;
+			if (env != null) buildExceptionStack(eval, env);
 
 			// Careful: We have to get the message before resetting the context because toString() might access it.
 			function getStack(ctx:Context):Array<Pos> {
@@ -290,9 +292,11 @@ class EvalExceptions {
 				})));
 			}
 		} catch (e:macros.MacroApi.Abort) {
+			eval.env = env;
 			finalFn();
 			None;
 		} catch (e:Dynamic) {
+			eval.env = env;
 			resetCtx();
 			finalFn();
 			throw e;

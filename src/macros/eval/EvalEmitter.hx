@@ -123,15 +123,26 @@ class EvalEmitter {
 	}
 
 	/** Evaluates [execs] in order (`List.map (apply env) execs`). **/
+	// An argument array allocated at its size (pushing grows it several times on HashLink).
+	static inline function presized(n:Int):Array<Value> {
+		#if hl
+		return cast hl.types.ArrayObj.alloc(new hl.NativeArray<Value>(n));
+		#else
+		var a = new Array<Value>();
+		a.resize(n);
+		return a;
+		#end
+	}
+
 	static inline function applyAll(execs:Array<Emitter>, env:Env):Array<Value> {
-		var vl = new Array<Value>();
+		var vl = presized(execs.length);
 		for (i in 0...execs.length) vl[i] = execs[i](env);
 		return vl;
 	}
 
 	/** `vthis :: List.map (apply env) execs` without an intermediate array. **/
 	static inline function applyAllThis(vthis:Value, execs:Array<Emitter>, env:Env):Array<Value> {
-		var vl = new Array<Value>();
+		var vl = presized(execs.length + 1);
 		vl[0] = vthis;
 		for (i in 0...execs.length) vl[i + 1] = execs[i](env);
 		return vl;
@@ -295,14 +306,20 @@ class EvalEmitter {
 	public static function runWhileContinue(execCond:Emitter, execBody:Emitter, env:Env):Void {
 		while (true) {
 			try {
-				while (EvalMisc.isTrue(execCond(env))) execBody(env);
+				while (EvalMisc.isTrue(execCond(env))) {
+					execBody(env);
+					core.ds.GcPolicy.tick(); // loops allocate without calls or typing
+				}
 				return;
 			} catch (_:Continue) {}
 		}
 	}
 
 	public static function runWhile(execCond:Emitter, execBody:Emitter, env:Env):Void {
-		while (EvalMisc.isTrue(execCond(env))) execBody(env);
+		while (EvalMisc.isTrue(execCond(env))) {
+			execBody(env);
+			core.ds.GcPolicy.tick();
+		}
 	}
 
 	public static function emitWhileBreak(execCond:Emitter, execBody:Emitter):Emitter {
@@ -349,11 +366,13 @@ class EvalEmitter {
 				var v = exc.value;
 				eval.caughtException = VNull;
 				restore();
-				EvalExceptions.buildExceptionStack(eval, env);
+				// Frames left by the throw are popped first (see createFunction): upstream's
+				// finally has popped them by the time its handler builds the stack.
 				while (true) {
 					var env2 = eval.env;
 					if (env2 != null && env2 != env) EvalContext.popEnvironment(ctx, env2) else break;
 				}
+				EvalExceptions.buildExceptionStack(eval, env);
 				var found:Null<TryCatch> = null;
 				for (c in catches) {
 					if (c.path == EvalHash.key_Dynamic || EvalContext.is(v, c.path)) {
@@ -1103,17 +1122,15 @@ class EvalEmitter {
 		if (nv > nf) EvalContext.excString('Bad number of arguments: 0 vs. ${nv - nf}');
 	}
 
+	// Upstream wraps each call in `Std.finally (pop_environment)`. A try is a setjmp
+	// on HashLink/C, so the environment is popped on normal return only; after an
+	// exception, frames are popped where it is caught (emit_try, catch_exceptions)
+	// before anything reads eval.env, which is the state upstream's finally leaves.
 	public static function createFunctionNoret(ctx:Context, eci:EnvInfo, exec:Emitter, fl:Array<ArgSetter>):Vfunc {
 		return function(vl:Array<Value>):Value {
 			var env = EvalContext.pushEnvironment(ctx, eci);
-			var v;
-			try {
-				processArguments(fl, vl, env);
-				v = exec(env);
-			} catch (e:Dynamic) {
-				EvalContext.popEnvironment(ctx, env);
-				throw e;
-			}
+			processArguments(fl, vl, env);
+			var v = exec(env);
 			EvalContext.popEnvironment(ctx, env);
 			return v;
 		}
@@ -1122,14 +1139,8 @@ class EvalEmitter {
 	public static function createFunction(ctx:Context, eci:EnvInfo, exec:Emitter, fl:Array<ArgSetter>):Vfunc {
 		return function(vl:Array<Value>):Value {
 			var env = EvalContext.pushEnvironment(ctx, eci);
-			var v;
-			try {
-				processArguments(fl, vl, env);
-				v = try exec(env) catch (r:Return) r.value;
-			} catch (e:Dynamic) {
-				EvalContext.popEnvironment(ctx, env);
-				throw e;
-			}
+			processArguments(fl, vl, env);
+			var v = try exec(env) catch (r:Return) r.value;
 			EvalContext.popEnvironment(ctx, env);
 			return v;
 		}
@@ -1139,15 +1150,9 @@ class EvalEmitter {
 			fl:Array<ArgSetter>):Vfunc {
 		return function(vl:Array<Value>):Value {
 			var env = EvalContext.pushEnvironment(ctx, eci);
-			var v;
-			try {
-				for (k in 0...refSlots.length) env.envCaptures[refSlots[k]] = refValues[k];
-				processArguments(fl, vl, env);
-				v = exec(env);
-			} catch (e:Dynamic) {
-				EvalContext.popEnvironment(ctx, env);
-				throw e;
-			}
+			for (k in 0...refSlots.length) env.envCaptures[refSlots[k]] = refValues[k];
+			processArguments(fl, vl, env);
+			var v = exec(env);
 			EvalContext.popEnvironment(ctx, env);
 			return v;
 		}
@@ -1157,20 +1162,13 @@ class EvalEmitter {
 			fl:Array<ArgSetter>):Vfunc {
 		return function(vl:Array<Value>):Value {
 			var env = EvalContext.pushEnvironment(ctx, eci);
-			var v;
-			try {
-				for (k in 0...refSlots.length) env.envCaptures[refSlots[k]] = refValues[k];
-				processArguments(fl, vl, env);
-				v = try exec(env) catch (r:Return) r.value;
-			} catch (e:Dynamic) {
-				EvalContext.popEnvironment(ctx, env);
-				throw e;
-			}
+			for (k in 0...refSlots.length) env.envCaptures[refSlots[k]] = refValues[k];
+			processArguments(fl, vl, env);
+			var v = try exec(env) catch (r:Return) r.value;
 			EvalContext.popEnvironment(ctx, env);
 			return v;
 		}
 	}
-
 	/**
 		[mapping] is upstream's `(i, slot) array`, as two parallel arrays: the
 		closure's capture slots [mappingI] and the outer capture slots [mappingSlot].

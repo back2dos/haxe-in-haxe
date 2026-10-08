@@ -355,6 +355,6 @@ class Purity {
  public static function applyToClass(c:TClass):Void {for (cf in c.clOrderedFields) applyToField(false,false,c,cf); for (cf in c.clOrderedStatics) applyToField(false,true,c,cf); if (c.clConstructor != null) applyToField(true,false,c,c.clConstructor);}
  public static function infer(types:Array<ModuleType>):Void {
   nodeLut.clear(); for (mt in types) switch mt {case TClassDecl(c):try applyToClass(c) catch (conflict:PurityConflict) {core.Error.raiseTypingErrorExt(core.Error.makeError(core.Error.ErrorMsg.Custom("Impure field overrides/implements field which was explicitly marked as @:pure"),conflict.node.pnField.cfPos,[core.Error.makeError(core.Error.ErrorMsg.Custom(core.Error.complMsg("Pure field is here")),conflict.pos)]));} case _:}
-  for (node in nodeLut) switch node.pnPurity {case Pure | MaybePure if (!exists((m:core.Ast.MetadataEntry) -> m.meta == core.MetaList.StrictMeta.Pure,node.pnField.cfMeta)):var p = Globals.mkZeroRangePos(node.pnField.cfPos); node.pnField.cfMeta.unshift({meta:core.MetaList.StrictMeta.Pure,exprs:[{expr:EConst(Ident("inferredPure")),pos:p}],pos:p}); case _:}
+  for (node in nodeLut) switch node.pnPurity {case Pure | MaybePure if (!exists((m:core.Ast.MetadataEntry) -> m.meta == core.MetaList.StrictMeta.Pure,node.pnField.cfMeta)):var p = Globals.mkZeroRangePos(node.pnField.cfPos); node.pnField.cfMeta = [({meta:core.MetaList.StrictMeta.Pure,exprs:[{expr:EConst(Ident("inferredPure")),pos:p}],pos:p} : core.Ast.MetadataEntry)].concat(node.pnField.cfMeta); case _:}
  }
 }

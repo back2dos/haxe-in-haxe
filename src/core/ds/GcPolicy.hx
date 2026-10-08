@@ -26,14 +26,6 @@ class GcPolicy {
 		heapAtMajor = Math.max(s.currentMemory, 64 * 1024 * 1024);
 	}
 
-	// Running a program (--interp): libhl's allocation-driven policy, as for any
-	// HashLink program; nothing calls tick() often enough during execution.
-	public static function enterProgram():Void {
-		if (!enabled) return;
-		enabled = false;
-		hl.Gc.enable(true);
-	}
-
 	public static inline function tick():Void {
 		if (++counter & 0xFFF == 0 && enabled) check();
 	}
@@ -49,7 +41,6 @@ class GcPolicy {
 	}
 	#else
 	public static inline function init():Void {}
-	public static inline function enterProgram():Void {}
 	public static inline function tick():Void {}
 	#end
 }

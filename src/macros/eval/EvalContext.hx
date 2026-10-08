@@ -90,6 +90,10 @@ enum EnvKind {
 }
 
 /** Per-environment debug information. These values are only modified while debugging. **/
+
+// Environment slots: a bare native array on HashLink (haxe.ds.Vector is an Array there).
+typedef ValueSlots = #if hl hl.NativeArray<Value> #else haxe.ds.Vector<Value> #end;
+
 class EnvDebug {
 	// The timer function to execute when the environment finishes executing
 	public final timer:Void->Void;
@@ -124,9 +128,10 @@ class Env {
 	public var envLeavePmin:Int = 0;
 	public var envLeavePmax:Int = 0;
 	// The environment's local variables.
-	public final envLocals:Array<Value>;
+	// Vectors (native arrays on HashLink): one allocation, unchecked access.
+	public final envLocals:ValueSlots;
 	// The environment's captured local variables.
-	public final envCaptures:Array<Value>;
+	public final envCaptures:ValueSlots;
 	// Map of extra variables added while debugging. Keys are hashed variable names.
 	public var envExtraLocals:GlobalsIntMap<Value>;
 	// The parent of the current environment, if exists.
@@ -135,7 +140,7 @@ class Env {
 	public final envStackDepth:Int;
 	public final envEval:Eval;
 
-	public function new(envInfo:EnvInfo, envDebug:EnvDebug, envLocals:Array<Value>, envCaptures:Array<Value>, envExtraLocals:GlobalsIntMap<Value>,
+	public function new(envInfo:EnvInfo, envDebug:EnvDebug, envLocals:ValueSlots, envCaptures:ValueSlots, envExtraLocals:GlobalsIntMap<Value>,
 			envParent:Null<Env>, envStackDepth:Int, envEval:Eval) {
 		this.envInfo = envInfo;
 		this.envDebug = envDebug;
@@ -451,6 +456,7 @@ class EvalContext {
 
 	public static final noTimer:Void->Void = () -> {};
 	public static final emptyArray:Array<Value> = [];
+	static final emptyVector = new ValueSlots(0);
 	public static final noExpr = "";
 	public static final noDebug = new EnvDebug(noTimer, [], 0, noExpr, Globals.nullPos);
 
@@ -468,9 +474,8 @@ class EvalContext {
 	}
 
 	// Array.make n vnull: one allocation instead of growing a comprehension.
-	static function makeNullArray(n:Int):Array<Value> {
-		var a = new Array<Value>();
-		a.resize(n);
+	static function makeNullArray(n:Int):ValueSlots {
+		var a = new ValueSlots(n);
 		for (i in 0...n) a[i] = VNull;
 		return a;
 	}
@@ -480,8 +485,8 @@ class EvalContext {
 		var eval = getEval(ctx);
 		var timer = if (ctx.detailTimes) core.Timer.startTimer(ctx.timerCtx, ["macro", "execution", kindName(eval, info.kind)]) else noTimer;
 		var debug = if (ctx.debug.supportDebugger || ctx.detailTimes) new EnvDebug(timer, [], 0, noExpr, Globals.nullPos) else noDebug;
-		var locals = info.numLocals == 0 ? emptyArray : makeNullArray(info.numLocals);
-		var captures = info.numCaptures == 0 ? emptyArray : makeNullArray(info.numCaptures);
+		var locals = info.numLocals == 0 ? emptyVector : makeNullArray(info.numLocals);
+		var captures = info.numCaptures == 0 ? emptyVector : makeNullArray(info.numCaptures);
 		var stackDepth = eval.env == null ? 1 : eval.env.envStackDepth + 1;
 		var env = new Env(info, debug, locals, captures, GlobalsIntMap.empty(), info.kind == EKEntrypoint ? null : eval.env, stackDepth, eval);
 		eval.env = env;
