@@ -91,8 +91,16 @@ class ExprToPattern {
    case ECall(e1,el):
     var e1=typeExpr(ctx,e1,WithTypeTools.withType(t));switch [e1.eexpr,follow(e1.etype)]{
      case [TField(_,FEnum(en,ef)),TFun(sig)]:var tl=switch follow(sig.ret){case TEnum(_,tl):tl;case _:fail();};function mapEn(t:T):T return applyParams(en.eParams,tl,t);var monos=Monomorph.spawnConstrainedMonos(mapEn,ef.efParams);function mapper(t:T):T return mapEn(applyParams(ef.efParams,monos,t));unify(ctx,mapper(ef.efType),e1.etype,e1.epos);
-      var args=switch follow(e1.etype){case TFun(s):expected(s.ret);s.args;case _:throw "assert";};var ps=[];var ei=0;var ai=0;
-      while(ei<el.length||ai<args.length){if(ai>=args.length)core.Error.raiseTypingError("Too many arguments",p);if(ei>=el.length){if(!args[ai].optional)core.Error.raiseTypingError("Not enough arguments",p);ps.push(({kind:PatAny,pos:e.pos} : typing.matcher.Pattern.PatternData));ai++;continue;}var arg=el[ei];var finalWildcard=ei==el.length-1&&(switch arg.expr{case EConst(Ident("_")):true;case _:false;});if(finalWildcard){ps.push({kind:PatAny,pos:arg.pos});ai++;if(ai==args.length)ei++;}else{ps.push(make(pctx,false,args[ai].type,arg));ai++;ei++;}}
+      var args=switch follow(e1.etype){case TFun(s):expected(s.ret);s.args;case _:throw "assert";};// `make pctx false t e :: loop el tl`: OCaml evaluates the tail first, so arguments are typed last to first.
+      function loopArgs(ei:Int,ai:Int):Array<typing.matcher.Pattern.PatternData> {
+       if(ei==el.length-1&&ai<args.length&&(switch el[ei].expr{case EConst(Ident("_")):true;case _:false;})){var rest=ai+1==args.length?[]:loopArgs(ei,ai+1);rest.unshift({kind:PatAny,pos:el[ei].pos});return rest;}
+       if(ei<el.length&&ai<args.length){var rest=loopArgs(ei+1,ai+1);rest.unshift(make(pctx,false,args[ai].type,el[ei]));return rest;}
+       if(ei>=el.length&&ai<args.length&&args[ai].optional){var pat:typing.matcher.Pattern.PatternData={kind:PatAny,pos:e.pos};var rest=loopArgs(ei,ai+1);rest.unshift(pat);return rest;}
+       if(ei>=el.length&&ai>=args.length)return [];
+       if(ei>=el.length)return core.Error.raiseTypingError("Not enough arguments",p);
+       return core.Error.raiseTypingError("Too many arguments",p);
+      }
+      var ps=loopArgs(0,0);
       for(i in 0...ef.efParams.length)switch monos[i]{case TMono(m) if(m.tmType==null):Monomorph.doBind(m,ef.efParams[i].ttpType);case _:}
       PatConstructor(conEnum(en,ef,e1.epos),ps);
      case _:fail();

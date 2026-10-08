@@ -8,21 +8,34 @@ class StringPool {
 
 	public function new() {}
 
+	// Deviation: HashLink's StringMap truncates keys at the first NUL ("\x00"
+	// and "" collide), so on HL keys containing NUL (or starting with the
+	// escape character) are escaped injectively into a NUL-free form.
+	static inline function key(value:String):String {
+		#if hl
+		return value.indexOf("\x00") < 0 && value.charCodeAt(0) != 1 ? value : "\x01" + value.split("\x01").join("\x01\x01").split("\x00").join("\x01\x02");
+		#else
+		return value;
+		#end
+	}
+
 	public function add(value:String):Int {
 		if (closed) throw "String pool is finalized";
 		var index = items.length;
-		indices.set(value, index);
+		indices.set(key(value), index);
 		items.add(value);
 		return index;
 	}
 
 	public function get(value:String):Int {
-		if (!indices.exists(value)) throw "Not_found";
-		return indices.get(value);
+		var k = key(value);
+		if (!indices.exists(k)) throw "Not_found";
+		return indices.get(k);
 	}
 
 	public function getOrAdd(value:String):Int {
-		return indices.exists(value) ? indices.get(value) : add(value);
+		var i = indices.get(key(value));
+		return i != null ? i : add(value);
 	}
 
 	public function finalize():StringDynArray {
