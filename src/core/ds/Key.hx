@@ -3,12 +3,13 @@ import Type as StdType;
 /** Structural comparison for the finite records, tuples and lists used as OCaml map keys. */
 class Key {
  public static function compare(a:Dynamic,b:Dynamic):Int {
-  if(a==b) return 0;
-  if(a==null) return -1;if(b==null) return 1;
-  // Fast paths for the common scalar keys; same result as Reflect.compare.
+  // Fast path for the common string keys (before the Dynamic ==, which is a
+  // runtime compare); same order as `>` on strings: by UTF-16 code units.
   // Std.downcast is a direct type check (Std.isOfType goes through a Dynamic class on HashLink)
   var sa:Null<String>=Std.downcast(a,String);
-  if(sa!=null) {var sb:Null<String>=Std.downcast(b,String);if(sb!=null) return sa > sb ? 1 : -1;}
+  if(sa!=null) {var sb:Null<String>=Std.downcast(b,String);if(sb!=null) return compareStrings(sa,sb);}
+  if(a==b) return 0;
+  if(a==null) return -1;if(b==null) return 1;
   if((a is Int) && (b is Int)) return (a:Int) > (b:Int) ? 1 : -1;
   // Type paths compare like the {name, pack} record they replace (fields in name order).
   var pa:Null<core.Globals.GlobalTypePath>=Std.downcast(a,core.Globals.GlobalTypePath),pb:Null<core.Globals.GlobalTypePath>=pa==null ? null : Std.downcast(b,core.Globals.GlobalTypePath);
@@ -28,6 +29,12 @@ class Key {
   }
  }
 
+ public static function compareStrings(a:String,b:String):Int {
+  var la=a.length,lb=b.length,n=la<lb ? la : lb;
+  for(i in 0...n) {var ca=StringTools.fastCodeAt(a,i),cb=StringTools.fastCodeAt(b,i);if(ca!=cb) return ca<cb ? -1 : 1;}
+  return la==lb ? 0 : la<lb ? -1 : 1;
+ }
+
  /**
   A string that is equal for two keys exactly when `compare` returns 0, used to
   index hash tables. Returns null for keys outside the plain-data subset
@@ -37,6 +44,17 @@ class Key {
  public static function canonical(value:Dynamic):Null<String> {
   var s0:Null<String>=Std.downcast(value,String);
   if(s0!=null) return "s" + s0;
+  // Type paths (module and type tables) get their own encoding: the parts
+  // joined by control characters, which identifiers cannot contain. Cheaper
+  // than visit() below (no closure, StringBuf or number formatting).
+  // GlobalTypePath is a class, so these keys never meet the structural
+  // {name, pack} encoding in the same table.
+  var tp0:Null<core.Globals.GlobalTypePath>=Std.downcast(value,core.Globals.GlobalTypePath);
+  if(tp0!=null && tp0.name!=null && tp0.pack!=null) return "\x01" + tp0.pack.join("\x02") + "\x03" + tp0.name;
+  return canonicalSlow(value);
+ }
+
+ static function canonicalSlow(value:Dynamic):Null<String> {
   var buf=new StringBuf(),budget=64;
   function visit(v:Dynamic):Bool {
    if(--budget<0) return false;
