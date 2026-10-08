@@ -728,7 +728,7 @@ class Grammar {
 							popt(function(s) return semicolon(ctx, s), s);
 							var l = acc.copy();
 							l.reverse();
-							return Parser.syntaxError(ctx, Expected(["identifier"]), s, {path: l, mode: INormal});
+							return Parser.syntaxError(ctx, Expected(["identifier"]), s, ({path: l, mode: INormal} : core.Ast.Import));
 					}
 				case Kwd(In):
 					s.junk();
@@ -766,7 +766,7 @@ class Grammar {
 				s.junk();
 				loop(tk.pos, [pn(name, tk.pos)]);
 			case _:
-				if (Parser.wouldSkipDisplayPosition(ctx, p1, true, s)) {path: [], mode: INormal} else Parser.syntaxError(ctx, Expected(["identifier"]), s, {path: [], mode: INormal});
+				if (Parser.wouldSkipDisplayPosition(ctx, p1, true, s)) ({path: [], mode: INormal} : core.Ast.Import) else Parser.syntaxError(ctx, Expected(["identifier"]), s, ({path: [], mode: INormal} : core.Ast.Import));
 		}
 	}
 
@@ -1454,7 +1454,7 @@ class Grammar {
 		if (opt) p1 = punion(p0, p1);
 		var p2 = Parser.lastToken(ctx, s).pos;
 		function next(acc:Array<ClassField>):Array<ClassField> {
-			return [
+			return ([
 				{
 					cffName: pn(name, p1),
 					cffMeta: opt ? ([{meta: StrictMeta.Optional, exprs: [], pos: Globals.nullPos}] : Array<MetadataEntry>) : [],
@@ -1463,7 +1463,7 @@ class Grammar {
 					cffKind: FVar(t, null),
 					cffPos: punion(p1, p2)
 				}
-			].concat(acc);
+			] : Array<ClassField>).concat(acc);
 		}
 		var tk = peek(s);
 		switch tk.token {
@@ -2172,7 +2172,7 @@ class Grammar {
 	static function arrowFirstParam(ctx:ParserContext, e:Expr, s:S):FuncArg {
 		return switch e.expr {
 			case EConst(Ident("true" | "false" | "null" | "this" | "super")):
-				Parser.syntaxError(ctx, Custom("Invalid argument name"), s, {name: pn("", Globals.nullPos), optional: false, meta: [], type: null, expr: null}, e.pos);
+				Parser.syntaxError(ctx, Custom("Invalid argument name"), s, ({name: pn("", Globals.nullPos), optional: false, meta: [], type: null, expr: null} : core.Ast.FuncArg), e.pos);
 			case EConst(Ident(n)):
 				{name: pn(n, e.pos), optional: false, meta: [], type: null, expr: null};
 			case EBinop(OpAssign, e1, e2) | EParenthesis({expr: EBinop(OpAssign, e1, e2)}):
@@ -2454,7 +2454,7 @@ class Grammar {
 				var er = tail(function() return arrowExpr(ctx, s));
 				if (al.length == 0) throw "die";
 				var a0 = al[0];
-				al = [{name: a0.name, optional: true, meta: [], type: a0.type, expr: a0.expr}].concat(al.slice(1));
+				al = [({name: a0.name, optional: true, meta: [], type: a0.type, expr: a0.expr} : FuncArg)].concat(al.slice(1));
 				return arrowFunction(ctx, p1, al, er, s);
 			case _:
 		}

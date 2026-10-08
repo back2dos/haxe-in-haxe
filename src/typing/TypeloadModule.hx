@@ -357,7 +357,7 @@ class TypeloadModule {
 				case FVar(_, value) | FProp(_, _, _, value) if (value != null):
 					metadata.unshift({meta:":value", exprs:[value], pos:{pfile:field.cffPos.pfile, pmin:field.cffPos.pmin, pmax:field.cffPos.pmin}});
 				case FFun(func):
-					var defaults = [for (arg in func.fArgs) if (arg.expr != null) {key:{name:arg.name.name, pos:arg.name.pos, quote:NoQuotes}, expr:arg.expr}];
+					var defaults = [for (arg in func.fArgs) if (arg.expr != null) ({key:{name:arg.name.name, pos:arg.name.pos, quote:NoQuotes}, expr:arg.expr} : core.Ast.ObjectField)];
 					if (defaults.length > 0) metadata.unshift({
 						meta:":value",
 						exprs:[{expr:EObjectDecl(defaults), pos:Globals.nullPos}],

@@ -93,9 +93,9 @@ class TExprToExpr {
 			case TIf(e,e1,e2):EIf(convertExpr(e),convertExpr(e1),eopt(e2));
 			case TWhile(e1,e2,flag):EWhile(convertExpr(e1),convertExpr(e2),flag);
 			case TSwitch(s):
-				var cases = [for (c in s.switchCases) {values:c.casePatterns.map(convertExpr),guard:null,expr:c.caseExpr.eexpr.match(TBlock([])) ? null : convertExpr(c.caseExpr),pos:c.caseExpr.epos}];
+				var cases = [for (c in s.switchCases) ({values:c.casePatterns.map(convertExpr),guard:null,expr:c.caseExpr.eexpr.match(TBlock([])) ? null : convertExpr(c.caseExpr),pos:c.caseExpr.epos} : core.Ast.SwitchCase)];
 				var de = eopt(s.switchDefault);
-				var def = de == null ? null : de.expr.match(EBlock([])) ? {expr:null,pos:Globals.nullPos} : {expr:de,pos:de.pos};
+				var def = de == null ? null : de.expr.match(EBlock([])) ? ({expr:null,pos:Globals.nullPos} : core.Ast.SwitchDefault) : ({expr:de,pos:de.pos} : core.Ast.SwitchDefault);
 				ESwitch(convertExpr(s.switchSubject),cases,def);
 			case TEnumIndex(_) | TEnumParameter(_,_,_):throw "Complex enum AST requires @:ast metadata";
 			case TTry(e,catches):

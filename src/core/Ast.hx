@@ -32,8 +32,21 @@ enum ImportMode { INormal; IAsName(name:PlacedName); IAll; }
 	public inline function new(name:String, pos:Pos) { this.name = name; this.pos = pos; }
 	public inline function clone():PlacedName return new PlacedName(name, pos);
 }
-typedef TypePath = { var tpackage:Array<String>; var tname:String; var tparams:Array<TypeParamOrConst>; var tsub:Null<String>; }
-typedef PlacedTypePath = { var path:TypePath; var posFull:Pos; var posPath:Pos; }
+@:structInit class TypePath {
+	public var tpackage:Array<String>;
+	public var tname:String;
+	public var tparams:Array<TypeParamOrConst>;
+	public var tsub:Null<String>;
+	public inline function new(tpackage:Array<String>, tname:String, tparams:Array<TypeParamOrConst>, tsub:Null<String>) { this.tpackage = tpackage; this.tname = tname; this.tparams = tparams; this.tsub = tsub; }
+	public inline function clone():TypePath return new TypePath(tpackage, tname, tparams, tsub);
+}
+@:structInit class PlacedTypePath {
+	public var path:TypePath;
+	public var posFull:Pos;
+	public var posPath:Pos;
+	public inline function new(path:TypePath, posFull:Pos, posPath:Pos) { this.path = path; this.posFull = posFull; this.posPath = posPath; }
+	public inline function clone():PlacedTypePath return new PlacedTypePath(path, posFull, posPath);
+}
 @:structInit class TypeHint {
 	public var type:ComplexType;
 	public var pos:Pos;
@@ -49,23 +62,100 @@ typedef PlacedTypePath = { var path:TypePath; var posFull:Pos; var posPath:Pos; 
 }
 typedef Metadata = Array<MetadataEntry>;
 typedef Documentation = Null<DocBlock>;
-typedef DocBlock = { var docOwn:Null<String>; var docInherited:Array<String>; }
-typedef Func = { var fParams:Array<TypeParam>; var fArgs:Array<FuncArg>; var fType:Null<TypeHint>; var fExpr:Null<Expr>; }
-typedef FuncArg = { var name:PlacedName; var optional:Bool; var meta:Metadata; var type:Null<TypeHint>; var expr:Null<Expr>; }
-typedef TypeParam = { var tpName:PlacedName; var tpParams:Array<TypeParam>; var tpConstraints:Null<TypeHint>; var tpDefault:Null<TypeHint>; var tpMeta:Metadata; }
-typedef ClassField = { var cffName:PlacedName; var cffDoc:Documentation; var cffPos:Pos; var cffMeta:Metadata; var cffAccess:Array<PlacedAccess>; var cffKind:ClassFieldKind; }
+@:structInit class DocBlock {
+	public var docOwn:Null<String>;
+	public var docInherited:Array<String>;
+	public inline function new(docOwn:Null<String>, docInherited:Array<String>) { this.docOwn = docOwn; this.docInherited = docInherited; }
+	public inline function clone():DocBlock return new DocBlock(docOwn, docInherited);
+}
+@:structInit class Func {
+	public var fParams:Array<TypeParam>;
+	public var fArgs:Array<FuncArg>;
+	public var fType:Null<TypeHint>;
+	public var fExpr:Null<Expr>;
+	public inline function new(fParams:Array<TypeParam>, fArgs:Array<FuncArg>, fType:Null<TypeHint>, fExpr:Null<Expr>) { this.fParams = fParams; this.fArgs = fArgs; this.fType = fType; this.fExpr = fExpr; }
+	public inline function clone():Func return new Func(fParams, fArgs, fType, fExpr);
+}
+@:structInit class FuncArg {
+	public var name:PlacedName;
+	public var optional:Bool;
+	public var meta:Metadata;
+	public var type:Null<TypeHint>;
+	public var expr:Null<Expr>;
+	public inline function new(name:PlacedName, optional:Bool, meta:Metadata, type:Null<TypeHint>, expr:Null<Expr>) { this.name = name; this.optional = optional; this.meta = meta; this.type = type; this.expr = expr; }
+	public inline function clone():FuncArg return new FuncArg(name, optional, meta, type, expr);
+}
+@:structInit class TypeParam {
+	public var tpName:PlacedName;
+	public var tpParams:Array<TypeParam>;
+	public var tpConstraints:Null<TypeHint>;
+	public var tpDefault:Null<TypeHint>;
+	public var tpMeta:Metadata;
+	public inline function new(tpName:PlacedName, tpParams:Array<TypeParam>, tpConstraints:Null<TypeHint>, tpDefault:Null<TypeHint>, tpMeta:Metadata) { this.tpName = tpName; this.tpParams = tpParams; this.tpConstraints = tpConstraints; this.tpDefault = tpDefault; this.tpMeta = tpMeta; }
+	public inline function clone():TypeParam return new TypeParam(tpName, tpParams, tpConstraints, tpDefault, tpMeta);
+}
+@:structInit class ClassField {
+	public var cffName:PlacedName;
+	public var cffDoc:Documentation;
+	public var cffPos:Pos;
+	public var cffMeta:Metadata;
+	public var cffAccess:Array<PlacedAccess>;
+	public var cffKind:ClassFieldKind;
+	public inline function new(cffName:PlacedName, cffDoc:Documentation, cffPos:Pos, cffMeta:Metadata, cffAccess:Array<PlacedAccess>, cffKind:ClassFieldKind) { this.cffName = cffName; this.cffDoc = cffDoc; this.cffPos = cffPos; this.cffMeta = cffMeta; this.cffAccess = cffAccess; this.cffKind = cffKind; }
+	public inline function clone():ClassField return new ClassField(cffName, cffDoc, cffPos, cffMeta, cffAccess, cffKind);
+}
 @:structInit class PlacedAccess {
 	public var access:Access;
 	public var pos:Pos;
 	public inline function new(access:Access, pos:Pos) { this.access = access; this.pos = pos; }
 	public inline function clone():PlacedAccess return new PlacedAccess(access, pos);
 }
-typedef EVar = { var evName:PlacedName; var evFinal:Bool; var evStatic:Bool; var evType:Null<TypeHint>; var evExpr:Null<Expr>; var evMeta:Metadata; }
-typedef EnumConstructor = { var ecName:PlacedName; var ecDoc:Documentation; var ecMeta:Metadata; var ecArgs:Array<EnumConstructorArg>; var ecPos:Pos; var ecParams:Array<TypeParam>; var ecType:Null<TypeHint>; }
-typedef EnumConstructorArg = { var name:String; var optional:Bool; var type:TypeHint; }
-typedef Import = { var path:Array<PlacedName>; var mode:ImportMode; }
-typedef TypeDecl = { var definition:TypeDef; var pos:Pos; }
-typedef Package = { var pack:Array<String>; var declarations:Array<TypeDecl>; }
+@:structInit class EVar {
+	public var evName:PlacedName;
+	public var evFinal:Bool;
+	public var evStatic:Bool;
+	public var evType:Null<TypeHint>;
+	public var evExpr:Null<Expr>;
+	public var evMeta:Metadata;
+	public inline function new(evName:PlacedName, evFinal:Bool, evStatic:Bool, evType:Null<TypeHint>, evExpr:Null<Expr>, evMeta:Metadata) { this.evName = evName; this.evFinal = evFinal; this.evStatic = evStatic; this.evType = evType; this.evExpr = evExpr; this.evMeta = evMeta; }
+	public inline function clone():EVar return new EVar(evName, evFinal, evStatic, evType, evExpr, evMeta);
+}
+@:structInit class EnumConstructor {
+	public var ecName:PlacedName;
+	public var ecDoc:Documentation;
+	public var ecMeta:Metadata;
+	public var ecArgs:Array<EnumConstructorArg>;
+	public var ecPos:Pos;
+	public var ecParams:Array<TypeParam>;
+	public var ecType:Null<TypeHint>;
+	public inline function new(ecName:PlacedName, ecDoc:Documentation, ecMeta:Metadata, ecArgs:Array<EnumConstructorArg>, ecPos:Pos, ecParams:Array<TypeParam>, ecType:Null<TypeHint>) { this.ecName = ecName; this.ecDoc = ecDoc; this.ecMeta = ecMeta; this.ecArgs = ecArgs; this.ecPos = ecPos; this.ecParams = ecParams; this.ecType = ecType; }
+	public inline function clone():EnumConstructor return new EnumConstructor(ecName, ecDoc, ecMeta, ecArgs, ecPos, ecParams, ecType);
+}
+@:structInit class EnumConstructorArg {
+	public var name:String;
+	public var optional:Bool;
+	public var type:TypeHint;
+	public inline function new(name:String, optional:Bool, type:TypeHint) { this.name = name; this.optional = optional; this.type = type; }
+	public inline function clone():EnumConstructorArg return new EnumConstructorArg(name, optional, type);
+}
+@:structInit class Import {
+	public var path:Array<PlacedName>;
+	public var mode:ImportMode;
+	public inline function new(path:Array<PlacedName>, mode:ImportMode) { this.path = path; this.mode = mode; }
+	public inline function clone():Import return new Import(path, mode);
+}
+@:structInit class TypeDecl {
+	public var definition:TypeDef;
+	public var pos:Pos;
+	public inline function new(definition:TypeDef, pos:Pos) { this.definition = definition; this.pos = pos; }
+	public inline function clone():TypeDecl return new TypeDecl(definition, pos);
+}
+@:structInit class Package {
+	public var pack:Array<String>;
+	public var declarations:Array<TypeDecl>;
+	public inline function new(pack:Array<String>, declarations:Array<TypeDecl>) { this.pack = pack; this.declarations = declarations; }
+	public inline function clone():Package return new Package(pack, declarations);
+}
 @:structInit class Expr {
 	public var expr:ExprDef;
 	public var pos:Pos;
@@ -77,16 +167,84 @@ enum TypeParamOrConst { TPType(type:TypeHint); TPExpr(expr:Expr); }
 enum ComplexType { CTPath(path:PlacedTypePath); CTFunction(args:Array<TypeHint>, ret:TypeHint); CTAnonymous(fields:Array<ClassField>); CTParent(type:TypeHint); CTExtend(paths:Array<PlacedTypePath>, fields:Array<ClassField>); CTOptional(type:TypeHint); CTNamed(name:PlacedName, type:TypeHint); CTIntersection(types:Array<TypeHint>); }
 enum ExprDef { EConst(constant:Constant); EArray(array:Expr, index:Expr); EBinop(op:Binop, left:Expr, right:Expr); EField(expr:Expr, field:String, kind:EFieldKind); EParenthesis(expr:Expr); EObjectDecl(fields:Array<ObjectField>); EArrayDecl(values:Array<Expr>); ECall(expr:Expr, args:Array<Expr>); ENew(path:PlacedTypePath, args:Array<Expr>); EUnop(op:Unop, flag:UnopFlag, expr:Expr); EVars(vars:Array<EVar>); EFunction(kind:FunctionKind, func:Func); EBlock(exprs:Array<Expr>); EFor(iterator:Expr, body:Expr); EIf(condition:Expr, thenExpr:Expr, elseExpr:Null<Expr>); EWhile(condition:Expr, body:Expr, flag:WhileFlag); ESwitch(expr:Expr, cases:Array<SwitchCase>, defaultCase:Null<SwitchDefault>); ETry(expr:Expr, catches:Array<Catch>); EReturn(expr:Null<Expr>); EBreak; EContinue; EUntyped(expr:Expr); EThrow(expr:Expr); ECast(expr:Expr, type:Null<TypeHint>); EIs(expr:Expr, type:TypeHint); EDisplay(expr:Expr, kind:DisplayKind); ETernary(condition:Expr, thenExpr:Expr, elseExpr:Expr); ECheckType(expr:Expr, type:TypeHint); EMeta(meta:MetadataEntry, expr:Expr); }
 enum TypeDef { EClass(definition:ClassDefinition); EEnum(definition:EnumDefinition); ETypedef(definition:TypedefDefinition); EAbstract(definition:AbstractDefinition); EStatic(definition:StaticDefinition); EImport(value:Import); EUsing(path:Array<PlacedName>); }
-typedef ObjectField = { var key:{var name:String; var pos:Pos; var quote:QuoteStatus;}; var expr:Expr; }
-typedef SwitchCase = { var values:Array<Expr>; var guard:Null<Expr>; var expr:Null<Expr>; var pos:Pos; }
-typedef SwitchDefault = { var expr:Null<Expr>; var pos:Pos; }
-typedef Catch = { var name:PlacedName; var type:Null<TypeHint>; var expr:Expr; var pos:Pos; }
-typedef ClassDefinition = { var name:PlacedName; var doc:Documentation; var params:Array<TypeParam>; var meta:Metadata; var flags:Array<ClassFlag>; var data:Array<ClassField>; }
-typedef EnumDefinition = { var name:PlacedName; var doc:Documentation; var params:Array<TypeParam>; var meta:Metadata; var flags:Array<EnumFlag>; var data:Array<EnumConstructor>; }
-typedef TypedefDefinition = { var name:PlacedName; var doc:Documentation; var params:Array<TypeParam>; var meta:Metadata; var flags:Array<TypedefFlag>; var data:TypeHint; }
-typedef AbstractDefinition = { var name:PlacedName; var doc:Documentation; var params:Array<TypeParam>; var meta:Metadata; var flags:Array<AbstractFlag>; var data:Array<ClassField>; }
-typedef StaticDefinition = { var name:PlacedName; var doc:Documentation; var params:Array<TypeParam>; var meta:Metadata; var flags:Array<PlacedAccess>; var data:ClassFieldKind; }
-
+@:structInit class ObjectField {
+	public var key:{var name:String; var pos:Pos; var quote:QuoteStatus;};
+	public var expr:Expr;
+	public inline function new(key:{var name:String; var pos:Pos; var quote:QuoteStatus;}, expr:Expr) { this.key = key; this.expr = expr; }
+	public inline function clone():ObjectField return new ObjectField(key, expr);
+}
+@:structInit class SwitchCase {
+	public var values:Array<Expr>;
+	public var guard:Null<Expr>;
+	public var expr:Null<Expr>;
+	public var pos:Pos;
+	public inline function new(values:Array<Expr>, guard:Null<Expr>, expr:Null<Expr>, pos:Pos) { this.values = values; this.guard = guard; this.expr = expr; this.pos = pos; }
+	public inline function clone():SwitchCase return new SwitchCase(values, guard, expr, pos);
+}
+@:structInit class SwitchDefault {
+	public var expr:Null<Expr>;
+	public var pos:Pos;
+	public inline function new(expr:Null<Expr>, pos:Pos) { this.expr = expr; this.pos = pos; }
+	public inline function clone():SwitchDefault return new SwitchDefault(expr, pos);
+}
+@:structInit class Catch {
+	public var name:PlacedName;
+	public var type:Null<TypeHint>;
+	public var expr:Expr;
+	public var pos:Pos;
+	public inline function new(name:PlacedName, type:Null<TypeHint>, expr:Expr, pos:Pos) { this.name = name; this.type = type; this.expr = expr; this.pos = pos; }
+	public inline function clone():Catch return new Catch(name, type, expr, pos);
+}
+@:structInit class ClassDefinition {
+	public var name:PlacedName;
+	public var doc:Documentation;
+	public var params:Array<TypeParam>;
+	public var meta:Metadata;
+	public var flags:Array<ClassFlag>;
+	public var data:Array<ClassField>;
+	public inline function new(name:PlacedName, doc:Documentation, params:Array<TypeParam>, meta:Metadata, flags:Array<ClassFlag>, data:Array<ClassField>) { this.name = name; this.doc = doc; this.params = params; this.meta = meta; this.flags = flags; this.data = data; }
+	public inline function clone():ClassDefinition return new ClassDefinition(name, doc, params, meta, flags, data);
+}
+@:structInit class EnumDefinition {
+	public var name:PlacedName;
+	public var doc:Documentation;
+	public var params:Array<TypeParam>;
+	public var meta:Metadata;
+	public var flags:Array<EnumFlag>;
+	public var data:Array<EnumConstructor>;
+	public inline function new(name:PlacedName, doc:Documentation, params:Array<TypeParam>, meta:Metadata, flags:Array<EnumFlag>, data:Array<EnumConstructor>) { this.name = name; this.doc = doc; this.params = params; this.meta = meta; this.flags = flags; this.data = data; }
+	public inline function clone():EnumDefinition return new EnumDefinition(name, doc, params, meta, flags, data);
+}
+@:structInit class TypedefDefinition {
+	public var name:PlacedName;
+	public var doc:Documentation;
+	public var params:Array<TypeParam>;
+	public var meta:Metadata;
+	public var flags:Array<TypedefFlag>;
+	public var data:TypeHint;
+	public inline function new(name:PlacedName, doc:Documentation, params:Array<TypeParam>, meta:Metadata, flags:Array<TypedefFlag>, data:TypeHint) { this.name = name; this.doc = doc; this.params = params; this.meta = meta; this.flags = flags; this.data = data; }
+	public inline function clone():TypedefDefinition return new TypedefDefinition(name, doc, params, meta, flags, data);
+}
+@:structInit class AbstractDefinition {
+	public var name:PlacedName;
+	public var doc:Documentation;
+	public var params:Array<TypeParam>;
+	public var meta:Metadata;
+	public var flags:Array<AbstractFlag>;
+	public var data:Array<ClassField>;
+	public inline function new(name:PlacedName, doc:Documentation, params:Array<TypeParam>, meta:Metadata, flags:Array<AbstractFlag>, data:Array<ClassField>) { this.name = name; this.doc = doc; this.params = params; this.meta = meta; this.flags = flags; this.data = data; }
+	public inline function clone():AbstractDefinition return new AbstractDefinition(name, doc, params, meta, flags, data);
+}
+@:structInit class StaticDefinition {
+	public var name:PlacedName;
+	public var doc:Documentation;
+	public var params:Array<TypeParam>;
+	public var meta:Metadata;
+	public var flags:Array<PlacedAccess>;
+	public var data:ClassFieldKind;
+	public inline function new(name:PlacedName, doc:Documentation, params:Array<TypeParam>, meta:Metadata, flags:Array<PlacedAccess>, data:ClassFieldKind) { this.name = name; this.doc = doc; this.params = params; this.meta = meta; this.flags = flags; this.data = data; }
+	public inline function clone():StaticDefinition return new StaticDefinition(name, doc, params, meta, flags, data);
+}
 class Ast {
  public static function dumpWithPos(e:Expr):String {
   var buf=new StringBuf();

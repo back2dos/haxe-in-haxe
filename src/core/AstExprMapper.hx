@@ -27,7 +27,7 @@ class AstExprMapper {
  }
  function func(f:Func):Func {
   var params=f.fParams.map(tparamDecl);
-  var args=f.fArgs.map(function(a) {var t=optHint(a.type);var e=optExpr(a.expr);return {name:a.name,optional:a.optional,meta:a.meta,type:t,expr:e};});
+  var args=f.fArgs.map(function(a) {var t=optHint(a.type);var e=optExpr(a.expr);return ({name:a.name,optional:a.optional,meta:a.meta,type:t,expr:e} : core.Ast.FuncArg);});
   var t=optHint(f.fType),e=optExpr(f.fExpr);return {fParams:params,fArgs:args,fType:t,fExpr:e};
  }
  public function map(e:Expr):Expr {
@@ -36,18 +36,18 @@ class AstExprMapper {
    case EArray(a,b):var a=loop(a);EArray(a,loop(b));
    case EBinop(op,a,b):var a=loop(a);EBinop(op,a,loop(b));
    case EField(e,f,k):EField(loop(e),f,k);case EParenthesis(e):EParenthesis(loop(e));
-   case EObjectDecl(fl):EObjectDecl(fl.map(f->{key:f.key,expr:loop(f.expr)}));case EArrayDecl(el):EArrayDecl(el.map(loop));
+   case EObjectDecl(fl):EObjectDecl(fl.map(f->({key:f.key,expr:loop(f.expr)} : core.Ast.ObjectField)));case EArrayDecl(el):EArrayDecl(el.map(loop));
    case ECall(e,el):var e=loop(e);ECall(e,el.map(loop));case ENew(t,el):var t=tpath(t);ENew(t,el.map(loop));
    case EUnop(op,flag,e):EUnop(op,flag,loop(e));
-   case EVars(vl):EVars(vl.map(function(v){var t=optHint(v.evType),e=optExpr(v.evExpr);return {evName:v.evName,evFinal:v.evFinal,evStatic:v.evStatic,evMeta:v.evMeta,evType:t,evExpr:e};}));
+   case EVars(vl):EVars(vl.map(function(v){var t=optHint(v.evType),e=optExpr(v.evExpr);return ({evName:v.evName,evFinal:v.evFinal,evStatic:v.evStatic,evMeta:v.evMeta,evType:t,evExpr:e} : core.Ast.EVar);}));
    case EFunction(k,f):EFunction(k,func(f));case EBlock(el):EBlock(el.map(loop));
    case EFor(a,b):var a=loop(a);EFor(a,loop(b));
    case EIf(e,a,b):var e=loop(e),a=loop(a);EIf(e,a,optExpr(b));
    case EWhile(c,e,f):var c=loop(c);EWhile(c,loop(e),f);
    case ESwitch(e,cases,def):
-    var e=loop(e);var cases=cases.map(function(c){var el=c.values.map(loop),guard=optExpr(c.guard),expr=optExpr(c.expr);return {values:el,guard:guard,expr:expr,pos:c.pos};});
-    var def=def==null?null:{expr:optExpr(def.expr),pos:def.pos};ESwitch(e,cases,def);
-   case ETry(e,catches):var e=loop(e);ETry(e,catches.map(function(c){var t=optHint(c.type);return {name:c.name,type:t,expr:loop(c.expr),pos:c.pos};}));
+    var e=loop(e);var cases=cases.map(function(c){var el=c.values.map(loop),guard=optExpr(c.guard),expr=optExpr(c.expr);return ({values:el,guard:guard,expr:expr,pos:c.pos} : core.Ast.SwitchCase);});
+    var def=def==null?null:({expr:optExpr(def.expr),pos:def.pos} : core.Ast.SwitchDefault);ESwitch(e,cases,def);
+   case ETry(e,catches):var e=loop(e);ETry(e,catches.map(function(c){var t=optHint(c.type);return ({name:c.name,type:t,expr:loop(c.expr),pos:c.pos} : core.Ast.Catch);}));
    case EReturn(e):EReturn(optExpr(e));case EBreak:EBreak;case EContinue:EContinue;
    case EUntyped(e):EUntyped(loop(e));case EThrow(e):EThrow(loop(e));
    case ECast(e,t):var e=loop(e);ECast(e,optHint(t));case EIs(e,t):var e=loop(e);EIs(e,typeHint(t));

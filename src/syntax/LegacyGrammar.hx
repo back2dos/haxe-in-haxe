@@ -288,7 +288,7 @@ class LegacyGrammar {
 		case Kwd(While): next(); expect(POpen); var c=expression(); expect(PClose); var b=statementBody(); expr(EWhile(c,b,NormalWhile),union(t.pos,b.pos));
 		case Kwd(For): next(); expect(POpen); var it=expression(); if(acceptKwd(In)!=null) { var right=expression(); it=expr(EBinop(OpIn,it,right),union(it.pos,right.pos)); } expect(PClose); var b=statementBody(); expr(EFor(it,b),union(t.pos,b.pos));
 		case Kwd(Do): next(); var b=statementBody(); expectKwd(While); expect(POpen); var c=expression(); var end=expect(PClose).pos; expr(EWhile(c,b,DoWhile),union(t.pos,end));
-		case Kwd(Try): next(); var body=statementBody(); var catches=[]; while(acceptKwd(Catch)!=null) { var cp=previous().pos; expect(POpen); var n=placedIdent(); var ty=typeHintOpt(); expect(PClose); var cb=statementBody(); catches.push({name:n,type:ty,expr:cb,pos:union(cp,cb.pos)}); } expr(ETry(body,catches),union(t.pos,catches.length == 0 ? body.pos : catches[catches.length-1].pos));
+		case Kwd(Try): next(); var body=statementBody(); var catches=[]; while(acceptKwd(Catch)!=null) { var cp=previous().pos; expect(POpen); var n=placedIdent(); var ty=typeHintOpt(); expect(PClose); var cb=statementBody(); catches.push(({name:n,type:ty,expr:cb,pos:union(cp,cb.pos)} : core.Ast.Catch)); } expr(ETry(body,catches),union(t.pos,catches.length == 0 ? body.pos : catches[catches.length-1].pos));
 		case Kwd(Switch): next(); parseSwitch(t.pos);
 		case Kwd(Break): next(); expr(EBreak,t.pos); case Kwd(Continue): next(); expr(EContinue,t.pos);
 		case Kwd(Untyped): next(); var e=is(BrOpen) ? block() : expression(); expr(EUntyped(e),union(t.pos,e.pos));
@@ -444,7 +444,7 @@ class LegacyGrammar {
 					case _: var n=placedIdent(); {name:n.name, pos:n.pos, quote:NoQuotes};
 				};
 				expect(DblDot); var value=expression();
-				fields.push({key:key,expr:value});
+				fields.push(({key:key,expr:value} : core.Ast.ObjectField));
 				if (accept(Comma) == null) break;
 			}
 			var end=expect(BrClose).pos;
@@ -619,12 +619,12 @@ class LegacyGrammar {
 	function placedPath():Array<PlacedName> { var result=[placedIdent()]; while(accept(Dot)!=null) result.push(placedIdent()); return result; }
 	function typeParams():Array<TypeParam> {
 		if (accept(Binop(OpLt)) == null) return [];
-		var result=[]; if(!isTypeGt()) do { var meta=metadata(); var name=placedIdent(); var constraints=typeHintOpt(); var defaultValue=accept(Binop(OpAssign)) == null ? null : typeHint(); result.push({tpName:name,tpParams:[],tpConstraints:constraints,tpDefault:defaultValue,tpMeta:meta}); } while(accept(Comma)!=null);
+		var result=[]; if(!isTypeGt()) do { var meta=metadata(); var name=placedIdent(); var constraints=typeHintOpt(); var defaultValue=accept(Binop(OpAssign)) == null ? null : typeHint(); result.push(({tpName:name,tpParams:[],tpConstraints:constraints,tpDefault:defaultValue,tpMeta:meta} : core.Ast.TypeParam)); } while(accept(Comma)!=null);
 		expectTypeGt(); return result;
 	}
 	function enumConstructor():EnumConstructor {
 		var doc=documentation(), meta=metadata(), name=placedIdent(), params=typeParams(), args=[];
-		if(accept(POpen)!=null) { if(!is(PClose)) while (true) { var optional=accept(Question)!=null; var n=placedIdent(); var t=typeHintOpt(); if(t==null) fail("Expected enum parameter type",n.pos); args.push({name:n.name,optional:optional,type:t}); if (accept(Comma) == null || is(PClose)) break; } expect(PClose); }
+		if(accept(POpen)!=null) { if(!is(PClose)) while (true) { var optional=accept(Question)!=null; var n=placedIdent(); var t=typeHintOpt(); if(t==null) fail("Expected enum parameter type",n.pos); args.push(({name:n.name,optional:optional,type:t} : core.Ast.EnumConstructorArg)); if (accept(Comma) == null || is(PClose)) break; } expect(PClose); }
 		var type=typeHintOpt(); var end=expect(Semicolon).pos;
 		return {ecName:name,ecDoc:doc,ecMeta:meta,ecArgs:args,ecPos:union(name.pos,end),ecParams:params,ecType:type};
 	}

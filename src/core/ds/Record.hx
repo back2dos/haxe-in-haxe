@@ -25,19 +25,9 @@ class Record {
 	public static function copyDynamic<T>(o:T):T {
 		#if !macro
 		if (std.Type.getClass(o) == null) return Reflect.copy(o); // anonymous record
-		if (o is core.TType.TExpr) return cast (cast o : core.TType.TExpr).clone();
-		if (o is core.Globals.Pos) return cast (cast o : core.Globals.Pos).clone();
-		if (o is core.Globals.GlobalTypePath) return cast (cast o : core.Globals.GlobalTypePath).clone();
-		if (o is core.Ast.Expr) return cast (cast o : core.Ast.Expr).clone();
-		if (o is core.TType.TVar) return cast (cast o : core.TType.TVar).clone();
-		if (o is core.TType.TClassField) return cast (cast o : core.TType.TClassField).clone();
-		if (o is core.TType.TMono) return cast (cast o : core.TType.TMono).clone();
-		if (o is core.TUnification.UnificationContext) return cast (cast o : core.TUnification.UnificationContext).clone();
-		if (o is syntax.Lexer.LexedToken) return cast (cast o : syntax.Lexer.LexedToken).clone();
-		if (o is core.Ast.MetadataEntry) return cast (cast o : core.Ast.MetadataEntry).clone();
-		if (o is core.Ast.PlacedName) return cast (cast o : core.Ast.PlacedName).clone();
-		if (o is core.Ast.PlacedAccess) return cast (cast o : core.Ast.PlacedAccess).clone();
-		if (o is core.Ast.TypeHint) return cast (cast o : core.Ast.TypeHint).clone();
+		// record classes all have clone(); Reflect.copy would lose the class
+		var clone = Reflect.field(o, "clone");
+		if (clone != null) return Reflect.callMethod(o, clone, []);
 		#end
 		return Reflect.copy(o);
 	}

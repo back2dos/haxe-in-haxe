@@ -17,7 +17,7 @@ class Reification {
   function arr<A>(f:A->Pos->Expr,values:Array<A>,p:Pos):Expr return {expr:EArrayDecl(values.map(function(v)return f(v,p))),pos:p};
   function opt<A>(f:A->Pos->Expr,v:Null<A>,p:Pos):Expr return v==null?nil(p):f(v,p);
   function bool(v:Bool,p:Pos):Expr return {expr:EConst(Ident(v?"true":"false")),pos:p};
-  function obj(fields:Array<{name:String,e:Expr}>,p:Pos):Expr return {expr:EObjectDecl(fields.map(function(f)return {key:{name:f.name,pos:nullPos,quote:NoQuotes},expr:f.e})),pos:p};
+  function obj(fields:Array<{name:String,e:Expr}>,p:Pos):Expr return {expr:EObjectDecl(fields.map(function(f)return ({key:{name:f.name,pos:nullPos,quote:NoQuotes},expr:f.e} : core.Ast.ObjectField))),pos:p};
   function fld(name:String,e:Expr):{name:String,e:Expr} return {name:name,e:e};
   function field(e:Expr,name:String,p:Pos):Expr return {expr:EField(e,name,EFNormal),pos:p};
   function macroField(cls:String,name:String,p:Pos):Expr return field(field(field({expr:EConst(Ident("haxe")),pos:p},"macro",p),cls,p),name,p);
