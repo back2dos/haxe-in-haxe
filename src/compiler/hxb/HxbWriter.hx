@@ -1110,18 +1110,19 @@ class HxbWriter {
 		}
 	}
 
+	// write_type_instance's local helpers, as methods so each call does not allocate closures.
+	function writeFunctionArg(a:{name:String, optional:Bool, type:T}) {
+		chunk.writeString(a.name);
+		chunk.writeBool(a.optional);
+		catchUnboundTtp(function() {
+			writeTypeInstance(a.type);
+			return null;
+		}, function() return 'function arg `${a.name}`', null);
+	}
+	function inlinedList<A>(offset:Int, max:Int, fFirst:Void->Void, fElt:A->Void, l:Array<A>) {
+		writeInlinedList(offset, max, chunk.writeU8, fFirst, fElt, l);
+	}
 	function writeTypeInstance(t:T):Void {
-		function writeFunctionArg(a:{name:String, optional:Bool, type:T}) {
-			chunk.writeString(a.name);
-			chunk.writeBool(a.optional);
-			catchUnboundTtp(function() {
-				writeTypeInstance(a.type);
-				return null;
-			}, function() return 'function arg `${a.name}`', null);
-		}
-		function inlinedList<A>(offset:Int, max:Int, fFirst:Void->Void, fElt:A->Void, l:Array<A>) {
-			writeInlinedList(offset, max, chunk.writeU8, fFirst, fElt, l);
-		}
 		switch t {
 			case TAbstract({aPath: {pack: [], name: "Void"}}, []):
 				chunk.writeU8(100);

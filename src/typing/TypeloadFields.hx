@@ -86,7 +86,7 @@ class FieldError {
  public static function unexpectedExpression(com:CommonContext,fctx:FieldInitCtx,reason:String,p:Pos):Void maybeDisplayError(com,fctx,reason,p);
 }
 class TypeloadFields {
- public static function hasAccess(a:Access,access:Array<PlacedAccess>):Bool return Lambda.exists(cast access,function(v:PlacedAccess) return v.access==a);
+ public static function hasAccess(a:Access,access:Array<PlacedAccess>):Bool {for(v in access) if(v.access==a) return true;return false;}
  public static function accessPos(a:Access,access:Array<PlacedAccess>):Dynamic {for(v in access) if(v.access==a) return v.pos;throw NotFound.raise();}
  public static function meta(m:StrictMeta,?p:Pos):MetadataEntry return {meta:m,exprs:[],pos:p==null ? Globals.nullPos : p};
  public static function ae(e:ExprDef,p:Pos):Expr return {expr:e,pos:p};

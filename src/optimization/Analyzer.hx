@@ -236,7 +236,10 @@ class Debug {
 }
 private typedef ExceptionOutput = {var value:Dynamic; var mutex:sys.thread.Mutex;}
 class Run {
- public static function withTimer<A>(timerCtx:Dynamic,level:Int,identifier:Null<String>,s:Array<String>,f:Void->A):A {var id = core.Timer.determineId(level,["analyzer"],s,identifier); return core.Timer.time(timerCtx,id,function(_:Null<Bool>) return f(),null);}
+ public static function withTimer<A>(timerCtx:core.Timer.TimerContext,level:Int,identifier:Null<String>,s:Array<String>,f:Void->A):A {
+  // Timer.time only calls f when times are not measured; skip building the id and wrapper.
+  if (timerCtx.measureTimes == core.Timer.MeasureTimes.No) return f();
+  var id = core.Timer.determineId(level,["analyzer"],s,identifier); return core.Timer.time(timerCtx,id,function(_:Null<Bool>) return f(),null);}
  public static function createAnalyzerContext(com:Dynamic,config:AnalyzerConfigData,identifier:String,e:TExpr):AnalyzerContext {
   var g = Graph.create(e.etype,e.epos); return {com:com,config:config,graph:g,tempVarName:com.platform == Cpp ? "_hx_tmp" : "tmp",withTimer:function(s,f) return withTimer(com.timerCtx,config.detailTimes,identifier,s,f),identifier:identifier,entry:g.gUnreachable,hasUnbound:false,loopCounter:0,loopStack:[],debugExprs:[],nameStack:[],didOptimize:false};
  }
