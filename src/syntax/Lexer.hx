@@ -212,7 +212,13 @@ class Lexer {
 	}
 	function make(token:Token, start:Int):LexedToken return {token: token, pos: {pfile: file, pmin: start, pmax: index}};
 	function fail(message:LexerErrorMsg, at:Int):Dynamic throw new LexerError(message, {pfile: file, pmin: at, pmax: at});
-	function skipWhitespace():Void while (!eof() && (current() == " " || current() == "\t" || current() == "\n" || current() == "\r")) index++;
+	function skipWhitespace():Void {
+		while (!eof()) {
+			var c = StringTools.fastCodeAt(source, index);
+			if (c != " ".code && c != "\t".code && c != "\n".code && c != "\r".code) break;
+			index++;
+		}
+	}
 
 	static inline function isDigitC(c:Int):Bool return c >= "0".code && c <= "9".code;
 	static inline function isHexC(c:Int):Bool return isDigitC(c) || (c >= "a".code && c <= "f".code) || (c >= "A".code && c <= "F".code);
@@ -439,6 +445,13 @@ class Lexer {
 	static final opTexts:Array<String> = [for (o in operators) o.text];
 	static final opTokens:Array<Token> = [for (o in operators) o.token];
 	static final opFirst:Array<Int> = [for (text in opTexts) StringTools.fastCodeAt(text, 0)];
+	// Operator indices by first character (in table order), so a token only
+	// tries the operators that can match it.
+	static final opByFirst:Array<Array<Int>> = {
+		var t:Array<Array<Int>> = [for (_ in 0...128) []];
+		for (i in 0...opFirst.length) t[opFirst[i]].push(i);
+		t;
+	};
 
 	public function token():LexedToken {
 		core.ds.GcPolicy.tick();
@@ -461,13 +474,11 @@ class Lexer {
 			}
 			// Find the longest fixed-text operator.
 			var opLen = 0, opTok:Token = null;
-			for (i in 0...opTexts.length) {
-				if (opFirst[i] == c) {
-					var text = opTexts[i];
-					if (text.length > opLen && starts(text)) {
-						opLen = text.length;
-						opTok = opTokens[i];
-					}
+			if (c >= 0 && c < 128) for (i in opByFirst[c]) {
+				var text = opTexts[i];
+				if (text.length > opLen && starts(text)) {
+					opLen = text.length;
+					opTok = opTokens[i];
 				}
 			}
 			if (isDigitC(c) || c == ".".code) {
@@ -572,15 +583,18 @@ class Lexer {
 	// comment: stores the content, returns the end of "*/".
 	function comment(buf:StringBuf, pmin:Int):Int {
 		index += 2;
-		while (true) {
-			if (eof()) return fail(UnclosedComment, pmin);
-			if (starts("*/")) {
-				index += 2;
-				return index;
+		// The text up to "*/" in one piece (not a one-character string per character).
+		var end = index > source.length ? -1 : source.indexOf("*/", index);
+		if (end < 0) {
+			if (index < source.length) {
+				buf.addSub(source, index, source.length - index);
+				index = source.length;
 			}
-			buf.add(current());
-			index++;
+			return fail(UnclosedComment, pmin);
 		}
+		buf.addSub(source, index, end - index);
+		index = end + 2;
+		return index;
 	}
 
 	// string: stores the raw content of a double-quoted string, returns the end of the closing quote.

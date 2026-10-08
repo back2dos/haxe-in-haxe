@@ -46,7 +46,7 @@ class ZipOutput extends AnyOutput {
 		var data = content;
 		var fileSize = data.length;
 		var compressed = compressionLevel != 0;
-		var crc32 = haxe.crypto.Crc32.make(data);
+		var crc32 = crc32Of(data);
 		if (compressed) {
 			// haxe.zip.Compress emits a zlib stream, while ZIP stores raw DEFLATE.
 			var zlibData = haxe.zip.Compress.run(data, compressionLevel);
@@ -61,6 +61,24 @@ class ZipOutput extends AnyOutput {
 			data: data,
 			crc32: crc32
 		});
+	}
+
+	// Table-driven CRC-32, as in zlib (upstream's Zip uses zlib's crc32);
+	// haxe.crypto.Crc32 computes it bit by bit.
+	static final crcTable:haxe.ds.Vector<Int> = {
+		var t = new haxe.ds.Vector<Int>(256);
+		for (n in 0...256) {
+			var c = n;
+			for (_ in 0...8) c = (c & 1) != 0 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1;
+			t[n] = c;
+		}
+		t;
+	};
+
+	static function crc32Of(b:Bytes):Int {
+		var crc = 0xFFFFFFFF, table = crcTable;
+		for (i in 0...b.length) crc = table[(crc ^ b.get(i)) & 0xFF] ^ (crc >>> 8);
+		return crc ^ 0xFFFFFFFF;
 	}
 
 	override public function close():Void {
