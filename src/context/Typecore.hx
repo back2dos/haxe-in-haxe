@@ -24,106 +24,153 @@ import core.Error.ErrorMsg;
 
 // Draft mechanical translation of haxe/src/context/typecore.ml; unvalidated.
 // Macro and display callbacks retain their shape; their runtimes are not implemented here.
-typedef TypePatch = { var tpType:Null<ComplexType>; var tpRemove:Bool; var tpMeta:Metadata; }
+@:structInit class TypePatch {
+	public var tpType:Null<ComplexType>;
+	public var tpRemove:Bool;
+	public var tpMeta:Metadata;
+	public inline function new(tpType:Null<ComplexType>, tpRemove:Bool, tpMeta:Metadata) { this.tpType = tpType; this.tpRemove = tpRemove; this.tpMeta = tpMeta; }
+	public inline function clone():TypePatch return new TypePatch(tpType, tpRemove, tpMeta);
+}
 enum CurrentFun { FunMember; FunStatic; FunConstructor; FunMemberAbstract; FunMemberClassLocal; FunMemberAbstractLocal; }
 enum MacroMode { MExpr; MBuild; MMacroType; MDisplay; }
 enum AccessMode { MGet; MSet(rhs:Null<Expr>); MCall(args:Array<Expr>); }
-typedef TyperModule = {
-	var curmod:ModuleDef;
-	var importResolution:ResolutionList;
-	var ownResolution:Null<ResolutionList>;
-	var enumWithType:Null<ModuleType>;
-	var moduleUsing:Array<{cls:TClass,pos:Pos}>;
-	var importStatements:Array<Import>;
-	var isDisplayFile:Bool;
+@:structInit class TyperModule {
+	public var curmod:ModuleDef;
+	public var importResolution:ResolutionList;
+	public var ownResolution:Null<ResolutionList>;
+	public var enumWithType:Null<ModuleType>;
+	public var moduleUsing:Array<{cls:TClass,pos:Pos}>;
+	public var importStatements:Array<Import>;
+	public var isDisplayFile:Bool;
+	public inline function new(curmod:ModuleDef, importResolution:ResolutionList, ownResolution:Null<ResolutionList>, enumWithType:Null<ModuleType>, moduleUsing:Array<{cls:TClass,pos:Pos}>, importStatements:Array<Import>, isDisplayFile:Bool) { this.curmod = curmod; this.importResolution = importResolution; this.ownResolution = ownResolution; this.enumWithType = enumWithType; this.moduleUsing = moduleUsing; this.importStatements = importStatements; this.isDisplayFile = isDisplayFile; }
+	public inline function clone():TyperModule return new TyperModule(curmod, importResolution, ownResolution, enumWithType, moduleUsing, importStatements, isDisplayFile);
 }
-typedef TyperClass = { var curclass:TClass; var tthis:T; var getBuildInfos:Void->Null<{type:ModuleType,params:TParams,fields:Array<ClassField>}>; }
+@:structInit class TyperClass {
+	public var curclass:TClass;
+	public var tthis:T;
+	public var getBuildInfos:Void->Null<{type:ModuleType,params:TParams,fields:Array<ClassField>}>;
+	public inline function new(curclass:TClass, tthis:T, getBuildInfos:Void->Null<{type:ModuleType,params:TParams,fields:Array<ClassField>}>) { this.curclass = curclass; this.tthis = tthis; this.getBuildInfos = getBuildInfos; }
+	public inline function clone():TyperClass return new TyperClass(curclass, tthis, getBuildInfos);
+}
 enum BuildKind { BuildNormal; BuildGeneric(cls:TClass); BuildGenericBuild; BuildMacroType; }
-typedef BuildInfo = {
-	var buildKind:BuildKind;
-	var buildPath:GlobalTypePath;
-	var buildParams:TypeParams;
-	var buildExtern:Bool;
-	var buildApply:TParams->T;
+@:structInit class BuildInfo {
+	public var buildKind:BuildKind;
+	public var buildPath:GlobalTypePath;
+	public var buildParams:TypeParams;
+	public var buildExtern:Bool;
+	public var buildApply:TParams->T;
+	public inline function new(buildKind:BuildKind, buildPath:GlobalTypePath, buildParams:TypeParams, buildExtern:Bool, buildApply:TParams->T) { this.buildKind = buildKind; this.buildPath = buildPath; this.buildParams = buildParams; this.buildExtern = buildExtern; this.buildApply = buildApply; }
+	public inline function clone():BuildInfo return new BuildInfo(buildKind, buildPath, buildParams, buildExtern, buildApply);
 }
 enum MacroResult { MSuccess(expr:Expr); MError; MMacroInMacro; }
-typedef TyperPassTasks = { var tasks:Array<Void->Void>; var tasksLate:Array<Void->Void>; }
+@:structInit class TyperPassTasks {
+	public var tasks:Array<Void->Void>;
+	public var tasksLate:Array<Void->Void>;
+	public inline function new(tasks:Array<Void->Void>, tasksLate:Array<Void->Void>) { this.tasks = tasks; this.tasksLate = tasksLate; }
+	public inline function clone():TyperPassTasks return new TyperPassTasks(tasks, tasksLate);
+}
 enum FunctionMode { FunFunction; FunCoroutine; FunNotFunction; }
-typedef CallArgContext = { var cacInOverload:Bool; var cacBodyCapture:{value:Array<core.Message.CompilerMessage>}; }
-typedef TyperGlobals = {
-	var delayed:Array<TyperPassTasks>;
-	var delayedMinIndex:Int;
-	var debugDelayed:Array<Dynamic>;
-	var retainMeta:Bool;
-	var coreApi:Null<Typer>;
-	var macros:Null<{finalize:Void->Void,typer:Typer}>;
-	var moduleCheckPolicies:Array<{pack:Array<String>,policies:Array<ModuleCheckPolicy>,recursive:Bool}>;
-	var globalUsing:Array<{cls:TClass,pos:Pos}>;
-	var complete:Bool;
-	var typeHints:Array<{display:ModuleDefDisplay,pos:Pos,type:T}>;
-	var loadOnlyCachedModules:Bool;
-	var returnPartialType:Bool;
-	var buildCount:Int;
-	var tDynamicDef:T;
-	var delayedDisplay:Null<Dynamic>;
-	var callArgContext:Null<CallArgContext>;
-	var rootTyper:Typer;
-	var continuationApi:Null<Dynamic>;
-	var doMacro:Typer->MacroMode->GlobalTypePath->String->Array<Expr>->Pos->MacroResult;
-	var doLoadMacro:Typer->Bool->GlobalTypePath->String->Pos->Dynamic;
-	var doLoadModule:(ctx:Typer,path:GlobalTypePath,p:Pos,?origin:ModuleDepOrigin)->ModuleDef;
-	var doLoadTypeDef:Typer->Pos->TypePath->ModuleType;
-	var getBuildInfo:Typer->ModuleType->Pos->BuildInfo;
-	var doFormatString:Typer->String->Pos->Expr;
-	var doLoadCoreClass:Typer->TClass->TClass;
+@:structInit class CallArgContext {
+	public var cacInOverload:Bool;
+	public var cacBodyCapture:{value:Array<core.Message.CompilerMessage>};
+	public inline function new(cacInOverload:Bool, cacBodyCapture:{value:Array<core.Message.CompilerMessage>}) { this.cacInOverload = cacInOverload; this.cacBodyCapture = cacBodyCapture; }
+	public inline function clone():CallArgContext return new CallArgContext(cacInOverload, cacBodyCapture);
 }
-typedef TyperExpr = {
-	var curfun:CurrentFun;
-	var functionMode:FunctionMode;
-	var ret:T;
-	var opened:Array<TAnon>;
-	var monomorphs:Array<{mono:TMono,pos:Pos}>;
-	var inLoop:Bool;
-	var bypassAccessor:Int;
-	var withTypeStack:Array<Dynamic>;
-	var callArgumentStack:Array<Array<Expr>>;
-	var macroDepth:Int;
+@:structInit class TyperGlobals {
+	public var delayed:Array<TyperPassTasks>;
+	public var delayedMinIndex:Int;
+	public var debugDelayed:Array<Dynamic>;
+	public var retainMeta:Bool;
+	public var coreApi:Null<Typer>;
+	public var macros:Null<{finalize:Void->Void,typer:Typer}>;
+	public var moduleCheckPolicies:Array<{pack:Array<String>,policies:Array<ModuleCheckPolicy>,recursive:Bool}>;
+	public var globalUsing:Array<{cls:TClass,pos:Pos}>;
+	public var complete:Bool;
+	public var typeHints:Array<{display:ModuleDefDisplay,pos:Pos,type:T}>;
+	public var loadOnlyCachedModules:Bool;
+	public var returnPartialType:Bool;
+	public var buildCount:Int;
+	public var tDynamicDef:T;
+	public var delayedDisplay:Null<Dynamic>;
+	public var callArgContext:Null<CallArgContext>;
+	public var rootTyper:Typer;
+	public var continuationApi:Null<Dynamic>;
+	public var doMacro:Typer->MacroMode->GlobalTypePath->String->Array<Expr>->Pos->MacroResult;
+	public var doLoadMacro:Typer->Bool->GlobalTypePath->String->Pos->Dynamic;
+	public var doLoadModule:(ctx:Typer,path:GlobalTypePath,p:Pos,?origin:ModuleDepOrigin)->ModuleDef;
+	public var doLoadTypeDef:Typer->Pos->TypePath->ModuleType;
+	public var getBuildInfo:Typer->ModuleType->Pos->BuildInfo;
+	public var doFormatString:Typer->String->Pos->Expr;
+	public var doLoadCoreClass:Typer->TClass->TClass;
+	public inline function new(delayed:Array<TyperPassTasks>, delayedMinIndex:Int, debugDelayed:Array<Dynamic>, retainMeta:Bool, coreApi:Null<Typer>, macros:Null<{finalize:Void->Void,typer:Typer}>, moduleCheckPolicies:Array<{pack:Array<String>,policies:Array<ModuleCheckPolicy>,recursive:Bool}>, globalUsing:Array<{cls:TClass,pos:Pos}>, complete:Bool, typeHints:Array<{display:ModuleDefDisplay,pos:Pos,type:T}>, loadOnlyCachedModules:Bool, returnPartialType:Bool, buildCount:Int, tDynamicDef:T, delayedDisplay:Null<Dynamic>, callArgContext:Null<CallArgContext>, rootTyper:Typer, continuationApi:Null<Dynamic>, doMacro:Typer->MacroMode->GlobalTypePath->String->Array<Expr>->Pos->MacroResult, doLoadMacro:Typer->Bool->GlobalTypePath->String->Pos->Dynamic, doLoadModule:(ctx:Typer,path:GlobalTypePath,p:Pos,?origin:ModuleDepOrigin)->ModuleDef, doLoadTypeDef:Typer->Pos->TypePath->ModuleType, getBuildInfo:Typer->ModuleType->Pos->BuildInfo, doFormatString:Typer->String->Pos->Expr, doLoadCoreClass:Typer->TClass->TClass) { this.delayed = delayed; this.delayedMinIndex = delayedMinIndex; this.debugDelayed = debugDelayed; this.retainMeta = retainMeta; this.coreApi = coreApi; this.macros = macros; this.moduleCheckPolicies = moduleCheckPolicies; this.globalUsing = globalUsing; this.complete = complete; this.typeHints = typeHints; this.loadOnlyCachedModules = loadOnlyCachedModules; this.returnPartialType = returnPartialType; this.buildCount = buildCount; this.tDynamicDef = tDynamicDef; this.delayedDisplay = delayedDisplay; this.callArgContext = callArgContext; this.rootTyper = rootTyper; this.continuationApi = continuationApi; this.doMacro = doMacro; this.doLoadMacro = doLoadMacro; this.doLoadModule = doLoadModule; this.doLoadTypeDef = doLoadTypeDef; this.getBuildInfo = getBuildInfo; this.doFormatString = doFormatString; this.doLoadCoreClass = doLoadCoreClass; }
+	public inline function clone():TyperGlobals return new TyperGlobals(delayed, delayedMinIndex, debugDelayed, retainMeta, coreApi, macros, moduleCheckPolicies, globalUsing, complete, typeHints, loadOnlyCachedModules, returnPartialType, buildCount, tDynamicDef, delayedDisplay, callArgContext, rootTyper, continuationApi, doMacro, doLoadMacro, doLoadModule, doLoadTypeDef, getBuildInfo, doFormatString, doLoadCoreClass);
 }
-typedef TyperField = {
-	var curfield:TClassField;
-	var locals:PersistentMap<String,TVar>;
-	var vthis:Null<TVar>;
-	var isUntyped:Bool;
-	var meta:Metadata;
-	var inDisplay:Bool;
-	var inCallArgs:Bool;
+@:structInit class TyperExpr {
+	public var curfun:CurrentFun;
+	public var functionMode:FunctionMode;
+	public var ret:T;
+	public var opened:Array<TAnon>;
+	public var monomorphs:Array<{mono:TMono,pos:Pos}>;
+	public var inLoop:Bool;
+	public var bypassAccessor:Int;
+	public var withTypeStack:Array<Dynamic>;
+	public var callArgumentStack:Array<Array<Expr>>;
+	public var macroDepth:Int;
+	public inline function new(curfun:CurrentFun, functionMode:FunctionMode, ret:T, opened:Array<TAnon>, monomorphs:Array<{mono:TMono,pos:Pos}>, inLoop:Bool, bypassAccessor:Int, withTypeStack:Array<Dynamic>, callArgumentStack:Array<Array<Expr>>, macroDepth:Int) { this.curfun = curfun; this.functionMode = functionMode; this.ret = ret; this.opened = opened; this.monomorphs = monomorphs; this.inLoop = inLoop; this.bypassAccessor = bypassAccessor; this.withTypeStack = withTypeStack; this.callArgumentStack = callArgumentStack; this.macroDepth = macroDepth; }
+	public inline function clone():TyperExpr return new TyperExpr(curfun, functionMode, ret, opened, monomorphs, inLoop, bypassAccessor, withTypeStack, callArgumentStack, macroDepth);
 }
-typedef Typer = {
-	var com:context.Common.CommonContext;
-	var t:BasicTypes;
-	var g:TyperGlobals;
-	var m:TyperModule;
-	var c:TyperClass;
-	var f:TyperField;
-	var e:TyperExpr;
-	var pass:TyperPass;
-	var typeParams:TypeParams;
-	var allowInline:Bool;
-	var allowTransform:Bool;
-	var memoryMarker:Array<Float>;
+@:structInit class TyperField {
+	public var curfield:TClassField;
+	public var locals:PersistentMap<String,TVar>;
+	public var vthis:Null<TVar>;
+	public var isUntyped:Bool;
+	public var meta:Metadata;
+	public var inDisplay:Bool;
+	public var inCallArgs:Bool;
+	public inline function new(curfield:TClassField, locals:PersistentMap<String,TVar>, vthis:Null<TVar>, isUntyped:Bool, meta:Metadata, inDisplay:Bool, inCallArgs:Bool) { this.curfield = curfield; this.locals = locals; this.vthis = vthis; this.isUntyped = isUntyped; this.meta = meta; this.inDisplay = inDisplay; this.inCallArgs = inCallArgs; }
+	public inline function clone():TyperField return new TyperField(curfield, locals, vthis, isUntyped, meta, inDisplay, inCallArgs);
+}
+@:structInit class Typer {
+	public var com:context.Common.CommonContext;
+	public var t:BasicTypes;
+	public var g:TyperGlobals;
+	public var m:TyperModule;
+	public var c:TyperClass;
+	public var f:TyperField;
+	public var e:TyperExpr;
+	public var pass:TyperPass;
+	public var typeParams:TypeParams;
+	public var allowInline:Bool;
+	public var allowTransform:Bool;
+	public var memoryMarker:Array<Float>;
+	public inline function new(com:context.Common.CommonContext, t:BasicTypes, g:TyperGlobals, m:TyperModule, c:TyperClass, f:TyperField, e:TyperExpr, pass:TyperPass, typeParams:TypeParams, allowInline:Bool, allowTransform:Bool, memoryMarker:Array<Float>) { this.com = com; this.t = t; this.g = g; this.m = m; this.c = c; this.f = f; this.e = e; this.pass = pass; this.typeParams = typeParams; this.allowInline = allowInline; this.allowTransform = allowTransform; this.memoryMarker = memoryMarker; }
+	public inline function clone():Typer return new Typer(com, t, g, m, c, f, e, pass, typeParams, allowInline, allowTransform, memoryMarker);
 }
 enum FieldHost { FHStatic(cls:TClass); FHInstance(cls:TClass,params:TParams); FHAbstract(abs:TAbstract,params:TParams,cls:TClass); FHAnon; }
-typedef FieldAccess = {
-	var faOn:TExpr;
-	var faField:TClassField;
-	var faHost:FieldHost;
-	var faInline:Bool;
-	var faPos:Pos;
-	var faFieldPos:Null<Pos>;
+@:structInit class FieldAccess {
+	public var faOn:TExpr;
+	public var faField:TClassField;
+	public var faHost:FieldHost;
+	public var faInline:Bool;
+	public var faPos:Pos;
+	public var faFieldPos:Null<Pos>;
+	public inline function new(faOn:TExpr, faField:TClassField, faHost:FieldHost, faInline:Bool, faPos:Pos, faFieldPos:Null<Pos>) { this.faOn = faOn; this.faField = faField; this.faHost = faHost; this.faInline = faInline; this.faPos = faPos; this.faFieldPos = faFieldPos; }
+	public inline function clone():FieldAccess return new FieldAccess(faOn, faField, faHost, faInline, faPos, faFieldPos);
 }
-typedef StaticExtensionAccess = { var seThis:TExpr; var seAccess:FieldAccess; }
+@:structInit class StaticExtensionAccess {
+	public var seThis:TExpr;
+	public var seAccess:FieldAccess;
+	public inline function new(seThis:TExpr, seAccess:FieldAccess) { this.seThis = seThis; this.seAccess = seAccess; }
+	public inline function clone():StaticExtensionAccess return new StaticExtensionAccess(seThis, seAccess);
+}
 enum DotPathPartCase { PUppercase; PLowercase; }
-typedef DotPathPart = { var name:String; var caseKind:DotPathPartCase; var pos:Pos; }
+@:structInit class DotPathPart {
+	public var name:String;
+	public var caseKind:DotPathPartCase;
+	public var pos:Pos;
+	public inline function new(name:String, caseKind:DotPathPartCase, pos:Pos) { this.name = name; this.caseKind = caseKind; this.pos = pos; }
+	public inline function clone():DotPathPart return new DotPathPart(name, caseKind, pos);
+}
 class ForbidPackage extends haxe.Exception {
 	public final forbidden:{name:String,path:GlobalTypePath,pos:Pos};
 	public final positions:Array<Pos>;
