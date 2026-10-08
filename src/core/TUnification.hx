@@ -172,7 +172,7 @@ class TUnification {
  // These reference cells are initialized below, as in upstream's trailing assignments.
  public static var unifyRef:UnificationContext->T->T->Void=unifyCustom;
  public static var unifyMinRef:UnificationContext->T->Array<T>->UnifyMinResult=UnifyMinT.unifyMin;
- public static function newRecStack<A>():RecStack<A> return [];
+ public static inline function newRecStack<A>():RecStack<A> return [];
  public static function defaultUnificationContext():UnificationContext return {
   allowTransitiveCast:true,allowAbstractCast:true,allowDynamicToCast:true,allowArgNameMismatch:true,allowOptionalMismatch:true,
   equalityKind:EqStrict,equalityUnderlying:false,strictFieldKind:false,opaqueFieldParams:false,allowFinalInvariance:false,
@@ -181,7 +181,6 @@ class TUnification {
  };
  public static var nativeUnificationContext:UnificationContext=makeNativeContext();
  static function makeNativeContext():UnificationContext {var c=defaultUnificationContext();c.allowTransitiveCast=false;c.allowAbstractCast=false;c.allowDynamicToCast=false;c.allowFinalInvariance=true;c.nullFollowMode=FollowIfNullable;return c;}
- public static function updated(c:UnificationContext,changes:Dynamic):UnificationContext {var result:UnificationContext=cast core.ds.Record.copy(c);for(n in Reflect.fields(changes)) Reflect.setField(result,n,Reflect.field(changes,n));return result;}
  static function pair(a:T,b:T):TypePair return {a:a,b:b};
  static function pathIs(p:Dynamic,pack:String,name:String):Bool return p.pack.join(".")==pack && p.name==name;
  static function pathEq(a:Dynamic,b:Dynamic):Bool return a.name==b.name && a.pack.join(".")==b.pack.join(".");
@@ -349,7 +348,7 @@ class TUnification {
   var i=0;List.iter2(function(t1,t2) {i++;try {typeEqCustom(c,t1,t2);} catch(e:Unify_error) {error([cannotUnify(a,b),InvariantParameter(i)].concat(e.errors));}},tl1,tl2);
  }
  public static function typeIseqCustom(c:UnificationContext,a:T,b:T):Bool {try {typeEqCustom(c,a,b);return true;} catch(_:Unify_error) {return false;}}
- public static function typeIseqStrict(a:T,b:T):Bool return typeIseqCustom(updated(defaultUnificationContext(),{equalityKind:EqStricter}),a,b);
+ public static function typeIseqStrict(a:T,b:T):Bool return typeIseqCustom(core.ds.Record.withFields(defaultUnificationContext(),{equalityKind:EqStricter}),a,b);
  public static function printStacks(c:UnificationContext):Void {
   var ctx=printContext(),st=function(t) return sType(ctx,t);
   Sys.println("unify_stack");for(p in c.unifyStack) Sys.println("\t"+st(p.a)+" , "+st(p.b));
@@ -380,7 +379,7 @@ class TUnification {
    case [_,TAbstract(ab,_)] if(pathIs(ab.aPath,"","Void")):error([cannotUnify(a,b)]);
    case [TAbstract(ab,[]),_] if(pathIs(ab.aPath,"haxe","NotVoid")):
    case [_,TAbstract(ab,[])] if(pathIs(ab.aPath,"haxe","NotVoid")):
-   case [TAbstract(ab,tl),TAbstract(target,_)] if(target.aPath.pack.join(".")=="haxe" && ["FlatEnum","Function","Constructible"].indexOf(target.aPath.name)>=0):unifyTo(updated(c,{allowTransitiveCast:false}),a,b,ab,tl);
+   case [TAbstract(ab,tl),TAbstract(target,_)] if(target.aPath.pack.join(".")=="haxe" && ["FlatEnum","Function","Constructible"].indexOf(target.aPath.name)>=0):unifyTo(core.ds.Record.withFields(c,{allowTransitiveCast:false}),a,b,ab,tl);
    case [TAbstract(a1,tl1),TAbstract(a2,tl2)]:unifyAbstracts(c,a,b,a1,tl1,a2,tl2);
    case [TInst({clKind:KTypeParameter(p1)},tl1),TInst({clKind:KTypeParameter(p2)},tl2)] if(c.typeParamMode!=TpDefault):assignTypeParams(c,p1,p2);unifyTypeParams(c,a,b,tl1,tl2);
    case [TInst(c1,tl1),TInst(c2,tl2)]:
@@ -464,7 +463,7 @@ class TUnification {
    case [TDynamic(null),_]:if(!c.allowDynamicToCast) switch b {case TDynamic(null):case _:error([cannotUnify(a,b)]);}
    case [TDynamic(t1),_] if(t1!=null):switch b {
     case TDynamic(null):
-    case TDynamic(t2):if(t2!=t1) try {typeEqCustom(updated(c,{equalityKind:EqRightDynamic}),t1,t2);} catch(e:Unify_error) {error([cannotUnify(a,b)].concat(e.errors));}
+    case TDynamic(t2):if(t2!=t1) try {typeEqCustom(core.ds.Record.withFields(c,{equalityKind:EqRightDynamic}),t1,t2);} catch(e:Unify_error) {error([cannotUnify(a,b)].concat(e.errors));}
     case TAbstract(bb,tl):unifyFrom(c,a,b,bb,tl);
     case _:error([cannotUnify(a,b)]);
    }
@@ -508,12 +507,12 @@ class TUnification {
  public static function doesFuncUnifyArg<A>(f:A->Void,arg:A):Bool {try {f(arg);return true;} catch(_:Unify_error) {return false;}}
  public static function getAbstractContext(c:UnificationContext,a:T,b:T,ab:TAbstract):UnificationContext {
   if(MetadataTools.has(CoreType,ab.aMeta)||MetadataTools.has(Transitive,ab.aMeta)) return c;
-  if(c.allowAbstractCast) return updated(c,{allowAbstractCast:false});
+  if(c.allowAbstractCast) return core.ds.Record.withFields(c,{allowAbstractCast:false});
   return error([cannotUnify(a,b)]);
  }
- public static function getNestedContext(c:UnificationContext):UnificationContext return updated(c,{allowAbstractCast:true});
- public static function unifiesWithAbstract(c:UnificationContext,a:T,b:T,f:UnificationContext->Bool):Bool return recStackDefault(c.abstractCastStack,pair(a,b),function(p) return fastEqPair(pair(a,b),p),function() return (c.allowTransitiveCast && f(updated(c,{allowTransitiveCast:false}))) || f(c),false);
- public static function getAbstractUnifyFunc(c:UnificationContext,kind:EqKind):T->T->Void return c.allowTransitiveCast ? function(a,b) unifyCustom(c,a,b) : function(a,b) typeEqCustom(updated(c,{equalityKind:kind}),a,b);
+ public static function getNestedContext(c:UnificationContext):UnificationContext return core.ds.Record.withFields(c,{allowAbstractCast:true});
+ public static function unifiesWithAbstract(c:UnificationContext,a:T,b:T,f:UnificationContext->Bool):Bool return recStackDefault(c.abstractCastStack,pair(a,b),function(p) return fastEqPair(pair(a,b),p),function() return (c.allowTransitiveCast && f(core.ds.Record.withFields(c,{allowTransitiveCast:false}))) || f(c),false);
+ public static function getAbstractUnifyFunc(c:UnificationContext,kind:EqKind):T->T->Void return c.allowTransitiveCast ? function(a,b) unifyCustom(c,a,b) : function(a,b) typeEqCustom(core.ds.Record.withFields(c,{equalityKind:kind}),a,b);
  public static function unifyAbstracts(c:UnificationContext,a:T,b:T,a1:TAbstract,tl1:Array<T>,a2:TAbstract,tl2:Array<T>):Void {if(!unifiesAbstracts(c,a,b,a1,tl1,a2,tl2)) error([cannotUnify(a,b)]);}
  public static function unifyFrom(c:UnificationContext,a:T,b:T,ab:TAbstract,tl:Array<T>):Void {if(!unifiesFrom(c,a,b,ab,tl)) error([cannotUnify(a,b)]);}
  public static function unifyTo(c:UnificationContext,a:T,b:T,ab:TAbstract,tl:Array<T>):Void {if(!unifiesTo(c,a,b,ab,tl)) error([cannotUnify(a,b)]);}
@@ -540,7 +539,7 @@ class TUnification {
     if(!c.opaqueFieldParams) {var monos=Monomorph.spawnConstrainedMonos(baseMap,cf.cfParams);map=function(t) return baseMap(applyParams(cf.cfParams,monos,t));}
     var c=getAbstractContext(c,a,b,ab),f=getAbstractUnifyFunc(c,EqStrict),athis=map(ab.aThis);
     if(MetadataTools.has(MultiType,ab.aMeta)&&hasMono(athis)) throw new Unify_error([]);
-    withVariance(c,function(a,b) typeEqCustom(updated(c,{equalityKind:EqStrict}),a,b),athis,map(ta));f(map(entry.type),b);
+    withVariance(c,function(a,b) typeEqCustom(core.ds.Record.withFields(c,{equalityKind:EqStrict}),a,b),athis,map(ta));f(map(entry.type),b);
    case _:Globals.die("","tUnification.ml");
   }
  });
@@ -552,7 +551,7 @@ class TUnification {
   function unifyTls(tl1:Array<T>,tl2:Array<T>):Void List.iter2(unifyNested,tl1,tl2);
   function thisType(ab:TAbstract,tl:Array<T>):T return followWithoutType(applyParams(ab.aParams,tl,ab.aThis));
   function definedType(td:TDef,tl:Array<T>):T return followWithoutType(applyTypedef(td,tl));
-  function compareUnderlying():Void typeEqCustom(updated(c,{equalityUnderlying:true,equalityKind:EqBothDynamic}),t1,t2);
+  function compareUnderlying():Void typeEqCustom(core.ds.Record.withFields(c,{equalityUnderlying:true,equalityKind:EqBothDynamic}),t1,t2);
   function unifiesAbstract(c:UnificationContext,a:T,b:T,ab:TAbstract,tl:Array<T>,ats:Array<T>):Bool {
    try {
     var c=getAbstractContext(c,a,b,ab);
@@ -580,7 +579,7 @@ class TUnification {
  }
  public static function unifyTypeParams(c:UnificationContext,a:T,b:T,tl1:Array<T>,tl2:Array<T>):Void {
   var c=getNestedContext(c),i=0;
-  List.iter2(function(t1,t2) {i++;try {withVariance(c,function(a,b) typeEqCustom(updated(c,{equalityKind:EqRightDynamic}),a,b),t1,t2);} catch(e:Unify_error) {error([cannotUnify(a,b),InvariantParameter(i)].concat(e.errors));}},tl1,tl2);
+  List.iter2(function(t1,t2) {i++;try {withVariance(c,function(a,b) typeEqCustom(core.ds.Record.withFields(c,{equalityKind:EqRightDynamic}),a,b),t1,t2);} catch(e:Unify_error) {error([cannotUnify(a,b),InvariantParameter(i)].concat(e.errors));}},tl1,tl2);
  }
  public static function withVariance(c:UnificationContext,f:T->T->Void,t1:T,t2:T):Void {
   try {f(t1,t2);} catch(first:Unify_error) {try {unifyWithVariance(c,f,t1,t2);} catch(_:Unify_error) {throw first;}}
@@ -593,12 +592,12 @@ class TUnification {
     var final1=hasClassFieldFlag(f1,CfFinal),final2=hasClassFieldFlag(f2,CfFinal);
     if(final1!=final2 && !c.allowFinalInvariance) throw new Unify_error([CannotUnify(f2.cfType,f1.cfType),FinalInvariance(final2,final1)]);
     unifyCustom(c,t1,f2.cfType);
-   case _:withVariance(c,function(a,b) typeEqCustom(updated(c,{equalityKind:EqBothDynamic}),a,b),t1,f2.cfType);
+   case _:withVariance(c,function(a,b) typeEqCustom(core.ds.Record.withFields(c,{equalityKind:EqBothDynamic}),a,b),t1,f2.cfType);
   }
  }
  public static function doesUnify(a:T,b:T):Bool return doesFuncUnify(function() unifyCustom(defaultUnificationContext(),a,b));
  public static function unify(a:T,b:T):Void unifyCustom(defaultUnificationContext(),a,b);
- public static function typeEq(kind:EqKind,a:T,b:T):Void typeEqCustom(updated(defaultUnificationContext(),{equalityKind:kind}),a,b);
+ public static function typeEq(kind:EqKind,a:T,b:T):Void typeEqCustom(core.ds.Record.withFields(defaultUnificationContext(),{equalityKind:kind}),a,b);
  public static function typeIseq(a:T,b:T):Bool return typeIseqCustom(defaultUnificationContext(),a,b);
  public static function initHooks():Void TFunctions.monomorphClassifyConstraintsRef=Monomorph.classifyDownConstraints;
  static function __init__():Void initHooks();

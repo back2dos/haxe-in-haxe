@@ -18,8 +18,10 @@ class Exception {
 	@:noCompletion var __customStack:Null<String>;
 
 	static function caught(value:Any):Exception {
-		if(Std.isOfType(value, Exception)) {
-			return value;
+		// Std.downcast is a single type check; Std.isOfType goes through a Dynamic class
+		var e:Null<Exception> = Std.downcast(cast value, Exception);
+		if(e != null) {
+			return e;
 		} else {
 			var e = new ValueException(value, null, value);
 			// Undo automatic __shiftStack()
@@ -30,8 +32,9 @@ class Exception {
 
 	static function thrown(value:Any):Any {
 		var result:Any;
-		if(Std.isOfType(value, Exception)) {
-			result = (value:Exception).native;
+		var ex:Null<Exception> = Std.downcast(cast value, Exception);
+		if(ex != null) {
+			result = ex.native;
 		} else {
 			var e = new ValueException(value);
 			e.__shiftStack();

@@ -6,11 +6,13 @@ class Key {
   if(a==b) return 0;
   if(a==null) return -1;if(b==null) return 1;
   // Fast paths for the common scalar keys; same result as Reflect.compare.
-  if((a is String) && (b is String)) return (a:String) > (b:String) ? 1 : -1;
+  // Std.downcast is a direct type check (Std.isOfType goes through a Dynamic class on HashLink)
+  var sa:Null<String>=Std.downcast(a,String);
+  if(sa!=null) {var sb:Null<String>=Std.downcast(b,String);if(sb!=null) return sa > sb ? 1 : -1;}
   if((a is Int) && (b is Int)) return (a:Int) > (b:Int) ? 1 : -1;
   // Type paths compare like the {name, pack} record they replace (fields in name order).
-  if((a is core.Globals.GlobalTypePath) && (b is core.Globals.GlobalTypePath)) {
-   var pa:core.Globals.GlobalTypePath=a,pb:core.Globals.GlobalTypePath=b;
+  var pa:Null<core.Globals.GlobalTypePath>=Std.downcast(a,core.Globals.GlobalTypePath),pb:Null<core.Globals.GlobalTypePath>=pa==null ? null : Std.downcast(b,core.Globals.GlobalTypePath);
+  if(pb!=null) {
    var c=compare(pa.name,pb.name);
    return c!=0 ? c : compare(pa.pack,pb.pack);
   }
@@ -33,15 +35,18 @@ class Key {
   linear scan with `compare`.
  **/
  public static function canonical(value:Dynamic):Null<String> {
-  if(value is String) return "s" + (value:String);
+  var s0:Null<String>=Std.downcast(value,String);
+  if(s0!=null) return "s" + s0;
   var buf=new StringBuf(),budget=64;
   function visit(v:Dynamic):Bool {
    if(--budget<0) return false;
    if(v==null) {buf.add("n");return true;}
-   if(v is String) {var s:String=v;buf.add("s");buf.add(s.length);buf.add(":");buf.add(s);return true;}
+   var s:Null<String>=Std.downcast(v,String);
+   if(s!=null) {buf.add("s");buf.add(s.length);buf.add(":");buf.add(s);return true;}
    if(v is Int) {buf.add("i");buf.add((v:Int));buf.add(";");return true;}
    if(Std.isOfType(v,Array)) {var a:Array<Dynamic>=v;buf.add("a");buf.add(a.length);buf.add("[");for(x in a) if(!visit(x)) return false;return true;}
-   if(v is core.Globals.GlobalTypePath) {var tp:core.Globals.GlobalTypePath=v;buf.add("o24:name");if(!visit(tp.name)) return false;buf.add("4:pack");return visit(tp.pack);}
+   var tp:Null<core.Globals.GlobalTypePath>=Std.downcast(v,core.Globals.GlobalTypePath);
+   if(tp!=null) {buf.add("o24:name");if(!visit(tp.name)) return false;buf.add("4:pack");return visit(tp.pack);}
    return switch StdType.typeof(v) {
     case TBool:buf.add((v:Bool) ? "T" : "F");true;
     case TEnum(_):

@@ -15,35 +15,42 @@ CPP_FLAGS="-D HXCPP_SINGLE_THREAD_MARK" sh bench/build.sh cpp
 HAXE_HLC=/path/to/patched/haxe HL_INCLUDE=/path/to/hashlink/src sh bench/build.sh hlc
 # with bench/libhl-allocator.patch applied to HashLink (built with -ftls-model=initial-exec):
 HL_STATIC="libhl.a fmt.o dxt.o sha1.o" sh bench/build.sh hlc   # static link
-HAXE_REFERENCE=haxe/haxe python3 bench/run.py -n 5
+# the HashLink JIT loads libhl.so: point it at the patched build
+LD_LIBRARY_PATH=/path/to/patched/hashlink HAXE_REFERENCE=haxe/haxe python3 bench/run.py -n 7
 ```
 
-## Results — 2026-10-08 (fourth round)
+## Results — 2026-10-08 (fifth round)
 
-4-core Linux container. Median of 5 runs, in seconds. HashLink runs use the
-patched libhl (`libhl-allocator.patch`); HL/C links it statically. C++ uses
-hxcpp git `cd5dc3b` with `hxcpp-single-thread-mark.patch`.
+4-core Linux container. Median of 7 runs, in seconds. Both HashLink runners
+use the patched libhl (`libhl-allocator.patch`): HL/C links it statically,
+the JIT loads it through `LD_LIBRARY_PATH`. (Earlier rounds' JIT numbers
+used the stock libhl.) C++ uses hxcpp git `cd5dc3b` with
+`hxcpp-single-thread-mark.patch`.
 
-| Runner | hello | trycatch | stdlib | vs. reference (stdlib) | stdlib, third round |
+| Runner | hello | trycatch | stdlib | vs. reference (stdlib) | stdlib, fourth round |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| reference (native OCaml) | 0.12 | 0.12 | 0.23 | 1× | 0.23 |
-| HL/C (HashLink compiled to C) | 0.23 | 0.23 | 0.53 | 2.3× | 0.49 |
-| C++ (hxcpp) | 0.45 | 0.45 | 1.02 | 4.4× | (crashed) |
-| HashLink (JIT) | 0.66 | 0.66 | 1.12 | 4.9× | 0.94 |
-| JS (Node 22) | 1.22 | 1.22 | 2.16 | 9× | 2.05 |
-| JVM (OpenJDK 21) | 2.11 | 2.07 | 3.13 | 14× | 2.79 |
+| reference (native OCaml) | 0.13 | 0.12 | 0.24 | 1× | 0.23 |
+| HL/C (HashLink compiled to C) | 0.17 | 0.17 | 0.37 | 1.5× | 0.53 |
+| C++ (hxcpp) | 0.43 | 0.43 | 0.96 | 4× | 1.02 |
+| HashLink (JIT) | 0.59 | 0.66 | 1.04 | 4.3× | 1.12 |
+| JS (Node 22) | 1.25 | 1.23 | 2.11 | 9× | 2.16 |
+| JVM (OpenJDK 21) | 2.01 | 1.94 | 2.96 | 12× | 3.13 |
 
-HL, JS and JVM read 5–15% slower than in the third round although nothing
-in this round should slow them down and the reference's own times barely
-moved; this round's runs weren't repeated, so that difference isn't
-explained.
+The JIT's runs vary a lot (0.85–1.35s on `stdlib`).
 
-Instruction counts (callgrind, stdlib): the reference executes 1.10G
-instructions, HL/C 2.66G. Roughly half of the remaining difference is
-allocation and GC (OCaml's minor-heap allocation is a pointer bump), about a
-third is the program code itself (about 1.9× OCaml's), and the rest is dynamic
-casts and structural-type conversions. C++ executes 5.36G: about a third of
-that is C++ exception unwinding in libgcc (see the C++ note below).
+Instruction counts (callgrind, stdlib): the reference executes 1.10G, HL/C
+2.38G (2.61G before this round). Of HL/C's instructions, 38% are
+allocation and GC: about 9.2M allocations at roughly 30–55 instructions
+each (OCaml's minor-heap allocation is an inline pointer bump), plus a
+non-generational major collection. 24% are
+runtime type checks, dynamic casts and closure/enum/array allocation in
+libhl, 10% libc (mostly zeroing), and 25% the compiled program itself. C++
+executes 5.36G: about a third of that is C++ exception unwinding in libgcc
+(see the C++ note below).
+
+Memory for speed: with the default `HAXE_IN_HAXE_GC_FACTOR=1` HL/C peaks at
+141 MB on `stdlib` (the reference: 52 MB). A factor of 2 skips the one
+major collection for about 10% more speed at 216 MB.
 
 Every build above passes the full conformance suite (282 cases) through
 `HAXE_IN_HAXE_PORT`.
@@ -112,6 +119,25 @@ In rough order of impact:
    its 62-argument constructor exceeds the HashLink JIT's argument limit.
    `Record.copyDynamic` clones any record class reflectively. Also made
    the JVM build (genjvm) take seconds instead of minutes.
+
+9. **Allocator, fifth round** (`libhl-allocator.patch`). New pages come
+   zeroed from `mmap`, so neither the page nor slices carved from untouched
+   blocks are cleared again (a per-page `zero_from` mark tracks this).
+   Slices are 8 KB instead of 2 KB. Pages are carved from 2 MB-aligned
+   32 MB chunks marked `MADV_HUGEPAGE`, which cuts page faults on `hello`
+   from 21k to 1.3k. The global GC lock skips its `setjmp` context save when
+   the lock is uncontended (the collecting thread saves its own context in
+   `gc_stop_world`). The lazy sweep scans the mark bitmap 64 bits at a time.
+   `hl_alloc_obj` bumps the thread's slice directly. Together: `stdlib`
+   0.53s → 0.37s on HL/C.
+10. **Fewer dynamic checks** (fifth round). On HashLink `Std.isOfType` casts
+   its class argument from `Dynamic` before checking, about 200
+   instructions per call; `haxe.Exception.caught`/`thrown`, `Key` and
+   `Meta` use `Std.downcast` instead, a direct type check.
+   `newRecStack` is inline, so each unification context no longer converts
+   five arrays from `Array<Dynamic>`. `TUnification.updated` (a copy plus
+   reflective field sets) became `Record.withFields`, which sets the
+   fields statically.
 
 Where the time went after the first round (HL/C, callgrind): libhl allocation and GC were about
 45% of the run. libhl takes a global lock and a TLS lookup on every
