@@ -2,10 +2,14 @@ package core;
 
 // Port of the foundational definitions in haxe/src/core/globals.ml.
 
-typedef Pos = {
-	var pfile:String;
-	var pmin:Int;
-	var pmax:Int;
+// A class rather than a structure so static targets access fields directly;
+// @:structInit keeps `{pfile:..., pmin:..., pmax:...}` literals working.
+@:structInit class Pos {
+	public var pfile:String;
+	public var pmin:Int;
+	public var pmax:Int;
+	public inline function new(pfile:String, pmin:Int, pmax:Int) { this.pfile = pfile; this.pmin = pmin; this.pmax = pmax; }
+	public inline function clone():Pos return new Pos(pfile, pmin, pmax);
 }
 
 typedef GlobalTypePath = {

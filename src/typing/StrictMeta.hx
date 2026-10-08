@@ -66,10 +66,10 @@ class StrictMeta {
    case t1: var e = typeExpr(ctx,eHave,WithTypeTools.withType(t1)); unify(ctx,e.etype,t1,e.epos); e;
   };
  }
- public static function handleFields(ctx:TyperContext,fields:Array<ObjectField>,withTypeExpr:Expr):Array<Expr> return fields.map(function(f) {
+ public static function handleFields(ctx:TyperContext,fields:Array<ObjectField>,withTypeExpr:Expr):Array<Expr> return fields.map(function(f):Expr {
   var expr=f.expr, pos=expr.pos;
-  var field={expr:efield(withTypeExpr,f.key.name),pos:pos};
-  var fieldexpr={expr:EConst(Ident(f.key.name)),pos:pos};
+  var field:core.Ast.Expr = {expr:efield(withTypeExpr,f.key.name),pos:pos};
+  var fieldexpr:core.Ast.Expr = {expr:EConst(Ident(f.key.name)),pos:pos};
   var left=typeExpr(ctx,{expr:ECall(field,[]),pos:pos},NoValue);
   var right=kindOfTypeAgainst(ctx,left.etype,expr);
   return {expr:EBinop(OpAssign,fieldexpr,processMetaArgument(ctx,right)),pos:pos};
@@ -112,7 +112,7 @@ class StrictMeta {
   var t=Typeload.loadComplexType(ctx,false,LoadNormal,{type:ctype,pos:pos});
   flushPass(ctx.g,PBuildClass,"get_strict_meta");
   var texpr=typeExpr(ctx,changedExpr,NoValue);
-  var withTypeExpr={expr:ECheckType({expr:EConst(Ident("null")),pos:pos},{type:ctype,pos:Globals.nullPos}),pos:pos};
+  var withTypeExpr:core.Ast.Expr = {expr:ECheckType({expr:EConst(Ident("null")),pos:pos},{type:ctype,pos:Globals.nullPos}),pos:pos};
   var args=[makeMeta(ctx,texpr,handleFields(ctx,fields,withTypeExpr))];
   switch t {case TInst(c,_): var v=getMetaString(c.clMeta,MetaTag.Annotation); args.push({expr:EConst(String(v==null?"CLASS":v,SDoubleQuotes)),pos:pos}); case _:}
   return {meta:meta,exprs:args,pos:pos};

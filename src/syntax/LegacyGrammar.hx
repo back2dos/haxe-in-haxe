@@ -39,7 +39,7 @@ class LegacyGrammar {
   case EParenthesis(e1):{expr:EParenthesis(validateMacroCond(ctx,s,e1)),pos:e.pos};
   case EField(e1,name,kind):{expr:EField(validateMacroCond(ctx,s,e1),name,kind),pos:e.pos};
   case ECall({expr:EConst(Ident(_))},args):switch e.expr {case ECall(callee,_):{expr:ECall(callee,args.map(function(arg)return validateMacroCond(ctx,s,arg))),pos:e.pos};case _:throw "unreachable";}
-  case _:Parser.syntaxError(ctx,Custom("Invalid conditional expression"),s,{expr:EConst(Ident("false")),pos:e.pos},e.pos);
+  case _:Parser.syntaxError(ctx,Custom("Invalid conditional expression"),s,({expr:EConst(Ident("false")),pos:e.pos}:Expr),e.pos);
  };
  public static function parseMacroCond(ctx:ParserContext,s:Stream<LexedToken>):{token:Null<ParserToken>,expr:Expr} {
   var token=s.next();
@@ -126,7 +126,7 @@ class LegacyGrammar {
 			var flags:Array<TypedefFlag>=[]; if(hasAccess(accesses,AExtern)) flags.push(TDExtern); if(hasAccess(accesses,APrivate)) flags.push(TDPrivate);
 			// grammar.ml consumes an optional semicolon but excludes it from the
 			// declaration range.
-			var declarationEnd = end == null ? data.pos : {pfile:end.pos.pfile, pmin:end.pos.pmin, pmax:end.pos.pmin};
+			var declarationEnd:Pos = end == null ? data.pos : {pfile:end.pos.pfile, pmin:end.pos.pmin, pmax:end.pos.pmin};
 			return decl(ETypedef({name:name,doc:doc,params:params,meta:meta,flags:flags,data:data}),union(start,declarationEnd));
 		}
 		if (acceptKwd(Abstract) != null) {

@@ -17,7 +17,7 @@ class SafeFilters {
 					var body = loop(ExtType.isVoid(TypeOps.follow(fn.tfType)), fn.tfExpr);
 					{eexpr:TFunction({tfArgs:fn.tfArgs, tfType:fn.tfType, tfExpr:body}), etype:e.etype, epos:e.epos};
 				case TReturn(returnExpr) if (returnExpr != null && returnIsVoid && TypeOps.tDynamic == TypeOps.follow(returnExpr.etype)):
-					var p = {pfile:e.epos.pfile, pmin:e.epos.pmin, pmax:returnExpr.epos.pmin - 1};
+					var p:core.Globals.Pos = {pfile:e.epos.pfile, pmin:e.epos.pmin, pmax:returnExpr.epos.pmin - 1};
 					var exprs:Array<TExpr> = [loop(returnIsVoid, returnExpr), {eexpr:TReturn(null), etype:e.etype, epos:p}];
 					{eexpr:TMeta({meta:core.MetaList.StrictMeta.MergeBlock,exprs:[], pos:Globals.nullPos}, TypeOps.mk(TBlock(exprs), e.etype, e.epos)), etype:e.etype, epos:e.epos};
 				case _: core.Texpr.mapExpr(e -> loop(returnIsVoid, e), e);

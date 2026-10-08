@@ -9,7 +9,7 @@ import core.Globals.Pos;
 class Reification {
  public static function reify(inMacro:Bool):{toExpr:Expr->Expr,toCtype:TypeHint->Pos->Expr,toTypeDef:TypeDecl->Expr} {
   var currentPos:Null<Expr>=null;
-  function en(ename:String,name:String,values:Array<Expr>,p:Pos):Expr {var min={pfile:p.pfile,pmin:p.pmin,pmax:p.pmin};var constructor:Expr={expr:EConst(Ident(name)),pos:min};return values.length==0?constructor:{expr:ECall(constructor,values),pos:min};}
+  function en(ename:String,name:String,values:Array<Expr>,p:Pos):Expr {var min:core.Globals.Pos = {pfile:p.pfile,pmin:p.pmin,pmax:p.pmin};var constructor:Expr={expr:EConst(Ident(name)),pos:min};return values.length==0?constructor:{expr:ECall(constructor,values),pos:min};}
   function rawString(s:String,p:Pos):Expr return {expr:EConst(String(s,SDoubleQuotes)),pos:p};
   function toString(s:String,p:Pos):Expr return s.length>1&&s.charAt(0)=="$"?{expr:EConst(Ident(s.substr(1))),pos:p}:rawString(s,p);
   function placed(n:PlacedName):Expr return toString(n.name,n.pos);

@@ -2859,7 +2859,7 @@ class Grammar {
 			case Const(_) | Kwd(_) | Dollar(_): 1;
 			case _: 0;
 		};
-		var plast = {pfile: plast.pfile, pmin: plast.pmax + offset, pmax: plast.pmax};
+		var plast:core.Globals.Pos = {pfile: plast.pfile, pmin: plast.pmax + offset, pmax: plast.pmax};
 		return Parser.syntaxError(ctx, Expected(["expression"]), s, Parser.mkNullExpr(Parser.punionNext(ctx, plast, s)));
 	}
 

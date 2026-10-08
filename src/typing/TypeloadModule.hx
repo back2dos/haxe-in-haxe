@@ -1342,7 +1342,7 @@ class TypeloadModule {
 		var stdModule = loadModule({pack:[], name:"Std"});
 		var stdClass = switch findModuleType(stdModule, "Std") { case TClassDecl(value): value; case _: throw "Std is not a class"; };
 		var field = stdClass.clStatics.get("string");
-		var zeroPos = {pfile:value.epos.pfile, pmin:value.epos.pmin, pmax:value.epos.pmin};
+		var zeroPos:core.Globals.Pos = {pfile:value.epos.pfile, pmin:value.epos.pmin, pmax:value.epos.pmin};
 		var stdExpr = typed(TTypeExpr(TClassDecl(stdClass)), TDynamic(null), zeroPos);
 		var callee = typed(TField(stdExpr, FStatic(stdClass, field)), field.cfType, zeroPos);
 		return typed(TCall(callee, [value]), basic("String"), value.epos);
@@ -1363,7 +1363,7 @@ class TypeloadModule {
 		var logClass = switch findModuleType(logModule, "Log") { case TClassDecl(value): value; case _: throw "haxe.Log is not a class"; };
 		var traceField = logClass.clStatics.get("trace");
 		if (traceField == null) throw "haxe.Log.trace was not loaded";
-		var logTypePos = {pfile:pos.pfile, pmin:pos.pmin, pmax:pos.pmin + 5};
+		var logTypePos:core.Globals.Pos = {pfile:pos.pfile, pmin:pos.pmin, pmax:pos.pmin + 5};
 		var logType = typed(TTypeExpr(TClassDecl(logClass)), TDynamic(null), logTypePos);
 		var callee = typed(TField(logType, FStatic(logClass, traceField)), traceField.cfType, logTypePos);
 		var stringValue = value;

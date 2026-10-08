@@ -80,7 +80,7 @@ class ModuleTyping {
      var cd:ClassDefinition={name:{name:d.name.name+"_Impl_",pos:d.name.pos},flags:[HPrivate],data:fields,doc:null,params:[],meta:meta},c=makeClass(cd,p);a.aImpl=c;c.clKind=KAbstractImpl(a);addClassFlag(c,CFinal);add({definition:EClass(cd),pos:p},TClassDecl(c));
     }
   }}
-  if(statics.length>0){var first=nullPos,fields=[];for(d in statics){first=d.pos;fields.push(fieldOfStaticDefinition(d.definition,d.pos));}fields.reverse();var p={pfile:first.pfile,pmin:first.pmin,pmax:first.pmin},d:ClassDefinition={name:{name:m.mPath.name+"_Fields_",pos:nullPos},flags:[HPrivate],data:fields,doc:null,params:[],meta:[]},c=makeClass(d,p);if(m.mStatics!=null)throw "Module statics already initialized";m.mStatics=c;c.clKind=KModuleFields(m);addClassFlag(c,CFinal);add({definition:EClass(d),pos:p},TClassDecl(c));}
+  if(statics.length>0){var first=nullPos,fields=[];for(d in statics){first=d.pos;fields.push(fieldOfStaticDefinition(d.definition,d.pos));}fields.reverse();var p:core.Globals.Pos = {pfile:first.pfile,pmin:first.pmin,pmax:first.pmin},d:ClassDefinition={name:{name:m.mPath.name+"_Fields_",pos:nullPos},flags:[HPrivate],data:fields,doc:null,params:[],meta:[]},c=makeClass(d,p);if(m.mStatics!=null)throw "Module statics already initialized";m.mStatics=c;c.clKind=KModuleFields(m);addClassFlag(c,CFinal);add({definition:EClass(d),pos:p},TClassDecl(c));}
   m.mTypes=m.mTypes.concat(types);return {imports:imports,declarations:declarations};
  }
  public static function initTypeParams(ctx:TyperContext,decls:Array<TypedDeclaration>):Void for(entry in decls)switch [entry.declaration.definition,entry.type] {

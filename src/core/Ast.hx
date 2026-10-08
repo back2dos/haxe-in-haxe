@@ -45,7 +45,12 @@ typedef EnumConstructorArg = { var name:String; var optional:Bool; var type:Type
 typedef Import = { var path:Array<PlacedName>; var mode:ImportMode; }
 typedef TypeDecl = { var definition:TypeDef; var pos:Pos; }
 typedef Package = { var pack:Array<String>; var declarations:Array<TypeDecl>; }
-typedef Expr = { var expr:ExprDef; var pos:Pos; }
+@:structInit class Expr {
+	public var expr:ExprDef;
+	public var pos:Pos;
+	public inline function new(expr:ExprDef, pos:Pos) { this.expr = expr; this.pos = pos; }
+	public inline function clone():Expr return new Expr(expr, pos);
+}
 
 enum TypeParamOrConst { TPType(type:TypeHint); TPExpr(expr:Expr); }
 enum ComplexType { CTPath(path:PlacedTypePath); CTFunction(args:Array<TypeHint>, ret:TypeHint); CTAnonymous(fields:Array<ClassField>); CTParent(type:TypeHint); CTExtend(paths:Array<PlacedTypePath>, fields:Array<ClassField>); CTOptional(type:TypeHint); CTNamed(name:PlacedName, type:TypeHint); CTIntersection(types:Array<TypeHint>); }

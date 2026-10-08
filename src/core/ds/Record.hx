@@ -12,6 +12,8 @@ class Record {
 	public static function copy<T>(o:T):T {
 		#if !macro
 		if (o is core.TType.TExpr) return cast (cast o : core.TType.TExpr).clone();
+		if (o is core.Globals.Pos) return cast (cast o : core.Globals.Pos).clone();
+		if (o is core.Ast.Expr) return cast (cast o : core.Ast.Expr).clone();
 		#end
 		return Reflect.copy(o);
 	}

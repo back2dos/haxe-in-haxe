@@ -749,14 +749,14 @@ class Typer {
    else {
     var first=el[0],rest=el.slice(1);
     function toStringMeta(e:Expr):Expr return {expr:EMeta({meta:MetaTag.ToString,exprs:[],pos:Globals.nullPos},e),pos:e.pos};
-    var params=rest.length==0?[]:[{key:{name:"customParams",pos:Globals.nullPos,quote:NoQuotes},expr:{expr:EArrayDecl(rest.map(toStringMeta)),pos:p}}],infos=mkInfos(ctx,p,params);
+    var params:Array<core.Ast.ObjectField>=rest.length==0?[]:[{key:{name:"customParams",pos:Globals.nullPos,quote:NoQuotes},expr:{expr:EArrayDecl(rest.map(toStringMeta)),pos:p}}],infos=mkInfos(ctx,p,params);
     if((platform(ctx.com,Js)||platform(ctx.com,Python))&&rest.length==0&&hasDce(ctx.com)) {
      var value=typeExpr(ctx,first,WithTypeTools.value); if(ExtType.isVoid(follow(value.etype))) raiseTypingError("Cannot use Void as value",value.epos);
      var information=typeExpr(ctx,infos,WithTypeTools.value);
      switch follow(value.etype) {case TAbstract(a,_) if(a.aImpl!=null&&a.aImpl.clStatics.exists("toString")):value=callToString(ctx,value); case _:}
      mk(TCall(mk(TIdent("`trace"),tDynamic,p),[value,information]),ctx.t.tvoid,p);
     } else {
-     var root={expr:EConst(Ident("haxe")),pos:p},log={expr:efield(root,"Log"),pos:p},trace={expr:efield(log,"trace"),pos:p};
+     var root:core.Ast.Expr = {expr:EConst(Ident("haxe")),pos:p},log:core.Ast.Expr={expr:efield(root,"Log"),pos:p},trace:core.Ast.Expr={expr:efield(log,"trace"),pos:p};
      typeExpr(ctx,{expr:ECall(trace,[toStringMeta(first),infos]),pos:p},NoValue);
     }
    }
@@ -808,7 +808,7 @@ class Typer {
     case "i64":
      if(s.length>18&&s.substr(0,2)=="0x") raiseTypingError("Invalid hexadecimal integer",p);
      var value=core.ds.OcamlInt64.ofString(s),high=value.high,low=value.low;
-     var root={expr:EConst(Ident("haxe")),pos:p},int64={expr:efield(root,"Int64"),pos:p},field={expr:efield(int64,"make"),pos:p};
+     var root:core.Ast.Expr = {expr:EConst(Ident("haxe")),pos:p},int64:core.Ast.Expr={expr:efield(root,"Int64"),pos:p},field:core.Ast.Expr={expr:efield(int64,"make"),pos:p};
      typeExpr(ctx,{expr:ECall(field,[{expr:EConst(Int(Std.string(high),null)),pos:p},{expr:EConst(Int(Std.string(low),null)),pos:p}]),pos:p},withType);
     case "u32":typeExpr(ctx,{expr:ECheckType({expr:EConst(Int(s,null)),pos:p},makePtpTh(mkTypePath(["haxe"],"UInt32"),p)),pos:p},withType);
     case other:raiseTypingError(other+" is not a valid integer suffix",p);

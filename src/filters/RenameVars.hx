@@ -172,7 +172,7 @@ class RenameVars {
 	public static function maybeRenameVar(rc:RenameContext, reserved:StringMap<Bool>, entry:{variable:TVar, overlaps:Overlaps}):Void {
 		var v = entry.variable;
 		function commit(name:String):Void {
-			v.vMeta = [{meta:core.MetaList.StrictMeta.RealPath,exprs:[{expr:EConst(String(v.vName, SDoubleQuotes)), pos:Globals.nullPos}], pos:Globals.nullPos}].concat(v.vMeta);
+			v.vMeta = ([{meta:core.MetaList.StrictMeta.RealPath,exprs:[{expr:EConst(String(v.vName, SDoubleQuotes)), pos:Globals.nullPos}], pos:Globals.nullPos}]:core.Ast.Metadata).concat(v.vMeta);
 			v.vName = name;
 		}
 		if (v.vName.charAt(0) == core.Globals.genLocalPrefix.charAt(0)) commit("_g" + trailingNumbers.replace(v.vName.substr(1), ""));
