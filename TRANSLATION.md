@@ -12,7 +12,15 @@ rejects; see `test/TESTING.md`. Since the snapshot below, `hxbWriter.ml`,
 `src/syntax/Lexer.hx`), and the batch entry in `haxe.ml` became
 `src/haxe/Main.hx`. The earlier hand-written versions remain as
 `LegacyGrammar`, `LegacyLexer` and `LegacyMain`, used only by the bootstrap
-unit tests. Macro execution remains the next milestone.
+unit tests.
+
+Status 2026-10-08: macro execution works. `macro/eval/*.ml` and `macroApi.ml`
+are translated in `src/macros/` and `typing/macroContext.ml` in
+`src/typing/MacroContext.hx`. All 66 macro-context conformance cases are
+byte-identical. The debugger (`evalDebug*.ml`), libuv (`evalLuv.ml`) and mbedtls
+(`evalSsl.ml`, except its enum constants) are not ported; see
+`src/macros/PORTING.md`. The table below still lists them as macro-milestone
+candidates.
 
 ## Translation snapshot
 

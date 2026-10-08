@@ -10,7 +10,7 @@ targets=${*:-js hl hlc jvm cpp}
 for t in $targets; do
 	start=$(date +%s)
 	case $t in
-		js) "$HAXE" -cp bench/js-shims -cp src -main haxe.Main -lib hxnodejs --js "$OUT/hih.js" ;;
+		js) "$HAXE" -cp src -main haxe.Main -lib hxnodejs -cp bench/js-shims --js "$OUT/hih.js" ;;
 		hl) "$HAXE" -cp runtime/hl -cp src -main haxe.Main --hl "$OUT/hih.hl" ;;
 		hlc) # needs a compiler with the hl2c fix (HAXE_HLC) and HashLink headers (HL_INCLUDE);
 			# HL_STATIC="libhl.a fmt.o ..." links the (patched) runtime statically

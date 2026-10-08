@@ -2,6 +2,54 @@
 
 Earlier checkpoints are in the Git history of this file.
 
+## Macro milestone: Eval macro runtime — 2026-10-08
+
+The port now runs macros (`--macro`, `@:build`, `macro` functions) in its own
+Eval interpreter (`src/macros/eval/`, a translation of `macro/eval/*.ml`), with
+the Macro API bridge (`src/macros/MacroApi.hx`) and the macro context
+(`src/typing/MacroContext.hx`). See `src/macros/PORTING.md`.
+
+```sh
+HAXE_REFERENCE=haxe/haxe python3 test/conformance.py --cases test/conformance-macro-cases.txt -j 8
+```
+
+| Check | Result |
+| --- | --- |
+| Macro-context cases (`test/conformance-macro-cases.txt`): same member set and byte-identical `.hxb` payloads, including the `macro/` modules | 66/66 |
+| Regular conformance set (`test/conformance-cases.txt`) | 275/275 accepted, 7/7 expected failures |
+
+The macro list holds the 67 cases that `test/discover-cases.py` excludes for
+creating a macro context, minus `eval-Pull11784-compile`, whose hxml sets its
+own `--hxb` output.
+
+**Supported host: HashLink.** Conformance is maintained on the HashLink build
+(`hl`) only. The JS, JVM, C++ and Go builds are no longer kept passing:
+- JS has no string identity. Upstream writes positions with a physical file
+  name comparison (`p.pfile != pw.p_file`), so 10 macro cases differ there.
+- The JVM build fails bytecode verification. Since the AST records became
+  classes, genjvm switches on `Dynamic` values without a cast.
+
+Not supported: mbedtls (TLS) and libuv natives, and the Eval debugger. Code
+reaching them throws "... is not supported by haxe-in-haxe". The mbedtls enum
+constants are registered.
+
+### Porting pitfalls behind the macro fixes
+
+- OCaml's physical equality on strings matters for HXB output. Positions from
+  macros carry freshly decoded file name strings
+  (`core.ds.StrTools.physNeq`).
+- HashLink's `StringMap` truncates keys at NUL, so `"\x00"` and `""` collided
+  in the HXB string pool (`core.ds.StringPool`).
+- In `make e :: loop el tl`, OCaml evaluates the recursive tail first. Enum
+  pattern arguments are therefore typed last to first, and that order decides
+  variable ids (`ExprToPattern`).
+- Upstream iterates immutable field lists. Filters that add fields
+  (`local_statics`) must not see their own additions (`SafeCom`).
+- `t_infos` returns the live record. The port's projection had to be re-read
+  after build macros replaced metadata (`TypeloadFields`).
+- HashLink can't cast optional arguments in function-typed record fields, so
+  compiler API callbacks take explicit `depth` arguments.
+
 ## First milestone: HXB compile without the macro runtime — 2026-10-07
 
 The translated compiler (`haxe.Main`, a port of the batch path in
@@ -93,8 +141,6 @@ for the bootstrap entry point (`haxe.LegacyMain`) and its unit tests.
 
 ### Out of scope for this milestone
 
-- Macro execution (`--macro`, `@:build`, `macro` functions): no Eval macro
-  context or Macro API bridge yet. Cases that create a macro context are
-  excluded and listed.
+- Macro execution: done in the macro milestone above.
 - Multi-part builds (`--next`/`--each`), haxelib, display/server, and
   HXB-library input in the port.
