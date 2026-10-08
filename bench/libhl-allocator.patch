@@ -175,7 +175,7 @@ index f332cf5..1844c29 100644
  	gc_freelist free;
  	unsigned char *sizes;
 diff --git a/src/gc.c b/src/gc.c
-index d338518..e75e1e8 100644
+index d338518..57f4239 100644
 --- a/src/gc.c
 +++ b/src/gc.c
 @@ -191,6 +191,16 @@ static gc_pheader *gc_alloc_page( int size, int kind, int block_count );
@@ -389,10 +389,35 @@ index d338518..e75e1e8 100644
  		MZERO(ptr,allocated);
  	else if( MEM_HAS_PTR(flags) && allocated != size )
  		MZERO((char*)ptr+size,allocated-size); // erase possible pointers after data
-@@ -1378,6 +1486,31 @@ static void *gc_alloc_page_memory( int size ) {
+@@ -1350,6 +1458,10 @@ struct _pextra {
+ 	pextra *next;
+ };
+ static pextra *extra_pages = NULL;
++typedef struct _page_cache { struct _page_cache *next; int size; } page_cache;
++static page_cache *page_cache_list = NULL;
++static int64 page_cache_bytes = 0;
++#define PAGE_CACHE_MAX ((int64)512 << 20)
+ #define EXTRA_SIZE (GC_PAGE_SIZE + (4<<10))
+ #endif
+ 
+@@ -1378,6 +1490,45 @@ static void *gc_alloc_page_memory( int size ) {
  #elif defined(HL_EMSCRIPTEN)
  	return emscripten_builtin_memalign(GC_PAGE_SIZE, size);
  #else
++	{
++		// Reuse a page freed by an earlier sweep (see gc_free_page_memory).
++		page_cache *c = page_cache_list, *prev = NULL;
++		while( c ) {
++			if( c->size == size ) {
++				if( prev ) prev->next = c->next; else page_cache_list = c->next;
++				page_cache_bytes -= size;
++				memset(c, 0, size);
++				return c;
++			}
++			prev = c;
++			c = c->next;
++		}
++	}
 +#	ifdef GC_HUGE_CHUNKS
 +	// Carve pages out of 2MB-aligned chunks, marked MADV_HUGEPAGE with HL_HUGEPAGES=1 (where THP defrag is synchronous, faults then compact memory and cost more than the TLB saves): one fault
 +	// then maps 2MB instead of 4KB, and the TLB covers far more of the heap.
@@ -421,7 +446,24 @@ index d338518..e75e1e8 100644
  	static int recursions = 0;
  	int i = 0;
  	while( gc_will_collide(base_addr,size) ) {
-@@ -1474,6 +1607,13 @@ vdynamic *hl_alloc_obj( hl_type *t ) {
+@@ -1445,6 +1596,16 @@ static void gc_free_page_memory( void *ptr, int size ) {
+ 		prev = e;
+ 		e = e->next;
+ 	}
++	// Keep empty pages for reuse instead of returning them to the OS: unmapping
++	// after each sweep and faulting fresh pages back in costs more than zeroing.
++	if( ptr && size >= (int)sizeof(page_cache) && page_cache_bytes + size <= PAGE_CACHE_MAX ) {
++		page_cache *c = (page_cache*)ptr;
++		c->size = size;
++		c->next = page_cache_list;
++		page_cache_list = c;
++		page_cache_bytes += size;
++		return;
++	}
+ 	munmap(ptr,size);
+ #endif
+ }
+@@ -1474,6 +1635,13 @@ vdynamic *hl_alloc_obj( hl_type *t ) {
  	int i;
  	hl_runtime_obj *rt = t->obj->rt;
  	if( rt == NULL || rt->methods == NULL ) rt = hl_get_obj_proto(t);
