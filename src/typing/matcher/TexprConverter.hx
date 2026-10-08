@@ -45,10 +45,14 @@ class TexprConverter {
    case TAbstract(a,pl) if(!core.Meta.has(MetaTag.CoreType,a.aMeta)):loop(deep,core.Abstract.getUnderlyingType(a,pl));
    case TInst({clPath:{pack:[],name:"String"}},_)|TInst({clKind:KTypeParameter(_)},_):{kind:SKValue,finiteness:Infinite};
    case TInst({clPath:{pack:[],name:"Array"}},_):{kind:SKLength,finiteness:Infinite};
-   case TEnum(en,_):if(!deep){var names=[for(n in en.eConstrs.keys())n];names.sort(Reflect.compare);for(n in names)add(ConEnum(en,en.eConstrs.get(n)));}{kind:SKEnum,finiteness:RunTimeFinite};
+   // `all` is still empty here and the constructors are distinct, so they are pushed without add's linear search.
+   case TEnum(en,_):if(!deep){var names=[for(n in en.eConstrs.keys())n];names.sort(Reflect.compare);for(n in names)all.push(({kind:ConEnum(en,en.eConstrs.get(n)),pos:nullPos} : typing.matcher.Constructor.ConstructorData));}{kind:SKEnum,finiteness:RunTimeFinite};
    case _:{kind:SKValue,finiteness:Infinite};
   };var classified=loop(false,t);
-  for(sc in cases){var compatible=switch sc.scCon.kind{case ConEnum(_,_):classified.kind==SKEnum;case ConArray(_):classified.kind==SKLength;case _:classified.kind==SKValue;};if(!compatible)Error.raiseTypingError("Incompatible pattern",sc.scDt.dtPos);if(sc.scUnguarded)all=all.filter(function(c)return !Constructor.equal(c,sc.scCon));}
+  // Unguarded enum constructors are removed in one pass at the end (by field identity) rather than one filter per case.
+  var removedEnum:Null<haxe.ds.ObjectMap<core.TType.TEnumField,Bool>>=null;
+  for(sc in cases){var compatible=switch sc.scCon.kind{case ConEnum(_,_):classified.kind==SKEnum;case ConArray(_):classified.kind==SKLength;case _:classified.kind==SKValue;};if(!compatible)Error.raiseTypingError("Incompatible pattern",sc.scDt.dtPos);if(sc.scUnguarded)switch sc.scCon.kind{case ConEnum(_,ef):if(removedEnum==null)removedEnum=new haxe.ds.ObjectMap();removedEnum.set(ef,true);case _:all=all.filter(function(c)return !Constructor.equal(c,sc.scCon));}}
+  if(removedEnum!=null){var removed=removedEnum;all=all.filter(function(c)return switch c.kind{case ConEnum(_,ef):!removed.exists(ef);case _:true;});}
   return {e:e,unmatched:all,kind:classified.kind,finiteness:classified.finiteness};
  }
  static function reportNotExhaustive(lookup:Map<Int,TExpr>,e:TExpr,unmatched:Array<Dynamic>):Dynamic {

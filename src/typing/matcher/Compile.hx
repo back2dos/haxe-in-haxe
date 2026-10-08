@@ -26,9 +26,19 @@ import typing.matcher.MatcherGlobals;
 import core.TUnification.typeIseq;
 // haxe/src/typing/matcher/compile.ml — mechanical draft; not compile-validated.
 private class ExtractorFound extends haxe.Exception {public function new()super("Extractor");}
-typedef MatcherContext={var ctx:Typer;var dtTable:Array<DecisionTreeData>;var matchPos:Pos;var matchDebug:Bool;var dtCount:Int;}
+typedef MatcherContext={var ctx:Typer;var dtTable:haxe.ds.IntMap<Array<DecisionTreeData>>;var matchPos:Pos;var matchDebug:Bool;var dtCount:Int;}
 class Compile {
- public static function hashcons(m:MatcherContext,dt:DecisionTreeKind,p:Pos):DecisionTreeData {for(existing in m.dtTable)if(DecisionTree.equal(existing.dtT,dt))return existing;var d=({dtT:dt,dtI:m.dtCount++,dtPos:p,dtGotoTarget:false,dtTexpr:null} : typing.matcher.DecisionTree.DecisionTreeData);m.dtTable.push(d);return d;}
+ // DtTable (Hashtbl.Make(DecisionTree)) as buckets under a key built only from
+ // what DecisionTree.equal compares, so equal trees share a bucket.
+ static function hashconsKey(dt:DecisionTreeKind):Int return switch dt {
+  case Leaf(c):1+c.casePos.pmin*8;
+  case Switch(_,cases,def):2+(cases.length*31+def.dtI+(cases.length>0?cases[0].scDt.dtI*131:0))*8;
+  case Bind(l,d):3+(l.length*31+d.dtI)*8;
+  case Fail:4;
+  case Guard(_,a,b):5+(a.dtI*31+b.dtI)*8;
+  case GuardNull(_,a,b):6+(a.dtI*31+b.dtI)*8;
+ };
+ public static function hashcons(m:MatcherContext,dt:DecisionTreeKind,p:Pos):DecisionTreeData {var key=hashconsKey(dt);var bucket=m.dtTable.get(key);if(bucket==null){bucket=[];m.dtTable.set(key,bucket);}for(existing in bucket)if(DecisionTree.equal(existing.dtT,dt))return existing;var d=({dtT:dt,dtI:m.dtCount++,dtPos:p,dtGotoTarget:false,dtTexpr:null} : typing.matcher.DecisionTree.DecisionTreeData);bucket.push(d);return d;}
  static function leaf(m:MatcherContext,c:CaseData):DecisionTreeData return hashcons(m,Leaf(c),c.casePos);
  static function fail(m:MatcherContext,p:Pos):DecisionTreeData return hashcons(m,Fail,p);
  static function switchTree(m:MatcherContext,e:TExpr,cases:Array<DecisionSwitchCase>,def:DecisionTreeData):DecisionTreeData return hashcons(m,Switch(e,cases,def),e.epos);
@@ -109,7 +119,7 @@ class Compile {
   var dt=compileRows(m,[new Subject(subject,null)].concat(ss).concat(subjects),result);return bind(m,bs,dt);
  }
  public static function compile(ctx:Typer,debug:Bool,expressions:Array<TExpr>,cases:Array<CaseRow>,p:Pos):DecisionTreeData {
-  var m:MatcherContext={ctx:ctx,matchDebug:debug,dtTable:[],matchPos:p,dtCount:0};var subjects=[],vars=[];
+  var m:MatcherContext={ctx:ctx,matchDebug:debug,dtTable:new haxe.ds.IntMap(),matchPos:p,dtCount:0};var subjects=[],vars=[];
   for(e in expressions)switch e.eexpr{case TConst(_)|TLocal(_):subjects.push(new Subject(e,null));case _:var v=genLocal(ctx,e.etype,e.epos);var ev=mk(TLocal(v),e.etype,e.epos);var b=makeBind(v,e.epos,e);subjects.push(new Subject(ev,b));vars.push(b);}
   if(cases.length==0&&subjects.length>0){var dt=fail(m,subjects[0].getPos());return switchTree(m,subjects[0].getExpr(),[],dt);}var dt=compileRows(m,subjects,cases);Useless.check(ctx,cases);return vars.length==0?dt:bind(m,vars,dt);
  }
