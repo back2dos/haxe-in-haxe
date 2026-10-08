@@ -351,7 +351,7 @@ class PosWriter {
 	}
 
 	public function writePos(chunk:Chunk, writeEqual:Bool, offset:Int, p:Pos):Void {
-		if (p.pfile != pFile) {
+		if (core.ds.StrTools.physNeq(p.pfile, pFile)) {
 			// File changed, write full pos
 			chunk.writeU8(4 + offset);
 			doWritePos(chunk, p);

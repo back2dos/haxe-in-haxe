@@ -2,6 +2,20 @@ package core.ds;
 
 class StrTools {
 	/**
+		OCaml's physical inequality `!=` on strings. HashLink compares the
+		character buffers; other hosts have no string identity and fall back
+		to structural inequality (deviation: positions are then encoded more
+		compactly than upstream when a macro rebuilt a file name).
+	**/
+	public static inline function physNeq(a:Null<String>, b:Null<String>):Bool {
+		#if hl
+		return a == null || b == null ? a != b : @:privateAccess ((a.bytes : hl.Bytes) != (b.bytes : hl.Bytes));
+		#else
+		return a != b;
+		#end
+	}
+
+	/**
 		`s.substring(start, end)` for 0 <= start <= end <= s.length. On HashLink
 		substring's optional end index is boxed on every call.
 	**/
