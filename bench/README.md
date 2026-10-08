@@ -179,6 +179,14 @@ In rough order of impact:
    collections, and zeroing recycled memory when slices are refilled
    (about 80M instructions of `memset`).
 
+14. **Generational GC: tried, not adopted** (2026-10-08). A sticky-mark-bit
+   generational mode with an hl2c write barrier works (all 282 conformance
+   cases pass even with a 1 MB nursery) but is slower: 0.42s or more of user
+   time on `stdlib`, against 0.32s. The barrier costs about 0.03s, and the
+   live set is so small (6–12 MB for 260 MB allocated) that the current rare
+   majors already mark little. Details, data and patches:
+   [experiments/generational-gc](experiments/generational-gc/README.md).
+
 Where the time went after the first round (HL/C, callgrind): libhl allocation and GC were about
 45% of the run. libhl takes a global lock and a TLS lookup on every
 allocation, which is far more expensive than OCaml's pointer bump. The rest is
