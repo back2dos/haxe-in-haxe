@@ -192,8 +192,16 @@ class ModuleTyping {
   if(com.hxbLibs.length>0)Error.raiseTypingError("HXB library input is outside the source-only HXB milestone",p);
   function missing():Dynamic return Error.raiseErrorMsg(ModuleNotFound(path),p);
   if(com.moduleNonexistentLut.mem(path)||g.loadOnlyCachedModules)return missing();
-  var parsed;try{parsed=SourceParser.parseModule(com,path,p);}catch(_:NotFound){if(com.loadExternType.length>0)Error.raiseTypingError("Native library loading is outside the source-only HXB milestone",p);com.moduleNonexistentLut.add(path,true);return missing();}
-  var m=typeModule(com,g,path,parsed.file.file,parsed.declarations,p);for(w in parsed.warnings)Common.moduleWarning(com,m,WIfDisplay,[],core.WarningList.warningObj(WIfDisplay).wDoc,w.pos);return m;
+  var isExtern=false,file:String,decls:Array<TypeDecl>,warnings:Array<syntax.Parser.ParseWarning>;
+  try{var parsed=SourceParser.parseModule(com,path,p);file=parsed.file.file;decls=parsed.declarations;warnings=parsed.warnings;}
+  catch(_:NotFound){
+   // Nothing to parse, try loading extern type; entries are {name, load:(path,pos)->Null<core.Ast.Package>}
+   isExtern=true;var found:Null<{file:String,decls:Array<TypeDecl>}>=null;
+   for(entry in com.loadExternType){var a:Null<core.Ast.Package>=entry.load(path,p);if(a!=null){found={file:entry.name,decls:a.declarations};break;}}
+   if(found==null){com.moduleNonexistentLut.add(path,true);return missing();}
+   file=found.file;decls=found.decls;warnings=[];
+  }
+  var m=typeModule(com,g,path,file,decls,p,false,isExtern);for(w in warnings)Common.moduleWarning(com,m,WIfDisplay,[],core.WarningList.warningObj(WIfDisplay).wDoc,w.pos);return m;
  }
  public static function loadModule(ctx:TyperContext,path:GlobalTypePath,p:Pos,origin:ModuleDepOrigin=MDepFromTyping):ModuleDef {var m=loadModulePrime(ctx.com,ctx.g,path,p);addDependency(ctx.m.curmod,m,origin,true);if(ctx.pass==PTypeField)flushPass(ctx.g,PConnectField,{name:"load_module",args:path.pack.concat([path.name])});return m;}
 }

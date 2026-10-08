@@ -14,7 +14,8 @@ import core.Error.CompilerError;
 import core.Error.TypingError;
 import core.Error.FatalError;
 import core.Define;
-import core.Meta;
+import core.Meta.Meta as MetaTools;
+import core.Ast.Ast as AstTools;
 import core.MetaList.StrictMeta as MetaTag;
 import core.Timer;
 import core.WithType as WithTypeTools;
@@ -30,7 +31,7 @@ import context.Typecore.MacroMode;
 import context.Typecore.MacroResult;
 import context.Typecore.WithTypeError;
 import context.TyperPass;
-import syntax.Parser;
+import syntax.Parser.Parser;
 import syntax.Parser.ParseResult;
 import syntax.ParserEntry;
 import syntax.ParserConfig;
@@ -309,7 +310,7 @@ class MacroContext {
 			},
 			addModuleCheckPolicy: function(sl, il, b) badStage(),
 			registerDefine: function(s, data) Define.registerUserDefine(com.userDefines, s, data),
-			registerMetadata: function(s, data) Meta.registerUserMeta(com.userMetas, s, data),
+			registerMetadata: function(s, data) MetaTools.registerUserMeta(com.userMetas, s, data),
 			decodeExpr: MacroApiImpl.decodeExpr,
 			encodeExpr: MacroApiImpl.encodeExpr,
 			encodeCtype: MacroApiImpl.encodeCtype,
@@ -386,14 +387,14 @@ class MacroContext {
 		var comApi = makeMacroComApi(ctx.com, mctx.com, p);
 		function mkTypePath(path:GlobalTypePath, ?sub:String):TypePath {
 			try
-				return Ast.mkTypePath(path.pack, path.name, null, sub)
+				return AstTools.mkTypePath(path.pack, path.name, null, sub)
 			catch (s:String)
 				return comApi.excString(s);
 		}
 		var api = comApi.clone();
 		api.getType = function(s) {
 			return typingTimer(ctx, false, function(ctx) {
-				var path = Ast.parsePath(s);
+				var path = AstTools.parsePath(s);
 				var rpack = path.pack.copy();
 				rpack.reverse();
 				var tp = if (rpack.length > 0 && rpack[0].length > 0 && rpack[0].charCodeAt(0) >= 'A'.code && rpack[0].charCodeAt(0) <= 'Z'.code) {
@@ -492,14 +493,14 @@ class MacroContext {
 		};
 		api.getModule = function(s) {
 			return typingTimer(ctx, false, function(ctx) {
-				var path = Ast.parsePath(s);
+				var path = AstTools.parsePath(s);
 				var m = ModuleTyping.loadModule(ctx, path, p, MDepFromMacro).mTypes.map(typeOfModuleType);
 				return m;
 			});
 		};
 		api.includeModule = function(s) {
 			typingTimer(ctx, false, function(ctx) {
-				var path = Ast.parsePath(s);
+				var path = AstTools.parsePath(s);
 				ModuleTyping.loadModule(ctx, path, p, MDepFromMacroInclude);
 				return null;
 			});
@@ -559,10 +560,10 @@ class MacroContext {
 			var decoded = safeDecode(ctx.com, v, "TypeDefinition", ttype, p, f);
 			var mpath = decoded.path, tdef = decoded.tdef, pos = decoded.pos;
 			var hasNativeMeta = switch tdef {
-				case EClass(d): Meta.has(MetaTag.Native, d.meta);
-				case EEnum(d): Meta.has(MetaTag.Native, d.meta);
-				case ETypedef(d): Meta.has(MetaTag.Native, d.meta);
-				case EAbstract(d): Meta.has(MetaTag.Native, d.meta);
+				case EClass(d): MetaTools.has(MetaTag.Native, d.meta);
+				case EEnum(d): MetaTools.has(MetaTag.Native, d.meta);
+				case ETypedef(d): MetaTools.has(MetaTag.Native, d.meta);
+				case EAbstract(d): MetaTools.has(MetaTag.Native, d.meta);
 				case _: false;
 			};
 			function add(isMacro:Bool, ctx:TyperContext) {
@@ -571,7 +572,7 @@ class MacroContext {
 					previouslyDefinedError(m, mpath, p);
 				} catch (_:NotFound) {
 					taintModule(ctx.com, mpath, "DefineType");
-					var mdep = mdep == null ? ctx.m.curmod : ModuleTyping.loadModule(ctx, Ast.parsePath(mdep), pos, MDepFromMacro);
+					var mdep = mdep == null ? ctx.m.curmod : ModuleTyping.loadModule(ctx, AstTools.parsePath(mdep), pos, MDepFromMacro);
 					var mnew = ModuleTyping.typeModule(ctx.com, ctx.g, mpath,
 						ctx.com.partScope.fileKeys.generateVirtual(mpath, ctx.com.partScope.compilationStep), [{definition: tdef, pos: pos}], pos,
 						hasNativeMeta);
@@ -602,7 +603,7 @@ class MacroContext {
 				return {definition: EUsing(sl.map(function(s):PlacedName return {name: s, pos: Globals.nullPos})), pos: pos};
 			});
 			var types = imports.concat(usings).concat(types);
-			var mpath = Ast.parsePath(m);
+			var mpath = AstTools.parsePath(m);
 			try {
 				var m = ctx.com.moduleLut.find(mpath);
 				if (m != ctx.m.curmod) {
@@ -622,7 +623,7 @@ class MacroContext {
 		api.moduleDependency = function(mpath, file) {
 			var m = typingTimer(ctx, false, function(ctx) {
 				var oldDeps = ctx.m.curmod.mExtra.mDeps;
-				var m = ModuleTyping.loadModule(ctx, Ast.parsePath(mpath), p, MDepFromMacro);
+				var m = ModuleTyping.loadModule(ctx, AstTools.parsePath(mpath), p, MDepFromMacro);
 				ctx.m.curmod.mExtra.mDeps = oldDeps;
 				return m;
 			});
@@ -929,7 +930,7 @@ class MacroContext {
 				}
 				var loaded = loadMacroModule(mctx, com, mpath, display, p);
 				var mloaded = loaded.module, restore = loaded.restore;
-				var cl:TClass, meth:TClassField;
+				var cl:TClass = null, meth:TClassField = null;
 				try {
 					if (sub != null || !Common.samePath(mloaded.mPath, cpath))
 						throw NotFound.raise();
@@ -1031,7 +1032,7 @@ class MacroContext {
 			} else margs;
 		};
 		var mpos = mfield.cfPos;
-		var ctexpr = Ast.mkTypePath(["haxe", "macro"], "Expr");
+		var ctexpr = AstTools.mkTypePath(["haxe", "macro"], "Expr");
 		var expr = Typeload.loadInstance(mctx, makePtp(ctexpr, p), ParamNormal, LoadNormal);
 		switch mode {
 			case MDisplay:
@@ -1039,12 +1040,12 @@ class MacroContext {
 			case MExpr:
 				Typecore.unify(mctx, mret, expr, mpos);
 			case MBuild:
-				var params = [TPType(makePtpTh(Ast.mkTypePath(["haxe", "macro"], "Expr", null, "Field"), Globals.nullPos))];
-				var ctfields = Ast.mkTypePath([], "Array", params);
+				var params = [TPType(makePtpTh(AstTools.mkTypePath(["haxe", "macro"], "Expr", null, "Field"), Globals.nullPos))];
+				var ctfields = AstTools.mkTypePath([], "Array", params);
 				var tfields = Typeload.loadInstance(mctx, makePtp(ctfields, p), ParamNormal, LoadNormal);
 				Typecore.unify(mctx, mret, tfields, mpos);
 			case MMacroType:
-				var cttype = Ast.mkTypePath(["haxe", "macro"], "Type");
+				var cttype = AstTools.mkTypePath(["haxe", "macro"], "Type");
 				var ttype = Typeload.loadInstance(mctx, makePtp(cttype, p), ParamNormal, LoadNormal);
 				try {
 					Typecore.unifyRaise(mret, ttype, mpos);
@@ -1053,7 +1054,7 @@ class MacroContext {
 				} catch (err:TypingError) {
 					switch err.error.errMessage {
 						case Unify(_):
-							var cttype = Ast.mkTypePath(["haxe", "macro"], "Expr", null, "ComplexType");
+							var cttype = AstTools.mkTypePath(["haxe", "macro"], "Expr", null, "ComplexType");
 							var ttype = Typeload.loadInstance(mctx, makePtp(cttype, p), ParamNormal, LoadNormal);
 							Typecore.unifyRaise(mret, ttype, mpos);
 						case _:
@@ -1107,7 +1108,7 @@ class MacroContext {
 			/*
 				force default parameter types to haxe.macro.Expr, and if success allow to pass any value type since it will be encoded
 			*/
-			var eargs:Array<{arg:{name:String, optional:Bool, type:T}, kind:MacroArgType}> = margs.map(function(a) {
+			var eargs:Array<{arg:{name:String, optional:Bool, type:T}, kind:MacroArgType}> = margs.map(function(a):{arg:{name:String, optional:Bool, type:T}, kind:MacroArgType} {
 				try {
 					Typecore.unifyRaise(a.type, expr, p);
 					return {arg: {name: a.name, optional: a.optional, type: tDynamic}, kind: MAExpr};
@@ -1124,6 +1125,7 @@ class MacroContext {
 							throw err;
 					}
 				}
+				return null;
 			});
 			/*
 				this is quite tricky here : we want to use unify_call_args which will type our AST expr
@@ -1144,7 +1146,7 @@ class MacroContext {
 						function loop(e:Expr):Expr
 							return switch e.expr {
 								case EConst(String(s, SSingleQuotes)): {expr: EConst(String(s, SDoubleQuotes)), pos: e.pos};
-								case _: Ast.mapExpr(loop, e);
+								case _: AstTools.mapExpr(loop, e);
 							};
 						loop(e);
 					} else if (isFunction(e))
@@ -1208,7 +1210,7 @@ class MacroContext {
 							var infos = ctx.c.getBuildInfos();
 							infos == null ? Globals.die("", "typing/MacroContext.hx") : infos.fields;
 						} else {
-							var ct = makePtpTh(Ast.mkTypePath(["haxe", "macro"], "Expr", null, "Field"), Globals.nullPos);
+							var ct = makePtpTh(AstTools.mkTypePath(["haxe", "macro"], "Expr", null, "Field"), Globals.nullPos);
 							var t = Typeload.loadComplexType(mctx, false, LoadNormal, ct);
 							macros.eval.EvalDecode.decodeArray(v).map(function(f) return safeDecode(ctx.com, f, "Field", t, p, function() return MacroApiImpl.decodeField(f)));
 						};

@@ -31,7 +31,7 @@ import compiler.io.CompilerMessage;
 import compiler.io.CompilerOutput;
 import typing.Finalization;
 // haxe/src/compiler/compiler.ml — mechanical draft; not compile-validated.
-// Source-only macro-free HXB driver. Deferred service branches are preserved in
+// Source-only HXB driver with init macros. Deferred display/server branches are preserved in
 // deferred/compiler/FullCompiler.hx and rejected explicitly when requested.
 class Compiler {
  public static function errorExt(com:CommonContext,err:Dynamic):Void com.errorExt(err);
@@ -59,12 +59,14 @@ class Compiler {
   }
  }
  public static function doType(com:CommonContext,mctx:Null<Typer>,actx:ArgContext,displayFileDotPath:Null<GlobalTypePath>):{typer:Typer,displayPath:Null<GlobalTypePath>} {
-  if(mctx!=null||actx.configMacros.length>0)throw new ArgumentError("Macro execution requires the macro milestone");
   if(com.display.dmsKind!=DMNone||displayFileDotPath!=null)throw new ArgumentError("Display services require the display/server milestone");
   Common.enterStage(com,CInitMacrosStart);Setup.initNativeLibs(com,actx.hxbLibs);
+  var configMacros=actx.configMacros.copy();configMacros.reverse();for(path in configMacros)mctx=typing.MacroContext.callInitMacro(com,mctx,path);
   Common.enterStage(com,CInitMacrosDone);checkDefines(com);Common.updatePlatformConfig(com);
-  Setup.initNativeLibs(com,actx.nativeLibs);var tctx=Setup.createTyperContext(com,null);
+  var macros=mctx==null?null:mctx.g.macros;
+  Setup.initNativeLibs(com,actx.nativeLibs);var tctx=Setup.createTyperContext(com,macros);
   DumpConfig.updateFromDefines(com.partScope.dumpConfig,com.defines);
+  if(mctx!=null)typing.MacroContext.finalizeMacroApi(tctx,mctx);
   com.callbacks.run(com.errorExt,com.callbacks.getAfterInitMacros());
   runOrDiagnose(com,function() {
    var classes=actx.classes.copy();classes.reverse();for(path in classes){tctx.g.doLoadModule(tctx,path,nullPos);context.Typecore.flushPass(tctx.g,PBuildClass,"actx.classes");}
@@ -81,13 +83,23 @@ class Compiler {
  public static function compile(com:CommonContext,actx:ArgContext,sctx:Dynamic):Void {
   if(sctx.isServer)throw new ArgumentError("Compilation server services require the server milestone");
   if(com.display.dmsKind!=DMNone||actx.displayArg!=null)throw new ArgumentError("Display services require the display/server milestone");
-  switch com.platform {case CustomTarget(_):throw new ArgumentError("Custom target initialization requires macro execution");case _:}
+  var mctx:Null<Typer>=switch com.platform {
+   case CustomTarget(name):
+    try typing.MacroContext.callInitMacro(com,null,name+".Init.init()") catch(e:core.Error.TypingError) {
+     switch e.error.errMessage {
+      // ignore if <target_name>.Init doesn't exist
+      case ModuleNotFound({pack:[pack],name:"Init"}) if(pack==name):null;
+      case _:throw e;
+     }
+    }
+   case _:null;
+  };
   var ext=Setup.initializeTarget(com,actx);Common.updatePlatformConfig(com);
   Timer.time(com.timerCtx,["init"],function(_:Null<Bool>) {var callbacks=actx.preCompilation.copy();callbacks.reverse();for(f in callbacks)f();if(actx.hxbOut!=null)com.hxbWriterConfig=compiler.hxb.HxbWriterConfig.processArgument(actx.hxbOut);return null;},null);
   Common.enterStage(com,CInitialized);
   if(actx.classes.length==1&&actx.classes[0].pack.length==0&&actx.classes[0].name=="Std"&&!actx.forceTyping){if(actx.cmds.length==0&&!actx.didSomething)actx.raiseUsage();}
   else {
-   var typed=Timer.time(com.timerCtx,["typing"],function(_:Null<Bool>)return doType(com,null,actx,null),null),tctx=typed.typer;
+   var typed=Timer.time(com.timerCtx,["typing"],function(_:Null<Bool>)return doType(com,mctx,actx,null),null),tctx=typed.typer;
    var ectx=filters.exception.ExceptionInit.createExceptionContext(tctx);finalizeTyping(com,tctx);codegen.Dump.maybeGenerateDump(com,AfterTyping);
    var isCompilation=Common.isCompilation(com);com.callbacks.addAfterSave(function(){if(isCompilation&&com.hxbWriterConfig!=null)Generate.checkHxbOutput(com,com.hxbWriterConfig);});
    filter(com,tctx,ectx,function(){});
@@ -126,7 +138,10 @@ class Compiler {
   if(Common.defined(com,Define.NoDeprecationWarnings))com.warningOptions.unshift([{woWarning:WDeprecated,woMode:WMDisable}]);
  }
  public static function compileCtx(sctx:Dynamic,com:CommonContext):Int return catchCompletionAndExit(com,sctx,function(com) {
-  if(sctx.isServer)throw new ArgumentError("Compilation server services require the server milestone");Setup.setupCommonContext(com);compileSafe(com,function() {var actx=Args.processArgs(com);processActx(com,actx);compile(com,actx,sctx);});ContextFlush.flushContext(com);finalize(com);
+  if(sctx.isServer)throw new ArgumentError("Compilation server services require the server milestone");
+  // ServerCache.before_anything -> ensure_macro_setup (serverCache.ml)
+  if(!sctx.macroContextSetup){sctx.macroContextSetup=true;typing.MacroContext.setup();}
+  Setup.setupCommonContext(com);compileSafe(com,function() {var actx=Args.processArgs(com);processActx(com,actx);compile(com,actx,sctx);});ContextFlush.flushContext(com);finalize(com);
  });
  public static function createContext(sctx:Dynamic,requestScope:RequestScope,runtimeArgs:Array<String>,hasNext:Bool):CommonContext {
   var part:PartScope={runtimeArgs:runtimeArgs,warnedPositions:new core.ds.Hashtbl<{file:String,offset:Int},{message:String,pos:Pos,options:Array<Array<core.Message.WarningOption>>}>(0),hasNext:hasNext,hasError:false,messages:[],reportMode:RMNone,messageCapture:null,compilationStep:sctx.compilationStep,passDebugMessages:[],dumpConfig:DumpConfig.createDefault(),parserState:{wasAutoTriggered:false,hadParserResume:false,displayModuleHasMacroDefines:false,delayedSyntaxCompletion:{value:null},specialIdentifierFiles:new core.ds.ThreadSafeHashtbl<String,String>(0)},fileKeys:new FileKeys(),storedTypedExprs:new context.Lookup.HashtblLookup(),cachedMacros:new context.Lookup.HashtblLookup()};

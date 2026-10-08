@@ -8,6 +8,7 @@ import core.ds.NotFound;
 import core.ds.GlobalsIntMap;
 import core.ds.OcamlHashtbl;
 import haxe.io.Bytes;
+import macros.eval.EvalStdLibA.Zresult;
 import macros.eval.EvalValue;
 import macros.eval.EvalContext;
 import macros.eval.EvalHash;
@@ -19,13 +20,15 @@ import macros.eval.EvalPrinting;
 import macros.eval.EvalMisc;
 import macros.eval.EvalField;
 import macros.eval.EvalStdLib;
+import macros.eval.EvalStdLibA;
+import macros.eval.EvalStdLibA.StdCompress;
 import compiler.io.CompilerIo;
 
 using macros.eval.EvalValue.EvalValueTools;
 
 /**
-	haxe/src/macro/eval/evalStdLib.ml, second half (lines 1481-3367: `lineEnd`,
-	`StdLog` .. `StdNativeString`). Each `module StdX` is class `StdX`.
+	haxe/src/macro/eval/evalStdLib.ml, second half (lines 1485-3367: `StdLog` ..
+	`StdNativeString`; `lineEnd` is `EvalStdLibA.lineEnd`). Each `module StdX` is class `StdX`.
 
 	Deviations (see also the comments at each site):
 	- Natives are `static final` values; upstream aliases between modules
@@ -41,17 +44,11 @@ using macros.eval.EvalValue.EvalValueTools;
 	- `sys.thread.Condition` keeps its own mutex on the host: acquire/release/wait
 	  use the condition's lock instead of `Vcondition.cmutex`.
 	- zlib streams (`Vzlib.z`) are host `haxe.zip.Compress`/`haxe.zip.Uncompress`
-	  objects, `zFlush` is the index of OCaml's `Extc.zflush` constructor.
+	  objects (see `StdCompress`).
 	- `haxe.Resource.listNames` follows the host map's key order (OCaml `Hashtbl`
 	  order cannot be reproduced).
 **/
 class StdLibBHelpers {
-	// evalStdLib.ml: `lineEnd` (defined just before StdLog)
-	public static final lineEnd = switch Sys.systemName() {
-		case "Windows": "\r\n";
-		case _: "\n";
-	}
-
 	public static function encodeListIterator(l:Array<Value>):Value {
 		var l = l;
 		return EvalEncode.encodeObj([
@@ -145,7 +142,7 @@ class StdLog {
 	public static final trace = EvalEncode.vfun2((v, infos) -> {
 		var s = EvalPrinting.valueString(v);
 		var s = switch infos {
-			case VNull: s + StdLibBHelpers.lineEnd;
+			case VNull: s + EvalStdLibA.lineEnd;
 			case _:
 				var infos = EvalDecode.decodeObject(infos);
 				var fileName = EvalDecode.decodeString(EvalField.objectField(infos, key_fileName));
@@ -154,7 +151,7 @@ class StdLog {
 					case VArray(va): [s].concat([for (v in EvalArray.toList(va)) EvalPrinting.valueString(v)]);
 					case _: [s];
 				}
-				'$fileName:$lineNumber: ${l.join(",")}' + StdLibBHelpers.lineEnd;
+				'$fileName:$lineNumber: ${l.join(",")}' + EvalStdLibA.lineEnd;
 		}
 		CompilerIo.writeOut(EvalContext.getCtx().curapi.getCom().requestScope.io, s);
 		VNull;
@@ -1451,7 +1448,7 @@ class StdSys {
 
 	public static final println = EvalEncode.vfun1(v -> {
 		var com = com();
-		CompilerIo.writeOut(com.requestScope.io, EvalPrinting.valueString(v) + StdLibBHelpers.lineEnd);
+		CompilerIo.writeOut(com.requestScope.io, EvalPrinting.valueString(v) + EvalStdLibA.lineEnd);
 		VNull;
 	});
 
@@ -1850,26 +1847,16 @@ class StdUncompress {
 		}
 	}
 
-	/** `Extc.zflush` constructor index to the host flush mode. **/
-	public static function hostFlushMode(flush:Int):haxe.zip.FlushMode {
-		return switch flush {
-			case 0: NO; // Z_NO_FLUSH
-			case 1: BLOCK; // Z_PARTIAL_FLUSH
-			case 2: SYNC; // Z_SYNC_FLUSH
-			case 3: FULL; // Z_FULL_FLUSH
-			case _: FINISH; // Z_FINISH
-		}
-	}
-
 	/**
 		`Extc.zlib_inflate` on a host `haxe.zip.Uncompress`. The host stream reads
-		up to the end of `src` and writes up to the end of `dst`.
+		up to the end of `src` and writes up to the end of `dst`, so both are cut
+		to `slen`/`dlen` when shorter.
 	**/
-	public static function zlibInflate(z:Dynamic, src:Bytes, spos:Int, slen:Int, dst:Bytes, dpos:Int, dlen:Int, flush:Int):{finish:Bool, read:Int, wrote:Int} {
+	public static function zlibInflate(z:Dynamic, src:Bytes, spos:Int, slen:Int, dst:Bytes, dpos:Int, dlen:Int, flush:Int):Zresult {
 		var u:haxe.zip.Uncompress = z;
 		if (spos + slen != src.length) src = src.sub(0, spos + slen);
 		var target = dpos + dlen != dst.length ? Bytes.alloc(dpos + dlen) : dst;
-		u.setFlushMode(hostFlushMode(flush));
+		u.setFlushMode(StdCompress.hostFlushMode(flush));
 		var r = u.execute(src, spos, target, dpos);
 		if (target != dst) dst.blit(dpos, target, dpos, r.write);
 		return {finish: r.done, read: r.read, wrote: r.write};
@@ -1894,7 +1881,7 @@ class StdUncompress {
 		tmp.fill(0, bufsize, 0);
 		var pos = 0;
 		while (true) {
-			var r = zlibInflate(zip, src, pos, src.length - pos, tmp, 0, bufsize, 2 /* Z_SYNC_FLUSH */);
+			var r = zlibInflate(zip, src, pos, src.length - pos, tmp, 0, bufsize, StdCompress.Z_SYNC_FLUSH);
 			buf.addBytes(tmp, 0, r.wrote);
 			if (!r.finish) pos = pos + r.read else break;
 		}

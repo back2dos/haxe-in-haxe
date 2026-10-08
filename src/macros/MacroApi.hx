@@ -223,3 +223,2691 @@ enum EnumType {
 	IFunctionKind;
 	IStringLiteralKind;
 }
+
+/** An object field of an encoded anonymous object (`string * value`). **/
+private typedef ObjField = {name:String, value:Value};
+
+/** The result of `decode_enum` (`int * value list`). **/
+private typedef DecodedEnum = {index:Int, args:Array<Value>};
+
+/** The result of `decode_enum_with_pos` (`(int * value list) * pos`). **/
+private typedef DecodedEnumWithPos = {index:Int, args:Array<Value>, pos:Pos};
+
+/** A decoded type definition (`Globals.path * Ast.type_def * pos`). **/
+typedef DecodedTypeDef = {path:GlobalTypePath, def:TypeDef, pos:Pos};
+
+class MacroApi {
+	public static function sTypePath(p:GlobalTypePath):String return Globals.sTypePath(p);
+
+	static function efield(e:Expr, s:String):ExprDef return EField(e, s, EFNormal);
+
+	/** convert float value to haxe expression, handling inf/-inf/nan **/
+	public static function haxeFloat(f:Float, p:Pos):Expr {
+		var std:Expr = {expr: EConst(Constant.Ident("std")), pos: p};
+		var math:Expr = {expr: efield(std, "Math"), pos: p};
+		if (f == Math.POSITIVE_INFINITY)
+			return {expr: efield(math, "POSITIVE_INFINITY"), pos: p};
+		else if (f == Math.NEGATIVE_INFINITY)
+			return {expr: efield(math, "NEGATIVE_INFINITY"), pos: p};
+		else if (f != f)
+			return {expr: efield(math, "NaN"), pos: p};
+		else
+			return {expr: EConst(Constant.Float(core.Numeric.floatRepr(f), null)), pos: p};
+	}
+}
+
+/**
+	Our macro api functor (`MacroApiImpl(InterpImpl)`), instantiated for Eval.
+
+	Upstream's `InterpImpl` is `Eval` (EvalEncode, EvalDecode, EvalValue,
+	EvalContext and EvalMain included in that order); its members are bound in
+	the first section below so that the rest of the module reads like upstream.
+
+	Deviations:
+	- OCaml evaluates the elements of a list literal (and the arguments of an
+	  application) right to left. Where an element can have an observable side
+	  effect (forcing lazy types, building classes, encoding typed expressions),
+	  the elements are evaluated into locals in that order before building the
+	  list; the order of the encoded fields is unchanged. Decoders and the pure
+	  AST encoders are evaluated left to right.
+	- `Stack_overflow` cannot be caught portably; the `try ... with
+	  Stack_overflow -> raise Invalid_expr` wrappers of decode_expr/decode_texpr
+	  are not reproduced.
+	- Services the port does not have (compilation server cache, native
+	  libraries, the JS generator) fail with an explicit error.
+**/
+class MacroApiImpl {
+	// ---------------------------------------------------------------------- //
+	// InterpImpl (Eval)
+
+	static final vnull:Value = VNull;
+
+	static inline function vint(i:Int):Value return VInt32(i);
+
+	static inline function vint32(i:Int):Value return VInt32(i);
+
+	static inline function vfloat(f:Float):Value return VFloat(f);
+
+	static inline function vbool(b:Bool):Value return b ? VTrue : VFalse;
+
+	static inline function encodeArray(l:Array<Value>):Value return macros.eval.EvalEncode.encodeArray(l);
+
+	static inline function encodeString(s:String):Value return macros.eval.EvalEncode.encodeString(s);
+
+	// EvalMain.encode_obj = EvalEncode.encode_obj_s
+	static inline function encodeObj(l:Array<ObjField>):Value return macros.eval.EvalEncode.encodeObjS(l);
+
+	static inline function encodeLazy(l:AtomicLazy<Value>):Value return macros.eval.EvalEncode.encodeLazy(l);
+
+	static inline function vfun0(f:Void->Value):Value return macros.eval.EvalEncode.vfun0(f);
+
+	static inline function vfun1(f:Value->Value):Value return macros.eval.EvalEncode.vfun1(f);
+
+	static inline function vfun2(f:Value->Value->Value):Value return macros.eval.EvalEncode.vfun2(f);
+
+	static inline function vfun3(f:Value->Value->Value->Value):Value return macros.eval.EvalEncode.vfun3(f);
+
+	static inline function vfun4(f:Value->Value->Value->Value->Value):Value return macros.eval.EvalEncode.vfun4(f);
+
+	static inline function vfun5(f:Value->Value->Value->Value->Value->Value):Value return macros.eval.EvalEncode.vfun5(f);
+
+	static inline function encodePos(p:Pos):Value return macros.eval.EvalEncode.encodePos(p);
+
+	static inline function encodeStringMap<A>(convert:A->Value, m:StringMap<A>):Value return macros.eval.EvalEncode.encodeStringMap(convert, m);
+
+	static inline function encodeTdecl(t:ModuleType):Value return macros.eval.EvalEncode.encodeTdecl(t);
+
+	static inline function encodeLazytype(t:TLazy, f:Void->Value):Value return macros.eval.EvalEncode.encodeLazytype(t, f);
+
+	static inline function encodeUnsafe(o:Dynamic):Value return macros.eval.EvalEncode.encodeUnsafe(o);
+
+	// EvalMain.field v f = EvalField.field v (EvalHash.hash f)
+	static inline function field(v:Value, f:String):Value return macros.eval.EvalField.field(v, macros.eval.EvalHash.hash(f));
+
+	static inline function decodeBool(v:Value):Bool return macros.eval.EvalDecode.decodeBool(v);
+
+	static inline function decodeInt(v:Value):Int return macros.eval.EvalDecode.decodeInt(v);
+
+	static inline function decodeI32(v:Value):Int return macros.eval.EvalDecode.decodeI32(v);
+
+	static inline function decodeString(v:Value):String return macros.eval.EvalDecode.decodeString(v);
+
+	static inline function decodeArray(v:Value):Array<Value> return macros.eval.EvalDecode.decodeArray(v);
+
+	static inline function decodePos(v:Value):Pos return macros.eval.EvalDecode.decodePos(v);
+
+	static inline function decodeEnum(v:Value):DecodedEnum return macros.eval.EvalDecode.decodeEnum(v);
+
+	static inline function decodeTdecl(v:Value):ModuleType return macros.eval.EvalDecode.decodeTdecl(v);
+
+	static inline function decodeLazytype(v:Value):TLazy return macros.eval.EvalDecode.decodeLazytype(v);
+
+	static inline function decodeUnsafe(v:Value):Dynamic return macros.eval.EvalDecode.decodeUnsafe(v);
+
+	static inline function decodeEnumWithPos(v:Value):DecodedEnumWithPos return macros.eval.EvalDecode.decodeEnumWithPos(v);
+
+	static inline function encodeRef<A>(v:A, convert:A->Value, tostr:Void->String):Value return macros.eval.EvalEncode.encodeRef(v, convert, tostr);
+
+	static inline function decodeRef(v:Value):Dynamic return macros.eval.EvalDecode.decodeRef(v);
+
+	static inline function compilerError(err:core.Error.CompilerError):Dynamic return macros.eval.EvalMain.compilerError(err);
+
+	static inline function errorMessage(msg:String):Dynamic return macros.eval.EvalContext.errorMessage(msg);
+
+	static inline function valueToExpr(v:Value, p:Pos):Expr return macros.eval.EvalMain.valueToExpr(v, p);
+
+	// `Digest.t` (the raw MD5 digest)
+	static inline function valueSignature(v:Value):haxe.io.Bytes return macros.eval.EvalMain.valueSignature(v);
+
+	static inline function encodeBytes(b:haxe.io.Bytes):Value return macros.eval.EvalEncode.encodeBytes(b);
+
+	static inline function decodeBytes(v:Value):haxe.io.Bytes return macros.eval.EvalDecode.decodeBytes(v);
+
+	// EvalMain.prepare_callback = EvalMisc.prepare_callback
+	static inline function prepareCallback(v:Value, nargs:Int):Array<Value>->Value return macros.eval.EvalMisc.prepareCallback(v, nargs);
+
+	static inline function getApiCallPos():Pos return macros.eval.EvalMain.getApiCallPos();
+
+	static inline function associateEnumValuePos(v:Value, p:Pos):Void macros.eval.EvalValue.EvalValueTools.associateEnumValuePos(v, p);
+
+	// ---------------------------------------------------------------------- //
+	// Helpers
+
+	static inline function fld(name:String, value:Value):ObjField return {name: name, value: value};
+
+	/** OCaml `v = vnull`. **/
+	static function isNull(v:Value):Bool return switch v {
+		case VNull: true;
+		case _: false;
+	}
+
+	/** OCaml structural equality on positions. **/
+	static function posEq(a:Pos, b:Pos):Bool return a.pfile == b.pfile && a.pmin == b.pmin && a.pmax == b.pmax;
+
+	static function isNotFound(e:Dynamic):Bool return Std.isOfType(e, NotFound) || (Std.isOfType(e, String) && (e : String) == "Not_found");
+
+	static function notSupported(what:String):Dynamic throw new core.ds.Failure(what + " is not supported by haxe-in-haxe");
+
+	// ---------------------------------------------------------------------- //
+	// The whole encoding/decoding of compiler values from/to interpreter values
+
+	static function vnullOr<A>(f:A->Value, v:Null<A>):Value return v == null ? vnull : f(v);
+
+	static function encodeEnum(k:EnumType, tag:Int, vl:Array<Value>, ?pos:Pos):Value return macros.eval.EvalEncode.encodeEnum(k, pos, tag, vl);
+
+	public static function encodeStringLiteralKind(qs:StringLiteralKind):Value {
+		var tag = switch qs {
+			case SDoubleQuotes: 0;
+			case SSingleQuotes: 1;
+		}
+		return encodeEnum(IStringLiteralKind, tag, []);
+	}
+
+	public static function encodeConst(c:Constant):Value {
+		return switch c {
+			case Int(s, suffix): encodeEnum(IConst, 0, [encodeString(s), vnullOr(encodeString, suffix)]);
+			case Float(s, suffix): encodeEnum(IConst, 1, [encodeString(s), vnullOr(encodeString, suffix)]);
+			case String(s, qs): encodeEnum(IConst, 2, [encodeString(s), encodeStringLiteralKind(qs)]);
+			case Ident(s): encodeEnum(IConst, 3, [encodeString(s)]);
+			case Regexp(s, opt): encodeEnum(IConst, 4, [encodeString(s), encodeString(opt)]);
+		}
+	}
+
+	public static function encodeBinop(op:Binop):Value {
+		return switch op {
+			case OpAdd: encodeEnum(IBinop, 0, []);
+			case OpMult: encodeEnum(IBinop, 1, []);
+			case OpDiv: encodeEnum(IBinop, 2, []);
+			case OpSub: encodeEnum(IBinop, 3, []);
+			case OpAssign: encodeEnum(IBinop, 4, []);
+			case OpEq: encodeEnum(IBinop, 5, []);
+			case OpNotEq: encodeEnum(IBinop, 6, []);
+			case OpGt: encodeEnum(IBinop, 7, []);
+			case OpGte: encodeEnum(IBinop, 8, []);
+			case OpLt: encodeEnum(IBinop, 9, []);
+			case OpLte: encodeEnum(IBinop, 10, []);
+			case OpAnd: encodeEnum(IBinop, 11, []);
+			case OpOr: encodeEnum(IBinop, 12, []);
+			case OpXor: encodeEnum(IBinop, 13, []);
+			case OpBoolAnd: encodeEnum(IBinop, 14, []);
+			case OpBoolOr: encodeEnum(IBinop, 15, []);
+			case OpShl: encodeEnum(IBinop, 16, []);
+			case OpShr: encodeEnum(IBinop, 17, []);
+			case OpUShr: encodeEnum(IBinop, 18, []);
+			case OpMod: encodeEnum(IBinop, 19, []);
+			case OpAssignOp(op): encodeEnum(IBinop, 20, [encodeBinop(op)]);
+			case OpInterval: encodeEnum(IBinop, 21, []);
+			case OpArrow: encodeEnum(IBinop, 22, []);
+			case OpIn: encodeEnum(IBinop, 23, []);
+			case OpNullCoal: encodeEnum(IBinop, 24, []);
+		}
+	}
+
+	public static function encodeUnop(op:Unop):Value {
+		var tag = switch op {
+			case Increment: 0;
+			case Decrement: 1;
+			case Not: 2;
+			case Neg: 3;
+			case NegBits: 4;
+			case Spread: 5;
+		}
+		return encodeEnum(IUnop, tag, []);
+	}
+
+	public static function encodeImport(imp:Import):Value {
+		var mode = switch imp.mode {
+			case INormal: encodeEnum(IImportMode, 0, []);
+			case IAsName(pn): encodeEnum(IImportMode, 1, [encodeString(pn.name)]);
+			case IAll: encodeEnum(IImportMode, 2, []);
+		}
+		return encodeObj([
+			fld("path", encodeArray(imp.path.map(pn -> encodeObj([fld("pos", encodePos(pn.pos)), fld("name", encodeString(pn.name))])))),
+			fld("mode", mode)
+		]);
+	}
+
+	public static function encodePlacedName(pn:PlacedName):Value return encodeString(pn.name);
+
+	/** Globals.path **/
+	public static function encodePath(p:GlobalTypePath):Value {
+		return encodeObj([fld("pack", encodeArray(p.pack.map(encodeString))), fld("name", encodeString(p.name)),]);
+	}
+
+	/** Ast.placed_type_path **/
+	public static function encodeAstPath(ptp:PlacedTypePath):Value {
+		var t = ptp.path;
+		var fields = [
+			fld("pack", encodeArray(t.tpackage.map(encodeString))),
+			fld("name", encodeString(t.tname)),
+			fld("params", encodeArray(t.tparams.map(encodeTparam))),
+			fld("pos", encodePos(ptp.posFull)),
+		];
+		if (!posEq(ptp.posFull, ptp.posPath))
+			fields.unshift(fld("posPath", encodePos(ptp.posPath)));
+		if (t.tsub != null)
+			fields.unshift(fld("sub", encodeString(t.tsub)));
+		return encodeObj(fields);
+	}
+
+	public static function encodeTparam(tp:TypeParamOrConst):Value {
+		return switch tp {
+			case TPType(t): encodeEnum(ITParam, 0, [encodeCtype(t)]);
+			case TPExpr(e): encodeEnum(ITParam, 1, [encodeExpr(e)]);
+		}
+	}
+
+	public static function encodeAccess(a:PlacedAccess):Value {
+		var tag = switch a.access {
+			case APublic: 0;
+			case APrivate: 1;
+			case AStatic: 2;
+			case AOverride: 3;
+			case ADynamic: 4;
+			case AInline: 5;
+			case AMacro: 6;
+			case AFinal: 7;
+			case AExtern: 8;
+			case AAbstract: 9;
+			case AOverload: 10;
+			case AEnum: 11;
+		}
+		return encodeEnum(IAccess, tag, [], a.pos);
+	}
+
+	public static function encodeMetaEntry(m:MetadataEntry):Value {
+		return encodeObj([
+			fld("name", encodeString(Meta.toString(m.meta))),
+			fld("params", encodeArray(m.exprs.map(encodeExpr))),
+			fld("pos", encodePos(m.pos)),
+		]);
+	}
+
+	public static function encodeMetaContent(m:Metadata):Value return encodeArray(m.map(encodeMetaEntry));
+
+	public static function encodeField(f:ClassField):Value {
+		var kind = switch f.cffKind {
+			case FVar(t, e): encodeEnum(IField, 0, [vnullOr(encodeCtype, t), vnullOr(encodeExpr, e)]);
+			case FFun(f): encodeEnum(IField, 1, [encodeFun(f)]);
+			case FProp(get, set, t, e): encodeEnum(IField, 2, [encodePlacedName(get), encodePlacedName(set), vnullOr(encodeCtype, t), vnullOr(encodeExpr, e)]);
+		}
+		return encodeObj([
+			fld("name", encodePlacedName(f.cffName)),
+			fld("name_pos", encodePos(f.cffName.pos)),
+			fld("doc", vnullOr(encodeString, Ast.genDocTextOpt(f.cffDoc))),
+			fld("pos", encodePos(f.cffPos)),
+			fld("kind", kind),
+			fld("meta", encodeMetaContent(f.cffMeta)),
+			fld("access", encodeArray(f.cffAccess.map(encodeAccess))),
+		]);
+	}
+
+	public static function encodeCtype(t:TypeHint):Value {
+		var r = switch t.type {
+			case CTPath(ptp): {tag: 0, pl: [encodeAstPath(ptp)]};
+			case CTFunction(pl, r): {tag: 1, pl: [encodeArray(pl.map(encodeCtype)), encodeCtype(r)]};
+			case CTAnonymous(fl): {tag: 2, pl: [encodeArray(fl.map(encodeField))]};
+			case CTParent(t): {tag: 3, pl: [encodeCtype(t)]};
+			case CTExtend(tl, fields): {tag: 4, pl: [encodeArray(tl.map(encodeAstPath)), encodeArray(fields.map(encodeField))]};
+			case CTOptional(t): {tag: 5, pl: [encodeCtype(t)]};
+			case CTNamed(n, t): {tag: 6, pl: [encodePlacedName(n), encodeCtype(t)]};
+			case CTIntersection(tl): {tag: 7, pl: [encodeArray(tl.map(encodeCtype))]};
+		}
+		return encodeEnum(ICType, r.tag, r.pl, t.pos);
+	}
+
+	public static function encodeTparamDecl(tp:TypeParam):Value {
+		return encodeObj([
+			fld("name", encodePlacedName(tp.tpName)),
+			fld("name_pos", encodePos(tp.tpName.pos)),
+			fld("params", encodeArray(tp.tpParams.map(encodeTparamDecl))),
+			fld("constraints", tp.tpConstraints == null ? encodeArray([]) : encodeArray([encodeCtype(tp.tpConstraints)])),
+			fld("meta", encodeMetaContent(tp.tpMeta)),
+		]);
+	}
+
+	public static function encodeFun(f:Func):Value {
+		return encodeObj([
+			fld("params", encodeArray(f.fParams.map(encodeTparamDecl))),
+			fld("args", encodeArray(f.fArgs.map(a -> encodeObj([
+				fld("name", encodePlacedName(a.name)),
+				fld("name_pos", encodePos(a.name.pos)),
+				fld("opt", vbool(a.optional)),
+				fld("meta", encodeMetaContent(a.meta)),
+				fld("type", vnullOr(encodeCtype, a.type)),
+				fld("value", vnullOr(encodeExpr, a.expr)),
+			])))),
+			fld("ret", vnullOr(encodeCtype, f.fType)),
+			fld("expr", vnullOr(encodeExpr, f.fExpr))
+		]);
+	}
+
+	public static function encodeDisplayKind(dk:DisplayKind):Value {
+		return switch dk {
+			case DKCall: encodeEnum(IDisplayKind, 0, []);
+			case DKDot: encodeEnum(IDisplayKind, 1, []);
+			case DKStructure: encodeEnum(IDisplayKind, 2, []);
+			case DKMarked: encodeEnum(IDisplayKind, 3, []);
+			case DKPattern(outermost): encodeEnum(IDisplayKind, 4, [vbool(outermost)]);
+		}
+	}
+
+	public static function encodeDisplayMode(dm:DisplayModeValue):Value {
+		return switch dm {
+			case DMNone: encodeEnum(IDisplayMode, 0, []);
+			case DMDefault: encodeEnum(IDisplayMode, 1, []);
+			case DMDefinition: encodeEnum(IDisplayMode, 2, []);
+			case DMTypeDefinition: encodeEnum(IDisplayMode, 3, []);
+			case DMImplementation: encodeEnum(IDisplayMode, 4, []);
+			case DMPackage: encodeEnum(IDisplayMode, 5, []);
+			case DMHover: encodeEnum(IDisplayMode, 6, []);
+			case DMUsage(withDefinition, findDescendants, findBase): encodeEnum(IDisplayMode, 7, [vbool(withDefinition), vbool(findDescendants), vbool(findBase)]);
+			case DMModuleSymbols(null): encodeEnum(IDisplayMode, 8, []);
+			case DMModuleSymbols(s): encodeEnum(IDisplayMode, 9, [encodeString(s)]);
+			case DMSignature: encodeEnum(IDisplayMode, 10, []);
+		}
+	}
+
+	public static function encodePlatform(p:Platform):Value {
+		return switch p {
+			case Cross: encodeEnum(IPlatform, 0, []);
+			case Js: encodeEnum(IPlatform, 1, []);
+			case Lua: encodeEnum(IPlatform, 2, []);
+			case Neko: encodeEnum(IPlatform, 3, []);
+			case Flash: encodeEnum(IPlatform, 4, []);
+			case Php: encodeEnum(IPlatform, 5, []);
+			case Cpp: encodeEnum(IPlatform, 6, []);
+			case Jvm: encodeEnum(IPlatform, 7, []);
+			case Python: encodeEnum(IPlatform, 8, []);
+			case Hl: encodeEnum(IPlatform, 9, []);
+			case Eval: encodeEnum(IPlatform, 10, []);
+			case CustomTarget(s): encodeEnum(IPlatform, 11, [encodeString(s)]);
+		}
+	}
+
+	public static function encodePlatformConfig(pc:PlatformConfig):Value {
+		return encodeObj([
+			fld("staticTypeSystem", vbool(pc.pfStatic)),
+			fld("sys", vbool(pc.pfSys)),
+			fld("capturePolicy", encodeCapturePolicy(pc.pfCapturePolicy)),
+			fld("padNulls", vbool(pc.pfPadNulls)),
+			fld("addFinalReturn", vbool(pc.pfAddFinalReturn)),
+			fld("overloadFunctions", vbool(pc.pfOverload)),
+			fld("reservedTypePaths", encodeArray(pc.pfReservedTypePaths.map(encodePath))),
+			fld("supportsFunctionEquality", vbool(pc.pfSupportsFunctionEquality)),
+			fld("usesUtf16", vbool(pc.pfUsesUtf16)),
+			fld("thisBeforeSuper", vbool(pc.pfThisBeforeSuper)),
+			fld("supportsThreads", vbool(pc.pfSupportsThreads)),
+			fld("supportsUnicode", vbool(pc.pfSupportsUnicode)),
+			fld("supportsRestArgs", vbool(pc.pfSupportsRestArgs)),
+			fld("exceptions", encodeExceptionsConfig(pc.pfExceptions)),
+			fld("scoping", encodeVarScopingConfig(pc.pfScoping)),
+			fld("supportsAtomics", vbool(pc.pfSupportsAtomics)),
+		]);
+	}
+
+	public static function encodeCapturePolicy(cp:CapturePolicy):Value {
+		var tag = switch cp {
+			case CPNone: 0;
+			case CPWrapRef: 1;
+			case CPLoopVars: 2;
+		}
+		return encodeEnum(ICapturePolicy, tag, []);
+	}
+
+	public static function encodeVarScopingConfig(vsc:VarScopingConfig):Value {
+		return encodeObj([
+			fld("scope", encodeVarScope(vsc.vsScope)),
+			fld("flags", encodeArray(vsc.vsFlags.map(encodeVarScopingFlags))),
+		]);
+	}
+
+	public static function encodeVarScope(vs:VarScope):Value {
+		var tag = switch vs {
+			case FunctionScope: 0;
+			case BlockScope: 1;
+		}
+		return encodeEnum(IVarScope, tag, []);
+	}
+
+	public static function encodeVarScopingFlags(vsf:VarScopingFlags):Value {
+		return switch vsf {
+			case VarHoisting: encodeEnum(IVarScopingFlags, 0, []);
+			case NoShadowing: encodeEnum(IVarScopingFlags, 1, []);
+			case NoCatchVarShadowing: encodeEnum(IVarScopingFlags, 2, []);
+			case ReserveCurrentTopLevelSymbol: encodeEnum(IVarScopingFlags, 3, []);
+			case ReserveAllTopLevelSymbols: encodeEnum(IVarScopingFlags, 4, []);
+			case ReserveAllTypesFlat: encodeEnum(IVarScopingFlags, 5, []);
+			case ReserveNames(names): encodeEnum(IVarScopingFlags, 6, [encodeArray(names.map(encodeString))]);
+			case SwitchCasesNoBlocks: encodeEnum(IVarScopingFlags, 7, []);
+		}
+	}
+
+	public static function encodeExceptionsConfig(ec:ExceptionsConfig):Value {
+		return encodeObj([
+			fld("nativeThrows", encodeArray(ec.ecNativeThrows.map(encodePath))),
+			fld("nativeCatches", encodeArray(ec.ecNativeCatches.map(encodePath))),
+			fld("avoidWrapping", vbool(ec.ecAvoidWrapping)),
+			fld("wildcardCatch", encodePath(ec.ecWildcardCatch)),
+			fld("baseThrow", encodePath(ec.ecBaseThrow)),
+			// skipping "specialThrow" since cannot use "decode_texpr" here
+		]);
+	}
+
+	public static function encodePackageRule(pr:PackageRule):Value {
+		return switch pr {
+			case Forbidden: encodeEnum(IPackageRule, 0, []);
+			case Remap(path): encodeEnum(IPackageRule, 2, [encodeString(path)]);
+		}
+	}
+
+	public static function encodeMessage(cm:CompilerMessage):Value {
+		return switch core.Message.Message.severity(cm) {
+			case Information: encodeEnum(IMessage, 0, [encodeString(cm.cmMessage), encodePos(cm.cmPos)]);
+			case Warning | Hint: encodeEnum(IMessage, 1, [encodeString(cm.cmMessage), encodePos(cm.cmPos)]);
+			case Error: Globals.die("", "macroApi.ml encode_message");
+		}
+	}
+
+	public static function encodeEfieldKind(efk:EFieldKind):Value {
+		var i = switch efk {
+			case EFNormal: 0;
+			case EFSafe: 1;
+		}
+		return encodeEnum(IEFieldKind, i, []);
+	}
+
+	public static function encodeExpr(e:Expr):Value {
+		function loop(e:Expr):Value {
+			var p = e.pos;
+			var r:{tag:Int, pl:Array<Value>} = switch e.expr {
+				case EConst(c):
+					{tag: 0, pl: [encodeConst(c)]};
+				case EArray(e1, e2):
+					{tag: 1, pl: [loop(e1), loop(e2)]};
+				case EBinop(op, e1, e2):
+					{tag: 2, pl: [encodeBinop(op), loop(e1), loop(e2)]};
+				case EField(e, f, efk):
+					{tag: 3, pl: [loop(e), encodeString(f), encodeEfieldKind(efk)]};
+				case EParenthesis(e):
+					{tag: 4, pl: [loop(e)]};
+				case EObjectDecl(fl):
+					{tag: 5, pl: [encodeArray(fl.map(of -> encodeObj([
+						fld("field", encodeString(of.key.name)),
+						fld("name_pos", encodePos(of.key.pos)),
+						fld("quotes", encodeEnum(IQuoteStatus, switch of.key.quote {
+							case NoQuotes: 0;
+							case DoubleQuotes: 1;
+						}, [])),
+						fld("expr", loop(of.expr)),
+					])))]};
+				case EArrayDecl(el):
+					{tag: 6, pl: [encodeArray(el.map(loop))]};
+				case ECall(e, el):
+					{tag: 7, pl: [loop(e), encodeArray(el.map(loop))]};
+				case ENew(p, el):
+					{tag: 8, pl: [encodeAstPath(p), encodeArray(el.map(loop))]};
+				case EUnop(op, flag, e):
+					{tag: 9, pl: [encodeUnop(op), vbool(switch flag {
+						case Prefix: false;
+						case Postfix: true;
+					}), loop(e)]};
+				case EVars(vl):
+					{tag: 10, pl: [encodeArray(vl.map(v -> encodeObj([
+						fld("name", encodePlacedName(v.evName)),
+						fld("namePos", encodePos(v.evName.pos)),
+						fld("isFinal", vbool(v.evFinal)),
+						fld("isStatic", vbool(v.evStatic)),
+						fld("type", vnullOr(encodeCtype, v.evType)),
+						fld("expr", vnullOr(loop, v.evExpr)),
+						fld("meta", encodeMetaContent(v.evMeta)),
+					])))]};
+				case EFunction(kind, f):
+					{tag: 11, pl: [encodeFunctionKind(kind), encodeFun(f)]};
+				case EBlock(el):
+					{tag: 12, pl: [encodeArray(el.map(loop))]};
+				case EFor(e, eloop):
+					{tag: 13, pl: [loop(e), loop(eloop)]};
+				case EIf(econd, e, eelse):
+					{tag: 14, pl: [loop(econd), loop(e), vnullOr(loop, eelse)]};
+				case EWhile(econd, e, flag):
+					{tag: 15, pl: [loop(econd), loop(e), vbool(switch flag {
+						case NormalWhile: true;
+						case DoWhile: false;
+					})]};
+				case ESwitch(e, cases, eopt):
+					{tag: 16, pl: [loop(e), encodeArray(cases.map(c -> encodeObj([
+						fld("values", encodeArray(c.values.map(loop))),
+						fld("guard", vnullOr(loop, c.guard)),
+						fld("expr", vnullOr(loop, c.expr)),
+						fld("pos", encodePos(c.pos)),
+					]))), vnullOr((d:SwitchDefault) -> encodeNullExpr(d.expr), eopt)]};
+				case ETry(e, catches):
+					{tag: 17, pl: [loop(e), encodeArray(catches.map(c -> encodeObj([
+						fld("name", encodePlacedName(c.name)),
+						fld("name_pos", encodePos(c.name.pos)),
+						fld("type", vnullOr(encodeCtype, c.type)),
+						fld("expr", loop(c.expr)),
+						fld("pos", encodePos(c.pos))
+					])))]};
+				case EReturn(eo):
+					{tag: 18, pl: [vnullOr(loop, eo)]};
+				case EBreak:
+					{tag: 19, pl: []};
+				case EContinue:
+					{tag: 20, pl: []};
+				case EUntyped(e):
+					{tag: 21, pl: [loop(e)]};
+				case EThrow(e):
+					{tag: 22, pl: [loop(e)]};
+				case ECast(e, t):
+					{tag: 23, pl: [loop(e), vnullOr(encodeCtype, t)]};
+				case EDisplay(e, dk):
+					{tag: 24, pl: [loop(e), encodeDisplayKind(dk)]};
+				case ETernary(econd, e1, e2):
+					{tag: 25, pl: [loop(econd), loop(e1), loop(e2)]};
+				case ECheckType(e, t):
+					{tag: 26, pl: [loop(e), encodeCtype(t)]};
+				case EMeta(m, e):
+					{tag: 27, pl: [encodeMetaEntry(m), loop(e)]};
+				case EIs(e, t):
+					{tag: 28, pl: [loop(e), encodeCtype(t)]};
+			}
+			return encodeObj([fld("pos", encodePos(p)), fld("expr", encodeEnum(IExpr, r.tag, r.pl)),]);
+		}
+		return encodeLazy(AtomicLazy.fromFun(() -> loop(e)));
+	}
+
+	public static function encodeNullExpr(e:Null<Expr>):Value {
+		return if (e == null) encodeObj([fld("pos", vnull), fld("expr", vnull)]); else encodeExpr(e);
+	}
+
+	public static function encodeFunctionKind(kind:FunctionKind):Value {
+		return switch kind {
+			case FKAnonymous: encodeEnum(IFunctionKind, 0, []);
+			case FKNamed(name, inl): encodeEnum(IFunctionKind, 1, [encodePlacedName(name), vbool(inl)]);
+			case FKArrow: encodeEnum(IFunctionKind, 2, []);
+		}
+	}
+
+	// ---------------------------------------------------------------------- //
+	// EXPR DECODING
+
+	static function opt<A>(f:Value->A, v:Value):Null<A> return isNull(v) ? null : f(v);
+
+	static function optList<A>(f:Value->Array<A>, v:Value):Array<A> return isNull(v) ? [] : f(v);
+
+	static function decodeOptBool(v:Value):Bool return isNull(v) ? false : decodeBool(v);
+
+	public static function decodeStringLiteralKind(v:Value):StringLiteralKind {
+		if (isNull(v))
+			return SDoubleQuotes;
+		return switch decodeEnum(v) {
+			case {index: 0, args: []}: SDoubleQuotes;
+			case {index: 1, args: []}: SSingleQuotes;
+			case _: throw InvalidExpr.raise();
+		}
+	}
+
+	public static function decodeConst(c:Value):Constant {
+		return switch decodeEnum(c) {
+			case {index: 0, args: [s, suffix]}:
+				var decodedSuffix = opt(decodeString, suffix);
+				switch decodedSuffix {
+					case null | "i32" | "i64" | "u32":
+						Constant.Int(decodeString(s), decodedSuffix);
+					case _:
+						throw InvalidExpr.raise();
+				}
+			case {index: 1, args: [s, suffix]}:
+				var decodedSuffix = opt(decodeString, suffix);
+				switch decodedSuffix {
+					case null | "f64":
+						Constant.Float(decodeString(s), opt(decodeString, suffix));
+					case _:
+						throw InvalidExpr.raise();
+				}
+			case {index: 2, args: [s, qs]}: Constant.String(decodeString(s), decodeStringLiteralKind(qs));
+			case {index: 3, args: [s]}: Constant.Ident(decodeString(s));
+			case {index: 4, args: [s, opt]}: Constant.Regexp(decodeString(s), decodeString(opt));
+			case {index: 5, args: [s]}: Constant.Ident(decodeString(s)); // deprecated CType, keep until 3.0 release
+			case _: throw InvalidExpr.raise();
+		}
+	}
+
+	public static function decodeOp(op:Value):Binop {
+		return switch decodeEnum(op) {
+			case {index: 0, args: []}: OpAdd;
+			case {index: 1, args: []}: OpMult;
+			case {index: 2, args: []}: OpDiv;
+			case {index: 3, args: []}: OpSub;
+			case {index: 4, args: []}: OpAssign;
+			case {index: 5, args: []}: OpEq;
+			case {index: 6, args: []}: OpNotEq;
+			case {index: 7, args: []}: OpGt;
+			case {index: 8, args: []}: OpGte;
+			case {index: 9, args: []}: OpLt;
+			case {index: 10, args: []}: OpLte;
+			case {index: 11, args: []}: OpAnd;
+			case {index: 12, args: []}: OpOr;
+			case {index: 13, args: []}: OpXor;
+			case {index: 14, args: []}: OpBoolAnd;
+			case {index: 15, args: []}: OpBoolOr;
+			case {index: 16, args: []}: OpShl;
+			case {index: 17, args: []}: OpShr;
+			case {index: 18, args: []}: OpUShr;
+			case {index: 19, args: []}: OpMod;
+			case {index: 20, args: [op]}: OpAssignOp(decodeOp(op));
+			case {index: 21, args: []}: OpInterval;
+			case {index: 22, args: []}: OpArrow;
+			case {index: 23, args: []}: OpIn;
+			case {index: 24, args: []}: OpNullCoal;
+			case _: throw InvalidExpr.raise();
+		}
+	}
+
+	public static function decodeUnop(op:Value):Unop {
+		return switch decodeEnum(op) {
+			case {index: 0, args: []}: Increment;
+			case {index: 1, args: []}: Decrement;
+			case {index: 2, args: []}: Not;
+			case {index: 3, args: []}: Neg;
+			case {index: 4, args: []}: NegBits;
+			case {index: 5, args: []}: Spread;
+			case _: throw InvalidExpr.raise();
+		}
+	}
+
+	public static function decodeImportMode(t:Value):ImportMode {
+		return switch decodeEnum(t) {
+			case {index: 0, args: []}: ImportMode.INormal;
+			case {index: 1, args: [alias]}: ImportMode.IAsName({name: decodeString(alias), pos: Globals.nullPos}); // TODO: is it okay to lose the pos here?
+			case {index: 2, args: []}: ImportMode.IAll;
+			case _: throw InvalidExpr.raise();
+		}
+	}
+
+	public static function decodeImport(t:Value):Import {
+		var path:Array<PlacedName> = decodeArray(field(t, "path")).map(o -> ({name: decodeString(field(o, "name")), pos: decodePos(field(o, "pos"))} : PlacedName));
+		return {path: path, mode: decodeImportMode(field(t, "mode"))};
+	}
+
+	static function maybeDecodePos(p:Value):Pos {
+		return try decodePos(p) catch (_:InvalidExpr) Globals.nullPos;
+	}
+
+	static function decodePosDefault(p:Value, pd:Pos):Pos {
+		return try decodePos(p) catch (_:InvalidExpr) pd;
+	}
+
+	static function decodePlacedName(vp:Value, v:Value):PlacedName {
+		return {name: decodeString(v), pos: maybeDecodePos(vp)};
+	}
+
+	static function decodeOptArray<A>(f:Value->A, v:Value):Array<A> return isNull(v) ? [] : decodeArray(v).map(f);
+
+	public static function decodeSubErrors(sub:Value):Array<core.Error.MacroError> {
+		function decodeSub(o:Value):core.Error.MacroError {
+			var msg = decodeString(field(o, "msg"));
+			var pos = decodePos(field(o, "pos"));
+			var sub = decodeOptArray(decodeSub, field(o, "sub"));
+			return {msg: msg, pos: pos, sub: sub};
+		}
+		return decodeOptArray(decodeSub, sub);
+	}
+
+	/** Ast.placed_type_path **/
+	public static function decodeAstPath(t:Value):PlacedTypePath {
+		var pack = decodeArray(field(t, "pack")).map(decodeString);
+		var name = decodeString(field(t, "name"));
+		var params = decodeOptArray(decodeTparam, field(t, "params"));
+		var sub = opt(decodeString, field(t, "sub"));
+		var pFull = field(t, "pos");
+		var pFull = if (isNull(pFull)) Globals.nullPos else decodePos(pFull);
+		var pPath = field(t, "posPath");
+		var pPath = if (isNull(pPath)) pFull else decodePos(pPath);
+		return Ast.makePtp(Ast.mkTypePath(pack, name, params, sub), pFull, pPath);
+	}
+
+	public static function decodeTparam(v:Value):TypeParamOrConst {
+		return switch decodeEnum(v) {
+			case {index: 0, args: [t]}: TPType(decodeCtype(t));
+			case {index: 1, args: [e]}: TPExpr(decodeExpr(e));
+			case _: throw InvalidExpr.raise();
+		}
+	}
+
+	public static function decodeTparams(v:Value):Array<TypeParam> return decodeOptArray(decodeTparamDecl, v);
+
+	public static function decodeTparamDecl(v:Value):TypeParam {
+		var vconstraints = field(v, "constraints");
+		var vdefault = field(v, "defaultType");
+		var tpName = decodePlacedName(field(v, "name_pos"), field(v, "name"));
+		var tpConstraints:Null<TypeHint> = if (isNull(vconstraints)) null else switch decodeArray(vconstraints) {
+			case []: null;
+			case [t]: decodeCtype(t);
+			case tl: {type: CTIntersection(tl.map(decodeCtype)), pos: Globals.nullPos};
+		}
+		var tpDefault = opt(decodeCtype, vdefault);
+		var tpParams = decodeTparams(field(v, "params"));
+		var tpMeta = decodeMetaContent(field(v, "meta"));
+		return {
+			tpName: tpName,
+			tpConstraints: tpConstraints,
+			tpDefault: tpDefault,
+			tpParams: tpParams,
+			tpMeta: tpMeta,
+		};
+	}
+
+	public static function decodeFun(v:Value):Func {
+		var fParams = decodeTparams(field(v, "params"));
+		var fArgs = decodeArray(field(v, "args")).map(o -> ({
+			name: decodePlacedName(field(o, "name_pos"), field(o, "name")),
+			optional: decodeOptBool(field(o, "opt")),
+			meta: decodeMetaContent(field(o, "meta")),
+			type: opt(decodeCtype, field(o, "type")),
+			expr: opt(decodeExpr, field(o, "value"))
+		} : FuncArg));
+		var fType = opt(decodeCtype, field(v, "ret"));
+		var fExpr = opt(decodeExpr, field(v, "expr"));
+		return {
+			fParams: fParams,
+			fArgs: fArgs,
+			fType: fType,
+			fExpr: fExpr,
+		};
+	}
+
+	public static function decodeAccess(v:Value):PlacedAccess {
+		var d = decodeEnumWithPos(v);
+		var a = switch d.index {
+			case 0: APublic;
+			case 1: APrivate;
+			case 2: AStatic;
+			case 3: AOverride;
+			case 4: ADynamic;
+			case 5: AInline;
+			case 6: AMacro;
+			case 7: AFinal;
+			case 8: AExtern;
+			case 9: AAbstract;
+			case 10: AOverload;
+			case 11: AEnum;
+			case _: throw InvalidExpr.raise();
+		}
+		return {access: a, pos: d.pos};
+	}
+
+	public static function decodeMetaEntry(v:Value):MetadataEntry {
+		return {meta: Meta.fromString(decodeString(field(v, "name"))), exprs: decodeOptArray(decodeExpr, field(v, "params")), pos: decodePos(field(v, "pos"))};
+	}
+
+	public static function decodeMetaContent(m:Value):Metadata return decodeOptArray(decodeMetaEntry, m);
+
+	static function decodeDoc(v:Value):Documentation return opt(s -> ({docOwn: decodeString(s), docInherited: []} : DocBlock), v);
+
+	public static function decodeClassFieldKind(v:Value):ClassFieldKind {
+		return switch decodeEnum(v) {
+			case {index: 0, args: [t, e]}:
+				FVar(opt(decodeCtype, t), opt(decodeExpr, e));
+			case {index: 1, args: [f]}:
+				FFun(decodeFun(f));
+			case {index: 2, args: [get, set, t, e]}:
+				FProp(decodePlacedName(vnull, get), decodePlacedName(vnull, set), opt(decodeCtype, t), opt(decodeExpr, e));
+			case _:
+				throw InvalidExpr.raise();
+		}
+	}
+
+	public static function decodeField(v:Value):ClassField {
+		var fkind = decodeClassFieldKind(field(v, "kind"));
+		var pos = decodePos(field(v, "pos"));
+		return {
+			cffName: {name: decodeString(field(v, "name")), pos: decodePosDefault(field(v, "name_pos"), pos)},
+			cffDoc: decodeDoc(field(v, "doc")),
+			cffPos: pos,
+			cffKind: fkind,
+			cffAccess: optList(decodeArray, field(v, "access")).map(decodeAccess),
+			cffMeta: optList(decodeMetaContent, field(v, "meta")),
+		};
+	}
+
+	public static function decodeCtype(t:Value):TypeHint {
+		var d = decodeEnumWithPos(t);
+		var p = d.pos;
+		var ct = switch {index: d.index, args: d.args} {
+			case {index: 0, args: [p]}:
+				CTPath(decodeAstPath(p));
+			case {index: 1, args: [a, r]}:
+				CTFunction(decodeArray(a).map(decodeCtype), decodeCtype(r));
+			case {index: 2, args: [fl]}:
+				CTAnonymous(decodeArray(fl).map(decodeField));
+			case {index: 3, args: [t]}:
+				CTParent(decodeCtype(t));
+			case {index: 4, args: [tl, fl]}:
+				CTExtend(decodeArray(tl).map(decodeAstPath), decodeArray(fl).map(decodeField));
+			case {index: 5, args: [t]}:
+				CTOptional(decodeCtype(t));
+			case {index: 6, args: [n, t]}:
+				CTNamed({name: decodeString(n), pos: p}, decodeCtype(t));
+			case {index: 7, args: [tl]}:
+				CTIntersection(decodeArray(tl).map(decodeCtype));
+			case _:
+				throw InvalidExpr.raise();
+		}
+		return {type: ct, pos: p};
+	}
+
+	public static function decodeDisplayKind(v:Value):DisplayKind {
+		return switch decodeEnum(v) {
+			case {index: 0, args: []}: DKCall;
+			case {index: 1, args: []}: DKDot;
+			case {index: 2, args: []}: DKStructure;
+			case {index: 3, args: []}: DKMarked;
+			case {index: 4, args: [outermost]}: DKPattern(decodeBool(outermost));
+			case _: throw InvalidExpr.raise();
+		}
+	}
+
+	public static function decodeFunctionKind(kind:Value):FunctionKind {
+		if (isNull(kind))
+			return FKAnonymous;
+		return switch decodeEnum(kind) {
+			case {index: 0, args: []}: FKAnonymous;
+			case {index: 1, args: [name, inl]}: FKNamed({name: decodeString(name), pos: Globals.nullPos}, decodeOptBool(inl));
+			case {index: 2, args: []}: FKArrow;
+			case _: throw InvalidExpr.raise();
+		}
+	}
+
+	public static function decodeExpr(v:Value):Expr {
+		// upstream: `try loop v with Stack_overflow -> raise Invalid_expr`
+		return decodeExprLoop(v);
+	}
+
+	static function decodeExprLoop(v:Value):Expr {
+		var p = decodePos(field(v, "pos"));
+		return {expr: decodeExprDef(field(v, "expr"), p), pos: p};
+	}
+
+	static function decodeExprDef(e:Value, p:Pos):ExprDef {
+		var loop = decodeExprLoop;
+		return switch decodeEnum(e) {
+			case {index: 0, args: [c]}:
+				EConst(decodeConst(c));
+			case {index: 1, args: [e1, e2]}:
+				EArray(loop(e1), loop(e2));
+			case {index: 2, args: [op, e1, e2]}:
+				EBinop(decodeOp(op), loop(e1), loop(e2));
+			case {index: 3, args: [e, f, efk]}:
+				var efk = if (isNull(efk)) EFNormal else switch decodeEnum(efk) {
+					case {index: 0, args: []}: EFNormal;
+					case {index: 1, args: []}: EFSafe;
+					case _: throw InvalidExpr.raise();
+				}
+				EField(loop(e), decodeString(f), efk);
+			case {index: 4, args: [e]}:
+				EParenthesis(loop(e));
+			case {index: 5, args: [a]}:
+				EObjectDecl(decodeArray(a).map(o -> {
+					var pn = decodePlacedName(field(o, "name_pos"), field(o, "field"));
+					var vquotes = field(o, "quotes");
+					var quotes = if (isNull(vquotes)) NoQuotes else switch decodeEnum(vquotes) {
+						case {index: 0, args: []}: NoQuotes;
+						case {index: 1, args: []}: DoubleQuotes;
+						case _: throw InvalidExpr.raise();
+					}
+					({key: {name: pn.name, pos: pn.pos, quote: quotes}, expr: loop(field(o, "expr"))} : ObjectField);
+				}));
+			case {index: 6, args: [a]}:
+				EArrayDecl(decodeArray(a).map(loop));
+			case {index: 7, args: [e, el]}:
+				ECall(loop(e), decodeArray(el).map(loop));
+			case {index: 8, args: [t, el]}:
+				ENew(decodeAstPath(t), decodeArray(el).map(loop));
+			case {index: 9, args: [op, f, e]}:
+				EUnop(decodeUnop(op), if (decodeBool(f)) Postfix else Prefix, loop(e));
+			case {index: 10, args: [vl]}:
+				EVars(decodeArray(vl).map(v -> {
+					var vfinal = field(v, "isFinal");
+					var isFinal = if (isNull(vfinal)) false else decodeBool(vfinal);
+					var vstatic = field(v, "isStatic");
+					var isStatic = if (isNull(vstatic)) false else decodeBool(vstatic);
+					var vmeta = field(v, "meta");
+					var meta = if (isNull(vmeta)) [] else decodeMetaContent(vmeta);
+					var namePos = maybeDecodePos(field(v, "namePos"));
+					var namePos = if (posEq(namePos, Globals.nullPos)) p else namePos;
+					var name:PlacedName = {name: decodeString(field(v, "name")), pos: namePos};
+					var t = opt(decodeCtype, field(v, "type"));
+					var eo = opt(loop, field(v, "expr"));
+					Ast.mkEVar(name, isFinal, isStatic, t, eo, meta);
+				}));
+			case {index: 11, args: [kind, f]}:
+				EFunction(decodeFunctionKind(kind), decodeFun(f));
+			case {index: 12, args: [el]}:
+				EBlock(decodeArray(el).map(loop));
+			case {index: 13, args: [e1, e2]}:
+				EFor(loop(e1), loop(e2));
+			case {index: 14, args: [e1, e2, e3]}:
+				EIf(loop(e1), loop(e2), opt(loop, e3));
+			case {index: 15, args: [e1, e2, flag]}:
+				EWhile(loop(e1), loop(e2), if (decodeBool(flag)) NormalWhile else DoWhile);
+			case {index: 16, args: [e, cases, eo]}:
+				var cases = decodeArray(cases).map(c -> ({
+					values: decodeArray(field(c, "values")).map(loop),
+					guard: opt(loop, field(c, "guard")),
+					expr: opt(loop, field(c, "expr")),
+					pos: maybeDecodePos(field(c, "pos"))
+				} : SwitchCase));
+				ESwitch(loop(e), cases, opt(v -> ({expr: if (isNull(field(v, "expr"))) null else decodeExpr(v), pos: p} : SwitchDefault), eo));
+			case {index: 17, args: [e, catches]}:
+				var catches = decodeArray(catches).map(c -> ({
+					name: decodePlacedName(field(c, "name_pos"), field(c, "name")),
+					type: opt(decodeCtype, field(c, "type")),
+					expr: loop(field(c, "expr")),
+					pos: maybeDecodePos(field(c, "pos"))
+				} : Catch));
+				ETry(loop(e), catches);
+			case {index: 18, args: [e]}:
+				EReturn(opt(loop, e));
+			case {index: 19, args: []}:
+				EBreak;
+			case {index: 20, args: []}:
+				EContinue;
+			case {index: 21, args: [e]}:
+				EUntyped(loop(e));
+			case {index: 22, args: [e]}:
+				EThrow(loop(e));
+			case {index: 23, args: [e, t]}:
+				ECast(loop(e), opt(decodeCtype, t));
+			case {index: 24, args: [e, dk]}:
+				EDisplay(loop(e), decodeDisplayKind(dk));
+			case {index: 25, args: [e1, e2, e3]}:
+				ETernary(loop(e1), loop(e2), loop(e3));
+			case {index: 26, args: [e, t]}:
+				ECheckType(loop(e), decodeCtype(t));
+			case {index: 27, args: [m, e]}:
+				EMeta(decodeMetaEntry(m), loop(e));
+			case {index: 28, args: [e, t]}:
+				EIs(loop(e), decodeCtype(t));
+			case _:
+				throw InvalidExpr.raise();
+		}
+	}
+
+	// ---------------------------------------------------------------------- //
+	// TYPE ENCODING
+
+	static function encodePmapArray<A>(convert:A->Value, m:StringMap<A>):Value {
+		var l = [];
+		PMap.iter((_, v) -> l.push(convert(v)), m);
+		return encodeArray(l);
+	}
+
+	static function encodeAndMapArray<A>(convert:A->Value, l:Array<A>):Value return encodeArray(l.map(convert));
+
+	static function vopt<A>(f:A->Value, v:Null<A>):Value return v == null ? vnull : f(v);
+
+	public static function encodeMeta(m:Metadata, set:Metadata->Void):Value {
+		var meta = m;
+		return encodeObj([
+			fld("get", vfun0(() -> encodeMetaContent(meta))),
+			fld("add", vfun3((k, vl, p) -> {
+				var el = decodeArray(vl).map(decodeExpr);
+				var entry:MetadataEntry = {meta: Meta.fromString(decodeString(k)), exprs: el, pos: decodePos(p)};
+				meta = [entry].concat(meta);
+				set(meta);
+				vnull;
+			})),
+			fld("extract", vfun1(k -> {
+				var k = Meta.fromString(decodeString(k));
+				encodeAndMapArray(encodeMetaEntry, meta.filter(m -> Meta.metaEq(k, m.meta)));
+			})),
+			fld("remove", vfun1(k -> {
+				var k = Meta.fromString(decodeString(k));
+				meta = meta.filter(m -> !Meta.metaEq(k, m.meta));
+				set(meta);
+				vnull;
+			})),
+			fld("has", vfun1(k -> {
+				var k = Meta.fromString(decodeString(k));
+				vbool(Lambda.exists(meta, m -> Meta.metaEq(k, m.meta)));
+			})),
+		]);
+	}
+
+	/**
+		`i.mt_meta <- m`: upstream's `t_infos` returns the type's own record,
+		while `TFunctions.tInfos` returns a copy, so the update is applied to
+		the module type itself.
+	**/
+	static function setMtMeta(t:ModuleType, m:Metadata):Void {
+		switch t {
+			case TClassDecl(c): c.clMeta = m;
+			case TEnumDecl(e): e.eMeta = m;
+			case TTypeDecl(t): t.tMeta = m;
+			case TAbstractDecl(a): a.aMeta = m;
+		}
+	}
+
+	public static function encodeMtype(t:ModuleType, fields:Array<ObjField>):Value {
+		var i = tInfos(t);
+		// evaluated right to left as upstream's list literal
+		var params = encodeTypeParams(i.mtParams);
+		var doc = vnullOr(encodeString, Ast.getOwnDocOpt(i.mtDoc));
+		var meta = encodeMeta(i.mtMeta, m -> setMtMeta(t, m));
+		var isPrivate = vbool(i.mtPrivate);
+		var vmodule = encodeString(MacroApi.sTypePath(i.mtModule.mPath));
+		var pos = encodePos(i.mtPos);
+		var name = encodeString(i.mtPath.name);
+		var pack = encodeArray(i.mtPath.pack.map(encodeString));
+		var tdecl = encodeTdecl(t);
+		return encodeObj([
+			fld("__t", tdecl),
+			fld("pack", pack),
+			fld("name", name),
+			fld("pos", pos),
+			fld("module", vmodule),
+			fld("isPrivate", isPrivate),
+			fld("meta", meta),
+			fld("doc", doc),
+			fld("params", params),
+		].concat(fields));
+	}
+
+	public static function encodeTypeParams(tl:TypeParams):Value {
+		return encodeArray(tl.map(tp -> {
+			var defaultType = tp.ttpDefault == null ? vnull : encodeType(tp.ttpDefault);
+			var t = encodeType(tp.ttpType);
+			var name = encodeString(tp.ttpName);
+			encodeObj([fld("name", name), fld("t", t), fld("defaultType", defaultType),]);
+		}));
+	}
+
+	public static function encodeTenum(e:TEnum):Value {
+		var names = encodeArray(e.eNames.map(encodeString));
+		var constructs = encodeStringMap(encodeEfield, e.eConstrs);
+		var exclude = vfun0(() -> {
+			addEnumFlag(e, EnExcluded);
+			vnull;
+		});
+		var isExtern = vbool(hasEnumFlag(e, EnExtern));
+		return encodeMtype(TEnumDecl(e), [
+			fld("isExtern", isExtern),
+			fld("exclude", exclude),
+			fld("constructs", constructs),
+			fld("names", names),
+		]);
+	}
+
+	public static function encodeTabstract(a:TAbstract):Value {
+		var resolveWrite = a.aWrite == null ? vnull : encodeCfref(a.aWrite);
+		var resolve = a.aRead == null ? vnull : encodeCfref(a.aRead);
+		var array = encodeArray(a.aArray.map(encodeCfield));
+		function fromTo(l:Array<T>, lf:Array<{type:T, field:TClassField}>):Value {
+			var withField = lf.map(x -> {
+				var field = encodeCfield(x.field);
+				var t = encodeType(x.type);
+				encodeObj([fld("t", t), fld("field", field)]);
+			});
+			var withoutField = l.map(t -> {
+				var field = vnull;
+				encodeObj([fld("t", encodeType(t)), fld("field", field)]);
+			});
+			return encodeArray(withoutField.concat(withField));
+		}
+		var to = fromTo(a.aTo, a.aToField);
+		var from = fromTo(a.aFrom, a.aFromField);
+		var unops = encodeArray(a.aUnops.map(u -> {
+			var field = encodeCfield(u.field);
+			var postFix = vbool(switch u.flag {
+				case Postfix: true;
+				case Prefix: false;
+			});
+			var op = encodeUnop(u.op);
+			encodeObj([fld("op", op), fld("postFix", postFix), fld("field", field)]);
+		}));
+		var binops = encodeArray(a.aOps.map(b -> {
+			var field = encodeCfield(b.field);
+			var op = encodeBinop(b.op);
+			encodeObj([fld("op", op), fld("field", field)]);
+		}));
+		var impl = a.aImpl == null ? vnull : encodeClref(a.aImpl);
+		var type = encodeType(a.aThis);
+		return encodeMtype(TAbstractDecl(a), [
+			fld("type", type),
+			fld("impl", impl),
+			fld("binops", binops),
+			fld("unops", unops),
+			fld("from", from),
+			fld("to", to),
+			fld("array", array),
+			fld("resolve", resolve),
+			fld("resolveWrite", resolveWrite),
+		]);
+	}
+
+	public static function encodeEfield(f:TEnumField):Value {
+		var params = encodeTypeParams(f.efParams);
+		var doc = vnullOr(encodeString, Ast.getOwnDocOpt(f.efDoc));
+		var meta = encodeMeta(f.efMeta, m -> f.efMeta = m);
+		var index = vint(f.efIndex);
+		var namePos = encodePos(f.efNamePos);
+		var pos = encodePos(f.efPos);
+		var type = encodeType(f.efType);
+		var name = encodeString(f.efName);
+		return encodeObj([
+			fld("name", name),
+			fld("type", type),
+			fld("pos", pos),
+			fld("namePos", namePos),
+			fld("index", index),
+			fld("meta", meta),
+			fld("doc", doc),
+			fld("params", params),
+		]);
+	}
+
+	public static function encodeCfield(f:TClassField):Value {
+		var isAbstract = vbool(hasClassFieldFlag(f, CfAbstract));
+		var isFinal = vbool(hasClassFieldFlag(f, CfFinal));
+		var isExtern = vbool(hasClassFieldFlag(f, CfExtern));
+		var overloads = encodeRef(f.cfOverloads, l -> encodeAndMapArray(encodeCfield, l), () -> "overloads");
+		var doc = vnullOr(encodeString, Ast.getOwnDocOpt(f.cfDoc));
+		var namePos = encodePos(f.cfNamePos);
+		var pos = encodePos(f.cfPos);
+		var kind = encodeFieldKind(f.cfKind);
+		var expr = vfun0(() -> {
+			follow(f.cfType);
+			f.cfExpr == null ? vnull : encodeTexpr(f.cfExpr);
+		});
+		var meta = encodeMeta(f.cfMeta, m -> f.cfMeta = m);
+		var params = encodeTypeParams(f.cfParams);
+		var isPublic = vbool(hasClassFieldFlag(f, CfPublic));
+		var type = encodeLazyType(f.cfType);
+		var name = encodeString(f.cfName);
+		return encodeObj([
+			fld("name", name),
+			fld("type", type),
+			fld("isPublic", isPublic),
+			fld("params", params),
+			fld("meta", meta),
+			fld("expr", expr),
+			fld("kind", kind),
+			fld("pos", pos),
+			fld("namePos", namePos),
+			fld("doc", doc),
+			fld("overloads", overloads),
+			fld("isExtern", isExtern),
+			fld("isFinal", isFinal),
+			fld("isAbstract", isAbstract),
+		]);
+	}
+
+	public static function encodeFieldKind(k:FieldKind):Value {
+		return switch k {
+			case Var(v):
+				var write = encodeVarAccess(v.vWrite);
+				var read = encodeVarAccess(v.vRead);
+				encodeEnum(IFieldKind, 0, [read, write]);
+			case Method(m): encodeEnum(IFieldKind, 1, [encodeMethodKind(m)]);
+		}
+	}
+
+	public static function encodeVarAccess(a:VarAccess):Value {
+		return switch a {
+			case AccNormal: encodeEnum(IVarAccess, 0, []);
+			case AccNo: encodeEnum(IVarAccess, 1, []);
+			case AccNever: encodeEnum(IVarAccess, 2, []);
+			case AccCall: encodeEnum(IVarAccess, 4, []);
+			case AccPrivateCall: encodeEnum(IVarAccess, 5, []);
+			case AccInline: encodeEnum(IVarAccess, 6, []);
+			case AccRequire(s, msg): encodeEnum(IVarAccess, 7, [encodeString(s), vnullOr(encodeString, msg)]);
+			case AccCtor: encodeEnum(IVarAccess, 8, []);
+		}
+	}
+
+	public static function encodeMethodKind(m:MethodKind):Value {
+		return switch m {
+			case MethNormal: encodeEnum(IMethodKind, 0, []);
+			case MethInline: encodeEnum(IMethodKind, 1, []);
+			case MethDynamic: encodeEnum(IMethodKind, 2, []);
+			case MethMacro: encodeEnum(IMethodKind, 3, []);
+		}
+	}
+
+	public static function encodeClassKind(k:TClassKind):Value {
+		return switch k {
+			case KNormal: encodeEnum(IClassKind, 0, []);
+			case KTypeParameter(ttp): encodeEnum(IClassKind, 1, [encodeTparams(getConstraints(ttp))]); // TTPTODO
+			case KModuleFields(m): encodeEnum(IClassKind, 2, [encodeString(MacroApi.sTypePath(m.mPath))]);
+			case KExpr(e): encodeEnum(IClassKind, 3, [encodeExpr(e)]);
+			case KGeneric: encodeEnum(IClassKind, 4, []);
+			case KGenericInstance(cl, params):
+				var vparams = encodeTparams(params);
+				encodeEnum(IClassKind, 5, [encodeClref(cl), vparams]);
+			case KMacroType: encodeEnum(IClassKind, 6, []);
+			case KAbstractImpl(a): encodeEnum(IClassKind, 7, [encodeAbref(a)]);
+			case KGenericBuild(cfl): encodeEnum(IClassKind, 8, []);
+		}
+	}
+
+	static function encodeClassAndParams(c:TClass, pl:TParams):Value {
+		var params = encodeTparams(pl);
+		return encodeObj([fld("t", encodeClref(c)), fld("params", params)]);
+	}
+
+	public static function encodeTclass(c:TClass):Value {
+		c.clBuild();
+		var overrides = encodeArray(c.clOrderedFields.filter(cf -> hasClassFieldFlag(cf, CfOverride)).map(encodeCfref));
+		var init = switch core.TOther.TClassTools.getClInit(c) {
+			case null: vnull;
+			case e: encodeTexpr(e);
+		}
+		var constructor = c.clConstructor == null ? vnull : encodeCfref(c.clConstructor);
+		var statics = encodeRef(c.clOrderedStatics, l -> encodeAndMapArray(encodeCfield, l), () -> "class fields");
+		var fields = encodeRef(c.clOrderedFields, l -> encodeAndMapArray(encodeCfield, l), () -> "class fields");
+		var interfaces = encodeArray(c.clImplements.map(i -> encodeClassAndParams(i.cls, i.params)));
+		var superClass = c.clSuper == null ? vnull : encodeClassAndParams(c.clSuper.cls, c.clSuper.params);
+		var isAbstract = vbool(hasClassFlag(c, CAbstract));
+		var isFinal = vbool(hasClassFlag(c, CFinal));
+		var isInterface = vbool(hasClassFlag(c, CInterface));
+		var exclude = vfun0(() -> {
+			addClassFlag(c, CExcluded);
+			c.clInit = null;
+			vnull;
+		});
+		var isExtern = vbool(hasClassFlag(c, CExtern));
+		var kind = encodeClassKind(c.clKind);
+		return encodeMtype(TClassDecl(c), [
+			fld("kind", kind),
+			fld("isExtern", isExtern),
+			fld("exclude", exclude),
+			fld("isInterface", isInterface),
+			fld("isFinal", isFinal),
+			fld("isAbstract", isAbstract),
+			fld("superClass", superClass),
+			fld("interfaces", interfaces),
+			fld("fields", fields),
+			fld("statics", statics),
+			fld("constructor", constructor),
+			fld("init", init),
+			fld("overrides", overrides)
+		]);
+	}
+
+	public static function encodeTtype(t:TDef):Value {
+		var type = encodeType(t.tType);
+		return encodeMtype(TTypeDecl(t), [
+			fld("isExtern", vbool(false)),
+			fld("exclude", vfun0(() -> vnull)),
+			fld("type", type),
+		]);
+	}
+
+	public static function encodeTanon(a:TAnon):Value {
+		var status = encodeAnonStatus(a.aStatus);
+		var fields = encodePmapArray(encodeCfield, a.aFields);
+		return encodeObj([fld("fields", fields), fld("status", status),]);
+	}
+
+	public static function encodeAnonStatus(s:AnonStatus):Value {
+		return switch s {
+			case Closed: encodeEnum(IAnonStatus, 0, []);
+			case Const: encodeEnum(IAnonStatus, 2, []);
+			case Extend(tl): encodeEnum(IAnonStatus, 3, [encodeRef(tl, tl -> encodeArray(tl.map(encodeType)), () -> "<extended types>")]);
+			case ClassStatics(cl): encodeEnum(IAnonStatus, 4, [encodeClref(cl)]);
+			case EnumStatics(en): encodeEnum(IAnonStatus, 5, [encodeEnref(en)]);
+			case AbstractStatics(ab): encodeEnum(IAnonStatus, 6, [encodeAbref(ab)]);
+		}
+	}
+
+	public static function encodeTparams(pl:TParams):Value return encodeArray(pl.map(encodeType));
+
+	public static function encodeClref(c:TClass):Value return encodeRef(c, encodeTclass, () -> MacroApi.sTypePath(c.clPath));
+
+	public static function encodeEnref(en:TEnum):Value return encodeRef(en, encodeTenum, () -> MacroApi.sTypePath(en.ePath));
+
+	public static function encodeCfref(cf:TClassField):Value return encodeRef(cf, encodeCfield, () -> cf.cfName);
+
+	public static function encodeAbref(ab:TAbstract):Value return encodeRef(ab, encodeTabstract, () -> MacroApi.sTypePath(ab.aPath));
+
+	public static function encodeType(t:T):Value {
+		function loop(t:T):{tag:Int, pl:Array<Value>} {
+			return switch t {
+				case TMono(r):
+					if (r.tmType == null) {
+						{tag: 0, pl: [encodeRef(r, (r:TMono) -> r.tmType == null ? vnull : encodeType(r.tmType), () -> "<mono>")]};
+					} else {
+						loop(r.tmType);
+					}
+				case TEnum(e, pl):
+					var params = encodeTparams(pl);
+					{tag: 1, pl: [encodeRef(e, encodeTenum, () -> MacroApi.sTypePath(e.ePath)), params]};
+				case TInst(c, pl):
+					var params = encodeTparams(pl);
+					{tag: 2, pl: [encodeClref(c), params]};
+				case TType(t, pl):
+					var params = encodeTparams(pl);
+					{tag: 3, pl: [encodeRef(t, encodeTtype, () -> MacroApi.sTypePath(t.tPath)), params]};
+				case TFun(sig):
+					var pl = sig.args.map(a -> {
+						var t = encodeType(a.type);
+						var o = vbool(a.optional);
+						var n = encodeString(a.name);
+						encodeObj([fld("name", n), fld("opt", o), fld("t", t)]);
+					});
+					var ret = encodeType(sig.ret);
+					{tag: 4, pl: [encodeArray(pl), ret]};
+				case TAnon(a):
+					{tag: 5, pl: [encodeRef(a, encodeTanon, () -> "<anonymous>")]};
+				case TDynamic(null):
+					{tag: 6, pl: [vnull]};
+				case TDynamic(tsub):
+					{tag: 6, pl: [encodeType(tsub)]};
+				case TLazy(f):
+					loop(lazyType(f));
+				case TAbstract(a, pl):
+					var params = encodeTparams(pl);
+					{tag: 8, pl: [encodeAbref(a), params]};
+			}
+		}
+		var r = loop(t);
+		return encodeEnum(IType, r.tag, r.pl);
+	}
+
+	public static function encodeLazyType(t:T):Value {
+		var outer = t;
+		function loop(t:T):Value {
+			return switch t {
+				case TMono(r):
+					if (r.tmType != null) loop(r.tmType) else encodeType(outer);
+				case TLazy(f):
+					switch f.value {
+						case LAvailable(t):
+							encodeType(t);
+						case _:
+							encodeEnum(IType, 7, [
+								encodeLazytype(f, () -> switch f.value {
+									case LAvailable(t):
+										encodeType(t);
+									case LWait(_):
+										encodeType(lazyType(f));
+									case LProcessing(_):
+										// our type in on the processing stack, error instead of returning most likely an unbound mono
+										errorMessage("Accessing a type while it's being typed");
+								})
+							]);
+					}
+				case _:
+					encodeType(outer);
+			}
+		}
+		return loop(t);
+	}
+
+	public static function decodeType(t:Value):T {
+		return switch decodeEnum(t) {
+			case {index: 0, args: [r]}: T.TMono(decodeRef(r));
+			case {index: 1, args: [e, pl]}: T.TEnum(decodeRef(e), decodeArray(pl).map(decodeType));
+			case {index: 2, args: [c, pl]}: T.TInst(decodeRef(c), decodeArray(pl).map(decodeType));
+			case {index: 3, args: [t, pl]}: T.TType(decodeRef(t), decodeArray(pl).map(decodeType));
+			case {index: 4, args: [pl, r]}:
+				var args = decodeArray(pl).map(p -> {name: decodeString(field(p, "name")), optional: decodeBool(field(p, "opt")), type: decodeType(field(p, "t"))});
+				T.TFun({args: args, ret: decodeType(r)});
+			case {index: 5, args: [a]}: T.TAnon(decodeRef(a));
+			case {index: 6, args: [t]}: if (isNull(t)) tDynamic else T.TDynamic(decodeType(t));
+			case {index: 7, args: [f]}: T.TLazy(decodeLazytype(f));
+			case {index: 8, args: [a, pl]}: T.TAbstract(decodeRef(a), decodeArray(pl).map(decodeType));
+			case _: throw InvalidExpr.raise();
+		}
+	}
+
+	public static function decodeTypeDecl(t:Value):ModuleType return decodeTdecl(field(t, "__t"));
+
+	// ---------------------------------------------------------------------- //
+	// TEXPR Encoding
+
+	public static function encodeTconst(c:TConstant):Value {
+		return switch c {
+			case TInt(i): encodeEnum(ITConstant, 0, [vint32(i)]);
+			case TFloat(f): encodeEnum(ITConstant, 1, [encodeString(f)]);
+			case TString(s): encodeEnum(ITConstant, 2, [encodeString(s)]);
+			case TBool(b): encodeEnum(ITConstant, 3, [vbool(b)]);
+			case TNull: encodeEnum(ITConstant, 4, []);
+			case TThis: encodeEnum(ITConstant, 5, []);
+			case TSuper: encodeEnum(ITConstant, 6, []);
+		}
+	}
+
+	public static function encodeTvar(v:TVar):Value {
+		function fExtra(ve:TVarExtra):Value {
+			var expr = vopt(encodeTexpr, ve.vExpr);
+			var params = encodeTypeParams(ve.vParams);
+			return encodeObj([fld("params", params), fld("expr", expr),]);
+		}
+		var unsafe = encodeUnsafe(v);
+		var isStatic = vbool(hasVarFlag(v, VStatic));
+		var meta = encodeMeta(v.vMeta, m -> v.vMeta = m);
+		var extra = vopt(fExtra, v.vExtra);
+		var capture = vbool(hasVarFlag(v, VCaptured));
+		var t = encodeType(v.vType);
+		var name = encodeString(v.vName);
+		var id = vint(v.vId);
+		return encodeObj([
+			fld("id", id),
+			fld("name", name),
+			fld("t", t),
+			fld("capture", capture),
+			fld("extra", extra),
+			fld("meta", meta),
+			fld("isStatic", isStatic),
+			fld("$", unsafe),
+		]);
+	}
+
+	public static function encodeModuleType(mt:ModuleType):Value {
+		return switch mt {
+			case TClassDecl(c): encodeEnum(IModuleType, 0, [encodeClref(c)]);
+			case TEnumDecl(e): encodeEnum(IModuleType, 1, [encodeEnref(e)]);
+			case TTypeDecl(t): encodeEnum(IModuleType, 2, [encodeRef(t, encodeTtype, () -> MacroApi.sTypePath(t.tPath))]);
+			case TAbstractDecl(a): encodeEnum(IModuleType, 3, [encodeAbref(a)]);
+		}
+	}
+
+	public static function encodeTfunc(func:TFunc):Value {
+		var expr = encodeTexpr(func.tfExpr);
+		var t = encodeType(func.tfType);
+		var args = encodeArray(func.tfArgs.map(a -> {
+			var value = a.defaultValue == null ? vnull : encodeTexpr(a.defaultValue);
+			var v = encodeTvar(a.variable);
+			encodeObj([fld("v", v), fld("value", value)]);
+		}));
+		return encodeObj([fld("args", args), fld("t", t), fld("expr", expr)]);
+	}
+
+	public static function encodeFieldAccess(fa:TFieldAccess):Value {
+		function encodeInstance(c:TClass, tl:TParams):Value {
+			var params = encodeTparams(tl);
+			return encodeObj([fld("c", encodeClref(c)), fld("params", params)]);
+		}
+		return switch fa {
+			case FInstance(c, tl, cf):
+				var vcf = encodeCfref(cf);
+				var vtl = encodeTparams(tl);
+				encodeEnum(IFieldAccess, 0, [encodeClref(c), vtl, vcf]);
+			case FStatic(c, cf):
+				var vcf = encodeCfref(cf);
+				encodeEnum(IFieldAccess, 1, [encodeClref(c), vcf]);
+			case FAnon(cf):
+				encodeEnum(IFieldAccess, 2, [encodeCfref(cf)]);
+			case FDynamic(s):
+				encodeEnum(IFieldAccess, 3, [encodeString(s)]);
+			case FClosure(co, cf):
+				var vcf = encodeCfref(cf);
+				encodeEnum(IFieldAccess, 4, [co == null ? vnull : encodeInstance(co.cls, co.params), vcf]);
+			case FEnum(en, ef):
+				var vef = encodeEfield(ef);
+				encodeEnum(IFieldAccess, 5, [encodeEnref(en), vef]);
+		}
+	}
+
+	public static function encodeTexpr(e:TExpr):Value {
+		function loop(e:TExpr):Value {
+			// the elements of each upstream list literal are evaluated right to left
+			var r:{tag:Int, pl:Array<Value>} = switch e.eexpr {
+				case TConst(c):
+					{tag: 0, pl: [encodeTconst(c)]};
+				case TLocal(v):
+					{tag: 1, pl: [encodeTvar(v)]};
+				case TArray(e1, e2):
+					var v2 = loop(e2);
+					{tag: 2, pl: [loop(e1), v2]};
+				case TBinop(op, e1, e2):
+					var v2 = loop(e2);
+					var v1 = loop(e1);
+					{tag: 3, pl: [encodeBinop(op), v1, v2]};
+				case TField(e1, fa):
+					var vfa = encodeFieldAccess(fa);
+					{tag: 4, pl: [loop(e1), vfa]};
+				case TTypeExpr(mt):
+					{tag: 5, pl: [encodeModuleType(mt)]};
+				case TParenthesis(e1):
+					{tag: 6, pl: [loop(e1)]};
+				case TObjectDecl(fl):
+					{tag: 7, pl: [encodeArray(fl.map(f -> {
+						var expr = loop(f.expr);
+						encodeObj([fld("name", encodeString(f.key.name)), fld("expr", expr),]);
+					}))]};
+				case TArrayDecl(el):
+					{tag: 8, pl: [encodeTexprList(el)]};
+				case TCall(e1, el):
+					var vel = encodeTexprList(el);
+					{tag: 9, pl: [loop(e1), vel]};
+				case TNew(c, pl, el):
+					var vel = encodeTexprList(el);
+					var vpl = encodeTparams(pl);
+					{tag: 10, pl: [encodeClref(c), vpl, vel]};
+				case TUnop(op, flag, e1):
+					var v1 = loop(e1);
+					{tag: 11, pl: [encodeUnop(op), vbool(flag == Postfix), v1]};
+				case TFunction(func):
+					{tag: 12, pl: [encodeTfunc(func)]};
+				case TVar(v, eo):
+					var veo = vopt(encodeTexpr, eo);
+					{tag: 13, pl: [encodeTvar(v), veo]};
+				case TBlock(el):
+					{tag: 14, pl: [encodeTexprList(el)]};
+				case TIf(eif, ethen, eelse):
+					var velse = vopt(encodeTexpr, eelse);
+					var vthen = loop(ethen);
+					{tag: 16, pl: [loop(eif), vthen, velse]};
+				case TWhile(econd, e1, flag):
+					var vflag = vbool(flag == NormalWhile);
+					var v1 = loop(e1);
+					{tag: 17, pl: [loop(econd), v1, vflag]};
+				case TSwitch(sw):
+					var switchSubject = if (sw.switchExhaustive) {
+						var meta:MetadataEntry = {meta: Exhaustive, exprs: [], pos: Globals.nullPos};
+						new TExpr(TMeta(meta, sw.switchSubject), sw.switchSubject.etype, sw.switchSubject.epos);
+					} else {
+						sw.switchSubject;
+					}
+					var vdefault = vopt(encodeTexpr, sw.switchDefault);
+					var vcases = encodeArray(sw.switchCases.map(c -> {
+						var expr = loop(c.caseExpr);
+						encodeObj([fld("values", encodeTexprList(c.casePatterns)), fld("expr", expr)]);
+					}));
+					{tag: 18, pl: [loop(switchSubject), vcases, vdefault]};
+				case TTry(e1, catches):
+					var vcatches = encodeArray(catches.map(c -> {
+						var expr = loop(c.expr);
+						encodeObj([fld("v", encodeTvar(c.variable)), fld("expr", expr)]);
+					}));
+					{tag: 19, pl: [loop(e1), vcatches]};
+				case TReturn(e1):
+					{tag: 20, pl: [vopt(encodeTexpr, e1)]};
+				case TBreak:
+					{tag: 21, pl: []};
+				case TContinue:
+					{tag: 22, pl: []};
+				case TThrow(e1):
+					{tag: 23, pl: [loop(e1)]};
+				case TCast(e1, mt):
+					var vmt = mt == null ? vnull : encodeModuleType(mt);
+					{tag: 24, pl: [loop(e1), vmt]};
+				case TMeta(m, e1):
+					var v1 = loop(e1);
+					{tag: 25, pl: [encodeMetaEntry(m), v1]};
+				case TEnumParameter(e1, ef, i):
+					var vef = encodeEfield(ef);
+					{tag: 26, pl: [loop(e1), vef, vint(i)]};
+				case TEnumIndex(e1):
+					{tag: 27, pl: [loop(e1)]};
+				case TIdent(s):
+					{tag: 28, pl: [encodeString(s)]};
+			}
+			var t = encodeType(e.etype);
+			var expr = encodeEnum(ITypedExpr, r.tag, r.pl);
+			return encodeObj([fld("pos", encodePos(e.epos)), fld("expr", expr), fld("t", t)]);
+		}
+		return loop(e);
+	}
+
+	public static function encodeTexprList(el:Array<TExpr>):Value return encodeArray(el.map(encodeTexpr));
+
+	// ---------------------------------------------------------------------- //
+	// TEXPR Decoding
+
+	public static function decodeTconst(c:Value):TConstant {
+		return switch decodeEnum(c) {
+			case {index: 0, args: [s]}: TInt(decodeI32(s));
+			case {index: 1, args: [s]}: TFloat(decodeString(s));
+			case {index: 2, args: [s]}: TString(decodeString(s));
+			case {index: 3, args: [s]}: TBool(decodeBool(s));
+			case {index: 4, args: []}: TNull;
+			case {index: 5, args: []}: TThis;
+			case {index: 6, args: []}: TSuper;
+			case _: throw InvalidExpr.raise();
+		}
+	}
+
+	public static function decodeTvar(v:Value):TVar return (decodeUnsafe(field(v, "$")) : TVar);
+
+	public static function decodeVarAccess(v:Value):VarAccess {
+		return switch decodeEnum(v) {
+			case {index: 0, args: []}: AccNormal;
+			case {index: 1, args: []}: AccNo;
+			case {index: 2, args: []}: AccNever;
+			case {index: 4, args: []}: AccCall;
+			case {index: 5, args: []}: AccPrivateCall;
+			case {index: 6, args: []}: AccInline;
+			case {index: 7, args: [s1, s2]}: AccRequire(decodeString(s1), opt(decodeString, s2));
+			case {index: 8, args: []}: AccCtor;
+			case _: throw InvalidExpr.raise();
+		}
+	}
+
+	public static function decodeMethodKind(v:Value):MethodKind {
+		return switch decodeEnum(v) {
+			case {index: 0, args: []}: MethNormal;
+			case {index: 1, args: []}: MethInline;
+			case {index: 2, args: []}: MethDynamic;
+			case {index: 3, args: []}: MethMacro;
+			case _: throw InvalidExpr.raise();
+		}
+	}
+
+	public static function decodeFieldKind(v:Value):FieldKind {
+		return switch decodeEnum(v) {
+			case {index: 0, args: [vr, vw]}: FieldKind.Var({vRead: decodeVarAccess(vr), vWrite: decodeVarAccess(vw)});
+			case {index: 1, args: [m]}: FieldKind.Method(decodeMethodKind(m));
+			case _: throw InvalidExpr.raise();
+		}
+	}
+
+	public static function decodeEfield(v:Value):TEnumField {
+		function getEnum(t:T):TEnum {
+			return switch follow(t) {
+				case TEnum(enm, _): enm;
+				case TFun(sig): getEnum(sig.ret);
+				case _: throw NotFound.raise();
+			}
+		}
+		var name = decodeString(field(v, "name"));
+		try {
+			var enm = getEnum(decodeType(field(v, "type")));
+			return PMap.find(name, enm.eConstrs);
+		} catch (_:NotFound) {
+			throw InvalidExpr.raise();
+		}
+	}
+
+	public static function decodeFieldAccess(v:Value):TFieldAccess {
+		return switch decodeEnum(v) {
+			case {index: 0, args: [c, tl, cf]}:
+				var c:TClass = decodeRef(c);
+				FInstance(c, decodeArray(tl).map(decodeType), decodeRef(cf));
+			case {index: 1, args: [c, cf]}: FStatic(decodeRef(c), decodeRef(cf));
+			case {index: 2, args: [cf]}: FAnon(decodeRef(cf));
+			case {index: 3, args: [s]}: FDynamic(decodeString(s));
+			case {index: 4, args: [co, cf]}:
+				var co = if (isNull(co)) null else {cls: (decodeRef(field(co, "c")) : TClass), params: decodeArray(field(co, "params")).map(decodeType)};
+				FClosure(co, decodeRef(cf));
+			case {index: 5, args: [e, ef]}: FEnum(decodeRef(e), decodeEfield(ef));
+			case _: throw InvalidExpr.raise();
+		}
+	}
+
+	public static function decodeModuleType(v:Value):ModuleType {
+		return switch decodeEnum(v) {
+			case {index: 0, args: [c]}: TClassDecl(decodeRef(c));
+			case {index: 1, args: [en]}: TEnumDecl(decodeRef(en));
+			case {index: 2, args: [t]}: TTypeDecl(decodeRef(t));
+			case {index: 3, args: [a]}: TAbstractDecl(decodeRef(a));
+			case _: throw InvalidExpr.raise();
+		}
+	}
+
+	public static function decodeTfunc(v:Value):TFunc {
+		var tfArgs = decodeArray(field(v, "args")).map(v -> {variable: decodeTvar(field(v, "v")), defaultValue: opt(decodeTexpr, field(v, "value"))});
+		var tfType = decodeType(field(v, "t"));
+		var tfExpr = decodeTexpr(field(v, "expr"));
+		return {
+			tfArgs: tfArgs,
+			tfType: tfType,
+			tfExpr: tfExpr
+		};
+	}
+
+	public static function decodeTexpr(v:Value):TExpr {
+		// upstream: `try loop v with Stack_overflow -> raise Invalid_expr`
+		return decodeTexprLoop(v);
+	}
+
+	static function decodeTexprLoop(v:Value):TExpr {
+		var p = decodePos(field(v, "pos"));
+		return mk(decodeTexprDef(field(v, "expr"), p), decodeType(field(v, "t")), p);
+	}
+
+	static function decodeTexprDef(e:Value, p:Pos):TExprDef {
+		var loop = decodeTexprLoop;
+		return switch decodeEnum(e) {
+			case {index: 0, args: [c]}: TConst(decodeTconst(c));
+			case {index: 1, args: [v]}: TLocal(decodeTvar(v));
+			case {index: 2, args: [v1, v2]}: TArray(loop(v1), loop(v2));
+			case {index: 3, args: [op, v1, v2]}: TBinop(decodeOp(op), loop(v1), loop(v2));
+			case {index: 4, args: [v1, fa]}: TField(loop(v1), decodeFieldAccess(fa));
+			case {index: 5, args: [mt]}: TTypeExpr(decodeModuleType(mt));
+			case {index: 6, args: [v1]}: TParenthesis(loop(v1));
+			case {index: 7, args: [v]}: TObjectDecl(decodeArray(v).map(v -> {key: {name: decodeString(field(v, "name")), pos: p, quote: NoQuotes}, expr: loop(field(v, "expr"))}));
+			case {index: 8, args: [vl]}: TArrayDecl(decodeArray(vl).map(loop));
+			case {index: 9, args: [v1, vl]}: TCall(loop(v1), decodeArray(vl).map(loop));
+			case {index: 10, args: [c, tl, vl]}: TNew(decodeRef(c), decodeArray(tl).map(decodeType), decodeArray(vl).map(loop));
+			case {index: 11, args: [op, pf, v1]}: TUnop(decodeUnop(op), if (decodeBool(pf)) Postfix else Prefix, loop(v1));
+			case {index: 12, args: [f]}: TFunction(decodeTfunc(f));
+			case {index: 13, args: [v, eo]}: TExprDef.TVar(decodeTvar(v), opt(loop, eo));
+			case {index: 14, args: [vl]}: TBlock(decodeArray(vl).map(loop));
+			// 15 was TFor
+			case {index: 16, args: [vif, vthen, velse]}: TIf(loop(vif), loop(vthen), opt(loop, velse));
+			case {index: 17, args: [vcond, v1, b]}: TWhile(loop(vcond), loop(v1), if (decodeBool(b)) NormalWhile else DoWhile);
+			case {index: 18, args: [v1, cl, vdef]}:
+				function isExhaustive(e1:TExpr, def:Null<TExpr>):Bool {
+					function loop(e1:TExpr):Bool {
+						return switch e1.eexpr {
+							case TMeta({meta: Exhaustive}, _): true;
+							case TMeta(_, e1) | TParenthesis(e1): loop(e1);
+							case _: false;
+						}
+					}
+					return def != null || loop(e1);
+				}
+				var subject = loop(v1);
+				var cases = decodeArray(cl).map(v -> ({
+					casePatterns: decodeArray(field(v, "values")).map(loop),
+					caseExpr: loop(field(v, "expr"))
+				} : TSwitchCase));
+				var def = opt(loop, vdef);
+				var sw = core.Texpr.mkSwitch(subject, cases, def, isExhaustive(subject, def));
+				TExprDef.TSwitch(sw);
+			case {index: 19, args: [v1, cl]}: TTry(loop(v1), decodeArray(cl).map(v -> {variable: decodeTvar(field(v, "v")), expr: loop(field(v, "expr"))}));
+			case {index: 20, args: [vo]}: TReturn(opt(loop, vo));
+			case {index: 21, args: []}: TBreak;
+			case {index: 22, args: []}: TContinue;
+			case {index: 23, args: [v1]}: TThrow(loop(v1));
+			case {index: 24, args: [v1, mto]}: TCast(loop(v1), opt(decodeModuleType, mto));
+			case {index: 25, args: [m, v1]}: TMeta(decodeMetaEntry(m), loop(v1));
+			case {index: 26, args: [v1, ef, i]}: TEnumParameter(loop(v1), decodeEfield(ef), decodeInt(i));
+			case {index: 27, args: [v1]}: TEnumIndex(loop(v1));
+			case {index: 28, args: [v1]}: TIdent(decodeString(v1));
+			case {index: i, args: el}:
+				Sys.print(i + " " + el.length + "\n");
+				throw InvalidExpr.raise();
+		}
+	}
+
+	// ---------------------------------------------------------------------- //
+	// TYPE DEFINITION
+
+	public static function decodeTypeDef(v:Value):DecodedTypeDef {
+		var pack = decodeArray(field(v, "pack")).map(decodeString);
+		var name = decodePlacedName(field(v, "name_pos"), field(v, "name"));
+		var meta = decodeMetaContent(field(v, "meta"));
+		var pos = decodePos(field(v, "pos"));
+		var isExtern = decodeOptBool(field(v, "isExtern"));
+		var fields = decodeArray(field(v, "fields")).map(decodeField);
+		var doc = decodeDoc(field(v, "doc"));
+		// `mk fl dl`: d_params is decoded when the definition is built
+		function params():Array<TypeParam> return decodeTparams(field(v, "params"));
+		var tdef:TypeDef = switch decodeEnum(field(v, "kind")) {
+			case {index: 0, args: []}:
+				function conv(f:ClassField):EnumConstructor {
+					function loop(a:FuncArg):EnumConstructorArg {
+						return switch a.type {
+							case null: throw InvalidExpr.raise();
+							case t: {name: a.name.name, optional: a.optional, type: t};
+						}
+					}
+					var r:{args:Array<EnumConstructorArg>, params:Array<TypeParam>, t:Null<TypeHint>} = switch f.cffKind {
+						case FVar(t, null): {args: [], params: [], t: t};
+						case FFun(f): {args: f.fArgs.map(loop), params: f.fParams, t: f.fType};
+						case _: throw InvalidExpr.raise();
+					}
+					return {
+						ecName: f.cffName,
+						ecDoc: f.cffDoc,
+						ecMeta: f.cffMeta,
+						ecPos: f.cffPos,
+						ecArgs: r.args,
+						ecParams: r.params,
+						ecType: r.t,
+					};
+				}
+				var data = fields.map(conv);
+				var flags:Array<EnumFlag> = if (isExtern) [EExtern] else [];
+				EEnum({name: name, doc: doc, params: params(), meta: meta, flags: flags, data: data});
+			case {index: 1, args: []}:
+				var data:TypeHint = {type: CTAnonymous(fields), pos: pos};
+				var flags:Array<TypedefFlag> = if (isExtern) [TDExtern] else [];
+				ETypedef({name: name, doc: doc, params: params(), meta: meta, flags: flags, data: data});
+			case {index: 2, args: [ext, impl, interf, isFinal, isAbstract]}:
+				var flags:Array<ClassFlag> = if (isExtern) [HExtern] else [];
+				var isInterface = decodeOptBool(interf);
+				var isFinal = decodeOptBool(isFinal);
+				var isAbstract = decodeOptBool(isAbstract);
+				var interfaces = switch opt(v -> decodeArray(v).map(decodeAstPath), impl) {
+					case null: [];
+					case l: l;
+				}
+				var flags = switch opt(decodeAstPath, ext) {
+					case null: flags;
+					case t: [HExtends(t)].concat(flags);
+				}
+				var flags = if (isInterface) {
+					var flags = [HInterface].concat(flags);
+					interfaces.map(t -> HExtends(t)).concat(flags);
+				} else {
+					interfaces.map(t -> HImplements(t)).concat(flags);
+				}
+				var flags = if (isFinal) [HFinal].concat(flags) else flags;
+				var flags = if (isAbstract) [HAbstract].concat(flags) else flags;
+				EClass({name: name, doc: doc, params: params(), meta: meta, flags: flags, data: fields});
+			case {index: 3, args: [t]}:
+				var data = decodeCtype(t);
+				var flags:Array<TypedefFlag> = if (isExtern) [TDExtern] else [];
+				ETypedef({name: name, doc: doc, params: params(), meta: meta, flags: flags, data: data});
+			case {index: 4, args: [tthis, tflags, tfrom, tto]}:
+				var flags:Array<AbstractFlag> = switch opt(decodeArray, tflags) {
+					case null: [];
+					case ta: ta.map(f -> switch decodeEnum(f) {
+						case {index: 0, args: []}: AbEnum;
+						case {index: 1, args: [ct]}: AbFrom(decodeCtype(ct));
+						case {index: 2, args: [ct]}: AbTo(decodeCtype(ct));
+						case _: throw InvalidExpr.raise();
+					});
+				}
+				var flags = switch opt(decodeArray, tfrom) {
+					case null: flags;
+					case ta: ta.map(t -> AbFrom(decodeCtype(t))).concat(flags);
+				}
+				var flags = switch opt(decodeArray, tto) {
+					case null: flags;
+					case ta: ta.map(t -> AbTo(decodeCtype(t))).concat(flags);
+				}
+				var flags = switch opt(decodeCtype, tthis) {
+					case null: flags;
+					case t: [AbOver(t)].concat(flags);
+				}
+				var flags = if (isExtern) [AbExtern].concat(flags) else flags;
+				EAbstract({name: name, doc: doc, params: params(), meta: meta, flags: flags, data: fields});
+			case {index: 5, args: [fk, al]}:
+				var fk = decodeClassFieldKind(fk);
+				var al = optList(decodeArray, al).map(decodeAccess);
+				// let al = if isExtern then (AExtern,pos) :: al else al in
+				EStatic({name: name, doc: doc, params: params(), meta: meta, flags: al, data: fk});
+			case _:
+				throw InvalidExpr.raise();
+		}
+		// if our package ends with an uppercase letter, then it's the module name
+		var path:GlobalTypePath = if (pack.length > 0 && pack[pack.length - 1].length > 0 && core.StringHelper.startsUppercaseIdentifier(pack[pack.length - 1])) {
+			{pack: pack.slice(0, pack.length - 1), name: pack[pack.length - 1]};
+		} else {
+			{pack: pack, name: name.name};
+		}
+		return {path: path, def: tdef, pos: pos};
+	}
+
+	public static function decodePath(v:Value):GlobalTypePath {
+		var pack = decodeArray(field(v, "pack")).map(decodeString);
+		var name = decodeString(field(v, "name"));
+		return {pack: pack, name: name};
+	}
+
+	public static function decodePlatform(v:Value):Platform {
+		return switch decodeEnum(v) {
+			case {index: 0, args: []}: Platform.Cross;
+			case {index: 1, args: []}: Platform.Js;
+			case {index: 2, args: []}: Platform.Lua;
+			case {index: 3, args: []}: Platform.Neko;
+			case {index: 4, args: []}: Platform.Flash;
+			case {index: 5, args: []}: Platform.Php;
+			case {index: 6, args: []}: Platform.Cpp;
+			case {index: 7, args: []}: Platform.Jvm;
+			case {index: 8, args: []}: Platform.Python;
+			case {index: 9, args: []}: Platform.Hl;
+			case {index: 10, args: []}: Platform.Eval;
+			case {index: 11, args: [s]}: Platform.CustomTarget(decodeString(s));
+			case _: throw InvalidExpr.raise();
+		}
+	}
+
+	public static function decodePlatformConfig(v:Value):PlatformConfig {
+		var capturePolicy = switch decodeEnum(field(v, "capturePolicy")) {
+			case {index: 0, args: []}: CPNone;
+			case {index: 1, args: []}: CPWrapRef;
+			case {index: 2, args: []}: CPLoopVars;
+			case _: throw InvalidExpr.raise();
+		}
+		var vExc = field(v, "exceptions");
+		var exceptionConfig:ExceptionsConfig = {
+			ecNativeThrows: decodeArray(field(vExc, "nativeThrows")).map(decodePath),
+			ecNativeCatches: decodeArray(field(vExc, "nativeCatches")).map(decodePath),
+			ecAvoidWrapping: decodeBool(field(vExc, "avoidWrapping")),
+			ecWildcardCatch: decodePath(field(vExc, "wildcardCatch")),
+			ecBaseThrow: decodePath(field(vExc, "baseThrow")),
+			ecSpecialThrow: (_) -> false, // wtf is this?
+		};
+		var vScoping = field(v, "scoping");
+		function decodeScopeFlag(v:Value):VarScopingFlags {
+			return switch decodeEnum(v) {
+				case {index: 0, args: []}: VarHoisting;
+				case {index: 1, args: []}: NoShadowing;
+				case {index: 2, args: []}: NoCatchVarShadowing;
+				case {index: 3, args: []}: ReserveCurrentTopLevelSymbol;
+				case {index: 4, args: []}: ReserveAllTopLevelSymbols;
+				case {index: 5, args: []}: ReserveAllTypesFlat;
+				case {index: 6, args: [sl]}: ReserveNames(decodeArray(sl).map(decodeString));
+				case {index: 7, args: []}: SwitchCasesNoBlocks;
+				case _: throw InvalidExpr.raise();
+			}
+		}
+		var varScopingConfig:VarScopingConfig = {
+			vsScope: switch decodeEnum(field(vScoping, "scope")) {
+				case {index: 0, args: []}: FunctionScope;
+				case {index: 1, args: []}: BlockScope;
+				case _: throw InvalidExpr.raise();
+			},
+			vsFlags: decodeArray(field(vScoping, "flags")).map(decodeScopeFlag),
+		};
+		return {
+			pfStatic: decodeBool(field(v, "staticTypeSystem")),
+			pfSys: decodeBool(field(v, "sys")),
+			pfCapturePolicy: capturePolicy,
+			pfPadNulls: decodeBool(field(v, "padNulls")),
+			pfAddFinalReturn: decodeBool(field(v, "addFinalReturn")),
+			pfOverload: decodeBool(field(v, "overloadFunctions")),
+			pfCanSkipNonNullableArgument: false,
+			pfReservedTypePaths: decodeArray(field(v, "reservedTypePaths")).map(decodePath),
+			pfSupportsFunctionEquality: decodeBool(field(v, "supportsFunctionEquality")),
+			pfUsesUtf16: decodeBool(field(v, "usesUtf16")),
+			pfThisBeforeSuper: decodeBool(field(v, "thisBeforeSuper")),
+			pfSupportsThreads: decodeBool(field(v, "supportsThreads")),
+			pfSupportsUnicode: decodeBool(field(v, "supportsUnicode")),
+			pfSupportsRestArgs: decodeBool(field(v, "supportsRestArgs")),
+			pfExceptions: exceptionConfig,
+			pfScoping: varScopingConfig,
+			pfSupportsAtomics: decodeBool(field(v, "supportsAtomics")),
+		};
+	}
+
+	// ---------------------------------------------------------------------- //
+	// VALUE-TO-CONSTANT
+
+	public static function makeConst(e:TExpr):Value {
+		return switch e.eexpr {
+			case TConst(c):
+				switch c {
+					case TInt(i): vint32(i);
+					case TFloat(s): vfloat(core.Numeric.parseFloat(s));
+					case TString(s): encodeString(s);
+					case TBool(b): vbool(b);
+					case TNull: vnull;
+					case TThis | TSuper: throw core.ds.Exit.raise();
+				}
+			case TParenthesis(e) | TMeta(_, e) | TCast(e, null):
+				makeConst(e);
+			case TObjectDecl(el):
+				encodeObj(el.map(f -> fld(f.key.name, makeConst(f.expr))));
+			case TArrayDecl(al):
+				encodeArray(al.map(makeConst));
+			case _:
+				throw core.ds.Exit.raise();
+		}
+	}
+
+	// ---------------------------------------------------------------------- //
+	// MACRO API
+
+	/**
+		Our macro API implementation. It gets called by the interpreter and
+		accesses the compiler with the compiler_api
+	**/
+	public static function macroApi(ccom:Void->CommonContext, getApi:Void->CompilerApi):Array<{name:String, value:Value}> {
+		var decodeType = function(v:Value):T {
+			return try MacroApiImpl.decodeType(v) catch (_:InvalidExpr) getApi().excString("Invalid expression");
+		}
+		var decodeExpr = function(v:Value):Expr {
+			return try MacroApiImpl.decodeExpr(v) catch (_:InvalidExpr) getApi().excString("Invalid expression");
+		}
+		var decodeTexpr = function(v:Value):TExpr {
+			return try MacroApiImpl.decodeTexpr(v) catch (_:InvalidExpr) getApi().excString("Invalid expression");
+		}
+		var failwith = function(s:String):Dynamic return getApi().excString(s);
+		return [
+			{name: "contains_display_position", value: vfun1(vp -> {
+				var p = decodePos(vp);
+				var displayPos = core.display.DisplayPosition.displayPosition;
+				function sameFile():Bool {
+					var dfile = displayPos.get().pfile;
+					return dfile == p.pfile || {
+						var com = ccom();
+						(!haxe.io.Path.isAbsolute(p.pfile) || !haxe.io.Path.isAbsolute(dfile))
+						&& (com.partScope.fileKeys.get(dfile) == com.partScope.fileKeys.get(p.pfile));
+					};
+				}
+				vbool(displayPos.enclosedIn(p) && sameFile());
+			})},
+			{name: "current_pos", value: vfun0(() -> {
+				encodePos(getApi().pos);
+			})},
+			{name: "get_macro_stack", value: vfun0(() -> {
+				var stack = getApi().getMacroStack();
+				encodeArray(stack.map(encodePos));
+			})},
+			{name: "init_macros_done", value: vfun0(() -> {
+				vbool(getApi().initMacrosDone());
+			})},
+			{name: "error", value: vfun3((msg, p, sub) -> {
+				var msg = decodeString(msg);
+				var p = decodePos(p);
+				var sub = decodeSubErrors(sub);
+				getApi().displayError(msg, p, sub);
+				throw new Abort();
+			})},
+			{name: "fatal_error", value: vfun3((msg, p, sub) -> {
+				var msg = decodeString(msg);
+				var pos = decodePos(p);
+				var sub = decodeSubErrors(sub);
+				throw new core.Error.FatalError(core.Error.convertError({msg: msg, pos: pos, sub: sub}));
+			})},
+			{name: "report_error", value: vfun3((msg, p, sub) -> {
+				var msg = decodeString(msg);
+				var p = decodePos(p);
+				var sub = decodeSubErrors(sub);
+				getApi().displayError(msg, p, sub);
+				vnull;
+			})},
+			{name: "warning", value: vfun3((msg, p, depth) -> {
+				var msg = decodeString(msg);
+				var p = decodePos(p);
+				var depth = decodeInt(depth);
+				getApi().warning(WUser, msg, p, depth);
+				vnull;
+			})},
+			{name: "info", value: vfun3((msg, p, depth) -> {
+				var msg = decodeString(msg);
+				var p = decodePos(p);
+				var depth = decodeInt(depth);
+				getApi().info(msg, p, depth);
+				vnull;
+			})},
+			{name: "get_messages", value: vfun0(() -> {
+				encodeArray(ccom().getMessages().map(msg -> encodeMessage(msg)));
+			})},
+			{name: "filter_messages", value: vfun1(predicate -> {
+				var predicate = prepareCallback(predicate, 2);
+				ccom().filterMessages(msg -> decodeBool(predicate([encodeMessage(msg)])));
+				vnull;
+			})},
+			{name: "class_path", value: vfun0(() -> {
+				encodeArray((ccom().classPaths.asStringList() : Array<String>).map(encodeString));
+			})},
+			{name: "resolve_path", value: vfun1(file -> {
+				var file = decodeString(file);
+				encodeString(try Common.findFile(ccom(), file) catch (e:Dynamic) if (isNotFound(e)) failwith("File not found '" + file + "'") else throw e);
+			})},
+			{name: "define", value: vfun2((s, v) -> {
+				var s = decodeString(s);
+				var com = ccom();
+				if (isNull(v))
+					Common.externalDefine(com, s)
+				else
+					Common.externalDefineValue(com, s, decodeString(v));
+				vnull;
+			})},
+			{name: "defined", value: vfun1(s -> {
+				vbool(Common.externalDefined(ccom(), decodeString(s)));
+			})},
+			{name: "defined_value", value: vfun1(s -> {
+				try encodeString(Common.externalDefinedValue(ccom(), decodeString(s))) catch (e:Dynamic) if (isNotFound(e)) vnull else throw e;
+			})},
+			{name: "get_defines", value: vfun0(() -> {
+				encodeStringMap(encodeString, (Common.definesForExternal(ccom()) : StringMap<String>));
+			})},
+			{name: "get_type", value: vfun1(s -> {
+				var tname = decodeString(s);
+				switch getApi().getType(tname) {
+					case null: failwith("Type not found '" + tname + "'");
+					case t: encodeType(t);
+				}
+			})},
+			{name: "get_module", value: vfun1(s -> {
+				encodeArray(getApi().getModule(decodeString(s)).map(encodeType));
+			})},
+			{name: "include_module", value: vfun1(s -> {
+				getApi().includeModule(decodeString(s));
+				vnull;
+			})},
+			{name: "on_after_init_macros", value: vfun1(f -> {
+				var f = prepareCallback(f, 1);
+				getApi().afterInitMacros(() -> {
+					f([]);
+				});
+				vnull;
+			})},
+			{name: "on_after_typing", value: vfun1(f -> {
+				var f = prepareCallback(f, 1);
+				getApi().afterTyping(tl -> {
+					f([encodeArray(tl.map(encodeModuleType))]);
+				});
+				vnull;
+			})},
+			{name: "on_generate", value: vfun2((f, b) -> {
+				var f = prepareCallback(f, 1);
+				getApi().onGenerate(tl -> {
+					f([encodeArray(tl.map(encodeType))]);
+				}, decodeBool(b));
+				vnull;
+			})},
+			{name: "on_after_generate", value: vfun1(f -> {
+				var f = prepareCallback(f, 0);
+				getApi().afterGenerate(() -> {
+					f([]);
+				});
+				vnull;
+			})},
+			{name: "on_type_not_found", value: vfun1(f -> {
+				var f = prepareCallback(f, 1);
+				getApi().onTypeNotFound(path -> f([encodeString(path)]));
+				vnull;
+			})},
+			{name: "do_parse", value: vfun3((s, p, b) -> {
+				var s = decodeString(s);
+				if (s == "")
+					getApi().excString("Invalid expression");
+				encodeExpr(getApi().parseString(s, decodePos(p), decodeBool(b)));
+			})},
+			{name: "register_file_contents", value: vfun2((f, c) -> {
+				var f = decodeString(f);
+				var content = decodeString(c);
+				getApi().registerFileContents(f, content);
+				vnull;
+			})},
+			{name: "make_expr", value: vfun2((v, p) -> {
+				encodeExpr(valueToExpr(v, decodePos(p)));
+			})},
+			{name: "signature", value: vfun1(v -> {
+				try {
+					encodeString(valueSignature(v).toHex());
+				} catch (e:core.ds.InvalidArgument) {
+					getApi().excString(e.message);
+				}
+			})},
+			{name: "to_complex_type", value: vfun1(v -> {
+				try {
+					encodeCtype(core.TOther.TExprToExpr.convertTypeHint(decodeType(v)));
+				} catch (_:core.ds.Exit) {
+					vnull;
+				} catch (_:TypeExit) {
+					// the port's TExprToExpr raises TypeExit where upstream raises Exit
+					vnull;
+				}
+			})},
+			{name: "unify", value: vfun2((t1, t2) -> {
+				var e1 = mk(TObjectDecl([]), decodeType(t1), Globals.nullPos);
+				vbool(getApi().castOrUnify(decodeType(t2), e1, Globals.nullPos));
+			})},
+			{name: "typeof", value: vfun1(v -> {
+				encodeType(getApi().typeExpr(decodeExpr(v)).etype);
+			})},
+			{name: "type_expr", value: vfun1(v -> {
+				encodeTexpr(getApi().typeExpr(decodeExpr(v)));
+			})},
+			{name: "resolve_type", value: vfun2((t, p) -> {
+				encodeType(getApi().resolveType(decodeCtype(t).type, decodePos(p)));
+			})},
+			{name: "resolve_complex_type", value: vfun2((ct, p) -> {
+				encodeCtype(getApi().resolveComplexType({type: decodeCtype(ct).type, pos: decodePos(p)}));
+			})},
+			{name: "s_type", value: vfun1(v -> {
+				encodeString(core.TPrinting.sType(core.TPrinting.printContext(), decodeType(v)));
+			})},
+			{name: "s_expr", value: vfun2((v, b) -> {
+				var f:(T->String)->TExpr->String = if (decodeOptBool(b)) core.TPrinting.sExprPretty.bind(false, "", false) else core.TPrinting.sExprAst.bind(true, "");
+				encodeString(f(core.TPrinting.sType.bind(core.TPrinting.printContext()), decodeTexpr(v)));
+			})},
+			{name: "format_string", value: vfun2((s, p) -> {
+				encodeExpr(getApi().formatString(decodeString(s), decodePos(p)));
+			})},
+			{name: "allow_package", value: vfun1(s -> {
+				getApi().allowPackage(decodeString(s));
+				vnull;
+			})},
+			{name: "add_global_metadata_impl", value: vfun5((s1, s2, b1, b2, b3) -> {
+				getApi().addGlobalMetadata(decodeString(s1), decodeString(s2), {a: decodeBool(b1), b: decodeBool(b2), c: decodeBool(b3)}, getApiCallPos());
+				vnull;
+			})},
+			{name: "register_define_impl", value: vfun2((d, src) -> {
+				var flags:Array<DefineParameter> = [];
+
+				var platforms = decodeOptArray(decodePlatform, field(d, "platforms"));
+				var flags = switch platforms {
+					case []: flags;
+					case _: [DefineParameter.Platforms(platforms)].concat(flags);
+				}
+
+				var params = decodeOptArray(decodeString, field(d, "params"));
+				var flags = flags.concat(params.map(p -> DefineParameter.HasParam(p)));
+
+				var links = decodeOptArray(decodeString, field(d, "links"));
+				var flags = flags.concat(links.map(l -> DefineParameter.Link(l)));
+
+				getApi().registerDefine(decodeString(field(d, "define")), {
+					doc: decodeString(field(d, "doc")),
+					flags: flags,
+					source: opt(decodeString, src),
+				});
+				vnull;
+			})},
+			{name: "register_metadata_impl", value: vfun2((m, src) -> {
+				var flags:Array<MetaParameter> = [];
+
+				var platforms = decodeOptArray(decodePlatform, field(m, "platforms"));
+				var flags = if (platforms.length == 0) flags else [MetaParameter.Platforms(platforms)].concat(flags);
+
+				var targets = decodeOptArray(decodeString, field(m, "targets"));
+				var flags = if (targets.length == 0) flags else [MetaParameter.UsedOn(targets.map(MetaList.parseMetaUsage))].concat(flags);
+
+				var params = decodeOptArray(decodeString, field(m, "params"));
+				var flags = flags.concat(params.map(p -> MetaParameter.HasParam(p)));
+
+				var links = decodeOptArray(decodeString, field(m, "links"));
+				var flags = flags.concat(links.map(l -> MetaParameter.Link(l)));
+
+				getApi().registerMetadata(decodeString(field(m, "metadata")), {
+					doc: decodeString(field(m, "doc")),
+					flags: flags,
+					source: opt(decodeString, src),
+				});
+				vnull;
+			})},
+			{name: "set_custom_js_generator", value: vfun1(f -> {
+				var f = prepareCallback(f, 1);
+				// The JS generator (Genjs) is not part of the port: the generator is
+				// registered as upstream does, but running it fails explicitly.
+				var com = ccom();
+				com.jsGen = () -> {
+					notSupported("Custom JS generators (Compiler.setCustomJSGenerator)");
+				};
+				vnull;
+			})},
+			{name: "flush_disk_cache", value: vfun0(() -> {
+				var com = getApi().getCom();
+				com.classPaths.clearCache();
+				vnull;
+			})},
+			{name: "get_pos_infos", value: vfun1(p -> {
+				var p = decodePos(p);
+				encodeObj([fld("min", vint(p.pmin)), fld("max", vint(p.pmax)), fld("file", encodeString(p.pfile))]);
+			})},
+			{name: "make_position", value: vfun3((min, max, file) -> {
+				encodePos({pmin: decodeInt(min), pmax: decodeInt(max), pfile: decodeString(file)});
+			})},
+			{name: "add_resource", value: vfun2((name, data) -> {
+				var name = decodeString(name);
+				var data = decodeBytes(data);
+				var data = data.toString();
+				if (name == "")
+					failwith("Empty resource name");
+				ccom().resources.set(name, data);
+				var m = getApi().currentModule();
+				m.mExtra.mCacheBoundObjects.push(Resource(name, data));
+				vnull;
+			})},
+			{name: "get_resources", value: vfun0(() -> {
+				var pmapResources = new StringMap<String>();
+				for (k => v in ccom().resources)
+					pmapResources.set(k, v);
+				function encodeStringToBytes(s:String):Value return encodeBytes(haxe.io.Bytes.ofString(s));
+				encodeStringMap(encodeStringToBytes, pmapResources);
+			})},
+			{name: "get_local_module", value: vfun0(() -> {
+				var m = getApi().currentModule();
+				encodeString(MacroApi.sTypePath(m.mPath));
+			})},
+			{name: "get_local_type", value: vfun0(() -> {
+				switch getApi().getLocalType() {
+					case null: vnull;
+					case t: encodeType(t);
+				}
+			})},
+			{name: "get_expected_type", value: vfun0(() -> {
+				switch getApi().getExpectedType() {
+					case null: vnull;
+					case t: encodeType(t);
+				}
+			})},
+			{name: "get_call_arguments", value: vfun0(() -> {
+				switch getApi().getCallArguments() {
+					case null: vnull;
+					case el: encodeArray(el.map(encodeExpr));
+				}
+			})},
+			{name: "get_local_method", value: vfun0(() -> {
+				encodeString(getApi().getLocalMethod());
+			})},
+			{name: "get_local_using", value: vfun0(() -> {
+				encodeArray(getApi().getLocalUsing().map(encodeClref));
+			})},
+			{name: "get_local_imports", value: vfun0(() -> {
+				encodeArray(getApi().getLocalImports().map(encodeImport));
+			})},
+			{name: "local_vars", value: vfun1(asVar -> {
+				var asVar = decodeOptBool(asVar);
+				var vars = getApi().getLocalVars();
+				encodeStringMap(if (asVar) encodeTvar else (v:TVar) -> encodeType(v.vType), vars);
+			})},
+			{name: "follow_with_abstracts", value: vfun2((v, once) -> {
+				var t = decodeType(v);
+				function followOnce(t:T):T {
+					return switch t {
+						case TMono(r):
+							switch r.tmType {
+								case null: t;
+								case t: t;
+							}
+						case TAbstract(a, tl) if (!Meta.has(CoreType, a.aMeta)):
+							core.Abstract.getUnderlyingType(a, tl);
+						case TAbstract(_) | TEnum(_) | TInst(_) | TFun(_) | TAnon(_) | TDynamic(_):
+							t;
+						case TType(t, tl):
+							applyTypedef(t, tl);
+						case TLazy(f):
+							lazyType(f);
+					}
+				}
+				encodeType(if (decodeOptBool(once)) followOnce(t) else core.Abstract.followWithAbstracts(t));
+			})},
+			{name: "follow", value: vfun2((v, once) -> {
+				var t = decodeType(v);
+				encodeType(if (decodeOptBool(once)) TFunctions.followOnce(t) else follow(t));
+			})},
+			{name: "get_build_fields", value: vfun0(() -> {
+				getApi().getBuildFields();
+			})},
+			{name: "define_type", value: vfun2((v, m) -> {
+				getApi().defineType(v, opt(decodeString, m));
+				vnull;
+			})},
+			{name: "make_monomorph", value: vfun0(() -> {
+				var t = T.TMono(core.TUnification.Monomorph.create());
+				encodeType(t);
+			})},
+			{name: "define_module", value: vfun4((path, vl, ui, ul) -> {
+				getApi().defineModule(decodeString(path), decodeArray(vl), decodeArray(ui).map(v -> {
+					var imp = decodeImport(v);
+					{path: imp.path, mode: imp.mode};
+				}), decodeArray(ul).map(decodeAstPath).map(ptp -> ptp.path));
+				vnull;
+			})},
+			{name: "add_class_path", value: vfun1(cp -> {
+				var com = ccom();
+				var cp = decodeString(cp);
+				var path = core.Path.addTrailingSlash(cp);
+				var cp = new core.ClassPath.DirectoryClassPath(path, User);
+				com.classPaths.add(cp);
+				switch com.getMacros() {
+					case null:
+					case mcom:
+						mcom.classPaths.add(cp.clone());
+				}
+				com.classPaths.clearCache();
+				vnull;
+			})},
+			{name: "add_native_lib", value: vfun1(file -> {
+				var file = decodeString(file);
+				var com = ccom();
+				var kind:compiler.ParsedArg.NativeLibKind = switch com.platform {
+					case Jvm: JavaLib;
+					case Flash: SwfLib;
+					case _: failwith("Unsupported platform");
+				}
+				// create_native_lib / NativeLibraryHandler.add_native_lib: Java and SWF
+				// libraries are not part of the port
+				notSupported("Adding native libraries (" + Std.string(kind) + " " + file + ")");
+			})},
+			{name: "register_module_dependency", value: vfun2((m, file) -> {
+				getApi().moduleDependency(decodeString(m), decodeString(file));
+				vnull;
+			})},
+			{name: "get_typed_expr", value: vfun1(e -> {
+				var e = decodeTexpr(e);
+				encodeExpr(core.TOther.TExprToExpr.convertExpr(e));
+			})},
+			{name: "store_expr", value: vfun1(e -> {
+				var api = getApi();
+				var te = api.typeExpr(decodeExpr(e));
+				encodeExpr(api.storeTypedExpr(te));
+			})},
+			{name: "store_typed_expr", value: vfun1(e -> {
+				var e = decodeTexpr(e);
+				encodeExpr(getApi().storeTypedExpr(e));
+			})},
+			{name: "type_and_store_expr", value: vfun1(e -> {
+				var api = getApi();
+				var te = api.typeExpr(decodeExpr(e));
+				var vE = encodeExpr(api.storeTypedExpr(te));
+				function vToString():String return core.TPrinting.sType(core.TPrinting.printContext(), te.etype);
+				encodeObj([fld("expr", vE), fld("type", encodeRef(te.etype, encodeType, vToString))]);
+			})},
+			{name: "get_output", value: vfun0(() -> {
+				encodeString(ccom().file);
+			})},
+			{name: "set_output", value: vfun1(s -> {
+				ccom().file = decodeString(s);
+				vnull;
+			})},
+			{name: "get_display_pos", value: vfun0(() -> {
+				var p = core.display.DisplayPosition.displayPosition.get();
+				if (posEq(p, Globals.nullPos))
+					vnull;
+				else
+					encodeObj([fld("file", encodeString(p.pfile)), fld("pos", vint(p.pmin))]);
+			})},
+			{name: "get_display_mode", value: vfun0(() -> {
+				encodeDisplayMode(ccom().display.dmsKind);
+			})},
+			{name: "get_configuration", value: vfun0(() -> {
+				var com = ccom();
+				encodeObj([
+					fld("version", vint(com.sctx.version.version)),
+					fld("args", encodeArray(compiler.Args.toRawArgs(com.parsedArgs).map(encodeString))),
+					fld("debug", vbool(com.debug)),
+					fld("verbose", vbool(com.verbose)),
+					fld("foptimize", vbool(com.foptimize)),
+					fld("platform", encodePlatform(com.platform)),
+					fld("platformConfig", encodePlatformConfig(com.config)),
+					fld("stdPath", encodeArray((com.classPaths.getStdPaths() : Array<core.ClassPath.IClassPath>).map(path -> encodeString(path.path)))),
+					fld("mainClass", switch com.main.mainPath {
+						case null: vnull;
+						case path: encodePath(path);
+					}),
+					fld("packageRules", encodeStringMap(encodePackageRule, com.packageRules)),
+				]);
+			})},
+			{name: "set_platform_configuration", value: vfun1(v -> {
+				ccom().config = decodePlatformConfig(v);
+				vnull;
+			})},
+			{name: "get_main_expr", value: vfun0(() -> {
+				switch ccom().main.mainExpr {
+					case null: vnull;
+					case e: encodeTexpr(e);
+				}
+			})},
+			{name: "get_module_types", value: vfun0(() -> {
+				encodeArray(ccom().types.map(encodeModuleType));
+			})},
+			{name: "type_to_module_type", value: vfun1(t -> {
+				encodeModuleType(moduleTypeOfType(decodeType(t)));
+			})},
+			{name: "module_type_to_type", value: vfun1(t -> {
+				encodeType(typeOfModuleType(decodeModuleType(t)));
+			})},
+			{name: "apply_params", value: vfun3((tpl, tl, t) -> {
+				var tl = decodeArray(tl).map(decodeType);
+				var tpl = decodeArray(tpl).map(v -> {
+					var t = decodeType(field(v, "t"));
+					var defaultType:Null<T> = null; // we don't care here
+					var c = switch t {
+						case TInst(c = {clKind: KTypeParameter(_)}, _):
+							c;
+						case _:
+							(getApi().excString("Unexpected type where type parameter was expected: " + core.TPrinting.sTypeKind(t)) : TClass);
+					}
+					mkTypeParam(c, TPHType, defaultType, null);
+				});
+				function map(t:T):T {
+					return switch t {
+						case TInst({clKind: KTypeParameter(_)}, _):
+							// use non-physical equality check here to make apply_params work
+							var found = Lambda.find(tpl, tp2 -> core.TUnification.TUnification.typeIseq(t, tp2.ttpType));
+							if (found != null) extractParamType(found) else TFunctions.map(map, t);
+						case _:
+							TFunctions.map(map, t);
+					}
+				}
+				var t = map(decodeType(t));
+				var t = try {
+					applyParams(tpl, tl, t);
+				} catch (_:ApplyParamsMismatch) {
+					var msg = "Could not apply type parameters to " + core.TPrinting.sTypeKind(t) + ":\n\tparams: "
+						+ tpl.map(tp -> core.TPrinting.sTypeParam(core.TPrinting.sTypeKind, tp)).join(", ") + "\n\ttypes: "
+						+ tl.map(core.TPrinting.sTypeKind).join(", ");
+					(getApi().excString(msg) : T);
+				}
+				encodeType(t);
+			})},
+			{name: "include_file", value: vfun2((file, position) -> {
+				var file = decodeString(file);
+				var position = decodeString(position);
+				var file = if (sys.FileSystem.exists(file)) {
+					file;
+				} else {
+					try Common.findFile(ccom(), file) catch (e:Dynamic) if (isNotFound(e)) failwith("unable to find file for inclusion: " + file) else throw e;
+				}
+				ccom().includeFiles = [({file: file, position: position} : Dynamic)].concat(ccom().includeFiles);
+				var m = getApi().currentModule();
+				m.mExtra.mCacheBoundObjects.push(IncludeFile(file, position));
+				vnull;
+			})},
+			// Compilation server
+			{name: "server_add_module_check_policy", value: vfun3((filter, policy, recursive) -> {
+				var filter = decodeArray(filter).map(decodeString);
+				var policy = decodeArray(policy).map(decodeInt);
+				getApi().addModuleCheckPolicy(filter, policy, decodeBool(recursive));
+				vnull;
+			})},
+			{name: "server_invalidate_module", value: vfun1(p -> {
+				var mpath = Ast.parsePath(decodeString(p));
+				var com = ccom();
+				try {
+					com.moduleLut.find(mpath);
+					var msg = "Cannot invalidate loaded module " + MacroApi.sTypePath(mpath);
+					var pos = getApiCallPos();
+					compilerError(core.Error.makeError(core.Error.ErrorMsg.Custom(msg), pos));
+				} catch (e:NotFound) {
+					// com.cs#taint_module mpath ServerInvalidateModule
+					notSupported("Invalidating modules of the compilation server cache");
+				}
+				vnull;
+			})},
+			{name: "server_invalidate_files", value: vfun1(a -> {
+				var com = ccom();
+				for (v in decodeArray(a)) {
+					var s = decodeString(v);
+					var s = com.partScope.fileKeys.get(s);
+					// cs#taint_modules s ServerInvalidateFiles; cs#remove_files s
+					notSupported("Invalidating files of the compilation server cache");
+				}
+				vnull;
+			})},
+			{name: "server_stats", value: vfun0(() -> {
+				var com = ccom();
+				var stats = com.requestScope.stats;
+				encodeObj([
+					fld("filesParsed", vint(stats.sFilesParsed)),
+					fld("modulesTyped", vint(stats.sModulesTyped)),
+					fld("modulesRestoredFromHxb", vint(stats.sModulesRestored)),
+					fld("classesBuilt", vint(stats.sClassesBuilt)),
+					fld("methodsTyped", vint(stats.sMethodsTyped)),
+					fld("macrosCalled", vint(stats.sMacrosCalled)),
+				]);
+			})},
+			{name: "position_to_range", value: vfun1(p -> {
+				var p = decodePos(p);
+				var c = syntax.Lexer.getPosCoords(p);
+				function makePos(line:Int, character:Int):Value {
+					return encodeObj([fld("line", vint(line)), fld("character", vint(character)),]);
+				}
+				var posStart = makePos(c.lineStart, c.columnStart);
+				var posEnd = makePos(c.lineEnd, c.columnEnd);
+				var range = encodeObj([fld("start", posStart), fld("end", posEnd),]);
+				var location = encodeObj([fld("file", encodeString(p.pfile)), fld("range", range)]);
+				location;
+			})},
+			{name: "position_to_zero_range", value: vfun1(p -> {
+				var p = decodePos(p);
+				encodePos(Globals.mkZeroRangePos(p));
+			})},
+			{name: "on_null_safety_report", value: vfun1(f -> {
+				var f = prepareCallback(f, 1);
+				ccom().callbacks.addNullSafetyReport(function(errors:Array<{msg:String, pos:Pos}>, warnings:Array<{warning:Dynamic, msg:String, pos:Pos}>):Void {
+					function encodeItem(kind:String, msg:String, pos:Pos):Value {
+						return encodeObj([fld("type", encodeString(kind)), fld("msg", encodeString(msg)), fld("pos", encodePos(pos))]);
+					}
+					function encodeWarning(w:{warning:Dynamic, msg:String, pos:Pos}):Value {
+						return encodeItem("warning", w.msg, w.pos);
+					}
+					var errors = errors.map(e -> encodeItem("error", e.msg, e.pos));
+					var warnings = warnings.map(encodeWarning);
+					f([encodeArray(errors.concat(warnings))]);
+				});
+				vnull;
+			})},
+			{name: "timer", value: vfun1(id -> {
+				var com = ccom();
+				var fullId = (com.timerCtx.current.id : Array<String>).concat([decodeString(id)]);
+				// TIMERTODO: Exposing this seems potentially dangerous... Have to at least document.
+				var stop = core.Timer.startTimer(com.timerCtx, fullId);
+				vfun0(() -> {
+					stop();
+					vnull;
+				});
+			})},
+			{name: "map_anon_ref", value: vfun2((aRef, fn) -> {
+				var a:TAnon = decodeRef(aRef);
+				var fn = prepareCallback(fn, 1);
+				switch TFunctions.map(t -> decodeType(fn([encodeType(t)])), T.TAnon(a)) {
+					case TAnon(a): encodeRef(a, encodeTanon, () -> "<anonymous>");
+					case _: Globals.die("", "macroApi.ml map_anon_ref");
+				}
+			})},
+			{name: "with_imports", value: vfun3((imports, usings, f) -> {
+				var imports = decodeArray(imports).map(decodeString);
+				var imports:Array<Import> = imports.map(s -> (getApi().parse((pctx, s) -> @:privateAccess syntax.Grammar.parseImport2(pctx, s, Globals.nullPos), s) : Import));
+				var usings = decodeArray(usings).map(decodeString);
+				var usings:Array<Array<PlacedName>> = usings.map(s -> (getApi().parse((pctx, s) -> @:privateAccess syntax.Grammar.parseUsing2(pctx, s, Globals.nullPos), s) : Array<PlacedName>));
+				var f = prepareCallback(f, 0);
+				(getApi().withImports(imports, usings, () -> f([])) : Value);
+			})},
+			{name: "with_options", value: vfun2((opts, f) -> {
+				var o:CompilerOptions = {
+					optInlining: opt(decodeBool, field(opts, "allowInlining")),
+					optTransform: opt(decodeBool, field(opts, "allowTransform")),
+				};
+				var f = prepareCallback(f, 0);
+				(getApi().withOptions(o, () -> f([])) : Value);
+			})},
+			{name: "set_var_name", value: vfun2((v, name) -> {
+				var v = decodeTvar(v);
+				var name = decodeString(name);
+				v.vName = name;
+				vnull;
+			})},
+			{name: "get_hxb_writer_config", value: vfun0(() -> {
+				getApi().getHxbWriterConfig();
+			})},
+			{name: "set_hxb_writer_config", value: vfun1(v -> {
+				getApi().setHxbWriterConfig(v);
+				vnull;
+			})},
+			{name: "associate_enum_value_pos", value: vfun2((ve, vp) -> {
+				var p = decodePos(vp);
+				associateEnumValuePos(ve, p);
+				vnull;
+			})},
+		];
+	}
+}

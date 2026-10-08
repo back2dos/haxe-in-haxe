@@ -126,13 +126,12 @@ class TyperEntry {
  }
  public static function create(com:CommonContext,macros:Null<{finalize:Void->Void,typer:TyperContext}>):TyperContext {
   typing.Typer.initialize();
-  if(macros!=null||com.isMacroContext) Error.raiseTypingError("Macro execution is outside the source-only HXB milestone",Globals.nullPos);
   var ctx:TyperContext={com:com,t:com.basic,g:null,
    m:{curmod:nullModule,importResolution:new ResolutionList(["import","typer"]),ownResolution:null,enumWithType:null,moduleUsing:[],importStatements:[],isDisplayFile:false},
    c:{curclass:nullClass,tthis:tDynamic,getBuildInfos:function() return null},f:TyperManager.createCtxF(nullField),e:TyperManager.createCtxE(FunStatic,FunFunction),
    pass:PBuildModule,allowInline:true,allowTransform:true,typeParams:[],memoryMarker:memoryMarker};
   ctx.g={coreApi:null,macros:macros,moduleCheckPolicies:[],delayed:[for(_ in 0...TyperPassTools.allTyperPassesLength) {tasks:[],tasksLate:[]}],delayedMinIndex:0,debugDelayed:[],retainMeta:Common.defined(com,Define.RetainUntypedMeta),globalUsing:[],complete:false,typeHints:[],loadOnlyCachedModules:false,returnPartialType:false,buildCount:0,tDynamicDef:tDynamic,continuationApi:null,
-   doMacro:function(_,_,_,_,_,p) return Error.raiseTypingError("Macro execution is outside the source-only HXB milestone",p),doLoadMacro:function(_,_,_,_,p) return Error.raiseTypingError("Macro execution is outside the source-only HXB milestone",p),doLoadModule:ModuleTyping.loadModule,doLoadTypeDef:Typeload.loadTypeDef,getBuildInfo:InstanceBuilder.getBuildInfo,doFormatString:formatString,doLoadCoreClass:Typeload.loadCoreClass,delayedDisplay:null,callArgContext:null,rootTyper:ctx};
+   doMacro:MacroContext.typeMacro,doLoadMacro:MacroContext.loadMacroPrime,doLoadModule:ModuleTyping.loadModule,doLoadTypeDef:Typeload.loadTypeDef,getBuildInfo:InstanceBuilder.getBuildInfo,doFormatString:formatString,doLoadCoreClass:Typeload.loadCoreClass,delayedDisplay:null,callArgContext:null,rootTyper:ctx};
   loadStdTypes(ctx); loadString(ctx); loadStd(ctx); loadAny(ctx); loadUnit(ctx); loadArray(ctx); loadEnumTools(ctx); loadCoro(ctx);
   ctx.com.localWrapper=loadLocalWrapper(ctx); ctx.g.complete=true; return ctx;
  }
