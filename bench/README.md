@@ -39,7 +39,8 @@ used the stock libhl.) C++ uses hxcpp git `cd5dc3b` with
 The JIT's runs vary a lot (0.85–1.35s on `stdlib`).
 
 Instruction counts (callgrind, stdlib): the reference executes 1.10G, HL/C
-2.38G (2.61G before this round). Of HL/C's instructions, 38% are
+2.25G (2.61G before this round; the lexer changes in item 11 came after
+the table above). Of HL/C's instructions, 38% are
 allocation and GC: about 9.2M allocations at roughly 30–55 instructions
 each (OCaml's minor-heap allocation is an inline pointer bump), plus a
 non-generational major collection. 24% are
@@ -138,6 +139,13 @@ In rough order of impact:
    five arrays from `Array<Dynamic>`. `TUnification.updated` (a copy plus
    reflective field sets) became `Record.withFields`, which sets the
    fields statically.
+
+11. **Lexer** (fifth round). A token only tries the operators starting with
+   its first character instead of all of them; comments are found with
+   `indexOf` and copied at once instead of a one-character string per
+   character; `skipWhitespace` compares code units. `ZipOutput` computes
+   the CRC-32 with a table instead of `haxe.crypto.Crc32`'s bitwise loop.
+   `Lexer.token` went from 80M to 18M instructions on `stdlib`.
 
 Where the time went after the first round (HL/C, callgrind): libhl allocation and GC were about
 45% of the run. libhl takes a global lock and a TLS lookup on every
