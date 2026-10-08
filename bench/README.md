@@ -11,21 +11,30 @@ make -C haxe haxe
 HAXE=haxe/haxe sh bench/build.sh js hl jvm cpp   # needs hxnodejs, hxjava, hxcpp (git)
 # HL/C needs a compiler with bench/hl2c-virtual-field-cast.patch and HashLink headers:
 HAXE_HLC=/path/to/patched/haxe HL_INCLUDE=/path/to/hashlink/src sh bench/build.sh hlc
+# with bench/libhl-allocator.patch applied to HashLink (built with -ftls-model=initial-exec):
+HL_STATIC="libhl.a fmt.o dxt.o sha1.o" sh bench/build.sh hlc   # static link
 HAXE_REFERENCE=haxe/haxe python3 bench/run.py -n 5
 ```
 
-## Results — 2026-10-08
+## Results — 2026-10-08 (second round)
 
-4-core Linux container. Median of 5 runs, in seconds.
+4-core Linux container. Median of 5 runs, in seconds. HashLink runs use the
+patched libhl (`libhl-allocator.patch`); HL/C links it statically.
 
 | Runner | hello | trycatch | stdlib | vs. reference (stdlib) | stdlib on 2026-10-07 |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| reference (native OCaml) | 0.13 | 0.13 | 0.24 | 1× | 0.23 |
-| HL/C (HashLink compiled to C) | 0.38 | 0.49 | 0.87 | 3.6× | (no build) |
-| HashLink (JIT) | 0.72 | 0.82 | 1.31 | 5.5× | 7.62 |
-| JS (Node 22) | 1.23 | 1.20 | 2.16 | 9× | 7.15 |
+| reference (native OCaml) | 0.11 | 0.12 | 0.23 | 1× | 0.23 |
+| HL/C (HashLink compiled to C) | 0.22 | 0.24 | 0.53 | 2.3× | (no build) |
+| HashLink (JIT) | 0.68 | 0.67 | 1.01 | 4.4× | 7.62 |
+| JS (Node 22) | 1.13 | 1.18 | 1.98 | 8.6× | 7.15 |
 | JVM (OpenJDK 21) | 2.14 | 2.20 | 3.10 | 13× | 5.40 |
 | C++ (hxcpp) | — | — | — | — | 1.83 |
+
+Instruction counts (callgrind, stdlib): the reference executes 1.10G
+instructions, HL/C 2.79G. Roughly half of the remaining difference is
+allocation and GC (OCaml's minor-heap allocation is a pointer bump), about a
+third is the program code itself (about 1.9× OCaml's), and the rest is dynamic
+casts and structural-type conversions.
 
 Every build above passes the full conformance suite (282 cases) through
 `HAXE_IN_HAXE_PORT`. C++ is left out: release builds with current hxcpp
@@ -73,8 +82,24 @@ In rough order of impact:
    pinned compiler's JVM generation from about 8 minutes to 90 seconds.
 5. **Counters.** `allocVar` and `allocMid` use `haxe.atomic.AtomicInt`
    (upstream's `Atomic.fetch_and_add`) instead of a mutex.
+6. **libhl allocator** (`libhl-allocator.patch`, second round). Fixed-size
+   classes go up to 128 bytes instead of 40, so typical compiler objects use
+   the thread-local slice fast path instead of the locked free-list
+   allocator. The fast path is a small separate function. Slices are zeroed
+   once when created rather than per allocation. Sweeping skips whole bitmap
+   bytes. Built with `-ftls-model=initial-exec` and linked statically, it
+   cuts HL/C from 0.86s to about 0.6s on `stdlib`.
+7. **Fewer allocations and conversions** (second round). More records became
+   classes (`GlobalTypePath`, `UnificationContext`, `LexedToken`,
+   `MetadataEntry`, `PlacedName`, `PlacedAccess`, `TypeHint`, map entries).
+   `RecStack` is the array itself. `Record.copy` resolves `clone()` at
+   compile time. The lexer's operator table is typed and its line table
+   avoids O(n) prepends and per-character strings. `Stream.peek` no longer
+   copies. Some hot local helpers became static functions. The default GC
+   factor is 1.0 (peak memory on `stdlib` about 140 MB, against the
+   reference's 53 MB).
 
-Where the time goes now (HL/C, callgrind): libhl allocation and GC are about
+Where the time went after the first round (HL/C, callgrind): libhl allocation and GC were about
 45% of the run. libhl takes a global lock and a TLS lookup on every
 allocation, which is far more expensive than OCaml's pointer bump. The rest is
 spread over the typer, filters and analyzer with no dominant hotspot. The
