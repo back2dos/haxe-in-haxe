@@ -26,16 +26,34 @@ class Unify_error { public var errors:Array<UnifyError>; public function new(err
 enum EqKind { EqStrict; EqCoreType; EqRightDynamic; EqBothDynamic; EqStricter; }
 typedef TypeParamUnificationContext = {var knownTypeParams:Array<TypedTypeParam>; var typeParamPairs:Array<{a:TypedTypeParam,b:TypedTypeParam}>;}
 enum TypeParamMode { TpDefault; TpDefinition(context:TypeParamUnificationContext); }
-typedef RecStack<A> = {var recStack:Array<A>;}
+@:structInit class RecStack<A> {
+	public var recStack:Array<A>;
+	public inline function new(recStack:Array<A>) { this.recStack = recStack; }
+	public inline function clone():RecStack<A> return new RecStack(recStack);
+}
 enum NullFollowMode { NeverFollow; AlwaysFollow; FollowIfNullable; }
 typedef TypePair = {var a:T; var b:T;}
-typedef UnificationContext = {
- var allowTransitiveCast:Bool; var allowAbstractCast:Bool; var allowDynamicToCast:Bool;
- var allowArgNameMismatch:Bool; var allowOptionalMismatch:Bool; var allowFinalInvariance:Bool;
- var equalityKind:EqKind; var equalityUnderlying:Bool; var strictFieldKind:Bool;
- var opaqueFieldParams:Bool; var typeParamMode:TypeParamMode; var nullFollowMode:NullFollowMode;
- var unifyStack:RecStack<TypePair>; var eqStack:RecStack<TypePair>; var varianceStack:RecStack<TypePair>;
- var abstractCastStack:RecStack<TypePair>; var unifyNewMonos:RecStack<T>; var applyParamsStack:ApplyParamsStack;
+@:structInit class UnificationContext {
+	public var allowTransitiveCast:Bool;
+	public var allowAbstractCast:Bool;
+	public var allowDynamicToCast:Bool;
+	public var allowArgNameMismatch:Bool;
+	public var allowOptionalMismatch:Bool;
+	public var allowFinalInvariance:Bool;
+	public var equalityKind:EqKind;
+	public var equalityUnderlying:Bool;
+	public var strictFieldKind:Bool;
+	public var opaqueFieldParams:Bool;
+	public var typeParamMode:TypeParamMode;
+	public var nullFollowMode:NullFollowMode;
+	public var unifyStack:RecStack<TypePair>;
+	public var eqStack:RecStack<TypePair>;
+	public var varianceStack:RecStack<TypePair>;
+	public var abstractCastStack:RecStack<TypePair>;
+	public var unifyNewMonos:RecStack<T>;
+	public var applyParamsStack:ApplyParamsStack;
+	public inline function new(allowTransitiveCast:Bool, allowAbstractCast:Bool, allowDynamicToCast:Bool, allowArgNameMismatch:Bool, allowOptionalMismatch:Bool, allowFinalInvariance:Bool, equalityKind:EqKind, equalityUnderlying:Bool, strictFieldKind:Bool, opaqueFieldParams:Bool, typeParamMode:TypeParamMode, nullFollowMode:NullFollowMode, unifyStack:RecStack<TypePair>, eqStack:RecStack<TypePair>, varianceStack:RecStack<TypePair>, abstractCastStack:RecStack<TypePair>, unifyNewMonos:RecStack<T>, applyParamsStack:ApplyParamsStack) { this.allowTransitiveCast = allowTransitiveCast; this.allowAbstractCast = allowAbstractCast; this.allowDynamicToCast = allowDynamicToCast; this.allowArgNameMismatch = allowArgNameMismatch; this.allowOptionalMismatch = allowOptionalMismatch; this.allowFinalInvariance = allowFinalInvariance; this.equalityKind = equalityKind; this.equalityUnderlying = equalityUnderlying; this.strictFieldKind = strictFieldKind; this.opaqueFieldParams = opaqueFieldParams; this.typeParamMode = typeParamMode; this.nullFollowMode = nullFollowMode; this.unifyStack = unifyStack; this.eqStack = eqStack; this.varianceStack = varianceStack; this.abstractCastStack = abstractCastStack; this.unifyNewMonos = unifyNewMonos; this.applyParamsStack = applyParamsStack; }
+	public inline function clone():UnificationContext return new UnificationContext(allowTransitiveCast, allowAbstractCast, allowDynamicToCast, allowArgNameMismatch, allowOptionalMismatch, allowFinalInvariance, equalityKind, equalityUnderlying, strictFieldKind, opaqueFieldParams, typeParamMode, nullFollowMode, unifyStack, eqStack, varianceStack, abstractCastStack, unifyNewMonos, applyParamsStack);
 }
 enum UnifyMinResult { UnifyMinOk(t:T); UnifyMinError(errors:Array<UnifyError>,index:Int); }
 class TypeRecursion extends haxe.Exception {

@@ -26,7 +26,12 @@ class LexerError {
 	public function new(message, pos) { this.message = message; this.pos = pos; }
 }
 
-typedef LexedToken = { var token:Token; var pos:Pos; }
+@:structInit class LexedToken {
+	public var token:Token;
+	public var pos:Pos;
+	public inline function new(token:Token, pos:Pos) { this.token = token; this.pos = pos; }
+	public inline function clone():LexedToken return new LexedToken(token, pos);
+}
 typedef LexerFile = {var lfile:String; var lline:Int; var lmaxline:Int; var llines:Array<{offset:Int,line:Int}>; var lalines:Array<{offset:Int,line:Int}>; var llast:Int; var llastindex:Int;}
 typedef LexerContext = {var file:LexerFile; var buf:StringBuf;}
 
@@ -414,6 +419,11 @@ class Lexer {
 		{text: "(", token: POpen}, {text: ")", token: PClose}, {text: "??", token: Binop(OpNullCoal)}, {text: "?", token: Question}, {text: "@", token: At}
 	];
 
+	// Typed views of `operators`, so the per-token scan reads no structures.
+	static final opTexts:Array<String> = [for (o in operators) o.text];
+	static final opTokens:Array<Token> = [for (o in operators) o.token];
+	static final opFirst:Array<Int> = [for (o in operators) StringTools.fastCodeAt(o.text, 0)];
+
 	public function token():LexedToken {
 		core.ds.GcPolicy.tick();
 		while (true) {
@@ -435,11 +445,13 @@ class Lexer {
 			}
 			// Find the longest fixed-text operator.
 			var opLen = 0, opTok:Token = null;
-			for (entry in operators) {
-				var text:String = entry.text;
-				if (StringTools.fastCodeAt(text, 0) == c && text.length > opLen && starts(text)) {
-					opLen = entry.text.length;
-					opTok = entry.token;
+			for (i in 0...opTexts.length) {
+				if (opFirst[i] == c) {
+					var text = opTexts[i];
+					if (text.length > opLen && starts(text)) {
+						opLen = text.length;
+						opTok = opTokens[i];
+					}
 				}
 			}
 			if (isDigitC(c) || c == ".".code) {

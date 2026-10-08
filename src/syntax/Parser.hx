@@ -64,7 +64,7 @@ typedef ParserContext = {
 	var cache:Array<ParserToken>;
 	var config:ParserConfiguration;
 }
-typedef ParserToken = { var token:Token; var pos:Pos; }
+typedef ParserToken = syntax.Lexer.LexedToken;
 typedef ParseData = Package;
 typedef ParseErrorInfo = { var message:ErrorMsg; var pos:Pos; }
 typedef ParseWarning = { var warning:WarningCode; var pos:Pos; }
