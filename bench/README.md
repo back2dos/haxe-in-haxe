@@ -16,7 +16,7 @@ HL_STATIC="libhl.a fmt.o dxt.o sha1.o" sh bench/build.sh hlc   # static link
 HAXE_REFERENCE=haxe/haxe python3 bench/run.py -n 5
 ```
 
-## Results — 2026-10-08 (second round)
+## Results — 2026-10-08 (third round)
 
 4-core Linux container. Median of 5 runs, in seconds. HashLink runs use the
 patched libhl (`libhl-allocator.patch`); HL/C links it statically.
@@ -24,14 +24,14 @@ patched libhl (`libhl-allocator.patch`); HL/C links it statically.
 | Runner | hello | trycatch | stdlib | vs. reference (stdlib) | stdlib on 2026-10-07 |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | reference (native OCaml) | 0.11 | 0.12 | 0.23 | 1× | 0.23 |
-| HL/C (HashLink compiled to C) | 0.22 | 0.24 | 0.53 | 2.3× | (no build) |
-| HashLink (JIT) | 0.68 | 0.67 | 1.01 | 4.4× | 7.62 |
-| JS (Node 22) | 1.13 | 1.18 | 1.98 | 8.6× | 7.15 |
-| JVM (OpenJDK 21) | 2.00 | 2.02 | 2.99 | 13× | 5.40 |
+| HL/C (HashLink compiled to C) | 0.23 | 0.21 | 0.49 | 2.2× | (no build) |
+| HashLink (JIT) | 0.58 | 0.59 | 0.94 | 4.3× | 7.62 |
+| JS (Node 22) | 1.13 | 1.25 | 2.05 | 9× | 7.15 |
+| JVM (OpenJDK 21) | 1.87 | 2.08 | 2.79 | 12× | 5.40 |
 | C++ (hxcpp) | — | — | — | — | 1.83 |
 
 Instruction counts (callgrind, stdlib): the reference executes 1.10G
-instructions, HL/C 2.79G. Roughly half of the remaining difference is
+instructions, HL/C 2.66G. Roughly half of the remaining difference is
 allocation and GC (OCaml's minor-heap allocation is a pointer bump), about a
 third is the program code itself (about 1.9× OCaml's), and the rest is dynamic
 casts and structural-type conversions.
@@ -98,6 +98,12 @@ In rough order of impact:
    copies. Some hot local helpers became static functions. The default GC
    factor is 1.0 (peak memory on `stdlib` about 140 MB, against the
    reference's 53 MB).
+8. **Records as classes everywhere** (third round). The AST, typed AST,
+   typer contexts and the analyzer, matcher, coroutine and filter records
+   are all `@:structInit` classes. `CommonContext` stays a structure because
+   its 62-argument constructor exceeds the HashLink JIT's argument limit.
+   `Record.copyDynamic` clones any record class reflectively. Also made
+   the JVM build (genjvm) take seconds instead of minutes.
 
 Where the time went after the first round (HL/C, callgrind): libhl allocation and GC were about
 45% of the run. libhl takes a global lock and a TLS lookup on every
