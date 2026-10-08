@@ -436,7 +436,8 @@ class Lexer {
 			// Find the longest fixed-text operator.
 			var opLen = 0, opTok:Token = null;
 			for (entry in operators) {
-				if (StringTools.fastCodeAt(entry.text, 0) == c && entry.text.length > opLen && starts(entry.text)) {
+				var text:String = entry.text;
+				if (StringTools.fastCodeAt(text, 0) == c && text.length > opLen && starts(text)) {
 					opLen = entry.text.length;
 					opTok = entry.token;
 				}

@@ -37,9 +37,6 @@ def runners(reference):
         "hlc": [str(BIN / "hih-hlc")],
         "jvm": ["java", "-Xss512m", "-XX:+UnlockDiagnosticVMOptions", "-XX:-BytecodeVerificationRemote", "-XX:-BytecodeVerificationLocal", "-jar", str(BIN / "hih.jar")],
         "js": ["node", "--stack-size=65500", str(BIN / "hih.js")],
-        # The port throws OCaml-style control-flow exceptions (Not_found, Exit,
-        # stream failures); V8 spends about half the run capturing their stacks.
-        "js-nostack": ["node", "--stack-size=65500", "--stack-trace-limit=0", str(BIN / "hih.js")],
     }
 
 
