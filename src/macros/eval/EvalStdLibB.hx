@@ -1,0 +1,2065 @@
+package macros.eval;
+
+import core.Globals;
+import core.Globals.Pos;
+import core.ds.Failure;
+import core.ds.InvalidArgument;
+import core.ds.NotFound;
+import core.ds.GlobalsIntMap;
+import core.ds.OcamlHashtbl;
+import haxe.io.Bytes;
+import macros.eval.EvalValue;
+import macros.eval.EvalContext;
+import macros.eval.EvalHash;
+import macros.eval.EvalString;
+import macros.eval.EvalEncode;
+import macros.eval.EvalDecode;
+import macros.eval.EvalExceptions;
+import macros.eval.EvalPrinting;
+import macros.eval.EvalMisc;
+import macros.eval.EvalField;
+import macros.eval.EvalStdLib;
+import compiler.io.CompilerIo;
+
+using macros.eval.EvalValue.EvalValueTools;
+
+/**
+	haxe/src/macro/eval/evalStdLib.ml, second half (lines 1481-3367: `lineEnd`,
+	`StdLog` .. `StdNativeString`). Each `module StdX` is class `StdX`.
+
+	Deviations (see also the comments at each site):
+	- Natives are `static final` values; upstream aliases between modules
+	  (`fastCodeAt = StdString.charCodeAt`, ...) are read-only properties so they
+	  do not depend on the static initialisation order of the classes.
+	- `Math.random`/`Std.random` use the host generator instead of OCaml's
+	  `Random.State`.
+	- Sockets (`eval.vm.NativeSocket`) are not supported by haxe-in-haxe: every
+	  native throws a clear error.
+	- Threads only have the host `Thread` mode: `exit` behaves as upstream's
+	  `Domain` branch (threads are spawned with `spawn_domain`), `join` is not
+	  supported (the host thread API has no join).
+	- `sys.thread.Condition` keeps its own mutex on the host: acquire/release/wait
+	  use the condition's lock instead of `Vcondition.cmutex`.
+	- zlib streams (`Vzlib.z`) are host `haxe.zip.Compress`/`haxe.zip.Uncompress`
+	  objects, `zFlush` is the index of OCaml's `Extc.zflush` constructor.
+	- `haxe.Resource.listNames` follows the host map's key order (OCaml `Hashtbl`
+	  order cannot be reproduced).
+**/
+class StdLibBHelpers {
+	// evalStdLib.ml: `lineEnd` (defined just before StdLog)
+	public static final lineEnd = switch Sys.systemName() {
+		case "Windows": "\r\n";
+		case _: "\n";
+	}
+
+	public static function encodeListIterator(l:Array<Value>):Value {
+		var l = l;
+		return EvalEncode.encodeObj([
+			{
+				name: EvalHash.key_hasNext,
+				value: EvalEncode.vifun0(_ -> l.length == 0 ? VFalse : VTrue)
+			},
+			{
+				name: EvalHash.key_next,
+				value: EvalEncode.vifun0(_ -> {
+					if (l.length == 0) VNull else {
+						var v = l[0];
+						l = l.slice(1);
+						v;
+					}
+				})
+			}
+		]);
+	}
+
+	public static function mapKeyValueIterator(path:Int):Value {
+		return EvalEncode.vifun0(vthis -> {
+			var ctx = EvalContext.getCtx();
+			var vit = EvalEncode.encodeInstance(path);
+			var fnew = EvalContext.getInstanceConstructor(ctx, path, Globals.nullPos);
+			EvalPrinting.callValueOn(vit, fnew.force(), [vthis]);
+			vit;
+		});
+	}
+
+	/** `List.nth`: Failure "nth" past the end, Invalid_argument "List.nth" for a negative index. **/
+	public static function listNth<T>(l:Array<T>, n:Int):T {
+		if (n < 0) throw new InvalidArgument("List.nth");
+		if (n >= l.length) throw new Failure("nth");
+		return l[n];
+	}
+
+	/** Physical equality (`==`) on values. **/
+	public static function physicalEquals(a:Value, b:Value):Bool {
+		return switch [a, b] {
+			case [VNull, VNull] | [VTrue, VTrue] | [VFalse, VFalse]: true;
+			case [VEnumValue(a), VEnumValue(b)]: a == b;
+			case [VObject(a), VObject(b)]: a == b;
+			case [VInstance(a), VInstance(b)]: a == b;
+			case [VString(a), VString(b)]: a == b;
+			case [VArray(a), VArray(b)]: a == b;
+			case [VVector(a), VVector(b)]: a == b;
+			case [VPrototype(a), VPrototype(b)]: a == b;
+			case [VNativeString(a), VNativeString(b)]: a == b;
+			case [VHandle(a), VHandle(b)]: a == b;
+			case [VLazy(a), VLazy(b)]: a == b;
+			case _: false;
+		}
+	}
+
+	/** OCaml `int_of_float` (amd64) followed by `Int32.of_int`. **/
+	public static function intOfFloat(f:Float):Int {
+		if (Math.isNaN(f) || f >= 9223372036854775808.0 || f <= -9223372036854775808.0) return 0;
+		var t = f < 0 ? Math.fceil(f) : Math.ffloor(f);
+		var m = t % 4294967296.0;
+		if (m >= 2147483648.0) m -= 4294967296.0;
+		if (m < -2147483648.0) m += 4294967296.0;
+		return Std.int(m);
+	}
+
+	/** Host errors standing for upstream's `Failure`/`Unix_error` in `process_catch`. **/
+	public static function processCatch<A, B>(f:A->B, arg:A):B {
+		try {
+			return f(arg);
+		} catch (e:RunTimeException) {
+			throw e;
+		} catch (e:NotFound) {
+			throw e;
+		} catch (e:Failure) {
+			return EvalContext.excString(e.message);
+		} catch (e:haxe.Exception) {
+			return EvalContext.excString(e.message);
+		}
+	}
+
+	public static function socketsNotSupported():Dynamic {
+		return EvalContext.excString("Sockets (eval.vm.NativeSocket) are not supported by haxe-in-haxe");
+	}
+}
+
+class StdLog {
+	static final key_fileName = EvalHash.hash("fileName");
+	static final key_lineNumber = EvalHash.hash("lineNumber");
+	static final key_customParams = EvalHash.hash("customParams");
+
+	public static final trace = EvalEncode.vfun2((v, infos) -> {
+		var s = EvalPrinting.valueString(v);
+		var s = switch infos {
+			case VNull: s + StdLibBHelpers.lineEnd;
+			case _:
+				var infos = EvalDecode.decodeObject(infos);
+				var fileName = EvalDecode.decodeString(EvalField.objectField(infos, key_fileName));
+				var lineNumber = EvalDecode.decodeInt(EvalField.objectField(infos, key_lineNumber));
+				var l = switch EvalField.objectField(infos, key_customParams) {
+					case VArray(va): [s].concat([for (v in EvalArray.toList(va)) EvalPrinting.valueString(v)]);
+					case _: [s];
+				}
+				'$fileName:$lineNumber: ${l.join(",")}' + StdLibBHelpers.lineEnd;
+		}
+		CompilerIo.writeOut(EvalContext.getCtx().curapi.getCom().requestScope.io, s);
+		VNull;
+	});
+}
+
+class StdIntMap {
+	static function thisValue(vthis:Value):RuntimeIntHashtbl<Value> {
+		return switch vthis {
+			case VInstance({ikind: IIntMap(h)}): h;
+			case v: EvalExceptions.unexpectedValue(v, "int map");
+		}
+	}
+
+	public static final copy = EvalEncode.vifun0(vthis -> {
+		var copied = thisValue(vthis).copy();
+		EvalEncode.encodeIntMapDirect(copied);
+	});
+
+	public static final exists = EvalEncode.vifun1((vthis, vkey) -> {
+		(thisValue(vthis).mem(EvalDecode.decodeInt(vkey))).vbool();
+	});
+
+	public static final get = EvalEncode.vifun1((vthis, vkey) -> {
+		try thisValue(vthis).find(EvalDecode.decodeInt(vkey)) catch (_:NotFound) VNull;
+	});
+
+	public static final iterator = EvalEncode.vifun0(vthis -> {
+		var keys = thisValue(vthis).fold((_, v, acc:Array<Value>) -> {
+			acc.push(v);
+			acc;
+		}, []);
+		keys.reverse();
+		StdLibBHelpers.encodeListIterator(keys);
+	});
+
+	public static final keys = EvalEncode.vifun0(vthis -> {
+		var keys = thisValue(vthis).fold((k, _, acc:Array<Value>) -> {
+			acc.push(k.vint());
+			acc;
+		}, []);
+		keys.reverse();
+		StdLibBHelpers.encodeListIterator(keys);
+	});
+
+	public static final keyValueIterator = StdLibBHelpers.mapKeyValueIterator(EvalHash.key_haxe_iterators_map_key_value_iterator);
+
+	public static final remove = EvalEncode.vifun1((vthis, vkey) -> {
+		var self = thisValue(vthis);
+		var key = EvalDecode.decodeInt(vkey);
+		var b = self.mem(key);
+		self.remove(key);
+		b.vbool();
+	});
+
+	public static final set = EvalEncode.vifun2((vthis, vkey, vvalue) -> {
+		thisValue(vthis).add(EvalDecode.decodeInt(vkey), vvalue);
+		VNull;
+	});
+
+	public static final toString = EvalEncode.vifun0(vthis -> {
+		var self = thisValue(vthis);
+		var l = self.fold((key, vvalue, acc:Array<Vstring>) -> {
+			acc.push(EvalString.join(EvalString.emptyString,
+				[EvalString.createAscii(Std.string(key)), EvalString.createAscii(" => "), EvalPrinting.sValue(0, vvalue)]));
+			acc;
+		}, []);
+		l.reverse();
+		var s = EvalString.join(EvalPrinting.rcomma, l);
+		var s = EvalString.join(EvalString.emptyString, [EvalPrinting.rbkopen, s, EvalPrinting.rbkclose]);
+		VString(s);
+	});
+
+	public static final clear = EvalEncode.vifun0(vthis -> {
+		thisValue(vthis).clear();
+		VNull;
+	});
+
+	public static final size = EvalEncode.vifun0(vthis -> {
+		thisValue(vthis).size().vint();
+	});
+}
+
+class StdInt64Map {
+	static function thisValue(vthis:Value):RuntimeInt64Hashtbl<Value> {
+		return switch vthis {
+			case VInstance({ikind: IInt64Map(h)}): h;
+			case v: EvalExceptions.unexpectedValue(v, "int64 map");
+		}
+	}
+
+	public static final copy = EvalEncode.vifun0(vthis -> {
+		var copied = thisValue(vthis).copy();
+		EvalEncode.encodeInt64MapDirect(copied);
+	});
+
+	public static final exists = EvalEncode.vifun1((vthis, vkey) -> {
+		(thisValue(vthis).mem(EvalIntegers.decodeI64(vkey))).vbool();
+	});
+
+	public static final get = EvalEncode.vifun1((vthis, vkey) -> {
+		try thisValue(vthis).find(EvalIntegers.decodeI64(vkey)) catch (_:NotFound) VNull;
+	});
+
+	public static final iterator = EvalEncode.vifun0(vthis -> {
+		var keys = thisValue(vthis).fold((_, v, acc:Array<Value>) -> {
+			acc.push(v);
+			acc;
+		}, []);
+		keys.reverse();
+		StdLibBHelpers.encodeListIterator(keys);
+	});
+
+	public static final keys = EvalEncode.vifun0(vthis -> {
+		var keys = thisValue(vthis).fold((k, _, acc:Array<Value>) -> {
+			acc.push(k.vint64());
+			acc;
+		}, []);
+		keys.reverse();
+		StdLibBHelpers.encodeListIterator(keys);
+	});
+
+	public static final keyValueIterator = StdLibBHelpers.mapKeyValueIterator(EvalHash.key_haxe_iterators_map_key_value_iterator);
+
+	public static final remove = EvalEncode.vifun1((vthis, vkey) -> {
+		var self = thisValue(vthis);
+		var key = EvalIntegers.decodeI64(vkey);
+		var b = self.mem(key);
+		self.remove(key);
+		b.vbool();
+	});
+
+	public static final set = EvalEncode.vifun2((vthis, vkey, vvalue) -> {
+		thisValue(vthis).add(EvalIntegers.decodeI64(vkey), vvalue);
+		VNull;
+	});
+
+	public static final toString = EvalEncode.vifun0(vthis -> {
+		var self = thisValue(vthis);
+		var l = self.fold((key, vvalue, acc:Array<Vstring>) -> {
+			acc.push(EvalString.join(EvalString.emptyString,
+				[EvalString.createAscii(haxe.Int64.toStr(key)), EvalString.createAscii(" => "), EvalPrinting.sValue(0, vvalue)]));
+			acc;
+		}, []);
+		l.reverse();
+		var s = EvalString.join(EvalPrinting.rcomma, l);
+		var s = EvalString.join(EvalString.emptyString, [EvalPrinting.rbkopen, s, EvalPrinting.rbkclose]);
+		VString(s);
+	});
+
+	public static final clear = EvalEncode.vifun0(vthis -> {
+		thisValue(vthis).clear();
+		VNull;
+	});
+
+	public static final size = EvalEncode.vifun0(vthis -> {
+		thisValue(vthis).size().vint();
+	});
+}
+
+class StdStringMap {
+	static function thisValue(vthis:Value):RuntimeStringHashtbl<Value> {
+		return switch vthis {
+			case VInstance({ikind: IStringMap(h)}): h;
+			case v: EvalExceptions.unexpectedValue(v, "string map");
+		}
+	}
+
+	public static final copy = EvalEncode.vifun0(vthis -> {
+		var copied = thisValue(vthis).copy();
+		EvalEncode.encodeStringMapDirect(copied);
+	});
+
+	public static final exists = EvalEncode.vifun1((vthis, vkey) -> {
+		(thisValue(vthis).mem(EvalDecode.decodeVstring(vkey))).vbool();
+	});
+
+	public static final get = EvalEncode.vifun1((vthis, vkey) -> {
+		try thisValue(vthis).find(EvalDecode.decodeVstring(vkey)).value catch (_:NotFound) VNull;
+	});
+
+	public static final iterator = EvalEncode.vifun0(vthis -> {
+		var keys = thisValue(vthis).fold((_, e, acc:Array<Value>) -> {
+			acc.push(e.value);
+			acc;
+		}, []);
+		keys.reverse();
+		StdLibBHelpers.encodeListIterator(keys);
+	});
+
+	public static final keys = EvalEncode.vifun0(vthis -> {
+		var keys = thisValue(vthis).fold((_, e, acc:Array<Value>) -> {
+			acc.push(VString(e.key));
+			acc;
+		}, []);
+		keys.reverse();
+		StdLibBHelpers.encodeListIterator(keys);
+	});
+
+	public static final keyValueIterator = StdLibBHelpers.mapKeyValueIterator(EvalHash.key_haxe_iterators_map_key_value_iterator);
+
+	public static final remove = EvalEncode.vifun1((vthis, vkey) -> {
+		var self = thisValue(vthis);
+		var key = EvalDecode.decodeVstring(vkey);
+		var b = self.mem(key);
+		self.remove(key);
+		b.vbool();
+	});
+
+	public static final set = EvalEncode.vifun2((vthis, vkey, vvalue) -> {
+		thisValue(vthis).add(EvalDecode.decodeVstring(vkey), vvalue);
+		VNull;
+	});
+
+	public static final toString = EvalEncode.vifun0(vthis -> {
+		var self = thisValue(vthis);
+		var l = self.fold((_, e, acc:Array<Vstring>) -> {
+			acc.push(EvalString.join(EvalString.emptyString, [e.key, EvalString.createAscii(" => "), EvalPrinting.sValue(0, e.value)]));
+			acc;
+		}, []);
+		l.reverse();
+		var s = EvalString.join(EvalPrinting.rcomma, l);
+		var s = EvalString.join(EvalString.emptyString, [EvalPrinting.rbkopen, s, EvalPrinting.rbkclose]);
+		VString(s);
+	});
+
+	public static final clear = EvalEncode.vifun0(vthis -> {
+		thisValue(vthis).clear();
+		VNull;
+	});
+
+	public static final size = EvalEncode.vifun0(vthis -> {
+		thisValue(vthis).size().vint();
+	});
+}
+
+class StdObjectMap {
+	static function thisValue(vthis:Value):OcamlHashtbl<Value, Value> {
+		return switch vthis {
+			case VInstance({ikind: IObjectMap(h)}): h;
+			case v: EvalExceptions.unexpectedValue(v, "int map");
+		}
+	}
+
+	public static final copy = EvalEncode.vifun0(vthis -> {
+		var copied = thisValue(vthis).copy();
+		EvalEncode.encodeObjectMapDirect(copied);
+	});
+
+	public static final exists = EvalEncode.vifun1((vthis, vkey) -> {
+		(thisValue(vthis).mem(vkey)).vbool();
+	});
+
+	public static final get = EvalEncode.vifun1((vthis, vkey) -> {
+		try thisValue(vthis).find(vkey) catch (_:NotFound) VNull;
+	});
+
+	public static final iterator = EvalEncode.vifun0(vthis -> {
+		var keys = thisValue(vthis).fold((_, v, acc:Array<Value>) -> {
+			acc.push(v);
+			acc;
+		}, []);
+		keys.reverse();
+		StdLibBHelpers.encodeListIterator(keys);
+	});
+
+	public static final keys = EvalEncode.vifun0(vthis -> {
+		var keys = thisValue(vthis).fold((k, _, acc:Array<Value>) -> {
+			acc.push(k);
+			acc;
+		}, []);
+		keys.reverse();
+		StdLibBHelpers.encodeListIterator(keys);
+	});
+
+	public static final keyValueIterator = StdLibBHelpers.mapKeyValueIterator(EvalHash.key_haxe_iterators_map_key_value_iterator);
+
+	public static final remove = EvalEncode.vifun1((vthis, vkey) -> {
+		var self = thisValue(vthis);
+		var b = self.mem(vkey);
+		self.remove(vkey);
+		b.vbool();
+	});
+
+	public static final set = EvalEncode.vifun2((vthis, vkey, vvalue) -> {
+		thisValue(vthis).replace(vkey, vvalue);
+		VNull;
+	});
+
+	public static final toString = EvalEncode.vifun0(vthis -> {
+		var self = thisValue(vthis);
+		var l = self.fold((key, vvalue, acc:Array<Vstring>) -> {
+			acc.push(EvalString.join(EvalString.emptyString, [EvalPrinting.sValue(0, key), EvalString.createAscii(" => "), EvalPrinting.sValue(0, vvalue)]));
+			acc;
+		}, []);
+		l.reverse();
+		var s = EvalString.join(EvalPrinting.rcomma, l);
+		var s = EvalString.join(EvalString.emptyString, [EvalPrinting.rbkopen, s, EvalPrinting.rbkclose]);
+		VString(s);
+	});
+
+	public static final clear = EvalEncode.vifun0(vthis -> {
+		thisValue(vthis).reset();
+		VNull;
+	});
+
+	public static final size = EvalEncode.vifun0(vthis -> {
+		thisValue(vthis).length().vint();
+	});
+}
+
+// `let random = Random.State.make_self_init()`: the host generator is used instead.
+
+class StdMath {
+	// Int32.of_float (mod_float f 2147483648.0); OCaml converts nan to 0 (amd64)
+	static function toInt(f:Float):Int {
+		var m = f % 2147483648.0;
+		if (Math.isNaN(m)) return 0;
+		return Std.int(m);
+	}
+
+	public static final nan = VFloat(Math.NaN);
+	public static final negativeInfinity = VFloat(Math.NEGATIVE_INFINITY);
+	public static final pi = VFloat(4.0 * Math.atan(1.0));
+	public static final positiveInfinity = VFloat(Math.POSITIVE_INFINITY);
+
+	public static final abs = EvalEncode.vfun1(v -> {
+		switch v {
+			case VInt32(i): VInt32(i < 0 ? -i : i); // Int32.abs (min_int stays min_int)
+			case VFloat(f): VFloat(Math.abs(f));
+			case _: EvalExceptions.unexpectedValue(v, "number");
+		}
+	});
+
+	public static final acos = EvalEncode.vfun1(v -> VFloat(Math.acos(EvalDecode.num(v))));
+	public static final asin = EvalEncode.vfun1(v -> VFloat(Math.asin(EvalDecode.num(v))));
+	public static final atan = EvalEncode.vfun1(v -> VFloat(Math.atan(EvalDecode.num(v))));
+	public static final atan2 = EvalEncode.vfun2((a, b) -> VFloat(Math.atan2(EvalDecode.num(a), EvalDecode.num(b))));
+	public static final ceil = EvalEncode.vfun1(v -> switch v {
+		case VInt32(_): v;
+		case _: VInt32(toInt(Math.fceil(EvalDecode.num(v))));
+	});
+	public static final cos = EvalEncode.vfun1(v -> VFloat(Math.cos(EvalDecode.num(v))));
+	public static final exp = EvalEncode.vfun1(v -> VFloat(Math.exp(EvalDecode.num(v))));
+	public static final fceil = EvalEncode.vfun1(v -> VFloat(Math.fceil(EvalDecode.num(v))));
+	public static final ffloor = EvalEncode.vfun1(v -> VFloat(Math.ffloor(EvalDecode.num(v))));
+	public static final floor = EvalEncode.vfun1(v -> switch v {
+		case VInt32(_): v;
+		case _: VInt32(toInt(Math.ffloor(EvalDecode.num(v))));
+	});
+	public static final fround = EvalEncode.vfun1(v -> VFloat(Math.ffloor(EvalDecode.num(v) + 0.5)));
+	public static final isFinite = EvalEncode.vfun1(v -> (switch v {
+		case VFloat(f): f != Math.POSITIVE_INFINITY && f != Math.NEGATIVE_INFINITY && f == f;
+		case _: true;
+	}).vbool());
+	public static final isNaN = EvalEncode.vfun1(v -> (switch v {
+		case VFloat(f): f != f;
+		case VInt32(_): false;
+		case _: true;
+	}).vbool());
+	public static final log = EvalEncode.vfun1(v -> VFloat(Math.log(EvalDecode.num(v))));
+
+	public static final max = EvalEncode.vfun2((a, b) -> {
+		var a = EvalDecode.num(a);
+		var b = EvalDecode.num(b);
+		VFloat(if (a < b) b else if (b != b) b else a);
+	});
+
+	public static final min = EvalEncode.vfun2((a, b) -> {
+		var a = EvalDecode.num(a);
+		var b = EvalDecode.num(b);
+		VFloat(if (a < b) a else if (a != a) a else b);
+	});
+
+	public static final pow = EvalEncode.vfun2((a, b) -> VFloat(Math.pow(EvalDecode.num(a), EvalDecode.num(b))));
+	public static final random = EvalEncode.vfun0(() -> VFloat(Math.random()));
+	public static final round = EvalEncode.vfun1(v -> switch v {
+		case VInt32(_): v;
+		case _: VInt32(toInt(Math.ffloor(EvalDecode.num(v) + 0.5)));
+	});
+	public static final sin = EvalEncode.vfun1(v -> VFloat(Math.sin(EvalDecode.num(v))));
+
+	public static final sqrt = EvalEncode.vfun1(v -> {
+		var v = EvalDecode.num(v);
+		if (v < 0.) nan else VFloat(Math.sqrt(v));
+	});
+
+	public static final tan = EvalEncode.vfun1(v -> VFloat(Math.tan(EvalDecode.num(v))));
+}
+
+class StdMd5 {
+	public static final encode = EvalEncode.vfun1(s -> {
+		var s = EvalDecode.decodeString(s);
+		EvalEncode.encodeString(haxe.crypto.Md5.encode(s));
+	});
+
+	public static final make = EvalEncode.vfun1(b -> {
+		var b = EvalDecode.decodeBytes(b);
+		EvalEncode.encodeBytes(haxe.crypto.Md5.make(b));
+	});
+}
+
+class StdMutex {
+	static function thisValue(vthis:Value):DomainMutex {
+		return switch vthis {
+			case VInstance({ikind: IMutex(mutex)}): mutex;
+			case _: EvalExceptions.unexpectedValue(vthis, "Mutex");
+		}
+	}
+
+	public static final acquire = EvalEncode.vifun0(vthis -> {
+		var mutex = thisValue(vthis);
+		var domainId = EvalContext.currentThreadId(EvalContext.getCtx());
+		mutex.lock(domainId);
+		VNull;
+	});
+
+	public static final release = EvalEncode.vifun0(vthis -> {
+		var mutex = thisValue(vthis);
+		mutex.unlock();
+		VNull;
+	});
+
+	public static final tryAcquire = EvalEncode.vifun0(vthis -> {
+		var mutex = thisValue(vthis);
+		var domainId = EvalContext.currentThreadId(EvalContext.getCtx());
+		mutex.tryLock(domainId).vbool();
+	});
+}
+
+class StdSemaphore {
+	static function thisValue(vthis:Value):sys.thread.Semaphore {
+		return switch vthis {
+			case VInstance({ikind: ISemaphore(sem)}): sem;
+			case _: EvalExceptions.unexpectedValue(vthis, "Semaphore");
+		}
+	}
+
+	public static final acquire = EvalEncode.vifun0(vthis -> {
+		thisValue(vthis).acquire();
+		VNull;
+	});
+
+	public static final tryAcquire = EvalEncode.vifun1((vthis, vtimeout) -> {
+		var sem = thisValue(vthis);
+		switch vtimeout {
+			case VNull:
+				sem.tryAcquire().vbool();
+			case _:
+				var timeout = EvalDecode.num(vtimeout);
+				var t = Sys.time() + timeout;
+				function loop():Value {
+					while (true) {
+						if (sem.tryAcquire()) return VTrue;
+						else if (Sys.time() >= t) return VFalse;
+						else Sys.sleep(0.0);
+					}
+				}
+				loop();
+		}
+	});
+
+	public static final release = EvalEncode.vifun0(vthis -> {
+		thisValue(vthis).release();
+		VNull;
+	});
+}
+
+class StdCondition {
+	static function thisValue(vthis:Value):Vcondition {
+		return switch vthis {
+			case VInstance({ikind: ICondition(cond)}): cond;
+			case _: EvalExceptions.unexpectedValue(vthis, "Condition");
+		}
+	}
+
+	// The host condition owns its mutex: Mutex.lock cond.cmutex
+	public static final acquire = EvalEncode.vifun0(vthis -> {
+		var cond = thisValue(vthis);
+		cond.cond.acquire();
+		VNull;
+	});
+
+	public static final tryAcquire = EvalEncode.vifun0(vthis -> {
+		var cond = thisValue(vthis);
+		cond.cond.tryAcquire().vbool();
+	});
+
+	public static final release = EvalEncode.vifun0(vthis -> {
+		var cond = thisValue(vthis);
+		cond.cond.release();
+		VNull;
+	});
+
+	public static final wait = EvalEncode.vifun0(vthis -> {
+		var c = thisValue(vthis);
+		c.cond.wait();
+		VNull;
+	});
+
+	public static final signal = EvalEncode.vifun0(vthis -> {
+		thisValue(vthis).cond.signal();
+		VNull;
+	});
+
+	public static final broadcast = EvalEncode.vifun0(vthis -> {
+		thisValue(vthis).cond.broadcast();
+		VNull;
+	});
+}
+
+class StdNativeProcess {
+	static function thisValue(vthis:Value):sys.io.Process {
+		return switch vthis {
+			case VInstance({ikind: IProcess(proc)}): proc;
+			case _: EvalExceptions.unexpectedValue(vthis, "NativeProcess");
+		}
+	}
+
+	static function call(f:(sys.io.Process, Bytes, Int, Int) -> Int, vthis:Value, bytes:Value, pos:Value, len:Value):Int {
+		var self = thisValue(vthis);
+		var bytes = EvalDecode.decodeBytes(bytes);
+		var pos = EvalDecode.decodeInt(pos);
+		var len = EvalDecode.decodeInt(len);
+		return f(self, bytes, pos, len);
+	}
+
+	static function processCatch<B>(f:sys.io.Process->B, vthis:Value):B {
+		return StdLibBHelpers.processCatch(f, thisValue(vthis));
+	}
+
+	public static final close = EvalEncode.vifun0(vthis -> {
+		processCatch(p -> {
+			p.close();
+			null;
+		}, vthis);
+		VNull;
+	});
+
+	public static final exitCode = EvalEncode.vifun0(vthis -> {
+		thisValue(vthis).exitCode(true).vint();
+	});
+
+	public static final getPid = EvalEncode.vifun0(vthis -> {
+		processCatch(p -> p.getPid(), vthis).vint();
+	});
+
+	public static final kill = EvalEncode.vifun0(vthis -> {
+		processCatch(p -> {
+			p.kill();
+			null;
+		}, vthis);
+		VNull;
+	});
+
+	public static final readStderr = EvalEncode.vifun3((vthis, bytes, pos, len) -> {
+		try call((p, b, pos, len) -> p.stderr.readBytes(b, pos, len), vthis, bytes, pos, len).vint() catch (_:Dynamic) EvalContext.excString("Could not read stderr");
+	});
+
+	public static final readStdout = EvalEncode.vifun3((vthis, bytes, pos, len) -> {
+		try call((p, b, pos, len) -> p.stdout.readBytes(b, pos, len), vthis, bytes, pos, len).vint() catch (_:Dynamic) EvalContext.excString("Could not read stdout");
+	});
+
+	public static final closeStdin = EvalEncode.vifun0(vthis -> {
+		processCatch(p -> {
+			p.stdin.close();
+			null;
+		}, vthis);
+		VNull;
+	});
+
+	public static final writeStdin = EvalEncode.vifun3((vthis, bytes, pos, len) -> {
+		call((p, b, pos, len) -> p.stdin.writeBytes(b, pos, len), vthis, bytes, pos, len).vint();
+	});
+}
+
+class StdReflect {
+	static final r_get_ = EvalString.createAscii("get_");
+	static final r_set_ = EvalString.createAscii("set_");
+
+	public static final callMethod = EvalEncode.vfun3((o, f, args) -> {
+		EvalPrinting.callValueOn(o, f, EvalDecode.decodeArray(args));
+	});
+
+	public static final compare = EvalEncode.vfun2((a, b) -> {
+		(switch EvalMisc.compare(a, b) {
+			case CEq: 0;
+			case CInf: -1;
+			case CSup: 1;
+			case CUndef: -1;
+		}).vint();
+	});
+
+	public static final compareMethods = EvalEncode.vfun2((a, b) -> {
+		function loop(a:Value, b:Value):Bool {
+			return StdLibBHelpers.physicalEquals(a, b) || switch [a, b] {
+				case [VFunction(f1, _), VFunction(f2, _)]: Reflect.compareMethods(f1, f2);
+				case [VFieldClosure(v1, f1), VFieldClosure(v2, f2)]: Reflect.compareMethods(f1, f2) && EvalMisc.compare(v1, v2) == CEq;
+				case _: false;
+			}
+		}
+		loop(a, b).vbool();
+	});
+
+	public static final copy = EvalEncode.vfun1(o -> switch o.vresolve() {
+		case VNull: VNull;
+		case VObject(o): VObject(new Vobject(o.ofields.copy(), o.oproto));
+		case VInstance(vi): VInstance(new Vinstance(vi.ifields.copy(), vi.iproto, vi.ikind));
+		case VString(_): o;
+		case VArray(va): VArray(new Varray(va.avalues.copy(), va.alength));
+		case VVector(vv): VVector(vv.copy());
+		case _: EvalExceptions.unexpectedValue(o, "object");
+	});
+
+	public static final deleteField = EvalEncode.vfun2((o, name) -> {
+		var name = EvalHash.hash(EvalDecode.decodeVstring(name).sstring);
+		switch o.vresolve() {
+			case VObject(o):
+				switch o.oproto {
+					case OProto(proto):
+						var found = false;
+						var fields = proto.pinstanceNames.fold((name2, i, acc:Array<{name:Int, value:Value}>) -> {
+							if (name == name2) {
+								found = true;
+								acc;
+							} else {
+								acc.unshift({name: name2, value: o.ofields[i]});
+								acc;
+							}
+						}, []);
+						if (found) {
+							EvalMisc.updateObjectPrototype(o, fields);
+							VTrue;
+						} else VFalse;
+					case ODictionary(d):
+						var has = d.mem(name);
+						if (has) o.oproto = ODictionary(d.remove(name));
+						has.vbool();
+				}
+			case _:
+				VFalse;
+		}
+	});
+
+	// field' upstream
+	public static final fieldValue = EvalEncode.vfun2((o, name) -> {
+		if (o.match(VNull)) VNull else EvalField.dynamicField(o, EvalHash.hash(EvalDecode.decodeVstring(name).sstring));
+	});
+
+	public static final fields = EvalEncode.vfun1(o -> {
+		function protoFields(proto:Vprototype):Array<Int> return proto.pnames.fold((name, _, acc:Array<Int>) -> {
+			acc.unshift(name);
+			acc;
+		}, []);
+		var fields = switch o.vresolve() {
+			case VObject(o): [for (f in EvalContext.objectFields(o)) f.name];
+			case VInstance(vi): vi.iproto.pinstanceNames.fold((name, _, acc:Array<Int>) -> {
+					acc.unshift(name);
+					acc;
+				}, []);
+			case VPrototype(proto): protoFields(proto);
+			case VNull: [];
+			case VString(_) | VArray(_) | VVector(_): [EvalHash.key_length];
+			case _: EvalExceptions.unexpectedValue(o, "object");
+		}
+		EvalEncode.encodeArray([for (i in fields) EvalEncode.encodeString(EvalHash.revHash(i))]);
+	});
+
+	public static final getProperty = EvalEncode.vfun2((o, name) -> {
+		if (o.match(VNull)) VNull else {
+			var name = EvalDecode.decodeVstring(name);
+			var nameGet = EvalHash.hash(EvalString.concat(r_get_, name).sstring);
+			var vget = EvalField.field(o, nameGet);
+			if (!vget.match(VNull)) EvalPrinting.callValueOn(o, vget, []) else EvalField.dynamicField(o, EvalHash.hash(name.sstring));
+		}
+	});
+
+	public static final hasField = EvalEncode.vfun2((o, field) -> {
+		var name = EvalHash.hash(EvalDecode.decodeVstring(field).sstring);
+		var b = switch o.vresolve() {
+			case VObject(o):
+				switch o.oproto {
+					case OProto(proto): proto.pinstanceNames.mem(name);
+					case ODictionary(d): d.mem(name);
+				}
+			case VInstance(vi): vi.iproto.pinstanceNames.mem(name) || vi.iproto.pnames.mem(name);
+			case VPrototype(proto): proto.pnames.mem(name);
+			case _: false; // issue #10993
+		}
+		b.vbool();
+	});
+
+	public static final isEnumValue = EvalEncode.vfun1(v -> switch v {
+		case VEnumValue(_): VTrue;
+		case _: VFalse;
+	});
+
+	public static final isFunction = EvalEncode.vfun1(f -> switch f {
+		case VFunction(_) | VFieldClosure(_): VTrue;
+		case _: VFalse;
+	});
+
+	public static final isObject = EvalEncode.vfun1(v -> switch v.vresolve() {
+		case VObject(_) | VString(_) | VArray(_) | VVector(_) | VInstance(_) | VPrototype(_): VTrue;
+		case _: VFalse;
+	});
+
+	public static final makeVarArgs = EvalEncode.vfun1(f -> {
+		EvalValueTools.vstaticFunction(vl -> EvalMisc.callValue(f, [EvalEncode.encodeArray(vl)]));
+	});
+
+	public static final setField = EvalEncode.vfun3((o, name, v) -> {
+		try EvalMisc.setFieldRuntime(o, EvalHash.hash(EvalDecode.decodeVstring(name).sstring), v) catch (_:NotFound) {}
+		VNull;
+	});
+
+	public static final setProperty = EvalEncode.vfun3((o, name, v) -> {
+		var name = EvalDecode.decodeVstring(name);
+		var nameSet = EvalHash.hash(EvalString.concat(r_set_, name).sstring);
+		var vset = EvalField.field(o, nameSet);
+		if (!vset.match(VNull)) EvalPrinting.callValueOn(o, vset, [v]) else {
+			try EvalMisc.setFieldRuntime(o, EvalHash.hash(name.sstring), v) catch (_:NotFound) {}
+			VNull;
+		}
+	});
+}
+
+class StdResource {
+	static function resources():haxe.ds.StringMap<String> return EvalContext.getCtx().curapi.getCom().resources;
+
+	public static final listNames = EvalEncode.vfun0(() -> {
+		EvalEncode.encodeArray([for (k in EvalStdLib.hashtblKeys(resources())) EvalString.createUnknown(k)]);
+	});
+
+	public static final getString = EvalEncode.vfun1(name -> {
+		var s = resources().get(EvalDecode.decodeString(name));
+		s == null ? VNull : EvalString.createUnknown(s);
+	});
+
+	public static final getBytes = EvalEncode.vfun1(name -> {
+		var s = resources().get(EvalDecode.decodeString(name));
+		s == null ? VNull : EvalEncode.encodeBytes(Bytes.ofString(s));
+	});
+}
+
+class StdSha1 {
+	public static final encode = EvalEncode.vfun1(s -> {
+		var s = EvalDecode.decodeString(s);
+		EvalEncode.encodeString(haxe.crypto.Sha1.encode(s));
+	});
+
+	public static final make = EvalEncode.vfun1(b -> {
+		var b = EvalDecode.decodeBytes(b);
+		EvalEncode.encodeBytes(haxe.crypto.Sha1.make(b));
+	});
+}
+
+/** Sockets are not supported by haxe-in-haxe: the natives keep upstream's names and argument checks, then fail. **/
+class StdSocket {
+	static function thisValue(vthis:Value):Dynamic {
+		return switch vthis {
+			case VInstance({ikind: ISocket(sock)}): sock;
+			case _: EvalExceptions.unexpectedValue(vthis, "NativeSocket");
+		}
+	}
+
+	public static final accept = EvalEncode.vifun0(vthis -> {
+		thisValue(vthis);
+		StdLibBHelpers.socketsNotSupported();
+	});
+
+	public static final bind = EvalEncode.vifun2((vthis, host, port) -> {
+		thisValue(vthis);
+		StdLibBHelpers.socketsNotSupported();
+	});
+
+	public static final close = EvalEncode.vifun0(vthis -> {
+		thisValue(vthis);
+		StdLibBHelpers.socketsNotSupported();
+	});
+
+	public static final connect = EvalEncode.vifun2((vthis, host, port) -> {
+		thisValue(vthis);
+		StdLibBHelpers.socketsNotSupported();
+	});
+
+	public static final host = EvalEncode.vifun0(vthis -> {
+		thisValue(vthis);
+		StdLibBHelpers.socketsNotSupported();
+	});
+
+	public static final listen = EvalEncode.vifun1((vthis, connections) -> {
+		thisValue(vthis);
+		StdLibBHelpers.socketsNotSupported();
+	});
+
+	public static final peer = EvalEncode.vifun0(vthis -> {
+		thisValue(vthis);
+		StdLibBHelpers.socketsNotSupported();
+	});
+
+	public static final receive = EvalEncode.vifun3((vthis, buf, pos, len) -> {
+		thisValue(vthis);
+		StdLibBHelpers.socketsNotSupported();
+	});
+
+	public static final receiveChar = EvalEncode.vifun0(vthis -> {
+		thisValue(vthis);
+		StdLibBHelpers.socketsNotSupported();
+	});
+
+	public static final select = EvalEncode.vfun4((read, write, others, timeout) -> {
+		StdLibBHelpers.socketsNotSupported();
+	});
+
+	public static final send = EvalEncode.vifun3((vthis, buf, pos, len) -> {
+		thisValue(vthis);
+		StdLibBHelpers.socketsNotSupported();
+	});
+
+	public static final sendChar = EvalEncode.vifun1((vthis, char) -> {
+		thisValue(vthis);
+		StdLibBHelpers.socketsNotSupported();
+	});
+
+	public static final setFastSend = EvalEncode.vifun1((vthis, b) -> {
+		thisValue(vthis);
+		StdLibBHelpers.socketsNotSupported();
+	});
+
+	public static final setBroadcast = EvalEncode.vifun1((vthis, b) -> {
+		thisValue(vthis);
+		StdLibBHelpers.socketsNotSupported();
+	});
+
+	public static final setTimeout = EvalEncode.vifun1((vthis, timeout) -> {
+		thisValue(vthis);
+		StdLibBHelpers.socketsNotSupported();
+	});
+
+	public static final shutdown = EvalEncode.vifun2((vthis, read, write) -> {
+		thisValue(vthis);
+		switch [read, write] {
+			case [VTrue, VTrue] | [VTrue, _] | [_, VTrue]:
+			case _: EvalContext.excString("Nothing to shut down");
+		}
+		StdLibBHelpers.socketsNotSupported();
+	});
+}
+
+class StdStd {
+	public static final isOfType = EvalEncode.vfun2((v, t) -> switch t {
+		case VNull: VFalse;
+		case VPrototype(proto): EvalContext.is(v, proto.ppath).vbool();
+		case _: VFalse;
+	});
+
+	// is' upstream
+	public static var isValue(get, never):Value;
+
+	static inline function get_isValue() return isOfType;
+
+	public static final downcast = EvalEncode.vfun2((v, t) -> switch t {
+		case VPrototype(proto):
+			if (EvalContext.is(v, proto.ppath)) v else VNull;
+		case _: VFalse;
+	});
+
+	public static var instance(get, never):Value;
+
+	static inline function get_instance() return downcast;
+
+	public static final string = EvalEncode.vfun1(v -> switch v {
+		case VString(_): v;
+		case _: VString(EvalPrinting.sValue(0, v));
+	});
+
+	public static final int = EvalEncode.vfun1(v -> {
+		try StdLibBHelpers.intOfFloat(EvalDecode.num(v)).vint() catch (_:Dynamic) VNull;
+	});
+
+	public static final parseInt = EvalEncode.vfun1(v -> {
+		try core.Numeric.parseInt(EvalDecode.decodeString(v)).vint32() catch (_:Dynamic) VNull;
+	});
+
+	public static final parseFloat = EvalEncode.vfun1(v -> {
+		try core.Numeric.parseFloat(EvalDecode.decodeString(v)).vfloat() catch (_:Dynamic) VFloat(Math.NaN);
+	});
+
+	public static final random = EvalEncode.vfun1(v -> {
+		var v = EvalDecode.decodeI32(v);
+		Std.random(v <= 0 ? 1 : v).vint32();
+	});
+}
+
+class StdString {
+	static function thisValue(vthis:Value):Vstring {
+		return switch vthis {
+			case VString(s): s;
+			case v: EvalExceptions.unexpectedValue(v, "string");
+		}
+	}
+
+	public static final charAt = EvalEncode.vifun1((vthis, index) -> {
+		var self = thisValue(vthis);
+		var i = EvalDecode.decodeInt(index);
+		if (i < 0 || i >= self.slength) EvalString.vEmptyString else VString(EvalString.fromCharCode(EvalString.charAt(self, i)));
+	});
+
+	public static final charCodeAt = EvalEncode.vifun1((vthis, index) -> {
+		var self = thisValue(vthis);
+		var i = EvalDecode.decodeInt(index);
+		if (i < 0 || i >= self.slength) VNull else EvalString.charAt(self, i).vint();
+	});
+
+	public static final fromCharCode = EvalEncode.vfun1(i -> {
+		var i = EvalDecode.decodeInt(i);
+		try VString(EvalString.fromCharCode(i)) catch (_:NotFound) VNull;
+	});
+
+	public static final indexOf = EvalEncode.vifun2((vthis, str, startIndex) -> {
+		var str = thisValue(str);
+		var self = thisValue(vthis);
+		var i = EvalDecode.defaultInt(startIndex, 0);
+		var i = i < 0 ? 0 : i;
+		try {
+			if (str.slength == 0) (i < self.slength ? i : self.slength).vint() else {
+				var i = if (i >= self.slength) throw NotFound.raise() else if (i < 0) {
+					var j = self.slength + i;
+					j < 0 ? 0 : j;
+				} else i;
+				var b = EvalString.getOffset(self, i);
+				var r = EvalString.findSubstring(self, str, false)(i, b);
+				r.c.vint();
+			}
+		} catch (_:NotFound) {
+			(-1).vint();
+		}
+	});
+
+	public static final lastIndexOf = EvalEncode.vifun2((vthis, str, startIndex) -> {
+		var str = thisValue(str);
+		var self = thisValue(vthis);
+		try {
+			if (str.slength == 0) {
+				var i = EvalDecode.defaultInt(startIndex, self.slength);
+				var m = i < self.slength ? i : self.slength;
+				(m > 0 ? m : 0).vint();
+			} else {
+				var i = EvalDecode.defaultInt(startIndex, self.slength - str.slength);
+				var i = if (i < 0) throw NotFound.raise() else if (i >= self.slength - str.slength) self.slength - str.slength else i;
+				var b = EvalString.getOffset(self, i);
+				var r = EvalString.findSubstring(self, str, true)(i, b);
+				r.c.vint();
+			}
+		} catch (_:NotFound) {
+			(-1).vint();
+		}
+	});
+
+	public static final split = EvalEncode.vifun1((vthis, delimiter) -> {
+		var self = thisValue(vthis);
+		var s = self.sstring;
+		var delimiter = EvalDecode.decodeVstring(delimiter);
+		var blDelimiter = delimiter.sstring.length;
+		var blThis = s.length;
+		function encodeRange(pos:Int, length:Int, clength:Int):Value {
+			var s = s.substr(pos, length);
+			return VString(EvalString.createWithLength(s, clength));
+		}
+		if (blDelimiter == 0) {
+			var acc = [];
+			for (uc in new haxe.iterators.StringIteratorUnicode(s)) {
+				acc.push(VString(EvalString.createWithLength(EvalString.stringOfCharCode(uc), 1)));
+			}
+			EvalEncode.encodeArray(acc);
+		} else if (blDelimiter > blThis) {
+			EvalEncode.encodeArray([encodeRange(0, blThis, self.slength)]);
+		} else {
+			var acc = [];
+			var f = EvalString.findSubstring(self, delimiter, false);
+			function loop(cIndex:Int, bIndex:Int):Void {
+				while (true) {
+					try {
+						var r = f(cIndex, bIndex);
+						acc.push(encodeRange(bIndex, r.b - bIndex, r.c - cIndex));
+						cIndex = r.c + delimiter.slength;
+						bIndex = r.e;
+					} catch (_:NotFound) {
+						acc.push(encodeRange(bIndex, blThis - bIndex, self.slength - cIndex));
+						return;
+					}
+				}
+			}
+			loop(0, 0);
+			EvalEncode.encodeArrayInstance(EvalArray.create(acc));
+		}
+	});
+
+	public static final substr = EvalEncode.vifun2((vthis, pos, len) -> {
+		var self = thisValue(vthis);
+		var clThis = self.slength;
+		var cPos = EvalDecode.decodeInt(pos);
+		if (cPos >= clThis) EvalString.vEmptyString else {
+			var cPos = if (cPos < 0) {
+				var cPos = self.slength + cPos;
+				cPos < 0 ? 0 : cPos;
+			} else cPos;
+			var cLen = switch len {
+				case VNull: clThis - cPos;
+				case VInt32(i): i;
+				case _: EvalExceptions.unexpectedValue(len, "int");
+			}
+			var cLen = if (cLen < 0) clThis + cLen - cPos else if (cLen > clThis - cPos) clThis - cPos else cLen;
+			VString(EvalString.substr(self, cPos, cLen));
+		}
+	});
+
+	public static final substring = EvalEncode.vifun2((vthis, startIndex, endIndex) -> {
+		var self = thisValue(vthis);
+		var cFirst = EvalDecode.decodeInt(startIndex);
+		var clThis = self.slength;
+		var cLast = EvalDecode.defaultInt(endIndex, clThis);
+		var cFirst = cFirst < 0 ? 0 : cFirst;
+		var cLast = cLast < 0 ? 0 : cLast;
+		var swap = cFirst > cLast;
+		var cFirst2 = swap ? cLast : cFirst;
+		var cLast2 = swap ? cFirst : cLast;
+		var cFirst = cFirst2;
+		var cLast = cLast2 > clThis ? clThis : cLast2;
+		if (cFirst > clThis || cFirst == cLast) EvalString.vEmptyString else {
+			var bOffset1 = EvalString.getOffset(self, cFirst);
+			var cLen = cLast - cFirst;
+			var bLen = if (cLast == clThis) self.sstring.length - bOffset1 else EvalString.move(self, bOffset1, cLen) - bOffset1;
+			VString(EvalString.createWithLength(self.sstring.substr(bOffset1, bLen), cLen));
+		}
+	});
+
+	public static final toLowerCase = EvalEncode.vifun0(vthis -> {
+		var self = thisValue(vthis);
+		VString(EvalString.caseMap(self, false));
+	});
+
+	public static final toString = EvalEncode.vifun0(vthis -> vthis);
+
+	public static final toUpperCase = EvalEncode.vifun0(vthis -> {
+		var self = thisValue(vthis);
+		VString(EvalString.caseMap(self, true));
+	});
+
+	public static var cca(get, never):Value;
+
+	static inline function get_cca() return charCodeAt;
+}
+
+class StdStringBuf {
+	static function thisValue(vthis:Value):VstringBuffer {
+		return switch vthis {
+			case VInstance({ikind: IBuffer(sb)}): sb;
+			case v: EvalExceptions.unexpectedValue(v, "string");
+		}
+	}
+
+	public static final add = EvalEncode.vifun1((vthis, x) -> {
+		var self = thisValue(vthis);
+		var s = switch x {
+			case VString(s): s;
+			case _: EvalString.createAscii(EvalPrinting.valueString(x));
+		}
+		EvalString.bufferAddString(self, s);
+		VNull;
+	});
+
+	public static final addChar = EvalEncode.vifun1((vthis, c) -> {
+		var self = thisValue(vthis);
+		var i = EvalDecode.decodeInt(c);
+		self.bbuffer.add(EvalString.stringOfCharCode(i));
+		self.blength = self.blength + 1;
+		VNull;
+	});
+
+	public static final addSub = EvalEncode.vifun3((vthis, s, pos, len) -> {
+		var self = thisValue(vthis);
+		var s = EvalDecode.decodeVstring(s);
+		var cPos = EvalDecode.decodeInt(pos);
+		var cLen = switch len {
+			case VNull: s.slength - cPos;
+			case VInt32(i): i;
+			case _: EvalExceptions.unexpectedValue(len, "int");
+		}
+		if (cLen > 0) {
+			var bOffset1 = EvalString.getOffset(s, cPos);
+			var bOffset2 = EvalString.move(s, bOffset1, cLen);
+			EvalString.bufferAddSubstring(self, s, bOffset1, bOffset2 - bOffset1, cLen);
+		}
+		VNull;
+	});
+
+	public static final clear = EvalEncode.vifun0(vthis -> {
+		var self = thisValue(vthis);
+		EvalString.bufferClear(self);
+		VNull;
+	});
+
+	public static final getLength = EvalEncode.vifun0(vthis -> {
+		var self = thisValue(vthis);
+		self.blength.vint();
+	});
+
+	public static final toString = EvalEncode.vifun0(vthis -> {
+		var self = thisValue(vthis);
+		var s = EvalString.bufferContents(self);
+		VString(s);
+	});
+}
+
+class StdStringTools {
+	static function urlEncode_(s:String):String {
+		var b = new StringBuf();
+		core.StringHelper.urlEncode(s, b.add);
+		return b.toString();
+	}
+
+	public static var fastCodeAt(get, never):Value;
+
+	static inline function get_fastCodeAt() return StdString.charCodeAt;
+
+	public static final replace = EvalEncode.vfun3((s, sub, by) -> {
+		var by = EvalDecode.decodeVstring(by);
+		var sub = EvalDecode.decodeVstring(sub);
+		var s2 = EvalDecode.decodeVstring(s);
+		var blS = s2.sstring.length;
+		var buf = new StringBuf();
+		var replaceCount = 0;
+		function create():Value {
+			return VString(EvalString.createWithLength(buf.toString(), s2.slength + by.slength * replaceCount - sub.slength * replaceCount));
+		}
+		if (sub.slength == 0) {
+			if (by.slength == 0) s else {
+				for (uc in new haxe.iterators.StringIteratorUnicode(s2.sstring)) {
+					buf.addChar(uc);
+					// don't add for the final char
+					if (replaceCount != s2.slength - 1) {
+						buf.add(by.sstring);
+						replaceCount++;
+					}
+				}
+				create();
+			}
+		} else {
+			var f = EvalString.findSubstring(s2, sub, false);
+			var cIndex = 0;
+			var bIndex = 0;
+			while (true) {
+				try {
+					var r = f(cIndex, bIndex);
+					buf.add(s2.sstring.substr(bIndex, r.b - bIndex));
+					buf.add(by.sstring);
+					replaceCount++;
+					cIndex = r.c + sub.slength;
+					bIndex = r.e;
+				} catch (_:NotFound) {
+					buf.add(s2.sstring.substr(bIndex, blS - bIndex));
+					break;
+				}
+			}
+			create();
+		}
+	});
+
+	public static final urlEncode = EvalEncode.vfun1(s -> {
+		var s = EvalDecode.decodeString(s);
+		EvalEncode.encodeString(urlEncode_(s));
+	});
+
+	public static final urlDecode = EvalEncode.vfun1(s -> {
+		var s = EvalDecode.decodeString(s);
+		var b = EvalString.bufferCreate();
+		function add(s:Vstring) EvalString.bufferAddString(b, s);
+		var len = s.length;
+		function decode(c:Int):Null<Int> {
+			return if (c >= "0".code && c <= "9".code) c - "0".code
+			else if (c >= "a".code && c <= "f".code) c - "a".code + 10
+			else if (c >= "A".code && c <= "F".code) c - "A".code + 10
+			else null;
+		}
+		function decodeHex(i:Int):Null<Int> {
+			var p1 = i < len ? decode(StringTools.fastCodeAt(s, i)) : null;
+			var p2 = i + 1 < len ? decode(StringTools.fastCodeAt(s, i + 1)) : null;
+			return if (p1 != null && p2 != null) (p1 << 4) | p2 else null;
+		}
+		function expectHex(i:Int):Int {
+			// String.unsafe_get: reading past the end is not checked upstream
+			return if (i < len && StringTools.fastCodeAt(s, i) == "%".code) {
+				var c = decodeHex(i + 1);
+				if (c == null) EvalContext.excString("Malformed") else c;
+			} else EvalContext.excString("Malformed");
+		}
+		var i = 0;
+		while (i != len) {
+			var c = StringTools.fastCodeAt(s, i);
+			if (c == "%".code) {
+				var c = decodeHex(i + 1);
+				if (c != null) {
+					if (c < 0x80) {
+						add(EvalString.createAscii(String.fromCharCode(c)));
+						i += 3;
+					} else if (c < 0xE0) {
+						var c2 = expectHex(i + 3);
+						add(EvalString.fromCharCode(((c & 0x3F) << 6) | (c2 & 0x7F)));
+						i += 6;
+					} else if (c < 0xF0) {
+						var c2 = expectHex(i + 3);
+						var c3 = expectHex(i + 6);
+						add(EvalString.fromCharCode(((c & 0x1F) << 12) | ((c2 & 0x7F) << 6) | (c3 & 0x7F)));
+						i += 9;
+					} else {
+						var c2 = expectHex(i + 3);
+						var c3 = expectHex(i + 6);
+						var c4 = expectHex(i + 9);
+						var k = ((c & 0x0F) << 18) | ((c2 & 0x7F) << 12) | ((c3 & 0x7F) << 6) | (c4 & 0x7F);
+						add(EvalString.fromCharCode(k));
+						i += 12;
+					}
+				} else {
+					i += 1;
+				}
+			} else if (c == "+".code) {
+				add(EvalString.createAscii(" "));
+				i += 1;
+			} else {
+				// upstream adds the byte; here the native character
+				add(EvalString.createUnknownVstring(s.charAt(i)));
+				i += 1;
+			}
+		}
+		VString(EvalString.bufferContents(b));
+	});
+}
+
+class StdSys {
+	static function com():context.Common.CommonContext return EvalContext.getCtx().curapi.getCom();
+
+	public static final args = EvalEncode.vfun0(() -> {
+		EvalEncode.encodeArray([for (s in EvalContext.getCtx().args) EvalString.createUnknown(s)]);
+	});
+
+	public static final _command = EvalEncode.vfun1(cmd -> {
+		var cmd = EvalDecode.decodeString(cmd);
+		com().runCommand(cmd).vint();
+	});
+
+	public static final cpuTime = EvalEncode.vfun0(() -> VFloat(Sys.cpuTime()));
+
+	public static final environment = EvalEncode.vfun0(() -> {
+		var env = EvalStdLib.catchUnixError(_ -> Sys.environment(), null);
+		var h = new RuntimeStringHashtbl<Value>();
+		for (k => v in env) {
+			h.add(EvalString.createAscii(k), EvalString.createUnknown(v));
+		}
+		EvalEncode.encodeStringMapDirect(h);
+	});
+
+	public static final exit = EvalEncode.vfun1(code -> {
+		throw new EvalTypes.SysExit(EvalDecode.decodeInt(code));
+	});
+
+	public static final getChar = EvalEncode.vfun1(echo -> {
+		var echo = EvalDecode.decodeBool(echo);
+		var com = com();
+		CompilerIo.getch(com.requestScope.io, echo).vint();
+	});
+
+	public static final getCwd = EvalEncode.vfun0(() -> {
+		var dir = EvalStdLib.catchUnixError(_ -> Sys.getCwd(), null);
+		var l = dir.length;
+		if (l == 0) EvalEncode.encodeString("./") else switch dir.charAt(l - 1) {
+			case "/" | "\\": EvalString.createUnknown(dir);
+			case _: EvalString.createUnknown(dir + "/");
+		}
+	});
+
+	public static final getEnv = EvalEncode.vfun1(s -> {
+		var s = EvalDecode.decodeString(s);
+		var v = try EvalStdLib.catchUnixError(Sys.getEnv, s) catch (_:Dynamic) null;
+		v == null ? VNull : EvalString.createUnknown(v);
+	});
+
+	public static final print = EvalEncode.vfun1(v -> {
+		var com = com();
+		CompilerIo.writeOut(com.requestScope.io, EvalPrinting.valueString(v));
+		VNull;
+	});
+
+	public static final println = EvalEncode.vfun1(v -> {
+		var com = com();
+		CompilerIo.writeOut(com.requestScope.io, EvalPrinting.valueString(v) + StdLibBHelpers.lineEnd);
+		VNull;
+	});
+
+	public static final programPath = EvalEncode.vfun0(() -> {
+		var com = com();
+		var file:Null<String> = com.main.mainFile;
+		if (file != null) EvalString.createUnknown(core.Path.getFullPath(file)) else VNull;
+	});
+
+	public static final putEnv = EvalEncode.vfun2((s, v) -> {
+		if (v.match(VNull)) {
+			// Luv.Env.unsetenv upstream
+			Sys.putEnv(EvalDecode.decodeString(s), null);
+			VNull;
+		} else {
+			var s = EvalDecode.decodeString(s);
+			var v = EvalDecode.decodeString(v);
+			EvalStdLib.catchUnixError(_ -> Sys.putEnv(s, v), null);
+			VNull;
+		}
+	});
+
+	public static final setCwd = EvalEncode.vfun1(s -> {
+		EvalStdLib.catchUnixError(Sys.setCwd, EvalDecode.decodeString(s));
+		VNull;
+	});
+
+	public static final setTimeLocale = EvalEncode.vfun1(_ -> VFalse);
+
+	public static final sleep = EvalEncode.vfun1(f -> {
+		var t = EvalDecode.num(f);
+		if (t > 0.0) Sys.sleep(t);
+		VNull;
+	});
+
+	public static final stderr = EvalEncode.vfun0(() -> {
+		var com = com();
+		EvalEncode.encodeInstance(EvalHash.key_sys_io_FileOutput, IOutChannel(CompilerIo.getStderr(com.requestScope.io)));
+	});
+
+	public static final stdin = EvalEncode.vfun0(() -> {
+		var com = com();
+		EvalEncode.encodeInstance(EvalHash.key_sys_io_FileInput, IInChannel(CompilerIo.getStdin(com.requestScope.io), {v: false}));
+	});
+
+	public static final stdout = EvalEncode.vfun0(() -> {
+		var com = com();
+		EvalEncode.encodeInstance(EvalHash.key_sys_io_FileOutput, IOutChannel(CompilerIo.getStdout(com.requestScope.io)));
+	});
+
+	static var cachedSysName:Null<String> = null;
+
+	// Upstream runs `uname` on Unix (mapping Darwin to Mac); the host's Sys.systemName is used here.
+	public static final systemName = EvalEncode.vfun0(() -> {
+		var s = switch cachedSysName {
+			case null:
+				var n = Sys.systemName();
+				cachedSysName = n;
+				n;
+			case n: n;
+		}
+		EvalEncode.encodeString(s);
+	});
+
+	public static final time = EvalEncode.vfun0(() -> VFloat(EvalStdLib.catchUnixError(_ -> Sys.time(), null)));
+
+	public static final timestampMs = EvalEncode.vfun0(() -> haxe.Int64.fromFloat(Math.ffloor(Sys.time() * 1000.0)).vint64());
+}
+
+class StdThread {
+	static function thisValue(vthis:Value):Vthread {
+		return switch vthis {
+			case VInstance({ikind: IThread(thread)}): thread;
+			case _: EvalExceptions.unexpectedValue(vthis, "Thread");
+		}
+	}
+
+	public static final delay = EvalEncode.vfun1(f -> {
+		var t = EvalDecode.num(f);
+		if (t > 0.0) Sys.sleep(t);
+		VNull;
+	});
+
+	public static final exit = EvalEncode.vfun0(() -> {
+		switch EvalContext.getEval(EvalContext.getCtx()).thread.threadMode {
+			// upstream `Domain _` branch: the host only has threads, spawned as domains upstream
+			case _:
+				var ctx = EvalContext.getCtx();
+				var path = EvalHash.key_eval_vm_NativeThreadExit;
+				var v = EvalEncode.encodeInstance(path);
+				var fnew = EvalContext.getInstanceConstructor(ctx, path, Globals.nullPos);
+				EvalPrinting.callValueOn(v, fnew.force(), []);
+				EvalContext.exc(v);
+		}
+		VNull;
+	});
+
+	public static final id = EvalEncode.vifun0(vthis -> {
+		thisValue(vthis).threadId.vint();
+	});
+
+	public static final join = EvalEncode.vfun1(thread -> {
+		switch thisValue(thread).threadMode {
+			case _:
+				EvalContext.excString("Thread.join is not supported by haxe-in-haxe");
+		}
+		VNull;
+	});
+
+	public static final self = EvalEncode.vfun0(() -> {
+		var eval = EvalContext.getEval(EvalContext.getCtx());
+		EvalEncode.encodeInstance(EvalHash.key_eval_vm_Thread, IThread(eval.thread));
+	});
+
+	public static final readMessage = EvalEncode.vfun1(blocking -> {
+		var eval = EvalContext.getEval(EvalContext.getCtx());
+		var blocking = EvalDecode.decodeBool(blocking);
+		switch EvalThread.Deque.pop(eval.thread.threadDeque, blocking) {
+			case null: VNull;
+			case v: v;
+		}
+	});
+
+	public static final sendMessage = EvalEncode.vifun1((vthis, msg) -> {
+		var self = thisValue(vthis);
+		EvalThread.Deque.push(self.threadDeque, msg);
+		VNull;
+	});
+
+	public static final yield = EvalEncode.vfun0(() -> {
+		// Thread.yield / Domain.cpu_relax upstream
+		Sys.sleep(0.0);
+		VNull;
+	});
+}
+
+class StdTls {
+	static function thisValue(vthis:Value):Int {
+		return switch vthis {
+			case VInstance({ikind: ITls(i)}): i;
+			case _: EvalExceptions.unexpectedValue(vthis, "Thread");
+		}
+	}
+
+	// TlsStorage is keyed by the Tls value upstream; here by its id
+	public static final getValue = EvalEncode.vifun0(vthis -> {
+		var id = thisValue(vthis);
+		try {
+			var eval = EvalContext.getEval(EvalContext.getCtx());
+			var v = eval.evalStorage.get(id);
+			v == null ? VNull : v;
+		} catch (_:NotFound) {
+			VNull;
+		}
+	});
+
+	public static final setValue = EvalEncode.vifun1((vthis, v) -> {
+		var id = thisValue(vthis);
+		var eval = EvalContext.getEval(EvalContext.getCtx());
+		eval.evalStorage.set(id, v);
+		v;
+	});
+}
+
+class StdType {
+	static function createEnum_(v:Value, constr:Int, params:Value):Value {
+		var vf = EvalField.field(v, constr);
+		return switch [vf, params] {
+			case [VEnumValue(_), VNull]: vf;
+			case [VEnumValue(_), VArray(va)] if (va.alength == 0): vf;
+			case [VFunction(_), VArray(va)]: EvalMisc.callValue(vf, EvalArray.toList(va));
+			case _: EvalExceptions.unexpectedValue(params, "array");
+		}
+	}
+
+	public static final allEnums = EvalEncode.vfun1(v -> {
+		switch v {
+			case VPrototype(proto = {pkind: PEnum(names)}):
+				try {
+					var l = [];
+					for (n in names) {
+						try {
+							switch EvalField.protoFieldDirect(proto, EvalHash.hash(n.name)) {
+								case v = VEnumValue(_): l.push(v);
+								case _:
+							}
+						} catch (_:NotFound) {}
+					}
+					EvalEncode.encodeArray(l);
+				} catch (_:NotFound) {
+					VNull;
+				}
+			case _:
+				VNull;
+		}
+	});
+
+	public static final createEmptyInstance = EvalEncode.vfun1(v -> {
+		switch v {
+			case VPrototype({pkind: PClass(_), ppath: path}):
+				var f = EvalContext.getCtx().builtins.emptyConstructorBuiltins.get(path);
+				if (f != null) f() else EvalEncode.encodeInstance(path);
+			case _: VNull;
+		}
+	});
+
+	public static final createEnum = EvalEncode.vfun3((e, constr, params) -> {
+		var constr = EvalHash.hash(EvalDecode.decodeVstring(constr).sstring);
+		createEnum_(e, constr, params);
+	});
+
+	public static final createEnumIndex = EvalEncode.vfun3((e, index, params) -> {
+		var index = EvalDecode.decodeInt(index);
+		switch e {
+			case VPrototype({pkind: PEnum(names)}):
+				try {
+					createEnum_(e, EvalHash.hash(StdLibBHelpers.listNth(names, index).name), params);
+				} catch (_:NotFound) {
+					VNull;
+				}
+			case _:
+				VNull;
+		}
+	});
+
+	public static final createInstance = EvalEncode.vfun2((v, vl) -> {
+		switch v {
+			case VPrototype({pkind: PClass(_), ppath: path}):
+				var ctx = EvalContext.getCtx();
+				var f = try EvalContext.getSpecialInstanceConstructorRaise(ctx, path) catch (_:NotFound) null;
+				if (f != null) f(EvalDecode.decodeArray(vl)) else {
+					var vthis = EvalEncode.encodeInstance(path);
+					var fnew = EvalContext.getInstanceConstructor(ctx, path, Globals.nullPos);
+					EvalPrinting.callValueOn(vthis, fnew.force(), EvalDecode.decodeArray(vl));
+					vthis;
+				}
+			case _:
+				EvalExceptions.unexpectedValue(v, "Class");
+		}
+	});
+
+	public static final enumConstructor = EvalEncode.vfun1(v -> switch v {
+		case VEnumValue(ve):
+			try {
+				switch EvalContext.getStaticPrototypeRaise(EvalContext.getCtx(), ve.epath).pkind {
+					case PEnum(names): EvalEncode.encodeString(StdLibBHelpers.listNth(names, ve.eindex).name);
+					case _: throw NotFound.raise();
+				}
+			} catch (_:NotFound) {
+				VNull;
+			}
+		case v: EvalExceptions.unexpectedValue(v, "enum value");
+	});
+
+	public static final enumEq = EvalEncode.vfun2((a, b) -> {
+		function weirdEq(a:Value, b:Value):Bool {
+			return switch [a, b] {
+				case [VEnumValue(a), VEnumValue(b)]: a == b || a.eindex == b.eindex && EvalMisc.arraysEqual(weirdEq, a.eargs, b.eargs) && a.epath == b.epath;
+				case _: a.equals(b);
+			}
+		}
+		weirdEq(a, b).vbool();
+	});
+
+	public static final enumIndex = EvalEncode.vfun1(v -> switch v {
+		case VEnumValue(ev): ev.eindex.vint32();
+		case v: EvalExceptions.unexpectedValue(v, "enum value");
+	});
+
+	public static final enumParameters = EvalEncode.vfun1(v -> switch v {
+		case VEnumValue(ev):
+			var va = EvalArray.create(ev.eargs);
+			VArray(va);
+		case v: EvalExceptions.unexpectedValue(v, "enum value");
+	});
+
+	public static final getClass = EvalEncode.vfun1(v -> switch v {
+		case VInstance(vi) if (vi.iproto.pkind.match(PInstance)): EvalContext.getStaticPrototypeAsValue(EvalContext.getCtx(), vi.iproto.ppath, Globals.nullPos);
+		case VString(_): EvalContext.getStaticPrototypeAsValue(EvalContext.getCtx(), EvalHash.key_String, Globals.nullPos);
+		case VArray(_): EvalContext.getStaticPrototypeAsValue(EvalContext.getCtx(), EvalHash.key_Array, Globals.nullPos);
+		case VVector(_): EvalContext.getStaticPrototypeAsValue(EvalContext.getCtx(), EvalHash.key_eval_Vector, Globals.nullPos);
+		case _: VNull;
+	});
+
+	public static final getClassFields = EvalEncode.vfun1(v -> switch v {
+		case VPrototype({pkind: PClass(_), pnames: names}):
+			EvalEncode.encodeArray(names.fold((name, _, acc:Array<Value>) -> {
+				acc.unshift(EvalEncode.encodeString(EvalHash.revHash(name)));
+				acc;
+			}, []));
+		case _:
+			VNull;
+	});
+
+	public static final getClassName = EvalEncode.vfun1(v -> switch v {
+		case VPrototype({pkind: PClass(_), ppath: path}): EvalEncode.encodeString(EvalHash.revHash(path));
+		case _: VNull;
+	});
+
+	public static final getEnum = EvalEncode.vfun1(v -> switch v {
+		case VEnumValue(ve): EvalContext.getStaticPrototypeAsValue(EvalContext.getCtx(), ve.epath, Globals.nullPos);
+		case _: VNull;
+	});
+
+	public static final getEnumConstructs = EvalEncode.vfun1(v -> switch v {
+		case VPrototype({pkind: PEnum(names)}):
+			try {
+				EvalEncode.encodeArray([for (n in names) EvalEncode.encodeString(n.name)]);
+			} catch (_:NotFound) {
+				VNull;
+			}
+		case _:
+			VNull;
+	});
+
+	public static final getEnumName = EvalEncode.vfun1(v -> switch v {
+		case VPrototype({pkind: PEnum(_), ppath: path}): EvalEncode.encodeString(EvalHash.revHash(path));
+		case _: VNull;
+	});
+
+	public static final getInstanceFields = EvalEncode.vfun1(v -> switch v {
+		case VPrototype(proto):
+			try {
+				function loop(acc:GlobalsIntMap<Int>, proto:Vprototype):GlobalsIntMap<Int> {
+					var acc = switch proto.pparent {
+						case null: acc;
+						case proto: loop(acc, proto);
+					}
+					var acc = proto.pinstanceNames.fold((name, _, acc:GlobalsIntMap<Int>) -> acc.add(name, 0), acc);
+					return proto.pnames.fold((name, _, acc:GlobalsIntMap<Int>) -> acc.add(name, 0), acc);
+				}
+				var proto = EvalContext.getInstancePrototype(EvalContext.getCtx(), proto.ppath, Globals.nullPos);
+				EvalEncode.encodeArray([
+					for (i in EvalStdLib.ptmapKeys(loop(GlobalsIntMap.empty(), proto))) EvalEncode.encodeString(EvalHash.revHash(i))
+				]);
+			} catch (_:NotFound) {
+				VNull;
+			}
+		case _:
+			VNull;
+	});
+
+	public static final getSuperClass = EvalEncode.vfun1(v -> switch v {
+		case VPrototype({pkind: PClass(_), pparent: proto}) if (proto != null): proto.pvalue;
+		case _: VNull;
+	});
+
+	public static final resolveClass = EvalEncode.vfun1(v -> {
+		var name = EvalDecode.decodeVstring(v).sstring;
+		try EvalContext.getStaticPrototypeRaise(EvalContext.getCtx(), EvalHash.hash(name)).pvalue catch (_:NotFound) VNull;
+	});
+
+	public static final resolveEnum = EvalEncode.vfun1(v -> {
+		var name = EvalDecode.decodeVstring(v).sstring;
+		try {
+			var proto = EvalContext.getStaticPrototypeRaise(EvalContext.getCtx(), EvalHash.hash(name));
+			switch proto.pkind {
+				case PEnum(_): proto.pvalue;
+				case _: VNull;
+			}
+		} catch (_:NotFound) {
+			VNull;
+		}
+	});
+
+	public static final typeof = EvalEncode.vfun1(v -> {
+		var ctx = EvalContext.getCtx();
+		function loop(v:Value):{i:Int, vl:Array<Value>} {
+			return switch v {
+				case VNull: {i: 0, vl: []};
+				case VInt32(_): {i: 1, vl: []};
+				case VInt64(_) | VUInt64(_): {i: 2, vl: []};
+				case VFloat(_): {i: 3, vl: []};
+				case VTrue | VFalse: {i: 4, vl: []};
+				case VInstance(vi): {i: 7, vl: [EvalContext.getStaticPrototypeAsValue(ctx, vi.iproto.ppath, Globals.nullPos)]};
+				case VString(_): {i: 7, vl: [EvalContext.getStaticPrototypeAsValue(ctx, EvalHash.key_String, Globals.nullPos)]};
+				case VArray(_): {i: 7, vl: [EvalContext.getStaticPrototypeAsValue(ctx, EvalHash.key_Array, Globals.nullPos)]};
+				case VVector(_): {i: 7, vl: [EvalContext.getStaticPrototypeAsValue(ctx, EvalHash.key_eval_Vector, Globals.nullPos)]};
+				case VObject(_) | VPrototype(_): {i: 5, vl: []};
+				case VFunction(_) | VFieldClosure(_): {i: 6, vl: []};
+				case VEnumValue(ve): {i: 8, vl: [EvalContext.getStaticPrototypeAsValue(ctx, ve.epath, Globals.nullPos)]};
+				case VLazy(f): loop(f.force());
+				case VNativeString(_) | VHandle(_): {i: 9, vl: []};
+			}
+		}
+		var r = loop(v);
+		EvalEncode.encodeEnumValue(EvalHash.key_ValueType, r.i, r.vl, null);
+	});
+}
+
+class StdUncompress {
+	static function thisValue(vthis:Value):Vzlib {
+		return switch vthis {
+			case VInstance({ikind: IZip(zip)}): zip;
+			case _: EvalExceptions.unexpectedValue(vthis, "Uncompress");
+		}
+	}
+
+	/** `Extc.zflush` constructor index to the host flush mode. **/
+	public static function hostFlushMode(flush:Int):haxe.zip.FlushMode {
+		return switch flush {
+			case 0: NO; // Z_NO_FLUSH
+			case 1: BLOCK; // Z_PARTIAL_FLUSH
+			case 2: SYNC; // Z_SYNC_FLUSH
+			case 3: FULL; // Z_FULL_FLUSH
+			case _: FINISH; // Z_FINISH
+		}
+	}
+
+	/**
+		`Extc.zlib_inflate` on a host `haxe.zip.Uncompress`. The host stream reads
+		up to the end of `src` and writes up to the end of `dst`.
+	**/
+	public static function zlibInflate(z:Dynamic, src:Bytes, spos:Int, slen:Int, dst:Bytes, dpos:Int, dlen:Int, flush:Int):{finish:Bool, read:Int, wrote:Int} {
+		var u:haxe.zip.Uncompress = z;
+		if (spos + slen != src.length) src = src.sub(0, spos + slen);
+		var target = dpos + dlen != dst.length ? Bytes.alloc(dpos + dlen) : dst;
+		u.setFlushMode(hostFlushMode(flush));
+		var r = u.execute(src, spos, target, dpos);
+		if (target != dst) dst.blit(dpos, target, dpos, r.write);
+		return {finish: r.done, read: r.read, wrote: r.write};
+	}
+
+	public static final close = EvalEncode.vifun0(vthis -> {
+		var u:haxe.zip.Uncompress = thisValue(vthis).z;
+		u.close();
+		VNull;
+	});
+
+	public static final execute = EvalEncode.vifun4((vthis, src, srcPos, dst, dstPos) -> {
+		StdCompress.exec(zlibInflate, vthis, src, srcPos, dst, dstPos);
+	});
+
+	public static final run = EvalEncode.vfun2((src, bufsize) -> {
+		var src = EvalDecode.decodeBytes(src);
+		var bufsize = EvalDecode.defaultInt(bufsize, 1 << 16);
+		var zip = new haxe.zip.Uncompress();
+		var buf = new haxe.io.BytesBuffer();
+		var tmp = Bytes.alloc(bufsize);
+		tmp.fill(0, bufsize, 0);
+		var pos = 0;
+		while (true) {
+			var r = zlibInflate(zip, src, pos, src.length - pos, tmp, 0, bufsize, 2 /* Z_SYNC_FLUSH */);
+			buf.addBytes(tmp, 0, r.wrote);
+			if (!r.finish) pos = pos + r.read else break;
+		}
+		EvalEncode.encodeBytes(buf.getBytes());
+	});
+
+	public static var setFlushMode(get, never):Value;
+
+	static inline function get_setFlushMode() return StdCompress.setFlushMode;
+}
+
+class StdUtf8 {
+	static function thisValue(vthis:Value):StringBuf {
+		return switch vthis {
+			case VInstance({ikind: IUtf8(buf)}): buf;
+			case v: EvalExceptions.unexpectedValue(v, "string");
+		}
+	}
+
+	public static final addChar = EvalEncode.vifun1((vthis, c) -> {
+		var c = EvalDecode.decodeInt(c);
+		// UCharExt.uchar_of_int
+		if (c < 0 || c >= 0x8000000) throw new InvalidArgument("UChar.uchar_of_int");
+		thisValue(vthis).addChar(c);
+		VNull;
+	});
+
+	public static var charCodeAt(get, never):Value;
+
+	static inline function get_charCodeAt() return StdString.charCodeAt;
+
+	public static final compare = EvalEncode.vfun2((a, b) -> {
+		var a = EvalDecode.decodeString(a);
+		var b = EvalDecode.decodeString(b);
+		var c = EvalString.compareCodePoints(a, b);
+		(c < 0 ? -1 : c > 0 ? 1 : 0).vint();
+	});
+
+	public static final decode = EvalEncode.vfun1(s -> {
+		var s = EvalDecode.decodeString(s);
+		var buf = new StringBuf();
+		for (uc in new haxe.iterators.StringIteratorUnicode(s)) {
+			// UCharExt.char_of
+			if (uc > 255) throw new InvalidArgument("UChar.char_of");
+			buf.addChar(uc);
+		}
+		var s = buf.toString();
+		EvalString.createUnknown(s);
+	});
+
+	public static final encode = EvalEncode.vfun1(s -> {
+		var s = EvalDecode.decodeString(s);
+		var bytes = Bytes.ofString(s);
+		var buf = new StringBuf();
+		for (i in 0...bytes.length) buf.addChar(bytes.get(i));
+		EvalString.createUnknown(buf.toString());
+	});
+
+	public static final iter = EvalEncode.vfun2((s, f) -> {
+		var s = EvalDecode.decodeString(s);
+		for (uc in new haxe.iterators.StringIteratorUnicode(s)) EvalMisc.callValue(f, [uc.vint()]);
+		VNull;
+	});
+
+	public static final length = EvalEncode.vfun1(s -> {
+		var s = EvalDecode.decodeVstring(s);
+		s.slength.vint();
+	});
+
+	public static var sub(get, never):Value;
+
+	static inline function get_sub() return StdString.substr;
+
+	public static final toString = EvalEncode.vifun0(vthis -> {
+		var self = thisValue(vthis);
+		VString(EvalString.createAscii(self.toString()));
+	});
+
+	public static final validate = EvalEncode.vfun1(s -> {
+		var s = EvalDecode.decodeString(s);
+		// native strings only fail to be valid with lone surrogates
+		var valid = true;
+		var i = 0;
+		while (i < s.length) {
+			var c = StringTools.fastCodeAt(s, i);
+			if (c >= 0xD800 && c <= 0xDBFF) {
+				var d = i + 1 < s.length ? StringTools.fastCodeAt(s, i + 1) : -1;
+				if (d >= 0xDC00 && d <= 0xDFFF) i++ else {
+					valid = false;
+					break;
+				}
+			} else if (c >= 0xDC00 && c <= 0xDFFF) {
+				valid = false;
+				break;
+			}
+			i++;
+		}
+		valid.vbool();
+	});
+}
+
+class StdNativeString {
+	public static final fromString = EvalEncode.vfun1(v -> {
+		switch EvalDecode.decodeOptional(EvalDecode.decodeVstring, v) {
+			case null: VNull;
+			case s: VNativeString(Bytes.ofString(s.sstring));
+		}
+	});
+
+	public static final fromBytes = EvalEncode.vfun1(v -> {
+		var b = EvalDecode.decodeBytes(v);
+		VNativeString(b.sub(0, b.length));
+	});
+
+	public static final toString = EvalEncode.vfun1(v -> {
+		var s = EvalDecode.decodeNativeString(v);
+		EvalString.createUnknown(s.toString());
+	});
+
+	public static final toBytes = EvalEncode.vfun1(v -> {
+		var s = EvalDecode.decodeNativeString(v);
+		EvalEncode.encodeBytes(s.sub(0, s.length));
+	});
+
+	public static final concat = EvalEncode.vfun2((v1, v2) -> {
+		// `let ... and ...`: both are evaluated before the concatenation
+		var s1 = EvalDecode.decodeNativeString(v1);
+		var s2 = EvalDecode.decodeNativeString(v2);
+		var b = Bytes.alloc(s1.length + s2.length);
+		b.blit(0, s1, 0, s1.length);
+		b.blit(s1.length, s2, 0, s2.length);
+		VNativeString(b);
+	});
+
+	public static final char = EvalEncode.vfun2((v1, v2) -> {
+		var s = EvalDecode.decodeNativeString(v1);
+		var index = EvalDecode.decodeInt(v2);
+		if (index < 0 || index >= s.length) EvalMisc.throwString("index out of bounds", Globals.nullPos) else EvalEncode.encodeString(String.fromCharCode(s.get(index)));
+	});
+
+	public static final code = EvalEncode.vfun2((v1, v2) -> {
+		var s = EvalDecode.decodeNativeString(v1);
+		var index = EvalDecode.decodeInt(v2);
+		if (index < 0 || index >= s.length) EvalMisc.throwString("index out of bounds", Globals.nullPos) else s.get(index).vint();
+	});
+
+	public static final getLength = EvalEncode.vfun1(v -> {
+		var s = EvalDecode.decodeNativeString(v);
+		s.length.vint();
+	});
+
+	public static final sub = EvalEncode.vfun3((v1, v2, v3) -> {
+		var s = EvalDecode.decodeNativeString(v1);
+		var start = EvalDecode.decodeInt(v2);
+		var maxLength = s.length - start;
+		function stringSub(start:Int, length:Int):Value {
+			if (start < 0 || length < 0 || start > s.length - length) return EvalMisc.throwString("Invalid arguments for eval.NativeString.sub", Globals.nullPos);
+			return VNativeString(s.sub(start, length));
+		}
+		if (v3.match(VNull)) stringSub(start, maxLength) else {
+			var length = {
+				var l = EvalDecode.decodeInt(v3);
+				l > maxLength ? maxLength : l;
+			}
+			stringSub(start, length);
+		}
+	});
+}

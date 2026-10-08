@@ -39,7 +39,7 @@ class Vstring {
 }
 
 class VstringBuffer {
-	public final bbuffer:StringBuf = new StringBuf();
+	public var bbuffer:StringBuf = new StringBuf();
 	public var blength:Int = 0;
 
 	public function new() {}

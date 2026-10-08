@@ -189,5 +189,11 @@ class EvalString {
 		self.blength += cLen;
 	}
 
+	// Buffer.clear: a fresh host buffer
+	public static function bufferClear(self:VstringBuffer):Void {
+		self.bbuffer = new StringBuf();
+		self.blength = 0;
+	}
+
 	public static function bufferContents(self:VstringBuffer):Vstring return createUnknownVstring(self.bbuffer.toString());
 }
