@@ -61,7 +61,9 @@ class InstanceBuilder {
 			case _: raiseTypingError("MacroType requires a single expression call parameter", p);
 		};
 		var old = ctx.e.ret;
-		var t = switch ctx.g.doMacro(ctx, MMacroType, call.path, call.field, call.args, p) {
+		// Typed local: gencpp can't switch on a call through a function-typed field.
+		var macroResult:context.Typecore.MacroResult = ctx.g.doMacro(ctx, MMacroType, call.path, call.field, call.args, p);
+		var t = switch macroResult {
 			case MError | MMacroInMacro: spawnMonomorph(ctx, p);
 			case MSuccess(_): ctx.e.ret;
 		};
@@ -77,7 +79,8 @@ class InstanceBuilder {
 		};
 		var oldRet = ctx.e.ret, oldBuild = ctx.c.getBuildInfos;
 		ctx.c.getBuildInfos = function() return {type:TClassDecl(c), params:pl, fields:cfl};
-		var t = switch ctx.g.doMacro(ctx, MMacroType, call.path, call.field, call.args, p) {
+		var macroResult:context.Typecore.MacroResult = ctx.g.doMacro(ctx, MMacroType, call.path, call.field, call.args, p);
+		var t = switch macroResult {
 			case MError | MMacroInMacro: spawnMonomorph(ctx, p);
 			case MSuccess(_): ctx.e.ret;
 		};

@@ -438,7 +438,7 @@ class Lexer {
 	// Typed views of `operators`, so the per-token scan reads no structures.
 	static final opTexts:Array<String> = [for (o in operators) o.text];
 	static final opTokens:Array<Token> = [for (o in operators) o.token];
-	static final opFirst:Array<Int> = [for (o in operators) StringTools.fastCodeAt(o.text, 0)];
+	static final opFirst:Array<Int> = [for (text in opTexts) StringTools.fastCodeAt(text, 0)];
 
 	public function token():LexedToken {
 		core.ds.GcPolicy.tick();

@@ -21,7 +21,8 @@ for t in $targets; do
 				cc -O2 -std=c11 -w -o "$OUT/hih-hlc" -I "$OUT/hlc" -I "${HL_INCLUDE:-/usr/local/include}" "$OUT/hlc/main.c" -L/usr/local/lib -lhl -l:fmt.hdll -lm -Wl,-rpath,/usr/local/lib
 			fi ;;
 		jvm) "$HAXE" -cp src -main haxe.Main -lib hxjava --jvm "$OUT/hih.jar" ;;
-		cpp) "$HAXE" -cp src -main haxe.Main -lib hxcpp -D HXCPP_M64 --cpp "$OUT/cpp" ;;
+		cpp) # CPP_FLAGS="-D HXCPP_SINGLE_THREAD_MARK" needs bench/hxcpp-single-thread-mark.patch
+			"$HAXE" -cp src -main haxe.Main -lib hxcpp -D HXCPP_M64 ${CPP_FLAGS:-} --cpp "$OUT/cpp" ;;
 		*) echo "unknown target $t" >&2; exit 2 ;;
 	esac > "$OUT/build-$t.log" 2>&1
 	echo "$t exit=$? $(( $(date +%s) - start ))s"

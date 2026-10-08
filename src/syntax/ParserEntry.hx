@@ -237,8 +237,14 @@ class ParserEntry {
 		catch(err:haxe.Exception){ restore(); throw err;}
 		restore(); return result;
 	}
+	/** `String.make n ' '`, by doubling (StringTools.lpad is quadratic on hxcpp). **/
+	static function makeSpaces(n:Int):String {
+		var r="",chunk=" ";
+		while (n>0) { if (n&1!=0) r+=chunk; chunk+=chunk; n>>=1; }
+		return r;
+	}
 	public static function parseExprString(config:ParserConfiguration,s:String,p:Pos,error:String->Pos->ParseResult<Expr>,inlined:Bool):ParseResult<Expr> {
-		if (p.pmin>0) s=StringTools.lpad(s," ",s.length+p.pmin);
+		if (p.pmin>0) s=makeSpaces(p.pmin)+s;
 		var result=parseString(config,Grammar.parseExpressionStream,s,p,error,inlined);
 		if (inlined) return result;
 		function loop(e:Expr):Expr { var mapped=Ast.mapExpr(loop,e); return {expr:mapped.expr,pos:p}; }

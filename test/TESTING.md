@@ -37,8 +37,9 @@ libraries, display/server services, or a non-HXB target.
 
 The same suite also runs on other builds of the port through
 `HAXE_IN_HAXE_PORT` (see `bench/README.md`). The HashLink, HL/C, JS and JVM
-builds each pass all 282 cases. C++ release builds crash in hxcpp's runtime
-(heap corruption, see `bench/README.md`).
+builds each pass all 282 cases. So does C++, built with
+`bench/hxcpp-single-thread-mark.patch`; stock hxcpp's parallel GC marking
+crashes it (see `bench/README.md`).
 
 Other lanes, all passing:
 

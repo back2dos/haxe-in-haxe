@@ -8,7 +8,9 @@ byte-identical `.hxb` payloads.
 
 ```sh
 make -C haxe haxe
-HAXE=haxe/haxe sh bench/build.sh js hl jvm cpp   # needs hxnodejs, hxjava, hxcpp (git)
+HAXE=haxe/haxe sh bench/build.sh js hl jvm   # needs hxnodejs, hxjava
+# C++ needs hxcpp from git with bench/hxcpp-single-thread-mark.patch:
+CPP_FLAGS="-D HXCPP_SINGLE_THREAD_MARK" sh bench/build.sh cpp
 # HL/C needs a compiler with bench/hl2c-virtual-field-cast.patch and HashLink headers:
 HAXE_HLC=/path/to/patched/haxe HL_INCLUDE=/path/to/hashlink/src sh bench/build.sh hlc
 # with bench/libhl-allocator.patch applied to HashLink (built with -ftls-model=initial-exec):
@@ -16,29 +18,35 @@ HL_STATIC="libhl.a fmt.o dxt.o sha1.o" sh bench/build.sh hlc   # static link
 HAXE_REFERENCE=haxe/haxe python3 bench/run.py -n 5
 ```
 
-## Results — 2026-10-08 (third round)
+## Results — 2026-10-08 (fourth round)
 
 4-core Linux container. Median of 5 runs, in seconds. HashLink runs use the
-patched libhl (`libhl-allocator.patch`); HL/C links it statically.
+patched libhl (`libhl-allocator.patch`); HL/C links it statically. C++ uses
+hxcpp git `cd5dc3b` with `hxcpp-single-thread-mark.patch`.
 
-| Runner | hello | trycatch | stdlib | vs. reference (stdlib) | stdlib on 2026-10-07 |
+| Runner | hello | trycatch | stdlib | vs. reference (stdlib) | stdlib, third round |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| reference (native OCaml) | 0.11 | 0.12 | 0.23 | 1× | 0.23 |
-| HL/C (HashLink compiled to C) | 0.23 | 0.21 | 0.49 | 2.2× | (no build) |
-| HashLink (JIT) | 0.58 | 0.59 | 0.94 | 4.3× | 7.62 |
-| JS (Node 22) | 1.13 | 1.25 | 2.05 | 9× | 7.15 |
-| JVM (OpenJDK 21) | 1.87 | 2.08 | 2.79 | 12× | 5.40 |
-| C++ (hxcpp) | — | — | — | — | 1.83 |
+| reference (native OCaml) | 0.12 | 0.12 | 0.23 | 1× | 0.23 |
+| HL/C (HashLink compiled to C) | 0.23 | 0.23 | 0.53 | 2.3× | 0.49 |
+| C++ (hxcpp) | 0.45 | 0.45 | 1.02 | 4.4× | (crashed) |
+| HashLink (JIT) | 0.66 | 0.66 | 1.12 | 4.9× | 0.94 |
+| JS (Node 22) | 1.22 | 1.22 | 2.16 | 9× | 2.05 |
+| JVM (OpenJDK 21) | 2.11 | 2.07 | 3.13 | 14× | 2.79 |
+
+HL, JS and JVM read 5–15% slower than in the third round although nothing
+in this round should slow them down and the reference's own times barely
+moved; this round's runs weren't repeated, so that difference isn't
+explained.
 
 Instruction counts (callgrind, stdlib): the reference executes 1.10G
 instructions, HL/C 2.66G. Roughly half of the remaining difference is
 allocation and GC (OCaml's minor-heap allocation is a pointer bump), about a
 third is the program code itself (about 1.9× OCaml's), and the rest is dynamic
-casts and structural-type conversions.
+casts and structural-type conversions. C++ executes 5.36G: about a third of
+that is C++ exception unwinding in libgcc (see the C++ note below).
 
 Every build above passes the full conformance suite (282 cases) through
-`HAXE_IN_HAXE_PORT`. C++ is left out: release builds with current hxcpp
-crash or hang (see below).
+`HAXE_IN_HAXE_PORT`.
 
 Workloads:
 
@@ -130,16 +138,32 @@ all allocation) or a cheaper allocator.
   build captures stacks through libgcc unwinding. Static linking of libhl and
   `-O3 -march=native` made no measurable difference.
 - **C++.** Needs hxcpp from git: the 4.3.2 haxelib release (and 4.3.99)
-  don't support the pinned std's zip API. Release builds of the port corrupt
-  hxcpp's heap: random segfaults inside hxcpp's string hash and GC, and
-  deadlocks on mutexes that no other thread holds. Since the latest changes
-  they crash on almost every run. Debug builds run correctly, and so do
-  builds with `HXCPP_GC_VERIFY`. Ruled out: the port's mutexes and threads
-  (single-threaded stand-ins still crash), GC parallel marking (a single
-  marker thread still crashes), stack depth, and null-reference exceptions.
-  Older hxcpp revisions don't run with the pinned std, so bisecting hxcpp
-  wasn't possible. One real port bug turned up along the way: a C++ trigraph
-  (`"??="`) in the lexer, now fixed.
+  don't support the pinned std's zip API.
+  - **Crash.** Release builds crashed or hung on random runs: segfaults in
+    random places (hxcpp's string hash, the GC, field reads from objects that
+    had been collected) and deadlocks. The cause is hxcpp's multi-threaded GC
+    marking. With a single marker thread every run passes; disabling only
+    the hand-off of large arrays to other marker threads doesn't help.
+    `hxcpp-single-thread-mark.patch` adds `HXCPP_SINGLE_THREAD_MARK`,
+    which turns parallel marking off, the same as `HXCPP_GC_VERIFY` does
+    without that define's verification work. Debug builds also mark on one
+    thread, which is why they never crashed.
+  - **Port fixes.** `switch` directly on a call through a function-typed
+    field with an enum result generated invalid C++ (`.StaticCast` on the
+    callable), so `InstanceBuilder` stores the result in a local first. On
+    hxcpp `StringTools.fastCodeAt` on a structure field calls `cca`
+    dynamically and failed at startup, so the lexer's first-character table
+    is built from its typed operator texts. Also fixed earlier: a C++
+    trigraph (`"??="`) in the lexer.
+  - **Speed.** `StringTools.lpad` reads `StringBuf.length`, which is O(n)
+    on hxcpp, so `ParserEntry.parseExprString` padding a string by `pmin`
+    spaces was quadratic: half of all instructions for `hello`. It now
+    builds the spaces directly (upstream's `String.make`). What remains is
+    mostly exceptions: parser backtracking throws (about 119k throws for
+    `stdlib`) unwind through libgcc's table-driven unwinder, which costs
+    about 19k instructions per throw on the deep recursive-descent stacks.
+    `HXCPP_SINGLE_THREADED_APP` (no TLS lookup per allocation) saves about 8%
+    more, but it's unsafe once the compiler runs parallel filters.
 - **JVM.** `genjvm` emits a method (`typing.Typer.typeExpr`) that the
   bytecode verifier rejects. The jar runs correctly with verification off
   (`-XX:-BytecodeVerificationLocal`), which `run.py` passes. The JVM
