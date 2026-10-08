@@ -429,10 +429,10 @@ index d338518..ab78e4d 100644
  		o = (vobj*)hl_gc_alloc_gen(t, rt->size, (rt->hasPtr ? MEM_KIND_RAW : MEM_KIND_NOPTR) | MEM_ZERO);
  	} else {
 diff --git a/src/hlc.h b/src/hlc.h
-index 7def07d..29e5a59 100644
+index 7def07d..75eff4d 100644
 --- a/src/hlc.h
 +++ b/src/hlc.h
-@@ -108,4 +108,103 @@ extern void hl_entry_point();
+@@ -108,4 +108,122 @@ extern void hl_entry_point();
  #define __hl_prefetch_m4(addr)
  #endif
  
@@ -533,6 +533,25 @@ index 7def07d..29e5a59 100644
 +#define hl_alloc_array hlc_alloc_array
 +#define hl_alloc_virtual hlc_alloc_virtual
 +#define hl_alloc_bytes hlc_alloc_bytes
++#endif
++
++#if defined(HLC_BOOT) && !defined(HLC_NO_INLINE_CAST)
++// Inline fast path for hl_dyn_castp (cast.c): a value already of the static
++// type, or a Dynamic holding a reference-typed value of exactly the target
++// type, needs no runtime call. HNULL keeps the runtime path (boxed values).
++#define HLC_DYN_REF_KINDS ((1 << HFUN) | (1 << HOBJ) | (1 << HARRAY) | (1 << HVIRTUAL) | (1 << HDYNOBJ) | (1 << HENUM))
++static inline __attribute__((always_inline)) void *hlc_dyn_castp( void *data, hl_type *t, hl_type *to ) {
++	if( !(hl_track.flags & HL_TRACK_CAST) ) {
++		if( t == to && t->kind != HNULL ) return *(void**)data;
++		if( t->kind == HDYN ) {
++			vdynamic *v = *(vdynamic**)data;
++			if( v == NULL ) return NULL;
++			if( v->t == to && ((1 << to->kind) & HLC_DYN_REF_KINDS) ) return v;
++		}
++	}
++	return hl_dyn_castp(data, t, to);
++}
++#define hl_dyn_castp hlc_dyn_castp
 +#endif
 +
  #endif

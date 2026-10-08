@@ -47,13 +47,16 @@ class Grammar {
 		try return f() catch (_:StreamFailure) throw new StreamError("Parse error.");
 	}
 
-	static function tryHead<T>(f:Void->T):Null<{v:T}> {
+	// Inline so the result is the caller's concrete {v:T} (HashLink otherwise
+	// converts the generic structure with a dynamic lookup per call).
+	static inline function tryHead<T>(f:Void->T):Null<{v:T}> {
+		var r:Null<{v:T}> = null;
 		// Stream.Failure is only ever thrown as the shared instance: an identity
 		// test instead of the typed catch's Exception.caught and type check.
-		try return {v: f()} catch (e:haxe.Exception) {
+		try r = {v: f()} catch (e:haxe.Exception) {
 			if (e != StreamFailure.instance) throw e;
-			return null;
 		}
+		return r;
 	}
 
 	static function fail<T>():T throw StreamFailure.raise();
@@ -126,12 +129,14 @@ class Grammar {
 
 	static function pn(name:String, p:Pos):PlacedName return {name: name, pos: p};
 
-	public static function popt<T>(f:S->T, s:S):Null<T> {
+	// popt, plist and the psep* helpers are inline for the same reason, and
+	// because HashLink builds an Array<T> of a type parameter as an ArrayDyn.
+	public static inline function popt<T>(f:S->T, s:S):Null<T> {
 		var r = tryHead(function() return f(s));
 		return r == null ? null : r.v;
 	}
 
-	public static function plist<T>(f:S->T, s:S):Array<T> {
+	public static inline function plist<T>(f:S->T, s:S):Array<T> {
 		var acc = [];
 		while (true) {
 			var r = tryHead(function() return f(s));
@@ -141,7 +146,7 @@ class Grammar {
 		return acc;
 	}
 
-	public static function psepNonempty<T>(sep:Token, f:S->T, s:S):Array<T> {
+	public static inline function psepNonempty<T>(sep:Token, f:S->T, s:S):Array<T> {
 		var v = f(s);
 		var acc = [v];
 		while (true) {
@@ -153,19 +158,20 @@ class Grammar {
 		return acc;
 	}
 
-	public static function psep<T>(sep:Token, f:S->T, s:S):Array<T> {
+	public static inline function psep<T>(sep:Token, f:S->T, s:S):Array<T> {
 		var r = tryHead(function() return psepNonempty(sep, f, s));
 		return r == null ? [] : r.v;
 	}
 
-	public static function psepTrailing<T>(sep:Token, f:S->T, s:S):Array<T> {
+	public static inline function psepTrailing<T>(sep:Token, f:S->T, s:S):Array<T> {
 		var acc = [];
 		while (true) {
 			var r = tryHead(function() return f(s));
-			if (r == null) return acc;
+			if (r == null) break;
 			acc.push(r.v);
-			if (isTok(s, sep)) s.junk() else return acc;
+			if (isTok(s, sep)) s.junk() else break;
 		}
+		return acc;
 	}
 
 	static function pignore(f:Void->Dynamic):Void {
