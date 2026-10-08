@@ -27,7 +27,7 @@ patched libhl (`libhl-allocator.patch`); HL/C links it statically.
 | HL/C (HashLink compiled to C) | 0.22 | 0.24 | 0.53 | 2.3× | (no build) |
 | HashLink (JIT) | 0.68 | 0.67 | 1.01 | 4.4× | 7.62 |
 | JS (Node 22) | 1.13 | 1.18 | 1.98 | 8.6× | 7.15 |
-| JVM (OpenJDK 21) | 2.14 | 2.20 | 3.10 | 13× | 5.40 |
+| JVM (OpenJDK 21) | 2.00 | 2.02 | 2.99 | 13× | 5.40 |
 | C++ (hxcpp) | — | — | — | — | 1.83 |
 
 Instruction counts (callgrind, stdlib): the reference executes 1.10G
