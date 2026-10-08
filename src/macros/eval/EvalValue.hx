@@ -1,0 +1,491 @@
+package macros.eval;
+
+import core.Globals.Pos;
+import core.ds.AtomicLazy;
+import core.ds.GlobalsIntMap;
+import core.ds.OcamlHashtbl;
+import haxe.io.Bytes;
+
+/**
+	haxe/src/macro/eval/evalValue.ml.
+
+	Deviations:
+	- Strings (`Vstring`) hold a native string. Their length and indices are in
+	  code points, as Eval's UTF-8 strings, see `EvalString`.
+	- libuv handles (`Vhandle`), mbedtls instances and OCaml domains are not
+	  implemented; the natives using them fail explicitly.
+	- `IObjectMap` cannot reproduce OCaml's structural hash of runtime values,
+	  so its iteration order is that of a single bucket (newest first).
+**/
+enum Cmp {
+	CEq;
+	CSup;
+	CInf;
+	CUndef;
+}
+
+class Vstring {
+	public final sstring:String;
+	// length in code points
+	public final slength:Int;
+	// sstring has no surrogate pairs: code point indices are string indices
+	public final sbmp:Bool;
+
+	public function new(sstring:String, slength:Int, sbmp:Bool) {
+		this.sstring = sstring;
+		this.slength = slength;
+		this.sbmp = sbmp;
+	}
+}
+
+class VstringBuffer {
+	public final bbuffer:StringBuf = new StringBuf();
+	public var blength:Int = 0;
+
+	public function new() {}
+}
+
+/** `RuntimeStringHashtbl`: a mutable reference to a string map, iterated in key order. **/
+class RuntimeStringHashtbl<V> {
+	var map:Map<String, {key:Vstring, value:V}>;
+
+	public function new(?map:Map<String, {key:Vstring, value:V}>) this.map = map == null ? new Map() : map;
+
+	public function add(key:Vstring, v:V):Void map.set(key.sstring, {key: key, value: v});
+
+	public function copy():RuntimeStringHashtbl<V> return new RuntimeStringHashtbl(map.copy());
+
+	public function find(key:Vstring):{key:Vstring, value:V} {
+		var e = map.get(key.sstring);
+		if (e == null) throw core.ds.NotFound.raise();
+		return e;
+	}
+
+	public function findOpt(key:Vstring):Null<{key:Vstring, value:V}> return map.get(key.sstring);
+
+	// StringMap order: OCaml's String.compare on the UTF-8 bytes, i.e. code point order
+	public function sortedKeys():Array<String> {
+		var keys = [for (k in map.keys()) k];
+		keys.sort(EvalString.compareCodePoints);
+		return keys;
+	}
+
+	public function fold<A>(f:String->{key:Vstring, value:V}->A->A, acc:A):A {
+		for (k in sortedKeys()) acc = f(k, map.get(k), acc);
+		return acc;
+	}
+
+	public function isEmpty():Bool return !map.keys().hasNext();
+
+	public function iter(f:String->{key:Vstring, value:V}->Void):Void for (k in sortedKeys()) f(k, map.get(k));
+
+	public function mem(key:Vstring):Bool return map.exists(key.sstring);
+
+	public function remove(key:Vstring):Void map.remove(key.sstring);
+
+	public function clear():Void map = new Map();
+
+	public function size():Int {
+		var n = 0;
+		for (_ in map.keys()) n++;
+		return n;
+	}
+}
+
+/** `RuntimeIntHashtbl`: `IntHashtbl` (an OCaml `Hashtbl` with `Int.hash`). **/
+class RuntimeIntHashtbl<V> {
+	public final h:OcamlHashtbl<Int, V>;
+
+	public function new(?h:OcamlHashtbl<Int, V>) this.h = h == null ? new OcamlHashtbl(OcamlHashtbl.hashInt, (a, b) -> a == b, 0) : h;
+
+	public function add(key:Int, v:V):Void h.replace(key, v);
+
+	public function copy():RuntimeIntHashtbl<V> return new RuntimeIntHashtbl(h.copy());
+
+	public function find(key:Int):V return h.find(key);
+
+	public function fold<A>(f:Int->V->A->A, acc:A):A return h.fold(f, acc);
+
+	public function isEmpty():Bool return h.length() == 0;
+
+	public function iter(f:Int->V->Void):Void h.iter(f);
+
+	public function mem(key:Int):Bool return h.mem(key);
+
+	public function remove(key:Int):Void h.remove(key);
+
+	public function clear():Void h.clear();
+
+	public function size():Int return h.length();
+}
+
+/**
+	`RuntimeInt64Hashtbl`: `Int64Hashtbl`, hashed with OCaml's polymorphic hash on
+	boxed int64s (custom block), which is not reproduced: one bucket, newest first.
+**/
+class RuntimeInt64Hashtbl<V> {
+	public final h:OcamlHashtbl<haxe.Int64, V>;
+
+	public function new(?h:OcamlHashtbl<haxe.Int64, V>) this.h = h == null ? new OcamlHashtbl(_ -> 0, (a, b) -> a == b, 0) : h;
+
+	public function add(key:haxe.Int64, v:V):Void h.replace(key, v);
+
+	public function copy():RuntimeInt64Hashtbl<V> return new RuntimeInt64Hashtbl(h.copy());
+
+	public function find(key:haxe.Int64):V return h.find(key);
+
+	public function fold<A>(f:haxe.Int64->V->A->A, acc:A):A return h.fold(f, acc);
+
+	public function isEmpty():Bool return h.length() == 0;
+
+	public function iter(f:haxe.Int64->V->Void):Void h.iter(f);
+
+	public function mem(key:haxe.Int64):Bool return h.mem(key);
+
+	public function remove(key:haxe.Int64):Void h.remove(key);
+
+	public function clear():Void h.clear();
+
+	public function size():Int return h.length();
+}
+
+/** Regular expression state. Upstream keeps PCRE2 handles; this uses the host EReg. **/
+class Vregex {
+	public final r:EReg;
+	public final rRexString:Vstring;
+	public final rGlobal:Bool;
+	public var rString:String = "";
+	// the last match succeeded (groups are read from `r`)
+	public var rMatched:Bool = false;
+
+	public function new(r:EReg, rRexString:Vstring, rGlobal:Bool) {
+		this.r = r;
+		this.rRexString = rRexString;
+		this.rGlobal = rGlobal;
+	}
+}
+
+/** zlib stream for haxe.zip.Compress/Uncompress (state kept by the std natives). **/
+class Vzlib {
+	public var z:Dynamic;
+	public var zFlush:Int;
+
+	public function new(z:Dynamic, zFlush:Int) {
+		this.z = z;
+		this.zFlush = zFlush;
+	}
+}
+
+enum VprototypeKind {
+	PClass(interfaces:Array<Int>);
+	PEnum(names:Array<{name:String, params:Array<Int>}>);
+	PInstance;
+	PObject;
+}
+
+/** libuv handles are not implemented (no instance can be created). **/
+class Vhandle {
+	function new() {}
+}
+
+enum Value {
+	VNull;
+	VTrue;
+	VFalse;
+	VInt32(i:Int);
+	VFloat(f:Float);
+	VEnumValue(e:VenumValue);
+	VObject(o:Vobject);
+	VInstance(i:Vinstance);
+	VString(s:Vstring);
+	VArray(a:Varray);
+	VVector(v:Vvector);
+	VPrototype(p:Vprototype);
+	VFunction(f:Vfunc, isStatic:Bool);
+	VFieldClosure(v:Value, f:Vfunc);
+	VLazy(l:AtomicLazy<Value>);
+	VNativeString(s:Bytes);
+	VHandle(h:Vhandle);
+	VInt64(i:haxe.Int64);
+	VUInt64(i:haxe.Int64);
+}
+
+typedef Vfunc = Array<Value>->Value;
+typedef Vvector = Array<Value>;
+
+class Vobject {
+	// The fields of the object known when it is created.
+	public var ofields:Array<Value>;
+	// The prototype of the object.
+	public var oproto:VobjectProto;
+
+	public function new(ofields:Array<Value>, oproto:VobjectProto) {
+		this.ofields = ofields;
+		this.oproto = oproto;
+	}
+}
+
+enum VobjectProto {
+	OProto(p:Vprototype);
+	ODictionary(d:GlobalsIntMap<Value>);
+}
+
+class Vprototype {
+	// The path of the prototype. Using revHash on this gives the original dot path.
+	public final ppath:Int;
+	// The fields of the prototype itself (static fields).
+	public final pfields:Array<Value>;
+	// Map from hashed name to field offset (in pfields).
+	public final pnames:GlobalsIntMap<Int>;
+	// The fields of instances of this prototype (non-static fields).
+	public final pinstanceFields:Array<Value>;
+	// Map from hashed name to field offset (in pinstanceFields).
+	public final pinstanceNames:GlobalsIntMap<Int>;
+	// The parent prototype in case of inheritance (static inheritance too, for Type.getSuperClass).
+	public final pparent:Null<Vprototype>;
+	public final pkind:VprototypeKind;
+	// The value of this prototype, i.e. VPrototype(this).
+	public var pvalue:Value;
+
+	public function new(ppath:Int, pfields:Array<Value>, pnames:GlobalsIntMap<Int>, pinstanceFields:Array<Value>, pinstanceNames:GlobalsIntMap<Int>,
+			pparent:Null<Vprototype>, pkind:VprototypeKind, pvalue:Value) {
+		this.ppath = ppath;
+		this.pfields = pfields;
+		this.pnames = pnames;
+		this.pinstanceFields = pinstanceFields;
+		this.pinstanceNames = pinstanceNames;
+		this.pparent = pparent;
+		this.pkind = pkind;
+		this.pvalue = pvalue;
+	}
+}
+
+enum VinstanceKind {
+	IBytes(b:Bytes);
+	IRegex(r:Vregex);
+	IDate(f:Float);
+	IStringMap(h:RuntimeStringHashtbl<Value>);
+	IIntMap(h:RuntimeIntHashtbl<Value>);
+	IInt64Map(h:RuntimeInt64Hashtbl<Value>);
+	IObjectMap(h:OcamlHashtbl<Value, Value>);
+	IOutput(b:haxe.io.BytesBuffer); // BytesBuffer
+	IBuffer(b:VstringBuffer); // StringBuf
+	IPos(p:Pos);
+	IUtf8(b:StringBuf);
+	IProcess(p:sys.io.Process);
+	IInChannel(i:haxe.io.Input, eof:{v:Bool}); // FileInput
+	IOutChannel(o:haxe.io.Output); // FileOutput
+	ISocket(s:Dynamic);
+	IThread(t:Vthread);
+	IMutex(m:DomainMutex);
+	ISemaphore(s:sys.thread.Semaphore);
+	ICondition(c:Vcondition);
+	ILock(l:Vlock);
+	ITls(i:Int);
+	IDeque(d:Vdeque);
+	IZip(z:Vzlib); // Compress/Uncompress
+	ITypeDecl(m:core.TType.ModuleType);
+	ILazyType(l:core.TType.TLazy, f:Void->Value);
+	IRef(o:Dynamic);
+	INormal;
+	IAtomicBool(b:{v:Bool});
+	IAtomicInt(i:{v:Int});
+	IAtomicObject(o:{v:Value});
+}
+
+class Vinstance {
+	// The fields of this instance.
+	public final ifields:Array<Value>;
+	// The prototype of this instance. Field offsets for ifields are in iproto.pinstanceNames.
+	public final iproto:Vprototype;
+	public var ikind:VinstanceKind;
+
+	public function new(ifields:Array<Value>, iproto:Vprototype, ikind:VinstanceKind) {
+		this.ifields = ifields;
+		this.iproto = iproto;
+		this.ikind = ikind;
+	}
+}
+
+class Varray {
+	public var avalues:Array<Value>;
+	public var alength:Int;
+
+	public function new(avalues:Array<Value>, alength:Int) {
+		this.avalues = avalues;
+		this.alength = alength;
+	}
+}
+
+class VenumValue {
+	public final eindex:Int;
+	public final eargs:Array<Value>;
+	public final epath:Int;
+	public var enpos:Null<Pos>;
+
+	public function new(eindex:Int, eargs:Array<Value>, epath:Int, enpos:Null<Pos>) {
+		this.eindex = eindex;
+		this.eargs = eargs;
+		this.epath = epath;
+		this.enpos = enpos;
+	}
+}
+
+enum VthreadMode {
+	Thread(t:sys.thread.Thread);
+}
+
+class Vthread {
+	public final threadId:Int;
+	public var threadMode:Null<VthreadMode>;
+	public final threadDeque:Vdeque;
+
+	public function new(threadId:Int, threadMode:Null<VthreadMode>, threadDeque:Vdeque) {
+		this.threadId = threadId;
+		this.threadMode = threadMode;
+		this.threadDeque = threadDeque;
+	}
+}
+
+class Vdeque {
+	public var dvalues:Array<Value> = [];
+	public final dmutex:sys.thread.Mutex = new sys.thread.Mutex();
+	public final dcond:sys.thread.Condition = new sys.thread.Condition();
+
+	public function new() {}
+}
+
+class Vlock {
+	public final lmutex:sys.thread.Mutex = new sys.thread.Mutex();
+	public final lcond:sys.thread.Condition = new sys.thread.Condition();
+	public var lcount:Int = 0;
+
+	public function new() {}
+}
+
+class Vcondition {
+	public final cond:sys.thread.Condition = new sys.thread.Condition();
+	public final cmutex:sys.thread.Mutex = new sys.thread.Mutex();
+
+	public function new() {}
+}
+
+/** Reentrant mutex owned by a thread id (DomainMutex upstream). **/
+class DomainMutex {
+	final dmutex = new sys.thread.Mutex();
+	var downer = -1;
+	var ddepth = 0;
+
+	public function new() {}
+
+	public function lock(id:Int):Void {
+		if (downer == id) ddepth++ else {
+			dmutex.acquire();
+			downer = id;
+			ddepth = 1;
+		}
+	}
+
+	public function tryLock(id:Int):Bool {
+		if (downer == id) {
+			ddepth++;
+			return true;
+		}
+		if (dmutex.tryAcquire()) {
+			downer = id;
+			ddepth = 1;
+			return true;
+		}
+		return false;
+	}
+
+	public function unlock():Void {
+		if (ddepth > 1) ddepth-- else {
+			downer = -1;
+			dmutex.release();
+		}
+	}
+}
+
+class EvalValueTools {
+	public static function vstringEqual(s1:Vstring, s2:Vstring):Bool return s1 == s2 || s1.sstring == s2.sstring;
+
+	public static function equals(a:Value, b:Value):Bool {
+		return switch [a, b] {
+			case [VTrue, VTrue] | [VFalse, VFalse] | [VNull, VNull]: true;
+			case [VInt32(a), VInt32(b)]: a == b;
+			case [VFloat(a), VFloat(b)]: a == b;
+			case [VFloat(a), VInt32(b)]: a == (b : Float);
+			case [VInt32(a), VFloat(b)]: (a : Float) == b;
+			case [VEnumValue(a), VEnumValue(b)]: a == b || (a.eindex == b.eindex && a.eargs.length == 0 && b.eargs.length == 0 && a.epath == b.epath);
+			case [VObject(vo1), VObject(vo2)]: vo1 == vo2;
+			case [VInstance(vi1), VInstance(vi2)]: vi1 == vi2;
+			case [VString(s1), VString(s2)]: vstringEqual(s1, s2);
+			case [VArray(va1), VArray(va2)]: va1 == va2;
+			case [VVector(vv1), VVector(vv2)]: vv1 == vv2;
+			case [VFunction(vf1, _), VFunction(vf2, _)]: Reflect.compareMethods(vf1, vf2);
+			case [VPrototype(proto1), VPrototype(proto2)]: proto1.ppath == proto2.ppath;
+			case [VFieldClosure(v1, f1), VFieldClosure(v2, f2)]: Reflect.compareMethods(f1, f2) && equals(v1, v2);
+			case [VNativeString(s1), VNativeString(s2)]: s1.compare(s2) == 0;
+			case [VHandle(h1), VHandle(h2)]: h1 == h2;
+			case [VLazy(f1), _]: equals(f1.force(), b);
+			case [_, VLazy(f2)]: equals(a, f2.force());
+			// physical equality on the remaining values (immediates and boxed int64s)
+			case [VInt64(a), VInt64(b)]: a == b;
+			case [VUInt64(a), VUInt64(b)]: a == b;
+			case _: false;
+		}
+	}
+
+	/** `ValueHashtbl`: Hashtbl.Make with `equals` and a constant hash. **/
+	public static function createValueHashtbl<V>():OcamlHashtbl<Value, V> return new OcamlHashtbl(_ -> 0, equals, 0);
+
+	public static final vnull = VNull;
+	public static final vtrue = VTrue;
+	public static final vfalse = VFalse;
+
+	public static inline function vbool(b:Bool):Value return b ? VTrue : VFalse;
+
+	public static inline function vprototype(proto:Vprototype):Value return VPrototype(proto);
+
+	public static inline function vinstance(i:Vinstance):Value return VInstance(i);
+
+	public static inline function vfunction(f:Vfunc):Value return VFunction(f, false);
+
+	public static inline function vstaticFunction(f:Vfunc):Value return VFunction(f, true);
+
+	public static inline function vfieldClosure(v:Value, f:Vfunc):Value return VFieldClosure(v, f);
+
+	public static inline function vobject(o:Vobject):Value return VObject(o);
+
+	public static inline function vint(i:Int):Value return VInt32(i);
+
+	public static inline function vint32(i:Int):Value return VInt32(i);
+
+	public static inline function vint64(i:haxe.Int64):Value return VInt64(i);
+
+	public static inline function vfloat(f:Float):Value return VFloat(f);
+
+	public static inline function venumValue(e:VenumValue):Value return VEnumValue(e);
+
+	public static inline function vnativeString(s:Bytes):Value return VNativeString(s);
+
+	public static function sExprPretty(e:core.TType.TExpr):String {
+		var ctx = core.TPrinting.printContext();
+		return core.TPrinting.sExprPretty(false, "", false, core.TPrinting.sType.bind(ctx), e);
+	}
+
+	public static function vresolve(v:Value):Value {
+		return switch v {
+			case VLazy(f): vresolve(f.force());
+			case _: v;
+		}
+	}
+
+	public static function associateEnumValuePos(ve:Value, p:Pos):Void {
+		switch ve {
+			case VEnumValue(ve): ve.enpos = p;
+			case _:
+		}
+	}
+}
