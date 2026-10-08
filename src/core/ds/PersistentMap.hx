@@ -1,8 +1,8 @@
 package core.ds;
 /** Persistent ordered lookup for non-string upstream keys. */
 class PersistentMap<K,V> {
- final entries:Array<{key:K,value:V}>;
- public function new(?entries:Array<{key:K,value:V}>) this.entries=entries==null ? [] : entries;
+ final entries:Array<MapEntry<K,V>>;
+ public function new(?entries:Array<MapEntry<K,V>>) this.entries=entries==null ? [] : entries;
  public static function empty<K,V>():PersistentMap<K,V> return new PersistentMap();
  // Entries are sorted by Key.compare with unique keys: index of the first entry not below key.
  function lowerBound(key:K):Int {
