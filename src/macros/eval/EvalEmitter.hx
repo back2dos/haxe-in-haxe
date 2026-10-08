@@ -403,9 +403,9 @@ class EvalEmitter {
 		}
 	}
 
-	public static final emitReturnNull:Emitter = _ -> throw new Return(VNull);
+	public static final emitReturnNull:Emitter = _ -> throw core.ds.FastThrow.of(new Return(VNull));
 
-	public static function emitReturnValue(exec:Emitter):Emitter return env -> throw new Return(exec(env));
+	public static function emitReturnValue(exec:Emitter):Emitter return env -> throw core.ds.FastThrow.of(new Return(exec(env)));
 
 	public static final emitBreak:Emitter = _ -> throw Break.raise();
 

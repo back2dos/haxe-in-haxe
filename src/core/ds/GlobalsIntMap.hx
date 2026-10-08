@@ -15,7 +15,9 @@ class GlobalsIntMap<V> {
 		this.values = values;
 	}
 
-	public static function empty<V>():GlobalsIntMap<V> return new GlobalsIntMap([], []);
+	// The map is persistent, so one empty instance is shared (OCaml's Map.empty).
+	static final emptyMap:GlobalsIntMap<Dynamic> = new GlobalsIntMap([], []);
+	public static inline function empty<V>():GlobalsIntMap<V> return cast emptyMap;
 
 	// index of the first key not above `key` (keys are sorted in decreasing order)
 	function lowerBound(key:Int):Int {

@@ -214,7 +214,7 @@ class EvalArray {
 			} else if (i31 < l) {
 				return i31;
 			} else {
-				throw new BottomException(i);
+				throw core.ds.FastThrow.of(new BottomException(i));
 			}
 		}
 		function trickle(l:Int, i:Int, e:Value):Void {

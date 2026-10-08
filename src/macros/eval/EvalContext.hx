@@ -434,9 +434,9 @@ class EvalContext {
 				env.envLeavePmin = p.pmin;
 				env.envLeavePmax = p.pmax;
 			}
-			throw new RunTimeException(v, callStack(eval), p);
+			throw core.ds.FastThrow.of(new RunTimeException(v, callStack(eval), p));
 		}
-		throw new RunTimeException(v, [], p);
+		throw core.ds.FastThrow.of(new RunTimeException(v, [], p));
 	}
 
 	public static function exc(v:Value):Dynamic return throwValue(v, Globals.nullPos);
@@ -467,12 +467,21 @@ class EvalContext {
 		};
 	}
 
+	// Array.make n vnull: one allocation instead of growing a comprehension.
+	static function makeNullArray(n:Int):Array<Value> {
+		var a = new Array<Value>();
+		a.resize(n);
+		for (i in 0...n) a[i] = VNull;
+		return a;
+	}
+
 	public static function pushEnvironment(ctx:Context, info:EnvInfo):Env {
+		core.ds.GcPolicy.tick(); // macro code allocates without typing anything
 		var eval = getEval(ctx);
 		var timer = if (ctx.detailTimes) core.Timer.startTimer(ctx.timerCtx, ["macro", "execution", kindName(eval, info.kind)]) else noTimer;
 		var debug = if (ctx.debug.supportDebugger || ctx.detailTimes) new EnvDebug(timer, [], 0, noExpr, Globals.nullPos) else noDebug;
-		var locals = info.numLocals == 0 ? emptyArray : [for (_ in 0...info.numLocals) VNull];
-		var captures = info.numCaptures == 0 ? emptyArray : [for (_ in 0...info.numCaptures) VNull];
+		var locals = info.numLocals == 0 ? emptyArray : makeNullArray(info.numLocals);
+		var captures = info.numCaptures == 0 ? emptyArray : makeNullArray(info.numCaptures);
 		var stackDepth = eval.env == null ? 1 : eval.env.envStackDepth + 1;
 		var env = new Env(info, debug, locals, captures, GlobalsIntMap.empty(), info.kind == EKEntrypoint ? null : eval.env, stackDepth, eval);
 		eval.env = env;

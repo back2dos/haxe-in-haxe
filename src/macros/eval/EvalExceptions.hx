@@ -23,7 +23,7 @@ class Break extends haxe.Exception {
 
 	public function new() super("Break");
 
-	public static inline function raise():Break return instance;
+	public static inline function raise():Break return core.ds.FastThrow.of(instance);
 }
 
 class Continue extends haxe.Exception {
@@ -31,7 +31,7 @@ class Continue extends haxe.Exception {
 
 	public function new() super("Continue");
 
-	public static inline function raise():Continue return instance;
+	public static inline function raise():Continue return core.ds.FastThrow.of(instance);
 }
 
 class Return extends haxe.Exception {
