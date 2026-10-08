@@ -18,14 +18,15 @@ WORKLOADS = {
     # name: (cwd, arguments)
     "hello": (ROOT / "bench/workloads", ["-cp", ".", "--main", "Hello"]),
     "trycatch": (ROOT, ["-cp", "test", "--main", "unit.moduleload.TryCatch"]),
-    # Many std modules as bare roots. (The port's own source is not a workload:
-    # compiling it executes std macros, which are outside the first milestone.)
+    # Many std modules as bare roots.
     "stdlib": (ROOT, """haxe.Json haxe.Serializer haxe.Unserializer haxe.crypto.Sha256 haxe.crypto.Md5
         haxe.crypto.Base64 haxe.io.BytesBuffer haxe.zip.Reader haxe.zip.Writer haxe.ds.BalancedTree
         haxe.ds.GenericStack haxe.ds.ListSort haxe.xml.Parser haxe.xml.Printer haxe.Template
         haxe.format.JsonParser haxe.io.Path haxe.Int64Helper haxe.CallStack DateTools EReg StringTools
         Lambda haxe.ds.Vector haxe.EnumFlags haxe.http.HttpBase haxe.crypto.Hmac haxe.crypto.Crc32
         haxe.zip.Huffman haxe.zip.InflateImpl haxe.io.Float32Array haxe.ds.HashMap""".split()),
+    # The port's own source (~52k lines, 382 modules); runs std macros.
+    "self": (ROOT, ["-cp", "src", "-main", "haxe.Main"]),
 }
 
 

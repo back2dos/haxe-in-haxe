@@ -19,6 +19,44 @@ HL_STATIC="libhl.a fmt.o dxt.o sha1.o" sh bench/build.sh hlc   # static link
 LD_LIBRARY_PATH=/path/to/patched/hashlink HAXE_REFERENCE=haxe/haxe python3 bench/run.py -n 7
 ```
 
+## Results — 2026-10-08 (macros, `self` workload)
+
+The port compiling its own source (`self` in `bench/run.py`: 229 files,
+~52k lines, 382 modules, std macros executed by the port's Eval). The archives
+are byte-identical to the reference. 4-core container, median of 5 runs
+(JIT: 3 runs).
+
+| Runner | wall | user | sys | peak RSS | vs. reference |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| reference (native OCaml) | 4.32s | 4.05s | 0.27s | 404 MB | 1× |
+| HL/C (static patched libhl) | 8.68s | 7.64s | 2.22s | 1803 MB | 2.0× |
+| HashLink JIT (stock libhl) | 13.46s | 13.13s | 1.62s | 1486 MB | 3.1× |
+
+HL/C's first run took 14.6s (cold page cache). The gap is wider than on
+`stdlib` (1.5×). From `--times` (timers add overhead and GC pauses land
+anywhere, so these are rough):
+
+| Phase | reference | HL/C | ratio |
+| --- | ---: | ---: | ---: |
+| DCE mark | 0.13s | ~1.5s | ~11× |
+| HXB generation | 0.66s | ~2.9s | ~4× |
+| analyzer | 0.95s | ~2.6s | ~2.7× |
+| typing | 1.32s | ~2.5s | ~2× |
+| macro | 0.05s | ~0.24s | ~4× |
+
+DCE mark stands out and is probably algorithmic. Memory is 4.5× the
+reference.
+
+Binary sizes:
+
+| Binary | size | stripped |
+| --- | ---: | ---: |
+| reference `haxe` (OCaml, every target generator) | 30.5 MB | 21.3 MB |
+| `hih-hlc` (HL/C, libhl linked statically, HXB only) | 14.3 MB | 10.8 MB |
+| `hih.hl` (HashLink bytecode; needs `hl` + libhl, 0.7 MB) | 2.7 MB | — |
+
+The generated C for HL/C is 37 MB of source.
+
 ## Results — 2026-10-08 (fifth round)
 
 4-core Linux container. Median of 7 runs, in seconds. Both HashLink runners
