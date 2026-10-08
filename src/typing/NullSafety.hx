@@ -342,7 +342,7 @@ class ClassChecker {
     case TMeta(meta={meta:MetaTag.NullSafety},inner):var metaMode=NullSafety.getSafetyMode([meta]);Texpr.iter(function(e)loop(metaMode,e),inner);
     case TMeta(_,inner):Texpr.iter(function(e)loop(mode,e),inner);
     case TBinop(OpAssign,left,right):switch left.eexpr{case TField({eexpr:TConst(TThis)},FInstance(_,_,_)) if(!isStatic):case TField(_,FStatic(_,_)) if(isStatic):case _:loop(mode,left);}loop(mode,right);
-    case _:Texpr.iter(function(e)loop(mode,e),e);
+    case _:Texpr.iterWith(loop,mode,e);
    };loop(mode,e);
   }
   function traverse(list:Map<String,TClassField>,mode:SafetyMode,e:TExpr):Map<String,TClassField> {

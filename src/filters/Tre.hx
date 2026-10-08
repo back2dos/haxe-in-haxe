@@ -38,7 +38,7 @@ class Tre {
 		function loop(inClosure:Bool, e:TExpr):Void switch e.eexpr {
 			case TLocal(v = {vKind:VUser(TVOArgument)}) if (inClosure && !result.contains(v) && args.contains(v)): result.unshift(v);
 			case TFunction(fn): loop(true, fn.tfExpr);
-			case _: core.Texpr.iter(e -> loop(inClosure, e), e);
+			case _: core.Texpr.iterWith(loop,inClosure,e);
 		}
 		loop(false, e); return result;
 	}

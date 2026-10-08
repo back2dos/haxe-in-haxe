@@ -278,9 +278,9 @@ class TUnification {
  public static function recStackDefault<A,R>(s:RecStack<A>,v:A,check:A->Bool,run:Void->R,def:R):R return !recStackExists(check,s) ? recStackLoop(s,v,function(_) return run(),null) : def;
  public static function typeEqCustom(c:UnificationContext,a:T,b:T):Void {
   var param=c.equalityKind;
-  function canFollow(t:T):Bool return param!=EqStricter && param!=EqCoreType;
-  function canFollowNull(t:T):Bool return switch c.nullFollowMode {case AlwaysFollow:true;case NeverFollow:false;case FollowIfNullable:isNullable(t);};
-  function canFollowAbstract(ab:TAbstract):Bool return c.equalityUnderlying && switch ab.aThis {case TAbstract(other,_):other!=ab;case _:true;};
+  inline function canFollow(t:T):Bool return param!=EqStricter && param!=EqCoreType;
+  inline function canFollowNull(t:T):Bool return switch c.nullFollowMode {case AlwaysFollow:true;case NeverFollow:false;case FollowIfNullable:isNullable(t);};
+  inline function canFollowAbstract(ab:TAbstract):Bool return c.equalityUnderlying && switch ab.aThis {case TAbstract(other,_):other!=ab;case _:true;};
   if(a==b) return;
   switch [a,b] {
    case [TLazy(f),_]:typeEqCustom(c,lazyType(f),b);

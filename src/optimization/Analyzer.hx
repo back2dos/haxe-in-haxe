@@ -44,7 +44,7 @@ class Ssa {
     if (el.length != bb.bbIncoming.length) throw "Invalid_argument: List.map2";
     var values = [for (j in 0...el.length) {var e = el[j]; var pred = bb.bbIncoming[j].cfgFrom; if (pred != edge.cfgFrom) e; else switch e.eexpr {case TLocal(v):var replacement = local(ctx,e,v,edge.cfgFrom); addSsaEdge(ctx.graph,replacement,bb,LUPhi(i)); withExpr(e,TLocal(replacement)); case _:throw "Analyzer.updatePhi";}}];
     var phi = withExpr(ecall,TCall(ephi,values)); setVarValue(ctx.graph,v0,bb,LUPhi(i)); withExpr(e,TBinop(OpAssign,e1,phi));
-   case _:mapExpr(e -> loop(i,e),e);
+   case _:mapExprWith(loop,i,e);
   }; dynarrayMapi(loop,bb.bbPhi);
  }
  public static function renameInBlock(ctx:AnalyzerContext,bb:BasicBlockData):Void {
@@ -54,7 +54,7 @@ class Ssa {
    case TVar(v,e1) if (e1 != null):var e1 = loop(luk,e1); var w = writeVar(v,luk); withExpr(e,TVar(w,e1));
    case TBinop(OpAssign,e1 = {eexpr:TLocal(v)},e2):var e2 = loop(luk,e2); var w = writeVar(v,luk); withExpr(e,TBinop(OpAssign,withExpr(e1,TLocal(w)),e2));
    case TCall({eexpr:TConst(TString("phi"))},_):e;
-   case _:mapExpr(e -> loop(luk,e),e);
+   case _:mapExprWith(loop,luk,e);
   };
   dynarrayMapi((i,e) -> loop(LUPhi(i),e),bb.bbPhi); dynarrayMapi((i,e) -> loop(LUEl(i),e),bb.bbEl); bb.bbTerminator = terminatorMap(e -> loop(LUTerm,e),bb.bbTerminator); for (edge in bb.bbOutgoing) updatePhi(ctx,edge); for (child in bb.bbDominated) renameInBlock(ctx,child);
  }
@@ -166,7 +166,7 @@ class CopyPropagationImpl implements DataFlowApi<CopyLattice,haxe.ds.IntMap<Copy
     }
    } catch (_:NotFound) {e;}
    case TBinop(op = OpAssign | OpAssignOp(_),e1 = {eexpr:TLocal(_)},e2):withExpr(e,TBinop(op,e1,commit(bb,e2)));
-   case _:mapExpr(e -> commit(bb,e),e);
+   case _:mapExprWith(commit,bb,e);
   };
   Graph.iterDomTree(actx.graph,function(bb) {dynarrayMap(e -> commit(bb,e),bb.bbEl); bb.bbTerminator = terminatorMap(e -> commit(bb,e),bb.bbTerminator);});
  }
@@ -275,7 +275,7 @@ class Run {
   var real = there(actx,e); optimization.Analyzer.Run.timed(actx,["->","idom"],function() Graph.inferImmediateDominators(actx.graph)); optimization.Analyzer.Run.timed(actx,["->","infer_scopes"],function() Graph.inferScopes(actx.graph)); optimization.Analyzer.Run.timed(actx,["->","var writes"],function() Graph.inferVarWrites(actx.graph)); if (actx.com.debug) Graph.checkIntegrity(actx.graph);
   if (actx.config.optimize && !actx.hasUnbound) {actx.didOptimize = true; optimization.Analyzer.Run.timed(actx,["optimize","ssa-apply"],function() Ssa.apply(actx)); if (actx.config.constPropagation) optimization.Analyzer.Run.timed(actx,["optimize","const-propagation"],function() ConstPropagation.apply(actx)); if (actx.config.copyPropagation) optimization.Analyzer.Run.timed(actx,["optimize","copy-propagation"],function() CopyPropagation.apply(actx)); optimization.Analyzer.Run.timed(actx,["optimize","local-dce"],function() LocalDce.apply(actx));} return backAgain(actx,real);
  }
- public static function reduceControlFlow(com:context.SafeCom.SafeContext,e:TExpr):TExpr return Optimizer.reduceControlFlow(com,mapExpr(e -> reduceControlFlow(com,e),e));
+ public static function reduceControlFlow(com:context.SafeCom.SafeContext,e:TExpr):TExpr return Optimizer.reduceControlFlow(com,mapExprWith(reduceControlFlow,com,e));
  public static function runOnFieldInternal(com:context.SafeCom.SafeContext,excOut:ExceptionOutput,config:AnalyzerConfigData,c:TClass,cf:TClassField):Void {
   if (cf.cfExpr == null || AnalyzerConfig.isIgnored(cf.cfMeta) || filters.FilterContext.isRemovableField(com.isMacroContext,cf) || hasClassFieldFlag(cf,CfPostProcessed)) return;
   var e = cf.cfExpr; config = AnalyzerConfig.updateConfigFromMeta(com,config,cf.cfMeta); var actx = createAnalyzerContext(com,config,Globals.sTypePath(c.clPath) + "." + cf.cfName,e);

@@ -90,10 +90,15 @@ private class ConstructorInlining {
    case _:
   } return isCtor || checkExpr(e -> checkForCtors(e,metaInline),e);
  }
+ var markInline:Null<TExpr->TExpr> = null;
+ var markPlain:Null<TExpr->TExpr> = null;
  function markCtors(e:TExpr,forceInline:Bool = false):TExpr {
   switch e.eexpr {case TMeta({meta:core.MetaList.StrictMeta.InlineConstructorArgument(_,_)},_):return e; case _:}
-  var isInline = switch e.eexpr {case TMeta({meta:core.MetaList.StrictMeta.Inline},_):true; case _:false;}; e = mapExpr(e -> markCtors(e,isInline),e);
-  function mark():TExpr {currIoId++; var id:Expr = {expr:EConst(Int(Std.string(currIoId),null)),pos:e.epos}; return mk(TMeta({meta:core.MetaList.StrictMeta.InlineObject,exprs:[id],pos:e.epos},e),e.etype,e.epos);}
+  var isInline = switch e.eexpr {case TMeta({meta:core.MetaList.StrictMeta.Inline},_):true; case _:false;};
+  // the two mapping closures are created once (a closure per node otherwise)
+  if (markInline == null) {markInline = e -> markCtors(e,true); markPlain = e -> markCtors(e,false);}
+  e = mapExpr(isInline ? markInline : markPlain,e);
+  inline function mark():TExpr {currIoId++; var id:Expr = {expr:EConst(Int(Std.string(currIoId),null)),pos:e.epos}; return mk(TMeta({meta:core.MetaList.StrictMeta.InlineObject,exprs:[id],pos:e.epos},e),e.etype,e.epos);}
   return switch e.eexpr {case TObjectDecl(_) | TArrayDecl(_):mark(); case TNew(_,_,_) if (forceInline):mark(); case TNew(c = {clConstructor:cf = {cfKind:Method(MethInline),cfExpr:{eexpr:TFunction(_)}}},_,_):needsInline(scom,c,cf) ? mark() : e; case _:e;};
  }
  function analyzeAliases(seen:Array<TClassField>,captured:InlineExpressionHandled,isLvalue:Bool,e:TExpr):Null<InlineVar> {

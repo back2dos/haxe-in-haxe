@@ -181,7 +181,7 @@ class RenameVars {
 				collect(scope, body);
 				if (flag == DoWhile) collect(scope, condition);
 			});
-			case _: core.Texpr.iter(e -> collect(scope, e), e);
+			case _: core.Texpr.iterWith(collect,scope,e);
 		}
 	}
 	public static function collectIgnoreBlock(rc:RenameContext, scope:RenameScope, e:TExpr, inBlock:Bool = false):Void {

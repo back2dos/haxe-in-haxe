@@ -68,8 +68,15 @@ class Optimizer {
 			case _: e;
 		};
 	}
+	// The mapping closure is made once per traversal and passed down (one per node otherwise).
 	public static function reduceLoop(scom:context.SafeCom.SafeContext, stack:Dynamic, e:TExpr):TExpr {
-		e = core.Texpr.mapExpr(e -> reduceLoop(scom, stack, e), e);
+		var fn:TExpr->TExpr = null;
+		fn = x -> reduceLoopWith(scom, stack, fn, x);
+		return fn(e);
+	}
+
+	static function reduceLoopWith(scom:context.SafeCom.SafeContext, stack:Dynamic, fn:TExpr->TExpr, e:TExpr):TExpr {
+		e = core.Texpr.mapExpr(fn, e);
 		var reduced:TExpr;
 		switch e.eexpr {
 			case TCall(e1, el):

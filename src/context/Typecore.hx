@@ -332,11 +332,13 @@ class Typecore {
 	public static function addLocalWithOrigin(ctx:Typer,origin:TVarOrigin,n:String,t:T,p:Pos):TVar { core.Naming.checkLocalVariableName(ctx.com,n,origin,p); return addLocal(ctx,VUser(origin),n,t,p); }
 	public static function genLocal(ctx:Typer,t:T,p:Pos):TVar return addLocal(ctx,VGenerated,Globals.genLocalPrefix,t,p);
 	public static function isGenLocal(v:TVar):Bool return switch v.vKind { case VGenerated: true; case _: false; };
+	// Task lists are stacks with the top at the end of the array (upstream conses onto
+	// lists; unshift/shift at the front were quadratic). Same order.
 	public static function delay(g:TyperGlobals,p:TyperPass,f:Void->Void):Void {
-		var index = passIndex(p); var tasks = g.delayed[index]; tasks.tasks.unshift(f); if (index < g.delayedMinIndex) g.delayedMinIndex = index;
+		var index = passIndex(p); var tasks = g.delayed[index]; tasks.tasks.push(f); if (index < g.delayedMinIndex) g.delayedMinIndex = index;
 	}
 	public static function delayLate(g:TyperGlobals,p:TyperPass,f:Void->Void):Void {
-		var index = passIndex(p); var tasks = g.delayed[index]; tasks.tasksLate.unshift(f); if (index < g.delayedMinIndex) g.delayedMinIndex = index;
+		var index = passIndex(p); var tasks = g.delayed[index]; tasks.tasksLate.push(f); if (index < g.delayedMinIndex) g.delayedMinIndex = index;
 	}
 	public static function delayIfMono(g:TyperGlobals,p:TyperPass,t:T,f:Void->Void):Void switch core.TFunctions.follow(t) { case TMono(_): delay(g,p,f); case _: f(); }
 	public static function flushPass(g:TyperGlobals,p:TyperPass,where:Dynamic):Void {
@@ -344,7 +346,7 @@ class Typecore {
 		while (index <= passIndex(p)) {
 			var tasks = g.delayed[index];
 			if (tasks.tasks.length != 0) {
-				var f = tasks.tasks.shift(); f(); flushPass(g,p,where); return;
+				var f = tasks.tasks.pop(); f(); flushPass(g,p,where); return;
 			} else if (tasks.tasksLate.length != 0) {
 				tasks.tasks = tasks.tasksLate.copy(); tasks.tasks.reverse(); tasks.tasksLate = []; flushPass(g,p,where); return;
 			} else { index++; g.delayedMinIndex = index; }

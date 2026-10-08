@@ -29,11 +29,11 @@ class LocalUsage {
 					localUsage(f, tf.tfExpr);
 				}));
 			case TBlock(l): f(Block(function(f) { for (e in l) localUsage(f, e); }));
-			case TWhile(_, _, _): f(Loop(function(f) { core.Texpr.iter(e -> localUsage(f, e), e); }));
+			case TWhile(_, _, _): f(Loop(function(f) { core.Texpr.iterWith(localUsage,f,e); }));
 			case TTry(body, catches):
 				localUsage(f, body);
 				for (c in catches) f(Block(function(f) { f(Declare(c.variable)); localUsage(f, c.expr); }));
-			case _: core.Texpr.iter(e -> localUsage(f, e), e);
+			case _: core.Texpr.iterWith(localUsage, f, e);
 		}
 	}
 }

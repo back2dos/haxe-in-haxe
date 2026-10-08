@@ -194,7 +194,8 @@ class Filters {
 			case TClassDecl(c):
 				var vars:Array<{variable:TVar, type:T}> = [];
 				function saveVars(e:TExpr):Void {
-					function add(v:TVar):Void vars.unshift({variable:v, type:v.vType});
+					// push, not unshift (quadratic): entries only restore each var's type, so order is irrelevant
+					inline function add(v:TVar):Void vars.push({variable:v, type:v.vType});
 					switch e.eexpr { case TFunction(fn): for (a in fn.tfArgs) add(a.variable); saveVars(fn.tfExpr); case TVar(v, eo): add(v); if (eo != null) saveVars(eo); case _: core.Texpr.iter(saveVars, e); }
 				}
 				function mkOverloadRestore(f:TClassField):Dynamic {

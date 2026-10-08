@@ -64,7 +64,7 @@ class CapturedVars {
 						tfExpr:TypeOps.mkBlock(TypeOps.mk(TReturn(e), e.etype, e.epos))};
 					var ft = TFun({args:newVars.map(a -> {name:a.variable.vName, optional:false, type:a.variable.vType}), ret:e.etype});
 					return TypeOps.mk(TCall(Texpr.Builder.mkParent(TypeOps.mk(TFunction(fn), ft, e.epos)), vars.map(v -> TypeOps.mk(TLocal(v), v.vType, e.epos))), e.etype, e.epos);
-				case _: return core.Texpr.mapExpr(e -> wrap(used, e), e);
+				case _: return core.Texpr.mapExprWith(wrap,used,e);
 			};
 			return TypeOps.mk(def, e.etype, e.epos);
 		}
