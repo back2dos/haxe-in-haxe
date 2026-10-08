@@ -1,6 +1,6 @@
 --- a/src/allocator.c	2026-10-07 19:37:06.820402032 +0000
-+++ b/src/allocator.c	2026-10-08 04:30:57.608870938 +0000
-@@ -1,654 +1,654 @@
++++ b/src/allocator.c	2026-10-08 05:26:35.564211239 +0000
+@@ -1,654 +1,669 @@
 -/*
 - * Copyright (C)2005-2020 Haxe Foundation
 - *
@@ -872,6 +872,21 @@
 +			next_bid = reuse ? reuse->pos : -1;
 +			continue;
 +		}
++		// fixed-size pages: handle a whole bitmap byte (8 blocks) at once when possible
++		if( !p->sizes && (bid & 7) == 0 && bid + 8 <= last && (next_bid < 0 || next_bid >= bid + 8) ) {
++			unsigned char b = bmp[bid>>3];
++			if( b == 0xFF ) { bid += 8; continue; }
++			if( b == 0 ) {
++				if( cur_pos && cur_pos->pos + cur_pos->count == bid )
++					cur_pos->count += 8;
++				else {
++					freelist_append(&new_fl,bid,8);
++					cur_pos = GET_FL(&new_fl,new_fl.count - 1);
++				}
++				bid += 8;
++				continue;
++			}
++		}
 +		fl_cursor count;
 +		if( p->sizes ) {
 +			count = p->sizes[bid];
@@ -1310,8 +1325,8 @@
 +	}
 +}
 --- a/src/gc.c	2026-10-07 19:37:06.820573294 +0000
-+++ b/src/gc.c	2026-10-08 04:31:31.002711005 +0000
-@@ -1,1718 +1,1745 @@
++++ b/src/gc.c	2026-10-08 05:25:51.443337968 +0000
+@@ -1,1718 +1,1743 @@
 -/*
 - * Copyright (C)2005-2016 Haxe Foundation
 - *
@@ -3604,13 +3619,9 @@
 +		if( part >= 0 ) {
 +			gc_slice *s = &gc_slices[(part << PAGE_KIND_BITS) | kind];
 +			if( s->gen == gc_slice_gen && s->cur < s->end ) {
++				// slices are zeroed when they are created (see gc_alloc_gen_slow)
 +				void *ptr = s->cur;
-+				int allocated = s->block_size;
-+				s->cur += allocated;
-+				if( flags & MEM_ZERO )
-+					MZERO(ptr,allocated);
-+				else if( MEM_HAS_PTR(flags) && allocated != size )
-+					MZERO((char*)ptr+size,allocated-size);
++				s->cur += s->block_size;
 +				return ptr;
 +			}
 +		}
@@ -3691,6 +3702,8 @@
 +			unsigned char *slice;
 +			if( max < 4 ) max = 4;
 +			slice = (unsigned char*)gc_alloc_fixed(tpart, kind, max, &n);
++			// zero the rest of the slice once, so the fast path does not have to
++			if( n > 1 ) MZERO(slice + bsize, (n - 1) * bsize);
 +			gc_slice *s = &gc_slices[(tpart << PAGE_KIND_BITS) | kind];
 +			s->block_size = bsize;
 +			s->cur = slice + bsize;
