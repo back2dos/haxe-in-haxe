@@ -132,8 +132,9 @@ class SafeCom {
 					}
 					for (overloadField in cf.cfOverloads) processField(overloadField);
 				}
-				for (cf in c.clOrderedFields) processField(cf);
-				for (cf in c.clOrderedStatics) processField(cf);
+				// Upstream iterates immutable lists; filters such as local_statics add fields while we iterate.
+				for (cf in c.clOrderedFields.copy()) processField(cf);
+				for (cf in c.clOrderedStatics.copy()) processField(cf);
 				if (c.clConstructor != null) processField(c.clConstructor);
 				var init = TClassTools.getClInit(c);
 				if (init != null) TClassTools.setClInit(c,run(local,Globals.sTypePath(c.clPath)+".__init__",init));

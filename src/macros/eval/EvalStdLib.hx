@@ -74,7 +74,7 @@ using macros.eval.EvalValue.EvalValueTools;
 	- `hashtbl_keys` follows the host map's key order (OCaml `Hashtbl` order is
 	  not reproduced).
 	- libuv (`EvalLuv`) natives are not registered and mbedtls (`EvalSsl`) fields
-	  are not registered; mbedtls constructors throw "... is not supported by
+	  are not registered except the enum constants; mbedtls constructors throw "... is not supported by
 	  haxe-in-haxe". Sockets are created by a constructor that fails likewise.
 	- zlib streams are host `haxe.zip.Compress`/`haxe.zip.Uncompress` objects.
 	- Field lists are `{name, value}` pairs instead of OCaml tuples.
@@ -768,8 +768,16 @@ class EvalStdLib {
 		], []);
 		initFields(builtins, tp(["eval", "integers", "_UInt64"], "UInt64_Impl_"), EvalIntegers.uint64Fields, []);
 		initFields(builtins, tp(["eval", "integers", "_Int64"], "Int64_Impl_"), EvalIntegers.int64Fields, []);
-		// EvalLuv.*_fields (eval.luv.*) and EvalSsl.init_fields (sys.ssl.*, mbedtls.*) are
-		// not registered: libuv and mbedtls are not supported by haxe-in-haxe.
+		// EvalLuv.*_fields (eval.luv.*) and the native fields of EvalSsl.init_fields
+		// (sys.ssl.*, mbedtls.*) are not registered: libuv and mbedtls are not supported by
+		// haxe-in-haxe. The mbedtls enum constants are plain data (hx_get_ssl_*_flags in
+		// libs/mbedtls/mbedtls_stubs.c, values from mbedtls/ssl.h), so they are.
+		function statics(a:Array<{name:String, value:Int}>) return [for (f in a) {name: f.name, value: EvalValue.EvalValueTools.vint(f.value)}];
+		initFields(builtins, tp(["mbedtls"], "SslAuthmode"), statics([
+			{name: "SSL_VERIFY_NONE", value: 0}, {name: "SSL_VERIFY_OPTIONAL", value: 1}, {name: "SSL_VERIFY_REQUIRED", value: 2}]), []);
+		initFields(builtins, tp(["mbedtls"], "SslEndpoint"), statics([{name: "SSL_IS_CLIENT", value: 0}, {name: "SSL_IS_SERVER", value: 1}]), []);
+		initFields(builtins, tp(["mbedtls"], "SslPreset"), statics([{name: "SSL_PRESET_DEFAULT", value: 0}, {name: "SSL_PRESET_SUITEB", value: 2}]), []);
+		initFields(builtins, tp(["mbedtls"], "SslTransport"), statics([{name: "SSL_TRANSPORT_STREAM", value: 0}, {name: "SSL_TRANSPORT_DATAGRAM", value: 1}]), []);
 		initFields(builtins, tp(["haxe", "atomic", "_AtomicBool"], "AtomicBool_Impl_"), EvalAtomic.atomicBoolFields, []);
 		initFields(builtins, tp(["haxe", "atomic", "_AtomicInt"], "AtomicInt_Impl_"), EvalAtomic.atomicIntFields, []);
 		initFields(builtins, tp(["haxe", "atomic", "_AtomicObject"], "AtomicObject_Impl_"), EvalAtomic.atomicObjectFields, []);
