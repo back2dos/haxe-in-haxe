@@ -180,8 +180,13 @@ def main():
         roots = [n.split("/", 1)[1][:-4].replace("/", ".") for n in names]
         cc, _ = run([reference, "--hxb-lib", str(port_hxb)] + target + roots, ROOT, out / "consume.log", env)
         if cc != 0:
-            result.update(status="FAIL", detail="reference cannot consume port archive: " + first_error(out / "consume.log"))
-            return result
+            # Modules built by macros need the macro's source to load; that
+            # only counts against the port if the reference's own archive loads.
+            rc, _ = run([reference, "--hxb-lib", str(ref_hxb)] + target + roots, ROOT, out / "consume-reference.log", env)
+            if rc == 0:
+                result.update(status="FAIL", detail="reference cannot consume port archive: " + first_error(out / "consume.log"))
+                return result
+            result["note"] = " (neither archive loads without the case's source: " + first_error(out / "consume-reference.log") + ")"
         if opts.eval:
             eval_hxb = out / "eval-hxb.hxb"
             ec, et = run([reference] + STACK + ["--hxb-lib", str(compiler), "--run", "haxe.Main"] + invocation(eval_hxb), cwd, out / "eval-hxb.log", env)
@@ -196,7 +201,7 @@ def main():
                     result.update(status="FAIL", detail="%s port differs from HashLink-executed port: %s" % (what, diff))
                     return result
         members = len(zipfile.ZipFile(ref_hxb).namelist())
-        result.update(status="PASS", detail="%d members identical" % members)
+        result.update(status="PASS", detail="%d members identical" % members + result.get("note", ""))
         return result
 
     results = []
