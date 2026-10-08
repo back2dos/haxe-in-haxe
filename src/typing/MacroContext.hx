@@ -315,11 +315,11 @@ class MacroContext {
 			encodeExpr: MacroApiImpl.encodeExpr,
 			encodeCtype: MacroApiImpl.encodeCtype,
 			decodeType: MacroApiImpl.decodeType,
-			displayError: function(msg, p, ?sub) Common.displayError(com, msg, p, sub),
+			displayError: function(msg, p, sub) Common.displayError(com, msg, p, sub),
 			withImports: function(imports, usings, f) return badStage(),
 			withOptions: function(opts, f) return badStage(),
-			info: function(msg, p, ?depth) com.info(msg, p, depth == null ? 0 : depth),
-			warning: function(w, msg, p, ?depth) com.warning(w, [], msg, p, depth == null ? 0 : depth),
+			info: function(msg, p, depth) com.info(msg, p, depth),
+			warning: function(w, msg, p, depth) com.warning(w, [], msg, p, depth),
 			excString: macros.eval.EvalContext.excString,
 			getHxbWriterConfig: function() {
 				if (com.hxbWriterConfig != null)

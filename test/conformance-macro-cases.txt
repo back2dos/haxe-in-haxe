@@ -1,6 +1,7 @@
 # Conformance cases that create a macro context (Eval macro milestone).
 # Generated from the cases test/discover-cases.py excludes for creating a macro context;
 # run with: python3 test/conformance.py --cases test/conformance-macro-cases.txt
+# eval-Pull11784-compile is left out: its hxml sets its own --hxb output path.
 
 hxml eval-GlobalMetadataWildcard-compile haxe/tests/misc/eval/projects/GlobalMetadataWildcard compile.hxml
 hxml eval-Issue10150-compile haxe/tests/misc/eval/projects/Issue10150 compile.hxml
@@ -65,7 +66,6 @@ hxml eval-Issue9425-compile-success haxe/tests/misc/eval/projects/Issue9425 comp
 hxml eval-Issue9483-compile-success haxe/tests/misc/eval/projects/Issue9483 compile-success.hxml
 hxml eval-Issue9769-compile haxe/tests/misc/eval/projects/Issue9769 compile.hxml
 hxml eval-Issue9838-compile haxe/tests/misc/eval/projects/Issue9838 compile.hxml
-hxml eval-Pull11784-compile haxe/tests/misc/eval/projects/Pull11784 compile.hxml
 hxml eval-customExt-compile1 haxe/tests/misc/eval/projects/customExt compile1.hxml
 hxml eval-customExt-compile2 haxe/tests/misc/eval/projects/customExt compile2.hxml
 hxml eval-recursive-callbacks-compile haxe/tests/misc/eval/projects/recursive-callbacks compile.hxml

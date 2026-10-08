@@ -228,7 +228,8 @@ class TypeloadFields {
    case _:null;
   };
   builds.reverse();for(f in builds) f();
-  for(m in ti.mtMeta) if(m.meta==core.MetaList.StrictMeta.Using) for(e in m.exprs) try {
+  // tInfos is a projection: read the metadata again, build macros may have replaced it
+  for(m in tInfos(mt).mtMeta) if(m.meta==core.MetaList.StrictMeta.Using) for(e in m.exprs) try {
    var path=stringPosListOfExprPathRaise(e);path.reverse();var r=ImportHandling.handleUsing(ctx,path,e.pos);
    delayLate(ctx.g,PConnectField,function() {var filtered=r.filterClasses(r.types);filtered.reverse();for(entry in filtered)ti.mtUsing.unshift(entry);});
   } catch(_:Exit) {raiseTypingError("dot path expected",e.pos);}
@@ -276,7 +277,8 @@ class TypeloadFields {
  public static function transformField(ctx:Typer,cctx:ClassInitCtx,c:TClass,f:ClassField,fields:Array<ClassField>,p:Pos):ClassField {
   if(cctx.abstractType!=null) f=transformAbstractField2(ctx,cctx.abstractType,f);
   if(hasAccess(AMacro,f.cffAccess) && ctx.g.macros!=null && ctx.g.macros.typer.com.moduleLut.getTypeLut().mem(c.clPath)) {
-   if(!core.ds.ArrayTools.exists(fields,function(f2) return f2.cffName==f.cffName && hasAccess(AMacro,f2.cffAccess))) raiseTypingError("Class build macro cannot return a macro function when the class has already been compiled into the macro context",p);
+   // cff_name is a (name, pos) pair compared structurally upstream
+   if(!core.ds.ArrayTools.exists(fields,function(f2) return f2.cffName.name==f.cffName.name && f2.cffName.pos.pfile==f.cffName.pos.pfile && f2.cffName.pos.pmin==f.cffName.pos.pmin && f2.cffName.pos.pmax==f.cffName.pos.pmax && hasAccess(AMacro,f2.cffAccess))) raiseTypingError("Class build macro cannot return a macro function when the class has already been compiled into the macro context",p);
   }
   return f;
  }

@@ -101,9 +101,10 @@ typedef CompilerApi = {
 	var encodeExpr:Expr->MacroValue;
 	var encodeCtype:TypeHint->MacroValue;
 	var decodeType:MacroValue->T;
-	var info:(msg:String, p:Pos, ?depth:Int) -> Void;
-	var warning:(w:core.Message.WarningCode, msg:String, p:Pos, ?depth:Int) -> Void;
-	var displayError:(msg:String, p:Pos, ?sub:Array<core.Error.MacroError>) -> Void;
+	// optional arguments are explicit: HashLink cannot call a closure typed with them through a structure field
+	var info:(msg:String, p:Pos, depth:Int) -> Void;
+	var warning:(w:core.Message.WarningCode, msg:String, p:Pos, depth:Int) -> Void;
+	var displayError:(msg:String, p:Pos, sub:Null<Array<core.Error.MacroError>>) -> Void;
 	// `with_imports imports usings f`
 	var withImports:Array<Import>->Array<Array<PlacedName>>->(Void->Dynamic)->Dynamic;
 	var withOptions:CompilerOptions->(Void->Dynamic)->Dynamic;
@@ -166,9 +167,9 @@ class CompilerApiTools {
 			encodeExpr: _ -> die(),
 			encodeCtype: _ -> die(),
 			decodeType: _ -> die(),
-			info: (_, _, ?_) -> die(),
-			warning: (_, _, _, ?_) -> die(),
-			displayError: (_, _, ?_) -> die(),
+			info: (_, _, _) -> die(),
+			warning: (_, _, _, _) -> die(),
+			displayError: (_, _, _) -> die(),
 			withImports: (_, _, _) -> die(),
 			withOptions: (_, _) -> die(),
 			excString: _ -> die(),
