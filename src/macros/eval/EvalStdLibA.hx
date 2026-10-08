@@ -742,7 +742,6 @@ class StdCompress {
 	public static inline final Z_FULL_FLUSH = 3;
 	public static inline final Z_FINISH = 4;
 
-	#if (hl || eval || neko || cpp)
 	public static function hostFlushMode(f:Int):haxe.zip.FlushMode {
 		return switch f {
 			case Z_NO_FLUSH: NO;
@@ -752,7 +751,7 @@ class StdCompress {
 			case _: BLOCK; // Z_PARTIAL_FLUSH (haxe.zip.FlushMode.BLOCK upstream)
 		}
 	}
-	#end
+
 
 	/** Extc.zlib_deflate on a host `haxe.zip.Compress` stream (the host deflates the rest of `src`). **/
 	public static function zlibDeflate(z:Dynamic, src:Bytes, spos:Int, slen:Int, dst:Bytes, dpos:Int, dlen:Int, flush:Int):Zresult {

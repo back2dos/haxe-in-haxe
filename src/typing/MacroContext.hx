@@ -391,7 +391,7 @@ class MacroContext {
 			catch (s:String)
 				return comApi.excString(s);
 		}
-		var api = comApi.clone();
+		var api = macros.MacroApi.CompilerApiTools.clone(comApi);
 		api.getType = function(s) {
 			return typingTimer(ctx, false, function(ctx) {
 				var path = AstTools.parsePath(s);

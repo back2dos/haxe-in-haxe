@@ -51,129 +51,70 @@ class Abort extends haxe.Exception {
 
 typedef MacroValue = macros.eval.EvalValue.Value;
 
-/** Our access to the compiler from the macro api (`'value compiler_api`). **/
-@:structInit class CompilerApi {
-	public var pos:Pos;
-	public var getCom:Void->context.Common.CommonContext;
-	public var getMacroCom:Void->context.Common.CommonContext;
-	public var getMacroStack:Void->Array<Pos>;
-	public var initMacrosDone:Void->Bool;
-	public var getType:String->Null<T>;
-	public var getModule:String->Array<T>;
-	public var includeModule:String->Void;
-	public var afterInitMacros:(Void->Void)->Void;
-	public var afterTyping:(Array<ModuleType>->Void)->Void;
-	public var onGenerate:(Array<T>->Void)->Bool->Void;
-	public var afterGenerate:(Void->Void)->Void;
-	public var onTypeNotFound:(String->MacroValue)->Void;
-	public var parseString:String->Pos->Bool->Expr;
-	public var registerFileContents:String->String->Void;
+/**
+	Our access to the compiler from the macro api (`'value compiler_api`).
+	A structure rather than a class: a constructor would take one argument per
+	field, more than HashLink's JIT allows in a call.
+**/
+typedef CompilerApi = {
+	var pos:Pos;
+	var getCom:Void->context.Common.CommonContext;
+	var getMacroCom:Void->context.Common.CommonContext;
+	var getMacroStack:Void->Array<Pos>;
+	var initMacrosDone:Void->Bool;
+	var getType:String->Null<T>;
+	var getModule:String->Array<T>;
+	var includeModule:String->Void;
+	var afterInitMacros:(Void->Void)->Void;
+	var afterTyping:(Array<ModuleType>->Void)->Void;
+	var onGenerate:(Array<T>->Void)->Bool->Void;
+	var afterGenerate:(Void->Void)->Void;
+	var onTypeNotFound:(String->MacroValue)->Void;
+	var parseString:String->Pos->Bool->Expr;
+	var registerFileContents:String->String->Void;
 	// `parse f s`: runs the parser function `f` on the source `s`
-	public var parse:(syntax.Parser.ParserContext->core.ds.Stream<syntax.Lexer.LexedToken>->Dynamic)->String->Dynamic;
-	public var typeExpr:Expr->TExpr;
-	public var resolveType:ComplexType->Pos->T;
-	public var resolveComplexType:TypeHint->TypeHint;
-	public var storeTypedExpr:TExpr->Expr;
-	public var allowPackage:String->Void;
-	public var getLocalType:Void->Null<T>;
-	public var getExpectedType:Void->Null<T>;
-	public var getCallArguments:Void->Null<Array<Expr>>;
-	public var getLocalMethod:Void->String;
-	public var getLocalImports:Void->Array<Import>;
-	public var getLocalUsing:Void->Array<TClass>;
-	public var getLocalVars:Void->haxe.ds.StringMap<TVar>;
-	public var getBuildFields:Void->MacroValue;
-	public var defineType:MacroValue->Null<String>->Void;
-	public var defineModule:String->Array<MacroValue>->Array<{path:Array<PlacedName>, mode:ImportMode}>->Array<TypePath>->Void;
-	public var moduleDependency:String->String->Void;
-	public var currentModule:Void->ModuleDef;
-	public var formatString:String->Pos->Expr;
-	public var castOrUnify:T->TExpr->Pos->Bool;
-	public var addGlobalMetadata:String->String->{a:Bool, b:Bool, c:Bool}->Pos->Void;
-	public var registerDefine:String->core.Define.UserDefine->Void;
-	public var registerMetadata:String->core.Meta.UserMeta->Void;
-	public var addModuleCheckPolicy:Array<String>->Array<Int>->Bool->Void;
-	public var decodeExpr:MacroValue->Expr;
-	public var encodeExpr:Expr->MacroValue;
-	public var encodeCtype:TypeHint->MacroValue;
-	public var decodeType:MacroValue->T;
-	public var info:(msg:String, p:Pos, ?depth:Int) -> Void;
-	public var warning:(w:core.Message.WarningCode, msg:String, p:Pos, ?depth:Int) -> Void;
-	public var displayError:(msg:String, p:Pos, ?sub:Array<core.Error.MacroError>) -> Void;
+	var parse:(syntax.Parser.ParserContext->core.ds.Stream<syntax.Lexer.LexedToken>->Dynamic)->String->Dynamic;
+	var typeExpr:Expr->TExpr;
+	var resolveType:ComplexType->Pos->T;
+	var resolveComplexType:TypeHint->TypeHint;
+	var storeTypedExpr:TExpr->Expr;
+	var allowPackage:String->Void;
+	var getLocalType:Void->Null<T>;
+	var getExpectedType:Void->Null<T>;
+	var getCallArguments:Void->Null<Array<Expr>>;
+	var getLocalMethod:Void->String;
+	var getLocalImports:Void->Array<Import>;
+	var getLocalUsing:Void->Array<TClass>;
+	var getLocalVars:Void->haxe.ds.StringMap<TVar>;
+	var getBuildFields:Void->MacroValue;
+	var defineType:MacroValue->Null<String>->Void;
+	var defineModule:String->Array<MacroValue>->Array<{path:Array<PlacedName>, mode:ImportMode}>->Array<TypePath>->Void;
+	var moduleDependency:String->String->Void;
+	var currentModule:Void->ModuleDef;
+	var formatString:String->Pos->Expr;
+	var castOrUnify:T->TExpr->Pos->Bool;
+	var addGlobalMetadata:String->String->{a:Bool, b:Bool, c:Bool}->Pos->Void;
+	var registerDefine:String->core.Define.UserDefine->Void;
+	var registerMetadata:String->core.Meta.UserMeta->Void;
+	var addModuleCheckPolicy:Array<String>->Array<Int>->Bool->Void;
+	var decodeExpr:MacroValue->Expr;
+	var encodeExpr:Expr->MacroValue;
+	var encodeCtype:TypeHint->MacroValue;
+	var decodeType:MacroValue->T;
+	var info:(msg:String, p:Pos, ?depth:Int) -> Void;
+	var warning:(w:core.Message.WarningCode, msg:String, p:Pos, ?depth:Int) -> Void;
+	var displayError:(msg:String, p:Pos, ?sub:Array<core.Error.MacroError>) -> Void;
 	// `with_imports imports usings f`
-	public var withImports:Array<Import>->Array<Array<PlacedName>>->(Void->Dynamic)->Dynamic;
-	public var withOptions:CompilerOptions->(Void->Dynamic)->Dynamic;
-	public var excString:String->Dynamic;
-	public var getHxbWriterConfig:Void->MacroValue;
-	public var setHxbWriterConfig:MacroValue->Void;
+	var withImports:Array<Import>->Array<Array<PlacedName>>->(Void->Dynamic)->Dynamic;
+	var withOptions:CompilerOptions->(Void->Dynamic)->Dynamic;
+	var excString:String->Dynamic;
+	var getHxbWriterConfig:Void->MacroValue;
+	var setHxbWriterConfig:MacroValue->Void;
+}
 
-	public function new(pos, getCom, getMacroCom, getMacroStack, initMacrosDone, getType, getModule, includeModule, afterInitMacros, afterTyping, onGenerate,
-			afterGenerate, onTypeNotFound, parseString, registerFileContents, parse, typeExpr, resolveType, resolveComplexType, storeTypedExpr, allowPackage,
-			getLocalType, getExpectedType, getCallArguments, getLocalMethod, getLocalImports, getLocalUsing, getLocalVars, getBuildFields, defineType,
-			defineModule, moduleDependency, currentModule, formatString, castOrUnify, addGlobalMetadata, registerDefine, registerMetadata,
-			addModuleCheckPolicy, decodeExpr, encodeExpr, encodeCtype, decodeType, info, warning, displayError, withImports, withOptions, excString,
-			getHxbWriterConfig, setHxbWriterConfig) {
-		this.pos = pos;
-		this.getCom = getCom;
-		this.getMacroCom = getMacroCom;
-		this.getMacroStack = getMacroStack;
-		this.initMacrosDone = initMacrosDone;
-		this.getType = getType;
-		this.getModule = getModule;
-		this.includeModule = includeModule;
-		this.afterInitMacros = afterInitMacros;
-		this.afterTyping = afterTyping;
-		this.onGenerate = onGenerate;
-		this.afterGenerate = afterGenerate;
-		this.onTypeNotFound = onTypeNotFound;
-		this.parseString = parseString;
-		this.registerFileContents = registerFileContents;
-		this.parse = parse;
-		this.typeExpr = typeExpr;
-		this.resolveType = resolveType;
-		this.resolveComplexType = resolveComplexType;
-		this.storeTypedExpr = storeTypedExpr;
-		this.allowPackage = allowPackage;
-		this.getLocalType = getLocalType;
-		this.getExpectedType = getExpectedType;
-		this.getCallArguments = getCallArguments;
-		this.getLocalMethod = getLocalMethod;
-		this.getLocalImports = getLocalImports;
-		this.getLocalUsing = getLocalUsing;
-		this.getLocalVars = getLocalVars;
-		this.getBuildFields = getBuildFields;
-		this.defineType = defineType;
-		this.defineModule = defineModule;
-		this.moduleDependency = moduleDependency;
-		this.currentModule = currentModule;
-		this.formatString = formatString;
-		this.castOrUnify = castOrUnify;
-		this.addGlobalMetadata = addGlobalMetadata;
-		this.registerDefine = registerDefine;
-		this.registerMetadata = registerMetadata;
-		this.addModuleCheckPolicy = addModuleCheckPolicy;
-		this.decodeExpr = decodeExpr;
-		this.encodeExpr = encodeExpr;
-		this.encodeCtype = encodeCtype;
-		this.decodeType = decodeType;
-		this.info = info;
-		this.warning = warning;
-		this.displayError = displayError;
-		this.withImports = withImports;
-		this.withOptions = withOptions;
-		this.excString = excString;
-		this.getHxbWriterConfig = getHxbWriterConfig;
-		this.setHxbWriterConfig = setHxbWriterConfig;
-	}
-
-	public function clone():CompilerApi {
-		return new CompilerApi(pos, getCom, getMacroCom, getMacroStack, initMacrosDone, getType, getModule, includeModule, afterInitMacros, afterTyping,
-			onGenerate, afterGenerate, onTypeNotFound, parseString, registerFileContents, parse, typeExpr, resolveType, resolveComplexType, storeTypedExpr,
-			allowPackage, getLocalType, getExpectedType, getCallArguments, getLocalMethod, getLocalImports, getLocalUsing, getLocalVars, getBuildFields,
-			defineType, defineModule, moduleDependency, currentModule, formatString, castOrUnify, addGlobalMetadata, registerDefine, registerMetadata,
-			addModuleCheckPolicy, decodeExpr, encodeExpr, encodeCtype, decodeType, info, warning, displayError, withImports, withOptions, excString,
-			getHxbWriterConfig, setHxbWriterConfig);
-	}
+class CompilerApiTools {
+	/** `{ api with ... }`: a shallow copy. **/
+	public static function clone(api:CompilerApi):CompilerApi return Reflect.copy(api);
 
 	/**
 		A null compiler API that holds no references to any compilation context,
@@ -181,12 +122,59 @@ typedef MacroValue = macros.eval.EvalValue.Value;
 	**/
 	public static function nullApi():CompilerApi {
 		function die():Dynamic return core.Globals.die("Macro API accessed after compilation cleanup", "MacroApi.nullApi");
-		return new CompilerApi(core.Globals.nullPos, () -> die(), () -> die(), () -> die(), () -> die(), _ -> die(), _ -> die(), _ -> die(), _ -> die(),
-			_ -> die(), (_, _) -> die(), _ -> die(), _ -> die(), (_, _, _) -> die(), (_, _) -> die(), (_, _) -> die(), _ -> die(), (_, _) -> die(),
-			_ -> die(), _ -> die(), _ -> die(), () -> die(), () -> die(), () -> die(), () -> die(), () -> die(), () -> die(), () -> die(), () -> die(),
-			(_, _) -> die(), (_, _, _, _) -> die(), (_, _) -> die(), () -> die(), (_, _) -> die(), (_, _, _) -> die(), (_, _, _, _) -> die(),
-			(_, _) -> die(), (_, _) -> die(), (_, _, _) -> die(), _ -> die(), _ -> die(), _ -> die(), _ -> die(), (_, _, ?_) -> die(), (_, _, _, ?_) -> die(),
-			(_, _, ?_) -> die(), (_, _, _) -> die(), (_, _) -> die(), _ -> die(), () -> die(), _ -> die());
+		return {
+			pos: core.Globals.nullPos,
+			getCom: () -> die(),
+			getMacroCom: () -> die(),
+			getMacroStack: () -> die(),
+			initMacrosDone: () -> die(),
+			getType: _ -> die(),
+			getModule: _ -> die(),
+			includeModule: _ -> die(),
+			afterInitMacros: _ -> die(),
+			afterTyping: _ -> die(),
+			onGenerate: (_, _) -> die(),
+			afterGenerate: _ -> die(),
+			onTypeNotFound: _ -> die(),
+			parseString: (_, _, _) -> die(),
+			registerFileContents: (_, _) -> die(),
+			parse: (_, _) -> die(),
+			typeExpr: _ -> die(),
+			resolveType: (_, _) -> die(),
+			resolveComplexType: _ -> die(),
+			storeTypedExpr: _ -> die(),
+			allowPackage: _ -> die(),
+			getLocalType: () -> die(),
+			getExpectedType: () -> die(),
+			getCallArguments: () -> die(),
+			getLocalMethod: () -> die(),
+			getLocalImports: () -> die(),
+			getLocalUsing: () -> die(),
+			getLocalVars: () -> die(),
+			getBuildFields: () -> die(),
+			defineType: (_, _) -> die(),
+			defineModule: (_, _, _, _) -> die(),
+			moduleDependency: (_, _) -> die(),
+			currentModule: () -> die(),
+			formatString: (_, _) -> die(),
+			castOrUnify: (_, _, _) -> die(),
+			addGlobalMetadata: (_, _, _, _) -> die(),
+			registerDefine: (_, _) -> die(),
+			registerMetadata: (_, _) -> die(),
+			addModuleCheckPolicy: (_, _, _) -> die(),
+			decodeExpr: _ -> die(),
+			encodeExpr: _ -> die(),
+			encodeCtype: _ -> die(),
+			decodeType: _ -> die(),
+			info: (_, _, ?_) -> die(),
+			warning: (_, _, _, ?_) -> die(),
+			displayError: (_, _, ?_) -> die(),
+			withImports: (_, _, _) -> die(),
+			withOptions: (_, _) -> die(),
+			excString: _ -> die(),
+			getHxbWriterConfig: () -> die(),
+			setHxbWriterConfig: _ -> die()
+		};
 	}
 }
 
