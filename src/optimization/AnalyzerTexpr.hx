@@ -229,35 +229,57 @@ class Fusion {
    var b = uses <= 1 && writes == 0 && asValue && !(variableSemantics && variableExpr) && (generated || config.optimize && config.fusion && config.userVarFusion && !typeParams && !impureExtern);
    if (config.fusionDebug) {Sys.println('\nFUSION: $b\n\tvar ${v.vName}<${v.vId}> = ' + AnalyzerTexpr.sExprPretty(e)); Sys.println('CONDITION:\n\tnum_uses:$uses <= 1 && num_writes:$writes = 0 && can_be_used_as_value:$asValue && not (has_variable_semantics:$variableSemantics && e.eexpr=TLocal:$variableExpr) (is_compiler_generated:$generated || config.optimize:${config.optimize} && config.fusion:${config.fusion} && config.user_var_fusion:${config.userVarFusion} && not has_type_params:$typeParams && not is_impuare_extern:$impureExtern)');} return b;
   }
-  function fuse(acc:Array<TExpr>,el:Array<TExpr>):Array<TExpr> {
-   if (el.length == 0) return acc; var first = el[0]; var rest = el.slice(1);
-   switch first.eexpr {
-    case TVar(v1,null) if (rest.length > 0):switch rest[0].eexpr {case TBinop(OpAssign,{eexpr:TLocal(v2)},e2) if (v1 == v2):state.markChanged(); state.decWrites(v1); return fuse([withExpr(first,TVar(v1,e2))].concat(acc),rest.slice(1)); case _:}
-    case _:
+  // Upstream recurses over OCaml lists (`first :: rest`, `first :: acc`); slicing and
+  // prepending arrays at each step was quadratic. Same steps here as a loop: the
+  // accumulator is reversed (head at the end) and `rest` is arr[restOff..].
+  function fuse(acc0:Array<TExpr>,el0:Array<TExpr>):Array<TExpr> {
+   var accRev = acc0.copy(); accRev.reverse();
+   var arr = el0, off = 0;
+   while (true) {
+    if (off >= arr.length) {accRev.reverse(); return accRev;}
+    var first = arr[off]; var restOff = off + 1; var restLength = arr.length - restOff;
+    inline function rest0():TExpr return arr[restOff];
+    inline function restArray():Array<TExpr> return arr.slice(restOff);
+    inline function next(pushed:Null<TExpr>,newArr:Null<Array<TExpr>>,skip:Int):Void {
+     if (pushed != null) accRev.push(pushed);
+     if (newArr != null) {arr = newArr; off = 0;} else off = restOff + skip;
+    }
+    var handled = false;
+    switch first.eexpr {
+     case TVar(v1,null) if (restLength > 0):switch rest0().eexpr {case TBinop(OpAssign,{eexpr:TLocal(v2)},e2) if (v1 == v2):state.markChanged(); state.decWrites(v1); next(withExpr(first,TVar(v1,e2)),null,1); handled = true; case _:}
+     case _:
+    }
+    if (handled) continue;
+    switch first.eexpr {
+     case TIf(_,_,eelse) if (eelse != null && AnalyzerTexpr.canBeUsedAsValue(com,first) && !core.TOther.ExtType.isVoid(first.etype) && !(com.platform == Cpp && !core.Define.defined(com.defines,core.Define.Cppia))):
+      try {var count = 0; var lhs:Null<TExpr> = null; var wrap:TExpr->TExpr = null; function checkAssign(e:TExpr):TExpr return switch e.eexpr {case TBinop(OpAssign,e1,e2):count++; if (lhs == null) {lhs = e1; wrap = other -> withExpr(e,TBinop(OpAssign,e1,other)); e2;} else if (Texpr.equal(lhs,e1)) e2; else throw new TypeExit(); case _:throw new TypeExit();}; var result = AnalyzerTexpr.mapValues(checkAssign,first).expr; if (lhs == null) throw "AnalyzerTexpr.fuse missing assignment"; switch lhs.eexpr {case TLocal(v):state.changeWrites(v,-count + 1); case _:} result = wrap(result); state.markChanged(); next(result,null,0);} catch (_:TypeExit) next(first,null,0);
+      continue;
+     case TVar(v,e1) if (e1 != null && config.optimize && config.localDce && state.getReads(v) == 0 && state.getWrites(v) == 0):next(null,[e1].concat(restArray()),0); continue;
+     case TVar(v1,null) if (!hasVarFlag(v1,VCaptured)):
+      var found = false; function replace(deep:Bool,e:TExpr):TExpr return switch e.eexpr {case TBinop(OpAssign,{eexpr:TLocal(v2)},e2) if (v1 == v2):if (deep) throw new TypeExit(); found = true; withExpr(first,TVar(v1,e2)); case TLocal(v2) if (v1 == v2):throw new TypeExit(); case _:mapExprWith(replace,true,e);};
+      try {var out = []; for (i in 0...restLength) {out.push(replace(false,arr[restOff + i])); if (found) {out = out.concat(arr.slice(restOff + i + 1)); break;}} if (!found) throw new TypeExit(); state.markChanged(); state.decWrites(v1); next(null,out,0);} catch (_:TypeExit) next(first,null,0);
+      continue;
+     case TVar(v1,e1) if (e1 != null && canBeFused(v1,e1)):
+      if (restLength > 0) switch rest0().eexpr {
+       // v2 intentionally shadows the declaration variable, as upstream's pattern does.
+       case TUnop(op = Increment | Decrement,Prefix,{eexpr:TLocal(v2)}):var found = false; function replace(e:TExpr):TExpr return switch e.eexpr {case TLocal(v) if (v2 == v):if (found) throw new TypeExit(); found = true; withExpr(e,TUnop(op,Postfix,e)); case TIf(_,_,_) | TSwitch(_) | TTry(_,_) | TWhile(_,_,_):throw new TypeExit(); case _:mapExpr(replace,e);};
+        try {var ev = replace(first); if (!found) throw new TypeExit(); state.markChanged(); next(null,[ev].concat(arr.slice(restOff + 1)),0);} catch (_:TypeExit) next(first,null,0);
+        continue;
+       case _:
+      }
+      var result = handleAssignedLocal(actx,v1,e1,restArray()); if (result != null) {state.markChanged(); state.decReads(v1); next(null,result,0);} else next(first,null,0);
+      continue;
+     case TUnop(op = Increment | Decrement,Prefix,ev = {eexpr:TLocal(v)}) if (restLength > 0):
+      try {var second = rest0(); var inner:TExpr; var wrap:TExpr->TExpr; switch second.eexpr {case TReturn(e2) if (e2 != null):inner = e2; wrap = e -> withExpr(e2,TReturn(e)); case TVar(v,e2) if (e2 != null):inner = e2; wrap = e -> withExpr(e2,TVar(v,e)); case _:throw new TypeExit();}
+       var replacement = switch inner.eexpr {case TBinop(op2,{eexpr:TLocal(v2)},{eexpr:TConst(TInt(1))}) if (v == v2 && (op == Increment && op2 == OpSub || op == Decrement && op2 == OpAdd)):state.markChanged(); state.decReads(v2); wrap(withExpr(first,TUnop(op,Postfix,ev))); case TLocal(v2) if (v == v2):state.markChanged(); state.decReads(v2); wrap(withExpr(first,TUnop(op,Prefix,ev))); case _:throw new TypeExit();}; next(replacement,null,1);
+      } catch (_:TypeExit) next(first,null,0);
+      continue;
+     case TBinop(OpAssign,e1,{eexpr:TBinop(op,e2,e3)}) if (useAssignOp(com,op,e1,e2,e3)):function reads(e:TExpr):Void switch e.eexpr {case TLocal(v):state.decReads(v); case _:iter(reads,e);} reads(e1); state.markChanged(); next(null,[withExpr(first,TBinop(OpAssignOp(op),e1,e3))].concat(restArray()),0); continue;
+     case TBinop(OpAssignOp(_),e1,_) if (restLength > 0):switch rest0().eexpr {case TVar(v,e2) if (e2 != null && Texpr.equal(e1,e2)):state.markChanged(); next(withExpr(rest0(),TVar(v,first)),null,1); continue; case _:}
+     case _:
+    }
+    next(first,null,0);
    }
-   switch first.eexpr {
-    case TIf(_,_,eelse) if (eelse != null && AnalyzerTexpr.canBeUsedAsValue(com,first) && !core.TOther.ExtType.isVoid(first.etype) && !(com.platform == Cpp && !core.Define.defined(com.defines,core.Define.Cppia))):
-     try {var count = 0; var lhs:Null<TExpr> = null; var wrap:TExpr->TExpr = null; function checkAssign(e:TExpr):TExpr return switch e.eexpr {case TBinop(OpAssign,e1,e2):count++; if (lhs == null) {lhs = e1; wrap = other -> withExpr(e,TBinop(OpAssign,e1,other)); e2;} else if (Texpr.equal(lhs,e1)) e2; else throw new TypeExit(); case _:throw new TypeExit();}; var result = AnalyzerTexpr.mapValues(checkAssign,first).expr; if (lhs == null) throw "AnalyzerTexpr.fuse missing assignment"; switch lhs.eexpr {case TLocal(v):state.changeWrites(v,-count + 1); case _:} result = wrap(result); state.markChanged(); return fuse([result].concat(acc),rest);} catch (_:TypeExit) return fuse([first].concat(acc),rest);
-    case TVar(v,e1) if (e1 != null && config.optimize && config.localDce && state.getReads(v) == 0 && state.getWrites(v) == 0):return fuse(acc,[e1].concat(rest));
-    case TVar(v1,null) if (!hasVarFlag(v1,VCaptured)):
-     var found = false; function replace(deep:Bool,e:TExpr):TExpr return switch e.eexpr {case TBinop(OpAssign,{eexpr:TLocal(v2)},e2) if (v1 == v2):if (deep) throw new TypeExit(); found = true; withExpr(first,TVar(v1,e2)); case TLocal(v2) if (v1 == v2):throw new TypeExit(); case _:mapExprWith(replace,true,e);};
-     try {var out = []; for (i in 0...rest.length) {out.push(replace(false,rest[i])); if (found) {out = out.concat(rest.slice(i + 1)); break;}} if (!found) throw new TypeExit(); state.markChanged(); state.decWrites(v1); return fuse(acc,out);} catch (_:TypeExit) return fuse([first].concat(acc),rest);
-    case TVar(v1,e1) if (e1 != null && canBeFused(v1,e1)):
-     if (rest.length > 0) switch rest[0].eexpr {
-      // v2 intentionally shadows the declaration variable, as upstream's pattern does.
-      case TUnop(op = Increment | Decrement,Prefix,{eexpr:TLocal(v2)}):var found = false; function replace(e:TExpr):TExpr return switch e.eexpr {case TLocal(v) if (v2 == v):if (found) throw new TypeExit(); found = true; withExpr(e,TUnop(op,Postfix,e)); case TIf(_,_,_) | TSwitch(_) | TTry(_,_) | TWhile(_,_,_):throw new TypeExit(); case _:mapExpr(replace,e);};
-       try {var ev = replace(first); if (!found) throw new TypeExit(); state.markChanged(); return fuse(acc,[ev].concat(rest.slice(1)));} catch (_:TypeExit) return fuse([first].concat(acc),rest);
-      case _:
-     }
-     var result = handleAssignedLocal(actx,v1,e1,rest); if (result != null) {state.markChanged(); state.decReads(v1); return fuse(acc,result);} return fuse([first].concat(acc),rest);
-    case TUnop(op = Increment | Decrement,Prefix,ev = {eexpr:TLocal(v)}) if (rest.length > 0):
-     try {var second = rest[0]; var inner:TExpr; var wrap:TExpr->TExpr; switch second.eexpr {case TReturn(e2) if (e2 != null):inner = e2; wrap = e -> withExpr(e2,TReturn(e)); case TVar(v,e2) if (e2 != null):inner = e2; wrap = e -> withExpr(e2,TVar(v,e)); case _:throw new TypeExit();}
-      var replacement = switch inner.eexpr {case TBinop(op2,{eexpr:TLocal(v2)},{eexpr:TConst(TInt(1))}) if (v == v2 && (op == Increment && op2 == OpSub || op == Decrement && op2 == OpAdd)):state.markChanged(); state.decReads(v2); wrap(withExpr(first,TUnop(op,Postfix,ev))); case TLocal(v2) if (v == v2):state.markChanged(); state.decReads(v2); wrap(withExpr(first,TUnop(op,Prefix,ev))); case _:throw new TypeExit();}; return fuse([replacement].concat(acc),rest.slice(1));
-     } catch (_:TypeExit) return fuse([first].concat(acc),rest);
-    case TBinop(OpAssign,e1,{eexpr:TBinop(op,e2,e3)}) if (useAssignOp(com,op,e1,e2,e3)):function reads(e:TExpr):Void switch e.eexpr {case TLocal(v):state.decReads(v); case _:iter(reads,e);} reads(e1); state.markChanged(); return fuse(acc,[withExpr(first,TBinop(OpAssignOp(op),e1,e3))].concat(rest));
-    case TBinop(OpAssignOp(_),e1,_) if (rest.length > 0):switch rest[0].eexpr {case TVar(v,e2) if (e2 != null && Texpr.equal(e1,e2)):state.markChanged(); return fuse([withExpr(rest[0],TVar(v,first))].concat(acc),rest.slice(1)); case _:}
-    case _:
-   } return fuse([first].concat(acc),rest);
   }
   function timedFuse(el:Array<TExpr>):Array<TExpr> return optimization.Analyzer.Run.timed(actx,["<-","fusion","fuse"],function() return fuse([],el));
   var loop:TExpr->TExpr = null;
