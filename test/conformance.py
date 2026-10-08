@@ -37,9 +37,9 @@ COMMON = ["-D", "disable-parallelism", "--interp", "--no-output"]
 TIMEOUT = 900
 
 
-def parse_cases():
+def parse_cases(cases_file):
     cases = []
-    for line in (ROOT / "test/conformance-cases.txt").read_text().splitlines():
+    for line in cases_file.read_text().splitlines():
         line = line.strip()
         if not line or line.startswith("#"):
             continue
@@ -110,6 +110,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("-j", type=int, default=os.cpu_count() or 2)
     ap.add_argument("--eval", action="store_true")
+    ap.add_argument("--cases", default="test/conformance-cases.txt", help="case list (test/conformance-macro-cases.txt: cases that run macros)")
     ap.add_argument("filters", nargs="*")
     opts = ap.parse_args()
     reference = os.environ.get("HAXE_REFERENCE")
@@ -120,7 +121,7 @@ def main():
     env["HAXE_STD_PATH"] = str(STD)
     env["HAXE_IN_HAXE_STD_PATH"] = str(STD)
 
-    cases = [c for c in parse_cases() if not opts.filters or any(f in c["name"] for f in opts.filters)]
+    cases = [c for c in parse_cases(ROOT / opts.cases) if not opts.filters or any(f in c["name"] for f in opts.filters)]
     GENERATED.mkdir(parents=True, exist_ok=True)
     if os.environ.get("HAXE_IN_HAXE_PORT"):
         # Another build of the port, e.g. "node --stack-size=65500 bin/bench/hih.js" (see bench/build.sh).
