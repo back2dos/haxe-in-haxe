@@ -348,7 +348,7 @@ class Lexer {
 		// "." and "..." can only compete with the '.'-led float rule
 		if (codeAt(start) == ".".code && source.substr(start, 3) == "..." && 3 > bestEnd - start) return null;
 		index = bestEnd;
-		var s = source.substring(start, bestEnd);
+		var s = core.ds.StrTools.sub(source, start, bestEnd);
 		return switch bestKind {
 			case 0: make(splitIntSuffix(s), start);
 			case 1: make(splitFloatSuffix(s), start);
@@ -495,7 +495,7 @@ class Lexer {
 				var content = index + 2;
 				index = content;
 				while (!eof() && codeAt(index) != "\n".code && codeAt(index) != "\r".code) index++;
-				return make(CommentLine(source.substring(content, index)), start);
+				return make(CommentLine(core.ds.StrTools.sub(source, content, index)), start);
 			}
 			if (starts("/*")) {
 				var buf = new StringBuf();
@@ -526,18 +526,18 @@ class Lexer {
 				var e = mLowerIdent(index + 1);
 				if (e >= 0) {
 					index = e;
-					return make(Sharp(source.substring(start + 1, e)), start);
+					return make(Sharp(core.ds.StrTools.sub(source, start + 1, e)), start);
 				}
 			}
 			if (c == "$".code) {
 				index++;
 				while (isIdentPartC(codeAt(index))) index++;
-				return make(Dollar(source.substring(start + 1, index)), start);
+				return make(Dollar(core.ds.StrTools.sub(source, start + 1, index)), start);
 			}
 			var ie = mIdent(index);
 			if (ie >= 0 && ie - start >= opLen) {
 				index = ie;
-				return make(keyword(source.substring(start, ie)), start);
+				return make(keyword(core.ds.StrTools.sub(source, start, ie)), start);
 			}
 			if (opTok != null) {
 				index += opLen;
@@ -561,7 +561,7 @@ class Lexer {
 					if (codeAt(j) == ".".code && (isLowerC(d) || isUpperC(d) || d == "_".code)) j += 2 else break;
 				}
 				index = j;
-				return make(Const(core.Ast.Constant.Ident(source.substring(start, j))), start);
+				return make(Const(core.Ast.Constant.Ident(core.ds.StrTools.sub(source, start, j))), start);
 			}
 			if (c == " ".code || c == "\t".code) {
 				while (codeAt(index) == " ".code || codeAt(index) == "\t".code) index++;
@@ -738,7 +738,7 @@ class Lexer {
 			if (starts("//")) {
 				var s = index;
 				while (!eof() && codeAt(index) != "\n".code && codeAt(index) != "\r".code) index++;
-				buf.add(source.substring(s, index));
+				buf.add(core.ds.StrTools.sub(source, s, index));
 				continue;
 			}
 			buf.add(current());

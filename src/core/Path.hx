@@ -107,20 +107,22 @@ class Path {
 		var length = file.length;
 		// Unix.getcwd has no trailing slash, unlike Sys.getCwd.
 		var cwd = Sys.getCwd();
-		if (cwd.length > 1 && cwd.charCodeAt(cwd.length - 1) == "/".code) cwd = cwd.substr(0, cwd.length - 1);
-		var absolutePath = length > 0 && file.charCodeAt(0) == "/".code ? file : length == 0 ? cwd : cwd + "/" + file;
-		var needsNormalization = length > 0 && file.charCodeAt(length - 1) == "/".code;
+		if (cwd.length > 1 && StringTools.fastCodeAt(cwd, cwd.length - 1) == "/".code) cwd = cwd.substr(0, cwd.length - 1);
+		var absolutePath = length > 0 && StringTools.fastCodeAt(file, 0) == "/".code ? file : length == 0 ? cwd : cwd + "/" + file;
+		var needsNormalization = length > 0 && StringTools.fastCodeAt(file, length - 1) == "/".code;
 		// has_dots_or_double_slash: only the first character of each segment is inspected.
+		// (fastCodeAt: every index here is checked against the length, and
+		// charCodeAt boxes its Null<Int> result on HashLink.)
 		var index = 0;
 		while (!needsNormalization && index < length) {
-			var c = file.charCodeAt(index);
+			var c = StringTools.fastCodeAt(file, index);
 			if (c == ".".code) {
-				if (index + 2 < length) needsNormalization = (file.charCodeAt(index + 1) == ".".code && file.charCodeAt(index + 2) == "/".code) || file.charCodeAt(index + 1) == "/".code;
-				else if (index + 1 < length) needsNormalization = file.charCodeAt(index + 1) == "/".code || file.charCodeAt(index + 1) == ".".code;
+				if (index + 2 < length) needsNormalization = (StringTools.fastCodeAt(file, index + 1) == ".".code && StringTools.fastCodeAt(file, index + 2) == "/".code) || StringTools.fastCodeAt(file, index + 1) == "/".code;
+				else if (index + 1 < length) needsNormalization = StringTools.fastCodeAt(file, index + 1) == "/".code || StringTools.fastCodeAt(file, index + 1) == ".".code;
 				else needsNormalization = true;
 			} else if (c == "/".code && index > 0) needsNormalization = true;
 			if (!needsNormalization) {
-				while (index < length && file.charCodeAt(index) != "/".code) index++;
+				while (index < length && StringTools.fastCodeAt(file, index) != "/".code) index++;
 				index++;
 			}
 		}

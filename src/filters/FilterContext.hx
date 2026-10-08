@@ -7,7 +7,9 @@ import core.Timer;
 
 // haxe/src/filters/filterContext.ml — mechanical draft; not compiled or validated.
 class FilterContext {
-	public static function withTimer<T>(timerCtx:Dynamic, level:Int, label:String, identifier:Dynamic, f:Void->T):T {
+	public static function withTimer<T>(timerCtx:core.Timer.TimerContext, level:Int, label:String, identifier:Null<String>, f:Void->T):T {
+		// Timer.time only calls f when times are not measured; skip building the id and wrapper.
+		if (timerCtx.measureTimes == core.Timer.MeasureTimes.No) return f();
 		var id = Timer.determineId(level, ["filters"], [label], identifier);
 		return Timer.time(timerCtx, id, function(_:Null<Bool>) return f(), null);
 	}

@@ -1,0 +1,27 @@
+package core.ds;
+
+class StrTools {
+	/**
+		`s.substring(start, end)` for 0 <= start <= end <= s.length. On HashLink
+		substring's optional end index is boxed on every call.
+	**/
+	public static inline function sub(s:String, start:Int, end:Int):String {
+		#if hl
+		return subHl(s, start, end - start);
+		#else
+		return s.substring(start, end);
+		#end
+	}
+
+	#if hl
+	static function subHl(s:String, pos:Int, len:Int):String @:privateAccess {
+		if (len <= 0) return "";
+		var bytes:hl.Bytes = s.bytes;
+		if (len == 1) return String.__char__(bytes.getUI16(pos << 1));
+		var b = new hl.Bytes((len + 1) << 1);
+		b.blit(0, bytes, pos << 1, len << 1);
+		b.setUI16(len << 1, 0);
+		return String.__alloc__(b, len);
+	}
+	#end
+}

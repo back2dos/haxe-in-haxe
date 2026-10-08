@@ -196,19 +196,26 @@ class HashedIdentityPool<K, V> {
 }
 
 // Pool of binary type-instance encodings (StringPool over Bytes.unsafe_to_string upstream).
+// Keyed by a content hash with byte comparison (a hex string key allocated
+// twice per lookup).
 class BytesPool {
-	final lut:Map<String, Int> = new Map();
+	final lut:Map<Int, Array<Int>> = new Map();
 	public final items:Array<Bytes> = [];
 
 	public function new() {}
 
 	public function getOrAdd(b:Bytes):Int {
-		var k = b.toHex();
-		var i = lut.get(k);
-		if (i != null) return i;
-		i = items.length;
+		var h = 0x811C9DC5;
+		for (i in 0...b.length) h = (h ^ b.get(i)) * 0x01000193;
+		var bucket = lut.get(h);
+		if (bucket == null) {
+			bucket = [];
+			lut.set(h, bucket);
+		} else
+			for (i in bucket) if (items[i].compare(b) == 0) return i;
+		var i = items.length;
 		items.push(b);
-		lut.set(k, i);
+		bucket.push(i);
 		return i;
 	}
 }
