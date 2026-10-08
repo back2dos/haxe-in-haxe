@@ -10,7 +10,7 @@ import core.Error;
 enum PurityState { Pure; Impure; MaybePure; InferredPure; ExpectPure(pos:Pos); }
 class PurityStateTools {
 	public static function getPurityFromMeta(meta:Metadata):PurityState {
-		var entry = try Meta.get(Meta.Pure, meta) catch (_:core.Meta.MetaNotFound) null;
+		var entry = Meta.getOpt(Meta.Pure, meta);
 		if (entry == null) return MaybePure;
 		if (entry.exprs.length == 0) return Pure;
 		if (entry.exprs.length == 1) switch entry.exprs[0] {

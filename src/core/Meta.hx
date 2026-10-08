@@ -31,6 +31,11 @@ class Meta {
 		for (entry in ml2) for (meta in ml1) if (metaEq(meta,entry.meta)) return true;
 		return false;
 	}
+	// Meta.get without the exception, for callers that catch MetaNotFound.
+	public static function getOpt(m:StrictMeta,ml:Metadata):Null<MetadataEntry> {
+		for (entry in ml) if (metaEq(m,entry.meta)) return entry;
+		return null;
+	}
 	public static function get(m:StrictMeta,ml:Metadata):MetadataEntry {
 		for (entry in ml) if (metaEq(m,entry.meta)) return entry;
 		throw MetaNotFound.raise();

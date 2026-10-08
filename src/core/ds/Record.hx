@@ -24,6 +24,7 @@ class Record {
 	}
 	public static function copyDynamic<T>(o:T):T {
 		#if !macro
+		if (std.Type.getClass(o) == null) return Reflect.copy(o); // anonymous record
 		if (o is core.TType.TExpr) return cast (cast o : core.TType.TExpr).clone();
 		if (o is core.Globals.Pos) return cast (cast o : core.Globals.Pos).clone();
 		if (o is core.Globals.GlobalTypePath) return cast (cast o : core.Globals.GlobalTypePath).clone();
