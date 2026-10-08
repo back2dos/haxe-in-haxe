@@ -97,13 +97,13 @@ private class ConstructorInlining {
   return switch e.eexpr {case TObjectDecl(_) | TArrayDecl(_):mark(); case TNew(_,_,_) if (forceInline):mark(); case TNew(c = {clConstructor:cf = {cfKind:Method(MethInline),cfExpr:{eexpr:TFunction(_)}}},_,_):needsInline(scom,c,cf) ? mark() : e; case _:e;};
  }
  function analyzeAliases(seen:Array<TClassField>,captured:InlineExpressionHandled,isLvalue:Bool,e:TExpr):Null<InlineVar> {
-  function analyze(cap:InlineExpressionHandled,e:TExpr):Null<InlineVar> return analyzeAliases(seen,cap,false,e);
-  function mkIo(kind:InlineObjectKind,id:Int,expr:TExpr,hasUntyped:Bool = false):InlineObject {var io:InlineObject = {ioKind:kind,ioExpr:expr,ioPos:expr.epos,ioCancelled:false,ioDeclared:false,ioFields:new haxe.ds.StringMap(),ioAliases:[],ioHasUntyped:hasUntyped,ioInlineMethods:[],ioDependentVars:[]}; inlineObjs.set(id,io); return io;}
-  function getInlineMethod(io:InlineObject,name:String):Null<{c:TClass,tl:TParams,cf:TClassField,tf:TFunc}> return switch io.ioKind {
+  inline function analyze(cap:InlineExpressionHandled,e:TExpr):Null<InlineVar> return analyzeAliases(seen,cap,false,e);
+  inline function mkIo(kind:InlineObjectKind,id:Int,expr:TExpr,hasUntyped:Bool = false):InlineObject {var io:InlineObject = {ioKind:kind,ioExpr:expr,ioPos:expr.epos,ioCancelled:false,ioDeclared:false,ioFields:new haxe.ds.StringMap(),ioAliases:[],ioHasUntyped:hasUntyped,ioInlineMethods:[],ioDependentVars:[]}; inlineObjs.set(id,io); return io;}
+  inline function getInlineMethod(io:InlineObject,name:String):Null<{c:TClass,tl:TParams,cf:TClassField,tf:TFunc}> return switch io.ioKind {
    case IOKCtor(ctor):var f = ctor.iocClass.clFields.get(name); if (f == null) null; else switch [f.cfParams,f.cfKind,f.cfExpr] {case [[],Method(MethInline),{eexpr:TFunction(tf)}]:needsInline(scom,ctor.iocClass,f) ? {c:ctor.iocClass,tl:ctor.iocTparams,cf:f,tf:tf} : null; case _:null;}
    case _:null;
   };
-  function handleField(ef:TExpr,ethis:TExpr,name:String,validate:InlineObject->Bool,cap:InlineExpressionHandled = IEHNotHandled,lvalue:Bool = false):InlineObjectField {
+  inline function handleField(ef:TExpr,ethis:TExpr,name:String,validate:InlineObject->Bool,cap:InlineExpressionHandled = IEHNotHandled,lvalue:Bool = false):InlineObjectField {
    var iv = analyze(IEHCaptured,ethis); if (iv == null) return IOFNone;
    return switch iv.ivState {
     case IVSAliasing(io) if (validate(io)):
@@ -117,10 +117,10 @@ private class ConstructorInlining {
     case _:cancelIv(iv,ef.epos); IOFNone;
    };
   }
-  function noMethods(ef:TExpr,ethis:TExpr,name:String,validate:InlineObject->Bool):Null<InlineVar> return switch handleField(ef,ethis,name,validate,captured,isLvalue) {case IOFInlineMethod(io,_,_,_,_,_):cancelIo(io,ef.epos); null; case IOFInlineVar(iv):iv; case IOFNone:null;};
-  function defaultCase(e:TExpr):Null<InlineVar> {var old = scopedIvs; scopedIvs = []; iter(function(e) {analyze(IEHNotHandled,e);},e); for (iv in scopedIvs) iv.ivClosed = true; scopedIvs = old; return null;}
-  function analyzeCallArgs(el:Array<TExpr>):{vars:Array<TVar>,exprs:Array<TExpr>} {var vs = []; var es = []; for (e in el) switch e.eexpr {case TConst(_):es.push(e); case _:var v = allocVar(VGenerated,"arg",e.etype,e.epos); analyze(IEHIgnored,mk(TVar(v,e),scom.basic.tvoid,e.epos)); var m:MetadataEntry = {meta:core.MetaList.StrictMeta.InlineConstructorArgument(v.vId,0),exprs:[],pos:e.epos}; vs.unshift(v); es.push(mk(TMeta(m,e),e.etype,e.epos));} return {vars:vs,exprs:es};}
-  function handleObject(id:Int,force:Bool,e:TExpr):Null<InlineVar> return switch [e.eexpr,e.etype] {
+  inline function noMethods(ef:TExpr,ethis:TExpr,name:String,validate:InlineObject->Bool):Null<InlineVar> return switch handleField(ef,ethis,name,validate,captured,isLvalue) {case IOFInlineMethod(io,_,_,_,_,_):cancelIo(io,ef.epos); null; case IOFInlineVar(iv):iv; case IOFNone:null;};
+  inline function defaultCase(e:TExpr):Null<InlineVar> {var old = scopedIvs; scopedIvs = []; iter(function(e) {analyze(IEHNotHandled,e);},e); for (iv in scopedIvs) iv.ivClosed = true; scopedIvs = old; return null;}
+  inline function analyzeCallArgs(el:Array<TExpr>):{vars:Array<TVar>,exprs:Array<TExpr>} {var vs = []; var es = []; for (e in el) switch e.eexpr {case TConst(_):es.push(e); case _:var v = allocVar(VGenerated,"arg",e.etype,e.epos); analyze(IEHIgnored,mk(TVar(v,e),scom.basic.tvoid,e.epos)); var m:MetadataEntry = {meta:core.MetaList.StrictMeta.InlineConstructorArgument(v.vId,0),exprs:[],pos:e.epos}; vs.unshift(v); es.push(mk(TMeta(m,e),e.etype,e.epos));} return {vars:vs,exprs:es};}
+  inline function handleObject(id:Int,force:Bool,e:TExpr):Null<InlineVar> return switch [e.eexpr,e.etype] {
    case [TNew(c = {clConstructor:cf = {cfExpr:{eexpr:TFunction(tf)}}},tl,pl),_] if (captured != IEHNotHandled && !seen.contains(cf)):
     var args = analyzeCallArgs(pl); var v = allocVar(VGenerated,"inl" + c.clPath.name,e.etype,e.epos); var inlined = InlineOps.typeInlineCtor(InlineOps.contextOfScom(scom),c,cf,tf,mk(TLocal(v),TInst(c,tl),e.epos),args.exprs,e.epos); inlined = markCtors(inlined);
     var io = mkIo(IOKCtor({iocClass:c,iocTparams:tl,iocField:cf,iocForced:isExternCtor(c,cf) || force}),id,inlined,Meta.has(HasUntyped,cf.cfMeta)); io.ioDependentVars = args.vars;

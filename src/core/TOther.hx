@@ -132,12 +132,8 @@ class ExtType {
 	public static function isRest(t:T):Bool return switch t {case TType(t,_) if (t.tPath.pack.join(".") == "haxe.extern" && t.tPath.name == "Rest"):true;case TAbstract(a,_) if (a.aPath.pack.join(".") == "haxe" && a.aPath.name == "Rest"):true;case _:false;};
 	public static function isTypeParam(t:T):Bool return t.match(TInst({clKind:KTypeParameter(_)},_));
 	public static function semanticsName(sem:Semantics):String return switch sem {case VariableSemantics:"variable";case ReferenceSemantics:"reference";case ValueSemantics:"value";};
-	public static function hasSemantics(t:T,sem:Semantics):Bool {
-		var name = semanticsName(sem);
-		function check(meta:Metadata):Bool return Ast.hasMetaOption(meta,Meta.Semantics,name);
-		function loop(t:T):Bool return switch t {case TInst(c,_):check(c.clMeta);case TEnum(en,_):check(en.eMeta);case TType(td,tl):check(td.tMeta) || loop(applyTypedef(td,tl));case TAbstract(a,_):check(a.aMeta);case TLazy(f):loop(lazyType(f));case TMono(r):r.tmType != null && loop(r.tmType);case _:false;};
-		return loop(t);
-	}
+	public static function hasSemantics(t:T,sem:Semantics):Bool return hasSemanticsLoop(t,semanticsName(sem));
+	static function hasSemanticsLoop(t:T,name:String):Bool return switch t {case TInst(c,_):Ast.hasMetaOption(c.clMeta,Meta.Semantics,name);case TEnum(en,_):Ast.hasMetaOption(en.eMeta,Meta.Semantics,name);case TType(td,tl):Ast.hasMetaOption(td.tMeta,Meta.Semantics,name) || hasSemanticsLoop(applyTypedef(td,tl),name);case TAbstract(a,_):Ast.hasMetaOption(a.aMeta,Meta.Semantics,name);case TLazy(f):hasSemanticsLoop(lazyType(f),name);case TMono(r):r.tmType != null && hasSemanticsLoop(r.tmType,name);case _:false;};
 	public static function hasVariableSemantics(t:T):Bool return hasSemantics(t,VariableSemantics);
 	public static function hasReferenceSemantics(t:T):Bool return hasSemantics(t,ReferenceSemantics);
 	public static function hasValueSemantics(t:T):Bool return hasSemantics(t,ValueSemantics);

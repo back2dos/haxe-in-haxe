@@ -161,10 +161,10 @@ class Fields {
  public static function classField(ctx:Typer,c:TClass,tl:TParams,name:String,p:Pos):RawClassField return rawClassField(f -> fieldType(ctx,c,tl,f,p),c,tl,name);
  public static function typeField(cfg:TypeFieldConfig,ctx:Typer,e:TExpr,i:String,p:Pos,mode:AccessMode,withType:WithTypeValue):AccessKind {
   var pfield=e.epos==p?p:patchStringPos(p,i),isSet=switch mode {case MSet(_):true; case _:false;};
-  function access(e:TExpr,f:TClassField,host:AccessHost):AccessKind return fieldAccess(ctx,mode,f,host,e,pfield);
-  function classAccess(e:TExpr,c:TClass,tl:TParams):{field:TClassField,access:AccessKind} {var raw=classField(ctx,c,tl,i,p),host=raw.owner==null?FHAnon:FHInstance(raw.owner.cls,raw.owner.params); return {field:raw.field,access:access(e,raw.field,host)};}
-  function byET(f:TExpr->T->AccessKind,e:TExpr,t:T):AccessKind return f(mk(TCast(e,null),t,e.epos),followWithoutType(t));
-  function byE(f:TExpr->T->AccessKind,e:TExpr):AccessKind return f(e,followWithoutType(e.etype));
+  inline function access(e:TExpr,f:TClassField,host:AccessHost):AccessKind return fieldAccess(ctx,mode,f,host,e,pfield);
+  inline function classAccess(e:TExpr,c:TClass,tl:TParams):{field:TClassField,access:AccessKind} {var raw=classField(ctx,c,tl,i,p),host=raw.owner==null?FHAnon:FHInstance(raw.owner.cls,raw.owner.params); return {field:raw.field,access:access(e,raw.field,host)};}
+  inline function byET(f:TExpr->T->AccessKind,e:TExpr,t:T):AccessKind return f(mk(TCast(e,null),t,e.epos),followWithoutType(t));
+  inline function byE(f:TExpr->T->AccessKind,e:TExpr):AccessKind return f(e,followWithoutType(e.etype));
   function byForward(f:Void->AccessKind,meta:MetaTag,a:TAbstract):AccessKind {
    var m=Meta.get(meta,a.aMeta),el:Array<Expr>=m.exprs;
    if(el.length!=0) {
@@ -174,14 +174,14 @@ class Fields {
    }
    return f();
   }
-  function forwardStatic(f:Void->AccessKind,a:TAbstract):AccessKind return byForward(f,MetaTag.ForwardStatics,a);
+  inline function forwardStatic(f:Void->AccessKind,a:TAbstract):AccessKind return byForward(f,MetaTag.ForwardStatics,a);
   function forwardMember(f:TExpr->T->AccessKind,e:TExpr,a:TAbstract,tl:TParams):AccessKind return byForward(() -> byET(f,e,Abstract.getUnderlyingType(a,tl,true)),MetaTag.Forward,a);
-  function byTypedef(f:TExpr->T->AccessKind,e:TExpr,td:TDef,tl:TParams):AccessKind return f(e,followWithoutType(applyTypedef(td,tl)));
+  inline function byTypedef(f:TExpr->T->AccessKind,e:TExpr,td:TDef,tl:TParams):AccessKind return f(e,followWithoutType(applyTypedef(td,tl)));
   function byInterfaces(e:TExpr,c:TClass):AccessKind {
    if(!(hasClassFlag(c,CExtern)&&Meta.has(MetaTag.LibType,c.clMeta))) throw NotFound.raise();
    return byList(function(pair) {var result=classAccess(e,pair.cls,pair.params); TClassTools.addField(c,result.field); return result.access;},c.clImplements);
   }
-  function noNoLookup(cf:TClassField):Void {if(hasClassFieldFlag(cf,CfNoLookup)) displayError(ctx.com,"This field cannot be accessed explicitly",pfield);}
+  inline function noNoLookup(cf:TClassField):Void {if(hasClassFieldFlag(cf,CfNoLookup)) displayError(ctx.com,"This field cannot be accessed explicitly",pfield);}
   function byType(e:TExpr,t:T):AccessKind return switch t {
    case TType(td,tl):byTypedef(byType,e,td,tl);
    case TInst(c,tl):

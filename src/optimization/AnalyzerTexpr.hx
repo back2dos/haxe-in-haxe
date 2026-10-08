@@ -144,12 +144,12 @@ class Fusion {
   var config = actx.config; var com = actx.com; var found = false; var blocked = false; var ir = InterferenceReport.fromTexpr(value);
   if (config.fusionDebug) Sys.println("INTERFERENCE: " + InterferenceReport.toString(ir) + "\nINTO: " + core.TPrinting.sExprPretty(true,"",false,core.TPrinting.sType.bind(core.TPrinting.printContext()),mk(TBlock(el),tDynamic,Globals.nullPos)));
   function replace(e:TExpr):TExpr {
-   function explore(e:TExpr):TExpr {var old = blocked; blocked = true; var e = replace(e); blocked = old; return e;}
-   function handleEl(el:Array<TExpr>):Array<TExpr> {
+   inline function explore(e:TExpr):TExpr {var old = blocked; blocked = true; var e = replace(e); blocked = old; return e;}
+   inline function handleEl(el:Array<TExpr>):Array<TExpr> {
     if (AnalyzerTexpr.targetHandlesSideEffectOrder(com)) return el.map(replace);
     var reallyFound = found; var el = el.map(e -> {found = false; var e = replace(e); if (found) reallyFound = true; return e;}); found = reallyFound; return el;
    }
-   function handleCall(e:TExpr,el:Array<TExpr>):{expr:TExpr,args:Array<TExpr>} return switch com.platform {case Neko:var el = el.map(replace); var e = replace(e); {expr:e,args:el}; case Cpp:var e = replace(e); {expr:e,args:handleEl(el)}; case _:var e = replace(e); {expr:e,args:el.map(replace)};};
+   inline function handleCall(e:TExpr,el:Array<TExpr>):{expr:TExpr,args:Array<TExpr>} return switch com.platform {case Neko:var el = el.map(replace); var e = replace(e); {expr:e,args:el}; case Cpp:var e = replace(e); {expr:e,args:handleEl(el)}; case _:var e = replace(e); {expr:e,args:el.map(replace)};};
    if (found) return e;
    return switch e.eexpr {
     case TWhile(_,_,_) | TTry(_,_):throw new TypeExit();
