@@ -39,7 +39,7 @@ class AnalyzerTexpr {
   switch e.eexpr {case TConst(TNull):switch com.platform {case Cpp | Jvm | Flash | Lua:return false; case _:} case _:} return canBeUsedAsValueLoop(com,e);
  }
  // static, with com passed along: a closure per call and per node otherwise
- static function canBeUsedAsValueLoop(com:context.SafeCom.SafeContext,e:TExpr):Bool return switch e.eexpr {case TBlock([e]):canBeUsedAsValueLoop(com,e); case TBlock(_) | TSwitch(_) | TTry(_,_) | TReturn(_) | TThrow(_) | TBreak | TContinue:false; case TCall({eexpr:TConst(TString("phi"))},_):false; case TUnop(Increment | Decrement,_,_) if (!targetHandlesUnops(com)):false; case TFunction(_):true; case _:!checkExprWith(cannotBeUsedAsValue,com,e);};
+ static function canBeUsedAsValueLoop(com:context.SafeCom.SafeContext,e:TExpr):Bool return switch e.eexpr {case TBlock([e]):canBeUsedAsValueLoop(com,e); case TBlock(_) | TSwitch(_) | TTry(_,_) | TReturn(_) | TThrow(_) | TBreak | TContinue:false; case TCall({eexpr:TConst(TString("phi"))},_):false; case TUnop(Increment | Decrement,_,_) if (!targetHandlesUnops(com)):false; case TFunction(_):true; case _:!core.Texpr.checkExprWithScom(cannotBeUsedAsValue,com,e);};
  static function cannotBeUsedAsValue(com:context.SafeCom.SafeContext,e:TExpr):Bool return !canBeUsedAsValueLoop(com,e);
  public static function wrapMeta(s:String,e:TExpr):TExpr return mk(TMeta({meta:core.MetaList.StrictMeta.Custom(s),exprs:[],pos:e.epos},e),e.etype,e.epos);
  public static function isReallyUnbound(s:String):Bool return s != "`trace" && s != "__int__";

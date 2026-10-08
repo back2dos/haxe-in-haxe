@@ -20,7 +20,7 @@ class SafeFilters {
 					var p:core.Globals.Pos = {pfile:e.epos.pfile, pmin:e.epos.pmin, pmax:returnExpr.epos.pmin - 1};
 					var exprs:Array<TExpr> = [loop(returnIsVoid, returnExpr), {eexpr:TReturn(null), etype:e.etype, epos:p}];
 					{eexpr:TMeta({meta:core.MetaList.StrictMeta.MergeBlock,exprs:[], pos:Globals.nullPos}, TypeOps.mk(TBlock(exprs), e.etype, e.epos)), etype:e.etype, epos:e.epos};
-				case _: core.Texpr.mapExprWith(loop,returnIsVoid,e);
+				case _: core.Texpr.mapExprWithBool(loop,returnIsVoid,e);
 			};
 		}
 		return loop(true, e);

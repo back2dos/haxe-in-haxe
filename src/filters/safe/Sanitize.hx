@@ -124,6 +124,6 @@ class Sanitize {
 		};
 	}
 	public static function sanitize(scom:context.SafeCom.SafeContext, e:TExpr):TExpr {
-		return sanitizeExpr(scom, reduceExpr(scom.platformConfig, core.Texpr.mapExprWith(sanitize,scom,e)));
+		return sanitizeExpr(scom, reduceExpr(scom.platformConfig, core.Texpr.mapExprWithScom(sanitize,scom,e)));
 	}
 }
