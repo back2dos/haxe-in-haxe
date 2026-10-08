@@ -28,6 +28,10 @@ enum DceMode { DceNo; DceStd; DceFull; }
 	public var usedMutex:sys.thread.Mutex;
 	public var featureMutex:sys.thread.Mutex;
 	public var addFeatureManager:core.ds.NowOrLater;
+	// `expr dce` as a closure, created once per record (clone() leaves it null).
+	public var visit:Null<TExpr->Void> = null;
+	// markT's type stack, reused across calls; a nested markT only scans its own part.
+	public var typeStack:Array<T> = [];
 	public inline function new(scom:SafeContext, mscom:Null<SafeContext>, full:Bool, stdDirs:Array<String>, debug:Bool, followExpr:DceData->TExpr->Void, curclass:TClass, addedFields:Array<{cls:TClass,field:TClassField,kind:ClassFieldRefKind}>, markedFields:{value:Array<TClassField>}, features:haxe.ds.StringMap<Array<ClassFieldRef>>, checkedFeatures:haxe.ds.StringMap<Bool>, mergeMutex:sys.thread.Mutex, fieldMarkerMutex:sys.thread.Mutex, usedMutex:sys.thread.Mutex, featureMutex:sys.thread.Mutex, addFeatureManager:core.ds.NowOrLater) { this.scom = scom; this.mscom = mscom; this.full = full; this.stdDirs = stdDirs; this.debug = debug; this.followExpr = followExpr; this.curclass = curclass; this.addedFields = addedFields; this.markedFields = markedFields; this.features = features; this.checkedFeatures = checkedFeatures; this.mergeMutex = mergeMutex; this.fieldMarkerMutex = fieldMarkerMutex; this.usedMutex = usedMutex; this.featureMutex = featureMutex; this.addFeatureManager = addFeatureManager; }
 	public inline function clone():DceData return new DceData(scom, mscom, full, stdDirs, debug, followExpr, curclass, addedFields, markedFields, features, checkedFeatures, mergeMutex, fieldMarkerMutex, usedMutex, featureMutex, addFeatureManager);
 }
@@ -84,18 +88,21 @@ class Dce {
  static function sortedKeys<V>(map:haxe.ds.StringMap<V>):Array<String> {var keys = [for (key in map.keys()) key]; keys.sort(Reflect.compare); return keys;}
  public static function markEnum(dce:DceData,en:TEnum):Void if (!Meta.has(Used,en.eMeta)) {dce.usedMutex.acquire(); if (!Meta.has(Used,en.eMeta)) {en.eMeta.unshift(mkUsedMeta(en.ePos)); dce.usedMutex.release(); checkAndAddFeature(dce,"has_enum"); checkFeature(dce,Globals.sTypePath(en.ePath) + ".*"); for (key in sortedKeys(en.eConstrs)) {var ef = en.eConstrs.get(key); markT(dce,ef.efPos,ef.efType);}} else dce.usedMutex.release();}
  public static function markAbstract(dce:DceData,a:TAbstract):Void if (!Meta.has(Used,a.aMeta)) {dce.usedMutex.acquire(); if (!Meta.has(Used,a.aMeta)) {a.aMeta.unshift(mkUsedMeta(a.aPos)); dce.usedMutex.release(); checkFeature(dce,Globals.sTypePath(a.aPath) + ".*");} else dce.usedMutex.release();}
- public static function markT(dce:DceData,p:Pos,t:T):Void {
-  function loop(stack:Array<T>,t:T):Void if (!exists(t2 -> fastEq(t,t2),stack)) {
-   stack = [t].concat(stack); switch follow(t) {
-    case TInst(c = {clKind:KTypeParameter(ttp)},pl):if (!hasClassFlag(c,CUsed)) {addClassFlag(c,CUsed); for (t in getConstraints(ttp)) loop(stack,t);} for (t in pl) loop(stack,t);
-    case TInst(c,pl):markClass(dce,c); for (t in pl) loop(stack,t);
-    case TFun(sig):for (a in sig.args) loop(stack,a.type); loop(stack,sig.ret);
-    case TEnum(en,pl):markEnum(dce,en); for (t in pl) loop(stack,t);
-    case TAbstract(a,pl) if (Meta.has(MultiType,a.aMeta)):try loop(stack,context.AbstractCast.findMultitypeSpecialization(dce.scom.platform,a,pl,p).type) catch (_:core.Error.TypingError) {}
-    case TAbstract(a,pl):markAbstract(dce,a); for (t in pl) loop(stack,t); if (!Meta.has(CoreType,a.aMeta)) loop(stack,core.Abstract.getUnderlyingType(a,pl));
-    case TLazy(_) | TDynamic(_) | TType(_,_) | TAnon(_) | TMono(_):
-   }
-  } loop([],t);
+ // The stack is pushed and popped instead of rebuilt per level (upstream conses onto a list).
+ public static function markT(dce:DceData,p:Pos,t:T):Void {var stack = dce.typeStack; markTLoop(dce,p,stack,stack.length,t);}
+ static function markTLoop(dce:DceData,p:Pos,stack:Array<T>,base:Int,t:T):Void {
+  for (i in base...stack.length) if (fastEq(t,stack[i])) return;
+  stack.push(t);
+  switch follow(t) {
+   case TInst(c = {clKind:KTypeParameter(ttp)},pl):if (!hasClassFlag(c,CUsed)) {addClassFlag(c,CUsed); for (t in getConstraints(ttp)) markTLoop(dce,p,stack,base,t);} for (t in pl) markTLoop(dce,p,stack,base,t);
+   case TInst(c,pl):markClass(dce,c); for (t in pl) markTLoop(dce,p,stack,base,t);
+   case TFun(sig):for (a in sig.args) markTLoop(dce,p,stack,base,a.type); markTLoop(dce,p,stack,base,sig.ret);
+   case TEnum(en,pl):markEnum(dce,en); for (t in pl) markTLoop(dce,p,stack,base,t);
+   case TAbstract(a,pl) if (Meta.has(MultiType,a.aMeta)):var depth = stack.length; try markTLoop(dce,p,stack,base,context.AbstractCast.findMultitypeSpecialization(dce.scom.platform,a,pl,p).type) catch (_:core.Error.TypingError) {stack.resize(depth);}
+   case TAbstract(a,pl):markAbstract(dce,a); for (t in pl) markTLoop(dce,p,stack,base,t); if (!Meta.has(CoreType,a.aMeta)) markTLoop(dce,p,stack,base,core.Abstract.getUnderlyingType(a,pl));
+   case TLazy(_) | TDynamic(_) | TType(_,_) | TAnon(_) | TMono(_):
+  }
+  stack.pop();
  }
  public static function markMt(dce:DceData,mt:ModuleType):Void switch mt {case TClassDecl(c):markClass(dce,c); case TEnumDecl(en):markEnum(dce,en); case TAbstractDecl(a):if (!Meta.has(ValueUsed,a.aMeta)) a.aMeta.unshift({meta:core.MetaList.StrictMeta.ValueUsed,exprs:[],pos:Globals.mkZeroRangePos(a.aPos)}); markAbstract(dce,a); case TTypeDecl(_):}
  public static function markDependentFields(dce:DceData,sup:TClass,name:String,kind:ClassFieldRefKind):Void {
@@ -140,8 +147,7 @@ class Dce {
  public static function isDynamic(t:T):Bool return switch follow(t) {case TAbstract(a,tl) if (!Meta.has(CoreType,a.aMeta)):isDynamic(core.Abstract.getUnderlyingType(a,tl)); case TDynamic(_):true; case _:false;};
  public static function isString(t:T):Bool return switch follow(t) {case TAbstract(a,tl) if (!Meta.has(CoreType,a.aMeta)):isString(core.Abstract.getUnderlyingType(a,tl)); case TInst({clPath:{pack:[],name:"String"}},_):true; case _:false;};
  public static function isConstString(e:TExpr):Bool return switch e.eexpr {case TConst(TString(_)):true; case _:false;};
- public static function exprField(dce:DceData,e:TExpr,fa:TFieldAccess,isCallExpr:Bool):Void {
-  function defaultCase():Void {
+ static function exprFieldDefault(dce:DceData,e:TExpr,fa:TFieldAccess):Void {
    var n = fieldName(fa); switch fa {
     case FAnon(cf):if (Meta.has(Optional,cf.cfMeta)) {checkAndAddFeature(dce,"anon_optional_read"); checkAndAddFeature(dce,"anon_optional_read." + n);} else {checkAndAddFeature(dce,"anon_read"); checkAndAddFeature(dce,"anon_read." + n);}
     case FDynamic(_):checkAndAddFeature(dce,"dynamic_read"); checkAndAddFeature(dce,"dynamic_read." + n);
@@ -149,16 +155,18 @@ class Dce {
     case _:
    }
    switch [follow(e.etype),fa] {case [TInst(c,_),_]:markClass(dce,c); field(dce,c,n,CfrMember); case [_,FClosure(ct,_)] if (ct != null):markClass(dce,ct.cls); field(dce,ct.cls,n,CfrMember); case [TAnon(a),_]:switch a.aStatus {case ClassStatics(c):markClass(dce,c); field(dce,c,n,CfrStatic); case _:} case _:}
-  }
-  function markInstanceFieldAccess(c:TClass,cf:TClassField):Void if (!isCallExpr && dce.scom.platform == Python) switch c.clPath {case {pack:[],name:"Array"}:checkAndAddFeature(dce,"closure_Array"); checkAndAddFeature(dce,"python.internal.ArrayImpl." + cf.cfName); checkAndAddFeature(dce,"python.internal.ArrayImpl"); case {pack:[],name:"String"}:checkAndAddFeature(dce,"closure_String"); checkAndAddFeature(dce,"python.internal.StringImpl." + cf.cfName); checkAndAddFeature(dce,"python.internal.StringImpl"); case _:}
-  switch fa {case FStatic(c,cf):markClass(dce,c); markField(dce,c,cf,CfrStatic); case FInstance(c,_,cf):markClass(dce,c); markField(dce,c,cf,CfrMember); case FClosure(ct,cf) if (ct != null):markInstanceFieldAccess(ct.cls,cf); defaultCase(); case _:defaultCase();} expr(dce,e);
+ }
+ static function markInstanceFieldAccess(dce:DceData,isCallExpr:Bool,c:TClass,cf:TClassField):Void if (!isCallExpr && dce.scom.platform == Python) switch c.clPath {case {pack:[],name:"Array"}:checkAndAddFeature(dce,"closure_Array"); checkAndAddFeature(dce,"python.internal.ArrayImpl." + cf.cfName); checkAndAddFeature(dce,"python.internal.ArrayImpl"); case {pack:[],name:"String"}:checkAndAddFeature(dce,"closure_String"); checkAndAddFeature(dce,"python.internal.StringImpl." + cf.cfName); checkAndAddFeature(dce,"python.internal.StringImpl"); case _:}
+ public static function exprField(dce:DceData,e:TExpr,fa:TFieldAccess,isCallExpr:Bool):Void {
+  switch fa {case FStatic(c,cf):markClass(dce,c); markField(dce,c,cf,CfrStatic); case FInstance(c,_,cf):markClass(dce,c); markField(dce,c,cf,CfrMember); case FClosure(ct,cf) if (ct != null):markInstanceFieldAccess(dce,isCallExpr,ct.cls,cf); exprFieldDefault(dce,e,fa); case _:exprFieldDefault(dce,e,fa);} expr(dce,e);
  }
  public static function checkOp(dce:DceData,op:Binop):Void switch op {case OpMod:checkAndAddFeature(dce,"binop_%"); case OpUShr:checkAndAddFeature(dce,"binop_>>>"); case OpAssignOp(op):checkOp(dce,op); case _:}
  public static function expr(dce:DceData,e:TExpr):Void {
-  markT(dce,e.epos,e.etype); function visit(e:TExpr):Void expr(dce,e); function pair(a:TExpr,b:TExpr):Void {visit(a); visit(b);}
+  markT(dce,e.epos,e.etype); var visit = dce.visit; if (visit == null) {visit = expr.bind(dce); dce.visit = visit;}
+  inline function pair(a:TExpr,b:TExpr):Void {expr(dce,a); expr(dce,b);}
   switch e.eexpr {
    case TNew(c,pl,el):markClass(dce,c); markDirectlyUsedClass(dce,c); field(dce,c,"new",CfrConstructor); for (e in el) visit(e); for (t in pl) markT(dce,e.epos,t);
-   case TVar(v,e1):opt(visit,e1); markT(dce,e.epos,v.vType);
+   case TVar(v,e1):if (e1 != null) expr(dce,e1); markT(dce,e.epos,v.vType);
    case TCast(inner,mt) if (mt != null):checkFeature(dce,"typed_cast"); markMt(dce,mt); markDirectlyUsedMt(dce,mt); visit(inner);
    case TObjectDecl(vl):checkAndAddFeature(dce,"has_anon"); for (v in vl) visit(v.expr);
    case TTypeExpr(mt):markMt(dce,mt); markDirectlyUsedMt(dce,mt);

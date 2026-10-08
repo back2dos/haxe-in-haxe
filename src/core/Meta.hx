@@ -38,7 +38,18 @@ class Meta {
 	// Structural equality (OCaml's =); comparing indices first avoids the deep
 	// comparison for the common mismatch.
 	// The legacy bootstrap stores some metadata names as plain strings, which never match.
-	public static inline function metaEq(a:StrictMeta,b:StrictMeta):Bool return core.ds.Key.asString(b) == null && StdType.enumIndex(a) == StdType.enumIndex(b) && StdType.enumEq(a,b);
+	#if hl
+	// One type-pointer test instead of a checked Dynamic->enum cast per entry.
+	// hl.Type comparison calls hl_same_type; the type pointers are compared directly.
+	static final strictMetaType:hl.Bytes = untyped $unsafecast(hl.Type.getDynamic(StrictMeta.Used));
+	public static inline function metaEq(a:StrictMeta,b:Dynamic):Bool {
+		if (b == null || (untyped $unsafecast(hl.Type.getDynamic(b)) : hl.Bytes) != strictMetaType) return false;
+		var e:StrictMeta = untyped $unsafecast(b);
+		return StdType.enumIndex(a) == StdType.enumIndex(e) && StdType.enumEq(a,e);
+	}
+	#else
+	public static inline function metaEq(a:StrictMeta,b:Dynamic):Bool return core.ds.Key.asString(b) == null && StdType.enumIndex(a) == StdType.enumIndex(b) && StdType.enumEq(a,b);
+	#end
 	public static function has(m:StrictMeta,ml:Metadata):Bool { for (entry in ml) if (metaEq(m,entry.meta)) return true; return false; }
 	public static function hasOneOf(ml1:Array<StrictMeta>,ml2:Metadata):Bool {
 		for (entry in ml2) for (meta in ml1) if (metaEq(meta,entry.meta)) return true;

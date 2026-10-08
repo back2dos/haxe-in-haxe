@@ -44,7 +44,14 @@ anywhere, so these are rough):
 | typing | 1.32s | ~2.5s | ~2× |
 | macro | 0.05s | ~0.24s | ~4× |
 
-DCE mark stands out and is probably algorithmic. Memory is 4.5× the
+DCE mark stood out. It was allocation rather than an algorithm problem.
+`markT` built a new type stack array per recursion level and a closure per
+call, `expr` made two closures per expression, and `Meta.has` did a checked
+`Dynamic`→enum cast for every metadata entry. After removing those, DCE mark
+takes 0.36s (from ~1.45s; reference 0.12s; 1.6G → 0.66G instructions).
+Head to head over 8 alternating runs, end to end goes from 9.2–9.35s to 8.6s
+and peak memory from 1.80 GB to 1.55 GB. Part of the time charged to DCE was
+GC collections, which now run in later phases. Memory is still about 4× the
 reference.
 
 Binary sizes:
