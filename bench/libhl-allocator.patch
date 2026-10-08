@@ -175,10 +175,29 @@ index f332cf5..1844c29 100644
  	gc_freelist free;
  	unsigned char *sizes;
 diff --git a/src/gc.c b/src/gc.c
-index d338518..57f4239 100644
+index d338518..340f881 100644
 --- a/src/gc.c
 +++ b/src/gc.c
-@@ -191,6 +191,16 @@ static gc_pheader *gc_alloc_page( int size, int kind, int block_count );
+@@ -53,7 +53,17 @@
+ #	define GC_CPU_PAUSE()
+ #endif
+ 
+-#define MZERO(ptr,size)		memset(ptr,0,size)
++// Small zeroings (short free runs after a sweep, objects) are inlined: a libc
++// memset call costs more than the stores for a few words.
++static inline void gc_mzero( void *ptr, size_t size ) {
++	if( size <= 256 && (size & 7) == 0 && (((size_t)ptr) & 7) == 0 ) {
++		int64 *q = (int64*)ptr;
++		size_t n = size >> 3, i;
++		for(i=0;i<n;i++) q[i] = 0;
++	} else
++		memset(ptr,0,size);
++}
++#define MZERO(ptr,size)		gc_mzero(ptr,size)
+ 
+ // GC
+ 
+@@ -191,6 +201,16 @@ static gc_pheader *gc_alloc_page( int size, int kind, int block_count );
  static void gc_free_page( gc_pheader *page, int block_count );
  
  #ifndef GC_EXTERN_API
@@ -195,7 +214,7 @@ index d338518..57f4239 100644
  #include "allocator.c"
  #endif
  
-@@ -200,7 +210,7 @@ HL_THREAD_STATIC_VAR hl_thread_info *current_thread;
+@@ -200,7 +220,7 @@ HL_THREAD_STATIC_VAR hl_thread_info *current_thread;
  
  #if !defined(GC_EXTERN_API) && defined(HL_THREADS) && !defined(GC_DEBUG)
  #	define GC_SLICES
@@ -204,7 +223,7 @@ index d338518..57f4239 100644
  #	define GC_SLICE_SLOTS		(GC_FIXED_PARTS << PAGE_KIND_BITS)
  
  typedef struct {
-@@ -210,8 +220,27 @@ typedef struct {
+@@ -210,8 +230,27 @@ typedef struct {
  	int gen;
  } gc_slice;
  
@@ -234,7 +253,7 @@ index d338518..57f4239 100644
  
  static int gc_slice_part( int size, int kind ) {
  	int sz = size + ((-size) & (GC_ALIGN - 1));
-@@ -311,6 +340,14 @@ static void gc_global_lock( bool lock ) {
+@@ -311,6 +350,14 @@ static void gc_global_lock( bool lock ) {
  	if( lock ) {
  		if( !t )
  			hl_fatal("Can't lock GC in unregistered thread");
@@ -249,7 +268,7 @@ index d338518..57f4239 100644
  		if( mt ) gc_save_context(t,&lock);
  		GC_MEMORY_BARRIER();
  		t->gc_blocking++;
-@@ -422,6 +459,8 @@ static void gc_stop_world( bool b ) {
+@@ -422,6 +469,8 @@ static void gc_stop_world( bool b ) {
  #	ifdef HL_THREADS
  	if( b ) {
  		int i;
@@ -258,7 +277,7 @@ index d338518..57f4239 100644
  		gc_threads.stopping_world = true;
  		GC_MEMORY_BARRIER();
  		for(i=0;i<gc_threads.count;i++) {
-@@ -513,7 +552,9 @@ static gc_pheader *gc_alloc_page( int size, int kind, int block_count ) {
+@@ -513,7 +562,9 @@ static gc_pheader *gc_alloc_page( int size, int kind, int block_count ) {
  	p->page_id = PAGE_ID++;
  #	else
  	// prevent false positive to access invalid type
@@ -268,7 +287,7 @@ index d338518..57f4239 100644
  #	endif
  	if( ((int_val)base) & ((1<<GC_MASK_BITS) - 1) )
  		hl_fatal("Page memory is not correctly aligned");
-@@ -560,10 +601,40 @@ static void gc_free_page( gc_pheader *ph, int block_count ) {
+@@ -560,10 +611,40 @@ static void gc_free_page( gc_pheader *ph, int block_count ) {
  
  static void gc_check_mark();
  
@@ -309,7 +328,7 @@ index d338518..57f4239 100644
  	if( size == 0 )
  		return NULL;
  	if( size < 0 )
-@@ -578,12 +649,24 @@ void *hl_gc_alloc_gen( hl_type *t, int size, int flags ) {
+@@ -578,12 +659,24 @@ void *hl_gc_alloc_gen( hl_type *t, int size, int flags ) {
  				ptr = s->cur;
  				allocated = s->block_size;
  				s->cur += allocated;
@@ -338,7 +357,7 @@ index d338518..57f4239 100644
  		}
  	}
  #	endif
-@@ -630,8 +713,13 @@ void *hl_gc_alloc_gen( hl_type *t, int size, int flags ) {
+@@ -630,8 +723,13 @@ void *hl_gc_alloc_gen( hl_type *t, int size, int flags ) {
  			int max = GC_SLICE_BYTES / bsize;
  			int n = 0;
  			unsigned char *slice;
@@ -353,7 +372,7 @@ index d338518..57f4239 100644
  			gc_slice *s = &gc_slices[(tpart << PAGE_KIND_BITS) | kind];
  			s->block_size = bsize;
  			s->cur = slice + bsize;
-@@ -644,6 +732,24 @@ void *hl_gc_alloc_gen( hl_type *t, int size, int flags ) {
+@@ -644,6 +742,24 @@ void *hl_gc_alloc_gen( hl_type *t, int size, int flags ) {
  			gc_stats.allocation_count += n - 1;
  			gc_stats.total_requested += (int64)(n - 1) * bsize;
  			gc_stats.total_allocated += (int64)n * bsize;
@@ -378,7 +397,7 @@ index d338518..57f4239 100644
  		} else
  #		endif
  		{
-@@ -662,7 +768,9 @@ void *hl_gc_alloc_gen( hl_type *t, int size, int flags ) {
+@@ -662,7 +778,9 @@ void *hl_gc_alloc_gen( hl_type *t, int size, int flags ) {
  #	ifdef GC_DEBUG
  	memset(ptr,0xCD,allocated);
  #	endif
@@ -389,7 +408,7 @@ index d338518..57f4239 100644
  		MZERO(ptr,allocated);
  	else if( MEM_HAS_PTR(flags) && allocated != size )
  		MZERO((char*)ptr+size,allocated-size); // erase possible pointers after data
-@@ -1350,6 +1458,10 @@ struct _pextra {
+@@ -1350,6 +1468,10 @@ struct _pextra {
  	pextra *next;
  };
  static pextra *extra_pages = NULL;
@@ -400,7 +419,7 @@ index d338518..57f4239 100644
  #define EXTRA_SIZE (GC_PAGE_SIZE + (4<<10))
  #endif
  
-@@ -1378,6 +1490,45 @@ static void *gc_alloc_page_memory( int size ) {
+@@ -1378,6 +1500,45 @@ static void *gc_alloc_page_memory( int size ) {
  #elif defined(HL_EMSCRIPTEN)
  	return emscripten_builtin_memalign(GC_PAGE_SIZE, size);
  #else
@@ -446,7 +465,7 @@ index d338518..57f4239 100644
  	static int recursions = 0;
  	int i = 0;
  	while( gc_will_collide(base_addr,size) ) {
-@@ -1445,6 +1596,16 @@ static void gc_free_page_memory( void *ptr, int size ) {
+@@ -1445,6 +1606,16 @@ static void gc_free_page_memory( void *ptr, int size ) {
  		prev = e;
  		e = e->next;
  	}
@@ -463,7 +482,7 @@ index d338518..57f4239 100644
  	munmap(ptr,size);
  #endif
  }
-@@ -1474,6 +1635,13 @@ vdynamic *hl_alloc_obj( hl_type *t ) {
+@@ -1474,6 +1645,13 @@ vdynamic *hl_alloc_obj( hl_type *t ) {
  	int i;
  	hl_runtime_obj *rt = t->obj->rt;
  	if( rt == NULL || rt->methods == NULL ) rt = hl_get_obj_proto(t);
