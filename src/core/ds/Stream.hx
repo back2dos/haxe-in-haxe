@@ -1,6 +1,11 @@
 package core.ds;
 
-/** The lazy, counted token stream operations used by OCaml's Stream parsers. */
+/**
+	The lazy, counted token stream operations used by OCaml's Stream parsers.
+	@:generic so the buffer is a typed array on static targets (HashLink
+	otherwise boxes every Array<T> of a type parameter in an ArrayDyn).
+**/
+@:generic
 class Stream<T> {
 	final produce:Int->Null<T>;
 	final buffered:Array<T> = [];
@@ -8,8 +13,7 @@ class Stream<T> {
 	var produced = 0;
 	var ended = false;
 	public function new(produce:Int->Null<T>) this.produce = produce;
-	public static function from<T>(produce:Int->Null<T>):Stream<T> return new Stream(produce);
-	public static function ofList<T>(values:Array<T>):Stream<T> return from(function(i) return i < values.length ? values[i] : null);
+	// Stream.from and Stream.of_list: a generic class has no statics, construct with new.
 	public function count():Int return consumed;
 	inline function fill(n:Int):Void {
 		while (!ended && buffered.length < n) {

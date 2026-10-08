@@ -305,7 +305,8 @@ class Chunk {
 
 	public function writeString(s:String):Void writeUleb128(cp.getOrAdd(s));
 
-	public function writeList<B>(l:Array<B>, f:B->Void):Void {
+	// inline: see core.ds.List (HashLink boxes Array<B> of a type parameter)
+	public inline function writeList<B>(l:Array<B>, f:B->Void):Void {
 		writeUleb128(l.length);
 		for (x in l) f(x);
 	}
@@ -495,7 +496,7 @@ class HxbWriter {
 		};
 	}
 
-	function writeInlinedList<A>(offset:Int, max:Int, fByte:Int->Void, fFirst:Void->Void, fElt:A->Void, l:Array<A>):Void {
+	inline function writeInlinedList<A>(offset:Int, max:Int, fByte:Int->Void, fFirst:Void->Void, fElt:A->Void, l:Array<A>):Void {
 		var length = l.length;
 		if (length > max) {
 			fByte(offset + 9);
@@ -1120,7 +1121,7 @@ class HxbWriter {
 			return null;
 		}, function() return 'function arg `${a.name}`', null);
 	}
-	function inlinedList<A>(offset:Int, max:Int, fFirst:Void->Void, fElt:A->Void, l:Array<A>) {
+	inline function inlinedList<A>(offset:Int, max:Int, fFirst:Void->Void, fElt:A->Void, l:Array<A>) {
 		writeInlinedList(offset, max, chunk.writeU8, fFirst, fElt, l);
 	}
 	function writeTypeInstance(t:T):Void {

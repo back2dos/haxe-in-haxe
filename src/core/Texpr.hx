@@ -27,8 +27,9 @@ class Texpr {
   case TSwitch(s):f(s.switchSubject); for (c in s.switchCases) {for (a in c.casePatterns) f(a); f(c.caseExpr);} if (s.switchDefault != null) f(s.switchDefault);
   case TTry(a,catches):f(a); for (c in catches) f(c.expr);
  }
- public static function exists<A>(f:A->Bool,el:Array<A>):Bool {for (e in el) if (f(e)) return true; return false;}
- public static function all<A>(f:A->Bool,el:Array<A>):Bool {for (e in el) if (!f(e)) return false; return true;}
+ // These generic array helpers are inline: see core.ds.List.
+ public static inline function exists<A>(f:A->Bool,el:Array<A>):Bool {var r = false; for (e in el) if (f(e)) {r = true; break;} return r;}
+ public static inline function all<A>(f:A->Bool,el:Array<A>):Bool {var r = true; for (e in el) if (!f(e)) {r = false; break;} return r;}
  public static function checkExpr(f:TExpr->Bool,e:TExpr):Bool return switch e.eexpr {
   case TConst(_) | TLocal(_) | TBreak | TContinue | TTypeExpr(_) | TIdent(_):false;
   case TArray(a,b) | TBinop(_,a,b) | TWhile(a,b,_):f(a) || f(b);
@@ -85,7 +86,7 @@ class Texpr {
   }
   return {eexpr:def,etype:ft(e.etype),epos:e.epos};
  }
- public static function all2<A,B>(f:A->B->Bool,a:Array<A>,b:Array<B>):Bool {if (a.length != b.length) return false; for (i in 0...a.length) if (!f(a[i],b[i])) return false; return true;}
+ public static inline function all2<A,B>(f:A->B->Bool,a:Array<A>,b:Array<B>):Bool {var r = a.length == b.length; if (r) for (i in 0...a.length) if (!f(a[i],b[i])) {r = false; break;} return r;}
  public static function equalFa(a:TFieldAccess,b:TFieldAccess):Bool return switch [a,b] {
   case [FStatic(c,cf),FStatic(d,df)]:c == d && cf.cfName == df.cfName;
   case [FInstance(c,tl,cf),FInstance(d,ul,df)]:c == d && all2(typeIseq,tl,ul) && cf.cfName == df.cfName;
@@ -147,7 +148,7 @@ class Texpr {
   }; return build(e);
  }
  public static function skip(e:TExpr):TExpr return switch e.eexpr {case TParenthesis(a) | TMeta(_,a) | TBlock([a]) | TCast(a,null):skip(a); case _:e;};
- public static function foldmapList<A,B>(f:A->B->{acc:A,value:B},acc:A,el:Array<B>):{acc:A,value:Array<B>} {var result = []; for (e in el) {var r = f(acc,e); acc = r.acc; result.push(r.value);} return {acc:acc,value:result};}
+ public static inline function foldmapList<A,B>(f:A->B->{acc:A,value:B},acc:A,el:Array<B>):{acc:A,value:Array<B>} {var result = []; for (e in el) {var r = f(acc,e); acc = r.acc; result.push(r.value);} return {acc:acc,value:result};}
  public static function foldmapOpt<A,B>(f:A->B->{acc:A,value:B},acc:A,eo:Null<B>):{acc:A,value:Null<B>} return eo == null ? {acc:acc,value:null} : f(acc,eo);
  public static function foldmapPairs<A,B,C>(f:A->C->{acc:A,value:C},acc:A,pairs:Array<{key:B,expr:C}>):{acc:A,value:Array<{key:B,expr:C}>} {var el = []; for (pair in pairs) {var r = f(acc,pair.expr); acc = r.acc; el.push({key:pair.key,expr:r.value});} return {acc:acc,value:el};}
  public static function foldmap<A>(f:A->TExpr->{acc:A,value:TExpr},acc:A,e:TExpr):{acc:A,value:TExpr} {

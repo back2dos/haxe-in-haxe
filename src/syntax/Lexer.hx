@@ -94,7 +94,7 @@ class Lexer {
 	}
 	public static function isValidIdentifier(value:String):Bool {
 		if(value.length==0) return false;
-		for(i in 0...value.length) if(!isIdentStart(value.charAt(i)) && !(i>0 && isDigit(value.charAt(i)))) return false;
+		for(i in 0...value.length) {var c=StringTools.fastCodeAt(value,i);if(!((c>="a".code && c<="z".code) || (c>="A".code && c<="Z".code) || c=="_".code) && !(i>0 && isDigitC(c))) return false;}
 		return switch keyword(value) {case Const(Ident(_)):true;case _:false;};
 	}
 	public static function createTempCtx(file:String):LexerContext return {file:{lfile:file,lline:1,lmaxline:1,llines:[{offset:0,line:1}],lalines:[{offset:0,line:1}],llast:0x7FFFFFFF,llastindex:0},buf:new StringBuf()};

@@ -19,7 +19,7 @@ import syntax.Parser;
 // selected unless it raises Stream.Failure. Once selected, any later element
 // that fails raises Stream.Error "Parse error.". No selected case raises
 // Stream.Failure. `tail` converts Stream.Failure from later call elements.
-private typedef S = Stream<ParserToken>;
+private typedef S = Stream<syntax.Lexer.LexedToken>;
 
 private enum DeclResult<T> {
 	DSuccess(v:T);
@@ -48,7 +48,12 @@ class Grammar {
 	}
 
 	static function tryHead<T>(f:Void->T):Null<{v:T}> {
-		try return {v: f()} catch (_:StreamFailure) return null;
+		// Stream.Failure is only ever thrown as the shared instance: an identity
+		// test instead of the typed catch's Exception.caught and type check.
+		try return {v: f()} catch (e:haxe.Exception) {
+			if (e != StreamFailure.instance) throw e;
+			return null;
+		}
 	}
 
 	static function fail<T>():T throw StreamFailure.raise();

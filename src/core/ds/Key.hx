@@ -5,14 +5,13 @@ class Key {
  public static function compare(a:Dynamic,b:Dynamic):Int {
   // Fast path for the common string keys (before the Dynamic ==, which is a
   // runtime compare); same order as `>` on strings: by UTF-16 code units.
-  // Std.downcast is a direct type check (Std.isOfType goes through a Dynamic class on HashLink)
-  var sa:Null<String>=Std.downcast(a,String);
-  if(sa!=null) {var sb:Null<String>=Std.downcast(b,String);if(sb!=null) return compareStrings(sa,sb);}
+  var sa=asString(a);
+  if(sa!=null) {var sb=asString(b);if(sb!=null) return compareStrings(sa,sb);}
   if(a==b) return 0;
   if(a==null) return -1;if(b==null) return 1;
   if((a is Int) && (b is Int)) return (a:Int) > (b:Int) ? 1 : -1;
   // Type paths compare like the {name, pack} record they replace (fields in name order).
-  var pa:Null<core.Globals.GlobalTypePath>=Std.downcast(a,core.Globals.GlobalTypePath),pb:Null<core.Globals.GlobalTypePath>=pa==null ? null : Std.downcast(b,core.Globals.GlobalTypePath);
+  var pa=asTypePath(a),pb=pa==null ? null : asTypePath(b);
   if(pb!=null) {
    var c=compare(pa.name,pb.name);
    return c!=0 ? c : compare(pa.pack,pb.pack);
@@ -29,6 +28,23 @@ class Key {
   }
  }
 
+ // String and GlobalTypePath have no subclasses: on HashLink an exact
+ // type-pointer test, where Std.downcast goes through BaseType.check.
+ public static inline function asString(v:Dynamic):Null<String> {
+  #if hl
+  return hl.Type.getDynamic(v)==hl.Type.get("") ? untyped $unsafecast(v) : null;
+  #else
+  return Std.downcast(v,String);
+  #end
+ }
+ static inline function asTypePath(v:Dynamic):Null<core.Globals.GlobalTypePath> {
+  #if hl
+  return hl.Type.getDynamic(v)==hl.Type.get((null:core.Globals.GlobalTypePath)) ? untyped $unsafecast(v) : null;
+  #else
+  return Std.downcast(v,core.Globals.GlobalTypePath);
+  #end
+ }
+
  public static function compareStrings(a:String,b:String):Int {
   var la=a.length,lb=b.length,n=la<lb ? la : lb;
   for(i in 0...n) {var ca=StringTools.fastCodeAt(a,i),cb=StringTools.fastCodeAt(b,i);if(ca!=cb) return ca<cb ? -1 : 1;}
@@ -42,14 +58,14 @@ class Key {
   linear scan with `compare`.
  **/
  public static function canonical(value:Dynamic):Null<String> {
-  var s0:Null<String>=Std.downcast(value,String);
+  var s0=asString(value);
   if(s0!=null) return "s" + s0;
   // Type paths (module and type tables) get their own encoding: the parts
   // joined by control characters, which identifiers cannot contain. Cheaper
   // than visit() below (no closure, StringBuf or number formatting).
   // GlobalTypePath is a class, so these keys never meet the structural
   // {name, pack} encoding in the same table.
-  var tp0:Null<core.Globals.GlobalTypePath>=Std.downcast(value,core.Globals.GlobalTypePath);
+  var tp0=asTypePath(value);
   if(tp0!=null && tp0.name!=null && tp0.pack!=null) return "\x01" + tp0.pack.join("\x02") + "\x03" + tp0.name;
   return canonicalSlow(value);
  }
@@ -59,11 +75,11 @@ class Key {
   function visit(v:Dynamic):Bool {
    if(--budget<0) return false;
    if(v==null) {buf.add("n");return true;}
-   var s:Null<String>=Std.downcast(v,String);
+   var s=asString(v);
    if(s!=null) {buf.add("s");buf.add(s.length);buf.add(":");buf.add(s);return true;}
    if(v is Int) {buf.add("i");buf.add((v:Int));buf.add(";");return true;}
    if(Std.isOfType(v,Array)) {var a:Array<Dynamic>=v;buf.add("a");buf.add(a.length);buf.add("[");for(x in a) if(!visit(x)) return false;return true;}
-   var tp:Null<core.Globals.GlobalTypePath>=Std.downcast(v,core.Globals.GlobalTypePath);
+   var tp=asTypePath(v);
    if(tp!=null) {buf.add("o24:name");if(!visit(tp.name)) return false;buf.add("4:pack");return visit(tp.pack);}
    return switch StdType.typeof(v) {
     case TBool:buf.add((v:Bool) ? "T" : "F");true;

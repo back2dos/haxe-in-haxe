@@ -355,7 +355,7 @@ class Ast {
 	public static function genDocText(doc:DocBlock):String return (doc.docOwn == null ? [] : [doc.docOwn]).concat(doc.docInherited).join("\n");
 	public static function genDocTextOpt(doc:Documentation):Null<String> return doc == null ? null : genDocText(doc);
 	public static function getOwnDocOpt(doc:Documentation):Null<String> return doc == null ? null : doc.docOwn;
-	public static function isLowerIdent(value:String):Bool { if (value.length == 0) throw new core.ds.InvalidArgument("Identifier name must not be empty"); var i = 0; while (true) { var c = value.charAt(i); if (c >= "a" && c <= "z") return true; if (c != "_") return false; i++; if (i >= value.length) return true; } }
+	public static function isLowerIdent(value:String):Bool { if (value.length == 0) throw new core.ds.InvalidArgument("Identifier name must not be empty"); var i = 0; while (true) { var c = StringTools.fastCodeAt(value, i); if (c >= "a".code && c <= "z".code) return true; if (c != "_".code) return false; i++; if (i >= value.length) return true; } }
 	public static function isPostfix(op:Unop):Bool return switch op { case Increment | Decrement | Not: true; case Neg | NegBits | Spread: false; };
 	public static function punion(a:Pos, b:Pos):Pos return {pfile: a.pfile, pmin: a.pmin < b.pmin ? a.pmin : b.pmin, pmax: a.pmax > b.pmax ? a.pmax : b.pmax};
 	public static function punionEl(exprs:Array<Expr>):Pos { if (exprs.length == 0) return Globals.nullPos; var result = exprs[0].pos; for (i in 1...exprs.length) result = punion(result, exprs[i].pos); return result; }
@@ -385,7 +385,7 @@ class Ast {
   return {expr:EField(e,path.name,EFNormal),pos:p};
  }
  public static function hasMetaOption(metas:Metadata,meta:core.MetaList.StrictMeta,s:String):Bool {
-  for(entry in metas)if(core.Meta.has(meta,[entry]))for(e in entry.exprs)switch e.expr {
+  for(entry in metas)if(core.Meta.metaEq(meta,entry.meta))for(e in entry.exprs)switch e.expr {
    case EConst(Ident(s2)) if(s==s2):return true;
    case _:
   }

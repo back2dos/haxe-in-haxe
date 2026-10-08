@@ -140,14 +140,14 @@ class ParserEntry {
 		}
 		return {left:v1,right:v2};
 	}
-	public static function parse<T>(config:ParserConfiguration,entry:ParserContext->Stream<ParserToken>->T,lctx:LexerContext,code:Lexer,file:String):ParseResult<T> {
+	public static function parse<T>(config:ParserConfiguration,entry:ParserContext->Stream<syntax.Lexer.LexedToken>->T,lctx:LexerContext,code:Lexer,file:String):ParseResult<T> {
 		var defines=config.defines;
 		var ctx=Parser.createContext(lctx,config,Define.rawDefined(defines,"macro"),code);
 		var parseEntry=entry.bind(ctx);
 		Lexer.skipHeader(code);
 		function sharpError(s:String,p:Pos):Dynamic return Parser.error(Custom(core.StringError.stringError("#"+s,["#if","#elseif","#else","#end","#error","#line"],"Unknown token")),p);
 		var conds=new ConditionHandler(); var dbc=new DeadBlockCollector(conds);
-		var sraw=Stream.from(function(_) return Lexer.sharpToken(lctx,code));
+		var sraw=new Stream<syntax.Lexer.LexedToken>(function(_) return Lexer.sharpToken(lctx,code));
 		function preprocessorError(ppe:ParserPreprocessorError,pos:Pos,tk:ParserToken):ParserToken return Parser.syntaxError(ctx,PreprocessorError(ppe),sraw,tk,pos);
 		var nextToken:Void->ParserToken=null;
 		var processToken:ParserToken->ParserToken=null;
@@ -210,7 +210,7 @@ class ParserEntry {
 			case _:skipTokens(p,test);
 		};
 		skipTokens=function(p,test) return skipTokensLoop(p,test,Lexer.readToken(lctx,code));
-		var stream=Stream.from(function(_) { var token=nextToken(); ctx.cache.push(token); return token; });
+		var stream=new Stream<syntax.Lexer.LexedToken>(function(_) { var token=nextToken(); ctx.cache.push(token); return token; });
 		try {
 			var data=parseEntry(stream);
 			var next:ParserToken=stream.peek();
@@ -225,7 +225,7 @@ class ParserEntry {
 			var last:ParserToken=stream.peek(); if (last==null) last=Parser.lastToken(ctx,stream); return Parser.error(Unexpected(last.token),last.pos);
 		}
 	}
-	public static function parseString<T>(config:ParserConfiguration,entry:ParserContext->Stream<ParserToken>->T,s:String,p:Pos,error:String->Pos->ParseResult<T>,inlined:Bool):ParseResult<T> {
+	public static function parseString<T>(config:ParserConfiguration,entry:ParserContext->Stream<syntax.Lexer.LexedToken>->T,s:String,p:Pos,error:String->Pos->ParseResult<T>,inlined:Bool):ParseResult<T> {
 		var oldDisplay=DisplayPosition.displayPosition.get();
 		function restore():Void { if (!inlined) DisplayPosition.displayPosition.set(oldDisplay); }
 		var lctx=Lexer.createTempCtx(p.pfile);

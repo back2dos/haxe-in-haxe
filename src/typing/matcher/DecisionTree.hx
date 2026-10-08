@@ -89,10 +89,11 @@ class DecisionTree {
 	}
 	public static function equalDt(dt1:DecisionTreeData, dt2:DecisionTreeData):Bool return dt1.dtI == dt2.dtI;
 	public static function equalBindExpr(e1:TExpr, e2:TExpr):Bool return Texpr.equal(e1, e2);
-	static function all2<A>(f:A->A->Bool, a:Array<A>, b:Array<A>):Bool {
-		if (a.length != b.length) return false;
-		for (i in 0...a.length) if (!f(a[i], b[i])) return false;
-		return true;
+	// inline: see core.ds.List
+	static inline function all2<A>(f:A->A->Bool, a:Array<A>, b:Array<A>):Bool {
+		var r = a.length == b.length;
+		if (r) for (i in 0...a.length) if (!f(a[i], b[i])) { r = false; break; }
+		return r;
 	}
 	public static function equal(dt1:DecisionTreeKind, dt2:DecisionTreeKind):Bool return switch [dt1, dt2] {
 		case [Leaf(c1), Leaf(c2)]: c1 == c2;

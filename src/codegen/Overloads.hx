@@ -16,10 +16,11 @@ import core.TUnification.*;
 // haxe/src/codegen/overloads.ml
 // Haxe max-int retains the ordering of upstream Dynamic and implicit-cast penalties.
 class Overloads {
-	public static function allPairs<A>(f:A->A->Bool,a:Array<A>,b:Array<A>):Bool {
-		if(a.length!=b.length) return false;
-		for(i in 0...a.length) if(!f(a[i],b[i])) return false;
-		return true;
+	// inline: see core.ds.List
+	public static inline function allPairs<A>(f:A->A->Bool,a:Array<A>,b:Array<A>):Bool {
+		var r=a.length==b.length;
+		if(r) for(i in 0...a.length) if(!f(a[i],b[i])) {r=false;break;}
+		return r;
 	}
 	public static function sameOverloadArgs(t1:T,t2:T,f1:TClassField,f2:TClassField,?getVmtype:T->T):Bool {
 		var transform = getVmtype == null ? function(t) return t : getVmtype;
