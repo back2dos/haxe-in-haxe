@@ -1,5 +1,5 @@
 diff --git a/src/allocator.c b/src/allocator.c
-index e8ab99f..f9b1e16 100644
+index e8ab99f..7999564 100644
 --- a/src/allocator.c
 +++ b/src/allocator.c
 @@ -44,18 +44,18 @@ static inline unsigned int TRAILING_ZEROES( unsigned int x ) {
@@ -130,11 +130,19 @@ index e8ab99f..f9b1e16 100644
  }
  
 -static void *gc_alloc_fixed( int part, int kind, int max_count, int *count ) {
-+static void *gc_alloc_fixed( int part, int kind, int max_count, int *count, bool *zeroed ) {
++static void *gc_alloc_fixed( int part, int kind, int max_count, int *count, bool *zeroed, bool can_grow ) {
  	int pid = (part << PAGE_KIND_BITS) | kind;
  	gc_pheader *ph = gc_free_pages[pid];
  	gc_allocator_page_data *p = NULL;
-@@ -324,6 +394,8 @@ static void *gc_alloc_fixed( int part, int kind, int max_count, int *count ) {
+@@ -300,6 +370,7 @@ static void *gc_alloc_fixed( int part, int kind, int max_count, int *count ) {
+ 		ph = ph->next_page;
+ 	}
+ 	if( ph == NULL ) {
++		if( !can_grow ) return NULL;
+ 		ph = gc_allocator_new_page(pid, GC_SIZES[part], GC_PAGE_SIZE, kind, false);
+ 		p = &ph->alloc;
+ 		c = p->free.data;
+@@ -324,6 +395,8 @@ static void *gc_alloc_fixed( int part, int kind, int max_count, int *count ) {
  #	endif
  	gc_free_pages[pid] = ph;
  	*count = n;
@@ -143,12 +151,12 @@ index e8ab99f..f9b1e16 100644
  	return ptr;
  }
  
-@@ -408,7 +480,7 @@ static void *gc_allocator_alloc( int *size, int page_kind ) {
+@@ -408,7 +481,7 @@ static void *gc_allocator_alloc( int *size, int page_kind ) {
  		int part = (sz >> GC_ALIGN_BITS) - 1;
  		int count;
  		*size = GC_SIZES[part];
 -		return gc_alloc_fixed(part, page_kind, 1, &count);
-+		return gc_alloc_fixed(part, page_kind, 1, &count, NULL);
++		return gc_alloc_fixed(part, page_kind, 1, &count, NULL, true);
  	}
  	int p;
  	for(p=GC_FIXED_PARTS;p<GC_PARTITIONS;p++) {
@@ -167,7 +175,7 @@ index f332cf5..1844c29 100644
  	gc_freelist free;
  	unsigned char *sizes;
 diff --git a/src/gc.c b/src/gc.c
-index d338518..cb721bf 100644
+index d338518..ab78e4d 100644
 --- a/src/gc.c
 +++ b/src/gc.c
 @@ -191,6 +191,16 @@ static gc_pheader *gc_alloc_page( int size, int kind, int block_count );
@@ -196,7 +204,37 @@ index d338518..cb721bf 100644
  #	define GC_SLICE_SLOTS		(GC_FIXED_PARTS << PAGE_KIND_BITS)
  
  typedef struct {
-@@ -311,6 +321,14 @@ static void gc_global_lock( bool lock ) {
+@@ -210,8 +220,27 @@ typedef struct {
+ 	int gen;
+ } gc_slice;
+ 
+-static volatile int gc_slice_gen = 1;
+-HL_THREAD_STATIC_VAR gc_slice gc_slices[GC_SLICE_SLOTS];
++// Free runs taken ahead of time under the lock, used when the slice runs out:
++// after a collection free runs are short, and refilling each one under the
++// global lock is expensive.
++#	define GC_RUNQ			32
++#	define GC_RUNQ_BYTES		(32 << 10)
++typedef struct {
++	unsigned char *p;
++	int n;
++	bool zeroed;
++} gc_run;
++typedef struct {
++	int gen;
++	int pos;
++	int count;
++	gc_run runs[GC_RUNQ];
++} gc_runq;
++HL_THREAD_STATIC_VAR gc_runq gc_runqs[GC_SLICE_SLOTS];
++
++// not static: HL/C inlines the slice fast path (hlc.h, HLC_INLINE_ALLOC)
++volatile int gc_slice_gen = 1;
++HL_THREAD_VAR gc_slice gc_slices[GC_SLICE_SLOTS];
+ 
+ static int gc_slice_part( int size, int kind ) {
+ 	int sz = size + ((-size) & (GC_ALIGN - 1));
+@@ -311,6 +340,14 @@ static void gc_global_lock( bool lock ) {
  	if( lock ) {
  		if( !t )
  			hl_fatal("Can't lock GC in unregistered thread");
@@ -211,7 +249,7 @@ index d338518..cb721bf 100644
  		if( mt ) gc_save_context(t,&lock);
  		GC_MEMORY_BARRIER();
  		t->gc_blocking++;
-@@ -422,6 +440,8 @@ static void gc_stop_world( bool b ) {
+@@ -422,6 +459,8 @@ static void gc_stop_world( bool b ) {
  #	ifdef HL_THREADS
  	if( b ) {
  		int i;
@@ -220,7 +258,7 @@ index d338518..cb721bf 100644
  		gc_threads.stopping_world = true;
  		GC_MEMORY_BARRIER();
  		for(i=0;i<gc_threads.count;i++) {
-@@ -513,7 +533,9 @@ static gc_pheader *gc_alloc_page( int size, int kind, int block_count ) {
+@@ -513,7 +552,9 @@ static gc_pheader *gc_alloc_page( int size, int kind, int block_count ) {
  	p->page_id = PAGE_ID++;
  #	else
  	// prevent false positive to access invalid type
@@ -230,7 +268,7 @@ index d338518..cb721bf 100644
  #	endif
  	if( ((int_val)base) & ((1<<GC_MASK_BITS) - 1) )
  		hl_fatal("Page memory is not correctly aligned");
-@@ -560,10 +582,40 @@ static void gc_free_page( gc_pheader *ph, int block_count ) {
+@@ -560,10 +601,40 @@ static void gc_free_page( gc_pheader *ph, int block_count ) {
  
  static void gc_check_mark();
  
@@ -271,21 +309,69 @@ index d338518..cb721bf 100644
  	if( size == 0 )
  		return NULL;
  	if( size < 0 )
-@@ -630,8 +682,12 @@ void *hl_gc_alloc_gen( hl_type *t, int size, int flags ) {
+@@ -584,6 +655,21 @@ void *hl_gc_alloc_gen( hl_type *t, int size, int flags ) {
+ 					MZERO((char*)ptr+size,allocated-size);
+ 				return ptr;
+ 			}
++			gc_runq *q = &gc_runqs[(part << PAGE_KIND_BITS) | kind];
++			if( q->gen == gc_slice_gen && q->pos < q->count ) {
++				gc_run *r = &q->runs[q->pos++];
++				int bsize = GC_SIZES[part];
++				if( !r->zeroed ) MZERO(r->p, r->n * bsize);
++				// accounted when used, like a slice (approximate without the lock)
++				gc_stats.allocation_count += r->n;
++				gc_stats.total_requested += (int64)r->n * bsize;
++				gc_stats.total_allocated += (int64)r->n * bsize;
++				s->block_size = bsize;
++				s->cur = r->p + bsize;
++				s->end = r->p + r->n * bsize;
++				s->gen = gc_slice_gen;
++				return r->p;
++			}
+ 		}
+ 	}
+ #	endif
+@@ -630,8 +716,13 @@ void *hl_gc_alloc_gen( hl_type *t, int size, int flags ) {
  			int max = GC_SLICE_BYTES / bsize;
  			int n = 0;
  			unsigned char *slice;
 +			bool zeroed = false;
  			if( max < 4 ) max = 4;
 -			slice = (unsigned char*)gc_alloc_fixed(tpart, kind, max, &n);
-+			slice = (unsigned char*)gc_alloc_fixed(tpart, kind, max, &n, &zeroed);
++			slice = (unsigned char*)gc_alloc_fixed(tpart, kind, max, &n, &zeroed, true);
 +			// zero the rest of the slice once, so the fast path does not have to
-+			if( n > 1 && !zeroed ) MZERO(slice + bsize, (n - 1) * bsize);
-+			fresh = zeroed; // the first block too
++			// zero the whole slice once (the first block is returned below)
++			if( !zeroed ) MZERO(slice, n * bsize);
++			fresh = true;
  			gc_slice *s = &gc_slices[(tpart << PAGE_KIND_BITS) | kind];
  			s->block_size = bsize;
  			s->cur = slice + bsize;
-@@ -662,7 +718,9 @@ void *hl_gc_alloc_gen( hl_type *t, int size, int flags ) {
+@@ -644,6 +735,24 @@ void *hl_gc_alloc_gen( hl_type *t, int size, int flags ) {
+ 			gc_stats.allocation_count += n - 1;
+ 			gc_stats.total_requested += (int64)(n - 1) * bsize;
+ 			gc_stats.total_allocated += (int64)n * bsize;
++			if( n < max ) {
++				// short run: queue more existing free runs (no new pages)
++				gc_runq *q = &gc_runqs[(tpart << PAGE_KIND_BITS) | kind];
++				int total = n, qmax = GC_RUNQ_BYTES / bsize;
++				q->gen = gc_slice_gen;
++				q->pos = q->count = 0;
++				while( total < qmax && q->count < GC_RUNQ ) {
++					int n2 = 0;
++					bool z2 = false;
++					unsigned char *p2 = (unsigned char*)gc_alloc_fixed(tpart, kind, qmax - total, &n2, &z2, false);
++					if( p2 == NULL ) break;
++					gc_run *r = &q->runs[q->count++];
++					r->p = p2;
++					r->n = n2;
++					r->zeroed = z2;
++					total += n2;
++				}
++			}
+ 		} else
+ #		endif
+ 		{
+@@ -662,7 +771,9 @@ void *hl_gc_alloc_gen( hl_type *t, int size, int flags ) {
  #	ifdef GC_DEBUG
  	memset(ptr,0xCD,allocated);
  #	endif
@@ -296,7 +382,7 @@ index d338518..cb721bf 100644
  		MZERO(ptr,allocated);
  	else if( MEM_HAS_PTR(flags) && allocated != size )
  		MZERO((char*)ptr+size,allocated-size); // erase possible pointers after data
-@@ -1378,6 +1436,31 @@ static void *gc_alloc_page_memory( int size ) {
+@@ -1378,6 +1489,31 @@ static void *gc_alloc_page_memory( int size ) {
  #elif defined(HL_EMSCRIPTEN)
  	return emscripten_builtin_memalign(GC_PAGE_SIZE, size);
  #else
@@ -328,7 +414,7 @@ index d338518..cb721bf 100644
  	static int recursions = 0;
  	int i = 0;
  	while( gc_will_collide(base_addr,size) ) {
-@@ -1474,6 +1557,13 @@ vdynamic *hl_alloc_obj( hl_type *t ) {
+@@ -1474,6 +1610,13 @@ vdynamic *hl_alloc_obj( hl_type *t ) {
  	int i;
  	hl_runtime_obj *rt = t->obj->rt;
  	if( rt == NULL || rt->methods == NULL ) rt = hl_get_obj_proto(t);
@@ -342,6 +428,114 @@ index d338518..cb721bf 100644
  	if( t->kind == HSTRUCT ) {
  		o = (vobj*)hl_gc_alloc_gen(t, rt->size, (rt->hasPtr ? MEM_KIND_RAW : MEM_KIND_NOPTR) | MEM_ZERO);
  	} else {
+diff --git a/src/hlc.h b/src/hlc.h
+index 7def07d..29e5a59 100644
+--- a/src/hlc.h
++++ b/src/hlc.h
+@@ -108,4 +108,103 @@ extern void hl_entry_point();
+ #define __hl_prefetch_m4(addr)
+ #endif
+ 
++#if defined(HLC_BOOT) && defined(HL_THREADS) && defined(HL_64) && !defined(HLC_NO_INLINE_ALLOC)
++// Inline allocation fast path for generated code: bump the thread's slice
++// for the size class (same layout and rules as gc.c GC_SLICES), falling back
++// to the runtime call. Slices are zeroed when they are created.
++#define HLC_INLINE_ALLOC
++typedef struct {
++	unsigned char *cur;
++	unsigned char *end;
++	int block_size;
++	int gen;
++} hlc_gc_slice;
++extern HL_THREAD_VAR hlc_gc_slice gc_slices[];
++extern volatile int gc_slice_gen;
++
++static inline __attribute__((always_inline)) void *hlc_slice_alloc( int size, int kind ) {
++	int sz = (size + 7) & ~7;
++	if( sz == 0 || sz > 128 || (hl_track.flags & HL_TRACK_ALLOC) ) return NULL;
++	hlc_gc_slice *s = &gc_slices[(((sz >> 3) - 1) << 2) | kind];
++	if( s->gen != gc_slice_gen || s->cur >= s->end ) return NULL;
++	void *p = s->cur;
++	s->cur += s->block_size;
++	return p;
++}
++
++static inline __attribute__((always_inline)) vdynamic *hlc_alloc_obj( hl_type *t ) {
++	hl_runtime_obj *rt = t->obj->rt;
++	if( rt && rt->methods && rt->nbindings == 0 && t->kind != HSTRUCT ) {
++		vobj *o = (vobj*)hlc_slice_alloc(rt->size, rt->hasPtr ? MEM_KIND_DYNAMIC : MEM_KIND_NOPTR);
++		if( o ) { o->t = t; return (vdynamic*)o; }
++	}
++	return hl_alloc_obj(t);
++}
++
++static inline __attribute__((always_inline)) venum *hlc_alloc_enum( hl_type *t, int index ) {
++	hl_enum_construct *c = t->tenum->constructs + index;
++	venum *v = (venum*)hlc_slice_alloc(c->size, c->hasptr ? MEM_KIND_DYNAMIC : MEM_KIND_NOPTR);
++	if( v ) { v->t = t; v->index = index; return v; }
++	return hl_alloc_enum(t, index);
++}
++
++static inline __attribute__((always_inline)) vclosure *hlc_alloc_closure_ptr( hl_type *fullt, void *fvalue, void *v ) {
++	hl_type_fun *ft = fullt->fun;
++	if( ft->closure_type.kind == HFUN && hl_setup.closure_stack_capture == 0 ) {
++		vclosure *c = (vclosure*)hlc_slice_alloc(sizeof(vclosure), MEM_KIND_DYNAMIC);
++		if( c ) {
++			c->t = (hl_type*)&ft->closure_type;
++			c->fun = fvalue;
++			c->hasValue = 1;
++			c->stackCount = 0;
++			c->value = v;
++			return c;
++		}
++	}
++	return hl_alloc_closure_ptr(fullt, fvalue, v);
++}
++
++static inline __attribute__((always_inline)) varray *hlc_alloc_array( hl_type *at, int size ) {
++	// element sizes and pointer kinds as in std/types.c (T_SIZES, hl_is_ptr)
++	// size 0 Dynamic arrays share a static empty array (hl_alloc_array)
++	if( size >= 0 && size <= 16 && (size > 0 || at->kind != HDYN) ) {
++		int k = at->kind, esize;
++		bool ptr = k >= HBYTES && k <= HPACKED;
++		switch( k ) {
++		case HUI8: case HBOOL: esize = 1; break;
++		case HUI16: esize = 2; break;
++		case HI32: case HF32: esize = 4; break;
++		case HPACKED: esize = 0; break;
++		default: esize = 8; break;
++		}
++		varray *a = (varray*)hlc_slice_alloc((int)sizeof(varray) + esize * size, ptr ? MEM_KIND_DYNAMIC : MEM_KIND_NOPTR);
++		if( a ) { a->t = &hlt_array; a->at = at; a->size = size; return a; }
++	}
++	return hl_alloc_array(at, size);
++}
++
++static inline __attribute__((always_inline)) vvirtual *hlc_alloc_virtual( hl_type *t ) {
++	hl_type_virtual *vt = t->virt;
++	int i, nf = vt->nfields;
++	vvirtual *v = (vvirtual*)hlc_slice_alloc(vt->dataSize + (int)sizeof(vvirtual) + (int)sizeof(void*) * nf, MEM_KIND_DYNAMIC);
++	if( !v ) return hl_alloc_virtual(t);
++	void **fields = (void**)(v + 1);
++	v->t = t; // value, next and the data are already zero
++	for(i=0;i<nf;i++) fields[i] = (char*)v + vt->indexes[i];
++	return v;
++}
++
++static inline __attribute__((always_inline)) vbyte *hlc_alloc_bytes( int size ) {
++	vbyte *b = size > 0 ? (vbyte*)hlc_slice_alloc(size, MEM_KIND_NOPTR) : NULL;
++	return b ? b : hl_alloc_bytes(size);
++}
++
++#define hl_alloc_obj hlc_alloc_obj
++#define hl_alloc_enum hlc_alloc_enum
++#define hl_alloc_closure_ptr hlc_alloc_closure_ptr
++#define hl_alloc_array hlc_alloc_array
++#define hl_alloc_virtual hlc_alloc_virtual
++#define hl_alloc_bytes hlc_alloc_bytes
++#endif
++
+ #endif
 diff --git a/src/std/fun.c b/src/std/fun.c
 index ffe94cc..f5de95b 100644
 --- a/src/std/fun.c

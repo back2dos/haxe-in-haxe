@@ -147,6 +147,18 @@ In rough order of impact:
    the CRC-32 with a table instead of `haxe.crypto.Crc32`'s bitwise loop.
    `Lexer.token` went from 80M to 18M instructions on `stdlib`.
 
+12. **Inline allocation** (sixth round). `libhl-allocator.patch` adds an
+   allocation fast path to `hlc.h`: generated code allocates objects, enums,
+   closures, small arrays, virtuals and bytes by bumping the thread's slice
+   directly instead of calling into libhl (about 70 instructions per
+   allocation before). After a collection free runs are short, so a slice
+   refill now takes several runs under one lock and queues them. HL/C
+   `stdlib`: 2.25G → 1.90G instructions, 0.38s (reference 0.24s); with
+   collection disabled it is about 1.25× the reference in CPU time. What
+   remains is mostly memory management: the non-generational major
+   collections, zeroing reused memory, and first writes to fresh memory,
+   which OCaml's cache-resident minor heap avoids.
+
 Where the time went after the first round (HL/C, callgrind): libhl allocation and GC were about
 45% of the run. libhl takes a global lock and a TLS lookup on every
 allocation, which is far more expensive than OCaml's pointer bump. The rest is
