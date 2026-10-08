@@ -348,8 +348,11 @@ class VenumValue {
 	}
 }
 
+// Both run on host threads. `finished` is released when the thread's function returns;
+// the host has no Thread.join (deviation: upstream joins the OCaml thread/domain).
 enum VthreadMode {
-	Thread(t:sys.thread.Thread);
+	Thread(t:sys.thread.Thread, finished:sys.thread.Lock);
+	Domain(t:sys.thread.Thread, finished:sys.thread.Lock);
 }
 
 class Vthread {

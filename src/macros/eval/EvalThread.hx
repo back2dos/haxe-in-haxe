@@ -13,7 +13,7 @@ import macros.eval.EvalContext;
 	  `threadLock` (upstream: an `Atomic.t` and a `ThreadSafeHashtbl`).
 	- The debugger is not ported, so no thread events are sent and the eval's
 	  breakpoint is a fresh disabled one (evalDebugMisc.ml `make_breakpoint`).
-	- `spawn_domain` throws: OCaml domains are not supported by haxe-in-haxe.
+	- OCaml domains (`spawn_domain`) and threads both become host threads.
 **/
 class Deque {
 	public static function create():Vdeque return new Vdeque();
@@ -100,18 +100,23 @@ class EvalThread {
 		return tthread;
 	}
 
-	public static function spawnDomain(ctx:Context, f:Void->Value):Vthread {
-		return EvalContext.excString("Domains (Thread.createWithEventLoop on a domain) are not supported by haxe-in-haxe");
-	}
+	public static function spawnDomain(ctx:Context, f:Void->Value):Vthread return spawn(ctx, f, true);
 
-	public static function spawnThread(ctx:Context, f:Void->Value):Vthread {
+	public static function spawnThread(ctx:Context, f:Void->Value):Vthread return spawn(ctx, f, false);
+
+	static function spawn(ctx:Context, f:Void->Value, domain:Bool):Vthread {
 		var tthread = createThreadInfo(ctx, null);
 		var startSem = new sys.thread.Semaphore(0);
-		var thread = Thread(sys.thread.Thread.create(() -> {
+		var finished = new sys.thread.Lock();
+		var t = sys.thread.Thread.create(() -> {
 			startSem.acquire();
-			run(ctx, tthread, f);
-		}));
-		tthread.threadMode = thread;
+			try run(ctx, tthread, f) catch (e:Dynamic) {
+				finished.release();
+				throw e;
+			}
+			finished.release();
+		});
+		tthread.threadMode = domain ? Domain(t, finished) : Thread(t, finished);
 		startSem.release();
 		return tthread;
 	}

@@ -1552,8 +1552,11 @@ class StdThread {
 
 	public static final join = EvalEncode.vfun1(thread -> {
 		switch thisValue(thread).threadMode {
-			case _:
-				EvalContext.excString("Thread.join is not supported by haxe-in-haxe");
+			case Domain(_, finished) | Thread(_, finished):
+				// wait, then release again so that later joins return at once
+				finished.wait();
+				finished.release();
+			case null:
 		}
 		VNull;
 	});

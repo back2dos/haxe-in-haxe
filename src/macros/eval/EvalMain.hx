@@ -94,7 +94,7 @@ class EvalMain {
 		ctx.args = args;
 		for (k => v in fakeProtoCache)
 			ctx.fakeProtoCache.set(k, v);
-		var thread = EvalThread.createThreadInfo(ctx, Thread(sys.thread.Thread.current()));
+		var thread = EvalThread.createThreadInfo(ctx, Thread(sys.thread.Thread.current(), new sys.thread.Lock()));
 		var eval = EvalThread.createEval(thread);
 		ctx.evals.set(0, eval);
 		EvalContext.setEval(ctx, eval);

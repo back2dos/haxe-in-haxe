@@ -124,13 +124,18 @@ class Compiler {
   catch(e:core.Globals.InternalCompilerError){if(!Helper.isDebugRun)error(com,"Error: "+makeIceMessage(com,e.message,e.stack.toString()),nullPos);else throw e;}
   catch(e:Helper.HelpMessage)CompilerIo.writeOut(com.requestScope.io,e.message+"\n")
   catch(e:Abort)throw e
+  catch(e:macros.eval.EvalTypes.SysExit)throw e
   catch(e:Cancelled)throw e
   catch(e:Dynamic){if(Sys.getEnv("OCAMLRUNPARAM")!="b"&&!Helper.isDebugRun)error(com,StdTools.string(e),nullPos);else {Sys.stderr().writeString(haxe.CallStack.toString(@:privateAccess haxe.Exception.caught(e).stack)+"\n");throw e;}}
  }
  public static function compileSafe(com:CommonContext,f:Void->Void):Void {try compileSafeImpl(com,f) catch (_:Abort) {}}
  public static function finalize(com:CommonContext):Void {CompilerIo.flush(com.requestScope.io);for (lib in com.hxbLibs) lib.close();if (!com.sctx.isServer) {for (lib in (cast com.nativeLibs.javaLibs:Array<Dynamic>)) lib.close();for (lib in (cast com.nativeLibs.swfLibs:Array<Dynamic>)) lib.close();}}
  public static function catchCompletionAndExit(com:CommonContext,sctx:Dynamic,run:CommonContext->Void):Int {
-  run(com);return hasError(com)?1:0;
+  try {run(com);return hasError(com)?1:0;}
+  catch(e:macros.eval.EvalTypes.SysExit) {
+   if(e.code!=0)com.partScope.hasError=true;
+   ContextFlush.flushContext(com);finalize(com);return e.code;
+  }
  }
  public static function processActx(com:CommonContext,actx:ArgContext):Void {
   com.doinline=com.display.dmsInline&&!Common.defined(com,Define.NoInline);com.timerCtx.measureTimes=actx.measureTimes?Yes:No;

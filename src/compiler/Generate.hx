@@ -64,8 +64,32 @@ class Generate {
   var com:CommonContext=tctx.com;if (com.partScope.dumpConfig.dumpDependencies) {codegen.Dump.dumpDependencies(com);if (!com.isMacroContext&&tctx.g.macros!=null) codegen.Dump.dumpDependencies(tctx.g.macros.typer.com,"macro");}
  }
  // HXB output is emitted by the after-save callback before backend destruction.
+ // Interpretation (--interp, --run, the Eval target) runs on the port's Eval; the other
+ // code generators are not ported and fail explicitly.
  public static function generate(com:CommonContext,tctx:Dynamic,ext:String,actx:Dynamic):Void {
-  throw new Failure("Ordinary target execution/generation is outside the HXB milestone; use --no-output with --hxb");
+  if (Path.fileExtension(com.file)==ext) deleteFile(com.file);
+  if (com.platform==Flash||com.platform==Cpp||com.platform==Hl) for (t in com.types) codegen.FixOverrides.fixOverrides(com,t);
+  switch com.platform {
+   case Neko|Hl|Eval if (actx.interp):
+   case Cpp if (Common.defined(com,Define.Cppia)):
+   case Cpp|Php:Path.mkdirFromPath(com.file+"/.");
+   case _:Path.mkdirFromPath(com.file);
+  }
+  if (actx.interp) {
+   var timer=Timer.startTimer(com.timerCtx,["interp"]);
+   try typing.MacroContext.interpret(tctx,com.partScope.runtimeArgs) catch (e:Dynamic) {timer();throw e;}
+   timer();
+  } else {
+   var name=switch com.platform {
+    case Eval:"eval";
+    case Cross|CustomTarget(_):"";
+    case p:throw new Failure("Code generation for "+Globals.platformName(p)+" is not supported by haxe-in-haxe (HXB and --interp only)");
+   };
+   if (name!="") {
+    Common.log(com,"Generating "+name+": "+com.file);
+    Timer.time(com.timerCtx,["generate",name],function(_:Null<Bool>) {typing.MacroContext.interpret(tctx,[]);return null;},null);
+   }
+  }
  }
 }
 private class HxbOutputError extends haxe.Exception {}

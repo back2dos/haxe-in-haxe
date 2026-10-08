@@ -19,6 +19,22 @@ HL_STATIC="libhl.a fmt.o dxt.o sha1.o" sh bench/build.sh hlc   # static link
 LD_LIBRARY_PATH=/path/to/patched/hashlink HAXE_REFERENCE=haxe/haxe python3 bench/run.py -n 7
 ```
 
+## Results — 2026-10-08 (Eval vs. Eval vs. host)
+
+`bench/interp.py` runs small programs (`bench/interp/`) with `--interp` on
+the reference, on the port's HL/C and JIT builds, and natively on HashLink
+(compiled by the reference, compile time excluded). Outputs are identical.
+Median of 3 runs:
+
+| workload | reference Eval | port Eval (HL/C) | port Eval (HL JIT) | native HashLink |
+| --- | ---: | ---: | ---: | ---: |
+| Empty (startup) | 0.05s | 0.09s | 0.49s | 0.01s |
+| Fib (calls) | 0.33s | 0.92s | 3.17s | 0.02s |
+| NBody (float fields) | 0.63s | 0.98s | 2.65s | 0.02s |
+| Strings (Map, StringBuf) | 0.32s | 0.35s | 1.15s | 0.07s |
+| Objects (sort, closures) | 1.39s | 9.24s | 13.73s | 0.60s |
+| Json | 0.16s | 0.63s | 1.03s | 0.02s |
+
 ## Results — 2026-10-08 (macros, `self` workload)
 
 The port compiling its own source (`self` in `bench/run.py`: 229 files,

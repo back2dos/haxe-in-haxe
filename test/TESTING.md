@@ -2,6 +2,41 @@
 
 Earlier checkpoints are in the Git history of this file.
 
+## Execution: `--interp` and `--run` — 2026-10-08
+
+The port now executes programs on its own Eval (`Generate.generate` →
+`MacroContext.interpret`, as upstream). Other code generators are still
+missing and fail explicitly.
+
+```sh
+HAXE_REFERENCE=haxe/haxe python3 test/interp.py -j 4
+```
+
+`test/interp.py` runs every conformance case with both compilers.
+Direct/module cases get `--interp`, and hxml cases run when they execute. Each
+hxml case runs in a scratch copy of its directory. Exit code, stdout and stderr
+must be identical.
+
+| Result | Cases |
+| --- | ---: |
+| Identical exit code, stdout and stderr | 268 |
+| Differ | 4 |
+| Skipped (the hxml doesn't execute) | 76 |
+
+The known differences:
+- `process-nonexistent` (×2): spawning a missing command exits 127 under
+  OCaml's `Unix.create_process` and 1 under HashLink's process API (a host
+  runtime difference).
+- `eval-eventLoop-compile`: a race. A task scheduled with
+  `EventLoop.addTask` runs on a worker thread, and the point where its event
+  joins the main loop depends on thread timing. It passes in some runs.
+- One run showed "Null access .meta" on two small cases; it didn't reproduce
+  in later runs. The harness runs without `-D disable-parallelism`, so the
+  parallel filter paths are suspected.
+
+Eval threads (`Thread.create`, and domains used by `createWithEventLoop`) run
+on host threads, and `Thread.join` waits on a completion lock.
+
 ## Macro milestone: Eval macro runtime — 2026-10-08
 
 The port now runs macros (`--macro`, `@:build`, `macro` functions) in its own
