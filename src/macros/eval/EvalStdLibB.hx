@@ -1859,7 +1859,7 @@ class StdUncompress {
 		u.setFlushMode(StdCompress.hostFlushMode(flush));
 		var r = u.execute(src, spos, target, dpos);
 		if (target != dst) dst.blit(dpos, target, dpos, r.write);
-		return {finish: r.done, read: r.read, wrote: r.write};
+		return {zFinish: r.done, zRead: r.read, zWrote: r.write};
 	}
 
 	public static final close = EvalEncode.vifun0(vthis -> {
@@ -1882,8 +1882,8 @@ class StdUncompress {
 		var pos = 0;
 		while (true) {
 			var r = zlibInflate(zip, src, pos, src.length - pos, tmp, 0, bufsize, StdCompress.Z_SYNC_FLUSH);
-			buf.addBytes(tmp, 0, r.wrote);
-			if (!r.finish) pos = pos + r.read else break;
+			buf.addBytes(tmp, 0, r.zWrote);
+			if (!r.zFinish) pos = pos + r.zRead else break;
 		}
 		EvalEncode.encodeBytes(buf.getBytes());
 	});

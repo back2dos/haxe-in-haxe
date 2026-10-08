@@ -12,7 +12,7 @@ import core.DisplayTypes.DisplayModeValue;
 import core.Message.CompilerMessage;
 import core.Message.MessageSeverity;
 import core.Meta;
-import core.MetaList;
+import core.MetaList.MetaParameter;
 import core.DefineRegistry.DefineParameter;
 import core.ds.AtomicLazy;
 import core.ds.NotFound;
@@ -356,8 +356,8 @@ class MacroApiImpl {
 
 	static inline function valueToExpr(v:Value, p:Pos):Expr return macros.eval.EvalMain.valueToExpr(v, p);
 
-	// `Digest.t` (the raw MD5 digest)
-	static inline function valueSignature(v:Value):haxe.io.Bytes return macros.eval.EvalMain.valueSignature(v);
+	// Deviation: returns `Digest.to_hex` of upstream's raw digest (see EvalMain)
+	static inline function valueSignature(v:Value):String return macros.eval.EvalMain.valueSignature(v);
 
 	static inline function encodeBytes(b:haxe.io.Bytes):Value return macros.eval.EvalEncode.encodeBytes(b);
 
@@ -1809,7 +1809,7 @@ class MacroApiImpl {
 					{tag: 17, pl: [loop(econd), v1, vflag]};
 				case TSwitch(sw):
 					var switchSubject = if (sw.switchExhaustive) {
-						var meta:MetadataEntry = {meta: Exhaustive, exprs: [], pos: Globals.nullPos};
+						var meta:MetadataEntry = {meta: core.MetaList.StrictMeta.Exhaustive, exprs: [], pos: Globals.nullPos};
 						new TExpr(TMeta(meta, sw.switchSubject), sw.switchSubject.etype, sw.switchSubject.epos);
 					} else {
 						sw.switchSubject;
@@ -1996,7 +1996,7 @@ class MacroApiImpl {
 				function isExhaustive(e1:TExpr, def:Null<TExpr>):Bool {
 					function loop(e1:TExpr):Bool {
 						return switch e1.eexpr {
-							case TMeta({meta: Exhaustive}, _): true;
+							case TMeta(m, _) if (Meta.metaEq(core.MetaList.StrictMeta.Exhaustive, m.meta)): true;
 							case TMeta(_, e1) | TParenthesis(e1): loop(e1);
 							case _: false;
 						}
@@ -2419,7 +2419,7 @@ class MacroApiImpl {
 			})},
 			{name: "signature", value: vfun1(v -> {
 				try {
-					encodeString(valueSignature(v).toHex());
+					encodeString(valueSignature(v));
 				} catch (e:core.ds.InvalidArgument) {
 					getApi().excString(e.message);
 				}
@@ -2497,7 +2497,7 @@ class MacroApiImpl {
 				var flags = if (platforms.length == 0) flags else [MetaParameter.Platforms(platforms)].concat(flags);
 
 				var targets = decodeOptArray(decodeString, field(m, "targets"));
-				var flags = if (targets.length == 0) flags else [MetaParameter.UsedOn(targets.map(MetaList.parseMetaUsage))].concat(flags);
+				var flags = if (targets.length == 0) flags else [MetaParameter.UsedOn(targets.map(core.MetaList.MetaList.parseMetaUsage))].concat(flags);
 
 				var params = decodeOptArray(decodeString, field(m, "params"));
 				var flags = flags.concat(params.map(p -> MetaParameter.HasParam(p)));
@@ -2597,7 +2597,7 @@ class MacroApiImpl {
 								case null: t;
 								case t: t;
 							}
-						case TAbstract(a, tl) if (!Meta.has(CoreType, a.aMeta)):
+						case TAbstract(a, tl) if (!Meta.has(core.MetaList.StrictMeta.CoreType, a.aMeta)):
 							core.Abstract.getUnderlyingType(a, tl);
 						case TAbstract(_) | TEnum(_) | TInst(_) | TFun(_) | TAnon(_) | TDynamic(_):
 							t;
