@@ -265,7 +265,7 @@ class Cleanup {
    case TIf(e1,e2,e3) if (e3 != null):var e1 = loop(e1); var e2 = loop(e2); var e3 = loop(e3); ifOrOp(e,e1,e2,e3);
    case TUnop(Increment | Decrement,_,e1) if (switch Texpr.skip(e1).eexpr {case TConst(_):true; case _:false;}):loop(e1);
    case TCall({eexpr:TIdent(s)},_) if (AnalyzerTexpr.isReallyUnbound(s)):e;
-   case TBlock(el):withExpr(e,TBlock(el.map(e -> {var e = loop(e); return switch e.eexpr {case TIf(_,_,_):{eexpr:e.eexpr,etype:scom.basic.tvoid,epos:e.epos}; case _:e;};})));
+   case TBlock(el):withExpr(e,TBlock(el.map(e -> {var e = loop(e); return switch e.eexpr {case TIf(_,_,_):({eexpr:e.eexpr,etype:(scom.basic.tvoid:T),epos:e.epos}:TExpr); case _:e;};})));
    case TWhile(e1,e2,NormalWhile):
     var e1 = loop(e1); var e2 = loop(e2); function hasContinue(e:TExpr):Bool return switch e.eexpr {case TContinue:true; case _:checkExpr(hasContinue,e);}; var continues = hasContinue(e2);
     switch e2.eexpr {

@@ -106,7 +106,7 @@ class Calls {
       for(mt in m.mTypes) switch mt {case TClassDecl(c) if(c.clPath==path):c2=c; break; case _:}
       if(c2==null) {c2=mkClass(m,path,c.clPos,Globals.nullPos); m.mTypes.unshift(TClassDecl(c2));}
       var wrapper:TClassField=c2.clStatics.get(cf.cfName);
-      if(wrapper==null) {wrapper=Reflect.copy(cf); wrapper.cfKind=Method(MethNormal); c2.clStatics.set(wrapper.cfName,wrapper); c2.clOrderedStatics.unshift(wrapper);}
+      if(wrapper==null) {wrapper=core.ds.Record.copy(cf); wrapper.cfKind=Method(MethNormal); c2.clStatics.set(wrapper.cfName,wrapper); c2.clOrderedStatics.unshift(wrapper);}
       var et=TyperBase.typeModuleType(ctx,TClassDecl(c2),p);
       return FieldAccess.getFieldExpr(FieldAccess.create(et,wrapper,FHStatic(c2),true,p),FRead);
      }

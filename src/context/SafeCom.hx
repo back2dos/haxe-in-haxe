@@ -117,11 +117,11 @@ class SafeCom {
 		switch t {
 			case TClassDecl(c) if (FilterContext.isRemovableClass(c)):
 			case TClassDecl(c):
-				var local:SafeContext = Reflect.copy(scom);
+				var local:SafeContext = core.ds.Record.copy(scom);
 				local.curclass = c;
 				function processField(cf:TClassField):Void {
 					if (ignoreProcessedStatus || !TypeOps.hasClassFieldFlag(cf,CfPostProcessed)) {
-						var fieldContext:SafeContext = Reflect.copy(local);
+						var fieldContext:SafeContext = core.ds.Record.copy(local);
 						fieldContext.curfield = cf;
 						if (cf.cfExpr != null && !FilterContext.isRemovableField(fieldContext.isMacroContext,cf))
 							cf.cfExpr = run(fieldContext,Globals.sTypePath(c.clPath)+"."+cf.cfName,cf.cfExpr);
@@ -137,7 +137,7 @@ class SafeCom {
 		}
 	}
 	public static function adaptScomToMt(scom:SafeContext, mt:ModuleType):SafeContext return switch mt {
-		case TClassDecl(c): var out:SafeContext = Reflect.copy(scom); out.curclass = c; out;
+		case TClassDecl(c): var out:SafeContext = core.ds.Record.copy(scom); out.curclass = c; out;
 		case _: scom;
 	};
 	public static function runTypeFiltersSafe(scom:SafeContext, filters:Array<SafeContext->ModuleType->Void>, types:Array<ModuleType>):Void {

@@ -15,7 +15,7 @@ class Abstract {
 	public static function findCastField<V>(uctx:Dynamic,find:Dynamic->Null<V>):V {
 		var found:Null<V>;
 		try {
-			var context = Reflect.copy(uctx);
+			var context = core.ds.Record.copy(uctx);
 			context.allowTransitiveCast = false;
 			found = find(context);
 		} catch (_:NotFound) { found = find(uctx); }

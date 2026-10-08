@@ -38,7 +38,7 @@ class AddFieldInits {
 				cf = TypeOps.mkField("new", ct, c.clPos, Globals.nullPos);
 				cf.cfKind = Method(MethNormal); cf.cfExpr = ce;
 			} else {
-				cf = Reflect.copy(c.clConstructor);
+				cf = core.ds.Record.copy(c.clConstructor);
 				switch cf.cfExpr {
 					case {eexpr:TFunction(f)}:
 						var bl = switch f.tfExpr.eexpr { case TBlock(b): b; case _: [f.tfExpr]; };

@@ -89,7 +89,7 @@ class SaveStacks {
 	}
 	public static function patchConstructors(ectx:Null<ExceptionContext>, scom:Dynamic):ModuleType->Void {
 		if (ectx == null) return function(_) {};
-		var ctx:ExceptionContext = Reflect.copy(ectx); ctx.scom = scom;
+		var ctx:ExceptionContext = core.ds.Record.copy(ectx); ctx.scom = scom;
 		return patchConstructorsContext(ctx);
 	}
 }

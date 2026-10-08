@@ -49,7 +49,7 @@ class CallUnification {
   if(callFieldP==null) callFieldP=callp;
   function callError(err:core.Error.CallError,p:Pos):Dynamic return raiseErrorMsg(CallError(err),p);
   function argError(e:CompilerError,name:String,opt:Bool):Dynamic {
-   var msg="For "+(opt?"optional ":"")+"function argument '"+name+"'",copy=Reflect.copy(e);
+   var msg="For "+(opt?"optional ":"")+"function argument '"+name+"'",copy=core.ds.Record.copy(e);
    switch e.errMessage {case Unify(l):copy.errMessage=Unify(l.concat([UnifyCustom(msg)])); case _:copy.errSub=[makeError(Custom(complMsg(msg)),e.errPos)].concat(e.errSub);}
    copy.errMessage=CallError(CouldNotUnify(copy.errMessage)); return raiseError(copy);
   }
@@ -100,7 +100,7 @@ class CallUnification {
    }
    if(el.length==0) {
     var arg=args[0],tail=args.slice(1);
-    if(!arg.optional) {var tailP=Reflect.copy(callp); tailP.pmin=callFieldP.pmin; return callError(NotEnoughArguments(args),tailP);}
+    if(!arg.optional) {var tailP=core.ds.Record.copy(callp); tailP.pmin=callFieldP.pmin; return callError(NotEnoughArguments(args),tailP);}
     var rest=loop([],tail);
     if(!ctx.allowTransform) return [];
     if(rest.length==0&&!(isInline&&(ctx.com.doinline||forceInline))&&!ctx.com.config.pfPadNulls) return isPosInfos(arg.type)?[posInfos(arg.type)]:[];
@@ -141,7 +141,7 @@ class CallUnification {
   for(i in 0...typed.length) {
    if(i>=args.length) raiseErrorMsg(CallError(TooManyArguments),callPos);
    var e=typed[i],arg=args[i];
-   try unifyRaise(tmap(e.etype),arg.type,e.epos) catch(exc:Dynamic) {switch exc {case (core.ds.ExceptionTools.typing(_) => Some(err)):switch err.errMessage {case Unify(_):var copy=Reflect.copy(err); copy.errMessage=CallError(CouldNotUnify(err.errMessage)); raiseError(copy); case _:throw exc;} case _:throw exc;}}
+   try unifyRaise(tmap(e.etype),arg.type,e.epos) catch(exc:Dynamic) {switch exc {case (core.ds.ExceptionTools.typing(_) => Some(err)):switch err.errMessage {case Unify(_):var copy=core.ds.Record.copy(err); copy.errMessage=CallError(CouldNotUnify(err.errMessage)); raiseError(copy); case _:throw exc;} case _:throw exc;}}
    consumed.push(arg); tmap=t -> t;
   }
   return {typed:consumed,remaining:args.slice(typed.length)};
@@ -188,7 +188,7 @@ class CallUnification {
     case Coro({args:args,ret:ret}) if(!TyperManager.isCoroutineContext(ctx)):
      var expanded=expandCoroType(ctx.com.basic,args,ret); ensureCoroAvailability(ctx.com); var fcc=make(expanded.args,expanded.ret,false);
      if(fcc.fcArgs.length==0) raiseTypingError("Unexpected overload candidate without arguments for coroutine call",p);
-     var cont=fcc.fcArgs[0],original=fcc.fcData.call,copy=Reflect.copy(fcc); copy.fcData={call:function() return wrapWithResolveTo(ctx.com,original(),cont,p),display:fcc.fcData.display}; copy;
+     var cont=fcc.fcArgs[0],original=fcc.fcData.call,copy=core.ds.Record.copy(fcc); copy.fcData={call:function() return wrapWithResolveTo(ctx.com,original(),cont,p),display:fcc.fcData.display}; copy;
     case Coro({args:args,ret:ret}):make(args,ret,true);
     case NotCoro(TFun({args:args,ret:ret})):make(args,ret,false);
     case NotCoro(t):raiseTypingError(sType(printContext(),t)+" cannot be called",p);

@@ -4,6 +4,17 @@ import haxe.macro.Expr;
 
 /** OCaml record updates are shallow copies, retaining every unchanged field. */
 class Record {
+	/**
+		Shallow copy. Records that became classes (for direct field access on
+		static targets) are cloned with their class; Reflect.copy would return
+		an anonymous object (JS, C++) or null (JVM).
+	**/
+	public static function copy<T>(o:T):T {
+		#if !macro
+		if (o is core.TType.TExpr) return cast (cast o : core.TType.TExpr).clone();
+		#end
+		return Reflect.copy(o);
+	}
 	#if macro
 	static var nextId = 0;
 	#end
@@ -14,7 +25,7 @@ class Record {
 		};
 		var name="__hihRecordUpdate"+(nextId++);
 		var ref:Expr={expr:EConst(CIdent(name)),pos:record.pos};
-		var result:Array<Expr>=[{expr:EVars([{name:name,expr:macro Reflect.copy($record)}]),pos:record.pos}];
+		var result:Array<Expr>=[{expr:EVars([{name:name,expr:macro core.ds.Record.copy($record)}]),pos:record.pos}];
 		for(field in fields) result.push({expr:EBinop(OpAssign,{expr:EField(ref,field.field),pos:field.expr.pos},field.expr),pos:field.expr.pos});
 		result.push(ref);
 		return {expr:EBlock(result),pos:record.pos};

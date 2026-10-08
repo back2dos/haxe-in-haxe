@@ -29,7 +29,7 @@ class ContinuationClassBuilder {
   var path=ctx.typer.c.curclass.clPath;var mangled='HxCoro_${path.pack.join("_")}_${path.name}';var name:String;var result:T;
   switch ctx.coroType {case ClassField(_,cf,tf,_):name=mangled+"_"+cf.cfName;result=tf.tfType;case LocalFunc(tf,v):var id=Coro.nextClosureId.get(mangled);if(id==null)id=0;Coro.nextClosureId.set(mangled,id+1);name=mangled+'_AnonFunc$id';result=tf.tfType;}
   var p=ctx.classNamePos;if(ExtType.isVoid(follow(result)))result=ctx.typer.t.tunit;var mod=ctx.typer.m.curmod;var cp={pack:mod.mPath.pack.concat(["_"+mod.mPath.name]),name:name};var cls=mkClass(mod,cp,p,p);
-  var outside:TypeParams=ctx.typer.typeParams;var inside=outside.map(function(ttp){var c={var recordCopy5 = Reflect.copy(ttp.ttpClass); recordCopy5.clPath = {pack:[],name:ttp.ttpName}; recordCopy5;};var constraints=ttp.ttpConstraints==null?null:AtomicLazy.fromFun(function()return (ttp.ttpConstraints).force().map(function(t)return t));return mkTypeParam(c,TPHType,ttp.ttpDefault,constraints);});cls.clParams=inside;
+  var outside:TypeParams=ctx.typer.typeParams;var inside=outside.map(function(ttp){var c={var recordCopy5 = core.ds.Record.copy(ttp.ttpClass); recordCopy5.clPath = {pack:[],name:ttp.ttpName}; recordCopy5;};var constraints=ttp.ttpConstraints==null?null:AtomicLazy.fromFun(function()return (ttp.ttpConstraints).force().map(function(t)return t));return mkTypeParam(c,TPHType,ttp.ttpDefault,constraints);});cls.clParams=inside;
   var api:ContinuationApi=ctx.typer.g.continuationApi;if(api==null)api=CoroInit.makeContinuationApi(ctx.typer);
   var pi=extractParamTypes(inside);var po=extractParamTypes(outside);var subst=[for(i in 0...outside.length){param:outside[i],t:pi[i]}];var ri=Coro.substituteTypeParams(subst,result);cls.clSuper={cls:api.baseContinuationClass,params:[ri]};
   return {cls:cls,namePos:p,inside:{params:inside,paramTypes:pi,clsT:TInst(cls,pi),resultType:ri,contType:TInst(api.baseContinuationClass,[ri])},outside:{params:outside,paramTypes:po,clsT:TInst(cls,po),resultType:result,contType:TInst(api.baseContinuationClass,[result])},typeParamSubst:subst,coroType:ctx.coroType,continuationApi:api};
@@ -47,7 +47,7 @@ class ContinuationClassBuilder {
  public static function mkInvokeResumeWithBody(ctx:CoroCtx,cc:CoroClass,vcontinuation:TVar,vtmpResult:AtomicLazy<TVar>,vtmpError:TVar,vtmpErrorUnwrapped:AtomicLazy<TVar>,eresult:TExpr,eloop:TExpr):TClassField {
   var basic:BasicTypes=ctx.typer.t;var b=ctx.builder;var p=cc.namePos;var ret=TInst((basic.tcoro.suspensionResultClass).force(),[cc.inside.resultType]);var ethis=b.makeThis(cc.inside.clsT,p);
   function subst(t:T):T return Coro.substituteTypeParams(cc.typeParamSubst,t);var vars:Map<Int,TVar>=[];
-  function mapVar(v:TVar):TVar {var n=vars.get(v.vId);if(n==null){n={var recordCopy4 = Reflect.copy(v); recordCopy4.vType = subst(v.vType); recordCopy4;};vars.set(v.vId,n);}return n;}
+  function mapVar(v:TVar):TVar {var n=vars.get(v.vId);if(n==null){n={var recordCopy4 = core.ds.Record.copy(v); recordCopy4.vType = subst(v.vType); recordCopy4;};vars.set(v.vId,n);}return n;}
   function mapLoop(e:TExpr):TExpr return Texpr.mapExprType(mapLoop,subst,mapVar,e);
   var el=[b.varInit(vcontinuation,ethis)];if((vtmpResult).isVal())el.push(b.varInit((vtmpResult).force(),eresult));el.push(b.varInitNull(vtmpError));if((vtmpErrorUnwrapped).isVal())el.push(b.varInitNull((vtmpErrorUnwrapped).force()));el.push(eloop);
   var expr=mk(TFunction({tfType:ret,tfArgs:[],tfExpr:mapLoop(b.voidBlock(el))}),basic.tvoid,p);var field=mkField("invokeResume",TFun({args:[],ret:ret}),p,p);addClassFieldFlag(field,CfOverride);field.cfExpr=expr;field.cfKind=Method(MethNormal);if(ctx.config.debug)Sys.println(core.TPrinting.sExprDebug(expr));return field;
@@ -90,10 +90,10 @@ class Coro {
   function helper(superExpr:TExpr,superCl:TClass,superCf:TClassField,p:Pos):TClassField {
    var name="_hx_super_"+superCf.cfName;var cf=curclass.clFields.get(name);if(cf!=null)return cf;cf=mkField(name,superCf.cfType,p,p);cf.cfKind=Method(MethNormal);
    var expanded=switch followWithCoro(superCf.cfType){case Coro({args:args,ret:ret}):Common.expandCoroType(basic,args,ret);case NotCoro(_):throw "super helper: expected Coro type";};
-   var vars=[for(a in expanded.args)allocVar(VGenerated,a.name,a.type,p)];var ecall=mk(TCall({var recordCopy3 = Reflect.copy(superExpr); recordCopy3.etype = TFun({args:expanded.args,ret:expanded.ret}); recordCopy3;},vars.map(function(v)return b.local(v,p))),expanded.ret,p);
+   var vars=[for(a in expanded.args)allocVar(VGenerated,a.name,a.type,p)];var ecall=mk(TCall({var recordCopy3 = core.ds.Record.copy(superExpr); recordCopy3.etype = TFun({args:expanded.args,ret:expanded.ret}); recordCopy3;},vars.map(function(v)return b.local(v,p))),expanded.ret,p);
    cf.cfExpr=mk(TFunction({tfArgs:vars.map(function(v)return {variable:v,defaultValue:null}),tfType:expanded.ret,tfExpr:mk(TReturn(ecall),tDynamic,p)}),superCf.cfType,p);core.TOther.TClassTools.addField(curclass,cf);return cf;
   }
-  return switch e.eexpr {case TField(esuper={eexpr:TConst(TSuper)},fa=FInstance(sc,_,cf)):var sf={eexpr:TField(esuper,fa),etype:cf.cfType,epos:e.epos};var h=helper(sf,sc,cf,e.epos);{var recordCopy2 = Reflect.copy(e); recordCopy2.eexpr = TField(egthis,FInstance(curclass,params,h)); recordCopy2;};case _:e;};
+  return switch e.eexpr {case TField(esuper={eexpr:TConst(TSuper)},fa=FInstance(sc,_,cf)):var sf:TExpr={eexpr:TField(esuper,fa),etype:cf.cfType,epos:e.epos};var h=helper(sf,sc,cf,e.epos);{var recordCopy2 = core.ds.Record.copy(e); recordCopy2.eexpr = TField(egthis,FInstance(curclass,params,h)); recordCopy2;};case _:e;};
  }
  public static function makeDeferredApi(ctx:CoroCtx,b:TexprBuilder):{deferred:CoroDeferredApi,install:CoroDeferredApi->Void} {
   function makeDeferred(build:Void->TExpr,t:T):TExpr {var v=allocVar(VGenerated,"_hx_coro_deferred",tDynamic,nullPos);ctx.deferredExprs.set(v.vId,build);return b.call(b.local(v,v.vPos),[],t);}
@@ -131,7 +131,7 @@ class Coro {
    makeInlineReturn:function(e,pos){var stmts=ctx.numStates==1?[]:[b.assign(egoto,b.int(-1,pos))];stmts.push(b.assign(estate,b.int(CoroReturned,pos)));if(e!=null)stmts.push(b.assign(eresult,e));stmts.push(b.makeReturn(econtinuation));return mk(TBlock(stmts),tDynamic,pos);},
    makeInlineTailCall:function(call){var r=SuspensionCalls.makeSuspendingTailCall(ctx,cont,exprs,call);return b.voidBlock([stack(call.csPos),r.call,r.check]);},
    makeSyncCall:function(call,e){var r=SuspensionCalls.makeSyncCallAndCheck(ctx,cont,exprs,call,e);return b.voidBlock([stack(call.csPos),r.call,r.check]);},
-   makeThis:function(e){var th=(egthis).force();return {var recordCopy1 = Reflect.copy(e); recordCopy1.eexpr = th.eexpr;recordCopy1.etype = th.etype; recordCopy1;};},
+   makeThis:function(e){var th=(egthis).force();return {var recordCopy1 = core.ds.Record.copy(e); recordCopy1.eexpr = th.eexpr;recordCopy1.etype = th.etype; recordCopy1;};},
    makeSuperField:function(e)return rewriteSuperField(ctx,(egthis).force(),e)
   });
   var startException:TExpr->TExpr;if(!ctx.typer.com.debug)startException=function(e)return e;else{var cf=PMap.find("startException",cont.baseContinuationClass.clFields);var ef=continuationField(cf,cf.cfType);startException=function(e)return mk(TCall(ef,[e]),basic.texception,p);}

@@ -223,7 +223,7 @@ class Texpr {
  public static function buildMetadata(api:Dynamic,t:ModuleType):Null<TExpr> {
   var p:Pos; var meta:Array<{name:String,meta:Metadata}>; var fields:Array<{name:String,meta:Metadata}>; var statics:Array<{name:String,meta:Metadata}>;
   switch t {
-   case TClassDecl(c):var fs = c.clOrderedFields.copy(); if (c.clConstructor != null) {var cf = Reflect.copy(c.clConstructor); cf.cfName = "_"; fs.push(cf);} p = c.clPos; meta = [{name:"",meta:c.clMeta}]; fields = fs.map(f -> {name:f.cfName,meta:f.cfMeta}); statics = c.clOrderedStatics.map(f -> {name:f.cfName,meta:f.cfMeta});
+   case TClassDecl(c):var fs = c.clOrderedFields.copy(); if (c.clConstructor != null) {var cf = core.ds.Record.copy(c.clConstructor); cf.cfName = "_"; fs.push(cf);} p = c.clPos; meta = [{name:"",meta:c.clMeta}]; fields = fs.map(f -> {name:f.cfName,meta:f.cfMeta}); statics = c.clOrderedStatics.map(f -> {name:f.cfName,meta:f.cfMeta});
    case TEnumDecl(e):p = e.ePos; meta = [{name:"",meta:e.eMeta}]; fields = e.eNames.map(n -> {name:n,meta:e.eConstrs.get(n).efMeta}); statics = [];
    case TTypeDecl(d):p = d.tPos; meta = [{name:"",meta:d.tMeta}]; fields = []; switch follow(d.tType) {case TAnon(a):var keys = [for (k in a.aFields.keys()) k]; keys.sort(Reflect.compare); for (k in keys) {var f = a.aFields.get(k); fields.unshift({name:f.cfName,meta:f.cfMeta});} case _:} statics = [];
    case TAbstractDecl(a):p = a.aPos; meta = [{name:"",meta:a.aMeta}]; fields = []; statics = [];

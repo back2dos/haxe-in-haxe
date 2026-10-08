@@ -134,7 +134,7 @@ class Fields {
     var access=isSet?v.vWrite:v.vRead;
     switch access {
      case AccNo if(!Meta.has(MetaTag.PrivateAccess,ctx.f.meta)):
-      var privateField:TClassField=Reflect.copy(f); removeClassFieldFlag(privateField,CfPublic);
+      var privateField:TClassField=core.ds.Record.copy(f); removeClassFieldFlag(privateField,CfPublic);
       switch follow(e.etype) {
        case TInst(c,_) if(extendsClass(ctx.c.curclass,c)||canAccess(ctx,c,privateField,false)):normal(false);
        case TAnon(a):switch a.aStatus {case ClassStatics(c) if(ctx.c.curclass==c||canAccess(ctx,c,privateField,true)):normal(false); case _:ctx.f.isUntyped?normal(false):failure();}
@@ -205,7 +205,7 @@ class Fields {
     function makeField():TClassField {var f=mkField(i,spawnMonomorph(ctx,p),p,Globals.nullPos); f.cfKind=Var({vRead:AccNormal,vWrite:isSet?AccNormal:AccNo}); return f;}
     function checkConstraint(constr:TMonoConstraintKind):AccessKind return switch constr {
      case CStructural(fields,isOpen):
-      try {var f=some(fields.get(i)); switch f.cfKind {case Var(acc) if(acc.vWrite==AccNo&&isOpen&&isSet):var copy=Reflect.copy(acc); copy.vWrite=AccNormal; f.cfKind=Var(copy); case _:} access(e,f,FHAnon);}
+      try {var f=some(fields.get(i)); switch f.cfKind {case Var(acc) if(acc.vWrite==AccNo&&isOpen&&isSet):var copy=core.ds.Record.copy(acc); copy.vWrite=AccNormal; f.cfKind=Var(copy); case _:} access(e,f,FHAnon);}
       catch(err:Dynamic) {if(!Std.isOfType(err,NotFound)||!isOpen||!cfg.allowOpenMono) throw err; var f=makeField(); Monomorph.addDownConstraint(r,MField(f)); access(e,f,FHAnon);}
      case CTypes(tl):byList(pair -> byET(byType,e,pair.type),tl);
      case CUnknown if(!cfg.allowOpenMono):throw NotFound.raise();
@@ -333,7 +333,7 @@ class Fields {
   }
   var fields=new haxe.ds.StringMap<TClassField>();
   if(args!=null) for(arg in args) {var cf=mkField(arg.name,arg.type,arg.pos,arg.pos); if(arg.optional) cf.cfMeta=[{meta:MetaTag.Optional,exprs:[],pos:Globals.nullPos}]; cf.cfDoc=docFromStringOpt(arg.doc); fields.set(cf.cfName,cf);}
-  else for(cf in c.clFields) switch cf.cfKind {case Var(_):var copy:TClassField=Reflect.copy(cf); copy.cfType=applyParams(c.clParams,tl,cf.cfType); fields.set(copy.cfName,copy); case _:}
+  else for(cf in c.clFields) switch cf.cfKind {case Var(_):var copy:TClassField=core.ds.Record.copy(cf); copy.cfType=applyParams(c.clParams,tl,cf.cfType); fields.set(copy.cfName,copy); case _:}
   return fields;
  }
 }

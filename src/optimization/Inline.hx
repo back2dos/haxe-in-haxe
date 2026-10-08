@@ -220,7 +220,7 @@ class InlineState {
    case TUnop(op = Increment | Decrement,flag,e1):withExpr(e,TUnop(op,flag,inlineParams(false,true,e1)));
    case _:mapExpr(e -> inlineParams(false,false,e),e);
   };
-  if (subst.iterator().hasNext()) e = inlineParams(false,false,e); var md = scom.curclass.clModule.mExtra.mDisplay; var endPos:Pos = Reflect.copy(p); endPos.pmax = p.pmin + cf.cfName.length; md.mInlineCalls.unshift({definitionPos:cf.cfNamePos,callPos:endPos});
+  if (subst.iterator().hasNext()) e = inlineParams(false,false,e); var md = scom.curclass.clModule.mExtra.mDisplay; var endPos:Pos = core.ds.Record.copy(p); endPos.pmax = p.pmin + cf.cfName.length; md.mInlineCalls.unshift({definitionPos:cf.cfNamePos,callPos:endPos});
   function wrap(e:TExpr):TExpr {var etype = hasParams ? mapType(e.etype) : e.etype; try {switch follow(e.etype) {
    case TMono(_) | TInst({clKind:KTypeParameter(_)},_):switch follow(tret) {case TAbstract({aPath:{pack:[],name:"Void"}},_):case _:throw new core.TUnification.Unify_error([]);}
    case _:var uctx = defaultUnificationContext(); uctx.equalityKind = EqStrict; uctx.nullFollowMode = scom.platformConfig.pfStatic ? NeverFollow : AlwaysFollow; typeEqCustom(uctx,etype,tret);

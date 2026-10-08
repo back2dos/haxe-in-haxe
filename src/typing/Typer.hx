@@ -421,7 +421,7 @@ class Typer {
  public static function typeNew(ctx:TyperContext,ptp:PlacedTypePath,el:Array<Expr>,withType:WithTypeValue,forceInline:Bool,p:Pos):TExpr {
   if(ptp.posFull==Globals.nullPos) {
    var pp=p;
-   if(el.length>0&&el[0].pos.pfile==p.pfile&&p.pmin<el[0].pos.pmin) {pp=Reflect.copy(p); var min=p.pmin+4,max=el[0].pos.pmin-2; pp.pmin=min<max?min:p.pmin; pp.pmax=max;}
+   if(el.length>0&&el[0].pos.pfile==p.pfile&&p.pmin<el[0].pos.pmin) {pp=core.ds.Record.copy(p); var min=p.pmin+4,max=el[0].pos.pmin-2; pp.pmin=min<max?min:p.pmin; pp.pmax=max;}
    ptp=makePtp(ptp.path,pp);
   }
   function unifyConstructor(c:TClass,fa:FieldAccessData):FieldCallCandidateData<Void->TExpr> {try {var fcc=unifyFieldCall(ctx,fa,[],el,p,fa.faInline); checkConstructorAccess(ctx,c,fcc.fcField,p); return fcc;} catch(exc:Dynamic) {switch exc {case (core.ds.ExceptionTools.typing(_) => Some(err)):return raiseTypingErrorExt(err); case _:throw exc;}}}
@@ -442,7 +442,7 @@ class Typer {
   try t=Typeload.loadInstance(ctx,ptp,ParamCustom(getParams),LoadNormal) catch(exc:haxe.Exception){restore(); if(Lambda.exists(el,e -> DisplayPosition.displayPosition.enclosedIn(e.pos))) for(e in el) typeExpr(ctx,e,WithTypeTools.value); throw exc;}
   checkDisplayType(ctx,t,ptp); t=follow(t);
   function buildConstructor(ao:Null<TAbstract>,c:TClass,tl:TParams):FieldCallCandidateData<Void->TExpr> {
-   var fa=FieldAccessTools.getConstructorAccess(c,tl,p); if(forceInline) {fa=Reflect.copy(fa); fa.faInline=true;}
+   var fa=FieldAccessTools.getConstructorAccess(c,tl,p); if(forceInline) {fa=core.ds.Record.copy(fa); fa.faInline=true;}
    var cf=fa.faField; noAbstractConstructor(c,p);
    switch cf.cfKind {case Var({vRead:AccRequire(r,msg)}):if(msg!=null) raiseTypingError(msg,p); else errorRequire(r,p); case _:}
    return unifyConstructor(c,fa);
@@ -732,8 +732,8 @@ class Typer {
   function check(cf:TClassField):Void {if(hasClassFieldFlag(cf,CfAbstract)) displayError(ctx.com,"Cannot force inline on abstract method",pInline);}
   function loop(e:AccessKind):AccessKind return switch e {
    case AKSafeNav(sn):AKSafeNav({snPos:sn.snPos,snBase:sn.snBase,snTempVar:sn.snTempVar,snAccess:loop(sn.snAccess)});
-   case AKField(fa):check(fa.faField); var copy=Reflect.copy(fa); copy.faInline=true; AKField(copy);
-   case AKUsingField(sea):check(sea.seAccess.faField); var copy=Reflect.copy(sea),access=Reflect.copy(sea.seAccess); access.faInline=true; copy.seAccess=access; AKUsingField(copy);
+   case AKField(fa):check(fa.faField); var copy=core.ds.Record.copy(fa); copy.faInline=true; AKField(copy);
+   case AKUsingField(sea):check(sea.seAccess.faField); var copy=core.ds.Record.copy(sea),access=core.ds.Record.copy(sea.seAccess); access.faInline=true; copy.seAccess=access; AKUsingField(copy);
    case AKExpr({eexpr:TLocal(_)}):displayError(ctx.com,"Cannot force inline on local functions",pInline); e;
    case _:e;
   };

@@ -137,7 +137,7 @@ class TypeloadFunction {
      switch [ctx.com.platform,def] {
       case [Flash,{eexpr:TConst(TString(_))}] if(!hasClassFlag(csup,CExtern)): return {variable:v,defaultValue:nullValue(v)};
       case [Cpp,{eexpr:TConst(TString(_))}]: return arg;
-      case [Cpp,_] if(def!=null): var v1=Reflect.copy(v); v1.vType=ctx.t.tnull(v.vType); return {variable:v1,defaultValue:nullValue(v1)};
+      case [Cpp,_] if(def!=null): var v1=core.ds.Record.copy(v); v1.vType=ctx.t.tnull(v.vType); return {variable:v1,defaultValue:nullValue(v1)};
       case _: return arg;
      }
     }

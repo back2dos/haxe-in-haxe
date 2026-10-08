@@ -207,7 +207,7 @@ class Exceptions {
 	}
 	public static function filter(ectx:Null<ExceptionContext>, scom:Dynamic):TExpr->TExpr {
 		if (ectx == null) return e -> e;
-		var ctx:ExceptionContext = Reflect.copy(ectx); ctx.scom = scom;
+		var ctx:ExceptionContext = core.ds.Record.copy(ectx); ctx.scom = scom;
 		function run(e:TExpr):TExpr return switch e.eexpr {
 			case TThrow(e1): TypeOps.mk(TThrow(throwNative(ctx, run(e1), e.etype, e.epos)), e.etype, e.epos);
 			case TTry(e1, catches):

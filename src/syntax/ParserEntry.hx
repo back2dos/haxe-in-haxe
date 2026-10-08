@@ -229,7 +229,7 @@ class ParserEntry {
 		var oldDisplay=DisplayPosition.displayPosition.get();
 		function restore():Void { if (!inlined) DisplayPosition.displayPosition.set(oldDisplay); }
 		var lctx=Lexer.createTempCtx(p.pfile);
-		if (!inlined) { DisplayPosition.displayPosition.reset(); config=Reflect.copy(config); config.inDisplayFile=false; }
+		if (!inlined) { DisplayPosition.displayPosition.reset(); config=core.ds.Record.copy(config); config.inDisplayFile=false; }
 		var result:ParseResult<T>;
 		try result=parse(config,entry,lctx,Lexer.lexbufFromUtf8String(s),p.pfile)
 		catch (err:ParserError) { restore(); result=error(Parser.errorMsg(err.error),inlined ? err.pos : p); }

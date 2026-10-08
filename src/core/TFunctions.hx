@@ -149,7 +149,7 @@ class TFunctions {
 		case TFun(s):TFun({args:[for (a in s.args) {name:a.name,optional:a.optional,type:loop(a.type)}],ret:loop(s.ret)});
 		case TAnon(a):
 			var fields = new StringMap<TClassField>();
-			for (name => f in a.aFields) { var copy:TClassField = Reflect.copy(f); copy.cfType = loop(f.cfType); fields.set(name,copy); }
+			for (name => f in a.aFields) { var copy:TClassField = core.ds.Record.copy(f); copy.cfType = loop(f.cfType); fields.set(name,copy); }
 			mkAnon(a.aStatus,fields);
 		case TLazy(f):var ft = lazyType(f); var ft2 = loop(ft); ft == ft2 ? t : ft2;
 		case TDynamic(null):t;

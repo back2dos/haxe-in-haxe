@@ -120,7 +120,7 @@ class Graph {
   function addInfo(bb:BasicBlockData,parent:BasicBlockData):Void {
    var bbi:DomBbInfo = {bb:bb,parent:null,idom:null,semi:nodes.length,label:null,ancestor:null,bucket:[]}; bbi.parent = bbi; bbi.idom = bbi; bbi.label = bbi; bbi.ancestor = bbi;
    // The OCaml record update keeps the original self-references for a non-root node.
-   if (bb != parent) {var copy:DomBbInfo = Reflect.copy(bbi); copy.parent = info.get(parent.bbId); bbi = copy;}
+   if (bb != parent) {var copy:DomBbInfo = core.ds.Record.copy(bbi); copy.parent = info.get(parent.bbId); bbi = copy;}
    info.set(bb.bbId,bbi); nodes.push(bbi);
   }
   function visit(parent:BasicBlockData,bb:BasicBlockData):Void {bb.bbDominated = []; addInfo(bb,parent); for (edge in bb.bbOutgoing) if (!info.exists(edge.cfgTo.bbId)) visit(bb,edge.cfgTo);}

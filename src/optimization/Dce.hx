@@ -18,7 +18,7 @@ typedef DceData = {
  var mergeMutex:sys.thread.Mutex; var fieldMarkerMutex:sys.thread.Mutex; var usedMutex:sys.thread.Mutex; var featureMutex:sys.thread.Mutex; var addFeatureManager:core.ds.NowOrLater;
 }
 class Dce {
- public static function pushClass(dce:DceData,c:TClass):DceData {var copy:DceData = Reflect.copy(dce); copy.curclass = c; return copy;}
+ public static function pushClass(dce:DceData,c:TClass):DceData {var copy:DceData = core.ds.Record.copy(dce); copy.curclass = c; return copy;}
  public static function resolveClassFieldRef(dce:DceData,cfr:ClassFieldRef):{cls:TClass,field:TClassField} {
   var scom = cfr.cfrIsMacro && !dce.scom.isMacroContext ? dce.mscom : dce.scom; if (scom == null) throw "Invalid_argument: Option.get";
   var m:ModuleDef = scom.findModuleByType(cfr.cfrPath); for (mt in m.mTypes) switch mt {case TClassDecl(c) if (Globals.sTypePath(c.clPath) == Globals.sTypePath(cfr.cfrPath)):return {cls:c,field:findField(c,cfr.cfrField,cfr.cfrKind)}; case _:} throw "Invalid_argument: Option.get";
@@ -195,7 +195,7 @@ class Dce {
    case TClassDecl(c):removeClassFlag(c,CUsed); var classFeatures = extractIfFeature(c.clMeta); var keepClass = keepWholeClass(dce,c) && (!hasClassFlag(c,CExtern) || hasClassFlag(c,CInterface)); var isStruct = dce.scom.platform == Hl && Meta.has(Struct,c.clMeta);
     function loop(kind:ClassFieldRefKind,cf:TClassField):Void {var ref = mkClassFieldRef(c,cf,kind,dce.scom.isMacroContext); feature(ref,classFeatures.concat(extractIfFeature(cf.cfMeta))); if (keepClass && !fieldForcesDce(cf) || isStruct || keepField(dce,cf,c,kind)) delayed.unshift(function() markField(dce,c,cf,kind));}
     for (cf in c.clOrderedStatics) loop(CfrStatic,cf); for (cf in c.clOrderedFields) loop(CfrMember,cf); if (c.clConstructor != null) loop(CfrConstructor,c.clConstructor); if (c.clInit != null && (keepClass || Meta.has(KeepInit,c.clMeta))) loop(CfrInit,c.clInit);
-   case TEnumDecl(en) if (keepWholeEnum(dce,en)):en.eMeta = Meta.remove(Used,en.eMeta); delayed.unshift(function() {var c:TClass = Reflect.copy(nullClass); c.clModule = en.eModule; markEnum(pushClass(dce,c),en);});
+   case TEnumDecl(en) if (keepWholeEnum(dce,en)):en.eMeta = Meta.remove(Used,en.eMeta); delayed.unshift(function() {var c:TClass = core.ds.Record.copy(nullClass); c.clModule = en.eModule; markEnum(pushClass(dce,c),en);});
    case _:
   }
   for (f in delayed) f(); if (dce.debug) for (item in dce.addedFields) if (item.field.cfExpr != null) Sys.println("[DCE] Entry point: " + Globals.sTypePath(item.cls.clPath) + "." + item.field.cfName);

@@ -48,7 +48,7 @@ class Genxml {
    node("f",attributes,sig.args.map(a->genType(a.optional?followParam(a.type):a.type)).concat([genType(sig.ret)]));
   case TAnon(a):
    var names=[for(name in a.aFields.keys())name];names.sort(Reflect.compare);var children=[];
-   for(name in names){var cf=Reflect.copy(a.aFields.get(name));removeClassFieldFlag(cf,CfPublic);children.unshift(genField([],cf));}
+   for(name in names){var cf=core.ds.Record.copy(a.aFields.get(name));removeClassFieldFlag(cf,CfPublic);children.unshift(genField([],cf));}
    node("a",[],children);
   case TDynamic(null):node("d",[],[]);
   case TDynamic(inner):node("d",[],[genType(inner)]);

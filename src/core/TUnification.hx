@@ -156,7 +156,7 @@ class TUnification {
  };
  public static var nativeUnificationContext:UnificationContext=makeNativeContext();
  static function makeNativeContext():UnificationContext {var c=defaultUnificationContext();c.allowTransitiveCast=false;c.allowAbstractCast=false;c.allowDynamicToCast=false;c.allowFinalInvariance=true;c.nullFollowMode=FollowIfNullable;return c;}
- public static function updated(c:UnificationContext,changes:Dynamic):UnificationContext {var result:UnificationContext=cast Reflect.copy(c);for(n in Reflect.fields(changes)) Reflect.setField(result,n,Reflect.field(changes,n));return result;}
+ public static function updated(c:UnificationContext,changes:Dynamic):UnificationContext {var result:UnificationContext=cast core.ds.Record.copy(c);for(n in Reflect.fields(changes)) Reflect.setField(result,n,Reflect.field(changes,n));return result;}
  static function pair(a:T,b:T):TypePair return {a:a,b:b};
  static function pathIs(p:Dynamic,pack:String,name:String):Bool return p.pack.join(".")==pack && p.name==name;
  static function pathEq(a:Dynamic,b:Dynamic):Bool return a.name==b.name && a.pack.join(".")==b.pack.join(".");

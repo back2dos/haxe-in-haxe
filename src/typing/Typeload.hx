@@ -43,8 +43,8 @@ enum LoadInstanceMode {LoadNormal; LoadReturn; LoadAny;}
 class Typeload {
  public static var typeFunctionParamsRef:Typer->Func->TypeParamHost->String->TypeParams=function(_:Typer,_:Func,_:TypeParamHost,_:String):TypeParams {throw "Uninitialized typeFunctionParamsRef";};
  public static function checkFieldAccess(ctx:Typer,cff:ClassField):Dynamic {
-  var displayed:Null<PlacedAccess>=null,acc:Array<PlacedAccess>=[],p0=Reflect.copy(cff.cffPos); p0.pmax=p0.pmin;
-  function checkDisplay(p1:Dynamic):Void {var pmid=Reflect.copy(p0); pmid.pmin=p0.pmax; pmid.pmax=p1.pmin; if(DisplayPosition.displayPosition.enclosedIn(pmid)&&acc.length>0) displayed=acc[0];}
+  var displayed:Null<PlacedAccess>=null,acc:Array<PlacedAccess>=[],p0=core.ds.Record.copy(cff.cffPos); p0.pmax=p0.pmin;
+  function checkDisplay(p1:Dynamic):Void {var pmid=core.ds.Record.copy(p0); pmid.pmin=p0.pmax; pmid.pmax=p1.pmin; if(DisplayPosition.displayPosition.enclosedIn(pmid)&&acc.length>0) displayed=acc[0];}
   for(entry in cff.cffAccess) {
    var access=entry.access,p1=entry.pos; checkDisplay(p1);
    var prior:Null<PlacedAccess>=null;
@@ -131,7 +131,7 @@ class Typeload {
    try unifyRaise(t,mapped,p) catch(exc:Dynamic) {switch exc {
     case (core.ds.ExceptionTools.typing(_) => Some(err)):switch err.errMessage {
      case Unify(l):
-      function fail():Void {if(!ctx.f.isUntyped) {var copy=Reflect.copy(err); copy.errMessage=Unify([ConstraintFailure(Globals.sTypePath(ttp.ttpClass.clPath))].concat(l)); displayErrorExt(ctx.com,copy);}}
+      function fail():Void {if(!ctx.f.isUntyped) {var copy=core.ds.Record.copy(err); copy.errMessage=Unify([ConstraintFailure(Globals.sTypePath(ttp.ttpClass.clPath))].concat(l)); displayErrorExt(ctx.com,copy);}}
       switch follow(t) {
        case TInst({clKind:KExpr(e)},_):var local=TyperManager.cloneForTypeParameterExpression(ctx),e=typeExpr(local,e,WithTypeTools.withType(mapped)); try unifyRaise(e.etype,mapped,p) catch(exc:Dynamic) {switch exc {case (core.ds.ExceptionTools.typing(_) => Some({errMessage:Unify(_)})):fail(); case _:throw exc;}}
        case _:fail();
@@ -329,7 +329,7 @@ class Typeload {
     var params=typeFunctionParamsRef(ctx,f,TPHMethod,cf.cfName); ctx.typeParams=params.concat(ctx.typeParams);
     function optionalType(mode:LoadInstanceMode,t:Null<TypeHint>):T {if(t==null) return raiseTypingError("Explicit type required",p); return loadComplexType(ctx,true,mode,t);}
     var args=f.fArgs.map(function(arg) {var t=optionalType(LoadNormal,arg.type); if(arg.optional) t=ctx.t.tnull(t); return {name:arg.name.name,optional:arg.optional||arg.expr!=null,type:t};});
-    var overloadField=Reflect.copy(cf); overloadField.cfType=TFun({args:args,ret:optionalType(LoadReturn,f.fType)}); overloadField.cfParams=params; overloadField.cfMeta=baseMeta.copy();
+    var overloadField=core.ds.Record.copy(cf); overloadField.cfType=TFun({args:args,ret:optionalType(LoadReturn,f.fType)}); overloadField.cfParams=params; overloadField.cfMeta=baseMeta.copy();
     generateArgsMeta(ctx.com,co,m -> overloadField.cfMeta.unshift(m),f.fArgs); overloads.unshift(overloadField); ctx.typeParams=old;
    case {meta:MetaTag.Overload,exprs:[]} if(ctx.com.config.pfOverload):
     addClassFieldFlag(cf,CfOverload);
@@ -381,7 +381,7 @@ class Typeload {
    if(ctx.com.isMacroContext) Common.define(com2,Define.Macro);
    com2.classPaths.lockContext(ctx.com.customExt,platformNameMacro(ctx.com),true);
    com2.classPaths.modify(function(cp:core.ClassPath.IClassPath) return switch cp.scope {case core.ClassPath.ClassPathScope.Std:[cp.clone()]; case _:[];},ctx.com.classPaths.asList());
-   if(com2.display.dmsCheckCoreApi) {var copy=Reflect.copy(com2.display); copy.dmsCheckCoreApi=false; com2.display=copy;}
+   if(com2.display.dmsCheckCoreApi) {var copy=core.ds.Record.copy(com2.display); copy.dmsCheckCoreApi=false; com2.display=copy;}
    // Server cache linking is deferred; define-signature computation still occurs.
    Define.getSignature(com2.defines);
    ctx2=createContextRef(com2,ctx.g.macros); ctx.g.coreApi=ctx2;

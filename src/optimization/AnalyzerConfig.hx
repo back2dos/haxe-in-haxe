@@ -48,7 +48,7 @@ class AnalyzerConfig {
 			userVarFusion:fusionAllowed && (Define.rawDefined(com.defines, "analyzer_user_var_fusion") || !com.debug && !Define.rawDefined(com.defines, "analyzer_no_user_var_fusion")), fusionDebug:false};
 	}
 	public static function updateConfigFromMeta(com:SafeContext, config:AnalyzerConfigData, ml:Metadata):AnalyzerConfigData {
-		config = Reflect.copy(config);
+		config = core.ds.Record.copy(config);
 		for (meta in ml) switch meta {
 			case {meta:core.MetaList.StrictMeta.Analyzer,exprs:el}:
 				for (e in el) switch e.expr {

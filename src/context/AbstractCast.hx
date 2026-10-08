@@ -199,7 +199,7 @@ class AbstractCast {
 				var unifyFunc = core.TUnification.getAbstractUnifyFunc(uctx,EqStrict);
 				var athis = map(ab.aThis);
 				if (MetadataTools.has(StrictMeta.MultiType,ab.aMeta) && core.TFunctions.hasMono(athis)) throw new core.TUnification.Unify_error([]);
-				var equalityContext = Reflect.copy(uctx);
+				var equalityContext = core.ds.Record.copy(uctx);
 				equalityContext.equalityKind = EqStrict;
 				core.TUnification.withVariance(uctx,function(t1,t2) return core.TUnification.typeEqCustom(equalityContext,t1,t2),athis,map(ta));
 				unifyFunc(map(t),b);

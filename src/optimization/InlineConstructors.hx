@@ -142,7 +142,7 @@ private class ConstructorInlining {
   function defaultCase(e:TExpr):FinalMapResult return {exprs:[mapExpr(mapOne,e)],object:null};
   function fieldCase(ethis:TExpr,fa:TFieldAccess,ef:TExpr):{exprs:Array<TExpr>,object:Null<InlineObject>,method:Bool} {
    var tr = finalMap(ethis); if (tr.object != null) {
-    var io = tr.object; try {var iv = getIoField(io,fieldName(fa)); return switch iv.ivState {case IVSAliasing(io):{exprs:tr.exprs,object:io,method:false}; case _:var expr = switch iv.ivKind {case IVKField(_,_,constant) if (constant != null):{eexpr:constant.eexpr,etype:constant.etype,epos:e.epos}; case _:mk(TLocal(iv.ivVar),ef.etype,ef.epos);}; {exprs:[expr].concat(tr.exprs),object:null,method:false};};}
+    var io = tr.object; try {var iv = getIoField(io,fieldName(fa)); return switch iv.ivState {case IVSAliasing(io):{exprs:tr.exprs,object:io,method:false}; case _:var expr = switch iv.ivKind {case IVKField(_,_,constant) if (constant != null):({eexpr:constant.eexpr,etype:constant.etype,epos:e.epos}:TExpr); case _:mk(TLocal(iv.ivVar),ef.etype,ef.epos);}; {exprs:[expr].concat(tr.exprs),object:null,method:false};};}
     catch (_:NotFound) {if (io.ioInlineMethods.length == 0) throw "InlineConstructors.missing inline method"; var method = io.ioInlineMethods.shift(); var r = finalMap(method); return {exprs:r.exprs.concat(tr.exprs),object:r.object,method:true};}
    }
    return {exprs:[mk(TField(makeExprForRevList(tr.exprs,ethis.etype,ethis.epos),fa),ef.etype,ef.epos)],object:null,method:false};

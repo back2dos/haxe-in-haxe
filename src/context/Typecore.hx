@@ -401,13 +401,13 @@ class Typecore {
 				case TFun(overloadSig) if (overloadSig.args.length > 0):
 					var tfo = core.TFunctions.applyParams(cfo.cfParams,core.TFunctions.extractParamTypes(cfo.cfParams),overloadSig.args[0].type);
 					if (TUnification.typeIseq(tf,tfo)) {
-						var copy:TClassField = Reflect.copy(cfo);
+						var copy:TClassField = core.ds.Record.copy(cfo);
 						copy.cfType = TFun({args:overloadSig.args.slice(1),ret:overloadSig.ret});
 						overloads.unshift(copy);
 					}
 				case _:
 			}
-			var out:TClassField = Reflect.copy(cf);
+			var out:TClassField = core.ds.Record.copy(cf);
 			out.cfOverloads = overloads;
 			out.cfType = TFun({args:sig.args.slice(1),ret:sig.ret});
 			out;

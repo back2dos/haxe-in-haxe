@@ -229,7 +229,7 @@ class Inheritance {
   function checkField(f:TClassField):Void {
    var t=applyParams(intf.clParams,params,f.cfType), isOverload=false;
    function implicitField():Dynamic {
-    var cf=Reflect.copy(f); cf.cfOverloads=[]; cf.cfType=applyParams(intf.clParams,params,f.cfType);
+    var cf=core.ds.Record.copy(f); cf.cfOverloads=[]; cf.cfType=applyParams(intf.clParams,params,f.cfType);
     if(c.clFields.exists(cf.cfName)) {var previous=c.clFields.get(cf.cfName); com.overloadCache.remove({path:c.clPath,name:f.cfName}); previous.cfOverloads.unshift(cf);} else TClassTools.addField(c,cf);
     return cf;
    }

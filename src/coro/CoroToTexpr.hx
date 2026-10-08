@@ -28,7 +28,7 @@ typedef CoroState={var csId:Int;var csElTail:Null<Array<TExpr>>;var csEl:Array<T
 typedef CoroToTexprExprs={var econtinuation:TExpr;var ecompletion:TExpr;var estate:TExpr;var eresult:TExpr;var egoto:TExpr;var eerror:TExpr;var etmpResult:AtomicLazy<TExpr>;var etmpError:TExpr;var etmpErrorUnwrapped:AtomicLazy<TExpr>;}
 class SuspensionCalls {
  public static function makeSuspensionCallAndAssign(ctx:CoroCtx,cont:ContinuationApi,call:CoroSuspend,econtinuation:TExpr):{call:TExpr,result:TExpr} {
-  var b=ctx.builder;var p=call.csPos;var create=CoroToTexpr.makeSuspendingCall(ctx.typer.com.basic,cont,call,{var recordCopy47 = Reflect.copy(econtinuation); recordCopy47.epos = p; recordCopy47;});
+  var b=ctx.builder;var p=call.csPos;var create=CoroToTexpr.makeSuspendingCall(ctx.typer.com.basic,cont,call,{var recordCopy47 = core.ds.Record.copy(econtinuation); recordCopy47.epos = p; recordCopy47;});
   var v=allocVar(VGenerated,"_hx_tmp",cont.suspensionResult(ctx.typer.com.basic.tany),p);return {call:b.varInit(v,create),result:b.local(v,p)};
  }
  public static function unpackResultFields(ctx:CoroCtx,cont:ContinuationApi,result:TExpr):{subject:TExpr,result:TExpr,error:TExpr} {
@@ -38,7 +38,7 @@ class SuspensionCalls {
  public static function makeSuspendedReturn(b:coro.CoroElsewhere.TexprBuilder,cont:ContinuationApi,p:Pos):TExpr return b.staticField(Builder.makeStaticThis(cont.suspensionResultClass,p),cont.suspensionResultClass,cont.suspended,cont.suspended.cfType);
  public static function makeSuspendingCall(ctx:CoroCtx,cont:ContinuationApi,exprs:CoroToTexprExprs,call:CoroSuspend):{call:TExpr,check:TExpr} {
   var b=ctx.builder;var p=call.csPos;var outcome=call.csKind;
-  if(outcome.noReturn&&outcome.noThrow)return {call:b.voidBlock([CoroToTexpr.makeSuspendingCall(ctx.typer.com.basic,cont,call,{var recordCopy46 = Reflect.copy(exprs.econtinuation); recordCopy46.epos = p; recordCopy46;})]),check:b.voidBlock([b.makeReturn(makeSuspendedReturn(b,cont,p))])};
+  if(outcome.noReturn&&outcome.noThrow)return {call:b.voidBlock([CoroToTexpr.makeSuspendingCall(ctx.typer.com.basic,cont,call,{var recordCopy46 = core.ds.Record.copy(exprs.econtinuation); recordCopy46.epos = p; recordCopy46;})]),check:b.voidBlock([b.makeReturn(makeSuspendedReturn(b,cont,p))])};
   var assigned=makeSuspensionCallAndAssign(ctx,cont,call,exprs.econtinuation);var fields=unpackResultFields(ctx,cont,assigned.result);
   var suspended=b.voidBlock([b.makeReturn(makeSuspendedReturn(b,cont,p))]);var returned=switch call.csResult {case SusBlock:b.voidBlockAt([],p);case SusResult:b.assign((exprs.etmpResult).force(),fields.result);};
   var thrown=b.voidBlock([b.assign(exprs.etmpError,fields.error),b.makeBreak(p)]);
@@ -59,7 +59,7 @@ class SuspensionCalls {
 class CoroToTexpr {
  public static function makeSuspendingCall(basic:Dynamic,cont:ContinuationApi,call:CoroSuspend,econtinuation:TExpr):TExpr {
   var tfun=switch followWithCoro(call.csFun.etype){case Coro({args:args,ret:ret}):var expanded=Common.expandCoroType(basic,args,ret);TFun({args:expanded.args,ret:expanded.ret});case NotCoro(_):throw "Unexpected coroutine type";};
-  return mk(TCall({var recordCopy45 = Reflect.copy(call.csFun); recordCopy45.etype = tfun; recordCopy45;},[econtinuation].concat(call.csArgs)),cont.suspensionResult(basic.tany),call.csPos);
+  return mk(TCall({var recordCopy45 = core.ds.Record.copy(call.csFun); recordCopy45.etype = tfun; recordCopy45;},[econtinuation].concat(call.csArgs)),cont.suspensionResult(basic.tany),call.csPos);
  }
  public static function handleLocals(ctx:CoroCtx,cls:TClass,params:Array<T>,states:Array<CoroState>,tfArgs:Array<{variable:TVar,defaultValue:Null<TExpr>}>,econtinuation:TExpr):Array<TClassField> {
   var b=ctx.builder;var first=states[0];var argStates=new CoroIntSet().add(first.csId);var usages:Map<Int,CoroIntSet>=[];for(a in tfArgs)usages.set(a.variable.vId,argStates);
@@ -75,10 +75,10 @@ class CoroToTexpr {
   for(state in states){
    function localMapping(v:TVar):TVar {var n=state.csMappedLocal.get(v.vId);if(n==null){n=allocVar(VGenerated,'_hx_restored${v.vId}',v.vType,v.vPos);state.csMappedLocal.set(v.vId,n);}return n;}
    function mapper(e:TExpr):TExpr return switch e.eexpr {
-    case TVar(v,eo) if(across(v.vId)):if(eo!=null)state.csWrites.add(v.vId);setField(v.vId,mkField('_hx_hoisted${v.vId}',v.vType,v.vPos,v.vPos));state.csMappedLocal.set(v.vId,v);{var recordCopy44 = Reflect.copy(e); recordCopy44.eexpr = TVar(v,eo==null?null:mapper(eo)); recordCopy44;};
-    case TBinop(op=(OpAssign|OpAssignOp(_)),lhs,rhs):switch Texpr.skip(lhs).eexpr {case TLocal(v) if(across(v.vId)||forced.exists(v.vId)):state.csWrites.add(v.vId);var lhs={var recordCopy43 = Reflect.copy(lhs); recordCopy43.eexpr = TLocal(localMapping(v)); recordCopy43;};var rhs=mapper(rhs);{var recordCopy42 = Reflect.copy(e); recordCopy42.eexpr = TBinop(op,lhs,rhs); recordCopy42;};case _:core.Texpr.mapExpr(mapper,e);}
-    case TUnop(mode=(Increment|Decrement),flag,rhs):switch Texpr.skip(rhs).eexpr{case TLocal(v) if(across(v.vId)||forced.exists(v.vId)):state.csWrites.add(v.vId);{var recordCopy41 = Reflect.copy(e); recordCopy41.eexpr = TUnop(mode,flag,{var recordCopy40 = Reflect.copy(rhs); recordCopy40.eexpr = TLocal(localMapping(v)); recordCopy40;}); recordCopy41;};case _:core.Texpr.mapExpr(mapper,e);}
-    case TLocal(v) if(across(v.vId)||forced.exists(v.vId)):state.csReads.add(v.vId);{var recordCopy39 = Reflect.copy(e); recordCopy39.eexpr = TLocal(localMapping(v)); recordCopy39;};
+    case TVar(v,eo) if(across(v.vId)):if(eo!=null)state.csWrites.add(v.vId);setField(v.vId,mkField('_hx_hoisted${v.vId}',v.vType,v.vPos,v.vPos));state.csMappedLocal.set(v.vId,v);{var recordCopy44 = core.ds.Record.copy(e); recordCopy44.eexpr = TVar(v,eo==null?null:mapper(eo)); recordCopy44;};
+    case TBinop(op=(OpAssign|OpAssignOp(_)),lhs,rhs):switch Texpr.skip(lhs).eexpr {case TLocal(v) if(across(v.vId)||forced.exists(v.vId)):state.csWrites.add(v.vId);var lhs={var recordCopy43 = core.ds.Record.copy(lhs); recordCopy43.eexpr = TLocal(localMapping(v)); recordCopy43;};var rhs=mapper(rhs);{var recordCopy42 = core.ds.Record.copy(e); recordCopy42.eexpr = TBinop(op,lhs,rhs); recordCopy42;};case _:core.Texpr.mapExpr(mapper,e);}
+    case TUnop(mode=(Increment|Decrement),flag,rhs):switch Texpr.skip(rhs).eexpr{case TLocal(v) if(across(v.vId)||forced.exists(v.vId)):state.csWrites.add(v.vId);{var recordCopy41 = core.ds.Record.copy(e); recordCopy41.eexpr = TUnop(mode,flag,{var recordCopy40 = core.ds.Record.copy(rhs); recordCopy40.eexpr = TLocal(localMapping(v)); recordCopy40;}); recordCopy41;};case _:core.Texpr.mapExpr(mapper,e);}
+    case TLocal(v) if(across(v.vId)||forced.exists(v.vId)):state.csReads.add(v.vId);{var recordCopy39 = core.ds.Record.copy(e); recordCopy39.eexpr = TLocal(localMapping(v)); recordCopy39;};
     case TCall({eexpr:TLocal(v)},[]) if(ctx.deferredExprs.exists(v.vId)):mapper(ctx.deferredExprs.get(v.vId)());
     case _:core.Texpr.mapExpr(mapper,e);
    };state.csEl=state.csEl.map(mapper);if(state.csElTail!=null)state.csElTail=state.csElTail.map(mapper);
@@ -103,7 +103,7 @@ class CoroToTexpr {
   function makeState(id:Int,el:Array<TExpr>,tail:Null<Array<TExpr>>):CoroState return {csId:id,csEl:el,csElTail:tail,csDeclarations:[],csMappedLocal:[],csReads:new CoroIntSet(),csWrites:new CoroIntSet()};
   var getCaught:TExpr->TExpr;var unwrap:TExpr->TExpr;
   switch (com.basic.texception:T) {case TInst(c,_):var cf=PMap.find("unwrap",c.clFields);unwrap=function(e)return b.call(b.instanceField(e,c,[],cf,cf.cfType),[],com.basic.tany);getCaught=function(e)return Builder.resolveAndMakeStaticCall(c,"caught",[e],e.epos);case _:throw "assert";}
-  function ifError(cb:CoroBlock):TExpr {var thenE=b.voidBlock([b.assign(exprs.etmpError,exprs.eerror),b.makeBreak(p)]);var cond=b.binop(OpNotEq,exprs.eerror,b.makeNull(exprs.eerror.etype,p),com.basic.tbool);if(cb.cbStackValue==null)return b.ifThen(cond,thenE);var e=cb.cbStackValue;return b.ifThenElse(cond,thenE,b.assign(e,{var recordCopy38 = Reflect.copy((exprs.etmpResult).force()); recordCopy38.epos = e.epos; recordCopy38;}),com.basic.tvoid);}
+  function ifError(cb:CoroBlock):TExpr {var thenE=b.voidBlock([b.assign(exprs.etmpError,exprs.eerror),b.makeBreak(p)]);var cond=b.binop(OpNotEq,exprs.eerror,b.makeNull(exprs.eerror.etype,p),com.basic.tbool);if(cb.cbStackValue==null)return b.ifThen(cond,thenE);var e=cb.cbStackValue;return b.ifThenElse(cond,thenE,b.assign(e,{var recordCopy38 = core.ds.Record.copy((exprs.etmpResult).force()); recordCopy38.epos = e.epos; recordCopy38;}),com.basic.tvoid);}
   var excStateMap:Array<Array<Int>>=[for(_ in 0...ctx.nextBlockId)[]];
   function generate(cb:CoroBlock):Int {
    var el=getBlockExprs(cb);
@@ -115,7 +115,7 @@ class CoroToTexpr {
     case NextFallThrough(n)|NextGoto(n)|NextBreak(n)|NextContinue(n):addState(n.cbId,[],null);
     case NextReturnVoid:addState(-1,[setControl(CoroReturned),ereturn],null);
     case NextReturn(e):addState(-1,[setControl(CoroReturned),b.assign(exprs.eresult,e),ereturn],null);
-    case NextThrow(e1):var tmp={var recordCopy37 = Reflect.copy(exprs.etmpError); recordCopy37.epos = e1.epos; recordCopy37;};addState(null,[b.assign(tmp,getCaught(e1)),stackItemInserter(e1.epos),b.assign(tmp,startException(tmp))],single?null:[b.makeBreak(p)]);
+    case NextThrow(e1):var tmp={var recordCopy37 = core.ds.Record.copy(exprs.etmpError); recordCopy37.epos = e1.epos; recordCopy37;};addState(null,[b.assign(tmp,getCaught(e1)),stackItemInserter(e1.epos),b.assign(tmp,startException(tmp))],single?null:[b.makeBreak(p)]);
     case NextIfThen(cond,a,n):addState(null,[b.ifThenElse(cond,setState(a.cbId),setState(n.cbId),com.basic.tint)],null);
     case NextIfThenElse(cond,a,z,_):addState(null,[b.ifThenElse(cond,setState(a.cbId),setState(z.cbId),com.basic.tint)],null);
     case NextSwitch(s,n):var cases=s.csCases.map(function(c)return {casePatterns:c.el,caseExpr:setState(c.cb.cbId)});var def=s.csDefault!=null?setState(s.csDefault.cbId):n==null?null:setState(n.cbId);addState(null,[mk(TSwitch(Texpr.mkSwitch(s.csSubject,cases,def,true)),com.basic.tvoid,p)],null);

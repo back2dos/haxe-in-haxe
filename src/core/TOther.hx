@@ -154,7 +154,7 @@ class TClassTools {
 		function loop(acc:StringMap<{cls:TClass,field:TClassField}>,c:TClass,tl:TParams):StringMap<{cls:TClass,field:TClassField}> {
 			var apply = function(t) return applyParams(c.clParams,tl,t);
 			if (selfToo || c != c0) for (cf in c.clOrderedFields) if (!acc.exists(cf.cfName)) {
-				if (tl.length != 0) { var copy:TClassField = Reflect.copy(cf); copy.cfType = apply(cf.cfType); cf = copy; }
+				if (tl.length != 0) { var copy:TClassField = core.ds.Record.copy(cf); copy.cfType = apply(cf.cfType); cf = copy; }
 				acc.set(cf.cfName,{cls:c,field:cf});
 			}
 			if (hasClassFlag(c,CInterface)) for (impl in c.clImplements) acc = loop(acc,impl.cls,impl.params.map(apply));

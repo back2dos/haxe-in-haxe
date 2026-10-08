@@ -59,7 +59,15 @@ enum TExprDef { TConst(value:TConstant); TLocal(variable:TVar); TArray(array:TEx
 typedef TSwitch = { var switchSubject:TExpr; var switchCases:Array<TSwitchCase>; var switchDefault:Null<TExpr>; var switchExhaustive:Bool; }
 typedef TSwitchCase = { var casePatterns:Array<TExpr>; var caseExpr:TExpr; }
 enum TFieldAccess { FInstance(cls:TClass, params:TParams, field:TClassField); FStatic(cls:TClass, field:TClassField); FAnon(field:TClassField); FDynamic(name:String); FClosure(cls:Null<{var cls:TClass; var params:TParams;}>, field:TClassField); FEnum(en:TEnum, field:TEnumField); }
-typedef TExpr = { var eexpr:TExprDef; var etype:T; var epos:Pos; }
+// A class rather than a structure so static targets access fields directly;
+// @:structInit keeps `{eexpr:..., etype:..., epos:...}` literals working.
+@:structInit class TExpr {
+	public var eexpr:TExprDef;
+	public var etype:T;
+	public var epos:Pos;
+	public inline function new(eexpr:TExprDef, etype:T, epos:Pos) { this.eexpr = eexpr; this.etype = etype; this.epos = epos; }
+	public inline function clone():TExpr return new TExpr(eexpr, etype, epos);
+}
 typedef TClassField = { var cfName:String; var cfType:T; var cfPos:Pos; var cfNamePos:Pos; var cfDoc:Documentation; var cfMeta:Metadata; var cfKind:FieldKind; var cfParams:TypeParams; var cfExpr:Null<TExpr>; var cfExprUnoptimized:Null<TExpr>; var cfOverloads:Array<TClassField>; var cfFlags:Int; }
 enum TClassKind { KNormal; KTypeParameter(param:TypedTypeParam); KExpr(expr:Expr); KGeneric; KGenericInstance(cls:TClass, params:TParams); KMacroType; KGenericBuild(fields:Array<ClassField>); KAbstractImpl(abs:TAbstract); KModuleFields(module:ModuleDef); }
 typedef TInfos = { var mtPath:GlobalTypePath; var mtModule:ModuleDef; var mtPos:Pos; var mtNamePos:Pos; var mtPrivate:Bool; var mtDoc:Documentation; var mtMeta:Metadata; var mtParams:TypeParams; var mtUsing:Array<{var cls:TClass; var pos:Pos;}>; var mtRestore:Void->Void; }

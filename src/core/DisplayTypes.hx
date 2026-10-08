@@ -25,7 +25,7 @@ class DisplayMode {
  public static final defaultDisplaySettings:DisplaySettings={dmsKind:DMDefault,dmsFullTyping:false,dmsForceMacroTyping:false,dmsErrorPolicy:EPIgnore,dmsCheckCoreApi:false,dmsInline:false,dmsDisplayFilePolicy:DFPOnly,dmsExitDuringTyping:true,dmsPopulateCache:false,dmsPerFile:false};
  public static final defaultCompilationSettings:DisplaySettings={dmsKind:DMNone,dmsFullTyping:true,dmsForceMacroTyping:true,dmsErrorPolicy:EPShow,dmsCheckCoreApi:true,dmsInline:true,dmsDisplayFilePolicy:DFPNo,dmsExitDuringTyping:false,dmsPopulateCache:true,dmsPerFile:false};
  public static function create(dm:DisplayModeValue):DisplaySettings {
-  var settings:DisplaySettings=cast Reflect.copy(defaultDisplaySettings);settings.dmsKind=dm;
+  var settings:DisplaySettings=cast core.ds.Record.copy(defaultDisplaySettings);settings.dmsKind=dm;
   switch dm {case DMNone:return defaultCompilationSettings;case DMDefault|DMDefinition|DMTypeDefinition|DMPackage|DMHover|DMSignature:
    case DMUsage(_,_,_)|DMImplementation:settings.dmsFullTyping=true;settings.dmsForceMacroTyping=true;settings.dmsDisplayFilePolicy=DFPAlso;settings.dmsExitDuringTyping=false;
    case DMModuleSymbols(filter):settings.dmsDisplayFilePolicy=filter==null?DFPOnly:DFPNo;settings.dmsExitDuringTyping=false;settings.dmsForceMacroTyping=false;settings.dmsPerFile=true;
