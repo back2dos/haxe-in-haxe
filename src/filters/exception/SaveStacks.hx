@@ -9,7 +9,7 @@ import filters.exception.ExceptionFunctions;
 
 // haxe/src/filters/exception/saveStacks.ml — mechanical draft; not compiled or validated.
 class SaveStacks {
-	public static function insertSaveStacks(ectx:ExceptionContext, scom:Dynamic):TExpr->TExpr {
+	public static function insertSaveStacks(ectx:ExceptionContext, scom:context.SafeCom.SafeContext):TExpr->TExpr {
 		function containsInsertionPoints(e:TExpr):Bool return switch e.eexpr {
 			case TTry(body, catches):
 				Lambda.exists(catches, c -> Meta.has(NeedsExceptionStack, c.variable.vMeta)) || containsInsertionPoints(body)
@@ -87,7 +87,7 @@ class SaveStacks {
 			}
 		};
 	}
-	public static function patchConstructors(ectx:Null<ExceptionContext>, scom:Dynamic):ModuleType->Void {
+	public static function patchConstructors(ectx:Null<ExceptionContext>, scom:context.SafeCom.SafeContext):ModuleType->Void {
 		if (ectx == null) return function(_) {};
 		var ctx:ExceptionContext = core.ds.Record.copy(ectx); ctx.scom = scom;
 		return patchConstructorsContext(ctx);

@@ -142,7 +142,7 @@ class Inline {
   if (inits.length > 0) {var body = switch tf.tfExpr.eexpr {case TBlock(el):el; case _:[tf.tfExpr];}; tf = {tfArgs:tf.tfArgs,tfType:tf.tfType,tfExpr:mk(TBlock(inits.concat(body)),ictx.scom.basic.tvoid,c.clPos)};}
   return typeInline(ictx,cf,tf,ethis,el,ictx.scom.basic.tvoid,null,po,true);
  }
- public static function inlineRestParams(ctx:Dynamic,f:TFunc,params:Array<TExpr>,mapType:T->T,p:Pos):Array<TExpr> {
+ public static function inlineRestParams(ctx:context.Typecore.Typer,f:TFunc,params:Array<TExpr>,mapType:T->T,p:Pos):Array<TExpr> {
   if (!ctx.com.config.pfSupportsRestArgs) return params;
   function loop(args:Array<{variable:TVar,defaultValue:Null<TExpr>}>,params:Array<TExpr>):Array<TExpr> {
    if (args.length == 1 && core.TOther.ExtType.isRest(follow(args[0].variable.vType))) {

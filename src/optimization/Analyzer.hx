@@ -291,7 +291,7 @@ class Run {
   var init = core.TOther.TClassTools.getClInit(c); if (init != null) {var tf:TFunc = {tfArgs:[],tfType:init.etype,tfExpr:init}; var e = mk(TFunction(tf),tfun([],init.etype),init.epos); var config:AnalyzerConfigData = core.ds.Record.copy(config); config.optimize = false; var actx = createAnalyzerContext(com,config,Globals.sTypePath(c.clPath) + ".__init__",e); var e = runOnExpr(actx,e); var body = switch e.eexpr {case TFunction(tf):tf.tfExpr; case _:throw "Analyzer.runOnClass expected function";}; core.TOther.TClassTools.setClInit(c,body);}
  }
  public static function runOnType(com:Dynamic,out:ExceptionOutput,pool:Dynamic,config:AnalyzerConfigData,t:ModuleType):Void switch t {case TClassDecl(c) if (AnalyzerConfig.isIgnored(c.clMeta)):case TClassDecl(c):runOnClass(com,out,pool,config,c); case TEnumDecl(_) | TTypeDecl(_) | TAbstractDecl(_):}
- public static function runOnTypes(scom:Dynamic,pool:Dynamic,allTypes:Array<ModuleType>,newTypes:Array<ModuleType>):Void {
+ public static function runOnTypes(scom:context.SafeCom.SafeContext,pool:Dynamic,allTypes:Array<ModuleType>,newTypes:Array<ModuleType>):Void {
   var config = AnalyzerConfig.getBaseConfig(scom); withTimer(scom.timerCtx,config.detailTimes,null,["other"],function() {if (config.optimize && config.purityInference) withTimer(scom.timerCtx,config.detailTimes,null,["optimize","purity-inference"],function() Purity.infer(allTypes)); var out:ExceptionOutput = {value:null,mutex:new sys.thread.Mutex()}; context.Parallel.ParallelArray.iter(pool,function(t) runOnType(scom,out,pool,config,t),newTypes); checkExcOut(out);});
  }
 }

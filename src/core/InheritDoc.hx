@@ -36,11 +36,11 @@ class InheritDoc {
 			return getClassField(c.clSuper.cls,fieldName);
 		}
 	}
-	public static function findType(ctx:Dynamic,mode:LoadInstanceMode,tp:TypePath,p:Pos):T {
+	public static function findType(ctx:context.Typecore.Typer,mode:LoadInstanceMode,tp:TypePath,p:Pos):T {
 		try return Typeload.loadInstancePrime(ctx,Ast.makePtp(tp,p),ParamSpawnMonos,mode)
 		catch (_:Dynamic) throw NotFound.raise();
 	}
-	public static function buildDoc(ctx:Dynamic,doc:{value:Documentation},meta:Metadata,?noArgsCb:(Documentation->Void)->Void):Void {
+	public static function buildDoc(ctx:context.Typecore.Typer,doc:{value:Documentation},meta:Metadata,?noArgsCb:(Documentation->Void)->Void):Void {
 		function add(d:Documentation):Void {
 			if (d == null) return;
 			var s = Ast.genDocText(d);
@@ -53,7 +53,7 @@ class InheritDoc {
 			else for (t in m.exprs) add(getTargetDoc(ctx,t));
 		}
 	}
-	public static function buildClassDoc(ctx:Dynamic,c:TClass):Void {
+	public static function buildClassDoc(ctx:context.Typecore.Typer,c:TClass):Void {
 		if (c.clDoc != null && c.clDoc.docInherited.length != 0) c.clDoc.docInherited = [];
 		var doc = {value:c.clDoc};
 		buildDoc(ctx,doc,c.clMeta,function(add) {
@@ -61,15 +61,15 @@ class InheritDoc {
 		});
 		c.clDoc = doc.value;
 	}
-	public static function buildEnumDoc(ctx:Dynamic,en:TEnum):Void {
+	public static function buildEnumDoc(ctx:context.Typecore.Typer,en:TEnum):Void {
 		if (en.eDoc != null && en.eDoc.docInherited.length != 0) en.eDoc.docInherited = [];
 		var doc = {value:en.eDoc};buildDoc(ctx,doc,en.eMeta);en.eDoc = doc.value;
 	}
-	public static function buildAbstractDoc(ctx:Dynamic,a:TAbstract):Void {
+	public static function buildAbstractDoc(ctx:context.Typecore.Typer,a:TAbstract):Void {
 		if (a.aDoc != null && a.aDoc.docInherited.length != 0) a.aDoc.docInherited = [];
 		var doc = {value:a.aDoc};buildDoc(ctx,doc,a.aMeta);a.aDoc = doc.value;
 	}
-	public static function buildClassFieldDoc(ctx:Dynamic,cOpt:Null<TClass>,cf:TClassField):Void {
+	public static function buildClassFieldDoc(ctx:context.Typecore.Typer,cOpt:Null<TClass>,cf:TClassField):Void {
 		if (cf.cfDoc != null && cf.cfDoc.docInherited.length != 0) cf.cfDoc.docInherited = [];
 		var doc = {value:cf.cfDoc};
 		buildDoc(ctx,doc,cf.cfMeta,function(add) {
@@ -80,11 +80,11 @@ class InheritDoc {
 		});
 		cf.cfDoc = doc.value;
 	}
-	public static function buildEnumFieldDoc(ctx:Dynamic,ef:TEnumField):Void {
+	public static function buildEnumFieldDoc(ctx:context.Typecore.Typer,ef:TEnumField):Void {
 		if (ef.efDoc != null && ef.efDoc.docInherited.length != 0) ef.efDoc.docInherited = [];
 		var doc = {value:ef.efDoc};buildDoc(ctx,doc,ef.efMeta);ef.efDoc = doc.value;
 	}
-	public static function getTargetDoc(ctx:Dynamic,eTarget:Expr):Documentation {
+	public static function getTargetDoc(ctx:context.Typecore.Typer,eTarget:Expr):Documentation {
 		var target = exprToTarget(eTarget);
 		var path = target.path;
 		function resolveField(fieldName:String):Documentation {

@@ -146,7 +146,7 @@ class Useless {
 		};
 		return loop(p[0]);
 	}
-	public static function checkCase(ctx:Dynamic, previous:Array<CaseRow>, row:CaseRow):Void {
+	public static function checkCase(ctx:context.Typecore.Typer, previous:Array<CaseRow>, row:CaseRow):Void {
 		var matrix = previous.map(function(row) return row.patterns);
 		switch uPrime(matrix, copy(matrix), copy(matrix), row.patterns, [], []) {
 			case False: Typecore.warning(ctx, WUnusedPattern, "This case is unused", row.caseData.casePos);
@@ -154,7 +154,7 @@ class Useless {
 			case True:
 		}
 	}
-	public static function check(ctx:Dynamic, cases:Array<CaseRow>):Void {
+	public static function check(ctx:context.Typecore.Typer, cases:Array<CaseRow>):Void {
 		var acc:Array<CaseRow> = [];
 		for (row in cases) {
 			checkCase(ctx, acc, row);

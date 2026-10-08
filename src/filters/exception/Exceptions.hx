@@ -205,7 +205,7 @@ class Exceptions {
 		}
 		return transform([], null, catches);
 	}
-	public static function filter(ectx:Null<ExceptionContext>, scom:Dynamic):TExpr->TExpr {
+	public static function filter(ectx:Null<ExceptionContext>, scom:context.SafeCom.SafeContext):TExpr->TExpr {
 		if (ectx == null) return e -> e;
 		var ctx:ExceptionContext = core.ds.Record.copy(ectx); ctx.scom = scom;
 		function run(e:TExpr):TExpr return switch e.eexpr {

@@ -8,7 +8,7 @@ import core.Texpr;
 import core.Error;
 import haxe.ds.IntMap;
 
-typedef LsContext = {var scom:Dynamic; var lut:IntMap<TClassField>; var addedFields:Array<TClassField>;}
+typedef LsContext = {var scom:context.SafeCom.SafeContext; var lut:IntMap<TClassField>; var addedFields:Array<TClassField>;}
 
 // haxe/src/filters/safe/localStatic.ml — mechanical draft; not compiled or validated.
 class LocalStatic {
@@ -66,7 +66,7 @@ class LocalStatic {
 		if (!lut.exists(v.vId)) throw "Not_found";
 		return lut.get(v.vId);
 	}
-	public static function run(scom:Dynamic, e:TExpr):TExpr {
+	public static function run(scom:context.SafeCom.SafeContext, e:TExpr):TExpr {
 		var lsctx:LsContext = {scom:scom, lut:new IntMap(), addedFields:[]};
 		var c:TClass = scom.curclass;
 		function run(e:TExpr):TExpr {

@@ -11,7 +11,7 @@ import haxe.ds.IntMap;
 // haxe/src/filters/safe/checkVarInit.ml — mechanical draft; not compiled or validated.
 // OCaml persistent maps become copied IntMaps at branch snapshots.
 class CheckVarInit {
-	public static function checkLocalVarsInit(scom:Dynamic, e:TExpr):TExpr {
+	public static function checkLocalVarsInit(scom:context.SafeCom.SafeContext, e:TExpr):TExpr {
 		function intersect(vl1:IntMap<Bool>, vl2:IntMap<Bool>):IntMap<Bool> {
 			var result = new IntMap<Bool>();
 			for (v => t in vl1) {

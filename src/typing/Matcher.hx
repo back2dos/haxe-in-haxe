@@ -29,7 +29,7 @@ typedef MatchCase = {var patterns:Array<Expr>; var guard:Null<Expr>; var expr:Nu
 typedef MatchDefault = {var expr:Null<Expr>; var pos:Pos;}
 
 class Matcher {
-	static function matchExprImpl(ctx:Dynamic, e:Expr, cases:Array<MatchCase>, def:Null<MatchDefault>, withType:WithTypeValue, postfixMatch:Bool, p:Pos):TExpr {
+	static function matchExprImpl(ctx:context.Typecore.Typer, e:Expr, cases:Array<MatchCase>, def:Null<MatchDefault>, withType:WithTypeValue, postfixMatch:Bool, p:Pos):TExpr {
 		var matchDebug = Meta.has(MetaTag.Custom(":debug.match"), ctx.f.curfield.cfMeta);
 		function loop(e:Expr):{type:T, subjects:Array<TExpr>} {
 			return switch e.expr {
@@ -89,7 +89,7 @@ class Matcher {
 		if (matchDebug) {Sys.println("TEXPR BEGIN"); Sys.println(MatcherGlobals.sExprPretty(result)); Sys.println("TEXPR END");}
 		return {eexpr:result.eexpr, etype:result.etype, epos:p};
 	}
-	public static function matchExpr(ctx:Dynamic, e:Expr, cases:Array<MatchCase>, def:Null<MatchDefault>, withType:WithTypeValue, postfixMatch:Bool, p:Pos):TExpr {
+	public static function matchExpr(ctx:context.Typecore.Typer, e:Expr, cases:Array<MatchCase>, def:Null<MatchDefault>, withType:WithTypeValue, postfixMatch:Bool, p:Pos):TExpr {
 		if (cases.length == 0 && def == null && withType == NoValue) return typeExpr(ctx, e, WithTypeTools.value);
 		return matchExprImpl(ctx, e, cases, def, withType, postfixMatch, p);
 	}

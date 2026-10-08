@@ -22,7 +22,7 @@ class ExceptionFunctions {
 	public static function isDynamic(t:T):Bool {
 		return switch Abstract.followWithAbstracts(t) { case TAbstract({aPath:{pack:[], name:"Dynamic"}}, _): true; case t: t == TypeOps.tDynamic; };
 	}
-	public static function makeCall(scom:Dynamic, eon:TExpr, el:Array<TExpr>, tret:T, p:Pos):TExpr {
+	public static function makeCall(scom:context.SafeCom.SafeContext, eon:TExpr, el:Array<TExpr>, tret:T, p:Pos):TExpr {
 		return switch eon.eexpr {
 			case TField(ef, FStatic(cl, cf) | FInstance(cl, _, cf)) if (SafeCom.needsInline(scom, cl, cf)):
 				switch cf.cfExpr {
@@ -34,7 +34,7 @@ class ExceptionFunctions {
 			case _: TypeOps.mk(TCall(eon, el), tret, p);
 		};
 	}
-	public static function makeStaticCall(scom:Dynamic, c:TClass, cf:TClassField, el:Array<TExpr>, tret:T, p:Pos):TExpr {
+	public static function makeStaticCall(scom:context.SafeCom.SafeContext, c:TClass, cf:TClassField, el:Array<TExpr>, tret:T, p:Pos):TExpr {
 		return makeCall(scom, Texpr.Builder.makeStaticField(c, cf, p), el, tret, p);
 	}
 }

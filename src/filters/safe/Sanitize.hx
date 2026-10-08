@@ -39,7 +39,7 @@ class Sanitize {
 			case _: true;
 		};
 	}
-	public static function sanitizeExpr(scom:Dynamic, e:TExpr):TExpr {
+	public static function sanitizeExpr(scom:context.SafeCom.SafeContext, e:TExpr):TExpr {
 		function parent(e:TExpr):TExpr return switch e.eexpr { case TParenthesis(_): e; case _: TypeOps.mk(TParenthesis(e), e.etype, e.epos); };
 		function block(e:TExpr):TExpr return switch e.eexpr { case TBlock(_): e; case _: TypeOps.mk(TBlock([e]), e.etype, e.epos); };
 		function complex(e:TExpr):TExpr return switch e.eexpr { case TVar(_, _) | TCall({eexpr:TIdent("__js__")}, _): block(e); case _: e; };
@@ -122,7 +122,7 @@ class Sanitize {
 			case _: e;
 		};
 	}
-	public static function sanitize(scom:Dynamic, e:TExpr):TExpr {
+	public static function sanitize(scom:context.SafeCom.SafeContext, e:TExpr):TExpr {
 		return sanitizeExpr(scom, reduceExpr(scom.platformConfig, core.Texpr.mapExpr(e -> sanitize(scom, e), e)));
 	}
 }

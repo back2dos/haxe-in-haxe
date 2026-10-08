@@ -21,7 +21,7 @@ import context.SafeCom.SafeContext;
 // Macro dispatch retains the upstream hook; its runtime remains a later milestone.
 class AbstractCast {
 	static final castStack:Array<TClassField> = [];
-	public static function makeStaticCall(ctx:Dynamic, c:TClass, cf:TClassField, a:TAbstract, pl:TParams, args:Array<TExpr>, t:T, p:Pos):TExpr {
+	public static function makeStaticCall(ctx:context.Typecore.Typer, c:TClass, cf:TClassField, a:TAbstract, pl:TParams, args:Array<TExpr>, t:T, p:Pos):TExpr {
 		switch cf.cfKind {
 			case Method(MethMacro):
 				if (args.length != 1) throw "abstractCast: invalid macro cast argument count";
@@ -40,7 +40,7 @@ class AbstractCast {
 			case _: return CallUnification.makeStaticCallBetter(ctx,c,cf,pl,args,t,p);
 		}
 	}
-	public static function doCheckCast(ctx:Dynamic, uctx:Dynamic, tleft:T, eright:TExpr, p:Pos):TExpr {
+	public static function doCheckCast(ctx:context.Typecore.Typer, uctx:Dynamic, tleft:T, eright:TExpr, p:Pos):TExpr {
 		function recurse(cf:TClassField, f:Void->TExpr):TExpr {
 			switch cf.cfKind {
 				case Method(MethMacro):
@@ -105,14 +105,14 @@ class AbstractCast {
 		}
 		return loop([],tleft,eright.etype);
 	}
-	public static function castOrUnifyRaise(ctx:Dynamic, tleft:T, eright:TExpr, p:Pos, ?uctx:Dynamic):TExpr {
+	public static function castOrUnifyRaise(ctx:context.Typecore.Typer, tleft:T, eright:TExpr, p:Pos, ?uctx:core.TUnification.UnificationContext):TExpr {
 		if (uctx == null) uctx = core.TUnification.defaultUnificationContext();
 		try return doCheckCast(ctx,uctx,tleft,eright,p) catch (_:NotFound) {
 			Typecore.unifyRaiseCustom(uctx,eright.etype,tleft,p);
 			return eright;
 		}
 	}
-	public static function castOrUnify(ctx:Dynamic, tleft:T, eright:TExpr, p:Pos):TExpr {
+	public static function castOrUnify(ctx:context.Typecore.Typer, tleft:T, eright:TExpr, p:Pos):TExpr {
 		try return castOrUnifyRaise(ctx,tleft,eright,p) catch (err:core.Error.TypingError) {
 			switch err.error.errMessage {
 				case Unify(_): Typecore.raiseOrDisplayError(ctx,err.error); return eright;
@@ -120,7 +120,7 @@ class AbstractCast {
 			}
 		}
 	}
-	public static function prepareArrayAccessField(ctx:Dynamic, a:TAbstract, pl:TParams, cf:TClassField, p:Pos):Dynamic {
+	public static function prepareArrayAccessField(ctx:context.Typecore.Typer, a:TAbstract, pl:TParams, cf:TClassField, p:Pos):Dynamic {
 		var monos = [for (_ in cf.cfParams) Typecore.spawnMonomorph(ctx,p)];
 		function map(t:T):T return core.TFunctions.applyParams(a.aParams,pl,core.TFunctions.applyParams(cf.cfParams,monos,t));
 		function checkConstraints():Void {
@@ -138,7 +138,7 @@ class AbstractCast {
 		}
 		return {map:map,checkConstraints:checkConstraints,getTa:getTa};
 	}
-	public static function findArrayReadAccessRaise(ctx:Dynamic, a:TAbstract, pl:TParams, e1:TExpr, p:Pos):Dynamic {
+	public static function findArrayReadAccessRaise(ctx:context.Typecore.Typer, a:TAbstract, pl:TParams, e1:TExpr, p:Pos):Dynamic {
 		for (cf in a.aArray) {
 			var prepared = prepareArrayAccessField(ctx,a,pl,cf,p);
 			var tf = core.TFunctions.follow(prepared.map(cf.cfType));
@@ -157,7 +157,7 @@ class AbstractCast {
 		}
 		throw NotFound.raise();
 	}
-	public static function findArrayWriteAccessRaise(ctx:Dynamic, a:TAbstract, pl:TParams, e1:TExpr, e2:TExpr, p:Pos):Dynamic {
+	public static function findArrayWriteAccessRaise(ctx:context.Typecore.Typer, a:TAbstract, pl:TParams, e1:TExpr, e2:TExpr, p:Pos):Dynamic {
 		for (cf in a.aArray) {
 			var prepared = prepareArrayAccessField(ctx,a,pl,cf,p);
 			var tf = core.TFunctions.follow(prepared.map(cf.cfType));
@@ -177,17 +177,17 @@ class AbstractCast {
 		}
 		throw NotFound.raise();
 	}
-	public static function findArrayReadAccess(ctx:Dynamic, a:TAbstract, tl:TParams, e1:TExpr, p:Pos):Dynamic {
+	public static function findArrayReadAccess(ctx:context.Typecore.Typer, a:TAbstract, tl:TParams, e1:TExpr, p:Pos):Dynamic {
 		try return findArrayReadAccessRaise(ctx,a,tl,e1,p) catch (_:NotFound) {
 			return Error.raiseTypingError("No @:arrayAccess function for " + core.TPrinting.sType(core.TPrinting.printContext(),TAbstract(a,tl)) + " accepts argument of " + core.TPrinting.sType(core.TPrinting.printContext(),e1.etype),p);
 		}
 	}
-	public static function findArrayWriteAccess(ctx:Dynamic, a:TAbstract, tl:TParams, e1:TExpr, e2:TExpr, p:Pos):Dynamic {
+	public static function findArrayWriteAccess(ctx:context.Typecore.Typer, a:TAbstract, tl:TParams, e1:TExpr, e2:TExpr, p:Pos):Dynamic {
 		try return findArrayWriteAccessRaise(ctx,a,tl,e1,e2,p) catch (_:NotFound) {
 			return Error.raiseTypingError("No @:arrayAccess function for " + core.TPrinting.sType(core.TPrinting.printContext(),TAbstract(a,tl)) + " accepts arguments of " + core.TPrinting.sType(core.TPrinting.printContext(),e1.etype) + " and " + core.TPrinting.sType(core.TPrinting.printContext(),e2.etype),p);
 		}
 	}
-	public static function findToField(uctx:Dynamic, b:T, ab:TAbstract, tl:TParams):Dynamic {
+	public static function findToField(uctx:core.TUnification.UnificationContext, b:T, ab:TAbstract, tl:TParams):Dynamic {
 		var a = TAbstract(ab,tl);
 		function check(t:T,cf:TClassField):Dynamic return switch core.TFunctions.follow(cf.cfType) {
 			case TFun(sig) if (sig.args.length > 0):

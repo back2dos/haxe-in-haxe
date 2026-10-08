@@ -252,7 +252,7 @@ class Fusion {
  }
 }
 class Cleanup {
- public static function apply(scom:Dynamic,e:TExpr):TExpr {
+ public static function apply(scom:context.SafeCom.SafeContext,e:TExpr):TExpr {
   function ifOrOp(e:TExpr,e1:TExpr,e2:TExpr,e3:TExpr):TExpr return switch [Texpr.skip(e1).eexpr,Texpr.skip(e2).eexpr,Texpr.skip(e3).eexpr] {
    case [_,TReturn(b),TReturn({eexpr:TConst(TBool(false))})] if (b != null):var binop = optimizeBinop(scom,withExpr(e,TBinop(OpBoolAnd,e1,b)),OpBoolAnd,e1,b); withExpr(e,TReturn(binop));
    case [TUnop(Not,Prefix,inner),TReturn(b),TReturn({eexpr:TConst(TBool(true))})] if (b != null):var binop = optimizeBinop(scom,withExpr(e,TBinop(OpBoolOr,inner,b)),OpBoolOr,inner,b); withExpr(e,TReturn(binop));

@@ -50,7 +50,7 @@ class OptimizerTexpr {
 		}
 		return {mightBeAffected:mightBeAffected, collectModifiedLocals:collectModifiedLocals};
 	}
-	public static function optimizeBinop(scom:Dynamic, e:TExpr, op:Binop, e1:TExpr, e2:TExpr):TExpr {
+	public static function optimizeBinop(scom:context.SafeCom.SafeContext, e:TExpr, op:Binop, e1:TExpr, e2:TExpr):TExpr {
 		function isFloat(t:T):Bool return switch TypeOps.follow(t) { case TAbstract({aPath:{pack:[], name:"Float"}}, _): true; case _: false; };
 		function isNumeric(t:T):Bool return switch TypeOps.follow(t) { case TAbstract({aPath:{pack:[], name:"Float" | "Int"}}, _): true; case _: false; };
 		function constant(c:TConstant):TExpr return TypeOps.mk(TConst(c), e.etype, e.epos);

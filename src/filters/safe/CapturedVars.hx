@@ -11,7 +11,7 @@ import haxe.ds.IntMap;
 // Persistent-map snapshots use copies. Sorted integer keys retain OCaml PMap fold order.
 class CapturedVars {
 	static function ids<T>(m:IntMap<T>):Array<Int> { var a = [for (i in m.keys()) i]; a.sort((a, b) -> a - b); return a; }
-	public static function capturedVars(scom:Dynamic, impl:Dynamic, forCoro:Bool, e:TExpr):TExpr {
+	public static function capturedVars(scom:context.SafeCom.SafeContext, impl:Dynamic, forCoro:Bool, e:TExpr):TExpr {
 		function mkVar(v:TVar, used:IntMap<T>):TVar {
 			if (!used.exists(v.vId)) throw "Not_found";
 			var v2 = TypeOps.allocVar(v.vKind, v.vName, used.get(v.vId), v.vPos);

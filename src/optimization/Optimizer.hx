@@ -48,7 +48,7 @@ class Optimizer {
 				return Lambda.foreach(sw.switchCases, c -> isEmpty(c.caseExpr)) && (sw.switchDefault == null || isEmpty(sw.switchDefault)) ? sw.switchSubject : null;
 		}
 	}
-	public static function reduceControlFlow(scom:Dynamic, e:TExpr):TExpr {
+	public static function reduceControlFlow(scom:context.SafeCom.SafeContext, e:TExpr):TExpr {
 		return switch e.eexpr {
 			case TIf({eexpr:TConst(TBool(t))}, e1, e2): t ? e1 : e2 == null ? TypeOps.mk(TBlock([]), e.etype, e.epos) : e2;
 			case TWhile({eexpr:TConst(TBool(false))}, sub, flag): flag == NormalWhile ? TypeOps.mk(TBlock([]), e.etype, e.epos) : e;
@@ -68,7 +68,7 @@ class Optimizer {
 			case _: e;
 		};
 	}
-	public static function reduceLoop(scom:Dynamic, stack:Dynamic, e:TExpr):TExpr {
+	public static function reduceLoop(scom:context.SafeCom.SafeContext, stack:Dynamic, e:TExpr):TExpr {
 		e = core.Texpr.mapExpr(e -> reduceLoop(scom, stack, e), e);
 		var reduced:TExpr;
 		switch e.eexpr {
@@ -107,12 +107,12 @@ class Optimizer {
 		}
 		return Sanitize.sanitizeExpr(scom, reduced);
 	}
-	public static function reduceExpression(scom:Dynamic, e:TExpr):TExpr {
+	public static function reduceExpression(scom:context.SafeCom.SafeContext, e:TExpr):TExpr {
 		if (!scom.foptimize) return e;
 		var stack = core.TUnification.newRecStack();
 		return core.TUnification.recStackDefault(stack, scom.curfield, cf -> cf == scom.curfield, () -> reduceLoop(scom, stack, e), e);
 	}
-	public static function makeConstantExpressionWithStack(scom:Dynamic, stack:Dynamic, e:TExpr, concatStrings:Bool = false):Null<TExpr> {
+	public static function makeConstantExpressionWithStack(scom:context.SafeCom.SafeContext, stack:Dynamic, e:TExpr, concatStrings:Bool = false):Null<TExpr> {
 		e = reduceLoop(scom, stack, e);
 		return switch e.eexpr {
 			case TConst(_): e;

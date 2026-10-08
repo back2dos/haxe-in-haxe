@@ -55,7 +55,7 @@ class SafeCom {
 		curclass:TypeOps.nullClass, curfield:TypeOps.nullField
 	};
 	}
-	public static function ofTyper(ctx:Dynamic):SafeContext {
+	public static function ofTyper(ctx:context.Typecore.Typer):SafeContext {
 		var out = ofCom(ctx.com);
 		out.curclass = ctx.c.curclass;
 		out.curfield = ctx.f.curfield;
