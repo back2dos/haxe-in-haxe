@@ -44,7 +44,7 @@ class TanonIdentification<A> {
   var path:Null<core.Globals.GlobalTypePath>=switch an.aStatus{case ClassStatics(c):c.clPath;case EnumStatics(e):e.ePath;case AbstractStatics(a):a.aPath;case _:null;};
   if(path!=null)return protect(function(){try{return pfms.find(path);}catch(e:NotFound){var pfm=makePfm(path);addPfm(path,pfm);return pfm;}});
   var arity=0;var fields=an.aFields.copy();var names=[for(n in (an.aFields.keys():Iterator<String>))n];names.sort(Reflect.compare);for(n in names){var cf=an.aFields.get(n);arity++;fields.set(cf.cfName,core.ds.Record.withFields(cf,{cfType:replaceMono(uctx.equalityKind!=EqStricter,cf.cfType)}));}an={aFields:fields,aStatus:an.aStatus};
-  return protect(function(){try{return findCompatible(uctx,arity,TAnon(an));}catch(e:NotFound){var id=num++;var path={pack:["haxe","generated"],name:'Anon$id'};var pfm=makePfm(path);addPfm(path,pfm);return pfm;}});
+  return protect(function(){try{return findCompatible(uctx,arity,TAnon(an));}catch(e:NotFound){var id=num++;var path:core.Globals.GlobalTypePath = {pack:["haxe","generated"],name:'Anon$id'};var pfm=makePfm(path);addPfm(path,pfm);return pfm;}});
  }
  public function identify(uctx:UnificationContext,acceptAnons:Bool,t:T):Null<PathFieldMapping<A>> {
   function loop(t:T):Null<PathFieldMapping<A>> return switch t {

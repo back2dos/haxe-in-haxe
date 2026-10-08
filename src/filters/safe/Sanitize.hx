@@ -39,11 +39,12 @@ class Sanitize {
 			case _: true;
 		};
 	}
+	// sanitize_expr's local helpers; static so each call does not allocate closures.
+	static function parent(e:TExpr):TExpr return switch e.eexpr { case TParenthesis(_): e; case _: TypeOps.mk(TParenthesis(e), e.etype, e.epos); };
+	static function block(e:TExpr):TExpr return switch e.eexpr { case TBlock(_): e; case _: TypeOps.mk(TBlock([e]), e.etype, e.epos); };
+	static function complex(e:TExpr):TExpr return switch e.eexpr { case TVar(_, _) | TCall({eexpr:TIdent("__js__")}, _): block(e); case _: e; };
+	static function hasIf(e:TExpr):Bool return switch e.eexpr { case TIf(_, _, null): true; case TWhile(_, body, NormalWhile): hasIf(body); case _: false; };
 	public static function sanitizeExpr(scom:context.SafeCom.SafeContext, e:TExpr):TExpr {
-		function parent(e:TExpr):TExpr return switch e.eexpr { case TParenthesis(_): e; case _: TypeOps.mk(TParenthesis(e), e.etype, e.epos); };
-		function block(e:TExpr):TExpr return switch e.eexpr { case TBlock(_): e; case _: TypeOps.mk(TBlock([e]), e.etype, e.epos); };
-		function complex(e:TExpr):TExpr return switch e.eexpr { case TVar(_, _) | TCall({eexpr:TIdent("__js__")}, _): block(e); case _: e; };
-		function hasIf(e:TExpr):Bool return switch e.eexpr { case TIf(_, _, null): true; case TWhile(_, body, NormalWhile): hasIf(body); case _: false; };
 		var def:TExprDef = switch e.eexpr {
 			case TConst(TNull):
 				if (scom.platformConfig.pfStatic && !TypeOps.isNullable(e.etype)) {

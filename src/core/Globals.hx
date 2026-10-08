@@ -12,9 +12,13 @@ package core;
 	public inline function clone():Pos return new Pos(pfile, pmin, pmax);
 }
 
-typedef GlobalTypePath = {
-	var pack:Array<String>;
-	var name:String;
+// A class so map keys (module lookups) compare without reflection; see
+// core.ds.Key. @:structInit keeps `{pack:..., name:...}` literals working.
+@:structInit class GlobalTypePath {
+	public var pack:Array<String>;
+	public var name:String;
+	public inline function new(pack:Array<String>, name:String) { this.pack = pack; this.name = name; }
+	public inline function clone():GlobalTypePath return new GlobalTypePath(pack, name);
 }
 
 typedef CompilerVersion = {

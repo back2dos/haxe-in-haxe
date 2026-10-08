@@ -13,6 +13,7 @@ class Record {
 		#if !macro
 		if (o is core.TType.TExpr) return cast (cast o : core.TType.TExpr).clone();
 		if (o is core.Globals.Pos) return cast (cast o : core.Globals.Pos).clone();
+		if (o is core.Globals.GlobalTypePath) return cast (cast o : core.Globals.GlobalTypePath).clone();
 		if (o is core.Ast.Expr) return cast (cast o : core.Ast.Expr).clone();
 		if (o is core.TType.TVar) return cast (cast o : core.TType.TVar).clone();
 		if (o is core.TType.TClassField) return cast (cast o : core.TType.TClassField).clone();

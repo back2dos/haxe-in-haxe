@@ -186,7 +186,7 @@ class TypeloadFields {
    var call=switch m.exprs {case [{expr:ECall(path,args)}]:{path:path,args:args};case _:raiseTypingError("Invalid build parameters",m.pos);};
    var sl:Array<String>=try {stringListOfExprPathRaise(call.path,function(i) return resolveTypeImport(ctx,m.pos,i));} catch(_:Exit) {raiseTypingError("Build call parameter must be a class path",m.pos);};
    if(sl.length<2) raiseTypingError("Invalid macro path",m.pos);
-   var pack=sl.slice(2);pack.reverse();var cpath={pack:pack,name:sl[1]},meth=sl[0];
+   var pack=sl.slice(2);pack.reverse();var cpath:core.Globals.GlobalTypePath = {pack:pack,name:sl[1]},meth=sl[0];
    if(ctx.com.isMacroContext) raiseTypingError("You cannot use @:build inside a macro : make sure that your type is not used in macro",m.pos);
    var old=ctx.c.getBuildInfos;ctx.c.getBuildInfos=function() return {type:mt,params:extractParamTypes(ti.mtParams),fields:fvars()};
    var r=try {ctx.g.doMacro(ctx,MBuild,cpath,meth,call.args,m.pos);} catch(e:haxe.Exception){ctx.c.getBuildInfos=old;throw e;};ctx.c.getBuildInfos=old;

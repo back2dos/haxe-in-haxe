@@ -241,7 +241,7 @@ class Typer {
         else if(upper==null) {upper=part; position=part.pos;} else {sub=part.name; position=part.pos; break;}
        }
        if(upper==null) throw core.ds.NotFound.raise();
-       var mpath={pack:pack,name:upper.name};
+       var mpath:core.Globals.GlobalTypePath = {pack:pack,name:upper.name};
        if(ctx.com.moduleLut.mem(mpath)) return raiseErrorMsg(TypeNotFound(mpath,sub==null?upper.name:sub,NotDefined),position);
        return raiseErrorMsg(ModuleNotFound(mpath),position);
       } catch(_:core.ds.NotFound) {
@@ -430,7 +430,7 @@ class Typer {
    function defaultParams(c:TClass):TParams {var tl=tlOrMonos(c.clParams); unifyConstructor(c,FieldAccessTools.getConstructorAccess(c,tl,p)); return tl;}
    return switch info.buildKind {
     case BuildGeneric(c):switch withType {
-     case WithType(t,_):switch follow(t) {case TInst(c,tl) if(c.clPath==info.buildPath):tl; case TInst({clKind:KGenericInstance(c,tl)},_) if(c.clPath==info.buildPath):tl; case TAbstract(a,tl) if(a.aPath==info.buildPath):tl; case _:defaultParams(c);}
+     case WithType(t,_):switch follow(t) {case TInst(c,tl) if(core.ds.Key.compare(c.clPath,info.buildPath)==0):tl; case TInst({clKind:KGenericInstance(c,tl)},_) if(core.ds.Key.compare(c.clPath,info.buildPath)==0):tl; case TAbstract(a,tl) if(core.ds.Key.compare(a.aPath,info.buildPath)==0):tl; case _:defaultParams(c);}
      case _:defaultParams(c);
     }
     case _:tlOrMonos(info.buildParams);

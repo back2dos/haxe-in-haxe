@@ -11,15 +11,22 @@ class Stream<T> {
 	public static function from<T>(produce:Int->Null<T>):Stream<T> return new Stream(produce);
 	public static function ofList<T>(values:Array<T>):Stream<T> return from(function(i) return i < values.length ? values[i] : null);
 	public function count():Int return consumed;
-	public function npeek(n:Int):Array<T> {
+	inline function fill(n:Int):Void {
 		while (!ended && buffered.length < n) {
 			var value = produce(produced);
 			if (value == null) ended = true;
 			else { buffered.push(value); produced++; }
 		}
+	}
+	public function npeek(n:Int):Array<T> {
+		fill(n);
 		return buffered.slice(0, n);
 	}
-	public function peek():Null<T> return npeek(1)[0];
+	// Without the npeek copy: the parser peeks at every token.
+	public function peek():Null<T> {
+		fill(1);
+		return buffered.length > 0 ? buffered[0] : null;
+	}
 	public function junk():Void {
 		if (peek() != null) { buffered.shift(); consumed++; }
 	}

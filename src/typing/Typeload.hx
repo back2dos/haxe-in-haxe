@@ -79,7 +79,7 @@ class Typeload {
  }
  public static function findInWildcardImports<R>(ctx:Typer,mname:String,p:Pos,f:ModuleDef->R):R {
   for(entry in (cast ctx.m.importResolution.extractWildcardPackages():Array<Dynamic>)) try {
-   var path={pack:entry.pack,name:mname},m:Dynamic;
+   var path:core.Globals.GlobalTypePath = {pack:entry.pack,name:mname},m:Dynamic;
    try m=ctx.g.doLoadModule(ctx,path,p) catch(exc:Dynamic) {switch exc {case (core.ds.ExceptionTools.typing(_) => Some({errMessage:ModuleNotFound(mpath)})) if(Common.samePath(mpath,path)):throw NotFound.raise(); case _:throw exc;}}
    var result=f(m); ImportHandling.markImportPosition(ctx,entry.pos); return result;
   } catch(exc:Dynamic) {if(!Std.isOfType(exc,NotFound)) throw exc;}
@@ -88,7 +88,7 @@ class Typeload {
  public static function findInModulesStartingFromCurrentPackage<R>(ctx:Typer,mname:String,p:Pos,f:ModuleDef->R):R {
   var pack:Array<String>=ctx.m.curmod.mPath.pack.copy(),m:ModuleDef=null;
   while(true) {
-   var path={pack:pack,name:mname};
+   var path:core.Globals.GlobalTypePath = {pack:pack,name:mname};
    try {m=ctx.g.doLoadModule(ctx,path,p); break;} catch(exc:Dynamic) {switch exc {case (core.ds.ExceptionTools.typing(_) => Some({errMessage:ModuleNotFound(mpath)})) if(Common.samePath(mpath,path)):if(pack.length==0) throw NotFound.raise(); pack=pack.slice(0,pack.length-1); case _:throw exc;}}
   }
   return f(m);

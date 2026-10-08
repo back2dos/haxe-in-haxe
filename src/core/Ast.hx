@@ -215,4 +215,4 @@ class Ast {
 
 }
 
-typedef TypePathParts = {var pack:Array<String>; var name:String;}
+typedef TypePathParts = core.Globals.GlobalTypePath;

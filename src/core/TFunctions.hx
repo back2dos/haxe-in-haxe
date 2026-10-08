@@ -74,7 +74,7 @@ class TFunctions {
 		tPath:path,tModule:m,tPos:pos,tNamePos:namePos,tPrivate:false,tDoc:null,tMeta:[],tParams:[],tUsing:[],tType:t,tRestore:function() {}
 	};
 	public static function classModuleType(c:TClass):TDef {
-		var path = {pack:[],name:"Class<" + Globals.sTypePath(c.clPath) + ">"};
+		var path:core.Globals.GlobalTypePath = {pack:[],name:"Class<" + Globals.sTypePath(c.clPath) + ">"};
 		var t = mkAnon(ClassStatics(c),c.clStatics);
 		var def = mkTypedef(c.clModule,path,c.clPos,Globals.nullPos,t); def.tPrivate = true; return def;
 	}

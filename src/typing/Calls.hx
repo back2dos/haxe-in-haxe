@@ -101,9 +101,9 @@ class Calls {
     case [Method(_),_]:
      function checkClass(c:TClass):Bool return (hasClassFlag(c,CExtern)||hasClassFieldFlag(cf,CfExtern))&&!Meta.has(MetaTag.Runtime,cf.cfMeta);
      function wrapExtern(c:TClass):TExpr {
-      var m=c.clModule,path={pack:c.clModule.mPath.pack.concat(["_"+c.clModule.mPath.name]),name:c.clModule.mPath.name+"_Impl_"};
+      var m=c.clModule,path:core.Globals.GlobalTypePath={pack:c.clModule.mPath.pack.concat(["_"+c.clModule.mPath.name]),name:c.clModule.mPath.name+"_Impl_"};
       var c2:Null<TClass>=null;
-      for(mt in m.mTypes) switch mt {case TClassDecl(c) if(c.clPath==path):c2=c; break; case _:}
+      for(mt in m.mTypes) switch mt {case TClassDecl(c) if(core.ds.Key.compare(c.clPath,path)==0):c2=c; break; case _:}
       if(c2==null) {c2=mkClass(m,path,c.clPos,Globals.nullPos); m.mTypes.unshift(TClassDecl(c2));}
       var wrapper:TClassField=c2.clStatics.get(cf.cfName);
       if(wrapper==null) {wrapper=core.ds.Record.copy(cf); wrapper.cfKind=Method(MethNormal); c2.clStatics.set(wrapper.cfName,wrapper); c2.clOrderedStatics.unshift(wrapper);}

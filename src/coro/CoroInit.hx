@@ -10,11 +10,11 @@ import coro.ContTypes;
 class CoroInit {
  public static function loadModuleClass(ctx:context.Typecore.Typer,path:Dynamic):TClass {
   var m=ctx.g.doLoadModule(ctx,path,nullPos);
-  for(mt in (m.mTypes:Array<ModuleType>)) switch mt {case TClassDecl(c) if(c.clPath==path):return c; case _:} throw NotFound.raise();
+  for(mt in (m.mTypes:Array<ModuleType>)) switch mt {case TClassDecl(c) if(core.ds.Key.compare(c.clPath,path)==0):return c; case _:} throw NotFound.raise();
  }
  public static function loadModuleAbstract(ctx:context.Typecore.Typer,path:Dynamic):TAbstract {
   var m=ctx.g.doLoadModule(ctx,path,nullPos);
-  for(mt in (m.mTypes:Array<ModuleType>)) switch mt {case TAbstractDecl(a) if(a.aPath==path):return a; case _:} throw NotFound.raise();
+  for(mt in (m.mTypes:Array<ModuleType>)) switch mt {case TAbstractDecl(a) if(core.ds.Key.compare(a.aPath,path)==0):return a; case _:} throw NotFound.raise();
  }
  public static function makeContinuationApi(ctx:context.Typecore.Typer):ContinuationApi {
   var base=loadModuleClass(ctx,{pack:["haxe","coro"],name:"BaseContinuation"});

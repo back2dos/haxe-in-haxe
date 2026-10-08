@@ -28,7 +28,7 @@ class ContinuationClassBuilder {
  public static function create(ctx:CoroCtx):CoroClass {
   var path=ctx.typer.c.curclass.clPath;var mangled='HxCoro_${path.pack.join("_")}_${path.name}';var name:String;var result:T;
   switch ctx.coroType {case ClassField(_,cf,tf,_):name=mangled+"_"+cf.cfName;result=tf.tfType;case LocalFunc(tf,v):var id=Coro.nextClosureId.get(mangled);if(id==null)id=0;Coro.nextClosureId.set(mangled,id+1);name=mangled+'_AnonFunc$id';result=tf.tfType;}
-  var p=ctx.classNamePos;if(ExtType.isVoid(follow(result)))result=ctx.typer.t.tunit;var mod=ctx.typer.m.curmod;var cp={pack:mod.mPath.pack.concat(["_"+mod.mPath.name]),name:name};var cls=mkClass(mod,cp,p,p);
+  var p=ctx.classNamePos;if(ExtType.isVoid(follow(result)))result=ctx.typer.t.tunit;var mod=ctx.typer.m.curmod;var cp:core.Globals.GlobalTypePath = {pack:mod.mPath.pack.concat(["_"+mod.mPath.name]),name:name};var cls=mkClass(mod,cp,p,p);
   var outside:TypeParams=ctx.typer.typeParams;var inside=outside.map(function(ttp){var c={var recordCopy5 = core.ds.Record.copy(ttp.ttpClass); recordCopy5.clPath = {pack:[],name:ttp.ttpName}; recordCopy5;};var constraints=ttp.ttpConstraints==null?null:AtomicLazy.fromFun(function()return (ttp.ttpConstraints).force().map(function(t)return t));return mkTypeParam(c,TPHType,ttp.ttpDefault,constraints);});cls.clParams=inside;
   var api:ContinuationApi=ctx.typer.g.continuationApi;if(api==null)api=CoroInit.makeContinuationApi(ctx.typer);
   var pi=extractParamTypes(inside);var po=extractParamTypes(outside);var subst=[for(i in 0...outside.length){param:outside[i],t:pi[i]}];var ri=Coro.substituteTypeParams(subst,result);cls.clSuper={cls:api.baseContinuationClass,params:[ri]};

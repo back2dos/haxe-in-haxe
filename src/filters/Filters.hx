@@ -56,7 +56,7 @@ class Filters {
 	}
 	public static function checkPrivatePath(com:CommonContext, t:ModuleType):Void switch t {
 		case TClassDecl(c) if (c.clPrivate):
-			var rpath = {pack:c.clModule.mPath.pack, name:"_" + c.clModule.mPath.name};
+			var rpath:core.Globals.GlobalTypePath = {pack:c.clModule.mPath.pack, name:"_" + c.clModule.mPath.name};
 			if (com.moduleLut.getTypeLut().mem(rpath)) Error.raiseTypingError("This private class name will clash with " + Globals.sTypePath(rpath), c.clPos);
 		case _:
 	}
@@ -78,7 +78,7 @@ class Filters {
 				Common.addFeature(com, "has_metadata");
 				var cf = TypeOps.mkField("__meta__", e.etype, e.epos, Globals.nullPos, true, true); cf.cfExpr = e;
 				if (TypeOps.hasClassFlag(c, CInterface) && com.platform == Jvm) {
-					var path = {pack:c.clPath.pack, name:c.clPath.name + "_HxMeta"};
+					var path:core.Globals.GlobalTypePath = {pack:c.clPath.pack, name:c.clPath.name + "_HxMeta"};
 					var ncls = TypeOps.mkClass(c.clModule, path, c.clPos, Globals.nullPos);
 					ncls.clOrderedStatics.unshift(cf); ncls.clStatics.set(cf.cfName, cf);
 					com.types = (cast com.types:Array<ModuleType>).concat([TClassDecl(ncls)]);
