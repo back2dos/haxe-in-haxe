@@ -215,7 +215,7 @@ class Printer {
 		["a_from",sList(", ",TPrinting.sTypeKind,a.aFrom.map(followLazyAndMono))],["a_to",sList(", ",TPrinting.sTypeKind,a.aTo.map(followLazyAndMono))],
 		["a_from_field",sList(", ",function(p) return TPrinting.sTypeKind(followLazyAndMono(p.type)) + ": " + p.field.cfName,a.aFromField)],
 		["a_to_field",sList(", ",function(p) return TPrinting.sTypeKind(followLazyAndMono(p.type)) + ": " + p.field.cfName,a.aToField)],
-		["a_array",sList(", ",function(cf) return cf.cfName,a.aArray)],["a_read",sOpt(function(cf) return cf.cfName,a.aRead)],["a_write",sOpt(function(cf) return cf.cfName,a.aWrite)]
+		["a_array",sList(", ",function(cf:TClassField) return cf.cfName,a.aArray)],["a_read",sOpt(function(cf:TClassField) return cf.cfName,a.aRead)],["a_write",sOpt(function(cf:TClassField) return cf.cfName,a.aWrite)]
 	]);
 	public static function sTvarExtra(ve:TVarExtra):String return 'Some(${sTypeParams("",ve.vParams)}, ${sOpt(function(e) return TPrinting.sExprAst(true,"",sType,e),ve.vExpr)})';
 	public static function sTvarKind(kind:TVarKind):String return switch kind {

@@ -124,7 +124,7 @@ class Monomorph {
    case CTypes([{type:t,name:_}]):if(getRecursion(t)==null) doBind(m,t);
    case CTypes(_),CMixed(_):
    case CStructural(fields,_):
-    PMap.iter(function(_,cf) {
+    PMap.iter(function(_,cf:TClassField) {
      var t=getRecursion(cf.cfType);
      if(t!=null) {var pctx=printContext();var s=sType(pctx,t)+" appears in { "+cf.cfName+": "+sType(pctx,cf.cfType)+" }";throw new Unify_error([UnifyCustom("Recursive type"),UnifyCustom(s)]);}
     },fields);
@@ -173,7 +173,7 @@ class TUnification {
     case TDynamic(null):false;
     case TDynamic(t):loop(t);
     case TLazy(f):loop(lazyType(f));
-    case TAnon(an):try {PMap.iter(function(_,f) {if(loop(f.cfType)) throw new TypeExit();},an.aFields);false;} catch(_:TypeExit) {true;}
+    case TAnon(an):try {PMap.iter(function(_,f:TClassField) {if(loop(f.cfType)) throw new TypeExit();},an.aFields);false;} catch(_:TypeExit) {true;}
    }
   }
   if(loop(b)) return follow(b)==a;

@@ -33,7 +33,14 @@ enum TypeParamHost { TPHType; TPHConstructor; TPHMethod; TPHEnumConstructor; TPH
 enum CacheBoundObject { Resource(name:String, data:String); IncludeFile(file:String, contents:String); Message(value:CompilerMessage); }
 
 enum T { TMono(mono:TMono); TEnum(en:TEnum, params:TParams); TInst(cls:TClass, params:TParams); TType(def:TDef, params:TParams); TFun(signature:TSignature); TAnon(anon:TAnon); TDynamic(inner:Null<T>); TLazy(lazy:TLazy); TAbstract(abs:TAbstract, params:TParams); }
-typedef TMono = { var tmType:Null<T>; var tmDownConstraints:Array<TMonoConstraint>; var tmUpConstraints:Array<{var type:T; var name:Null<String>;}>; var tmModifiers:Array<TMonoModifier>; }
+@:structInit class TMono {
+	public var tmType:Null<T>;
+	public var tmDownConstraints:Array<TMonoConstraint>;
+	public var tmUpConstraints:Array<{var type:T; var name:Null<String>;}>;
+	public var tmModifiers:Array<TMonoModifier>;
+	public inline function new(tmType:Null<T>, tmDownConstraints:Array<TMonoConstraint>, tmUpConstraints:Array<{var type:T; var name:Null<String>;}>, tmModifiers:Array<TMonoModifier>) { this.tmType = tmType; this.tmDownConstraints = tmDownConstraints; this.tmUpConstraints = tmUpConstraints; this.tmModifiers = tmModifiers; }
+	public inline function clone():TMono return new TMono(tmType, tmDownConstraints, tmUpConstraints, tmModifiers);
+}
 enum TMonoConstraint { MMono(mono:TMono, name:Null<String>); MField(field:TClassField); MType(type:T, name:Null<String>); MEmptyStructure; }
 enum TMonoConstraintKind { CUnknown; CStructural(fields:TypeMap<TClassField>, open:Bool); CMixed(kinds:Array<TMonoConstraintKind>); CTypes(types:Array<{var type:T; var name:Null<String>;}>); }
 enum TMonoModifier { MNullable(callback:T->T); MOpenStructure; MDynamic; }
@@ -51,7 +58,18 @@ enum TConstant { TInt(value:Int); TFloat(value:String); TString(value:String); T
 typedef TVarExtra = { var vParams:TypeParams; var vExpr:Null<TExpr>; }
 enum TVarOrigin { TVOLocalVariable; TVOArgument; TVOForVariable; TVOPatternVariable; TVOCatchVariable; TVOLocalFunction; }
 enum TVarKind { VUser(origin:TVarOrigin); VGenerated; VInlined; VInlinedConstructorVariable(fields:Array<String>); VExtractorVariable; VAbstractThis; }
-typedef TVar = { var vId:Int; var vName:String; var vType:T; var vKind:TVarKind; var vExtra:Null<TVarExtra>; var vMeta:Metadata; var vFlags:Int; var vPos:Pos; }
+@:structInit class TVar {
+	public var vId:Int;
+	public var vName:String;
+	public var vType:T;
+	public var vKind:TVarKind;
+	public var vExtra:Null<TVarExtra>;
+	public var vMeta:Metadata;
+	public var vFlags:Int;
+	public var vPos:Pos;
+	public inline function new(vId:Int, vName:String, vType:T, vKind:TVarKind, vExtra:Null<TVarExtra>, vMeta:Metadata, vFlags:Int, vPos:Pos) { this.vId = vId; this.vName = vName; this.vType = vType; this.vKind = vKind; this.vExtra = vExtra; this.vMeta = vMeta; this.vFlags = vFlags; this.vPos = vPos; }
+	public inline function clone():TVar return new TVar(vId, vName, vType, vKind, vExtra, vMeta, vFlags, vPos);
+}
 typedef TFunc = { var tfArgs:Array<{var variable:TVar; var defaultValue:Null<TExpr>;}>; var tfType:T; var tfExpr:TExpr; }
 enum AnonStatus { Closed; Const; Extend(types:Array<T>); ClassStatics(cls:TClass); EnumStatics(en:TEnum); AbstractStatics(abs:TAbstract); }
 typedef TAnon = { var aFields:TypeMap<TClassField>; var aStatus:AnonStatus; }
@@ -68,7 +86,22 @@ enum TFieldAccess { FInstance(cls:TClass, params:TParams, field:TClassField); FS
 	public inline function new(eexpr:TExprDef, etype:T, epos:Pos) { this.eexpr = eexpr; this.etype = etype; this.epos = epos; }
 	public inline function clone():TExpr return new TExpr(eexpr, etype, epos);
 }
-typedef TClassField = { var cfName:String; var cfType:T; var cfPos:Pos; var cfNamePos:Pos; var cfDoc:Documentation; var cfMeta:Metadata; var cfKind:FieldKind; var cfParams:TypeParams; var cfExpr:Null<TExpr>; var cfExprUnoptimized:Null<TExpr>; var cfOverloads:Array<TClassField>; var cfFlags:Int; }
+@:structInit class TClassField {
+	public var cfName:String;
+	public var cfType:T;
+	public var cfPos:Pos;
+	public var cfNamePos:Pos;
+	public var cfDoc:Documentation;
+	public var cfMeta:Metadata;
+	public var cfKind:FieldKind;
+	public var cfParams:TypeParams;
+	public var cfExpr:Null<TExpr>;
+	public var cfExprUnoptimized:Null<TExpr>;
+	public var cfOverloads:Array<TClassField>;
+	public var cfFlags:Int;
+	public inline function new(cfName:String, cfType:T, cfPos:Pos, cfNamePos:Pos, cfDoc:Documentation, cfMeta:Metadata, cfKind:FieldKind, cfParams:TypeParams, cfExpr:Null<TExpr>, cfExprUnoptimized:Null<TExpr>, cfOverloads:Array<TClassField>, cfFlags:Int) { this.cfName = cfName; this.cfType = cfType; this.cfPos = cfPos; this.cfNamePos = cfNamePos; this.cfDoc = cfDoc; this.cfMeta = cfMeta; this.cfKind = cfKind; this.cfParams = cfParams; this.cfExpr = cfExpr; this.cfExprUnoptimized = cfExprUnoptimized; this.cfOverloads = cfOverloads; this.cfFlags = cfFlags; }
+	public inline function clone():TClassField return new TClassField(cfName, cfType, cfPos, cfNamePos, cfDoc, cfMeta, cfKind, cfParams, cfExpr, cfExprUnoptimized, cfOverloads, cfFlags);
+}
 enum TClassKind { KNormal; KTypeParameter(param:TypedTypeParam); KExpr(expr:Expr); KGeneric; KGenericInstance(cls:TClass, params:TParams); KMacroType; KGenericBuild(fields:Array<ClassField>); KAbstractImpl(abs:TAbstract); KModuleFields(module:ModuleDef); }
 typedef TInfos = { var mtPath:GlobalTypePath; var mtModule:ModuleDef; var mtPos:Pos; var mtNamePos:Pos; var mtPrivate:Bool; var mtDoc:Documentation; var mtMeta:Metadata; var mtParams:TypeParams; var mtUsing:Array<{var cls:TClass; var pos:Pos;}>; var mtRestore:Void->Void; }
 typedef TClass = { var clPath:GlobalTypePath; var clModule:ModuleDef; var clPos:Pos; var clNamePos:Pos; var clPrivate:Bool; var clDoc:Documentation; var clMeta:Metadata; var clParams:TypeParams; var clUsing:Array<{var cls:TClass; var pos:Pos;}>; var clRestore:Void->Void; var clType:T; var clKind:TClassKind; var clFlags:Int; var clSuper:Null<{var cls:TClass; var params:TParams;}>; var clImplements:Array<{var cls:TClass; var params:TParams;}>; var clFields:TypeMap<TClassField>; var clStatics:TypeMap<TClassField>; var clOrderedStatics:Array<TClassField>; var clOrderedFields:Array<TClassField>; var clDynamic:Null<T>; var clArrayAccess:Null<T>; var clConstructor:Null<TClassField>; var clInit:Null<TClassField>; var clBuild:Void->BuildState; var clDescendants:Array<TClass>; }
