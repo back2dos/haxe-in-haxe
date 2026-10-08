@@ -9,7 +9,7 @@ class List {
  public static function map2<A,B,C>(f:A->B->C,a:Array<A>,b:Array<B>):Array<C> {sameLength(a,b);return [for(i in 0...a.length) f(a[i],b[i])];}
  public static function foldLeft<A,B>(f:A->B->A,acc:A,l:Array<B>):A {for(v in l) acc=f(acc,v);return acc;}
  public static function foldRight<A,B>(f:A->B->B,l:Array<A>,acc:B):B {var i=l.length;while(i>0) acc=f(l[--i],acc);return acc;}
- public static function find<A>(f:A->Bool,l:Array<A>):A {for(v in l) if(f(v)) return v;throw NotFound.instance;}
+ public static function find<A>(f:A->Bool,l:Array<A>):A {for(v in l) if(f(v)) return v;throw NotFound.raise();}
  public static function hd<A>(l:Array<A>):A {if(l.length==0) throw new haxe.Exception("hd");return l[0];}
  public static function tl<A>(l:Array<A>):Array<A> {if(l.length==0) throw new haxe.Exception("tl");return l.slice(1);}
  public static function rev<A>(l:Array<A>):Array<A> {var out=l.copy();out.reverse();return out;}

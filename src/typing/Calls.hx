@@ -48,8 +48,8 @@ class Calls {
   switch follow(e.etype) {case TFun({args:args,ret:_}):if(args.length>0) {var last=args[args.length-1]; if(last.optional&&isPosInfos(last.type)&&args.length-1==params.length) params=params.concat([mkInfosT(ctx,p,[],last.type)]);} case _:}
   try {
    var ethis:TExpr,cl:Null<TClass>,f:TClassField;
-   switch e.eexpr {case TField(on,fa):ethis=on; switch fa {case FInstance(c,_,cf)|FStatic(c,cf):cl=c; f=cf; case FAnon(cf):cl=null; f=cf; case _:throw core.ds.Exit.instance;} case _:throw core.ds.Exit.instance;}
-   if(!forceInline) {if(!needsInline(ctx,cl,f)) throw core.ds.Exit.instance;}
+   switch e.eexpr {case TField(on,fa):ethis=on; switch fa {case FInstance(c,_,cf)|FStatic(c,cf):cl=c; f=cf; case FAnon(cf):cl=null; f=cf; case _:throw core.ds.Exit.raise();} case _:throw core.ds.Exit.raise();}
+   if(!forceInline) {if(!needsInline(ctx,cl,f)) throw core.ds.Exit.raise();}
    else if(cl!=null) ctx.com.callbacks.addBeforeSave(function() {
     function hasOverride(c:TClass):Bool {if(c.clFields.exists(f.cfName)) return true; for(child in c.clDescendants) if(hasOverride(child)) return true; return false;}
     for(c in cl.clDescendants) if(hasOverride(c)) raiseTypingError("Cannot force inline-call to "+f.cfName+" because it is overridden",p);
@@ -70,7 +70,7 @@ class Calls {
     case {eexpr:TFunction(fd)}:return inlineFunction(fd);
     case _:
      if(hasClassFieldFlag(f,CfPostProcessed)) warning(ctx,WInlineOptimizedField,"Inlining of cached field "+f.cfName+" might lead to unexpected output",p);
-     switch f.cfExpr {case expression={eexpr:TFunction(fd)}:f.cfExprUnoptimized=expression; return inlineFunction(fd); case _:throw core.ds.Exit.instance;}
+     switch f.cfExpr {case expression={eexpr:TFunction(fd)}:f.cfExprUnoptimized=expression; return inlineFunction(fd); case _:throw core.ds.Exit.raise();}
    }
   } catch(_:core.ds.Exit) { return mk(TCall(e,params),t,p);}
  }
@@ -249,7 +249,7 @@ class Calls {
     case MSet(_):AKAccess(a,pl,a.aImpl,e1,e2);
     case _:hasAbstractArrayAccess=true; var f=AbstractCast.findArrayReadAccess(ctx,a,pl,e2,p); AKExpr(!ctx.allowTransform?mk(TArray(e1,e2),f.ret,p):mkArrayGetCall(ctx,f,a.aImpl,e1,p));
    }
-   case _:throw core.ds.NotFound.instance;
+   case _:throw core.ds.NotFound.raise();
   } catch(_:core.ds.NotFound) {}
   var baseOk=true;
   function loop(et:T,skipAbstract:Bool=false):T return switch follow(et) {

@@ -60,7 +60,7 @@ class TFunctions {
 		return {vKind:kind,vName:n,vType:t,vId:id,vExtra:null,vMeta:[],vPos:p,vFlags:switch kind {case VUser(TVOLocalFunction):intOfVarFlag(VFinal);case _:0;}};
 	}
 	public static function allocMid():Int return moduleUid.add(1) + 1;
-	public static function mk(e:TExprDef,t:T,p:Pos):TExpr return {eexpr:e,etype:t,epos:p};
+	public static function mk(e:TExprDef,t:T,p:Pos):TExpr {core.ds.GcPolicy.tick(); return {eexpr:e,etype:t,epos:p};}
 	public static function mkBlock(e:TExpr):TExpr return switch e.eexpr {case TBlock(_):e;case _:mk(TBlock([e]),e.etype,e.epos);};
 	public static function mkCast(e:TExpr,t:T,p:Pos):TExpr return mk(TCast(e,null),t,p);
 	// `null` is a Haxe keyword.
@@ -91,10 +91,10 @@ class TFunctions {
 		if (isPublic) flags = setFlag(flags,intOfClassFieldFlag(CfPublic));
 		return {cfName:name,cfType:t,cfPos:p,cfNamePos:namePos,cfDoc:null,cfMeta:[],cfKind:Var({vRead:AccNormal,vWrite:AccNormal}),cfExpr:null,cfExprUnoptimized:null,cfParams:[],cfOverloads:[],cfFlags:flags};
 	}
-	public static function findMap<V>(map:StringMap<V>,name:String):V { if (!map.exists(name)) throw NotFound.instance; return map.get(name); }
+	public static function findMap<V>(map:StringMap<V>,name:String):V { if (!map.exists(name)) throw NotFound.raise(); return map.get(name); }
 	public static function findField(c:TClass,name:String,kind:ClassFieldRefKind):TClassField {
 		var f = switch kind {case CfrConstructor:c.clConstructor;case CfrStatic:findMap(c.clStatics,name);case CfrMember:findMap(c.clFields,name);case CfrInit:c.clInit;};
-		if (f == null) throw NotFound.instance; return f;
+		if (f == null) throw NotFound.raise(); return f;
 	}
 	// Digest values use hexadecimal strings in this port (see Define.getSignature).
 	public static final nullModule:ModuleDef = {mId:allocMid(),mPath:{pack:[],name:""},mTypes:[],mStatics:null,mExtra:moduleExtra("",haxe.crypto.Md5.encode(""),0,MFake,0,[])};
@@ -275,7 +275,7 @@ class TFunctions {
 	public static function extractParamType(tp:TypedTypeParam):T return tp.ttpType;
 	public static function extractParamTypes(params:TypeParams):TParams return params.map(extractParamType);
 	public static function extractParamName(tp:TypedTypeParam):String return tp.ttpName;
-	public static function lookupParam(n:String,l:TypeParams):T { for (tp in l) if (n == tp.ttpName) return tp.ttpType; throw NotFound.instance; }
+	public static function lookupParam(n:String,l:TypeParams):T { for (tp in l) if (n == tp.ttpName) return tp.ttpType; throw NotFound.raise(); }
 	public static function mkTypeParam(c:TClass,host:TypeParamHost,def:Null<T>,constraints:Null<AtomicLazy<Array<T>>>):TypedTypeParam {
 		var ttp:TypedTypeParam = {ttpName:c.clPath.name,ttpType:TInst(c,[]),ttpClass:c,ttpHost:host,ttpConstraints:constraints,ttpDefault:def};
 		c.clKind = KTypeParameter(ttp); return ttp;
@@ -285,9 +285,9 @@ class TFunctions {
 		case TInst(c,_):TClassDecl(c); case TEnum(e,_):TEnumDecl(e); case TType(t,_):TTypeDecl(t); case TAbstract(a,_):TAbstractDecl(a);
 		case TLazy(f):moduleTypeOfType(lazyType(f));
 		// Upstream raises Exit (not TypeExit) here; callers convert it to Not_found.
-		case TMono(r):if (r.tmType == null) throw Exit.instance; moduleTypeOfType(r.tmType);
-		case TAnon(a):switch a.aStatus {case ClassStatics(c):TClassDecl(c);case EnumStatics(e):TEnumDecl(e);case AbstractStatics(a):TAbstractDecl(a);case _:throw Exit.instance;}
-		case _:throw Exit.instance;
+		case TMono(r):if (r.tmType == null) throw Exit.raise(); moduleTypeOfType(r.tmType);
+		case TAnon(a):switch a.aStatus {case ClassStatics(c):TClassDecl(c);case EnumStatics(e):TEnumDecl(e);case AbstractStatics(a):TAbstractDecl(a);case _:throw Exit.raise();}
+		case _:throw Exit.raise();
 	};
 	public static function tconstToConst(c:TConstant):Constant return switch c {
 		case TInt(i):Int(Std.string(i),null);case TFloat(s):Float(s,null);case TString(s):String(s,SDoubleQuotes);case TBool(b):Ident(b ? "true" : "false");case TNull:Ident("null");case TThis:Ident("this");case TSuper:Ident("super");
@@ -309,10 +309,10 @@ class TFunctions {
 		var apply = function(t) return applyParams(c.clParams,tl,t);
 		try { var f = findMap(c.clFields,i); return {owner:{cls:c,params:tl},type:buildType(f),field:f}; }
 		catch (_:NotFound) {}
-		try { if (c.clConstructor == null || i != "new") throw NotFound.instance; return {owner:{cls:c,params:tl},type:buildType(c.clConstructor),field:c.clConstructor}; }
+		try { if (c.clConstructor == null || i != "new") throw NotFound.raise(); return {owner:{cls:c,params:tl},type:buildType(c.clConstructor),field:c.clConstructor}; }
 		catch (_:NotFound) {}
 		try {
-			if (c.clSuper == null) throw NotFound.instance;
+			if (c.clSuper == null) throw NotFound.raise();
 			var sup = c.clSuper; var result = rawClassField(buildType,sup.cls,sup.params.map(apply),i);
 			return {owner:result.owner,type:applyParams(sup.cls.clParams,sup.params,result.type),field:result.field};
 		} catch (_:NotFound) {}
@@ -324,10 +324,10 @@ class TFunctions {
 					case _:
 				}
 			case _:
-				if (!hasClassFlag(c,CInterface)) throw NotFound.instance;
+				if (!hasClassFlag(c,CInterface)) throw NotFound.raise();
 				for (impl in c.clImplements) try {var result = rawClassField(buildType,impl.cls,impl.params.map(apply),i);return {owner:result.owner,type:applyParams(impl.cls.clParams,impl.params,result.type),field:result.field};} catch (_:NotFound) {}
 		}
-		throw NotFound.instance;
+		throw NotFound.raise();
 	}
 	public static function classField(c:TClass,tl:TParams,i:String):RawClassField return rawClassField(fieldType,c,tl,i);
 	public static function quickField(t:T,n:String):TFieldAccess return switch follow(t) {
@@ -335,20 +335,20 @@ class TFunctions {
 		case TAnon(a):switch a.aStatus {
 			case EnumStatics(e):FEnum(e,findMap(e.eConstrs,n));
 			case ClassStatics(c):FStatic(c,findMap(c.clStatics,n));
-			case AbstractStatics(a):if (a.aImpl == null) throw NotFound.instance; FStatic(a.aImpl,findMap(a.aImpl.clStatics,n));
+			case AbstractStatics(a):if (a.aImpl == null) throw NotFound.raise(); FStatic(a.aImpl,findMap(a.aImpl.clStatics,n));
 			case _:FAnon(findMap(a.aFields,n));
 		}
 		case TDynamic(_):FDynamic(n);
-		case TEnum(_) | TMono(_) | TAbstract(_,_) | TFun(_):throw NotFound.instance;
+		case TEnum(_) | TMono(_) | TAbstract(_,_) | TFun(_):throw NotFound.raise();
 		case TLazy(_) | TType(_,_):throw "Unexpected unresolved field type";
 	};
 	public static function quickFieldDynamic(t:T,s:String):TFieldAccess { try return quickField(t,s) catch (_:NotFound) return FDynamic(s); }
 	public static function getConstructorClass(c:TClass,tl:TParams):{field:TClassField,cls:TClass,params:TParams} {
 		if (c.clConstructor != null) return {field:c.clConstructor,cls:c,params:tl};
-		if (c.clSuper == null) throw NotFound.instance;
+		if (c.clSuper == null) throw NotFound.raise();
 		return getConstructorClass(c.clSuper.cls,c.clSuper.params.map(function(t) return applyParams(c.clParams,tl,t)));
 	}
-	public static function getConstructor(c:TClass):TClassField { if (c.clConstructor != null) return c.clConstructor; if (c.clSuper == null) throw NotFound.instance; return getConstructor(c.clSuper.cls); }
+	public static function getConstructor(c:TClass):TClassField { if (c.clConstructor != null) return c.clConstructor; if (c.clSuper == null) throw NotFound.raise(); return getConstructor(c.clSuper.cls); }
 	public static function hasConstructor(c:TClass):Bool {try { getConstructor(c); return true; } catch (_:NotFound) return false;}
 	public static function isModuleFieldsClass(c:TClass):Bool return c.clKind.match(KModuleFields(_));
 	public static function isPosOutsideClass(c:TClass,p:Pos):Bool return p.pfile != c.clPos.pfile || p.pmax < c.clPos.pmin || p.pmin > c.clPos.pmax;

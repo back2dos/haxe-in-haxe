@@ -70,7 +70,7 @@ class Hashtbl<K,V> {
   for(e in entries) if(Key.compare(e.key,key)==0) return e;
   return null;
  }
- public function find(key:K):V {var e=lookup(key);if(e==null) throw NotFound.instance;return e.value;}
+ public function find(key:K):V {var e=lookup(key);if(e==null) throw NotFound.raise();return e.value;}
  public function findOpt(key:K):Null<V> {var e=lookup(key);return e==null ? null : e.value;}
  public function mem(key:K):Bool return lookup(key)!=null;
  public function iter(f:K->V->Void):Void for(e in entries) f(e.key,e.value);

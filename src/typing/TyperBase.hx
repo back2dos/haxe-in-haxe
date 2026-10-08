@@ -101,7 +101,7 @@ class TyperBase {
   case FunMemberClassLocal | FunMemberAbstractLocal:
    var v=ctx.f.vthis;
    if(v==null) {
-    if(ctx.e.curfun==FunMemberAbstractLocal) {v=ctx.f.locals.findOpt("this"); if(v==null) throw core.ds.NotFound.instance; addVarFlag(v,VUsedByTyper);}
+    if(ctx.e.curfun==FunMemberAbstractLocal) {v=ctx.f.locals.findOpt("this"); if(v==null) throw core.ds.NotFound.raise(); addVarFlag(v,VUsedByTyper);}
     else v=addLocal(ctx,VGenerated,genLocalPrefix+"this",ctx.c.tthis,p);
     ctx.f.vthis=v;
    } else ctx.f.locals=ctx.f.locals.add(v.vName,v);

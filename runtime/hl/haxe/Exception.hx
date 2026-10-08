@@ -1,5 +1,5 @@
 // Copy of haxe/std/hl/_std/haxe/Exception.hx for the compiler's HashLink build;
-// the only change is the captureStack switch.
+// changes: the captureStack switch, used by the constructor and thrown().
 package haxe;
 
 @:coreApi
@@ -29,13 +29,18 @@ class Exception {
 	}
 
 	static function thrown(value:Any):Any {
+		var result:Any;
 		if(Std.isOfType(value, Exception)) {
-			return (value:Exception).native;
+			result = (value:Exception).native;
 		} else {
 			var e = new ValueException(value);
 			e.__shiftStack();
-			return e;
+			result = e;
 		}
+		// `throw v` compiles to `throw Exception.thrown(v)`: throwing here with
+		// rethrow skips libhl's native stack capture for the throw.
+		if(!captureStack) hl.Api.rethrow(result);
+		return result;
 	}
 
 	// Like OCaml, only record backtraces when OCAMLRUNPARAM contains "b": the

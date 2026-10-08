@@ -20,6 +20,7 @@ class Main {
 		var ocamlrunparam = Sys.getEnv("OCAMLRUNPARAM");
 		if (ocamlrunparam == null || ocamlrunparam.indexOf("b") < 0) js.Syntax.code("Error.stackTraceLimit = 0");
 		#end
+		core.ds.GcPolicy.init();
 		Sys.exit(run(Sys.args()));
 	}
 

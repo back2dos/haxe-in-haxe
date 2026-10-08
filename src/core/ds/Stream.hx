@@ -25,17 +25,24 @@ class Stream<T> {
 	}
 	public function next():T {
 		var value = peek();
-		if (value == null) throw StreamFailure.instance;
+		if (value == null) throw StreamFailure.raise();
 		junk();
 		return value;
 	}
-	public function empty():Void if (peek() != null) throw StreamFailure.instance;
+	public function empty():Void if (peek() != null) throw StreamFailure.raise();
 	public function iter(f:T->Void):Void while (peek() != null) f(next());
 }
 
 class StreamFailure extends haxe.Exception {
 	// Shared instance; see NotFound. The parser backtracks through this constantly.
 	public static final instance = new StreamFailure();
+
+ // Throw site helper: `throw X.raise()`. On HashLink the shared instance is
+ // thrown with rethrow, which skips libhl's native stack capture per throw.
+ public static inline function raise():StreamFailure {
+  #if hl hl.Api.rethrow(instance); #end
+  return instance;
+ }
 	public function new() super("Stream.Failure");
 }
 

@@ -150,7 +150,7 @@ class CallUnification {
  public static function wrapWithResolveTo(com:CommonContext,ecall:TExpr,econt:TExpr,p:Pos):TExpr {
   var basic=com.basic,b=new coro.CoroElsewhere.TexprBuilder(basic,p),c=basic.tcoro.suspensionResultClass.force();
   var param=switch follow(ecall.etype) {case TInst(_,[t]):t; case _:throw "Expected SuspensionResult with one type parameter for coroutine call result";};
-  var cf=c.clFields.get("resolveTo"); if(cf==null) throw core.ds.NotFound.instance;
+  var cf=c.clFields.get("resolveTo"); if(cf==null) throw core.ds.NotFound.raise();
   var type=applyParams(c.clParams,[param],cf.cfType);
   function resolve(call:TExpr,cont:TExpr):TExpr return b.call(b.instanceField(call,c,[param],cf,type),[cont],basic.tvoid);
   switch econt.eexpr {case TLocal(_)|TConst(_):return resolve(ecall,econt); case _:}

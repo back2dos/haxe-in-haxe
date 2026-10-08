@@ -16,7 +16,7 @@ class PersistentMap<K,V> {
   if(i<out.length && Key.compare(out[i].key,key)==0) out[i]={key:key,value:value};else out.insert(i,{key:key,value:value});return new PersistentMap(out);
  }
  public function remove(key:K):PersistentMap<K,V> return new PersistentMap(entries.filter(function(e) return Key.compare(e.key,key)!=0));
- public function find(key:K):V {var i=indexOf(key);if(i<0) throw NotFound.instance;return entries[i].value;}
+ public function find(key:K):V {var i=indexOf(key);if(i<0) throw NotFound.raise();return entries[i].value;}
  public function findOpt(key:K):Null<V> {var i=indexOf(key);return i<0 ? null : entries[i].value;}
  public function mem(key:K):Bool return indexOf(key)>=0;
  public function iter(f:K->V->Void):Void for(e in entries) f(e.key,e.value);

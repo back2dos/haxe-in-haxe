@@ -10,7 +10,7 @@ class Native {
   for (entry in meta) if (entry.meta == Meta.Native && entry.exprs.length == 1) {
    return switch entry.exprs {case [{expr:EConst(String(name,_)),pos:p}]: {name:name,pos:p}; case _: Error.raiseTypingError("String expected",entry.pos);};
   }
-  throw NotFound.instance;
+  throw NotFound.raise();
  }
  public static function applyNativePaths(t:ModuleType):Void {
   function real(meta:Metadata,name:String):{meta:MetadataEntry,name:String} {

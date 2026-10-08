@@ -47,7 +47,7 @@ class Dce {
   return switch cf.cfKind {case Var({vRead:AccCall | AccPrivateCall,vWrite:_}):accessor("get_"); case Var({vRead:_,vWrite:AccCall | AccPrivateCall}):accessor("set_"); case _:false;};
  }
  public static function checkFeature(dce:DceData,s:String):Void {
-  try {var refs = dce.features.get(s); if (refs == null) throw NotFound.instance; dce.featureMutex.acquire(); if (!dce.checkedFeatures.exists(s)) {dce.checkedFeatures.set(s,true); dce.featureMutex.release(); for (ref in refs) {var resolved = resolveClassFieldRef(dce,ref); markField(dce,resolved.cls,resolved.field,ref.cfrKind);}} else dce.featureMutex.release();} catch (_:NotFound) {}
+  try {var refs = dce.features.get(s); if (refs == null) throw NotFound.raise(); dce.featureMutex.acquire(); if (!dce.checkedFeatures.exists(s)) {dce.checkedFeatures.set(s,true); dce.featureMutex.release(); for (ref in refs) {var resolved = resolveClassFieldRef(dce,ref); markField(dce,resolved.cls,resolved.field,ref.cfrKind);}} else dce.featureMutex.release();} catch (_:NotFound) {}
  }
  public static function checkAndAddFeature(dce:DceData,s:String):Void {checkFeature(dce,s); var c = dce.curclass; if (c == nullClass) throw "assert: missing DCE class"; dce.addFeatureManager.tryNow(function() c.clModule.mExtra.mFeatures.set(s,true));}
  public static function markField(dce:DceData,c:TClass,cf:TClassField,kind:ClassFieldRefKind):Void {
@@ -103,8 +103,8 @@ class Dce {
  }
  public static function resolveField(dce:DceData,c:TClass,name:String,kind:ClassFieldRefKind):{cls:TClass,field:TClassField} {
   try return {cls:c,field:findField(c,name,kind)} catch (_:NotFound) {}
-  try {if (hasClassFlag(c,CInterface)) {for (ct in c.clImplements) try return resolveField(dce,ct.cls,name,kind) catch (_:NotFound) {} throw NotFound.instance;} else if (c.clSuper != null) return resolveField(dce,c.clSuper.cls,name,kind); else throw NotFound.instance;} catch (_:NotFound) {}
-  switch c.clKind {case KTypeParameter(ttp):for (t in getConstraints(ttp)) switch t {case TInst(c,_):try return resolveField(dce,c,name,kind) catch (_:NotFound) {} case _:} case _:} throw NotFound.instance;
+  try {if (hasClassFlag(c,CInterface)) {for (ct in c.clImplements) try return resolveField(dce,ct.cls,name,kind) catch (_:NotFound) {} throw NotFound.raise();} else if (c.clSuper != null) return resolveField(dce,c.clSuper.cls,name,kind); else throw NotFound.raise();} catch (_:NotFound) {}
+  switch c.clKind {case KTypeParameter(ttp):for (t in getConstraints(ttp)) switch t {case TInst(c,_):try return resolveField(dce,c,name,kind) catch (_:NotFound) {} case _:} case _:} throw NotFound.raise();
  }
  public static function field(dce:DceData,c:TClass,name:String,kind:ClassFieldRefKind):Void {try {var r = resolveField(dce,c,name,kind); markField(dce,r.cls,r.field,kind);} catch (_:NotFound) {if (dce.debug) Sys.stderr().writeString("[DCE] Field " + name + " not found on " + Globals.sTypePath(c.clPath) + "\n");}}
  public static function keepToString(dce:DceData,c:TClass):Void {try {var r = resolveField(dce,c,"toString",CfrMember); if (!fieldForcesDce(r.field)) markField(dce,r.cls,r.field,CfrMember);} catch (_:NotFound) {}}

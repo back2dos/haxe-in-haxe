@@ -415,6 +415,7 @@ class Lexer {
 	];
 
 	public function token():LexedToken {
+		core.ds.GcPolicy.tick();
 		while (true) {
 			var start = index;
 			if (eof()) return make(Eof, start);

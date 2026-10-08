@@ -16,7 +16,11 @@ typedef MetaInfos = {
 	var mInternal:Bool; var mDoc:String; var mParams:Array<String>; var mPlatforms:Array<Platform>;
 	var mUsedOn:Array<MetaUsage>; var mOrigin:MetaOrigin; var mLinks:Array<String>;
 }
-class MetaNotFound extends core.ds.NotFound { public static final instance = new MetaNotFound(); public function new() super(); }
+class MetaNotFound extends core.ds.NotFound {
+	public static final instance = new MetaNotFound();
+	public static inline function raise():MetaNotFound { #if hl hl.Api.rethrow(instance); #end return instance; }
+	public function new() super();
+}
 class Meta {
 	// Structural equality (OCaml's =); comparing indices first avoids the deep
 	// comparison for the common mismatch.
@@ -28,7 +32,7 @@ class Meta {
 	}
 	public static function get(m:StrictMeta,ml:Metadata):MetadataEntry {
 		for (entry in ml) if (metaEq(m,entry.meta)) return entry;
-		throw MetaNotFound.instance;
+		throw MetaNotFound.raise();
 	}
 	public static function remove(m:StrictMeta,ml:Metadata):Metadata {
 		if (ml.length == 0) return [];

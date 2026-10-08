@@ -87,7 +87,7 @@ class FieldError {
 }
 class TypeloadFields {
  public static function hasAccess(a:Access,access:Array<PlacedAccess>):Bool return Lambda.exists(cast access,function(v:PlacedAccess) return v.access==a);
- public static function accessPos(a:Access,access:Array<PlacedAccess>):Dynamic {for(v in access) if(v.access==a) return v.pos;throw NotFound.instance;}
+ public static function accessPos(a:Access,access:Array<PlacedAccess>):Dynamic {for(v in access) if(v.access==a) return v.pos;throw NotFound.raise();}
  public static function meta(m:StrictMeta,?p:Pos):MetadataEntry return {meta:m,exprs:[],pos:p==null ? Globals.nullPos : p};
  public static function ae(e:ExprDef,p:Pos):Expr return {expr:e,pos:p};
  public static function dumpClassContext(cctx:ClassInitCtx):String return Printer.sRecordFields("",[
@@ -106,7 +106,7 @@ class TypeloadFields {
   try {var m=MetadataTools.get(Native,metadata);if(m.exprs.length==0) {warning(ctx,WDeprecated,"@:native metadata for jni functions is deprecated. Use @:java.native instead.",pos);return true;}return false;}
   catch(_:NotFound) {return MetadataTools.has(NativeJni,metadata);}
  }
- public static function getMethodArgs(field:TClassField):Array<{variable:TVar,defaultValue:Null<TExpr>}> return switch field.cfExpr {case {eexpr:TFunction(f)}:f.tfArgs;case _:throw NotFound.instance;};
+ public static function getMethodArgs(field:TClassField):Array<{variable:TVar,defaultValue:Null<TExpr>}> return switch field.cfExpr {case {eexpr:TFunction(f)}:f.tfArgs;case _:throw NotFound.raise();};
  public static function getStructInitSuperInfo(ctx:Typer,c:TClass,p:Pos):{args:Array<{variable:TVar,defaultValue:Null<TExpr>}>,expr:Null<TExpr>,types:Array<{name:String,optional:Bool,type:T}>} {
   if(c.clSuper==null || c.clSuper.cls.clConstructor==null) return {args:[],expr:null,types:[]};
   var s=c.clSuper,ctor=s.cls.clConstructor,args:Array<{variable:TVar,defaultValue:Null<TExpr>}>=try {getMethodArgs(ctor);} catch(_:NotFound) {[];};
@@ -193,7 +193,7 @@ class TypeloadFields {
    switch r {case MError,MMacroInMacro:raiseTypingError("Build failure ("+Globals.sTypePath(cpath)+"."+meth+")",m.pos);case MSuccess(e):fbuild(e);}
   });
   var fenum:Null<Void->Void>=switch mt {
-   case TClassDecl(c) if(switch c.clKind {case KAbstractImpl(a):a.aEnum;case _:false;}):var a=switch c.clKind {case KAbstractImpl(a):a;case _:throw NotFound.instance;};function() fbuild(buildEnumAbstract(ctx,c,a,fvars(),a.aNamePos));
+   case TClassDecl(c) if(switch c.clKind {case KAbstractImpl(a):a.aEnum;case _:false;}):var a=switch c.clKind {case KAbstractImpl(a):a;case _:throw NotFound.raise();};function() fbuild(buildEnumAbstract(ctx,c,a,fvars(),a.aNamePos));
    case TClassDecl(c):
     // tInfos is a projection object in Haxe, so assigning mtUsing on it would
     // only replace the projected field. Mutate the shared array instead.
@@ -395,7 +395,7 @@ class TypeloadFields {
   });
   function propertyType():Dynamic {
    var property=name.substr(4),cf=PMap.find(property,fctx.isStatic?c.clStatics:c.clFields);
-   return switch [kind.force(),cf.cfKind] {case [MKGetter,Var({vRead:AccCall|AccPrivateCall})]|[MKSetter,Var({vWrite:AccCall|AccPrivateCall})]:cf.cfType;case _:throw NotFound.instance;};
+   return switch [kind.force(),cf.cfKind] {case [MKGetter,Var({vRead:AccCall|AccPrivateCall})]|[MKSetter,Var({vWrite:AccCall|AccPrivateCall})]:cf.cfType;case _:throw NotFound.raise();};
   }
   function maybeProperty(th:Dynamic,check:Void->Bool,def:Void->Dynamic):Dynamic {if(th==null&&check()) {try return propertyType() catch(_:NotFound) return def();}return def();}
   var ret=fctx.fieldKind==CfrConstructor?ctx.t.tvoid:maybeProperty(fd.fType,function() return switch kind.force() {case MKGetter|MKSetter:true;case _:false;},() -> typeOpt(ctx,cctx,fctx,p,LoadReturn,fd.fType));
@@ -515,7 +515,7 @@ class TypeloadFields {
    try {
     var overloads=findAccessor(m),found:Dynamic=null;
     for(i in 0...overloads.length) if(i==overloads.length-1||typeIseq(t,overloads[i].type)) {found=overloads[i];break;}
-    if(found==null) throw NotFound.instance;
+    if(found==null) throw NotFound.raise();
     var t2=found.type,f2=found.field;
     for(m in f.cffMeta) if(m.meta==core.MetaList.StrictMeta.Deprecated) f2.cfMeta.unshift(m);
     delay(ctx.g,PForce,function() {
@@ -781,8 +781,8 @@ class TypeBinding {
      case Var(_) if (!isPhysicalField(cf)):unexpectedExpression(ctx.com,fctx,"on field that is not a real variable",p); e;
      case Var(_) if (!fctx.isStatic):
       function checkThis(e:TExpr):Void switch e.eexpr {
-       case TConst(TThis):displayError(ctx.com,"Cannot access this or other member field in variable initialization",e.epos); throw Exit.instance;
-       case TLocal(v) if (ctx.f.vthis != null && v == ctx.f.vthis):displayError(ctx.com,"Cannot access this or other member field in variable initialization",e.epos); throw Exit.instance;
+       case TConst(TThis):displayError(ctx.com,"Cannot access this or other member field in variable initialization",e.epos); throw Exit.raise();
+       case TLocal(v) if (ctx.f.vthis != null && v == ctx.f.vthis):displayError(ctx.com,"Cannot access this or other member field in variable initialization",e.epos); throw Exit.raise();
        case _:core.Texpr.iter(checkThis,e);
       }
       try checkThis(e) catch (_:Exit) {} e;

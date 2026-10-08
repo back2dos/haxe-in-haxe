@@ -31,8 +31,8 @@ private class ConstructorInlining {
  function abs(i:Int):Int return i < 0 ? -i : i;
  function isMarked(id:Int):Bool return markedVars.exists(abs(id));
  function toggleMark(id:Int):Void {id = abs(id); if (markedVars.exists(id)) markedVars.remove(id); else markedVars.set(id,true);}
- function getIo(id:Int):InlineObject {if (!inlineObjs.exists(id)) throw NotFound.instance; return inlineObjs.get(id);}
- function getIv(id:Int):InlineVar {id = abs(id); if (!vars.exists(id)) throw NotFound.instance; return vars.get(id);}
+ function getIo(id:Int):InlineObject {if (!inlineObjs.exists(id)) throw NotFound.raise(); return inlineObjs.get(id);}
+ function getIv(id:Int):InlineVar {id = abs(id); if (!vars.exists(id)) throw NotFound.raise(); return vars.get(id);}
  function fieldKeys(io:InlineObject):Array<String> {var keys = [for (k in io.ioFields.keys()) k]; keys.sort(Reflect.compare); return keys;}
  function cancelIo(io:InlineObject,p:Pos):Void if (!io.ioCancelled) {
   io.ioCancelled = true; for (iv in io.ioAliases) cancelIv(iv,p); for (k in fieldKeys(io)) cancelIv(io.ioFields.get(k),p);
@@ -45,7 +45,7 @@ private class ConstructorInlining {
  function cancelV(v:TVar,p:Pos):Void {try cancelIv(getIv(v.vId),p) catch (_:NotFound) {}}
  function setIvAlias(iv:InlineVar,io:InlineObject):Void {if (iv.ivState != IVSUnassigned || io.ioCancelled) {cancelIo(io,io.ioPos); cancelIv(iv,io.ioPos);} else {iv.ivState = IVSAliasing(io); io.ioAliases.unshift(iv);}}
  function add(v:TVar,kind:InlineVarKind):InlineVar {var iv = {ivVar:v,ivState:IVSUnassigned,ivKind:kind,ivClosed:false}; toggleMark(v.vId); vars.set(abs(v.vId),iv); return iv;}
- function getIoField(io:InlineObject,s:String):InlineVar {if (!io.ioFields.exists(s)) throw NotFound.instance; return io.ioFields.get(s);}
+ function getIoField(io:InlineObject,s:String):InlineVar {if (!io.ioFields.exists(s)) throw NotFound.raise(); return io.ioFields.get(s);}
  function allocIoFieldFull(io:InlineObject,name:String,constant:Null<TExpr>,t:T,p:Pos):InlineVar {var iv = add(allocVar(VInlined,name,t,p),IVKField(io,name,constant)); io.ioFields.set(name,iv); return iv;}
  function allocConstIoField(io:InlineObject,name:String,e:TExpr):InlineVar {var iv = allocIoFieldFull(io,name,e,e.etype,e.epos); iv.ivState = IVSCancelled; return iv;}
  function allocIoField(io:InlineObject,name:String,t:T,p:Pos):InlineVar return allocIoFieldFull(io,name,null,t,p);
@@ -83,8 +83,8 @@ private class ConstructorInlining {
      var method = getInlineMethod(io,name);
      if (method != null) {var mt = applyParams(method.c.clParams,method.tl,method.cf.cfType); var isFun = switch ef.etype {case TFun(_):true; case _:false;}; if (isFun && doesUnify(mt,ef.etype)) IOFInlineMethod(io,iv,method.c,method.tl,method.cf,method.tf); else {cancelIv(iv,ef.epos); IOFNone;}}
      else try {
-      var fiv = getIoField(io,name); if (!typeIseqStrict(fiv.ivVar.vType,ef.etype)) throw NotFound.instance; var constant = switch fiv.ivKind {case IVKField(_,_,e) if (e != null):true; case _:false;}; if (lvalue && constant || fiv.ivClosed) throw NotFound.instance;
-      if (!lvalue && fiv.ivState == IVSUnassigned) {SafeCom.addWarning(scom,WConstructorInliningCancelled,"Constructor inlining cancelled because of use of uninitialized member field " + name,ethis.epos); throw NotFound.instance;}
+      var fiv = getIoField(io,name); if (!typeIseqStrict(fiv.ivVar.vType,ef.etype)) throw NotFound.raise(); var constant = switch fiv.ivKind {case IVKField(_,_,e) if (e != null):true; case _:false;}; if (lvalue && constant || fiv.ivClosed) throw NotFound.raise();
+      if (!lvalue && fiv.ivState == IVSUnassigned) {SafeCom.addWarning(scom,WConstructorInliningCancelled,"Constructor inlining cancelled because of use of uninitialized member field " + name,ethis.epos); throw NotFound.raise();}
       if (cap == IEHNotHandled) cancelIv(fiv,ef.epos); IOFInlineVar(fiv);
      } catch (_:NotFound) {cancelIv(iv,ef.epos); IOFNone;}
     case _:cancelIv(iv,ef.epos); IOFNone;
@@ -148,7 +148,7 @@ private class ConstructorInlining {
    return {exprs:[mk(TField(makeExprForRevList(tr.exprs,ethis.etype,ethis.epos),fa),ef.etype,ef.epos)],object:null,method:false};
   }
   return switch e.eexpr {
-   case TMeta({meta:core.MetaList.StrictMeta.InlineObject,exprs:[{expr:EConst(Int(id,_))}]},inner):try {var io = getIo(Std.parseInt(id)); if (io.ioCancelled) throw NotFound.instance; if (io.ioHasUntyped) includedUntyped = true; var r = finalMap(io.ioExpr,true); {exprs:r.exprs.concat(getIoVarDecls(io)),object:io};} catch (_:NotFound) {defaultCase(inner);}
+   case TMeta({meta:core.MetaList.StrictMeta.InlineObject,exprs:[{expr:EConst(Int(id,_))}]},inner):try {var io = getIo(Std.parseInt(id)); if (io.ioCancelled) throw NotFound.raise(); if (io.ioHasUntyped) includedUntyped = true; var r = finalMap(io.ioExpr,true); {exprs:r.exprs.concat(getIoVarDecls(io)),object:io};} catch (_:NotFound) {defaultCase(inner);}
    case TVar(v,null) if (isMarked(v.vId)):var iv = getIv(v.vId); {exprs:iv.ivState == IVSUnassigned ? [e] : getIvVarDecls(iv),object:null};
    case TVar(v,inner) if (isMarked(v.vId)):var decls = getIvVarDecls(getIv(v.vId)); var r = finalMap(inner,true); {exprs:r.exprs.concat(decls),object:null};
    case TBinop(OpAssign,lve,rve):var lhs = finalMap(lve); var rhs = finalMap(rve,true); if (lhs.object != null) {exprs:rhs.exprs.concat(lhs.exprs),object:lhs.object}; else {var rve = makeExprForRevList(rhs.exprs,rve.etype,rve.epos); if (lhs.exprs.length == 0) throw "InlineConstructors.empty assignment lhs"; var first = lhs.exprs[0]; {exprs:[mk(TBinop(OpAssign,first,rve),first.etype,first.epos)].concat(lhs.exprs.slice(1)),object:null};}

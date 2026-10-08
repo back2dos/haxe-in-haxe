@@ -54,7 +54,7 @@ class TypeloadFunction {
   }
   switch e.eexpr {case TMeta({meta:MetaTag.MergeBlock},e1={eexpr:TBlock(_)}): e=e1; case _:}
   function hasReturn(e:TExpr):Bool {
-   function loop(e:TExpr):Void switch e.eexpr {case TReturn(v) if(v!=null): throw core.ds.Exit.instance; case TFunction(_): case _: Texpr.iter(loop,e);}
+   function loop(e:TExpr):Void switch e.eexpr {case TReturn(v) if(v!=null): throw core.ds.Exit.raise(); case TFunction(_): case _: Texpr.iter(loop,e);}
    try {loop(e); return false;} catch(_:core.ds.Exit) { return true;}
   }
   switch follow(ret) {
@@ -62,7 +62,7 @@ class TypeloadFunction {
    case TMono(_) if(!hasReturn(e)): unify(ctx,ctx.t.tvoid,ret,p);
    case _: try TypeloadCheck.returnFlow(ctx,e) catch(_:core.ds.Exit) {}
   }
-  function findSuper(e:TExpr):Void switch e.eexpr {case TCall({eexpr:TConst(TSuper)},_): throw core.ds.Exit.instance; case TFunction(_): case _: Texpr.iter(findSuper,e);}
+  function findSuper(e:TExpr):Void switch e.eexpr {case TCall({eexpr:TConst(TSuper)},_): throw core.ds.Exit.raise(); case TFunction(_): case _: Texpr.iter(findSuper,e);}
   function superConstructor():Null<{wasForced:Bool,type:T}> {
    var sup=ctx.c.curclass.clSuper;
    if(sup==null) return null;

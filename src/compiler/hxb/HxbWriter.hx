@@ -109,7 +109,7 @@ class Pool<K, V> {
 
 	public function get(k:K):Int {
 		var i = lut.get(key(k));
-		if (i == null) throw NotFound.instance;
+		if (i == null) throw NotFound.raise();
 		return i;
 	}
 
@@ -146,7 +146,7 @@ class IdentityPool<K, V> {
 
 	public function get(key:K):Int {
 		for (i in 0...items.length) if (items[i].key == key) return i;
-		throw NotFound.instance;
+		throw NotFound.raise();
 	}
 
 	public function getOrAdd(key:K, value:V):Int {
@@ -185,7 +185,7 @@ class HashedIdentityPool<K, V> {
 	public function get(hkey:String, key:K):Int {
 		var l = lut.get(hkey);
 		if (l != null) for (e in l) if (e.key == key) return e.index;
-		throw NotFound.instance;
+		throw NotFound.raise();
 	}
 
 	public function finalize():Array<{key:K, value:V}> {
@@ -1095,7 +1095,7 @@ class HxbWriter {
 					chunk.writeU8(3);
 					chunk.writeUleb128(index);
 				case TPHUnbound:
-					throw NotFound.instance;
+					throw NotFound.raise();
 			}
 		} catch (_:NotFound) {
 			var r = performUnboundTtp();

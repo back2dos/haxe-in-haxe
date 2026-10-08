@@ -8,7 +8,7 @@ class PMap {
  public static function empty<V>():StringMap<V> return new StringMap();
  public static function add<V>(key:String,value:V,map:StringMap<V>):StringMap<V> {var out=map.copy();out.set(key,value);return out;}
  public static function remove<V>(key:String,map:StringMap<V>):StringMap<V> {var out=map.copy();out.remove(key);return out;}
- public static function find<V>(key:String,map:StringMap<V>):V {if(!map.exists(key)) throw NotFound.instance;return map.get(key);}
+ public static function find<V>(key:String,map:StringMap<V>):V {if(!map.exists(key)) throw NotFound.raise();return map.get(key);}
  public static function findOpt<V>(key:String,map:StringMap<V>):Null<V> return map.get(key);
  public static function mem<V>(key:String,map:StringMap<V>):Bool return map.exists(key);
  public static function exists<V>(key:String,map:StringMap<V>):Bool return map.exists(key);

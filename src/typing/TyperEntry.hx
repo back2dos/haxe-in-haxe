@@ -96,7 +96,7 @@ class TyperEntry {
   if(ctx.com.platform==Jvm) {
    var m=ModuleTyping.loadModule(ctx,{pack:["jvm"],name:"NativeArray"},Globals.nullPos);
    for(md in m.mTypes) switch md {case TClassDecl(cl={clPath:{pack:["jvm"],name:"NativeArray"}}):return new CaptureLocalWrapper(ctx.t,cl);case _:}
-   throw core.ds.NotFound.instance;
+   throw core.ds.NotFound.raise();
   }
   return new CaptureLocalWrapper(ctx.t,null);
  }

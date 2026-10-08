@@ -43,7 +43,7 @@ class Generic {
      case TType(td,tl):result(pathName(td.tPath)+tlName(tl));case TEnum(en,tl):result(pathName(en.ePath)+tlName(tl));
      case TAnon(a):var names=[for(n in a.aFields.keys())n];names.sort(Reflect.compare);var fields=[];for(n in names)fields.unshift(n+"_"+deep(follow(a.aFields.get(n).cfType)));result("anon_"+fields.join("_"));
      case TFun(s):result("func_"+s.args.map(function(a)return deep(a.type)).join("_")+"_"+deep(s.ret));
-     case TAbstract(a,tl):result(pathName(a.aPath)+tlName(tl));case TDynamic(_):result("Dynamic");case TMono({tmType:null}):if(top)throw Exit.instance;result("_");case TMono({tmType:t}):loop(top,t);case TLazy(f):loop(top,lazyType(f));
+     case TAbstract(a,tl):result(pathName(a.aPath)+tlName(tl));case TDynamic(_):result("Dynamic");case TMono({tmType:null}):if(top)throw Exit.raise();result("_");case TMono({tmType:t}):loop(top,t);case TLazy(f):loop(top,lazyType(f));
     };
    }return loop(true,t);
   }

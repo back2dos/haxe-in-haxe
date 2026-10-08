@@ -94,7 +94,7 @@ class Graph {
  public static function addVarDef(g:GraphData,bb:BasicBlockData,v:TVar):Void if (bb.bbId > 0) {bb.bbVarWrites.unshift(v); getVarInfo(g,v).viWrites.unshift(bb);}
  public static function setVarValue(g:GraphData,v:TVar,bb:BasicBlockData,luk:TExprLookupTarget) getVarInfo(g,v).viValue = {bb:bb,target:luk};
  public static function getVarValue(g:GraphData,v:TVar):TExpr {
-  var value = getVarInfo(g,v).viValue; if (value == null) throw NotFound.instance;
+  var value = getVarInfo(g,v).viValue; if (value == null) throw NotFound.raise();
   return switch BasicBlock.getTexpr(value.bb,value.target).eexpr {case TVar(_,e) if (e != null):e; case TBinop(OpAssign,_,e):e; case _:throw "AnalyzerTypes.getVarValue";};
  }
  public static function addVarOrigin(g:GraphData,v:TVar,origin:TVar) getVarInfo(g,v).viOrigin = origin;
