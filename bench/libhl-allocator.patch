@@ -175,7 +175,7 @@ index f332cf5..1844c29 100644
  	gc_freelist free;
  	unsigned char *sizes;
 diff --git a/src/gc.c b/src/gc.c
-index d338518..340f881 100644
+index d338518..b100670 100644
 --- a/src/gc.c
 +++ b/src/gc.c
 @@ -53,7 +53,17 @@
@@ -482,10 +482,14 @@ index d338518..340f881 100644
  	munmap(ptr,size);
  #endif
  }
-@@ -1474,6 +1645,13 @@ vdynamic *hl_alloc_obj( hl_type *t ) {
+@@ -1473,7 +1644,16 @@ vdynamic *hl_alloc_obj( hl_type *t ) {
+ 	vobj *o;
  	int i;
  	hl_runtime_obj *rt = t->obj->rt;
- 	if( rt == NULL || rt->methods == NULL ) rt = hl_get_obj_proto(t);
+-	if( rt == NULL || rt->methods == NULL ) rt = hl_get_obj_proto(t);
++	// rt->methods stays NULL for a class without methods, which sent every
++	// allocation of one through hl_get_obj_proto: test the prototype instead
++	if( rt == NULL || t->vobj_proto == NULL ) rt = hl_get_obj_proto(t);
 +	if( t->kind != HSTRUCT && rt->nbindings == 0 ) {
 +		o = (vobj*)gc_alloc_from_slice(rt->size, rt->hasPtr ? MEM_KIND_DYNAMIC : MEM_KIND_NOPTR);
 +		if( o ) {

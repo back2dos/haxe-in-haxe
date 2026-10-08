@@ -459,9 +459,13 @@ class EvalEmitter {
 	// Type.call() - immediate
 
 	public static function emitProtoFieldCall(v:AtomicLazy<Vfunc>, execs:Array<Emitter>, p:Pos):Emitter {
+		// Forced once per call site: reading the generic AtomicLazy's value back as a
+		// function is a dynamic cast on HashLink.
+		var forced:Null<Vfunc> = null;
 		return function(env:Env):Value {
 			checkStackDepth(env);
-			var f = v.force();
+			var f = forced;
+			if (f == null) f = forced = v.force();
 			var vl = applyAll(execs, env);
 			env.envLeavePmin = p.pmin;
 			env.envLeavePmax = p.pmax;
@@ -511,9 +515,13 @@ class EvalEmitter {
 	// new() - immediate + this-binding
 
 	public static function emitConstructorCall(proto:Vprototype, v:AtomicLazy<Vfunc>, execs:Array<Emitter>, p:Pos):Emitter {
+		// Forced once per call site: reading the generic AtomicLazy's value back as a
+		// function is a dynamic cast on HashLink.
+		var forced:Null<Vfunc> = null;
 		return function(env:Env):Value {
 			checkStackDepth(env);
-			var f = v.force();
+			var f = forced;
+			if (f == null) f = forced = v.force();
 			var vthis = EvalEncode.createInstanceDirect(proto, INormal);
 			var vl = applyAllThis(vthis, execs, env);
 			env.envLeavePmin = p.pmin;
@@ -541,9 +549,13 @@ class EvalEmitter {
 	}
 
 	public static function emitSuperCall(v:AtomicLazy<Vfunc>, execs:Array<Emitter>, p:Pos):Emitter {
+		// Forced once per call site: reading the generic AtomicLazy's value back as a
+		// function is a dynamic cast on HashLink.
+		var forced:Null<Vfunc> = null;
 		return function(env:Env):Value {
 			checkStackDepth(env);
-			var f = v.force();
+			var f = forced;
+			if (f == null) f = forced = v.force();
 			var vthis = env.envLocals[0];
 			var vl = applyAllThis(vthis, execs, env);
 			env.envLeavePmin = p.pmin;
