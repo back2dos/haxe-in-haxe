@@ -37,7 +37,8 @@ libraries, display/server services, or a non-HXB target.
 
 The same suite also runs on other builds of the port through
 `HAXE_IN_HAXE_PORT` (see `bench/README.md`). The HashLink, HL/C, JS and JVM
-builds each pass all 282 cases. So does C++, built with
+builds each pass all 282 cases. So does Go (`bench/hx2go/build.sh`, hx2go
+with patches), and C++, built with
 `bench/hxcpp-single-thread-mark.patch`; stock hxcpp's parallel GC marking
 crashes it (see `bench/README.md`).
 

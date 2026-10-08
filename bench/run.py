@@ -37,6 +37,7 @@ def runners(reference):
         "hlc": [str(BIN / "hih-hlc")],
         "jvm": ["java", "-Xss512m", "-XX:+UnlockDiagnosticVMOptions", "-XX:-BytecodeVerificationRemote", "-XX:-BytecodeVerificationLocal", "-jar", str(BIN / "hih.jar")],
         "js": ["node", "--stack-size=65500", str(BIN / "hih.js")],
+        "go": [str(BIN / "hih-go")],
     }
 
 

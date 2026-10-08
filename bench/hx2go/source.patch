@@ -1,0 +1,263 @@
+diff -ruN a/src/compiler/Compiler.hx b/src/compiler/Compiler.hx
+--- a/src/compiler/Compiler.hx	2026-10-08 11:58:14.668770116 +0000
++++ b/src/compiler/Compiler.hx	2026-10-08 11:58:14.675590635 +0000
+@@ -104,7 +104,7 @@
+   try f()
+   catch(e:core.Error.FatalError)errorExt(com,e.error)
+   catch(e:syntax.Lexer.LexerError)error(com,syntax.Lexer.errorMsg(e.message),e.pos)
+-   catch(e:syntax.Parser.ParserError)error(com,syntax.Parser.errorMsg(e.error),e.pos)
++   catch(e:syntax.Parser.ParserError)error(com,syntax.Parser.errorMsg(e.errorValue),e.pos)
+   catch(e:context.Typecore.ForbidPackage){var sub=e.positions.map(p->Error.makeError(Custom(Error.complMsg("referenced here")),p));errorExt(com,Error.makeError(Custom("You cannot access the "+e.forbidden.name+" package while "+(e.reason=="macro"?"in a macro":"targeting "+e.reason)+" (for "+sTypePath(e.forbidden.path)+")"),e.forbidden.pos,sub));}
+   catch(e:core.Error.TypingError)errorExt(com,e.error)
+   catch(e:ArgumentError)error(com,"Error: "+e.message,nullPos)
+diff -ruN a/src/compiler/Generate.hx b/src/compiler/Generate.hx
+--- a/src/compiler/Generate.hx	2026-10-08 11:58:14.668792481 +0000
++++ b/src/compiler/Generate.hx	2026-10-08 11:58:14.675561938 +0000
+@@ -31,7 +31,7 @@
+    case MCode|MMacro|MFake|MExtern:
+     var path=[platform].concat(m.mPath.pack).concat([m.mPath.name]).join("/")+".hxb";
+     if (fromCache) {
+-     var cache=try cc.getHxbModule(m.mPath) catch (e:Dynamic) {if (!Std.isOfType(e,NotFound)) throw e;throw new MissingHxbModule();};
++     var cache=try cc.getHxbModule(m.mPath) catch(e:NotFound) {throw new MissingHxbModule();};
+      var out=new haxe.io.BytesOutput();HxbData.writeHeader(out);
+      for (chunk in (cast cache.mcChunks:Array<Dynamic>)) {HxbData.writeChunkPrefix(chunk.kind,chunk.data.length,out);out.write(chunk.data);}
+      {path:path,bytes:out.getBytes()};
+diff -ruN a/src/context/Typecore.hx b/src/context/Typecore.hx
+--- a/src/context/Typecore.hx	2026-10-08 11:58:14.669172026 +0000
++++ b/src/context/Typecore.hx	2026-10-08 11:58:14.676120431 +0000
+@@ -178,8 +178,8 @@
+ 	public function new(forbidden,positions,reason) { super(reason); this.forbidden=forbidden; this.positions=positions; this.reason=reason; }
+ }
+ class WithTypeError extends haxe.Exception {
+-	public final error:Dynamic;
+-	public function new(error:Dynamic) { super("WithTypeError"); this.error = error; }
++	public final errorValue:Dynamic;
++	public function new(error:Dynamic) { super("WithTypeError"); this.errorValue = error; }
+ }
+ class TyperManager {
+ 	public static function create(ctx:Typer,m:TyperModule,c:TyperClass,f:TyperField,e:TyperExpr,pass:TyperPass,params:TypeParams):Typer {
+diff -ruN a/src/core/Abstract.hx b/src/core/Abstract.hx
+--- a/src/core/Abstract.hx	2026-10-08 11:58:14.669731201 +0000
++++ b/src/core/Abstract.hx	2026-10-08 11:58:14.676609417 +0000
+@@ -72,8 +72,8 @@
+ 		if (a.aParams.length != pl.length) throw "List.map2";
+ 		var tl = [for (i in 0...pl.length) {
+ 			var t = pl[i];
+-			var f = relevant.get(a.aParams[i].ttpName);
+-			if (f != null) { t = f(t); definitiveTypes.unshift(t); t; }
++			// hx2go: a nullable function value read from a map is never null in Go
++			if (relevant.exists(a.aParams[i].ttpName)) { var f = relevant.get(a.aParams[i].ttpName); t = f(t); definitiveTypes.unshift(t); t; }
+ 			else if (!hasMono(t)) t else tDynamic;
+ 		}];
+ 		return {types:tl,definitiveTypes:definitiveTypes};
+diff -ruN a/src/core/ds/ExceptionTools.hx b/src/core/ds/ExceptionTools.hx
+--- a/src/core/ds/ExceptionTools.hx	2026-10-08 11:58:14.670440726 +0000
++++ b/src/core/ds/ExceptionTools.hx	2026-10-08 11:58:14.677041083 +0000
+@@ -11,5 +11,5 @@
+ class ExceptionTools {
+ 	public static function typing(value:Dynamic):Option<CompilerError> return Std.isOfType(value,TypingError) ? Some((cast value:TypingError).error) : None;
+ 	public static function unification(value:Dynamic):Option<Array<UnifyError>> return Std.isOfType(value,Unify_error) ? Some((cast value:Unify_error).errors) : None;
+-	public static function withType(value:Dynamic):Option<CompilerError> return Std.isOfType(value,WithTypeError) ? Some((cast value:WithTypeError).error) : None;
++	public static function withType(value:Dynamic):Option<CompilerError> return Std.isOfType(value,WithTypeError) ? Some((cast value:WithTypeError).errorValue) : None;
+ }
+diff -ruN a/src/optimization/InlineConstructors.hx b/src/optimization/InlineConstructors.hx
+--- a/src/optimization/InlineConstructors.hx	2026-10-08 11:58:14.671409238 +0000
++++ b/src/optimization/InlineConstructors.hx	2026-10-08 11:58:14.678760548 +0000
+@@ -103,7 +103,7 @@
+    case IOKCtor(ctor):var f = ctor.iocClass.clFields.get(name); if (f == null) null; else switch [f.cfParams,f.cfKind,f.cfExpr] {case [[],Method(MethInline),{eexpr:TFunction(tf)}]:needsInline(scom,ctor.iocClass,f) ? {c:ctor.iocClass,tl:ctor.iocTparams,cf:f,tf:tf} : null; case _:null;}
+    case _:null;
+   };
+-  function handleField(ef:TExpr,ethis:TExpr,name:String,validate:InlineObject->Bool,cap:InlineExpressionHandled = IEHNotHandled,lvalue:Bool = false):InlineObjectField {
++  function handleField(ef:TExpr,ethis:TExpr,name:String,validate:InlineObject->Bool,?cap:InlineExpressionHandled,lvalue:Bool = false):InlineObjectField {if(cap==null)cap=IEHNotHandled;
+    var iv = analyze(IEHCaptured,ethis); if (iv == null) return IOFNone;
+    return switch iv.ivState {
+     case IVSAliasing(io) if (validate(io)):
+diff -ruN a/src/syntax/Parser.hx b/src/syntax/Parser.hx
+--- a/src/syntax/Parser.hx	2026-10-08 11:58:14.671992291 +0000
++++ b/src/syntax/Parser.hx	2026-10-08 11:58:14.679415621 +0000
+@@ -34,9 +34,9 @@
+ 	public inline function clone():SyntaxCompletionOn return new SyntaxCompletionOn(kind, subject);
+ }
+ class ParserError extends haxe.Exception {
+-	public final error:ErrorMsg;
++	public final errorValue:ErrorMsg;
+ 	public final pos:Pos;
+-	public function new(error:ErrorMsg,pos:Pos) { super(Parser.errorMsg(error)); this.error=error; this.pos=pos; }
++	public function new(error:ErrorMsg,pos:Pos) { super(Parser.errorMsg(error)); this.errorValue=error; this.pos=pos; }
+ }
+ class TypePathCompletion extends haxe.Exception {
+ 	public final pack:Array<String>;
+diff -ruN a/src/syntax/ParserEntry.hx b/src/syntax/ParserEntry.hx
+--- a/src/syntax/ParserEntry.hx	2026-10-08 11:58:14.671756254 +0000
++++ b/src/syntax/ParserEntry.hx	2026-10-08 11:58:14.679201751 +0000
+@@ -232,7 +232,7 @@
+ 		if (!inlined) { DisplayPosition.displayPosition.reset(); config=core.ds.Record.copy(config); config.inDisplayFile=false; }
+ 		var result:ParseResult<T>;
+ 		try result=parse(config,entry,lctx,Lexer.lexbufFromUtf8String(s),p.pfile)
+-		catch (err:ParserError) { restore(); result=error(Parser.errorMsg(err.error),inlined ? err.pos : p); }
++		catch (err:ParserError) { restore(); result=error(Parser.errorMsg(err.errorValue),inlined ? err.pos : p); }
+ 		catch (err:syntax.Lexer.LexerError) { restore(); result=error(Lexer.errorMsg(err.message),inlined ? err.pos : p); }
+ 		catch(err:haxe.Exception){ restore(); throw err;}
+ 		restore(); return result;
+diff -ruN a/src/typing/Fields.hx b/src/typing/Fields.hx
+--- a/src/typing/Fields.hx	2026-10-08 11:58:14.672123925 +0000
++++ b/src/typing/Fields.hx	2026-10-08 11:58:14.679567836 +0000
+@@ -188,7 +188,7 @@
+     try classAccess(e,c,tl).access catch(err:Dynamic) {
+      if(!Std.isOfType(err,NotFound)) throw err;
+      try switch c.clKind {case KTypeParameter(ttp):byList(function(t) return switch follow(t) {case TAbstract(_):byE(byType,mkCast(e,t,p)); case _:throw NotFound.raise();},getConstraints(ttp)); case _:throw NotFound.raise();}
+-     catch(err:Dynamic) {if(!Std.isOfType(err,NotFound)) throw err; byInterfaces(e,c);}
++     catch(err:NotFound) { byInterfaces(e,c);}
+     }
+    case TAnon(a):switch a.aStatus {
+     case ClassStatics(c):
+@@ -196,7 +196,7 @@
+       var cf=some(c.clStatics.get(i)); if(hasClassFieldFlag(cf,CfImpl)&&!hasClassFieldFlag(cf,CfEnum)) displayError(ctx.com,"Cannot access non-static abstract field statically",pfield); noNoLookup(cf); access(e,cf,FHStatic(c));
+      } catch(err:Dynamic) {
+       if(!Std.isOfType(err,NotFound)) throw err;
+-      switch c.clKind {case KAbstractImpl(a):forwardStatic(function() {var mt:ModuleType; try mt=moduleTypeOfType(a.aThis) catch(err:Dynamic) {if(!Std.isOfType(err,Exit)) throw err; throw NotFound.raise();} return byE(byType,TyperBase.typeModuleType(ctx,mt,p));},a); case _:throw NotFound.raise();}
++      switch c.clKind {case KAbstractImpl(a):forwardStatic(function() {var mt:ModuleType; try mt=moduleTypeOfType(a.aThis) catch(err:Exit) { throw NotFound.raise();} return byE(byType,TyperBase.typeModuleType(ctx,mt,p));},a); case _:throw NotFound.raise();}
+      }
+     case EnumStatics(en):var c=some(en.eConstrs.get(i)); AKExpr(mk(TField(e,FEnum(en,c)),enumFieldType(ctx,en,c,p),p));
+     case _:access(e,some(a.aFields.get(i)),FHAnon);
+@@ -217,7 +217,7 @@
+     checkConstraint(Monomorph.classifyDownConstraints(r));
+    case TAbstract(a,tl):
+     try {var c=some(a.aImpl),f=some(c.clStatics.get(i)); if(!hasClassFieldFlag(f,CfImpl)) throw NotFound.raise(); noNoLookup(f); access(e,f,FHAbstract(a,tl,c));}
+-    catch(err:Dynamic) {if(!Std.isOfType(err,NotFound)) throw err; forwardMember(byType,e,a,tl);}
++    catch(err:NotFound) { forwardMember(byType,e,a,tl);}
+    case _:throw NotFound.raise();
+   };
+   function byExtension(f:(Array<{cls:TClass,pos:Pos}>->AccessKind)->AccessKind,t:T,e:TExpr):AccessKind {
+@@ -251,23 +251,23 @@
+   }
+   function byTypeExtension(e:TExpr,t:T):AccessKind {
+    if(isSet) throw NotFound.raise();
+-   function extension():AccessKind return byExtension(function(lookup) {var mt:ModuleType; try mt=moduleTypeOfType(t) catch(err:Dynamic) {if(!Std.isOfType(err,Exit)) throw err; throw NotFound.raise();} return lookup(tInfos(mt).mtUsing);},t,e);
++   function extension():AccessKind return byExtension(function(lookup) {var mt:ModuleType; try mt=moduleTypeOfType(t) catch(err:Exit) { throw NotFound.raise();} return lookup(tInfos(mt).mtUsing);},t,e);
+    return switch t {
+-    case TType(td,tl):try extension() catch(err:Dynamic) {if(!Std.isOfType(err,NotFound)) throw err; byTypedef(byTypeExtension,e,td,tl);}
++    case TType(td,tl):try extension() catch(err:NotFound) { byTypedef(byTypeExtension,e,td,tl);}
+     case TMono(_):throw NotFound.raise();
+-    case TAbstract(a,tl):try extension() catch(err:Dynamic) {if(!Std.isOfType(err,NotFound)) throw err; forwardMember(byTypeExtension,e,a,tl);}
++    case TAbstract(a,tl):try extension() catch(err:NotFound) { forwardMember(byTypeExtension,e,a,tl);}
+     case _:extension();
+    };
+   }
+   function byModuleExtension(e:TExpr,t:T):AccessKind {
+    if(isSet) throw NotFound.raise();
+    function extension():AccessKind return byExtension(function(lookup) {
+-    try return lookup(ctx.m.moduleUsing) catch(err:Dynamic) {if(!Std.isOfType(err,NotFound)) throw err; var acc=lookup(ctx.g.globalUsing); return switch acc {case AKUsingField({seAccess:{faHost:FHStatic(c)}}):addDependency(ctx.m.curmod,c.clModule,MDepFromTyping); acc; case _:throw "Invalid global using access";};}
++    try return lookup(ctx.m.moduleUsing) catch(err:NotFound) { var acc=lookup(ctx.g.globalUsing); return switch acc {case AKUsingField({seAccess:{faHost:FHStatic(c)}}):addDependency(ctx.m.curmod,c.clModule,MDepFromTyping); acc; case _:throw "Invalid global using access";};}
+    },t,e);
+    return switch t {
+     case TType(td,tl):byTypedef(byModuleExtension,e,td,tl);
+     case TMono(r):switch Monomorph.classifyDownConstraints(r) {case CStructural(_,false):extension(); case _:throw NotFound.raise();}
+-    case TAbstract(a,tl):try extension() catch(err:Dynamic) {if(!Std.isOfType(err,NotFound)) throw err; forwardMember(byModuleExtension,e,a,tl);}
++    case TAbstract(a,tl):try extension() catch(err:NotFound) { forwardMember(byModuleExtension,e,a,tl);}
+     case _:extension();
+    };
+   }
+@@ -284,7 +284,7 @@
+     try {if(!cfg.allowResolve) throw NotFound.raise(); var c=some(a.aImpl),f=some(isSet?a.aWrite:a.aRead); AKResolve(makeAbstractStaticExtensionAccess(a,tl,c,f,e,false,p),i);}
+     catch(err:Dynamic) {
+      if(!Std.isOfType(err,NotFound)) throw err;
+-     try forwardMember(byFallback,e,a,tl) catch(err:Dynamic) {if(!Std.isOfType(err,NotFound)) throw err; var f=some(some(a.aImpl).clStatics.get(i)); if(!hasClassFieldFlag(f,CfImpl)) raiseTypingError("Invalid call to static function "+i+" through abstract instance",pfield); else throw err;}
++     try forwardMember(byFallback,e,a,tl) catch(err:NotFound) { var f=some(some(a.aImpl).clStatics.get(i)); if(!hasClassFieldFlag(f,CfImpl)) raiseTypingError("Invalid call to static function "+i+" through abstract instance",pfield); else throw err;}
+     }
+    case _:throw NotFound.raise();
+   };
+@@ -297,7 +297,7 @@
+    case _:throw NotFound.raise();
+   };
+   var t=followWithoutType(e.etype);
+-  for(strategy in [byType,byTypeExtension,byModuleExtension,byFallback,byModule]) try return strategy(e,t) catch(err:Dynamic) {if(!Std.isOfType(err,NotFound)) throw err;}
++  for(strategy in [byType,byTypeExtension,byModuleExtension,byFallback,byModule]) try return strategy(e,t) catch(err:NotFound) {}
+   if(cfg.doResume) throw NotFound.raise();
+   if(!ctx.f.isUntyped) {
+    function special(a:TAbstract):Bool return Lambda.exists(a.aOps,pair -> pair.field.cfName==i)||Lambda.exists(a.aUnops,pair -> pair.field.cfName==i)||Lambda.exists(a.aArray,cf -> cf.cfName==i);
+diff -ruN a/src/typing/ModuleTyping.hx b/src/typing/ModuleTyping.hx
+--- a/src/typing/ModuleTyping.hx	2026-10-08 11:58:14.672216075 +0000
++++ b/src/typing/ModuleTyping.hx	2026-10-08 11:58:14.679724181 +0000
+@@ -194,5 +194,5 @@
+   var parsed;try{parsed=SourceParser.parseModule(com,path,p);}catch(_:NotFound){if(com.loadExternType.length>0)Error.raiseTypingError("Native library loading is outside the source-only HXB milestone",p);com.moduleNonexistentLut.add(path,true);return missing();}
+   var m=typeModule(com,g,path,parsed.file.file,parsed.declarations,p);for(w in parsed.warnings)Common.moduleWarning(com,m,WIfDisplay,[],core.WarningList.warningObj(WIfDisplay).wDoc,w.pos);return m;
+  }
+- public static function loadModule(ctx:TyperContext,path:GlobalTypePath,p:Pos,origin:ModuleDepOrigin=MDepFromTyping):ModuleDef {var m=loadModulePrime(ctx.com,ctx.g,path,p);addDependency(ctx.m.curmod,m,origin,true);if(ctx.pass==PTypeField)flushPass(ctx.g,PConnectField,{name:"load_module",args:path.pack.concat([path.name])});return m;}
++ public static function loadModule(ctx:TyperContext,path:GlobalTypePath,p:Pos,?origin:ModuleDepOrigin):ModuleDef {if(origin==null)origin=MDepFromTyping;var m=loadModulePrime(ctx.com,ctx.g,path,p);addDependency(ctx.m.curmod,m,origin,true);if(ctx.pass==PTypeField)flushPass(ctx.g,PConnectField,{name:"load_module",args:path.pack.concat([path.name])});return m;}
+ }
+diff -ruN a/src/typing/Typeload.hx b/src/typing/Typeload.hx
+--- a/src/typing/Typeload.hx	2026-10-08 11:58:14.672374604 +0000
++++ b/src/typing/Typeload.hx	2026-10-08 11:58:14.679906507 +0000
+@@ -82,7 +82,7 @@
+    var path:core.Globals.GlobalTypePath = {pack:entry.pack,name:mname},m:Dynamic;
+    try m=ctx.g.doLoadModule(ctx,path,p) catch(exc:Dynamic) {switch exc {case (core.ds.ExceptionTools.typing(_) => Some({errMessage:ModuleNotFound(mpath)})) if(Common.samePath(mpath,path)):throw NotFound.raise(); case _:throw exc;}}
+    var result=f(m); ImportHandling.markImportPosition(ctx,entry.pos); return result;
+-  } catch(exc:Dynamic) {if(!Std.isOfType(exc,NotFound)) throw exc;}
++  } catch(exc:NotFound) {}
+   throw NotFound.raise();
+  }
+  public static function findInModulesStartingFromCurrentPackage<R>(ctx:Typer,mname:String,p:Pos,f:ModuleDef->R):R {
+@@ -93,8 +93,8 @@
+   }
+   return f(m);
+  }
+- public static function findInUnqualifiedModules<R>(ctx:Typer,name:String,p:Pos,f:ModuleDef->R):R {try return findInWildcardImports(ctx,name,p,f) catch(exc:Dynamic) {if(!Std.isOfType(exc,NotFound)) throw exc; return findInModulesStartingFromCurrentPackage(ctx,name,p,f);}}
+- public static function loadUnqualifiedTypeDef(ctx:Typer,mname:String,tname:String,p:Pos):Dynamic {try return findInUnqualifiedModules(ctx,mname,p,m -> findTypeInModuleRaise(ctx,m,tname,p)) catch(exc:Dynamic) {if(!Std.isOfType(exc,NotFound)) throw exc; return raiseErrorMsg(ModuleNotFound({pack:[],name:mname}),p);}}
++ public static function findInUnqualifiedModules<R>(ctx:Typer,name:String,p:Pos,f:ModuleDef->R):R {try return findInWildcardImports(ctx,name,p,f) catch(exc:NotFound) { return findInModulesStartingFromCurrentPackage(ctx,name,p,f);}}
++ public static function loadUnqualifiedTypeDef(ctx:Typer,mname:String,tname:String,p:Pos):Dynamic {try return findInUnqualifiedModules(ctx,mname,p,m -> findTypeInModuleRaise(ctx,m,tname,p)) catch(exc:NotFound) { return raiseErrorMsg(ModuleNotFound({pack:[],name:mname}),p);}}
+  public static function loadModule(ctx:Typer,path:GlobalTypePath,p:Pos):Dynamic {
+   try return ctx.g.doLoadModule(ctx,path,p) catch(exc:Dynamic) {switch exc {case (core.ds.ExceptionTools.typing(_) => Some({errMessage:ModuleNotFound(mpath)})) if(Common.samePath(mpath,path)&&path.pack.length>0&&path.pack[0]=="std"):return ctx.g.doLoadModule(ctx,{pack:path.pack.slice(1),name:path.name},p); case _:throw exc;}}
+  }
+@@ -103,7 +103,7 @@
+  public static function loadTypeDef(ctx:Typer,p:Pos,t:Dynamic):Dynamic {
+   if(core.ds.Key.compare(t,Parser.magicTypePath)==0) DeferredServices.display();
+   var name=t.tsub==null?t.tname:t.tsub;
+-  try {if(t.tsub!=null) throw NotFound.raise(); return findTypeInCurrentModuleContext(ctx,t.tpackage,name);} catch(exc:Dynamic) {if(!Std.isOfType(exc,NotFound)) throw exc; return loadTypeDefPrime(ctx,t.tpackage,t.tname,name,p);}
++  try {if(t.tsub!=null) throw NotFound.raise(); return findTypeInCurrentModuleContext(ctx,t.tpackage,name);} catch(exc:NotFound) { return loadTypeDefPrime(ctx,t.tpackage,t.tname,name,p);}
+  }
+  public static function generateArgsMeta(com:Dynamic,cls:Dynamic,addMeta:MetadataEntry->Void,args:Array<FuncArg>):Void {
+   var values:Array<ObjectField>=[];
+@@ -199,7 +199,7 @@
+   try {
+    if(t.tpackage.length!=0||t.tsub!=null) throw NotFound.raise();
+    var pt=lookupParam(t.tname,ctx.typeParams); if(t.tparams.length!=0) raiseTypingError("Class type parameter "+t.tname+" can't have parameters",ptp.posFull); return pt;
+-  } catch(exc:Dynamic) {if(!Std.isOfType(exc,NotFound)) throw exc;}
++  } catch(exc:NotFound) {}
+   var mt=loadTypeDef(ctx,ptp.posPath,t),info=ctx.g.getBuildInfo(ctx,mt,ptp.posFull);
+   if(info.buildPath.pack.length==0&&info.buildPath.name=="Dynamic") return switch t.tparams {case []:tDynamic; case [TPType(t)]:TDynamic(loadComplexType(ctx,true,LoadNormal,t)); case _:raiseTypingError("Too many parameters for Dynamic",ptp.posFull);};
+   if(info.buildParams.length==0) {
+diff -ruN a/src/typing/TypeloadCheck.hx b/src/typing/TypeloadCheck.hx
+--- a/src/typing/TypeloadCheck.hx	2026-10-08 11:58:14.672400517 +0000
++++ b/src/typing/TypeloadCheck.hx	2026-10-08 11:58:14.679930952 +0000
+@@ -47,8 +47,8 @@
+ class TypeloadCheck {
+  public static function isGenericParameter(ctx:Typer,c:TClass):Bool {
+   var name=c.clPath.name;
+-  try {lookupParam(name,ctx.f.curfield.cfParams); return hasClassFieldFlag(ctx.f.curfield,CfGeneric);} catch(e:Dynamic) {if(!Std.isOfType(e,NotFound)) throw e;}
+-  try {lookupParam(name,ctx.typeParams); return switch ctx.c.curclass.clKind {case KGeneric:true; case _:false;};} catch(e:Dynamic) {if(!Std.isOfType(e,NotFound)) throw e; return false;}
++  try {lookupParam(name,ctx.f.curfield.cfParams); return hasClassFieldFlag(ctx.f.curfield,CfGeneric);} catch(e:NotFound) {}
++  try {lookupParam(name,ctx.typeParams); return switch ctx.c.curclass.clKind {case KGeneric:true; case _:false;};} catch(e:NotFound) { return false;}
+  }
+  public static function validRedefinition(com:CommonContext,map1:T->T,map2:T->T,f1:TClassField,t1:T,f2:TClassField,t2:T):Void {
+   var tctx:TypeParamUnificationContext={typeParamPairs:[],knownTypeParams:f1.cfParams};
+@@ -98,8 +98,8 @@
+  public static function copyMeta(source:Metadata,target:Metadata,selected:Array<core.MetaList.StrictMeta>):Metadata {var result=target.copy(); for(m in source) if(selected.contains(m.meta)) result.unshift(m); return result;}
+  public static function checkNativeNameOverride(ctx:Typer,child:TClassField,base:TClassField):Void {
+   function error(bp:Pos,cp:Pos):Void displayErrorExt(ctx.com,makeError(Custom("Field "+child.cfName+" has different @:native value than in superclass"),cp,[makeError(Custom(complMsg("Base field is defined here")),bp)]));
+-  try {var cn=NativeTools.getNativeName(child.cfMeta); try {var bn=NativeTools.getNativeName(base.cfMeta); if(bn.name!=cn.name) error(bn.pos,cn.pos);} catch(e:Dynamic) {if(!Std.isOfType(e,NotFound)) throw e; error(base.cfNamePos,cn.pos);}}
+-  catch(e:Dynamic) {if(!Std.isOfType(e,NotFound)) throw e;}
++  try {var cn=NativeTools.getNativeName(child.cfMeta); try {var bn=NativeTools.getNativeName(base.cfMeta); if(bn.name!=cn.name) error(bn.pos,cn.pos);} catch(e:NotFound) { error(base.cfNamePos,cn.pos);}}
++  catch(e:NotFound) {}
+  }
+  public static function checkOverrideField(ctx:Typer,p:Pos,r:RedefinitionContext):Void {
+   var i=r.cfNew.cfName, hasOverride=hasClassFieldFlag(r.cfNew,CfOverride);
+@@ -151,7 +151,7 @@
+   function active(c:TClass,cf:TClassField):Bool {
+    if(hasClassFieldFlag(r.cfOld,CfAbstract)) return false;
+    try {var m=Meta.get(MetaTag.CallSuper,cf.cfMeta); return switch m.exprs {case [{expr:EConst(Ident("false"))}]:false; case _:true;};}
+-   catch(e:Dynamic) {if(!Std.isOfType(e,NotFound)) throw e; var sup=c.clSuper; if(sup==null||!sup.cls.clFields.exists(name)) return false; return active(sup.cls,sup.cls.clFields.get(name));}
++   catch(e:NotFound) { var sup=c.clSuper; if(sup==null||!sup.cls.clFields.exists(name)) return false; return active(sup.cls,sup.cls.clFields.get(name));}
+   }
+   if(active(r.cOld,r.cfOld)&&!hasSuperCall(name,e)) displayError(com,"Missing call to super."+name+"()",r.cfNew.cfNamePos);
+  }

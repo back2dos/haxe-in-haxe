@@ -156,14 +156,43 @@ all allocation) or a cheaper allocator.
 
 ## Notes
 
-- **Go** isn't benchmarked. The pinned compiler has no Go target, and the
+- **Go** (hx2go). The pinned compiler has no Go target; the
   [hx2go](https://github.com/go2hx/hx2go) custom target (git `2739b6c`)
-  compiles a hello world but not the port. Its `haxe.Exception` defines
-  `error()` for Go's error interface, which clashes with the port's
-  `ParserError.error` and `WithTypeError.error` fields. With those renamed,
-  the generated Go still has 40 compile errors: `break`/`continue` outside
-  their loop, missing `HxArray` methods (`concat`, `slice`, `join`), generic
-  variance (`HxArray[T]` vs `HxArray[any]`) and missing returns.
+  generates Go that only builds and runs after patching:
+  `HAXE=haxe/haxe sh bench/hx2go/build.sh` produces `bin/bench/hih-go`. With
+  those patches it passes the full conformance suite (282 cases) and runs
+  every workload, but it's the slowest build: `stdlib` 5.10s (20× the
+  reference; HL/C 0.48s, JS 2.21s, JVM 3.09s in the same run), `hello`
+  2.34s. About a third of its time is Go panic/recover unwinding for the
+  port's exception-based control flow, and a quarter is GC; much of the rest
+  goes through reflection-based dynamic calls.
+  The fixes, all specific to hx2go 2739b6c:
+  - Source (`bench/hx2go/source.patch`, applied to a copy of `src`): rename
+    two exception fields called `error` (hx2go's `haxe.Exception` defines
+    `error()`); explicit null checks for the two enum-valued default
+    arguments (hx2go drops callee-side defaults); `catch (e:NotFound)`
+    instead of `catch (e:Dynamic)` plus `Std.isOfType` (a caught subclass
+    arrives as its base `haxe.Exception`); `exists` before calling a
+    function read from a map (hx2go's adapter makes it non-null).
+  - Generated Go: `trybreak.py` (a `break` out of a loop inside a `try` body
+    left the whole `try` body, skipping e.g. class field initialization),
+    `tryreturn.py` (`return f()` inside `try` marked the function as returned
+    before evaluating `f()`, so a caught exception made it return nil),
+    `staticorder.py` (static initializers ran before the statics they read),
+    `autofix.py` (generic array variance, dead `break`/`continue`, missing
+    returns, `any` assertions), and `manual.py`: a name clash between
+    `core.Texpr` and `core.TExpr`, `super` inside closures, typed `catch` on
+    a typedef alias, `Map` values stored as concrete maps, a recursion limit
+    for `Std.string` (types are cyclic), void functions behind dynamic
+    closure adapters, and the string runtime. hx2go's `charCodeAt` counted
+    runes from the start of the string on every call (quadratic lexing) and
+    `indexOf` returned byte offsets while `substr` used code points; the
+    patched runtime has O(1) paths for ASCII strings and code-point-correct
+    `indexOf`. Mutex ownership formatted a stack trace (`runtime.Stack`) per
+    acquire to get the goroutine id; with a single goroutine it's now constant.
+  - Debugging aids in the patched runtime: `HXGO_TRACE=1` prints the Go
+    stack of every thrown Haxe value (except the control-flow singletons) and
+    runtime error; `HXGO_CPUPROFILE=file` writes a pprof CPU profile.
 - **HL/C.** The pinned compiler's `hl2c` dies (`Globals.die` in `rassign`)
   when a `Dynamic` field of a structural type is read into a typed register.
   `hl2c-virtual-field-cast.patch` converts through `hl_dyn_cast` there, like
