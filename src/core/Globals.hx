@@ -18,6 +18,20 @@ package core;
 	public var pack:Array<String>;
 	public var name:String;
 	public inline function new(pack:Array<String>, name:String) { this.pack = pack; this.name = name; }
+	// "pack.name#" style key, cached while pack and name are unchanged (HXB pools).
+	var keyCache:Null<String> = null;
+	var keyPack:Null<Array<String>> = null;
+	var keyName:Null<String> = null;
+	var keyPackLength = 0;
+	public function hashKey():String {
+		if (keyCache == null || keyPack != pack || keyName != name || keyPackLength != pack.length) {
+			keyCache = pack.join(".") + "#" + name;
+			keyPack = pack;
+			keyName = name;
+			keyPackLength = pack.length;
+		}
+		return keyCache;
+	}
 	public inline function clone():GlobalTypePath return new GlobalTypePath(pack, name);
 }
 

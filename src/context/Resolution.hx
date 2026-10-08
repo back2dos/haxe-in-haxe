@@ -105,7 +105,7 @@ class ResolutionList {
 				var ef = en.eConstrs.get(i);
 				if (ef != null && !core.TFunctions.hasMeta(StrictMeta.NoImportGlobal, ef.efMeta)) return Resolution.enumConstructorResolution(en,ef,null,res.rPos);
 			case RTypeImport(alias,_), RClassFieldImport(alias,_,_), RAbstractFieldImport(alias,_,_,_), REnumConstructorImport(alias,_,_):
-				if (alias == i) return res;
+				if (core.ds.StrTools.eq(alias, i)) return res;
 			case RLazy(_), RWildcardPackage(_):
 		}
 		throw core.ds.NotFound.raise();

@@ -27,14 +27,28 @@ class StringPool {
 		return index;
 	}
 
+	// The plain key is tried first and the hit verified against the stored string;
+	// only misses and NUL-truncation collisions compute the escaped key (scanning
+	// every string on every lookup was a large share of HXB writing).
+	inline function find(value:String):Null<Int> {
+		var i = indices.get(value);
+		#if hl
+		if (i == null || items.get(i) != value) {
+			var k = key(value);
+			i = k == value ? null : indices.get(k);
+		}
+		#end
+		return i;
+	}
+
 	public function get(value:String):Int {
-		var k = key(value);
-		if (!indices.exists(k)) throw "Not_found";
-		return indices.get(k);
+		var i = find(value);
+		if (i == null) throw "Not_found";
+		return i;
 	}
 
 	public function getOrAdd(value:String):Int {
-		var i = indices.get(key(value));
+		var i = find(value);
 		return i != null ? i : add(value);
 	}
 

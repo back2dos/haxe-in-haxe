@@ -89,7 +89,7 @@ function sortedKeys<V>(m:haxe.ds.StringMap<V>):Array<String> {
 	return keys;
 }
 
-function pathKey(path:GlobalTypePath):String return path.pack.join(".") + "#" + path.name;
+function pathKey(path:GlobalTypePath):String return path.hashKey();
 
 class Pool<K, V> {
 	final lut:Map<String, Int> = new Map();

@@ -1,6 +1,15 @@
 package core.ds;
 
 class StrTools {
+	/** String equality for non-null strings; on HashLink `==` calls String.__compare, so lengths are compared first. **/
+	public static inline function eq(a:String, b:String):Bool {
+		#if hl
+		return a.length == b.length && a == b;
+		#else
+		return a == b;
+		#end
+	}
+
 	/**
 		OCaml's physical inequality `!=` on strings. HashLink compares the
 		character buffers and the JVM references; other hosts have no string
