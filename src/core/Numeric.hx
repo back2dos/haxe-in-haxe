@@ -18,6 +18,20 @@ class Numeric {
 		return validFloatLexeme(Std.string(value));
 	}
 
+	/** numeric.ml `float_repres`: shortest of %.12g/%.15g/%.18g that reads back as `f`. **/
+	public static function floatRepres(f:Float):String {
+		if (Math.isNaN(f)) return "nan";
+		if (!Math.isFinite(f)) return f < 0.0 ? "neg_infinity" : "infinity";
+		var floatVal = {
+			var s1 = core.ds.OcamlPrintf.formatG(12, f);
+			if (f == Std.parseFloat(s1)) s1 else {
+				var s2 = core.ds.OcamlPrintf.formatG(15, f);
+				if (f == Std.parseFloat(s2)) s2 else core.ds.OcamlPrintf.formatG(18, f);
+			}
+		}
+		return validFloatLexeme(floatVal);
+	}
+
 	public static function isWhitespace(code:Int):Bool {
 		return code > 8 && code < 14;
 	}

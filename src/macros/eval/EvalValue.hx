@@ -155,13 +155,30 @@ class Vregex {
 	public final rRexString:Vstring;
 	public final rGlobal:Bool;
 	public var rString:String = "";
-	// the last match succeeded (groups are read from `r`)
-	public var rMatched:Bool = false;
+	// `r_groups`: snapshots of the last match (empty when no match was made)
+	public var rGroups:Array<VregexMatch> = [];
 
 	public function new(r:EReg, rRexString:Vstring, rGlobal:Bool) {
 		this.r = r;
 		this.rRexString = rRexString;
 		this.rGlobal = rGlobal;
+	}
+}
+
+/**
+	One PCRE2 `substrings` value: native offsets of group 0 and the group
+	substrings (`null` for unset groups), taken from the host EReg right after
+	the match so that later host matches do not affect it.
+**/
+class VregexMatch {
+	public final first:Int;
+	public final last:Int;
+	public final groups:Array<Null<String>>;
+
+	public function new(first:Int, last:Int, groups:Array<Null<String>>) {
+		this.first = first;
+		this.last = last;
+		this.groups = groups;
 	}
 }
 

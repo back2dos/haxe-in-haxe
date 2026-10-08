@@ -1,8 +1,26 @@
 package macros;
 
 import core.Globals.Pos;
+import core.Globals.GlobalTypePath;
+import core.Globals.Platform;
+import core.Globals;
 import core.Ast;
 import core.TType;
+import core.TFunctions;
+import core.TFunctions.*;
+import core.DisplayTypes.DisplayModeValue;
+import core.Message.CompilerMessage;
+import core.Message.MessageSeverity;
+import core.Meta;
+import core.MetaList;
+import core.DefineRegistry.DefineParameter;
+import core.ds.AtomicLazy;
+import core.ds.NotFound;
+import core.ds.PMap;
+import context.Common;
+import context.PlatformConfig;
+import macros.eval.EvalValue.Value;
+import haxe.ds.StringMap;
 
 /**
 	haxe/src/macro/macroApi.ml: the compiler side of the macro API (`compiler_api`)

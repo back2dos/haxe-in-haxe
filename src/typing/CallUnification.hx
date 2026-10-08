@@ -266,8 +266,63 @@ class CallDispatcher {
   return fcc.fcData();
  }
  function macroCall(ethis:TExpr,cf:TClassField,el:Array<Expr>):TExpr {
-  // Original macro dispatch is retained in deferred/macros/typing/CallDispatcherMacros.hx.
-  return context.DeferredServices.macros();
+  if(ctx.e.macroDepth>300) raiseTypingError("Stack overflow",p);
+  ctx.e.macroDepth=ctx.e.macroDepth+1;
+  ctx.e.withTypeStack.unshift(withType);
+  var ethisF:Void->Void=function() {};
+  function macroInMacro():Void->TExpr return function() {
+   var e:Expr={expr:EThrow({expr:EConst(String("macro-in-macro",SDoubleQuotes)),pos:p}),pos:p};
+   return typeExpr(ctx,e,withType,mode);
+  };
+  var f:Void->TExpr=switch ethis.eexpr {
+   case TTypeExpr(TClassDecl(c)):
+    context.display.DeprecationCheck.checkCf(createDeprecationContext(ctx),cf,p);
+    switch ctx.g.doMacro(ctx,MExpr,c.clPath,cf.cfName,el,p) {
+     case MError:function() return typeExpr(ctx,{expr:EConst(Ident("null")),pos:p},WithTypeTools.value,mode);
+     case MSuccess({expr:EMeta({meta:MetaTag.MergeBlock},{expr:EBlock(el)})}):function() {var e:TExpr=typeBlockRef(ctx,el,withType,p); return mk(TMeta({meta:MetaTag.MergeBlock,exprs:[],pos:p},e),e.etype,e.epos);};
+     case MSuccess(e):function() return typeExpr(ctx,e,withType,mode);
+     case MMacroInMacro:macroInMacro();
+    }
+   case _:
+    // member-macro call : since we will make a static call, let's find the actual class and not its subclass
+    switch follow(ethis.etype) {
+     case TInst(c,_):
+      function loop(c:TClass):Void->TExpr {
+       if(c.clFields.exists(cf.cfName)) {
+        var pushed=pushThis(ctx,ethis);
+        ethisF=pushed.restore;
+        return switch ctx.g.doMacro(ctx,MExpr,c.clPath,cf.cfName,[pushed.expr].concat(el),p) {
+         case MError:function() return typeExpr(ctx,{expr:EConst(Ident("null")),pos:p},WithTypeTools.value,mode);
+         case MSuccess(e):function() return typeExpr(ctx,e,withType,mode);
+         case MMacroInMacro:macroInMacro();
+        };
+       }
+       return c.clSuper==null?Globals.die("","typing/CallUnification.hx"):loop(c.clSuper.cls);
+      }
+      loop(c);
+     case _:Globals.die("","typing/CallUnification.hx");
+    }
+  };
+  ctx.e.macroDepth=ctx.e.macroDepth-1;
+  ctx.e.withTypeStack.shift();
+  var old=ctx.com.errorExt;
+  ctx.com.errorExt=function(err:Dynamic) {
+   var err:CompilerError=err;
+   var ep=err.errPos;
+   // display additional info in the case the error is not part of our original call
+   if(ep.pfile!=p.pfile||ep.pmax<p.pmin||ep.pmin>p.pmax) {
+    if(ep.pfile==Globals.nullPos.pfile&&ep.pmin==Globals.nullPos.pmin&&ep.pmax==Globals.nullPos.pmax) old(makeError(err.errMessage,p,err.errSub));
+    else old(makeError(err.errMessage,err.errPos,[makeError(Custom(complMsg("Called from macro here")),p)].concat(err.errSub)));
+   } else old(err);
+  };
+  var e=try f() catch(exc:Dynamic) {
+   ctx.com.errorExt=old;
+   ethisF();
+   throw exc;
+  };
+  ctx.com.errorExt=old;
+  ethisF();
+  return e;
  }
  public function exprCall(e:TExpr,typed:Array<TExpr>,el:Array<Expr>):TExpr {
   checkAssign();
