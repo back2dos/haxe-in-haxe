@@ -143,7 +143,13 @@ class BasicBlock {
 	public inline function new(gRoot:BasicBlockData, gExit:BasicBlockData, gUnreachable:BasicBlockData, gFunctions:haxe.ds.IntMap<TFuncInfo>, gNodes:Array<BasicBlockData>, gVarInfos:Array<VarInfo>, gLoops:haxe.ds.IntMap<BasicBlockData>) { this.gRoot = gRoot; this.gExit = gExit; this.gUnreachable = gUnreachable; this.gFunctions = gFunctions; this.gNodes = gNodes; this.gVarInfos = gVarInfos; this.gLoops = gLoops; }
 	public inline function clone():GraphData return new GraphData(gRoot, gExit, gUnreachable, gFunctions, gNodes, gVarInfos, gLoops);
 }
-private typedef DomBbInfo = {var bb:BasicBlockData; var parent:DomBbInfo; var idom:DomBbInfo; var semi:Int; var label:DomBbInfo; var ancestor:DomBbInfo; var bucket:Array<DomBbInfo>;}
+// A class rather than a structure: HashLink accesses structures through
+// virtual tables (a conversion per IntMap lookup).
+@:structInit private class DomBbInfo {
+ public var bb:BasicBlockData; public var parent:DomBbInfo; public var idom:DomBbInfo; public var semi:Int; public var label:DomBbInfo; public var ancestor:DomBbInfo; public var bucket:Array<DomBbInfo>;
+ public inline function new(bb:BasicBlockData,parent:DomBbInfo,idom:DomBbInfo,semi:Int,label:DomBbInfo,ancestor:DomBbInfo,bucket:Array<DomBbInfo>) {this.bb = bb; this.parent = parent; this.idom = idom; this.semi = semi; this.label = label; this.ancestor = ancestor; this.bucket = bucket;}
+ public inline function clone():DomBbInfo return new DomBbInfo(bb,parent,idom,semi,label,ancestor,bucket);
+}
 class Graph {
  public static function createVarInfo(g:GraphData,bb:BasicBlockData,v:TVar):VarInfo {
   var vi:VarInfo = {viVar:v,viExtra:v.vExtra,viBbDeclare:bb,viOrigin:v,viWrites:[],viValue:null,viSsaEdges:[],viReachingDef:null};

@@ -386,7 +386,16 @@ class PosWriter {
 }
 typedef ExprChunks = {pre:Chunk, e:Chunk};
 
-private typedef UnboundFrame = {source:Void->String, p:Null<Pos>};
+// A class rather than a structure: HashLink accesses structures through
+// virtual tables (a conversion per pop).
+@:structInit private class UnboundFrame {
+	public final source:Void->String;
+	public final p:Null<Pos>;
+	public inline function new(source:Void->String, p:Null<Pos>) {
+		this.source = source;
+		this.p = p;
+	}
+}
 
 class HxbWriter {
 	final generateDocs:Bool;

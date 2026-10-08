@@ -175,7 +175,7 @@ index f332cf5..1844c29 100644
  	gc_freelist free;
  	unsigned char *sizes;
 diff --git a/src/gc.c b/src/gc.c
-index d338518..ab78e4d 100644
+index d338518..e75e1e8 100644
 --- a/src/gc.c
 +++ b/src/gc.c
 @@ -191,6 +191,16 @@ static gc_pheader *gc_alloc_page( int size, int kind, int block_count );
@@ -309,8 +309,15 @@ index d338518..ab78e4d 100644
  	if( size == 0 )
  		return NULL;
  	if( size < 0 )
-@@ -584,6 +655,21 @@ void *hl_gc_alloc_gen( hl_type *t, int size, int flags ) {
- 					MZERO((char*)ptr+size,allocated-size);
+@@ -578,12 +649,24 @@ void *hl_gc_alloc_gen( hl_type *t, int size, int flags ) {
+ 				ptr = s->cur;
+ 				allocated = s->block_size;
+ 				s->cur += allocated;
+-				if( flags & MEM_ZERO )
+-					MZERO(ptr,allocated);
+-				else if( MEM_HAS_PTR(flags) && allocated != size )
+-					MZERO((char*)ptr+size,allocated-size);
++				// slices and queued runs are zeroed when they are taken
  				return ptr;
  			}
 +			gc_runq *q = &gc_runqs[(part << PAGE_KIND_BITS) | kind];
@@ -331,7 +338,7 @@ index d338518..ab78e4d 100644
  		}
  	}
  #	endif
-@@ -630,8 +716,13 @@ void *hl_gc_alloc_gen( hl_type *t, int size, int flags ) {
+@@ -630,8 +713,13 @@ void *hl_gc_alloc_gen( hl_type *t, int size, int flags ) {
  			int max = GC_SLICE_BYTES / bsize;
  			int n = 0;
  			unsigned char *slice;
@@ -346,7 +353,7 @@ index d338518..ab78e4d 100644
  			gc_slice *s = &gc_slices[(tpart << PAGE_KIND_BITS) | kind];
  			s->block_size = bsize;
  			s->cur = slice + bsize;
-@@ -644,6 +735,24 @@ void *hl_gc_alloc_gen( hl_type *t, int size, int flags ) {
+@@ -644,6 +732,24 @@ void *hl_gc_alloc_gen( hl_type *t, int size, int flags ) {
  			gc_stats.allocation_count += n - 1;
  			gc_stats.total_requested += (int64)(n - 1) * bsize;
  			gc_stats.total_allocated += (int64)n * bsize;
@@ -371,7 +378,7 @@ index d338518..ab78e4d 100644
  		} else
  #		endif
  		{
-@@ -662,7 +771,9 @@ void *hl_gc_alloc_gen( hl_type *t, int size, int flags ) {
+@@ -662,7 +768,9 @@ void *hl_gc_alloc_gen( hl_type *t, int size, int flags ) {
  #	ifdef GC_DEBUG
  	memset(ptr,0xCD,allocated);
  #	endif
@@ -382,7 +389,7 @@ index d338518..ab78e4d 100644
  		MZERO(ptr,allocated);
  	else if( MEM_HAS_PTR(flags) && allocated != size )
  		MZERO((char*)ptr+size,allocated-size); // erase possible pointers after data
-@@ -1378,6 +1489,31 @@ static void *gc_alloc_page_memory( int size ) {
+@@ -1378,6 +1486,31 @@ static void *gc_alloc_page_memory( int size ) {
  #elif defined(HL_EMSCRIPTEN)
  	return emscripten_builtin_memalign(GC_PAGE_SIZE, size);
  #else
@@ -414,7 +421,7 @@ index d338518..ab78e4d 100644
  	static int recursions = 0;
  	int i = 0;
  	while( gc_will_collide(base_addr,size) ) {
-@@ -1474,6 +1610,13 @@ vdynamic *hl_alloc_obj( hl_type *t ) {
+@@ -1474,6 +1607,13 @@ vdynamic *hl_alloc_obj( hl_type *t ) {
  	int i;
  	hl_runtime_obj *rt = t->obj->rt;
  	if( rt == NULL || rt->methods == NULL ) rt = hl_get_obj_proto(t);
