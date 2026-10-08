@@ -2,22 +2,23 @@ package core;
 
 // Port of haxe/src/core/stringError.ml.
 class StringError {
+	// Same distance as the matrix in stringError.ml, computed with two rows.
 	public static function levenshtein(first:String, second:String):Int {
-		if (first.length == 0) return second.length;
-		if (second.length == 0) return first.length;
-		var matrix:Array<Array<Int>> = [];
-		for (row in 0...first.length + 1) {
-			var values:Array<Int> = [];
-			for (column in 0...second.length + 1) values.push(row == 0 ? column : column == 0 ? row : 0);
-			matrix.push(values);
-		}
-		for (row in 1...first.length + 1) {
-			for (column in 1...second.length + 1) {
-				var cost = first.charCodeAt(row - 1) == second.charCodeAt(column - 1) ? 0 : 1;
-				matrix[row][column] = minimum(matrix[row - 1][column] + 1, matrix[row][column - 1] + 1, matrix[row - 1][column - 1] + cost);
+		var n = first.length, m = second.length;
+		if (n == 0) return m;
+		if (m == 0) return n;
+		var prev = new haxe.ds.Vector<Int>(m + 1), cur = new haxe.ds.Vector<Int>(m + 1);
+		for (column in 0...m + 1) prev[column] = column;
+		for (row in 1...n + 1) {
+			cur[0] = row;
+			var c1 = StringTools.fastCodeAt(first, row - 1);
+			for (column in 1...m + 1) {
+				var cost = c1 == StringTools.fastCodeAt(second, column - 1) ? 0 : 1;
+				cur[column] = minimum(prev[column] + 1, cur[column - 1] + 1, prev[column - 1] + cost);
 			}
+			var t = prev; prev = cur; cur = t;
 		}
-		return matrix[first.length][second.length];
+		return prev[m];
 	}
 
 	public static function getSimilar(input:String, candidates:Array<String>):Array<String> {
