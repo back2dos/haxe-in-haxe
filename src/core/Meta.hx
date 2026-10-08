@@ -24,7 +24,8 @@ class MetaNotFound extends core.ds.NotFound {
 class Meta {
 	// Structural equality (OCaml's =); comparing indices first avoids the deep
 	// comparison for the common mismatch.
-	static inline function metaEq(a:StrictMeta,b:StrictMeta):Bool return StdType.enumIndex(a) == StdType.enumIndex(b) && StdType.enumEq(a,b);
+	// The legacy bootstrap stores some metadata names as plain strings, which never match.
+	static inline function metaEq(a:StrictMeta,b:StrictMeta):Bool return !((b:Dynamic) is String) && StdType.enumIndex(a) == StdType.enumIndex(b) && StdType.enumEq(a,b);
 	public static function has(m:StrictMeta,ml:Metadata):Bool { for (entry in ml) if (metaEq(m,entry.meta)) return true; return false; }
 	public static function hasOneOf(ml1:Array<StrictMeta>,ml2:Metadata):Bool {
 		for (entry in ml2) for (meta in ml1) if (metaEq(meta,entry.meta)) return true;
