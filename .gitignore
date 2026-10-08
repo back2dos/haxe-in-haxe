@@ -3,3 +3,4 @@
 /test/reference/
 /examples/generated/
 /.haxelib/
+__pycache__/
