@@ -110,7 +110,8 @@ class Finalization {
 		var types:Array<ModuleType> = [];
 		var states:Map<String, FinalizationState> = [];
 		var statics:Map<String, Bool> = [];
-		function key(p:GlobalTypePath):String return p.pack.concat([p.name]).join(".");
+		// Cached path keys (pack#name) rather than joining a fresh string per comparison.
+		inline function key(p:GlobalTypePath):String return p.hashKey();
 		function staticKey(c:TClass, name:String):String return key(c.clPath) + ":" + name;
 		var loop:ModuleType->Void = null;
 		var walkExpr:GlobalTypePath->TExpr->Void = null;
@@ -170,7 +171,7 @@ class Finalization {
 					states.set(k, Generating);
 					switch t {case TClassDecl(c): walkClass(p, c); case _:}
 					states.set(k, Done);
-					types.unshift(t);
+					types.push(t); // upstream conses here and reverses the list at the end
 			}
 		};
 		var sortedModules:Array<ModuleDef> = modules.fold(function(_, m, acc:Array<ModuleDef>) {acc.unshift(m); return acc;}, []);
@@ -184,7 +185,6 @@ class Finalization {
 			return p1.length != p2.length ? p1.length - p2.length : Reflect.compare(m1.mPath.name, m2.mPath.name);
 		});
 		for (m in sortedModules) for (t in m.mTypes) loop(t);
-		types.reverse();
 		return {types:types, modules:sortedModules};
 	}
 	public static function generate(ctx:Typer, mainPath:Null<ModuleDef>):Dynamic {

@@ -83,10 +83,10 @@ class CapturedVars {
 		function outLoop(e:TExpr):TExpr {
 			switch e.eexpr {
 				case TWhile(_, _, _):
-					var vars = new IntMap<Int>(); var used = new IntMap<TVar>(); var depth = 0;
+					var vars = new core.ds.ScopedIntMap(); var used = new IntMap<TVar>(); var depth = 0;
 					function collectVars(inLoop:Bool, u:Usage):Void switch u {
-						case Block(f): var old = vars.copy(); f(u -> collectVars(inLoop, u)); vars = old;
-						case Loop(f): var old = vars.copy(); f(u -> collectVars(true, u)); vars = old;
+						case Block(f): var old = vars.mark(); f(u -> collectVars(inLoop, u)); vars.rollback(old);
+						case Loop(f): var old = vars.mark(); f(u -> collectVars(true, u)); vars.rollback(old);
 						case Function(f): ++depth; f(u -> collectVars(false, u)); --depth;
 						case Declare(v): if (inLoop) vars.set(v.vId, depth);
 						case Use(v) | Assign(v): if (vars.exists(v.vId) && vars.get(v.vId) != depth) used.set(v.vId, v);
@@ -97,19 +97,20 @@ class CapturedVars {
 			}
 		}
 		function allVars(e:TExpr):IntMap<TVar> {
-			var vars = new IntMap<Int>(); var used = new IntMap<TVar>();
-			var inLoop = false; var loopVars = new IntMap<Bool>(); var assigned = new IntMap<TVar>(); var depth = 0;
+			// Scoped maps: restoring a saved PMap is a rollback rather than a copy per scope.
+			var vars = new core.ds.ScopedIntMap(); var used = new IntMap<TVar>();
+			var inLoop = false; var loopVars = new core.ds.ScopedIntMap(); /* 1 when assigned */ var assigned = new IntMap<TVar>(); var depth = 0;
 			function markAssigned(v:TVar):Void { assigned.set(v.vId, v); vars.remove(v.vId); }
 			function checkLoopVar(v:TVar, isAssign:Bool):Void {
 				if (!inLoop) return;
-				if (loopVars.exists(v.vId)) { if (isAssign != loopVars.get(v.vId)) markAssigned(v); }
-				else loopVars.set(v.vId, isAssign);
+				if (loopVars.exists(v.vId)) { if (isAssign != (loopVars.get(v.vId) == 1)) markAssigned(v); }
+				else loopVars.set(v.vId, isAssign ? 1 : 0);
 			}
 			function collectVars(u:Usage):Void switch u {
-				case Block(f): var old = vars.copy(); f(collectVars); vars = old;
+				case Block(f): var old = vars.mark(); f(collectVars); vars.rollback(old);
 				case Loop(f):
-					var old = vars.copy(); var oldLoopVars = loopVars.copy(); var oldLoop = inLoop;
-					inLoop = true; f(collectVars); inLoop = oldLoop; loopVars = oldLoopVars; vars = old;
+					var old = vars.mark(); var oldLoopVars = loopVars.mark(); var oldLoop = inLoop;
+					inLoop = true; f(collectVars); inLoop = oldLoop; loopVars.rollback(oldLoopVars); vars.rollback(old);
 				case Function(f): ++depth; f(collectVars); --depth;
 				case Declare(v) if (!forCoro && TypeOps.hasVarFlag(v, VCoroCaptured)):
 				case Declare(v): vars.set(v.vId, depth);
