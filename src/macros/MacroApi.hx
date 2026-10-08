@@ -1791,7 +1791,7 @@ class MacroApiImpl {
 					{tag: 10, pl: [encodeClref(c), vpl, vel]};
 				case TUnop(op, flag, e1):
 					var v1 = loop(e1);
-					{tag: 11, pl: [encodeUnop(op), vbool(flag == Postfix), v1]};
+					{tag: 11, pl: [encodeUnop(op), vbool(flag.match(Postfix)), v1]};
 				case TFunction(func):
 					{tag: 12, pl: [encodeTfunc(func)]};
 				case TVar(v, eo):
@@ -1804,7 +1804,7 @@ class MacroApiImpl {
 					var vthen = loop(ethen);
 					{tag: 16, pl: [loop(eif), vthen, velse]};
 				case TWhile(econd, e1, flag):
-					var vflag = vbool(flag == NormalWhile);
+					var vflag = vbool(flag.match(NormalWhile));
 					var v1 = loop(e1);
 					{tag: 17, pl: [loop(econd), v1, vflag]};
 				case TSwitch(sw):
