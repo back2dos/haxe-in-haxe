@@ -25,9 +25,15 @@ import typing.matcher.TexprConverter;
 import typing.matcher.MatcherGlobals;
 
 // haxe/src/typing/matcher.ml (module Match) — mechanical draft; not compile-validated.
-typedef MatchCase = {var patterns:Array<Expr>; var guard:Null<Expr>; var expr:Null<Expr>; var pos:Pos;}
-typedef MatchDefault = {var expr:Null<Expr>; var pos:Pos;}
-
+@:structInit class MatchCase {
+	public var patterns:Array<Expr>;
+	public var guard:Null<Expr>;
+	public var expr:Null<Expr>;
+	public var pos:Pos;
+	public inline function new(patterns:Array<Expr>, guard:Null<Expr>, expr:Null<Expr>, pos:Pos) { this.patterns = patterns; this.guard = guard; this.expr = expr; this.pos = pos; }
+	public inline function clone():MatchCase return new MatchCase(patterns, guard, expr, pos);
+}
+typedef MatchDefault = core.Ast.SwitchDefault;
 class Matcher {
 	static function matchExprImpl(ctx:context.Typecore.Typer, e:Expr, cases:Array<MatchCase>, def:Null<MatchDefault>, withType:WithTypeValue, postfixMatch:Bool, p:Pos):TExpr {
 		var matchDebug = Meta.has(MetaTag.Custom(":debug.match"), ctx.f.curfield.cfMeta);
@@ -57,7 +63,7 @@ class Matcher {
 			case _:
 		}
 		// collect_free_monos is disabled in the pinned upstream entry point too.
-		var rows:Array<CaseRow> = cases.map(function(c) {
+		var rows:Array<CaseRow> = cases.map(function(c):CaseRow {
 			var cp = c.pos;
 			if (c.expr != null && cp.pfile == Globals.nullPos.pfile && cp.pmin == Globals.nullPos.pmin && cp.pmax == Globals.nullPos.pmax) cp = c.expr.pos;
 			var row = Case.make(ctx, subject.type, [], c.patterns, c.guard, c.expr, withType, postfixMatch, cp);

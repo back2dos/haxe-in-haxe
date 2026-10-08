@@ -20,8 +20,18 @@ class TypeExit { public function new() {} }
 class ApplyParamsRecursion { public function new() {} }
 class ApplyParamsMismatch { public function new() {} }
 enum MaybeCoro { Coro(signature:TSignature); NotCoro(type:T); }
-typedef ApplyParamsStack = {var value:Array<{subject:T,params:TParams}>;}
-typedef RawClassField = {var owner:Null<{cls:TClass,params:TParams}>;var type:T;var field:TClassField;}
+@:structInit class ApplyParamsStack {
+	public var value:Array<{subject:T,params:TParams}>;
+	public inline function new(value:Array<{subject:T,params:TParams}>) { this.value = value; }
+	public inline function clone():ApplyParamsStack return new ApplyParamsStack(value);
+}
+@:structInit class RawClassField {
+	public var owner:Null<{cls:TClass,params:TParams}>;
+	public var type:T;
+	public var field:TClassField;
+	public inline function new(owner:Null<{cls:TClass,params:TParams}>, type:T, field:TClassField) { this.owner = owner; this.type = type; this.field = field; }
+	public inline function clone():RawClassField return new RawClassField(owner, type, field);
+}
 class TFunctions {
 	public static var monomorphCreateRef:Void->TMono = function() throw "monomorphCreateRef is uninitialized";
 	public static var monomorphBindRef:TMono->T->Void = function(_,_) throw "monomorphBindRef is uninitialized";

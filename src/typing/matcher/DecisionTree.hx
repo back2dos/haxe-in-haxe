@@ -18,9 +18,22 @@ enum DecisionTreeKind {
 	GuardNull(expr:TExpr, thenTree:DecisionTreeData, elseTree:DecisionTreeData);
 	Fail;
 }
-typedef DecisionTreeData = {var dtT:DecisionTreeKind; var dtI:Int; var dtPos:Pos; var dtGotoTarget:Bool; var dtTexpr:Null<TExpr>;}
-typedef DecisionSwitchCase = {var scCon:ConstructorData; var scUnguarded:Bool; var scDt:DecisionTreeData;}
-
+@:structInit class DecisionTreeData {
+	public var dtT:DecisionTreeKind;
+	public var dtI:Int;
+	public var dtPos:Pos;
+	public var dtGotoTarget:Bool;
+	public var dtTexpr:Null<TExpr>;
+	public inline function new(dtT:DecisionTreeKind, dtI:Int, dtPos:Pos, dtGotoTarget:Bool, dtTexpr:Null<TExpr>) { this.dtT = dtT; this.dtI = dtI; this.dtPos = dtPos; this.dtGotoTarget = dtGotoTarget; this.dtTexpr = dtTexpr; }
+	public inline function clone():DecisionTreeData return new DecisionTreeData(dtT, dtI, dtPos, dtGotoTarget, dtTexpr);
+}
+@:structInit class DecisionSwitchCase {
+	public var scCon:ConstructorData;
+	public var scUnguarded:Bool;
+	public var scDt:DecisionTreeData;
+	public inline function new(scCon:ConstructorData, scUnguarded:Bool, scDt:DecisionTreeData) { this.scCon = scCon; this.scUnguarded = scUnguarded; this.scDt = scDt; }
+	public inline function clone():DecisionSwitchCase return new DecisionSwitchCase(scCon, scUnguarded, scDt);
+}
 class DecisionTree {
 	public static function makeBindGen(v:TVar, p:Pos, e:TExpr, s:BindStatus):Bind return {bVar:v, bPos:p, bExpr:e, bStatus:s};
 	public static function makeBind(v:TVar, p:Pos, e:TExpr):Bind return makeBindGen(v, p, e, BindUsed);
@@ -83,8 +96,8 @@ class DecisionTree {
 	}
 	public static function equal(dt1:DecisionTreeKind, dt2:DecisionTreeKind):Bool return switch [dt1, dt2] {
 		case [Leaf(c1), Leaf(c2)]: c1 == c2;
-		case [Switch(s1, c1, d1), Switch(s2, c2, d2)]: Texpr.equal(s1, s2) && all2(function(a, b) return Constructor.equal(a.scCon, b.scCon) && a.scUnguarded == b.scUnguarded && equalDt(a.scDt, b.scDt), c1, c2) && equalDt(d1, d2);
-		case [Bind(l1, d1), Bind(l2, d2)]: all2(function(a, b) return a.bVar == b.bVar && equalBindExpr(a.bExpr, b.bExpr), l1, l2) && equalDt(d1, d2);
+		case [Switch(s1, c1, d1), Switch(s2, c2, d2)]: Texpr.equal(s1, s2) && all2(function(a:DecisionSwitchCase, b:DecisionSwitchCase) return Constructor.equal(a.scCon, b.scCon) && a.scUnguarded == b.scUnguarded && equalDt(a.scDt, b.scDt), c1, c2) && equalDt(d1, d2);
+		case [Bind(l1, d1), Bind(l2, d2)]: all2(function(a:typing.matcher.Bind.Bind, b:typing.matcher.Bind.Bind) return a.bVar == b.bVar && equalBindExpr(a.bExpr, b.bExpr), l1, l2) && equalDt(d1, d2);
 		case [Fail, Fail]: true;
 		case [Guard(e1, d11, d12), Guard(e2, d21, d22)] | [GuardNull(e1, d11, d12), GuardNull(e2, d21, d22)]: e1 == e2 && equalDt(d11, d21) && equalDt(d12, d22);
 		case _: false;

@@ -11,11 +11,25 @@ import core.Meta;
 import context.SafeCom;
 // haxe/src/optimization/dce.ml — mechanical draft; not compiled or validated.
 enum DceMode { DceNo; DceStd; DceFull; }
-typedef DceData = {
- var scom:SafeContext; var mscom:Null<SafeContext>; var full:Bool; var stdDirs:Array<String>; var debug:Bool; var followExpr:DceData->TExpr->Void; var curclass:TClass;
- var addedFields:Array<{cls:TClass,field:TClassField,kind:ClassFieldRefKind}>; var markedFields:{value:Array<TClassField>};
- var features:haxe.ds.StringMap<Array<ClassFieldRef>>; var checkedFeatures:haxe.ds.StringMap<Bool>;
- var mergeMutex:sys.thread.Mutex; var fieldMarkerMutex:sys.thread.Mutex; var usedMutex:sys.thread.Mutex; var featureMutex:sys.thread.Mutex; var addFeatureManager:core.ds.NowOrLater;
+@:structInit class DceData {
+	public var scom:SafeContext;
+	public var mscom:Null<SafeContext>;
+	public var full:Bool;
+	public var stdDirs:Array<String>;
+	public var debug:Bool;
+	public var followExpr:DceData->TExpr->Void;
+	public var curclass:TClass;
+	public var addedFields:Array<{cls:TClass,field:TClassField,kind:ClassFieldRefKind}>;
+	public var markedFields:{value:Array<TClassField>};
+	public var features:haxe.ds.StringMap<Array<ClassFieldRef>>;
+	public var checkedFeatures:haxe.ds.StringMap<Bool>;
+	public var mergeMutex:sys.thread.Mutex;
+	public var fieldMarkerMutex:sys.thread.Mutex;
+	public var usedMutex:sys.thread.Mutex;
+	public var featureMutex:sys.thread.Mutex;
+	public var addFeatureManager:core.ds.NowOrLater;
+	public inline function new(scom:SafeContext, mscom:Null<SafeContext>, full:Bool, stdDirs:Array<String>, debug:Bool, followExpr:DceData->TExpr->Void, curclass:TClass, addedFields:Array<{cls:TClass,field:TClassField,kind:ClassFieldRefKind}>, markedFields:{value:Array<TClassField>}, features:haxe.ds.StringMap<Array<ClassFieldRef>>, checkedFeatures:haxe.ds.StringMap<Bool>, mergeMutex:sys.thread.Mutex, fieldMarkerMutex:sys.thread.Mutex, usedMutex:sys.thread.Mutex, featureMutex:sys.thread.Mutex, addFeatureManager:core.ds.NowOrLater) { this.scom = scom; this.mscom = mscom; this.full = full; this.stdDirs = stdDirs; this.debug = debug; this.followExpr = followExpr; this.curclass = curclass; this.addedFields = addedFields; this.markedFields = markedFields; this.features = features; this.checkedFeatures = checkedFeatures; this.mergeMutex = mergeMutex; this.fieldMarkerMutex = fieldMarkerMutex; this.usedMutex = usedMutex; this.featureMutex = featureMutex; this.addFeatureManager = addFeatureManager; }
+	public inline function clone():DceData return new DceData(scom, mscom, full, stdDirs, debug, followExpr, curclass, addedFields, markedFields, features, checkedFeatures, mergeMutex, fieldMarkerMutex, usedMutex, featureMutex, addFeatureManager);
 }
 class Dce {
  public static function pushClass(dce:DceData,c:TClass):DceData {var copy:DceData = core.ds.Record.copy(dce); copy.curclass = c; return copy;}

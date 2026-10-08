@@ -11,11 +11,20 @@ import core.Globals;
 import core.Message;
 
 enum DebugKind { DebugNone; DebugDot; DebugFull; }
-typedef AnalyzerConfigData = {
-	var optimize:Bool; var constPropagation:Bool; var copyPropagation:Bool; var localDce:Bool; var fusion:Bool;
-	var purityInference:Bool; var debugKind:DebugKind; var detailTimes:Int; var userVarFusion:Bool; var fusionDebug:Bool;
+@:structInit class AnalyzerConfigData {
+	public var optimize:Bool;
+	public var constPropagation:Bool;
+	public var copyPropagation:Bool;
+	public var localDce:Bool;
+	public var fusion:Bool;
+	public var purityInference:Bool;
+	public var debugKind:DebugKind;
+	public var detailTimes:Int;
+	public var userVarFusion:Bool;
+	public var fusionDebug:Bool;
+	public inline function new(optimize:Bool, constPropagation:Bool, copyPropagation:Bool, localDce:Bool, fusion:Bool, purityInference:Bool, debugKind:DebugKind, detailTimes:Int, userVarFusion:Bool, fusionDebug:Bool) { this.optimize = optimize; this.constPropagation = constPropagation; this.copyPropagation = copyPropagation; this.localDce = localDce; this.fusion = fusion; this.purityInference = purityInference; this.debugKind = debugKind; this.detailTimes = detailTimes; this.userVarFusion = userVarFusion; this.fusionDebug = fusionDebug; }
+	public inline function clone():AnalyzerConfigData return new AnalyzerConfigData(optimize, constPropagation, copyPropagation, localDce, fusion, purityInference, debugKind, detailTimes, userVarFusion, fusionDebug);
 }
-
 // haxe/src/optimization/analyzerConfig.ml — mechanical draft; not compiled or validated.
 class AnalyzerConfig {
 	public static final flagOptimize = "optimize";

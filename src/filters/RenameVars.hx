@@ -11,19 +11,38 @@ import core.Native;
 import haxe.ds.IntMap;
 import haxe.ds.StringMap;
 
-typedef RenameInit = {
-	var riScope:Dynamic; var riHoisting:Bool; var riNoShadowing:Bool; var riNoCatchVarShadowing:Bool;
-	var riSwitchCasesNoBlocks:Bool; var riReserved:StringMap<Bool>; var riReserveCurrentTopLevelSymbol:Bool;
+@:structInit class RenameInit {
+	public var riScope:Dynamic;
+	public var riHoisting:Bool;
+	public var riNoShadowing:Bool;
+	public var riNoCatchVarShadowing:Bool;
+	public var riSwitchCasesNoBlocks:Bool;
+	public var riReserved:StringMap<Bool>;
+	public var riReserveCurrentTopLevelSymbol:Bool;
+	public inline function new(riScope:Dynamic, riHoisting:Bool, riNoShadowing:Bool, riNoCatchVarShadowing:Bool, riSwitchCasesNoBlocks:Bool, riReserved:StringMap<Bool>, riReserveCurrentTopLevelSymbol:Bool) { this.riScope = riScope; this.riHoisting = riHoisting; this.riNoShadowing = riNoShadowing; this.riNoCatchVarShadowing = riNoCatchVarShadowing; this.riSwitchCasesNoBlocks = riSwitchCasesNoBlocks; this.riReserved = riReserved; this.riReserveCurrentTopLevelSymbol = riReserveCurrentTopLevelSymbol; }
+	public inline function clone():RenameInit return new RenameInit(riScope, riHoisting, riNoShadowing, riNoCatchVarShadowing, riSwitchCasesNoBlocks, riReserved, riReserveCurrentTopLevelSymbol);
 }
-typedef RenameScope = {
-	var parent:Null<RenameScope>; var children:Array<RenameScope>; var ownVars:Array<{variable:TVar, overlaps:Overlaps}>;
-	var foreignVars:Overlaps; var loopVars:Overlaps; var loopCount:Int;
+@:structInit class RenameScope {
+	public var parent:Null<RenameScope>;
+	public var children:Array<RenameScope>;
+	public var ownVars:Array<{variable:TVar, overlaps:Overlaps}>;
+	public var foreignVars:Overlaps;
+	public var loopVars:Overlaps;
+	public var loopCount:Int;
+	public inline function new(parent:Null<RenameScope>, children:Array<RenameScope>, ownVars:Array<{variable:TVar, overlaps:Overlaps}>, foreignVars:Overlaps, loopVars:Overlaps, loopCount:Int) { this.parent = parent; this.children = children; this.ownVars = ownVars; this.foreignVars = foreignVars; this.loopVars = loopVars; this.loopCount = loopCount; }
+	public inline function clone():RenameScope return new RenameScope(parent, children, ownVars, foreignVars, loopVars, loopCount);
 }
-typedef RenameContext = {
-	var rcHoisting:Bool; var rcNoShadowing:Bool; var rcNoCatchVarShadowing:Bool; var rcSwitchCasesNoBlocks:Bool;
-	var rcScope:Dynamic; var rcReserved:StringMap<Bool>; var rcVarOrigins:IntMap<RenameScope>;
+@:structInit class RenameContext {
+	public var rcHoisting:Bool;
+	public var rcNoShadowing:Bool;
+	public var rcNoCatchVarShadowing:Bool;
+	public var rcSwitchCasesNoBlocks:Bool;
+	public var rcScope:Dynamic;
+	public var rcReserved:StringMap<Bool>;
+	public var rcVarOrigins:IntMap<RenameScope>;
+	public inline function new(rcHoisting:Bool, rcNoShadowing:Bool, rcNoCatchVarShadowing:Bool, rcSwitchCasesNoBlocks:Bool, rcScope:Dynamic, rcReserved:StringMap<Bool>, rcVarOrigins:IntMap<RenameScope>) { this.rcHoisting = rcHoisting; this.rcNoShadowing = rcNoShadowing; this.rcNoCatchVarShadowing = rcNoCatchVarShadowing; this.rcSwitchCasesNoBlocks = rcSwitchCasesNoBlocks; this.rcScope = rcScope; this.rcReserved = rcReserved; this.rcVarOrigins = rcVarOrigins; }
+	public inline function clone():RenameContext return new RenameContext(rcHoisting, rcNoShadowing, rcNoCatchVarShadowing, rcSwitchCasesNoBlocks, rcScope, rcReserved, rcVarOrigins);
 }
-
 // haxe/src/filters/renameVars.ml — mechanical draft; not compiled or validated.
 // Persistent map/list snapshots are explicitly copied where mutation would change sharing semantics.
 class Overlaps {

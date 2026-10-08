@@ -6,11 +6,12 @@ import core.ClassPath.IClassPath;
 import core.StringHelper;
 
 // Port of haxe/src/core/classPaths.ml.
-typedef ResolvedFile = {
-	var file:String;
-	var classPath:IClassPath;
+@:structInit class ResolvedFile {
+	public var file:String;
+	public var classPath:IClassPath;
+	public inline function new(file:String, classPath:IClassPath) { this.file = file; this.classPath = classPath; }
+	public inline function clone():ResolvedFile return new ResolvedFile(file, classPath);
 }
-
 enum FileResolutionSpecificity {
 	SpecificityNormal;
 	SpecificityPlatformSpecific;
@@ -19,11 +20,12 @@ enum FileResolutionSpecificity {
 	SpecificityCoreApi;
 }
 
-typedef FileLookup = {
-	var resolvedFile:ResolvedFile;
-	var specificity:FileResolutionSpecificity;
+@:structInit class FileLookup {
+	public var resolvedFile:ResolvedFile;
+	public var specificity:FileResolutionSpecificity;
+	public inline function new(resolvedFile:ResolvedFile, specificity:FileResolutionSpecificity) { this.resolvedFile = resolvedFile; this.specificity = specificity; }
+	public inline function clone():FileLookup return new FileLookup(resolvedFile, specificity);
 }
-
 class ClassPaths {
 	public static final absoluteClassPath:IClassPath = new DirectoryClassPath("", User);
 

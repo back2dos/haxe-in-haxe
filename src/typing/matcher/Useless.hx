@@ -11,8 +11,12 @@ import context.Typecore;
 // haxe/src/typing/matcher/useless.ml — mechanical draft; not compile-validated.
 enum UselessResult { False; Pos(pos:Pos); True; }
 typedef PatternMatrix = Array<Array<PatternData>>;
-typedef LocatedUseless = {var result:UselessResult; var pos:Pos;}
-
+@:structInit class LocatedUseless {
+	public var result:UselessResult;
+	public var pos:Pos;
+	public inline function new(result:UselessResult, pos:Pos) { this.result = result; this.pos = pos; }
+	public inline function clone():LocatedUseless return new LocatedUseless(result, pos);
+}
 class Useless {
 	public static function specialize(isTuple:Bool, con:ConstructorData, matrix:PatternMatrix):PatternMatrix {
 		var acc:PatternMatrix = [], remaining = matrix.copy();

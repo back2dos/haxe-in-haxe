@@ -42,7 +42,7 @@ class CoroFunctions {
   cb.cbNext=switch cb.cbNext {
    case NextIfThen(e,a,n): var a=f(a); var n=f(n); NextIfThen(e,a,n);
    case NextIfThenElse(e,a,b,n): var a=f(a); var b=f(b); var n=fo(n); NextIfThenElse(e,a,b,n);
-   case NextSwitch(s,n): var cases=s.csCases.map(function(c) return {el:c.el,cb:f(c.cb)}); var def=fo(s.csDefault); var s={csSubject:s.csSubject,csCases:cases,csDefault:def,csExhaustive:s.csExhaustive}; var n=fo(n); NextSwitch(s,n);
+   case NextSwitch(s,n): var cases=s.csCases.map(function(c) return {el:c.el,cb:f(c.cb)}); var def=fo(s.csDefault); var s=({csSubject:s.csSubject,csCases:cases,csDefault:def,csExhaustive:s.csExhaustive} : coro.CoroTypes.CoroSwitch); var n=fo(n); NextSwitch(s,n);
    case NextWhile(e,b,n): var b=f(b); var n=fo(n); NextWhile(e,b,n);
    case NextTry(b,c,n): var b=f(b); var cc=f(c.ccCb); var catches=c.ccCatches.map(function(c) return {v:c.v,cb:f(c.cb)}); var n=fo(n); NextTry(b,{ccCb:cc,ccCatches:catches},n);
    case NextSuspend(s,n): NextSuspend(s,fo(n));

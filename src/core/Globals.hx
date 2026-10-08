@@ -21,15 +21,16 @@ package core;
 	public inline function clone():GlobalTypePath return new GlobalTypePath(pack, name);
 }
 
-typedef CompilerVersion = {
-	var version:Int;
-	var major:Int;
-	var minor:Int;
-	var revision:Int;
-	var pre:Null<String>;
-	var extra:Null<{name:String, build:String}>;
+@:structInit class CompilerVersion {
+	public var version:Int;
+	public var major:Int;
+	public var minor:Int;
+	public var revision:Int;
+	public var pre:Null<String>;
+	public var extra:Null<{name:String, build:String}>;
+	public inline function new(version:Int, major:Int, minor:Int, revision:Int, pre:Null<String>, extra:Null<{name:String, build:String}>) { this.version = version; this.major = major; this.minor = minor; this.revision = revision; this.pre = pre; this.extra = extra; }
+	public inline function clone():CompilerVersion return new CompilerVersion(version, major, minor, revision, pre, extra);
 }
-
 enum Platform {
 	Cross;
 	Js;

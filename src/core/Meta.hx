@@ -10,11 +10,24 @@ import core.MetaList;
 import haxe.ds.StringMap;
 
 // Mechanical translation of haxe/src/core/meta.ml. Draft; not compiled or tested.
-typedef UserMeta = { var doc:String; var flags:Array<MetaParameter>; var source:Null<String>; }
+@:structInit class UserMeta {
+	public var doc:String;
+	public var flags:Array<MetaParameter>;
+	public var source:Null<String>;
+	public inline function new(doc:String, flags:Array<MetaParameter>, source:Null<String>) { this.doc = doc; this.flags = flags; this.source = source; }
+	public inline function clone():UserMeta return new UserMeta(doc, flags, source);
+}
 enum MetaOrigin { Compiler; UserDefined(source:Null<String>); }
-typedef MetaInfos = {
-	var mInternal:Bool; var mDoc:String; var mParams:Array<String>; var mPlatforms:Array<Platform>;
-	var mUsedOn:Array<MetaUsage>; var mOrigin:MetaOrigin; var mLinks:Array<String>;
+@:structInit class MetaInfos {
+	public var mInternal:Bool;
+	public var mDoc:String;
+	public var mParams:Array<String>;
+	public var mPlatforms:Array<Platform>;
+	public var mUsedOn:Array<MetaUsage>;
+	public var mOrigin:MetaOrigin;
+	public var mLinks:Array<String>;
+	public inline function new(mInternal:Bool, mDoc:String, mParams:Array<String>, mPlatforms:Array<Platform>, mUsedOn:Array<MetaUsage>, mOrigin:MetaOrigin, mLinks:Array<String>) { this.mInternal = mInternal; this.mDoc = mDoc; this.mParams = mParams; this.mPlatforms = mPlatforms; this.mUsedOn = mUsedOn; this.mOrigin = mOrigin; this.mLinks = mLinks; }
+	public inline function clone():MetaInfos return new MetaInfos(mInternal, mDoc, mParams, mPlatforms, mUsedOn, mOrigin, mLinks);
 }
 class MetaNotFound extends core.ds.NotFound {
 	public static final instance = new MetaNotFound();

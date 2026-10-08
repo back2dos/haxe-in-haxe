@@ -24,8 +24,13 @@ import context.display.DeprecationCheck;
 
 // haxe/src/typing/instanceBuilder.ml — mechanical draft; not compile-validated.
 // Macro branches preserve dispatch hooks only; no macro runtime is implemented.
-typedef MacroCallPath = {var path:GlobalTypePath; var field:String; var args:Array<Expr>;}
-
+@:structInit class MacroCallPath {
+	public var path:GlobalTypePath;
+	public var field:String;
+	public var args:Array<Expr>;
+	public inline function new(path:GlobalTypePath, field:String, args:Array<Expr>) { this.path = path; this.field = field; this.args = args; }
+	public inline function clone():MacroCallPath return new MacroCallPath(path, field, args);
+}
 class InstanceBuilder {
 	public static function getMacroPath(ctx:Typer, e:Expr, args:Array<Expr>, p:Pos):MacroCallPath {
 		function loop(e:Expr):Array<String> return switch e.expr {

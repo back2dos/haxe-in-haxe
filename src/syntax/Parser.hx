@@ -27,7 +27,12 @@ enum DeclFlag { DPrivate; DExtern; DFinal; DMacro; DDynamic; DInline; DPublic; D
 enum TypeDeclCompletionMode { TCBeforePackage; TCAfterImport; TCAfterType; }
 enum SyntaxCompletion { SCComment; SCClassRelation; SCInterfaceRelation; SCTypeDecl(mode:TypeDeclCompletionMode); SCAfterTypeFlag(flags:Array<DeclFlag>); }
 enum SequenceParsingResult<T> { Success(value:T); End(pos:Pos); Error(message:String); }
-typedef SyntaxCompletionOn = { var kind:SyntaxCompletion; var subject:Dynamic; }
+@:structInit class SyntaxCompletionOn {
+	public var kind:SyntaxCompletion;
+	public var subject:Dynamic;
+	public inline function new(kind:SyntaxCompletion, subject:Dynamic) { this.kind = kind; this.subject = subject; }
+	public inline function clone():SyntaxCompletionOn return new SyntaxCompletionOn(kind, subject);
+}
 class ParserError extends haxe.Exception {
 	public final error:ErrorMsg;
 	public final pos:Pos;
@@ -44,38 +49,54 @@ class SyntaxCompletionException extends haxe.Exception {
 	public final completion:SyntaxCompletionOn;
 	public function new(completion) { super("SyntaxCompletion"); this.completion=completion; }
 }
-typedef ParserConfiguration = {
-	var defines:DefineContext;
-	var inDisplay:Bool;
-	var inDisplayFile:Bool;
-	var displayMode:DisplayModeValue;
-	var wasAutoTriggered:Bool;
-	var specialIdentifierFiles:Null<Dynamic>;
+@:structInit class ParserConfiguration {
+	public var defines:DefineContext;
+	public var inDisplay:Bool;
+	public var inDisplayFile:Bool;
+	public var displayMode:DisplayModeValue;
+	public var wasAutoTriggered:Bool;
+	public var specialIdentifierFiles:Null<Dynamic>;
+	public inline function new(defines:DefineContext, inDisplay:Bool, inDisplayFile:Bool, displayMode:DisplayModeValue, wasAutoTriggered:Bool, specialIdentifierFiles:Null<Dynamic>) { this.defines = defines; this.inDisplay = inDisplay; this.inDisplayFile = inDisplayFile; this.displayMode = displayMode; this.wasAutoTriggered = wasAutoTriggered; this.specialIdentifierFiles = specialIdentifierFiles; }
+	public inline function clone():ParserConfiguration return new ParserConfiguration(defines, inDisplay, inDisplayFile, displayMode, wasAutoTriggered, specialIdentifierFiles);
 }
-typedef ParserContext = {
-	var lexerCtx:LexerContext;
-	var syntaxErrors:Array<ParseErrorInfo>;
-	var syntaxWarnings:Array<ParseWarning>;
-	var lastDoc:Null<{doc:String,position:Int}>;
-	var inMacro:Bool;
-	var code:Lexer;
-	var hadResume:Bool;
-	var delayedSyntaxCompletion:Null<SyntaxCompletionOn>;
-	var cache:Array<ParserToken>;
-	var config:ParserConfiguration;
+@:structInit class ParserContext {
+	public var lexerCtx:LexerContext;
+	public var syntaxErrors:Array<ParseErrorInfo>;
+	public var syntaxWarnings:Array<ParseWarning>;
+	public var lastDoc:Null<{doc:String,position:Int}>;
+	public var inMacro:Bool;
+	public var code:Lexer;
+	public var hadResume:Bool;
+	public var delayedSyntaxCompletion:Null<SyntaxCompletionOn>;
+	public var cache:Array<ParserToken>;
+	public var config:ParserConfiguration;
+	public inline function new(lexerCtx:LexerContext, syntaxErrors:Array<ParseErrorInfo>, syntaxWarnings:Array<ParseWarning>, lastDoc:Null<{doc:String,position:Int}>, inMacro:Bool, code:Lexer, hadResume:Bool, delayedSyntaxCompletion:Null<SyntaxCompletionOn>, cache:Array<ParserToken>, config:ParserConfiguration) { this.lexerCtx = lexerCtx; this.syntaxErrors = syntaxErrors; this.syntaxWarnings = syntaxWarnings; this.lastDoc = lastDoc; this.inMacro = inMacro; this.code = code; this.hadResume = hadResume; this.delayedSyntaxCompletion = delayedSyntaxCompletion; this.cache = cache; this.config = config; }
+	public inline function clone():ParserContext return new ParserContext(lexerCtx, syntaxErrors, syntaxWarnings, lastDoc, inMacro, code, hadResume, delayedSyntaxCompletion, cache, config);
 }
 typedef ParserToken = syntax.Lexer.LexedToken;
 typedef ParseData = Package;
-typedef ParseErrorInfo = { var message:ErrorMsg; var pos:Pos; }
-typedef ParseWarning = { var warning:WarningCode; var pos:Pos; }
-typedef ParserDisplayInformation = {
-	var pdErrors:Array<ParseErrorInfo>;
-	var pdWarnings:Array<ParseWarning>;
-	var pdDeadBlocks:Array<{pos:Pos,expr:Expr}>;
-	var pdConditions:Array<Expr>;
-	var pdWasDisplayFile:Bool;
-	var pdHadResume:Bool;
-	var pdDelayedSyntaxCompletion:Null<SyntaxCompletionOn>;
+@:structInit class ParseErrorInfo {
+	public var message:ErrorMsg;
+	public var pos:Pos;
+	public inline function new(message:ErrorMsg, pos:Pos) { this.message = message; this.pos = pos; }
+	public inline function clone():ParseErrorInfo return new ParseErrorInfo(message, pos);
+}
+@:structInit class ParseWarning {
+	public var warning:WarningCode;
+	public var pos:Pos;
+	public inline function new(warning:WarningCode, pos:Pos) { this.warning = warning; this.pos = pos; }
+	public inline function clone():ParseWarning return new ParseWarning(warning, pos);
+}
+@:structInit class ParserDisplayInformation {
+	public var pdErrors:Array<ParseErrorInfo>;
+	public var pdWarnings:Array<ParseWarning>;
+	public var pdDeadBlocks:Array<{pos:Pos,expr:Expr}>;
+	public var pdConditions:Array<Expr>;
+	public var pdWasDisplayFile:Bool;
+	public var pdHadResume:Bool;
+	public var pdDelayedSyntaxCompletion:Null<SyntaxCompletionOn>;
+	public inline function new(pdErrors:Array<ParseErrorInfo>, pdWarnings:Array<ParseWarning>, pdDeadBlocks:Array<{pos:Pos,expr:Expr}>, pdConditions:Array<Expr>, pdWasDisplayFile:Bool, pdHadResume:Bool, pdDelayedSyntaxCompletion:Null<SyntaxCompletionOn>) { this.pdErrors = pdErrors; this.pdWarnings = pdWarnings; this.pdDeadBlocks = pdDeadBlocks; this.pdConditions = pdConditions; this.pdWasDisplayFile = pdWasDisplayFile; this.pdHadResume = pdHadResume; this.pdDelayedSyntaxCompletion = pdDelayedSyntaxCompletion; }
+	public inline function clone():ParserDisplayInformation return new ParserDisplayInformation(pdErrors, pdWarnings, pdDeadBlocks, pdConditions, pdWasDisplayFile, pdHadResume, pdDelayedSyntaxCompletion);
 }
 enum ParseResult<T> {
 	ParseSuccess(data:T,display:ParserDisplayInformation);

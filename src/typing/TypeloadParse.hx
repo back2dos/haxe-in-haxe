@@ -9,11 +9,12 @@ import syntax.LegacyGrammar;
 // Batch-only portion of haxe/src/typing/typeloadParse.ml.  Display parser
 // state, parser caches and stdin replacement are intentionally left to the
 // eventual compiler context.
-typedef ParsedFile = {
-	var file:String;
-	var data:Package;
+@:structInit class ParsedFile {
+	public var file:String;
+	public var data:Package;
+	public inline function new(file:String, data:Package) { this.file = file; this.data = data; }
+	public inline function clone():ParsedFile return new ParsedFile(file, data);
 }
-
 class ParseError {
 	public final message:String;
 	public final pos:Pos;

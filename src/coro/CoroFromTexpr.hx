@@ -116,7 +116,7 @@ class CoroFromTexpr {
    var next=AtomicLazy.fromFun(function()return makeBlock(null));
    var cases=[for(c in s.switchCases){var b=blockFromE(c.caseExpr);var n=loopBlock(b,ret,c.caseExpr);if(n!=null)fallThrough(n.cb,(next).force());{el:c.casePatterns,cb:b};}];
    var def=null;if(s.switchDefault!=null){def=blockFromE(s.switchDefault);var n=loopBlock(def,ret,s.switchDefault);if(n!=null)fallThrough(n.cb,(next).force());}
-   var sw={csSubject:r.e,csCases:cases,csDefault:def,csExhaustive:s.switchExhaustive};
+   var sw=({csSubject:r.e,csCases:cases,csDefault:def,csExhaustive:s.switchExhaustive} : coro.CoroTypes.CoroSwitch);
    var n=(next).isVal()||!sw.csExhaustive?(next).force():null;terminate(cb,NextSwitch(sw,n),e.etype,e.epos);return n==null?null:{cb:n,e:complex.e};
   }
   function splitWhile(cb:CoroBlock,e1:TExpr,e2:TExpr,etype:T,epos:Pos):Null<BlockValue> {
@@ -127,7 +127,7 @@ class CoroFromTexpr {
    var complex=checkComplex(cb,ret,etype,epos);ret=complex.ret;ctx.hasCatch=true;var next=AtomicLazy.fromFun(function()return makeBlock(null));
    var catches=catches.map(function(c){var b=blockFromE(c.expr);addExpr(b,mk(TVar(c.variable,(etmpErrorUnwrapped).force()),ctx.typer.t.tvoid,c.variable.vPos));var n=loopBlock(b,ret,c.expr);if(n!=null)fallThrough(n.cb,(next).force());return {v:c.variable,cb:b};});
    var catchBlock=makeBlock(null);addBlockFlag(catchBlock,CbGenerated);var old=ctx.currentCatch;ctx.currentCatch=catchBlock;
-   var ca={ccCb:catchBlock,ccCatches:catches};var body=blockFromE(e1);var bn=loopBlock(body,ret,e1);ctx.currentCatch=old;if(bn!=null)fallThrough(bn.cb,(next).force());
+   var ca=({ccCb:catchBlock,ccCatches:catches} : coro.CoroTypes.CoroCatch);var body=blockFromE(e1);var bn=loopBlock(body,ret,e1);ctx.currentCatch=old;if(bn!=null)fallThrough(bn.cb,(next).force());
    var n=(next).isVal()?(next).force():null;terminate(cb,NextTry(body,ca,n),etype,epos);return n==null?null:{cb:n,e:complex.e};
   }
   loop=function(cb,ret,e) {
@@ -168,8 +168,8 @@ class CoroFromTexpr {
         function makeNextBlock():CoroBlock {var n=blockFromE(e1);addBlockFlag(n,CbResumeState);addBlockFlag(cb,CbSuspendState);return n;}
         var isTco=(switch ret {case RTailBlock|RTailReturn:true;case _:false;})&&cb.cbCatch==null&&!ctx.typer.com.debug;
         if(kind.noSuspend){
-         if(isTco){var s={csFun:e1,csArgs:argsExprs,csPos:e.epos,csResult:ret==RTailBlock?SusBlock:SusResult,csKind:kind};terminate(cb,NextSuspend(s,null),tDynamic,nullPos);null;}
-         else{var needsResult=switch ret{case RBlock|RTailBlock:false;case _:true;};var ev=needsResult?(etmpResult).force():eNoValue;var s={csFun:e1,csArgs:argsExprs,csPos:e.epos,csResult:needsResult?SusResult:SusBlock,csKind:kind};addExpr(cb,deferred.makeSyncCall(s,needsResult?ev:null));{cb:cb,e:ev};}
+         if(isTco){var s=({csFun:e1,csArgs:argsExprs,csPos:e.epos,csResult:ret==RTailBlock?SusBlock:SusResult,csKind:kind} : coro.CoroTypes.CoroSuspend);terminate(cb,NextSuspend(s,null),tDynamic,nullPos);null;}
+         else{var needsResult=switch ret{case RBlock|RTailBlock:false;case _:true;};var ev=needsResult?(etmpResult).force():eNoValue;var s=({csFun:e1,csArgs:argsExprs,csPos:e.epos,csResult:needsResult?SusResult:SusBlock,csKind:kind} : coro.CoroTypes.CoroSuspend);addExpr(cb,deferred.makeSyncCall(s,needsResult?ev:null));{cb:cb,e:ev};}
         }else{
          var result:SuspendExpr;var next:Null<BlockValue>;
          switch ret {

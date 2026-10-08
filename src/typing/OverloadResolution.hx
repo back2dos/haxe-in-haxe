@@ -13,8 +13,13 @@ import typing.FieldCallCandidate.FieldCallCandidateData;
 import codegen.Overloads;
 
 // haxe/src/typing/overloadResolution.ml — mechanical draft; not compile-validated.
-typedef ResolvedOverload = {var cls:TClass; var field:TClassField; var monos:Array<T>;}
-
+@:structInit class ResolvedOverload {
+	public var cls:TClass;
+	public var field:TClassField;
+	public var monos:Array<T>;
+	public inline function new(cls:TClass, field:TClassField, monos:Array<T>) { this.cls = cls; this.field = field; this.monos = monos; }
+	public inline function clone():ResolvedOverload return new ResolvedOverload(cls, field, monos);
+}
 class OverloadResolution {
 	public static function tryFunctionalInterfaceMatch(tParam:T, tArg:T):Bool {
 		return switch [follow(tParam), follow(tArg)] {
@@ -49,7 +54,7 @@ class OverloadResolution {
 										// Preserve upstream's use of the tail after the failed argument.
 										var tail = rest.map(function(e) {unify(element, e.etype); return e;});
 										var ordered = acc.copy(); ordered.reverse();
-										FieldCallCandidate.makeFieldCallCandidate(ordered.concat(tail), signature.ret, monos, tf, cf, {cls:c, field:cf, monos:monos});
+										FieldCallCandidate.makeFieldCallCandidate(ordered.concat(tail), signature.ret, monos, tf, cf, ({cls:c, field:cf, monos:monos} : ResolvedOverload));
 									} catch (_:Dynamic) {null;}
 								case _: throw "Invalid rest overload";
 							};
@@ -58,7 +63,7 @@ class OverloadResolution {
 					}
 					if (expressions.length == 0 && tl.length == 0) {
 						var ordered = acc.copy(); ordered.reverse();
-						return FieldCallCandidate.makeFieldCallCandidate(ordered, signature.ret, monos, tf, cf, {cls:c, field:cf, monos:monos});
+						return FieldCallCandidate.makeFieldCallCandidate(ordered, signature.ret, monos, tf, cf, ({cls:c, field:cf, monos:monos} : typing.OverloadResolution.ResolvedOverload));
 					}
 					return null;
 				}

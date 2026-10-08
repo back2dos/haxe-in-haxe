@@ -26,9 +26,22 @@ import compiler.io.CompilerIo;
 // haxe/src/context/common.ml — mechanical draft; not compile-validated.
 // Shared declarations and deferred runtime hooks are retained without implementing their services.
 enum PackageRule { Forbidden; Remap(name:String); }
-typedef StatsData = {var sFilesParsed:Int;var sModulesTyped:Int;var sModulesRestored:Int;var sClassesBuilt:Int;var sMethodsTyped:Int;var sMacrosCalled:Int;}
+@:structInit class StatsData {
+	public var sFilesParsed:Int;
+	public var sModulesTyped:Int;
+	public var sModulesRestored:Int;
+	public var sClassesBuilt:Int;
+	public var sMethodsTyped:Int;
+	public var sMacrosCalled:Int;
+	public inline function new(sFilesParsed:Int, sModulesTyped:Int, sModulesRestored:Int, sClassesBuilt:Int, sMethodsTyped:Int, sMacrosCalled:Int) { this.sFilesParsed = sFilesParsed; this.sModulesTyped = sModulesTyped; this.sModulesRestored = sModulesRestored; this.sClassesBuilt = sClassesBuilt; this.sMethodsTyped = sMethodsTyped; this.sMacrosCalled = sMacrosCalled; }
+	public inline function clone():StatsData return new StatsData(sFilesParsed, sModulesTyped, sModulesRestored, sClassesBuilt, sMethodsTyped, sMacrosCalled);
+}
 class Stats {public static function create():StatsData return {sFilesParsed:0,sModulesTyped:0,sModulesRestored:0,sClassesBuilt:0,sMethodsTyped:0,sMacrosCalled:0};}
-typedef CallbackList = {var value:Array<Void->Void>;}
+@:structInit class CallbackList {
+	public var value:Array<Void->Void>;
+	public inline function new(value:Array<Void->Void>) { this.value = value; }
+	public inline function clone():CallbackList return new CallbackList(value);
+}
 class CompilerCallbacks {
  var beforeTyperCreate:CallbackList={value:[]}; var afterInitMacros:CallbackList={value:[]}; var afterTyping:Array<Array<ModuleType>->Void>=[];
  var beforeSave:CallbackList={value:[]}; var afterSave:CallbackList={value:[]}; var afterFilters:CallbackList={value:[]}; var afterGeneration:CallbackList={value:[]};
@@ -86,7 +99,15 @@ interface AbstractHxbLib {
  public function load():Void; public function getBytes(target:String,path:GlobalTypePath):Null<haxe.io.Bytes>; public function close():Void;
  public function getFilePath():String; public function getStringPool(target:String):Null<Array<String>>;
 }
-typedef ParserState = {var wasAutoTriggered:Bool;var hadParserResume:Bool;var displayModuleHasMacroDefines:Bool;var delayedSyntaxCompletion:Dynamic;var specialIdentifierFiles:Dynamic;}
+@:structInit class ParserState {
+	public var wasAutoTriggered:Bool;
+	public var hadParserResume:Bool;
+	public var displayModuleHasMacroDefines:Bool;
+	public var delayedSyntaxCompletion:Dynamic;
+	public var specialIdentifierFiles:Dynamic;
+	public inline function new(wasAutoTriggered:Bool, hadParserResume:Bool, displayModuleHasMacroDefines:Bool, delayedSyntaxCompletion:Dynamic, specialIdentifierFiles:Dynamic) { this.wasAutoTriggered = wasAutoTriggered; this.hadParserResume = hadParserResume; this.displayModuleHasMacroDefines = displayModuleHasMacroDefines; this.delayedSyntaxCompletion = delayedSyntaxCompletion; this.specialIdentifierFiles = specialIdentifierFiles; }
+	public inline function clone():ParserState return new ParserState(wasAutoTriggered, hadParserResume, displayModuleHasMacroDefines, delayedSyntaxCompletion, specialIdentifierFiles);
+}
 interface LocalWrapperApi {
  public function capturedType(t:T):T; public function mkInit(av:TVar,v:TVar,p:Pos):TExpr;
  public function mkRef(v:TVar,e:Null<TExpr>,p:Pos):TExpr; public function mkRefAccess(e:TExpr,v:TVar):TExpr;
@@ -101,14 +122,44 @@ private class NullLocalWrapper implements LocalWrapperApi {
  public function mkRefAccess(e:TExpr,v:TVar):TExpr return e;
  public function mkInit(av:TVar,v:TVar,p:Pos):TExpr return mk(TVar(av,mk(TLocal(v),v.vType,p)),tDynamic,p);
 }
-typedef PartScope = {
- var runtimeArgs:Array<String>;var warnedPositions:Dynamic;var hasNext:Bool;var messages:Array<CompilerMessage>;var hasError:Bool;var reportMode:ReportMode;
- var messageCapture:Null<{value:Array<CompilerMessage>}>;var compilationStep:Int;var passDebugMessages:Array<String>;var dumpConfig:Dynamic;var parserState:ParserState;
- var fileKeys:FileKeys;var storedTypedExprs:Dynamic;var cachedMacros:Dynamic;
+@:structInit class PartScope {
+	public var runtimeArgs:Array<String>;
+	public var warnedPositions:Dynamic;
+	public var hasNext:Bool;
+	public var messages:Array<CompilerMessage>;
+	public var hasError:Bool;
+	public var reportMode:ReportMode;
+	public var messageCapture:Null<{value:Array<CompilerMessage>}>;
+	public var compilationStep:Int;
+	public var passDebugMessages:Array<String>;
+	public var dumpConfig:Dynamic;
+	public var parserState:ParserState;
+	public var fileKeys:FileKeys;
+	public var storedTypedExprs:Dynamic;
+	public var cachedMacros:Dynamic;
+	public inline function new(runtimeArgs:Array<String>, warnedPositions:Dynamic, hasNext:Bool, messages:Array<CompilerMessage>, hasError:Bool, reportMode:ReportMode, messageCapture:Null<{value:Array<CompilerMessage>}>, compilationStep:Int, passDebugMessages:Array<String>, dumpConfig:Dynamic, parserState:ParserState, fileKeys:FileKeys, storedTypedExprs:Dynamic, cachedMacros:Dynamic) { this.runtimeArgs = runtimeArgs; this.warnedPositions = warnedPositions; this.hasNext = hasNext; this.messages = messages; this.hasError = hasError; this.reportMode = reportMode; this.messageCapture = messageCapture; this.compilationStep = compilationStep; this.passDebugMessages = passDebugMessages; this.dumpConfig = dumpConfig; this.parserState = parserState; this.fileKeys = fileKeys; this.storedTypedExprs = storedTypedExprs; this.cachedMacros = cachedMacros; }
+	public inline function clone():PartScope return new PartScope(runtimeArgs, warnedPositions, hasNext, messages, hasError, reportMode, messageCapture, compilationStep, passDebugMessages, dumpConfig, parserState, fileKeys, storedTypedExprs, cachedMacros);
 }
 enum ParseInputResult { NeedsTyping;NoCompletionPointFound;Completed; }
-typedef RequestScope = {var stats:StatsData;var timerCtx:Dynamic;var cancellationRequested:Bool;var io:CompilerIoData;var resultHandler:ResultHandler;}
-typedef ResultHandler = {var sendResult:Dynamic->Void;var sendResultRaise:Dynamic->Dynamic;var sendError:Array<Dynamic>->Void;var sendErrorRaise:Array<Dynamic>->Dynamic;var flushMessages:Bool->CommonContext->Void;var setCom:CommonContext->ParseInputResult;}
+@:structInit class RequestScope {
+	public var stats:StatsData;
+	public var timerCtx:Dynamic;
+	public var cancellationRequested:Bool;
+	public var io:CompilerIoData;
+	public var resultHandler:ResultHandler;
+	public inline function new(stats:StatsData, timerCtx:Dynamic, cancellationRequested:Bool, io:CompilerIoData, resultHandler:ResultHandler) { this.stats = stats; this.timerCtx = timerCtx; this.cancellationRequested = cancellationRequested; this.io = io; this.resultHandler = resultHandler; }
+	public inline function clone():RequestScope return new RequestScope(stats, timerCtx, cancellationRequested, io, resultHandler);
+}
+@:structInit class ResultHandler {
+	public var sendResult:Dynamic->Void;
+	public var sendResultRaise:Dynamic->Dynamic;
+	public var sendError:Array<Dynamic>->Void;
+	public var sendErrorRaise:Array<Dynamic>->Dynamic;
+	public var flushMessages:Bool->CommonContext->Void;
+	public var setCom:CommonContext->ParseInputResult;
+	public inline function new(sendResult:Dynamic->Void, sendResultRaise:Dynamic->Dynamic, sendError:Array<Dynamic>->Void, sendErrorRaise:Array<Dynamic>->Dynamic, flushMessages:Bool->CommonContext->Void, setCom:CommonContext->ParseInputResult) { this.sendResult = sendResult; this.sendResultRaise = sendResultRaise; this.sendError = sendError; this.sendErrorRaise = sendErrorRaise; this.flushMessages = flushMessages; this.setCom = setCom; }
+	public inline function clone():ResultHandler return new ResultHandler(sendResult, sendResultRaise, sendError, sendErrorRaise, flushMessages, setCom);
+}
 typedef CommonContext = {
  var requestScope:RequestScope;var partScope:PartScope;var stage:CompilerStage;var sctx:Dynamic;var cs:Dynamic;var cache:Dynamic;var isMacroContext:Bool;var timerCtx:Dynamic;
  var parsedArgs:Array<compiler.ParsedArg>;var display:DisplaySettings;var debug:Bool;var verbose:Bool;var foptimize:Bool;var doinline:Bool;var platform:Platform;var config:PlatformConfig;var customExt:Null<String>;
@@ -210,7 +261,7 @@ class Common {
    runCommand:function(cmd) return Sys.command(cmd),runCommandArgs:function(s,args) return com.runCommand(s+" "+args.join(" ")),
    emptyClassPath:new core.ClassPath.DirectoryClassPath("",User),classPaths:new core.ClassPaths(),main:{mainPath:null,mainFile:null,mainExpr:null},packageRules:new haxe.ds.StringMap(),file:"",types:[],callbacks:new CompilerCallbacks(),globalMetadata:[],modules:[],moduleLut:new ModuleLut(),moduleNonexistentLut:new HashtblLookup(),fakeModules:new haxe.ds.StringMap(),flashVersion:10.0,resources:new haxe.ds.StringMap(),
    nativeLibs:NativeLibraries.createNativeLibs(),hxbLibs:[],nekoLibPaths:[],includeFiles:[],jsGen:null,loadExternType:[],defines:Define.emptyDefines(),userDefines:new haxe.ds.StringMap(),userMetas:new haxe.ds.StringMap(),getMacros:function() return null,localWrapper:LocalWrapper.nullWrapper,
-   info:function(_,_,?depth) throw "Uninitialized info handler",warning:function(_,_,_,_,?depth) throw "Uninitialized warning handler",warningOptions:[WarningList.disabledWarnings.map(function(w) return {woWarning:w,woMode:WMDisable})],error:function(_,_) throw "Uninitialized error handler",errorExt:function(_) throw "Uninitialized error handler",getMessages:function() return [],filterMessages:function(_) {},
+   info:function(_,_,?depth) throw "Uninitialized info handler",warning:function(_,_,_,_,?depth) throw "Uninitialized warning handler",warningOptions:[WarningList.disabledWarnings.map(function(w) return ({woWarning:w,woMode:WMDisable} : core.Message.WarningOption))],error:function(_,_) throw "Uninitialized error handler",errorExt:function(_) throw "Uninitialized error handler",getMessages:function() return [],filterMessages:function(_) {},
    basic:newBasicTypes(),std:nullClass,fileContents:[],moduleToFile:new HashtblLookup(),memoryMarker:memoryMarker,parserCache:new HashtblLookup(),overloadCache:new HashtblLookup(),isMacroContext:false,hxbReaderApi:null,hxbReaderStats:HxbReaderStats.create(),hxbWriterConfig:null
   };return com;
  }
@@ -309,7 +360,7 @@ class Common {
  public static function adaptDefinesToMacroContext(defines:DefineContext):DefineContext {
   var remove=["java"].concat(Globals.platforms.map(Globals.platformName));for (d in [Define.NoTraces]) remove.unshift(Define.getDefineKey(d));for (v in flashVersions) remove.unshift("flash"+v.define);
   var values=new haxe.ds.StringMap<String>();var keys:Array<String>=[for (k in defines.values.keys()) k];keys.sort(Reflect.compare);for (k in keys) if (!remove.contains(k)) values.set(k,defines.values.get(k));
-  var result={values:values,definesSignature:null};Define.define(result,Define.Macro);Define.rawDefine(result,Globals.platformName(Eval));return result;
+  var result=({values:values,definesSignature:null} : core.Define.DefineContext);Define.define(result,Define.Macro);Define.rawDefine(result,Globals.platformName(Eval));return result;
  }
  public static function adaptDefinesToDisplayContext(defines:DefineContext):DefineContext {var result=adaptDefinesToMacroContext(defines);Define.define(result,Define.Display);return result;}
  public static function getEntryPoint(com:CommonContext):Null<{name:String,cls:TClass,expr:TExpr}> {

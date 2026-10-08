@@ -20,12 +20,13 @@ enum NativeLibKind {
 	HxbLib;
 }
 
-typedef NativeLibArg = {
-	var libFile:String;
-	var libKind:NativeLibKind;
-	var libExtern:Bool;
+@:structInit class NativeLibArg {
+	public var libFile:String;
+	public var libKind:NativeLibKind;
+	public var libExtern:Bool;
+	public inline function new(libFile:String, libKind:NativeLibKind, libExtern:Bool) { this.libFile = libFile; this.libKind = libKind; this.libExtern = libExtern; }
+	public inline function clone():NativeLibArg return new NativeLibArg(libFile, libKind, libExtern);
 }
-
 /** The CLI representation is intentionally separate from compiler context mutation. */
 enum ParsedArg {
 	SetPlatform(platform:Platform, output:String);

@@ -66,7 +66,12 @@ class Overloads {
 	}
 }
 
-typedef ConversionRate = {var conversions:Int; var params:Int;}
+@:structInit class ConversionRate {
+	public var conversions:Int;
+	public var params:Int;
+	public inline function new(conversions:Int, params:Int) { this.conversions = conversions; this.params = params; }
+	public inline function clone():ConversionRate return new ConversionRate(conversions, params);
+}
 class Resolution {
 	static function nullAbstract(a:TAbstract):Bool return a.aPath.pack.length==0 && a.aPath.name=="Null";
 	public static function simplifyT(t:T):T return switch t {

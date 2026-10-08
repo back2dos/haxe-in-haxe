@@ -33,9 +33,23 @@ class LexerError {
 	public inline function clone():LexedToken return new LexedToken(token, pos);
 }
 // llines is kept in ascending order (upstream's newest-first list, without O(n) prepends).
-typedef LexerFile = {var lfile:String; var lline:Int; var lmaxline:Int; var llines:Array<{offset:Int,line:Int}>; var lalines:Array<{offset:Int,line:Int}>; var llast:Int; var llastindex:Int;}
-typedef LexerContext = {var file:LexerFile; var buf:StringBuf;}
-
+@:structInit class LexerFile {
+	public var lfile:String;
+	public var lline:Int;
+	public var lmaxline:Int;
+	public var llines:Array<{offset:Int,line:Int}>;
+	public var lalines:Array<{offset:Int,line:Int}>;
+	public var llast:Int;
+	public var llastindex:Int;
+	public inline function new(lfile:String, lline:Int, lmaxline:Int, llines:Array<{offset:Int,line:Int}>, lalines:Array<{offset:Int,line:Int}>, llast:Int, llastindex:Int) { this.lfile = lfile; this.lline = lline; this.lmaxline = lmaxline; this.llines = llines; this.lalines = lalines; this.llast = llast; this.llastindex = llastindex; }
+	public inline function clone():LexerFile return new LexerFile(lfile, lline, lmaxline, llines, lalines, llast, llastindex);
+}
+@:structInit class LexerContext {
+	public var file:LexerFile;
+	public var buf:StringBuf;
+	public inline function new(file:LexerFile, buf:StringBuf) { this.file = file; this.buf = buf; }
+	public inline function clone():LexerContext return new LexerContext(file, buf);
+}
 class Lexer {
 	public static function isWhitespace(value:String):Bool return value==" "||value=="\n"||value=="\r"||value=="\t";
 	public static function stringIsWhitespace(value:String):Bool {for(i in 0...value.length) if(" \n\r\t".indexOf(value.charAt(i))<0)return false;return true;}
@@ -850,8 +864,13 @@ class Lexer {
 	}
 }
 
-typedef FormatContext = {var buffer:StringBuf; var quoteOpen:Bool; var quotePmin:Int;}
-
+@:structInit class FormatContext {
+	public var buffer:StringBuf;
+	public var quoteOpen:Bool;
+	public var quotePmin:Int;
+	public inline function new(buffer:StringBuf, quoteOpen:Bool, quotePmin:Int) { this.buffer = buffer; this.quoteOpen = quoteOpen; this.quotePmin = quotePmin; }
+	public inline function clone():FormatContext return new FormatContext(buffer, quoteOpen, quotePmin);
+}
 private class LexExit extends haxe.Exception {
 	public function new() super("Exit");
 }

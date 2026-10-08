@@ -5,19 +5,35 @@ import sys.thread.Thread;
 
 // Mechanical translation of haxe/src/core/timer.ml. Draft; not compiled or tested.
 // OCaml Domain identity uses the host runtime's thread identity here.
-typedef TimerInfo = { var id:Array<String>; var total:Float; var pauses:Float; var calls:Int; }
-enum MeasureTimes { Yes; No; Maybe; }
-typedef TimerContext = {
-	var rootTimer:TimerInfo;
-	var current:TimerInfo;
-	var measureTimes:MeasureTimes;
-	var startTime:Float;
-	var timerLut:StringMap<TimerInfo>;
-	var domainId:Thread;
+@:structInit class TimerInfo {
+	public var id:Array<String>;
+	public var total:Float;
+	public var pauses:Float;
+	public var calls:Int;
+	public inline function new(id:Array<String>, total:Float, pauses:Float, calls:Int) { this.id = id; this.total = total; this.pauses = pauses; this.calls = calls; }
+	public inline function clone():TimerInfo return new TimerInfo(id, total, pauses, calls);
 }
-typedef TimerNode = {
-	var name:String; var path:String; var parent:TimerNode; var info:String;
-	var time:Float; var numCalls:Int; var children:Array<TimerNode>;
+enum MeasureTimes { Yes; No; Maybe; }
+@:structInit class TimerContext {
+	public var rootTimer:TimerInfo;
+	public var current:TimerInfo;
+	public var measureTimes:MeasureTimes;
+	public var startTime:Float;
+	public var timerLut:StringMap<TimerInfo>;
+	public var domainId:Thread;
+	public inline function new(rootTimer:TimerInfo, current:TimerInfo, measureTimes:MeasureTimes, startTime:Float, timerLut:StringMap<TimerInfo>, domainId:Thread) { this.rootTimer = rootTimer; this.current = current; this.measureTimes = measureTimes; this.startTime = startTime; this.timerLut = timerLut; this.domainId = domainId; }
+	public inline function clone():TimerContext return new TimerContext(rootTimer, current, measureTimes, startTime, timerLut, domainId);
+}
+@:structInit class TimerNode {
+	public var name:String;
+	public var path:String;
+	public var parent:TimerNode;
+	public var info:String;
+	public var time:Float;
+	public var numCalls:Int;
+	public var children:Array<TimerNode>;
+	public inline function new(name:String, path:String, parent:TimerNode, info:String, time:Float, numCalls:Int, children:Array<TimerNode>) { this.name = name; this.path = path; this.parent = parent; this.info = info; this.time = time; this.numCalls = numCalls; this.children = children; }
+	public inline function clone():TimerNode return new TimerNode(name, path, parent, info, time, numCalls, children);
 }
 class Timer {
 	static function key(id:Array<String>):String return haxe.Json.stringify(id);

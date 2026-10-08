@@ -12,34 +12,38 @@ import core.Error;
 import filters.FilterContext;
 import sys.thread.Mutex;
 // Draft mechanical translation of haxe/src/context/safeCom.ml; unvalidated.
-typedef SavedWarning = {
-	var wModule:ModuleDef;
-	var wWarning:WarningCode;
-	var wOptions:Array<Array<WarningOption>>;
-	var wMsg:String;
-	var wPos:core.Globals.Pos;
+@:structInit class SavedWarning {
+	public var wModule:ModuleDef;
+	public var wWarning:WarningCode;
+	public var wOptions:Array<Array<WarningOption>>;
+	public var wMsg:String;
+	public var wPos:core.Globals.Pos;
+	public inline function new(wModule:ModuleDef, wWarning:WarningCode, wOptions:Array<Array<WarningOption>>, wMsg:String, wPos:core.Globals.Pos) { this.wModule = wModule; this.wWarning = wWarning; this.wOptions = wOptions; this.wMsg = wMsg; this.wPos = wPos; }
+	public inline function clone():SavedWarning return new SavedWarning(wModule, wWarning, wOptions, wMsg, wPos);
 }
-typedef SafeContext = {
-	var basic:BasicTypes;
-	var platform:core.Globals.Platform;
-	var defines:core.Define.DefineContext;
-	var platformConfig:PlatformConfig;
-	var debug:Bool;
-	var isMacroContext:Bool;
-	var foptimize:Bool;
-	var doinline:Bool;
-	var dumpConfig:DumpConfiguration;
-	var exceptions:{value:Array<Dynamic>};
-	var exceptionsMutex:Mutex;
-	var warnings:{value:Array<SavedWarning>};
-	var warningsMutex:Mutex;
-	var errors:{value:Array<Dynamic>};
-	var errorsMutex:Mutex;
-	var timerCtx:Dynamic;
-	var findModule:core.Globals.GlobalTypePath->ModuleDef;
-	var findModuleByType:core.Globals.GlobalTypePath->ModuleDef;
-	var curclass:TClass;
-	var curfield:TClassField;
+@:structInit class SafeContext {
+	public var basic:BasicTypes;
+	public var platform:core.Globals.Platform;
+	public var defines:core.Define.DefineContext;
+	public var platformConfig:PlatformConfig;
+	public var debug:Bool;
+	public var isMacroContext:Bool;
+	public var foptimize:Bool;
+	public var doinline:Bool;
+	public var dumpConfig:DumpConfiguration;
+	public var exceptions:{value:Array<Dynamic>};
+	public var exceptionsMutex:Mutex;
+	public var warnings:{value:Array<SavedWarning>};
+	public var warningsMutex:Mutex;
+	public var errors:{value:Array<Dynamic>};
+	public var errorsMutex:Mutex;
+	public var timerCtx:Dynamic;
+	public var findModule:core.Globals.GlobalTypePath->ModuleDef;
+	public var findModuleByType:core.Globals.GlobalTypePath->ModuleDef;
+	public var curclass:TClass;
+	public var curfield:TClassField;
+	public inline function new(basic:BasicTypes, platform:core.Globals.Platform, defines:core.Define.DefineContext, platformConfig:PlatformConfig, debug:Bool, isMacroContext:Bool, foptimize:Bool, doinline:Bool, dumpConfig:DumpConfiguration, exceptions:{value:Array<Dynamic>}, exceptionsMutex:Mutex, warnings:{value:Array<SavedWarning>}, warningsMutex:Mutex, errors:{value:Array<Dynamic>}, errorsMutex:Mutex, timerCtx:Dynamic, findModule:core.Globals.GlobalTypePath->ModuleDef, findModuleByType:core.Globals.GlobalTypePath->ModuleDef, curclass:TClass, curfield:TClassField) { this.basic = basic; this.platform = platform; this.defines = defines; this.platformConfig = platformConfig; this.debug = debug; this.isMacroContext = isMacroContext; this.foptimize = foptimize; this.doinline = doinline; this.dumpConfig = dumpConfig; this.exceptions = exceptions; this.exceptionsMutex = exceptionsMutex; this.warnings = warnings; this.warningsMutex = warningsMutex; this.errors = errors; this.errorsMutex = errorsMutex; this.timerCtx = timerCtx; this.findModule = findModule; this.findModuleByType = findModuleByType; this.curclass = curclass; this.curfield = curfield; }
+	public inline function clone():SafeContext return new SafeContext(basic, platform, defines, platformConfig, debug, isMacroContext, foptimize, doinline, dumpConfig, exceptions, exceptionsMutex, warnings, warningsMutex, errors, errorsMutex, timerCtx, findModule, findModuleByType, curclass, curfield);
 }
 class SafeCom {
 	public static function ofCom(com:Dynamic):SafeContext {

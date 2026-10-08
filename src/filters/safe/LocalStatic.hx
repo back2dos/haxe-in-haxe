@@ -8,8 +8,13 @@ import core.Texpr;
 import core.Error;
 import haxe.ds.IntMap;
 
-typedef LsContext = {var scom:context.SafeCom.SafeContext; var lut:IntMap<TClassField>; var addedFields:Array<TClassField>;}
-
+@:structInit class LsContext {
+	public var scom:context.SafeCom.SafeContext;
+	public var lut:IntMap<TClassField>;
+	public var addedFields:Array<TClassField>;
+	public inline function new(scom:context.SafeCom.SafeContext, lut:IntMap<TClassField>, addedFields:Array<TClassField>) { this.scom = scom; this.lut = lut; this.addedFields = addedFields; }
+	public inline function clone():LsContext return new LsContext(scom, lut, addedFields);
+}
 // haxe/src/filters/safe/localStatic.ml — mechanical draft; not compiled or validated.
 class LocalStatic {
 	public static function promoteLocalStatic(lsctx:LsContext, run:TExpr->TExpr, v:TVar, eo:Null<TExpr>):Void {

@@ -23,7 +23,12 @@ enum ResolutionKind {
 	REnumStatics(en:TEnum);
 	RLazy(f:Void->Null<ResolvedImport>);
 }
-typedef ResolvedImport = { var rKind:ResolutionKind; var rPos:Pos; }
+@:structInit class ResolvedImport {
+	public var rKind:ResolutionKind;
+	public var rPos:Pos;
+	public inline function new(rKind:ResolutionKind, rPos:Pos) { this.rKind = rKind; this.rPos = rPos; }
+	public inline function clone():ResolvedImport return new ResolvedImport(rKind, rPos);
+}
 class Resolution {
 	public static function mkResolution(kind:ResolutionKind, p:Pos):ResolvedImport return {rKind:kind, rPos:p};
 	public static function lazyResolution(f:Void->Null<ResolvedImport>):ResolvedImport return mkResolution(RLazy(f), Globals.nullPos);

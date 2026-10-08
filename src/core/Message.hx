@@ -64,27 +64,29 @@ enum abstract WarningCode(String) from String to String {
 	var WPointlessCode = "WPointlessCode";
 }
 
-typedef WarningOption = {
-	var woWarning:WarningCode;
-	var woMode:WarningMode;
+@:structInit class WarningOption {
+	public var woWarning:WarningCode;
+	public var woMode:WarningMode;
+	public inline function new(woWarning:WarningCode, woMode:WarningMode) { this.woWarning = woWarning; this.woMode = woMode; }
+	public inline function clone():WarningOption return new WarningOption(woWarning, woMode);
 }
-
 enum CompilerMessageKind {
 	MKError;
 	MKWarning(warning:WarningCode, options:Array<Array<WarningOption>>);
 	MKInfo;
 }
 
-typedef CompilerMessage = {
-	var cmMessage:String;
-	var cmPos:Pos;
-	var cmDepth:Int;
-	var cmFromMacro:Bool;
-	var cmMessageKind:CompilerMessageKind;
-	var cmDiagnosticsKind:MessageKind;
-	var cmJson:JsonValue;
+@:structInit class CompilerMessage {
+	public var cmMessage:String;
+	public var cmPos:Pos;
+	public var cmDepth:Int;
+	public var cmFromMacro:Bool;
+	public var cmMessageKind:CompilerMessageKind;
+	public var cmDiagnosticsKind:MessageKind;
+	public var cmJson:JsonValue;
+	public inline function new(cmMessage:String, cmPos:Pos, cmDepth:Int, cmFromMacro:Bool, cmMessageKind:CompilerMessageKind, cmDiagnosticsKind:MessageKind, cmJson:JsonValue) { this.cmMessage = cmMessage; this.cmPos = cmPos; this.cmDepth = cmDepth; this.cmFromMacro = cmFromMacro; this.cmMessageKind = cmMessageKind; this.cmDiagnosticsKind = cmDiagnosticsKind; this.cmJson = cmJson; }
+	public inline function clone():CompilerMessage return new CompilerMessage(cmMessage, cmPos, cmDepth, cmFromMacro, cmMessageKind, cmDiagnosticsKind, cmJson);
 }
-
 class Message {
 	public static function severityToInt(severity:MessageSeverity):Int {
 		return switch (severity) {

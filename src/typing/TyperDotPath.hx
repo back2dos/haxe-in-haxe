@@ -17,8 +17,12 @@ import typing.Fields.*;
 import typing.Fields.TypeFieldConfig;
 
 // haxe/src/typing/typerDotPath.ml — mechanical draft; not compile-validated.
-typedef DotPathResolution = {var access:AccessKind; var rest:Array<DotPathPart>;}
-
+@:structInit class DotPathResolution {
+	public var access:AccessKind;
+	public var rest:Array<DotPathPart>;
+	public inline function new(access:AccessKind, rest:Array<DotPathPart>) { this.access = access; this.rest = rest; }
+	public inline function clone():DotPathResolution return new DotPathResolution(access, rest);
+}
 class TyperDotPath {
 	public static function mkDotPathPart(s:String, p:Pos):DotPathPart {
 		return {name:s, caseKind:isLowerIdent(s, p) ? PLowercase : PUppercase, pos:p};

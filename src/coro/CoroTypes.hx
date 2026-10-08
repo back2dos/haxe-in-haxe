@@ -6,7 +6,17 @@ import coro.CoroElsewhere.TexprBuilder;
 // haxe/src/coro/coroTypes.ml — mechanical draft; not compile-validated.
 enum CoroFor { LocalFunc(tf:TFunc,v:TVar); ClassField(c:TClass,cf:TClassField,tf:TFunc,p:Pos); }
 enum SuspendExpr { SusBlock; SusResult; }
-typedef CoroBlock = { var cbId:Int; var cbEl:Array<TExpr>; var cbTypepos:Null<{t:T,p:Pos}>; var cbCatch:Null<CoroBlock>; var cbNext:CoroNext; var cbFlags:Int; var cbStackValue:Null<TExpr>; }
+@:structInit class CoroBlock {
+	public var cbId:Int;
+	public var cbEl:Array<TExpr>;
+	public var cbTypepos:Null<{t:T,p:Pos}>;
+	public var cbCatch:Null<CoroBlock>;
+	public var cbNext:CoroNext;
+	public var cbFlags:Int;
+	public var cbStackValue:Null<TExpr>;
+	public inline function new(cbId:Int, cbEl:Array<TExpr>, cbTypepos:Null<{t:T,p:Pos}>, cbCatch:Null<CoroBlock>, cbNext:CoroNext, cbFlags:Int, cbStackValue:Null<TExpr>) { this.cbId = cbId; this.cbEl = cbEl; this.cbTypepos = cbTypepos; this.cbCatch = cbCatch; this.cbNext = cbNext; this.cbFlags = cbFlags; this.cbStackValue = cbStackValue; }
+	public inline function clone():CoroBlock return new CoroBlock(cbId, cbEl, cbTypepos, cbCatch, cbNext, cbFlags, cbStackValue);
+}
 typedef CoroBlockNext = Null<CoroBlock>;
 enum CoroNext {
  NextUnknown; NextReturnVoid; NextReturn(e:TExpr); NextThrow(e:TExpr);
@@ -16,15 +26,59 @@ enum CoroNext {
  NextTry(body:CoroBlock,catches:CoroCatch,next:CoroBlockNext); NextSuspend(s:CoroSuspend,next:CoroBlockNext);
  NextBreak(next:CoroBlock); NextContinue(next:CoroBlock); NextFallThrough(next:CoroBlock); NextGoto(next:CoroBlock);
 }
-typedef CoroSwitch = { var csSubject:TExpr; var csCases:Array<{el:Array<TExpr>,cb:CoroBlock}>; var csDefault:Null<CoroBlock>; var csExhaustive:Bool; }
-typedef CoroCatch = {var ccCb:CoroBlock; var ccCatches:Array<{v:TVar,cb:CoroBlock}>;}
-typedef CoroSuspend = {var csFun:TExpr; var csArgs:Array<TExpr>; var csPos:Pos; var csResult:SuspendExpr; var csKind:CoroOutcome;}
-typedef CoroDeferredApi = {var makeInlineReturn:Null<TExpr>->Pos->TExpr; var makeInlineTailCall:CoroSuspend->TExpr; var makeSyncCall:CoroSuspend->Null<TExpr>->TExpr; var makeThis:TExpr->TExpr; var makeSuperField:TExpr->TExpr;}
-typedef CoroCtx = {
- var builder:TexprBuilder; var typer:context.Typecore.Typer; var config:CoroConfigData; var coroType:CoroFor; var classNamePos:Pos;
- var deferredExprs:Map<Int,Void->TExpr>; var hasCaptureVars:Bool; var capturesThis:Bool; var nextBlockId:Int;
- var currentCatch:Null<CoroBlock>; var hasCatch:Bool; var numStates:Int;
+@:structInit class CoroSwitch {
+	public var csSubject:TExpr;
+	public var csCases:Array<{el:Array<TExpr>,cb:CoroBlock}>;
+	public var csDefault:Null<CoroBlock>;
+	public var csExhaustive:Bool;
+	public inline function new(csSubject:TExpr, csCases:Array<{el:Array<TExpr>,cb:CoroBlock}>, csDefault:Null<CoroBlock>, csExhaustive:Bool) { this.csSubject = csSubject; this.csCases = csCases; this.csDefault = csDefault; this.csExhaustive = csExhaustive; }
+	public inline function clone():CoroSwitch return new CoroSwitch(csSubject, csCases, csDefault, csExhaustive);
+}
+@:structInit class CoroCatch {
+	public var ccCb:CoroBlock;
+	public var ccCatches:Array<{v:TVar,cb:CoroBlock}>;
+	public inline function new(ccCb:CoroBlock, ccCatches:Array<{v:TVar,cb:CoroBlock}>) { this.ccCb = ccCb; this.ccCatches = ccCatches; }
+	public inline function clone():CoroCatch return new CoroCatch(ccCb, ccCatches);
+}
+@:structInit class CoroSuspend {
+	public var csFun:TExpr;
+	public var csArgs:Array<TExpr>;
+	public var csPos:Pos;
+	public var csResult:SuspendExpr;
+	public var csKind:CoroOutcome;
+	public inline function new(csFun:TExpr, csArgs:Array<TExpr>, csPos:Pos, csResult:SuspendExpr, csKind:CoroOutcome) { this.csFun = csFun; this.csArgs = csArgs; this.csPos = csPos; this.csResult = csResult; this.csKind = csKind; }
+	public inline function clone():CoroSuspend return new CoroSuspend(csFun, csArgs, csPos, csResult, csKind);
+}
+@:structInit class CoroDeferredApi {
+	public var makeInlineReturn:Null<TExpr>->Pos->TExpr;
+	public var makeInlineTailCall:CoroSuspend->TExpr;
+	public var makeSyncCall:CoroSuspend->Null<TExpr>->TExpr;
+	public var makeThis:TExpr->TExpr;
+	public var makeSuperField:TExpr->TExpr;
+	public inline function new(makeInlineReturn:Null<TExpr>->Pos->TExpr, makeInlineTailCall:CoroSuspend->TExpr, makeSyncCall:CoroSuspend->Null<TExpr>->TExpr, makeThis:TExpr->TExpr, makeSuperField:TExpr->TExpr) { this.makeInlineReturn = makeInlineReturn; this.makeInlineTailCall = makeInlineTailCall; this.makeSyncCall = makeSyncCall; this.makeThis = makeThis; this.makeSuperField = makeSuperField; }
+	public inline function clone():CoroDeferredApi return new CoroDeferredApi(makeInlineReturn, makeInlineTailCall, makeSyncCall, makeThis, makeSuperField);
+}
+@:structInit class CoroCtx {
+	public var builder:TexprBuilder;
+	public var typer:context.Typecore.Typer;
+	public var config:CoroConfigData;
+	public var coroType:CoroFor;
+	public var classNamePos:Pos;
+	public var deferredExprs:Map<Int,Void->TExpr>;
+	public var hasCaptureVars:Bool;
+	public var capturesThis:Bool;
+	public var nextBlockId:Int;
+	public var currentCatch:Null<CoroBlock>;
+	public var hasCatch:Bool;
+	public var numStates:Int;
+	public inline function new(builder:TexprBuilder, typer:context.Typecore.Typer, config:CoroConfigData, coroType:CoroFor, classNamePos:Pos, deferredExprs:Map<Int,Void->TExpr>, hasCaptureVars:Bool, capturesThis:Bool, nextBlockId:Int, currentCatch:Null<CoroBlock>, hasCatch:Bool, numStates:Int) { this.builder = builder; this.typer = typer; this.config = config; this.coroType = coroType; this.classNamePos = classNamePos; this.deferredExprs = deferredExprs; this.hasCaptureVars = hasCaptureVars; this.capturesThis = capturesThis; this.nextBlockId = nextBlockId; this.currentCatch = currentCatch; this.hasCatch = hasCatch; this.numStates = numStates; }
+	public inline function clone():CoroCtx return new CoroCtx(builder, typer, config, coroType, classNamePos, deferredExprs, hasCaptureVars, capturesThis, nextBlockId, currentCatch, hasCatch, numStates);
 }
 enum abstract CbFlag(Int) to Int {var CbGenerated=0; var CbSuspendState=1; var CbResumeState=2;}
-typedef CoroScope = {var scopeVar:TVar; var restrictedSuspension:Bool;}
+@:structInit class CoroScope {
+	public var scopeVar:TVar;
+	public var restrictedSuspension:Bool;
+	public inline function new(scopeVar:TVar, restrictedSuspension:Bool) { this.scopeVar = scopeVar; this.restrictedSuspension = restrictedSuspension; }
+	public inline function clone():CoroScope return new CoroScope(scopeVar, restrictedSuspension);
+}
 enum CoroGenMode {GenThunk(cf:TClassField); GenInline(field:Null<{e:TExpr,cf:TClassField}>);}

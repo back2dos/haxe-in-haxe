@@ -22,9 +22,19 @@ import syntax.ParserEntry;
 import syntax.Grammar;
 import syntax.Lexer;
 
-typedef SourceParseResult = {var data:Package;var warnings:Array<ParseWarning>;}
-typedef SourceModuleResult = {var file:ResolvedFile;var declarations:Array<TypeDecl>;var warnings:Array<ParseWarning>;}
-
+@:structInit class SourceParseResult {
+	public var data:Package;
+	public var warnings:Array<ParseWarning>;
+	public inline function new(data:Package, warnings:Array<ParseWarning>) { this.data = data; this.warnings = warnings; }
+	public inline function clone():SourceParseResult return new SourceParseResult(data, warnings);
+}
+@:structInit class SourceModuleResult {
+	public var file:ResolvedFile;
+	public var declarations:Array<TypeDecl>;
+	public var warnings:Array<ParseWarning>;
+	public inline function new(file:ResolvedFile, declarations:Array<TypeDecl>, warnings:Array<ParseWarning>) { this.file = file; this.declarations = declarations; this.warnings = warnings; }
+	public inline function clone():SourceModuleResult return new SourceModuleResult(file, declarations, warnings);
+}
 // Source-only module parser from haxe/src/typing/typeloadParse.ml. Interactive
 // ConditionDisplay/PdiHandler and parser-cache services belong to later milestones.
 // The legacy TypeloadParse entry remains available to the bootstrap loader.

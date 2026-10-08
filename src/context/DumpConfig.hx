@@ -4,12 +4,14 @@ import core.Define.DefineContext;
 // Draft mechanical translation of haxe/src/context/dumpConfig.ml; unvalidated.
 enum DumpMode { NoDump; Ast; Pretty; Record; Position; }
 enum DumpStage { AfterTyping; AfterCasting; AfterInlining; AfterAnalyzing; AfterSanitizing; AfterDce; }
-typedef DumpConfiguration = {
-	var dumpMode:DumpMode;
-	var dumpPath:String;
-	var dumpStage:DumpStage;
-	var dumpPrintIds:Bool;
-	var dumpDependencies:Bool;
+@:structInit class DumpConfiguration {
+	public var dumpMode:DumpMode;
+	public var dumpPath:String;
+	public var dumpStage:DumpStage;
+	public var dumpPrintIds:Bool;
+	public var dumpDependencies:Bool;
+	public inline function new(dumpMode:DumpMode, dumpPath:String, dumpStage:DumpStage, dumpPrintIds:Bool, dumpDependencies:Bool) { this.dumpMode = dumpMode; this.dumpPath = dumpPath; this.dumpStage = dumpStage; this.dumpPrintIds = dumpPrintIds; this.dumpDependencies = dumpDependencies; }
+	public inline function clone():DumpConfiguration return new DumpConfiguration(dumpMode, dumpPath, dumpStage, dumpPrintIds, dumpDependencies);
 }
 class DumpConfig {
 	public static function createDefault():DumpConfiguration return {

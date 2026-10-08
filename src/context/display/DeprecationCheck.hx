@@ -8,13 +8,14 @@ import core.MetaList.StrictMeta;
 import core.Message.WarningCode;
 import context.Common;
 
-typedef DeprecationContext = {
- var com:CommonContext;
- var classMeta:Metadata;
- var fieldMeta:Metadata;
- var curmod:ModuleDef;
+@:structInit class DeprecationContext {
+	public var com:CommonContext;
+	public var classMeta:Metadata;
+	public var fieldMeta:Metadata;
+	public var curmod:ModuleDef;
+	public inline function new(com:CommonContext, classMeta:Metadata, fieldMeta:Metadata, curmod:ModuleDef) { this.com = com; this.classMeta = classMeta; this.fieldMeta = fieldMeta; this.curmod = curmod; }
+	public inline function clone():DeprecationContext return new DeprecationContext(com, classMeta, fieldMeta, curmod);
 }
-
 // haxe/src/context/display/deprecationCheck.ml; warnings are required outside display services.
 class DeprecationCheck {
  public static function createContext(com:CommonContext):DeprecationContext

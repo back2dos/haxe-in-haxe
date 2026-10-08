@@ -5,9 +5,27 @@ import core.data.DataReaderApi;
 import core.TFunctions.NotFound;
 import core.data.MetaDataApi;
 // haxe/src/coro/coroConfig.ml — mechanical draft; not compile-validated.
-typedef CoroAssert = {var numStates:Null<Int>; var numHoisted:Null<Int>;}
-typedef CoroOutcome = {var noSuspend:Bool; var noReturn:Bool; var noThrow:Bool;}
-typedef CoroConfigData = {var debug:Bool; var transformed:Bool; var assertConfig:Null<CoroAssert>; var outcome:CoroOutcome;}
+@:structInit class CoroAssert {
+	public var numStates:Null<Int>;
+	public var numHoisted:Null<Int>;
+	public inline function new(numStates:Null<Int>, numHoisted:Null<Int>) { this.numStates = numStates; this.numHoisted = numHoisted; }
+	public inline function clone():CoroAssert return new CoroAssert(numStates, numHoisted);
+}
+@:structInit class CoroOutcome {
+	public var noSuspend:Bool;
+	public var noReturn:Bool;
+	public var noThrow:Bool;
+	public inline function new(noSuspend:Bool, noReturn:Bool, noThrow:Bool) { this.noSuspend = noSuspend; this.noReturn = noReturn; this.noThrow = noThrow; }
+	public inline function clone():CoroOutcome return new CoroOutcome(noSuspend, noReturn, noThrow);
+}
+@:structInit class CoroConfigData {
+	public var debug:Bool;
+	public var transformed:Bool;
+	public var assertConfig:Null<CoroAssert>;
+	public var outcome:CoroOutcome;
+	public inline function new(debug:Bool, transformed:Bool, assertConfig:Null<CoroAssert>, outcome:CoroOutcome) { this.debug = debug; this.transformed = transformed; this.assertConfig = assertConfig; this.outcome = outcome; }
+	public inline function clone():CoroConfigData return new CoroConfigData(debug, transformed, assertConfig, outcome);
+}
 class CoroConfigReader<Data> {
  var api:DataReaderApi<Data>;
  public function new(api:DataReaderApi<Data>) this.api=api;

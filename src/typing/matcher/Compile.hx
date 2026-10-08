@@ -28,7 +28,7 @@ import core.TUnification.typeIseq;
 private class ExtractorFound extends haxe.Exception {public function new()super("Extractor");}
 typedef MatcherContext={var ctx:Typer;var dtTable:Array<DecisionTreeData>;var matchPos:Pos;var matchDebug:Bool;var dtCount:Int;}
 class Compile {
- public static function hashcons(m:MatcherContext,dt:DecisionTreeKind,p:Pos):DecisionTreeData {for(existing in m.dtTable)if(DecisionTree.equal(existing.dtT,dt))return existing;var d={dtT:dt,dtI:m.dtCount++,dtPos:p,dtGotoTarget:false,dtTexpr:null};m.dtTable.push(d);return d;}
+ public static function hashcons(m:MatcherContext,dt:DecisionTreeKind,p:Pos):DecisionTreeData {for(existing in m.dtTable)if(DecisionTree.equal(existing.dtT,dt))return existing;var d=({dtT:dt,dtI:m.dtCount++,dtPos:p,dtGotoTarget:false,dtTexpr:null} : typing.matcher.DecisionTree.DecisionTreeData);m.dtTable.push(d);return d;}
  static function leaf(m:MatcherContext,c:CaseData):DecisionTreeData return hashcons(m,Leaf(c),c.casePos);
  static function fail(m:MatcherContext,p:Pos):DecisionTreeData return hashcons(m,Fail,p);
  static function switchTree(m:MatcherContext,e:TExpr,cases:Array<DecisionSwitchCase>,def:DecisionTreeData):DecisionTreeData return hashcons(m,Switch(e,cases,def),e.epos);
@@ -66,7 +66,7 @@ class Compile {
  static function selectColumn(subjects:Array<Subject>,cases:Array<CaseRow>):{subjects:Array<Subject>,cases:Array<CaseRow>} {
   var ps=cases[0].patterns.copy();var i=0;while(ps.length>0){var p=ps.shift();switch p.kind{case PatAny|PatExtractor(_):i++;case PatBind(_,p):ps.unshift(p);case _:break; }if(switch p.kind{case PatAny|PatExtractor(_)|PatBind(_,_):false;case _:true;})break;}if(ps.length==0&&i>=cases[0].patterns.length)i=0;
   function sort<A>(a:Array<A>):Array<A>{if(i==0)return a;var acc=[];for(j in 0...a.length){if(j==i)return [a[j]].concat(acc).concat(a.slice(j+1));acc.unshift(a[j]);}return acc;}
-  return {subjects:sort(subjects),cases:cases.map(function(c)return {caseData:c.caseData,bindings:c.bindings,patterns:sort(c.patterns)})};
+  return {subjects:sort(subjects),cases:cases.map(function(c)return ({caseData:c.caseData,bindings:c.bindings,patterns:sort(c.patterns)} : typing.matcher.Case.CaseRow))};
  }
  static function compileRows(m:MatcherContext,subjects:Array<Subject>,cases:Array<CaseRow>):DecisionTreeData {
   if(cases.length==0)return fail(m,subjects.length>0?subjects[0].getPos():m.matchPos);
@@ -91,7 +91,7 @@ class Compile {
    case _:Error.raiseTypingError("Unexpected pattern: "+Pattern.toString(p),row.caseData.casePos);
   };loop(row.bindings,row.patterns[0]);}
   sigma.sort(function(a,b)return a.con.pos.pmin-b.con.pos.pmin);if(m.matchDebug)Sys.println('compile_switch:\n\tsubject: ${sExprPretty(subject)}\n\ttsubjects: ${sSubjects(subjects)}\n\tcases: ${sCases(cases)}');
-  var switchCases=sigma.map(function(s){var sub=getSubSubjects(m,subject,s.con,s.positions);var bs=[],ss=[];for(sub in sub){var v=addLocal(m.ctx,VGenerated,genLocalPrefix+sub.name,sub.e.etype,sub.e.epos);var ev=mk(TLocal(v),v.vType,v.vPos);var b=makeBindGen(v,v.vPos,sub.e,BindUnused);bs.push(b);ss.push(new Subject(ev,b));}var dt=compileRows(m,ss.concat(subjects),specialize(subject,s.con,cases));return {scCon:s.con,scUnguarded:s.unguarded,scDt:bind(m,bs,dt)};});
+  var switchCases=sigma.map(function(s){var sub=getSubSubjects(m,subject,s.con,s.positions);var bs=[],ss=[];for(sub in sub){var v=addLocal(m.ctx,VGenerated,genLocalPrefix+sub.name,sub.e.etype,sub.e.epos);var ev=mk(TLocal(v),v.vType,v.vPos);var b=makeBindGen(v,v.vPos,sub.e,BindUnused);bs.push(b);ss.push(new Subject(ev,b));}var dt=compileRows(m,ss.concat(subjects),specialize(subject,s.con,cases));return ({scCon:s.con,scUnguarded:s.unguarded,scDt:bind(m,bs,dt)} : typing.matcher.DecisionTree.DecisionSwitchCase);});
   var subjectNull=subject,subjectSwitch=subject,subjectDefault=subject;
   if(nullRows.length>0||isExplicitNullOrAbstractOverThat(subject.etype))subjectNull=scoped.expr;else if(switchCases.length==0)subjectDefault=scoped.expr;else subjectSwitch=scoped.expr;
   var defaults=defaultRows(subjectDefault,cases);var switchDefault=compileRows(m,subjects,defaults);var dt=switchCases.length==0?switchDefault:switchTree(m,subjectSwitch,switchCases,switchDefault);

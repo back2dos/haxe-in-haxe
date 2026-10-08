@@ -851,7 +851,7 @@ class Typer {
    case EWhile(cond,body,DoWhile):
     var old=ctx.e.inLoop; ctx.e.inLoop=true; var e=typeExpr(ctx,ensureBlock(body),NoValue); ctx.e.inLoop=old;
     var condition=typeExpr(ctx,cond,WithTypeTools.value); condition=AbstractCast.castOrUnify(ctx,ctx.t.tbool,condition,condition.epos); mk(TWhile(condition,e,DoWhile),ctx.t.tvoid,p);
-   case ESwitch(e1,cases,def):var result=Matcher.matchExpr(ctx,e1,cases.map(c->{patterns:c.values,guard:c.guard,expr:c.expr,pos:c.pos}),def,withType,false,p); mk(TMeta({meta:MetaTag.Ast,exprs:[syntax],pos:p},result),result.etype,result.epos);
+   case ESwitch(e1,cases,def):var result=Matcher.matchExpr(ctx,e1,cases.map(c->({patterns:c.values,guard:c.guard,expr:c.expr,pos:c.pos} : typing.Matcher.MatchCase)),def,withType,false,p); mk(TMeta({meta:MetaTag.Ast,exprs:[syntax],pos:p},result),result.etype,result.epos);
    case EReturn(e):
     if(!TyperManager.isFunctionContext(ctx)) {displayError(ctx.com,"Return outside function",p); e==null?Texpr.Builder.makeNull(terminatorType(ctx,withType,p),p):typeExpr(ctx,e,WithTypeTools.value);} else typeReturn(ctx,e,withType,p);
    case EBreak:if(!ctx.e.inLoop) displayError(ctx.com,"Break outside loop",p); mk(TBreak,terminatorType(ctx,withType,p),p);

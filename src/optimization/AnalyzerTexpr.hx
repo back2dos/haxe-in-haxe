@@ -67,7 +67,16 @@ class TexprFilter {
   }; return loop(e);
  }
 }
-typedef InterferenceReportData = {var irVarReads:haxe.ds.IntMap<Bool>; var irVarWrites:haxe.ds.IntMap<Bool>; var irFieldReads:haxe.ds.StringMap<Bool>; var irFieldWrites:haxe.ds.StringMap<Bool>; var irStateRead:Bool; var irStateWrite:Bool;}
+@:structInit class InterferenceReportData {
+	public var irVarReads:haxe.ds.IntMap<Bool>;
+	public var irVarWrites:haxe.ds.IntMap<Bool>;
+	public var irFieldReads:haxe.ds.StringMap<Bool>;
+	public var irFieldWrites:haxe.ds.StringMap<Bool>;
+	public var irStateRead:Bool;
+	public var irStateWrite:Bool;
+	public inline function new(irVarReads:haxe.ds.IntMap<Bool>, irVarWrites:haxe.ds.IntMap<Bool>, irFieldReads:haxe.ds.StringMap<Bool>, irFieldWrites:haxe.ds.StringMap<Bool>, irStateRead:Bool, irStateWrite:Bool) { this.irVarReads = irVarReads; this.irVarWrites = irVarWrites; this.irFieldReads = irFieldReads; this.irFieldWrites = irFieldWrites; this.irStateRead = irStateRead; this.irStateWrite = irStateWrite; }
+	public inline function clone():InterferenceReportData return new InterferenceReportData(irVarReads, irVarWrites, irFieldReads, irFieldWrites, irStateRead, irStateWrite);
+}
 class InterferenceReport {
  public static function create():InterferenceReportData return {irVarReads:new haxe.ds.IntMap(),irVarWrites:new haxe.ds.IntMap(),irFieldReads:new haxe.ds.StringMap(),irFieldWrites:new haxe.ds.StringMap(),irStateRead:false,irStateWrite:false};
  public static function setVarRead(ir:InterferenceReportData,v:TVar):Void ir.irVarReads.set(v.vId,true);
@@ -289,7 +298,14 @@ class Cleanup {
   }; return loop(e);
  }
 }
-typedef PurityNode = {var pnClass:TClass; var pnField:TClassField; var pnPurity:PurityState; var pnDependents:Array<PurityNode>;}
+@:structInit class PurityNode {
+	public var pnClass:TClass;
+	public var pnField:TClassField;
+	public var pnPurity:PurityState;
+	public var pnDependents:Array<PurityNode>;
+	public inline function new(pnClass:TClass, pnField:TClassField, pnPurity:PurityState, pnDependents:Array<PurityNode>) { this.pnClass = pnClass; this.pnField = pnField; this.pnPurity = pnPurity; this.pnDependents = pnDependents; }
+	public inline function clone():PurityNode return new PurityNode(pnClass, pnField, pnPurity, pnDependents);
+}
 class PurityConflict {public var node:PurityNode; public var pos:Pos; public function new(node:PurityNode,pos:Pos) {this.node = node; this.pos = pos;}}
 class Purity {
  public static var nodeLut = new haxe.ds.StringMap<PurityNode>();

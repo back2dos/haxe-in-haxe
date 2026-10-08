@@ -21,9 +21,20 @@ import typing.matcher.Pattern;
 import typing.matcher.Bind;
 
 // haxe/src/typing/matcher/case.ml — mechanical draft; not compile-validated.
-typedef CaseData = {var caseGuard:Null<TExpr>; var caseExpr:Null<TExpr>; var casePos:Pos;}
-typedef CaseRow = {var caseData:CaseData; var bindings:Array<Bind>; var patterns:Array<PatternData>;}
-
+@:structInit class CaseData {
+	public var caseGuard:Null<TExpr>;
+	public var caseExpr:Null<TExpr>;
+	public var casePos:Pos;
+	public inline function new(caseGuard:Null<TExpr>, caseExpr:Null<TExpr>, casePos:Pos) { this.caseGuard = caseGuard; this.caseExpr = caseExpr; this.casePos = casePos; }
+	public inline function clone():CaseData return new CaseData(caseGuard, caseExpr, casePos);
+}
+@:structInit class CaseRow {
+	public var caseData:CaseData;
+	public var bindings:Array<Bind>;
+	public var patterns:Array<PatternData>;
+	public inline function new(caseData:CaseData, bindings:Array<Bind>, patterns:Array<PatternData>) { this.caseData = caseData; this.bindings = bindings; this.patterns = patterns; }
+	public inline function clone():CaseRow return new CaseRow(caseData, bindings, patterns);
+}
 class Case {
 	public static function collectFreeMonos(t:T):Array<TMono> {
 		var acc:Array<TMono> = [];

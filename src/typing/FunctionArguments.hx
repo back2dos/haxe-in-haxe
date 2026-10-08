@@ -32,8 +32,13 @@ import context.SafeCom;
 import optimization.Optimizer;
 
 // haxe/src/typing/functionArguments.ml — mechanical draft; not compile-validated.
-typedef ArgumentWithDefault = {var name:String; var expr:Null<Expr>; var type:T;}
-
+@:structInit class ArgumentWithDefault {
+	public var name:String;
+	public var expr:Null<Expr>;
+	public var type:T;
+	public inline function new(name:String, expr:Null<Expr>, type:T) { this.name = name; this.expr = expr; this.type = type; }
+	public inline function clone():ArgumentWithDefault return new ArgumentWithDefault(name, expr, type);
+}
 class FunctionArguments {
 	public static function isFlashNativeBasic(t:T):Bool return switch follow(t) {
 		case TAbstract(a, _):

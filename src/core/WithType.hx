@@ -3,7 +3,12 @@ package core;
 import core.TType.T;
 
 // Mechanical translation of haxe/src/core/withType.ml. Draft; not compiled or tested.
-typedef WithTypeSourceInformation = { var siName:String; var siDoc:Null<String>; }
+@:structInit class WithTypeSourceInformation {
+	public var siName:String;
+	public var siDoc:Null<String>;
+	public inline function new(siName:String, siDoc:Null<String>) { this.siName = siName; this.siDoc = siDoc; }
+	public inline function clone():WithTypeSourceInformation return new WithTypeSourceInformation(siName, siDoc);
+}
 enum WithTypeSource {
 	FunctionArgument(info:WithTypeSourceInformation);
 	StructureField(info:WithTypeSourceInformation);

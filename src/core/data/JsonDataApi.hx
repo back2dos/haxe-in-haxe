@@ -3,11 +3,12 @@ package core.data;
 import haxe.DynamicAccess;
 
 // Port of haxe/src/core/data/jsonDataApi.ml.
-typedef JsonField = {
-	var name:String;
-	var value:Dynamic;
+@:structInit class JsonField {
+	public var name:String;
+	public var value:Dynamic;
+	public inline function new(name:String, value:Dynamic) { this.name = name; this.value = value; }
+	public inline function clone():JsonField return new JsonField(name, value);
 }
-
 class JsonReaderApi {
 	public static function readOptional(data:Dynamic, callback:Dynamic->Void):Void {
 		if (data != null) callback(data);

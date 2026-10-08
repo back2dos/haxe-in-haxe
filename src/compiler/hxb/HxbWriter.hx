@@ -375,13 +375,14 @@ class PosWriter {
 	}
 }
 
-typedef FieldWriterContext = {
-	var tPool:BytesPool;
-	var posWriter:PosWriter;
-	var texprThis:Null<TExpr>;
-	var vars:Array<{v:TVar, id:Int}>;
+@:structInit class FieldWriterContext {
+	public var tPool:BytesPool;
+	public var posWriter:PosWriter;
+	public var texprThis:Null<TExpr>;
+	public var vars:Array<{v:TVar, id:Int}>;
+	public inline function new(tPool:BytesPool, posWriter:PosWriter, texprThis:Null<TExpr>, vars:Array<{v:TVar, id:Int}>) { this.tPool = tPool; this.posWriter = posWriter; this.texprThis = texprThis; this.vars = vars; }
+	public inline function clone():FieldWriterContext return new FieldWriterContext(tPool, posWriter, texprThis, vars);
 }
-
 typedef ExprChunks = {pre:Chunk, e:Chunk};
 
 private typedef UnboundFrame = {source:Void->String, p:Null<Pos>};

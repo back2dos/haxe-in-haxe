@@ -14,10 +14,33 @@ import core.Meta;
 import core.Error;
 import optimization.OptimizerTexpr.*;
 // haxe/src/optimization/inline.ml — mechanical draft; not compiled or validated.
-typedef InlineContext = {var scom:SafeContext; var typer:Dynamic;}
-typedef InLocal = {var iVar:TVar; var iSubst:TVar; var iOutside:Bool; var iAbstractThis:Bool; var iCaptured:Bool; var iWrite:Bool; var iRead:Int; var iCalled:Int; var iForceTemp:Bool; var iDefaultValue:Null<TExpr>;}
+@:structInit class InlineContext {
+	public var scom:SafeContext;
+	public var typer:Dynamic;
+	public inline function new(scom:SafeContext, typer:Dynamic) { this.scom = scom; this.typer = typer; }
+	public inline function clone():InlineContext return new InlineContext(scom, typer);
+}
+@:structInit class InLocal {
+	public var iVar:TVar;
+	public var iSubst:TVar;
+	public var iOutside:Bool;
+	public var iAbstractThis:Bool;
+	public var iCaptured:Bool;
+	public var iWrite:Bool;
+	public var iRead:Int;
+	public var iCalled:Int;
+	public var iForceTemp:Bool;
+	public var iDefaultValue:Null<TExpr>;
+	public inline function new(iVar:TVar, iSubst:TVar, iOutside:Bool, iAbstractThis:Bool, iCaptured:Bool, iWrite:Bool, iRead:Int, iCalled:Int, iForceTemp:Bool, iDefaultValue:Null<TExpr>) { this.iVar = iVar; this.iSubst = iSubst; this.iOutside = iOutside; this.iAbstractThis = iAbstractThis; this.iCaptured = iCaptured; this.iWrite = iWrite; this.iRead = iRead; this.iCalled = iCalled; this.iForceTemp = iForceTemp; this.iDefaultValue = iDefaultValue; }
+	public inline function clone():InLocal return new InLocal(iVar, iSubst, iOutside, iAbstractThis, iCaptured, iWrite, iRead, iCalled, iForceTemp, iDefaultValue);
+}
 enum VarInlineKind { VIInline; VIInlineIfCalled; VIDoNotInline; }
-typedef InlineConfig = {var hasParams:Bool; var mapType:T->T;}
+@:structInit class InlineConfig {
+	public var hasParams:Bool;
+	public var mapType:T->T;
+	public inline function new(hasParams:Bool, mapType:T->T) { this.hasParams = hasParams; this.mapType = mapType; }
+	public inline function clone():InlineConfig return new InlineConfig(hasParams, mapType);
+}
 class Inline {
  public static function mkUntypedCall(name:String,p:Pos,params:Array<TExpr>):TExpr return mk(TCall(mk(TIdent(name),tDynamic,p),params),tDynamic,p);
  public static function apiInline2(b:Dynamic,platform:Dynamic,c:TClass,field:String,params:Array<TExpr>,p:Pos):Null<TExpr> {

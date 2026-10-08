@@ -29,8 +29,20 @@ enum ErrorMsg {
 	AbstractClass(type:ModuleType);
 }
 enum TypeNotFoundReason { PrivateType; NotDefined; }
-typedef CompilerError = {var errMessage:ErrorMsg;var errPos:Pos;var errSub:Array<CompilerError>;}
-typedef MacroError = {var msg:String;var pos:Pos;var sub:Array<MacroError>;}
+@:structInit class CompilerError {
+	public var errMessage:ErrorMsg;
+	public var errPos:Pos;
+	public var errSub:Array<CompilerError>;
+	public inline function new(errMessage:ErrorMsg, errPos:Pos, errSub:Array<CompilerError>) { this.errMessage = errMessage; this.errPos = errPos; this.errSub = errSub; }
+	public inline function clone():CompilerError return new CompilerError(errMessage, errPos, errSub);
+}
+@:structInit class MacroError {
+	public var msg:String;
+	public var pos:Pos;
+	public var sub:Array<MacroError>;
+	public inline function new(msg:String, pos:Pos, sub:Array<MacroError>) { this.msg = msg; this.pos = pos; this.sub = sub; }
+	public inline function clone():MacroError return new MacroError(msg, pos, sub);
+}
 class FatalError { public var error:CompilerError; public function new(error:CompilerError) this.error = error; }
 class TypingError { public var error:CompilerError; public function new(error:CompilerError) this.error = error; }
 class Error {
@@ -111,11 +123,24 @@ class Error {
 	}
 	public static function invalidAssign(p:Pos):Dynamic return raiseTypingError("Invalid assign",p);
 }
-typedef AccessKindInfo = {var isOptional:Bool;var isFinal:Bool;}
+@:structInit class AccessKindInfo {
+	public var isOptional:Bool;
+	public var isFinal:Bool;
+	public inline function new(isOptional:Bool, isFinal:Bool) { this.isOptional = isOptional; this.isFinal = isFinal; }
+	public inline function clone():AccessKindInfo return new AccessKindInfo(isOptional, isFinal);
+}
 enum ErrorAccessKind { Field(name:String); FunctionArgument(index:Int,total:Int); FunctionReturn; TypeParameter(index:Int); Root; }
-typedef ErrorAccess = {
-	var accKind:ErrorAccessKind;var accExpected:T;var accActual:T;var accMessages:Array<UnifyError>;
-	var accExtra:Array<UnifyError>;var accNext:Null<ErrorAccess>;var accExpectedInfo:AccessKindInfo;var accActualInfo:AccessKindInfo;
+@:structInit class ErrorAccess {
+	public var accKind:ErrorAccessKind;
+	public var accExpected:T;
+	public var accActual:T;
+	public var accMessages:Array<UnifyError>;
+	public var accExtra:Array<UnifyError>;
+	public var accNext:Null<ErrorAccess>;
+	public var accExpectedInfo:AccessKindInfo;
+	public var accActualInfo:AccessKindInfo;
+	public inline function new(accKind:ErrorAccessKind, accExpected:T, accActual:T, accMessages:Array<UnifyError>, accExtra:Array<UnifyError>, accNext:Null<ErrorAccess>, accExpectedInfo:AccessKindInfo, accActualInfo:AccessKindInfo) { this.accKind = accKind; this.accExpected = accExpected; this.accActual = accActual; this.accMessages = accMessages; this.accExtra = accExtra; this.accNext = accNext; this.accExpectedInfo = accExpectedInfo; this.accActualInfo = accActualInfo; }
+	public inline function clone():ErrorAccess return new ErrorAccess(accKind, accExpected, accActual, accMessages, accExtra, accNext, accExpectedInfo, accActualInfo);
 }
 class BetterErrors {
 	public static function sAccessKind(kind:ErrorAccessKind):String return switch kind {case Field(s):"Field " + s;case FunctionArgument(i,l):'FunctionArgument($i, $l)';case FunctionReturn:"FunctionReturn";case TypeParameter(i):"TypeParameter " + i;case Root:"Root";};

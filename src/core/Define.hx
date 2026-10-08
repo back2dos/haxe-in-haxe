@@ -7,14 +7,32 @@ import core.Globals.Platform;
 
 // haxe/src/core/define.ml; registry data follows pinned prebuild.ml and define.json.
 // Digests remain hexadecimal to avoid arbitrary binary bytes in Haxe Strings.
-typedef UserDefine = { var doc:String; var flags:Array<DefineParameter>; var source:Null<String>; }
-enum DefineOrigin { Compiler; UserDefined(source:Null<String>); }
-typedef DefineInfos = { var dDoc:String; var dParams:Array<String>; var dPlatforms:Array<Platform>; var dOrigin:DefineOrigin; var dLinks:Array<String>; var dDeprecated:Null<String>; var dDefault:Null<String>; var dReserved:Null<Bool>; }
-typedef DefineContext = {
-	var values:StringMap<String>;
-	var definesSignature:Null<String>;
+@:structInit class UserDefine {
+	public var doc:String;
+	public var flags:Array<DefineParameter>;
+	public var source:Null<String>;
+	public inline function new(doc:String, flags:Array<DefineParameter>, source:Null<String>) { this.doc = doc; this.flags = flags; this.source = source; }
+	public inline function clone():UserDefine return new UserDefine(doc, flags, source);
 }
-
+enum DefineOrigin { Compiler; UserDefined(source:Null<String>); }
+@:structInit class DefineInfos {
+	public var dDoc:String;
+	public var dParams:Array<String>;
+	public var dPlatforms:Array<Platform>;
+	public var dOrigin:DefineOrigin;
+	public var dLinks:Array<String>;
+	public var dDeprecated:Null<String>;
+	public var dDefault:Null<String>;
+	public var dReserved:Null<Bool>;
+	public inline function new(dDoc:String, dParams:Array<String>, dPlatforms:Array<Platform>, dOrigin:DefineOrigin, dLinks:Array<String>, dDeprecated:Null<String>, dDefault:Null<String>, dReserved:Null<Bool>) { this.dDoc = dDoc; this.dParams = dParams; this.dPlatforms = dPlatforms; this.dOrigin = dOrigin; this.dLinks = dLinks; this.dDeprecated = dDeprecated; this.dDefault = dDefault; this.dReserved = dReserved; }
+	public inline function clone():DefineInfos return new DefineInfos(dDoc, dParams, dPlatforms, dOrigin, dLinks, dDeprecated, dDefault, dReserved);
+}
+@:structInit class DefineContext {
+	public var values:StringMap<String>;
+	public var definesSignature:Null<String>;
+	public inline function new(values:StringMap<String>, definesSignature:Null<String>) { this.values = values; this.definesSignature = definesSignature; }
+	public inline function clone():DefineContext return new DefineContext(values, definesSignature);
+}
 class Define {
  public static final deprecationLut = DefineRegistry.deprecationLut;
  public static final defaultValues = DefineRegistry.defaultValues;

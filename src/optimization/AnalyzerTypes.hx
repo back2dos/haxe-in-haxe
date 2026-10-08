@@ -14,7 +14,14 @@ enum BlockKind { BKRoot; BKNormal; BKFunctionBegin(tf:TFunc); BKFunctionEnd; BKS
 enum FlagBlock { BlockDce; }
 enum CfgEdgeFlag { FlagExecutable; FlagDce; FlagCopyPropagation; }
 enum CfgEdgeKind { CFGGoto; CFGFunction; CFGMaybeThrow; CFGCondBranch(e:TExpr); CFGCondElse; }
-typedef CfgEdge = {var cfgFrom:BasicBlockData; var cfgTo:BasicBlockData; var cfgKind:CfgEdgeKind; var cfgFlags:Array<CfgEdgeFlag>;}
+@:structInit class CfgEdge {
+	public var cfgFrom:BasicBlockData;
+	public var cfgTo:BasicBlockData;
+	public var cfgKind:CfgEdgeKind;
+	public var cfgFlags:Array<CfgEdgeFlag>;
+	public inline function new(cfgFrom:BasicBlockData, cfgTo:BasicBlockData, cfgKind:CfgEdgeKind, cfgFlags:Array<CfgEdgeFlag>) { this.cfgFrom = cfgFrom; this.cfgTo = cfgTo; this.cfgKind = cfgKind; this.cfgFlags = cfgFlags; }
+	public inline function clone():CfgEdge return new CfgEdge(cfgFrom, cfgTo, cfgKind, cfgFlags);
+}
 enum SyntaxEdge {
  SEIfThen(bbThen:BasicBlockData,bbNext:BasicBlockData,p:Pos);
  SEIfThenElse(bbThen:BasicBlockData,bbElse:BasicBlockData,bbNext:BasicBlockData,t:T,p:Pos);
@@ -24,14 +31,37 @@ enum SyntaxEdge {
  SESubBlock(bbSub:BasicBlockData,bbNext:BasicBlockData);
  SEMerge(bb:BasicBlockData); SENone;
 }
-typedef SyntaxSwitch = {var ssCases:Array<{values:Array<TExpr>,bb:BasicBlockData}>; var ssDefault:Null<BasicBlockData>; var ssNext:BasicBlockData; var ssPos:Pos; var ssExhaustive:Bool;}
+@:structInit class SyntaxSwitch {
+	public var ssCases:Array<{values:Array<TExpr>,bb:BasicBlockData}>;
+	public var ssDefault:Null<BasicBlockData>;
+	public var ssNext:BasicBlockData;
+	public var ssPos:Pos;
+	public var ssExhaustive:Bool;
+	public inline function new(ssCases:Array<{values:Array<TExpr>,bb:BasicBlockData}>, ssDefault:Null<BasicBlockData>, ssNext:BasicBlockData, ssPos:Pos, ssExhaustive:Bool) { this.ssCases = ssCases; this.ssDefault = ssDefault; this.ssNext = ssNext; this.ssPos = ssPos; this.ssExhaustive = ssExhaustive; }
+	public inline function clone():SyntaxSwitch return new SyntaxSwitch(ssCases, ssDefault, ssNext, ssPos, ssExhaustive);
+}
 enum TerminatorKind { TermNone; TermCondBranch(e:TExpr); TermReturn(p:Pos); TermReturnValue(e:TExpr,p:Pos); TermBreak(p:Pos); TermContinue(p:Pos); TermThrow(e:TExpr,p:Pos); }
-typedef BasicBlockData = {
- var bbId:Int; var bbType:T; var bbPos:Pos; var bbKind:BlockKind; var bbClosed:Bool; var bbFlags:Int;
- var bbEl:Array<TExpr>; var bbPhi:Array<TExpr>; var bbTerminator:TerminatorKind;
- var bbOutgoing:Array<CfgEdge>; var bbIncoming:Array<CfgEdge>; var bbDominator:BasicBlockData;
- var bbDominated:Array<BasicBlockData>; var bbDf:Array<BasicBlockData>; var bbSyntaxEdge:SyntaxEdge;
- var bbLoopGroups:Array<Int>; var bbScopes:Array<Int>; var bbVarWrites:Array<TVar>;
+@:structInit class BasicBlockData {
+	public var bbId:Int;
+	public var bbType:T;
+	public var bbPos:Pos;
+	public var bbKind:BlockKind;
+	public var bbClosed:Bool;
+	public var bbFlags:Int;
+	public var bbEl:Array<TExpr>;
+	public var bbPhi:Array<TExpr>;
+	public var bbTerminator:TerminatorKind;
+	public var bbOutgoing:Array<CfgEdge>;
+	public var bbIncoming:Array<CfgEdge>;
+	public var bbDominator:BasicBlockData;
+	public var bbDominated:Array<BasicBlockData>;
+	public var bbDf:Array<BasicBlockData>;
+	public var bbSyntaxEdge:SyntaxEdge;
+	public var bbLoopGroups:Array<Int>;
+	public var bbScopes:Array<Int>;
+	public var bbVarWrites:Array<TVar>;
+	public inline function new(bbId:Int, bbType:T, bbPos:Pos, bbKind:BlockKind, bbClosed:Bool, bbFlags:Int, bbEl:Array<TExpr>, bbPhi:Array<TExpr>, bbTerminator:TerminatorKind, bbOutgoing:Array<CfgEdge>, bbIncoming:Array<CfgEdge>, bbDominator:BasicBlockData, bbDominated:Array<BasicBlockData>, bbDf:Array<BasicBlockData>, bbSyntaxEdge:SyntaxEdge, bbLoopGroups:Array<Int>, bbScopes:Array<Int>, bbVarWrites:Array<TVar>) { this.bbId = bbId; this.bbType = bbType; this.bbPos = bbPos; this.bbKind = bbKind; this.bbClosed = bbClosed; this.bbFlags = bbFlags; this.bbEl = bbEl; this.bbPhi = bbPhi; this.bbTerminator = bbTerminator; this.bbOutgoing = bbOutgoing; this.bbIncoming = bbIncoming; this.bbDominator = bbDominator; this.bbDominated = bbDominated; this.bbDf = bbDf; this.bbSyntaxEdge = bbSyntaxEdge; this.bbLoopGroups = bbLoopGroups; this.bbScopes = bbScopes; this.bbVarWrites = bbVarWrites; }
+	public inline function clone():BasicBlockData return new BasicBlockData(bbId, bbType, bbPos, bbKind, bbClosed, bbFlags, bbEl, bbPhi, bbTerminator, bbOutgoing, bbIncoming, bbDominator, bbDominated, bbDf, bbSyntaxEdge, bbLoopGroups, bbScopes, bbVarWrites);
 }
 enum TExprLookupTarget { LUPhi(i:Int); LUEl(i:Int); LUTerm; }
 class BasicBlock {
@@ -76,10 +106,43 @@ class BasicBlock {
   case TermNone | TermReturn(_) | TermBreak(_) | TermContinue(_):
  }
 }
-typedef TFuncInfo = {var bb:BasicBlockData; var type:T; var pos:Pos; var tf:TFunc;}
-typedef TExprLookup = {var bb:BasicBlockData; var target:TExprLookupTarget;}
-typedef VarInfo = {var viVar:TVar; var viExtra:Null<TVarExtra>; var viBbDeclare:BasicBlockData; var viOrigin:TVar; var viWrites:Array<BasicBlockData>; var viValue:Null<TExprLookup>; var viSsaEdges:Array<TExprLookup>; var viReachingDef:Null<TVar>;}
-typedef GraphData = {var gRoot:BasicBlockData; var gExit:BasicBlockData; var gUnreachable:BasicBlockData; var gFunctions:haxe.ds.IntMap<TFuncInfo>; var gNodes:Array<BasicBlockData>; var gVarInfos:Array<VarInfo>; var gLoops:haxe.ds.IntMap<BasicBlockData>;}
+@:structInit class TFuncInfo {
+	public var bb:BasicBlockData;
+	public var type:T;
+	public var pos:Pos;
+	public var tf:TFunc;
+	public inline function new(bb:BasicBlockData, type:T, pos:Pos, tf:TFunc) { this.bb = bb; this.type = type; this.pos = pos; this.tf = tf; }
+	public inline function clone():TFuncInfo return new TFuncInfo(bb, type, pos, tf);
+}
+@:structInit class TExprLookup {
+	public var bb:BasicBlockData;
+	public var target:TExprLookupTarget;
+	public inline function new(bb:BasicBlockData, target:TExprLookupTarget) { this.bb = bb; this.target = target; }
+	public inline function clone():TExprLookup return new TExprLookup(bb, target);
+}
+@:structInit class VarInfo {
+	public var viVar:TVar;
+	public var viExtra:Null<TVarExtra>;
+	public var viBbDeclare:BasicBlockData;
+	public var viOrigin:TVar;
+	public var viWrites:Array<BasicBlockData>;
+	public var viValue:Null<TExprLookup>;
+	public var viSsaEdges:Array<TExprLookup>;
+	public var viReachingDef:Null<TVar>;
+	public inline function new(viVar:TVar, viExtra:Null<TVarExtra>, viBbDeclare:BasicBlockData, viOrigin:TVar, viWrites:Array<BasicBlockData>, viValue:Null<TExprLookup>, viSsaEdges:Array<TExprLookup>, viReachingDef:Null<TVar>) { this.viVar = viVar; this.viExtra = viExtra; this.viBbDeclare = viBbDeclare; this.viOrigin = viOrigin; this.viWrites = viWrites; this.viValue = viValue; this.viSsaEdges = viSsaEdges; this.viReachingDef = viReachingDef; }
+	public inline function clone():VarInfo return new VarInfo(viVar, viExtra, viBbDeclare, viOrigin, viWrites, viValue, viSsaEdges, viReachingDef);
+}
+@:structInit class GraphData {
+	public var gRoot:BasicBlockData;
+	public var gExit:BasicBlockData;
+	public var gUnreachable:BasicBlockData;
+	public var gFunctions:haxe.ds.IntMap<TFuncInfo>;
+	public var gNodes:Array<BasicBlockData>;
+	public var gVarInfos:Array<VarInfo>;
+	public var gLoops:haxe.ds.IntMap<BasicBlockData>;
+	public inline function new(gRoot:BasicBlockData, gExit:BasicBlockData, gUnreachable:BasicBlockData, gFunctions:haxe.ds.IntMap<TFuncInfo>, gNodes:Array<BasicBlockData>, gVarInfos:Array<VarInfo>, gLoops:haxe.ds.IntMap<BasicBlockData>) { this.gRoot = gRoot; this.gExit = gExit; this.gUnreachable = gUnreachable; this.gFunctions = gFunctions; this.gNodes = gNodes; this.gVarInfos = gVarInfos; this.gLoops = gLoops; }
+	public inline function clone():GraphData return new GraphData(gRoot, gExit, gUnreachable, gFunctions, gNodes, gVarInfos, gLoops);
+}
 private typedef DomBbInfo = {var bb:BasicBlockData; var parent:DomBbInfo; var idom:DomBbInfo; var semi:Int; var label:DomBbInfo; var ancestor:DomBbInfo; var bucket:Array<DomBbInfo>;}
 class Graph {
  public static function createVarInfo(g:GraphData,bb:BasicBlockData,v:TVar):VarInfo {
@@ -169,8 +232,21 @@ class Graph {
   for (fn in g.gFunctions) loop([0],fn.bb);
  }
 }
-typedef AnalyzerContext = {
- var com:Dynamic; var config:AnalyzerConfigData; var graph:GraphData; var tempVarName:String; var withTimer:Dynamic; var identifier:String;
- var entry:BasicBlockData; var hasUnbound:Bool; var loopCounter:Int; var loopStack:Array<Int>; var debugExprs:Array<{name:String,expr:TExpr}>; var nameStack:Array<String>; var didOptimize:Bool;
+@:structInit class AnalyzerContext {
+	public var com:Dynamic;
+	public var config:AnalyzerConfigData;
+	public var graph:GraphData;
+	public var tempVarName:String;
+	public var withTimer:Dynamic;
+	public var identifier:String;
+	public var entry:BasicBlockData;
+	public var hasUnbound:Bool;
+	public var loopCounter:Int;
+	public var loopStack:Array<Int>;
+	public var debugExprs:Array<{name:String,expr:TExpr}>;
+	public var nameStack:Array<String>;
+	public var didOptimize:Bool;
+	public inline function new(com:Dynamic, config:AnalyzerConfigData, graph:GraphData, tempVarName:String, withTimer:Dynamic, identifier:String, entry:BasicBlockData, hasUnbound:Bool, loopCounter:Int, loopStack:Array<Int>, debugExprs:Array<{name:String,expr:TExpr}>, nameStack:Array<String>, didOptimize:Bool) { this.com = com; this.config = config; this.graph = graph; this.tempVarName = tempVarName; this.withTimer = withTimer; this.identifier = identifier; this.entry = entry; this.hasUnbound = hasUnbound; this.loopCounter = loopCounter; this.loopStack = loopStack; this.debugExprs = debugExprs; this.nameStack = nameStack; this.didOptimize = didOptimize; }
+	public inline function clone():AnalyzerContext return new AnalyzerContext(com, config, graph, tempVarName, withTimer, identifier, entry, hasUnbound, loopCounter, loopStack, debugExprs, nameStack, didOptimize);
 }
 class AnalyzerTypes {}

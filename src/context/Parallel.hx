@@ -3,7 +3,13 @@ import core.Timer;
 import core.ds.TaskPool;
 import sys.thread.Mutex;
 // haxe/src/context/parallel.ml; TaskPool isolates host threading differences.
-typedef ManagedPoolData = {var setup:Void->TaskPool; var pool:Null<TaskPool>; var mutex:Mutex;}
+@:structInit class ManagedPoolData {
+	public var setup:Void->TaskPool;
+	public var pool:Null<TaskPool>;
+	public var mutex:Mutex;
+	public inline function new(setup:Void->TaskPool, pool:Null<TaskPool>, mutex:Mutex) { this.setup = setup; this.pool = pool; this.mutex = mutex; }
+	public inline function clone():ManagedPoolData return new ManagedPoolData(setup, pool, mutex);
+}
 class Parallel {
  public static var enable=true;
  public static function runParallelFor(numDomains:Int,length:Int,f:Int->Void,chunkSize:Int=0):Void {

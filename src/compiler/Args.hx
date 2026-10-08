@@ -13,14 +13,28 @@ import core.ds.Failure;
 import core.ds.NotFound;
 import compiler.Helper.HelpMessage;
 
-typedef ArgContext = {
- var classes:Array<GlobalTypePath>;var xmlOut:Null<String>;var hxbOut:Null<String>;var jsonOut:Null<String>;
- var cmds:Array<String>;var configMacros:Array<String>;var noOutput:Bool;var didSomething:Bool;var forceTyping:Bool;
- var preCompilation:Array<Void->Void>;var interp:Bool;var jvmFlag:Bool;var swfVersion:Bool;
- var hxbLibs:Array<NativeLibArg>;var nativeLibs:Array<NativeLibArg>;var raiseUsage:Void->Void;var displayArg:Null<String>;var measureTimes:Bool;
+@:structInit class ArgContext {
+	public var classes:Array<GlobalTypePath>;
+	public var xmlOut:Null<String>;
+	public var hxbOut:Null<String>;
+	public var jsonOut:Null<String>;
+	public var cmds:Array<String>;
+	public var configMacros:Array<String>;
+	public var noOutput:Bool;
+	public var didSomething:Bool;
+	public var forceTyping:Bool;
+	public var preCompilation:Array<Void->Void>;
+	public var interp:Bool;
+	public var jvmFlag:Bool;
+	public var swfVersion:Bool;
+	public var hxbLibs:Array<NativeLibArg>;
+	public var nativeLibs:Array<NativeLibArg>;
+	public var raiseUsage:Void->Void;
+	public var displayArg:Null<String>;
+	public var measureTimes:Bool;
+	public inline function new(classes:Array<GlobalTypePath>, xmlOut:Null<String>, hxbOut:Null<String>, jsonOut:Null<String>, cmds:Array<String>, configMacros:Array<String>, noOutput:Bool, didSomething:Bool, forceTyping:Bool, preCompilation:Array<Void->Void>, interp:Bool, jvmFlag:Bool, swfVersion:Bool, hxbLibs:Array<NativeLibArg>, nativeLibs:Array<NativeLibArg>, raiseUsage:Void->Void, displayArg:Null<String>, measureTimes:Bool) { this.classes = classes; this.xmlOut = xmlOut; this.hxbOut = hxbOut; this.jsonOut = jsonOut; this.cmds = cmds; this.configMacros = configMacros; this.noOutput = noOutput; this.didSomething = didSomething; this.forceTyping = forceTyping; this.preCompilation = preCompilation; this.interp = interp; this.jvmFlag = jvmFlag; this.swfVersion = swfVersion; this.hxbLibs = hxbLibs; this.nativeLibs = nativeLibs; this.raiseUsage = raiseUsage; this.displayArg = displayArg; this.measureTimes = measureTimes; }
+	public inline function clone():ArgContext return new ArgContext(classes, xmlOut, hxbOut, jsonOut, cmds, configMacros, noOutput, didSomething, forceTyping, preCompilation, interp, jvmFlag, swfVersion, hxbLibs, nativeLibs, raiseUsage, displayArg, measureTimes);
 }
-
-
 // Port of the parse_args portion of haxe/src/compiler/args.ml.
 class Args {
  // haxe/src/compiler/args.ml: request expansion (haxelib/server execution deferred).
@@ -293,6 +307,18 @@ class Args {
 }
 
 // Request structures from args.ml.
-typedef PartArgs = {var args:Array<ParsedArg>;var runtimeArgs:Array<String>;}
+@:structInit class PartArgs {
+	public var args:Array<ParsedArg>;
+	public var runtimeArgs:Array<String>;
+	public inline function new(args:Array<ParsedArg>, runtimeArgs:Array<String>) { this.args = args; this.runtimeArgs = runtimeArgs; }
+	public inline function clone():PartArgs return new PartArgs(args, runtimeArgs);
+}
 enum RequestServerMode {SMNone;SMListen(hostPort:String);SMConnect(hostPort:String);}
-typedef RequestArgs = {var parts:Array<PartArgs>;var serverMode:RequestServerMode;var connectArg:Null<String>;var displayArg:Null<String>;}
+@:structInit class RequestArgs {
+	public var parts:Array<PartArgs>;
+	public var serverMode:RequestServerMode;
+	public var connectArg:Null<String>;
+	public var displayArg:Null<String>;
+	public inline function new(parts:Array<PartArgs>, serverMode:RequestServerMode, connectArg:Null<String>, displayArg:Null<String>) { this.parts = parts; this.serverMode = serverMode; this.connectArg = connectArg; this.displayArg = displayArg; }
+	public inline function clone():RequestArgs return new RequestArgs(parts, serverMode, connectArg, displayArg);
+}

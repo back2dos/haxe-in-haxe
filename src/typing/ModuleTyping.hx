@@ -36,7 +36,12 @@ import typing.Typeload.*;
 import typing.TypeloadCheck.BuildCanceled;
 using Lambda;
 
-typedef TypedDeclaration = {var declaration:TypeDecl;var type:ModuleType;}
+@:structInit class TypedDeclaration {
+	public var declaration:TypeDecl;
+	public var type:ModuleType;
+	public inline function new(declaration:TypeDecl, type:ModuleType) { this.declaration = declaration; this.type = type; }
+	public inline function clone():TypedDeclaration return new TypedDeclaration(declaration, type);
+}
 class ModuleTyping {
  public static function getPolicy(g:TyperGlobals,path:GlobalTypePath):Array<ModuleCheckPolicy> {var parts=AstTools.fullDotPath2(path,path),out=[];for(entry in g.moduleCheckPolicies)if(AstTools.matchPath(entry.recursive,parts,entry.pack))out=entry.policies.concat(out);return out;}
  public static function makeModule(com:CommonContext,g:TyperGlobals,path:GlobalTypePath,file:String,p:Pos):ModuleDef return {mId:allocMid(),mPath:path,mTypes:[],mStatics:null,mExtra:moduleExtra(core.Path.getFullPath(file),Define.getSignature(com.defines),Common.fileTime(file),com.isMacroContext?MMacro:MCode,com.partScope.compilationStep,getPolicy(g,path))};

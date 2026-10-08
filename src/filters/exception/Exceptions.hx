@@ -12,21 +12,22 @@ import core.Abstract;
 import typing.TyperBase;
 import filters.exception.ExceptionFunctions;
 
-typedef ExceptionContext = {
-	var scom:SafeContext;
-	var basic:BasicTypes;
-	var config:ExceptionsConfig;
-	var wildcardCatchType:T;
-	var baseThrowType:T;
-	var throwsAnything:Bool;
-	var catchesAnything:Bool;
-	var haxeException:AtomicLazy<{type:T, cls:TClass}>;
-	var haxeNativeStackTrace:AtomicLazy<TClass>;
-	var valueException:AtomicLazy<{type:T, cls:TClass}>;
-	var isOfType:{cls:TClass, field:TClassField, returnType:T};
+@:structInit class ExceptionContext {
+	public var scom:SafeContext;
+	public var basic:BasicTypes;
+	public var config:ExceptionsConfig;
+	public var wildcardCatchType:T;
+	public var baseThrowType:T;
+	public var throwsAnything:Bool;
+	public var catchesAnything:Bool;
+	public var haxeException:AtomicLazy<{type:T, cls:TClass}>;
+	public var haxeNativeStackTrace:AtomicLazy<TClass>;
+	public var valueException:AtomicLazy<{type:T, cls:TClass}>;
+	public var isOfType:{cls:TClass, field:TClassField, returnType:T};
+	public inline function new(scom:SafeContext, basic:BasicTypes, config:ExceptionsConfig, wildcardCatchType:T, baseThrowType:T, throwsAnything:Bool, catchesAnything:Bool, haxeException:AtomicLazy<{type:T, cls:TClass}>, haxeNativeStackTrace:AtomicLazy<TClass>, valueException:AtomicLazy<{type:T, cls:TClass}>, isOfType:{cls:TClass, field:TClassField, returnType:T}) { this.scom = scom; this.basic = basic; this.config = config; this.wildcardCatchType = wildcardCatchType; this.baseThrowType = baseThrowType; this.throwsAnything = throwsAnything; this.catchesAnything = catchesAnything; this.haxeException = haxeException; this.haxeNativeStackTrace = haxeNativeStackTrace; this.valueException = valueException; this.isOfType = isOfType; }
+	public inline function clone():ExceptionContext return new ExceptionContext(scom, basic, config, wildcardCatchType, baseThrowType, throwsAnything, catchesAnything, haxeException, haxeNativeStackTrace, valueException, isOfType);
 }
 typedef CatchClause = {var variable:TVar; var expr:TExpr;}
-
 // haxe/src/filters/exception/exceptions.ml — mechanical draft; not compiled or validated.
 class Exceptions {
 	public static function haxeExceptionClass(ctx:ExceptionContext):TClass {
@@ -211,7 +212,7 @@ class Exceptions {
 		function run(e:TExpr):TExpr return switch e.eexpr {
 			case TThrow(e1): TypeOps.mk(TThrow(throwNative(ctx, run(e1), e.etype, e.epos)), e.etype, e.epos);
 			case TTry(e1, catches):
-				var catches = catchNative(ctx, catches.map(c -> {variable:c.variable, expr:run(c.expr)}), e.etype, e.epos);
+				var catches = catchNative(ctx, catches.map(c -> ({variable:c.variable, expr:run(c.expr)} : filters.exception.Exceptions.CatchClause)), e.etype, e.epos);
 				TypeOps.mk(TTry(run(e1), catches), e.etype, e.epos);
 			case _: core.Texpr.mapExpr(run, e);
 		};

@@ -12,11 +12,12 @@ enum FileKind {
 	FFile;
 }
 
-typedef DirectoryListing = {
-	var directory:String;
-	var files:Array<String>;
+@:structInit class DirectoryListing {
+	public var directory:String;
+	public var files:Array<String>;
+	public inline function new(directory:String, files:Array<String>) { this.directory = directory; this.files = files; }
+	public inline function clone():DirectoryListing return new DirectoryListing(directory, files);
 }
-
 interface IClassPath {
 	public var path(get, never):String;
 	public var scope(get, never):ClassPathScope;

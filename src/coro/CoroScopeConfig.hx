@@ -5,7 +5,11 @@ import core.data.DataReaderApi;
 import core.TFunctions.NotFound;
 import core.data.MetaDataApi;
 // haxe/src/coro/coroScopeConfig.ml — mechanical draft; not compile-validated.
-typedef CoroScopeConfigData = {var restrictedSuspension:Bool;}
+@:structInit class CoroScopeConfigData {
+	public var restrictedSuspension:Bool;
+	public inline function new(restrictedSuspension:Bool) { this.restrictedSuspension = restrictedSuspension; }
+	public inline function clone():CoroScopeConfigData return new CoroScopeConfigData(restrictedSuspension);
+}
 class CoroScopeConfigReader<Data> {
  var api:DataReaderApi<Data>; public function new(api:DataReaderApi<Data>) this.api=api;
  public function readCoroScopeConfig(config:CoroScopeConfigData,data:Data):Void api.readOptional(data,function(data) {

@@ -61,16 +61,42 @@ import typing.TypeloadFields.TypeloadFields.*;
 
 // haxe/src/typing/typeloadFields.ml — mechanical draft; not compile-validated.
 // Display/macro hooks are retained at their source call sites; their services are deferred.
-typedef ClassInitCtx = {
- var tclass:TClass; var isLib:Bool; var coreApiCheck:CoreApiCheck; var isClassDebug:Bool; var extendsPublic:Bool;
- var abstractType:Null<TAbstract>; var hasDisplayField:Bool; var delayedExpr:Array<{ctx:Typer,lazy:Null<TLazy>}>;
- var forceConstructor:Bool; var uninitializedFinal:Array<TClassField>;
+@:structInit class ClassInitCtx {
+	public var tclass:TClass;
+	public var isLib:Bool;
+	public var coreApiCheck:CoreApiCheck;
+	public var isClassDebug:Bool;
+	public var extendsPublic:Bool;
+	public var abstractType:Null<TAbstract>;
+	public var hasDisplayField:Bool;
+	public var delayedExpr:Array<{ctx:Typer,lazy:Null<TLazy>}>;
+	public var forceConstructor:Bool;
+	public var uninitializedFinal:Array<TClassField>;
+	public inline function new(tclass:TClass, isLib:Bool, coreApiCheck:CoreApiCheck, isClassDebug:Bool, extendsPublic:Bool, abstractType:Null<TAbstract>, hasDisplayField:Bool, delayedExpr:Array<{ctx:Typer,lazy:Null<TLazy>}>, forceConstructor:Bool, uninitializedFinal:Array<TClassField>) { this.tclass = tclass; this.isLib = isLib; this.coreApiCheck = coreApiCheck; this.isClassDebug = isClassDebug; this.extendsPublic = extendsPublic; this.abstractType = abstractType; this.hasDisplayField = hasDisplayField; this.delayedExpr = delayedExpr; this.forceConstructor = forceConstructor; this.uninitializedFinal = uninitializedFinal; }
+	public inline function clone():ClassInitCtx return new ClassInitCtx(tclass, isLib, coreApiCheck, isClassDebug, extendsPublic, abstractType, hasDisplayField, delayedExpr, forceConstructor, uninitializedFinal);
 }
-typedef FieldInitCtx = {
- var isInline:Bool; var isFinal:Bool; var isStatic:Bool; var defaultPos:Dynamic; var overridePos:Dynamic; var overloadPos:Dynamic;
- var isExtern:Bool; var isAbstract:Bool; var isMacro:Bool; var isAbstractMember:Bool; var isAbstractConstructor:Bool;
- var isDisplayField:Bool; var isFieldDebug:Bool; var isGeneric:Bool; var fieldKind:ClassFieldRefKind;
- var displayModifier:Dynamic; var doBind:Bool; var exprPresenceMatters:Bool; var hadError:Bool;
+@:structInit class FieldInitCtx {
+	public var isInline:Bool;
+	public var isFinal:Bool;
+	public var isStatic:Bool;
+	public var defaultPos:Dynamic;
+	public var overridePos:Dynamic;
+	public var overloadPos:Dynamic;
+	public var isExtern:Bool;
+	public var isAbstract:Bool;
+	public var isMacro:Bool;
+	public var isAbstractMember:Bool;
+	public var isAbstractConstructor:Bool;
+	public var isDisplayField:Bool;
+	public var isFieldDebug:Bool;
+	public var isGeneric:Bool;
+	public var fieldKind:ClassFieldRefKind;
+	public var displayModifier:Dynamic;
+	public var doBind:Bool;
+	public var exprPresenceMatters:Bool;
+	public var hadError:Bool;
+	public inline function new(isInline:Bool, isFinal:Bool, isStatic:Bool, defaultPos:Dynamic, overridePos:Dynamic, overloadPos:Dynamic, isExtern:Bool, isAbstract:Bool, isMacro:Bool, isAbstractMember:Bool, isAbstractConstructor:Bool, isDisplayField:Bool, isFieldDebug:Bool, isGeneric:Bool, fieldKind:ClassFieldRefKind, displayModifier:Dynamic, doBind:Bool, exprPresenceMatters:Bool, hadError:Bool) { this.isInline = isInline; this.isFinal = isFinal; this.isStatic = isStatic; this.defaultPos = defaultPos; this.overridePos = overridePos; this.overloadPos = overloadPos; this.isExtern = isExtern; this.isAbstract = isAbstract; this.isMacro = isMacro; this.isAbstractMember = isAbstractMember; this.isAbstractConstructor = isAbstractConstructor; this.isDisplayField = isDisplayField; this.isFieldDebug = isFieldDebug; this.isGeneric = isGeneric; this.fieldKind = fieldKind; this.displayModifier = displayModifier; this.doBind = doBind; this.exprPresenceMatters = exprPresenceMatters; this.hadError = hadError; }
+	public inline function clone():FieldInitCtx return new FieldInitCtx(isInline, isFinal, isStatic, defaultPos, overridePos, overloadPos, isExtern, isAbstract, isMacro, isAbstractMember, isAbstractConstructor, isDisplayField, isFieldDebug, isGeneric, fieldKind, displayModifier, doBind, exprPresenceMatters, hadError);
 }
 enum MethodKind { MKNormal; MKGetter; MKSetter; }
 enum EnumAbstractMode { EAString; EAInt(counter:{value:Int}); EAOther; }

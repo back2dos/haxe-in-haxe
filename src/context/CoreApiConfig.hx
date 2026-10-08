@@ -6,7 +6,11 @@ import core.data.MetaDataApi;
 import core.Error;
 // Draft mechanical translation of haxe/src/context/coreApiConfig.ml; unvalidated.
 enum CoreApiCheck { On; Off; Implied; }
-typedef CoreApiConfiguration = { var check:CoreApiCheck; }
+@:structInit class CoreApiConfiguration {
+	public var check:CoreApiCheck;
+	public inline function new(check:CoreApiCheck) { this.check = check; }
+	public inline function clone():CoreApiConfiguration return new CoreApiConfiguration(check);
+}
 class CoreApiConfigReader {
 	final api:Dynamic;
 	public function new(api:Dynamic) this.api = api;

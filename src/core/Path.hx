@@ -6,13 +6,14 @@ import sys.io.FileOutput;
 import sys.thread.Mutex;
 
 // Port of haxe/src/core/path.ml.
-typedef FilePathData = {
-	var directory:Null<String>;
-	var fileName:Null<String>;
-	var extension:Null<String>;
-	var backslash:Bool;
+@:structInit class FilePathData {
+	public var directory:Null<String>;
+	public var fileName:Null<String>;
+	public var extension:Null<String>;
+	public var backslash:Bool;
+	public inline function new(directory:Null<String>, fileName:Null<String>, extension:Null<String>, backslash:Bool) { this.directory = directory; this.fileName = fileName; this.extension = extension; this.backslash = backslash; }
+	public inline function clone():FilePathData return new FilePathData(directory, fileName, extension, backslash);
 }
-
 class Path {
 	// Unix.chdir back to a saved directory. Skips the call when the directory did
 	// not change, so hosts without chdir support (JVM) can run the batch driver.
@@ -238,8 +239,12 @@ class UniqueKey {
 	public static function toString(key:String):String return key;
 }
 
-typedef LazyUniqueKey = { var path:String; var key:Null<String>; }
-
+@:structInit class LazyUniqueKey {
+	public var path:String;
+	public var key:Null<String>;
+	public inline function new(path:String, key:Null<String>) { this.path = path; this.key = key; }
+	public inline function clone():LazyUniqueKey return new LazyUniqueKey(path, key);
+}
 class FilePath {
 	public static function create(directory:Null<String>, fileName:Null<String>, extension:Null<String>, backslash:Bool):FilePathData return {
 		directory: directory,

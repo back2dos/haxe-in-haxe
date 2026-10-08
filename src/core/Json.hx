@@ -11,11 +11,12 @@ enum JsonValue {
 	JNull;
 }
 
-typedef JsonField = {
-	var name:String;
-	var value:JsonValue;
+@:structInit class JsonField {
+	public var name:String;
+	public var value:JsonValue;
+	public inline function new(name:String, value:JsonValue) { this.name = name; this.value = value; }
+	public inline function clone():JsonField return new JsonField(name, value);
 }
-
 class Json {
 	public static function stringOfJson(json:JsonValue):String {
 		var output = new StringBuf();

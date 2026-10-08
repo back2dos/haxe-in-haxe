@@ -24,12 +24,22 @@ enum UnifyError {
 }
 class Unify_error { public var errors:Array<UnifyError>; public function new(errors) this.errors=errors; }
 enum EqKind { EqStrict; EqCoreType; EqRightDynamic; EqBothDynamic; EqStricter; }
-typedef TypeParamUnificationContext = {var knownTypeParams:Array<TypedTypeParam>; var typeParamPairs:Array<{a:TypedTypeParam,b:TypedTypeParam}>;}
+@:structInit class TypeParamUnificationContext {
+	public var knownTypeParams:Array<TypedTypeParam>;
+	public var typeParamPairs:Array<{a:TypedTypeParam,b:TypedTypeParam}>;
+	public inline function new(knownTypeParams:Array<TypedTypeParam>, typeParamPairs:Array<{a:TypedTypeParam,b:TypedTypeParam}>) { this.knownTypeParams = knownTypeParams; this.typeParamPairs = typeParamPairs; }
+	public inline function clone():TypeParamUnificationContext return new TypeParamUnificationContext(knownTypeParams, typeParamPairs);
+}
 enum TypeParamMode { TpDefault; TpDefinition(context:TypeParamUnificationContext); }
 // Upstream wraps a mutable list in a record; the array itself is the stack here.
 typedef RecStack<A> = Array<A>;
 enum NullFollowMode { NeverFollow; AlwaysFollow; FollowIfNullable; }
-typedef TypePair = {var a:T; var b:T;}
+@:structInit class TypePair {
+	public var a:T;
+	public var b:T;
+	public inline function new(a:T, b:T) { this.a = a; this.b = b; }
+	public inline function clone():TypePair return new TypePair(a, b);
+}
 @:structInit class UnificationContext {
 	public var allowTransitiveCast:Bool;
 	public var allowAbstractCast:Bool;

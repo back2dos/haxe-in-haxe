@@ -13,7 +13,12 @@ enum PatternKind {
 	PatTuple(patterns:Array<PatternData>);
 	PatExtractor(extractor:Extractor);
 }
-typedef PatternData = {var kind:PatternKind; var pos:Pos;}
+@:structInit class PatternData {
+	public var kind:PatternKind;
+	public var pos:Pos;
+	public inline function new(kind:PatternKind, pos:Pos) { this.kind = kind; this.pos = pos; }
+	public inline function clone():PatternData return new PatternData(kind, pos);
+}
 typedef Extractor = {var exVar:TVar; var exExpr:TExpr; var exPattern:PatternData;}
 
 class Pattern {

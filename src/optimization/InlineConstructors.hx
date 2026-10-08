@@ -13,12 +13,39 @@ import context.SafeCom;
 import context.SafeCom.*;
 import optimization.Inline as InlineOps;
 // haxe/src/optimization/inlineConstructors.ml — mechanical draft; not compiled or validated.
-typedef InlineObjectCtor = {var iocClass:TClass; var iocTparams:TParams; var iocField:TClassField; var iocForced:Bool;}
+@:structInit class InlineObjectCtor {
+	public var iocClass:TClass;
+	public var iocTparams:TParams;
+	public var iocField:TClassField;
+	public var iocForced:Bool;
+	public inline function new(iocClass:TClass, iocTparams:TParams, iocField:TClassField, iocForced:Bool) { this.iocClass = iocClass; this.iocTparams = iocTparams; this.iocField = iocField; this.iocForced = iocForced; }
+	public inline function clone():InlineObjectCtor return new InlineObjectCtor(iocClass, iocTparams, iocField, iocForced);
+}
 enum InlineObjectKind { IOKCtor(ctor:InlineObjectCtor); IOKStructure; IOKArray(length:Int); }
-typedef InlineObject = {var ioKind:InlineObjectKind; var ioExpr:TExpr; var ioPos:Pos; var ioHasUntyped:Bool; var ioCancelled:Bool; var ioDeclared:Bool; var ioAliases:Array<InlineVar>; var ioFields:haxe.ds.StringMap<InlineVar>; var ioInlineMethods:Array<TExpr>; var ioDependentVars:Array<TVar>;}
+@:structInit class InlineObject {
+	public var ioKind:InlineObjectKind;
+	public var ioExpr:TExpr;
+	public var ioPos:Pos;
+	public var ioHasUntyped:Bool;
+	public var ioCancelled:Bool;
+	public var ioDeclared:Bool;
+	public var ioAliases:Array<InlineVar>;
+	public var ioFields:haxe.ds.StringMap<InlineVar>;
+	public var ioInlineMethods:Array<TExpr>;
+	public var ioDependentVars:Array<TVar>;
+	public inline function new(ioKind:InlineObjectKind, ioExpr:TExpr, ioPos:Pos, ioHasUntyped:Bool, ioCancelled:Bool, ioDeclared:Bool, ioAliases:Array<InlineVar>, ioFields:haxe.ds.StringMap<InlineVar>, ioInlineMethods:Array<TExpr>, ioDependentVars:Array<TVar>) { this.ioKind = ioKind; this.ioExpr = ioExpr; this.ioPos = ioPos; this.ioHasUntyped = ioHasUntyped; this.ioCancelled = ioCancelled; this.ioDeclared = ioDeclared; this.ioAliases = ioAliases; this.ioFields = ioFields; this.ioInlineMethods = ioInlineMethods; this.ioDependentVars = ioDependentVars; }
+	public inline function clone():InlineObject return new InlineObject(ioKind, ioExpr, ioPos, ioHasUntyped, ioCancelled, ioDeclared, ioAliases, ioFields, ioInlineMethods, ioDependentVars);
+}
 enum InlineVarKind { IVKField(io:InlineObject,name:String,constant:Null<TExpr>); IVKLocal; }
 enum InlineVarState { IVSUnassigned; IVSAliasing(io:InlineObject); IVSCancelled; }
-typedef InlineVar = {var ivVar:TVar; var ivState:InlineVarState; var ivKind:InlineVarKind; var ivClosed:Bool;}
+@:structInit class InlineVar {
+	public var ivVar:TVar;
+	public var ivState:InlineVarState;
+	public var ivKind:InlineVarKind;
+	public var ivClosed:Bool;
+	public inline function new(ivVar:TVar, ivState:InlineVarState, ivKind:InlineVarKind, ivClosed:Bool) { this.ivVar = ivVar; this.ivState = ivState; this.ivKind = ivKind; this.ivClosed = ivClosed; }
+	public inline function clone():InlineVar return new InlineVar(ivVar, ivState, ivKind, ivClosed);
+}
 enum InlineObjectField { IOFInlineMethod(io:InlineObject,iv:InlineVar,c:TClass,tl:TParams,cf:TClassField,tf:TFunc); IOFInlineVar(iv:InlineVar); IOFNone; }
 enum InlineExpressionHandled { IEHCaptured; IEHIgnored; IEHNotHandled; }
 private typedef FinalMapResult = {var exprs:Array<TExpr>; var object:Null<InlineObject>;}
@@ -44,7 +71,7 @@ private class ConstructorInlining {
  }
  function cancelV(v:TVar,p:Pos):Void {try cancelIv(getIv(v.vId),p) catch (_:NotFound) {}}
  function setIvAlias(iv:InlineVar,io:InlineObject):Void {if (iv.ivState != IVSUnassigned || io.ioCancelled) {cancelIo(io,io.ioPos); cancelIv(iv,io.ioPos);} else {iv.ivState = IVSAliasing(io); io.ioAliases.unshift(iv);}}
- function add(v:TVar,kind:InlineVarKind):InlineVar {var iv = {ivVar:v,ivState:IVSUnassigned,ivKind:kind,ivClosed:false}; toggleMark(v.vId); vars.set(abs(v.vId),iv); return iv;}
+ function add(v:TVar,kind:InlineVarKind):InlineVar {var iv = ({ivVar:v,ivState:IVSUnassigned,ivKind:kind,ivClosed:false} : optimization.InlineConstructors.InlineVar); toggleMark(v.vId); vars.set(abs(v.vId),iv); return iv;}
  function getIoField(io:InlineObject,s:String):InlineVar {if (!io.ioFields.exists(s)) throw NotFound.raise(); return io.ioFields.get(s);}
  function allocIoFieldFull(io:InlineObject,name:String,constant:Null<TExpr>,t:T,p:Pos):InlineVar {var iv = add(allocVar(VInlined,name,t,p),IVKField(io,name,constant)); io.ioFields.set(name,iv); return iv;}
  function allocConstIoField(io:InlineObject,name:String,e:TExpr):InlineVar {var iv = allocIoFieldFull(io,name,e,e.etype,e.epos); iv.ivState = IVSCancelled; return iv;}

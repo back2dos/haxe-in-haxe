@@ -16,8 +16,12 @@ enum ConstructorKind {
 	ConFields(fields:Array<String>);
 	ConArray(length:Int);
 }
-typedef ConstructorData = {var kind:ConstructorKind; var pos:Pos;}
-
+@:structInit class ConstructorData {
+	public var kind:ConstructorKind;
+	public var pos:Pos;
+	public inline function new(kind:ConstructorKind, pos:Pos) { this.kind = kind; this.pos = pos; }
+	public inline function clone():ConstructorData return new ConstructorData(kind, pos);
+}
 class Constructor {
 	public static function toString(con:ConstructorData):String return switch con.kind {
 		case ConConst(ct): sConst(ct);
