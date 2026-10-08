@@ -105,7 +105,7 @@ class Sanitize {
 			case TArray(e1, e2): if (needParent(e1)) TArray(parent(e1), e2); else return e;
 			case TTry(e1, catches): TTry(block(e1), catches.map(c -> {variable:c.variable, expr:block(c.expr)}));
 			case TSwitch(sw):
-				TSwitch({switchSubject:parent(sw.switchSubject), switchCases:sw.switchCases.map(c -> {casePatterns:c.casePatterns, caseExpr:complex(c.caseExpr)}),
+				TSwitch({switchSubject:parent(sw.switchSubject), switchCases:sw.switchCases.map(c -> ({casePatterns:c.casePatterns, caseExpr:complex(c.caseExpr)} : core.TType.TSwitchCase)),
 					switchDefault:sw.switchDefault == null ? null : complex(sw.switchDefault), switchExhaustive:sw.switchExhaustive});
 			case _: return e;
 		};

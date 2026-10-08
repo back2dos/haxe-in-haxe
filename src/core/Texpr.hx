@@ -39,7 +39,7 @@ class Texpr {
   case TVar(_,eo) | TReturn(eo):eo != null && f(eo);
   case TFunction(fu):exists(a -> a.defaultValue != null && f(a.defaultValue),fu.tfArgs) || f(fu.tfExpr);
   case TIf(c,a,b):f(c) || f(a) || b != null && f(b);
-  case TSwitch(s):f(s.switchSubject) || exists(c -> exists(f,c.casePatterns) || f(c.caseExpr),s.switchCases) || s.switchDefault != null && f(s.switchDefault);
+  case TSwitch(s):f(s.switchSubject) || exists((c:TSwitchCase) -> exists(f,c.casePatterns) || f(c.caseExpr),s.switchCases) || s.switchDefault != null && f(s.switchDefault);
   case TTry(a,catches):f(a) || exists(c -> f(c.expr),catches);
  };
  public static function withExpr(e:TExpr,def:TExprDef):TExpr return {eexpr:def,etype:e.etype,epos:e.epos};
@@ -57,7 +57,7 @@ class Texpr {
    case TVar(v,eo):TVar(v,eo == null ? null : f(eo));
    case TFunction(fu):var args = fu.tfArgs.map(a -> {variable:a.variable,defaultValue:a.defaultValue == null ? null : f(a.defaultValue)}); TFunction({tfArgs:args,tfType:fu.tfType,tfExpr:f(fu.tfExpr)});
    case TIf(c,a,b):var c = f(c); var a = f(a); TIf(c,a,b == null ? null : f(b));
-   case TSwitch(s):var subject = f(s.switchSubject); var cases = s.switchCases.map(c -> {casePatterns:c.casePatterns.map(f),caseExpr:f(c.caseExpr)}); var def = s.switchDefault == null ? null : f(s.switchDefault); TSwitch(mkSwitch(subject,cases,def,s.switchExhaustive));
+   case TSwitch(s):var subject = f(s.switchSubject); var cases = s.switchCases.map(c -> ({casePatterns:c.casePatterns.map(f),caseExpr:f(c.caseExpr)} : core.TType.TSwitchCase)); var def = s.switchDefault == null ? null : f(s.switchDefault); TSwitch(mkSwitch(subject,cases,def,s.switchExhaustive));
    case TTry(a,catches):var a = f(a); TTry(a,catches.map(c -> {variable:c.variable,expr:f(c.expr)}));
    case TReturn(eo):TReturn(eo == null ? null : f(eo)); case TCast(a,mt):TCast(f(a),mt); case TMeta(m,a):TMeta(m,f(a));
   }; return withExpr(e,def);
@@ -120,7 +120,7 @@ class Texpr {
   case [TIf(c,a,x),TIf(d,b,y)] if (x != null && y != null):equal(c,d) && equal(a,b) && equal(x,y);
   // Preserve upstream's eb2/eb2 comparison literally.
   case [TWhile(c,a,flag),TWhile(d,b,flag2)]:equal(c,d) && equal(b,b) && flag == flag2;
-  case [TSwitch(a),TSwitch(b)]:equal(a.switchSubject,b.switchSubject) && all2((a,b) -> all2(equal,a.casePatterns,b.casePatterns) && equal(a.caseExpr,b.caseExpr),a.switchCases,b.switchCases) && equalOpt(a.switchDefault,b.switchDefault);
+  case [TSwitch(a),TSwitch(b)]:equal(a.switchSubject,b.switchSubject) && all2((a:TSwitchCase,b:TSwitchCase) -> all2(equal,a.casePatterns,b.casePatterns) && equal(a.caseExpr,b.caseExpr),a.switchCases,b.switchCases) && equalOpt(a.switchDefault,b.switchDefault);
   case [TTry(a,cl),TTry(b,dl)]:equal(a,b) && all2((c,d) -> c.variable == d.variable && equal(c.expr,d.expr),cl,dl);
   case [TReturn(null),TReturn(null)]:true;
   case [TReturn(a),TReturn(b)] if (a != null && b != null):equal(a,b);
@@ -321,7 +321,7 @@ class DeadEnd {
     case TFunction(_):false;
     case TIf(cond,a,b) if (b != null):loop(cond) || loop(a) && loop(b);
     case TIf(cond,_,null):loop(cond);
-    case TSwitch(s):loop(s.switchSubject) || Texpr.isExhaustive(s) && Texpr.all(c -> Texpr.exists(loop,c.casePatterns) || loop(c.caseExpr),s.switchCases) && (s.switchDefault == null || loop(s.switchDefault));
+    case TSwitch(s):loop(s.switchSubject) || Texpr.isExhaustive(s) && Texpr.all((c:TSwitchCase) -> Texpr.exists(loop,c.casePatterns) || loop(c.caseExpr),s.switchCases) && (s.switchDefault == null || loop(s.switchDefault));
     case TBinop(OpBoolAnd,a,b):loop(a) || Texpr.isTrueExpr(a) && loop(b);
     case TBinop(OpBoolOr,a,b):loop(a) || Texpr.isFalseExpr(a) && loop(b);
     case TWhile(cond,body,flag):loop(cond) || (flag == DoWhile || Texpr.isTrueExpr(cond)) && inLoop(body);

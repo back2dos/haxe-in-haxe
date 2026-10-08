@@ -129,7 +129,7 @@ class TypeloadFields {
    args.unshift({variable:v,defaultValue:null});el.unshift(e);tl.unshift({name:cf.cfName,optional:opt,type:t});
   }
   if(sup.expr!=null) el.unshift(sup.expr);
-  var tf={tfArgs:args.concat(sup.args),tfType:ctx.t.tvoid,tfExpr:mk(TBlock(el),ctx.t.tvoid,p)};
+  var tf=({tfArgs:args.concat(sup.args),tfType:ctx.t.tvoid,tfExpr:mk(TBlock(el),ctx.t.tvoid,p)} : core.TType.TFunc);
   var e=mk(TFunction(tf),TFun({args:tl.concat(sup.types),ret:ctx.t.tvoid}),p),cf=mkField("new",e.etype,p,Globals.nullPos);
   cf.cfDoc=docFromString(doc.toString());cf.cfExpr=e;cf.cfType=e.etype;cf.cfMeta=[meta(CompilerGenerated),meta(InheritDoc)];cf.cfKind=Method(MethNormal);c.clConstructor=cf;
   delay(ctx.g,PTypeField,function() InheritDocTools.buildClassFieldDoc(ctx,c,cf));
@@ -281,7 +281,7 @@ class TypeloadFields {
   var missing=fctx.isFinal && !(fctx.isExtern||hasClassFlag(c,CExtern)||hasClassFlag(c,CInterface)) && eo==null;
   if(missing && fctx.isStatic && fctx.isFinal) missingExpression(ctx.com,fctx,"Static final variable must be initialized",p);
   var type=loadVariableTypeHint(ctx,fctx,eo,f.cffName.pos,t);
-  var kind=fctx.isInline ? {vRead:AccInline,vWrite:AccNever} : fctx.isFinal ? {vRead:AccNormal,vWrite:fctx.isStatic ? AccNever : AccCtor} : {vRead:AccNormal,vWrite:AccNormal};
+  var kind=fctx.isInline ? ({vRead:AccInline,vWrite:AccNever} : core.TType.VarKind) : fctx.isFinal ? ({vRead:AccNormal,vWrite:fctx.isStatic ? AccNever : AccCtor} : core.TType.VarKind) : ({vRead:AccNormal,vWrite:AccNormal} : core.TType.VarKind);
   cf.cfType=type;cf.cfKind=Var(kind);
   if(fctx.isFinal) {if(missing && !fctx.isStatic) cctx.uninitializedFinal.unshift(cf);addClassFieldFlag(cf,CfFinal);}
   if(fctx.isExtern) addClassFieldFlag(cf,CfExtern);

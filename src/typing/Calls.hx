@@ -238,7 +238,7 @@ class Calls {
   if(safe) {var base=TyperBase.getSafeNavBase(ctx,e); var sn:SafeNavAccess={snPos:p,snBase:base.base,snTempVar:base.tempVar,snAccess:AKExpr(e)}; body=TyperBase.safeNavBranch(ctx,sn,() -> makeCall(ctx,base.base,ordered,ret,p));}
   else body=makeCall(ctx,e,ordered,ret,p);
   if(!ExtType.isVoid(follow(ret))) body=mk(TReturn(body),ret,p);
-  var fn={tfArgs:missing.map(arg -> {variable:arg.variable,defaultValue:arg.optional?Texpr.Builder.makeNull(arg.variable.vType,Globals.nullPos):null}),tfType:ret,tfExpr:body};
+  var fn=({tfArgs:missing.map(arg -> {variable:arg.variable,defaultValue:arg.optional?Texpr.Builder.makeNull(arg.variable.vType,Globals.nullPos):null}),tfType:ret,tfExpr:body} : core.TType.TFunc);
   var t=TFun({args:missing.map(arg -> {name:arg.variable.vName,optional:arg.optional,type:arg.variable.vType}),ret:ret});
   return mk(TBlock(declarations.concat([mk(TFunction(fn),t,p)])),t,p);
  }

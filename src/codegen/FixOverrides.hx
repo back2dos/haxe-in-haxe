@@ -41,7 +41,7 @@ class FixOverrides {
     var decls=changed.map(function(pair) return mk(TVar(pair.original,mk(TCast(mk(TLocal(pair.replacement),pair.replacement.vType,p),null),pair.original.vType,p)),com.basic.tvoid,p));
     expr={eexpr:TBlock(decls.concat(el)),etype:expr.etype,epos:expr.epos};
    }
-   var fd2={tfArgs:nargs,tfType:signature.ret,tfExpr:expr};var args=nargs.map(function(arg) return {name:arg.variable.vName,optional:arg.defaultValue!=null,type:arg.variable.vType});
+   var fd2=({tfArgs:nargs,tfType:signature.ret,tfExpr:expr} : core.TType.TFunc);var args=nargs.map(function(arg) return {name:arg.variable.vName,optional:arg.defaultValue!=null,type:arg.variable.vType});
    var fde=f.cfExpr;if (fde==null) throw "Missing override expression";f.cfExpr={eexpr:TFunction(fd2),etype:fde.etype,epos:fde.epos};f.cfType=TFun({args:args,ret:signature.ret});
   }else if (f2!=null&&fd==null&&hasClassFlag(c,CInterface)) {
    var s=switch followWithCoro(f2.cfType) {case Coro(s):Common.expandCoroType(com.basic,s.args,s.ret);case NotCoro(TFun(s)):s;case _:throw "Invalid override type";};f.cfType=TFun(s);

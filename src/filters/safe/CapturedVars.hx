@@ -49,7 +49,7 @@ class CapturedVars {
 						fexpr = TypeOps.concat(impl.mkInit(a.variable, vtmp, e.epos), fexpr);
 						return {variable:vtmp, defaultValue:a.defaultValue};
 					});
-					var e = TypeOps.mk(TFunction({tfArgs:fargs, tfType:f.tfType, tfExpr:fexpr}), e.etype, e.epos);
+					var e = TypeOps.mk(TFunction(({tfArgs:fargs, tfType:f.tfType, tfExpr:fexpr} : core.TType.TFunc)), e.etype, e.epos);
 					if (scom.platformConfig.pfCapturePolicy != CPLoopVars) return e;
 					var newVars = vars.map(v -> {id:v.vId, variable:TypeOps.allocVar(v.vKind, v.vName, v.vType, v.vPos)});
 					function loop(e:TExpr):TExpr return switch e.eexpr {
@@ -60,7 +60,7 @@ class CapturedVars {
 						case _: core.Texpr.mapExpr(loop, e);
 					};
 					e = loop(e);
-					var fn = {tfArgs:newVars.map(a -> {variable:a.variable, defaultValue:null}), tfType:e.etype,
+					var fn:TFunc = {tfArgs:newVars.map(a -> {variable:a.variable, defaultValue:null}), tfType:e.etype,
 						tfExpr:TypeOps.mkBlock(TypeOps.mk(TReturn(e), e.etype, e.epos))};
 					var ft = TFun({args:newVars.map(a -> {name:a.variable.vName, optional:false, type:a.variable.vType}), ret:e.etype});
 					return TypeOps.mk(TCall(Texpr.Builder.mkParent(TypeOps.mk(TFunction(fn), ft, e.epos)), vars.map(v -> TypeOps.mk(TLocal(v), v.vType, e.epos))), e.etype, e.epos);

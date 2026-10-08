@@ -118,7 +118,7 @@ class CoroToTexpr {
     case NextThrow(e1):var tmp={var recordCopy37 = core.ds.Record.copy(exprs.etmpError); recordCopy37.epos = e1.epos; recordCopy37;};addState(null,[b.assign(tmp,getCaught(e1)),stackItemInserter(e1.epos),b.assign(tmp,startException(tmp))],single?null:[b.makeBreak(p)]);
     case NextIfThen(cond,a,n):addState(null,[b.ifThenElse(cond,setState(a.cbId),setState(n.cbId),com.basic.tint)],null);
     case NextIfThenElse(cond,a,z,_):addState(null,[b.ifThenElse(cond,setState(a.cbId),setState(z.cbId),com.basic.tint)],null);
-    case NextSwitch(s,n):var cases=s.csCases.map(function(c)return {casePatterns:c.el,caseExpr:setState(c.cb.cbId)});var def=s.csDefault!=null?setState(s.csDefault.cbId):n==null?null:setState(n.cbId);addState(null,[mk(TSwitch(Texpr.mkSwitch(s.csSubject,cases,def,true)),com.basic.tvoid,p)],null);
+    case NextSwitch(s,n):var cases=s.csCases.map(function(c)return ({casePatterns:c.el,caseExpr:setState(c.cb.cbId)} : core.TType.TSwitchCase));var def=s.csDefault!=null?setState(s.csDefault.cbId):n==null?null:setState(n.cbId);addState(null,[mk(TSwitch(Texpr.mkSwitch(s.csSubject,cases,def,true)),com.basic.tvoid,p)],null);
     case NextWhile(_,body,_):addState(body.cbId,[],null);
     case NextTry(body,c,_):
      var rethrow=c.ccCb.cbCatch!=null?setState(c.ccCb.cbCatch.cbId):b.voidBlock([b.makeBreak(p)]);var cond=rethrow;var catches=c.ccCatches.copy();catches.reverse();for(ca in catches)cond=switch follow(ca.v.vType){case TDynamic(_):setState(ca.cb.cbId);case _:b.ifThenElse(stdIs((exprs.etmpErrorUnwrapped).force(),ca.v.vType),setState(ca.cb.cbId),cond,com.basic.tvoid);};
@@ -128,10 +128,10 @@ class CoroToTexpr {
   function loop(cb:CoroBlock):Void if(!hasBlockFlag(cb,CbGenerated)){addBlockFlag(cb,CbGenerated);generate(cb);coroIter(loop,cb);}loop(root);
   states.sort(function(a,b)return a.csId-b.csId);var fields=handleLocals(ctx,cls,params,states,tfArgs,exprs.econtinuation);
   var eloop:TExpr;if(states.length==1)eloop=b.voidBlockAt(states[0].csEl,Texpr.punionEl(p,states[0].csEl));else{
-   var thrown=b.voidBlock([b.assign(exprs.etmpError,getCaught(b.string("Invalid coroutine state",p))),b.makeBreak(p)]);var cases=states.map(function(s)return {casePatterns:[b.int(s.csId,p)],caseExpr:b.voidBlockAt(s.csEl,Texpr.punionEl(p,s.csEl))});var eswitch=mk(TSwitch(Texpr.mkSwitch(exprs.egoto,cases,thrown,true)),com.basic.tvoid,p);eloop=mk(TWhile(b.bool(true,p),eswitch,NormalWhile),com.basic.tvoid,p);
+   var thrown=b.voidBlock([b.assign(exprs.etmpError,getCaught(b.string("Invalid coroutine state",p))),b.makeBreak(p)]);var cases=states.map(function(s)return ({casePatterns:[b.int(s.csId,p)],caseExpr:b.voidBlockAt(s.csEl,Texpr.punionEl(p,s.csEl))} : core.TType.TSwitchCase));var eswitch=mk(TSwitch(Texpr.mkSwitch(exprs.egoto,cases,thrown,true)),com.basic.tvoid,p);eloop=mk(TWhile(b.bool(true,p),eswitch,NormalWhile),com.basic.tvoid,p);
   }
   var etry=eloop;if(!ctx.config.outcome.noThrow){var v=allocVar(VGenerated,"e",tDynamic,p);var caught=getCaught(b.local(v,p));etry=mk(TTry(eloop,[{variable:v,expr:b.voidBlock([b.assign(exprs.etmpError,startException(caught))])}]),com.basic.tvoid,p);}
-  var cases=[];for(i in 0...excStateMap.length)if(excStateMap[i].length>0)cases.push({casePatterns:excStateMap[i].map(function(i)return b.int(i,p)),caseExpr:b.voidBlock([setState(i)])});
+  var cases=[];for(i in 0...excStateMap.length)if(excStateMap[i].length>0)cases.push(({casePatterns:excStateMap[i].map(function(i)return b.int(i,p)),caseExpr:b.voidBlock([setState(i)])} : core.TType.TSwitchCase));
   var def=b.voidBlock([b.assign(exprs.eerror,exprs.etmpError),buildCallStack(ctx,cont,exprs.econtinuation,p),setControl(CoroThrown),ereturn]);
   var handler=cases.length==0?def:mk(TSwitch({switchSubject:exprs.egoto,switchCases:cases,switchDefault:def,switchExhaustive:true}),com.basic.tvoid,p);
   etry=b.voidBlock([etry,handler]);eloop=ctx.hasCatch?mk(TWhile(b.bool(true,p),etry,NormalWhile),com.basic.tvoid,p):etry;

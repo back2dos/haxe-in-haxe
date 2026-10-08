@@ -261,7 +261,7 @@ class Run {
      case TReturn(inner) if (inner != null):inner;
      case TBlock(el):if (el.length == 0) e; else {var last = loop(el[el.length - 1]); withExpr(e,TBlock(el.slice(0,el.length - 1).concat([last])));}
      case TIf(e1,e2,e3) if (e3 != null):var e2 = loop(e2); var e3 = loop(e3); {eexpr:TIf(e1,e2,e3),etype:getT(e.etype),epos:e.epos};
-     case TSwitch(s):var cases = s.switchCases.map(c -> {casePatterns:c.casePatterns,caseExpr:loop(c.caseExpr)}); var def = s.switchDefault == null ? null : loop(s.switchDefault); {eexpr:TSwitch(mkSwitch(s.switchSubject,cases,def,s.switchExhaustive)),etype:getT(e.etype),epos:e.epos};
+     case TSwitch(s):var cases = s.switchCases.map(c -> ({casePatterns:c.casePatterns,caseExpr:loop(c.caseExpr)} : core.TType.TSwitchCase)); var def = s.switchDefault == null ? null : loop(s.switchDefault); {eexpr:TSwitch(mkSwitch(s.switchSubject,cases,def,s.switchExhaustive)),etype:getT(e.etype),epos:e.epos};
      case TTry(e1,catches):var e1 = loop(e1); var catches = catches.map(c -> {variable:c.variable,expr:loop(c.expr)}); {eexpr:TTry(e1,catches),etype:getT(e.etype),epos:e.epos};
      case TMeta(m,e1):withExpr(e,TMeta(m,loop(e1))); case TParenthesis(e1):withExpr(e,TParenthesis(loop(e1))); case _:e;
     }; try loop(tf.tfExpr) catch (_:TypeExit) mk(TCall(e,[]),tf.tfType,e.epos);

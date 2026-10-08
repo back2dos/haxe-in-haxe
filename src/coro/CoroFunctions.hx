@@ -7,7 +7,7 @@ import coro.CoroElsewhere.TexprBuilder;
 enum abstract CoroControl(Int) to Int {var CoroPending=0; var CoroReturned=1; var CoroThrown=2;}
 class CoroFunctions {
  public static function makeCustomControlSwitch(b:TexprBuilder,eSubject:TExpr,cases:Array<{controls:Array<CoroControl>,e:TExpr}>,p:core.Globals.Pos):TExpr {
-  var cases=cases.map(function(c) return {casePatterns:c.controls.map(function(k) return b.int(k,p)),caseExpr:c.e});
+  var cases=cases.map(function(c) return ({casePatterns:c.controls.map(function(k) return b.int(k,p)),caseExpr:c.e} : core.TType.TSwitchCase));
   return mk(TSwitch({switchSubject:eSubject,switchCases:cases,switchDefault:null,switchExhaustive:true}),b.tvoid,p);
  }
  public static function makeControlSwitch(b:TexprBuilder,eSubject:TExpr,ePending:TExpr,eReturned:TExpr,eThrown:TExpr,p:core.Globals.Pos):TExpr return makeCustomControlSwitch(b,eSubject,[{controls:[CoroPending],e:ePending},{controls:[CoroReturned],e:eReturned},{controls:[CoroThrown],e:eThrown}],p);

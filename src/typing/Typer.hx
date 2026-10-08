@@ -584,7 +584,7 @@ class Typer {
    try body=TypeloadFunction.typeFunction(ctx,args,rt,f.fExpr,ctx.f.inDisplay,p) catch(exc:Dynamic) {switch exc {case (core.ds.ExceptionTools.typing(_) => Some(err)) if(resets):checkError(ctx,err); body=mk(TBlock([]),ctx.t.tvoid,p); case _:throw exc;}}
    deactivate(); ctx.f.inCallArgs=oldInArgs;
   } catch(exc:haxe.Exception){deactivate(); ctx.f.inCallArgs=oldInArgs; throw exc;}
-  var tf={tfArgs:args.forExpr(ctx),tfType:rt,tfExpr:body},e=mk(TFunction(tf),ft,p),config=TypeloadFields.getCoroConfig(ctx,ctx.f.meta);
+  var tf=({tfArgs:args.forExpr(ctx),tfType:rt,tfExpr:body} : core.TType.TFunc),e=mk(TFunction(tf),ft,p),config=TypeloadFields.getCoroConfig(ctx,ctx.f.meta);
   if(config!=null) {if(v==null) throw "No_value"; e=CoroTools.funToCoro(CoroTools.createCoroContext(ctx,config,coro.CoroTypes.CoroFor.LocalFunc(tf,v)));}
   if(v==null) return e;
   Typeload.generateArgsMeta(ctx.com,null,m -> v.vMeta.unshift(m),f.fArgs);

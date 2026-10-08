@@ -21,7 +21,7 @@ class AnalyzerTexpr {
   function value(e:TExpr):TExpr {if (branching) return f(e); finalExpr = e; return mk(TConst(TNull),e.etype,e.epos);}
   function loop(complex:Bool,e:TExpr):TExpr return switch e.eexpr {
    case TIf(e1,e2,e3) if (e3 != null):branching = true; var e2 = loop(true,e2); var e3 = loop(true,e3); withExpr(e,TIf(e1,e2,e3));
-   case TSwitch(s):branching = true; var cases = s.switchCases.map(c -> {casePatterns:c.casePatterns,caseExpr:loop(true,c.caseExpr)}); var def = s.switchDefault == null ? null : loop(true,s.switchDefault); withExpr(e,TSwitch(mkSwitch(s.switchSubject,cases,def,s.switchExhaustive)));
+   case TSwitch(s):branching = true; var cases = s.switchCases.map(c -> ({casePatterns:c.casePatterns,caseExpr:loop(true,c.caseExpr)} : core.TType.TSwitchCase)); var def = s.switchDefault == null ? null : loop(true,s.switchDefault); withExpr(e,TSwitch(mkSwitch(s.switchSubject,cases,def,s.switchExhaustive)));
    case TBlock([e1]):loop(complex,e1);
    case TBlock(el):if (el.length > 0) {var last = loop(true,el[el.length - 1]); var block = withExpr(e,TBlock(el.slice(0,el.length - 1).concat([last]))); withExpr(block,TMeta({meta:core.MetaList.StrictMeta.MergeBlock,exprs:[],pos:block.epos},block));} else {if (!complex) throw new TypeExit(); value(e);}
    case TTry(e1,catches):branching = true; var e1 = loop(true,e1); withExpr(e,TTry(e1,catches.map(c -> {variable:c.variable,expr:loop(true,c.expr)})));

@@ -38,7 +38,7 @@ class AnalyzerTexprTransformer {
    case SEIfThen(bt,n,p):next = ifLive(n); term = mk(TIf(getTerminator(),block(bt),null),ctx.com.basic.tvoid,p);
    case SEIfThenElse(bt,be,n,t,p):next = ifLive(n); term = mk(TIf(getTerminator(),block(bt),block(be)),t,p);
    case SEWhile(body,n,p):var e2 = block(body); next = ifLive(n); term = mk(TWhile(getTerminator(),e2,NormalWhile),ctx.com.basic.tvoid,p);
-   case SESwitch(ss):var cases = ss.ssCases.map(c -> {casePatterns:c.values,caseExpr:block(c.bb)}); var s = mkSwitch(getTerminator(),cases,ss.ssDefault == null ? null : block(ss.ssDefault),ss.ssExhaustive); next = ss.ssNext; term = mk(TSwitch(s),ctx.com.basic.tvoid,ss.ssPos);
+   case SESwitch(ss):var cases = ss.ssCases.map(c -> ({casePatterns:c.values,caseExpr:block(c.bb)} : core.TType.TSwitchCase)); var s = mkSwitch(getTerminator(),cases,ss.ssDefault == null ? null : block(ss.ssDefault),ss.ssExhaustive); next = ss.ssNext; term = mk(TSwitch(s),ctx.com.basic.tvoid,ss.ssPos);
   }
   var el = bb.bbEl.copy(); if (term != null) el.push(term); if (next != null) el = el.concat(blockToTexprEl(ctx,next)); return el;
  }

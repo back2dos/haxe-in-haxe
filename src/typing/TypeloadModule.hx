@@ -433,7 +433,7 @@ class TypeloadModule {
 				case FVar(_, value) | FProp(_, _, _, value): if (value != null) typed.cfExpr = typeExpr(module, cls, value, new StringMap());
 				case FFun(func):
 					if (func.fExpr != null && canTypeExpression(func.fExpr)) {
-					var signature = switch typed.cfType { case TFun(value): value; case _: {args: [], ret: TDynamic(null)}; };
+					var signature = switch typed.cfType { case TFun(value): value; case _: ({args: [], ret: TDynamic(null)} : core.TType.TSignature); };
 					typed.cfExpr = typeFunction(module, cls, field.cffName.name, func, signature);
 					if (func.fType == null && field.cffName.name != "new") {
 						var inferred = inferReturnType(typed.cfExpr);

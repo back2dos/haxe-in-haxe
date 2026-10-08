@@ -292,7 +292,7 @@ class Typeload {
      if(ctx.m.isDisplayFile) {DeferredServices.display(); if(DisplayPosition.displayPosition.enclosedIn(cf.cfNamePos)) displayed=cf;}
      fields=PMap.add(name,cf,fields);
     }
-    var a={aFields:fields,aStatus:Closed};
+    var a=({aFields:fields,aStatus:Closed} : core.TType.TAnon);
     if(displayed!=null) {var cf=displayed; delay(ctx.g,PBuildClass,function() DeferredServices.display());}
     TAnon(a);
    case CTFunction(args,ret):
