@@ -136,7 +136,13 @@ class TFunctions {
 		case TTypeDecl(t): {mtPath:t.tPath,mtModule:t.tModule,mtPos:t.tPos,mtNamePos:t.tNamePos,mtPrivate:t.tPrivate,mtDoc:t.tDoc,mtMeta:t.tMeta,mtParams:t.tParams,mtUsing:t.tUsing,mtRestore:t.tRestore};
 		case TAbstractDecl(a): {mtPath:a.aPath,mtModule:a.aModule,mtPos:a.aPos,mtNamePos:a.aNamePos,mtPrivate:a.aPrivate,mtDoc:a.aDoc,mtMeta:a.aMeta,mtParams:a.aParams,mtUsing:a.aUsing,mtRestore:a.aRestore};
 	};
-	public static function tPath(t:ModuleType):GlobalTypePath return tInfos(t).mtPath;
+	// Direct switch: tInfos allocates its record on every call.
+	public static function tPath(t:ModuleType):GlobalTypePath return switch t {
+		case TClassDecl(c): c.clPath;
+		case TEnumDecl(e): e.ePath;
+		case TTypeDecl(t): t.tPath;
+		case TAbstractDecl(a): a.aPath;
+	};
 	public static function tName(t:ModuleType):String return tPath(t).name;
 	public static function extendsClass(c:TClass,csup:TClass):Bool {
 		if (c == csup) return true;
