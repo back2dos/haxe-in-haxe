@@ -347,5 +347,5 @@ class AbstractCast {
 		return loop(e);
 	}
 	static final installCastOrUnifyRaise = install();
-	static function install():Bool { Typecore.castOrUnifyRaiseRef = castOrUnifyRaise; return true; }
+	public static function install():Bool { Typecore.castOrUnifyRaiseRef = castOrUnifyRaise; return true; }
 }

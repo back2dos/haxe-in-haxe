@@ -30,6 +30,7 @@ class Main {
 	public static function initHooks():Void {
 		core.Type.initialize();
 		core.TUnification.initHooks();
+		context.AbstractCast.install(); // the JVM initializes classes lazily
 		typing.Typer.initialize();
 		typing.TyperEntry.initHooks();
 		typing.TypeloadFunction.initHooks();

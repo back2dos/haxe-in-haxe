@@ -36,9 +36,9 @@ archive, 1 times out). The other upstream suites (`tests/unit`,
 libraries, display/server services, or a non-HXB target.
 
 The same suite also runs on other builds of the port through
-`HAXE_IN_HAXE_PORT` (see `bench/README.md`): the JS build passes all 282
-cases. The C++ build passes 281; the other one hit an intermittent hxcpp
-segfault (about 1 run in 30, under investigation).
+`HAXE_IN_HAXE_PORT` (see `bench/README.md`). The HashLink, HL/C, JS and JVM
+builds each pass all 282 cases. C++ release builds crash in hxcpp's runtime
+(heap corruption, see `bench/README.md`).
 
 Other lanes, all passing:
 
