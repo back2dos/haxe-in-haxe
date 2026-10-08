@@ -9,7 +9,20 @@ class Record {
 		static targets) are cloned with their class; Reflect.copy would return
 		an anonymous object (JS, C++) or null (JVM).
 	**/
-	public static function copy<T>(o:T):T {
+	/**
+		Shallow copy, resolved at compile time: a record class's clone() when the
+		static type has one, otherwise copyDynamic.
+	**/
+	public static macro function copy(record:Expr):Expr {
+		var t = try haxe.macro.Context.follow(haxe.macro.Context.typeof(record)) catch (_:Dynamic) null;
+		switch t {
+			case TInst(c, _):
+				for (f in c.get().fields.get()) if (f.name == "clone") return macro $record.clone();
+			case _:
+		}
+		return macro core.ds.Record.copyDynamic($record);
+	}
+	public static function copyDynamic<T>(o:T):T {
 		#if !macro
 		if (o is core.TType.TExpr) return cast (cast o : core.TType.TExpr).clone();
 		if (o is core.Globals.Pos) return cast (cast o : core.Globals.Pos).clone();

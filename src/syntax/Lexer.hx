@@ -32,6 +32,7 @@ class LexerError {
 	public inline function new(token:Token, pos:Pos) { this.token = token; this.pos = pos; }
 	public inline function clone():LexedToken return new LexedToken(token, pos);
 }
+// llines is kept in ascending order (upstream's newest-first list, without O(n) prepends).
 typedef LexerFile = {var lfile:String; var lline:Int; var lmaxline:Int; var llines:Array<{offset:Int,line:Int}>; var lalines:Array<{offset:Int,line:Int}>; var llast:Int; var llastindex:Int;}
 typedef LexerContext = {var file:LexerFile; var buf:StringBuf;}
 
@@ -48,7 +49,7 @@ class Lexer {
 			var c=bytes.get(i++),inc=1;
 			if(c==10 || c==13) {
 				if(c==13) {i++;inc=2;}
-				f.lline++;f.llines.unshift({offset:p+inc,line:f.lline});
+				f.lline++;f.llines.push({offset:p+inc,line:f.lline});
 			} else if(c>=0xC0) i+=c<0xE0?1:c<0xF0?2:3;
 			p+=inc;
 		}
@@ -60,7 +61,7 @@ class Lexer {
 		return f;
 	}
 	public static function findLine(p:Int,f:LexerFile):{line:Int,column:Int} {
-		if(f.lmaxline!=f.lline) {f.lmaxline=f.lline;f.lalines=f.llines.copy();f.lalines.reverse();f.llast=0x7FFFFFFF;f.llastindex=0;}
+		if(f.lmaxline!=f.lline) {f.lmaxline=f.lline;f.lalines=f.llines.copy();f.llast=0x7FFFFFFF;f.llastindex=0;}
 		function loop(min:Int,max:Int):{line:Int,column:Int} {
 			var med=(min+max)>>>1,entry=f.lalines[med];
 			if(med==min) {f.llast=p;f.llastindex=med;return {line:entry.line,column:p-entry.offset};}
@@ -95,10 +96,11 @@ class Lexer {
 	}
 	static function updateLines(ctx:LexerContext,code:Lexer,start:Int):Void {
 		var i=start;
+		var src=code.source,n=src.length;
 		while (i<code.index) {
-			var c=code.source.charAt(i++);
-			if (c=="\r" && code.source.charAt(i)=="\n") i++;
-			if (c=="\r" || c=="\n") {ctx.file.lline++;ctx.file.llines.unshift({offset:i,line:ctx.file.lline});}
+			var c=StringTools.fastCodeAt(src,i++);
+			if (c=="\r".code && i<n && StringTools.fastCodeAt(src,i)=="\n".code) i++;
+			if (c=="\r".code || c=="\n".code) {ctx.file.lline++;ctx.file.llines.push({offset:i,line:ctx.file.lline});}
 		}
 	}
 	public static function readToken(ctx:LexerContext,code:Lexer):LexedToken {
