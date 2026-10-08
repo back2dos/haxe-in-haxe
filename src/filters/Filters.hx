@@ -106,7 +106,7 @@ class Filters {
 	public static function checkReservedTypePaths(scom:SafeContext, t:ModuleType):Void {
 		function check(path:GlobalTypePath, pos:Pos):Void {
 			var paths:Array<GlobalTypePath> = scom.platformConfig.pfReservedTypePaths;
-			if (Lambda.exists(paths, p -> p.name == path.name && p.pack.join(".") == path.pack.join(".")))
+			if (core.ds.ArrayTools.exists(paths, p -> p.name == path.name && p.pack.join(".") == path.pack.join(".")))
 				SafeCom.addWarning(scom, WReservedTypePath, "Type path " + Globals.sTypePath(path) + " is reserved on this target", pos);
 		}
 		switch t { case TClassDecl(c) if (!TypeOps.hasClassFlag(c, CExtern)): check(c.clPath, c.clPos); case TEnumDecl(e) if (!TypeOps.hasEnumFlag(e, EnExtern)): check(e.ePath, e.ePos); case _: }

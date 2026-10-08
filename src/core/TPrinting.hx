@@ -234,7 +234,7 @@ class Printer {
 	public static function sModuleSkipReason(reason:ModuleSkipReason):String {
 		function loop(stack:Array<GlobalTypePath>,reason:ModuleSkipReason):String return switch reason {
 			case DependencyDirty(path,reason):
-				var exists = Lambda.exists(stack,function(p) return p.name == path.name && p.pack.join(".") == path.pack.join("."));
+				var exists = core.ds.ArrayTools.exists(stack,function(p) return p.name == path.name && p.pack.join(".") == path.pack.join("."));
 				(stack.length == 0 ? "DependencyDirty " : "") + Globals.sTypePath(path) + " - " + (exists ? "rec" : loop([path].concat(stack),reason));
 			case Tainted(cause):"Tainted " + sModuleTaintingReason(cause);case FileChanged(file):"FileChanged " + file;case Shadowed(file):"Shadowed " + file;case LibraryChanged:"LibraryChanged";
 		};

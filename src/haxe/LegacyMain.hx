@@ -54,7 +54,7 @@ class LegacyMain {
 		var roots:Array<GlobalTypePath> = [];
 		var hxbArgument:Null<String> = null;
 		var parsedArguments = Args.expandHxml(Args.parseArgs(arguments));
-		var hasHxbOutput = Lambda.exists(parsedArguments, function(argument) return switch argument { case SetHxbOut(_): true; case _: false; });
+		var hasHxbOutput = core.ds.ArrayTools.exists(parsedArguments, function(argument) return switch argument { case SetHxbOut(_): true; case _: false; });
 		for (argument in parsedArguments) {
 			switch argument {
 				case AddClassPath(path): classPaths.add(new DirectoryClassPath(classPathPath(path), User));

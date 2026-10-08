@@ -15,7 +15,7 @@ class FilterContext {
 		return switch c.clKind {
 			case KGeneric:
 				Meta.has(core.MetaList.StrictMeta.Remove, c.clMeta) || (c.clSuper != null && isRemovableClass(c.clSuper.cls))
-					|| Lambda.exists(c.clParams, tp -> TypeOps.hasCtorConstraint(tp.ttpClass) || Meta.has(core.MetaList.StrictMeta.Const, tp.ttpClass.clMeta));
+					|| core.ds.ArrayTools.exists(c.clParams, tp -> TypeOps.hasCtorConstraint(tp.ttpClass) || Meta.has(core.MetaList.StrictMeta.Const, tp.ttpClass.clMeta));
 			case KTypeParameter(_): true; // Upstream: investigate why this happens (#4092).
 			case _: false;
 		};

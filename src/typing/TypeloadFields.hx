@@ -143,7 +143,7 @@ class TypeloadFields {
  }
  public static function ensureStructInitConstructor(ctx:Typer,c:TClass,astFields:Array<ClassField>,p:Pos):Void {
   if(c.clConstructor!=null) return;
-  function fieldHasDefault(name:String):Bool return Lambda.exists(astFields,function(f) {if(f.cffName.name!=name) return false;return switch f.cffKind {case FVar(_,e),FProp(_,_,_,e):e!=null;case _:false;};});
+  function fieldHasDefault(name:String):Bool return core.ds.ArrayTools.exists(astFields,function(f) {if(f.cffName.name!=name) return false;return switch f.cffKind {case FVar(_,e),FProp(_,_,_,e):e!=null;case _:false;};});
   var sup=getStructInitSuperInfo(ctx,c,p),params=extractParamTypes(c.clParams),ethis=mk(TConst(TThis),TInst(c,params),p),doc=new StringBuf();
   var args:Array<{variable:TVar,defaultValue:Null<TExpr>}>=[],el:Array<TExpr>=[],tl:Array<{name:String,optional:Bool,type:T}>=[],ordered=c.clOrderedFields.copy();ordered.reverse();
   for(cf in ordered) if(isPhysicalVarField(cf)) {
@@ -276,7 +276,7 @@ class TypeloadFields {
  public static function transformField(ctx:Typer,cctx:ClassInitCtx,c:TClass,f:ClassField,fields:Array<ClassField>,p:Pos):ClassField {
   if(cctx.abstractType!=null) f=transformAbstractField2(ctx,cctx.abstractType,f);
   if(hasAccess(AMacro,f.cffAccess) && ctx.g.macros!=null && ctx.g.macros.typer.com.moduleLut.getTypeLut().mem(c.clPath)) {
-   if(!Lambda.exists(fields,function(f2) return f2.cffName==f.cffName && hasAccess(AMacro,f2.cffAccess))) raiseTypingError("Class build macro cannot return a macro function when the class has already been compiled into the macro context",p);
+   if(!core.ds.ArrayTools.exists(fields,function(f2) return f2.cffName==f.cffName && hasAccess(AMacro,f2.cffAccess))) raiseTypingError("Class build macro cannot return a macro function when the class has already been compiled into the macro context",p);
   }
   return f;
  }
@@ -742,7 +742,7 @@ class TypeBinding {
   var c = cctx.tclass;
   var deferred:TLazy = r;
   function isFullType(t:T):Bool return switch t {
-   case TFun(signature):isFullType(signature.ret) && Lambda.foreach(signature.args,function(arg) return isFullType(arg.type));
+   case TFun(signature):isFullType(signature.ret) && core.ds.ArrayTools.foreach(signature.args,function(arg) return isFullType(arg.type));
    case TMono(mono):mono.tmType != null && isFullType(mono.tmType);
    case TAbstract(_,_) | TInst(_,_) | TEnum(_,_) | TLazy(_) | TDynamic(_) | TAnon(_) | TType(_,_):true;
   };

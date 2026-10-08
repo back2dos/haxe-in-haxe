@@ -341,7 +341,7 @@ class Grammar {
 							t.reverse();
 							if (t.length > 0 && t[0].name == name) {
 								var path = t.slice(1);
-								if (Lambda.foreach(path, function(i) return isLowerIdent(i.name))) {
+								if (core.ds.ArrayTools.foreach(path, function(i) return isLowerIdent(i.name))) {
 									var p2 = [for (i in path) i.name];
 									p2.reverse();
 									throw new TypePathCompletion(p2, {name: name, isSub: false}, e.inImport, e.pos);

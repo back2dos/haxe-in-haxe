@@ -29,7 +29,7 @@ class FixOverrides {
     try {
      typeEq(EqStrict,monomorphs(c.clParams,monomorphs(f.cfParams,v.vType)),t2);
      switch follow(v.vType) {case TInst(cp={clKind:KTypeParameter(ttp)},_) if (com.platform==Flash):
-      if (getConstraints(ttp).length==1&&Lambda.exists(c.clParams,function(tp) return tp.ttpName==cp.clPath.name)) throw new Unify_error([]);
+      if (getConstraints(ttp).length==1&&core.ds.ArrayTools.exists(c.clParams,function(tp) return tp.ttpName==cp.clPath.name)) throw new Unify_error([]);
       case _:
      }
     }catch (_:Unify_error) {var v2=allocVar(VGenerated,"_tmp_"+v.vName,t2,v.vPos);changed.unshift({original:v,replacement:v2});next={variable:v2,defaultValue:cur.defaultValue};}

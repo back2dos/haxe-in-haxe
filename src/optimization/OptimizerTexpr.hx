@@ -14,8 +14,8 @@ class OptimizerTexpr {
 	public static function hasSideEffect(e:TExpr):Bool {
 		return switch e.eexpr {
 			case TConst(_) | TLocal(_) | TTypeExpr(_) | TFunction(_) | TIdent(_): false;
-			case TCall({eexpr:TField(e1, fa)}, el) if (PurityState.isPureFieldAccess(fa)): hasSideEffect(e1) || Lambda.exists(el, hasSideEffect);
-			case TNew(c, _, el) if (c.clConstructor != null && PurityState.isPure(c, c.clConstructor)): Lambda.exists(el, hasSideEffect);
+			case TCall({eexpr:TField(e1, fa)}, el) if (PurityState.isPureFieldAccess(fa)): hasSideEffect(e1) || core.ds.ArrayTools.exists(el, hasSideEffect);
+			case TNew(c, _, el) if (c.clConstructor != null && PurityState.isPure(c, c.clConstructor)): core.ds.ArrayTools.exists(el, hasSideEffect);
 			case TField(_, fa) if (PurityState.isExplicitlyImpure(fa)): true;
 			case TNew(_, _, _) | TCall(_, _) | TBinop(OpAssignOp(_) | OpAssign, _, _) | TUnop(Increment | Decrement, _, _): true;
 			case TReturn(_) | TBreak | TContinue | TThrow(_): true;

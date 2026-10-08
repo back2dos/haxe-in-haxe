@@ -233,7 +233,7 @@ class Graph {
  }
 }
 @:structInit class AnalyzerContext {
-	public var com:Dynamic;
+	public var com:context.SafeCom.SafeContext;
 	public var config:AnalyzerConfigData;
 	public var graph:GraphData;
 	public var tempVarName:String;
@@ -246,7 +246,7 @@ class Graph {
 	public var debugExprs:Array<{name:String,expr:TExpr}>;
 	public var nameStack:Array<String>;
 	public var didOptimize:Bool;
-	public inline function new(com:Dynamic, config:AnalyzerConfigData, graph:GraphData, tempVarName:String, withTimer:Dynamic, identifier:String, entry:BasicBlockData, hasUnbound:Bool, loopCounter:Int, loopStack:Array<Int>, debugExprs:Array<{name:String,expr:TExpr}>, nameStack:Array<String>, didOptimize:Bool) { this.com = com; this.config = config; this.graph = graph; this.tempVarName = tempVarName; this.withTimer = withTimer; this.identifier = identifier; this.entry = entry; this.hasUnbound = hasUnbound; this.loopCounter = loopCounter; this.loopStack = loopStack; this.debugExprs = debugExprs; this.nameStack = nameStack; this.didOptimize = didOptimize; }
+	public inline function new(com:context.SafeCom.SafeContext, config:AnalyzerConfigData, graph:GraphData, tempVarName:String, withTimer:Dynamic, identifier:String, entry:BasicBlockData, hasUnbound:Bool, loopCounter:Int, loopStack:Array<Int>, debugExprs:Array<{name:String,expr:TExpr}>, nameStack:Array<String>, didOptimize:Bool) { this.com = com; this.config = config; this.graph = graph; this.tempVarName = tempVarName; this.withTimer = withTimer; this.identifier = identifier; this.entry = entry; this.hasUnbound = hasUnbound; this.loopCounter = loopCounter; this.loopStack = loopStack; this.debugExprs = debugExprs; this.nameStack = nameStack; this.didOptimize = didOptimize; }
 	public inline function clone():AnalyzerContext return new AnalyzerContext(com, config, graph, tempVarName, withTimer, identifier, entry, hasUnbound, loopCounter, loopStack, debugExprs, nameStack, didOptimize);
 }
 class AnalyzerTypes {}

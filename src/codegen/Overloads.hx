@@ -47,7 +47,7 @@ class Overloads {
 		function loop(map:T->T,c:TClass):Void {
 			function add(cf:TClassField):Void {
 				var t=map(cf.cfType);
-				if(!Lambda.exists(acc,function(v) return sameOverloadArgs(t,v.type,cf,v.field))) acc.unshift({type:t,field:cf});
+				if(!core.ds.ArrayTools.exists(acc,function(v) return sameOverloadArgs(t,v.type,cf,v.field))) acc.unshift({type:t,field:cf});
 			}
 			try {
 				var cf=c.clFields.get(name);
@@ -139,7 +139,7 @@ class Resolution {
 		return false;
 	}
 	public static function rmDuplicates<A>(acc:Array<FieldCallCandidateData<A>>,rest:Array<FieldCallCandidateData<A>>):Array<FieldCallCandidateData<A>> {
-		for(f in rest) if(!Lambda.exists(acc,function(g) return typeIseq(f.fcType,g.fcType))) acc.unshift(f);
+		for(f in rest) if(!core.ds.ArrayTools.exists(acc,function(g) return typeIseq(f.fcType,g.fcType))) acc.unshift(f);
 		return acc;
 	}
 	public static function countOptionals(t:T):Int return switch follow(t) { case TFun(s): var n=0; for(a in s.args) if(a.optional) n++; n; case _: 0; }

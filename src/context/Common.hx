@@ -268,7 +268,7 @@ class Common {
  public static function isDiagnostics(com:CommonContext):Bool return switch com.partScope.reportMode {case RMDiagnostics(_):true;case _:false;};
  public static function isCompilation(com:CommonContext):Bool return com.display.dmsKind==DMNone && !isDiagnostics(com);
  public static function hasErrorToReport(com:CommonContext):Bool {
-  var reportable=Lambda.exists(com.partScope.messages,function(cm) return switch cm.cmDiagnosticsKind {case DKMissingFields|DKUnresolvedIdentifier:false;case _:true;});
+  var reportable=core.ds.ArrayTools.exists(com.partScope.messages,function(cm) return switch cm.cmDiagnosticsKind {case DKMissingFields|DKUnresolvedIdentifier:false;case _:true;});
   return com.partScope.hasError && (isCompilation(com)||reportable);
  }
  public static function activateMessageCapture(com:CommonContext,buf:{value:Array<CompilerMessage>}):Void->Void {
@@ -317,7 +317,7 @@ class Common {
  static function copyStringMap<A>(m:haxe.ds.StringMap<A>):haxe.ds.StringMap<A> {var out=new haxe.ds.StringMap<A>();for (k in m.keys()) out.set(k,m.get(k));return out;}
  public static function setPlatform(com:CommonContext,pf:Platform,file:String):Void {if (com.platform!=Cross) throw "Multiple targets";com.platform=pf;com.file=file;}
  public static function setCustomTarget(com:CommonContext,name:String,path:String):Void {
-  if (Lambda.exists(Globals.platforms,function(pf) return Globals.platformName(pf)==name)) throw new ArgumentError("--custom-target cannot use reserved name "+name);
+  if (core.ds.ArrayTools.exists(Globals.platforms,function(pf) return Globals.platformName(pf)==name)) throw new ArgumentError("--custom-target cannot use reserved name "+name);
   if (name.length>maxCustomTargetLen) throw new ArgumentError("--custom-target name "+name+" exceeds the maximum of "+maxCustomTargetLen+" characters");
   if (~/^[a-zA-Z0-9_]+$/.match(name)) setPlatform(com,CustomTarget(name),path);else throw new ArgumentError("--custom-target name "+name+" may only contain alphanumeric or underscore characters");
  }

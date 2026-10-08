@@ -127,7 +127,7 @@ class Tre {
 	public static function hasTailRecursion(isRecursiveCall:TExpr->Array<TExpr>->Bool, cancelTre:Bool, functionEnd:Bool, e:TExpr):Bool {
 		return switch e.eexpr {
 			case TWhile(_, _, _): core.Texpr.checkExpr(e -> hasTailRecursion(isRecursiveCall, true, false, e), e);
-			case TTry(body, catches): hasTailRecursion(isRecursiveCall, true, functionEnd, body) || Lambda.exists(catches, c -> hasTailRecursion(isRecursiveCall, cancelTre, functionEnd, c.expr));
+			case TTry(body, catches): hasTailRecursion(isRecursiveCall, true, functionEnd, body) || core.ds.ArrayTools.exists(catches, c -> hasTailRecursion(isRecursiveCall, cancelTre, functionEnd, c.expr));
 			case TBinop(OpAssign, {eexpr:TLocal(v = {vKind:VUser(TVOLocalFunction)})}, {eexpr:TFunction(fn)}):
 				hasTailRecursion((callee, args) -> isRecursiveNamedLocalCall(v, callee, args), false, true, fn.tfExpr);
 			case TFunction(_): false;

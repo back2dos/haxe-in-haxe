@@ -42,7 +42,7 @@ class Case {
 			switch ty {
 				case TMono(m):
 					if (m.tmType != null) walk(m.tmType);
-					else if (!Lambda.exists(acc, function(other) return m == other)) acc.unshift(m);
+					else if (!core.ds.ArrayTools.exists(acc, function(other) return m == other)) acc.unshift(m);
 				case TEnum(_, tl) | TInst(_, tl) | TAbstract(_, tl): for (t in tl) walk(t);
 				case TType(t, tl): walk(applyTypedef(t, tl));
 				case TFun(s): for (arg in s.args) walk(arg.type); walk(s.ret);
@@ -85,9 +85,9 @@ class Case {
 		function subst(ty:T):T return switch ty {
 			case TMono(m):
 				if (m.tmType != null) subst(m.tmType);
-				else if (Lambda.exists(freeMonos, function(other) return m == other)) TMono(getOrCreateFree(m));
+				else if (core.ds.ArrayTools.exists(freeMonos, function(other) return m == other)) TMono(getOrCreateFree(m));
 				else ty;
-			case TInst(c = {clKind:KTypeParameter(_)}, []) if (Lambda.exists(tpClasses, function(other) return c == other)): TMono(getOrCreateTp(c));
+			case TInst(c = {clKind:KTypeParameter(_)}, []) if (core.ds.ArrayTools.exists(tpClasses, function(other) return c == other)): TMono(getOrCreateTp(c));
 			case _: map(subst, ty);
 		};
 		function rebindUnrefined():Void {

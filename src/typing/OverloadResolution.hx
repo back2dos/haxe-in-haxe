@@ -99,7 +99,7 @@ class OverloadResolution {
 				var found = findOverload(mapType, c, cf, el);
 				if (found.length == 0) searchParents = true;
 				for (fcc in found) {
-					if (!Lambda.exists(candidates, function(other) return hasFunction(fcc.fcType, other))) candidates.unshift(fcc);
+					if (!core.ds.ArrayTools.exists(candidates, function(other) return hasFunction(fcc.fcType, other))) candidates.unshift(fcc);
 				}
 				if (hasClassFieldFlag(cf, CfOverload) || cf.cfOverloads.length > 0) searchParents = true;
 			}

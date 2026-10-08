@@ -445,13 +445,16 @@ class Lexer {
 	static final opTexts:Array<String> = [for (o in operators) o.text];
 	static final opTokens:Array<Token> = [for (o in operators) o.token];
 	static final opFirst:Array<Int> = [for (text in opTexts) StringTools.fastCodeAt(text, 0)];
-	// Operator indices by first character (in table order), so a token only
-	// tries the operators that can match it.
-	static final opByFirst:Array<Array<Int>> = {
-		var t:Array<Array<Int>> = [for (_ in 0...128) []];
-		for (i in 0...opFirst.length) t[opFirst[i]].push(i);
+	// Operator indices grouped by first character (in table order), so a token
+	// only tries the operators that can match it: opByFirst[opFirstStart[c]] ...
+	// opByFirst[opFirstStart[c + 1] - 1]. Flat Int arrays (an Array<Array<Int>>
+	// would be read through a dynamic cast on HashLink).
+	static final opFirstStart:Array<Int> = {
+		var t = [0];
+		for (c in 0...128) t.push(t[c] + [for (f in opFirst) if (f == c) f].length);
 		t;
 	};
+	static final opByFirst:Array<Int> = [for (c in 0...128) for (i in 0...opFirst.length) if (opFirst[i] == c) i];
 
 	public function token():LexedToken {
 		core.ds.GcPolicy.tick();
@@ -474,7 +477,8 @@ class Lexer {
 			}
 			// Find the longest fixed-text operator.
 			var opLen = 0, opTok:Token = null;
-			if (c >= 0 && c < 128) for (i in opByFirst[c]) {
+			if (c >= 0 && c < 128) for (k in opFirstStart[c]...opFirstStart[c + 1]) {
+				var i = opByFirst[k];
 				var text = opTexts[i];
 				if (text.length > opLen && starts(text)) {
 					opLen = text.length;

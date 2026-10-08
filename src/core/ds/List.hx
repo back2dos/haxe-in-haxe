@@ -13,6 +13,6 @@ class List {
  public static function hd<A>(l:Array<A>):A {if(l.length==0) throw new haxe.Exception("hd");return l[0];}
  public static function tl<A>(l:Array<A>):Array<A> {if(l.length==0) throw new haxe.Exception("tl");return l.slice(1);}
  public static function rev<A>(l:Array<A>):Array<A> {var out=l.copy();out.reverse();return out;}
- public static function exists<A>(f:A->Bool,l:Array<A>):Bool return Lambda.exists(l,f);
- public static function forAll<A>(f:A->Bool,l:Array<A>):Bool return Lambda.foreach(l,f);
+ public static function exists<A>(f:A->Bool,l:Array<A>):Bool return core.ds.ArrayTools.exists(l,f);
+ public static function forAll<A>(f:A->Bool,l:Array<A>):Bool return core.ds.ArrayTools.foreach(l,f);
 }

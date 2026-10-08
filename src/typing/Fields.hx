@@ -210,7 +210,7 @@ class Fields {
      case CTypes(tl):byList(pair -> byET(byType,e,pair.type),tl);
      case CUnknown if(!cfg.allowOpenMono):throw NotFound.raise();
      case CUnknown:
-      if(!Lambda.exists(ctx.e.monomorphs,pair -> pair.mono==r)&&!(ctx.f.isUntyped&&ctx.com.platform==Neko)) ctx.e.monomorphs.unshift({mono:r,pos:p});
+      if(!core.ds.ArrayTools.exists(ctx.e.monomorphs,pair -> pair.mono==r)&&!(ctx.f.isUntyped&&ctx.com.platform==Neko)) ctx.e.monomorphs.unshift({mono:r,pos:p});
       var f=makeField(); Monomorph.addDownConstraint(r,MField(f)); Monomorph.addModifier(r,MOpenStructure); access(e,f,FHAnon);
      case CMixed(l):byList(checkConstraint,l);
     };
@@ -240,9 +240,9 @@ class Fields {
       var casted=TyperBase.unifyStaticExtension(ctx,e,t0,p); ImportHandling.markImportPosition(ctx,pc); ctx.e.monomorphs=current;
       return AKUsingField(makeStaticExtensionAccess(c,cf,casted,false,p));
      } catch(err:Unify_error) {
-      constantStruct=constantStruct||Lambda.exists(err.errors,function(err) return switch err {case HasExtraField(_):true;case _:false;});return next();
+      constantStruct=constantStruct||core.ds.ArrayTools.exists(err.errors,function(err) return switch err {case HasExtraField(_):true;case _:false;});return next();
      } catch(err:TypingError) {
-      switch err.error.errMessage {case Unify(el):constantStruct=constantStruct||Lambda.exists(el,function(err) return switch err {case HasExtraField(_):true;case _:false;});return next();case _:throw err;}
+      switch err.error.errMessage {case Unify(el):constantStruct=constantStruct||core.ds.ArrayTools.exists(el,function(err) return switch err {case HasExtraField(_):true;case _:false;});return next();case _:throw err;}
      }
     }
     return check([cf0].concat(cf0.cfOverloads));
@@ -300,7 +300,7 @@ class Fields {
   for(strategy in [byType,byTypeExtension,byModuleExtension,byFallback,byModule]) try return strategy(e,t) catch(err:Dynamic) {if(!Std.isOfType(err,NotFound)) throw err;}
   if(cfg.doResume) throw NotFound.raise();
   if(!ctx.f.isUntyped) {
-   function special(a:TAbstract):Bool return Lambda.exists(a.aOps,pair -> pair.field.cfName==i)||Lambda.exists(a.aUnops,pair -> pair.field.cfName==i)||Lambda.exists(a.aArray,cf -> cf.cfName==i);
+   function special(a:TAbstract):Bool return core.ds.ArrayTools.exists(a.aOps,pair -> pair.field.cfName==i)||core.ds.ArrayTools.exists(a.aUnops,pair -> pair.field.cfName==i)||core.ds.ArrayTools.exists(a.aArray,cf -> cf.cfName==i);
    switch follow(t) {
     case TAnon({aStatus:ClassStatics({clKind:KAbstractImpl(a)})})|TInst({clKind:KAbstractImpl(a)},_)|TAbstract(a,_) if(special(a)):displayError(ctx.com,"Field "+i+" cannot be called directly because it has no expression",pfield);
     case TAnon({aStatus:ClassStatics(c)}) if(c.clFields.exists(i)):displayError(ctx.com,"Static access to instance field "+i+" is not allowed",pfield);

@@ -41,11 +41,11 @@ class Optimizer {
 						if (e2 == null) return null;
 						patterns.push(e2);
 					}
-					if (Lambda.exists(patterns, e2 -> Texpr.equal(subject, e2))) return c.caseExpr;
+					if (core.ds.ArrayTools.exists(patterns, e2 -> Texpr.equal(subject, e2))) return c.caseExpr;
 				}
 				return sw.switchDefault;
 			case _:
-				return Lambda.foreach(sw.switchCases, c -> isEmpty(c.caseExpr)) && (sw.switchDefault == null || isEmpty(sw.switchDefault)) ? sw.switchSubject : null;
+				return core.ds.ArrayTools.foreach(sw.switchCases, c -> isEmpty(c.caseExpr)) && (sw.switchDefault == null || isEmpty(sw.switchDefault)) ? sw.switchSubject : null;
 		}
 	}
 	public static function reduceControlFlow(scom:context.SafeCom.SafeContext, e:TExpr):TExpr {

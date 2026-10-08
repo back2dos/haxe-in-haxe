@@ -103,7 +103,7 @@ class ExprToPattern {
      case TFun(s) if(s.ret==fakeTupleType):if(el.length<s.args.length)core.Error.raiseTypingError("Not enough arguments",p);if(el.length>s.args.length)core.Error.raiseTypingError("Too many arguments",el[s.args.length].pos);PatTuple([for(i in 0...el.length)make(pctx,false,s.args[i].type,el[i])]);
      case TInst({clPath:{pack:[],name:"Array"}},[t2]):var ps=el.map(function(e)return make(pctx,false,t2,e));PatConstructor({kind:ConArray(ps.length),pos:e.pos},ps);
      case t2=TDynamic(_):var ps=el.map(function(e)return make(pctx,false,t2,e));PatConstructor({kind:ConArray(ps.length),pos:e.pos},ps);
-     case ty=TAbstract(a,tl) if(!Lambda.exists(seen,function(t)return shallowEq(ty,t))):var froms=TyperBase.getAbstractFroms(ctx,a,tl);if(froms.length==1)pattern([ty].concat(seen),froms[0].type);else fail();
+     case ty=TAbstract(a,tl) if(!core.ds.ArrayTools.exists(seen,function(t)return shallowEq(ty,t))):var froms=TyperBase.getAbstractFroms(ctx,a,tl);if(froms.length==1)pattern([ty].concat(seen),froms[0].type);else fail();
      case _:fail();
     };pattern([],t);
    case EObjectDecl(fl):

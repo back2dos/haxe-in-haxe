@@ -12,6 +12,7 @@ import context.Common;
 import typing.TyperBase;
 import typing.TyperBase.*;
 using Lambda;
+using core.ds.ArrayTools;
 import core.WithType as WithTypeTools;
 import core.WithType.WithTypeValue;
 import core.MetaList.StrictMeta as MetaTag;

@@ -18,6 +18,7 @@ import typing.FieldAccess as FieldAccessTools;
 import optimization.Optimizer;
 import core.Ast.*;
 using Lambda;
+using core.ds.ArrayTools;
 import core.WithType as WithTypeTools;
 import core.WithType.WithTypeValue;
 import core.MetaList.StrictMeta as MetaTag;

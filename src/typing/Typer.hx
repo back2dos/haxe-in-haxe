@@ -106,7 +106,7 @@ class Typer {
      case TEnum(en,_):{isEnum:true,path:en.ePath,fields:en.eNames,type:TEnumDecl(en)};
      case TAbstract(a,_) if(a.aImpl!=null&&a.aEnum):{isEnum:false,path:a.aPath,fields:a.aImpl.clOrderedStatics.filter(cf -> hasClassFieldFlag(cf,CfEnum)).map(cf -> cf.cfName),type:TAbstractDecl(a)};
      case TAbstract(a,pl) if(!Meta.has(MetaTag.CoreType,a.aMeta)):
-      var froms=TyperBase.getAbstractFroms(ctx,a,pl); if(froms.length!=1||Lambda.exists(stack,t2 -> shallowEq(t,t2))) throw core.ds.Exit.raise(); loop([t].concat(stack),froms[0].type);
+      var froms=TyperBase.getAbstractFroms(ctx,a,pl); if(froms.length!=1||core.ds.ArrayTools.exists(stack,t2 -> shallowEq(t,t2))) throw core.ds.Exit.raise(); loop([t].concat(stack),froms[0].type);
      case _:throw core.ds.Exit.raise();
     };
     var expected=loop([],t),old=ctx.m.enumWithType; ctx.m.enumWithType=expected.type;
@@ -123,7 +123,7 @@ class Typer {
  }
  public static function unifyMinRaise(ctx:TyperContext,el:Array<TExpr>):T {try return UnifyMin.unifyMinRaise(ctx.t,el) catch(_:typing.UnifyMin.NoValue) { return spawnMonomorph(ctx,Globals.nullPos);}}
  public static function unifyMin(ctx:TyperContext,el:Array<TExpr>):T {try return unifyMinRaise(ctx,el) catch(exc:Dynamic) {switch exc {case (core.ds.ExceptionTools.typing(_) => Some(err)):switch err.errMessage {case Unify(_):if(!ctx.f.isUntyped) displayErrorExt(ctx.com,err); return el[0].etype; case _:throw exc;} case _:throw exc;}}}
- public static function unifyMinForTypeSource(ctx:TyperContext,el:Array<TExpr>,src:Null<WithTypeSource>):T {if(src==ImplicitReturn&&Lambda.exists(el,e -> ExtType.isVoid(follow(e.etype)))) return ctx.com.basic.tvoid; return unifyMin(ctx,el);}
+ public static function unifyMinForTypeSource(ctx:TyperContext,el:Array<TExpr>,src:Null<WithTypeSource>):T {if(src==ImplicitReturn&&core.ds.ArrayTools.exists(el,e -> ExtType.isVoid(follow(e.etype)))) return ctx.com.basic.tvoid; return unifyMin(ctx,el);}
  public static function enumFieldAccess(ctx:TyperContext,en:TEnum,ef:TEnumField,mode:AccessMode,p:Pos,pt:Pos):AccessKind {
   var et=TyperBase.typeModuleType(ctx,TEnumDecl(en),p),acc=AKExpr(mk(TField(et,FEnum(en,ef)),enumFieldType(ctx,en,ef,p),p));
   return switch mode {case MSet(_):AKNo(acc,p); case _:acc;};
@@ -332,7 +332,7 @@ class Typer {
    case WithType(t,_):
     function loop(hadCast:Bool,seen:Array<T>,t:T):ObjectDeclKind return switch follow(t) {
      case TAnon(a):ODKWithStructure(a);
-     case followed=TAbstract(a,pl) if(!Meta.has(MetaTag.CoreType,a.aMeta)&&!Lambda.exists(seen,t -> shallowEq(followed,t))):
+     case followed=TAbstract(a,pl) if(!Meta.has(MetaTag.CoreType,a.aMeta)&&!core.ds.ArrayTools.exists(seen,t -> shallowEq(followed,t))):
       var matches=[];
       for(from in TyperBase.getAbstractFroms(ctx,a,pl)) {var result=loop(from.kind==FromField,[followed].concat(seen),from.type); if(result!=ODKPlain) matches.unshift(result);}
       matches.length==0?ODKPlain:matches.length==1?matches[0]:ODKFailed;
@@ -439,7 +439,7 @@ class Typer {
   ctx.e.callArgumentStack.unshift(el); ctx.e.withTypeStack.unshift(withType);
   function restore():Void {ctx.e.withTypeStack.shift(); ctx.e.callArgumentStack.shift();}
   var t:T;
-  try t=Typeload.loadInstance(ctx,ptp,ParamCustom(getParams),LoadNormal) catch(exc:haxe.Exception){restore(); if(Lambda.exists(el,e -> DisplayPosition.displayPosition.enclosedIn(e.pos))) for(e in el) typeExpr(ctx,e,WithTypeTools.value); throw exc;}
+  try t=Typeload.loadInstance(ctx,ptp,ParamCustom(getParams),LoadNormal) catch(exc:haxe.Exception){restore(); if(core.ds.ArrayTools.exists(el,e -> DisplayPosition.displayPosition.enclosedIn(e.pos))) for(e in el) typeExpr(ctx,e,WithTypeTools.value); throw exc;}
   checkDisplayType(ctx,t,ptp); t=follow(t);
   function buildConstructor(ao:Null<TAbstract>,c:TClass,tl:TParams):FieldCallCandidateData<Void->TExpr> {
    var fa=FieldAccessTools.getConstructorAccess(c,tl,p); if(forceInline) {fa=core.ds.Record.copy(fa); fa.faInline=true;}
@@ -559,12 +559,12 @@ class Typer {
      case NotCoro(TFun({args:args2,ret:tr}))|Coro({args:args2,ret:tr}) if(args2.length==targs.length):for(i in 0...targs.length) maybeUnifyArg(targs[i].type,args2[i].type); maybeUnifyRet(tr);
      case NotCoro(TAbstract(a,tl)):
       var froms=TyperBase.getAbstractFroms(ctx,a,tl);
-      if(froms.length==1) {if(!Lambda.exists(stack,t2 -> shallowEq(t,t2))) loop([t].concat(stack),froms[0].type);}
+      if(froms.length==1) {if(!core.ds.ArrayTools.exists(stack,t2 -> shallowEq(t,t2))) loop([t].concat(stack),froms[0].type);}
       else {
        var pending=froms.copy(),seen=[],flat=[];
        while(pending.length>0) {
         var next=pending.shift().type;
-        switch follow(next) {case t=TAbstract(a,tl) if(!Lambda.exists(seen,t2 -> shallowEq(t,t2))):seen.unshift(t); pending=pending.concat(TyperBase.getAbstractFroms(ctx,a,tl)); case _:flat.push(next);}
+        switch follow(next) {case t=TAbstract(a,tl) if(!core.ds.ArrayTools.exists(seen,t2 -> shallowEq(t,t2))):seen.unshift(t); pending=pending.concat(TyperBase.getAbstractFroms(ctx,a,tl)); case _:flat.push(next);}
        }
        matrix(flat);
       }
@@ -606,7 +606,7 @@ class Typer {
   function loop(seen:Array<T>,t:T):Null<T> return switch follow(t) {
    case TInst({clPath:{pack:[],name:"Array"}},[tp]):switch follow(tp) {case TMono(_):null; case t:if(t==tDynamic) allowDynamic=true; tp;}
    case TAnon(_):try getIterableParam(t) catch(_:core.ds.NotFound) { null;}
-   case t=TAbstract(a,pl) if(!Lambda.exists(seen,t2 -> shallowEq(t,t2))):
+   case t=TAbstract(a,pl) if(!core.ds.ArrayTools.exists(seen,t2 -> shallowEq(t,t2))):
     var types=[];
     for(from in TyperBase.getAbstractFroms(ctx,a,pl)) {var next=loop([t].concat(seen),from.type); if(next!=null) types.unshift(next);}
     types.length==1?types[0]:null;

@@ -35,6 +35,7 @@ import context.display.DeprecationCheck;
 import typing.Typeload.*;
 import typing.TypeloadCheck.BuildCanceled;
 using Lambda;
+using core.ds.ArrayTools;
 
 @:structInit class TypedDeclaration {
 	public var declaration:TypeDecl;

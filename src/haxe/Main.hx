@@ -97,6 +97,8 @@ class Main {
 			return 1;
 		}
 		ManagedPool.release(pool);
+		// haxe.ml: a normal compilation reports --times after success
+		if (code == 0 && lastRequest.timerCtx.measureTimes == Yes) CompilerOutput.sendTimerReport(io, lastRequest.timerCtx);
 		return code;
 	}
 

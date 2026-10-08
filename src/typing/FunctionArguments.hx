@@ -156,7 +156,7 @@ class FunctionArguments {
 			delay(ctx.g, PTypeField, function() checkRest(last, typed.expr, arg.optional, typed.type, pn));
 			if (!isExtern) {
 				Naming.checkLocalVariableName(ctx.com, typed.name, TVOArgument, pn);
-				if (typed.name != "_" && Lambda.exists(acc, function(arg) return arg.variable.vName == typed.name)) raiseTypingError('Duplicate argument name "' + typed.name + '"', pn);
+				if (typed.name != "_" && core.ds.ArrayTools.exists(acc, function(arg) return arg.variable.vName == typed.name)) raiseTypingError('Duplicate argument name "' + typed.name + '"', pn);
 			}
 			var eo = typeFunctionArgValue(ctx, typed.type, typed.expr, doDisplay);
 			var v = makeLocal(typed.name, VUser(TVOArgument), typed.type, arg.meta, pn);

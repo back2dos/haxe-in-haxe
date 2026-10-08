@@ -46,7 +46,7 @@ import sys.thread.Mutex;
 	public inline function clone():SafeContext return new SafeContext(basic, platform, defines, platformConfig, debug, isMacroContext, foptimize, doinline, dumpConfig, exceptions, exceptionsMutex, warnings, warningsMutex, errors, errorsMutex, timerCtx, findModule, findModuleByType, curclass, curfield);
 }
 class SafeCom {
-	public static function ofCom(com:Dynamic):SafeContext {
+	public static function ofCom(com:context.Common.CommonContext):SafeContext {
 		// Typed so the method values are bound closures (read through Dynamic they are unbound on JS).
 		var moduleLut:context.Common.ModuleLut = com.moduleLut;
 		return {

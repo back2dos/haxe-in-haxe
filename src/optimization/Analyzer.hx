@@ -218,7 +218,7 @@ class Debug {
   Graph.iterEdges(g,function(edge) ch.writeString('n${edge.cfgFrom.bbId}:out -> n${edge.cfgTo.bbId}:in[label="${BasicBlock.sCfgEdgeKind(edge.cfgKind)}"];\n'));
   for (vi in g.gVarInfos) if (vi.viValue != null) {var value = vi.viValue; var n1 = 'n${value.bb.bbId}:${exprName(value.target)}'; for (edge in vi.viSsaEdges) if (value.bb != edge.bb) ch.writeString('$n1 -> n${edge.bb.bbId}:${exprName(edge.target)}[color=lightblue,constraint=false];\n');}
  }
- public static function platformNameMacro(com:Dynamic):String return core.Define.defined(com.defines,core.Define.Macro) ? "macro" : core.Globals.platformName(com.platform);
+ public static function platformNameMacro(com:context.SafeCom.SafeContext):String return core.Define.defined(com.defines,core.Define.Macro) ? "macro" : core.Globals.platformName(com.platform);
  public static function getDumpPath(ctx:AnalyzerContext,c:TClass,cf:TClassField):Array<String> return [ctx.com.dumpConfig.dumpPath,platformNameMacro(ctx.com)].concat(c.clPath.pack).concat([c.clPath.name + "." + cf.cfName]);
  public static function dotDebug(ctx:AnalyzerContext,c:GlobalTypePath,cf:String):Void {
   var g = ctx.graph; function start(suffix:String):Dynamic return context.DotGraph.startGraph(context.DotGraph.getDumpPath(ctx.com,c,cf),suffix,[]);
@@ -236,22 +236,25 @@ class Debug {
 }
 private typedef ExceptionOutput = {var value:Dynamic; var mutex:sys.thread.Mutex;}
 class Run {
+ // actx.withTimer without the dynamic call (the field holds a polymorphic
+ // function, which Haxe can only type as Dynamic)
+ public static inline function timed<A>(actx:AnalyzerContext,s:Array<String>,f:Void->A):A return withTimer(actx.com.timerCtx,actx.config.detailTimes,actx.identifier,s,f);
  public static function withTimer<A>(timerCtx:core.Timer.TimerContext,level:Int,identifier:Null<String>,s:Array<String>,f:Void->A):A {
   // Timer.time only calls f when times are not measured; skip building the id and wrapper.
   if (timerCtx.measureTimes == core.Timer.MeasureTimes.No) return f();
   var id = core.Timer.determineId(level,["analyzer"],s,identifier); return core.Timer.time(timerCtx,id,function(_:Null<Bool>) return f(),null);}
- public static function createAnalyzerContext(com:Dynamic,config:AnalyzerConfigData,identifier:String,e:TExpr):AnalyzerContext {
+ public static function createAnalyzerContext(com:context.SafeCom.SafeContext,config:AnalyzerConfigData,identifier:String,e:TExpr):AnalyzerContext {
   var g = Graph.create(e.etype,e.epos); return {com:com,config:config,graph:g,tempVarName:com.platform == Cpp ? "_hx_tmp" : "tmp",withTimer:function(s,f) return withTimer(com.timerCtx,config.detailTimes,identifier,s,f),identifier:identifier,entry:g.gUnreachable,hasUnbound:false,loopCounter:0,loopStack:[],debugExprs:[],nameStack:[],didOptimize:false};
  }
  public static function addDebugExpr(ctx:AnalyzerContext,s:String,e:TExpr):Void ctx.debugExprs.unshift({name:s,expr:e});
  public static function there(actx:AnalyzerContext,e:TExpr):Bool {
-  if (actx.com.debug) addDebugExpr(actx,"initial",e); e = actx.withTimer(["->","filter-apply"],function() return TexprFilter.apply(actx.com,e)); if (actx.com.debug) addDebugExpr(actx,"after filter-apply",e);
+  if (actx.com.debug) addDebugExpr(actx,"initial",e); e = optimization.Analyzer.Run.timed(actx,["->","filter-apply"],function() return TexprFilter.apply(actx.com,e)); if (actx.com.debug) addDebugExpr(actx,"after filter-apply",e);
   var tf:TFunc; var t:T; var real:Bool; switch e.eexpr {case TFunction(f):tf = f; t = e.etype; real = true; case _:var ret = e.etype; tf = {tfArgs:[],tfType:ret,tfExpr:mk(TReturn(e),tDynamic,e.epos)}; t = tfun([],ret); real = false;}
-  actx.withTimer(["->","from-texpr"],function() AnalyzerTexprTransformer.fromTfunction(actx,tf,t,e.epos)); return real;
+  optimization.Analyzer.Run.timed(actx,["->","from-texpr"],function() AnalyzerTexprTransformer.fromTfunction(actx,tf,t,e.epos)); return real;
  }
  public static function backAgain(actx:AnalyzerContext,isRealFunction:Bool):TExpr {
-  var e:TExpr = actx.withTimer(["<-","to-texpr"],function() return AnalyzerTexprTransformer.toTexpr(actx)); if (actx.com.debug) addDebugExpr(actx,"after to-texpr",e); for (vi in actx.graph.gVarInfos) vi.viVar.vExtra = vi.viExtra;
-  if (actx.config.fusion) e = actx.withTimer(["<-","fusion"],function() return Fusion.apply(actx,e)); if (actx.com.debug) addDebugExpr(actx,"after fusion",e); e = actx.withTimer(["<-","cleanup"],function() return Cleanup.apply(actx.com,e)); if (actx.com.debug) addDebugExpr(actx,"after cleanup",e);
+  var e:TExpr = optimization.Analyzer.Run.timed(actx,["<-","to-texpr"],function() return AnalyzerTexprTransformer.toTexpr(actx)); if (actx.com.debug) addDebugExpr(actx,"after to-texpr",e); for (vi in actx.graph.gVarInfos) vi.viVar.vExtra = vi.viExtra;
+  if (actx.config.fusion) e = optimization.Analyzer.Run.timed(actx,["<-","fusion"],function() return Fusion.apply(actx,e)); if (actx.com.debug) addDebugExpr(actx,"after fusion",e); e = optimization.Analyzer.Run.timed(actx,["<-","cleanup"],function() return Cleanup.apply(actx.com,e)); if (actx.com.debug) addDebugExpr(actx,"after cleanup",e);
   if (isRealFunction) return e;
   return switch e.eexpr {
    case TFunction(tf):function getT(t:T):T return core.TOther.ExtType.isVoid(t) ? tf.tfType : t; var dislikesComplex = switch actx.com.platform {case Cpp | Hl | Jvm | Php | Flash:true; case _:false;};
@@ -269,11 +272,11 @@ class Run {
   };
  }
  public static function runOnExpr(actx:AnalyzerContext,e:TExpr):TExpr {
-  var real = there(actx,e); actx.withTimer(["->","idom"],function() Graph.inferImmediateDominators(actx.graph)); actx.withTimer(["->","infer_scopes"],function() Graph.inferScopes(actx.graph)); actx.withTimer(["->","var writes"],function() Graph.inferVarWrites(actx.graph)); if (actx.com.debug) Graph.checkIntegrity(actx.graph);
-  if (actx.config.optimize && !actx.hasUnbound) {actx.didOptimize = true; actx.withTimer(["optimize","ssa-apply"],function() Ssa.apply(actx)); if (actx.config.constPropagation) actx.withTimer(["optimize","const-propagation"],function() ConstPropagation.apply(actx)); if (actx.config.copyPropagation) actx.withTimer(["optimize","copy-propagation"],function() CopyPropagation.apply(actx)); actx.withTimer(["optimize","local-dce"],function() LocalDce.apply(actx));} return backAgain(actx,real);
+  var real = there(actx,e); optimization.Analyzer.Run.timed(actx,["->","idom"],function() Graph.inferImmediateDominators(actx.graph)); optimization.Analyzer.Run.timed(actx,["->","infer_scopes"],function() Graph.inferScopes(actx.graph)); optimization.Analyzer.Run.timed(actx,["->","var writes"],function() Graph.inferVarWrites(actx.graph)); if (actx.com.debug) Graph.checkIntegrity(actx.graph);
+  if (actx.config.optimize && !actx.hasUnbound) {actx.didOptimize = true; optimization.Analyzer.Run.timed(actx,["optimize","ssa-apply"],function() Ssa.apply(actx)); if (actx.config.constPropagation) optimization.Analyzer.Run.timed(actx,["optimize","const-propagation"],function() ConstPropagation.apply(actx)); if (actx.config.copyPropagation) optimization.Analyzer.Run.timed(actx,["optimize","copy-propagation"],function() CopyPropagation.apply(actx)); optimization.Analyzer.Run.timed(actx,["optimize","local-dce"],function() LocalDce.apply(actx));} return backAgain(actx,real);
  }
- public static function reduceControlFlow(com:Dynamic,e:TExpr):TExpr return Optimizer.reduceControlFlow(com,mapExpr(e -> reduceControlFlow(com,e),e));
- public static function runOnFieldInternal(com:Dynamic,excOut:ExceptionOutput,config:AnalyzerConfigData,c:TClass,cf:TClassField):Void {
+ public static function reduceControlFlow(com:context.SafeCom.SafeContext,e:TExpr):TExpr return Optimizer.reduceControlFlow(com,mapExpr(e -> reduceControlFlow(com,e),e));
+ public static function runOnFieldInternal(com:context.SafeCom.SafeContext,excOut:ExceptionOutput,config:AnalyzerConfigData,c:TClass,cf:TClassField):Void {
   if (cf.cfExpr == null || AnalyzerConfig.isIgnored(cf.cfMeta) || filters.FilterContext.isRemovableField(com.isMacroContext,cf) || hasClassFieldFlag(cf,CfPostProcessed)) return;
   var e = cf.cfExpr; config = AnalyzerConfig.updateConfigFromMeta(com,config,cf.cfMeta); var actx = createAnalyzerContext(com,config,Globals.sTypePath(c.clPath) + "." + cf.cfName,e);
   function debug():Void {Sys.println("While analyzing " + Globals.sTypePath(c.clPath) + "." + cf.cfName); var expressions = actx.debugExprs.copy(); expressions.reverse(); for (item in expressions) {Sys.println("<" + item.name + ">"); Sys.println(core.TPrinting.sExprPretty(true,"",false,core.TPrinting.sType.bind(core.TPrinting.printContext()),item.expr)); Sys.println("</" + item.name + ">");} Debug.dotDebug(actx,c.clPath,cf.cfName); Sys.println("dot graph written to " + context.DotGraph.getDumpPath(actx.com,c.clPath,cf.cfName).join("/"));}
@@ -285,15 +288,15 @@ class Run {
   catch (exc:Dynamic) {debug(); save(exc);}
  }
  public static function checkExcOut(out:ExceptionOutput):Void {out.mutex.acquire(); var exc = out.value; out.mutex.release(); if (exc != null) throw exc;}
- public static function runOnField(com:Dynamic,config:AnalyzerConfigData,c:TClass,cf:TClassField):Void {var out:ExceptionOutput = {value:null,mutex:new sys.thread.Mutex()}; runOnFieldInternal(com,out,config,c,cf); checkExcOut(out);}
- public static function runOnClass(com:Dynamic,out:ExceptionOutput,pool:Dynamic,config:AnalyzerConfigData,c:TClass):Void {
+ public static function runOnField(com:context.SafeCom.SafeContext,config:AnalyzerConfigData,c:TClass,cf:TClassField):Void {var out:ExceptionOutput = {value:null,mutex:new sys.thread.Mutex()}; runOnFieldInternal(com,out,config,c,cf); checkExcOut(out);}
+ public static function runOnClass(com:context.SafeCom.SafeContext,out:ExceptionOutput,pool:Dynamic,config:AnalyzerConfigData,c:TClass):Void {
   config = AnalyzerConfig.updateConfigFromMeta(com,config,c.clMeta); var fields = [];
   function processField(stat:Bool,cf:TClassField):Void switch cf.cfKind {case Var({vRead:_,vWrite:_}) if (!stat):case _:fields.push(cf); for (overloadedField in cf.cfOverloads) fields.push(overloadedField);}
   for (cf in c.clOrderedFields) processField(false,cf); for (cf in c.clOrderedStatics) processField(true,cf); if (c.clConstructor != null) processField(false,c.clConstructor);
   context.Parallel.ParallelArray.iter(pool,function(cf) runOnFieldInternal(com,out,config,c,cf),fields);
   var init = core.TOther.TClassTools.getClInit(c); if (init != null) {var tf:TFunc = {tfArgs:[],tfType:init.etype,tfExpr:init}; var e = mk(TFunction(tf),tfun([],init.etype),init.epos); var config:AnalyzerConfigData = core.ds.Record.copy(config); config.optimize = false; var actx = createAnalyzerContext(com,config,Globals.sTypePath(c.clPath) + ".__init__",e); var e = runOnExpr(actx,e); var body = switch e.eexpr {case TFunction(tf):tf.tfExpr; case _:throw "Analyzer.runOnClass expected function";}; core.TOther.TClassTools.setClInit(c,body);}
  }
- public static function runOnType(com:Dynamic,out:ExceptionOutput,pool:Dynamic,config:AnalyzerConfigData,t:ModuleType):Void switch t {case TClassDecl(c) if (AnalyzerConfig.isIgnored(c.clMeta)):case TClassDecl(c):runOnClass(com,out,pool,config,c); case TEnumDecl(_) | TTypeDecl(_) | TAbstractDecl(_):}
+ public static function runOnType(com:context.SafeCom.SafeContext,out:ExceptionOutput,pool:Dynamic,config:AnalyzerConfigData,t:ModuleType):Void switch t {case TClassDecl(c) if (AnalyzerConfig.isIgnored(c.clMeta)):case TClassDecl(c):runOnClass(com,out,pool,config,c); case TEnumDecl(_) | TTypeDecl(_) | TAbstractDecl(_):}
  public static function runOnTypes(scom:context.SafeCom.SafeContext,pool:Dynamic,allTypes:Array<ModuleType>,newTypes:Array<ModuleType>):Void {
   var config = AnalyzerConfig.getBaseConfig(scom); withTimer(scom.timerCtx,config.detailTimes,null,["other"],function() {if (config.optimize && config.purityInference) withTimer(scom.timerCtx,config.detailTimes,null,["optimize","purity-inference"],function() Purity.infer(allTypes)); var out:ExceptionOutput = {value:null,mutex:new sys.thread.Mutex()}; context.Parallel.ParallelArray.iter(pool,function(t) runOnType(scom,out,pool,config,t),newTypes); checkExcOut(out);});
  }

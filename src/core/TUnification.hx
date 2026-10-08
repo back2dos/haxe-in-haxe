@@ -70,7 +70,7 @@ class TypeRecursion extends haxe.Exception {
 class Monomorph {
  public static function create():TMono return {tmType:null,tmDownConstraints:[],tmUpConstraints:[],tmModifiers:[]};
  public static function addModifier(m:TMono,mod:TMonoModifier):Void m.tmModifiers.unshift(mod);
- public static function hasModifier(m:TMono,f:TMonoModifier->Bool):Bool return Lambda.exists(m.tmModifiers,f);
+ public static function hasModifier(m:TMono,f:TMonoModifier->Bool):Bool return core.ds.ArrayTools.exists(m.tmModifiers,f);
  public static function isDynamic(m:TMono):Bool return hasModifier(m,function(mod) return switch mod {case MDynamic:true; case _:false;});
  public static function addUpConstraint(m:TMono,c:{type:T,name:Null<String>}):Void {
   m.tmUpConstraints.unshift(c); switch c.type {case TMono(m2):m2.tmDownConstraints.unshift(MMono(m,c.name)); case _:}
@@ -190,10 +190,10 @@ class TUnification {
    if(t==a) return true;
    return switch t {
     case TMono(m):m.tmType!=null && loop(m.tmType);
-    case TEnum(_,tl):Lambda.exists(tl,loop);
-    case TInst({clKind:KTypeParameter(ttp)},tl):switch uctx.typeParamMode {case TpDefault:Lambda.exists(tl,loop);case TpDefinition(c):c.knownTypeParams.indexOf(ttp)<0;}
-    case TInst(_,tl),TType(_,tl),TAbstract(_,tl):Lambda.exists(tl,loop);
-    case TFun(s):Lambda.exists(s.args,function(a) return loop(a.type)) || loop(s.ret);
+    case TEnum(_,tl):core.ds.ArrayTools.exists(tl,loop);
+    case TInst({clKind:KTypeParameter(ttp)},tl):switch uctx.typeParamMode {case TpDefault:core.ds.ArrayTools.exists(tl,loop);case TpDefinition(c):c.knownTypeParams.indexOf(ttp)<0;}
+    case TInst(_,tl),TType(_,tl),TAbstract(_,tl):core.ds.ArrayTools.exists(tl,loop);
+    case TFun(s):core.ds.ArrayTools.exists(s.args,function(a) return loop(a.type)) || loop(s.ret);
     case TDynamic(null):false;
     case TDynamic(t):loop(t);
     case TLazy(f):loop(lazyType(f));
@@ -386,9 +386,9 @@ class TUnification {
     function loop(cl:TClass,tl:Array<T>):Bool {
      if(cl==c2) {unifyTypeParams(c,a,b,tl,tl2);return true;}
      if(cl.clSuper!=null) {var s=cl.clSuper;if(loop(s.cls,s.params.map(function(t) return applyParams(cl.clParams,tl,t)))) return true;}
-     if(Lambda.exists(cl.clImplements,function(s) return loop(s.cls,s.params.map(function(t) return applyParams(cl.clParams,tl,t))))) return true;
+     if(core.ds.ArrayTools.exists(cl.clImplements,function(s) return loop(s.cls,s.params.map(function(t) return applyParams(cl.clParams,tl,t))))) return true;
      return switch cl.clKind {
-      case KTypeParameter(p):Lambda.exists(getConstraints(p),function(t) return switch follow(t) {case TInst(cs,tls):loop(cs,tls.map(function(t) return applyParams(cl.clParams,tl,t)));case TAbstract(aa,tl):unifiesTo(c,a,b,aa,tl);case _:false;});
+      case KTypeParameter(p):core.ds.ArrayTools.exists(getConstraints(p),function(t) return switch follow(t) {case TInst(cs,tls):loop(cs,tls.map(function(t) return applyParams(cl.clParams,tl,t)));case TAbstract(aa,tl):unifiesTo(c,a,b,aa,tl);case _:false;});
       case _:false;
      }
     }
@@ -402,7 +402,7 @@ class TUnification {
     } catch(e:Unify_error) {error([cannotUnify(a,b),i==0 ? InvalidReturnType : InvalidFunctionArgument(i,s1.args.length)].concat(e.errors));}
    case [TInst(cl,tl),TAnon(an)]:
     if(PMap.isEmpty(an.aFields)) switch cl.clKind {
-     case KTypeParameter(p):if(!Lambda.exists(getConstraints(p),function(t) return switch follow(t) {case TInst(_,_),TAnon(_):true;case _:false;})) error([cannotUnify(a,b)]);
+     case KTypeParameter(p):if(!core.ds.ArrayTools.exists(getConstraints(p),function(t) return switch follow(t) {case TInst(_,_),TAnon(_):true;case _:false;})) error([cannotUnify(a,b)]);
      case _:
     }
     cl.clBuild();
@@ -428,7 +428,7 @@ class TUnification {
         c.unifyNewMonos=old;
        case _:try {unifyWithAccess(c,f1,ft,f2);} catch(e:Unify_error) {error([invalidField(n)].concat(e.errors));}
       }
-      for(f2o in f2.cfOverloads) if(!Lambda.exists([f1].concat(f1.cfOverloads),function(f1o) return typeIseqCustom(c,f1o.cfType,f2o.cfType))) error([MissingOverload(f1,f2o.cfType)]);
+      for(f2o in f2.cfOverloads) if(!core.ds.ArrayTools.exists([f1].concat(f1.cfOverloads),function(f1o) return typeIseqCustom(c,f1o.cfType,f2o.cfType))) error([MissingOverload(f1,f2o.cfType)]);
       if(!hasClassFieldFlag(f1,CfMaybeUsed)) {
        addClassFieldFlag(f1,CfMaybeUsed);
        switch f2.cfKind {
@@ -454,7 +454,7 @@ class TUnification {
    case [TInst(cl,tl),TAbstract(ab,[t1])] if(pathIs(ab.aPath,"haxe","Constructible")):
     try {
      switch cl.clKind {
-      case KTypeParameter(p):if(!Lambda.exists(getConstraints(p),function(t) return switch follow(t) {case TAbstract(ab,[t2]) if(pathIs(ab.aPath,"haxe","Constructible")):typeIseqCustom(c,t1,t2);case _:false;})) error([cannotUnify(a,b)]);
+      case KTypeParameter(p):if(!core.ds.ArrayTools.exists(getConstraints(p),function(t) return switch follow(t) {case TAbstract(ab,[t2]) if(pathIs(ab.aPath,"haxe","Constructible")):typeIseqCustom(c,t1,t2);case _:false;})) error([cannotUnify(a,b)]);
       case _:
        var found=classField(cl,tl,"new");if(!hasClassFieldFlag(found.field,CfPublic)) error([invalidVisibility("new")]);
        try {unifyCustom(c,found.type,t1);} catch(e:Unify_error) {error([cannotUnify(a,b)].concat(e.errors));}
@@ -479,7 +479,7 @@ class TUnification {
    case [TAbstract(aa,tl),_]:unifyTo(c,a,b,aa,tl);
    case [TInst(cl,pl),TAbstract(bb,tl)] if(switch cl.clKind {case KTypeParameter(_):true;case _:false;}):
     var p=switch cl.clKind {case KTypeParameter(p):p;case _:Globals.die("","tUnification.ml");};
-    if(!Lambda.exists(getConstraints(p),function(t) {var t=applyParams(cl.clParams,pl,t);try {unifyCustom(c,t,b);return true;} catch(_:Unify_error) {return false;}})) unifyFrom(c,a,b,bb,tl);
+    if(!core.ds.ArrayTools.exists(getConstraints(p),function(t) {var t=applyParams(cl.clParams,pl,t);try {unifyCustom(c,t,b);return true;} catch(_:Unify_error) {return false;}})) unifyFrom(c,a,b,bb,tl);
    case [_,TAbstract(bb,tl)]:unifyFrom(c,a,b,bb,tl);
    case _:error([cannotUnify(a,b)]);
   }
@@ -516,9 +516,9 @@ class TUnification {
  public static function unifyAbstracts(c:UnificationContext,a:T,b:T,a1:TAbstract,tl1:Array<T>,a2:TAbstract,tl2:Array<T>):Void {if(!unifiesAbstracts(c,a,b,a1,tl1,a2,tl2)) error([cannotUnify(a,b)]);}
  public static function unifyFrom(c:UnificationContext,a:T,b:T,ab:TAbstract,tl:Array<T>):Void {if(!unifiesFrom(c,a,b,ab,tl)) error([cannotUnify(a,b)]);}
  public static function unifyTo(c:UnificationContext,a:T,b:T,ab:TAbstract,tl:Array<T>):Void {if(!unifiesTo(c,a,b,ab,tl)) error([cannotUnify(a,b)]);}
- public static function unifiesAbstracts(c:UnificationContext,a:T,b:T,a1:TAbstract,tl1:Array<T>,a2:TAbstract,tl2:Array<T>):Bool return unifiesWithAbstract(c,a,b,function(c) return Lambda.exists(a1.aTo,function(t) return unifiesToDirect(c,a,b,a1,tl1,t)) || Lambda.exists(a2.aFrom,function(t) return unifiesFromDirect(c,a,b,a2,tl2,t)));
- public static function unifiesFrom(c:UnificationContext,a:T,b:T,ab:TAbstract,tl:Array<T>):Bool return unifiesWithAbstract(c,a,b,function(c) return Lambda.exists(ab.aFrom,function(t) return unifiesFromDirect(c,a,b,ab,tl,t)));
- public static function unifiesTo(c:UnificationContext,a:T,b:T,ab:TAbstract,tl:Array<T>):Bool return unifiesWithAbstract(c,a,b,function(c) return Lambda.exists(ab.aTo,function(t) return unifiesToDirect(c,a,b,ab,tl,t)));
+ public static function unifiesAbstracts(c:UnificationContext,a:T,b:T,a1:TAbstract,tl1:Array<T>,a2:TAbstract,tl2:Array<T>):Bool return unifiesWithAbstract(c,a,b,function(c) return core.ds.ArrayTools.exists(a1.aTo,function(t) return unifiesToDirect(c,a,b,a1,tl1,t)) || core.ds.ArrayTools.exists(a2.aFrom,function(t) return unifiesFromDirect(c,a,b,a2,tl2,t)));
+ public static function unifiesFrom(c:UnificationContext,a:T,b:T,ab:TAbstract,tl:Array<T>):Bool return unifiesWithAbstract(c,a,b,function(c) return core.ds.ArrayTools.exists(ab.aFrom,function(t) return unifiesFromDirect(c,a,b,ab,tl,t)));
+ public static function unifiesTo(c:UnificationContext,a:T,b:T,ab:TAbstract,tl:Array<T>):Bool return unifiesWithAbstract(c,a,b,function(c) return core.ds.ArrayTools.exists(ab.aTo,function(t) return unifiesToDirect(c,a,b,ab,tl,t)));
  public static function unifiesFromDirect(c:UnificationContext,a:T,b:T,ab:TAbstract,tl:Array<T>,t:T):Bool return doesFuncUnify(function() {var t=applyParams(ab.aParams,tl,t),c=getAbstractContext(c,a,b,ab),f=getAbstractUnifyFunc(c,EqRightDynamic);f(a,t);});
  public static function unifiesToDirect(c:UnificationContext,a:T,b:T,ab:TAbstract,tl:Array<T>,t:T):Bool return doesFuncUnify(function() {var t=applyParams(ab.aParams,tl,t),c=getAbstractContext(c,a,b,ab),f=getAbstractUnifyFunc(c,EqStrict);f(t,b);});
  public static function unifiesFromField(c:UnificationContext,a:T,b:T,ab:TAbstract,tl:Array<T>,entry:{type:T,field:TClassField}):Bool return doesFuncUnify(function() {
@@ -555,7 +555,7 @@ class TUnification {
   function unifiesAbstract(c:UnificationContext,a:T,b:T,ab:TAbstract,tl:Array<T>,ats:Array<T>):Bool {
    try {
     var c=getAbstractContext(c,a,b,ab);
-    return recStackDefault(c.abstractCastStack,pair(a,b),function(p) return fastEqPair(pair(a,b),p),function() return Lambda.exists(ats,function(at) return doesFuncUnifyArg(function(at) {
+    return recStackDefault(c.abstractCastStack,pair(a,b),function(p) return fastEqPair(pair(a,b),p),function() return core.ds.ArrayTools.exists(ats,function(at) return doesFuncUnifyArg(function(at) {
      var at=applyParams(ab.aParams,tl,at);if(ats==ab.aTo) withVariance(c,f,at,b);else withVariance(c,f,a,at);
     },at)),false);
    } catch(_:Unify_error) {return false;}

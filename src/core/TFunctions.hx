@@ -272,9 +272,9 @@ class TFunctions {
 	};
 	public static function hasMono(t:T):Bool return switch t {
 		case TMono(r):r.tmType == null || hasMono(r.tmType);
-		case TInst(_,pl) | TEnum(_,pl) | TAbstract(_,pl) | TType(_,pl):Lambda.exists(pl,hasMono);
+		case TInst(_,pl) | TEnum(_,pl) | TAbstract(_,pl) | TType(_,pl):core.ds.ArrayTools.exists(pl,hasMono);
 		case TDynamic(_):false;
-		case TFun(s):hasMono(s.ret) || Lambda.exists(s.args,function(a) return hasMono(a.type));
+		case TFun(s):hasMono(s.ret) || core.ds.ArrayTools.exists(s.args,function(a) return hasMono(a.type));
 		case TAnon(a):var result = false; for (cf in a.aFields) result = hasMono(cf.cfType) || result; result;
 		case TLazy(f):hasMono(lazyType(f));
 	};
@@ -304,7 +304,7 @@ class TFunctions {
 	};
 	public static function getConstraints(ttp:TypedTypeParam):TParams return ttp.ttpConstraints == null ? [] : ttp.ttpConstraints.force();
 	public static function hasCtorConstraint(c:TClass):Bool return switch c.clKind {
-		case KTypeParameter(ttp):Lambda.exists(getConstraints(ttp),function(t) return switch follow(t) {case TAnon(a) if (a.aFields.exists("new")):true;case TAbstract(a,_) if (a.aPath.pack.join(".") == "haxe" && a.aPath.name == "Constructible"):true;case _:false;});
+		case KTypeParameter(ttp):core.ds.ArrayTools.exists(getConstraints(ttp),function(t) return switch follow(t) {case TAnon(a) if (a.aFields.exists("new")):true;case TAbstract(a,_) if (a.aPath.pack.join(".") == "haxe" && a.aPath.name == "Constructible"):true;case _:false;});
 		case _:false;
 	};
 	public static function fieldName(f:TFieldAccess):String return switch f {case FAnon(f) | FInstance(_,_,f) | FStatic(_,f) | FClosure(_,f):f.cfName;case FEnum(_,f):f.efName;case FDynamic(n):n;};

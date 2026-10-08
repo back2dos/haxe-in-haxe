@@ -16,9 +16,9 @@ class FiltersCommon {
 	}
 	public static function isOverridden(cls:TClass, field:TClassField):Bool {
 		function loopInheritance(c:TClass):Bool {
-			return c.clFields.exists(field.cfName) || Lambda.exists(c.clDescendants, loopInheritance);
+			return c.clFields.exists(field.cfName) || core.ds.ArrayTools.exists(c.clDescendants, loopInheritance);
 		}
-		return Lambda.exists(cls.clDescendants, loopInheritance);
+		return core.ds.ArrayTools.exists(cls.clDescendants, loopInheritance);
 	}
 	public static function isCached(com:CommonContext, t:ModuleType):Bool {
 		var m = TypeOps.tInfos(t).mtModule.mExtra;

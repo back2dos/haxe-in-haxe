@@ -32,10 +32,10 @@ class AnalyzerTexpr {
  }
  public static function canThrow(e:TExpr):Bool return switch e.eexpr {case TConst(_) | TLocal(_) | TTypeExpr(_) | TFunction(_) | TBlock(_):false; case TCall(_,_) | TNew(_,_,_) | TThrow(_) | TField(_,_) | TArray(_,_):true; case TCast(_,mt) if (mt != null):true; case _:checkExpr(canThrow,e);};
  public static function canBeInlined(e:TExpr):Bool return switch e.eexpr {case TConst(_):true; case TParenthesis(e1) | TMeta(_,e1):canBeInlined(e1); case _:false;};
- public static function targetHandlesUnops(com:Dynamic):Bool return switch com.platform {case Lua | Python:false; case _:true;};
- public static function targetHandlesAssignOps(com:Dynamic,e2:TExpr):Bool return switch com.platform {case Php:!hasSideEffect(e2); case Lua:false; case Cpp if (!core.Define.defined(com.defines,core.Define.Cppia)):!hasSideEffect(e2); case _:true;};
- public static function targetHandlesSideEffectOrder(com:Dynamic):Bool return switch com.platform {case Cpp:core.Define.defined(com.defines,core.Define.Cppia); case Php:false; case _:true;};
- public static function canBeUsedAsValue(com:Dynamic,e:TExpr):Bool {
+ public static function targetHandlesUnops(com:context.SafeCom.SafeContext):Bool return switch com.platform {case Lua | Python:false; case _:true;};
+ public static function targetHandlesAssignOps(com:context.SafeCom.SafeContext,e2:TExpr):Bool return switch com.platform {case Php:!hasSideEffect(e2); case Lua:false; case Cpp if (!core.Define.defined(com.defines,core.Define.Cppia)):!hasSideEffect(e2); case _:true;};
+ public static function targetHandlesSideEffectOrder(com:context.SafeCom.SafeContext):Bool return switch com.platform {case Cpp:core.Define.defined(com.defines,core.Define.Cppia); case Php:false; case _:true;};
+ public static function canBeUsedAsValue(com:context.SafeCom.SafeContext,e:TExpr):Bool {
   function loop(e:TExpr):Bool return switch e.eexpr {case TBlock([e]):loop(e); case TBlock(_) | TSwitch(_) | TTry(_,_) | TReturn(_) | TThrow(_) | TBreak | TContinue:false; case TCall({eexpr:TConst(TString("phi"))},_):false; case TUnop(Increment | Decrement,_,_) if (!targetHandlesUnops(com)):false; case TFunction(_):true; case _:!checkExpr(e -> !loop(e),e);};
   switch [com.platform,e.eexpr] {case [Cpp | Jvm | Flash | Lua,TConst(TNull)]:return false; case _:} return loop(e);
  }
@@ -44,7 +44,7 @@ class AnalyzerTexpr {
  static var r = ~/^[A-Za-z0-9_]+$/;
  public static function isUnboundCallThatMightHaveSideEffects(s:String,el:Array<TExpr>):Bool return switch [s,el] {case ["__js__",[{eexpr:TConst(TString(code))}]] if (r.match(code)):false; case _:true;};
  public static function maybeInheritVarName(v:TVar,alias:TVar):Void if (v.vName != alias.vName) switch [alias.vKind,v.vKind] {case [VUser(_),VUser(_)]:case [VUser(_),_]:v.vName = alias.vName; case _:}
- public static function typeChangeOk(com:Dynamic,t1:T,t2:T):Bool {
+ public static function typeChangeOk(com:context.SafeCom.SafeContext,t1:T,t2:T):Bool {
   if (t1 == t2) return true; function map(t:T):T return switch t {case TMono(r):r.tmType == null ? tDynamic : map(r.tmType); case _:core.TFunctions.map(map,t);}; t1 = map(t1); t2 = map(t2);
   function nullable(t:T):Bool return switch t {case TMono(r):r.tmType != null && nullable(r.tmType); case TAbstract({aPath:{pack:[],name:"Null"}},[_]):true; case TLazy(f):nullable(lazyType(f)); case TType(t,tl):nullable(applyTypedef(t,tl)); case TFun(_) | TInst({clKind:KTypeParameter(_)},_):false; case TAbstract(a,_) if (Meta.has(CoreType,a.aMeta)):!Meta.has(NotNull,a.aMeta); case TAbstract(a,tl):!Meta.has(NotNull,a.aMeta) && nullable(applyParams(a.aParams,tl,a.aThis)); case _:true;};
   if (t1 == t2) return true; return switch [follow(t1),follow(t2)] {case [TDynamic(_),_] | [_,TDynamic(_)]:false; case _:com.platformConfig.pfStatic && nullable(t1) != nullable(t2) ? false : typeIseq(t1,t2);};
@@ -53,7 +53,7 @@ class AnalyzerTexpr {
  public static function dynarrayMapi<A>(f:Int->A->A,d:Array<A>):Void for (i in 0...d.length) d[i] = f(i,d[i]);
 }
 class TexprFilter {
- public static function apply(com:Dynamic,e:TExpr):TExpr {
+ public static function apply(com:context.SafeCom.SafeContext,e:TExpr):TExpr {
   function loop(e:TExpr):TExpr return switch e.eexpr {
    case TBinop(op = OpBoolAnd | OpBoolOr,e1,e2):var cond = op == OpBoolOr ? mk(TUnop(Not,Prefix,e1),com.basic.tbool,e.epos) : e1; var otherwise = mk(TConst(TBool(op == OpBoolOr)),com.basic.tbool,e.epos); loop(mk(TIf(cond,e2,otherwise),e.etype,e.epos));
    case TBinop(OpAssignOp(op),e1 = {eexpr:TLocal(_)},e2):var inner = withExpr(e,TBinop(op,e1,e2)); loop(withExpr(inner,TBinop(OpAssign,e1,inner)));
@@ -139,7 +139,7 @@ class FusionState {
 }
 class Fusion {
  public static function isAssignOp(op:Binop):Bool return switch op {case OpAdd | OpMult | OpDiv | OpSub | OpAnd | OpOr | OpXor | OpShl | OpShr | OpUShr | OpMod:true; case OpAssign | OpEq | OpNotEq | OpGt | OpGte | OpLt | OpLte | OpBoolAnd | OpBoolOr | OpAssignOp(_) | OpInterval | OpIn | OpNullCoal | OpArrow:false;};
- public static function useAssignOp(com:Dynamic,op:Binop,e1:TExpr,e2:TExpr,e3:TExpr):Bool {if (com.platform == Eval) {e1 = Texpr.skip(e1); e2 = Texpr.skip(e2);} return isAssignOp(op) && AnalyzerTexpr.targetHandlesAssignOps(com,e3) && Texpr.equal(e1,e2) && !hasSideEffect(e1);}
+ public static function useAssignOp(com:context.SafeCom.SafeContext,op:Binop,e1:TExpr,e2:TExpr,e3:TExpr):Bool {if (com.platform == Eval) {e1 = Texpr.skip(e1); e2 = Texpr.skip(e2);} return isAssignOp(op) && AnalyzerTexpr.targetHandlesAssignOps(com,e3) && Texpr.equal(e1,e2) && !hasSideEffect(e1);}
  public static function handleAssignedLocal(actx:AnalyzerContext,v1:TVar,value:TExpr,el:Array<TExpr>):Null<Array<TExpr>> {
   var config = actx.config; var com = actx.com; var found = false; var blocked = false; var ir = InterferenceReport.fromTexpr(value);
   if (config.fusionDebug) Sys.println("INTERFERENCE: " + InterferenceReport.toString(ir) + "\nINTO: " + core.TPrinting.sExprPretty(true,"",false,core.TPrinting.sType.bind(core.TPrinting.printContext()),mk(TBlock(el),tDynamic,Globals.nullPos)));
@@ -182,38 +182,46 @@ class Fusion {
     case _:mapExpr(replace,e);
    };
   }
-  try {var out = []; for (i in 0...el.length) {var mapped:TExpr = actx.withTimer(["<-","fusion","fuse","replace"],function() return replace(el[i])); out.push(mapped); if (found) {out = out.concat(el.slice(i + 1)); break;}} if (!found) throw new TypeExit(); if (config.fusionDebug) Sys.println("YES: " + AnalyzerTexpr.sExprPretty(mk(TBlock(out),tDynamic,Globals.nullPos))); return out;}
+  try {var out = []; for (i in 0...el.length) {var mapped:TExpr = optimization.Analyzer.Run.timed(actx,["<-","fusion","fuse","replace"],function() return replace(el[i])); out.push(mapped); if (found) {out = out.concat(el.slice(i + 1)); break;}} if (!found) throw new TypeExit(); if (config.fusionDebug) Sys.println("YES: " + AnalyzerTexpr.sExprPretty(mk(TBlock(out),tDynamic,Globals.nullPos))); return out;}
   catch (_:TypeExit) {if (config.fusionDebug) Sys.println("NO: " + haxe.CallStack.toString(haxe.CallStack.exceptionStack())); return null;}
  }
  public static function blockElement(config:AnalyzerConfigData,state:FusionState,loopBottom:Bool,acc:Array<TExpr>,el:Array<TExpr>):Array<TExpr> {
-  function loop(acc:Array<TExpr>,el:Array<TExpr>):Array<TExpr> {
-   if (el.length == 0) return acc; var e = el[0]; var rest = el.slice(1); return switch e.eexpr {
-    case TBinop(OpAssign,{eexpr:TLocal(v1)},{eexpr:TLocal(v2)}) if (v1 == v2):loop(acc,rest);
-    case TBinop(OpAssign | OpAssignOp(_),_,_) | TUnop(Increment | Decrement,_,_):loop([e].concat(acc),rest);
-    case TLocal(_) if (!config.localDce):loop([e].concat(acc),rest);
-    case TLocal(v):state.decReads(v); loop(acc,rest);
-    case TField(_,fa) if (PurityStateTools.isExplicitlyImpure(fa)):loop([e].concat(acc),rest);
-    case TFunction(_) | TConst(_) | TTypeExpr(_):loop(acc,rest);
-    case TMeta(meta = {meta:core.MetaList.StrictMeta.Pure},_) if (PurityStateTools.getPurityFromMeta([meta]) == Pure):loop(acc,rest);
-    case TCall({eexpr:TField(e1,fa)},args) if (PurityStateTools.isPureFieldAccess(fa) && config.localDce):loop(acc,[e1].concat(args).concat(rest));
-    case TNew(c,tl,args) if (c.clConstructor != null && PurityStateTools.isPure(c,c.clConstructor) && config.localDce):loop(acc,args.concat(rest));
-    case TIf({eexpr:TConst(TBool(t))},a,b):loop(acc,t ? [a].concat(rest) : b == null ? rest : [b].concat(rest));
-    case TSwitch(s):var folded = Optimizer.checkConstantSwitch(s); folded == null ? loop([e].concat(acc),rest) : loop(acc,[folded].concat(rest));
-    case TParenthesis(e1) | TMeta(_,e1) | TCast(e1,null) | TField(e1,_) | TUnop(_,_,e1) | TEnumIndex(e1) | TEnumParameter(e1,_,_):loop(acc,[e1].concat(rest));
-    case TArray(e1,e2) | TBinop(_,e1,e2):loop(acc,[e1,e2].concat(rest));
-    case TArrayDecl(args) | TCall({eexpr:TField(_,FEnum(_,_))},args):loop(acc,args.concat(rest));
-    case TObjectDecl(fl):loop(acc,fl.map(f -> f.expr).concat(rest));
-    case TIf(e1,e2,null) if (!hasSideEffect(e2)):loop(acc,[e1].concat(rest));
-    case TIf(e1,e2,e3) if (e3 != null && !hasSideEffect(e2) && !hasSideEffect(e3)):loop(acc,[e1].concat(rest));
-    case TBlock([e1]):loop(acc,[e1].concat(rest)); case TBlock([]):loop(acc,rest);
-    case TContinue if (loopBottom):loop([],rest);
-    case _:loop([e].concat(acc),rest);
-   };
-  } return loop(acc,el);
+  // Upstream walks OCaml lists (`e :: acc`, `e1 :: rest`); with arrays that is a
+  // copy per step. Same order here: `stack` is the work list with its head at the
+  // end, `accRev` the accumulator with its head at the end.
+  var stack = el.copy(); stack.reverse();
+  var accRev = acc.copy(); accRev.reverse();
+  inline function pushAll(xs:Array<TExpr>):Void {var i = xs.length; while (i > 0) stack.push(xs[--i]);}
+  while (stack.length > 0) {
+   var e = stack.pop();
+   switch e.eexpr {
+    case TBinop(OpAssign,{eexpr:TLocal(v1)},{eexpr:TLocal(v2)}) if (v1 == v2):
+    case TBinop(OpAssign | OpAssignOp(_),_,_) | TUnop(Increment | Decrement,_,_):accRev.push(e);
+    case TLocal(_) if (!config.localDce):accRev.push(e);
+    case TLocal(v):state.decReads(v);
+    case TField(_,fa) if (PurityStateTools.isExplicitlyImpure(fa)):accRev.push(e);
+    case TFunction(_) | TConst(_) | TTypeExpr(_):
+    case TMeta(meta = {meta:core.MetaList.StrictMeta.Pure},_) if (PurityStateTools.getPurityFromMeta([meta]) == Pure):
+    case TCall({eexpr:TField(e1,fa)},args) if (PurityStateTools.isPureFieldAccess(fa) && config.localDce):pushAll(args); stack.push(e1);
+    case TNew(c,tl,args) if (c.clConstructor != null && PurityStateTools.isPure(c,c.clConstructor) && config.localDce):pushAll(args);
+    case TIf({eexpr:TConst(TBool(t))},a,b):if (t) stack.push(a) else if (b != null) stack.push(b);
+    case TSwitch(s):var folded = Optimizer.checkConstantSwitch(s); if (folded == null) accRev.push(e) else stack.push(folded);
+    case TParenthesis(e1) | TMeta(_,e1) | TCast(e1,null) | TField(e1,_) | TUnop(_,_,e1) | TEnumIndex(e1) | TEnumParameter(e1,_,_):stack.push(e1);
+    case TArray(e1,e2) | TBinop(_,e1,e2):stack.push(e2); stack.push(e1);
+    case TArrayDecl(args) | TCall({eexpr:TField(_,FEnum(_,_))},args):pushAll(args);
+    case TObjectDecl(fl):pushAll(fl.map(f -> f.expr));
+    case TIf(e1,e2,null) if (!hasSideEffect(e2)):stack.push(e1);
+    case TIf(e1,e2,e3) if (e3 != null && !hasSideEffect(e2) && !hasSideEffect(e3)):stack.push(e1);
+    case TBlock([e1]):stack.push(e1); case TBlock([]):
+    case TContinue if (loopBottom):accRev = [];
+    case _:accRev.push(e);
+   }
+  }
+  accRev.reverse(); return accRev;
  }
  public static function apply(actx:AnalyzerContext,e:TExpr):TExpr {
-  var config = actx.config; var com = actx.com; var state = new FusionState(); actx.withTimer(["<-","fusion","infer_from_texpr"],function() state.inferFromTexpr(e));
-  function blockElementTimed(bottom:Bool,acc:Array<TExpr>,el:Array<TExpr>):Array<TExpr> return actx.withTimer(["<-","fusion","block_element"],function() return blockElement(config,state,bottom,acc,el));
+  var config = actx.config; var com = actx.com; var state = new FusionState(); optimization.Analyzer.Run.timed(actx,["<-","fusion","infer_from_texpr"],function() state.inferFromTexpr(e));
+  function blockElementTimed(bottom:Bool,acc:Array<TExpr>,el:Array<TExpr>):Array<TExpr> return optimization.Analyzer.Run.timed(actx,["<-","fusion","block_element"],function() return blockElement(config,state,bottom,acc,el));
   function canBeFused(v:TVar,e:TExpr):Bool {
    var uses = state.getReads(v); var writes = state.getWrites(v); var asValue = AnalyzerTexpr.canBeUsedAsValue(com,e); var generated = switch v.vKind {case VUser(_) | VInlined | VInlinedConstructorVariable(_):false; case _:true;}; var typeParams = v.vExtra != null && v.vExtra.vParams.length > 0;
    function impure(e:TExpr):Bool return switch e.eexpr {case TField(_,FStatic(cl,cf) | FInstance(cl,_,cf)) if (hasClassFlag(cl,CExtern)):!(Meta.has(CoreApi,cl.clMeta) || PurityStateTools.isPure(cl,cf)); case _:checkExpr(impure,e);};
@@ -251,7 +259,7 @@ class Fusion {
     case _:
    } return fuse([first].concat(acc),rest);
   }
-  function timedFuse(el:Array<TExpr>):Array<TExpr> return actx.withTimer(["<-","fusion","fuse"],function() return fuse([],el));
+  function timedFuse(el:Array<TExpr>):Array<TExpr> return optimization.Analyzer.Run.timed(actx,["<-","fusion","fuse"],function() return fuse([],el));
   var loop:TExpr->TExpr = null;
   function block(bottom:Bool,el:Array<TExpr>,t:T,p:Pos):TExpr {
    el = el.map(loop); el.reverse(); el = blockElementTimed(bottom,[],el); el = timedFuse(el); el = blockElementTimed(false,[],el);

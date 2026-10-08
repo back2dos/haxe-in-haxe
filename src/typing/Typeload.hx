@@ -35,6 +35,7 @@ import syntax.Parser;
 import context.display.ImportHandling;
 import context.DeferredServices;
 using Lambda;
+using core.ds.ArrayTools;
 import core.Define;
 
 // haxe/src/typing/typeload.ml — mechanical draft; not compile-validated.

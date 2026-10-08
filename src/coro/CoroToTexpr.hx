@@ -84,7 +84,7 @@ class CoroToTexpr {
    };state.csEl=state.csEl.map(mapper);if(state.csElTail!=null)state.csElTail=state.csElTail.map(mapper);
   }
   var used=new CoroIntSet();for(s in states)used=used.union(s.csWrites.union(s.csReads));for(id in fieldOrder)if(!used.has(id))fields.remove(id);
-  for(state in states){var restoring=[];for(id in state.csWrites.union(state.csReads).elements())if(!Lambda.exists(state.csDeclarations,function(v)return v.vId==id)){var v=state.csMappedLocal.get(id);var field=fields.get(id);restoring.push(b.varInit(v,b.instanceField(econtinuation,cls,params,field,field.cfType)));}
+  for(state in states){var restoring=[];for(id in state.csWrites.union(state.csReads).elements())if(!core.ds.ArrayTools.exists(state.csDeclarations,function(v)return v.vId==id)){var v=state.csMappedLocal.get(id);var field=fields.get(id);restoring.push(b.varInit(v,b.instanceField(econtinuation,cls,params,field,field.cfType)));}
    var saving=[for(id in state.csWrites.elements()){var v=state.csMappedLocal.get(id);var field=fields.get(id);b.assign(b.instanceField(econtinuation,cls,params,field,field.cfType),b.local(v,v.vPos));}];
    state.csEl=restoring.concat(state.csEl).concat(saving).concat(state.csElTail==null?[]:state.csElTail);
   }

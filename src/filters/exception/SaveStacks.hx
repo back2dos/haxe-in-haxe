@@ -12,8 +12,8 @@ class SaveStacks {
 	public static function insertSaveStacks(ectx:ExceptionContext, scom:context.SafeCom.SafeContext):TExpr->TExpr {
 		function containsInsertionPoints(e:TExpr):Bool return switch e.eexpr {
 			case TTry(body, catches):
-				Lambda.exists(catches, c -> Meta.has(NeedsExceptionStack, c.variable.vMeta)) || containsInsertionPoints(body)
-					|| Lambda.exists(catches, c -> containsInsertionPoints(c.expr));
+				core.ds.ArrayTools.exists(catches, c -> Meta.has(NeedsExceptionStack, c.variable.vMeta)) || containsInsertionPoints(body)
+					|| core.ds.ArrayTools.exists(catches, c -> containsInsertionPoints(c.expr));
 			case _: core.Texpr.checkExpr(containsInsertionPoints, e);
 		};
 		function saveExceptionStack(catchVar:TVar):TExpr {

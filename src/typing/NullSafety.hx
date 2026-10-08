@@ -17,6 +17,7 @@ import context.PurityState.PurityStateTools as PurityState;
 import filters.FiltersCommon;
 import syntax.Lexer;
 using Lambda;
+using core.ds.ArrayTools;
 import core.MetaList.StrictMeta as MetaTag;
 import core.Globals.Pos;
 import core.TType;

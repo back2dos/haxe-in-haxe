@@ -147,7 +147,7 @@ class SourceParser {
     case EEnum(d):build(d.name,d.params,d.flags.contains(EPrivate),decl.pos);
     case ETypedef(d):build(d.name,d.params,d.flags.contains(TDPrivate),decl.pos);
     case EAbstract(d):build(d.name,d.params,d.flags.contains(AbPrivate),decl.pos);
-    case EStatic(d):build(d.name,d.params,Lambda.exists(d.flags,f->f.access==AStatic&&f.pos==Globals.nullPos),decl.pos);
+    case EStatic(d):build(d.name,d.params,core.ds.ArrayTools.exists(d.flags,f->f.access==AStatic&&f.pos==Globals.nullPos),decl.pos);
     case EImport(_)|EUsing(_):
    }
    declarations=redirected;

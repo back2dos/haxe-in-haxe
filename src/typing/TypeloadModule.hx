@@ -459,13 +459,13 @@ class TypeloadModule {
 		case EParenthesis(value) | EThrow(value): canTypeExpression(value);
 		case EArray(array, index) | EBinop(_, array, index): canTypeExpression(array) && canTypeExpression(index);
 		case EField(value, _, _) | EUnop(_, _, value): canTypeExpression(value);
-		case EObjectDecl(fields): Lambda.foreach(fields, function(field) return canTypeExpression(field.expr));
+		case EObjectDecl(fields): core.ds.ArrayTools.foreach(fields, function(field) return canTypeExpression(field.expr));
 		case EArrayDecl([value]) if (switch value.expr { case EFor(_, _): true; case _: false; }): true;
-		case EArrayDecl(values) | EBlock(values): Lambda.foreach(values, canTypeExpression);
-		case ECall(value, args): canTypeExpression(value) && Lambda.foreach(args, canTypeExpression);
-		case ENew(_, args): Lambda.foreach(args, canTypeExpression);
+		case EArrayDecl(values) | EBlock(values): core.ds.ArrayTools.foreach(values, canTypeExpression);
+		case ECall(value, args): canTypeExpression(value) && core.ds.ArrayTools.foreach(args, canTypeExpression);
+		case ENew(_, args): core.ds.ArrayTools.foreach(args, canTypeExpression);
 		case EFunction(_, func): func.fExpr == null || canTypeExpression(func.fExpr);
-		case EVars(vars): Lambda.foreach(vars, function(value) return value.evExpr == null || canTypeExpression(value.evExpr));
+		case EVars(vars): core.ds.ArrayTools.foreach(vars, function(value) return value.evExpr == null || canTypeExpression(value.evExpr));
 		case EIf(condition, thenExpr, elseExpr): canTypeExpression(condition) && canTypeExpression(thenExpr) && (elseExpr == null || canTypeExpression(elseExpr));
 		case ETernary(condition, thenExpr, elseExpr): canTypeExpression(condition) && canTypeExpression(thenExpr) && canTypeExpression(elseExpr);
 		case EWhile(condition, body, _): canTypeExpression(condition) && canTypeExpression(body);
@@ -477,17 +477,17 @@ class TypeloadModule {
 		case EUntyped(value): canTypeExpression(value);
 		case ESwitch(subject, cases, defaultCase):
 			canTypeExpression(subject)
-			&& Lambda.foreach(cases, function(item) return item.guard == null && Lambda.foreach(item.values, isSupportedPattern) && (item.expr == null || canTypeExpression(item.expr)))
+			&& core.ds.ArrayTools.foreach(cases, function(item) return item.guard == null && core.ds.ArrayTools.foreach(item.values, isSupportedPattern) && (item.expr == null || canTypeExpression(item.expr)))
 			&& (defaultCase == null || defaultCase.expr == null || canTypeExpression(defaultCase.expr));
-		case ETry(body, catches): canTypeExpression(body) && Lambda.foreach(catches, function(item) return canTypeExpression(item.expr));
+		case ETry(body, catches): canTypeExpression(body) && core.ds.ArrayTools.foreach(catches, function(item) return canTypeExpression(item.expr));
 		case EIs(value, _): canTypeExpression(value);
 		case EDisplay(_, _): false;
 	};
 
 	static function isSupportedPattern(value:Expr):Bool return switch value.expr {
 		case EConst(_): true;
-		case ECall({expr:EConst(Ident(_))}, args): Lambda.foreach(args, function(arg) return switch arg.expr { case EConst(Ident(_)): true; case _: false; });
-		case EArrayDecl(values): Lambda.foreach(values, isSupportedPattern);
+		case ECall({expr:EConst(Ident(_))}, args): core.ds.ArrayTools.foreach(args, function(arg) return switch arg.expr { case EConst(Ident(_)): true; case _: false; });
+		case EArrayDecl(values): core.ds.ArrayTools.foreach(values, isSupportedPattern);
 		case _: false;
 	};
 

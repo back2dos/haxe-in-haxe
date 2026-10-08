@@ -79,8 +79,8 @@ class Exceptions {
 		return addMetaExceptionTypeCheck(ExceptionFunctions.makeStaticCall(ctx.scom, std.cls, std.field, [e, typeExpr], std.returnType, p));
 	}
 	public static function isInList(t:T, lst:Array<GlobalTypePath>):Bool {
-		function contains(path:GlobalTypePath):Bool return Lambda.exists(lst, p -> p.name == path.name && p.pack.join(".") == path.pack.join("."));
-		function check(cls:TClass):Bool return contains(cls.clPath) || Lambda.exists(cls.clImplements, c -> check(c.cls)) || cls.clSuper != null && check(cls.clSuper.cls);
+		function contains(path:GlobalTypePath):Bool return core.ds.ArrayTools.exists(lst, p -> p.name == path.name && p.pack.join(".") == path.pack.join("."));
+		function check(cls:TClass):Bool return contains(cls.clPath) || core.ds.ArrayTools.exists(cls.clImplements, c -> check(c.cls)) || cls.clSuper != null && check(cls.clSuper.cls);
 		return switch Abstract.followWithAbstracts(t) {
 			case TInst(_, _): switch TypeOps.follow(t) { case TInst(cls, _): check(cls); case _: false; }
 			case TAbstract({aPath:path}, _) | TEnum({ePath:path}, _): contains(path);
