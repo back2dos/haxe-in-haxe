@@ -120,15 +120,19 @@ class Lexer {
 	public static function readToken(ctx:LexerContext,code:Lexer):LexedToken {
 		code.file=ctx.file.lfile;
 		var start=code.index;
+		code.lineCtx=ctx;code.lineStart=start;
 		var result=code.token();
-		updateLines(ctx,code,start);
+		updateLines(ctx,code,code.lineStart);
+		code.lineCtx=null;
 		return result;
 	}
 	public static function sharpToken(ctx:LexerContext,code:Lexer):LexedToken {
 		code.file=ctx.file.lfile;
 		var start=code.index;
+		code.lineCtx=ctx;code.lineStart=start;
 		var result=code.sharpTokenRaw();
-		updateLines(ctx,code,start);
+		updateLines(ctx,code,code.lineStart);
+		code.lineCtx=null;
 		return result;
 	}
 	static function xmlNameStart(code:Int):Bool return code==36 || code==58 || code==95 || (code>=65&&code<=90) || (code>=97&&code<=122) || (code>=0xC0&&code<=0xD6) || (code>=0xD8&&code<=0xF6) || (code>=0xF8&&code<=0x2FF) || (code>=0x370&&code<=0x37D) || (code>=0x37F&&code<=0x1FFF) || (code>=0x200C&&code<=0x200D) || (code>=0x2070&&code<=0x218F) || (code>=0x2C00&&code<=0x2FEF) || (code>=0x3001&&code<=0xD7FF) || (code>=0xF900&&code<=0xFDCF) || (code>=0xFDF0&&code<=0xFFFD) || (code>=0x10000&&code<=0xEFFFF);
@@ -181,6 +185,11 @@ class Lexer {
 	var source:String;
 	var file:String;
 	var index:Int;
+	// Upstream registers each newline as the lexer consumes it (`newline`), so a
+	// lexer error leaves every consumed line in the file's line table. The port
+	// records lines after each token; on an error, `fail` records them first.
+	var lineCtx:Null<LexerContext>;
+	var lineStart:Int;
 
 	public function new(source:String, ?file = "?") {
 		this.source = source;
@@ -211,7 +220,13 @@ class Lexer {
 		return true;
 	}
 	function make(token:Token, start:Int):LexedToken return {token: token, pos: {pfile: file, pmin: start, pmax: index}};
-	function fail(message:LexerErrorMsg, at:Int):Dynamic throw new LexerError(message, {pfile: file, pmin: at, pmax: at});
+	function fail(message:LexerErrorMsg, at:Int):Dynamic {
+		if (lineCtx != null) {
+			updateLines(lineCtx, this, lineStart);
+			lineStart = index;
+		}
+		throw new LexerError(message, {pfile: file, pmin: at, pmax: at});
+	}
 	function skipWhitespace():Void {
 		while (!eof()) {
 			var c = StringTools.fastCodeAt(source, index);

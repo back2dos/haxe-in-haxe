@@ -125,7 +125,7 @@ class ClassPaths {
 	}
 
 	public function relativePath(file:String):String {
-		var fullPath = normalize(sys.FileSystem.fullPath(file));
+		var fullPath = normalize(Path.getFullPath(file));
 		var lowerFullPath = fullPath.toLowerCase();
 		for (path in paths) {
 			var classPath = normalize(path.path).toLowerCase();
