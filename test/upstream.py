@@ -17,13 +17,19 @@ The port is the HashLink build test/conformance.py makes
 (test/generated/haxe-in-haxe.hl; HAXE_IN_HAXE_PORT overrides the command).
 Steps excluded on purpose are listed in SKIPPED with the reason.
 
+Single misc projects that need a target generator the port does not have
+(AGENTS.md: HXB only) are listed in MISC_EXCLUDED with the reason. The misc
+runner (tests/misc/src/Main.hx) only runs project hxmls whose path matches the
+MISC_TEST_FILTER define, so the "misc" step passes it a negative lookahead
+over the excluded paths (for both compilers, so the counts stay comparable).
+
 utest is installed as upstream CI does (`haxelib git utest
 https://github.com/haxe-utest/utest.git`): cloned into
 test/generated/upstream/libs/utest and registered in a local haxelib repo
 (test/generated/upstream/.haxelib), which haxelib finds from the step
 directories below it.
 """
-import os, pathlib, shlex, shutil, subprocess, sys, time
+import os, pathlib, re, shlex, shutil, subprocess, sys, time
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 HAXE = ROOT / "haxe"
@@ -49,6 +55,19 @@ SKIPPED = {
     "display": "Macro.hx only installs haxeserver here; display tests run in their own job",
     "party": "tink_core and hxcoro are cloned from GitHub; run separately",
 }
+
+
+# misc project hxml (path as the misc runner prints it) -> reason
+MISC_EXCLUDED = {
+    "projects/HxbWildcardExclude/compile.hxml": "step 1 compiles with -js next to --hxb (the archive itself is written)",
+}
+
+
+def misc_filter_args() -> list:
+    if not MISC_EXCLUDED:
+        return []
+    alternatives = "|".join(re.escape(path) for path in sorted(MISC_EXCLUDED))
+    return ["-D", "MISC_TEST_FILTER=^(?!(?:" + alternatives + ")$)"]
 
 
 def wrapper(bin_dir: pathlib.Path, reference: bool) -> None:
@@ -106,6 +125,9 @@ def main() -> None:
             shutil.copytree(base / "unit-macro" / "tests" / "unit" / "bin", work / "tests" / "unit" / "bin", dirs_exist_ok=True)
         # runci System.runSysTest exports EXISTS=1 for the sys tests
         step_env = dict(env, EXISTS="1") if name == "sys-run" else env
+        if name == "misc":
+            # the defines must precede compile.hxml: arguments after its --run go to the runner
+            cmd = cmd[:1] + misc_filter_args() + cmd[1:]
         log = base / (name + ".log")
         start = time.time()
         with open(log, "w") as out:
@@ -118,6 +140,9 @@ def main() -> None:
     for name, why in SKIPPED.items():
         if not names or any(n in name for n in names):
             print(f"SKIP  {name:20} {why}")
+    if not names or any(n in "misc" for n in names):
+        for path, why in MISC_EXCLUDED.items():
+            print(f"SKIP  misc {path}: {why}")
     failed = [r for r in results if r[1] != 0]
     print(f"{label}: {len(results) - len(failed)}/{len(results)} steps passed")
     sys.exit(1 if failed else 0)
