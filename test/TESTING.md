@@ -35,11 +35,6 @@ all-module and unit builds.
 
 Known limits:
 
-- Default HXB module cache: from the second compilation on, the server
-  restores modules from the HXB chunks it cached, which needs the HXB reader
-  (`hxbReader.ml`, HXB-input milestone). The port fails explicitly there
-  ("Cannot restore ... from the compilation server's HXB cache"). With
-  `-D disable-hxb-cache` the server reuses typed modules from memory.
 - Display requests (`--display`) fail explicitly until display is ported.
 - The pinned upstream rejects `--wait stdio` ("Invalid host/port"); so does
   the port. The host socket API is IPv4 only: an IPv6 address fails with a
@@ -53,6 +48,70 @@ must be copied (DCE adds `@:keep` in place), `ClassPaths.relative_path` must
 not resolve symbolic links, `Path.find_directories` conses like upstream,
 `m_deps` copies where upstream shares a persistent map, and the server's
 stdout/stderr pipes buffer like OCaml channels (output order with `--cmd`).
+
+## HXB library input: `--hxb-lib` — 2026-10-09
+
+The port reads HXB archives (`src/compiler/hxb/HxbReader.hx`, a translation
+of `hxbReader.ml`, with `hxbLib.ml` and `hxbReaderApi.ml`). `load_module'`
+looks a module up in the `--hxb-lib` archives before parsing, as upstream.
+
+```sh
+HAXE_REFERENCE=haxe/haxe python3 test/conformance.py -j 2 --hxb-lib
+HAXE_REFERENCE=haxe/haxe python3 test/conformance.py -j 2 --hxb-lib --cases test/conformance-macro-cases.txt
+HAXE_REFERENCE=haxe/haxe python3 test/conformance.py -j 2 --hxb-lib --cases test/conformance-hxblib-cases.txt
+HAXE_IN_HAXE_PORT="hl $PWD/test/generated/conformance/haxe-in-haxe.hl" \
+  HAXE_REFERENCE=haxe/haxe python3 test/interp.py -j 2 --cases test/conformance-hxblib-cases.txt
+```
+
+- `--hxb-lib` round trip (new `conformance.py` option): after a case passes,
+  both compilers load every module of the reference's archive through
+  `--hxb-lib`, without the case's class path, and write it again with
+  `--hxb`. Every module, std included, then comes from the reader, and the
+  writer serializes what it restored. The two outputs must have the same
+  member set and byte-identical payloads.
+- `hxblib` cases (`test/conformance-hxblib-cases.txt`, new case kind): the
+  reference builds a library archive from `test/hxblib/*/lib`, and both
+  compilers compile `test/hxblib/*/app` against it. The libraries cover
+  classes, interfaces, inheritance, overloads, enums, enum abstracts,
+  abstracts with operators, `@:from`/`@:to`, `@:arrayAccess` and properties,
+  typedefs, generics (`@:generic`, constraints, default type parameters,
+  generic methods), static extensions, `__init__`, dynamic functions, private
+  types, module-level fields, macro functions, `@:build` and `@:autoBuild`
+  (loaded into the macro context from the archive's `macro/` modules), and a
+  broad std selection (with and without `-dce full`). `hl-Issue12357` is
+  `haxe/tests/misc/hl/projects/Issue12357` typed for HashLink without
+  generation.
+- `test/interp.py` runs the `hxblib` cases that use `--interp` with both
+  compilers: exit code, stdout and stderr must be identical.
+
+| Check | Result |
+| --- | --- |
+| Regular set with `--hxb-lib` round trip | 275/275 accepted cases pass with identical round trips; 7/7 expected failures |
+| Macro set with `--hxb-lib` round trip | 66/66 pass; 17 round trips identical, 49 rejected by both compilers (the archive alone lacks macro sources or `eval` modules for the detected target) |
+| `hxblib` cases (member set, payloads, round trip) | 7/7 (6 identical round trips; the HashLink case is rejected by both because `Main` is a module-level function) |
+| `hxblib` cases under `--interp` (exit, stdout, stderr) | 6/6 identical (the HashLink case doesn't execute) |
+| Eval-HXB host execution of the `hxblib` cases (`--eval`) | 7/7 identical to the HashLink-executed port |
+
+Upstream tests that use `--hxb-lib`: `tests/unit/compile-hxb-interp-roundtrip.hxml`,
+`tests/sys` (`compile-eval-hxb.hxml`) and the hxcoro build in
+`tests/runci/targets/Macro.hx` need haxelib (`-lib utest`, `hxcoro`), which
+the port does not support yet; `tests/unit/compile-hxb-jvm-roundtrip.hxml`
+needs the JVM target. `tests/misc/hl/projects/Issue12357` is covered as above.
+
+Not ported: the server and display uses of the reader (`serverCache.ml`,
+`displayJson.ml`, `displayTexpr.ml`) and `commonCache.ml`, which only the
+compilation server uses. `read_chunks`/`read_chunks_until` are translated
+but have no batch caller.
+
+Two fixes came out of this work:
+- HashLink's `Bytes.getString` stops at the first NUL byte, so the reader
+  decodes pool strings that contain NUL segment by segment (`"\x00"` in
+  `haxe.macro.Printer`).
+- `ClassPaths.relativePath` used `sys.FileSystem.fullPath` (`realpath`),
+  while upstream's `Path.get_full_path` doesn't resolve symbolic links on
+  Unix. With a symlinked std path (a worktree whose `haxe/` links to the
+  main checkout), PosInfos file names of std modules stayed absolute, and 85
+  regular cases differed from the reference.
 
 ## Execution: `--interp` and `--run` — 2026-10-08
 
@@ -230,4 +289,4 @@ for the bootstrap entry point (`haxe.LegacyMain`) and its unit tests.
 
 - Macro execution: done in the macro milestone above.
 - Multi-part builds (`--next`/`--each`), haxelib, display/server, and
-  HXB-library input in the port.
+  HXB-library input in the port (HXB-library input: done, see above).

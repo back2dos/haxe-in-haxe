@@ -7,18 +7,6 @@ enum ChunkKind {
 	STR; DOC; MDF; MTF; IMP; CLR; ENR; ABR; TDR; OFR; OFD; OBD; CLD; END; ABD; TDD; EOT; EFR; CFR; CFD; EFD; AFD; EOF; EXD; EOM;
 }
 
-class HxbFailure {
-	public final message:String;
-
-	public function new(message:String) {
-		this.message = message;
-	}
-
-	public function toString():String {
-		return message;
-	}
-}
-
 typedef CachedChunk = {kind:ChunkKind, data:haxe.io.Bytes};
 typedef CachedChunks = Array<CachedChunk>;
 
@@ -33,6 +21,18 @@ typedef CachedChunks = Array<CachedChunk>;
 enum TypingMode {
 	FullTyping;
 	AllowPartialTyping;
+}
+
+class HxbFailure {
+	public final message:String;
+
+	public function new(message:String) {
+		this.message = message;
+	}
+
+	public function toString():String {
+		return message;
+	}
 }
 
 class HxbData {
@@ -58,8 +58,8 @@ class HxbData {
 		};
 	}
 
-	public static function error(message:String):Void {
-		Sys.stderr().writeString('[error] $message\\n');
+	public static function error(message:String):Dynamic {
+		Sys.stderr().writeString('[error] $message\n');
 		throw new HxbFailure(message);
 	}
 

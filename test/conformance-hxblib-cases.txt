@@ -1,0 +1,17 @@
+# HXB library input cases (--hxb-lib) for test/conformance.py; run with:
+#   python3 test/conformance.py --cases test/conformance-hxblib-cases.txt --hxb-lib
+#   hxblib <name> <dir> "<library arguments>" "<arguments>"
+# The reference compiles the library arguments to an HXB archive (std modules
+# included); both compilers then compile the arguments against it with
+# --hxb-lib, so every module the archive holds (std included) is read from it.
+
+hxblib hxblib-basic test/hxblib/basic "-cp lib --main LibMain --interp" "-cp app --main Main --interp"
+hxblib hxblib-generics test/hxblib/generics "-cp lib --main GenMain --interp" "-cp app --main Main --interp"
+hxblib hxblib-macros test/hxblib/macros "-cp lib --main MacMain --interp" "-cp app --main Main --interp"
+hxblib hxblib-std test/hxblib/std "-cp lib --main StdMain --interp" "-cp app --main Main --interp"
+hxblib hxblib-std-dce-full test/hxblib/std "-cp lib --main StdMain --interp -dce full" "-cp app --main Main --interp -dce full"
+# The library is used without its source: the application only names
+# library modules.
+hxblib hxblib-lib-only test/hxblib/generics "-cp lib --main GenMain --interp" "--main GenMain --interp"
+# haxe/tests/misc/hl/projects/Issue12357 (compile-hxb.hxml, compile-with-hxblib.hxml), typed for HashLink without generation
+hxblib hl-Issue12357 haxe/tests/misc/hl/projects/Issue12357 "-cp src -main Main -hl bin/dummy.hl" "-cp src -main Main MyException -hl bin/dummy.hl"

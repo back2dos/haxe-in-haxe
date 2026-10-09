@@ -73,9 +73,10 @@ using macros.eval.EvalValue.EvalValueTools;
 	  becomes an Eval string exception carrying the host message.
 	- `hashtbl_keys` follows the host map's key order (OCaml `Hashtbl` order is
 	  not reproduced).
-	- libuv (`EvalLuv`) natives are not registered and mbedtls (`EvalSsl`) fields
-	  are not registered except the enum constants; mbedtls constructors throw "... is not supported by
-	  haxe-in-haxe". Sockets are created by a constructor that fails likewise.
+	- libuv (`EvalLuv`) and mbedtls (`EvalSsl`) work on the hxc host
+	  (backend/); elsewhere their natives throw "... is not supported by
+	  haxe-in-haxe". Sockets use BSD sockets on the hxc host and
+	  fail likewise on other hosts.
 	- zlib streams are host `haxe.zip.Compress`/`haxe.zip.Uncompress` objects.
 	- Field lists are `{name, value}` pairs instead of OCaml tuples.
 **/
@@ -239,7 +240,13 @@ class EvalStdLib {
 			case _: die();
 		});
 		add(EvalHash.key_eval_vm_NativeSocket, _ -> {
+			#if (target.name == "hxc")
+			// catch_unix_error Unix.socket PF_INET SOCK_STREAM 0
+			var fd = macros.eval.EvalStdLibB.StdSocket.check(hxc.NativeNet.socket(), "socket");
+			EvalEncode.encodeInstance(EvalHash.key_eval_vm_NativeSocket, ISocket(fd));
+			#else
 			notSupported("Sockets (eval.vm.NativeSocket)");
+			#end
 		});
 		add(EvalHash.key_haxe_zip_Compress, vl -> switch vl {
 			case [level]:
@@ -289,17 +296,7 @@ class EvalStdLib {
 		add(EvalHash.key_sys_net_Deque, _ -> {
 			EvalEncode.encodeInstance(EvalHash.key_sys_net_Deque, IDeque(EvalThread.Deque.create()));
 		});
-		// EvalSsl.init_constructors add: mbedtls is not ported
-		for (key in [
-			EvalHash.key_mbedtls_Config,
-			EvalHash.key_mbedtls_CtrDrbg,
-			EvalHash.key_mbedtls_Entropy,
-			EvalHash.key_mbedtls_PkContext,
-			EvalHash.key_mbedtls_Ssl,
-			EvalHash.key_mbedtls_X509Crt
-		]) {
-			add(key, _ -> notSupported("mbedtls (" + EvalHash.revHash(key) + ")"));
-		}
+		EvalSsl.initConstructors(add);
 	}
 
 	public static function initEmptyConstructors(builtins:Builtins):Void {
@@ -768,16 +765,55 @@ class EvalStdLib {
 		], []);
 		initFields(builtins, tp(["eval", "integers", "_UInt64"], "UInt64_Impl_"), EvalIntegers.uint64Fields, []);
 		initFields(builtins, tp(["eval", "integers", "_Int64"], "Int64_Impl_"), EvalIntegers.int64Fields, []);
-		// EvalLuv.*_fields (eval.luv.*) and the native fields of EvalSsl.init_fields
-		// (sys.ssl.*, mbedtls.*) are not registered: libuv and mbedtls are not supported by
-		// haxe-in-haxe. The mbedtls enum constants are plain data (hx_get_ssl_*_flags in
-		// libs/mbedtls/mbedtls_stubs.c, values from mbedtls/ssl.h), so they are.
-		inline function statics(a:Array<{name:String, value:Int}>) return [for (f in a) {name: f.name, value: EvalValue.EvalValueTools.vint(f.value)}];
-		initFields(builtins, tp(["mbedtls"], "SslAuthmode"), statics([
-			{name: "SSL_VERIFY_NONE", value: 0}, {name: "SSL_VERIFY_OPTIONAL", value: 1}, {name: "SSL_VERIFY_REQUIRED", value: 2}]), []);
-		initFields(builtins, tp(["mbedtls"], "SslEndpoint"), statics([{name: "SSL_IS_CLIENT", value: 0}, {name: "SSL_IS_SERVER", value: 1}]), []);
-		initFields(builtins, tp(["mbedtls"], "SslPreset"), statics([{name: "SSL_PRESET_DEFAULT", value: 0}, {name: "SSL_PRESET_SUITEB", value: 2}]), []);
-		initFields(builtins, tp(["mbedtls"], "SslTransport"), statics([{name: "SSL_TRANSPORT_STREAM", value: 0}, {name: "SSL_TRANSPORT_DATAGRAM", value: 1}]), []);
+		initFields(builtins, tp(["eval", "luv", "_UVError"], "UVError_Impl_"), EvalLuv.fields(EvalLuv.uvErrorFields), []);
+		initFields(builtins, tp(["eval", "luv", "_Loop"], "Loop_Impl_"), EvalLuv.fields(EvalLuv.loopFields), []);
+		initFields(builtins, tp(["eval", "luv", "_Loop"], "LoopOption_Impl_"), EvalLuv.fields(EvalLuv.loopOptionFields), []);
+		initFields(builtins, tp(["eval", "luv", "_Handle"], "Handle_Impl_"), EvalLuv.fields(EvalLuv.handleFields), []);
+		initFields(builtins, tp(["eval", "luv", "_Idle"], "Idle_Impl_"), EvalLuv.fields(EvalLuv.idleFields), []);
+		initFields(builtins, tp(["eval", "luv", "_Async"], "Async_Impl_"), EvalLuv.fields(EvalLuv.asyncFields), []);
+		initFields(builtins, tp(["eval", "luv", "_Timer"], "Timer_Impl_"), EvalLuv.fields(EvalLuv.timerFields), []);
+		initFields(builtins, tp(["eval", "luv", "_Buffer"], "Buffer_Impl_"), EvalLuv.fields(EvalLuv.bufferFields), []);
+		initFields(builtins, tp(["eval", "luv", "_SockAddr"], "SockAddr_Impl_"), EvalLuv.fields(EvalLuv.sockaddrFields), []);
+		initFields(builtins, tp(["eval", "luv", "_Tcp"], "Tcp_Impl_"), EvalLuv.fields(EvalLuv.tcpFields), []);
+		initFields(builtins, tp(["eval", "luv", "_Udp"], "Udp_Impl_"), EvalLuv.fields(EvalLuv.udpFields), []);
+		initFields(builtins, tp(["eval", "luv", "_ConnectedUdp"], "ConnectedUdp_Impl_"), EvalLuv.fields(EvalLuv.connectedUdpFields), []);
+		initFields(builtins, tp(["eval", "luv", "_Pipe"], "Pipe_Impl_"), EvalLuv.fields(EvalLuv.pipeFields), []);
+		initFields(builtins, tp(["eval", "luv", "_Tty"], "Tty_Impl_"), EvalLuv.fields(EvalLuv.ttyFields), []);
+		initFields(builtins, tp(["eval", "luv", "_Stream"], "Stream_Impl_"), EvalLuv.fields(EvalLuv.streamFields), []);
+		initFields(builtins, tp(["eval", "luv", "_Signal"], "Signal_Impl_"), EvalLuv.fields(EvalLuv.signalFields), []);
+		initFields(builtins, tp(["eval", "luv", "_Signal"], "SigNum_Impl_"), EvalLuv.fields(EvalLuv.signumFields), []);
+		initFields(builtins, tp(["eval", "luv", "_Process"], "Process_Impl_"), EvalLuv.fields(EvalLuv.processFields), []);
+		initFields(builtins, tp(["eval", "luv", "_Request"], "Request_Impl_"), EvalLuv.fields(EvalLuv.requestFields), []);
+		initFields(builtins, tp(["eval", "luv"], "Dns"), EvalLuv.fields(EvalLuv.dnsFields), []);
+		initFields(builtins, tp(["eval", "luv", "_File"], "File_Impl_"), EvalLuv.fields(EvalLuv.fileFields), []);
+		initFields(builtins, tp(["eval", "luv", "_Dir"], "Dir_Impl_"), EvalLuv.fields(EvalLuv.dirFields), []);
+		initFields(builtins, tp(["eval", "luv"], "FileSync"), EvalLuv.fields(EvalLuv.fileSyncFields), []);
+		initFields(builtins, tp(["eval", "luv"], "DirSync"), EvalLuv.fields(EvalLuv.dirSyncFields), []);
+		initFields(builtins, tp(["eval", "luv", "_FsEvent"], "FsEvent_Impl_"), EvalLuv.fields(EvalLuv.fsEventFields), []);
+		initFields(builtins, tp(["eval", "luv"], "ThreadPool"), EvalLuv.fields(EvalLuv.threadPoolFields), []);
+		initFields(builtins, tp(["eval", "luv", "_Thread"], "Thread_Impl_"), EvalLuv.fields(EvalLuv.threadFields), []);
+		initFields(builtins, tp(["eval", "luv", "_Once"], "Once_Impl_"), EvalLuv.fields(EvalLuv.onceFields), []);
+		initFields(builtins, tp(["eval", "luv", "_Mutex"], "Mutex_Impl_"), EvalLuv.fields(EvalLuv.mutexFields), []);
+		initFields(builtins, tp(["eval", "luv", "_RwLock"], "RwLock_Impl_"), EvalLuv.fields(EvalLuv.rwlockFields), []);
+		initFields(builtins, tp(["eval", "luv", "_Semaphore"], "Semaphore_Impl_"), EvalLuv.fields(EvalLuv.semaphoreFields), []);
+		initFields(builtins, tp(["eval", "luv", "_Condition"], "Condition_Impl_"), EvalLuv.fields(EvalLuv.conditionFields), []);
+		initFields(builtins, tp(["eval", "luv", "_Barrier"], "Barrier_Impl_"), EvalLuv.fields(EvalLuv.barrierFields), []);
+		initFields(builtins, tp(["eval", "luv"], "Env"), EvalLuv.fields(EvalLuv.envFields), []);
+		initFields(builtins, tp(["eval", "luv"], "Time"), EvalLuv.fields(EvalLuv.timeFields), []);
+		initFields(builtins, tp(["eval", "luv"], "Path"), EvalLuv.fields(EvalLuv.pathFields), []);
+		initFields(builtins, tp(["eval", "luv"], "Random"), EvalLuv.fields(EvalLuv.randomFields), []);
+		initFields(builtins, tp(["eval", "luv"], "RandomSync"), EvalLuv.fields(EvalLuv.randomSyncFields), []);
+		initFields(builtins, tp(["eval", "luv"], "Network"), EvalLuv.fields(EvalLuv.networkFields), []);
+		initFields(builtins, tp(["eval", "luv", "_FsPoll"], "FsPoll_Impl_"), EvalLuv.fields(EvalLuv.fsPollFields), []);
+		initFields(builtins, tp(["eval", "luv"], "Resource"), EvalLuv.fields(EvalLuv.resourceFields), []);
+		initFields(builtins, tp(["eval", "luv"], "SystemInfo"), EvalLuv.fields(EvalLuv.systemInfoFields), []);
+		initFields(builtins, tp(["eval", "luv"], "Pid"), EvalLuv.fields(EvalLuv.pidFields), []);
+		initFields(builtins, tp(["eval", "luv"], "Passwd"), EvalLuv.fields(EvalLuv.passwdFields), []);
+		initFields(builtins, tp(["eval", "luv"], "Metrics"), EvalLuv.fields(EvalLuv.metricsFields), []);
+		initFields(builtins, tp(["eval", "luv", "_Prepare"], "Prepare_Impl_"), EvalLuv.fields(EvalLuv.prepareFields), []);
+		initFields(builtins, tp(["eval", "luv", "_Check"], "Check_Impl_"), EvalLuv.fields(EvalLuv.checkFields), []);
+		initFields(builtins, tp(["eval", "luv"], "Version"), EvalLuv.fields(EvalLuv.versionFields), []);
+		EvalSsl.initFields((path, statics, instance) -> initFields(builtins, tp(path.pack, path.name), statics, instance));
 		initFields(builtins, tp(["haxe", "atomic", "_AtomicBool"], "AtomicBool_Impl_"), EvalAtomic.atomicBoolFields, []);
 		initFields(builtins, tp(["haxe", "atomic", "_AtomicInt"], "AtomicInt_Impl_"), EvalAtomic.atomicIntFields, []);
 		initFields(builtins, tp(["haxe", "atomic", "_AtomicObject"], "AtomicObject_Impl_"), EvalAtomic.atomicObjectFields, []);

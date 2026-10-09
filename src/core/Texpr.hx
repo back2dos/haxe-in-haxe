@@ -459,7 +459,8 @@ class Texpr {
    value=value*radix+digit;if(value>limit)throw "Int32.of_string";
   }
   if(value>2147483647.0)value-=4294967296.0;
-  var result=Std.int(value);return negative?-result:result;
+  // `| 0`: Int32 wrap-around on hosts with unbounded Int arithmetic (JS: -(-2147483648))
+  var result=Std.int(value);return negative?(-result)|0:result;
  }
  public static function typeConstant(b:Dynamic,c:Constant,p:Pos):TExpr return switch c {
   case Int(s,_):

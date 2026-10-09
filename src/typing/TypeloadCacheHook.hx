@@ -1,14 +1,14 @@
 package typing;
 
-import core.Globals;
+import core.Define;
 import core.Globals.GlobalTypePath;
 import core.Globals.Pos;
 import core.TType;
 import core.TFunctions.*;
-import core.Define;
-import context.Common;
-import context.TyperPass;
 import compiler.hxb.HxbData.ModuleCache;
+import context.Common;
+import context.Common.CommonContext;
+import context.TyperPass;
 
 // Port of haxe/src/typing/typeloadCacheHook.ml.
 enum FindModuleResult {
@@ -20,7 +20,7 @@ enum FindModuleResult {
 }
 
 class TypeloadCacheHook {
-	public static var typeModuleHook:CommonContext->(TyperPass->(Void->Void)->Void)->GlobalTypePath->Pos->FindModuleResult = function(_, _, _, _) return NoModule;
+	public static var typeModuleHook:(com:CommonContext, delay:(TyperPass, Void->Void)->Void, path:GlobalTypePath, p:Pos)->FindModuleResult = function(_, _, _, _) return NoModule;
 
 	public static final fakeModules:Map<String, ModuleDef> = new Map();
 

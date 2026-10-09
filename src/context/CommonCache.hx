@@ -11,6 +11,7 @@ import core.Timer;
 import core.ds.Hashtbl;
 import core.ds.NotFound;
 import context.Common;
+import compiler.hxb.HxbReader.dumpStats as hxbDumpStats;
 import context.Parallel.ParallelArray;
 import context.NativeLibraries.NativeLibrary;
 import compiler.CompilationCache;
@@ -163,7 +164,7 @@ class CommonCache {
 				cacheContext(cs, macroCom);
 		}
 		if (Define.defined(com.defines, Define.HxbStats))
-			HxbReaderStats.dumpStats(Globals.platformName(com.platform), com.hxbReaderStats);
+			hxbDumpStats(Globals.platformName(com.platform), com.hxbReaderStats);
 	}
 
 	public static function maybeAddContextSign(cs:Cache, com:CommonContext, desc:String):Void {

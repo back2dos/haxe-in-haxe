@@ -21,17 +21,13 @@ import context.CommonCache;
 import context.TyperPass;
 import compiler.CompilationCache;
 import compiler.hxb.HxbData;
+import compiler.hxb.HxbReader;
+import compiler.hxb.HxbReaderApi;
 import syntax.Parser.ParseResult;
 import typing.TypeloadCacheHook;
 import typing.SourceParser;
 
 // Port of haxe/src/compiler/server/serverCache.ml.
-//
-// Deliberate deviation: restoring a module from the binary (HXB) cache needs
-// compiler/hxb/hxbReader.ml, which belongs to the HXB-input milestone and is not
-// ported yet. Every place upstream instantiates `HxbReader.hxb_reader` calls
-// `createHxbReader` below, which fails explicitly. `-D disable-hxb-cache` keeps
-// typed modules in memory instead and does not need the reader.
 class Dirty extends haxe.Exception {
 	public final reason:ModuleSkipReason;
 
@@ -42,11 +38,6 @@ class Dirty extends haxe.Exception {
 }
 
 class ServerError extends haxe.Exception {}
-
-/** The part of `HxbReader.hxb_reader` that the server uses. **/
-typedef ServerHxbReader = {
-	function readChunksUntil(api:HxbReaderApiServer, chunks:CachedChunks, endChunk:ChunkKind, typingMode:TypingMode):{m:ModuleDef, chunks:CachedChunks};
-}
 
 class ServerCache {
 	public static function parseFile(sctx:ServerCompilationContext, com:CommonContext, rfile:ResolvedFile, p:Pos):ParseResult<Package> {
@@ -426,10 +417,9 @@ class ServerCache {
 		}
 	}
 
-	/** `new HxbReader.hxb_reader path com.hxb_reader_stats timer_ctx` **/
-	public static function createHxbReader(com:CommonContext, path:GlobalTypePath):ServerHxbReader {
-		throw new Failure("Cannot restore " + Globals.sTypePath(path)
-			+ " from the compilation server's HXB cache: the HXB reader (compiler/hxb/hxbReader.ml) is not ported yet. Use -D disable-hxb-cache.");
+	/** `new HxbReader.hxb_reader path com.hxb_reader_stats (if Common.defined com Define.HxbTimes then Some com.timer_ctx else None)` **/
+	public static function createHxbReader(com:CommonContext, path:GlobalTypePath):HxbReader {
+		return new HxbReader(path, com.hxbReaderStats, if (Common.defined(com, Define.HxbTimes)) com.timerCtx else null);
 	}
 
 	public static function handleCacheBoundObjects(com:CommonContext, cbol:Array<CacheBoundObject>):Void {
@@ -556,7 +546,7 @@ class ServerCache {
 					case null:
 						var reader = createHxbReader(com, mpath);
 						var typingMode = getTypingMode(com, mc.mcExtra);
-						var api:HxbReaderApiServer = switch (com.hxbReaderApi : Null<HxbReaderApiServer>) {
+						var api:HxbReaderApi = switch (com.hxbReaderApi : Null<HxbReaderApi>) {
 							case null:
 								var api = new HxbReaderApiServer(com, cc, delay);
 								com.hxbReaderApi = api;
@@ -570,7 +560,7 @@ class ServerCache {
 						}
 
 						var r = fNext(mc.mcChunks, EOT);
-						var m = r.m, chunks = r.chunks;
+						var m = r.m, chunks = r.remaining;
 
 						/* We try to avoid reading expressions as much as possible, so we only do this for
 							our current display file if we're in display mode. */
@@ -658,12 +648,8 @@ class ServerCache {
 	}
 }
 
-/**
-	`hxb_reader_api_server`: the reader callbacks used when restoring modules from
-	the binary cache. It implements the methods of `HxbReaderApi.hxb_reader_api`;
-	the class declares them directly until that interface is ported with the reader.
-**/
-class HxbReaderApiServer {
+/** `hxb_reader_api_server`: the reader callbacks used when restoring modules from the binary cache. **/
+class HxbReaderApiServer implements HxbReaderApi {
 	final com:CommonContext;
 	final cc:ContextCache;
 	final delay:TyperPass->(Void->Void)->Void;
@@ -714,7 +700,7 @@ class HxbReaderApiServer {
 				}
 
 				var r = fNext(mc.mcChunks, EOT);
-				var m = r.m, chunks = r.chunks;
+				var m = r.m, chunks = r.remaining;
 
 				/* We try to avoid reading expressions as much as possible, so we only do this for
 					our current display file if we're in display mode. */
@@ -733,7 +719,7 @@ class HxbReaderApiServer {
 				}
 
 				var r = fNext(mc.mcChunks, EOT);
-				var m = r.m, chunks = r.chunks;
+				var m = r.m, chunks = r.remaining;
 				m.mExtra.mCacheState = MSBad(reason);
 
 				/* We try to avoid reading expressions as much as possible, so we only do this for

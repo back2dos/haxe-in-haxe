@@ -105,6 +105,8 @@ class Compiler {
  }
  public static function finalizeTyping(com:CommonContext,tctx:Typer):Void Timer.time(com.timerCtx,["finalize"],function(tctx) {finalizeTypingImpl(com,tctx);return null;},tctx);
  public static function filter(com:CommonContext,tctx:Typer,ectx:Dynamic,beforeDestruction:Void->Void):Void Timer.time(com.timerCtx,["filters"],function(_:Null<Bool>) return runOrDiagnose(com,function() {filters.Filters.run(com,ectx,beforeDestruction);return null;}),null);
+ // Not upstream: experimental code generators (backend/) receive the filtered program here. Always null in the compiler itself.
+ public static var generateHook:Null<CommonContext->Void>=null;
  public static function compile(com:CommonContext,actx:ArgContext,sctx:ServerCompilationContext):Void {
   if(com.display.dmsKind!=DMNone||actx.displayArg!=null)throw new ArgumentError("Display services require the display/server milestone");
   var mctx:Null<Typer>=switch com.platform {
@@ -131,7 +133,7 @@ class Compiler {
    filter(com,tctx,ectx,function(){});
    if(hasError(com)&&isCompilation)throw new Abort();if(isCompilation)Generate.checkAuxiliaryOutput(com,actx);
    Common.enterStage(com,CGenerationStart);ServerMessage.compilerStage(com);codegen.Dump.maybeGenerateDump(com,AfterDce);Generate.maybeGenerateDumpDependencies(com,tctx);
-   if(!actx.noOutput)Generate.generate(com,tctx,ext,actx);Common.enterStage(com,CGenerationDone);ServerMessage.compilerStage(com);
+   if(!actx.noOutput)Generate.generate(com,tctx,ext,actx);if(generateHook!=null)generateHook(com);Common.enterStage(com,CGenerationDone);ServerMessage.compilerStage(com);
   }
   // The Haxe host owns signal handling; this port does not install OCaml Sys.catch_break.
   com.callbacks.run(com.errorExt,com.callbacks.getAfterGeneration());
@@ -199,7 +201,10 @@ class Setup {
   };
  }
  public static function initNativeLibs(com:CommonContext,nativeLibs:Array<compiler.ParsedArg.NativeLibArg>):Void {
-  if(nativeLibs.length>0)throw new ArgumentError("Native-library and HXB-library input require a later milestone");
+  // Native lib pass 1: Register
+  var rev=nativeLibs.copy();rev.reverse();var fl=[for (lib in rev) context.NativeLibraryHandler.addNativeLib(com,lib)];
+  // Native lib pass 2: Initialize
+  for (f in fl) f();
  }
  public static function createTyperContext(com:CommonContext,macros:Dynamic):Typer {
   var buf=new StringBuf();buf.add("Defines: ");var keys:Array<String>=[for (k in com.defines.values.keys()) k];keys.sort(Reflect.compare);for (k in keys) {var v=com.defines.values.get(k);buf.add(v=="1"?k+";":k+"="+v+";");}

@@ -1826,12 +1826,25 @@ class StdHost {
 	}
 
 	public static final localhost = EvalEncode.vfun0(() -> {
+		#if (target.name == "hxc")
+		// catch_unix_error Unix.gethostname
+		var name = hxc.NativeNet.gethostname();
+		if (name == null) macros.eval.EvalStdLibB.StdSocket.unixError("gethostname");
+		return EvalString.createUnknown(name);
+		#else
 		return EvalString.createUnknown(EvalStdLib.catchUnixError(_ -> sys.net.Host.localhost(), null));
+		#end
 	});
 
 	public static final hostReverse = EvalEncode.vfun1(ip -> {
 		var ip = EvalDecode.decodeI32(ip);
+		#if (target.name == "hxc")
+		// Unix.gethostbyaddr raises Not_found
+		var name = hxc.NativeNet.reverse(ip);
+		if (name == null) EvalContext.excString("Could not reverse host");
+		#else
 		var name = try new sys.net.Host(int32Addr(ip)).reverse() catch (_:Dynamic) EvalContext.excString("Could not reverse host");
+		#end
 		return EvalString.createUnknown(name);
 	});
 
@@ -1842,11 +1855,18 @@ class StdHost {
 
 	public static final resolve = EvalEncode.vfun1(name -> {
 		var name = EvalDecode.decodeString(name);
+		#if (target.name == "hxc")
+		// Unix.gethostbyname raises Not_found; the address is h_addr_list.(0)
+		var a = hxc.NativeNet.resolve(name);
+		if (a == null) EvalContext.excString('Could not resolve host $name');
+		return VInt32(a[0]);
+		#else
 		var h = try new sys.net.Host(name) catch (_:Dynamic) EvalContext.excString('Could not resolve host $name');
 		var addr = h.toString();
 		var parts = addr.split(".").map(Std.parseInt);
 		var a = parts[0], b = parts[1], c = parts[2], d = parts[3];
 		return VInt32((a << 24) | (d | (c << 8) | (b << 16)));
+		#end
 	});
 }
 

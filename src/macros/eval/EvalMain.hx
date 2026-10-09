@@ -23,8 +23,8 @@ using macros.eval.EvalValue.EvalValueTools;
 	- The debugger is not ported: `support_debugger` is always false, and
 	  `-D eval-debugger` fails with "the Eval debugger is not supported by
 	  haxe-in-haxe" instead of starting a debug socket.
-	- libuv is not ported, so no unhandled-exception handler is installed
-	  (`Luv.Error.set_on_unhandled_exception`); no libuv loop ever runs.
+	- `Luv.Error.set_on_unhandled_exception` sets `EvalLuv.exceptionHandler`
+	  (libuv works on the hxc host only, see `EvalLuv`).
 	- The debug record shared between contexts (`GlobalState.debug`) is
 	  `EvalMain.globalDebug`.
 	- `valueSignature` returns the MD5 digest as a lowercase hex string
@@ -101,7 +101,24 @@ class EvalMain {
 		if (debug.supportDebugger) {
 			throw debuggerNotSupported();
 		}
-		// Luv.Error.set_on_unhandled_exception: libuv is not ported (see the module comment).
+		// If no user-defined exception handler is set then follow libuv behavior.
+		// Which is printing an error to stderr and exiting with code 2.
+		EvalLuv.exceptionHandler = ex -> {
+			if (Std.isOfType(ex, macros.eval.EvalTypes.SysExit)) {
+				throw ex;
+			} else {
+				var msg = if (Std.isOfType(ex, core.Error.TypingError)) {
+					var messages = [];
+					core.Error.recurseError((depth, err) -> {
+						messages.unshift(core.Message.makeMessage(isMacro, core.Error.errorMsg(err.errMessage), err.errPos, depth, MKError));
+					}, (ex : core.Error.TypingError).error);
+					compiler.MessageReporting.formatMessages(EvalContext.getCtx().curapi.getCom().defines, messages);
+				} else
+					Std.string(ex);
+				Sys.stderr().writeString(msg + "\n");
+				Sys.exit(2);
+			}
+		};
 		return ctx;
 	}
 
