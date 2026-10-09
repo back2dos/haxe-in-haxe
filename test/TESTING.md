@@ -13,25 +13,28 @@ server; `test/haxelib.py` uses a local haxelib repository (no network).
 ```sh
 HAXE_REFERENCE=haxe/haxe python3 test/server.py -j 2
 HAXE_REFERENCE=haxe/haxe python3 test/server.py --scenario cases --cases test/conformance-macro-cases.txt -j 2
-HAXE_REFERENCE=haxe/haxe python3 test/server.py --scenario cases --hxb-cache --fresh --rounds 1 -j 2
+HAXE_REFERENCE=haxe/haxe python3 test/server.py --hxb-cache -j 2
 HAXE_REFERENCE=haxe/haxe python3 test/haxelib.py --server
 ```
 
 | Check (same exit code, client stdout/stderr, HXB members and payloads) | Result |
 | --- | --- |
-| Conformance cases, two rounds each on shared servers (`-D disable-hxb-cache`) | 564/564 (282 cases) |
-| Macro conformance cases, two rounds each | 132/132 (66 cases) |
+| `-D disable-hxb-cache`: all scenarios (282 cases twice, edit, misc, `--server-connect`) | 587/587 |
+| `-D disable-hxb-cache`: macro cases, two rounds each | 132/132 |
 | Edit sequence (edit, add, syntax error, fix, remove, touch) | 8/8 |
 | Verbose server logs of the edit sequence (reusing/skipping/parsed/directories) | identical (628 lines) |
 | `misc`: `--interp` output, stdin forwarding, `--cmd`, macro output, errors, `--next` | 10/10 |
 | `--server-connect` (length-prefixed requests, exit on disconnect) | 4/4 |
-| Default HXB cache, first compilation of a fresh server | 282/282 |
+| Default HXB cache (modules restored with the HXB reader): all scenarios | 587/587 |
+| Default HXB cache, macro cases, two rounds each | 132/132 |
 | haxelib: batch and server (`-L`, `--library`, `-lib`, dependencies, several libraries, `--haxelib-global`, missing library, hxml) | 14/14 |
 
-The batch lanes stay green: `test/conformance.py` 275/275 with 7/7 expected
-failures, the macro cases 66/66, `test/interp.py` 270 identical with 2 known
-host differences (`process-nonexistent`, exit 127 vs 1), and the bootstrap,
-all-module and unit builds.
+After merging the HXB reader, the batch lanes stay green: `test/conformance.py
+--hxb-lib` 275/275 with 7/7 expected failures, the macro cases 66/66, the
+`--hxb-lib` cases 7/7, and the bootstrap build. Before the merge,
+`test/interp.py` gave 270 identical with 2 known host differences
+(`process-nonexistent`, exit 127 vs 1), and the all-module and unit builds
+passed.
 
 Known limits:
 
