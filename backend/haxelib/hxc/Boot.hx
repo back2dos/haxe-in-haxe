@@ -15,7 +15,7 @@ using StringTools;
 //   -D hxc.static         fully static, portable binary with cosmocc
 //   -D hxc.debug          -O0 -g
 //   -D hxc.c-only         stop after writing <out>.c
-//   -D hxc.ssl, hxc.uv    link the system's mbedtls / libuv
+//   -D hxc.ssl, hxc.uv    link mbedtls / libuv (the system's; with cosmocc, the package's cosmo/)
 //   -D hxc.keep-hxb       keep the intermediate archive (<out>.hxb.zip)
 //   -D hxc.verbose        print the commands
 class Boot {

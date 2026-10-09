@@ -49,7 +49,7 @@ the expected build.
 | `-D hxc.static` | Fully static, portable binary built with cosmocc (downloaded once into `~/.hxc/cosmocc`, about 420 MB unpacked; `HXC_COSMOCC_URL` overrides the source; `haxelib run hxc setup-cosmocc` downloads it now). The result runs on Linux, macOS, Windows and the BSDs. |
 | `-D hxc.debug` | `-O0 -g` instead of `-O2`. |
 | `-D hxc.c-only` | Stop after writing `<out>.c`. |
-| `-D hxc.ssl`, `-D hxc.uv` | Link the system's mbedtls / libuv. Without them, `sys.ssl` and the libuv natives throw when called. |
+| `-D hxc.ssl`, `-D hxc.uv` | Link mbedtls (`sys.ssl`) / libuv. Without them, `sys.ssl` and the libuv natives throw when called. With cc/gcc/clang/tcc: the system's libraries (mbedtls 2.28, libuv 1.x; e.g. `libmbedtls-dev libuv1-dev`). With `-D hxc.static` (cosmocc): the static libraries in the package's `cosmo/` (mbedtls 2.28.10, libuv 1.48.0 built with cosmocc for x86-64 and arm64), so nothing needs installing. |
 | `-D hxc.keep-hxb` | Keep `<out>.hxb.zip`. With your own `--hxb <path>`, that archive is used and kept. |
 
 Without any C compiler on `PATH`, cosmocc is used.

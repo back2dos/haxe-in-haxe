@@ -164,6 +164,27 @@ sh backend/build.sh backend/bench/threads Threads && bin/backend/Threads/prog_c
 | Server `misc` and conformance, cosmocc build (`hih.com`) | 10/10, 275 + 7 |
 | Self-compile CPU time, gcc -O2 (`--interp --no-output`, min of 5, two rounds) | 4.05/4.06 s before, 4.03/3.86 s after |
 
+## Cosmopolitan builds with mbedtls and libuv — 2026-10-09
+
+The APE builds link mbedtls 2.28.10 and libuv 1.48.0 built with cosmocc
+(`backend/tools/cosmo-deps.sh`; bench/COSMO.md, backend/README.md).
+
+```sh
+sh backend/tools/cosmo-deps.sh               # bin/cosmo-deps (cosmocc on PATH)
+CC="cosmocc -O2" RT_DEPS=bin/cosmo-deps BIN=hih.com sh backend/build.sh port
+HAXE_REFERENCE=haxe/haxe HAXE_IN_HAXE_PORT="sh bin/backend/hih/hih.com" python3 test/conformance.py -j 3
+sh bin/backend/hih/hih.com -cp backend/bench/natives -main Luv --interp
+sh bin/backend/hih/hih.com -cp backend/bench/natives --run Tls 4433 ca.pem example.com   # openssl s_server on 4433
+```
+
+| Check (cosmocc fat APE with mbedtls and libuv, Linux x86-64) | Result |
+| --- | --- |
+| Conformance | 275 PASS + 7 expected failures |
+| Conformance, macro cases | 66/66 |
+| `tests/threads` in the port's Eval | 138/139 (`TestEval.testNative`: `eval.luv.Thread`, unsupported) |
+| `backend/bench/natives/Luv.hx` (`--interp`, macro; also the haxelib `hxc.com`) | all, as the reference |
+| `backend/bench/natives/Tls.hx` (local `openssl s_server`, HTTPS GET of example.com; also `hxc.com`, `-D hxc.static -D hxc.ssl` through the haxelib package, tcc with system mbedtls) | all, as the reference |
+
 ## Compilation server and haxelib — 2026-10-09
 
 The port runs as a compilation server (`--wait <port>`, `--server-connect`)

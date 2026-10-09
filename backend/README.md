@@ -105,6 +105,74 @@ backend/bench/threads Threads && bin/backend/Threads/prog_c`).
 `sys.net.Socket`/`Host` are real (`backend/std-hxc/sys/net`, over
 `rt_net.c`).
 
+## TLS and libuv: mbedtls and libuv natives
+
+`rt/rt_ssl.c` (mbedtls 2.28 API, behind `hxc.NativeSsl`) backs the Eval
+interpreter's `sys.ssl`/`mbedtls.*` (`src/macros/eval/EvalSsl.hx`) and the
+hxc target's own `sys.ssl` (`std-hxc/sys/ssl`: `Socket`, `Certificate`,
+`Key`, as Eval's `_std` versions over `NativeSsl`; `setCertificate`,
+`addSNICertificate` and `Digest` are missing there as in Eval).
+`rt/rt_uv.c` (libuv 1.x, behind `hxc.NativeUv`) backs `eval.luv`
+(`src/macros/eval/EvalLuv.hx`). `-DHXC_NO_SSL`/`-DHXC_NO_UV` build stubs that
+throw when called.
+
+- Native builds link the system's libraries: `RT_NO=
+  RT_LIBS="-lmbedtls -lmbedx509 -lmbedcrypto -luv" sh backend/build.sh port`
+  (Ubuntu: `libmbedtls-dev libuv1-dev`, mbedtls 2.28, libuv 1.48).
+- Cosmopolitan builds link static libraries built with cosmocc by
+  `tools/cosmo-deps.sh` (fat x86-64 + aarch64 `.a` files and headers in
+  `bin/cosmo-deps`; pinned mbedtls 2.28.10 and libuv 1.48.0, fetched with git
+  at their tags and checked against the pinned commits, patched with
+  `tools/cosmo-patches/*.patch`; about 2 minutes once). `haxelib/build.sh`
+  (`hxc.com`) and `site/build.sh` (`haxe-in-haxe.com`) run it and link the
+  result (`NO_DEPS=1` keeps the stubs); `backend/build.sh` links it with
+  `RT_DEPS=bin/cosmo-deps`:
+  `CC="cosmocc -O2" RT_DEPS=bin/cosmo-deps BIN=hih.com sh backend/build.sh port`.
+  User programs built with `-D hxc.static -D hxc.ssl`/`-D hxc.uv` link the
+  copy in the haxelib package (`cosmo/`, 1.6 MB zipped), so nothing is built
+  or downloaded on first use besides cosmocc itself.
+- mbedtls under Cosmopolitan: entropy from `getrandom()` (the patch; every
+  host OS, Windows included). System CA certificates
+  (`Certificate.loadDefaults`, the default CA of `sys.ssl.Socket`):
+  `Sys.systemName()` is "Linux" on every OS in an APE build, so the std's
+  Linux file list is read on Linux, and `hxc_NativeSsl_certLoadDefaults`
+  picks the others at run time: `/etc/ssl/cert.pem` on macOS (the system
+  roots; certificates added to the keychain are not seen), the std's BSD
+  list on FreeBSD/OpenBSD/NetBSD, and on Windows upstream's branch (the
+  system "Root" store through `crypt32.dll`, loaded with `LoadLibraryA`).
+- libuv under Cosmopolitan: one binary runs on Linux, macOS, the BSDs and
+  Windows, so libuv is built as its generic unix port: the `poll(2)` backend
+  (`posix-poll.c`, as for GNU/Hurd and Cygwin), no file system events
+  (`FsEvent` fails with ENOSYS; `FsPoll` works), interfaces through
+  `getifaddrs` (no hardware addresses), memory, load and uptime through
+  `sysinfo`, and `src/unix/cosmo.c` (the patch) for the executable path,
+  CPU count (no model, speed or times), resident set size (the peak) and
+  random bytes. Cosmopolitan's errno constants are variables holding the
+  host OS's values, so libuv's `UV_E*` codes take the fixed values of its
+  Windows table and system errors are translated at run time
+  (`uv__cosmo_err`); interface names in IPv6 scope ids are numeric only
+  (no `if_nametoindex`), and source-specific multicast is unsupported.
+- `Loop.run` blocks the whole process, green threads included, as do TLS
+  reads and writes (see the threads section). libuv's thread pool runs
+  file system and DNS requests on real threads in C only; their callbacks
+  run on the loop's thread. `eval.luv.Thread`/`ThreadPool` stay unsupported.
+- Tested on Linux x86-64 only (see bench/COSMO.md): the aarch64 half is built
+  but not run (no qemu-aarch64 here), and macOS, Windows and the BSDs are
+  untested. Windows is the least likely to work: libuv's unix code there
+  depends on Cosmopolitan's emulation of `poll` on pipes, `fork` and Unix
+  sockets.
+
+`bench/natives/Luv.hx` (timers, a TCP echo, file system requests, a child
+process with a pipe, idle handles, system queries) and `bench/natives/Tls.hx`
+(a local `openssl s_server`: handshakes with and without verification, host
+name check, system CAs; an HTTPS GET) check a build:
+
+```sh
+sh bin/backend/hih/hih.com -cp backend/bench/natives -main Luv --interp
+openssl s_server -accept 4433 -cert cert.pem -key key.pem -www &   # cert for localhost, signed by ca.pem
+sh bin/backend/hih/hih.com -cp backend/bench/natives --run Tls 4433 ca.pem example.com
+```
+
 ## The hxc haxelib package
 
 `backend/haxelib/` packages the C target as a library for the user's own Haxe
@@ -128,6 +196,9 @@ treats classes outside the std path as user code (kept whole).
 
 Checked: a Map/sort/exception program and a macro/Reflect/Json program with
 cc (gcc), tcc and `-D hxc.static`; `--no-output`, `-D hxc.c-only`, type
-errors and `haxelib run hxc`. The backend tool itself built through the
+errors and `haxelib run hxc`; `bench/natives/Tls.hx` (`sys.ssl`) with
+`-D hxc.static -D hxc.ssl` (the package's `cosmo/` libraries) and with tcc
+and `-D hxc.ssl` (the system's), and `hxc.NativeUv` with
+`-D hxc.static -D hxc.uv`. The backend tool itself built through the
 package (`haxe -lib hxc ... -main backend.Main`) gives byte-identical C to
 the source build (9 s: typing by the reference compiler, then `hxc.com`).

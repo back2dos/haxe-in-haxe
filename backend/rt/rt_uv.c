@@ -170,6 +170,7 @@ void *hxc_NativeUv_getPasswd(void) { no_uv(); return NULL; }
 #include <netinet/in.h>
 #include <netdb.h>
 #include <fcntl.h>
+#include <unistd.h>
 #include <uv.h>
 
 int32_t hxc_NativeUv_available(void) { return 1; }

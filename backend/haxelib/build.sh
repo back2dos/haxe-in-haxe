@@ -12,14 +12,18 @@
 #   hxstd/        the class path: the hxc target's std overrides (backend/std)
 #                 and hxc/{Boot,Build,Run}.hx (the init macro and `haxelib run hxc`)
 #   rt/           the C runtime, compiled with the generated C on the user's machine
+#   cosmo/        mbedtls and libuv built with cosmocc, for -D hxc.static
+#                 (headers, fat static libraries; backend/tools/cosmo-deps.sh)
 #   extraParams.hxml   --macro hxc.Boot.init(), added by -lib hxc
 #
 # The user's Haxe types the program and writes HXB; bin/hxc.com reads it
 # (--hxb-lib) and lowers it to C. The archive's format must match the
 # compiler hxc.com was built from (haxe/, see hxc.json).
 #
-# Needs: node, haxe/haxe (backend/build.sh), cosmocc on PATH (bench/COSMO.md).
-# SKIP_GEN=1 reuses the generated C, SKIP_COM=1 reuses the binary.
+# Needs: node, haxe/haxe (backend/build.sh), cosmocc on PATH (bench/COSMO.md),
+# git and patch (backend/tools/cosmo-deps.sh, once).
+# SKIP_GEN=1 reuses the generated C, SKIP_COM=1 reuses the binary, NO_DEPS=1
+# leaves mbedtls and libuv out (stubs that throw).
 set -eu
 cd "$(dirname "$0")/../.."
 HAXE=${HAXE:-haxe/haxe}
@@ -36,10 +40,20 @@ if [ -z "${SKIP_GEN:-}" ]; then
 		--custom-target hxc > "$B/wbk.log" 2>&1 || { cat "$B/wbk.log"; exit 1; }
 fi
 
-# 2. the APE binary. Macros run in the bundled Eval: no mbedtls/libuv in the
-# portable build yet (their natives fail when called)
+# 2. the APE binary. Macros run in the bundled Eval, whose sys.ssl and eval.luv
+# use mbedtls and libuv built with cosmocc (backend/tools/cosmo-deps.sh, into
+# $DEPS); NO_DEPS=1 builds without them (their natives fail when called)
+DEPS=${COSMO_DEPS:-bin/cosmo-deps}
+if [ -z "${NO_DEPS:-}" ]; then
+	sh backend/tools/cosmo-deps.sh "$DEPS"
+	RT="-I$DEPS/include"
+	RT_LIBS="-L$DEPS/lib -lmbedtls -lmbedx509 -lmbedcrypto -luv"
+else
+	RT="-DHXC_NO_SSL -DHXC_NO_UV"
+	RT_LIBS=
+fi
 if [ -z "${SKIP_COM:-}" ] || [ ! -f "$B/hxc.com" ]; then
-	cosmocc -O2 -w -fno-strict-aliasing -DHXC_NO_SSL -DHXC_NO_UV -I backend/rt "$B/hxc.c" backend/rt/rt*.c -lm -o "$B/hxc.com"
+	cosmocc -O2 -w -fno-strict-aliasing $RT -I backend/rt "$B/hxc.c" backend/rt/rt*.c -lm $RT_LIBS -o "$B/hxc.com"
 fi
 
 # 3. the package
@@ -53,6 +67,12 @@ cp -r haxe/std/haxe haxe/std/sys haxe/std/eval "$B/std/"
 cp -r backend/std "$P/hxstd"
 cp -r backend/haxelib/hxc/. "$P/hxstd/hxc/"
 cp backend/rt/*.h backend/rt/rt*.c "$P/rt/"
+# mbedtls and libuv for -D hxc.static with -D hxc.ssl / hxc.uv (headers and fat
+# static libraries, about 1.6 MB zipped)
+if [ -z "${NO_DEPS:-}" ]; then
+	mkdir -p "$P/cosmo"
+	cp -r "$DEPS/include" "$DEPS/lib" "$DEPS/VERSIONS" "$DEPS/LICENSE.mbedtls" "$DEPS/LICENSE.libuv" "$P/cosmo/"
+fi
 cp backend/haxelib/haxelib.json backend/haxelib/README.md backend/haxelib/extraParams.hxml "$P/"
 printf '{"haxe": "%s", "commit": "%s"}\n' "$("$HAXE" -version 2>&1)" "$(git -C haxe rev-parse --short HEAD)" > "$P/hxc.json"
 cp haxe/LICENSE "$P/LICENSE.txt"

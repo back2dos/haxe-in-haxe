@@ -42,9 +42,19 @@ class Build {
 		// slots are read as int32/double/pointer through casts: no strict aliasing
 		var flags = (o.debug ? ["-O0", "-g"] : ["-O2"]).concat(["-w", "-fno-strict-aliasing", "-I", rt]);
 		var libs = ["-lm"];
+		var compiler = o.isStatic ? cosmocc() : (o.cc != null ? o.cc : findCc());
+		var isCosmo = o.isStatic || StringTools.endsWith(compiler.split(" ")[0], "cosmocc");
+		if ((o.ssl || o.uv) && isCosmo) {
+			// cosmocc can't link the system's libraries: the package carries mbedtls and
+			// libuv built with cosmocc (fat static libraries, backend/tools/cosmo-deps.sh).
+			// `-L<dir>` in one argument: cosmocc maps it to <dir>/.aarch64 for the aarch64 half
+			var deps = lib + "cosmo/";
+			if (!FileSystem.exists(deps + "lib/libuv.a")) throw 'hxc: $deps is missing: this hxc package has no mbedtls/libuv for -D hxc.static';
+			flags = flags.concat(["-I", deps + "include"]);
+			libs.push("-L" + deps + "lib");
+		}
 		if (o.ssl) libs = libs.concat(["-lmbedtls", "-lmbedx509", "-lmbedcrypto"]) else flags.push("-DHXC_NO_SSL");
 		if (o.uv) libs.push("-luv") else flags.push("-DHXC_NO_UV");
-		var compiler = o.isStatic ? cosmocc() : (o.cc != null ? o.cc : findCc());
 		var parts = compiler.split(" ");
 		if (verbose) Sys.println("hxc: " + parts.concat(flags).concat(files).concat(libs).concat(["-o", out]).join(" "));
 		var code = Sys.command(parts[0], parts.slice(1).concat(flags).concat(files).concat(libs).concat(["-o", out]));
