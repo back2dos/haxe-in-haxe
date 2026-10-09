@@ -36,20 +36,27 @@ runtime objects from `bench/build-wasm.sh` and a haxe with the hl2c fix
 
 ## The hxc haxelib package
 
-`backend/haxelib/` packages the C target as a library that any Haxe install
-can use (`haxelib run hxc build.hxml`); usage is in
-[haxelib/README.md](haxelib/README.md). The package holds the compiler (port +
-C backend, compiled by itself to C and then with cosmocc to one portable APE
-binary with the Haxe std inside), the hxc std overrides, the C runtime and the
-run script, which compiles the generated C with the user's C compiler (or
-cosmocc for `--hxc-static`).
+`backend/haxelib/` packages the C target as a library for the user's own Haxe
+(`haxe -lib hxc -main Main --custom-target hxc=bin/main`); usage is in
+[haxelib/README.md](haxelib/README.md). The user's Haxe types the program;
+the init macro (`hxc/Boot.hx`) makes it write the program as HXB and, after
+generation, runs the bundled `bin/hxc.com` on the archive (`--hxb-lib`) and
+then the C compiler. `hxc.com` is the port with the C backend, compiled by
+itself to C and with cosmocc to one portable APE binary.
 
 ```sh
 sh backend/haxelib/build.sh          # bin/haxelib/hxc.zip (cosmocc on PATH; about 5 min)
 haxelib install bin/haxelib/hxc.zip
-haxelib run hxc -cp src -main Main --custom-target hxc=out/main
+haxe -lib hxc -cp src -main Main --custom-target hxc=out/main
 ```
 
-Checked: a Map/sort/exception program and a macro/Reflect/Json program, with
-cc (gcc), tcc and `--hxc-static`; tcc takes 0.4 s from source to binary, and
-`--hxc-static` makes a 1.5 MB fat binary.
+The archive must come from the Haxe build `hxc.com` was made from (the
+pinned `haxe/`; recorded in the package's `hxc.json`). The tool runs with the
+user's std path as `HAXE_STD_PATH`: DCE reruns on the loaded modules and
+treats classes outside the std path as user code (kept whole).
+
+Checked: a Map/sort/exception program and a macro/Reflect/Json program with
+cc (gcc), tcc and `-D hxc.static`; `--no-output`, `-D hxc.c-only`, type
+errors and `haxelib run hxc`. The backend tool itself built through the
+package (`haxe -lib hxc ... -main backend.Main`) gives byte-identical C to
+the source build (9 s: typing by the reference compiler, then `hxc.com`).

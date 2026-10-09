@@ -17,6 +17,7 @@ using StringTools;
 //   -D hxc.c-only         stop after writing <out>.c
 //   -D hxc.ssl, hxc.uv    link the system's mbedtls / libuv
 //   -D hxc.keep-hxb       keep the intermediate archive (<out>.hxb.zip)
+//   -D hxc.verbose        print the commands
 class Boot {
 	public static function init() {
 		if (Context.definedValue("target.name") != "hxc" || Context.defined("display")) return;
@@ -33,13 +34,17 @@ class Boot {
 			// macro modules are not part of the program
 			Compiler.setHxbWriterConfiguration({archivePath: archive, macroConfig: {generate: false}});
 		}
+		Build.verbose = Context.defined("hxc.verbose");
 		Context.onAfterGenerate(function() {
 			var main = Compiler.getConfiguration().mainClass;
 			if (main == null) Context.fatalError("hxc: needs a main class (-main)", Context.currentPos());
-			if (!FileSystem.exists(archive)) return; // --no-output
+			if (Compiler.getConfiguration().args.contains("--no-output") || !FileSystem.exists(archive)) {
+				if (!keep && FileSystem.exists(archive)) FileSystem.deleteFile(archive);
+				return;
+			}
 			var dir = haxe.io.Path.directory(out);
 			if (dir != "" && !FileSystem.exists(dir)) FileSystem.createDirectory(dir);
-			var code = Build.toC(archive, out, main.pack.concat([main.name]).join("."), defines());
+			var code = Build.toC(archive, out, main.pack.concat([main.name]).join("."), defines(), Compiler.getConfiguration().stdPath);
 			if (!keep) FileSystem.deleteFile(archive);
 			if (code != 0) {
 				// HXB is tied to the compiler that writes it: the archive must come from the Haxe hxc.com was built from

@@ -9,7 +9,8 @@ using StringTools;
 // The steps after typing, run by the user's Haxe (macro context or haxelib run):
 // the bundled compiler lowers the HXB archive to C, then a C compiler builds it.
 class Build {
-	public static var lib(get, null):String;
+	public static var lib(get, default):String;
+	public static var verbose = false;
 
 	// the library root: hxstd/hxc/Build.hx -> ../../
 	static function get_lib():String {
@@ -20,11 +21,15 @@ class Build {
 		return lib;
 	}
 
-	public static function toC(archive:String, out:String, main:String, defines:Array<String>):Int {
-		// the archive holds every module of the program: nothing is typed from source
+	public static function toC(archive:String, out:String, main:String, defines:Array<String>, stdPath:Array<String>):Int {
+		// The modules come from the archive. The std path must still be the one
+		// the program was typed with: DCE (rerun on the loaded modules) keeps the
+		// whole of every class whose file is outside the std path
+		Sys.putEnv("HAXE_STD_PATH", stdPath.join(Sys.systemName() == "Windows" ? ";" : ":"));
 		var args = [out, "--hxb-lib", archive, "-main", main, "--custom-target", "hxc", "-D", "disable-parallelism"];
 		for (d in defines) args = args.concat(["-D", d]);
 		var com = lib + "bin/hxc.com";
+		if (verbose) Sys.println("hxc: " + [com].concat(args).join(" "));
 		if (Sys.systemName() == "Windows") return Sys.command(com, args);
 		// an APE file starts as a shell script: `sh` runs it without binfmt_misc.
 		// Loading modules from HXB recurses deeply on large programs: raise the stack limit
@@ -41,6 +46,7 @@ class Build {
 		if (o.uv) libs.push("-luv") else flags.push("-DHXC_NO_UV");
 		var compiler = o.isStatic ? cosmocc() : (o.cc != null ? o.cc : findCc());
 		var parts = compiler.split(" ");
+		if (verbose) Sys.println("hxc: " + parts.concat(flags).concat(files).concat(libs).concat(["-o", out]).join(" "));
 		var code = Sys.command(parts[0], parts.slice(1).concat(flags).concat(files).concat(libs).concat(["-o", out]));
 		// cosmocc's per-architecture binaries and symbols, next to the fat binary
 		if (code == 0 && o.isStatic && !o.debug)
