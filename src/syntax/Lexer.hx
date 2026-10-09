@@ -182,6 +182,11 @@ class Lexer {
 	var source:String;
 	var file:String;
 	var index:Int;
+	// Deviation from upstream (memory only): identifiers are interned per file,
+	// so the AST holds one string per name instead of one per occurrence. The
+	// identity of identifier strings is never observed (only position file
+	// names are compared physically, core.ds.StrTools.physNeq).
+	var idents:Map<String, String>;
 
 	// UTF-16 indices of the surrogate pairs of `source` (null without any): sedlex
 	// positions count code points, so a pair is one position (see `cp`).
@@ -198,6 +203,7 @@ class Lexer {
 				pairs.push(i);
 			}
 		}
+		idents = new Map();
 	}
 
 	/** The position (code point offset) of the UTF-16 index `i`. **/
@@ -210,6 +216,13 @@ class Lexer {
 			if (pairs[mid] < i) lo = mid + 1 else hi = mid;
 		}
 		return i - lo;
+	}
+
+	function ident(s:String):String {
+		var r = idents.get(s);
+		if (r != null) return r;
+		idents.set(s, s);
+		return s;
 	}
 
 	public static function lex(source:String, ?file = "?"):Array<LexedToken> {
@@ -562,7 +575,7 @@ class Lexer {
 			var ie = mIdent(index);
 			if (ie >= 0 && ie - start >= opLen) {
 				index = ie;
-				return make(keyword(core.ds.StrTools.sub(source, start, ie)), start);
+				return make(keyword(ident(core.ds.StrTools.sub(source, start, ie))), start);
 			}
 			if (opTok != null) {
 				index += opLen;
