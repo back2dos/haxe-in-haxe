@@ -45,16 +45,16 @@ class ExprToPattern {
  public static function unifyTypePattern(ctx:Typer,mt:ModuleType,t:T,p:Pos):Void switch getGeneralModuleType(ctx,mt,p){case TAbstract(a,_):unify(ctx,TAbstract(a,[spawnMonomorph(ctx,p)]),t,p);case _:throw "assert";};
  public static function make(pctx:PatternContext,toplevel:Bool,t:T,e:Expr):PatternData {
   var ctx=pctx.ctx;var p=e.pos;
-  function fail():Dynamic return core.Error.raiseTypingError("Unrecognized pattern: "+core.AstPrinter.sExpr(e),p);
+  inline function fail():Dynamic return core.Error.raiseTypingError("Unrecognized pattern: "+core.AstPrinter.sExpr(e),p);
   function expected(tp:T):Void unify(ctx,tp,t,p);
-  function variableError(name:String,p:Pos):Dynamic return core.Error.raiseTypingError('Variable $name must appear exactly once in each sub-pattern',p);
-  function addLocal(finalFlag:Bool,name:String,p:Pos):TVar {
+  inline function variableError(name:String,p:Pos):Dynamic return core.Error.raiseTypingError('Variable $name must appear exactly once in each sub-pattern',p);
+  inline function addLocal(finalFlag:Bool,name:String,p:Pos):TVar {
    var wildcard=name=="_";if(!wildcard&&pctx.isPostfixMatch)core.Error.raiseTypingError("Pattern variables are not allowed in .match patterns",p);if(!wildcard&&pctx.currentLocals.exists(name))core.Error.raiseTypingError('Variable $name is bound multiple times',p);
    if(pctx.orLocals!=null&&!wildcard){var entry=pctx.orLocals.get(name);if(entry==null)return variableError(name,p);var v:TVar=entry.v;unify(ctx,t,v.vType,entry.p);if(finalFlag)addVarFlag(v,VFinal);pctx.currentLocals.set(name,{v:v,p:entry.p});return v;}
    var v=allocVar(VUser(TVOPatternVariable),name,t,p);if(finalFlag)addVarFlag(v,VFinal);pctx.currentLocals.set(name,{v:v,p:p});ctx.f.locals=ctx.f.locals.add(name,v);return v;
   }
-  function conEnum(en:TEnum,ef:TEnumField,p:Pos):ConstructorData {var d=createDeprecationContext(ctx);DeprecationCheck.checkEnum(d,en,p);DeprecationCheck.checkEf(d,ef,p);return {kind:ConEnum(en,ef),pos:p};}
-  function enumerable():Array<String> return switch follow(t){case TEnum(en,_):en.eNames;case TAbstract(a={aImpl:c},_) if(c!=null&&a.aEnum):[for(cf in c.clOrderedStatics)if(hasClassFieldFlag(cf,CfImpl)&&hasClassFieldFlag(cf,CfEnum))cf.cfName];case _:[];};
+  inline function conEnum(en:TEnum,ef:TEnumField,p:Pos):ConstructorData {var d=createDeprecationContext(ctx);DeprecationCheck.checkEnum(d,en,p);DeprecationCheck.checkEf(d,ef,p);return {kind:ConEnum(en,ef),pos:p};}
+  inline function enumerable():Array<String> return switch follow(t){case TEnum(en,_):en.eNames;case TAbstract(a={aImpl:c},_) if(c!=null&&a.aEnum):[for(cf in c.clOrderedStatics)if(hasClassFieldFlag(cf,CfImpl)&&hasClassFieldFlag(cf,CfEnum))cf.cfName];case _:[];};
   function checkExpr(e:TExpr):PatternKind return switch e.eexpr {
    case TField(_,FEnum(en,ef)):PatConstructor(conEnum(en,ef,e.epos),[]);
    case TField(_,FStatic(c,cf={cfKind:Var({vWrite:AccNever})})):PatConstructor({kind:ConStatic(c,cf),pos:e.epos},[]);
@@ -65,11 +65,11 @@ class ExprToPattern {
    case TMeta(meta={meta:MetaTag.Deprecated},e1):DeprecationCheck.checkMeta(createDeprecationContext(ctx),[meta],"field",e1.epos);checkExpr(e1);
    case _:throw Exit.raise();
   };
-  function displayMode():DisplayKind return pctx.isPostfixMatch?DKMarked:DKPattern(toplevel);
-  function catchErrors(p:Pos):Void->Void {
+  inline function displayMode():DisplayKind return pctx.isPostfixMatch?DKMarked:DKPattern(toplevel);
+  inline function catchErrors(p:Pos):Void->Void {
    var old=ctx.com.errorExt;var restore=Common.disableReportMode(ctx.com);ctx.com.errorExt=function(err){var ep=err.errPos;if(ep.pfile!=p.pfile||ep.pmax<p.pmin||ep.pmin>p.pmax)old(err);else throw Exit.raise();};return function(){restore();ctx.com.errorExt=old;};
   }
-  function tryTyping(e:Expr):PatternKind {
+  inline function tryTyping(e:Expr):PatternKind {
    var old=ctx.f.isUntyped;ctx.f.isUntyped=true;var restore=catchErrors(e.pos);var typed:TExpr;try{typed=typeExpr(ctx,e,WithTypeTools.withType(t));}catch(ex:haxe.Exception){restore();ctx.f.isUntyped=old;throw ex;}restore();ctx.f.isUntyped=old;
    var pat=checkExpr(typed);switch pat{case PatConstructor({kind:ConTypeExpr(mt)},_):unifyTypePattern(ctx,mt,t,typed.epos);case _:unify(ctx,typed.etype,t,p);}return pat;
   }
@@ -90,7 +90,7 @@ class ExprToPattern {
    case EVars([{evName:{name:s,pos:p},evFinal:finalFlag,evType:null,evExpr:null}]):PatBind(addLocal(finalFlag,s,p),{kind:PatAny,pos:nullPos});
    case ECall(e1,el):
     var e1=typeExpr(ctx,e1,WithTypeTools.withType(t));switch [e1.eexpr,follow(e1.etype)]{
-     case [TField(_,FEnum(en,ef)),TFun(sig)]:var tl=switch follow(sig.ret){case TEnum(_,tl):tl;case _:fail();};function mapEn(t:T):T return applyParams(en.eParams,tl,t);var monos=Monomorph.spawnConstrainedMonos(mapEn,ef.efParams);function mapper(t:T):T return mapEn(applyParams(ef.efParams,monos,t));unify(ctx,mapper(ef.efType),e1.etype,e1.epos);
+     case [TField(_,FEnum(en,ef)),TFun(sig)]:var tl=switch follow(sig.ret){case TEnum(_,tl):tl;case _:fail();};function mapEn(t:T):T return applyParams(en.eParams,tl,t);var monos=Monomorph.spawnConstrainedMonos(mapEn,ef.efParams);inline function mapper(t:T):T return mapEn(applyParams(ef.efParams,monos,t));unify(ctx,mapper(ef.efType),e1.etype,e1.epos);
       var args=switch follow(e1.etype){case TFun(s):expected(s.ret);s.args;case _:throw "assert";};// `make pctx false t e :: loop el tl`: OCaml evaluates the tail first, so arguments are typed last to first.
       function loopArgs(ei:Int,ai:Int):Array<typing.matcher.Pattern.PatternData> {
        if(ei==el.length-1&&ai<args.length&&(switch el[ei].expr{case EConst(Ident("_")):true;case _:false;})){var rest=ai+1==args.length?[]:loopArgs(ei,ai+1);rest.unshift({kind:PatAny,pos:el[ei].pos});return rest;}
@@ -116,7 +116,7 @@ class ExprToPattern {
     };pattern([],t);
    case EObjectDecl(fl):
     var known:Array<{cf:TClassField,t:T}>=[];
-    function collectField(cf:TClassField,t:T,filter:Null<Array<String>>):Void {if(filter!=null&&filter.indexOf(cf.cfName)<0)return;known=known.filter(function(k)return k.cf.cfName!=cf.cfName);known.unshift({cf:cf,t:t});}
+    inline function collectField(cf:TClassField,t:T,filter:Null<Array<String>>):Void {if(filter!=null&&filter.indexOf(cf.cfName)<0)return;known=known.filter(function(k)return k.cf.cfName!=cf.cfName);known.unshift({cf:cf,t:t});}
     function collectFields(t:T,filter:Null<Array<String>>):Void switch follow(t){
      case TAnon(an):var names=[for(n in an.aFields.keys())n];names.sort(Reflect.compare);for(n in names){var cf=an.aFields.get(n);collectField(cf,cf.cfType,filter);}
      case TInst(c,tl):function loopClass(c:TClass,tl:Array<T>):Void {if(c.clSuper!=null)loopClass(c.clSuper.cls,c.clSuper.params.map(function(t)return applyParams(c.clParams,tl,t)));for(cf in c.clOrderedFields)if(canAccess(ctx,c,cf,false))collectField(cf,applyParams(c.clParams,tl,cf.cfType),filter);}loopClass(c,tl);

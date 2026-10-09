@@ -138,7 +138,7 @@ class Typer {
   if(ctx.m.enumWithType==null) throw core.ds.NotFound.raise(); return loop(ctx.m.enumWithType);
  }
  public static function typeIdentRaise(ctx:TyperContext,i:String,p:Pos,mode:AccessMode,withType:WithTypeValue):AccessKind {
-  function resolve(res:ResolvedImport):AccessKind {
+  inline function resolve(res:ResolvedImport):AccessKind {
    ImportHandling.markImportPosition(ctx,res.rPos);
    return switch res.rKind {
     case RTypeImport(_,mt):AKExpr(TyperBase.typeModuleType(ctx,mt,p));

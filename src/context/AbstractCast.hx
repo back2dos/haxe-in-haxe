@@ -41,7 +41,7 @@ class AbstractCast {
 		}
 	}
 	public static function doCheckCast(ctx:context.Typecore.Typer, uctx:Dynamic, tleft:T, eright:TExpr, p:Pos):TExpr {
-		function recurse(cf:TClassField, f:Void->TExpr):TExpr {
+		inline function recurse(cf:TClassField, f:Void->TExpr):TExpr {
 			switch cf.cfKind {
 				case Method(MethMacro):
 					if (castStack.length > 0 && castStack[0] == cf)
@@ -55,7 +55,7 @@ class AbstractCast {
 			castStack.shift();
 			return result;
 		}
-		function make(found:Dynamic):TExpr {
+		inline function make(found:Dynamic):TExpr {
 			var a:TAbstract = found.abs;
 			var tl:TParams = found.params;
 			var cf:TClassField = found.field.field;
