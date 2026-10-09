@@ -19,6 +19,32 @@ HL_STATIC="libhl.a fmt.o dxt.o sha1.o" sh bench/build.sh hlc   # static link
 LD_LIBRARY_PATH=/path/to/patched/hashlink HAXE_REFERENCE=haxe/haxe python3 bench/run.py -n 7
 ```
 
+## WebAssembly build (2026-10-09)
+
+`bench/build-wasm.sh` compiles the HL/C output with Emscripten 6.0.12 for
+Node.js: stock HashLink runtime, single-threaded, zlib built from source.
+The self-compile (`-D disable-parallelism`) and `stdlib` produce archives
+byte-identical to the reference.
+
+| | size | gzip -9 |
+| --- | ---: | ---: |
+| `hih.wasm` | 51.5 MB | 4.27 MB |
+| `hih.js` (loader) | 171 KB | 46 KB |
+| native HL/C binary, for comparison | 14.3 MB | 4.49 MB |
+
+Binaryen's `--spill-pointers`, which makes pointers held in wasm locals
+visible to libhl's conservative stack scan, grows the module from 30.6 MB.
+
+| Workload (Node 22, `--liftoff-only`) | Wasm | native HL/C | reference |
+| --- | ---: | ---: | ---: |
+| hello | 2.0s | 0.15s | 0.12s |
+| self, `-D disable-parallelism` | 22.7s | ~6s | 4.7s |
+
+V8's optimizing tier spends about 20 seconds compiling HL/C's very large
+functions, and the program waits for it (hello takes 22s and the self-compile
+26s without `--liftoff-only`), so the baseline compiler alone is faster here.
+`--interp` needs `--stack-size=60000` for the typer's recursion.
+
 ## Results — 2026-10-09 early (second performance pass)
 
 Same container and build as below. Median of 5 runs (3 for memory); every
