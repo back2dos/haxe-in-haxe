@@ -19,6 +19,19 @@ HL_STATIC="libhl.a fmt.o dxt.o sha1.o" sh bench/build.sh hlc   # static link
 LD_LIBRARY_PATH=/path/to/patched/hashlink HAXE_REFERENCE=haxe/haxe python3 bench/run.py -n 7
 ```
 
+## Refresh after OS threads and the memory work (2026-10-09, night)
+
+`bench/run.py -n 3 --json bench/results.json reference hxc hxc-o2 hxc-clang hxc-cosmo`
+(load 1-1.4; the other runners' entries are from the earlier runs). Self-compile, CPU min of 3:
+reference 5.95 s / 539 MB, hxc clang -O2 5.19 s / 456 MB, gcc -O2 5.22 s / 454 MB,
+tcc 13.2 s / 464 MB, **cosmocc 8.25 s / 447 MB**.
+
+The cosmocc build regressed (it was on par with the reference, 5.05 s, before
+the memory and threads work): on the older snapshot workload it takes 6.5 s
+against 4.4 s for clang/gcc. Not the thread model (an `-DRT_GREEN_THREADS`
+cosmocc build is as slow) and not the GC (RT_STATS: 0.74 s vs 0.61 s of GC
+time); the extra time is in the mutator code cosmocc generates. To investigate.
+
 ## hxc OS threads: sequential cost and parallel mode (2026-10-09, late)
 
 `self` (a snapshot of `src`), clang -O2 builds, minimum of 3 runs per

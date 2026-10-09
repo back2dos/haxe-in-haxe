@@ -7,7 +7,15 @@ Earlier checkpoints are in the Git history of this file.
 Latest result per lane, from the dated sections below (newest first; the
 "C build of the port (hxc): memory work" section is at the end).
 
-Full matrix (6a46279+): pending
+Full matrix (e221106, 2026-10-09 night): everything green.
+HashLink port: conformance 279 + 7 (also with `--hxb-lib`), macro 66/66, hxblib 7/7,
+upstream cases 133 + 62 rejected by both, party 2/2, display 679/679, server 595/595,
+bootstrap and JS tool builds; `test/upstream.py` 11/14 steps, the 3 others failing only on
+host limits (unit-macro and unit-macro-hxblib: 11367/11371, the 4 `Gc.finalise` errors;
+threads: 141/142, eval.luv needs libuv). hxc: tcc, gcc -O2 and clang -O2 builds
+conformance 279 + 7 and macro 66/66 each; clang parallel mode (`--parallel 2`) 279 + 7;
+server 595/595; `test/upstream.py` 14/14 steps (unit-macro 11372/11372, threads 144/144,
+tink_core, hxcoro); cosmocc build OK.
 
 | Lane | HashLink build | hxc build |
 | --- | --- | --- |
