@@ -142,11 +142,6 @@ extern class NativeUv {
 	static function fsPollStop(handle:Int):Int;
 	// random: loop -1 runs synchronously; the bytes are copied out with reqCopyOut
 	static function random(loop:Int, req:Int, len:Int):Int;
-	// synchronization (kinds: mutex rwlock semaphore condition barrier once)
-	static function syncInit(kind:Int, arg:Int):Int;
-	static function syncOp(sync:Int, op:Int, other:Int, timeout:Float):Int;
-	static function onceRun(once:Int):Bool;
-	static function threadSelf():Void; // i64
 	// environment, time, paths, system
 	static function getEnv(name:String):Null<Bytes>;
 	static function setEnv(name:String, value:Null<Bytes>):Int; // null: unset

@@ -69,7 +69,10 @@ in macros and `--interp`) work in it.
   others; a loop that never allocates does. Since a switch can happen at
   any allocation, the primitives check their condition again after
   queueing themselves, and an unpark of a thread that is not parked makes
-  its next park return at once.
+  its next park return at once. For the same reason `Tls` holds a mutex
+  around its map (shared by all threads), `Mutex` allocates its waiter list
+  up front, and the runtime's array growth (`hx_arr_grow`, `hx_apush_slow`)
+  reads the length again after allocating.
 - I/O while other threads exist: a blocking socket (`rt_net.c`) is used
   without blocking (`MSG_DONTWAIT`, a `poll` before `accept`, a
   non-blocking `connect`) and the thread waits for the descriptor in the
@@ -87,8 +90,25 @@ in macros and `--interp`) work in it.
   `fatal: deadlock, every thread is blocked forever` and exits with 1.
 - Still blocking the whole process: `Sys.print`/`println` and writes to
   stdout/stderr, `Sys.command`, file system calls, host name resolution,
-  TLS (`rt_ssl.c` BIO send/recv) and libuv (`eval.luv`, `Loop.run`).
-  `eval.luv.Thread`/`ThreadPool` stay unsupported (`EvalLuv.hx`).
+  TLS (`rt_ssl.c` BIO send/recv) and libuv calls other than `Loop.run`
+  (which gives way while other threads exist, see the libuv section).
+- `eval.luv` threads (`EvalLuv.hx`): `Thread.create` runs the Eval function
+  on a new green thread with its own Eval thread context (as upstream's
+  luv OS threads get one), and `ThreadPool.queueWork` hands the work to a
+  pool of `UV_THREADPOOL_SIZE` green threads (default 4, started by the
+  first `queueWork`; `ThreadPool.setSize` sets the variable as luv does).
+  A finished work signals a `uv_async_t` of its loop, whose callback (inside
+  `Loop.run`) calls the after-work callback, so the callback is delivered
+  by the loop as with libuv; `Request.cancel` cancels work no pool thread
+  has taken yet (`ECANCELED`). `Mutex`, `RwLock`, `Semaphore`, `Condition`,
+  `Barrier` and `Once` are Haxe over the hxc `sys.thread` primitives, so
+  they block only the calling green thread (libuv's `uv_mutex_t` & co.
+  would block the process and deadlock). Semantics differences from
+  upstream: no parallelism, and a thread gives way only where it blocks,
+  sleeps or allocates (upstream's Eval threads already never run Haxe code
+  at the same time, under the OCaml runtime lock, but switch at any point);
+  `Thread.create` ignores the stack size. libuv's own thread pool of real
+  threads still runs the file system and DNS requests.
 - Exit: the process exits when the main thread's `main` returns (as on hl
   and cpp), whatever other threads do. An uncaught exception ends only its
   thread (`Thread.onAbort` prints it). `haxe.atomic` needs nothing: the std
@@ -152,10 +172,20 @@ throw when called.
   Windows table and system errors are translated at run time
   (`uv__cosmo_err`); interface names in IPv6 scope ids are numeric only
   (no `if_nametoindex`), and source-specific multicast is unsupported.
-- `Loop.run` blocks the whole process, green threads included, as do TLS
-  reads and writes (see the threads section). libuv's thread pool runs
-  file system and DNS requests on real threads in C only; their callbacks
-  run on the loop's thread. `eval.luv.Thread`/`ThreadPool` stay unsupported.
+- `Loop.run` with one green thread is `uv_run` (it blocks the process). While
+  other green threads exist (e.g. `eval.luv` thread pool work or a thread
+  that will `Async.send`), it runs `UV_RUN_NOWAIT` iterations and waits in
+  between in the green scheduler for the loop's backend descriptor
+  (`uv_backend_fd`, the epoll fd) up to `uv_backend_timeout`, so the other
+  threads run meanwhile and an `Async.send` from one wakes the loop. A
+  thread spawned by a callback during a plain `uv_run` stops it
+  (`rt_spawn_hook`) and the run continues that way; `Loop.stop` is
+  remembered across those iterations. Without a pollable backend descriptor
+  the loop is polled every millisecond. TLS reads and writes still block the
+  process. libuv's thread pool runs file system and DNS requests on real
+  threads in C only; their callbacks run on the loop's thread.
+  `eval.luv.Thread`/`ThreadPool` run on green threads (see the threads
+  section).
 - Tested on Linux x86-64 only (see bench/COSMO.md): the aarch64 half is built
   but not run (no qemu-aarch64 here), and macOS, Windows and the BSDs are
   untested. Windows is the least likely to work: libuv's unix code there

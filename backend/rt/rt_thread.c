@@ -25,6 +25,7 @@
 #include <time.h>
 
 int32_t rt_nthreads = 1;
+void (*rt_spawn_hook)(void);
 
 static double now_secs(void) {
 	struct timespec t;
@@ -348,6 +349,7 @@ int32_t hxc_NativeThread_spawn(void *job) {
 	all_threads = t;
 	rt_nthreads++;
 	enqueue(t);
+	if (rt_spawn_hook) rt_spawn_hook();
 	return t->id;
 }
 

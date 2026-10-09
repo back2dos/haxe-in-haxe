@@ -375,6 +375,9 @@ class EvalContext {
 		return e;
 	}
 
+	/** `Thread_local_storage.get_opt ctx.eval`: the current host thread's own eval, if set. **/
+	public static function getEvalOpt(ctx:Context):Null<Eval> return currentEval.value;
+
 	public static function setEval(ctx:Context, e:Eval):Void {
 		currentEval.value = e;
 		if (!multiThreaded) {

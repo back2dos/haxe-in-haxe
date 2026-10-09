@@ -136,10 +136,6 @@ int32_t hxc_NativeUv_fsEventStop(int32_t id) { return no_uv(); }
 int32_t hxc_NativeUv_fsPollStart(int32_t id, void *path, int32_t interval) { return no_uv(); }
 int32_t hxc_NativeUv_fsPollStop(int32_t id) { return no_uv(); }
 int32_t hxc_NativeUv_random(int32_t loopId, int32_t rid, int32_t len) { return no_uv(); }
-int32_t hxc_NativeUv_syncInit(int32_t kind, int32_t arg) { return no_uv(); }
-int32_t hxc_NativeUv_syncOp(int32_t id, int32_t op, int32_t other, double timeout) { return no_uv(); }
-int32_t hxc_NativeUv_onceRun(int32_t id) { return no_uv(); }
-void hxc_NativeUv_threadSelf(void) { no_uv(); }
 void *hxc_NativeUv_getEnv(void *name) { no_uv(); return NULL; }
 int32_t hxc_NativeUv_setEnv(void *name, void *value) { return no_uv(); }
 void *hxc_NativeUv_environ(void) { no_uv(); return NULL; }
@@ -338,8 +334,11 @@ void *hxc_NativeUv_versionSuffix(void) { return str_of_c(UV_VERSION_SUFFIX); }
 enum { EV_CLOSE, EV_CB, EV_REQ, EV_CONNECTION, EV_ALLOC, EV_READ, EV_EXIT, EV_UDP_RECV, EV_FS_EVENT, EV_FS_POLL };
 static void **disp_slot; // the shadow-stack slot holding the dispatcher
 
+static unsigned long dispatch_count; // events reported (hxc_NativeUv_loopRun, UV_RUN_ONCE)
+
 static void dispatch(int32_t id, int32_t ev, int32_t a, void *b) {
 	if (!disp_slot) return;
+	dispatch_count++;
 	RT_ROOT(b);
 	void *args = hx_arr_new(AK_PTR, 4);
 	RT_ROOT(args);
@@ -358,7 +357,10 @@ static void dispatch(int32_t id, int32_t ev, int32_t a, void *b) {
 
 typedef struct {
 	uv_loop_t *loop;
+	int user_stop; // Loop.stop since the current run began (see hxc_NativeUv_loopRun)
 } hx_loop;
+
+void hxc_NativeThread_yield(void);
 
 static int32_t default_loop_id;
 
@@ -366,7 +368,7 @@ static uv_loop_t *LOOP(int32_t id) { return ((hx_loop *)obj_get(id))->loop; }
 
 int32_t hxc_NativeUv_loopDefault(void) {
 	if (!default_loop_id) {
-		hx_loop *l = malloc(sizeof *l);
+		hx_loop *l = calloc(1, sizeof *l);
 		l->loop = uv_default_loop();
 		default_loop_id = obj_add(l);
 	}
@@ -374,7 +376,7 @@ int32_t hxc_NativeUv_loopDefault(void) {
 }
 
 int32_t hxc_NativeUv_loopInit(void) {
-	hx_loop *l = malloc(sizeof *l);
+	hx_loop *l = calloc(1, sizeof *l);
 	l->loop = malloc(sizeof(uv_loop_t));
 	int r = uv_loop_init(l->loop);
 	if (r < 0) {
@@ -385,18 +387,93 @@ int32_t hxc_NativeUv_loopInit(void) {
 	return obj_add(l);
 }
 
+// Loop.run and green threads (rt_thread.c): uv_run blocks the OS thread, so
+// while other green threads exist (eval.luv thread pool work, threads that
+// signal an Async, ...) the loop is run without blocking in libuv: one
+// UV_RUN_NOWAIT iteration at a time, waiting in between in the scheduler for
+// the loop's backend descriptor (or its next timer), so the other threads run
+// meanwhile. UV_RUN_ONCE ends after an iteration that reported an event.
+// libuv registers new watchers with the backend only at its next poll, so
+// while some are queued the next iteration follows without waiting. With one
+// thread uv_run is called as is; a thread spawned by a callback meanwhile
+// stops it (rt_spawn_hook) and the run goes on giving way.
+static uv_loop_t *plain_loop; // the loop in a plain uv_run, if any
+static int plain_spawned;
+
+static void plain_on_spawn(void) {
+	if (plain_loop && !plain_spawned) {
+		plain_spawned = 1;
+		uv_stop(plain_loop);
+	}
+}
+
+// whether watchers wait to be added to the backend (libuv's private
+// watcher_queue, a struct uv__queue or void *[2]: empty when it points to itself)
+static int watchers_queued(uv_loop_t *loop) {
+	void **q = (void **)&loop->watcher_queue;
+	return q[0] != (void *)q;
+}
+
+// waits, letting the other green threads run, until the loop has work
+static void coop_wait(uv_loop_t *loop) {
+	if (!uv_loop_alive(loop)) return;
+	if (watchers_queued(loop)) {
+		hxc_NativeThread_yield();
+		return;
+	}
+	uv_update_time(loop);
+	int t = uv_backend_timeout(loop);
+	if (t == 0) {
+		hxc_NativeThread_yield();
+		return;
+	}
+	int fd = uv_backend_fd(loop);
+	if (fd >= 0) rt_wait_fd(fd, 0, t < 0 ? -1.0 : t / 1000.0);
+	else rt_sleep(t < 0 || t > 1 ? 0.001 : t / 1000.0); // no pollable backend: poll every millisecond
+}
+
 int32_t hxc_NativeUv_loopRun(int32_t id, int32_t mode, void *dispatcher) {
-	uv_loop_t *loop = LOOP(id);
+	hx_loop *hl = (hx_loop *)obj_get(id);
+	uv_loop_t *loop = hl->loop;
 	void **saved = disp_slot;
 	RT_ROOT(dispatcher);
 	disp_slot = dispatcher_root;
-	int r = uv_run(loop, mode == 0 ? UV_RUN_DEFAULT : mode == 1 ? UV_RUN_ONCE : UV_RUN_NOWAIT);
+	uv_run_mode m = mode == 0 ? UV_RUN_DEFAULT : mode == 1 ? UV_RUN_ONCE : UV_RUN_NOWAIT;
+	int r;
+	int coop = m != UV_RUN_NOWAIT && rt_nthreads > 1;
+	if (!coop) {
+		uv_loop_t *saved_loop = plain_loop;
+		int saved_spawned = plain_spawned;
+		void (*saved_hook)(void) = rt_spawn_hook;
+		plain_loop = loop;
+		plain_spawned = 0;
+		rt_spawn_hook = plain_on_spawn;
+		r = uv_run(loop, m);
+		coop = plain_spawned && r && m == UV_RUN_DEFAULT && !hl->user_stop;
+		plain_loop = saved_loop;
+		plain_spawned = saved_spawned;
+		rt_spawn_hook = saved_hook;
+	}
+	if (coop) {
+		for (;;) {
+			unsigned long n = dispatch_count;
+			r = uv_run(loop, UV_RUN_NOWAIT);
+			if (!r || hl->user_stop || (m == UV_RUN_ONCE && dispatch_count != n)) break;
+			coop_wait(loop);
+		}
+	}
+	hl->user_stop = 0;
 	disp_slot = saved;
 	RT_UNROOT(1);
 	return r != 0;
 }
 
-void hxc_NativeUv_loopStop(int32_t id) { uv_stop(LOOP(id)); }
+void hxc_NativeUv_loopStop(int32_t id) {
+	hx_loop *hl = (hx_loop *)obj_get(id);
+	hl->user_stop = 1;
+	uv_stop(hl->loop);
+}
+
 int32_t hxc_NativeUv_loopClose(int32_t id) { return uv_loop_close(LOOP(id)); }
 int32_t hxc_NativeUv_loopAlive(int32_t id) { return uv_loop_alive(LOOP(id)) != 0; }
 void hxc_NativeUv_loopNow(int32_t id) { i64_out = (int64_t)uv_now(LOOP(id)); }
@@ -1317,103 +1394,6 @@ int32_t hxc_NativeUv_random(int32_t loopId, int32_t rid, int32_t len) {
 	if (loopId < 0) return uv_random(NULL, NULL, r->scratch, r->scratch_len, 0, NULL);
 	return uv_random(LOOP(loopId), &r->u.random, r->scratch, r->scratch_len, 0, random_cb);
 }
-
-// ---- threads and synchronization (no thread creation: see EvalLuv)
-
-typedef struct {
-	int kind; // 0 mutex, 1 rwlock, 2 semaphore, 3 condition, 4 barrier, 5 once
-	union {
-		uv_mutex_t mutex;
-		uv_rwlock_t rwlock;
-		uv_sem_t sem;
-		uv_cond_t cond;
-		uv_barrier_t barrier;
-		uv_once_t once;
-	} u;
-} hx_sync;
-
-static hx_sync *SYNC(int32_t id) { return obj_get(id); }
-
-// kind, arg (recursive, count): id or negative error
-int32_t hxc_NativeUv_syncInit(int32_t kind, int32_t arg) {
-	hx_sync *s = calloc(1, sizeof(hx_sync));
-	s->kind = kind;
-	int r = 0;
-	switch (kind) {
-	case 0: r = arg ? uv_mutex_init_recursive(&s->u.mutex) : uv_mutex_init(&s->u.mutex); break;
-	case 1: r = uv_rwlock_init(&s->u.rwlock); break;
-	case 2: r = uv_sem_init(&s->u.sem, (unsigned)arg); break;
-	case 3: r = uv_cond_init(&s->u.cond); break;
-	case 4: r = uv_barrier_init(&s->u.barrier, (unsigned)arg); break;
-	case 5: {
-		uv_once_t o = UV_ONCE_INIT;
-		s->u.once = o;
-		break;
-	}
-	}
-	if (r < 0) {
-		free(s);
-		return r;
-	}
-	return obj_add(s);
-}
-
-// op on a synchronization object; other: a mutex (condition wait), timeout (ns)
-int32_t hxc_NativeUv_syncOp(int32_t id, int32_t op, int32_t other, double timeout) {
-	hx_sync *s = SYNC(id);
-	switch (s->kind) {
-	case 0:
-		switch (op) {
-		case 0: uv_mutex_destroy(&s->u.mutex); return 0;
-		case 1: uv_mutex_lock(&s->u.mutex); return 0;
-		case 2: return uv_mutex_trylock(&s->u.mutex);
-		default: uv_mutex_unlock(&s->u.mutex); return 0;
-		}
-	case 1:
-		switch (op) {
-		case 0: uv_rwlock_destroy(&s->u.rwlock); return 0;
-		case 1: uv_rwlock_rdlock(&s->u.rwlock); return 0;
-		case 2: return uv_rwlock_tryrdlock(&s->u.rwlock);
-		case 3: uv_rwlock_rdunlock(&s->u.rwlock); return 0;
-		case 4: uv_rwlock_wrlock(&s->u.rwlock); return 0;
-		case 5: return uv_rwlock_trywrlock(&s->u.rwlock);
-		default: uv_rwlock_wrunlock(&s->u.rwlock); return 0;
-		}
-	case 2:
-		switch (op) {
-		case 0: uv_sem_destroy(&s->u.sem); return 0;
-		case 1: uv_sem_post(&s->u.sem); return 0;
-		case 2: uv_sem_wait(&s->u.sem); return 0;
-		default: return uv_sem_trywait(&s->u.sem);
-		}
-	case 3:
-		switch (op) {
-		case 0: uv_cond_destroy(&s->u.cond); return 0;
-		case 1: uv_cond_signal(&s->u.cond); return 0;
-		case 2: uv_cond_broadcast(&s->u.cond); return 0;
-		case 3: uv_cond_wait(&s->u.cond, &SYNC(other)->u.mutex); return 0;
-		default: return uv_cond_timedwait(&s->u.cond, &SYNC(other)->u.mutex, (uint64_t)timeout);
-		}
-	case 4:
-		if (op == 0) {
-			uv_barrier_destroy(&s->u.barrier);
-			return 0;
-		}
-		return uv_barrier_wait(&s->u.barrier) > 0;
-	}
-	return UV_EINVAL;
-}
-
-// Once.once: 1 when this call runs the initialization (the port then calls the callback)
-static int once_ran;
-static void once_init(void) { once_ran = 1; }
-int32_t hxc_NativeUv_onceRun(int32_t id) {
-	once_ran = 0;
-	uv_once(&SYNC(id)->u.once, once_init);
-	return once_ran;
-}
-
-void hxc_NativeUv_threadSelf(void) { i64_out = (int64_t)(uintptr_t)uv_thread_self(); }
 
 // ---- environment, time, paths, system
 

@@ -208,6 +208,7 @@ int rt_wait_fds(void *pollfds, int n, double timeout); // struct pollfd[n], reve
 void rt_sleep(double seconds); // <= 0: yield
 void rt_preempt(void); // lets other runnable threads (and due timers/descriptors) run
 void rt_fd_closed(int fd); // before close(fd): waiters on fd fail instead of polling a reused number
+extern void (*rt_spawn_hook)(void); // called after a thread is spawned (rt_uv.c: a running uv loop gives way)
 
 // ---- Haxe Int semantics: wrapping 32-bit arithmetic
 #define IADD(a, b) ((int32_t)((uint32_t)(a) + (uint32_t)(b)))
