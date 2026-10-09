@@ -87,7 +87,7 @@ class ServerCache {
 										isUnusual = true;
 									} catch (e:Dynamic) {
 										// ThreadSafeHashtbl.find signals absence with the string "Not_found"
-										if (!(Std.isOfType(e, NotFound) || (Std.isOfType(e, String) && (e : String) == "Not_found"))) throw e;
+										if (!(Std.isOfType(e, NotFound) || (Std.isOfType(e, std.String) && (e : std.String) == "Not_found"))) throw e;
 										cc.cacheFile(fkey, ({file: ffile, classPath: rfile.classPath} : ResolvedFile), ftime, data, pdi);
 										info = "cached";
 										isUnusual = false;
@@ -193,7 +193,7 @@ class ServerCache {
 		function eq(a:Dynamic, b:Dynamic):Bool {
 			if (a == b) return true;
 			if (a == null || b == null) return false;
-			if (Std.isOfType(a, String) || Std.isOfType(b, String)) return a == b;
+			if (Std.isOfType(a, std.String) || Std.isOfType(b, std.String)) return a == b;
 			if (Std.isOfType(a, Array)) {
 				if (!Std.isOfType(b, Array)) return false;
 				var aa:Array<Dynamic> = a, bb:Array<Dynamic> = b;

@@ -2206,7 +2206,7 @@ class Grammar {
 			try {
 				return Parser.makeMeta(m.meta, m.exprs, secureExpr(ctx, s), m.pos);
 			} catch (e:haxe.Exception) {
-				if ((Std.isOfType(e, StreamFailure) || Std.isOfType(e, StreamError)) && ctx.config.inDisplayFile) {
+				if ((Std.isOfType(e, StreamFailure) || Std.isOfType(e, core.ds.Stream.StreamError)) && ctx.config.inDisplayFile) {
 					var e = mk(EConst(Ident("null")), Globals.nullPos);
 					return Parser.makeMeta(m.meta, m.exprs, e, m.pos);
 				}

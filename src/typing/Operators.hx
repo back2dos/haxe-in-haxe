@@ -49,8 +49,12 @@ enum TypeClass {KInt;KFloat;KString;KUnk;KDyn;KOther;KNumParam(t:T);KStrParam(t:
 typedef AssignOpApi<A>={var aknoFallback:Void->TExpr;var typeRhs:TExpr->Expr->A;var toTexpr:Dynamic->A->(TExpr->TExpr)->TExpr;var generate:Dynamic->TExpr->TExpr->TExpr;var assign:Dynamic->TExpr->A->TExpr;}
 class Operators {
  public static function checkError(ctx:Typer,err:CompilerError):Void {
-  if(ctx.com.display.dmsKind!=DMNone) Error.raiseTypingError("Display diagnostics are outside the source-only HXB milestone",err.errPos);
-  raiseOrDisplayError(ctx,err);
+  switch err.errMessage {
+   case ModuleNotFound({pack:[],name:name}) if(context.display.Diagnostics.errorInDiagnosticsRun(ctx.com,err.errPos)):
+    context.display.DisplayToplevel.handleUnresolvedIdentifier(ctx,name,err.errPos,true);
+   case _:
+    raiseOrDisplayError(ctx,err);
+  }
  }
  public static function checkAssign(ctx:Typer,e:TExpr):Void switch e.eexpr{case TLocal(v) if(hasVarFlag(v,VFinal)&&!Common.ignoreError(ctx.com)):Error.raiseTypingError("Cannot assign to final",e.epos);case TLocal({vExtra:null})|TArray(_,_)|TField(_,_)|TIdent(_):case TConst(TThis)|TTypeExpr(_) if(ctx.f.isUntyped):case _:if(!Common.ignoreError(ctx.com))invalidAssign(e.epos);};
  public static function classify(t:T):TypeClass {

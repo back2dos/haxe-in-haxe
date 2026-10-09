@@ -43,14 +43,19 @@ path`) with the `Expand` markers of `args.ml` in `src/compiler/HighLevel.hx`.
 As upstream, the batch compiler also runs through `Server.setup_server_context`
 and the cache hooks. The server's HXB module cache restores modules with the
 translated HXB reader (`HxbReaderApiServer` implements `HxbReaderApi`), and
-`-D disable-hxb-cache` keeps typed modules in memory instead. Missing:
-
-- Display requests (`--display`, JSON-RPC) fail with "Display services
-  (--display) are not ported yet" at `Server.create_request_scope`.
-
-The pinned upstream no longer implements `--wait stdio` (it reports "Invalid
+`-D disable-hxb-cache` keeps typed modules in memory instead. The pinned upstream no longer implements `--wait stdio` (it reports "Invalid
 host/port"); the port behaves the same. The host socket API is IPv4 only. See
 `test/TESTING.md` for the server and haxelib results.
+
+Status 2026-10-09: display services work in batch mode. `--display` takes a
+JSON-RPC request like the pinned reference (the legacy `file@pos` form is a
+JSON-RPC parse error upstream too). `typerDisplay.ml`, `context/display/*`,
+`displayOutput.ml`, `displayProcessing.ml`, `completionItem.ml`, `genjson.ml`,
+`jsonRpc.ml`, `jsonrpc_handler.ml`, are translated, and every display hook in the typer calls them directly
+(`context/DeferredServices.hx` is gone). OCaml `Hashtbl` iteration order,
+which display output exposes, is reproduced by `core.ds.OcamlHash`
+(`caml_hash`) with `core.ds.OcamlHashtbl`. Results of the display corpus are
+in `test/TESTING.md`.
 
 ## Translation snapshot
 
@@ -88,7 +93,7 @@ Shared HXB-path helpers were extracted from otherwise deferred areas:
 
 - `context/display/DeprecationCheck.hx`: compiler deprecation warnings.
 - `context/display/ImportHandling.hx`: imports, aliases, wildcard imports, using
-  resolution, and bookkeeping; interactive completion branches fail explicitly.
+  resolution, and bookkeeping, including the display branches.
 - `core/display/DisplayPosition.hx` and `Javadoc.hx`: shared positions and
   documentation parsing required by typing.
 - `codegen/Genxml.hx`: RTTI type serialization before HXB save; the standalone
@@ -300,6 +305,31 @@ conformance, or completion of the pre-existing HXB writer. The subsequent runtim
 | `compiler/server/serverConfig.ml` | `src/compiler/server/ServerConfig.hx` | Server configuration |
 | `compiler/server/serverMessage.ml` | `src/compiler/server/ServerMessage.hx` | Verbose server messages |
 | `context/commonCache.ml` | `src/context/CommonCache.hx` | Cache contexts and signatures |
+| `compiler/displayOutput.ml` | `src/compiler/DisplayOutput.hx` | Display services |
+| `compiler/displayProcessing.ml` | `src/compiler/DisplayProcessing.hx` | Display services |
+| `compiler/displayProcessingGlobals.ml` | `src/compiler/DisplayProcessingGlobals.hx` | Display services |
+| `context/display/diagnostics.ml` | `src/context/display/Diagnostics.hx` | Display services |
+| `context/display/diagnosticsPrinter.ml` | `src/context/display/DiagnosticsPrinter.hx` | Display services |
+| `context/display/display.ml` | `src/context/display/Display.hx` | Display services |
+| `context/display/displayEmitter.ml` | `src/context/display/DisplayEmitter.hx` | Display services |
+| `context/display/displayException.ml` | `src/context/display/DisplayException.hx` | Display services |
+| `context/display/displayFields.ml` | `src/context/display/DisplayFields.hx` | Display services |
+| `context/display/displayJson.ml` | `src/context/display/DisplayJson.hx` | Display services; `server/*` cache methods need the server milestone, `server/module` HXB input |
+| `context/display/displayMemory.ml` | `src/context/display/DisplayMemory.hx` | Display services; memory sizes need `Memory.memSize` (no OCaml Obj reflection) |
+| `context/display/displayPath.ml` | `src/context/display/DisplayPath.hx` | Display services |
+| `context/display/displayTexpr.ml` | `src/context/display/DisplayTexpr.hx` | Display services |
+| `context/display/displayToplevel.ml` | `src/context/display/DisplayToplevel.hx` | Display services |
+| `context/display/documentSymbols.ml` | `src/context/display/DocumentSymbols.hx` | Display services |
+| `context/display/exprPreprocessing.ml` | `src/context/display/ExprPreprocessing.hx` | Display services |
+| `context/display/findReferences.ml` | `src/context/display/FindReferences.hx` | Display services |
+| `context/display/statistics.ml` | `src/context/display/Statistics.hx` | Display services |
+| `context/display/syntaxExplorer.ml` | `src/context/display/SyntaxExplorer.hx` | Display services |
+| `context/memory.ml` | `src/context/Memory.hx` | Request types; object sizes are unavailable on the host runtimes |
+| `core/display/completionItem.ml` | `src/core/display/CompletionItem.hx` | Display services |
+| `core/json/genjson.ml` | `src/core/json/Genjson.hx` | Display serialization |
+| `core/json/jsonRpc.ml` | `src/core/json/JsonRpc.hx` | JSON-RPC protocol |
+| `core/json/jsonrpc_handler.ml` | `src/core/json/JsonrpcHandler.hx` | JSON-RPC handler |
+| `typing/typerDisplay.ml` | `src/typing/TyperDisplay.hx` | Display services |
 
 ## Deferred or scope-review areas
 
@@ -312,33 +342,9 @@ A scope-review entry is not a blanket exclusion of shared batch-compiler helpers
 | `codegen/jClass.ml` | Other target/library support |
 | `codegen/javaModern.ml` | Other target/library support |
 | `codegen/swfLoader.ml` | Other target/library support |
-| `compiler/displayOutput.ml` | Display/service area; batch-used helpers and shared declarations need scope review |
-| `compiler/displayProcessing.ml` | Display/service area; batch-used helpers and shared declarations need scope review |
-| `compiler/displayProcessingGlobals.ml` | Display/service area; batch-used helpers and shared declarations need scope review |
-| `context/display/diagnostics.ml` | Display/service area; batch-used helpers and shared declarations need scope review |
-| `context/display/diagnosticsPrinter.ml` | Display/service area; batch-used helpers and shared declarations need scope review |
-| `context/display/display.ml` | Display/service area; batch-used helpers and shared declarations need scope review |
-| `context/display/displayEmitter.ml` | Display/service area; batch-used helpers and shared declarations need scope review |
-| `context/display/displayException.ml` | Display/service area; batch-used helpers and shared declarations need scope review |
-| `context/display/displayFields.ml` | Display/service area; batch-used helpers and shared declarations need scope review |
-| `context/display/displayJson.ml` | Display/service area; batch-used helpers and shared declarations need scope review |
-| `context/display/displayMemory.ml` | Display/service area; batch-used helpers and shared declarations need scope review |
-| `context/display/displayPath.ml` | Display/service area; batch-used helpers and shared declarations need scope review |
-| `context/display/displayTexpr.ml` | Display/service area; batch-used helpers and shared declarations need scope review |
-| `context/display/displayToplevel.ml` | Display/service area; batch-used helpers and shared declarations need scope review |
-| `context/display/documentSymbols.ml` | Display/service area; batch-used helpers and shared declarations need scope review |
-| `context/display/exprPreprocessing.ml` | Display/service area; batch-used helpers and shared declarations need scope review |
-| `context/display/findReferences.ml` | Display/service area; batch-used helpers and shared declarations need scope review |
-| `context/display/statistics.ml` | Display/service area; batch-used helpers and shared declarations need scope review |
-| `context/display/syntaxExplorer.ml` | Display/service area; batch-used helpers and shared declarations need scope review |
-| `context/memory.ml` | Server cache/object-size/leak diagnostics |
 | `context/nativeLibraryHandler.ml` | SWF/JVM library handlers (`SwfLoader`, `JavaModern`); the HXB branch is translated |
 | `context/sourcemaps.ml` | Ordinary output-target source maps |
-| `core/display/completionItem.ml` | Display/service area; batch-used helpers and shared declarations need scope review |
-| `core/json/genjson.ml` | Auxiliary typed JSON dump/display serialization; retained hooks unresolved |
-| `core/json/jsonRpc.ml` | Display/server JSON-RPC protocol |
 | `core/json/jsonRpcSocket.ml` | Display/server JSON-RPC transport |
-| `core/json/jsonrpc_handler.ml` | Display/server JSON-RPC handler |
 | `filters/ES6Ctors.ml` | Other target/library support |
 | `generators/cpp/cppAst.ml` | Ordinary output-target generator/runtime |
 | `generators/cpp/cppAstTools.ml` | Ordinary output-target generator/runtime |
@@ -430,7 +436,6 @@ A scope-review entry is not a blanket exclusion of shared batch-compiler helpers
 | `macro/macroApi.ml` | Macro runtime/API milestone |
 | `prebuild.ml` | OCaml build/runtime adapter; no mechanical compiler-module port |
 | `typing/macroContext.ml` | Macro context milestone |
-| `typing/typerDisplay.ml` | Display/service area; batch-used helpers and shared declarations need scope review |
 
 ## Additional draft support files
 

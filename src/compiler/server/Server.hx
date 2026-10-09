@@ -243,9 +243,13 @@ class Server {
 			case null:
 				if (isServer) CompilerOutput.createServerResultHandler(io) else CompilerOutput.createCliResultHandler(io);
 			case arg:
-				// JsonRpc.parse_request / DisplayJson.create_json_result_handler: the display
-				// services (context/display, core/json) are ported separately.
-				throw new ArgumentError("Display services (--display) are not ported yet");
+				core.json.JsonRpc.handleJsonrpcError(function() {
+					var input = core.json.JsonRpc.parseRequest(arg);
+					return context.display.DisplayJson.createJsonResultHandler(timerCtx, io, new core.json.JsonrpcHandler(input));
+				}, function(json) {
+					context.display.DisplayJson.sendJson(io, json);
+					throw core.ds.Exit.raise();
+				});
 		}
 		return {
 			stats: Stats.create(),

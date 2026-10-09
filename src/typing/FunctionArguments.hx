@@ -57,7 +57,7 @@ class FunctionArguments {
 	public static function typeFunctionArgValue(ctx:TyperContext, t:T, c:Null<Expr>, doDisplay:Bool):Null<TExpr> {
 		if (c == null) return null;
 		var p = c.pos;
-		var input = doDisplay ? context.DeferredServices.display() : c;
+		var input = doDisplay ? context.display.Display.preprocessExpr(ctx.com, c) : c;
 		var e = typeExpr(ctx, input, WithTypeTools.withType(t));
 		e = AbstractCast.castOrUnify(ctx, t, e, p);
 		e = Optimizer.reduceExpression(SafeCom.ofTyper(ctx), e);
@@ -160,7 +160,7 @@ class FunctionArguments {
 			}
 			var eo = typeFunctionArgValue(ctx, typed.type, typed.expr, doDisplay);
 			var v = makeLocal(typed.name, VUser(TVOArgument), typed.type, arg.meta, pn);
-			if (doDisplay && DisplayPosition.displayPosition.enclosedIn(pn)) context.DeferredServices.display();
+			if (doDisplay && DisplayPosition.displayPosition.enclosedIn(pn)) context.display.DisplayEmitter.displayVariable(ctx, v, pn);
 			if (acc.length == 0 && TyperManager.isCoroutineContext(ctx)) checkCoroutineScope(v);
 			if (typed.name != "_") ctx.f.locals = ctx.f.locals.add(v.vName, v);
 			acc.unshift({variable:v, defaultValue:eo});

@@ -60,8 +60,11 @@ class Json {
 	static function writeInt(write:String->Void, value:Int):Void write(Std.string(value));
 
 	static function writeFloat(write:String->Void, value:Float):Void {
-		if (Math.isNaN(value) || !Math.isFinite(value)) throw "NaN and infinity floats are unsupported in JSON";
-		write(Std.string(value));
+		if (Math.isNaN(value) || !Math.isFinite(value)) throw new core.ds.Failure("NaN and infinity floats are unsupported in JSON");
+		// json.ml: Printf "%.16g", or "%.17g" if that does not read back exactly
+		var s = core.ds.OcamlPrintf.formatG(16, value);
+		var s = Std.parseFloat(s) == value ? s : core.ds.OcamlPrintf.formatG(17, value);
+		write(s);
 	}
 
 	static function writeArray(write:String->Void, values:Array<JsonValue>):Void {

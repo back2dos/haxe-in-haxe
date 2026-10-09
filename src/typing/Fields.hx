@@ -305,9 +305,13 @@ class Fields {
     case TAnon({aStatus:ClassStatics({clKind:KAbstractImpl(a)})})|TInst({clKind:KAbstractImpl(a)},_)|TAbstract(a,_) if(special(a)):displayError(ctx.com,"Field "+i+" cannot be called directly because it has no expression",pfield);
     case TAnon({aStatus:ClassStatics(c)}) if(c.clFields.exists(i)):displayError(ctx.com,"Static access to instance field "+i+" is not allowed",pfield);
     case _:
-     // Display diagnostics are a later milestone; ordinary missing-field errors retain the source path.
-     if(Common.isDiagnostics(ctx.com)) throw new haxe.Exception("Display diagnostics are not supported by the source-only HXB compiler");
-     displayError(ctx.com,StringError.stringError(i,stringSource(e.etype),sType(printContext(),e.etype)+" has no field "+i),pfield);
+     var tthis=e.etype;
+     try {
+      if(!context.display.Diagnostics.errorInDiagnosticsRun(ctx.com,pfield)) throw core.ds.Exit.raise();
+      context.display.DisplayFields.handleMissingFieldRaise(ctx,tthis,i,mode,withType,pfield);
+     } catch(_:core.ds.Exit) {
+      displayError(ctx.com,StringError.stringError(i,stringSource(tthis),sType(printContext(),tthis)+" has no field "+i),pfield);
+     }
    }
   }
   return AKExpr(mk(TField(e,FDynamic(i)),spawnMonomorph(ctx,p),p));

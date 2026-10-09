@@ -200,6 +200,12 @@ class Main {
 		var requestScope = try Server.createRequestScope(false, io, requestArgs.displayArg) catch (e:core.ds.ArgumentError) {
 			ServerCompilationContext.dispose(sctx);
 			return badArg(e.message);
+		} catch (e:core.ds.Exit) {
+			// handle_jsonrpc_error raised Exit after sending the error: an uncaught OCaml exception
+			ServerCompilationContext.dispose(sctx);
+			io.flush();
+			Sys.stderr().writeString("Fatal error: exception Stdlib.Exit\n");
+			return 2;
 		}
 		var code = try HighLevel.entry(sctx, requestScope, requestArgs) catch (e:core.ds.ArgumentError) {
 			ServerCompilationContext.dispose(sctx);

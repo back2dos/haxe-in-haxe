@@ -20,7 +20,7 @@ import typing.TypeloadParse.ParseError;
 class TypeloadModule {
  // haxe/src/typing/typeloadModule.ml: make_curmod.
  public static function makeCurmod(com:context.Common.CommonContext,g:context.Typecore.TyperGlobals,m:ModuleDef):context.Typecore.TyperModule {
-  return {curmod:m,importResolution:g.rootTyper.m.importResolution.cloneAs(["import",Globals.sTypePath(m.mPath)]),ownResolution:null,enumWithType:null,moduleUsing:[],importStatements:[],isDisplayFile:com.display.dmsKind!=core.DisplayTypes.DisplayModeValue.DMNone && core.display.DisplayPosition.displayPosition.isInFile(core.Path.UniqueKey.create(m.mExtra.mFile))};
+  return {curmod:m,importResolution:g.rootTyper.m.importResolution.cloneAs(["import",Globals.sTypePath(m.mPath)]),ownResolution:null,enumWithType:null,moduleUsing:[],importStatements:[],isDisplayFile:com.display.dmsKind!=core.DisplayTypes.DisplayModeValue.DMNone && core.display.DisplayPosition.displayPosition.isInFile(core.Path.UniqueKey.lazyKey(m.mExtra.mFile))};
  }
 
 	var classPaths:ClassPaths;

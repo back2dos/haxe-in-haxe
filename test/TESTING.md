@@ -200,7 +200,10 @@ passed.
 
 Known limits:
 
-- Display requests (`--display`) fail explicitly until display is ported.
+- Display requests work in batch mode (see the display section); `server/*`
+  JSON-RPC methods through a server are not covered by a harness yet, and
+  `server/module` still raises (it needs `hxb_reader_api_com` in
+  `displayJson.ml`).
 - The pinned upstream rejects `--wait stdio` ("Invalid host/port"); so does
   the port. The host socket API is IPv4 only: an IPv6 address fails with a
   Failure, where the reference fails with `EAFNOSUPPORT` in this environment.
@@ -277,6 +280,76 @@ Two fixes came out of this work:
   Unix. With a symlinked std path (a worktree whose `haxe/` links to the
   main checkout), PosInfos file names of std modules stayed absolute, and 85
   regular cases differed from the reference.
+
+## Display services: `--display` JSON-RPC — 2026-10-09
+
+```sh
+HAXE_REFERENCE=haxe/haxe python3 test/display.py -j 2 [--extended]
+```
+
+`test/display.py` uses the upstream display test corpus
+(`haxe/tests/display/src/cases/*.hx`) as input. Each documented test method
+holds a snippet with `{-N-}` markers. The harness extracts the snippet like
+`Marker.hx`, writes it where `RpcDisplayTestContext`'s Vfs would (one
+directory per method), and sends each request that the method body names
+(`fields`/`toplevel` → display/completion, `type`/`doc` → display/hover,
+`position` → display/definition, `usage` → display/references, `signature`
+→ display/signatureHelp, `diagnostics()`, `documentSymbols()`) as a batch
+`--display '<json-rpc>'` invocation to both compilers, with the arguments of
+`BaseDisplayTestContext.runHaxe`. `initialize`, display/metadata and
+display/defines are sent once. Exit code, stdout and stderr must be
+identical after the response `timestamp` is zeroed. The upstream assertions
+are not evaluated: the reference's answer is the oracle, so a case that
+upstream marks as failing still has to be reproduced.
+
+`--extended` also sends every position method (completion, hover,
+definition, typeDefinition, implementation, references, signatureHelp) at
+every marker, and diagnostics, documentSymbols, statistics and package for
+every snippet.
+
+| Run | Requests | Identical | Differ |
+| --- | ---: | ---: | ---: |
+| Default | 679 | 679 | 0 |
+| `--extended` | 7325 | 7325 | 0 |
+
+The default run takes about 4 minutes and the extended run about 70 minutes
+with `-j 2`.
+
+Notes:
+- In the pinned upstream, `--display` always takes JSON-RPC; the legacy
+  `file@pos` form (still used by `XmlDisplayTestContext` and
+  `documentSymbols()` there) is a JSON-RPC parse error in both compilers.
+- Batch mode runs with a compilation cache like upstream
+  (`Server.setup_server_context`/`enable_cache_mode`): toplevel completion
+  lists the types of every cached file, so it depends on the parse cache.
+- Output order follows OCaml `Hashtbl` iteration, reproduced with
+  `core.ds.OcamlHash` (`caml_hash`).
+- Not covered: the `server/*` methods (server milestone) and memory
+  statistics (`server/memory`, which needs OCaml object sizes).
+
+Bugs found by the corpus besides the display port itself: the lexer lost
+lines of the line table on a lexer error, `Std.isOfType(e, StreamError)` in
+the grammar tested against an enum constructor, a Dynamic-typed for-loop
+display callback received an anonymous structure instead of an `Expr`,
+`Path.getRealPath` returned null for a missing file on HashLink, type
+metadata prepends mutated the parsed declaration, and
+`ClassPaths.relativePath` resolved symlinks (PosInfos file names became
+absolute with a symlinked std; the HXB conformance suite caught this in a
+worktree whose `haxe/` is a symlink). The extended run also found:
+`OcamlHashtbl.hashInt` hashed the untagged int (caml_hash mixes 2n+1, which
+also affects Eval's int-keyed tables), statistics read the inline-call pairs
+swapped, `ExtString.String.nsplit ""` is `[]`, `magic_type_path` is compared
+structurally, and uncaught exceptions print `Printexc` text.
+
+HXB conformance after this work: 275 identical + 7 expected failures; macro
+cases 66/66; `test/interp.py`: 269 identical, the 3 known differences below.
+
+After merging the server/HXB-reader branch (cache tables back to OcamlHashtbl
+so display output keeps OCaml's order): display default run 679/679,
+conformance `--hxb-lib` 275 + 7 expected failures, macro cases 66/66,
+`test/server.py` 587/587 with `-D disable-hxb-cache` and with the HXB cache,
+`test/haxelib.py` 7/7 and `--server` 14/14, `test/upstream.py misc` 684 tests
+with 0 failures (5 recorded skips), bootstrap build.
 
 ## Execution: `--interp` and `--run` — 2026-10-08
 

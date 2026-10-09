@@ -48,7 +48,7 @@ class TypeloadFunction {
   } else {
    var displayDebug=Meta.has(MetaTag.Custom(":debug.display"),ctx.f.curfield.cfMeta);
    if(displayDebug) Sys.println("before processing:\n"+Ast.dumpWithPos(syntax));
-   if(!ctx.com.partScope.parserState.hadParserResume) syntax=context.DeferredServices.display();
+   if(!ctx.com.partScope.parserState.hadParserResume) syntax=context.display.Display.preprocessExpr(ctx.com,syntax);
    if(displayDebug) Sys.println("after processing:\n"+Ast.dumpWithPos(syntax));
    e=typeExpr(ctx,syntax,NoValue);
   }

@@ -9,7 +9,8 @@ import core.ds.PMap;
 import core.ds.NotFound;
 import context.Resolution;
 import context.Resolution.*;
-import context.DeferredServices;
+import core.display.CompletionItem.ToplevelKind;
+import core.DisplayTypes.CompletionResultKindValue;
 import context.Common.*;
 import core.Ast;
 import context.Typecore.Typer;
@@ -18,11 +19,68 @@ import core.TFunctions.*;
 import context.Typecore.*;
 import context.TyperPass;
 
-// Shared bookkeeping from haxe/src/context/display/importHandling.ml:46–64.
+enum ImportDisplayKind {
+ IDKPackage(sl:Array<String>);
+ IDKModule(sl:Array<String>,s:String);
+ IDKSubType(sl:Array<String>,sm:String,st:String);
+ IDKModuleField(sl:Array<String>,sm:String,sf:String);
+ IDKSubTypeField(sl:Array<String>,sm:String,st:String,sf:String);
+ IDK;
+}
+// haxe/src/context/display/importHandling.ml
 // The preexisting Haxe ModuleDefDisplay model stores position keys as strings.
 class ImportHandling {
+ public static function convertImportToSomethingUsable(pt:Pos,path:Array<PlacedName>):{kind:ImportDisplayKind,pos:Pos} {
+  var pack:Array<String>=[],m:Null<String>=null,t:Null<String>=null;
+  for(part in path) {
+   var s=part.name,p=part.pos;
+   var isLower=Ast.isLowerIdent(s);
+   var isDisplayPos=DisplayPosition.enclosesPosition(pt,p);
+   if(m==null&&t!=null) throw new core.Globals.InternalCompilerError("importHandling.ml: impossible import state",""); // impossible, I think
+   else if(isLower&&m!=null&&t==null) {
+    if(isDisplayPos) return {kind:IDKModuleField(pack.copy(),m,s),pos:p};
+    else return {kind:IDK,pos:p}; // assume that we're done
+   } else if(m!=null&&t!=null) {
+    if(isDisplayPos) return {kind:IDKSubTypeField(pack.copy(),m,t,s),pos:p};
+    else return {kind:IDK,pos:p};
+   } else if(isLower&&m==null&&t==null) {
+    if(isDisplayPos) return {kind:IDKPackage(pack.concat([s])),pos:p};
+    else pack.push(s);
+   } else if(!isLower&&m!=null&&t==null) {
+    if(isDisplayPos) return {kind:IDKSubType(pack.copy(),m,s),pos:p};
+    else t=s;
+   } else {
+    if(isDisplayPos) return {kind:IDKModule(pack.copy(),s),pos:p};
+    else m=s;
+   }
+  }
+  return {kind:IDK,pos:Globals.nullPos};
+ }
  // Injective (the file comes last) and much cheaper than JSON-encoding the position per lookup.
- static function key(p:Pos):String return p.pmin+":"+p.pmax+":"+p.pfile;
+ public static function key(p:Pos):String return p.pmin+":"+p.pmax+":"+p.pfile;
+ public static function posOfKey(k:String):Pos {
+  var i=k.indexOf(":"),j=k.indexOf(":",i+1);
+  return {pfile:k.substr(j+1),pmin:Std.parseInt(k.substr(0,i)),pmax:Std.parseInt(k.substr(i+1,j-i-1))};
+ }
+ /** OCaml's `compare` on positions: file, then pmin, then pmax. **/
+ public static function comparePos(a:Pos,b:Pos):Int {
+  var c=context.display.Display.compareStrings(a.pfile,b.pfile);
+  if(c!=0) return c;
+  if(a.pmin!=b.pmin) return a.pmin<b.pmin?-1:1;
+  if(a.pmax!=b.pmax) return a.pmax<b.pmax?-1:1;
+  return 0;
+ }
+ /** `PMap.iter` over `m_import_positions`: in position order. **/
+ public static function iterImportPositions(positions:Map<String,Bool>,f:String->Pos->Bool->Void):Void {
+  var l=[for(k in positions.keys()) {key:k,pos:posOfKey(k)}];
+  l.sort((a,b)->comparePos(a.pos,b.pos));
+  for(e in l) f(e.key,e.pos,positions.get(e.key));
+ }
+ public static function sortedImportPositions(positions:Map<String,{pos:Pos,used:{value:Bool}}>):Array<{pos:Pos,used:{value:Bool}}> {
+  var l=[for(v in positions) v];
+  l.sort((a,b)->comparePos(a.pos,b.pos));
+  return l;
+ }
  public static function addImportPosition(ctx:Typer,p:Pos,path:Array<PlacedName>):Void {
   var positions=ctx.m.curmod.mExtra.mDisplay.mImportPositions,k=key(p);
   if (!positions.exists(k)) positions.set(k,false);
@@ -40,7 +98,8 @@ class ImportHandling {
   var pack=path.slice(0,i),rest=path.slice(i);
   if(rest.length==0) {
    if(mode==IAll) ctx.m.importResolution.add(wildcardPackageResolution(pack.map(part->part.name),p));
-   else if(path.length==0) DeferredServices.display();
+   // p spans `import |` (to the display position), so we take the pmax here
+   else if(path.length==0) DisplayException.raiseFields(DisplayToplevel.collect(ctx,TKType,NoValue,true),CRImport,core.DisplayTypes.DisplayTypes.makeSubject(null,{pfile:p.pfile,pmin:p.pmax,pmax:p.pmax}));
    else raiseTypingError("Module name must start with an uppercase letter",path[path.length-1].pos);
    return;
   }
@@ -58,7 +117,8 @@ class ImportHandling {
   inline function getType(name:String):ModuleType {var t=try findType(name) catch(_:NotFound) failUsefully(name,pType);checkPrivate(t,pType);return t;}
   inline function checkAlias(mt:ModuleType,name:String,pname:Pos):Void {
    if(!(name.charAt(0)>="A"&&name.charAt(0)<="Z")) raiseTypingError("Type aliases must start with an uppercase letter",pname);
-   if(ctx.m.isDisplayFile&&DisplayPosition.displayPosition.enclosedIn(pname)&&UniqueKey.create(pname.pfile)==UniqueKey.lazyKey(ctx.m.curmod.mExtra.mFile)) DeferredServices.display();
+   // Imports from import.hx should not match display position from current file
+   if(ctx.m.isDisplayFile&&DisplayPosition.displayPosition.enclosedIn(pname)&&UniqueKey.create(pname.pfile)==UniqueKey.lazyKey(ctx.m.curmod.mExtra.mFile)) DisplayEmitter.displayAlias(ctx,name,typeOfModuleType(mt),pname);
   }
   inline function addStaticInit(t:ModuleType,name:Null<String>,s:String):ResolvedImport return switch resolveTypedef(t) {
    case TClassDecl(c):c.clBuild();staticFieldResolution(c,PMap.find(s,c.clStatics),name,p);
@@ -139,7 +199,7 @@ class ImportHandling {
    if(Ast.isLowerIdent(s2)) {pack.push(s2);t=Ast.mkTypePath(pack,s1);}
    else t=Ast.mkTypePath(pack,s2,null,s1);
   } else if(parts.length==1) t=Ast.mkTypePath([],parts[0].name);
-  else return context.DeferredServices.display();
+  else return DisplayException.raiseFields(DisplayToplevel.collect(ctx,TKType,NoValue,true),CRUsing,core.DisplayTypes.DisplayTypes.makeSubject(null,{pfile:p.pfile,pmin:p.pmax,pmax:p.pmax}));
   var types:Array<ModuleType>;
   if(t.tsub==null) {
    var md=ctx.g.doLoadModule(ctx,{pack:t.tpackage,name:t.tname},p,MDepFromImport);

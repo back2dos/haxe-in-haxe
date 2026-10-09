@@ -72,9 +72,8 @@ import typing.Operators.*;
 class Typer {
  static function ensureBlock(e:Expr):Expr return switch e.expr {case EBlock(_):e;case _:{expr:EBlock([e]),pos:e.pos};};
  static function efield(e:Expr,name:String):ExprDef return EField(e,name,EFNormal);
- static function deferredDisplay(ctx:TyperContext,e:Expr,dk:DisplayKind,mode:AccessMode,withType:WithTypeValue):TExpr return context.DeferredServices.display();
- static function checkDisplayMetadata(ctx:TyperContext,metas:Metadata):Void for(m in metas){if(DisplayPosition.displayPosition.enclosedIn(m.pos))context.DeferredServices.display();for(e in m.exprs)if(DisplayPosition.displayPosition.enclosedIn(e.pos))context.DeferredServices.display();}
- static function checkDisplayType(ctx:TyperContext,t:T,ptp:PlacedTypePath):Void {ctx.g.typeHints.unshift({display:ctx.m.curmod.mExtra.mDisplay,pos:ptp.posFull,type:t});if(ctx.m.isDisplayFile&&DisplayPosition.displayPosition.enclosedIn(ptp.posFull))context.DeferredServices.display();}
+ static function checkDisplayMetadata(ctx:TyperContext,metas:Metadata):Void context.display.DisplayEmitter.checkDisplayMetadata(ctx,metas);
+ static function checkDisplayType(ctx:TyperContext,t:T,ptp:PlacedTypePath):Void context.display.DisplayEmitter.checkDisplayType(ctx,t,ptp);
 
  public static function terminatorType(ctx:TyperContext,withType:WithTypeValue,p:Pos):T return switch withType {case NoValue:tDynamic; case WithType(t,_):t; case Value(_):spawnMonomorph(ctx,p);};
  public static function getIteratorParam(t:T):T return switch follow(t) {
@@ -222,7 +221,7 @@ class Typer {
   var err=UnknownIdent(i);
   if(ctx.f.inDisplay) raiseErrorMsg(err,p);
   if(ctx.f.inCallArgs) throw new context.Typecore.WithTypeError(makeError(err,p));
-  if(Common.isDiagnostics(ctx.com)) {context.DeferredServices.display(); context.DeferredServices.display(); return AKExpr(mk(TIdent(i),mkMono(),p));}
+  if(context.display.Diagnostics.errorInDiagnosticsRun(ctx.com,p)) {context.display.DisplayToplevel.handleUnresolvedIdentifier(ctx,i,p,false); context.display.DisplayFields.handleMissingIdent(ctx,i,mode,withType,p); return AKExpr(mk(TIdent(i),mkMono(),p));}
   if(ctx.com.display.dmsKind==DMNone) return raiseErrorMsg(err,p);
   displayError(ctx.com,errorMsg(err),p); return AKExpr(mk(TIdent(i),mkMono(),p));
  }
@@ -245,7 +244,11 @@ class Typer {
        if(ctx.com.moduleLut.mem(mpath)) return raiseErrorMsg(TypeNotFound(mpath,sub==null?upper.name:sub,NotDefined),position);
        return raiseErrorMsg(ModuleNotFound(mpath),position);
       } catch(_:core.ds.NotFound) {
-       if(ctx.f.inDisplay) context.DeferredServices.display();
+       // if there was no module name part, last guess is that we're trying to get package completion
+       if(ctx.f.inDisplay) {
+        var sl=path.map(part -> part.name);
+        context.display.DisplayToplevel.collectAndRaise(ctx,TKType,WithTypeTools.noValue,CRToplevel(null),sl.join("."),p0,p0);
+       }
        return raiseError(err);
       }
      case _:throw exc;
@@ -287,7 +290,7 @@ class Typer {
   case EField(_):handleEfield(ctx,e,p,mode,withType);
   case EArray(e1,e2):typeArrayAccess(ctx,e1,e2,p,mode);
   case ECall(e,el):typeCallAccess(ctx,e,el,mode,withType,null,p);
-  case EDisplay(e,dk):AKExpr(context.DeferredServices.display());
+  case EDisplay(e,dk):AKExpr(TyperDisplay.handleEdisplay(ctx,e,dk,mode,withType));
   case _:AKExpr(typeExpr(ctx,{expr:e,pos:p},withType,mode));
  };
  public static function typeArrayAccess(ctx:TyperContext,e1:Expr,e2:Expr,p:Pos,mode:AccessMode):AccessKind {
@@ -307,7 +310,7 @@ class Typer {
     }
     var v=Meta.has(MetaTag.This,ev.evMeta)?addLocal(ctx,VAbstractThis,name,t,pv):addLocalWithOrigin(ctx,TVOLocalVariable,name,t,pv); v.vMeta=ev.evMeta;
     checkDisplayMetadata(ctx,v.vMeta); if(ev.evFinal) addVarFlag(v,VFinal); if(ev.evStatic) addVarFlag(v,VStatic);
-    if(ctx.f.inDisplay&&DisplayPosition.displayPosition.enclosedIn(pv)) context.DeferredServices.display();
+    if(ctx.f.inDisplay&&DisplayPosition.displayPosition.enclosedIn(pv)) context.display.DisplayEmitter.displayVariable(ctx,v,pv);
     vars.push({variable:v,expr:e});
    } catch(exc:Dynamic) {switch exc {case (core.ds.ExceptionTools.typing(_) => Some(err)):checkError(ctx,err); vars.push({variable:addLocal(ctx,VGenerated,name,tDynamic,pv),expr:null}); case _:throw exc;}}
   }
@@ -315,7 +318,7 @@ class Typer {
   if(vars.length==1) return mk(TVar(vars[0].variable,vars[0].expr),ctx.t.tvoid,p);
   var block=mk(TBlock(vars.map(pair -> mk(TVar(pair.variable,pair.expr),ctx.t.tvoid,p))),ctx.t.tvoid,p); return mk(TMeta({meta:MetaTag.MergeBlock,exprs:[],pos:p},block),block.etype,block.epos);
  }
- public static function formatString(ctx:TyperContext,s:String,p:Pos):Expr return FormatString.formatString(ParserConfig.fileParserConfig(ctx.com,p.pfile),s,p,function(next:ExprDef,p:Pos) return ctx.f.inDisplay&&DisplayPosition.displayPosition.enclosedIn(p)?context.DeferredServices.display():{expr:next,pos:p});
+ public static function formatString(ctx:TyperContext,s:String,p:Pos):Expr return FormatString.formatString(ParserConfig.fileParserConfig(ctx.com,p.pfile),s,p,function(next:ExprDef,p:Pos) return ctx.f.inDisplay&&DisplayPosition.displayPosition.enclosedIn(p)?context.display.Display.preprocessExpr(ctx.com,{expr:next,pos:p}):{expr:next,pos:p});
  public static function typeBlock(ctx:TyperContext,el:Array<Expr>,withType:WithTypeValue,p:Pos):TExpr {
   var result=[];
   for(i in 0...el.length) {
@@ -351,7 +354,7 @@ class Typer {
     try {
      var t:T;
      if(dynamicParameter!=null) t=dynamicParameter;
-     else {original=fieldMap.get(n); if(original==null) throw core.ds.NotFound.raise(); if(ctx.f.inDisplay&&DisplayPosition.displayPosition.enclosedIn(pn)) context.DeferredServices.display(); t=original.cfType;}
+     else {original=fieldMap.get(n); if(original==null) throw core.ds.NotFound.raise(); if(ctx.f.inDisplay&&DisplayPosition.displayPosition.enclosedIn(pn)) context.display.DisplayEmitter.displayField(ctx,Unknown,CFSMember,original,pn); t=original.cfType;}
      e=typeExpr(ctx,field.expr,WithTypeTools.withStructureField(t,n)); e=AbstractCast.castOrUnify(ctx,t,e,e.epos);
      if(isNull(t)&&!isNull(e.etype)) e=mk(TCast(e,null),ctx.t.tnull(e.etype),e.epos);
      try typeEq(EqStrict,e.etype,t) catch(exc:Dynamic) {switch exc {case (core.ds.ExceptionTools.unification(_) => Some(_)):e=mk(TCast(e,null),t,e.epos); case _:throw exc;}}
@@ -381,7 +384,7 @@ class Typer {
     var e=typeExpr(ctx,field.expr,WithTypeTools.namedStructureField(name));
     switch follow(e.etype) {case TAbstract({aPath:{pack:[],name:"Void"}},_):raiseTypingError("Fields of type Void are not allowed in structures",e.epos); case _:}
     var cf=mkField(name,e.etype,Ast.punion(pf,e.epos),pf);
-    if(ctx.f.inDisplay&&DisplayPosition.displayPosition.enclosedIn(pf)) context.DeferredServices.display();
+    if(ctx.f.inDisplay&&DisplayPosition.displayPosition.enclosedIn(pf)) context.display.DisplayEmitter.displayField(ctx,Unknown,CFSMember,cf,pf);
     fields.push({key:field.key,expr:e});
     if(valid) {if(StringTools.startsWith(name,"$")) raiseTypingError("Field names starting with a dollar are not allowed",p); types.set(name,cf);}
    }
@@ -458,7 +461,7 @@ class Typer {
    case TInst(c,params):var fcc=buildConstructor(null,c,params); mk(TNew(c,params,fcc.fcArgs),t,p);
    case TAbstract(a,params) if(a.aImpl!=null):var fcc=buildConstructor(null,a.aImpl,params); mk(TNew(a.aImpl,params,fcc.fcArgs),t,p);
    case _:raiseTypingError(sType(printContext(),t)+" cannot be constructed",p);
-  } catch(exc:Dynamic) {switch exc {case (core.ds.ExceptionTools.typing(_) => Some(err)):switch err.errMessage {case NoConstructor(_):if(Common.isDiagnostics(ctx.com)) context.DeferredServices.display(); displayErrorExt(ctx.com,err); return mk(TConst(TNull),t,p); case _:throw exc;} case _:throw exc;}}
+  } catch(exc:Dynamic) {switch exc {case (core.ds.ExceptionTools.typing(_) => Some(err)):switch err.errMessage {case NoConstructor(_):if(context.display.Diagnostics.errorInDiagnosticsRun(ctx.com,p)) context.display.DisplayFields.handleMissingFieldRaise(ctx,t,"new",MCall(el),withType,p); displayErrorExt(ctx.com,err); return mk(TConst(TNull),t,p); case _:throw exc;} case _:throw exc;}}
  }
  public static function typeTry(ctx:TyperContext,e1:Expr,catches:Array<Catch>,withType:WithTypeValue,p:Pos):TExpr {
   var body=typeExpr(ctx,ensureBlock(e1),withType),typed:Array<{variable:TVar,expr:TExpr}>=[],expressions=[body];
@@ -487,9 +490,11 @@ class Typer {
    };
    var t2=loop(t); checkUnreachable(typed,t2,catchSyntax.expr.pos);
    var locals=saveLocals(ctx),v=addLocalWithOrigin(ctx,TVOCatchVariable,catchSyntax.name.name,t,catchSyntax.name.pos);
-   if(ctx.m.isDisplayFile&&DisplayPosition.displayPosition.enclosedIn(catchSyntax.name.pos)) context.DeferredServices.display();
+   if(ctx.m.isDisplayFile&&DisplayPosition.displayPosition.enclosedIn(catchSyntax.name.pos)) context.display.DisplayEmitter.displayVariable(ctx,v,catchSyntax.name.pos);
    var e=typeExpr(ctx,catchSyntax.expr,withType);
-   if(ctx.m.isDisplayFile&&DisplayPosition.displayPosition.enclosedIn(catchSyntax.pos)) context.DeferredServices.display();
+   // If the catch position is the display position it means we get completion on the catch keyword or some
+   // punctuation. Otherwise we wouldn't reach this point.
+   if(ctx.m.isDisplayFile&&DisplayPosition.displayPosition.enclosedIn(catchSyntax.pos)) TyperDisplay.displayExpr(ctx,catchSyntax.expr,e,DKMarked,MGet,withType,catchSyntax.pos);
    v.vType=t2; locals(); typed.unshift({variable:v,expr:e}); expressions.unshift(e);
   }
   var t:T=switch withType {
@@ -589,7 +594,7 @@ class Typer {
   if(v==null) return e;
   Typeload.generateArgsMeta(ctx.com,null,m -> v.vMeta.unshift(m),f.fArgs);
   if(params.length>0||inlined) v.vExtra=varExtra(params,inlined?e:null);
-  if(ctx.f.inDisplay&&DisplayPosition.displayPosition.enclosedIn(v.vPos)) context.DeferredServices.display();
+  if(ctx.f.inDisplay&&DisplayPosition.displayPosition.enclosedIn(v.vPos)) context.display.DisplayEmitter.displayVariable(ctx,v,v.vPos);
   function usage(event:Usage):Void switch event {case Usage.Block(f)|Usage.Loop(f)|Usage.Function(f):f(usage); case Usage.Use(v2)|Usage.Assign(v2) if(v==v2):throw core.ds.Exit.raise(); case Usage.Use(_)|Usage.Assign(_)|Usage.Declare(_):}
   var recursive=false;
   try LocalUsage.localUsage(usage,e) catch(_:core.ds.Exit) { recursive=true;}
@@ -709,7 +714,7 @@ class Typer {
    case MetaTag.Inline:switch e1.expr {
     case ECall(e,el):accGet(ctx,typeCallAccess(ctx,e,el,MGet,WithTypeTools.value,m.pos,p));
     case ENew(t,el):var e=typeNew(ctx,t,el,withType,true,p); mk(TMeta({meta:MetaTag.Inline,exprs:[],pos:Globals.nullPos},e),e.etype,e.epos);
-    case EFor(it,e2):ForLoop.typeForLoop(ctx,deferredDisplay,it,e2,ForcedUnroll,p);
+    case EFor(it,e2):ForLoop.typeForLoop(ctx,TyperDisplay.handleDisplay,it,e2,ForcedUnroll,p);
     case _:displayError(ctx.com,"Call or function expected after inline keyword",p); expression();
    }
    case MetaTag.ImplicitReturn:switch e1.expr {case EReturn(e):typeReturn(ctx,e,withType,e1.pos,true); case _:expression();}
@@ -778,7 +783,7 @@ class Typer {
   case EConst(Ident("__unprotect__")) if(el.length==1&&switch el[0].expr {case EConst(String(_)):true; case _:false;}):
    var value=typeExpr(ctx,el[0],WithTypeTools.value);
    if(Common.platform(ctx.com,Flash)) {var t=tfun([value.etype],value.etype); mk(TCall(mk(TIdent("__unprotect__"),t,p),[value]),value.etype,value.epos);} else value;
-  case EDisplay(subject={expr:EConst(Ident("super"))},dk):context.DeferredServices.display();
+  case EDisplay(subject={expr:EConst(Ident("super"))},dk):TyperDisplay.handleDisplay(ctx,{expr:ECall(subject,el),pos:p},dk,mode,withType);
   case EConst(Ident("super")):
    if(ctx.e.curfun!=FunConstructor) raiseTypingError("Cannot call super constructor outside class constructor",p);
    var sup=ctx.c.curclass.clSuper; if(sup==null) raiseTypingError("Current class does not have a super",p);
@@ -842,7 +847,7 @@ class Typer {
      case _:typeArrayDecl(ctx,list,withType,p);
     }
    case EVars(vl):typeVars(ctx,vl,p);
-   case EFor(it,e2):ForLoop.typeForLoop(ctx,deferredDisplay,it,e2,NoForcedUnroll,p);
+   case EFor(it,e2):ForLoop.typeForLoop(ctx,TyperDisplay.handleDisplay,it,e2,NoForcedUnroll,p);
    case ETernary(e1,e2,e3):typeIf(ctx,e1,e2,e3,withType,true,p);
    case EIf(e,e1,e2):typeIf(ctx,e,e1,e2,withType,false,p);
    case EWhile(cond,body,NormalWhile):
@@ -868,14 +873,14 @@ class Typer {
     var value=typeExpr(ctx,inner,withType); ctx.f.isUntyped=old; mk(value.eexpr,mkMono(),value.epos);
    case ECast(inner,null):var value=typeExpr(ctx,inner,WithTypeTools.value); mk(TCast(value,null),spawnMonomorph(ctx,p),p);
    case ECast(inner,t):typeCast(ctx,inner,t,p);
-   case EDisplay(inner,dk):context.DeferredServices.display();
+   case EDisplay(inner,dk):TyperDisplay.handleEdisplay(ctx,inner,dk,mode,withType);
    case ECheckType(inner,hint):var t=Typeload.loadComplexType(ctx,true,LoadAny,hint),value=typeExpr(ctx,inner,WithTypeTools.withType(t)); value=AbstractCast.castOrUnify(ctx,t,value,p); value.etype==t?value:mk(TCast(value,null),t,p);
    case EMeta(m,inner):typeMeta(ctx,m,inner,withType,p,mode);
    case EIs(inner,hint):switch hint.type {
     case CTPath(tp):
      if(tp.path.tparams.length>0) displayError(ctx.com,"Type parameters are not supported for the `is` operator",hint.pos);
      var value=typeExpr(ctx,inner,WithTypeTools.value),mt=Typeload.loadTypeDef(ctx,hint.pos,tp.path);
-     if(ctx.f.inDisplay&&DisplayPosition.displayPosition.enclosedIn(hint.pos)) context.DeferredServices.display();
+     if(ctx.f.inDisplay&&DisplayPosition.displayPosition.enclosedIn(hint.pos)) context.display.DisplayEmitter.displayModuleType(ctx,mt,hint.pos);
      var typeValue=TyperBase.typeModuleType(ctx,mt,hint.pos); Texpr.Builder.resolveAndMakeStaticCall(ctx.com.std,"isOfType",[value,typeValue],p);
     case _:displayError(ctx.com,"Unsupported type for `is` operator",hint.pos); Texpr.Builder.makeBool(ctx.com.basic,false,p);
    }

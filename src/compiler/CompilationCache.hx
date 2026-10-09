@@ -7,6 +7,8 @@ import core.Globals.GlobalTypePath;
 import core.Json;
 import core.TType;
 import core.ds.Hashtbl;
+import core.ds.OcamlHash;
+import core.ds.OcamlHashtbl;
 import core.ds.NotFound;
 import core.ds.PriorityQueue;
 import compiler.hxb.HxbData;
@@ -51,6 +53,15 @@ class CompilationCache {
 		}
 	}
 
+	// Tables whose iteration order shows in display/server output are OcamlHashtbl
+	// with OCaml's polymorphic hash, so they iterate like upstream's Hashtbl.
+	public static function stringTable<V>():OcamlHashtbl<String, V> return new OcamlHashtbl(OcamlHash.hashString, (a, b) -> a == b, 0);
+
+	public static function pathTable<V>():OcamlHashtbl<GlobalTypePath, V> return new OcamlHashtbl(OcamlHash.hashPath, pathEq, 0);
+
+	/** OCaml structural equality on type paths. **/
+	public static function pathEq(a:GlobalTypePath, b:GlobalTypePath):Bool return a.name == b.name && a.pack.length == b.pack.length && a.pack.join(".") == b.pack.join(".");
+
 	public static function createDirectory(path:String, mtime:Float):CachedDirectory {
 		return {cPath: path, cMtime: mtime};
 	}
@@ -59,16 +70,16 @@ class CompilationCache {
 class ContextCache {
 	final index:Int;
 	final sign:String;
-	final files:Hashtbl<String, CachedFile> = new Hashtbl(0);
-	final modules:Hashtbl<GlobalTypePath, ModuleDef> = new Hashtbl(0);
-	final binaryCache:Hashtbl<GlobalTypePath, ModuleCache> = new Hashtbl(0);
-	final tmpBinaryCache:Hashtbl<GlobalTypePath, ModuleCache> = new Hashtbl(0);
+	final files:OcamlHashtbl<String, CachedFile> = CompilationCache.stringTable();
+	final modules:OcamlHashtbl<GlobalTypePath, ModuleDef> = CompilationCache.pathTable();
+	final binaryCache:OcamlHashtbl<GlobalTypePath, ModuleCache> = CompilationCache.pathTable();
+	final tmpBinaryCache:OcamlHashtbl<GlobalTypePath, ModuleCache> = CompilationCache.pathTable();
 	final getHxbModuleMutex = new sys.thread.Mutex();
-	final removedFiles:Hashtbl<String, ResolvedFile> = new Hashtbl(0);
+	final removedFiles:OcamlHashtbl<String, ResolvedFile> = CompilationCache.stringTable();
 	var json:JsonValue = JNull;
 	var initialized = false;
 	var lastAccessTime = Sys.time();
-	final children:Hashtbl<String, Bool> = new Hashtbl(0);
+	final children:OcamlHashtbl<String, Bool> = CompilationCache.stringTable();
 
 	public function new(index:Int, sign:String) {
 		this.index = index;
@@ -196,13 +207,13 @@ class ContextCache {
 
 	public function getSign():String return sign;
 	public function getIndex():Int return index;
-	public function getFiles():Hashtbl<String, CachedFile> return files;
-	public function getModules():Hashtbl<GlobalTypePath, ModuleDef> return modules;
+	public function getFiles():OcamlHashtbl<String, CachedFile> return files;
+	public function getModules():OcamlHashtbl<GlobalTypePath, ModuleDef> return modules;
 
-	public function getHxb():Hashtbl<GlobalTypePath, ModuleCache> return binaryCache;
+	public function getHxb():OcamlHashtbl<GlobalTypePath, ModuleCache> return binaryCache;
 
 	/* TODO handle hxb cache there too */
-	public function getRemovedFiles():Hashtbl<String, ResolvedFile> return removedFiles;
+	public function getRemovedFiles():OcamlHashtbl<String, ResolvedFile> return removedFiles;
 
 	public function getJson():JsonValue return json;
 	public function setJson(j:JsonValue):Void json = j;
@@ -215,7 +226,7 @@ class ContextCache {
 	/* child contexts */
 
 	public function addChild(childSign:String):Void children.replace(childSign, true);
-	public function getChildren():Hashtbl<String, Bool> return children;
+	public function getChildren():OcamlHashtbl<String, Bool> return children;
 }
 
 abstract class ServerTask {
@@ -251,10 +262,10 @@ class ArbitraryTask extends ServerTask {
 }
 
 class Cache {
-	final contexts:Hashtbl<String, ContextCache> = new Hashtbl(0);
+	final contexts:OcamlHashtbl<String, ContextCache> = CompilationCache.stringTable();
 	var contextList:Array<ContextCache> = [];
 	final haxelib:Hashtbl<HaxelibKey, Array<String>> = new Hashtbl(0);
-	final directories:Hashtbl<String, Array<CachedDirectory>> = new Hashtbl(0);
+	final directories:OcamlHashtbl<String, Array<CachedDirectory>> = CompilationCache.stringTable();
 	final nativeLibs:Hashtbl<String, CachedNativeLib> = new Hashtbl(0);
 	var tasks:PriorityQueue<ServerTask> = Empty;
 
@@ -509,7 +520,7 @@ class Cache {
 		else {
 			/* Transitive closure of "kept": start with non-stale contexts, follow
 				each kept context's children edges. */
-			var kept = new Hashtbl<String, Bool>(0);
+			var kept = CompilationCache.stringTable();
 			var worklist:Array<ContextCache> = [];
 			contexts.iter(function(sign, cc) {
 				if (!isStale(cc)) {

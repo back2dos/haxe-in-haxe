@@ -33,7 +33,12 @@ import core.ds.PMap;
 import core.ds.NotFound;
 import syntax.Parser;
 import context.display.ImportHandling;
-import context.DeferredServices;
+import core.display.CompletionItem.ToplevelKind;
+import core.display.CompletionItem.CompletionModuleKind;
+import core.display.CompletionItem.TKind;
+import core.DisplayTypes.CompletionResultKindValue;
+import core.DisplayTypes.DisplayExceptionKind;
+import core.display.CompletionItem.ClassFieldOrigin;
 using Lambda;
 using core.ds.ArrayTools;
 import core.Define;
@@ -102,7 +107,8 @@ class Typeload {
  public static function loadQualifiedTypeDef(ctx:Typer,pack:Array<String>,mname:String,tname:String,p:Pos):Dynamic return findTypeInModuleRaise(ctx,loadModule(ctx,{pack:pack,name:mname},p),tname,p);
  public static function loadTypeDefPrime(ctx:Typer,pack:Array<String>,mname:String,tname:String,p:Pos):Dynamic return pack.length==0?loadUnqualifiedTypeDef(ctx,mname,tname,p):loadQualifiedTypeDef(ctx,pack,mname,tname,p);
  public static function loadTypeDef(ctx:Typer,p:Pos,t:Dynamic):Dynamic {
-  if(core.ds.Key.compare(t,Parser.magicTypePath)==0) DeferredServices.display();
+  // `t = Parser.magic_type_path` is OCaml structural equality ({[]; ""; []; None})
+  if(t.tpackage.length==0&&t.tname==""&&(t.tparams==null||t.tparams.length==0)&&t.tsub==null) context.display.DisplayException.raiseFields(context.display.DisplayToplevel.collect(ctx,TKType,NoValue,true),CRTypeHint,core.DisplayTypes.DisplayTypes.makeSubject(null,p));
   var name=t.tsub==null?t.tname:t.tsub;
   try {if(t.tsub!=null) throw NotFound.raise(); return findTypeInCurrentModuleContext(ctx,t.tpackage,name);} catch(exc:Dynamic) {if(!Std.isOfType(exc,NotFound)) throw exc; return loadTypeDefPrime(ctx,t.tpackage,t.tname,name,p);}
  }
@@ -212,13 +218,26 @@ class Typeload {
   return maybeBuildInstance(ctx,info.buildApply(tl),getParams,ptp.posFull);
  }
  public static function loadInstance(ctx:Typer,ptp:PlacedTypePath,getParams:LoadInstanceParamMode,mode:LoadInstanceMode,allowDisplay:Bool=false):T {
-  try {var t=loadInstancePrime(ctx,ptp,getParams,mode); if(allowDisplay && ctx.m.isDisplayFile) DeferredServices.display(); return t;}
+  try {var t=loadInstancePrime(ctx,ptp,getParams,mode); if(allowDisplay) context.display.DisplayEmitter.checkDisplayType(ctx,t,ptp); return t;}
   catch(exc:Dynamic) {switch exc {
-   case (core.ds.ExceptionTools.typing(_) => Some({errMessage:ModuleNotFound(path)})) if(ctx.e.macroDepth<=0&&ctx.com.display.dmsKind==DMDefault&&DisplayPosition.displayPosition.enclosedIn(ptp.posPath)):return DeferredServices.display();
+   case (core.ds.ExceptionTools.typing(_) => Some({errMessage:ModuleNotFound(path)})) if(ctx.e.macroDepth<=0&&ctx.com.display.dmsKind==DMDefault&&DisplayPosition.displayPosition.enclosedIn(ptp.posPath)):
+    var s=Globals.sTypePath(path);
+    return context.display.DisplayToplevel.collectAndRaise(ctx,TKType,NoValue,CRTypeHint,s,ptp.posFull,ptp.posPath);
    case _:throw exc;
   }}
  }
- static function structCompletion(e:Dynamic,intersection:Bool):Dynamic {throw e;}
+ static function structCompletion(e:Dynamic,intersection:Bool):Dynamic {
+  if(Std.isOfType(e,context.display.DisplayException)) switch (e:context.display.DisplayException).kind {
+   case DisplayFields(r) if(r.fkind.match(CRTypeHint)):
+    var l=r.fitems.filter(item -> switch item.ciKind {
+     case ITType({kind:Struct},_):true;
+     case _:false;
+    });
+    return context.display.DisplayException.raiseFields(l,CRStructExtension(intersection),r.fsubject);
+   case _:
+  }
+  throw e;
+ }
 
  public static function loadComplexTypePrime(ctx:Typer,allowDisplay:Bool,mode:LoadInstanceMode,hint:TypeHint):T {
   var p=hint.pos;
@@ -290,11 +309,11 @@ class Typeload {
      if(Meta.has(MetaTag.Optional,f.cffMeta)) t=ctx.t.tnull(t);
      var cf=mkField(name,t,p,f.cffName.pos,pub); cf.cfKind=kind; cf.cfParams=params; cf.cfDoc=f.cffDoc; cf.cfMeta=f.cffMeta.copy();
      if(isFinal) addClassFieldFlag(cf,CfFinal); initMetaOverloads(ctx,null,cf);
-     if(ctx.m.isDisplayFile) {DeferredServices.display(); if(DisplayPosition.displayPosition.enclosedIn(cf.cfNamePos)) displayed=cf;}
+     if(ctx.m.isDisplayFile) {context.display.DisplayEmitter.checkDisplayMetadata(ctx,cf.cfMeta); if(DisplayPosition.displayPosition.enclosedIn(cf.cfNamePos)) displayed=cf;}
      fields=PMap.add(name,cf,fields);
     }
     var a=({aFields:fields,aStatus:Closed} : core.TType.TAnon);
-    if(displayed!=null) {var cf=displayed; delay(ctx.g,PBuildClass,function() DeferredServices.display());}
+    if(displayed!=null) {var cf=displayed; delay(ctx.g,PBuildClass,function() context.display.DisplayEmitter.displayField(ctx,AnonymousStructure(a),CFSMember,cf,cf.cfNamePos));}
     TAnon(a);
    case CTFunction(args,ret):
     var voidArg=args.length==1&&switch args[0].type {case CTPath({path:{tpackage:[],tparams:[],tname:"Void"}}):true; case _:false;};
@@ -313,7 +332,9 @@ class Typeload {
  public static function loadComplexType(ctx:Typer,allowDisplay:Bool,mode:LoadInstanceMode,hint:TypeHint):T {
   try return loadComplexTypePrime(ctx,allowDisplay,mode,hint) catch(exc:Dynamic) {switch exc {
    case (core.ds.ExceptionTools.typing(_) => Some(err)):switch err.errMessage {
-    case ModuleNotFound({pack:[],name:name}) if(Common.isDiagnostics(ctx.com)):return DeferredServices.display();
+    case ModuleNotFound({pack:[],name:name}) if(context.display.Diagnostics.errorInDiagnosticsRun(ctx.com,err.errPos)):
+     delay(ctx.g,PForce,function() context.display.DisplayToplevel.handleUnresolvedIdentifier(ctx,name,err.errPos,true));
+     return tDynamic;
     case _:throw exc;
    }
    case _:throw exc;
@@ -347,7 +368,7 @@ class Typeload {
  public static function typeTypeParam(ctx:Typer,host:TypeParamHost,path:GlobalTypePath,tp:TypeParam):TypedTypeParam {
   var name=tp.tpName.name,c=mkClass(ctx.m.curmod,{pack:path.pack.concat([path.name]),name:name},tp.tpName.pos,tp.tpName.pos);
   c.clParams=typeTypeParams(ctx,host,c.clPath,tp.tpParams); c.clMeta=tp.tpMeta; var ttp=mkTypeParam(c,host,null,null);
-  if(ctx.m.isDisplayFile&&DisplayPosition.displayPosition.enclosedIn(tp.tpName.pos)) DeferredServices.display(); return ttp;
+  if(ctx.m.isDisplayFile&&DisplayPosition.displayPosition.enclosedIn(tp.tpName.pos)) context.display.DisplayEmitter.displayType(ctx,ttp.ttpType,tp.tpName.pos); return ttp;
  }
  public static function typeTypeParams(ctx:Typer,host:TypeParamHost,path:GlobalTypePath,tpl:Array<TypeParam>):TypeParams {
   var names:Array<String>=[],pairs=[];

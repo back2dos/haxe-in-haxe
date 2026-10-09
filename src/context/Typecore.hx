@@ -179,7 +179,8 @@ class ForbidPackage extends haxe.Exception {
 }
 class WithTypeError extends haxe.Exception {
 	public final error:Dynamic;
-	public function new(error:Dynamic) { super("WithTypeError"); this.error = error; }
+	// The message is what Printexc.to_string prints for the uncaught OCaml exception.
+	public function new(error:Dynamic) { super("Typecore.WithTypeError(_)"); this.error = error; }
 }
 class TyperManager {
 	public static function create(ctx:Typer,m:TyperModule,c:TyperClass,f:TyperField,e:TyperExpr,pass:TyperPass,params:TypeParams):Typer {
