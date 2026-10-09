@@ -29,8 +29,8 @@ enum SyntaxCompletion { SCComment; SCClassRelation; SCInterfaceRelation; SCTypeD
 enum SequenceParsingResult<T> { Success(value:T); End(pos:Pos); Error(message:String); }
 @:structInit class SyntaxCompletionOn {
 	public var kind:SyntaxCompletion;
-	public var subject:Dynamic;
-	public inline function new(kind:SyntaxCompletion, subject:Dynamic) { this.kind = kind; this.subject = subject; }
+	public var subject:core.DisplayTypes.CompletionSubject;
+	public inline function new(kind:SyntaxCompletion, subject:core.DisplayTypes.CompletionSubject) { this.kind = kind; this.subject = subject; }
 	public inline function clone():SyntaxCompletionOn return new SyntaxCompletionOn(kind, subject);
 }
 class ParserError extends haxe.Exception {
@@ -55,8 +55,8 @@ class SyntaxCompletionException extends haxe.Exception {
 	public var inDisplayFile:Bool;
 	public var displayMode:DisplayModeValue;
 	public var wasAutoTriggered:Bool;
-	public var specialIdentifierFiles:Null<Dynamic>;
-	public inline function new(defines:DefineContext, inDisplay:Bool, inDisplayFile:Bool, displayMode:DisplayModeValue, wasAutoTriggered:Bool, specialIdentifierFiles:Null<Dynamic>) { this.defines = defines; this.inDisplay = inDisplay; this.inDisplayFile = inDisplayFile; this.displayMode = displayMode; this.wasAutoTriggered = wasAutoTriggered; this.specialIdentifierFiles = specialIdentifierFiles; }
+	public var specialIdentifierFiles:Null<core.ds.ThreadSafeHashtbl<String,String>>;
+	public inline function new(defines:DefineContext, inDisplay:Bool, inDisplayFile:Bool, displayMode:DisplayModeValue, wasAutoTriggered:Bool, specialIdentifierFiles:Null<core.ds.ThreadSafeHashtbl<String,String>>) { this.defines = defines; this.inDisplay = inDisplay; this.inDisplayFile = inDisplayFile; this.displayMode = displayMode; this.wasAutoTriggered = wasAutoTriggered; this.specialIdentifierFiles = specialIdentifierFiles; }
 	public inline function clone():ParserConfiguration return new ParserConfiguration(defines, inDisplay, inDisplayFile, displayMode, wasAutoTriggered, specialIdentifierFiles);
 }
 @:structInit class ParserContext {
@@ -123,7 +123,7 @@ class Parser {
 		lexerCtx:lexerCtx,syntaxErrors:[],syntaxWarnings:[],lastDoc:null,inMacro:inMacro,code:code,
 		hadResume:false,delayedSyntaxCompletion:null,cache:[],config:config
 	};
-	public static function createConfig(defines:DefineContext,inDisplay:Bool,inDisplayFile:Bool,displayMode:DisplayModeValue,wasAutoTriggered:Bool,specialIdentifierFiles:Null<Dynamic>):ParserConfiguration return {
+	public static function createConfig(defines:DefineContext,inDisplay:Bool,inDisplayFile:Bool,displayMode:DisplayModeValue,wasAutoTriggered:Bool,specialIdentifierFiles:Null<core.ds.ThreadSafeHashtbl<String,String>>):ParserConfiguration return {
 		defines:defines,inDisplay:inDisplay,inDisplayFile:inDisplayFile,displayMode:displayMode,
 		wasAutoTriggered:wasAutoTriggered,specialIdentifierFiles:specialIdentifierFiles
 	};

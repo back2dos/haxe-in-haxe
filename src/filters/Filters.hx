@@ -39,8 +39,11 @@ import haxe.ds.StringMap;
 
 // haxe/src/filters/filters.ml — mechanical draft; not compiled or validated.
 // Target-specific and later-milestone calls remain unresolved hooks, preserving pipeline order.
+// save_class_state: the saved fields of one class field (mk_field_restore)
+private typedef FieldRestoreState = {name:String, kind:FieldKind, expr:Null<TExpr>, type:T, meta:Metadata, params:TypeParams};
+private typedef FieldRestore = {field:TClassField, state:FieldRestoreState, overloads:Array<{field:TClassField, state:FieldRestoreState}>};
 class Filters {
-	public static function getNativeName(meta:Metadata):Dynamic return Native.getNativeName(meta);
+	public static function getNativeName(meta:Metadata):{name:String,pos:Pos} return Native.getNativeName(meta);
 	public static function applyMacroExclude(t:ModuleType):Void switch t {
 		case TClassDecl(c) if (TypeOps.hasClassFlag(c, CExcluded)): TypeOps.addClassFlag(c, CExtern);
 		case TEnumDecl(e) if (TypeOps.hasEnumFlag(e, EnExcluded)): TypeOps.addEnumFlag(e, EnExtern);
@@ -198,22 +201,22 @@ class Filters {
 					inline function add(v:TVar):Void vars.push({variable:v, type:v.vType});
 					switch e.eexpr { case TFunction(fn): for (a in fn.tfArgs) add(a.variable); saveVars(fn.tfExpr); case TVar(v, eo): add(v); if (eo != null) saveVars(eo); case _: core.Texpr.iter(saveVars, e); }
 				}
-				inline function mkOverloadRestore(f:TClassField):Dynamic {
+				inline function mkOverloadRestore(f:TClassField):FieldRestoreState {
 					TypeOps.addClassFieldFlag(f, CfPostProcessed);
 					// cf_meta and cf_params are immutable lists upstream; the port's arrays are
 					// modified in place, so the saved state holds copies.
 					return {name:f.cfName, kind:f.cfKind, expr:f.cfExpr, type:f.cfType, meta:f.cfMeta.copy(), params:f.cfParams.copy()};
 				}
-				function mkFieldRestore(f:TClassField):Dynamic {
+				function mkFieldRestore(f:TClassField):FieldRestore {
 					if (f.cfExpr != null) saveVars(f.cfExpr);
 					return {field:f, state:mkOverloadRestore(f), overloads:f.cfOverloads.map(f -> {field:f, state:mkOverloadRestore(f)})};
 				}
-				inline function restoreOne(f:TClassField, s:Dynamic):TClassField {
-					f.cfName = s.name; f.cfKind = s.kind; f.cfExpr = s.expr; f.cfType = s.type; f.cfMeta = (s.meta:Metadata).copy(); f.cfParams = (s.params:TypeParams).copy(); return f;
+				inline function restoreOne(f:TClassField, s:FieldRestoreState):TClassField {
+					f.cfName = s.name; f.cfKind = s.kind; f.cfExpr = s.expr; f.cfType = s.type; f.cfMeta = s.meta.copy(); f.cfParams = s.params.copy(); return f;
 				}
-				function restoreField(saved:Dynamic):TClassField {
+				function restoreField(saved:FieldRestore):TClassField {
 					var f = restoreOne(saved.field, saved.state);
-					f.cfOverloads = [for (o in (cast saved.overloads:Array<Dynamic>)) restoreOne(o.field, o.state)]; return f;
+					f.cfOverloads = [for (o in saved.overloads) restoreOne(o.field, o.state)]; return f;
 				}
 				inline function mkPmap(lst:Array<TClassField>):StringMap<TClassField> { var map = new StringMap(); for (f in lst) map.set(f.cfName, f); return map; }
 				var meta = c.clMeta.copy(); var path = c.clPath; var ext = TypeOps.hasClassFlag(c, CExtern); var sup = c.clSuper; var impl = c.clImplements.copy();

@@ -21,12 +21,12 @@ class TanonIdentification<A> {
  var pfms:Hashtbl<core.Globals.GlobalTypePath,PathFieldMapping<A>>=new Hashtbl();var pfmMutex=new sys.thread.Mutex();var pfmByArity:Array<Array<PathFieldMapping<A>>>=[];var addPfmMutex=new sys.thread.Mutex();var num=0;
  public function new() {}
  public static function replaceMono(asDynamic:Bool,t:T):T {var visited=[];function loop(t:T):T return switch t{case TMono({tmType:null}):asDynamic?tDynamic:t;case TAnon(an):if(visited.indexOf(an)>=0)t;else{visited.unshift(an);map(loop,t);}case _:map(loop,t);};return loop(t);}
- public static function countFields(pm:Dynamic):Int {var i=0;for(_ in (pm.keys():Iterator<String>))i++;return i;}
+ public static function countFields(pm:TypeMap<TClassField>):Int {var i=0;for(_ in pm.keys())i++;return i;}
  public static function pfmOfTypedef<A>(td:TDef):PathFieldMapping<A> return switch follow(td.tType){case TAnon(an):{pfmPath:td.tPath,pfmParams:td.tParams,pfmFields:an.aFields,pfmConverted:null,pfmArity:countFields(an.aFields)};case _:throw "assert";};
- public function getPfms():Dynamic return pfms;
+ public function getPfms():Hashtbl<core.Globals.GlobalTypePath,PathFieldMapping<A>> return pfms;
  public function addPfm(path:core.Globals.GlobalTypePath,pfm:PathFieldMapping<A>):Void {addPfmMutex.acquire();while(pfmByArity.length<=pfm.pfmArity)pfmByArity.push([]);pfmByArity[pfm.pfmArity].push(pfm);pfms.replace(path,pfm);addPfmMutex.release();}
  public function unify(uctx:UnificationContext,tc:T,pfm:PathFieldMapping<A>):Void {
-  inline function pairs(fields:Dynamic):Array<Dynamic> {var acc=[];var names=[for(n in (pfm.pfmFields.keys():Iterator<String>))n];names.sort(Reflect.compare);for(n in names){var cf=pfm.pfmFields.get(n);var other=fields.get(cf.cfName);if(other==null)throw NotFound.raise();acc.unshift({cf:cf,other:other});}return acc;}
+  inline function pairs(fields:TypeMap<TClassField>):Array<{cf:TClassField,other:TClassField}> {var acc=[];var names=[for(n in pfm.pfmFields.keys())n];names.sort(Reflect.compare);for(n in names){var cf=pfm.pfmFields.get(n);var other=fields.get(cf.cfName);if(other==null)throw NotFound.raise();acc.unshift({cf:cf,other:other});}return acc;}
   inline function fieldType(cf:TClassField):T return uctx.opaqueFieldParams?cf.cfType:monomorphs(cf.cfParams,cf.cfType);
   try {
    var monos:Array<T>=switch follow(tc) {

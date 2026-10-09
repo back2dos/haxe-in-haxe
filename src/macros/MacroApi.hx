@@ -2342,7 +2342,7 @@ class MacroApiImpl {
 				try encodeString(Common.externalDefinedValue(ccom(), decodeString(s))) catch (e:Dynamic) if (isNotFound(e)) vnull else throw e;
 			})},
 			{name: "get_defines", value: vfun0(() -> {
-				encodeStringMap(encodeString, (Common.definesForExternal(ccom()) : StringMap<String>));
+				encodeStringMap(encodeString, Common.definesForExternal(ccom()));
 			})},
 			{name: "get_type", value: vfun1(s -> {
 				var tname = decodeString(s);
@@ -2830,11 +2830,11 @@ class MacroApiImpl {
 			})},
 			{name: "on_null_safety_report", value: vfun1(f -> {
 				var f = prepareCallback(f, 1);
-				ccom().callbacks.addNullSafetyReport(function(errors:Array<{msg:String, pos:Pos}>, warnings:Array<{warning:Dynamic, msg:String, pos:Pos}>):Void {
+				ccom().callbacks.addNullSafetyReport(function(errors:Array<{msg:String, pos:Pos}>, warnings:Array<{warning:core.Message.WarningCode, msg:String, pos:Pos}>):Void {
 					inline function encodeItem(kind:String, msg:String, pos:Pos):Value {
 						return encodeObj([fld("type", encodeString(kind)), fld("msg", encodeString(msg)), fld("pos", encodePos(pos))]);
 					}
-					function encodeWarning(w:{warning:Dynamic, msg:String, pos:Pos}):Value {
+					function encodeWarning(w:{warning:core.Message.WarningCode, msg:String, pos:Pos}):Value {
 						return encodeItem("warning", w.msg, w.pos);
 					}
 					var errors = errors.map(e -> encodeItem("error", e.msg, e.pos));

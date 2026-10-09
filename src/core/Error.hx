@@ -59,9 +59,9 @@ class Error {
 		case TAbstract(a,_) if (a.aImpl != null):[for (cf in a.aImpl.clOrderedStatics) cf.cfName];
 		case _:[];
 	};
-	public static function shortType(ctx:Dynamic,t:T):String {var str = sType(ctx,t);return str.length > 150 ? str.substr(0,147) + "..." : str;}
+	public static function shortType(ctx:PrintContext,t:T):String {var str = sType(ctx,t);return str.length > 150 ? str.substr(0,147) + "..." : str;}
 	public static function complMsg(s:String):String return "... " + s;
-	public static function unifyErrorMsg(ctx:Dynamic,err:UnifyError):String return switch err {
+	public static function unifyErrorMsg(ctx:PrintContext,err:UnifyError):String return switch err {
 		case CannotUnify(t1,t2):sType(ctx,t1) + " should be " + sType(ctx,t2);
 		case CannotUnifyImplementation(tImpl,tParent):sType(ctx,tImpl) + " should be " + sType(ctx,tParent);
 		case InvalidFieldType(s):"Invalid type for field " + s + " :";
@@ -144,7 +144,7 @@ enum ErrorAccessKind { Field(name:String); FunctionArgument(index:Int,total:Int)
 }
 class BetterErrors {
 	public static function sAccessKind(kind:ErrorAccessKind):String return switch kind {case Field(s):"Field " + s;case FunctionArgument(i,l):'FunctionArgument($i, $l)';case FunctionReturn:"FunctionReturn";case TypeParameter(i):"TypeParameter " + i;case Root:"Root";};
-	public static function getAccessChain(ctx:Dynamic,l:Array<UnifyError>):ErrorAccess {
+	public static function getAccessChain(ctx:PrintContext,l:Array<UnifyError>):ErrorAccess {
 		inline function makeAcc(kind:ErrorAccessKind,actual:T,expected:T):ErrorAccess return {accKind:kind,accExpected:expected,accActual:actual,accMessages:[],accExtra:[],accNext:null,accExpectedInfo:{isOptional:false,isFinal:false},accActualInfo:{isOptional:false,isFinal:false}};
 		var root = makeAcc(Root,tDynamic,tDynamic), current = root;
 		inline function addMessage(msg:UnifyError):Void current.accMessages.unshift(msg);
@@ -163,7 +163,7 @@ class BetterErrors {
 		}
 		return root;
 	}
-	public static function sType(ctx:Dynamic,t:T):String return switch t {
+	public static function sType(ctx:PrintContext,t:T):String return switch t {
 		case TMono(r):core.TPrinting.MonomorphPrinting.sMono(sType,ctx,false,r);
 		case TEnum(e,tl):Globals.sTypePath(e.ePath) + sTypeParams(ctx,tl);
 		case TInst(c,tl):switch c.clKind {case KExpr(e):core.AstPrinter.sExpr(e);case _:Globals.sTypePath(c.clPath) + sTypeParams(ctx,tl);}
@@ -183,8 +183,8 @@ class BetterErrors {
 		case TDynamic(t2):"Dynamic" + sTypeParams(ctx,[t2]);
 		case TLazy(f):sType(ctx,lazyType(f));
 	};
-	public static function sTypeParams(ctx:Dynamic,l:TParams):String return l.length == 0 ? "" : "<" + [for (_ in l) "..."].join(", ") + ">";
-	public static function sTypeParamsExpanded(ctx:Dynamic,l:TParams):String return l.length == 0 ? "" : "<" + [for (t in l) sType(ctx,t)].join(", ") + ">";
+	public static function sTypeParams(ctx:PrintContext,l:TParams):String return l.length == 0 ? "" : "<" + [for (_ in l) "..."].join(", ") + ">";
+	public static function sTypeParamsExpanded(ctx:PrintContext,l:TParams):String return l.length == 0 ? "" : "<" + [for (t in l) sType(ctx,t)].join(", ") + ">";
 	public static function betterErrorMessage(l:Array<UnifyError>):String {
 		var ctx = printContext();
 		var filtered:Array<UnifyError> = [];

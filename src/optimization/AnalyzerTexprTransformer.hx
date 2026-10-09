@@ -152,7 +152,7 @@ private class FunctionGraphBuilder {
    close(); return bb;
   } catch (_:TypeExit) return g.gUnreachable;
  }
- function blockElementPlus(bb:BasicBlockData,pair:Dynamic,f:TExpr->TExpr):BasicBlockData {bb = blockElement(bb,pair.expr); if (pair.finalExpr != null && bb != g.gUnreachable) bb = blockElement(bb,f(pair.finalExpr)); return bb;}
+ function blockElementPlus(bb:BasicBlockData,pair:{expr:TExpr,finalExpr:Null<TExpr>},f:TExpr->TExpr):BasicBlockData {bb = blockElement(bb,pair.expr); if (pair.finalExpr != null && bb != g.gUnreachable) bb = blockElement(bb,f(pair.finalExpr)); return bb;}
  function blockElementValue(bb:BasicBlockData,e:TExpr,f:TExpr->TExpr):BasicBlockData return blockElementPlus(bb,mapValues(f,e),f);
  function call(bb:BasicBlockData,e:TExpr,e1:TExpr,el:Array<TExpr>):BlockValue {
   function check(e:TExpr,t:T):TExpr return switch e.eexpr {

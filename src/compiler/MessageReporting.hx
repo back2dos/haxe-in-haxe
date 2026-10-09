@@ -11,7 +11,7 @@ import core.TPrinting;
 import syntax.Lexer;
 import context.Common;
 // haxe/src/compiler/messageReporting.ml — mechanical draft; not compile-validated.
-typedef ErrorContext={var absolutePositions:Bool;var sourceLines:Map<String,Array<String>>;var lastPositions:Map<Int,Pos>;var maxLines:Map<Int,Int>;var gutter:Map<Int,Int>;var previous:Null<{pos:Pos,severity:Dynamic,depth:Int}>;}
+typedef ErrorContext={var absolutePositions:Bool;var sourceLines:Map<String,Array<String>>;var lastPositions:Map<Int,Pos>;var maxLines:Map<Int,Int>;var gutter:Map<Int,Int>;var previous:Null<{pos:Pos,severity:MessageSeverity,depth:Int}>;}
 class ConfigError extends haxe.Exception {public function new(message:String) super(message);}
 class MessageReporting {
  static function samePos(a:Pos,b:Pos):Bool return a.pfile==b.pfile&&a.pmin==b.pmin&&a.pmax==b.pmax;
@@ -31,7 +31,7 @@ class MessageReporting {
   var lines=ctx.sourceLines.get(file);if (lines==null) {lines=readSourceLines(file);ctx.sourceLines.set(file,lines);}
   var result=[];var i=Std.int(Math.min(l2,lines.length));while (i>=l1) {if (i-1<0||i-1>=lines.length) throw "Invalid_argument: index out of bounds";result.unshift({line:i,text:lines[i-1]});i--;}return result;
  }
- public static function compilerPrettyMessageString(defines:Dynamic,ctx:ErrorContext,cm:MessageData):Null<String> {
+ public static function compilerPrettyMessageString(defines:DefineContext,ctx:ErrorContext,cm:MessageData):Null<String> {
   if (cm.cmMessage=="End of overload failure reasons") return null;
   ctx.lastPositions.set(cm.cmDepth,cm.cmPos);var isNull=samePos(cm.cmPos,Globals.nullPos)||cm.cmPos.pmin==-1;
   function unknown(file:String):Bool return file==""||file=="?";
@@ -77,16 +77,16 @@ class MessageReporting {
  public static function getMaxLine(maxLines:Map<Int,Int>,messages:Array<MessageData>):Map<Int,Int> {
   var result=new Map();for (k in maxLines.keys()) result.set(k,maxLines.get(k));for (cm in messages) {var l2=Lexer.getPosCoords(cm.cmPos).lineEnd,old=result.exists(cm.cmDepth)?result.get(cm.cmDepth):0;if (l2>old) result.set(cm.cmDepth,l2);}return result;
  }
- public static function displaySourceAt(defines:Dynamic,p:Pos):Void {var ctx=createErrorContext(Define.defined(defines,Define.MessageAbsolutePositions)),msg=Message.makeMessage(false,"",p,0,MKInfo);ctx.maxLines=getMaxLine(ctx.maxLines,[msg]);var s=compilerPrettyMessageString(defines,ctx,msg);if (s!=null) Sys.stderr().writeString(s+"\n");}
- public static function getFormatter(defines:Dynamic,def:Dynamic,defaultMode:String):ErrorContext->MessageData->Null<String> {
+ public static function displaySourceAt(defines:DefineContext,p:Pos):Void {var ctx=createErrorContext(Define.defined(defines,Define.MessageAbsolutePositions)),msg=Message.makeMessage(false,"",p,0,MKInfo);ctx.maxLines=getMaxLine(ctx.maxLines,[msg]);var s=compilerPrettyMessageString(defines,ctx,msg);if (s!=null) Sys.stderr().writeString(s+"\n");}
+ public static function getFormatter(defines:DefineContext,def:String,defaultMode:String):ErrorContext->MessageData->Null<String> {
   return switch Define.definedValueSafe(defines,def,defaultMode) {case "pretty":function(ctx,cm) return compilerPrettyMessageString(defines,ctx,cm);case "indent":compilerIndentedMessageString;case "classic":messageString;case m:throw new ConfigError('Invalid message reporting mode: "'+m+'", expected classic | pretty | indent (for -D '+Define.getDefineKey(def)+').');};
  }
- public static function printError(err:Dynamic):String {var out="";Error.recurseError(function(_,err) {out+=Lexer.getErrorPos(function(file,line) return file+":"+line+": ",err.errPos)+Error.errorMsg(err.errMessage)+"\n";},err);return out;}
- public static function formatMessages(defines:Dynamic,messages:Array<MessageData>):String {var ctx=createErrorContext(Define.defined(defines,Define.MessageAbsolutePositions));ctx.maxLines=getMaxLine(ctx.maxLines,messages);var formatter=getFormatter(defines,Define.MessageReporting,"pretty"),lines=[];for (cm in messages) {var s=formatter(ctx,cm);if (s!=null) lines.push(s);}return lines.join("\n");}
- public static function displayMessagesFrom(defines:Dynamic,messages:Array<MessageData>,setError:Void->Void,onMessage:core.Message.MessageSeverity->String->Void):Void {
+ public static function printError(err:CompilerError):String {var out="";Error.recurseError(function(_,err) {out+=Lexer.getErrorPos(function(file,line) return file+":"+line+": ",err.errPos)+Error.errorMsg(err.errMessage)+"\n";},err);return out;}
+ public static function formatMessages(defines:DefineContext,messages:Array<MessageData>):String {var ctx=createErrorContext(Define.defined(defines,Define.MessageAbsolutePositions));ctx.maxLines=getMaxLine(ctx.maxLines,messages);var formatter=getFormatter(defines,Define.MessageReporting,"pretty"),lines=[];for (cm in messages) {var s=formatter(ctx,cm);if (s!=null) lines.push(s);}return lines.join("\n");}
+ public static function displayMessagesFrom(defines:DefineContext,messages:Array<MessageData>,setError:Void->Void,onMessage:core.Message.MessageSeverity->String->Void):Void {
   var ctx=createErrorContext(Define.defined(defines,Define.MessageAbsolutePositions));ctx.maxLines=getMaxLine(ctx.maxLines,messages);
   inline function error(msg:String):Void {setError();onMessage(Error,msg);}
-  inline function formatter(def:Dynamic,defaultMode:String):ErrorContext->MessageData->Null<String> {try return getFormatter(defines,def,defaultMode) catch (e:ConfigError) {error(e.message);return messageString;}}
+  inline function formatter(def:String,defaultMode:String):ErrorContext->MessageData->Null<String> {try return getFormatter(defines,def,defaultMode) catch (e:ConfigError) {error(e.message);return messageString;}}
   var messageFormatter=formatter(Define.MessageReporting,"pretty"),logFormatter=formatter(Define.MessageLogFormat,"indent"),logMessages=Define.defined(defines,Define.MessageLogFile);
   var logMessage:Null<MessageData->Void>=null,closeLogs:Null<Void->Void>=null;
   if (logMessages) try {

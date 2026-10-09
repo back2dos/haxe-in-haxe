@@ -287,7 +287,7 @@ enum ModuleDepOrigin { MDepFromTyping; MDepFromImport; MDepFromMacro; MDepFromMa
 	public inline function clone():ModuleDep return new ModuleDep(mdSign, mdKind, mdPath, mdOrigin);
 }
 @:structInit class ModuleDefExtra {
-	public var mFile:Dynamic;
+	public var mFile:core.Path.LazyUniqueKey;
 	public var mSign:String;
 	public var mDisplay:ModuleDefDisplay;
 	public var mCheckPolicy:Array<ModuleCheckPolicy>;
@@ -301,7 +301,7 @@ enum ModuleDepOrigin { MDepFromTyping; MDepFromImport; MDepFromMacro; MDepFromMa
 	public var mKind:ModuleKind;
 	public var mCacheBoundObjects:Array<CacheBoundObject>;
 	public var mFeatures:Map<String, Bool>;
-	public inline function new(mFile:Dynamic, mSign:String, mDisplay:ModuleDefDisplay, mCheckPolicy:Array<ModuleCheckPolicy>, mTime:Float, mCacheState:ModuleCacheState, mAdded:Int, mChecked:Int, mProcessed:Int, mDeps:IntMap<ModuleDep>, mDisplayDeps:Null<IntMap<ModuleDep>>, mKind:ModuleKind, mCacheBoundObjects:Array<CacheBoundObject>, mFeatures:Map<String, Bool>) { this.mFile = mFile; this.mSign = mSign; this.mDisplay = mDisplay; this.mCheckPolicy = mCheckPolicy; this.mTime = mTime; this.mCacheState = mCacheState; this.mAdded = mAdded; this.mChecked = mChecked; this.mProcessed = mProcessed; this.mDeps = mDeps; this.mDisplayDeps = mDisplayDeps; this.mKind = mKind; this.mCacheBoundObjects = mCacheBoundObjects; this.mFeatures = mFeatures; }
+	public inline function new(mFile:core.Path.LazyUniqueKey, mSign:String, mDisplay:ModuleDefDisplay, mCheckPolicy:Array<ModuleCheckPolicy>, mTime:Float, mCacheState:ModuleCacheState, mAdded:Int, mChecked:Int, mProcessed:Int, mDeps:IntMap<ModuleDep>, mDisplayDeps:Null<IntMap<ModuleDep>>, mKind:ModuleKind, mCacheBoundObjects:Array<CacheBoundObject>, mFeatures:Map<String, Bool>) { this.mFile = mFile; this.mSign = mSign; this.mDisplay = mDisplay; this.mCheckPolicy = mCheckPolicy; this.mTime = mTime; this.mCacheState = mCacheState; this.mAdded = mAdded; this.mChecked = mChecked; this.mProcessed = mProcessed; this.mDeps = mDeps; this.mDisplayDeps = mDisplayDeps; this.mKind = mKind; this.mCacheBoundObjects = mCacheBoundObjects; this.mFeatures = mFeatures; }
 	public inline function clone():ModuleDefExtra return new ModuleDefExtra(mFile, mSign, mDisplay, mCheckPolicy, mTime, mCacheState, mAdded, mChecked, mProcessed, mDeps, mDisplayDeps, mKind, mCacheBoundObjects, mFeatures);
 }
 enum ClassFieldRefKind { CfrStatic; CfrMember; CfrConstructor; CfrInit; }

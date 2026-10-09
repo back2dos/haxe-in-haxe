@@ -12,14 +12,14 @@ import haxe.ds.IntMap;
 import haxe.ds.StringMap;
 
 @:structInit class RenameInit {
-	public var riScope:Dynamic;
+	public var riScope:context.PlatformConfig.VarScope;
 	public var riHoisting:Bool;
 	public var riNoShadowing:Bool;
 	public var riNoCatchVarShadowing:Bool;
 	public var riSwitchCasesNoBlocks:Bool;
 	public var riReserved:StringMap<Bool>;
 	public var riReserveCurrentTopLevelSymbol:Bool;
-	public inline function new(riScope:Dynamic, riHoisting:Bool, riNoShadowing:Bool, riNoCatchVarShadowing:Bool, riSwitchCasesNoBlocks:Bool, riReserved:StringMap<Bool>, riReserveCurrentTopLevelSymbol:Bool) { this.riScope = riScope; this.riHoisting = riHoisting; this.riNoShadowing = riNoShadowing; this.riNoCatchVarShadowing = riNoCatchVarShadowing; this.riSwitchCasesNoBlocks = riSwitchCasesNoBlocks; this.riReserved = riReserved; this.riReserveCurrentTopLevelSymbol = riReserveCurrentTopLevelSymbol; }
+	public inline function new(riScope:context.PlatformConfig.VarScope, riHoisting:Bool, riNoShadowing:Bool, riNoCatchVarShadowing:Bool, riSwitchCasesNoBlocks:Bool, riReserved:StringMap<Bool>, riReserveCurrentTopLevelSymbol:Bool) { this.riScope = riScope; this.riHoisting = riHoisting; this.riNoShadowing = riNoShadowing; this.riNoCatchVarShadowing = riNoCatchVarShadowing; this.riSwitchCasesNoBlocks = riSwitchCasesNoBlocks; this.riReserved = riReserved; this.riReserveCurrentTopLevelSymbol = riReserveCurrentTopLevelSymbol; }
 	public inline function clone():RenameInit return new RenameInit(riScope, riHoisting, riNoShadowing, riNoCatchVarShadowing, riSwitchCasesNoBlocks, riReserved, riReserveCurrentTopLevelSymbol);
 }
 @:structInit class RenameScope {
@@ -37,10 +37,10 @@ import haxe.ds.StringMap;
 	public var rcNoShadowing:Bool;
 	public var rcNoCatchVarShadowing:Bool;
 	public var rcSwitchCasesNoBlocks:Bool;
-	public var rcScope:Dynamic;
+	public var rcScope:context.PlatformConfig.VarScope;
 	public var rcReserved:StringMap<Bool>;
 	public var rcVarOrigins:IntMap<RenameScope>;
-	public inline function new(rcHoisting:Bool, rcNoShadowing:Bool, rcNoCatchVarShadowing:Bool, rcSwitchCasesNoBlocks:Bool, rcScope:Dynamic, rcReserved:StringMap<Bool>, rcVarOrigins:IntMap<RenameScope>) { this.rcHoisting = rcHoisting; this.rcNoShadowing = rcNoShadowing; this.rcNoCatchVarShadowing = rcNoCatchVarShadowing; this.rcSwitchCasesNoBlocks = rcSwitchCasesNoBlocks; this.rcScope = rcScope; this.rcReserved = rcReserved; this.rcVarOrigins = rcVarOrigins; }
+	public inline function new(rcHoisting:Bool, rcNoShadowing:Bool, rcNoCatchVarShadowing:Bool, rcSwitchCasesNoBlocks:Bool, rcScope:context.PlatformConfig.VarScope, rcReserved:StringMap<Bool>, rcVarOrigins:IntMap<RenameScope>) { this.rcHoisting = rcHoisting; this.rcNoShadowing = rcNoShadowing; this.rcNoCatchVarShadowing = rcNoCatchVarShadowing; this.rcSwitchCasesNoBlocks = rcSwitchCasesNoBlocks; this.rcScope = rcScope; this.rcReserved = rcReserved; this.rcVarOrigins = rcVarOrigins; }
 	public inline function clone():RenameContext return new RenameContext(rcHoisting, rcNoShadowing, rcNoCatchVarShadowing, rcSwitchCasesNoBlocks, rcScope, rcReserved, rcVarOrigins);
 }
 // haxe/src/filters/renameVars.ml — mechanical draft; not compiled or validated.
@@ -88,11 +88,11 @@ class RenameVars {
 			}
 		}
 	}
-	public static function init(config:Dynamic, types:Array<ModuleType>):RenameInit {
+	public static function init(config:context.PlatformConfig, types:Array<ModuleType>):RenameInit {
 		var ri:RenameInit = {riScope:config.pfScoping.vsScope, riReserved:new StringMap(), riHoisting:false, riNoShadowing:false,
 			riNoCatchVarShadowing:false, riSwitchCasesNoBlocks:false, riReserveCurrentTopLevelSymbol:false};
 		reserveInit(ri, "this");
-		for (flag in (cast config.pfScoping.vsFlags:Array<Dynamic>)) switch flag {
+		for (flag in config.pfScoping.vsFlags) switch flag {
 			case VarHoisting: ri.riHoisting = true;
 			case NoShadowing: ri.riNoShadowing = true;
 			case NoCatchVarShadowing: ri.riNoCatchVarShadowing = true;

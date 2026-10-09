@@ -42,10 +42,12 @@ class Stats {public static function create():StatsData return {sFilesParsed:0,sM
 	public inline function new(value:Array<Void->Void>) { this.value = value; }
 	public inline function clone():CallbackList return new CallbackList(value);
 }
+// (string*pos) list -> (WarningList.warning*string*pos) list -> unit
+typedef NullSafetyReportCallback = Array<{msg:String,pos:Pos}>->Array<{warning:WarningCode,msg:String,pos:Pos}>->Void;
 class CompilerCallbacks {
  var beforeTyperCreate:CallbackList={value:[]}; var afterInitMacros:CallbackList={value:[]}; var afterTyping:Array<Array<ModuleType>->Void>=[];
  var beforeSave:CallbackList={value:[]}; var afterSave:CallbackList={value:[]}; var afterFilters:CallbackList={value:[]}; var afterGeneration:CallbackList={value:[]};
- var nullSafetyReport:Array<Dynamic>=[];
+ var nullSafetyReport:Array<NullSafetyReportCallback>=[];
  public function new() {}
  public function addBeforeTyperCreate(f:Void->Void):Void beforeTyperCreate.value.unshift(f);
  public function addAfterInitMacros(f:Void->Void):Void afterInitMacros.value.unshift(f);
@@ -54,8 +56,8 @@ class CompilerCallbacks {
  public function addAfterSave(f:Void->Void):Void afterSave.value.unshift(f);
  public function addAfterFilters(f:Void->Void):Void afterFilters.value.unshift(f);
  public function addAfterGeneration(f:Void->Void):Void afterGeneration.value.unshift(f);
- public function addNullSafetyReport(f:Dynamic):Void nullSafetyReport.unshift(f);
- public function run(handleError:Dynamic->Void,r:CallbackList):Void {
+ public function addNullSafetyReport(f:NullSafetyReportCallback):Void nullSafetyReport.unshift(f);
+ public function run(handleError:CompilerError->Void,r:CallbackList):Void {
   while (r.value.length>0) {var l=r.value; r.value=[]; var ordered=l.copy(); ordered.reverse(); for (f in ordered) try f() catch (e:core.Error.TypingError) handleError(e.error);}
  }
  public function getBeforeTyperCreate():CallbackList return beforeTyperCreate;
@@ -65,16 +67,16 @@ class CompilerCallbacks {
  public function getAfterSave():CallbackList return afterSave;
  public function getAfterFilters():CallbackList return afterFilters;
  public function getAfterGeneration():CallbackList return afterGeneration;
- public function getNullSafetyReport():Array<Dynamic> return nullSafetyReport;
+ public function getNullSafetyReport():Array<NullSafetyReportCallback> return nullSafetyReport;
 }
 class FileKeys {
- var cache:Map<String,Dynamic>=[]; var virtualCounter=0;
+ var cache:Map<String,String>=[]; var virtualCounter=0;
  public function new() {}
- public function get(file:String):Dynamic {if (cache.exists(file)) return cache.get(file); var key=core.Path.UniqueKey.create(file); cache.set(file,key); return key;}
+ public function get(file:String):String {if (cache.exists(file)) return cache.get(file); var key=core.Path.UniqueKey.create(file); cache.set(file,key); return key;}
  public function generateVirtual(mpath:GlobalTypePath,step:Int):String {virtualCounter++; return (mpath.pack.length==0 ? "." : mpath.pack.join("/"))+"/"+mpath.name+"_"+step+"_"+virtualCounter;}
 }
 enum CompilerStage { CCreated;CInitialized;CInitMacrosStart;CInitMacrosDone;CTypingDone;CFilteringStart;CAnalyzerStart;CAnalyzerDone;CSaveStart;CSaveDone;CDceStart;CDceDone;CFilteringDone;CGenerationStart;CGenerationDone; }
-enum ReportMode { RMNone;RMDiagnostics(files:Array<Dynamic>);RMStatistics; }
+enum ReportMode { RMNone;RMDiagnostics(files:Array<String>);RMStatistics; }
 class ModuleLut extends HashtblLookup<GlobalTypePath,ModuleDef> {
  var typeLut:HashtblLookup<GlobalTypePath,GlobalTypePath>=new HashtblLookup();
  public function new() super();
@@ -103,9 +105,9 @@ interface AbstractHxbLib {
 	public var wasAutoTriggered:Bool;
 	public var hadParserResume:Bool;
 	public var displayModuleHasMacroDefines:Bool;
-	public var delayedSyntaxCompletion:Dynamic;
-	public var specialIdentifierFiles:Dynamic;
-	public inline function new(wasAutoTriggered:Bool, hadParserResume:Bool, displayModuleHasMacroDefines:Bool, delayedSyntaxCompletion:Dynamic, specialIdentifierFiles:Dynamic) { this.wasAutoTriggered = wasAutoTriggered; this.hadParserResume = hadParserResume; this.displayModuleHasMacroDefines = displayModuleHasMacroDefines; this.delayedSyntaxCompletion = delayedSyntaxCompletion; this.specialIdentifierFiles = specialIdentifierFiles; }
+	public var delayedSyntaxCompletion:{value:Null<syntax.Parser.SyntaxCompletionOn>};
+	public var specialIdentifierFiles:core.ds.ThreadSafeHashtbl<String,String>;
+	public inline function new(wasAutoTriggered:Bool, hadParserResume:Bool, displayModuleHasMacroDefines:Bool, delayedSyntaxCompletion:{value:Null<syntax.Parser.SyntaxCompletionOn>}, specialIdentifierFiles:core.ds.ThreadSafeHashtbl<String,String>) { this.wasAutoTriggered = wasAutoTriggered; this.hadParserResume = hadParserResume; this.displayModuleHasMacroDefines = displayModuleHasMacroDefines; this.delayedSyntaxCompletion = delayedSyntaxCompletion; this.specialIdentifierFiles = specialIdentifierFiles; }
 	public inline function clone():ParserState return new ParserState(wasAutoTriggered, hadParserResume, displayModuleHasMacroDefines, delayedSyntaxCompletion, specialIdentifierFiles);
 }
 interface LocalWrapperApi {
@@ -124,7 +126,7 @@ private class NullLocalWrapper implements LocalWrapperApi {
 }
 @:structInit class PartScope {
 	public var runtimeArgs:Array<String>;
-	public var warnedPositions:Dynamic;
+	public var warnedPositions:core.ds.OcamlHashtbl<{file:String,offset:Int},{message:String,pos:Pos,options:Array<Array<WarningOption>>}>;
 	public var hasNext:Bool;
 	public var messages:Array<CompilerMessage>;
 	public var hasError:Bool;
@@ -132,32 +134,33 @@ private class NullLocalWrapper implements LocalWrapperApi {
 	public var messageCapture:Null<{value:Array<CompilerMessage>}>;
 	public var compilationStep:Int;
 	public var passDebugMessages:Array<String>;
-	public var dumpConfig:Dynamic;
+	public var dumpConfig:DumpConfig.DumpConfiguration;
 	public var parserState:ParserState;
 	public var fileKeys:FileKeys;
-	public var storedTypedExprs:Dynamic;
-	public var cachedMacros:Dynamic;
-	public inline function new(runtimeArgs:Array<String>, warnedPositions:Dynamic, hasNext:Bool, messages:Array<CompilerMessage>, hasError:Bool, reportMode:ReportMode, messageCapture:Null<{value:Array<CompilerMessage>}>, compilationStep:Int, passDebugMessages:Array<String>, dumpConfig:Dynamic, parserState:ParserState, fileKeys:FileKeys, storedTypedExprs:Dynamic, cachedMacros:Dynamic) { this.runtimeArgs = runtimeArgs; this.warnedPositions = warnedPositions; this.hasNext = hasNext; this.messages = messages; this.hasError = hasError; this.reportMode = reportMode; this.messageCapture = messageCapture; this.compilationStep = compilationStep; this.passDebugMessages = passDebugMessages; this.dumpConfig = dumpConfig; this.parserState = parserState; this.fileKeys = fileKeys; this.storedTypedExprs = storedTypedExprs; this.cachedMacros = cachedMacros; }
+	public var storedTypedExprs:Lookup<Int,TExpr>;
+	public var cachedMacros:Lookup<{path:GlobalTypePath,name:String},typing.MacroContext.LoadedMacro>;
+	public inline function new(runtimeArgs:Array<String>, warnedPositions:core.ds.OcamlHashtbl<{file:String,offset:Int},{message:String,pos:Pos,options:Array<Array<WarningOption>>}>, hasNext:Bool, messages:Array<CompilerMessage>, hasError:Bool, reportMode:ReportMode, messageCapture:Null<{value:Array<CompilerMessage>}>, compilationStep:Int, passDebugMessages:Array<String>, dumpConfig:DumpConfig.DumpConfiguration, parserState:ParserState, fileKeys:FileKeys, storedTypedExprs:Lookup<Int,TExpr>, cachedMacros:Lookup<{path:GlobalTypePath,name:String},typing.MacroContext.LoadedMacro>) { this.runtimeArgs = runtimeArgs; this.warnedPositions = warnedPositions; this.hasNext = hasNext; this.messages = messages; this.hasError = hasError; this.reportMode = reportMode; this.messageCapture = messageCapture; this.compilationStep = compilationStep; this.passDebugMessages = passDebugMessages; this.dumpConfig = dumpConfig; this.parserState = parserState; this.fileKeys = fileKeys; this.storedTypedExprs = storedTypedExprs; this.cachedMacros = cachedMacros; }
 	public inline function clone():PartScope return new PartScope(runtimeArgs, warnedPositions, hasNext, messages, hasError, reportMode, messageCapture, compilationStep, passDebugMessages, dumpConfig, parserState, fileKeys, storedTypedExprs, cachedMacros);
 }
 enum ParseInputResult { NeedsTyping;NoCompletionPointFound;Completed; }
 @:structInit class RequestScope {
 	public var stats:StatsData;
-	public var timerCtx:Dynamic;
+	public var timerCtx:core.Timer.TimerContext;
 	public var cancellationRequested:Bool;
 	public var io:CompilerIoData;
 	public var resultHandler:ResultHandler;
-	public inline function new(stats:StatsData, timerCtx:Dynamic, cancellationRequested:Bool, io:CompilerIoData, resultHandler:ResultHandler) { this.stats = stats; this.timerCtx = timerCtx; this.cancellationRequested = cancellationRequested; this.io = io; this.resultHandler = resultHandler; }
+	public inline function new(stats:StatsData, timerCtx:core.Timer.TimerContext, cancellationRequested:Bool, io:CompilerIoData, resultHandler:ResultHandler) { this.stats = stats; this.timerCtx = timerCtx; this.cancellationRequested = cancellationRequested; this.io = io; this.resultHandler = resultHandler; }
 	public inline function clone():RequestScope return new RequestScope(stats, timerCtx, cancellationRequested, io, resultHandler);
 }
 @:structInit class ResultHandler {
-	public var sendResult:Dynamic->Void;
-	public var sendResultRaise:Dynamic->Dynamic;
-	public var sendError:Array<Dynamic>->Void;
-	public var sendErrorRaise:Array<Dynamic>->Dynamic;
+	public var sendResult:JsonValue->Void;
+	// 'a . Json.t -> 'a: never returns
+	public var sendResultRaise:JsonValue->Dynamic;
+	public var sendError:Array<JsonValue>->Void;
+	public var sendErrorRaise:Array<JsonValue>->Dynamic;
 	public var flushMessages:Bool->CommonContext->Void;
 	public var setCom:CommonContext->ParseInputResult;
-	public inline function new(sendResult:Dynamic->Void, sendResultRaise:Dynamic->Dynamic, sendError:Array<Dynamic>->Void, sendErrorRaise:Array<Dynamic>->Dynamic, flushMessages:Bool->CommonContext->Void, setCom:CommonContext->ParseInputResult) { this.sendResult = sendResult; this.sendResultRaise = sendResultRaise; this.sendError = sendError; this.sendErrorRaise = sendErrorRaise; this.flushMessages = flushMessages; this.setCom = setCom; }
+	public inline function new(sendResult:JsonValue->Void, sendResultRaise:JsonValue->Dynamic, sendError:Array<JsonValue>->Void, sendErrorRaise:Array<JsonValue>->Dynamic, flushMessages:Bool->CommonContext->Void, setCom:CommonContext->ParseInputResult) { this.sendResult = sendResult; this.sendResultRaise = sendResultRaise; this.sendError = sendError; this.sendErrorRaise = sendErrorRaise; this.flushMessages = flushMessages; this.setCom = setCom; }
 	public inline function clone():ResultHandler return new ResultHandler(sendResult, sendResultRaise, sendError, sendErrorRaise, flushMessages, setCom);
 }
 // (string * (path -> pos -> Ast.package option))
@@ -172,7 +175,7 @@ typedef CommonContext = {
  var requestScope:RequestScope;var partScope:PartScope;var stage:CompilerStage;var sctx:compiler.server.ServerCompilationContext;var cs:compiler.CompilationCache.Cache;var cache:Null<compiler.CompilationCache.ContextCache>;var isMacroContext:Bool;var timerCtx:core.Timer.TimerContext;
  var parsedArgs:Array<compiler.ParsedArg>;var display:DisplaySettings;var debug:Bool;var verbose:Bool;var foptimize:Bool;var doinline:Bool;var platform:Platform;var config:PlatformConfig;var customExt:Null<String>;
  var emptyClassPath:core.ClassPath.IClassPath;var classPaths:core.ClassPaths;var main:{mainPath:Null<GlobalTypePath>,mainFile:Null<String>,mainExpr:Null<TExpr>};var packageRules:haxe.ds.StringMap<PackageRule>;
- var error:String->Pos->Void;var errorExt:CompilerError->Void;var info:(msg:String,p:Pos,?depth:Int)->Void;var warning:(w:Dynamic,options:Array<Array<WarningOption>>,msg:String,p:Pos,?depth:Int)->Void;var warningOptions:Array<Array<WarningOption>>;var getMessages:Void->Array<CompilerMessage>;
+ var error:String->Pos->Void;var errorExt:CompilerError->Void;var info:(msg:String,p:Pos,?depth:Int)->Void;var warning:(w:WarningCode,options:Array<Array<WarningOption>>,msg:String,p:Pos,?depth:Int)->Void;var warningOptions:Array<Array<WarningOption>>;var getMessages:Void->Array<CompilerMessage>;
  var filterMessages:(CompilerMessage->Bool)->Void;var runCommand:String->Int;var runCommandArgs:String->Array<String>->Int;
  var loadExternType:Array<ExternTypeLoader>;var callbacks:CompilerCallbacks;var defines:DefineContext;var userDefines:haxe.ds.StringMap<core.Define.UserDefine>;var userMetas:haxe.ds.StringMap<core.Meta.UserMeta>;var getMacros:Void->Null<CommonContext>;var localWrapper:LocalWrapperApi;
  var std:TClass;var globalMetadata:Array<GlobalMetadataEntry>;var fileContents:Array<FileContent>;var parserCache:Lookup<String,Array<TypeDecl>>;var moduleToFile:Lookup<GlobalTypePath,core.ClassPaths.ResolvedFile>;var overloadCache:Lookup<{path:GlobalTypePath,name:String},Array<CastField>>;
@@ -195,13 +198,13 @@ class Common {
   if (com.display.dmsFullTyping) m.mExtra.mCacheBoundObjects.push(Message(Message.makeMessage(com.isMacroContext,msg,p,0,MKWarning(w,options))));
   com.warning(w,options,msg,p);
  }
- public static function defined(com:CommonContext,s:Dynamic):Bool return Define.defined(com.defines,s);
+ public static function defined(com:CommonContext,s:String):Bool return Define.defined(com.defines,s);
  public static function rawDefined(com:CommonContext,s:String):Bool return Define.rawDefined(com.defines,s);
- public static function definedValue(com:CommonContext,s:Dynamic):String return Define.definedValue(com.defines,s);
- public static function definedValueSafe(com:CommonContext,s:Dynamic,?defaultValue:String):String return Define.definedValueSafe(com.defines,s,defaultValue);
- public static function define(com:CommonContext,s:Dynamic):Void Define.define(com.defines,s);
+ public static function definedValue(com:CommonContext,s:String):String return Define.definedValue(com.defines,s);
+ public static function definedValueSafe(com:CommonContext,s:String,?defaultValue:String):String return Define.definedValueSafe(com.defines,s,defaultValue);
+ public static function define(com:CommonContext,s:String):Void Define.define(com.defines,s);
  public static function rawDefine(com:CommonContext,s:String):Void Define.rawDefine(com.defines,s);
- public static function defineValue(com:CommonContext,k:Dynamic,v:String):Void Define.defineValue(com.defines,k,v);
+ public static function defineValue(com:CommonContext,k:String,v:String):Void Define.defineValue(com.defines,k,v);
  public static function convertDefine(k:String):String return k.split("-").join("_");
  public static function isNext(com:CommonContext):Bool return defined(com,Define.HaxeNext);
  public static function failFast(com:CommonContext):Bool return defined(com,Define.FailFast);
@@ -218,7 +221,7 @@ class Common {
  public static function externalDefineValue(com:CommonContext,k:String,v:String):Void Define.rawDefineValue(com.defines,convertAndValidate(k),v);
  public static function externalDefine(com:CommonContext,k:String):Void Define.rawDefine(com.defines,convertAndValidate(k));
  public static function externalUndefine(com:CommonContext,k:String):Void Define.rawUndefine(com.defines,convertAndValidate(k));
- public static function definesForExternal(com:CommonContext):Dynamic {
+ public static function definesForExternal(com:CommonContext):haxe.ds.StringMap<String> {
   var result=new haxe.ds.StringMap<String>(); var names:Array<String>=[for (k in com.defines.values.keys()) k]; names.sort(Reflect.compare);
   for (k in names) {var v=com.defines.values.get(k);result.set(k,v);if (k.split("_").length>1) result.set(k.split("_").join("-"),v);}return result;
  }
@@ -356,12 +359,12 @@ class Common {
  public static function findFile(com:CommonContext,f:String):String return com.classPaths.findFile(f).file;
  // memSize is preserved in deferred/diagnostics/CommonMemory.hx for the later diagnostics milestone.
  public static function hash(f:String):Int {var h=0;for (i in 0...f.length) h=h*223+f.charCodeAt(i);return (h<<1)>>1;}
- public static function addDiagnosticsMessage(com:CommonContext,s:String,p:Pos,kind:Dynamic,depth:Int=0,?diagnosticsKind:Dynamic):Void {
+ public static function addDiagnosticsMessage(com:CommonContext,s:String,p:Pos,kind:CompilerMessageKind,depth:Int=0,?diagnosticsKind:MessageKind):Void {
   if (diagnosticsKind==null) diagnosticsKind=DKCompilerMessage;
   var cm=Message.makeDiagnostic(com.isMacroContext,diagnosticsKind,JString(s),p,depth,kind);
   if (com.partScope.messageCapture!=null) com.partScope.messageCapture.value.unshift(cm);else {if (Message.messageKindSeverity(kind)==MessageSeverity.Error) com.partScope.hasError=true;com.partScope.messages.unshift(cm);}
  }
- public static function displayErrorExt(com:CommonContext,err:Dynamic):Void {
+ public static function displayErrorExt(com:CommonContext,err:CompilerError):Void {
   if (isDiagnostics(com)) Error.recurseError(function(depth,err) addDiagnosticsMessage(com,Error.errorMsg(err.errMessage),err.errPos,MKError,depth),err);else com.errorExt(err);
  }
  public static function displayError(com:CommonContext,msg:String,pos:Pos,?sub:Array<core.Error.MacroError>):Void displayErrorExt(com,Error.convertError({msg:msg,pos:pos,sub:sub==null?[]:sub}));

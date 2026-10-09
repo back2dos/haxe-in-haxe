@@ -605,16 +605,16 @@ class DisplayJson {
 		function sendError(send:JsonValue->Void, jl:Array<JsonValue>):Void {
 			send(JsonRpc.error(jsonrpc.getId(), 0, JArray(jl), "Compiler error"));
 		}
-		var sendResultRaise = function(json:Dynamic):Dynamic {
+		var sendResultRaise = function(json:JsonValue):Dynamic {
 			sendResult(j -> sendJsonRaise(io, j), json);
 			return null;
 		};
-		var sendResultNoraise = function(json:Dynamic):Void sendResult(j -> sendJson(io, j), json);
-		var sendErrorRaise = function(errors:Array<Dynamic>):Dynamic {
-			sendError(j -> sendJsonRaise(io, j), cast errors);
+		var sendResultNoraise = function(json:JsonValue):Void sendResult(j -> sendJson(io, j), json);
+		var sendErrorRaise = function(errors:Array<JsonValue>):Dynamic {
+			sendError(j -> sendJsonRaise(io, j), errors);
 			return null;
 		};
-		var sendErrorNoraise = function(errors:Array<Dynamic>):Void sendError(j -> sendJson(io, j), cast errors);
+		var sendErrorNoraise = function(errors:Array<JsonValue>):Void sendError(j -> sendJson(io, j), errors);
 		var methodName = jsonrpc.getMethodName();
 		var f = handler.findOpt(methodName);
 		if (f == null) JsonRpc.raiseMethodNotFound(jsonrpc.getId(), methodName);

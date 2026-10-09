@@ -69,13 +69,13 @@ class Optimizer {
 		};
 	}
 	// The mapping closure is made once per traversal and passed down (one per node otherwise).
-	public static function reduceLoop(scom:context.SafeCom.SafeContext, stack:Dynamic, e:TExpr):TExpr {
+	public static function reduceLoop(scom:context.SafeCom.SafeContext, stack:core.TUnification.RecStack<TClassField>, e:TExpr):TExpr {
 		var fn:TExpr->TExpr = null;
 		fn = x -> reduceLoopWith(scom, stack, fn, x);
 		return fn(e);
 	}
 
-	static function reduceLoopWith(scom:context.SafeCom.SafeContext, stack:Dynamic, fn:TExpr->TExpr, e:TExpr):TExpr {
+	static function reduceLoopWith(scom:context.SafeCom.SafeContext, stack:core.TUnification.RecStack<TClassField>, fn:TExpr->TExpr, e:TExpr):TExpr {
 		e = core.Texpr.mapExpr(fn, e);
 		var reduced:TExpr;
 		switch e.eexpr {
@@ -119,7 +119,7 @@ class Optimizer {
 		var stack = core.TUnification.newRecStack();
 		return core.TUnification.recStackDefault(stack, scom.curfield, cf -> cf == scom.curfield, () -> reduceLoop(scom, stack, e), e);
 	}
-	public static function makeConstantExpressionWithStack(scom:context.SafeCom.SafeContext, stack:Dynamic, e:TExpr, concatStrings:Bool = false):Null<TExpr> {
+	public static function makeConstantExpressionWithStack(scom:context.SafeCom.SafeContext, stack:core.TUnification.RecStack<TClassField>, e:TExpr, concatStrings:Bool = false):Null<TExpr> {
 		e = reduceLoop(scom, stack, e);
 		return switch e.eexpr {
 			case TConst(_): e;
@@ -149,7 +149,7 @@ class Optimizer {
 			case _: null;
 		};
 	}
-	public static function makeConstantExpression(ctx:Dynamic, e:TExpr, concatStrings:Bool = false):Null<TExpr> {
+	public static function makeConstantExpression(ctx:context.SafeCom.SafeContext, e:TExpr, concatStrings:Bool = false):Null<TExpr> {
 		return makeConstantExpressionWithStack(ctx, core.TUnification.newRecStack(), e, concatStrings);
 	}
 }

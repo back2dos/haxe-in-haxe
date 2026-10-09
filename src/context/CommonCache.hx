@@ -131,7 +131,7 @@ class CommonCache {
 				cc.cacheModuleInMemory(m.mPath, m);
 			} else {
 				var anonIdentification = new typing.TanonIdentification<Dynamic>();
-				function warn(w:Dynamic, s:String, p:Pos):Void com.warning(w, com.warningOptions, s, p);
+				function warn(w:core.Message.WarningCode, s:String, p:Pos):Void com.warning(w, com.warningOptions, s, p);
 				var config:WriterTargetConfig = switch com.hxbWriterConfig {
 					case null:
 						new WriterTargetConfig(); // HxbWriterConfig.create_target_config ()

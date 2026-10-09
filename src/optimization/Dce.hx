@@ -224,7 +224,7 @@ class Dce {
   }
   for (f in delayed) f(); if (dce.debug) for (item in dce.addedFields) if (item.field.cfExpr != null) Sys.println("[DCE] Entry point: " + Globals.sTypePath(item.cls.clPath) + "." + item.field.cfName);
  }
- public static function mark(pool:Dynamic,dce:DceData):Void while (dce.addedFields.length > 0) {
+ public static function mark(pool:Null<core.ds.TaskPool>,dce:DceData):Void while (dce.addedFields.length > 0) {
   var cfl = dce.addedFields.copy(); dce.addedFields.resize(0); for (k in dce.checkedFeatures.keys()) dce.features.remove(k); dce.checkedFeatures.clear(); dce.addFeatureManager.handleLater();
   context.Parallel.ParallelArray.iter(pool,function(item) {var c:TClass = item.cls; var cf:TClassField = item.field; var kind:ClassFieldRefKind = item.kind; markDependentFields(dce,c,cf.cfName,kind); var local = pushClass(dce,c); if (isPhysicalField(cf)) markClass(local,c); markField(local,c,cf,kind); markT(local,cf.cfPos,cf.cfType); if (!hasClassFlag(c,CExtern)) {opt(expr.bind(local),cf.cfExpr); for (overloadedField in cf.cfOverloads) if (overloadedField.cfExpr != null) opt(expr.bind(local),overloadedField.cfExpr);}},cfl);
  }
@@ -244,7 +244,7 @@ class Dce {
    case _:acc.unshift(mt);
   } return acc;
  }
- public static function run(pool:Dynamic,scom:SafeContext,mscom:Null<SafeContext>,main:Dynamic,mode:DceMode,stdPaths:Array<core.ClassPath.IClassPath>,types:Array<ModuleType>):Array<ModuleType> {
+ public static function run(pool:Null<core.ds.TaskPool>,scom:SafeContext,mscom:Null<SafeContext>,main:Null<TExpr>,mode:DceMode,stdPaths:Array<core.ClassPath.IClassPath>,types:Array<ModuleType>):Array<ModuleType> {
   var full = mode == DceFull; var dce:DceData = {scom:scom,mscom:mscom,full:full,stdDirs:full ? [] : stdPaths.map(path -> core.Path.getFullPath(path.path)),debug:core.Define.defined(scom.defines,core.Define.DceDebug),addedFields:[],followExpr:expr,markedFields:{value:[]},features:new haxe.ds.StringMap(),checkedFeatures:new haxe.ds.StringMap(),curclass:nullClass,mergeMutex:new sys.thread.Mutex(),fieldMarkerMutex:new sys.thread.Mutex(),usedMutex:new sys.thread.Mutex(),featureMutex:new sys.thread.Mutex(),addFeatureManager:new core.ds.NowOrLater()};
   core.Timer.time(scom.timerCtx,["filters","dce","collect"],function(_:Null<Bool>) collectEntryPoints(dce,types),null); core.Timer.time(scom.timerCtx,["filters","dce","mark"],function(_:Null<Bool>) mark(pool,dce),null); if (mode != DceNo) types = core.Timer.time(scom.timerCtx,["filters","dce","sweep"],function(_:Null<Bool>) return sweep(dce,types),null);
   core.Timer.time(scom.timerCtx,["filters","dce","cleanup"],function(_:Null<Bool>) {
