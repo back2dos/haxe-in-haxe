@@ -870,8 +870,21 @@ void *hxc_Native_copyObject(void *o) {
 	RT_ROOT(o);
 	void *c = rt_alloc(n, TINDEX(o), KIND(o));
 	RT_RELOAD(o);
-	RT_UNROOT(1);
 	memcpy(c, o, 8 * (size_t)n);
+	// an anonymous object's dynamic fields (slot 0) are its own
+	if (rt_types[TINDEX(o)].tk == TK_ANON && FP(o, 0)) {
+		RT_ROOT(c);
+		void *ov = FP(o, 0);
+		void *nv = rt_alloc(NSLOTS(ov), T_OVERFLOW, K_PARR);
+		RT_RELOAD(o);
+		RT_RELOAD(c);
+		RT_UNROOT(1);
+		ov = FP(o, 0);
+		memcpy(nv, ov, 8 * (size_t)NSLOTS(ov));
+		rt_barrier_range(nv, (void **)nv, NSLOTS(ov));
+		FP(c, 0) = nv;
+	}
+	RT_UNROOT(1);
 	if (KIND(c) == K_PARR) rt_barrier_range(c, (void **)c, n);
 	else if (KIND(c) == K_OBJ) {
 		const uint64_t *pm = rt_types[TINDEX(c)].ptrmap; // only the reference slots

@@ -490,8 +490,9 @@ class Lower {
 	public function staticVar(c:TClass, cf:TClassField):Int {
 		var g = staticVars.get(cf);
 		if (g != null) return g;
+		var t = ty(cf.cfType); // first: it may register globals itself (enum constructors)
 		g = prog.globals.length;
-		prog.globals.push({ty: ty(cf.cfType), init: null, name: nativeName(c) + "_" + cf.cfName});
+		prog.globals.push({ty: t, init: null, name: nativeName(c) + "_" + cf.cfName});
 		staticVars.set(cf, g);
 		initClass(c);
 		return g;

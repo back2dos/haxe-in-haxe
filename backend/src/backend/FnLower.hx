@@ -428,7 +428,12 @@ class FnLower {
 			case TContinue:
 				out.push(SContinue);
 			case TThrow(x):
-				out.push(SThrow(coerce(value(x), tyOf(x), TRef(RAny))));
+				// as the exceptions filter does for wildcard-catch targets: a haxe.Exception
+				// is thrown as its native value (a wrapped value comes out unwrapped)
+				var v = coerce(value(x), tyOf(x), TRef(RAny));
+				var base = exceptionBase(x.etype);
+				if (base != null) v = temp(TRef(RAny), ECall(l.staticFunc(base, base.clStatics.get("thrown")), [v]));
+				out.push(SThrow(v));
 			case TCall(_, _) | TNew(_, _, _) | TBinop(OpAssign | OpAssignOp(_), _, _) | TUnop(Increment | Decrement, _, _):
 				var x = rhs(e);
 				if (isImpure(x)) out.push(SExpr(x));
@@ -520,13 +525,46 @@ class FnLower {
 			var exn = newLocal("exn", TRef(RAny));
 			var test = typeTest(c.variable.vType);
 			var lo = declare(c.variable);
+			// catching haxe.Exception (or a subclass) catches any value, wrapped by haxe.Exception.caught
+			var base = exceptionBase(c.variable.vType);
+			var caught = null;
+			if (base != null) {
+				var fn = l.staticFunc(base, base.clStatics.get("caught"));
+				caught = newLocal("caught", fn.ret);
+				var cls = switch TFunctions.follow(c.variable.vType) {
+					case TInst(k, _): k;
+					case _: null;
+				};
+				test = if (cls == base) null else {
+					var ci = l.classInfo(cls);
+					x -> EInstOf(ci, ECall(fn, [x])); // pure enough: caught allocates only for non-Exception values
+				};
+			}
 			var handler = block(() -> {
-				var x = coerce(ELocal(exn), TRef(RAny), t);
+				var src:Ex = ELocal(exn);
+				if (caught != null) {
+					out.push(SSet(caught, ECall(l.staticFunc(base, base.clStatics.get("caught")), [ELocal(exn)])));
+					src = ELocal(caught);
+				}
+				var x = coerce(src, caught != null ? caught.ty : TRef(RAny), t);
 				if (isBoxed(c.variable)) out.push(SSet(lo, ENewBox(t, x))) else out.push(SSet(lo, x));
 			}).concat(branch(c.expr, target));
 			cs.push({test: test, l: exn, body: handler});
 		}
 		out.push(STry(b, cs));
+	}
+
+	// haxe.Exception when t is it or one of its subclasses
+	function exceptionBase(t:T):Null<TClass> {
+		var c = switch TFunctions.follow(t) {
+			case TInst(c, _): c;
+			case _: return null;
+		};
+		while (c != null) {
+			if (c.clPath.name == "Exception" && c.clPath.pack.join(".") == "haxe") return c;
+			c = c.clSuper != null ? c.clSuper.cls : null;
+		}
+		return null;
 	}
 
 	// a runtime test that a Dynamic value has the given type (null: always true)

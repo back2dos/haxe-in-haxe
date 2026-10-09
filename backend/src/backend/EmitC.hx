@@ -590,7 +590,7 @@ class EmitC {
 				b.add('${ind}RT_CATCH($h)\n');
 				for (c in catches)
 					b.add('$ind\t${local(c.l)} = rt_exn;\n');
-				b.add('$ind\tvoid *e_ = rt_exn;\n$ind\trt_exn = 0;\n');
+				b.add('$ind\trt_exn = 0;\n');
 				var first = true;
 				var catchAll = false;
 				for (c in catches) {
@@ -604,7 +604,8 @@ class EmitC {
 						break;
 					}
 				}
-				if (!catchAll) b.add('$ind\telse rt_throw(e_);\n');
+				// the catch locals are rooted (a test may allocate): rethrow from one of them
+				if (!catchAll) b.add('$ind\telse rt_throw(${local(catches[0].l)});\n');
 				b.add('${ind}RT_END_TRY($h)\n');
 		}
 	}
