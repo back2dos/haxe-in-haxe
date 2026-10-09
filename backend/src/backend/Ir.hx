@@ -1,12 +1,13 @@
 package backend;
 
-// EXPERIMENTAL (bench/WASM-BACKEND.md): the typed IR shared by the WasmGC and C
-// emitters. Statements are structured (no gotos); expressions are pure except
-// as the right-hand side of SSet/SExpr, so evaluation order and GC safepoints
-// are explicit and identical on both targets.
+// EXPERIMENTAL (bench/WASM-BACKEND.md): the typed IR between the typed AST and
+// the C emitter. Statements are structured (no gotos); expressions are pure
+// except as the right-hand side of SSet/SExpr, so evaluation order and GC
+// points are explicit.
 
 enum Ty {
 	TI32;
+	TBool; // an i32 at run time; kept apart so boxing and Std.string know it
 	TF64;
 	TVoid;
 	TRef(r:RefTy);
@@ -14,26 +15,35 @@ enum Ty {
 
 enum RefTy {
 	RObj(c:ClassInfo); // class instance (interfaces use the root object type)
-	REnum(e:EnumInfo);
+	REnum(e:Null<EnumInfo>); // enum value; null: any enum (EnumValue)
 	RCtor(c:CtorInfo); // a specific enum constructor (after a tag test)
-	RArr(elem:Ty);
+	RArr(elem:Ty); // the runtime array also records its element kind (§ arrays in rt.h)
 	RClos(s:SigInfo);
 	RBox(t:Ty); // captured mutable local
-	RAny;
+	RNull(t:Ty); // Null<Int>, Null<Float>, Null<Bool>: a Dynamic box or null
+	RStr;
+	RAnon; // anonymous structure, any shape: fields found through the type's field table
+	RAny; // Dynamic, type parameters, Any
+	RType; // Class<T> / Enum<T>: a runtime type descriptor
+	RNative(path:String); // instance of an extern class, implemented by the runtime
 }
 
 class ClassInfo {
 	public var id:Int; // preorder number: subclasses are in [id, lastDescendant]
 	public var lastDescendant:Int;
-	public var name:String;
+	public var name:String; // Haxe dot path
+	public var cname:String; // C identifier prefix
 	public var sup:Null<ClassInfo>;
 	public var fields:Array<{name:String, ty:Ty}> = []; // including inherited, slot 0 = class id
 	public var methods:Map<String, FuncInfo> = new Map(); // own implementations
 	public var ctor:Null<FuncInfo>;
 	public var tindex:Int = -1;
+	public var isInterface = false;
+	public var ifaces:Array<ClassInfo> = []; // implemented interfaces, including inherited ones
 
-	public function new(name, sup) {
+	public function new(name, cname, sup) {
 		this.name = name;
+		this.cname = cname;
 		this.sup = sup;
 	}
 
@@ -56,10 +66,14 @@ class ClassInfo {
 
 class EnumInfo {
 	public var name:String;
+	public var cname:String;
 	public var ctors:Array<CtorInfo> = [];
+	public var tindex:Int = -1; // the enum's own descriptor (Enum<T> values)
 
-	public function new(name)
+	public function new(name, cname) {
 		this.name = name;
+		this.cname = cname;
+	}
 }
 
 class CtorInfo {
@@ -67,6 +81,7 @@ class CtorInfo {
 	public var name:String;
 	public var tag:Int;
 	public var params:Array<Ty>; // slot 0 = tag, params from slot 1
+	public var paramNames:Array<String> = [];
 	public var global:Int = -1; // singleton for constructors without arguments
 	public var tindex:Int = -1;
 
@@ -78,15 +93,38 @@ class CtorInfo {
 	}
 }
 
+// An anonymous structure layout: the fields of an object literal, sorted by name.
+class ShapeInfo {
+	public var id:Int;
+	public var fields:Array<{name:String, ty:Ty}>; // slot 0 = dynamic overflow fields, then these
+	public var tindex:Int = -1;
+
+	public function new(id, fields) {
+		this.id = id;
+		this.fields = fields;
+	}
+
+	public function slot(name:String):Int {
+		for (i in 0...fields.length)
+			if (fields[i].name == name) return i + 1;
+		return -1;
+	}
+}
+
+// A function signature by C representation: i (Int), b (Bool), f (Float),
+// p (any reference), v (Void). Closures of the same representation are
+// interchangeable; others need an adapter (FnLower.coerce).
 class SigInfo {
 	public var id:Int;
 	public var args:Array<Ty>;
 	public var ret:Ty;
+	public var key:String;
 
-	public function new(id, args, ret) {
+	public function new(id, args, ret, key) {
 		this.id = id;
 		this.args = args;
 		this.ret = ret;
+		this.key = key;
 	}
 }
 
@@ -135,13 +173,19 @@ class FuncInfo {
 
 enum Ex {
 	EInt(v:Int);
+	EF64(v:Float);
+	EStr(s:String); // a literal, statically allocated
 	ENull(t:Ty);
 	ELocal(l:Local);
 	EGlobal(g:Int, t:Ty);
 	EBin(op:BinOp, a:Ex, b:Ex);
 	ENot(a:Ex);
+	EConv(op:ConvOp, a:Ex);
+	EBox(t:Ty, a:Ex); // scalar -> Dynamic box (cached for small ints)
+	EUnbox(t:Ty, a:Ex); // Dynamic or Null<T> -> scalar (null gives 0)
 	EField(c:ClassInfo, idx:Int, obj:Ex);
-	ECast(t:Ty, e:Ex); // checked downcast on WasmGC, unchecked in C
+	EAnonGet(name:String, t:Ty, obj:Ex); // structural field read, converted to t
+	ECast(t:Ty, e:Ex); // unchecked
 	EInstOf(c:ClassInfo, e:Ex);
 	EEnumTag(e:Ex);
 	EEnumParam(c:CtorInfo, idx:Int, e:Ex);
@@ -149,16 +193,30 @@ enum Ex {
 	EArrGet(elem:Ty, a:Ex, i:Ex);
 	EBoxGet(t:Ty, b:Ex);
 	ECapture(l:LambdaInfo, idx:Int, clos:Ex);
+	EType(t:TypeRef); // runtime type descriptor (Class<T>, Enum<T> values)
 	// impure: only as the value of SSet / SExpr
 	ECall(f:FuncInfo, args:Array<Ex>);
 	ECallDispatch(sel:Int, sig:SigInfo, args:Array<Ex>); // virtual and interface calls
 	ECallClos(s:SigInfo, clos:Ex, args:Array<Ex>);
-	ECallHost(name:String, args:Array<Ex>);
+	ECallHost(name:String, args:Array<Ex>, ret:Ty); // runtime function (backend/rt)
 	ENewObj(c:ClassInfo); // zeroed instance; the constructor is called separately
 	ENewEnum(c:CtorInfo, args:Array<Ex>);
 	ENewArr(elem:Ty, values:Array<Ex>);
 	ENewClos(l:LambdaInfo, captures:Array<Ex>);
 	ENewBox(t:Ty, v:Ex);
+	ENewAnon(s:ShapeInfo, values:Array<Ex>);
+}
+
+enum TypeRef {
+	TRClass(c:ClassInfo);
+	TREnum(e:EnumInfo);
+	TRBuiltin(name:String); // String, Int, Float, Bool, Array, Dynamic, ...
+}
+
+enum ConvOp {
+	I2F; // Int -> Float
+	F2I; // Float -> Int, truncating (Std.int)
+	FNeg;
 }
 
 enum BinOp {
@@ -180,15 +238,28 @@ enum BinOp {
 	Ge;
 	RefEq;
 	RefNe;
+	FAdd;
+	FSub;
+	FMul;
+	FDiv;
+	FMod;
+	FEq;
+	FNe;
+	FLt;
+	FLe;
+	FGt;
+	FGe;
 }
 
 enum Stmt {
 	SSet(l:Local, e:Ex);
 	SExpr(e:Ex);
 	SSetField(c:ClassInfo, idx:Int, obj:Ex, v:Ex);
+	SAnonSet(name:String, t:Ty, obj:Ex, v:Ex);
 	SArrSet(elem:Ty, a:Local, i:Ex, v:Ex);
 	SArrPush(elem:Ty, a:Local, v:Ex);
 	SBoxSet(t:Ty, b:Ex, v:Ex);
+	SSetGlobal(g:Int, v:Ex);
 	SIf(c:Ex, a:Array<Stmt>, b:Array<Stmt>);
 	SLoop(body:Array<Stmt>); // infinite; left with SBreak
 	SBreak;
@@ -196,59 +267,62 @@ enum Stmt {
 	SSwitch(e:Ex, cases:Array<{values:Array<Int>, body:Array<Stmt>}>, def:Array<Stmt>);
 	SReturn(e:Null<Ex>);
 	SThrow(e:Ex);
-	STry(body:Array<Stmt>, catches:Array<{c:Null<ClassInfo>, l:Local, body:Array<Stmt>}>);
+	STry(body:Array<Stmt>, catches:Array<{test:Null<Ex->Ex>, l:Local, body:Array<Stmt>}>);
 }
 
 class Program {
 	public var classes:Array<ClassInfo> = [];
 	public var enums:Array<EnumInfo> = [];
+	public var shapes:Array<ShapeInfo> = [];
 	public var funcs:Array<FuncInfo> = [];
 	public var sigs:Array<SigInfo> = [];
 	public var lambdas:Array<LambdaInfo> = [];
 	public var selectors:Array<{name:String, sig:SigInfo}> = [];
-	public var globals:Array<{ty:Ty, init:Null<CtorInfo>}> = [];
+	public var globals:Array<{ty:Ty, init:Null<CtorInfo>, name:String}> = [];
+	public var inits:Array<FuncInfo> = []; // static initializers, run before main
 	public var main:FuncInfo;
 
 	public function new() {}
 
 	public function sig(args:Array<Ty>, ret:Ty):SigInfo {
+		var key = [for (a in args) Ir.repr(a)].join("") + "_" + Ir.repr(ret);
 		for (s in sigs)
-			if (Ir.sameTys(s.args, args) && Ir.sameTy(s.ret, ret)) return s;
-		var s = new SigInfo(sigs.length, args, ret);
+			if (s.key == key) return s;
+		var norm = (t:Ty) -> Ir.isRef(t) ? TRef(RAny) : t;
+		var s = new SigInfo(sigs.length, [for (a in args) norm(a)], norm(ret), key);
 		sigs.push(s);
+		return s;
+	}
+
+	public function shape(fields:Array<{name:String, ty:Ty}>):ShapeInfo {
+		var fs = fields.copy();
+		fs.sort((a, b) -> a.name < b.name ? -1 : a.name > b.name ? 1 : 0);
+		for (s in shapes)
+			if (s.fields.length == fs.length) {
+				var same = true;
+				for (i in 0...fs.length)
+					if (s.fields[i].name != fs[i].name || Ir.repr(s.fields[i].ty) != Ir.repr(fs[i].ty)) same = false;
+				if (same) return s;
+			}
+		var s = new ShapeInfo(shapes.length, fs);
+		shapes.push(s);
 		return s;
 	}
 }
 
 class Ir {
-	public static function sameTy(a:Ty, b:Ty):Bool {
-		return switch [a, b] {
-			case [TI32, TI32] | [TF64, TF64] | [TVoid, TVoid]: true;
-			case [TRef(x), TRef(y)]: sameRef(x, y);
-			case _: false;
+	public static function repr(t:Ty):String
+		return switch t {
+			case TI32: "i";
+			case TBool: "b";
+			case TF64: "f";
+			case TVoid: "v";
+			case TRef(_): "p";
 		}
-	}
-
-	public static function sameTys(a:Array<Ty>, b:Array<Ty>):Bool {
-		if (a.length != b.length) return false;
-		for (i in 0...a.length)
-			if (!sameTy(a[i], b[i])) return false;
-		return true;
-	}
-
-	static function sameRef(a:RefTy, b:RefTy):Bool {
-		return switch [a, b] {
-			case [RObj(x), RObj(y)]: x == y;
-			case [REnum(x), REnum(y)]: x == y;
-			case [RCtor(x), RCtor(y)]: x == y;
-			case [RArr(x), RArr(y)]: sameTy(x, y);
-			case [RClos(x), RClos(y)]: x == y;
-			case [RBox(x), RBox(y)]: sameTy(x, y);
-			case [RAny, RAny]: true;
-			case _: false;
-		}
-	}
 
 	public static function isRef(t:Ty):Bool
 		return t.match(TRef(_));
+
+	public static function isScalar(t:Ty):Bool
+		return t == TI32 || t == TBool || t == TF64;
 }

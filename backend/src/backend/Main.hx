@@ -2,7 +2,7 @@ package backend;
 
 // EXPERIMENTAL code generator (bench/WASM-BACKEND.md). Runs the port's
 // compiler pipeline, then lowers the filtered program (the data an HXB
-// archive holds) to the shared IR and writes <out>.wat and <out>.c:
+// archive holds) to the shared IR and writes <out>.c:
 //   node wbk.js <out> <haxe arguments...>
 class Main {
 	static function main() {
@@ -20,7 +20,7 @@ class Main {
 						case _:
 					}
 				var prog = Lower.program(mainClass);
-				sys.io.File.saveContent(out + ".wat", EmitWat.emit(prog));
+				if (Lower.survey) return;
 				sys.io.File.saveContent(out + ".c", EmitC.emit(prog));
 			} catch (e:Dynamic) {
 				failed = Std.string(e);
