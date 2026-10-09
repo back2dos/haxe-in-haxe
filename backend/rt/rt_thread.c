@@ -68,7 +68,7 @@ void rt_run_main(void (*body)(void)) { body(); }
 #include <unistd.h>
 
 #define CSTACK_BYTES ((size_t)64 << 20) // reserved, committed as touched
-#define SSTACK_BYTES ((size_t)64 << 20) // shadow stack (the main thread's is 128 MB)
+#define SSTACK_BYTES ((size_t)64 << 20) // shadow stack (the main thread's is 1 GB, rt.c)
 
 enum { TS_RUNNING, TS_RUNNABLE, TS_PARKED, TS_DONE };
 
@@ -79,7 +79,7 @@ typedef struct rt_thread {
 	int unparkable; // parked in hxc_NativeThread_park (not sleeping or waiting for a descriptor)
 	int permit; // unparked while not parked: the next park returns at once
 	ucontext_t ctx;
-	char *cstack; // NULL for the main thread (it runs on the process stack)
+	char *cstack; // NULL for the main thread (its stack is rt_run_main's)
 	void **sbase, **sp; // shadow stack (saved while not running)
 	rt_handler *hcur;
 	void *exn;

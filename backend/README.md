@@ -48,8 +48,10 @@ in macros and `--interp`) work in it.
 - Switching: `ucontext` (`makecontext`/`swapcontext` from the C library, so
   tcc, gcc and cosmocc builds all work). A thread record holds its C stack
   (64 MB reserved with `MAP_NORESERVE` and a guard page, committed as
-  touched), its shadow stack (64 MB, likewise; the main thread keeps its
-  128 MB one), its exception handler chain and pending exception. A switch
+  touched), its shadow stack (64 MB, likewise; the main thread has 1 GB
+  of each: `rt_run_main` runs the program's `main` on a reserved stack of
+  `RT_STACK_MB`, default 1024, as OCaml 5 lets the main fiber's stack grow
+  to 1 GB), its exception handler chain and pending exception. A switch
   saves the globals `rt_sp`, `rt_stack_base`, `rt_hcur` and `rt_exn` into
   the record and loads the next thread's, so shadow-stack push/pop,
   allocation and `RT_TRY` are unchanged: with one thread nothing else runs
@@ -104,6 +106,21 @@ in macros and `--interp`) work in it.
 backend/bench/threads Threads && bin/backend/Threads/prog_c`).
 `sys.net.Socket`/`Host` are real (`backend/std-hxc/sys/net`, over
 `rt_net.c`).
+
+## Finalisers and regular expressions
+
+- `rt.c` keeps OCaml's `Gc.finalise` semantics for Eval's `eval.vm.Gc`
+  (`hxc.NativeGc`, used by `src/macros/eval/EvalStdLibA.hx`): a finaliser's
+  function is a root and its value a root of minor collections only; a
+  major collection that finds the value unreachable copies it back (it
+  lives on for the call) and queues the call. Queued calls run at the next
+  allocation slow path or after Eval's `Gc.minor`/`major`/`full_major`/
+  `compact` (which collect). Weak references are not provided.
+- `hxc.Regex` (EReg) follows PCRE2 with `PCRE2_UCP`, as Eval and HashLink:
+  `\d \w \s \b` and the POSIX classes use Unicode properties and caseless
+  matching uses Unicode case variants (tables from
+  `tools/mkunicode.py`). It matches UTF-16 code units: `.` and classes see
+  the two halves of a surrogate pair separately.
 
 ## TLS and libuv: mbedtls and libuv natives
 
