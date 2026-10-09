@@ -117,6 +117,15 @@ void *rt_alloc_slow(uint64_t header, uint32_t bytes);
 void rt_write_barrier(void *obj, void **slot, void *val);
 void rt_barrier_range(void *obj, void **from, int32_t n);
 void rt_init(int nglobals, int argc, char **argv);
+// RT_CENSUS (rt_census.c): a census of the objects in [start, end)
+typedef struct {
+	const char *when;
+	size_t young, old_used, old_limit, populated[2], remembered, gcstack, shadow;
+	unsigned long minors, majors;
+	int nglobals;
+} rt_census_info;
+void rt_census(char *start, char *end, const rt_census_info *info);
+void rt_proc_rss(long *rss_kb, long *peak_kb); // from /proc/self/status (0 elsewhere)
 
 static inline void *rt_alloc(uint32_t nslots, uint32_t tindex, uint32_t kind) {
 	uint32_t bytes = 8 * (nslots + 1);
@@ -142,11 +151,16 @@ static inline void *rt_alloc_init(uint32_t nslots, uint32_t tindex, uint32_t kin
 	return rt_alloc_slow(MKHDR(nslots, kind, tindex), bytes);
 }
 
-// store a reference into a heap object: remember old-to-young pointers
+// store a reference into a heap object: remember old-to-young pointers. A
+// slot of an old object that already holds a young pointer is remembered
+// already (every such store comes through here or rt_barrier_range), so
+// storing into it again adds no duplicate entry.
 static inline void rt_set_ptr(void *obj, void **slot, void *val) {
+	void *prev = *slot;
 	*slot = val;
 	if ((char *)obj < rt_young_start || (char *)obj >= rt_young_limit)
-		if ((char *)val >= rt_young_start && (char *)val < rt_young_limit) rt_write_barrier(obj, slot, val);
+		if ((char *)val >= rt_young_start && (char *)val < rt_young_limit)
+			if ((char *)prev < rt_young_start || (char *)prev >= rt_young_limit) rt_write_barrier(obj, slot, val);
 }
 
 // natives keep references across allocations in shadow-stack slots
