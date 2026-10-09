@@ -2,6 +2,48 @@
 
 Earlier checkpoints are in the Git history of this file.
 
+## Upstream test suite — 2026-10-09
+
+`python3 test/upstream.py [--reference] [step ...]` runs upstream CI's
+target-independent job (`haxe/tests/runci/targets/Macro.hx`) with the port as
+`haxe` on PATH (see the script header).
+
+### misc (`haxe/tests/misc`, 686 projects)
+
+The reference passes all 686 projects. Second half of the 64 port failures
+(Issue8019 through process-nonexistent, 32 projects): all pass now, none
+excluded. Root causes:
+
+- Abort after typing when errors were reported (the non-display branch of
+  `DisplayProcessing.handle_display_after_typing`, previously missing): -main
+  checks no longer add "Module X does not define type X" / "Invalid -main"
+  after the real errors, and filters no longer add errors after them
+  (Issue8258, Issue8277 ×2, Issue8517, Issue8697, Issue8787 ×2,
+  Issue9010/NativeMeta, Issue9017, default_type_params ×3, extern-overloads
+  ×3, issue5002/compile2, local-static Break/Continue).
+- Coroutines: type paths and metadata arguments passed as `Dynamic` were
+  anonymous objects on HashLink, failing the cast to `GlobalTypePath`/`Expr`
+  (coro ×7; these projects use `-js`, but the errors are typing errors raised
+  before generation).
+- Plain arguments are classified with `Path.parse_path` (`Main.hx` is class
+  `Main`, not `--include` of a package) (Issue8534).
+- `#if` comparison errors print floats with OCaml `string_of_float`
+  (`0.`) (Issue8677).
+- The lexer records the lines before a lexer error (escape errors were
+  reported on the previous line) (Issue8119 ×2).
+- Type-path hash keys kept `[]` and `[""]` apart (a macro-defined type in
+  package `""` was a "redefinition") (Issue8019 ×2).
+- Eval's `sys.io.Process` follows `libs/extc/process.ml`: a command that
+  cannot be spawned gives EOF stdout, the error on stderr and exit code 127
+  (the command is looked up in PATH like `posix_spawnp`, since host
+  processes fork first and exit 1 on HashLink) (process-nonexistent). This
+  also removes the `process-nonexistent` difference of `test/interp.py`.
+
+With these fixes the full misc step gives 681/686 (the remaining 5 are in
+the first half: HxbWildcardExclude, Issue1138/compile3-fail, Issue11881,
+Issue4660, Issue7997). Conformance stays at 275 PASS + 7 EXPECTED-FAILURE
+(also `--hxb-lib`), and the bootstrap build passes.
+
 ## Compilation server and haxelib — 2026-10-09
 
 The port runs as a compilation server (`--wait <port>`, `--server-connect`)

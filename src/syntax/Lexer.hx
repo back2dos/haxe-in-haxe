@@ -120,7 +120,8 @@ class Lexer {
 	public static function readToken(ctx:LexerContext,code:Lexer):LexedToken {
 		code.file=ctx.file.lfile;
 		var start=code.index;
-		var result=code.token();
+		// upstream records each newline as it is lexed, so a lexer error sees the lines before it
+		var result=try code.token() catch(e:LexerError){updateLines(ctx,code,start);throw e;};
 		updateLines(ctx,code,start);
 		return result;
 	}

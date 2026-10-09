@@ -325,7 +325,7 @@ enum VinstanceKind {
 	IBuffer(b:VstringBuffer); // StringBuf
 	IPos(p:Pos);
 	IUtf8(b:StringBuf);
-	IProcess(p:sys.io.Process);
+	IProcess(p:EvalProcess);
 	IInChannel(i:haxe.io.Input, eof:{v:Bool}); // FileInput
 	IOutChannel(o:haxe.io.Output); // FileOutput
 	ISocket(s:Dynamic);

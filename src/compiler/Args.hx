@@ -281,8 +281,12 @@ class Args {
 				case "-w": parsed.push(AddWarning(requiredArgument(argument, arguments, index++)));
 				default:
 					if (StringTools.endsWith(argument, ".hxml")) parsed.push(HxmlFile(argument));
-					else if (isClassPath(argument)) parsed.push(AddClass(parseTypePath(argument)));
-					else parsed.push(IncludeModule(argument));
+					else {
+						var path = try core.Path.parsePath(argument) catch (_:String) null;
+						if (path == null) parsed.push(IncludeModule(argument));
+						else if (core.StringHelper.startsUppercaseIdentifier(path.name)) parsed.push(AddClass(path.pack.concat([path.name])));
+						else parsed.push(IncludeModule(argument));
+					}
 			}
 		}
 		return parsed;
@@ -295,12 +299,6 @@ class Args {
 
 	static function parseTypePath(path:String):Array<String> {
 		return path.split(".");
-	}
-
-	static function isClassPath(path:String):Bool {
-		var parts = parseTypePath(path);
-		var name = parts[parts.length - 1];
-		return name.length > 0 && name.charCodeAt(0) >= "A".code && name.charCodeAt(0) <= "Z".code;
 	}
 
 	static function nativeLib(file:String, isExtern:Bool, kind:NativeLibKind):NativeLibArg {

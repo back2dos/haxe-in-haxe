@@ -8,11 +8,11 @@ import core.Globals.*;
 import coro.ContTypes;
 // haxe/src/coro/coroInit.ml — mechanical draft; not compile-validated.
 class CoroInit {
- public static function loadModuleClass(ctx:context.Typecore.Typer,path:Dynamic):TClass {
+ public static function loadModuleClass(ctx:context.Typecore.Typer,path:GlobalTypePath):TClass {
   var m=ctx.g.doLoadModule(ctx,path,nullPos);
   for(mt in (m.mTypes:Array<ModuleType>)) switch mt {case TClassDecl(c) if(core.ds.Key.compare(c.clPath,path)==0):return c; case _:} throw NotFound.raise();
  }
- public static function loadModuleAbstract(ctx:context.Typecore.Typer,path:Dynamic):TAbstract {
+ public static function loadModuleAbstract(ctx:context.Typecore.Typer,path:GlobalTypePath):TAbstract {
   var m=ctx.g.doLoadModule(ctx,path,nullPos);
   for(mt in (m.mTypes:Array<ModuleType>)) switch mt {case TAbstractDecl(a) if(core.ds.Key.compare(a.aPath,path)==0):return a; case _:} throw NotFound.raise();
  }

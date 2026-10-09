@@ -665,14 +665,14 @@ class StdCondition {
 }
 
 class StdNativeProcess {
-	static function thisValue(vthis:Value):sys.io.Process {
+	static function thisValue(vthis:Value):EvalProcess {
 		return switch vthis {
 			case VInstance({ikind: IProcess(proc)}): proc;
 			case _: EvalExceptions.unexpectedValue(vthis, "NativeProcess");
 		}
 	}
 
-	static function call(f:(sys.io.Process, Bytes, Int, Int) -> Int, vthis:Value, bytes:Value, pos:Value, len:Value):Int {
+	static function call(f:(EvalProcess, Bytes, Int, Int) -> Int, vthis:Value, bytes:Value, pos:Value, len:Value):Int {
 		var self = thisValue(vthis);
 		var bytes = EvalDecode.decodeBytes(bytes);
 		var pos = EvalDecode.decodeInt(pos);
@@ -680,7 +680,7 @@ class StdNativeProcess {
 		return f(self, bytes, pos, len);
 	}
 
-	static function processCatch<B>(f:sys.io.Process->B, vthis:Value):B {
+	static function processCatch<B>(f:EvalProcess->B, vthis:Value):B {
 		return StdLibBHelpers.processCatch(f, thisValue(vthis));
 	}
 
@@ -693,11 +693,11 @@ class StdNativeProcess {
 	});
 
 	public static final exitCode = EvalEncode.vifun0(vthis -> {
-		thisValue(vthis).exitCode(true).vint();
+		thisValue(vthis).exit().vint();
 	});
 
 	public static final getPid = EvalEncode.vifun0(vthis -> {
-		processCatch(p -> p.getPid(), vthis).vint();
+		processCatch(p -> p.pid(), vthis).vint();
 	});
 
 	public static final kill = EvalEncode.vifun0(vthis -> {
@@ -709,23 +709,23 @@ class StdNativeProcess {
 	});
 
 	public static final readStderr = EvalEncode.vifun3((vthis, bytes, pos, len) -> {
-		try call((p, b, pos, len) -> p.stderr.readBytes(b, pos, len), vthis, bytes, pos, len).vint() catch (_:Dynamic) EvalContext.excString("Could not read stderr");
+		try call((p, b, pos, len) -> p.readStderr(b, pos, len), vthis, bytes, pos, len).vint() catch (_:Dynamic) EvalContext.excString("Could not read stderr");
 	});
 
 	public static final readStdout = EvalEncode.vifun3((vthis, bytes, pos, len) -> {
-		try call((p, b, pos, len) -> p.stdout.readBytes(b, pos, len), vthis, bytes, pos, len).vint() catch (_:Dynamic) EvalContext.excString("Could not read stdout");
+		try call((p, b, pos, len) -> p.readStdout(b, pos, len), vthis, bytes, pos, len).vint() catch (_:Dynamic) EvalContext.excString("Could not read stdout");
 	});
 
 	public static final closeStdin = EvalEncode.vifun0(vthis -> {
 		processCatch(p -> {
-			p.stdin.close();
+			p.closeStdin();
 			null;
 		}, vthis);
 		VNull;
 	});
 
 	public static final writeStdin = EvalEncode.vifun3((vthis, bytes, pos, len) -> {
-		call((p, b, pos, len) -> p.stdin.writeBytes(b, pos, len), vthis, bytes, pos, len).vint();
+		call((p, b, pos, len) -> p.writeStdin(b, pos, len), vthis, bytes, pos, len).vint();
 	});
 }
 

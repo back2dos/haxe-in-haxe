@@ -18,6 +18,13 @@ class Numeric {
 		return validFloatLexeme(Std.string(value));
 	}
 
+	/** OCaml Stdlib `string_of_float`: `valid_float_lexeme (sprintf "%.12g" f)`. **/
+	public static function stringOfFloat(f:Float):String {
+		if (Math.isNaN(f)) return "nan";
+		if (!Math.isFinite(f)) return f < 0.0 ? "-inf" : "inf";
+		return validFloatLexeme(core.ds.OcamlPrintf.formatG(12, f));
+	}
+
 	/** numeric.ml `float_repres`: shortest of %.12g/%.15g/%.18g that reads back as `f`. **/
 	public static function floatRepres(f:Float):String {
 		if (Math.isNaN(f)) return "nan";
