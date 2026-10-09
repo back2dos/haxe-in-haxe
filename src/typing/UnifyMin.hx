@@ -80,7 +80,7 @@ class UnifyMin {
 				result.set(name, mkField(name, t, values[0].epos, nullPos));
 			}
 			return mkAnon(Closed, result);
-		} catch (error:Dynamic) {if (error != "Not_found") throw error;}
+		} catch (error:Dynamic) {if (error != "Not_found") throw core.ds.FastThrow.of(error);}
 		try {
 			// Function argument types are contravariant; return types have a common base.
 			var signature = switch follow(el[0].etype) {case TFun(s): s; case _: throw core.ds.FastThrow.of(new UnifyMinExit());};

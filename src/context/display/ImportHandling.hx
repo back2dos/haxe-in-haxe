@@ -21,7 +21,8 @@ import context.TyperPass;
 // Shared bookkeeping from haxe/src/context/display/importHandling.ml:46–64.
 // The preexisting Haxe ModuleDefDisplay model stores position keys as strings.
 class ImportHandling {
- static function key(p:Pos):String return haxe.Json.stringify([p.pfile,p.pmin,p.pmax]);
+ // Injective (the file comes last) and much cheaper than JSON-encoding the position per lookup.
+ static function key(p:Pos):String return p.pmin+":"+p.pmax+":"+p.pfile;
  public static function addImportPosition(ctx:Typer,p:Pos,path:Array<PlacedName>):Void {
   var positions=ctx.m.curmod.mExtra.mDisplay.mImportPositions,k=key(p);
   if (!positions.exists(k)) positions.set(k,false);

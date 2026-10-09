@@ -646,6 +646,46 @@ index 7def07d..75eff4d 100644
 +#endif
 +
  #endif
+diff --git a/src/std/array.c b/src/std/array.c
+index 317480e..1303b56 100644
+--- a/src/std/array.c
++++ b/src/std/array.c
+@@ -21,11 +21,35 @@
+  */
+ #include <hl.h>
+ 
++// Empty arrays are immutable, so like the HDYN one above they can be shared:
++// one per element type (`[]` allocates one per literal otherwise). Outside the
++// GC heap, so never collected; a full or colliding table just allocates.
++#define EMPTY_ARRAYS 1024
++static varray *empty_arrays[EMPTY_ARRAYS];
++
++static varray *hl_empty_array( hl_type *at ) {
++	int h = (int)(((int_val)at >> 4) & (EMPTY_ARRAYS - 1));
++	varray *a = __atomic_load_n(&empty_arrays[h], __ATOMIC_ACQUIRE);
++	if( a && a->at == at ) return a;
++	if( a ) return NULL;
++	a = (varray*)malloc(sizeof(varray));
++	if( a == NULL ) return NULL;
++	a->t = &hlt_array;
++	a->at = at;
++	a->size = 0;
++	__atomic_store_n(&empty_arrays[h], a, __ATOMIC_RELEASE); // racing threads at worst leak one
++	return a;
++}
++
+ HL_PRIM varray *hl_alloc_array( hl_type *at, int size ) {
+ 	if( size == 0 && at->kind == HDYN ) {
+ 		static varray empty_array = { &hlt_array, &hlt_dyn };
+ 		return &empty_array;
+ 	}
++	if( size == 0 ) {
++		varray *e = hl_empty_array(at);
++		if( e ) return e;
++	}
+ 	int esize = hl_type_size(at);
+ 	varray *a;
+ 	if( size < 0 ) hl_error("Invalid array size");
 diff --git a/src/std/fun.c b/src/std/fun.c
 index ffe94cc..f5de95b 100644
 --- a/src/std/fun.c

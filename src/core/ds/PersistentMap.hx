@@ -7,6 +7,12 @@ class PersistentMap<K,V> {
  // Entries are sorted by Key.compare with unique keys: index of the first entry not below key.
  function lowerBound(key:K):Int {
   var lo=0,hi=entries.length;
+  // String keys (typer locals): compare directly instead of dispatching in Key.compare.
+  var sk=Key.asString(key);
+  if(sk!=null) {
+   while(lo<hi) {var mid=(lo+hi)>>1,ek=Key.asString(entries[mid].key);if((ek!=null ? Key.compareStrings(ek,sk) : Key.compare(entries[mid].key,key))<0) lo=mid+1;else hi=mid;}
+   return lo;
+  }
   while(lo<hi) {var mid=(lo+hi)>>1;if(Key.compare(entries[mid].key,key)<0) lo=mid+1;else hi=mid;}
   return lo;
  }
