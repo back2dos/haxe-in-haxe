@@ -101,6 +101,19 @@ static void scan_object(void *o, void *(*fwd)(void *)) {
 	}
 }
 
+// ---- finalisers (Gc.finalise in Eval): OCaml's Gc.finalise semantics. A
+// finaliser's function is a root; its value is a root of minor collections
+// only (they promote it), and a major collection that finds it unreachable
+// copies it back (it lives on for the call) and queues the call. Queued calls
+// run at the next allocation slow path or rt_gc_run_finalisers, in the
+// reverse order of registration for values found dead together.
+typedef struct {
+	void *fn, *val;
+} rt_final;
+static rt_final *finals, *final_queue;
+static size_t nfinals, finals_cap, final_qhead, final_qlen, final_qcap;
+static int finals_running;
+
 static void scan_roots(void *(*fwd)(void *)) {
 	for (void **s = rt_stack_base; s < rt_sp; s++)
 		if (*s) *s = fwd(*s);
@@ -108,6 +121,12 @@ static void scan_roots(void *(*fwd)(void *)) {
 	for (int i = 0; i < nglobals; i++)
 		if (rt_globals[i]) rt_globals[i] = fwd(rt_globals[i]);
 	if (rt_exn) rt_exn = fwd(rt_exn);
+	for (size_t i = 0; i < nfinals; i++)
+		finals[i].fn = fwd(finals[i].fn);
+	for (size_t i = final_qhead; i < final_qlen; i++) {
+		final_queue[i].fn = fwd(final_queue[i].fn);
+		final_queue[i].val = fwd(final_queue[i].val);
+	}
 }
 
 // Depth-first copying: an object's descendants are copied right after it
@@ -173,6 +192,7 @@ static void *fwd_root(void *p) {
 }
 
 static void major(size_t need);
+static void run_finalisers(int propagate);
 
 static void minor_(void);
 static void minor(void) {
@@ -194,6 +214,8 @@ static void minor_(void) {
 	if (!gc_bfs) {
 		gc_fwd = minor_forward;
 		scan_roots(fwd_root);
+		for (size_t i = 0; i < nfinals; i++)
+			finals[i].val = fwd_root(finals[i].val);
 		for (size_t i = 0; i < remembered_len; i++)
 			if (*remembered[i]) *remembered[i] = fwd_root(*remembered[i]);
 		remembered_len = 0;
@@ -201,6 +223,8 @@ static void minor_(void) {
 		return;
 	}
 	scan_roots(minor_forward);
+	for (size_t i = 0; i < nfinals; i++)
+		finals[i].val = minor_forward(finals[i].val);
 	for (size_t i = 0; i < remembered_len; i++)
 		if (*remembered[i]) *remembered[i] = minor_forward(*remembered[i]);
 	remembered_len = 0;
@@ -290,6 +314,38 @@ static void major_(size_t need) {
 		scan += obj_bytes(o);
 		scan_object(o, major_forward);
 	}
+	if (nfinals) {
+		// values not copied yet are unreachable: queue their calls (newest
+		// first), then copy them and what they reach
+		size_t live = 0, q0 = final_qlen;
+		for (size_t i = nfinals; i-- > 0;) {
+			void *v = finals[i].val;
+			int collected = in_young(v) || ((char *)v >= from_start && (char *)v < from_end);
+			if (collected && KIND(v) != K_FWD) {
+				if (final_qlen == final_qcap) {
+					final_qcap = final_qcap ? final_qcap * 2 : 64;
+					final_queue = (rt_final *)realloc(final_queue, final_qcap * sizeof(rt_final));
+				}
+				final_queue[final_qlen++] = finals[i];
+				finals[i].fn = NULL;
+			}
+		}
+		for (size_t i = 0; i < nfinals; i++)
+			if (finals[i].fn) {
+				void *v = finals[i].val;
+				if (in_young(v) || ((char *)v >= from_start && (char *)v < from_end)) v = FP(v, 0);
+				finals[live].fn = finals[i].fn;
+				finals[live++].val = v;
+			}
+		nfinals = live;
+		for (size_t i = q0; i < final_qlen; i++)
+			final_queue[i].val = gc_bfs ? major_forward(final_queue[i].val) : fwd_root(final_queue[i].val);
+		while (gc_bfs && scan < old_ptr) {
+			void *o = scan + 8;
+			scan += obj_bytes(o);
+			scan_object(o, major_forward);
+		}
+	}
 	rt_young_ptr = rt_young_start;
 #ifdef __EMSCRIPTEN__
 	free(from_start);
@@ -310,6 +366,8 @@ void *rt_alloc_slow(uint64_t header, uint32_t bytes) {
 	// a green thread that only computes gives way at each minor collection
 	// (before allocating: the caller's live references are rooted here)
 	if (rt_nthreads > 1) rt_preempt();
+	// likewise for finaliser calls queued by an earlier major collection
+	if (final_qhead < final_qlen && !finals_running) run_finalisers(0);
 	if (bytes > minor_size / 4) {
 		// large objects go straight to the old space
 		if ((size_t)(old_end - old_ptr) < bytes) major(bytes);
@@ -325,6 +383,59 @@ void *rt_alloc_slow(uint64_t header, uint32_t bytes) {
 	*(uint64_t *)p = header;
 	memset(p + 8, 0, bytes - 8);
 	return p + 8;
+}
+
+// Gc.finalise f v: values outside the heap (static objects, null) are never
+// collected, so their finalisers never run
+void rt_gc_finalise(void *fn, void *val) {
+	if (!val || !(in_young(val) || ((char *)val >= old_start && (char *)val < old_ptr))) return;
+	if (nfinals == finals_cap) {
+		finals_cap = finals_cap ? finals_cap * 2 : 64;
+		finals = (rt_final *)realloc(finals, finals_cap * sizeof(rt_final));
+	}
+	finals[nfinals].fn = fn;
+	finals[nfinals++].val = val;
+}
+
+// a collection now: minor (0) or major (1), as OCaml's Gc.minor/full_major
+void rt_gc_collect(int full) {
+	if (full) major(0);
+	else minor();
+}
+
+// calls the queued finalisers (an exception escapes when propagate is set,
+// as from OCaml's Gc.full_major; otherwise, at an allocation, it is reported)
+void rt_gc_run_finalisers(int propagate) { run_finalisers(propagate); }
+
+static void run_finalisers(int propagate) {
+	if (finals_running) return;
+	finals_running = 1;
+	while (final_qhead < final_qlen) {
+		void **r = rt_sp;
+		rt_sp += 2;
+		r[0] = final_queue[final_qhead].fn;
+		r[1] = final_queue[final_qhead].val;
+		if (++final_qhead == final_qlen) final_qhead = final_qlen = 0;
+		void *args = hx_arr_new(AK_PTR, 0);
+		RT_ROOT(args);
+		hx_apush_slow(args_root, AK_PTR, (uint64_t)(uintptr_t)&r[1]);
+		RT_TRY(h)
+			hx_dyn_call(r[0], *args_root);
+		RT_CATCH(h)
+			if (propagate) {
+				finals_running = 0;
+				rt_sp = r;
+				rt_throw(rt_exn);
+			}
+			char *s = hx_str_to_utf8(hx_std_string(rt_exn));
+			rt_exn = 0;
+			fflush(stdout);
+			fprintf(stderr, "Uncaught exception in a finaliser: %s\n", s);
+			free(s);
+		RT_END_TRY(h)
+		rt_sp = r;
+	}
+	finals_running = 0;
 }
 
 void rt_write_barrier(void *obj, void **slot, void *val) {
@@ -669,3 +780,9 @@ void hx_apush_slow(void **slot, int32_t vk, uint64_t v) {
 	ARR_LEN(a) = n + 1;
 	store_conv(slot, n, vk, v);
 }
+
+// ---- hxc.NativeGc
+
+void hxc_NativeGc_finalise(void *fn, void *val) { rt_gc_finalise(fn, val); }
+void hxc_NativeGc_collect(int32_t full) { rt_gc_collect(full); }
+void hxc_NativeGc_runFinalisers(void) { rt_gc_run_finalisers(1); }

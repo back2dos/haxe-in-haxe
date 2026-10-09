@@ -1775,11 +1775,15 @@ class StdGc {
 	public static final key_top_heap_words = EvalHash.hash("top_heap_words");
 	public static final key_stack_size = EvalHash.hash("stack_size");
 
-	static function hostCollect():Void {
+	static function hostCollect(full:Bool = true):Void {
 		#if hl
 		hl.Gc.major();
 		#elseif cpp
 		cpp.vm.Gc.run(true);
+		#elseif (target.name == "hxc")
+		// a collection, then the finalisers it found due (rt.c)
+		hxc.NativeGc.collect(full);
+		hxc.NativeGc.runFinalisers();
 		#end
 	}
 
@@ -1794,10 +1798,23 @@ class StdGc {
 
 	public static final counters = EvalEncode.vfun0(() -> unsupported("counters"));
 
+	#if (target.name == "hxc")
+	// the hxc host GC has OCaml's finalisers (backend/rt/rt.c)
+	public static final finalise = EvalEncode.vfun2((f, v) -> {
+		hxc.NativeGc.finalise((v:Value) -> {
+			EvalMisc.callValue(f, [v]);
+		}, v);
+		VNull;
+	});
+
+	// finalisers run one after the other already
+	public static final finaliseRelease = EvalEncode.vfun0(() -> VNull);
+	#else
 	public static final finalise = EvalEncode.vfun2((f, v) -> unsupported("finalise"));
 
 	// no finalisers are ever registered
 	public static final finaliseRelease = EvalEncode.vfun0(() -> VNull);
+	#end
 
 	public static final fullMajor = EvalEncode.vfun0(() -> {
 		hostCollect();
@@ -1814,7 +1831,7 @@ class StdGc {
 	public static final majorSlice = EvalEncode.vfun1(n -> unsupported("major_slice"));
 
 	public static final minor = EvalEncode.vfun0(() -> {
-		hostCollect();
+		hostCollect(false);
 		return VNull;
 	});
 
