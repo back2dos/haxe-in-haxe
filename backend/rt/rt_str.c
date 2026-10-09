@@ -95,15 +95,8 @@ char *hx_str_to_utf8(void *s) {
 	return buf;
 }
 
-int32_t String_length(void *s) {
-	return STR_LEN(s);
-}
-
-int hx_str_eq(void *a, void *b) {
-	if (a == b) return 1;
-	if (!a || !b) return 0;
-	int32_t n = STR_LEN(a);
-	return n == STR_LEN(b) && memcmp(STR_CHARS(a), STR_CHARS(b), 2 * (size_t)n) == 0;
+int hx_str_eq_slow(void *a, void *b) {
+	return memcmp(STR_CHARS(a), STR_CHARS(b), 2 * (size_t)STR_LEN(a)) == 0;
 }
 
 int32_t hx_str_cmp(void *a, void *b) {
@@ -246,10 +239,6 @@ void *String_charAt(void *s, int32_t i) {
 void *String_charCodeAt(void *s, int32_t i) {
 	if ((uint32_t)i >= (uint32_t)STR_LEN(s)) return 0;
 	return hx_box_int(STR_CHARS(s)[i]);
-}
-
-int32_t String_charCodeAt_i(void *s, int32_t i) {
-	return (uint32_t)i < (uint32_t)STR_LEN(s) ? STR_CHARS(s)[i] : 0;
 }
 
 void *String_fromCharCode(int32_t code) {

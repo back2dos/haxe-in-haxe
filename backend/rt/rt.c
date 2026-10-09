@@ -31,14 +31,29 @@ static void ***remembered;
 static size_t remembered_len, remembered_cap;
 static size_t minor_size;
 static int stats;
+static int release_pages;
+static void populate(char *upto);
 static unsigned long minors, majors;
+static double minor_secs, major_secs; // RT_STATS
+#include <time.h>
+static double now_secs(void) {
+	struct timespec t;
+	clock_gettime(CLOCK_MONOTONIC, &t);
+	return t.tv_sec + t.tv_nsec * 1e-9;
+}
 int rt_argc;
 char **rt_argv;
 
 static inline uint32_t obj_bytes(void *o) { return 8 * (NSLOTS(o) + 1); }
 
 static char *copy_to(char *dst, void *obj) {
-	memcpy(dst, (char *)obj - 8, obj_bytes(obj));
+	uint32_t words = NSLOTS(obj) + 1;
+	uint64_t *s = (uint64_t *)obj - 1, *d = (uint64_t *)dst;
+	if (words <= 8) // most objects: a few words, no call
+		for (uint32_t i = 0; i < words; i++)
+			d[i] = s[i];
+	else
+		memcpy(dst, s, 8 * (size_t)words);
 	return dst + 8;
 }
 
@@ -94,16 +109,96 @@ static void scan_roots(void *(*fwd)(void *)) {
 	if (rt_exn) rt_exn = fwd(rt_exn);
 }
 
+// Depth-first copying: an object's descendants are copied right after it
+// (preorder), the order in which the compiler then walks its trees; Cheney's
+// breadth-first scan scatters them. RT_BFS=1 selects the breadth-first scan.
+typedef struct {
+	void *o;
+	uint32_t i; // next slot to scan
+} gc_frame;
+static gc_frame *gc_stack;
+static size_t gc_top, gc_cap;
+static int gc_bfs;
+static void *(*gc_fwd)(void *);
+
+static void gc_push(void *o) {
+	if (gc_top == gc_cap) {
+		gc_cap = gc_cap ? gc_cap * 2 : 4096;
+		gc_stack = (gc_frame *)realloc(gc_stack, gc_cap * sizeof(gc_frame));
+	}
+	gc_stack[gc_top].o = o;
+	gc_stack[gc_top].i = 0;
+	gc_top++;
+}
+
+static void gc_drain(void) {
+	while (gc_top) {
+		gc_frame *f = &gc_stack[gc_top - 1];
+		void *o = f->o;
+		uint32_t n = NSLOTS(o), k = KIND(o);
+		const uint64_t *pm = k == K_OBJ ? rt_types[TINDEX(o)].ptrmap : 0;
+		if (k == K_RAW || (k == K_OBJ && !pm)) {
+			gc_top--;
+			continue;
+		}
+		uint32_t i = f->i;
+		for (; i < n; i++) {
+			if (pm && !((pm[i >> 6] >> (i & 63)) & 1)) continue;
+			void *v = FP(o, i);
+			if (!v) continue;
+			char *before = old_ptr;
+			void *nv = gc_fwd(v);
+			FP(o, i) = nv;
+			if (old_ptr != before) { // copied just now: its subtree next
+				f->i = i + 1;
+				gc_push(nv); // may move gc_stack: f is not used after this
+				goto next;
+			}
+		}
+		gc_top--;
+	next:;
+	}
+}
+
+// forward a root, then copy everything reachable from it that is still to copy
+static void *fwd_root(void *p) {
+	char *before = old_ptr;
+	void *n = gc_fwd(p);
+	if (old_ptr != before) {
+		gc_push(n);
+		gc_drain();
+	}
+	return n;
+}
+
 static void major(size_t need);
 
+static void minor_(void);
 static void minor(void) {
+	double t0 = stats ? now_secs() : 0;
+	unsigned long m0 = majors;
+	minor_();
+	if (stats && majors == m0) minor_secs += now_secs() - t0;
+}
+
+static void minor_(void) {
 	size_t young_used = rt_young_ptr - rt_young_start;
 	if ((size_t)(old_end - old_ptr) < young_used + 64) {
 		major(0);
 		return;
 	}
 	minors++;
+	populate(old_ptr + young_used);
 	char *scan = old_ptr;
+	if (!gc_bfs) {
+		gc_fwd = minor_forward;
+		scan_roots(fwd_root);
+		for (size_t i = 0; i < remembered_len; i++)
+			if (*remembered[i]) *remembered[i] = fwd_root(*remembered[i]);
+		remembered_len = 0;
+		rt_young_ptr = rt_young_start;
+		return;
+	}
 	scan_roots(minor_forward);
 	for (size_t i = 0; i < remembered_len; i++)
 		if (*remembered[i]) *remembered[i] = minor_forward(*remembered[i]);
@@ -126,6 +221,24 @@ static void minor(void) {
 #define REGION (16ull << 30)
 static char *regions[2];
 static int cur_region;
+// pages of each region already faulted in: populated in large batches ahead
+// of use, which costs the kernel much less than one fault per 4 KB page
+static char *populated[2];
+static void populate(char *upto) {
+#ifdef MADV_POPULATE_WRITE
+	char **hi = &populated[cur_region];
+	if (*hi == NULL || *hi < regions[cur_region]) *hi = regions[cur_region];
+	if (upto <= *hi) return;
+	char *end = (char *)(((uintptr_t)upto + (32u << 20)) & ~(uintptr_t)((2u << 20) - 1));
+	if (end > regions[cur_region] + REGION) end = regions[cur_region] + REGION;
+	if (madvise(*hi, end - *hi, MADV_POPULATE_WRITE) == 0) *hi = end;
+	else *hi = end; // not supported: let pages fault in as before
+#else
+	(void)upto;
+#endif
+}
+#else
+static void populate(char *upto) { (void)upto; }
 #endif
 static char *from_start, *from_end;
 
@@ -138,7 +251,14 @@ static void *major_forward(void *p) {
 	return n;
 }
 
+static void major_(size_t need);
 static void major(size_t need) {
+	double t0 = stats ? now_secs() : 0;
+	major_(need);
+	if (stats) major_secs += now_secs() - t0;
+}
+
+static void major_(size_t need) {
 	majors++;
 	from_start = old_start;
 	from_end = old_ptr;
@@ -154,11 +274,17 @@ static void major(size_t need) {
 #else
 	cur_region ^= 1;
 	old_start = old_ptr = regions[cur_region];
+	if (release_pages) populated[cur_region] = NULL;
+	populate(old_start + (from_end - from_start) + (rt_young_ptr - rt_young_start));
 #endif
 	char *scan = old_ptr;
-	scan_roots(major_forward);
+	if (!gc_bfs) {
+		gc_fwd = major_forward;
+		scan_roots(fwd_root);
+	} else
+		scan_roots(major_forward);
 	remembered_len = 0;
-	while (scan < old_ptr) {
+	while (gc_bfs && scan < old_ptr) {
 		void *o = scan + 8;
 		scan += obj_bytes(o);
 		scan_object(o, major_forward);
@@ -168,7 +294,9 @@ static void major(size_t need) {
 	free(from_start);
 	old_end = old_start + cap;
 #else
-	madvise(from_start, from_end - from_start, MADV_DONTNEED);
+	// RT_RELEASE=1 returns the from-space to the kernel; by default it stays
+	// resident, so the next major collection copies into faulted-in pages
+	if (release_pages) madvise(from_start, from_end - from_start, MADV_DONTNEED);
 	size_t live = old_ptr - old_start;
 	size_t limit = 3 * live + 4 * minor_size + need;
 	if (limit < (64u << 20)) limit = 64u << 20;
@@ -215,7 +343,7 @@ void rt_barrier_range(void *obj, void **from, int32_t n) {
 }
 
 static void report(void) {
-	if (stats) fprintf(stderr, "gc: %lu minor, %lu major, old %zu MB used\n", minors, majors, (size_t)(old_ptr - old_start) >> 20);
+	if (stats) fprintf(stderr, "gc: %lu minor (%.2fs), %lu major (%.2fs), old %zu MB used\n", minors, minor_secs, majors, major_secs, (size_t)(old_ptr - old_start) >> 20);
 }
 
 // small Int boxes and the two Bool boxes are static
@@ -234,7 +362,18 @@ void rt_init(int ng, int argc, char **argv) {
 	const char *m = getenv("RT_MINOR_KB");
 	minor_size = (m ? (size_t)atoi(m) : 4096) << 10;
 	stats = getenv("RT_STATS") != NULL;
+	release_pages = getenv("RT_RELEASE") != NULL;
+	gc_bfs = getenv("RT_BFS") != NULL;
+#if defined(MADV_HUGEPAGE) && !defined(__EMSCRIPTEN__)
+	// transparent huge pages for the heap: the old space grows by hundreds of
+	// MB and is copied into fresh pages, so 4 KB page faults add up
+	const char *hp = getenv("RT_HUGE");
+	int huge = hp && atoi(hp); // opt-in: it costs more kernel time than it saves here
+	rt_young_start = rt_young_ptr = (char *)aligned_alloc(2u << 20, (minor_size + (2u << 20) - 1) & ~(size_t)((2u << 20) - 1));
+	if (huge) madvise(rt_young_start, minor_size, MADV_HUGEPAGE);
+#else
 	rt_young_start = rt_young_ptr = (char *)malloc(minor_size);
+#endif
 	rt_young_limit = rt_young_start + minor_size;
 #ifdef __EMSCRIPTEN__
 	old_start = old_ptr = (char *)malloc(32u << 20);
@@ -247,9 +386,13 @@ void rt_init(int ng, int argc, char **argv) {
 			fputs("cannot reserve heap\n", stderr);
 			exit(2);
 		}
+#ifdef MADV_HUGEPAGE
+		if (huge) madvise(regions[i], REGION, MADV_HUGEPAGE);
+#endif
 	}
 	old_start = old_ptr = regions[0];
-	old_end = old_start + (64u << 20);
+	const char *om = getenv("RT_OLD_MB");
+	old_end = old_start + ((size_t)(om ? atoi(om) : 256) << 20); // fewer major collections early on
 	size_t stack_slots = 16u << 20;
 #endif
 	stack_base = rt_sp = (void **)calloc(stack_slots, sizeof(void *));
@@ -347,31 +490,29 @@ int32_t hx_unbox_bool(void *v) {
 
 // ---- arrays
 
-static uint32_t cap_of(void *a) {
-	void *d = ARR_DATA(a);
-	switch (ARR_KIND(a)) {
-	case AK_I32: return 2 * NSLOTS(d);
-	default: return NSLOTS(d);
-	}
-}
-
-static void *data_alloc(int32_t kind, int32_t cap) {
+// data for at least `cap` elements; *real: the capacity in elements
+static void *data_alloc(int32_t kind, int32_t cap, int32_t *real) {
 	if (cap < 4) cap = 4;
 	switch (kind) {
-	case AK_I32: return rt_alloc((cap + 1) / 2, T_ADATA_RAW, K_RAW);
-	case AK_F64: return rt_alloc(cap, T_ADATA_RAW, K_RAW);
-	default: return rt_alloc(cap, T_ADATA_P, K_PARR);
+	case AK_I32:
+		*real = (cap + 1) & ~1;
+		return rt_alloc((cap + 1) / 2, T_ADATA_RAW, K_RAW);
+	case AK_F64: *real = cap; return rt_alloc(cap, T_ADATA_RAW, K_RAW);
+	default: *real = cap; return rt_alloc(cap, T_ADATA_P, K_PARR);
 	}
 }
 
-void *hx_arr_new(int32_t kind, int32_t len) {
-	void *d = data_alloc(kind, len);
+// arrays with elements (empty arrays have no data until the first store: rt.h)
+void *hx_arr_new_n(int32_t kind, int32_t len) {
+	int32_t cap;
+	void *d = data_alloc(kind, len, &cap);
 	RT_ROOT(d);
-	void *a = rt_alloc(2, T_ARRAY, K_OBJ);
+	void *a = rt_alloc(3, T_ARRAY, K_OBJ);
 	RT_RELOAD(d);
 	RT_UNROOT(1);
 	ARR_LEN(a) = len;
 	ARR_KIND(a) = kind;
+	ARR_CAP(a) = cap;
 	FP(a, 1) = d; // a is young
 	if (!in_young(a)) rt_set_ptr(a, &FP(a, 1), d);
 	return a;
@@ -380,12 +521,14 @@ void *hx_arr_new(int32_t kind, int32_t len) {
 // room for `need` elements
 void hx_arr_grow(void **slot, int32_t need) {
 	void *a = *slot;
-	uint32_t cap = cap_of(a);
+	uint32_t cap = ARR_CAP(a);
 	if ((uint32_t)need <= cap) return;
 	uint32_t ncap = cap * 2;
 	if (ncap < (uint32_t)need) ncap = need;
-	void *nd = data_alloc(ARR_KIND(a), ncap);
+	int32_t real;
+	void *nd = data_alloc(ARR_KIND(a), ncap, &real);
 	a = *slot;
+	ARR_CAP(a) = real;
 	void *d = ARR_DATA(a);
 	uint32_t len = ARR_LEN(a);
 	switch (ARR_KIND(a)) {
@@ -407,7 +550,8 @@ void hx_arr_to_ptr(void **slot) {
 	void *a = *slot;
 	if (ARR_KIND(a) == AK_PTR) return;
 	uint32_t len = ARR_LEN(a);
-	void *nd = data_alloc(AK_PTR, len);
+	int32_t real;
+	void *nd = data_alloc(AK_PTR, len, &real);
 	RT_ROOT(nd);
 	for (uint32_t i = 0; i < len; i++) {
 		a = *slot;
@@ -419,6 +563,7 @@ void hx_arr_to_ptr(void **slot) {
 	RT_UNROOT(1);
 	a = *slot;
 	ARR_KIND(a) = AK_PTR;
+	ARR_CAP(a) = real;
 	rt_set_ptr(a, &ARR_DATA(a), nd);
 }
 

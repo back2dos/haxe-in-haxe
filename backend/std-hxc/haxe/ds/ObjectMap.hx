@@ -14,11 +14,11 @@ class ObjectMap<K:{}, T> implements haxe.Constraints.IMap<K, T> {
 	var mask:Int;
 
 	public function new()
-		reset(8);
+		reset(0); // the index is allocated by the first set
 
 	function reset(cap:Int) {
 		index = [];
-		index.resize(cap);
+		if (cap > 0) index.resize(cap);
 		hashes = [];
 		ks = [];
 		vs = [];
@@ -32,6 +32,7 @@ class ObjectMap<K:{}, T> implements haxe.Constraints.IMap<K, T> {
 	}
 
 	inline function find(k:K, h:Int):Int {
+		if (live == 0) return -1;
 		var i = h & mask;
 		var r = -1;
 		while (true) {
@@ -75,6 +76,7 @@ class ObjectMap<K:{}, T> implements haxe.Constraints.IMap<K, T> {
 	}
 
 	public function remove(k:K):Bool {
+		if (live == 0) return false;
 		var h = hashOf(k);
 		var i = h & mask;
 		while (true) {
@@ -147,7 +149,7 @@ class ObjectMap<K:{}, T> implements haxe.Constraints.IMap<K, T> {
 	}
 
 	public function clear():Void
-		reset(8);
+		reset(0);
 
 	public function size():Int
 		return live;

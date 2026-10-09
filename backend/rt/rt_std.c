@@ -22,6 +22,7 @@ void *Array_copy(void *a) {
 	void *r = hx_arr_new(ARR_KIND(a), n);
 	RT_RELOAD(a);
 	RT_UNROOT(1);
+	if (ARR_DATA(r)) // empty arrays have no data
 	memcpy(ARR_DATA(r), ARR_DATA(a), (size_t)elem_size(a) * n);
 	if (ARR_KIND(r) == AK_PTR) rt_barrier_range(ARR_DATA(r), (void **)ARR_DATA(r), n);
 	return r;
@@ -200,6 +201,7 @@ void *Array_slice(void *a, int32_t pos, void *endp) {
 	void *r = hx_arr_new(ARR_KIND(a), len);
 	RT_RELOAD(a);
 	RT_UNROOT(1);
+	if (ARR_DATA(r)) // empty arrays have no data
 	memcpy(ARR_DATA(r), (char *)ARR_DATA(a) + (size_t)elem_size(a) * pos, (size_t)elem_size(a) * len);
 	if (ARR_KIND(r) == AK_PTR) rt_barrier_range(ARR_DATA(r), (void **)ARR_DATA(r), len);
 	return r;
@@ -220,6 +222,7 @@ void *Array_splice(void *a, int32_t pos, int32_t len) {
 	RT_UNROOT(1);
 	int32_t es = elem_size(a);
 	char *d = (char *)ARR_DATA(a);
+	if (ARR_DATA(r)) // empty arrays have no data
 	memcpy(ARR_DATA(r), d + (size_t)es * pos, (size_t)es * len);
 	memmove(d + (size_t)es * pos, d + (size_t)es * (pos + len), (size_t)es * (n - pos - len));
 	memset(d + (size_t)es * (n - len), 0, (size_t)es * len);

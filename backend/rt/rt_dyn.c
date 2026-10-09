@@ -472,33 +472,70 @@ static int call_builtin(void *o, const char *nm, int32_t n, void **slots, void *
 	return 1;
 }
 
+// a method of a built-in value (Array, String) called through Dynamic
+static int call_field_builtin(void *o, const char *nm, void *args, void **res) {
+	int32_t n = args ? ARR_LEN(args) : 0;
+	RT_ROOT(o);
+	RT_ROOT(args);
+	// the arguments boxed into rooted slots
+	void **slots = rt_sp;
+	rt_sp += n;
+	for (int32_t i = 0; i < n; i++)
+		slots[i] = 0;
+	for (int32_t i = 0; i < n; i++) {
+		void *v = hx_aget_p_slow(*args_root, i);
+		slots[i] = v;
+	}
+	int ok = call_builtin(*o_root, nm, n, slots, res);
+	rt_sp = slots;
+	RT_UNROOT(2);
+	return ok;
+}
+
 void *hx_dyn_call_field(void *o, void *name, void *args) {
 	uint32_t t = o ? TINDEX(o) : 0;
 	if ((t == T_ARRAY || t == T_STRING) && STR_LEN(name) < 30) {
 		char nm[128];
 		nm[hx_str_utf8_into(name, nm)] = 0;
-		// the arguments boxed into rooted slots
-		int32_t n = args ? ARR_LEN(args) : 0;
+		void *r;
 		RT_ROOT(o);
 		RT_ROOT(args);
-		void **slots = rt_sp;
-		rt_sp += n;
-		for (int32_t i = 0; i < n; i++)
-			slots[i] = 0;
-		for (int32_t i = 0; i < n; i++) {
-			void *v = hx_aget_p_slow(*args_root, i);
-			slots[i] = v;
-		}
-		void *r;
-		int ok = call_builtin(*o_root, nm, n, slots, &r);
-		rt_sp = slots;
-		RT_UNROOT(2);
-		if (ok) return r;
+		int ok = call_field_builtin(o, nm, args, &r);
 		RT_RELOAD(o);
 		RT_RELOAD(args);
+		RT_UNROOT(2);
+		if (ok) return r;
 	}
 	RT_ROOT(args);
 	void *f = hx_dyn_get(o, name);
+	RT_RELOAD(args);
+	RT_UNROOT(1);
+	return hx_dyn_call(f, args);
+}
+
+// by field id (a literal name: no interning at run time)
+void *hx_dyn_get_fid(void *o, int32_t fid) {
+	return hx_anon_get_slow(o, fid);
+}
+
+void hx_dyn_set_fid(void *o, int32_t fid, void *v) {
+	hx_anon_set_slow(o, fid, v);
+}
+
+void *hx_dyn_call_field_fid(void *o, int32_t fid, void *args) {
+	uint32_t t = o ? TINDEX(o) : 0;
+	if (t == T_ARRAY || t == T_STRING) {
+		void *r;
+		RT_ROOT(o);
+		RT_ROOT(args);
+		int ok = call_field_builtin(o, fid_name(fid), args, &r);
+		RT_RELOAD(o);
+		RT_RELOAD(args);
+		RT_UNROOT(2);
+		if (ok) return r;
+	}
+	RT_ROOT(args);
+	void *f = hx_anon_get_slow(o, fid);
 	RT_RELOAD(args);
 	RT_UNROOT(1);
 	return hx_dyn_call(f, args);

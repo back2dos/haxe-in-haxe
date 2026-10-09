@@ -136,7 +136,7 @@ class EmitC {
 
 	function assignTypes() {
 		var rtNames = ["None", "String", "Int", "Float", "Bool", "Array", "ArrayData", "ArrayData", "haxe.io.Bytes", "haxe.io.BytesBuffer", "StringBuf", "Ref", "Ref", "Ref", "Class", "Overflow", "Native", "ArrayIterator"];
-		var rtSlots:Array<Array<Null<Ty>>> = [[], [], [TI32], [TF64], [TBool], [TI32, TRef(RAny)], [], [], [], [TI32, TRef(RAny)], [TI32, TRef(RAny)], [TRef(RAny)], [TI32], [TF64], [TI32], [], [], [TRef(RAny), TI32]];
+		var rtSlots:Array<Array<Null<Ty>>> = [[], [], [TI32], [TF64], [TBool], [TI32, TRef(RAny), TI32], [], [], [], [TI32, TRef(RAny)], [TI32, TRef(RAny)], [TRef(RAny)], [TI32], [TF64], [TI32], [], [], [TRef(RAny), TI32]];
 		for (i in 0...T_FIRST)
 			addType(entry(i < rtNames.length ? rtNames[i] : "Reserved", "TK_RUNTIME", i < rtSlots.length ? rtSlots[i] : []));
 		for (c in p.classes) {
@@ -236,6 +236,13 @@ class EmitC {
 				case ECallAnon(n, _, o, args):
 					names.set(n, true);
 					ex(o);
+					for (a in args)
+						ex(a);
+				case ECallHost("hx_dyn_get" | "hx_dyn_set" | "hx_dyn_call_field", args, _) if (args[1].match(EStr(_))):
+					switch args[1] {
+						case EStr(n): names.set(n, true);
+						case _:
+					}
 					for (a in args)
 						ex(a);
 				case _:
@@ -778,8 +785,19 @@ class EmitC {
 					+ 'if (c_->slot == 0 && c_->sig == ${s.id}) ${r}((${ft})c_->fn)(${["o_"].concat(xs).join(", ")}); '
 					+ 'else if (c_->slot > 0 && c_->kind == \'p\' && hx_is_sig(FP(o_, c_->slot - 1), ${s.id})) { void *k_ = FP(o_, c_->slot - 1); ${r}((${ft})CLOS_FN(k_))(${["k_"].concat(xs).join(", ")}); } '
 					+ 'else { $slow } ${s.ret == TVoid ? "" : "r_; "}})';
+			// Dynamic access by a literal name: the field id is known here
+			case ECallHost("hx_dyn_get" | "hx_dyn_set" | "hx_dyn_call_field", args, _) if (args[1].match(EStr(_))):
+				var n = switch args[1] {
+					case EStr(n): n;
+					case _: throw "unreachable";
+				};
+				var fn = switch e {
+					case ECallHost(f, _, _): f + "_fid";
+					case _: throw "unreachable";
+				};
+				'$fn(${[for (i in 0...args.length) i == 1 ? Std.string(fid(n)) : expr(args[i])].join(", ")})';
 			case ECallHost(name, args, ret):
-				if (!StringTools.startsWith(name, "hx_") && name != "String_length" && !hostProtos.exists(name)) {
+				if (!StringTools.startsWith(name, "hx_") && name != "String_length" && name != "String_charCodeAt_i" && !hostProtos.exists(name)) {
 					hostProtos.set(name, '${cty(ret)} $name(${args.length == 0 ? "void" : [for (a in args) ctyOf(a)].join(", ")})');
 					hostOrder.push(name);
 				}
@@ -854,17 +872,17 @@ static inline void hx_aset_p(void **slot, int32_t i, void **v) {
 }
 static inline void hx_apush_i(void **slot, int32_t v) {
 	void *a = *slot;
-	if (ARR_KIND(a) == AK_I32 && (uint32_t)ARR_LEN(a) < 2 * NSLOTS(ARR_DATA(a))) ((int32_t *)ARR_DATA(a))[ARR_LEN(a)++] = v;
+	if (ARR_KIND(a) == AK_I32 && (uint32_t)ARR_LEN(a) < (uint32_t)ARR_CAP(a)) ((int32_t *)ARR_DATA(a))[ARR_LEN(a)++] = v;
 	else hx_apush_slow(slot, AK_I32, (uint64_t)(uint32_t)v);
 }
 static inline void hx_apush_f(void **slot, double v) {
 	void *a = *slot;
-	if (ARR_KIND(a) == AK_F64 && (uint32_t)ARR_LEN(a) < NSLOTS(ARR_DATA(a))) ((double *)ARR_DATA(a))[ARR_LEN(a)++] = v;
+	if (ARR_KIND(a) == AK_F64 && (uint32_t)ARR_LEN(a) < (uint32_t)ARR_CAP(a)) ((double *)ARR_DATA(a))[ARR_LEN(a)++] = v;
 	else hx_apush_slow(slot, AK_F64, hx_d2u(v));
 }
 static inline void hx_apush_p(void **slot, void **v) {
 	void *a = *slot;
-	if (ARR_KIND(a) == AK_PTR && (uint32_t)ARR_LEN(a) < NSLOTS(ARR_DATA(a))) { void *d = ARR_DATA(a); rt_set_ptr(d, &FP(d, ARR_LEN(a)), *v); ARR_LEN(a)++; }
+	if (ARR_KIND(a) == AK_PTR && (uint32_t)ARR_LEN(a) < (uint32_t)ARR_CAP(a)) { void *d = ARR_DATA(a); rt_set_ptr(d, &FP(d, ARR_LEN(a)), *v); ARR_LEN(a)++; }
 	else hx_apush_slow(slot, AK_PTR, (uint64_t)(uintptr_t)v);
 }
 static inline int hx_is_sig(void *c, int32_t sig) {

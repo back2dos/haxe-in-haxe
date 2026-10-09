@@ -40,7 +40,7 @@ enum {
 	T_BOXINT, // Dynamic Int: slot 0
 	T_BOXFLOAT,
 	T_BOXBOOL,
-	T_ARRAY, // slot 0: int32 length, int32 element kind; slot 1: data
+	T_ARRAY, // slot 0: int32 length, int32 element kind; slot 1: data (NULL while empty); slot 2: int32 capacity
 	T_ADATA_P, // K_PARR array data
 	T_ADATA_RAW, // K_RAW array data (Int: 4 bytes per element, Float: 8)
 	T_BYTES, // K_RAW: int32 length, then bytes
@@ -212,7 +212,12 @@ void *hx_str_alloc(int32_t len);
 void *hx_str_of_ascii(const char *s);
 void *hx_str_of_utf8(const char *s, int32_t n);
 char *hx_str_to_utf8(void *s); // malloc'ed
-int hx_str_eq(void *a, void *b);
+int hx_str_eq_slow(void *a, void *b); // same length
+static inline int hx_str_eq(void *a, void *b) {
+	if (a == b) return 1;
+	if (!a || !b || STR_LEN(a) != STR_LEN(b)) return 0;
+	return hx_str_eq_slow(a, b);
+}
 int32_t hx_str_cmp(void *a, void *b);
 int32_t hx_str_hash(void *s);
 void *hx_str_concat(void *a, void *b);
@@ -221,7 +226,8 @@ void *hx_str_of_int(int32_t v);
 void *hx_str_of_float(double v);
 void *hx_str_of_bool(int32_t v);
 void *hx_std_string(void *v);
-int32_t String_length(void *s);
+static inline int32_t String_length(void *s) { return STR_LEN(s); }
+static inline int32_t String_charCodeAt_i(void *s, int32_t i) { return (uint32_t)i < (uint32_t)STR_LEN(s) ? STR_CHARS(s)[i] : 0; }
 
 // ---- boxes and Dynamic
 void *hx_box_int(int32_t v);
@@ -234,6 +240,9 @@ int hx_dyn_eq(void *a, void *b);
 int32_t hx_dyn_cmp(void *a, void *b);
 void *hx_dyn_op(int32_t op, void *a, void *b);
 void *hx_dyn_get(void *o, void *name);
+void *hx_dyn_get_fid(void *o, int32_t fid); // by field id: the name was a literal
+void hx_dyn_set_fid(void *o, int32_t fid, void *v);
+void *hx_dyn_call_field_fid(void *o, int32_t fid, void *args);
 void hx_dyn_set(void *o, void *name, void *v);
 void *hx_dyn_call(void *f, void *args);
 void *hx_dyn_call_field(void *o, void *name, void *args);
@@ -266,7 +275,16 @@ uint64_t hx_anon_call_slow(void *o, int32_t fid, int32_t sig, uint64_t *args);
 #define ARR_LEN(a) FI(a, 0)
 #define ARR_KIND(a) (((int32_t *)(a))[1])
 #define ARR_DATA(a) FP(a, 1)
-void *hx_arr_new(int32_t kind, int32_t len);
+#define ARR_CAP(a) FI(a, 2) // elements the data has room for
+void *hx_arr_new_n(int32_t kind, int32_t len);
+static inline void *hx_arr_new(int32_t kind, int32_t len) {
+	if (len == 0) { // `[]`: the data is allocated by the first store
+		void *a = rt_alloc(3, T_ARRAY, K_OBJ);
+		ARR_KIND(a) = kind;
+		return a;
+	}
+	return hx_arr_new_n(kind, len);
+}
 void hx_arr_grow(void **slot, int32_t need);
 int32_t hx_aget_i_slow(void *a, int32_t i);
 double hx_aget_f_slow(void *a, int32_t i);
