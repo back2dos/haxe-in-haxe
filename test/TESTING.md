@@ -131,6 +131,39 @@ Remaining failures (host limits of the HashLink build, not typing):
   `ThreadPool.queueWork` need libuv, which only the hxc host provides
   (`EvalLuv`); the `sys.thread` part of the test passes.
 
+## C build of the port (hxc): green threads — 2026-10-09
+
+The hxc runtime has M:1 cooperative threads (`backend/rt/rt_thread.c`, see
+`backend/README.md`), and the C build of the port uses the hxc `sys.thread`
+package instead of the single-threaded stand-ins of `bench/js-shims`, so
+the compilation server works in it. `test/server.py` takes the port command
+from `HAXE_IN_HAXE_PORT`, as `test/conformance.py` does. The hxc
+`sys.net.Socket.bind` sets SO_REUSEADDR as HashLink's does, so a server
+restarted on its port (`tests/misc/eval/connect_stdin` reruns) can bind.
+
+```sh
+sh backend/build.sh port                     # bin/backend/hih/hih (tcc)
+HAXE_REFERENCE=haxe/haxe HAXE_IN_HAXE_PORT=bin/backend/hih/hih python3 test/conformance.py -j 3
+HAXE_REFERENCE=haxe/haxe HAXE_IN_HAXE_PORT=bin/backend/hih/hih python3 test/server.py -j 2
+HAXE_REFERENCE=haxe/haxe HAXE_IN_HAXE_PORT=bin/backend/hih/hih python3 test/server.py --hxb-cache -j 2
+HAXE_IN_HAXE_PORT=$PWD/bin/backend/hih/hih python3 test/upstream.py threads connect-stdin
+sh backend/build.sh backend/bench/threads Threads && bin/backend/Threads/prog_c
+```
+
+| Check (hxc build of the port, tcc unless noted) | Result |
+| --- | --- |
+| Conformance (also gcc -O2) | 275 PASS + 7 expected failures |
+| Conformance, macro cases / `--hxb-lib` / hxblib cases | 66/66, 275 + 7, 7/7 |
+| Server, `-D disable-hxb-cache`: all scenarios (also gcc -O2) | 587/587 |
+| Server, default HXB cache: all scenarios | 587/587 |
+| Server, macro cases (both cache modes) | 132/132 |
+| `tests/threads` in the port's Eval (`--interp`; tcc, gcc -O2, cosmocc) | 138/139: `TestEval.testNative` needs `eval.luv.Thread`, unsupported as in the HashLink build |
+| `tests/misc/eval/connect_stdin` (`--wait`/`--connect` stdin forwarding) | 10/10 |
+| `backend/bench/threads` (Lock, Mutex, Deque, Semaphore, Condition, Tls, messages, sleep, GC, preemption at allocation, contention, exceptions, sockets, processes; tcc, gcc -O2, cosmocc; nursery 4 KB to 4 MB) | all |
+| Server, cases with `RT_MINOR_KB=64` (a thread switch at every 64 KB of allocation while others are runnable) | 564/564 |
+| Server `misc` and conformance, cosmocc build (`hih.com`) | 10/10, 275 + 7 |
+| Self-compile CPU time, gcc -O2 (`--interp --no-output`, min of 5, two rounds) | 4.05/4.06 s before, 4.03/3.86 s after |
+
 ## Compilation server and haxelib — 2026-10-09
 
 The port runs as a compilation server (`--wait <port>`, `--server-connect`)

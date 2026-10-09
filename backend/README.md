@@ -34,14 +34,76 @@ python3 backend/tools/besttime.py 5 bin/backend/Bench/prog_c
 runtime objects from `bench/build-wasm.sh` and a haxe with the hl2c fix
 (`HAXE_HLC`).
 
-## Limits of the C build of the port
+## Threads: green threads in the C runtime
 
-The hxc runtime is single-threaded (one shadow stack, a stop-the-world
-copying GC without thread support), and the port's C build uses the
-single-threaded `sys.thread` stand-ins of `bench/js-shims`. So the
-compilation server (`--wait`, which runs requests on a worker thread) does not
-work in it yet; `--connect` as a client does. `sys.net.Socket`/`Host` are real
-(`backend/std-hxc/sys/net`, over `rt_net.c`).
+The hxc runtime runs Haxe threads as M:1 cooperative (green) threads
+(`rt/rt_thread.c`): every thread runs on the one OS thread, and only one runs
+at a time, so the GC and the runtime tables need no locks. The C build of the
+port uses them through the hxc `sys.thread` package (`std-hxc/sys/thread`,
+over `hxc.NativeThread`), so the compilation server (`--wait`, its worker
+thread and the per-client stdin forwarders), `--connect` stdin forwarding,
+`--cmd` output piping and Eval threads (`Thread.create`, `Deque`, `Lock`, ...
+in macros and `--interp`) work in it.
+
+- Switching: `ucontext` (`makecontext`/`swapcontext` from the C library, so
+  tcc, gcc and cosmocc builds all work). A thread record holds its C stack
+  (64 MB reserved with `MAP_NORESERVE` and a guard page, committed as
+  touched), its shadow stack (64 MB, likewise; the main thread keeps its
+  128 MB one), its exception handler chain and pending exception. A switch
+  saves the globals `rt_sp`, `rt_stack_base`, `rt_hcur` and `rt_exn` into
+  the record and loads the next thread's, so shadow-stack push/pop,
+  allocation and `RT_TRY` are unchanged: with one thread nothing else runs
+  (no `poll`, no extra stacks; self-compile time is unchanged).
+- GC: the collector scans the running thread's shadow stack as before and,
+  through `rt_threads_scan`, every other thread's saved shadow stack, its
+  pending exception and the entry closure of a thread not started yet.
+  Values passed through `Deque`/`Lock`/`Tls` are ordinary Haxe objects
+  reachable from those roots. Natives that wait root their own references.
+- Scheduling points: `NativeThread.park` (all of `Mutex`, `Lock`,
+  `Semaphore`, `Condition`, `Deque.pop(true)`, `Thread.readMessage(true)`
+  are plain Haxe over park/unpark, with timeouts), `Sys.sleep` (0 yields),
+  and waiting for a descriptor. A thread that computes without blocking also
+  gives way at each minor collection (`rt_alloc_slow`, before allocating,
+  where the caller's live references are rooted), so a spin loop that
+  allocates (e.g. on a `haxe.atomic` value in Eval) does not starve the
+  others; a loop that never allocates does. Since a switch can happen at
+  any allocation, the primitives check their condition again after
+  queueing themselves, and an unpark of a thread that is not parked makes
+  its next park return at once.
+- I/O while other threads exist: a blocking socket (`rt_net.c`) is used
+  without blocking (`MSG_DONTWAIT`, a `poll` before `accept`, a
+  non-blocking `connect`) and the thread waits for the descriptor in the
+  scheduler, honouring `setTimeout` (a timeout fails with EAGAIN, i.e.
+  `haxe.io.Error.Blocked`, as the blocking call does). Sockets made
+  non-blocking with `setBlocking(false)` still throw `Blocked`.
+  `Socket.select` waits in the scheduler, then selects without waiting.
+  Reads and writes of `sys.io.File`/`Process` descriptors and `Sys.getChar`
+  wait until the descriptor is ready (pipes and terminals; regular files are
+  always ready), and `Process.exitCode()` polls the child with growing
+  sleeps. `close` marks the descriptor so a thread waiting on it fails
+  (EBADF) instead of using a reused number. When no thread can run, the
+  scheduler waits in `poll` over the waited descriptors up to the nearest
+  timer deadline; if no thread can ever be woken it prints
+  `fatal: deadlock, every thread is blocked forever` and exits with 1.
+- Still blocking the whole process: `Sys.print`/`println` and writes to
+  stdout/stderr, `Sys.command`, file system calls, host name resolution,
+  TLS (`rt_ssl.c` BIO send/recv) and libuv (`eval.luv`, `Loop.run`).
+  `eval.luv.Thread`/`ThreadPool` stay unsupported (`EvalLuv.hx`).
+- Exit: the process exits when the main thread's `main` returns (as on hl
+  and cpp), whatever other threads do. An uncaught exception ends only its
+  thread (`Thread.onAbort` prints it). `haxe.atomic` needs nothing: the std
+  versions for non-threaded targets are correct with one running thread.
+  Thread ids are small integers (main: 1); `Thread.events` is not available
+  (the custom target does not define `target.threaded`).
+- Under `__EMSCRIPTEN__` (the wasm playground) there are no threads:
+  `Thread.create` throws "threads are not supported", a wait without a
+  timeout that would block forever throws, and a timed wait sleeps and times
+  out.
+
+`bench/threads/Threads.hx` checks the package (`sh backend/build.sh
+backend/bench/threads Threads && bin/backend/Threads/prog_c`).
+`sys.net.Socket`/`Host` are real (`backend/std-hxc/sys/net`, over
+`rt_net.c`).
 
 ## The hxc haxelib package
 

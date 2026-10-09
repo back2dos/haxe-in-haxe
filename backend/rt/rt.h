@@ -111,6 +111,7 @@ extern const int32_t rt_bound_types[];
 // ---- allocation
 extern char *rt_young_start, *rt_young_ptr, *rt_young_limit;
 extern void **rt_sp; // shadow stack top
+extern void **rt_stack_base; // shadow stack bottom (of the running thread)
 extern void **rt_globals;
 void *rt_alloc_slow(uint64_t header, uint32_t bytes);
 void rt_write_barrier(void *obj, void **slot, void *val);
@@ -194,6 +195,19 @@ extern "C" {
 __attribute__((noreturn)) void rt_throw(void *v);
 #endif
 __attribute__((noreturn)) void hx_throw_str(const char *msg);
+
+// ---- green threads (rt_thread.c): M:1, switched only at blocking points.
+// Switching swaps rt_sp, rt_stack_base, rt_hcur and rt_exn; with one thread
+// (rt_nthreads == 1) the blocking natives keep their plain blocking calls.
+extern int32_t rt_nthreads;
+void rt_threads_scan(void *(*fwd)(void *)); // GC: roots of the threads not running
+// wait until fd is readable (write 0) or writable (write 1), letting other
+// threads run: 1 ready, 0 timeout (seconds; < 0: none), -1 the fd was closed meanwhile
+int rt_wait_fd(int fd, int write, double timeout);
+int rt_wait_fds(void *pollfds, int n, double timeout); // struct pollfd[n], revents set
+void rt_sleep(double seconds); // <= 0: yield
+void rt_preempt(void); // lets other runnable threads (and due timers/descriptors) run
+void rt_fd_closed(int fd); // before close(fd): waiters on fd fail instead of polling a reused number
 
 // ---- Haxe Int semantics: wrapping 32-bit arithmetic
 #define IADD(a, b) ((int32_t)((uint32_t)(a) + (uint32_t)(b)))

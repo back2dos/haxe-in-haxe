@@ -120,6 +120,10 @@ class Socket {
 	}
 
 	public function bind(host:Host, port:Int):Void {
+		// as HashLink's socket_bind: a server restarted on its port does not
+		// wait for the previous connections' TIME_WAIT (the compilation server
+		// relies on it, see src/compiler/server/Server.hx initWaitSocket)
+		NativeNet.setReuseAddr(fd, true);
 		check(NativeNet.bind(fd, host.ip, port));
 	}
 

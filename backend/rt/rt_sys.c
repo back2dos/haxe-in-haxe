@@ -87,7 +87,15 @@ void *hxc_NativeSys_environ(void) {
 	return str_array(environ, n);
 }
 
+// Green threads (rt_thread.c): while other threads exist, sleeping and
+// waiting for a pipe, terminal or child process let them run; regular files
+// are always ready. Writes to stdout/stderr (print), Sys.command and the
+// rest of the file system calls still block the process.
 void hxc_NativeSys_sleep(double seconds) {
+	if (rt_nthreads > 1) {
+		rt_sleep(seconds); // 0: give way to the other runnable threads
+		return;
+	}
 	if (seconds <= 0) return;
 	struct timespec t;
 	t.tv_sec = (time_t)seconds;
@@ -176,6 +184,7 @@ int32_t hxc_NativeSys_getChar(int32_t echo) {
 		tcsetattr(0, TCSANOW, &raw);
 	}
 	unsigned char c;
+	if (rt_nthreads > 1) rt_wait_fd(0, 0, -1);
 	ssize_t r = read(0, &c, 1);
 	if (tty) tcsetattr(0, TCSANOW, &old);
 	if (r <= 0) hx_throw_str("Eof");
@@ -195,6 +204,13 @@ int32_t hxc_NativeSys_fileOpen(void *path, int32_t mode) {
 
 int32_t hxc_NativeSys_fileRead(int32_t fd, void *b, int32_t pos, int32_t len) {
 	if (pos < 0 || len < 0 || pos + len > BYTES_LEN(b)) hx_throw_str("OutsideBounds");
+	if (rt_nthreads > 1) {
+		RT_ROOT(b);
+		int w = rt_wait_fd(fd, 0, -1);
+		RT_RELOAD(b);
+		RT_UNROOT(1);
+		if (w < 0) return -1; // closed while waiting
+	}
 	for (;;) {
 		ssize_t r = read(fd, BYTES_DATA(b) + pos, (size_t)len);
 		if (r < 0 && errno == EINTR) continue;
@@ -204,6 +220,13 @@ int32_t hxc_NativeSys_fileRead(int32_t fd, void *b, int32_t pos, int32_t len) {
 
 int32_t hxc_NativeSys_fileWrite(int32_t fd, void *b, int32_t pos, int32_t len) {
 	if (pos < 0 || len < 0 || pos + len > BYTES_LEN(b)) hx_throw_str("OutsideBounds");
+	if (rt_nthreads > 1) {
+		RT_ROOT(b);
+		int w = rt_wait_fd(fd, 1, -1);
+		RT_RELOAD(b);
+		RT_UNROOT(1);
+		if (w < 0) return -1;
+	}
 	for (;;) {
 		ssize_t r = write(fd, BYTES_DATA(b) + pos, (size_t)len);
 		if (r < 0 && errno == EINTR) continue;
@@ -211,7 +234,10 @@ int32_t hxc_NativeSys_fileWrite(int32_t fd, void *b, int32_t pos, int32_t len) {
 	}
 }
 
-void hxc_NativeSys_fileClose(int32_t fd) { close(fd); }
+void hxc_NativeSys_fileClose(int32_t fd) {
+	rt_fd_closed(fd);
+	close(fd);
+}
 
 void hxc_NativeSys_fileSeek(int32_t fd, int32_t p, int32_t whence) {
 	static const int w[] = {SEEK_SET, SEEK_CUR, SEEK_END};
@@ -394,9 +420,16 @@ int32_t hxc_NativeSys_processRun(void *cmd, void *args, void *fds) {
 
 int32_t hxc_NativeSys_processWait(int32_t pid, int32_t block) {
 	int st;
+	double pause = 0.001;
 	for (;;) {
-		pid_t r = waitpid(pid, &st, block ? 0 : WNOHANG);
+		int coop = block && rt_nthreads > 1; // poll the child, sleeping in between
+		pid_t r = waitpid(pid, &st, block && !coop ? 0 : WNOHANG);
 		if (r < 0 && errno == EINTR) continue;
+		if (r == 0 && coop) {
+			rt_sleep(pause);
+			if (pause < 0.02) pause *= 2;
+			continue;
+		}
 		if (r == 0) return -1;
 		if (r < 0) return -1;
 		break;

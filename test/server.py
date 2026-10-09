@@ -30,10 +30,13 @@ restarts the servers for every case, so with `--hxb-cache --rounds 1` each
 request is the first compilation of a server (HXB written to and exported
 from the cache, no restoring).
 
+HAXE_IN_HAXE_PORT replaces the HashLink build with another prebuilt port
+command (as in conformance.py), e.g. bin/backend/hih/hih (backend/build.sh port).
+
 Usage: HAXE_REFERENCE=haxe/haxe python3 test/server.py [-j N] [--rounds N] [--hxb-cache] [--fresh]
            [--scenario cases|edit|misc|server-connect|all] [--cases FILE] [name-substring ...]
 """
-import argparse, concurrent.futures, os, pathlib, re, shutil, socket, subprocess, sys, time, zipfile
+import argparse, concurrent.futures, os, pathlib, re, shlex, shutil, socket, subprocess, sys, time, zipfile
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 STD = ROOT / "haxe/std"
@@ -422,12 +425,17 @@ def main():
     env["HAXE_STD_PATH"] = str(STD)
     env["HAXE_IN_HAXE_STD_PATH"] = str(STD)
     GENERATED.mkdir(parents=True, exist_ok=True)
-    hl = os.environ.get("HAXE_HL") or shutil.which("hl")
-    port_hl = GENERATED / "haxe-in-haxe.hl"
-    code = subprocess.run([reference, "-cp", str(ROOT / "runtime/hl"), "-cp", str(ROOT / "src"), "-main", "haxe.Main", "-hl", str(port_hl)], cwd=ROOT, env=env).returncode
-    if code != 0:
-        raise SystemExit("Building the port for HashLink failed")
-    ref_cmd, port_cmd = [reference], [hl, str(port_hl)]
+    if os.environ.get("HAXE_IN_HAXE_PORT"):
+        # a prebuilt port command (e.g. the hxc build bin/backend/hih/hih), as in conformance.py
+        port_cmd = [str(ROOT / a) if (ROOT / a).is_file() else a for a in shlex.split(os.environ["HAXE_IN_HAXE_PORT"])]
+    else:
+        hl = os.environ.get("HAXE_HL") or shutil.which("hl")
+        port_hl = GENERATED / "haxe-in-haxe.hl"
+        code = subprocess.run([reference, "-cp", str(ROOT / "runtime/hl"), "-cp", str(ROOT / "src"), "-main", "haxe.Main", "-hl", str(port_hl)], cwd=ROOT, env=env).returncode
+        if code != 0:
+            raise SystemExit("Building the port for HashLink failed")
+        port_cmd = [hl, str(port_hl)]
+    ref_cmd = [reference]
     extra = [] if opts.hxb_cache else ["-D", "disable-hxb-cache"]
     results = []
     if opts.scenario in ("cases", "all"):

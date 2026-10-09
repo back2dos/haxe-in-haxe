@@ -28,6 +28,7 @@ int32_t hxc_NativeNet_send(int32_t fd, void *b, int32_t pos, int32_t len) { retu
 int32_t hxc_NativeNet_select(void *r, void *w, void *o, double t) { return no_net(); }
 int32_t hxc_NativeNet_setNoDelay(int32_t fd, int32_t b) { return no_net(); }
 int32_t hxc_NativeNet_setBroadcast(int32_t fd, int32_t b) { return no_net(); }
+int32_t hxc_NativeNet_setReuseAddr(int32_t fd, int32_t b) { return no_net(); }
 int32_t hxc_NativeNet_setTimeout(int32_t fd, double t) { return no_net(); }
 int32_t hxc_NativeNet_shutdown(int32_t fd, int32_t mode) { return no_net(); }
 int32_t hxc_NativeNet_setBlocking(int32_t fd, int32_t b) { return no_net(); }
@@ -39,6 +40,7 @@ void *hxc_NativeNet_reverse(int32_t ip) { no_net(); return NULL; }
 #else
 
 #include <arpa/inet.h>
+#include <poll.h>
 #include <netdb.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
@@ -58,6 +60,34 @@ static int32_t ret(int r) {
 
 int32_t hxc_NativeNet_errno(void) { return last_errno; }
 
+// Green threads (rt_thread.c): while other threads exist, a blocking call on a
+// socket in blocking mode must not block the process. The call is made
+// without blocking (MSG_DONTWAIT, a poll first, or a non-blocking connect)
+// and the thread waits for the descriptor in the scheduler. Sockets the
+// program made non-blocking keep failing with EAGAIN (haxe.io.Error.Blocked).
+static int cooperative(int fd) {
+	if (rt_nthreads <= 1) return 0;
+	int flags = fcntl(fd, F_GETFL);
+	return flags >= 0 && !(flags & O_NONBLOCK);
+}
+
+// SO_RCVTIMEO/SO_SNDTIMEO (setTimeout): seconds, -1 when none
+static double sock_timeout(int fd, int opt) {
+	struct timeval tv;
+	socklen_t n = sizeof tv;
+	if (getsockopt(fd, SOL_SOCKET, opt, &tv, &n) < 0 || (tv.tv_sec == 0 && tv.tv_usec == 0)) return -1;
+	return (double)tv.tv_sec + (double)tv.tv_usec * 1e-6;
+}
+
+// waits for fd as a blocking call would (with the socket's timeout): 0 when the
+// wait failed, errno set as the blocking call would have (EAGAIN: timeout)
+static int wait_sock(int fd, int write) {
+	int r = rt_wait_fd(fd, write, sock_timeout(fd, write ? SO_SNDTIMEO : SO_RCVTIMEO));
+	if (r > 0) return 1;
+	errno = r == 0 ? EAGAIN : EBADF;
+	return 0;
+}
+
 void *hxc_NativeNet_strerror(int32_t err) {
 	const char *s = strerror(err);
 	return hx_str_of_utf8(s, (int32_t)strlen(s));
@@ -74,11 +104,15 @@ int32_t hxc_NativeNet_socket(void) {
 	return ret(socket(PF_INET, SOCK_STREAM, 0));
 }
 
-int32_t hxc_NativeNet_close(int32_t fd) { return ret(close(fd)); }
+int32_t hxc_NativeNet_close(int32_t fd) {
+	rt_fd_closed(fd);
+	return ret(close(fd));
+}
 
 int32_t hxc_NativeNet_accept(int32_t fd) {
 	struct sockaddr_storage a;
 	socklen_t n = sizeof a;
+	if (cooperative(fd) && !wait_sock(fd, 0)) return ret(-1);
 	return ret(accept(fd, (struct sockaddr *)&a, &n));
 }
 
@@ -98,6 +132,24 @@ int32_t hxc_NativeNet_bind(int32_t fd, int32_t ip, int32_t port) {
 
 int32_t hxc_NativeNet_connect(int32_t fd, int32_t ip, int32_t port) {
 	struct sockaddr_in a = inet_addr_of(ip, port);
+	if (cooperative(fd)) { // a non-blocking connect, then wait until it completes
+		int flags = fcntl(fd, F_GETFL);
+		fcntl(fd, F_SETFL, flags | O_NONBLOCK);
+		int r = connect(fd, (struct sockaddr *)&a, sizeof a);
+		if (r < 0 && errno == EINPROGRESS) {
+			if (wait_sock(fd, 1)) {
+				int err = 0;
+				socklen_t n = sizeof err;
+				getsockopt(fd, SOL_SOCKET, SO_ERROR, &err, &n);
+				r = err ? -1 : 0;
+				errno = err;
+			} else r = -1;
+		}
+		int e = errno;
+		fcntl(fd, F_SETFL, flags);
+		errno = e;
+		return ret(r);
+	}
 	return ret(connect(fd, (struct sockaddr *)&a, sizeof a));
 }
 
@@ -126,11 +178,27 @@ void *hxc_NativeNet_sockName(int32_t fd, int32_t peer) {
 // OCaml's Unix.recv/send check the range (Invalid_argument "Unix.recv")
 int32_t hxc_NativeNet_recv(int32_t fd, void *b, int32_t pos, int32_t len) {
 	if (pos < 0 || len < 0 || pos > BYTES_LEN(b) - len) hx_throw_str("Unix.recv");
+	if (cooperative(fd)) {
+		RT_ROOT(b); // the wait lets other threads run (and collect)
+		ssize_t r;
+		while ((r = recv(fd, BYTES_DATA(*b_root) + pos, (size_t)len, MSG_DONTWAIT)) < 0 && (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR))
+			if (errno != EINTR && !wait_sock(fd, 0)) break;
+		RT_UNROOT(1);
+		return ret((int)r);
+	}
 	return ret((int)recv(fd, BYTES_DATA(b) + pos, (size_t)len, 0));
 }
 
 int32_t hxc_NativeNet_send(int32_t fd, void *b, int32_t pos, int32_t len) {
 	if (pos < 0 || len < 0 || pos > BYTES_LEN(b) - len) hx_throw_str("Unix.send");
+	if (cooperative(fd)) { // may send part of the buffer, as a signal-interrupted send does
+		RT_ROOT(b);
+		ssize_t r;
+		while ((r = send(fd, BYTES_DATA(*b_root) + pos, (size_t)len, MSG_DONTWAIT)) < 0 && (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR))
+			if (errno != EINTR && !wait_sock(fd, 1)) break;
+		RT_UNROOT(1);
+		return ret((int)r);
+	}
 	return ret((int)send(fd, BYTES_DATA(b) + pos, (size_t)len, 0));
 }
 
@@ -163,6 +231,30 @@ int32_t hxc_NativeNet_select(void *r, void *w, void *o, double timeout) {
 		return -1;
 	}
 	struct timeval tv, *tvp = NULL;
+	if (rt_nthreads > 1 && timeout != 0) {
+		// other threads run until a descriptor is ready or the timeout passes,
+		// then select looks without waiting
+		int32_t nr = r ? ARR_LEN(r) : 0, nw = w ? ARR_LEN(w) : 0, no = o ? ARR_LEN(o) : 0;
+		struct pollfd *p = (struct pollfd *)malloc((nr + nw + no + 1) * sizeof(struct pollfd));
+		int k = 0;
+		for (int32_t i = 0; i < nr; i++, k++) p[k].fd = hx_aget_i_slow(r, i), p[k].events = POLLIN;
+		for (int32_t i = 0; i < nw; i++, k++) p[k].fd = hx_aget_i_slow(w, i), p[k].events = POLLOUT;
+		for (int32_t i = 0; i < no; i++, k++) p[k].fd = hx_aget_i_slow(o, i), p[k].events = POLLPRI;
+		RT_ROOT(r);
+		RT_ROOT(w);
+		RT_ROOT(o);
+		rt_wait_fds(p, k, timeout);
+		RT_RELOAD(r);
+		RT_RELOAD(w);
+		RT_RELOAD(o);
+		RT_UNROOT(3);
+		free(p);
+		if (to_fdset(r, &rs, &maxfd) || to_fdset(w, &ws, &maxfd) || to_fdset(o, &os, &maxfd)) {
+			last_errno = EBADF;
+			return -1;
+		}
+		timeout = 0;
+	}
 	if (timeout >= 0) {
 		tv.tv_sec = (long)timeout;
 		tv.tv_usec = (long)(1e6 * (timeout - (double)tv.tv_sec));
@@ -190,6 +282,7 @@ static int32_t set_bool(int fd, int level, int opt, int32_t b) {
 
 int32_t hxc_NativeNet_setNoDelay(int32_t fd, int32_t b) { return set_bool(fd, IPPROTO_TCP, TCP_NODELAY, b); }
 int32_t hxc_NativeNet_setBroadcast(int32_t fd, int32_t b) { return set_bool(fd, SOL_SOCKET, SO_BROADCAST, b); }
+int32_t hxc_NativeNet_setReuseAddr(int32_t fd, int32_t b) { return set_bool(fd, SOL_SOCKET, SO_REUSEADDR, b); }
 
 // Unix.setsockopt_float SO_RCVTIMEO, then SO_SNDTIMEO
 int32_t hxc_NativeNet_setTimeout(int32_t fd, double t) {
