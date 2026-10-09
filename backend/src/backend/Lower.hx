@@ -235,6 +235,11 @@ class Lower {
 					var slot = {name: f.cfName, ty: null};
 					ci.fields.push(slot);
 					own.push({slot: slot, f: f});
+				// a dynamic method's current function (null until first use or assignment, see FnLower.dynMethod)
+				case Method(MethDynamic) if (!Lambda.exists(ci.fields, x -> x.name == f.cfName)):
+					var slot = {name: f.cfName, ty: null};
+					ci.fields.push(slot);
+					own.push({slot: slot, f: f});
 				case _:
 			}
 		// field types may refer back to this class

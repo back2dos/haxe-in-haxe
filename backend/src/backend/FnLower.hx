@@ -768,6 +768,7 @@ class FnLower {
 		return switch fa {
 			case FInstance(c, _, cf):
 				switch cf.cfKind {
+					case Method(MethDynamic) if (isDynMethod(c, cf)): coerce(dynMethod(obj, c, cf, e), dynSlotTy(c, cf), tyOf(e));
 					case Method(_): methodClosure(obj, c, cf, e);
 					case Var(_) if (Lower.isCore(c, "Array") && cf.cfName == "length"):
 						EArrLen(value(obj));
@@ -801,6 +802,9 @@ class FnLower {
 						var sig = l.getProgram().sig([for (a in s.args) ty(a.type)], ty(s.ret));
 						var li = l.hostClosure(l.native(Lower.nativeName(c) + "_" + cf.cfName), sig);
 						coerce(temp(TRef(RClos(sig)), ENewClos(li, [])), TRef(RClos(sig)), tyOf(e));
+					case Method(MethDynamic):
+						var g = staticDynMethod(c, cf);
+						coerce(EGlobal(g, l.getProgram().globals[g].ty), l.getProgram().globals[g].ty, tyOf(e));
 					case Method(_):
 						var f = l.staticFunc(c, cf);
 						var li = l.staticClosure(f);
@@ -817,6 +821,8 @@ class FnLower {
 				if (cl == null) {
 					// a closure of a structural field: just the field's value
 					EAnonGet(cf.cfName, tyOf(e), value(obj));
+				} else if (cf.cfKind.match(Method(MethDynamic)) && isDynMethod(cl.cls, cf)) {
+					coerce(dynMethod(obj, cl.cls, cf, e), dynSlotTy(cl.cls, cf), tyOf(e));
 				} else methodClosure(obj, cl.cls, cf, e);
 			case FEnum(en, ef):
 				var ci = l.ctorInfo(ef, en);
@@ -829,8 +835,52 @@ class FnLower {
 		}
 	}
 
+	// dynamic methods (`dynamic function`): the current function lives in a field
+	// slot (Lower.classInfo) or, for statics, a global. The slot starts null and
+	// gets the bound method on first use, so every allocation path (constructors,
+	// Type.createEmptyInstance) is covered. Deviation: assigning null and calling
+	// restores the original method instead of failing.
+	function isDynMethod(c:TClass, cf:TClassField):Bool
+		return !c.hasClassFlag(CExtern) && !c.hasClassFlag(CInterface) && !Lower.isCore(c, "String") && !Lower.isCore(c, "Array");
+
+	function dynSlotTy(c:TClass, cf:TClassField):Ty {
+		var ci = l.classInfo(c);
+		return ci.fields[ci.fieldIndex(cf.cfName)].ty;
+	}
+
+	function dynMethod(obj:TExpr, c:TClass, cf:TClassField, e:TExpr):Ex {
+		var ci = l.classInfo(c);
+		var idx = ci.fieldIndex(cf.cfName);
+		var st = ci.fields[idx].ty;
+		var o = asLocal(value(obj), tyOf(obj));
+		var s = newLocal("dm", st);
+		out.push(SSet(s, EField(ci, idx, ELocal(o))));
+		out.push(SIf(EBin(RefEq, ELocal(s), ENull(st)), block(() -> {
+			out.push(SSet(s, methodClosureOf(ELocal(o), c, cf, st, e)));
+			out.push(SSetField(ci, idx, ELocal(o), ELocal(s)));
+		}), []));
+		return ELocal(s);
+	}
+
+	function staticDynMethod(c:TClass, cf:TClassField):Int {
+		var g = l.staticVar(c, cf);
+		var t = l.getProgram().globals[g].ty;
+		out.push(SIf(EBin(RefEq, EGlobal(g, t), ENull(t)), block(() -> {
+			var f = l.staticFunc(c, cf);
+			var li = l.staticClosure(f);
+			out.push(SSetGlobal(g, coerce(temp(TRef(RClos(li.sig)), ENewClos(li, [])), TRef(RClos(li.sig)), t)));
+		}), []));
+		return g;
+	}
+
 	// obj.method as a value
 	function methodClosure(obj:TExpr, c:TClass, cf:TClassField, e:TExpr):Ex {
+		if (c.hasClassFlag(CExtern) || Lower.isCore(c, "String") || Lower.isCore(c, "Array"))
+			return methodClosureOf(null, c, cf, tyOf(e), e, obj);
+		return methodClosureOf(value(obj), c, cf, tyOf(e), e);
+	}
+
+	function methodClosureOf(o:Null<Ex>, c:TClass, cf:TClassField, rt:Ty, e:TExpr, ?obj:TExpr):Ex {
 		if (c.hasClassFlag(CExtern) || Lower.isCore(c, "String") || Lower.isCore(c, "Array")) {
 			var s = switch TFunctions.follow(cf.cfType) {
 				case TFun(s): s;
@@ -839,9 +889,8 @@ class FnLower {
 			var sig = l.getProgram().sig([for (a in s.args) ty(a.type)], ty(s.ret));
 			var li = l.hostClosure(l.native(Lower.nativeName(c) + "_" + cf.cfName), sig, tyOf(obj));
 			var x = temp(TRef(RClos(sig)), ENewClos(li, [value(obj)]));
-			return coerce(x, TRef(RClos(sig)), tyOf(e));
+			return coerce(x, TRef(RClos(sig)), rt);
 		}
-		var o = value(obj);
 		var li:LambdaInfo;
 		if (l.needsDispatch(c, cf.cfName)) {
 			var d = dispatchSig(c, cf);
@@ -855,7 +904,7 @@ class FnLower {
 			li = l.boundClosure(l.method(impl.cls, impl.field), null);
 		}
 		var x = temp(TRef(RClos(li.sig)), ENewClos(li, [o]));
-		return coerce(x, TRef(RClos(li.sig)), tyOf(e));
+		return coerce(x, TRef(RClos(li.sig)), rt);
 	}
 
 	// the selector signature of a method: its root declaration's
@@ -1160,6 +1209,13 @@ class FnLower {
 				// StringTools.fastCodeAt / unsafeCodeAt: `untyped s.cca(i)` (0 past the end, as on cpp/hl)
 				var xs = operands([obj, cargs[0]]);
 				return coerceRhs(ECallHost("String_charCodeAt_i", [xs[0], coerce(xs[1], tyOf(cargs[0]), TI32)], TI32), TI32, rt);
+			case TField(_, FStatic(c, cf)) if (cf.cfKind.match(Method(MethDynamic)) && !c.hasClassFlag(CExtern)):
+				var g = staticDynMethod(c, cf);
+				var t = l.getProgram().globals[g].ty;
+				var s = switch t { case TRef(RClos(s)): s; case _: fail("dynamic static " + cf.cfName + " is not a closure", e); };
+				var cl = asLocal(EGlobal(g, t), t);
+				var xs = args(cargs, s.args, null);
+				return coerceRhs(ECallClos(s, ELocal(cl), xs), s.ret, rt);
 			case TField(_, FStatic(c, cf)):
 				var fn = l.staticFunc(c, cf);
 				var xs = args(cargs, tys(fn), l.defaults.get(fn));
@@ -1205,6 +1261,12 @@ class FnLower {
 					case Var(_):
 						// a field holding a function
 						return callValue(f, cargs, e);
+					case Method(MethDynamic) if (isDynMethod(c, cf)):
+						var st = dynSlotTy(c, cf);
+						var s = switch st { case TRef(RClos(s)): s; case _: fail("dynamic method " + cf.cfName + " is not a closure", e); };
+						var cl = asLocal(dynMethod(obj, c, cf, e), st);
+						var xs = args(cargs, s.args, null); // closure calls apply defaults in the callee
+						return coerceRhs(ECallClos(s, ELocal(cl), xs), s.ret, rt);
 					case Method(_):
 				}
 				if (l.needsDispatch(c, cf.cfName)) {
