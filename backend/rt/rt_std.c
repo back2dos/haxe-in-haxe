@@ -145,7 +145,10 @@ void Array_insert(void *a, int32_t pos, void *x) {
 	if (pos > n) pos = n;
 	RT_ROOT(a);
 	RT_ROOT(x);
-	hx_apush_slow(a_root, AK_PTR, (uint64_t)(uintptr_t)x_root); // grows (and converts the kind if needed)
+	// grows (and converts the kind if needed); the length may have changed
+	// meanwhile (another green thread at the allocation)
+	n = hx_apush_slow(a_root, AK_PTR, (uint64_t)(uintptr_t)x_root);
+	if (pos > n) pos = n;
 	RT_RELOAD(a);
 	int32_t es = elem_size(a);
 	char *d = (char *)ARR_DATA(a);

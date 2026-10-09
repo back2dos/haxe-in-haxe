@@ -304,7 +304,7 @@ int32_t hx_aget_i_slow(void *a, int32_t i);
 double hx_aget_f_slow(void *a, int32_t i);
 void *hx_aget_p_slow(void *a, int32_t i);
 void hx_aset_slow(void **slot, int32_t i, int32_t kind, uint64_t v);
-void hx_apush_slow(void **slot, int32_t kind, uint64_t v);
+int32_t hx_apush_slow(void **slot, int32_t kind, uint64_t v); // the index of the new element
 
 int32_t hx_arrayiter_hasNext(void *it);
 void *hx_arrayiter_next(void *it);

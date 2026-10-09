@@ -10,7 +10,9 @@ import hxc.NativeThread;
 class Mutex {
 	var owner = 0; // thread id, 0: free
 	var depth = 0;
-	var waiters:Null<Array<Int>>;
+	// allocated with the mutex: a lazy `if (waiters == null) waiters = []` could
+	// lose a waiter (two threads allocating, switched at the allocation)
+	final waiters:Array<Int> = [];
 
 	public function new():Void {}
 
@@ -22,7 +24,6 @@ class Mutex {
 		} else if (owner == cur) {
 			depth++;
 		} else {
-			if (waiters == null) waiters = [];
 			waiters.push(cur);
 			while (owner != cur) {
 				// released while push was growing the array (an allocation may
@@ -58,7 +59,7 @@ class Mutex {
 			depth--;
 			return;
 		}
-		if (waiters != null && waiters.length > 0) {
+		if (waiters.length > 0) {
 			owner = waiters.shift();
 			depth = 1;
 			NativeThread.unpark(owner);
