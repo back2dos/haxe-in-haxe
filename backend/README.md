@@ -11,7 +11,7 @@ port's conformance work. The design, measurements and recommendation are in
 - `src/backend/Lower.hx`: typed AST → IR (`Ir.hx`), for the subset listed
   in the design note.
 - `src/backend/EmitWat.hx`: IR → WasmGC text (prototype; a real emitter
-  would write binary wasm, see the design note §2.6).
+  would write binary wasm, see the design note §2.7).
 - `src/backend/EmitC.hx`: IR → C. Its `Roots` analysis decides which
   references need shadow-stack slots.
 - `rt/`: the C runtime (generational copying GC, exceptions, arrays) and

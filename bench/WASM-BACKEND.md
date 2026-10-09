@@ -39,7 +39,7 @@ best of 3–5 runs.
    route.
 3. Keep the WasmGC emitter (already working for the subset) as an optional
    second wasm path. It should write the binary format directly; the WAT
-   text and Binaryen's assembler are a prototype shortcut (§2.6). It is worth finishing if module size or JS interop
+   text and Binaryen's assembler are a prototype shortcut (§2.7). It is worth finishing if module size or JS interop
    matters, or if a large program shows V8's collector clearly ahead of
    ours.
 
@@ -357,7 +357,36 @@ allocates, so the major heap matters more than in Bench. libhl's patched
 allocator shows how close a non-moving heap can get: HL/C with it is only
 13% slower on `retain` while using 45% less memory.
 
-### 2.6 Output format of the wasm emitters
+### 2.6 Code size: WasmGC vs linear memory
+
+Per function, from the same IR (Bench, function sizes read from the binaries;
+wabt 1.0.34's objdump can't parse GC modules):
+
+| Function | C → wasm -O2 | C → wasm -Oz | WasmGC (Binaryen -O2/-O3) |
+| --- | ---: | ---: | ---: |
+| `simplify` | 1,820 B | 858 B | 530–538 B |
+| `build` (allocation-heavy) | 1,060 B | 530 B | 179–181 B |
+| `eval` | 271 B | 219 B | 183–197 B |
+| `size` | 187 B | 148 B | 138–146 B |
+| total | 3,338 B | 1,755 B | ~1,050 B |
+
+WasmGC code is 1.7× (against `-Oz`) to 3.2× (against `-O2`) smaller. The
+linear route pays for inlined bump-allocation fast paths, write barriers,
+shadow-stack frames and address arithmetic, where WasmGC has `struct.new`,
+`struct.set` and engine-managed roots. `-Oz` keeps most of the speed here
+(0.43s at both `-O2` and `-Oz`, 0.41s at `-Os`). The linear runtime itself
+(GC, malloc, libc pieces, ~27 KB) doesn't matter at the compiler's scale.
+WasmGC instead adds a type section with one type per class, enum
+constructor and closure.
+
+At the compiler's scale, neither route has what made today's module
+51.5 MB: `--spill-pointers` (~21 MB) and Emscripten's `setjmp` lowering
+(the ten functions that are 45% of the code). So the main size win comes
+from leaving HL/C, whichever route is taken. WasmGC would then be a further
+~2× on code, probably less after compression. The real figure for the
+compiler is unknown until the C route can compile it.
+
+### 2.7 Output format of the wasm emitters
 
 - **C/linear-memory route:** the wasm comes from Emscripten compiling the C
   (as C++ for exceptions), so there is no wasm emitter to write. Binaryen
