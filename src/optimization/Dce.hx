@@ -126,7 +126,7 @@ class Dce {
  }
  public static function resolveField(dce:DceData,c:TClass,name:String,kind:ClassFieldRefKind):{cls:TClass,field:TClassField} {
   try return {cls:c,field:findField(c,name,kind)} catch (_:NotFound) {}
-  try {if (hasClassFlag(c,CInterface)) {for (ct in c.clImplements) try return resolveField(dce,ct.cls,name,kind) catch (_:NotFound) {} throw NotFound.raise();} else if (c.clSuper != null) return resolveField(dce,c.clSuper.cls,name,kind); else throw NotFound.raise();} catch (_:NotFound) {}
+  try {if (hasClassFlag(c,CInterface)) {for (ct in c.clImplements) {/* HashLink 2.0 JIT: an early exit through two nested try blocks restores only the innermost trap, leaving a dangling handler */ var r = try resolveField(dce,ct.cls,name,kind) catch (_:NotFound) null; if (r != null) return r;} throw NotFound.raise();} else if (c.clSuper != null) return resolveField(dce,c.clSuper.cls,name,kind); else throw NotFound.raise();} catch (_:NotFound) {}
   switch c.clKind {case KTypeParameter(ttp):for (t in getConstraints(ttp)) switch t {case TInst(c,_):try return resolveField(dce,c,name,kind) catch (_:NotFound) {} case _:} case _:} throw NotFound.raise();
  }
  public static function field(dce:DceData,c:TClass,name:String,kind:ClassFieldRefKind):Void {try {var r = resolveField(dce,c,name,kind); markField(dce,r.cls,r.field,kind);} catch (_:NotFound) {if (dce.debug) Sys.stderr().writeString("[DCE] Field " + name + " not found on " + Globals.sTypePath(c.clPath) + "\n");}}

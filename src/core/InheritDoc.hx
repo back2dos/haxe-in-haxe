@@ -87,7 +87,8 @@ class InheritDoc {
 	public static function getTargetDoc(ctx:context.Typecore.Typer,eTarget:Expr):Documentation {
 		var target = exprToTarget(eTarget);
 		var path = target.path;
-		inline function resolveField(fieldName:String):Documentation {
+		// Not inline: HashLink 2.0 JIT: an early exit through two nested try blocks restores only the innermost trap, leaving a dangling handler (resolveField's try sits inside the try below).
+		function resolveField(fieldName:String):Documentation {
 			var reversed = path.pack.copy();reversed.reverse();
 			var tp = if (reversed.length > 0 && !Ast.isLowerIdent(reversed[0])) {
 				var pack = reversed.slice(1);pack.reverse();Ast.mkTypePath(pack,reversed[0],[],path.name);
@@ -110,8 +111,9 @@ class InheritDoc {
 		try {
 			if (target.sub == null) return resolveTypeT(findType(ctx,LoadNormal,Ast.mkTypePath(path.pack,path.name),eTarget.pos));
 			if (Ast.isLowerIdent(target.sub)) return resolveField(target.sub);
-			try return resolveTypeT(findType(ctx,LoadNormal,Ast.mkTypePath(path.pack,path.name,[],target.sub),eTarget.pos))
-			catch (_:NotFound) return resolveField(target.sub);
+			var doc = try resolveTypeT(findType(ctx,LoadNormal,Ast.mkTypePath(path.pack,path.name,[],target.sub),eTarget.pos))
+			catch (_:NotFound) resolveField(target.sub);
+			return doc;
 		} catch (_:NotFound) return null;
 	}
 }

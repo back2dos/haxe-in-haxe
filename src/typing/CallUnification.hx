@@ -121,8 +121,10 @@ class CallUnification {
    inline function maybeRaiseCapturedError():Void {
     if(mightSkip||optFollowedByRest) for(cm in bodyCapture.value) if(Message.severity(cm)==MessageSeverity.Error) throw new context.Typecore.WithTypeError(makeError(Custom(cm.cmMessage),cm.cmPos));
    }
+   // HashLink 2.0 JIT: an early exit through two nested try blocks restores only the innermost trap, leaving a dangling handler; the result is returned after both.
+   var result:Array<TExpr>=null;
    try {
-    try {var typed=typeAgainst(name,t,e); maybeRaiseCapturedError(); commit(); return [typed].concat(loop(tailEl,tailArgs));}
+    try {var typed=typeAgainst(name,t,e); maybeRaiseCapturedError(); commit(); result=[typed].concat(loop(tailEl,tailArgs));}
     catch(exc:Dynamic) {switch exc {
      case (core.ds.ExceptionTools.withType(_) => Some(ul)):
       if(mightSkip||optFollowedByRest) {drop(); restoreMonos(); var def=skip(name,ul,t); return [def].concat(loop(el,tailArgs));}
@@ -132,6 +134,7 @@ class CallUnification {
      case _:throw exc;
     }}
    } catch(exc:haxe.Exception){commit(); throw exc;}
+   return result;
   }
   var restore=enterCallArgs(ctx,inOverload);
   try {var result=loop(el,args); restore(); return result;} catch(exc:haxe.Exception){restore(); throw exc;}
