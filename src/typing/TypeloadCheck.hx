@@ -33,7 +33,8 @@ import core.Globals.*;
 import core.DisplayTypes;
 import codegen.Overloads;
 import core.Texpr.DeadEnd;
-import context.DeferredServices;
+import core.display.CompletionItem.TKind;
+import core.display.CompletionItem.CompletionModuleKind;
 import typing.Typeload;
 import typing.TypeloadCheck.*;
 
@@ -197,7 +198,7 @@ class TypeloadCheck {
  public static function checkGlobalMetadata(ctx:Typer,meta:Metadata,fAdd:MetadataEntry->Void,mpath:GlobalTypePath,tpath:GlobalTypePath,so:Null<String>):Void {
   var sl1=fullDotPath2(mpath,tpath), fieldMode=so!=null; if(fieldMode) sl1=sl1.concat([so]);
   for(entry in (cast ctx.com.globalMetadata:Array<Dynamic>)) if(((fieldMode&&entry.toFields)||(!fieldMode&&entry.toTypes))&&matchPath(entry.recursive,sl1,entry.path)) fAdd(entry.meta);
-  if(ctx.m.isDisplayFile) delay(ctx.g,PCheckConstraint,function() DeferredServices.display());
+  if(ctx.m.isDisplayFile) delay(ctx.g,PCheckConstraint,function() context.display.DisplayEmitter.checkDisplayMetadata(ctx,meta));
  }
  public static function checkFinalVars(ctx:Typer,e:TExpr):Void {
   var finalVars=new Map<String,Bool>(),ordered=[];
@@ -257,7 +258,7 @@ class Inheritance {
     if(hasClassFlag(c,CAbstract)&&isMethod()) addClassFieldFlag(implicitField(),CfAbstract);
     else if(hasClassFieldFlag(f,CfDefault)) {var cf=implicitField(); cf.cfExpr=null; addClassFieldFlag(cf,CfExtern); addClassFieldFlag(cf,CfOverride);}
     else if(!hasClassFlag(c,CInterface)) {
-     if(Common.isDiagnostics(com)) missing.push({field:f,type:t});
+     if(context.display.Diagnostics.errorInDiagnosticsRun(com,c.clPos)) missing.push({field:f,type:t});
      else {
       var msg:String;
       if(isOverload) {var pc=printContext(); var args=switch follow(f.cfType) {case TFun({args:args,ret:_}):args.map(a -> (a.optional?"?":"")+a.name+" : "+sType(pc,a.type)).join(", "); case _:throw "Invalid overload type";}; msg="No suitable overload for "+f.cfName+"( "+args+" ), as needed by "+Globals.sTypePath(intf.clPath)+" was found";}
@@ -273,7 +274,17 @@ class Inheritance {
  public static function checkInterfaces(ctx:Typer,c:TClass):Void {
   for(pair in c.clImplements) {
    var missing=[]; checkInterface(ctx.com,ctx.g,missing,c,pair.cls,pair.params);
-   if(missing.length>0) DeferredServices.display();
+   if(missing.length>0) {
+    var l=missing;
+    var diag:core.DisplayTypes.MissingFieldsDiagnostics={
+     mfPos:c.clNamePos,
+     mfOn:TClassDecl(c),
+     mfFields:l.map(e -> {field:e.field,type:e.type,completion:core.display.CompletionItem.CompletionType.fromType(context.display.Display.getImportStatus.bind(ctx),null,e.type)}),
+     mfCause:ImplementedInterface(pair.cls,pair.params)
+    };
+    var cm=context.display.DiagnosticsPrinter.makeMissingFieldsMessage(diag);
+    compiler.io.CompilerMessage.addModuleDiagnostic(ctx.com,c.clModule,cm);
+   }
   }
  }
  public static function checkAbstractClass(ctx:Typer,c:TClass,csup:TClass,params:TParams):Void {
@@ -285,7 +296,18 @@ class Inheritance {
   }
   PMap.iter(function(_:String,pair:Dynamic) {for(overloadField in (cast Overloads.collectOverloads(map,csup,pair.field.cfName):Array<Dynamic>)) if(hasClassFieldFlag(overloadField.field,CfAbstract)) checkField(overloadField.field,overloadField.type);},TClassTools.getAllFields(csup,params));
   if(missing.length==0) return;
-  if(Common.isDiagnostics(ctx.com)) {DeferredServices.display();
+  if(context.display.Diagnostics.errorInDiagnosticsRun(ctx.com,c.clPos)) {
+   // List.rev_map over the cons-built list
+   var fields=[];
+   for(e in missing) fields.unshift({field:e.field,type:e.type,completion:core.display.CompletionItem.CompletionType.fromType(context.display.Display.getImportStatus.bind(ctx),null,e.type)});
+   var diag:core.DisplayTypes.MissingFieldsDiagnostics={
+    mfPos:c.clNamePos,
+    mfOn:TClassDecl(c),
+    mfFields:fields,
+    mfCause:AbstractParent(csup,params)
+   };
+   var cm=context.display.DiagnosticsPrinter.makeMissingFieldsMessage(diag);
+   compiler.io.CompilerMessage.addModuleDiagnostic(ctx.com,c.clModule,cm);
   } else {
    var pctx=printContext(),sub=missing.map(function(pair) {var cf=pair.field; var s=switch follow(cf.cfType) {case TFun({args:tl,ret:_}):tl.map(arg -> arg.name+":"+sType(pctx,arg.type)).join(", "); case t:sType(pctx,t);}; return makeError(Custom(complMsg(cf.cfName+"("+s+")")),cf.cfNamePos);});
    var singular=missing.length==1;
@@ -340,10 +362,29 @@ class Inheritance {
   var fl=[];
   for(h in selected) try {
    var t:T;
-   t=Typeload.loadInstance(ctx,h.type,ParamNormal,LoadNormal,true);
+   var isExtends=h.isExtends;
+   t=try Typeload.loadInstance(ctx,h.type,ParamNormal,LoadNormal,true) catch(de:context.display.DisplayException) {
+    switch de.kind {
+     case DisplayFields(r) if(r.fkind.match(CRTypeHint)):
+      // We don't allow `implements` on interfaces. Just raise fields completion with no fields.
+      if(!isExtends&&hasClassFlag(c,CInterface)) context.display.DisplayException.raiseFields([],CRImplements,r.fsubject);
+      var l=r.fitems.filter(item -> switch item.ciKind {
+       case ITType(cm={kind:Interface},_):(!isExtends||hasClassFlag(c,CInterface))&&!compiler.CompilationCache.pathEq(core.display.CompletionItem.CompletionModuleType.getPath(cm),c.clPath);
+       case ITType(cm={kind:Class},_):
+        isExtends&&!hasClassFlag(c,CInterface)&&!compiler.CompilationCache.pathEq(core.display.CompletionItem.CompletionModuleType.getPath(cm),c.clPath)&&
+        (!cm.isFinal||Meta.has(MetaTag.Hack,c.clMeta))&&
+        (!isBasicClassPath({pack:cm.pack,name:cm.name})||(hasClassFlag(c,CExtern)&&cm.isExtern));
+       case _:false;
+      });
+      context.display.DisplayException.raiseFields(l,isExtends?CRExtends:CRImplements,r.fsubject);
+     case _:
+      throw de;
+    }
+   };
    fl.push(checkHerit(t,h.isExtends,h.type.posFull));
   } catch(e:Dynamic) {switch e {
-   case (core.ds.ExceptionTools.typing(_) => Some({errMessage:ModuleNotFound({pack:[],name:name}),errPos:p})) if(ctx.com.display.dmsKind!=DMNone):DeferredServices.display();
+   case (core.ds.ExceptionTools.typing(_) => Some({errMessage:ModuleNotFound({pack:[],name:name}),errPos:p})) if(ctx.com.display.dmsKind!=DMNone):
+    if(context.display.Diagnostics.errorInDiagnosticsRun(ctx.com,p)) context.display.DisplayToplevel.handleUnresolvedIdentifier(ctx,name,p,true);
    case _:throw e;
   }}
   return fl;

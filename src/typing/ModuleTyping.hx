@@ -76,7 +76,7 @@ class ModuleTyping {
    case EAbstract(d):
     checkTypeName(d.name.name,d.meta,p);var priv=d.flags.contains(AbPrivate),path=makePath(d.name.name,priv,d.meta,p),enumPos=MetadataTools.maybeGetPos(MetaTag.Enum,d.meta);
     var a:TAbstract={aPath:path,aPrivate:priv,aModule:m,aPos:p,aNamePos:d.name.pos,aDoc:d.doc,aParams:[],aUsing:[],aRestore:function(){},aMeta:d.meta,aFrom:[],aTo:[],aFromField:[],aToField:[],aOps:[],aUnops:[],aImpl:null,aArray:[],aThis:mkMono(),aRead:null,aWrite:null,aCall:null,aConstructor:null,aExtern:d.flags.contains(AbExtern),aEnum:d.flags.contains(AbEnum)||enumPos!=null};
-    if(enumPos==null){if(a.aEnum)a.aMeta.unshift({meta:MetaTag.Enum,exprs:[],pos:nullPos});}else Common.moduleWarning(com,ctx.m.curmod,WDeprecatedEnumAbstract,Warning.fromMeta(d.meta),"`@:enum abstract` is deprecated in favor of `enum abstract`",enumPos);
+    if(enumPos==null){if(a.aEnum)a.aMeta=[({meta:MetaTag.Enum,exprs:[],pos:nullPos}:MetadataEntry)].concat(a.aMeta);}else Common.moduleWarning(com,ctx.m.curmod,WDeprecatedEnumAbstract,Warning.fromMeta(d.meta),"`@:enum abstract` is deprecated in favor of `enum abstract`",enumPos);
     add(decl,TAbstractDecl(a));
     if(d.data.length==0&&MetadataTools.has(MetaTag.CoreType,a.aMeta))a.aThis=tDynamic;else{
      var params=[for(tp in d.params)TPType(AstTools.makePtpTh(AstTools.mkTypePath([],tp.tpName.name),nullPos))],aType=AstTools.makePtpTh(AstTools.mkTypePath([],d.name.name,params),nullPos),thisType=aType;
@@ -99,7 +99,8 @@ class ModuleTyping {
   case _:throw "Inconsistent module declaration";
  };
  public static function initClass(ctx:TyperContext,c:TClass,d:ClassDefinition,p:Pos):Void {
-  switch c.clKind{case KAbstractImpl(_):case _:TypeloadCheck.checkGlobalMetadata(ctx,c.clMeta,function(meta)c.clMeta.unshift(meta),c.clModule.mPath,c.clPath,null);}
+  if(ctx.m.isDisplayFile&&core.display.DisplayPosition.displayPosition.enclosedIn(d.name.pos))context.display.DisplayEmitter.displayModuleType(ctx,switch c.clKind{case KAbstractImpl(a):TAbstractDecl(a);case _:TClassDecl(c);},d.name.pos);
+  switch c.clKind{case KAbstractImpl(_):case _:TypeloadCheck.checkGlobalMetadata(ctx,c.clMeta,function(meta)c.clMeta=[meta].concat(c.clMeta),c.clModule.mPath,c.clPath,null);}
   for(meta in d.meta)if(Type.enumEq(meta.meta,MetaTag.Final))addClassFlag(c,CFinal);
   var previous=ctx.g.buildCount-1,cctx=TypeloadFields.createClassContext(c,p),local=TypeloadFields.createTyperContextForClass(ctx,cctx,p);
   function build():BuildState {
@@ -119,10 +120,11 @@ class ModuleTyping {
   var ret=c.ecType==null?et:Typeload.loadComplexType(local,true,LoadReturn,c.ecType);
   if(c.ecType!=null)switch follow(ret){case TEnum(te,_) if(te==e):case _:Error.raiseTypingError("Explicit enum type must be of the same enum type",c.ecType.pos);}
   var type=ret;if(c.ecArgs.length>0){isFlat.value=false;var names=new haxe.ds.StringMap<Bool>();var args=[for(arg in c.ecArgs){switch arg.type.type{case CTPath({path:{tpackage:[],tname:"Void"}}):Error.raiseTypingError("Arguments of type Void are not allowed in enum constructors",arg.type.pos);case _:}if(names.exists(arg.name))Error.raiseTypingError("Duplicate argument `"+arg.name+"` in enum constructor "+c.ecName.name,c.ecPos);names.set(arg.name,true);{name:arg.name,optional:arg.optional,type:Typeload.loadTypeHint(local,c.ecPos,LoadNormal,arg.type,arg.optional)};}];type=TFun({args:args,ret:ret});}
-  var f:TEnumField={efName:c.ecName.name,efType:type,efPos:c.ecPos,efNamePos:c.ecName.pos,efDoc:c.ecDoc,efIndex:index,efParams:params,efMeta:c.ecMeta};DeprecationCheck.checkIs(local.com,local.m.curmod,e.eMeta,f.efMeta,f.efName,f.efMeta,f.efNamePos);return f;
+  var f:TEnumField={efName:c.ecName.name,efType:type,efPos:c.ecPos,efNamePos:c.ecName.pos,efDoc:c.ecDoc,efIndex:index,efParams:params,efMeta:c.ecMeta};DeprecationCheck.checkIs(local.com,local.m.curmod,e.eMeta,f.efMeta,f.efName,f.efMeta,f.efNamePos);if(local.m.isDisplayFile&&core.display.DisplayPosition.displayPosition.enclosedIn(f.efNamePos))context.display.DisplayEmitter.displayEnumField(local,e,f,c.ecPos);return f;
  }
  public static function initEnum(ctx:TyperContext,e:TEnum,d:EnumDefinition,p:Pos):Void {
-  var local=TyperManager.cloneForEnum(ctx,e);TypeloadCheck.checkGlobalMetadata(local,e.eMeta,function(meta)e.eMeta.unshift(meta),e.eModule.mPath,e.ePath,null);
+  if(ctx.m.isDisplayFile&&core.display.DisplayPosition.displayPosition.enclosedIn(d.name.pos))context.display.DisplayEmitter.displayModuleType(ctx,TEnumDecl(e),d.name.pos);
+  var local=TyperManager.cloneForEnum(ctx,e);TypeloadCheck.checkGlobalMetadata(local,e.eMeta,function(meta)e.eMeta=[meta].concat(e.eMeta),e.eModule.mPath,e.ePath,null);
   var constructs=d.data;
   function getConstructs():Array<ClassField> return [for(c in constructs){
    var kind:ClassFieldKind=c.ecArgs.length==0&&c.ecParams.length==0?FVar(c.ecType,null):FFun({fParams:c.ecParams,fType:c.ecType,fExpr:null,fArgs:[for(arg in c.ecArgs){name:{name:arg.name,pos:nullPos},optional:arg.optional,meta:[],type:arg.type,expr:null}]});
@@ -145,11 +147,12 @@ class ModuleTyping {
   });
   var et=TEnum(e,extractParamTypes(e.eParams)),flat={value:true},names=[];var index=0;
   for(c in constructs){if(e.eConstrs.exists(c.ecName.name))Error.raiseTypingError("Duplicate constructor "+c.ecName.name,c.ecName.pos);var f=loadEnumField(local,e,et,flat,index++,c);e.eConstrs.set(f.efName,f);names.push(c.ecName.name);if(MetadataTools.has(MetaTag.InheritDoc,f.efMeta))delay(local.g,PConnectField,function()InheritDoc.buildEnumFieldDoc(local,f));}
-  e.eNames=names;Typecore.unify(local,TType(enumModuleType(e),[]),e.eType,p);if(flat.value)e.eMeta.unshift({meta:MetaTag.FlatEnum,exprs:[],pos:nullPos});if(MetadataTools.has(MetaTag.InheritDoc,e.eMeta))delay(local.g,PConnectField,function()InheritDoc.buildEnumDoc(local,e));
+  e.eNames=names;Typecore.unify(local,TType(enumModuleType(e),[]),e.eType,p);if(flat.value)e.eMeta=[({meta:MetaTag.FlatEnum,exprs:[],pos:nullPos}:MetadataEntry)].concat(e.eMeta);if(MetadataTools.has(MetaTag.InheritDoc,e.eMeta))delay(local.g,PConnectField,function()InheritDoc.buildEnumDoc(local,e));
   if(local.com.platform==Jvm&&!hasEnumFlag(e,EnExtern))delay(local.g,PTypeField,function(){e.eMeta=StrictMeta.checkStrictMeta(local,e.eMeta).concat(e.eMeta);var keys=[for(k in e.eConstrs.keys())k];keys.sort(Reflect.compare);for(k in keys){var f=e.eConstrs.get(k);f.efMeta=StrictMeta.checkStrictMeta(local,f.efMeta).concat(f.efMeta);}});
  }
  public static function initTypedef(ctx:TyperContext,t:TDef,d:TypedefDefinition,p:Pos):Void {
-  TypeloadCheck.checkGlobalMetadata(ctx,t.tMeta,function(meta)t.tMeta.unshift(meta),t.tModule.mPath,t.tPath,null);var local=TyperManager.cloneForTypedef(ctx,t),type=Typeload.loadComplexType(local,true,LoadNormal,d.data);
+  if(ctx.m.isDisplayFile&&core.display.DisplayPosition.displayPosition.enclosedIn(d.name.pos))context.display.DisplayEmitter.displayModuleType(ctx,TTypeDecl(t),d.name.pos);
+  TypeloadCheck.checkGlobalMetadata(ctx,t.tMeta,function(meta)t.tMeta=[meta].concat(t.tMeta),t.tModule.mPath,t.tPath,null);var local=TyperManager.cloneForTypedef(ctx,t),type=Typeload.loadComplexType(local,true,LoadNormal,d.data);
   var result=switch d.data.type{case CTExtend(_,_):type;case CTPath({path:{tpackage:["haxe","macro"],tname:"MacroType"}}):if(t.tType==follow(type))Error.raiseTypingError("Recursive typedef is not allowed",p);type;case _:
    if(MetadataTools.has(MetaTag.Eager,d.meta))follow(type);else{function recursive(tt:T):Void {if(tt==t.tType)Error.raiseTypingError("Recursive typedef is not allowed",p);switch tt{case TMono(r):if(r.tmType!=null)recursive(r.tmType);case TLazy(f):recursive(lazyType(f));case TType(td,tl):if(td==t)Error.raiseTypingError("Recursive typedef is not allowed",p);recursive(applyTypedef(td,tl));case _:}}TLazy(makeLazy(local.g,type,function(){recursive(type);return type;},"typedef_rec_check"));}
   };
@@ -157,7 +160,8 @@ class ModuleTyping {
   TypeloadFields.buildModuleDef(local,TTypeDecl(t),t.tMeta,function()return [],function(_){});
  }
  public static function initAbstract(ctx:TyperContext,a:TAbstract,d:AbstractDefinition,p:Pos):Void {
-  TypeloadCheck.checkGlobalMetadata(ctx,a.aMeta,function(meta)a.aMeta.unshift(meta),a.aModule.mPath,a.aPath,null);
+  if(ctx.m.isDisplayFile&&core.display.DisplayPosition.displayPosition.enclosedIn(d.name.pos))context.display.DisplayEmitter.displayModuleType(ctx,TAbstractDecl(a),d.name.pos);
+  TypeloadCheck.checkGlobalMetadata(ctx,a.aMeta,function(meta)a.aMeta=[meta].concat(a.aMeta),a.aModule.mPath,a.aPath,null);
   if(a.aImpl!=null)for(meta in a.aMeta)switch (meta.meta:MetaTag){case Using|Build|CoreApi|Allow|Access|Enum|Dce|Native|HlNative|JsRequire|PythonImport|Expose|Deprecated|PhpGlobal|PublicFields:a.aImpl.clMeta.unshift(meta);case _:}
   var local=TyperManager.cloneForAbstract(ctx,a),isType=false;
   inline function load(hint:TypeHint,from:Bool):T {var type=Typeload.loadComplexType(local,true,LoadNormal,hint);if(!MetadataTools.has(MetaTag.CoreType,a.aMeta)){if(!isType)return Error.raiseTypingError("Missing underlying type declaration or @:coreType declaration",p);return TLazy(makeLazy(local.g,type,function(){try{if(from)core.TUnification.unify(type,a.aThis);else core.TUnification.unify(a.aThis,type);}catch(_:Unify_error){Error.raiseTypingError("You can only declare from/to with compatible types",hint.pos);}return type;},"constraint"));}if(MetadataTools.has(MetaTag.Callable,a.aMeta))Error.raiseTypingError("@:coreType abstracts cannot be @:callable",p);return type;}
@@ -169,11 +173,15 @@ class ModuleTyping {
   a.aFrom.reverse();a.aTo.reverse();if(!isType){if(MetadataTools.has(MetaTag.CoreType,a.aMeta))a.aThis=TAbstract(a,extractParamTypes(a.aParams));else Error.raiseTypingError("Abstract is missing underlying type declaration",a.aPos);}if(MetadataTools.has(MetaTag.InheritDoc,a.aMeta))delay(local.g,PConnectField,function()InheritDoc.buildAbstractDoc(local,a));
  }
  public static function initModuleType(ctx:TyperContext,entry:TypedDeclaration):Void {var p=entry.declaration.pos;switch [entry.declaration.definition,entry.type]{case [EClass(d),TClassDecl(c)]:initClass(ctx,c,d,p);case [EEnum(d),TEnumDecl(e)]:initEnum(ctx,e,d,p);case [ETypedef(d),TTypeDecl(t)]:initTypedef(ctx,t,d,p);case [EAbstract(d),TAbstractDecl(a)]:initAbstract(ctx,a,d,p);case _:throw "Inconsistent module declaration";}}
- public static function initImportsOrUsing(ctx:TyperContext,decl:TypeDecl):Void switch decl.definition {
-  case EImport(i):try{context.display.ImportHandling.initImport(ctx,i.path,i.mode,decl.pos);context.display.ImportHandling.commitImport(ctx,i.path,i.mode,decl.pos);}catch(e:TypingError){Common.displayErrorExt(ctx.com,e.error);}
-  case EUsing(path):context.display.ImportHandling.initUsing(ctx,path,decl.pos);
+ public static function initImportsOrUsing(ctx:TyperContext,decl:TypeDecl):Void {
+  var com=ctx.com;
+  function checkPathDisplay(path:Array<PlacedName>,p:Pos):Void if(core.display.DisplayPosition.displayPosition.isInFile(com.partScope.fileKeys.get(p.pfile)))context.display.DisplayPath.handlePathDisplay(ctx,path,p);
+  switch decl.definition {
+  case EImport(i):try{checkPathDisplay(i.path,decl.pos);context.display.ImportHandling.initImport(ctx,i.path,i.mode,decl.pos);context.display.ImportHandling.commitImport(ctx,i.path,i.mode,decl.pos);}catch(e:TypingError){Common.displayErrorExt(ctx.com,e.error);}
+  case EUsing(path):checkPathDisplay(path,decl.pos);context.display.ImportHandling.initUsing(ctx,path,decl.pos);
   case _:throw "Expected import or using";
- };
+  }
+ }
  public static function typeTypesIntoModule(com:CommonContext,g:TyperGlobals,m:ModuleDef,decls:Array<TypeDecl>,p:Pos):TyperContext {
   var ctx=TyperManager.cloneForModule(g.rootTyper,TypeloadModule.makeCurmod(com,g,m)),created=createModuleTypes(ctx,m,decls,p);initTypeParams(ctx,created.declarations);for(decl in created.imports)initImportsOrUsing(ctx,decl);for(decl in created.declarations)initModuleType(ctx,decl);delay(ctx.g,PConnectField,function()ctx.m.importResolution.resolveLazies());return ctx;
  }

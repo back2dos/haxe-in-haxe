@@ -108,7 +108,7 @@ class CallUnification {
    }
    if(args.length==0) {
     if(skipped.length==0) {
-     if(ctx.m.isDisplayFile&&!context.DeferredServices.display()) {typeExpr(ctx,el[0],WithTypeTools.value); loop(el.slice(1),[]);}
+     if(ctx.m.isDisplayFile&&!context.display.Diagnostics.errorInDiagnosticsRun(ctx.com,el[0].pos)) {typeExpr(ctx,el[0],WithTypeTools.value); loop(el.slice(1),[]);}
      return callError(TooManyArguments,el[0].pos);
     }
     var first=skipped[skipped.length-1]; return argError(first.error,first.name,true);
@@ -169,16 +169,35 @@ class CallUnification {
   }
   var forced=isForcedInline(co,fa.faField),kind=hasClassFieldFlag(fa.faField,CfOverload)?OverloadProper:fa.faField.cfOverloads.length!=0?OverloadMeta:OverloadNone;
   inline function extractDisplay():Dynamic {var f=ctx.g.delayedDisplay; ctx.g.delayedDisplay=null; return f;}
-  inline function raiseAugmentedDisplay(cf:Dynamic,de:Dynamic):Dynamic {
-   // Original display augmentation is retained in deferred/display/typing/CallUnificationDisplay.hx.
-   return context.DeferredServices.display();
+  function raiseAugmentedDisplay<R>(cf:TClassField,de:core.DisplayTypes.DisplayExceptionKind):R {
+   inline function defaultRaise():R throw new context.display.DisplayException(de);
+   var text=genDocTextOpt(cf.cfDoc);
+   if(text==null) return defaultRaise();
+   var javadoc=new core.display.Javadoc(text);
+   switch de {
+    case DisplayHover(hover):
+     switch hover.hexpected {
+      case WithType(t,si) if(si!=null):
+       var si:core.WithType.WithTypeSource=switch si {
+        case FunctionArgument(info) if(info.siDoc==null):FunctionArgument(new core.WithType.WithTypeSourceInformation(info.siName,javadoc.getParamInfo(info.siName)));
+        case StructureField(info) if(info.siDoc==null):StructureField(new core.WithType.WithTypeSourceInformation(info.siName,javadoc.getParamInfo(info.siName)));
+        case _:si;
+       };
+       var expected=WithType(t,si);
+       return context.display.DisplayException.raiseHover(hover.hitem,expected,hover.hpos);
+      case _:
+       return defaultRaise();
+     }
+    case _:
+     return defaultRaise();
+   }
   }
   inline function commitDisplay(fcc:FieldCallCandidateData<CallAttemptData>):FieldCallCandidateData<Void->TExpr> {if(fcc.fcData.display!=null) raiseAugmentedDisplay(fcc.fcField,fcc.fcData.display); return makeFieldCallCandidate(fcc.fcArgs,fcc.fcRet,fcc.fcMonos,fcc.fcType,fcc.fcField,fcc.fcData.call);}
   inline function attempt(cf:TClassField,inOverload:Bool):FieldCallCandidateData<CallAttemptData> {
    var monos=Monomorph.spawnConstrainedMonos(map,cf.cfParams),t=map(applyParams(cf.cfParams,monos,cf.cfType));
    inline function make(args:Array<CallParameter>,ret:T,coro:Bool):FieldCallCandidateData<CallAttemptData> {
     var split=unifyTypedArgs(tmap,args,elTyped,p),typed:Array<TExpr>;
-    typed=unifyCallArgs(ctx,el,split.remaining,ret,p,isInline,forced,inOverload,fa.faFieldPos);
+    typed=try unifyCallArgs(ctx,el,split.remaining,ret,p,isInline,forced,inOverload,fa.faFieldPos) catch(de:context.display.DisplayException) raiseAugmentedDisplay(cf,de.kind);
     typed=elTyped.concat(typed); args=split.typed.concat(split.remaining);
     var tf=coro?ctx.t.tcoro.tcoro.force()({args:args,ret:ret}):TFun({args:args,ret:ret});
     function makeCall():TExpr {var ef=mk(TField(fa.faOn,FieldAccess.applyFa(cf,fa.faHost)),t,fa.faPos); return makeCallRef(ctx,ef,typed,ret,p,isInline);}

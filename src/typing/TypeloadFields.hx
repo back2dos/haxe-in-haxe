@@ -34,7 +34,6 @@ import context.CoreApiConfig;
 import context.AbstractCast;
 import context.display.DeprecationCheck;
 import context.display.ImportHandling;
-import context.DeferredServices;
 import coro.CoroConfig;
 import typing.TypeloadCheck;
 import core.TOther.TExprToExpr;
@@ -284,7 +283,7 @@ class TypeloadFields {
  }
  public static function typeVarField(ctx:Typer,t:T,e:Expr,stat:Bool,doDisplay:Bool,p:Pos):TExpr {
   var save=TypeloadFunction.saveFieldState(ctx);
-  try {if(doDisplay && ctx.m.isDisplayFile) DeferredServices.display();var result=AbstractCast.castOrUnify(ctx,t,typeExpr(ctx,e,WithTypeTools.withType(t)),p);save();return result;} catch(err:haxe.Exception){save();throw err;}
+  try {var e=doDisplay?context.display.Display.preprocessExpr(ctx.com,e):e;var result=AbstractCast.castOrUnify(ctx,t,typeExpr(ctx,e,WithTypeTools.withType(t)),p);save();return result;} catch(err:haxe.Exception){save();throw err;}
  }
  public static function buildFields(ctx:Typer,cctx:ClassInitCtx,c:TClass,fields:Array<ClassField>):Array<ClassField> {
   var pending:Array<Void->Void>=[];c.clBuild=function() return BuildMacro(pending);
@@ -295,7 +294,23 @@ class TypeloadFields {
   c.clBuild=function() return Building([c]);for(f in pending) f();return fields;
  }
  public static function checkFieldDisplay(ctx:Typer,fctx:FieldInitCtx,c:TClass,cf:TClassField):Void {
-  if(fctx.isDisplayField) DeferredServices.display();
+  if(fctx.isDisplayField) {
+   var r:{scope:ClassFieldScope,cf:TClassField}=switch c.clKind {
+    case KAbstractImpl(_):
+     if(hasClassFieldFlag(cf,CfImpl)) {
+      if(fctx.isAbstractConstructor) {var cf2=cf.clone();cf2.cfName="new";{scope:CFSConstructor,cf:cf2};} else {scope:CFSMember,cf:cf};
+     } else {scope:CFSStatic,cf:cf};
+    case _:
+     {scope:fctx.isStatic?CFSStatic:(fctx.fieldKind==CfrConstructor?CFSConstructor:CFSMember),cf:cf};
+   };
+   var scope=r.scope,cf=r.cf;
+   var origin:core.display.CompletionItem.ClassFieldOrigin=switch c.clKind {
+    case KAbstractImpl(a):Self(TAbstractDecl(a));
+    case _:Self(TClassDecl(c));
+   };
+   context.display.DisplayEmitter.maybeDisplayField(ctx,origin,scope,cf,cf.cfNamePos);
+   context.display.DisplayEmitter.checkFieldModifiers(ctx,c,cf,fctx.overridePos,fctx.displayModifier);
+  }
  }
  public static function loadVariableTypeHint(ctx:Typer,fctx:FieldInitCtx,eo:Dynamic,p:Pos,t:Dynamic):T {
   if(t==null && eo==null) {missingExpression(ctx.com,fctx,"Variable requires type-hint or initialization",p);return tDynamic;}
@@ -556,7 +571,19 @@ class TypeloadFields {
    } catch(_:NotFound) {
     inline function generate():Dynamic {var cf=mkField(m,t,p,Globals.nullPos);cf.cfMeta=[meta(CompilerGenerated),meta(NoCompletion)];cf.cfKind=Method(MethNormal);return cf;}
     if(hasClassFlag(c,CInterface)) {var cf=generate();c.clFields=PMap.add(cf.cfName,cf,c.clFields);c.clOrderedFields.unshift(cf);}
-    else if(Common.isDiagnostics(ctx.com)) { DeferredServices.display(); } else if(!hasClassFlag(c,CExtern)) {
+    else if(context.display.Diagnostics.errorInDiagnosticsRun(ctx.com,f.cffPos)) {
+     var cfAccessor=generate();
+     removeClassFieldFlag(cfAccessor,CfPublic);
+     if(fctx.isStatic) addClassFieldFlag(cfAccessor,CfStatic);
+     var diag:core.DisplayTypes.MissingFieldsDiagnostics={
+      mfPos:f.cffName.pos,
+      mfOn:TClassDecl(c),
+      mfFields:[{field:cfAccessor,type:t,completion:core.display.CompletionItem.CompletionType.fromType(context.display.Display.getImportStatus.bind(ctx),null,t)}],
+      mfCause:PropertyAccessor(cf,isGetter)
+     };
+     var cm=context.display.DiagnosticsPrinter.makeMissingFieldsMessage(diag);
+     compiler.io.CompilerMessage.addModuleDiagnostic(ctx.com,c.clModule,cm);
+    } else if(!hasClassFlag(c,CExtern)) {
      try {
       var f2=fctx.isStatic?classField(c,extractParamTypes(c.clParams),m).field:PMap.find(m,c.clStatics);
       displayError(ctx.com,"Method "+m+" is no valid accessor for "+name+" because it is "+(fctx.isStatic?"not ":"")+"static",f2.cfPos);
@@ -564,8 +591,12 @@ class TypeloadFields {
     }
    }
   }
-  inline function displayAccessor(m:String,p:Pos):Void {
-   DeferredServices.display();
+  function displayAccessor(m:String,p:Pos):Void {
+   try {
+    var l=findAccessor(m);
+    var cf:TClassField=if(l.length==1) l[0].field else throw NotFound.raise();
+    context.display.DisplayEmitter.displayField(ctx,Self(TClassDecl(c)),fctx.isStatic?CFSStatic:CFSMember,cf,p);
+   } catch(_:NotFound) {}
   }
   inline function resolvedAccessor(part:Dynamic,getter:Bool,privateCall:Bool):Dynamic {
    var m=(getter?"get_":"set_")+name;
@@ -732,7 +763,16 @@ class TypeloadFields {
   if(hasStructInit) {if(hasClassFlag(c,CInterface)) displayError(com,"@:structInit is not allowed on interfaces",structInitPos);else ensureStructInitConstructor(ctxC,c,fields,p);}
   if(cctx.uninitializedFinal.length>0&&c.clConstructor==null&&!hasClassFlag(c,CAbstract)) {
    var cf=cctx.uninitializedFinal[0];
-   if(Common.isDiagnostics(com)) { DeferredServices.display(); } else displayErrorExt(com,makeError(Custom("This class has uninitialized final vars, which requires a constructor"),p,[makeError(Custom("Example of an uninitialized final var"),cf.cfNamePos)]));
+   if(context.display.Diagnostics.errorInDiagnosticsRun(com,cf.cfNamePos)) {
+    var diag:core.DisplayTypes.MissingFieldsDiagnostics={
+     mfPos:c.clNamePos,
+     mfOn:TClassDecl(c),
+     mfFields:[],
+     mfCause:FinalFields(cctx.uninitializedFinal.copy())
+    };
+    var cm=context.display.DiagnosticsPrinter.makeMissingFieldsMessage(diag);
+    compiler.io.CompilerMessage.addModuleDiagnostic(com,c.clModule,cm);
+   } else displayErrorExt(com,makeError(Custom("This class has uninitialized final vars, which requires a constructor"),p,[makeError(Custom("Example of an uninitialized final var"),cf.cfNamePos)]));
   }
   if(!hasStructInit&&!com.config.pfOverload) delayLate(ctxC.g,PConnectField,() -> TypeloadFunction.addConstructor(ctxC,c,cctx.forceConstructor,p));
   finalizeClass(cctx);
@@ -751,7 +791,7 @@ class TypeBinding {
   inline function forceMacro(display:Bool):Void delay(ctx.g,PTypeField,function() {
    try {ctx.g.doMacro(ctx,MDisplay,c.clPath,cf.cfName,[],p);}
    catch (_:Exit) {}
-   catch (error:core.Error.Error) {if (!display) throw error;}
+   catch (error:core.Error.TypingError) {if (!display) throw error;}
   });
   function handleDisplayField():Void {
    if (fctx.isMacro && !ctx.com.isMacroContext) forceMacro(true);
@@ -847,7 +887,7 @@ class TypeBinding {
      if (e != null) warning(ctx,WDeprecated,"@:java.native function definitions shouldn't include an expression. This behaviour is deprecated.",cf.cfPos);
      cf.cfExpr = null; cf.cfType = t;
     case _:
-     if (MetadataTools.has(DisplayOverride,cf.cfMeta)) DeferredServices.display();
+     if (MetadataTools.has(DisplayOverride,cf.cfMeta)) context.display.DisplayEmitter.checkFieldModifiers(ctx,c,cf,fctx.overridePos,fctx.displayModifier);
      var checkResult = fctx.fieldKind == CfrMember ? TypeloadCheck.checkOverriding(ctx,c,cf) : NothingToDo;
      inline function check():Void switch checkResult {case NothingToDo:case NormalOverride(rctx):TypeloadCheck.checkOverrideField(ctx,cf.cfNamePos,rctx); case OverloadOverride(f):f();}
      var body = TypeloadFunction.typeFunction(ctx,args,ret,e,fctx.isDisplayField,p);

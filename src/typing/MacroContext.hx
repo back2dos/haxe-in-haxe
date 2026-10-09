@@ -56,9 +56,6 @@ import macros.eval.EvalContext.RunTimeException;
 	  not available: the port's HxbWriterConfig has no DataReaderApi/DataWriterApi functors.
 	  `get/set_hxb_writer_config` therefore raise a macro exception when they would need
 	  them (the `None`/`null` branches are kept).
-	- The compilation cache (`com.cs`) is absent in the port's batch mode: cache tainting
-	  (`cs#taint_module`) and `CommonCache.lock_signature` only apply to a server cache and
-	  are rejected when one is present.
 	- `TypeloadCacheHook.create_fake_module` is not ported as its own module; it is
 	  translated below as `createFakeModule` (with its global `fake_modules` table).
 **/
@@ -339,11 +336,8 @@ class MacroContext {
 		};
 	}
 
-	// CompilationCache#taint_module: there is no compilation cache in batch mode.
-	static function taintModule(com:CommonContext, mpath:GlobalTypePath, reason:String):Void {
-		if (com.cs != null)
-			throw new core.ds.Failure("Compilation-server cache tainting (" + reason + ") is not supported by haxe-in-haxe");
-	}
+	static inline function taintModule(com:CommonContext, mpath:GlobalTypePath, reason:core.TType.ModuleTaintingReason):Void
+		(com.cs : compiler.CompilationCache.Cache).taintModule(mpath, reason);
 
 	// TypeloadCacheHook.fake_modules / create_fake_module
 	static final fakeModules:Map<String, ModuleDef> = new Map();
@@ -571,7 +565,7 @@ class MacroContext {
 					var m = ctx.com.moduleLut.find(mpath);
 					previouslyDefinedError(m, mpath, p);
 				} catch (_:NotFound) {
-					taintModule(ctx.com, mpath, "DefineType");
+					taintModule(ctx.com, mpath, DefineType);
 					var mdep = mdep == null ? ctx.m.curmod : ModuleTyping.loadModule(ctx, AstTools.parsePath(mdep), pos, MDepFromMacro);
 					var mnew = ModuleTyping.typeModule(ctx.com, ctx.g, mpath,
 						ctx.com.partScope.fileKeys.generateVirtual(mpath, ctx.com.partScope.compilationStep), [{definition: tdef, pos: pos}], pos,
@@ -611,7 +605,7 @@ class MacroContext {
 				} else
 					ModuleTyping.typeTypesIntoModule(ctx.com, ctx.g, ctx.m.curmod, types, pos);
 			} catch (_:NotFound) {
-				taintModule(ctx.com, mpath, "DefineModule");
+				taintModule(ctx.com, mpath, DefineModule);
 				var mnew = ModuleTyping.typeModule(ctx.com, ctx.g, mpath, ctx.com.partScope.fileKeys.generateVirtual(mpath, ctx.com.partScope.compilationStep),
 					types, pos);
 				mnew.mExtra.mKind = MFake;
@@ -880,8 +874,7 @@ class MacroContext {
 		Common.initPlatform(com2);
 		var mctx:TyperContext = Typecore.createContextRef(com2, null);
 		mctx.m.isDisplayFile = false;
-		// CommonCache.lock_signature com2 "get_macro_context": the compilation cache is
-		// absent in batch mode (see Compiler.doType, which omits its lock_signature too).
+		context.CommonCache.lockSignature(com2, "get_macro_context");
 		return mctx;
 	}
 

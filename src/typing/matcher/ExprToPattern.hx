@@ -32,9 +32,8 @@ typedef PatternContext={var ctx:Typer;var orLocals:Null<haxe.ds.StringMap<{v:TVa
 class BadPattern extends haxe.Exception {public function new(s:String)super(s);}
 class ExprToPattern {
  static function fieldAssoc(name:String,fields:Array<ObjectField>):Expr {for(field in fields)if(field.key.name==name)return field.expr;throw NotFound.raise();}
- // Display requests are excluded from the source-only HXB milestone.
- static function displayDeferred(ctx:Typer,e:Expr,kind:DisplayKind,mode:AccessMode,withType:WithTypeValue):Void throw new haxe.Exception("Pattern display services are not supported by the source-only HXB compiler");
- static function displayExprDeferred(ctx:Typer,e:Expr,typed:TExpr,kind:DisplayKind,mode:AccessMode,withType:WithTypeValue,p:Pos):Void throw new haxe.Exception("Pattern display services are not supported by the source-only HXB compiler");
+ static function displayDeferred(ctx:Typer,e:Expr,kind:DisplayKind,mode:AccessMode,withType:WithTypeValue):Void typing.TyperDisplay.handleEdisplay(ctx,e,kind,mode,withType);
+ static function displayExprDeferred(ctx:Typer,e:Expr,typed:TExpr,kind:DisplayKind,mode:AccessMode,withType:WithTypeValue,p:Pos):Void typing.TyperDisplay.displayExpr(ctx,e,typed,kind,mode,withType,p);
  public static var fakeTupleType:T=TInst(mkClass(nullModule,{pack:[],name:"-Tuple"},nullPos,nullPos),[]);
  public static function tupleType(tl:Array<T>):T return tfun(tl,fakeTupleType);
  public static function typeFieldAccess(ctx:Typer,e:TExpr,name:String,resume:Bool=false):TExpr return Calls.accGet(ctx,Fields.typeField(Fields.TypeFieldConfig.create(resume),ctx,e,name,e.epos,MGet,WithTypeTools.value));

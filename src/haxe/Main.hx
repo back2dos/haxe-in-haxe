@@ -63,13 +63,12 @@ class Main {
 			pre: core.Globals.versionPre,
 			extra: null
 		};
-		// Compilation-cache services are deferred; source-only batch loading never
-		// dereferences cs. All active shared context fields follow upstream defaults.
+		// Server.setup_server_context false false (serverCompilationContext.ml:create)
 		var sctx = {
 			isServer: false,
 			version: version,
 			verbose: false,
-			cs: null,
+			cs: new compiler.CompilationCache.Cache(),
 			classPaths: new core.ds.Hashtbl<String, Array<String>>(0),
 			changedDirectories: new core.ds.Hashtbl<String, Array<Dynamic>>(0),
 			compilationStep: 0,
@@ -80,13 +79,15 @@ class Main {
 			persistentCwd: null,
 			pool: pool
 		};
+		// ServerCache.enable_cache_mode: the parse cache (the module cache hook is part of the server milestone)
+		compiler.server.ServerCache.enableCacheMode(sctx);
 		var io = CompilerIo.createStdioIo();
-		lastRequest = {
-			stats: Stats.create(),
-			timerCtx: Timer.makeContext(Timer.make(["other"])),
-			cancellationRequested: false,
-			io: io,
-			resultHandler: CompilerOutput.createCliResultHandler(io)
+		lastRequest = try createRequestScope(false, io, requestArgs.displayArg) catch (e:ExitException) {
+			// handle_jsonrpc_error raised Exit after sending the error: an uncaught OCaml exception
+			ManagedPool.release(pool);
+			io.flush();
+			Sys.stderr().writeString("Fatal error: exception Stdlib.Exit\n");
+			return 2;
 		};
 		var code = try HighLevel.entry(sctx, lastRequest, requestArgs) catch (e:core.ds.ArgumentError) {
 			ManagedPool.release(pool);
@@ -104,6 +105,29 @@ class Main {
 
 	public static var lastRequest(default, null):Null<RequestScope>;
 
+	/** server.ml: create_request_scope **/
+	public static function createRequestScope(isServer:Bool, io:compiler.io.CompilerIo.CompilerIoData, displayArg:Null<String>):RequestScope {
+		var timerCtx = Timer.makeContext(Timer.make(["other"]));
+		var resultHandler = if (displayArg != null) {
+			core.json.JsonRpc.handleJsonrpcError(function() {
+				var input = core.json.JsonRpc.parseRequest(displayArg);
+				return context.display.DisplayJson.createJsonResultHandler(timerCtx, io, new core.json.JsonrpcHandler(input));
+			}, function(json) {
+				context.display.DisplayJson.sendJson(io, json);
+				throw new ExitException();
+			});
+		} else {
+			if (isServer) throw new core.ds.ArgumentError("Compilation server services require the server milestone") else CompilerOutput.createCliResultHandler(io);
+		};
+		return {
+			stats: Stats.create(),
+			timerCtx: timerCtx,
+			cancellationRequested: false,
+			io: io,
+			resultHandler: resultHandler
+		};
+	}
+
 	static function badArg(msg:String):Int {
 		Sys.stderr().writeString(msg + "\n");
 		return 1;
@@ -119,4 +143,9 @@ class Main {
 			case None:
 		}
 	}
+}
+
+/** OCaml's `Exit` escaping the program. **/
+private class ExitException extends haxe.Exception {
+	public function new() super("Exit");
 }

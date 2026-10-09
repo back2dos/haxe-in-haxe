@@ -15,7 +15,8 @@ import core.ds.Record;
 import context.Common;
 import context.Common.*;
 import context.Typecore.ForbidPackage;
-import context.DeferredServices;
+import core.Message.CompilerMessageKind;
+import core.Message.MessageKind;
 import syntax.Parser;
 import syntax.ParserConfig;
 import syntax.ParserEntry;
@@ -35,23 +36,47 @@ import syntax.Lexer;
 	public inline function new(file:ResolvedFile, declarations:Array<TypeDecl>, warnings:Array<ParseWarning>) { this.file = file; this.declarations = declarations; this.warnings = warnings; }
 	public inline function clone():SourceModuleResult return new SourceModuleResult(file, declarations, warnings);
 }
-// Source-only module parser from haxe/src/typing/typeloadParse.ml. Interactive
-// ConditionDisplay/PdiHandler and parser-cache services belong to later milestones.
+@:structInit class SourceModuleParts {
+	public var file:ResolvedFile;
+	public var remap:Array<String>;
+	public var pack:Array<String>;
+	public var declarations:Array<TypeDecl>;
+	public var warnings:Array<ParseWarning>;
+	public inline function new(file:ResolvedFile, remap:Array<String>, pack:Array<String>, declarations:Array<TypeDecl>, warnings:Array<ParseWarning>) { this.file = file; this.remap = remap; this.pack = pack; this.declarations = declarations; this.warnings = warnings; }
+}
+/** `exception DisplayInMacroBlock` **/
+class DisplayInMacroBlock extends haxe.Exception {
+	public function new() super("DisplayInMacroBlock");
+}
+// Module parser from haxe/src/typing/typeloadParse.ml.
 // The legacy TypeloadParse entry remains available to the bootstrap loader.
 class SourceParser {
  public static function parseFileFromString(com:CommonContext,file:String,p:Pos,source:String):ParseResult<Package> {
   return core.Timer.time(com.timerCtx,["parsing"],function(source:String) {
    com.requestScope.stats.sFilesParsed++;
    var result=ParserEntry.parse(ParserConfig.fileParserConfig(com,file),Grammar.parseFileStream,Lexer.createFileCtx(file),new Lexer(source,file),file);
-   if(com.display.dmsKind!=DMNone) DeferredServices.display();
+   switch [com.display.dmsKind,result] {
+    case [DMModuleSymbols(""),_]:
+    case [DMModuleSymbols(filter),ParseSuccess(data,_)] if(filter==null&&core.display.DisplayPosition.displayPosition.isInFile(com.partScope.fileKeys.get(file))):
+     var ds=context.display.DocumentSymbols.collectModuleSymbols(null,filter==null,data);
+     context.display.DisplayException.sendModuleSymbolsRaise(com,context.display.DocumentSymbols.DocumentSymbolsPrinter.jsonOfModuleSymbols(com,[{file:file,symbols:ds}],filter));
+    case [_,ParseSuccess(_,pdi)] if(pdi.pdWasDisplayFile):
+     if(pdi.pdHadResume) com.partScope.parserState.hadParserResume=true;
+     com.partScope.parserState.delayedSyntaxCompletion.value=pdi.pdDelayedSyntaxCompletion;
+    case _:
+   }
    Common.log(com,"Parsed "+file);
    return result;
   },source);
  }
  public static function parseFile(com:CommonContext,rfile:ResolvedFile,p:Pos):ParseResult<Package> {
   var key=com.partScope.fileKeys.get(rfile.file),contents:Null<String>=null;
-  if(com.fileContents.length==0&&Common.defined(com,Define.DisplayStdin)&&core.display.DisplayPosition.displayPosition.isInFile(key)) DeferredServices.display();
-  for(entry in com.fileContents) if(entry.fileKey==key) {contents=entry.content;break;}
+  if(com.fileContents.length==0&&Common.defined(com,Define.DisplayStdin)&&core.display.DisplayPosition.displayPosition.isInFile(key)) {
+   var s=Sys.stdin().readAll().toString();
+   Sys.stdin().close();
+   com.fileContents=[{fileKey:key,content:s}];
+   contents=s;
+  } else for(entry in com.fileContents) if(entry.fileKey==key) {contents=entry.content;break;}
   if(contents==null) {
    var bytes:haxe.io.Bytes;
    try bytes=sys.io.File.getBytes(rfile.file) catch(_:Dynamic) return raiseTypingError("Could not open "+rfile.file,p);
@@ -76,13 +101,16 @@ class SourceParser {
  }
  public static var parseHook:CommonContext->ResolvedFile->Pos->ParseResult<Package>=parseFile;
  public static function handleParserResult(com:CommonContext,p:Pos,result:ParseResult<Package>):SourceParseResult {
-  inline function handleError(error:ParseErrorInfo):Void switch com.display.dmsErrorPolicy {
-   case EPShow:if(Common.isDiagnostics(com)) DeferredServices.display();else raiseTypingError(Parser.errorMsg(error.message),error.pos);
-   case EPIgnore:com.partScope.hasError=true;
+  inline function handleError(error:ParseErrorInfo):Void {
+   var msg=Parser.errorMsg(error.message);
+   switch com.display.dmsErrorPolicy {
+    case EPShow:if(Common.isDiagnostics(com)) Common.addDiagnosticsMessage(com,msg,error.pos,MKError,0,DKParserError);else raiseTypingError(msg,error.pos);
+    case EPIgnore:com.partScope.hasError=true;
+   }
   }
   return switch result {
    case ParseSuccess(data,pdi):
-    if(pdi.pdWasDisplayFile) {if(pdi.pdErrors.length>0) handleError(pdi.pdErrors[0]);DeferredServices.display();}
+    if(pdi.pdWasDisplayFile) {if(pdi.pdErrors.length>0) handleError(pdi.pdErrors[0]);PdiHandler.handlePdi(com,pdi);}
     {data:data,warnings:pdi.pdWarnings};
    case ParseError(data,error,_):handleError(error);{data:data,warnings:[]};
   };
@@ -127,6 +155,10 @@ class SourceParser {
   }
   com.moduleToFile.add(path,rfile);return rfile;
  }
+ public static function parseModule_(com:CommonContext,path:GlobalTypePath,p:Pos):SourceModuleParts {
+  var remap={value:path.pack.copy()},rfile=resolveModuleFile(com,path,remap,p),parsed=parseModuleFile(com,rfile,p);
+  return {file:rfile,remap:remap.value,pack:parsed.data.pack,declarations:parsed.data.declarations,warnings:parsed.warnings};
+ }
  public static function parseModule(com:CommonContext,path:GlobalTypePath,p:Pos):SourceModuleResult {
   var remap={value:path.pack.copy()},rfile=resolveModuleFile(com,path,remap,p),parsed=parseModuleFile(com,rfile,p),pack=parsed.data.pack;
   function same(a:Array<String>,b:Array<String>):Bool {if(a.length!=b.length)return false;for(i in 0...a.length)if(a[i]!=b[i])return false;return true;}
@@ -153,5 +185,87 @@ class SourceParser {
    declarations=redirected;
   }
   return {file:rfile,declarations:declarations,warnings:parsed.warnings};
+ }
+}
+
+/** `TypeloadParse.ConditionDisplay` **/
+class ConditionDisplay {
+ static final tSemver:core.TType.T=TInst(core.TFunctions.mkClass(core.TFunctions.nullModule,{pack:[],name:"SemVer"},Globals.nullPos,Globals.nullPos),[]);
+ static function convertSmallType(com:CommonContext,v:syntax.ParserEntry.SmallType):{s:String,t:core.TType.T} return switch v {
+  case TNull:{s:"null",t:core.TFunctions.mkMono()};
+  case TBool(b):{s:b?"true":"false",t:com.basic.tbool};
+  case TFloat(f):{s:core.Numeric.validFloatLexeme(core.ds.OcamlPrintf.formatG(12,f)),t:com.basic.tfloat};
+  case TString(s):{s:"\""+core.StringHelper.sEscape(s)+"\"",t:com.basic.tstring};
+  case TVersion(r):{s:syntax.SemVer.SemVerTools.toString(r),t:tSemver};
+ };
+ public static function checkCondition(com:CommonContext,e:Expr):Void {
+  var dp=core.display.DisplayPosition.displayPosition.get();
+  function checkPosition(p:Pos):Bool return com.display.dmsKind==DMHover?core.display.DisplayPosition.enclosesPositionGt(dp,p):core.display.DisplayPosition.enclosesPosition(dp,p);
+  function tpair(t:core.TType.T):core.display.CompletionItem.TPair return {t:t,ct:core.display.CompletionItem.CompletionType.fromType(function(_) return Imported,t)};
+  function checkExpr(e:Expr):Void switch e.expr {
+   case ECall({expr:EConst(Ident("version")),pos:p},_):
+    var t=core.TType.T.TFun({args:[{name:"s",optional:false,type:com.basic.tstring}],ret:tSemver});
+    if(checkPosition(p)) context.display.DisplayException.sendHoverRaise(com,core.display.CompletionItem.makeCiClassField({
+     field:{
+      cfName:"version",cfType:t,cfPos:Globals.nullPos,cfNamePos:Globals.nullPos,
+      cfDoc:AstTools.docFromString("Allows comparing defines (such as the version of a Haxelib or Haxe) with SemVer semantics.
+Both the define and the string passed to `version()` must be valid semantic versions.
+
+Example:
+```haxe
+#if (haxe >= version(\"4.0.0-rc.3\"))\n
+```
+
+Note: this syntax does not parse with Haxe versions earlier than 4.0.0-rc.3,
+so it should be avoided if backwards-compatibility with earlier versions is needed.
+
+@see https://semver.org/"),
+      cfMeta:[],cfKind:Method(MethNormal),cfParams:[],cfExpr:null,cfExprUnoptimized:null,cfOverloads:[],cfFlags:core.TFunctions.setFlag(0,core.TFunctions.intOfClassFieldFlag(CfPublic))
+     },
+     scope:CFSStatic,origin:BuiltIn,isQualified:true
+    },tpair(t)),null,p);
+   case EConst(Ident(n)):
+    var v=ParserEntry.eval(com.defines,e);
+    context.display.DisplayException.sendHoverRaise(com,core.display.CompletionItem.makeCiDefine(n,switch v {
+     case TNull:null;
+     case TString(s):core.StringHelper.sEscape(s);
+     case _:throw new core.Globals.InternalCompilerError("typeloadParse.ml: unexpected define value","");
+    },tpair(com.basic.tstring)),null,e.pos);
+   case _:
+  }
+  function loop(e:Expr):Void {
+   if(checkPosition(e.pos)) checkExpr(e);
+   AstTools.iterExpr(loop,e);
+   if(checkPosition(e.pos)) {
+    var v=ParserEntry.eval(com.defines,e);
+    var r=convertSmallType(com,v);
+    context.display.DisplayException.sendHoverRaise(com,core.display.CompletionItem.makeCiLiteral(r.s,tpair(r.t)),null,e.pos);
+   }
+  }
+  loop(e);
+ }
+}
+/** `TypeloadParse.PdiHandler` **/
+class PdiHandler {
+ static function isTrue(defines:core.Define.DefineContext,e:Expr):Bool return ParserEntry.isTrue(ParserEntry.eval(defines,e));
+ public static function handlePdi(com:CommonContext,pdi:ParserDisplayInformation):Void {
+  var macroDefines=Common.adaptDefinesToMacroContext(com.defines);
+  var dp=core.display.DisplayPosition.displayPosition.get();
+  function check(p:Pos):Bool return com.display.dmsKind==DMHover?core.display.DisplayPosition.enclosesPositionGt(dp,p):core.display.DisplayPosition.enclosesPosition(dp,p);
+  for(b in pdi.pdDeadBlocks) {
+   var hasMacroDefine=isTrue(macroDefines,b.expr);
+   if(hasMacroDefine) com.partScope.parserState.displayModuleHasMacroDefines=true;
+   if(check(b.pos)) {
+    if(hasMacroDefine) throw new DisplayInMacroBlock();
+    switch com.display.dmsKind {
+     case DMHover:context.display.DisplayException.sendNoResultRaise(com);
+     case _:
+    }
+   }
+  }
+  switch com.display.dmsKind {
+   case DMHover:for(e in pdi.pdConditions) ConditionDisplay.checkCondition(com,e);
+   case _:
+  }
  }
 }

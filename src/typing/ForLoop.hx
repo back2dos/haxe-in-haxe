@@ -34,7 +34,8 @@ enum IteratorKind {
  IteratorIntConst(from:TExpr,to:TExpr,ascending:Bool);IteratorIntUnroll(offset:Int,length:Int,ascending:Bool);IteratorInt(from:TExpr,to:TExpr);IteratorArrayDecl(el:Array<TExpr>);IteratorArray;IteratorArrayAccess;IteratorGenericStack(c:TClass);IteratorIterator;IteratorCustom(get:TExpr->TExpr->T->Pos->TExpr,length:TExpr->Pos->TExpr);IteratorHasNextNext(v:TVar,next:TExpr,hasNext:TExpr);IteratorDynamic;
 }
 typedef IteratorData={var itKind:IteratorKind;var itType:T;var itExpr:TExpr;}
-typedef IterationIdent={var name:String;var pos:Pos;var display:Dynamic;}
+typedef IterationIdent={var name:String;var pos:Pos;var display:Null<DisplayKind>;}
+typedef ForLoopDisplay=(Typer,Expr,DisplayKind,AccessMode,WithTypeValue)->TExpr;
 enum IterationKindData {IKNormal(ident:IterationIdent);IKKeyValue(key:IterationIdent,value:IterationIdent);}
 enum ForLoopUnroll {NoForcedUnroll;ForcedUnroll;}
 class IterationKind {
@@ -118,7 +119,7 @@ class ForLoop {
  public static function getUnrollParams(ctx:Typer,e2:Expr,force:Bool):Null<UnrollParameters> {
   var count=0;function loop(e:Expr):Expr return switch e.expr{case EContinue|EBreak:throw Exit.raise();case _:count++;core.Ast.mapExpr(loop,e);};try{if(ctx.com.display.dmsKind!=DMNone)throw Exit.raise();loop(e2);return {expressionWeight:count,forceUnroll:force};}catch(ex:Exit){return null;}
  }
- static function typeForLoopKind(ctx:Typer,display:Dynamic,kind:IterationKindData,e1:TExpr,e2:Expr,unroll:ForLoopUnroll,p:Pos):TExpr {
+ static function typeForLoopKind(ctx:Typer,display:ForLoopDisplay,kind:IterationKindData,e1:TExpr,e2:Expr,unroll:ForLoopUnroll,p:Pos):TExpr {
   var old=ctx.e.inLoop;var restore=saveLocals(ctx);ctx.e.inLoop=true;e2=switch e2.expr {case EBlock(_):e2;case _:{expr:EBlock([e2]),pos:e2.pos};};
   inline function check(v:TVar,ident:IterationIdent):Void if(ident.display!=null)display(ctx,{expr:EConst(Ident(v.vName)),pos:v.vPos},ident.display,MGet,WithTypeTools.withType(v.vType));var force=unroll==ForcedUnroll;
   return switch kind {
@@ -128,9 +129,9 @@ class ForLoop {
     var block=mk(TBlock([mk(TVar(v,next),ctx.t.tvoid,next.epos),mk(TVar(vk,ek),ctx.t.tvoid,ek.epos),mk(TVar(vv,evalue),ctx.t.tvoid,evalue.epos),body]),ctx.t.tvoid,body.epos);var e=mk(TBlock([mk(TVar(tmp,e1),ctx.t.tvoid,e1.epos),mk(TWhile(hasNext,block,NormalWhile),ctx.t.tvoid,p)]),ctx.t.tvoid,p);ctx.e.inLoop=old;restore();e;
   };
  }
- public static function typeForLoop(ctx:Typer,display:Dynamic,it:Expr,e2:Expr,unroll:ForLoopUnroll,p:Pos):TExpr {
-  function ident(dk:Dynamic,e:Expr):IterationIdent return switch e.expr{case EConst(Ident(i)):{name:i,pos:e.pos,display:dk};case EDisplay(e1,dk):ident(dk,e1);case _:Error.raiseTypingError("Identifier expected",e.pos);};
-  function loop(dk:Dynamic,e:Expr):{kind:IterationKindData,e:Expr} return switch e.expr{case EBinop(OpIn,e1,e2):var kind=switch e1.expr{case EBinop(OpArrow,a,b):IKKeyValue(ident(null,a),ident(null,b));case _:IKNormal(ident(dk,e1));};{kind:kind,e:e2};case EDisplay(e1,dk):loop(dk,e1);case EBinop(OpArrow,a,{expr:EBinop(OpIn,b,e2)}):{kind:IKKeyValue(ident(null,a),ident(null,b)),e:e2};case _:if(dk!=null)display(ctx,e,dk,MGet,WithTypeTools.value);Error.raiseTypingError("For expression should be 'v in expr'",it.pos);};
+ public static function typeForLoop(ctx:Typer,display:ForLoopDisplay,it:Expr,e2:Expr,unroll:ForLoopUnroll,p:Pos):TExpr {
+  function ident(dk:Null<DisplayKind>,e:Expr):IterationIdent return switch e.expr{case EConst(Ident(i)):{name:i,pos:e.pos,display:dk};case EDisplay(e1,dk):ident(dk,e1);case _:Error.raiseTypingError("Identifier expected",e.pos);};
+  function loop(dk:Null<DisplayKind>,e:Expr):{kind:IterationKindData,e:Expr} return switch e.expr{case EBinop(OpIn,e1,e2):var kind=switch e1.expr{case EBinop(OpArrow,a,b):IKKeyValue(ident(null,a),ident(null,b));case _:IKNormal(ident(dk,e1));};{kind:kind,e:e2};case EDisplay(e1,dk):loop(dk,e1);case EBinop(OpArrow,a,{expr:EBinop(OpIn,b,e2)}):{kind:IKKeyValue(ident(null,a),ident(null,b)),e:e2};case _:if(dk!=null)display(ctx,e,dk,MGet,WithTypeTools.value);Error.raiseTypingError("For expression should be 'v in expr'",it.pos);};
   var parsed=loop(null,it);return typeForLoopKind(ctx,display,parsed.kind,typeExpr(ctx,parsed.e,WithTypeTools.value),e2,unroll,p);
  }
 }
