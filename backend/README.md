@@ -188,6 +188,25 @@ without `-D disable-parallelism`).
   the aarch64 half of the APE build is not validated for it. Eval threads
   run in parallel (upstream: OCaml domains); `Thread.create` ignores the
   stack size; the main thread's exit ends the process (as on hl and cpp).
+- Shared mutable state of Haxe code is the program's business, as on any
+  threaded target: a Haxe `Array` mutated by two threads at once can lose
+  elements or be copied while it is moved. Upstream's OCaml leans on
+  immutable lists (`l <- x :: l` is memory safe under races) where the port
+  mutates arrays in place, so such spots need a lock in the port: the
+  parallel filters' inline-call recording (`Inline.hx`, `mInlineCalls`)
+  takes a mutex, and shared `EReg`s (which keep their last match) were
+  replaced by fresh ones (`RenameVars`, `AnalyzerTexpr`, hxc `EReg.escape`);
+  hxc `Regex`'s lazily built case sets are published whole.
+- ThreadSanitizer: a build with the whole program instrumented does not run
+  (libtsan's fixed-size shadow call stack overflows in the port's parser,
+  single-threaded too, and TSan then hangs in its signal handler). What
+  works is instrumenting the runtime only: generated C compiled plainly
+  with `-D__SANITIZE_THREAD__` (so `RT_TRY` uses the intercepted `setjmp`),
+  `rt*.c` with `gcc -fsanitize=thread --param
+  tsan-instrument-func-entry-exit=0`; it sees every access the runtime
+  makes (allocation, barriers, arrays, strings, maps) and every lock, and
+  found the `mInlineCalls` race (test/TESTING.md). Racy publication
+  (above) shows up as occasional `Array_slice` reports.
 
 ### Green threads (tcc, M:1)
 
