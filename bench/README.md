@@ -45,6 +45,23 @@ functions, and the program waits for it (hello takes 22s and the self-compile
 26s without `--liftoff-only`), so the baseline compiler alone is faster here.
 `--interp` needs `--stack-size=60000` for the typer's recursion.
 
+**Compared with the JS target** (would a host GC, as WasmGC would give,
+help?). Best of 3, `-D disable-parallelism`, all four outputs byte-identical:
+
+| Workload | reference | HL/C | JS (Node 22) | Wasm (`--liftoff-only`) |
+| --- | ---: | ---: | ---: | ---: |
+| hello | 0.08 | 0.11 | 0.90 | 2.11 |
+| stdlib | 0.19 | 0.27 | 1.60 | 2.63 |
+| self | 4.53 | 7.67 | 23.40 | 26.95 |
+
+V8's profiler puts 14% of the JS self-compile in V8's garbage collector
+(516 scavenges, 3.0s), against about 38% in libhl allocation and marking
+for the Wasm build (`gc_allocator_new_page` 15%, `hl_gc_alloc_gen` 13%).
+So a host GC removes most of the allocation cost, but JS ends up about as
+slow overall: its time goes to exceptions used for control flow
+(`haxe_Exception`, `Grammar.fail`), closure binding (`$_`) and dynamic
+access. JS is 6.1 MB (0.88 MB gzipped).
+
 ## Results — 2026-10-09 early (second performance pass)
 
 Same container and build as below. Median of 5 runs (3 for memory); every
