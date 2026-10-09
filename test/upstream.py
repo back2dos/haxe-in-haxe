@@ -104,11 +104,13 @@ def main() -> None:
             shutil.copytree(base / "sys-hxb" / "tests" / "sys" / "bin", work / "tests" / "sys" / "bin", dirs_exist_ok=True)
         if name == "unit-macro-hxblib" and (base / "unit-macro" / "tests" / "unit" / "bin").exists():
             shutil.copytree(base / "unit-macro" / "tests" / "unit" / "bin", work / "tests" / "unit" / "bin", dirs_exist_ok=True)
+        # runci System.runSysTest exports EXISTS=1 for the sys tests
+        step_env = dict(env, EXISTS="1") if name == "sys-run" else env
         log = base / (name + ".log")
         start = time.time()
         with open(log, "w") as out:
             try:
-                code = subprocess.run(cmd, cwd=work / "tests" / sub, env=env, stdout=out, stderr=subprocess.STDOUT, timeout=3600).returncode
+                code = subprocess.run(cmd, cwd=work / "tests" / sub, env=step_env, stdout=out, stderr=subprocess.STDOUT, timeout=3600).returncode
             except subprocess.TimeoutExpired:
                 code = "timeout"
         results.append((name, code, time.time() - start))

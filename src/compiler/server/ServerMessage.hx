@@ -139,6 +139,7 @@ class ServerMessage {
 		if (config.printClassPathsChanged) printEndline(signString(com) + "class paths changed, resetting directories");
 	}
 
+	@:native("arguments_") // JS: functions have their own `arguments`
 	public static function arguments(data:String):Void {
 		if (config.printArguments) printEndline("Processing Arguments " + data);
 	}
