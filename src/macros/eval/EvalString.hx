@@ -148,9 +148,29 @@ class EvalString {
 		}
 	}
 
-	/** Upstream maps through EvalBytes.Unicase tables; the host's case mapping is used here. **/
 	public static function caseMap(self:Vstring, upper:Bool):Vstring {
-		return new Vstring(upper ? self.sstring.toUpperCase() : self.sstring.toLowerCase(), self.slength, self.sbmp);
+		var buf = new StringBuf();
+		var a = upper ? EvalBytesUnicase._UPPER : EvalBytesUnicase._LOWER;
+		var m = upper ? 1022 : 1021;
+		var s = self.sstring;
+		var i = 0;
+		while (i < s.length) {
+			var c = StringTools.fastCodeAt(s, i++);
+			if (c >= 0xD800 && c <= 0xDBFF && i < s.length) {
+				var d = StringTools.fastCodeAt(s, i);
+				if (d >= 0xDC00 && d <= 0xDFFF) {
+					c = ((c - 0xD800) << 10) + (d - 0xDC00) + 0x10000;
+					i++;
+				}
+			}
+			var up = c >>> 6;
+			if (up < m) {
+				var c2 = a[up][c & ((1 << 6) - 1)];
+				if (c2 != 0) c = c2;
+			}
+			buf.addChar(c);
+		}
+		return createWithLength(buf.toString(), self.slength);
 	}
 
 	public static function substr(self:Vstring, cIndex:Int, cLength:Int):Vstring {
