@@ -435,6 +435,47 @@ All outputs match.
     `stdlib`, and its conservative GC has the same `--spill-pointers`
     problem on wasm.
 
+### 2.9 Binary size and compile time: C vs OCaml (measured)
+
+**Synthetic scale-up:** 200 renamed copies of Bench's four hot functions
+(800 functions): 104,600 lines of our generated C against 8,900 lines of
+the OCaml translation. Sizes are the growth per copy.
+
+| | native code per copy | native compile, 800 functions | wasm code per copy | wasm compile, 800 functions |
+| --- | ---: | ---: | ---: | ---: |
+| our C, gcc -O2 (identical-code folding off) | 3.4 KB (stripped binary) | 11.7s | | |
+| our C, gcc -O1 | 3.4 KB (.text) | 6.7s | | |
+| our C, clang -O2 | 2.8 KB (stripped binary) | 7.7s | | |
+| our C, em++ -O2 / -Oz | | | 4.0 / 2.0 KB | 5.2 / 3.8s |
+| OCaml, ocamlopt | 4.1 KB object (2.1 code + 1.5 GC frame tables and closures + 0.4 unwind); 6.1 KB in a PIE binary | 1.3s | | |
+| OCaml, wasm_of_ocaml (`Int32`) | | | 1.2 KB | 2.7s (incl. ocamlc) |
+| our WasmGC emitter | | | ~1.05 KB | |
+
+**Real scale:**
+- The port's HL/C output is 891k lines of C in one translation unit.
+  `gcc -O2` takes 150s for it (`emcc` 137s); the stripped binary is
+  11.2 MB.
+- The upstream OCaml compiler (135k lines including its libraries and every
+  target generator) builds from scratch in 19.9s with `dune --profile
+  release` on 4 cores. Its stripped binary is 21.3 MB: 7.2 MB code, 6.8 MB
+  data (frame tables, closures, constants) and 3.8 MB of PIE dynamic
+  relocations. Linking with `-ccopt -no-pie` would drop the relocations.
+  It also contains all the generators the port doesn't have, so it is not a
+  like-for-like comparison.
+
+**Conclusions:**
+- **Natively, C gives smaller binaries:** 1.2–2× less code per function.
+  OCaml stores GC frame tables and closures as data, plus relocations in PIE
+  builds.
+- **On wasm it is the other way round:** WasmGC output (wasm_of_ocaml's or
+  ours) is 1.7–3.4× smaller than C through Emscripten.
+- **OCaml compiles 5–9× faster** than gcc/clang on equivalent code, and its
+  separate compilation makes rebuilds incremental. Generated C should be
+  split into many files so builds can run in parallel; `-O1` halves gcc's
+  time. Our C is verbose (12× the lines of the OCaml for the same
+  functions) because of the shadow stack, ANF temporaries and inlined
+  allocation.
+
 ### 2.7 Output format of the wasm emitters
 
 - **C/linear-memory route:** the wasm comes from Emscripten compiling the C
