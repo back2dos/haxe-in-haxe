@@ -68,8 +68,9 @@ class CoroToTexpr {
    case TLocal(v) if(usages.exists(v.vId)):usages.get(v.vId).add(state.csId);
    case _:core.Texpr.iter(loop,e);
   };for(e in state.csEl)loop(e);if(state.csElTail!=null)for(e in state.csElTail)loop(e);}
-  var fields:Map<Int,TClassField>=[];var fieldOrder:Array<Int>=[];
-  inline function setField(id:Int,field:TClassField):Void {if(!fields.exists(id))fieldOrder.push(id);fields.set(id,field);}
+  // `Hashtbl.create 0`: the result lists the fields in OCaml's bucket order (Hashtbl.to_seq_values)
+  var fields=new core.ds.OcamlHashtbl<Int,TClassField>(core.ds.OcamlHashtbl.hashInt,function(a,b)return a==b);
+  inline function setField(id:Int,field:TClassField):Void fields.replace(id,field);
   inline function across(id:Int):Bool {var set=usages.get(id);return set!=null&&set.elements().length!=1;}
   var forced:Map<Int,Bool>=[];for(a in tfArgs){var v:TVar=a.variable;setField(v.vId,mkField('_hx_hoisted${v.vId}',v.vType,v.vPos,v.vPos));first.csMappedLocal.set(v.vId,allocVar(VGenerated,'_hx_restored${v.vId}',v.vType,v.vPos));forced.set(v.vId,true);}
   for(state in states){
@@ -83,13 +84,12 @@ class CoroToTexpr {
     case _:core.Texpr.mapExpr(mapper,e);
    };state.csEl=state.csEl.map(mapper);if(state.csElTail!=null)state.csElTail=state.csElTail.map(mapper);
   }
-  var used=new CoroIntSet();for(s in states)used=used.union(s.csWrites.union(s.csReads));for(id in fieldOrder)if(!used.has(id))fields.remove(id);
-  for(state in states){var restoring=[];for(id in state.csWrites.union(state.csReads).elements())if(!core.ds.ArrayTools.exists(state.csDeclarations,function(v)return v.vId==id)){var v=state.csMappedLocal.get(id);var field=fields.get(id);restoring.push(b.varInit(v,b.instanceField(econtinuation,cls,params,field,field.cfType)));}
-   var saving=[for(id in state.csWrites.elements()){var v=state.csMappedLocal.get(id);var field=fields.get(id);b.assign(b.instanceField(econtinuation,cls,params,field,field.cfType),b.local(v,v.vPos));}];
+  var used=new CoroIntSet();for(s in states)used=used.union(s.csWrites.union(s.csReads));var unused=[];fields.iter(function(id,_)if(!used.has(id))unused.push(id));for(id in unused)fields.remove(id);
+  for(state in states){var restoring=[];for(id in state.csWrites.union(state.csReads).elements())if(!core.ds.ArrayTools.exists(state.csDeclarations,function(v)return v.vId==id)){var v=state.csMappedLocal.get(id);var field=fields.find(id);restoring.push(b.varInit(v,b.instanceField(econtinuation,cls,params,field,field.cfType)));}
+   var saving=[for(id in state.csWrites.elements()){var v=state.csMappedLocal.get(id);var field=fields.find(id);b.assign(b.instanceField(econtinuation,cls,params,field,field.cfType),b.local(v,v.vPos));}];
    state.csEl=restoring.concat(state.csEl).concat(saving).concat(state.csElTail==null?[]:state.csElTail);
   }
-  // OCaml hash-table value enumeration has no specified order. Keep explicit insertion order here.
-  return [for(id in fieldOrder)if(fields.exists(id))fields.get(id)];
+  var out=[];fields.iter(function(_,f)out.push(f));return out;
  }
  public static function buildCallStack(ctx:CoroCtx,cont:ContinuationApi,econtinuation:TExpr,p:Pos):TExpr {
   var b=ctx.builder;if(!ctx.typer.com.debug)return b.voidBlockAt([],p);var cf=PMap.find("buildCallStack",cont.baseContinuationClass.clFields);return mk(TCall(b.instanceField(econtinuation,cont.baseContinuationClass,[ctx.typer.t.tany],cf,cf.cfType),[]),ctx.typer.t.tvoid,p);
