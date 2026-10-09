@@ -9,9 +9,14 @@
 #   bin/hxc.com   the compiler (port + C backend) as a Cosmopolitan APE binary
 #                 that runs on Linux, macOS, Windows and the BSDs (x86-64 and
 #                 arm64), with the Haxe std subset in its own zip (/zip/std)
-#   hxstd/        the hxc target's std overrides (backend/std)
+#   hxstd/        the class path: the hxc target's std overrides (backend/std)
+#                 and hxc/{Boot,Build,Run}.hx (the init macro and `haxelib run hxc`)
 #   rt/           the C runtime, compiled with the generated C on the user's machine
-#   run/Run.hx    `haxelib run hxc`
+#   extraParams.hxml   --macro hxc.Boot.init(), added by -lib hxc
+#
+# The user's Haxe types the program and writes HXB; bin/hxc.com reads it
+# (--hxb-lib) and lowers it to C. The archive's format must match the
+# compiler hxc.com was built from (haxe/, see hxc.json).
 #
 # Needs: node, haxe/haxe (backend/build.sh), cosmocc on PATH (bench/COSMO.md).
 # SKIP_GEN=1 reuses the generated C, SKIP_COM=1 reuses the binary.
@@ -46,10 +51,10 @@ cp -r haxe/std/haxe haxe/std/sys haxe/std/eval "$B/std/"
 (cd "$B" && zip -qr -9 "../../../$P/bin/hxc.com" std)
 # not std/: haxe looks for its own std in ./std, and haxelib runs Run.hx from the library root
 cp -r backend/std "$P/hxstd"
+cp -r backend/haxelib/hxc/. "$P/hxstd/hxc/"
 cp backend/rt/*.h backend/rt/rt*.c "$P/rt/"
-mkdir -p "$P/run" && cp backend/haxelib/Run.hx "$P/run/"
-# Run.hx sits in run/ (classPath) so the library root, with hxstd/, is not on the class path
-cp backend/haxelib/haxelib.json backend/haxelib/README.md "$P/"
+cp backend/haxelib/haxelib.json backend/haxelib/README.md backend/haxelib/extraParams.hxml "$P/"
+printf '{"haxe": "%s", "commit": "%s"}\n' "$("$HAXE" -version 2>&1)" "$(git -C haxe rev-parse --short HEAD)" > "$P/hxc.json"
 cp haxe/LICENSE "$P/LICENSE.txt"
 rm -f bin/haxelib/hxc.zip
 (cd "$P" && zip -qr -9 ../hxc.zip .)
