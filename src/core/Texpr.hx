@@ -84,8 +84,8 @@ class Texpr {
   for (i in 0...el.length) {
    var cur = el[i], y = f(x,cur);
    if (y != cur) {
-    var r = el.slice(0,i); r.push(y);
-    for (j in i + 1...el.length) r.push(f(x,el[j]));
+    var r = el.copy(); r[i] = y; // one allocation of the final length
+    for (j in i + 1...el.length) r[j] = f(x,el[j]);
     return r;
    }
   }
@@ -156,8 +156,8 @@ class Texpr {
   for (i in 0...el.length) {
    var cur = el[i], y = f(x,cur);
    if (y != cur) {
-    var r = el.slice(0,i); r.push(y);
-    for (j in i + 1...el.length) r.push(f(x,el[j]));
+    var r = el.copy(); r[i] = y; // one allocation of the final length
+    for (j in i + 1...el.length) r[j] = f(x,el[j]);
     return r;
    }
   }
@@ -232,8 +232,8 @@ class Texpr {
   for (i in 0...el.length) {
    var x = el[i], y = f(x);
    if (y != x) {
-    var r = el.slice(0,i); r.push(y);
-    for (j in i + 1...el.length) r.push(f(el[j]));
+    var r = el.copy(); r[i] = y; // one allocation of the final length
+    for (j in i + 1...el.length) r[j] = f(el[j]);
     return r;
    }
   }
@@ -287,8 +287,8 @@ class Texpr {
   for (i in 0...el.length) {
    var cur = el[i], y = f(x,cur);
    if (y != cur) {
-    var r = el.slice(0,i); r.push(y);
-    for (j in i + 1...el.length) r.push(f(x,el[j]));
+    var r = el.copy(); r[i] = y; // one allocation of the final length
+    for (j in i + 1...el.length) r[j] = f(x,el[j]);
     return r;
    }
   }

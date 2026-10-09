@@ -5,7 +5,8 @@ package core.ds;
 	allocating 20% of the heap, so a heap full of typed modules is marked
 	over and over. Like OCaml's space_overhead, collect instead when the
 	allocation since the last major exceeds `factor` times the heap size seen
-	after it. Elsewhere `tick` is a no-op.
+	after it (on HL/C, a multiple of the live data instead). Elsewhere `tick`
+	is a no-op.
 **/
 class GcPolicy {
 	#if hl
@@ -13,7 +14,15 @@ class GcPolicy {
 	static var enabled = false;
 	static var allocatedAtMajor = 0.;
 	static var heapAtMajor = 0.;
+	#if hlc
+	// HL/C links the patched libhl (bench/libhl-allocator.patch), whose
+	// currentMemory after a collection is the live data rather than page memory.
+	// Fragmentation keeps page memory well above the live data, and growing the
+	// threshold with it made the heap size jump between runs on small changes.
+	static var factor = 5.0;
+	#else
 	static var factor = 1.0;
+	#end
 
 	public static function init():Void {
 		var v = Sys.getEnv("HAXE_IN_HAXE_GC_FACTOR");
@@ -23,7 +32,7 @@ class GcPolicy {
 		hl.Gc.enable(false);
 		var s = hl.Gc.stats();
 		allocatedAtMajor = s.totalAllocated;
-		heapAtMajor = Math.max(s.currentMemory, 64 * 1024 * 1024);
+		heapAtMajor = s.currentMemory;
 	}
 
 	public static inline function tick():Void {
@@ -32,11 +41,13 @@ class GcPolicy {
 
 	static function check():Void {
 		var s = hl.Gc.stats();
-		if (s.totalAllocated - allocatedAtMajor > factor * heapAtMajor) {
+		// At least 64 MB between collections: on small heaps, faulting in fresh
+		// pages costs more than marking.
+		if (s.totalAllocated - allocatedAtMajor > Math.max(factor * heapAtMajor, 64 * 1024 * 1024)) {
 			hl.Gc.major();
 			s = hl.Gc.stats();
 			allocatedAtMajor = s.totalAllocated;
-			heapAtMajor = Math.max(s.currentMemory, 64 * 1024 * 1024);
+			heapAtMajor = s.currentMemory;
 		}
 	}
 	#else

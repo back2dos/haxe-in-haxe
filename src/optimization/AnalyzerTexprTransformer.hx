@@ -78,7 +78,9 @@ private class FunctionGraphBuilder {
  function addTerminator(bb:BasicBlockData,term:TerminatorKind):BasicBlockData {bb.bbTerminator = term; closeNode(bb); return g.gUnreachable;}
  function checkUnboundCall(s:String,el:Array<TExpr>):Void {if (s == "$ref") switch el {case [{eexpr:TLocal(v)}]:addVarFlag(v,VCaptured); case _:} if (isUnboundCallThatMightHaveSideEffects(s,el)) ctx.hasUnbound = true;}
  function noVoid(t:T,p:Pos):Void if (core.TOther.ExtType.isVoid(follow(t))) core.Error.raiseTypingError("Cannot use Void as value",p);
- function pushName(s:String):Void->Void {ctx.nameStack = [s].concat(ctx.nameStack); return function() ctx.nameStack = ctx.nameStack.slice(1);}
+ // name_stack is consed and popped with List.tl upstream; here its top is the array's last element.
+ var popName:Void->Void = null;
+ function pushName(s:String):Void->Void {ctx.nameStack.push(s); if (popName == null) popName = function() ctx.nameStack.pop(); return popName;}
  function checkRef(v:TVar,e:TExpr):Void if (core.TOther.ExtType.hasReferenceSemantics(v.vType)) switch Texpr.skip(e).eexpr {case TLocal(w):addVarFlag(w,VCaptured); case _:}
  function valueRaw(bb:BasicBlockData,e:TExpr):BlockValue {
   function result(def:TExprDef):BlockValue return {bb:bb,value:withExpr(e,def)};
@@ -132,7 +134,7 @@ private class FunctionGraphBuilder {
    case TField(e1,fa):var fa = switch fa {case FInstance(c,tl,cf = {cfKind:Method(_)}):FClosure({cls:c,params:tl},cf); case _:fa;}; withExpr(e,TField(e1,fa));
    case _:e;
   }; e = strip(e);
-  function name(e:TExpr):String return switch e.eexpr {case TLocal(v):v.vName; case TArray(a,_) | TField(a,_) | TParenthesis(a) | TCast(a,null) | TMeta(_,a):name(a); case _:ctx.nameStack.length > 0 ? ctx.nameStack[0] : ctx.tempVarName;};
+  function name(e:TExpr):String return switch e.eexpr {case TLocal(v):v.vName; case TArray(a,_) | TField(a,_) | TParenthesis(a) | TCast(a,null) | TMeta(_,a):name(a); case _:ctx.nameStack.length > 0 ? ctx.nameStack[ctx.nameStack.length - 1] : ctx.tempVarName;};
   if (v == null) v = allocVar(VGenerated,name(e),e.etype,e.epos); bb = declareVarAndAssign(bb,v,e,e.epos); e = withExpr(e,TLocal(v)); for (f in fl) e = f(e); return {bb:bb,value:e};
  }
  function declareVarAndAssign(bb:BasicBlockData,v:TVar,e:TExpr,p:Pos):BasicBlockData {

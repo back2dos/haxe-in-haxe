@@ -194,7 +194,7 @@ index f332cf5..1844c29 100644
  	gc_freelist free;
  	unsigned char *sizes;
 diff --git a/src/gc.c b/src/gc.c
-index d338518..b100670 100644
+index d338518..db7bbba 100644
 --- a/src/gc.c
 +++ b/src/gc.c
 @@ -53,7 +53,17 @@
@@ -427,7 +427,29 @@ index d338518..b100670 100644
  		MZERO(ptr,allocated);
  	else if( MEM_HAS_PTR(flags) && allocated != size )
  		MZERO((char*)ptr+size,allocated-size); // erase possible pointers after data
-@@ -1350,6 +1468,10 @@ struct _pextra {
+@@ -997,6 +1115,8 @@ static void gc_mark() {
+ 	gc_allocator_after_mark();
+ }
+ 
++static int64 gc_live_after_major = -1;
++
+ static void count_free_memory( gc_pheader *page, int size ) {
+ 	gc_stats.free_memory += gc_free_memory(page);
+ }
+@@ -1041,6 +1161,12 @@ static void gc_major() {
+ 	gc_stats.last_mark_allocs = gc_stats.allocation_count;
+ 	gc_stop_world(true);
+ 	gc_mark();
++	// hl_gc_stats reports the bytes still in use after the last collection as
++	// current_memory, instead of all page memory, which fragmentation keeps far
++	// above it. Counting flushes the free lists now rather than on first use.
++	gc_stats.free_memory = 0;
++	gc_iter_pages(count_free_memory);
++	gc_live_after_major = gc_stats.pages_total_memory - gc_stats.free_memory;
+ 	gc_stop_world(false);
+ 	dt = TIMESTAMP() - time;
+ 	gc_stats.mark_count++;
+@@ -1350,6 +1476,10 @@ struct _pextra {
  	pextra *next;
  };
  static pextra *extra_pages = NULL;
@@ -438,7 +460,7 @@ index d338518..b100670 100644
  #define EXTRA_SIZE (GC_PAGE_SIZE + (4<<10))
  #endif
  
-@@ -1378,6 +1500,45 @@ static void *gc_alloc_page_memory( int size ) {
+@@ -1378,6 +1508,45 @@ static void *gc_alloc_page_memory( int size ) {
  #elif defined(HL_EMSCRIPTEN)
  	return emscripten_builtin_memalign(GC_PAGE_SIZE, size);
  #else
@@ -484,7 +506,7 @@ index d338518..b100670 100644
  	static int recursions = 0;
  	int i = 0;
  	while( gc_will_collide(base_addr,size) ) {
-@@ -1445,6 +1606,16 @@ static void gc_free_page_memory( void *ptr, int size ) {
+@@ -1445,6 +1614,16 @@ static void gc_free_page_memory( void *ptr, int size ) {
  		prev = e;
  		e = e->next;
  	}
@@ -501,7 +523,7 @@ index d338518..b100670 100644
  	munmap(ptr,size);
  #endif
  }
-@@ -1473,7 +1644,16 @@ vdynamic *hl_alloc_obj( hl_type *t ) {
+@@ -1473,7 +1652,16 @@ vdynamic *hl_alloc_obj( hl_type *t ) {
  	vobj *o;
  	int i;
  	hl_runtime_obj *rt = t->obj->rt;
@@ -519,6 +541,15 @@ index d338518..b100670 100644
  	if( t->kind == HSTRUCT ) {
  		o = (vobj*)hl_gc_alloc_gen(t, rt->size, (rt->hasPtr ? MEM_KIND_RAW : MEM_KIND_NOPTR) | MEM_ZERO);
  	} else {
+@@ -1510,7 +1698,7 @@ vvirtual *hl_alloc_virtual( hl_type *t ) {
+ HL_API void hl_gc_stats( double *total_allocated, double *allocation_count, double *current_memory ) {
+ 	*total_allocated = (double)gc_stats.total_allocated;
+ 	*allocation_count = (double)gc_stats.allocation_count;
+-	*current_memory = (double)gc_stats.pages_total_memory;
++	*current_memory = (double)(gc_live_after_major >= 0 ? gc_live_after_major : gc_stats.pages_total_memory);
+ }
+ 
+ HL_API void hl_gc_enable( bool b ) {
 diff --git a/src/hlc.h b/src/hlc.h
 index 7def07d..75eff4d 100644
 --- a/src/hlc.h
