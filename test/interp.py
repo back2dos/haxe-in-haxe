@@ -69,7 +69,7 @@ def main():
     ap.add_argument("filters", nargs="*")
     opts = ap.parse_args()
     reference = str(pathlib.Path(os.environ.get("HAXE_REFERENCE", ROOT / "haxe/haxe")).resolve())
-    port = shlex.split(os.environ.get("HAXE_IN_HAXE_PORT", "hl " + str(ROOT / "bin/bench/hih.hl")))
+    port = shlex.split(os.environ.get("HAXE_IN_HAXE_PORT", "hl " + str(ROOT / "test/generated/haxe-in-haxe.hl")))  # the build test/conformance.py makes
     env = dict(os.environ, HAXE_STD_PATH=str(STD), HAXE_IN_HAXE_STD_PATH=str(STD))
     files = opts.cases or [ROOT / "test/conformance-cases.txt", ROOT / "test/conformance-macro-cases.txt"]
     cases = [c for f in files for c in parse_cases(f)]
