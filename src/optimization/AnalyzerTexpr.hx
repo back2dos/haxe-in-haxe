@@ -43,8 +43,9 @@ class AnalyzerTexpr {
  static function cannotBeUsedAsValue(com:context.SafeCom.SafeContext,e:TExpr):Bool return !canBeUsedAsValueLoop(com,e);
  public static function wrapMeta(s:String,e:TExpr):TExpr return mk(TMeta({meta:core.MetaList.StrictMeta.Custom(s),exprs:[],pos:e.epos},e),e.etype,e.epos);
  public static function isReallyUnbound(s:String):Bool return s != "`trace" && s != "__int__";
- static var r = ~/^[A-Za-z0-9_]+$/;
- public static function isUnboundCallThatMightHaveSideEffects(s:String,el:Array<TExpr>):Bool return switch [s,el] {case ["__js__",[{eexpr:TConst(TString(code))}]] if (r.match(code)):false; case _:true;};
+ // Deviation: a fresh EReg per use (an EReg keeps its last match; the analyzer runs on several threads)
+ static inline function r():EReg return ~/^[A-Za-z0-9_]+$/;
+ public static function isUnboundCallThatMightHaveSideEffects(s:String,el:Array<TExpr>):Bool return switch [s,el] {case ["__js__",[{eexpr:TConst(TString(code))}]] if (r().match(code)):false; case _:true;};
  public static function maybeInheritVarName(v:TVar,alias:TVar):Void if (v.vName != alias.vName) switch [alias.vKind,v.vKind] {case [VUser(_),VUser(_)]:case [VUser(_),_]:v.vName = alias.vName; case _:}
  public static function typeChangeOk(com:context.SafeCom.SafeContext,t1:T,t2:T):Bool {
   if (t1 == t2) return true; function map(t:T):T return switch t {case TMono(r):r.tmType == null ? tDynamic : map(r.tmType); case _:core.TFunctions.map(map,t);}; t1 = map(t1); t2 = map(t2);

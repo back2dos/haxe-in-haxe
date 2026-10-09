@@ -180,6 +180,10 @@ class Inline {
  }
 }
 class InlineState {
+ // Deviation: upstream conses onto md.m_inline_calls (`x :: l`, then an assignment), which
+ // is memory safe when parallel filter workers inline into classes of the same module; the
+ // port's list is a shared Haxe array mutated in place, so concurrent unshifts are serialized.
+ static final inlineCallsMutex = new sys.thread.Mutex();
  var ictx:InlineContext; var scom:SafeContext; var ethis:TExpr; var params:Array<TExpr>; var cf:TClassField; var f:TFunc; var p:Pos;
  var locals = new haxe.ds.IntMap<InLocal>(); var checker:{mightBeAffected:TExpr->Bool, collectModifiedLocals:TExpr->Void};
  public var inlinedVars:Array<{local:InLocal,expr:TExpr}> = []; public var inLocalFun = false; public var hadSideEffect = false; public var hasReturnValue = false;
@@ -243,7 +247,7 @@ class InlineState {
    case TUnop(op = Increment | Decrement,flag,e1):withExpr(e,TUnop(op,flag,inlineParams(false,true,e1)));
    case _:mapExpr(e -> inlineParams(false,false,e),e);
   };
-  if (subst.iterator().hasNext()) e = inlineParams(false,false,e); var md = scom.curclass.clModule.mExtra.mDisplay; var endPos:Pos = core.ds.Record.copy(p); endPos.pmax = p.pmin + cf.cfName.length; md.mInlineCalls.unshift({definitionPos:cf.cfNamePos,callPos:endPos});
+  if (subst.iterator().hasNext()) e = inlineParams(false,false,e); var md = scom.curclass.clModule.mExtra.mDisplay; var endPos:Pos = core.ds.Record.copy(p); endPos.pmax = p.pmin + cf.cfName.length; inlineCallsMutex.acquire(); md.mInlineCalls.unshift({definitionPos:cf.cfNamePos,callPos:endPos}); inlineCallsMutex.release();
   inline function wrap(e:TExpr):TExpr {var etype = hasParams ? mapType(e.etype) : e.etype; try {switch follow(e.etype) {
    case TMono(_) | TInst({clKind:KTypeParameter(_)},_):switch follow(tret) {case TAbstract({aPath:{pack:[],name:"Void"}},_):case _:throw new core.TUnification.Unify_error([]);}
    case _:var uctx = defaultUnificationContext(); uctx.equalityKind = EqStrict; uctx.nullFollowMode = scom.platformConfig.pfStatic ? NeverFollow : AlwaysFollow; typeEqCustom(uctx,etype,tret);

@@ -39,7 +39,7 @@ class TaskPool {
   if (threads==0) {for (i in first...last+1) f(i);return;}
   var chunk=chunkSize>0 ? chunkSize : Std.int(Math.max(1,count/(8*(threads+1))));
   var job=new ForJob(first,last,chunk,f);
-  #if hlc
+  #if (hlc || target.name == "hxc")
   ForJob.invite(job,threads);
   #else
   // HashLink JIT: threads stay scoped to the call. With persistent workers it
@@ -53,7 +53,7 @@ class TaskPool {
   #end
   job.work();
   job.finish();
-  #if !hlc
+  #if !(hlc || target.name == "hxc")
   for (_ in 0...spawned) job.exited.wait();
   #end
  }
@@ -85,7 +85,7 @@ private class ForJob {
  var waiting=false;
  var failed=false;
  var failure:Dynamic=null;
- #if !hlc
+ #if !(hlc || target.name == "hxc")
  public final exited=new Lock();
  #end
 

@@ -321,6 +321,60 @@ tcc, gcc -O2 and HashLink builds; `test/server.py` with the tcc build
 (the child compiler spinning); it did not recur in the three full misc runs
 since (tcc twice, gcc -O2) nor when run alone.
 
+## C build of the port (hxc): OS threads and parallel mode — 2026-10-09, late
+
+gcc, clang and cosmocc builds now run Haxe threads on OS threads with a
+stop-the-world collector (backend/README.md, "OS threads (1:1)"); tcc keeps
+the green threads below. The port runs its parallel passes (filters,
+analyzer, DCE marking, HXB writing) when `-D disable-parallelism` is not
+given. `test/conformance.py --parallel N` checks parallel-mode archives: each
+run must succeed, the reference must load the archive, and after normalizing
+variable IDs (the reference reads the archive with `--hxb-lib` and writes it
+again sequentially) it must equal the sequential reference archive.
+
+```sh
+CC="clang -O2" BIN=hih_clang RT_NO= RT_LIBS="-lmbedtls -lmbedx509 -lmbedcrypto -luv" sh backend/build.sh port
+HAXE_REFERENCE=haxe/haxe HAXE_IN_HAXE_PORT=$PWD/bin/backend/hih/hih_clang python3 test/conformance.py -j 3 --parallel 3
+HAXE_REFERENCE=haxe/haxe HAXE_IN_HAXE_PORT=$PWD/bin/backend/hih/hih_clang python3 test/conformance.py -j 2 --parallel 3 --cases test/conformance-macro-cases.txt
+# the self-compile as a case: "direct self <abs path of a src snapshot> haxe.Main" in a case file
+HAXE_REFERENCE=haxe/haxe HAXE_IN_HAXE_PORT=$PWD/bin/backend/hih/hih_clang python3 test/conformance.py -j 1 --parallel 4 --parallel-reference --cases self-case.txt
+```
+
+| Check (clang -O2 build with mbedtls/libuv unless noted) | Result |
+| --- | --- |
+| Conformance, sequential (tcc, green threads; clang) | 279 PASS + 7 expected failures / same |
+| Conformance, macro cases, sequential (tcc; clang) | 66/66 / 66/66 |
+| `test/upstream.py threads` (clang; 4 runs) | 144/144 assertions each |
+| Conformance `--parallel 3` (837 parallel runs; two rounds, before and after the `Inline.hx` fix) | 279 PASS + 7 expected failures; every run of every case identical to the sequential reference after normalizing (raw-identical: 3/3 runs in 31 cases, 0/3 in 174) |
+| Macro cases `--parallel 3` | 66/66 pass; 54 normalized-identical in 3/3 runs, 12 cannot be normalized because the reference cannot reload its own archive without the sources (macro-built types; runs succeed) |
+| Self-compile `--parallel 4 --parallel-reference` | port 4/4 and reference 4/4 identical after normalizing (434 members), 0 raw-identical for either |
+| `backend/bench/threads` (clang -O2, OS threads; 10 runs, loaded machine) | all |
+| ThreadSanitizer, runtime instrumented (backend/README.md): self-compile ×2, stdlib, hello in parallel mode; `backend/bench/threads` fully instrumented | after the fixes below: 0 reports on the port runs; bench: only races of the test program's own unsynchronized Haxe variables and arrays |
+
+No run crashed or hung. Found and fixed:
+
+- `Inline.hx`: parallel filter workers inlining into classes of the same
+  module unshifted into that module's `mInlineCalls` array at the same time
+  (TSan: `Array_insert` vs `hx_apush_slow`/`hx_arr_grow`). Upstream conses
+  onto an immutable list; the port's push now takes a mutex.
+- hxc std: `EReg.escape` shared one static `EReg`; `Regex` published its
+  case-set map before filling it (both by review).
+- `rt_nthreads` was read plainly while updated atomically (TSan): relaxed
+  atomic loads (`RT_NTHREADS`).
+- `backend/bench/threads` semaphore test: an unguarded counter and a fixed
+  10 ms sleep failed on a loaded machine (1 run in 5) with OS threads.
+- Earlier on this branch: `RenameVars`/`AnalyzerTexpr` shared static
+  `EReg`s, which corrupted generated variable names in parallel mode.
+
+Benign races left (TSan, plain stores): `sys.thread.Thread.create` (std,
+as on HashLink) stores the thread's id and name from both the parent and the
+child; new expressions published to other filter workers without a fence
+(upstream's documented races, x86-64 store order).
+
+Not run in this pass (by request, the full matrix runs at merge): gcc -O2
+and cosmocc conformance, the wasm build, `test/server.py`, the other
+`test/upstream.py` steps, `--parallel` on tcc.
+
 ## C build of the port (hxc): green threads — 2026-10-09
 
 The hxc runtime has M:1 cooperative threads (`backend/rt/rt_thread.c`, see
