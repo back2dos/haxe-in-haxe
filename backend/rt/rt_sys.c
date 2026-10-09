@@ -229,9 +229,9 @@ void *hxc_NativeSys_fileContent(void *path) {
 	size_t cap = 65536, n = 0;
 	struct stat st;
 	if (fstat(fd, &st) == 0 && S_ISREG(st.st_mode)) cap = (size_t)st.st_size + 1;
-	char *buf = malloc(cap);
+	char *buf = (char *)malloc(cap);
 	for (;;) {
-		if (n == cap) buf = realloc(buf, cap *= 2);
+		if (n == cap) buf = (char *)realloc(buf, cap *= 2);
 		ssize_t r = read(fd, buf + n, cap - n);
 		if (r < 0 && errno == EINTR) continue;
 		if (r < 0) {
@@ -308,11 +308,11 @@ void *hxc_NativeSys_readDirectory(void *path) {
 	free(p);
 	if (!d) return NULL;
 	int32_t n = 0, cap = 16;
-	char **names = malloc(sizeof(char *) * cap);
+	char **names = (char **)malloc(sizeof(char *) * cap);
 	struct dirent *e;
 	while ((e = readdir(d))) {
 		if (strcmp(e->d_name, ".") == 0 || strcmp(e->d_name, "..") == 0) continue;
-		if (n == cap) names = realloc(names, sizeof(char *) * (cap *= 2));
+		if (n == cap) names = (char **)realloc(names, sizeof(char *) * (cap *= 2));
 		names[n++] = strdup(e->d_name);
 	}
 	closedir(d);
@@ -350,7 +350,7 @@ void *hxc_NativeSys_stat(void *path) {
 int32_t hxc_NativeSys_processRun(void *cmd, void *args, void *fds) {
 	// argv in malloc'ed C strings before forking
 	int32_t n = args ? ARR_LEN(args) : 0;
-	char **argv = malloc(sizeof(char *) * (n + 4));
+	char **argv = (char **)malloc(sizeof(char *) * (n + 4));
 	if (args) {
 		argv[0] = hx_str_to_utf8(cmd);
 		for (int32_t i = 0; i < n; i++) argv[i + 1] = hx_str_to_utf8(hx_aget_p_slow(args, i));

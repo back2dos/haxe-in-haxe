@@ -90,7 +90,7 @@ int32_t hx_str_utf8_into(void *s, char *buf) {
 
 char *hx_str_to_utf8(void *s) {
 	if (!s) return strdup("null");
-	char *buf = malloc(3 * (size_t)STR_LEN(s) + 1);
+	char *buf = (char *)malloc(3 * (size_t)STR_LEN(s) + 1);
 	hx_str_utf8_into(s, buf);
 	return buf;
 }

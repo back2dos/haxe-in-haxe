@@ -6,6 +6,7 @@
 #include <stdlib.h>
 #include <math.h>
 #include <sys/mman.h>
+#include <unistd.h>
 
 #ifdef __TINYC__ // tcc, for fast development builds: no bit-scan builtin
 static inline int __builtin_ctzll(uint64_t m) {
@@ -115,17 +116,17 @@ static void minor(void) {
 	rt_young_ptr = rt_young_start;
 }
 
-// ---- major collection: copy everything live into the other region.
-// The old space alternates between two large reserved regions; old_end is a
-// soft limit, set after each major collection to three times the live size.
+// ---- major collection: copy everything live into a fresh to-space.
+// Natively the old space alternates between two large reserved regions;
+// old_end is a soft limit, set after each major collection to three times the
+// live size. Under Emscripten memory is real, so each major collection
+// mallocs a to-space sized from what may survive and frees the from-space.
 
-#ifdef __EMSCRIPTEN__
-#define REGION (640u << 20) // wasm32: the regions are real memory
-#else
+#ifndef __EMSCRIPTEN__
 #define REGION (16ull << 30)
-#endif
 static char *regions[2];
 static int cur_region;
+#endif
 static char *from_start, *from_end;
 
 static void *major_forward(void *p) {
@@ -141,8 +142,19 @@ static void major(size_t need) {
 	majors++;
 	from_start = old_start;
 	from_end = old_ptr;
+#ifdef __EMSCRIPTEN__
+	// everything in the old and young spaces may survive
+	size_t cap = 2 * ((size_t)(old_ptr - old_start) + (size_t)(rt_young_ptr - rt_young_start)) + 4 * minor_size + need;
+	if (cap < (32u << 20)) cap = 32u << 20;
+	old_start = old_ptr = (char *)malloc(cap);
+	if (!old_start) {
+		fputs("out of memory\n", stderr);
+		exit(2);
+	}
+#else
 	cur_region ^= 1;
 	old_start = old_ptr = regions[cur_region];
+#endif
 	char *scan = old_ptr;
 	scan_roots(major_forward);
 	remembered_len = 0;
@@ -151,15 +163,18 @@ static void major(size_t need) {
 		scan += obj_bytes(o);
 		scan_object(o, major_forward);
 	}
-#ifndef __EMSCRIPTEN__
-	madvise(from_start, from_end - from_start, MADV_DONTNEED);
-#endif
 	rt_young_ptr = rt_young_start;
+#ifdef __EMSCRIPTEN__
+	free(from_start);
+	old_end = old_start + cap;
+#else
+	madvise(from_start, from_end - from_start, MADV_DONTNEED);
 	size_t live = old_ptr - old_start;
 	size_t limit = 3 * live + 4 * minor_size + need;
 	if (limit < (64u << 20)) limit = 64u << 20;
 	if (limit > REGION) limit = REGION;
 	old_end = old_start + limit;
+#endif
 }
 
 void *rt_alloc_slow(uint64_t header, uint32_t bytes) {
@@ -185,7 +200,7 @@ void rt_write_barrier(void *obj, void **slot, void *val) {
 	(void)val;
 	if (remembered_len == remembered_cap) {
 		remembered_cap = remembered_cap ? remembered_cap * 2 : 4096;
-		remembered = realloc(remembered, remembered_cap * sizeof(void **));
+		remembered = (void ***)realloc(remembered, remembered_cap * sizeof(void **));
 	}
 	remembered[remembered_len++] = slot;
 }
@@ -212,19 +227,23 @@ static uint64_t bool_boxes[4];
 void rt_init(int ng, int argc, char **argv) {
 	rt_argc = argc;
 	rt_argv = argv;
+#ifdef __COSMOPOLITAN__
+	// an APE build may carry the Haxe standard library in its own zip (site/build.sh)
+	if (!getenv("HAXE_STD_PATH") && access("/zip/std/StdTypes.hx", R_OK) == 0) setenv("HAXE_STD_PATH", "/zip/std/", 1);
+#endif
 	const char *m = getenv("RT_MINOR_KB");
 	minor_size = (m ? (size_t)atoi(m) : 4096) << 10;
 	stats = getenv("RT_STATS") != NULL;
-	rt_young_start = rt_young_ptr = malloc(minor_size);
+	rt_young_start = rt_young_ptr = (char *)malloc(minor_size);
 	rt_young_limit = rt_young_start + minor_size;
-	for (int i = 0; i < 2; i++) {
 #ifdef __EMSCRIPTEN__
-		regions[i] = malloc(REGION); // Emscripten's mmap zero-fills eagerly
-		if (!regions[i]) {
+	old_start = old_ptr = (char *)malloc(32u << 20);
+	old_end = old_start + (32u << 20);
+	size_t stack_slots = 4u << 20;
 #else
+	for (int i = 0; i < 2; i++) {
 		regions[i] = mmap(NULL, REGION, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
 		if (regions[i] == MAP_FAILED) {
-#endif
 			fputs("cannot reserve heap\n", stderr);
 			exit(2);
 		}
@@ -232,9 +251,10 @@ void rt_init(int ng, int argc, char **argv) {
 	old_start = old_ptr = regions[0];
 	old_end = old_start + (64u << 20);
 	size_t stack_slots = 16u << 20;
-	stack_base = rt_sp = calloc(stack_slots, sizeof(void *));
+#endif
+	stack_base = rt_sp = (void **)calloc(stack_slots, sizeof(void *));
 	nglobals = ng;
-	rt_globals = calloc(ng + 1, sizeof(void *));
+	rt_globals = (void **)calloc(ng + 1, sizeof(void *));
 	for (int i = SMALL_MIN; i <= SMALL_MAX; i++) {
 		uint64_t *b = &small_ints[2 * (i - SMALL_MIN)];
 		b[0] = MKHDR(1, K_OBJ, T_BOXINT);

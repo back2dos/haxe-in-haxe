@@ -33,7 +33,7 @@ static int32_t intern(const char *name) {
 	if (f >= 0) return f;
 	if (nextra == capextra) {
 		capextra = capextra ? capextra * 2 : 64;
-		extra_names = realloc(extra_names, capextra * sizeof(char *));
+		extra_names = (char **)realloc(extra_names, capextra * sizeof(char *));
 	}
 	extra_names[nextra] = strdup(name);
 	return rt_nfield_names + nextra++;
@@ -41,7 +41,7 @@ static int32_t intern(const char *name) {
 
 int32_t hx_fid(void *name) {
 	char small[256];
-	char *buf = STR_LEN(name) * 3 + 1 <= (int32_t)sizeof small ? small : malloc(STR_LEN(name) * 3 + 1);
+	char *buf = STR_LEN(name) * 3 + 1 <= (int32_t)sizeof small ? small : (char *)malloc(STR_LEN(name) * 3 + 1);
 	hx_str_utf8_into(name, buf);
 	int32_t f = intern(buf);
 	if (buf != small) free(buf);

@@ -520,7 +520,7 @@ void *haxe_io_Bytes_getString(void *b, int32_t pos, int32_t len, void *encoding)
 	if (pos < 0 || len < 0 || pos + len > BYTES_LEN(b)) hx_throw_str("OutsideBounds");
 	// decoding allocates once at the end: copy the bytes out first
 	char small[256];
-	char *buf = len <= (int32_t)sizeof small ? small : malloc(len);
+	char *buf = len <= (int32_t)sizeof small ? small : (char *)malloc(len);
 	memcpy(buf, BYTES_DATA(b) + pos, len);
 	void *s = hx_str_of_utf8(buf, len);
 	if (buf != small) free(buf);
@@ -535,7 +535,7 @@ void *haxe_io_Bytes_ofString(void *s, void *encoding) {
 	(void)encoding;
 	char small[512];
 	size_t cap = 3 * (size_t)STR_LEN(s) + 1;
-	char *buf = cap <= sizeof small ? small : malloc(cap);
+	char *buf = cap <= sizeof small ? small : (char *)malloc(cap);
 	int32_t n = hx_str_utf8_into(s, buf);
 	void *b = haxe_io_Bytes_alloc(n);
 	memcpy(BYTES_DATA(b), buf, n);
