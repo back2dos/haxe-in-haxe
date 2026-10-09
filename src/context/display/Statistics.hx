@@ -195,7 +195,7 @@ class Statistics {
 			var key = Globals.sTypePath(m.mPath);
 			if (!handledModules.exists(key)) {
 				handledModules.set(key, true);
-				for (ic in m.mExtra.mDisplay.mInlineCalls) addRelation(ic.callPos, {r: Referenced, p: ic.definitionPos});
+				for (ic in m.mExtra.mDisplay.mInlineCalls) addRelation(ic.definitionPos, {r: Referenced, p: ic.callPos});
 				for (th in m.mExtra.mDisplay.mTypeHints) addRelation(th.typePos, {r: Referenced, p: th.hintPos});
 			}
 		}

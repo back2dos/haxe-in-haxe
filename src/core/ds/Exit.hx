@@ -10,5 +10,6 @@ class Exit extends haxe.Exception {
   #if hl hl.Api.rethrow(instance); #end
   return instance;
  }
- public function new() super("Exit");
+ // Printexc.to_string Exit
+ public function new() super("Stdlib.Exit");
 }

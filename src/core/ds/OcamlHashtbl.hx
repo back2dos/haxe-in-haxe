@@ -178,7 +178,9 @@ class OcamlHashtbl<K, V> {
 
 	/** OCaml's `Hashtbl.hash` / `Int.hash` on an int in the 32-bit range (caml_hash_mix_intnat, then FINAL_MIX). **/
 	public static function hashInt(d:Int):Int {
-		var h = mixWord(0, d);
+		// caml_hash mixes the tagged value Val_long(d) = 2d+1; for a 32-bit d the
+		// 64-bit fold `(i >> 32) ^ (i >> 63) ^ i` keeps only its low 32 bits.
+		var h = mixWord(0, (d << 1) | 1);
 		h ^= h >>> 16;
 		h = mul32(h, 0x85ebca6b);
 		h ^= h >>> 13;

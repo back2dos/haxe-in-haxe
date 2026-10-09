@@ -141,7 +141,12 @@ class Path {
 		return "/" + normalized.join("/");
 	}
 
-	public static function getRealPath(path:String):String return try FileSystem.fullPath(path) catch (_:Dynamic) path;
+	public static function getRealPath(path:String):String {
+		// Extc.get_real_path fails for a missing file (falling back to `path`);
+		// HashLink's fullPath returns null instead of throwing.
+		var r = try FileSystem.fullPath(path) catch (_:Dynamic) null;
+		return r == null ? path : r;
+	}
 	public static function addTrailingSlash(path:String):String return path.length == 0 ? "./" : switch (path.charAt(path.length - 1)) { case "/" | "\\": path; case _: path + "/"; };
 	public static function removeTrailingSlash(path:String):String {
 		while (path.length > 0 && (path.charAt(path.length - 1) == "/" || path.charAt(path.length - 1) == "\\")) path = path.substr(0, path.length - 1);

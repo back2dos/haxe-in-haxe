@@ -107,7 +107,8 @@ class Typeload {
  public static function loadQualifiedTypeDef(ctx:Typer,pack:Array<String>,mname:String,tname:String,p:Pos):Dynamic return findTypeInModuleRaise(ctx,loadModule(ctx,{pack:pack,name:mname},p),tname,p);
  public static function loadTypeDefPrime(ctx:Typer,pack:Array<String>,mname:String,tname:String,p:Pos):Dynamic return pack.length==0?loadUnqualifiedTypeDef(ctx,mname,tname,p):loadQualifiedTypeDef(ctx,pack,mname,tname,p);
  public static function loadTypeDef(ctx:Typer,p:Pos,t:Dynamic):Dynamic {
-  if(core.ds.Key.compare(t,Parser.magicTypePath)==0) context.display.DisplayException.raiseFields(context.display.DisplayToplevel.collect(ctx,TKType,NoValue,true),CRTypeHint,core.DisplayTypes.DisplayTypes.makeSubject(null,p));
+  // `t = Parser.magic_type_path` is OCaml structural equality ({[]; ""; []; None})
+  if(t.tpackage.length==0&&t.tname==""&&(t.tparams==null||t.tparams.length==0)&&t.tsub==null) context.display.DisplayException.raiseFields(context.display.DisplayToplevel.collect(ctx,TKType,NoValue,true),CRTypeHint,core.DisplayTypes.DisplayTypes.makeSubject(null,p));
   var name=t.tsub==null?t.tname:t.tsub;
   try {if(t.tsub!=null) throw NotFound.raise(); return findTypeInCurrentModuleContext(ctx,t.tpackage,name);} catch(exc:Dynamic) {if(!Std.isOfType(exc,NotFound)) throw exc; return loadTypeDefPrime(ctx,t.tpackage,t.tname,name,p);}
  }

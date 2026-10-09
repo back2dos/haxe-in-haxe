@@ -169,7 +169,9 @@ class DiagnosticsPrinter {
 			} else if (d.cmDepth > 0 && current != null) {
 				var diag = current;
 				var depth = d.cmDepth;
-				var lines = d.cmMessage.split("\n");
+				// ExtString.String.nsplit "" returns []
+				var lines = d.cmMessage == "" ? [] : d.cmMessage.split("\n");
+				if (lines.length == 0) continue;
 				var s = lines[0];
 				var sub = lines.slice(1);
 				var rsub = sub.copy();
