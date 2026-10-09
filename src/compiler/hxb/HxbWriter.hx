@@ -1195,7 +1195,7 @@ class HxbWriter {
 				chunk.writeU8(50);
 				writeEnumRef(en);
 			case TType(td, []):
-				function defaultCase() {
+				inline function defaultCase() {
 					chunk.writeU8(60);
 					writeTypedefRef(td);
 				}
@@ -1264,7 +1264,7 @@ class HxbWriter {
 	}
 
 	function writeTexpr(fctx:FieldWriterContext, e:TExpr):Void {
-		function declareVar(v:TVar) {
+		inline function declareVar(v:TVar) {
 			var index = if (TFunctions.hasVarFlag(v, VHxb)) {
 				// Duplicate var declaration! Can happen when writing both cf_expr and cf_expr_unoptimized,
 				// although it arguably shouldn't. In this case we don't add the var again and instead write

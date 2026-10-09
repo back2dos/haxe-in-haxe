@@ -244,7 +244,7 @@ class InlineState {
    case _:mapExpr(e -> inlineParams(false,false,e),e);
   };
   if (subst.iterator().hasNext()) e = inlineParams(false,false,e); var md = scom.curclass.clModule.mExtra.mDisplay; var endPos:Pos = core.ds.Record.copy(p); endPos.pmax = p.pmin + cf.cfName.length; md.mInlineCalls.unshift({definitionPos:cf.cfNamePos,callPos:endPos});
-  function wrap(e:TExpr):TExpr {var etype = hasParams ? mapType(e.etype) : e.etype; try {switch follow(e.etype) {
+  inline function wrap(e:TExpr):TExpr {var etype = hasParams ? mapType(e.etype) : e.etype; try {switch follow(e.etype) {
    case TMono(_) | TInst({clKind:KTypeParameter(_)},_):switch follow(tret) {case TAbstract({aPath:{pack:[],name:"Void"}},_):case _:throw new core.TUnification.Unify_error([]);}
    case _:var uctx = defaultUnificationContext(); uctx.equalityKind = EqStrict; uctx.nullFollowMode = scom.platformConfig.pfStatic ? NeverFollow : AlwaysFollow; typeEqCustom(uctx,etype,tret);
 		} return e;} catch (_:core.TUnification.Unify_error) return mk(TCast(e,null),tret,e.epos);}
@@ -252,9 +252,9 @@ class InlineState {
   else if (vars.length == 0) e = switch e.eexpr {case TBlock([inner]):wrap(inner); case _:wrap(e);};
   else {var el = []; for (v in vars) el.push(mk(TVar(v.variable,v.expr),scom.basic.tvoid,e.epos)); for (item in inlinedVars) {var l = item.local; if (l.iDefaultValue != null && l.iRead > 0) {var de = l.iDefaultValue; el.push(setDefault(scom.basic,l.iSubst,duplicateTvars(eIdentity,de),de.epos));}} switch e.eexpr {case TBlock(body):el = el.concat(body); case _:el.push(e);} e = mk(TBlock(el),tret,e.epos);}
   e = Inline.inlineMetadata(e,cf.cfMeta);
-  if (hasParams) {var mt = mapType(cf.cfType); function unifyFunc():Void context.Typecore.unifyRaise(mt,TFun({args:tl,ret:tret}),p); switch follow(ethis.etype) {case TAnon(a):switch a.aStatus {case ClassStatics({clKind:KAbstractImpl(a)}) if (hasClassFieldFlag(cf,CfImpl)):if (!hasClassFieldFlag(cf,CfAbstractConstructor)) {if (tl.length == 0) throw "Failure: tl"; var args = [{name:"",optional:false,type:mapType(a.aThis)}].concat(tl.slice(1)); context.Typecore.unifyRaise(mt,TFun({args:args,ret:tret}),p);} case _:unifyFunc();} case _:unifyFunc();}}
+  if (hasParams) {var mt = mapType(cf.cfType); inline function unifyFunc():Void context.Typecore.unifyRaise(mt,TFun({args:tl,ret:tret}),p); switch follow(ethis.etype) {case TAnon(a):switch a.aStatus {case ClassStatics({clKind:KAbstractImpl(a)}) if (hasClassFieldFlag(cf,CfImpl)):if (!hasClassFieldFlag(cf,CfAbstractConstructor)) {if (tl.length == 0) throw "Failure: tl"; var args = [{name:"",optional:false,type:mapType(a.aThis)}].concat(tl.slice(1)); context.Typecore.unifyRaise(mt,TFun({args:args,ret:tret}),p);} case _:unifyFunc();} case _:unifyFunc();}}
   var mappedVars = new haxe.ds.IntMap<Bool>(); var mapExpression:T->T->TExpr; var mapExprTypeLocal:(T->T)->TExpr->TExpr = null;
-  function mapVar(mapType:T->T,v:TVar):TVar {if (!mappedVars.exists(v.vId)) {mappedVars.set(v.vId,true); if (!read(v).iOutside) {v.vType = mapType(v.vType); if (v.vExtra != null && v.vExtra.vExpr != null) v.vExtra = varExtra(v.vExtra.vParams,mapExprTypeLocal(mapType,v.vExtra.vExpr));}} return v;}
+  inline function mapVar(mapType:T->T,v:TVar):TVar {if (!mappedVars.exists(v.vId)) {mappedVars.set(v.vId,true); if (!read(v).iOutside) {v.vType = mapType(v.vType); if (v.vExtra != null && v.vExtra.vExpr != null) v.vExtra = varExtra(v.vExtra.vParams,mapExprTypeLocal(mapType,v.vExtra.vExpr));}} return v;}
   mapExprTypeLocal = function(mapType:T->T,e:TExpr):TExpr {var mapper = params.contains(e) ? t -> t : mapType; var e = Texpr.mapExprType(e -> mapExprTypeLocal(mapper,e),mapper,v -> mapVar(mapper,v),e); return typing.OverloadResolution.maybeReapplyOverloadCall(e);};
   e = mapExprTypeLocal(mapType,e);
   function dropUnused(e:TExpr):TExpr return switch e.eexpr {case TVar(v,{eexpr:TConst(_)}):var data = locals.get(v.vId); if (data != null && data.iRead == 0 && data.iCalled == 0 && !data.iWrite) mk(TBlock([]),e.etype,e.epos); else mapExpr(dropUnused,e); case _:mapExpr(dropUnused,e);};

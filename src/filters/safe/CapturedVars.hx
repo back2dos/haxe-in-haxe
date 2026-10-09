@@ -12,7 +12,7 @@ import haxe.ds.IntMap;
 class CapturedVars {
 	static function ids<T>(m:IntMap<T>):Array<Int> { var a = [for (i in m.keys()) i]; a.sort((a, b) -> a - b); return a; }
 	public static function capturedVars(scom:context.SafeCom.SafeContext, impl:Dynamic, forCoro:Bool, e:TExpr):TExpr {
-		function mkVar(v:TVar, used:IntMap<T>):TVar {
+		inline function mkVar(v:TVar, used:IntMap<T>):TVar {
 			if (!used.exists(v.vId)) throw "Not_found";
 			var v2 = TypeOps.allocVar(v.vKind, v.vName, used.get(v.vId), v.vPos);
 			v2.vMeta = v.vMeta; return v2;
@@ -68,7 +68,7 @@ class CapturedVars {
 			};
 			return TypeOps.mk(def, e.etype, e.epos);
 		}
-		function doWrap(used:IntMap<TVar>, e:TExpr):TExpr {
+		inline function doWrap(used:IntMap<TVar>, e:TExpr):TExpr {
 			var keys = ids(used);
 			if (keys.length == 0) return e;
 			var types = new IntMap<T>();
@@ -96,12 +96,12 @@ class CapturedVars {
 				case _: return core.Texpr.mapExpr(outLoop, e);
 			}
 		}
-		function allVars(e:TExpr):IntMap<TVar> {
+		inline function allVars(e:TExpr):IntMap<TVar> {
 			// Scoped maps: restoring a saved PMap is a rollback rather than a copy per scope.
 			var vars = new core.ds.ScopedIntMap(); var used = new IntMap<TVar>();
 			var inLoop = false; var loopVars = new core.ds.ScopedIntMap(); /* 1 when assigned */ var assigned = new IntMap<TVar>(); var depth = 0;
-			function markAssigned(v:TVar):Void { assigned.set(v.vId, v); vars.remove(v.vId); }
-			function checkLoopVar(v:TVar, isAssign:Bool):Void {
+			inline function markAssigned(v:TVar):Void { assigned.set(v.vId, v); vars.remove(v.vId); }
+			inline function checkLoopVar(v:TVar, isAssign:Bool):Void {
 				if (!inLoop) return;
 				if (loopVars.exists(v.vId)) { if (isAssign != (loopVars.get(v.vId) == 1)) markAssigned(v); }
 				else loopVars.set(v.vId, isAssign ? 1 : 0);
