@@ -23,26 +23,27 @@ LD_LIBRARY_PATH=/path/to/patched/hashlink HAXE_REFERENCE=haxe/haxe python3 bench
 
 Same container and build as below. Median of 5 runs (3 for memory); every
 archive byte-identical. The machine's speed drifted by 10–15% during the
-night (the reference took 3.9–4.5s for `self`), so changes were compared in
+night (the reference took 3.9–4.8s for `self`), so changes were compared in
 interleaved A/B runs and the ratios below come from runs taken together.
 
 | Workload | reference | HL/C | ratio | night pass |
 | --- | ---: | ---: | ---: | ---: |
-| self, `-D disable-parallelism` | 4.48s / 414 MB | 6.14s / 1252 MB | 1.4× | 1.7× (1083 MB) |
-| self, parallel | 3.06s / 472 MB | 4.49s / 1500 MB | 1.5× | 2.0× (1593 MB) |
-| stdlib | 0.24s | 0.33s | 1.4× | |
-| hello | 0.12s | 0.16s | 1.3× | |
+| self, `-D disable-parallelism` | 4.81s / 414 MB | 6.17s / 1348 MB | 1.3× | 1.7× (1083 MB) |
+| self, parallel | 3.41s / 472 MB | 4.95s / 1412 MB | 1.45× | 2.0× (1593 MB) |
+| stdlib | 0.23s | 0.32s | 1.4× | |
+| hello | 0.12s | 0.15s | 1.25× | |
 
-On a quieter stretch earlier in the pass the same build of `self` ran in
-5.48s against the reference's 3.98s.
+These are the last runs of the pass, taken interleaved while the machine was
+at its slowest. On a quieter stretch an earlier build of `self` ran in 5.48s
+against the reference's 3.98s.
 
 | Eval (`bench/interp.py`) | reference Eval | port Eval (HL/C) | ratio | night pass |
 | --- | ---: | ---: | ---: | ---: |
-| Fib | 0.34s | 0.47s | 1.4× | 1.6× |
-| NBody | 0.62s | 0.98s | 1.6× | 1.6× |
-| Strings | 0.32s | 0.34s | 1.1× | 1.3× |
-| Objects | 1.49s | 2.03s | 1.4× | 1.5× |
-| Json | 0.15s | 0.23s | 1.5× | 1.7× |
+| Fib | 0.29s | 0.42s | 1.4× | 1.6× |
+| NBody | 0.62s | 0.90s | 1.45× | 1.6× |
+| Strings | 0.31s | 0.33s | 1.1× | 1.3× |
+| Objects | 1.44s | 1.92s | 1.3× | 1.5× |
+| Json | 0.15s | 0.22s | 1.5× | 1.7× |
 
 What changed, roughly by effect:
 
@@ -67,7 +68,8 @@ What changed, roughly by effect:
   definition runs. The typer's `typeField`, `fieldAccess`, call unification,
   cast checks and pattern conversion, and several analyzer and parser
   functions, allocated a dozen or more per call. Helpers that are only called
-  are now `inline` (5–7% on `self`). `Texpr` walkers that passed a typed
+  are now `inline`, first in the hot functions and then in every package
+  (8–10% on `self` together). `Texpr` walkers that passed a typed
   function through a generic parameter got a wrapper closure per call.
 - **Quadratic translations of persistent structures.** `captured_vars`
   copied its variable maps at every block (OCaml PMap snapshots are free):
