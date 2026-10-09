@@ -353,6 +353,7 @@ void *String_split(void *s, void *delim) {
 	RT_ROOT(delim);
 	void *arr = hx_arr_new(AK_PTR, 0);
 	RT_ROOT(arr);
+	RT_RELOAD(delim); // hx_arr_new may have moved it (a stale delim's length is its forwarding address)
 	int32_t m = STR_LEN(delim);
 	int32_t start = 0;
 	for (;;) {

@@ -1,6 +1,6 @@
 // Regressions found compiling haxe-formatter with hxc (bench/README.md, 2026-10-09):
 //   haxe -lib hxc -cp backend/bench/regress -main Regress -dce full --custom-target hxc=bin/regress && bin/regress
-// prints "ok" four times.
+// prints "ok" five times.
 class Regress {
 	static function main() {
 		// -dce full removed haxe.Exception.caught/thrown, which only the backend calls
@@ -22,5 +22,16 @@ class Regress {
 			n++;
 		Sys.println(n == 2 ? "ok" : "isEof: " + n);
 		Sys.println(StringTools.isEof(StringTools.fastCodeAt("", 0)) ? "ok" : "isEof past the end");
+		// String.split read the delimiter's length after allocating its result
+		// array: a minor collection there moved a young delimiter, and the length
+		// came from the forwarding address (crashed or split wrongly, depending
+		// on where the heap was mapped)
+		var bad = 0;
+		for (i in 0...1000000) {
+			var delim = (",;" + i).substr(0, 2); // a young ",;"
+			var shift = haxe.io.Bytes.alloc(i % 61); // varies where the nursery fills up
+			if ("a,;b,;c".split(delim).length != 3 + shift.length * 0) bad++;
+		}
+		Sys.println(bad == 0 ? "ok" : "split: " + bad);
 	}
 }
