@@ -251,7 +251,9 @@ class Threads {
 					sem.acquire();
 					var v = q.pop(true);
 					if (v[0] < 0) break;
+					m.acquire(); // two consumers: with OS threads an unguarded ++ loses counts
 					got++;
+					m.release();
 				}
 				done.release();
 			});

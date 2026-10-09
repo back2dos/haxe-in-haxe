@@ -136,7 +136,8 @@ void *hxc_NativeSys_systemName(void) {
 int32_t hxc_NativeSys_command(void *cmd) {
 	char *c = hx_str_to_utf8(cmd);
 	fflush(stdout);
-	int r = system(c);
+	int r;
+	RT_BLOCKING(r = system(c)); // c is malloc'ed: no heap pointer
 	free(c);
 	if (r == -1) return -1;
 	return WIFEXITED(r) ? WEXITSTATUS(r) : 128 + WTERMSIG(r);
@@ -420,9 +421,19 @@ int32_t hxc_NativeSys_processRun(void *cmd, void *args, void *fds) {
 
 int32_t hxc_NativeSys_processWait(int32_t pid, int32_t block) {
 	int st;
+#if RT_MT
+	// OS threads: wait in a safe region
+	for (;;) {
+		pid_t r;
+		RT_BLOCKING(r = waitpid(pid, &st, block ? 0 : WNOHANG));
+		if (r < 0 && errno == EINTR) continue;
+		if (r <= 0) return -1;
+		break;
+	}
+#else
 	double pause = 0.001;
 	for (;;) {
-		int coop = block && rt_nthreads > 1; // poll the child, sleeping in between
+		int coop = block && rt_nthreads > 1; // green threads: poll the child, sleeping in between
 		pid_t r = waitpid(pid, &st, block && !coop ? 0 : WNOHANG);
 		if (r < 0 && errno == EINTR) continue;
 		if (r == 0 && coop) {
@@ -434,6 +445,7 @@ int32_t hxc_NativeSys_processWait(int32_t pid, int32_t block) {
 		if (r < 0) return -1;
 		break;
 	}
+#endif
 	if (WIFEXITED(st)) return WEXITSTATUS(st);
 	if (WIFSIGNALED(st)) return 128 + WTERMSIG(st);
 	return -1;
