@@ -80,6 +80,8 @@ class Compiler {
  }
  public static function finalizeTyping(com:CommonContext,tctx:Typer):Void Timer.time(com.timerCtx,["finalize"],function(tctx) {finalizeTypingImpl(com,tctx);return null;},tctx);
  public static function filter(com:CommonContext,tctx:Typer,ectx:Dynamic,beforeDestruction:Void->Void):Void Timer.time(com.timerCtx,["filters"],function(_:Null<Bool>) return runOrDiagnose(com,function() {filters.Filters.run(com,ectx,beforeDestruction);return null;}),null);
+ // Not upstream: experimental code generators (backend/) receive the filtered program here. Always null in the compiler itself.
+ public static var generateHook:Null<CommonContext->Void>=null;
  public static function compile(com:CommonContext,actx:ArgContext,sctx:Dynamic):Void {
   if(sctx.isServer)throw new ArgumentError("Compilation server services require the server milestone");
   if(com.display.dmsKind!=DMNone||actx.displayArg!=null)throw new ArgumentError("Display services require the display/server milestone");
@@ -105,7 +107,7 @@ class Compiler {
    filter(com,tctx,ectx,function(){});
    if(hasError(com)&&isCompilation)throw new Abort();if(isCompilation)Generate.checkAuxiliaryOutput(com,actx);
    Common.enterStage(com,CGenerationStart);codegen.Dump.maybeGenerateDump(com,AfterDce);Generate.maybeGenerateDumpDependencies(com,tctx);
-   if(!actx.noOutput)Generate.generate(com,tctx,ext,actx);Common.enterStage(com,CGenerationDone);
+   if(!actx.noOutput)Generate.generate(com,tctx,ext,actx);if(generateHook!=null)generateHook(com);Common.enterStage(com,CGenerationDone);
   }
   // The Haxe host owns signal handling; this port does not install OCaml Sys.catch_break.
   com.callbacks.run(com.errorExt,com.callbacks.getAfterGeneration());
