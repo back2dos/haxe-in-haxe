@@ -19,6 +19,22 @@ class HxbFailure {
 	}
 }
 
+typedef CachedChunk = {kind:ChunkKind, data:haxe.io.Bytes};
+typedef CachedChunks = Array<CachedChunk>;
+
+@:structInit class ModuleCache {
+	public var mcPath:core.Globals.GlobalTypePath;
+	public var mcId:Int;
+	public var mcChunks:CachedChunks;
+	public var mcExtra:core.TType.ModuleDefExtra;
+	public inline function new(mcPath:core.Globals.GlobalTypePath, mcId:Int, mcChunks:CachedChunks, mcExtra:core.TType.ModuleDefExtra) { this.mcPath = mcPath; this.mcId = mcId; this.mcChunks = mcChunks; this.mcExtra = mcExtra; }
+}
+
+enum TypingMode {
+	FullTyping;
+	AllowPartialTyping;
+}
+
 class HxbData {
 	public static inline var VERSION = 1;
 

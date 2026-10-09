@@ -161,7 +161,7 @@ enum ParseInputResult { NeedsTyping;NoCompletionPointFound;Completed; }
 	public inline function clone():ResultHandler return new ResultHandler(sendResult, sendResultRaise, sendError, sendErrorRaise, flushMessages, setCom);
 }
 typedef CommonContext = {
- var requestScope:RequestScope;var partScope:PartScope;var stage:CompilerStage;var sctx:Dynamic;var cs:Dynamic;var cache:Dynamic;var isMacroContext:Bool;var timerCtx:Dynamic;
+ var requestScope:RequestScope;var partScope:PartScope;var stage:CompilerStage;var sctx:compiler.server.ServerCompilationContext;var cs:compiler.CompilationCache.Cache;var cache:Null<compiler.CompilationCache.ContextCache>;var isMacroContext:Bool;var timerCtx:Dynamic;
  var parsedArgs:Array<compiler.ParsedArg>;var display:DisplaySettings;var debug:Bool;var verbose:Bool;var foptimize:Bool;var doinline:Bool;var platform:Platform;var config:PlatformConfig;var customExt:Null<String>;
  var emptyClassPath:Dynamic;var classPaths:Dynamic;var main:{mainPath:Null<GlobalTypePath>,mainFile:Dynamic,mainExpr:Null<TExpr>};var packageRules:haxe.ds.StringMap<PackageRule>;
  var error:String->Pos->Void;var errorExt:Dynamic->Void;var info:(msg:String,p:Pos,?depth:Int)->Void;var warning:(w:Dynamic,options:Array<Array<WarningOption>>,msg:String,p:Pos,?depth:Int)->Void;var warningOptions:Array<Array<WarningOption>>;var getMessages:Void->Array<Dynamic>;
@@ -251,7 +251,7 @@ class Common {
   tnull:function(_) throw "Could use locate abstract Null<T> (was it redefined?)",tarray:function(_) throw "Could not locate class Array<T> (was it redefined?)",titerator:function(_) throw "Could not locate typedef Iterator<T> (was it redefined?)",tunit:mkMono(),
   tcoro:{tcoro:AtomicLazy.fromFun(function():TSignature->T return function(_:TSignature):T throw "Could not locate abstract Coroutine<T> (was it redefined?)"),continuation:AtomicLazy.fromFun(function() return mkMono()),suspensionResultClass:AtomicLazy.fromFun(function() return nullClass),tasyncIterator:AtomicLazy.fromFun(function():T->T return function(_:T):T throw "Could not locate typedef AsyncIterator<T> (was it redefined?)")}
  };
- public static function create(sctx:Dynamic,requestScope:RequestScope,partScope:PartScope,displayMode:DisplaySettings):CommonContext {
+ public static function create(sctx:compiler.server.ServerCompilationContext,requestScope:RequestScope,partScope:PartScope,displayMode:DisplaySettings):CommonContext {
   // OCaml links Type's reference initialization before constructing basic types.
   // Explicit setup retains that step when callers import the split modules.
   core.Type.initialize();

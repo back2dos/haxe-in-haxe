@@ -37,9 +37,9 @@ import compiler.Helper.HelpMessage;
 }
 // Port of the parse_args portion of haxe/src/compiler/args.ml.
 class Args {
- // haxe/src/compiler/args.ml: request expansion (haxelib/server execution deferred).
+ // haxe/src/compiler/args.ml: to_raw_args (the --connect wire format) and expand_args.
  public static function toRawArgs(args:Array<ParsedArg>):Array<String> {
-  inline function raw(arg:ParsedArg):Array<String> return switch arg {
+  function raw(arg:ParsedArg):Array<String> return switch arg {
    case SetPlatform(platform,file):["--"+switch platform {case Flash:"swf";case Js:"js";case Lua:"lua";case Neko:"neko";case Php:"php";case Cpp:"cpp";case Jvm:"jvm";case Python:"python";case Hl:"hl";},file];
    case SetCppiaTarget(file):["--cppia",file];
    case SetCustomTarget(name,path):["--custom-target",path==""?name:name+"="+path];
@@ -52,7 +52,7 @@ class Args {
    case AddNekoLibPath(dir):["--neko-lib-path",dir];case Remap(pack,target):["--remap",pack+":"+target];case SetCustomExtension(ext):["--custom-extension",ext];
    case AddMacro(e):["--macro",e];case SetDisplayArg(input):["--display",input];case SetXmlOut(file):["--xml",file];case SetJsonOut(file):["--json",file];case SetHxbOut(file):["--hxb",file];
    case SetNoOutput:["--no-output"];case SetMeasureTimes:["--times"];case AddWarning(s):["-w",s];case AddClass(path):[path.join(".")];case IncludeModule(cl):[cl];
-   case SetPrompt:["--prompt"];case Next:["--next"];case Each:["--each"];case ServerListen(hp):["--wait",hp];case ServerConnect(hp):["--server-connect",hp];case Connect(hp):["--connect",hp];
+   case SetPrompt:["--prompt"];case Next:["--next"];case Each:["--each"];case Expand(ex):var out=[];for(a in ex.original) out=out.concat(raw(a));out;case ServerListen(hp):["--wait",hp];case ServerConnect(hp):["--server-connect",hp];case Connect(hp):["--connect",hp];
    case Cwd(dir):["--cwd",dir];case HxmlFile(path):[path];case ShowVersion:["--version"];case ShowHelp:["--help"];case ShowHelpDefines:["--help-defines"];case ShowHelpMetas:["--help-metas"];case ShowHelpUserDefines:["--help-user-defines"];case ShowHelpUserMetas:["--help-user-metas"];
   };
   var output=[];for (arg in args) output=output.concat(raw(arg));return output;
@@ -72,7 +72,10 @@ class Args {
     case ServerListen(hp):serverMode=SMListen(hp);
     case Run(cl,runtime):current.push(SetMain(parseTypePath(cl)));current.push(Interp);addPart(current,runtime.concat(toRawArgs(args.slice(i))));return;
     case RunX(cl):current.push(SetMain(parseTypePath(cl)));current.push(Interp);
-    case AddLib(_):throw new ArgumentError("Haxelib integration is outside the source-only HXB milestone");
+    case AddLib(name):
+     var libs=[name];
+     while (i<args.length) switch args[i] {case AddLib(name):libs.push(name);i++;case _:break;}
+     current.push(Expand(new ExpandingArg(libs.map(name->AddLib(name)),NotYetExpanded(AddLibs(libs,core.Path.removeTrailingSlash(Sys.getCwd()))))));
     case HxmlFile(path):
      var fullPath:String;
      try fullPath=sys.FileSystem.fullPath(path) catch (_:Dynamic) {throw new ArgumentError("File not found: "+path);}
@@ -98,7 +101,7 @@ class Args {
    var p=req.parts[i],args=toRawArgs(p.args).map(quote).join(" "),runtime=p.runtimeArgs.map(quote).join(" ");
    "  Part "+(i+1)+": "+args+(runtime==""?"":" -- "+runtime);
   }];
-  return ["server_mode: "+mode,"connect_arg: "+(req.connectArg==null?"<none>":req.connectArg),"display_arg: "+(req.displayArg==null?"<none>":req.displayArg)].concat(parts).join("\n");
+  return ["server_mode: "+mode,"connect_arg: "+(req.connectArg==null?"<none>":req.connectArg),"display_arg: "+(req.displayArg==null?"<none>":req.displayArg),"parts:",parts.join("\n")].join("\n");
  }
 
  public static function limitString(s:String,offset:Int):String {
@@ -148,7 +151,7 @@ class Args {
    case AddWarning(s):com.warningOptions.unshift(Warning.parseOptions(s,Globals.fakePos("-w "+s)));
    case AddClass(path):actx.classes.unshift(globalPath(path));case IncludeModule(cl):actx.forceTyping=true;actx.configMacros.unshift("include('"+cl+"', true, null, null, true)");
    case SetPrompt:Helper.prompt=true;case Cwd(dir):try Sys.setCwd(dir)catch(_:Dynamic)throw new ArgumentError("Invalid directory: "+dir);actx.didSomething=true;
-   case HxmlFile(_)|Next|Each|ServerListen(_)|ServerConnect(_)|Connect(_): // Request-layer directives.
+   case HxmlFile(_)|Next|Each|Expand(_)|ServerListen(_)|ServerConnect(_)|Connect(_): // Request-layer directives.
    case ShowVersion:throw new HelpMessage(Globals.sVersionFull(com.sctx.version));case ShowHelp:throw new HelpMessage(usageString(usage,true));
    case ShowHelpDefines:docs(Defines.getDocumentationList(com.userDefines));case ShowHelpMetas:docs(Meta.getDocumentationList(com.userMetas));
    case ShowHelpUserDefines:actx.didSomething=true;com.callbacks.addAfterInitMacros(function()docs(Defines.getUserDocumentationList(com.userDefines)));

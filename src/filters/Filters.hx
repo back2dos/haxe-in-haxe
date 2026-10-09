@@ -200,25 +200,27 @@ class Filters {
 				}
 				inline function mkOverloadRestore(f:TClassField):Dynamic {
 					TypeOps.addClassFieldFlag(f, CfPostProcessed);
-					return {name:f.cfName, kind:f.cfKind, expr:f.cfExpr, type:f.cfType, meta:f.cfMeta, params:f.cfParams};
+					// cf_meta and cf_params are immutable lists upstream; the port's arrays are
+					// modified in place, so the saved state holds copies.
+					return {name:f.cfName, kind:f.cfKind, expr:f.cfExpr, type:f.cfType, meta:f.cfMeta.copy(), params:f.cfParams.copy()};
 				}
 				function mkFieldRestore(f:TClassField):Dynamic {
 					if (f.cfExpr != null) saveVars(f.cfExpr);
 					return {field:f, state:mkOverloadRestore(f), overloads:f.cfOverloads.map(f -> {field:f, state:mkOverloadRestore(f)})};
 				}
 				inline function restoreOne(f:TClassField, s:Dynamic):TClassField {
-					f.cfName = s.name; f.cfKind = s.kind; f.cfExpr = s.expr; f.cfType = s.type; f.cfMeta = s.meta; f.cfParams = s.params; return f;
+					f.cfName = s.name; f.cfKind = s.kind; f.cfExpr = s.expr; f.cfType = s.type; f.cfMeta = (s.meta:Metadata).copy(); f.cfParams = (s.params:TypeParams).copy(); return f;
 				}
 				function restoreField(saved:Dynamic):TClassField {
 					var f = restoreOne(saved.field, saved.state);
 					f.cfOverloads = [for (o in (cast saved.overloads:Array<Dynamic>)) restoreOne(o.field, o.state)]; return f;
 				}
 				inline function mkPmap(lst:Array<TClassField>):StringMap<TClassField> { var map = new StringMap(); for (f in lst) map.set(f.cfName, f); return map; }
-				var meta = c.clMeta; var path = c.clPath; var ext = TypeOps.hasClassFlag(c, CExtern); var sup = c.clSuper; var impl = c.clImplements.copy();
+				var meta = c.clMeta.copy(); var path = c.clPath; var ext = TypeOps.hasClassFlag(c, CExtern); var sup = c.clSuper; var impl = c.clImplements.copy();
 				var csr = c.clConstructor == null ? null : mkFieldRestore(c.clConstructor);
 				var ofr = c.clOrderedFields.map(mkFieldRestore); var osr = c.clOrderedStatics.map(mkFieldRestore); var init = c.clInit == null ? null : mkFieldRestore(c.clInit);
 				c.clRestore = function() {
-					c.clSuper = sup; c.clImplements = impl.copy(); c.clMeta = meta;
+					c.clSuper = sup; c.clImplements = impl.copy(); c.clMeta = meta.copy();
 					if (ext) TypeOps.addClassFlag(c, CExtern); else TypeOps.removeClassFlag(c, CExtern);
 					c.clPath = path; c.clInit = init == null ? null : restoreField(init);
 					c.clOrderedFields = ofr.map(restoreField); c.clOrderedStatics = osr.map(restoreField);

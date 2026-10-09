@@ -41,12 +41,21 @@ private class PipeOutput extends Output {
    done.release();
   });
  }
+ // Like an OCaml out_channel, writes are buffered (65536 bytes) until flushed;
+ // the pipe then delivers them in chunks of at most 1024 bytes.
+ var buffer=new haxe.io.BytesBuffer();
+ static inline var CHANNEL_BUFFER_SIZE=65536;
  override public function writeByte(byte:Int):Void {var bytes=haxe.io.Bytes.alloc(1);bytes.set(0,byte);writeBytes(bytes,0,1);}
  override public function writeBytes(bytes:haxe.io.Bytes,pos:Int,len:Int):Int {
   if(closed) throw haxe.io.Error.Custom("Output is closed");
   if(pos<0 || len<0 || pos+len>bytes.length) throw haxe.io.Error.OutsideBounds;
-  var left=len;while(left>0) {var n=Std.int(Math.min(left,1024));queue.add(bytes.sub(pos,n));pos+=n;left-=n;}return len;
+  buffer.addBytes(bytes,pos,len);if(buffer.length>=CHANNEL_BUFFER_SIZE) flush();return len;
  }
- override public function close():Void {if(!closed) {closed=true;queue.add(null);}}
+ override public function flush():Void {
+  if(buffer.length==0) return;
+  var bytes=buffer.getBytes();buffer=new haxe.io.BytesBuffer();
+  var pos=0,left=bytes.length;while(left>0) {var n=Std.int(Math.min(left,1024));queue.add(bytes.sub(pos,n));pos+=n;left-=n;}
+ }
+ override public function close():Void {if(!closed) {flush();closed=true;queue.add(null);}}
  public function join():Void done.wait();
 }

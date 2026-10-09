@@ -383,8 +383,8 @@ class Typeload {
    com2.classPaths.lockContext(ctx.com.customExt,platformNameMacro(ctx.com),true);
    com2.classPaths.modify(function(cp:core.ClassPath.IClassPath) return switch cp.scope {case core.ClassPath.ClassPathScope.Std:[cp.clone()]; case _:[];},ctx.com.classPaths.asList());
    if(com2.display.dmsCheckCoreApi) {var copy=core.ds.Record.copy(com2.display); copy.dmsCheckCoreApi=false; com2.display=copy;}
-   // Server cache linking is deferred; define-signature computation still occurs.
-   Define.getSignature(com2.defines);
+   context.CommonCache.lockSignature(com2,"load_core_class");
+   context.CommonCache.getCache(ctx.com).addChild(context.CommonCache.getCacheSign(com2));
    ctx2=createContextRef(com2,ctx.g.macros); ctx.g.coreApi=ctx2;
   }
   var path=switch c.clKind {case KAbstractImpl(a):a.aPath; case _:c.clPath;};

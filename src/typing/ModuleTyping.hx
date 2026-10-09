@@ -189,6 +189,12 @@ class ModuleTyping {
  }
  public static function loadModulePrime(com:CommonContext,g:TyperGlobals,path:GlobalTypePath,p:Pos):ModuleDef {
   Common.checkCancellation(com);try{return com.moduleLut.find(path);}catch(_:NotFound){}
+  // Check cache
+  switch TypeloadCacheHook.typeModuleHook(com,(pass,f)->delay(g,pass,f),path,p) {
+   case GoodModule(m):return m;
+   case BinaryModule(_):return Globals.die("","typeloadModule.ml"); // The server builds those
+   case NoModule|BadModule(_)|BadBinaryModule(_,_):
+  }
   if(com.hxbLibs.length>0)Error.raiseTypingError("HXB library input is outside the source-only HXB milestone",p);
   inline function missing():Dynamic return Error.raiseErrorMsg(ModuleNotFound(path),p);
   if(com.moduleNonexistentLut.mem(path)||g.loadOnlyCachedModules)return missing();

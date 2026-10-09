@@ -30,9 +30,12 @@ import compiler.io.CompilerIo;
 import compiler.io.CompilerMessage;
 import compiler.io.CompilerOutput;
 import typing.Finalization;
-// haxe/src/compiler/compiler.ml — mechanical draft; not compile-validated.
-// Source-only HXB driver with init macros. Deferred display/server branches are preserved in
-// deferred/compiler/FullCompiler.hx and rejected explicitly when requested.
+import compiler.server.ServerCache;
+import compiler.server.ServerMessage;
+import compiler.server.ServerCompilationContext;
+import context.CommonCache;
+// haxe/src/compiler/compiler.ml. Display branches are rejected explicitly until the
+// display services are ported (drafts in deferred/compiler/FullCompiler.hx).
 class Compiler {
  public static function errorExt(com:CommonContext,err:Dynamic):Void com.errorExt(err);
  public static function error(com:CommonContext,msg:String,p:Pos):Void errorExt(com,Error.makeError(Custom(msg),p));
@@ -45,9 +48,22 @@ class Compiler {
   return f();
  }
  static function runCommandImpl(com:CommonContext,cmd:String):Int {
-  if(com.sctx.isServer)throw new ArgumentError("Server command execution requires the display/server milestone");
-  if(cmd.length>3&&cmd.substr(0,3)=="cd "){Sys.setCwd(cmd.substr(3));return 0;}
-  return Sys.command(cmd);
+  var io=com.requestScope.io;
+  // TODO: this is a hack
+  var cmd=if(com.sctx.isServer) {
+   var h=["__file__"=>com.file,"__platform__"=>platformName(com.platform)];
+   Helper.expandEnv(cmd,h);
+  } else cmd;
+  var len=cmd.length;
+  var result=if(len>3&&cmd.substr(0,3)=="cd "){Sys.setCwd(cmd.substr(3));0;}
+  else if(!com.sctx.isServer)
+   // In non-server mode, inherit stdin/stdout/stderr so that interactive commands work
+   Sys.command(cmd);
+  else
+   // In server mode, capture stdout/stderr through the output target and
+   // forward the client's stdin from request_scope.
+   PipeThings.runCommand(io,cmd);
+  return result;
  }
  public static function runCommand(com:CommonContext,cmd:String):Int return Timer.time(com.timerCtx,["command",cmd],function(cmd) return runCommandImpl(com,cmd),cmd);
  public static function checkDefines(com:CommonContext):Void {
@@ -59,29 +75,37 @@ class Compiler {
   }
  }
  public static function doType(com:CommonContext,mctx:Null<Typer>,actx:ArgContext,displayFileDotPath:Null<GlobalTypePath>):{typer:Typer,displayPath:Null<GlobalTypePath>} {
+  var cs=com.cs;
+  CommonCache.maybeAddContextSign(cs,com,"before_init_macros");
   if(com.display.dmsKind!=DMNone||displayFileDotPath!=null)throw new ArgumentError("Display services require the display/server milestone");
-  Common.enterStage(com,CInitMacrosStart);Setup.initNativeLibs(com,actx.hxbLibs);
+  Common.enterStage(com,CInitMacrosStart);
+  ServerMessage.compilerStage(com);
+  Setup.initNativeLibs(com,actx.hxbLibs);
   var configMacros=actx.configMacros.copy();configMacros.reverse();for(path in configMacros)mctx=typing.MacroContext.callInitMacro(com,mctx,path);
   Common.enterStage(com,CInitMacrosDone);checkDefines(com);Common.updatePlatformConfig(com);
+  ServerMessage.compilerStage(com);
   var macros=mctx==null?null:mctx.g.macros;
   Setup.initNativeLibs(com,actx.nativeLibs);var tctx=Setup.createTyperContext(com,macros);
   DumpConfig.updateFromDefines(com.partScope.dumpConfig,com.defines);
+  CommonCache.lockSignature(com,"after_init_macros");
   if(mctx!=null)typing.MacroContext.finalizeMacroApi(tctx,mctx);
   com.callbacks.run(com.errorExt,com.callbacks.getAfterInitMacros());
   runOrDiagnose(com,function() {
    var classes=actx.classes.copy();classes.reverse();for(path in classes){tctx.g.doLoadModule(tctx,path,nullPos);context.Typecore.flushPass(tctx.g,PBuildClass,"actx.classes");}
    Finalization.finalize(tctx);return null;
   });
-  Common.enterStage(com,CTypingDone);return {typer:tctx,displayPath:null};
+  Common.enterStage(com,CTypingDone);
+  ServerMessage.compilerStage(com);
+  return {typer:tctx,displayPath:null};
  }
  static function finalizeTypingImpl(com:CommonContext,tctx:Dynamic):Void {
   var main=Finalization.maybeLoadMain(tctx);Common.enterStage(com,CFilteringStart);
+  ServerMessage.compilerStage(com);
   var output=runOrDiagnose(com,function() return Finalization.generate(tctx,main));com.main.mainExpr=output.main.expr;com.main.mainFile=output.main.path;com.types=output.types;com.modules=output.modules;
  }
  public static function finalizeTyping(com:CommonContext,tctx:Typer):Void Timer.time(com.timerCtx,["finalize"],function(tctx) {finalizeTypingImpl(com,tctx);return null;},tctx);
  public static function filter(com:CommonContext,tctx:Typer,ectx:Dynamic,beforeDestruction:Void->Void):Void Timer.time(com.timerCtx,["filters"],function(_:Null<Bool>) return runOrDiagnose(com,function() {filters.Filters.run(com,ectx,beforeDestruction);return null;}),null);
- public static function compile(com:CommonContext,actx:ArgContext,sctx:Dynamic):Void {
-  if(sctx.isServer)throw new ArgumentError("Compilation server services require the server milestone");
+ public static function compile(com:CommonContext,actx:ArgContext,sctx:ServerCompilationContext):Void {
   if(com.display.dmsKind!=DMNone||actx.displayArg!=null)throw new ArgumentError("Display services require the display/server milestone");
   var mctx:Null<Typer>=switch com.platform {
    case CustomTarget(name):
@@ -95,17 +119,19 @@ class Compiler {
    case _:null;
   };
   var ext=Setup.initializeTarget(com,actx);Common.updatePlatformConfig(com);
+  ServerCache.afterTargetInit(sctx,com);
   Timer.time(com.timerCtx,["init"],function(_:Null<Bool>) {var callbacks=actx.preCompilation.copy();callbacks.reverse();for(f in callbacks)f();if(actx.hxbOut!=null)com.hxbWriterConfig=compiler.hxb.HxbWriterConfig.processArgument(actx.hxbOut);return null;},null);
   Common.enterStage(com,CInitialized);
+  ServerMessage.compilerStage(com);
   if(actx.classes.length==1&&actx.classes[0].pack.length==0&&actx.classes[0].name=="Std"&&!actx.forceTyping){if(actx.cmds.length==0&&!actx.didSomething)actx.raiseUsage();}
   else {
    var typed=Timer.time(com.timerCtx,["typing"],function(_:Null<Bool>)return doType(com,mctx,actx,null),null),tctx=typed.typer;
    var ectx=filters.exception.ExceptionInit.createExceptionContext(tctx);finalizeTyping(com,tctx);codegen.Dump.maybeGenerateDump(com,AfterTyping);
-   var isCompilation=Common.isCompilation(com);com.callbacks.addAfterSave(function(){if(isCompilation&&com.hxbWriterConfig!=null)Generate.checkHxbOutput(com,com.hxbWriterConfig);});
+   var isCompilation=Common.isCompilation(com);com.callbacks.addAfterSave(function(){ServerCache.afterSave(sctx,com);if(isCompilation&&com.hxbWriterConfig!=null)Generate.checkHxbOutput(com,com.hxbWriterConfig);});
    filter(com,tctx,ectx,function(){});
    if(hasError(com)&&isCompilation)throw new Abort();if(isCompilation)Generate.checkAuxiliaryOutput(com,actx);
-   Common.enterStage(com,CGenerationStart);codegen.Dump.maybeGenerateDump(com,AfterDce);Generate.maybeGenerateDumpDependencies(com,tctx);
-   if(!actx.noOutput)Generate.generate(com,tctx,ext,actx);Common.enterStage(com,CGenerationDone);
+   Common.enterStage(com,CGenerationStart);ServerMessage.compilerStage(com);codegen.Dump.maybeGenerateDump(com,AfterDce);Generate.maybeGenerateDumpDependencies(com,tctx);
+   if(!actx.noOutput)Generate.generate(com,tctx,ext,actx);Common.enterStage(com,CGenerationDone);ServerMessage.compilerStage(com);
   }
   // The Haxe host owns signal handling; this port does not install OCaml Sys.catch_break.
   com.callbacks.run(com.errorExt,com.callbacks.getAfterGeneration());
@@ -130,7 +156,7 @@ class Compiler {
  }
  public static function compileSafe(com:CommonContext,f:Void->Void):Void {try compileSafeImpl(com,f) catch (_:Abort) {}}
  public static function finalize(com:CommonContext):Void {CompilerIo.flush(com.requestScope.io);for (lib in com.hxbLibs) lib.close();if (!com.sctx.isServer) {for (lib in (cast com.nativeLibs.javaLibs:Array<Dynamic>)) lib.close();for (lib in (cast com.nativeLibs.swfLibs:Array<Dynamic>)) lib.close();}}
- public static function catchCompletionAndExit(com:CommonContext,sctx:Dynamic,run:CommonContext->Void):Int {
+ public static function catchCompletionAndExit(com:CommonContext,sctx:ServerCompilationContext,run:CommonContext->Void):Int {
   try {run(com);return hasError(com)?1:0;}
   catch(e:macros.eval.EvalTypes.SysExit) {
    if(e.code!=0)com.partScope.hasError=true;
@@ -142,13 +168,11 @@ class Compiler {
   if(actx.displayArg!=null)throw new ArgumentError("Display services require the display/server milestone");
   if(Common.defined(com,Define.NoDeprecationWarnings))com.warningOptions.unshift([{woWarning:WDeprecated,woMode:WMDisable}]);
  }
- public static function compileCtx(sctx:Dynamic,com:CommonContext):Int return catchCompletionAndExit(com,sctx,function(com) {
-  if(sctx.isServer)throw new ArgumentError("Compilation server services require the server milestone");
-  // ServerCache.before_anything -> ensure_macro_setup (serverCache.ml)
-  if(!sctx.macroContextSetup){sctx.macroContextSetup=true;typing.MacroContext.setup();}
+ public static function compileCtx(sctx:ServerCompilationContext,com:CommonContext):Int return catchCompletionAndExit(com,sctx,function(com) {
+  ServerCache.beforeAnything(sctx,com);
   Setup.setupCommonContext(com);compileSafe(com,function() {var actx=Args.processArgs(com);processActx(com,actx);compile(com,actx,sctx);});ContextFlush.flushContext(com);finalize(com);
  });
- public static function createContext(sctx:Dynamic,requestScope:RequestScope,runtimeArgs:Array<String>,hasNext:Bool):CommonContext {
+ public static function createContext(sctx:ServerCompilationContext,requestScope:RequestScope,runtimeArgs:Array<String>,hasNext:Bool):CommonContext {
   var part:PartScope={runtimeArgs:runtimeArgs,warnedPositions:new core.ds.Hashtbl<{file:String,offset:Int},{message:String,pos:Pos,options:Array<Array<core.Message.WarningOption>>}>(0),hasNext:hasNext,hasError:false,messages:[],reportMode:RMNone,messageCapture:null,compilationStep:sctx.compilationStep,passDebugMessages:[],dumpConfig:DumpConfig.createDefault(),parserState:{wasAutoTriggered:false,hadParserResume:false,displayModuleHasMacroDefines:false,delayedSyntaxCompletion:{value:null},specialIdentifierFiles:new core.ds.ThreadSafeHashtbl<String,String>(0)},fileKeys:new FileKeys(),storedTypedExprs:new context.Lookup.HashtblLookup(),cachedMacros:new context.Lookup.HashtblLookup()};
   return Common.create(sctx,requestScope,part,core.DisplayTypes.DisplayMode.create(DMNone));
  }
