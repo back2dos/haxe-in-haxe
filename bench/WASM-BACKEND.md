@@ -25,10 +25,14 @@ best of 3–5 runs.
    whose runtime has an OCaml-style precise GC**: a copying nursery, plus a
    non-moving major heap still to be written. This is the native
    distribution.
-2. For wasm, start by compiling that same C to linear-memory wasm
-   (option c). On the benchmarks it ran as fast as the WasmGC output and
-   faster than today's HL/C→wasm. It needs no `--spill-pointers`, and both
-   targets share one GC and one set of semantics.
+2. For wasm, use the same runtime design in linear memory (option c). On
+   the benchmarks, the C compiled with Emscripten ran as fast as the WasmGC
+   output and faster than today's HL/C→wasm. It needs no
+   `--spill-pointers`, and both targets share one GC and one set of
+   semantics. Exceptions must map to wasm exception handling, not `setjmp`
+   (§4). That rules out shipping this prototype's C-through-Emscripten
+   route unchanged, and means either a direct linear-memory wasm emitter or
+   C++ exceptions under Emscripten.
 3. Keep the WasmGC emitter (already working for the subset) as an optional
    second wasm path. It is worth finishing if module size or JS interop
    matters, or if a large program shows V8's collector clearly ahead of
@@ -44,7 +48,7 @@ end.
 | --- | --- | --- |
 | HL/C→wasm module is 51.5 MB; `--spill-pointers` adds ~21 MB | `bench/README.md` | No spill pass on any new route. The C/linear route roots values in a shadow stack, and WasmGC roots are managed by the engine. |
 | ~38% of the wasm self-compile is libhl allocation and marking | profile | Bump allocation in a young generation on both routes (V8's on WasmGC, `backend/rt` in C) |
-| V8's optimizing tier stalls ~20 s on HL/C's huge functions | `bench/README.md` | §4 below. Function size is a property of the code we emit, so our own backend can split functions. |
+| V8's optimizing tier stalls ~20 s on HL/C's huge functions | `bench/README.md` | §4: the functions are huge because of Emscripten's `setjmp` lowering of `hl_trap`, and the stall happens at exit. Neither new route uses `setjmp` on wasm, and our emitter can bound function size. A custom section brings today's build from 25–31 s to 17.5 s. |
 | self-compile: reference 4.53s, HL/C 7.67s, JS 23.4s, wasm 27s | `bench/README.md` | The prototype can't compile the compiler yet; the benchmarks below measure the same effects at small scale |
 
 ## 1. Prototype
@@ -331,9 +335,80 @@ allocator shows how close a non-moving heap can get: HL/C with it is only
 
 ## 4. Function size and V8's optimizing tier
 
-(filled in below from the stall experiment)
+Measured on the existing HL/C→wasm build (`hih.wasm`, 8,534 functions,
+50.1 MB of code) with Node 22's `--trace-wasm-compilation-times`. A
+timestamped loader showed where the time goes; `backend/tools/wasm_hints.py`
+is the fix described below.
+
+- **The stall happens at exit, not during the run.** For `hello`, the
+  compiler finishes in 2–3.4 s. Node then waits until T+27 s for TurboFan
+  jobs already started on background threads, which can't be cancelled:
+  21.6 s for `core_TUnification_unifyCustom` and 9.0 s for
+  `typing_IterationKind_ofTexpr` (44 s of TurboFan CPU across 183
+  functions). `process.exit`, `process.reallyExit` and `worker.terminate`
+  all still wait. Only SIGKILL from `proc_exit` returns at once (2.2–2.7 s,
+  identical output, exit code 137).
+- **The 10 largest functions are 45% of the code** (7.3 MB, 7.0 MB, 2.3 MB,
+  1.2 MB, …). The ten are `CoroFromTexpr.exprToCoro`, `unifyCustom`,
+  `IterationKind.ofTexpr`, `typeObjectDecl`, `typeUnop`, `analyzeAliases`,
+  `EvalJit.jitExprRec`, `unifyWithVariance`, `validRedefinition` and
+  `ExprToPattern.make`. They take 76–81% of all TurboFan time, and functions
+  of 100 KB and more take 92–97%. Compiling the whole module eagerly with
+  TurboFan takes 29.2 s wall (87 s CPU); with the top 10 replaced by stubs,
+  6.0 s.
+- **Why they are so big:** every one of them contains `hl_trap`, which is
+  `setjmp`. Emscripten's wasm-EH-based setjmp lowering
+  (`-sSUPPORT_LONGJMP=wasm`) stores every live local to memory around every
+  call in such a function. `unifyCustom` is 255 KB of C and 7 MB of wasm,
+  roughly 780k stores. In a synthetic test, one `setjmp` made a function
+  26× larger (80.7 KB vs 3.1 KB; 29 KB with the JS-based lowering, whose
+  compile time is unusable at this scale).
+- **Optimizing time grows mildly faster than size:** doubling a synthetic
+  function costs 2.1–2.3× the TurboFan time, about 1 ms/KB below 1 MB and
+  3–3.5 ms/KB above it. Splitting a 3.3 MB function into 16 pieces cut
+  TurboFan CPU by 1.9× and wall time by 5.6× (parallel compile threads).
+  Binaryen's `--outlining` pass can't be used: it asserts on the legacy
+  exception instructions, and after `--translate-to-exnref` it saves 125
+  bytes and Node 22 can't load the result.
+- **The giant functions are not hot.** They are 2.8% of self time in a CPU
+  profile of the self-compile. The hot spots are libhl's allocator:
+  `gc_allocator_new_page` takes 18.8% (it walks the page list per new page,
+  O(pages)), `hl_gc_alloc_gen` 10% and `__wasm_longjmp` 4.9%. Splitting or
+  shrinking therefore removes the stall without making the run faster.
+- **Mitigation for the existing build:** V8 12.4 has no flag that caps
+  tier-up by function size, and raising `--wasm-tiering-budget` doesn't help.
+  What works is V8's experimental `compilationHints` custom section, marking
+  every function of 100 KB or more (67 functions) as Liftoff-only.
+  `backend/tools/wasm_hints.py` adds it. Run with
+  `node --experimental-wasm-compilation-hints --no-wasm-dynamic-tiering`,
+  because dynamic tiering ignores the hints. The self-compile then takes
+  17.5–18.0 s (default 25–31 s; `--liftoff-only` 24.6–25.2 s), and `hello`
+  3.1–4.1 s. Both produce archives identical to the reference; I re-checked
+  one self-compile run against a fresh reference. Thresholds from 30 KB to
+  1 MB gave 18.6–20.7 s. This is an experimental V8 feature that may go away.
+
+**Consequences for the backend design:**
+
+1. **Never lower Haxe `try` to `setjmp` on wasm.** It is what made HL/C's
+   functions huge. The WasmGC emitter uses wasm exception handling
+   directly, and a linear-memory route must do the same. For option (c) that
+   means a direct wasm emitter for the IR, or C++ `try`/`catch` under
+   Emscripten's native wasm exceptions, rather than this prototype's
+   `setjmp` under Emscripten. Natively, `setjmp` stays: it is cheap there
+   (0.027s for `Exc`).
+2. **Bound function size in the emitter.** Our own backend controls code
+   layout, unlike hl2c. Large `switch` arms (the matcher's output for
+   `unifyCustom`-style functions) can be outlined into separate functions
+   when a function passes a size budget. It is also worth emitting the
+   compilation hints (or `--liftoff-only` advice) for whatever remains huge.
+3. **Allocation is where the time goes.** That supports the GC part of the
+   recommendation, not just the stall fix.
 
 ## 5. Unknowns and risks
+
+- **Whether newer V8 versions cap tier-up by function size** (untested;
+  only Node 22 is available), and the exact reason LLVM's setjmp lowering
+  stores every local (observed in the output, not traced in LLVM).
 
 - **Scale.** The prototype covers a subset and programs of a few hundred
   lines. Dynamic, anonymous structures, strings, Map, Reflect/Type and Float

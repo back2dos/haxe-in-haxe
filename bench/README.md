@@ -19,6 +19,41 @@ HL_STATIC="libhl.a fmt.o dxt.o sha1.o" sh bench/build.sh hlc   # static link
 LD_LIBRARY_PATH=/path/to/patched/hashlink HAXE_REFERENCE=haxe/haxe python3 bench/run.py -n 7
 ```
 
+## Experimental HXB → native/wasm backend: go/no-go (2026-10-09)
+
+Details, numbers and caveats are in [WASM-BACKEND.md](WASM-BACKEND.md);
+the prototype is in `backend/`. One typed IR, lowered from the filtered
+typed AST that HXB serializes, feeds a WasmGC emitter and a C emitter, and
+every route printed identical output.
+
+| Bench (enum trees; `-D retain`: ≈200 MB live) | Bench | retain |
+| --- | ---: | ---: |
+| HL/C native (patched libhl) | 0.43s | 0.61s |
+| HL/C → wasm (Emscripten) | 0.59s | 0.83s |
+| JS (Node 22) | 1.12s | 1.93s |
+| new C (precise generational GC, shadow stack) | 0.32s | 0.54s |
+| new WasmGC (Node 22) | 0.38s | 0.66s |
+| new C → linear-memory wasm | 0.39s | 0.65s |
+| new WasmGC via Wasmtime / WAMR AOT | 2.0s / 0.62s | 0.98s / 1.14s |
+
+- **Go** on a typed IR plus a C backend with an OCaml-style GC (copying
+  nursery; the non-moving major heap is still to be written) for the native
+  binary. Translate `hxbReader.ml` for input.
+- **Go** on wasm from the same runtime design in linear memory (it matched
+  WasmGC here), with exceptions mapped to wasm exception handling. The
+  WasmGC emitter is the optional alternative.
+- **No-go** on native through wasm runtimes: wasm2c has no GC support,
+  WAMR has no standard exception handling, and Wasmtime's default collector
+  is 3–6× slower here.
+- **The ~20 s V8 stall is caused by `setjmp`.** Emscripten's lowering of
+  `hl_trap` makes ten functions 45% of the module; V8 waits at exit for
+  their optimization. For today's build, `backend/tools/wasm_hints.py`
+  marks functions of 100 KB and more as Liftoff-only (run with
+  `--experimental-wasm-compilation-hints --no-wasm-dynamic-tiering`). This
+  brings the self-compile from 25–31 s to 17.5–18 s with identical output.
+- **Unknown:** how the prototype's gains hold for the whole compiler. The
+  benchmarks don't cover Dynamic, strings, maps or reflection.
+
 ## WebAssembly build (2026-10-09)
 
 `bench/build-wasm.sh` compiles the HL/C output with Emscripten 6.0.12 for
