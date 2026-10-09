@@ -19,6 +19,57 @@ HL_STATIC="libhl.a fmt.o dxt.o sha1.o" sh bench/build.sh hlc   # static link
 LD_LIBRARY_PATH=/path/to/patched/hashlink HAXE_REFERENCE=haxe/haxe python3 bench/run.py -n 7
 ```
 
+## All runners, CPU time and memory (2026-10-09, evening)
+
+`bench/run.py` now also runs the port on the reference's Eval (`eval-source`:
+`haxe -cp src --run haxe.Main …`, typed on every run; `eval-hxb`: from an Eval
+HXB archive built once, `--hxb-lib … --run haxe.Main …`) and the hxc C output
+compiled by Emscripten for Node (`wasm`: `sh bench/build.sh wasm`, the
+playground's wasm64 build but with NODERAWFS; memory64 needs Node 24, so
+`NODE_WASM=~/emsdk/node/24.19.0_64bit/bin/node`). Per run it records wall
+time, CPU time (user + system of the child and its reaped children, from
+`wait4`) and peak RSS; `--json FILE` merges machine-readable results into
+FILE (`bench/results.json`, shown on the website's Benchmarks section).
+
+```sh
+NODE_WASM=... python3 bench/run.py -n 3 -w hello -w stdlib -w self --json bench/results.json hl hlc js jvm cpp hxc hxc-o2 hxc-cosmo wasm
+python3 bench/run.py -n 3 -w hello -w stdlib --json bench/results.json eval-source eval-hxb
+python3 bench/run.py -n 1 -w self --json bench/results.json eval-source eval-hxb
+```
+
+CPU time, minimum of 3 runs (1 for the Eval runners on `self`), ratio to the
+reference; `-D disable-parallelism`; every archive byte-identical to the
+reference. Commit 93f1df5, 4-core Xeon @ 2.10 GHz shared with other jobs
+(load 5–9 during the runs, so wall times are noisier: JS, JVM and wasm also
+use extra threads for JIT and GC, so their CPU time exceeds wall time).
+
+| Runner | hello | stdlib | self | self peak RSS |
+| --- | ---: | ---: | ---: | ---: |
+| reference (OCaml) | 0.12 s | 0.23 s | 5.05 s | 480 MB |
+| eval-source | 15.1 s (124×) | 24.5 s (106×) | 1929 s (382×) | 3506 MB |
+| eval-hxb | 11.3 s (92×) | 20.6 s (89×) | 1885 s (373×) | 3329 MB |
+| hl (JIT) | 0.79 s (6.5×) | 1.15 s (5.0×) | 15.3 s (3.0×) | 1351 MB |
+| hlc (patched static libhl) | 0.18 s (1.5×) | 0.39 s (1.7×) | 8.15 s (1.6×) | 1657 MB |
+| js (Node 22) | 2.19 s (18×) | 4.30 s (19×) | 41.8 s (8.3×) | 1717 MB |
+| jvm (OpenJDK 21) | 5.90 s (48×) | 9.24 s (40×) | 64.3 s (12.7×) | 1027 MB |
+| cpp (hxcpp, single-thread mark) | 0.40 s (3.3×) | 0.87 s (3.8×) | 17.9 s (3.5×) | 1266 MB |
+| hxc (tcc) | 0.28 s (2.3×) | 0.58 s (2.5×) | 11.6 s (2.3×) | 805 MB |
+| hxc-o2 (gcc -O2) | 0.12 s (0.98×) | 0.22 s (0.97×) | 4.42 s (0.87×) | 798 MB |
+| hxc-cosmo (fat APE) | 0.10 s (0.84×) | 0.22 s (0.96×) | 5.05 s (1.00×) | 760 MB |
+| wasm (hxc, Node 24) | 2.01 s (16×) | 2.61 s (11×) | 11.6 s (2.3×) | 1219 MB |
+
+- The Eval runners need `-D eval-call-stack-depth=1000000` and an unlimited
+  native stack on `self`: with 10000 frames both stopped after about 4.5 min
+  with "Stack overflow". `run.py` sets both for them.
+- Most of an Eval run is not typing the port: `eval-hxb` skips it and is
+  only 3–4 s faster on hello and stdlib; on `self` they are within 3%.
+  Building the Eval archive itself takes about 6 s of CPU.
+- The hxc wasm build runs the self-compile in 11.6 s of CPU (9.0 s wall),
+  against 22.7 s wall for the HL/C wasm build below.
+- The C++ build first failed to compile: the JS-only `@:native("arguments_")`
+  on `ServerMessage.arguments` made hxcpp emit a call to a global
+  `arguments_`. The metadata is now applied on JS only.
+
 ## hxc backend: faster than the OCaml compiler (2026-10-09)
 
 The port compiled by `backend/` (the hxc target: C, gcc -O2) now beats the

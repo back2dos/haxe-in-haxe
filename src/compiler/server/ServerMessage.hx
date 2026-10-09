@@ -139,7 +139,8 @@ class ServerMessage {
 		if (config.printClassPathsChanged) printEndline(signString(com) + "class paths changed, resetting directories");
 	}
 
-	@:native("arguments_") // JS: functions have their own `arguments`
+	// JS: functions have their own `arguments`; on C++, @:native would turn the call into a global function
+	#if js @:native("arguments_") #end
 	public static function arguments(data:String):Void {
 		if (config.printArguments) printEndline("Processing Arguments " + data);
 	}
