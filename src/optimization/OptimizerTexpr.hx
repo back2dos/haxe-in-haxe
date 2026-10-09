@@ -138,7 +138,7 @@ class OptimizerTexpr {
 					case _: e;
 				};
 				transform(e, esub);
-			case [Neg, TConst(TInt(i))]: TypeOps.mk(TConst(TInt(-i)), e.etype, e.epos);
+			case [Neg, TConst(TInt(i))]: TypeOps.mk(TConst(TInt((-i) | 0)), e.etype, e.epos); // Int32.neg wraps
 			case [NegBits, TConst(TInt(i))]: TypeOps.mk(TConst(TInt(~i)), e.etype, e.epos);
 			case [Neg, TConst(TFloat(f))]:
 				var v = 0.0 - Std.parseFloat(f); var str = Numeric.floatRepr(v);
