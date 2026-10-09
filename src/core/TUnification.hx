@@ -203,8 +203,8 @@ class TUnification {
  public static var nativeUnificationContext:UnificationContext=makeNativeContext();
  static function makeNativeContext():UnificationContext {var c=defaultUnificationContext();c.allowTransitiveCast=false;c.allowAbstractCast=false;c.allowDynamicToCast=false;c.allowFinalInvariance=true;c.nullFollowMode=FollowIfNullable;return c;}
  static function pair(a:T,b:T):TypePair return {a:a,b:b};
- static function pathIs(p:Dynamic,pack:String,name:String):Bool return p.pack.join(".")==pack && p.name==name;
- static function pathEq(a:Dynamic,b:Dynamic):Bool return a.name==b.name && a.pack.join(".")==b.pack.join(".");
+ static function pathIs(p:core.Globals.GlobalTypePath,pack:String,name:String):Bool return p.pack.join(".")==pack && p.name==name;
+ static function pathEq(a:core.Globals.GlobalTypePath,b:core.Globals.GlobalTypePath):Bool return a.name==b.name && a.pack.join(".")==b.pack.join(".");
  public static function followAndClose(t:T):T return switch follow(t) {case TMono(r):Monomorph.close(r);r.tmType!=null ? followAndClose(t) : TMono(r);case t:t;}
  public static function link(uctx:UnificationContext,e:TMono,a:T,b:T):Bool {
   function loop(t:T):Bool {

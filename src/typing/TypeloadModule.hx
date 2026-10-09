@@ -44,7 +44,7 @@ class TypeloadModule {
 		this.defines = defines;
 		basicModule = {
 			mId: -1, mPath: {pack: [], name: "StdTypes"}, mTypes: [], mStatics: null,
-			mExtra: {mFile: "<built-in>", mSign: "", mDisplay: {mInlineCalls: [], mTypeHints: [], mImportPositions: new Map()}, mCheckPolicy: [], mTime: 0,
+			mExtra: {mFile: core.Path.UniqueKey.createLazy("<built-in>"), mSign: "", mDisplay: {mInlineCalls: [], mTypeHints: [], mImportPositions: new Map()}, mCheckPolicy: [], mTime: 0,
 				mCacheState: MSUnknown, mAdded: 0, mChecked: 0, mProcessed: 0, mDeps: new IntMap(), mDisplayDeps: null, mKind: MFake, mCacheBoundObjects: [], mFeatures: new Map()}
 		};
 		for (name in ["Void", "Int", "Float", "Bool", "String"]) basicTypes.set(name, makeBasicType(name));
@@ -136,7 +136,7 @@ class TypeloadModule {
 	function makeModule(path:GlobalTypePath, file:String):ModuleDef {
 		return {
 			mId: nextModuleId++, mPath: path, mTypes: [], mStatics: null,
-			mExtra: {mFile: sys.FileSystem.fullPath(file), mSign: Define.getSignature(defines), mDisplay: {mInlineCalls: [], mTypeHints: [], mImportPositions: new Map()}, mCheckPolicy: [], mTime: 0,
+			mExtra: {mFile: core.Path.UniqueKey.createLazy(sys.FileSystem.fullPath(file)), mSign: Define.getSignature(defines), mDisplay: {mInlineCalls: [], mTypeHints: [], mImportPositions: new Map()}, mCheckPolicy: [], mTime: 0,
 				mCacheState: MSUnknown, mAdded: 0, mChecked: 0, mProcessed: 0, mDeps: new IntMap(), mDisplayDeps: null, mKind: MCode, mCacheBoundObjects: [], mFeatures: new Map()}
 		};
 	}

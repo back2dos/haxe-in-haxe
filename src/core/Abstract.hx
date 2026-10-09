@@ -5,6 +5,8 @@ import core.TType;
 import core.ds.NotFound;
 import core.TFunctions.*;
 import core.TUnification.*;
+import core.TUnification.UnificationContext;
+import core.TUnification.RecStack;
 import core.TPrinting.*;
 import core.MetaList.StrictMeta;
 import core.Meta as MetadataTools;
@@ -12,7 +14,7 @@ import core.Meta as MetadataTools;
 // Mechanical translation of haxe/src/core/abstract.ml. Draft; not compiled or tested.
 class Abstract {
 	public static function buildAbstract(a:TAbstract):Void { if (a.aImpl != null) a.aImpl.clBuild(); }
-	public static function findCastField<V>(uctx:Dynamic,find:Dynamic->Null<V>):V {
+	public static function findCastField<V>(uctx:UnificationContext,find:UnificationContext->Null<V>):V {
 		var found:Null<V>;
 		try {
 			var context = core.ds.Record.copy(uctx);
@@ -22,23 +24,23 @@ class Abstract {
 		if (found == null) throw NotFound.raise();
 		return found;
 	}
-	public static function findFieldFrom(uctx:Dynamic,a:T,b:T,ab:TAbstract,tl:TParams):Dynamic {
+	public static function findFieldFrom(uctx:UnificationContext,a:T,b:T,ab:TAbstract,tl:TParams):CastField {
 		for (field in ab.aFromField) if (unifiesFromField(uctx,a,b,ab,tl,field)) return field;
 		throw NotFound.raise();
 	}
-	public static function findFieldTo(uctx:Dynamic,a:T,b:T,ab:TAbstract,tl:TParams):Dynamic {
+	public static function findFieldTo(uctx:UnificationContext,a:T,b:T,ab:TAbstract,tl:TParams):CastField {
 		for (field in ab.aToField) if (unifiesToField(uctx,a,b,ab,tl,field)) return field;
 		throw NotFound.raise();
 	}
-	public static function findToFrom(uctx:Dynamic,a:T,b:T,a1:TAbstract,tl1:TParams,a2:TAbstract,tl2:TParams):Dynamic {
+	public static function findToFrom(uctx:UnificationContext,a:T,b:T,a1:TAbstract,tl1:TParams,a2:TAbstract,tl2:TParams):AbstractCastField {
 		buildAbstract(a1); buildAbstract(a2);
-		return findCastField(uctx,function(uctx) {
+		return findCastField(uctx,function(uctx):Null<AbstractCastField> {
 			if (unifiesAbstracts(uctx,a,b,a1,tl1,a2,tl2)) return null;
 			try return {abs:a1,params:tl1,field:findFieldTo(uctx,a,b,a1,tl1)}
 			catch (_:NotFound) return {abs:a2,params:tl2,field:findFieldFrom(uctx,a,b,a2,tl2)};
 		});
 	}
-	public static function findFrom(uctx:Dynamic,a:T,ab:TAbstract,tl:TParams):Dynamic {
+	public static function findFrom(uctx:UnificationContext,a:T,ab:TAbstract,tl:TParams):CastField {
 		buildAbstract(ab);
 		if (follow(a) == tDynamic) {
 			for (field in ab.aFromField) if (follow(field.type) == tDynamic) return field;
@@ -47,7 +49,7 @@ class Abstract {
 		var b = TAbstract(ab,tl);
 		return findCastField(uctx,function(uctx) return unifiesFrom(uctx,a,b,ab,tl) ? null : findFieldFrom(uctx,a,b,ab,tl));
 	}
-	public static function findTo(uctx:Dynamic,b:T,ab:TAbstract,tl:TParams):Dynamic {
+	public static function findTo(uctx:UnificationContext,b:T,ab:TAbstract,tl:TParams):CastField {
 		buildAbstract(ab);
 		if (follow(b) == tDynamic) {
 			for (field in ab.aToField) if (follow(field.type) == tDynamic) return field;
@@ -86,7 +88,7 @@ class Abstract {
 		for (t in result.definitiveTypes) if (hasMono(t)) throw NotFound.raise();
 		return follow(m);
 	}
-	public static function getUnderlyingTypeWithStack(stack:Dynamic,a:TAbstract,pl:TParams,returnFirst:Bool = false):T {
+	public static function getUnderlyingTypeWithStack(stack:RecStack<T>,a:TAbstract,pl:TParams,returnFirst:Bool = false):T {
 		inline function maybeRecurse(t:T):T {
 			function loop(t:T):T return switch t {
 				case TMono(r): r.tmType == null ? t : loop(r.tmType);

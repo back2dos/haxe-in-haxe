@@ -157,7 +157,7 @@ class Printer {
 	static function record(tabs:String,fields:Array<Array<String>>):String return sRecordFields(tabs,[for (f in fields) {name:f[0],value:f[1]}]);
 	public static function sList<V>(sep:String,f:V->String,l:Array<V>):String return "[" + l.map(f).join(sep) + "]";
 	public static function sOpt<V>(f:V->String,o:Null<V>):String return o == null ? "None" : f(o);
-	public static function sPmap<K,V>(fk:K->String,fv:V->String,pm:Dynamic):String {
+	public static function sPmap<K,V>(fk:K->String,fv:V->String,pm:haxe.Constraints.IMap<K,V>):String {
 		var keys:Array<K> = [];var iter:Iterator<K> = pm.keys();for (k in iter) keys.push(k);keys.sort(Reflect.compare);keys.reverse();
 		return "{" + [for (k in keys) fk(k) + " = " + fv(pm.get(k))].join(", ") + "}";
 	}

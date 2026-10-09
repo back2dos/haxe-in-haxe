@@ -16,13 +16,13 @@ import compiler.hxb.HxbWriterConfig;
 // haxe/src/compiler/generate.ml; deferred backend dispatch retained in deferred/compiler/GenerateTargets.hx.
 class MissingHxbModule extends haxe.Exception {public function new() super("Missing_hxb_module");}
 class Generate {
- public static function checkAuxiliaryOutput(com:CommonContext,actx:Dynamic):Void {
+ public static function checkAuxiliaryOutput(com:CommonContext,actx:compiler.Args.ArgContext):Void {
   if (actx.xmlOut!=null || actx.jsonOut!=null) throw new Failure("XML and JSON auxiliary output are outside the HXB milestone");
  }
  public static function createWriter(com:CommonContext,config:WriterTargetConfig):{writer:HxbWriter,close:Void->haxe.io.Bytes} {
   if (config.hxbVersion!=HxbData.VERSION) throw new Failure("Unsupported HXB version: "+config.hxbVersion);
   var anonIdentification=new typing.TanonIdentification<Dynamic>();
-  function warn(w:Dynamic,s:String,p:Pos):Void com.warning(w,com.warningOptions,s,p);
+  function warn(w:core.Message.WarningCode,s:String,p:Pos):Void com.warning(w,com.warningOptions,s,p);
   var writer=new HxbWriter(config.generateDocumentation,warn,anonIdentification);
   return {writer:writer,close:writer.exportModule};
  }
@@ -65,13 +65,13 @@ class Generate {
   catch (e:HxbOutputError) com.error("Could not write to "+config.archivePath+": "+e.message,nullPos);
  }
  public static function deleteFile(file:String):Void {try sys.FileSystem.deleteFile(file) catch (_:Dynamic) {}}
- public static function maybeGenerateDumpDependencies(ctx:Dynamic,tctx:Dynamic):Void {
+ public static function maybeGenerateDumpDependencies(ctx:CommonContext,tctx:context.Typecore.Typer):Void {
   var com:CommonContext=tctx.com;if (com.partScope.dumpConfig.dumpDependencies) {codegen.Dump.dumpDependencies(com);if (!com.isMacroContext&&tctx.g.macros!=null) codegen.Dump.dumpDependencies(tctx.g.macros.typer.com,"macro");}
  }
  // HXB output is emitted by the after-save callback before backend destruction.
  // Interpretation (--interp, --run, the Eval target) runs on the port's Eval; the other
  // code generators are not ported and fail explicitly.
- public static function generate(com:CommonContext,tctx:Dynamic,ext:String,actx:Dynamic):Void {
+ public static function generate(com:CommonContext,tctx:context.Typecore.Typer,ext:String,actx:compiler.Args.ArgContext):Void {
   if (Path.fileExtension(com.file)==ext) deleteFile(com.file);
   if (com.platform==Flash||com.platform==Cpp||com.platform==Hl) for (t in com.types) codegen.FixOverrides.fixOverrides(com,t);
   switch com.platform {

@@ -7,8 +7,8 @@ import coro.CoroFunctions.*;
 class CoroDebug {
  public static function createDotgraph(path:Array<String>,root:CoroBlock):Void {
   Sys.println(path.join(".")); var graph=DotGraph.startGraph(path,".coro"); var ch=graph.channel;
-  var pctx=core.TPrinting.printContext(); function st(t:Dynamic):String return core.TPrinting.sType(pctx,t);
-  function se(e:Dynamic):String return core.TPrinting.sExprPretty(true,"",false,st,e);
+  var pctx=core.TPrinting.printContext(); function st(t:core.TType.T):String return core.TPrinting.sType(pctx,t);
+  function se(e:core.TType.TExpr):String return core.TPrinting.sExprPretty(true,"",false,st,e);
   var edges:Array<{from:Int,to:Int,label:String,tree:Bool}>=[];
   function block(cb:CoroBlock):Void {
    inline function edge(label:String,target:CoroBlock):Void {block(target); edges.push({from:cb.cbId,to:target.cbId,label:label,tree:true});}

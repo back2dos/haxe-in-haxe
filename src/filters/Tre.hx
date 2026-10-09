@@ -10,7 +10,7 @@ import core.Define;
 
 // haxe/src/filters/tre.ml — mechanical draft; not compiled or validated.
 class Tre {
-	public static function collectNewArgsValues(ctx:Dynamic, args:Array<TExpr>, declarations:Array<TExpr>, values:Array<TExpr>, n:Int):{declarations:Array<TExpr>, values:Array<TExpr>} {
+	public static function collectNewArgsValues(ctx:context.SafeCom.SafeContext, args:Array<TExpr>, declarations:Array<TExpr>, values:Array<TExpr>, n:Int):{declarations:Array<TExpr>, values:Array<TExpr>} {
 		for (arg in args) {
 			var v = TypeOps.allocVar(VGenerated, "tmp", arg.etype, arg.epos);
 			declarations.unshift(TypeOps.mk(TVar(v, arg), ctx.basic.tvoid, v.vPos));
@@ -26,7 +26,7 @@ class Tre {
 		var lhs = TypeOps.mk(TLocal(arg.variable), e.etype, e.epos);
 		return [TypeOps.mk(TBinop(OpAssign, lhs, e), e.etype, e.epos)].concat(assignArgs(vars.slice(1), exprs.length == 0 ? exprs : exprs.slice(1)));
 	}
-	public static function replacementForTReturn(ctx:Dynamic, fn:TFunc, args:Array<TExpr>, p:Pos):TExpr {
+	public static function replacementForTReturn(ctx:context.SafeCom.SafeContext, fn:TFunc, args:Array<TExpr>, p:Pos):TExpr {
 		var collected = collectNewArgsValues(ctx, args, [], [], 0);
 		collected.declarations.reverse(); collected.values.reverse();
 		var next = TypeOps.mk(TContinue, ctx.basic.tvoid, Globals.nullPos);
@@ -42,7 +42,7 @@ class Tre {
 		}
 		loop(false, e); return result;
 	}
-	public static function redeclareVars(ctx:Dynamic, vars:Array<TVar>, declarations:Array<TExpr>, replaceList:Array<{old:TVar, replacement:TVar}>):{declarations:Array<TExpr>, replaceList:Array<{old:TVar, replacement:TVar}>} {
+	public static function redeclareVars(ctx:context.SafeCom.SafeContext, vars:Array<TVar>, declarations:Array<TExpr>, replaceList:Array<{old:TVar, replacement:TVar}>):{declarations:Array<TExpr>, replaceList:Array<{old:TVar, replacement:TVar}>} {
 		for (v in vars) {
 			var newV = TypeOps.allocVar(VGenerated, core.Globals.genLocalPrefix + v.vName, v.vType, v.vPos);
 			declarations.unshift(TypeOps.mk(TVar(newV, TypeOps.mk(TLocal(v), v.vType, v.vPos)), ctx.basic.tvoid, v.vPos));
@@ -62,7 +62,7 @@ class Tre {
 			case _: core.Texpr.mapExpr(e -> replaceVars(replaceList, inTailRecursion, e), e);
 		};
 	}
-	public static function wrapLoop(ctx:Dynamic, args:Array<TVar>, body:TExpr):TExpr {
+	public static function wrapLoop(ctx:context.SafeCom.SafeContext, args:Array<TVar>, body:TExpr):TExpr {
 		function wrap(e:TExpr):TExpr return TypeOps.mk(TWhile(TypeOps.mk(TConst(TBool(true)), ctx.basic.tbool, Globals.nullPos), e, NormalWhile), e.etype, e.epos);
 		var captured = collectCapturedArgs(args, body);
 		if (captured.length == 0) return wrap(body);
@@ -82,7 +82,7 @@ class Tre {
 			case _: false;
 		};
 	}
-	public static function transformFunction(ctx:Dynamic, isRecursiveCall:TExpr->Array<TExpr>->Bool, fn:TFunc):TFunc {
+	public static function transformFunction(ctx:context.SafeCom.SafeContext, isRecursiveCall:TExpr->Array<TExpr>->Bool, fn:TFunc):TFunc {
 		var addLoop = false;
 		function transformExpr(cancelTre:Bool, functionEnd:Bool, e:TExpr):TExpr {
 			return switch e.eexpr {
@@ -147,7 +147,7 @@ class Tre {
 			case _: core.Texpr.checkExpr(e -> hasTailRecursion(isRecursiveCall, cancelTre, functionEnd, e), e);
 		};
 	}
-	public static function run(ctx:Dynamic):TExpr->TExpr {
+	public static function run(ctx:context.SafeCom.SafeContext):TExpr->TExpr {
 		if (Define.defined(ctx.defines, Define.NoTre)) return e -> e;
 		return function(e) {
 			return switch e.eexpr {

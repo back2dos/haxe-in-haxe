@@ -406,7 +406,7 @@ typedef ExprChunks = {pre:Chunk, e:Chunk};
 
 class HxbWriter {
 	final generateDocs:Bool;
-	final warn:(warning:Dynamic, msg:String, p:Pos) -> Void;
+	final warn:(warning:core.Message.WarningCode, msg:String, p:Pos) -> Void;
 	final anonId:TanonIdentification<Dynamic>;
 	final identifiedAnons:IdentityPool<TAnon, Int> = new IdentityPool();
 	var currentModule:ModuleDef = TFunctions.nullModule;
@@ -441,7 +441,7 @@ class HxbWriter {
 	final tInstanceChunk:Chunk;
 	final unboundFrames:Array<UnboundFrame> = [];
 
-	public function new(generateDocumentation:Bool = true, ?warn:(warning:Dynamic, msg:String, p:Pos) -> Void, ?anonId:TanonIdentification<Dynamic>) {
+	public function new(generateDocumentation:Bool = true, ?warn:(warning:core.Message.WarningCode, msg:String, p:Pos) -> Void, ?anonId:TanonIdentification<Dynamic>) {
 		this.generateDocs = generateDocumentation;
 		this.warn = warn != null ? warn : function(_, _, _) {};
 		this.anonId = anonId != null ? anonId : new TanonIdentification();
@@ -459,8 +459,7 @@ class HxbWriter {
 	function moduleFilePos():Pos return core.Globals.filePos(moduleFile(currentModule));
 
 	static function moduleFile(m:ModuleDef):String {
-		var file:Dynamic = m.mExtra.mFile;
-		return Std.isOfType(file, StdString) ? file : core.Path.UniqueKey.lazyPath(file);
+		return core.Path.UniqueKey.lazyPath(m.mExtra.mFile);
 	}
 
 	function catchUnboundTtp<R>(f:Void->R, source:Void->String, p:Null<Pos>):R {

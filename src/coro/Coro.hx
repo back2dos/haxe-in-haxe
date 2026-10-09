@@ -141,7 +141,7 @@ class Coro {
   if(ctx.config.debug){Sys.println("BEFORE:\n"+core.TPrinting.sExprDebug(expr));CoroDebug.createDotgraph(DotGraph.getDumpPath(SafeCom.ofCom(ctx.typer.com),ctx.typer.c.curclass.clPath,name),root);}
   var e=mk(TFunction({tfArgs:tfArgs,tfExpr:tfExpr,tfType:tfType}),TFun({args:tfArgs.map(function(a)return {name:a.variable.vName,optional:false,type:a.variable.vType}),ret:tfType}),tfExpr.epos);if(ctx.config.debug)Sys.println("AFTER:\n"+core.TPrinting.sExprDebug(e));return e;
  }
- public static function createCoroContext(typer:Dynamic,config:coro.CoroConfig.CoroConfigData,type:CoroFor):CoroCtx {
+ public static function createCoroContext(typer:context.Typecore.Typer,config:coro.CoroConfig.CoroConfigData,type:CoroFor):CoroCtx {
   var p=switch type{case ClassField(_,cf,_,_):cf.cfNamePos;case LocalFunc(_,v):v.vPos;};return {builder:new TexprBuilder(typer.t,p),typer:typer,config:config,coroType:type,classNamePos:p,deferredExprs:[],hasCaptureVars:false,capturesThis:false,nextBlockId:0,currentCatch:null,hasCatch:false,numStates:0};
  }
 }

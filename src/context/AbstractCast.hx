@@ -22,6 +22,16 @@ import context.SafeCom.SafeContext;
 // find_array_read_access / find_array_write_access results (OCaml tuples)
 typedef ArrayReadAccess = {field:TClassField, type:T, ret:T, index:TExpr};
 typedef ArrayWriteAccess = {field:TClassField, type:T, ret:T, index:TExpr, value:TExpr};
+// prepare_array_access_field result: (map, check_constraints, get_ta)
+typedef PreparedArrayAccess = {map:T->T, checkConstraints:Void->Void, getTa:Void->T};
+// find_to_field result: (t, cf, monos)
+typedef ToField = {type:T, field:TClassField, monos:TParams};
+// find_multitype_specialization' result: (cf, field_monos, m, tl)
+typedef MultitypeSpecializationFull = {field:TClassField, fieldMonos:TParams, type:T, params:TParams};
+// find_multitype_specialization result: (cf, m)
+typedef MultitypeSpecialization = {field:TClassField, type:T};
+// handle_abstract_casts find_abstract result: (a, pl, e)
+typedef MultitypeAbstractExpr = {abs:TAbstract, params:TParams, expr:TExpr};
 
 class AbstractCast {
 	static final castStack:Array<TClassField> = [];
@@ -44,7 +54,7 @@ class AbstractCast {
 			case _: return CallUnification.makeStaticCallBetter(ctx,c,cf,pl,args,t,p);
 		}
 	}
-	public static function doCheckCast(ctx:context.Typecore.Typer, uctx:Dynamic, tleft:T, eright:TExpr, p:Pos):TExpr {
+	public static function doCheckCast(ctx:context.Typecore.Typer, uctx:UnificationContext, tleft:T, eright:TExpr, p:Pos):TExpr {
 		inline function recurse(cf:TClassField, f:Void->TExpr):TExpr {
 			switch cf.cfKind {
 				case Method(MethMacro):
@@ -59,7 +69,7 @@ class AbstractCast {
 			castStack.shift();
 			return result;
 		}
-		inline function make(found:Dynamic):TExpr {
+		inline function make(found:AbstractCastField):TExpr {
 			var a:TAbstract = found.abs;
 			var tl:TParams = found.params;
 			var cf:TClassField = found.field.field;
@@ -124,7 +134,7 @@ class AbstractCast {
 			}
 		}
 	}
-	public static function prepareArrayAccessField(ctx:context.Typecore.Typer, a:TAbstract, pl:TParams, cf:TClassField, p:Pos):Dynamic {
+	public static function prepareArrayAccessField(ctx:context.Typecore.Typer, a:TAbstract, pl:TParams, cf:TClassField, p:Pos):PreparedArrayAccess {
 		var monos = [for (_ in cf.cfParams) Typecore.spawnMonomorph(ctx,p)];
 		function map(t:T):T return core.TFunctions.applyParams(a.aParams,pl,core.TFunctions.applyParams(cf.cfParams,monos,t));
 		function checkConstraints():Void {
@@ -191,9 +201,9 @@ class AbstractCast {
 			return Error.raiseTypingError("No @:arrayAccess function for " + core.TPrinting.sType(core.TPrinting.printContext(),TAbstract(a,tl)) + " accepts arguments of " + core.TPrinting.sType(core.TPrinting.printContext(),e1.etype) + " and " + core.TPrinting.sType(core.TPrinting.printContext(),e2.etype),p);
 		}
 	}
-	public static function findToField(uctx:core.TUnification.UnificationContext, b:T, ab:TAbstract, tl:TParams):Dynamic {
+	public static function findToField(uctx:core.TUnification.UnificationContext, b:T, ab:TAbstract, tl:TParams):ToField {
 		var a = TAbstract(ab,tl);
-		inline function check(t:T,cf:TClassField):Dynamic return switch core.TFunctions.follow(cf.cfType) {
+		inline function check(t:T,cf:TClassField):ToField return switch core.TFunctions.follow(cf.cfType) {
 			case TFun(sig) if (sig.args.length > 0):
 				var ta = sig.args[0].type;
 				function outerMap(t:T):T return core.TFunctions.applyParams(ab.aParams,tl,t);
@@ -213,15 +223,15 @@ class AbstractCast {
 		for (entry in ab.aToField) try return check(entry.type,entry.field) catch (_:core.TUnification.Unify_error) {}
 		throw NotFound.raise();
 	}
-	public static function findMultitypeSpecializationFull(platform:core.Globals.Platform,a:TAbstract,pl:TParams,p:Pos):Dynamic {
+	public static function findMultitypeSpecializationFull(platform:core.Globals.Platform,a:TAbstract,pl:TParams,p:Pos):MultitypeSpecializationFull {
 		var uctx = core.TUnification.defaultUnificationContext();
 		var m = core.TFunctions.mkMono();
 		var params = Abstract.findMultitypeParams(a,pl);
 		var tl:TParams = params.types;
-		var found:Dynamic = null;
+		var found:Null<ToField> = null;
 		try {
 			found = findToField(uctx,m,a,tl);
-			for (t in (cast params.definitiveTypes:TParams)) if (core.TFunctions.hasMono(t)) {
+			for (t in params.definitiveTypes) if (core.TFunctions.hasMono(t)) {
 				var at = core.TFunctions.applyParams(a.aParams,pl,a.aThis);
 				Error.raiseTypingError("Type parameters of multi type abstracts must be known (for " + core.TPrinting.sType(core.TPrinting.printContext(),at) + ")",p);
 			}
@@ -233,7 +243,7 @@ class AbstractCast {
 		}
 		return {field:found.field,fieldMonos:found.monos,type:core.TFunctions.follow(m),params:tl};
 	}
-	public static function findMultitypeSpecialization(platform:core.Globals.Platform,a:TAbstract,pl:TParams,p:Pos):Dynamic {
+	public static function findMultitypeSpecialization(platform:core.Globals.Platform,a:TAbstract,pl:TParams,p:Pos):MultitypeSpecialization {
 		var found = findMultitypeSpecializationFull(platform,a,pl,p);
 		return {field:found.field,type:found.type};
 	}
@@ -274,7 +284,7 @@ class AbstractCast {
 				}
 			case TCall(e1,el):
 				try {
-					function findAbstract(e:TExpr,t:T):Dynamic {
+					function findAbstract(e:TExpr,t:T):MultitypeAbstractExpr {
 						switch core.TFunctions.follow(t) {
 							case TAbstract(a,pl) if (MetadataTools.has(StrictMeta.MultiType,a.aMeta)): return {abs:a,params:pl,expr:e};
 							case _:

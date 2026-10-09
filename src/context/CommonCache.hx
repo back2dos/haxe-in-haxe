@@ -61,7 +61,7 @@ class CommonCache {
 		function build(path:GlobalTypePath, p:Pos):Null<Package> {
 			/* The first build has to load, afterwards we install a direct lib#build call. */
 			lib.load();
-			com.loadExternType = com.loadExternType.map(function(entry:Dynamic):Dynamic {
+			com.loadExternType = com.loadExternType.map(function(entry:context.Common.ExternTypeLoader):context.Common.ExternTypeLoader {
 				return entry.name == lib.getFilePath() ? {name: entry.name, load: lib.build} : entry;
 			});
 			return lib.build(path, p);
@@ -90,7 +90,7 @@ class CommonCache {
 						function build(path:GlobalTypePath, p:Pos):Null<Package> {
 							return lut.findOpt(path);
 						}
-						com.loadExternType = com.loadExternType.map(function(entry:Dynamic):Dynamic {
+						com.loadExternType = com.loadExternType.map(function(entry:context.Common.ExternTypeLoader):context.Common.ExternTypeLoader {
 							return entry.name == lib.getFilePath() ? {name: entry.name, load: build} : entry;
 						});
 				}
@@ -131,8 +131,8 @@ class CommonCache {
 				cc.cacheModuleInMemory(m.mPath, m);
 			} else {
 				var anonIdentification = new typing.TanonIdentification<Dynamic>();
-				function warn(w:Dynamic, s:String, p:Pos):Void com.warning(w, com.warningOptions, s, p);
-				var config:WriterTargetConfig = switch (com.hxbWriterConfig : Null<HxbWriterConfig>) {
+				function warn(w:core.Message.WarningCode, s:String, p:Pos):Void com.warning(w, com.warningOptions, s, p);
+				var config:WriterTargetConfig = switch com.hxbWriterConfig {
 					case null:
 						new WriterTargetConfig(); // HxbWriterConfig.create_target_config ()
 					case config:

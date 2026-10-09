@@ -57,7 +57,7 @@ class SuspensionCalls {
  }
 }
 class CoroToTexpr {
- public static function makeSuspendingCall(basic:Dynamic,cont:ContinuationApi,call:CoroSuspend,econtinuation:TExpr):TExpr {
+ public static function makeSuspendingCall(basic:BasicTypes,cont:ContinuationApi,call:CoroSuspend,econtinuation:TExpr):TExpr {
   var tfun=switch followWithCoro(call.csFun.etype){case Coro({args:args,ret:ret}):var expanded=Common.expandCoroType(basic,args,ret);TFun({args:expanded.args,ret:expanded.ret});case NotCoro(_):throw "Unexpected coroutine type";};
   return mk(TCall({var recordCopy45 = core.ds.Record.copy(call.csFun); recordCopy45.etype = tfun; recordCopy45;},[econtinuation].concat(call.csArgs)),cont.suspensionResult(basic.tany),call.csPos);
  }

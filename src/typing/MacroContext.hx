@@ -699,9 +699,9 @@ class MacroContext {
 			var mctx = mctx.g.macros == null ? Globals.die("", "typing/MacroContext.hx") : mctx.g.macros.typer;
 			var mainModule = Finalization.maybeLoadMain(mctx);
 			Finalization.finalize(mctx);
-			var generated:Dynamic = Finalization.generate(mctx, mainModule);
-			var types:Array<ModuleType> = generated.types;
-			var modules:Array<ModuleDef> = generated.modules;
+			var generated = Finalization.generate(mctx, mainModule);
+			var types = generated.types;
+			var modules = generated.modules;
 			mctx.com.types = types;
 			mctx.com.modules = modules;
 			var ectx = filters.exception.ExceptionInit.createExceptionContext(mctx);
@@ -867,7 +867,7 @@ class MacroContext {
 	}
 
 	public static function loadMacroModule(mctx:TyperContext, com:CommonContext, cpath:GlobalTypePath, display:Bool, p:Pos):{module:ModuleDef, restore:Void->Void} {
-		var m = try (com.moduleLut.getTypeLut() : context.Lookup.HashtblLookup<GlobalTypePath, GlobalTypePath>).find(cpath) catch (_:NotFound) cpath;
+		var m = try com.moduleLut.getTypeLut().find(cpath) catch (_:NotFound) cpath;
 		// Temporarily enter display mode while typing the macro.
 		var old = mctx.com.display;
 		if (display)

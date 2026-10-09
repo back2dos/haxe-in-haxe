@@ -157,7 +157,7 @@ class ContextCache {
 		});
 	}
 
-	public function cacheHxbModule(config:compiler.hxb.HxbWriterConfig.WriterTargetConfig, warn:Dynamic->String->core.Globals.Pos->Void, anonIdentification:typing.TanonIdentification<Dynamic>, m:ModuleDef):Null<Void->CachedChunks> {
+	public function cacheHxbModule(config:compiler.hxb.HxbWriterConfig.WriterTargetConfig, warn:core.Message.WarningCode->String->core.Globals.Pos->Void, anonIdentification:typing.TanonIdentification<Dynamic>, m:ModuleDef):Null<Void->CachedChunks> {
 		return switch m.mExtra.mKind {
 			case MImport:
 				modules.add(m.mPath, m);

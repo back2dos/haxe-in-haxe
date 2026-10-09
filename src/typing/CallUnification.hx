@@ -39,8 +39,8 @@ import typing.FieldCallCandidate.*;
 import typing.CallUnification.*;
 
 // haxe/src/typing/callUnification.ml — mechanical draft; not compile-validated.
-typedef CallAttemptData={var call:Void->TExpr;var display:Null<Dynamic>;}
-typedef CallAttemptFailure={var field:TClassField;var error:CompilerError;var display:Null<Dynamic>;}
+typedef CallAttemptData={var call:Void->TExpr;var display:Null<core.DisplayTypes.DisplayExceptionKind>;}
+typedef CallAttemptFailure={var field:TClassField;var error:CompilerError;var display:Null<core.DisplayTypes.DisplayExceptionKind>;}
 typedef CallAttempts={var candidates:Array<FieldCallCandidateData<CallAttemptData>>;var failures:Array<CallAttemptFailure>;}
 typedef CallParameter={var name:String;var optional:Bool;var type:T;}
 enum OverloadKind {OverloadProper; OverloadMeta; OverloadNone;}
@@ -167,11 +167,11 @@ class CallUnification {
   switch fa.faHost {
    case FHStatic(c):candidates=expand(fa.faField); co=c; isStatic=true; map=t -> t; tmap=t -> t;
    case FHAnon:candidates=expand(fa.faField); co=null; isStatic=false; map=t -> t; tmap=t -> t;
-   case FHInstance(c,tl):var cf=fa.faField; candidates=cf.cfName=="new"||!hasClassFieldFlag(cf,CfOverload)?expand(cf):(cast getOverloads(ctx.com,c,cf.cfName):Array<Dynamic>).map(pair -> pair.field); co=c; isStatic=false; map=TClassTools.getMapFunction(c,tl); tmap=t -> t;
+   case FHInstance(c,tl):var cf=fa.faField; candidates=cf.cfName=="new"||!hasClassFieldFlag(cf,CfOverload)?expand(cf):getOverloads(ctx.com,c,cf.cfName).map(pair -> pair.field); co=c; isStatic=false; map=TClassTools.getMapFunction(c,tl); tmap=t -> t;
    case FHAbstract(a,tl,c):map=t -> applyParams(a.aParams,tl,t); tmap=hasClassFieldFlag(fa.faField,CfAbstractConstructor)?(t -> t):(t -> map(a.aThis)); candidates=expand(fa.faField); co=c; isStatic=true;
   }
   var forced=isForcedInline(co,fa.faField),kind=hasClassFieldFlag(fa.faField,CfOverload)?OverloadProper:fa.faField.cfOverloads.length!=0?OverloadMeta:OverloadNone;
-  inline function extractDisplay():Dynamic {var f=ctx.g.delayedDisplay; ctx.g.delayedDisplay=null; return f;}
+  inline function extractDisplay():Null<core.DisplayTypes.DisplayExceptionKind> {var f=ctx.g.delayedDisplay; ctx.g.delayedDisplay=null; return f;}
   function raiseAugmentedDisplay<R>(cf:TClassField,de:core.DisplayTypes.DisplayExceptionKind):R {
    inline function defaultRaise():R throw new context.display.DisplayException(de);
    var text=genDocTextOpt(cf.cfDoc);
@@ -328,7 +328,7 @@ class CallDispatcher {
   ctx.e.macroDepth=ctx.e.macroDepth-1;
   ctx.e.withTypeStack.shift();
   var old=ctx.com.errorExt;
-  ctx.com.errorExt=function(err:Dynamic) {
+  ctx.com.errorExt=function(err:CompilerError) {
    var err:CompilerError=err;
    var ep=err.errPos;
    // display additional info in the case the error is not part of our original call

@@ -49,17 +49,18 @@ class Path {
 		checkInvalidChar(value);
 	}
 
-	public static function parsePath(file:String):{pack:Array<String>, name:String} {
+	public static function parsePath(file:String):core.Globals.GlobalTypePath {
 		var parts = getPathParts(file);
 		inline function fail(message:String):Dynamic throw 'Could not process argument $file\n$message';
-		function loop(index:Int, pack:Array<String>):{pack:Array<String>, name:String} {
+		function loop(index:Int, pack:Array<String>):core.Globals.GlobalTypePath {
 			if (index == parts.length) return fail("Package name must not be empty");
 			var value = parts[index];
 			if (index == parts.length - 1) {
 				checkInvalidChar(value);
 				return {pack: pack, name: value};
 			}
-			if (value == "_std") return loop(index + 1, pack);
+			// `_ :: ("_std" :: l) -> loop l` drops "_std" and the part before it.
+			if (parts[index + 1] == "_std") return loop(index + 2, pack);
 			checkPackageName(value);
 			pack.push(value);
 			return loop(index + 1, pack);

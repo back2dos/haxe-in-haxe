@@ -36,7 +36,7 @@ import compiler.server.ServerCompilationContext;
 import context.CommonCache;
 // haxe/src/compiler/compiler.ml
 class Compiler {
- public static function errorExt(com:CommonContext,err:Dynamic):Void com.errorExt(err);
+ public static function errorExt(com:CommonContext,err:core.Error.CompilerError):Void com.errorExt(err);
  public static function error(com:CommonContext,msg:String,p:Pos):Void errorExt(com,Error.makeError(Custom(msg),p));
  public static function hasError(com:CommonContext):Bool return com.partScope.hasError;
  public static function handleDiagnostics(com:CommonContext,msg:String,p:Pos,kind:CompilerMessageKind,?diagnosticsKind:MessageKind):Void {
@@ -129,13 +129,13 @@ class Compiler {
   }
   return {typer:tctx,displayPath:displayFileDotPath};
  }
- static function finalizeTypingImpl(com:CommonContext,tctx:Dynamic):Void {
+ static function finalizeTypingImpl(com:CommonContext,tctx:Typer):Void {
   var main=Finalization.maybeLoadMain(tctx);Common.enterStage(com,CFilteringStart);
   ServerMessage.compilerStage(com);
   var output=runOrDiagnose(com,function() return Finalization.generate(tctx,main));com.main.mainExpr=output.main.expr;com.main.mainFile=output.main.path;com.types=output.types;com.modules=output.modules;
  }
  public static function finalizeTyping(com:CommonContext,tctx:Typer):Void Timer.time(com.timerCtx,["finalize"],function(tctx) {finalizeTypingImpl(com,tctx);return null;},tctx);
- public static function filter(com:CommonContext,tctx:Typer,ectx:Dynamic,beforeDestruction:Void->Void):Void Timer.time(com.timerCtx,["filters"],function(_:Null<Bool>) return runOrDiagnose(com,function() {filters.Filters.run(com,ectx,beforeDestruction);return null;}),null);
+ public static function filter(com:CommonContext,tctx:Typer,ectx:Null<filters.exception.Exceptions.ExceptionContext>,beforeDestruction:Void->Void):Void Timer.time(com.timerCtx,["filters"],function(_:Null<Bool>) return runOrDiagnose(com,function() {filters.Filters.run(com,ectx,beforeDestruction);return null;}),null);
  // Not upstream: experimental code generators (backend/) receive the filtered program here. Always null in the compiler itself.
  public static var generateHook:Null<CommonContext->Void>=null;
  public static function compile(com:CommonContext,actx:ArgContext,sctx:ServerCompilationContext):Void {
@@ -206,7 +206,7 @@ class Compiler {
   catch(e:Dynamic){if(Sys.getEnv("OCAMLRUNPARAM")!="b"&&!Helper.isDebugRun)error(com,StdTools.string(e),nullPos);else {Sys.stderr().writeString(haxe.CallStack.toString(@:privateAccess haxe.Exception.caught(e).stack)+"\n");throw e;}}
  }
  public static function compileSafe(com:CommonContext,f:Void->Void):Void {try compileSafeImpl(com,f) catch (_:Abort) {}}
- public static function finalize(com:CommonContext):Void {CompilerIo.flush(com.requestScope.io);for (lib in com.hxbLibs) lib.close();if (!com.sctx.isServer) {for (lib in (cast com.nativeLibs.javaLibs:Array<Dynamic>)) lib.close();for (lib in (cast com.nativeLibs.swfLibs:Array<Dynamic>)) lib.close();}}
+ public static function finalize(com:CommonContext):Void {CompilerIo.flush(com.requestScope.io);for (lib in com.hxbLibs) lib.close();if (!com.sctx.isServer) {for (lib in com.nativeLibs.javaLibs) lib.close();for (lib in com.nativeLibs.swfLibs) lib.close();}}
  public static function catchCompletionAndExit(com:CommonContext,sctx:ServerCompilationContext,run:CommonContext->Void):Int {
   try {run(com);return hasError(com)?1:0;}
   catch(e:context.display.DisplayJson.JsonCompleted) {
@@ -244,7 +244,7 @@ class Compiler {
  }
 }
 class Setup {
- public static function initializeTarget(com:CommonContext,actx:Dynamic):String {
+ public static function initializeTarget(com:CommonContext,actx:compiler.Args.ArgContext):String {
   Common.initPlatform(com);com.classPaths.lockContext(com.customExt,Globals.platformName(com.platform),false);
   inline function addStd(dir:String):Void com.classPaths.modifyInplace(function(cp:core.ClassPath.IClassPath):Array<core.ClassPath.IClassPath> return switch cp.scope {case Std:[cp,new core.ClassPath.DirectoryClassPath(cp.path+dir+"/_std/",StdTarget)];case _:[cp];});
   return switch com.platform {
@@ -270,12 +270,12 @@ class Setup {
   // Native lib pass 2: Initialize
   for (f in fl) f();
  }
- public static function createTyperContext(com:CommonContext,macros:Dynamic):Typer {
+ public static function createTyperContext(com:CommonContext,macros:Null<{finalize:Void->Void,typer:Typer}>):Typer {
   var buf=new StringBuf();buf.add("Defines: ");var keys:Array<String>=[for (k in com.defines.values.keys()) k];keys.sort(Reflect.compare);for (k in keys) {var v=com.defines.values.get(k);buf.add(v=="1"?k+";":k+"="+v+";");}
   var text=buf.toString();Common.log(com,text.substr(0,text.length-1));com.callbacks.run(com.errorExt,com.callbacks.getBeforeTyperCreate());return typing.TyperEntry.create(com,macros);
  }
  public static function executablePath():String return Sys.programPath();
- public static function getStdClassPaths():Array<{path:String,scope:Dynamic}> {
+ public static function getStdClassPaths():Array<{path:String,scope:core.ClassPath.ClassPathScope}> {
   var env=Sys.getEnv("HAXE_STD_PATH");if (env!=null) {
    var p=Path.removeTrailingSlash(env),parts=~/[;:]/g.split(p),result=[];var i=0;
    while (i<parts.length) {var s=parts[i];if (i+1<parts.length&&s.length==1&&~/^[a-zA-Z]$/.match(s)) {result.push({path:s+":"+parts[i+1],scope:Std});i+=2;}else {result.push({path:s,scope:Std});i++;}}return result;

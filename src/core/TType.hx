@@ -62,6 +62,12 @@ class TLazy {
 	public inline function clone():TSignature return new TSignature(args, ret);
 }
 typedef TParams = Array<T>;
+/** An `a_from_field`/`a_to_field` entry: `(t * tclass_field)`. */
+/** `(tclass * tparams)`, as in `cl_super`/`cl_implements`. */
+typedef ClassAndParams = {var cls:TClass; var params:TParams;};
+typedef CastField = {var type:T; var field:TClassField;};
+/** `Abstract.find_to_from` result: `(tabstract * tparams * (t * tclass_field))`. */
+typedef AbstractCastField = {var abs:TAbstract; var params:TParams; var field:CastField;};
 @:structInit class TypedTypeParam {
 	public var ttpName:String;
 	public var ttpClass:TClass;
@@ -165,8 +171,8 @@ typedef TInfos = { var mtPath:GlobalTypePath; var mtModule:ModuleDef; var mtPos:
 	public var clType:T;
 	public var clKind:TClassKind;
 	public var clFlags:Int;
-	public var clSuper:Null<{var cls:TClass; var params:TParams;}>;
-	public var clImplements:Array<{var cls:TClass; var params:TParams;}>;
+	public var clSuper:Null<ClassAndParams>;
+	public var clImplements:Array<ClassAndParams>;
 	public var clFields:TypeMap<TClassField>;
 	public var clStatics:TypeMap<TClassField>;
 	public var clOrderedStatics:Array<TClassField>;
@@ -241,9 +247,9 @@ typedef TInfos = { var mtPath:GlobalTypePath; var mtModule:ModuleDef; var mtPos:
 	public var aImpl:Null<TClass>;
 	public var aThis:T;
 	public var aFrom:Array<T>;
-	public var aFromField:Array<{var type:T; var field:TClassField;}>;
+	public var aFromField:Array<CastField>;
 	public var aTo:Array<T>;
-	public var aToField:Array<{var type:T; var field:TClassField;}>;
+	public var aToField:Array<CastField>;
 	public var aArray:Array<TClassField>;
 	public var aRead:Null<TClassField>;
 	public var aWrite:Null<TClassField>;
@@ -281,7 +287,7 @@ enum ModuleDepOrigin { MDepFromTyping; MDepFromImport; MDepFromMacro; MDepFromMa
 	public inline function clone():ModuleDep return new ModuleDep(mdSign, mdKind, mdPath, mdOrigin);
 }
 @:structInit class ModuleDefExtra {
-	public var mFile:Dynamic;
+	public var mFile:core.Path.LazyUniqueKey;
 	public var mSign:String;
 	public var mDisplay:ModuleDefDisplay;
 	public var mCheckPolicy:Array<ModuleCheckPolicy>;
@@ -295,7 +301,7 @@ enum ModuleDepOrigin { MDepFromTyping; MDepFromImport; MDepFromMacro; MDepFromMa
 	public var mKind:ModuleKind;
 	public var mCacheBoundObjects:Array<CacheBoundObject>;
 	public var mFeatures:Map<String, Bool>;
-	public inline function new(mFile:Dynamic, mSign:String, mDisplay:ModuleDefDisplay, mCheckPolicy:Array<ModuleCheckPolicy>, mTime:Float, mCacheState:ModuleCacheState, mAdded:Int, mChecked:Int, mProcessed:Int, mDeps:IntMap<ModuleDep>, mDisplayDeps:Null<IntMap<ModuleDep>>, mKind:ModuleKind, mCacheBoundObjects:Array<CacheBoundObject>, mFeatures:Map<String, Bool>) { this.mFile = mFile; this.mSign = mSign; this.mDisplay = mDisplay; this.mCheckPolicy = mCheckPolicy; this.mTime = mTime; this.mCacheState = mCacheState; this.mAdded = mAdded; this.mChecked = mChecked; this.mProcessed = mProcessed; this.mDeps = mDeps; this.mDisplayDeps = mDisplayDeps; this.mKind = mKind; this.mCacheBoundObjects = mCacheBoundObjects; this.mFeatures = mFeatures; }
+	public inline function new(mFile:core.Path.LazyUniqueKey, mSign:String, mDisplay:ModuleDefDisplay, mCheckPolicy:Array<ModuleCheckPolicy>, mTime:Float, mCacheState:ModuleCacheState, mAdded:Int, mChecked:Int, mProcessed:Int, mDeps:IntMap<ModuleDep>, mDisplayDeps:Null<IntMap<ModuleDep>>, mKind:ModuleKind, mCacheBoundObjects:Array<CacheBoundObject>, mFeatures:Map<String, Bool>) { this.mFile = mFile; this.mSign = mSign; this.mDisplay = mDisplay; this.mCheckPolicy = mCheckPolicy; this.mTime = mTime; this.mCacheState = mCacheState; this.mAdded = mAdded; this.mChecked = mChecked; this.mProcessed = mProcessed; this.mDeps = mDeps; this.mDisplayDeps = mDisplayDeps; this.mKind = mKind; this.mCacheBoundObjects = mCacheBoundObjects; this.mFeatures = mFeatures; }
 	public inline function clone():ModuleDefExtra return new ModuleDefExtra(mFile, mSign, mDisplay, mCheckPolicy, mTime, mCacheState, mAdded, mChecked, mProcessed, mDeps, mDisplayDeps, mKind, mCacheBoundObjects, mFeatures);
 }
 enum ClassFieldRefKind { CfrStatic; CfrMember; CfrConstructor; CfrInit; }

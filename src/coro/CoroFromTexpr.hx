@@ -45,7 +45,7 @@ class CoroFromTexpr {
   var wrapper=ctx.typer.com.localWrapper; var scom=SafeCom.ofCom(ctx.typer.com);
   scom={var recordCopy36 = core.ds.Record.copy(scom); recordCopy36.platformConfig = {var recordCopy35 = core.ds.Record.copy(scom.platformConfig); recordCopy35.pfCapturePolicy = CPWrapRef; recordCopy35;}; recordCopy36;};
   e=CapturedVars.capturedVars(scom,wrapper,true,e);
-  inline function makeBlock(tp:Dynamic):CoroBlock return CoroFunctions.makeBlock(ctx,tp);
+  inline function makeBlock(tp:Null<{t:T,p:core.Globals.Pos}>):CoroBlock return CoroFunctions.makeBlock(ctx,tp);
   inline function blockFromE(e:TExpr):CoroBlock return makeBlock({t:e.etype,p:e.epos});
   inline function hasSideEffect(e:TExpr):Bool return switch e.eexpr {case TVar(_,_):true;case _:OptimizerTexpr.hasSideEffect(e);};
   inline function addExpr(cb:CoroBlock,e:TExpr):Void if(cb.cbNext==NextUnknown&&e!=eNoValue&&hasSideEffect(e))cb.cbEl.push(e);
@@ -62,7 +62,7 @@ class CoroFromTexpr {
   inline function scopeAllowsSuspensionCallOn(e1:TExpr,args:Array<{name:String,optional:Bool,type:T}>,el:Array<TExpr>):Bool {
    if(scope==null||!scope.restrictedSuspension)return true;
    function isScopeLocalExpr(e:TExpr):Bool return switch Texpr.skip(e).eexpr {case TLocal(v) if(v==scope.scopeVar):true;case TField(e1,_):isScopeLocalExpr(e1);case _:false;};
-   inline function isRestricted(meta:Dynamic):Bool {var c=CoroScopeConfig.ofMetaList(meta);return c!=null&&c.restrictedSuspension;}
+   inline function isRestricted(meta:core.Ast.Metadata):Bool {var c=CoroScopeConfig.ofMetaList(meta);return c!=null&&c.restrictedSuspension;}
    inline function hasScopeLocalFirstArgument():Bool {
     if(args.length==0||el.length==0||!isScopeLocalExpr(el[0]))return false;
     return switch e1.eexpr {
@@ -95,7 +95,7 @@ class CoroFromTexpr {
    };
    return try HasNoSuspension(remap(allowTco,0,e))catch(e:FoundSuspension)HasSuspension;
   }
-  var loopStack:Array<{body:CoroBlock,next:Dynamic}>=[];
+  var loopStack:Array<{body:CoroBlock,next:AtomicLazy<CoroBlock>}>=[];
   var loop:CoroBlock->CoroRet->TExpr->Null<BlockValue>=null;
   var loopAssign:CoroBlock->CoroRet->TExpr->Null<BlockValue>=null;
   var loopBlock:CoroBlock->CoroRet->TExpr->Null<BlockValue>=null;

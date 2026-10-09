@@ -432,7 +432,7 @@ class Texpr {
   switch mapped.eexpr {case TSwitch(s):s.switchCases.reverse(); case _:}
   return {acc:acc,value:mapped};
  }
- public static function setDefault(b:Dynamic,a:TVar,c:TExpr,p:Pos):TExpr {var t = a.vType; var v = mk(TLocal(a),t,p); var cond = TBinop(OpEq,v,mk(TConst(TNull),t,p)); return mk(TIf(Builder.mkParent(mk(cond,b.tbool,p)),mk(TBinop(OpAssign,v,c),t,p),null),b.tvoid,p);}
+ public static function setDefault(b:BasicTypes,a:TVar,c:TExpr,p:Pos):TExpr {var t = a.vType; var v = mk(TLocal(a),t,p); var cond = TBinop(OpEq,v,mk(TConst(TNull),t,p)); return mk(TIf(Builder.mkParent(mk(cond,b.tbool,p)),mk(TBinop(OpAssign,v,c),t,p),null),b.tvoid,p);}
  public static function constructorSideEffects(e:TExpr):Bool return switch e.eexpr {
   case TBinop(op,_,_) if (op != OpAssign):true;
   case TField(_,FEnum(_,_)):false;
@@ -462,7 +462,7 @@ class Texpr {
   // `| 0`: Int32 wrap-around on hosts with unbounded Int arithmetic (JS: -(-2147483648))
   var result=Std.int(value);return negative?(-result)|0:result;
  }
- public static function typeConstant(b:Dynamic,c:Constant,p:Pos):TExpr return switch c {
+ public static function typeConstant(b:BasicTypes,c:Constant,p:Pos):TExpr return switch c {
   case Int(s,_):
    if (s.length > 10 && s.substr(0,2) == "0x") Error.raiseTypingError("Invalid hexadecimal integer",p);
    if (s.length > 34 && s.substr(0,2) == "0b") Error.raiseTypingError("Invalid binary integer",p);
@@ -474,14 +474,14 @@ class Texpr {
   case Ident(s):Error.raiseTypingError("Invalid constant :  " + s,p);
   case Regexp(_,_):Error.raiseTypingError("Invalid constant",p);
  };
- public static function typeConstantValue(b:Dynamic,e:Expr):TExpr return switch e.expr {
+ public static function typeConstantValue(b:BasicTypes,e:Expr):TExpr return switch e.expr {
   case EConst(c):typeConstant(b,c,e.pos); case EParenthesis(a):typeConstantValue(b,a);
   case EObjectDecl(el):mk(TObjectDecl(el.map(a -> {key:a.key,expr:typeConstantValue(b,a.expr)})),mkAnon(Closed),e.pos);
   case EArrayDecl(el):mk(TArrayDecl(el.map(a -> typeConstantValue(b,a))),b.tarray(tDynamic),e.pos);
   case _:Error.raiseTypingError("Constant value expected",e.pos);
  };
- public static function isConstantValue(b:Dynamic,e:Expr):Bool {try {typeConstantValue(b,e); return true;} catch (err:core.Error.TypingError) {switch err.error.errMessage {case Custom(_):return false; case _:throw err;}}}
- public static function forRemap(b:Dynamic,v:TVar,etype:T,e1:TExpr,e2:TExpr,p:Pos):TExpr {
+ public static function isConstantValue(b:BasicTypes,e:Expr):Bool {try {typeConstantValue(b,e); return true;} catch (err:core.Error.TypingError) {switch err.error.errMessage {case Custom(_):return false; case _:throw err;}}}
+ public static function forRemap(b:BasicTypes,v:TVar,etype:T,e1:TExpr,e2:TExpr,p:Pos):TExpr {
   var v2 = allocVar(v.vKind,v.vName,etype,e1.epos); var ev = mk(TLocal(v2),etype,e1.epos); var t = AbstractTools.followWithAbstracts(etype);
   var fa = try quickField(t,"hasNext") catch (_:NotFound) Error.raiseTypingError(sType(printContext(),t) + " has no field hasNext()",p);
   var hasNext = mk(TField(ev,fa),tfun([],b.tbool),e1.epos); hasNext = mk(TCall(hasNext,[]),b.tbool,hasNext.epos);
@@ -489,14 +489,14 @@ class Texpr {
   var assign = mk(TVar(v,next),b.tvoid,p); var body = concat(assign,e2);
   return mk(TBlock([mk(TVar(v2,e1),b.tvoid,e1.epos),mk(TWhile(mk(TParenthesis(hasNext),hasNext.etype,hasNext.epos),body,NormalWhile),b.tvoid,e1.epos)]),b.tvoid,p);
  }
- public static function notWhileTrueToWhileTrue(b:Dynamic,e1:TExpr,e2:TExpr,flag:WhileFlag,t:T,p:Pos):TExpr {
+ public static function notWhileTrueToWhileTrue(b:BasicTypes,e1:TExpr,e2:TExpr,flag:WhileFlag,t:T,p:Pos):TExpr {
   var br = mk(TBreak,tDynamic,p); var not = mk(TUnop(Not,Prefix,Builder.mkParent(e1)),e1.etype,e1.epos);
   inline function makeIf(eo:Null<TExpr>):TExpr return mk(TIf(not,br,eo),b.tvoid,p);
   function mapContinue(e:TExpr):TExpr return switch e.eexpr {case TContinue:duplicateTvars(eIdentity,makeIf(e)); case TWhile(_,_,_):e; case _:mapExpr(mapContinue,e);};
   if (flag != NormalWhile) e2 = mapContinue(e2); var cond = makeIf(null); var block = flag == NormalWhile ? concat(cond,e2) : concat(e2,cond);
   return mk(TWhile(mk(TConst(TBool(true)),b.tbool,p),block,NormalWhile),t,p);
  }
- public static function buildMetadata(api:Dynamic,t:ModuleType):Null<TExpr> {
+ public static function buildMetadata(api:BasicTypes,t:ModuleType):Null<TExpr> {
   var p:Pos; var meta:Array<{name:String,meta:Metadata}>; var fields:Array<{name:String,meta:Metadata}>; var statics:Array<{name:String,meta:Metadata}>;
   switch t {
    case TClassDecl(c):var fs = c.clOrderedFields.copy(); if (c.clConstructor != null) {var cf = core.ds.Record.copy(c.clConstructor); cf.cfName = "_"; fs.push(cf);} p = c.clPos; meta = [{name:"",meta:c.clMeta}]; fields = fs.map(f -> {name:f.cfName,meta:f.cfMeta}); statics = c.clOrderedStatics.map(f -> {name:f.cfName,meta:f.cfMeta});
@@ -506,7 +506,7 @@ class Texpr {
   }
   inline function filter(l:Array<{name:String,meta:Metadata}>):Array<{name:String,meta:Metadata}> return l.map(a -> {name:a.name,meta:a.meta.filter(m -> switch m.meta {case core.MetaList.StrictMeta.Custom(s):s.length > 0 && s.charAt(0) != ":"; case _:false;})}).filter(a -> a.meta.length > 0);
   meta = filter(meta); fields = filter(fields); statics = filter(statics);
-  function key(n:String):Dynamic return {name:n,pos:Globals.nullPos,quote:NoQuotes};
+  function key(n:String):{name:String,pos:Pos,quote:QuoteStatus} return {name:n,pos:Globals.nullPos,quote:NoQuotes};
   inline function makeMetaField(ml:Metadata):TExpr {
    var seen = new haxe.ds.StringMap<Bool>();
    return mk(TObjectDecl(ml.map(m -> {var name = switch m.meta {case core.MetaList.StrictMeta.Custom(s):s; case _:throw "Texpr.buildMetadata";}; if (seen.exists(name)) Error.raiseTypingError("Duplicate metadata '" + name + "'",m.pos); seen.set(name,true); return {key:key(name),expr:mk(m.exprs.length == 0 ? TConst(TNull) : TArrayDecl(m.exprs.map(e -> typeConstantValue(api,e))),api.tarray(tDynamic),m.pos)};})),tDynamic,p);
@@ -568,20 +568,20 @@ class Builder {
  public static function makeTypeexpr(mt:ModuleType,p:Pos):TExpr {var t = switch resolveTypedef(mt) {case TClassDecl(c):c.clType; case TEnumDecl(e):e.eType; case TAbstractDecl(a):TType(abstractModuleType(a,[]),[]); case _:throw "Texpr.makeTypeexpr";}; return mk(TTypeExpr(mt),t,p);}
  public static function makeStaticField(c:TClass,cf:TClassField,p:Pos):TExpr return mk(TField(makeStaticThis(c,p),FStatic(c,cf)),cf.cfType,p);
  public static function makeThrow(e:TExpr,p:Pos):TExpr return mk(TThrow(e),tDynamic,p);
- public static function makeInt(b:Dynamic,i:Int,p:Pos):TExpr return mk(TConst(TInt(i)),b.tint,p);
- public static function makeFloat(b:Dynamic,f:String,p:Pos):TExpr return mk(TConst(TFloat(f)),b.tfloat,p);
- public static function makeBool(b:Dynamic,v:Bool,p:Pos):TExpr return mk(TConst(TBool(v)),b.tbool,p);
- public static function makeString(b:Dynamic,s:String,p:Pos):TExpr return mk(TConst(TString(s)),b.tstring,p);
+ public static function makeInt(b:BasicTypes,i:Int,p:Pos):TExpr return mk(TConst(TInt(i)),b.tint,p);
+ public static function makeFloat(b:BasicTypes,f:String,p:Pos):TExpr return mk(TConst(TFloat(f)),b.tfloat,p);
+ public static function makeBool(b:BasicTypes,v:Bool,p:Pos):TExpr return mk(TConst(TBool(v)),b.tbool,p);
+ public static function makeString(b:BasicTypes,s:String,p:Pos):TExpr return mk(TConst(TString(s)),b.tstring,p);
  public static function makeNull(t:T,p:Pos):TExpr return mk(TConst(TNull),t,p);
  public static function makeLocal(v:TVar,p:Pos):TExpr return mk(TLocal(v),v.vType,p);
- public static function makeConstTexpr(b:Dynamic,c:TConstant,p:Pos):TExpr return switch c {case TString(s):makeString(b,s,p); case TInt(i):makeInt(b,i,p); case TFloat(f):makeFloat(b,f,p); case TBool(v):makeBool(b,v,p); case TNull:makeNull(b.tnull(mkMono()),p); case _:Error.raiseTypingError("Unsupported constant",p);};
+ public static function makeConstTexpr(b:BasicTypes,c:TConstant,p:Pos):TExpr return switch c {case TString(s):makeString(b,s,p); case TInt(i):makeInt(b,i,p); case TFloat(f):makeFloat(b,f,p); case TBool(v):makeBool(b,v,p); case TNull:makeNull(b.tnull(mkMono()),p); case _:Error.raiseTypingError("Unsupported constant",p);};
  public static function field(e:TExpr,name:String,t:T,p:Pos):TExpr {var fa = try quickField(e.etype,name) catch (_:NotFound) {throw "Field " + sType(printContext(),e.etype) + "." + name + " requested but not found";}; return mk(TField(e,fa),t,p);}
  public static function fcall(e:TExpr,name:String,el:Array<TExpr>,ret:T,p:Pos):TExpr return mk(TCall(field(e,name,tfun(el.map(e -> e.etype),ret),p),el),ret,p);
  public static function mkParent(e:TExpr):TExpr return mk(TParenthesis(e),e.etype,e.epos);
  public static function ensureParent(e:TExpr):TExpr return switch e.eexpr {case TParenthesis(_):e; case _:mkParent(e);};
  public static function mkReturn(e:TExpr):TExpr return mk(TReturn(e),tDynamic,e.epos);
  public static function binop(op:Binop,a:TExpr,b:TExpr,t:T,p:Pos):TExpr return mk(TBinop(op,a,b),t,p);
- public static function index(b:Dynamic,e:TExpr,i:Int,t:T,p:Pos):TExpr return mk(TArray(e,mk(TConst(TInt(i)),b.tint,p)),t,p);
+ public static function index(b:BasicTypes,e:TExpr,i:Int,t:T,p:Pos):TExpr return mk(TArray(e,mk(TConst(TInt(i)),b.tint,p)),t,p);
  public static function resolveAndMakeStaticCall(c:TClass,name:String,args:Array<TExpr>,p:Pos):TExpr {c.clBuild(); var cf = c.clStatics.get(name); if (cf == null) throw "Texpr.resolveAndMakeStaticCall"; var ef = makeStaticField(c,cf,Globals.mkZeroRangePos(p)); var ret = switch follow(ef.etype) {case TFun(sig):sig.ret; case _:throw "assert: static call is not a function";}; return mk(TCall(ef,args),ret,p);}
 }
 private class BreakOrContinue {public function new() {}}

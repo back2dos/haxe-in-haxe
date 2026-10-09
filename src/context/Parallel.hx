@@ -18,7 +18,7 @@ class Parallel {
   pool.run(function() pool.parallelFor(0,length-1,f,chunkSize));
   pool.close();
  }
- public static function runInNewPool<A>(timerCtx:Dynamic,f:Null<TaskPool>->A):A {
+ public static function runInNewPool<A>(timerCtx:core.Timer.TimerContext,f:Null<TaskPool>->A):A {
   if (!enable) return f(null);
   var pool=Timer.time(timerCtx,["domainslib","setup"],function(_) return new TaskPool(TaskPool.recommendedDomainCount()-1),null);
   inline function cleanup():Void Timer.time(timerCtx,["domainslib","teardown"],function(_) {pool.close();return null;},null);

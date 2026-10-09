@@ -10,7 +10,7 @@ import filters.RenameVars;
 
 // haxe/src/filters/safe/addFieldInits.ml — mechanical draft; not compiled or validated.
 class AddFieldInits {
-	public static function addFieldInits(clPath:Dynamic, locals:Dynamic, scom:context.SafeCom.SafeContext, t:ModuleType):Void {
+	public static function addFieldInits(clPath:core.Globals.GlobalTypePath, locals:RenameVars.RenameInit, scom:context.SafeCom.SafeContext, t:ModuleType):Void {
 		inline function apply(c:TClass):Void {
 			var ethis = TypeOps.mk(TConst(TThis), TInst(c, TypeOps.extractParamTypes(c.clParams)), c.clPos);
 			var v = TypeOps.allocVar(VGenerated, "_g", ethis.etype, ethis.epos);

@@ -111,7 +111,8 @@ class Sanitize {
 		};
 		return {eexpr:def, etype:e.etype, epos:e.epos};
 	}
-	public static function reduceExpr(com:Dynamic, e:TExpr):TExpr {
+	// `com` is polymorphic and unused upstream.
+	public static function reduceExpr<C>(com:C, e:TExpr):TExpr {
 		return switch e.eexpr {
 			case TBlock(l) if (l.length == 0): e;
 			case TBlock(l):

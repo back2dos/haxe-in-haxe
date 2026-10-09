@@ -35,14 +35,14 @@ import sys.thread.Mutex;
 	public var exceptionsMutex:Mutex;
 	public var warnings:{value:Array<SavedWarning>};
 	public var warningsMutex:Mutex;
-	public var errors:{value:Array<Dynamic>};
+	public var errors:{value:Array<core.Error.CompilerError>};
 	public var errorsMutex:Mutex;
-	public var timerCtx:Dynamic;
+	public var timerCtx:core.Timer.TimerContext;
 	public var findModule:core.Globals.GlobalTypePath->ModuleDef;
 	public var findModuleByType:core.Globals.GlobalTypePath->ModuleDef;
 	public var curclass:TClass;
 	public var curfield:TClassField;
-	public inline function new(basic:BasicTypes, platform:core.Globals.Platform, defines:core.Define.DefineContext, platformConfig:PlatformConfig, debug:Bool, isMacroContext:Bool, foptimize:Bool, doinline:Bool, dumpConfig:DumpConfiguration, exceptions:{value:Array<Dynamic>}, exceptionsMutex:Mutex, warnings:{value:Array<SavedWarning>}, warningsMutex:Mutex, errors:{value:Array<Dynamic>}, errorsMutex:Mutex, timerCtx:Dynamic, findModule:core.Globals.GlobalTypePath->ModuleDef, findModuleByType:core.Globals.GlobalTypePath->ModuleDef, curclass:TClass, curfield:TClassField) { this.basic = basic; this.platform = platform; this.defines = defines; this.platformConfig = platformConfig; this.debug = debug; this.isMacroContext = isMacroContext; this.foptimize = foptimize; this.doinline = doinline; this.dumpConfig = dumpConfig; this.exceptions = exceptions; this.exceptionsMutex = exceptionsMutex; this.warnings = warnings; this.warningsMutex = warningsMutex; this.errors = errors; this.errorsMutex = errorsMutex; this.timerCtx = timerCtx; this.findModule = findModule; this.findModuleByType = findModuleByType; this.curclass = curclass; this.curfield = curfield; }
+	public inline function new(basic:BasicTypes, platform:core.Globals.Platform, defines:core.Define.DefineContext, platformConfig:PlatformConfig, debug:Bool, isMacroContext:Bool, foptimize:Bool, doinline:Bool, dumpConfig:DumpConfiguration, exceptions:{value:Array<Dynamic>}, exceptionsMutex:Mutex, warnings:{value:Array<SavedWarning>}, warningsMutex:Mutex, errors:{value:Array<core.Error.CompilerError>}, errorsMutex:Mutex, timerCtx:core.Timer.TimerContext, findModule:core.Globals.GlobalTypePath->ModuleDef, findModuleByType:core.Globals.GlobalTypePath->ModuleDef, curclass:TClass, curfield:TClassField) { this.basic = basic; this.platform = platform; this.defines = defines; this.platformConfig = platformConfig; this.debug = debug; this.isMacroContext = isMacroContext; this.foptimize = foptimize; this.doinline = doinline; this.dumpConfig = dumpConfig; this.exceptions = exceptions; this.exceptionsMutex = exceptionsMutex; this.warnings = warnings; this.warningsMutex = warningsMutex; this.errors = errors; this.errorsMutex = errorsMutex; this.timerCtx = timerCtx; this.findModule = findModule; this.findModuleByType = findModuleByType; this.curclass = curclass; this.curfield = curfield; }
 	public inline function clone():SafeContext return new SafeContext(basic, platform, defines, platformConfig, debug, isMacroContext, foptimize, doinline, dumpConfig, exceptions, exceptionsMutex, warnings, warningsMutex, errors, errorsMutex, timerCtx, findModule, findModuleByType, curclass, curfield);
 }
 class SafeCom {
@@ -65,7 +65,7 @@ class SafeCom {
 		out.curfield = ctx.f.curfield;
 		return out;
 	}
-	public static function finalize(scom:SafeContext, com:Dynamic):Void {
+	public static function finalize(scom:SafeContext, com:context.Common.CommonContext):Void {
 		var warnings = scom.warnings.value;
 		var errors = scom.errors.value;
 		var exns = scom.exceptions.value;
@@ -76,7 +76,7 @@ class SafeCom {
 		for (err in errors) Common.displayErrorExt(com,err);
 		if (exns.length > 0) throw exns[0];
 	}
-	public static function runWithScom<T>(com:Dynamic, scom:SafeContext, f:Void->T):T {
+	public static function runWithScom<T>(com:context.Common.CommonContext, scom:SafeContext, f:Void->T):T {
 		var result:T;
 		try result = f() catch(exn:haxe.Exception){ finalize(scom,com); throw exn;}
 		finalize(scom,com);
@@ -89,11 +89,11 @@ class SafeCom {
 		mutex.release();
 		return result;
 	}
-	public static function addError(scom:SafeContext, err:Dynamic):Void {
+	public static function addError(scom:SafeContext, err:core.Error.CompilerError):Void {
 		protect(scom.errorsMutex,function() { scom.errors.value.unshift(err); return null; });
 	}
 	public static function addExn(scom:SafeContext, exn:Dynamic):Void {
-		if (Std.isOfType(exn, core.Error.TypingError)) addError(scom,exn.error);
+		if (Std.isOfType(exn, core.Error.TypingError)) addError(scom,(cast exn:core.Error.TypingError).error);
 		else protect(scom.exceptionsMutex,function() { scom.exceptions.value.unshift(exn); return null; });
 	}
 	public static function addWarning(scom:SafeContext, w:WarningCode, msg:String, p:core.Globals.Pos):Void {

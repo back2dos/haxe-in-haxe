@@ -41,12 +41,12 @@ class BinopResult {
  public static function toString(br:BinopResultData):String {function st(t:T):String return core.TPrinting.sType(core.TPrinting.printContext(),t);inline function se(e:TExpr):String return core.TPrinting.sExprPretty(false,"",false,st,e);return switch br{case BinopNormal(b):Printer.sRecordFields("",[{name:"binop_op",value:sBinop(b.binopOp)},{name:"binop_lhs",value:se(b.binopLhs)},{name:"binop_rhs",value:se(b.binopRhs)},{name:"binop_type",value:st(b.binopType)},{name:"binop_needs_assign",value:Std.string(b.binopNeedsAssign)},{name:"binop_swapped",value:Std.string(b.binopSwapped)},{name:"binop_pos",value:Printer.sPos(b.binopPos)}]);case BinopSpecial(e,assign):'BinopSpecial(${se(e)},$assign)';};}
  public static function createNormal(op:Binop,e1:TExpr,e2:TExpr,t:T,needs:Bool,swapped:Bool,p:Pos):BinopResultData return BinopNormal({binopOp:op,binopLhs:e1,binopRhs:e2,binopType:t,binopNeedsAssign:needs,binopSwapped:swapped,binopPos:p});
  public static function createSpecial(e:TExpr,needs:Bool):BinopResultData return BinopSpecial(e,needs);
- public static function toTexpr(vr:Dynamic,br:BinopResultData,assign:TExpr->TExpr):TExpr return switch br{case BinopNormal(b):var lhs=b.binopLhs,rhs=b.binopRhs;if(b.binopSwapped){var first=vr.asVar("lhs",rhs);var second=vr.asVar("rhs",lhs);lhs=second;rhs=first;}var e=mk(TBinop(b.binopOp,lhs,rhs),b.binopType,b.binopPos);b.binopNeedsAssign?assign(e):e;case BinopSpecial(e,needs):needs?assign(e):e;};
+ public static function toTexpr(vr:ValueReference,br:BinopResultData,assign:TExpr->TExpr):TExpr return switch br{case BinopNormal(b):var lhs=b.binopLhs,rhs=b.binopRhs;if(b.binopSwapped){var first=vr.asVar("lhs",rhs);var second=vr.asVar("rhs",lhs);lhs=second;rhs=first;}var e=mk(TBinop(b.binopOp,lhs,rhs),b.binopType,b.binopPos);b.binopNeedsAssign?assign(e):e;case BinopSpecial(e,needs):needs?assign(e):e;};
  public static function getType(br:BinopResultData):T return switch br{case BinopNormal(b):b.binopType;case BinopSpecial(e,_):e.etype;};
  public static function needsAssign(br:BinopResultData):Bool return switch br{case BinopNormal(_):true;case BinopSpecial(_,needs):needs;};
 }
 enum TypeClass {KInt;KFloat;KString;KUnk;KDyn;KOther;KNumParam(t:T);KStrParam(t:T);KAbstract(a:TAbstract,tl:Array<T>);}
-typedef AssignOpApi<A>={var aknoFallback:Void->TExpr;var typeRhs:TExpr->Expr->A;var toTexpr:Dynamic->A->(TExpr->TExpr)->TExpr;var generate:Dynamic->TExpr->TExpr->TExpr;var assign:Dynamic->TExpr->A->TExpr;}
+typedef AssignOpApi<A>={var aknoFallback:Void->TExpr;var typeRhs:TExpr->Expr->A;var toTexpr:ValueReference->A->(TExpr->TExpr)->TExpr;var generate:ValueReference->TExpr->TExpr->TExpr;var assign:ValueReference->TExpr->A->TExpr;}
 class Operators {
  public static function checkError(ctx:Typer,err:CompilerError):Void {
   switch err.errMessage {
@@ -132,7 +132,7 @@ class Operators {
    return BinopResult.createSpecial(CallUnification.makeStaticCallBetter(ctx,c,cf,tl,[e1,e2],ret,p),needs);
   }
   var eq=op==OpEq||op==OpNotEq;if(eq)switch [follow(e1.etype),follow(e2.etype)]{case [TMono(_),_]|[_,TMono(_)]:try core.TUnification.unify(e1.etype,e2.etype)catch(ex:UnificationFailure){}case _:}
-  function loop(findOp:Binop,ops:Array<Dynamic>):BinopResultData {
+  function loop(findOp:Binop,ops:Array<{op:Binop,field:TClassField}>):BinopResultData {
    for(entry in ops){var opCf:Binop=entry.op;var cf:TClassField=entry.field;if(!Type.enumEq(opCf,findOp))continue;var impl=hasClassFieldFlag(cf,CfImpl);var sig=switch follow(cf.cfType){case TFun(s):s;case _:throw "assert";};if(sig.args.length<2)throw "assert";if(sig.args.length>2&&!(sig.args.length==3&&sig.args[2].optional&&isPosInfos(sig.args[2].type)))throw 'Unexpected arguments list of function ${cf.cfName}';
     function check(e1:TExpr,e2:TExpr,swapped:Bool):BinopResultData {
      var monos=Monomorph.spawnConstrainedMonos(function(t)return t,cf.cfParams);function mapper(t:T):T return mapA(applyParams(cf.cfParams,monos,t));var t1=mapper(sig.args[0].type),t2=mapper(sig.args[1].type),ret=mapper(sig.ret);if(impl)t1=core.Abstract.followWithAbstracts(t1);
@@ -143,7 +143,7 @@ class Operators {
     try{if(!core.Meta.has(MetaTag.Commutative,cf.cfMeta))throw NotFound.raise();return check(e2,e1,true);}catch(_:NotFound){}catch(_:UnificationFailure){}catch(ex:Dynamic){if(!unificationError(ex))throw ex;}
    }throw NotFound.raise();
   }
-  var ops:Array<Dynamic>=left?a.aOps:a.aOps.filter(function(o)return !hasClassFieldFlag(o.field,CfImpl)||core.Meta.has(MetaTag.Commutative,o.field.cfMeta));if(isAssign)try{return loop(OpAssignOp(op),ops);}catch(ex:NotFound){}return loop(op,ops);
+  var ops=left?a.aOps:a.aOps.filter(function(o)return !hasClassFieldFlag(o.field,CfImpl)||core.Meta.has(MetaTag.Commutative,o.field.cfMeta));if(isAssign)try{return loop(OpAssignOp(op),ops);}catch(ex:NotFound){}return loop(op,ops);
  }
  public static function tryAbstractBinopOverloads(ctx:Typer,op:Binop,e1:TExpr,e2:TExpr,isAssign:Bool,p:Pos):BinopResultData {
   try{return switch follow(e1.etype){case TAbstract(a={aImpl:c},tl) if(c!=null):findAbstractBinopOverload(ctx,op,e1,e2,a,c,tl,true,isAssign,p);case _:throw NotFound.raise();};}catch(ex:NotFound){}
@@ -171,11 +171,11 @@ class Operators {
   var lhs=typeExpr(ctx,e1,promoted);switch promoted{case WithType(t,_):var has=switch follow(lhs.etype){case TAbstract(a,_):a.aOps.exists(function(o)return Type.enumEq(o.op,op));case _:false;};if(!has)lhs=context.AbstractCast.castOrUnify(ctx,t,lhs,lhs.epos);case _:}
   var result=abstractOnly?tryAbstractBinopOverloads(ctx,op,lhs,typeBinopRhs(ctx,op,lhs,e2,isAssign,wt,p),isAssign,p):typeBinop2(ctx,op,lhs,e2,isAssign,promoted,p);var vr=new TyperBase.ValueReference(ctx);return vr.toTexpr(BinopResult.toTexpr(vr,result,function(_)throw NotFound.raise()));
  }
- public static function processLhsExpr(ctx:Typer,name:String,e:TExpr):{e:TExpr,vr:Dynamic} {var vr=new TyperBase.ValueReference(ctx);return {e:vr.getExpr(name,e),vr:vr};}
+ public static function processLhsExpr(ctx:Typer,name:String,e:TExpr):{e:TExpr,vr:ValueReference} {var vr=new TyperBase.ValueReference(ctx);return {e:vr.getExpr(name,e),vr:vr};}
  public static function handleAssignOp<A>(ctx:Typer,api:AssignOpApi<A>,e1:Expr,e2:Expr,wt:WithTypeValue,p:Pos):TExpr {
   inline function fieldRhsName(name:String,ev:TExpr,wt:WithTypeValue):{e:TExpr,r:A} {var get=accGet(ctx,typeFieldDefaultCfg(ctx,ev,name,e1.pos,MGet,wt));return {e:get,r:api.typeRhs(get,e2)};}
   inline function fieldRhs(cf:TClassField,ev:TExpr):{e:TExpr,r:A} return fieldRhsName(cf.cfName,ev,WithTypeTools.withType(cf.cfType));
-  inline function set(vr:Dynamic,fa:Dynamic,lhs:TExpr,r:A,el:Array<TExpr>):TExpr {function assign(rhs:TExpr):TExpr {rhs=context.AbstractCast.castOrUnify(ctx,lhs.etype,rhs,p);return new CallUnification.CallDispatcher(ctx,MSet(e2),wt,p).accessorCall(fa,el.concat([rhs]),[]);}return api.generate(vr,lhs,api.toTexpr(vr,r,assign));}
+  inline function set(vr:ValueReference,fa:context.Typecore.FieldAccess,lhs:TExpr,r:A,el:Array<TExpr>):TExpr {function assign(rhs:TExpr):TExpr {rhs=context.AbstractCast.castOrUnify(ctx,lhs.etype,rhs,p);return new CallUnification.CallDispatcher(ctx,MSet(e2),wt,p).accessorCall(fa,el.concat([rhs]),[]);}return api.generate(vr,lhs,api.toTexpr(vr,r,assign));}
   function loop(acc:AccessKind):TExpr return switch acc {
    case AKNo(_,p):try api.aknoFallback()catch(ex:NotFound)Error.raiseTypingError("This expression cannot be accessed for writing",p);
    case AKSafeNav(sn):safeNavBranch(ctx,sn,function()return loop(sn.snAccess));case AKUsingField(_):Error.raiseTypingError("Invalid operation",p);
@@ -192,21 +192,21 @@ class Operators {
  }
  public static function typeOpNullCoalAssign(ctx:Typer,e1:Expr,e2:Expr,wt:WithTypeValue,p:Pos):TExpr {
   var hack:TExpr->TExpr=function(e)return e;
-  inline function gen(vr:Dynamic,lhs:TExpr,t2:T,assign:TExpr):TExpr {var eelse=null;var tif=ctx.t.tvoid;if(wt!=NoValue){lhs=vr.asVar("tmp",lhs);tif=isNullable(t2)?lhs.etype:followWithoutType(lhs.etype);eelse=lhs;}var cond=Texpr.Builder.binop(OpEq,lhs,Texpr.Builder.makeNull(lhs.etype,lhs.epos),ctx.t.tbool,lhs.epos);return vr.toTexpr(mk(TIf(cond,assign,eelse),tif,lhs.epos));}
+  inline function gen(vr:ValueReference,lhs:TExpr,t2:T,assign:TExpr):TExpr {var eelse=null;var tif=ctx.t.tvoid;if(wt!=NoValue){lhs=vr.asVar("tmp",lhs);tif=isNullable(t2)?lhs.etype:followWithoutType(lhs.etype);eelse=lhs;}var cond=Texpr.Builder.binop(OpEq,lhs,Texpr.Builder.makeNull(lhs.etype,lhs.epos),ctx.t.tbool,lhs.epos);return vr.toTexpr(mk(TIf(cond,assign,eelse),tif,lhs.epos));}
   var api:AssignOpApi<TExpr>={aknoFallback:function()throw NotFound.raise(),typeRhs:function(lhs,e)return typeExpr(ctx,e,WithType(lhs.etype,null)),toTexpr:function(vr,e,assign){hack=assign;return e;},generate:function(vr,lhs,e)return gen(vr,lhs,e.etype,hack(e)),assign:function(vr,lhs,rhs){checkAssign(ctx,lhs);var casted=context.AbstractCast.castOrUnify(ctx,lhs.etype,rhs,p);return gen(vr,lhs,rhs.etype,mk(TBinop(OpAssign,lhs,casted),lhs.etype,p));}};return handleAssignOp(ctx,api,e1,e2,wt,p);
  }
  public static function typeBinop(ctx:Typer,op:Binop,e1:Expr,e2:Expr,isAssign:Bool,wt:WithTypeValue,p:Pos):TExpr return switch op{case OpAssign:typeAssign(ctx,e1,e2,wt,p);case OpAssignOp(OpBoolAnd|OpBoolOr):Error.raiseTypingError("The operators ||= and &&= are not supported",p);case OpAssignOp(op):typeAssignOp(ctx,op,e1,e2,wt,p);case _:try typeNonAssignOp(ctx,op,e1,e2,isAssign,false,wt,p)catch(ex:NotFound)throw "Failed to type binary operation "+sBinop(isAssign?OpAssignOp(op):op);};
  public static function typeUnop(ctx:Typer,op:Unop,flag:UnopFlag,e:Expr,wt:WithTypeValue,p:Pos):TExpr {
-  inline function findOverload(e:TExpr):TExpr return switch follow(e.etype){case TAbstract(a={aImpl:c},tl) if(c!=null):var fcc:Dynamic=null;for(entry in a.aUnops){if(entry.op!=op||entry.flag!=flag)continue;var cf=entry.field;var sea=hasClassFieldFlag(cf,CfImpl)?FieldAccessTools.makeAbstractStaticExtensionAccess(a,tl,c,cf,e,false,p):FieldAccessTools.makeStaticExtensionAccess(c,cf,e,false,p);try{fcc=CallUnification.unifyFieldCall(ctx,sea.seAccess,[sea.seThis],[],p,false);break;}catch(ex:Dynamic){switch ex{case (core.ds.ExceptionTools.typing(_) => Some(_)):case _:throw ex;}}}if(fcc==null)throw NotFound.raise();follow(fcc.fcField.cfType);fcc.fcField.cfExpr==null?mk(TUnop(op,flag,e),fcc.fcRet,p):fcc.fcData();case _:throw NotFound.raise();};
+  inline function findOverload(e:TExpr):TExpr return switch follow(e.etype){case TAbstract(a={aImpl:c},tl) if(c!=null):var fcc:Null<typing.FieldCallCandidate.FieldCallCandidateData<Void->TExpr>>=null;for(entry in a.aUnops){if(entry.op!=op||entry.flag!=flag)continue;var cf=entry.field;var sea=hasClassFieldFlag(cf,CfImpl)?FieldAccessTools.makeAbstractStaticExtensionAccess(a,tl,c,cf,e,false,p):FieldAccessTools.makeStaticExtensionAccess(c,cf,e,false,p);try{fcc=CallUnification.unifyFieldCall(ctx,sea.seAccess,[sea.seThis],[],p,false);break;}catch(ex:Dynamic){switch ex{case (core.ds.ExceptionTools.typing(_) => Some(_)):case _:throw ex;}}}if(fcc==null)throw NotFound.raise();follow(fcc.fcField.cfType);fcc.fcField.cfExpr==null?mk(TUnop(op,flag,e),fcc.fcRet,p):fcc.fcData();case _:throw NotFound.raise();};
   inline function spread():Dynamic return Error.raiseTypingError("Spread unary operator is only allowed for unpacking the last argument in a call with rest arguments",p);
   inline function make(e:TExpr):TExpr {inline function checkInt():T return switch classify(e.etype){case KFloat:ctx.t.tfloat;case KNumParam(t):unify(ctx,e.etype,ctx.t.tfloat,e.epos);t;case k:unifyInt(ctx,e,k)?ctx.t.tint:ctx.t.tfloat;};var t=switch op{case Not:if(flag==Postfix)Common.displayError(ctx.com,"Postfix ! is not supported",p);unify(ctx,e.etype,ctx.t.tbool,e.epos);ctx.t.tbool;case NegBits:unify(ctx,e.etype,ctx.t.tint,e.epos);ctx.t.tint;case Increment|Decrement:checkAssign(ctx,e);checkInt();case Neg:checkInt();case Spread:spread();};return mk(TUnop(op,flag,e),t,p);}
   inline function findOrMake(e:TExpr):TExpr return try findOverload(e)catch(ex:NotFound)make(e);
   switch op{case Spread:return spread();case Not|Neg|NegBits:return findOrMake(accGet(ctx,typeAccessRef(ctx,e.expr,e.pos,MGet,WithTypeTools.value)));case Increment|Decrement:}
   var binop=op==Increment?OpAdd:OpSub;var one=mk(TConst(TInt(1)),ctx.t.tint,p);
-  function postfix(vr:Dynamic,lhs:TExpr):{lhs:TExpr,out:Null<TExpr>} {if(flag==Postfix&&wt!=NoValue){lhs=vr.getExpr("lhs",lhs);return {lhs:lhs,out:vr.asVar("postfix",lhs)};}return {lhs:lhs,out:null};}
-  inline function readOn(vr:Dynamic,ef:TExpr,fa:Dynamic):{lhs:TExpr,out:Null<TExpr>} return postfix(vr,accGet(ctx,typeFieldDefaultCfg(ctx,ef,fa.faField.cfName,e.pos,MGet,WithTypeTools.value)));
-  inline function generate(vr:Dynamic,out:Null<TExpr>,e:TExpr):TExpr return out==null?vr.toTexpr(e):vr.toTexprEl([e],out);
-  inline function makeOp(vr:Dynamic,a:TExpr,b:TExpr):TExpr return BinopResult.toTexpr(vr,makeBinop(ctx,binop,a,b,false,p),function(_)throw NotFound.raise());
+  function postfix(vr:ValueReference,lhs:TExpr):{lhs:TExpr,out:Null<TExpr>} {if(flag==Postfix&&wt!=NoValue){lhs=vr.getExpr("lhs",lhs);return {lhs:lhs,out:vr.asVar("postfix",lhs)};}return {lhs:lhs,out:null};}
+  inline function readOn(vr:ValueReference,ef:TExpr,fa:context.Typecore.FieldAccess):{lhs:TExpr,out:Null<TExpr>} return postfix(vr,accGet(ctx,typeFieldDefaultCfg(ctx,ef,fa.faField.cfName,e.pos,MGet,WithTypeTools.value)));
+  inline function generate(vr:ValueReference,out:Null<TExpr>,e:TExpr):TExpr return out==null?vr.toTexpr(e):vr.toTexprEl([e],out);
+  inline function makeOp(vr:ValueReference,a:TExpr,b:TExpr):TExpr return BinopResult.toTexpr(vr,makeBinop(ctx,binop,a,b,false,p),function(_)throw NotFound.raise());
   function loop(acc:AccessKind):TExpr return switch acc {
    case AKNo(acc,p):try findOverload(accGet(ctx,acc))catch(ex:NotFound)Error.raiseTypingError("This expression cannot be accessed for writing",p);
    case AKExpr(e):findOrMake(e);

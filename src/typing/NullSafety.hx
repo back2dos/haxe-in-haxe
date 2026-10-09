@@ -29,10 +29,10 @@ import core.TOther;
 // haxe/src/typing/nullSafety.ml — mechanical draft; not compile-validated.
 typedef SafetyMessage={var smMsg:String;var smPos:Pos;var smModule:ModuleDef;}
 typedef SafetyWarning={var swWarning:WarningCode;var swOptions:Array<Array<WarningOption>>;var swMsg:String;var swPos:Pos;var swModule:ModuleDef;}
-typedef SafetyReport={var srErrors:Array<SafetyMessage>;var srWarnings:Array<SafetyWarning>;var srSeenErrors:Dynamic;var srSeenWarnings:Dynamic;}
+typedef SafetyReport={var srErrors:Array<SafetyMessage>;var srWarnings:Array<SafetyWarning>;var srSeenErrors:Hashtbl<{msg:String,pos:Pos,moduleId:Int},Bool>;var srSeenWarnings:Hashtbl<{type:WarningCode,options:Array<Array<WarningOption>>,msg:String,pos:Pos,moduleId:Int},Bool>;}
 enum ScopeType {STNormal;STLoop;STClosure;STImmediateClosure;}
 enum SafetyMode {SMOff;SMLoose;SMStrict;SMStrictThreaded;}
-enum SafetySubject {SFieldOfClass(path:Dynamic,fields:Array<String>);SFieldOfLocalVar(id:Int,fields:Array<String>);SFieldOfThis(fields:Array<String>);SLocalVar(id:Int);SNotSuitable;}
+enum SafetySubject {SFieldOfClass(path:core.Globals.GlobalTypePath,fields:Array<String>);SFieldOfLocalVar(id:Int,fields:Array<String>);SFieldOfThis(fields:Array<String>);SLocalVar(id:Int);SNotSuitable;}
 class SafetyUnifyError extends haxe.Exception {public var a:T;public var b:T;public var access:ErrorAccessKind;public function new(a:T,b:T,access:ErrorAccessKind){super("Safety_unify_error");this.a=a;this.b=b;this.access=access;}}
 // Structural subject keys preserve field-path identity without depending on Map enumeration.
 class SafetyTable {
@@ -50,7 +50,7 @@ class NullSafety {
  public static function addError(report:SafetyReport,m:ModuleDef,msg:String,p:Pos):Void {var e={smMsg:"Null safety: "+msg,smPos:p,smModule:m};var key={msg:e.smMsg,pos:p,moduleId:m.mId};if(!report.srSeenErrors.mem(key)){report.srSeenErrors.add(key,true);report.srErrors.unshift(e);}}
  public static function addWarning(report:SafetyReport,m:ModuleDef,type:WarningCode,options:Array<Array<WarningOption>>,msg:String,p:Pos):Void {var w={swWarning:type,swOptions:options,swMsg:"Null safety: "+msg,swPos:p,swModule:m};var key={type:type,options:options,msg:w.swMsg,pos:p,moduleId:m.mId};if(!report.srSeenWarnings.mem(key)){report.srSeenWarnings.add(key,true);report.srWarnings.unshift(w);}}
  public static function safetyError(a:T,b:T,access:ErrorAccessKind):Void throw new SafetyUnifyError(a,b,access);
- public static function fail(hxpos:Pos,mlpos:Dynamic,msg:Null<String>=null):Dynamic {var message=Lexer.getErrorPos(function(file,line)return '$file:$line:',hxpos)+": Null safety: "+(msg==null?"unexpected expression.":msg)+"\nSubmit an issue to https://github.com/HaxeFoundation/haxe/issues with expression example and following information:";Sys.stderr().writeString(message+"\n"+mlpos.file+":"+mlpos.line+"\n");return die("","haxe/src/typing/nullSafety.ml");}
+ public static function fail(hxpos:Pos,mlpos:{file:String,line:Int},msg:Null<String>=null):Dynamic {var message=Lexer.getErrorPos(function(file,line)return '$file:$line:',hxpos)+": Null safety: "+(msg==null?"unexpected expression.":msg)+"\nSubmit an issue to https://github.com/HaxeFoundation/haxe/issues with expression example and following information:";Sys.stderr().writeString(message+"\n"+mlpos.file+":"+mlpos.line+"\n");return die("","haxe/src/typing/nullSafety.ml");}
  static var printContext=core.TPrinting.printContext();
  public static function strType(t:T):String return core.TPrinting.sType(printContext,t);
  public static function strExpr(e:TExpr):String return core.TPrinting.sExprPretty(false,"\t",true,strType,e);
@@ -76,8 +76,8 @@ class NullSafety {
   case TField({eexpr:TConst(TThis)},FInstance(_,_,_))|TField({eexpr:TLocal(_)},FInstance(_,_,_)|FAnon(_))|TField({eexpr:TTypeExpr(_)},FStatic(_,_))|TLocal(_):true;
   case TField(target,FInstance(_,_,_)|FStatic(_,_)|FAnon(_)) if(mode!=SMStrictThreaded):isSuitable(mode,target);case TBinop(OpAssign,target,_):isSuitable(mode,target);case _:false;
  };
- public static function getArgumentsMeta(callee:TExpr,count:Int):Array<Dynamic> {
-  inline function empty():Array<Dynamic> return [for(_ in 0...count)[]];
+ public static function getArgumentsMeta(callee:TExpr,count:Int):Array<Metadata> {
+  inline function empty():Array<Metadata> return [for(_ in 0...count)[]];
   return switch callee.eexpr{case TField(_,FAnon(cf)|FClosure(_,cf)|FStatic(_,cf)|FInstance(_,_,cf)):try{var meta=getMeta(MetaTag.HaxeArguments,cf.cfMeta);switch meta.exprs{case [{expr:EFunction(_,{fArgs:args})}] if(args.length==count):args.map(function(a)return a.meta);case _:empty();}}catch(ex:NotFound)empty();case TFunction(fn) if(fn.tfArgs.length==count):fn.tfArgs.map(function(a)return a.variable.vMeta);case _:empty();};
  }
  public static function isTrace(e:TExpr):Bool return switch e.eexpr{case TIdent("`trace")|TField(_,FStatic({clPath:{pack:["haxe"],name:"Log"}},{cfName:"trace"})):true;case _:false;};
@@ -110,7 +110,7 @@ class NullSafety {
  public static function listStartsWithList(hay:Array<String>,needle:Array<String>):Bool {if(needle.length>hay.length)return false;for(i in 0...needle.length)if(hay[i]!=needle[i])return false;return true;}
  public static function run(com:context.Common.CommonContext,types:Array<ModuleType>):Void {
   var report:SafetyReport=Timer.time(com.timerCtx,["null safety"],function(_:Null<Bool>){var r:SafetyReport={srErrors:[],srWarnings:[],srSeenErrors:new Hashtbl(),srSeenWarnings:new Hashtbl()};var immediate=new ImmediateExecution();for(type in types)switch type{case TClassDecl(c):new ClassChecker(c,immediate,r,com.main.mainExpr).check();case TEnumDecl(_)|TTypeDecl(_)|TAbstractDecl(_):}return r;},null);
-  var callbacks:Array<Dynamic>=com.callbacks.getNullSafetyReport();if(callbacks.length==0){var warnings=report.srWarnings.copy();warnings.reverse();for(w in warnings)Common.moduleWarning(com,w.swModule,w.swWarning,w.swOptions,w.swMsg,w.swPos);var errors=report.srErrors.copy();errors.reverse();for(e in errors)Common.displayError(com,e.smMsg,e.smPos);}else{var errors=report.srErrors.map(function(e)return {msg:e.smMsg,pos:e.smPos});var warnings=[];for(w in report.srWarnings)switch Warning.getMode(w.swWarning,w.swOptions.concat(com.warningOptions)){case WMEnable:warnings.push({warning:w.swWarning,msg:w.swMsg,pos:w.swPos});case WMDisable:}for(fn in callbacks)fn(errors,warnings);}
+  var callbacks=com.callbacks.getNullSafetyReport();if(callbacks.length==0){var warnings=report.srWarnings.copy();warnings.reverse();for(w in warnings)Common.moduleWarning(com,w.swModule,w.swWarning,w.swOptions,w.swMsg,w.swPos);var errors=report.srErrors.copy();errors.reverse();for(e in errors)Common.displayError(com,e.smMsg,e.smPos);}else{var errors=report.srErrors.map(function(e)return {msg:e.smMsg,pos:e.smPos});var warnings=[];for(w in report.srWarnings)switch Warning.getMode(w.swWarning,w.swOptions.concat(com.warningOptions)){case WMEnable:warnings.push({warning:w.swWarning,msg:w.swMsg,pos:w.swPos});case WMDisable:}for(fn in callbacks)fn(errors,warnings);}
  }
 }
 class Unificator {

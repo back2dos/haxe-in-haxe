@@ -16,8 +16,8 @@ import optimization.OptimizerTexpr.*;
 // haxe/src/optimization/inline.ml — mechanical draft; not compiled or validated.
 @:structInit class InlineContext {
 	public var scom:SafeContext;
-	public var typer:Dynamic;
-	public inline function new(scom:SafeContext, typer:Dynamic) { this.scom = scom; this.typer = typer; }
+	public var typer:Null<context.Typecore.Typer>;
+	public inline function new(scom:SafeContext, typer:Null<context.Typecore.Typer>) { this.scom = scom; this.typer = typer; }
 	public inline function clone():InlineContext return new InlineContext(scom, typer);
 }
 @:structInit class InLocal {
@@ -43,7 +43,7 @@ enum VarInlineKind { VIInline; VIInlineIfCalled; VIDoNotInline; }
 }
 class Inline {
  public static function mkUntypedCall(name:String,p:Pos,params:Array<TExpr>):TExpr return mk(TCall(mk(TIdent(name),tDynamic,p),params),tDynamic,p);
- public static function apiInline2(b:Dynamic,platform:Dynamic,c:TClass,field:String,params:Array<TExpr>,p:Pos):Null<TExpr> {
+ public static function apiInline2(b:BasicTypes,platform:core.Globals.Platform,c:TClass,field:String,params:Array<TExpr>,p:Pos):Null<TExpr> {
   var path = Globals.sTypePath(c.clPath);
   return switch [path,field,params] {
    case ["Type","enumIndex",[{eexpr:TField(_,FEnum(_,f))}]]:mk(TConst(TInt(f.efIndex)),b.tint,p);
@@ -62,7 +62,7 @@ class Inline {
    case _:null;
   };
  }
- public static function contextOfTyper(typer:Dynamic):InlineContext return {scom:context.SafeCom.ofTyper(typer),typer:typer};
+ public static function contextOfTyper(typer:context.Typecore.Typer):InlineContext return {scom:context.SafeCom.ofTyper(typer),typer:typer};
  public static function contextOfScom(scom:SafeContext):InlineContext return {scom:scom,typer:null};
  public static function apiInline(scom:SafeContext,c:TClass,field:String,params:Array<TExpr>,p:Pos):Null<TExpr> {
   function mkTypeexpr(path:GlobalTypePath):TExpr {var m:ModuleDef = try scom.findModule(path) catch (_:NotFound) {throw "Inline.mkTypeexpr";}; addDependency(scom.curclass.clModule,m,MDepFromTyping); for (mt in m.mTypes) switch mt {case TClassDecl(cl) if (Globals.sTypePath(cl.clPath) == Globals.sTypePath(path)):return Texpr.Builder.makeStaticThis(cl,p); case _:} throw "Invalid_argument: Option.get";}
@@ -181,7 +181,7 @@ class Inline {
 }
 class InlineState {
  var ictx:InlineContext; var scom:SafeContext; var ethis:TExpr; var params:Array<TExpr>; var cf:TClassField; var f:TFunc; var p:Pos;
- var locals = new haxe.ds.IntMap<InLocal>(); var checker:Dynamic;
+ var locals = new haxe.ds.IntMap<InLocal>(); var checker:{mightBeAffected:TExpr->Bool, collectModifiedLocals:TExpr->Void};
  public var inlinedVars:Array<{local:InLocal,expr:TExpr}> = []; public var inLocalFun = false; public var hadSideEffect = false; public var hasReturnValue = false;
  public function new(ictx:InlineContext,ethis:TExpr,params:Array<TExpr>,cf:TClassField,f:TFunc,p:Pos) {this.ictx = ictx; scom = ictx.scom; this.ethis = ethis; this.params = params; this.cf = cf; this.f = f; this.p = p; checker = createAffectionChecker();}
  public function enterLocalFun():Void->Void {var old = inLocalFun; inLocalFun = true; return function() inLocalFun = old;}
