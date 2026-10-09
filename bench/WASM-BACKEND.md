@@ -30,11 +30,16 @@ best of 3–5 runs.
    output and faster than today's HL/C→wasm. It needs no
    `--spill-pointers`, and both targets share one GC and one set of
    semantics. Exceptions must map to wasm exception handling, not `setjmp`
-   (§4). That rules out shipping this prototype's C-through-Emscripten
-   route unchanged, and means either a direct linear-memory wasm emitter or
-   C++ exceptions under Emscripten.
+   (§4). The emitter now does this: the generated file uses `RT_TRY`
+   macros, which become `setjmp` natively and C++ `try`/`catch` when compiled
+   as C++ by Emscripten (`backend/build.sh` builds `prog_linear.js`). In a
+   40-call test function this gives 3.3 KB of wasm, against 80.7 KB with
+   `setjmp` and 3.1 KB without exceptions. Run times are unchanged (Bench
+   0.39s, Exc 0.46s vs 0.42s). No separate wasm emitter is needed for this
+   route.
 3. Keep the WasmGC emitter (already working for the subset) as an optional
-   second wasm path. It is worth finishing if module size or JS interop
+   second wasm path. It should write the binary format directly; the WAT
+   text and Binaryen's assembler are a prototype shortcut (§2.6). It is worth finishing if module size or JS interop
    matters, or if a large program shows V8's collector clearly ahead of
    ours.
 
@@ -352,6 +357,21 @@ allocates, so the major heap matters more than in Bench. libhl's patched
 allocator shows how close a non-moving heap can get: HL/C with it is only
 13% slower on `retain` while using 45% less memory.
 
+### 2.6 Output format of the wasm emitters
+
+- **C/linear-memory route:** the wasm comes from Emscripten compiling the C
+  (as C++ for exceptions), so there is no wasm emitter to write. Binaryen
+  runs inside Emscripten's link step anyway.
+- **WasmGC route, if pursued:** the prototype writes WAT and assembles it
+  with Binaryen's `wasm-as`. That was quick to debug, but the text is ~17×
+  the binary here (35 KB vs 2 KB before `-O3`). It adds a parser pass and an
+  external tool, and it depends on Binaryen's evolving text syntax. A real
+  emitter should write the binary format directly; an encoder for the needed
+  sections, GC types, instructions and LEB128 is roughly 1–2k lines. It
+  should then optionally run `wasm-opt -O3`, since Binaryen's GC
+  optimizations (inlining, cast elimination, type refinement) are worth
+  keeping. `wasm-dis` turns the binary back into text for debugging.
+
 ## 3. Feasibility checks
 
 - Emscripten 6.0.12 and Binaryen 133 handle the WasmGC text format,
@@ -425,11 +445,10 @@ is the fix described below.
 
 1. **Never lower Haxe `try` to `setjmp` on wasm.** It is what made HL/C's
    functions huge. The WasmGC emitter uses wasm exception handling
-   directly, and a linear-memory route must do the same. For option (c) that
-   means a direct wasm emitter for the IR, or C++ `try`/`catch` under
-   Emscripten's native wasm exceptions, rather than this prototype's
-   `setjmp` under Emscripten. Natively, `setjmp` stays: it is cheap there
-   (0.027s for `Exc`).
+   directly. The C emitter compiles `try` to C++ `try`/`catch` under
+   Emscripten, which LLVM lowers to wasm exception handling without storing
+   locals (measured above: +8% code instead of 26×). Natively, `setjmp`
+   stays: it is cheap there (0.027s for `Exc`).
 2. **Bound function size in the emitter.** Our own backend controls code
    layout, unlike hl2c. Large `switch` arms (the matcher's output for
    `unifyCustom`-style functions) can be outlined into separate functions

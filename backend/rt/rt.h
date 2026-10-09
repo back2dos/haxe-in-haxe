@@ -8,6 +8,10 @@
 #include <stdint.h>
 #include <string.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 // Object layout: pointer to the payload; the header word precedes it.
 // Payload = 8-byte slots. Header: [0..31] slot count, [32..47] type index,
 // [48..55] kind.
@@ -83,7 +87,30 @@ typedef struct rt_handler {
 } rt_handler;
 extern rt_handler *rt_hcur;
 extern void *rt_exn;
+
+// try/catch. Natively: setjmp handlers (cheap). Under Emscripten the
+// generated code is compiled as C++ so that try maps to wasm exception
+// handling: wasm setjmp makes LLVM store every local around every call
+// (26x code growth, bench/WASM-BACKEND.md section 4).
+#if defined(__cplusplus) && defined(__EMSCRIPTEN__)
+}
+struct rt_cxx_exn {};
+#define RT_TRY(h) { void **h##_sp = rt_sp; try {
+#define RT_CATCH(h) } catch (rt_cxx_exn &) { rt_sp = h##_sp;
+#define RT_END_TRY(h) } }
+#define RT_POP(h)
+[[noreturn]] static inline void rt_throw(void *v) {
+	rt_exn = v;
+	throw rt_cxx_exn();
+}
+extern "C" {
+#else
+#define RT_TRY(h) { rt_handler h; h.prev = rt_hcur; h.sp = rt_sp; rt_hcur = &h; if (RT_SETJMP(h.buf) == 0) {
+#define RT_CATCH(h) rt_hcur = h.prev; } else { rt_hcur = h.prev; rt_sp = h.sp;
+#define RT_END_TRY(h) } }
+#define RT_POP(h) rt_hcur = h.prev;
 __attribute__((noreturn)) void rt_throw(void *v);
+#endif
 
 // Haxe Int semantics: wrapping 32-bit arithmetic.
 #define IADD(a, b) ((int32_t)((uint32_t)(a) + (uint32_t)(b)))
@@ -100,3 +127,7 @@ static inline int32_t IMOD(int32_t a, int32_t b) { return b == 0 ? 0 : (b == -1 
 #define ARR_DATA(a) FP(a, 1)
 void *rt_arr_new(int raw, int32_t cap, uint32_t tindex);
 void rt_arr_grow(void **arr_slot, int raw);
+
+#ifdef __cplusplus
+}
+#endif

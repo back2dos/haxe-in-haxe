@@ -183,27 +183,26 @@ class EmitC {
 				b.add('${ind}rt_throw(${expr(e)});\n');
 			case STry(body, catches):
 				var h = "h" + nextLabel++;
-				b.add('$ind{\n$ind\trt_handler $h;\n$ind\t$h.prev = rt_hcur;\n$ind\t$h.sp = rt_sp;\n$ind\trt_hcur = &$h;\n');
-				b.add('$ind\tif (RT_SETJMP($h.buf) == 0) {\n');
+				b.add('${ind}RT_TRY($h)\n');
 				tries.push(h);
-				stmts(body, ind + "\t\t");
+				stmts(body, ind + "\t");
 				tries.pop();
-				b.add('$ind\t\trt_hcur = $h.prev;\n$ind\t} else {\n$ind\t\trt_hcur = $h.prev;\n$ind\t\trt_sp = $h.sp;\n');
+				b.add('${ind}RT_CATCH($h)\n');
 				var first = true;
 				for (c in catches) {
 					var cond = c.c == null ? "1" : 'is_inst(rt_exn, ${c.c.tindex}, ${c.c.tindex + c.c.lastDescendant - c.c.id})';
-					b.add('$ind\t\t${first ? "" : "else "}if ($cond) {\n$ind\t\t\t${local(c.l)} = rt_exn;\n$ind\t\t\trt_exn = 0;\n');
-					stmts(c.body, ind + "\t\t\t");
-					b.add('$ind\t\t}\n');
+					b.add('$ind\t${first ? "" : "else "}if ($cond) {\n$ind\t\t${local(c.l)} = rt_exn;\n$ind\t\trt_exn = 0;\n');
+					stmts(c.body, ind + "\t\t");
+					b.add('$ind\t}\n');
 					first = false;
 				}
-				b.add('$ind\t\telse rt_throw(rt_exn);\n$ind\t}\n$ind}\n');
+				b.add('$ind\telse rt_throw(rt_exn);\n${ind}RT_END_TRY($h)\n');
 		}
 	}
 
 	// pops the exception handlers entered since `depth`
 	function unwindTo(depth:Int):String
-		return tries.length > depth ? 'rt_hcur = ${tries[depth]}.prev; ' : "";
+		return tries.length > depth ? 'RT_POP(${tries[depth]}) ' : "";
 
 	function local(l:Local):String {
 		var s = refSlot.get(l);

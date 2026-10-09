@@ -10,7 +10,8 @@ port's conformance work. The design, measurements and recommendation are in
   HXB archive holds) and writes `<out>.wat` and `<out>.c`.
 - `src/backend/Lower.hx`: typed AST → IR (`Ir.hx`), for the subset listed
   in the design note.
-- `src/backend/EmitWat.hx`: IR → WasmGC text.
+- `src/backend/EmitWat.hx`: IR → WasmGC text (prototype; a real emitter
+  would write binary wasm, see the design note §2.6).
 - `src/backend/EmitC.hx`: IR → C. Its `Roots` analysis decides which
   references need shadow-stack slots.
 - `rt/`: the C runtime (generational copying GC, exceptions, arrays) and
@@ -19,7 +20,7 @@ port's conformance work. The design, measurements and recommendation are in
   Wasmtime/WAMR runners.
 
 ```sh
-sh backend/build.sh                                   # Bench -> bin/backend/Bench/{prog_c,prog.wasm}
+sh backend/build.sh                                   # Bench -> bin/backend/Bench/{prog_c,prog_linear.js,prog.wasm}
 HXFLAGS="-D retain" VARIANT=-retain sh backend/build.sh
 sh backend/build.sh backend/bench/exc Exc
 sh backend/tools/baselines.sh                         # HL/C native, HL/C->wasm, JS for comparison
