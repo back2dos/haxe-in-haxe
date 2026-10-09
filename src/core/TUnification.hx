@@ -53,13 +53,34 @@ enum NullFollowMode { NeverFollow; AlwaysFollow; FollowIfNullable; }
 	public var opaqueFieldParams:Bool;
 	public var typeParamMode:TypeParamMode;
 	public var nullFollowMode:NullFollowMode;
-	public var unifyStack:RecStack<TypePair>;
-	public var eqStack:RecStack<TypePair>;
-	public var varianceStack:RecStack<TypePair>;
-	public var abstractCastStack:RecStack<TypePair>;
-	public var unifyNewMonos:RecStack<T>;
-	public var applyParamsStack:ApplyParamsStack;
-	public inline function new(allowTransitiveCast:Bool, allowAbstractCast:Bool, allowDynamicToCast:Bool, allowArgNameMismatch:Bool, allowOptionalMismatch:Bool, allowFinalInvariance:Bool, equalityKind:EqKind, equalityUnderlying:Bool, strictFieldKind:Bool, opaqueFieldParams:Bool, typeParamMode:TypeParamMode, nullFollowMode:NullFollowMode, unifyStack:RecStack<TypePair>, eqStack:RecStack<TypePair>, varianceStack:RecStack<TypePair>, abstractCastStack:RecStack<TypePair>, unifyNewMonos:RecStack<T>, applyParamsStack:ApplyParamsStack) { this.allowTransitiveCast = allowTransitiveCast; this.allowAbstractCast = allowAbstractCast; this.allowDynamicToCast = allowDynamicToCast; this.allowArgNameMismatch = allowArgNameMismatch; this.allowOptionalMismatch = allowOptionalMismatch; this.allowFinalInvariance = allowFinalInvariance; this.equalityKind = equalityKind; this.equalityUnderlying = equalityUnderlying; this.strictFieldKind = strictFieldKind; this.opaqueFieldParams = opaqueFieldParams; this.typeParamMode = typeParamMode; this.nullFollowMode = nullFollowMode; this.unifyStack = unifyStack; this.eqStack = eqStack; this.varianceStack = varianceStack; this.abstractCastStack = abstractCastStack; this.unifyNewMonos = unifyNewMonos; this.applyParamsStack = applyParamsStack; }
+	// The stacks are allocated on first access: most unifications never reach
+	// them, and a default context is built for each one. Any access (including
+	// clone) allocates, so contexts copied from this one share its stacks.
+	public var unifyStack(get,set):RecStack<TypePair>;
+	var _unifyStack:Null<RecStack<TypePair>>;
+	inline function get_unifyStack():RecStack<TypePair> {var v=_unifyStack;if(v==null) v=_unifyStack=[];return v;}
+	inline function set_unifyStack(v:RecStack<TypePair>):RecStack<TypePair> return _unifyStack=v;
+	public var eqStack(get,set):RecStack<TypePair>;
+	var _eqStack:Null<RecStack<TypePair>>;
+	inline function get_eqStack():RecStack<TypePair> {var v=_eqStack;if(v==null) v=_eqStack=[];return v;}
+	inline function set_eqStack(v:RecStack<TypePair>):RecStack<TypePair> return _eqStack=v;
+	public var varianceStack(get,set):RecStack<TypePair>;
+	var _varianceStack:Null<RecStack<TypePair>>;
+	inline function get_varianceStack():RecStack<TypePair> {var v=_varianceStack;if(v==null) v=_varianceStack=[];return v;}
+	inline function set_varianceStack(v:RecStack<TypePair>):RecStack<TypePair> return _varianceStack=v;
+	public var abstractCastStack(get,set):RecStack<TypePair>;
+	var _abstractCastStack:Null<RecStack<TypePair>>;
+	inline function get_abstractCastStack():RecStack<TypePair> {var v=_abstractCastStack;if(v==null) v=_abstractCastStack=[];return v;}
+	inline function set_abstractCastStack(v:RecStack<TypePair>):RecStack<TypePair> return _abstractCastStack=v;
+	public var unifyNewMonos(get,set):RecStack<T>;
+	var _unifyNewMonos:Null<RecStack<T>>;
+	inline function get_unifyNewMonos():RecStack<T> {var v=_unifyNewMonos;if(v==null) v=_unifyNewMonos=[];return v;}
+	inline function set_unifyNewMonos(v:RecStack<T>):RecStack<T> return _unifyNewMonos=v;
+	public var applyParamsStack(get,set):ApplyParamsStack;
+	var _applyParamsStack:Null<ApplyParamsStack>;
+	inline function get_applyParamsStack():ApplyParamsStack {var v=_applyParamsStack;if(v==null) v=_applyParamsStack={value:[]};return v;}
+	inline function set_applyParamsStack(v:ApplyParamsStack):ApplyParamsStack return _applyParamsStack=v;
+	public inline function new(allowTransitiveCast:Bool, allowAbstractCast:Bool, allowDynamicToCast:Bool, allowArgNameMismatch:Bool, allowOptionalMismatch:Bool, allowFinalInvariance:Bool, equalityKind:EqKind, equalityUnderlying:Bool, strictFieldKind:Bool, opaqueFieldParams:Bool, typeParamMode:TypeParamMode, nullFollowMode:NullFollowMode, unifyStack:Null<RecStack<TypePair>>, eqStack:Null<RecStack<TypePair>>, varianceStack:Null<RecStack<TypePair>>, abstractCastStack:Null<RecStack<TypePair>>, unifyNewMonos:Null<RecStack<T>>, applyParamsStack:Null<ApplyParamsStack>) { this.allowTransitiveCast = allowTransitiveCast; this.allowAbstractCast = allowAbstractCast; this.allowDynamicToCast = allowDynamicToCast; this.allowArgNameMismatch = allowArgNameMismatch; this.allowOptionalMismatch = allowOptionalMismatch; this.allowFinalInvariance = allowFinalInvariance; this.equalityKind = equalityKind; this.equalityUnderlying = equalityUnderlying; this.strictFieldKind = strictFieldKind; this.opaqueFieldParams = opaqueFieldParams; this.typeParamMode = typeParamMode; this.nullFollowMode = nullFollowMode; this._unifyStack = unifyStack; this._eqStack = eqStack; this._varianceStack = varianceStack; this._abstractCastStack = abstractCastStack; this._unifyNewMonos = unifyNewMonos; this._applyParamsStack = applyParamsStack; }
 	public inline function clone():UnificationContext return new UnificationContext(allowTransitiveCast, allowAbstractCast, allowDynamicToCast, allowArgNameMismatch, allowOptionalMismatch, allowFinalInvariance, equalityKind, equalityUnderlying, strictFieldKind, opaqueFieldParams, typeParamMode, nullFollowMode, unifyStack, eqStack, varianceStack, abstractCastStack, unifyNewMonos, applyParamsStack);
 }
 enum UnifyMinResult { UnifyMinOk(t:T); UnifyMinError(errors:Array<UnifyError>,index:Int); }
@@ -176,8 +197,8 @@ class TUnification {
  public static function defaultUnificationContext():UnificationContext return {
   allowTransitiveCast:true,allowAbstractCast:true,allowDynamicToCast:true,allowArgNameMismatch:true,allowOptionalMismatch:true,
   equalityKind:EqStrict,equalityUnderlying:false,strictFieldKind:false,opaqueFieldParams:false,allowFinalInvariance:false,
-  typeParamMode:TpDefault,nullFollowMode:AlwaysFollow,unifyStack:newRecStack(),eqStack:newRecStack(),varianceStack:newRecStack(),
-  abstractCastStack:newRecStack(),unifyNewMonos:newRecStack(),applyParamsStack:{value:[]}
+  typeParamMode:TpDefault,nullFollowMode:AlwaysFollow,unifyStack:null,eqStack:null,varianceStack:null,
+  abstractCastStack:null,unifyNewMonos:null,applyParamsStack:null
  };
  public static var nativeUnificationContext:UnificationContext=makeNativeContext();
  static function makeNativeContext():UnificationContext {var c=defaultUnificationContext();c.allowTransitiveCast=false;c.allowAbstractCast=false;c.allowDynamicToCast=false;c.allowFinalInvariance=true;c.nullFollowMode=FollowIfNullable;return c;}
