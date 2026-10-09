@@ -724,9 +724,10 @@ int32_t hx_unbox_bool(void *v) {
 
 // ---- arrays
 
-// data for at least `cap` elements; *real: the capacity in elements
+// data for at least `cap` elements (exactly: literals and copies have their
+// length; growth rounds up, see hx_arr_grow); *real: the capacity in elements
 static void *data_alloc(int32_t kind, int32_t cap, int32_t *real) {
-	if (cap < 4) cap = 4;
+	if (cap < 1) cap = 1;
 	switch (kind) {
 	case AK_I32:
 		*real = (cap + 1) & ~1;
@@ -741,12 +742,11 @@ void *hx_arr_new_n(int32_t kind, int32_t len) {
 	int32_t cap;
 	void *d = data_alloc(kind, len, &cap);
 	RT_ROOT(d);
-	void *a = rt_alloc(3, T_ARRAY, K_OBJ);
+	void *a = rt_alloc(2, T_ARRAY, K_OBJ);
 	RT_RELOAD(d);
 	RT_UNROOT(1);
 	ARR_LEN(a) = len;
 	ARR_KIND(a) = kind;
-	ARR_CAP(a) = cap;
 	FP(a, 1) = d; // a is young
 	if (!in_young(a)) rt_set_ptr(a, &FP(a, 1), d);
 	return a;
@@ -761,17 +761,18 @@ void hx_arr_grow(void **slot, int32_t need) {
 	void *a = *slot;
 	uint32_t cap = ARR_CAP(a);
 	if ((uint32_t)need <= cap) return;
+	void *d0 = ARR_DATA(a);
 	uint32_t ncap = cap * 2;
+	if (ncap < 2) ncap = 2; // from empty: 2, 4, 8... (most arrays stay small)
 	if (ncap < (uint32_t)need) ncap = need;
 	int32_t real;
 	int32_t kind = ARR_KIND(a);
 	void *nd = data_alloc(kind, ncap, &real);
 	a = *slot;
-	if (ARR_CAP(a) != cap || ARR_KIND(a) != kind) {
+	if (ARR_DATA(a) != d0 || ARR_KIND(a) != kind) {
 		hx_arr_grow(slot, need);
 		return;
 	}
-	ARR_CAP(a) = real;
 	void *d = ARR_DATA(a);
 	uint32_t len = ARR_LEN(a);
 	switch (ARR_KIND(a)) {
@@ -804,7 +805,6 @@ void hx_arr_to_ptr(void **slot) {
 	RT_UNROOT(1);
 	a = *slot;
 	ARR_KIND(a) = AK_PTR;
-	ARR_CAP(a) = real;
 	rt_set_ptr(a, &ARR_DATA(a), nd);
 }
 

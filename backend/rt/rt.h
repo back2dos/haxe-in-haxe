@@ -40,7 +40,7 @@ enum {
 	T_BOXINT, // Dynamic Int: slot 0
 	T_BOXFLOAT,
 	T_BOXBOOL,
-	T_ARRAY, // slot 0: int32 length, int32 element kind; slot 1: data (NULL while empty); slot 2: int32 capacity
+	T_ARRAY, // slot 0: int32 length, int32 element kind; slot 1: data (NULL while empty), its slot count gives the capacity
 	T_ADATA_P, // K_PARR array data
 	T_ADATA_RAW, // K_RAW array data (Int: 4 bytes per element, Float: 8)
 	T_BYTES, // K_RAW: int32 length, then bytes
@@ -305,11 +305,13 @@ uint64_t hx_anon_call_slow(void *o, int32_t fid, int32_t sig, uint64_t *args);
 #define ARR_LEN(a) FI(a, 0)
 #define ARR_KIND(a) (((int32_t *)(a))[1])
 #define ARR_DATA(a) FP(a, 1)
-#define ARR_CAP(a) FI(a, 2) // elements the data has room for
+// elements the data has room for (its slot count; Int arrays: two per slot)
+#define DATA_CAP(d, kind) ((int32_t)(NSLOTS(d) << ((kind) == AK_I32)))
+#define ARR_CAP(a) (ARR_DATA(a) ? DATA_CAP(ARR_DATA(a), ARR_KIND(a)) : 0)
 void *hx_arr_new_n(int32_t kind, int32_t len);
 static inline void *hx_arr_new(int32_t kind, int32_t len) {
 	if (len == 0) { // `[]`: the data is allocated by the first store
-		void *a = rt_alloc(3, T_ARRAY, K_OBJ);
+		void *a = rt_alloc(2, T_ARRAY, K_OBJ);
 		ARR_KIND(a) = kind;
 		return a;
 	}

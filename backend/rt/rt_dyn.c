@@ -772,20 +772,19 @@ void *hxc_Native_enumCreate(void *e, int32_t index, void *params) {
 	int32_t ct = rt_types[t].ctors[index];
 	const rt_type *cty = &rt_types[ct];
 	RT_ROOT(params);
-	void *o = rt_alloc(cty->nslots, ct, K_OBJ);
+	void *o = rt_alloc(cty->nslots ? cty->nslots : 1, ct, K_OBJ);
 	RT_RELOAD(params);
 	RT_UNROOT(1);
-	FI(o, 0) = cty->tag;
 	for (uint32_t i = 0; i < cty->nfields; i++) {
 		const rt_field *f = &cty->fields[i];
-		void *v = params ? hx_aget_p_slow(params, f->slot - 1) : 0;
+		void *v = params ? hx_aget_p_slow(params, f->slot) : 0;
 		store_slot(o, f->slot, f->kind, v);
 	}
 	return o;
 }
 
 int32_t hxc_Native_enumIndex(void *v) {
-	return FI(v, 0);
+	return rt_types[TINDEX(v)].tag;
 }
 
 void *hxc_Native_enumCtorName(void *v) {
@@ -794,7 +793,7 @@ void *hxc_Native_enumCtorName(void *v) {
 
 void *hxc_Native_enumParams(void *v) {
 	const rt_type *ty = &rt_types[TINDEX(v)];
-	uint32_t n = ty->nslots - 1;
+	uint32_t n = ty->nslots;
 	RT_ROOT(v);
 	void *a = hx_arr_new(AK_PTR, n);
 	RT_ROOT(a);
@@ -803,7 +802,7 @@ void *hxc_Native_enumParams(void *v) {
 		RT_RELOAD(v);
 		void *b = box_slot(v, f->slot, f->kind);
 		RT_RELOAD(a);
-		rt_set_ptr(ARR_DATA(a), &FP(ARR_DATA(a), f->slot - 1), b);
+		rt_set_ptr(ARR_DATA(a), &FP(ARR_DATA(a), f->slot), b);
 	}
 	RT_RELOAD(a);
 	RT_UNROOT(2);

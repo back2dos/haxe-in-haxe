@@ -136,7 +136,7 @@ class EmitC {
 
 	function assignTypes() {
 		var rtNames = ["None", "String", "Int", "Float", "Bool", "Array", "ArrayData", "ArrayData", "haxe.io.Bytes", "haxe.io.BytesBuffer", "StringBuf", "Ref", "Ref", "Ref", "Class", "Overflow", "Native", "ArrayIterator"];
-		var rtSlots:Array<Array<Null<Ty>>> = [[], [], [TI32], [TF64], [TBool], [TI32, TRef(RAny), TI32], [], [], [], [TI32, TRef(RAny)], [TI32, TRef(RAny)], [TRef(RAny)], [TI32], [TF64], [TI32], [], [], [TRef(RAny), TI32]];
+		var rtSlots:Array<Array<Null<Ty>>> = [[], [], [TI32], [TF64], [TBool], [TI32, TRef(RAny)], [], [], [], [TI32, TRef(RAny)], [TI32, TRef(RAny)], [TRef(RAny)], [TI32], [TF64], [TI32], [], [], [TRef(RAny), TI32]];
 		for (i in 0...T_FIRST)
 			addType(entry(i < rtNames.length ? rtNames[i] : "Reserved", "TK_RUNTIME", i < rtSlots.length ? rtSlots[i] : []));
 		for (c in p.classes) {
@@ -155,13 +155,12 @@ class EmitC {
 			et.tag = e.ctors.length;
 			e.tindex = addType(et);
 			for (c in e.ctors) {
-				var slots:Array<Null<Ty>> = [TI32];
-				for (pt in c.params)
-					slots.push(pt);
+				// no tag slot: the constructor is the type index (rt.h)
+				var slots:Array<Null<Ty>> = [for (pt in c.params) pt];
 				var t = entry(c.name, "TK_CTOR", slots);
 				t.sup = e.tindex;
 				t.tag = c.tag;
-				t.fields = [for (i in 0...c.params.length) {name: c.paramNames[i], slot: i + 1, ty: c.params[i]}];
+				t.fields = [for (i in 0...c.params.length) {name: c.paramNames[i], slot: i, ty: c.params[i]}];
 				c.tindex = addType(t);
 			}
 			types[e.tindex].ctors = [for (c in e.ctors) c.tindex];
@@ -274,7 +273,7 @@ class EmitC {
 			case EBin(_, a, b):
 				f(a);
 				f(b);
-			case ENot(a) | EConv(_, a) | EBox(_, a) | EUnbox(_, a) | EField(_, _, a) | EAnonGet(_, _, a) | ECast(_, a) | EInstOf(_, a) | EEnumTag(a) | EEnumParam(_, _, a) | EArrLen(a) | EBoxGet(_, a) | ECapture(_, _, a) | ENewBox(_, a):
+			case ENot(a) | EConv(_, a) | EBox(_, a) | EUnbox(_, a) | EField(_, _, a) | EAnonGet(_, _, a) | ECast(_, a) | EInstOf(_, a) | EEnumTag(a, _) | EEnumParam(_, _, a) | EArrLen(a) | EBoxGet(_, a) | ECapture(_, _, a) | ENewBox(_, a):
 				f(a);
 			case EArrGet(_, a, i):
 				f(a);
@@ -381,7 +380,7 @@ class EmitC {
 		b.add('static void hx_main_body(void) {\n');
 		for (i in 0...p.globals.length) {
 			var c = p.globals[i].init;
-			if (c != null) b.add('\trt_globals[$i] = rt_alloc(1, ${c.tindex}, K_OBJ);\n\tFI(rt_globals[$i], 0) = ${c.tag};\n');
+			if (c != null) b.add('\trt_globals[$i] = rt_alloc(1, ${c.tindex}, K_OBJ);\n');
 		}
 		for (f in p.inits)
 			b.add('\t${cname(f)}();\n');
@@ -752,8 +751,14 @@ class EmitC {
 				'({ void *o_ = ${expr(obj)}; rt_icache *c_ = rt_ic(o_, ${fid(name)}, &IC[$ic]); c_->slot > 0 && $match ? ${load("o_", "c_->slot - 1", t)} : ${unboxFrom('hx_anon_get_slow(o_, ${fid(name)})', t)}; })';
 			case ECast(_, x): expr(x);
 			case EInstOf(c, x): 'hx_inst(${expr(x)}, ${c.tindex}, ${c.tindex + c.lastDescendant - c.id})';
-			case EEnumTag(x): 'FI(${expr(x)}, 0)';
-			case EEnumParam(c, idx, x): load(expr(x), Std.string(idx + 1), c.params[idx]);
+			case EEnumTag(x, en):
+				// constructors of an enum have consecutive type indices in tag order
+				var base = en == null || en.ctors.length == 0 ? null : en.ctors[0].tindex - en.ctors[0].tag;
+				if (base != null)
+					for (c in en.ctors)
+						if (c.tindex - c.tag != base) base = null;
+				base != null ? '((int32_t)TINDEX(${expr(x)}) - $base)' : 'rt_types[TINDEX(${expr(x)})].tag';
+			case EEnumParam(c, idx, x): load(expr(x), Std.string(idx), c.params[idx]);
 			case EArrLen(a): 'ARR_LEN(${expr(a)})';
 			case EArrGet(elem, a, i):
 				switch elem {
@@ -805,9 +810,11 @@ class EmitC {
 				'$name(${[for (a in args) expr(a)].join(", ")})';
 			case ENewObj(c): 'rt_alloc(${Std.int(Math.max(1, c.fields.length))}, ${c.tindex}, K_OBJ)';
 			case ENewEnum(c, args):
-				var s = '({ void *o = rt_alloc_init(${c.params.length + 1}, ${c.tindex}, K_OBJ); FP(o, 0) = 0; FI(o, 0) = ${c.tag}; ';
-				for (i in 0...args.length)
-					s += load("o", Std.string(i + 1), c.params[i]) + ' = ${expr(args[i])}; ';
+				var s = '({ void *o = rt_alloc_init(${c.params.length == 0 ? 1 : c.params.length}, ${c.tindex}, K_OBJ); ' + (c.params.length == 0 ? 'FP(o, 0) = 0; ' : '');
+				for (i in 0...args.length) {
+					if (c.params[i].match(TI32 | TBool)) s += 'FP(o, $i) = 0; ';
+					s += load("o", Std.string(i), c.params[i]) + ' = ${expr(args[i])}; ';
+				}
 				s + "o; })";
 			case ENewArr(elem, vs):
 				var s = '({ void *o = hx_arr_new(${arrKind(elem)}, ${vs.length}); ';
@@ -873,17 +880,20 @@ static inline void hx_aset_p(void **slot, int32_t i, void **v) {
 }
 static inline void hx_apush_i(void **slot, int32_t v) {
 	void *a = *slot;
-	if (ARR_KIND(a) == AK_I32 && (uint32_t)ARR_LEN(a) < (uint32_t)ARR_CAP(a)) ((int32_t *)ARR_DATA(a))[ARR_LEN(a)++] = v;
+	void *d = ARR_DATA(a);
+	if (ARR_KIND(a) == AK_I32 && d && (uint32_t)ARR_LEN(a) < (uint32_t)DATA_CAP(d, AK_I32)) ((int32_t *)d)[ARR_LEN(a)++] = v;
 	else hx_apush_slow(slot, AK_I32, (uint64_t)(uint32_t)v);
 }
 static inline void hx_apush_f(void **slot, double v) {
 	void *a = *slot;
-	if (ARR_KIND(a) == AK_F64 && (uint32_t)ARR_LEN(a) < (uint32_t)ARR_CAP(a)) ((double *)ARR_DATA(a))[ARR_LEN(a)++] = v;
+	void *d = ARR_DATA(a);
+	if (ARR_KIND(a) == AK_F64 && d && (uint32_t)ARR_LEN(a) < NSLOTS(d)) ((double *)d)[ARR_LEN(a)++] = v;
 	else hx_apush_slow(slot, AK_F64, hx_d2u(v));
 }
 static inline void hx_apush_p(void **slot, void **v) {
 	void *a = *slot;
-	if (ARR_KIND(a) == AK_PTR && (uint32_t)ARR_LEN(a) < (uint32_t)ARR_CAP(a)) { void *d = ARR_DATA(a); rt_set_ptr(d, &FP(d, ARR_LEN(a)), *v); ARR_LEN(a)++; }
+	void *d = ARR_DATA(a);
+	if (ARR_KIND(a) == AK_PTR && d && (uint32_t)ARR_LEN(a) < NSLOTS(d)) { rt_set_ptr(d, &FP(d, ARR_LEN(a)), *v); ARR_LEN(a)++; }
 	else hx_apush_slow(slot, AK_PTR, (uint64_t)(uintptr_t)v);
 }
 static inline int hx_is_sig(void *c, int32_t sig) {
