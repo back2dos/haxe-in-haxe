@@ -1,7 +1,7 @@
 package context;
 
 // Shared counters from haxe/src/compiler/hxb/hxbReader.ml:21-29.
-// This model does not implement HXB-library input.
+// Incremented by compiler.hxb.HxbReader.
 @:structInit class HxbReaderStatsData {
 	public var modulesFullyRestored:Int;
 	public var modulesPartiallyRestored:Int;

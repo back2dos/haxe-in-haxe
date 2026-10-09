@@ -187,9 +187,39 @@ class ModuleTyping {
  public static function typeModule(com:CommonContext,g:TyperGlobals,path:GlobalTypePath,file:String,decls:Array<TypeDecl>,p:Pos,dontCheckPath:Bool=false,isExtern:Bool=false):ModuleDef {
   var m=makeModule(com,g,path,file,p);com.moduleLut.add(path,m);var all=handleImportHx(com,g,m,decls,p);typeTypesIntoModule(com,g,m,all,p);if(isExtern)m.mExtra.mKind=MExtern;else if(!dontCheckPath)Naming.checkModulePath(com,m.mPath,p);com.requestScope.stats.sModulesTyped++;return m;
  }
+ public static function loadHxbModule(com:CommonContext,g:TyperGlobals,path:GlobalTypePath,p:Pos):ModuleDef {
+  function read(file:String,bytes:haxe.io.Bytes):ModuleDef {
+   try{
+    var api:compiler.hxb.HxbReaderApi=new HxbReaderApiTypeload(com,g,loadModulePrime,p);
+    var reader=new compiler.hxb.HxbReader(path,com.hxbReaderStats,Common.defined(com,Define.HxbTimes)?com.timerCtx:null);
+    var read=reader.read(api,bytes);
+    var m=read(EOT);
+    delay(g,PConnectField,function(){read(EOM);});
+    return m;
+   }catch(e:Dynamic){
+    var stack=haxe.CallStack.toString(haxe.CallStack.exceptionStack());
+    Sys.stderr().writeString("\x1b[30;41mError loading "+path.name+" from "+file+"\x1b[0m\n");
+    Sys.stderr().writeString(" => "+Std.string(e)+"\n"+stack+"\n");
+    #if hl hl.Api.rethrow(e); #end
+    throw e;
+   }
+  }
+  var target=Common.platformNameMacro(com);
+  for(hxbLib in com.hxbLibs){
+   var bytes=hxbLib.getBytes(target,path);
+   if(bytes!=null)return read(hxbLib.getFilePath(),bytes);
+  }
+  throw NotFound.raise();
+ }
  public static function loadModulePrime(com:CommonContext,g:TyperGlobals,path:GlobalTypePath,p:Pos):ModuleDef {
   Common.checkCancellation(com);try{return com.moduleLut.find(path);}catch(_:NotFound){}
-  if(com.hxbLibs.length>0)Error.raiseTypingError("HXB library input is outside the source-only HXB milestone",p);
+  // Check cache
+  switch TypeloadCacheHook.typeModuleHook(com,function(pass,f)delay(g,pass,f),path,p){
+   case GoodModule(m):return m;
+   case BinaryModule(_):return Globals.die("","typeloadModule.ml load_module'"); // The server builds those
+   case NoModule|BadModule(_)|BadBinaryModule(_,_):
+  }
+  try{return loadHxbModule(com,g,path,p);}catch(_:NotFound){}
   inline function missing():Dynamic return Error.raiseErrorMsg(ModuleNotFound(path),p);
   if(com.moduleNonexistentLut.mem(path)||g.loadOnlyCachedModules)return missing();
   var isExtern=false,file:String,decls:Array<TypeDecl>,warnings:Array<syntax.Parser.ParseWarning>;
@@ -204,4 +234,35 @@ class ModuleTyping {
   var m=typeModule(com,g,path,file,decls,p,false,isExtern);for(w in warnings)Common.moduleWarning(com,m,WIfDisplay,[],core.WarningList.warningObj(WIfDisplay).wDoc,w.pos);return m;
  }
  public static function loadModule(ctx:TyperContext,path:GlobalTypePath,p:Pos,origin:ModuleDepOrigin=MDepFromTyping):ModuleDef {var m=loadModulePrime(ctx.com,ctx.g,path,p);addDependency(ctx.m.curmod,m,origin,true);if(ctx.pass==PTypeField)flushPass(ctx.g,PConnectField,{name:"load_module",args:path.pack.concat([path.name])});return m;}
+}
+
+// haxe/src/typing/typeloadModule.ml: class hxb_reader_api_typeload.
+class HxbReaderApiTypeload implements compiler.hxb.HxbReaderApi {
+ final com:CommonContext;
+ final g:TyperGlobals;
+ final loadModule:(CommonContext,TyperGlobals,GlobalTypePath,Pos)->ModuleDef;
+ final p:Pos;
+ public function new(com:CommonContext,g:TyperGlobals,loadModule:(CommonContext,TyperGlobals,GlobalTypePath,Pos)->ModuleDef,p:Pos){this.com=com;this.g=g;this.loadModule=loadModule;this.p=p;}
+ public function makeModule(path:GlobalTypePath,file:String):ModuleDef {
+  var m=ModuleTyping.makeModule(com,g,path,file,p);
+  m.mExtra.mProcessed=1;
+  return m;
+ }
+ public function addModule(m:ModuleDef):Void com.moduleLut.add(m.mPath,m);
+ public function resolveType(pack:Array<String>,mname:String,tname:String,_:compiler.hxb.HxbData.TypingMode):ModuleType {
+  var m=loadModule(com,g,{pack:pack,name:mname},p);
+  for(t in m.mTypes)if(tPath(t).name==tname)return t;
+  throw NotFound.raise();
+ }
+ public function resolveModule(path:GlobalTypePath,_:compiler.hxb.HxbData.TypingMode):ModuleDef return loadModule(com,g,path,p);
+ public function basicTypes():BasicTypes return com.basic;
+ // The v_id in .hxb has no relation to this context, make a new one.
+ public function getVarId(i:Int):Int return allocVarId();
+ public function readExpressionEagerly(cf:TClassField):Bool {
+  return com.isMacroContext||switch cf.cfKind{
+   case Var(_):true;
+   case Method(_):delay(g,PTypeField,function(){follow(cf.cfType);});false;
+  }
+ }
+ public function makeLazyType(t:T,f:Void->T):T return TLazy(makeLazy(g,t,f,"typeload-api"));
 }

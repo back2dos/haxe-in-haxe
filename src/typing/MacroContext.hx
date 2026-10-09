@@ -59,8 +59,6 @@ import macros.eval.EvalContext.RunTimeException;
 	- The compilation cache (`com.cs`) is absent in the port's batch mode: cache tainting
 	  (`cs#taint_module`) and `CommonCache.lock_signature` only apply to a server cache and
 	  are rejected when one is present.
-	- `TypeloadCacheHook.create_fake_module` is not ported as its own module; it is
-	  translated below as `createFakeModule` (with its global `fake_modules` table).
 **/
 typedef MacroMethod = {args:Array<{name:String, optional:Bool, type:T}>, ret:T, cls:TClass, field:TClassField};
 
@@ -345,26 +343,8 @@ class MacroContext {
 			throw new core.ds.Failure("Compilation-server cache tainting (" + reason + ") is not supported by haxe-in-haxe");
 	}
 
-	// TypeloadCacheHook.fake_modules / create_fake_module
-	static final fakeModules:Map<String, ModuleDef> = new Map();
-
-	static function createFakeModule(com:CommonContext, file:String):ModuleDef {
-		var key:String = com.partScope.fileKeys.get(file);
-		var file = core.Path.getFullPath(file);
-		var mdep = fakeModules.get(key);
-		if (mdep == null) {
-			mdep = {
-				mId: allocMid(),
-				mPath: {pack: ["$DEP"], name: file},
-				mTypes: [],
-				mStatics: null,
-				mExtra: moduleExtra(file, Define.getSignature(com.defines), Common.fileTime(file), MFake, com.partScope.compilationStep, [])
-			};
-			fakeModules.set(key, mdep);
-		}
-		com.moduleLut.add(mdep.mPath, mdep);
-		return mdep;
-	}
+	static inline function createFakeModule(com:CommonContext, file:String):ModuleDef
+		return TypeloadCacheHook.createFakeModule(com, file);
 
 	static function previouslyDefinedError(m:ModuleDef, mpath:GlobalTypePath, p:Pos):Dynamic {
 		var pos:Pos = {pfile: core.Path.UniqueKey.lazyPath(m.mExtra.mFile), pmin: 0, pmax: 0};
