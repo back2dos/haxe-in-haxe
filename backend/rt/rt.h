@@ -5,7 +5,9 @@
 // objects), or NULL.
 //
 // Objects: the pointer addresses the payload, a header word precedes it.
-// Payload = 8-byte slots; Int/Bool use the low 4 bytes of a slot.
+// Payload = 8-byte slots; Int/Bool use the low 4 bytes of a slot, or half
+// of one: classes and anonymous structures pack two Int/Bool fields per slot.
+// Enum values: the constructor is the type index, the arguments the slots.
 //   header bits [0..27] slot count, [28..31] kind, [32..47] type index,
 //               [48..63] identity hash (0 until asked for)
 //
@@ -30,6 +32,9 @@ enum { K_OBJ = 0, K_PARR = 1, K_RAW = 2, K_FWD = 15 };
 #define MKHDR(nslots, kind, tindex) ((uint64_t)(nslots) | ((uint64_t)(kind) << 28) | ((uint64_t)(tindex) << 32))
 
 #define FI(p, i) (((int32_t *)(p))[2 * (i)])
+// an Int/Bool field by 4-byte index: classes and anonymous structures pack two
+// per slot, and rt_field.slot of 'i'/'b' fields is this index for every type
+#define FH(p, h) (((int32_t *)(p))[h])
 #define FD(p, i) (((double *)(p))[i])
 #define FP(p, i) (((void **)(p))[i])
 
@@ -40,7 +45,7 @@ enum {
 	T_BOXINT, // Dynamic Int: slot 0
 	T_BOXFLOAT,
 	T_BOXBOOL,
-	T_ARRAY, // slot 0: int32 length, int32 element kind; slot 1: data (NULL while empty); slot 2: int32 capacity
+	T_ARRAY, // slot 0: int32 length, int32 element kind; slot 1: data (NULL while empty), its slot count gives the capacity
 	T_ADATA_P, // K_PARR array data
 	T_ADATA_RAW, // K_RAW array data (Int: 4 bytes per element, Float: 8)
 	T_BYTES, // K_RAW: int32 length, then bytes
@@ -142,6 +147,15 @@ void *rt_alloc_slow(uint64_t header, uint32_t bytes);
 void rt_write_barrier(void *obj, void **slot, void *val);
 void rt_barrier_range(void *obj, void **from, int32_t n);
 void rt_init(int nglobals, int argc, char **argv);
+// RT_CENSUS (rt_census.c): a census of the objects in [start, end)
+typedef struct {
+	const char *when;
+	size_t young, old_used, old_limit, populated[2], remembered, gcstack, shadow;
+	unsigned long minors, majors;
+	int nglobals;
+} rt_census_info;
+void rt_census(char *start, char *end, const rt_census_info *info);
+void rt_proc_rss(long *rss_kb, long *peak_kb); // from /proc/self/status (0 elsewhere)
 
 static inline void *rt_alloc(uint32_t nslots, uint32_t tindex, uint32_t kind) {
 	uint32_t bytes = 8 * (nslots + 1);
@@ -167,11 +181,18 @@ static inline void *rt_alloc_init(uint32_t nslots, uint32_t tindex, uint32_t kin
 	return rt_alloc_slow(MKHDR(nslots, kind, tindex), bytes);
 }
 
-// store a reference into a heap object: remember old-to-young pointers
+// store a reference into a heap object: remember old-to-young pointers. A
+// slot of an old object that already holds a young pointer is remembered
+// already (every such store comes through here or rt_barrier_range), so
+// storing into it again adds no duplicate entry.
 static inline void rt_set_ptr(void *obj, void **slot, void *val) {
+	void *prev = *slot;
 	*slot = val;
+	// (with OS threads the slot's entry may be in another thread's remembered
+	// set: all of them are processed by the next minor collection)
 	if ((char *)obj < rt_young_start || (char *)obj >= rt_young_end)
-		if ((char *)val >= rt_young_start && (char *)val < rt_young_end) rt_write_barrier(obj, slot, val);
+		if ((char *)val >= rt_young_start && (char *)val < rt_young_end)
+			if ((char *)prev < rt_young_start || (char *)prev >= rt_young_end) rt_write_barrier(obj, slot, val);
 }
 
 // natives keep references across allocations in shadow-stack slots
@@ -357,11 +378,13 @@ uint64_t hx_anon_call_slow(void *o, int32_t fid, int32_t sig, uint64_t *args);
 #define ARR_LEN(a) FI(a, 0)
 #define ARR_KIND(a) (((int32_t *)(a))[1])
 #define ARR_DATA(a) FP(a, 1)
-#define ARR_CAP(a) FI(a, 2) // elements the data has room for
+// elements the data has room for (its slot count; Int arrays: two per slot)
+#define DATA_CAP(d, kind) ((int32_t)(NSLOTS(d) << ((kind) == AK_I32)))
+#define ARR_CAP(a) (ARR_DATA(a) ? DATA_CAP(ARR_DATA(a), ARR_KIND(a)) : 0)
 void *hx_arr_new_n(int32_t kind, int32_t len);
 static inline void *hx_arr_new(int32_t kind, int32_t len) {
 	if (len == 0) { // `[]`: the data is allocated by the first store
-		void *a = rt_alloc(3, T_ARRAY, K_OBJ);
+		void *a = rt_alloc(2, T_ARRAY, K_OBJ);
 		ARR_KIND(a) = kind;
 		return a;
 	}

@@ -38,7 +38,7 @@ class Build {
 
 	public static function toBinary(out:String, o:Options):Int {
 		var rt = lib + "rt/";
-		var files = [out + ".c"].concat([for (f in ["rt", "rt_dyn", "rt_std", "rt_str", "rt_sys", "rt_net", "rt_ssl", "rt_uv", "rt_thread"]) rt + f + ".c"]);
+		var files = [out + ".c"].concat([for (f in ["rt", "rt_dyn", "rt_std", "rt_str", "rt_sys", "rt_net", "rt_ssl", "rt_uv", "rt_thread", "rt_census"]) rt + f + ".c"]);
 		// slots are read as int32/double/pointer through casts: no strict aliasing
 		var flags = (o.debug ? ["-O0", "-g"] : ["-O2"]).concat(["-w", "-fno-strict-aliasing", "-I", rt]);
 		var libs = ["-lm"];
@@ -65,7 +65,8 @@ class Build {
 	}
 
 	static function findCc():String {
-		for (c in ["cc", "gcc", "clang", "tcc"])
+		// clang first: 4-10% less CPU than gcc on the self-compile (bench/README.md, 2026-10-09 clang)
+		for (c in ["clang", "cc", "gcc", "tcc"])
 			if (exists(c)) return c;
 		Sys.println("hxc: no C compiler found (cc, gcc, clang or tcc); using cosmocc");
 		return cosmocc();

@@ -1076,9 +1076,18 @@ static void thread_exit(void) {
 		memcpy(dead_mut.rem + dead_mut.rem_len, m->rem, m->rem_len * sizeof(void **));
 		dead_mut.rem_len += m->rem_len;
 	}
+	if (m->robjs_len) {
+		if (dead_mut.robjs_len + m->robjs_len > dead_mut.robjs_cap) {
+			dead_mut.robjs_cap = (dead_mut.robjs_len + m->robjs_len) * 2;
+			dead_mut.robjs = (void **)realloc(dead_mut.robjs, dead_mut.robjs_cap * sizeof(void *));
+		}
+		memcpy(dead_mut.robjs + dead_mut.robjs_len, m->robjs, m->robjs_len * sizeof(void *));
+		dead_mut.robjs_len += m->robjs_len;
+	}
 	__atomic_fetch_sub(&rt_nthreads, 1, __ATOMIC_SEQ_CST);
 	pthread_mutex_unlock(&wl);
 	free(m->rem);
+	free(m->robjs);
 	rt_dyn_thread_exit();
 	munmap(t->sbase, SSTACK_BYTES);
 	free(t);

@@ -34,6 +34,56 @@ python3 backend/tools/besttime.py 5 bin/backend/Bench/prog_c
 runtime objects from `bench/build-wasm.sh` and a haxe with the hl2c fix
 (`HAXE_HLC`).
 
+## Memory: object layouts, heap census, GC policy
+
+Object layouts (`rt/rt.h`): a header word, then 8-byte slots.
+
+- Classes and anonymous structures pack Int/Bool fields two per slot
+  (`EmitC.layout`: in field order, the second fills the free half of the
+  previous one; a subclass's layout extends its superclass's). Generated
+  code and the runtime address them by 4-byte index (`FH`), which is what
+  `rt_field.slot` holds for 'i'/'b' fields of every type. `core.Pos` is 24
+  bytes instead of 32.
+- Enum values have no tag slot: the constructor is the header's type index
+  (constructors of an enum have consecutive indices in tag order, so
+  `Type.enumIndex` of a known enum is `TINDEX(v) - base`). Argument-less
+  constructors are shared values, as before.
+- An `Array` is 24 bytes (length, element kind, data); its capacity is the
+  data block's slot count. `[]` has no data block; literals and copies get
+  exactly their length, growth from empty goes 2, 4, 8...
+- Strings are UTF-16. One byte per character would save 1.6 MB of the 5.5
+  MB of strings live at the end of the self-compile (all of them Latin-1),
+  less than 1% of the heap, for a change touching every string native; the
+  port's lexer interns identifiers per file instead (13.6 → 5.5 MB). A GC
+  that deduplicates promoted strings saved 2 MB more but cannot be used:
+  string identity is observable in the port (`StrTools.physNeq`, OCaml's
+  `!=` on position file names, changes HXB output).
+
+`RT_CENSUS=1` prints a heap census at exit (after a major collection, so
+only live objects count; `RT_CENSUS=2` also after every major collection,
+`RT_CENSUS_TOP=n` rows): bytes and counts per type, an estimate of the same
+data in OCaml's representation (a word per field, no overflow slot,
+1-byte strings, arrays as OCaml arrays), strings (Latin-1 share, length
+histogram, duplicates), arrays (empty, length histogram, capacity slack),
+arrays/strings/maps by the type and field that first refers to them, the
+heap's sizes, malloc'd memory and RSS (`rt_census.c`). `RT_STATS=1` prints
+each major collection (live, from-space and new limit) and the peak RSS.
+
+GC policy (the copying algorithm is unchanged): the from-space is returned
+to the kernel after a major collection (`RT_RELEASE=0` keeps it), the
+to-space is faulted in as the copy reaches it, the populate-ahead batch is
+an eighth of the space in use (4–32 MB, `RT_AHEAD_MB`), `rt_barrier_range`
+remembers a whole object for ranges longer than 16 slots (the port's
+`Array.insert` at the front of large arrays used to add the array's length
+to the remembered set at every call), and `rt_set_ptr` does not record a
+slot again that already held a young pointer.
+
+Self-compile, gcc -O2 (bench/README.md): live heap at exit 214 → 170 MB,
+peak RSS 837 → 467 MB (the reference: 531 MB), CPU 5.7 → 5.0 s. With a copying old generation the
+peak is about the old space's size at the last major collection plus what
+survives it; a mark-sweep or mark-compact old generation (after the OS
+threads work) would remove the to-space from the peak.
+
 ## Threads: green threads in the C runtime
 
 The hxc runtime runs Haxe threads as M:1 cooperative (green) threads

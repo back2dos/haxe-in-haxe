@@ -14,6 +14,9 @@ typedef struct rt_mutator {
 	char **yptr_ref, **ylim_ref;
 	void ***rem; // remembered set: slots of old objects that may hold young pointers
 	size_t rem_len, rem_cap;
+	void **robjs; // remembered objects: old objects scanned whole (rt_barrier_range of long ranges)
+	size_t robjs_len, robjs_cap;
+	void *robjs_recent[256];
 	struct rt_mutator *next; // the registered mutators (rt_thread.c)
 } rt_mutator;
 

@@ -658,7 +658,12 @@ class FnLower {
 				}
 				EType(typeRef(mt));
 			case TField(obj, fa): field(obj, fa, e);
-			case TEnumIndex(e1): EEnumTag(value(e1));
+			case TEnumIndex(e1):
+				var en = switch TFunctions.follow(e1.etype) {
+					case TEnum(en, _): l.enumInfo(en);
+					case _: null;
+				};
+				EEnumTag(value(e1), en);
 			case TEnumParameter(e1, ef, i):
 				var en = switch TFunctions.follow(e1.etype) {
 					case TEnum(en, _): en;

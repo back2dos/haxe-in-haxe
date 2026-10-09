@@ -29,7 +29,7 @@ for t in $targets; do
 			# needs em++ on PATH (. ~/emsdk/emsdk_env.sh)
 			C=bin/backend/hih/prog.c
 			F="-O2 -w -fno-strict-aliasing -fwasm-exceptions -sMEMORY64=1 -I backend/rt"
-			RT="rt rt_dyn rt_std rt_str rt_sys rt_net rt_ssl rt_uv"
+			RT="rt rt_dyn rt_std rt_str rt_sys rt_net rt_ssl rt_uv rt_thread rt_census"
 			mkdir -p "$OUT/wasm/obj"
 			# Emscripten's ENV doesn't inherit the process environment (HAXE_STD_PATH)
 			echo 'Module.preRun = [() => { for (const k in process.env) ENV[k] = process.env[k]; }];' > "$OUT/wasm/env.js"

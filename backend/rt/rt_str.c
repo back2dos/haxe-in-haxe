@@ -587,7 +587,7 @@ void *hx_std_string(void *v) {
 		void *name = hx_str_of_ascii(ty->name);
 		RT_RELOAD(b);
 		sb_add_str(b, name);
-		uint32_t np = ty->nslots - 1;
+		uint32_t np = ty->nslots;
 		if (np > 0) {
 			RT_RELOAD(b);
 			StringBuf_addChar(b, '(');
@@ -600,12 +600,12 @@ void *hx_std_string(void *v) {
 				void *p = 0;
 				char k = 'p';
 				for (uint32_t f = 0; f < ty->nfields; f++)
-					if (ty->fields[f].slot == (int32_t)i + 1) k = ty->fields[f].kind;
+					if (ty->fields[f].slot == (int32_t)(ty->fields[f].kind == 'i' || ty->fields[f].kind == 'b' ? 2 * i : i)) k = ty->fields[f].kind;
 				switch (k) {
-				case 'i': p = hx_box_int(FI(v, i + 1)); break;
-				case 'b': p = hx_box_bool(FI(v, i + 1)); break;
-				case 'f': p = hx_box_float(FD(v, i + 1)); break;
-				default: p = FP(v, i + 1);
+				case 'i': p = hx_box_int(FI(v, i)); break;
+				case 'b': p = hx_box_bool(FI(v, i)); break;
+				case 'f': p = hx_box_float(FD(v, i)); break;
+				default: p = FP(v, i);
 				}
 				void *s = hx_std_string(p);
 				RT_RELOAD(b);

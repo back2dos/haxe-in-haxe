@@ -35,6 +35,8 @@ class ClassInfo {
 	public var cname:String; // C identifier prefix
 	public var sup:Null<ClassInfo>;
 	public var fields:Array<{name:String, ty:Ty}> = []; // including inherited (the class is the header's type index)
+	public var locs:Array<Int>; // per field: its slot, or for Int/Bool its 4-byte index (packed two per slot; EmitC.layout)
+	public var nslots:Int;
 	public var methods:Map<String, FuncInfo> = new Map(); // own implementations
 	public var ctor:Null<FuncInfo>;
 	public var tindex:Int = -1;
@@ -82,7 +84,7 @@ class CtorInfo {
 	public var en:EnumInfo;
 	public var name:String;
 	public var tag:Int;
-	public var params:Array<Ty>; // slot 0 = tag, params from slot 1
+	public var params:Array<Ty>; // from slot 0: the tag is the header's type index (rt.h)
 	public var paramNames:Array<String> = [];
 	public var global:Int = -1; // singleton for constructors without arguments
 	public var tindex:Int = -1;
@@ -100,6 +102,8 @@ class ShapeInfo {
 	public var id:Int;
 	public var fields:Array<{name:String, ty:Ty}>; // slot 0 = dynamic overflow fields, then these
 	public var tindex:Int = -1;
+	public var locs:Array<Int>; // as ClassInfo.locs
+	public var nslots:Int;
 
 	public function new(id, fields) {
 		this.id = id;
@@ -189,7 +193,7 @@ enum Ex {
 	EAnonGet(name:String, t:Ty, obj:Ex); // structural field read, converted to t
 	ECast(t:Ty, e:Ex); // unchecked
 	EInstOf(c:ClassInfo, e:Ex);
-	EEnumTag(e:Ex);
+	EEnumTag(e:Ex, en:Null<EnumInfo>); // en: the value's enum when known
 	EEnumParam(c:CtorInfo, idx:Int, e:Ex);
 	EArrLen(a:Ex);
 	EArrGet(elem:Ty, a:Ex, i:Ex);

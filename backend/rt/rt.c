@@ -39,6 +39,8 @@ RT_TLS rt_mutator *rt_mut;
 static size_t tlab_size; // with several threads (RT_TLAB_KB; default a 16th of the nursery)
 static size_t minor_size;
 static int stats;
+static int census; // RT_CENSUS: 1 at exit, 2 also after each major collection
+static void census_now(const char *when);
 static int release_pages;
 static void populate(char *upto);
 static unsigned long minors, majors;
@@ -255,16 +257,26 @@ static void minor(void) {
 }
 
 static void *(*rem_fwd)(void *);
+static void scan_object(void *o, void *(*fwd)(void *));
+static void forget_objs(rt_mutator *m) {
+	m->robjs_len = 0;
+	memset(m->robjs_recent, 0, sizeof m->robjs_recent);
+}
+
 static void forward_remembered(rt_mutator *m, void *arg) {
 	(void)arg;
 	for (size_t i = 0; i < m->rem_len; i++)
 		if (*m->rem[i]) *m->rem[i] = rem_fwd(*m->rem[i]);
 	m->rem_len = 0;
+	for (size_t i = 0; i < m->robjs_len; i++)
+		scan_object(m->robjs[i], rem_fwd);
+	forget_objs(m);
 }
 
 static void clear_remembered(rt_mutator *m, void *arg) {
 	(void)arg;
 	m->rem_len = 0;
+	forget_objs(m);
 }
 
 static void minor_(void) {
@@ -308,14 +320,20 @@ static void minor_(void) {
 static char *regions[2];
 static int cur_region;
 // pages of each region already faulted in: populated in large batches ahead
-// of use, which costs the kernel much less than one fault per 4 KB page
+// of use, which costs the kernel much less than one fault per 4 KB page. The
+// batch is an eighth of the space in use, between 4 MB and 32 MB
+// (RT_AHEAD_MB), so a small program does not fault in memory it never uses.
 static char *populated[2];
+static size_t populate_ahead = 32u << 20; // RT_AHEAD_MB
 static void populate(char *upto) {
 #ifdef MADV_POPULATE_WRITE
 	char **hi = &populated[cur_region];
 	if (*hi == NULL || *hi < regions[cur_region]) *hi = regions[cur_region];
 	if (upto <= *hi) return;
-	char *end = (char *)(((uintptr_t)upto + (32u << 20)) & ~(uintptr_t)((2u << 20) - 1));
+	size_t ahead = (size_t)(upto - regions[cur_region]) / 8;
+	if (ahead < (4u << 20)) ahead = 4u << 20;
+	if (ahead > populate_ahead) ahead = populate_ahead;
+	char *end = (char *)(((uintptr_t)upto + ahead) & ~(uintptr_t)((2u << 20) - 1));
 	if (end > regions[cur_region] + REGION) end = regions[cur_region] + REGION;
 	if (madvise(*hi, end - *hi, MADV_POPULATE_WRITE) == 0) *hi = end;
 	else *hi = end; // not supported: let pages fault in as before
@@ -323,14 +341,22 @@ static void populate(char *upto) {
 	(void)upto;
 #endif
 }
+#ifdef MADV_POPULATE_WRITE
+#define POPULATE_AHEAD(bytes) \
+	if (__builtin_expect(old_ptr + (bytes) > populated[cur_region], 0)) populate(old_ptr + (bytes))
+#else
+#define POPULATE_AHEAD(bytes)
+#endif
 #else
 static void populate(char *upto) { (void)upto; }
+#define POPULATE_AHEAD(bytes)
 #endif
 static char *from_start, *from_end;
 
 static void *major_forward(void *p) {
 	if (!in_young(p) && !((char *)p >= from_start && (char *)p < from_end)) return p;
 	if (KIND(p) == K_FWD) return FP(p, 0);
+	POPULATE_AHEAD(obj_bytes(p)); // the to-space is faulted in as the copy reaches it
 	void *n = copy_to(old_ptr, p);
 	old_ptr += obj_bytes(p);
 	forward_to(p, n);
@@ -358,10 +384,15 @@ static void major_(size_t need) {
 		exit(2);
 	}
 #else
+	// pages faulted in ahead of the from-space's end are not needed now
+	if (release_pages && populated[cur_region] > from_end) {
+		char *lo = (char *)(((uintptr_t)from_end + 4095) & ~(uintptr_t)4095);
+		if (populated[cur_region] > lo) madvise(lo, populated[cur_region] - lo, MADV_DONTNEED);
+		populated[cur_region] = lo;
+	}
 	cur_region ^= 1;
 	old_start = old_ptr = regions[cur_region];
-	if (release_pages) populated[cur_region] = NULL;
-	populate(old_start + (from_end - from_start) + (young_next - rt_young_start));
+	populate(old_start + 1);
 #endif
 	char *scan = old_ptr;
 	if (!gc_bfs) {
@@ -412,15 +443,22 @@ static void major_(size_t need) {
 	free(from_start);
 	old_end = old_start + cap;
 #else
-	// RT_RELEASE=1 returns the from-space to the kernel; by default it stays
-	// resident, so the next major collection copies into faulted-in pages
-	if (release_pages) madvise(from_start, from_end - from_start, MADV_DONTNEED);
+	// the from-space goes back to the kernel (RT_RELEASE=0 keeps it resident,
+	// so the next major collection copies into faulted-in pages: a little
+	// less system time for as much more memory as the old space held)
+	if (release_pages) {
+		char *hi = populated[cur_region ^ 1] > from_end ? populated[cur_region ^ 1] : from_end; // with the pages faulted in ahead
+		madvise(from_start, hi - from_start, MADV_DONTNEED);
+		populated[cur_region ^ 1] = regions[cur_region ^ 1];
+	}
 	size_t live = old_ptr - old_start;
 	size_t limit = 3 * live + 4 * minor_size + need;
 	if (limit < (64u << 20)) limit = 64u << 20;
 	if (limit > REGION) limit = REGION;
 	old_end = old_start + limit;
 #endif
+	if (stats) fprintf(stderr, "gc: major %lu: %zu MB live of %zu MB, limit %zu MB\n", majors, (size_t)(old_ptr - old_start) >> 20, (size_t)(from_end - from_start) >> 20, (size_t)(old_end - old_start) >> 20);
+	if (census == 2) census_now("major collection");
 }
 
 // the nursery is empty again: every thread takes a new TLAB at its next allocation
@@ -572,6 +610,21 @@ static void run_finalisers(int propagate) {
 	finals_running = 0;
 }
 
+// old objects whose every slot may hold a young pointer, scanned whole by the
+// next minor collection (per thread, rt_mutator); a small cache drops
+// repeated entries for one object
+static void remember_obj(void *obj) {
+	rt_mutator *m = rt_mut;
+	size_t h = ((uintptr_t)obj >> 4) & 255;
+	if (m->robjs_recent[h] == obj) return;
+	m->robjs_recent[h] = obj;
+	if (m->robjs_len == m->robjs_cap) {
+		m->robjs_cap = m->robjs_cap ? m->robjs_cap * 2 : 256;
+		m->robjs = (void **)realloc(m->robjs, m->robjs_cap * sizeof(void *));
+	}
+	m->robjs[m->robjs_len++] = obj;
+}
+
 void rt_write_barrier(void *obj, void **slot, void *val) {
 	(void)obj;
 	(void)val;
@@ -585,14 +638,53 @@ void rt_write_barrier(void *obj, void **slot, void *val) {
 
 // after a bulk move or copy of references into obj (memmove in natives): the
 // remembered set records slots, so every slot now holding a young pointer is
-// recorded again
+// recorded again. A long range (e.g. Array.insert at the front of a large
+// array, as the port does for OCaml's `x :: l`) remembers the whole object
+// once instead: recording its slots made the set grow by the array's length
+// at every insertion (16M entries, 128 MB, on the self-compile).
 void rt_barrier_range(void *obj, void **from, int32_t n) {
 	if (in_young(obj)) return;
+	if (n > 16) {
+		remember_obj(obj);
+		return;
+	}
 	for (int32_t i = 0; i < n; i++)
 		if (in_young(from[i])) rt_write_barrier(obj, &from[i], from[i]);
 }
 
+static void census_now(const char *when) {
+	rt_census_info gi;
+	memset(&gi, 0, sizeof gi);
+	gi.when = when;
+	gi.young = minor_size;
+	gi.old_used = old_ptr - old_start;
+	gi.old_limit = old_end - old_start;
+#ifndef __EMSCRIPTEN__
+	for (int i = 0; i < 2; i++)
+		gi.populated[i] = populated[cur_region ^ i] > regions[cur_region ^ i] ? (size_t)(populated[cur_region ^ i] - regions[cur_region ^ i]) : 0;
+#endif
+	gi.remembered = (rt_mut->rem_cap + rt_mut->robjs_cap) * sizeof(void *); // the calling thread's
+	gi.gcstack = gc_cap * sizeof(gc_frame);
+	gi.shadow = (char *)rt_sp - (char *)rt_stack_base;
+	gi.minors = minors;
+	gi.majors = majors;
+	gi.nglobals = nglobals;
+	rt_census(old_start, old_ptr, &gi);
+}
+
 static void report(void) {
+	if (stats) {
+		long rss, hwm;
+		rt_proc_rss(&rss, &hwm);
+		fprintf(stderr, "gc: RSS %ld MB, peak %ld MB; old %zu MB used of %zu MB limit\n", rss >> 10, hwm >> 10, (size_t)(old_ptr - old_start) >> 20, (size_t)(old_end - old_start) >> 20);
+	}
+	if (census) {
+		int c = census;
+		census = 0;
+		major(0);
+		census_now("exit");
+		census = c;
+	}
 	if (stats) fprintf(stderr, "gc: %lu minor (%.2fs), %lu major (%.2fs), old %zu MB used\n", minors, minor_secs, majors, major_secs, (size_t)(old_ptr - old_start) >> 20);
 }
 
@@ -612,7 +704,14 @@ void rt_init(int ng, int argc, char **argv) {
 	const char *m = getenv("RT_MINOR_KB");
 	minor_size = (m ? (size_t)atoi(m) : 4096) << 10;
 	stats = getenv("RT_STATS") != NULL;
-	release_pages = getenv("RT_RELEASE") != NULL;
+#ifndef __EMSCRIPTEN__
+	const char *ah = getenv("RT_AHEAD_MB");
+	if (ah) populate_ahead = (size_t)atoi(ah) << 20;
+#endif
+	const char *cs = getenv("RT_CENSUS");
+	census = cs ? atoi(cs) : 0;
+	const char *rp = getenv("RT_RELEASE");
+	release_pages = rp ? atoi(rp) : 1;
 	gc_bfs = getenv("RT_BFS") != NULL;
 #if defined(MADV_HUGEPAGE) && !defined(__EMSCRIPTEN__)
 	// transparent huge pages for the heap: the old space grows by hundreds of
@@ -769,9 +868,10 @@ int32_t hx_unbox_bool(void *v) {
 
 // ---- arrays
 
-// data for at least `cap` elements; *real: the capacity in elements
+// data for at least `cap` elements (exactly: literals and copies have their
+// length; growth rounds up, see hx_arr_grow); *real: the capacity in elements
 static void *data_alloc(int32_t kind, int32_t cap, int32_t *real) {
-	if (cap < 4) cap = 4;
+	if (cap < 1) cap = 1;
 	switch (kind) {
 	case AK_I32:
 		*real = (cap + 1) & ~1;
@@ -786,12 +886,11 @@ void *hx_arr_new_n(int32_t kind, int32_t len) {
 	int32_t cap;
 	void *d = data_alloc(kind, len, &cap);
 	RT_ROOT(d);
-	void *a = rt_alloc(3, T_ARRAY, K_OBJ);
+	void *a = rt_alloc(2, T_ARRAY, K_OBJ);
 	RT_RELOAD(d);
 	RT_UNROOT(1);
 	ARR_LEN(a) = len;
 	ARR_KIND(a) = kind;
-	ARR_CAP(a) = cap;
 	FP(a, 1) = d; // a is young
 	if (!in_young(a)) rt_set_ptr(a, &FP(a, 1), d);
 	return a;
@@ -806,17 +905,18 @@ void hx_arr_grow(void **slot, int32_t need) {
 	void *a = *slot;
 	uint32_t cap = ARR_CAP(a);
 	if ((uint32_t)need <= cap) return;
+	void *d0 = ARR_DATA(a);
 	uint32_t ncap = cap * 2;
+	if (ncap < 2) ncap = 2; // from empty: 2, 4, 8... (most arrays stay small)
 	if (ncap < (uint32_t)need) ncap = need;
 	int32_t real;
 	int32_t kind = ARR_KIND(a);
 	void *nd = data_alloc(kind, ncap, &real);
 	a = *slot;
-	if (ARR_CAP(a) != cap || ARR_KIND(a) != kind) {
+	if (ARR_DATA(a) != d0 || ARR_KIND(a) != kind) {
 		hx_arr_grow(slot, need);
 		return;
 	}
-	ARR_CAP(a) = real;
 	void *d = ARR_DATA(a);
 	uint32_t len = ARR_LEN(a);
 	switch (ARR_KIND(a)) {
@@ -825,9 +925,7 @@ void hx_arr_grow(void **slot, int32_t need) {
 	default:
 		memcpy(nd, d, 8 * len);
 		// large data is allocated old: its elements may point to young objects
-		if (!in_young(nd))
-			for (uint32_t i = 0; i < len; i++)
-				if (in_young(FP(nd, i))) rt_write_barrier(nd, &FP(nd, i), FP(nd, i));
+		if (!in_young(nd)) rt_barrier_range(nd, (void **)nd, len);
 		break;
 	}
 	rt_set_ptr(a, &ARR_DATA(a), nd);
@@ -851,7 +949,6 @@ void hx_arr_to_ptr(void **slot) {
 	RT_UNROOT(1);
 	a = *slot;
 	ARR_KIND(a) = AK_PTR;
-	ARR_CAP(a) = real;
 	rt_set_ptr(a, &ARR_DATA(a), nd);
 }
 

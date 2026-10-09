@@ -19,6 +19,84 @@ HL_STATIC="libhl.a fmt.o dxt.o sha1.o" sh bench/build.sh hlc   # static link
 LD_LIBRARY_PATH=/path/to/patched/hashlink HAXE_REFERENCE=haxe/haxe python3 bench/run.py -n 7
 ```
 
+## hxc memory: below the OCaml compiler's peak RSS (2026-10-09, night)
+
+Peak RSS and CPU time (user + system), minimum of 3–5 interleaved runs,
+`-D disable-parallelism --interp --no-output --hxb`; `self` compiles a
+snapshot of `src`; every archive byte-identical to the reference. Before:
+commit d2bbaad; after: 4dc6b64 (details in backend/README.md, "Memory").
+The machine was slower than in the sections below (the reference took
+5.7–5.9 s for `self`).
+
+| Workload | reference | hxc-o2 before | hxc-o2 after | hxc (tcc) after |
+| --- | ---: | ---: | ---: | ---: |
+| hello | 0.12 s / 39 MB | 0.11 s / 51 MB | 0.10 s / 32 MB | 0.26 s / 39 MB |
+| stdlib | 0.24 s / 53 MB | 0.23 s / 51 MB | 0.22 s / 42 MB | 0.55 s / 49 MB |
+| self | 5.78 s / 531 MB | 5.72 s / 837 MB | 4.98 s / 467 MB | 12.4 s / 477 MB |
+
+`RT_CENSUS=1` (heap census at exit, after a major collection) on `self`:
+
+| | before | after |
+| --- | ---: | ---: |
+| live heap | 214 MB, 6.82M objects | 170 MB, 6.53M objects |
+| same data in OCaml's representation (estimate) | 154 MB | 142 MB |
+| enum values (2.0M) | 54 MB (a tag slot each) | 39 MB |
+| `core.Pos` (753k) | 23 MB (32 B) | 17 MB (24 B, Int fields packed) |
+| arrays (946k, 511k of them empty) | 29 + 22 MB data (32 B headers, slack 9 MB) | 22 + 16 MB (24 B, slack 3 MB) |
+| strings | 410k, 13.6 MB (32.8k distinct) | 120k, 5.5 MB |
+| remembered set (malloc) | 16 MB (128 MB with a 16 MB nursery) | 0.2 MB |
+
+What it was, in order of effect on the peak:
+
+- **GC memory policy** (837 → 565 MB, and −0.8 s): the from-space of the
+  copying major collection stayed resident and the to-space was faulted in
+  up to the from-space's size; both are now returned or faulted in on
+  demand. `Array.insert` at the front of large arrays (the port's
+  translation of `x :: l`) re-recorded every young element in the
+  remembered set at each call (700M slot checks, 16M entries); a long
+  range now remembers the object once.
+- **Representation** (565 → 467 MB): no enum tag slot, no array capacity
+  slot, exact array literals and growth from 2, Int/Bool fields packed two
+  per slot, identifiers interned per file by the lexer.
+- Not kept: a GC that deduplicates promoted strings (−3 MB more live) breaks
+  HXB conformance, because string identity is observable in the port
+  (`StrTools.physNeq`); a larger nursery (8 MB: −14 MB on `self`, +8 MB on
+  hello and stdlib); a different old-space limit (128 MB first / 2.5× live
+  instead of 256 MB / 3×: 436 MB on `self`, tuned to one workload).
+
+With a copying old generation the peak is at least the old space at a
+major collection plus what survives it. Simulated with an experimental
+limit factor (old space limit = f × live after a major; not committed):
+
+| f | majors | major time | peak RSS (copying) | old space before a major (≈ peak in place) |
+| ---: | ---: | ---: | ---: | ---: |
+| 3 (default) | 1 | 0.26 s | 467 MB | 415 MB (at exit) |
+| 2 | 2 | 0.49 s | 562 MB | 360 MB |
+| 1.5 | 3 | 0.73 s | 476 MB | 275 MB |
+
+A mark-sweep or mark-compact old generation (planned after the OS threads
+work) would bring the peak down to the last column plus the nursery and
+binary (~30 MB): about 390 MB at f = 2 or 305 MB at f = 1.5, for 0.25–0.5 s
+more collection time if marking costs what copying does.
+
+## hxc: clang vs gcc (2026-10-09)
+
+The same generated C of the port (`bin/backend/hih/prog.c`), built with
+`-w -fno-strict-aliasing` and each optimizer, self-compile CPU time
+(`/tmp/claude-0/cpu.py -n 5`, two alternating rounds, load 2-3):
+
+| Build | build time | binary | self CPU (round 1 / 2) | stdlib | hello | peak RSS |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| gcc 13.3 -O2 | 179 s | 11.5 MB | 4.57 / 4.71 s | 0.20 s | 0.12 s | 773 MB |
+| clang 18.1 -O2 | 151 s | 12.1 MB | 4.41 / 4.19 s | 0.19 s | 0.12 s | 773 MB |
+| clang 18.1 -O3 | 151 s | 12.4 MB | 4.36 / 4.37 s | | | 774 MB |
+
+clang -O2 is 4-10% faster on the large workload and builds faster; -O3 adds
+nothing. The clang build passes conformance (279 + 7 expected failures, macro
+cases 66/66). The haxelib package (`backend/haxelib/hxc/Build.hx`) now
+prefers clang when it is installed. cosmocc is GCC-based, so the portable
+builds are unaffected.
+
 ## All runners, CPU time and memory (2026-10-09, evening)
 
 `bench/run.py` now also runs the port on the reference's Eval (`eval-source`:
