@@ -9,6 +9,7 @@ package core.ds;
 class Stream<T> {
 	final produce:Int->Null<T>;
 	final buffered:Array<T> = [];
+	var head = 0; // buffered[head] is the next token: junk advances it instead of shifting
 	var consumed = 0;
 	var produced = 0;
 	var ended = false;
@@ -16,7 +17,7 @@ class Stream<T> {
 	// Stream.from and Stream.of_list: a generic class has no statics, construct with new.
 	public function count():Int return consumed;
 	inline function fill(n:Int):Void {
-		while (!ended && buffered.length < n) {
+		while (!ended && buffered.length - head < n) {
 			var value = produce(produced);
 			if (value == null) ended = true;
 			else { buffered.push(value); produced++; }
@@ -24,15 +25,20 @@ class Stream<T> {
 	}
 	public function npeek(n:Int):Array<T> {
 		fill(n);
-		return buffered.slice(0, n);
+		return buffered.slice(head, head + n);
 	}
 	// Without the npeek copy: the parser peeks at every token.
 	public function peek():Null<T> {
 		fill(1);
-		return buffered.length > 0 ? buffered[0] : null;
+		return buffered.length > head ? buffered[head] : null;
 	}
 	public function junk():Void {
-		if (peek() != null) { buffered.shift(); consumed++; }
+		if (peek() != null) {
+			head++;
+			consumed++;
+			if (head == buffered.length) { buffered.resize(0); head = 0; }
+			else if (head >= 64) { buffered.splice(0, head); head = 0; }
+		}
 	}
 	public function next():T {
 		var value = peek();
