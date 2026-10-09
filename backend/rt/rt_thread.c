@@ -58,6 +58,7 @@ int32_t hxc_NativeThread_park(double timeout) {
 }
 void hxc_NativeThread_unpark(int32_t id) { (void)id; }
 void hxc_NativeThread_yield(void) {}
+void rt_run_main(void (*body)(void)) { body(); }
 
 #else
 
@@ -459,6 +460,34 @@ int rt_wait_fd(int fd, int write, double timeout) {
 	p.events = write ? POLLOUT : POLLIN;
 	p.revents = 0;
 	return rt_wait_fds(&p, 1, timeout);
+}
+
+
+// The program's main runs on a reserved stack of RT_STACK_MB (default 1024)
+// MB, committed as touched, with a guard page: OCaml 5, which the reference
+// compiler is built with, lets the main fiber's stack grow to 1 GB, and deep
+// recursion in the port (the typer, Eval-interpreted code, the hxc regular
+// expression engine) needs more than the default 8 MB process stack.
+static ucontext_t run_main_ret, run_main_ctx;
+static void (*run_main_body)(void);
+static void run_main_entry(void) { run_main_body(); }
+
+void rt_run_main(void (*body)(void)) {
+	const char *e = getenv("RT_STACK_MB");
+	size_t bytes = (size_t)(e ? atoi(e) : 1024) << 20;
+	char *stack = bytes ? (char *)map_stack(bytes) : NULL;
+	if (!stack) {
+		body();
+		return;
+	}
+	mprotect(stack, (size_t)sysconf(_SC_PAGESIZE), PROT_NONE);
+	run_main_body = body;
+	getcontext(&run_main_ctx);
+	run_main_ctx.uc_stack.ss_sp = stack;
+	run_main_ctx.uc_stack.ss_size = bytes;
+	run_main_ctx.uc_link = &run_main_ret;
+	makecontext(&run_main_ctx, run_main_entry, 0);
+	swapcontext(&run_main_ret, &run_main_ctx);
 }
 
 #endif

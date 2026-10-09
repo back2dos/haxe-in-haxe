@@ -378,14 +378,15 @@ class EmitC {
 		}
 		b.add('static rt_icache IC[${nextCache + 1}];\n\n');
 		b.add(code.toString());
-		b.add('int main(int argc, char **argv) {\n\trt_init(${p.globals.length}, argc, argv);\n');
+		b.add('static void hx_main_body(void) {\n');
 		for (i in 0...p.globals.length) {
 			var c = p.globals[i].init;
 			if (c != null) b.add('\trt_globals[$i] = rt_alloc(1, ${c.tindex}, K_OBJ);\n\tFI(rt_globals[$i], 0) = ${c.tag};\n');
 		}
 		for (f in p.inits)
 			b.add('\t${cname(f)}();\n');
-		b.add('\t${cname(p.main)}();\n\treturn 0;\n}\n');
+		b.add('\t${cname(p.main)}();\n}\n');
+		b.add('int main(int argc, char **argv) {\n\trt_init(${p.globals.length}, argc, argv);\n\trt_run_main(hx_main_body);\n\treturn 0;\n}\n');
 		return b.toString();
 	}
 

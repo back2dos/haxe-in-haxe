@@ -399,7 +399,21 @@ void rt_init(int ng, int argc, char **argv) {
 	old_end = old_start + ((size_t)(om ? atoi(om) : 256) << 20); // fewer major collections early on
 	size_t stack_slots = 16u << 20;
 #endif
+#ifdef __EMSCRIPTEN__
 	rt_stack_base = rt_sp = (void **)calloc(stack_slots, sizeof(void *));
+#else
+	// reserved, committed as touched, with a guard page above it: as deep as
+	// the main C stack (rt_run_main)
+	(void)stack_slots;
+	size_t sbytes = (size_t)1 << 30, page = (size_t)sysconf(_SC_PAGESIZE);
+	char *sstack = mmap(NULL, sbytes + page, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
+	if (sstack == MAP_FAILED) {
+		fputs("cannot reserve the shadow stack\n", stderr);
+		exit(2);
+	}
+	mprotect(sstack + sbytes, page, PROT_NONE);
+	rt_stack_base = rt_sp = (void **)sstack;
+#endif
 	nglobals = ng;
 	rt_globals = (void **)calloc(ng + 1, sizeof(void *));
 	for (int i = SMALL_MIN; i <= SMALL_MAX; i++) {
