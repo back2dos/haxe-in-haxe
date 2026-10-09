@@ -19,6 +19,63 @@ HL_STATIC="libhl.a fmt.o dxt.o sha1.o" sh bench/build.sh hlc   # static link
 LD_LIBRARY_PATH=/path/to/patched/hashlink HAXE_REFERENCE=haxe/haxe python3 bench/run.py -n 7
 ```
 
+## Results — 2026-10-09 early (second performance pass)
+
+Same container and build as below. Median of 5 runs (3 for memory); every
+archive byte-identical. The machine's speed drifts by up to 10% over an hour,
+so changes were compared in interleaved A/B runs.
+
+| Workload | reference | HL/C | ratio | night pass |
+| --- | ---: | ---: | ---: | ---: |
+| self, `-D disable-parallelism` | 3.98s / 409 MB | 5.62s / 1380 MB | 1.4× | 6.73s (1.7×) |
+| self, parallel | 2.67s / 465 MB | 4.25s / 1716 MB | 1.6× | 5.55s (2.0×) |
+| stdlib | 0.21s | 0.30s | 1.4× | |
+| hello | 0.12s | 0.15s | 1.3× | |
+
+| Eval (`bench/interp.py`) | reference Eval | port Eval (HL/C) | ratio | night pass |
+| --- | ---: | ---: | ---: | ---: |
+| Fib | 0.32s | 0.48s | 1.5× | 0.50s |
+| NBody | 0.53s | 0.82s | 1.5× | 0.90s |
+| Strings | 0.29s | 0.31s | 1.1× | 0.38s |
+| Objects | 1.39s | 1.82s | 1.3× | 2.08s |
+| Json | 0.16s | 0.23s | 1.4× | 0.26s |
+
+What changed, roughly by effect:
+
+- **Free-run threshold in libhl.** After a sweep the non-moving heap is
+  fragmented, and about one allocation in ten refilled its thread's slice
+  from a short free run. Runs under 256 bytes now wait for the next sweep
+  (8% on `self`, about +200 MB peak).
+- **Persistent workers (HL/C).** `parallelFor` started threads per call;
+  each start registers with the GC and blocks the caller, and the analyzer's
+  nested per-class loops started ~1400 of them. Workers are now kept for the
+  process (parallel `self` 5.55s → 4.95s). The HashLink JIT keeps call-scoped
+  threads: persistent ones crashed intermittently there, in a way HL/C does
+  not reproduce.
+- **Quadratic translations of persistent structures.** `captured_vars`
+  copied its variable maps at every block (OCaml PMap snapshots are free):
+  `core.ds.ScopedIntMap` undoes changes instead. The matcher hash-consed
+  decision trees by linear search (upstream: a Hashtbl) and filtered the
+  constructor list once per case.
+- **Stack captures.** Remaining hot `throw`s of control-flow exceptions
+  (`unify_min`, the matcher's extractor probe, `Invalid_expr`) use
+  `FastThrow`; each native throw unwound and recorded the typer's deep stack.
+- **Smaller runtime fixes.** libhl allocated method-less classes (Eval's
+  `Env`) through `hl_get_obj_proto` every time, and gave every `[]` its own
+  zero-length native array; Eval call sites cast the forced `AtomicLazy`
+  back from `Dynamic` on every call; `Texpr` walkers with a typed argument
+  passed through a generic parameter got a wrapper closure per call.
+
+Tried and not kept: a generational GC on this workload (live data is larger
+here than on `stdlib`, but a 32–128 MB nursery still made `self` 35–60%
+slower), bigger allocation slices, skipping the zeroing of pointer-free
+slices, populating GC chunks at `mmap`, `-O3`, lazily allocated unification
+stacks, and transparent huge pages (synchronous compaction here).
+
+In the parallel run the typer, which upstream also runs on one thread, is
+now most of the difference: 1.9s against 1.2s, while filters, analyzer,
+parsing and HXB generation are within 10–25% of the reference or faster.
+
 ## Results — 2026-10-08 night (performance pass)
 
 Same container; HL/C linked statically against the patched libhl
