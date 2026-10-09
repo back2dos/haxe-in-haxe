@@ -476,6 +476,30 @@ the OCaml translation. Sizes are the growth per copy.
   functions) because of the shadow stack, ANF temporaries and inlined
   allocation.
 
+### 2.10 Other routes (measured: Go, tcc)
+
+| | Bench / retain (wall) | compile, 800 functions | native code per function copy | exceptions (`Exc`) | wasm |
+| --- | ---: | ---: | ---: | ---: | --- |
+| our C, gcc -O2 | 0.32 / 0.53s | 11.7s | 3.4 KB | 0.027s | Emscripten, linear memory |
+| our C, **tcc** | 0.55 / 0.90s | **0.45s** | 8.8 KB | 0.078s | — |
+| OCaml (ocamlopt) | 0.28 / 0.44s | 1.3s | 4.1–6.1 KB | **0.020s** | wasm_of_ocaml (`Int32`) |
+| Go 1.24 (`backend/go/bench.go`) | 0.30 / 0.43s (CPU 0.38 / 0.61s, concurrent GC) | ~1.0s | 3.5 KB (1.4 MB runtime) | 0.17s (panic/recover) | 2.5 MB module before any code; 0.79 / 0.99s in Wasmtime |
+
+- **tcc** compiles C 26× faster than gcc -O2, and its code is ~1.7× slower.
+  That makes it the development compiler, with gcc/clang for release
+  builds. `backend/rt` builds with tcc: `setjmp` and a bit-scan fallback
+  replace two GCC builtins.
+- **Go** compiles fast and its code is fast natively. Its wasm output is
+  heavy (its runtime and goroutine machinery in linear memory). A generator
+  would also have to thread `break`/`continue`/`return` out of
+  closure-based `try` blocks, and Go has no inheritance.
+- **Not measured:**
+  - QBE (a tiny optimizing backend, fast to compile; no GC support or wasm);
+  - Cranelift as a direct backend (§2.5);
+  - Chez Scheme (fast compiler, good GC, no wasm);
+  - TinyGo (smaller Go wasm);
+  - JVM + native-image (slow builds).
+
 ### 2.7 Output format of the wasm emitters
 
 - **C/linear-memory route:** the wasm comes from Emscripten compiling the C

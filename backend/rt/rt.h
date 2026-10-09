@@ -70,7 +70,7 @@ static inline void rt_set_ptr(void *obj, void **slot, void *val) {
 }
 
 // Exceptions: __builtin_setjmp handlers chained through the C stack.
-#ifdef __EMSCRIPTEN__
+#if defined(__EMSCRIPTEN__) || defined(__TINYC__) // no __builtin_setjmp
 #include <setjmp.h>
 #define RT_SETJMP(b) setjmp(b)
 #define RT_LONGJMP(b) longjmp(b, 1)

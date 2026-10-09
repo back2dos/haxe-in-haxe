@@ -4,6 +4,17 @@
 #include <stdlib.h>
 #include <sys/mman.h>
 
+#ifdef __TINYC__ // tcc, for fast development builds: no bit-scan builtin
+static inline int __builtin_ctzll(uint64_t m) {
+	int i = 0;
+	while (!(m & 1)) {
+		m >>= 1;
+		i++;
+	}
+	return i;
+}
+#endif
+
 char *rt_young_start, *rt_young_ptr, *rt_young_limit;
 static char *old_start, *old_ptr, *old_end;
 void **rt_sp;
