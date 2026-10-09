@@ -1,7 +1,7 @@
 # Conformance cases for test/conformance.py.
 #   direct <name> <class-path> <main>
 #   module <name> <class-path> <module>     (bare module root, no --main)
-#   hxml   <name> <project-dir> <hxml> <main>
+#   hxml   <name> <project-dir> <hxml> [argument ...]
 # Cases whose reference invocation fails are expected-failure cases: the port
 # must reject them as well. Their reasons are recorded in upstream-hxb-exclusions.md.
 
