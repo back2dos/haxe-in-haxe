@@ -22,6 +22,29 @@ byte-identical. The debugger (`evalDebug*.ml`), libuv (`evalLuv.ml`) and mbedtls
 `src/macros/PORTING.md`. The table below still lists them as macro-milestone
 candidates.
 
+Status 2026-10-09: the compilation server, its caches and haxelib integration
+are translated: `compiler/server/*.ml` in `src/compiler/server/`,
+`compilationCache.ml`, `pipeThings.ml` and `tasks.ml` in `src/compiler/`,
+`context/commonCache.ml` and `typing/typeloadCacheHook.ml`, the client and
+server entry of `haxe.ml` (`--connect`, `--wait`, `--server-connect`) in
+`src/haxe/Main.hx`, and `add_libs` (`-L`/`--library`, which runs `haxelib
+path`) with the `Expand` markers of `args.ml` in `src/compiler/HighLevel.hx`.
+As upstream, the batch compiler also runs through `Server.setup_server_context`
+and the cache hooks. Two parts are missing:
+
+- Restoring a module from the binary (HXB) module cache needs
+  `compiler/hxb/hxbReader.ml` (HXB-input milestone). Until it lands,
+  `ServerCache.createHxbReader` fails explicitly ("Cannot restore ... from the
+  compilation server's HXB cache"); `HxbReaderApiServer` is the translated
+  `hxb_reader_api_server`. With `-D disable-hxb-cache` the server keeps typed
+  modules in memory and works fully.
+- Display requests (`--display`, JSON-RPC) fail with "Display services
+  (--display) are not ported yet" at `Server.create_request_scope`.
+
+The pinned upstream no longer implements `--wait stdio` (it reports "Invalid
+host/port"); the port behaves the same. The host socket API is IPv4 only. See
+`test/TESTING.md` for the server and haxelib results.
+
 ## Translation snapshot
 
 **The pending counterpart batch was completed in `2fcd217`.** This inventory records file coverage,
@@ -35,8 +58,8 @@ compiler pipeline is included separately by `compile-all.hxml`.
 - 0 additional candidate ML files have no corresponding HX file yet.
 
 This follow-up added 59 in-scope counterparts from the previous 69 pending
-candidates. The other ten are explicitly deferred below. `HighLevel` covers the
-batch entry path; its haxelib-only `add_libs` implementation remains deferred.
+candidates. The other ten are explicitly deferred below. `HighLevel` now also
+implements haxelib `add_libs` (2026-10-09).
 
 The candidate list is deliberately conservative, not a proven minimal dependency
 closure. Translate the source-only HXB path, including its shared filtering and
@@ -96,9 +119,9 @@ conformance, or completion of the pre-existing HXB writer. The subsequent runtim
 | `compiler/args.ml` | `src/compiler/Args.hx` | Existing, unaudited |
 | `compiler/compiler.ml` | `src/compiler/Compiler.hx` | Draft translated |
 | `compiler/generate.ml` | `src/compiler/Generate.hx` | Draft translated |
-| `compiler/haxe.ml` | `src/haxe/Main.hx` | Existing, unaudited |
+| `compiler/haxe.ml` | `src/haxe/Main.hx` | Translated, including client/server entry |
 | `compiler/helper.ml` | `src/compiler/Helper.hx` | Existing, unaudited |
-| `compiler/highLevel.ml` | `src/compiler/HighLevel.hx` | Batch entry draft; haxelib add_libs deferred |
+| `compiler/highLevel.ml` | `src/compiler/HighLevel.hx` | Translated, including haxelib `add_libs` |
 | `compiler/hxb/hxbData.ml` | `src/compiler/hxb/HxbData.hx` | Existing, unaudited |
 | `compiler/hxb/hxbWriter.ml` | `src/compiler/hxb/HxbWriter.hx` | Existing, unaudited |
 | `compiler/hxb/hxbWriterConfig.ml` | `src/compiler/hxb/HxbWriterConfig.hx` | Existing, unaudited |
@@ -256,6 +279,16 @@ conformance, or completion of the pre-existing HXB writer. The subsequent runtim
 | `core/display/displayPosition.ml` | `src/core/display/DisplayPosition.hx` | Shared position state |
 | `core/display/javadoc.ml` | `src/core/display/Javadoc.hx` | Documentation parsing |
 | `codegen/genxml.ml` | `src/codegen/Genxml.hx` | RTTI serializer |
+| `compiler/compilationCache.ml` | `src/compiler/CompilationCache.hx` | Server cache |
+| `compiler/pipeThings.ml` | `src/compiler/PipeThings.hx` | Client/server transport (host streams, see header) |
+| `compiler/tasks.ml` | `src/compiler/Tasks.hx` | Server maintenance tasks |
+| `compiler/server/server.ml` | `src/compiler/server/Server.hx` | Server loop, `--connect`, `--server-connect` |
+| `compiler/server/serverCache.ml` | `src/compiler/server/ServerCache.hx` | Module cache; HXB-cache restore needs `hxbReader.ml` |
+| `compiler/server/serverCompilationContext.ml` | `src/compiler/server/ServerCompilationContext.hx` | Server context |
+| `compiler/server/serverConfig.ml` | `src/compiler/server/ServerConfig.hx` | Server configuration |
+| `compiler/server/serverMessage.ml` | `src/compiler/server/ServerMessage.hx` | Verbose server messages |
+| `context/commonCache.ml` | `src/context/CommonCache.hx` | Cache contexts and signatures |
+| `typing/typeloadCacheHook.ml` | `src/typing/TypeloadCacheHook.hx` | Module cache hook, fake modules |
 
 ## Deferred or scope-review areas
 
@@ -268,21 +301,12 @@ A scope-review entry is not a blanket exclusion of shared batch-compiler helpers
 | `codegen/jClass.ml` | Other target/library support |
 | `codegen/javaModern.ml` | Other target/library support |
 | `codegen/swfLoader.ml` | Other target/library support |
-| `compiler/compilationCache.ml` | Cache/server integration; shared batch pieces may need extraction |
 | `compiler/displayOutput.ml` | Display/service area; batch-used helpers and shared declarations need scope review |
 | `compiler/displayProcessing.ml` | Display/service area; batch-used helpers and shared declarations need scope review |
 | `compiler/displayProcessingGlobals.ml` | Display/service area; batch-used helpers and shared declarations need scope review |
 | `compiler/hxb/hxbLib.ml` | HXB input milestone |
 | `compiler/hxb/hxbReader.ml` | HXB input milestone |
 | `compiler/hxb/hxbReaderApi.ml` | HXB input milestone |
-| `compiler/pipeThings.ml` | Server/client pipe and socket transport |
-| `compiler/server/server.ml` | Server milestone |
-| `compiler/server/serverCache.ml` | Server milestone |
-| `compiler/server/serverCompilationContext.ml` | Server milestone |
-| `compiler/server/serverConfig.ml` | Server milestone |
-| `compiler/server/serverMessage.ml` | Server milestone |
-| `compiler/tasks.ml` | Server maintenance task scheduling |
-| `context/commonCache.ml` | Cache/server integration; shared batch pieces may need extraction |
 | `context/display/diagnostics.ml` | Display/service area; batch-used helpers and shared declarations need scope review |
 | `context/display/diagnosticsPrinter.ml` | Display/service area; batch-used helpers and shared declarations need scope review |
 | `context/display/display.ml` | Display/service area; batch-used helpers and shared declarations need scope review |
@@ -398,7 +422,6 @@ A scope-review entry is not a blanket exclusion of shared batch-compiler helpers
 | `macro/macroApi.ml` | Macro runtime/API milestone |
 | `prebuild.ml` | OCaml build/runtime adapter; no mechanical compiler-module port |
 | `typing/macroContext.ml` | Macro context milestone |
-| `typing/typeloadCacheHook.ml` | Cache/server integration; shared batch pieces may need extraction |
 | `typing/typerDisplay.ml` | Display/service area; batch-used helpers and shared declarations need scope review |
 
 ## Additional draft support files

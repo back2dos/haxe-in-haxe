@@ -2,6 +2,58 @@
 
 Earlier checkpoints are in the Git history of this file.
 
+## Compilation server and haxelib — 2026-10-09
+
+The port runs as a compilation server (`--wait <port>`, `--server-connect`)
+and as its client (`--connect`), with the server caches of
+`compiler/server/*.ml`, and expands `-L`/`--library` through `haxelib path`.
+`test/server.py` sends the same requests to a reference server and a port
+server; `test/haxelib.py` uses a local haxelib repository (no network).
+
+```sh
+HAXE_REFERENCE=haxe/haxe python3 test/server.py -j 2
+HAXE_REFERENCE=haxe/haxe python3 test/server.py --scenario cases --cases test/conformance-macro-cases.txt -j 2
+HAXE_REFERENCE=haxe/haxe python3 test/server.py --scenario cases --hxb-cache --fresh --rounds 1 -j 2
+HAXE_REFERENCE=haxe/haxe python3 test/haxelib.py --server
+```
+
+| Check (same exit code, client stdout/stderr, HXB members and payloads) | Result |
+| --- | --- |
+| Conformance cases, two rounds each on shared servers (`-D disable-hxb-cache`) | 564/564 (282 cases) |
+| Macro conformance cases, two rounds each | 132/132 (66 cases) |
+| Edit sequence (edit, add, syntax error, fix, remove, touch) | 8/8 |
+| Verbose server logs of the edit sequence (reusing/skipping/parsed/directories) | identical (628 lines) |
+| `misc`: `--interp` output, stdin forwarding, `--cmd`, macro output, errors, `--next` | 10/10 |
+| `--server-connect` (length-prefixed requests, exit on disconnect) | 4/4 |
+| Default HXB cache, first compilation of a fresh server | 282/282 |
+| haxelib: batch and server (`-L`, `--library`, `-lib`, dependencies, several libraries, `--haxelib-global`, missing library, hxml) | 14/14 |
+
+The batch lanes stay green: `test/conformance.py` 275/275 with 7/7 expected
+failures, the macro cases 66/66, `test/interp.py` 270 identical with 2 known
+host differences (`process-nonexistent`, exit 127 vs 1), and the bootstrap,
+all-module and unit builds.
+
+Known limits:
+
+- Default HXB module cache: from the second compilation on, the server
+  restores modules from the HXB chunks it cached, which needs the HXB reader
+  (`hxbReader.ml`, HXB-input milestone). The port fails explicitly there
+  ("Cannot restore ... from the compilation server's HXB cache"). With
+  `-D disable-hxb-cache` the server reuses typed modules from memory.
+- Display requests (`--display`) fail explicitly until display is ported.
+- The pinned upstream rejects `--wait stdio` ("Invalid host/port"); so does
+  the port. The host socket API is IPv4 only: an IPv6 address fails with a
+  Failure, where the reference fails with `EAFNOSUPPORT` in this environment.
+- File times have one-second resolution on HashLink, so an edit within the
+  same second as the previous compilation is not seen (upstream uses
+  sub-second times).
+
+Fixes found with these tests: class/field metadata saved for `cl_restore`
+must be copied (DCE adds `@:keep` in place), `ClassPaths.relative_path` must
+not resolve symbolic links, `Path.find_directories` conses like upstream,
+`m_deps` copies where upstream shares a persistent map, and the server's
+stdout/stderr pipes buffer like OCaml channels (output order with `--cmd`).
+
 ## Execution: `--interp` and `--run` — 2026-10-08
 
 The port now executes programs on its own Eval (`Generate.generate` →
