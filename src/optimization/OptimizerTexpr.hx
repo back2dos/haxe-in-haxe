@@ -55,7 +55,7 @@ class OptimizerTexpr {
 		inline function isNumeric(t:T):Bool return switch TypeOps.follow(t) { case TAbstract({aPath:{pack:[], name:"Float" | "Int"}}, _): true; case _: false; };
 		function constant(c:TConstant):TExpr return TypeOps.mk(TConst(c), e.etype, e.epos);
 		inline function checkFloat(fn:Float->Float->Float, f1:Float, f2:Float):TExpr {
-			var f = fn(f1, f2); var fstr = Numeric.floatRepr(f);
+			var f = fn(f1, f2); var fstr = Numeric.floatRepres(f);
 			return Math.isFinite(f) && core.ds.OcamlFloat.ofString(fstr) == f ? constant(TFloat(fstr)) : e;
 		}
 		inline function comparison(a:Float, b:Float):TExpr {
@@ -141,7 +141,7 @@ class OptimizerTexpr {
 			case [Neg, TConst(TInt(i))]: TypeOps.mk(TConst(TInt((-i) | 0)), e.etype, e.epos); // Int32.neg wraps
 			case [NegBits, TConst(TInt(i))]: TypeOps.mk(TConst(TInt(~i)), e.etype, e.epos);
 			case [Neg, TConst(TFloat(f))]:
-				var v = 0.0 - core.ds.OcamlFloat.ofString(f); var str = Numeric.floatRepr(v);
+				var v = 0.0 - core.ds.OcamlFloat.ofString(f); var str = Numeric.floatRepres(v);
 				core.ds.OcamlFloat.ofString(str) == v ? TypeOps.mk(TConst(TFloat(str)), e.etype, e.epos) : e;
 			case _: e;
 		};

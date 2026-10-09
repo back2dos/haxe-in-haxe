@@ -241,7 +241,7 @@ class MacroApi {
 		else if (f != f)
 			return {expr: efield(math, "NaN"), pos: p};
 		else
-			return {expr: EConst(Constant.Float(core.Numeric.floatRepr(f), null)), pos: p};
+			return {expr: EConst(Constant.Float(core.Numeric.floatRepres(f), null)), pos: p};
 	}
 }
 

@@ -12,12 +12,6 @@ class Numeric {
 		return value + ".";
 	}
 
-	public static function floatRepr(value:Float):String {
-		if (Math.isNaN(value)) return "nan";
-		if (!Math.isFinite(value)) return value < 0.0 ? "neg_infinity" : "infinity";
-		return validFloatLexeme(Std.string(value));
-	}
-
 	/** OCaml Stdlib `string_of_float`: `valid_float_lexeme (sprintf "%.12g" f)`. **/
 	public static function stringOfFloat(f:Float):String {
 		if (Math.isNaN(f)) return "nan";
