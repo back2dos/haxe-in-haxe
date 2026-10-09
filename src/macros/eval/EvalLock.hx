@@ -81,7 +81,8 @@ class EvalLock {
 			guard.release();
 			return;
 		}
-		if (last == null) first = w else last.next = w;
+		if (last == null) first = w
+		else last.next = w;
 		last = w;
 		guard.release();
 		// `leave` hands the lock over by releasing `w.lock`

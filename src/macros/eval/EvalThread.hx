@@ -118,7 +118,8 @@ class EvalThread {
 		var t = sys.thread.Thread.create(() -> {
 			startSem.acquire();
 			EvalLock.enter();
-			try run(ctx, tthread, f) catch (e:Dynamic) {
+			try run(ctx, tthread, f)
+			catch (e:Dynamic) {
 				EvalLock.leave();
 				finished.release();
 				throw e;
