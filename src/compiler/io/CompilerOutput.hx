@@ -16,6 +16,18 @@ class CompilerOutput {
  public static function sendTimerReport(io:CompilerIoData,timerCtx:Dynamic):Void {
   var buf=new StringBuf();Timer.reportTimes(timerCtx,function(s) buf.add(s+"\n"));try CompilerIo.writeErr(io,buf.toString()) catch (_:Dynamic) {}
  }
+ public static function createServerResultHandler(io:CompilerIoData):ResultHandler {
+  function sendMessage(sev:core.Message.MessageSeverity,output:String):Void switch sev {
+   // Non-errors go through write_out (the \x01-prefixed prints channel); see compilerOutput.ml.
+   case Error:CompilerIo.writeErr(io,output+"\n");compiler.server.ServerMessage.message(output);
+   case Warning|Information|Hint:CompilerIo.writeOut(io,output+"\n");
+  };
+  return {sendResult:function(_) {},sendResultRaise:function(_):Dynamic throw new core.ds.Failure("send_result_raise called in non-JSON-RPC mode"),sendError:function(errors) {for (je in errors) CompilerIo.writeErr(io,extractErrorMessage(je)+"\n");},sendErrorRaise:function(_):Dynamic throw new core.ds.Failure("send_error_raise called in non-JSON-RPC mode"),
+   flushMessages:function(hasError,com) {var messages=com.partScope.messages.copy();messages.reverse();MessageReporting.displayMessagesFrom(com.defines,messages,function() {hasError=true;com.partScope.hasError=true;},sendMessage);
+    com.sctx.wasCompilation=com.display.dmsFullTyping;
+    if (hasError) {com.timerCtx.measureTimes=No;CompilerIo.signalError(io);}else if (com.timerCtx.measureTimes==Yes) sendTimerReport(io,com.timerCtx);
+   },setCom:function(_) return NoCompletionPointFound};
+ }
  public static function createCliResultHandler(io:CompilerIoData):ResultHandler {
   function sendMessage(sev:core.Message.MessageSeverity,output:String):Void switch sev {case Information:CompilerIo.writeOut(io,output+"\n");case Warning|Error|Hint:CompilerIo.writeErr(io,output+"\n");};
   return {sendResult:function(_) {},sendResultRaise:function(_):Dynamic throw "send_result_raise called in non-JSON-RPC mode",sendError:function(errors) {for (je in errors) CompilerIo.writeErr(io,extractErrorMessage(je)+"\n");},sendErrorRaise:function(_):Dynamic throw "send_error_raise called in non-JSON-RPC mode",

@@ -125,6 +125,7 @@ class ClassPaths {
 	}
 
 	public function relativePath(file:String):String {
+		// Path.get_full_path: absolute and normalized, without resolving symbolic links.
 		var fullPath = normalize(core.Path.getFullPath(file));
 		var lowerFullPath = fullPath.toLowerCase();
 		for (path in paths) {
