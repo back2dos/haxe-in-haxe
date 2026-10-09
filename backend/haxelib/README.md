@@ -45,7 +45,7 @@ the expected build.
 
 | Define | |
 | --- | --- |
-| `-D hxc.cc=<command>` | C compiler. Default `$HXC_CC`, else the first of `cc`, `gcc`, `clang`, `tcc` (tcc compiles fastest, gcc/clang `-O2` run fastest). |
+| `-D hxc.cc=<command>` | C compiler. Default `$HXC_CC`, else the first of `clang`, `cc`, `gcc`, `tcc` (tcc compiles fastest; clang `-O2` runs fastest, slightly ahead of gcc). |
 | `-D hxc.static` | Fully static, portable binary built with cosmocc (downloaded once into `~/.hxc/cosmocc`, about 420 MB unpacked; `HXC_COSMOCC_URL` overrides the source; `haxelib run hxc setup-cosmocc` downloads it now). The result runs on Linux, macOS, Windows and the BSDs. |
 | `-D hxc.debug` | `-O0 -g` instead of `-O2`. |
 | `-D hxc.c-only` | Stop after writing `<out>.c`. |

@@ -19,6 +19,24 @@ HL_STATIC="libhl.a fmt.o dxt.o sha1.o" sh bench/build.sh hlc   # static link
 LD_LIBRARY_PATH=/path/to/patched/hashlink HAXE_REFERENCE=haxe/haxe python3 bench/run.py -n 7
 ```
 
+## hxc: clang vs gcc (2026-10-09)
+
+The same generated C of the port (`bin/backend/hih/prog.c`), built with
+`-w -fno-strict-aliasing` and each optimizer, self-compile CPU time
+(`/tmp/claude-0/cpu.py -n 5`, two alternating rounds, load 2-3):
+
+| Build | build time | binary | self CPU (round 1 / 2) | stdlib | hello | peak RSS |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| gcc 13.3 -O2 | 179 s | 11.5 MB | 4.57 / 4.71 s | 0.20 s | 0.12 s | 773 MB |
+| clang 18.1 -O2 | 151 s | 12.1 MB | 4.41 / 4.19 s | 0.19 s | 0.12 s | 773 MB |
+| clang 18.1 -O3 | 151 s | 12.4 MB | 4.36 / 4.37 s | | | 774 MB |
+
+clang -O2 is 4-10% faster on the large workload and builds faster; -O3 adds
+nothing. The clang build passes conformance (279 + 7 expected failures, macro
+cases 66/66). The haxelib package (`backend/haxelib/hxc/Build.hx`) now
+prefers clang when it is installed. cosmocc is GCC-based, so the portable
+builds are unaffected.
+
 ## All runners, CPU time and memory (2026-10-09, evening)
 
 `bench/run.py` now also runs the port on the reference's Eval (`eval-source`:
