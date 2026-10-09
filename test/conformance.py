@@ -11,6 +11,12 @@ For every case in test/conformance-cases.txt:
    class path.
 5. With --eval, the port executed from Eval HXB and from source on Eval must
    produce the same member set and payloads.
+6. With --hxb-lib, both compilers load every module of the reference archive
+   back through --hxb-lib (without the case's source class path) and write
+   it again; the two outputs must conform.
+
+`hxblib` cases first build a library archive with the reference and compile
+the case against it with --hxb-lib (HXB library input).
 
 A case the reference rejects is an expected-failure case: the port must reject
 it as well. Both invocations use -D disable-parallelism: the reference
@@ -25,7 +31,7 @@ example "node bin/bench/hih.js" from bench/build.sh.
 reference and from source on Eval, and requires both to reproduce the
 HashLink output exactly (Eval-HXB host execution parity).
 
-Usage: HAXE_REFERENCE=haxe/haxe python3 test/conformance.py [-j N] [--eval] [name-substring ...]
+Usage: HAXE_REFERENCE=haxe/haxe python3 test/conformance.py [-j N] [--eval] [--hxb-lib] [name-substring ...]
 """
 import argparse, concurrent.futures, os, pathlib, shlex, shutil, subprocess, sys, tempfile, time, zipfile
 
@@ -49,6 +55,12 @@ def parse_cases(cases_file):
             cases.append(dict(kind=kind, name=name, cwd=ROOT, args=["-cp", parts[2], "--main", parts[3]]))
         elif kind == "module":
             cases.append(dict(kind=kind, name=name, cwd=ROOT, args=["-cp", parts[2], parts[3]]))
+        elif kind == "hxblib":
+            # hxblib <name> <dir> "<library arguments>" "<arguments>": the
+            # reference compiles the library arguments to an HXB archive, and
+            # both compilers compile the arguments against it with --hxb-lib.
+            # As for hxml cases, the arguments select their own target.
+            cases.append(dict(kind=kind, name=name, cwd=ROOT / parts[2], lib=shlex.split(parts[3]), args=shlex.split(parts[4]), hxml=True))
         elif kind == "hxml":
             # HXML configurations select their own target; only defines and the output are added.
             cases.append(dict(kind=kind, name=name, cwd=ROOT / parts[2], args=[parts[3]], hxml=True))
@@ -110,6 +122,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("-j", type=int, default=os.cpu_count() or 2)
     ap.add_argument("--eval", action="store_true")
+    ap.add_argument("--hxb-lib", action="store_true", help="also load each reference archive back through --hxb-lib with both compilers and compare their output")
     ap.add_argument("--cases", default="test/conformance-cases.txt", help="case list (test/conformance-macro-cases.txt: cases that run macros)")
     ap.add_argument("filters", nargs="*")
     opts = ap.parse_args()
@@ -157,6 +170,12 @@ def main():
             if case.get("hxml"):
                 return ["--hxb", str(hxb), "-D", "disable-parallelism", "--no-output"] + case["args"]
             return COMMON + case["args"] + ["--hxb", str(hxb)]
+        if case.get("lib"):
+            lib_hxb = out / "lib.hxb"
+            lc, _ = run([reference, "--hxb", str(lib_hxb), "-D", "disable-parallelism", "--no-output"] + case["lib"], cwd, out / "lib.log", env)
+            if lc != 0:
+                return dict(name=case["name"], seconds=0, status="FAIL", detail="reference cannot build the library: " + first_error(out / "lib.log"))
+            case = dict(case, args=["--hxb-lib", str(lib_hxb)] + case["args"])
         rc, rt = run([reference] + invocation(ref_hxb), cwd, out / "reference.log", env)
         pc, pt = run(port_cmd + invocation(port_hxb), cwd, out / "port.log", env)
         result = dict(name=case["name"], seconds=round(rt + pt, 1))
@@ -187,6 +206,30 @@ def main():
                 result.update(status="FAIL", detail="reference cannot consume port archive: " + first_error(out / "consume.log"))
                 return result
             result["note"] = " (neither archive loads without the case's source: " + first_error(out / "consume-reference.log") + ")"
+        if opts.hxb_lib:
+            # HXB library input: both compilers load every module of the
+            # reference archive through --hxb-lib (no source class path) and
+            # write it again; the outputs must conform.
+            def roundtrip(hxb):
+                return ["--hxb-lib", str(ref_hxb), "-D", "disable-parallelism"] + target + roots + ["--hxb", str(hxb)]
+            rt_ref, rt_port = out / "roundtrip-reference.hxb", out / "roundtrip-port.hxb"
+            rrc, rrt = run([reference] + roundtrip(rt_ref), ROOT, out / "roundtrip-reference.log", env)
+            rpc, rpt = run(port_cmd + roundtrip(rt_port), ROOT, out / "roundtrip-port.log", env)
+            result["seconds"] = round(result["seconds"] + rrt + rpt, 1)
+            if rrc != 0:
+                if rpc == 0:
+                    result.update(status="FAIL", detail="reference rejects the --hxb-lib round trip (%s) but port accepts" % first_error(out / "roundtrip-reference.log"))
+                    return result
+                result["note"] = result.get("note", "") + " (--hxb-lib round trip rejected by both: " + first_error(out / "roundtrip-reference.log") + ")"
+            elif rpc != 0:
+                result.update(status="FAIL", detail="port failed the --hxb-lib round trip (%s): %s" % (rpc, first_error(out / "roundtrip-port.log")))
+                return result
+            else:
+                diff = compare(rt_ref, rt_port)
+                if diff:
+                    result.update(status="FAIL", detail="--hxb-lib round trip: " + diff)
+                    return result
+                result["note"] = result.get("note", "") + " (--hxb-lib round trip identical)"
         if opts.eval:
             eval_hxb = out / "eval-hxb.hxb"
             ec, et = run([reference] + STACK + ["--hxb-lib", str(compiler), "--run", "haxe.Main"] + invocation(eval_hxb), cwd, out / "eval-hxb.log", env)

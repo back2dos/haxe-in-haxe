@@ -6,7 +6,9 @@ the port, and both must produce the same exit code, stdout and stderr:
 
 - direct/module cases get `--interp` appended, so their program runs;
 - hxml cases run as written when they execute (`--interp`, `--run`, `-x`) and
-  are skipped otherwise. Each hxml case runs in a scratch copy of its directory
+  are skipped otherwise;
+- hxblib cases (test/conformance-hxblib-cases.txt) run against a library
+  archive the reference builds first, when they use `--interp`. Each hxml case runs in a scratch copy of its directory
   so that nothing is written into the haxe/ submodule.
 
 Timings are summed per side, which makes this also an Eval-vs-Eval benchmark
@@ -35,8 +37,18 @@ def run(cmd, cwd, env):
         return "timeout", b"", b"", time.monotonic() - start
 
 
-def prepare(case):
+def prepare(case, reference, env):
     """Returns (cwd, args, scratch dir or None), or None when the case does not execute."""
+    if case.get("lib"):
+        # hxblib case: the reference builds the library archive, which both
+        # compilers then load with --hxb-lib.
+        if "--interp" not in case["args"]:
+            return None
+        out = GENERATED / case["name"]
+        out.mkdir(parents=True, exist_ok=True)
+        lib = out / "lib.hxb"
+        subprocess.run([reference, "--hxb", str(lib), "--no-output"] + case["lib"], cwd=case["cwd"], env=env, capture_output=True, timeout=TIMEOUT)
+        return case["cwd"], ["--hxb-lib", str(lib)] + case["args"], None
     if case.get("hxml"):
         text = (case["cwd"] / case["args"][0]).read_text(errors="replace")
         if not EXECUTES.search(text):
@@ -64,7 +76,7 @@ def main():
     GENERATED.mkdir(parents=True, exist_ok=True)
 
     def one(case):
-        prep = prepare(case)
+        prep = prepare(case, reference, env)
         if prep is None:
             return case["name"], "SKIP", "does not execute", 0, 0
         cwd, args, scratch = prep

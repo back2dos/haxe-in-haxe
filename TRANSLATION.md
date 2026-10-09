@@ -22,6 +22,17 @@ byte-identical. The debugger (`evalDebug*.ml`), libuv (`evalLuv.ml`) and mbedtls
 `src/macros/PORTING.md`. The table below still lists them as macro-milestone
 candidates.
 
+Status 2026-10-09: HXB library input (`--hxb-lib`) works. `hxbReader.ml`,
+`hxbReaderApi.ml` and `hxbLib.ml` are translated in `src/compiler/hxb/`,
+`typeloadCacheHook.ml` in `src/typing/TypeloadCacheHook.hx`, the HXB branch of
+`nativeLibraryHandler.ml` in `src/context/NativeLibraryHandler.hx`, and the
+`hxb_reader_api_typeload` class and `load_hxb_module` of `typeloadModule.ml` in
+`src/typing/ModuleTyping.hx`. The ZIP reading that `hxbLib.ml` takes from
+`libs/ziplib` is reproduced in `src/core/ZipInput.hx`. Of `commonCache.ml`,
+only the server cache uses the reader (`HxbReader.dump_stats` in
+`cache_context`), so nothing of it is needed by the batch `--hxb-lib` path.
+See `test/TESTING.md`.
+
 ## Translation snapshot
 
 **The pending counterpart batch was completed in `2fcd217`.** This inventory records file coverage,
@@ -100,6 +111,9 @@ conformance, or completion of the pre-existing HXB writer. The subsequent runtim
 | `compiler/helper.ml` | `src/compiler/Helper.hx` | Existing, unaudited |
 | `compiler/highLevel.ml` | `src/compiler/HighLevel.hx` | Batch entry draft; haxelib add_libs deferred |
 | `compiler/hxb/hxbData.ml` | `src/compiler/hxb/HxbData.hx` | Existing, unaudited |
+| `compiler/hxb/hxbLib.ml` | `src/compiler/hxb/HxbLib.hx` | Translated; ZIP reading in `src/core/ZipInput.hx` (from `libs/ziplib/zip.ml`) |
+| `compiler/hxb/hxbReader.ml` | `src/compiler/hxb/HxbReader.hx` | Translated; `hxb_reader_stats` stays in `src/context/HxbReaderStats.hx` |
+| `compiler/hxb/hxbReaderApi.ml` | `src/compiler/hxb/HxbReaderApi.hx` | Translated (virtual class as interface) |
 | `compiler/hxb/hxbWriter.ml` | `src/compiler/hxb/HxbWriter.hx` | Existing, unaudited |
 | `compiler/hxb/hxbWriterConfig.ml` | `src/compiler/hxb/HxbWriterConfig.hx` | Existing, unaudited |
 | `compiler/io/compilerIo.ml` | `src/compiler/io/CompilerIo.hx` | Draft translated |
@@ -114,6 +128,7 @@ conformance, or completion of the pre-existing HXB writer. The subsequent runtim
 | `context/dumpConfig.ml` | `src/context/DumpConfig.hx` | Draft translated |
 | `context/formatString.ml` | `src/context/FormatString.hx` | Draft translated |
 | `context/lookup.ml` | `src/context/Lookup.hx` | Draft translated |
+| `context/nativeLibraryHandler.ml` | `src/context/NativeLibraryHandler.hx` | HXB library branch; SWF/JVM libraries rejected explicitly |
 | `context/nativeLibraries.ml` | `src/context/NativeLibraries.hx` | Draft translated |
 | `context/parallel.ml` | `src/context/Parallel.hx` | Draft translated |
 | `context/platformConfig.ml` | `src/context/PlatformConfig.hx` | Draft translated |
@@ -236,10 +251,11 @@ conformance, or completion of the pre-existing HXB writer. The subsequent runtim
 | `typing/strictMeta.ml` | `src/typing/StrictMeta.hx` | Draft translated |
 | `typing/tanon_identification.ml` | `src/typing/TanonIdentification.hx` | Draft translated |
 | `typing/typeload.ml` | `src/typing/Typeload.hx` | Draft translated |
+| `typing/typeloadCacheHook.ml` | `src/typing/TypeloadCacheHook.hx` | Translated (also used by `MacroContext` for fake modules) |
 | `typing/typeloadCheck.ml` | `src/typing/TypeloadCheck.hx` | Draft translated |
 | `typing/typeloadFields.ml` | `src/typing/TypeloadFields.hx` | Draft translated |
 | `typing/typeloadFunction.ml` | `src/typing/TypeloadFunction.hx` | Draft translated |
-| `typing/typeloadModule.ml` | `src/typing/ModuleTyping.hx`; legacy `TypeloadModule.hx` | Source pipeline integrated during compile phase |
+| `typing/typeloadModule.ml` | `src/typing/ModuleTyping.hx`; legacy `TypeloadModule.hx` | Source pipeline integrated during compile phase; `hxb_reader_api_typeload` and `load_hxb_module` translated |
 | `typing/typeloadParse.ml` | `src/typing/SourceParser.hx`; legacy `TypeloadParse.hx` | Source pipeline integrated during compile phase |
 | `typing/typer.ml` | `src/typing/Typer.hx` | Draft translated |
 | `typing/typerBase.ml` | `src/typing/TyperBase.hx` | Draft translated |
@@ -272,9 +288,6 @@ A scope-review entry is not a blanket exclusion of shared batch-compiler helpers
 | `compiler/displayOutput.ml` | Display/service area; batch-used helpers and shared declarations need scope review |
 | `compiler/displayProcessing.ml` | Display/service area; batch-used helpers and shared declarations need scope review |
 | `compiler/displayProcessingGlobals.ml` | Display/service area; batch-used helpers and shared declarations need scope review |
-| `compiler/hxb/hxbLib.ml` | HXB input milestone |
-| `compiler/hxb/hxbReader.ml` | HXB input milestone |
-| `compiler/hxb/hxbReaderApi.ml` | HXB input milestone |
 | `compiler/pipeThings.ml` | Server/client pipe and socket transport |
 | `compiler/server/server.ml` | Server milestone |
 | `compiler/server/serverCache.ml` | Server milestone |
@@ -282,7 +295,7 @@ A scope-review entry is not a blanket exclusion of shared batch-compiler helpers
 | `compiler/server/serverConfig.ml` | Server milestone |
 | `compiler/server/serverMessage.ml` | Server milestone |
 | `compiler/tasks.ml` | Server maintenance task scheduling |
-| `context/commonCache.ml` | Cache/server integration; shared batch pieces may need extraction |
+| `context/commonCache.ml` | Cache/server integration; the batch `--hxb-lib` path uses none of it |
 | `context/display/diagnostics.ml` | Display/service area; batch-used helpers and shared declarations need scope review |
 | `context/display/diagnosticsPrinter.ml` | Display/service area; batch-used helpers and shared declarations need scope review |
 | `context/display/display.ml` | Display/service area; batch-used helpers and shared declarations need scope review |
@@ -300,7 +313,7 @@ A scope-review entry is not a blanket exclusion of shared batch-compiler helpers
 | `context/display/statistics.ml` | Display/service area; batch-used helpers and shared declarations need scope review |
 | `context/display/syntaxExplorer.ml` | Display/service area; batch-used helpers and shared declarations need scope review |
 | `context/memory.ml` | Server cache/object-size/leak diagnostics |
-| `context/nativeLibraryHandler.ml` | SWF/JVM library and HXB input handlers; later milestones |
+| `context/nativeLibraryHandler.ml` | SWF/JVM library handlers (`SwfLoader`, `JavaModern`); the HXB branch is translated |
 | `context/sourcemaps.ml` | Ordinary output-target source maps |
 | `core/display/completionItem.ml` | Display/service area; batch-used helpers and shared declarations need scope review |
 | `core/json/genjson.ml` | Auxiliary typed JSON dump/display serialization; retained hooks unresolved |
@@ -398,7 +411,6 @@ A scope-review entry is not a blanket exclusion of shared batch-compiler helpers
 | `macro/macroApi.ml` | Macro runtime/API milestone |
 | `prebuild.ml` | OCaml build/runtime adapter; no mechanical compiler-module port |
 | `typing/macroContext.ml` | Macro context milestone |
-| `typing/typeloadCacheHook.ml` | Cache/server integration; shared batch pieces may need extraction |
 | `typing/typerDisplay.ml` | Display/service area; batch-used helpers and shared declarations need scope review |
 
 ## Additional draft support files
