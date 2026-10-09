@@ -168,7 +168,7 @@ typedef CommonContext = {
  var filterMessages:(Dynamic->Bool)->Void;var runCommand:String->Int;var runCommandArgs:String->Array<String>->Int;
  var loadExternType:Array<Dynamic>;var callbacks:CompilerCallbacks;var defines:DefineContext;var userDefines:haxe.ds.StringMap<core.Define.UserDefine>;var userMetas:haxe.ds.StringMap<core.Meta.UserMeta>;var getMacros:Void->Null<CommonContext>;var localWrapper:LocalWrapperApi;
  var std:TClass;var globalMetadata:Array<Dynamic>;var fileContents:Array<Dynamic>;var parserCache:Dynamic;var moduleToFile:Dynamic;var overloadCache:Dynamic;
- var moduleLut:ModuleLut;var moduleNonexistentLut:Dynamic;var fakeModules:haxe.ds.StringMap<ModuleDef>;var file:String;var features:Map<String,Bool>;var modules:Array<ModuleDef>;var types:Array<ModuleType>;var resources:haxe.ds.StringMap<String>;
+ var moduleLut:ModuleLut;var moduleNonexistentLut:Dynamic;var fakeModules:haxe.ds.StringMap<ModuleDef>;var file:String;var features:Map<String,Bool>;var modules:Array<ModuleDef>;var types:Array<ModuleType>;var resources:haxe.ds.StringMap<haxe.io.Bytes>;
  var flashVersion:Float;var nekoLibPaths:Array<String>;var includeFiles:Array<Dynamic>;var nativeLibs:Dynamic;var hxbLibs:Array<AbstractHxbLib>;var jsGen:Null<Void->Void>;
  var basic:BasicTypes;var memoryMarker:Array<Float>;var hxbReaderApi:Dynamic;var hxbReaderStats:HxbReaderStatsData;var hxbWriterConfig:Dynamic;
 }

@@ -208,7 +208,7 @@ class Path {
 	}
 
 	public static function mkdirFromPathUnixErr(path:String):Void {
-		var parts = new EReg("[\\\\/]+", "").split(path);
+		var parts = new EReg("[\\\\/]+", "g").split(path);
 		if (parts.length > 0) { parts.pop(); mkdirRecursive("", parts); }
 	}
 	public static function mkdirFromPath(path:String):Void try mkdirFromPathUnixErr(path) catch (error:Dynamic) throw Std.string(error);

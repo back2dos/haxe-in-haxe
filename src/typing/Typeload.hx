@@ -288,7 +288,7 @@ class Typeload {
        t=loadComplexType(ctx,allowDisplay,LoadNormal,type); kind=Var({vRead:property(i1,true),vWrite:property(i2,false)});
      }
      if(Meta.has(MetaTag.Optional,f.cffMeta)) t=ctx.t.tnull(t);
-     var cf=mkField(name,t,p,f.cffName.pos,pub); cf.cfKind=kind; cf.cfParams=params; cf.cfDoc=f.cffDoc; cf.cfMeta=f.cffMeta;
+     var cf=mkField(name,t,p,f.cffName.pos,pub); cf.cfKind=kind; cf.cfParams=params; cf.cfDoc=f.cffDoc; cf.cfMeta=f.cffMeta.copy();
      if(isFinal) addClassFieldFlag(cf,CfFinal); initMetaOverloads(ctx,null,cf);
      if(ctx.m.isDisplayFile) {DeferredServices.display(); if(DisplayPosition.displayPosition.enclosedIn(cf.cfNamePos)) displayed=cf;}
      fields=PMap.add(name,cf,fields);

@@ -91,7 +91,7 @@ class ParserEntry {
 		case _:throw new ComparisonExit();
 	};
 	static function numeric(s:String):Float {
-		var value=Std.parseFloat(s); if (Math.isNaN(value)) throw new haxe.Exception("float_of_string"); return value;
+		return core.ds.OcamlFloat.ofString(s);
 	}
 	public static function eval(ctx:DefineContext,e:Expr):SmallType return switch e.expr {
 		case EConst(Ident(i)):Define.rawDefined(ctx,i) ? TString(Define.rawDefinedValue(ctx,i)) : TNull;

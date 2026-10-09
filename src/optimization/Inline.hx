@@ -55,9 +55,9 @@ class Inline {
    case ["Std","string",[ev = {eexpr:TLocal(v) | TField({eexpr:TLocal(v)},_)}]] if ((platform == Js || platform == Flash) && switch v.vKind {case VUser(_):true; case _:false;}):
     inline function stringv():TExpr {var pos = ev.epos; var str = mk(TBinop(OpAdd,mk(TConst(TString("")),b.tstring,pos),ev),b.tstring,pos); if (platform == Js || isNullable(ev.etype)) {var cond = mk(TBinop(OpEq,ev,mk(TConst(TNull),tDynamic,pos)),b.tbool,pos); return mk(TIf(cond,mk(TConst(TString("null")),b.tstring,pos),str),b.tstring,pos);} return str;}
     switch follow(ev.etype) {case TInst({clPath:{pack:[],name:"String"}},[]) | TAbstract({aPath:{pack:[],name:"Float" | "Int" | "UInt" | "Bool"}},[]):stringv(); case _:null;}
-   case ["Std","int",[{eexpr:TConst(TFloat(s))}]]:var f = Std.parseFloat(s); !Math.isFinite(f) || Math.isNaN(f) || f <= -2147483649.0 || f >= 2147483648.0 ? null : mk(TConst(TInt(Std.int(f))),b.tint,p);
-   case ["Math","ceil",[{eexpr:TConst(TFloat(s))}]]:var f = Std.parseFloat(s); !Math.isFinite(f) || Math.isNaN(f) || f <= -2147483649.0 || f >= 2147483647.0 ? null : mk(TConst(TInt(Math.ceil(f))),b.tint,p);
-   case ["Math","floor",[{eexpr:TConst(TFloat(s))}]]:var f = Std.parseFloat(s); !Math.isFinite(f) || Math.isNaN(f) || f <= -2147483648.0 || f >= 2147483648.0 ? null : mk(TConst(TInt(Math.floor(f))),b.tint,p);
+   case ["Std","int",[{eexpr:TConst(TFloat(s))}]]:var f = core.ds.OcamlFloat.ofString(s); !Math.isFinite(f) || Math.isNaN(f) || f <= -2147483649.0 || f >= 2147483648.0 ? null : mk(TConst(TInt(Std.int(f))),b.tint,p);
+   case ["Math","ceil",[{eexpr:TConst(TFloat(s))}]]:var f = core.ds.OcamlFloat.ofString(s); !Math.isFinite(f) || Math.isNaN(f) || f <= -2147483649.0 || f >= 2147483647.0 ? null : mk(TConst(TInt(Math.ceil(f))),b.tint,p);
+   case ["Math","floor",[{eexpr:TConst(TFloat(s))}]]:var f = core.ds.OcamlFloat.ofString(s); !Math.isFinite(f) || Math.isNaN(f) || f <= -2147483648.0 || f >= 2147483648.0 ? null : mk(TConst(TInt(Math.floor(f))),b.tint,p);
    case ["java.Lib","lock",[obj,block]]:mkUntypedCall("__lock__",p,[obj,mkBlock(block)]);
    case _:null;
   };

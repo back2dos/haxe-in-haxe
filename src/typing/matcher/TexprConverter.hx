@@ -55,7 +55,7 @@ class TexprConverter {
   if(removedEnum!=null){var removed=removedEnum;all=all.filter(function(c)return switch c.kind{case ConEnum(_,ef):!removed.exists(ef);case _:true;});}
   return {e:e,unmatched:all,kind:classified.kind,finiteness:classified.finiteness};
  }
- static function reportNotExhaustive(lookup:Map<Int,TExpr>,e:TExpr,unmatched:Array<Dynamic>):Dynamic {
+ static function reportNotExhaustive(lookup:Map<Int,TExpr>,e:TExpr,unmatched:Array<{con:ConstructorData,params:Array<T>}>):Dynamic {
   var sl:Array<String>=switch follow(e.etype){case TAbstract(a={aImpl:c},_) if(c!=null&&a.aEnum):unmatched.map(function(u){var con:ConstructorData=u.con;return switch con.kind{case ConConst(_)|ConEnum(_,_):var found=null;for(cf in c.clOrderedStatics)if(cf.cfExpr!=null){var ctor=extractCtor(cf.cfExpr);if(ctor!=null&&Constructor.equal({kind:ctor,pos:nullPos},con)){found=cf;break;}}if(found==null)throw NotFound.raise();found.cfName;case _:Constructor.toString(con);};});case _:unmatched.map(function(u)return Constructor.toString(u.con));};sl.sort(Reflect.compare);var s=unmatched.length==0?"_":sl.join(" | ");return Error.raiseTypingError("Unmatched patterns: "+sSubject(lookup,s,e),e.epos);
  }
  public static function toTexpr(ctx:Typer,tSwitch:T,withType:WithTypeValue,root:DecisionTreeData):TExpr {

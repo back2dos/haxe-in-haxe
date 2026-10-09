@@ -63,8 +63,73 @@ and checks the JavaScript).
 
 The full misc step now passes: 684/684 with 2 excluded. Conformance stays at
 275 PASS + 7 EXPECTED-FAILURE (also `--hxb-lib`), and the bootstrap build
-passes. (`python3 test/upstream.py misc` also runs `misc-resolution`, which
-still fails.)
+passes. (`python3 test/upstream.py misc` also runs `misc-resolution`; see
+below.)
+
+### The other steps
+
+| Step | Reference | Port (HashLink build) |
+| --- | --- | --- |
+| unit-macro | 11372/11372 assertions | 11367/11371, 4 errors (Gc.finalise) |
+| unit-macro-hxblib | 11372/11372 | 11367/11371, 4 errors (Gc.finalise) |
+| nullsafety | 232 expected errors, pass | 232 expected errors, pass |
+| misc-resolution | 7/7 (3 excluded) | 7/7 (3 excluded) |
+| sys-hxb | pass | pass |
+| sys-run | 31 + 31 + 1103 assertions, all pass | same |
+| compiler-loops | 19/19 | 19/19 |
+| connect-stdin | 10/10 | 10/10 |
+| threads | 144/144 assertions | 138/139, 1 error (eval.luv; the test's last 5 assertions are not reached) |
+
+Root causes of the port failures, one per fix:
+
+- nullsafety segfaulted on HashLink: the nested-`try` HashLink JIT bug
+  above (CallUnification), reached when a null-safety error followed a macro
+  call. Found with gdb: the uncaught `Abort` longjmp'd to a trap below the
+  stack pointer (a dead frame).
+- unit-macro: the matcher passed an anonymous `{kind,pos}` as `Dynamic` where
+  the `ConstructorData` class is read (HashLink cast error on non-exhaustive
+  null matches); `Path.mkdir_from_path` split with an `EReg` without `g`, so
+  `--hxb bin/hxb/eval.zip` only created `bin/`.
+- unit-macro tests: OCaml `float_of_string` (`core.ds.OcamlFloat`: skips `_`,
+  reads the whole string, hex/nan/inf) where upstream uses it (Eval
+  constants, Macro API, optimizer, inliner, `#if`), so `12.3_4` is not
+  `12.3`; `Numeric.parse_int` translated directly (`Std.parseInt("+-123")` is
+  null); resources kept as bytes (UTF-8 decoding lost bytes of binary
+  resources); NUL in Eval regex patterns passed as `\x00` (HashLink compiles
+  NUL-terminated patterns); Eval sockets on HashLink (`EvalHostNet`: the
+  `hxc.NativeNet` interface over the host's `sys.net.Socket`).
+- unit-macro-hxblib reused unit-macro's archive, which was never written.
+- connect-stdin "without close": the client forwarded `Sys.stdin()` with
+  `readBytes` (HashLink `fread`: waits for 1024 bytes) and the blocked reader
+  held the stdin `FILE` lock, so glibc's `exit` hung. On HashLink the client
+  now polls descriptor 0 with `select` and reads it with `read(2)`, and joins
+  the forwarding thread as upstream does (`PipeThings.RawStdin`).
+- sys-hxb printed 133 `WDeprecatedEnumAbstract` warnings at unknown
+  positions: types aliased the declaration's metadata array and unshifted
+  `@:enum` (null_pos) into it, which the second `--next` compilation saw
+  when typing the cached AST again. Types and fields now copy the
+  declaration's metadata (upstream prepends to an immutable list).
+- compiler-loops: fixed by the abort after typing above.
+
+Excluded in `test/upstream.py`, for both compilers:
+
+- misc-resolution (`RESOLUTION_EXCLUDED`): Issue9367, modulestatics and spec
+  `compile.hxml` compile with `-js` and run `node test.js`.
+- sys-hxb and sys-run (`STEP_PATCHES`): the `--cmd haxe
+  compile-neko-exitcode.hxml` block of `compile-each.hxml` (builds
+  `bin/neko/ExitCode.n` with `-neko` and `nekotools`; `ExitCode.getNative`
+  only copies it on Windows, gcc builds `bin/ExitCode` elsewhere). sys-run
+  needs it too: `TestCommandBase.testCommand` runs `haxe compile-each.hxml`.
+
+Remaining failures (host limits of the HashLink build, not typing):
+
+- `unit.TestGcFinalizer` (4 tests): `Gc.finalise` needs finalisers on
+  arbitrary values; HashLink has neither finalisers nor weak references for
+  Haxe objects, and a finaliser receives the value, which would have to be
+  resurrected after the host GC freed it.
+- threads `cases.TestEval.testNative`: `eval.luv.Thread.create` and
+  `ThreadPool.queueWork` need libuv, which only the hxc host provides
+  (`EvalLuv`); the `sys.thread` part of the test passes.
 
 ## Compilation server and haxelib — 2026-10-09
 

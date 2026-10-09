@@ -61,56 +61,42 @@ class Numeric {
 	}
 
 	public static function parseInt(value:String):Int {
-		var start = 0;
-		while (start < value.length) {
-			var code = value.charCodeAt(start);
-			if (code == " ".code || isWhitespace(code)) start++;
-			else break;
-		}
-		if (start == value.length) return parseIntToken("");
-		if (value.charCodeAt(start) == "+".code) start++;
-		var tokenStart = start;
-		var digits = start;
-		if (digits < value.length && value.charCodeAt(digits) == "-".code) digits++;
-		if (digits + 1 < value.length && value.charCodeAt(digits) == "0".code && (value.charCodeAt(digits + 1) == "x".code || value.charCodeAt(digits + 1) == "X".code)) {
-			digits += 2;
-			while (digits < value.length) {
-				var code = value.charCodeAt(digits);
-				if (!((code >= "0".code && code <= "9".code) || (code >= "a".code && code <= "f".code) || (code >= "A".code && code <= "F".code))) break;
-				digits++;
+		function loopHex(sp:Int, i:Int):String {
+			while (i < value.length) {
+				var c = value.charCodeAt(i);
+				if ((c >= "0".code && c <= "9".code) || (c >= "a".code && c <= "f".code) || (c >= "A".code && c <= "F".code)) i++ else break;
 			}
-		} else {
-			while (digits < value.length && value.charCodeAt(digits) >= "0".code && value.charCodeAt(digits) <= "9".code) digits++;
+			return value.substr(sp, i - sp);
 		}
-		return parseIntToken(value.substr(tokenStart, digits - tokenStart));
+		function loopDec(sp:Int, i:Int):String {
+			while (i < value.length) {
+				var c = value.charCodeAt(i);
+				if (c >= "0".code && c <= "9".code) i++ else break;
+			}
+			return value.substr(sp, i - sp);
+		}
+		function handleDigits(sp:Int, i:Int):String {
+			return if (i + 1 < value.length && value.charCodeAt(i) == "0".code
+				&& (value.charCodeAt(i + 1) == "x".code || value.charCodeAt(i + 1) == "X".code))
+				loopHex(sp, i + 2)
+			else
+				loopDec(sp, i);
+		}
+		function loop(sp:Int):String {
+			while (true) {
+				if (sp == value.length) return "";
+				var c = value.charCodeAt(sp);
+				if (c == " ".code) sp++;
+				else if (c == "+".code) return handleDigits(sp + 1, sp + 1);
+				else if (c == "-".code) return handleDigits(sp, sp + 1);
+				else if (isWhitespace(c)) sp++;
+				else return handleDigits(sp, sp);
+			}
+		}
+		return core.ds.OcamlInt32.ofString(loop(0));
 	}
 
 	static function parseFloatToken(value:String):Float {
-		var result = Std.parseFloat(value);
-		if (Math.isNaN(result)) throw 'Invalid float $value';
-		return result;
-	}
-
-	static function parseIntToken(value:String):Int {
-		var index = 0;
-		var negative = false;
-		if (value.charCodeAt(index) == "-".code) {
-			negative = true;
-			index++;
-		}
-		if (index + 1 < value.length && value.charCodeAt(index) == "0".code && (value.charCodeAt(index + 1) == "x".code || value.charCodeAt(index + 1) == "X".code)) {
-			index += 2;
-			if (index == value.length) throw 'Invalid integer $value';
-			var result = 0;
-			while (index < value.length) {
-				var code = value.charCodeAt(index++);
-				var digit = code >= "0".code && code <= "9".code ? code - "0".code : code >= "a".code && code <= "f".code ? code - "a".code + 10 : code - "A".code + 10;
-				result = (result << 4) | digit;
-			}
-			return negative ? -result : result;
-		}
-		var result = Std.parseInt(value);
-		if (result == null) throw 'Invalid integer $value';
-		return result;
+		return core.ds.OcamlFloat.ofString(value);
 	}
 }

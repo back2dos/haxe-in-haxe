@@ -35,7 +35,7 @@ enum ModuleTaintingReason { CheckDisplayFile; DefineType; DefineModule; ServerIn
 enum ModuleSkipReason { DependencyDirty(path:GlobalTypePath, reason:ModuleSkipReason); Tainted(reason:ModuleTaintingReason); FileChanged(file:String); Shadowed(file:String); LibraryChanged; }
 enum ModuleCacheState { MSGood; MSBad(reason:ModuleSkipReason); MSUnknown; }
 enum TypeParamHost { TPHType; TPHConstructor; TPHMethod; TPHEnumConstructor; TPHAnonField; TPHLocal; TPHUnbound; }
-enum CacheBoundObject { Resource(name:String, data:String); IncludeFile(file:String, contents:String); Message(value:CompilerMessage); }
+enum CacheBoundObject { Resource(name:String, data:haxe.io.Bytes); IncludeFile(file:String, contents:String); Message(value:CompilerMessage); }
 
 enum T { TMono(mono:TMono); TEnum(en:TEnum, params:TParams); TInst(cls:TClass, params:TParams); TType(def:TDef, params:TParams); TFun(signature:TSignature); TAnon(anon:TAnon); TDynamic(inner:Null<T>); TLazy(lazy:TLazy); TAbstract(abs:TAbstract, params:TParams); }
 @:structInit class TMono {

@@ -58,9 +58,7 @@ class EvalJit {
 
 	/** OCaml `float_of_string` on a lexed float literal. **/
 	static function floatOfString(s:String):Float {
-		var f = Std.parseFloat(s);
-		if (Math.isNaN(f) && s != "nan") throw new core.ds.Failure("float_of_string");
-		return f;
+		return core.ds.OcamlFloat.ofString(s);
 	}
 
 	public static function isInt(t:T):Bool {

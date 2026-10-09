@@ -56,7 +56,7 @@ class OptimizerTexpr {
 		function constant(c:TConstant):TExpr return TypeOps.mk(TConst(c), e.etype, e.epos);
 		inline function checkFloat(fn:Float->Float->Float, f1:Float, f2:Float):TExpr {
 			var f = fn(f1, f2); var fstr = Numeric.floatRepr(f);
-			return Math.isFinite(f) && Std.parseFloat(fstr) == f ? constant(TFloat(fstr)) : e;
+			return Math.isFinite(f) && core.ds.OcamlFloat.ofString(fstr) == f ? constant(TFloat(fstr)) : e;
 		}
 		inline function comparison(a:Float, b:Float):TExpr {
 			// OCaml compare gives NaN a total ordering; preserve that distinction from IEEE comparisons.
@@ -66,12 +66,12 @@ class OptimizerTexpr {
 		return switch [e1.eexpr, e2.eexpr] {
 			case [TConst(TInt(0)), _] if (op == OpAdd && isNumeric(e2.etype)): e2;
 			case [TConst(TInt(1)), _] if (op == OpMult): e2;
-			case [TConst(TFloat(v)), _] if (op == OpAdd && Std.parseFloat(v) == 0 && isFloat(e2.etype)): e2;
-			case [TConst(TFloat(v)), _] if (op == OpMult && Std.parseFloat(v) == 1 && isFloat(e2.etype)): e2;
+			case [TConst(TFloat(v)), _] if (op == OpAdd && core.ds.OcamlFloat.ofString(v) == 0 && isFloat(e2.etype)): e2;
+			case [TConst(TFloat(v)), _] if (op == OpMult && core.ds.OcamlFloat.ofString(v) == 1 && isFloat(e2.etype)): e2;
 			case [_, TConst(TInt(0))] if (switch op { case OpAdd: isNumeric(e1.etype); case OpSub | OpShr | OpShl: true; case _: false; }): e1;
 			case [_, TConst(TInt(1))] if (op == OpMult): e1;
-			case [_, TConst(TFloat(v))] if ((op == OpAdd || op == OpSub) && Std.parseFloat(v) == 0 && isFloat(e1.etype)): e1;
-			case [_, TConst(TFloat(v))] if (op == OpMult && Std.parseFloat(v) == 1 && isFloat(e1.etype)): e1;
+			case [_, TConst(TFloat(v))] if ((op == OpAdd || op == OpSub) && core.ds.OcamlFloat.ofString(v) == 0 && isFloat(e1.etype)): e1;
+			case [_, TConst(TFloat(v))] if (op == OpMult && core.ds.OcamlFloat.ofString(v) == 1 && isFloat(e1.etype)): e1;
 			case [TConst(TNull), TConst(TNull)]: switch op { case OpEq: constant(TBool(true)); case OpNotEq: constant(TBool(false)); case _: e; }
 			case [TFunction(_), TConst(TNull)] | [TConst(TNull), TFunction(_)]: switch op { case OpEq: constant(TBool(false)); case OpNotEq: constant(TBool(true)); case _: e; }
 			case [TConst(TInt(a)), TConst(TInt(b))]:
@@ -93,7 +93,7 @@ class OptimizerTexpr {
 					case _: e;
 				}
 			case [TConst(ca = TFloat(_) | TInt(_)), TConst(cb = TFloat(_) | TInt(_))]:
-				inline function number(c:TConstant):Float return switch c { case TFloat(f): Std.parseFloat(f); case TInt(i): i; case _: throw "optimizerTexpr: numeric constant"; };
+				inline function number(c:TConstant):Float return switch c { case TFloat(f): core.ds.OcamlFloat.ofString(f); case TInt(i): i; case _: throw "optimizerTexpr: numeric constant"; };
 				var a = number(ca); var b = number(cb);
 				switch op {
 					case OpAdd: checkFloat((a, b) -> a + b, a, b); case OpDiv: checkFloat((a, b) -> a / b, a, b);
@@ -106,7 +106,7 @@ class OptimizerTexpr {
 			}
 			case [TConst(a), TConst(b)] if (op == OpEq || op == OpNotEq):
 				var result = switch [a, b] {
-					case [TInt(a), TFloat(b)] | [TFloat(b), TInt(a)]: a == Std.parseFloat(b);
+					case [TInt(a), TFloat(b)] | [TFloat(b), TInt(a)]: a == core.ds.OcamlFloat.ofString(b);
 					case [TNull, TInt(_) | TFloat(_) | TBool(_)] | [TInt(_) | TFloat(_) | TBool(_), TNull] if (scom.platformConfig.pfStatic): return e;
 					case _: Type.enumEq(a, b);
 				};
@@ -141,8 +141,8 @@ class OptimizerTexpr {
 			case [Neg, TConst(TInt(i))]: TypeOps.mk(TConst(TInt((-i) | 0)), e.etype, e.epos); // Int32.neg wraps
 			case [NegBits, TConst(TInt(i))]: TypeOps.mk(TConst(TInt(~i)), e.etype, e.epos);
 			case [Neg, TConst(TFloat(f))]:
-				var v = 0.0 - Std.parseFloat(f); var str = Numeric.floatRepr(v);
-				Std.parseFloat(str) == v ? TypeOps.mk(TConst(TFloat(str)), e.etype, e.epos) : e;
+				var v = 0.0 - core.ds.OcamlFloat.ofString(f); var str = Numeric.floatRepr(v);
+				core.ds.OcamlFloat.ofString(str) == v ? TypeOps.mk(TConst(TFloat(str)), e.etype, e.epos) : e;
 			case _: e;
 		};
 	}

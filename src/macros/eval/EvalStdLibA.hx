@@ -1020,9 +1020,27 @@ class StdEReg {
 			}
 		}
 		// `UTF :: `UCP :: flags: the host always compiles with UTF and UCP
-		var rex = try new EReg(r, hostOpt.toString()) catch (e:Dynamic) throw new Failure(Std.string(e));
+		var rex = try new EReg(hostPattern(r), hostOpt.toString()) catch (e:Dynamic) throw new Failure(Std.string(e));
 		var pcre = new Vregex(rex, EvalString.createAscii('~/$r/$opt'), global);
 		return IRegex(pcre);
+	}
+
+	/** PCRE2 takes the pattern with its length; the HashLink host passes a
+		NUL-terminated string, so NUL characters become the `\x00` escape. **/
+	static function hostPattern(r:String):String {
+		#if hl
+		if (r.indexOf("\x00") < 0) return r;
+		var buf = new StringBuf(), backslashes = 0;
+		for (i in 0...r.length) {
+			var c = r.charCodeAt(i);
+			if (c == 0) buf.add(backslashes % 2 == 1 ? "x00" : "\\x00");
+			else buf.addChar(c);
+			backslashes = c == "\\".code ? backslashes + 1 : 0;
+		}
+		return buf.toString();
+		#else
+		return r;
+		#end
 	}
 
 	static function hostMatchedNum(r:EReg):Int {

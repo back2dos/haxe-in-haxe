@@ -240,9 +240,9 @@ class EvalStdLib {
 			case _: die();
 		});
 		add(EvalHash.key_eval_vm_NativeSocket, _ -> {
-			#if (target.name == "hxc")
+			#if (target.name == "hxc" || hl)
 			// catch_unix_error Unix.socket PF_INET SOCK_STREAM 0
-			var fd = macros.eval.EvalStdLibB.StdSocket.check(hxc.NativeNet.socket(), "socket");
+			var fd = macros.eval.EvalStdLibB.StdSocket.check(#if hl macros.eval.EvalHostNet #else hxc.NativeNet #end.socket(), "socket");
 			EvalEncode.encodeInstance(EvalHash.key_eval_vm_NativeSocket, ISocket(fd));
 			#else
 			notSupported("Sockets (eval.vm.NativeSocket)");
