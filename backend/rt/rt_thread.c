@@ -926,6 +926,17 @@ static char *dead_yptr, *dead_ylim;
 
 static pthread_condattr_t mono_attr; // conditions waiting on CLOCK_MONOTONIC
 
+// RT_STATS: threads started, contended mutex acquisitions and their waits,
+// collections and the time from a request until every thread had stopped
+static int thr_stats;
+static unsigned long st_spawned, st_contended, st_stw, st_stw_max_us;
+static double st_contended_secs, st_stw_secs;
+static void thr_report(void) {
+	fprintf(stderr, "threads: %lu started; %lu contended mutex acquisitions (%.3fs waiting); %lu stops of the world, %.3fs until stopped (max %lu us)\n",
+		st_spawned, st_contended, st_contended_secs, st_stw, st_stw_secs, st_stw_max_us);
+}
+
+
 int32_t hxc_NativeThread_parallel(void) { return 1; }
 
 static void cond_init(pthread_cond_t *c) { pthread_cond_init(c, &mono_attr); }
@@ -955,6 +966,8 @@ void rt_threads_init(void) {
 	by_id = (rt_thread **)calloc(by_id_cap, sizeof(rt_thread *));
 	by_id[1] = &main_thread;
 	self = &main_thread;
+	thr_stats = getenv("RT_STATS") != NULL;
+	if (thr_stats) atexit(thr_report);
 }
 
 static int get_state(rt_thread *t) { return __atomic_load_n(&t->state, __ATOMIC_SEQ_CST); }
@@ -970,6 +983,7 @@ static void stop_here(void) {
 }
 
 int rt_world_stop(void) {
+	double t0 = thr_stats ? now_secs() : 0;
 	pthread_mutex_lock(&wl);
 	if (gc_requested()) { // another thread is collecting: wait for it as at a safepoint
 		stop_here();
@@ -986,6 +1000,12 @@ int rt_world_stop(void) {
 			}
 		if (all) break;
 		pthread_cond_wait(&wl_stopped, &wl);
+	}
+	if (thr_stats && all_threads->next) {
+		double d = now_secs() - t0;
+		st_stw++;
+		st_stw_secs += d;
+		if (d * 1e6 > st_stw_max_us) st_stw_max_us = (unsigned long)(d * 1e6);
 	}
 	return 1; // wl stays held during the collection
 }
@@ -1148,6 +1168,7 @@ int32_t hxc_NativeThread_spawn(void *job) {
 	all_threads->prev = t;
 	all_threads = t;
 	__atomic_fetch_add(&rt_nthreads, 1, __ATOMIC_SEQ_CST);
+	st_spawned++;
 	rt_mt = 1;
 	int32_t id = t->id;
 	pthread_mutex_unlock(&wl);
@@ -1351,9 +1372,14 @@ void hxc_NativeThread_mutexAcquire(void *mo) {
 	}
 	if (pthread_mutex_trylock(&m->m) != 0) {
 		RT_ROOT(mo); // the handle stays alive while this thread waits
+		double t0 = thr_stats ? now_secs() : 0;
 		rt_blocking_enter();
 		pthread_mutex_lock(&m->m);
 		rt_blocking_leave();
+		if (thr_stats) {
+			__atomic_fetch_add(&st_contended, 1, __ATOMIC_RELAXED);
+			st_contended_secs += now_secs() - t0; // under the mutex just taken: approximate across mutexes
+		}
 		RT_UNROOT(1);
 	}
 	__atomic_store_n(&m->owner, self, __ATOMIC_RELAXED);
