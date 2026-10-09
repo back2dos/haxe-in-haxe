@@ -250,13 +250,13 @@ class Lower {
 			addIface(ci, j.cls);
 	}
 
-	// a var field with storage (not a property with only accessor methods)
+	// a var field with storage (not a property with only accessor methods):
+	// tFunctions.ml is_physical_var_field, but inline vars have no storage
 	static function isPhysical(c:TClass, f:TClassField, v:VarKind):Bool {
 		return switch [v.vRead, v.vWrite] {
 			case [AccInline, _]: false;
-			case [AccCall, AccCall | AccNever | AccNo]: core.Meta.has(IsVar, f.cfMeta);
-			case [AccNever | AccNo, AccCall]: core.Meta.has(IsVar, f.cfMeta);
-			case _: true;
+			case [AccNormal | AccNo, _] | [_, AccNormal | AccNo]: true;
+			case _: core.Meta.has(IsVar, f.cfMeta);
 		}
 	}
 

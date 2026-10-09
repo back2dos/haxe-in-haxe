@@ -22,7 +22,7 @@ static inline int __builtin_ctzll(uint64_t m) {
 char *rt_young_start, *rt_young_ptr, *rt_young_limit;
 static char *old_start, *old_ptr, *old_end;
 void **rt_sp;
-static void **stack_base;
+void **rt_stack_base; // the running thread's shadow stack (rt_thread.c swaps it)
 void **rt_globals;
 static int nglobals;
 rt_handler *rt_hcur;
@@ -102,8 +102,9 @@ static void scan_object(void *o, void *(*fwd)(void *)) {
 }
 
 static void scan_roots(void *(*fwd)(void *)) {
-	for (void **s = stack_base; s < rt_sp; s++)
+	for (void **s = rt_stack_base; s < rt_sp; s++)
 		if (*s) *s = fwd(*s);
+	rt_threads_scan(fwd); // the other green threads' shadow stacks
 	for (int i = 0; i < nglobals; i++)
 		if (rt_globals[i]) rt_globals[i] = fwd(rt_globals[i]);
 	if (rt_exn) rt_exn = fwd(rt_exn);
@@ -306,6 +307,9 @@ static void major_(size_t need) {
 }
 
 void *rt_alloc_slow(uint64_t header, uint32_t bytes) {
+	// a green thread that only computes gives way at each minor collection
+	// (before allocating: the caller's live references are rooted here)
+	if (rt_nthreads > 1) rt_preempt();
 	if (bytes > minor_size / 4) {
 		// large objects go straight to the old space
 		if ((size_t)(old_end - old_ptr) < bytes) major(bytes);
@@ -395,7 +399,7 @@ void rt_init(int ng, int argc, char **argv) {
 	old_end = old_start + ((size_t)(om ? atoi(om) : 256) << 20); // fewer major collections early on
 	size_t stack_slots = 16u << 20;
 #endif
-	stack_base = rt_sp = (void **)calloc(stack_slots, sizeof(void *));
+	rt_stack_base = rt_sp = (void **)calloc(stack_slots, sizeof(void *));
 	nglobals = ng;
 	rt_globals = (void **)calloc(ng + 1, sizeof(void *));
 	for (int i = SMALL_MIN; i <= SMALL_MAX; i++) {
