@@ -6,6 +6,7 @@
 #   sh backend/build.sh [source dir] [main class]     (default: backend/bench Bench)
 #   sh backend/build.sh port                          (the port itself: bin/backend/hih/hih)
 #   CC="cosmocc -O2" BIN=hih.com sh backend/build.sh port
+#   CC="cosmocc -O2" RT_DEPS=bin/cosmo-deps BIN=hih.com sh backend/build.sh port   (with mbedtls/libuv: backend/tools/cosmo-deps.sh)
 #   HXFLAGS="-D retain" VARIANT=-retain sh backend/build.sh
 set -eu
 cd "$(dirname "$0")/.."
@@ -32,8 +33,15 @@ fi
 HAXE_STD_PATH=${HAXE_STD_PATH:-$PWD/haxe/std} node --stack-size=65500 bin/backend/wbk.js "$OUT/prog" \
 	$ARGS -cp backend/std --custom-target hxc ${HXFLAGS:-} > "$OUT/wbk.log" 2>&1 || { cat "$OUT/wbk.log"; exit 1; }
 # slots are read as int32/double/pointer through casts (FI/FD/FP): no strict aliasing
-# without mbedtls/libuv: their natives fail when called (RT_LIBS="-lmbedtls -lmbedx509 -lmbedcrypto -luv" and RT_NO= to link them)
-$CC -w -fno-strict-aliasing ${RT_NO--DHXC_NO_SSL -DHXC_NO_UV} -I backend/rt "$OUT/prog.c" backend/rt/rt*.c -lm ${RT_LIBS:-} -o "$OUT/$BIN"
+# without mbedtls/libuv: their natives fail when called (RT_LIBS="-lmbedtls -lmbedx509 -lmbedcrypto -luv" and RT_NO= to link them;
+# with cosmocc, RT_DEPS=bin/cosmo-deps links the static libraries of backend/tools/cosmo-deps.sh)
+RT_INC=
+if [ -n "${RT_DEPS:-}" ]; then
+	RT_NO=${RT_NO-}
+	RT_INC="-I$RT_DEPS/include"
+	RT_LIBS="-L$RT_DEPS/lib -lmbedtls -lmbedx509 -lmbedcrypto -luv ${RT_LIBS:-}"
+fi
+$CC -w -fno-strict-aliasing ${RT_NO--DHXC_NO_SSL -DHXC_NO_UV} $RT_INC -I backend/rt "$OUT/prog.c" backend/rt/rt*.c -lm ${RT_LIBS:-} -o "$OUT/$BIN"
 # linear-memory wasm, compiled as C++ so try/catch uses wasm exception handling
 if [ -n "${EMXX:-}" ]; then
 	for f in backend/rt/rt*.c; do emcc -O2 -w -c -fwasm-exceptions -DHXC_NO_NET -DHXC_NO_SSL -DHXC_NO_UV -I backend/rt "$f" -o "$OUT/$(basename "$f" .c)_wasm.o"; done

@@ -68,11 +68,71 @@ builds.
   assembly, `as` 14 s), so it was dropped in favour of tcc's 0.6 s. Upstream
   chibicc also can't use cosmo's headers.
 
+## mbedtls and libuv (2026-10-09)
+
+The APE builds now link real mbedtls and libuv instead of the throwing stubs
+(`-DHXC_NO_SSL -DHXC_NO_UV`), so `sys.ssl`/`mbedtls.*` and `eval.luv` work in
+macros and `--interp` of `hxc.com` and `haxe-in-haxe.com`, and `-D hxc.static`
+user programs can use `sys.ssl` (`-D hxc.ssl`) and the libuv natives
+(`-D hxc.uv`). Design, patches and limits: backend/README.md, "TLS and
+libuv".
+
+- `backend/tools/cosmo-deps.sh` builds mbedtls 2.28.10 (the API of
+  `rt_ssl.c`, as upstream's bindings and the system's 2.28) and libuv 1.48.0
+  (the native builds' version) with `cosmocc -O2` into fat static libraries
+  (`bin/cosmo-deps/lib/*.a` and `lib/.aarch64/*.a`, headers in `include/`),
+  from tags fetched with git and checked against pinned commits, with the
+  patches in `backend/tools/cosmo-patches/`: mbedtls takes its entropy from
+  `getrandom()`; libuv is built as a generic unix port (`poll(2)` backend,
+  run-time errno translation, a `cosmo.c` platform file). 2 minutes on 4
+  cores. Wired into `backend/haxelib/build.sh` and `site/build.sh`
+  (`NO_DEPS=1`: stubs) and `backend/build.sh` (`RT_DEPS=bin/cosmo-deps`).
+- The haxelib package bundles the libraries and headers (`cosmo/`: 4.1 MB,
+  1.6 MB compressed) rather than building them on first use: building needs
+  git, patch, network access and 2 minutes, and the package already ships
+  a prebuilt `hxc.com`.
+
+Sizes (fat APE, `cosmocc -O2`, the port as of this change):
+
+| Binary | stubs | mbedtls + libuv |
+| --- | ---: | ---: |
+| the port, `backend/build.sh port` (`hih.com`; `haxe-in-haxe.com` adds its std zip) | 19.5 MB (gzip 7.1 MB) | 21.2 MB (gzip 7.9 MB) |
+| `haxe-in-haxe.com` (`site/build.sh`, with its std zip; the site's limit is 25 MiB per file) | | 21.6 MB |
+| haxelib package `hxc.zip` (`hxc.com` + `cosmo/`) | about 8.1 MB (estimated) | 10.4 MB |
+| `-D hxc.static` user program (`backend/bench/natives/Tls.hx`) | | 3.0 MB (`-D hxc.ssl`), 3.3 MB (`hxc.ssl` + `hxc.uv`) |
+
+Checked on Linux x86-64 (the APE started through `sh`):
+
+- Conformance with the real-ssl/uv `hih.com`: 275 PASS + 7 EXPECTED-FAILURE;
+  macro cases 66/66; `tests/threads` 138/139 (unchanged: `TestEval.testNative`
+  needs `eval.luv.Thread`).
+- `backend/bench/natives/Luv.hx` in `--interp` and in a macro (`hih.com` and
+  the package's `hxc.com`; `haxe-in-haxe.com` in `--interp`): timers, a TCP echo between two handles, file
+  system requests (write, stat, read, unlink, ENOENT), `Process.spawn` with a
+  pipe and the exit status, idle handles, uptime/CPU/memory queries. All
+  pass, with the same output as the reference compiler.
+- `backend/bench/natives/Tls.hx` (`--run`) against a local `openssl
+  s_server` with a certificate signed by a local CA: handshake and GET
+  without verification, verified with the CA, wrong host name rejected,
+  system CAs loaded (512 from `/etc/ssl/certs/ca-certificates.crt`) and not
+  trusting the local CA, and a real HTTPS GET of `https://example.com/`
+  verified with the system CAs. All pass in `hih.com`, `haxe-in-haxe.com`, in the package's
+  `hxc.com`, in a `-D hxc.static -D hxc.ssl` program built through the
+  installed package (`haxelib newrepo`), in the same program built natively
+  (tcc, `-D hxc.ssl`, system mbedtls) and in the reference compiler.
+- The stub builds still build (`eval.luv` throws "not supported" in them),
+  and native builds with the system libraries still work.
+- Not run: the aarch64 half (no `qemu-aarch64` here), macOS, Windows and
+  the BSDs. Their CA certificate sources (macOS `/etc/ssl/cert.pem`, the
+  BSD lists, Windows' "Root" store through `crypt32.dll`) and libuv's poll
+  backend on them are untested.
+
 ## Next steps, if adopted
 
 - Find the source of the slowdown (perf on a cosmo build, or a glibc build
   with GCC 14 for comparison).
 - Run the aarch64 half (`hih.aarch64.elf`, or the APE on an arm64 host), and
-  try the binary on macOS and Windows, including the 16 GB reservations.
+  try the binary on macOS and Windows, including the 16 GB reservations, TLS
+  (system CA certificates) and `eval.luv`.
 - Set up a release job: tcc stays the development compiler; cosmocc builds
   the downloadable binary.
