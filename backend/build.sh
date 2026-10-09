@@ -31,10 +31,11 @@ fi
 HAXE_STD_PATH=${HAXE_STD_PATH:-$PWD/haxe/std} node --stack-size=65500 bin/backend/wbk.js "$OUT/prog" \
 	-cp backend/std $ARGS --custom-target hxc ${HXFLAGS:-} > "$OUT/wbk.log" 2>&1 || { cat "$OUT/wbk.log"; exit 1; }
 # slots are read as int32/double/pointer through casts (FI/FD/FP): no strict aliasing
-$CC -w -fno-strict-aliasing -I backend/rt "$OUT/prog.c" backend/rt/rt*.c -lm -o "$OUT/$BIN"
+# without mbedtls/libuv: their natives fail when called (RT_LIBS="-lmbedtls -lmbedx509 -lmbedcrypto -luv" and RT_NO= to link them)
+$CC -w -fno-strict-aliasing ${RT_NO--DHXC_NO_SSL -DHXC_NO_UV} -I backend/rt "$OUT/prog.c" backend/rt/rt*.c -lm ${RT_LIBS:-} -o "$OUT/$BIN"
 # linear-memory wasm, compiled as C++ so try/catch uses wasm exception handling
 if [ -n "${EMXX:-}" ]; then
-	for f in backend/rt/rt*.c; do emcc -O2 -w -c -fwasm-exceptions -I backend/rt "$f" -o "$OUT/$(basename "$f" .c)_wasm.o"; done
+	for f in backend/rt/rt*.c; do emcc -O2 -w -c -fwasm-exceptions -DHXC_NO_NET -DHXC_NO_SSL -DHXC_NO_UV -I backend/rt "$f" -o "$OUT/$(basename "$f" .c)_wasm.o"; done
 	$EMXX -O2 -w -x c++ -fwasm-exceptions -I backend/rt -c "$OUT/prog.c" -o "$OUT/prog_wasm.o"
 	$EMXX -O2 -fwasm-exceptions -sALLOW_MEMORY_GROWTH=1 -sMAXIMUM_MEMORY=4GB -sINITIAL_MEMORY=64MB -sSTACK_SIZE=8MB -sEXIT_RUNTIME=1 \
 		"$OUT/prog_wasm.o" "$OUT"/rt*_wasm.o -o "$OUT/prog_linear.js"

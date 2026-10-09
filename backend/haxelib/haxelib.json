@@ -1,0 +1,12 @@
+{
+	"name": "hxc",
+	"url": "https://github.com/benmerckx/haxe-in-haxe",
+	"license": "GPL",
+	"tags": ["c", "native", "target", "cosmopolitan"],
+	"description": "EXPERIMENTAL: compiles Haxe to C and to a native binary with the haxe-in-haxe compiler (bundled as a portable binary). `haxelib run hxc build.hxml`.",
+	"version": "0.1.0",
+	"releasenote": "First package: the hxc compiler as a Cosmopolitan APE binary, the C runtime and the hxc std.",
+	"contributors": ["benmerckx"],
+	"main": "Run",
+	"dependencies": {}
+}
