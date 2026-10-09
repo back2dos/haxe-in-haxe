@@ -135,8 +135,8 @@ class EmitC {
 		};
 
 	function assignTypes() {
-		var rtNames = ["None", "String", "Int", "Float", "Bool", "Array", "ArrayData", "ArrayData", "haxe.io.Bytes", "haxe.io.BytesBuffer", "StringBuf", "Ref", "Ref", "Ref", "Class", "Overflow", "Native"];
-		var rtSlots:Array<Array<Null<Ty>>> = [[], [], [TI32], [TF64], [TBool], [TI32, TRef(RAny)], [], [], [], [TI32, TRef(RAny)], [TI32, TRef(RAny)], [TRef(RAny)], [TI32], [TF64], [TI32], [], []];
+		var rtNames = ["None", "String", "Int", "Float", "Bool", "Array", "ArrayData", "ArrayData", "haxe.io.Bytes", "haxe.io.BytesBuffer", "StringBuf", "Ref", "Ref", "Ref", "Class", "Overflow", "Native", "ArrayIterator"];
+		var rtSlots:Array<Array<Null<Ty>>> = [[], [], [TI32], [TF64], [TBool], [TI32, TRef(RAny)], [], [], [], [TI32, TRef(RAny)], [TI32, TRef(RAny)], [TRef(RAny)], [TI32], [TF64], [TI32], [], [], [TRef(RAny), TI32]];
 		for (i in 0...T_FIRST)
 			addType(entry(i < rtNames.length ? rtNames[i] : "Reserved", "TK_RUNTIME", i < rtSlots.length ? rtSlots[i] : []));
 		for (c in p.classes) {
@@ -198,6 +198,11 @@ class EmitC {
 			}
 			types[c.tindex].methods = ms;
 		}
+		// the runtime's array iterator (Iterable.iterator() on an Array): methods in rt_dyn.c
+		types[17].methods = [
+			{name: "hasNext", fn: "hx_arrayiter_hasNext", sig: p.sig([], TBool).id},
+			{name: "next", fn: "hx_arrayiter_next", sig: p.sig([], TRef(RAny)).id}
+		];
 		// one bound-method closure type per signature: code, this, method
 		for (s in p.sigs) {
 			var t = entry("<bound>", "TK_BOUND", [TI32, TRef(RAny), TI32]);

@@ -52,6 +52,7 @@ enum {
 	T_TYPEOBJ, // a Class<T>/Enum<T> value: slot 0 = described type index
 	T_OVERFLOW, // K_PARR: dynamic fields of an anonymous object: (name, value) pairs
 	T_NATIVE, // K_RAW: a native handle (FILE *, process), slot 0
+	T_ARRAYITER, // Array iterator for structural iterator() calls: slot 0 array, slot 1 index
 	T_FIRST = 32
 };
 
@@ -153,16 +154,19 @@ static inline void rt_set_ptr(void *obj, void **slot, void *val) {
 #define RT_UNROOT(n) (rt_sp -= (n))
 
 // ---- exceptions: setjmp handlers natively, C++ try/catch under Emscripten
-#if defined(__EMSCRIPTEN__) || defined(__TINYC__)
+// Not __builtin_setjmp: GCC models its receiver as reached from the setjmp
+// point only, so at -O2 a handler's loads (rt_exn, slots the try body wrote)
+// can be hoisted above the calls that throw. setjmp is returns_twice, which
+// GCC treats conservatively. _setjmp does not save the signal mask.
 #include <setjmp.h>
+#if defined(__EMSCRIPTEN__) || defined(__TINYC__)
 #define RT_SETJMP(b) setjmp(b)
 #define RT_LONGJMP(b) longjmp(b, 1)
-typedef jmp_buf rt_jmpbuf;
 #else
-#define RT_SETJMP(b) __builtin_setjmp(b)
-#define RT_LONGJMP(b) __builtin_longjmp(b, 1)
-typedef void *rt_jmpbuf[5];
+#define RT_SETJMP(b) _setjmp(b)
+#define RT_LONGJMP(b) _longjmp(b, 1)
 #endif
+typedef jmp_buf rt_jmpbuf;
 typedef struct rt_handler {
 	rt_jmpbuf buf;
 	struct rt_handler *prev;
@@ -269,6 +273,9 @@ double hx_aget_f_slow(void *a, int32_t i);
 void *hx_aget_p_slow(void *a, int32_t i);
 void hx_aset_slow(void **slot, int32_t i, int32_t kind, uint64_t v);
 void hx_apush_slow(void **slot, int32_t kind, uint64_t v);
+
+int32_t hx_arrayiter_hasNext(void *it);
+void *hx_arrayiter_next(void *it);
 
 // ---- closures: slot 0 is the code pointer
 #define CLOS_FN(c) FP(c, 0)

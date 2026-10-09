@@ -289,6 +289,25 @@ static uint64_t from_boxed(void *v, char k) {
 	}
 }
 
+int32_t hx_arrayiter_hasNext(void *it) { return FI(it, 1) < ARR_LEN(FP(it, 0)); }
+
+void *hx_arrayiter_next(void *it) {
+	int32_t i = FI(it, 1);
+	FI(it, 1) = i + 1;
+	return hx_aget_p_slow(FP(it, 0), i);
+}
+
+static void *array_iterator(void *a) {
+	RT_ROOT(a);
+	void *it = rt_alloc(2, T_ARRAYITER, K_OBJ);
+	RT_RELOAD(a);
+	RT_UNROOT(1);
+	FP(it, 0) = a; // it is young
+	return it;
+}
+
+static int call_builtin(void *o, const char *nm, int32_t n, void **slots, void **res);
+
 uint64_t hx_anon_call_slow(void *o, int32_t fid, int32_t sig, uint64_t *args) {
 	const char *k = rt_sig_keys[sig];
 	int32_t n = (int32_t)(strchr(k, '_') - k);
@@ -315,8 +334,11 @@ uint64_t hx_anon_call_slow(void *o, int32_t fid, int32_t sig, uint64_t *args) {
 		slots[i] = b;
 	}
 	RT_RELOAD(o);
-	void *f = hx_anon_get_slow(o, fid);
-	void *r = call_boxed(f, slots, n);
+	void *r;
+	if (!(o && call_builtin(o, fid_name(fid), n, slots, &r))) {
+		void *f = hx_anon_get_slow(o, fid);
+		r = call_boxed(f, slots, n);
+	}
 	rt_sp = slots;
 	RT_UNROOT(1);
 	return from_boxed(r, rk);
@@ -400,22 +422,10 @@ void *String_toLowerCase(void *s);
 void *String_toUpperCase(void *s);
 void *String_split(void *s, void *delim);
 
-static int call_builtin(void *o, void *name, void *args, void **res) {
+static int call_builtin(void *o, const char *nm, int32_t n, void **slots, void **res) {
 	uint32_t t = TINDEX(o);
-	if ((t != T_ARRAY && t != T_STRING) || STR_LEN(name) > 30) return 0;
-	char nm[128];
-	nm[hx_str_utf8_into(name, nm)] = 0;
-	int32_t n = args ? ARR_LEN(args) : 0;
-	// reading elements may box (Int arrays): keep everything rooted meanwhile
-	RT_ROOT(o);
-	RT_ROOT(args);
-	void *a0 = n > 0 ? hx_aget_p_slow(args, 0) : 0;
-	RT_ROOT(a0);
-	RT_RELOAD(args);
-	void *a1 = n > 1 ? hx_aget_p_slow(args, 1) : 0;
-	RT_RELOAD(a0);
-	RT_RELOAD(o);
-	RT_UNROOT(3);
+	if (t != T_ARRAY && t != T_STRING) return 0;
+	void *a0 = n > 0 ? slots[0] : 0, *a1 = n > 1 ? slots[1] : 0;
 #define IS(s) (strcmp(nm, s) == 0)
 	if (t == T_STRING) {
 		if (IS("charAt")) *res = String_charAt(o, hx_unbox_int(a0));
@@ -435,7 +445,7 @@ static int call_builtin(void *o, void *name, void *args, void **res) {
 	if (IS("join")) *res = Array_join(o, a0);
 	else if (IS("push")) {
 		RT_ROOT(o);
-		hx_apush_slow(o_root, AK_PTR, (uint64_t)(uintptr_t)a0);
+		hx_apush_slow(o_root, AK_PTR, (uint64_t)(uintptr_t)&slots[0]);
 		RT_RELOAD(o);
 		RT_UNROOT(1);
 		*res = hx_box_int(ARR_LEN(o));
@@ -456,14 +466,37 @@ static int call_builtin(void *o, void *name, void *args, void **res) {
 	else if (IS("sort")) Array_sort(o, a0);
 	else if (IS("filter")) *res = Array_filter(o, a0);
 	else if (IS("map")) *res = Array_map(o, a0);
+	else if (IS("iterator")) *res = array_iterator(o);
 	else return 0;
 #undef IS
 	return 1;
 }
 
 void *hx_dyn_call_field(void *o, void *name, void *args) {
-	void *r;
-	if (o && call_builtin(o, name, args, &r)) return r;
+	uint32_t t = o ? TINDEX(o) : 0;
+	if ((t == T_ARRAY || t == T_STRING) && STR_LEN(name) < 30) {
+		char nm[128];
+		nm[hx_str_utf8_into(name, nm)] = 0;
+		// the arguments boxed into rooted slots
+		int32_t n = args ? ARR_LEN(args) : 0;
+		RT_ROOT(o);
+		RT_ROOT(args);
+		void **slots = rt_sp;
+		rt_sp += n;
+		for (int32_t i = 0; i < n; i++)
+			slots[i] = 0;
+		for (int32_t i = 0; i < n; i++) {
+			void *v = hx_aget_p_slow(*args_root, i);
+			slots[i] = v;
+		}
+		void *r;
+		int ok = call_builtin(*o_root, nm, n, slots, &r);
+		rt_sp = slots;
+		RT_UNROOT(2);
+		if (ok) return r;
+		RT_RELOAD(o);
+		RT_RELOAD(args);
+	}
 	RT_ROOT(args);
 	void *f = hx_dyn_get(o, name);
 	RT_RELOAD(args);

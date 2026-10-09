@@ -39,6 +39,9 @@ def runners(reference):
         "jvm": ["java", "-Xss512m", "-XX:+UnlockDiagnosticVMOptions", "-XX:-BytecodeVerificationRemote", "-XX:-BytecodeVerificationLocal", "-jar", str(BIN / "hih.jar")],
         "js": ["node", "--stack-size=65500", str(BIN / "hih.js")],
         "go": [str(BIN / "hih-go")],
+        # backend/ (hxc target): sh backend/build.sh port; hih is the tcc build, hih_o2 gcc -O2
+        "hxc": [str(ROOT / "bin/backend/hih/hih")],
+        "hxc-o2": [str(ROOT / "bin/backend/hih/hih_o2")],
     }
 
 
