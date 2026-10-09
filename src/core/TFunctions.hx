@@ -69,6 +69,8 @@ class TFunctions {
 		var id = varUid.add(1) + 1;
 		return {vKind:kind,vName:n,vType:t,vId:id,vExtra:null,vMeta:[],vPos:p,vFlags:switch kind {case VUser(TVOLocalFunction):intOfVarFlag(VFinal);case _:0;}};
 	}
+	// `let uid = fst alloc_var' in Atomic.fetch_and_add uid 1 + 1` (hxb_reader_api_typeload#get_var_id).
+	public static function allocVarId():Int return varUid.add(1) + 1;
 	public static function allocMid():Int return moduleUid.add(1) + 1;
 	public static function mk(e:TExprDef,t:T,p:Pos):TExpr {core.ds.GcPolicy.tick(); return {eexpr:e,etype:t,epos:p};}
 	public static function mkBlock(e:TExpr):TExpr return switch e.eexpr {case TBlock(_):e;case _:mk(TBlock([e]),e.etype,e.epos);};

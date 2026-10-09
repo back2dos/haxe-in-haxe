@@ -175,7 +175,10 @@ class Setup {
   };
  }
  public static function initNativeLibs(com:CommonContext,nativeLibs:Array<compiler.ParsedArg.NativeLibArg>):Void {
-  if(nativeLibs.length>0)throw new ArgumentError("Native-library and HXB-library input require a later milestone");
+  // Native lib pass 1: Register
+  var rev=nativeLibs.copy();rev.reverse();var fl=[for (lib in rev) context.NativeLibraryHandler.addNativeLib(com,lib)];
+  // Native lib pass 2: Initialize
+  for (f in fl) f();
  }
  public static function createTyperContext(com:CommonContext,macros:Dynamic):Typer {
   var buf=new StringBuf();buf.add("Defines: ");var keys:Array<String>=[for (k in com.defines.values.keys()) k];keys.sort(Reflect.compare);for (k in keys) {var v=com.defines.values.get(k);buf.add(v=="1"?k+";":k+"="+v+";");}
