@@ -167,7 +167,10 @@ passed.
 
 Known limits:
 
-- Display requests (`--display`) fail explicitly until display is ported.
+- Display requests work in batch mode (see the display section); `server/*`
+  JSON-RPC methods through a server are not covered by a harness yet, and
+  `server/module` still raises (it needs `hxb_reader_api_com` in
+  `displayJson.ml`).
 - The pinned upstream rejects `--wait stdio` ("Invalid host/port"); so does
   the port. The host socket API is IPv4 only: an IPv6 address fails with a
   Failure, where the reference fails with `EAFNOSUPPORT` in this environment.
@@ -307,6 +310,13 @@ structurally, and uncaught exceptions print `Printexc` text.
 
 HXB conformance after this work: 275 identical + 7 expected failures; macro
 cases 66/66; `test/interp.py`: 269 identical, the 3 known differences below.
+
+After merging the server/HXB-reader branch (cache tables back to OcamlHashtbl
+so display output keeps OCaml's order): display default run 679/679,
+conformance `--hxb-lib` 275 + 7 expected failures, macro cases 66/66,
+`test/server.py` 587/587 with `-D disable-hxb-cache` and with the HXB cache,
+`test/haxelib.py` 7/7 and `--server` 14/14, `test/upstream.py misc` 684 tests
+with 0 failures (5 recorded skips), bootstrap build.
 
 ## Execution: `--interp` and `--run` — 2026-10-08
 
