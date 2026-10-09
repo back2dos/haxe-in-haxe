@@ -128,7 +128,7 @@ class Compiler {
   if(actx.classes.length==1&&actx.classes[0].pack.length==0&&actx.classes[0].name=="Std"&&!actx.forceTyping){if(actx.cmds.length==0&&!actx.didSomething)actx.raiseUsage();}
   else {
    var typed=Timer.time(com.timerCtx,["typing"],function(_:Null<Bool>)return doType(com,mctx,actx,null),null),tctx=typed.typer;
-   // DisplayProcessing.handle_display_after_typing: display modes are rejected above, so only its DMNone branch applies.
+   // DisplayProcessing.handle_display_after_typing: only its non-display branch (display services are a later milestone)
    if(com.display.dmsKind==DMNone&&com.partScope.hasError&&Common.isCompilation(com))throw new Abort();
    var ectx=filters.exception.ExceptionInit.createExceptionContext(tctx);finalizeTyping(com,tctx);codegen.Dump.maybeGenerateDump(com,AfterTyping);
    var isCompilation=Common.isCompilation(com);com.callbacks.addAfterSave(function(){ServerCache.afterSave(sctx,com);if(isCompilation&&com.hxbWriterConfig!=null)Generate.checkHxbOutput(com,com.hxbWriterConfig);});

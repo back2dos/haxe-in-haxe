@@ -62,11 +62,12 @@ class Key {
   if(s0!=null) return "s" + s0;
   // Type paths (module and type tables) get their own encoding: the parts
   // joined by control characters, which identifiers cannot contain. Cheaper
-  // than visit() below (no closure, StringBuf or number formatting).
+  // than visit() below (no closure, StringBuf or number formatting). The
+  // part count keeps [] and [""] (a macro-defined empty package) apart.
   // GlobalTypePath is a class, so these keys never meet the structural
   // {name, pack} encoding in the same table.
   var tp0=asTypePath(value);
-  if(tp0!=null && tp0.name!=null && tp0.pack!=null) return "\x01" + tp0.pack.join("\x02") + "\x03" + tp0.name;
+  if(tp0!=null && tp0.name!=null && tp0.pack!=null) return "\x01" + tp0.pack.length + "\x02" + tp0.pack.join("\x02") + "\x03" + tp0.name;
   return canonicalSlow(value);
  }
 
