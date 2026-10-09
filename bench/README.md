@@ -19,6 +19,29 @@ HL_STATIC="libhl.a fmt.o dxt.o sha1.o" sh bench/build.sh hlc   # static link
 LD_LIBRARY_PATH=/path/to/patched/hashlink HAXE_REFERENCE=haxe/haxe python3 bench/run.py -n 7
 ```
 
+## hxc backend: faster than the OCaml compiler (2026-10-09)
+
+The port compiled by `backend/` (the hxc target: C, gcc -O2) now beats the
+reference. CPU time (user + system), minimum of 3 runs, `-D disable-parallelism`,
+outputs byte-identical:
+
+| Workload | OCaml reference | hxc (gcc -O2) |
+| --- | ---: | ---: |
+| self (the port, 52k lines, runs macros) | 4.94 s | 3.89–4.08 s |
+| 282 conformance cases, summed | 18.05 s | 16.79 s (faster on 220) |
+| 66 macro cases, summed | 12.12 s | 10.49 s (faster on all) |
+| hello / 17 std modules | 0.11 s / 0.20 s | 0.11 s / 0.18 s |
+
+Peak RSS on `self`: 694 MB against 462 MB. What mattered, in order:
+depth-first copying in the GC (the compiler is memory-latency bound: an
+object's descendants now sit right after it, in the order its tree walks
+visit them; −15% on `self`), pre-faulting the old space in 32 MB batches,
+keeping the from-space resident, and smaller runtime costs (no data block
+for empty arrays, field ids for literal Dynamic names, inline string
+helpers, lazily allocated map indexes). Nursery and heap sizes stay at
+generic defaults (`RT_MINOR_KB`, `RT_OLD_MB`) rather than being tuned to this
+benchmark.
+
 ## Experimental HXB → native/wasm backend: go/no-go (2026-10-09)
 
 Details, numbers and caveats are in [WASM-BACKEND.md](WASM-BACKEND.md);
