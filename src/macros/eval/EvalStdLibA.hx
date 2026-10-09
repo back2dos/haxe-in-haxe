@@ -1547,7 +1547,7 @@ class StdFileInput {
 	public static final readByte = EvalEncode.vifun0(vthis -> {
 		var t = thisValue(vthis);
 		var i = try {
-			t.ch.readByte();
+			EvalLock.blocking(() -> t.ch.readByte());
 		} catch (_:Dynamic) {
 			t.eof.v = true;
 			raiseEof();
@@ -1562,7 +1562,7 @@ class StdFileInput {
 		var len = EvalDecode.decodeInt(len);
 		if (pos < 0 || len < 0 || pos > bytes.length - len) throw new InvalidArgument("input");
 		// `input` returns 0 at end of file; the host raises Eof
-		var i = if (len == 0) 0 else try t.ch.readBytes(bytes, pos, len) catch (_:haxe.io.Eof) 0;
+		var i = if (len == 0) 0 else try EvalLock.blocking(() -> t.ch.readBytes(bytes, pos, len)) catch (_:haxe.io.Eof) 0;
 		if (i == 0) {
 			t.eof.v = true;
 			raiseEof();
@@ -1930,11 +1930,14 @@ class StdLock {
 		var lock = thisValue(vthis);
 		switch timeout {
 			case VNull:
-				lock.lcond.acquire();
-				while (lock.lcount == 0)
-					lock.lcond.wait();
-				lock.lcount = lock.lcount - 1;
-				lock.lcond.release();
+				EvalLock.blocking(() -> {
+					lock.lcond.acquire();
+					while (lock.lcount == 0)
+						lock.lcond.wait();
+					lock.lcount = lock.lcount - 1;
+					lock.lcond.release();
+					true;
+				});
 				return VTrue;
 			case _:
 				var timeout = EvalDecode.num(timeout);
@@ -1949,7 +1952,7 @@ class StdLock {
 						} else {
 							lock.lcond.release();
 							if (Sys.time() >= deadline) return VFalse;
-							else Sys.sleep(0.0);
+							else EvalLock.yieldNow();
 						}
 					}
 				}

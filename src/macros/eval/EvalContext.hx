@@ -499,6 +499,7 @@ class EvalContext {
 
 	public static function pushEnvironment(ctx:Context, info:EnvInfo):Env {
 		core.ds.GcPolicy.tick(); // macro code allocates without typing anything
+		EvalLock.tick();
 		var eval = getEval(ctx);
 		var timer = if (ctx.detailTimes) core.Timer.startTimer(ctx.timerCtx, ["macro", "execution", kindName(eval, info.kind)]) else noTimer;
 		var debug = if (ctx.debug.supportDebugger || ctx.detailTimes) new EnvDebug(timer, [], 0, noExpr, Globals.nullPos) else noDebug;

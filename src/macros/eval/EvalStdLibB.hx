@@ -592,7 +592,11 @@ class StdSemaphore {
 	}
 
 	public static final acquire = EvalEncode.vifun0(vthis -> {
-		thisValue(vthis).acquire();
+		var sem = thisValue(vthis);
+		if (!sem.tryAcquire()) EvalLock.blocking(() -> {
+			sem.acquire();
+			true;
+		});
 		VNull;
 	});
 
@@ -608,7 +612,7 @@ class StdSemaphore {
 					while (true) {
 						if (sem.tryAcquire()) return VTrue;
 						else if (Sys.time() >= t) return VFalse;
-						else Sys.sleep(0.0);
+						else EvalLock.yieldNow();
 					}
 				}
 				loop();
@@ -632,7 +636,7 @@ class StdCondition {
 	// The host condition owns its mutex: Mutex.lock cond.cmutex
 	public static final acquire = EvalEncode.vifun0(vthis -> {
 		var cond = thisValue(vthis);
-		cond.cond.acquire();
+		EvalLock.acquireCondition(cond.cond);
 		VNull;
 	});
 
@@ -649,7 +653,10 @@ class StdCondition {
 
 	public static final wait = EvalEncode.vifun0(vthis -> {
 		var c = thisValue(vthis);
-		c.cond.wait();
+		EvalLock.blocking(() -> {
+			c.cond.wait();
+			true;
+		});
 		VNull;
 	});
 
@@ -693,7 +700,8 @@ class StdNativeProcess {
 	});
 
 	public static final exitCode = EvalEncode.vifun0(vthis -> {
-		thisValue(vthis).exit().vint();
+		var p = thisValue(vthis);
+		EvalLock.blocking(() -> p.exit()).vint();
 	});
 
 	public static final getPid = EvalEncode.vifun0(vthis -> {
@@ -709,11 +717,11 @@ class StdNativeProcess {
 	});
 
 	public static final readStderr = EvalEncode.vifun3((vthis, bytes, pos, len) -> {
-		try call((p, b, pos, len) -> p.readStderr(b, pos, len), vthis, bytes, pos, len).vint() catch (_:Dynamic) EvalContext.excString("Could not read stderr");
+		try call((p, b, pos, len) -> EvalLock.blocking(() -> p.readStderr(b, pos, len)), vthis, bytes, pos, len).vint() catch (_:Dynamic) EvalContext.excString("Could not read stderr");
 	});
 
 	public static final readStdout = EvalEncode.vifun3((vthis, bytes, pos, len) -> {
-		try call((p, b, pos, len) -> p.readStdout(b, pos, len), vthis, bytes, pos, len).vint() catch (_:Dynamic) EvalContext.excString("Could not read stdout");
+		try call((p, b, pos, len) -> EvalLock.blocking(() -> p.readStdout(b, pos, len)), vthis, bytes, pos, len).vint() catch (_:Dynamic) EvalContext.excString("Could not read stdout");
 	});
 
 	public static final closeStdin = EvalEncode.vifun0(vthis -> {
@@ -725,7 +733,7 @@ class StdNativeProcess {
 	});
 
 	public static final writeStdin = EvalEncode.vifun3((vthis, bytes, pos, len) -> {
-		call((p, b, pos, len) -> p.writeStdin(b, pos, len), vthis, bytes, pos, len).vint();
+		call((p, b, pos, len) -> EvalLock.blocking(() -> p.writeStdin(b, pos, len)), vthis, bytes, pos, len).vint();
 	});
 }
 
@@ -963,7 +971,7 @@ class StdSocket {
 	public static final accept = EvalEncode.vifun0(vthis -> {
 		var self = thisValue(vthis);
 		#if (target.name == "hxc" || hl)
-		var socket = check(SocketHost.accept(self), "accept");
+		var socket = check(EvalLock.blocking(() -> SocketHost.accept(self)), "accept");
 		EvalEncode.encodeInstance(EvalHash.key_eval_vm_NativeSocket, ISocket(socket));
 		#else
 		StdLibBHelpers.socketsNotSupported();
@@ -997,7 +1005,7 @@ class StdSocket {
 		var host = EvalDecode.decodeI32(host);
 		var port = EvalDecode.decodeInt(port);
 		#if (target.name == "hxc" || hl)
-		check(SocketHost.connect(self, host, port), "connect");
+		check(EvalLock.blocking(() -> SocketHost.connect(self, host, port)), "connect");
 		VNull;
 		#else
 		StdLibBHelpers.socketsNotSupported();
@@ -1039,7 +1047,7 @@ class StdSocket {
 		var pos = EvalDecode.decodeInt(pos);
 		var len = EvalDecode.decodeInt(len);
 		#if (target.name == "hxc" || hl)
-		VInt32(check(SocketHost.recv(self, buf, pos, len), "recv"));
+		VInt32(check(EvalLock.blocking(() -> SocketHost.recv(self, buf, pos, len)), "recv"));
 		#else
 		StdLibBHelpers.socketsNotSupported();
 		#end
@@ -1049,7 +1057,8 @@ class StdSocket {
 		#if (target.name == "hxc" || hl)
 		var buf = Bytes.alloc(1);
 		buf.set(0, 0);
-		check(SocketHost.recv(thisValue(vthis), buf, 0, 1), "recv");
+		var self = thisValue(vthis);
+		check(EvalLock.blocking(() -> SocketHost.recv(self, buf, 0, 1)), "recv");
 		VInt32(buf.get(0));
 		#else
 		thisValue(vthis);
@@ -1081,7 +1090,7 @@ class StdSocket {
 		var readFds = [for (p in read) p.fd];
 		var writeFds = [for (p in write) p.fd];
 		var othersFds = [for (p in others) p.fd];
-		check(SocketHost.select(readFds, writeFds, othersFds, timeout), "select");
+		check(EvalLock.blocking(() -> SocketHost.select(readFds, writeFds, othersFds, timeout)), "select");
 		// Unix.select lists the ready descriptors in reverse input order; List.assq
 		// maps each back to the first pair holding it
 		function ready(pairs:Array<{fd:Int, v:Value}>, fds:Array<Int>):Array<Value> {
@@ -1118,7 +1127,7 @@ class StdSocket {
 		var pos = EvalDecode.decodeInt(pos);
 		var len = EvalDecode.decodeInt(len);
 		#if (target.name == "hxc" || hl)
-		VInt32(check(SocketHost.send(self, buf, pos, len), "send"));
+		VInt32(check(EvalLock.blocking(() -> SocketHost.send(self, buf, pos, len)), "send"));
 		#else
 		StdLibBHelpers.socketsNotSupported();
 		#end
@@ -1132,7 +1141,7 @@ class StdSocket {
 		if (char < 0 || char > 255) throw new InvalidArgument("char_of_int");
 		var buf = Bytes.alloc(1);
 		buf.set(0, char);
-		check(SocketHost.send(self, buf, 0, 1), "send");
+		check(EvalLock.blocking(() -> SocketHost.send(self, buf, 0, 1)), "send");
 		VNull;
 		#else
 		StdLibBHelpers.socketsNotSupported();
@@ -1610,7 +1619,7 @@ class StdSys {
 	public static final getChar = EvalEncode.vfun1(echo -> {
 		var echo = EvalDecode.decodeBool(echo);
 		var com = com();
-		CompilerIo.getch(com.requestScope.io, echo).vint();
+		EvalLock.blocking(() -> CompilerIo.getch(com.requestScope.io, echo)).vint();
 	});
 
 	public static final getCwd = EvalEncode.vfun0(() -> {
@@ -1668,7 +1677,10 @@ class StdSys {
 
 	public static final sleep = EvalEncode.vfun1(f -> {
 		var t = EvalDecode.num(f);
-		if (t > 0.0) Sys.sleep(t);
+		if (t > 0.0) EvalLock.blocking(() -> {
+			Sys.sleep(t);
+			true;
+		});
 		VNull;
 	});
 
@@ -1716,7 +1728,10 @@ class StdThread {
 
 	public static final delay = EvalEncode.vfun1(f -> {
 		var t = EvalDecode.num(f);
-		if (t > 0.0) Sys.sleep(t);
+		if (t > 0.0) EvalLock.blocking(() -> {
+			Sys.sleep(t);
+			true;
+		});
 		VNull;
 	});
 
@@ -1745,10 +1760,10 @@ class StdThread {
 		switch thisValue(thread).threadMode {
 			case Domain(_, finished) | Thread(_, finished):
 				// wait, then release again so that later joins return at once
-				finished.wait();
+				EvalLock.blocking(() -> finished.wait());
 				finished.release();
 			case LuvThread(t):
-				t.join();
+				EvalLock.blocking(() -> t.join());
 			case null:
 		}
 		VNull;
@@ -1776,7 +1791,7 @@ class StdThread {
 
 	public static final yield = EvalEncode.vfun0(() -> {
 		// Thread.yield / Domain.cpu_relax upstream
-		Sys.sleep(0.0);
+		EvalLock.yieldNow();
 		VNull;
 	});
 }

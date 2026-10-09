@@ -354,7 +354,12 @@ class Server {
 			var cs = sctx.cs;
 			function loop() {
 				while (true) {
-					rq.semaphore.acquire();
+					// Eval threads left by a request (--interp) run while the worker waits
+					// (it holds the Eval lock otherwise, see macros.eval.EvalLock)
+					macros.eval.EvalLock.blocking(() -> {
+						rq.semaphore.acquire();
+						true;
+					});
 					/* Check for shutdown before doing any work */
 					if (rq.shutdownFlag) {
 						workerShutdown(rq);
