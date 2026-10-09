@@ -16,6 +16,12 @@ so the runners' own nested `haxe` calls use it too.
 The port is the HashLink build test/conformance.py makes
 (test/generated/haxe-in-haxe.hl; HAXE_IN_HAXE_PORT overrides the command).
 Steps excluded on purpose are listed in SKIPPED with the reason.
+
+utest is installed as upstream CI does (`haxelib git utest
+https://github.com/haxe-utest/utest.git`): cloned into
+test/generated/upstream/libs/utest and registered in a local haxelib repo
+(test/generated/upstream/.haxelib), which haxelib finds from the step
+directories below it.
 """
 import os, pathlib, shlex, shutil, subprocess, sys, time
 
@@ -60,11 +66,22 @@ def wrapper(bin_dir: pathlib.Path, reference: bool) -> None:
     (bin_dir / "haxe").chmod(0o755)
 
 
+def setup_libs() -> None:
+    utest = GENERATED / "libs" / "utest"
+    if not utest.exists():
+        subprocess.run(["git", "clone", "-q", "--depth", "1", "https://github.com/haxe-utest/utest.git", str(utest)], check=True)
+    if not (GENERATED / ".haxelib").exists():
+        subprocess.run(["haxelib", "newrepo"], cwd=GENERATED, check=True, stdout=subprocess.DEVNULL)
+    subprocess.run(["haxelib", "dev", "utest", str(utest)], cwd=GENERATED, check=True, stdout=subprocess.DEVNULL)
+
+
 def main() -> None:
     args = sys.argv[1:]
     reference = "--reference" in args
     names = [a for a in args if not a.startswith("--")]
     label = "reference" if reference else "port"
+    GENERATED.mkdir(parents=True, exist_ok=True)
+    setup_libs()
     base = GENERATED / label
     bin_dir = base / "bin"
     wrapper(bin_dir, reference)
