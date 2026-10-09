@@ -19,7 +19,7 @@ class Main {
 							mainClass = c;
 						case _:
 					}
-				var prog = Lower.program(mainClass);
+				var prog = Lower.program(mainClass, com.types);
 				if (Lower.survey) return;
 				sys.io.File.saveContent(out + ".c", EmitC.emit(prog));
 			} catch (e:Dynamic) {

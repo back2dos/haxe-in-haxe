@@ -34,12 +34,14 @@ class ClassInfo {
 	public var name:String; // Haxe dot path
 	public var cname:String; // C identifier prefix
 	public var sup:Null<ClassInfo>;
-	public var fields:Array<{name:String, ty:Ty}> = []; // including inherited, slot 0 = class id
+	public var fields:Array<{name:String, ty:Ty}> = []; // including inherited (the class is the header's type index)
 	public var methods:Map<String, FuncInfo> = new Map(); // own implementations
 	public var ctor:Null<FuncInfo>;
 	public var tindex:Int = -1;
 	public var isInterface = false;
 	public var ifaces:Array<ClassInfo> = []; // implemented interfaces, including inherited ones
+	// statics reachable through the class value (Dynamic access, Reflect): set once the class is used as a value
+	public var statics:Null<Array<{name:String, clos:Null<LambdaInfo>, global:Int}>> = null;
 
 	public function new(name, cname, sup) {
 		this.name = name;
@@ -198,6 +200,7 @@ enum Ex {
 	ECall(f:FuncInfo, args:Array<Ex>);
 	ECallDispatch(sel:Int, sig:SigInfo, args:Array<Ex>); // virtual and interface calls
 	ECallClos(s:SigInfo, clos:Ex, args:Array<Ex>);
+	ECallAnon(name:String, s:SigInfo, obj:Ex, args:Array<Ex>); // obj.name(args) through a structural type: a method or a closure field
 	ECallHost(name:String, args:Array<Ex>, ret:Ty); // runtime function (backend/rt)
 	ENewObj(c:ClassInfo); // zeroed instance; the constructor is called separately
 	ENewEnum(c:CtorInfo, args:Array<Ex>);
@@ -272,6 +275,7 @@ enum Stmt {
 
 class Program {
 	public var classes:Array<ClassInfo> = [];
+	public var interfaces:Array<ClassInfo> = [];
 	public var enums:Array<EnumInfo> = [];
 	public var shapes:Array<ShapeInfo> = [];
 	public var funcs:Array<FuncInfo> = [];

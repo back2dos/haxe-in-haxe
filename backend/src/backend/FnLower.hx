@@ -73,6 +73,10 @@ class FnLower {
 			var v = tf.tfArgs[i].variable;
 			var a = fi.args[i + off];
 			var t = ty(v.vType);
+			// direct calls pass defaults; calls through closures and Dynamic pass null
+			var d = tf.tfArgs[i].defaultValue;
+			if (d != null && Ir.isRef(a.ty) && !strip(d).eexpr.match(TConst(TNull)))
+				out.push(SIf(EBin(RefEq, ELocal(a), ENull(a.ty)), block(() -> out.push(SSet(a, coerceRhs(rhs(d), tyOf(d), a.ty)))), []));
 			var x:Ex = ELocal(a);
 			if (Ir.repr(t) != Ir.repr(a.ty) || a.ty.match(TRef(RClos(_))) && t.match(TRef(RClos(_)))) {
 				var lo = newLocal(v.vName, t);
@@ -231,14 +235,17 @@ class FnLower {
 	// runtime functions that neither allocate nor call back into Haxe code
 	public static var PURE = [
 		"hx_str_eq" => true, "hx_str_cmp" => true, "hx_dyn_eq" => true, "hx_dyn_cmp" => true, "hx_is" => true, "String_length" => true,
-		"String_charCodeAt_i" => true, "hx_str_hash" => true
+		"String_charCodeAt_i" => true, "hx_str_hash" => true, "hxc_Native_strHash" => true, "hxc_Native_objHash" => true, "hxc_Native_refEq" => true,
+		"hx_unbox_int" => true, "hx_unbox_float" => true, "hx_unbox_bool" => true
 	];
 
 	public static function isImpure(e:Ex):Bool
 		return switch e {
-			case ECall(_) | ECallDispatch(_) | ECallClos(_) | ENewObj(_) | ENewEnum(_) | ENewArr(_) | ENewClos(_) | ENewBox(_) | ENewAnon(_) | EBox(_):
+			case ECall(_) | ECallDispatch(_) | ECallClos(_) | ECallAnon(_) | ENewObj(_) | ENewEnum(_) | ENewArr(_) | ENewClos(_) | ENewBox(_) | ENewAnon(_) | EBox(_):
 				true;
 			case ECallHost(n, _, _): !PURE.exists(n);
+			case EArrGet(TRef(RAny), _, _): true; // reading an Int/Float array as Dynamic boxes
+			case EAnonGet(_): true; // the slow path may box
 			case _: false;
 		}
 
@@ -606,7 +613,12 @@ class FnLower {
 				var x = coerce(value(e1), tyOf(e1), TRef(RAny));
 				var c = temp(TRef(RAny), ECallHost(l.native("hx_cast"), [x, EType(typeRef(mt))], TRef(RAny)));
 				coerce(c, TRef(RAny), tyOf(e));
-			case TTypeExpr(mt): EType(typeRef(mt));
+			case TTypeExpr(mt):
+				switch mt {
+					case TClassDecl(c): l.reflectStatics(c);
+					case _:
+				}
+				EType(typeRef(mt));
 			case TField(obj, fa): field(obj, fa, e);
 			case TEnumIndex(e1): EEnumTag(value(e1));
 			case TEnumParameter(e1, ef, i):
@@ -629,6 +641,12 @@ class FnLower {
 			case TBinop(op, a, b): binop(op, a, b, e);
 			case TUnop(op, flag, e1): unop(op, flag, e1, e);
 			case TCall(f, cargs): call(f, cargs, e);
+			case TNew(c, _, cargs) if (Lower.isCore(c, "Array")):
+				var elem = switch tyOf(e) {
+					case TRef(RArr(t)): t;
+					case _: TRef(RAny);
+				};
+				ENewArr(elem, []);
 			case TNew(c, _, cargs) if (c.hasClassFlag(CExtern)):
 				var s = ctorSig(c);
 				var x = temp(TRef(RNative(Lower.nativeName(c))), ECallHost(l.native(Lower.nativeName(c) + "_new"), args(cargs, s, null), TRef(RNative(Lower.nativeName(c)))));
@@ -1098,6 +1116,10 @@ class FnLower {
 				var t = ty(s.ret);
 				var xs = args(cargs, [for (a in s.args) ty(a.type)], null);
 				return coerceRhs(ECallHost(l.native(name), xs, t), t, rt);
+			case TField(obj, FDynamic("cca")) if (tyOf(obj).match(TRef(RStr)) && cargs.length == 1):
+				// StringTools.fastCodeAt / unsafeCodeAt: `untyped s.cca(i)` (0 past the end, as on cpp/hl)
+				var xs = operands([obj, cargs[0]]);
+				return coerceRhs(ECallHost("String_charCodeAt_i", [xs[0], coerce(xs[1], tyOf(cargs[0]), TI32)], TI32), TI32, rt);
 			case TField(_, FStatic(c, cf)):
 				var fn = l.staticFunc(c, cf);
 				var xs = args(cargs, tys(fn), l.defaults.get(fn));
@@ -1164,6 +1186,14 @@ class FnLower {
 				var ci = l.ctorInfo(ef, en);
 				var xs = args(cargs, ci.params, null);
 				return coerceRhs(ENewEnum(ci, xs), TRef(RCtor(ci)), rt);
+			case TField(obj, FAnon(cf) | FInstance(_, _, cf)) if (tyOf(f).match(TRef(RClos(_)))):
+				var s = switch tyOf(f) {
+					case TRef(RClos(s)): s;
+					case _: null;
+				};
+				var o = asLocal(value(obj), tyOf(obj));
+				var xs = args(cargs, s.args, null);
+				return coerceRhs(ECallAnon(cf.cfName, s, ELocal(o), xs), s.ret, rt);
 			case TField(obj, FDynamic(name)):
 				var o = coerce(value(obj), tyOf(obj), TRef(RAny));
 				var xs = args(cargs, [for (_ in cargs) TRef(RAny)], null);

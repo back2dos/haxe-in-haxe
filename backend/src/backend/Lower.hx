@@ -31,16 +31,28 @@ class Lower {
 
 	public function new() {
 		root = new ClassInfo("Object", "Object", null);
-		root.fields.push({name: "__cid", ty: TI32});
 		prog.classes.push(root);
 	}
 
-	public static function program(main:TClass):Program {
+	public static function program(main:TClass, types:Array<core.TType.ModuleType>):Program {
 		var l = new Lower();
 		var mainField = main.clStatics.get("main");
 		l.prog.main = l.staticFunc(main, mainField);
 		l.drain();
 		l.finish();
+		// static initializers run in the order of com.types, which
+		// Finalization.sortTypes arranged for static initialization
+		var order = new Map<TClass, Int>();
+		for (i in 0...types.length)
+			switch types[i] {
+				case TClassDecl(c): order.set(c, i);
+				case _:
+			}
+		var pos = (fi:FuncInfo) -> {
+			var c = l.initOf.get(fi);
+			c != null && order.exists(c) ? order.get(c) : types.length;
+		};
+		l.prog.inits.sort((a, b) -> pos(a) - pos(b));
 		if (survey) l.writeSurvey();
 		return l.prog;
 	}
@@ -96,8 +108,21 @@ class Lower {
 	public static function isCore(c:TClass, name:String):Bool
 		return c.clPath.pack.length == 0 && c.clPath.name == name;
 
+	var methodsDone = 0; // classes whose every method is lowered
+
 	function drain() {
 		while (true) {
+			while (pending.length > 0)
+				pending.shift()();
+			// all methods of every class seen: structural and dynamic access
+			// (Iterator.hasNext, Reflect) reach them through the method tables;
+			// DCE already removed the unused ones
+			while (methodsDone < tclasses.length) {
+				var tc = tclasses[methodsDone++];
+				for (f in tc.clOrderedFields)
+					if (f.cfKind.match(Method(MethNormal | MethInline)) && funcOf(f) != null && !f.hasClassFieldFlag(CfExtern))
+						method(tc, f);
+			}
 			while (pending.length > 0)
 				pending.shift()();
 			// every implementation of a dispatched selector, in every class seen so far
@@ -138,7 +163,7 @@ class Lower {
 	// ---- types
 
 	public function ty(t:T):Ty {
-		var t = TFunctions.follow(t);
+		var t = TFunctions.followWithoutNull(t);
 		return switch t {
 			case TMono(_): TRef(RAny);
 			case TAbstract(a, params):
@@ -189,8 +214,8 @@ class Lower {
 			// interfaces have no layout: values are any object
 			ci = new ClassInfo(core.Globals.sTypePath(c.clPath), nativeName(c), null);
 			ci.isInterface = true;
-			ci.fields = root.fields;
 			classes.set(c, ci);
+			prog.interfaces.push(ci);
 			return ci;
 		}
 		var sup = c.clSuper != null ? classInfo(c.clSuper.cls) : root;
@@ -386,6 +411,22 @@ class Lower {
 	// a closure calling a static function (the function used as a value)
 	var staticClosures = new Map<FuncInfo, LambdaInfo>();
 
+	// the class is used as a value: its statics become reachable dynamically
+	public function reflectStatics(c:TClass) {
+		if (c.hasClassFlag(CExtern) || c.hasClassFlag(CInterface)) return;
+		var ci = classInfo(c);
+		if (ci.statics != null) return;
+		ci.statics = [];
+		for (cf in c.clOrderedStatics)
+			switch cf.cfKind {
+				case Method(MethNormal | MethInline) if (funcOf(cf) != null):
+					ci.statics.push({name: cf.cfName, clos: staticClosure(staticFunc(c, cf)), global: -1});
+				case Var(v) if (isPhysical(c, cf, v) && !v.vRead.match(AccInline)):
+					ci.statics.push({name: cf.cfName, clos: null, global: staticVar(c, cf)});
+				case _:
+			}
+	}
+
 	public function staticClosure(f:FuncInfo):LambdaInfo {
 		var li = staticClosures.get(f);
 		if (li != null) return li;
@@ -457,6 +498,7 @@ class Lower {
 	}
 
 	var initialized = new Map<TClass, Bool>();
+	var initOf = new Map<FuncInfo, TClass>();
 
 	// static variable initializers and __init__ of a class, run at startup in
 	// the order classes are first used
@@ -466,6 +508,7 @@ class Lower {
 		var fi = new FuncInfo(nativeName(c) + "__init");
 		prog.funcs.push(fi);
 		prog.inits.push(fi);
+		initOf.set(fi, c);
 		pending.push(guarded(fi, () -> new FnLower(this, fi, null, null).runInit(c)));
 	}
 
