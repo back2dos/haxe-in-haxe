@@ -118,17 +118,23 @@ class Threads {
 	}
 
 	static function semaphore() {
-		var s = new Semaphore(0), n = 0;
+		// (OS threads run in parallel: n is guarded, and the main thread waits
+		// for the three acquisitions instead of sleeping a fixed time)
+		var s = new Semaphore(0), n = 0, m = new Mutex(), acquired = new Lock();
 		for (i in 0...3)
 			Thread.create(() -> {
 				s.acquire();
+				m.acquire();
 				n++;
+				m.release();
+				acquired.release();
 			});
 		Sys.sleep(0.01);
 		check("semaphore blocks", n == 0);
 		for (i in 0...3) s.release();
-		Sys.sleep(0.01);
-		check("semaphore", n == 3);
+		var all = true;
+		for (i in 0...3) if (!acquired.wait(10)) all = false;
+		check("semaphore", all && n == 3);
 		check("semaphore tryAcquire", !s.tryAcquire());
 		var t0 = Sys.time();
 		check("semaphore timeout", !s.tryAcquire(0.05) && Sys.time() - t0 >= 0.04);
