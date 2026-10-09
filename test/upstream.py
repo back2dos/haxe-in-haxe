@@ -60,6 +60,7 @@ SKIPPED = {
 # misc project hxml (path as the misc runner prints it) -> reason
 MISC_EXCLUDED = {
     "projects/HxbWildcardExclude/compile.hxml": "step 1 compiles with -js next to --hxb (the archive itself is written)",
+    "projects/Issue4660/compile.hxml": "Test.hx runs `haxe -js out.js` and checks the generated JavaScript",
 }
 
 
