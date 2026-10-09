@@ -18,7 +18,7 @@ class AnalyzerTexpr {
  public static function isStackAllocated(c:TClass):Bool return Meta.has(StructAccess,c.clMeta);
  public static function mapValues(f:TExpr->TExpr,e:TExpr,allowControlFlow:Bool = true):{expr:TExpr,finalExpr:Null<TExpr>} {
   var branching = false; var finalExpr = null;
-  function value(e:TExpr):TExpr {if (branching) return f(e); finalExpr = e; return mk(TConst(TNull),e.etype,e.epos);}
+  inline function value(e:TExpr):TExpr {if (branching) return f(e); finalExpr = e; return mk(TConst(TNull),e.etype,e.epos);}
   function loop(complex:Bool,e:TExpr):TExpr return switch e.eexpr {
    case TIf(e1,e2,e3) if (e3 != null):branching = true; var e2 = loop(true,e2); var e3 = loop(true,e3); withExpr(e,TIf(e1,e2,e3));
    case TSwitch(s):branching = true; var cases = s.switchCases.map(c -> ({casePatterns:c.casePatterns,caseExpr:loop(true,c.caseExpr)} : core.TType.TSwitchCase)); var def = s.switchDefault == null ? null : loop(true,s.switchDefault); withExpr(e,TSwitch(mkSwitch(s.switchSubject,cases,def,s.switchExhaustive)));
@@ -62,7 +62,7 @@ class TexprFilter {
    case TUnop(op = Increment | Decrement,flag,e1 = {eexpr:TLocal(_)}):var one = mk(TConst(TInt(1)),com.basic.tint,e1.epos); var assign = withExpr(e,TBinop(OpAssignOp(op == Increment ? OpAdd : OpSub),e1,one)); loop(flag == Prefix ? assign : mk(TBlock([assign,withExpr(assign,TBinop(op == Increment ? OpSub : OpAdd,e1,one))]),assign.etype,assign.epos));
    case TWhile(e1,e2,DoWhile) if (isTrueExpr(e1)):loop(withExpr(e,TWhile(e1,e2,NormalWhile)));
    case TWhile(e1,e2,flag) if (!isTrueExpr(e1)):
-    var p = e.epos; var br = mk(TBreak,tDynamic,p); var not = mk(TUnop(Not,Prefix,Texpr.Builder.mkParent(e1)),e1.etype,e1.epos); function makeIf(eo:Null<TExpr>):TExpr return mk(TIf(not,br,eo),com.basic.tvoid,p);
+    var p = e.epos; var br = mk(TBreak,tDynamic,p); var not = mk(TUnop(Not,Prefix,Texpr.Builder.mkParent(e1)),e1.etype,e1.epos); inline function makeIf(eo:Null<TExpr>):TExpr return mk(TIf(not,br,eo),com.basic.tvoid,p);
     function mapContinue(e:TExpr):TExpr return switch e.eexpr {case TContinue:duplicateTvars(eIdentity,makeIf(e)); case TWhile(_,_,_):e; case _:mapExpr(mapContinue,e);};
     if (flag != NormalWhile) e2 = mapContinue(e2); var condition = makeIf(null); var block = flag == NormalWhile ? concat(condition,e2) : concat(e2,condition); var yes = Texpr.Builder.mkParent(mk(TConst(TBool(true)),com.basic.tbool,p)); loop(mk(TWhile(yes,block,NormalWhile),e.etype,p));
    case _:mapExpr(loop,e);

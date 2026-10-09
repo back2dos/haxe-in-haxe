@@ -60,7 +60,7 @@ class Sanitize {
 					return loop(e.etype);
 				} else return e;
 			case TBinop(op, e1, e2):
-				function swap(op1:Binop, op2:Binop):Bool {
+				inline function swap(op1:Binop, op2:Binop):Bool {
 					var p1 = standardPrecedence(op1); var p2 = standardPrecedence(op2);
 					return p1.left && p1.priority <= p2.priority;
 				}

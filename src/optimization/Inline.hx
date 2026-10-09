@@ -66,10 +66,10 @@ class Inline {
  public static function contextOfScom(scom:SafeContext):InlineContext return {scom:scom,typer:null};
  public static function apiInline(scom:SafeContext,c:TClass,field:String,params:Array<TExpr>,p:Pos):Null<TExpr> {
   function mkTypeexpr(path:GlobalTypePath):TExpr {var m:ModuleDef = try scom.findModule(path) catch (_:NotFound) {throw "Inline.mkTypeexpr";}; addDependency(scom.curclass.clModule,m,MDepFromTyping); for (mt in m.mTypes) switch mt {case TClassDecl(cl) if (Globals.sTypePath(cl.clPath) == Globals.sTypePath(path)):return Texpr.Builder.makeStaticThis(cl,p); case _:} throw "Invalid_argument: Option.get";}
-  function jsSyntax():TExpr return mkTypeexpr({pack:["js"],name:"Syntax"}); function jsBoot():TExpr return mkTypeexpr({pack:["js"],name:"Boot"}); var b = scom.basic;
+  inline function jsSyntax():TExpr return mkTypeexpr({pack:["js"],name:"Syntax"}); inline function jsBoot():TExpr return mkTypeexpr({pack:["js"],name:"Boot"}); var b = scom.basic;
   return switch [Globals.sTypePath(c.clPath),field,params] {
    case ["Std","isOfType",[o,t]] | ["js.Boot","__instanceof",[o,t]] if (scom.platform == Js):
-    function trivial(e:TExpr):Bool return switch e.eexpr {case TConst(_) | TLocal(_):true; case _:false;};
+    inline function trivial(e:TExpr):Bool return switch e.eexpr {case TConst(_) | TLocal(_):true; case _:false;};
     function typeof(name:String):TExpr return mk(TBinop(OpEq,Texpr.Builder.fcall(jsSyntax(),"typeof",[o],b.tstring,p),mk(TConst(TString(name)),b.tstring,p)),b.tbool,p);
     function skipCast(e:TExpr):TExpr return switch e.eexpr {case TCast(inner,null):skipCast(inner); case _:e;};
     switch skipCast(t).eexpr {

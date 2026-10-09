@@ -51,14 +51,14 @@ class OptimizerTexpr {
 		return {mightBeAffected:mightBeAffected, collectModifiedLocals:collectModifiedLocals};
 	}
 	public static function optimizeBinop(scom:context.SafeCom.SafeContext, e:TExpr, op:Binop, e1:TExpr, e2:TExpr):TExpr {
-		function isFloat(t:T):Bool return switch TypeOps.follow(t) { case TAbstract({aPath:{pack:[], name:"Float"}}, _): true; case _: false; };
-		function isNumeric(t:T):Bool return switch TypeOps.follow(t) { case TAbstract({aPath:{pack:[], name:"Float" | "Int"}}, _): true; case _: false; };
+		inline function isFloat(t:T):Bool return switch TypeOps.follow(t) { case TAbstract({aPath:{pack:[], name:"Float"}}, _): true; case _: false; };
+		inline function isNumeric(t:T):Bool return switch TypeOps.follow(t) { case TAbstract({aPath:{pack:[], name:"Float" | "Int"}}, _): true; case _: false; };
 		function constant(c:TConstant):TExpr return TypeOps.mk(TConst(c), e.etype, e.epos);
-		function checkFloat(fn:Float->Float->Float, f1:Float, f2:Float):TExpr {
+		inline function checkFloat(fn:Float->Float->Float, f1:Float, f2:Float):TExpr {
 			var f = fn(f1, f2); var fstr = Numeric.floatRepr(f);
 			return Math.isFinite(f) && Std.parseFloat(fstr) == f ? constant(TFloat(fstr)) : e;
 		}
-		function comparison(a:Float, b:Float):TExpr {
+		inline function comparison(a:Float, b:Float):TExpr {
 			// OCaml compare gives NaN a total ordering; preserve that distinction from IEEE comparisons.
 			var cmp = Math.isNaN(a) ? (Math.isNaN(b) ? 0 : -1) : Math.isNaN(b) ? 1 : a < b ? -1 : a > b ? 1 : 0;
 			return switch op { case OpEq: constant(TBool(cmp == 0)); case OpNotEq: constant(TBool(cmp != 0)); case OpGt: constant(TBool(cmp > 0)); case OpGte: constant(TBool(cmp >= 0)); case OpLt: constant(TBool(cmp < 0)); case OpLte: constant(TBool(cmp <= 0)); case _: e; };
@@ -75,7 +75,7 @@ class OptimizerTexpr {
 			case [TConst(TNull), TConst(TNull)]: switch op { case OpEq: constant(TBool(true)); case OpNotEq: constant(TBool(false)); case _: e; }
 			case [TFunction(_), TConst(TNull)] | [TConst(TNull), TFunction(_)]: switch op { case OpEq: constant(TBool(false)); case OpNotEq: constant(TBool(true)); case _: e; }
 			case [TConst(TInt(a)), TConst(TInt(b))]:
-				function checkOverflow(fn:Int64->Int64->Int64):TExpr {
+				inline function checkOverflow(fn:Int64->Int64->Int64):TExpr {
 					var value = fn(Int64.ofInt(a), Int64.ofInt(b));
 					var iv = value.low;
 					return Int64.compare(Int64.ofInt(iv), value) == 0 ? constant(TInt(iv)) : e;
@@ -93,7 +93,7 @@ class OptimizerTexpr {
 					case _: e;
 				}
 			case [TConst(ca = TFloat(_) | TInt(_)), TConst(cb = TFloat(_) | TInt(_))]:
-				function number(c:TConstant):Float return switch c { case TFloat(f): Std.parseFloat(f); case TInt(i): i; case _: throw "optimizerTexpr: numeric constant"; };
+				inline function number(c:TConstant):Float return switch c { case TFloat(f): Std.parseFloat(f); case TInt(i): i; case _: throw "optimizerTexpr: numeric constant"; };
 				var a = number(ca); var b = number(cb);
 				switch op {
 					case OpAdd: checkFloat((a, b) -> a + b, a, b); case OpDiv: checkFloat((a, b) -> a / b, a, b);

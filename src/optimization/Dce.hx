@@ -69,7 +69,7 @@ class Dce {
  }
  public static function checkAndAddFeature(dce:DceData,s:String):Void {checkFeature(dce,s); var c = dce.curclass; if (c == nullClass) throw "assert: missing DCE class"; dce.addFeatureManager.tryNow(function() c.clModule.mExtra.mFeatures.set(s,true));}
  public static function markField(dce:DceData,c:TClass,cf:TClassField,kind:ClassFieldRefKind):Void {
-  function add(owner:TClass,cf:TClassField):Void if (!hasClassFieldFlag(cf,CfUsed)) {
+  inline function add(owner:TClass,cf:TClassField):Void if (!hasClassFieldFlag(cf,CfUsed)) {
    dce.fieldMarkerMutex.acquire(); if (!hasClassFieldFlag(cf,CfUsed)) {addClassFieldFlag(cf,CfUsed); dce.addedFields.push({cls:owner,field:cf,kind:kind}); dce.markedFields.value.unshift(cf); dce.fieldMarkerMutex.release(); checkFeature(dce,Globals.sTypePath(c.clPath) + "." + cf.cfName);} else dce.fieldMarkerMutex.release();
   }
   switch kind {

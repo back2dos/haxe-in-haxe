@@ -1401,13 +1401,13 @@ class Grammar {
 	}
 
 	static function parseComplexTypeNext(ctx:ParserContext, t:TypeHint, s:S):TypeHint {
-		function makeFun(t2:ComplexType, p2:Pos):TypeHint {
+		inline function makeFun(t2:ComplexType, p2:Pos):TypeHint {
 			return switch t2 {
 				case CTFunction(args, r): {type: CTFunction([t].concat(args), r), pos: punion(t.pos, p2)};
 				case _: {type: CTFunction([t], {type: t2, pos: p2}), pos: punion(t.pos, p2)};
 			}
 		}
-		function makeIntersection(t2:ComplexType, p2:Pos):TypeHint {
+		inline function makeIntersection(t2:ComplexType, p2:Pos):TypeHint {
 			return switch t2 {
 				case CTIntersection(tl): {type: CTIntersection([t].concat(tl)), pos: punion(t.pos, p2)};
 				case _: {type: CTIntersection([t, {type: t2, pos: p2}]), pos: punion(t.pos, p2)};

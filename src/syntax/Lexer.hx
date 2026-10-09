@@ -296,7 +296,7 @@ class Lexer {
 	function numberToken(start:Int):Null<LexedToken> {
 		// candidates in rule order; kind 0 = int, 1 = float, 2 = interval
 		var bestEnd = -1, bestKind = 0;
-		function cand(end:Int, kind:Int) {
+		inline function cand(end:Int, kind:Int) {
 			if (end > bestEnd) {
 				bestEnd = end;
 				bestKind = kind;

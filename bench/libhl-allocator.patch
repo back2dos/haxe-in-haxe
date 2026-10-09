@@ -718,7 +718,7 @@ index 317480e..1303b56 100644
  	varray *a;
  	if( size < 0 ) hl_error("Invalid array size");
 diff --git a/src/std/fun.c b/src/std/fun.c
-index ffe94cc..f5de95b 100644
+index ffe94cc..0747609 100644
 --- a/src/std/fun.c
 +++ b/src/std/fun.c
 @@ -20,6 +20,7 @@
@@ -729,7 +729,27 @@ index ffe94cc..f5de95b 100644
  #include "hlsystem.h"
  
  static void fun_var_args() {
-@@ -135,10 +136,10 @@ HL_PRIM vdynamic* hl_call_method( vdynamic *c, varray *args ) {
+@@ -37,14 +38,17 @@ HL_PRIM vclosure *hl_alloc_closure_void( hl_type *t, void *fvalue ) {
+ 
+ static hl_type *hl_get_closure_type( hl_type *t ) {
+ 	hl_type_fun *ft = t->fun;
+-	if( ft->closure_type.kind != HFUN ) {
++	if( __atomic_load_n(&ft->closure_type.kind, __ATOMIC_ACQUIRE) != HFUN ) {
+ 		if( ft->nargs == 0 ) hl_fatal("assert");
+-		ft->closure_type.kind = HFUN;
++		// Filled in before the kind marks it ready: another thread seeing HFUN
++		// with parent still NULL crashed in hl_wrapper_call. Racing threads
++		// write the same values.
+ 		ft->closure_type.p = &ft->closure;
+ 		ft->closure.nargs = ft->nargs - 1;
+ 		ft->closure.args = ft->closure.nargs ? ft->args + 1 : NULL;
+ 		ft->closure.ret = ft->ret;
+ 		ft->closure.parent = t;
++		__atomic_store_n(&ft->closure_type.kind, HFUN, __ATOMIC_RELEASE);
+ 	}
+ 	return (hl_type*)&ft->closure_type;
+ }
+@@ -135,10 +139,10 @@ HL_PRIM vdynamic* hl_call_method( vdynamic *c, varray *args ) {
  			cl = (vclosure*)cl->value;
  			return cl->hasValue ? ((vdynamic* (*)(vdynamic*, varray*))cl->fun)(cl->value, args) : ((vdynamic* (*)(varray*))cl->fun)(args);
  		}
@@ -742,3 +762,55 @@ index ffe94cc..f5de95b 100644
  	for(i=0;i<cl->t->fun->nargs;i++) {
  		vdynamic *v = vargs[i];
  		hl_type *t = cl->t->fun->args[i];
+diff --git a/src/std/obj.c b/src/std/obj.c
+index 5fc939d..97a18a5 100644
+--- a/src/std/obj.c
++++ b/src/std/obj.c
+@@ -280,7 +280,6 @@ HL_PRIM hl_runtime_obj *hl_get_obj_rt( hl_type *ot ) {
+ 	t->largest_field = largest_field;
+ 	t->nmethods = p ? p->nmethods : o->nproto;
+ 	t->methods = NULL;
+-	o->rt = t;
+ 	ot->vobj_proto = NULL;
+ 
+ 	// fields lookup
+@@ -330,6 +329,9 @@ HL_PRIM hl_runtime_obj *hl_get_obj_rt( hl_type *ot ) {
+ 		}
+ 	}
+ 
++	// Published once complete: other threads read o->rt without the lock, and
++	// a half-built lookup table made their dynamic calls fail.
++	__atomic_store_n(&o->rt, t, __ATOMIC_RELEASE);
+ 	hl_global_lock(false);
+ 	return t;
+ }
+@@ -356,9 +358,10 @@ HL_API hl_runtime_obj *hl_get_obj_proto( hl_type *ot ) {
+ 		return t;
+ 	}
+ 
++	void *proto;
+ 	if( t->nproto ) {
+ 		void **fptr = (void**)hl_malloc(alloc, sizeof(void*) * t->nproto);
+-		ot->vobj_proto = fptr;
++		proto = fptr;
+ 		if( p )
+ 			memcpy(fptr, p->t->vobj_proto, p->nproto * sizeof(void*));
+ 		for(i=0;i<o->nproto;i++) {
+@@ -366,7 +369,7 @@ HL_API hl_runtime_obj *hl_get_obj_proto( hl_type *ot ) {
+ 			if( p->pindex >= 0 ) fptr[p->pindex] = m->functions_ptrs[p->findex];
+ 		}
+ 	} else
+-		ot->vobj_proto = (void*)1;
++		proto = (void*)1;
+ 
+ 	t->methods = (void**)hl_malloc(alloc, sizeof(void*) * t->nmethods);
+ 	if( p ) memcpy(t->methods,p->methods,p->nmethods * sizeof(void*));
+@@ -455,6 +458,8 @@ HL_API hl_runtime_obj *hl_get_obj_proto( hl_type *ot ) {
+ 	t->getFieldFun = getField ? t->methods[-(getField->field_index+1)] : NULL;
+ 	if( p && !t->getFieldFun ) t->getFieldFun = p->getFieldFun;
+ 
++	// Published last, like o->rt in hl_get_obj_rt: readers test it without the lock.
++	__atomic_store_n(&ot->vobj_proto, proto, __ATOMIC_RELEASE);
+ 	hl_global_lock(false);
+ 
+ 	return t;

@@ -26,8 +26,8 @@ class AnalyzerTexprTransformer {
  };
  public static function blockToTexprEl(ctx:AnalyzerContext,bb:BasicBlockData):Array<TExpr> {
   if (bb.bbDominator == ctx.graph.gUnreachable) return [];
-  function block(bb:BasicBlockData):TExpr return blockToTexpr(ctx,bb);
-  function ifLive(bb:BasicBlockData):Null<BasicBlockData> return !ctx.didOptimize || !ctx.config.localDce || hasBlockFlag(bb,BlockDce) ? bb : null;
+  inline function block(bb:BasicBlockData):TExpr return blockToTexpr(ctx,bb);
+  inline function ifLive(bb:BasicBlockData):Null<BasicBlockData> return !ctx.didOptimize || !ctx.config.localDce || hasBlockFlag(bb,BlockDce) ? bb : null;
   function getTerminator():TExpr return switch bb.bbTerminator {case TermCondBranch(e):e; case _:throw "AnalyzerTexprTransformer.getTerminator";};
   var next:Null<BasicBlockData>; var term:Null<TExpr>;
   switch bb.bbSyntaxEdge {
@@ -83,7 +83,7 @@ private class FunctionGraphBuilder {
  function pushName(s:String):Void->Void {ctx.nameStack.push(s); if (popName == null) popName = function() ctx.nameStack.pop(); return popName;}
  function checkRef(v:TVar,e:TExpr):Void if (core.TOther.ExtType.hasReferenceSemantics(v.vType)) switch Texpr.skip(e).eexpr {case TLocal(w):addVarFlag(w,VCaptured); case _:}
  function valueRaw(bb:BasicBlockData,e:TExpr):BlockValue {
-  function result(def:TExprDef):BlockValue return {bb:bb,value:withExpr(e,def)};
+  inline function result(def:TExprDef):BlockValue return {bb:bb,value:withExpr(e,def)};
   return switch e.eexpr {
    case TLocal(_) | TIdent(_):{bb:bb,value:e};
    case TBinop(OpAssign,e1 = {eexpr:TLocal(v)},e2):{bb:blockElement(bb,e),value:e1};
@@ -122,7 +122,7 @@ private class FunctionGraphBuilder {
   var values = []; for (item in annotated) if (bb != g.gUnreachable) {var r = item.affected || item.opt ? bindToTemp(bb,item.e) : value(bb,item.e); bb = r.bb; values.push(r.value);} return {bb:bb,values:values};
  }
  function bindToTemp(bb:BasicBlockData,e:TExpr,?v:TVar):BlockValue {
-  function unaffected(e:TExpr,e1:TExpr,fa:TFieldAccess):Bool return switch fa {
+  inline function unaffected(e:TExpr,e1:TExpr,fa:TFieldAccess):Bool return switch fa {
    case FAnon(cf) | FInstance(_,_,cf) | FStatic(_,cf) | FClosure(_,cf) if (switch cf.cfKind {case Method(MethNormal):true;case _:false;}):true;
    case FStatic(_,{cfKind:Method(MethDynamic)}):false;
    case FEnum(_,_):true; case FDynamic("cca" | "__Index" | "__s"):true;

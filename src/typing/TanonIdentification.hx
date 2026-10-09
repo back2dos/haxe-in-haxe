@@ -26,8 +26,8 @@ class TanonIdentification<A> {
  public function getPfms():Dynamic return pfms;
  public function addPfm(path:core.Globals.GlobalTypePath,pfm:PathFieldMapping<A>):Void {addPfmMutex.acquire();while(pfmByArity.length<=pfm.pfmArity)pfmByArity.push([]);pfmByArity[pfm.pfmArity].push(pfm);pfms.replace(path,pfm);addPfmMutex.release();}
  public function unify(uctx:UnificationContext,tc:T,pfm:PathFieldMapping<A>):Void {
-  function pairs(fields:Dynamic):Array<Dynamic> {var acc=[];var names=[for(n in (pfm.pfmFields.keys():Iterator<String>))n];names.sort(Reflect.compare);for(n in names){var cf=pfm.pfmFields.get(n);var other=fields.get(cf.cfName);if(other==null)throw NotFound.raise();acc.unshift({cf:cf,other:other});}return acc;}
-  function fieldType(cf:TClassField):T return uctx.opaqueFieldParams?cf.cfType:monomorphs(cf.cfParams,cf.cfType);
+  inline function pairs(fields:Dynamic):Array<Dynamic> {var acc=[];var names=[for(n in (pfm.pfmFields.keys():Iterator<String>))n];names.sort(Reflect.compare);for(n in names){var cf=pfm.pfmFields.get(n);var other=fields.get(cf.cfName);if(other==null)throw NotFound.raise();acc.unshift({cf:cf,other:other});}return acc;}
+  inline function fieldType(cf:TClassField):T return uctx.opaqueFieldParams?cf.cfType:monomorphs(cf.cfParams,cf.cfType);
   try {
    var monos:Array<T>=switch follow(tc) {
     case TInst(c,tl):var ps=pairs(c.clFields);var ms=pfm.pfmParams.map(function(_)return mkMono());for(pair in ps){if(!unifyKind(uctx,pair.other.cfKind,pair.cf.cfKind))throw new Unify_error([UnifyCustom("kind mismatch")]);core.TUnification.unify(applyParams(c.clParams,tl,fieldType(pair.other)),applyParams(pfm.pfmParams,ms,fieldType(pair.cf)));}ms;
