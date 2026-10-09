@@ -671,7 +671,7 @@ class TypeloadFields {
   for(pair in cctx.delayedExpr) if(pair.lazy!=null) delay(pair.ctx.g,PTypeField,function() {lazyType(pair.lazy);});
  }
  public static function createClassField(cctx:ClassInitCtx,f:ClassField):TClassField {
-  var cf=mkField(f.cffName.name,tDynamic,f.cffPos,f.cffName.pos,isPublic(cctx,f.cffAccess,null));cf.cfDoc=f.cffDoc;cf.cfMeta=f.cffMeta;return cf;
+  var cf=mkField(f.cffName.name,tDynamic,f.cffPos,f.cffName.pos,isPublic(cctx,f.cffAccess,null));cf.cfDoc=f.cffDoc;cf.cfMeta=f.cffMeta.copy();return cf;
  }
  public static function initClass(ctxC:Typer,cctx:ClassInitCtx,c:TClass,p:Pos,herits:Dynamic,fields:Array<ClassField>):Void {
   var com:CommonContext=ctxC.com;

@@ -108,20 +108,24 @@ class PipeThings {
 			for (line in lines(complete)) print(line);
 			if (lastNl + 1 < bytes.length) responseBuf.addBytes(bytes, lastNl + 1, bytes.length - lastNl - 1);
 		}
-		/* Forward stdin to the server socket in a background thread. */
+		/* Forward stdin to the server socket in a background thread.
+			Using a dedicated thread avoids mixing socket and non-socket file
+			descriptors in Unix.select, which has known issues on Windows. */
+		var stdinBuf = Bytes.alloc(1024);
+		var stopStdin = false;
+		var stdinDone = new sys.thread.Lock();
 		sys.thread.Thread.create(function() {
-			var stdinBuf = Bytes.alloc(1024);
-			var stdin = Sys.stdin();
 			try {
-				while (true) {
-					var n = try stdin.readBytes(stdinBuf, 0, 1024) catch (_:haxe.io.Eof) 0;
+				while (!stopStdin) {
+					var n = RawStdin.read(stdinBuf, 0.05);
 					if (n == 0) {
 						try sock.shutdown(false, true) catch (_:Dynamic) {}
 						break;
 					}
-					ssend(sock, stdinBuf.sub(0, n));
+					if (n > 0) ssend(sock, stdinBuf.sub(0, n));
 				}
 			} catch (_:Dynamic) {}
+			stdinDone.release();
 		});
 		/* Read server output until the connection closes, printing lines immediately
 			as they arrive rather than waiting for the server to disconnect. */
@@ -136,12 +140,71 @@ class PipeThings {
 				flushCompleteLines();
 			}
 		}
+		stopStdin = true;
+		if (RawStdin.interruptible) stdinDone.wait();
 		/* Flush any remaining partial line after the server closes the connection */
 		var s = responseBuf.getBytes().toString();
 		if (s != "") {
 			for (line in lines(s)) print(line);
 		}
 	}
+}
+
+/**
+	The client's stdin as `Unix.select` + `Unix.read` on descriptor 0 see it
+	(PipeThings.poll). `read` returns the byte count read (at most the buffer
+	length, as soon as any data is available), 0 at end of input, or -1 when
+	nothing arrived within [timeout] seconds.
+
+	Host difference: Haxe's `Sys.stdin()` is a C `FILE`; reading it blocks until
+	the whole buffer is filled and holds the stream lock, so glibc's `exit`
+	(which locks every stream to flush it) hangs while the forwarding thread
+	waits for input. On HashLink, descriptor 0 is polled through the std
+	library's `select` and read with `read(2)` (the natives behind
+	sys.net.Socket.select and sys.io.Process, given a handle whose descriptor
+	is 0). Elsewhere it falls back to byte reads of `Sys.stdin()`, which cannot
+	be interrupted (`interruptible` is false: the thread is not joined).
+**/
+class RawStdin {
+	#if hl
+	public static inline final interruptible = true;
+	// hl_socket { int sock } and vprocess { finalize; int oread; ... } with descriptor 0
+	static var socket:Null<hl.Abstract<"hl_socket">> = null;
+	static var process:Null<hl.Abstract<"hl_process">> = null;
+	static var selectTmp:Null<hl.Bytes> = null;
+
+	public static function read(buf:Bytes, timeout:Float):Int {
+		if (socket == null) {
+			var s = new hl.Bytes(16), p = new hl.Bytes(32);
+			s.fill(0, 16, 0);
+			p.fill(0, 32, 0);
+			socket = hl.Api.unsafeCast(s);
+			process = hl.Api.unsafeCast(p);
+			selectTmp = new hl.Bytes(1024);
+		}
+		var set = new hl.NativeArray<hl.Abstract<"hl_socket">>(1);
+		set[0] = socket;
+		if (!socketSelect(set, null, null, selectTmp, 1024, timeout)) return 0;
+		if (set[0] == null) return -1;
+		var n = processRead(process, buf, 0, buf.length);
+		return n <= 0 ? 0 : n;
+	}
+
+	@:hlNative("std", "socket_select") static function socketSelect(read:hl.NativeArray<hl.Abstract<"hl_socket">>, write:hl.NativeArray<hl.Abstract<"hl_socket">>,
+		other:hl.NativeArray<hl.Abstract<"hl_socket">>, tmpData:hl.Bytes, tmpSize:Int, timeout:Float):Bool return false;
+	@:hlNative("std", "process_stdout_read") static function processRead(p:hl.Abstract<"hl_process">, bytes:hl.Bytes, pos:Int, len:Int):Int return 0;
+	#else
+	public static inline final interruptible = false;
+
+	public static function read(buf:Bytes, timeout:Float):Int {
+		try {
+			buf.set(0, Sys.stdin().readByte());
+			return 1;
+		} catch (_:haxe.io.Eof) {
+			return 0;
+		}
+	}
+	#end
 }
 
 /**

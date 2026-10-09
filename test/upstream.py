@@ -22,6 +22,7 @@ Single misc projects that need a target generator the port does not have
 runner (tests/misc/src/Main.hx) only runs project hxmls whose path matches the
 MISC_TEST_FILTER define, so the "misc" step passes it a negative lookahead
 over the excluded paths (for both compilers, so the counts stay comparable).
+The "misc-resolution" step uses the same runner and RESOLUTION_EXCLUDED.
 
 utest is installed as upstream CI does (`haxelib git utest
 https://github.com/haxe-utest/utest.git`): cloned into
@@ -64,10 +65,31 @@ MISC_EXCLUDED = {
 }
 
 
-def misc_filter_args() -> list:
-    if not MISC_EXCLUDED:
+# eval/resolution project hxml -> reason
+RESOLUTION_EXCLUDED = {
+    "projects/Issue9367/compile.hxml": "compiles with -js and runs `node test.js`",
+    "projects/modulestatics/compile.hxml": "compiles with -js and runs `node test.js`",
+    "projects/spec/compile.hxml": "compiles with -js and runs `node test.js`",
+}
+
+# step -> [(file under the step directory, text removed from it, reason)]:
+# commands of an hxml that need a target generator the port does not have,
+# removed for both compilers when the rest of the step does not depend on them
+NEKO_EXITCODE = (
+    "compile-each.hxml", "--cmd haxe compile-neko-exitcode.hxml\n--next\n",
+    "builds bin/neko/ExitCode.n with -neko and nekotools; ExitCode.getNative only copies it on Windows (gcc builds bin/ExitCode elsewhere)",
+)
+# sys-run: TestCommandBase.testCommand runs `haxe compile-each.hxml --run TestArguments`
+STEP_PATCHES = {"sys-hxb": [NEKO_EXITCODE], "sys-run": [NEKO_EXITCODE]}
+
+# step -> excluded runner projects
+STEP_EXCLUDED = {"misc": MISC_EXCLUDED, "misc-resolution": RESOLUTION_EXCLUDED}
+
+
+def misc_filter_args(excluded: dict = MISC_EXCLUDED) -> list:
+    if not excluded:
         return []
-    alternatives = "|".join(re.escape(path) for path in sorted(MISC_EXCLUDED))
+    alternatives = "|".join(re.escape(path) for path in sorted(excluded))
     return ["-D", "MISC_TEST_FILTER=^(?!(?:" + alternatives + ")$)"]
 
 
@@ -124,11 +146,16 @@ def main() -> None:
             shutil.copytree(base / "sys-hxb" / "tests" / "sys" / "bin", work / "tests" / "sys" / "bin", dirs_exist_ok=True)
         if name == "unit-macro-hxblib" and (base / "unit-macro" / "tests" / "unit" / "bin").exists():
             shutil.copytree(base / "unit-macro" / "tests" / "unit" / "bin", work / "tests" / "unit" / "bin", dirs_exist_ok=True)
+        for file, text, _ in STEP_PATCHES.get(name, []):
+            target = work / "tests" / sub / file
+            content = target.read_text()
+            assert text in content, (name, file)
+            target.write_text(content.replace(text, "", 1))
         # runci System.runSysTest exports EXISTS=1 for the sys tests
         step_env = dict(env, EXISTS="1") if name == "sys-run" else env
-        if name == "misc":
-            # the defines must precede compile.hxml: arguments after its --run go to the runner
-            cmd = cmd[:1] + misc_filter_args() + cmd[1:]
+        if name in STEP_EXCLUDED:
+            # the defines must precede the hxml: arguments after its --run go to the runner
+            cmd = cmd[:1] + misc_filter_args(STEP_EXCLUDED[name]) + cmd[1:]
         log = base / (name + ".log")
         start = time.time()
         with open(log, "w") as out:
@@ -141,9 +168,14 @@ def main() -> None:
     for name, why in SKIPPED.items():
         if not names or any(n in name for n in names):
             print(f"SKIP  {name:20} {why}")
-    if not names or any(n in "misc" for n in names):
-        for path, why in MISC_EXCLUDED.items():
-            print(f"SKIP  misc {path}: {why}")
+    for step, patches in STEP_PATCHES.items():
+        if not names or any(n in step for n in names):
+            for file, text, why in patches:
+                print(f"SKIP  {step} {file}: {text.splitlines()[0]}: {why}")
+    for step, excluded in STEP_EXCLUDED.items():
+        if not names or any(n in step for n in names):
+            for path, why in excluded.items():
+                print(f"SKIP  {step} {path}: {why}")
     failed = [r for r in results if r[1] != 0]
     print(f"{label}: {len(results) - len(failed)}/{len(results)} steps passed")
     sys.exit(1 if failed else 0)

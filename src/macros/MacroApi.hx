@@ -2218,7 +2218,7 @@ class MacroApiImpl {
 			case TConst(c):
 				switch c {
 					case TInt(i): vint32(i);
-					case TFloat(s): vfloat(core.Numeric.parseFloat(s));
+					case TFloat(s): vfloat(core.ds.OcamlFloat.ofString(s));
 					case TString(s): encodeString(s);
 					case TBool(b): vbool(b);
 					case TNull: vnull;
@@ -2526,7 +2526,6 @@ class MacroApiImpl {
 			{name: "add_resource", value: vfun2((name, data) -> {
 				var name = decodeString(name);
 				var data = decodeBytes(data);
-				var data = data.toString();
 				if (name == "")
 					failwith("Empty resource name");
 				ccom().resources.set(name, data);
@@ -2535,11 +2534,10 @@ class MacroApiImpl {
 				vnull;
 			})},
 			{name: "get_resources", value: vfun0(() -> {
-				var pmapResources = new StringMap<String>();
+				var pmapResources = new StringMap<haxe.io.Bytes>();
 				for (k => v in ccom().resources)
 					pmapResources.set(k, v);
-				function encodeStringToBytes(s:String):Value return encodeBytes(haxe.io.Bytes.ofString(s));
-				encodeStringMap(encodeStringToBytes, pmapResources);
+				encodeStringMap(encodeBytes, pmapResources);
 			})},
 			{name: "get_local_module", value: vfun0(() -> {
 				var m = getApi().currentModule();

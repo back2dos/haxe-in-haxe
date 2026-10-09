@@ -61,7 +61,7 @@ class ModuleTyping {
   inline function makeClass(d:ClassDefinition,p:Pos):TClass {
    hasDeclaration=true;var priv=d.flags.contains(HPrivate),path=makePath(d.name.name,priv,d.meta,d.name.pos),c=mkClass(m,path,p,d.name.pos);
    c.clBuild=function() return Error.raiseTypingError(sTypePath(c.clPath)+" is not ready to be accessed, separate your type declarations in several files",p);
-   c.clPrivate=priv;c.clDoc=d.doc;c.clMeta=d.meta;
+   c.clPrivate=priv;c.clDoc=d.doc;c.clMeta=d.meta.copy();
    for(flag in d.flags)switch flag{case HAbstract:addClassFlag(c,CAbstract);case HExtern:addClassFlag(c,CExtern);case HInterface:addClassFlag(c,CInterface);case HFinal:addClassFlag(c,CFinal);case _:}
    if(!hasClassFlag(c,CExtern))checkTypeName(d.name.name,d.meta,p);
    if(hasClassFlag(c,CAbstract)){if(hasClassFlag(c,CInterface))Common.displayError(com,"An interface may not be abstract",c.clNamePos);if(hasClassFlag(c,CFinal))Common.displayError(com,"An abstract class may not be final",c.clNamePos);}
@@ -71,12 +71,12 @@ class ModuleTyping {
    case EImport(_)|EUsing(_):if(hasDeclaration)Error.raiseTypingError("import and using may not appear after a declaration",p);imports.push(decl);
    case EStatic(d):checkName(d.name.name,d.meta,false,d.name.pos);hasDeclaration=true;statics.unshift({definition:d,pos:p});
    case EClass(d):add(decl,TClassDecl(makeClass(d,p)));
-   case EEnum(d):hasDeclaration=true;var priv=d.flags.contains(EPrivate),en=mkEnum(m,makePath(d.name.name,priv,d.meta,p),p,d.name.pos);en.eDoc=d.doc;en.eMeta=d.meta;en.ePrivate=priv;if(d.flags.contains(EExtern))addEnumFlag(en,EnExtern);else checkTypeName(d.name.name,d.meta,p);add(decl,TEnumDecl(en));
-   case ETypedef(d):checkTypeName(d.name.name,d.meta,p);hasDeclaration=true;var priv=d.flags.contains(TDPrivate),td=mkTypedef(m,makePath(d.name.name,priv,d.meta,p),p,d.name.pos,mkMono());td.tDoc=d.doc;td.tPrivate=priv;td.tMeta=d.meta;delay(ctx.g,PBuildModule,function(){switch td.tType{case TMono(r) if(r.tmType==null):Monomorph.bind(r,com.basic.tvoid);case _:}});add(decl,TTypeDecl(td));
+   case EEnum(d):hasDeclaration=true;var priv=d.flags.contains(EPrivate),en=mkEnum(m,makePath(d.name.name,priv,d.meta,p),p,d.name.pos);en.eDoc=d.doc;en.eMeta=d.meta.copy();en.ePrivate=priv;if(d.flags.contains(EExtern))addEnumFlag(en,EnExtern);else checkTypeName(d.name.name,d.meta,p);add(decl,TEnumDecl(en));
+   case ETypedef(d):checkTypeName(d.name.name,d.meta,p);hasDeclaration=true;var priv=d.flags.contains(TDPrivate),td=mkTypedef(m,makePath(d.name.name,priv,d.meta,p),p,d.name.pos,mkMono());td.tDoc=d.doc;td.tPrivate=priv;td.tMeta=d.meta.copy();delay(ctx.g,PBuildModule,function(){switch td.tType{case TMono(r) if(r.tmType==null):Monomorph.bind(r,com.basic.tvoid);case _:}});add(decl,TTypeDecl(td));
    case EAbstract(d):
     checkTypeName(d.name.name,d.meta,p);var priv=d.flags.contains(AbPrivate),path=makePath(d.name.name,priv,d.meta,p),enumPos=MetadataTools.maybeGetPos(MetaTag.Enum,d.meta);
-    var a:TAbstract={aPath:path,aPrivate:priv,aModule:m,aPos:p,aNamePos:d.name.pos,aDoc:d.doc,aParams:[],aUsing:[],aRestore:function(){},aMeta:d.meta,aFrom:[],aTo:[],aFromField:[],aToField:[],aOps:[],aUnops:[],aImpl:null,aArray:[],aThis:mkMono(),aRead:null,aWrite:null,aCall:null,aConstructor:null,aExtern:d.flags.contains(AbExtern),aEnum:d.flags.contains(AbEnum)||enumPos!=null};
-    if(enumPos==null){if(a.aEnum)a.aMeta=[({meta:MetaTag.Enum,exprs:[],pos:nullPos}:MetadataEntry)].concat(a.aMeta);}else Common.moduleWarning(com,ctx.m.curmod,WDeprecatedEnumAbstract,Warning.fromMeta(d.meta),"`@:enum abstract` is deprecated in favor of `enum abstract`",enumPos);
+    var a:TAbstract={aPath:path,aPrivate:priv,aModule:m,aPos:p,aNamePos:d.name.pos,aDoc:d.doc,aParams:[],aUsing:[],aRestore:function(){},aMeta:d.meta.copy(),aFrom:[],aTo:[],aFromField:[],aToField:[],aOps:[],aUnops:[],aImpl:null,aArray:[],aThis:mkMono(),aRead:null,aWrite:null,aCall:null,aConstructor:null,aExtern:d.flags.contains(AbExtern),aEnum:d.flags.contains(AbEnum)||enumPos!=null};
+    if(enumPos==null){if(a.aEnum)a.aMeta.unshift({meta:MetaTag.Enum,exprs:[],pos:nullPos});}else Common.moduleWarning(com,ctx.m.curmod,WDeprecatedEnumAbstract,Warning.fromMeta(d.meta),"`@:enum abstract` is deprecated in favor of `enum abstract`",enumPos);
     add(decl,TAbstractDecl(a));
     if(d.data.length==0&&MetadataTools.has(MetaTag.CoreType,a.aMeta))a.aThis=tDynamic;else{
      var params=[for(tp in d.params)TPType(AstTools.makePtpTh(AstTools.mkTypePath([],tp.tpName.name),nullPos))],aType=AstTools.makePtpTh(AstTools.mkTypePath([],d.name.name,params),nullPos),thisType=aType;

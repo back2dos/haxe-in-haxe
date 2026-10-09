@@ -881,7 +881,7 @@ class StdReflect {
 }
 
 class StdResource {
-	static function resources():haxe.ds.StringMap<String> return EvalContext.getCtx().curapi.getCom().resources;
+	static function resources():haxe.ds.StringMap<Bytes> return EvalContext.getCtx().curapi.getCom().resources;
 
 	public static final listNames = EvalEncode.vfun0(() -> {
 		EvalEncode.encodeArray([for (k in EvalStdLib.hashtblKeys(resources())) EvalString.createUnknown(k)]);
@@ -889,12 +889,12 @@ class StdResource {
 
 	public static final getString = EvalEncode.vfun1(name -> {
 		var s = resources().get(EvalDecode.decodeString(name));
-		s == null ? VNull : EvalString.createUnknown(s);
+		s == null ? VNull : EvalString.createUnknown(s.toString());
 	});
 
 	public static final getBytes = EvalEncode.vfun1(name -> {
 		var s = resources().get(EvalDecode.decodeString(name));
-		s == null ? VNull : EvalEncode.encodeBytes(Bytes.ofString(s));
+		s == null ? VNull : EvalEncode.encodeBytes(s);
 	});
 }
 
@@ -910,12 +910,21 @@ class StdSha1 {
 	});
 }
 
+#if (target.name == "hxc")
+private typedef SocketHost = hxc.NativeNet;
+#elseif hl
+private typedef SocketHost = macros.eval.EvalHostNet;
+#end
+
 /**
 	Sockets: on the hxc host (backend/) the natives call BSD sockets through
 	`hxc.NativeNet` (backend/rt/rt_net.c) where upstream calls OCaml's Unix
-	module; a socket is its file descriptor. Other hosts keep upstream's names
-	and argument checks, then fail ("... is not supported by haxe-in-haxe").
+	module; a socket is its file descriptor. On HashLink, EvalHostNet offers
+	the same interface over the host's sys.net.Socket. Other hosts keep
+	upstream's names and argument checks, then fail ("... is not supported by
+	haxe-in-haxe").
 **/
+
 class StdSocket {
 	static function thisValue(vthis:Value):Dynamic {
 		return switch vthis {
@@ -924,10 +933,10 @@ class StdSocket {
 		}
 	}
 
-	#if (target.name == "hxc")
+	#if (target.name == "hxc" || hl)
 	/** `catch_unix_error`: `Unix_error(err, cmd, args)` becomes "message(cmd, args)". **/
 	public static function unixError(cmd:String):Dynamic {
-		return EvalContext.excString(hxc.NativeNet.strerror(hxc.NativeNet.errno()) + "(" + cmd + ", )");
+		return EvalContext.excString(SocketHost.strerror(SocketHost.errno()) + "(" + cmd + ", )");
 	}
 
 	public static inline function check(r:Int, cmd:String):Int {
@@ -953,8 +962,8 @@ class StdSocket {
 
 	public static final accept = EvalEncode.vifun0(vthis -> {
 		var self = thisValue(vthis);
-		#if (target.name == "hxc")
-		var socket = check(hxc.NativeNet.accept(self), "accept");
+		#if (target.name == "hxc" || hl)
+		var socket = check(SocketHost.accept(self), "accept");
 		EvalEncode.encodeInstance(EvalHash.key_eval_vm_NativeSocket, ISocket(socket));
 		#else
 		StdLibBHelpers.socketsNotSupported();
@@ -965,8 +974,8 @@ class StdSocket {
 		var self = thisValue(vthis);
 		var host = EvalDecode.decodeI32(host);
 		var port = EvalDecode.decodeInt(port);
-		#if (target.name == "hxc")
-		check(hxc.NativeNet.bind(self, host, port), "bind");
+		#if (target.name == "hxc" || hl)
+		check(SocketHost.bind(self, host, port), "bind");
 		VNull;
 		#else
 		StdLibBHelpers.socketsNotSupported();
@@ -974,8 +983,8 @@ class StdSocket {
 	});
 
 	public static final close = EvalEncode.vifun0(vthis -> {
-		#if (target.name == "hxc")
-		check(hxc.NativeNet.close(thisValue(vthis)), "close");
+		#if (target.name == "hxc" || hl)
+		check(SocketHost.close(thisValue(vthis)), "close");
 		VNull;
 		#else
 		thisValue(vthis);
@@ -987,8 +996,8 @@ class StdSocket {
 		var self = thisValue(vthis);
 		var host = EvalDecode.decodeI32(host);
 		var port = EvalDecode.decodeInt(port);
-		#if (target.name == "hxc")
-		check(hxc.NativeNet.connect(self, host, port), "connect");
+		#if (target.name == "hxc" || hl)
+		check(SocketHost.connect(self, host, port), "connect");
 		VNull;
 		#else
 		StdLibBHelpers.socketsNotSupported();
@@ -996,8 +1005,8 @@ class StdSocket {
 	});
 
 	public static final host = EvalEncode.vifun0(vthis -> {
-		#if (target.name == "hxc")
-		encodeAddr(hxc.NativeNet.sockName(thisValue(vthis), false), "getsockname");
+		#if (target.name == "hxc" || hl)
+		encodeAddr(SocketHost.sockName(thisValue(vthis), false), "getsockname");
 		#else
 		thisValue(vthis);
 		StdLibBHelpers.socketsNotSupported();
@@ -1007,8 +1016,8 @@ class StdSocket {
 	public static final listen = EvalEncode.vifun1((vthis, connections) -> {
 		var self = thisValue(vthis);
 		var connections = EvalDecode.decodeInt(connections);
-		#if (target.name == "hxc")
-		check(hxc.NativeNet.listen(self, connections), "listen");
+		#if (target.name == "hxc" || hl)
+		check(SocketHost.listen(self, connections), "listen");
 		VNull;
 		#else
 		StdLibBHelpers.socketsNotSupported();
@@ -1016,8 +1025,8 @@ class StdSocket {
 	});
 
 	public static final peer = EvalEncode.vifun0(vthis -> {
-		#if (target.name == "hxc")
-		encodeAddr(hxc.NativeNet.sockName(thisValue(vthis), true), "getpeername");
+		#if (target.name == "hxc" || hl)
+		encodeAddr(SocketHost.sockName(thisValue(vthis), true), "getpeername");
 		#else
 		thisValue(vthis);
 		StdLibBHelpers.socketsNotSupported();
@@ -1029,18 +1038,18 @@ class StdSocket {
 		var buf = EvalDecode.decodeBytes(buf);
 		var pos = EvalDecode.decodeInt(pos);
 		var len = EvalDecode.decodeInt(len);
-		#if (target.name == "hxc")
-		VInt32(check(hxc.NativeNet.recv(self, buf, pos, len), "recv"));
+		#if (target.name == "hxc" || hl)
+		VInt32(check(SocketHost.recv(self, buf, pos, len), "recv"));
 		#else
 		StdLibBHelpers.socketsNotSupported();
 		#end
 	});
 
 	public static final receiveChar = EvalEncode.vifun0(vthis -> {
-		#if (target.name == "hxc")
+		#if (target.name == "hxc" || hl)
 		var buf = Bytes.alloc(1);
 		buf.set(0, 0);
-		check(hxc.NativeNet.recv(thisValue(vthis), buf, 0, 1), "recv");
+		check(SocketHost.recv(thisValue(vthis), buf, 0, 1), "recv");
 		VInt32(buf.get(0));
 		#else
 		thisValue(vthis);
@@ -1049,7 +1058,7 @@ class StdSocket {
 	});
 
 	public static final select = EvalEncode.vfun4((read, write, others, timeout) -> {
-		#if (target.name == "hxc")
+		#if (target.name == "hxc" || hl)
 		var proto = EvalContext.getInstancePrototype(EvalContext.getCtx(), EvalHash.key_sys_net_Socket, Globals.nullPos);
 		var i = EvalContext.getInstanceFieldIndex(proto, EvalHash.key_socket, Globals.nullPos);
 		function pair(v:Value):{fd:Int, v:Value} {
@@ -1072,7 +1081,7 @@ class StdSocket {
 		var readFds = [for (p in read) p.fd];
 		var writeFds = [for (p in write) p.fd];
 		var othersFds = [for (p in others) p.fd];
-		check(hxc.NativeNet.select(readFds, writeFds, othersFds, timeout), "select");
+		check(SocketHost.select(readFds, writeFds, othersFds, timeout), "select");
 		// Unix.select lists the ready descriptors in reverse input order; List.assq
 		// maps each back to the first pair holding it
 		function ready(pairs:Array<{fd:Int, v:Value}>, fds:Array<Int>):Array<Value> {
@@ -1108,8 +1117,8 @@ class StdSocket {
 		var buf = EvalDecode.decodeBytes(buf);
 		var pos = EvalDecode.decodeInt(pos);
 		var len = EvalDecode.decodeInt(len);
-		#if (target.name == "hxc")
-		VInt32(check(hxc.NativeNet.send(self, buf, pos, len), "send"));
+		#if (target.name == "hxc" || hl)
+		VInt32(check(SocketHost.send(self, buf, pos, len), "send"));
 		#else
 		StdLibBHelpers.socketsNotSupported();
 		#end
@@ -1118,12 +1127,12 @@ class StdSocket {
 	public static final sendChar = EvalEncode.vifun1((vthis, char) -> {
 		var self = thisValue(vthis);
 		var char = EvalDecode.decodeInt(char);
-		#if (target.name == "hxc")
+		#if (target.name == "hxc" || hl)
 		// char_of_int
 		if (char < 0 || char > 255) throw new InvalidArgument("char_of_int");
 		var buf = Bytes.alloc(1);
 		buf.set(0, char);
-		check(hxc.NativeNet.send(self, buf, 0, 1), "send");
+		check(SocketHost.send(self, buf, 0, 1), "send");
 		VNull;
 		#else
 		StdLibBHelpers.socketsNotSupported();
@@ -1133,8 +1142,8 @@ class StdSocket {
 	public static final setFastSend = EvalEncode.vifun1((vthis, b) -> {
 		var self = thisValue(vthis);
 		var b = EvalDecode.decodeBool(b);
-		#if (target.name == "hxc")
-		check(hxc.NativeNet.setNoDelay(self, b), "setsockopt");
+		#if (target.name == "hxc" || hl)
+		check(SocketHost.setNoDelay(self, b), "setsockopt");
 		VNull;
 		#else
 		StdLibBHelpers.socketsNotSupported();
@@ -1144,8 +1153,8 @@ class StdSocket {
 	public static final setBroadcast = EvalEncode.vifun1((vthis, b) -> {
 		var self = thisValue(vthis);
 		var b = EvalDecode.decodeBool(b);
-		#if (target.name == "hxc")
-		check(hxc.NativeNet.setBroadcast(self, b), "setsockopt");
+		#if (target.name == "hxc" || hl)
+		check(SocketHost.setBroadcast(self, b), "setsockopt");
 		VNull;
 		#else
 		StdLibBHelpers.socketsNotSupported();
@@ -1154,10 +1163,10 @@ class StdSocket {
 
 	public static final setTimeout = EvalEncode.vifun1((vthis, timeout) -> {
 		var self = thisValue(vthis);
-		#if (target.name == "hxc")
+		#if (target.name == "hxc" || hl)
 		var timeout = timeoutValue(timeout);
 		var timeout = timeout * 1000.;
-		check(hxc.NativeNet.setTimeout(self, timeout), "setsockopt_float");
+		check(SocketHost.setTimeout(self, timeout), "setsockopt_float");
 		VNull;
 		#else
 		StdLibBHelpers.socketsNotSupported();
@@ -1172,8 +1181,8 @@ class StdSocket {
 			case [_, VTrue]: 1; // SHUTDOWN_SEND
 			case _: EvalContext.excString("Nothing to shut down");
 		}
-		#if (target.name == "hxc")
-		check(hxc.NativeNet.shutdown(self, mode), "shutdown");
+		#if (target.name == "hxc" || hl)
+		check(SocketHost.shutdown(self, mode), "shutdown");
 		VNull;
 		#else
 		StdLibBHelpers.socketsNotSupported();

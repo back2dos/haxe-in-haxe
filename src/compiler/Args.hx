@@ -137,8 +137,8 @@ class Args {
    case Interp:Common.define(com,Defines.Interp);Common.setPlatform(com,Eval,"");actx.interp=true;
    case Run(_,_ )|RunX(_): // Expanded by the request layer.
    case AddResource(file,name):
-    file=try Common.findFile(com,file)catch(_:NotFound)file;var data:String;
-    try{var bytes=sys.io.File.getBytes(file);if(bytes.length>12000000)throw core.ds.Exit.raise();data=bytes.toString();}catch(e:Dynamic){if(Std.isOfType(e,core.ds.Exit))throw new Failure("Resource '"+file+"' excess the maximum size of 12MB");throw new Failure("Resource file not found: "+file);}
+    file=try Common.findFile(com,file)catch(_:NotFound)file;var data:haxe.io.Bytes;
+    try{var bytes=sys.io.File.getBytes(file);if(bytes.length>12000000)throw core.ds.Exit.raise();data=bytes;}catch(e:Dynamic){if(Std.isOfType(e,core.ds.Exit))throw new Failure("Resource '"+file+"' excess the maximum size of 12MB");throw new Failure("Resource file not found: "+file);}
     if(com.resources.exists(name))throw new Failure("Duplicate resource name "+name);com.resources.set(name,data);
    case RunCmd(cmd):actx.cmds.unshift(cmd);
    case SetSwfVersion(v):if(!actx.swfVersion||com.flashVersion<v)com.flashVersion=v;actx.swfVersion=true;

@@ -9,8 +9,13 @@ class NotFound extends haxe.Exception {
  // Throw site helper: `throw X.raise()`. On HashLink the shared instance is
  // thrown with rethrow, which skips libhl's native stack capture per throw.
  public static inline function raise():NotFound {
+  // -D hih-fresh-not-found: a new instance per throw, for debug stack traces
+  #if hih_fresh_not_found
+  return new NotFound();
+  #else
   #if hl hl.Api.rethrow(instance); #end
   return instance;
+  #end
  }
  public function new() super("Not_found");
 }
