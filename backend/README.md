@@ -66,7 +66,10 @@ in macros and `--interp`) work in it.
   gives way at each minor collection (`rt_alloc_slow`, before allocating,
   where the caller's live references are rooted), so a spin loop that
   allocates (e.g. on a `haxe.atomic` value in Eval) does not starve the
-  others; a loop that never allocates does.
+  others; a loop that never allocates does. Since a switch can happen at
+  any allocation, the primitives check their condition again after
+  queueing themselves, and an unpark of a thread that is not parked makes
+  its next park return at once.
 - I/O while other threads exist: a blocking socket (`rt_net.c`) is used
   without blocking (`MSG_DONTWAIT`, a `poll` before `accept`, a
   non-blocking `connect`) and the thread waits for the descriptor in the

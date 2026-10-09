@@ -30,6 +30,7 @@ class Threads {
 		sleep();
 		gc();
 		preempt();
+		stress();
 		exceptions();
 		sockets();
 		process();
@@ -223,6 +224,44 @@ class Threads {
 		var spins = 0;
 		while (!flag) keep = [spins++];
 		check("preempt at allocation", flag && keep != null);
+	}
+
+	// contention with allocation everywhere: threads are switched out at minor
+	// collections, also between queueing themselves and parking
+	// (run with RT_MINOR_KB=8 to make that frequent)
+	static function stress() {
+		var m = new Mutex(), q = new Deque<Array<Int>>(), sem = new Semaphore(0), done = new Lock();
+		var total = 0, n = 4, per = 3000;
+		for (p in 0...n)
+			Thread.create(() -> {
+				for (i in 0...per) {
+					m.acquire();
+					var tmp = [for (k in 0...4) k];
+					total += tmp.length - 3;
+					m.release();
+					q.add([i]);
+					sem.release();
+				}
+				done.release();
+			});
+		var got = 0;
+		for (c in 0...2)
+			Thread.create(() -> {
+				while (true) {
+					sem.acquire();
+					var v = q.pop(true);
+					if (v[0] < 0) break;
+					got++;
+				}
+				done.release();
+			});
+		for (_ in 0...n) done.wait();
+		for (c in 0...2) {
+			q.add([-1]);
+			sem.release();
+		}
+		for (_ in 0...2) done.wait();
+		check("stress", total == n * per && got == n * per);
 	}
 
 	static function exceptions() {

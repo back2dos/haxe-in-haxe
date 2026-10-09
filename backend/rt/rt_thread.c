@@ -76,6 +76,7 @@ typedef struct rt_thread {
 	int state;
 	int woken; // result of a park: 1 unparked or descriptor ready, 0 timeout
 	int unparkable; // parked in hxc_NativeThread_park (not sleeping or waiting for a descriptor)
+	int permit; // unparked while not parked: the next park returns at once
 	ucontext_t ctx;
 	char *cstack; // NULL for the main thread (it runs on the process stack)
 	void **sbase, **sp; // shadow stack (saved while not running)
@@ -358,6 +359,10 @@ int32_t hxc_NativeThread_count(void) { return rt_nthreads; }
 int32_t hxc_NativeThread_park(double timeout) {
 	ensure_init();
 	rt_thread *t = cur;
+	if (t->permit) {
+		t->permit = 0;
+		return 1;
+	}
 	t->deadline = timeout < 0 ? -1 : now_secs() + timeout;
 	t->woken = 0;
 	t->unparkable = 1;
@@ -368,12 +373,16 @@ int32_t hxc_NativeThread_park(double timeout) {
 	return t->woken;
 }
 
-// wakes thread id if it is parked in hxc_NativeThread_park (else nothing: the
-// sys.thread primitives check their state again after a park)
+// wakes thread id if it is parked in hxc_NativeThread_park; else its next park
+// returns at once (a thread can be switched out at an allocation between
+// queueing itself and parking). A park may thus return early: the sys.thread
+// primitives check their state again after each park.
 void hxc_NativeThread_unpark(int32_t id) {
 	if (!cur || id <= 0 || id >= by_id_cap) return;
 	rt_thread *t = by_id[id];
-	if (t && t->state == TS_PARKED && t->unparkable) wake(t, 1);
+	if (!t) return;
+	if (t->state == TS_PARKED && t->unparkable) wake(t, 1);
+	else t->permit = 1;
 }
 
 void hxc_NativeThread_yield(void) {

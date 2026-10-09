@@ -12,7 +12,9 @@ extern class NativeThread {
 	static function count():Int; // live threads
 	// blocks until unpark (true) or until `timeout` seconds pass (false); timeout < 0: no timeout
 	static function park(timeout:Float):Bool;
-	// wakes a thread blocked in park (else nothing): callers check their condition again after park
+	// wakes a thread blocked in park, else makes its next park return at once
+	// (a thread may be switched out at an allocation between queueing itself
+	// and parking); park can return early, so callers check their condition again
 	static function unpark(id:Int):Void;
 	static function yield():Void;
 }

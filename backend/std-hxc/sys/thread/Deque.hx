@@ -24,7 +24,9 @@ class Deque<T> {
 			if (!block) return null;
 			var cur = NativeThread.current();
 			waiters.push(cur);
-			while (waiters.indexOf(cur) >= 0) NativeThread.park(-1);
+			// items.length: an add while push was growing the array found no waiter
+			while (waiters.indexOf(cur) >= 0 && items.length == 0) NativeThread.park(-1);
+			waiters.remove(cur);
 		}
 		return items.shift();
 	}

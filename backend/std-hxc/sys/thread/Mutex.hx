@@ -3,8 +3,10 @@ package sys.thread;
 import hxc.NativeThread;
 
 // hxc target (backend/): a re-entrant mutex over green threads (rt_thread.c).
-// Only one thread runs at a time, so the state needs no atomics; a release
-// hands the mutex to the longest waiting thread.
+// Only one thread runs at a time, so the state needs no atomics, but a thread
+// can be switched out at an allocation (rt_alloc_slow), so waits check their
+// condition again after queueing. A release hands the mutex to the longest
+// waiting thread.
 class Mutex {
 	var owner = 0; // thread id, 0: free
 	var depth = 0;
@@ -22,7 +24,17 @@ class Mutex {
 		} else {
 			if (waiters == null) waiters = [];
 			waiters.push(cur);
-			while (owner != cur) NativeThread.park(-1);
+			while (owner != cur) {
+				// released while push was growing the array (an allocation may
+				// switch threads): nobody was waiting, take it
+				if (owner == 0) {
+					waiters.remove(cur);
+					owner = cur;
+					depth = 1;
+					return;
+				}
+				NativeThread.park(-1);
+			}
 		}
 	}
 

@@ -23,6 +23,7 @@ extern class NativeNet {
 	static function select(read:Array<Int>, write:Array<Int>, others:Array<Int>, timeout:Float):Int;
 	static function setNoDelay(fd:Int, b:Bool):Int;
 	static function setBroadcast(fd:Int, b:Bool):Int;
+	static function setReuseAddr(fd:Int, b:Bool):Int; // SO_REUSEADDR (sys.net.Socket.bind)
 	static function setTimeout(fd:Int, seconds:Float):Int; // SO_RCVTIMEO then SO_SNDTIMEO
 	static function shutdown(fd:Int, mode:Int):Int; // 0 receive, 1 send, 2 all
 	static function setBlocking(fd:Int, b:Bool):Int; // O_NONBLOCK (sys.net.Socket only)

@@ -23,14 +23,23 @@ class Semaphore {
 		}
 		if (timeout == null || timeout == 0) return false;
 		var cur = NativeThread.current();
+		var deadline = timeout < 0 ? -1 : timeout;
+		if (deadline >= 0) deadline += Sys.time();
 		waiters.push(cur);
 		while (true) {
-			var woken = NativeThread.park(timeout < 0 ? -1 : timeout);
 			if (waiters.indexOf(cur) < 0) return true; // a release took us out
-			if (!woken) {
+			// a release while push was growing the array (an allocation may
+			// switch threads) found no waiter and counted
+			if (count > 0) {
 				waiters.remove(cur);
-				return false;
+				count--;
+				return true;
 			}
+			if (!NativeThread.park(deadline < 0 ? -1 : Math.max(0, deadline - Sys.time()))) {
+				if (waiters.remove(cur)) return false; // else a release took us out meanwhile
+				return true;
+			}
+			// unparked, or an early return of park (see NativeThread.unpark): look again
 		}
 	}
 

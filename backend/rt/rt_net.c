@@ -28,6 +28,7 @@ int32_t hxc_NativeNet_send(int32_t fd, void *b, int32_t pos, int32_t len) { retu
 int32_t hxc_NativeNet_select(void *r, void *w, void *o, double t) { return no_net(); }
 int32_t hxc_NativeNet_setNoDelay(int32_t fd, int32_t b) { return no_net(); }
 int32_t hxc_NativeNet_setBroadcast(int32_t fd, int32_t b) { return no_net(); }
+int32_t hxc_NativeNet_setReuseAddr(int32_t fd, int32_t b) { return no_net(); }
 int32_t hxc_NativeNet_setTimeout(int32_t fd, double t) { return no_net(); }
 int32_t hxc_NativeNet_shutdown(int32_t fd, int32_t mode) { return no_net(); }
 int32_t hxc_NativeNet_setBlocking(int32_t fd, int32_t b) { return no_net(); }
@@ -281,6 +282,7 @@ static int32_t set_bool(int fd, int level, int opt, int32_t b) {
 
 int32_t hxc_NativeNet_setNoDelay(int32_t fd, int32_t b) { return set_bool(fd, IPPROTO_TCP, TCP_NODELAY, b); }
 int32_t hxc_NativeNet_setBroadcast(int32_t fd, int32_t b) { return set_bool(fd, SOL_SOCKET, SO_BROADCAST, b); }
+int32_t hxc_NativeNet_setReuseAddr(int32_t fd, int32_t b) { return set_bool(fd, SOL_SOCKET, SO_REUSEADDR, b); }
 
 // Unix.setsockopt_float SO_RCVTIMEO, then SO_SNDTIMEO
 int32_t hxc_NativeNet_setTimeout(int32_t fd, double t) {
