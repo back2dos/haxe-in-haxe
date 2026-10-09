@@ -39,10 +39,32 @@ excluded. Root causes:
   processes fork first and exit 1 on HashLink) (process-nonexistent). This
   also removes the `process-nonexistent` difference of `test/interp.py`.
 
-With these fixes the full misc step gives 681/686 (the remaining 5 are in
-the first half: HxbWildcardExclude, Issue1138/compile3-fail, Issue11881,
-Issue4660, Issue7997). Conformance stays at 275 PASS + 7 EXPECTED-FAILURE
-(also `--hxb-lib`), and the bootstrap build passes.
+First half (HxbWildcardExclude through Issue7997, 32 projects): 30 pass,
+2 excluded. Most were the abort after typing above; the others:
+
+- `TUnification.close`: the "Recursive type" message prints the field type
+  before the mono, as OCaml evaluates `sprintf` arguments right to left (the
+  first printing of a constrained mono shows its constraint) (Issue11881,
+  Issue7997).
+- HashLink 2.0 JIT: every `endtrap` of an early `return`/`break` restores
+  the innermost trap, so leaving two nested `try` blocks at once left the
+  outer handler installed after its frame was gone, and the next uncaught
+  exception jumped into a dead frame (Issue1138/compile3-fail segfaulted).
+  The five such exits in the port (CallUnification, ImportHandling,
+  InheritDoc, Dce, FixOverrides; found by scanning `-D dump`'s
+  `dump/hlcode.txt` for consecutive `endtrap false`) now return after the
+  inner `try`. Re-run that scan after adding `return` inside nested `try`.
+- Coroutine module paths typed as `GlobalTypePath` (Issue12483 ×2).
+
+Excluded in `test/upstream.py` (`MISC_EXCLUDED`, passed to the runner as a
+negative `MISC_TEST_FILTER`): HxbWildcardExclude/compile (its first step
+compiles with `-js` next to `--hxb`) and Issue4660/compile (runs `haxe -js`
+and checks the JavaScript).
+
+The full misc step now passes: 684/684 with 2 excluded. Conformance stays at
+275 PASS + 7 EXPECTED-FAILURE (also `--hxb-lib`), and the bootstrap build
+passes. (`python3 test/upstream.py misc` also runs `misc-resolution`, which
+still fails.)
 
 ## Compilation server and haxelib — 2026-10-09
 
