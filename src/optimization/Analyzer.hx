@@ -48,7 +48,7 @@ class Ssa {
   }; dynarrayMapi(loop,bb.bbPhi);
  }
  public static function renameInBlock(ctx:AnalyzerContext,bb:BasicBlockData):Void {
-  function writeVar(v:TVar,luk:TExprLookupTarget):TVar {updateReachingDef(ctx,v,bb); var w = allocVar(v.vKind,v.vName,v.vType,v.vPos); declareVar(ctx.graph,w,bb); w.vMeta = v.vMeta; if (hasVarFlag(v,VCaptured)) addVarFlag(w,VCaptured); addVarDef(ctx.graph,bb,w); setReachingDef(ctx.graph,w,getReachingDef(ctx.graph,v)); setReachingDef(ctx.graph,v,w); setVarValue(ctx.graph,w,bb,luk); addVarOrigin(ctx.graph,w,v); return w;}
+  inline function writeVar(v:TVar,luk:TExprLookupTarget):TVar {updateReachingDef(ctx,v,bb); var w = allocVar(v.vKind,v.vName,v.vType,v.vPos); declareVar(ctx.graph,w,bb); w.vMeta = v.vMeta; if (hasVarFlag(v,VCaptured)) addVarFlag(w,VCaptured); addVarDef(ctx.graph,bb,w); setReachingDef(ctx.graph,w,getReachingDef(ctx.graph,v)); setReachingDef(ctx.graph,v,w); setVarValue(ctx.graph,w,bb,luk); addVarOrigin(ctx.graph,w,v); return w;}
   function loop(luk:TExprLookupTarget,e:TExpr):TExpr return switch e.eexpr {
    case TLocal(v):var w = local(ctx,e,v,bb); addSsaEdge(ctx.graph,w,bb,luk); withExpr(e,TLocal(w));
    case TVar(v,e1) if (e1 != null):var e1 = loop(luk,e1); var w = writeVar(v,luk); withExpr(e,TVar(w,e1));
@@ -70,21 +70,21 @@ class DataFlow<L,C> {
  public static function getSsaEdgesFrom(g:GraphData,v:TVar):Array<TExprLookup> return getVarInfo(g,v).viSsaEdges;
  public function run(actx:AnalyzerContext,ctx:C):Void {
   var g = actx.graph; var ssaWork:Array<TExprLookup> = []; var cfgWork = g.gRoot.bbOutgoing.copy();
-  function addCfg(edge:CfgEdge):Void cfgWork.unshift(edge);
-  function visitPhi(bb:BasicBlockData,v:TVar,el:Array<TExpr>):L {
+  inline function addCfg(edge:CfgEdge):Void cfgWork.unshift(edge);
+  inline function visitPhi(bb:BasicBlockData,v:TVar,el:Array<TExpr>):L {
    if (el.length != bb.bbIncoming.length) throw "Invalid_argument: List.fold_left2"; var expressions = []; for (i in 0...el.length) if (BasicBlock.hasFlag(bb.bbIncoming[i],api.flag)) expressions.unshift(el[i]); var values = expressions.map(e -> api.transfer(actx,ctx,bb,e));
    return values.length > 0 && all(e -> api.equals(values[0],e),values.slice(1)) ? values[0] : api.bottom;
   }
-  function setCell(v:TVar,e:L):Void {var old = api.getCell(ctx,v.vId); api.setCell(ctx,v.vId,e); if (!api.equals(e,old)) for (edge in getSsaEdgesFrom(g,v)) ssaWork.unshift(edge);}
-  function visitAssignment(bb:BasicBlockData,v:TVar,e:TExpr):Void switch e.eexpr {case TCall({eexpr:TConst(TString("phi"))},el):setCell(v,visitPhi(bb,v,el)); case _:if (exists(edge -> BasicBlock.hasFlag(edge,api.flag),bb.bbIncoming)) setCell(v,api.transfer(actx,ctx,bb,e));}
-  function visitExpression(bb:BasicBlockData,condBranch:Bool,e:TExpr):Bool return switch e.eexpr {
+  inline function setCell(v:TVar,e:L):Void {var old = api.getCell(ctx,v.vId); api.setCell(ctx,v.vId,e); if (!api.equals(e,old)) for (edge in getSsaEdgesFrom(g,v)) ssaWork.unshift(edge);}
+  inline function visitAssignment(bb:BasicBlockData,v:TVar,e:TExpr):Void switch e.eexpr {case TCall({eexpr:TConst(TString("phi"))},el):setCell(v,visitPhi(bb,v,el)); case _:if (exists(edge -> BasicBlock.hasFlag(edge,api.flag),bb.bbIncoming)) setCell(v,api.transfer(actx,ctx,bb,e));}
+  inline function visitExpression(bb:BasicBlockData,condBranch:Bool,e:TExpr):Bool return switch e.eexpr {
    case TBinop(OpAssign,{eexpr:TLocal(v)},e2) | TVar(v,e2) if (e2 != null):visitAssignment(bb,v,e2); false;
    case _ if (api.conditional && condBranch):var value = api.transfer(actx,ctx,bb,e); var edges:Array<CfgEdge>;
     if (value == api.bottom || value == api.top) edges = bb.bbOutgoing; else {var yes = []; var maybe = []; var also = []; for (edge in bb.bbOutgoing) switch edge.cfgKind {case CFGCondBranch(e):if (api.equals(api.transfer(actx,ctx,bb,e),value)) yes.unshift(edge); case CFGCondElse:maybe.unshift(edge); case CFGGoto | CFGFunction | CFGMaybeThrow:also.unshift(edge);} edges = yes.length == 0 ? (maybe.length == 0 ? bb.bbOutgoing : maybe.concat(also)) : yes.concat(also);}
     for (edge in edges) addCfg(edge); true;
    case _:false;
   };
-  function visitExpressions(bb:BasicBlockData):Void {
+  inline function visitExpressions(bb:BasicBlockData):Void {
    var handled = false; for (e in bb.bbEl) handled = visitExpression(bb,false,e) || handled;
    handled = switch bb.bbTerminator {case TermCondBranch(e):visitExpression(bb,true,e) || handled; case TermReturnValue(e,_) | TermThrow(e,_):visitExpression(bb,false,e); case _:handled;};
    if (!handled) for (edge in bb.bbOutgoing) addCfg(edge);
@@ -108,7 +108,7 @@ class ConstPropagationImpl implements DataFlowApi<ConstLattice,haxe.ds.IntMap<Co
  public function transfer(actx:AnalyzerContext,ctx:haxe.ds.IntMap<ConstLattice>,bb:BasicBlockData,e:TExpr):ConstLattice {
   function eval(e:TExpr):ConstLattice {
    function wrap(t:ConstLattice):TExpr return switch t {case ConstValue(ct,t):mk(TConst(ct),t,Globals.nullPos); case NullValue(t):mk(TConst(TNull),t,e.epos); case _:throw new TypeExit();};
-   function unwrap(e:TExpr):ConstLattice return switch e.eexpr {case TConst(ct):ConstValue(ct,e.etype); case _:throw new TypeExit();};
+   inline function unwrap(e:TExpr):ConstLattice return switch e.eexpr {case TConst(ct):ConstValue(ct,e.etype); case _:throw new TypeExit();};
    return switch e.eexpr {
     case TConst(TSuper | TThis):Bottom; case TConst(TNull):NullValue(e.etype); case TConst(ct):ConstValue(ct,e.etype); case TTypeExpr(mt):ModuleValue(mt,e.etype);
     case TLocal(v):if (follow(v.vType) == tDynamic || hasVarFlag(v,VCaptured)) Bottom; else switch getCell(ctx,v.vId) {case NullValue(_) if (!isNullable(v.vType)):Bottom; case ct:ct;}
@@ -208,29 +208,29 @@ class Debug {
   var label = switch edge.cfgKind {case CFGGoto:"goto"; case CFGFunction:"function"; case CFGMaybeThrow:"throw?"; case CFGCondBranch(_):"branch"; case CFGCondElse:"else";}; if (edge.cfgFlags.length > 0) label += " [" + edge.cfgFlags.map(flag -> switch flag {case FlagExecutable:"exe"; case FlagDce:"dce"; case FlagCopyPropagation:"copy";}).join(", ") + "]"; ch.writeString('n${edge.cfgFrom.bbId} -> n${edge.cfgTo.bbId}[label="${escape(label)}"];\n');
  }
  public static function dotDebugSyntaxEdge(ch:haxe.io.Output,bb:BasicBlockData,se:SyntaxEdge):Void {
-  function edge(other:BasicBlockData,label:String):Void ch.writeString('n${bb.bbId} -> n${other.bbId}[style="dashed",color="gray",label="$label"];\n');
+  inline function edge(other:BasicBlockData,label:String):Void ch.writeString('n${bb.bbId} -> n${other.bbId}[style="dashed",color="gray",label="$label"];\n');
   switch se {case SESubBlock(sub,next):edge(sub,"sub"); edge(next,"next"); case SEIfThen(bt,next,_):edge(bt,"then"); edge(next,"next"); case SEIfThenElse(bt,be,next,_,_):edge(bt,"then"); edge(be,"else"); edge(next,"next"); case SEWhile(body,next,_):edge(body,"loop-body"); edge(next,"next"); case SEMerge(next):edge(next,"merge"); case SESwitch(ss):for (c in ss.ssCases) edge(c.bb,"case " + c.values.map(sExprPretty).join(" | ")); if (ss.ssDefault != null) edge(ss.ssDefault,"default"); edge(ss.ssNext,"next"); case SETry(bt,_,catches,next,_):edge(bt,"try"); for (c in catches) edge(c.bb,"catch"); edge(next,"next"); case SENone:}
  }
  public static function htmlescape(s:String):String return s.split("&").join("&amp;").split("<").join("&lt;").split(">").join("&gt;");
  public static function generateCfgSsa(ch:haxe.io.Output,g:GraphData):Void {
-  ch.writeString("\tnode [shape=plaintext];\n"); function exprName(luk:TExprLookupTarget):String return "e" + switch luk {case LUPhi(i):"p" + i; case LUEl(i):Std.string(i); case LUTerm:"t";};
-  for (bb in g.gNodes) {ch.writeString('n${bb.bbId}[label=<<table BORDER="0" CELLBORDER="1" CELLSPACING="0">\n\t<tr><td port="in" bgcolor="lightgray">(${bb.bbId}) ${BasicBlock.sBlockKind(bb.bbKind)}</td></tr>\n'); function row(luk:TExprLookupTarget,e:TExpr):Void ch.writeString('\t<tr><td port="${exprName(luk)}" align="left">${escape(htmlescape(sExprPretty(e)))}</td></tr>\n'); for (i in 0...bb.bbPhi.length) row(LUPhi(i),bb.bbPhi[i]); for (i in 0...bb.bbEl.length) row(LUEl(i),bb.bbEl[i]); ch.writeString('\t<tr><td port="out"></td></tr>\n</table>>];\n');}
+  ch.writeString("\tnode [shape=plaintext];\n"); inline function exprName(luk:TExprLookupTarget):String return "e" + switch luk {case LUPhi(i):"p" + i; case LUEl(i):Std.string(i); case LUTerm:"t";};
+  for (bb in g.gNodes) {ch.writeString('n${bb.bbId}[label=<<table BORDER="0" CELLBORDER="1" CELLSPACING="0">\n\t<tr><td port="in" bgcolor="lightgray">(${bb.bbId}) ${BasicBlock.sBlockKind(bb.bbKind)}</td></tr>\n'); inline function row(luk:TExprLookupTarget,e:TExpr):Void ch.writeString('\t<tr><td port="${exprName(luk)}" align="left">${escape(htmlescape(sExprPretty(e)))}</td></tr>\n'); for (i in 0...bb.bbPhi.length) row(LUPhi(i),bb.bbPhi[i]); for (i in 0...bb.bbEl.length) row(LUEl(i),bb.bbEl[i]); ch.writeString('\t<tr><td port="out"></td></tr>\n</table>>];\n');}
   Graph.iterEdges(g,function(edge) ch.writeString('n${edge.cfgFrom.bbId}:out -> n${edge.cfgTo.bbId}:in[label="${BasicBlock.sCfgEdgeKind(edge.cfgKind)}"];\n'));
   for (vi in g.gVarInfos) if (vi.viValue != null) {var value = vi.viValue; var n1 = 'n${value.bb.bbId}:${exprName(value.target)}'; for (edge in vi.viSsaEdges) if (value.bb != edge.bb) ch.writeString('$n1 -> n${edge.bb.bbId}:${exprName(edge.target)}[color=lightblue,constraint=false];\n');}
  }
  public static function platformNameMacro(com:context.SafeCom.SafeContext):String return core.Define.defined(com.defines,core.Define.Macro) ? "macro" : core.Globals.platformName(com.platform);
  public static function getDumpPath(ctx:AnalyzerContext,c:TClass,cf:TClassField):Array<String> return [ctx.com.dumpConfig.dumpPath,platformNameMacro(ctx.com)].concat(c.clPath.pack).concat([c.clPath.name + "." + cf.cfName]);
  public static function dotDebug(ctx:AnalyzerContext,c:GlobalTypePath,cf:String):Void {
-  var g = ctx.graph; function start(suffix:String):Dynamic return context.DotGraph.startGraph(context.DotGraph.getDumpPath(ctx.com,c,cf),suffix,[]);
+  var g = ctx.graph; inline function start(suffix:String):Dynamic return context.DotGraph.startGraph(context.DotGraph.getDumpPath(ctx.com,c,cf),suffix,[]);
   var graph = start("-cfg.dot"); for (bb in g.gNodes) dotDebugNode(g,graph.channel,[NILoopGroups,NIScopes,NIPhi,NIExpr],bb); Graph.iterEdges(g,dotDebugCfgEdge.bind(graph.channel)); graph.close();
   graph = start("-cfg-ssa.dot"); generateCfgSsa(graph.channel,g); graph.close();
   graph = start("-dj.dot"); for (bb in g.gNodes) {dotDebugNode(g,graph.channel,[],bb); for (inc in bb.bbIncoming) {var pred = inc.cfgFrom; var style = pred == bb.bbDominator ? "solid" : "dashed"; graph.channel.writeString('n${pred.bbId} -> n${bb.bbId}[style="$style"];\n');}} graph.close();
   graph = start("-df.dot"); for (bb in g.gNodes) {dotDebugNode(g,graph.channel,[NIVars],bb); for (other in bb.bbDf) graph.channel.writeString('n${bb.bbId} -> n${other.bbId};\n');} graph.close();
   graph = start("-dom.dot"); for (bb in g.gNodes) {dotDebugNode(g,graph.channel,[NIVars],bb); for (other in bb.bbDominated) graph.channel.writeString('n${bb.bbId} -> n${other.bbId};\n');} graph.close();
   graph = start("-syntax.dot"); for (bb in g.gNodes) {dotDebugNode(g,graph.channel,[NIExpr],bb); dotDebugSyntaxEdge(graph.channel,bb,bb.bbSyntaxEdge);} graph.close();
-  graph = start("-ssa-edges.dot"); var nodes = new haxe.ds.StringMap<Bool>(); function nodeName(bb:BasicBlockData,luk:TExprLookupTarget):String return 'e${bb.bbId}_' + switch luk {case LUPhi(i):"phi_" + i; case LUEl(i):"el" + i; case LUTerm:"term";}; function activeName(bb:BasicBlockData,luk:TExprLookupTarget):String {var n = nodeName(bb,luk); nodes.set(n,true); return n;}
+  graph = start("-ssa-edges.dot"); var nodes = new haxe.ds.StringMap<Bool>(); inline function nodeName(bb:BasicBlockData,luk:TExprLookupTarget):String return 'e${bb.bbId}_' + switch luk {case LUPhi(i):"phi_" + i; case LUEl(i):"el" + i; case LUTerm:"term";}; inline function activeName(bb:BasicBlockData,luk:TExprLookupTarget):String {var n = nodeName(bb,luk); nodes.set(n,true); return n;}
   for (vi in g.gVarInfos) if (vi.viValue != null) {var value = vi.viValue; var n1 = activeName(value.bb,value.target); for (edge in vi.viSsaEdges) {var n2 = activeName(edge.bb,edge.target); graph.channel.writeString('$n1 -> $n2;\n');}}
-  for (bb in g.gNodes) {var active = []; function add(luk:TExprLookupTarget,e:TExpr):Void {var n = nodeName(bb,luk); if (nodes.exists(n)) active.unshift({name:n,label:sExprPretty(e)});} for (i in 0...bb.bbPhi.length) add(LUPhi(i),bb.bbPhi[i]); for (i in 0...bb.bbEl.length) add(LUEl(i),bb.bbEl[i]); if (active.length > 0) {graph.channel.writeString('subgraph cluster_${bb.bbId} {\nlabel=${bb.bbId};\nstyle=filled;\ncolor=lightblue;\n'); for (item in active) graph.channel.writeString('${item.name}[shape=box,label="${escape(item.label)}"];\n'); graph.channel.writeString("}\n");}}
+  for (bb in g.gNodes) {var active = []; inline function add(luk:TExprLookupTarget,e:TExpr):Void {var n = nodeName(bb,luk); if (nodes.exists(n)) active.unshift({name:n,label:sExprPretty(e)});} for (i in 0...bb.bbPhi.length) add(LUPhi(i),bb.bbPhi[i]); for (i in 0...bb.bbEl.length) add(LUEl(i),bb.bbEl[i]); if (active.length > 0) {graph.channel.writeString('subgraph cluster_${bb.bbId} {\nlabel=${bb.bbId};\nstyle=filled;\ncolor=lightblue;\n'); for (item in active) graph.channel.writeString('${item.name}[shape=box,label="${escape(item.label)}"];\n'); graph.channel.writeString("}\n");}}
   graph.close();
  }
 }
@@ -257,7 +257,7 @@ class Run {
   if (actx.config.fusion) e = optimization.Analyzer.Run.timed(actx,["<-","fusion"],function() return Fusion.apply(actx,e)); if (actx.com.debug) addDebugExpr(actx,"after fusion",e); e = optimization.Analyzer.Run.timed(actx,["<-","cleanup"],function() return Cleanup.apply(actx.com,e)); if (actx.com.debug) addDebugExpr(actx,"after cleanup",e);
   if (isRealFunction) return e;
   return switch e.eexpr {
-   case TFunction(tf):function getT(t:T):T return core.TOther.ExtType.isVoid(t) ? tf.tfType : t; var dislikesComplex = switch actx.com.platform {case Cpp | Hl | Jvm | Php | Flash:true; case _:false;};
+   case TFunction(tf):inline function getT(t:T):T return core.TOther.ExtType.isVoid(t) ? tf.tfType : t; var dislikesComplex = switch actx.com.platform {case Cpp | Hl | Jvm | Php | Flash:true; case _:false;};
     function loop(e:TExpr):TExpr return switch e.eexpr {
      case TBlock([e1]):loop(e1);
      case TBlock(_) | TIf(_,_,_) | TSwitch(_) | TTry(_,_) if (dislikesComplex):throw new TypeExit();
@@ -279,9 +279,9 @@ class Run {
  public static function runOnFieldInternal(com:context.SafeCom.SafeContext,excOut:ExceptionOutput,config:AnalyzerConfigData,c:TClass,cf:TClassField):Void {
   if (cf.cfExpr == null || AnalyzerConfig.isIgnored(cf.cfMeta) || filters.FilterContext.isRemovableField(com.isMacroContext,cf) || hasClassFieldFlag(cf,CfPostProcessed)) return;
   var e = cf.cfExpr; config = AnalyzerConfig.updateConfigFromMeta(com,config,cf.cfMeta); var actx = createAnalyzerContext(com,config,Globals.sTypePath(c.clPath) + "." + cf.cfName,e);
-  function debug():Void {Sys.println("While analyzing " + Globals.sTypePath(c.clPath) + "." + cf.cfName); var expressions = actx.debugExprs.copy(); expressions.reverse(); for (item in expressions) {Sys.println("<" + item.name + ">"); Sys.println(core.TPrinting.sExprPretty(true,"",false,core.TPrinting.sType.bind(core.TPrinting.printContext()),item.expr)); Sys.println("</" + item.name + ">");} Debug.dotDebug(actx,c.clPath,cf.cfName); Sys.println("dot graph written to " + context.DotGraph.getDumpPath(actx.com,c.clPath,cf.cfName).join("/"));}
-  function maybeDebug():Void switch config.debugKind {case DebugNone:case DebugDot:Debug.dotDebug(actx,c.clPath,cf.cfName); case DebugFull:debug();}
-  function save(exc:Dynamic):Void {excOut.mutex.acquire(); excOut.value = exc; excOut.mutex.release();}
+  inline function debug():Void {Sys.println("While analyzing " + Globals.sTypePath(c.clPath) + "." + cf.cfName); var expressions = actx.debugExprs.copy(); expressions.reverse(); for (item in expressions) {Sys.println("<" + item.name + ">"); Sys.println(core.TPrinting.sExprPretty(true,"",false,core.TPrinting.sType.bind(core.TPrinting.printContext()),item.expr)); Sys.println("</" + item.name + ">");} Debug.dotDebug(actx,c.clPath,cf.cfName); Sys.println("dot graph written to " + context.DotGraph.getDumpPath(actx.com,c.clPath,cf.cfName).join("/"));}
+  inline function maybeDebug():Void switch config.debugKind {case DebugNone:case DebugDot:Debug.dotDebug(actx,c.clPath,cf.cfName); case DebugFull:debug();}
+  inline function save(exc:Dynamic):Void {excOut.mutex.acquire(); excOut.value = exc; excOut.mutex.release();}
   try {e = runOnExpr(actx,e); e = reduceControlFlow(com,e); maybeDebug(); cf.cfExpr = e;}
   catch (exc:core.Error.TypingError) {maybeDebug(); save(exc);}
   catch (exc:core.ds.Cancelled) {maybeDebug(); save(exc);}
@@ -291,7 +291,7 @@ class Run {
  public static function runOnField(com:context.SafeCom.SafeContext,config:AnalyzerConfigData,c:TClass,cf:TClassField):Void {var out:ExceptionOutput = {value:null,mutex:new sys.thread.Mutex()}; runOnFieldInternal(com,out,config,c,cf); checkExcOut(out);}
  public static function runOnClass(com:context.SafeCom.SafeContext,out:ExceptionOutput,pool:Dynamic,config:AnalyzerConfigData,c:TClass):Void {
   config = AnalyzerConfig.updateConfigFromMeta(com,config,c.clMeta); var fields = [];
-  function processField(stat:Bool,cf:TClassField):Void switch cf.cfKind {case Var({vRead:_,vWrite:_}) if (!stat):case _:fields.push(cf); for (overloadedField in cf.cfOverloads) fields.push(overloadedField);}
+  inline function processField(stat:Bool,cf:TClassField):Void switch cf.cfKind {case Var({vRead:_,vWrite:_}) if (!stat):case _:fields.push(cf); for (overloadedField in cf.cfOverloads) fields.push(overloadedField);}
   for (cf in c.clOrderedFields) processField(false,cf); for (cf in c.clOrderedStatics) processField(true,cf); if (c.clConstructor != null) processField(false,c.clConstructor);
   context.Parallel.ParallelArray.iter(pool,function(cf) runOnFieldInternal(com,out,config,c,cf),fields);
   var init = core.TOther.TClassTools.getClInit(c); if (init != null) {var tf:TFunc = {tfArgs:[],tfType:init.etype,tfExpr:init}; var e = mk(TFunction(tf),tfun([],init.etype),init.epos); var config:AnalyzerConfigData = core.ds.Record.copy(config); config.optimize = false; var actx = createAnalyzerContext(com,config,Globals.sTypePath(c.clPath) + ".__init__",e); var e = runOnExpr(actx,e); var body = switch e.eexpr {case TFunction(tf):tf.tfExpr; case _:throw "Analyzer.runOnClass expected function";}; core.TOther.TClassTools.setClInit(c,body);}

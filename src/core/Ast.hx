@@ -248,10 +248,10 @@ enum TypeDef { EClass(definition:ClassDefinition); EEnum(definition:EnumDefiniti
 class Ast {
  public static function dumpWithPos(e:Expr):String {
   var buf=new StringBuf();
-  function line(tabs:String,p:Pos,s:String):Void buf.add(StringTools.lpad(Std.string(p.pmin)," ",4)+"-"+StringTools.lpad(Std.string(p.pmax)," ",4)+" "+tabs+s+"\n");
+  inline function line(tabs:String,p:Pos,s:String):Void buf.add(StringTools.lpad(Std.string(p.pmin)," ",4)+"-"+StringTools.lpad(Std.string(p.pmax)," ",4)+" "+tabs+s+"\n");
   function walk(tabs:String,e:Expr):Void {
-   function add(s:String):Void line(tabs,e.pos,s);
-   function loop(e:Expr):Void walk(tabs+"  ",e);
+   inline function add(s:String):Void line(tabs,e.pos,s);
+   inline function loop(e:Expr):Void walk(tabs+"  ",e);
    switch e.expr {
     case EConst(c):add(sConstant(c));
     case EArray(a,b):add("EArray");loop(a);loop(b);
@@ -286,7 +286,7 @@ class Ast {
  public static function stringPosListOfExprPathRaise(e:Expr):Array<PlacedName> return switch e.expr {case EConst(Ident(name)):([{name:name,pos:e.pos}] : Array<core.Ast.PlacedName>);case EField(inner,name,_):([{name:name,pos:e.pos}] : Array<core.Ast.PlacedName>).concat(stringPosListOfExprPathRaise(inner));case _:throw core.ds.Exit.raise();};
  public static function fullDotPath2(mpath:GlobalTypePath,tpath:GlobalTypePath):Array<String> return core.ds.Key.compare(mpath,tpath)==0?tpath.pack.concat([tpath.name]):mpath.pack.concat([mpath.name,tpath.name]);
  public static function iterExpr(loop:Expr->Void,e:Expr):Void {
-  function opt(e:Null<Expr>):Void if(e!=null) loop(e);
+  inline function opt(e:Null<Expr>):Void if(e!=null) loop(e);
   switch e.expr {
    case EConst(_) | EContinue | EBreak | EReturn(null):
    case EParenthesis(e) | EField(e,_,_) | EUnop(_,_,e) | EReturn(e) | EThrow(e) | EMeta(_,e) | ECheckType(e,_) | EDisplay(e,_) | ECast(e,_) | EIs(e,_) | EUntyped(e):loop(e);

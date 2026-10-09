@@ -161,7 +161,7 @@ class Monomorph {
  }
  public static function close(m:TMono):Void {
   if(m.tmType!=null) return;
-  function getRecursion(t:T):Null<T> {
+  inline function getRecursion(t:T):Null<T> {
    function loop(t:T):Void switch t {case TMono(m2) if(m==m2):throw new TypeRecursion(t);case _:TFunctions.iter(loop,t);}
    try {loop(t);return null;} catch(e:TypeRecursion) {return e.type;}
   }
@@ -301,7 +301,7 @@ class TUnification {
   var param=c.equalityKind;
   inline function canFollow(t:T):Bool return param!=EqStricter && param!=EqCoreType;
   inline function canFollowNull(t:T):Bool return switch c.nullFollowMode {case AlwaysFollow:true;case NeverFollow:false;case FollowIfNullable:isNullable(t);};
-  inline function canFollowAbstract(ab:TAbstract):Bool return c.equalityUnderlying && switch ab.aThis {case TAbstract(other,_):other!=ab;case _:true;};
+  function canFollowAbstract(ab:TAbstract):Bool return c.equalityUnderlying && switch ab.aThis {case TAbstract(other,_):other!=ab;case _:true;};
   if(a==b) return;
   switch [a,b] {
    case [TLazy(f),_]:typeEqCustom(c,lazyType(f),b);
@@ -454,7 +454,7 @@ class TUnification {
        addClassFieldFlag(f1,CfMaybeUsed);
        switch f2.cfKind {
         case Var(v):
-         function check(name:String):Void try {addClassFieldFlag(rawClassField(makeType,cl,tl,name).field,CfMaybeUsed);} catch(_:NotFound) {}
+         inline function check(name:String):Void try {addClassFieldFlag(rawClassField(makeType,cl,tl,name).field,CfMaybeUsed);} catch(_:NotFound) {}
          switch v.vRead {case AccCall,AccPrivateCall:check("get_"+f1.cfName);case _:}
          switch v.vWrite {case AccCall,AccPrivateCall:check("set_"+f1.cfName);case _:}
         case _:
@@ -506,13 +506,13 @@ class TUnification {
   }
  }
  public static function unifyAnons(c:UnificationContext,a:T,b:T,a1:TAnon,a2:TAnon):Void {
-  function unifyField(fields:TypeMap<TClassField>,f2:TClassField):TClassField {
+  inline function unifyField(fields:TypeMap<TClassField>,f2:TClassField):TClassField {
    var n=f2.cfName,f1=PMap.find(n,fields);
    if(!unifyKind(c,f1.cfKind,f2.cfKind)) error([invalidKind(n,f1.cfKind,f2.cfKind)]);
    if(hasClassFieldFlag(f2,CfPublic)&&!hasClassFieldFlag(f1,CfPublic)) error([invalidVisibility(n)]);
    try {var t=fastEq(f1.cfType,f2.cfType) ? f1.cfType : fieldTypeForUnification(c,f1);unifyWithAccess(c,f1,t,f2);return f1;} catch(e:Unify_error) {return error([invalidField(n)].concat(e.errors));}
   }
-  function unifyFields(fields:TypeMap<TClassField>,good:TClassField->Void,bad:TClassField->Bool):Void {
+  inline function unifyFields(fields:TypeMap<TClassField>,good:TClassField->Void,bad:TClassField->Bool):Void {
    try {PMap.iter(function(_,f2) {try {good(unifyField(fields,f2));} catch(_:NotFound) {if(!bad(f2)) error([hasNoField(a,f2.cfName)]);}},a2.aFields);} catch(e:Unify_error) {error([cannotUnify(a,b)].concat(e.errors));}
   }
   switch [a1.aStatus,a2.aStatus] {
@@ -566,14 +566,14 @@ class TUnification {
  });
  public static function unifyWithVariance(c:UnificationContext,f:T->T->Void,t1:T,t2:T):Void {
   t1=followWithoutType(t1);t2=followWithoutType(t2);
-  function fail():Void error([cannotUnify(t1,t2)]);
-  function unifyRec(f:Void->Void):Void recStack(c.varianceStack,pair(t1,t2),function(p) return fastEqPair(pair(t1,t2),p),f,function(_) fail());
+  inline function fail():Void error([cannotUnify(t1,t2)]);
+  inline function unifyRec(f:Void->Void):Void recStack(c.varianceStack,pair(t1,t2),function(p) return fastEqPair(pair(t1,t2),p),f,function(_) fail());
   function unifyNested(t1:T,t2:T):Void withVariance(getNestedContext(c),f,t1,t2);
-  function unifyTls(tl1:Array<T>,tl2:Array<T>):Void List.iter2(unifyNested,tl1,tl2);
-  function thisType(ab:TAbstract,tl:Array<T>):T return followWithoutType(applyParams(ab.aParams,tl,ab.aThis));
-  function definedType(td:TDef,tl:Array<T>):T return followWithoutType(applyTypedef(td,tl));
-  function compareUnderlying():Void typeEqCustom(core.ds.Record.withFields(c,{equalityUnderlying:true,equalityKind:EqBothDynamic}),t1,t2);
-  function unifiesAbstract(c:UnificationContext,a:T,b:T,ab:TAbstract,tl:Array<T>,ats:Array<T>):Bool {
+  inline function unifyTls(tl1:Array<T>,tl2:Array<T>):Void List.iter2(unifyNested,tl1,tl2);
+  inline function thisType(ab:TAbstract,tl:Array<T>):T return followWithoutType(applyParams(ab.aParams,tl,ab.aThis));
+  inline function definedType(td:TDef,tl:Array<T>):T return followWithoutType(applyTypedef(td,tl));
+  inline function compareUnderlying():Void typeEqCustom(core.ds.Record.withFields(c,{equalityUnderlying:true,equalityKind:EqBothDynamic}),t1,t2);
+  inline function unifiesAbstract(c:UnificationContext,a:T,b:T,ab:TAbstract,tl:Array<T>,ats:Array<T>):Bool {
    try {
     var c=getAbstractContext(c,a,b,ab);
     return recStackDefault(c.abstractCastStack,pair(a,b),function(p) return fastEqPair(pair(a,b),p),function() return core.ds.ArrayTools.exists(ats,function(at) return doesFuncUnifyArg(function(at) {

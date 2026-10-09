@@ -45,7 +45,7 @@ class Typeload {
  public static var typeFunctionParamsRef:Typer->Func->TypeParamHost->String->TypeParams=function(_:Typer,_:Func,_:TypeParamHost,_:String):TypeParams {throw "Uninitialized typeFunctionParamsRef";};
  public static function checkFieldAccess(ctx:Typer,cff:ClassField):Dynamic {
   var displayed:Null<PlacedAccess>=null,acc:Array<PlacedAccess>=[],p0=core.ds.Record.copy(cff.cffPos); p0.pmax=p0.pmin;
-  function checkDisplay(p1:Dynamic):Void {var pmid=core.ds.Record.copy(p0); pmid.pmin=p0.pmax; pmid.pmax=p1.pmin; if(DisplayPosition.displayPosition.enclosedIn(pmid)&&acc.length>0) displayed=acc[0];}
+  inline function checkDisplay(p1:Dynamic):Void {var pmid=core.ds.Record.copy(p0); pmid.pmin=p0.pmax; pmid.pmax=p1.pmin; if(DisplayPosition.displayPosition.enclosedIn(pmid)&&acc.length>0) displayed=acc[0];}
   for(entry in cff.cffAccess) {
    var access=entry.access,p1=entry.pos; checkDisplay(p1);
    var prior:Null<PlacedAccess>=null;
@@ -132,7 +132,7 @@ class Typeload {
    try unifyRaise(t,mapped,p) catch(exc:Dynamic) {switch exc {
     case (core.ds.ExceptionTools.typing(_) => Some(err)):switch err.errMessage {
      case Unify(l):
-      function fail():Void {if(!ctx.f.isUntyped) {var copy=core.ds.Record.copy(err); copy.errMessage=Unify([ConstraintFailure(Globals.sTypePath(ttp.ttpClass.clPath))].concat(l)); displayErrorExt(ctx.com,copy);}}
+      inline function fail():Void {if(!ctx.f.isUntyped) {var copy=core.ds.Record.copy(err); copy.errMessage=Unify([ConstraintFailure(Globals.sTypePath(ttp.ttpClass.clPath))].concat(l)); displayErrorExt(ctx.com,copy);}}
       switch follow(t) {
        case TInst({clKind:KExpr(e)},_):var local=TyperManager.cloneForTypeParameterExpression(ctx),e=typeExpr(local,e,WithTypeTools.withType(mapped)); try unifyRaise(e.etype,mapped,p) catch(exc:Dynamic) {switch exc {case (core.ds.ExceptionTools.typing(_) => Some({errMessage:Unify(_)})):fail(); case _:throw exc;}}
        case _:fail();
@@ -243,7 +243,7 @@ class Typeload {
       var fields=a2.aFields; PMap.iter(function(name:String,cf:TClassField) {fields=PMap.add(name,cf,fields);},a.aFields); mkAnon(Extend([pair.type]),fields);
      case _:raiseTypingError("Can only extend structures",pair.pos);
     };
-    function merge(pair:Dynamic):Void switch follow(pair.type) {case TAnon(a2):PMap.iter(function(name:String,cf:TClassField) {if(!isRedefined(ctx,cf,a.aFields,pair.pos)) a.aFields=PMap.add(name,cf,a.aFields);},a2.aFields); case _:raiseTypingError("Can only extend structures",pair.pos);}
+    inline function merge(pair:Dynamic):Void switch follow(pair.type) {case TAnon(a2):PMap.iter(function(name:String,cf:TClassField) {if(!isRedefined(ctx,cf,a.aFields,pair.pos)) a.aFields=PMap.add(name,cf,a.aFields);},a2.aFields); case _:raiseTypingError("Can only extend structures",pair.pos);}
     var instances:Array<{type:T,pos:Pos}>=tl.map(function(ptp) {try return {type:loadInstance(ctx,ptp,ParamNormal,LoadNormal,allowDisplay),pos:ptp.posFull} catch(e:Dynamic) return structCompletion(e,false);});
     var tr=Monomorph.create(),t=TMono(tr),r=makeLazy(ctx.g,t,function() {
      var result:Dynamic;
@@ -255,9 +255,9 @@ class Typeload {
     for(f in list) {
      var name=f.cffName.name,pf=f.cffName.pos,p=f.cffPos;
      if(fields.exists(name)) raiseTypingError("Duplicate field declaration : "+name,pf);
-     function optionalType(mode:LoadInstanceMode,t:Null<TypeHint>):T {if(t==null) return raiseTypingError("Explicit type required for field "+name,p); return loadComplexType(ctx,allowDisplay,mode,t);}
+     inline function optionalType(mode:LoadInstanceMode,t:Null<TypeHint>):T {if(t==null) return raiseTypingError("Explicit type required for field "+name,p); return loadComplexType(ctx,allowDisplay,mode,t);}
      if(name=="new") warning(ctx,WDeprecated,"Structures with new are deprecated, use haxe.Constraints.Constructible instead",p);
-     function noExpr(e:Dynamic):Void {if(e!=null) raiseTypingError("Expression not allowed here",e.pos);}
+     inline function noExpr(e:Dynamic):Void {if(e!=null) raiseTypingError("Expression not allowed here",e.pos);}
      var pub=true,dyn=false,params:TypeParams=[],isFinal=false;
      checkFieldAccess(ctx,f);
      for(access in (cast f.cffAccess:Array<Dynamic>)) switch access.access {
@@ -328,7 +328,7 @@ class Typeload {
     switch cf.cfKind {case Method(MethInline):raiseTypingError("Cannot @:overload inline function",p); case _:}
     var old=ctx.typeParams; if(cf.cfParams.length>0) ctx.typeParams=ctx.typeParams.filter(ttp -> ttp.ttpHost!=TPHMethod);
     var params=typeFunctionParamsRef(ctx,f,TPHMethod,cf.cfName); ctx.typeParams=params.concat(ctx.typeParams);
-    function optionalType(mode:LoadInstanceMode,t:Null<TypeHint>):T {if(t==null) return raiseTypingError("Explicit type required",p); return loadComplexType(ctx,true,mode,t);}
+    inline function optionalType(mode:LoadInstanceMode,t:Null<TypeHint>):T {if(t==null) return raiseTypingError("Explicit type required",p); return loadComplexType(ctx,true,mode,t);}
     var args=f.fArgs.map(function(arg) {var t=optionalType(LoadNormal,arg.type); if(arg.optional) t=ctx.t.tnull(t); return {name:arg.name.name,optional:arg.optional||arg.expr!=null,type:t};});
     var overloadField=core.ds.Record.copy(cf); overloadField.cfType=TFun({args:args,ret:optionalType(LoadReturn,f.fType)}); overloadField.cfParams=params; overloadField.cfMeta=baseMeta.copy();
     generateArgsMeta(ctx.com,co,m -> overloadField.cfMeta.unshift(m),f.fArgs); overloads.unshift(overloadField); ctx.typeParams=old;
@@ -401,7 +401,7 @@ class Typeload {
    try for(j in 0...a.length) typeEq(EqCoreType,b[j],a[j]) catch(exc:Unify_error) displayErrorExt(ctx.com,makeError(Custom("Type parameter "+params[i].ttpName+" has different constraint than in core type"),c.clPos,[makeError(Custom(complMsg(errorMsg(Unify(exc.errors)))),c.clPos)]));
   }
   if(c.clDoc==null) c.clDoc=ccore.clDoc;
-  function compare(f:TClassField,f2:TClassField):Void {
+  inline function compare(f:TClassField,f2:TClassField):Void {
    var p=f2.cfExpr==null?c.clPos:f2.cfExpr.epos;
    try typeEq(EqCoreType,applyParams(ccore.clParams,extractParamTypes(c.clParams),f.cfType),f2.cfType) catch(exc:Unify_error) displayErrorExt(ctx.com,makeError(Custom("Field "+f.cfName+" has different type than in core type"),p,[makeError(Custom(complMsg(errorMsg(Unify(exc.errors)))),p)]));
    if(hasClassFieldFlag(f2,CfPublic)!=hasClassFieldFlag(f,CfPublic)) raiseTypingError("Field "+f.cfName+" has different visibility than core type",p);
@@ -416,7 +416,7 @@ class Typeload {
     case _:
    }
   }
-  function checkFields(expected:TypeMap<TClassField>,actual:TypeMap<TClassField>):Void {
+  inline function checkFields(expected:TypeMap<TClassField>,actual:TypeMap<TClassField>):Void {
    PMap.iter(function(name:String,f:TClassField) {if(hasClassFieldFlag(f,CfPublic)) {var f2=actual.get(f.cfName); if(f2==null) raiseTypingError("Missing field "+name+" required by core type",c.clPos); compare(f,f2);}},expected);
    PMap.iter(function(name:String,f:TClassField) {var p=f.cfExpr==null?c.clPos:f.cfExpr.epos; if(hasClassFieldFlag(f,CfPublic)&&!Meta.has(MetaTag.Hack,f.cfMeta)&&!expected.exists(f.cfName)&&!hasClassFieldFlag(f,CfOverride)) raiseTypingError("Public field "+name+" is not part of core type",p);},actual);
   }

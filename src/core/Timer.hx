@@ -147,7 +147,7 @@ class Timer {
 		print(StringTools.rpad("name"," ",maxName) + " | " + StringTools.lpad("time(s)"," ",7) + " |   % |  p% | " + StringTools.lpad("#"," ",maxCalls) + " | info");
 		var sep = StringTools.rpad("","-",maxName + maxCalls + 27);
 		print(sep);
-		function printTime(name:String,node:TimerNode):Void {
+		inline function printTime(name:String,node:TimerNode):Void {
 			if (node.time >= timerThreshold)
 				print(StringTools.rpad(name," ",maxName) + " | " + StringTools.lpad(fixed(node.time,3)," ",7) + " | " + StringTools.lpad(fixed(node.time * 100 / root.time,0)," ",3) + " | " + StringTools.lpad(fixed(node.time * 100 / node.parent.time,0)," ",3) + " | " + StringTools.lpad(Std.string(node.numCalls)," ",maxCalls) + " | " + node.info);
 		}

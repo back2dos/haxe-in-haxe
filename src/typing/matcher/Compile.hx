@@ -64,7 +64,7 @@ class Compile {
  }
  static function isWildcardPattern(p:PatternData):Bool return switch p.kind{case PatAny:true;case PatBind(_,p):isWildcardPattern(p);case _:false;};
  static function expand(cases:Array<CaseRow>):Array<CaseRow> {
-  function expandRow(f:PatternData->PatternData,c:CaseRow):Array<CaseRow> {if(c.patterns.length==0)return [c];var p=c.patterns[0],tail=c.patterns.slice(1);function row(ps:Array<PatternData>):CaseRow return {caseData:c.caseData,bindings:c.bindings,patterns:ps};return switch p.kind {
+  function expandRow(f:PatternData->PatternData,c:CaseRow):Array<CaseRow> {if(c.patterns.length==0)return [c];var p=c.patterns[0],tail=c.patterns.slice(1);inline function row(ps:Array<PatternData>):CaseRow return {caseData:c.caseData,bindings:c.bindings,patterns:ps};return switch p.kind {
    case PatOr(a,b):expandRow(f,row([a].concat(tail))).concat(expandRow(f,row([b].concat(tail))));
    case PatBind(v,p1):expandRow(function(p2)return f({kind:PatBind(v,p2),pos:p.pos}),row([p1].concat(tail)));
    case PatTuple(ps):expandRow(f,row(ps.concat(tail)));case _:[row([f(p)].concat(tail))];

@@ -47,26 +47,26 @@ class ImportHandling {
   var tname=rest[0].name,p2=rest[0].pos;rest=rest.slice(1);
   var p1=pack.length==0?p2:pack[0].pos,pType=Ast.punion(p1,p2);
   var md=ctx.g.doLoadModule(ctx,{pack:pack.map(part->part.name),name:tname},pType,MDepFromImport),types=md.mTypes;
-  function errorPrivate(p:Pos):Void raiseTypingError("Importing private declarations from a module is not allowed",p);
-  function checkPrivate(t:ModuleType,p:Pos):Void {if(ctx.m.curmod!=tModule(t)&&tPrivate(t)) errorPrivate(p);}
-  function staticNames():Array<String> {if(md.mStatics==null) return [];var names=PMap.keys(md.mStatics.clStatics);names.reverse();return names;}
+  inline function errorPrivate(p:Pos):Void raiseTypingError("Importing private declarations from a module is not allowed",p);
+  inline function checkPrivate(t:ModuleType,p:Pos):Void {if(ctx.m.curmod!=tModule(t)&&tPrivate(t)) errorPrivate(p);}
+  inline function staticNames():Array<String> {if(md.mStatics==null) return [];var names=PMap.keys(md.mStatics.clStatics);names.reverse();return names;}
   function failUsefully<R>(name:String,p:Pos):R {
    var lower=name.charAt(0)>="a"&&name.charAt(0)<="z",candidates=lower?staticNames():types.map(mt->tPath(mt).name);
    return raiseTypingError(StringError.stringError(name,candidates,"Module "+Globals.sTypePath(md.mPath)+" does not define "+(lower?"field":"type")+" "+name),p);
   }
   function findType(name:String):ModuleType {for(mt in types) if(tPath(mt).name==name) return mt;throw NotFound.raise();}
-  function getType(name:String):ModuleType {var t=try findType(name) catch(_:NotFound) failUsefully(name,pType);checkPrivate(t,pType);return t;}
-  function checkAlias(mt:ModuleType,name:String,pname:Pos):Void {
+  inline function getType(name:String):ModuleType {var t=try findType(name) catch(_:NotFound) failUsefully(name,pType);checkPrivate(t,pType);return t;}
+  inline function checkAlias(mt:ModuleType,name:String,pname:Pos):Void {
    if(!(name.charAt(0)>="A"&&name.charAt(0)<="Z")) raiseTypingError("Type aliases must start with an uppercase letter",pname);
    if(ctx.m.isDisplayFile&&DisplayPosition.displayPosition.enclosedIn(pname)&&UniqueKey.create(pname.pfile)==UniqueKey.lazyKey(ctx.m.curmod.mExtra.mFile)) DeferredServices.display();
   }
-  function addStaticInit(t:ModuleType,name:Null<String>,s:String):ResolvedImport return switch resolveTypedef(t) {
+  inline function addStaticInit(t:ModuleType,name:Null<String>,s:String):ResolvedImport return switch resolveTypedef(t) {
    case TClassDecl(c):c.clBuild();staticFieldResolution(c,PMap.find(s,c.clStatics),name,p);
    case TAbstractDecl(a) if(a.aImpl!=null):var c=a.aImpl;c.clBuild();staticAbstractFieldResolution(a,c,PMap.find(s,c.clStatics),name,p);
    case TEnumDecl(en):enumConstructorResolution(en,PMap.find(s,en.eConstrs),name,p);
    case _:throw NotFound.raise();
   };
-  function addLazyResolution(f:Void->Null<ResolvedImport>):Void ctx.m.importResolution.add(lazyResolution(f));
+  inline function addLazyResolution(f:Void->Null<ResolvedImport>):Void ctx.m.importResolution.add(lazyResolution(f));
   switch mode {
    case INormal|IAsName(_):
     var name:Null<PlacedName>=switch mode {case IAsName(n):n;case _:null;};

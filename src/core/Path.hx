@@ -51,7 +51,7 @@ class Path {
 
 	public static function parsePath(file:String):{pack:Array<String>, name:String} {
 		var parts = getPathParts(file);
-		function fail(message:String):Dynamic throw 'Could not process argument $file\n$message';
+		inline function fail(message:String):Dynamic throw 'Could not process argument $file\n$message';
 		function loop(index:Int, pack:Array<String>):{pack:Array<String>, name:String} {
 			if (index == parts.length) return fail("Package name must not be empty");
 			var value = parts[index];

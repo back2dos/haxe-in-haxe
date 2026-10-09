@@ -65,7 +65,7 @@ class Calls {
    }
    var reduced=params.map(e -> Optimizer.reduceExpression(SafeCom.ofTyper(ctx),e));
    var forced=isForcedInline(cl,f);
-   function inlineFunction(fd:TFunc):TExpr return InlineTools.typeInline(InlineTools.contextOfTyper(ctx),f,fd,ethis,reduced,t,config,p,forced);
+   inline function inlineFunction(fd:TFunc):TExpr return InlineTools.typeInline(InlineTools.contextOfTyper(ctx),f,fd,ethis,reduced,t,config,p,forced);
    switch f.cfExprUnoptimized {
     case {eexpr:TFunction(fd)}:return inlineFunction(fd);
     case _:
@@ -99,8 +99,8 @@ class Calls {
   if(!ctx.com.display.dmsInline) return FieldAccess.getFieldExpr(fa,FRead);
   return switch [cf.cfKind,cf.cfExpr] {
    case [Method(_),_]:
-    function checkClass(c:TClass):Bool return (hasClassFlag(c,CExtern)||hasClassFieldFlag(cf,CfExtern))&&!Meta.has(MetaTag.Runtime,cf.cfMeta);
-    function wrapExtern(c:TClass):TExpr {
+    inline function checkClass(c:TClass):Bool return (hasClassFlag(c,CExtern)||hasClassFieldFlag(cf,CfExtern))&&!Meta.has(MetaTag.Runtime,cf.cfMeta);
+    inline function wrapExtern(c:TClass):TExpr {
      var m=c.clModule,path:core.Globals.GlobalTypePath={pack:c.clModule.mPath.pack.concat(["_"+c.clModule.mPath.name]),name:c.clModule.mPath.name+"_Impl_"};
      var c2:Null<TClass>=null;
      for(mt in m.mTypes) switch mt {case TClassDecl(c) if(core.ds.Key.compare(c.clPath,path)==0):c2=c; break; case _:}
@@ -169,7 +169,7 @@ class Calls {
   case _:
  }
  public static function buildCallAccess(ctx:TyperContext,acc:AccessKind,el:Array<Expr>,mode:AccessMode,withType:WithTypeValue,p:Pos):AccessKind {
-  function getAccessor(fa:FieldAccessData,args:Array<TExpr>):TExpr return new CallDispatcher(ctx,MGet,WithTypeTools.value,fa.faPos).fieldCall(fa,args,[]);
+  inline function getAccessor(fa:FieldAccessData,args:Array<TExpr>):TExpr return new CallDispatcher(ctx,MGet,WithTypeTools.value,fa.faPos).fieldCall(fa,args,[]);
   var dispatch=new CallDispatcher(ctx,mode,withType,p);
   return switch acc {
    case AKField(fa):checkDynamicSuperMethodCall(ctx,fa,p); AKExpr(dispatch.fieldCall(fa,[],el));
@@ -192,7 +192,7 @@ class Calls {
  public static function needsTempVar(e:TExpr):Bool return switch e.eexpr {case TLocal(_)|TTypeExpr(_)|TConst(_):false; case TField(e,_)|TParenthesis(e):needsTempVar(e); case _:true;};
  public static function callToString(ctx:TyperContext,e:TExpr,resume:Bool=false):TExpr {
   if(!ctx.allowTransform) return mk(e.eexpr,ctx.t.tstring,e.epos);
-  function generate(e:TExpr):TExpr {
+  inline function generate(e:TExpr):TExpr {
    ctx.f.meta.unshift({meta:MetaTag.PrivateAccess,exprs:[],pos:e.epos});
    var acc=Fields.typeField(TypeFieldConfig.create(resume),ctx,e,"toString",e.epos,MCall([]),WithTypeTools.withType(ctx.t.tstring));
    ctx.f.meta.shift(); return buildCall(ctx,acc,[],WithTypeTools.withType(ctx.t.tstring),e.epos);
@@ -226,7 +226,7 @@ class Calls {
   }
   if(pi<params.length) raiseTypingError("Too many callback arguments",p);
   var declarations=given.map(pair -> mk(TVar(pair.variable,pair.expr),ctx.t.tvoid,pair.variable.vPos));
-  function immutable(cf:TClassField):Bool return switch cf.cfKind {case Method(k):k!=MethDynamic; case _:false;};
+  inline function immutable(cf:TClassField):Bool return switch cf.cfKind {case Method(k):k!=MethDynamic; case _:false;};
   switch e.eexpr {
    case TFunction(_)|TLocal({vKind:VUser(TVOLocalFunction)}):
    case TField(_,FStatic(_,cf)|FInstance(_,_,cf)) if(immutable(cf)):

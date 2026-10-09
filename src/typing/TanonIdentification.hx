@@ -40,7 +40,7 @@ class TanonIdentification<A> {
  public function identifyTypedef(td:TDef):Void {function loop(t:T):Void switch t{case TAnon(an) if((an.aStatus==Closed||an.aStatus==Const)&&countFields(an.aFields)>0):addPfm(td.tPath,pfmOfTypedef(td));case TMono({tmType:t}) if(t!=null):loop(t);case TLazy(f):loop(lazyType(f));case _:};loop(td.tType);}
  function protect<B>(f:Void->B):B {pfmMutex.acquire();try{var r=f();pfmMutex.release();return r;}catch(e:haxe.Exception){pfmMutex.release();throw e;}}
  public function identifyAnon(uctx:UnificationContext,an:TAnon):PathFieldMapping<A> {
-  function makePfm(path:core.Globals.GlobalTypePath):PathFieldMapping<A> return {pfmPath:path,pfmParams:[],pfmFields:an.aFields,pfmConverted:null,pfmArity:countFields(an.aFields)};
+  inline function makePfm(path:core.Globals.GlobalTypePath):PathFieldMapping<A> return {pfmPath:path,pfmParams:[],pfmFields:an.aFields,pfmConverted:null,pfmArity:countFields(an.aFields)};
   var path:Null<core.Globals.GlobalTypePath>=switch an.aStatus{case ClassStatics(c):c.clPath;case EnumStatics(e):e.ePath;case AbstractStatics(a):a.aPath;case _:null;};
   if(path!=null)return protect(function(){try{return pfms.find(path);}catch(e:NotFound){var pfm=makePfm(path);addPfm(path,pfm);return pfm;}});
   var arity=0;var fields=an.aFields.copy();var names=[for(n in (an.aFields.keys():Iterator<String>))n];names.sort(Reflect.compare);for(n in names){var cf=an.aFields.get(n);arity++;fields.set(cf.cfName,core.ds.Record.withFields(cf,{cfType:replaceMono(uctx.equalityKind!=EqStricter,cf.cfType)}));}an={aFields:fields,aStatus:an.aStatus};

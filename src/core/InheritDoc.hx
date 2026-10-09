@@ -87,7 +87,7 @@ class InheritDoc {
 	public static function getTargetDoc(ctx:context.Typecore.Typer,eTarget:Expr):Documentation {
 		var target = exprToTarget(eTarget);
 		var path = target.path;
-		function resolveField(fieldName:String):Documentation {
+		inline function resolveField(fieldName:String):Documentation {
 			var reversed = path.pack.copy();reversed.reverse();
 			var tp = if (reversed.length > 0 && !Ast.isLowerIdent(reversed[0])) {
 				var pack = reversed.slice(1);pack.reverse();Ast.mkTypePath(pack,reversed[0],[],path.name);
@@ -101,7 +101,7 @@ class InheritDoc {
 				case _:throw NotFound.raise();
 			} catch (_:NotFound) return null;
 		}
-		function resolveTypeT(t:T):Documentation return switch follow(t) {
+		inline function resolveTypeT(t:T):Documentation return switch follow(t) {
 			case TInst(c,_):buildClassDoc(ctx,c);c.clDoc;
 			case TAbstract(a,_):buildAbstractDoc(ctx,a);a.aDoc;
 			case TEnum(en,_):buildEnumDoc(ctx,en);en.eDoc;

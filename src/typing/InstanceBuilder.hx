@@ -90,7 +90,7 @@ class InstanceBuilder {
 		return switch mtype {
 			case TClassDecl(c):
 				if (Type.enumIndex(ctx.pass) > Type.enumIndex(PBuildClass)) c.clBuild();
-				function build(f:TParams->T, label:String, tl:TParams):T {
+				inline function build(f:TParams->T, label:String, tl:TParams):T {
 					var t = spawnMonomorph(ctx, p);
 					var r = makeLazy(ctx.g, t, function() {
 						var tf = f(tl); unifyRaise(tf, t, p); linkDynamic(t, tf);

@@ -111,7 +111,7 @@ class Useless {
 			var et = True;
 			for (i in 0...r.length) switch r[i].kind {
 				case PatOr(pat1, pat2):
-					function processRow(index:Int, row:Array<PatternData>, q:Array<PatternData>):{pattern:PatternData, rest:Array<PatternData>} {
+					inline function processRow(index:Int, row:Array<PatternData>, q:Array<PatternData>):{pattern:PatternData, rest:Array<PatternData>} {
 						if (index >= row.length) throw "Invalid pattern column";
 						return {pattern:row[index], rest:row.slice(0, index).concat(row.slice(index + 1)).concat(q)};
 					}

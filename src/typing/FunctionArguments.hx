@@ -61,7 +61,7 @@ class FunctionArguments {
 		var e = typeExpr(ctx, input, WithTypeTools.withType(t));
 		e = AbstractCast.castOrUnify(ctx, t, e, p);
 		e = Optimizer.reduceExpression(SafeCom.ofTyper(ctx), e);
-		function runAnalyzer(e:TExpr):TExpr return analyzerRunOnExprRef(ctx.com, Globals.sTypePath(ctx.c.curclass.clPath) + "." + ctx.f.curfield.cfName, e);
+		inline function runAnalyzer(e:TExpr):TExpr return analyzerRunOnExprRef(ctx.com, Globals.sTypePath(ctx.c.curclass.clPath) + "." + ctx.f.curfield.cfName, e);
 		if (ctx.e.curfun == FunConstructor) {
 			function checkThis(e:TExpr):Void {
 				switch e.eexpr {
@@ -72,7 +72,7 @@ class FunctionArguments {
 			}
 			checkThis(e);
 		}
-		function referencesArg(e:TExpr):Bool {
+		inline function referencesArg(e:TExpr):Bool {
 			var found = false;
 			function loop(e:TExpr):Void {
 				if (found) return;
@@ -136,7 +136,7 @@ class FunctionArguments {
 	}
 	public function forExpr(ctx:TyperContext):Array<{variable:TVar, defaultValue:Null<TExpr>}> {
 		if (exprRepr != null) return exprRepr;
-		function makeLocal(name:String, kind:TVarKind, t:T, meta:Metadata, pn:Pos):TVar {
+		inline function makeLocal(name:String, kind:TVarKind, t:T, meta:Metadata, pn:Pos):TVar {
 			var v = allocVar(kind, name, t, pn);
 			v.vMeta = StrictMeta.checkStrictMeta(ctx, meta).concat(meta);
 			return v;

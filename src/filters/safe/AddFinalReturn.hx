@@ -7,7 +7,7 @@ import core.TFunctions as TypeOps;
 class AddFinalReturn {
 	public static function addFinalReturn(e:TExpr):TExpr {
 		function loop(e:TExpr, t:T):TExpr {
-			function defReturn(p:core.Globals.Pos):TExpr {
+			inline function defReturn(p:core.Globals.Pos):TExpr {
 				var c:TConstant = switch TypeOps.follow(t) {
 					case TAbstract({aPath:{pack:[], name:"Int"}}, _): TInt(0);
 					case TAbstract({aPath:{pack:[], name:"Float"}}, _): TFloat("0.");

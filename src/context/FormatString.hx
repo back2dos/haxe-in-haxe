@@ -12,22 +12,22 @@ class FormatString {
 		var result:Null<Expr> = null;
 		var pmin = p.pmin;
 		var min = p.pmin + 1;
-		function positioned(a:Int, b:Int):Pos return {pfile:p.pfile, pmin:a, pmax:b};
-		function addExpr(next:Expr, len:Int):Void {
+		inline function positioned(a:Int, b:Int):Pos return {pfile:p.pfile, pmin:a, pmax:b};
+		inline function addExpr(next:Expr, len:Int):Void {
 			min += len;
 			var processed = processExpr(next.expr, next.pos);
 			if (result == null) result = processed;
 			else result = {expr:EBinop(OpAdd,result,processed), pos:Ast.punion(result.pos,next.pos)};
 		}
-		function add(next:ExprDef, len:Int):Void addExpr({expr:next, pos:positioned(min,min+len)},len);
-		function addSub(start:Int, pos:Int):Void {
+		inline function add(next:ExprDef, len:Int):Void addExpr({expr:next, pos:positioned(min,min+len)},len);
+		inline function addSub(start:Int, pos:Int):Void {
 			var len = pos-start;
 			if (len > 0 || result == null) add(EConst(String(s.substr(start,len),SDoubleQuotes)),len);
 		}
 		var len = s.length;
-		function identStart(c:String):Bool return (c >= "a" && c <= "z") || (c >= "A" && c <= "Z") || c == "_";
+		inline function identStart(c:String):Bool return (c >= "a" && c <= "z") || (c >= "A" && c <= "Z") || c == "_";
 		var parse:Int->Int->Void = null;
-		function parseGroup(start:Int, pos:Int, gopen:String, gclose:String, gname:String):Void {
+		inline function parseGroup(start:Int, pos:Int, gopen:String, gclose:String, gname:String):Void {
 			addSub(start,pos-1);
 			var groups = [pos];
 			var send = pos+1;

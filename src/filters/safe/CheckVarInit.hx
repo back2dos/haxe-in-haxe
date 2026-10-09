@@ -12,7 +12,7 @@ import haxe.ds.IntMap;
 // OCaml persistent maps become copied IntMaps at branch snapshots.
 class CheckVarInit {
 	public static function checkLocalVarsInit(scom:context.SafeCom.SafeContext, e:TExpr):TExpr {
-		function intersect(vl1:IntMap<Bool>, vl2:IntMap<Bool>):IntMap<Bool> {
+		inline function intersect(vl1:IntMap<Bool>, vl2:IntMap<Bool>):IntMap<Bool> {
 			var result = new IntMap<Bool>();
 			for (v => t in vl1) {
 				if (!vl2.exists(v)) throw "Not_found";
@@ -23,10 +23,10 @@ class CheckVarInit {
 		var declared:Array<Int> = [];
 		var outsideVars = new IntMap<Bool>();
 		var vars = new IntMap<Bool>();
-		function setAllVars():Void {
+		inline function setAllVars():Void {
 			for (id => isSet in vars) if (!outsideVars.exists(id)) vars.set(id, true);
 		}
-		function join(cvars:Array<IntMap<Bool>>):Void {
+		inline function join(cvars:Array<IntMap<Bool>>):Void {
 			for (v in cvars) vars = intersect(vars, v);
 		}
 		function loop(e:TExpr):Void {

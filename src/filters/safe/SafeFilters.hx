@@ -37,7 +37,7 @@ class SafeFilters {
 		loop(e); return e;
 	}
 	public static function markSwitchBreakLoops(_:Dynamic, e:TExpr):TExpr {
-		function addLoopLabel(n:Int, e:TExpr):TExpr {
+		inline function addLoopLabel(n:Int, e:TExpr):TExpr {
 			return {eexpr:TMeta({meta:core.MetaList.StrictMeta.LoopLabel,exprs:[{expr:EConst(Int(Std.string(n), null)), pos:e.epos}], pos:e.epos}, e), etype:e.etype, epos:e.epos};
 		}
 		var inSwitch = false;

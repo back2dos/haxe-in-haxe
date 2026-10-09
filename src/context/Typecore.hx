@@ -390,7 +390,7 @@ class Typecore {
 			}
 			return true;
 		}
-		function has(meta:Dynamic,c:TClass,f:TClassField,entry:{path:Array<String>,isCurrent:Bool}):Bool {
+		inline function has(meta:Dynamic,c:TClass,f:TClassField,entry:{path:Array<String>,isCurrent:Bool}):Bool {
 			function loop(metadata:Metadata):Bool {
 				for (m in metadata) if (m.meta == meta) for (e in m.exprs) switch e.expr {
 					case EConst(Ident("std")): if (entry.path.length == 2) return true;
@@ -467,7 +467,7 @@ class Typecore {
 		if (c == null || !MetadataTools.has(StrictMeta.CoreApi,c.clMeta)) return;
 		var core = ctx.g.doLoadCoreClass(ctx,c);
 		if (c.clDoc == null) c.clDoc = core.clDoc;
-		function maybeMerge(map:TypeMap<TClassField>,cf:TClassField):Void {
+		inline function maybeMerge(map:TypeMap<TClassField>,cf:TClassField):Void {
 			if (cf.cfDoc == null) { var other = map.get(cf.cfName); if (other != null) cf.cfDoc = other.cfDoc; }
 		}
 		for (cf in c.clOrderedFields) maybeMerge(core.clFields,cf);

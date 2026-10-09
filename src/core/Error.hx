@@ -145,10 +145,10 @@ enum ErrorAccessKind { Field(name:String); FunctionArgument(index:Int,total:Int)
 class BetterErrors {
 	public static function sAccessKind(kind:ErrorAccessKind):String return switch kind {case Field(s):"Field " + s;case FunctionArgument(i,l):'FunctionArgument($i, $l)';case FunctionReturn:"FunctionReturn";case TypeParameter(i):"TypeParameter " + i;case Root:"Root";};
 	public static function getAccessChain(ctx:Dynamic,l:Array<UnifyError>):ErrorAccess {
-		function makeAcc(kind:ErrorAccessKind,actual:T,expected:T):ErrorAccess return {accKind:kind,accExpected:expected,accActual:actual,accMessages:[],accExtra:[],accNext:null,accExpectedInfo:{isOptional:false,isFinal:false},accActualInfo:{isOptional:false,isFinal:false}};
+		inline function makeAcc(kind:ErrorAccessKind,actual:T,expected:T):ErrorAccess return {accKind:kind,accExpected:expected,accActual:actual,accMessages:[],accExtra:[],accNext:null,accExpectedInfo:{isOptional:false,isFinal:false},accActualInfo:{isOptional:false,isFinal:false}};
 		var root = makeAcc(Root,tDynamic,tDynamic), current = root;
-		function addMessage(msg:UnifyError):Void current.accMessages.unshift(msg);
-		function addAccess(kind:ErrorAccessKind):Void {var acc = makeAcc(kind,tDynamic,tDynamic);current.accNext = acc;current = acc;}
+		inline function addMessage(msg:UnifyError):Void current.accMessages.unshift(msg);
+		inline function addAccess(kind:ErrorAccessKind):Void {var acc = makeAcc(kind,tDynamic,tDynamic);current.accNext = acc;current = acc;}
 		for (err in l) switch err {
 			case CannotUnify(t1,t2):current.accActual = t1;current.accExpected = t2;addMessage(err);
 			case CannotUnifyImplementation(t2,t1):current.accActual = t1;current.accExpected = t2;addMessage(err);
@@ -196,12 +196,12 @@ class BetterErrors {
 		}
 		var access = getAccessChain(ctx,filtered);
 		var message = new StringBuf();
-		function fill(s:String,i:Int,total:Int):Array<String> return [for (k in 1...total + 1) k == i ? s : "..."];
+		inline function fill(s:String,i:Int,total:Int):Array<String> return [for (k in 1...total + 1) k == i ? s : "..."];
 		function loop(access:ErrorAccess,previous:ErrorAccess):{actual:String,expected:String} {
-			function next():{actual:String,expected:String} {
+			inline function next():{actual:String,expected:String} {
 				if (access.accNext != null) return loop(access.accNext,access);
 				if (access.accMessages.length > 0) message.add(Error.unifyErrorMsg(ctx,access.accMessages[0]));
-				function withInfo(t:T,info:AccessKindInfo):String return (info.isOptional ? "?" : "") + sType(ctx,info.isOptional ? followWithoutType(t) : t);
+				inline function withInfo(t:T,info:AccessKindInfo):String return (info.isOptional ? "?" : "") + sType(ctx,info.isOptional ? followWithoutType(t) : t);
 				return {actual:withInfo(access.accActual,access.accActualInfo),expected:withInfo(access.accExpected,access.accExpectedInfo)};
 			}
 			return switch access.accKind {
@@ -209,7 +209,7 @@ class BetterErrors {
 				case FunctionArgument(i,l):var pair = next();{actual:"(" + fill(pair.expected,i,l).join(", ") + ") -> ...",expected:"(" + fill(pair.actual,i,l).join(", ") + ") -> ..."};
 				case FunctionReturn:var pair = next();{actual:"(...) -> " + pair.actual,expected:"(...) -> " + pair.expected};
 				case TypeParameter(i):
-					function getParams(t:T):{path:GlobalTypePath,params:TParams} return switch t {
+					inline function getParams(t:T):{path:GlobalTypePath,params:TParams} return switch t {
 						case TInst(c,params):{path:c.clPath,params:params};case TEnum(e,params):{path:e.ePath,params:params};case TAbstract(a,params):{path:a.aPath,params:params};case TType(t,params):{path:t.tPath,params:params};case _:throw "Invalid type parameter access";
 					};
 					var pair = next(), p1 = getParams(previous.accActual), p2 = getParams(previous.accExpected);

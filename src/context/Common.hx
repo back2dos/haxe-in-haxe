@@ -217,7 +217,7 @@ class Common {
  public static function shortPlatformName(p:Platform):String return switch p {case Cross:"x";case Js:"js";case Lua:"lua";case Neko:"n";case Flash:"swf";case Php:"php";case Cpp:"cpp";case Jvm:"jvm";case Python:"py";case Hl:"hl";case Eval:"evl";case CustomTarget(n):"c_"+n;};
  public static final defaultConfig:PlatformConfig={pfStatic:true,pfSys:true,pfCapturePolicy:CPNone,pfPadNulls:false,pfAddFinalReturn:false,pfOverload:false,pfCanSkipNonNullableArgument:true,pfReservedTypePaths:[],pfSupportsFunctionEquality:true,pfUsesUtf16:true,pfThisBeforeSuper:true,pfSupportsThreads:false,pfSupportsUnicode:true,pfSupportsRestArgs:false,pfExceptions:{ecNativeThrows:[],ecNativeCatches:[],ecWildcardCatch:{pack:["StdTypes"],name:"Dynamic"},ecBaseThrow:{pack:["StdTypes"],name:"Dynamic"},ecAvoidWrapping:true,ecSpecialThrow:function(_) return false},pfScoping:{vsScope:BlockScope,vsFlags:[]},pfSupportsAtomics:false};
  public static function getConfig(com:CommonContext):PlatformConfig {
-  function path(pack:Array<String>,name:String):GlobalTypePath return {pack:pack,name:name};
+  inline function path(pack:Array<String>,name:String):GlobalTypePath return {pack:pack,name:name};
   if (com.platform==Cross) return defaultConfig;
   var c:PlatformConfig=cast core.ds.Record.copy(defaultConfig);c.pfExceptions=cast core.ds.Record.copy(defaultConfig.pfExceptions);c.pfScoping=cast core.ds.Record.copy(defaultConfig.pfScoping);
   switch com.platform {

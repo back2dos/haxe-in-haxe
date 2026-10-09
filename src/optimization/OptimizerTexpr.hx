@@ -124,7 +124,7 @@ class OptimizerTexpr {
 		};
 	}
 	public static function optimizeUnop(e:TExpr, op:Unop, flag:UnopFlag, esub:TExpr):TExpr {
-		function isInt(t:T):Bool return switch TypeOps.follow(t) { case TAbstract({aPath:{pack:[], name:"Int"}}, _): true; case _: false; };
+		inline function isInt(t:T):Bool return switch TypeOps.follow(t) { case TAbstract({aPath:{pack:[], name:"Int"}}, _): true; case _: false; };
 		return switch [op, esub.eexpr] {
 			case [Not, _]:
 				function transform(e:TExpr, esub:TExpr):TExpr return switch esub.eexpr {

@@ -89,7 +89,7 @@ class Filters {
 	}
 	public static function checkRemoveMetadata(t:ModuleType):Void switch t { case TClassDecl(c): c.clImplements = c.clImplements.filter(c -> !Meta.has(Remove, c.cls.clMeta)); case _: }
 	public static function checkVoidField(t:ModuleType):Void {
-		function check(f:TClassField):Void switch TypeOps.follow(f.cfType) { case TAbstract({aPath:{pack:[], name:"Void"}}, _): Error.raiseTypingError("Fields of type Void are not allowed", f.cfPos); case _: }
+		inline function check(f:TClassField):Void switch TypeOps.follow(f.cfType) { case TAbstract({aPath:{pack:[], name:"Void"}}, _): Error.raiseTypingError("Fields of type Void are not allowed", f.cfPos); case _: }
 		switch t { case TClassDecl(c): for (f in c.clOrderedFields) check(f); for (f in c.clOrderedStatics) check(f); case _: }
 	}
 	public static function promoteFirstInterfaceToSuper(t:ModuleType):Void switch t {
@@ -104,7 +104,7 @@ class Filters {
 		for (k in TypeOps.tModule(t).mExtra.mFeatures.keys()) Common.addFeature(com, k);
 	}
 	public static function checkReservedTypePaths(scom:SafeContext, t:ModuleType):Void {
-		function check(path:GlobalTypePath, pos:Pos):Void {
+		inline function check(path:GlobalTypePath, pos:Pos):Void {
 			var paths:Array<GlobalTypePath> = scom.platformConfig.pfReservedTypePaths;
 			if (core.ds.ArrayTools.exists(paths, p -> p.name == path.name && p.pack.join(".") == path.pack.join(".")))
 				SafeCom.addWarning(scom, WReservedTypePath, "Type path " + Globals.sTypePath(path) + " is reserved on this target", pos);
@@ -113,7 +113,7 @@ class Filters {
 	}
 	public static function iterExpressions(fl:Array<TExpr->Void>, mt:ModuleType):Void switch mt {
 		case TClassDecl(c):
-			function field(cf:TClassField):Void { if (cf.cfExpr != null) for (f in fl) f(cf.cfExpr); }
+			inline function field(cf:TClassField):Void { if (cf.cfExpr != null) for (f in fl) f(cf.cfExpr); }
 			for (cf in c.clOrderedStatics) field(cf); for (cf in c.clOrderedFields) field(cf); if (c.clConstructor != null) field(c.clConstructor);
 		case _:
 	}
@@ -198,7 +198,7 @@ class Filters {
 					inline function add(v:TVar):Void vars.push({variable:v, type:v.vType});
 					switch e.eexpr { case TFunction(fn): for (a in fn.tfArgs) add(a.variable); saveVars(fn.tfExpr); case TVar(v, eo): add(v); if (eo != null) saveVars(eo); case _: core.Texpr.iter(saveVars, e); }
 				}
-				function mkOverloadRestore(f:TClassField):Dynamic {
+				inline function mkOverloadRestore(f:TClassField):Dynamic {
 					TypeOps.addClassFieldFlag(f, CfPostProcessed);
 					return {name:f.cfName, kind:f.cfKind, expr:f.cfExpr, type:f.cfType, meta:f.cfMeta, params:f.cfParams};
 				}
@@ -206,14 +206,14 @@ class Filters {
 					if (f.cfExpr != null) saveVars(f.cfExpr);
 					return {field:f, state:mkOverloadRestore(f), overloads:f.cfOverloads.map(f -> {field:f, state:mkOverloadRestore(f)})};
 				}
-				function restoreOne(f:TClassField, s:Dynamic):TClassField {
+				inline function restoreOne(f:TClassField, s:Dynamic):TClassField {
 					f.cfName = s.name; f.cfKind = s.kind; f.cfExpr = s.expr; f.cfType = s.type; f.cfMeta = s.meta; f.cfParams = s.params; return f;
 				}
 				function restoreField(saved:Dynamic):TClassField {
 					var f = restoreOne(saved.field, saved.state);
 					f.cfOverloads = [for (o in (cast saved.overloads:Array<Dynamic>)) restoreOne(o.field, o.state)]; return f;
 				}
-				function mkPmap(lst:Array<TClassField>):StringMap<TClassField> { var map = new StringMap(); for (f in lst) map.set(f.cfName, f); return map; }
+				inline function mkPmap(lst:Array<TClassField>):StringMap<TClassField> { var map = new StringMap(); for (f in lst) map.set(f.cfName, f); return map; }
 				var meta = c.clMeta; var path = c.clPath; var ext = TypeOps.hasClassFlag(c, CExtern); var sup = c.clSuper; var impl = c.clImplements.copy();
 				var csr = c.clConstructor == null ? null : mkFieldRestore(c.clConstructor);
 				var ofr = c.clOrderedFields.map(mkFieldRestore); var osr = c.clOrderedStatics.map(mkFieldRestore); var init = c.clInit == null ? null : mkFieldRestore(c.clInit);
@@ -274,7 +274,7 @@ class Filters {
 					for (iface in cls.clImplements) TypeOps.addDescendant(iface.cls, cls);
 					if (cls.clSuper != null) TypeOps.addDescendant(cls.clSuper.cls, cls);
 					if (!cached) {
-						function field(cf:TClassField):Void { if (cf.cfExpr != null && cf.cfExprUnoptimized == null && mightNeedCfUnoptimized(cls, cf)) cf.cfExprUnoptimized = cf.cfExpr; }
+						inline function field(cf:TClassField):Void { if (cf.cfExpr != null && cf.cfExprUnoptimized == null && mightNeedCfUnoptimized(cls, cf)) cf.cfExprUnoptimized = cf.cfExpr; }
 						for (cf in cls.clOrderedFields) field(cf); for (cf in cls.clOrderedStatics) field(cf); if (cls.clConstructor != null) field(cls.clConstructor);
 					}
 				case _:

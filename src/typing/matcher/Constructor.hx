@@ -49,7 +49,7 @@ class Constructor {
 	public static function compare(con1:ConstructorData, con2:ConstructorData):Int return switch [con1.kind, con2.kind] {
 		case [ConConst(ct1), ConConst(ct2)]:
 			// OCaml orders constant constructors before payload constructors.
-			function rank(c:TConstant):Int return switch c {case TNull: 0; case TThis: 1; case TSuper: 2; case TInt(_): 3; case TFloat(_): 4; case TString(_): 5; case TBool(_): 6;};
+			inline function rank(c:TConstant):Int return switch c {case TNull: 0; case TThis: 1; case TSuper: 2; case TInt(_): 3; case TFloat(_): 4; case TString(_): 5; case TBool(_): 6;};
 			var r = rank(ct1) - rank(ct2);
 			if (r != 0) r else switch [ct1, ct2] {
 				case [TInt(a), TInt(b)]: Reflect.compare(a, b);

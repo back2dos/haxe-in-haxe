@@ -69,7 +69,7 @@ class Matcher {
 			var row = Case.make(ctx, subject.type, [], c.patterns, c.guard, c.expr, withType, postfixMatch, cp);
 			return {caseData:row.caseData, bindings:row.bindings, patterns:[row.pattern]};
 		});
-		function inferSwitchType():T return switch withType {
+		inline function inferSwitchType():T return switch withType {
 			case NoValue: ctx.t.tvoid;
 			case Value(_):
 				if (rows.length == 0) ctx.t.tvoid else {

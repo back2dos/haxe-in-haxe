@@ -21,7 +21,7 @@ class Parallel {
  public static function runInNewPool<A>(timerCtx:Dynamic,f:Null<TaskPool>->A):A {
   if (!enable) return f(null);
   var pool=Timer.time(timerCtx,["domainslib","setup"],function(_) return new TaskPool(TaskPool.recommendedDomainCount()-1),null);
-  function cleanup():Void Timer.time(timerCtx,["domainslib","teardown"],function(_) {pool.close();return null;},null);
+  inline function cleanup():Void Timer.time(timerCtx,["domainslib","teardown"],function(_) {pool.close();return null;},null);
   var result:A;
   try result=pool.run(function() return f(pool)) catch(e:haxe.Exception){cleanup(); throw e;}
   cleanup(); return result;

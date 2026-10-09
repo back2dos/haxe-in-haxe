@@ -76,7 +76,7 @@ class SourceParser {
  }
  public static var parseHook:CommonContext->ResolvedFile->Pos->ParseResult<Package>=parseFile;
  public static function handleParserResult(com:CommonContext,p:Pos,result:ParseResult<Package>):SourceParseResult {
-  function handleError(error:ParseErrorInfo):Void switch com.display.dmsErrorPolicy {
+  inline function handleError(error:ParseErrorInfo):Void switch com.display.dmsErrorPolicy {
    case EPShow:if(Common.isDiagnostics(com)) DeferredServices.display();else raiseTypingError(Parser.errorMsg(error.message),error.pos);
    case EPIgnore:com.partScope.hasError=true;
   }
@@ -131,14 +131,14 @@ class SourceParser {
   var remap={value:path.pack.copy()},rfile=resolveModuleFile(com,path,remap,p),parsed=parseModuleFile(com,rfile,p),pack=parsed.data.pack;
   function same(a:Array<String>,b:Array<String>):Bool {if(a.length!=b.length)return false;for(i in 0...a.length)if(a[i]!=b[i])return false;return true;}
   if(!same(pack,remap.value)) {
-   function sPack(pack:Array<String>):String return pack.length==0?"`package;`":"`package "+pack.join(".")+";`";
+   inline function sPack(pack:Array<String>):String return pack.length==0?"`package;`":"`package "+pack.join(".")+";`";
    if(p==Globals.nullPos) Common.displayError(com,"Invalid commandline class : "+Globals.sTypePath(path)+" should be "+Globals.sTypePath({pack:pack,name:path.name}),p);
    else Common.displayError(com,sPack(pack)+" in "+rfile.file+" should be "+sPack(path.pack),Record.withFields(p,{pmax:p.pmin}));
   }
   var declarations=parsed.data.declarations;
   if(!same(remap.value,path.pack)) {
    var redirected:Array<TypeDecl>=[{definition:EImport({path:remap.value.concat([path.name]).map(s->({name:s,pos:Globals.nullPos}:core.Ast.PlacedName)),mode:INormal}),pos:Globals.nullPos}];
-   function build(name:PlacedName,params:Array<TypeParam>,priv:Bool,p:Pos):Void {
+   inline function build(name:PlacedName,params:Array<TypeParam>,priv:Bool,p:Pos):Void {
     var tp=priv?AstTools.mkTypePath([],"Dynamic"):AstTools.mkTypePath(remap.value,path.name,params.map(tp->TPType(AstTools.makePtpTh(AstTools.mkTypePath([],tp.tpName.name),Globals.nullPos))),name.name);
     redirected.push({definition:ETypedef({name:name,doc:null,meta:[],params:params,flags:priv?[TDPrivate]:[],data:AstTools.makePtpTh(tp,name.pos)}),pos:p});
    }

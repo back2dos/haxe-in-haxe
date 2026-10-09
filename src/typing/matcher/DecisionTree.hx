@@ -40,7 +40,7 @@ class DecisionTree {
 	public static final tabString = "    ";
 	public static function toString(dt:DecisionTreeData):String {
 		var buf = new StringBuf(), indices:Array<Int> = [];
-		function addLine(tabs:String, s:String):Void {
+		inline function addLine(tabs:String, s:String):Void {
 			if (buf.length > 0) buf.add("\n");
 			if (indices.length > 0) {
 				buf.add(StringTools.lpad(Std.string(indices.pop()), " ", 2));
@@ -48,13 +48,13 @@ class DecisionTree {
 			} else buf.add(tabs);
 			buf.add(s);
 		}
-		function sExpr(tabs:String, e:TExpr):String return TPrinting.sExprPretty(true, tabs, false, MatcherGlobals.sType, e);
-		function printExprNoblock(tabs:String, e:TExpr):Void switch e.eexpr {
+		inline function sExpr(tabs:String, e:TExpr):String return TPrinting.sExprPretty(true, tabs, false, MatcherGlobals.sType, e);
+		inline function printExprNoblock(tabs:String, e:TExpr):Void switch e.eexpr {
 			case TBlock(el): for (e in el) addLine(tabs, sExpr(tabs, e));
 			case _: addLine(tabs, sExpr(tabs, e));
 		};
 		var loop:String->DecisionTreeData->Void = null;
-		function printGuard(tabs:String, e:TExpr, dt1:DecisionTreeData, dt2:DecisionTreeData, isNullGuard:Bool):Void {
+		inline function printGuard(tabs:String, e:TExpr, dt1:DecisionTreeData, dt2:DecisionTreeData, isNullGuard:Bool):Void {
 			addLine(tabs, "if ("); buf.add(sExpr(tabs, e));
 			if (isNullGuard) buf.add(" == null");
 			buf.add(")"); loop(tabs + tabString, dt1);

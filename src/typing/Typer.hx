@@ -342,7 +342,7 @@ class Typer {
     } loop(false,[],t);
    case _:ODKPlain;
   };
-  function typeFields(fieldMap:haxe.ds.StringMap<TClassField>):{type:T,fields:Array<{key:{name:String,pos:Pos,quote:QuoteStatus},expr:TExpr}>} {
+  inline function typeFields(fieldMap:haxe.ds.StringMap<TClassField>):{type:T,fields:Array<{key:{name:String,pos:Pos,quote:QuoteStatus},expr:TExpr}>} {
    var fields=new haxe.ds.StringMap<TClassField>(),extra=[];
    var result=fl.map(function(field) {
     var n=field.key.name,pn=field.key.pos,valid=Lexer.isValidIdentifier(n);
@@ -373,7 +373,7 @@ class Typer {
    }
    return {type:t,fields:result};
   }
-  function plain():TExpr {
+  inline function plain():TExpr {
    var fields=[],types=new haxe.ds.StringMap<TClassField>();
    for(field in fl) {
     var name=field.key.name,pf=field.key.pos,valid=Lexer.isValidIdentifier(name);
@@ -473,7 +473,7 @@ class Typer {
     case _:core.TUnification.unify(t,v.vType); unreachable();
    } catch(exc:Dynamic) {switch exc {case (core.ds.ExceptionTools.unification(_) => Some(_)):checkUnreachable(cases.slice(1),t,p); case _:throw exc;}}
   }
-  function checkParams(params:TParams,p:Pos):Void {for(pt in params) if(AbstractTools.followWithAbstracts(pt)!=tDynamic) raiseTypingError("Catch class parameter must be Dynamic",p);}
+  inline function checkParams(params:TParams,p:Pos):Void {for(pt in params) if(AbstractTools.followWithAbstracts(pt)!=tDynamic) raiseTypingError("Catch class parameter must be Dynamic",p);}
   for(catchSyntax in catches) {
    var th=catchSyntax.type==null?makePtpTh({tpackage:["haxe"],tname:"Exception",tsub:null,tparams:[]},Globals.nullPos):catchSyntax.type;
    var t=Typeload.loadComplexType(ctx,true,LoadNormal,th);
@@ -507,7 +507,7 @@ class Typer {
    case _:null;
   };
   var keys=new core.ds.Hashtbl<TExprDef,Pos>();
-  function checkKey(e:TExpr):Void {
+  inline function checkKey(e:TExpr):Void {
    if(keys.mem(e.eexpr)) raiseTypingErrorExt(makeError(Custom("Duplicate key"),e.epos,[makeError(Custom(complMsg("Previously defined here")),keys.find(e.eexpr))]));
    switch e.eexpr {case TConst(_):keys.add(e.eexpr,e.epos); case _:}
   }
@@ -542,8 +542,8 @@ class Typer {
   var rt=Typeload.loadTypeHint(ctx,p,LoadReturn,f.fType);
   function typeArg(_:Int,opt:Bool,t:Null<TypeHint>,p:Pos):T return Typeload.loadTypeHint(ctx,p,LoadNormal,t,opt);
   var args=new FunctionArguments(ctx.com,typeArg,false,ctx.f.inDisplay,null,f.fArgs),targs=args.forType();
-  function maybeUnifyArg(t1:T,t2:T):Void switch follow(t1) {case TMono(_):Typecore.unify(ctx,t2,t1,p); case _:}
-  function maybeUnifyRet(tr:T):Void switch [follow(tr),follow(rt)] {case [TAbstract({aPath:{pack:[],name:"Void"}},_),_] if(kind!=FKArrow): case [_,TMono(_)]:Typecore.unify(ctx,rt,tr,p); case _:}
+  inline function maybeUnifyArg(t1:T,t2:T):Void switch follow(t1) {case TMono(_):Typecore.unify(ctx,t2,t1,p); case _:}
+  inline function maybeUnifyRet(tr:T):Void switch [follow(tr),follow(rt)] {case [TAbstract({aPath:{pack:[],name:"Void"}},_),_] if(kind!=FKArrow): case [_,TMono(_)]:Typecore.unify(ctx,rt,tr,p); case _:}
   function matrix(list:Array<T>):Void {
    var arity=targs.length,m=new UnificationMatrix(arity+1);
    for(t in list) switch followWithCoro(t) {
@@ -668,7 +668,7 @@ class Typer {
  }
  public static function typeCast(ctx:TyperContext,e:Expr,hint:TypeHint,p:Pos):TExpr {
   var tpos=hint.pos,t=Typeload.loadComplexType(ctx,true,LoadNormal,hint);
-  function check(pt:T):Void switch follow(pt) {case TMono(_): case t if(t==tDynamic): case _:raiseTypingError("Cast type parameters must be Dynamic",tpos);}
+  inline function check(pt:T):Void switch follow(pt) {case TMono(_): case t if(t==tDynamic): case _:raiseTypingError("Cast type parameters must be Dynamic",tpos);}
   function loop(t:T):ModuleType return switch follow(t) {
    case TInst(c,params):for(pt in params) check(pt); switch c.clKind {case KTypeParameter(_):raiseTypingError("Can't cast to a type parameter",tpos); case _:} TClassDecl(c);
    case TEnum(en,params):for(pt in params) check(pt); TEnumDecl(en);
@@ -695,7 +695,7 @@ class Typer {
   if(mode==null) mode=MGet;
   if(ctx.m.isDisplayFile) checkDisplayMetadata(ctx,[m]); var old=ctx.f.meta; ctx.f.meta=[m].concat(ctx.f.meta);
   function expression():TExpr return typeExpr(ctx,e1,withType,mode);
-  function preserve():TExpr {var e=expression(); return mk(TMeta(m,e),e.etype,e.epos);}
+  inline function preserve():TExpr {var e=expression(); return mk(TMeta(m,e),e.etype,e.epos);}
   var e:TExpr=switch m.meta {
    case MetaTag.ToString:var e=expression(); switch follow(e.etype) {case TAbstract(a,_) if(a.aImpl!=null&&a.aImpl.clStatics.exists("toString")):callToString(ctx,e); case _:e;}
    case MetaTag.Markup:raiseTypingError("Markup literals must be processed by a macro",p);
@@ -720,7 +720,7 @@ class Typer {
    case MetaTag.Dollar(""):expression();
    case MetaTag.Dollar(s):displayError(ctx.com,"Reification $"+s+" is not allowed outside of `macro` expression",m.pos); expression();
    case MetaTag.Custom(":debug.import"):
-    function print(list:Array<ResolvedImport>):Void Sys.println(list.map(res -> sResolutionKind(res.rKind)).join("\n"));
+    inline function print(list:Array<ResolvedImport>):Void Sys.println(list.map(res -> sResolutionKind(res.rKind)).join("\n"));
     Sys.println("OWN:"); print(getOwnResolution(ctx).getList()); Sys.println("IMPORT:"); print(ctx.m.importResolution.getList()); expression();
    case _:ctx.g.retainMeta?preserve():expression();
   };
@@ -729,7 +729,7 @@ class Typer {
  public static function typeCallTarget(ctx:TyperContext,e:Expr,el:Array<Expr>,withType:WithTypeValue,pInline:Null<Pos>):AccessKind {
   var acc=maybeTypeAgainstEnum(ctx,() -> typeAccess(ctx,e.expr,e.pos,MCall(el),WithTypeTools.value),withType,true,e.pos);
   if(pInline==null) return acc;
-  function check(cf:TClassField):Void {if(hasClassFieldFlag(cf,CfAbstract)) displayError(ctx.com,"Cannot force inline on abstract method",pInline);}
+  inline function check(cf:TClassField):Void {if(hasClassFieldFlag(cf,CfAbstract)) displayError(ctx.com,"Cannot force inline on abstract method",pInline);}
   function loop(e:AccessKind):AccessKind return switch e {
    case AKSafeNav(sn):AKSafeNav({snPos:sn.snPos,snBase:sn.snBase,snTempVar:sn.snTempVar,snAccess:loop(sn.snAccess)});
    case AKField(fa):check(fa.faField); var copy=core.ds.Record.copy(fa); copy.faInline=true; AKField(copy);

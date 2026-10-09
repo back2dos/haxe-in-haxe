@@ -186,7 +186,7 @@ class Graph {
  }
  public static function inferImmediateDominators(g:GraphData):Void {
   var info = new haxe.ds.IntMap<DomBbInfo>(); var nodes:Array<DomBbInfo> = [];
-  function addInfo(bb:BasicBlockData,parent:BasicBlockData):Void {
+  inline function addInfo(bb:BasicBlockData,parent:BasicBlockData):Void {
    var bbi:DomBbInfo = {bb:bb,parent:null,idom:null,semi:nodes.length,label:null,ancestor:null,bucket:[]}; bbi.parent = bbi; bbi.idom = bbi; bbi.label = bbi; bbi.ancestor = bbi;
    // The OCaml record update keeps the original self-references for a non-root node.
    if (bb != parent) {var copy:DomBbInfo = core.ds.Record.copy(bbi); copy.parent = info.get(parent.bbId); bbi = copy;}
@@ -200,7 +200,7 @@ class Graph {
    var a = worklist.shift(); var minSemi = a.label.semi;
    for (desc in worklist) {var label = desc.label; if (label.semi > minSemi) desc.label = a.label; else minSemi = label.semi; a = desc;}
   }
-  function eval(id:Int):DomBbInfo {var bbi = info.get(id); if (bbi.ancestor != bbi) {compress(bbi); return bbi.label;} return bbi;}
+  inline function eval(id:Int):DomBbInfo {var bbi = info.get(id); if (bbi.ancestor != bbi) {compress(bbi); return bbi.label;} return bbi;}
   var i = nodes.length - 1;
   while (i > 0) {
    var w = nodes[i--]; var semi = w.semi; for (edge in w.bb.bbIncoming) semi = Std.int(Math.min(semi,eval(edge.cfgFrom.bbId).semi));
@@ -221,7 +221,7 @@ class Graph {
   for (e in bb.bbEl) infer(e); BasicBlock.terminatorIter(infer,bb.bbTerminator);
  });
  public static function inferScopes(g:GraphData):Void {
-  var nextScopeId = 0; function nextScope(scopes:Array<Int>):Array<Int> return [++nextScopeId].concat(scopes);
+  var nextScopeId = 0; inline function nextScope(scopes:Array<Int>):Array<Int> return [++nextScopeId].concat(scopes);
   function loop(scopes:Array<Int>,bb:BasicBlockData):Void {
    bb.bbScopes = scopes;
    switch bb.bbSyntaxEdge {

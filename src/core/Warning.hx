@@ -11,8 +11,8 @@ import syntax.Lexer;
 // Mechanical translation of haxe/src/core/warning.ml. Draft; not compiled or tested.
 class Warning {
 	public static function parseOptionsFromLexer(lexer:Lexer,ps:Pos):Array<WarningOption> {
-		function fail(msg:String,p:Pos):Dynamic return Error.raiseTypingError(msg,{pfile:p.pfile,pmin:ps.pmin + p.pmin,pmax:ps.pmin + p.pmax});
-		function parseWarning():WarningCode {
+		inline function fail(msg:String,p:Pos):Dynamic return Error.raiseTypingError(msg,{pfile:p.pfile,pmin:ps.pmin + p.pmin,pmax:ps.pmin + p.pmax});
+		inline function parseWarning():WarningCode {
 			var token = lexer.token();
 			return switch token.token {
 				case Const(Ident(s)):

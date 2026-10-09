@@ -88,7 +88,7 @@ class OverloadResolution {
 
 	public static function resolveInstanceOverload(isCtor:Bool, mapType:T->T, c:TClass, name:String, el:Array<TExpr>):Null<ResolvedOverload> {
 		var candidates:Array<FieldCallCandidateData<ResolvedOverload>> = [];
-		function hasFunction(t1:T, fcc2:FieldCallCandidateData<ResolvedOverload>):Bool return switch [follow(t1), fcc2.fcType] {
+		inline function hasFunction(t1:T, fcc2:FieldCallCandidateData<ResolvedOverload>):Bool return switch [follow(t1), fcc2.fcType] {
 			case [TFun(s1), TFun(s2)]: typeIseq(TFun({args:s1.args, ret:tDynamic}), TFun({args:s2.args, ret:tDynamic}));
 			case _: false;
 		};
@@ -135,7 +135,7 @@ class OverloadResolution {
 	public static function maybeReapplyOverloadCall(e:TExpr):TExpr {
 		return switch e.eexpr {
 			case TCall(ef = {eexpr:TField(e1, fa)}, el):
-				function rebuild(cf:TClassField):TExpr {
+				inline function rebuild(cf:TClassField):TExpr {
 					var access = switch fa {case FInstance(c, tl, _): FInstance(c, tl, cf); case FStatic(c, _): FStatic(c, cf); case _: fa;};
 					return {eexpr:TCall({eexpr:TField(e1, access), etype:ef.etype, epos:ef.epos}, el), etype:e.etype, epos:e.epos};
 				}

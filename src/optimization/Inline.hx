@@ -53,7 +53,7 @@ class Inline {
    case ["Std","string",[{eexpr:TCast(e = {eexpr:TConst(ct)},null)}]] | ["Std","string",[e = {eexpr:TConst(ct)}]]:switch ct {case TString(_):{eexpr:e.eexpr,etype:e.etype,epos:p}; case TInt(i):mk(TConst(TString(Std.string(i))),b.tstring,p); case TBool(v):mk(TConst(TString(v ? "true" : "false")),b.tstring,p); case _:null;}
    case ["Std","string",[e = {eexpr:TIf(_,{eexpr:TConst(TString(_))},{eexpr:TConst(TString(_))})}]]:e;
    case ["Std","string",[ev = {eexpr:TLocal(v) | TField({eexpr:TLocal(v)},_)}]] if ((platform == Js || platform == Flash) && switch v.vKind {case VUser(_):true; case _:false;}):
-    function stringv():TExpr {var pos = ev.epos; var str = mk(TBinop(OpAdd,mk(TConst(TString("")),b.tstring,pos),ev),b.tstring,pos); if (platform == Js || isNullable(ev.etype)) {var cond = mk(TBinop(OpEq,ev,mk(TConst(TNull),tDynamic,pos)),b.tbool,pos); return mk(TIf(cond,mk(TConst(TString("null")),b.tstring,pos),str),b.tstring,pos);} return str;}
+    inline function stringv():TExpr {var pos = ev.epos; var str = mk(TBinop(OpAdd,mk(TConst(TString("")),b.tstring,pos),ev),b.tstring,pos); if (platform == Js || isNullable(ev.etype)) {var cond = mk(TBinop(OpEq,ev,mk(TConst(TNull),tDynamic,pos)),b.tbool,pos); return mk(TIf(cond,mk(TConst(TString("null")),b.tstring,pos),str),b.tstring,pos);} return str;}
     switch follow(ev.etype) {case TInst({clPath:{pack:[],name:"String"}},[]) | TAbstract({aPath:{pack:[],name:"Float" | "Int" | "UInt" | "Bool"}},[]):stringv(); case _:null;}
    case ["Std","int",[{eexpr:TConst(TFloat(s))}]]:var f = Std.parseFloat(s); !Math.isFinite(f) || Math.isNaN(f) || f <= -2147483649.0 || f >= 2147483648.0 ? null : mk(TConst(TInt(Std.int(f))),b.tint,p);
    case ["Math","ceil",[{eexpr:TConst(TFloat(s))}]]:var f = Std.parseFloat(s); !Math.isFinite(f) || Math.isNaN(f) || f <= -2147483649.0 || f >= 2147483647.0 ? null : mk(TConst(TInt(Math.ceil(f))),b.tint,p);
@@ -105,9 +105,9 @@ class Inline {
   try {var c = switch follow(ethis.etype) {case TInst(c,_):c; case TAnon(a):switch a.aStatus {case ClassStatics(c):c; case _:throw new TypeExit();} case _:throw new TypeExit();}; var result = apiInline(scom,c,cf.cfName,params,p); if (result == null) throw new TypeExit(); return result;} catch (_:TypeExit) {}
   if (config == null) config = inlineDefaultConfig(cf,ethis.etype); var hasParams = config.hasParams; var mapType = config.mapType; if (ictx.typer != null) params = inlineRestParams(ictx.typer,f,params,mapType,p);
   var state = new InlineState(ictx,ethis,params,cf,f,p); var vthis = state.initialize(); var inLoop = false;
-  function returnType(t:T,el:Array<TExpr>):T {if (follow(f.tfType) == tDynamic || core.TOther.ExtType.isVoid(follow(f.tfType))) return f.tfType; if (core.TOther.ExtType.isVoid(t)) return typing.UnifyMin.unifyMinRaise(scom.basic,el); return t;}
-  function mapPos(e:TExpr):TExpr return selfCallingClosure || core.Define.defined(scom.defines,core.Define.KeepInlinePositions) ? e : {eexpr:e.eexpr,etype:e.etype,epos:p};
-  function saveLocals():Void->Void return ictx.typer == null ? function() {} : context.Typecore.saveLocals(ictx.typer);
+  inline function returnType(t:T,el:Array<TExpr>):T {if (follow(f.tfType) == tDynamic || core.TOther.ExtType.isVoid(follow(f.tfType))) return f.tfType; if (core.TOther.ExtType.isVoid(t)) return typing.UnifyMin.unifyMinRaise(scom.basic,el); return t;}
+  inline function mapPos(e:TExpr):TExpr return selfCallingClosure || core.Define.defined(scom.defines,core.Define.KeepInlinePositions) ? e : {eexpr:e.eexpr,etype:e.etype,epos:p};
+  inline function saveLocals():Void->Void return ictx.typer == null ? function() {} : context.Typecore.saveLocals(ictx.typer);
   function hasTermReturn(e:TExpr):Bool {
    function loop(e:TExpr):Void {var r = switch e.eexpr {
     case TReturn(_):true; case TFunction(_):false;
@@ -204,7 +204,7 @@ class InlineState {
   }
   var vars = [];
   for (item in inlinedVars) {
-   var i = item.local; var e = item.expr; function accept(kind:VarInlineKind) subst.set(i.iSubst.vId,{kind:kind,expr:e}); function reject():Void {if (i.iRead + i.iCalled <= 1 && !i.iWrite) i.iSubst.vKind = VGenerated; vars.unshift({variable:i.iSubst,expr:e});}
+   var i = item.local; var e = item.expr; inline function accept(kind:VarInlineKind) subst.set(i.iSubst.vId,{kind:kind,expr:e}); inline function reject():Void {if (i.iRead + i.iCalled <= 1 && !i.iWrite) i.iSubst.vKind = VGenerated; vars.unshift({variable:i.iSubst,expr:e});}
    if (i.iAbstractThis && i.iWrite) {checkWrite(e); accept(VIInline);} else if (i.iForceTemp || i.iCaptured && !constant(e)) reject(); else {
     var kind = switch e.eexpr {case TLocal(_) if (i.iAbstractThis):VIInline; case TConst(TNull):VIDoNotInline; case TLocal(_) | TConst(_):!i.iWrite ? VIInline : VIDoNotInline; case TFunction(_):if (i.iWrite) Error.raiseTypingError("Cannot modify a closure parameter inside inline method",p); i.iRead <= 1 ? VIInline : VIInlineIfCalled; case _:!i.iWrite && i.iRead + i.iCalled <= 1 ? VIInline : VIDoNotInline;};
     switch kind {case VIInline:accept(kind); case VIDoNotInline:reject(); case VIInlineIfCalled:accept(kind); if (i.iRead > 1) reject();}
@@ -212,7 +212,7 @@ class InlineState {
   } return {vars:vars,subst:subst};
  }
  public function initialize():Null<TVar> {
-  function setVars(pl:Array<TExpr>,al:Array<{variable:TVar,defaultValue:Null<TExpr>}>):Void {
+  inline function setVars(pl:Array<TExpr>,al:Array<{variable:TVar,defaultValue:Null<TExpr>}>):Void {
    var acc = []; var index = 0;
    for (arg in al) {
     var v = arg.variable; var opt = arg.defaultValue; var l = declare(v); var e:TExpr;

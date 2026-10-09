@@ -53,7 +53,7 @@ class UnifyMin {
 		try {
 			// Constant anonymous structures retain every field with a common type.
 			var fcount = -1;
-			function expr(f:TClassField):TExpr return f.cfExpr == null ? mk(TBlock([]), f.cfType, f.cfPos) : f.cfExpr;
+			inline function expr(f:TClassField):TExpr return f.cfExpr == null ? mk(TBlock([]), f.cfType, f.cfPos) : f.cfExpr;
 			var fields = new StringMap<Array<TExpr>>();
 			for (e in el) switch follow(e.etype) {
 				case TAnon(a) if (a.aStatus == Const):

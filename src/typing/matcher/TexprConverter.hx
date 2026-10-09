@@ -67,7 +67,7 @@ class TexprConverter {
     case Switch(subject,[sc={scCon:{kind:ConFields(_)}}],_):var e=loop(rec,params,sc.scDt);e==null?null:core.TFunctions.concat(subject,e);
     case Switch(subject,cases,def):
      var nextRec=rec==Toplevel?AfterSwitch:Deep;var top=rec==Toplevel;var ctors=allCtors(ctx,subject,cases);subject=ctors.e;var unmatched=[];for(con in ctors.unmatched){var u=unifyConstructor(ctx,params,subject.etype,con);if(u!=null)unmatched.push(u);}
-     function descend(params:Array<T>,dt:DecisionTreeData):Null<TExpr>{var e=loop(nextRec,params,dt);if(e!=null)return e;if(withType==NoValue&&ctors.finiteness==Infinite&&top)return null;if(ctors.finiteness==CompileTimeFinite&&unmatched.length==0)return null;if(Common.ignoreError(com))return null;return reportNotExhaustive(lookup,subject,unmatched);}
+     inline function descend(params:Array<T>,dt:DecisionTreeData):Null<TExpr>{var e=loop(nextRec,params,dt);if(e!=null)return e;if(withType==NoValue&&ctors.finiteness==Infinite&&top)return null;if(ctors.finiteness==CompileTimeFinite&&unmatched.length==0)return null;if(Common.ignoreError(com))return null;return reportNotExhaustive(lookup,subject,unmatched);}
      var groups:Array<{cons:Array<ConstructorData>,dt:DecisionTreeData,params:Array<T>}>=[];
      for(sc in cases){var u=unifyConstructor(ctx,params,subject.etype,sc.scCon);if(u==null)continue;var group=null;for(g in groups)if(DecisionTree.equal(g.dt.dtT,sc.scDt.dtT)){group=g;break;}if(group==null)groups.push({cons:[sc.scCon],dt:sc.scDt,params:u.params});else{group.cons.unshift(sc.scCon);group.dt=sc.scDt;group.params=u.params;}}
      groups.sort(function(a,b)return a.cons.length>0&&b.cons.length>0?Constructor.compare(a.cons[0],b.cons[0]):-1);

@@ -32,13 +32,13 @@ typedef GenericSubst={var cls:TClass;var t:T;var expr:Null<TExpr>;}
 typedef GenericContext={var ctx:Typer;var subst:Array<GenericSubst>;var name:String;var p:Pos;var mg:Null<ModuleDef>;var genericDebug:Bool;}
 class Generic {
  public static function makeGeneric(ctx:Typer,ps:TypeParams,pt:Array<T>,debug:Bool,p:Pos):GenericContext {
-  function identSafe(s:String):String {var b=new StringBuf();for(i in 0...s.length){var c=s.charCodeAt(i);b.add(c>=65&&c<=90||c>=97&&c<=122||c>=48&&c<=57||c==95?s.charAt(i):'_${c}_');}return b.toString();}
-  function pathName(p:Dynamic):String return p.pack.length==0?p.name:p.pack.join("_")+"_"+p.name;
-  function process(t:T):{name:String,t:T,expr:Null<TExpr>} {
+  inline function identSafe(s:String):String {var b=new StringBuf();for(i in 0...s.length){var c=s.charCodeAt(i);b.add(c>=65&&c<=90||c>=97&&c<=122||c>=48&&c<=57||c==95?s.charAt(i):'_${c}_');}return b.toString();}
+  inline function pathName(p:Dynamic):String return p.pack.length==0?p.name:p.pack.join("_")+"_"+p.name;
+  inline function process(t:T):{name:String,t:T,expr:Null<TExpr>} {
    function loop(top:Bool,t:T):{name:String,t:T,expr:Null<TExpr>} {
-    function result(name:String,expr:Null<TExpr>=null):Dynamic return {name:name,t:t,expr:expr};
-    function tlName(tl:Array<T>):String return tl.length==0?"":"_"+tl.map(function(t)return loop(top,t).name).join("_");
-    function deep(t:T):String return loop(false,t).name;
+    inline function result(name:String,expr:Null<TExpr>=null):Dynamic return {name:name,t:t,expr:expr};
+    inline function tlName(tl:Array<T>):String return tl.length==0?"":"_"+tl.map(function(t)return loop(top,t).name).join("_");
+    inline function deep(t:T):String return loop(false,t).name;
     return switch t {
      case TInst(c,tl):switch c.clKind{case KExpr(e):var name=identSafe(core.AstPrinter.sExpr(e));var cloned=TyperManager.cloneForTypeParameterExpression(ctx);result(name,typeExpr(cloned,e,WithTypeTools.value));case _:result(identSafe(pathName(c.clPath))+tlName(tl));}
      case TType(td,tl):result(pathName(td.tPath)+tlName(tl));case TEnum(en,tl):result(pathName(en.ePath)+tlName(tl));
@@ -78,7 +78,7 @@ class Generic {
   var mg=makeModule(g,c,path);g.mg=mg;var cg=mkClass(mg,path,c.clPos,c.clNamePos);mg.mTypes=[TClassDecl(cg)];ctx.com.moduleLut.add(mg.mPath,mg);addDependency(mg,c.clModule,MDepFromTyping);addDependency(ctx.m.curmod,mg,MDepFromTyping);return cg;
  }
  public static function setTypeParameterDependencies(mg:ModuleDef,tl:Array<T>):Void {
-  var stack=[];function loop(t:T):Void {if(stack.indexOf(t)>=0)return;stack.unshift(t);function dep(m:ModuleDef,tl:Array<T>):Void{addDependency(mg,m,MDepFromTyping);for(t in tl)loop(t);}switch t{case TInst(c,tl):dep(c.clModule,tl);case TEnum(e,tl):dep(e.eModule,tl);case TType(t,tl):dep(t.tModule,tl);case TAbstract(a,tl):dep(a.aModule,tl);case TMono(r):if(r.tmType!=null)loop(r.tmType);case TLazy(f):loop(lazyType(f));case TDynamic(t):if(t!=null)loop(t);case TAnon(a):var names=[for(n in a.aFields.keys())n];names.sort(Reflect.compare);for(n in names)loop(a.aFields.get(n).cfType);case TFun(s):for(a in s.args)loop(a.type);loop(s.ret);}}
+  var stack=[];function loop(t:T):Void {if(stack.indexOf(t)>=0)return;stack.unshift(t);inline function dep(m:ModuleDef,tl:Array<T>):Void{addDependency(mg,m,MDepFromTyping);for(t in tl)loop(t);}switch t{case TInst(c,tl):dep(c.clModule,tl);case TEnum(e,tl):dep(e.eModule,tl);case TType(t,tl):dep(t.tModule,tl);case TAbstract(a,tl):dep(a.aModule,tl);case TMono(r):if(r.tmType!=null)loop(r.tmType);case TLazy(f):loop(lazyType(f));case TDynamic(t):if(t!=null)loop(t);case TAnon(a):var names=[for(n in a.aFields.keys())n];names.sort(Reflect.compare);for(n in names)loop(a.aFields.get(n).cfType);case TFun(s):for(a in s.args)loop(a.type);loop(s.ret);}}
   for(t in tl)loop(t);
  }
  public static function buildInstances(ctx:Typer,t:T,p:Pos):T {function loop(t:T):T return map(loop,Typeload.maybeBuildInstance(ctx,t,ParamNormal,p));return loop(t);}
@@ -91,12 +91,12 @@ class Generic {
   if(g.genericDebug){Sys.println('[GENERIC] Building @:generic class ${sTypePath(c.clPath)} as ${path.name} with:');for(s in g.subst)Sys.println('[GENERIC]   ${s.cls.clPath.name}: ${core.TPrinting.sTypeKind(s.t)}'+(s.expr==null?"":" (expr: "+core.TPrinting.sExprDebug(s.expr)+")"));}
   c.clBuild();var mg=makeModule(g,c,path);var ctx=TyperManager.cloneForModule(ctx.g.rootTyper,TypeloadModule.makeCurmod(ctx.com,ctx.g,mg));g.mg=mg;var cg=mkClass(mg,path,c.clPos,c.clNamePos);ctx=TyperManager.cloneForClass(ctx,c);
   cg.clMeta=c.clMeta.filter(function(m)return switch (m.meta:MetaTag){case MetaTag.Access|Allow|Final|Hack|Keep|KeepSub|NoClosure|NullSafety|Pure|Struct|StructInit|Using|AutoBuild|Unreflective:true;case _:false;});cg.clMeta.unshift({meta:MetaTag.NoDoc,exprs:[],pos:nullPos});mg.mTypes=[TClassDecl(cg)];ctx.com.moduleLut.add(mg.mPath,mg);addDependency(mg,c.clModule,MDepFromTyping);addDependency(ctx.m.curmod,mg,MDepFromTyping);setTypeParameterDependencies(mg,tl);
-  function buildField(old:TClassField):TClassField {
+  inline function buildField(old:TClassField):TClassField {
    var params=old.cfParams.map(function(ttp)return {original:ttp.ttpClass,param:cloneTypeParameter(g,mg,{pack:[old.cfName],name:ttp.ttpName},ttp)});var localG:GenericContext=core.ds.Record.withFields(g,{subst:params.map(function(s)return {cls:s.original,t:s.param.ttpType,expr:null}).concat(g.subst)});
    var field:TClassField=core.ds.Record.withFields(old,{cfExprUnoptimized:null});field.cfParams=params.map(function(s)return s.param);
-   function f():T {
+   inline function f():T {
     follow(old.cfType);field.cfFlags=old.cfFlags;removeClassFieldFlag(field,CfPostProcessed);if(localG.genericDebug)Sys.println("[GENERIC] expanding "+old.cfName);var t=genericSubstituteType(localG,old.cfType);
-    function update(e:TExpr):Void field.cfExpr=genericSubstituteExpr(localG,e);
+    inline function update(e:TExpr):Void field.cfExpr=genericSubstituteExpr(localG,e);
     if(old.cfExpr!=null)update(old.cfExpr);else delayLate(ctx.g,PTypeField,function(){if(old.cfExpr!=null)update(old.cfExpr);else switch old.cfKind{case Method(_) if(!hasClassFlag(c,CInterface)&&!hasClassFlag(c,CExtern)&&!hasClassFieldFlag(old,CfAbstract)):Common.displayErrorExt(ctx.com,Error.makeError(Custom('Field ${field.cfName} has no expression (possible typing order issue)'),field.cfPos,[Error.makeError(Custom(complMsg("While building "+sTypePath(cg.clPath))),p)]));case _:}});
     if(localG.genericDebug)Sys.println("[GENERIC] "+Printer.sTclassField("  ",field));return t;
    }
@@ -114,15 +114,15 @@ class Generic {
   var c:TClass;var stat:Bool;switch fa.faHost{case FHInstance(cls,_):c=cls;stat=false;case FHStatic(cls):c=cls;stat=true;case FHAbstract(_,_,cls):c=cls;stat=true;case _:throw "assert";}
   var cf:TClassField=fcc.fcField;if(cf.cfParams.length==0)Error.raiseTypingError("Function has no type parameters and cannot be generic",p);switch withType{case WithType(t,_):unify(ctx,buildInstances(ctx,fcc.fcRet,p),t,p);case _:}
   var monos:Array<T>=fcc.fcMonos;for(t in monos)switch follow(t){case TMono(m):safeMonoClose(ctx,m,p);case _:}var args=fcc.fcArgs;var g=makeGeneric(ctx,cf.cfParams,monos,core.Meta.has(MetaTag.Custom(":debug.generic"),cf.cfMeta),p);var type=buildInstances(ctx,fcc.fcType,p);var name=cf.cfName+"_"+g.name;var params=extractTypeParameters(monos);
-  function unifyExisting(t:T,pcf:Pos):Void {try{unifyRaise(t,type,p);}catch(ex:Dynamic){switch ex{case (core.ds.ExceptionTools.typing(_) => Some(err={errMessage:Unify(_)})):throw new core.Error.TypingError(core.ds.Record.withFields(err,{errSub:[Error.makeError(Custom("Cannot create field "+name+" due to type mismatch"),p,[Error.makeError(Custom(complMsg("Conflicting field was defined here")),pcf)])].concat(err.errSub)}));case _:throw ex;}}}
+  inline function unifyExisting(t:T,pcf:Pos):Void {try{unifyRaise(t,type,p);}catch(ex:Dynamic){switch ex{case (core.ds.ExceptionTools.typing(_) => Some(err={errMessage:Unify(_)})):throw new core.Error.TypingError(core.ds.Record.withFields(err,{errSub:[Error.makeError(Custom("Cannot create field "+name+" due to type mismatch"),p,[Error.makeError(Custom(complMsg("Conflicting field was defined here")),pcf)])].concat(err.errSub)}));case _:throw ex;}}}
   var found:Null<TClassField>=(stat?c.clStatics:c.clFields).get(name);
   if(found!=null){unifyExisting(found.cfType,found.cfPos);fa=core.ds.Record.withFields(fa,{faField:found});}else{
-   function finalize(cls:TClass,field:TClassField):Void {
+   inline function finalize(cls:TClass,field:TClassField):Void {
     follow(cf.cfType);function check(e:TExpr):Void switch e.eexpr{case TNew(c={clKind:KTypeParameter(_)},_,_) if(!TypeloadCheck.isGenericParameter(ctx,c)):Common.displayErrorExt(ctx.com,Error.makeError(Custom("Only generic type parameters can be constructed"),e.epos,[Error.makeError(Custom(complMsg("While specializing this call")),p)]));case _:Texpr.iter(check,e);};
     if(cf.cfExpr==null){var mappings=[for(i in 0...cf.cfParams.length)cf.cfParams[i].ttpName+" = "+core.TPrinting.sType(core.TPrinting.printContext(),monos[i])];Common.displayErrorExt(ctx.com,Error.makeError(Custom("Recursive @:generic function"),p,[Error.makeError(Custom("Mapping: "+mappings.join(", ")),p),Error.makeError(Custom("For function "+sTypePath(cls.clPath)+"."+cf.cfName),p)]));field.cfExpr=null;}else{var e=genericSubstituteExpr(g,cf.cfExpr);check(e);field.cfExpr=e;}
     field.cfKind=cf.cfKind;if(!hasClassFieldFlag(cf,CfPublic))removeClassFieldFlag(field,CfPublic);var meta=cf.cfMeta.filter(function(m)return !Type.enumEq(m.meta,MetaTag.Generic));var zero=mkZeroRangePos(p);field.cfMeta=([{meta:MetaTag.NoCompletion,exprs:[],pos:zero},{meta:MetaTag.NoUsing,exprs:[],pos:zero},{meta:MetaTag.GenericInstance,exprs:[],pos:zero}] : Array<core.Ast.MetadataEntry>).concat(meta);field.cfParams=params;
    }
-   function makeField(name:String):TClassField return mkField(name,type,cf.cfPos,cf.cfNamePos,true,stat);
+   inline function makeField(name:String):TClassField return mkField(name,type,cf.cfPos,cf.cfNamePos,true,stat);
    if(stat&&core.Meta.has(MetaTag.GenericClassPerMethod,c.clMeta)){var container=staticMethodContainer(g,c,cf,p);setTypeParameterDependencies(container.clModule,monos);var field=container.clStatics.get(cf.cfName);if(field!=null)unifyExisting(field.cfType,field.cfPos);else{field=makeField(cf.cfName);container.clStatics.set(field.cfName,field);container.clOrderedStatics.unshift(field);finalize(container,field);}fa=core.ds.Record.withFields(fa,{faHost:FHStatic(container),faField:field,faOn:Texpr.Builder.makeStaticThis(container,p)});}
    else if(stat){setTypeParameterDependencies(c.clModule,monos);var field=makeField(name);c.clStatics.set(field.cfName,field);c.clOrderedStatics.unshift(field);finalize(c,field);fa=core.ds.Record.withFields(fa,{faField:field});}
    else{setTypeParameterDependencies(c.clModule,monos);var field=makeField(name);if(hasClassFieldFlag(cf,CfOverride))addClassFieldFlag(field,CfOverride);c.clFields.set(field.cfName,field);c.clOrderedFields.unshift(field);finalize(c,field);fa=core.ds.Record.withFields(fa,{faField:field});}

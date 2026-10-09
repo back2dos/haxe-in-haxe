@@ -39,13 +39,13 @@ class TExprToExpr {
 				for (name in names) {
 					var f = a.aFields.get(name);
 					var access:Array<PlacedAccess> = [];
-					function add(flag:Access):Void access.unshift({access:flag,pos:Globals.nullPos});
+					inline function add(flag:Access):Void access.unshift({access:flag,pos:Globals.nullPos});
 					add(hasClassFieldFlag(f,CfPublic) ? APublic : APrivate);
 					if (hasClassFieldFlag(f,CfFinal)) add(AFinal);
 					if (hasClassFieldFlag(f,CfExtern)) add(AExtern);
 					var kind = switch [f.cfKind,follow(f.cfType)] {
 						case [Var(v),_]:
-							function accessToString(va:VarAccess,getOrSet:String):String return switch va {
+							inline function accessToString(va:VarAccess,getOrSet:String):String return switch va {
 								case AccNormal | AccCtor | AccInline | AccRequire(_,_):"default";
 								case AccNo:"null";case AccNever:"never";case AccCall | AccPrivateCall:getOrSet;
 							};
@@ -65,12 +65,12 @@ class TExprToExpr {
 	public static function tparam(t:T):TypeParamOrConst return switch t {case TInst({clKind:KExpr(e)},_):TPExpr(e);case _:TPType(convertTypeHint(t));};
 	public static function mkTypeHint(t:T,p:Pos):Null<TypeHint> return switch follow(t) {case TMono(_):null;case _:try {type:convertType(t),pos:p} catch (_:TypeExit) null;};
 	public static function convertExpr(e:TExpr):Expr {
-		function fullTypePath(t:ModuleType):GlobalTypePath {
+		inline function fullTypePath(t:ModuleType):GlobalTypePath {
 			var info = tInfos(t);
 			var mp = info.mtModule.mPath, p = info.mtPath;
 			return mp.name == p.name ? p : {pack:mp.pack.concat([mp.name]),name:p.name};
 		}
-		function eopt(e:Null<TExpr>):Null<Expr> return e == null ? null : convertExpr(e);
+		inline function eopt(e:Null<TExpr>):Null<Expr> return e == null ? null : convertExpr(e);
 		var expr:ExprDef = switch e.eexpr {
 			case TConst(c):EConst(tconstToConst(c));
 			case TLocal(v):EConst(Ident(v.vName == "`trace" ? "trace" : v.vName));
@@ -184,7 +184,7 @@ class TClassTools {
 		else {var cf = mkField("__init__",tDynamic,Globals.nullPos,Globals.nullPos);cf.cfExpr = e;c.clInit = cf;}
 	}
 	public static function getSingularInterfaceField(fields:Array<TClassField>):Null<TClassField> {
-		function isObjectMember(cf:TClassField):Bool return switch [cf.cfName,follow(cf.cfType)] {case ["equals",TFun({args:[_]})] | ["hashCode",TFun({args:[]})] | ["toString",TFun({args:[]})]:true;case _:false;};
+		inline function isObjectMember(cf:TClassField):Bool return switch [cf.cfName,follow(cf.cfType)] {case ["equals",TFun({args:[_]})] | ["hashCode",TFun({args:[]})] | ["toString",TFun({args:[]})]:true;case _:false;};
 		var result:Null<TClassField> = null;
 		for (cf in fields) if (!hasClassFieldFlag(cf,CfDefault) && !isObjectMember(cf) && cf.cfKind.match(Method(MethNormal))) {
 			if (result != null) return null; result = cf;

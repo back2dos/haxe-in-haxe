@@ -411,7 +411,7 @@ class Texpr {
  public static function eIdentity(e:TExpr):TExpr return e;
  public static function copyVar(v:TVar):TVar {var w = allocVar(v.vKind,v.vName,v.vType,v.vPos); w.vMeta = v.vMeta; w.vExtra = v.vExtra; w.vFlags = v.vFlags; return w;}
  public static function duplicateTvars(fThis:TExpr->TExpr,e:TExpr):TExpr {
-  var vars = new haxe.ds.IntMap<TVar>(); function copy(v:TVar):TVar {var w = copyVar(v); vars.set(v.vId,w); return w;}
+  var vars = new haxe.ds.IntMap<TVar>(); inline function copy(v:TVar):TVar {var w = copyVar(v); vars.set(v.vId,w); return w;}
   function build(e:TExpr):TExpr return switch e.eexpr {
    case TVar(v,eo):var w = copy(v); withExpr(e,TVar(w,eo == null ? null : build(eo)));
    case TTry(a,cl):var cl = cl.map(c -> {variable:copy(c.variable),expr:build(c.expr)}); withExpr(e,TTry(build(a),cl));
@@ -490,7 +490,7 @@ class Texpr {
  }
  public static function notWhileTrueToWhileTrue(b:Dynamic,e1:TExpr,e2:TExpr,flag:WhileFlag,t:T,p:Pos):TExpr {
   var br = mk(TBreak,tDynamic,p); var not = mk(TUnop(Not,Prefix,Builder.mkParent(e1)),e1.etype,e1.epos);
-  function makeIf(eo:Null<TExpr>):TExpr return mk(TIf(not,br,eo),b.tvoid,p);
+  inline function makeIf(eo:Null<TExpr>):TExpr return mk(TIf(not,br,eo),b.tvoid,p);
   function mapContinue(e:TExpr):TExpr return switch e.eexpr {case TContinue:duplicateTvars(eIdentity,makeIf(e)); case TWhile(_,_,_):e; case _:mapExpr(mapContinue,e);};
   if (flag != NormalWhile) e2 = mapContinue(e2); var cond = makeIf(null); var block = flag == NormalWhile ? concat(cond,e2) : concat(e2,cond);
   return mk(TWhile(mk(TConst(TBool(true)),b.tbool,p),block,NormalWhile),t,p);
@@ -503,23 +503,23 @@ class Texpr {
    case TTypeDecl(d):p = d.tPos; meta = [{name:"",meta:d.tMeta}]; fields = []; switch follow(d.tType) {case TAnon(a):var keys = [for (k in a.aFields.keys()) k]; keys.sort(Reflect.compare); for (k in keys) {var f = a.aFields.get(k); fields.unshift({name:f.cfName,meta:f.cfMeta});} case _:} statics = [];
    case TAbstractDecl(a):p = a.aPos; meta = [{name:"",meta:a.aMeta}]; fields = []; statics = [];
   }
-  function filter(l:Array<{name:String,meta:Metadata}>):Array<{name:String,meta:Metadata}> return l.map(a -> {name:a.name,meta:a.meta.filter(m -> switch m.meta {case core.MetaList.StrictMeta.Custom(s):s.length > 0 && s.charAt(0) != ":"; case _:false;})}).filter(a -> a.meta.length > 0);
+  inline function filter(l:Array<{name:String,meta:Metadata}>):Array<{name:String,meta:Metadata}> return l.map(a -> {name:a.name,meta:a.meta.filter(m -> switch m.meta {case core.MetaList.StrictMeta.Custom(s):s.length > 0 && s.charAt(0) != ":"; case _:false;})}).filter(a -> a.meta.length > 0);
   meta = filter(meta); fields = filter(fields); statics = filter(statics);
   function key(n:String):Dynamic return {name:n,pos:Globals.nullPos,quote:NoQuotes};
-  function makeMetaField(ml:Metadata):TExpr {
+  inline function makeMetaField(ml:Metadata):TExpr {
    var seen = new haxe.ds.StringMap<Bool>();
    return mk(TObjectDecl(ml.map(m -> {var name = switch m.meta {case core.MetaList.StrictMeta.Custom(s):s; case _:throw "Texpr.buildMetadata";}; if (seen.exists(name)) Error.raiseTypingError("Duplicate metadata '" + name + "'",m.pos); seen.set(name,true); return {key:key(name),expr:mk(m.exprs.length == 0 ? TConst(TNull) : TArrayDecl(m.exprs.map(e -> typeConstantValue(api,e))),api.tarray(tDynamic),m.pos)};})),tDynamic,p);
   }
-  function makeMeta(l:Array<{name:String,meta:Metadata}>):TExpr return mk(TObjectDecl(l.map(a -> {key:key(a.name),expr:makeMetaField(a.meta)})),tDynamic,p);
+  inline function makeMeta(l:Array<{name:String,meta:Metadata}>):TExpr return mk(TObjectDecl(l.map(a -> {key:key(a.name),expr:makeMetaField(a.meta)})),tDynamic,p);
   if (meta.length == 0 && fields.length == 0 && statics.length == 0) return null;
   var obj = []; if (fields.length != 0) obj.unshift({key:key("fields"),expr:makeMeta(fields)}); if (statics.length != 0) obj.unshift({key:key("statics"),expr:makeMeta(statics)});
   for (a in meta) if (a.name == "") {obj.unshift({key:key("obj"),expr:makeMetaField(a.meta)}); break;}
   return mk(TObjectDecl(obj),tDynamic,p);
  }
  public static function dumpWithPos(tabs:String,e:TExpr):String {
-  var buf = new StringBuf(); function line(tabs:String,p:Pos,s:String):Void buf.add(StringTools.lpad(Std.string(p.pmin)," ",4) + "-" + StringTools.lpad(Std.string(p.pmax)," ",4) + " " + tabs + s + "\n");
+  var buf = new StringBuf(); inline function line(tabs:String,p:Pos,s:String):Void buf.add(StringTools.lpad(Std.string(p.pmin)," ",4) + "-" + StringTools.lpad(Std.string(p.pmax)," ",4) + " " + tabs + s + "\n");
   function walk(tabs:String,e:TExpr):Void {
-   function add(s:String) line(tabs,e.epos,s); function loop(e:TExpr) walk(tabs + "  ",e);
+   inline function add(s:String) line(tabs,e.epos,s); inline function loop(e:TExpr) walk(tabs + "  ",e);
    switch e.eexpr {
     case TConst(c):add(sConst(c)); case TLocal(v):add("TLocal " + v.vName); case TTypeExpr(mt):add("TTypeExpr " + Globals.sTypePath(tPath(mt))); case TIdent(s):add("TIdent " + s);
     case TEnumParameter(a,ef,_):add("TEnumParameter " + ef.efName); loop(a); case TEnumIndex(a):add("TEnumIndex"); loop(a);
@@ -537,7 +537,7 @@ class Texpr {
   } walk(tabs,e); return buf.toString();
  }
  public static function collectCapturedVars(e:TExpr):{vars:Array<TVar>,accessesThis:Bool} {
-  var known = new haxe.ds.IntMap<Bool>(); var unknown = []; var accessesThis = false; function declare(v:TVar) known.set(v.vId,true);
+  var known = new haxe.ds.IntMap<Bool>(); var unknown = []; var accessesThis = false; inline function declare(v:TVar) known.set(v.vId,true);
   function loop(e:TExpr):Void switch e.eexpr {
    case TLocal(v) if (hasVarFlag(v,VCaptured) && !known.exists(v.vId)):known.set(v.vId,true); unknown.push(v);
    case TConst(TThis | TSuper):accessesThis = true;
@@ -548,7 +548,7 @@ class Texpr {
   } loop(e); return {vars:unknown,accessesThis:accessesThis};
  }
  public static function reduceUnsafeCasts(e:TExpr,t:T,requireCast:Bool = false):TExpr {
-  function same(a:T,b:T):Bool return fastEq(followWithoutNull(a),followWithoutNull(b));
+  inline function same(a:T,b:T):Bool return fastEq(followWithoutNull(a),followWithoutNull(b));
   function loop(e:TExpr):TExpr return switch e.eexpr {case TCast(subject,null):var result = loop(subject); same(e.etype,subject.etype) ? result : withExpr(e,TCast(result,null)); case _:e;};
   var result = loop(e); return switch result.eexpr {case TCast(_,_):result; case _:requireCast ? withExpr(e,TCast(result,null)) : result;};
  }
@@ -587,7 +587,7 @@ private class BreakOrContinue {public function new() {}}
 class DeadEnd {
  public static function hasDeadEnd(e:TExpr):Bool {
   function loop(e:TExpr):Bool {
-   function inLoop(e:TExpr):Bool {try return loop(e) catch (_:BreakOrContinue) return false;}
+   inline function inLoop(e:TExpr):Bool {try return loop(e) catch (_:BreakOrContinue) return false;}
    return switch e.eexpr {
     case TContinue | TBreak:throw new BreakOrContinue();
     case TThrow(a):loop(a) || true;

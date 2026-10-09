@@ -112,13 +112,13 @@ class Finalization {
 		var statics:Map<String, Bool> = [];
 		// Cached path keys (pack#name) rather than joining a fresh string per comparison.
 		inline function key(p:GlobalTypePath):String return p.hashKey();
-		function staticKey(c:TClass, name:String):String return key(c.clPath) + ":" + name;
+		inline function staticKey(c:TClass, name:String):String return key(c.clPath) + ":" + name;
 		var loop:ModuleType->Void = null;
 		var walkExpr:GlobalTypePath->TExpr->Void = null;
-		function loopClass(p:GlobalTypePath, c:TClass):Void {if (key(c.clPath) != key(p)) loop(TClassDecl(c));}
-		function loopEnum(p:GlobalTypePath, e:TEnum):Void {if (key(e.ePath) != key(p)) loop(TEnumDecl(e));}
-		function loopAbstract(p:GlobalTypePath, a:TAbstract):Void {if (key(a.aPath) != key(p)) loop(TAbstractDecl(a));}
-		function walkStaticField(p:GlobalTypePath, c:TClass, cf:TClassField):Void {
+		inline function loopClass(p:GlobalTypePath, c:TClass):Void {if (key(c.clPath) != key(p)) loop(TClassDecl(c));}
+		inline function loopEnum(p:GlobalTypePath, e:TEnum):Void {if (key(e.ePath) != key(p)) loop(TEnumDecl(e));}
+		inline function loopAbstract(p:GlobalTypePath, a:TAbstract):Void {if (key(a.aPath) != key(p)) loop(TAbstractDecl(a));}
+		inline function walkStaticField(p:GlobalTypePath, c:TClass, cf:TClassField):Void {
 			if (cf.cfExpr != null && !statics.exists(staticKey(c, cf.cfName))) {
 				statics.set(staticKey(c, cf.cfName), true);
 				walkExpr(p, cf.cfExpr);
@@ -147,7 +147,7 @@ class Finalization {
 				case _: Texpr.iter(e1 -> walkExpr(p, e1), e); // not iterWith: a typed closure passed to its generic parameter is wrapped per call
 			}
 		};
-		function walkClass(p:GlobalTypePath, c:TClass):Void {
+		inline function walkClass(p:GlobalTypePath, c:TClass):Void {
 			if (c.clSuper != null) loopClass(p, c.clSuper.cls);
 			for (parent in c.clImplements) loopClass(p, parent.cls);
 			var init = TClassTools.getClInit(c);

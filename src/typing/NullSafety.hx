@@ -77,15 +77,15 @@ class NullSafety {
   case TField(target,FInstance(_,_,_)|FStatic(_,_)|FAnon(_)) if(mode!=SMStrictThreaded):isSuitable(mode,target);case TBinop(OpAssign,target,_):isSuitable(mode,target);case _:false;
  };
  public static function getArgumentsMeta(callee:TExpr,count:Int):Array<Dynamic> {
-  function empty():Array<Dynamic> return [for(_ in 0...count)[]];
+  inline function empty():Array<Dynamic> return [for(_ in 0...count)[]];
   return switch callee.eexpr{case TField(_,FAnon(cf)|FClosure(_,cf)|FStatic(_,cf)|FInstance(_,_,cf)):try{var meta=getMeta(MetaTag.HaxeArguments,cf.cfMeta);switch meta.exprs{case [{expr:EFunction(_,{fArgs:args})}] if(args.length==count):args.map(function(a)return a.meta);case _:empty();}}catch(ex:NotFound)empty();case TFunction(fn) if(fn.tfArgs.length==count):fn.tfArgs.map(function(a)return a.variable.vMeta);case _:empty();};
  }
  public static function isTrace(e:TExpr):Bool return switch e.eexpr{case TIdent("`trace")|TField(_,FStatic({clPath:{pack:["haxe"],name:"Log"}},{cfName:"trace"})):true;case _:false;};
  public static function unfoldNull(t:T):T return switch t{case TMono(r):r.tmType==null?t:unfoldNull(r.tmType);case TAbstract({aPath:{pack:[],name:"Null"}},[t]):unfoldNull(t);case TAbstract(a,tl) if(!core.Meta.has(MetaTag.CoreType,a.aMeta)):unfoldNull(applyParams(a.aParams,tl,a.aThis));case TLazy(f):unfoldNull(lazyType(f));case TType(td,tl):unfoldNull(applyTypedef(td,tl));case _:t;};
  public static function accessedFieldName(access:TFieldAccess):String return switch access{case FInstance(_,_,cf)|FStatic(_,cf)|FAnon(cf)|FClosure(_,cf):cf.cfName;case FDynamic(n):n;case FEnum(_,ef):ef.efName;};
  public static function processCondition(mode:SafetyMode,condition:TExpr,nullable:TExpr->Bool,callback:TExpr->Void):{nulls:Array<TExpr>,notNulls:Array<TExpr>} {
-  var nulls=[],notNulls=[];function add(toNulls:Bool,e:TExpr):Void {e=revealExpr(e);if(toNulls)nulls.unshift(e);else notNulls.unshift(e);}
-  function remove(e:TExpr):Void {var subject=getSubject(mode,revealExpr(e));nulls=nulls.filter(function(e)return !SafetyTable.equal(getSubject(mode,revealExpr(e)),subject));notNulls=notNulls.filter(function(e)return !SafetyTable.equal(getSubject(mode,revealExpr(e)),subject));}
+  var nulls=[],notNulls=[];inline function add(toNulls:Bool,e:TExpr):Void {e=revealExpr(e);if(toNulls)nulls.unshift(e);else notNulls.unshift(e);}
+  inline function remove(e:TExpr):Void {var subject=getSubject(mode,revealExpr(e));nulls=nulls.filter(function(e)return !SafetyTable.equal(getSubject(mode,revealExpr(e)),subject));notNulls=notNulls.filter(function(e)return !SafetyTable.equal(getSubject(mode,revealExpr(e)),subject));}
   function traverse(positive:Bool,e:TExpr):Void switch e.eexpr{
    case TUnop(Not,Prefix,e):traverse(!positive,e);
    case TBinop(OpAssign,checked,e) if(isSuitable(mode,checked)&&nullable(e)):remove(checked);
@@ -161,7 +161,7 @@ class SafetyScope {
  public function filterSafety(sample:SafetyTable):Void for(e in safe.copy().all())if(!sample.has(e.subject))safe.remove(e.subject);
  public function reassigned(e:TExpr):Void {
   var subject=getSubject(e);if(subject==SNotSuitable)return;switch subject{case SFieldOfClass(_,_)|SFieldOfLocalVar(_,_)|SFieldOfThis(_):dropSafeFieldsInStrictMode();case _:}
-  function starts(safeFields:Array<String>,fields:Array<String>):Bool {var a=safeFields.copy(),b=fields.copy();a.reverse();b.reverse();return NullSafety.listStartsWithList(a,b);}
+  inline function starts(safeFields:Array<String>,fields:Array<String>):Bool {var a=safeFields.copy(),b=fields.copy();a.reverse();b.reverse();return NullSafety.listStartsWithList(a,b);}
   var remove=[];for(entry in safe.all()){var yes=switch [entry.subject,subject]{case [SFieldOfLocalVar(id,_),SLocalVar(v)] if(id==v):true;case [SFieldOfLocalVar(id,a),SFieldOfLocalVar(v,b)] if(id==v):starts(a,b);case [SFieldOfClass(path,a),SFieldOfClass(p,b)] if(SafetyTable.equal(SFieldOfClass(path,[]),SFieldOfClass(p,[]))):starts(a,b);case [SFieldOfThis(a),SFieldOfThis(b)]:starts(a,b);case _:false;};if(yes)remove.unshift(entry.subject);}for(s in remove)safe.remove(s);
  }
  public function callMade():Void dropSafeFieldsInStrictMode();
@@ -194,7 +194,7 @@ class LocalSafety {
   case TIf(cond,thenBody,elseBody):
    condition(cond);var checked=NullSafety.processCondition(mode,cond,nullable,function(_){});var notNulls=checked.notNulls.filter(function(e)return !isSafe(e));var notCond:TExpr={eexpr:TUnop(Not,Prefix,cond),etype:cond.etype,epos:cond.epos};var elseNotNulls=NullSafety.processCondition(mode,notCond,nullable,function(_){}).notNulls.filter(function(e)return !isSafe(e));var initial=getSafeLocalsCopy();
    for(e in notNulls)current().addToSafety(e);body(thenBody);var afterIf=getSafeLocalsCopy();current().resetTo(initial);
-   function deadEnd(body:TExpr,vars:Array<TExpr>):Void if(DeadEnd.hasDeadEnd(body))for(e in vars)current().addToSafety(e);
+   inline function deadEnd(body:TExpr,vars:Array<TExpr>):Void if(DeadEnd.hasDeadEnd(body))for(e in vars)current().addToSafety(e);
    if(elseBody==null){for(e in checked.nulls)if(afterIf.has(current().getSubject(e)))current().addToSafety(e);for(e in initial.all())if(!afterIf.has(e.subject))current().removeFromSafety(e.expr);deadEnd(thenBody,elseNotNulls);}
    else{for(e in elseNotNulls)current().addToSafety(e);body(elseBody);var afterElse=getSafeLocalsCopy();current().resetTo(initial);for(e in initial.all()){if(!afterIf.has(e.subject)||!afterElse.has(e.subject))current().removeFromSafety(e.expr);afterIf.remove(e.subject);afterElse.remove(e.subject);}for(e in afterIf.all())if(afterElse.has(e.subject))current().addToSafety(e.expr);deadEnd(thenBody,elseNotNulls);deadEnd(elseBody,notNulls);}
   case _:NullSafety.fail(e.epos,{file:"nullSafety.ml",line:1016},"Expected TIf");
@@ -233,11 +233,11 @@ class ExprChecker {
   case _:NullSafety.isNullableType(e.etype)&&!localSafety.isSafe(e);
  };}
  public function canPassExpr(expr:TExpr,toType:T,p:Pos):Bool {
-  function tryUnify(expr:TExpr,toType:T):Bool {
+  inline function tryUnify(expr:TExpr,toType:T):Bool {
    if(isNullableExpr(expr)&&!NullSafety.isNullableType(toType,true))return false;
    var type=NullSafety.unfoldNull(expr.etype);try{new Unificator().unify(type,toType);return true;}catch(ex:SafetyUnifyError){var errors=switch ex.access{case Field(name):[InvalidFieldType(name),CannotUnify(ex.a,ex.b)];case FunctionArgument(i,total):[InvalidFunctionArgument(i,total),CannotUnify(ex.a,ex.b)];case FunctionReturn:[InvalidReturnType,CannotUnify(ex.a,ex.b)];case _:[CannotUnify(ex.a,ex.b)];};errorUnify(errors,p);return true;}catch(ex:Dynamic){return NullSafety.fail(expr.epos,{file:"nullSafety.ml",line:1240},"Null safety unification failure");}
   }
-  function checkAnon(fields:Array<{key:{name:String,pos:Pos,quote:QuoteStatus},expr:TExpr}>,to:TAnon):Bool {var acc=true;for(f in fields){var field=to.aFields.get(f.key.name);if(field==null){acc=true;continue;}if(!canPassExpr(f.expr,field.cfType,f.expr.epos))error("Cannot assign nullable value here.",[f.expr.epos]);acc=acc&&true;}return acc;}
+  inline function checkAnon(fields:Array<{key:{name:String,pos:Pos,quote:QuoteStatus},expr:TExpr}>,to:TAnon):Bool {var acc=true;for(f in fields){var field=to.aFields.get(f.key.name);if(field==null){acc=true;continue;}if(!canPassExpr(f.expr,field.cfType,f.expr.epos))error("Cannot assign nullable value here.",[f.expr.epos]);acc=acc&&true;}return acc;}
   return switch [expr.eexpr,toType]{
    case [TLocal(v),_] if(NullSafety.containsUnsafeMeta(v.vMeta)):true;
    case [TObjectDecl(fields),TAbstract({aPath:{pack:[],name:"Null"}},[TAnon(to)])]|[TObjectDecl(fields),TAnon(to)]:checkAnon(fields,to);
@@ -274,7 +274,7 @@ class ExprChecker {
  function checkIf(e:TExpr):Void {function condition(cond:TExpr):Void {if(isNullableExpr(cond))error('Cannot use nullable value as condition in "if".',[cond.epos,e.epos]);checkExpr(cond);}localSafety.processIf(e,isNullableExpr,condition,checkExpr);}
  function checkArrayAccess(arr:TExpr,idx:TExpr,p:Pos):Void {if(isNullableExpr(arr))error("Cannot perform array access on nullable value.",[p,arr.epos]);if(isNullableExpr(idx))error("Cannot use nullable value as an index for array access.",[p,idx.epos]);checkExpr(arr);checkExpr(idx);}
  function checkBinop(op:Binop,left:TExpr,right:TExpr,p:Pos):Void {
-  function both():Void {checkExpr(left);checkExpr(right);}
+  inline function both():Void {checkExpr(left);checkExpr(right);}
   switch op{
    case OpEq|OpNotEq:both();case OpBoolAnd:localSafety.processAnd(left,right,isNullableExpr,checkExpr);case OpBoolOr:localSafety.processOr(left,right,isNullableExpr,checkExpr);
    case OpAdd|OpAssignOp(OpAdd) if(NullSafety.isStringType(left.etype)||NullSafety.isStringType(right.etype)):both();if(NullSafety.isNullableType(left.etype)&&NullSafety.isNullableType(right.etype))error("Cannot concatenate two nullable values.",[p,left.epos,right.epos]);
@@ -308,7 +308,7 @@ class ClassChecker {
  function checkAccessors(isStatic:Bool,field:TClassField):Void switch field.cfKind {
   case Var(access) if(!NullSafety.isNullableType(field.cfType)):
    var fields=isStatic?cls.clStatics:cls.clFields;
-   function checkAccessor(prefix:String):Void {var accessor=fields.get(prefix+field.cfName);if(accessor==null||!isInSafety(accessor))return;switch accessor.cfExpr{case e={eexpr:TFunction(fn)}:getChecker(classSafetyMode()).checkRootExpr(core.ds.Record.withFields(e,{eexpr:TFunction(core.ds.Record.withFields(fn,{tfType:field.cfType}))}));case _:}}
+   inline function checkAccessor(prefix:String):Void {var accessor=fields.get(prefix+field.cfName);if(accessor==null||!isInSafety(accessor))return;switch accessor.cfExpr{case e={eexpr:TFunction(fn)}:getChecker(classSafetyMode()).checkRootExpr(core.ds.Record.withFields(e,{eexpr:TFunction(core.ds.Record.withFields(fn,{tfType:field.cfType}))}));case _:}}
    if(access.vRead==AccCall)checkAccessor("get_");if(access.vWrite==AccCall)checkAccessor("set_");if(access.vRead==AccPrivateCall)checkAccessor("get_");if(access.vWrite==AccPrivateCall)checkAccessor("set_");
   case _:
  };
@@ -329,9 +329,9 @@ class ClassChecker {
  }
  function checkFieldsInitialization(pending:Map<String,TClassField>,expr:TExpr,isStatic:Bool,mode:SafetyMode):Map<String,TClassField> {
   var thisVars:Map<Int,TVar>=[];
-  function unsafeUsage(list:Map<String,TClassField>,mode:SafetyMode,e:TExpr):Void {
+  inline function unsafeUsage(list:Map<String,TClassField>,mode:SafetyMode,e:TExpr):Void {
    if(!list.keys().hasNext())return;
-   function maybeError(mode:SafetyMode,msg:String,p:Pos):Void if(mode!=SMOff)checker.error(msg,[p]);
+   inline function maybeError(mode:SafetyMode,msg:String,p:Pos):Void if(mode!=SMOff)checker.error(msg,[p]);
    function loop(mode:SafetyMode,e:TExpr):Void switch e.eexpr {
     case TField({eexpr:TConst(TThis)},FInstance(_,_,field)) if(!isStatic):if(list.exists(field.cfName))maybeError(mode,"Cannot use field "+field.cfName+" until initialization.",e.epos);
     case TField(_,FStatic(_,field)) if(isStatic):if(list.exists(field.cfName))maybeError(mode,"Cannot use field "+field.cfName+" until initialization.",e.epos);

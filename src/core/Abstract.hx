@@ -87,7 +87,7 @@ class Abstract {
 		return follow(m);
 	}
 	public static function getUnderlyingTypeWithStack(stack:Dynamic,a:TAbstract,pl:TParams,returnFirst:Bool = false):T {
-		function maybeRecurse(t:T):T {
+		inline function maybeRecurse(t:T):T {
 			function loop(t:T):T return switch t {
 				case TMono(r): r.tmType == null ? t : loop(r.tmType);
 				case TLazy(f): loop(lazyType(f));

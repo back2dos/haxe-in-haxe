@@ -61,7 +61,7 @@ class Dce {
   var stat = kind == CfrStatic;
   if (Meta.hasOneOf(keepMetas,cf.cfMeta) || hasClassFieldFlag(cf,CfUsed) || cf.cfName == "__init__" || hasClassFieldFlag(cf,CfExtern) || !stat && overridesExternField(cf,c)) return true;
   if (kind == CfrConstructor && c.clSuper != null && c.clSuper.cls.clConstructor != null && keepField(dce,c.clSuper.cls.clConstructor,c.clSuper.cls,CfrConstructor)) return true;
-  function accessor(prefix:String):Bool {var field = (stat ? c.clStatics : c.clFields).get(prefix + cf.cfName); return field != null && keepField(dce,field,c,kind);}
+  inline function accessor(prefix:String):Bool {var field = (stat ? c.clStatics : c.clFields).get(prefix + cf.cfName); return field != null && keepField(dce,field,c,kind);}
   return switch cf.cfKind {case Var({vRead:AccCall | AccPrivateCall,vWrite:_}):accessor("get_"); case Var({vRead:_,vWrite:AccCall | AccPrivateCall}):accessor("set_"); case _:false;};
  }
  public static function checkFeature(dce:DceData,s:String):Void {
@@ -207,17 +207,17 @@ class Dce {
   case TClassDecl(c = {clKind:KAbstractImpl(a)}) if (a.aEnum):if (!exists(cf -> !hasClassFieldFlag(cf,CfEnum),c.clOrderedStatics)) addClassFlag(c,CExtern);
   case TClassDecl(c):
    function hasAccessor(c:TClass,name:String,stat:Bool):Bool return (stat ? c.clStatics : c.clFields).exists(name) || c.clSuper != null && hasAccessor(c.clSuper.cls,name,stat);
-   function checkProp(stat:Bool,cf:TClassField):Void {switch cf.cfKind {case Var({vRead:read = AccCall | AccPrivateCall,vWrite:write}):cf.cfKind = Var({vRead:hasAccessor(c,"get_" + cf.cfName,stat) ? read : AccNever,vWrite:write}); case _:} switch cf.cfKind {case Var({vRead:read,vWrite:write = AccCall | AccPrivateCall}):cf.cfKind = Var({vRead:read,vWrite:hasAccessor(c,"set_" + cf.cfName,stat) ? write : AccNever}); case _:}}
+   inline function checkProp(stat:Bool,cf:TClassField):Void {switch cf.cfKind {case Var({vRead:read = AccCall | AccPrivateCall,vWrite:write}):cf.cfKind = Var({vRead:hasAccessor(c,"get_" + cf.cfName,stat) ? read : AccNever,vWrite:write}); case _:} switch cf.cfKind {case Var({vRead:read,vWrite:write = AccCall | AccPrivateCall}):cf.cfKind = Var({vRead:read,vWrite:hasAccessor(c,"set_" + cf.cfName,stat) ? write : AccNever}); case _:}}
    for (cf in c.clOrderedStatics) checkProp(true,cf); for (cf in c.clOrderedFields) checkProp(false,cf);
   case _:
  }
  public static function extractIfFeature(meta:Metadata):Array<String> {for (m in meta) if (m.meta == core.MetaList.StrictMeta.IfFeature) return m.exprs.map(e -> switch e.expr {case EConst(String(s,_)):s; case _:core.Error.raiseTypingError("String expected",e.pos);}); return [];}
  public static function collectEntryPoints(dce:DceData,types:Array<ModuleType>):Void {
   var delayed:Array<Void->Void> = [];
-  function feature(ref:ClassFieldRef,names:Array<String>):Void for (s in names) {if (dce.features.exists(s)) dce.features.get(s).unshift(ref); else dce.features.set(s,[ref]);}
+  inline function feature(ref:ClassFieldRef,names:Array<String>):Void for (s in names) {if (dce.features.exists(s)) dce.features.get(s).unshift(ref); else dce.features.set(s,[ref]);}
   for (t in types) switch t {
    case TClassDecl(c):removeClassFlag(c,CUsed); var classFeatures = extractIfFeature(c.clMeta); var keepClass = keepWholeClass(dce,c) && (!hasClassFlag(c,CExtern) || hasClassFlag(c,CInterface)); var isStruct = dce.scom.platform == Hl && Meta.has(Struct,c.clMeta);
-    function loop(kind:ClassFieldRefKind,cf:TClassField):Void {var ref = mkClassFieldRef(c,cf,kind,dce.scom.isMacroContext); feature(ref,classFeatures.concat(extractIfFeature(cf.cfMeta))); if (keepClass && !fieldForcesDce(cf) || isStruct || keepField(dce,cf,c,kind)) delayed.unshift(function() markField(dce,c,cf,kind));}
+    inline function loop(kind:ClassFieldRefKind,cf:TClassField):Void {var ref = mkClassFieldRef(c,cf,kind,dce.scom.isMacroContext); feature(ref,classFeatures.concat(extractIfFeature(cf.cfMeta))); if (keepClass && !fieldForcesDce(cf) || isStruct || keepField(dce,cf,c,kind)) delayed.unshift(function() markField(dce,c,cf,kind));}
     for (cf in c.clOrderedStatics) loop(CfrStatic,cf); for (cf in c.clOrderedFields) loop(CfrMember,cf); if (c.clConstructor != null) loop(CfrConstructor,c.clConstructor); if (c.clInit != null && (keepClass || Meta.has(KeepInit,c.clMeta))) loop(CfrInit,c.clInit);
    case TEnumDecl(en) if (keepWholeEnum(dce,en)):en.eMeta = Meta.remove(Used,en.eMeta); delayed.unshift(function() {var c:TClass = core.ds.Record.copy(nullClass); c.clModule = en.eModule; markEnum(pushClass(dce,c),en);});
    case _:
@@ -233,9 +233,9 @@ class Dce {
   for (mt in reverse) switch mt {
    case TClassDecl(c) if (keepWholeClass(dce,c) && !classHasDceField(c)):acc.unshift(mt);
    case TClassDecl(c):
-    function checkProperty(cf:TClassField,stat:Bool):Void {function addAccessor(name:String):Void {var cf = (stat ? c.clStatics : c.clFields).get(name); if (cf != null && !Meta.has(Accessor,cf.cfMeta)) cf.cfMeta.unshift({meta:core.MetaList.StrictMeta.Accessor,exprs:[],pos:Globals.mkZeroRangePos(c.clPos)});} switch cf.cfKind {case Var({vRead:AccCall | AccPrivateCall,vWrite:_}):addAccessor("get_" + cf.cfName); case _:} switch cf.cfKind {case Var({vRead:_,vWrite:AccCall | AccPrivateCall}):addAccessor("set_" + cf.cfName); case _:}}
-    var classKept = keepWholeClass(dce,c); function keep(cf:TClassField,kind:ClassFieldRefKind):Bool return classKept && !fieldForcesDce(cf) || keepField(dce,cf,c,kind); c.clMeta.unshift(mkKeepMeta(c.clPos));
-    function filter(cf:TClassField,kind:ClassFieldRefKind):Bool {var b = keep(cf,kind); if (!b) {if (dce.debug) Sys.println("[DCE] Removed field " + Globals.sTypePath(c.clPath) + "." + cf.cfName); var stat = kind == CfrStatic; checkProperty(cf,stat); (stat ? c.clStatics : c.clFields).remove(cf.cfName);} return b;}
+    inline function checkProperty(cf:TClassField,stat:Bool):Void {inline function addAccessor(name:String):Void {var cf = (stat ? c.clStatics : c.clFields).get(name); if (cf != null && !Meta.has(Accessor,cf.cfMeta)) cf.cfMeta.unshift({meta:core.MetaList.StrictMeta.Accessor,exprs:[],pos:Globals.mkZeroRangePos(c.clPos)});} switch cf.cfKind {case Var({vRead:AccCall | AccPrivateCall,vWrite:_}):addAccessor("get_" + cf.cfName); case _:} switch cf.cfKind {case Var({vRead:_,vWrite:AccCall | AccPrivateCall}):addAccessor("set_" + cf.cfName); case _:}}
+    var classKept = keepWholeClass(dce,c); inline function keep(cf:TClassField,kind:ClassFieldRefKind):Bool return classKept && !fieldForcesDce(cf) || keepField(dce,cf,c,kind); c.clMeta.unshift(mkKeepMeta(c.clPos));
+    inline function filter(cf:TClassField,kind:ClassFieldRefKind):Bool {var b = keep(cf,kind); if (!b) {if (dce.debug) Sys.println("[DCE] Removed field " + Globals.sTypePath(c.clPath) + "." + cf.cfName); var stat = kind == CfrStatic; checkProperty(cf,stat); (stat ? c.clStatics : c.clFields).remove(cf.cfName);} return b;}
     c.clOrderedStatics = c.clOrderedStatics.filter(cf -> filter(cf,CfrStatic)); c.clOrderedFields = c.clOrderedFields.filter(cf -> filter(cf,CfrMember)); if (c.clConstructor != null && !keep(c.clConstructor,CfrConstructor)) c.clConstructor = null;
     var nonExtern = exists(isPhysicalField,c.clOrderedFields) || exists(isPhysicalField,c.clOrderedStatics);
     if (classKept || hasClassFlag(c,CUsed) || nonExtern) acc.unshift(mt); else if (core.TOther.TClassTools.getClInit(c) != null && Meta.has(KeepInit,c.clMeta)) {addClassFlag(c,CExtern); acc.unshift(mt);} else if (dce.debug) Sys.println("[DCE] Removed class " + Globals.sTypePath(c.clPath));

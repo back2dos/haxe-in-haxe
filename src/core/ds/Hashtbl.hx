@@ -6,7 +6,7 @@ class Hashtbl<K,V> {
  // Bounded structural hashing for grouping tables; hash values are not serialized.
  public static function hash(value:Dynamic):Int {
   var budget=100,meaningful=10,result=0;
-  function mix(v:Int):Void result=(result*65599+v)|0;
+  inline function mix(v:Int):Void result=(result*65599+v)|0;
   function visit(v:Dynamic):Void {
    if(budget--<=0 || meaningful<=0) return;
    if(v==null) {mix(0);meaningful--;return;}

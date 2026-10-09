@@ -28,12 +28,12 @@ class ExceptionInit {
 			else Ast.mkTypePath(path.pack,path.name);
 			return Ast.makePtp(tp, Globals.nullPos);
 		}
-		function load(path:GlobalTypePath):T return Typeload.loadInstance(tctx, tp(path), ParamSpawnMonos, LoadNormal);
+		inline function load(path:GlobalTypePath):T return Typeload.loadInstance(tctx, tp(path), ParamSpawnMonos, LoadNormal);
 		var wildcardCatchType = load(config.ecWildcardCatch);
 		if (ExceptionFunctions.isDynamic(wildcardCatchType)) wildcardCatchType = TypeOps.tDynamic;
 		var baseThrowType = load(config.ecBaseThrow);
 		if (ExceptionFunctions.isDynamic(baseThrowType)) baseThrowType = TypeOps.tDynamic;
-		function lazyClass(path:GlobalTypePath, error:String):AtomicLazy<{type:T, cls:TClass}> {
+		inline function lazyClass(path:GlobalTypePath, error:String):AtomicLazy<{type:T, cls:TClass}> {
 			return AtomicLazy.fromFun(function() {
 				var t = load(path);
 				return switch t { case TInst(cls, _): {type:t, cls:cls}; case _: Error.raiseTypingError(error, Globals.nullPos); };
@@ -48,7 +48,7 @@ class ExceptionInit {
 				case _: Error.raiseTypingError("haxe.NativeStackTrace is expected to be a class or an abstract", Globals.nullPos);
 			};
 		});
-		function isPathOfDynamic(path:GlobalTypePath):Bool return path.name == "Dynamic" && (path.pack.length == 0 || path.pack.length == 1 && path.pack[0] == "StdTypes");
+		inline function isPathOfDynamic(path:GlobalTypePath):Bool return path.name == "Dynamic" && (path.pack.length == 0 || path.pack.length == 1 && path.pack[0] == "StdTypes");
 		var stdCls:TClass = tctx.com.std;
 		if (!stdCls.clStatics.exists("isOfType")) Error.raiseTypingError("Std has no field isOfType", Globals.nullPos);
 		var isOfTypeField = stdCls.clStatics.get("isOfType");

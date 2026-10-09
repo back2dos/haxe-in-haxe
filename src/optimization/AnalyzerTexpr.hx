@@ -124,8 +124,8 @@ class InterferenceReport {
   } loop(e); return ir;
  }
  public static function toString(ir:InterferenceReportData):String {
-  function ints(map:haxe.ds.IntMap<Bool>):String {var keys = [for (k in map.keys()) k]; keys.sort((a,b) -> b - a); return keys.map(Std.string).join(", ");}
-  function strings(map:haxe.ds.StringMap<Bool>):String {var keys = [for (k in map.keys()) k]; keys.sort((a,b) -> Reflect.compare(b,a)); return keys.join(", ");}
+  inline function ints(map:haxe.ds.IntMap<Bool>):String {var keys = [for (k in map.keys()) k]; keys.sort((a,b) -> b - a); return keys.map(Std.string).join(", ");}
+  inline function strings(map:haxe.ds.StringMap<Bool>):String {var keys = [for (k in map.keys()) k]; keys.sort((a,b) -> Reflect.compare(b,a)); return keys.join(", ");}
   return core.TPrinting.Printer.sRecordFields("",[{name:"ir_var_reads",value:ints(ir.irVarReads)},{name:"ir_var_writes",value:ints(ir.irVarWrites)},{name:"ir_field_reads",value:strings(ir.irFieldReads)},{name:"ir_field_writes",value:strings(ir.irFieldWrites)},{name:"ir_state_read",value:Std.string(ir.irStateRead)},{name:"ir_state_write",value:Std.string(ir.irStateWrite)}]);
  }
 }
@@ -353,8 +353,8 @@ class Purity {
  public static function taintRaise(node:PurityNode):Dynamic {taint(node); throw new TypeExit();}
  public static function applyToField(isCtor:Bool,isStatic:Bool,c:TClass,cf:TClassField):Void {
   var node = getNode(c,cf);
-  function checkField(c:TClass,cf:TClassField):Void {var other = getNode(c,cf); switch other.pnPurity {case Pure | InferredPure | ExpectPure(_):case Impure:taintRaise(node); case MaybePure:other.pnDependents.unshift(node);}}
-  function checkWrite(e:TExpr):Void switch e.eexpr {case TLocal(v):if (core.TOther.ExtType.hasReferenceSemantics(v.vType)) taintRaise(node); case TField({eexpr:TConst(TThis)},_) if (isCtor):case _:taintRaise(node);}
+  inline function checkField(c:TClass,cf:TClassField):Void {var other = getNode(c,cf); switch other.pnPurity {case Pure | InferredPure | ExpectPure(_):case Impure:taintRaise(node); case MaybePure:other.pnDependents.unshift(node);}}
+  inline function checkWrite(e:TExpr):Void switch e.eexpr {case TLocal(v):if (core.TOther.ExtType.hasReferenceSemantics(v.vType)) taintRaise(node); case TField({eexpr:TConst(TThis)},_) if (isCtor):case _:taintRaise(node);}
   function loop(e:TExpr):Void switch e.eexpr {
    case TMeta(m = {meta:core.MetaList.StrictMeta.Pure},_):if (PurityStateTools.getPurityFromMeta([m]) == Impure) taintRaise(node);
    case TThrow(_):taintRaise(node);

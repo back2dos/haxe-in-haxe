@@ -190,7 +190,7 @@ class RenameVars {
 	static final trailingNumbers = ~/[0-9]+$/;
 	public static function maybeRenameVar(rc:RenameContext, reserved:StringMap<Bool>, entry:{variable:TVar, overlaps:Overlaps}):Void {
 		var v = entry.variable;
-		function commit(name:String):Void {
+		inline function commit(name:String):Void {
 			v.vMeta = ([{meta:core.MetaList.StrictMeta.RealPath,exprs:[{expr:EConst(String(v.vName, SDoubleQuotes)), pos:Globals.nullPos}], pos:Globals.nullPos}]:core.Ast.Metadata).concat(v.vMeta);
 			v.vName = name;
 		}

@@ -13,21 +13,21 @@ class Native {
   throw NotFound.raise();
  }
  public static function applyNativePaths(t:ModuleType):Void {
-  function real(meta:Metadata,name:String):{meta:MetadataEntry,name:String} {
+  inline function real(meta:Metadata,name:String):{meta:MetadataEntry,name:String} {
    var native = getNativeName(meta);
    return {meta:{meta:Meta.RealPath,exprs:[{expr:EConst(String(name,SDoubleQuotes)),pos:native.pos}],pos:native.pos},name:native.name};
   }
   try switch t {
    case TClassDecl(c):
     var changed = false;
-    function field(cf:TClassField):Void {
+    inline function field(cf:TClassField):Void {
      try {
       var r = real(cf.cfMeta,cf.cfName); cf.cfName = r.name; cf.cfMeta.unshift(r.meta);
       for (overloadField in cf.cfOverloads) overloadField.cfName = r.name;
       changed = true;
      } catch (_:NotFound) {}
     }
-    function fields(cfs:Array<TClassField>,old:haxe.ds.StringMap<TClassField>):haxe.ds.StringMap<TClassField> {
+    inline function fields(cfs:Array<TClassField>,old:haxe.ds.StringMap<TClassField>):haxe.ds.StringMap<TClassField> {
      changed = false; for (cf in cfs) field(cf);
      if (!changed) return old;
      var result = new haxe.ds.StringMap<TClassField>(); for (cf in cfs) result.set(cf.cfName,cf); return result;

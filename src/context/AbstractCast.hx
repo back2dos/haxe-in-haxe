@@ -189,7 +189,7 @@ class AbstractCast {
 	}
 	public static function findToField(uctx:core.TUnification.UnificationContext, b:T, ab:TAbstract, tl:TParams):Dynamic {
 		var a = TAbstract(ab,tl);
-		function check(t:T,cf:TClassField):Dynamic return switch core.TFunctions.follow(cf.cfType) {
+		inline function check(t:T,cf:TClassField):Dynamic return switch core.TFunctions.follow(cf.cfType) {
 			case TFun(sig) if (sig.args.length > 0):
 				var ta = sig.args[0].type;
 				function outerMap(t:T):T return core.TFunctions.applyParams(ab.aParams,tl,t);
@@ -298,7 +298,7 @@ class AbstractCast {
 							var el = el.map(loop);
 							try {
 								var fa = core.TFunctions.quickField(m,fname);
-								function getFunType(t:T):{type:T,signature:TSignature} return switch core.TFunctions.follow(t) {
+								inline function getFunType(t:T):{type:T,signature:TSignature} return switch core.TFunctions.follow(t) {
 									case TFun(sig): {type:TFun(sig),signature:sig};
 									case _: throw NotFound.raise();
 								};
@@ -308,7 +308,7 @@ class AbstractCast {
 									case FAnon(cf): getFunType(cf.cfType);
 									case _: throw NotFound.raise();
 								};
-								function maybeCast(e:TExpr,t:T,p:Pos):TExpr return core.TUnification.typeIseq(e.etype,t) ? e : core.TFunctions.mk(TCast(e,null),t,p);
+								inline function maybeCast(e:TExpr,t:T,p:Pos):TExpr return core.TUnification.typeIseq(e.etype,t) ? e : core.TFunctions.mk(TCast(e,null),t,p);
 								var ef = core.TFunctions.mk(TField({eexpr:e2.eexpr,etype:m,epos:e2.epos},fa),funType.type,e2.epos);
 								if (core.TFunctions.hasMeta(StrictMeta.MultiType,a.aMeta)) switch core.TFunctions.follow(e1.etype) {
 									case TFun(original):

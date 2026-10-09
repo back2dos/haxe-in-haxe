@@ -49,16 +49,16 @@ class ModuleTyping {
  public static function fieldOfStaticDefinition(d:StaticDefinition,p:Pos):ClassField return {cffName:d.name,cffDoc:d.doc,cffPos:p,cffMeta:d.meta,cffAccess:([{access:AStatic,pos:nullPos}] : Array<core.Ast.PlacedAccess>).concat(d.flags),cffKind:d.data};
  public static function createModuleTypes(ctx:TyperContext,m:ModuleDef,decls:Array<TypeDecl>,loadp:Pos):{imports:Array<TypeDecl>,declarations:Array<TypedDeclaration>} {
   var com:CommonContext=ctx.com;var imports:Array<TypeDecl>=[],types:Array<ModuleType>=[],declarations:Array<TypedDeclaration>=[],statics:Array<{definition:StaticDefinition,pos:Pos}>=[],hasDeclaration=false;
-  function add(decl:TypeDecl,t:ModuleType):Void {declarations.push({declaration:decl,type:t});com.moduleLut.addModuleType(m,t);types.push(t);}
-  function checkName(name:String,meta:Metadata,alsoStatics:Bool,p:Pos):Void {
+  inline function add(decl:TypeDecl,t:ModuleType):Void {declarations.push({declaration:decl,type:t});com.moduleLut.addModuleType(m,t);types.push(t);}
+  inline function checkName(name:String,meta:Metadata,alsoStatics:Bool,p:Pos):Void {
    DeprecationCheck.checkIs(com,ctx.m.curmod,meta,[],name,meta,p);
-   function duplicate(previous:Pos):Void Error.raiseTypingErrorExt(Error.makeError(Custom("Name "+name+" is already defined in this module"),p,[Error.makeError(Custom(complMsg("Previous declaration here")),previous)]));
+   inline function duplicate(previous:Pos):Void Error.raiseTypingErrorExt(Error.makeError(Custom("Name "+name+" is already defined in this module"),p,[Error.makeError(Custom(complMsg("Previous declaration here")),previous)]));
    for(t in types)if(tName(t)==name)duplicate(tInfos(t).mtNamePos);
    if(alsoStatics)for(d in statics)if(d.definition.name.name==name)duplicate(d.definition.name.pos);
   }
-  function makePath(name:String,priv:Bool,meta:Metadata,p:Pos):GlobalTypePath {checkName(name,meta,true,p);return {pack:priv?m.mPath.pack.concat(["_"+m.mPath.name]):m.mPath.pack,name:name};}
-  function checkTypeName(name:String,meta:Metadata,p:Pos):Void if(name!=m.mPath.name&&!MetadataTools.has(MetaTag.Native,meta))Naming.checkUppercaseIdentifierName(com,name,"type",p);
-  function makeClass(d:ClassDefinition,p:Pos):TClass {
+  inline function makePath(name:String,priv:Bool,meta:Metadata,p:Pos):GlobalTypePath {checkName(name,meta,true,p);return {pack:priv?m.mPath.pack.concat(["_"+m.mPath.name]):m.mPath.pack,name:name};}
+  inline function checkTypeName(name:String,meta:Metadata,p:Pos):Void if(name!=m.mPath.name&&!MetadataTools.has(MetaTag.Native,meta))Naming.checkUppercaseIdentifierName(com,name,"type",p);
+  inline function makeClass(d:ClassDefinition,p:Pos):TClass {
    hasDeclaration=true;var priv=d.flags.contains(HPrivate),path=makePath(d.name.name,priv,d.meta,d.name.pos),c=mkClass(m,path,p,d.name.pos);
    c.clBuild=function() return Error.raiseTypingError(sTypePath(c.clPath)+" is not ready to be accessed, separate your type declarations in several files",p);
    c.clPrivate=priv;c.clDoc=d.doc;c.clMeta=d.meta;
@@ -160,7 +160,7 @@ class ModuleTyping {
   TypeloadCheck.checkGlobalMetadata(ctx,a.aMeta,function(meta)a.aMeta.unshift(meta),a.aModule.mPath,a.aPath,null);
   if(a.aImpl!=null)for(meta in a.aMeta)switch (meta.meta:MetaTag){case Using|Build|CoreApi|Allow|Access|Enum|Dce|Native|HlNative|JsRequire|PythonImport|Expose|Deprecated|PhpGlobal|PublicFields:a.aImpl.clMeta.unshift(meta);case _:}
   var local=TyperManager.cloneForAbstract(ctx,a),isType=false;
-  function load(hint:TypeHint,from:Bool):T {var type=Typeload.loadComplexType(local,true,LoadNormal,hint);if(!MetadataTools.has(MetaTag.CoreType,a.aMeta)){if(!isType)return Error.raiseTypingError("Missing underlying type declaration or @:coreType declaration",p);return TLazy(makeLazy(local.g,type,function(){try{if(from)core.TUnification.unify(type,a.aThis);else core.TUnification.unify(a.aThis,type);}catch(_:Unify_error){Error.raiseTypingError("You can only declare from/to with compatible types",hint.pos);}return type;},"constraint"));}if(MetadataTools.has(MetaTag.Callable,a.aMeta))Error.raiseTypingError("@:coreType abstracts cannot be @:callable",p);return type;}
+  inline function load(hint:TypeHint,from:Bool):T {var type=Typeload.loadComplexType(local,true,LoadNormal,hint);if(!MetadataTools.has(MetaTag.CoreType,a.aMeta)){if(!isType)return Error.raiseTypingError("Missing underlying type declaration or @:coreType declaration",p);return TLazy(makeLazy(local.g,type,function(){try{if(from)core.TUnification.unify(type,a.aThis);else core.TUnification.unify(a.aThis,type);}catch(_:Unify_error){Error.raiseTypingError("You can only declare from/to with compatible types",hint.pos);}return type;},"constraint"));}if(MetadataTools.has(MetaTag.Callable,a.aMeta))Error.raiseTypingError("@:coreType abstracts cannot be @:callable",p);return type;}
   for(flag in d.flags)switch flag{
    case AbFrom(t):a.aFrom.unshift(load(t,true));case AbTo(t):a.aTo.unshift(load(t,false));
    case AbOver(t):if(a.aImpl==null)Error.raiseTypingError("Abstracts with underlying type must have an implementation",a.aPos);if(MetadataTools.has(MetaTag.CoreType,a.aMeta))Error.raiseTypingError("@:coreType abstracts cannot have an underlying type",p);var type=Typeload.loadComplexType(local,true,LoadNormal,t);delay(local.g,PForce,function(){function loop(stack:Array<TAbstract>,t:T):Void switch follow(t){case TAbstract(ab,_) if(!MetadataTools.has(MetaTag.CoreType,ab.aMeta)):if(stack.contains(ab))Error.raiseTypingError("Abstract underlying type cannot be recursive",ab.aPos);else loop([ab].concat(stack),ab.aThis);case _:};loop([],type);});a.aThis=type;isType=true;
@@ -190,7 +190,7 @@ class ModuleTyping {
  public static function loadModulePrime(com:CommonContext,g:TyperGlobals,path:GlobalTypePath,p:Pos):ModuleDef {
   Common.checkCancellation(com);try{return com.moduleLut.find(path);}catch(_:NotFound){}
   if(com.hxbLibs.length>0)Error.raiseTypingError("HXB library input is outside the source-only HXB milestone",p);
-  function missing():Dynamic return Error.raiseErrorMsg(ModuleNotFound(path),p);
+  inline function missing():Dynamic return Error.raiseErrorMsg(ModuleNotFound(path),p);
   if(com.moduleNonexistentLut.mem(path)||g.loadOnlyCachedModules)return missing();
   var isExtern=false,file:String,decls:Array<TypeDecl>,warnings:Array<syntax.Parser.ParseWarning>;
   try{var parsed=SourceParser.parseModule(com,path,p);file=parsed.file.file;decls=parsed.declarations;warnings=parsed.warnings;}

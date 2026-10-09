@@ -22,7 +22,7 @@ class OcamlPrintf {
 		}
 		// little-endian base 10000 limbs
 		var big:Array<Int> = [0];
-		function mulAdd(k:Int, add:Int):Void {
+		inline function mulAdd(k:Int, add:Int):Void {
 			var carry = add;
 			for (i in 0...big.length) {
 				var x = big[i] * k + carry;

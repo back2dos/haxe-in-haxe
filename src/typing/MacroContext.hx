@@ -87,7 +87,7 @@ class MacroContext {
 		};
 
 	public static function safeDecode<A>(com:CommonContext, v:Value, expected:String, t:T, p:Pos, f:Void->A):A {
-		function raiseDecodeError(s:String):Dynamic {
+		inline function raiseDecodeError(s:String):Dynamic {
 			var path = [com.partScope.dumpConfig.dumpPath, "decoding_error"];
 			var ch = core.Path.createFile(false, ".txt", [], path.copy());
 			ch.writeString(core.TPrinting.Printer.sPos(p) + ": " + s + "\n");
@@ -131,7 +131,7 @@ class MacroContext {
 		var restoreFieldState = TypeloadFunction.saveFieldState(ctx);
 		ctx.com.errorExt = function(err) Error.raiseError(err);
 
-		function exit() {
+		inline function exit() {
 			t();
 			ctx.com.errorExt = old;
 			restoreFieldState();
@@ -158,7 +158,7 @@ class MacroContext {
 
 	public static function makeMacroComApi(com:CommonContext, mcom:CommonContext, p:Pos):CompilerApi {
 		var timerLevel = Timer.levelFromDefine(com.defines, Define.MacroTimes);
-		function parseMetadata(s:String, p:Pos):Metadata {
+		inline function parseMetadata(s:String, p:Pos):Metadata {
 			try {
 				return switch ParserEntry.parseString(ParserConfig.defaultConfig(com.defines), @:privateAccess syntax.Grammar.parseMeta, s, Globals.nullPos,
 					parseErrorCallback, false) {
@@ -169,7 +169,7 @@ class MacroContext {
 				return Error.raiseTypingError("Malformed metadata string", p);
 			}
 		}
-		function badStage():Dynamic {
+		inline function badStage():Dynamic {
 			if (Type.enumIndex(com.stage) < Type.enumIndex(CInitMacrosDone))
 				return macros.eval.EvalContext.excString("This API cannot be used in initialization macros");
 			else
@@ -242,7 +242,7 @@ class MacroContext {
 			parseString: function(s, p, inl) {
 				var old = com.errorExt;
 				com.errorExt = function(err) Error.raiseError(err);
-				function exit() com.errorExt = old;
+				inline function exit() com.errorExt = old;
 
 				try {
 					var r = switch ParserEntry.parseExprString(ParserConfig.fileParserConfig(com, p.pfile), s, p, parseErrorCallback, inl) {
@@ -373,7 +373,7 @@ class MacroContext {
 	}
 
 	public static function makeMacroApi(ctx:TyperContext, mctx:TyperContext, p:Pos):CompilerApi {
-		function parseMetadata(s:String, p:Pos):Metadata {
+		inline function parseMetadata(s:String, p:Pos):Metadata {
 			try {
 				return switch ParserEntry.parseString(ParserConfig.defaultConfig(mctx.com.defines), @:privateAccess syntax.Grammar.parseMeta, s, Globals.nullPos,
 					parseErrorCallback, false) {
@@ -385,7 +385,7 @@ class MacroContext {
 			}
 		}
 		var comApi = makeMacroComApi(ctx.com, mctx.com, p);
-		function mkTypePath(path:GlobalTypePath, ?sub:String):TypePath {
+		inline function mkTypePath(path:GlobalTypePath, ?sub:String):TypePath {
 			try
 				return AstTools.mkTypePath(path.pack, path.name, null, sub)
 			catch (s:String)
@@ -424,7 +424,7 @@ class MacroContext {
 				var loadCf:ClassField->ClassField = null;
 				var loadTparam:TypeParam->TypeParam = null;
 				var loadPath:PlacedTypePath->PlacedTypePath = null;
-				function loadOpt(t:Null<TypeHint>):Null<TypeHint> return t == null ? null : load(t);
+				inline function loadOpt(t:Null<TypeHint>):Null<TypeHint> return t == null ? null : load(t);
 				load = function(th:TypeHint):TypeHint {
 					var ct = switch th.type {
 						case CTPath(ptp):
@@ -675,7 +675,7 @@ class MacroContext {
 		api.withImports = function(imports, usings, f) {
 			var restoreResolution = ctx.m.importResolution.save();
 			var oldUsing = ctx.m.moduleUsing;
-			function run() {
+			inline function run() {
 				for (i in imports)
 					context.display.ImportHandling.initImport(ctx, i.path, i.mode, Globals.nullPos);
 				for (path in usings)
@@ -741,7 +741,7 @@ class MacroContext {
 				some filters here might cause side effects that would break compilation server.
 				let's save the minimal amount of information we need
 			*/
-			function minimalRestore(t:ModuleType):Void {
+			inline function minimalRestore(t:ModuleType):Void {
 				if (tModule(t).mExtra.mProcessed == 0)
 					tModule(t).mExtra.mProcessed = mctx.com.partScope.compilationStep;
 
@@ -771,7 +771,7 @@ class MacroContext {
 				}
 			}
 			// Apply native paths for externs only
-			function maybeApplyNativePaths(t:ModuleType):Void {
+			inline function maybeApplyNativePaths(t:ModuleType):Void {
 				var applyNative = switch t {
 					case TClassDecl({clKind: KAbstractImpl(a)}): a.aExtern && a.aEnum;
 					case TEnumDecl(e): hasEnumFlag(e, EnExtern);

@@ -53,7 +53,7 @@ class TypeloadCheck {
  public static function validRedefinition(com:CommonContext,map1:T->T,map2:T->T,f1:TClassField,t1:T,f2:TClassField,t2:T):Void {
   var tctx:TypeParamUnificationContext={typeParamPairs:[],knownTypeParams:f1.cfParams};
   var uctx=defaultUnificationContext(); uctx.typeParamMode=TpDefinition(tctx);
-  function valid(a:Dynamic,b:Dynamic):Void {unifyCustom(uctx,a,b); if(isNull(a)!=isNull(b)||(follow(a)==tDynamic && follow(b)!=tDynamic)) throw new core.TUnification.Unify_error([CannotUnify(a,b)]);}
+  inline function valid(a:Dynamic,b:Dynamic):Void {unifyCustom(uctx,a,b); if(isNull(a)!=isNull(b)||(follow(a)==tDynamic && follow(b)!=tDynamic)) throw new core.TUnification.Unify_error([CannotUnify(a,b)]);}
   switch [PurityStateTools.getPurityFromMeta(f2.cfMeta),PurityStateTools.getPurityFromMeta(f1.cfMeta)] {
    case [Pure,MaybePure]:f1.cfMeta.unshift({meta:MetaTag.Pure,exprs:[{expr:EConst(Ident("expect")),pos:mkZeroRangePos(f2.cfPos)}],pos:Globals.nullPos});
    case [ExpectPure(p),MaybePure]:f1.cfMeta.unshift({meta:MetaTag.Pure,exprs:[{expr:EConst(Ident("expect")),pos:p}],pos:Globals.nullPos});
@@ -82,9 +82,9 @@ class TypeloadCheck {
    case [_,_] if(hasClassFieldFlag(f2,CfFinal)):valid(t1,t2);
    case _:typeEq(EqStrict,t1,t2); if(isNull(t1)!=isNull(t2)) throw new core.TUnification.Unify_error([CannotUnify(t1,t2)]);
   }
-  function assignTtp(ttp1:Dynamic,ttp2:Dynamic):Void {
+  inline function assignTtp(ttp1:Dynamic,ttp2:Dynamic):Void {
    var ct1:Array<Dynamic>=getConstraints(ttp1),ct2:Array<Dynamic>=getConstraints(ttp2);
-   function fail(t:T):Void {throw new core.TUnification.Unify_error([UnifyCustom("Constraint unsatisfied for type parameter "+ttp2.ttpName+": "+sType(printContext(),t))]);}
+   inline function fail(t:T):Void {throw new core.TUnification.Unify_error([UnifyCustom("Constraint unsatisfied for type parameter "+ttp2.ttpName+": "+sType(printContext(),t))]);}
    if(ct2.length==0) return;
    if(ct1.length==0) fail(ct2[0]);
    for(t2 in ct2) {
@@ -97,7 +97,7 @@ class TypeloadCheck {
  }
  public static function copyMeta(source:Metadata,target:Metadata,selected:Array<core.MetaList.StrictMeta>):Metadata {var result=target.copy(); for(m in source) if(selected.contains(m.meta)) result.unshift(m); return result;}
  public static function checkNativeNameOverride(ctx:Typer,child:TClassField,base:TClassField):Void {
-  function error(bp:Pos,cp:Pos):Void displayErrorExt(ctx.com,makeError(Custom("Field "+child.cfName+" has different @:native value than in superclass"),cp,[makeError(Custom(complMsg("Base field is defined here")),bp)]));
+  inline function error(bp:Pos,cp:Pos):Void displayErrorExt(ctx.com,makeError(Custom("Field "+child.cfName+" has different @:native value than in superclass"),cp,[makeError(Custom(complMsg("Base field is defined here")),bp)]));
   try {var cn=NativeTools.getNativeName(child.cfMeta); try {var bn=NativeTools.getNativeName(base.cfMeta); if(bn.name!=cn.name) error(bn.pos,cn.pos);} catch(e:Dynamic) {if(!Std.isOfType(e,NotFound)) throw e; error(base.cfNamePos,cn.pos);}}
   catch(e:Dynamic) {if(!Std.isOfType(e,NotFound)) throw e;}
  }
@@ -177,7 +177,7 @@ class TypeloadCheck {
   return {map:map,type:applyParams(sup.cls.clParams,sup.params,raw.type),field:raw.field};
  }
  public static function returnFlow(ctx:Typer,e:TExpr):Void {
-  function error():Void {displayError(ctx.com,"Missing return: "+sType(printContext(),ctx.e.ret),e.epos); throw Exit.raise();}
+  inline function error():Void {displayError(ctx.com,"Missing return: "+sType(printContext(),ctx.e.ret),e.epos); throw Exit.raise();}
   switch e.eexpr {
    case TReturn(_) | TThrow(_):
    case TParenthesis(e) | TMeta(_,e):returnFlow(ctx,e);
@@ -226,14 +226,14 @@ class Inheritance {
   var uctx=defaultUnificationContext();
   for(pair in intf.clImplements) checkInterface(com,g,missing,c,pair.cls,pair.params.map(t -> applyParams(intf.clParams,params,t)));
   var p=c.clNamePos;
-  function checkField(f:TClassField):Void {
+  inline function checkField(f:TClassField):Void {
    var t=applyParams(intf.clParams,params,f.cfType), isOverload=false;
-   function implicitField():Dynamic {
+   inline function implicitField():Dynamic {
     var cf=core.ds.Record.copy(f); cf.cfOverloads=[]; cf.cfType=applyParams(intf.clParams,params,f.cfType);
     if(c.clFields.exists(cf.cfName)) {var previous=c.clFields.get(cf.cfName); com.overloadCache.remove({path:c.clPath,name:f.cfName}); previous.cfOverloads.unshift(cf);} else TClassTools.addField(c,cf);
     return cf;
    }
-   function isMethod():Bool return switch f.cfKind {case Method(_):true; case Var(_):false;};
+   inline function isMethod():Bool return switch f.cfKind {case Method(_):true; case Var(_):false;};
    try {
     var previous=TypeloadCheck.classFieldNoInterf(c,f.cfName),map2=previous.map,t2=previous.type,f2=previous.field;
     if(f2.cfOverloads.length!=0 || hasClassFieldFlag(f2,CfOverload)) {
@@ -243,7 +243,7 @@ class Inheritance {
     }
     delay(g,PForce,function() {
      follow(f2.cfType); var p=f2.cfNamePos;
-     function mkind(m:Dynamic):Int return switch m {case MethNormal|MethInline:0; case MethDynamic:1; case MethMacro:2;};
+     inline function mkind(m:Dynamic):Int return switch m {case MethNormal|MethInline:0; case MethDynamic:1; case MethMacro:2;};
      var sameKind=switch [f.cfKind,f2.cfKind] {case [Var(_),Var(_)]:true; case [Method(m1),Method(m2)]:mkind(m1)==mkind(m2); case _:false;};
      if(hasClassFieldFlag(f,CfPublic)&&!hasClassFieldFlag(f2,CfPublic)&&!Meta.has(MetaTag.CompilerGenerated,f.cfMeta)) displayError(com,"Field "+f.cfName+" should be public as requested by "+Globals.sTypePath(intf.clPath),p);
      else if(!unifyKind(uctx,f2.cfKind,f.cfKind)||!sameKind) displayError(com,"Field "+f.cfName+" has different property access than in "+Globals.sTypePath(intf.clPath)+": "+sKind(f2.cfKind)+" should be "+sKind(f.cfKind),p);
@@ -278,7 +278,7 @@ class Inheritance {
  }
  public static function checkAbstractClass(ctx:Typer,c:TClass,csup:TClass,params:TParams):Void {
   var missing:Array<{field:TClassField,type:T}>=[],map=t -> applyParams(csup.clParams,params,t);
-  function checkField(cf1:TClassField,t1:T):Void {
+  inline function checkField(cf1:TClassField,t1:T):Void {
    var found=false;
    if(c.clFields.exists(cf1.cfName)) {var cf2=c.clFields.get(cf1.cfName); for(cf in ([cf2].concat(cf2.cfOverloads):Array<Dynamic>)) if(Overloads.sameOverloadArgs(t1,cf.cfType,cf1,cf)) {found=true; break;}}
    if(!found) missing.unshift({field:cf1,type:t1});
@@ -295,14 +295,14 @@ class Inheritance {
  }
  public static function setHeritance(ctx:Typer,c:TClass,herits:Array<ClassFlag>,p:Pos):Array<Void->Void> {
   var isLib=Meta.has(MetaTag.LibType,c.clMeta),oldMeta=c.clMeta,hasInterf=false;
-  function processMeta(csup:TClass):Void {
+  inline function processMeta(csup:TClass):Void {
    var list:Array<Dynamic>=csup.clMeta.copy(); list.reverse();
    for(m in list) if(m.meta==MetaTag.AutoBuild) c.clMeta=([{meta:MetaTag.Build,exprs:m.exprs,pos:mkZeroRangePos(c.clPos)},m] : Array<core.Ast.MetadataEntry>).concat(c.clMeta);
    var isParam=switch c.clKind {case KTypeParameter(_):true; case _:false;};
    if(hasClassFlag(csup,CFinal)&&!((hasClassFlag(csup,CExtern)&&Meta.has(MetaTag.Hack,c.clMeta))||isParam)) raiseTypingError("Cannot extend a final "+(hasClassFlag(c,CInterface)?"interface":"class"),p);
   }
-  function checkCancelBuild(csup:TClass):Void {var state=csup.clBuild(); if(state!=Built) {c.clMeta=oldMeta; throw new BuildCanceled(state);}}
-  function checkHerit(t:T,isExtends:Bool,p:Pos):Void->Void {
+  inline function checkCancelBuild(csup:TClass):Void {var state=csup.clBuild(); if(state!=Built) {c.clMeta=oldMeta; throw new BuildCanceled(state);}}
+  inline function checkHerit(t:T,isExtends:Bool,p:Pos):Void->Void {
    function checkInterfacesOrDelay():Void switch c.clBuild() {
     case BuildMacro(pending):pending.unshift(function() delay(ctx.g,PConnectField,checkInterfacesOrDelay));
     case _ if(ctx.com.display.dmsFullTyping):checkInterfaces(ctx,c);

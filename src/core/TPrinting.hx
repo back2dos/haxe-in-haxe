@@ -37,7 +37,7 @@ class MonomorphPrinting {
 class TPrinting {
 	public static function printContext():PrintContext return [];
 	public static function sTypeKind(t:T):String {
-		function map(tl:TParams):String return tl.map(sTypeKind).join(", ");
+		inline function map(tl:TParams):String return tl.map(sTypeKind).join(", ");
 		return switch t {
 			case TMono(r):r.tmType == null ? "TMono (None)" : "TMono (Some (" + sTypeKind(r.tmType) + "))";
 			case TEnum(en,tl):'TEnum(${Globals.sTypePath(en.ePath)}, [${map(tl)}])';
@@ -78,8 +78,8 @@ class TPrinting {
 	static function key(name:String,quote:QuoteStatus):String return quote == NoQuotes ? name : '"' + StringHelper.sEscape(name) + '"';
 	public static function sExprPretty(printVarIds:Bool,tabs:String,topLevel:Bool,print:T->String,e:TExpr):String {
 		function loop(e:TExpr):String return sExprPretty(printVarIds,tabs,false,print,e);
-		function list(el:Array<TExpr>):String return el.map(loop).join(", ");
-		function local(v:TVar):String return printVarIds ? '${v.vName}<${v.vId}>' : v.vName;
+		inline function list(el:Array<TExpr>):String return el.map(loop).join(", ");
+		inline function local(v:TVar):String return printVarIds ? '${v.vName}<${v.vId}>' : v.vName;
 		return switch e.eexpr {
 			case TConst(c):sConst(c);case TLocal(v):local(v);
 			case TArray(e1,e2):'${loop(e1)}[${loop(e2)}]';case TBinop(op,e1,e2):'${loop(e1)} ${Ast.sBinop(op)} ${loop(e2)}';
@@ -107,14 +107,14 @@ class TPrinting {
 	}
 	public static function sFlags(flags:Int,allFlags:Array<String>):String {var l = [];for (i in 0...allFlags.length) if (hasFlag(flags,i)) l.unshift(allFlags[i]);return l.join(" ");}
 	public static function sExprAst(printVarIds:Bool,tabs:String,print:T->String,e:TExpr):String {
-		function loop(e:TExpr,extraTabs:String = ""):String return sExprAst(printVarIds,tabs + "\t" + extraTabs,print,e);
-		function tagArgs(tabs:String,sl:Array<String>):String {if (sl.length == 0) return "";if (sl.length == 1 && sl[0].indexOf("\n") < 0) return " " + sl[0];var sep = "\n" + tabs + "\t";return sep + sl.join(sep);}
+		inline function loop(e:TExpr,extraTabs:String = ""):String return sExprAst(printVarIds,tabs + "\t" + extraTabs,print,e);
+		inline function tagArgs(tabs:String,sl:Array<String>):String {if (sl.length == 0) return "";if (sl.length == 1 && sl[0].indexOf("\n") < 0) return " " + sl[0];var sep = "\n" + tabs + "\t";return sep + sl.join(sep);}
 		function tag(s:String,sl:Array<String>,?t:T,extraTabs:String = ""):String return '[$s:${print(t == null ? e.etype : t)}]' + tagArgs(tabs + extraTabs,sl);
-		function varId(v:TVar):Int return printVarIds ? v.vId : 0;
-		function local(v:TVar,?t:T):String return '[Local ${v.vName}(${varId(v)}):${print(v.vType)}${t == null ? "" : ":" + print(t)}]';
+		inline function varId(v:TVar):Int return printVarIds ? v.vId : 0;
+		inline function local(v:TVar,?t:T):String return '[Local ${v.vName}(${varId(v)}):${print(v.vType)}${t == null ? "" : ":" + print(t)}]';
 		function variable(tag:String,v:TVar,sl:Array<String>):String return '[$tag ${v.vName}<${varId(v)}>${v.vFlags == 0 ? "" : "(" + sFlags(v.vFlags,TypeModel.flagTVarNames) + ")"}:${print(v.vType)}]' + tagArgs(tabs,sl);
-		function moduleType(mt:ModuleType):String return '[TypeExpr ${Globals.sTypePath(tPath(mt))}:${print(e.etype)}]';
-		function loops(el:Array<TExpr>):Array<String> return [for (e in el) loop(e)];
+		inline function moduleType(mt:ModuleType):String return '[TypeExpr ${Globals.sTypePath(tPath(mt))}:${print(e.etype)}]';
+		inline function loops(el:Array<TExpr>):Array<String> return [for (e in el) loop(e)];
 		return switch e.eexpr {
 			case TConst(c):tag("Const",[sConst(c)],e.etype);case TLocal(v):local(v,e.etype);case TArray(e1,e2):tag("Array",[loop(e1),loop(e2)]);
 			case TBinop(op,e1,e2):tag("Binop",[loop(e1),Ast.sBinop(op),loop(e2)]);case TUnop(op,flag,e1):tag("Unop",[Ast.sUnop(op),flag == Postfix ? "Postfix" : "Prefix",loop(e1)]);

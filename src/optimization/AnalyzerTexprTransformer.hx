@@ -188,7 +188,7 @@ private class FunctionGraphBuilder {
    }
   case TSwitch(s):
    var exhaustive = isExhaustive(s); var r = bindToTemp(bb,s.switchSubject); bb = r.bb; bb.bbTerminator = TermCondBranch(r.value); var reachable = [];
-   function makeCase(e:TExpr):BasicBlockData {var bc = createNode(BKConditional,e.etype,e.epos); var cn = block(bc,e); if (cn != g.gUnreachable) reachable.unshift(cn); closeNode(cn); return bc;}
+   inline function makeCase(e:TExpr):BasicBlockData {var bc = createNode(BKConditional,e.etype,e.epos); var cn = block(bc,e); if (cn != g.gUnreachable) reachable.unshift(cn); closeNode(cn); return bc;}
    var cases = s.switchCases.map(c -> {var bc = makeCase(c.caseExpr); for (e in c.casePatterns) addCfgEdge(bb,bc,CFGCondBranch(e)); return {values:c.casePatterns,bb:bc};});
    var def = s.switchDefault == null ? null : makeCase(s.switchDefault); if (def != null) addCfgEdge(bb,def,CFGCondElse);
    var ss:SyntaxSwitch = {ssCases:cases,ssDefault:def,ssPos:e.epos,ssNext:g.gUnreachable,ssExhaustive:exhaustive};

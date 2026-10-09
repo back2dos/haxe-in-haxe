@@ -53,7 +53,7 @@ class TypeloadFunction {
    e=typeExpr(ctx,syntax,NoValue);
   }
   switch e.eexpr {case TMeta({meta:MetaTag.MergeBlock},e1={eexpr:TBlock(_)}): e=e1; case _:}
-  function hasReturn(e:TExpr):Bool {
+  inline function hasReturn(e:TExpr):Bool {
    function loop(e:TExpr):Void switch e.eexpr {case TReturn(v) if(v!=null): throw core.ds.Exit.raise(); case TFunction(_): case _: Texpr.iter(loop,e);}
    try {loop(e); return false;} catch(_:core.ds.Exit) { return true;}
   }
@@ -63,7 +63,7 @@ class TypeloadFunction {
    case _: try TypeloadCheck.returnFlow(ctx,e) catch(_:core.ds.Exit) {}
   }
   function findSuper(e:TExpr):Void switch e.eexpr {case TCall({eexpr:TConst(TSuper)},_): throw core.ds.Exit.raise(); case TFunction(_): case _: Texpr.iter(findSuper,e);}
-  function superConstructor():Null<{wasForced:Bool,type:T}> {
+  inline function superConstructor():Null<{wasForced:Bool,type:T}> {
    var sup=ctx.c.curclass.clSuper;
    if(sup==null) return null;
    try {var cf=getConstructor(sup.cls); return {wasForced:Meta.has(MetaTag.CompilerGenerated,cf.cfMeta),type:TInst(sup.cls,sup.params)};}
@@ -96,7 +96,7 @@ class TypeloadFunction {
   for(r in ctx.e.opened) r.aStatus=Closed;
   if(Meta.has(MetaTag.Custom(":debug.mono"),ctx.f.curfield.cfMeta)) {
    var pctx=printContext();
-   function printMono(i:Int,m:TMono):String return StringTools.lpad(Std.string(i)," ",4)+": "+MonomorphPrinting.sMono(sType,pctx,true,m);
+   inline function printMono(i:Int,m:TMono):String return StringTools.lpad(Std.string(i)," ",4)+": "+MonomorphPrinting.sMono(sType,pctx,true,m);
    Sys.println("BEFORE:");
    var monos=[];
    var values=ctx.e.monomorphs;
@@ -132,7 +132,7 @@ class TypeloadFunction {
     for(cf in cfsup.cfOverloads) follow(cf.cfType);
     function mapArg(arg:{variable:TVar,defaultValue:Null<TExpr>}):{variable:TVar,defaultValue:Null<TExpr>} {
      var v=arg.variable, def=arg.defaultValue;
-     function nullValue(v:TVar):TExpr return Texpr.Builder.makeNull(v.vType,v.vPos);
+     inline function nullValue(v:TVar):TExpr return Texpr.Builder.makeNull(v.vType,v.vPos);
      if(def!=null && !ctx.com.config.pfStatic) return {variable:v,defaultValue:nullValue(v)};
      switch [ctx.com.platform,def] {
       case [Flash,{eexpr:TConst(TString(_))}] if(!hasClassFlag(csup,CExtern)): return {variable:v,defaultValue:nullValue(v)};

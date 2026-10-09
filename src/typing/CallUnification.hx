@@ -152,7 +152,7 @@ class CallUnification {
   var param=switch follow(ecall.etype) {case TInst(_,[t]):t; case _:throw "Expected SuspensionResult with one type parameter for coroutine call result";};
   var cf=c.clFields.get("resolveTo"); if(cf==null) throw core.ds.NotFound.raise();
   var type=applyParams(c.clParams,[param],cf.cfType);
-  function resolve(call:TExpr,cont:TExpr):TExpr return b.call(b.instanceField(call,c,[param],cf,type),[cont],basic.tvoid);
+  inline function resolve(call:TExpr,cont:TExpr):TExpr return b.call(b.instanceField(call,c,[param],cf,type),[cont],basic.tvoid);
   switch econt.eexpr {case TLocal(_)|TConst(_):return resolve(ecall,econt); case _:}
   var v=allocVar(VGenerated,"_hx_cont",econt.etype,econt.epos),local=b.local(v,v.vPos);
   var call=switch ecall.eexpr {case TCall(ef,args) if(args.length>0):mk(TCall(ef,[local].concat(args.slice(1))),ecall.etype,ecall.epos); case _:throw "Expected TCall with at least one argument (continuation)";};
@@ -217,8 +217,8 @@ class CallUnification {
     case _:throw exc;
    }}
   }
-  inline function checkAccess(cf:TClassField):Void {if(co!=null) checkFieldAccess(ctx,co,cf,isStatic,p);}
-  inline function checkDisplayArgs():Void {if(ctx.m.isDisplayFile) for(e in el) if(Ast.exists(function(def) return switch def {case EDisplay(_):true; case _:false;},e)) {typeExpr(ctx,e,WithTypeTools.value); break;}}
+  function checkAccess(cf:TClassField):Void {if(co!=null) checkFieldAccess(ctx,co,cf,isStatic,p);}
+  function checkDisplayArgs():Void {if(ctx.m.isDisplayFile) for(e in el) if(Ast.exists(function(def) return switch def {case EDisplay(_):true; case _:false;},e)) {typeExpr(ctx,e,WithTypeTools.value); break;}}
   if(candidates.length==1) {
    var cf=candidates[0]; if(kind==OverloadProper) checkAccess(cf);
    try return commitDisplay(attempt(cf,false)) catch(exc:Dynamic) {switch exc {
@@ -230,7 +230,7 @@ class CallUnification {
    }}
   }
   var all=attempts(candidates),success=all.candidates,failures=all.failures;
-  inline function fail():FieldCallCandidateData<Void->TExpr> {
+  function fail():FieldCallCandidateData<Void->TExpr> {
    var errors:Array<{field:TClassField,error:CompilerError}>=[];
    for(f in failures) {if(f.display!=null) raiseAugmentedDisplay(f.field,f.display); errors.push({field:f.field,error:f.error});}
    checkDisplayArgs(); errors=removeDuplicates((a:{field:TClassField,error:CompilerError},b:{field:TClassField,error:CompilerError}) -> MessageReporting.printError(a.error)!=MessageReporting.printError(b.error),errors);
@@ -270,7 +270,7 @@ class CallDispatcher {
   ctx.e.macroDepth=ctx.e.macroDepth+1;
   ctx.e.withTypeStack.unshift(withType);
   var ethisF:Void->Void=function() {};
-  function macroInMacro():Void->TExpr return function() {
+  inline function macroInMacro():Void->TExpr return function() {
    var e:Expr={expr:EThrow({expr:EConst(String("macro-in-macro",SDoubleQuotes)),pos:p}),pos:p};
    return typeExpr(ctx,e,withType,mode);
   };
@@ -326,7 +326,7 @@ class CallDispatcher {
  }
  public function exprCall(e:TExpr,typed:Array<TExpr>,el:Array<Expr>):TExpr {
   checkAssign();
-  function defaultCall(t:T):TExpr {
+  inline function defaultCall(t:T):TExpr {
    var all=typed.concat(el.map(e -> typeExpr(ctx,e,WithTypeTools.value))),ret:T;
    if(t==tDynamic) ret=tDynamic; else if(ctx.f.isUntyped) ret=mkMono();
    else {
@@ -335,7 +335,7 @@ class CallDispatcher {
    }
    return mk(TCall(e,all),ret,p);
   }
-  function make(args:Array<CallParameter>,ret:T):TExpr {var split=CallUnification.unifyTypedArgs(t -> t,args,typed,p); var all=CallUnification.unifyCallArgs(ctx,el,split.remaining,ret,p,false,false,false); return mk(TCall(e,typed.concat(all)),ret,p);}
+  inline function make(args:Array<CallParameter>,ret:T):TExpr {var split=CallUnification.unifyTypedArgs(t -> t,args,typed,p); var all=CallUnification.unifyCallArgs(ctx,el,split.remaining,ret,p,false,false,false); return mk(TCall(e,typed.concat(all)),ret,p);}
   function loop(t:T):TExpr return switch followWithCoro(t) {
    case Coro({args:args,ret:ret}) if(!TyperManager.isCoroutineContext(ctx)):
     var expanded=expandCoroType(ctx.com.basic,args,ret); CallUnification.ensureCoroAvailability(ctx.com); var call=make(expanded.args,expanded.ret);

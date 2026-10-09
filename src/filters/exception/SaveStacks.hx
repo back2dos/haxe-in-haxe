@@ -16,7 +16,7 @@ class SaveStacks {
 					|| core.ds.ArrayTools.exists(catches, c -> containsInsertionPoints(c.expr));
 			case _: core.Texpr.checkExpr(containsInsertionPoints, e);
 		};
-		function saveExceptionStack(catchVar:TVar):TExpr {
+		inline function saveExceptionStack(catchVar:TVar):TExpr {
 			var cls = ectx.haxeNativeStackTrace.force();
 			if (!cls.clStatics.exists("saveStack")) Error.raiseTypingError("haxe.NativeStackTrace has no field saveStack", catchVar.vPos);
 			var field = cls.clStatics.get("saveStack");

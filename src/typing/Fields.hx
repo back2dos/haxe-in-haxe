@@ -58,7 +58,7 @@ class Fields {
    case TAnon(a):if(a.aStatus==Const) {a.aStatus=Closed; temporary.unshift(a);} for(f in a.aFields) loop(f.cfType);
    case _:
   }
-  function restore():Void {for(a in temporary) a.aStatus=Const;}
+  inline function restore():Void {for(a in temporary) a.aStatus=Const;}
   try {loop(t); var ret=callback(temporary.length!=0); restore(); return ret;} catch(e:haxe.Exception){restore(); throw e;}
  }
  public static function enumFieldType(ctx:Typer,en:TEnum,ef:TEnumField,p:Pos):T {
@@ -230,7 +230,7 @@ class Fields {
      var cf=fields[0],rest=fields.slice(1);
      if(Meta.has(MetaTag.NoUsing,cf.cfMeta)||!canAccess(ctx,c,cf,true)||hasClassFieldFlag(cf,CfImpl)) return check(rest);
      var current=ctx.e.monomorphs;
-     inline function next():AccessKind {ctx.e.monomorphs=current; return check(rest);}
+     function next():AccessKind {ctx.e.monomorphs=current; return check(rest);}
      try {
       var monos=Monomorph.spawnConstrainedMonos(t -> t,cf.cfParams),cft=follow(applyParams(cf.cfParams,monos,cf.cfType));
       var args:Array<{name:String,optional:Bool,type:T}>=switch followWithCoro(cft) {case NotCoro(TFun({args:args,ret:_}))|Coro({args:args}):args; case _:[];};
@@ -317,7 +317,7 @@ class Fields {
   var args:Null<Array<{name:String,optional:Bool,type:T,pos:Pos,doc:Null<String>}>>=null,cf=c.clConstructor;
   if(cf!=null) {
    var doc=genDocTextOpt(cf.cfDoc),javadoc:Null<Javadoc>=doc==null?null:new Javadoc(doc);
-   function paramInfo(name:String):Null<String> return javadoc==null?null:javadoc.getParamInfo(name);
+   inline function paramInfo(name:String):Null<String> return javadoc==null?null:javadoc.getParamInfo(name);
    switch follow(cf.cfType) {
     case TFun({args:list,ret:_}):
      args=list.map(function(arg) {

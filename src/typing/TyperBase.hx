@@ -172,7 +172,7 @@ class TyperBase {
  public static function sSafeNavAccess(sn:SafeNavAccess):String return Printer.sRecordFields("",[{name:"sn_base",value:pretty(sn.snBase)},{name:"sn_temp_var",value:sn.snTempVar==null?"None":"Some "+pretty(sn.snTempVar)},{name:"sn_access",value:sAccessKind(sn.snAccess)}]);
  public static function sDotPathPart(part:DotPathPart):String return Printer.sRecordFields("",[{name:"name",value:part.name},{name:"case",value:part.caseKind==PUppercase?"PUppercase":"PLowercase"},{name:"pos",value:position(part.pos)}]);
  public static function getConstructibleConstraint(ctx:TyperContext,tl:TParams,p:Pos):Null<TSignature> {
-  function extract(t:T):TSignature return switch follow(t) {case TFun({args:tl,ret:tr}):{args:tl,ret:tr}; case _:raiseTypingError("Constructible type parameter should be function",p);};
+  inline function extract(t:T):TSignature return switch follow(t) {case TFun({args:tl,ret:tr}):{args:tl,ret:tr}; case _:raiseTypingError("Constructible type parameter should be function",p);};
   for(t in tl) switch follow(t) {
    case TAnon(a): if(a.aFields.exists("new")) return extract(a.aFields.get("new").cfType);
    case TAbstract({aPath:{pack:["haxe"],name:"Constructible"}},[t1]):return extract(t1);
@@ -182,7 +182,7 @@ class TyperBase {
   return null;
  }
  public static function unifyStaticExtension(ctx:TyperContext,e:TExpr,t:T,p:Pos):TExpr {
-  function check(t:T):Bool return switch follow(t) {case TAbstract(a,_) if(Meta.has(MetaTag.MultiType,a.aMeta)):true; case _:false;};
+  inline function check(t:T):Bool return switch follow(t) {case TAbstract(a,_) if(Meta.has(MetaTag.MultiType,a.aMeta)):true; case _:false;};
   if(check(e.etype)||check(t)) return AbstractCast.castOrUnifyRaise(ctx,t,e,p);
   var config=defaultUnificationContext(); config.allowDynamicToCast=false; core.TUnification.unifyCustom(config,e.etype,t); return e;
  }

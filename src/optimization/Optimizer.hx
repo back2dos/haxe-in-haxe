@@ -30,7 +30,7 @@ class Optimizer {
 		};
 	}
 	public static function checkConstantSwitch(sw:TSwitch):Null<TExpr> {
-		function isEmpty(e:TExpr):Bool return switch e.eexpr { case TBlock([]): true; case _: false; };
+		inline function isEmpty(e:TExpr):Bool return switch e.eexpr { case TBlock([]): true; case _: false; };
 		var subject = Texpr.skip(sw.switchSubject);
 		switch subject.eexpr {
 			case TConst(ct) if (ct != TSuper && ct != TThis):
