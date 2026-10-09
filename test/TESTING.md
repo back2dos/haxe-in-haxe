@@ -2,6 +2,30 @@
 
 Earlier checkpoints are in the Git history of this file.
 
+## Current status
+
+Latest result per lane, from the dated sections below (newest first; the
+"C build of the port (hxc): memory work" section is at the end).
+
+Full matrix (6a46279+): pending
+
+| Lane | HashLink build | hxc build |
+| --- | --- | --- |
+| HXB conformance (`conformance-cases.txt`, 286) | 279 PASS + 7 expected failures | same (tcc, clang -O2); gcc -O2 and cosmocc last run at 275 + 7, before the 4 new cases |
+| Macro cases / `--hxb-lib` round trip / hxblib cases | 66/66, 279 + 7, 7/7 | 66/66 (tcc, clang) |
+| Other upstream suites (195) / display snippets (406) / party (2) | 135 + 60 expected failures / 117 + 289 / 2/2 | not run |
+| Parallel mode (`--parallel 3`; self-compile `--parallel 4`) | n/a | 279 + 7 and 66/66, every run identical after normalizing; self 4/4 (clang) |
+| `test/upstream.py` (target-independent CI job) | unit-macro 11367/11371 (4 `Gc.finalise` errors), threads 141/142 (no libuv), the other steps pass | all steps: unit-macro 11372/11372, misc 684/684, threads 144/144 |
+| Party: tink_core, hxcoro (hxcoro 20 runs in a row) | pass, 20/20 | pass |
+| `test/display.py` default / `--extended` | 679/679, 7325/7325 | not run |
+| `test/server.py` (both cache modes) / macro cases | 595/595 / 132/132 | 587/587 (tcc, before the new cases) |
+| `test/haxelib.py` / `--server` | 7/7, 14/14 | not run |
+| `test/interp.py` | 270 identical, 2 known host differences (last run before the server merge) | not run |
+| ThreadSanitizer (runtime instrumented, parallel self-compile) | n/a | 0 reports after the fixes |
+
+Not covered: `server/*` JSON-RPC methods through a server, the Eval debugger,
+memory statistics, non-HXB targets (see `upstream-hxb-exclusions.md`).
+
 ## Eval lock: OCaml's runtime lock for Eval threads — 2026-10-09
 
 Upstream's Eval threads are OCaml threads sharing one runtime lock; the port

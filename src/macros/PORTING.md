@@ -42,9 +42,12 @@ of them exist:
   use `EvalString.createAscii`, `createUnknown`, `createWithLength`.
   "Byte offsets" in upstream are native string indices here.
 - **Positions** are `core.Globals.Pos`; AST/types are `core.Ast`/`core.TType`.
-- **Not ported**: the debugger (`evalDebug*.ml`, debug socket), libuv
-  (`evalLuv.ml`), mbedtls (`evalSsl.ml`). Code that would use them throws a
-  clear error ("... is not supported by haxe-in-haxe"); never fake a result.
+- **Not ported**: the debugger (`evalDebug*.ml`, debug socket). Code that
+  would use it throws a clear error ("... is not supported by haxe-in-haxe");
+  never fake a result. libuv (`evalLuv.ml`) and mbedtls (`evalSsl.ml`) are
+  ported over the hxc runtime's natives (`hxc.NativeUv`, `hxc.NativeSsl`);
+  on other hosts their natives fail the same way (the `eval.luv` threads and
+  synchronization primitives work everywhere).
 - Translate argument evaluation order explicitly where OCaml's right-to-left
   order is observable (side effects, allocations, ids).
 - Each file starts with a comment naming its upstream file and any

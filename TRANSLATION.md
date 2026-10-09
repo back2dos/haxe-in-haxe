@@ -3,6 +3,37 @@
 Snapshot: 2026-09-04. Pinned upstream source:
 `b10fa6e93c0206cc0dc8f7abba98534e3edac248`.
 
+## Current coverage (2026-10-09)
+
+Every upstream `.ml` file under `haxe/src/` is listed below, with its Haxe
+counterpart or the reason it has none. Ported and tested against the
+reference (results in `test/TESTING.md`):
+
+- the batch compiler: syntax, typing, finalization, filters, optimizer,
+  analyzer, DCE, coroutines and the HXB writer (`haxe.Main`);
+- the macro runtime: `macro/eval/*.ml`, `macroApi.ml` and `macroContext.ml`,
+  including `evalSsl.ml` (mbedtls), `evalLuv.ml` (libuv, with `eval.luv`
+  threads, thread pool and synchronization) and `evalThread.ml`. The
+  natives that call mbedtls/libuv need the hxc host (`hxc.NativeSsl`,
+  `hxc.NativeUv`); on HashLink they fail explicitly, except the `eval.luv`
+  threads and primitives, which need no libuv;
+- HXB library input: `hxbReader.ml`, `hxbReaderApi.ml`, `hxbLib.ml`;
+- the compilation server and its caches: `compiler/server/*.ml`,
+  `compilationCache.ml`, `context/commonCache.ml`, `pipeThings.ml`,
+  `tasks.ml`; the server's HXB module cache uses the HXB reader;
+- haxelib (`add_libs` in `highLevel.ml`);
+- display services: `typerDisplay.ml`, `context/display/*`,
+  `displayOutput.ml`, `displayProcessing.ml`, `completionItem.ml`,
+  `genjson.ml`, `jsonRpc.ml`, `jsonrpc_handler.ml`.
+
+Not ported: the Eval debugger (`evalDebug*.ml`), `jsonRpcSocket.ml`, source
+maps, object sizes for `server/memory` (`Memory.memSize`), `server/module`
+(it needs `Genjson.generate_module` over the HXB module cache), the SWF/JVM
+native-library handlers and every target generator. `EvalLock.hx` (OCaml's
+runtime lock for Eval threads) has no upstream module.
+
+## History
+
 Status 2026-10-07: the first milestone is reached. The translated batch
 compiler (`haxe.Main`) emits HXB byte-identical to the pinned reference for
 all 275 accepted conformance cases, and rejects the 7 cases the reference
@@ -18,9 +49,8 @@ Status 2026-10-08: macro execution works. `macro/eval/*.ml` and `macroApi.ml`
 are translated in `src/macros/` and `typing/macroContext.ml` in
 `src/typing/MacroContext.hx`. All 66 macro-context conformance cases are
 byte-identical. The debugger (`evalDebug*.ml`), libuv (`evalLuv.ml`) and mbedtls
-(`evalSsl.ml`, except its enum constants) are not ported; see
-`src/macros/PORTING.md`. The table below still lists them as macro-milestone
-candidates.
+(`evalSsl.ml`, except its enum constants) were not ported at first; libuv and
+mbedtls followed on 2026-10-09 (below).
 
 Status 2026-10-09: HXB library input (`--hxb-lib`) works. `hxbReader.ml`,
 `hxbReaderApi.ml` and `hxbLib.ml` are translated in `src/compiler/hxb/`,
@@ -57,6 +87,16 @@ which display output exposes, is reproduced by `core.ds.OcamlHash`
 (`caml_hash`) with `core.ds.OcamlHashtbl`. Results of the display corpus are
 in `test/TESTING.md`.
 
+Status 2026-10-09: `evalSsl.ml` and `evalLuv.ml` are translated
+(`src/macros/eval/EvalSsl.hx`, `EvalLuv.hx`) over the hxc runtime's mbedtls
+and libuv natives (`backend/rt/rt_ssl.c`, `rt_uv.c`), including `eval.luv`
+`Thread`, `ThreadPool`, `Once`, `Mutex`, `RwLock`, `Semaphore`, `Condition`
+and `Barrier` on host threads. Eval's `sys.io.Process` follows
+`libs/extc/process.ml` (`EvalProcess.hx`). `EvalLock.hx` serializes Eval
+threads as OCaml's runtime lock does (a documented deviation: the port's
+host threads run in parallel). The upstream test suite's threads step passes
+144/144 on the hxc build.
+
 ## Translation snapshot
 
 **The pending counterpart batch was completed in `2fcd217`.** This inventory records file coverage,
@@ -86,7 +126,8 @@ The compile phase reconciles enum/record layouts, callback signatures, persisten
 maps, typed exceptions, and Haxe secondary-type imports. New runtime adapters
 provide OCaml-style lists/maps/tables, fixed-width integer parsing, streams, and
 thread scheduling. `Record.withFields` preserves shallow record updates.
-`TaskPool` uses bounded host threads per operation instead of a persistent
+`TaskPool` stands in for Domainslib with host threads (persistent workers on
+HL/C and hxc, threads scoped to the call elsewhere) instead of a
 work-stealing pool; `CompilerIo` uses byte queues instead of OCaml Unix pipes.
 
 Shared HXB-path helpers were extracted from otherwise deferred areas:
@@ -103,9 +144,12 @@ Shared HXB-path helpers were extracted from otherwise deferred areas:
   loading, package rules/remapping, import.hx processing, and parser integration
   required by `TyperEntry`; the existing bootstrap loader remains separate.
 
-Display, server, macro-runtime, native-library, and other target dispatch bodies
-remain under `deferred/` outside the build classpath. Their call sites reject
-unsupported services explicitly. In-scope typing and filtering paths remain in
+At the time, display, server, macro-runtime, native-library and target
+dispatch bodies were kept under `deferred/`, outside the build class path.
+Display, server and the macro runtime have since been translated in `src/`
+(see the history above); `deferred/` now only holds old drafts, and the
+remaining unsupported services (other targets, SWF/JVM libraries) are
+rejected explicitly at their call sites. In-scope typing and filtering paths remain in
 the all-module build. Compilation does not establish runtime correctness,
 conformance, or completion of the pre-existing HXB writer. The subsequent runtime test phase is tracked in
 `test/TESTING.md`.
@@ -314,7 +358,7 @@ conformance, or completion of the pre-existing HXB writer. The subsequent runtim
 | `context/display/displayEmitter.ml` | `src/context/display/DisplayEmitter.hx` | Display services |
 | `context/display/displayException.ml` | `src/context/display/DisplayException.hx` | Display services |
 | `context/display/displayFields.ml` | `src/context/display/DisplayFields.hx` | Display services |
-| `context/display/displayJson.ml` | `src/context/display/DisplayJson.hx` | Display services; `server/*` cache methods need the server milestone, `server/module` HXB input |
+| `context/display/displayJson.ml` | `src/context/display/DisplayJson.hx` | Display services; `server/module` fails explicitly (needs `Genjson.generate_module` over the HXB module cache); `server/*` methods through a server have no harness yet |
 | `context/display/displayMemory.ml` | `src/context/display/DisplayMemory.hx` | Display services; memory sizes need `Memory.memSize` (no OCaml Obj reflection) |
 | `context/display/displayPath.ml` | `src/context/display/DisplayPath.hx` | Display services |
 | `context/display/displayTexpr.ml` | `src/context/display/DisplayTexpr.hx` | Display services |
@@ -330,6 +374,52 @@ conformance, or completion of the pre-existing HXB writer. The subsequent runtim
 | `core/json/jsonRpc.ml` | `src/core/json/JsonRpc.hx` | JSON-RPC protocol |
 | `core/json/jsonrpc_handler.ml` | `src/core/json/JsonrpcHandler.hx` | JSON-RPC handler |
 | `typing/typerDisplay.ml` | `src/typing/TyperDisplay.hx` | Display services |
+
+## Macro runtime coverage
+
+Conventions: `src/macros/PORTING.md`. Natives without a host implementation
+fail with "... is not supported by haxe-in-haxe".
+
+| Upstream under `haxe/src/` | Haxe counterpart | Status |
+| --- | --- | --- |
+| `macro/eval/bytes/evalBytesLower.ml` | `src/macros/eval/EvalBytesUnicase.hx` | Translated (case tables) |
+| `macro/eval/bytes/evalBytesUpper.ml` | `src/macros/eval/EvalBytesUnicase.hx` | Translated (case tables) |
+| `macro/eval/bytes/evalBytes_E_L79.ml` | `src/macros/eval/EvalBytesUnicase.hx` | Translated (case tables) |
+| `macro/eval/bytes/evalBytes_L1020.ml` | `src/macros/eval/EvalBytesUnicase.hx` | Translated (case tables) |
+| `macro/eval/bytes/evalBytes_U1021.ml` | `src/macros/eval/EvalBytesUnicase.hx` | Translated (case tables) |
+| `macro/eval/bytes/evalBytes_U79.ml` | `src/macros/eval/EvalBytesUnicase.hx` | Translated (case tables) |
+| `macro/eval/eval.ml` | `src/macros/eval/EvalMain.hx` | Only includes other modules |
+| `macro/eval/evalArray.ml` | `src/macros/eval/EvalArray.hx` | Translated |
+| `macro/eval/evalAtomic.ml` | `src/macros/eval/EvalAtomic.hx` | Translated |
+| `macro/eval/evalBytes.ml` | `src/macros/eval/EvalBytesUnicase.hx`; byte access in `EvalStdLibA.hx` | Translated |
+| `macro/eval/evalContext.ml` | `src/macros/eval/EvalContext.hx` | Translated |
+| `macro/eval/evalDataApi.ml` | `src/macros/eval/EvalDataApi.hx` | Translated |
+| `macro/eval/evalDebug.ml` | – | Not ported (Eval debugger; fails explicitly) |
+| `macro/eval/evalDebugMisc.ml` | – | Not ported (Eval debugger) |
+| `macro/eval/evalDebugSocket.ml` | – | Not ported (Eval debugger) |
+| `macro/eval/evalDecode.ml` | `src/macros/eval/EvalDecode.hx` | Translated |
+| `macro/eval/evalEmitter.ml` | `src/macros/eval/EvalEmitter.hx` | Translated |
+| `macro/eval/evalEncode.ml` | `src/macros/eval/EvalEncode.hx` | Translated |
+| `macro/eval/evalExceptions.ml` | `src/macros/eval/EvalExceptions.hx` | Translated |
+| `macro/eval/evalField.ml` | `src/macros/eval/EvalField.hx` | Translated |
+| `macro/eval/evalHash.ml` | `src/macros/eval/EvalHash.hx` | Translated |
+| `macro/eval/evalIntegers.ml` | `src/macros/eval/EvalIntegers.hx` | Translated |
+| `macro/eval/evalJit.ml` | `src/macros/eval/EvalJit.hx` | Translated |
+| `macro/eval/evalJitContext.ml` | `src/macros/eval/EvalJitContext.hx` | Translated |
+| `macro/eval/evalLuv.ml` | `src/macros/eval/EvalLuv.hx` | Translated; libuv through `hxc.NativeUv` (hxc host only); threads, thread pool and synchronization on host threads |
+| `macro/eval/evalMain.ml` | `src/macros/eval/EvalMain.hx` | Translated |
+| `macro/eval/evalMisc.ml` | `src/macros/eval/EvalMisc.hx` | Translated |
+| `macro/eval/evalPrinting.ml` | `src/macros/eval/EvalPrinting.hx` | Translated |
+| `macro/eval/evalPrototype.ml` | `src/macros/eval/EvalPrototype.hx` | Translated |
+| `macro/eval/evalSsl.ml` | `src/macros/eval/EvalSsl.hx` | Translated; mbedtls through `hxc.NativeSsl` (hxc host only) |
+| `macro/eval/evalStackTrace.ml` | `src/macros/eval/EvalStackTrace.hx` | Translated |
+| `macro/eval/evalStdLib.ml` | `src/macros/eval/EvalStdLib.hx`, `EvalStdLibA.hx`, `EvalStdLibB.hx` | Translated; host processes in `EvalProcess.hx` (`libs/extc/process.ml`), HashLink sockets in `EvalHostNet.hx` |
+| `macro/eval/evalString.ml` | `src/macros/eval/EvalString.hx` | Translated |
+| `macro/eval/evalThread.ml` | `src/macros/eval/EvalThread.hx` | Translated; Eval threads serialized by `EvalLock.hx` |
+| `macro/eval/evalTypes.ml` | `src/macros/eval/EvalTypes.hx` | Translated |
+| `macro/eval/evalValue.ml` | `src/macros/eval/EvalValue.hx` | Translated |
+| `macro/macroApi.ml` | `src/macros/MacroApi.hx` | Translated |
+| `typing/macroContext.ml` | `src/typing/MacroContext.hx` | Translated |
 
 ## Deferred or scope-review areas
 
@@ -397,45 +487,7 @@ A scope-review entry is not a blanket exclusion of shared batch-compiler helpers
 | `generators/jvm/jvmVerificationTypeInfo.ml` | Ordinary output-target generator/runtime |
 | `generators/jvm/jvmWriter.ml` | Ordinary output-target generator/runtime |
 | `lazy.ml` | OCaml build/runtime adapter; no mechanical compiler-module port |
-| `macro/eval/bytes/evalBytesLower.ml` | Macro runtime/API milestone |
-| `macro/eval/bytes/evalBytesUpper.ml` | Macro runtime/API milestone |
-| `macro/eval/bytes/evalBytes_E_L79.ml` | Macro runtime/API milestone |
-| `macro/eval/bytes/evalBytes_L1020.ml` | Macro runtime/API milestone |
-| `macro/eval/bytes/evalBytes_U1021.ml` | Macro runtime/API milestone |
-| `macro/eval/bytes/evalBytes_U79.ml` | Macro runtime/API milestone |
-| `macro/eval/eval.ml` | Macro runtime/API milestone |
-| `macro/eval/evalArray.ml` | Macro runtime/API milestone |
-| `macro/eval/evalAtomic.ml` | Macro runtime/API milestone |
-| `macro/eval/evalBytes.ml` | Macro runtime/API milestone |
-| `macro/eval/evalContext.ml` | Macro runtime/API milestone |
-| `macro/eval/evalDataApi.ml` | Macro runtime/API milestone |
-| `macro/eval/evalDebug.ml` | Macro runtime/API milestone |
-| `macro/eval/evalDebugMisc.ml` | Macro runtime/API milestone |
-| `macro/eval/evalDebugSocket.ml` | Macro runtime/API milestone |
-| `macro/eval/evalDecode.ml` | Macro runtime/API milestone |
-| `macro/eval/evalEmitter.ml` | Macro runtime/API milestone |
-| `macro/eval/evalEncode.ml` | Macro runtime/API milestone |
-| `macro/eval/evalExceptions.ml` | Macro runtime/API milestone |
-| `macro/eval/evalField.ml` | Macro runtime/API milestone |
-| `macro/eval/evalHash.ml` | Macro runtime/API milestone |
-| `macro/eval/evalIntegers.ml` | Macro runtime/API milestone |
-| `macro/eval/evalJit.ml` | Macro runtime/API milestone |
-| `macro/eval/evalJitContext.ml` | Macro runtime/API milestone |
-| `macro/eval/evalLuv.ml` | Macro runtime/API milestone |
-| `macro/eval/evalMain.ml` | Macro runtime/API milestone |
-| `macro/eval/evalMisc.ml` | Macro runtime/API milestone |
-| `macro/eval/evalPrinting.ml` | Macro runtime/API milestone |
-| `macro/eval/evalPrototype.ml` | Macro runtime/API milestone |
-| `macro/eval/evalSsl.ml` | Macro runtime/API milestone |
-| `macro/eval/evalStackTrace.ml` | Macro runtime/API milestone |
-| `macro/eval/evalStdLib.ml` | Macro runtime/API milestone |
-| `macro/eval/evalString.ml` | Macro runtime/API milestone |
-| `macro/eval/evalThread.ml` | Macro runtime/API milestone |
-| `macro/eval/evalTypes.ml` | Macro runtime/API milestone |
-| `macro/eval/evalValue.ml` | Macro runtime/API milestone |
-| `macro/macroApi.ml` | Macro runtime/API milestone |
 | `prebuild.ml` | OCaml build/runtime adapter; no mechanical compiler-module port |
-| `typing/macroContext.ml` | Macro context milestone |
 
 ## Additional draft support files
 
@@ -446,13 +498,12 @@ A scope-review entry is not a blanket exclusion of shared batch-compiler helpers
 
 ## Next work
 
-The previously pending in-scope module counterparts are now written. The ten
-candidates moved to the deferred table were reviewed against the source-only HXB
-milestone: they implement server transport/diagnostics, native-library input,
-JSON services, source maps, or ordinary generator support.
+Every upstream module now has a counterpart or a recorded reason. What
+remains open:
 
-File presence does not prove complete one-to-one coverage of the 33 pre-existing
-counterparts. Their earlier subset implementations and shared hooks in deferred
-areas remain an explicit source-coverage limitation. Keep that distinction visible
-when reconciling APIs and bringing the compiler together. No compilation or tests
-were performed during these translation batches.
+- the Eval debugger, `server/module`, `server/memory` object sizes and
+  `jsonRpcSocket.ml`;
+- a harness for the `server/*` JSON-RPC methods through a running server;
+- an audit of the 33 counterparts that predate the translation snapshot
+  ("Existing, unaudited" above): they pass the conformance suites, but were not
+  checked line by line against upstream.
