@@ -42,9 +42,10 @@ class TaskPool {
   #if hlc
   ForJob.invite(job,threads);
   #else
-  // HashLink JIT: persistent workers crashed intermittently (in hl_to_virtual,
-  // under --interp) in a way HL/C does not reproduce, so threads stay scoped
-  // to the call there.
+  // HashLink JIT: threads stay scoped to the call. With persistent workers it
+  // crashed intermittently, most likely through the races in libhl's lazy type
+  // initialisation that bench/libhl-allocator.patch fixes for HL/C (the JIT
+  // loads the system libhl).
   var spawned=0;
   try {
    for (_ in 0...threads) {Thread.create(function() {job.work();job.exited.release();});spawned++;}
