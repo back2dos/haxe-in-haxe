@@ -182,11 +182,24 @@ class Lexer {
 	var source:String;
 	var file:String;
 	var index:Int;
+	// Deviation from upstream (memory only): identifiers are interned per file,
+	// so the AST holds one string per name instead of one per occurrence. The
+	// identity of identifier strings is never observed (only position file
+	// names are compared physically, core.ds.StrTools.physNeq).
+	var idents:Map<String, String>;
 
 	public function new(source:String, ?file = "?") {
 		this.source = source;
 		this.file = file;
 		index = 0;
+		idents = new Map();
+	}
+
+	function ident(s:String):String {
+		var r = idents.get(s);
+		if (r != null) return r;
+		idents.set(s, s);
+		return s;
 	}
 
 	public static function lex(source:String, ?file = "?"):Array<LexedToken> {
@@ -538,7 +551,7 @@ class Lexer {
 			var ie = mIdent(index);
 			if (ie >= 0 && ie - start >= opLen) {
 				index = ie;
-				return make(keyword(core.ds.StrTools.sub(source, start, ie)), start);
+				return make(keyword(ident(core.ds.StrTools.sub(source, start, ie))), start);
 			}
 			if (opTok != null) {
 				index += opLen;
