@@ -259,7 +259,7 @@ class DisplayProcessing {
 					var l = cs.getContextFiles([Define.getSignature(com.defines)].concat(macroCom == null ? [] : [Define.getSignature(macroCom.defines)]));
 					var acc = [];
 					for (e in l) {
-						var cfile = e.file;
+						var cfile = e.cfile;
 						var file = cfile.cFilePath.file;
 						if (filter != null || DisplayPosition.displayPosition.isInFile(com.partScope.fileKeys.get(file))) {
 							acc.unshift({file: file, symbols: context.display.DocumentSymbols.collectModuleSymbols({file: file, name: CompilationCache.getModuleNameOfCfile(file, cfile)}, filter == null, {pack: cfile.cPackage, declarations: cfile.cDecls})});

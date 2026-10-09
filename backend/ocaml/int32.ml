@@ -1,0 +1,11 @@
+type hint = int32
+let[@inline] ( +! ) a b = Int32.add a b
+let[@inline] ( -! ) a b = Int32.sub a b
+let[@inline] ( *! ) a b = Int32.mul a b
+let[@inline] ( &! ) a b = Int32.logand a b
+let[@inline] hmod a b = if Int32.equal b 0l then 0l else Int32.rem a b
+let[@inline] hasr a n = Int32.shift_right a n
+let[@inline] lit x = Int32.of_int x
+let[@inline] eqi a b = Int32.equal a b
+let[@inline] to_int a = Int32.to_int a
+let show = Int32.to_string

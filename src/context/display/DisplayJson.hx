@@ -403,7 +403,7 @@ class DisplayJson {
 			{name: "server/modules", f: function(hctx) {
 				var sign = hctx.jsonrpc.getStringParam("signature");
 				var cc = hctx.display.getCs().getContext(sign);
-				var l = cc.getHxb().fold(function(_, m:ModuleCache, acc:Array<JsonValue>) {
+				var l = cc.getHxb().fold(function(_, m:compiler.hxb.HxbData.ModuleCache, acc:Array<JsonValue>) {
 					if (m.mcExtra.mKind != MFake) acc.unshift(jstring(Globals.sTypePath(m.mcPath)));
 					return acc;
 				}, []);

@@ -172,7 +172,7 @@ class Monomorph {
    case CStructural(fields,_):
     PMap.iter(function(_,cf:TClassField) {
      var t=getRecursion(cf.cfType);
-     if(t!=null) {var pctx=printContext();var s=sType(pctx,t)+" appears in { "+cf.cfName+": "+sType(pctx,cf.cfType)+" }";throw new Unify_error([UnifyCustom("Recursive type"),UnifyCustom(s)]);}
+     if(t!=null) {var pctx=printContext();/* OCaml evaluates the sprintf arguments right to left */var sf=sType(pctx,cf.cfType);var s=sType(pctx,t)+" appears in { "+cf.cfName+": "+sf+" }";throw new Unify_error([UnifyCustom("Recursive type"),UnifyCustom(s)]);}
     },fields);
     doBind(m,mkAnon(Closed,fields));
   }

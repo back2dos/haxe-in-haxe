@@ -2,6 +2,184 @@
 
 Earlier checkpoints are in the Git history of this file.
 
+## Upstream test suite — 2026-10-09
+
+`python3 test/upstream.py [--reference] [step ...]` runs upstream CI's
+target-independent job (`haxe/tests/runci/targets/Macro.hx`) with the port as
+`haxe` on PATH (see the script header).
+
+### misc (`haxe/tests/misc`, 686 projects)
+
+The reference passes all 686 projects. Second half of the 64 port failures
+(Issue8019 through process-nonexistent, 32 projects): all pass now, none
+excluded. Root causes:
+
+- Abort after typing when errors were reported (the non-display branch of
+  `DisplayProcessing.handle_display_after_typing`, previously missing): -main
+  checks no longer add "Module X does not define type X" / "Invalid -main"
+  after the real errors, and filters no longer add errors after them
+  (Issue8258, Issue8277 ×2, Issue8517, Issue8697, Issue8787 ×2,
+  Issue9010/NativeMeta, Issue9017, default_type_params ×3, extern-overloads
+  ×3, issue5002/compile2, local-static Break/Continue).
+- Coroutines: type paths and metadata arguments passed as `Dynamic` were
+  anonymous objects on HashLink, failing the cast to `GlobalTypePath`/`Expr`
+  (coro ×7; these projects use `-js`, but the errors are typing errors raised
+  before generation).
+- Plain arguments are classified with `Path.parse_path` (`Main.hx` is class
+  `Main`, not `--include` of a package) (Issue8534).
+- `#if` comparison errors print floats with OCaml `string_of_float`
+  (`0.`) (Issue8677).
+- The lexer records the lines before a lexer error (escape errors were
+  reported on the previous line) (Issue8119 ×2).
+- Type-path hash keys kept `[]` and `[""]` apart (a macro-defined type in
+  package `""` was a "redefinition") (Issue8019 ×2).
+- Eval's `sys.io.Process` follows `libs/extc/process.ml`: a command that
+  cannot be spawned gives EOF stdout, the error on stderr and exit code 127
+  (the command is looked up in PATH like `posix_spawnp`, since host
+  processes fork first and exit 1 on HashLink) (process-nonexistent). This
+  also removes the `process-nonexistent` difference of `test/interp.py`.
+
+First half (HxbWildcardExclude through Issue7997, 32 projects): 30 pass,
+2 excluded. Most were the abort after typing above; the others:
+
+- `TUnification.close`: the "Recursive type" message prints the field type
+  before the mono, as OCaml evaluates `sprintf` arguments right to left (the
+  first printing of a constrained mono shows its constraint) (Issue11881,
+  Issue7997).
+- HashLink 2.0 JIT: every `endtrap` of an early `return`/`break` restores
+  the innermost trap, so leaving two nested `try` blocks at once left the
+  outer handler installed after its frame was gone, and the next uncaught
+  exception jumped into a dead frame (Issue1138/compile3-fail segfaulted).
+  The five such exits in the port (CallUnification, ImportHandling,
+  InheritDoc, Dce, FixOverrides; found by scanning `-D dump`'s
+  `dump/hlcode.txt` for consecutive `endtrap false`) now return after the
+  inner `try`. Re-run that scan after adding `return` inside nested `try`.
+- Coroutine module paths typed as `GlobalTypePath` (Issue12483 ×2).
+
+Excluded in `test/upstream.py` (`MISC_EXCLUDED`, passed to the runner as a
+negative `MISC_TEST_FILTER`): HxbWildcardExclude/compile (its first step
+compiles with `-js` next to `--hxb`) and Issue4660/compile (runs `haxe -js`
+and checks the JavaScript).
+
+The full misc step now passes: 684/684 with 2 excluded. Conformance stays at
+275 PASS + 7 EXPECTED-FAILURE (also `--hxb-lib`), and the bootstrap build
+passes. (`python3 test/upstream.py misc` also runs `misc-resolution`, which
+still fails.)
+
+## Compilation server and haxelib — 2026-10-09
+
+The port runs as a compilation server (`--wait <port>`, `--server-connect`)
+and as its client (`--connect`), with the server caches of
+`compiler/server/*.ml`, and expands `-L`/`--library` through `haxelib path`.
+`test/server.py` sends the same requests to a reference server and a port
+server; `test/haxelib.py` uses a local haxelib repository (no network).
+
+```sh
+HAXE_REFERENCE=haxe/haxe python3 test/server.py -j 2
+HAXE_REFERENCE=haxe/haxe python3 test/server.py --scenario cases --cases test/conformance-macro-cases.txt -j 2
+HAXE_REFERENCE=haxe/haxe python3 test/server.py --hxb-cache -j 2
+HAXE_REFERENCE=haxe/haxe python3 test/haxelib.py --server
+```
+
+| Check (same exit code, client stdout/stderr, HXB members and payloads) | Result |
+| --- | --- |
+| `-D disable-hxb-cache`: all scenarios (282 cases twice, edit, misc, `--server-connect`) | 587/587 |
+| `-D disable-hxb-cache`: macro cases, two rounds each | 132/132 |
+| Edit sequence (edit, add, syntax error, fix, remove, touch) | 8/8 |
+| Verbose server logs of the edit sequence (reusing/skipping/parsed/directories) | identical (628 lines) |
+| `misc`: `--interp` output, stdin forwarding, `--cmd`, macro output, errors, `--next` | 10/10 |
+| `--server-connect` (length-prefixed requests, exit on disconnect) | 4/4 |
+| Default HXB cache (modules restored with the HXB reader): all scenarios | 587/587 |
+| Default HXB cache, macro cases, two rounds each | 132/132 |
+| haxelib: batch and server (`-L`, `--library`, `-lib`, dependencies, several libraries, `--haxelib-global`, missing library, hxml) | 14/14 |
+
+After merging the HXB reader, the batch lanes stay green: `test/conformance.py
+--hxb-lib` 275/275 with 7/7 expected failures, the macro cases 66/66, the
+`--hxb-lib` cases 7/7, and the bootstrap build. Before the merge,
+`test/interp.py` gave 270 identical with 2 known host differences
+(`process-nonexistent`, exit 127 vs 1), and the all-module and unit builds
+passed.
+
+Known limits:
+
+- Display requests (`--display`) fail explicitly until display is ported.
+- The pinned upstream rejects `--wait stdio` ("Invalid host/port"); so does
+  the port. The host socket API is IPv4 only: an IPv6 address fails with a
+  Failure, where the reference fails with `EAFNOSUPPORT` in this environment.
+- File times have one-second resolution on HashLink, so an edit within the
+  same second as the previous compilation is not seen (upstream uses
+  sub-second times).
+
+Fixes found with these tests: class/field metadata saved for `cl_restore`
+must be copied (DCE adds `@:keep` in place), `ClassPaths.relative_path` must
+not resolve symbolic links, `Path.find_directories` conses like upstream,
+`m_deps` copies where upstream shares a persistent map, and the server's
+stdout/stderr pipes buffer like OCaml channels (output order with `--cmd`).
+
+## HXB library input: `--hxb-lib` — 2026-10-09
+
+The port reads HXB archives (`src/compiler/hxb/HxbReader.hx`, a translation
+of `hxbReader.ml`, with `hxbLib.ml` and `hxbReaderApi.ml`). `load_module'`
+looks a module up in the `--hxb-lib` archives before parsing, as upstream.
+
+```sh
+HAXE_REFERENCE=haxe/haxe python3 test/conformance.py -j 2 --hxb-lib
+HAXE_REFERENCE=haxe/haxe python3 test/conformance.py -j 2 --hxb-lib --cases test/conformance-macro-cases.txt
+HAXE_REFERENCE=haxe/haxe python3 test/conformance.py -j 2 --hxb-lib --cases test/conformance-hxblib-cases.txt
+HAXE_IN_HAXE_PORT="hl $PWD/test/generated/conformance/haxe-in-haxe.hl" \
+  HAXE_REFERENCE=haxe/haxe python3 test/interp.py -j 2 --cases test/conformance-hxblib-cases.txt
+```
+
+- `--hxb-lib` round trip (new `conformance.py` option): after a case passes,
+  both compilers load every module of the reference's archive through
+  `--hxb-lib`, without the case's class path, and write it again with
+  `--hxb`. Every module, std included, then comes from the reader, and the
+  writer serializes what it restored. The two outputs must have the same
+  member set and byte-identical payloads.
+- `hxblib` cases (`test/conformance-hxblib-cases.txt`, new case kind): the
+  reference builds a library archive from `test/hxblib/*/lib`, and both
+  compilers compile `test/hxblib/*/app` against it. The libraries cover
+  classes, interfaces, inheritance, overloads, enums, enum abstracts,
+  abstracts with operators, `@:from`/`@:to`, `@:arrayAccess` and properties,
+  typedefs, generics (`@:generic`, constraints, default type parameters,
+  generic methods), static extensions, `__init__`, dynamic functions, private
+  types, module-level fields, macro functions, `@:build` and `@:autoBuild`
+  (loaded into the macro context from the archive's `macro/` modules), and a
+  broad std selection (with and without `-dce full`). `hl-Issue12357` is
+  `haxe/tests/misc/hl/projects/Issue12357` typed for HashLink without
+  generation.
+- `test/interp.py` runs the `hxblib` cases that use `--interp` with both
+  compilers: exit code, stdout and stderr must be identical.
+
+| Check | Result |
+| --- | --- |
+| Regular set with `--hxb-lib` round trip | 275/275 accepted cases pass with identical round trips; 7/7 expected failures |
+| Macro set with `--hxb-lib` round trip | 66/66 pass; 17 round trips identical, 49 rejected by both compilers (the archive alone lacks macro sources or `eval` modules for the detected target) |
+| `hxblib` cases (member set, payloads, round trip) | 7/7 (6 identical round trips; the HashLink case is rejected by both because `Main` is a module-level function) |
+| `hxblib` cases under `--interp` (exit, stdout, stderr) | 6/6 identical (the HashLink case doesn't execute) |
+| Eval-HXB host execution of the `hxblib` cases (`--eval`) | 7/7 identical to the HashLink-executed port |
+
+Upstream tests that use `--hxb-lib`: `tests/unit/compile-hxb-interp-roundtrip.hxml`,
+`tests/sys` (`compile-eval-hxb.hxml`) and the hxcoro build in
+`tests/runci/targets/Macro.hx` need haxelib (`-lib utest`, `hxcoro`), which
+the port does not support yet; `tests/unit/compile-hxb-jvm-roundtrip.hxml`
+needs the JVM target. `tests/misc/hl/projects/Issue12357` is covered as above.
+
+Not ported: the server and display uses of the reader (`serverCache.ml`,
+`displayJson.ml`, `displayTexpr.ml`) and `commonCache.ml`, which only the
+compilation server uses. `read_chunks`/`read_chunks_until` are translated
+but have no batch caller.
+
+Two fixes came out of this work:
+- HashLink's `Bytes.getString` stops at the first NUL byte, so the reader
+  decodes pool strings that contain NUL segment by segment (`"\x00"` in
+  `haxe.macro.Printer`).
+- `ClassPaths.relativePath` used `sys.FileSystem.fullPath` (`realpath`),
+  while upstream's `Path.get_full_path` doesn't resolve symbolic links on
+  Unix. With a symlinked std path (a worktree whose `haxe/` links to the
+  main checkout), PosInfos file names of std modules stayed absolute, and 85
+  regular cases differed from the reference.
+
 ## Display services: `--display` JSON-RPC — 2026-10-09
 
 ```sh
@@ -241,4 +419,4 @@ for the bootstrap entry point (`haxe.LegacyMain`) and its unit tests.
 
 - Macro execution: done in the macro milestone above.
 - Multi-part builds (`--next`/`--each`), haxelib, display/server, and
-  HXB-library input in the port.
+  HXB-library input in the port (HXB-library input: done, see above).

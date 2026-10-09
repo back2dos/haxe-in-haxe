@@ -12,7 +12,7 @@ class StrTools {
 
 	/**
 		OCaml's physical inequality `!=` on strings. HashLink compares the
-		character buffers and the JVM references; other hosts have no string
+		character buffers, the JVM and hxc (backend/) references; other hosts have no string
 		identity and fall back to structural inequality (deviation: positions are then encoded more
 		compactly than upstream when a macro rebuilt a file name).
 	**/
@@ -21,6 +21,8 @@ class StrTools {
 		return a == null || b == null ? a != b : @:privateAccess ((a.bytes : hl.Bytes) != (b.bytes : hl.Bytes));
 		#elseif jvm
 		return !jvm.Jvm.referenceEquals(a, b);
+		#elseif (target.name == "hxc")
+		return !hxc.Native.refEq(a, b);
 		#else
 		return a != b;
 		#end

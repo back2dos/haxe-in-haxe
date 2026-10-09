@@ -22,12 +22,36 @@ byte-identical. The debugger (`evalDebug*.ml`), libuv (`evalLuv.ml`) and mbedtls
 `src/macros/PORTING.md`. The table below still lists them as macro-milestone
 candidates.
 
+Status 2026-10-09: HXB library input (`--hxb-lib`) works. `hxbReader.ml`,
+`hxbReaderApi.ml` and `hxbLib.ml` are translated in `src/compiler/hxb/`,
+`typeloadCacheHook.ml` in `src/typing/TypeloadCacheHook.hx`, the HXB branch of
+`nativeLibraryHandler.ml` in `src/context/NativeLibraryHandler.hx`, and the
+`hxb_reader_api_typeload` class and `load_hxb_module` of `typeloadModule.ml` in
+`src/typing/ModuleTyping.hx`. The ZIP reading that `hxbLib.ml` takes from
+`libs/ziplib` is reproduced in `src/core/ZipInput.hx`. Of `commonCache.ml`,
+only the server cache uses the reader (`HxbReader.dump_stats` in
+`cache_context`), so nothing of it is needed by the batch `--hxb-lib` path.
+See `test/TESTING.md`.
+
+Status 2026-10-09: the compilation server, its caches and haxelib integration
+are translated: `compiler/server/*.ml` in `src/compiler/server/`,
+`compilationCache.ml`, `pipeThings.ml` and `tasks.ml` in `src/compiler/`,
+`context/commonCache.ml` and `typing/typeloadCacheHook.ml`, the client and
+server entry of `haxe.ml` (`--connect`, `--wait`, `--server-connect`) in
+`src/haxe/Main.hx`, and `add_libs` (`-L`/`--library`, which runs `haxelib
+path`) with the `Expand` markers of `args.ml` in `src/compiler/HighLevel.hx`.
+As upstream, the batch compiler also runs through `Server.setup_server_context`
+and the cache hooks. The server's HXB module cache restores modules with the
+translated HXB reader (`HxbReaderApiServer` implements `HxbReaderApi`), and
+`-D disable-hxb-cache` keeps typed modules in memory instead. The pinned upstream no longer implements `--wait stdio` (it reports "Invalid
+host/port"); the port behaves the same. The host socket API is IPv4 only. See
+`test/TESTING.md` for the server and haxelib results.
+
 Status 2026-10-09: display services work in batch mode. `--display` takes a
 JSON-RPC request like the pinned reference (the legacy `file@pos` form is a
 JSON-RPC parse error upstream too). `typerDisplay.ml`, `context/display/*`,
 `displayOutput.ml`, `displayProcessing.ml`, `completionItem.ml`, `genjson.ml`,
-`jsonRpc.ml`, `jsonrpc_handler.ml`, `compilationCache.ml` and `commonCache.ml`
-are translated, and every display hook in the typer calls them directly
+`jsonRpc.ml`, `jsonrpc_handler.ml`, are translated, and every display hook in the typer calls them directly
 (`context/DeferredServices.hx` is gone). OCaml `Hashtbl` iteration order,
 which display output exposes, is reproduced by `core.ds.OcamlHash`
 (`caml_hash`) with `core.ds.OcamlHashtbl`. Results of the display corpus are
@@ -46,8 +70,8 @@ compiler pipeline is included separately by `compile-all.hxml`.
 - 0 additional candidate ML files have no corresponding HX file yet.
 
 This follow-up added 59 in-scope counterparts from the previous 69 pending
-candidates. The other ten are explicitly deferred below. `HighLevel` covers the
-batch entry path; its haxelib-only `add_libs` implementation remains deferred.
+candidates. The other ten are explicitly deferred below. `HighLevel` now also
+implements haxelib `add_libs` (2026-10-09).
 
 The candidate list is deliberately conservative, not a proven minimal dependency
 closure. Translate the source-only HXB path, including its shared filtering and
@@ -107,10 +131,13 @@ conformance, or completion of the pre-existing HXB writer. The subsequent runtim
 | `compiler/args.ml` | `src/compiler/Args.hx` | Existing, unaudited |
 | `compiler/compiler.ml` | `src/compiler/Compiler.hx` | Draft translated |
 | `compiler/generate.ml` | `src/compiler/Generate.hx` | Draft translated |
-| `compiler/haxe.ml` | `src/haxe/Main.hx` | Existing, unaudited |
+| `compiler/haxe.ml` | `src/haxe/Main.hx` | Translated, including client/server entry |
 | `compiler/helper.ml` | `src/compiler/Helper.hx` | Existing, unaudited |
-| `compiler/highLevel.ml` | `src/compiler/HighLevel.hx` | Batch entry draft; haxelib add_libs deferred |
+| `compiler/highLevel.ml` | `src/compiler/HighLevel.hx` | Translated, including haxelib `add_libs` |
 | `compiler/hxb/hxbData.ml` | `src/compiler/hxb/HxbData.hx` | Existing, unaudited |
+| `compiler/hxb/hxbLib.ml` | `src/compiler/hxb/HxbLib.hx` | Translated; ZIP reading in `src/core/ZipInput.hx` (from `libs/ziplib/zip.ml`) |
+| `compiler/hxb/hxbReader.ml` | `src/compiler/hxb/HxbReader.hx` | Translated; `hxb_reader_stats` stays in `src/context/HxbReaderStats.hx` |
+| `compiler/hxb/hxbReaderApi.ml` | `src/compiler/hxb/HxbReaderApi.hx` | Translated (virtual class as interface) |
 | `compiler/hxb/hxbWriter.ml` | `src/compiler/hxb/HxbWriter.hx` | Existing, unaudited |
 | `compiler/hxb/hxbWriterConfig.ml` | `src/compiler/hxb/HxbWriterConfig.hx` | Existing, unaudited |
 | `compiler/io/compilerIo.ml` | `src/compiler/io/CompilerIo.hx` | Draft translated |
@@ -125,6 +152,7 @@ conformance, or completion of the pre-existing HXB writer. The subsequent runtim
 | `context/dumpConfig.ml` | `src/context/DumpConfig.hx` | Draft translated |
 | `context/formatString.ml` | `src/context/FormatString.hx` | Draft translated |
 | `context/lookup.ml` | `src/context/Lookup.hx` | Draft translated |
+| `context/nativeLibraryHandler.ml` | `src/context/NativeLibraryHandler.hx` | HXB library branch; SWF/JVM libraries rejected explicitly |
 | `context/nativeLibraries.ml` | `src/context/NativeLibraries.hx` | Draft translated |
 | `context/parallel.ml` | `src/context/Parallel.hx` | Draft translated |
 | `context/platformConfig.ml` | `src/context/PlatformConfig.hx` | Draft translated |
@@ -247,10 +275,11 @@ conformance, or completion of the pre-existing HXB writer. The subsequent runtim
 | `typing/strictMeta.ml` | `src/typing/StrictMeta.hx` | Draft translated |
 | `typing/tanon_identification.ml` | `src/typing/TanonIdentification.hx` | Draft translated |
 | `typing/typeload.ml` | `src/typing/Typeload.hx` | Draft translated |
+| `typing/typeloadCacheHook.ml` | `src/typing/TypeloadCacheHook.hx` | Translated (also used by `MacroContext` for fake modules) |
 | `typing/typeloadCheck.ml` | `src/typing/TypeloadCheck.hx` | Draft translated |
 | `typing/typeloadFields.ml` | `src/typing/TypeloadFields.hx` | Draft translated |
 | `typing/typeloadFunction.ml` | `src/typing/TypeloadFunction.hx` | Draft translated |
-| `typing/typeloadModule.ml` | `src/typing/ModuleTyping.hx`; legacy `TypeloadModule.hx` | Source pipeline integrated during compile phase |
+| `typing/typeloadModule.ml` | `src/typing/ModuleTyping.hx`; legacy `TypeloadModule.hx` | Source pipeline integrated during compile phase; `hxb_reader_api_typeload` and `load_hxb_module` translated |
 | `typing/typeloadParse.ml` | `src/typing/SourceParser.hx`; legacy `TypeloadParse.hx` | Source pipeline integrated during compile phase |
 | `typing/typer.ml` | `src/typing/Typer.hx` | Draft translated |
 | `typing/typerBase.ml` | `src/typing/TyperBase.hx` | Draft translated |
@@ -267,11 +296,18 @@ conformance, or completion of the pre-existing HXB writer. The subsequent runtim
 | `core/display/displayPosition.ml` | `src/core/display/DisplayPosition.hx` | Shared position state |
 | `core/display/javadoc.ml` | `src/core/display/Javadoc.hx` | Documentation parsing |
 | `codegen/genxml.ml` | `src/codegen/Genxml.hx` | RTTI serializer |
-| `compiler/compilationCache.ml` | `src/compiler/CompilationCache.hx` | Cache classes; batch runs use the cache like upstream (parse cache, context signs) |
+| `compiler/compilationCache.ml` | `src/compiler/CompilationCache.hx` | Server cache |
+| `compiler/pipeThings.ml` | `src/compiler/PipeThings.hx` | Client/server transport (host streams, see header) |
+| `compiler/tasks.ml` | `src/compiler/Tasks.hx` | Server maintenance tasks |
+| `compiler/server/server.ml` | `src/compiler/server/Server.hx` | Server loop, `--connect`, `--server-connect` |
+| `compiler/server/serverCache.ml` | `src/compiler/server/ServerCache.hx` | Module cache, `hxb_reader_api_server` |
+| `compiler/server/serverCompilationContext.ml` | `src/compiler/server/ServerCompilationContext.hx` | Server context |
+| `compiler/server/serverConfig.ml` | `src/compiler/server/ServerConfig.hx` | Server configuration |
+| `compiler/server/serverMessage.ml` | `src/compiler/server/ServerMessage.hx` | Verbose server messages |
+| `context/commonCache.ml` | `src/context/CommonCache.hx` | Cache contexts and signatures |
 | `compiler/displayOutput.ml` | `src/compiler/DisplayOutput.hx` | Display services |
 | `compiler/displayProcessing.ml` | `src/compiler/DisplayProcessing.hx` | Display services |
 | `compiler/displayProcessingGlobals.ml` | `src/compiler/DisplayProcessingGlobals.hx` | Display services |
-| `context/commonCache.ml` | `src/context/CommonCache.hx` | Context cache/signatures; native-library cache tasks belong to the native-library milestone |
 | `context/display/diagnostics.ml` | `src/context/display/Diagnostics.hx` | Display services |
 | `context/display/diagnosticsPrinter.ml` | `src/context/display/DiagnosticsPrinter.hx` | Display services |
 | `context/display/display.ml` | `src/context/display/Display.hx` | Display services |
@@ -306,17 +342,7 @@ A scope-review entry is not a blanket exclusion of shared batch-compiler helpers
 | `codegen/jClass.ml` | Other target/library support |
 | `codegen/javaModern.ml` | Other target/library support |
 | `codegen/swfLoader.ml` | Other target/library support |
-| `compiler/hxb/hxbLib.ml` | HXB input milestone |
-| `compiler/hxb/hxbReader.ml` | HXB input milestone |
-| `compiler/hxb/hxbReaderApi.ml` | HXB input milestone |
-| `compiler/pipeThings.ml` | Server/client pipe and socket transport |
-| `compiler/server/server.ml` | Server milestone |
-| `compiler/server/serverCache.ml` | Server milestone; `parse_file` and the parse-cache part of `enable_cache_mode` are in `src/compiler/server/ServerCache.hx` for batch display |
-| `compiler/server/serverCompilationContext.ml` | Server milestone |
-| `compiler/server/serverConfig.ml` | Server milestone; the configuration values are in `src/compiler/server/ServerConfig.hx` |
-| `compiler/server/serverMessage.ml` | Server milestone |
-| `compiler/tasks.ml` | Server maintenance task scheduling |
-| `context/nativeLibraryHandler.ml` | SWF/JVM library and HXB input handlers; later milestones |
+| `context/nativeLibraryHandler.ml` | SWF/JVM library handlers (`SwfLoader`, `JavaModern`); the HXB branch is translated |
 | `context/sourcemaps.ml` | Ordinary output-target source maps |
 | `core/json/jsonRpcSocket.ml` | Display/server JSON-RPC transport |
 | `filters/ES6Ctors.ml` | Other target/library support |
@@ -410,7 +436,6 @@ A scope-review entry is not a blanket exclusion of shared batch-compiler helpers
 | `macro/macroApi.ml` | Macro runtime/API milestone |
 | `prebuild.ml` | OCaml build/runtime adapter; no mechanical compiler-module port |
 | `typing/macroContext.ml` | Macro context milestone |
-| `typing/typeloadCacheHook.ml` | Cache/server integration; shared batch pieces may need extraction |
 
 ## Additional draft support files
 

@@ -23,7 +23,7 @@ class TexprBuilder {
  public function instanceField(e:TExpr,c:TClass,params:Array<T>,cf:TClassField,t:T):TExpr return mk(TField(e,FInstance(c,params,cf)),t,e.epos);
  public function int(i:Int,p:Pos):TExpr return mk(TConst(TInt(i)),basic.tint,p);
  public function meta0(m:Dynamic,e:TExpr):TExpr return mk(TMeta({meta:m,exprs:[],pos:e.epos},e),e.etype,e.epos);
- public function meta1(m:Dynamic,marg1:Dynamic,e:TExpr):TExpr return mk(TMeta({meta:m,exprs:[marg1],pos:e.epos},e),e.etype,e.epos);
+ public function meta1(m:Dynamic,marg1:core.Ast.Expr,e:TExpr):TExpr return mk(TMeta({meta:m,exprs:[marg1],pos:e.epos},e),e.etype,e.epos);
  public function makeNull(t:T,p:Pos):TExpr return mk(TConst(TNull),t,p);
  public function opBoolAnd(e1:TExpr,e2:TExpr):TExpr return binop(OpBoolAnd,e1,e2,basic.tbool);
  public function opEq(e1:TExpr,e2:TExpr):TExpr return binop(OpEq,e1,e2,basic.tbool);

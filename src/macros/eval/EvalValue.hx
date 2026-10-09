@@ -12,8 +12,9 @@ import haxe.io.Bytes;
 	Deviations:
 	- Strings (`Vstring`) hold a native string. Their length and indices are in
 	  code points, as Eval's UTF-8 strings, see `EvalString`.
-	- libuv handles (`Vhandle`), mbedtls instances and OCaml domains are not
-	  implemented; the natives using them fail explicitly.
+	- libuv handles (`Vhandle`) and mbedtls instances hold host objects; they
+	  only exist on hosts implementing them (see `EvalLuv`, `EvalSsl`). OCaml
+	  domains are not implemented.
 	- `IObjectMap` cannot reproduce OCaml's structural hash of runtime values,
 	  so its iteration order is that of a single bucket (newest first).
 **/
@@ -200,9 +201,44 @@ enum VprototypeKind {
 	PObject;
 }
 
-/** libuv handles are not implemented (no instance can be created). **/
-class Vhandle {
-	function new() {}
+/**
+	libuv handles (eval.luv). The payloads are host objects (see `EvalLuv`):
+	integer ids of the host's libuv objects, `EvalLuv.LuvBuffer` for buffers,
+	Bytes for socket addresses, `EvalLuv.LuvRedirection` for redirections.
+**/
+enum Vhandle {
+	HLoop(h:Dynamic);
+	HIdle(h:Dynamic);
+	HTimer(h:Dynamic);
+	HAsync(h:Dynamic);
+	HBuffer(h:Dynamic);
+	HSockAddr(h:Dynamic);
+	HTcp(h:Dynamic);
+	HUdp(h:Dynamic);
+	HPipe(h:Dynamic);
+	HTty(h:Dynamic);
+	HFile(h:Dynamic);
+	HDir(h:Dynamic);
+	HSignal(h:Dynamic);
+	HProcess(h:Dynamic);
+	HRedirection(h:Dynamic);
+	HAddrRequest(h:Dynamic);
+	HNameRequest(h:Dynamic);
+	HFileRequest(h:Dynamic);
+	HRandomRequest(h:Dynamic);
+	HThreadPoolRequest(h:Dynamic);
+	HFileModeNumeric(h:Dynamic);
+	HFsEvent(h:Dynamic);
+	HThread(h:Dynamic);
+	HOnce(h:Dynamic);
+	HMutex(h:Dynamic);
+	HRwLock(h:Dynamic);
+	HSemaphore(h:Dynamic);
+	HCondition(h:Dynamic);
+	HBarrier(h:Dynamic);
+	HFsPoll(h:Dynamic);
+	HPrepare(h:Dynamic);
+	HCheck(h:Dynamic);
 }
 
 enum Value {
@@ -289,7 +325,7 @@ enum VinstanceKind {
 	IBuffer(b:VstringBuffer); // StringBuf
 	IPos(p:Pos);
 	IUtf8(b:StringBuf);
-	IProcess(p:sys.io.Process);
+	IProcess(p:EvalProcess);
 	IInChannel(i:haxe.io.Input, eof:{v:Bool}); // FileInput
 	IOutChannel(o:haxe.io.Output); // FileOutput
 	ISocket(s:Dynamic);
@@ -304,6 +340,13 @@ enum VinstanceKind {
 	ITypeDecl(m:core.TType.ModuleType);
 	ILazyType(l:core.TType.TLazy, f:Void->Value);
 	IRef(o:Dynamic);
+	// SSL (contexts are host handles: hxc.NativeSsl on the hxc host)
+	IMbedtlsConfig(c:Dynamic);
+	IMbedtlsCtrDrbg(c:Dynamic);
+	IMbedtlsEntropy(c:Dynamic);
+	IMbedtlsPkContext(c:Dynamic);
+	IMbedtlsSsl(c:Dynamic);
+	IMbedtlsX509Crt(c:Dynamic);
 	INormal;
 	IAtomicBool(b:{v:Bool});
 	IAtomicInt(i:{v:Int});
@@ -430,6 +473,24 @@ class DomainMutex {
 class EvalValueTools {
 	public static function vstringEqual(s1:Vstring, s2:Vstring):Bool return s1 == s2 || s1.sstring == s2.sstring;
 
+	/** `same_handle`: the host objects compare physically (ids by value). **/
+	public static function sameHandle(h1:Vhandle, h2:Vhandle):Bool {
+		return switch [h1, h2] {
+			case [HLoop(h1), HLoop(h2)] | [HIdle(h1), HIdle(h2)] | [HTimer(h1), HTimer(h2)] | [HAsync(h1), HAsync(h2)] | [HBuffer(h1), HBuffer(h2)] |
+				[HSockAddr(h1), HSockAddr(h2)] | [HTcp(h1), HTcp(h2)] | [HPipe(h1), HPipe(h2)] | [HTty(h1), HTty(h2)] | [HFile(h1), HFile(h2)] |
+				[HDir(h1), HDir(h2)] | [HUdp(h1), HUdp(h2)] | [HSignal(h1), HSignal(h2)] | [HProcess(h1), HProcess(h2)] |
+				[HRedirection(h1), HRedirection(h2)] | [HFileRequest(h1), HFileRequest(h2)] | [HNameRequest(h1), HNameRequest(h2)] |
+				[HAddrRequest(h1), HAddrRequest(h2)] | [HRandomRequest(h1), HRandomRequest(h2)] | [HThreadPoolRequest(h1), HThreadPoolRequest(h2)] |
+				[HFileModeNumeric(h1), HFileModeNumeric(h2)] | [HFsEvent(h1), HFsEvent(h2)] | [HOnce(h1), HOnce(h2)] | [HMutex(h1), HMutex(h2)] |
+				[HRwLock(h1), HRwLock(h2)] | [HSemaphore(h1), HSemaphore(h2)] | [HCondition(h1), HCondition(h2)] | [HBarrier(h1), HBarrier(h2)] |
+				[HFsPoll(h1), HFsPoll(h2)] | [HPrepare(h1), HPrepare(h2)] | [HCheck(h1), HCheck(h2)]:
+				h1 == h2;
+			case [HThread(h1), HThread(h2)]: // Luv.Thread.equal
+				(h1 : haxe.Int64) == (h2 : haxe.Int64);
+			case _: false;
+		}
+	}
+
 	public static function equals(a:Value, b:Value):Bool {
 		return switch [a, b] {
 			case [VTrue, VTrue] | [VFalse, VFalse] | [VNull, VNull]: true;
@@ -447,7 +508,7 @@ class EvalValueTools {
 			case [VPrototype(proto1), VPrototype(proto2)]: proto1.ppath == proto2.ppath;
 			case [VFieldClosure(v1, f1), VFieldClosure(v2, f2)]: Reflect.compareMethods(f1, f2) && equals(v1, v2);
 			case [VNativeString(s1), VNativeString(s2)]: s1.compare(s2) == 0;
-			case [VHandle(h1), VHandle(h2)]: h1 == h2;
+			case [VHandle(h1), VHandle(h2)]: sameHandle(h1, h2);
 			case [VLazy(f1), _]: equals(f1.force(), b);
 			case [_, VLazy(f2)]: equals(a, f2.force());
 			// physical equality on the remaining values (immediates and boxed int64s)

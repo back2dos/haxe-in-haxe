@@ -164,7 +164,8 @@ class Path {
 			for (file in FileSystem.readDirectory(directory)) if (file != "." && file != "..") {
 				var full = directory + file;
 				if (FileSystem.isDirectory(full) && file.charCodeAt(0) >= "a".code && file.charCodeAt(0) <= "z".code && !(platformNames.indexOf(file) >= 0 && file != target)) {
-					if (recursive) { result.push(full); loop(full + "/"); } else result.push(full);
+					// consed onto the accumulator, as upstream
+					if (recursive) { result.unshift(full); loop(full + "/"); } else result.unshift(full);
 				}
 			}
 		} catch (_:Dynamic) {};

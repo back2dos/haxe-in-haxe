@@ -14,6 +14,23 @@ to the reference. Setting `HAXE_STD_PATH` alone is insufficient for native
 Haxe: its compiled-in installation path can otherwise leak into serialized
 source positions and produce a false first payload mismatch.
 
+## Compilation server and haxelib
+
+`server.py` starts the reference and the port as compilation servers
+(`--wait`) and sends both the same requests through `--connect`: every
+conformance case several times in a row (cache reuse), an edit/invalidate
+sequence on a scratch project (whose verbose `-v` server logs must also agree),
+program output, stdin forwarding, `--cmd`, errors and `--next` (`misc`), and
+length-prefixed requests over `--server-connect`. `haxelib.py` compiles `-L`
+invocations against a local haxelib repository (`haxelib newrepo` and `haxelib
+dev`, no network), in batch and (`--server`) through the servers.
+
+```sh
+HAXE_REFERENCE=haxe/haxe python3 test/server.py -j 2
+HAXE_REFERENCE=haxe/haxe python3 test/server.py --cases test/conformance-macro-cases.txt --scenario cases -j 2
+HAXE_REFERENCE=haxe/haxe python3 test/haxelib.py --server
+```
+
 ## Eval-HXB execution
 
 Run:

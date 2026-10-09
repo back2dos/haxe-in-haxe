@@ -2787,18 +2787,18 @@ class MacroApiImpl {
 					var pos = getApiCallPos();
 					compilerError(core.Error.makeError(core.Error.ErrorMsg.Custom(msg), pos));
 				} catch (e:NotFound) {
-					// com.cs#taint_module mpath ServerInvalidateModule
-					notSupported("Invalidating modules of the compilation server cache");
+					com.cs.taintModule(mpath, ServerInvalidateModule);
 				}
 				vnull;
 			})},
 			{name: "server_invalidate_files", value: vfun1(a -> {
 				var com = ccom();
+				var cs = com.cs;
 				for (v in decodeArray(a)) {
 					var s = decodeString(v);
 					var s = com.partScope.fileKeys.get(s);
-					// cs#taint_modules s ServerInvalidateFiles; cs#remove_files s
-					notSupported("Invalidating files of the compilation server cache");
+					cs.taintModules(s, ServerInvalidateFiles);
+					cs.removeFiles(s);
 				}
 				vnull;
 			})},

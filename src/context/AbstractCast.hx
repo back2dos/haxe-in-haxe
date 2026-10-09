@@ -19,6 +19,10 @@ import core.ds.NotFound;
 import context.SafeCom.SafeContext;
 // Draft mechanical translation of haxe/src/context/abstractCast.ml; unvalidated.
 // Macro dispatch retains the upstream hook; its runtime remains a later milestone.
+// find_array_read_access / find_array_write_access results (OCaml tuples)
+typedef ArrayReadAccess = {field:TClassField, type:T, ret:T, index:TExpr};
+typedef ArrayWriteAccess = {field:TClassField, type:T, ret:T, index:TExpr, value:TExpr};
+
 class AbstractCast {
 	static final castStack:Array<TClassField> = [];
 	public static function makeStaticCall(ctx:context.Typecore.Typer, c:TClass, cf:TClassField, a:TAbstract, pl:TParams, args:Array<TExpr>, t:T, p:Pos):TExpr {
@@ -138,7 +142,7 @@ class AbstractCast {
 		}
 		return {map:map,checkConstraints:checkConstraints,getTa:getTa};
 	}
-	public static function findArrayReadAccessRaise(ctx:context.Typecore.Typer, a:TAbstract, pl:TParams, e1:TExpr, p:Pos):Dynamic {
+	public static function findArrayReadAccessRaise(ctx:context.Typecore.Typer, a:TAbstract, pl:TParams, e1:TExpr, p:Pos):ArrayReadAccess {
 		for (cf in a.aArray) {
 			var prepared = prepareArrayAccessField(ctx,a,pl,cf,p);
 			var tf = core.TFunctions.follow(prepared.map(cf.cfType));
@@ -157,7 +161,7 @@ class AbstractCast {
 		}
 		throw NotFound.raise();
 	}
-	public static function findArrayWriteAccessRaise(ctx:context.Typecore.Typer, a:TAbstract, pl:TParams, e1:TExpr, e2:TExpr, p:Pos):Dynamic {
+	public static function findArrayWriteAccessRaise(ctx:context.Typecore.Typer, a:TAbstract, pl:TParams, e1:TExpr, e2:TExpr, p:Pos):ArrayWriteAccess {
 		for (cf in a.aArray) {
 			var prepared = prepareArrayAccessField(ctx,a,pl,cf,p);
 			var tf = core.TFunctions.follow(prepared.map(cf.cfType));
@@ -177,12 +181,12 @@ class AbstractCast {
 		}
 		throw NotFound.raise();
 	}
-	public static function findArrayReadAccess(ctx:context.Typecore.Typer, a:TAbstract, tl:TParams, e1:TExpr, p:Pos):Dynamic {
+	public static function findArrayReadAccess(ctx:context.Typecore.Typer, a:TAbstract, tl:TParams, e1:TExpr, p:Pos):ArrayReadAccess {
 		try return findArrayReadAccessRaise(ctx,a,tl,e1,p) catch (_:NotFound) {
 			return Error.raiseTypingError("No @:arrayAccess function for " + core.TPrinting.sType(core.TPrinting.printContext(),TAbstract(a,tl)) + " accepts argument of " + core.TPrinting.sType(core.TPrinting.printContext(),e1.etype),p);
 		}
 	}
-	public static function findArrayWriteAccess(ctx:context.Typecore.Typer, a:TAbstract, tl:TParams, e1:TExpr, e2:TExpr, p:Pos):Dynamic {
+	public static function findArrayWriteAccess(ctx:context.Typecore.Typer, a:TAbstract, tl:TParams, e1:TExpr, e2:TExpr, p:Pos):ArrayWriteAccess {
 		try return findArrayWriteAccessRaise(ctx,a,tl,e1,e2,p) catch (_:NotFound) {
 			return Error.raiseTypingError("No @:arrayAccess function for " + core.TPrinting.sType(core.TPrinting.printContext(),TAbstract(a,tl)) + " accepts arguments of " + core.TPrinting.sType(core.TPrinting.printContext(),e1.etype) + " and " + core.TPrinting.sType(core.TPrinting.printContext(),e2.etype),p);
 		}

@@ -176,11 +176,14 @@ class OcamlHashtbl<K, V> {
 		return acc;
 	}
 
-	/** OCaml's `Hashtbl.hash` / `Int.hash` on an int in the 32-bit range (caml_hash_mix_intnat, then FINAL_MIX). **/
-	public static function hashInt(d:Int):Int {
-		// caml_hash mixes the tagged value Val_long(d) = 2d+1; for a 32-bit d the
-		// 64-bit fold `(i >> 32) ^ (i >> 63) ^ i` keeps only its low 32 bits.
-		var h = mixWord(0, (d << 1) | 1);
+	/**
+		OCaml's `Hashtbl.hash` / `Int.hash` on an int in the 32-bit range
+		(caml_hash_mix_intnat, then FINAL_MIX). caml_hash mixes the tagged value
+		2n+1; caml_hash_mix_intnat folds its high word into the low one, which for
+		32-bit n leaves the low 32 bits of 2n+1.
+	**/
+	public static function hashInt(n:Int):Int {
+		var h = mixWord(0, (n << 1) | 1);
 		h ^= h >>> 16;
 		h = mul32(h, 0x85ebca6b);
 		h ^= h >>> 13;

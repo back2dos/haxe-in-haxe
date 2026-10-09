@@ -146,7 +146,8 @@ class ImportHandling {
       function findMainTypeStatic():Null<ResolvedImport> {
        try {
         var main=findType(tname);
-        try return addStaticInit(main,alias,subName) catch(_:NotFound) {
+        // HashLink 2.0 JIT: an early exit through two nested try blocks restores only the innermost trap, leaving a dangling handler; the result is returned from the outer try only.
+        var resolved=try addStaticInit(main,alias,subName) catch(_:NotFound) {
          var info=switch resolveTypedef(main) {
           case TClassDecl(c):{parent:"Class<"+Globals.sTypePath(c.clPath)+">",kind:"field",names:PMap.keys(c.clStatics)};
           case TAbstractDecl(a) if(a.aImpl!=null):{parent:"Abstract<"+Globals.sTypePath(md.mPath)+">",kind:"field",names:PMap.keys(a.aImpl.clStatics)};
@@ -158,6 +159,7 @@ class ImportHandling {
          displayError(ctx.com,StringError.stringError(subName,info.names,info.parent+" has no "+info.kind+" "+subName),p);
          return null;
         }
+        return resolved;
        } catch(_:NotFound) return failUsefully(subName,p);
       }
       addLazyResolution(function() {

@@ -75,7 +75,7 @@ class ParserEntry {
 	public static function isTrue(value:SmallType):Bool return switch value { case TBool(false),TNull,TFloat(0):false; case _:true; };
 	public static function sSmallType(value:SmallType):String return switch value { case TNull:"null"; case TBool(_):"boolean"; case TFloat(_):"float"; case TString(_):"string"; case TVersion(_):"version"; };
 	public static function sValue(value:SmallType):String return switch value {
-		case TNull:"null"; case TBool(b):"boolean "+Std.string(b); case TFloat(f):"float "+Std.string(f);
+		case TNull:"null"; case TBool(b):"boolean "+Std.string(b); case TFloat(f):"float "+core.Numeric.stringOfFloat(f);
 		case TString(s):"string \""+s+"\""; case TVersion(v):"version "+SemVerTools.toString(v);
 	};
 	public static function parseVersion(s:String,p:Pos):SmallType {

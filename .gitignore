@@ -4,3 +4,6 @@
 /examples/generated/
 /.haxelib/
 __pycache__/
+/backend/std/
+/.claude/worktrees/
+*.o

@@ -56,8 +56,6 @@ import macros.eval.EvalContext.RunTimeException;
 	  not available: the port's HxbWriterConfig has no DataReaderApi/DataWriterApi functors.
 	  `get/set_hxb_writer_config` therefore raise a macro exception when they would need
 	  them (the `None`/`null` branches are kept).
-	- `TypeloadCacheHook.create_fake_module` is not ported as its own module; it is
-	  translated below as `createFakeModule` (with its global `fake_modules` table).
 **/
 typedef MacroMethod = {args:Array<{name:String, optional:Bool, type:T}>, ret:T, cls:TClass, field:TClassField};
 
@@ -336,30 +334,6 @@ class MacroContext {
 		};
 	}
 
-	static inline function taintModule(com:CommonContext, mpath:GlobalTypePath, reason:core.TType.ModuleTaintingReason):Void
-		(com.cs : compiler.CompilationCache.Cache).taintModule(mpath, reason);
-
-	// TypeloadCacheHook.fake_modules / create_fake_module
-	static final fakeModules:Map<String, ModuleDef> = new Map();
-
-	static function createFakeModule(com:CommonContext, file:String):ModuleDef {
-		var key:String = com.partScope.fileKeys.get(file);
-		var file = core.Path.getFullPath(file);
-		var mdep = fakeModules.get(key);
-		if (mdep == null) {
-			mdep = {
-				mId: allocMid(),
-				mPath: {pack: ["$DEP"], name: file},
-				mTypes: [],
-				mStatics: null,
-				mExtra: moduleExtra(file, Define.getSignature(com.defines), Common.fileTime(file), MFake, com.partScope.compilationStep, [])
-			};
-			fakeModules.set(key, mdep);
-		}
-		com.moduleLut.add(mdep.mPath, mdep);
-		return mdep;
-	}
-
 	static function previouslyDefinedError(m:ModuleDef, mpath:GlobalTypePath, p:Pos):Dynamic {
 		var pos:Pos = {pfile: core.Path.UniqueKey.lazyPath(m.mExtra.mFile), pmin: 0, pmax: 0};
 		return macros.eval.EvalMain.compilerError(Error.makeError(Custom("Cannot redefine module " + Globals.sTypePath(mpath)), p,
@@ -565,7 +539,7 @@ class MacroContext {
 					var m = ctx.com.moduleLut.find(mpath);
 					previouslyDefinedError(m, mpath, p);
 				} catch (_:NotFound) {
-					taintModule(ctx.com, mpath, DefineType);
+					ctx.com.cs.taintModule(mpath, DefineType);
 					var mdep = mdep == null ? ctx.m.curmod : ModuleTyping.loadModule(ctx, AstTools.parsePath(mdep), pos, MDepFromMacro);
 					var mnew = ModuleTyping.typeModule(ctx.com, ctx.g, mpath,
 						ctx.com.partScope.fileKeys.generateVirtual(mpath, ctx.com.partScope.compilationStep), [{definition: tdef, pos: pos}], pos,
@@ -605,7 +579,7 @@ class MacroContext {
 				} else
 					ModuleTyping.typeTypesIntoModule(ctx.com, ctx.g, ctx.m.curmod, types, pos);
 			} catch (_:NotFound) {
-				taintModule(ctx.com, mpath, DefineModule);
+				ctx.com.cs.taintModule(mpath, DefineModule);
 				var mnew = ModuleTyping.typeModule(ctx.com, ctx.g, mpath, ctx.com.partScope.fileKeys.generateVirtual(mpath, ctx.com.partScope.compilationStep),
 					types, pos);
 				mnew.mExtra.mKind = MFake;
@@ -616,12 +590,12 @@ class MacroContext {
 		};
 		api.moduleDependency = function(mpath, file) {
 			var m = typingTimer(ctx, false, function(ctx) {
-				var oldDeps = ctx.m.curmod.mExtra.mDeps;
+				var oldDeps = ctx.m.curmod.mExtra.mDeps.copy(); // m_deps is a persistent map upstream
 				var m = ModuleTyping.loadModule(ctx, AstTools.parsePath(mpath), p, MDepFromMacro);
 				ctx.m.curmod.mExtra.mDeps = oldDeps;
 				return m;
 			});
-			addDependency(m, createFakeModule(ctx.com, file), MDepFromMacro);
+			addDependency(m, TypeloadCacheHook.createFakeModule(ctx.com, file), MDepFromMacro);
 		};
 		api.currentModule = function() {
 			return ctx.m.curmod;

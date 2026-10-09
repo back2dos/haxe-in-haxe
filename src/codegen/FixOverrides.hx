@@ -12,7 +12,8 @@ class FixOverrides {
   catch (e:Dynamic) {if (e!="Not_found") throw e;}
   try {
    if (com.platform==Cpp||com.platform==Hl) throw "Not_found";
-   for (parent in c.clImplements) try return findField(com,parent.cls,f) catch (e:Dynamic) {if (e!="Not_found") throw e;}
+   // HashLink 2.0 JIT: an early exit through two nested try blocks restores only the innermost trap, leaving a dangling handler.
+   for (parent in c.clImplements) {var r=try findField(com,parent.cls,f) catch (e:Dynamic) {if (e!="Not_found") throw e; null;} if (r!=null) return r;}
    throw "Not_found";
   } catch (e:Dynamic) {if (e!="Not_found") throw e;}
   var field=c.clFields.get(f.cfName);if (field==null) throw "Not_found";
