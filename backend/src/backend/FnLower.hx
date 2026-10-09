@@ -1122,16 +1122,18 @@ class FnLower {
 					});
 					coerce(ELocal(old), t1, tyOf(e));
 				}
-			case Not: ENot(cond(e1));
+			// the result has the representation of tyOf(e), which may be Null<T>
+			case Not: coerce(ENot(cond(e1)), TBool, tyOf(e));
 			case Neg:
 				var t1 = tyOf(e1);
 				var x = value(e1);
 				switch tyOf(e) {
 					case TF64: EConv(FNeg, coerce(x, t1, TF64));
 					case TI32: EBin(Sub, EInt(0), coerce(x, t1, TI32));
+					case t = TRef(RNull(TI32)): coerce(EBin(Sub, EInt(0), coerce(x, t1, TI32)), TI32, t);
 					case t: coerce(EConv(FNeg, coerce(x, t1, TF64)), TF64, t);
 				}
-			case NegBits: EBin(Xor, coerce(value(e1), tyOf(e1), TI32), EInt(-1));
+			case NegBits: coerce(EBin(Xor, coerce(value(e1), tyOf(e1), TI32), EInt(-1)), TI32, tyOf(e));
 			case Spread: fail("spread", e);
 		}
 	}

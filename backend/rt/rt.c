@@ -1,5 +1,6 @@
 // EXPERIMENTAL runtime for the C output of backend/; see rt.h.
 // GC, startup, exceptions, boxes, arrays.
+#define _GNU_SOURCE // madvise (cosmocc)
 #include "rt.h"
 #include <stdio.h>
 #include <stdlib.h>

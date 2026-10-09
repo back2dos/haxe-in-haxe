@@ -1,9 +1,11 @@
 #!/bin/sh
 # EXPERIMENTAL: builds the backend tool, then compiles a program with it to C
 # and to a native binary (CC, default tcc for fast builds; CC="gcc -O2" for
-# speed). When EMXX is set (e.g. EMXX=em++), also to linear-memory wasm.
+# speed; CC="cosmocc -O2" for a portable APE binary, see bench/COSMO.md).
+# When EMXX is set (e.g. EMXX=em++), also to linear-memory wasm.
 #   sh backend/build.sh [source dir] [main class]     (default: backend/bench Bench)
 #   sh backend/build.sh port                          (the port itself: bin/backend/hih/hih)
+#   CC="cosmocc -O2" BIN=hih.com sh backend/build.sh port
 #   HXFLAGS="-D retain" VARIANT=-retain sh backend/build.sh
 set -eu
 cd "$(dirname "$0")/.."
@@ -12,7 +14,7 @@ CC=${CC:-tcc}
 if [ "${1:-}" = port ]; then
 	OUT=bin/backend/hih
 	ARGS="-cp src -main haxe.Main -cp bench/js-shims -D disable-parallelism"
-	BIN=hih
+	BIN=${BIN:-hih}
 else
 	MAIN=${2:-Bench}
 	OUT=bin/backend/$MAIN${VARIANT:-}
@@ -28,7 +30,8 @@ fi
 # hxnodejs's stdout flush fails on pipes, hence the file
 HAXE_STD_PATH=${HAXE_STD_PATH:-$PWD/haxe/std} node --stack-size=65500 bin/backend/wbk.js "$OUT/prog" \
 	-cp backend/std $ARGS --custom-target hxc ${HXFLAGS:-} > "$OUT/wbk.log" 2>&1 || { cat "$OUT/wbk.log"; exit 1; }
-$CC -w -I backend/rt "$OUT/prog.c" backend/rt/rt*.c -lm -o "$OUT/$BIN"
+# slots are read as int32/double/pointer through casts (FI/FD/FP): no strict aliasing
+$CC -w -fno-strict-aliasing -I backend/rt "$OUT/prog.c" backend/rt/rt*.c -lm -o "$OUT/$BIN"
 # linear-memory wasm, compiled as C++ so try/catch uses wasm exception handling
 if [ -n "${EMXX:-}" ]; then
 	for f in backend/rt/rt*.c; do emcc -O2 -w -c -fwasm-exceptions -I backend/rt "$f" -o "$OUT/$(basename "$f" .c)_wasm.o"; done
