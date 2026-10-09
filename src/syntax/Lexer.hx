@@ -114,7 +114,7 @@ class Lexer {
 		while (i<code.index) {
 			var c=StringTools.fastCodeAt(src,i++);
 			if (c=="\r".code && i<n && StringTools.fastCodeAt(src,i)=="\n".code) i++;
-			if (c=="\r".code || c=="\n".code) {ctx.file.lline++;ctx.file.llines.push({offset:i,line:ctx.file.lline});}
+			if (c=="\r".code || c=="\n".code) {ctx.file.lline++;ctx.file.llines.push({offset:code.cp(i),line:ctx.file.lline});}
 		}
 	}
 	public static function readToken(ctx:LexerContext,code:Lexer):LexedToken {
@@ -143,7 +143,7 @@ class Lexer {
 	}
 	public static function lexXml(ctx:LexerContext,p:Int,code:Lexer):Int {
 		code.file=ctx.file.lfile;
-		if (p+1!=code.index) code.fail(InvalidCharacter(code.current().charCodeAt(0)),code.index);
+		if (p+1!=code.cp(code.index)) code.fail(InvalidCharacter(code.current().charCodeAt(0)),code.index);
 		var start=code.index, name=code.xmlName();
 		ctx.buf.add("<"+name);
 		var open="<"+name, close="</"+name+">", depth=0, inOpen=name!="";
@@ -154,7 +154,7 @@ class Lexer {
 				if (code.current()==">") {
 					code.index++;
 					var tag=code.source.substr(offset,code.index-offset);ctx.buf.add(tag);
-					if (tag==close) {if (depth==0) {updateLines(ctx,code,start);return code.index;} depth--;}
+					if (tag==close) {if (depth==0) {updateLines(ctx,code,start);return code.cp(code.index);} depth--;}
 					inOpen=false;continue;
 				}
 				code.index=offset;
@@ -164,10 +164,10 @@ class Lexer {
 				if (tag==open) {depth++;inOpen=true;} else inOpen=false;
 			} else if (code.starts("/>")) {
 				code.index+=2;ctx.buf.add("/>");if (inOpen) depth--;
-				if (depth<0) {updateLines(ctx,code,start);return code.index;} inOpen=false;
+				if (depth<0) {updateLines(ctx,code,start);return code.cp(code.index);} inOpen=false;
 			} else {ctx.buf.add(code.current());code.index++;}
 		}
-		code.fail(UnterminatedMarkup,p);return 0;
+		code.failPos(UnterminatedMarkup,p);return 0;
 	}
 	public static function errorMsg(error:LexerErrorMsg):String return switch error {
 		case InvalidCharacter(c):c>32&&c<128?"Invalid character '"+String.fromCharCode(c)+"'":"Invalid character 0x"+StringTools.hex(c,2);
@@ -183,10 +183,33 @@ class Lexer {
 	var file:String;
 	var index:Int;
 
+	// UTF-16 indices of the surrogate pairs of `source` (null without any): sedlex
+	// positions count code points, so a pair is one position (see `cp`).
+	var pairs:Null<Array<Int>>;
+
 	public function new(source:String, ?file = "?") {
 		this.source = source;
 		this.file = file;
 		index = 0;
+		for (i in 0...source.length) {
+			var c = StringTools.fastCodeAt(source, i);
+			if (c >= 0xD800 && c < 0xDC00) {
+				if (pairs == null) pairs = [];
+				pairs.push(i);
+			}
+		}
+	}
+
+	/** The position (code point offset) of the UTF-16 index `i`. **/
+	inline function cp(i:Int):Int return pairs == null ? i : cpPairs(i);
+
+	function cpPairs(i:Int):Int {
+		var lo = 0, hi = pairs.length;
+		while (lo < hi) {
+			var mid = (lo + hi) >>> 1;
+			if (pairs[mid] < i) lo = mid + 1 else hi = mid;
+		}
+		return i - lo;
 	}
 
 	public static function lex(source:String, ?file = "?"):Array<LexedToken> {
@@ -211,8 +234,9 @@ class Lexer {
 		for (i in 0...n) if (StringTools.fastCodeAt(source, index + i) != StringTools.fastCodeAt(value, i)) return false;
 		return true;
 	}
-	function make(token:Token, start:Int):LexedToken return {token: token, pos: {pfile: file, pmin: start, pmax: index}};
-	function fail(message:LexerErrorMsg, at:Int):Dynamic throw new LexerError(message, {pfile: file, pmin: at, pmax: at});
+	function make(token:Token, start:Int):LexedToken return {token: token, pos: {pfile: file, pmin: cp(start), pmax: cp(index)}};
+	function fail(message:LexerErrorMsg, at:Int):Dynamic return failPos(message, cp(at));
+	function failPos(message:LexerErrorMsg, pos:Int):Dynamic throw new LexerError(message, {pfile: file, pmin: pos, pmax: pos});
 	function skipWhitespace():Void {
 		while (!eof()) {
 			var c = StringTools.fastCodeAt(source, index);
@@ -489,7 +513,7 @@ class Lexer {
 			if (isDigitC(c) || c == ".".code) {
 				var save = index;
 				var r = numberToken(start);
-				if (r != null && r.pos.pmax - start >= opLen) return r;
+				if (r != null && r.pos.pmax - cp(start) >= opLen) return r;
 				index = save;
 			}
 			if (starts("//")) {
@@ -501,27 +525,27 @@ class Lexer {
 			if (starts("/*")) {
 				var buf = new StringBuf();
 				var pmax = comment(buf, start);
-				return {token: Comment(buf.toString()), pos: {pfile: file, pmin: start, pmax: pmax}};
+				return {token: Comment(buf.toString()), pos: {pfile: file, pmin: cp(start), pmax: cp(pmax)}};
 			}
 			if (starts("~/")) {
 				index += 2;
 				var buf = new StringBuf();
 				var r = regexp(buf, start);
-				return {token: Const(core.Ast.Constant.Regexp(buf.toString(), r.options)), pos: {pfile: file, pmin: start, pmax: r.pmax}};
+				return {token: Const(core.Ast.Constant.Regexp(buf.toString(), r.options)), pos: {pfile: file, pmin: cp(start), pmax: cp(r.pmax)}};
 			}
 			if (c == '"'.code) {
 				index++;
 				var buf = new StringBuf();
 				var pmax = string(buf, start);
 				var str = try unescape(buf.toString()) catch (e:InvalidEscapeSequence) fail(InvalidEscape(e.c, e.msg), start + e.i);
-				return {token: Const(core.Ast.Constant.String(str, SDoubleQuotes)), pos: {pfile: file, pmin: start, pmax: pmax}};
+				return {token: Const(core.Ast.Constant.String(str, SDoubleQuotes)), pos: {pfile: file, pmin: cp(start), pmax: cp(pmax)}};
 			}
 			if (c == "'".code) {
 				index++;
 				var fmt:FormatContext = {buffer: new StringBuf(), quoteOpen: false, quotePmin: start};
 				var buf = new StringBuf();
 				var pmax = try string2(buf, fmt) catch (_:LexExit) fail(UnterminatedString, start);
-				return {token: Const(core.Ast.Constant.String(fmt.buffer.toString(), SSingleQuotes)), pos: {pfile: file, pmin: start, pmax: pmax}};
+				return {token: Const(core.Ast.Constant.String(fmt.buffer.toString(), SSingleQuotes)), pos: {pfile: file, pmin: cp(start), pmax: cp(pmax)}};
 			}
 			if (c == "#".code) {
 				var e = mLowerIdent(index + 1);

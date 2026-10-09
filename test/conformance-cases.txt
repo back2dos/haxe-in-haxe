@@ -1,7 +1,7 @@
 # Conformance cases for test/conformance.py.
 #   direct <name> <class-path> <main>
 #   module <name> <class-path> <module>     (bare module root, no --main)
-#   hxml   <name> <project-dir> <hxml> <main>
+#   hxml   <name> <project-dir> <hxml> [argument ...]
 # Cases whose reference invocation fails are expected-failure cases: the port
 # must reject them as well. Their reasons are recorded in upstream-hxb-exclusions.md.
 
@@ -142,6 +142,14 @@ module moduleload-TryCatch test unit.moduleload.TryCatch
 module moduleload-ValueSwitch test unit.moduleload.ValueSwitch
 direct moduleload-Basic test/conformance unit.moduleload.Basic
 direct moduleload-HelloWorld test/conformance unit.moduleload.HelloWorld
+
+# The parts of multi-part misc/eval configurations that discovery leaves out
+# (Issue11354/compile.hxml: --cwd proj, then --each over a, b and proj itself;
+# sys-exit/compile00.hxml compiles SysExit0 twice)
+hxml eval-Issue11354-compile-a haxe/tests/misc/eval/projects/Issue11354/proj/a --main Main --interp
+hxml eval-Issue11354-compile-b haxe/tests/misc/eval/projects/Issue11354/proj/b --main Main --interp
+hxml eval-Issue11354-compile-proj haxe/tests/misc/eval/projects/Issue11354/proj --main Main --interp
+hxml eval-sys-exit-compile00 haxe/tests/misc/eval/projects/sys-exit --main SysExit0 --interp
 
 # --- Discovered (test/discover-cases.py) ---
 hxml eval-Issue10107-compile haxe/tests/misc/eval/projects/Issue10107 compile.hxml

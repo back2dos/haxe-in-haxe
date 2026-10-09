@@ -304,6 +304,8 @@ class Common {
  public static function clone(com:CommonContext,isMacroContext:Bool):CommonContext {
   // Shallow copy preserves the explicitly retained references; every upstream reinit follows.
   var out:CommonContext=cast core.ds.Record.copy(com);
+  // global_metadata is an immutable list upstream (prepended to): the clone keeps a snapshot
+  out.globalMetadata=com.globalMetadata.copy();
   out.defines={values:com.defines.values,definesSignature:com.defines.definesSignature};out.cache=null;out.stage=CCreated;out.features=new Map();
   out.emptyClassPath=new core.ClassPath.DirectoryClassPath("",User);out.classPaths=new core.ClassPaths();out.main={mainPath:null,mainFile:null,mainExpr:null};out.types=[];out.callbacks=new CompilerCallbacks();out.modules=[];out.moduleLut=new ModuleLut();out.moduleNonexistentLut=new HashtblLookup();out.fakeModules=new haxe.ds.StringMap();out.loadExternType=[];out.basic=newBasicTypes();out.localWrapper=LocalWrapper.nullWrapper;out.std=nullClass;out.moduleToFile=new HashtblLookup();out.parserCache=new HashtblLookup();out.overloadCache=new HashtblLookup();out.isMacroContext=isMacroContext;out.hxbReaderApi=null;out.hxbReaderStats=HxbReaderStats.create();return out;
  }

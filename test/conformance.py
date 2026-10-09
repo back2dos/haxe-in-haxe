@@ -71,9 +71,16 @@ def parse_cases(cases_file):
             # both compilers compile the arguments against it with --hxb-lib.
             # As for hxml cases, the arguments select their own target.
             cases.append(dict(kind=kind, name=name, cwd=ROOT / parts[2], lib=shlex.split(parts[3]), args=shlex.split(parts[4]), hxml=True))
+        elif kind == "volatile":
+            # volatile <case> <member> <reason ...>: the member's payload depends on the
+            # time of compilation (a macro embeds Date.now()), so two invocations cannot
+            # produce the same bytes; it must exist in both archives but is not compared.
+            case = next(c for c in cases if c["name"] == name)
+            case.setdefault("volatile", set()).add(parts[2])
         elif kind == "hxml":
             # HXML configurations select their own target; only defines and the output are added.
-            cases.append(dict(kind=kind, name=name, cwd=ROOT / parts[2], args=[parts[3]], hxml=True))
+            # Arguments after the hxml are passed after it (hxml <name> <dir> <hxml> [argument ...]).
+            cases.append(dict(kind=kind, name=name, cwd=ROOT / parts[2], args=parts[3:], hxml=True))
         else:
             raise SystemExit("Unknown case kind: " + line)
     return cases
@@ -103,7 +110,7 @@ def first_error(log):
     return (lines[-1] if lines else "")[:200]
 
 
-def compare(expected, actual):
+def compare(expected, actual, volatile=()):
     """Returns None when the archives conform, otherwise a description."""
     try:
         a = zipfile.ZipFile(expected)
@@ -117,7 +124,7 @@ def compare(expected, actual):
         return "member set differs (reference-only %d %s, port-only %d %s)" % (len(only_a), only_a[:3], len(only_b), only_b[:3])
     diffs = []
     for name in sorted(na):
-        if not name.endswith(".hxb"):
+        if not name.endswith(".hxb") or name in volatile:
             continue
         x, y = a.read(name), b.read(name)
         if x != y:
@@ -145,6 +152,11 @@ def main():
     env = os.environ.copy()
     env["HAXE_STD_PATH"] = str(STD)
     env["HAXE_IN_HAXE_STD_PATH"] = str(STD)
+    # Upstream suites that use utest (-lib utest, test/conformance-upstream-cases.txt) find it in
+    # the haxelib repository test/upstream.py sets up; local repositories (.haxelib) still win.
+    upstream_haxelib = ROOT / "test/generated/upstream/.haxelib"
+    if "HAXELIB_PATH" not in env and upstream_haxelib.is_dir():
+        env["HAXELIB_PATH"] = str(upstream_haxelib)
 
     cases = [c for c in parse_cases(ROOT / opts.cases) if not opts.filters or any(f in c["name"] for f in opts.filters)]
     GENERATED.mkdir(parents=True, exist_ok=True)
@@ -200,7 +212,8 @@ def main():
         if pc != 0:
             result.update(status="FAIL", detail="port failed (%s): %s" % (pc, first_error(out / "port.log")))
             return result
-        diff = compare(ref_hxb, port_hxb)
+        volatile = case.get("volatile", set())
+        diff = compare(ref_hxb, port_hxb, volatile)
         if diff:
             result.update(status="FAIL", detail=diff)
             return result
@@ -251,11 +264,13 @@ def main():
                 if code != 0:
                     result.update(status="FAIL", detail="%s port failed: %s" % (what, first_error(out / log)))
                     return result
-                diff = compare(port_hxb, hxb)
+                diff = compare(port_hxb, hxb, volatile)
                 if diff:
                     result.update(status="FAIL", detail="%s port differs from HashLink-executed port: %s" % (what, diff))
                     return result
         members = len(zipfile.ZipFile(ref_hxb).namelist())
+        if volatile:
+            result["note"] = " (%d volatile not compared)" % len(volatile) + result.get("note", "")
         result.update(status="PASS", detail="%d members identical" % members + result.get("note", ""))
         return result
 
