@@ -169,7 +169,29 @@ class EvalLuv {
 
 	static function unhandledException(e:Dynamic):Void exceptionHandler(e);
 
-	static function loopRun(loop:Int, mode:Int):Bool return Uv.loopRun(loop, mode, dispatch);
+	/**
+		uv_run waits without the Eval lock (luv's `Loop.run` releases OCaml's
+		runtime lock) and its callbacks take it. A callback that activates the
+		lock (by starting a thread) holds it until it returns.
+	**/
+	static function loopRun(loop:Int, mode:Int):Bool {
+		EvalLock.leave();
+		var r = try Uv.loopRun(loop, mode, lockedDispatch) catch (e:Dynamic) {
+			EvalLock.enter();
+			throw e;
+		}
+		EvalLock.enter();
+		return r;
+	}
+
+	static function lockedDispatch(id:Int, event:Int, a:Int, b:Dynamic):Void {
+		EvalLock.enter();
+		try dispatch(id, event, a, b) catch (e:Dynamic) {
+			EvalLock.leave();
+			throw e;
+		}
+		EvalLock.leave();
+	}
 
 	// ---- encoders/decoders
 
@@ -2403,7 +2425,7 @@ class EvalLuv {
 				case VHandle(HThread(t)): (t : LuvThreadHandle);
 				case _: EvalExceptions.unexpectedValue(v, "eval.luv.Thread");
 			}
-			encodeIndexResult(thread.join());
+			encodeIndexResult(EvalLock.blocking(() -> thread.join()));
 		})),
 	];
 
@@ -2952,14 +2974,18 @@ class LuvThreadHandle {
 	public static function create(fn:Void->Void):LuvThreadHandle {
 		var finished = new sys.thread.Lock();
 		var t = new LuvThreadHandle(finished);
+		EvalLock.activate();
 		sys.thread.Thread.create(() -> {
 			current.value = t;
+			EvalLock.enter();
 			try {
 				fn();
 			} catch (e:Dynamic) {
+				EvalLock.leave();
 				finished.release();
 				throw e;
 			}
+			EvalLock.leave();
 			finished.release();
 		});
 		return t;
@@ -3043,6 +3069,7 @@ class LuvThreadPool {
 		if (size > 1024) size = 1024;
 		var q = new sys.thread.Deque<LuvWorkRequest>();
 		queue = q;
+		EvalLock.activate();
 		for (_ in 0...size) sys.thread.Thread.create(() -> worker(q));
 	}
 
@@ -3054,7 +3081,12 @@ class LuvThreadPool {
 			if (run) r.state = 2;
 			guard.release();
 			if (!run) continue; // cancelled
-			r.work();
+			EvalLock.enter();
+			try r.work() catch (e:Dynamic) {
+				EvalLock.leave();
+				throw e;
+			}
+			EvalLock.leave();
 			guard.acquire();
 			r.state = 3;
 			guard.release();
@@ -3090,7 +3122,7 @@ class LuvSync {
 		var l = new sys.thread.Lock();
 		waiters.push(l);
 		guard.release();
-		var r = l.wait(timeout);
+		var r = EvalLock.blocking(() -> l.wait(timeout));
 		guard.acquire();
 		if (!r && waiters.remove(l) == false) r = true; // woken meanwhile
 		return r;
@@ -3271,7 +3303,7 @@ class LuvCondition extends LuvSync {
 		waiters.push(l);
 		guard.release();
 		mutex.unlock();
-		var r = l.wait(timeout);
+		var r = EvalLock.blocking(() -> l.wait(timeout));
 		if (!r) {
 			guard.acquire();
 			if (waiters.remove(l) == false) r = true; // signalled meanwhile

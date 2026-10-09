@@ -445,7 +445,7 @@ class DomainMutex {
 
 	public function lock(id:Int):Void {
 		if (downer == id) ddepth++ else {
-			dmutex.acquire();
+			EvalLock.acquireMutex(dmutex);
 			downer = id;
 			ddepth = 1;
 		}

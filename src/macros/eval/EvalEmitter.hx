@@ -309,6 +309,7 @@ class EvalEmitter {
 				while (EvalMisc.isTrue(execCond(env))) {
 					execBody(env);
 					core.ds.GcPolicy.tick(); // loops allocate without calls or typing
+					EvalLock.tick();
 				}
 				return;
 			} catch (_:Continue) {}
@@ -319,6 +320,7 @@ class EvalEmitter {
 		while (EvalMisc.isTrue(execCond(env))) {
 			execBody(env);
 			core.ds.GcPolicy.tick();
+			EvalLock.tick();
 		}
 	}
 
