@@ -28,7 +28,8 @@ utest is installed as upstream CI does (`haxelib git utest
 https://github.com/haxe-utest/utest.git`): cloned into
 test/generated/upstream/libs/utest (at UTEST_COMMIT) and registered in a local
 haxelib repo (test/generated/upstream/.haxelib), which haxelib finds from the
-step directories below it.
+step directories below it. haxeserver (`haxelibInstallGit("Simn", "haxeserver")`)
+is registered the same way, at HAXESERVER_COMMIT.
 
 The third-party projects (Macro.hx `party`) are cloned at the commits pinned
 in PARTY into test/generated/upstream/party/<name>, once, and run in place
@@ -76,6 +77,9 @@ PARTY = {
     "hxcoro": ("https://github.com/HaxeFoundation/hxcoro", "4b1a4d49542c578dc184297b75d125093ca444d2"),
 }
 UTEST_COMMIT = "a055e05e2e872ae12a32b53d0200612345059c38"
+# Macro.hx `haxelibInstallGit("Simn", "haxeserver")` (for the display tests, which run in
+# their own job; test/conformance-upstream-cases.txt compiles their runner)
+HAXESERVER_COMMIT = "fad3af2a59a5b00e4abb3f0b4734b779dba90ba5"
 
 # `haxelib install tests.hxml --always` in tink_core: the latest releases of
 # tink_unittest and deep_equal and their dependencies when this was added,
@@ -187,9 +191,13 @@ def setup_libs() -> None:
     utest = GENERATED / "libs" / "utest"
     if not utest.exists():
         clone("https://github.com/haxe-utest/utest.git", UTEST_COMMIT, utest)
+    haxeserver = GENERATED / "libs" / "haxeserver"
+    if not haxeserver.exists():
+        clone("https://github.com/Simn/haxeserver", HAXESERVER_COMMIT, haxeserver)
     if not (GENERATED / ".haxelib").exists():
         subprocess.run(["haxelib", "newrepo"], cwd=GENERATED, check=True, stdout=subprocess.DEVNULL)
     subprocess.run(["haxelib", "dev", "utest", str(utest)], cwd=GENERATED, check=True, stdout=subprocess.DEVNULL)
+    subprocess.run(["haxelib", "dev", "haxeserver", str(haxeserver)], cwd=GENERATED, check=True, stdout=subprocess.DEVNULL)
 
 
 def main() -> None:

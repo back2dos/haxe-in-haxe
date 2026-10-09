@@ -1,0 +1,237 @@
+# HXB conformance of upstream test suites beyond tests/misc/eval and tests/optimization
+# (test/conformance-cases.txt): the configurations of upstream CI's macro job
+# (haxe/tests/runci/targets/Macro.hx), compiled to HXB instead of being run.
+# Most create a macro context and use utest (-lib utest), which conformance.py
+# finds in the haxelib repository of test/upstream.py (HAXELIB_PATH); set it up
+# with `python3 test/upstream.py --reference <any step>` first. Run with:
+#   HAXE_REFERENCE=haxe/haxe python3 test/conformance.py --cases test/conformance-upstream-cases.txt [--hxb-lib]
+# Format: see conformance-cases.txt (hxml cases pass their remaining arguments after the hxml).
+#   volatile <case> <member> <reason>: the member's payload embeds the time of compilation;
+#   it must exist in both archives, but its bytes are not compared.
+# Exclusions are recorded in upstream-hxb-exclusions.md ("Upstream suites").
+
+# tests/unit: the whole unit suite (unit-macro step without its --hxb argument)
+hxml unit-macro haxe/tests/unit compile-macro.hxml
+# HelperMacros.getCompilationDate embeds Std.string(Date.now()) (to the second)
+volatile unit-macro eval/unit/TestMainNow.hxb compile-time date
+# the same without dead code elimination: every field of every module the suite loads
+hxml unit-macro-dce-no haxe/tests/unit compile-macro.hxml -dce no
+volatile unit-macro-dce-no eval/unit/TestMainNow.hxb compile-time date
+
+# tests/nullsafety (nullsafety step)
+hxml nullsafety haxe/tests/nullsafety test.hxml
+
+# tests/threads (threads step)
+hxml threads haxe/tests/threads build.hxml --interp
+
+# tests/sys: the four parts of compile-eval-hxb.hxml (compile-each.hxml without its
+# `--cmd haxe compile-neko-exitcode.hxml` part, which builds a Neko binary)
+hxml sys-Main haxe/tests/sys -D source-header= --debug -lib utest -p src compile-fs.hxml Main --interp
+hxml sys-TestArguments haxe/tests/sys -D source-header= --debug -lib utest -p src compile-fs.hxml TestArguments --interp
+hxml sys-ExitCode haxe/tests/sys -D source-header= --debug -lib utest -p src compile-fs.hxml ExitCode --interp
+hxml sys-UtilityProcess haxe/tests/sys -D source-header= --debug -lib utest -p src compile-fs.hxml UtilityProcess --interp
+
+# tests/misc/eval/resolution: the main configurations, typed for Eval instead of
+# JavaScript (upstream runs them with -js and node)
+hxml resolution-Issue9367 haxe/tests/misc/eval/resolution/projects/Issue9367 -main Main -lib utest --interp
+hxml resolution-spec haxe/tests/misc/eval/resolution/projects/spec -main Main -lib utest --interp
+hxml resolution-modulestatics haxe/tests/misc/eval/resolution/projects/modulestatics -main Main --macro Macro.lowerCase() --macro Macro.UpperCase() --macro Macro.Macro.lowerCase() --macro Macro.Macro.UpperCase() -lib utest --interp
+
+# tests/server/test/templates: the source templates of the server tests, each module
+# compiled on its own (the ones the reference rejects are expected failures)
+module server-ArgsMacro haxe/tests/server/test/templates ArgsMacro
+module server-ArgsMain haxe/tests/server/test/templates ArgsMain
+module server-BrokenSyntax haxe/tests/server/test/templates BrokenSyntax
+module server-BuildMacro haxe/tests/server/test/templates BuildMacro
+module server-BuiltClass haxe/tests/server/test/templates BuiltClass
+module server-Dependency haxe/tests/server/test/templates Dependency
+module server-Empty haxe/tests/server/test/templates Empty
+module server-GenericInstanceMethod haxe/tests/server/test/templates GenericInstanceMethod
+module server-GenericMethod haxe/tests/server/test/templates GenericMethod
+module server-GlobalBuildMacro haxe/tests/server/test/templates GlobalBuildMacro
+module server-HelloJvm haxe/tests/server/test/templates HelloJvm
+module server-HelloWorld haxe/tests/server/test/templates HelloWorld
+module server-InheritDocTypes haxe/tests/server/test/templates InheritDocTypes
+module server-Issue9918 haxe/tests/server/test/templates Issue9918
+module server-Issue9956Types haxe/tests/server/test/templates Issue9956Types
+module server-Macro haxe/tests/server/test/templates Macro
+module server-MacroMain haxe/tests/server/test/templates MacroMain
+module server-MutuallyDependent1 haxe/tests/server/test/templates MutuallyDependent1
+module server-MutuallyDependent2 haxe/tests/server/test/templates MutuallyDependent2
+module server-Vector haxe/tests/server/test/templates Vector
+module server-VectorInliner haxe/tests/server/test/templates VectorInliner
+module server-WithDependency haxe/tests/server/test/templates WithDependency
+module server-csSafeTypeBuilding-Bar haxe/tests/server/test/templates/csSafeTypeBuilding Bar
+module server-csSafeTypeBuilding-Baz haxe/tests/server/test/templates/csSafeTypeBuilding Baz
+module server-csSafeTypeBuilding-Foo haxe/tests/server/test/templates/csSafeTypeBuilding Foo
+module server-csSafeTypeBuilding-Main haxe/tests/server/test/templates/csSafeTypeBuilding Main
+module server-diagnostics-Issue12861 haxe/tests/server/test/templates/diagnostics Issue12861
+module server-diagnostics-MissingFieldsDep haxe/tests/server/test/templates/diagnostics MissingFieldsDep
+module server-diagnostics-MissingFieldsMain haxe/tests/server/test/templates/diagnostics MissingFieldsMain
+module server-diagnostics-multi-files-File1 haxe/tests/server/test/templates/diagnostics/multi-files File1
+module server-diagnostics-multi-files-File2 haxe/tests/server/test/templates/diagnostics/multi-files File2
+module server-diagnostics-multi-files-File3 haxe/tests/server/test/templates/diagnostics/multi-files File3
+module server-diagnostics-multi-files-Main haxe/tests/server/test/templates/diagnostics/multi-files Main
+module server-display-issues-Issue10673-Macro haxe/tests/server/test/templates/display/issues/Issue10673 Macro
+module server-display-issues-Issue7877-ProcessMacro haxe/tests/server/test/templates/display/issues/Issue7877 ProcessMacro
+module server-display-issues-Issue7877-ProcessedClass haxe/tests/server/test/templates/display/issues/Issue7877 ProcessedClass
+module server-issues-Issue10171-Main haxe/tests/server/test/templates/issues/Issue10171 Main
+module server-issues-Issue10634-Main haxe/tests/server/test/templates/issues/Issue10634 Main
+module server-issues-Issue10635-MainAfter haxe/tests/server/test/templates/issues/Issue10635 MainAfter
+module server-issues-Issue10635-MainBefore haxe/tests/server/test/templates/issues/Issue10635 MainBefore
+module server-issues-Issue10635-MainInstanceAfter haxe/tests/server/test/templates/issues/Issue10635 MainInstanceAfter
+module server-issues-Issue10635-MainInstanceBefore haxe/tests/server/test/templates/issues/Issue10635 MainInstanceBefore
+module server-issues-Issue10635-Something haxe/tests/server/test/templates/issues/Issue10635 Something
+module server-issues-Issue10653-MainAfter haxe/tests/server/test/templates/issues/Issue10653 MainAfter
+module server-issues-Issue10653-MainAfterWrong haxe/tests/server/test/templates/issues/Issue10653 MainAfterWrong
+module server-issues-Issue10653-MainBefore haxe/tests/server/test/templates/issues/Issue10653 MainBefore
+module server-issues-Issue10653-Test haxe/tests/server/test/templates/issues/Issue10653 Test
+module server-issues-Issue10677-Main haxe/tests/server/test/templates/issues/Issue10677 Main
+module server-issues-Issue10677-Polygon haxe/tests/server/test/templates/issues/Issue10677 Polygon
+module server-issues-Issue10677-PolygonCollider haxe/tests/server/test/templates/issues/Issue10677 PolygonCollider
+module server-issues-Issue10677-Polygons haxe/tests/server/test/templates/issues/Issue10677 Polygons
+module server-issues-Issue10678-Macro haxe/tests/server/test/templates/issues/Issue10678 Macro
+module server-issues-Issue10986-Main haxe/tests/server/test/templates/issues/Issue10986 Main
+module server-issues-Issue10986-Vector haxe/tests/server/test/templates/issues/Issue10986 Vector
+module server-issues-Issue11020-Main haxe/tests/server/test/templates/issues/Issue11020 Main
+module server-issues-Issue11177-Buttons haxe/tests/server/test/templates/issues/Issue11177 Buttons
+module server-issues-Issue11177-KeyCode haxe/tests/server/test/templates/issues/Issue11177 KeyCode
+module server-issues-Issue11177-Main haxe/tests/server/test/templates/issues/Issue11177 Main
+module server-issues-Issue11177-Main2 haxe/tests/server/test/templates/issues/Issue11177 Main2
+module server-issues-Issue11179-Main haxe/tests/server/test/templates/issues/Issue11179 Main
+module server-issues-Issue11184-Main haxe/tests/server/test/templates/issues/Issue11184 Main
+module server-issues-Issue11203-MainAbstract haxe/tests/server/test/templates/issues/Issue11203 MainAbstract
+module server-issues-Issue11203-MainClass haxe/tests/server/test/templates/issues/Issue11203 MainClass
+module server-issues-Issue11311-Main haxe/tests/server/test/templates/issues/Issue11311 Main
+module server-issues-Issue11460-C haxe/tests/server/test/templates/issues/Issue11460 C
+module server-issues-Issue11460-Main haxe/tests/server/test/templates/issues/Issue11460 Main
+module server-issues-Issue11516-Importson haxe/tests/server/test/templates/issues/Issue11516 Importson
+module server-issues-Issue11589-Main haxe/tests/server/test/templates/issues/Issue11589 Main
+module server-issues-Issue11589-Main1 haxe/tests/server/test/templates/issues/Issue11589 Main1
+module server-issues-Issue11589-Main2 haxe/tests/server/test/templates/issues/Issue11589 Main2
+module server-issues-Issue11643-Foo haxe/tests/server/test/templates/issues/Issue11643 Foo
+module server-issues-Issue11643-Main haxe/tests/server/test/templates/issues/Issue11643 Main
+module server-issues-Issue11678-Main haxe/tests/server/test/templates/issues/Issue11678 Main
+module server-issues-Issue11678-ModuleFields haxe/tests/server/test/templates/issues/Issue11678 ModuleFields
+module server-issues-Issue11695-Macro1 haxe/tests/server/test/templates/issues/Issue11695 Macro1
+module server-issues-Issue11695-Macro2 haxe/tests/server/test/templates/issues/Issue11695 Macro2
+module server-issues-Issue11695-Main haxe/tests/server/test/templates/issues/Issue11695 Main
+module server-issues-Issue11701-Bar haxe/tests/server/test/templates/issues/Issue11701 Bar
+module server-issues-Issue11701-Baz haxe/tests/server/test/templates/issues/Issue11701 Baz
+module server-issues-Issue11701-Foo haxe/tests/server/test/templates/issues/Issue11701 Foo
+module server-issues-Issue11701-Main haxe/tests/server/test/templates/issues/Issue11701 Main
+module server-issues-Issue11702-Bar haxe/tests/server/test/templates/issues/Issue11702 Bar
+module server-issues-Issue11702-Foo haxe/tests/server/test/templates/issues/Issue11702 Foo
+module server-issues-Issue11702-Foo2 haxe/tests/server/test/templates/issues/Issue11702 Foo2
+module server-issues-Issue11702-Macro haxe/tests/server/test/templates/issues/Issue11702 Macro
+module server-issues-Issue11702-Main haxe/tests/server/test/templates/issues/Issue11702 Main
+module server-issues-Issue11702-Proxy haxe/tests/server/test/templates/issues/Issue11702 Proxy
+module server-issues-Issue11702-State haxe/tests/server/test/templates/issues/Issue11702 State
+module server-issues-Issue11711-Main haxe/tests/server/test/templates/issues/Issue11711 Main
+module server-issues-Issue11711-Main1 haxe/tests/server/test/templates/issues/Issue11711 Main1
+module server-issues-Issue11720-Macro haxe/tests/server/test/templates/issues/Issue11720 Macro
+module server-issues-Issue11720-Main haxe/tests/server/test/templates/issues/Issue11720 Main
+module server-issues-Issue11720-col-Collection haxe/tests/server/test/templates/issues/Issue11720/col Collection
+module server-issues-Issue11720-col-Item haxe/tests/server/test/templates/issues/Issue11720/col Item
+module server-issues-Issue11720-data-Weapon haxe/tests/server/test/templates/issues/Issue11720/data Weapon
+module server-issues-Issue11757-Main haxe/tests/server/test/templates/issues/Issue11757 Main
+module server-issues-Issue11817-MainAfter haxe/tests/server/test/templates/issues/Issue11817 MainAfter
+module server-issues-Issue11817-MainBefore haxe/tests/server/test/templates/issues/Issue11817 MainBefore
+module server-issues-Issue11817-MainError haxe/tests/server/test/templates/issues/Issue11817 MainError
+module server-issues-Issue11817-Utils haxe/tests/server/test/templates/issues/Issue11817 Utils
+module server-issues-Issue11849-Main haxe/tests/server/test/templates/issues/Issue11849 Main
+module server-issues-Issue11892-Main haxe/tests/server/test/templates/issues/Issue11892 Main
+module server-issues-Issue11904 haxe/tests/server/test/templates/issues Issue11904
+module server-issues-Issue11909-Main haxe/tests/server/test/templates/issues/Issue11909 Main
+module server-issues-Issue12001-Macro haxe/tests/server/test/templates/issues/Issue12001 Macro
+module server-issues-Issue12001-Macro1 haxe/tests/server/test/templates/issues/Issue12001 Macro1
+module server-issues-Issue12001-Main haxe/tests/server/test/templates/issues/Issue12001 Main
+module server-issues-Issue12001-Main1 haxe/tests/server/test/templates/issues/Issue12001 Main1
+module server-issues-Issue12018-Main haxe/tests/server/test/templates/issues/Issue12018 Main
+module server-issues-Issue12174 haxe/tests/server/test/templates/issues Issue12174
+module server-issues-Issue12224-Main haxe/tests/server/test/templates/issues/Issue12224 Main
+module server-issues-Issue12554-Foo haxe/tests/server/test/templates/issues/Issue12554 Foo
+module server-issues-Issue12554-Main haxe/tests/server/test/templates/issues/Issue12554 Main
+module server-issues-Issue12910-Color haxe/tests/server/test/templates/issues/Issue12910 Color
+module server-issues-Issue12910-Main haxe/tests/server/test/templates/issues/Issue12910 Main
+module server-issues-Issue3931-pack-A haxe/tests/server/test/templates/issues/Issue3931/pack A
+module server-issues-Issue3931-pack-B haxe/tests/server/test/templates/issues/Issue3931/pack B
+module server-issues-Issue6794-Main haxe/tests/server/test/templates/issues/Issue6794 Main
+module server-issues-Issue7197-A haxe/tests/server/test/templates/issues/Issue7197 A
+module server-issues-Issue7197-Main haxe/tests/server/test/templates/issues/Issue7197 Main
+module server-issues-Issue7282-Main haxe/tests/server/test/templates/issues/Issue7282 Main
+module server-issues-Issue7697-data-function-Test haxe/tests/server/test/templates/issues/Issue7697/data/function Test
+module server-issues-Issue7851-Main haxe/tests/server/test/templates/issues/Issue7851 Main
+module server-issues-Issue7923-Main haxe/tests/server/test/templates/issues/Issue7923 Main
+module server-issues-Issue7923-TreeItem haxe/tests/server/test/templates/issues/Issue7923 TreeItem
+module server-issues-Issue7924-Main haxe/tests/server/test/templates/issues/Issue7924 Main
+module server-issues-Issue7924-ReturnTypeHintOption haxe/tests/server/test/templates/issues/Issue7924 ReturnTypeHintOption
+module server-issues-Issue7931-Main haxe/tests/server/test/templates/issues/Issue7931 Main
+module server-issues-Issue7931-Main1 haxe/tests/server/test/templates/issues/Issue7931 Main1
+module server-issues-Issue8368-Main haxe/tests/server/test/templates/issues/Issue8368 Main
+module server-issues-Issue8368-Main2 haxe/tests/server/test/templates/issues/Issue8368 Main2
+module server-issues-Issue8368-MyMacro haxe/tests/server/test/templates/issues/Issue8368 MyMacro
+module server-issues-Issue8368-Type1 haxe/tests/server/test/templates/issues/Issue8368 Type1
+module server-issues-Issue8368-Type2 haxe/tests/server/test/templates/issues/Issue8368 Type2
+module server-issues-Issue8616-A haxe/tests/server/test/templates/issues/Issue8616 A
+module server-issues-Issue8616-Main haxe/tests/server/test/templates/issues/Issue8616 Main
+module server-issues-Issue8631-Init haxe/tests/server/test/templates/issues/Issue8631 Init
+module server-issues-Issue8631-Macro haxe/tests/server/test/templates/issues/Issue8631 Macro
+module server-issues-Issue8631-Main haxe/tests/server/test/templates/issues/Issue8631 Main
+module server-issues-Issue8687-Main haxe/tests/server/test/templates/issues/Issue8687 Main
+module server-issues-Issue8738-Base haxe/tests/server/test/templates/issues/Issue8738 Base
+module server-issues-Issue8738-Main1 haxe/tests/server/test/templates/issues/Issue8738 Main1
+module server-issues-Issue8738-Main2 haxe/tests/server/test/templates/issues/Issue8738 Main2
+module server-issues-Issue8738-Main3 haxe/tests/server/test/templates/issues/Issue8738 Main3
+module server-issues-Issue8805-Main haxe/tests/server/test/templates/issues/Issue8805 Main
+module server-issues-Issue9029-Game haxe/tests/server/test/templates/issues/Issue9029 Game
+module server-issues-Issue9029-Main haxe/tests/server/test/templates/issues/Issue9029 Main
+module server-issues-Issue9029-Screen haxe/tests/server/test/templates/issues/Issue9029 Screen
+module server-issues-Issue9115-A haxe/tests/server/test/templates/issues/Issue9115 A
+module server-issues-Issue9134-Main haxe/tests/server/test/templates/issues/Issue9134 Main
+module server-issues-Issue9134-Main2 haxe/tests/server/test/templates/issues/Issue9134 Main2
+module server-issues-Issue9134-Other haxe/tests/server/test/templates/issues/Issue9134 Other
+module server-issues-Issue9134-Other2 haxe/tests/server/test/templates/issues/Issue9134 Other2
+module server-issues-Issue9358-Main haxe/tests/server/test/templates/issues/Issue9358 Main
+module server-issues-Issue9358-StateHandler haxe/tests/server/test/templates/issues/Issue9358 StateHandler
+module server-issues-Issue9359-Main haxe/tests/server/test/templates/issues/Issue9359 Main
+module server-issues-Issue9359-SysCommand haxe/tests/server/test/templates/issues/Issue9359 SysCommand
+module server-issues-Issue9359-SysPrint haxe/tests/server/test/templates/issues/Issue9359 SysPrint
+module server-issues-Issue9423-Mod9423 haxe/tests/server/test/templates/issues/Issue9423 Mod9423
+module server-issues-Issue9449-Macro haxe/tests/server/test/templates/issues/Issue9449 Macro
+module server-issues-Issue9636-Foo haxe/tests/server/test/templates/issues/Issue9636 Foo
+module server-issues-Issue9636-Main haxe/tests/server/test/templates/issues/Issue9636 Main
+module server-issues-Issue9676-MainExpr haxe/tests/server/test/templates/issues/Issue9676 MainExpr
+module server-issues-Issue9676-MainField haxe/tests/server/test/templates/issues/Issue9676 MainField
+module server-issues-Issue9676-MainMacro haxe/tests/server/test/templates/issues/Issue9676 MainMacro
+module server-issues-Issue9690-B haxe/tests/server/test/templates/issues/Issue9690 B
+module server-issues-Issue9705-Main haxe/tests/server/test/templates/issues/Issue9705 Main
+
+# tests/optimization/run.hxml: the Eval parts (the JavaScript parts check generated code)
+hxml optimization-TestAnalyzer haxe/tests/optimization -p src -D analyzer-optimize -D analyzer-user-var-fusion -D loop-unroll-max-cost=0 --main TestAnalyzer --interp
+hxml optimization-TestNullChecker haxe/tests/optimization -p src -D analyzer-optimize -D analyzer-user-var-fusion -D loop-unroll-max-cost=0 --main TestNullChecker -D analyzer-check-null --interp
+hxml optimization-TestTreBehavior haxe/tests/optimization -p src -D analyzer-optimize -D analyzer-user-var-fusion -D loop-unroll-max-cost=0 --main TestTreBehavior --interp
+# typed for Eval instead of `-js /dev/null`
+hxml optimization-TestCoroAssert haxe/tests/optimization -p src -D analyzer-optimize -D analyzer-user-var-fusion -D loop-unroll-max-cost=0 --main TestCoroAssert -D haxe-next --interp
+
+# tests/benchs (build.hxml without -D dump=pretty, which writes into the source tree): hxcoro
+# from test/upstream.py's party checkout instead of -lib hxcoro (no extraParams; the define added).
+# The Coro case uses hxcoro.CoroRun.runScoped, which hxcoro's master no longer has (an
+# expected failure); the other cases (-D test=<case>) do not use hxcoro.
+hxml benchs-Coro haxe/tests/benchs -cp src -main Main -cp ../../../test/generated/upstream/party/hxcoro/src -D hxcoro=0.0.1 -D test=Coro -D analyzer-optimize -D analyzer-no-purity-inference --interp
+hxml benchs-Access haxe/tests/benchs -cp src -main Main -D test=Access -D analyzer-optimize -D analyzer-no-purity-inference --interp
+hxml benchs-Calls haxe/tests/benchs -cp src -main Main -D test=Calls -D analyzer-optimize -D analyzer-no-purity-inference --interp
+hxml benchs-CharacterAccess haxe/tests/benchs -cp src -main Main -D test=CharacterAccess -D analyzer-optimize -D analyzer-no-purity-inference --interp
+hxml benchs-CustomIterator haxe/tests/benchs -cp src -main Main -D test=CustomIterator -D analyzer-optimize -D analyzer-no-purity-inference --interp
+hxml benchs-Ds haxe/tests/benchs -cp src -main Main -D test=Ds -D analyzer-optimize -D analyzer-no-purity-inference --interp
+hxml benchs-Regexp haxe/tests/benchs -cp src -main Main -D test=Regexp -D analyzer-optimize -D analyzer-no-purity-inference --interp
+hxml benchs-StringCreate haxe/tests/benchs -cp src -main Main -D test=StringCreate -D analyzer-optimize -D analyzer-no-purity-inference --interp
+hxml benchs-StringIterator haxe/tests/benchs -cp src -main Main -D test=StringIterator -D analyzer-optimize -D analyzer-no-purity-inference --interp
+hxml benchs-StringScan haxe/tests/benchs -cp src -main Main -D test=StringScan -D analyzer-optimize -D analyzer-no-purity-inference --interp
+
+# tests/display: the display test runner (utest, haxeserver), typed with every case class
+hxml display-runner haxe/tests/display build.hxml
+hxml display-runner-rpc haxe/tests/display build-rpc.hxml
+
+# tests/sourcemaps: the runner (it compiles the JavaScript source map tests itself at run time)
+hxml sourcemaps-runner haxe/tests/sourcemaps run.hxml
