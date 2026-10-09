@@ -36,8 +36,9 @@ using macros.eval.EvalValue.EvalValueTools;
 	  do not depend on the static initialisation order of the classes.
 	- `Math.random`/`Std.random` use the host generator instead of OCaml's
 	  `Random.State`.
-	- Sockets (`eval.vm.NativeSocket`) are not supported by haxe-in-haxe: every
-	  native throws a clear error.
+	- Sockets (`eval.vm.NativeSocket`) use BSD sockets through `hxc.NativeNet`
+	  on the hxc host (backend/); on other hosts every native throws a clear
+	  error.
 	- Threads only have the host `Thread` mode: `exit` behaves as upstream's
 	  `Domain` branch (threads are spawned with `spawn_domain`), `join` is not
 	  supported (the host thread API has no join).
@@ -909,7 +910,12 @@ class StdSha1 {
 	});
 }
 
-/** Sockets are not supported by haxe-in-haxe: the natives keep upstream's names and argument checks, then fail. **/
+/**
+	Sockets: on the hxc host (backend/) the natives call BSD sockets through
+	`hxc.NativeNet` (backend/rt/rt_net.c) where upstream calls OCaml's Unix
+	module; a socket is its file descriptor. Other hosts keep upstream's names
+	and argument checks, then fail ("... is not supported by haxe-in-haxe").
+**/
 class StdSocket {
 	static function thisValue(vthis:Value):Dynamic {
 		return switch vthis {
@@ -918,87 +924,260 @@ class StdSocket {
 		}
 	}
 
+	#if (target.name == "hxc")
+	/** `catch_unix_error`: `Unix_error(err, cmd, args)` becomes "message(cmd, args)". **/
+	public static function unixError(cmd:String):Dynamic {
+		return EvalContext.excString(hxc.NativeNet.strerror(hxc.NativeNet.errno()) + "(" + cmd + ", )");
+	}
+
+	public static inline function check(r:Int, cmd:String):Int {
+		if (r < 0) unixError(cmd);
+		return r;
+	}
+
+	static function encodeAddr(a:Null<Array<Int>>, cmd:String):Value {
+		if (a == null) unixError(cmd);
+		if (a[1] < 0) Globals.die("", "evalStdLib.ml:StdSocket");
+		return EvalEncode.encodeObj([{name: EvalHash.key_ip, value: VInt32(a[0])}, {name: EvalHash.key_port, value: VInt32(a[1])}]);
+	}
+
+	static function timeoutValue(timeout:Value):Float {
+		return switch timeout {
+			case VNull: 0.;
+			case VInt32(i): i;
+			case VFloat(f): f;
+			case _: EvalExceptions.unexpectedValue(timeout, "number");
+		}
+	}
+	#end
+
 	public static final accept = EvalEncode.vifun0(vthis -> {
-		thisValue(vthis);
+		var self = thisValue(vthis);
+		#if (target.name == "hxc")
+		var socket = check(hxc.NativeNet.accept(self), "accept");
+		EvalEncode.encodeInstance(EvalHash.key_eval_vm_NativeSocket, ISocket(socket));
+		#else
 		StdLibBHelpers.socketsNotSupported();
+		#end
 	});
 
 	public static final bind = EvalEncode.vifun2((vthis, host, port) -> {
-		thisValue(vthis);
+		var self = thisValue(vthis);
+		var host = EvalDecode.decodeI32(host);
+		var port = EvalDecode.decodeInt(port);
+		#if (target.name == "hxc")
+		check(hxc.NativeNet.bind(self, host, port), "bind");
+		VNull;
+		#else
 		StdLibBHelpers.socketsNotSupported();
+		#end
 	});
 
 	public static final close = EvalEncode.vifun0(vthis -> {
+		#if (target.name == "hxc")
+		check(hxc.NativeNet.close(thisValue(vthis)), "close");
+		VNull;
+		#else
 		thisValue(vthis);
 		StdLibBHelpers.socketsNotSupported();
+		#end
 	});
 
 	public static final connect = EvalEncode.vifun2((vthis, host, port) -> {
-		thisValue(vthis);
+		var self = thisValue(vthis);
+		var host = EvalDecode.decodeI32(host);
+		var port = EvalDecode.decodeInt(port);
+		#if (target.name == "hxc")
+		check(hxc.NativeNet.connect(self, host, port), "connect");
+		VNull;
+		#else
 		StdLibBHelpers.socketsNotSupported();
+		#end
 	});
 
 	public static final host = EvalEncode.vifun0(vthis -> {
+		#if (target.name == "hxc")
+		encodeAddr(hxc.NativeNet.sockName(thisValue(vthis), false), "getsockname");
+		#else
 		thisValue(vthis);
 		StdLibBHelpers.socketsNotSupported();
+		#end
 	});
 
 	public static final listen = EvalEncode.vifun1((vthis, connections) -> {
-		thisValue(vthis);
+		var self = thisValue(vthis);
+		var connections = EvalDecode.decodeInt(connections);
+		#if (target.name == "hxc")
+		check(hxc.NativeNet.listen(self, connections), "listen");
+		VNull;
+		#else
 		StdLibBHelpers.socketsNotSupported();
+		#end
 	});
 
 	public static final peer = EvalEncode.vifun0(vthis -> {
+		#if (target.name == "hxc")
+		encodeAddr(hxc.NativeNet.sockName(thisValue(vthis), true), "getpeername");
+		#else
 		thisValue(vthis);
 		StdLibBHelpers.socketsNotSupported();
+		#end
 	});
 
 	public static final receive = EvalEncode.vifun3((vthis, buf, pos, len) -> {
-		thisValue(vthis);
+		var self = thisValue(vthis);
+		var buf = EvalDecode.decodeBytes(buf);
+		var pos = EvalDecode.decodeInt(pos);
+		var len = EvalDecode.decodeInt(len);
+		#if (target.name == "hxc")
+		VInt32(check(hxc.NativeNet.recv(self, buf, pos, len), "recv"));
+		#else
 		StdLibBHelpers.socketsNotSupported();
+		#end
 	});
 
 	public static final receiveChar = EvalEncode.vifun0(vthis -> {
+		#if (target.name == "hxc")
+		var buf = Bytes.alloc(1);
+		buf.set(0, 0);
+		check(hxc.NativeNet.recv(thisValue(vthis), buf, 0, 1), "recv");
+		VInt32(buf.get(0));
+		#else
 		thisValue(vthis);
 		StdLibBHelpers.socketsNotSupported();
+		#end
 	});
 
 	public static final select = EvalEncode.vfun4((read, write, others, timeout) -> {
+		#if (target.name == "hxc")
+		var proto = EvalContext.getInstancePrototype(EvalContext.getCtx(), EvalHash.key_sys_net_Socket, Globals.nullPos);
+		var i = EvalContext.getInstanceFieldIndex(proto, EvalHash.key_socket, Globals.nullPos);
+		function pair(v:Value):{fd:Int, v:Value} {
+			return switch v {
+				case VInstance(vi): {fd: thisValue(vi.ifields[i]), v: v};
+				case v: EvalExceptions.unexpectedValue(v, "NativeSocket");
+			}
+		}
+		function decodeOptionalArray(v:Value):Array<Value> {
+			return switch v {
+				case VNull: [];
+				case VArray(va): EvalArray.toList(va);
+				case v: EvalExceptions.unexpectedValue(v, "array");
+			}
+		}
+		var read = decodeOptionalArray(read).map(pair);
+		var write = decodeOptionalArray(write).map(pair);
+		var others = decodeOptionalArray(others).map(pair);
+		var timeout = timeoutValue(timeout);
+		var readFds = [for (p in read) p.fd];
+		var writeFds = [for (p in write) p.fd];
+		var othersFds = [for (p in others) p.fd];
+		check(hxc.NativeNet.select(readFds, writeFds, othersFds, timeout), "select");
+		// Unix.select lists the ready descriptors in reverse input order; List.assq
+		// maps each back to the first pair holding it
+		function ready(pairs:Array<{fd:Int, v:Value}>, fds:Array<Int>):Array<Value> {
+			var l = [];
+			var k = fds.length;
+			while (--k >= 0) {
+				if (fds[k] < 0) continue;
+				var fd = fds[k];
+				var v = null;
+				for (p in pairs) if (p.fd == fd) {
+					v = p.v;
+					break;
+				}
+				l.push(v);
+			}
+			return l;
+		}
+		var read = ready(read, readFds);
+		var write = ready(write, writeFds);
+		var others = ready(others, othersFds);
+		EvalEncode.encodeObj([
+			{name: EvalHash.key_read, value: EvalEncode.encodeArray(read)},
+			{name: EvalHash.key_write, value: EvalEncode.encodeArray(write)},
+			{name: EvalHash.key_others, value: EvalEncode.encodeArray(others)}
+		]);
+		#else
 		StdLibBHelpers.socketsNotSupported();
+		#end
 	});
 
 	public static final send = EvalEncode.vifun3((vthis, buf, pos, len) -> {
-		thisValue(vthis);
+		var self = thisValue(vthis);
+		var buf = EvalDecode.decodeBytes(buf);
+		var pos = EvalDecode.decodeInt(pos);
+		var len = EvalDecode.decodeInt(len);
+		#if (target.name == "hxc")
+		VInt32(check(hxc.NativeNet.send(self, buf, pos, len), "send"));
+		#else
 		StdLibBHelpers.socketsNotSupported();
+		#end
 	});
 
 	public static final sendChar = EvalEncode.vifun1((vthis, char) -> {
-		thisValue(vthis);
+		var self = thisValue(vthis);
+		var char = EvalDecode.decodeInt(char);
+		#if (target.name == "hxc")
+		// char_of_int
+		if (char < 0 || char > 255) throw new InvalidArgument("char_of_int");
+		var buf = Bytes.alloc(1);
+		buf.set(0, char);
+		check(hxc.NativeNet.send(self, buf, 0, 1), "send");
+		VNull;
+		#else
 		StdLibBHelpers.socketsNotSupported();
+		#end
 	});
 
 	public static final setFastSend = EvalEncode.vifun1((vthis, b) -> {
-		thisValue(vthis);
+		var self = thisValue(vthis);
+		var b = EvalDecode.decodeBool(b);
+		#if (target.name == "hxc")
+		check(hxc.NativeNet.setNoDelay(self, b), "setsockopt");
+		VNull;
+		#else
 		StdLibBHelpers.socketsNotSupported();
+		#end
 	});
 
 	public static final setBroadcast = EvalEncode.vifun1((vthis, b) -> {
-		thisValue(vthis);
+		var self = thisValue(vthis);
+		var b = EvalDecode.decodeBool(b);
+		#if (target.name == "hxc")
+		check(hxc.NativeNet.setBroadcast(self, b), "setsockopt");
+		VNull;
+		#else
 		StdLibBHelpers.socketsNotSupported();
+		#end
 	});
 
 	public static final setTimeout = EvalEncode.vifun1((vthis, timeout) -> {
-		thisValue(vthis);
+		var self = thisValue(vthis);
+		#if (target.name == "hxc")
+		var timeout = timeoutValue(timeout);
+		var timeout = timeout * 1000.;
+		check(hxc.NativeNet.setTimeout(self, timeout), "setsockopt_float");
+		VNull;
+		#else
 		StdLibBHelpers.socketsNotSupported();
+		#end
 	});
 
 	public static final shutdown = EvalEncode.vifun2((vthis, read, write) -> {
-		thisValue(vthis);
-		switch [read, write] {
-			case [VTrue, VTrue] | [VTrue, _] | [_, VTrue]:
+		var self = thisValue(vthis);
+		var mode = switch [read, write] {
+			case [VTrue, VTrue]: 2; // SHUTDOWN_ALL
+			case [VTrue, _]: 0; // SHUTDOWN_RECEIVE
+			case [_, VTrue]: 1; // SHUTDOWN_SEND
 			case _: EvalContext.excString("Nothing to shut down");
 		}
+		#if (target.name == "hxc")
+		check(hxc.NativeNet.shutdown(self, mode), "shutdown");
+		VNull;
+		#else
 		StdLibBHelpers.socketsNotSupported();
+		#end
 	});
 }
 
