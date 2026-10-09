@@ -23,13 +23,14 @@ else
 fi
 mkdir -p "$OUT"
 # backend/std: the hxc target's std (backend/std-hxc) with the Eval originals for macros
+# (given last: the last class path wins over earlier ones, e.g. bench/js-shims)
 python3 backend/tools/mkstd.py
 if [ -z "${SKIP_TOOL:-}" ]; then
 	"$HAXE" -cp src -cp backend/src -main backend.Main -lib hxnodejs -cp bench/js-shims --js bin/backend/wbk.js -w -WDeprecated
 fi
 # hxnodejs's stdout flush fails on pipes, hence the file
 HAXE_STD_PATH=${HAXE_STD_PATH:-$PWD/haxe/std} node --stack-size=65500 bin/backend/wbk.js "$OUT/prog" \
-	-cp backend/std $ARGS --custom-target hxc ${HXFLAGS:-} > "$OUT/wbk.log" 2>&1 || { cat "$OUT/wbk.log"; exit 1; }
+	$ARGS -cp backend/std --custom-target hxc ${HXFLAGS:-} > "$OUT/wbk.log" 2>&1 || { cat "$OUT/wbk.log"; exit 1; }
 # slots are read as int32/double/pointer through casts (FI/FD/FP): no strict aliasing
 # without mbedtls/libuv: their natives fail when called (RT_LIBS="-lmbedtls -lmbedx509 -lmbedcrypto -luv" and RT_NO= to link them)
 $CC -w -fno-strict-aliasing ${RT_NO--DHXC_NO_SSL -DHXC_NO_UV} -I backend/rt "$OUT/prog.c" backend/rt/rt*.c -lm ${RT_LIBS:-} -o "$OUT/$BIN"

@@ -34,6 +34,15 @@ python3 backend/tools/besttime.py 5 bin/backend/Bench/prog_c
 runtime objects from `bench/build-wasm.sh` and a haxe with the hl2c fix
 (`HAXE_HLC`).
 
+## Limits of the C build of the port
+
+The hxc runtime is single-threaded (one shadow stack, a stop-the-world
+copying GC without thread support), and the port's C build uses the
+single-threaded `sys.thread` stand-ins of `bench/js-shims`. So the
+compilation server (`--wait`, which runs requests on a worker thread) does not
+work in it yet; `--connect` as a client does. `sys.net.Socket`/`Host` are real
+(`backend/std-hxc/sys/net`, over `rt_net.c`).
+
 ## The hxc haxelib package
 
 `backend/haxelib/` packages the C target as a library for the user's own Haxe

@@ -25,6 +25,8 @@ extern class NativeNet {
 	static function setBroadcast(fd:Int, b:Bool):Int;
 	static function setTimeout(fd:Int, seconds:Float):Int; // SO_RCVTIMEO then SO_SNDTIMEO
 	static function shutdown(fd:Int, mode:Int):Int; // 0 receive, 1 send, 2 all
+	static function setBlocking(fd:Int, b:Bool):Int; // O_NONBLOCK (sys.net.Socket only)
+	static function blocked():Bool; // the last failure was EAGAIN/EWOULDBLOCK
 	// host names: null when the name is unknown (errno 0) or on failure
 	static function gethostname():Null<String>;
 	static function resolve(name:String):Null<Array<Int>>; // [host-order IPv4 of h_addr_list[0]]

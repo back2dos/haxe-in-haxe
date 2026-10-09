@@ -30,6 +30,8 @@ int32_t hxc_NativeNet_setNoDelay(int32_t fd, int32_t b) { return no_net(); }
 int32_t hxc_NativeNet_setBroadcast(int32_t fd, int32_t b) { return no_net(); }
 int32_t hxc_NativeNet_setTimeout(int32_t fd, double t) { return no_net(); }
 int32_t hxc_NativeNet_shutdown(int32_t fd, int32_t mode) { return no_net(); }
+int32_t hxc_NativeNet_setBlocking(int32_t fd, int32_t b) { return no_net(); }
+int32_t hxc_NativeNet_blocked(void) { return 0; }
 void *hxc_NativeNet_gethostname(void) { no_net(); return NULL; }
 void *hxc_NativeNet_resolve(void *name) { no_net(); return NULL; }
 void *hxc_NativeNet_reverse(int32_t ip) { no_net(); return NULL; }
@@ -40,6 +42,7 @@ void *hxc_NativeNet_reverse(int32_t ip) { no_net(); return NULL; }
 #include <netdb.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
+#include <fcntl.h>
 #include <signal.h>
 #include <sys/select.h>
 #include <sys/socket.h>
@@ -201,6 +204,16 @@ int32_t hxc_NativeNet_shutdown(int32_t fd, int32_t mode) {
 	int how = mode == 0 ? SHUT_RD : mode == 1 ? SHUT_WR : SHUT_RDWR;
 	return ret(shutdown(fd, how));
 }
+
+// for sys.net.Socket.setBlocking (hxc std; the Eval socket natives are blocking)
+int32_t hxc_NativeNet_setBlocking(int32_t fd, int32_t b) {
+	int flags = fcntl(fd, F_GETFL);
+	if (flags < 0) return ret(-1);
+	return ret(fcntl(fd, F_SETFL, b ? flags & ~O_NONBLOCK : flags | O_NONBLOCK));
+}
+
+// whether the last failure was EAGAIN/EWOULDBLOCK (a non-blocking socket not ready)
+int32_t hxc_NativeNet_blocked(void) { return last_errno == EAGAIN || last_errno == EWOULDBLOCK; }
 
 void *hxc_NativeNet_gethostname(void) {
 	char buf[4096];
