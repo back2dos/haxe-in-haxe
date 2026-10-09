@@ -258,7 +258,7 @@ class Fusion {
       continue;
      case TVar(v,e1) if (e1 != null && config.optimize && config.localDce && state.getReads(v) == 0 && state.getWrites(v) == 0):next(null,[e1].concat(restArray()),0); continue;
      case TVar(v1,null) if (!hasVarFlag(v1,VCaptured)):
-      var found = false; function replace(deep:Bool,e:TExpr):TExpr return switch e.eexpr {case TBinop(OpAssign,{eexpr:TLocal(v2)},e2) if (v1 == v2):if (deep) throw new TypeExit(); found = true; withExpr(first,TVar(v1,e2)); case TLocal(v2) if (v1 == v2):throw new TypeExit(); case _:mapExprWith(replace,true,e);};
+      var found = false; function replace(deep:Bool,e:TExpr):TExpr return switch e.eexpr {case TBinop(OpAssign,{eexpr:TLocal(v2)},e2) if (v1 == v2):if (deep) throw new TypeExit(); found = true; withExpr(first,TVar(v1,e2)); case TLocal(v2) if (v1 == v2):throw new TypeExit(); case _:core.Texpr.mapExprWithBool(replace,true,e);};
       try {var out = []; for (i in 0...restLength) {out.push(replace(false,arr[restOff + i])); if (found) {out = out.concat(arr.slice(restOff + i + 1)); break;}} if (!found) throw new TypeExit(); state.markChanged(); state.decWrites(v1); next(null,out,0);} catch (_:TypeExit) next(first,null,0);
       continue;
      case TVar(v1,e1) if (e1 != null && canBeFused(v1,e1)):

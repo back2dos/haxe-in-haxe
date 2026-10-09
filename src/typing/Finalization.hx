@@ -133,7 +133,7 @@ class Finalization {
 					case TTypeDecl(_): throw "Typedef in static initialization";
 				}
 				case TNew(c, _, _):
-					Texpr.iterWith(walkExpr,p,e);
+					Texpr.iter(e1 -> walkExpr(p, e1), e); // not iterWith: a typed closure passed to its generic parameter is wrapped per call
 					loopClass(p, c);
 					function walkConstructor(c:TClass):Void {
 						var k = staticKey(c, "new");
@@ -144,7 +144,7 @@ class Finalization {
 					}
 					walkConstructor(c);
 				case TField(e1, FStatic(c, cf)): walkExpr(p, e1); walkStaticField(p, c, cf);
-				case _: Texpr.iterWith(walkExpr,p,e);
+				case _: Texpr.iter(e1 -> walkExpr(p, e1), e); // not iterWith: a typed closure passed to its generic parameter is wrapped per call
 			}
 		};
 		function walkClass(p:GlobalTypePath, c:TClass):Void {
