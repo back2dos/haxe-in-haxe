@@ -127,7 +127,7 @@ class RuntimeIntHashtbl<V> {
 class RuntimeInt64Hashtbl<V> {
 	public final h:OcamlHashtbl<haxe.Int64, V>;
 
-	public function new(?h:OcamlHashtbl<haxe.Int64, V>) this.h = h == null ? new OcamlHashtbl(_ -> 0, (a, b) -> a == b, 0) : h;
+	public function new(?h:OcamlHashtbl<haxe.Int64, V>) this.h = h == null ? new OcamlHashtbl(_ -> 0, (a:haxe.Int64, b:haxe.Int64) -> a == b, 0) : h; // typed: Int64 equality, not physical (hxc boxes Int64)
 
 	public function add(key:haxe.Int64, v:V):Void h.replace(key, v);
 
