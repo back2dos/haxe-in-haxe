@@ -198,7 +198,9 @@ void rt_census(char *start, char *end, const rt_census_info *gi) {
 		} else if (k == K_OBJ && ty->tk == TK_ANON) {
 			an_n++;
 			if (FP(o, 0)) an_ovf++;
-			oc = b - 8; // a record: no overflow slot
+			oc = 8 + 8 * (uint64_t)ty->nfields; // a record: a word per field, no overflow slot
+		} else if (k == K_OBJ && ty->tk == TK_CLASS) {
+			oc = 8 + 8 * (uint64_t)(ty->nfields ? ty->nfields : 1); // a word per field (Int/Bool are packed here)
 		} else if (k == K_OBJ && ty->tk == TK_CLOSURE) {
 			cl_n++;
 			cl_bytes += b;
@@ -271,7 +273,7 @@ void rt_census(char *start, char *end, const rt_census_info *gi) {
 	fprintf(out, "  arrays: %llu (%llu without data, %llu empty), headers %.1f MB + data %.1f MB, %llu elements, capacity %llu (slack %.1f MB); OCaml arrays %.1f MB\n", (unsigned long long)a_n, (unsigned long long)a_nodata, (unsigned long long)a_len0, a_hdr / 1048576.0, a_data / 1048576.0, (unsigned long long)a_len, (unsigned long long)a_cap, a_waste / 1048576.0, a_ocaml / 1048576.0);
 	fprintf(out, "    length 0:%llu 1:%llu 2:%llu 3-4:%llu 5-8:%llu 9-16:%llu 17-64:%llu 65+:%llu\n", (unsigned long long)a_hist[0], (unsigned long long)a_hist[1], (unsigned long long)a_hist[2], (unsigned long long)a_hist[3], (unsigned long long)a_hist[4], (unsigned long long)a_hist[5], (unsigned long long)a_hist[6], (unsigned long long)a_hist[7]);
 	fprintf(out, "  enum values: %llu, %.1f MB; anonymous objects: %llu (%llu with overflow; the slot: %.1f MB); closures: %llu, %.1f MB\n", (unsigned long long)c_n, c_bytes / 1048576.0, (unsigned long long)an_n, (unsigned long long)an_ovf, an_n * 8 / 1048576.0, (unsigned long long)cl_n, cl_bytes / 1048576.0);
-	fprintf(out, "  fields of %llu objects: %llu Int/Bool (half a slot each: %.1f MB), %llu pointers (%llu null); boxes: %llu Int/Bool, %llu Float\n", (unsigned long long)k_obj, (unsigned long long)k_ib, k_ib * 4 / 1048576.0, (unsigned long long)k_ptrs, (unsigned long long)k_nullp, (unsigned long long)boxes[0], (unsigned long long)boxes[1]);
+	fprintf(out, "  fields of %llu objects: %llu Int/Bool (%.1f MB as 4-byte values), %llu pointers (%llu null); boxes: %llu Int/Bool, %llu Float\n", (unsigned long long)k_obj, (unsigned long long)k_ib, k_ib * 4 / 1048576.0, (unsigned long long)k_ptrs, (unsigned long long)k_nullp, (unsigned long long)boxes[0], (unsigned long long)boxes[1]);
 	// types by bytes
 	typedef struct {
 		cstat s;

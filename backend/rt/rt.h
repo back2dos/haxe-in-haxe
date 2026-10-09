@@ -5,7 +5,9 @@
 // objects), or NULL.
 //
 // Objects: the pointer addresses the payload, a header word precedes it.
-// Payload = 8-byte slots; Int/Bool use the low 4 bytes of a slot.
+// Payload = 8-byte slots; Int/Bool use the low 4 bytes of a slot, or half
+// of one: classes and anonymous structures pack two Int/Bool fields per slot.
+// Enum values: the constructor is the type index, the arguments the slots.
 //   header bits [0..27] slot count, [28..31] kind, [32..47] type index,
 //               [48..63] identity hash (0 until asked for)
 //
@@ -30,6 +32,9 @@ enum { K_OBJ = 0, K_PARR = 1, K_RAW = 2, K_FWD = 15 };
 #define MKHDR(nslots, kind, tindex) ((uint64_t)(nslots) | ((uint64_t)(kind) << 28) | ((uint64_t)(tindex) << 32))
 
 #define FI(p, i) (((int32_t *)(p))[2 * (i)])
+// an Int/Bool field by 4-byte index: classes and anonymous structures pack two
+// per slot, and rt_field.slot of 'i'/'b' fields is this index for every type
+#define FH(p, h) (((int32_t *)(p))[h])
 #define FD(p, i) (((double *)(p))[i])
 #define FP(p, i) (((void **)(p))[i])
 

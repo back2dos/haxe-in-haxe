@@ -106,8 +106,8 @@ void rt_icache_fill(void *o, int32_t fid, rt_icache *c) {
 
 static void *box_slot(void *o, int32_t slot, char kind) {
 	switch (kind) {
-	case 'i': return hx_box_int(FI(o, slot));
-	case 'b': return hx_box_bool(FI(o, slot));
+	case 'i': return hx_box_int(FH(o, slot));
+	case 'b': return hx_box_bool(FH(o, slot));
 	case 'f': return hx_box_float(FD(o, slot));
 	default: return FP(o, slot);
 	}
@@ -115,8 +115,8 @@ static void *box_slot(void *o, int32_t slot, char kind) {
 
 static void store_slot(void *o, int32_t slot, char kind, void *v) {
 	switch (kind) {
-	case 'i': FI(o, slot) = hx_unbox_int(v); break;
-	case 'b': FI(o, slot) = hx_unbox_bool(v); break;
+	case 'i': FH(o, slot) = hx_unbox_int(v); break;
+	case 'b': FH(o, slot) = hx_unbox_bool(v); break;
 	case 'f': FD(o, slot) = hx_unbox_float(v); break;
 	default: rt_set_ptr(o, &FP(o, slot), v);
 	}
@@ -766,6 +766,11 @@ void *hxc_Native_enumCtorNames(void *e) {
 	return a;
 }
 
+// the position of an enum constructor's argument (its slot: no packing)
+static int32_t ctor_arg(const rt_field *f) {
+	return f->kind == 'i' || f->kind == 'b' ? f->slot / 2 : f->slot;
+}
+
 void *hxc_Native_enumCreate(void *e, int32_t index, void *params) {
 	int32_t t = FI(e, 0);
 	if (rt_types[t].tk != TK_ENUM || index < 0 || index >= rt_types[t].tag) hx_throw_str("Invalid enum constructor");
@@ -777,7 +782,7 @@ void *hxc_Native_enumCreate(void *e, int32_t index, void *params) {
 	RT_UNROOT(1);
 	for (uint32_t i = 0; i < cty->nfields; i++) {
 		const rt_field *f = &cty->fields[i];
-		void *v = params ? hx_aget_p_slow(params, f->slot) : 0;
+		void *v = params ? hx_aget_p_slow(params, ctor_arg(f)) : 0;
 		store_slot(o, f->slot, f->kind, v);
 	}
 	return o;
@@ -802,7 +807,7 @@ void *hxc_Native_enumParams(void *v) {
 		RT_RELOAD(v);
 		void *b = box_slot(v, f->slot, f->kind);
 		RT_RELOAD(a);
-		rt_set_ptr(ARR_DATA(a), &FP(ARR_DATA(a), f->slot), b);
+		rt_set_ptr(ARR_DATA(a), &FP(ARR_DATA(a), ctor_arg(f)), b);
 	}
 	RT_RELOAD(a);
 	RT_UNROOT(2);
@@ -819,7 +824,7 @@ int32_t hxc_Native_enumEq(void *a, void *b) {
 		switch (f->kind) {
 		case 'i':
 		case 'b':
-			if (FI(a, f->slot) != FI(b, f->slot)) return 0;
+			if (FH(a, f->slot) != FH(b, f->slot)) return 0;
 			break;
 		case 'f':
 			if (FD(a, f->slot) != FD(b, f->slot)) return 0;

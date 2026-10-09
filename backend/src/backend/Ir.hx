@@ -35,6 +35,8 @@ class ClassInfo {
 	public var cname:String; // C identifier prefix
 	public var sup:Null<ClassInfo>;
 	public var fields:Array<{name:String, ty:Ty}> = []; // including inherited (the class is the header's type index)
+	public var locs:Array<Int>; // per field: its slot, or for Int/Bool its 4-byte index (packed two per slot; EmitC.layout)
+	public var nslots:Int;
 	public var methods:Map<String, FuncInfo> = new Map(); // own implementations
 	public var ctor:Null<FuncInfo>;
 	public var tindex:Int = -1;
@@ -100,6 +102,8 @@ class ShapeInfo {
 	public var id:Int;
 	public var fields:Array<{name:String, ty:Ty}>; // slot 0 = dynamic overflow fields, then these
 	public var tindex:Int = -1;
+	public var locs:Array<Int>; // as ClassInfo.locs
+	public var nslots:Int;
 
 	public function new(id, fields) {
 		this.id = id;

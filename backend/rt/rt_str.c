@@ -590,7 +590,7 @@ void *hx_std_string(void *v) {
 				void *p = 0;
 				char k = 'p';
 				for (uint32_t f = 0; f < ty->nfields; f++)
-					if (ty->fields[f].slot == (int32_t)i) k = ty->fields[f].kind;
+					if (ty->fields[f].slot == (int32_t)(ty->fields[f].kind == 'i' || ty->fields[f].kind == 'b' ? 2 * i : i)) k = ty->fields[f].kind;
 				switch (k) {
 				case 'i': p = hx_box_int(FI(v, i)); break;
 				case 'b': p = hx_box_bool(FI(v, i)); break;

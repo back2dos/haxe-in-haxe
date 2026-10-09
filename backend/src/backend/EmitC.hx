@@ -134,14 +134,48 @@ class EmitC {
 			ctors: []
 		};
 
+	// Field layout of classes and anonymous structures: fields in order, one
+	// 8-byte slot each, except that Int/Bool fields are packed two per slot
+	// (the second fills the free half of the previous one). A class's fields
+	// start with its superclass's, so the layout of a subclass extends the
+	// superclass's. Returns per field its location (see `at`); appends the
+	// physical slots (for the pointer map) to `slots`.
+	static function layout(slots:Array<Null<Ty>>, tys:Array<Ty>):Array<Int> {
+		var locs = [], half = -1;
+		for (t in tys)
+			switch t {
+				case TI32 | TBool:
+					if (half >= 0) {
+						locs.push(2 * half + 1);
+						half = -1;
+					} else {
+						half = slots.length;
+						locs.push(2 * half);
+						slots.push(TI32);
+					}
+				case _:
+					locs.push(slots.length);
+					slots.push(t);
+			}
+		return locs;
+	}
+
+	// the location of a value of type t in slot `slot` of an unpacked layout:
+	// Int/Bool are addressed by 4-byte index (FH), the rest by slot
+	static function at(slot:Int, t:Ty):Int
+		return t.match(TI32 | TBool) ? 2 * slot : slot;
+
 	function assignTypes() {
 		var rtNames = ["None", "String", "Int", "Float", "Bool", "Array", "ArrayData", "ArrayData", "haxe.io.Bytes", "haxe.io.BytesBuffer", "StringBuf", "Ref", "Ref", "Ref", "Class", "Overflow", "Native", "ArrayIterator"];
 		var rtSlots:Array<Array<Null<Ty>>> = [[], [], [TI32], [TF64], [TBool], [TI32, TRef(RAny)], [], [], [], [TI32, TRef(RAny)], [TI32, TRef(RAny)], [TRef(RAny)], [TI32], [TF64], [TI32], [], [], [TRef(RAny), TI32]];
 		for (i in 0...T_FIRST)
 			addType(entry(i < rtNames.length ? rtNames[i] : "Reserved", "TK_RUNTIME", i < rtSlots.length ? rtSlots[i] : []));
 		for (c in p.classes) {
-			var t = entry(c.name, "TK_CLASS", [for (f in c.fields) f.ty]);
-			t.fields = [for (i in 0...c.fields.length) {name: c.fields[i].name, slot: i, ty: c.fields[i].ty}];
+			var slots:Array<Null<Ty>> = [];
+			c.locs = layout(slots, [for (f in c.fields) f.ty]);
+			c.nslots = slots.length;
+			var t = entry(c.name, "TK_CLASS", slots);
+			t.fields = [for (i in 0...c.fields.length) {name: c.fields[i].name, slot: c.locs[i], ty: c.fields[i].ty}];
 			c.tindex = addType(t);
 		}
 		for (c in p.classes)
@@ -160,17 +194,17 @@ class EmitC {
 				var t = entry(c.name, "TK_CTOR", slots);
 				t.sup = e.tindex;
 				t.tag = c.tag;
-				t.fields = [for (i in 0...c.params.length) {name: c.paramNames[i], slot: i, ty: c.params[i]}];
+				t.fields = [for (i in 0...c.params.length) {name: c.paramNames[i], slot: at(i, c.params[i]), ty: c.params[i]}];
 				c.tindex = addType(t);
 			}
 			types[e.tindex].ctors = [for (c in e.ctors) c.tindex];
 		}
 		for (s in p.shapes) {
 			var slots:Array<Null<Ty>> = [TRef(RAny)];
-			for (f in s.fields)
-				slots.push(f.ty);
+			s.locs = layout(slots, [for (f in s.fields) f.ty]);
+			s.nslots = slots.length;
 			var t = entry("{}", "TK_ANON", slots);
-			t.fields = [for (i in 0...s.fields.length) {name: s.fields[i].name, slot: i + 1, ty: s.fields[i].ty}];
+			t.fields = [for (i in 0...s.fields.length) {name: s.fields[i].name, slot: s.locs[i], ty: s.fields[i].ty}];
 			s.tindex = addType(t);
 		}
 		for (l in p.lambdas) {
@@ -523,7 +557,7 @@ class EmitC {
 			case SExpr(e):
 				b.add('$ind${expr(e)};\n');
 			case SSetField(c, idx, obj, v):
-				b.add(ind + store(expr(obj), Std.string(idx), c.fields[idx].ty, expr(v)) + ";\n");
+				b.add(ind + store(expr(obj), Std.string(c.locs[idx]), c.fields[idx].ty, expr(v)) + ";\n");
 			case SBoxSet(t, bx, v):
 				b.add(ind + store(expr(bx), "0", t, expr(v)) + ";\n");
 			case SSetGlobal(g, v):
@@ -642,7 +676,7 @@ class EmitC {
 		return switch t {
 			case TRef(_): 'rt_set_ptr($o, &FP($o, $idx), $v)';
 			case TF64: 'FD($o, $idx) = $v';
-			case _: 'FI($o, $idx) = $v';
+			case _: 'FH($o, $idx) = $v';
 		}
 	}
 
@@ -650,7 +684,7 @@ class EmitC {
 		return switch t {
 			case TRef(_): 'FP($o, $idx)';
 			case TF64: 'FD($o, $idx)';
-			case _: 'FI($o, $idx)';
+			case _: 'FH($o, $idx)';
 		}
 
 	static function box(x:String, t:Ty):String
@@ -743,7 +777,7 @@ class EmitC {
 			case EConv(FNeg, x): '(-(${expr(x)}))';
 			case EBox(t, x): box(expr(x), t);
 			case EUnbox(t, x): unboxFrom(expr(x), t);
-			case EField(c, idx, obj): load(expr(obj), Std.string(idx), c.fields[idx].ty);
+			case EField(c, idx, obj): load(expr(obj), Std.string(c.locs[idx]), c.fields[idx].ty);
 			case EAnonGet(name, t, obj):
 				var ic = nextCache++;
 				var k = kindChar(t);
@@ -758,7 +792,7 @@ class EmitC {
 					for (c in en.ctors)
 						if (c.tindex - c.tag != base) base = null;
 				base != null ? '((int32_t)TINDEX(${expr(x)}) - $base)' : 'rt_types[TINDEX(${expr(x)})].tag';
-			case EEnumParam(c, idx, x): load(expr(x), Std.string(idx), c.params[idx]);
+			case EEnumParam(c, idx, x): load(expr(x), Std.string(at(idx, c.params[idx])), c.params[idx]);
 			case EArrLen(a): 'ARR_LEN(${expr(a)})';
 			case EArrGet(elem, a, i):
 				switch elem {
@@ -767,7 +801,7 @@ class EmitC {
 					case _: 'hx_aget_p(${expr(a)}, ${expr(i)})';
 				}
 			case EBoxGet(t, bx): load(expr(bx), "0", t);
-			case ECapture(l, idx, clos): load(expr(clos), Std.string(idx + 1), l.captures[idx].ty);
+			case ECapture(l, idx, clos): load(expr(clos), Std.string(at(idx + 1, l.captures[idx].ty)), l.captures[idx].ty);
 			case EType(t): 'TYPE_OBJ(${typeIndex(t)})';
 			case ECall(f, args): '${cname(f)}(${[for (a in args) expr(a)].join(", ")})';
 			case ECallDispatch(sel, sig, args):
@@ -808,12 +842,12 @@ class EmitC {
 					hostOrder.push(name);
 				}
 				'$name(${[for (a in args) expr(a)].join(", ")})';
-			case ENewObj(c): 'rt_alloc(${Std.int(Math.max(1, c.fields.length))}, ${c.tindex}, K_OBJ)';
+			case ENewObj(c): 'rt_alloc(${Std.int(Math.max(1, c.nslots))}, ${c.tindex}, K_OBJ)';
 			case ENewEnum(c, args):
 				var s = '({ void *o = rt_alloc_init(${c.params.length == 0 ? 1 : c.params.length}, ${c.tindex}, K_OBJ); ' + (c.params.length == 0 ? 'FP(o, 0) = 0; ' : '');
 				for (i in 0...args.length) {
 					if (c.params[i].match(TI32 | TBool)) s += 'FP(o, $i) = 0; ';
-					s += load("o", Std.string(i), c.params[i]) + ' = ${expr(args[i])}; ';
+					s += load("o", Std.string(at(i, c.params[i])), c.params[i]) + ' = ${expr(args[i])}; ';
 				}
 				s + "o; })";
 			case ENewArr(elem, vs):
@@ -828,7 +862,7 @@ class EmitC {
 			case ENewClos(l, caps):
 				var s = '({ void *o = rt_alloc_init(${l.captures.length + 1}, ${l.tindex}, K_OBJ); FP(o, 0) = (void *)${cname(l.fn)}; ';
 				for (i in 0...caps.length)
-					s += load("o", Std.string(i + 1), l.captures[i].ty) + ' = ${expr(caps[i])}; ';
+					s += load("o", Std.string(at(i + 1, l.captures[i].ty)), l.captures[i].ty) + ' = ${expr(caps[i])}; ';
 				s + "o; })";
 			case ENewBox(t, v):
 				var tt = switch t {
@@ -838,9 +872,9 @@ class EmitC {
 				};
 				'({ void *o = rt_alloc_init(1, $tt, K_OBJ); FP(o, 0) = 0; ${load("o", "0", t)} = ${expr(v)}; o; })';
 			case ENewAnon(sh, vals):
-				var s = '({ void *o = rt_alloc(${sh.fields.length + 1}, ${sh.tindex}, K_OBJ); ';
+				var s = '({ void *o = rt_alloc(${sh.nslots}, ${sh.tindex}, K_OBJ); ';
 				for (i in 0...vals.length)
-					s += load("o", Std.string(i + 1), sh.fields[i].ty) + ' = ${expr(vals[i])}; ';
+					s += load("o", Std.string(sh.locs[i]), sh.fields[i].ty) + ' = ${expr(vals[i])}; ';
 				s + "o; })";
 		}
 	}
