@@ -235,7 +235,7 @@ class EvalStdLib {
 					case VArray(va): [for (i in 0...va.alength) EvalDecode.decodeString(va.avalues[i])];
 					case _: EvalExceptions.unexpectedValue(args, "array");
 				}
-				var proc = StdLibBHelpers.processCatch(_ -> new sys.io.Process(cmd, args), null);
+				var proc = StdLibBHelpers.processCatch(_ -> EvalProcess.run(cmd, args), null);
 				EvalEncode.encodeInstance(EvalHash.key_sys_io__Process_NativeProcess, IProcess(proc));
 			case _: die();
 		});
