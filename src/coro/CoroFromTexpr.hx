@@ -85,7 +85,11 @@ class CoroFromTexpr {
     case TThrow(_):throw new FoundSuspension();
     case TBreak|TContinue if(loopDepth==0):throw new FoundSuspension();
     case TBlock([]):e;
-    case TBlock(el):{var recordCopy34 = core.ds.Record.copy(e); recordCopy34.eexpr = TBlock([for(i in 0...el.length)remap(i==el.length-1?canTco:false,loopDepth,el[i])]); recordCopy34;};
+    case TBlock(el):
+     // remap_block conses `remap hd :: remap_block tl`: OCaml remaps the tail first (the deferred
+     // expressions allocate variables, and a later suspension aborts the mapping)
+     var out=[for(_ in el)null];var i=el.length;while(i-->0)out[i]=remap(i==el.length-1?canTco:false,loopDepth,el[i]);
+     {var recordCopy34 = core.ds.Record.copy(e); recordCopy34.eexpr = TBlock(out); recordCopy34;};
     case TIf(e1,e2,e3):var a=remap(false,loopDepth,e1);var b=remap(canTco,loopDepth,e2);var c=e3==null?null:remap(canTco,loopDepth,e3);{var recordCopy33 = core.ds.Record.copy(e); recordCopy33.eexpr = TIf(a,b,c); recordCopy33;};
     case TSwitch(s):var subject=remap(false,loopDepth,s.switchSubject);var cases=s.switchCases.map(function(c)return {var recordCopy32 = core.ds.Record.copy(c); recordCopy32.caseExpr = remap(canTco,loopDepth,c.caseExpr); recordCopy32;});var def=s.switchDefault==null?null:remap(canTco,loopDepth,s.switchDefault);{var recordCopy31 = core.ds.Record.copy(e); recordCopy31.eexpr = TSwitch({var recordCopy30 = core.ds.Record.copy(s); recordCopy30.switchSubject = subject;recordCopy30.switchCases = cases;recordCopy30.switchDefault = def; recordCopy30;}); recordCopy31;};
     case TTry(e1,catches):var e1=remap(false,loopDepth,e1);var catches=catches.map(function(c)return {variable:c.variable,expr:remap(canTco,loopDepth,c.expr)});{var recordCopy29 = core.ds.Record.copy(e); recordCopy29.eexpr = TTry(e1,catches); recordCopy29;};

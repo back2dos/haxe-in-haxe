@@ -50,7 +50,9 @@ def prepare(case, reference, env):
         subprocess.run([reference, "--hxb", str(lib), "--no-output"] + case["lib"], cwd=case["cwd"], env=env, capture_output=True, timeout=TIMEOUT)
         return case["cwd"], ["--hxb-lib", str(lib)] + case["args"], None
     if case.get("hxml"):
-        text = (case["cwd"] / case["args"][0]).read_text(errors="replace")
+        first = case["cwd"] / case["args"][0]
+        # an hxml file, or plain arguments (hxml <name> <dir> <argument ...>)
+        text = first.read_text(errors="replace") if first.is_file() else "\n".join(case["args"])
         if not EXECUTES.search(text):
             return None
         scratch = pathlib.Path(tempfile.mkdtemp(prefix="hih-interp-"))

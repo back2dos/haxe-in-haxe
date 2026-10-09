@@ -2,6 +2,100 @@
 
 Earlier checkpoints are in the Git history of this file.
 
+## Wider upstream coverage: third-party projects and more suites — 2026-10-09
+
+### Third-party projects (Macro.hx `party`)
+
+`python3 test/upstream.py [--reference] party` runs upstream CI's tink_core and
+hxcoro steps (clones pinned in `PARTY`: tink_core `b6745a8`, hxcoro `4b1a4d4`,
+the master branches when added; utest `a055e05`, haxeserver `fad3af2`).
+GitHub clones work through the proxy. lib.haxe.org metadata works, but
+haxelib's own download fails: the 302 to haxelib-files.haxe.org yields an empty
+download. curl follows it, so tink_core's test dependencies (the latest
+releases of tink_unittest, deep_equal and their dependencies, pinned in
+`TINK_CORE_LIBS`) are fetched with curl and installed with `haxelib install
+<zip>`.
+
+| Step | Reference | Port (HashLink build) |
+| --- | --- | --- |
+| party-tink_core (`--interp`) | 257/257 assertions | 257/257, identical output |
+| party-hxcoro (from source) | 321 tests, 1256 assertions | same |
+| party-hxcoro-hxb (`--hxb bin/test.hxb`) | same | same |
+| party-hxcoro-hxblib (`--hxb-lib bin/test.hxb`) | same | same |
+
+`test/conformance-party-cases.txt` compares the two projects' HXB output:
+tink_core 327 members, hxcoro 369 members, identical.
+
+Root causes of the port failures:
+
+- tink_core: "You cannot use @:build inside a macro". `Common.clone` shared the
+  global metadata array with the macro context; upstream's `global_metadata`
+  is an immutable list, so the macro context keeps a snapshot. tink_syntaxhub
+  adds a global `@:build` after the macro context exists.
+- hxcoro HXB (135/369 payloads): coroutine hoisted fields were listed in
+  insertion order instead of OCaml `Hashtbl.to_seq_values` order
+  (`CoroToTexpr.handleLocals`, now an `OcamlHashtbl`), and `map_suspension`
+  remapped block elements head first. OCaml's `remap hd :: remap_block tl`
+  remaps the tail first, and the deferred expressions allocate variables
+  (`CoroFromTexpr`).
+
+### More upstream suites as HXB conformance cases
+
+`test/conformance-upstream-cases.txt` (new, 195 cases; needs the utest and
+haxeserver repository of `test/upstream.py`, found through `HAXELIB_PATH`):
+the unit suite (`compile-macro.hxml`, also with `-dce no`), nullsafety,
+threads, the four parts of the sys suite, the eval resolution projects typed
+for Eval, the Eval parts of `tests/optimization/run.hxml`, the benchmarks, the
+display and sourcemaps test runners, and every server test template module
+(167). `test/display-snippet-cases.py` writes
+`test/generated/display-snippets/cases.txt`: the 406 display test snippets
+compiled normally. `conformance-cases.txt` gains the parts of two multi-part
+misc/eval configurations (Issue11354 ×3, sys-exit). Exclusions are listed in
+`upstream-hxb-exclusions.md` ("Upstream suites").
+
+`conformance.py` changes: hxml cases take arguments after the hxml (or
+arguments only); `volatile <case> <member>` names a member whose payload embeds
+the compilation time (the unit suite's `TestMainNow`, `Date.now()` in a macro),
+which must exist in both archives but is not compared.
+
+| Case list (`conformance.py --hxb-lib`) | Result |
+| --- | --- |
+| `conformance-upstream-cases.txt` (195) | 135 PASS (115 identical `--hxb-lib` round trips, the rest rejected by both), 60 expected failures (59 server templates, `benchs-Coro`) |
+| display snippets (406) | 117 PASS (115 identical round trips), 289 expected failures (incomplete snippets) |
+| `conformance-party-cases.txt` (2) | 2 PASS |
+| `conformance-cases.txt` (286) | 279 PASS, 7 expected failures |
+| `conformance-macro-cases.txt` / `conformance-hxblib-cases.txt` | 66/66, 7/7 |
+
+The unit suite case has 1827 members (the whole suite, std included); the
+nullsafety, threads, sys, resolution and display runner cases 150 to 480 each.
+The bootstrap build passes.
+
+`python3 test/upstream.py` with the port: the existing steps are unchanged
+(misc 684 tests, 0 failures; unit-macro and unit-macro-hxblib 11367/11371 with
+the 4 `Gc.finalise` errors; threads 138/139 with `TestEval.testNative`;
+nullsafety, misc-resolution, sys-hxb, sys-run, compiler-loops, connect-stdin
+pass), and the party steps pass, except for an intermittent crash:
+
+- hxcoro's tests sometimes die with SIGSEGV in a spawned Eval thread (always
+  at `EvalAtomic` `AtomicInt.load`, in thread-pool tests such as
+  `issues.hf.Issue32`/`Issue64` or `testReleaseAcquireConcurrency`) or hang
+  (`issues.hf.Issue37.testNotCancelling`). 2 of 8 runs of the source build
+  crashed, and 3 of 8 with the port as it was before this work, so these
+  changes did not cause it; the reference passed 4/4. The port runs Eval
+  threads truly in parallel on HashLink threads; a stand-alone HashLink test
+  of the same locked `{v:Int}` cell pattern does not crash. Not fixed here.
+
+Root causes of the port failures:
+
+- Lexer positions: sedlex counts code points, the port counted UTF-16 units,
+  so positions after an emoji were off by one (unit TestJson, TestUnicode,
+  TestUtf8 and 10 more modules).
+- `FormatString`: OCaml's `format_string` counts UTF-8 bytes for offsets and
+  positions; the port counted characters (sys TestUnicode).
+- Folded float constants used `Std.string` instead of `Numeric.float_repres`
+  (`%.12g`): `1455555555 * 1000.` is `1.455555555e+12` (unit TestDate). Also
+  negated float constants and the Macro API's float encoding.
+
 ## Upstream test suite — 2026-10-09
 
 `python3 test/upstream.py [--reference] [step ...]` runs upstream CI's
