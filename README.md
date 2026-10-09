@@ -1,153 +1,169 @@
 # Haxe in Haxe
 
-An in-progress, close-to-line-by-line port of the Haxe compiler from OCaml to
-Haxe.
+A close-to-line-by-line port of the Haxe compiler from OCaml (`haxe/src`) to
+Haxe (`src/`), plus an experimental C backend for it (`backend/`, the "hxc"
+target) and a website with an in-browser playground (`site/`).
 
-The only current code-generation deliverable is an HXB-emitting compiler.
-JavaScript, C++, HashLink, Eval, and every ordinary output target are explicitly
-out of scope until that goal is complete. During development, the pinned Haxe
-compiler can compile the port to Eval-flavoured HXB and execute it through
-`--hxb-lib`; this is a host strategy, not an Eval generator in the port. The
-Eval machinery eventually required for macro execution is likewise separate
-from exposing Eval as a user target.
+## Current state
+
+- **HXB output.** The port (`haxe.Main`) parses, types, finalizes and filters
+  Haxe programs and writes HXB archives whose `.hxb` members are
+  byte-identical to the pinned reference compiler's: 279/279 accepted
+  conformance cases plus 7 the reference also rejects, 66/66 macro cases, and
+  195 cases from the other upstream suites (135 identical, 60 rejected by
+  both).
+- **Ported services.** The Eval macro interpreter and Macro API (including
+  `sys.ssl`/mbedtls, `eval.luv`/libuv and Eval threads), `--interp`/`--run`,
+  HXB library input (`--hxb-lib`), display services (`--display` JSON-RPC),
+  the compilation server (`--wait`, `--connect`, `--server-connect`) and
+  haxelib (`-L`/`--library`). The Eval debugger and object-size memory
+  statistics are not ported. Target generators (JS, C++, HL, JVM, ...) are out
+  of scope: the port type-checks, runs programs with `--interp`, writes HXB
+  and, through hxc, C.
+- **Upstream test suite.** Every target-independent step of upstream CI
+  (`tests/runci/targets/Macro.hx`) passes with the hxc build of the port,
+  including the tink_core and hxcoro projects (unit 11372/11372, misc
+  684/684, threads 144/144). The HashLink build misses 5 tests that need
+  finalisers or a libuv loop.
+- **hxc.** The port compiled to C by its own backend compiles itself faster
+  than the OCaml compiler with less memory (clang -O2: 5.20 s vs 6.11 s, peak
+  RSS 469 MB vs 531 MB), and in parallel mode with 4 threads in 4.18 s (OCaml
+  with 4 domains: 4.03 s). The runtime has a precise generational GC, 1:1 OS
+  threads (green threads with tcc), TLS and libuv. The same backend builds
+  other programs: haxe-formatter built with hxc formats `haxe/std` 1.6× faster
+  than its C++ and Node builds, with byte-identical output.
+
+Results and dates: [`test/TESTING.md`](test/TESTING.md) (tests),
+[`bench/README.md`](bench/README.md) (performance and memory),
+[`TRANSLATION.md`](TRANSLATION.md) (module mapping),
+[`backend/README.md`](backend/README.md) (hxc).
 
 ## Repository layout
 
-- `haxe/` is the pinned `haxefoundation/haxe` Git submodule. It is the source
-  being ported and the behavioral reference.
-- `src/` holds the Haxe port. Its structure should remain traceable to
-  `haxe/src/`.
-- `haxe-in-haxe.hxml` builds the bootstrap compiler to
-  `bin/haxe-in-haxe.hxb`.
-- `compile-all.hxml` includes all port modules, including the new compiler pipeline.
-- `deferred/` preserves drafts for services and targets outside the HXB milestone.
-- `test/` defines the HXB conformance harness and its ignored artifacts.
+- `haxe/`: the pinned `haxefoundation/haxe` submodule, the source being ported
+  and the behavioral reference. Never edited here.
+- `src/`: the port, traceable to `haxe/src/` module by module.
+- `backend/`: the hxc C backend, its runtime (`rt/`), its std (`std-hxc/`) and
+  the haxelib package (`haxelib/`).
+- `test/`: conformance, upstream-suite, display, server and haxelib harnesses.
+- `bench/`: benchmark scripts and results. `site/`: the website.
+- `tools/format-src.sh`, `hxformat.json`: source formatting.
+- `deferred/`: old drafts of target dispatch outside the build.
 
 ## Setup
 
-Clone with submodules, or initialize them after cloning:
-
 ```sh
 git submodule update --init --recursive
+make -C haxe haxe                     # the pinned reference compiler (OCaml/Dune setup: haxe/README.md)
+export HAXE_REFERENCE=$PWD/haxe/haxe
 ```
 
-The project needs a Haxe compiler capable of emitting HXB and, for conformance
-testing, a native reference compiler built from the pinned `haxe/` submodule.
-Follow the upstream build instructions in `haxe/README.md` to build that
-reference compiler. With its OCaml/Dune dependencies installed, the direct
-compiler-only build is:
+The reference compiler is always the one built from `haxe/`, not a system Haxe.
+
+## Build the port
 
 ```sh
-make -C haxe haxe
-export HAXE_REFERENCE="$PWD/haxe/haxe"
+haxe/haxe haxe-in-haxe.hxml           # bootstrap build: bin/haxe-in-haxe.hxb
+haxe/haxe compile-all.hxml            # every port module: bin/haxe-in-haxe.all.eval.hxb
+haxe/haxe -cp runtime/hl -cp src -main haxe.Main -hl bin/haxe-in-haxe.hl   # HashLink build (HashLink master)
+HAXE_STD_PATH=$PWD/haxe/std hl bin/haxe-in-haxe.hl -cp app --main Main --interp
 ```
 
-## Build
+The first two only check that the port compiles. `sh test/eval-hxb-execution.sh`
+runs the port from an Eval HXB archive through the reference's `--hxb-lib`.
+`sh examples/run.sh hello` compiles and runs a small example
+([`examples/README.md`](examples/README.md)).
+
+## Tests
+
+All harnesses take the reference from `HAXE_REFERENCE` and run the port's
+HashLink build by default; `HAXE_IN_HAXE_PORT=<command>` runs another build
+(for example the hxc binary `bin/backend/hih/hih_clang`).
 
 ```sh
-haxe haxe-in-haxe.hxml
-haxe compile-all.hxml
+python3 test/conformance.py -j 8                                          # HXB conformance (286 cases)
+python3 test/conformance.py -j 8 --hxb-lib                                # plus the --hxb-lib round trip
+python3 test/conformance.py -j 8 --cases test/conformance-macro-cases.txt # also -hxblib, -party, -upstream
+python3 test/conformance.py -j 3 --parallel 3                             # parallel mode, threaded builds
+python3 test/interp.py -j 4                                               # --interp output vs the reference
+python3 test/upstream.py [--reference] [step ...]                         # upstream CI's target-independent job
+python3 test/display.py -j 2 [--extended]                                 # display requests vs the reference
+python3 test/server.py -j 2 [--hxb-cache]                                 # compilation server scenarios
+python3 test/haxelib.py [--server]                                        # -L/--library with a local repository
 ```
 
-The first command compiles the compiler (`haxe.Main`) to
-`bin/haxe-in-haxe.hxb`. The second also includes every translated source module
-and writes `bin/haxe-in-haxe.all.eval.hxb`. These builds only check that the
-port compiles; conformance is tested separately.
+Conformance compares normalized ZIP member names and the uncompressed `.hxb`
+payloads, never the container bytes; cases the reference rejects must be
+rejected by the port. Sequential runs use `-D disable-parallelism` (the
+reference itself is not deterministic with parallel filters); `--parallel`
+compares after normalizing variable IDs. Exclusions and their reasons are in
+[`test/upstream-hxb-exclusions.md`](test/upstream-hxb-exclusions.md) and in
+`test/upstream.py`.
 
-For a fast native-ish build, compile the port to HashLink (HashLink master is
-required) and run it like `haxe`:
+Other lanes: `haxe test/unit.hxml`, `haxe test/upstream-parser-corpus.hxml`
+(1,355/1,366 upstream sources parse), `HAXEDEBUG=1 haxe
+test/translated-pipeline.hxml`.
+
+## hxc: the port as a native binary
+
+`backend/build.sh port` compiles the port to C with the backend and then with
+`CC` (default tcc). clang -O2 is the fastest build (4–10% ahead of gcc -O2);
+tcc builds in about a second; cosmocc makes one portable binary for Linux,
+macOS, Windows and the BSDs.
 
 ```sh
-haxe -cp src -main haxe.Main -hl bin/haxe-in-haxe.hl
-HAXE_STD_PATH=$PWD/haxe/std hl bin/haxe-in-haxe.hl -cp src-dir --main Main --interp --no-output --hxb out.hxb
+sh backend/build.sh port                                                      # tcc: bin/backend/hih/hih
+CC="clang -O2" BIN=hih_clang RT_NO= RT_LIBS="-lmbedtls -lmbedx509 -lmbedcrypto -luv" \
+  sh backend/build.sh port                                                    # with system mbedtls/libuv
+sh backend/tools/cosmo-deps.sh && CC="cosmocc -O2" RT_DEPS=bin/cosmo-deps BIN=hih.com sh backend/build.sh port
+bin/backend/hih/hih_clang -cp app --main Main --interp
+bin/backend/hih/hih_clang -cp app --main Main --hxb out.zip --no-output -D disable-parallelism
 ```
 
-## Execute the compiler from HXB
+Without `-D disable-parallelism`, a gcc/clang/cosmocc build runs the parallel
+compiler passes (filters, analyzer, DCE marking, HXB writing) on OS threads.
+`RT_STATS=1` prints GC and thread statistics, `RT_CENSUS=1` a heap census.
 
-The shortest functional feedback loop uses the pinned compiler as the Eval HXB
-loader and runtime:
+## hxc for your own programs
+
+The haxelib package lets your own Haxe type the program and hxc turn it into
+C ([`backend/haxelib/README.md`](backend/haxelib/README.md)):
 
 ```sh
-HAXE_REFERENCE=/absolute/path/to/pinned/haxe \
-  sh test/eval-hxb-execution.sh
+sh backend/haxelib/build.sh                       # bin/haxelib/hxc.zip (cosmocc on PATH)
+haxelib install bin/haxelib/hxc.zip
+haxe -lib hxc -cp src -main Main --custom-target hxc=bin/main
 ```
 
-The test first asks the pinned compiler to compile the port's source to an
-Eval-target archive containing `eval/haxe/Main.hxb`. It executes the source form
-to compile a fixture, then loads that archive with `--hxb-lib`, executes
-`haxe.Main` again, and verifies that both runs emit identical HXB member sets
-and payloads. This proves that the compiler can run from HXB without requiring
-HashLink, Go, or another independent host.
+HXB is tied to the compiler that writes it, so the user's Haxe must be the
+build `hxc.com` was made from (the pinned `haxe/`).
 
-The batch compiler also expands nested `.hxml` files, including their class
-paths, defines, main class or bare module roots. When an HXB output is present,
-ordinary execution markers such as `--interp` and `--no-output` are accepted as
-configuration input but do not add another output target. Multi-part builds,
-libraries, macros, and display/server options still fail explicitly.
+## Formatting
 
-## Play with examples
-
-Three small programs now have a single-command compile-and-run loop:
+`src/` is formatted with [haxe-formatter](https://github.com/HaxeCheckstyle/haxe-formatter),
+built with hxc, using `hxformat.json`:
 
 ```sh
-sh examples/run.sh hello
-sh examples/run.sh shapes
-sh examples/run.sh fibonacci
+sh tools/format-src.sh             # format src/ in place (builds the formatter once)
+sh tools/format-src.sh --check     # list files that would change
 ```
 
-The loop exercises the compiler port from its HXB archive and keeps the current
-host-runtime boundary explicit. See [`examples/README.md`](examples/README.md).
-
-## Conformance
-
-The first milestone (source-only, macro-free HXB compilation) is done: the
-translated compiler `haxe.Main` produces HXB whose uncompressed `.hxb` members
-are byte-identical to the pinned reference compiler's for every case in
-`test/conformance-cases.txt`, and the reference consumes each archive through
-`--hxb-lib`. Results and how to run them are in
-[`test/TESTING.md`](test/TESTING.md).
+## Website
 
 ```sh
-make -C haxe haxe
-HAXE_REFERENCE=haxe/haxe python3 test/conformance.py -j 8          # port on HashLink
+sh site/build.sh                   # bin/site: the playground (Emscripten), the APE download, the pages
+cd bin/site && python3 -m http.server
 ```
 
-Comparisons look at normalized archive member names and the uncompressed
-`.hxb` payloads, never the ZIP containers (timestamps, member order and
-compression are not HXB semantics). Cases the reference rejects must be
-rejected by the port too. Exclusions (macro, haxelib, multi-part,
-compile-fail-only) are listed in
-[`test/upstream-hxb-exclusions.md`](test/upstream-hxb-exclusions.md) and
-regenerated by `test/discover-cases.py`.
-
-## Other test lanes
-
-```sh
-haxe test/unit.hxml
-haxe test/upstream-parser-corpus.hxml   # 1,355/1,366 upstream sources parse
-HAXEDEBUG=1 haxe test/translated-pipeline.hxml
-```
-
-`test/conformance.sh` and `test/eval-hxb-execution.sh` are single-fixture
-(`unit.moduleload.Basic`) versions of the conformance and Eval-HXB checks.
-`haxe.LegacyMain` is the older bootstrap compiler; a few unit tests still
-cover it.
+`site/index.html` is the front page (playground, download, status,
+benchmarks from `bench/results.json`); `site/story.html` is the long account
+of how the port was made.
 
 ## Porting approach
 
-The translation snapshot is committed. Compilation and integration now reconcile
-the HXB-path drafts. `haxe compile-all.hxml` explicitly includes source modules
-which the bootstrap entry point does not reach. Both builds compile; existing
-test results do not validate these drafts. See `TRANSLATION.md` for
-coverage and remaining work.
-
-Keep each port mechanically close to its counterpart in `haxe/src/`. Preserve
-control flow, data representation, error behavior, and module boundaries unless
-a documented language difference requires a deviation. Reference the upstream
-path in the ported file or its adjacent documentation when the relationship is
-not obvious.
-
-There is an older exploratory implementation at
-[`elnabo/haxe_in_haxe`](https://github.com/elnabo/haxe_in_haxe). It may be used
-for research, but this repository should not inherit its design without first
-checking it against the pinned upstream source and the HXB conformance contract.
+Keep each module mechanically close to its counterpart in `haxe/src/`:
+control flow, branch order, data layout, error behavior and module
+boundaries, unless a documented language difference requires a deviation
+(see [`AGENTS.md`](AGENTS.md)). An older exploratory implementation,
+[`elnabo/haxe_in_haxe`](https://github.com/elnabo/haxe_in_haxe), is reference
+material only.
