@@ -1,7 +1,7 @@
 {
  "meta": {
-  "date": "2026-10-09 18:32 UTC",
-  "commit": "93f1df5",
+  "date": "2026-10-09 20:24 UTC",
+  "commit": "4dc6b64",
   "cpu": "Intel(R) Xeon(R) Processor @ 2.10GHz",
   "cores": 4,
   "memory_gb": 15.7,
@@ -110,12 +110,12 @@
    "status": "ok",
    "runs": 3,
    "verified": true,
-   "wall_min": 0.284,
-   "wall_median": 0.297,
-   "cpu_min": 0.283,
-   "cpu_median": 0.297,
-   "maxrss_mb": 56.5,
-   "date": "2026-10-09 16:12 UTC"
+   "wall_min": 0.269,
+   "wall_median": 0.283,
+   "cpu_min": 0.268,
+   "cpu_median": 0.281,
+   "maxrss_mb": 43.0,
+   "date": "2026-10-09 20:24 UTC"
   },
   {
    "workload": "hello",
@@ -136,12 +136,12 @@
    "status": "ok",
    "runs": 3,
    "verified": true,
-   "wall_min": 0.12,
-   "wall_median": 0.125,
-   "cpu_min": 0.12,
-   "cpu_median": 0.125,
-   "maxrss_mb": 49.1,
-   "date": "2026-10-09 16:12 UTC"
+   "wall_min": 0.111,
+   "wall_median": 0.113,
+   "cpu_min": 0.109,
+   "cpu_median": 0.113,
+   "maxrss_mb": 34.8,
+   "date": "2026-10-09 20:24 UTC"
   },
   {
    "workload": "hello",
@@ -175,12 +175,12 @@
    "status": "ok",
    "runs": 3,
    "verified": false,
-   "wall_min": 0.122,
-   "wall_median": 0.138,
-   "cpu_min": 0.122,
-   "cpu_median": 0.138,
-   "maxrss_mb": 38.2,
-   "date": "2026-10-09 17:14 UTC"
+   "wall_min": 0.119,
+   "wall_median": 0.123,
+   "cpu_min": 0.118,
+   "cpu_median": 0.122,
+   "maxrss_mb": 39.4,
+   "date": "2026-10-09 20:24 UTC"
   },
   {
    "workload": "hello",
@@ -266,12 +266,12 @@
    "status": "ok",
    "runs": 3,
    "verified": true,
-   "wall_min": 0.583,
-   "wall_median": 0.587,
-   "cpu_min": 0.578,
-   "cpu_median": 0.582,
-   "maxrss_mb": 56.8,
-   "date": "2026-10-09 16:12 UTC"
+   "wall_min": 0.569,
+   "wall_median": 0.588,
+   "cpu_min": 0.569,
+   "cpu_median": 0.585,
+   "maxrss_mb": 51.2,
+   "date": "2026-10-09 20:24 UTC"
   },
   {
    "workload": "stdlib",
@@ -292,12 +292,12 @@
    "status": "ok",
    "runs": 3,
    "verified": true,
-   "wall_min": 0.23,
-   "wall_median": 0.236,
-   "cpu_min": 0.223,
-   "cpu_median": 0.23,
-   "maxrss_mb": 49.3,
-   "date": "2026-10-09 16:12 UTC"
+   "wall_min": 0.206,
+   "wall_median": 0.211,
+   "cpu_min": 0.205,
+   "cpu_median": 0.211,
+   "maxrss_mb": 43.1,
+   "date": "2026-10-09 20:24 UTC"
   },
   {
    "workload": "stdlib",
@@ -331,12 +331,12 @@
    "status": "ok",
    "runs": 3,
    "verified": false,
-   "wall_min": 0.233,
+   "wall_min": 0.228,
    "wall_median": 0.233,
-   "cpu_min": 0.231,
-   "cpu_median": 0.232,
-   "maxrss_mb": 52.2,
-   "date": "2026-10-09 17:14 UTC"
+   "cpu_min": 0.228,
+   "cpu_median": 0.231,
+   "maxrss_mb": 53.3,
+   "date": "2026-10-09 20:24 UTC"
   },
   {
    "workload": "stdlib",
@@ -422,12 +422,12 @@
    "status": "ok",
    "runs": 3,
    "verified": true,
-   "wall_min": 11.603,
-   "wall_median": 11.606,
-   "cpu_min": 11.596,
-   "cpu_median": 11.604,
-   "maxrss_mb": 805.3,
-   "date": "2026-10-09 16:12 UTC"
+   "wall_min": 12.501,
+   "wall_median": 12.825,
+   "cpu_min": 12.437,
+   "cpu_median": 12.81,
+   "maxrss_mb": 464.5,
+   "date": "2026-10-09 20:24 UTC"
   },
   {
    "workload": "self",
@@ -448,12 +448,12 @@
    "status": "ok",
    "runs": 3,
    "verified": true,
-   "wall_min": 4.418,
-   "wall_median": 4.433,
-   "cpu_min": 4.417,
-   "cpu_median": 4.432,
-   "maxrss_mb": 797.7,
-   "date": "2026-10-09 16:12 UTC"
+   "wall_min": 4.828,
+   "wall_median": 4.917,
+   "cpu_min": 4.811,
+   "cpu_median": 4.915,
+   "maxrss_mb": 453.9,
+   "date": "2026-10-09 20:24 UTC"
   },
   {
    "workload": "self",
@@ -487,12 +487,12 @@
    "status": "ok",
    "runs": 3,
    "verified": false,
-   "wall_min": 5.171,
-   "wall_median": 5.418,
-   "cpu_min": 5.055,
-   "cpu_median": 5.184,
-   "maxrss_mb": 480.1,
-   "date": "2026-10-09 18:32 UTC"
+   "wall_min": 5.723,
+   "wall_median": 5.919,
+   "cpu_min": 5.72,
+   "cpu_median": 5.903,
+   "maxrss_mb": 531.4,
+   "date": "2026-10-09 20:24 UTC"
   },
   {
    "workload": "self",

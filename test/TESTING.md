@@ -650,3 +650,22 @@ for the bootstrap entry point (`haxe.LegacyMain`) and its unit tests.
 - Macro execution: done in the macro milestone above.
 - Multi-part builds (`--next`/`--each`), haxelib, display/server, and
   HXB-library input in the port (HXB-library input: done, see above).
+
+## C build of the port (hxc): memory work — 2026-10-09
+
+After the object-layout and GC-policy changes (backend/README.md, "Memory";
+bench/README.md), checked on the tcc and gcc -O2 builds (with mbedtls and
+libuv):
+
+| Check | Result |
+| --- | --- |
+| Conformance, tcc / gcc -O2 | 275 PASS + 7 expected failures / same |
+| Conformance, macro cases, tcc / gcc -O2 | 66/66 / 66/66 |
+| `test/server.py` (tcc) | 587/587 |
+| `test/upstream.py`, tcc / gcc -O2 | 10/10 steps each (unit-macro 11372 assertions, misc 684/684, threads 144/144) |
+| self-compile, cosmocc APE (no deps) | archive identical to the reference |
+| WebAssembly (site/build.sh step 3 flags) | builds |
+
+A GC deduplicating promoted strings was tried and dropped: 10 macro cases
+differed, because `StrTools.physNeq` (OCaml's `!=` on position file names)
+observes string identity.
