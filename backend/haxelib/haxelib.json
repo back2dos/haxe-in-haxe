@@ -7,6 +7,7 @@
 	"version": "0.1.0",
 	"releasenote": "First package: the hxc compiler as a Cosmopolitan APE binary, the C runtime and the hxc std.",
 	"contributors": ["benmerckx"],
+	"classPath": "run",
 	"main": "Run",
 	"dependencies": {}
 }

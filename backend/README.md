@@ -33,3 +33,23 @@ python3 backend/tools/besttime.py 5 bin/backend/Bench/prog_c
 `/root/emsdk/upstream/bin`). `baselines.sh` also needs Emscripten, the
 runtime objects from `bench/build-wasm.sh` and a haxe with the hl2c fix
 (`HAXE_HLC`).
+
+## The hxc haxelib package
+
+`backend/haxelib/` packages the C target as a library that any Haxe install
+can use (`haxelib run hxc build.hxml`); usage is in
+[haxelib/README.md](haxelib/README.md). The package holds the compiler (port +
+C backend, compiled by itself to C and then with cosmocc to one portable APE
+binary with the Haxe std inside), the hxc std overrides, the C runtime and the
+run script, which compiles the generated C with the user's C compiler (or
+cosmocc for `--hxc-static`).
+
+```sh
+sh backend/haxelib/build.sh          # bin/haxelib/hxc.zip (cosmocc on PATH; about 5 min)
+haxelib install bin/haxelib/hxc.zip
+haxelib run hxc -cp src -main Main --custom-target hxc=out/main
+```
+
+Checked: a Map/sort/exception program and a macro/Reflect/Json program, with
+cc (gcc), tcc and `--hxc-static`; tcc takes 0.4 s from source to binary, and
+`--hxc-static` makes a 1.5 MB fat binary.

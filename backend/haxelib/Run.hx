@@ -57,7 +57,7 @@ class Run {
 		var dir = Path.directory(out);
 		if (dir != "" && !FileSystem.exists(dir)) FileSystem.createDirectory(dir);
 		// 1. Haxe -> C
-		var code = run(compilerCommand(), [out, "-cp", lib + "std"].concat(rest));
+		var code = run(compilerCommand(), [out, "-cp", lib + "hxstd"].concat(rest));
 		if (code != 0) Sys.exit(code);
 		if (cOnly) return;
 		// 2. C -> binary
@@ -72,6 +72,8 @@ class Run {
 		var parts = compiler.split(" ");
 		code = run(parts[0], parts.slice(1).concat(flags).concat(files).concat(libs).concat(["-o", out]));
 		if (code != 0) Sys.exit(code);
+		// cosmocc's per-architecture binaries and symbols, next to the fat binary
+		if (static_ && !debug) for (f in [out + ".aarch64.elf", out + ".com.dbg"]) if (FileSystem.exists(f)) FileSystem.deleteFile(f);
 		Sys.println(out);
 	}
 
