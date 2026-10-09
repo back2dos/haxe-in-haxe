@@ -584,7 +584,7 @@ class EvalContext {
 			case VArray(_): path == EvalHash.key_Array;
 			case VVector(_): path == EvalHash.key_eval_Vector;
 			case VInstance(vi):
-				function hasInterface(path2:Int):Bool {
+				inline function hasInterface(path2:Int):Bool {
 					try {
 						return switch getStaticPrototypeRaise(getCtx(), path2).pkind {
 							case PClass(interfaces): interfaces.indexOf(path) >= 0;

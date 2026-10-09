@@ -772,7 +772,7 @@ class EvalStdLib {
 		// (sys.ssl.*, mbedtls.*) are not registered: libuv and mbedtls are not supported by
 		// haxe-in-haxe. The mbedtls enum constants are plain data (hx_get_ssl_*_flags in
 		// libs/mbedtls/mbedtls_stubs.c, values from mbedtls/ssl.h), so they are.
-		function statics(a:Array<{name:String, value:Int}>) return [for (f in a) {name: f.name, value: EvalValue.EvalValueTools.vint(f.value)}];
+		inline function statics(a:Array<{name:String, value:Int}>) return [for (f in a) {name: f.name, value: EvalValue.EvalValueTools.vint(f.value)}];
 		initFields(builtins, tp(["mbedtls"], "SslAuthmode"), statics([
 			{name: "SSL_VERIFY_NONE", value: 0}, {name: "SSL_VERIFY_OPTIONAL", value: 1}, {name: "SSL_VERIFY_REQUIRED", value: 2}]), []);
 		initFields(builtins, tp(["mbedtls"], "SslEndpoint"), statics([{name: "SSL_IS_CLIENT", value: 0}, {name: "SSL_IS_SERVER", value: 1}]), []);

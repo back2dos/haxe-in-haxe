@@ -419,7 +419,7 @@ class Grammar {
 		var name = typeName(ctx, s);
 		var tl = parseConstraintParams(ctx, s);
 		function loop(hadDisplay:Bool, p0:Pos, acc:Array<ClassFlag>):Array<ClassFlag> {
-			function checkDisplay(p1:Pos) {
+			inline function checkDisplay(p1:Pos) {
 				if (!hadDisplay && ctx.config.inDisplayFile && ctx.config.displayMode == DMDefault && DisplayPosition.displayPosition.enclosedIn(p1))
 					Parser.syntaxCompletion(n.indexOf(HInterface) >= 0 ? SCInterfaceRelation : SCClassRelation, null, DisplayPosition.displayPosition.withPos(p1));
 			}
@@ -1270,12 +1270,12 @@ class Grammar {
 
 	// pack is in reverse order (head = innermost), as upstream.
 	static function parseTypePath2(ctx:ParserContext, p0:Null<Pos>, pack:Array<String>, name:String, p1:Pos, s:S):PlacedTypePath {
-		function revPack(l:Array<String>):Array<String> {
+		inline function revPack(l:Array<String>):Array<String> {
 			var r = l.copy();
 			r.reverse();
 			return r;
 		}
-		function checkDisplay(f:Void->PlacedTypePath):PlacedTypePath {
+		inline function checkDisplay(f:Void->PlacedTypePath):PlacedTypePath {
 			var p = p0 == null ? p1 : punion(p0, p1);
 			if (ctx.config.inDisplayFile && DisplayPosition.displayPosition.enclosedIn(p)) return makePtp(mkTypePath(revPack(pack), name), p);
 			return f();
@@ -1464,7 +1464,7 @@ class Grammar {
 		var opt = p0 != null;
 		if (opt) p1 = punion(p0, p1);
 		var p2 = Parser.lastToken(ctx, s).pos;
-		function next(acc:Array<ClassField>):Array<ClassField> {
+		inline function next(acc:Array<ClassField>):Array<ClassField> {
 			return ([
 				{
 					cffName: pn(name, p1),
@@ -1588,7 +1588,7 @@ class Grammar {
 		var doc = Parser.getDoc(ctx, s);
 		var meta = parseMeta(ctx, s);
 		var al = plist(parseCfRights, s);
-		function checkOptional(opt:Bool, name:PlacedName):Metadata {
+		inline function checkOptional(opt:Bool, name:PlacedName):Metadata {
 			if (opt) {
 				if (!tdecl) Parser.syntaxError(ctx, Custom("?var syntax is only allowed in structures"), s, null, name.pos);
 				return ([{meta: StrictMeta.Optional, exprs: [], pos: Globals.nullPos}] : Array<core.Ast.MetadataEntry>).concat(meta);
@@ -1783,7 +1783,7 @@ class Grammar {
 	}
 
 	static function parseTypePathOrResume(ctx:ParserContext, p1:Pos, s:S):{ptp:PlacedTypePath, b:Bool} {
-		function checkResume(exc:Dynamic):{ptp:PlacedTypePath, b:Bool} {
+		inline function checkResume(exc:Dynamic):{ptp:PlacedTypePath, b:Bool} {
 			if (Parser.isCompletion(ctx) && Parser.wouldSkipDisplayPosition(ctx, p1, true, s)) {
 				var p = DisplayPosition.displayPosition.withPos(p1);
 				return {ptp: makePtp(Parser.magicTypePath, p), b: true};
@@ -1940,7 +1940,7 @@ class Grammar {
 	}
 
 	static function parseObjDecl(ctx:ParserContext, name:{name:String, pos:Pos, quote:QuoteStatus}, e:Expr, p0:Pos, s:S):Expr {
-		function makeObjDecl(el:Array<ObjectField>, p1:Pos):Expr {
+		inline function makeObjDecl(el:Array<ObjectField>, p1:Pos):Expr {
 			var l = el.copy();
 			l.reverse();
 			return mk(EObjectDecl(l), punion(p0, p1));
@@ -1949,13 +1949,13 @@ class Grammar {
 		var pEnd = p0;
 		while (true) {
 			if (acceptTok(s, Comma) == null) break;
-			function nextExpr(key):Bool {
+			inline function nextExpr(key):Bool {
 				var e = secureExpr(ctx, s);
 				pEnd = e.pos;
 				acc.unshift({key: key, expr: e});
 				return true;
 			}
-			function next(key) {
+			inline function next(key) {
 				if (acceptTok(s, DblDot) != null) nextExpr(key) else Parser.syntaxError(ctx, Expected([":"]), s, nextExpr(key));
 			}
 			var r = tryHead(function() return ident(s));
@@ -1977,7 +1977,7 @@ class Grammar {
 	}
 
 	static function parseArrayDecl(ctx:ParserContext, p1:Pos, s:S):Expr {
-		function resumeOrFail(p1:Pos):{el:Array<Expr>, p:Pos} {
+		inline function resumeOrFail(p1:Pos):{el:Array<Expr>, p:Pos} {
 			var p = Parser.punionNext(ctx, p1, s);
 			return Parser.syntaxError(ctx, Expected(["expr", "]"]), s, {el: [Parser.mkNullExpr(p)], p: p});
 		}
@@ -2125,7 +2125,7 @@ class Grammar {
 			var al = tail(function() return psepTrailing(Comma, function(s) return parseFunParam(ctx, s), s));
 			expectTok(s, PClose);
 			var t = tail(function() return popt(function(s) return parseTypeHint(ctx, s), s));
-			function make(e:Expr):Expr {
+			inline function make(e:Expr):Expr {
 				var f:Func = {
 					fParams: pl,
 					fType: t,
@@ -2158,7 +2158,7 @@ class Grammar {
 	}
 
 	static function arrowFunction(ctx:ParserContext, p1:Pos, al:Array<FuncArg>, er:Expr, s:S):Expr {
-		function make(e:Expr):Expr {
+		inline function make(e:Expr):Expr {
 			var p = e.pos;
 			var ret = mk(EMeta({meta: StrictMeta.ImplicitReturn, exprs: [], pos: Globals.nullPos}, mk(EReturn(e), p)), p);
 			return mk(EFunction(FKArrow, {
@@ -2504,7 +2504,7 @@ class Grammar {
 				case Binop(OpAssign):
 					s.junk();
 					var ea1 = tail(function() return expr(ctx, s));
-					function withArgs(al:Array<FuncArg>, er:Expr):Expr {
+					inline function withArgs(al:Array<FuncArg>, er:Expr):Expr {
 						return switch e.expr {
 							case EConst(Ident(n)):
 								arrowFunction(ctx, p1, [({name: pn(n, e.pos), optional: true, meta: [], type: t, expr: ea1} : FuncArg)].concat(al), er, s);
@@ -2803,7 +2803,7 @@ class Grammar {
 				Parser.handleStreamError(ctx, err.message, s);
 				Parser.mkNullExpr(Parser.punionNext(ctx, p1, s));
 			}
-			function finish(l:Array<Expr>):Array<Expr> {
+			inline function finish(l:Array<Expr>):Array<Expr> {
 				var r = acc.copy();
 				r.reverse();
 				return r.concat(l);

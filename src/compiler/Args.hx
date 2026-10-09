@@ -39,7 +39,7 @@ import compiler.Helper.HelpMessage;
 class Args {
  // haxe/src/compiler/args.ml: request expansion (haxelib/server execution deferred).
  public static function toRawArgs(args:Array<ParsedArg>):Array<String> {
-  function raw(arg:ParsedArg):Array<String> return switch arg {
+  inline function raw(arg:ParsedArg):Array<String> return switch arg {
    case SetPlatform(platform,file):["--"+switch platform {case Flash:"swf";case Js:"js";case Lua:"lua";case Neko:"neko";case Php:"php";case Cpp:"cpp";case Jvm:"jvm";case Python:"python";case Hl:"hl";},file];
    case SetCppiaTarget(file):["--cppia",file];
    case SetCustomTarget(name,path):["--custom-target",path==""?name:name+"="+path];
@@ -108,7 +108,7 @@ class Args {
  }
  public static function usageString(usage:String,extended:Bool):String {
   var rows=ArgumentDescriptions.all.filter(row->extended||!row.advanced);var order=["Target","Compilation","Optimization","Debug","Batch","Services","Compilation Server","Target-specific","Miscellaneous"];
-  function label(row:ArgumentDescriptions.ArgumentDescription):String return row.names.join(", ")+" "+row.hint;
+  inline function label(row:ArgumentDescriptions.ArgumentDescription):String return row.names.join(", ")+" "+row.hint;
   var max=0;for(row in rows)max=Std.int(Math.max(max,label(row).length));var lines=[];
   for(category in order){var group=rows.filter(row->row.category==category);if(group.length==0)continue;lines.push("\n"+category+":");for(row in group)lines.push("  "+StringTools.rpad(label(row)," ",max)+"  "+row.doc);}
   return usage+lines.join("\n");
@@ -117,7 +117,7 @@ class Args {
  public static function processArgs(com:CommonContext):ArgContext {
   var actx:ArgContext={classes:[{pack:[],name:"Std"}],xmlOut:null,hxbOut:null,jsonOut:null,cmds:[],configMacros:[],noOutput:false,didSomething:false,forceTyping:false,preCompilation:[],interp:false,jvmFlag:false,swfVersion:false,hxbLibs:[],nativeLibs:[],raiseUsage:function(){},displayArg:null,measureTimes:false};
   var usage="Haxe Compiler "+Globals.sVersionFull(com.sctx.version)+" - (C)2005-2025 Haxe Foundation\nUsage: haxe"+(Sys.systemName()=="Windows"?".exe":"")+" <target> [options] [hxml files and dot paths...]\n";
-  function docs(result:{all:Array<{name:String,description:String}>,maxLength:Int}):Void throw new HelpMessage([for(doc in result.all)" "+StringTools.rpad(doc.name," ",result.maxLength)+": "+limitString(doc.description,result.maxLength+3)].join("\n"));
+  inline function docs(result:{all:Array<{name:String,description:String}>,maxLength:Int}):Void throw new HelpMessage([for(doc in result.all)" "+StringTools.rpad(doc.name," ",result.maxLength)+": "+limitString(doc.description,result.maxLength+3)].join("\n"));
   var args:Array<ParsedArg>=com.parsedArgs;
   for(arg in args)switch arg {
    case SetPlatform(platform,file):

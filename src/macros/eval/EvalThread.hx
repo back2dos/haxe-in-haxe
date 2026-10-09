@@ -62,12 +62,12 @@ class EvalThread {
 		var newEval = createEval(tthread);
 		var id = tthread.threadId;
 		// the debug socket is not ported: no thread events
-		function maybeSendThreadEvent(reason:String):Void {}
+		inline function maybeSendThreadEvent(reason:String):Void {}
 		threadLock.acquire();
 		ctx.evals.set(id, newEval);
 		threadLock.release();
 		EvalContext.setEval(ctx, newEval);
-		function close():Void {
+		inline function close():Void {
 			threadLock.acquire();
 			ctx.evals.remove(id);
 			threadLock.release();

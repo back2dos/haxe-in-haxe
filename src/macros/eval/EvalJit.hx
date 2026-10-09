@@ -635,21 +635,21 @@ class EvalJit {
 			case TField(ef, fa):
 				var name = EvalHash.hash(fieldName(fa));
 				var execs = [for (e in el) jitExprRec(jit, false, e)];
-				function isFinal(c:TClass, cf:TClassField):Bool {
+				inline function isFinal(c:TClass, cf:TClassField):Bool {
 					return hasClassFlag(c, CFinal) || (hasClassFieldFlag(cf, CfFinal)) ||
 						/* In interp mode we can assume that a field is final if it is not overridden.
 							We cannot do that in macro mode because overriding fields might be added
 							after jitting this call. */
 						(!ctx.isMacro && !ctx.overrides.exists(Globals.sTypePath(c.clPath) + "." + cf.cfName));
 				}
-				function isProperMethod(cf:TClassField):Bool {
+				inline function isProperMethod(cf:TClassField):Bool {
 					return switch cf.cfKind {
 						case Method(MethDynamic): false;
 						case Method(_): true;
 						case Var(_): false;
 					}
 				}
-				function lazyProtoField(proto:Vprototype):AtomicLazy<Vfunc> {
+				inline function lazyProtoField(proto:Vprototype):AtomicLazy<Vfunc> {
 					var i = EvalContext.getProtoFieldIndex(proto, name);
 					var p = e.epos;
 					return AtomicLazy.fromFun(() -> switch proto.pfields[i] {
@@ -657,17 +657,17 @@ class EvalJit {
 						case v: (EvalEmitter.cannotCall(v, p) : Vfunc);
 					});
 				}
-				function jitWithNullCheck(ef:TExpr):Emitter {
+				inline function jitWithNullCheck(ef:TExpr):Emitter {
 					var exec = jitExprRec(jit, false, ef);
 					return EvalEmitter.emitNullCheck(exec, ef.epos);
 				}
-				function instanceCall(c:TClass):Emitter {
+				inline function instanceCall(c:TClass):Emitter {
 					var exec = jitWithNullCheck(ef);
 					var proto = EvalContext.getInstancePrototype(ctx, EvalHash.pathHash(c.clPath), ef.epos);
 					var v = lazyProtoField(proto);
 					return EvalEmitter.emitProtoFieldCall(v, [exec].concat(execs), e.epos);
 				}
-				function defaultCall():Emitter {
+				inline function defaultCall():Emitter {
 					var exec = jitWithNullCheck(ef);
 					return EvalEmitter.emitMethodCall(exec, name, execs, e.epos);
 				}
@@ -754,7 +754,7 @@ class EvalJit {
 				e = concat(Texpr.setDefault(ctx.curapi.getCom().basic, a.variable, a.defaultValue, e.epos), e);
 			k--;
 		}
-		function hasFinalReturn(el:Array<TExpr>):Bool {
+		inline function hasFinalReturn(el:Array<TExpr>):Bool {
 			return el.length > 0 && el[el.length - 1].eexpr.match(TReturn(_));
 		}
 		switch e.eexpr {

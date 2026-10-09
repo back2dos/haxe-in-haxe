@@ -32,7 +32,7 @@ class SuspensionCalls {
   var v=allocVar(VGenerated,"_hx_tmp",cont.suspensionResult(ctx.typer.com.basic.tany),p);return {call:b.varInit(v,create),result:b.local(v,p)};
  }
  public static function unpackResultFields(ctx:CoroCtx,cont:ContinuationApi,result:TExpr):{subject:TExpr,result:TExpr,error:TExpr} {
-  function base(cf:TClassField,t:T):TExpr return ctx.builder.instanceField(result,cont.suspensionResultClass,[ctx.typer.com.basic.tany],cf,t);
+  inline function base(cf:TClassField,t:T):TExpr return ctx.builder.instanceField(result,cont.suspensionResultClass,[ctx.typer.com.basic.tany],cf,t);
   return {subject:base(cont.state,cont.state.cfType),result:base(cont.result,ctx.typer.com.basic.tany),error:base(cont.error,cont.error.cfType)};
  }
  public static function makeSuspendedReturn(b:coro.CoroElsewhere.TexprBuilder,cont:ContinuationApi,p:Pos):TExpr return b.staticField(Builder.makeStaticThis(cont.suspensionResultClass,p),cont.suspensionResultClass,cont.suspended,cont.suspended.cfType);
@@ -69,11 +69,11 @@ class CoroToTexpr {
    case _:core.Texpr.iter(loop,e);
   };for(e in state.csEl)loop(e);if(state.csElTail!=null)for(e in state.csElTail)loop(e);}
   var fields:Map<Int,TClassField>=[];var fieldOrder:Array<Int>=[];
-  function setField(id:Int,field:TClassField):Void {if(!fields.exists(id))fieldOrder.push(id);fields.set(id,field);}
-  function across(id:Int):Bool {var set=usages.get(id);return set!=null&&set.elements().length!=1;}
+  inline function setField(id:Int,field:TClassField):Void {if(!fields.exists(id))fieldOrder.push(id);fields.set(id,field);}
+  inline function across(id:Int):Bool {var set=usages.get(id);return set!=null&&set.elements().length!=1;}
   var forced:Map<Int,Bool>=[];for(a in tfArgs){var v:TVar=a.variable;setField(v.vId,mkField('_hx_hoisted${v.vId}',v.vType,v.vPos,v.vPos));first.csMappedLocal.set(v.vId,allocVar(VGenerated,'_hx_restored${v.vId}',v.vType,v.vPos));forced.set(v.vId,true);}
   for(state in states){
-   function localMapping(v:TVar):TVar {var n=state.csMappedLocal.get(v.vId);if(n==null){n=allocVar(VGenerated,'_hx_restored${v.vId}',v.vType,v.vPos);state.csMappedLocal.set(v.vId,n);}return n;}
+   inline function localMapping(v:TVar):TVar {var n=state.csMappedLocal.get(v.vId);if(n==null){n=allocVar(VGenerated,'_hx_restored${v.vId}',v.vType,v.vPos);state.csMappedLocal.set(v.vId,n);}return n;}
    function mapper(e:TExpr):TExpr return switch e.eexpr {
     case TVar(v,eo) if(across(v.vId)):if(eo!=null)state.csWrites.add(v.vId);setField(v.vId,mkField('_hx_hoisted${v.vId}',v.vType,v.vPos,v.vPos));state.csMappedLocal.set(v.vId,v);{var recordCopy44 = core.ds.Record.copy(e); recordCopy44.eexpr = TVar(v,eo==null?null:mapper(eo)); recordCopy44;};
     case TBinop(op=(OpAssign|OpAssignOp(_)),lhs,rhs):switch Texpr.skip(lhs).eexpr {case TLocal(v) if(across(v.vId)||forced.exists(v.vId)):state.csWrites.add(v.vId);var lhs={var recordCopy43 = core.ds.Record.copy(lhs); recordCopy43.eexpr = TLocal(localMapping(v)); recordCopy43;};var rhs=mapper(rhs);{var recordCopy42 = core.ds.Record.copy(e); recordCopy42.eexpr = TBinop(op,lhs,rhs); recordCopy42;};case _:core.Texpr.mapExpr(mapper,e);}
@@ -96,18 +96,18 @@ class CoroToTexpr {
  }
  public static function blockToTexprCoroutine(ctx:CoroCtx,root:CoroBlock,cont:ContinuationApi,cls:TClass,params:Array<T>,tfArgs:Array<{variable:TVar,defaultValue:Null<TExpr>}>,exprs:CoroToTexprExprs,p:Pos,stackItemInserter:Pos->TExpr,startException:TExpr->TExpr):{expr:TExpr,initialState:Int,fields:Array<TClassField>,numStates:Int} {
   var com=ctx.typer.com;var b=ctx.builder;var single=ctx.numStates==1;
-  function setState(id:Int):TExpr return b.assign(exprs.egoto,b.int(id,p));
-  function setControl(c:CoroControl):TExpr return b.assign(exprs.estate,b.int(c,p));
-  function stdIs(e:TExpr,t:T):TExpr return Builder.resolveAndMakeStaticCall(com.std,"isOfType",[e,mk(TTypeExpr(moduleTypeOfType(t)),tDynamic,p)],p);
+  inline function setState(id:Int):TExpr return b.assign(exprs.egoto,b.int(id,p));
+  inline function setControl(c:CoroControl):TExpr return b.assign(exprs.estate,b.int(c,p));
+  inline function stdIs(e:TExpr,t:T):TExpr return Builder.resolveAndMakeStaticCall(com.std,"isOfType",[e,mk(TTypeExpr(moduleTypeOfType(t)),tDynamic,p)],p);
   var ereturn=b.makeReturn(exprs.econtinuation);var states:Array<CoroState>=[];var initialState=root.cbId;
-  function makeState(id:Int,el:Array<TExpr>,tail:Null<Array<TExpr>>):CoroState return {csId:id,csEl:el,csElTail:tail,csDeclarations:[],csMappedLocal:[],csReads:new CoroIntSet(),csWrites:new CoroIntSet()};
+  inline function makeState(id:Int,el:Array<TExpr>,tail:Null<Array<TExpr>>):CoroState return {csId:id,csEl:el,csElTail:tail,csDeclarations:[],csMappedLocal:[],csReads:new CoroIntSet(),csWrites:new CoroIntSet()};
   var getCaught:TExpr->TExpr;var unwrap:TExpr->TExpr;
   switch (com.basic.texception:T) {case TInst(c,_):var cf=PMap.find("unwrap",c.clFields);unwrap=function(e)return b.call(b.instanceField(e,c,[],cf,cf.cfType),[],com.basic.tany);getCaught=function(e)return Builder.resolveAndMakeStaticCall(c,"caught",[e],e.epos);case _:throw "assert";}
-  function ifError(cb:CoroBlock):TExpr {var thenE=b.voidBlock([b.assign(exprs.etmpError,exprs.eerror),b.makeBreak(p)]);var cond=b.binop(OpNotEq,exprs.eerror,b.makeNull(exprs.eerror.etype,p),com.basic.tbool);if(cb.cbStackValue==null)return b.ifThen(cond,thenE);var e=cb.cbStackValue;return b.ifThenElse(cond,thenE,b.assign(e,{var recordCopy38 = core.ds.Record.copy((exprs.etmpResult).force()); recordCopy38.epos = e.epos; recordCopy38;}),com.basic.tvoid);}
+  inline function ifError(cb:CoroBlock):TExpr {var thenE=b.voidBlock([b.assign(exprs.etmpError,exprs.eerror),b.makeBreak(p)]);var cond=b.binop(OpNotEq,exprs.eerror,b.makeNull(exprs.eerror.etype,p),com.basic.tbool);if(cb.cbStackValue==null)return b.ifThen(cond,thenE);var e=cb.cbStackValue;return b.ifThenElse(cond,thenE,b.assign(e,{var recordCopy38 = core.ds.Record.copy((exprs.etmpResult).force()); recordCopy38.epos = e.epos; recordCopy38;}),com.basic.tvoid);}
   var excStateMap:Array<Array<Int>>=[for(_ in 0...ctx.nextBlockId)[]];
-  function generate(cb:CoroBlock):Int {
+  inline function generate(cb:CoroBlock):Int {
    var el=getBlockExprs(cb);
-   function addState(next:Null<Int>,extra:Array<TExpr>,tail:Null<Array<TExpr>>):Int {var el=el.copy();if(!single&&next!=null)el.push(setState(next));if(hasBlockFlag(cb,CbResumeState))el.unshift(ifError(cb));el=el.concat(extra);states.unshift(makeState(cb.cbId,el,tail));if(cb.cbCatch!=null)excStateMap[cb.cbCatch.cbId].unshift(cb.cbId);return cb.cbId;}
+   inline function addState(next:Null<Int>,extra:Array<TExpr>,tail:Null<Array<TExpr>>):Int {var el=el.copy();if(!single&&next!=null)el.push(setState(next));if(hasBlockFlag(cb,CbResumeState))el.unshift(ifError(cb));el=el.concat(extra);states.unshift(makeState(cb.cbId,el,tail));if(cb.cbCatch!=null)excStateMap[cb.cbCatch.cbId].unshift(cb.cbId);return cb.cbId;}
    return switch cb.cbNext {
     case NextSuspend(call,null):var r=SuspensionCalls.makeSuspendingTailCall(ctx,cont,exprs,call);addState(null,[stackItemInserter(call.csPos)],[r.call,r.check]);
     case NextSuspend(call,n):var r=SuspensionCalls.makeSuspendingCall(ctx,cont,exprs,call);addState(n.cbId,[stackItemInserter(call.csPos)],[r.call,r.check]);

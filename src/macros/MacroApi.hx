@@ -122,7 +122,7 @@ class CompilerApiTools {
 		used to clear the interpreter's curapi between compilations. Any access fails.
 	**/
 	public static function nullApi():CompilerApi {
-		function die():Dynamic return core.Globals.die("Macro API accessed after compilation cleanup", "MacroApi.nullApi");
+		inline function die():Dynamic return core.Globals.die("Macro API accessed after compilation cleanup", "MacroApi.nullApi");
 		return {
 			pos: core.Globals.nullPos,
 			getCom: () -> die(),
@@ -1334,7 +1334,7 @@ class MacroApiImpl {
 		var resolveWrite = a.aWrite == null ? vnull : encodeCfref(a.aWrite);
 		var resolve = a.aRead == null ? vnull : encodeCfref(a.aRead);
 		var array = encodeArray(a.aArray.map(encodeCfield));
-		function fromTo(l:Array<T>, lf:Array<{type:T, field:TClassField}>):Value {
+		inline function fromTo(l:Array<T>, lf:Array<{type:T, field:TClassField}>):Value {
 			var withField = lf.map(x -> {
 				var field = encodeCfield(x.field);
 				var t = encodeType(x.type);
@@ -1717,7 +1717,7 @@ class MacroApiImpl {
 	}
 
 	public static function encodeFieldAccess(fa:TFieldAccess):Value {
-		function encodeInstance(c:TClass, tl:TParams):Value {
+		inline function encodeInstance(c:TClass, tl:TParams):Value {
 			var params = encodeTparams(tl);
 			return encodeObj([fld("c", encodeClref(c)), fld("params", params)]);
 		}
@@ -1982,7 +1982,7 @@ class MacroApiImpl {
 			case {index: 16, args: [vif, vthen, velse]}: TIf(loop(vif), loop(vthen), opt(loop, velse));
 			case {index: 17, args: [vcond, v1, b]}: TWhile(loop(vcond), loop(v1), if (decodeBool(b)) NormalWhile else DoWhile);
 			case {index: 18, args: [v1, cl, vdef]}:
-				function isExhaustive(e1:TExpr, def:Null<TExpr>):Bool {
+				inline function isExhaustive(e1:TExpr, def:Null<TExpr>):Bool {
 					function loop(e1:TExpr):Bool {
 						return switch e1.eexpr {
 							case TMeta(m, _) if (Meta.metaEq(core.MetaList.StrictMeta.Exhaustive, m.meta)): true;
@@ -2257,7 +2257,7 @@ class MacroApiImpl {
 			{name: "contains_display_position", value: vfun1(vp -> {
 				var p = decodePos(vp);
 				var displayPos = core.display.DisplayPosition.displayPosition;
-				function sameFile():Bool {
+				inline function sameFile():Bool {
 					var dfile = displayPos.get().pfile;
 					return dfile == p.pfile || {
 						var com = ccom();
@@ -2579,7 +2579,7 @@ class MacroApiImpl {
 			})},
 			{name: "follow_with_abstracts", value: vfun2((v, once) -> {
 				var t = decodeType(v);
-				function followOnce(t:T):T {
+				inline function followOnce(t:T):T {
 					return switch t {
 						case TMono(r):
 							switch r.tmType {
@@ -2817,7 +2817,7 @@ class MacroApiImpl {
 			{name: "position_to_range", value: vfun1(p -> {
 				var p = decodePos(p);
 				var c = syntax.Lexer.getPosCoords(p);
-				function makePos(line:Int, character:Int):Value {
+				inline function makePos(line:Int, character:Int):Value {
 					return encodeObj([fld("line", vint(line)), fld("character", vint(character)),]);
 				}
 				var posStart = makePos(c.lineStart, c.columnStart);
@@ -2833,7 +2833,7 @@ class MacroApiImpl {
 			{name: "on_null_safety_report", value: vfun1(f -> {
 				var f = prepareCallback(f, 1);
 				ccom().callbacks.addNullSafetyReport(function(errors:Array<{msg:String, pos:Pos}>, warnings:Array<{warning:Dynamic, msg:String, pos:Pos}>):Void {
-					function encodeItem(kind:String, msg:String, pos:Pos):Value {
+					inline function encodeItem(kind:String, msg:String, pos:Pos):Value {
 						return encodeObj([fld("type", encodeString(kind)), fld("msg", encodeString(msg)), fld("pos", encodePos(pos))]);
 					}
 					function encodeWarning(w:{warning:Dynamic, msg:String, pos:Pos}):Value {

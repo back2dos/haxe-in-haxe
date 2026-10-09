@@ -69,8 +69,8 @@ class EvalMisc {
 
 	/** Turns prototypes into dictionaries if the field doesn't exist. **/
 	public static function setObjectFieldRuntime(o:Vobject, name:Int, v2:Value):Void {
-		function updateDictionary(d:core.ds.GlobalsIntMap<Value>) return d.add(name, v2);
-		function makeDictionary(proto:Vprototype) return proto.pinstanceNames.map(i -> o.ofields[i]);
+		inline function updateDictionary(d:core.ds.GlobalsIntMap<Value>) return d.add(name, v2);
+		inline function makeDictionary(proto:Vprototype) return proto.pinstanceNames.map(i -> o.ofields[i]);
 		switch o.oproto {
 			case OProto(proto):
 				try {

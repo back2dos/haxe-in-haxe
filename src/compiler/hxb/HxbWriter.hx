@@ -1010,7 +1010,7 @@ class HxbWriter {
 	}
 
 	function writeAnon(an:TAnon):Void {
-		function writeFields() {
+		inline function writeFields() {
 			var restore = startTemporaryChunk(256);
 			var i = 0;
 			for (k in sortedKeys(an.aFields)) {
@@ -1691,7 +1691,7 @@ class HxbWriter {
 		// weird/overlooked combinations
 		case Var({vRead: r, vWrite: w}):
 			chunk.writeU8(100);
-			function f(a:VarAccess) switch a {
+			inline function f(a:VarAccess) switch a {
 				case AccNormal: chunk.writeU8(0);
 				case AccNo: chunk.writeU8(1);
 				case AccNever: chunk.writeU8(2);
@@ -1922,7 +1922,7 @@ class HxbWriter {
 				return null;
 			}, function() return 'underlying type for abstract `${core.Globals.sTypePath(a.aPath)}`', a.aPos);
 		}
-		function writeFromTo(source:String, t:T) {
+		inline function writeFromTo(source:String, t:T) {
 			catchUnboundTtp(function() {
 				writeTypeInstance(t);
 				return null;
@@ -2023,7 +2023,7 @@ class HxbWriter {
 				chunk.writeOption(c.clInit, writeClassFieldForward);
 
 				// Write in reverse order so reader can read tail-recursively without List.rev
-				function writeFields(cfl:Array<TClassField>):{n:Int, bytes:Bytes} {
+				inline function writeFields(cfl:Array<TClassField>):{n:Int, bytes:Bytes} {
 					var restore = startTemporaryChunk(256);
 					var i = cfl.length;
 					while (i-- > 0) writeClassFieldForward(cfl[i]);
@@ -2088,7 +2088,7 @@ class HxbWriter {
 						selectType(c.clPath);
 				}
 				var cExprChunks = [];
-				function writeField(refKind:ClassFieldRefKind, cf:TClassField) {
+				inline function writeField(refKind:ClassFieldRefKind, cf:TClassField) {
 					var l = writeClassFieldAndOverloadsData(false, cf);
 					for (x in l) cExprChunks.push({cf: x.cf, kind: refKind, e: x.e});
 				}

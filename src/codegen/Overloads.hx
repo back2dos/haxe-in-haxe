@@ -46,7 +46,7 @@ class Overloads {
 	public static function collectOverloads(map:T->T,c:TClass,name:String):Array<{type:T,field:TClassField}> {
 		var acc:Array<{type:T,field:TClassField}>=[];
 		function loop(map:T->T,c:TClass):Void {
-			function add(cf:TClassField):Void {
+			inline function add(cf:TClassField):Void {
 				var t=map(cf.cfType);
 				if(!core.ds.ArrayTools.exists(acc,function(v) return sameOverloadArgs(t,v.type,cf,v.field))) acc.unshift({type:t,field:cf});
 			}
@@ -153,7 +153,7 @@ class Resolution {
 	}
 	public static function reduceCompatible<A>(compatible:Array<FieldCallCandidateData<A>>):Array<FieldCallCandidateData<A>> {
 		compatible=fewerOptionals([],rmDuplicates([],compatible)); if(compatible.length<2) return compatible;
-		function rateArg(t:T,e:TExpr):ConversionRate return switch e.eexpr {
+		inline function rateArg(t:T,e:TExpr):ConversionRate return switch e.eexpr {
 			case TMeta(m,_) if(m.meta==core.MetaList.StrictMeta.ImplicitCast): rate(0x7fffffff-1,0);
 			case _: rateConv(0,t,e.etype);
 		}

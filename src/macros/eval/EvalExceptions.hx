@@ -175,13 +175,13 @@ class EvalExceptions {
 			if (env != null) buildExceptionStack(eval, env);
 
 			// Careful: We have to get the message before resetting the context because toString() might access it.
-			function getStack(ctx:Context):Array<Pos> {
+			inline function getStack(ctx:Context):Array<Pos> {
 				var stack = switch evalStack {
 					case []: [];
 					case l if (isNullPos(p2)): l; // If the exception position is null_pos, we're "probably" in a built-in function.
 					case l: l.slice(1); // Otherwise, ignore topmost frame position.
 				}
-				function def():Array<Pos> return getExcErrorStack(ctx, stack);
+				inline function def():Array<Pos> return getExcErrorStack(ctx, stack);
 				return switch v {
 					case VInstance(vi) if (EvalContext.is(v, EvalHash.key_haxe_Exception)):
 						try {

@@ -31,7 +31,7 @@ class CoroFromTexpr {
   return CoroConfig.ofMetaList(meta).outcome;
  }
  public static function checkCaptures(ctx:CoroCtx,args:Array<{variable:TVar,defaultValue:Null<TExpr>}>,expr:TExpr):Void {
-  var vars:Map<Int,Bool>=[]; function declare(v:TVar):Void vars.set(v.vId,true); for(a in args)declare(a.variable);
+  var vars:Map<Int,Bool>=[]; inline function declare(v:TVar):Void vars.set(v.vId,true); for(a in args)declare(a.variable);
   function browse(e:TExpr):Void switch e.eexpr {
    case TConst(TThis|TSuper):ctx.capturesThis=true;
    case TLocal(v):if(!vars.exists(v.vId))ctx.hasCaptureVars=true;
@@ -45,25 +45,25 @@ class CoroFromTexpr {
   var wrapper=ctx.typer.com.localWrapper; var scom=SafeCom.ofCom(ctx.typer.com);
   scom={var recordCopy36 = core.ds.Record.copy(scom); recordCopy36.platformConfig = {var recordCopy35 = core.ds.Record.copy(scom.platformConfig); recordCopy35.pfCapturePolicy = CPWrapRef; recordCopy35;}; recordCopy36;};
   e=CapturedVars.capturedVars(scom,wrapper,true,e);
-  function makeBlock(tp:Dynamic):CoroBlock return CoroFunctions.makeBlock(ctx,tp);
-  function blockFromE(e:TExpr):CoroBlock return makeBlock({t:e.etype,p:e.epos});
-  function hasSideEffect(e:TExpr):Bool return switch e.eexpr {case TVar(_,_):true;case _:OptimizerTexpr.hasSideEffect(e);};
-  function addExpr(cb:CoroBlock,e:TExpr):Void if(cb.cbNext==NextUnknown&&e!=eNoValue&&hasSideEffect(e))cb.cbEl.push(e);
-  function terminate(cb:CoroBlock,kind:CoroNext,t:T,p:Pos):Void if(cb.cbNext==NextUnknown)cb.cbNext=kind;
-  function fallThrough(a:CoroBlock,b:CoroBlock):Void terminate(a,NextFallThrough(b),tDynamic,nullPos);
-  function gotoBlock(a:CoroBlock,b:CoroBlock):Void terminate(a,NextGoto(b),tDynamic,nullPos);
-  function tmpLocal(cb:CoroBlock,t:T,eo:Null<TExpr>,p:Pos):TVar {var v=allocVar(VGenerated,"tmp",t,p);addExpr(cb,mk(TVar(v,eo),ctx.typer.t.tvoid,p));return v;}
+  inline function makeBlock(tp:Dynamic):CoroBlock return CoroFunctions.makeBlock(ctx,tp);
+  inline function blockFromE(e:TExpr):CoroBlock return makeBlock({t:e.etype,p:e.epos});
+  inline function hasSideEffect(e:TExpr):Bool return switch e.eexpr {case TVar(_,_):true;case _:OptimizerTexpr.hasSideEffect(e);};
+  inline function addExpr(cb:CoroBlock,e:TExpr):Void if(cb.cbNext==NextUnknown&&e!=eNoValue&&hasSideEffect(e))cb.cbEl.push(e);
+  inline function terminate(cb:CoroBlock,kind:CoroNext,t:T,p:Pos):Void if(cb.cbNext==NextUnknown)cb.cbNext=kind;
+  inline function fallThrough(a:CoroBlock,b:CoroBlock):Void terminate(a,NextFallThrough(b),tDynamic,nullPos);
+  inline function gotoBlock(a:CoroBlock,b:CoroBlock):Void terminate(a,NextGoto(b),tDynamic,nullPos);
+  inline function tmpLocal(cb:CoroBlock,t:T,eo:Null<TExpr>,p:Pos):TVar {var v=allocVar(VGenerated,"tmp",t,p);addExpr(cb,mk(TVar(v,eo),ctx.typer.t.tvoid,p));return v;}
   function checkComplex(cb:CoroBlock,ret:CoroRet,t:T,p:Pos):{e:TExpr,ret:CoroRet} return switch ret {
    case RValue:var v=tmpLocal(cb,t,null,p);{e:Builder.makeLocal(v,v.vPos),ret:RLocal(v)};
    case RLocal(v):{e:Builder.makeLocal(v,v.vPos),ret:ret};
    case RMapExpr(inner,f):var r=checkComplex(cb,inner,t,p);r.e==eNoValue?{e:eNoValue,ret:RMapExpr(r.ret,f)}:{e:f(r.e),ret:r.ret};
    case _:{e:eNoValue,ret:ret};
   };
-  function scopeAllowsSuspensionCallOn(e1:TExpr,args:Array<{name:String,optional:Bool,type:T}>,el:Array<TExpr>):Bool {
+  inline function scopeAllowsSuspensionCallOn(e1:TExpr,args:Array<{name:String,optional:Bool,type:T}>,el:Array<TExpr>):Bool {
    if(scope==null||!scope.restrictedSuspension)return true;
    function isScopeLocalExpr(e:TExpr):Bool return switch Texpr.skip(e).eexpr {case TLocal(v) if(v==scope.scopeVar):true;case TField(e1,_):isScopeLocalExpr(e1);case _:false;};
-   function isRestricted(meta:Dynamic):Bool {var c=CoroScopeConfig.ofMetaList(meta);return c!=null&&c.restrictedSuspension;}
-   function hasScopeLocalFirstArgument():Bool {
+   inline function isRestricted(meta:Dynamic):Bool {var c=CoroScopeConfig.ofMetaList(meta);return c!=null&&c.restrictedSuspension;}
+   inline function hasScopeLocalFirstArgument():Bool {
     if(args.length==0||el.length==0||!isScopeLocalExpr(el[0]))return false;
     return switch e1.eexpr {
      case TField(_,FStatic({clKind:KAbstractImpl(a)},cf)) if(hasClassFieldFlag(cf,CfImpl)):isRestricted(a.aMeta);
@@ -72,9 +72,9 @@ class CoroFromTexpr {
    }
    return isScopeLocalExpr(e1)||hasScopeLocalFirstArgument();
   }
-  function scopeAllowsAccessTo(v:TVar):Bool return scope==null||scope.scopeVar==v;
-  function isCoro(e:TExpr):Bool return switch followWithCoro(e.etype){case Coro({args:_,ret:_}):true;case _:false;};
-  function mapSuspension(cb:CoroBlock,ret:CoroRet,e:TExpr):MapSuspensionResult {
+  inline function scopeAllowsAccessTo(v:TVar):Bool return scope==null||scope.scopeVar==v;
+  inline function isCoro(e:TExpr):Bool return switch followWithCoro(e.etype){case Coro({args:_,ret:_}):true;case _:false;};
+  inline function mapSuspension(cb:CoroBlock,ret:CoroRet,e:TExpr):MapSuspensionResult {
    var allowTco=(switch ret{case RTailBlock|RTailReturn:true;case _:false;})&&cb.cbCatch==null&&!ctx.typer.com.debug;
    function remap(canTco:Bool,loopDepth:Int,e:TExpr):TExpr return switch e.eexpr {
     case TConst(TThis):deferred.makeThis(e);
@@ -102,16 +102,16 @@ class CoroFromTexpr {
   function orderedLoop(cb:CoroBlock,el:Array<TExpr>):Null<{cb:CoroBlock,el:Array<TExpr>}> {
    var acc=[];for(e in el){var r=loop(cb,RValue,e);if(r==null){for(a in acc)addExpr(cb,a);return null;}cb=r.cb;acc.push(r.e);}return {cb:cb,el:acc};
   }
-  function splitIfThen(cb:CoroBlock,e1:TExpr,etype:T,epos:Pos,e2:TExpr):BlockValue {
+  inline function splitIfThen(cb:CoroBlock,e1:TExpr,etype:T,epos:Pos,e2:TExpr):BlockValue {
    var a=blockFromE(e2);var an=loopBlock(a,RBlock,e2);var n=makeBlock(null);if(an!=null)fallThrough(an.cb,n);terminate(cb,NextIfThen(e1,a,n),etype,epos);return {cb:n,e:eNoValue};
   }
-  function splitIfThenElse(cb:CoroBlock,ret:CoroRet,etype:T,epos:Pos,e1:TExpr,e2:TExpr,e3:TExpr):Null<BlockValue> {
+  inline function splitIfThenElse(cb:CoroBlock,ret:CoroRet,etype:T,epos:Pos,e1:TExpr,e2:TExpr,e3:TExpr):Null<BlockValue> {
    var complex=checkComplex(cb,ret,etype,epos);ret=complex.ret;var r=loop(cb,RValue,e1);if(r==null)return null;cb=r.cb;e1=r.e;
    var a=blockFromE(e2);var an=loopBlock(a,ret,e2);var b=blockFromE(e3);var bn=loopBlock(b,ret,e3);var n=null;
    if(an!=null||bn!=null){n=makeBlock(null);if(an!=null)fallThrough(an.cb,n);if(bn!=null)fallThrough(bn.cb,n);}
    terminate(cb,NextIfThenElse(e1,a,b,n),etype,epos);return n==null?null:{cb:n,e:complex.e};
   }
-  function splitSwitch(cb:CoroBlock,ret:CoroRet,s:TSwitch,e:TExpr):Null<BlockValue> {
+  inline function splitSwitch(cb:CoroBlock,ret:CoroRet,s:TSwitch,e:TExpr):Null<BlockValue> {
    var complex=checkComplex(cb,ret,e.etype,e.epos);ret=complex.ret;var r=loop(cb,RValue,s.switchSubject);if(r==null)return null;cb=r.cb;
    var next=AtomicLazy.fromFun(function()return makeBlock(null));
    var cases=[for(c in s.switchCases){var b=blockFromE(c.caseExpr);var n=loopBlock(b,ret,c.caseExpr);if(n!=null)fallThrough(n.cb,(next).force());{el:c.casePatterns,cb:b};}];
@@ -119,11 +119,11 @@ class CoroFromTexpr {
    var sw=({csSubject:r.e,csCases:cases,csDefault:def,csExhaustive:s.switchExhaustive} : coro.CoroTypes.CoroSwitch);
    var n=(next).isVal()||!sw.csExhaustive?(next).force():null;terminate(cb,NextSwitch(sw,n),e.etype,e.epos);return n==null?null:{cb:n,e:complex.e};
   }
-  function splitWhile(cb:CoroBlock,e1:TExpr,e2:TExpr,etype:T,epos:Pos):Null<BlockValue> {
+  inline function splitWhile(cb:CoroBlock,e1:TExpr,e2:TExpr,etype:T,epos:Pos):Null<BlockValue> {
    var next=AtomicLazy.fromFun(function()return makeBlock(null));var body=blockFromE(e2);loopStack.unshift({body:body,next:next});var bn=loopBlock(body,RBlock,e2);if(bn!=null)gotoBlock(bn.cb,body);loopStack.shift();
    var n=(next).isVal()?(next).force():null;terminate(cb,NextWhile(e1,body,n),etype,epos);return n==null?null:{cb:n,e:eNoValue};
   }
-  function splitTry(cb:CoroBlock,ret:CoroRet,e1:TExpr,catches:Array<{variable:TVar,expr:TExpr}>,etype:T,epos:Pos):Null<BlockValue> {
+  inline function splitTry(cb:CoroBlock,ret:CoroRet,e1:TExpr,catches:Array<{variable:TVar,expr:TExpr}>,etype:T,epos:Pos):Null<BlockValue> {
    var complex=checkComplex(cb,ret,etype,epos);ret=complex.ret;ctx.hasCatch=true;var next=AtomicLazy.fromFun(function()return makeBlock(null));
    var catches=catches.map(function(c){var b=blockFromE(c.expr);addExpr(b,mk(TVar(c.variable,(etmpErrorUnwrapped).force()),ctx.typer.t.tvoid,c.variable.vPos));var n=loopBlock(b,ret,c.expr);if(n!=null)fallThrough(n.cb,(next).force());return {v:c.variable,cb:b};});
    var catchBlock=makeBlock(null);addBlockFlag(catchBlock,CbGenerated);var old=ctx.currentCatch;ctx.currentCatch=catchBlock;
@@ -131,7 +131,7 @@ class CoroFromTexpr {
    var n=(next).isVal()?(next).force():null;terminate(cb,NextTry(body,ca,n),etype,epos);return n==null?null:{cb:n,e:complex.e};
   }
   loop=function(cb,ret,e) {
-   function mapped(r:Null<BlockValue>,f:TExpr->TExpr):Null<BlockValue>return r==null?null:{cb:r.cb,e:f(r.e)};
+   inline function mapped(r:Null<BlockValue>,f:TExpr->TExpr):Null<BlockValue>return r==null?null:{cb:r.cb,e:f(r.e)};
    return switch e.eexpr {
     case TConst(TThis):{cb:cb,e:deferred.makeThis(e)};
     case TField({eexpr:TConst(TSuper)},_):{cb:cb,e:deferred.makeSuperField(e)};
@@ -165,7 +165,7 @@ class CoroFromTexpr {
         var affection=OptimizerTexpr.createAffectionChecker();
         argsExprs=argsExprs.map(function(e){var effect=hasSideEffect(e);var affected=affection.mightBeAffected(e);if(effect)affection.collectModifiedLocals(e);if(effect||affected){var v=tmpLocal(cb,e.etype,e,e.epos);return Builder.makeLocal(v,v.vPos);}return e;});
         var kind=getOutcomeFromCallee(e1);
-        function makeNextBlock():CoroBlock {var n=blockFromE(e1);addBlockFlag(n,CbResumeState);addBlockFlag(cb,CbSuspendState);return n;}
+        inline function makeNextBlock():CoroBlock {var n=blockFromE(e1);addBlockFlag(n,CbResumeState);addBlockFlag(cb,CbSuspendState);return n;}
         var isTco=(switch ret {case RTailBlock|RTailReturn:true;case _:false;})&&cb.cbCatch==null&&!ctx.typer.com.debug;
         if(kind.noSuspend){
          if(isTco){var s=({csFun:e1,csArgs:argsExprs,csPos:e.epos,csResult:ret==RTailBlock?SusBlock:SusResult,csKind:kind} : coro.CoroTypes.CoroSuspend);terminate(cb,NextSuspend(s,null),tDynamic,nullPos);null;}

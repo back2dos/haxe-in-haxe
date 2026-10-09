@@ -151,11 +151,11 @@ class EvalMain {
 
 	public static function valueSignature(v:Value):String {
 		var buf = new haxe.io.BytesBuffer();
-		function add(s:String) buf.addString(s);
-		function addc(c:String) buf.addString(c);
+		inline function add(s:String) buf.addString(s);
+		inline function addc(c:String) buf.addString(c);
 		var scache:Map<String, Int> = new Map();
 		var scacheLength = 0;
-		function adds(s:String) {
+		inline function adds(s:String) {
 			var i = scache.get(s);
 			if (i != null) {
 				addc('R');
@@ -172,7 +172,7 @@ class EvalMain {
 		}
 		var cache = EvalValueTools.createValueHashtbl();
 		var cacheLength = 0;
-		function cacheValue(v:Value, f:Void->Void) {
+		inline function cacheValue(v:Value, f:Void->Void) {
 			var i = cache.findOpt(v);
 			if (i != null) {
 				addc('r');
@@ -187,7 +187,7 @@ class EvalMain {
 		var customCount = 0;
 		// Custom format: enumerate custom entities as name_char0, name_char1 etc.
 		// (upstream caches the value passed to value_signature here, not the current one)
-		function customName(nameChar:String) {
+		inline function customName(nameChar:String) {
 			cacheValue(v, () -> {
 				addc('F');
 				add(Std.string(customCount));
@@ -303,7 +303,7 @@ class EvalMain {
 				case VArray({avalues: a}) | VVector(a):
 					cacheValue(v, () -> {
 						addc('a');
-						function nulls(nullCount:Int) {
+						inline function nulls(nullCount:Int) {
 							if (nullCount > 0) {
 								addc('u');
 								add(Std.string(nullCount));
@@ -451,9 +451,9 @@ class EvalMain {
 	}
 
 	public static function valueToExpr(v:Value, p:Pos):Expr {
-		function path(i:Int):Expr {
+		inline function path(i:Int):Expr {
 			var mt = EvalContext.getCtx().typeCache.find(i);
-			function makePath(t:ModuleType):Expr {
+			inline function makePath(t:ModuleType):Expr {
 				function loop(l:Array<String>, idx:Int):Expr {
 					// `l` is reversed: l[idx] is the head
 					return switch l.length - idx {
@@ -472,7 +472,7 @@ class EvalMain {
 			}
 			return makePath(mt);
 		}
-		function makeMapEntry(eKey:Expr, v:Value):Expr {
+		inline function makeMapEntry(eKey:Expr, v:Value):Expr {
 			var eValue = valueToExpr(v, p);
 			return {expr: EBinop(OpArrow, eKey, eValue), pos: p};
 		}
@@ -564,7 +564,7 @@ class EvalMain {
 	public static function handleDecodingError(f:String->Void, v:Value, t:T):Array<{msg:String, line:Int}> {
 		var line = 1;
 		var errors:Array<{msg:String, line:Int}> = [];
-		function error(msg:String, v:Value) {
+		inline function error(msg:String, v:Value) {
 			errors.unshift({msg: msg, line: line});
 			f(valueString(v) + " <- " + msg);
 		}

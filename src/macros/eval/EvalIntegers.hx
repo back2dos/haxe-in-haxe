@@ -64,7 +64,7 @@ class EvalIntegers {
 
 	/** UInt64.of_string: integers' C parser (sign, 0x/0o/0b/0u prefixes, '_'); raises Failure. **/
 	public static function uint64OfString(s:String):Int64 {
-		function fail():Dynamic throw new core.ds.Failure("UInt64.of_string");
+		inline function fail():Dynamic throw new core.ds.Failure("UInt64.of_string");
 		var i = 0, sign = 1, base = 10;
 		if (i < s.length && s.charAt(i) == "-") {
 			sign = -1;
@@ -84,7 +84,7 @@ class EvalIntegers {
 				i += 2;
 			case _:
 		}
-		function digit(c:Int):Int {
+		inline function digit(c:Int):Int {
 			return if (c >= "0".code && c <= "9".code) c - "0".code else if (c >= "A".code && c <= "F".code) c - "A".code + 10 else if (c >= "a".code
 				&& c <= "f".code) c - "a".code + 10 else -1;
 		}

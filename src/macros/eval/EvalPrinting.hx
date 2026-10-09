@@ -142,7 +142,7 @@ class EvalPrinting {
 
 	/** `s_value ?(indent_level=0) depth v` **/
 	public static function sValue(depth:Int, v:Value, indentLevel:Int = 0):Vstring {
-		function callToString():Vstring {
+		inline function callToString():Vstring {
 			var vf = EvalField.fieldRaise(v, EvalHash.key_toString);
 			return sValue(depth + 1, callValueOn(v, vf, []), indentLevel);
 		}

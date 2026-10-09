@@ -11,8 +11,8 @@ class CoroDebug {
   function se(e:Dynamic):String return core.TPrinting.sExprPretty(true,"",false,st,e);
   var edges:Array<{from:Int,to:Int,label:String,tree:Bool}>=[];
   function block(cb:CoroBlock):Void {
-   function edge(label:String,target:CoroBlock):Void {block(target); edges.push({from:cb.cbId,to:target.cbId,label:label,tree:true});}
-   function maybe(label:String,target:Null<CoroBlock>):Void if(target!=null) edge(label,target);
+   inline function edge(label:String,target:CoroBlock):Void {block(target); edges.push({from:cb.cbId,to:target.cbId,label:label,tree:true});}
+   inline function maybe(label:String,target:Null<CoroBlock>):Void if(target!=null) edge(label,target);
    var s=cb.cbEl.map(se).join("\n"); var flags=hasBlockFlag(cb,CbResumeState)?" resume":hasBlockFlag(cb,CbSuspendState)?" suspend":"";
    s='(${cb.cbId}$flags)'+(s==""?"":"\n"+s);
    var next:Null<String>=switch cb.cbNext {

@@ -37,7 +37,7 @@ class ContinuationClassBuilder {
  public static function mkCtor(ctx:CoroCtx,cont:ContinuationApi,cc:CoroClass,initial:Int,captured:Null<TClassField>,hoisted:Array<{name:String,e:TExpr,field:TClassField}>):TClassField {
   var basic:BasicTypes=ctx.typer.t;var b=ctx.builder;var p=cc.namePos;var ethis=mk(TConst(TThis),cc.inside.clsT,p);var completion=allocVar(VGenerated,"completion",cont.continuation,p);
   var esuper=b.call(b.makeSuper(cc.inside.contType,p),[b.local(completion,p),b.int(initial,p)],basic.tvoid);
-  function thisField(cf:TClassField):TExpr return b.instanceField(ethis,cc.cls,cc.inside.paramTypes,cf,cf.cfType);
+  inline function thisField(cf:TClassField):TExpr return b.instanceField(ethis,cc.cls,cc.inside.paramTypes,cf,cf.cfType);
   var capture:Null<{v:TVar,e:TExpr}>=null;if(captured!=null){var v=allocVar(VGenerated,"_hx_captured",captured.cfType,p);capture={v:v,e:b.assign(thisField(captured),b.local(v,p))};}
   var hs=hoisted.map(function(h){var v=allocVar(VGenerated,h.name,h.field.cfType,p);return {v:v,e:b.assign(thisField(h.field),b.local(v,p))};});
   var el=[esuper].concat(hs.map(function(h)return h.e));var funArgs:Array<{name:String,optional:Bool,type:T}>=[{name:"completion",optional:false,type:cont.continuation}].concat(hs.map(function(h)return {name:h.v.vName,optional:false,type:h.v.vType}));var args:Array<{variable:TVar,defaultValue:Null<TExpr>}>=[{variable:completion,defaultValue:null}].concat(hs.map(function(h)return {variable:h.v,defaultValue:null}));
@@ -96,7 +96,7 @@ class Coro {
   return switch e.eexpr {case TField(esuper={eexpr:TConst(TSuper)},fa=FInstance(sc,_,cf)):var sf:TExpr={eexpr:TField(esuper,fa),etype:cf.cfType,epos:e.epos};var h=helper(sf,sc,cf,e.epos);{var recordCopy2 = core.ds.Record.copy(e); recordCopy2.eexpr = TField(egthis,FInstance(curclass,params,h)); recordCopy2;};case _:e;};
  }
  public static function makeDeferredApi(ctx:CoroCtx,b:TexprBuilder):{deferred:CoroDeferredApi,install:CoroDeferredApi->Void} {
-  function makeDeferred(build:Void->TExpr,t:T):TExpr {var v=allocVar(VGenerated,"_hx_coro_deferred",tDynamic,nullPos);ctx.deferredExprs.set(v.vId,build);return b.call(b.local(v,v.vPos),[],t);}
+  inline function makeDeferred(build:Void->TExpr,t:T):TExpr {var v=allocVar(VGenerated,"_hx_coro_deferred",tDynamic,nullPos);ctx.deferredExprs.set(v.vId,build);return b.call(b.local(v,v.vPos),[],t);}
   var api:Null<CoroDeferredApi>=null;var deferred:CoroDeferredApi={
    makeInlineReturn:function(e,p)return makeDeferred(function()return api.makeInlineReturn(e,p),tDynamic),
    makeInlineTailCall:function(c)return makeDeferred(function()return api.makeInlineTailCall(c),tDynamic),
@@ -119,9 +119,9 @@ class Coro {
    case LocalFunc(_,v):GenThunk(mkField("_hx_captured",TFun({args:[],ret:retInside}),v.vPos,v.vPos));
   };
   var vcompletion=allocVar(VGenerated,"_hx_completion",cont.continuation,p);var ecompletion=b.local(vcompletion,p);var contType=switch mode{case GenInline(_):cc.inside.clsT;case GenThunk(_):cc.outside.clsT;};var vcontinuation=allocVar(VGenerated,"_hx_continuation",contType,p);var econtinuation=b.local(vcontinuation,p);
-  function resultField(cf:TClassField,t:T):TExpr return b.instanceField(econtinuation,cont.suspensionResultClass,[basic.tany],cf,t);
+  inline function resultField(cf:TClassField,t:T):TExpr return b.instanceField(econtinuation,cont.suspensionResultClass,[basic.tany],cf,t);
   var estate=resultField(cont.state,cont.suspensionState);var eresult=resultField(cont.result,basic.tnull(basic.tany));var eerror=resultField(cont.error,basic.tnull(basic.texception));
-  function continuationField(cf:TClassField,t:T):TExpr return b.instanceField(econtinuation,cont.baseContinuationClass,[basic.tany],cf,t);
+  inline function continuationField(cf:TClassField,t:T):TExpr return b.instanceField(econtinuation,cont.baseContinuationClass,[basic.tany],cf,t);
   var egoto=continuationField(cont.gotoLabel,basic.tint);var etmpError=b.local(vtmpError,p);var exprs:CoroToTexprExprs={econtinuation:econtinuation,ecompletion:ecompletion,estate:estate,eresult:eresult,egoto:egoto,eerror:eerror,etmpResult:etmpResult,etmpError:etmpError,etmpErrorUnwrapped:etmpErrorUnwrapped};
   function stack(pos:Pos):TExpr {
    if(!ctx.typer.com.debug)return b.voidBlock([]);var field=PMap.find("setStackItem",cont.baseContinuationClass.clFields);var args=switch ctx.coroType{case ClassField(cls,cf,_,_):[b.int(0,p),b.string(core.TOther.sClassPath(cls),p),b.string(cf.cfName,p),b.int(0,p)];case LocalFunc(_,v):[b.int(1,p),b.string("",p),b.string("",p),b.int(v.vId,p)];};var coords=Lexer.getPosCoords(pos);args=args.concat([b.string(pos.pfile,p),b.int(coords.lineStart,p),b.int(coords.columnStart,p),b.int(pos.pmin,p),b.int(pos.pmax,p)]);return mk(TCall(continuationField(field,field.cfType),args),basic.tvoid,p);

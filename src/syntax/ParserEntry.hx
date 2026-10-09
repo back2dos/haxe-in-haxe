@@ -145,10 +145,10 @@ class ParserEntry {
 		var ctx=Parser.createContext(lctx,config,Define.rawDefined(defines,"macro"),code);
 		var parseEntry=entry.bind(ctx);
 		Lexer.skipHeader(code);
-		function sharpError(s:String,p:Pos):Dynamic return Parser.error(Custom(core.StringError.stringError("#"+s,["#if","#elseif","#else","#end","#error","#line"],"Unknown token")),p);
+		inline function sharpError(s:String,p:Pos):Dynamic return Parser.error(Custom(core.StringError.stringError("#"+s,["#if","#elseif","#else","#end","#error","#line"],"Unknown token")),p);
 		var conds=new ConditionHandler(); var dbc=new DeadBlockCollector(conds);
 		var sraw=new Stream<syntax.Lexer.LexedToken>(function(_) return Lexer.sharpToken(lctx,code));
-		function preprocessorError(ppe:ParserPreprocessorError,pos:Pos,tk:ParserToken):ParserToken return Parser.syntaxError(ctx,PreprocessorError(ppe),sraw,tk,pos);
+		inline function preprocessorError(ppe:ParserPreprocessorError,pos:Pos,tk:ParserToken):ParserToken return Parser.syntaxError(ctx,PreprocessorError(ppe),sraw,tk,pos);
 		var nextToken:Void->ParserToken=null;
 		var processToken:ParserToken->ParserToken=null;
 		var enterMacro:Bool->Pos->ParserToken=null;
@@ -227,7 +227,7 @@ class ParserEntry {
 	}
 	public static function parseString<T>(config:ParserConfiguration,entry:ParserContext->Stream<syntax.Lexer.LexedToken>->T,s:String,p:Pos,error:String->Pos->ParseResult<T>,inlined:Bool):ParseResult<T> {
 		var oldDisplay=DisplayPosition.displayPosition.get();
-		function restore():Void { if (!inlined) DisplayPosition.displayPosition.set(oldDisplay); }
+		inline function restore():Void { if (!inlined) DisplayPosition.displayPosition.set(oldDisplay); }
 		var lctx=Lexer.createTempCtx(p.pfile);
 		if (!inlined) { DisplayPosition.displayPosition.reset(); config=core.ds.Record.copy(config); config.inDisplayFile=false; }
 		var result:ParseResult<T>;

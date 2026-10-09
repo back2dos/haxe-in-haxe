@@ -1309,7 +1309,7 @@ class StdEReg {
 	static function pcreReplace(rex:Vregex, global:Bool, templ:String, subj:String):String {
 		var name = global ? "Pcre2.replace" : "Pcre2.replace_first";
 		var s = subst(templ);
-		function check(m:VregexMatch):Void {
+		inline function check(m:VregexMatch):Void {
 			var nsubs = m.groups.length - 1;
 			if (s.maxBr > nsubs) throw new Failure(name + ": backreference denotes nonexistent subpattern");
 			if (s.withLp && nsubs == 0) throw new Failure(name + ": no backreferences");

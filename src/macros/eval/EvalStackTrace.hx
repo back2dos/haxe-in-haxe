@@ -11,7 +11,7 @@ class EvalStackTrace {
 		var l:Array<Value> = [];
 		for (e in envs) {
 			var pos = e.pos;
-			function filePos(s:Value):Value {
+			inline function filePos(s:Value):Value {
 				var c = syntax.Lexer.getPosCoords(pos);
 				return EvalEncode.encodeEnumValue(EvalHash.key_haxe_StackItem, 2, [s, EvalString.createUnknown(pos.pfile), VInt32(c.lineStart), VInt32(c.columnStart)],
 					pos);

@@ -20,7 +20,7 @@ class CoroFunctions {
   var acc=[]; var i=cb.cbEl.length; while(i-->0) switch cb.cbEl[i].eexpr {case TBlock(el): acc=el.concat(acc); case _:acc.unshift(cb.cbEl[i]);} return acc;
  }
  public static function coroIter(f:CoroBlock->Void,cb:CoroBlock):Void {
-  function fo(c:Null<CoroBlock>):Void if(c!=null) f(c);
+  inline function fo(c:Null<CoroBlock>):Void if(c!=null) f(c);
   fo(cb.cbCatch);
   switch cb.cbNext {
    case NextIfThen(_,a,n): f(a); f(n);
@@ -37,7 +37,7 @@ class CoroFunctions {
   var visited:Map<Int,Bool>=[]; function loop(cb:CoroBlock):Void if(!visited.exists(cb.cbId)) {visited.set(cb.cbId,true); f(cb); coroIter(loop,cb);} loop(cb);
  }
  public static function coroNextMap(f:CoroBlock->CoroBlock,cb:CoroBlock):Void {
-  function fo(c:Null<CoroBlock>):Null<CoroBlock> return c==null?null:f(c);
+  inline function fo(c:Null<CoroBlock>):Null<CoroBlock> return c==null?null:f(c);
   cb.cbCatch=fo(cb.cbCatch);
   cb.cbNext=switch cb.cbNext {
    case NextIfThen(e,a,n): var a=f(a); var n=f(n); NextIfThen(e,a,n);

@@ -56,7 +56,7 @@ class Genxml {
  }
  static function genTypeRef(name:String,t:ModuleType,params:TParams):RttiXml return node(name,[genPath(tpath(t),tPrivate(t))],params.map(t->genType(t)));
  static function genField(attributes:Array<Attribute>,f:TClassField):RttiXml {
-  function addGetSet(access:VarAccess,name:String,attrs:Array<Attribute>):Array<Attribute> return switch access {
+  inline function addGetSet(access:VarAccess,name:String,attrs:Array<Attribute>):Array<Attribute> return switch access {
    case AccNormal|AccRequire(_,_)|AccCtor:attrs;
    case AccNo|AccNever:[attr(name,"null")].concat(attrs);
    case AccCall|AccPrivateCall:[attr(name,"accessor")].concat(attrs);
@@ -109,7 +109,7 @@ class Genxml {
    case TEnumDecl(e):node("enum",genTypeParams(includePos,e.ePrivate,tpath(t),e.eParams,e.ePos,m),e.eNames.map(name->genConstr(core.ds.PMap.find(name,e.eConstrs))).concat(genDocOpt(e.eDoc)).concat(genMeta(e.eMeta)));
    case TTypeDecl(d):node("typedef",genTypeParams(includePos,d.tPrivate,d.tPath,d.tParams,d.tPos,m),[genType(d.tType)].concat(genDocOpt(d.tDoc)).concat(genMeta(d.tMeta)));
    case TAbstractDecl(a):
-    function casts(name:String,types:Array<T>,fields:Array<{type:T,field:TClassField}>):Array<RttiXml>{if(types.length==0&&fields.length==0)return [];var children=types.map(t->node("icast",[],[genType(t)]));for(f in fields)if(!Meta.has(Meta.NoDoc,f.field.cfMeta))children.push(node("icast",[attr("field",f.field.cfName)],[genType(f.type)]));return [node(name,[],children)];}
+    inline function casts(name:String,types:Array<T>,fields:Array<{type:T,field:TClassField}>):Array<RttiXml>{if(types.length==0&&fields.length==0)return [];var children=types.map(t->node("icast",[],[genType(t)]));for(f in fields)if(!Meta.has(Meta.NoDoc,f.field.cfMeta))children.push(node("icast",[attr("field",f.field.cfName)],[genType(f.type)]));return [node(name,[],children)];}
     var impl=a.aImpl==null?[]:[node("impl",[],[genTypeDecl(includePos,TClassDecl(a.aImpl))])];
     node("abstract",genTypeParams(includePos,a.aPrivate,tpath(t),a.aParams,a.aPos,m),casts("from",a.aFrom,a.aFromField).concat([node("this",[],[genType(a.aThis)])]).concat(casts("to",a.aTo,a.aToField)).concat(genDocOpt(a.aDoc)).concat(genMeta(a.aMeta)).concat(impl));
   }

@@ -216,7 +216,7 @@ class Parser {
 		case _:{expr:EBinop(op,e,e2),pos:Ast.punion(e.pos,e2.pos)};
 	};
 	public static function makeUnop(op:Unop,e:Expr,p1:Pos):Expr {
-		function neg(s:String):String return s.charAt(0) == "-" ? s.substr(1) : "-"+s;
+		inline function neg(s:String):String return s.charAt(0) == "-" ? s.substr(1) : "-"+s;
 		var expr = switch e.expr {
 			case EBinop(bop,left,right):EBinop(bop,makeUnop(op,left,p1),right);
 			case ETernary(e1,e2,e3):ETernary(makeUnop(op,e1,p1),e2,e3);

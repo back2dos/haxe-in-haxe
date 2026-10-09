@@ -20,16 +20,16 @@ class Dump {
  public static function dumpTypesFormatted(com:CommonContext,pretty:Bool):Void {
   var restore:Void->Void=function() {};if (!pretty) {var old=TPrinting.MonomorphPrinting.showMonoIds;TPrinting.MonomorphPrinting.showMonoIds=com.partScope.dumpConfig.dumpPrintIds;restore=function() TPrinting.MonomorphPrinting.showMonoIds=old;}
   var pc=TPrinting.printContext();function st(t:T):String return TPrinting.sType(pc,t);
-  function se(e:TExpr):String return pretty?TPrinting.sExprPretty(false,"\t",true,st,e):TPrinting.sExprAst(com.partScope.dumpConfig.dumpPrintIds,"\t",st,e);
+  inline function se(e:TExpr):String return pretty?TPrinting.sExprPretty(false,"\t",true,st,e):TPrinting.sExprAst(com.partScope.dumpConfig.dumpPrintIds,"\t",st,e);
   function tp(param:TypedTypeParam):String return pretty?TPrinting.sTypeParam(st,param):Printer.sTypeParam("",param);
   function params(tl:TypeParams):String return tl.length==0?"":"<"+tl.map(tp).join(", ")+">";
   function emit(mt:ModuleType):Void {
    var path=tPath(mt),out=createDumpfileFromPath(com,path),buf=out.buffer;
-   function metas(ml:Metadata,tabs:String):String {if (ml.length==0) return "";return ml.map(function(m) return "@"+Meta.toString(m.meta)+(m.exprs.length==0?"":"("+m.exprs.map(core.AstPrinter.sExpr).join(", ")+")")).join(" ")+"\n"+tabs;}
+   inline function metas(ml:Metadata,tabs:String):String {if (ml.length==0) return "";return ml.map(function(m) return "@"+Meta.toString(m.meta)+(m.exprs.length==0?"":"("+m.exprs.map(core.AstPrinter.sExpr).join(", ")+")")).join(" ")+"\n"+tabs;}
    switch mt {
     case TClassDecl(c):
      function cfExpr(f:TClassField):String return f.cfExpr==null?"":se(f.cfExpr);
-     function inlineVar(kind:FieldKind):Bool return switch kind {case Var({vRead:AccInline,vWrite:AccNever}):true;case _:false;};
+     inline function inlineVar(kind:FieldKind):Bool return switch kind {case Var({vRead:AccInline,vWrite:AccNever}):true;case _:false;};
      function printField(stat:Bool,f:TClassField):Void {
       var modifier=switch f.cfKind {case Var(_) if (inlineVar(f.cfKind)):"inline ";case Var(_):"";case Method(MethNormal):"";case Method(MethDynamic):"dynamic ";case Method(MethInline):"inline ";case Method(MethMacro):"macro ";};
       var kind=switch f.cfKind {case Var(_):"var";case Method(_):"function";};
@@ -56,7 +56,7 @@ class Dump {
   Parallel.runWithPool(com.sctx.pool,function(pool) {ParallelArray.iter(pool,emit,com.types.copy());return null;});
  }
  public static function dumpPosition(com:CommonContext):Void {
-  function emit(mt:ModuleType):Void switch mt {case TClassDecl(c):var out=createDumpfileFromPath(com,tPath(mt));out.buffer.add(sTypePath(c.clPath)+"\n");function field(cf:TClassField):Void {out.buffer.add("\t"+cf.cfName+"\n");if (cf.cfExpr!=null) out.buffer.add(core.Texpr.dumpWithPos("\t",cf.cfExpr)+"\n");}if (c.clConstructor!=null) field(c.clConstructor);for (cf in c.clOrderedStatics) field(cf);for (cf in c.clOrderedFields) field(cf);out.close();case _:};
+  function emit(mt:ModuleType):Void switch mt {case TClassDecl(c):var out=createDumpfileFromPath(com,tPath(mt));out.buffer.add(sTypePath(c.clPath)+"\n");inline function field(cf:TClassField):Void {out.buffer.add("\t"+cf.cfName+"\n");if (cf.cfExpr!=null) out.buffer.add(core.Texpr.dumpWithPos("\t",cf.cfExpr)+"\n");}if (c.clConstructor!=null) field(c.clConstructor);for (cf in c.clOrderedStatics) field(cf);for (cf in c.clOrderedFields) field(cf);out.close();case _:};
   Parallel.runWithPool(com.sctx.pool,function(pool) {ParallelArray.iter(pool,emit,com.types.copy());return null;});
  }
  public static function dumpTypes(com:CommonContext):Void switch com.partScope.dumpConfig.dumpMode {case NoDump:case Pretty:dumpTypesFormatted(com,true);case Record:dumpRecord(com);case Position:dumpPosition(com);case Ast:dumpTypesFormatted(com,false);};

@@ -19,8 +19,8 @@ class MessageReporting {
  public static function readSourceLines(file:String):Array<String> {
   var ch;try ch=sys.io.File.read(file,true) catch (e:Dynamic) {throw new SourceIoError(Std.string(e));}
   var lines=[],buf=new StringBuf();
-  function flushLine():Void {lines.push(buf.toString());buf=new StringBuf();}
-  function read():Int {try return ch.readByte() catch (e:haxe.io.Eof) {flushLine();throw e;}}
+  inline function flushLine():Void {lines.push(buf.toString());buf=new StringBuf();}
+  inline function read():Int {try return ch.readByte() catch (e:haxe.io.Eof) {flushLine();throw e;}}
   try {while (true) switch read() {case 10:flushLine();case 13:read();flushLine();case c:buf.addChar(c);}}catch (_:haxe.io.Eof) {}
   ch.close();return lines;
  }
@@ -52,7 +52,7 @@ class MessageReporting {
   if (!noColor) switch sev {case Warning:color="\x1b[33m";background="\x1b[30;43m";case Information|Hint:color="\x1b[34m";background="\x1b[30;44m";case Error:color="\x1b[31m";background="\x1b[30;41m";}
   var label=switch sev {case Warning:"WARNING";case Information:"INFO";case Hint:"HINT";case Error:"ERROR";};label=cm.cmDepth>0?" -> ":noColor?"["+label+"]":" "+label+" ";
   var out=heading?background+label+reset+" "+(cm.cmFromMacro?color+"(macro) "+reset:"")+epos+"\n\n":"";
-  function safeSub(s:String,pos:Int,len:Int):String {if (len<0) return "";if (pos<0) pos=0;if (pos>=s.length) return "";if (pos+len>s.length) len=s.length-pos;try return s.substr(pos,len) catch (_:haxe.exceptions.ArgumentException) return "["+s+";"+pos+";"+len+"]";}
+  inline function safeSub(s:String,pos:Int,len:Int):String {if (len<0) return "";if (pos<0) pos=0;if (pos>=s.length) return "";if (pos+len>s.length) len=s.length-pos;try return s.substr(pos,len) catch (_:haxe.exceptions.ArgumentException) return "["+s+";"+pos+";"+len+"]";}
   if (source) for (entry in lines) {
    var l=entry.line,gutter=gutterLen-Std.string(l).length-1,line=entry.text.split("\t").join(" "),len=line.length;
    var text=if (l==0) dim+line+reset;else if (l1==l2) (p1>1?dim+safeSub(line,0,p1-1):"")+reset+bold+safeSub(line,p1-1,p2-p1)+reset+dim+safeSub(line,p2-1,len-p2+1)+reset;
@@ -85,8 +85,8 @@ class MessageReporting {
  public static function formatMessages(defines:Dynamic,messages:Array<MessageData>):String {var ctx=createErrorContext(Define.defined(defines,Define.MessageAbsolutePositions));ctx.maxLines=getMaxLine(ctx.maxLines,messages);var formatter=getFormatter(defines,Define.MessageReporting,"pretty"),lines=[];for (cm in messages) {var s=formatter(ctx,cm);if (s!=null) lines.push(s);}return lines.join("\n");}
  public static function displayMessagesFrom(defines:Dynamic,messages:Array<MessageData>,setError:Void->Void,onMessage:core.Message.MessageSeverity->String->Void):Void {
   var ctx=createErrorContext(Define.defined(defines,Define.MessageAbsolutePositions));ctx.maxLines=getMaxLine(ctx.maxLines,messages);
-  function error(msg:String):Void {setError();onMessage(Error,msg);}
-  function formatter(def:Dynamic,defaultMode:String):ErrorContext->MessageData->Null<String> {try return getFormatter(defines,def,defaultMode) catch (e:ConfigError) {error(e.message);return messageString;}}
+  inline function error(msg:String):Void {setError();onMessage(Error,msg);}
+  inline function formatter(def:Dynamic,defaultMode:String):ErrorContext->MessageData->Null<String> {try return getFormatter(defines,def,defaultMode) catch (e:ConfigError) {error(e.message);return messageString;}}
   var messageFormatter=formatter(Define.MessageReporting,"pretty"),logFormatter=formatter(Define.MessageLogFormat,"indent"),logMessages=Define.defined(defines,Define.MessageLogFile);
   var logMessage:Null<MessageData->Void>=null,closeLogs:Null<Void->Void>=null;
   if (logMessages) try {

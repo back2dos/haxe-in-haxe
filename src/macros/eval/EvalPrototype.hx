@@ -325,7 +325,7 @@ class EvalPrototype {
 					{name: name, params: args};
 				});
 				var pctx = PrototypeBuilder.create(ctx, key, null, PEnum(names), meta);
-				function enumFieldValue(ef:TEnumField):Value {
+				inline function enumFieldValue(ef:TEnumField):Value {
 					return switch TFunctions.follow(ef.efType) {
 						case TFun(_):
 							var f = (vl:Array<Value>) -> EvalEncode.encodeEnumValue(key, ef.efIndex, vl.copy(), ef.efPos);

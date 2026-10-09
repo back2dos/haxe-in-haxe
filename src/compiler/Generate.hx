@@ -40,10 +40,10 @@ class Generate {
   };
  }
  public static function checkHxbOutput(com:CommonContext,config:HxbWriterConfig):Void {
-  function matchPathList(list:Array<Array<String>>,path:Array<String>):Bool return core.ds.ArrayTools.exists(list,function(part) return Ast.matchPath(true,path,part));
-  function tryWrite(fromCache:Bool):Void {
+  inline function matchPathList(list:Array<Array<String>>,path:Array<String>):Bool return core.ds.ArrayTools.exists(list,function(part) return Ast.matchPath(true,path,part));
+  inline function tryWrite(fromCache:Bool):Void {
    var path=StringTools.replace(config.archivePath,"$target",Globals.platformName(com.platform));var stop=Timer.startTimer(com.timerCtx,["generate","hxb"]);Path.mkdirFromPath(path);var zip;try zip=new core.ZipOutput(path,0) catch (e:Dynamic) {throw new HxbOutputError(Std.string(e));}
-   function export(com:CommonContext,config:WriterTargetConfig):Void {
+   inline function export(com:CommonContext,config:WriterTargetConfig):Void {
     var target=Common.platformNameMacro(com);
     function emit(m:ModuleDef):Null<{path:String,bytes:haxe.io.Bytes}> {
      var path=m.mPath.pack.concat([m.mPath.name]);

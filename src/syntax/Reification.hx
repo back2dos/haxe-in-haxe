@@ -9,19 +9,19 @@ import core.Globals.Pos;
 class Reification {
  public static function reify(inMacro:Bool):{toExpr:Expr->Expr,toCtype:TypeHint->Pos->Expr,toTypeDef:TypeDecl->Expr} {
   var currentPos:Null<Expr>=null;
-  function en(ename:String,name:String,values:Array<Expr>,p:Pos):Expr {var min:core.Globals.Pos = {pfile:p.pfile,pmin:p.pmin,pmax:p.pmin};var constructor:Expr={expr:EConst(Ident(name)),pos:min};return values.length==0?constructor:{expr:ECall(constructor,values),pos:min};}
+  inline function en(ename:String,name:String,values:Array<Expr>,p:Pos):Expr {var min:core.Globals.Pos = {pfile:p.pfile,pmin:p.pmin,pmax:p.pmin};var constructor:Expr={expr:EConst(Ident(name)),pos:min};return values.length==0?constructor:{expr:ECall(constructor,values),pos:min};}
   function rawString(s:String,p:Pos):Expr return {expr:EConst(String(s,SDoubleQuotes)),pos:p};
   function toString(s:String,p:Pos):Expr return s.length>1&&s.charAt(0)=="$"?{expr:EConst(Ident(s.substr(1))),pos:p}:rawString(s,p);
-  function placed(n:PlacedName):Expr return toString(n.name,n.pos);
-  function nil(p:Pos):Expr return {expr:EConst(Ident("null")),pos:p};
+  inline function placed(n:PlacedName):Expr return toString(n.name,n.pos);
+  inline function nil(p:Pos):Expr return {expr:EConst(Ident("null")),pos:p};
   function arr<A>(f:A->Pos->Expr,values:Array<A>,p:Pos):Expr return {expr:EArrayDecl(values.map(function(v)return f(v,p))),pos:p};
   function opt<A>(f:A->Pos->Expr,v:Null<A>,p:Pos):Expr return v==null?nil(p):f(v,p);
-  function bool(v:Bool,p:Pos):Expr return {expr:EConst(Ident(v?"true":"false")),pos:p};
-  function obj(fields:Array<{name:String,e:Expr}>,p:Pos):Expr return {expr:EObjectDecl(fields.map(function(f)return ({key:{name:f.name,pos:nullPos,quote:NoQuotes},expr:f.e} : core.Ast.ObjectField))),pos:p};
-  function fld(name:String,e:Expr):{name:String,e:Expr} return {name:name,e:e};
+  inline function bool(v:Bool,p:Pos):Expr return {expr:EConst(Ident(v?"true":"false")),pos:p};
+  inline function obj(fields:Array<{name:String,e:Expr}>,p:Pos):Expr return {expr:EObjectDecl(fields.map(function(f)return ({key:{name:f.name,pos:nullPos,quote:NoQuotes},expr:f.e} : core.Ast.ObjectField))),pos:p};
+  inline function fld(name:String,e:Expr):{name:String,e:Expr} return {name:name,e:e};
   function field(e:Expr,name:String,p:Pos):Expr return {expr:EField(e,name,EFNormal),pos:p};
-  function macroField(cls:String,name:String,p:Pos):Expr return field(field(field({expr:EConst(Ident("haxe")),pos:p},"macro",p),cls,p),name,p);
-  function toConst(c:Constant,p:Pos):Expr return switch c {
+  inline function macroField(cls:String,name:String,p:Pos):Expr return field(field(field({expr:EConst(Ident("haxe")),pos:p},"macro",p),cls,p),name,p);
+  inline function toConst(c:Constant,p:Pos):Expr return switch c {
    case Int(i,suffix):en("Constant","CInt",[rawString(i,p),opt(rawString,suffix,p)],p);
    case String(s,kind):en("Constant","CString",[rawString(s,p),en("StringLiteralKind",kind==SDoubleQuotes?"DoubleQuotes":"SingleQuotes",[],p)],p);
    case Float(f,suffix):en("Constant","CFloat",[rawString(f,p),opt(rawString,suffix,p)],p);
@@ -30,10 +30,10 @@ class Reification {
   };
   function toBinop(op:Binop,p:Pos):Expr return switch op {case OpAssignOp(op):en("Binop","OpAssignOp",[toBinop(op,p)],p);case _:en("Binop",switch op{case OpAdd:"OpAdd";case OpMult:"OpMult";case OpDiv:"OpDiv";case OpSub:"OpSub";case OpAssign:"OpAssign";case OpEq:"OpEq";case OpNotEq:"OpNotEq";case OpGt:"OpGt";case OpGte:"OpGte";case OpLt:"OpLt";case OpLte:"OpLte";case OpAnd:"OpAnd";case OpOr:"OpOr";case OpXor:"OpXor";case OpBoolAnd:"OpBoolAnd";case OpBoolOr:"OpBoolOr";case OpShl:"OpShl";case OpShr:"OpShr";case OpUShr:"OpUShr";case OpMod:"OpMod";case OpInterval:"OpInterval";case OpArrow:"OpArrow";case OpIn:"OpIn";case OpNullCoal:"OpNullCoal";case OpAssignOp(_):throw "assert";},[],p);};
   var toExpr:Expr->Pos->Expr=null;var toCtype:TypeHint->Pos->Expr=null;var toCfield:ClassField->Pos->Expr=null;var toMeta:Metadata->Pos->Expr=null;var toExprArray:Array<Expr>->Pos->Expr=null;
-  function toPos(p:Pos):Expr {if(currentPos!=null)return currentPos;if(inMacro)return {expr:EUntyped({expr:EConst(Ident("$__mk_pos__")),pos:p}),pos:p};return obj([fld("file",rawString(p.pfile,p)),fld("min",{expr:EConst(Int(Std.string(p.pmin),null)),pos:p}),fld("max",{expr:EConst(Int(Std.string(p.pmax),null)),pos:p})],p);}
-  function toEncPos(p:Pos):Expr {if(currentPos!=null)return currentPos;if(inMacro)return toPos(p);return {expr:ECall(macroField("Context","makePosition",p),[toPos(p)]),pos:p};}
+  inline function toPos(p:Pos):Expr {if(currentPos!=null)return currentPos;if(inMacro)return {expr:EUntyped({expr:EConst(Ident("$__mk_pos__")),pos:p}),pos:p};return obj([fld("file",rawString(p.pfile,p)),fld("min",{expr:EConst(Int(Std.string(p.pmin),null)),pos:p}),fld("max",{expr:EConst(Int(Std.string(p.pmax),null)),pos:p})],p);}
+  inline function toEncPos(p:Pos):Expr {if(currentPos!=null)return currentPos;if(inMacro)return toPos(p);return {expr:ECall(macroField("Context","makePosition",p),[toPos(p)]),pos:p};}
   function toTparam(t:TypeParamOrConst,p:Pos):Expr return switch t{case TPType(t):en("TypeParam","TPType",[toCtype(t,p)],p);case TPExpr(e):en("TypeParam","TPExpr",[toExpr(e,p)],p);};
-  function toTpath(ptp:PlacedTypePath):Expr {
+  inline function toTpath(ptp:PlacedTypePath):Expr {
    var t=ptp.path;var p:Pos=ptp.posFull;
    if(t.tpackage.length==0&&t.tname.length>1&&t.tname.charAt(0)=="$"){var ei:Expr={expr:EConst(Ident(t.tname.substr(1))),pos:p};if(t.tparams.length==0)return ei;return obj([fld("pack",field(ei,"pack",p)),fld("name",field(ei,"name",p)),fld("sub",field(ei,"sub",p)),fld("params",arr(toTparam,t.tparams,p)),fld("pos",toPos(p)),fld("posPath",toPos(ptp.posPath))],p);}
    var fields=[fld("pack",arr(toString,t.tpackage,p)),fld("name",toString(t.tname,p)),fld("params",arr(toTparam,t.tparams,p)),fld("pos",toPos(p)),fld("posPath",toPos(ptp.posPath))];if(t.tsub!=null)fields.push(fld("sub",toString(t.tsub,p)));return obj(fields,p);
@@ -50,7 +50,7 @@ class Reification {
    case CTNamed(n,t):en("ComplexType","TNamed",[placed(n),toTypeHint(t,p)],p);
    case CTIntersection(tl):en("ComplexType","TIntersection",[arr(toCtype,tl,p)],p);
   };
-  function toFun(f:Func,p:Pos):Expr {
+  inline function toFun(f:Func,p:Pos):Expr {
    p={pfile:p.pfile,pmin:p.pmin,pmax:p.pmin};
    function arg(a:FuncArg,p:Pos):Expr {var fields=[fld("name",toString(a.name.name,p)),fld("opt",bool(a.optional,p)),fld("type",opt(toTypeHint,a.type,p))];if(a.expr!=null)fields.push(fld("value",toExpr(a.expr,p)));return obj(fields,p);}
    function param(t:TypeParam,p:Pos):Expr return obj([fld("name",placed(t.tpName)),fld("constraints",t.tpConstraints==null?nil(p):arr(toCtype,[t.tpConstraints],p)),fld("params",arr(param,t.tpParams,p))],p);
@@ -63,7 +63,7 @@ class Reification {
   };
   toMeta=function(meta,p)return arr(function(m:MetadataEntry,_){var p=m.pos;return obj([fld("name",toString(core.Meta.toString(m.meta),p)),fld("params",toExprArray(m.exprs,p)),fld("pos",toPos(p))],p);},meta,p);
   toExprArray=function(values,p){if(values.length==1)switch values[0].expr{case EMeta(m,e1) if (m.exprs.length==0 && Type.enumEq(m.meta,StrictMeta.Dollar("a"))):switch e1.expr{case EArrayDecl(el) if(!(el.length==1&&(switch el[0].expr{case EFor(_,_):true;case _:false;}))):return toExprArray(el,p);case _:return e1;}case _:}return arr(toExpr,values,p);};
-  toExpr=function(e,_){var p=e.pos;function expr(name:String,args:Array<Expr>):Expr return obj([fld("expr",en("ExprDef",name,args,p)),fld("pos",toPos(p))],p);function loop(e:Expr):Expr return toExpr(e,e.pos);
+  toExpr=function(e,_){var p=e.pos;function expr(name:String,args:Array<Expr>):Expr return obj([fld("expr",en("ExprDef",name,args,p)),fld("pos",toPos(p))],p);inline function loop(e:Expr):Expr return toExpr(e,e.pos);
    return switch e.expr {
     case EConst(Ident(n)) if(n.charAt(0)=="$"&&n.length>1&&n!="$__mk_pos__"):toString(n,p);
     case EConst(c):expr("EConst",[toConst(c,p)]);

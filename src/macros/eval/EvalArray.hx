@@ -202,7 +202,7 @@ class EvalArray {
 
 	/** stdlib/array.ml `sort` (heap sort with bottom-up sift), translated directly. **/
 	static function ocamlArraySort(cmp:Value->Value->Int, a:Array<Value>):Void {
-		function maxson(l:Int, i:Int):Int {
+		inline function maxson(l:Int, i:Int):Int {
 			var i31 = i + i + i + 1;
 			var x = i31;
 			if (i31 + 2 < l) {

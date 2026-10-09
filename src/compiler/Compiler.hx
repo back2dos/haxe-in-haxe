@@ -156,7 +156,7 @@ class Compiler {
 class Setup {
  public static function initializeTarget(com:CommonContext,actx:Dynamic):String {
   Common.initPlatform(com);com.classPaths.lockContext(com.customExt,Globals.platformName(com.platform),false);
-  function addStd(dir:String):Void com.classPaths.modifyInplace(function(cp:core.ClassPath.IClassPath):Array<core.ClassPath.IClassPath> return switch cp.scope {case Std:[cp,new core.ClassPath.DirectoryClassPath(cp.path+dir+"/_std/",StdTarget)];case _:[cp];});
+  inline function addStd(dir:String):Void com.classPaths.modifyInplace(function(cp:core.ClassPath.IClassPath):Array<core.ClassPath.IClassPath> return switch cp.scope {case Std:[cp,new core.ClassPath.DirectoryClassPath(cp.path+dir+"/_std/",StdTarget)];case _:[cp];});
   return switch com.platform {
    case Cross:"?";case CustomTarget(name):name;
    case Flash:for (v in Common.flashVersions) {if (v.version>com.flashVersion) break;Common.rawDefine(com,"flash"+v.define);}com.packageRules.remove("flash");addStd("flash");"swf";
