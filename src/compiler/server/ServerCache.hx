@@ -262,14 +262,14 @@ class ServerCache {
 					case MExtern:
 						/* if we have a file then this will override our extern type */
 						checkModuleShadowing(directories, mPath, mExtra);
-						function loop(l:Array<Dynamic>, i:Int) {
+						function loop(l:Array<context.Common.ExternTypeLoader>, i:Int) {
 							if (i >= l.length) {
 								if (sctx.verbose) Sys.println("No library file was found for " + Globals.sTypePath(mPath)); /* TODO */
 								throw new Dirty(LibraryChanged);
 							}
 							var entry = l[i];
-							var file:String = entry.name;
-							var load:GlobalTypePath->Pos->Null<Package> = entry.load;
+							var file = entry.name;
+							var load = entry.load;
 							switch load(mPath, p) {
 								case null:
 									loop(l, i + 1);
@@ -427,7 +427,7 @@ class ServerCache {
 			case Resource(name, data):
 				com.resources.set(name, data);
 			case IncludeFile(file, position):
-				com.includeFiles = [({file: file, position: position} : Dynamic)].concat(com.includeFiles);
+				com.includeFiles = [({file: file, position: position} : context.Common.IncludeFile)].concat(com.includeFiles);
 			case Message(cm):
 				compiler.io.CompilerMessage.replayMessage(com, cm);
 		}
@@ -546,7 +546,7 @@ class ServerCache {
 					case null:
 						var reader = createHxbReader(com, mpath);
 						var typingMode = getTypingMode(com, mc.mcExtra);
-						var api:HxbReaderApi = switch (com.hxbReaderApi : Null<HxbReaderApi>) {
+						var api:HxbReaderApi = switch com.hxbReaderApi {
 							case null:
 								var api = new HxbReaderApiServer(com, cc, delay);
 								com.hxbReaderApi = api;

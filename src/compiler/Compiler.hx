@@ -206,7 +206,7 @@ class Compiler {
   catch(e:Dynamic){if(Sys.getEnv("OCAMLRUNPARAM")!="b"&&!Helper.isDebugRun)error(com,StdTools.string(e),nullPos);else {Sys.stderr().writeString(haxe.CallStack.toString(@:privateAccess haxe.Exception.caught(e).stack)+"\n");throw e;}}
  }
  public static function compileSafe(com:CommonContext,f:Void->Void):Void {try compileSafeImpl(com,f) catch (_:Abort) {}}
- public static function finalize(com:CommonContext):Void {CompilerIo.flush(com.requestScope.io);for (lib in com.hxbLibs) lib.close();if (!com.sctx.isServer) {for (lib in (cast com.nativeLibs.javaLibs:Array<Dynamic>)) lib.close();for (lib in (cast com.nativeLibs.swfLibs:Array<Dynamic>)) lib.close();}}
+ public static function finalize(com:CommonContext):Void {CompilerIo.flush(com.requestScope.io);for (lib in com.hxbLibs) lib.close();if (!com.sctx.isServer) {for (lib in com.nativeLibs.javaLibs) lib.close();for (lib in com.nativeLibs.swfLibs) lib.close();}}
  public static function catchCompletionAndExit(com:CommonContext,sctx:ServerCompilationContext,run:CommonContext->Void):Int {
   try {run(com);return hasError(com)?1:0;}
   catch(e:context.display.DisplayJson.JsonCompleted) {

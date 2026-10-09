@@ -527,7 +527,7 @@ class DisplayToplevel {
 		}, null);
 
 		Timer.time(ctx.com.timerCtx, ["display", "toplevel collect", "native lib"], function(_:Null<Bool>) {
-			for (file in (ctx.com.nativeLibs.allLibs : Array<String>)) {
+			for (file in ctx.com.nativeLibs.allLibs) {
 				var lib = cs.getNativeLib(file);
 				if (lib != null) lib.cNlFiles.iter(function(path, p:Package) {
 					if (processDecls(p.pack, path.name, p.declarations)) checkPackage(p.pack);

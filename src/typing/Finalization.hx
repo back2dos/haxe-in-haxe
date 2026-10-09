@@ -187,7 +187,7 @@ class Finalization {
 		for (m in sortedModules) for (t in m.mTypes) loop(t);
 		return {types:types, modules:sortedModules};
 	}
-	public static function generate(ctx:Typer, mainPath:Null<ModuleDef>):Dynamic {
+	public static function generate(ctx:Typer, mainPath:Null<ModuleDef>):{main:{expr:Null<TExpr>, path:Null<String>}, types:Array<ModuleType>, modules:Array<ModuleDef>} {
 		var sorted = sortTypes(ctx.com, ctx.com.moduleLut);
 		return {main:getMain(ctx, mainPath, sorted.types), types:sorted.types, modules:sorted.modules};
 	}

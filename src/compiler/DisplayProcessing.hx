@@ -79,9 +79,9 @@ class DisplayProcessing {
 			case DFPOnly if (DisplayPosition.displayPosition.get().pfile == DisplayProcessingGlobals.fileInputMarker):
 				actx.classes = [];
 				com.main.mainPath = null;
-				var fc:Array<Dynamic> = com.fileContents;
+				var fc = com.fileContents;
 				if (fc.length == 1 && fc[0].content != null) {
-					var input:String = fc[0].content;
+					var input = fc[0].content;
 					com.fileContents = [];
 					return DPKInput(input);
 				}

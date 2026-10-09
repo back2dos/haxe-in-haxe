@@ -93,7 +93,7 @@ class ModuleLut extends HashtblLookup<GlobalTypePath,ModuleDef> {
  override public function remove(path:GlobalTypePath):Void {try {for (mt in find(path).mTypes) typeLut.remove(tPath(mt)); super.remove(path);} catch (_:NotFound) {}}
  public function findByType(path:GlobalTypePath):ModuleDef return find(typeLut.find(path));
  override public function clear():Void {super.clear(); typeLut.clear();}
- public function getTypeLut():Dynamic return typeLut;
+ public function getTypeLut():HashtblLookup<GlobalTypePath,GlobalTypePath> return typeLut;
 }
 interface AbstractHxbLib {
  public function load():Void; public function getBytes(target:String,path:GlobalTypePath):Null<haxe.io.Bytes>; public function close():Void;
@@ -160,17 +160,25 @@ enum ParseInputResult { NeedsTyping;NoCompletionPointFound;Completed; }
 	public inline function new(sendResult:Dynamic->Void, sendResultRaise:Dynamic->Dynamic, sendError:Array<Dynamic>->Void, sendErrorRaise:Array<Dynamic>->Dynamic, flushMessages:Bool->CommonContext->Void, setCom:CommonContext->ParseInputResult) { this.sendResult = sendResult; this.sendResultRaise = sendResultRaise; this.sendError = sendError; this.sendErrorRaise = sendErrorRaise; this.flushMessages = flushMessages; this.setCom = setCom; }
 	public inline function clone():ResultHandler return new ResultHandler(sendResult, sendResultRaise, sendError, sendErrorRaise, flushMessages, setCom);
 }
+// (string * (path -> pos -> Ast.package option))
+typedef ExternTypeLoader = {name:String, load:GlobalTypePath->Pos->Null<Package>};
+// (string list * metadata_entry * (bool * bool * bool))
+typedef GlobalMetadataEntry = {path:Array<String>, meta:MetadataEntry, recursive:Bool, toTypes:Bool, toFields:Bool};
+// (Path.UniqueKey.t * string option)
+typedef FileContent = {fileKey:String, content:Null<String>};
+// (string * string): file, position ("top"/"bottom"/"inline")
+typedef IncludeFile = {file:String, position:String};
 typedef CommonContext = {
- var requestScope:RequestScope;var partScope:PartScope;var stage:CompilerStage;var sctx:compiler.server.ServerCompilationContext;var cs:compiler.CompilationCache.Cache;var cache:Null<compiler.CompilationCache.ContextCache>;var isMacroContext:Bool;var timerCtx:Dynamic;
+ var requestScope:RequestScope;var partScope:PartScope;var stage:CompilerStage;var sctx:compiler.server.ServerCompilationContext;var cs:compiler.CompilationCache.Cache;var cache:Null<compiler.CompilationCache.ContextCache>;var isMacroContext:Bool;var timerCtx:core.Timer.TimerContext;
  var parsedArgs:Array<compiler.ParsedArg>;var display:DisplaySettings;var debug:Bool;var verbose:Bool;var foptimize:Bool;var doinline:Bool;var platform:Platform;var config:PlatformConfig;var customExt:Null<String>;
- var emptyClassPath:Dynamic;var classPaths:Dynamic;var main:{mainPath:Null<GlobalTypePath>,mainFile:Dynamic,mainExpr:Null<TExpr>};var packageRules:haxe.ds.StringMap<PackageRule>;
- var error:String->Pos->Void;var errorExt:Dynamic->Void;var info:(msg:String,p:Pos,?depth:Int)->Void;var warning:(w:Dynamic,options:Array<Array<WarningOption>>,msg:String,p:Pos,?depth:Int)->Void;var warningOptions:Array<Array<WarningOption>>;var getMessages:Void->Array<Dynamic>;
- var filterMessages:(Dynamic->Bool)->Void;var runCommand:String->Int;var runCommandArgs:String->Array<String>->Int;
- var loadExternType:Array<Dynamic>;var callbacks:CompilerCallbacks;var defines:DefineContext;var userDefines:haxe.ds.StringMap<core.Define.UserDefine>;var userMetas:haxe.ds.StringMap<core.Meta.UserMeta>;var getMacros:Void->Null<CommonContext>;var localWrapper:LocalWrapperApi;
- var std:TClass;var globalMetadata:Array<Dynamic>;var fileContents:Array<Dynamic>;var parserCache:Dynamic;var moduleToFile:Dynamic;var overloadCache:Dynamic;
- var moduleLut:ModuleLut;var moduleNonexistentLut:Dynamic;var fakeModules:haxe.ds.StringMap<ModuleDef>;var file:String;var features:Map<String,Bool>;var modules:Array<ModuleDef>;var types:Array<ModuleType>;var resources:haxe.ds.StringMap<haxe.io.Bytes>;
- var flashVersion:Float;var nekoLibPaths:Array<String>;var includeFiles:Array<Dynamic>;var nativeLibs:Dynamic;var hxbLibs:Array<AbstractHxbLib>;var jsGen:Null<Void->Void>;
- var basic:BasicTypes;var memoryMarker:Array<Float>;var hxbReaderApi:Dynamic;var hxbReaderStats:HxbReaderStatsData;var hxbWriterConfig:Dynamic;
+ var emptyClassPath:core.ClassPath.IClassPath;var classPaths:core.ClassPaths;var main:{mainPath:Null<GlobalTypePath>,mainFile:Null<String>,mainExpr:Null<TExpr>};var packageRules:haxe.ds.StringMap<PackageRule>;
+ var error:String->Pos->Void;var errorExt:CompilerError->Void;var info:(msg:String,p:Pos,?depth:Int)->Void;var warning:(w:Dynamic,options:Array<Array<WarningOption>>,msg:String,p:Pos,?depth:Int)->Void;var warningOptions:Array<Array<WarningOption>>;var getMessages:Void->Array<CompilerMessage>;
+ var filterMessages:(CompilerMessage->Bool)->Void;var runCommand:String->Int;var runCommandArgs:String->Array<String>->Int;
+ var loadExternType:Array<ExternTypeLoader>;var callbacks:CompilerCallbacks;var defines:DefineContext;var userDefines:haxe.ds.StringMap<core.Define.UserDefine>;var userMetas:haxe.ds.StringMap<core.Meta.UserMeta>;var getMacros:Void->Null<CommonContext>;var localWrapper:LocalWrapperApi;
+ var std:TClass;var globalMetadata:Array<GlobalMetadataEntry>;var fileContents:Array<FileContent>;var parserCache:Lookup<String,Array<TypeDecl>>;var moduleToFile:Lookup<GlobalTypePath,core.ClassPaths.ResolvedFile>;var overloadCache:Lookup<{path:GlobalTypePath,name:String},Array<CastField>>;
+ var moduleLut:ModuleLut;var moduleNonexistentLut:Lookup<GlobalTypePath,Bool>;var fakeModules:haxe.ds.StringMap<ModuleDef>;var file:String;var features:Map<String,Bool>;var modules:Array<ModuleDef>;var types:Array<ModuleType>;var resources:haxe.ds.StringMap<haxe.io.Bytes>;
+ var flashVersion:Float;var nekoLibPaths:Array<String>;var includeFiles:Array<IncludeFile>;var nativeLibs:NativeLibraries.NativeLibrariesData;var hxbLibs:Array<AbstractHxbLib>;var jsGen:Null<Void->Void>;
+ var basic:BasicTypes;var memoryMarker:Array<Float>;var hxbReaderApi:Null<compiler.hxb.HxbReaderApi>;var hxbReaderStats:HxbReaderStatsData;var hxbWriterConfig:Null<compiler.hxb.HxbWriterConfig>;
 }
 class Common {
  public static function samePath(a:GlobalTypePath,b:GlobalTypePath):Bool return a.name==b.name && a.pack.length==b.pack.length && a.pack.join(".")==b.pack.join(".");
@@ -178,7 +186,7 @@ class Common {
  public static function toGctx(com:CommonContext):Dynamic return {
   platform:com.platform,defines:com.defines,basic:com.basic,classPaths:com.classPaths,runCommand:com.runCommand,runCommandArgs:com.runCommandArgs,
   warning:com.warning,error:com.error,io:com.requestScope.io,debug:com.debug,file:com.file,version:com.sctx.version,features:com.features,modules:com.modules,
-  main:com.main,types:com.types,resources:com.resources,nativeLibs:switch com.platform {case Jvm: com.nativeLibs.javaLibs;case Flash:com.nativeLibs.swfLibs;case _:[];},
+  main:com.main,types:com.types,resources:com.resources,nativeLibs:switch com.platform {case Jvm: (cast com.nativeLibs.javaLibs:Array<Dynamic>);case Flash:(cast com.nativeLibs.swfLibs:Array<Dynamic>);case _:[];},
   includeFiles:com.includeFiles,std:com.std,timerCtx:com.timerCtx,pool:com.sctx.pool
  };
  public static function enterStage(com:CommonContext,stage:CompilerStage):Void com.stage=stage;

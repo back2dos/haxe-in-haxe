@@ -2764,7 +2764,7 @@ class MacroApiImpl {
 				} else {
 					try Common.findFile(ccom(), file) catch (e:Dynamic) if (isNotFound(e)) failwith("unable to find file for inclusion: " + file) else throw e;
 				}
-				ccom().includeFiles = [({file: file, position: position} : Dynamic)].concat(ccom().includeFiles);
+				ccom().includeFiles = [({file: file, position: position} : context.Common.IncludeFile)].concat(ccom().includeFiles);
 				var m = getApi().currentModule();
 				m.mExtra.mCacheBoundObjects.push(IncludeFile(file, position));
 				vnull;

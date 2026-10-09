@@ -200,7 +200,7 @@ class DisplayEmitter {
 		}
 	}
 
-	public static function checkFieldModifiers(ctx:Typer, c:TClass, cf:TClassField, override_:Null<Pos>, displayModifier:Null<Dynamic>):Void {
+	public static function checkFieldModifiers(ctx:Typer, c:TClass, cf:TClassField, override_:Null<Pos>, displayModifier:Null<core.Ast.PlacedAccess>):Void {
 		if (override_ != null && DisplayPosition.displayPosition.enclosedIn(override_) && ctx.com.display.dmsKind == DMDefinition) {
 			if (c.clSuper != null) {
 				var r = rawClassField(function(cf) return cf.cfType, c.clSuper.cls, c.clSuper.params, cf.cfName);

@@ -62,6 +62,12 @@ class TLazy {
 	public inline function clone():TSignature return new TSignature(args, ret);
 }
 typedef TParams = Array<T>;
+/** An `a_from_field`/`a_to_field` entry: `(t * tclass_field)`. */
+/** `(tclass * tparams)`, as in `cl_super`/`cl_implements`. */
+typedef ClassAndParams = {var cls:TClass; var params:TParams;};
+typedef CastField = {var type:T; var field:TClassField;};
+/** `Abstract.find_to_from` result: `(tabstract * tparams * (t * tclass_field))`. */
+typedef AbstractCastField = {var abs:TAbstract; var params:TParams; var field:CastField;};
 @:structInit class TypedTypeParam {
 	public var ttpName:String;
 	public var ttpClass:TClass;
@@ -165,8 +171,8 @@ typedef TInfos = { var mtPath:GlobalTypePath; var mtModule:ModuleDef; var mtPos:
 	public var clType:T;
 	public var clKind:TClassKind;
 	public var clFlags:Int;
-	public var clSuper:Null<{var cls:TClass; var params:TParams;}>;
-	public var clImplements:Array<{var cls:TClass; var params:TParams;}>;
+	public var clSuper:Null<ClassAndParams>;
+	public var clImplements:Array<ClassAndParams>;
 	public var clFields:TypeMap<TClassField>;
 	public var clStatics:TypeMap<TClassField>;
 	public var clOrderedStatics:Array<TClassField>;
@@ -241,9 +247,9 @@ typedef TInfos = { var mtPath:GlobalTypePath; var mtModule:ModuleDef; var mtPos:
 	public var aImpl:Null<TClass>;
 	public var aThis:T;
 	public var aFrom:Array<T>;
-	public var aFromField:Array<{var type:T; var field:TClassField;}>;
+	public var aFromField:Array<CastField>;
 	public var aTo:Array<T>;
-	public var aToField:Array<{var type:T; var field:TClassField;}>;
+	public var aToField:Array<CastField>;
 	public var aArray:Array<TClassField>;
 	public var aRead:Null<TClassField>;
 	public var aWrite:Null<TClassField>;
