@@ -119,6 +119,17 @@ class OcamlHashtbl<K, V> {
 		return null;
 	}
 
+	/** `Hashtbl.find_all`: every binding of `key`, most recent first. **/
+	public function findAll(key:K):Array<V> {
+		var out = [];
+		var c = data[keyIndex(key)];
+		while (c != null) {
+			if (equalFn(c.key, key)) out.push(c.data);
+			c = c.next;
+		}
+		return out;
+	}
+
 	public function replace(key:K, value:V):Void {
 		var i = keyIndex(key);
 		var c = data[i];
