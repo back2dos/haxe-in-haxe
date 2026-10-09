@@ -386,6 +386,55 @@ from leaving HL/C, whichever route is taken. WasmGC would then be a further
 ~2× on code, probably less after compression. The real figure for the
 compiler is unknown until the C route can compile it.
 
+### 2.8 Alternative: generate OCaml source instead (measured)
+
+Instead of our own IR, C and runtime, a generator could emit OCaml from
+the typed AST. ocamlopt would give the native binary and `wasm_of_ocaml`
+(6.4.1, WasmGC) the wasm one, with no GC or runtime of our own.
+`backend/ocaml/bench.ml` is Bench translated by hand in the style such a
+generator would produce. It uses records with a vtable for classes, an
+`Obj.t` payload for `throw` and a growable record for `Array`, and every
+Haxe `Int` goes through a swappable integer layer (`backend/ocaml/build.sh`).
+All outputs match.
+
+| Bench (best of 3) | Bench | retain | peak RSS |
+| --- | ---: | ---: | ---: |
+| ocamlopt, 63-bit int wrapped to 32 (`int63.ml`) | **0.28s** | **0.44s** | 12 / 86 MB |
+| ocamlopt, `Int32` (`int32.ml`) | 0.38s | 0.53s | 16 / 115 MB |
+| wasm_of_ocaml, `Int32` (Node 22) | 0.64s | 0.99s | 137 / 324 MB |
+| for comparison: our C / our WasmGC / C → linear wasm | 0.32 / 0.38 / 0.39s | 0.53 / 0.66 / 0.65s | |
+| for comparison: HL/C / HL/C → wasm | 0.43 / 0.59s | 0.61 / 0.83s | |
+
+- **Natively, OCaml is the fastest route measured, and the leanest in
+  memory.** Its non-moving major heap is the design §2.5 recommends for our
+  runtime, and here it comes ready-made.
+- **On wasm it is slower than our own emitters.** `wasm_of_ocaml`'s `int` is
+  31 bits (an `i31ref`, `Sys.int_size = 31`), so Haxe's 32-bit `Int` needs
+  boxed `Int32`. With the native 63-bit wrapping layer, the wasm build
+  silently computed wrong results. The generator must therefore emit (or
+  functorize) two integer layers. Its uniform value representation also
+  costs casts. The wasm module is 42 KB (16 KB gzipped) for Bench, mostly
+  runtime.
+- **What it would take:**
+  - mapping Haxe's object model onto OCaml with `Obj.magic`: subclass
+    records sharing a prefix, `null`, `Dynamic`, structural types,
+    interfaces through vtables;
+  - mapping Haxe's UTF-16 `String` (the port's semantics on HL) onto OCaml's
+    byte strings, or emulating it;
+  - providing wasm versions of the C stubs a native build would use (PCRE,
+    zlib).
+
+  It saves writing and tuning a GC and runtime; the generator itself is
+  comparable in size to the C emitter plus lowering.
+- **Not measured:**
+  - Haxe → JVM (existing `genjvm`) → GraalVM native-image. The JVM jar
+    already needs bytecode verification disabled (`bench/README.md`), which
+    native-image may not accept.
+  - GraalVM's or TeaVM's WasmGC backends.
+  - hxcpp. It exists and needs no work, but measured 4× the reference on
+    `stdlib`, and its conservative GC has the same `--spill-pointers`
+    problem on wasm.
+
 ### 2.7 Output format of the wasm emitters
 
 - **C/linear-memory route:** the wasm comes from Emscripten compiling the C

@@ -54,6 +54,11 @@ every route printed identical output.
   marks functions of 100 KB and more as Liftoff-only (run with
   `--experimental-wasm-compilation-hints --no-wasm-dynamic-tiering`). This
   brings the self-compile from 25–31 s to 17.5–18 s with identical output.
+- **Alternative, measured:** generating OCaml source. ocamlopt was the
+  fastest native route (Bench 0.28s, retain 0.44s, least memory), with no
+  runtime of our own to write. wasm_of_ocaml is slower (0.64s / 0.99s),
+  because its `int` is 31-bit and Haxe `Int` needs boxed `Int32`
+  (WASM-BACKEND.md §2.8).
 - **Unknown:** how the prototype's gains hold for the whole compiler. The
   benchmarks don't cover Dynamic, strings, maps or reflection.
 
