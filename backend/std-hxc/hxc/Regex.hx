@@ -3,7 +3,8 @@ package hxc;
 // hxc target (backend/): the regular expression engine behind EReg, in Haxe
 // (no PCRE in the runtime). A backtracking matcher over UTF-16 code units
 // with the PCRE subset Haxe code commonly uses: classes and escapes
-// (\d \w \s \b ...), groups ((...), (?:...), (?<name>...), lookahead (?= (?!),
+// (\d \w \s \b ... and POSIX classes, Unicode-aware as PCRE2_UCP, which Eval
+// and HashLink use; tables in hxc.RegexUnicode), groups ((...), (?:...), (?<name>...), lookahead (?= (?!),
 // alternation, greedy and lazy quantifiers (* + ? {n,m}), backreferences,
 // anchors and the flags i, m, s (g is EReg's own).
 enum RNode {
@@ -213,20 +214,16 @@ class Regex {
 		}
 	}
 
-	static final DIGIT = [48, 57];
-	static final WORD = [48, 57, 65, 90, 95, 95, 97, 122];
-	static final SPACE = [9, 13, 32, 32];
-
 	function parseEscape(inClass:Bool):RNode {
 		var c = peek();
 		p++;
 		return switch c {
-			case "d".code: RSet(DIGIT, false);
-			case "D".code: RSet(DIGIT, true);
-			case "w".code: RSet(WORD, false);
-			case "W".code: RSet(WORD, true);
-			case "s".code: RSet(SPACE, false);
-			case "S".code: RSet(SPACE, true);
+			case "d".code: RSet(RegexUnicode.DIGIT, false);
+			case "D".code: RSet(RegexUnicode.DIGIT, true);
+			case "w".code: RSet(RegexUnicode.WORD, false);
+			case "W".code: RSet(RegexUnicode.WORD, true);
+			case "s".code: RSet(RegexUnicode.SPACE, false);
+			case "S".code: RSet(RegexUnicode.SPACE, true);
 			case "b".code if (!inClass): RWordB(false);
 			case "B".code if (!inClass): RWordB(true);
 			case "b".code: RChar(8);
@@ -300,7 +297,25 @@ class Regex {
 		}
 		if (peek() != "]".code) throw "Invalid regular expression: missing ]";
 		p++;
-		return RSet(ranges, neg);
+		return RSet(normalize(ranges), neg);
+	}
+
+	// sorted, merged ranges (inSet searches them)
+	static function normalize(ranges:Array<Int>):Array<Int> {
+		var pairs = [for (i in 0...ranges.length >> 1) i];
+		pairs.sort((a, b) -> ranges[2 * a] - ranges[2 * b]);
+		var out = [];
+		for (i in pairs) {
+			var lo = ranges[2 * i], hi = ranges[2 * i + 1];
+			if (hi < lo) continue;
+			if (out.length > 0 && lo <= out[out.length - 1] + 1) {
+				if (hi > out[out.length - 1]) out[out.length - 1] = hi;
+			} else {
+				out.push(lo);
+				out.push(hi);
+			}
+		}
+		return out;
 	}
 
 	// one class member: its code, or -1 after adding a whole class escape to ranges
@@ -314,14 +329,14 @@ class Regex {
 				var name = src.substring(p + 1, end);
 				p = end + 2;
 				var r = switch name {
-					case "alpha": [65, 90, 97, 122];
-					case "digit": DIGIT;
-					case "alnum": [48, 57, 65, 90, 97, 122];
-					case "space": SPACE;
-					case "upper": [65, 90];
-					case "lower": [97, 122];
+					case "alpha": RegexUnicode.ALPHA;
+					case "digit": RegexUnicode.DIGIT;
+					case "alnum": RegexUnicode.ALNUM;
+					case "space": RegexUnicode.SPACE;
+					case "upper": RegexUnicode.UPPER;
+					case "lower": RegexUnicode.LOWER;
 					case "xdigit": [48, 57, 65, 70, 97, 102];
-					case "word": WORD;
+					case "word": RegexUnicode.WORD;
 					case "punct": [33, 47, 58, 64, 91, 96, 123, 126];
 					case _: throw "Invalid regular expression class " + name;
 				};
@@ -363,27 +378,65 @@ class Regex {
 	inline function code(pos:Int):Int
 		return StringTools.fastCodeAt(s, pos);
 
-	static inline function lower(c:Int):Int
-		return c >= "A".code && c <= "Z".code ? c + 32 : c;
+	// the representative of c's caseless set (ASCII letters: the upper case one)
+	static function lower(c:Int):Int {
+		if (c < 128) return c >= "a".code && c <= "z".code ? c - 32 : c;
+		var src = RegexUnicode.FOLD_SRC;
+		var lo = 0, hi = src.length - 1;
+		while (lo <= hi) {
+			var mid = (lo + hi) >> 1;
+			var v = src[mid];
+			if (v == c) return RegexUnicode.FOLD_REP[mid];
+			if (v < c) lo = mid + 1 else hi = mid - 1;
+		}
+		return c;
+	}
+
+	// representative -> the members of its caseless set
+	static var caseSets:Null<Map<Int, Array<Int>>>;
+
+	static function caseSet(c:Int):Null<Array<Int>> {
+		if (caseSets == null) {
+			caseSets = new Map();
+			var src = RegexUnicode.FOLD_SRC, rep = RegexUnicode.FOLD_REP;
+			for (i in 0...src.length) {
+				var a = caseSets.get(rep[i]);
+				if (a == null) caseSets.set(rep[i], a = []);
+				a.push(src[i]);
+			}
+		}
+		return caseSets.get(lower(c));
+	}
 
 	static function isWord(c:Int):Bool
-		return c >= "0".code && c <= "9".code || c >= "A".code && c <= "Z".code || c >= "a".code && c <= "z".code || c == "_".code;
+		return c < 128 ? c >= "0".code && c <= "9".code || c >= "A".code && c <= "Z".code || c >= "a".code && c <= "z".code
+			|| c == "_".code : inRanges(RegexUnicode.WORD, c);
+
+	// ranges sorted (normalize, the tables, or a complement of them)
+	static function inRanges(ranges:Array<Int>, c:Int):Bool {
+		if (ranges.length <= 16) {
+			var i = 0;
+			while (i < ranges.length) {
+				if (c >= ranges[i] && c <= ranges[i + 1]) return true;
+				i += 2;
+			}
+			return false;
+		}
+		var lo = 0, hi = (ranges.length >> 1) - 1;
+		while (lo <= hi) {
+			var mid = (lo + hi) >> 1;
+			if (c < ranges[2 * mid]) hi = mid - 1 else if (c > ranges[2 * mid + 1]) lo = mid + 1 else return true;
+		}
+		return false;
+	}
 
 	function inSet(ranges:Array<Int>, c:Int):Bool {
-		var i = 0;
-		while (i < ranges.length) {
-			if (c >= ranges[i] && c <= ranges[i + 1]) return true;
-			i += 2;
-		}
+		if (inRanges(ranges, c)) return true;
 		if (icase) {
-			var o = c >= "A".code && c <= "Z".code ? c + 32 : c >= "a".code && c <= "z".code ? c - 32 : -1;
-			if (o >= 0) {
-				i = 0;
-				while (i < ranges.length) {
-					if (o >= ranges[i] && o <= ranges[i + 1]) return true;
-					i += 2;
-				}
-			}
+			var set = caseSet(c);
+			if (set != null)
+				for (o in set)
+					if (o != c && inRanges(ranges, o)) return true;
 		}
 		return false;
 	}
