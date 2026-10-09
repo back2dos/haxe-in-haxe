@@ -40,8 +40,8 @@ import typing.TypeloadCheck.*;
 
 // haxe/src/typing/typeloadCheck.ml — mechanical draft; not compile-validated.
 class BuildCanceled extends haxe.Exception {
- public final state:Dynamic;
- public function new(state:Dynamic) {super("Build canceled"); this.state=state;}
+ public final state:BuildState;
+ public function new(state:BuildState) {super("Build canceled"); this.state=state;}
 }
 typedef RedefinitionContext={var cNew:TClass; var cfNew:TClassField; var cOld:TClass; var cfOld:TClassField; var map:T->T; var tOld:T;}
 enum CheckOverrideKind {NothingToDo; NormalOverride(ctx:RedefinitionContext); OverloadOverride(f:Void->Void);}

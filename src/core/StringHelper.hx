@@ -71,7 +71,7 @@ class StringHelper {
 		return dot < 0 ? file : file.substr(dot);
 	}
 
-	public static function toUtf8(value:String, position:Dynamic):{value:String, utf16Length:Int} {
+	public static function toUtf8(value:String, position:core.Globals.Pos):{value:String, utf16Length:Int} {
 		var length = 0;
 		for (code in new haxe.iterators.StringIteratorUnicode(value)) {
 			if ((code >= 0xD800 && code <= 0xDFFF) || code >= 0x110000) throw "Invalid unicode char";

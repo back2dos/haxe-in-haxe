@@ -81,7 +81,7 @@ class Timer {
 			case _: label2 == null ? baseLabels : baseLabels.concat(label1).concat([label2]);
 		};
 	}
-	public static function levelFromDefine(defines:Dynamic,define:Dynamic):Int {
+	public static function levelFromDefine(defines:core.Define.DefineContext,define:String):Int {
 		try { var result = Std.parseInt(Define.definedValue(defines,define)); return result == null ? 0 : result; }
 		catch (_:Dynamic) { return 0; }
 	}

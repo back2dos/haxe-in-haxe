@@ -508,7 +508,7 @@ class Genjson {
 		return c;
 	}
 
-	public static function generate(timerCtx:Dynamic, types:Array<ModuleType>, file:String):Void {
+	public static function generate(timerCtx:core.Timer.TimerContext, types:Array<ModuleType>, file:String):Void {
 		var json = core.Timer.time(timerCtx, ["generate", "json", "construct"], function(_:Null<Bool>) {
 			var ctx = createFullConfig();
 			return jarray(types.map(generateModuleType.bind(ctx)));

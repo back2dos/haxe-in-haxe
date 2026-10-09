@@ -33,10 +33,10 @@ typedef GenericContext={var ctx:Typer;var subst:Array<GenericSubst>;var name:Str
 class Generic {
  public static function makeGeneric(ctx:Typer,ps:TypeParams,pt:Array<T>,debug:Bool,p:Pos):GenericContext {
   inline function identSafe(s:String):String {var b=new StringBuf();for(i in 0...s.length){var c=s.charCodeAt(i);b.add(c>=65&&c<=90||c>=97&&c<=122||c>=48&&c<=57||c==95?s.charAt(i):'_${c}_');}return b.toString();}
-  inline function pathName(p:Dynamic):String return p.pack.length==0?p.name:p.pack.join("_")+"_"+p.name;
+  inline function pathName(p:GlobalTypePath):String return p.pack.length==0?p.name:p.pack.join("_")+"_"+p.name;
   inline function process(t:T):{name:String,t:T,expr:Null<TExpr>} {
    function loop(top:Bool,t:T):{name:String,t:T,expr:Null<TExpr>} {
-    inline function result(name:String,expr:Null<TExpr>=null):Dynamic return {name:name,t:t,expr:expr};
+    inline function result(name:String,expr:Null<TExpr>=null):{name:String,t:T,expr:Null<TExpr>} return {name:name,t:t,expr:expr};
     inline function tlName(tl:Array<T>):String return tl.length==0?"":"_"+tl.map(function(t)return loop(top,t).name).join("_");
     inline function deep(t:T):String return loop(false,t).name;
     return switch t {

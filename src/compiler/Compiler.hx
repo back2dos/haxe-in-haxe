@@ -36,7 +36,7 @@ import compiler.server.ServerCompilationContext;
 import context.CommonCache;
 // haxe/src/compiler/compiler.ml
 class Compiler {
- public static function errorExt(com:CommonContext,err:Dynamic):Void com.errorExt(err);
+ public static function errorExt(com:CommonContext,err:core.Error.CompilerError):Void com.errorExt(err);
  public static function error(com:CommonContext,msg:String,p:Pos):Void errorExt(com,Error.makeError(Custom(msg),p));
  public static function hasError(com:CommonContext):Bool return com.partScope.hasError;
  public static function handleDiagnostics(com:CommonContext,msg:String,p:Pos,kind:CompilerMessageKind,?diagnosticsKind:MessageKind):Void {

@@ -8,7 +8,7 @@ import syntax.Lexer;
 import core.Error as CompilerError;
 // Draft mechanical translation of haxe/src/context/formatString.ml; unvalidated.
 class FormatString {
-	public static function formatString(config:Dynamic, s:String, p:Pos, processExpr:ExprDef->Pos->Expr):Expr {
+	public static function formatString(config:syntax.Parser.ParserConfiguration, s:String, p:Pos, processExpr:ExprDef->Pos->Expr):Expr {
 		var result:Null<Expr> = null;
 		var pmin = p.pmin;
 		var min = p.pmin + 1;
