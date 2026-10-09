@@ -78,7 +78,7 @@ below.)
 | sys-run | 31 + 31 + 1103 assertions, all pass | same |
 | compiler-loops | 19/19 | 19/19 |
 | connect-stdin | 10/10 | 10/10 |
-| threads | 144/144 assertions | 138/139, 1 error (eval.luv; the test's last 5 assertions are not reached) |
+| threads | 144/144 assertions | 141/142, 1 error (`eval.luv.Loop`/`ThreadPool`: libuv; the test's last 2 assertions are not reached) |
 
 Root causes of the port failures, one per fix:
 
@@ -127,9 +127,10 @@ Remaining failures (host limits of the HashLink build, not typing):
   arbitrary values; HashLink has neither finalisers nor weak references for
   Haxe objects, and a finaliser receives the value, which would have to be
   resurrected after the host GC freed it.
-- threads `cases.TestEval.testNative`: `eval.luv.Thread.create` and
-  `ThreadPool.queueWork` need libuv, which only the hxc host provides
-  (`EvalLuv`); the `sys.thread` part of the test passes.
+- threads `cases.TestEval.testNative`: `ThreadPool.queueWork` needs a
+  libuv loop, which only the hxc host provides (`EvalLuv`); the `sys.thread`
+  and `eval.luv.Thread` parts of the test pass (eval.luv threads and
+  synchronization primitives need no libuv, see "eval.luv threads" below).
 
 ### The C build of the port (hxc)
 
@@ -212,7 +213,7 @@ sh backend/build.sh backend/bench/threads Threads && bin/backend/Threads/prog_c
 | Server, `-D disable-hxb-cache`: all scenarios (also gcc -O2) | 587/587 |
 | Server, default HXB cache: all scenarios | 587/587 |
 | Server, macro cases (both cache modes) | 132/132 |
-| `tests/threads` in the port's Eval (`--interp`; tcc, gcc -O2, cosmocc) | 138/139: `TestEval.testNative` needs `eval.luv.Thread`, unsupported as in the HashLink build |
+| `tests/threads` in the port's Eval (`--interp`; tcc, gcc -O2, cosmocc) | 144/144 with libuv (tcc, cosmocc; see "eval.luv threads") |
 | `tests/misc/eval/connect_stdin` (`--wait`/`--connect` stdin forwarding) | 10/10 |
 | `backend/bench/threads` (Lock, Mutex, Deque, Semaphore, Condition, Tls, messages, sleep, GC, preemption at allocation, contention, exceptions, sockets, processes; tcc, gcc -O2, cosmocc; nursery 4 KB to 4 MB) | all |
 | Server, cases with `RT_MINOR_KB=64` (a thread switch at every 64 KB of allocation while others are runnable) | 564/564 |
@@ -236,9 +237,54 @@ sh bin/backend/hih/hih.com -cp backend/bench/natives --run Tls 4433 ca.pem examp
 | --- | --- |
 | Conformance | 275 PASS + 7 expected failures |
 | Conformance, macro cases | 66/66 |
-| `tests/threads` in the port's Eval | 138/139 (`TestEval.testNative`: `eval.luv.Thread`, unsupported) |
+| `tests/threads` in the port's Eval | 144/144 |
 | `backend/bench/natives/Luv.hx` (`--interp`, macro; also the haxelib `hxc.com`) | all, as the reference |
 | `backend/bench/natives/Tls.hx` (local `openssl s_server`, HTTPS GET of example.com; also `hxc.com`, `-D hxc.static -D hxc.ssl` through the haxelib package, tcc with system mbedtls) | all, as the reference |
+
+## eval.luv threads, thread pool and synchronization — 2026-10-09
+
+`eval.luv.Thread`, `ThreadPool`, `Once`, `Mutex`, `RwLock`, `Semaphore`,
+`Condition` and `Barrier` (evalLuv.ml) run on host threads in the port's
+Eval (`EvalLuv.hx`: `LuvThreadHandle`, `LuvThreadPool`, `LuvSync`); on the hxc
+host these are green threads, `Loop.run` gives way to them while they exist,
+and finished thread pool work reaches the loop through an async handle
+(backend/README.md). On HashLink everything but `ThreadPool` works (no libuv
+loop there).
+
+```sh
+RT_NO= RT_LIBS="-lmbedtls -lmbedx509 -lmbedcrypto -luv" sh backend/build.sh port
+HAXE_IN_HAXE_PORT=$PWD/bin/backend/hih/hih python3 test/upstream.py threads connect-stdin
+bin/backend/hih/hih -cp backend/bench/natives -main LuvThreads --interp   # = haxe/haxe ... --interp
+```
+
+| Check | Result |
+| --- | --- |
+| `tests/threads`, hxc build with libuv (tcc; cosmocc APE with `RT_DEPS`) | 144/144 assertions (reference 144/144) |
+| `tests/threads`, HashLink build | 141/142 (`ThreadPool`: no libuv loop) |
+| `backend/bench/natives/LuvThreads.hx` (Thread create/join/self, NativeThread messages and exit in a luv thread, the primitives and their error results, queueWork/cancel, Async from a thread, `Loop.stop`/`ONCE` with threads, exceptions), hxc tcc with libuv, cosmocc | output identical to the reference (5 runs) |
+| same without the loop parts: HashLink build, hxc build without libuv | identical to the reference |
+| Conformance, HashLink build / hxc build | 275 PASS + 7 expected failures / same |
+| Conformance, macro cases (HashLink / hxc) | 66/66 / 66/66 |
+| `backend/bench/threads` | all |
+| Server conformance (hxc build with libuv), all scenarios | 587/587 |
+
+The earlier count of 138/139 was not a different test set: `testNative`
+aborted at `eval.luv.Thread.create`, so its later assertions never ran.
+
+Fixed on the way (hxc runtime, all races at a thread switch inside an
+allocation, `rt_alloc_slow` -> `rt_preempt`; they hung or deadlocked the
+port's own parallel filters at random, e.g. on one class name but not
+another):
+- `sys.thread.Tls` kept its values in an unguarded `IntMap` shared by all
+  threads: a switch while the map grew left it half rebuilt (an endless
+  probe in `remove`). Accesses now hold a mutex.
+- `sys.thread.Mutex` allocated its waiter list lazily
+  (`if (waiters == null) waiters = []`): two threads could each allocate
+  one, and the second assignment dropped the first waiter, which then
+  waited forever. The list is now allocated with the mutex.
+- `hx_apush_slow` (and `Array.insert`/`unshift`, `hx_aset_slow`) read the
+  length before growing the array and used it after the allocation;
+  `hx_arr_grow` now retries when another thread grew the array meanwhile.
 
 ## Compilation server and haxelib — 2026-10-09
 

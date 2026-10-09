@@ -391,11 +391,13 @@ class VenumValue {
 	}
 }
 
-// Both run on host threads. `finished` is released when the thread's function returns;
+// All run on host threads. `finished` is released when the thread's function returns;
 // the host has no Thread.join (deviation: upstream joins the OCaml thread/domain).
+// `LuvThread`: an eval.luv thread or thread pool worker (EvalLuv.hx).
 enum VthreadMode {
 	Thread(t:sys.thread.Thread, finished:sys.thread.Lock);
 	Domain(t:sys.thread.Thread, finished:sys.thread.Lock);
+	LuvThread(t:macros.eval.EvalLuv.LuvThreadHandle);
 }
 
 class Vthread {
@@ -483,10 +485,9 @@ class EvalValueTools {
 				[HAddrRequest(h1), HAddrRequest(h2)] | [HRandomRequest(h1), HRandomRequest(h2)] | [HThreadPoolRequest(h1), HThreadPoolRequest(h2)] |
 				[HFileModeNumeric(h1), HFileModeNumeric(h2)] | [HFsEvent(h1), HFsEvent(h2)] | [HOnce(h1), HOnce(h2)] | [HMutex(h1), HMutex(h2)] |
 				[HRwLock(h1), HRwLock(h2)] | [HSemaphore(h1), HSemaphore(h2)] | [HCondition(h1), HCondition(h2)] | [HBarrier(h1), HBarrier(h2)] |
-				[HFsPoll(h1), HFsPoll(h2)] | [HPrepare(h1), HPrepare(h2)] | [HCheck(h1), HCheck(h2)]:
+				[HFsPoll(h1), HFsPoll(h2)] | [HPrepare(h1), HPrepare(h2)] | [HCheck(h1), HCheck(h2)] |
+				[HThread(h1), HThread(h2)]: // Luv.Thread.equal: one EvalLuv.LuvThread per host thread
 				h1 == h2;
-			case [HThread(h1), HThread(h2)]: // Luv.Thread.equal
-				(h1 : haxe.Int64) == (h2 : haxe.Int64);
 			case _: false;
 		}
 	}

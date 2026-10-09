@@ -648,6 +648,10 @@ void *hx_arr_new_n(int32_t kind, int32_t len) {
 }
 
 // room for `need` elements
+// With green threads (rt_thread.c), another thread can run at the allocation
+// (rt_alloc_slow -> rt_preempt) and change the array: its length, capacity or
+// kind are read again after allocating, and the growth is retried if another
+// thread replaced the data meanwhile.
 void hx_arr_grow(void **slot, int32_t need) {
 	void *a = *slot;
 	uint32_t cap = ARR_CAP(a);
@@ -655,8 +659,13 @@ void hx_arr_grow(void **slot, int32_t need) {
 	uint32_t ncap = cap * 2;
 	if (ncap < (uint32_t)need) ncap = need;
 	int32_t real;
-	void *nd = data_alloc(ARR_KIND(a), ncap, &real);
+	int32_t kind = ARR_KIND(a);
+	void *nd = data_alloc(kind, ncap, &real);
 	a = *slot;
+	if (ARR_CAP(a) != cap || ARR_KIND(a) != kind) {
+		hx_arr_grow(slot, need);
+		return;
+	}
 	ARR_CAP(a) = real;
 	void *d = ARR_DATA(a);
 	uint32_t len = ARR_LEN(a);
@@ -767,18 +776,25 @@ void hx_aset_slow(void **slot, int32_t i, int32_t vk, uint64_t v) {
 	if ((uint32_t)i >= (uint32_t)ARR_LEN(a)) {
 		hx_arr_grow(slot, i + 1);
 		a = *slot;
-		ARR_LEN(a) = i + 1; // the data is zeroed: new elements are 0 / null
+		// the data is zeroed: new elements are 0 / null (another thread may have grown it meanwhile)
+		if ((uint32_t)i >= (uint32_t)ARR_LEN(a)) ARR_LEN(a) = i + 1;
 	}
 	store_conv(slot, i, vk, v);
 }
 
-void hx_apush_slow(void **slot, int32_t vk, uint64_t v) {
+// returns the index of the new element (the length is read after growing:
+// another thread may have changed it at the allocation, see hx_arr_grow)
+int32_t hx_apush_slow(void **slot, int32_t vk, uint64_t v) {
 	void *a = *slot;
 	int32_t n = ARR_LEN(a);
-	hx_arr_grow(slot, n + 1);
-	a = *slot;
+	while ((uint32_t)n >= ARR_CAP(a)) {
+		hx_arr_grow(slot, n + 1);
+		a = *slot;
+		n = ARR_LEN(a);
+	}
 	ARR_LEN(a) = n + 1;
 	store_conv(slot, n, vk, v);
+	return n;
 }
 
 // ---- hxc.NativeGc

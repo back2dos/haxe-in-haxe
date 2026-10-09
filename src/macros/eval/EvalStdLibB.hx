@@ -1722,6 +1722,9 @@ class StdThread {
 
 	public static final exit = EvalEncode.vfun0(() -> {
 		switch EvalContext.getEval(EvalContext.getCtx()).thread.threadMode {
+			case LuvThread(_):
+				// Caught by catch_exceptions
+				throw new macros.MacroApi.Abort();
 			// upstream `Domain _` branch: the host only has threads, spawned as domains upstream
 			case _:
 				var ctx = EvalContext.getCtx();
@@ -1744,6 +1747,8 @@ class StdThread {
 				// wait, then release again so that later joins return at once
 				finished.wait();
 				finished.release();
+			case LuvThread(t):
+				t.join();
 			case null:
 		}
 		VNull;

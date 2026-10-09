@@ -209,6 +209,7 @@ void rt_sleep(double seconds); // <= 0: yield
 void rt_preempt(void); // lets other runnable threads (and due timers/descriptors) run
 void rt_fd_closed(int fd); // before close(fd): waiters on fd fail instead of polling a reused number
 void rt_run_main(void (*body)(void)); // runs the program's main on a large stack
+extern void (*rt_spawn_hook)(void); // called after a thread is spawned (rt_uv.c: a running uv loop gives way)
 
 // ---- Haxe Int semantics: wrapping 32-bit arithmetic
 #define IADD(a, b) ((int32_t)((uint32_t)(a) + (uint32_t)(b)))
@@ -305,7 +306,7 @@ int32_t hx_aget_i_slow(void *a, int32_t i);
 double hx_aget_f_slow(void *a, int32_t i);
 void *hx_aget_p_slow(void *a, int32_t i);
 void hx_aset_slow(void **slot, int32_t i, int32_t kind, uint64_t v);
-void hx_apush_slow(void **slot, int32_t kind, uint64_t v);
+int32_t hx_apush_slow(void **slot, int32_t kind, uint64_t v); // the index of the new element
 
 int32_t hx_arrayiter_hasNext(void *it);
 void *hx_arrayiter_next(void *it);

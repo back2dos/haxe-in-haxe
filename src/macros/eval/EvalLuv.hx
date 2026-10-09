@@ -30,10 +30,14 @@ using macros.eval.EvalValue.EvalValueTools;
 	(callback bookkeeping, result conversion, `Buffer`, the request life cycle
 	of `File`), following luv's sources. On other hosts, and in hxc builds
 	without libuv (-DHXC_NO_UV), every eval.luv native fails with "libuv
-	(eval.luv) is not supported by haxe-in-haxe".
+	(eval.luv) is not supported by haxe-in-haxe", except `Thread`, `Once`,
+	`Mutex`, `RwLock`, `Semaphore`, `Condition` and `Barrier`, which need no
+	libuv here (see below).
 
-	Representation (see `Vhandle`): loops, handles, requests, directories and
-	synchronization objects are integer ids of the host; files are descriptors;
+	Representation (see `Vhandle`): loops, handles, requests and directories
+	are integer ids of the host; threads, thread pool requests and
+	synchronization objects are the classes at the end of this module; files
+	are descriptors;
 	`Luv.Buffer.t` (a Bigarray) is `LuvBuffer`, a view on a Bytes, so `sub`
 	shares memory as upstream; socket addresses are Bytes holding a
 	`sockaddr_storage`; a process redirection is a `LuvRedirection`.
@@ -45,9 +49,17 @@ using macros.eval.EvalValue.EvalValueTools;
 	`EvalMain.create`).
 
 	Deviations:
-	- Threads: the host runtime is single-threaded, so `Thread.create`,
-	  `Thread.join` and `ThreadPool.queueWork` are not supported (clear error).
-	  The synchronization primitives, `Once` and `Thread.self` work.
+	- Threads (luv: libuv's OS threads, its thread pool and its
+	  synchronization primitives) are host threads (`sys.thread`), with the
+	  primitives written over host locks (`LuvThreadHandle`, `LuvThreadPool`,
+	  `LuvSync` below). On the hxc host these are green threads: no
+	  parallelism, and a thread only gives way where it blocks or allocates
+	  (backend/README.md). `ThreadPool.queueWork` runs the work on a pool
+	  thread (UV_THREADPOOL_SIZE of them, default 4), which signals an async
+	  handle of the loop, whose callback calls the after-work callback, as
+	  libuv does; `Request.cancel` cancels work no pool thread took yet.
+	  `Thread.create` ignores the stack size. Error results of the primitives
+	  are luv error indices directly.
 	- Memory of handles is released when their close completes; requests
 	  made by the natives are released when they complete; nothing else is
 	  finalized (upstream relies on the OCaml GC).
@@ -481,27 +493,27 @@ class EvalLuv {
 		case v: EvalExceptions.unexpectedValue(v, "eval.luv.FsEvent");
 	}
 
-	static function decodeMutex(v:Value):Int return switch v {
+	static function decodeMutex(v:Value):LuvMutex return switch v {
 		case VHandle(HMutex(m)): m;
 		case v: EvalExceptions.unexpectedValue(v, "eval.luv.Mutex");
 	}
 
-	static function decodeRwlock(v:Value):Int return switch v {
+	static function decodeRwlock(v:Value):LuvRwLock return switch v {
 		case VHandle(HRwLock(l)): l;
 		case v: EvalExceptions.unexpectedValue(v, "eval.luv.RwLock");
 	}
 
-	static function decodeSemaphore(v:Value):Int return switch v {
+	static function decodeSemaphore(v:Value):LuvSemaphore return switch v {
 		case VHandle(HSemaphore(s)): s;
 		case v: EvalExceptions.unexpectedValue(v, "eval.luv.Semaphore");
 	}
 
-	static function decodeCondition(v:Value):Int return switch v {
+	static function decodeCondition(v:Value):LuvCondition return switch v {
 		case VHandle(HCondition(c)): c;
 		case v: EvalExceptions.unexpectedValue(v, "eval.luv.Condition");
 	}
 
-	static function decodeBarrier(v:Value):Int return switch v {
+	static function decodeBarrier(v:Value):LuvBarrier return switch v {
 		case VHandle(HBarrier(b)): b;
 		case v: EvalExceptions.unexpectedValue(v, "eval.luv.Barrier");
 	}
@@ -1605,7 +1617,7 @@ class EvalLuv {
 		f("cancel", EvalEncode.vfun1(v -> {
 			encodeUnitResult(switch v {
 				case VHandle(HFileRequest(r)) | VHandle(HAddrRequest(r)) | VHandle(HNameRequest(r)) | VHandle(HRandomRequest(r)): Uv.reqCancel(r);
-				case VHandle(HThreadPoolRequest(r)): Uv.reqCancel(r);
+				case VHandle(HThreadPoolRequest(r)): return encodeIndexResult(LuvThreadPool.cancel(r));
 				case _: EvalExceptions.unexpectedValue(v, "eval.luv.Request");
 			});
 		})),
@@ -2305,56 +2317,107 @@ class EvalLuv {
 		})),
 	];
 
-	// ---- threads (see the module comment)
+	// ---- threads and synchronization (see the module comment)
 
-	static function threadsNotSupported():Dynamic {
-		return EvalContext.excString("Creating or joining libuv threads (eval.luv.Thread, eval.luv.ThreadPool) is not supported by haxe-in-haxe");
+	/** A `Result.Error` of a luv `Error.t` index (the primitives below report indices, not libuv codes). **/
+	static function errorIndex(i:Int):Value return EvalEncode.encodeEnumValue(EvalHash.key_eval_luv_Result, 1, [i.vint()], null);
+
+	static function encodeIndexResult(i:Int):Value return i == 0 ? ok(VNull) : errorIndex(i);
+
+	static function prepareLuvCallback(v:Value):Void->Void {
+		return switch v {
+			case VFunction(_) | VFieldClosure(_):
+				() -> {
+					var ctx = EvalContext.getCtx();
+					switch EvalContext.getEvalOpt(ctx) {
+						case null:
+							var thread = EvalThread.createThreadInfo(ctx, LuvThread(LuvThreadHandle.self()));
+							var eval = EvalThread.createEval(thread);
+							EvalContext.setEval(ctx, eval);
+						case _:
+					}
+					EvalExceptions.catchExceptions(ctx, () -> EvalMisc.callValue(v, []), Globals.nullPos);
+				}
+			case _:
+				throw macros.MacroApi.InvalidExpr.raise();
+		}
 	}
 
 	public static final threadPoolFields:Array<{name:String, value:Value}> = [
 		f("createRequest", EvalEncode.vfun0(() -> {
-			VHandle(HThreadPoolRequest(Uv.reqNew()));
+			VHandle(HThreadPoolRequest(new LuvWorkRequest()));
 		})),
 		f("queueWork", EvalEncode.vfun4((v1, v2, v3, v4) -> {
-			decodeLoop(v1);
-			threadsNotSupported();
+			var loop = decodeLoop(v1);
+			var request = EvalDecode.decodeOptional(v -> switch v {
+				case VHandle(HThreadPoolRequest(r)): (r : LuvWorkRequest);
+				case v: EvalExceptions.unexpectedValue(v, "eval.luv.ThreadPool.ThreadPoolRequest");
+			}, v2);
+			var work = prepareLuvCallback(v3);
+			var callback = encodeCallback(v4);
+			// Thread_pool.queue_work: the work runs on a pool thread, then the callback on the
+			// loop, reached through an async handle the pool signals (see LuvThreadPool)
+			var request = request == null ? new LuvWorkRequest() : request;
+			var r = Uv.handleInit(HK_ASYNC, loop, 0, 0);
+			if (r < 0) {
+				catchExceptions(callback, error(r));
+			} else {
+				var async = r;
+				var status = 0;
+				callbacks(async).cb = _ -> {
+					Uv.handleClose(async);
+					catchExceptions(callback, encodeIndexResult(status));
+				};
+				request.work = () -> catchExceptions(_ -> work(), null);
+				request.done = s -> {
+					status = s;
+					Uv.asyncSend(async);
+				};
+				LuvThreadPool.queueWork(request);
+			}
+			VNull;
 		})),
 		f("setSize", EvalEncode.vfun2((v1, v2) -> {
 			var size = EvalDecode.decodeInt(v1);
-			EvalDecode.decodeOptional(EvalDecode.decodeBool, v2);
-			// Thread_pool.set_size sets UV_THREADPOOL_SIZE (unless already set)
+			var ifNotAlreadySet = EvalDecode.decodeOptional(EvalDecode.decodeBool, v2);
+			// luv's Thread_pool.set_size: sets UV_THREADPOOL_SIZE, read when a pool starts
+			if (!(ifNotAlreadySet == true && Sys.getEnv("UV_THREADPOOL_SIZE") != null))
+				Sys.putEnv("UV_THREADPOOL_SIZE", Std.string(size));
 			VNull;
 		})),
 	];
 
 	public static final threadFields:Array<{name:String, value:Value}> = [
 		f("self", EvalEncode.vfun0(() -> {
-			Uv.threadSelf();
-			VHandle(HThread(i64()));
+			VHandle(HThread(LuvThreadHandle.self()));
 		})),
 		f("create", EvalEncode.vfun2((v1, v2) -> {
-			threadsNotSupported();
+			var fn = prepareLuvCallback(v1);
+			// ignored: host threads have a fixed stack size
+			var stackSize = EvalDecode.decodeOptional(EvalDecode.decodeInt, v2);
+			// luv's Thread.create runs the function under Error.catch_exceptions
+			ok(VHandle(HThread(LuvThreadHandle.create(() -> catchExceptions(_ -> fn(), null)))));
 		})),
 		f("join", EvalEncode.vfun1(v -> {
-			switch v {
-				case VHandle(HThread(_)):
+			var thread = switch v {
+				case VHandle(HThread(t)): (t : LuvThreadHandle);
 				case _: EvalExceptions.unexpectedValue(v, "eval.luv.Thread");
 			}
-			threadsNotSupported();
+			encodeIndexResult(thread.join());
 		})),
 	];
 
 	public static final onceFields:Array<{name:String, value:Value}> = [
 		f("init", EvalEncode.vfun0(() -> {
-			encodeResult(Uv.syncInit(5, 0), o -> VHandle(HOnce(o)));
+			ok(VHandle(HOnce(new LuvOnce())));
 		})),
 		f("once", EvalEncode.vfun2((v1, v2) -> {
 			var once = switch v1 {
-				case VHandle(HOnce(o)): (o : Int);
+				case VHandle(HOnce(o)): (o : LuvOnce);
 				case _: EvalExceptions.unexpectedValue(v1, "eval.luv.Once");
 			}
 			var callback = EvalMisc.prepareCallback(v2, 0);
-			if (Uv.onceRun(once)) callback([]);
+			once.once(() -> callback([]));
 			VNull;
 		})),
 	];
@@ -2362,118 +2425,120 @@ class EvalLuv {
 	public static final mutexFields:Array<{name:String, value:Value}> = [
 		f("init", EvalEncode.vfun1(v -> {
 			var recursive = EvalDecode.decodeOptional(EvalDecode.decodeBool, v);
-			encodeResult(Uv.syncInit(0, recursive == true ? 1 : 0), m -> VHandle(HMutex(m)));
+			ok(VHandle(HMutex(new LuvMutex(recursive == true))));
 		})),
 		f("destroy", EvalEncode.vfun1(v -> {
-			Uv.syncOp(decodeMutex(v), 0, 0, 0);
+			decodeMutex(v);
 			VNull;
 		})),
 		f("lock", EvalEncode.vfun1(v -> {
-			Uv.syncOp(decodeMutex(v), 1, 0, 0);
+			decodeMutex(v).lock();
 			VNull;
 		})),
 		f("tryLock", EvalEncode.vfun1(v -> {
-			encodeUnitResult(Uv.syncOp(decodeMutex(v), 2, 0, 0));
+			encodeIndexResult(decodeMutex(v).tryLock());
 		})),
 		f("unlock", EvalEncode.vfun1(v -> {
-			Uv.syncOp(decodeMutex(v), 3, 0, 0);
+			decodeMutex(v).unlock();
 			VNull;
 		})),
 	];
 
 	public static final rwlockFields:Array<{name:String, value:Value}> = [
 		f("init", EvalEncode.vfun0(() -> {
-			encodeResult(Uv.syncInit(1, 0), l -> VHandle(HRwLock(l)));
+			ok(VHandle(HRwLock(new LuvRwLock())));
 		})),
 		f("destroy", EvalEncode.vfun1(v -> {
-			Uv.syncOp(decodeRwlock(v), 0, 0, 0);
+			decodeRwlock(v);
 			VNull;
 		})),
 		f("rdLock", EvalEncode.vfun1(v -> {
-			Uv.syncOp(decodeRwlock(v), 1, 0, 0);
+			decodeRwlock(v).rdLock();
 			VNull;
 		})),
 		f("rdTryLock", EvalEncode.vfun1(v -> {
-			encodeUnitResult(Uv.syncOp(decodeRwlock(v), 2, 0, 0));
+			encodeIndexResult(decodeRwlock(v).rdTryLock());
 		})),
 		f("rdUnlock", EvalEncode.vfun1(v -> {
-			Uv.syncOp(decodeRwlock(v), 3, 0, 0);
+			decodeRwlock(v).rdUnlock();
 			VNull;
 		})),
 		f("wrLock", EvalEncode.vfun1(v -> {
-			Uv.syncOp(decodeRwlock(v), 4, 0, 0);
+			decodeRwlock(v).wrLock();
 			VNull;
 		})),
 		f("wrTryLock", EvalEncode.vfun1(v -> {
-			encodeUnitResult(Uv.syncOp(decodeRwlock(v), 5, 0, 0));
+			encodeIndexResult(decodeRwlock(v).wrTryLock());
 		})),
 		f("wrUnlock", EvalEncode.vfun1(v -> {
-			Uv.syncOp(decodeRwlock(v), 6, 0, 0);
+			decodeRwlock(v).wrUnlock();
 			VNull;
 		})),
 	];
 
 	public static final semaphoreFields:Array<{name:String, value:Value}> = [
 		f("init", EvalEncode.vfun1(v -> {
-			encodeResult(Uv.syncInit(2, EvalDecode.decodeInt(v)), s -> VHandle(HSemaphore(s)));
+			ok(VHandle(HSemaphore(new LuvSemaphore(EvalDecode.decodeInt(v)))));
 		})),
 		f("destroy", EvalEncode.vfun1(v -> {
-			Uv.syncOp(decodeSemaphore(v), 0, 0, 0);
+			decodeSemaphore(v);
 			VNull;
 		})),
 		f("post", EvalEncode.vfun1(v -> {
-			Uv.syncOp(decodeSemaphore(v), 1, 0, 0);
+			decodeSemaphore(v).post();
 			VNull;
 		})),
 		f("wait", EvalEncode.vfun1(v -> {
-			Uv.syncOp(decodeSemaphore(v), 2, 0, 0);
+			decodeSemaphore(v).wait();
 			VNull;
 		})),
 		f("tryWait", EvalEncode.vfun1(v -> {
-			encodeUnitResult(Uv.syncOp(decodeSemaphore(v), 3, 0, 0));
+			encodeIndexResult(decodeSemaphore(v).tryWait());
 		})),
 	];
 
 	public static final conditionFields:Array<{name:String, value:Value}> = [
 		f("init", EvalEncode.vfun0(() -> {
-			encodeResult(Uv.syncInit(3, 0), s -> VHandle(HCondition(s)));
+			ok(VHandle(HCondition(new LuvCondition())));
 		})),
 		f("destroy", EvalEncode.vfun1(v -> {
-			Uv.syncOp(decodeCondition(v), 0, 0, 0);
+			decodeCondition(v);
 			VNull;
 		})),
 		f("signal", EvalEncode.vfun1(v -> {
-			Uv.syncOp(decodeCondition(v), 1, 0, 0);
+			decodeCondition(v).signal();
 			VNull;
 		})),
 		f("broadcast", EvalEncode.vfun1(v -> {
-			Uv.syncOp(decodeCondition(v), 2, 0, 0);
+			decodeCondition(v).broadcast();
 			VNull;
 		})),
 		f("wait", EvalEncode.vfun2((v1, v2) -> {
 			var condition = decodeCondition(v1);
 			var mutex = decodeMutex(v2);
-			Uv.syncOp(condition, 3, mutex, 0);
+			condition.wait(mutex);
 			VNull;
 		})),
 		f("timedWait", EvalEncode.vfun3((v1, v2, v3) -> {
 			var condition = decodeCondition(v1);
 			var mutex = decodeMutex(v2);
 			var timeout = EvalDecode.decodeInt(v3);
-			encodeUnitResult(Uv.syncOp(condition, 4, mutex, timeout));
+			encodeIndexResult(condition.timedWait(mutex, timeout));
 		})),
 	];
 
 	public static final barrierFields:Array<{name:String, value:Value}> = [
 		f("init", EvalEncode.vfun1(v -> {
-			encodeResult(Uv.syncInit(4, EvalDecode.decodeInt(v)), b -> VHandle(HBarrier(b)));
+			var count = EvalDecode.decodeInt(v);
+			// uv_barrier_init: pthread_barrier_init fails with EINVAL for a count of 0
+			count == 0 ? errorIndex(LuvSync.EINVAL) : ok(VHandle(HBarrier(new LuvBarrier(count))));
 		})),
 		f("destroy", EvalEncode.vfun1(v -> {
-			Uv.syncOp(decodeBarrier(v), 0, 0, 0);
+			decodeBarrier(v);
 			VNull;
 		})),
 		f("wait", EvalEncode.vfun1(v -> {
-			(Uv.syncOp(decodeBarrier(v), 1, 0, 0) == 1).vbool();
+			decodeBarrier(v).wait().vbool();
 		})),
 	];
 
@@ -2801,7 +2866,8 @@ class EvalLuv {
 
 	/**
 		The field lists to register: unchanged when libuv is available, otherwise
-		every entry fails with the not-supported error.
+		every entry fails with the not-supported error. (The thread and
+		synchronization lists are registered as they are.)
 	**/
 	public static function fields(l:Array<{name:String, value:Value}>):Array<{name:String, value:Value}> {
 		if (available()) return l;
@@ -2854,6 +2920,422 @@ class LuvRedirection {
 		this.kind = kind;
 		this.flags = flags;
 		this.value = value;
+	}
+}
+
+/**
+	`Luv.Thread.t` (a `uv_thread_t`): a host thread. There is one object per
+	host thread, so `Thread.equal` is physical equality. `finished` (threads
+	made by `Thread.create`) is released when the thread's function returns.
+**/
+class LuvThreadHandle {
+	static final current = new sys.thread.Tls<LuvThreadHandle>();
+
+	final finished:Null<sys.thread.Lock>;
+	var joined = false;
+
+	function new(finished:Null<sys.thread.Lock>) {
+		this.finished = finished;
+	}
+
+	/** `Thread.self`. **/
+	public static function self():LuvThreadHandle {
+		var t = current.value;
+		if (t == null) {
+			t = new LuvThreadHandle(null);
+			current.value = t;
+		}
+		return t;
+	}
+
+	/** `Thread.create`: `fn` runs on a new host thread. **/
+	public static function create(fn:Void->Void):LuvThreadHandle {
+		var finished = new sys.thread.Lock();
+		var t = new LuvThreadHandle(finished);
+		sys.thread.Thread.create(() -> {
+			current.value = t;
+			try {
+				fn();
+			} catch (e:Dynamic) {
+				finished.release();
+				throw e;
+			}
+			finished.release();
+		});
+		return t;
+	}
+
+	/**
+		`Thread.join`: 0 or a luv error index. Joining the calling thread fails
+		(pthread_join's EDEADLK, which luv reports as `UNKNOWN`); a thread not
+		made by `Thread.create` is waited for forever (it is never joinable
+		before the process exits). Joining again returns at once.
+	**/
+	public function join():Int {
+		if (current.value == this) return LuvSync.UNKNOWN;
+		if (joined) return LuvSync.ESRCH; // the thread is gone
+		if (finished == null) {
+			new sys.thread.Lock().wait();
+			return 0;
+		}
+		finished.wait();
+		joined = true;
+		return 0;
+	}
+}
+
+/** `Luv.Thread_pool.Request.t`. **/
+class LuvWorkRequest {
+	/** 0 never queued, 1 queued, 2 running, 3 done or cancelled (LuvThreadPool's guard). **/
+	public var state = 0;
+
+	public var work:Null<Void->Void>;
+
+	/** Called when the work completes or is cancelled: 0 or a luv error index. **/
+	public var done:Null<Int->Void>;
+
+	public function new() {}
+}
+
+/**
+	libuv's thread pool for `ThreadPool.queueWork`: `UV_THREADPOOL_SIZE`
+	(default 4, read when the first work is queued) host threads take queued
+	work in order. On the hxc host these are green threads, so work runs
+	interleaved with the other threads, not in parallel (libuv's own pool of
+	real threads still serves the file system and DNS requests).
+**/
+class LuvThreadPool {
+	static final guard = new sys.thread.Mutex();
+	static var queue:Null<sys.thread.Deque<LuvWorkRequest>>;
+
+	public static function queueWork(r:LuvWorkRequest):Void {
+		guard.acquire();
+		if (queue == null) start();
+		r.state = 1;
+		guard.release();
+		queue.add(r);
+	}
+
+	/** `uv_cancel` of a work request: 0 or a luv error index. **/
+	public static function cancel(r:LuvWorkRequest):Int {
+		guard.acquire();
+		var state = r.state;
+		if (state == 1) r.state = 3;
+		guard.release();
+		return switch state {
+			case 0: LuvSync.EINVAL; // not a work request yet
+			case 1:
+				r.done(LuvSync.ECANCELED);
+				0;
+			case _: LuvSync.EBUSY;
+		}
+	}
+
+	static function start():Void {
+		var size = switch Sys.getEnv("UV_THREADPOOL_SIZE") {
+			case null: 4;
+			case s:
+				var n = Std.parseInt(s);
+				n == null ? 0 : n;
+		}
+		// libuv: at least 1, at most 1024
+		if (size < 1) size = 1;
+		if (size > 1024) size = 1024;
+		var q = new sys.thread.Deque<LuvWorkRequest>();
+		queue = q;
+		for (_ in 0...size) sys.thread.Thread.create(() -> worker(q));
+	}
+
+	static function worker(q:sys.thread.Deque<LuvWorkRequest>):Void {
+		while (true) {
+			var r = q.pop(true);
+			guard.acquire();
+			var run = r.state == 1;
+			if (run) r.state = 2;
+			guard.release();
+			if (!run) continue; // cancelled
+			r.work();
+			guard.acquire();
+			r.state = 3;
+			guard.release();
+			r.done(0);
+		}
+	}
+}
+
+/**
+	luv's `Mutex`, `Rwlock`, `Semaphore`, `Condition`, `Barrier` and `Once`
+	over host threads: a guard mutex for the state, and a Lock per waiting
+	thread, released to wake it (which then checks the state again). They do
+	not need libuv, and on the hxc host they block only the calling green
+	thread. Results are 0 or a luv `Error.t` index (evalLuv.ml
+	encode_uv_error order), for the error codes libuv returns.
+**/
+class LuvSync {
+	public static inline final EAGAIN = 5;
+	public static inline final EBUSY = 22;
+	public static inline final ECANCELED = 23;
+	public static inline final EINVAL = 34;
+	public static inline final ESRCH = 67;
+	public static inline final ETIMEDOUT = 68;
+	public static inline final UNKNOWN = 71;
+
+	final guard = new sys.thread.Mutex();
+	var waiters:Array<sys.thread.Lock> = [];
+
+	public function new() {}
+
+	/** With the guard held: waits (guard released) until woken or `timeout` seconds pass; false on timeout. **/
+	function await(?timeout:Float):Bool {
+		var l = new sys.thread.Lock();
+		waiters.push(l);
+		guard.release();
+		var r = l.wait(timeout);
+		guard.acquire();
+		if (!r && waiters.remove(l) == false) r = true; // woken meanwhile
+		return r;
+	}
+
+	function wakeOne():Void {
+		if (waiters.length > 0) waiters.shift().release();
+	}
+
+	function wakeAll():Void {
+		var all = waiters;
+		waiters = [];
+		for (l in all) l.release();
+	}
+}
+
+/** `uv_mutex_t`: locking a non-recursive mutex the thread holds deadlocks, as with pthreads. **/
+class LuvMutex extends LuvSync {
+	final recursive:Bool;
+	var owner:Null<LuvThreadHandle>;
+	var depth = 0;
+
+	public function new(recursive:Bool) {
+		super();
+		this.recursive = recursive;
+	}
+
+	public function lock():Void {
+		var cur = LuvThreadHandle.self();
+		guard.acquire();
+		if (owner == cur && recursive) {
+			depth++;
+		} else {
+			while (owner != null) await();
+			owner = cur;
+			depth = 1;
+		}
+		guard.release();
+	}
+
+	public function tryLock():Int {
+		var cur = LuvThreadHandle.self();
+		guard.acquire();
+		var r = 0;
+		if (owner == null) {
+			owner = cur;
+			depth = 1;
+		} else if (owner == cur && recursive) {
+			depth++;
+		} else {
+			r = LuvSync.EBUSY;
+		}
+		guard.release();
+		return r;
+	}
+
+	public function unlock():Void {
+		guard.acquire();
+		if (depth > 1) {
+			depth--;
+		} else {
+			owner = null;
+			depth = 0;
+			wakeOne();
+		}
+		guard.release();
+	}
+}
+
+/** `uv_rwlock_t` (readers are not held back by waiting writers, as glibc's default). **/
+class LuvRwLock extends LuvSync {
+	var readers = 0;
+	var writer = false;
+
+	public function rdLock():Void {
+		guard.acquire();
+		while (writer) await();
+		readers++;
+		guard.release();
+	}
+
+	public function rdTryLock():Int {
+		guard.acquire();
+		var r = writer ? LuvSync.EBUSY : 0;
+		if (r == 0) readers++;
+		guard.release();
+		return r;
+	}
+
+	public function rdUnlock():Void {
+		guard.acquire();
+		if (readers > 0) readers--;
+		if (readers == 0) wakeAll();
+		guard.release();
+	}
+
+	public function wrLock():Void {
+		guard.acquire();
+		while (writer || readers > 0) await();
+		writer = true;
+		guard.release();
+	}
+
+	public function wrTryLock():Int {
+		guard.acquire();
+		var r = writer || readers > 0 ? LuvSync.EBUSY : 0;
+		if (r == 0) writer = true;
+		guard.release();
+		return r;
+	}
+
+	public function wrUnlock():Void {
+		guard.acquire();
+		writer = false;
+		wakeAll();
+		guard.release();
+	}
+}
+
+/** `uv_sem_t`. **/
+class LuvSemaphore extends LuvSync {
+	var count:Int;
+
+	public function new(count:Int) {
+		super();
+		this.count = count;
+	}
+
+	public function post():Void {
+		guard.acquire();
+		count++;
+		wakeOne();
+		guard.release();
+	}
+
+	public function wait():Void {
+		guard.acquire();
+		while (count <= 0) await();
+		count--;
+		guard.release();
+	}
+
+	public function tryWait():Int {
+		guard.acquire();
+		var r = count <= 0 ? LuvSync.EAGAIN : 0;
+		if (r == 0) count--;
+		guard.release();
+		return r;
+	}
+}
+
+/** `uv_cond_t`. **/
+class LuvCondition extends LuvSync {
+	public function signal():Void {
+		guard.acquire();
+		wakeOne();
+		guard.release();
+	}
+
+	public function broadcast():Void {
+		guard.acquire();
+		wakeAll();
+		guard.release();
+	}
+
+	public function wait(mutex:LuvMutex):Void {
+		timedWaitSeconds(mutex, null);
+	}
+
+	/** `uv_cond_timedwait`: `timeout` in nanoseconds. **/
+	public function timedWait(mutex:LuvMutex, timeout:Int):Int {
+		return timedWaitSeconds(mutex, Math.max(0.0, timeout / 1e9)) ? 0 : LuvSync.ETIMEDOUT;
+	}
+
+	function timedWaitSeconds(mutex:LuvMutex, timeout:Null<Float>):Bool {
+		guard.acquire();
+		var l = new sys.thread.Lock();
+		waiters.push(l);
+		guard.release();
+		mutex.unlock();
+		var r = l.wait(timeout);
+		if (!r) {
+			guard.acquire();
+			if (waiters.remove(l) == false) r = true; // signalled meanwhile
+			guard.release();
+		}
+		mutex.lock();
+		return r;
+	}
+}
+
+/** `uv_barrier_t`: `wait` is true in one thread per cycle, the last to arrive. **/
+class LuvBarrier extends LuvSync {
+	final count:Int;
+	var arrived = 0;
+	var cycle = 0;
+
+	public function new(count:Int) {
+		super();
+		this.count = count;
+	}
+
+	public function wait():Bool {
+		guard.acquire();
+		var c = cycle;
+		arrived++;
+		var serial = arrived >= count;
+		if (serial) {
+			arrived = 0;
+			cycle++;
+			wakeAll();
+		} else {
+			while (cycle == c) await();
+		}
+		guard.release();
+		return serial;
+	}
+}
+
+/** `uv_once_t`: other threads calling `once` meanwhile wait until the function has run. **/
+class LuvOnce extends LuvSync {
+	var state = 0; // 0 not run, 1 running, 2 done
+
+	public function once(f:Void->Void):Void {
+		guard.acquire();
+		if (state == 0) {
+			state = 1;
+			guard.release();
+			inline function finish() {
+				guard.acquire();
+				state = 2;
+				wakeAll();
+				guard.release();
+			}
+			try {
+				f();
+			} catch (e:Dynamic) {
+				finish();
+				throw e;
+			}
+			finish();
+		} else {
+			while (state != 2) await();
+			guard.release();
+		}
 	}
 }
 
@@ -3091,14 +3573,6 @@ private class Uv {
 	public static function fsPollStop(handle:Int):Int return no();
 
 	public static function random(loop:Int, req:Int, len:Int):Int return no();
-
-	public static function syncInit(kind:Int, arg:Int):Int return no();
-
-	public static function syncOp(sync:Int, op:Int, other:Int, timeout:Float):Int return no();
-
-	public static function onceRun(once:Int):Bool return no();
-
-	public static function threadSelf():Void no();
 
 	public static function getEnv(name:String):Null<Bytes> return no();
 
