@@ -50,7 +50,9 @@ class EvalLock {
 
 	static var guard:Null<sys.thread.Mutex> = null;
 	static var held = false;
-	static var waiters:Array<sys.thread.Lock> = [];
+	// FIFO of waiting threads; nothing is allocated while `guard` is held
+	static var first:Null<Waiter> = null;
+	static var last:Null<Waiter> = null;
 
 	/**
 		Called by a thread running Eval code (and so the only one) before it
@@ -72,26 +74,30 @@ class EvalLock {
 	/** Takes the lock (when active), waiting for it in FIFO order. **/
 	public static function enter():Void {
 		if (!active) return;
+		var w = new Waiter();
 		guard.acquire();
 		if (!held) {
 			held = true;
 			guard.release();
 			return;
 		}
-		var l = new sys.thread.Lock();
-		waiters.push(l);
+		if (last == null) first = w else last.next = w;
+		last = w;
 		guard.release();
-		// `leave` hands the lock over by releasing `l`
-		while (!l.wait(SLICE)) yieldRequested = true;
+		// `leave` hands the lock over by releasing `w.lock`
+		while (!w.lock.wait(SLICE)) yieldRequested = true;
 	}
 
 	/** Gives the lock up (when active): to the first waiter, if any. **/
 	public static function leave():Void {
 		if (!active) return;
 		guard.acquire();
-		if (waiters.length > 0) {
+		var w = first;
+		if (w != null) {
+			first = w.next;
+			if (first == null) last = null;
 			yieldRequested = false;
-			waiters.shift().release();
+			w.lock.release();
 		} else {
 			held = false;
 		}
@@ -150,4 +156,11 @@ class EvalLock {
 			true;
 		});
 	}
+}
+
+private class Waiter {
+	public final lock = new sys.thread.Lock();
+	public var next:Null<Waiter> = null;
+
+	public function new() {}
 }
