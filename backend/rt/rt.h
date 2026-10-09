@@ -247,6 +247,12 @@ __attribute__((noreturn)) void hx_throw_str(const char *msg);
 // plain blocking calls (nothing else runs; with green threads nothing else
 // can run anyway while they block).
 extern int32_t rt_nthreads;
+#if RT_MT
+// a heuristic (whether other threads may run): a relaxed load, written atomically under the world lock
+#define RT_NTHREADS() __atomic_load_n(&rt_nthreads, __ATOMIC_RELAXED)
+#else
+#define RT_NTHREADS() rt_nthreads
+#endif
 void rt_threads_scan(void *(*fwd)(void *)); // GC: roots of the threads (stacks of the others, entry closures, Tls values)
 // wait until fd is readable (write 0) or writable (write 1), letting other
 // threads run: 1 ready, 0 timeout (seconds; < 0: none), -1 the fd was closed meanwhile

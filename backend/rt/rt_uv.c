@@ -463,7 +463,7 @@ int32_t hxc_NativeUv_loopRun(int32_t id, int32_t mode, void *dispatcher) {
 	disp_slot = dispatcher_root;
 	uv_run_mode m = mode == 0 ? UV_RUN_DEFAULT : mode == 1 ? UV_RUN_ONCE : UV_RUN_NOWAIT;
 	int r;
-	int coop = m != UV_RUN_NOWAIT && rt_nthreads > 1;
+	int coop = m != UV_RUN_NOWAIT && RT_NTHREADS() > 1;
 	if (!coop) {
 		uv_loop_t *saved_loop = plain_loop;
 		int saved_spawned = plain_spawned;

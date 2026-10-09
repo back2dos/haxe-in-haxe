@@ -481,7 +481,7 @@ static void collect(int full, size_t need) {
 
 // a TLAB with room for `bytes`: with one thread the whole free nursery
 static int tlab_refill(uint32_t bytes) {
-	size_t want = rt_nthreads > 1 ? tlab_size : (size_t)-1;
+	size_t want = RT_NTHREADS() > 1 ? tlab_size : (size_t)-1;
 	if (want < bytes) want = bytes;
 #if RT_MT
 	char *p = __atomic_load_n(&young_next, __ATOMIC_RELAXED);
@@ -511,7 +511,7 @@ void *rt_alloc_slow(uint64_t header, uint32_t bytes) {
 #if RT_GREEN
 	// a green thread that only computes gives way at each minor collection
 	// (before allocating: the caller's live references are rooted here)
-	if (rt_nthreads > 1) rt_preempt();
+	if (RT_NTHREADS() > 1) rt_preempt();
 #endif
 	// a safepoint: the caller's live references are rooted here
 	rt_safepoint();

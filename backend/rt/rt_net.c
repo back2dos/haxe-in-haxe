@@ -66,7 +66,7 @@ int32_t hxc_NativeNet_errno(void) { return last_errno; }
 // and the thread waits for the descriptor in the scheduler. Sockets the
 // program made non-blocking keep failing with EAGAIN (haxe.io.Error.Blocked).
 static int cooperative(int fd) {
-	if (rt_nthreads <= 1) return 0;
+	if (RT_NTHREADS() <= 1) return 0;
 	int flags = fcntl(fd, F_GETFL);
 	return flags >= 0 && !(flags & O_NONBLOCK);
 }
@@ -231,7 +231,7 @@ int32_t hxc_NativeNet_select(void *r, void *w, void *o, double timeout) {
 		return -1;
 	}
 	struct timeval tv, *tvp = NULL;
-	if (rt_nthreads > 1 && timeout != 0) {
+	if (RT_NTHREADS() > 1 && timeout != 0) {
 		// other threads run until a descriptor is ready or the timeout passes,
 		// then select looks without waiting
 		int32_t nr = r ? ARR_LEN(r) : 0, nw = w ? ARR_LEN(w) : 0, no = o ? ARR_LEN(o) : 0;

@@ -92,7 +92,7 @@ void *hxc_NativeSys_environ(void) {
 // are always ready. Writes to stdout/stderr (print), Sys.command and the
 // rest of the file system calls still block the process.
 void hxc_NativeSys_sleep(double seconds) {
-	if (rt_nthreads > 1) {
+	if (RT_NTHREADS() > 1) {
 		rt_sleep(seconds); // 0: give way to the other runnable threads
 		return;
 	}
@@ -185,7 +185,7 @@ int32_t hxc_NativeSys_getChar(int32_t echo) {
 		tcsetattr(0, TCSANOW, &raw);
 	}
 	unsigned char c;
-	if (rt_nthreads > 1) rt_wait_fd(0, 0, -1);
+	if (RT_NTHREADS() > 1) rt_wait_fd(0, 0, -1);
 	ssize_t r = read(0, &c, 1);
 	if (tty) tcsetattr(0, TCSANOW, &old);
 	if (r <= 0) hx_throw_str("Eof");
@@ -205,7 +205,7 @@ int32_t hxc_NativeSys_fileOpen(void *path, int32_t mode) {
 
 int32_t hxc_NativeSys_fileRead(int32_t fd, void *b, int32_t pos, int32_t len) {
 	if (pos < 0 || len < 0 || pos + len > BYTES_LEN(b)) hx_throw_str("OutsideBounds");
-	if (rt_nthreads > 1) {
+	if (RT_NTHREADS() > 1) {
 		RT_ROOT(b);
 		int w = rt_wait_fd(fd, 0, -1);
 		RT_RELOAD(b);
@@ -221,7 +221,7 @@ int32_t hxc_NativeSys_fileRead(int32_t fd, void *b, int32_t pos, int32_t len) {
 
 int32_t hxc_NativeSys_fileWrite(int32_t fd, void *b, int32_t pos, int32_t len) {
 	if (pos < 0 || len < 0 || pos + len > BYTES_LEN(b)) hx_throw_str("OutsideBounds");
-	if (rt_nthreads > 1) {
+	if (RT_NTHREADS() > 1) {
 		RT_ROOT(b);
 		int w = rt_wait_fd(fd, 1, -1);
 		RT_RELOAD(b);
@@ -433,7 +433,7 @@ int32_t hxc_NativeSys_processWait(int32_t pid, int32_t block) {
 #else
 	double pause = 0.001;
 	for (;;) {
-		int coop = block && rt_nthreads > 1; // green threads: poll the child, sleeping in between
+		int coop = block && RT_NTHREADS() > 1; // green threads: poll the child, sleeping in between
 		pid_t r = waitpid(pid, &st, block && !coop ? 0 : WNOHANG);
 		if (r < 0 && errno == EINTR) continue;
 		if (r == 0 && coop) {
