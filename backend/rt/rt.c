@@ -68,10 +68,34 @@ static inline void forward_to(void *p, void *n) {
 	FP(p, 0) = n;
 }
 
+// RT_VERIFY=1|2 (a debugging aid, see minor_): after each collection the
+// nursery is filled with POISON_BYTE, so a reference that a collection did
+// not update (a missing root or barrier) points at a POISON_WORD header,
+// and an object allocated uninitialised (rt_alloc_init) whose slot is not
+// written before the next collection holds POISON_WORD there; both abort
+#define POISON_BYTE 0xAB
+#define POISON_WORD 0xABABABABABABABABull
+static int verify_heap;
+static void stale_ref(void *p) {
+	fprintf(stderr, "RT_VERIFY: stale reference %p into the nursery (collected before)\n", p);
+	abort();
+}
+// a pointer slot still holds RT_VERIFY's nursery poison: its object was
+// allocated uninitialised (rt_alloc_init) and reached a GC point before
+// the slot was written
+static void poisoned_slot(void *o, uint32_t i) {
+	uint32_t t = TINDEX(o);
+	fprintf(stderr, "RT_VERIFY: object %p (type %u %s, kind %u, %u slots) slot %u uninitialised at a collection\n", o, t,
+		t < (uint32_t)rt_ntypes && rt_types[t].name ? rt_types[t].name : "?", KIND(o), NSLOTS(o), i);
+	abort();
+}
+
+
 // ---- minor collection: copy live nursery objects to the end of the old space
 
 static void *minor_forward(void *p) {
 	if (!in_young(p)) return p;
+	if (verify_heap && HDR(p) == POISON_WORD) stale_ref(p);
 	if (KIND(p) == K_FWD) return FP(p, 0);
 	void *n = copy_to(old_ptr, p);
 	old_ptr += obj_bytes(p);
@@ -168,6 +192,7 @@ static void gc_drain(void) {
 			if (pm && !((pm[i >> 6] >> (i & 63)) & 1)) continue;
 			void *v = FP(o, i);
 			if (!v) continue;
+			if (verify_heap && v == (void *)POISON_WORD) poisoned_slot(o, i);
 			char *before = old_ptr;
 			void *nv = gc_fwd(v);
 			FP(o, i) = nv;
@@ -207,7 +232,46 @@ static void minor(void) {
 	if (stats && majors == m0) minor_secs += now_secs() - t0;
 }
 
+// RT_VERIFY=1 (a debugging aid): before each minor collection, every pointer
+// slot of the old space that refers to the nursery must be in the remembered
+// set (a slot, or its whole object); the first one that is not aborts with
+// its object's type and slot (a store that missed rt_set_ptr)
+static int cmp_ptr(const void *a, const void *b) {
+	uintptr_t x = *(const uintptr_t *)a, y = *(const uintptr_t *)b;
+	return x < y ? -1 : x > y;
+}
+static void verify_remembered(void) {
+	void **slots = (void **)malloc((remembered_len + robjs_len + 1) * sizeof(void *));
+	for (size_t i = 0; i < remembered_len; i++)
+		slots[i] = (void *)remembered[i];
+	qsort(slots, remembered_len, sizeof(void *), cmp_ptr);
+	void **objs = slots + remembered_len;
+	memcpy(objs, remembered_objs, robjs_len * sizeof(void *));
+	qsort(objs, robjs_len, sizeof(void *), cmp_ptr);
+	for (char *scan = old_start; scan < old_ptr;) {
+		void *o = scan + 8;
+		scan += obj_bytes(o);
+		uint32_t n = NSLOTS(o), k = KIND(o);
+		const uint64_t *pm = k == K_OBJ ? rt_types[TINDEX(o)].ptrmap : 0;
+		if (k != K_PARR && !pm) continue;
+		if (bsearch(&o, objs, robjs_len, sizeof(void *), cmp_ptr)) continue;
+		for (uint32_t i = 0; i < n; i++) {
+			if (pm && !((pm[i >> 6] >> (i & 63)) & 1)) continue;
+			if (!in_young(FP(o, i))) continue;
+			void *s = &FP(o, i);
+			if (bsearch(&s, slots, remembered_len, sizeof(void *), cmp_ptr)) continue;
+			uint32_t t = TINDEX(o);
+			fprintf(stderr, "RT_VERIFY: minor %lu: old object %p (type %u %s, kind %u, %u slots) slot %u -> young %p (type %u %s) not remembered\n", minors, o, t,
+				t < (uint32_t)rt_ntypes && rt_types[t].name ? rt_types[t].name : "?", k, n, i, FP(o, i), TINDEX(FP(o, i)),
+				TINDEX(FP(o, i)) < (uint32_t)rt_ntypes && rt_types[TINDEX(FP(o, i))].name ? rt_types[TINDEX(FP(o, i))].name : "?");
+			abort();
+		}
+	}
+	free(slots);
+}
+
 static void minor_(void) {
+	if (verify_heap == 1) verify_remembered();
 	size_t young_used = rt_young_ptr - rt_young_start;
 	if ((size_t)(old_end - old_ptr) < young_used + 64) {
 		major(0);
@@ -228,6 +292,7 @@ static void minor_(void) {
 			scan_object(remembered_objs[i], fwd_root);
 		forget_objs();
 		rt_young_ptr = rt_young_start;
+		if (verify_heap) memset(rt_young_start, POISON_BYTE, rt_young_limit - rt_young_start);
 		return;
 	}
 	scan_roots(minor_forward);
@@ -245,6 +310,7 @@ static void minor_(void) {
 		scan_object(o, minor_forward);
 	}
 	rt_young_ptr = rt_young_start;
+	if (verify_heap) memset(rt_young_start, POISON_BYTE, rt_young_limit - rt_young_start);
 }
 
 // ---- major collection: copy everything live into a fresh to-space.
@@ -293,6 +359,7 @@ static char *from_start, *from_end;
 
 static void *major_forward(void *p) {
 	if (!in_young(p) && !((char *)p >= from_start && (char *)p < from_end)) return p;
+	if (verify_heap && in_young(p) && HDR(p) == POISON_WORD) stale_ref(p);
 	if (KIND(p) == K_FWD) return FP(p, 0);
 	POPULATE_AHEAD(obj_bytes(p)); // the to-space is faulted in as the copy reaches it
 	void *n = copy_to(old_ptr, p);
@@ -378,6 +445,7 @@ static void major_(size_t need) {
 		}
 	}
 	rt_young_ptr = rt_young_start;
+	if (verify_heap) memset(rt_young_start, POISON_BYTE, rt_young_limit - rt_young_start);
 #ifdef __EMSCRIPTEN__
 	free(from_start);
 	old_end = old_start + cap;
@@ -584,6 +652,8 @@ void rt_init(int ng, int argc, char **argv) {
 	const char *rp = getenv("RT_RELEASE");
 	release_pages = rp ? atoi(rp) : 1;
 	gc_bfs = getenv("RT_BFS") != NULL;
+	const char *vh = getenv("RT_VERIFY");
+	verify_heap = vh ? atoi(vh) : 0;
 #if defined(MADV_HUGEPAGE) && !defined(__EMSCRIPTEN__)
 	// transparent huge pages for the heap: the old space grows by hundreds of
 	// MB and is copied into fresh pages, so 4 KB page faults add up

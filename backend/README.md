@@ -69,6 +69,18 @@ arrays/strings/maps by the type and field that first refers to them, the
 heap's sizes, malloc'd memory and RSS (`rt_census.c`). `RT_STATS=1` prints
 each major collection (live, from-space and new limit) and the peak RSS.
 
+`RT_VERIFY` checks the GC contract (slow; for debugging natives and the
+emitter): `RT_VERIFY=2` fills the nursery with a poison pattern after every
+collection, so a reference a collection did not update (a C local used after
+an allocation without `RT_RELOAD`, a missing root) reads poison and a
+collection that meets it aborts, as does an uninitialised `rt_alloc_init`
+slot; `RT_VERIFY=1` also checks before each minor collection that every
+old-to-young pointer is in the remembered set (a missed `rt_set_ptr`).
+Combine with a small `RT_MINOR_KB` to collect often. It found
+`String.split` reading the delimiter's length after allocating its result
+(the length then came from the forwarding address: a crash in about half
+the runs of haxe-formatter, depending on ASLR).
+
 GC policy (the copying algorithm is unchanged): the from-space is returned
 to the kernel after a major collection (`RT_RELEASE=0` keeps it), the
 to-space is faulted in as the copy reaches it, the populate-ahead batch is
