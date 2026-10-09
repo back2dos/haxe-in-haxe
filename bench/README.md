@@ -42,9 +42,12 @@ every route printed identical output.
 - **Go** on wasm from the same runtime design in linear memory (it matched
   WasmGC here), with exceptions mapped to wasm exception handling. The
   WasmGC emitter is the optional alternative.
-- **No-go** on native through wasm runtimes: wasm2c has no GC support,
-  WAMR has no standard exception handling, and Wasmtime's default collector
-  is 3–6× slower here.
+- **No-go** on native through wasm runtimes for WasmGC modules: wasm2c has
+  no GC support, WAMR has no standard exception handling, and Wasmtime's
+  default collector is 3–6× slower here. **Viable** for the linear-memory
+  build: precompiled with Wasmtime (Cranelift), it runs within 7–11% of gcc
+  (Bench 0.34s vs 0.32s, retain 0.60s vs 0.53s). Exceptions there cost
+  the same as in V8 (14× native `setjmp`).
 - **The ~20 s V8 stall is caused by `setjmp`.** Emscripten's lowering of
   `hl_trap` makes ten functions 45% of the module; V8 waits at exit for
   their optimization. For today's build, `backend/tools/wasm_hints.py`

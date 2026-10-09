@@ -296,7 +296,41 @@ native (option b).
   handling** (legacy only, interpreter only), so exceptions would have to
   be lowered to return codes for it.
 
-**No-go** for the compiler: slower and less complete than emitting C.
+**No-go for WasmGC modules** through these runtimes: slower and less
+complete than emitting C.
+
+**Viable for linear-memory modules (b+c), measured with Wasmtime/Cranelift.**
+A standalone (WASI) Emscripten build of the C output
+(`backend/tools/wasmtime_wasi.py`, exceptions translated to exnref) runs in
+Wasmtime 49 from a precompiled artifact (101 KB). Run times, excluding
+process start:
+
+| Program | gcc -O2 native | Cranelift (Wasmtime AOT) | V8 (Node, incl. startup) |
+| --- | ---: | ---: | ---: |
+| Bench | 0.315s | 0.338s | 0.394s |
+| Bench -D retain | 0.534s | 0.595s | 0.682s |
+| Exc | 0.026s | 0.357s | 0.415s |
+
+Cranelift's code is 7–11% behind gcc here, and the module's own GC means
+the earlier 2.0s (Wasmtime's reference-counting collector on WasmGC) does
+not apply. One wasm artifact could thus be both the wasm distribution and,
+through `wasmtime compile` or an embedded Wasmtime, the native one. The
+catch is exceptions: wasm exception handling costs the same in Wasmtime as
+in V8, 14× the native `setjmp` route on `Exc`.
+
+**Cranelift as a direct native backend** (IR → CLIF instead of IR → C) is
+the other way it could help. Its user stack maps let a frontend mark GC
+references at safepoints, as OCaml's frame tables do. That would replace
+the shadow stack: references stay in registers, and the GC finds them
+through the maps. Recent Cranelift also has `try_call` with landing pads
+(Wasmtime's exception support uses it), tail calls, and compiles much
+faster than gcc on a 50k-line program. The costs: Cranelift is a Rust
+library with no stable C API, so the backend's code generator would be a
+Rust program reading the IR (or HXB). It produces no wasm, so a wasm emitter
+is still needed. And its code quality trails gcc/LLVM (7–11% above, through
+wasm). This route has not been prototyped: the stack-map and exception
+claims are from Cranelift's documentation and Wasmtime's use of them, not
+measured here.
 
 **(c) Linear memory with a precise shadow-stack GC on both targets.** This
 is what `backend/rt` is: nursery bump allocation, copying minor collections
