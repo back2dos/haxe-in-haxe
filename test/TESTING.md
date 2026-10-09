@@ -131,6 +131,61 @@ Remaining failures (host limits of the HashLink build, not typing):
   `ThreadPool.queueWork` need libuv, which only the hxc host provides
   (`EvalLuv`); the `sys.thread` part of the test passes.
 
+### The C build of the port (hxc)
+
+```sh
+RT_NO= RT_LIBS="-lmbedtls -lmbedx509 -lmbedcrypto -luv" sh backend/build.sh port     # tcc
+CC="gcc -O2" BIN=hih_o2 RT_NO= RT_LIBS="-lmbedtls -lmbedx509 -lmbedcrypto -luv" sh backend/build.sh port
+HAXE_IN_HAXE_PORT=$PWD/bin/backend/hih/hih python3 test/upstream.py
+```
+
+| Step | Reference | HashLink build | hxc build (tcc and gcc -O2) |
+| --- | --- | --- | --- |
+| unit-macro | 11372/11372 | 11367/11371, 4 errors (Gc.finalise) | 11372/11372 |
+| unit-macro-hxblib | 11372/11372 | 11367/11371, 4 errors | 11372/11372 |
+| nullsafety | pass | pass | pass |
+| misc | 684/684 (2 excluded) | 684/684 | 684/684 |
+| misc-resolution | 7/7 | 7/7 | 7/7 |
+| sys-hxb, sys-run | pass | pass | pass |
+| compiler-loops | 19/19 | 19/19 | 19/19 |
+| connect-stdin | 10/10 | 10/10 | 10/10 |
+| threads | 144/144 | 138/139 (eval.luv) | 138/139 (eval.luv, as HashLink) |
+
+Before the fixes unit-macro segfaulted on hxc; with an unlimited stack it
+reported 30 failures and 5 errors. Root causes, one per fix:
+
+- Stack overflow: the hxc regular expression engine (a backtracking
+  matcher in continuation-passing style) recursed past the 8 MB process
+  stack on a few thousand characters. The program's main now runs on a
+  1 GB reserved stack (`rt_run_main`, `RT_STACK_MB`; OCaml 5, which the
+  reference is built with, lets the main fiber's stack grow to 1 GB) and the
+  main shadow stack is a 1 GB reservation with a guard page.
+- `Math.ffloor/fceil/fround` went through Int `floor`, wrapping infinities
+  to 0: the hxc std now declares them extern (TestMath, TestBasetypes).
+- `String.toUpperCase/toLowerCase` in Eval used the host's mapping
+  (ASCII-only on hxc); `EvalString.caseMap` now maps through upstream's
+  `EvalBytes.Unicase` tables (`EvalBytesUnicase.hx`) on every host.
+- EReg in Eval: hxc.Regex was ASCII-only; it now follows PCRE2_UCP
+  (Unicode `\d \w \s \b`, POSIX classes, caseless sets) as PCRE2 does in
+  the reference and HashLink (TestUnicode).
+- `Int64Map`: the key equality was physical on hxc (Int64 is an object).
+- `unit.TestGcFinalizer`: the hxc GC (`rt.c`) implements OCaml's
+  `Gc.finalise` (function a root, value a root of minor collections only,
+  an unreachable value is copied back by the major collection and its call
+  queued; calls run at the next allocation slow path or after Eval's
+  `Gc.minor/major/full_major/compact`, which now collect). Weak references
+  are not needed by the port's Eval and are not provided. HashLink keeps
+  its 4 errors: it has no finalisers on Haxe objects.
+
+Checks after the fixes: conformance 275 PASS + 7 EXPECTED-FAILURE with the
+tcc, gcc -O2 and HashLink builds; `test/server.py` with the tcc build
+587/587; self-compile CPU time of the gcc -O2 build (`--interp --no-output
+--hxb`, min of 3, two rounds, loaded machine): 5.49/5.50 s before,
+5.46/5.29 s after. One earlier run with the pre-fix tcc binary stalled for
+15 minutes in misc on `eval/projects/Issue10871/Compiler/compile1.hxml`
+(the child compiler spinning); it did not recur in the three full misc runs
+since (tcc twice, gcc -O2) nor when run alone.
+
 ## C build of the port (hxc): green threads — 2026-10-09
 
 The hxc runtime has M:1 cooperative threads (`backend/rt/rt_thread.c`, see
