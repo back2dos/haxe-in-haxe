@@ -185,7 +185,7 @@ static inline void rt_set_ptr(void *obj, void **slot, void *val) {
 // can be hoisted above the calls that throw. setjmp is returns_twice, which
 // GCC treats conservatively. _setjmp does not save the signal mask.
 #include <setjmp.h>
-#if defined(__EMSCRIPTEN__) || defined(__TINYC__)
+#if defined(__EMSCRIPTEN__) || defined(__TINYC__) || defined(__SANITIZE_THREAD__) // TSan intercepts setjmp/longjmp
 #define RT_SETJMP(b) setjmp(b)
 #define RT_LONGJMP(b) longjmp(b, 1)
 #else

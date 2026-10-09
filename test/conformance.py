@@ -308,17 +308,42 @@ def main():
         names = [n for n in zipfile.ZipFile(ref_hxb).namelist() if n.endswith(".hxb")]
         target = ["--interp", "--no-output"] if any(n.startswith("eval/") for n in names) else ["--no-output"]
         roots = [n.split("/", 1)[1][:-4].replace("/", ".") for n in names]
+        words = list(case["args"])
+        for a in case["args"]:
+            if a.endswith(".hxml") and (cwd / a).is_file():
+                words += shlex.split((cwd / a).read_text(), comments=True)
+        cps = [a for i, a in enumerate(words) if i > 0 and words[i - 1] in ("-cp", "-p", "--class-path")] or ["."]
+        # one normalization per output directory: macro-context modules
+        # (macro/, eval/) load with --interp, the others for the cross target
+        groups = {}
+        for n in names:
+            groups.setdefault(n.split("/", 1)[0], []).append(n.split("/", 1)[1][:-4].replace("/", "."))
         def normalize(hxb, tag):
-            # the reference reads the archive (fresh variable IDs) and writes it again
-            norm = out / ("normalized-%s.hxb" % tag)
-            nc, _ = run([reference, "--hxb-lib", str(hxb), "-D", "disable-parallelism"] + target + roots + ["--hxb", str(norm)], ROOT, out / ("normalize-%s.log" % tag), env)
-            return norm if nc == 0 else None
+            # the reference reads the archive (fresh variable IDs) and writes it
+            # again; modules built by macros need the macro's source: then with
+            # the case's class paths too. Returns the normalized archives, or None.
+            norms = []
+            for prefix, group in sorted(groups.items()):
+                norm = out / ("normalized-%s-%s.hxb" % (tag, prefix))
+                gtarget = ["--interp", "--no-output"] if prefix in ("eval", "macro") else ["--no-output"]
+                cmd = [reference, "--hxb-lib", str(hxb), "-D", "disable-parallelism"] + gtarget + group + ["--hxb", str(norm)]
+                log = out / ("normalize-%s-%s.log" % (tag, prefix))
+                nc, _ = run(cmd, ROOT, log, env)
+                if nc != 0 and cps:
+                    nc, _ = run(cmd[:1] + sum([["-cp", c] for c in cps], []) + cmd[1:], cwd, log, env)
+                if nc != 0:
+                    normalize.failed = log
+                    return None
+                norms.append(norm)
+            return norms
         ref_norm = normalize(ref_hxb, "reference")
+        ref_consumes = None # whether the reference loads its own archive without the case's source
         runs = [("port", port_cmd, i) for i in range(opts.parallel)]
         if opts.parallel_reference:
             runs += [("reference", [reference], i) for i in range(opts.parallel)]
         raw_same = {"port": 0, "reference": 0}
         norm_same = {"port": 0, "reference": 0}
+        diffs = [] # runs that differ after normalizing (all runs go on)
         for who, cmd, i in runs:
             tag = "%s-%d" % (who, i)
             hxb = out / ("parallel-%s.hxb" % tag)
@@ -329,23 +354,30 @@ def main():
             if compare(ref_hxb, hxb) is None:
                 raw_same[who] += 1
             cc, _ = run([reference, "--hxb-lib", str(hxb)] + target + roots, ROOT, out / ("consume-%s.log" % tag), env)
-            if cc != 0 and ref_norm is not None:
+            if cc != 0 and ref_consumes is None:
+                ref_consumes = run([reference, "--hxb-lib", str(ref_hxb)] + target + roots, ROOT, out / "consume-reference.log", env)[0] == 0
+            if cc != 0 and ref_consumes:
                 return finish(status="FAIL", detail="reference cannot consume parallel %s archive %d: %s" % (who, i, first_error(out / ("consume-%s.log" % tag))))
             if ref_norm is None:
                 continue
             norm = normalize(hxb, tag)
             if norm is None:
-                return finish(status="FAIL", detail="reference cannot normalize parallel %s archive %d: %s" % (who, i, first_error(out / ("normalize-%s.log" % tag))))
-            diff = compare(ref_norm, norm)
+                return finish(status="FAIL", detail="reference cannot normalize parallel %s archive %d: %s" % (who, i, first_error(normalize.failed)))
+            diff = next((d for d in (compare(a, b) for a, b in zip(ref_norm, norm)) if d), None)
             if diff:
-                return finish(status="FAIL", detail="parallel %s run %d differs after normalizing: %s" % (who, i, diff))
+                diffs.append("%s run %d: %s" % (who, i, diff))
+                continue
             norm_same[who] += 1
         members = len(zipfile.ZipFile(ref_hxb).namelist())
         detail = "%d members; port: %d/%d runs identical after normalizing, %d raw-identical" % (members, norm_same["port"], opts.parallel, raw_same["port"])
         if opts.parallel_reference:
             detail += "; reference: %d/%d normalized, %d raw" % (norm_same["reference"], opts.parallel, raw_same["reference"])
         if ref_norm is None:
-            detail += " (no normalization: the reference cannot load its own archive without the case's source: %s)" % first_error(out / "normalize-reference.log")
+            detail += " (no normalization: the reference cannot load its own archive without the case's source: %s)" % first_error(normalize.failed)
+        if any(d.startswith("port") for d in diffs):
+            return finish(status="FAIL", detail=detail + "; differs after normalizing: " + " | ".join(diffs[:3]))
+        if diffs:
+            detail += "; the parallel reference itself differs: " + " | ".join(diffs[:2])
         return finish(status="PASS", detail=detail)
 
     results = []

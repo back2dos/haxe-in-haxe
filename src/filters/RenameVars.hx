@@ -187,14 +187,16 @@ class RenameVars {
 	public static function collectIgnoreBlock(rc:RenameContext, scope:RenameScope, e:TExpr, inBlock:Bool = false):Void {
 		switch e.eexpr { case TBlock(el): for (e in el) collectVars(rc, scope, e, inBlock); case _: collectVars(rc, scope, e, inBlock); }
 	}
-	static final trailingNumbers = ~/[0-9]+$/;
+	// Deviation: a fresh EReg per use; an EReg keeps its last match, and this
+	// runs on several threads at once (upstream's Str.regexp is immutable)
+	static inline function trailingNumbers():EReg return ~/[0-9]+$/;
 	public static function maybeRenameVar(rc:RenameContext, reserved:StringMap<Bool>, entry:{variable:TVar, overlaps:Overlaps}):Void {
 		var v = entry.variable;
 		inline function commit(name:String):Void {
 			v.vMeta = ([{meta:core.MetaList.StrictMeta.RealPath,exprs:[{expr:EConst(String(v.vName, SDoubleQuotes)), pos:Globals.nullPos}], pos:Globals.nullPos}]:core.Ast.Metadata).concat(v.vMeta);
 			v.vName = name;
 		}
-		if (v.vName.charAt(0) == core.Globals.genLocalPrefix.charAt(0)) commit("_g" + trailingNumbers.replace(v.vName.substr(1), ""));
+		if (v.vName.charAt(0) == core.Globals.genLocalPrefix.charAt(0)) commit("_g" + trailingNumbers().replace(v.vName.substr(1), ""));
 		var name = v.vName; var count = 0;
 		while (reserved.exists(name) || entry.overlaps.hasName(name)) { ++count; name = v.vName + count; }
 		commit(name); if (willBeReserved(rc, v)) reserve(reserved, v.vName);

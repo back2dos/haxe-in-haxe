@@ -40,10 +40,12 @@ class Threads {
 
 	static function lock() {
 		var l = new Lock();
-		var order = [];
+		var order = [], om = new Mutex();
 		for (i in 0...3)
 			Thread.create(() -> {
+				om.acquire(); // OS threads: concurrent pushes would race
 				order.push(i);
+				om.release();
 				l.release();
 			});
 		for (_ in 0...3) l.wait();
