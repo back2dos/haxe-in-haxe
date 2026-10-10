@@ -4,13 +4,13 @@ package backend;
 // compiler pipeline, then lowers the filtered program (the data an HXB
 // archive holds) to the shared IR and writes C: the files of <out>_hxc/
 // (files.txt lists the .c files to compile; HXC_CHUNK_KB sets the chunk
-// size, default 384) or, with HXC_SINGLE=1, one file <out>.c:
+// size, default 192) or, with HXC_SINGLE=1, one file <out>.c:
 //   node wbk.js <out> <haxe arguments...>
 class Main {
 	static function chunkKb():Int {
 		var v = Sys.getEnv("HXC_CHUNK_KB");
 		var n = v == null ? null : Std.parseInt(v);
-		return n == null || n <= 0 ? 384 : n;
+		return n == null || n <= 0 ? 192 : n;
 	}
 
 	// writes only the files whose content changed (their mtimes say what to

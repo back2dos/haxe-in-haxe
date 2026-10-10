@@ -21,7 +21,9 @@ class Build {
 		return lib;
 	}
 
-	public static function toC(archive:String, out:String, main:String, defines:Array<String>, stdPath:Array<String>):Int {
+	// single: one file <out>.c instead of the chunks of <out>_hxc/
+	public static function toC(archive:String, out:String, main:String, defines:Array<String>, stdPath:Array<String>, single = false):Int {
+		Sys.putEnv("HXC_SINGLE", single ? "1" : "0");
 		// The modules come from the archive. The std path must still be the one
 		// the program was typed with: DCE (rerun on the loaded modules) keeps the
 		// whole of every class whose file is outside the std path
@@ -38,7 +40,11 @@ class Build {
 
 	public static function toBinary(out:String, o:Options):Int {
 		var rt = lib + "rt/";
-		var files = [out + ".c"].concat([for (f in ["rt", "rt_dyn", "rt_std", "rt_str", "rt_sys", "rt_net", "rt_ssl", "rt_uv", "rt_thread", "rt_census"]) rt + f + ".c"]);
+		var rtFiles = [for (f in ["rt", "rt_dyn", "rt_std", "rt_str", "rt_sys", "rt_net", "rt_ssl", "rt_uv", "rt_thread", "rt_census"]) rt + f + ".c"];
+		// chunked output (<out>_hxc/files.txt) unless hxc.com wrote one file (-D hxc.single)
+		var chunks = out + "_hxc/";
+		var single = o.single == true;
+		var files = single ? [out + ".c"].concat(rtFiles) : rtFiles;
 		// slots are read as int32/double/pointer through casts: no strict aliasing
 		var flags = (o.debug ? ["-O0", "-g"] : ["-O2"]).concat(["-w", "-fno-strict-aliasing", "-I", rt]);
 		var libs = ["-lm"];
@@ -56,12 +62,84 @@ class Build {
 		if (o.ssl) libs = libs.concat(["-lmbedtls", "-lmbedx509", "-lmbedcrypto"]) else flags.push("-DHXC_NO_SSL");
 		if (o.uv) libs.push("-luv") else flags.push("-DHXC_NO_UV");
 		var parts = compiler.split(" ");
-		if (verbose) Sys.println("hxc: " + parts.concat(flags).concat(files).concat(libs).concat(["-o", out]).join(" "));
-		var code = Sys.command(parts[0], parts.slice(1).concat(flags).concat(files).concat(libs).concat(["-o", out]));
+		var code;
+		if (single) {
+			if (verbose) Sys.println("hxc: " + parts.concat(flags).concat(files).concat(libs).concat(["-o", out]).join(" "));
+			code = Sys.command(parts[0], parts.slice(1).concat(flags).concat(files).concat(libs).concat(["-o", out]));
+		} else {
+			var objs = compileChunks(parts, flags, chunks, rtFiles, rt, o.jobs);
+			if (objs == null) return 1;
+			if (verbose) Sys.println("hxc: " + parts.concat(flags).concat(["<" + objs.length + " objects>"]).concat(libs).concat(["-o", out]).join(" "));
+			code = Sys.command(parts[0], parts.slice(1).concat(flags).concat(objs).concat(libs).concat(["-o", out]));
+		}
 		// cosmocc's per-architecture binaries and symbols, next to the fat binary
 		if (code == 0 && o.isStatic && !o.debug)
 			for (f in [out + ".aarch64.elf", out + ".com.dbg"]) if (FileSystem.exists(f)) FileSystem.deleteFile(f);
 		return code;
+	}
+
+	// Compiles the chunks <dir>files.txt lists and the runtime, `jobs` at a time
+	// (default: the number of cores), into <dir>obj-<hash of the command>/,
+	// reusing objects newer than their source and the headers. Returns the
+	// objects, or null when a compilation failed.
+	static function compileChunks(cc:Array<String>, flags:Array<String>, dir:String, rtFiles:Array<String>, rt:String, jobs:Null<Int>):Null<Array<String>> {
+		var objDir = dir + "obj-" + haxe.crypto.Md5.encode(cc.concat(flags).join(" ")).substr(0, 12) + "/";
+		if (!FileSystem.exists(objDir)) FileSystem.createDirectory(objDir);
+		var mtime = (f:String) -> FileSystem.exists(f) ? FileSystem.stat(f).mtime.getTime() : -1.0;
+		var genHeaders = Math.max(mtime(dir + "hxc.h"), Math.max(mtime(rt + "rt.h"), mtime(rt + "rt_gc.h")));
+		var rtHeaders = Math.max(mtime(rt + "rt.h"), mtime(rt + "rt_gc.h"));
+		var objs = [], todo = [];
+		var sources = [for (f in sys.io.File.getContent(dir + "files.txt").split("\n")) if (f.trim() != "") {src: dir + f.trim(), headers: genHeaders}];
+		for (f in rtFiles)
+			sources.push({src: f, headers: rtHeaders});
+		for (s in sources) {
+			var o = objDir + haxe.io.Path.withoutDirectory(haxe.io.Path.withoutExtension(s.src)) + ".o";
+			objs.push(o);
+			var t = mtime(o);
+			if (t < 0 || t < mtime(s.src) || t < s.headers) todo.push({src: s.src, obj: o});
+		}
+		if (jobs == null || jobs < 1) jobs = cores();
+		if (verbose) Sys.println('hxc: compiling ${todo.length} of ${objs.length} files, $jobs at a time');
+		var failed = false;
+		var command = (t:{src:String, obj:String}) -> cc.concat(flags).concat(["-c", t.src, "-o", t.obj]);
+		if (Sys.systemName() == "Windows" || jobs == 1) {
+			for (t in todo)
+				if (!failed && Sys.command(cc[0], command(t).slice(1)) != 0) failed = true;
+		} else {
+			// at most `jobs` processes; output merged into stdout (`2>&1`), read when the oldest finishes
+			var running:Array<{p:Process, obj:String}> = [];
+			function wait() {
+				var r = running.shift();
+				var output = r.p.stdout.readAll().toString();
+				var code = r.p.exitCode();
+				r.p.close();
+				if (output != "") Sys.print(output);
+				if (code != 0) {
+					failed = true;
+					if (FileSystem.exists(r.obj)) FileSystem.deleteFile(r.obj);
+				}
+			}
+			for (t in todo) {
+				if (failed) break;
+				if (running.length >= jobs) wait();
+				running.push({p: new Process("sh", ["-c", 'exec "$$@" 2>&1', "sh"].concat(command(t))), obj: t.obj});
+			}
+			while (running.length > 0)
+				wait();
+		}
+		return failed ? null : objs;
+	}
+
+	static function cores():Int {
+		var env = Sys.getEnv("HXC_JOBS");
+		var n = env == null ? null : Std.parseInt(env);
+		if (n != null && n > 0) return n;
+		try {
+			var p = new Process("sh", ["-c", "nproc 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || sysctl -n hw.ncpu"]);
+			n = Std.parseInt(p.stdout.readAll().toString().trim());
+			p.close();
+		} catch (_:Dynamic) {}
+		return n != null && n > 0 ? n : 4;
 	}
 
 	static function findCc():String {
@@ -108,4 +186,6 @@ typedef Options = {
 	var debug:Bool;
 	var ssl:Bool;
 	var uv:Bool;
+	var ?single:Bool; // toC wrote one file
+	var ?jobs:Int; // parallel C compilations (default: $HXC_JOBS, else the number of cores)
 }

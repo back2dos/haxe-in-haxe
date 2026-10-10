@@ -22,7 +22,7 @@ class Run {
 			Sys.println("  haxe -lib hxc -main Main --custom-target hxc=bin/main");
 			Sys.println("  haxelib run hxc build.hxml          (haxe -lib hxc build.hxml)");
 			Sys.println("  haxelib run hxc setup-cosmocc       download cosmocc now\n");
-			Sys.println("  -D hxc.cc=<command>  -D hxc.static  -D hxc.debug  -D hxc.c-only  -D hxc.ssl  -D hxc.uv  -D hxc.keep-hxb");
+			Sys.println("  -D hxc.cc=<command>  -D hxc.static  -D hxc.debug  -D hxc.c-only  -D hxc.single  -D hxc.jobs=<n>  -D hxc.ssl  -D hxc.uv  -D hxc.keep-hxb");
 			return;
 		}
 		if (!hasOutput(args)) args = args.concat(["--custom-target", "hxc=bin/main"]);

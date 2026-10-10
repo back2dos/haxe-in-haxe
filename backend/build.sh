@@ -12,7 +12,7 @@
 # the objects of unchanged chunks (backend/tools/cc-chunks.sh: JOBS, CFLAGS;
 # CFLAGS=-DHXC_CONST_IDS folds the ids, CC="clang -O2 -flto=thin" for ThinLTO);
 # HXC_SINGLE=1 writes and compiles one file $OUT/prog.c instead; HXC_CHUNK_KB
-# sets the chunk size (default 384).
+# sets the chunk size (default 192).
 set -eu
 cd "$(dirname "$0")/.."
 HAXE=${HAXE:-haxe/haxe}

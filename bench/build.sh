@@ -27,17 +27,15 @@ for t in $targets; do
 		wasm) # the hxc C output (sh backend/build.sh port) built like site/build.sh's WebAssembly
 			# (wasm64, wasm exceptions), but for Node with direct file system access (NODERAWFS);
 			# needs em++ on PATH (. ~/emsdk/emsdk_env.sh)
-			C=bin/backend/hih/prog.c
+			# (the chunks of bin/backend/hih/prog_hxc, compiled in parallel by backend/tools/cc-chunks.sh)
 			F="-O2 -w -fno-strict-aliasing -fwasm-exceptions -sMEMORY64=1 -I backend/rt"
-			RT="rt rt_dyn rt_std rt_str rt_sys rt_net rt_ssl rt_uv rt_thread rt_census"
-			mkdir -p "$OUT/wasm/obj"
+			mkdir -p "$OUT/wasm"
 			# Emscripten's ENV doesn't inherit the process environment (HAXE_STD_PATH)
 			echo 'Module.preRun = [() => { for (const k in process.env) ENV[k] = process.env[k]; }];' > "$OUT/wasm/env.js"
-			em++ -x c++ $F -c "$C" -o "$OUT/wasm/obj/prog.o" &&
-			for f in $RT; do em++ -x c++ $F -DHXC_NO_NET -DHXC_NO_SSL -DHXC_NO_UV -c "backend/rt/$f.c" -o "$OUT/wasm/obj/$f.o" || exit 1; done &&
-			em++ $F -o "$OUT/wasm/hih.js" "$OUT/wasm/obj/prog.o" $(for f in $RT; do echo "$OUT/wasm/obj/$f.o"; done) \
-				-sENVIRONMENT=node -sNODERAWFS=1 --pre-js "$OUT/wasm/env.js" \
-				-sEXIT_RUNTIME=1 -sALLOW_MEMORY_GROWTH=1 -sINITIAL_MEMORY=64MB -sMAXIMUM_MEMORY=8GB -sSTACK_SIZE=8MB ;;
+			CC=em++ CFLAGS="-x c++ $F -DHXC_NO_NET -DHXC_NO_SSL -DHXC_NO_UV" LIBS= LDFLAGS="$F \
+				-sENVIRONMENT=node -sNODERAWFS=1 --pre-js $OUT/wasm/env.js \
+				-sEXIT_RUNTIME=1 -sALLOW_MEMORY_GROWTH=1 -sINITIAL_MEMORY=64MB -sMAXIMUM_MEMORY=8GB -sSTACK_SIZE=8MB" \
+				sh backend/tools/cc-chunks.sh bin/backend/hih/prog_hxc "$OUT/wasm/hih.js" ;;
 		*) echo "unknown target $t" >&2; exit 2 ;;
 	esac > "$OUT/build-$t.log" 2>&1
 	echo "$t exit=$? $(( $(date +%s) - start ))s"

@@ -22,7 +22,8 @@
 #
 # Needs: node, haxe/haxe (backend/build.sh), cosmocc on PATH (bench/COSMO.md),
 # git and patch (backend/tools/cosmo-deps.sh, once).
-# SKIP_GEN=1 reuses the generated C, SKIP_COM=1 reuses the binary, NO_DEPS=1
+# The C is generated in chunks ($B/hxc_hxc/) and compiled in parallel, reusing
+# unchanged objects (backend/tools/cc-chunks.sh). SKIP_GEN=1 reuses the generated C, SKIP_COM=1 reuses the binary, NO_DEPS=1
 # leaves mbedtls and libuv out (stubs that throw).
 # NATIVE_CC=clang (or gcc, tcc...) builds a package for this machine only, without
 # cosmocc: bin/hxc-native is compiled with "$NATIVE_CC -O2" (no mbedtls/libuv:
@@ -51,7 +52,7 @@ DEPS=${COSMO_DEPS:-bin/cosmo-deps}
 if [ -n "${NATIVE_CC:-}" ]; then
 	NO_DEPS=1
 	if [ -z "${SKIP_COM:-}" ] || [ ! -f "$B/hxc-native" ]; then
-		$NATIVE_CC -O2 -w -fno-strict-aliasing -DHXC_NO_SSL -DHXC_NO_UV -I backend/rt "$B/hxc.c" backend/rt/rt*.c -lm -o "$B/hxc-native"
+		CC="$NATIVE_CC -O2" CFLAGS="-w -fno-strict-aliasing -DHXC_NO_SSL -DHXC_NO_UV" sh backend/tools/cc-chunks.sh "$B/hxc_hxc" "$B/hxc-native"
 	fi
 elif [ -z "${NO_DEPS:-}" ]; then
 	sh backend/tools/cosmo-deps.sh "$DEPS"
@@ -64,7 +65,7 @@ fi
 if [ -n "${NATIVE_CC:-}" ]; then
 	:
 elif [ -z "${SKIP_COM:-}" ] || [ ! -f "$B/hxc.com" ]; then
-	cosmocc -O2 -w -fno-strict-aliasing $RT -I backend/rt "$B/hxc.c" backend/rt/rt*.c -lm $RT_LIBS -o "$B/hxc.com"
+	CC="cosmocc -O2" CFLAGS="-w -fno-strict-aliasing $RT" LIBS="-lm $RT_LIBS" sh backend/tools/cc-chunks.sh "$B/hxc_hxc" "$B/hxc.com"
 fi
 
 # 3. the package

@@ -9,12 +9,14 @@ using StringTools;
 
 // `-lib hxc` (extraParams.hxml) with `--custom-target hxc=<out>`: the user's
 // Haxe types the program and writes it as HXB; after generation, the bundled
-// compiler lowers that archive to <out>.c and a C compiler builds <out>.
+// compiler lowers that archive to C (<out>_hxc/) and a C compiler builds <out>.
 //
 //   -D hxc.cc=<command>   C compiler (default: $HXC_CC, else cc, gcc, clang, tcc)
 //   -D hxc.static         fully static, portable binary with cosmocc
 //   -D hxc.debug          -O0 -g
-//   -D hxc.c-only         stop after writing <out>.c
+//   -D hxc.c-only         stop after writing the C (<out>_hxc/, or <out>.c with hxc.single)
+//   -D hxc.single         one C file <out>.c instead of chunks compiled in parallel
+//   -D hxc.jobs=<n>       parallel C compilations (default: $HXC_JOBS, else the number of cores)
 //   -D hxc.ssl, hxc.uv    link mbedtls / libuv (the system's; with cosmocc, the package's cosmo/)
 //   -D hxc.keep-hxb       keep the intermediate archive (<out>.hxb.zip)
 //   -D hxc.verbose        print the commands
@@ -44,7 +46,8 @@ class Boot {
 			}
 			var dir = haxe.io.Path.directory(out);
 			if (dir != "" && !FileSystem.exists(dir)) FileSystem.createDirectory(dir);
-			var code = Build.toC(archive, out, main.pack.concat([main.name]).join("."), defines(), Compiler.getConfiguration().stdPath);
+			var code = Build.toC(archive, out, main.pack.concat([main.name]).join("."), defines(), Compiler.getConfiguration().stdPath,
+				Context.defined("hxc.single"));
 			if (!keep) FileSystem.deleteFile(archive);
 			if (code != 0) {
 				// HXB is tied to the compiler that writes it: the archive must come from the Haxe hxc.com was built from
@@ -59,7 +62,9 @@ class Boot {
 				isStatic: Context.defined("hxc.static"),
 				debug: Context.defined("hxc.debug"),
 				ssl: Context.defined("hxc.ssl"),
-				uv: Context.defined("hxc.uv")
+				uv: Context.defined("hxc.uv"),
+				single: Context.defined("hxc.single"),
+				jobs: Context.defined("hxc.jobs") ? Std.parseInt(Context.definedValue("hxc.jobs")) : null
 			});
 			if (code != 0) Context.fatalError("hxc: C compilation failed", Context.currentPos());
 		});
