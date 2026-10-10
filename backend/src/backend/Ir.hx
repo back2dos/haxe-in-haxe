@@ -172,9 +172,15 @@ class FuncInfo {
 	public var lambda:Null<LambdaInfo>; // closure body: args[0] is the closure
 	public var dispatchSel:Int = -1;
 	public var hasTry:Bool = false;
+	// the Haxe module the function comes from (dot path): EmitC groups the
+	// functions of a module into one C file
+	public var module:String;
+	public var nlambdas = 0; // closures created in this function (their names: <name>__lambda<k>)
 
-	public function new(name)
+	public function new(name, module) {
 		this.name = name;
+		this.module = module;
+	}
 }
 
 enum Ex {

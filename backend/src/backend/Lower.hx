@@ -105,6 +105,13 @@ class Lower {
 	public static function nativeName(c:TClass):String
 		return cname(c.clPath.pack, c.clPath.name);
 
+	public static function moduleOf(c:TClass):String
+		return core.Globals.sTypePath(c.clModule.mPath);
+
+	// the name of the next closure created in `owner`: stable while other functions change
+	public static function lambdaName(owner:FuncInfo):String
+		return owner.name + "__lambda" + owner.nlambdas++;
+
 	public static function isCore(c:TClass, name:String):Bool
 		return c.clPath.pack.length == 0 && c.clPath.name == name;
 
@@ -319,7 +326,7 @@ class Lower {
 		if (fi != null) return fi;
 		var tf = funcOf(cf);
 		if (tf == null) fail("static " + cf.cfName + " is not a function");
-		fi = new FuncInfo(nativeName(c) + "_" + cf.cfName);
+		fi = new FuncInfo(nativeName(c) + "_" + cf.cfName, moduleOf(c));
 		funcs.set(cf, fi);
 		prog.funcs.push(fi);
 		signature(fi, tf, null);
@@ -349,7 +356,7 @@ class Lower {
 		var tf = funcOf(cf);
 		if (tf == null) fail("method " + cf.cfName + " is not a function");
 		var ci = classInfo(c);
-		fi = new FuncInfo(nativeName(c) + "_" + cf.cfName);
+		fi = new FuncInfo(nativeName(c) + "_" + cf.cfName, moduleOf(c));
 		fi.selfClass = ci;
 		funcs.set(cf, fi);
 		ci.methods.set(cf.cfName, fi);
@@ -382,7 +389,7 @@ class Lower {
 		var fi = ctors.get(c);
 		if (fi != null) return fi;
 		var ci = classInfo(c);
-		fi = new FuncInfo(nativeName(c) + "_new");
+		fi = new FuncInfo(nativeName(c) + "_new", moduleOf(c));
 		ci.ctor = fi;
 		ctors.set(c, fi);
 		prog.funcs.push(fi);
@@ -399,8 +406,11 @@ class Lower {
 		return fi;
 	}
 
-	public function newLambda(sig:SigInfo, captures:Array<Local>, body:FnLower->Void):LambdaInfo {
-		var fi = new FuncInfo("lambda" + prog.lambdas.length);
+	// `name` and `module`: a name that stays the same when unrelated code changes
+	// (Lower.lambdaName for closures in a function body, else derived from what
+	// the closure forwards to) and the module whose C file holds it
+	public function newLambda(sig:SigInfo, captures:Array<Local>, body:FnLower->Void, name:String, module:String):LambdaInfo {
+		var fi = new FuncInfo(name, module);
 		var li = new LambdaInfo(prog.lambdas.length, sig, captures, fi);
 		fi.lambda = li;
 		fi.args.push(new Local(0, "clos", TRef(RClos(sig))));
@@ -436,7 +446,7 @@ class Lower {
 		var li = staticClosures.get(f);
 		if (li != null) return li;
 		var sig = prog.sig([for (a in f.args) a.ty], f.ret);
-		li = newLambda(sig, [], fl -> fl.forward(f, null));
+		li = newLambda(sig, [], fl -> fl.forward(f, null), f.name + "__sclos", f.module);
 		staticClosures.set(f, li);
 		return li;
 	}
@@ -447,7 +457,7 @@ class Lower {
 	public function hostClosure(name:String, sig:SigInfo, ?self:Ty):LambdaInfo {
 		var li = hostClosures.get(name);
 		if (li != null) return li;
-		li = newLambda(sig, self == null ? [] : [new Local(-1, "self", self)], fl -> fl.forwardHost(name));
+		li = newLambda(sig, self == null ? [] : [new Local(-1, "self", self)], fl -> fl.forwardHost(name), name + "__hclos", "_closures");
 		hostClosures.set(name, li);
 		return li;
 	}
@@ -457,7 +467,7 @@ class Lower {
 	public function ctorClosure(ci:CtorInfo, sig:SigInfo):LambdaInfo {
 		var li = ctorClosures.get(ci);
 		if (li != null) return li;
-		li = newLambda(sig, [], fl -> fl.forwardCtor(ci));
+		li = newLambda(sig, [], fl -> fl.forwardCtor(ci), ci.en.cname + "_" + ci.name + "__cclos", "_closures");
 		ctorClosures.set(ci, li);
 		return li;
 	}
@@ -465,13 +475,13 @@ class Lower {
 	// a closure over `this` calling a method (obj.method used as a value)
 	var boundClosures = new Map<FuncInfo, LambdaInfo>();
 
-	public function boundClosure(f:FuncInfo, dispatch:Null<{sel:Int, sig:SigInfo}>):LambdaInfo {
+	public function boundClosure(f:FuncInfo, dispatch:Null<{sel:Int, sig:SigInfo}>, owner:FuncInfo):LambdaInfo {
 		var li = boundClosures.get(f);
 		if (li != null && dispatch == null) return li;
 		var args = [for (i in 1...f.args.length) f.args[i].ty];
 		var sig = prog.sig(args, f.ret);
 		var self = new Local(-1, "self", TRef(RObj(root)));
-		li = newLambda(sig, [self], fl -> fl.forward(f, dispatch));
+		li = newLambda(sig, [self], fl -> fl.forward(f, dispatch), dispatch == null ? f.name + "__bound" : lambdaName(owner), dispatch == null ? f.module : owner.module);
 		if (dispatch == null) boundClosures.set(f, li);
 		return li;
 	}
@@ -484,7 +494,7 @@ class Lower {
 		var li = adapters.get(key);
 		if (li != null) return li;
 		var inner = new Local(-1, "inner", TRef(RClos(from)));
-		li = newLambda(to, [inner], fl -> fl.adapt(from));
+		li = newLambda(to, [inner], fl -> fl.adapt(from), "adapt__" + from.key + "__" + to.key, "_closures");
 		adapters.set(key, li);
 		return li;
 	}
@@ -511,7 +521,7 @@ class Lower {
 	function initClass(c:TClass) {
 		if (initialized.exists(c)) return;
 		initialized.set(c, true);
-		var fi = new FuncInfo(nativeName(c) + "__init");
+		var fi = new FuncInfo(nativeName(c) + "__init", moduleOf(c));
 		prog.funcs.push(fi);
 		prog.inits.push(fi);
 		initOf.set(fi, c);

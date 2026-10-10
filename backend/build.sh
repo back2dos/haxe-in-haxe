@@ -8,6 +8,11 @@
 #   CC="cosmocc -O2" BIN=hih.com sh backend/build.sh port
 #   CC="cosmocc -O2" RT_DEPS=bin/cosmo-deps BIN=hih.com sh backend/build.sh port   (with mbedtls/libuv: backend/tools/cosmo-deps.sh)
 #   HXFLAGS="-D retain" VARIANT=-retain sh backend/build.sh
+# The C is written in chunks to $OUT/prog_hxc/ and compiled in parallel, reusing
+# the objects of unchanged chunks (backend/tools/cc-chunks.sh: JOBS, CFLAGS;
+# CFLAGS=-DHXC_CONST_IDS folds the ids, CC="clang -O2 -flto=thin" for ThinLTO);
+# HXC_SINGLE=1 writes and compiles one file $OUT/prog.c instead; HXC_CHUNK_KB
+# sets the chunk size (default 384).
 set -eu
 cd "$(dirname "$0")/.."
 HAXE=${HAXE:-haxe/haxe}
@@ -23,6 +28,9 @@ else
 	BIN=prog_c
 fi
 mkdir -p "$OUT"
+# EMXX builds from the single file
+if [ -n "${EMXX:-}" ]; then HXC_SINGLE=1; fi
+export HXC_SINGLE=${HXC_SINGLE:-0}
 # backend/std: the hxc target's std (backend/std-hxc) with the Eval originals for macros
 # (given last: the last class path wins over earlier ones, e.g. bench/js-shims)
 python3 backend/tools/mkstd.py
@@ -41,7 +49,13 @@ if [ -n "${RT_DEPS:-}" ]; then
 	RT_INC="-I$RT_DEPS/include"
 	RT_LIBS="-L$RT_DEPS/lib -lmbedtls -lmbedx509 -lmbedcrypto -luv ${RT_LIBS:-}"
 fi
-$CC -w -fno-strict-aliasing ${RT_NO--DHXC_NO_SSL -DHXC_NO_UV} $RT_INC -I backend/rt "$OUT/prog.c" backend/rt/rt*.c -lm ${RT_LIBS:-} -o "$OUT/$BIN"
+RT_FLAGS="-w -fno-strict-aliasing ${RT_NO--DHXC_NO_SSL -DHXC_NO_UV} $RT_INC -I backend/rt"
+if [ "${HXC_SINGLE:-0}" != 0 ]; then
+	$CC $RT_FLAGS "$OUT/prog.c" backend/rt/rt*.c -lm ${RT_LIBS:-} -o "$OUT/$BIN"
+else
+	# chunks in parallel, unchanged ones reused (backend/tools/cc-chunks.sh)
+	CC="$CC" CFLAGS="$RT_FLAGS ${CFLAGS:-}" LIBS="-lm ${RT_LIBS:-}" sh backend/tools/cc-chunks.sh "$OUT/prog_hxc" "$OUT/$BIN"
+fi
 # linear-memory wasm, compiled as C++ so try/catch uses wasm exception handling
 if [ -n "${EMXX:-}" ]; then
 	for f in backend/rt/rt*.c; do emcc -O2 -w -c -fwasm-exceptions -DHXC_NO_NET -DHXC_NO_SSL -DHXC_NO_UV -I backend/rt "$f" -o "$OUT/$(basename "$f" .c)_wasm.o"; done

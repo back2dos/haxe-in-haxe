@@ -902,11 +902,11 @@ class FnLower {
 			var impl = l.lookupMethod(c, cf.cfName);
 			var f = impl != null ? l.method(impl.cls, impl.field) : null;
 			if (f == null) fail("closure of an abstract method", e);
-			li = l.boundClosure(f, {sel: l.selector(cf.cfName, d), sig: d});
+			li = l.boundClosure(f, {sel: l.selector(cf.cfName, d), sig: d}, fi);
 		} else {
 			var impl = l.lookupMethod(c, cf.cfName);
 			if (impl == null) fail("no implementation of " + cf.cfName, e);
-			li = l.boundClosure(l.method(impl.cls, impl.field), null);
+			li = l.boundClosure(l.method(impl.cls, impl.field), null, fi);
 		}
 		var x = temp(TRef(RClos(li.sig)), ENewClos(li, [o]));
 		return coerce(x, TRef(RClos(li.sig)), rt);
@@ -1369,7 +1369,7 @@ class FnLower {
 			case _: l.getProgram().sig([for (a in tf.tfArgs) ty(a.variable.vType)], ty(tf.tfType));
 		};
 		var outerBoxed = boxed;
-		var li = l.newLambda(sig, captureLocals, fl -> fl.runLambda(tf, copyMap(outerBoxed), caps));
+		var li = l.newLambda(sig, captureLocals, fl -> fl.runLambda(tf, copyMap(outerBoxed), caps), Lower.lambdaName(fi), fi.module);
 		return ENewClos(li, capVals);
 	}
 

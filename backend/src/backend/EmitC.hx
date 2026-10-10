@@ -14,22 +14,52 @@ class EmitC {
 	var refSlot:Map<Local, Int>;
 	var loops:Array<{id:Int, tries:Int}>;
 	var tries:Array<String>;
-	var nextLabel = 0;
-	var nextCache = 0;
-	var strings = new Map<String, Int>();
-	var nstrings = 0;
-	var stringDefs = new StringBuf();
+	var nextLabel = 0; // per function
+	var nextCache = 0; // per function: its inline caches are a static array `ic_` in the function
+	var strNames = new Map<String, String>(); // literal -> S_<hash of its content>
+	var strOrder:Array<String> = [];
+	var strByName = new Map<String, String>();
 	var hostProtos = new Map<String, String>(); // runtime functions not declared in rt.h
 	var hostOrder:Array<String> = [];
 	var fids = new Map<String, Int>();
 	var fieldNames:Array<String> = [];
 	var cnames = new Map<FuncInfo, String>();
 	var usedCNames = new Map<String, Bool>();
+	var byCName = new Map<String, FuncInfo>();
 	var types:Array<TypeEntry> = [];
 	var boundTypes = new Map<Int, Int>(); // sig -> type index of its bound-method closures
 
+	// Function bodies refer to program-wide numbers (type indices, field ids,
+	// signature ids, globals, dispatch selectors) by name: TY_*, FID_*, SIG_*,
+	// GI_* (index into rt_globals), G_* (scalar globals), DSP_* (dispatch rows),
+	// S_* (string literals, named by a hash of their content). Names stay the
+	// same when unrelated code changes, so with chunked output (emitChunks) an
+	// edit changes few C files. The numbers are defined once: `#define`s in
+	// ids.h (HXC_CONST_IDS, folded into the code like literals) or const
+	// globals in data.c (the default for chunks: no file but data.c depends
+	// on them).
+	var ids = new Map<String, Int>(); // id name -> value
+	var idOrder:Array<String> = [];
+	var typeNames:Array<String> = []; // type index -> C expression (program types: TY_* ids)
+	var fidNames = new Map<String, String>();
+	var sigNames:Array<String> = [];
+	var globalNames:Array<String> = [];
+	var selNames:Array<String> = [];
+	var refs:Refs; // what the function being emitted refers to
+	var dataRefs = new Refs(); // functions the data tables refer to
+	var single = true;
+
+	// one C file (the whole program, all functions static)
 	public static function emit(p:Program):String
-		return new EmitC(p).run();
+		return new EmitC(p).runSingle();
+
+	// chunked output: hxc.h (program-independent), ids.h, strings.c, data.c and
+	// one file per group of modules of about `chunkBytes` of C (see `pack`).
+	public static function emitChunks(p:Program, chunkBytes:Int):Array<{name:String, content:String}> {
+		var e = new EmitC(p);
+		e.single = false;
+		return e.runChunks(chunkBytes);
+	}
 
 	function new(p)
 		this.p = p;
@@ -64,17 +94,105 @@ class EmitC {
 		return f;
 	}
 
+	// a field id in function bodies
+	function fidRef(name:String):String {
+		fid(name);
+		return useId(fidNames.get(name));
+	}
+
+	function useId(n:String):String {
+		refs.ids.set(n, true);
+		return n;
+	}
+
+	function typeRef(tindex:Int):String
+		return tindex < T_FIRST ? Std.string(tindex) : useId(typeNames[tindex]);
+
+	function sigRef(s:SigInfo):String
+		return useId(sigNames[s.id]);
+
+	function globalRef(g:Int):String {
+		if (Ir.isRef(p.globals[g].ty)) return 'rt_globals[${useId(globalNames[g])}]';
+		refs.globals.set(g, true);
+		return "G_" + globalNames[g].substr(3);
+	}
+
+	function funcRef(f:FuncInfo):String {
+		var n = cname(f);
+		refs.funcs.set(n, true);
+		return n;
+	}
+
 	function str(s:String):String {
-		var id = strings.get(s);
-		if (id == null) {
-			id = nstrings++;
-			strings.set(s, id);
-			var units = [for (i in 0...s.length) s.charCodeAt(i)];
-			var nslots = Std.int((8 + 2 * units.length + 7) / 8);
-			units.push(0);
-			stringDefs.add('static struct { uint64_t h; int32_t len, hash; uint16_t c[${units.length}]; } S$id = {MKHDR($nslots, K_RAW, T_STRING), ${s.length}, 0, {${units.join(",")}}};\n');
+		var n = strNames.get(s);
+		if (n == null) {
+			// the hash of the UTF-16 units (an ASCII rendering: injective)
+			n = "S_" + haxe.crypto.Md5.encode([for (i in 0...s.length) StringTools.hex(s.charCodeAt(i))].join(",")).substr(0, 16);
+			if (strByName.exists(n)) throw "string literal hash collision: " + n;
+			strByName.set(n, s);
+			strNames.set(s, n);
+			strOrder.push(s);
 		}
-		return '((void *)&S$id.len)';
+		refs.strs.set(n, true);
+		return '((void *)&$n.len)';
+	}
+
+	function strDef(s:String):String {
+		var units = [for (i in 0...s.length) s.charCodeAt(i)];
+		var nslots = Std.int((8 + 2 * units.length + 7) / 8);
+		units.push(0);
+		return '${single ? "static " : ""}struct { uint64_t h; int32_t len, hash; uint16_t c[${units.length}]; } ${strNames.get(s)} = {MKHDR($nslots, K_RAW, T_STRING), ${s.length}, 0, {${units.join(",")}}};\n';
+	}
+
+	// C names for keys: `prefix` + the key as an identifier; keys mapping to the
+	// same identifier get a suffix by their sorted rank. Values become ids.
+	function nameIds(prefix:String, keys:Array<String>, values:Null<Array<Int>>):Array<String> {
+		var cands = [for (k in keys) prefix + ident(k)];
+		var groups = new Map<String, Array<String>>();
+		for (i in 0...keys.length) {
+			var g = groups.get(cands[i]);
+			if (g == null) groups.set(cands[i], g = []);
+			g.push(keys[i]);
+		}
+		var names = [];
+		for (i in 0...keys.length) {
+			var g = groups.get(cands[i]);
+			var n = cands[i];
+			if (g.length > 1) {
+				g.sort((a, b) -> a < b ? -1 : a > b ? 1 : 0);
+				n += "_" + g.indexOf(keys[i]);
+			}
+			names.push(n);
+			if (values != null) {
+				if (ids.exists(n)) throw "duplicate C name " + n;
+				ids.set(n, values[i]);
+				idOrder.push(n);
+			}
+		}
+		return names;
+	}
+
+	function assignNames() {
+		var keys = [], vals = [];
+		for (i in T_FIRST...types.length) {
+			keys.push(types[i].key);
+			vals.push(i);
+		}
+		var tn = nameIds("TY_", keys, vals);
+		typeNames = [for (i in 0...types.length) i < T_FIRST ? Std.string(i) : tn[i - T_FIRST]];
+		var fn = nameIds("FID_", fieldNames, [for (i in 0...fieldNames.length) i]);
+		for (i in 0...fieldNames.length)
+			fidNames.set(fieldNames[i], fn[i]);
+		sigNames = nameIds("SIG_", [for (s in p.sigs) s.key], [for (s in p.sigs) s.id]);
+		globalNames = nameIds("GI_", [for (g in p.globals) g.name], null);
+		// reference globals are slots of rt_globals (GI_*: the index); scalar ones are variables (G_*)
+		for (i in 0...p.globals.length)
+			if (Ir.isRef(p.globals[i].ty)) {
+				if (ids.exists(globalNames[i])) throw "duplicate C name " + globalNames[i];
+				ids.set(globalNames[i], i);
+				idOrder.push(globalNames[i]);
+			}
+		selNames = nameIds("DSP_", [for (s in p.selectors) s.name], null);
 	}
 
 	// ---- types
@@ -121,8 +239,9 @@ class EmitC {
 		return types.length - 1;
 	}
 
-	static function entry(name:String, tk:String, slots:Array<Null<Ty>>):TypeEntry
+	static function entry(name:String, tk:String, slots:Array<Null<Ty>>, key:String):TypeEntry
 		return {
+			key: key,
 			name: name,
 			tk: tk,
 			sup: -1,
@@ -169,29 +288,29 @@ class EmitC {
 		var rtNames = ["None", "String", "Int", "Float", "Bool", "Array", "ArrayData", "ArrayData", "haxe.io.Bytes", "haxe.io.BytesBuffer", "StringBuf", "Ref", "Ref", "Ref", "Class", "Overflow", "Native", "ArrayIterator"];
 		var rtSlots:Array<Array<Null<Ty>>> = [[], [], [TI32], [TF64], [TBool], [TI32, TRef(RAny)], [], [], [], [TI32, TRef(RAny)], [TI32, TRef(RAny)], [TRef(RAny)], [TI32], [TF64], [TI32], [], [], [TRef(RAny), TI32]];
 		for (i in 0...T_FIRST)
-			addType(entry(i < rtNames.length ? rtNames[i] : "Reserved", "TK_RUNTIME", i < rtSlots.length ? rtSlots[i] : []));
+			addType(entry(i < rtNames.length ? rtNames[i] : "Reserved", "TK_RUNTIME", i < rtSlots.length ? rtSlots[i] : [], "rt" + i));
 		for (c in p.classes) {
 			var slots:Array<Null<Ty>> = [];
 			c.locs = layout(slots, [for (f in c.fields) f.ty]);
 			c.nslots = slots.length;
-			var t = entry(c.name, "TK_CLASS", slots);
+			var t = entry(c.name, "TK_CLASS", slots, c.name);
 			t.fields = [for (i in 0...c.fields.length) {name: c.fields[i].name, slot: c.locs[i], ty: c.fields[i].ty}];
 			c.tindex = addType(t);
 		}
 		for (c in p.classes)
 			types[c.tindex].sup = c.sup == null ? -1 : c.sup.tindex;
 		for (c in p.interfaces)
-			c.tindex = addType(entry(c.name, "TK_INTERFACE", []));
+			c.tindex = addType(entry(c.name, "TK_INTERFACE", [], c.name));
 		for (c in p.classes)
 			types[c.tindex].ifaces = [for (i in c.ifaces) i.tindex];
 		for (e in p.enums) {
-			var et = entry(e.name, "TK_ENUM", []);
+			var et = entry(e.name, "TK_ENUM", [], e.name);
 			et.tag = e.ctors.length;
 			e.tindex = addType(et);
 			for (c in e.ctors) {
 				// no tag slot: the constructor is the type index (rt.h)
 				var slots:Array<Null<Ty>> = [for (pt in c.params) pt];
-				var t = entry(c.name, "TK_CTOR", slots);
+				var t = entry(c.name, "TK_CTOR", slots, e.name + "." + c.name);
 				t.sup = e.tindex;
 				t.tag = c.tag;
 				t.fields = [for (i in 0...c.params.length) {name: c.paramNames[i], slot: at(i, c.params[i]), ty: c.params[i]}];
@@ -203,7 +322,7 @@ class EmitC {
 			var slots:Array<Null<Ty>> = [TRef(RAny)];
 			s.locs = layout(slots, [for (f in s.fields) f.ty]);
 			s.nslots = slots.length;
-			var t = entry("{}", "TK_ANON", slots);
+			var t = entry("{}", "TK_ANON", slots, "anon." + haxe.crypto.Md5.encode([for (f in s.fields) f.name + ":" + Ir.repr(f.ty)].join(",")).substr(0, 16));
 			t.fields = [for (i in 0...s.fields.length) {name: s.fields[i].name, slot: s.locs[i], ty: s.fields[i].ty}];
 			s.tindex = addType(t);
 		}
@@ -211,7 +330,7 @@ class EmitC {
 			var slots:Array<Null<Ty>> = [TI32];
 			for (c in l.captures)
 				slots.push(c.ty);
-			var t = entry("<closure>", "TK_CLOSURE", slots);
+			var t = entry("<closure>", "TK_CLOSURE", slots, "clos." + cname(l.fn));
 			t.sup = l.sig.id;
 			l.tindex = addType(t);
 		}
@@ -238,7 +357,7 @@ class EmitC {
 		];
 		// one bound-method closure type per signature: code, this, method
 		for (s in p.sigs) {
-			var t = entry("<bound>", "TK_BOUND", [TI32, TRef(RAny), TI32]);
+			var t = entry("<bound>", "TK_BOUND", [TI32, TRef(RAny), TI32], "bound." + s.key);
 			t.sup = s.id;
 			boundTypes.set(s.id, addType(t));
 		}
@@ -367,26 +486,57 @@ class EmitC {
 
 	// ---- output
 
-	function run():String {
+	// names, types, field ids; then every function body (with what it refers to)
+	var bodies = new Map<FuncInfo, {text:String, refs:Refs}>();
+
+	function prepare() {
 		for (f in p.funcs)
-			cname(f);
+			byCName.set(cname(f), f);
 		assignTypes();
 		collectNames();
-		var code = new StringBuf();
+		assignNames();
 		var saved = b;
-		b = code;
-		for (f in p.funcs)
+		for (f in p.funcs) {
+			b = new StringBuf();
+			refs = new Refs();
 			func(f);
+			bodies.set(f, {text: b.toString(), refs: refs});
+		}
 		b = saved;
+	}
 
+	function runSingle():String {
+		prepare();
 		b.add("// Generated by backend/ (EXPERIMENTAL)\n#include \"rt.h\"\n#include <stdio.h>\n#include <math.h>\n\n");
 		b.add(PRELUDE);
+		b.add(idsHeader());
 		b.add('const char *const rt_field_names[] = {${[for (n in fieldNames) cstr(n)].join(", ")}};\nconst int rt_nfield_names = ${fieldNames.length};\n');
-		b.add(stringDefs.toString());
+		for (s in strOrder)
+			b.add(strDef(s));
 		for (n in hostOrder)
 			b.add(hostProtos.get(n) + ";\n");
 		for (f in p.funcs)
-			b.add(proto(f) + ";\n");
+			b.add(proto(f, true) + ";\n");
+		b.add(data());
+		for (f in p.funcs)
+			b.add(proto(f, true) + " " + bodies.get(f).text);
+		b.add(mainBody());
+		return b.toString();
+	}
+
+	// #defines of the ids (single file, ids.h)
+	function idsHeader():String {
+		var r = new StringBuf();
+		for (n in idOrder)
+			r.add('#define $n ${ids.get(n)}\n');
+		return r.toString();
+	}
+
+	// tables and globals: everything but the function bodies and main
+	function data():String {
+		var saved = b;
+		b = new StringBuf();
+		var st = single ? "static " : "";
 		for (s in p.sigs)
 			b.add(sigFunctions(s));
 		b.add('const rt_dyncall rt_dyncalls[] = {${[for (s in p.sigs) "DYN" + s.id].join(", ")}};\n');
@@ -394,33 +544,208 @@ class EmitC {
 		b.add('void *const rt_bound_tramps[] = {${[for (s in p.sigs) "(void *)BT" + s.id].join(", ")}};\n');
 		b.add('const int32_t rt_bound_types[] = {${[for (s in p.sigs) boundTypes.get(s.id)].join(", ")}};\n');
 		for (i in 0...p.globals.length)
-			if (!Ir.isRef(p.globals[i].ty)) b.add('static ${cty(p.globals[i].ty)} G$i; // ${p.globals[i].name}\n');
+			if (!Ir.isRef(p.globals[i].ty)) b.add('$st${cty(p.globals[i].ty)} ${scalarGlobal(i)}; // ${p.globals[i].name}\n');
 		emitTypes();
 		var nc = p.classes.length;
-		if (p.selectors.length > 0) {
-			b.add('static void *const dispatch[${p.selectors.length}][$nc] = {\n');
-			for (s in 0...p.selectors.length) {
-				var row = [];
-				for (c in p.classes) {
-					var m = c.findMethod(p.selectors[s].name);
-					row.push(m != null && m.dispatchSel == s ? "(void *)" + cname(m) : "0");
-				}
-				b.add('{${row.join(", ")}},\n');
+		for (s in 0...p.selectors.length) {
+			var row = [];
+			for (c in p.classes) {
+				var m = c.findMethod(p.selectors[s].name);
+				row.push(m != null && m.dispatchSel == s ? "(void *)" + dataFunc(m) : "0");
 			}
-			b.add("};\n");
+			b.add('${single ? "static " : "extern "}void *const ${selNames[s]}[$nc] = {${row.join(", ")}};\n');
 		}
-		b.add('static rt_icache IC[${nextCache + 1}];\n\n');
-		b.add(code.toString());
-		b.add('static void hx_main_body(void) {\n');
+		var r = b.toString();
+		b = saved;
+		return r;
+	}
+
+	function scalarGlobal(g:Int):String
+		return "G_" + globalNames[g].substr(3);
+
+	function dataFunc(f:FuncInfo):String {
+		var n = cname(f);
+		dataRefs.funcs.set(n, true);
+		return n;
+	}
+
+	function mainBody():String {
+		var r = new StringBuf();
+		r.add('static void hx_main_body(void) {\n');
 		for (i in 0...p.globals.length) {
 			var c = p.globals[i].init;
-			if (c != null) b.add('\trt_globals[$i] = rt_alloc(1, ${c.tindex}, K_OBJ);\n');
+			if (c != null) r.add('\trt_globals[$i] = rt_alloc(1, ${c.tindex}, K_OBJ);\n');
 		}
 		for (f in p.inits)
-			b.add('\t${cname(f)}();\n');
-		b.add('\t${cname(p.main)}();\n}\n');
-		b.add('int main(int argc, char **argv) {\n\trt_init(${p.globals.length}, argc, argv);\n\trt_run_main(hx_main_body);\n\treturn 0;\n}\n');
-		return b.toString();
+			r.add('\t${dataFunc(f)}();\n');
+		r.add('\t${dataFunc(p.main)}();\n}\n');
+		r.add('int main(int argc, char **argv) {\n\trt_init(${p.globals.length}, argc, argv);\n\trt_run_main(hx_main_body);\n\treturn 0;\n}\n');
+		return r.toString();
+	}
+
+	// ---- chunked output
+
+	static final HEADER = "// Generated by backend/ (EXPERIMENTAL): shared by every C file of the program
+#pragma once
+#include \"rt.h\"
+#include <stdio.h>
+#include <math.h>
+// a string literal (strings.c defines each with its exact length)
+typedef struct { uint64_t h; int32_t len, hash; uint16_t c[1]; } hx_slit;
+// HXC_CONST_IDS: the program's ids are #defines (ids.h), folded into the code
+// like literals, and every C file depends on ids.h; else they are const
+// globals defined in data.c and only data.c changes when they do
+#ifdef HXC_CONST_IDS
+#include \"ids.h\"
+#define ID(x)
+#else
+#define ID(x) extern const int32_t x;
+#endif
+";
+
+	function runChunks(chunkBytes:Int):Array<{name:String, content:String}> {
+		prepare();
+		var files = [];
+		files.push({name: "hxc.h", content: HEADER + PRELUDE});
+		files.push({name: "ids.h", content: "// Generated by backend/ (EXPERIMENTAL): the program's ids for HXC_CONST_IDS builds\n" + idsHeader()});
+		var sb = new StringBuf();
+		sb.add("// Generated by backend/ (EXPERIMENTAL): string literals\n#include \"hxc.h\"\n");
+		var sorted = strOrder.copy();
+		sorted.sort((x, y) -> cmp(strNames.get(x), strNames.get(y)));
+		for (s in sorted)
+			sb.add(strDef(s));
+		files.push({name: "strings.c", content: sb.toString()});
+		var dataText = data() + mainBody();
+		var chunks = packChunks(chunkBytes);
+		// a function stays static unless the data tables or another chunk refer to it
+		var chunkOf = new Map<String, Int>();
+		for (i in 0...chunks.length)
+			for (f in chunks[i].funcs)
+				chunkOf.set(cname(f), i);
+		var exported = new Map<String, Bool>();
+		for (n in dataRefs.funcs.keys())
+			exported.set(n, true);
+		for (i in 0...chunks.length)
+			for (f in chunks[i].funcs)
+				for (n in bodies.get(f).refs.funcs.keys())
+					if (chunkOf.get(n) != i) exported.set(n, true);
+		var d = new StringBuf();
+		d.add("// Generated by backend/ (EXPERIMENTAL): tables, globals and main\n#include \"hxc.h\"\n");
+		d.add('const char *const rt_field_names[] = {${[for (n in fieldNames) cstr(n)].join(", ")}};\nconst int rt_nfield_names = ${fieldNames.length};\n');
+		var dn = [for (n in dataRefs.funcs.keys()) if (byCName.exists(n)) n];
+		dn.sort(cmp);
+		for (n in dn)
+			d.add(proto(byCName.get(n), false) + ";\n");
+		d.add("#ifndef HXC_CONST_IDS\n");
+		for (n in idOrder)
+			d.add('extern const int32_t $n = ${ids.get(n)};\n');
+		d.add("#endif\n");
+		d.add(dataText);
+		files.push({name: "data.c", content: d.toString()});
+		for (i in 0...chunks.length) {
+			var c = chunks[i];
+			var all = new Refs();
+			for (f in c.funcs)
+				all.add(bodies.get(f).refs);
+			var r = new StringBuf();
+			r.add('// Generated by backend/ (EXPERIMENTAL): ${c.modules.join(", ")}\n#include "hxc.h"\n');
+			var xs = [for (n in all.ids.keys()) n];
+			xs.sort(cmp);
+			for (n in xs)
+				r.add('ID($n)\n');
+			var xs = [for (n in all.strs.keys()) n];
+			xs.sort(cmp);
+			for (n in xs)
+				r.add('extern hx_slit $n;\n');
+			var gs = [for (g in all.globals.keys()) g];
+			gs.sort((a, b) -> cmp(scalarGlobal(a), scalarGlobal(b)));
+			for (g in gs)
+				r.add('extern ${cty(p.globals[g].ty)} ${scalarGlobal(g)};\n');
+			var xs = [for (sel in all.dsps.keys()) selNames[sel]];
+			xs.sort(cmp);
+			for (n in xs)
+				r.add('extern void *const $n[];\n');
+			var xs = [for (n in all.hosts.keys()) n];
+			xs.sort(cmp);
+			for (n in xs)
+				r.add(hostProtos.get(n) + ";\n");
+			var xs = [for (n in all.funcs.keys()) if (chunkOf.get(n) != i) n];
+			xs.sort(cmp);
+			for (n in xs)
+				r.add(proto(byCName.get(n), false) + ";\n");
+			for (f in c.funcs)
+				r.add(proto(f, !exported.exists(cname(f))) + ";\n");
+			for (f in c.funcs)
+				r.add(proto(f, !exported.exists(cname(f))) + " " + bodies.get(f).text);
+			files.push({name: c.name + ".c", content: r.toString()});
+		}
+		return files;
+	}
+
+	static function cmp(a:String, b:String):Int
+		return a < b ? -1 : a > b ? 1 : 0;
+
+	// Chunks: the functions of a module (sorted by name) stay together, modules
+	// in name order; a module larger than twice the target is split. A chunk
+	// ends after a unit once it holds `target` bytes, at a unit whose name
+	// hashes to 0 mod 4 (or past twice the target): boundaries depend on the
+	// names, so when an edit moves one, the next ones realign (as
+	// content-defined chunking does). A chunk's file name is its first unit's.
+	function packChunks(target:Int):Array<{name:String, modules:Array<String>, funcs:Array<FuncInfo>}> {
+		var byModule = new Map<String, Array<FuncInfo>>();
+		for (f in p.funcs) {
+			var m = f.module == null ? "_" : f.module;
+			var fs = byModule.get(m);
+			if (fs == null) byModule.set(m, fs = []);
+			fs.push(f);
+		}
+		var modules = [for (m in byModule.keys()) m];
+		modules.sort(cmp);
+		var units:Array<Unit> = [];
+		for (m in modules) {
+			var fs = byModule.get(m);
+			fs.sort((a, b) -> cmp(cname(a), cname(b)));
+			var fus:Array<Unit> = [for (f in fs) {name: cname(f), modules: [m], funcs: [f], size: bodies.get(f).text.length}];
+			var total = 0;
+			for (u in fus)
+				total += u.size;
+			if (total <= 2 * target) units.push({name: m, modules: [m], funcs: fs, size: total});
+			else {
+				var parts = cut(fus, target);
+				for (k in 0...parts.length)
+					units.push({name: k == 0 ? m : m + "." + parts[k].name, modules: [m], funcs: parts[k].funcs, size: parts[k].size});
+			}
+		}
+		var chunks = cut(units, target);
+		var names = nameIds("m_", [for (c in chunks) c.name], null);
+		return [for (i in 0...chunks.length) {name: names[i], modules: chunks[i].modules, funcs: chunks[i].funcs}];
+	}
+
+	// groups consecutive units (named by their first)
+	static function cut(units:Array<Unit>, target:Int):Array<Unit> {
+		var r:Array<Unit> = [];
+		var cur:Unit = null;
+		for (u in units) {
+			if (cur == null) cur = {name: u.name, modules: [], funcs: [], size: 0};
+			for (m in u.modules)
+				if (cur.modules.indexOf(m) < 0) cur.modules.push(m);
+			for (f in u.funcs)
+				cur.funcs.push(f);
+			cur.size += u.size;
+			if (cur.size >= target && (cur.size >= 2 * target || (hash(u.name) & 3) == 0)) {
+				r.push(cur);
+				cur = null;
+			}
+		}
+		if (cur != null) r.push(cur);
+		return r;
+	}
+
+	static function hash(s:String):Int {
+		var h = 5381;
+		for (i in 0...s.length)
+			h = ((h << 5) + h + s.charCodeAt(i)) & 0xFFFFFF;
+		return h;
 	}
 
 	static function cstr(s:String):String {
@@ -450,9 +775,9 @@ class EmitC {
 				ss = ss.copy();
 				ss.sort((a, b) -> fid(a.name) - fid(b.name));
 				// closure: lambda type index + code; variable: global index (pointer globals) or address
-				b.add('static const rt_static SS$i[] = {${[for (s in ss) if (s.clos != null) '{${fid(s.name)}, \'c\', ${s.clos.tindex}, (void *)${cname(s.clos.fn)}}' else {
+				b.add('static const rt_static SS$i[] = {${[for (s in ss) if (s.clos != null) '{${fid(s.name)}, \'c\', ${s.clos.tindex}, (void *)${dataFunc(s.clos.fn)}}' else {
 					var gt = p.globals[s.global].ty;
-					Ir.isRef(gt) ? '{${fid(s.name)}, \'p\', ${s.global}, 0}' : '{${fid(s.name)}, \'${kindChar(gt)}\', -1, &G${s.global}}';
+					Ir.isRef(gt) ? '{${fid(s.name)}, \'p\', ${s.global}, 0}' : '{${fid(s.name)}, \'${kindChar(gt)}\', -1, &${scalarGlobal(s.global)}}';
 				}].join(", ")}};\n');
 			}
 			var n = t.slots.length;
@@ -474,6 +799,8 @@ class EmitC {
 			if (fs.length > 0) b.add('static const rt_field FS$i[] = {${[for (f in fs) '{${fid(f.name)}, ${f.slot}, \'${kindChar(f.ty)}\'}'].join(", ")}};\n');
 			var ms = t.methods.copy();
 			ms.sort((a, b) -> fid(a.name) - fid(b.name));
+			for (m in ms)
+				dataRefs.funcs.set(m.fn, true);
 			if (ms.length > 0) b.add('static const rt_method MS$i[] = {${[for (m in ms) '{${fid(m.name)}, (void *)${m.fn}, ${m.sig}}'].join(", ")}};\n');
 			if (t.ifaces.length > 0) b.add('static const int32_t IF$i[] = {${t.ifaces.join(", ")}};\n');
 			if (t.ctors.length > 0) b.add('static const int32_t CT$i[] = {${t.ctors.join(", ")}};\n');
@@ -512,8 +839,8 @@ class EmitC {
 			case _: x;
 		}
 
-	function proto(f:FuncInfo):String
-		return 'static ${cty(f.ret)} ${cname(f)}(${f.args.length == 0 ? "void" : [for (a in f.args) cty(a.ty) + " a" + a.id].join(", ")})';
+	function proto(f:FuncInfo, isStatic:Bool):String
+		return '${isStatic ? "static " : ""}${cty(f.ret)} ${cname(f)}(${f.args.length == 0 ? "void" : [for (a in f.args) cty(a.ty) + " a" + a.id].join(", ")})';
 
 	// ---- functions
 
@@ -528,7 +855,10 @@ class EmitC {
 			refSlot.set(l, slot);
 			if (slot >= n) n = slot + 1;
 		}
-		b.add(proto(f) + " {\n");
+		var outer = b;
+		b = new StringBuf();
+		nextLabel = 0;
+		nextCache = 0;
 		if (n > 0) b.add('\tvoid **fr = rt_sp;\n\trt_sp += $n;\n\tmemset(fr, 0, $n * sizeof(void *));\n');
 		var vol = f.hasTry ? "volatile " : "";
 		for (a in f.args)
@@ -539,7 +869,9 @@ class EmitC {
 		stmts(f.body, "\t");
 		if (f.ret == TVoid) b.add(n > 0 ? "\trt_sp = fr;\n" : "");
 		else b.add('${n > 0 ? "\trt_sp = fr;\n" : ""}\treturn ${f.ret == TF64 ? "0.0" : "0"};\n');
-		b.add("}\n\n");
+		// the function's inline caches (structural access sites)
+		outer.add("{\n" + (nextCache > 0 ? '\tstatic rt_icache ic_[$nextCache];\n' : "") + b.toString() + "}\n\n");
+		b = outer;
 	}
 
 	function popFrame():String
@@ -561,14 +893,14 @@ class EmitC {
 			case SBoxSet(t, bx, v):
 				b.add(ind + store(expr(bx), "0", t, expr(v)) + ";\n");
 			case SSetGlobal(g, v):
-				b.add(ind + (Ir.isRef(p.globals[g].ty) ? 'rt_globals[$g]' : 'G$g') + ' = ${expr(v)};\n');
+				b.add(ind + globalRef(g) + ' = ${expr(v)};\n');
 			case SAnonSet(name, t, obj, v):
 				var ic = nextCache++;
 				var k = kindChar(t);
 				var match = k == "b" || k == "i" ? "(c_->kind == 'i' || c_->kind == 'b')" : 'c_->kind == \'$k\'';
-				b.add('$ind{\n$ind\tvoid *o_ = ${expr(obj)};\n$ind\trt_icache *c_ = rt_ic(o_, ${fid(name)}, &IC[$ic]);\n');
+				b.add('$ind{\n$ind\tvoid *o_ = ${expr(obj)};\n$ind\trt_icache *c_ = rt_ic(o_, ${fidRef(name)}, &ic_[$ic]);\n');
 				b.add('$ind\tif (c_->slot > 0 && $match) ${store("o_", "c_->slot - 1", t, expr(v))};\n');
-				b.add('$ind\telse { void *b_ = ${box(expr(v), t)}; hx_anon_set_slow(${expr(obj)}, ${fid(name)}, b_); }\n$ind}\n');
+				b.add('$ind\telse { void *b_ = ${box(expr(v), t)}; hx_anon_set_slow(${expr(obj)}, ${fidRef(name)}, b_); }\n$ind}\n');
 			case SArrSet(elem, a, i, v):
 				var slot = '&${local(a)}';
 				switch elem {
@@ -745,7 +1077,7 @@ class EmitC {
 			case EStr(s): str(s);
 			case ENull(_): "((void *)0)";
 			case ELocal(l): local(l);
-			case EGlobal(g, t): Ir.isRef(t) ? 'rt_globals[$g]' : 'G$g';
+			case EGlobal(g, t): globalRef(g);
 			case EBin(op, x, y):
 				var a = expr(x), c = expr(y);
 				switch op {
@@ -782,16 +1114,18 @@ class EmitC {
 				var ic = nextCache++;
 				var k = kindChar(t);
 				var match = k == "b" || k == "i" ? "(c_->kind == 'i' || c_->kind == 'b')" : 'c_->kind == \'$k\'';
-				'({ void *o_ = ${expr(obj)}; rt_icache *c_ = rt_ic(o_, ${fid(name)}, &IC[$ic]); c_->slot > 0 && $match ? ${load("o_", "c_->slot - 1", t)} : ${unboxFrom('hx_anon_get_slow(o_, ${fid(name)})', t)}; })';
+				var f = fidRef(name);
+				'({ void *o_ = ${expr(obj)}; rt_icache *c_ = rt_ic(o_, $f, &ic_[$ic]); c_->slot > 0 && $match ? ${load("o_", "c_->slot - 1", t)} : ${unboxFrom('hx_anon_get_slow(o_, $f)', t)}; })';
 			case ECast(_, x): expr(x);
-			case EInstOf(c, x): 'hx_inst(${expr(x)}, ${c.tindex}, ${c.tindex + c.lastDescendant - c.id})';
+			case EInstOf(c, x): 'hx_inst(${expr(x)}, ${typeRef(c.tindex)}, ${typeRef(c.tindex + c.lastDescendant - c.id)})';
 			case EEnumTag(x, en):
 				// constructors of an enum have consecutive type indices in tag order
 				var base = en == null || en.ctors.length == 0 ? null : en.ctors[0].tindex - en.ctors[0].tag;
 				if (base != null)
 					for (c in en.ctors)
 						if (c.tindex - c.tag != base) base = null;
-				base != null ? '((int32_t)TINDEX(${expr(x)}) - $base)' : 'rt_types[TINDEX(${expr(x)})].tag';
+				var c0 = en == null || en.ctors.length == 0 ? null : en.ctors[0];
+				base != null ? '((int32_t)TINDEX(${expr(x)}) - ${c0.tag == 0 ? typeRef(c0.tindex) : '(${typeRef(c0.tindex)} - ${c0.tag})'})' : 'rt_types[TINDEX(${expr(x)})].tag';
 			case EEnumParam(c, idx, x): load(expr(x), Std.string(at(idx, c.params[idx])), c.params[idx]);
 			case EArrLen(a): 'ARR_LEN(${expr(a)})';
 			case EArrGet(elem, a, i):
@@ -802,12 +1136,13 @@ class EmitC {
 				}
 			case EBoxGet(t, bx): load(expr(bx), "0", t);
 			case ECapture(l, idx, clos): load(expr(clos), Std.string(at(idx + 1, l.captures[idx].ty)), l.captures[idx].ty);
-			case EType(t): 'TYPE_OBJ(${typeIndex(t)})';
-			case ECall(f, args): '${cname(f)}(${[for (a in args) expr(a)].join(", ")})';
+			case EType(t): 'TYPE_OBJ(${typeRef(typeIndex(t))})';
+			case ECall(f, args): '${funcRef(f)}(${[for (a in args) expr(a)].join(", ")})';
 			case ECallDispatch(sel, sig, args):
 				var ft = sigType(sig.ret, [for (t in sig.args) cty(t)]);
 				var o = expr(args[0]);
-				'((${ft})dispatch[$sel][TINDEX($o) - $T_FIRST])(${[for (a in args) expr(a)].join(", ")})';
+				refs.dsps.set(sel, true);
+				'((${ft})${selNames[sel]}[TINDEX($o) - $T_FIRST])(${[for (a in args) expr(a)].join(", ")})';
 			case ECallClos(s, clos, args):
 				var ft = sigType(s.ret, ["void *"].concat([for (t in s.args) cty(t)]));
 				var c = expr(clos);
@@ -816,14 +1151,15 @@ class EmitC {
 				var ic = nextCache++;
 				var ft = sigType(s.ret, ["void *"].concat([for (t in s.args) cty(t)]));
 				var xs = [for (a in args) expr(a)];
-				var f = fid(name);
+				var f = fidRef(name);
+				var sid = sigRef(s);
 				var r = s.ret == TVoid ? "" : "r_ = ";
 				var decl = s.ret == TVoid ? "" : '${cty(s.ret)} r_; ';
 				var packed = [for (i in 0...args.length) pack(xs[i], s.args[i])];
-				var slow = 'uint64_t av_[] = {${packed.length == 0 ? "0" : packed.join(", ")}}; uint64_t u_ = hx_anon_call_slow(o_, $f, ${s.id}, av_); ${s.ret == TVoid ? "(void)u_;" : 'r_ = ${unpack("u_", s.ret)};'}';
-				'({ ${decl}void *o_ = ${expr(obj)}; rt_icache *c_ = rt_ic(o_, $f, &IC[$ic]); '
-					+ 'if (c_->slot == 0 && c_->sig == ${s.id}) ${r}((${ft})c_->fn)(${["o_"].concat(xs).join(", ")}); '
-					+ 'else if (c_->slot > 0 && c_->kind == \'p\' && hx_is_sig(FP(o_, c_->slot - 1), ${s.id})) { void *k_ = FP(o_, c_->slot - 1); ${r}((${ft})CLOS_FN(k_))(${["k_"].concat(xs).join(", ")}); } '
+				var slow = 'uint64_t av_[] = {${packed.length == 0 ? "0" : packed.join(", ")}}; uint64_t u_ = hx_anon_call_slow(o_, $f, $sid, av_); ${s.ret == TVoid ? "(void)u_;" : 'r_ = ${unpack("u_", s.ret)};'}';
+				'({ ${decl}void *o_ = ${expr(obj)}; rt_icache *c_ = rt_ic(o_, $f, &ic_[$ic]); '
+					+ 'if (c_->slot == 0 && c_->sig == $sid) ${r}((${ft})c_->fn)(${["o_"].concat(xs).join(", ")}); '
+					+ 'else if (c_->slot > 0 && c_->kind == \'p\' && hx_is_sig(FP(o_, c_->slot - 1), $sid)) { void *k_ = FP(o_, c_->slot - 1); ${r}((${ft})CLOS_FN(k_))(${["k_"].concat(xs).join(", ")}); } '
 					+ 'else { $slow } ${s.ret == TVoid ? "" : "r_; "}})';
 			// Dynamic access by a literal name: the field id is known here
 			case ECallHost("hx_dyn_get" | "hx_dyn_set" | "hx_dyn_call_field", args, _) if (args[1].match(EStr(_))):
@@ -835,16 +1171,17 @@ class EmitC {
 					case ECallHost(f, _, _): f + "_fid";
 					case _: throw "unreachable";
 				};
-				'$fn(${[for (i in 0...args.length) i == 1 ? Std.string(fid(n)) : expr(args[i])].join(", ")})';
+				'$fn(${[for (i in 0...args.length) i == 1 ? fidRef(n) : expr(args[i])].join(", ")})';
 			case ECallHost(name, args, ret):
 				if (!StringTools.startsWith(name, "hx_") && name != "String_length" && name != "String_charCodeAt_i" && !hostProtos.exists(name)) {
 					hostProtos.set(name, '${cty(ret)} $name(${args.length == 0 ? "void" : [for (a in args) ctyOf(a)].join(", ")})');
 					hostOrder.push(name);
 				}
+				if (hostProtos.exists(name)) refs.hosts.set(name, true);
 				'$name(${[for (a in args) expr(a)].join(", ")})';
-			case ENewObj(c): 'rt_alloc(${Std.int(Math.max(1, c.nslots))}, ${c.tindex}, K_OBJ)';
+			case ENewObj(c): 'rt_alloc(${Std.int(Math.max(1, c.nslots))}, ${typeRef(c.tindex)}, K_OBJ)';
 			case ENewEnum(c, args):
-				var s = '({ void *o = rt_alloc_init(${c.params.length == 0 ? 1 : c.params.length}, ${c.tindex}, K_OBJ); ' + (c.params.length == 0 ? 'FP(o, 0) = 0; ' : '');
+				var s = '({ void *o = rt_alloc_init(${c.params.length == 0 ? 1 : c.params.length}, ${typeRef(c.tindex)}, K_OBJ); ' + (c.params.length == 0 ? 'FP(o, 0) = 0; ' : '');
 				for (i in 0...args.length) {
 					if (c.params[i].match(TI32 | TBool)) s += 'FP(o, $i) = 0; ';
 					s += load("o", Std.string(at(i, c.params[i])), c.params[i]) + ' = ${expr(args[i])}; ';
@@ -860,7 +1197,7 @@ class EmitC {
 					};
 				s + "o; })";
 			case ENewClos(l, caps):
-				var s = '({ void *o = rt_alloc_init(${l.captures.length + 1}, ${l.tindex}, K_OBJ); FP(o, 0) = (void *)${cname(l.fn)}; ';
+				var s = '({ void *o = rt_alloc_init(${l.captures.length + 1}, ${typeRef(l.tindex)}, K_OBJ); FP(o, 0) = (void *)${funcRef(l.fn)}; ';
 				for (i in 0...caps.length)
 					s += load("o", Std.string(at(i + 1, l.captures[i].ty)), l.captures[i].ty) + ' = ${expr(caps[i])}; ';
 				s + "o; })";
@@ -872,7 +1209,7 @@ class EmitC {
 				};
 				'({ void *o = rt_alloc_init(1, $tt, K_OBJ); FP(o, 0) = 0; ${load("o", "0", t)} = ${expr(v)}; o; })';
 			case ENewAnon(sh, vals):
-				var s = '({ void *o = rt_alloc(${sh.nslots}, ${sh.tindex}, K_OBJ); ';
+				var s = '({ void *o = rt_alloc(${sh.nslots}, ${typeRef(sh.tindex)}, K_OBJ); ';
 				for (i in 0...vals.length)
 					s += load("o", Std.string(sh.locs[i]), sh.fields[i].ty) + ' = ${expr(vals[i])}; ';
 				s + "o; })";
@@ -937,7 +1274,37 @@ static inline int hx_is_sig(void *c, int32_t sig) {
 ";
 }
 
+// what a function body refers to by name (chunked output declares them)
+class Refs {
+	public var funcs = new Map<String, Bool>(); // C names
+	public var strs = new Map<String, Bool>();
+	public var ids = new Map<String, Bool>();
+	public var hosts = new Map<String, Bool>();
+	public var dsps = new Map<Int, Bool>();
+	public var globals = new Map<Int, Bool>(); // scalar globals
+
+	public function new() {}
+
+	public function add(r:Refs) {
+		for (k in r.funcs.keys())
+			funcs.set(k, true);
+		for (k in r.strs.keys())
+			strs.set(k, true);
+		for (k in r.ids.keys())
+			ids.set(k, true);
+		for (k in r.hosts.keys())
+			hosts.set(k, true);
+		for (k in r.dsps.keys())
+			dsps.set(k, true);
+		for (k in r.globals.keys())
+			globals.set(k, true);
+	}
+}
+
+typedef Unit = {name:String, modules:Array<String>, funcs:Array<FuncInfo>, size:Int};
+
 typedef TypeEntry = {
+	key:String, // stable across unrelated changes: its C name (TY_*) derives from it
 	name:String,
 	tk:String,
 	sup:Int,
