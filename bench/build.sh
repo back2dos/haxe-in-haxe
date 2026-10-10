@@ -32,7 +32,7 @@ for t in $targets; do
 			mkdir -p "$OUT/wasm"
 			# Emscripten's ENV doesn't inherit the process environment (HAXE_STD_PATH)
 			echo 'Module.preRun = [() => { for (const k in process.env) ENV[k] = process.env[k]; }];' > "$OUT/wasm/env.js"
-			CC=em++ CFLAGS="-x c++ $F -DHXC_NO_NET -DHXC_NO_SSL -DHXC_NO_UV" LIBS= LDFLAGS="$F \
+			CC=em++ CFLAGS="-x c++ $F -DHXC_CONST_IDS -DHXC_NO_NET -DHXC_NO_SSL -DHXC_NO_UV" LIBS= LDFLAGS="$F \
 				-sENVIRONMENT=node -sNODERAWFS=1 --pre-js $OUT/wasm/env.js \
 				-sEXIT_RUNTIME=1 -sALLOW_MEMORY_GROWTH=1 -sINITIAL_MEMORY=64MB -sMAXIMUM_MEMORY=8GB -sSTACK_SIZE=8MB" \
 				sh backend/tools/cc-chunks.sh bin/backend/hih/prog_hxc "$OUT/wasm/hih.js" ;;

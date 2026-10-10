@@ -12,12 +12,13 @@
 # JOBS      parallel compilations (default: the number of cores)
 # RT_DIR    the runtime sources (default backend/rt); RT_FILES: their names
 #           without .c (default: every rt*.c of RT_DIR)
+# OBJ_DIR   where the objects go (default below)
 # HXC_CCACHE=0  do not use ccache (used with gcc/clang/cc when installed)
 #
 # Objects go to <dir>/obj-<hash of CC and CFLAGS>, so builds with different
 # compilers or options keep their own. With -DHXC_CONST_IDS in CFLAGS every
-# file also depends on ids.h. With clang -flto=thin and ld.lld, ThinLTO's
-# cache (<objdir>/thinlto) makes relinking after a small change fast.
+# file also depends on ids.h. With clang -flto=thin and ld.lld, ThinLTO uses a
+# cache (<objdir>/thinlto; it saves little after an edit: bench/README.md).
 set -eu
 SRC=$1
 BIN=$2
@@ -28,7 +29,7 @@ LDFLAGS=${LDFLAGS-$CFLAGS}
 LIBS=${LIBS--lm}
 JOBS=${JOBS:-$(nproc 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)}
 key=$(printf '%s|%s' "$CC" "$CFLAGS" | cksum | cut -d' ' -f1)
-OBJ=$SRC/obj-$key
+OBJ=${OBJ_DIR:-$SRC/obj-$key}
 mkdir -p "$OBJ"
 
 PFX=

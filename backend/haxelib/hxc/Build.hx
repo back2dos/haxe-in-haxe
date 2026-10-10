@@ -67,7 +67,9 @@ class Build {
 			if (verbose) Sys.println("hxc: " + parts.concat(flags).concat(files).concat(libs).concat(["-o", out]).join(" "));
 			code = Sys.command(parts[0], parts.slice(1).concat(flags).concat(files).concat(libs).concat(["-o", out]));
 		} else {
-			var objs = compileChunks(parts, flags, chunks, rtFiles, rt, o.jobs);
+			// release builds fold the ids into the code (ids.h); debug builds keep them
+			// as const globals, so an edit recompiles only the chunks it changes
+			var objs = compileChunks(parts, o.debug ? flags : flags.concat(["-DHXC_CONST_IDS"]), chunks, rtFiles, rt, o.jobs);
 			if (objs == null) return 1;
 			if (verbose) Sys.println("hxc: " + parts.concat(flags).concat(["<" + objs.length + " objects>"]).concat(libs).concat(["-o", out]).join(" "));
 			code = Sys.command(parts[0], parts.slice(1).concat(flags).concat(objs).concat(libs).concat(["-o", out]));
@@ -87,6 +89,7 @@ class Build {
 		if (!FileSystem.exists(objDir)) FileSystem.createDirectory(objDir);
 		var mtime = (f:String) -> FileSystem.exists(f) ? FileSystem.stat(f).mtime.getTime() : -1.0;
 		var genHeaders = Math.max(mtime(dir + "hxc.h"), Math.max(mtime(rt + "rt.h"), mtime(rt + "rt_gc.h")));
+		if (flags.contains("-DHXC_CONST_IDS")) genHeaders = Math.max(genHeaders, mtime(dir + "ids.h"));
 		var rtHeaders = Math.max(mtime(rt + "rt.h"), mtime(rt + "rt_gc.h"));
 		var objs = [], todo = [];
 		var sources = [for (f in sys.io.File.getContent(dir + "files.txt").split("\n")) if (f.trim() != "") {src: dir + f.trim(), headers: genHeaders}];

@@ -10,7 +10,7 @@
 #   HXFLAGS="-D retain" VARIANT=-retain sh backend/build.sh
 # The C is written in chunks to $OUT/prog_hxc/ and compiled in parallel, reusing
 # the objects of unchanged chunks (backend/tools/cc-chunks.sh: JOBS, CFLAGS;
-# CFLAGS=-DHXC_CONST_IDS folds the ids, CC="clang -O2 -flto=thin" for ThinLTO);
+# HXC_IDS=const|extern, see below; CC="clang -O2 -flto=thin" for ThinLTO);
 # HXC_SINGLE=1 writes and compiles one file $OUT/prog.c instead; HXC_CHUNK_KB
 # sets the chunk size (default 192).
 set -eu
@@ -53,7 +53,13 @@ RT_FLAGS="-w -fno-strict-aliasing ${RT_NO--DHXC_NO_SSL -DHXC_NO_UV} $RT_INC -I b
 if [ "${HXC_SINGLE:-0}" != 0 ]; then
 	$CC $RT_FLAGS "$OUT/prog.c" backend/rt/rt*.c -lm ${RT_LIBS:-} -o "$OUT/$BIN"
 else
-	# chunks in parallel, unchanged ones reused (backend/tools/cc-chunks.sh)
+	# chunks in parallel, unchanged ones reused (backend/tools/cc-chunks.sh).
+	# HXC_IDS=const (default except with tcc): the ids are #defines (ids.h) as
+	# fast as the single file, but a change of an id (a new closure, type or
+	# field name) recompiles every chunk; HXC_IDS=extern: const globals, about
+	# 2% slower with clang -O2, an edit recompiles only the chunks it changes
+	case "$CC" in tcc*|*/tcc*) IDS=extern ;; *) IDS=const ;; esac
+	if [ "${HXC_IDS:-$IDS}" = const ]; then RT_FLAGS="$RT_FLAGS -DHXC_CONST_IDS"; fi
 	CC="$CC" CFLAGS="$RT_FLAGS ${CFLAGS:-}" LIBS="-lm ${RT_LIBS:-}" sh backend/tools/cc-chunks.sh "$OUT/prog_hxc" "$OUT/$BIN"
 fi
 # linear-memory wasm, compiled as C++ so try/catch uses wasm exception handling

@@ -52,7 +52,7 @@ DEPS=${COSMO_DEPS:-bin/cosmo-deps}
 if [ -n "${NATIVE_CC:-}" ]; then
 	NO_DEPS=1
 	if [ -z "${SKIP_COM:-}" ] || [ ! -f "$B/hxc-native" ]; then
-		CC="$NATIVE_CC -O2" CFLAGS="-w -fno-strict-aliasing -DHXC_NO_SSL -DHXC_NO_UV" sh backend/tools/cc-chunks.sh "$B/hxc_hxc" "$B/hxc-native"
+		CC="$NATIVE_CC -O2" CFLAGS="-w -fno-strict-aliasing -DHXC_CONST_IDS -DHXC_NO_SSL -DHXC_NO_UV" sh backend/tools/cc-chunks.sh "$B/hxc_hxc" "$B/hxc-native"
 	fi
 elif [ -z "${NO_DEPS:-}" ]; then
 	sh backend/tools/cosmo-deps.sh "$DEPS"
@@ -65,7 +65,7 @@ fi
 if [ -n "${NATIVE_CC:-}" ]; then
 	:
 elif [ -z "${SKIP_COM:-}" ] || [ ! -f "$B/hxc.com" ]; then
-	CC="cosmocc -O2" CFLAGS="-w -fno-strict-aliasing $RT" LIBS="-lm $RT_LIBS" sh backend/tools/cc-chunks.sh "$B/hxc_hxc" "$B/hxc.com"
+	CC="cosmocc -O2" CFLAGS="-w -fno-strict-aliasing -DHXC_CONST_IDS $RT" LIBS="-lm $RT_LIBS" sh backend/tools/cc-chunks.sh "$B/hxc_hxc" "$B/hxc.com"
 fi
 
 # 3. the package
