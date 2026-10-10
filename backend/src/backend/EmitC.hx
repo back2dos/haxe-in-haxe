@@ -141,8 +141,16 @@ class EmitC {
 		var units = [for (i in 0...s.length) s.charCodeAt(i)];
 		var nslots = Std.int((8 + 2 * units.length + 7) / 8);
 		units.push(0);
-		return '${single ? "static " : ""}struct { uint64_t h; int32_t len, hash; uint16_t c[${units.length}]; } ${strNames.get(s)} = {MKHDR($nslots, K_RAW, T_STRING), ${s.length}, 0, {${units.join(",")}}};\n';
+		var init = '{MKHDR($nslots, K_RAW, T_STRING), ${s.length}, 0, {${units.join(",")}}};\n';
+		if (single) return 'static struct { uint64_t h; int32_t len, hash; uint16_t c[${units.length}]; } ${strNames.get(s)} = $init';
+		// strings.c: a named type per length (a variable of an unnamed type would have internal linkage in C++, i.e. Emscripten)
+		var n = units.length;
+		var decl = strTypes.exists(n) ? "" : 'struct hx_s$n { uint64_t h; int32_t len, hash; uint16_t c[$n]; };\n';
+		strTypes.set(n, true);
+		return '${decl}struct hx_s$n ${strNames.get(s)} = $init';
 	}
+
+	var strTypes = new Map<Int, Bool>();
 
 	// C names for keys: `prefix` + the key as an identifier; keys mapping to the
 	// same identifier get a suffix by their sorted rank. Values become ids.
