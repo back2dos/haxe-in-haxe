@@ -19,6 +19,68 @@ HL_STATIC="libhl.a fmt.o dxt.o sha1.o" sh bench/build.sh hlc   # static link
 LD_LIBRARY_PATH=/path/to/patched/hashlink HAXE_REFERENCE=haxe/haxe python3 bench/run.py -n 7
 ```
 
+## hxc: chunked C output, parallel and incremental builds (2026-10-10)
+
+The emitter now writes the port's C as 60 files (`bin/backend/hih/prog_hxc/`:
+58 chunks of about 192 KB, `strings.c`, `data.c`; backend/README.md
+"Chunked output") compiled in parallel by `backend/tools/cc-chunks.sh`,
+which reuses unchanged objects. Shared 4-core machine (load 2–3.5 during
+the builds), `-j4`, `-w -fno-strict-aliasing -DHXC_NO_SSL -DHXC_NO_UV`, the
+10 runtime files included:
+
+| Build | wall | CPU |
+| --- | ---: | ---: |
+| clang 18 -O2, single file (`HXC_SINGLE=1`, 19.9 MB) | 177 s | 169 s |
+| gcc 13 -O2, single file | 207 s | 205 s |
+| tcc, chunks | 0.5 s | 1.4 s |
+| clang -O2, chunks (`HXC_CONST_IDS`, build.sh's default) | 33 s | 130 s |
+| clang -O2, chunks, extern ids | 35 s | 135 s |
+| clang -O2 -flto=thin, chunks | 65 s | 252 s |
+| gcc -O2, chunks | 48 s | 189 s |
+| gcc -O2 -flto=auto, chunks | 63 s | 223 s |
+| cosmocc -O2, chunks (x86-64 + aarch64; load 6) | 146 s | 529 s |
+| em++ -O2 wasm64 (C++), chunks | 31 s | 100 s |
+
+Splitting costs no CPU (130 s against 169 s: the optimizer no longer works on
+one 20 MB translation unit). 384 KB chunks (28 files, up to 1.3 MB): 36 s /
+136 s with clang -O2; 192 KB is the default.
+
+**Incremental.** One-line edits in a function of `src/typing/Operators.hx`,
+then the backend tool and `cc-chunks.sh` again:
+
+| Edit | files rewritten | clang -O2 rebuild |
+| --- | --- | ---: |
+| change a string literal | the module's chunk, `strings.c` | 2.9 s (2 files) |
+| add a closure (`(s:String) -> s + "!"`) | the chunk, `data.c`, `ids.h` | 2.7 s (3 files) with extern ids; 33 s (all) with `HXC_CONST_IDS` |
+| change a string literal, clang -O2 -flto=thin | as above | 52 s (the ThinLTO cache saves little: the edited chunk's functions are imported everywhere) |
+
+The backend tool's own run (the JS build lowering the port, under Node) takes
+about 55 s and is now most of the edit-to-binary time.
+
+**Runtime.** Self-compile CPU, minimum of 8 runs over two alternating rounds
+(`/tmp/claude-0/cpu.py -n 4`, load 1–2):
+
+| Build | self CPU |
+| --- | ---: |
+| clang -O2, single file | 4.46 s |
+| clang -O2, chunks, `HXC_CONST_IDS` | 4.45 s |
+| clang -O2, chunks, extern ids | 4.56 s |
+| clang -O2 -flto=thin, chunks | 4.49 s (another build, 384 KB chunks: 4.39 s) |
+| gcc -O2, single file | 4.46 s |
+| gcc -O2, chunks (extern ids) | 4.50 s |
+| gcc -O2 -flto=auto, chunks | 4.50 s (another build, 384 KB chunks: 4.26 s) |
+| gcc -O2 PGO (`-fprofile-generate` on the self-compile, then `-fprofile-use`), chunks | 4.15–4.37 s; with -flto=auto 4.27 s |
+| cosmocc -O2, chunks / single file (`hih.com` of 2026-10-09) | 6.72 / 6.91 s |
+
+Without LTO the chunked build is as fast as the single file once the ids are
+`#define`s; extern ids cost about 2%. LTO gains 0–4% at twice the build CPU
+and a slow relink, so it is not the default (`CC="clang -O2 -flto=thin"` for
+release builds that want it). PGO: a few percent with gcc, not pursued; clang
+PGO could not be tried (no `libclang_rt.profile` installed). Conformance with
+the chunked clang -O2 build (both id modes): 279 PASS + 7 EXPECTED-FAILURE,
+macro cases 66/66; tcc and cosmocc chunked builds and the `HXC_SINGLE=1`
+build: macro cases 66/66.
+
 ## Refresh after OS threads and the memory work (2026-10-09, night)
 
 `bench/run.py -n 3 --json bench/results.json reference hxc hxc-o2 hxc-clang hxc-cosmo`

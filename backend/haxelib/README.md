@@ -27,8 +27,10 @@ or in an `.hxml`:
 `-lib hxc` adds an init macro (`extraParams.hxml`, `hxc.Boot`). With
 `--custom-target hxc=<out>`, it asks your Haxe to write the typed, filtered
 program as HXB (`<out>.hxb.zip`, removed afterwards). After generation, the
-bundled `bin/hxc.com` reads that archive and writes `<out>.c`, and the C
-compiler builds `<out>`. So typing, macros, `-lib` and the display/completion
+bundled `bin/hxc.com` reads that archive and writes the C to `<out>_hxc/`
+(in chunks of a few modules each), and the C compiler builds `<out>`,
+compiling the chunks in parallel and reusing the objects of chunks that did
+not change since the last build. So typing, macros, `-lib` and the display/completion
 services all come from your own Haxe.
 
 `bin/hxc.com` is the haxe-in-haxe compiler with the C backend, compiled by
@@ -48,7 +50,9 @@ the expected build.
 | `-D hxc.cc=<command>` | C compiler. Default `$HXC_CC`, else the first of `clang`, `cc`, `gcc`, `tcc` (tcc compiles fastest; clang `-O2` runs fastest, slightly ahead of gcc). |
 | `-D hxc.static` | Fully static, portable binary built with cosmocc (downloaded once into `~/.hxc/cosmocc`, about 420 MB unpacked; `HXC_COSMOCC_URL` overrides the source; `haxelib run hxc setup-cosmocc` downloads it now). The result runs on Linux, macOS, Windows and the BSDs. |
 | `-D hxc.debug` | `-O0 -g` instead of `-O2`. |
-| `-D hxc.c-only` | Stop after writing `<out>.c`. |
+| `-D hxc.c-only` | Stop after writing the C (`<out>_hxc/`). |
+| `-D hxc.single` | Write and compile one C file, `<out>.c`, instead of chunks. |
+| `-D hxc.jobs=<n>` | Parallel C compilations. Default `$HXC_JOBS`, else the number of cores. |
 | `-D hxc.ssl`, `-D hxc.uv` | Link mbedtls (`sys.ssl`) / libuv. Without them, `sys.ssl` and the libuv natives throw when called. With cc/gcc/clang/tcc: the system's libraries (mbedtls 2.28, libuv 1.x; e.g. `libmbedtls-dev libuv1-dev`). With `-D hxc.static` (cosmocc): the static libraries in the package's `cosmo/` (mbedtls 2.28.10, libuv 1.48.0 built with cosmocc for x86-64 and arm64), so nothing needs installing. |
 | `-D hxc.keep-hxb` | Keep `<out>.hxb.zip`. With your own `--hxb <path>`, that archive is used and kept. |
 

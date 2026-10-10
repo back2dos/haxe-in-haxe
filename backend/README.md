@@ -25,12 +25,17 @@ example haxe-formatter (`tools/format-src.sh`), which then formats
 ## Builds
 
 `build.sh` builds the backend tool (with the reference compiler, to JS), runs
-it on a program and compiles the C with `CC` (default tcc):
+it on a program and compiles the C with `CC` (default tcc). The C is written
+in chunks (`<out>/prog_hxc/`, see "Chunked output" below) compiled in
+parallel by `backend/tools/cc-chunks.sh`, which reuses the objects of
+unchanged chunks:
 
 ```sh
 sh backend/build.sh port                                    # the port: bin/backend/hih/hih (tcc)
-CC="clang -O2" BIN=hih_clang sh backend/build.sh port       # the fastest build
+CC="clang -O2" BIN=hih_clang sh backend/build.sh port       # the fastest build (C compile: ~35 s on 4 cores)
+CC="clang -O2 -flto=thin" BIN=hih_lto sh backend/build.sh port   # ThinLTO (~65 s)
 CC="gcc -O2" BIN=hih_o2 sh backend/build.sh port
+HXC_SINGLE=1 CC="clang -O2" sh backend/build.sh port       # one file, bin/backend/hih/prog.c (~170 s, one core)
 RT_NO= RT_LIBS="-lmbedtls -lmbedx509 -lmbedcrypto -luv" sh backend/build.sh port   # link mbedtls/libuv
 sh backend/tools/cosmo-deps.sh                              # bin/cosmo-deps (once, ~2 min)
 CC="cosmocc -O2" RT_DEPS=bin/cosmo-deps BIN=hih.com sh backend/build.sh port       # portable APE
@@ -39,7 +44,7 @@ sh backend/build.sh backend/bench/threads Threads && bin/backend/Threads/prog_c 
 
 | Compiler | Use | Threads | Notes |
 | --- | --- | --- | --- |
-| tcc | development: the port's 16 MB of C compiles in about a second | green (M:1) | code 2–2.5× slower than clang/gcc -O2 |
+| tcc | development: the port's 20 MB of C compiles in about a second | green (M:1) | code 2–2.5× slower than clang/gcc -O2 |
 | clang -O2 | fastest code (4–10% ahead of gcc -O2 on the self-compile, builds faster; -O3 adds nothing) | OS (1:1) | preferred by the haxelib package |
 | gcc -O2 | release builds | OS (1:1) | |
 | cosmocc -O2 | one binary for Linux, macOS, Windows, the BSDs (x86-64 + aarch64) | OS (1:1) | only Linux x86-64 tested (bench/COSMO.md) |
@@ -50,6 +55,13 @@ Without `RT_NO=`/`RT_DEPS` the mbedtls and libuv natives are stubs that throw
 when called (`-DHXC_NO_SSL -DHXC_NO_UV`). The port itself is compiled with
 `-D disable-parallelism` only for its own typing; the resulting binary runs
 its parallel passes unless *its* invocation passes that define.
+
+| Variable | |
+| --- | --- |
+| `HXC_SINGLE=1` | one C file `<out>.c` (all functions static), compiled by one compiler call |
+| `HXC_CHUNK_KB` | chunk size in KB of C (default 192) |
+| `HXC_IDS=const` / `extern` | the program's ids as `#define`s (default, except with tcc) or const globals (below) |
+| `JOBS`, `CFLAGS` | parallel compilations (default: cores), extra compile options (`cc-chunks.sh`) |
 
 ## The emitter
 
@@ -72,6 +84,62 @@ its parallel passes unless *its* invocation passes that define.
   natively (GCC treats `__builtin_setjmp` too optimistically at `-O2`), a
   C++ `try`/`catch` under Emscripten.
 - `HXC_SURVEY=<file>` records unsupported constructs and the natives a program needs.
+
+### Chunked output
+
+The emitter (`EmitC.emitChunks`, written by `Main.writeChunks`) writes
+`<out>_hxc/`:
+
+| File | |
+| --- | --- |
+| `hxc.h` | the same for every program: `rt.h`, the inline helpers, `ID()` |
+| `ids.h` | the program's numbers as `#define`s: type indices `TY_*`, field ids `FID_*`, signature ids `SIG_*`, `rt_globals` indices `GI_*` |
+| `strings.c` | the string literals, each named `S_<hash of its UTF-16 units>` |
+| `data.c` | type tables, dispatch rows (`DSP_<method>`), scalar globals (`G_*`), closure trampolines, `main`; the ids as const globals |
+| `m_<module>.c` | the functions of consecutive modules (in name order), about `HXC_CHUNK_KB` of C each |
+| `files.txt` | the `.c` files to compile |
+
+A chunk declares what it uses (`ID(TY_x)`, `extern hx_slit S_..`, prototypes
+of other chunks' functions, runtime functions); its functions are `static`
+unless `data.c` or another chunk refers to them. Nothing in a chunk depends
+on program-wide numbering, so an edit changes few files:
+
+- type indices, field ids, signatures, globals and dispatch selectors are
+  names, not numbers; closures are named after the function they are
+  created in (`<function>__lambda<k>`, or what they forward to), types
+  after their path or content, string literals after their content;
+- inline caches are a static array per function (`ic_`), labels are numbered
+  per function;
+- chunks group whole modules; a module over twice the target is split by
+  function. A chunk ends once it holds the target size, at a unit whose name
+  hashes to 0 mod 4 (or at twice the target), so boundaries depend on names:
+  when an edit moves one, the following ones realign. A chunk is named after
+  its first module (or function), not numbered;
+- files are only written when their content changed, so their mtimes say
+  what to recompile; files of an earlier run that are gone are deleted.
+
+The ids are read in one of two ways. With `-DHXC_CONST_IDS` (build.sh's
+default for every compiler but tcc, the haxelib package outside `-D
+hxc.debug`, the site and wasm builds) `hxc.h` includes `ids.h`: the numbers
+fold into the code as in the single file, but every chunk depends on
+`ids.h`, which changes when a closure, type, field name, signature or
+global is added or removed. Without it (`HXC_IDS=extern`, tcc), `ID(x)`
+declares `extern const int32_t x`, defined in `data.c`: one load more per
+use (about 2% of the self-compile with clang -O2, bench/README.md) and only
+the edited chunk, `data.c` and `strings.c` recompile.
+
+After a one-line edit of a function in `src/typing/Operators.hx` (port,
+60 files): a changed string literal rewrites the module's chunk and
+`strings.c`; adding a closure rewrites the chunk, `data.c` and `ids.h`.
+`cc-chunks.sh` then recompiles 2–3 files: about 3 s with clang -O2 instead
+of a 170 s rebuild (bench/README.md has the numbers; the backend tool's
+own run, 55 s under Node, is now most of the edit-to-binary time).
+
+Cross-chunk calls are not inlined without LTO; on the self-compile the
+chunked build is as fast as the single file (within noise with
+`HXC_CONST_IDS`). `-flto=thin` (clang, with ld.lld and a ThinLTO cache in
+the object directory) or `-flto=auto` (gcc) recovers cross-file inlining
+for release builds.
 
 ## The runtime
 
@@ -373,11 +441,13 @@ options are in [haxelib/README.md](haxelib/README.md). The user's Haxe types
 the program; the init macro (`hxc/Boot.hx`) makes it write the program as
 HXB and, after generation, runs the bundled `bin/hxc.com` on the archive
 (`--hxb-lib`) and then the C compiler (`-D hxc.cc`, else the first of clang,
-cc, gcc, tcc; `-D hxc.static` for cosmocc). `hxc.com` is the port with the C
+cc, gcc, tcc; `-D hxc.static` for cosmocc) on the chunks, in parallel
+(`Build.compileChunks`: `-D hxc.jobs`, else `HXC_JOBS`, else the cores; objects
+newer than their source are reused; `-D hxc.single` for one file). `hxc.com` is the port with the C
 backend, compiled by itself to C and with cosmocc to one APE binary.
 
 ```sh
-sh backend/haxelib/build.sh          # bin/haxelib/hxc.zip (cosmocc on PATH, or NATIVE_CC=clang; about 5 min)
+sh backend/haxelib/build.sh          # bin/haxelib/hxc.zip (cosmocc on PATH, or NATIVE_CC=clang; about 2-5 min)
 haxelib install bin/haxelib/hxc.zip
 haxe -lib hxc -cp src -main Main --custom-target hxc=out/main
 ```
@@ -392,7 +462,9 @@ cc, tcc and `-D hxc.static`; `--no-output`, `-D hxc.c-only`, type errors and
 `haxelib run hxc`; `Tls.hx` with `-D hxc.static -D hxc.ssl` and with tcc and
 the system's mbedtls, and `hxc.NativeUv` with `-D hxc.static -D hxc.uv`;
 haxe-formatter (`tools/format-src.sh`). The backend tool built through the
-package gives byte-identical C to the source build.
+package gives byte-identical C to the source build. Chunked builds (2026-10-10): a Map/closure/exception program with
+clang and tcc (`NATIVE_CC=clang` package), a rebuild reusing every object,
+and `-D hxc.single`.
 
 ## Limits
 
