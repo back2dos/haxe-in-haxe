@@ -403,8 +403,8 @@ class Args {
 					if (Std.isOfType(e, core.ds.Exit)) throw new Failure("Resource '" + file + "' excess the maximum size of 12MB");
 					throw new Failure("Resource file not found: " + file);
 				}
-				if (com.resources.exists(name)) throw new Failure("Duplicate resource name " + name);
-				com.resources.set(name, data);
+				if (com.resources.mem(name)) throw new Failure("Duplicate resource name " + name);
+				com.resources.add(name, data);
 			case RunCmd(cmd):
 				actx.cmds.unshift(cmd);
 			case SetSwfVersion(v):

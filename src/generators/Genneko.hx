@@ -297,12 +297,7 @@ class Genneko {
 					array(p, el.map(genExpr.bind(ctx)))
 				]);
 			case [TIdent("__resources__"), []]:
-				// port: com.resources is a StringMap; its entries are replayed, in insertion order
-				// (the hxc StringMap's order), into an OCaml-ordered Hashtbl to fold them in
-				// upstream's order.
-				var h = new OcamlHashtbl<String, Bytes>(OcamlHash.hashString, (a, b) -> a == b);
-				for (name => data in ctx.com.resources) h.replace(name, data);
-				return call(p, builtin(p, "array"), h.fold((name, data, acc:Array<NExpr>) -> {
+				return call(p, builtin(p, "array"), ctx.com.resources.fold((name, data, acc:Array<NExpr>) -> {
 					[
 						new NExpr(EObject([
 							{name: "name", expr: genConstant(ctx, e.epos, TString(name))},
