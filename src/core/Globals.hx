@@ -169,8 +169,9 @@ class Globals {
 		Usage: `die message __LOC__`, where `__LOC__` is a built-in ocaml constant
 	**/
 	// port: `source` stands for `__LOC__`; the backtrace is the Haxe call stack.
+	// ... `!get_error_pos_ref` is Lexer.get_error_pos (lexer.ml installs it), called directly.
 	public static function die(msg:String, source:String, ?p:Pos):Dynamic {
-		var prefix = p == null ? "" : p.pfile + ":" + p.pmin + ": ";
+		var prefix = p == null ? "" : syntax.Lexer.getErrorPos((f, l) -> f + ":" + l + ":", p) + " ";
 		var message = prefix
 			+ "Compiler failure"
 			+ (msg == "" ? "" : ": " + msg)

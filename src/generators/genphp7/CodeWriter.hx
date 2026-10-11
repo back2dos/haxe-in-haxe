@@ -314,7 +314,10 @@ class CodeWriter {
 					case _:
 						switch [tcls.clPath, params] {
 							case [{pack: [], name: "String"}, _]: "string";
-							case [{pack: [], name: "Array"}, [param]] if (forDoc): (useT(param)) + "[]|" + (use(tcls.clPath));
+							case [{pack: [], name: "Array"}, [param]] if (forDoc):
+								// port: OCaml evaluates the right operand of `^` first: `use` runs before `use_t`.
+								var arrayAlias = use(tcls.clPath);
+								(useT(param)) + "[]|" + arrayAlias;
 							case _: use(!(hasClassFlag(tcls, CExtern)), tcls.clPath);
 						}
 				}
