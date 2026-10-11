@@ -59,7 +59,7 @@ class Codegen {
 		case _: false;
 	};
 
-	public static function bytesSerialize(data:haxe.io.Bytes):String return haxe.crypto.Base64.encode(data);
+	public static function bytesSerialize(data:haxe.io.Bytes):String return haxe.crypto.Base64.encode(data, false); // port: ExtLib Base64 does not pad
 
 	/*
 		Build a default safe-cast expression :
