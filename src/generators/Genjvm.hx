@@ -1012,19 +1012,6 @@ class Genjvm {
 		writeClass(gctx, jcClosureDispatch.getThisPath(), jcClosureDispatch.exportClass(gctx.defaultExportConfig));
 	}
 
-	// port: OCaml's Hashtbl order of com.resources. The port keeps resources in a StringMap
-	// without their insertion order, so the table is rebuilt by adding the names in sorted
-	// order; this differs from upstream only for names colliding in one bucket.
-	public static function resourceNamesInOrder(gctx:Gctx):Array<String> {
-		var names = [for (k in gctx.resources.keys()) k];
-		names.sort(TypedefInterfaces.compareStrings);
-		var h = new OcamlHashtbl<String, Bool>(OcamlHash.hashString, function(a, b) return a == b);
-		for (n in names) h.replace(n, true);
-		var l = [];
-		h.iter(function(n, _) l.push(n));
-		return l;
-	}
-
 	public static function generate(jvmFlag:Bool, gctx0:Gctx):Void {
 		var path = core.Path.FilePath.parse(gctx0.file);
 		var jarName, entryPoint;
@@ -1114,11 +1101,10 @@ class Genjvm {
 					+ ")");
 			}
 		}
-		for (name in resourceNamesInOrder(gctx.gctx)) {
-			var v = gctx.gctx.resources.get(name);
+		gctx.gctx.resources.iter(function(name, v) {
 			var filename = core.StringHelper.escapeResName(name, ["/", "-"]);
 			gctx.out.addEntry(v, filename);
-		}
+		});
 
 		// port: upstream runs the type-level passes on the domain pool when parallelism is
 		// enabled, which makes the order of closure_paths (and so the output) depend on
@@ -3485,8 +3471,10 @@ class TclassToJvm {
 		switch cf.cfExpr {
 			case null:
 				if (Genjvm.isPathOf(c.clPath, ["haxe"], "Resource") && cf.cfName == "content") {
-					var el = [];
-					for (name in Genjvm.resourceNamesInOrder(gctx.gctx)) el.unshift(TexprBuilder.makeString(gctx.gctx.basic, name, nullPos));
+					var el = gctx.gctx.resources.fold(function(name, _, acc:Array<TExpr>) {
+						acc.unshift(TexprBuilder.makeString(gctx.gctx.basic, name, nullPos));
+						return acc;
+					}, []);
 					var e = mk(TArrayDecl(el), gctx.gctx.basic.tarray(gctx.gctx.basic.tstring), nullPos);
 					default_(e);
 				}
