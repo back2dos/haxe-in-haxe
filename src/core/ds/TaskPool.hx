@@ -4,9 +4,9 @@ import sys.thread.Thread;
 import sys.thread.Mutex;
 import sys.thread.Lock;
 
-// Runtime substitute for Domainslib.Task, backed by process-wide worker threads
-// on HL/C (see ForJob) rather than work-stealing domains. Indexed results and
-// propagation of worker exceptions are preserved.
+// port: substitute for Domainslib.Task, backed by threads (process-wide workers on
+// HL/C and hxc, see ForJob) rather than work-stealing domains. Worker exceptions
+// propagate to the caller.
 class TaskPool {
 	public final workers:Int;
 
@@ -54,7 +54,7 @@ class TaskPool {
 		#if (hlc || target.name == "hxc")
 		ForJob.invite(job, threads);
 		#else
-		// HashLink JIT: threads stay scoped to the call. With persistent workers it
+		// port: HashLink JIT: threads stay scoped to the call. With persistent workers it
 		// crashed intermittently, most likely through the races in libhl's lazy type
 		// initialisation that bench/libhl-allocator.patch fixes for HL/C (the JIT
 		// loads the system libhl).
@@ -79,17 +79,15 @@ class TaskPool {
 	}
 }
 
-/**
-	One parallelFor call. Chunks are claimed under the job's mutex by the
-	calling thread and by any invited worker; the caller then waits only for
-	chunks already in flight, so a nested parallelFor never waits on a ticket
-	that a busy worker might not pick up.
-
-	On HL/C, workers are process-wide threads started on first use and kept for later
-	calls (Domainslib keeps its domains for the pool's lifetime): starting a
-	HashLink thread registers it with the GC and blocks the caller until it
-	runs, which dominated the analyzer's many small per-class loops.
-**/
+// port: one parallelFor call. Chunks are claimed under the job's mutex by the
+// calling thread and by any invited worker; the caller then waits only for
+// chunks already in flight, so a nested parallelFor never waits on a ticket
+// that a busy worker might not pick up.
+//
+// On HL/C and hxc, workers are process-wide threads started on first use and kept
+// for later calls (Domainslib keeps its domains for the pool's lifetime): starting
+// a HashLink thread registers it with the GC and blocks the caller until it
+// runs, which dominated the analyzer's many small per-class loops.
 private class ForJob {
 	static var queue:Null<sys.thread.Deque<ForJob>> = null;
 	static var started = 0;

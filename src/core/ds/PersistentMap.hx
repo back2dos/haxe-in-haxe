@@ -1,6 +1,6 @@
 package core.ds;
 
-/** Persistent ordered lookup for non-string upstream keys. */
+// port: an OCaml persistent map (PMap, Map.Make) with keys ordered by Key.compare.
 class PersistentMap<K, V> {
 	final entries:Array<MapEntry<K, V>>;
 
@@ -8,10 +8,10 @@ class PersistentMap<K, V> {
 
 	public static function empty<K, V>():PersistentMap<K, V> return new PersistentMap();
 
-	// Entries are sorted by Key.compare with unique keys: index of the first entry not below key.
+	// port: entries are sorted by Key.compare with unique keys: index of the first entry not below key.
 	function lowerBound(key:K):Int {
 		var lo = 0, hi = entries.length;
-		// String keys (typer locals): compare directly instead of dispatching in Key.compare.
+		// port: string keys (typer locals): compare directly instead of dispatching in Key.compare.
 		var sk = Key.asString(key);
 		if (sk != null) {
 			while (lo < hi) {

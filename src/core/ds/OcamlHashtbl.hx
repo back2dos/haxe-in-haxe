@@ -1,13 +1,11 @@
 package core.ds;
 
-/**
-	OCaml's stdlib `Hashtbl` (5.x, non-randomized), reproduced bucket for
-	bucket so that iteration order matches: power-of-two bucket arrays of at
-	least 16, new bindings at the head of their bucket, resizing (to twice the
-	size once there are more than two bindings per bucket) that keeps each
-	bucket's order, and `iter`/`fold` going through buckets 0..n-1 head first.
-	The hash and equality functions are those of the `Hashtbl.Make` argument.
-**/
+// port: OCaml's stdlib `Hashtbl` (5.x, non-randomized), reproduced bucket for
+// bucket so that iteration order matches: power-of-two bucket arrays of at
+// least 16, new bindings at the head of their bucket, resizing (to twice the
+// size once there are more than two bindings per bucket) that keeps each
+// bucket's order, and `iter`/`fold` going through buckets 0..n-1 head first.
+// The hash and equality functions are those of the `Hashtbl.Make` argument.
 class OcamlHashtbl<K, V> {
 	final hashFn:K->Int;
 	final equalFn:K->K->Bool;
@@ -123,7 +121,7 @@ class OcamlHashtbl<K, V> {
 		return null;
 	}
 
-	/** `Hashtbl.find_all`: every binding of `key`, most recent first. **/
+	// port: `Hashtbl.find_all`: every binding of `key`, most recent first.
 	public function findAll(key:K):Array<V> {
 		var out = [];
 		var c = data[keyIndex(key)];
@@ -180,12 +178,10 @@ class OcamlHashtbl<K, V> {
 		return acc;
 	}
 
-	/**
-		OCaml's `Hashtbl.hash` / `Int.hash` on an int in the 32-bit range
-		(caml_hash_mix_intnat, then FINAL_MIX). caml_hash mixes the tagged value
-		2n+1; caml_hash_mix_intnat folds its high word into the low one, which for
-		32-bit n leaves the low 32 bits of 2n+1.
-	**/
+	// port: OCaml's `Hashtbl.hash` / `Int.hash` on an int in the 32-bit range
+	// (caml_hash_mix_intnat, then FINAL_MIX). caml_hash mixes the tagged value
+	// 2n+1; caml_hash_mix_intnat folds its high word into the low one, which for
+	// 32-bit n leaves the low 32 bits of 2n+1.
 	public static function hashInt(n:Int):Int {
 		var h = mixWord(0, (n << 1) | 1);
 		h ^= h >>> 16;

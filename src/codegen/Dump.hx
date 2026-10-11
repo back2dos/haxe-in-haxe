@@ -15,8 +15,10 @@ import context.Common;
 import context.DumpConfig;
 import context.Parallel;
 
-// haxe/src/codegen/dump.ml — mechanical draft; not compile-validated.
 class Dump {
+	/*
+		Make a dump of the full typed AST of all types
+	*/
 	public static function createDumpfile(acc:Array<String>, parts:Array<String>):{buffer:StringBuf, close:Void->Void} {
 		var ch = Path.createFile(false, ".dump", acc, parts),
 			buf = new StringBuf();
@@ -247,7 +249,8 @@ class Dump {
 		}
 		out.close();
 		var out = createDumpfile([], [com.partScope.dumpConfig.dumpPath, target, "dependants"]);
-		// Upstream uses Hashtbl iteration here; this diagnostic does not affect HXB ordering.
+		// port: StringMap order instead of upstream's Hashtbl.iter order; this
+		// diagnostic does not affect HXB output.
 		for (file in deps.keys()) {
 			out.buffer.add(file + ":\n");
 			for (m in deps.get(file)) out.buffer.add("\t" + Path.UniqueKey.lazyPath(m.mExtra.mFile) + "\n");

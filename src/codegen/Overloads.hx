@@ -13,10 +13,8 @@ import typing.FieldCallCandidate;
 import core.TFunctions.*;
 import core.TUnification.*;
 
-// haxe/src/codegen/overloads.ml
-// Haxe max-int retains the ordering of upstream Dynamic and implicit-cast penalties.
 class Overloads {
-	// inline: see core.ds.List
+	// port: inline: see core.ds.List
 	public static inline function allPairs<A>(f:A->A->Bool, a:Array<A>, b:Array<A>):Bool {
 		var r = a.length == b.length;
 		if (r) for (i in 0...a.length) if (!f(a[i], b[i])) {
@@ -32,11 +30,12 @@ class Overloads {
 		if (f1.cfParams.length != f2.cfParams.length) return false;
 		for (i in 0...f1.cfParams.length) {
 			var p1 = f1.cfParams[i], p2 = f2.cfParams[i];
-			// Preserve upstream's comparison of the second parameter's constraints to itself.
+			// port: preserves upstream's comparison of the second parameter's constraints to itself.
 			if (p1.ttpName != p2.ttpName || !allPairs(eq, getConstraints(p2), getConstraints(p2))) return false;
 		}
 		function arguments(a:Array<{name:String, optional:Bool, type:T}>, b:Array<{name:String, optional:Bool, type:T}>):Bool {
 			if (a.length != b.length) return false;
+			// TODO: do we want to compare n and o here?
 			for (i in 0...a.length) if (!eq(a[i].type, b[i].type)) return false;
 			return true;
 		}
@@ -92,6 +91,7 @@ class Overloads {
 	public inline function clone():ConversionRate return new ConversionRate(conversions, params);
 }
 
+/** Overload resolution **/
 class Resolution {
 	static function nullAbstract(a:TAbstract):Bool return a.aPath.pack.length == 0 && a.aPath.name == "Null";
 
@@ -113,6 +113,7 @@ class Resolution {
 		case TLazy(f): simplifyT(lazyType(f));
 	}
 
+	// rate type parameters
 	public static function rateTp(a:Array<T>, b:Array<T>):Int {
 		if (a.length != b.length) throw "Invalid_argument: List.iter2";
 		var n = 0;
@@ -122,8 +123,18 @@ class Resolution {
 
 	static function rate(c:Int, p:Int):ConversionRate return {conversions: c, params: p};
 
+	/**
+		The rate function returns an ( int * int ) type.
+		The smaller the int, the best rated the caller argument is in comparison with the callee.
+
+		The first int refers to how many "conversions" would be necessary to convert from the callee to the caller type, and
+		the second refers to the type parameters.
+	**/
+	// port: max_int is 0x7fffffff, which keeps the ordering of the Dynamic and
+	// implicit-cast penalties.
 	public static function rateConv(cacc:Int, tfun:T, targ:T):ConversionRate return switch [simplifyT(tfun), simplifyT(targ)] {
 		case [TInst(cf, tlf), TInst(ca, tla)] if (hasClassFlag(cf, CInterface)):
+			// breadth-first
 			var cur = {acc: 0, c: ca, tl: tla}, stack = [cur];
 			while (true) {
 				if (stack.length == 0) {
@@ -156,8 +167,8 @@ class Resolution {
 			if (ef != ea) throw NotFound.raise();
 			rate(cacc, rateTp(tlf, tla));
 		case [TDynamic(_), TDynamic(_)]: rate(cacc, 0);
-		case [TDynamic(_), _]: rate(0x7fffffff, 0);
-		case [TAbstract(a, _), TDynamic(_)] if (CoreMeta.has(CoreType, a.aMeta) && !nullAbstract(a)): rate(cacc + 2, 0);
+		case [TDynamic(_), _]: rate(0x7fffffff, 0); // a function with dynamic will always be worst of all
+		case [TAbstract(a, _), TDynamic(_)] if (CoreMeta.has(CoreType, a.aMeta) && !nullAbstract(a)): rate(cacc + 2, 0); // a dynamic to a basic type will have an "unboxing" penalty
 		case [_, TDynamic(_)]: rate(cacc + 1, 0);
 		case [TAbstract(a, [tf]), TAbstract(b, [ta])] if (nullAbstract(a) && nullAbstract(b)): rateConv(cacc, tf, ta);
 		case [TAbstract(a, [tf]), ta] if (nullAbstract(a)): rateConv(cacc + 1, tf, ta);
@@ -172,7 +183,11 @@ class Resolution {
 				} catch (_:NotFound) {}
 				throw NotFound.raise();
 			}
-		case [TFun(_), TFun(_)]: rate(cacc, 0);
+		case [TFun(_), TFun(_)]: rate(cacc, 0); // unify will make sure they are compatible
+		// SAM conversion: lambda passed where a functional-interface class is
+		// expected. Rate by how closely the lambda's signature matches the SAM
+		// method's signature so specificity ordering still works between two
+		// SAM-parametered overloads.
 		case [TInst(cf, tlf), TFun(_)] if (hasClassFlag(cf, CFunctionalInterface)):
 			var sam = core.TOther.TClassTools.getSingularInterfaceField(cf.clOrderedFields);
 			if (sam == null) throw NotFound.raise();
@@ -219,9 +234,13 @@ class Resolution {
 		compatible = fewerOptionals([], rmDuplicates([], compatible));
 		if (compatible.length < 2) return compatible;
 		inline function rateArg(t:T, e:TExpr):ConversionRate return switch e.eexpr {
+			// if the argument is an implicit cast, we need to start with a penalty
+			// The penalty should be higher than any other implicit cast - other than Dynamic
+			// since Dynamic has a penalty of max_int, we'll impose max_int - 1 to it
 			case TMeta(m, _) if (m.meta == core.MetaList.StrictMeta.ImplicitCast): rate(0x7fffffff - 1, 0);
 			case _: rateConv(0, t, e.etype);
 		}
+		// convert compatible into ( rate * compatible_type ) list
 		function mkRate(acc:Array<ConversionRate>, el:Array<TExpr>,
 				args:Array<{name:String, optional:Bool, type:T}>):{rates:Array<ConversionRate>, rest:Bool} {
 			if (el.length == 0 && args.length == 0) return {rates: acc, rest: false};
@@ -237,6 +256,7 @@ class Resolution {
 				acc.unshift(rateArg(args[0].type, el[0]));
 				return mkRate(acc, el.slice(1), args.slice(1));
 			}
+			// this can happen on pf_pad_nulls = false targets, see #10434
 			if (el.length == 0) return {rates: acc, rest: false};
 			return Globals.die("", "overloads.ml");
 		}
@@ -248,8 +268,11 @@ class Resolution {
 			};
 			try {
 				var r = mkRate([], f.fcArgs, args);
+				// If it's the first one, assume it's the best
 				if (best == null || isBest(r.rates, best.rates)) best = {rates: r.rates, rest: r.rest, list: [f]};
-				else if (isBest(best.rates, r.rates)) {} else if (r.rest && !best.rest) {} else if (!r.rest && best.rest) best = {
+				else if (isBest(best.rates, r.rates)) {}
+				// If they are equal, we prefer the one without Rest (issue #10205)
+				else if (r.rest && !best.rest) {} else if (!r.rest && best.rest) best = {
 					rates: r.rates,
 					rest: r.rest,
 					list: [f]

@@ -1,7 +1,8 @@
 package core.ds;
 
 class StrTools {
-	/** String equality for non-null strings; on HashLink `==` calls String.__compare, so lengths are compared first. **/
+	// port: string equality for non-null strings; on HashLink `==` calls
+	// String.__compare, so lengths are compared first.
 	public static inline function eq(a:String, b:String):Bool {
 		#if hl
 		return a.length == b.length && a == b;
@@ -10,12 +11,10 @@ class StrTools {
 		#end
 	}
 
-	/**
-		OCaml's physical inequality `!=` on strings. HashLink compares the
-		character buffers, the JVM and hxc (backend/) references; other hosts have no string
-		identity and fall back to structural inequality (deviation: positions are then encoded more
-		compactly than upstream when a macro rebuilt a file name).
-	**/
+	// port: OCaml's physical inequality `!=` on strings. HashLink compares the
+	// character buffers, the JVM and hxc (backend/) references; other hosts have no
+	// string identity and fall back to structural inequality (positions are then
+	// encoded more compactly than upstream when a macro rebuilt a file name).
 	public static inline function physNeq(a:Null<String>, b:Null<String>):Bool {
 		#if hl
 		return a == null || b == null ? a != b : @:privateAccess ((a.bytes : hl.Bytes) != (b.bytes : hl.Bytes));
@@ -28,10 +27,8 @@ class StrTools {
 		#end
 	}
 
-	/**
-		`s.substring(start, end)` for 0 <= start <= end <= s.length. On HashLink
-		substring's optional end index is boxed on every call.
-	**/
+	// port: `s.substring(start, end)` for 0 <= start <= end <= s.length. On HashLink
+	// substring's optional end index is boxed on every call.
 	public static inline function sub(s:String, start:Int, end:Int):String {
 		#if hl
 		return subHl(s, start, end - start);

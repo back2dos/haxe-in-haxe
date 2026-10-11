@@ -6,8 +6,7 @@ class IntParseFailure extends haxe.Exception {
 	public function new() super("int_of_string");
 }
 
-// Runtime compatibility for upstream int_of_string (64-bit OCaml host).
-// Parsing follows OCaml runtime/ints.c: signed decimal, unsigned base prefixes,
+// port: OCaml int_of_string (64-bit OCaml host). Parsing follows OCaml runtime/ints.c: signed decimal, unsigned base prefixes,
 // optional sign, underscores after the first digit, and a 63-bit tagged value.
 class OcamlInt {
 	public static inline var maxInt:Int = 0x7fffffff;
@@ -55,7 +54,7 @@ class OcamlInt {
 		return (result << 1) >> 1;
 	}
 
-	// Haxe model fields use 32-bit Int. Keep narrowing explicit and checked;
+	// port: Haxe model fields use 32-bit Int. Keep narrowing explicit and checked;
 	// callers needing the complete OCaml range (e.g. index validation) use parse.
 	public static function ofString(value:String):Int {
 		var result = parse(value);

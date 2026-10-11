@@ -2,10 +2,10 @@ package core.ds;
 
 import Type as StdType;
 
-/** Structural comparison for the finite records, tuples and lists used as OCaml map keys. */
+// port: OCaml's polymorphic compare for the finite records, tuples and lists used as map keys.
 class Key {
 	public static function compare(a:Dynamic, b:Dynamic):Int {
-		// Fast path for the common string keys (before the Dynamic ==, which is a
+		// port: fast path for the common string keys (before the Dynamic ==, which is a
 		// runtime compare); same order as `>` on strings: by UTF-16 code units.
 		var sa = asString(a);
 		if (sa != null) {
@@ -16,7 +16,7 @@ class Key {
 		if (a == null) return -1;
 		if (b == null) return 1;
 		if ((a is Int) && (b is Int)) return (a : Int) > (b : Int) ? 1 : -1;
-		// Type paths compare like the {name, pack} record they replace (fields in name order).
+		// port: type paths compare like the {name, pack} record they replace (fields in name order).
 		var pa = asTypePath(a), pb = pa == null ? null : asTypePath(b);
 		if (pb != null) {
 			var c = compare(pa.name, pb.name);
@@ -57,7 +57,7 @@ class Key {
 		}
 	}
 
-	// String and GlobalTypePath have no subclasses: on HashLink an exact
+	// port: String and GlobalTypePath have no subclasses: on HashLink an exact
 	// type-pointer test, where Std.downcast goes through BaseType.check.
 	public static inline function asString(v:Dynamic):Null<String> {
 		#if hl
@@ -85,16 +85,14 @@ class Key {
 		return la == lb ? 0 : la < lb ? -1 : 1;
 	}
 
-	/**
-		A string that is equal for two keys exactly when `compare` returns 0, used to
-		index hash tables. Returns null for keys outside the plain-data subset
-		(class instances, functions, large values): tables then fall back to a
-		linear scan with `compare`.
-	**/
+	// port: a string that is equal for two keys exactly when `compare` returns 0, used to
+	// index hash tables. Returns null for keys outside the plain-data subset
+	// (class instances, functions, large values): tables then fall back to a
+	// linear scan with `compare`.
 	public static function canonical(value:Dynamic):Null<String> {
 		var s0 = asString(value);
 		if (s0 != null) return "s" + s0;
-		// Type paths (module and type tables) get their own encoding: the parts
+		// port: type paths (module and type tables) get their own encoding: the parts
 		// joined by control characters, which identifiers cannot contain. Cheaper
 		// than visit() below (no closure, StringBuf or number formatting). The
 		// part count keeps [] and [""] (a macro-defined empty package) apart.
@@ -171,7 +169,7 @@ class Key {
 						if (!visit(Reflect.field(v, name))) return false;
 					}
 					true;
-				case _: false; // floats, class instances and functions keep the linear path
+				case _: false; // port: floats, class instances and functions keep the linear path
 			}
 		}
 		return visit(value) ? buf.toString() : null;

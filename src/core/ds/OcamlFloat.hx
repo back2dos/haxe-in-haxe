@@ -1,11 +1,11 @@
 package core.ds;
 
-// OCaml Stdlib `float_of_string` (runtime/floats.c caml_float_of_string):
+// port: OCaml Stdlib `float_of_string` (runtime/floats.c caml_float_of_string):
 // underscores are skipped, then the whole remaining string must be read by
 // strtod (leading whitespace, optional sign, decimal or hexadecimal forms,
 // "nan", "inf", "infinity"); anything else fails with Failure "float_of_string".
 class OcamlFloat {
-	// [ws][+-](digits[.digits]|.digits)[(e|E)[+-]digits], the whole string
+	// port: [ws][+-](digits[.digits]|.digits)[(e|E)[+-]digits], the whole string
 	static function isDecimal(t:String):Bool {
 		var i = 0, n = t.length;
 		inline function digits():Int {
@@ -40,7 +40,7 @@ class OcamlFloat {
 			t = buf.toString();
 		}
 		if (isDecimal(t)) return Std.parseFloat(StringTools.trim(t));
-		// rare forms: local EReg instances (an EReg keeps match state)
+		// port: rare forms: local EReg instances (an EReg keeps match state)
 		var hex = ~/^\s*([+-]?)0[xX]([0-9a-fA-F]*)\.?([0-9a-fA-F]*)([pP]([+-]?[0-9]+))?$/;
 		var special = ~/^\s*([+-]?)(nan|inf|infinity)$/i;
 		if (special.match(t)) {

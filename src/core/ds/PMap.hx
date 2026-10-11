@@ -2,8 +2,8 @@ package core.ds;
 
 import haxe.ds.StringMap;
 
-/** Persistent string-key maps used by upstream PMap compiler tables.
-	Updates copy the table; iteration follows key order, never hash order. */
+// port: OCaml PMap with string keys. Updates copy the table; iteration follows
+// key order, never hash order.
 class PMap {
 	public static function empty<V>():StringMap<V> return new StringMap();
 

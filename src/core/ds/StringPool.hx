@@ -1,6 +1,5 @@
 package core.ds;
 
-// Port of haxe/src/core/ds/stringPool.ml.
 class StringPool {
 	var indices:Map<String, Int> = new Map();
 	var items:StringDynArray = new StringDynArray(16);
@@ -8,7 +7,7 @@ class StringPool {
 
 	public function new() {}
 
-	// Deviation: HashLink's StringMap truncates keys at the first NUL ("\x00"
+	// port: HashLink's StringMap truncates keys at the first NUL ("\x00"
 	// and "" collide), so on HL keys containing NUL (or starting with the
 	// escape character) are escaped injectively into a NUL-free form.
 	static inline function key(value:String):String {
@@ -28,7 +27,7 @@ class StringPool {
 		return index;
 	}
 
-	// The plain key is tried first and the hit verified against the stored string;
+	// port: the plain key is tried first and the hit verified against the stored string;
 	// only misses and NUL-truncation collisions compute the escaped key (scanning
 	// every string on every lookup was a large share of HXB writing).
 	inline function find(value:String):Null<Int> {

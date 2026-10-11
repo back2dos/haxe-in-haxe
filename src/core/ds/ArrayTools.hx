@@ -1,9 +1,7 @@
 package core.ds;
 
-/**
-	Lambda.exists/foreach/count for arrays. Lambda takes an Iterable, so on
-	static targets the iterator() call and every step go through dynamic calls.
-**/
+// port: Lambda.exists/foreach/count for arrays. Lambda takes an Iterable, so on
+// static targets the iterator() call and every step go through dynamic calls.
 class ArrayTools {
 	public static inline function exists<T>(a:Array<T>, f:T->Bool):Bool {
 		var found = false;

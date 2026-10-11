@@ -7,7 +7,7 @@ import core.TUnification.Unify_error;
 import context.Typecore.WithTypeError;
 import haxe.ds.Option;
 
-/** Typed extractors retain OCaml exception-match branch order in Haxe switches. */
+// port: typed extractors retain OCaml exception-match branch order in Haxe switches.
 class ExceptionTools {
 	public static function typing(value:Dynamic):Option<CompilerError> return Std.isOfType(value,
 		TypingError) ? Some((cast value : TypingError).error) : None;

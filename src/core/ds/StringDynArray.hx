@@ -1,6 +1,5 @@
 package core.ds;
 
-// Port of haxe/src/core/ds/stringDynArray.ml.
 class StringDynArray {
 	var values:Array<String>;
 

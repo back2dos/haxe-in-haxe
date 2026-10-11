@@ -1,6 +1,5 @@
 package core.ds;
 
-// Port of haxe/src/core/ds/priorityQueue.ml.
 enum PriorityQueue<T> {
 	Empty;
 	Node(priority:Int, element:T, left:PriorityQueue<T>, right:PriorityQueue<T>);

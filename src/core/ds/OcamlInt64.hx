@@ -3,7 +3,7 @@ package core.ds;
 import haxe.Int64;
 import core.ds.OcamlInt.IntParseFailure;
 
-// Fixed-width integer literal parsing corresponding to OCaml runtime/ints.c.
+// port: OCaml Int64.of_string: fixed-width integer parsing as in runtime/ints.c.
 class OcamlInt64 {
 	public static function ofString(value:String):Int64 return parse(value, 64);
 
@@ -33,7 +33,7 @@ class OcamlInt64 {
 		}
 		var signBit = Int64.ofInt(1) << (bits - 1);
 		var limit = signed ? (negative ? signBit : signBit - 1) : (bits == 64 ? Int64.make(-1, -1) : (signBit << 1) - 1);
-		// Divide the unsigned limit by a small base without signed Int64 overflow.
+		// port: divide the unsigned limit by a small base without signed Int64 overflow.
 		var half = limit >>> 1, rem = (half % base).low * 2 + (limit.low & 1);
 		var threshold = (half / base) * 2 + Std.int(rem / base);
 		rem %= base;

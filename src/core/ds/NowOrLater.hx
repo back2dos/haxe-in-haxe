@@ -2,7 +2,6 @@ package core.ds;
 
 import sys.thread.Mutex;
 
-// Port of haxe/src/core/ds/nowOrLater.ml.
 class NowOrLater {
 	var now:Mutex = new Mutex();
 	var running:Bool = false;

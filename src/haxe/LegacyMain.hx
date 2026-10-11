@@ -18,23 +18,16 @@ import sys.FileSystem;
 import sys.io.File;
 import typing.TypeloadModule;
 
-/**
- * Legacy bootstrap entry point (pre-translation loader). The translated
- * compiler entry is haxe.Main.
- *
- * Compiler subsystems will be ported from haxe/src in small, traceable steps.
- */
+// port: legacy bootstrap entry point (pre-translation loader), not an upstream
+// module. The translated compiler entry is haxe.Main.
 class LegacyMain {
 	static function main():Void {
 		run(Sys.args());
 	}
 
-	/**
-		The deliberately narrow batch entry point currently supported by the
-		port: source class paths, raw defines, HXML expansion, source roots and an HXB output.
-		Keeping this separate from Args lets the latter remain a faithful CLI
-		parser while unsupported compiler phases fail before any compilation work.
-	**/
+	// port: a deliberately narrow batch entry point: source class paths, raw defines,
+	// HXML expansion, source roots and an HXB output. Unsupported options fail
+	// before any compilation work.
 	public static function run(arguments:Array<String>):Void {
 		if (arguments.length > 0 && arguments[0] == "--") arguments = arguments.slice(1);
 		var classPaths = new ClassPaths();
@@ -46,7 +39,7 @@ class LegacyMain {
 		classPaths.push(new DirectoryClassPath(stdPath, Std));
 		classPaths.add(new DirectoryClassPath(classPathPath("."), User));
 		var defines = Define.emptyDefines();
-		// The HXB target is a cross-target compiler artifact. Std.hx uses this
+		// port: the HXB target is a cross-target compiler artifact. Std.hx uses this
 		// target define to permit loading the shared standard library.
 		Define.rawDefineValue(defines, "cross", "1");
 		var main:Null<GlobalTypePath> = null;
@@ -193,7 +186,7 @@ class LegacyMain {
 		return true;
 	}
 
-	// Direct port of Ast.match_path true for HXB include/exclude patterns.
+	// port: after Ast.match_path true, for HXB include/exclude patterns.
 	static function matchesPath(path:Array<String>, pattern:Array<String>):Bool {
 		function lowerIdentifier(value:String):Bool return value.length > 0 && value.charCodeAt(0) >= "a".code
 			&& value.charCodeAt(0) <= "z".code;
