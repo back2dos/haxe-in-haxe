@@ -36,7 +36,7 @@ with `-cp ../src -main Main -D disable-parallelism`, so paths embedded in output
 | `exec:<a>,<b>` | `[ref:\|port:]<target>` each (default `ref`) | only what the program prints when run (from its `start` line, after any compiler warnings) and the exit code |
 
 Built-in targets (`--list`): `hxb`, `interp`, `js`, `lua`, `python`, `neko`,
-`hl`, `hlc`, `php`, `cpp` (`-D no-compilation`), `jvm`, `swf`, and `hxc` (the
+`hl`, `hlc` and `cpp` (both `-D no-compilation`), `php`, `jvm`, `swf`, and `hxc` (the
 program compiled to C by the hxc tool, `bin/hxc/wbk.js`, and tcc;
 `HXC_CC` picks another C compiler; see `hxc.sh`). Add others with
 `--target-def 'name|--flag {out}/file|file:file|runner {out}/file'`.

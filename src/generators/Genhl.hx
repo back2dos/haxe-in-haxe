@@ -189,7 +189,7 @@ class HlContext {
 
 /* --- */
 
-enum Access {
+private enum Access {
 	ANone;
 	AGlobal(g:Int);
 	ALocal(v:TVar, r:Int);

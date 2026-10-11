@@ -108,7 +108,7 @@ class Runner {
 		});
 		add({
 			name: "hlc",
-			args: ["--hl", "{out}/hlc/main.c"],
+			args: ["--hl", "{out}/hlc/main.c", "-D", "no-compilation"],
 			output: "dir:hlc",
 			run: null
 		});
