@@ -18,7 +18,7 @@ import compiler.CompilationCache;
 import compiler.hxb.HxbData;
 import compiler.hxb.HxbWriterConfig;
 
-// port: native libraries (SWF/JVM) are not ported; `lib` is the NativeLibrary interface.
+// port: `lib` is the NativeLibrary interface.
 class LibBuildTask extends ServerTask {
 	final cs:Cache;
 	final file:String;

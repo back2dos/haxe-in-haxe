@@ -19,25 +19,14 @@ using macros.eval.EvalValue.EvalValueTools;
 // port: also covers eval.ml, which only includes modules.
 //
 // Deviations:
-// - The debugger is not ported: `support_debugger` is always false, and
-//   `-D eval-debugger` fails with "the Eval debugger is not supported by
-//   haxe-in-haxe" instead of starting a debug socket.
 // - `Luv.Error.set_on_unhandled_exception` sets `EvalLuv.exceptionHandler`
 //   (libuv works on the hxc host only, see `EvalLuv`).
-// - The debug record shared between contexts (`GlobalState.debug`) is
-//   `EvalMain.globalDebug`.
 // - `valueSignature` returns the MD5 digest as a lowercase hex string
 //   (the port keeps digests hexadecimal; upstream callers apply
 //   `Digest.to_hex` to the raw digest).
 // - The thread info is created after the context record, because the
 //   thread id counter (`next_thread_id`) is a field of the context here.
 class EvalMain {
-	static var globalDebug:Null<Debug> = null;
-
-	public static function debuggerNotSupported():haxe.Exception {
-		return new Failure("the Eval debugger is not supported by haxe-in-haxe");
-	}
-
 	// port: OCaml int_of_string
 	static function intOfString(s:String):Int {
 		if (!~/^[-+]?(0[xX][0-9a-fA-F_]+|[0-9][0-9_]*)$/.match(s)) throw new Failure("int_of_string");
@@ -59,17 +48,34 @@ class EvalMain {
 			case builtins:
 				builtins;
 		}
-		var debug = switch globalDebug {
+		var debug = switch GlobalState.debug {
 			case null:
 				var supportDebugger = context.Common.defined(com, core.Define.EvalDebugger);
-				if (supportDebugger) {
-					// port: the debug socket (EvalDebugSocket) is not ported.
-					throw debuggerNotSupported();
+				var socket:Null<DebugSocket> = try {
+					if (!supportDebugger) throw new EvalDebugMisc.Exit();
+					function fail<T>(msg:String):T {
+						Sys.println(msg);
+						throw new EvalDebugMisc.Exit();
+					}
+					var s = context.Common.definedValue(com, core.Define.EvalDebugger);
+					var i = s.indexOf(":");
+					var host = if (i < 0) fail("Invalid host format, expected host:port") else s.substr(0, i);
+					var port = s.substr(i + 1);
+					var port = try intOfString(port) catch (_:Dynamic) fail("Invalid port, expected int");
+					try {
+						var socket = core.Socket.create(host, port);
+						new DebugSocket(socket, EvalDebugSocket.makeConnection(socket));
+					} catch (exc:EvalDebugMisc.Exit) {
+						throw exc;
+					} catch (exc:Dynamic) {
+						fail(Std.string(exc));
+					}
+				} catch (_:EvalDebugMisc.Exit) {
+					null;
 				}
-				var debug2 = new Debug();
-				debug2.supportDebugger = supportDebugger;
-				debug2.exceptionMode = CatchUncaught;
-				globalDebug = debug2;
+				var debug2 = new Debug(EvalDebugMisc.newIntHashtbl(), new core.ds.OcamlHashtbl<{type:Int, field:Int}, FunctionBreakpoint>((k:{type:Int, field:Int}) -> core.ds.OcamlHash.hash(core.ds.OcamlHash.OcamlValue.OBlock(0, [core.ds.OcamlHash.OcamlValue.OInt(k.type), core.ds.OcamlHash.OcamlValue.OInt(k.field)])),
+					(a:{type:Int, field:Int}, b:{type:Int, field:Int}) -> a.type == b.type && a.field == b.field, 0), supportDebugger, socket, CatchUncaught, new EvalDebugContext());
+				GlobalState.debug = debug2;
 				debug2;
 			case debug:
 				debug;
@@ -95,10 +101,17 @@ class EvalMain {
 			ctx.fakeProtoCache.set(k, v);
 		var thread = EvalThread.createThreadInfo(ctx, Thread(sys.thread.Thread.current(), new sys.thread.Lock()));
 		var eval = EvalThread.createEval(thread);
-		ctx.evals.set(0, eval);
+		ctx.evals.add(0, eval);
 		EvalContext.setEval(ctx, eval);
-		if (debug.supportDebugger) {
-			throw debuggerNotSupported();
+		if (debug.supportDebugger && !GlobalState.debuggerInitialized) {
+			/* Let's wait till the debugger says we're good to continue. This allows it to finish configuration.
+				Note that configuration is shared between macro and interpreter contexts, which is why the check
+				is governed by a global variable. */
+			GlobalState.debuggerInitialized = true;
+			/* There's select_ctx in the json-rpc handling, so let's select this one. It's fine because it's the
+				first context anyway. */
+			EvalContext.select(ctx);
+			eval.debugChannel.receive();
 		}
 		// If no user-defined exception handler is set then follow libuv behavior.
 		// Which is printing an error to stderr and exiting with code 2.
@@ -145,7 +158,7 @@ class EvalMain {
 				var vfield = EvalField.field(vtype, EvalHash.hash(f));
 				var p = api.pos;
 				var info = EvalContext.createEnvInfo(true, p.pfile, ctx.fileKeys.get(p.pfile),
-					EKMacro(EvalHash.pathHash(path), EvalHash.hash(f)), new Map(), 0, 0);
+					EKMacro(EvalHash.pathHash(path), EvalHash.hash(f)), EvalDebugMisc.newIntHashtbl(), 0, 0);
 				var env = EvalContext.pushEnvironment(ctx, info);
 				env.envLeavePmin = p.pmin;
 				env.envLeavePmax = p.pmax;

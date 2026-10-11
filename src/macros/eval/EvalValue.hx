@@ -439,6 +439,9 @@ class DomainMutex {
 
 	public function new() {}
 
+	// port: Atomic.get mutex.downer
+	public function owner():Int return downer;
+
 	public function lock(id:Int):Void {
 		if (downer == id) ddepth++
 		else {

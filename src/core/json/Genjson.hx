@@ -655,7 +655,37 @@ class Genjson {
 
 	// module
 
-	// port: generate_module is not ported: it needs the HXB module cache of the server (see DisplayJson).
+	public static function generateModule(modules:core.ds.OcamlHashtbl<GlobalTypePath, compiler.hxb.HxbData.ModuleCache>,
+			findModule:GlobalTypePath->ModuleDef, m:ModuleDef):JsonValue {
+		// port: PMap.fold visits m_deps in increasing key order and conses: decreasing key order
+		var depIds = [for (k in m.mExtra.mDeps.keys()) k];
+		depIds.sort((a, b) -> a < b ? 1 : (a > b ? -1 : 0));
+		return jobject([
+			kv("id", jint(m.mId)),
+			kv("path", generateModulePath(m.mPath)),
+			kv("types", jlist(mt -> generateTypePath(m.mPath, tInfos(mt).mtPath, tInfos(mt).mtMeta), m.mTypes)),
+			kv("file", jstring(core.Path.UniqueKey.lazyPath(m.mExtra.mFile))),
+			kv("sign", jstring(m.mExtra.mSign)),
+			kv("cacheState", jstring(switch m.mExtra.mCacheState {
+				case MSGood: "Good";
+				case MSBad(reason): core.TPrinting.Printer.sModuleSkipReason(reason);
+				case MSUnknown: "Unknown";
+			})),
+			kv("dependencies", jarray([
+				for (id in depIds) {
+					var mdep = m.mExtra.mDeps.get(id);
+					jobject([
+						kv("path", jstring(Globals.sTypePath(mdep.mdPath))),
+						kv("sign", jstring(findModule(mdep.mdPath).mExtra.mSign))
+					]);
+				}
+			])),
+			kv("dependents", jarray(modules.fold(function(_, m_:compiler.hxb.HxbData.ModuleCache, acc:Array<{path:GlobalTypePath, sign:String}>) {
+				if (m_.mcExtra.mDeps.exists(m.mId)) acc.unshift({path: m_.mcPath, sign: m_.mcExtra.mSign});
+				return acc;
+			}, []).map(function(ps) return jobject([kv("path", jstring(Globals.sTypePath(ps.path))), kv("sign", jstring(ps.sign))]))))
+		]);
+	}
 
 	public static function createFullConfig():GenjsonContext return {
 		generateAbstractImpl: false,

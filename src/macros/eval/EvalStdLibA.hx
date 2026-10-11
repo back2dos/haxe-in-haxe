@@ -37,7 +37,7 @@ using macros.eval.EvalValue.EvalValueTools;
 //   `FileSystem.stat` times have the host's precision.
 // - Sys_error messages are approximated as "<path>: <reason>", with
 //   "No such file or directory" when the path does not exist.
-// - OCaml's Gc statistics/control, Dynlink plugins and the debugger are not
+// - OCaml's Gc statistics/control and Dynlink plugins are not
 //   available: those natives fail with "... is not supported by haxe-in-haxe".
 //   Gc collection requests run the host collector when there is one.
 // - `StdLock` waits on the condition's own mutex (host `sys.thread.Condition`
@@ -832,14 +832,17 @@ class StdContext {
 	public static final addBreakpoint = EvalEncode.vfun2((file, line) -> {
 		var file = EvalDecode.decodeString(file);
 		var line = EvalDecode.decodeInt(line);
-		// port: EvalDebugMisc.add_breakpoint: the debugger is not ported
-		EvalStdLibA.notSupported("The Eval debugger (breakpoints)");
+		try {
+			EvalDebugMisc.addBreakpoint(EvalContext.getCtx(), file, line, BPAny, null);
+		} catch (_:core.ds.NotFound) {
+			EvalContext.excString("Could not find file " + file);
+		}
 		return VNull;
 	});
 
 	public static final breakHere = EvalEncode.vfun0(() -> {
 		if (!EvalContext.getCtx().debug.supportDebugger) return VNull;
-		else return EvalStdLibA.notSupported("The Eval debugger (breakHere)");
+		else throw new EvalDebugMisc.BreakHere();
 	});
 
 	public static final callMacroApi = EvalEncode.vfun1(f -> {

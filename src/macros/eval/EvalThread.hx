@@ -8,8 +8,6 @@ import macros.eval.EvalContext;
 //   mutex); `dmutex` is not used by these functions.
 // - `ctx.next_thread_id` and `ctx.evals` are plain fields guarded by
 //   `threadLock` (upstream: an `Atomic.t` and a `ThreadSafeHashtbl`).
-// - The debugger is not ported, so no thread events are sent and the eval's
-//   breakpoint is a fresh disabled one (evalDebugMisc.ml `make_breakpoint`).
 // - OCaml domains (`spawn_domain`) and threads both become host threads,
 //   which run Eval code holding `EvalLock` (OCaml's runtime lock).
 class Deque {
@@ -48,25 +46,26 @@ class Deque {
 class EvalThread {
 	static final threadLock = new sys.thread.Mutex();
 
-	// port: evalDebugMisc.ml `breakpoint_id`
-	static var breakpointId = 0;
-
 	public static function createEval(tthread:Vthread):Eval {
 		threadLock.acquire();
-		breakpointId++;
-		var id = breakpointId;
+		var breakpoint = EvalDebugMisc.makeBreakpoint(0, 0, BPDisabled, BPAny, null);
 		threadLock.release();
-		var eval = new Eval(tthread, new Breakpoint(id, 0, 0, BPAny, null, BPDisabled));
+		var eval = new Eval(tthread, breakpoint);
 		return eval;
 	}
 
 	public static function run(ctx:Context, tthread:Vthread, f:Void->Value):Void {
 		var newEval = createEval(tthread);
 		var id = tthread.threadId;
-		// port: the debug socket is not ported: no thread events
-		inline function maybeSendThreadEvent(reason:String):Void {}
+		function maybeSendThreadEvent(reason:String):Void {
+			switch ctx.debug.debugSocket {
+				case null:
+				case socket:
+					socket.connection.sendThreadEvent(id, reason);
+			}
+		}
 		threadLock.acquire();
-		ctx.evals.set(id, newEval);
+		ctx.evals.add(id, newEval);
 		threadLock.release();
 		EvalContext.setEval(ctx, newEval);
 		inline function close():Void {

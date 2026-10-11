@@ -4,8 +4,16 @@
 // haxe/src/macro/eval/evalSsl.ml.
 //
 // Contexts are T_NATIVE objects whose slot 0 holds the malloc'ed mbedtls
-// context. They are not registered with rt_native_new, so contexts are never
-// freed (upstream frees them from OCaml custom-block finalizers).
+// context, registered with rt_native_new_refs: the collector frees them once
+// unreachable (upstream frees them from OCaml custom-block finalizers, which
+// call mbedtls_*_free but not free()). Deviations, for memory safety:
+// - a context's reference slots keep alive what mbedtls keeps pointers to: a
+//   configuration its CtrDrbg and CA chain, a CtrDrbg its entropy, an Ssl its
+//   configuration (upstream relies on the Haxe side keeping them reachable);
+// - X509Crt.next and Ssl.get_peer_cert return borrowed certificates, which
+//   are not freed but keep their owner alive (upstream gives them the
+//   owning finalizer, which would free a chain's tail or the session's peer
+//   certificate).
 //
 // Deviation: upstream's BIO callbacks call OCaml's Unix.send/Unix.recv, whose
 // Unix_error escapes through mbedtls. Here the BIO is C send/recv on the
@@ -16,6 +24,7 @@
 // -DHXC_NO_SSL builds stubs that fail (builds without libmbedtls).
 #define _GNU_SOURCE
 #include "rt.h"
+#include "rt_gc.h"
 #include <stdlib.h>
 
 #define BYTES_LEN(b) (((int32_t *)(b))[0])
@@ -85,10 +94,45 @@ int32_t hxc_NativeSsl_bioErrorSend(void *ssl) NO_I
 
 #define PTR(o) FP(o, 0)
 
-static void *wrap(void *p) {
-	void *o = rt_alloc(1, T_NATIVE, K_RAW);
+// a borrowed pointer into owner's resource: slot 1 keeps owner alive
+static void *borrow(void *p, void *owner) {
+	void **f = rt_push(1);
+	f[0] = owner;
+	void *o = rt_alloc(2, T_NATIVE, K_PARR);
 	PTR(o) = p;
+	FP(o, 1) = NULL;
+	rt_set_ptr(o, &FP(o, 1), f[0]);
+	rt_sp = f;
 	return o;
+}
+
+// the reference slots of each context (rt_native_new_refs)
+#define CTR_REF_ENTROPY 1
+#define CONF_REF_RNG 1
+#define CONF_REF_CA 2
+#define SSL_REF_CONF 1
+
+static void set_ref(void *o, int slot, void *v) { rt_set_ptr(o, &FP(o, slot), v); }
+
+static void free_ctr_drbg(void *p) {
+	mbedtls_ctr_drbg_free(p);
+	free(p);
+}
+static void free_entropy(void *p) {
+	mbedtls_entropy_free(p);
+	free(p);
+}
+static void free_x509_crt(void *p) {
+	mbedtls_x509_crt_free(p);
+	free(p);
+}
+static void free_ssl_config(void *p) {
+	mbedtls_ssl_config_free(p);
+	free(p);
+}
+static void free_pk(void *p) {
+	mbedtls_pk_free(p);
+	free(p);
 }
 
 static void *str_of_c(const char *s, size_t n) { return hx_str_of_utf8(s, (int32_t)n); }
@@ -113,7 +157,7 @@ void *hxc_NativeSsl_strerror(int32_t code) {
 void *hxc_NativeSsl_ctrDrbgInit(void) {
 	mbedtls_ctr_drbg_context *ctr_drbg = malloc(sizeof(mbedtls_ctr_drbg_context));
 	mbedtls_ctr_drbg_init(ctr_drbg);
-	return wrap(ctr_drbg);
+	return rt_native_new_refs(ctr_drbg, free_ctr_drbg, 1);
 }
 
 int32_t hxc_NativeSsl_ctrDrbgRandom(void *ctx, void *output, int32_t len) {
@@ -121,6 +165,7 @@ int32_t hxc_NativeSsl_ctrDrbgRandom(void *ctx, void *output, int32_t len) {
 }
 
 int32_t hxc_NativeSsl_ctrDrbgSeed(void *ctx, void *entropy) {
+	set_ref(ctx, CTR_REF_ENTROPY, entropy);
 	return mbedtls_ctr_drbg_seed(PTR(ctx), mbedtls_entropy_func, PTR(entropy), NULL, 0);
 }
 
@@ -129,7 +174,7 @@ int32_t hxc_NativeSsl_ctrDrbgSeed(void *ctx, void *entropy) {
 void *hxc_NativeSsl_entropyInit(void) {
 	mbedtls_entropy_context *entropy = malloc(sizeof(mbedtls_entropy_context));
 	mbedtls_entropy_init(entropy);
-	return wrap(entropy);
+	return rt_native_new(entropy, free_entropy);
 }
 
 // Certificate
@@ -137,13 +182,13 @@ void *hxc_NativeSsl_entropyInit(void) {
 void *hxc_NativeSsl_x509CrtInit(void) {
 	mbedtls_x509_crt *x509_crt = malloc(sizeof(mbedtls_x509_crt));
 	mbedtls_x509_crt_init(x509_crt);
-	return wrap(x509_crt);
+	return rt_native_new(x509_crt, free_x509_crt);
 }
 
 void *hxc_NativeSsl_x509Next(void *chain) {
 	mbedtls_x509_crt *cert = PTR(chain);
 	if (cert->next == NULL) return NULL;
-	return wrap(cert->next);
+	return borrow(cert->next, chain);
 }
 
 int32_t hxc_NativeSsl_x509CrtParse(void *chain, void *bytes) {
@@ -313,17 +358,23 @@ int32_t hxc_NativeSsl_certLoadDefaults(void *certificate) {
 void *hxc_NativeSsl_configInit(void) {
 	mbedtls_ssl_config *ssl_config = malloc(sizeof(mbedtls_ssl_config));
 	mbedtls_ssl_config_init(ssl_config);
-	return wrap(ssl_config);
+	return rt_native_new_refs(ssl_config, free_ssl_config, 2);
 }
 
 void hxc_NativeSsl_confAuthmode(void *conf, int32_t authmode) { mbedtls_ssl_conf_authmode(PTR(conf), authmode); }
-void hxc_NativeSsl_confCaChain(void *conf, void *ca_chain) { mbedtls_ssl_conf_ca_chain(PTR(conf), PTR(ca_chain), NULL); }
+void hxc_NativeSsl_confCaChain(void *conf, void *ca_chain) {
+	set_ref(conf, CONF_REF_CA, ca_chain);
+	mbedtls_ssl_conf_ca_chain(PTR(conf), PTR(ca_chain), NULL);
+}
 
 int32_t hxc_NativeSsl_configDefaults(void *conf, int32_t endpoint, int32_t transport, int32_t preset) {
 	return mbedtls_ssl_config_defaults(PTR(conf), endpoint, transport, preset);
 }
 
-void hxc_NativeSsl_confRng(void *conf, void *p_rng) { mbedtls_ssl_conf_rng(PTR(conf), mbedtls_ctr_drbg_random, PTR(p_rng)); }
+void hxc_NativeSsl_confRng(void *conf, void *p_rng) {
+	set_ref(conf, CONF_REF_RNG, p_rng);
+	mbedtls_ssl_conf_rng(PTR(conf), mbedtls_ctr_drbg_random, PTR(p_rng));
+}
 
 // Pk: ml_mbedtls_pk_parse_* return the C int without Val_int, so OCaml reads
 // the result as an immediate (r asr 1); the error codes Eval sees are halved.
@@ -332,7 +383,7 @@ void hxc_NativeSsl_confRng(void *conf, void *p_rng) { mbedtls_ssl_conf_rng(PTR(c
 void *hxc_NativeSsl_pkInit(void) {
 	mbedtls_pk_context *pk_context = malloc(sizeof(mbedtls_pk_context));
 	mbedtls_pk_init(pk_context);
-	return wrap(pk_context);
+	return rt_native_new(pk_context, free_pk);
 }
 
 int32_t hxc_NativeSsl_pkParseKey(void *ctx, void *key, void *password, void *rng) {
@@ -387,18 +438,24 @@ typedef struct {
 	int bio_send; // the failure was in send (else recv)
 } hx_ssl;
 
+static void free_ssl(void *p) {
+	hx_ssl *s = p;
+	mbedtls_ssl_free(&s->ssl);
+	free(s);
+}
+
 void *hxc_NativeSsl_sslInit(void) {
 	hx_ssl *s = calloc(1, sizeof(hx_ssl));
 	mbedtls_ssl_init(&s->ssl);
 	s->fd = -1;
-	return wrap(s);
+	return rt_native_new_refs(s, free_ssl, 1);
 }
 
 void *hxc_NativeSsl_sslGetPeerCert(void *ssl) {
 	hx_ssl *s = PTR(ssl);
 	mbedtls_x509_crt *crt = (mbedtls_x509_crt *)mbedtls_ssl_get_peer_cert(&s->ssl);
 	if (crt == NULL) return NULL;
-	return wrap(crt);
+	return borrow(crt, ssl);
 }
 
 int32_t hxc_NativeSsl_sslHandshake(void *ssl) {
@@ -482,6 +539,7 @@ int32_t hxc_NativeSsl_sslSetHostname(void *ssl, void *hostname) {
 
 int32_t hxc_NativeSsl_sslSetup(void *ssl, void *conf) {
 	hx_ssl *s = PTR(ssl);
+	set_ref(ssl, SSL_REF_CONF, conf);
 	return mbedtls_ssl_setup(&s->ssl, PTR(conf));
 }
 

@@ -479,14 +479,14 @@ class Args {
 		if (Defines.rawDefined(com.defines, "gen_hx_classes")) {
 			actx.forceTyping = true;
 			actx.preCompilation.unshift(function() {
-				// port: the two library lists have distinct types; the flag and module list are passed in.
-				function processLib(isStd:Bool, modules:Void->Array<GlobalTypePath>) {
-					if (!isStd)
-						for (path in modules()) if (!(path.pack.length == 2 && path.pack[0] == "java" && path.pack[1] == "lang" && path.name == "String"))
-							actx.classes.unshift(path);
+				function processLib(lib:context.NativeLibraries.NativeLibrary<Dynamic, Dynamic>) {
+					if (!lib.hasFlag(context.NativeLibraries.NativeLibFlags.FlagIsStd))
+						for (path in lib.listModules())
+							if (!(path.pack.length == 2 && path.pack[0] == "java" && path.pack[1] == "lang" && path.name == "String"))
+								actx.classes.unshift(path);
 				}
-				for (lib in com.nativeLibs.swfLibs) processLib(lib.hasFlag(context.NativeLibraries.NativeLibFlags.FlagIsStd), () -> lib.listModules());
-				for (lib in com.nativeLibs.javaLibs) processLib(lib.hasFlag(context.NativeLibraries.NativeLibFlags.FlagIsStd), () -> lib.listModules());
+				for (lib in com.nativeLibs.swfLibs) processLib(cast lib);
+				for (lib in com.nativeLibs.javaLibs) processLib(cast lib);
 			});
 			actx.xmlOut = "hx";
 		}
