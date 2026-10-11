@@ -38,7 +38,7 @@ jobs:
       OPAMYES: 1
       PLATFORM: linux64
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           submodules: true
 
@@ -48,7 +48,7 @@ jobs:
 
       - name: Cache the reference compiler
         id: cache-haxe
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: haxe/haxe
           key: haxe-${{ runner.os }}-${{ runner.arch }}-${{ env.OCAML_VERSION }}-${{ steps.ref.outputs.rev }}
@@ -61,7 +61,7 @@ jobs:
       - name: Cache opam
         if: steps.cache-haxe.outputs.cache-hit != 'true'
         id: cache-opam
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.opam/
           key: opam-${{ runner.os }}-${{ runner.arch }}-${{ env.OCAML_VERSION }}-${{ hashFiles('haxe/haxe.opam') }}
@@ -86,7 +86,7 @@ jobs:
           eval $(opam env)
           make -C haxe -s -j"$(nproc)" haxe
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
 
@@ -111,7 +111,7 @@ jobs:
           tar czf dist/port-c.tar.gz -C bin/hxc/hih prog_hxc
           tar czf dist/std.tar.gz -C haxe std
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: port-c
           path: dist/
@@ -134,8 +134,8 @@ jobs:
           - name: macos-aarch64
             target: aarch64-macos
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
         with:
           name: port-c
           path: dist
@@ -167,7 +167,7 @@ jobs:
           EOF
           tar czf "$P.tar.gz" -C pkg "$P"
           ls -l "$P.tar.gz"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: haxe-in-haxe-${{ matrix.name }}
           path: haxe-in-haxe-${{ matrix.name }}.tar.gz
@@ -178,14 +178,14 @@ jobs:
     needs: generate
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
         with:
           name: port-c
           path: dist
       - name: Cache cosmocc
         id: cache-cosmocc
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/cosmocc
           key: cosmocc-${{ env.COSMOCC_VERSION }}
@@ -204,7 +204,7 @@ jobs:
           sudo sh -c "echo ':APE-jart:M::jartsr::/usr/bin/ape:' > /proc/sys/fs/binfmt_misc/register" || true
           echo "$HOME/cosmocc/bin" >> "$GITHUB_PATH"
       - name: Cache mbedtls and libuv
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: bin/cosmo-deps
           key: cosmo-deps-${{ env.COSMOCC_VERSION }}-${{ hashFiles('hxc/tools/cosmo-deps.sh', 'hxc/tools/cosmo-patches/*') }}
@@ -216,6 +216,7 @@ jobs:
           mkdir -p bin/hxc/hih
           tar xzf dist/port-c.tar.gz -C bin/hxc/hih
           D=bin/cosmo-deps
+          mkdir -p bin/cosmo
           RT="rt rt_dyn rt_std rt_str rt_sys rt_net rt_ssl rt_uv rt_thread rt_census"
           CC="cosmocc -O2" CFLAGS="-w -fno-strict-aliasing -DHXC_CONST_IDS -I$D/include" \
             LIBS="-lm -L$D/lib -lmbedtls -lmbedx509 -lmbedcrypto -luv" RT_FILES="$RT" \
@@ -246,7 +247,7 @@ jobs:
           EOF
           (cd pkg && zip -qr -9 "../out/$P.zip" "$P")
           ls -l out
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: haxe-in-haxe-cosmo
           path: out/
@@ -280,13 +281,13 @@ jobs:
       run:
         shell: bash
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           sparse-checkout: hxc/tools
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: ${{ (matrix.pkg == 'com' || startsWith(matrix.pkg, 'windows')) && 'haxe-in-haxe-cosmo' || format('haxe-in-haxe-{0}', matrix.pkg) }}
           path: dl
@@ -345,7 +346,7 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       GH_REPO: ${{ github.repository }}
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           pattern: haxe-in-haxe-*
           path: assets
