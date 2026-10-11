@@ -21,15 +21,14 @@ import core.Globals.*;
 import coro.CoroTypes;
 import coro.CoroFunctions.*;
 
-// haxe/src/coro/coroFromTexpr.ml — mechanical draft; not compile-validated.
 enum CoroRet {
 	RLocal(v:TVar);
 	RTerminate(f:CoroBlock->TExpr->Void);
 	RValue;
 	RBlock;
 	RMapExpr(ret:CoroRet, f:TExpr->TExpr);
-	RTailBlock;
-	RTailReturn;
+	RTailBlock; // tail call in block/void position
+	RTailReturn; // tail call in return position
 }
 
 enum MapSuspensionResult {
@@ -46,6 +45,8 @@ private typedef BlockValue = {var cb:CoroBlock; var e:TExpr;}
 class CoroFromTexpr {
 	public static var eNoValue:TExpr = Builder.makeNull(tDynamic, nullPos);
 
+	// Extract the @:coroutine outcome config from a callee expression.
+	// Handles all field access variants and local variables.
 	public static function getOutcomeFromCallee(e1:TExpr):coro.CoroConfig.CoroOutcome {
 		var meta = switch Texpr.skip(e1).eexpr {
 			case TField(_, FStatic(_, cf)) | TField(_, FInstance(_, _, cf)) | TField(_, FClosure(_, cf)) | TField(_, FAnon(cf)): cf.cfMeta;
@@ -84,6 +85,7 @@ class CoroFromTexpr {
 
 	public static function exprToCoro(ctx:CoroCtx, etmpResult:AtomicLazy<TExpr>, etmpErrorUnwrapped:AtomicLazy<TExpr>, cbRoot:CoroBlock,
 			scope:Null<CoroScope>, deferred:CoroDeferredApi, e:TExpr):Null<BlockValue> {
+		// TODO : Not have this be copy and pasted from capturedVars with slight modifications
 		var wrapper = ctx.typer.com.localWrapper;
 		var scom = SafeCom.ofCom(ctx.typer.com);
 		scom = {
@@ -99,6 +101,7 @@ class CoroFromTexpr {
 		inline function makeBlock(tp:Null<{t:T, p:core.Globals.Pos}>):CoroBlock return CoroFunctions.makeBlock(ctx, tp);
 		inline function blockFromE(e:TExpr):CoroBlock return makeBlock({t: e.etype, p: e.epos});
 		inline function hasSideEffect(e:TExpr):Bool return switch e.eexpr {
+			// has_side_effect doesn't consider var declarations a side effect which may just be wrong
 			case TVar(_, _): true;
 			case _: OptimizerTexpr.hasSideEffect(e);
 		};
@@ -119,6 +122,13 @@ class CoroFromTexpr {
 					{e: Builder.makeLocal(v, v.vPos), ret: RLocal(v)};
 				case RLocal(v): {e: Builder.makeLocal(v, v.vPos), ret: ret};
 				case RMapExpr(inner, f):
+					// When a complex expression (&&/||, switch, try) is wrapped by TParenthesis
+					// or TCast, `ret` becomes `RMapExpr(inner_ret, f)`.  Without special
+					// handling this falls through to `| _ ->` and returns e_no_value, so no
+					// temp variable is allocated and the result is lost (manifests as `!null`
+					// in the generated while-condition state).
+					// Fix: recurse into inner_ret to allocate the temp var as usual, then
+					// apply f to produce the correctly-wrapped expression for the caller.
 					var r = checkComplex(cb, inner, t, p);
 					r.e == eNoValue ? {e: eNoValue, ret: RMapExpr(r.ret, f)} : {e: f(r.e), ret: r.ret};
 				case _: {e: eNoValue, ret: ret};
@@ -134,6 +144,8 @@ class CoroFromTexpr {
 				var c = CoroScopeConfig.ofMetaList(meta);
 				return c != null && c.restrictedSuspension;
 			}
+			// Allow calls where the scope var is the first argument because that's what happens when
+			// using `scope.staticExtension()`.
 			inline function hasScopeLocalFirstArgument():Bool {
 				if (args.length == 0 || el.length == 0 || !isScopeLocalExpr(el[0])) return false;
 				return switch e1.eexpr {
@@ -147,7 +159,7 @@ class CoroFromTexpr {
 			}
 			return isScopeLocalExpr(e1) || hasScopeLocalFirstArgument();
 		}
-		inline function scopeAllowsAccessTo(v:TVar):Bool return scope == null || scope.scopeVar == v;
+		inline function scopeAllowsAccessTo(v:TVar):Bool return scope == null || scope.scopeVar == v; // I think?
 		inline function isCoro(e:TExpr):Bool return switch followWithCoro(e.etype) {
 			case Coro({args: _, ret: _}): true;
 			case _: false;
@@ -170,15 +182,22 @@ class CoroFromTexpr {
 						csKind: getOutcomeFromCallee(e1)
 					});
 				case TReturn(null): deferred.makeInlineReturn(null, e.epos);
+				// `return suspensionCall()` — if `e1` is a coro call, delegate to
+				// the TCall arm (which may inline it as a TCO tail call or raise
+				// Found). We must not wrap with make_inline_return in that case,
+				// because make_inline_tail_call already handles the return.
 				case TReturn(e1): switch e1.eexpr {
 						case TCall(efun, _) if (isCoro(efun)): remap(canTco, loopDepth, e1);
 						case _: deferred.makeInlineReturn(remap(false, loopDepth, e1), e.epos);
 					}
+				// TODO: too much of a special case for now, let's bail until the rest works
 				case TThrow(_): throw new FoundSuspension();
+				// Breaking or continuing while we're in block mode means we need to stay in block mode
 				case TBreak | TContinue if (loopDepth == 0): throw new FoundSuspension();
 				case TBlock([]): e;
 				case TBlock(el):
-					// remap_block conses `remap hd :: remap_block tl`: OCaml remaps the tail first (the deferred
+					// Only the last element of a block is in tail position.
+					// port: remap_block conses `remap hd :: remap_block tl`: OCaml remaps the tail first (the deferred
 					// expressions allocate variables, and a later suspension aborts the mapping)
 					var out = [for (_ in el) null];
 					var i = el.length;
@@ -209,6 +228,9 @@ class CoroFromTexpr {
 						recordCopy31;
 					};
 				case TTry(e1, catches):
+					// The try body has a catch handler (this TTry's), so no TCO there.
+					// The catch bodies don't have a catch handler from this TTry node,
+					// so they inherit can_tco from the outer context.
 					var e1 = remap(false, loopDepth, e1);
 					var catches = catches.map(function(c) return {variable: c.variable, expr: remap(canTco, loopDepth, c.expr)});
 					{var recordCopy29 = core.ds.Record.copy(e); recordCopy29.eexpr = TTry(e1, catches); recordCopy29;};
@@ -322,6 +344,8 @@ class CoroFromTexpr {
 				return {v: c.variable, cb: b};
 			});
 			var catchBlock = makeBlock(null);
+			// This block is handled in a special way in the texpr transformer, let's mark it as
+			// already generated so we don't generate it twice.
 			addBlockFlag(catchBlock, CbGenerated);
 			var old = ctx.currentCatch;
 			ctx.currentCatch = catchBlock;
@@ -337,13 +361,16 @@ class CoroFromTexpr {
 		loop = function(cb, ret, e) {
 			inline function mapped(r:Null<BlockValue>, f:TExpr->TExpr):Null<BlockValue> return r == null ? null : {cb: r.cb, e: f(r.e)};
 			return switch e.eexpr {
+				// special cases
 				case TConst(TThis): {cb: cb, e: deferred.makeThis(e)};
 				case TField({eexpr: TConst(TSuper)}, _): {cb: cb, e: deferred.makeSuperField(e)};
 				case TBlock([]): {cb: cb, e: e};
 				case TLocal(v) if (hasVarFlag(v,
 					VCoroScope) && !scopeAllowsAccessTo(v)): Error.raiseTypingError("Invalid usage of a coroutine scope in a different coroutine scope",
 						e.epos);
+				// simple values
 				case TConst(_) | TLocal(_) | TTypeExpr(_) | TIdent(_): {cb: cb, e: e};
+				// compound values
 				case TBlock([e1]): loop(cb, ret, e1);
 				case TBlock(_): switch mapSuspension(cb, ret, e) {
 						case HasNoSuspension(e): {cb: cb, e: e};
@@ -405,6 +432,7 @@ class CoroFromTexpr {
 							recordCopy21;
 						}
 					};
+				// rewrites & forwards
 				case TCast(e1, o):
 					function f(e1:TExpr):TExpr return {
 						var recordCopy20 = core.ds.Record.copy(e);
@@ -424,6 +452,7 @@ class CoroFromTexpr {
 						recordCopy18.eexpr = TMeta(meta, e1);
 						recordCopy18;
 					});
+				// TODO: is this right?
 				case TUnop(op, flag, e1): mapped(loop(cb, ret, e1), function(e1) return {
 						var recordCopy17 = core.ds.Record.copy(e);
 						recordCopy17.eexpr = TUnop(op, flag, e1);
@@ -437,10 +466,14 @@ class CoroFromTexpr {
 				case TBinop(op = (OpBoolOr | OpBoolAnd), e1, e2): switch mapSuspension(cb, ret, e) {
 						case HasNoSuspension(e): {cb: cb, e: e};
 						case HasSuspension:
+							// At least one operand has a suspension call; desugar to if/else for correct short-circuit semantics:
+							// a || b  →  if (a) true else b
+							// a && b  →  if (a) b else false
 							var thenE = op == OpBoolOr ? mk(TConst(TBool(true)), e.etype, e.epos) : e2;
 							var elseE = op == OpBoolOr ? e2 : mk(TConst(TBool(false)), e.etype, e.epos);
 							splitIfThenElse(cb, ret, e.etype, e.epos, e1, thenE, elseE);
 					}
+				// TODO: OpAssignOp and other OpAssign
 				case TBinop(op, e1, e2):
 					var r = loop(cb, RValue, e1);
 					if (r == null) null; else {
@@ -457,12 +490,14 @@ class CoroFromTexpr {
 							}
 						};
 					}
+				// variables
 				case TVar(v, null):
 					addExpr(cb, e);
 					{cb: cb, e: eNoValue};
 				case TVar(v, e1):
 					addExpr(cb, {var recordCopy14 = core.ds.Record.copy(e); recordCopy14.eexpr = TVar(v, null); recordCopy14;});
 					loopAssign(cb, RLocal(v), e1);
+				// calls
 				case TCall(e1, el):
 					var r = orderedLoop(cb, [e1].concat(el));
 					if (r == null) null; else {
@@ -475,6 +510,8 @@ class CoroFromTexpr {
 								if (!scopeAllowsSuspensionCallOn(e1, args,
 									argsExprs)) Common.displayError(ctx.typer.com,
 										"Invalid suspension call in restricted suspension scope", e.epos);
+								// Because of hoisting requirements, we want to temp var anything that has a side-effect
+								// or could be affected by one.
 								var affection = OptimizerTexpr.createAffectionChecker();
 								argsExprs = argsExprs.map(function(e) {
 									var effect = hasSideEffect(e);
@@ -498,6 +535,8 @@ class CoroFromTexpr {
 									case _: false;
 								}) && cb.cbCatch == null && !ctx.typer.com.debug;
 								if (kind.noSuspend) {
+									// For a Never-suspending callee in TCO tail position, keep the
+									// existing tail-call optimisation (single-state, no resume block).
 									if (isTco) {
 										var s = ({
 											csFun: e1,
@@ -509,6 +548,8 @@ class CoroFromTexpr {
 										terminate(cb, NextSuspend(s, null), tDynamic, nullPos);
 										null;
 									} else {
+										// Inline path: add the call as a statement in the current block,
+										// no new state is created.
 										var needsResult = switch ret {
 											case RBlock | RTailBlock: false;
 											case _: true;
@@ -567,11 +608,12 @@ class CoroFromTexpr {
 								};
 						}
 					}
+				// terminators
 				case TBreak:
-					if (loopStack.length > 0) terminate(cb, NextBreak((loopStack[0].next).force()), e.etype, e.epos);
+					if (loopStack.length > 0) terminate(cb, NextBreak((loopStack[0].next).force()), e.etype, e.epos); // Ignore, this failed during typing already.
 					null;
 				case TContinue:
-					if (loopStack.length > 0) terminate(cb, NextContinue(loopStack[0].body), e.etype, e.epos);
+					if (loopStack.length > 0) terminate(cb, NextContinue(loopStack[0].body), e.etype, e.epos); // Ignore, this failed during typing already.
 					null;
 				case TReturn(null):
 					terminate(cb, NextReturnVoid, e.etype, e.epos);
@@ -585,6 +627,7 @@ class CoroFromTexpr {
 					var r = loopAssign(cb, ret, e1);
 					if (r != null) terminate(r.cb, NextThrow(r.e), e.etype, e.epos);
 					null;
+				// branching
 				case TIf(e1, e2, null):
 					var r = loop(cb, RValue, e1);
 					r == null ? null : switch mapSuspension(r.cb, ret, e2) {
@@ -631,7 +674,7 @@ class CoroFromTexpr {
 				case TWhile(e1, e2,
 					flag) if (!isTrueExpr(e1)): loop(cb, ret,
 						Texpr.notWhileTrueToWhileTrue(ctx.typer.com.basic, e1, e2, flag, e.etype, e.epos));
-				case TWhile(e1, e2, flag): switch mapSuspension(cb, RBlock, e2) {
+				case TWhile(e1, e2, flag): switch mapSuspension(cb, RBlock, e2) { // always while(true)
 						case HasNoSuspension(e2):
 							addExpr(cb, {var recordCopy7 = core.ds.Record.copy(e); recordCopy7.eexpr = TWhile(e1, e2, flag); recordCopy7;});
 							{cb: cb, e: eNoValue};

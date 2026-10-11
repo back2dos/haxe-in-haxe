@@ -4,7 +4,6 @@ import core.Ast;
 import core.TType;
 import core.TFunctions as TypeOps;
 
-// haxe/src/filters/localUsage.ml — mechanical draft; not compiled or validated.
 enum Usage {
 	Block(visit:(Usage->Void)->Void);
 	Loop(visit:(Usage->Void)->Void);
@@ -51,7 +50,7 @@ class LocalUsage {
 		}
 	}
 
-	// Texpr.iter specialised to localUsage: a typed function passed to the generic
+	// port: Texpr.iter specialised to localUsage: a typed function passed to the generic
 	// Texpr.iterWith is wrapped in a new closure per call on HashLink.
 	static function iterLocalUsage(f:Usage->Void, e:TExpr):Void switch e.eexpr {
 		case TConst(_) | TLocal(_) | TBreak | TContinue | TTypeExpr(_) | TIdent(_):

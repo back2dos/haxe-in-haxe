@@ -6,7 +6,6 @@ import context.Common;
 import context.SafeCom;
 import core.Define;
 
-// haxe/src/filters/filtersCommon.ml — mechanical draft; not compiled or validated.
 class FiltersCommon {
 	public static function removeGenericBase(t:ModuleType):Void {
 		switch t {
@@ -16,6 +15,9 @@ class FiltersCommon {
 		}
 	}
 
+	/**
+		Check if `field` is overridden in subclasses
+	**/
 	public static function isOverridden(cls:TClass, field:TClassField):Bool {
 		function loopInheritance(c:TClass):Bool {
 			return c.clFields.exists(field.cfName) || core.ds.ArrayTools.exists(c.clDescendants, loopInheritance);

@@ -23,12 +23,14 @@ import coro.ContTypes;
 import coro.CoroToTexpr;
 import coro.CoroElsewhere.TexprBuilder;
 
-// haxe/src/coro/coro.ml — mechanical draft; not compile-validated.
 typedef CoroCls = {var params:TypeParams; var paramTypes:Array<T>; var clsT:T; var resultType:T; var contType:T;}
+// inside = inside the continuation class
+// outside = in the original function
 typedef CoroClass = {var cls:TClass; var namePos:Pos; var inside:CoroCls; var outside:CoroCls; var typeParamSubst:Array<{param:TypedTypeParam, t:T}>; var coroType:CoroFor; var continuationApi:ContinuationApi;}
 
 class ContinuationClassBuilder {
 	public static function create(ctx:CoroCtx):CoroClass {
+		// Mangle class names to hopefully get unique names and avoid collisions
 		var path = ctx.typer.c.curclass.clPath;
 		var mangled = 'HxCoro_${path.pack.join("_")}_${path.name}';
 		var name:String;
@@ -47,18 +49,20 @@ class ContinuationClassBuilder {
 		var p = ctx.classNamePos;
 		if (ExtType.isVoid(follow(result))) result = ctx.typer.t.tunit;
 		var mod = ctx.typer.m.curmod;
+		// Is there a pre-existing function somewhere to a valid path?
 		var cp:core.Globals.GlobalTypePath = {pack: mod.mPath.pack.concat(["_" + mod.mPath.name]), name: name};
 		var cls = mkClass(mod, cp, p, p);
 		var outside:TypeParams = ctx.typer.typeParams;
 		var inside = outside.map(function(ttp) {
+			// TODO: this duplicates clone_type_parameter
 			var c = {
 				var recordCopy5 = core.ds.Record.copy(ttp.ttpClass);
 				recordCopy5.clPath = {pack: [], name: ttp.ttpName};
 				recordCopy5;
 			};
 			var constraints = ttp.ttpConstraints == null ? null : AtomicLazy.fromFun(function() return (ttp.ttpConstraints).force()
-				.map(function(t) return t));
-			return mkTypeParam(c, TPHType, ttp.ttpDefault, constraints);
+				.map(function(t) return t)); // TODO: ?
+			return mkTypeParam(c, TPHType, ttp.ttpDefault, constraints); // !!!
 		});
 		cls.clParams = inside;
 		var api:ContinuationApi = ctx.typer.g.continuationApi;
@@ -105,10 +109,13 @@ class ContinuationClassBuilder {
 			var v = allocVar(VGenerated, "_hx_captured", captured.cfType, p);
 			capture = {v: v, e: b.assign(thisField(captured), b.local(v, p))};
 		}
+		// For the inline path (no captures), function arguments are passed as constructor parameters
+		// so the thin wrapper can be a single  new Ctor(completion, arg1, ...).invokeResume()  call.
 		var hs = hoisted.map(function(h) {
 			var v = allocVar(VGenerated, h.name, h.field.cfType, p);
 			return {v: v, e: b.assign(thisField(h.field), b.local(v, p))};
 		});
+		// If the coroutine field is not static then our HxCoro class needs to capture this for future resuming
 		var el = [esuper].concat(hs.map(function(h) return h.e));
 		var funArgs:Array<{name:String, optional:Bool, type:T}> = [
 			{
@@ -236,18 +243,27 @@ class Coro {
 		var cont = cc.continuationApi;
 		var result = CoroToTexpr.blockToTexprCoroutine(ctx, root, cont, cc.cls, cc.outside.paramTypes, args, exprs, cc.namePos, stack,
 			startException);
+		// Check @:coroutine(assert) config — skip numStates assertion in debug mode
+		// because debug mode disables TCO which may add extra states.
 		if (!ctx.typer.com.debug) checkAssertions(ctx.config.assertConfig, result.numStates, result.fields.length, cc.namePos);
+		// update cf_type to use inside type parameters
 		for (cf in result.fields) {
 			cf.cfType = substituteTypeParams(cc.typeParamSubst, cf.cfType);
 			core.TOther.TClassTools.addField(cc.cls, cf);
 		}
 		var ret = cont.suspensionResult(cc.outside.resultType);
+		// In debug mode, insert an initial setStackItem call at the very start of
+		// invokeResume so that the continuation always has a valid stack item, even in
+		// single-state coroutines where no suspension call triggers setStackItem.
 		var eloop = b.voidBlock([stack(cc.namePos), result.expr]);
 		var invoke = switch mode {
 			case GenInline(_): ContinuationClassBuilder.mkInvokeResumeWithBody(ctx, cc, vcontinuation, vtmpResult, vtmpError,
 					vtmpErrorUnwrapped, exprs.eresult, eloop);
 			case GenThunk(cf): ContinuationClassBuilder.mkInvokeResumeThunkCall(ctx, cc, cf);
 		};
+		// Collect (orig_var, hoisted_field) pairs for function arguments that were hoisted
+		// into continuation fields.  These become constructor parameters for both the inline
+		// and thunk paths, so the constructor can assign them in one place.
 		var hoisted = [];
 		for (a in args) {
 			var v:TVar = a.variable;
@@ -257,11 +273,15 @@ class Coro {
 		createContinuationClass(ctx, cont, cc, result.initialState, invoke, mode, hoisted);
 		return switch mode {
 			case GenInline(captured):
+				// Inline path: pass hoisted args directly to the constructor and call invokeResume()
+				// on the result — no intermediate variable, no separate field assignments.
 				var ctorArgs = [exprs.ecompletion].concat(hoisted.map(function(h) return h.e)).concat(captured == null ? [] : [captured.e]);
 				var tnew = mk(TNew(cc.cls, cc.outside.paramTypes, ctorArgs), cc.outside.clsT, cc.namePos);
 				var einvoke = b.instanceField(tnew, cc.cls, cc.outside.paramTypes, invoke, TFun({args: [], ret: ret}));
 				b.makeReturn(b.call(einvoke, [], ret));
 			case GenThunk(_):
+				// Thunk path: build the closure that captures outer locals, allocate the continuation
+				// (passing hoisted args to the constructor), then call invokeResume().
 				var econt = b.local(vcontinuation, cc.namePos);
 				var invokeType = applyParams(cc.inside.params, cc.outside.paramTypes, invoke.cfType);
 				var call = b.call(b.instanceField(econt, cc.cls, cc.outside.paramTypes, invoke, invokeType), [], ret);
@@ -294,13 +314,19 @@ class Coro {
 			var name = "_hx_super_" + superCf.cfName;
 			var cf = curclass.clFields.get(name);
 			if (cf != null) return cf;
+			// Helper has same Coro type as the super method, so expr_to_coro will
+			// recognize it as a coroutine call and add the completion arg.
 			cf = mkField(name, superCf.cfType, p, p);
 			cf.cfKind = Method(MethNormal);
+			// Helper body: forwards all args (including completion) to super.X().
+			// We build the body in expanded form (explicit completion parameter)
+			// so it is never run through fun_to_coro again.
 			var expanded = switch followWithCoro(superCf.cfType) {
 				case Coro({args: args, ret: ret}): Common.expandCoroType(basic, args, ret);
 				case NotCoro(_): throw "super helper: expected Coro type";
 			};
 			var vars = [for (a in expanded.args) allocVar(VGenerated, a.name, a.type, p)];
+			// Expand the super field type so the TCall type-checks
 			var ecall = mk(TCall({
 				var recordCopy3 = core.ds.Record.copy(superExpr);
 				recordCopy3.etype = TFun({
@@ -336,10 +362,11 @@ class Coro {
 			ctx.deferredExprs.set(v.vId, build);
 			return b.call(b.local(v, v.vPos), [], t);
 		}
+		// These refs will be filled in after the continuation API is created (step 4).
 		var api:Null<CoroDeferredApi> = null;
 		var deferred:CoroDeferredApi = {
-			makeInlineReturn: function(e, p) return makeDeferred(function() return api.makeInlineReturn(e, p), tDynamic),
-			makeInlineTailCall: function(c) return makeDeferred(function() return api.makeInlineTailCall(c), tDynamic),
+			makeInlineReturn: function(e, p) return makeDeferred(function() return api.makeInlineReturn(e, p), tDynamic), // TODO: ?
+			makeInlineTailCall: function(c) return makeDeferred(function() return api.makeInlineTailCall(c), tDynamic), // TODO: ?
 			makeSyncCall: function(c, e) return makeDeferred(function() return api.makeSyncCall(c, e), tDynamic),
 			makeThis: function(e) return makeDeferred(function() return api.makeThis(e), e.etype),
 			makeSuperField: function(e) return makeDeferred(function() return api.makeSuperField(e), e.etype)
@@ -350,8 +377,12 @@ class Coro {
 	public static function funToCoro(ctx:CoroCtx):TExpr {
 		var basic:BasicTypes = ctx.typer.t;
 		var b = ctx.builder;
+		// 1. Setup continuation class
+
 		var cc = ContinuationClassBuilder.create(ctx);
 		var p = cc.namePos;
+		// 2. Create expressions and variables that we need for expr_to_coro
+
 		var vtmpResult = AtomicLazy.fromFun(function() return allocVar(VGenerated, "_hx_result", basic.tnull(basic.tany), p));
 		var etmpResult = AtomicLazy.fromFun(function() return b.local((vtmpResult).force(), p));
 		var vtmpError = allocVar(VGenerated, "_hx_error", basic.tnull(basic.texception), p);
@@ -377,13 +408,23 @@ class Coro {
 			scopeVar: args[0].variable,
 			restrictedSuspension: hasVarFlag(args[0].variable, VCoroRestrictedSuspension)
 		};
+		// 3. Run expr_to_coro to build the CFG and set ctx.captures_this/ctx.has_capture_vars.
+
 		var deferred = makeDeferredApi(ctx, b);
 		CoroFromTexpr.checkCaptures(ctx, args, expr);
 		CoroFromTexpr.exprToCoro(ctx, etmpResult, etmpErrorUnwrapped, root, scope, deferred.deferred, expr);
+		// Count the number of reachable CFG blocks.
 		var count = 0;
 		coroWalk(function(_) count++, root);
 		ctx.numStates = count;
+
+		// 4. Setup continuation API — now that ctx.captures_this/ctx.has_capture_vars are
+		//    fully set we can create the continuation variables with informed types.
+
 		var cont = cc.continuationApi;
+
+		// Determine the generation mode (inline vs. thunk) now that we know whether any
+		// outside variables are captured.
 		var retInside = cont.suspensionResult(cc.inside.resultType);
 		var mode = switch cc.coroType {
 			case ClassField(_, cf, _, _) if (hasClassFieldFlag(cf, CfStatic)): GenInline(null);
@@ -425,6 +466,8 @@ class Coro {
 		function stack(pos:Pos):TExpr {
 			if (!ctx.typer.com.debug) return b.voidBlock([]);
 			var field = PMap.find("setStackItem", cont.baseContinuationClass.clFields);
+			// setStackItem(kind, cls, func, id, file, line, column, pmin, pmax)
+			// kind: 0 = ClassFunction, 1 = LocalFunction
 			var args = switch ctx.coroType {
 				case ClassField(cls, cf, _, _): [
 						b.int(0, p),
@@ -432,7 +475,7 @@ class Coro {
 						b.string(cf.cfName, p),
 						b.int(0, p)
 					];
-				case LocalFunc(_, v): [b.int(1, p), b.string("", p), b.string("", p), b.int(v.vId, p)];
+				case LocalFunc(_, v): [b.int(1, p), b.string("", p), b.string("", p), b.int(v.vId, p)]; // Placeholder values for ClassFunction-only parameters.
 			};
 			var coords = Lexer.getPosCoords(pos);
 			args = args.concat([
@@ -444,6 +487,8 @@ class Coro {
 			]);
 			return mk(TCall(continuationField(field, field.cfType), args), basic.tvoid, p);
 		}
+		// 5. Fill in the deferred callback implementations now that the continuation API exists
+
 		var vgthis = AtomicLazy.fromFun(function() return allocVar(VGenerated, "_hx_this", ctx.typer.c.tthis, p));
 		var egthis = AtomicLazy.fromFun(function() return switch mode {
 			case GenThunk(_): b.local((vgthis).force(), p);
@@ -477,6 +522,8 @@ class Coro {
 			},
 			makeSuperField: function(e) return rewriteSuperField(ctx, (egthis).force(), e)
 		});
+		// 6. Transform blocks to state machine
+
 		var startException:TExpr->TExpr;
 		if (!ctx.typer.com.debug) startException = function(e) return e;
 		else {
@@ -486,8 +533,14 @@ class Coro {
 		}
 		var tfExpr = coroToStateMachine(ctx, cc, root, exprs, args, vtmpResult, vtmpError, vtmpErrorUnwrapped, vcompletion, vcontinuation,
 			mode, stack, startException);
+		// For non-static ClassField: prepend  var _hx_this = this  to the thin wrapper so the
+		// thunk (built inside coro_to_state_machine) can capture `_hx_this` via closure, making
+		// the original class instance accessible throughout the state machine.
 		if ((vgthis).isVal()) tfExpr = b.voidBlock([b.varInit((vgthis).force(), b.makeThis(ctx.typer.c.tthis, p)), tfExpr]);
 		var tfArgs = [{variable: vcompletion, defaultValue: null}].concat(args);
+		// I'm not sure what this should be, but let's stick to the widest one for now.
+		// Cpp dies if I try to use coro_class.outside.cls_t here, which might be something
+		// to investigate independently.
 		var tfType = cont.suspensionResult(cc.outside.resultType);
 		if (ctx.config.debug) {
 			Sys.println("BEFORE:\n" + core.TPrinting.sExprDebug(expr));

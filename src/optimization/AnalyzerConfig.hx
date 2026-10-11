@@ -46,7 +46,6 @@ enum DebugKind {
 		fusion, purityInference, debugKind, detailTimes, userVarFusion, fusionDebug);
 }
 
-// haxe/src/optimization/analyzerConfig.ml — mechanical draft; not compiled or validated.
 class AnalyzerConfig {
 	public static final flagOptimize = "optimize";
 	public static final flagConstPropagation = "const_propagation";

@@ -8,7 +8,6 @@ import core.Globals;
 import core.Globals.*;
 import coro.ContTypes;
 
-// haxe/src/coro/coroInit.ml — mechanical draft; not compile-validated.
 class CoroInit {
 	public static function loadModuleClass(ctx:context.Typecore.Typer, path:GlobalTypePath):TClass {
 		var m = ctx.g.doLoadModule(ctx, path, nullPos);

@@ -8,11 +8,13 @@ import core.Abstract;
 import context.SafeCom;
 import optimization.Inline;
 
-// haxe/src/filters/exception/exceptionFunctions.ml — mechanical draft; not compiled or validated.
 class ExceptionFunctions {
 	public static final haxeExceptionTypePath:GlobalTypePath = {pack: ["haxe"], name: "Exception"};
 	public static final valueExceptionTypePath:GlobalTypePath = {pack: ["haxe"], name: "ValueException"};
 
+	/**
+		Check if `cls` is or extends (if `check_parent=true`) `haxe.Exception`
+	**/
 	public static function isHaxeExceptionClass(cls:TClass, checkParent:Bool = true):Bool {
 		return cls.clPath.name == "Exception"
 			&& cls.clPath.pack.length == 1
@@ -22,6 +24,9 @@ class ExceptionFunctions {
 			&& isHaxeExceptionClass(cls.clSuper.cls, checkParent);
 	}
 
+	/**
+		Check if `t` is or extends `haxe.Exception`
+	**/
 	public static function isHaxeException(t:T, checkParent:Bool = true):Bool {
 		return switch Abstract.followWithAbstracts(t) {
 			case TInst(cls, _): isHaxeExceptionClass(cls, checkParent);

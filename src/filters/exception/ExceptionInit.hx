@@ -12,10 +12,9 @@ import context.Typecore;
 import filters.exception.Exceptions;
 import filters.exception.ExceptionFunctions;
 
-// haxe/src/filters/exception/exceptionInit.ml — mechanical draft; not compiled or validated.
 class ExceptionInit {
 	public static function createExceptionContext(tctx:Typer):Null<ExceptionContext> {
-		switch tctx.com.platform {
+		switch tctx.com.platform { // TODO: implement for all targets
 			case Cross | CustomTarget(_):
 				return null;
 			case Php | Js | Jvm | Python | Lua | Eval | Neko | Flash | Hl | Cpp:

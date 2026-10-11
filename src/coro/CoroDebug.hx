@@ -5,7 +5,6 @@ import core.StringHelper;
 import coro.CoroTypes;
 import coro.CoroFunctions.*;
 
-// haxe/src/coro/coroDebug.ml — mechanical draft; not compile-validated.
 class CoroDebug {
 	public static function createDotgraph(path:Array<String>, root:CoroBlock):Void {
 		Sys.println(path.join("."));

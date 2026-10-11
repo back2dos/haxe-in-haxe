@@ -8,8 +8,7 @@ import core.Error;
 import context.SafeCom;
 import haxe.ds.IntMap;
 
-// haxe/src/filters/safe/checkVarInit.ml — mechanical draft; not compiled or validated.
-// OCaml persistent maps become copied IntMaps at branch snapshots.
+// port: OCaml persistent maps become copied IntMaps at branch snapshots.
 class CheckVarInit {
 	public static function checkLocalVarsInit(scom:context.SafeCom.SafeContext, e:TExpr):TExpr {
 		inline function intersect(vl1:IntMap<Bool>, vl2:IntMap<Bool>):IntMap<Bool> {
@@ -23,6 +22,7 @@ class CheckVarInit {
 		var declared:Array<Int> = [];
 		var outsideVars = new IntMap<Bool>();
 		var vars = new IntMap<Bool>();
+		// Set variables which belong to current function
 		inline function setAllVars():Void {
 			for (id => isSet in vars) if (!outsideVars.exists(id)) vars.set(id, true);
 		}
@@ -57,6 +57,7 @@ class CheckVarInit {
 					var oldVars = vars.copy();
 					declared = [];
 					for (e in el) loop(e);
+					// restore variables declared in this block to their previous state
 					declared.reverse();
 					for (v in declared) if (oldVars.exists(v)) vars.set(v, oldVars.get(v));
 					else vars.remove(v);
@@ -64,6 +65,8 @@ class CheckVarInit {
 				case TBinop(OpAssign, {eexpr: TLocal(v)}, rhs) if (vars.exists(v.vId)):
 					switch Texpr.skip(rhs).eexpr {
 						case TFunction(_):
+							// We can be sure that the function doesn't execute immediately, so it's fine to
+							// consider the local initialized (issue #9919).
 							vars.set(v.vId, true);
 							loop(rhs);
 						case _:
@@ -76,6 +79,7 @@ class CheckVarInit {
 					loop(e2);
 					if (eo == null) vars = vbase;
 					else switch eo.eexpr {
+						// ignore else false cases (they are added by the side-effect handler)
 						case TConst(TBool(false)):
 						case _:
 							var v1 = vars;
@@ -128,6 +132,7 @@ class CheckVarInit {
 						loop(sw.switchDefault);
 						join(cvars);
 					}
+				// mark all reachable vars as initialized, since we don't exit the block
 				case TBreak | TContinue | TReturn(null):
 					setAllVars();
 				case TThrow(value) | TReturn(value):
@@ -135,6 +140,8 @@ class CheckVarInit {
 					setAllVars();
 				case TFunction(tf):
 					var old = outsideVars.copy();
+					// Mark all known variables as "outside" so we can ignore their initialization state within the function.
+					// We cannot use `vars` directly because we still care about initializations the function might make.
 					for (i in vars.keys()) outsideVars.set(i, true);
 					loop(tf.tfExpr);
 					outsideVars = old;

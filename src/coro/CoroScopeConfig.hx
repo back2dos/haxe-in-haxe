@@ -6,7 +6,6 @@ import core.data.DataReaderApi;
 import core.TFunctions.NotFound;
 import core.data.MetaDataApi;
 
-// haxe/src/coro/coroScopeConfig.ml — mechanical draft; not compile-validated.
 @:structInit class CoroScopeConfigData {
 	public var restrictedSuspension:Bool;
 
@@ -35,6 +34,10 @@ class CoroScopeConfigReader<Data> {
 class CoroScopeConfig {
 	public static function create():CoroScopeConfigData return {restrictedSuspension: false};
 
+	/**
+		Returns the coroutine scope config for a given metadata list, or `None` if
+		the type is not a coroutine scope.
+	**/
 	public static function ofMetaList(meta:Metadata):Null<CoroScopeConfigData> {
 		var entry;
 		try {

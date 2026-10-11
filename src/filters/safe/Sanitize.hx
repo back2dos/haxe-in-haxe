@@ -9,8 +9,19 @@ import core.Meta;
 import core.Abstract;
 import core.Error;
 
-// haxe/src/filters/safe/sanitize.ml — mechanical draft; not compiled or validated.
+// ----------------------------------------------------------------------
+// SANITIZE
+
+/*
+	makes sure that when an AST get generated to source code, it will not
+	generate expressions that evaluate differently. It is then necessary to
+	add parenthesises around some binary expressions when the AST does not
+	correspond to the natural operand priority order for the platform
+*/
 class Sanitize {
+	/*
+		this is the standard C++ operator precedence, which is also used by both JS and PHP
+	*/
 	public static function standardPrecedence(op:Binop):{priority:Int, left:Bool} {
 		return switch op {
 			case OpIn: {priority: 4, left: false};
@@ -22,12 +33,12 @@ class Sanitize {
 			case OpAnd: {priority: 10, left: true};
 			case OpXor: {priority: 11, left: true};
 			case OpOr: {priority: 12, left: true};
-			case OpInterval: {priority: 13, left: false};
+			case OpInterval: {priority: 13, left: false}; // haxe specific
 			case OpBoolAnd: {priority: 14, left: true};
 			case OpBoolOr: {priority: 15, left: true};
 			case OpArrow: {priority: 16, left: true};
 			case OpNullCoal: {priority: 17, left: false};
-			case OpAssignOp(OpAssign): {priority: 18, left: false};
+			case OpAssignOp(OpAssign): {priority: 18, left: false}; // mimics ?:
 			case OpAssign | OpAssignOp(_): {priority: 19, left: false};
 		};
 	}
@@ -41,7 +52,7 @@ class Sanitize {
 		};
 	}
 
-	// sanitize_expr's local helpers; static so each call does not allocate closures.
+	// port: sanitize_expr's local helpers; static so each call does not allocate closures.
 	static function parent(e:TExpr):TExpr return switch e.eexpr {
 		case TParenthesis(_): e;
 		case _: TypeOps.mk(TParenthesis(e), e.etype, e.epos);
@@ -52,11 +63,15 @@ class Sanitize {
 		case _: TypeOps.mk(TBlock([e]), e.etype, e.epos);
 	};
 
+	// complex expressions are the one that once generated to source consists in several expressions
 	static function complex(e:TExpr):TExpr return switch e.eexpr {
-		case TVar(_, _) | TCall({eexpr: TIdent("__js__")}, _): block(e);
+		case TVar(_, _) // needs to be put into blocks
+			| TCall({eexpr: TIdent("__js__")}, _): // we never know
+			block(e);
 		case _: e;
 	};
 
+	// tells if the printed expresssion ends with an if without else
 	static function hasIf(e:TExpr):Bool return switch e.eexpr {
 		case TIf(_, _, null): true;
 		case TWhile(_, body, NormalWhile): hasIf(body);
@@ -69,8 +84,11 @@ class Sanitize {
 				if (scom.platformConfig.pfStatic && !TypeOps.isNullable(e.etype)) {
 					function loop(t:T):TExpr {
 						return switch TypeOps.follow(t) {
-							case TMono(_) | TFun(_): e;
+							case TMono(_) // in these cases the null will cast to default value
+							| TFun(_): // this is a bit a particular case, maybe flash-specific actually
+								e;
 							case TAbstract(a, tl) if (Meta.has(FromNull, a.aMeta)): TypeOps.mk(TCast(e, null), e.etype, e.epos);
+							// TODO: this should use get_underlying_type, but we do not have access to Codegen here.
 							case TAbstract(a, tl) if (!Meta.has(CoreType, a.aMeta)): loop(TypeOps.applyParams(a.aParams, tl, a.aThis));
 							case _ if (scom.platform == Cross): e;
 							case _: Error.raiseTypingError("On static platforms, null can't be used as basic type "
@@ -144,12 +162,13 @@ class Sanitize {
 		return {eexpr: def, etype: e.etype, epos: e.epos};
 	}
 
-	// `com` is polymorphic and unused upstream.
+	// port: `com` is polymorphic and unused upstream.
 	public static function reduceExpr<C>(com:C, e:TExpr):TExpr {
 		return switch e.eexpr {
 			case TBlock(l) if (l.length == 0): e;
 			case TBlock(l):
 				var ec = l[l.length - 1];
+				// remove all no-ops : not-final constants in blocks
 				var rest = l.slice(0, l.length - 1).filter(e -> switch e.eexpr {
 					case TConst(_) | TBlock([]) | TObjectDecl([]): false;
 					case _: true;

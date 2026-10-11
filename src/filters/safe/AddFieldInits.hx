@@ -8,12 +8,12 @@ import optimization.AnalyzerConfig;
 import optimization.Analyzer;
 import filters.RenameVars;
 
-// haxe/src/filters/safe/addFieldInits.ml — mechanical draft; not compiled or validated.
 class AddFieldInits {
 	public static function addFieldInits(clPath:core.Globals.GlobalTypePath, locals:RenameVars.RenameInit,
 			scom:context.SafeCom.SafeContext, t:ModuleType):Void {
 		inline function apply(c:TClass):Void {
 			var ethis = TypeOps.mk(TConst(TThis), TInst(c, TypeOps.extractParamTypes(c.clParams)), c.clPos);
+			// TODO: we have to find a variable name which is not used in any of the functions
 			var v = TypeOps.allocVar(VGenerated, "_g", ethis.etype, ethis.epos);
 			var needThis = false;
 			var inits:Array<TClassField> = [];
@@ -72,6 +72,7 @@ class AddFieldInits {
 			Analyzer.Run.runOnField(scom, config, c, cf);
 			TypeOps.addClassFieldFlag(cf, CfPostProcessed);
 			if (cf.cfExpr != null) {
+				// This seems a bit expensive, but hopefully constructor expressions aren't that massive.
 				var e = RenameVars.run(clPath, locals, cf.cfExpr);
 				e = Sanitize.sanitize(scom, e);
 				if (scom.platformConfig.pfAddFinalReturn) e = AddFinalReturn.addFinalReturn(e);

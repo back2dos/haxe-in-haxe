@@ -5,10 +5,9 @@ import core.Globals.Pos;
 import coro.CoroConfig;
 import coro.CoroElsewhere.TexprBuilder;
 
-// haxe/src/coro/coroTypes.ml — mechanical draft; not compile-validated.
 enum CoroFor {
 	LocalFunc(tf:TFunc, v:TVar);
-	ClassField(c:TClass, cf:TClassField, tf:TFunc, p:Pos);
+	ClassField(c:TClass, cf:TClassField, tf:TFunc, p:Pos); // expr pos
 }
 
 enum SuspendExpr {
@@ -51,7 +50,8 @@ enum CoroNext {
 	NextSwitch(s:CoroSwitch, next:CoroBlockNext);
 	NextWhile(e:TExpr, body:CoroBlock, next:CoroBlockNext);
 	NextTry(body:CoroBlock, catches:CoroCatch, next:CoroBlockNext);
-	NextSuspend(s:CoroSuspend, next:CoroBlockNext);
+	NextSuspend(s:CoroSuspend, next:CoroBlockNext); // None = tail call
+	// graph connections from here on, careful with traversal
 	NextBreak(next:CoroBlock);
 	NextContinue(next:CoroBlock);
 	NextFallThrough(next:CoroBlock);

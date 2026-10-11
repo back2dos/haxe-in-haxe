@@ -14,12 +14,34 @@ import context.SafeCom;
 import context.SafeCom.*;
 import optimization.Inline as InlineOps;
 
-// haxe/src/optimization/inlineConstructors.ml — mechanical draft; not compiled or validated.
+// INLINE CONSTRUCTORS
+
+/*
+	First pass:
+	Finds all inline objects and variables that alias them.
+	Inline objects reference instances of TNew TObjectDecl and TArrayDecl.
+	When an inline object is assigned to a variable, this variable is considered an alias of it.
+	If an aliasing variable is assigned more than once then inlining will be cancelled for the inline
+	object the variable would have aliased.
+	The algorithm supports unassigned variables to be used as aliases 'var a; a = new Inl();'. For this
+	reason variable declarations without assignment are tracked as IVKUnassigned inline variables.
+	When an unassigned inline variable is assigned an alias it's scope is limited to that in which the
+	assignment happened, after which the variable is set as "closed" and any appearance will cancel inlining.
+	Fields of inline objects behave in the same way as unassigned inline variables, allowing nested object
+	inlining.
+
+	Second pass:
+	Replaces inline objects with their inlined constructor expressions.
+	Replaces field access of aliasing variables with the respective field inline variable or inlined methods.
+	Because some replacements turn a single expression into many, this pass will map texpr into texpr list,
+	which is converted into TBlocks by the caller as needed.
+*/
+
 @:structInit class InlineObjectCtor {
 	public var iocClass:TClass;
 	public var iocTparams:TParams;
 	public var iocField:TClassField;
-	public var iocForced:Bool;
+	public var iocForced:Bool; // Cancelling a forced constructor should produce an error
 
 	public inline function new(iocClass:TClass, iocTparams:TParams, iocField:TClassField, iocForced:Bool) {
 		this.iocClass = iocClass;
@@ -37,17 +59,22 @@ enum InlineObjectKind {
 	IOKArray(length:Int);
 }
 
+/*
+	inline_object
+	Represents an instance of TNew TObjectDecl or TArrayDecl that has potential to be inlined.
+	Wether the inlining is cancelled or not is decided during the analysis phase.
+*/
 @:structInit class InlineObject {
 	public var ioKind:InlineObjectKind;
-	public var ioExpr:TExpr;
-	public var ioPos:Pos;
-	public var ioHasUntyped:Bool;
-	public var ioCancelled:Bool;
-	public var ioDeclared:Bool;
-	public var ioAliases:Array<InlineVar>;
-	public var ioFields:haxe.ds.StringMap<InlineVar>;
-	public var ioInlineMethods:Array<TExpr>;
-	public var ioDependentVars:Array<TVar>;
+	public var ioExpr:TExpr; // This is the inlined constructor expression
+	public var ioPos:Pos; // The original position of the constructor expression
+	public var ioHasUntyped:Bool; // Wether inlining this object would bring untyped expressions into the parent expression
+	public var ioCancelled:Bool; // Wether this inline object has been cancelled
+	public var ioDeclared:Bool; // Wether the variable declarations for this inline object's fields have already been output. (Used in final_map)
+	public var ioAliases:Array<InlineVar>; // List of variables that are aliasing/referencing this inline object
+	public var ioFields:haxe.ds.StringMap<InlineVar>; // The fields that this inline object supports, fields are inline variables which might alias other inline_objects
+	public var ioInlineMethods:Array<TExpr>; // List of inlined method calls. Populated during analysis and consumed by the final_map phase
+	public var ioDependentVars:Array<TVar>; // List of variables that should be cancelled if this inline object is cancelled
 
 	public inline function new(ioKind:InlineObjectKind, ioExpr:TExpr, ioPos:Pos, ioHasUntyped:Bool, ioCancelled:Bool, ioDeclared:Bool,
 			ioAliases:Array<InlineVar>, ioFields:haxe.ds.StringMap<InlineVar>, ioInlineMethods:Array<TExpr>, ioDependentVars:Array<TVar>) {
@@ -68,21 +95,28 @@ enum InlineObjectKind {
 }
 
 enum InlineVarKind {
-	IVKField(io:InlineObject, name:String, constant:Null<TExpr>);
+	IVKField(io:InlineObject, name:String, // The field name
+		constant:Null<TExpr>); // If this is Some _ then this field is a constant. (Used for Array .length property)
 	IVKLocal;
 }
 
 enum InlineVarState {
-	IVSUnassigned;
-	IVSAliasing(io:InlineObject);
-	IVSCancelled;
+	IVSUnassigned; // The variable isn't yet assigned
+	IVSAliasing(io:InlineObject); // The variable is aliasing an inline object
+	IVSCancelled; // The variable was cancelled and should no longer be considered for aliasing inline objects
 }
 
+/*
+	inline_var
+	Represents a local variable that is tracked by the inline constructor analysis.
+	It's main purpose is to track variables that are considered aliases of inline objects.
+	It also tracks all unassigned variables in the program.
+*/
 @:structInit class InlineVar {
 	public var ivVar:TVar;
 	public var ivState:InlineVarState;
 	public var ivKind:InlineVarKind;
-	public var ivClosed:Bool;
+	public var ivClosed:Bool; // Inline variables are marked as closed when the scope they were first assigned on ends, any appearance of this variable after it has been closed causes cancellation
 
 	public inline function new(ivVar:TVar, ivState:InlineVarState, ivKind:InlineVarKind, ivClosed:Bool) {
 		this.ivVar = ivVar;
@@ -100,10 +134,14 @@ enum InlineObjectField {
 	IOFNone;
 }
 
+/*
+	inline_expression_handled
+	Defines what will happen to the expression being analized by analyze_aliases
+*/
 enum InlineExpressionHandled {
-	IEHCaptured;
-	IEHIgnored;
-	IEHNotHandled;
+	IEHCaptured; // The expression will be assigned to a variable
+	IEHIgnored; // The result of the expression will not be used
+	IEHNotHandled; // Cases that are not handled (usually leads to cancelling inlining
 }
 
 private typedef FinalMapResult = {var exprs:Array<TExpr>; var object:Null<InlineObject>;}
@@ -244,6 +282,11 @@ private class ConstructorInlining {
 		return makeExprForList(el, t, p);
 	}
 
+	/*
+		check_for_ctors
+		Returns true if there are any potential inline objects in the expression.
+		It is used to save work before running mark_ctors and analyze_aliases.
+	*/
 	function checkForCtors(e:TExpr, forceInline:Bool = false):Bool {
 		var isCtor = false;
 		var metaInline = false;
@@ -264,6 +307,11 @@ private class ConstructorInlining {
 	var markInline:Null<TExpr->TExpr> = null;
 	var markPlain:Null<TExpr->TExpr> = null;
 
+	/*
+		mark_ctors
+		Finds all instances of potential inline objects in an expression and wraps them with metadata @:inlineObject(id).
+		The id is incremented each time and is used later in the final_map phase to identify the correct inline_object.
+	*/
 	function markCtors(e:TExpr, forceInline:Bool = false):TExpr {
 		switch e.eexpr {
 			case TMeta({meta: core.MetaList.StrictMeta.InlineConstructorArgument(_, _)}, _):
@@ -274,7 +322,7 @@ private class ConstructorInlining {
 			case TMeta({meta: core.MetaList.StrictMeta.Inline}, _): true;
 			case _: false;
 		};
-		// the two mapping closures are created once (a closure per node otherwise)
+		// port: the two mapping closures are created once (a closure per node otherwise)
 		if (markInline == null) {
 			markInline = e -> markCtors(e, true);
 			markPlain = e -> markCtors(e, false);
@@ -294,6 +342,22 @@ private class ConstructorInlining {
 		};
 	}
 
+	/*
+		analyze_aliases is the main work-horse of the constructor inliner analysis.
+		It runs recursively over all expressions, it must do so in code execution order.
+		The expression being analyzed should have been processed with mark_ctors before hand.
+
+		returns: Some(inline variable) if the expression being analyzed returns an inline variable. None otherwise.
+
+		seen_ctors: used to avoid infinite constructor inlining loops.
+
+		captured: Wether the caller is ready to accept an inline variable. If analysis results in an inline
+		variable and this argument is false then the inline variable must be cancelled before returning.
+
+		is_lvalue: Wether the expression being analyzed is on the left side of an assignment.
+
+		e: The expression to analyze
+	*/
 	function analyzeAliases(seen:Array<TClassField>, captured:InlineExpressionHandled, isLvalue:Bool, e:TExpr):Null<InlineVar> {
 		inline function analyze(cap:InlineExpressionHandled, e:TExpr):Null<InlineVar> return analyzeAliases(seen, cap, false, e);
 		inline function mkIo(kind:InlineObjectKind, id:Int, expr:TExpr, hasUntyped:Bool = false):InlineObject {
@@ -519,6 +583,7 @@ private class ConstructorInlining {
 			case TBlock(el):
 				for (e in el.slice(0, el.length - 1)) analyze(IEHIgnored, e);
 				el.length == 0 ? null : analyze(captured, el[el.length - 1]);
+			// The contents have already been analyzed, so we must skip the wrapped expression
 			case TMeta({meta: core.MetaList.StrictMeta.InlineConstructorArgument(id, _)}, _): try {
 					var iv = getIv(id);
 					if (iv.ivClosed || captured == IEHNotHandled) cancelIv(iv, e.epos);
@@ -538,6 +603,11 @@ private class ConstructorInlining {
 						io.ioInlineMethods.push(inlined);
 						var iv = analyze(captured, inlined);
 						if (iv != null) {
+							/*
+								The parent inline object might have been cancelled while analyzing the inlined method body
+								If the parent inline object is cancelled the inlining of this method will no longer happen,
+								so the return value must be cancelled.
+							*/
 							if (io.ioCancelled) {
 								cancelIv(iv, inlined.epos);
 								null;
@@ -596,6 +666,10 @@ private class ConstructorInlining {
 	function finalMap(e:TExpr, unwrapBlock:Bool = false):FinalMapResult {
 		function mapOne(e:TExpr):TExpr return makeExprForRevList(finalMap(e).exprs, e.etype, e.epos);
 		inline function defaultCase(e:TExpr):FinalMapResult return {exprs: [mapExpr(mapOne, e)], object: null};
+		/*
+			field_case handles the final map of TField expressions.
+			The last bool in the returned tuple indicates that the field was handled as an inlined method.
+		*/
 		inline function fieldCase(ethis:TExpr, fa:TFieldAccess, ef:TExpr):{exprs:Array<TExpr>, object:Null<InlineObject>, method:Bool} {
 			var tr = finalMap(ethis);
 			if (tr.object != null) {
@@ -613,7 +687,9 @@ private class ConstructorInlining {
 							{exprs: [expr].concat(tr.exprs), object: null, method: false};
 					};
 				} catch (_:NotFound) {
+					// Since the field is not an inline variable then it must be an inlined method call
 					if (io.ioInlineMethods.length == 0) throw "InlineConstructors.missing inline method";
+					// method fields will appear in the same order as they did during analysis, so we consume the first and remove it from the list
 					var method = io.ioInlineMethods.shift();
 					var r = finalMap(method);
 					return {exprs: r.exprs.concat(tr.exprs), object: r.object, method: true};
@@ -639,6 +715,7 @@ private class ConstructorInlining {
 				}
 			case TVar(v, null) if (isMarked(v.vId)):
 				var iv = getIv(v.vId);
+				// If the variable is unassigned, leave the expression unchanged
 				{exprs: iv.ivState == IVSUnassigned ? [e] : getIvVarDecls(iv), object: null};
 			case TVar(v, inner) if (isMarked(v.vId)):
 				var decls = getIvVarDecls(getIv(v.vId));
@@ -655,8 +732,12 @@ private class ConstructorInlining {
 				}
 			case TCall(ef = {eexpr: TField(ethis, fa)}, args):
 				var r = fieldCase(ethis, fa, ef);
-				r.method ? {exprs: r.exprs, object: r.object} : {
+				r.method ? {exprs: r.exprs, object: r.object} /* the field was an inlined method */ : { // the field was a normal field access
 					exprs: [
+						/*
+							This is equivalent to `default_case e`, but field_case already run final_map
+							on the TField expression so we must reuse those results.
+						*/
 						withExpr(e, TCall(makeExprForRevList(r.exprs, ef.etype, ef.epos), args.map(mapOne)))
 					],
 					object: null
@@ -765,7 +846,7 @@ private class ConstructorInlining {
 			({meta: core.MetaList.StrictMeta.HasUntyped, exprs: [], pos: Globals.mkZeroRangePos(e.epos)} : core.Ast.MetadataEntry)
 		].concat(cf.cfMeta);
 		e = makeExprForRevList(result.exprs, e.etype, e.epos);
-		// Globals.IntMap compares keys in reverse (compare i1 i2 = i2 - i1): iterate descending.
+		// port: Globals.IntMap compares keys in reverse (compare i1 i2 = i2 - i1): iterate descending.
 		var ids = [for (id in vars.keys()) id];
 		ids.sort((a, b) -> b - a);
 		for (id in ids) {
