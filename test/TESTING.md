@@ -7,13 +7,17 @@ Earlier checkpoints are in the Git history of this file.
 Latest result per lane, from the dated sections below (newest first; the
 "C build of the port (hxc): memory work" section is at the end).
 
-Full matrix (ba6d07d, 2026-10-11): everything green.
+Full matrix (upstream 995a7d1fe, 2026-10-11): everything green.
 HashLink port: conformance 279 + 7 (also with `--hxb-lib`), macro 66/66, hxblib 7/7,
-display 679/679, server 595/595, interp 275 + the known `eval-eventLoop-compile` race;
-unit tests. hxc clang: conformance 279 + 7, macro 66/66, `--parallel 3`, server
-595/595, display 679/679, `test/upstream.py` 14/14, server JSON-RPC 107/107 (both
-cache modes), Eval debugger 6/6; fuzz `diff:` hxb, interp, js, lua, python, neko, hl,
-hlc, cpp, jvm, swf 150/150 each, php 149 + 1 reference failure (size 5, seed 2026).
+display 679/679, server 595/595, interp 276/276; unit tests. hxc clang: conformance
+279 + 7, macro 66/66, `--parallel 3`, server 595/595, display 679/679,
+`test/upstream.py` 14/14, server JSON-RPC 107/107 (both cache modes), Eval debugger
+6/6; fuzz `diff:` hxb, interp, js, lua, python, neko, hl, hlc, cpp, jvm, swf 150/150
+each, php 149 + 1 reference failure (size 5, seed 2026). Harness fix: `display.py`,
+`interp.py` and `upstream.py` ran the HashLink port from a stale path
+(`test/generated/haxe-in-haxe.hl`, not rebuilt since 2026-10-10); they now use the
+build `test/conformance.py` makes (`test/generated/conformance/`), and the HashLink
+display and interp results above are from the current port.
 Earlier full matrix (e221106, 2026-10-09 night), for the lanes not rerun since:
 
 HashLink port: conformance 279 + 7 (also with `--hxb-lib`), macro 66/66, hxblib 7/7,

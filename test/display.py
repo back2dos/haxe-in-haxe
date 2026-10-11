@@ -191,7 +191,7 @@ def main():
 	args = ap.parse_args()
 
 	reference = os.environ.get("HAXE_REFERENCE", str(ROOT / "haxe/haxe"))
-	port = shlex.split(os.environ.get("HAXE_IN_HAXE_PORT", "hl " + str(ROOT / "test/generated/haxe-in-haxe.hl")))  # the build test/conformance.py makes
+	port = shlex.split(os.environ.get("HAXE_IN_HAXE_PORT", "hl " + str(ROOT / "test/generated/conformance/haxe-in-haxe.hl")))  # the build test/conformance.py makes
 	env = dict(os.environ, HAXE_STD_PATH=str(ROOT / "haxe/std"))
 
 	jobs = []

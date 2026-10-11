@@ -14,7 +14,7 @@ so the runners' own nested `haxe` calls use it too.
 
 --reference runs the pinned reference compiler instead, for the baseline.
 The port is the HashLink build test/conformance.py makes
-(test/generated/haxe-in-haxe.hl; HAXE_IN_HAXE_PORT overrides the command).
+(test/generated/conformance/haxe-in-haxe.hl, from test/conformance.py; HAXE_IN_HAXE_PORT overrides the command).
 Steps excluded on purpose are listed in SKIPPED with the reason.
 
 Single misc projects that need a target generator the port does not have
@@ -142,7 +142,7 @@ def wrapper(bin_dir: pathlib.Path, reference: bool) -> None:
             cmd = port
         else:
             hl = os.environ.get("HAXE_HL") or shutil.which("hl")
-            cmd = shlex.quote(hl) + " " + shlex.quote(str(ROOT / "test" / "generated" / "haxe-in-haxe.hl"))
+            cmd = shlex.quote(hl) + " " + shlex.quote(str(ROOT / "test" / "generated" / "conformance" / "haxe-in-haxe.hl"))
     (bin_dir / "haxe").write_text("#!/bin/sh\nexec " + cmd + ' "$@"\n')
     (bin_dir / "haxe").chmod(0o755)
 
