@@ -7,6 +7,7 @@ these files refer to the repository layout of their time (`backend/` is now
 | Path | |
 | --- | --- |
 | `deferred/` | Early drafts of compiler parts outside the HXB milestone (target dispatch, full compiler entry, display typing, memory diagnostics), superseded by the translated modules in `src/` or waiting for their milestone. |
+| `legacy-bootstrap/` | The hand-written bootstrap loader and typer (`typing/TypeloadModule.hx`, `TypeloadParse.hx`), its lexer, preprocessor and grammar (`syntax/`) and entry point (`haxe/LegacyMain.hx`), which emitted HXB before the translated pipeline existed. The translations of `typeloadModule.ml` and `typeloadParse.ml` are `src/typing/TypeloadModule.hx` and `TypeloadParse.hx`. |
 | `examples/` | The first playable examples (bootstrap pipeline, before the full typer); `site/examples/` replaces them. |
 | `hx2go/` | Building the port with hx2go (Haxe → Go): the fix-up scripts and patch used for the comparison in `bench/README.md`. |
 | `generational-gc/` | The HashLink generational GC prototype (libhl and hl2c patches) that preceded hxc's own collector. |

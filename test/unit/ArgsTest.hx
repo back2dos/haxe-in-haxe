@@ -30,7 +30,7 @@ class ArgsTest {
 		}
 		if (advanced.length != 5) throw "Early-exit help must consume remaining arguments";
 
-		var expanded = Args.expandHxml(Args.parseArgs(["test/unit/args/root.hxml", "--hxb", "out.hxb"]));
+		var expanded = Args.expandArgs(Args.parseArgs(["test/unit/args/root.hxml", "--hxb", "out.hxb"])).parts[0].args;
 		if (expanded.length != 3) throw "Unexpected expanded HXML argument count";
 		switch expanded[0] { case AddClassPath("test"): case _: throw "Expected HXML class path"; }
 		switch expanded[1] { case Define("nested", "yes"): case _: throw "Expected nested HXML define"; }

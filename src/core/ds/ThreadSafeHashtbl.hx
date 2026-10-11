@@ -3,91 +3,77 @@ package core.ds;
 import sys.thread.Mutex;
 
 class ThreadSafeHashtbl<Key, Value> {
-	var values:Array<{key:Key, value:Value}> = [];
-	var mutex:Mutex = new Mutex();
+	final h:OcamlHashtbl<Key, Value>;
+	final mutex:Mutex = new Mutex();
 
-	public function new(size:Int) {}
-
-	public function add(key:Key, value:Value):Void {
-		protect(function() values.push({key: key, value: value}));
+	public function new(size:Int) {
+		h = new OcamlHashtbl<Key, Value>(polymorphicHash, function(a, b) return a == b, size);
 	}
 
-	public function replace(key:Key, value:Value):Void {
+	// port: OCaml's polymorphic `Hashtbl.hash`, for the key types the port uses.
+	static function polymorphicHash<Key>(key:Key):Int {
+		var k:Dynamic = key;
+		if (Std.isOfType(k, String)) return OcamlHash.hashString(k);
+		if (Std.isOfType(k, Int)) return OcamlHashtbl.hashInt(k);
+		throw new Failure("ThreadSafeHashtbl: no polymorphic hash for " + Std.string(k));
+	}
+
+	// port: `Mutex.protect`: the mutex is released when `f` raises.
+	inline function protect<Result>(f:Void->Result):Result {
+		mutex.acquire();
+		var r = try f() catch (e:haxe.Exception) {
+			mutex.release();
+			throw e;
+		}
+		mutex.release();
+		return r;
+	}
+
+	public function add(k:Key, v:Value):Void {
 		protect(function() {
-			removeUnsafe(key);
-			values.push({key: key, value: value});
+			h.add(k, v);
+			return null;
 		});
 	}
 
-	public function find(key:Key):Value {
-		return protect(function() {
-			return findUnsafe(key);
+	public function replace(k:Key, v:Value):Void {
+		protect(function() {
+			h.replace(k, v);
+			return null;
 		});
 	}
 
-	public function findOrAdd(key:Key, create:Void->Value):Value {
+	public function find(k:Key):Value {
+		return protect(function() return h.find(k));
+	}
+
+	public function findOrAdd(k:Key, f:Void->Value):Value {
 		mutex.acquire();
 		try {
-			var result:Value;
-			try result = findUnsafe(key)
-			catch (_:Dynamic) {
-				result = create();
-				values.push({key: key, value: result});
-			}
+			var r = h.find(k);
 			mutex.release();
-			return result;
-		} catch (error:haxe.Exception) {
+			return r;
+		} catch (_:NotFound) {
+			// port: like upstream, the mutex stays locked if `f` raises
+			var r = f();
+			h.add(k, r);
 			mutex.release();
-			throw error;
+			return r;
 		}
 	}
 
-	public function exists(key:Key):Bool {
-		return protect(function() return hasUnsafe(key));
+	public function mem(k:Key):Bool {
+		return protect(function() return h.mem(k));
 	}
 
-	public function remove(key:Key):Void {
-		protect(function() removeUnsafe(key));
-	}
-
-	public function fold<Result>(callback:Key->Value->Result->Result, initial:Result):Result {
-		return protect(function() {
-			var result = initial;
-			for (entry in values) result = callback(entry.key, entry.value, result);
-			return result;
+	public function remove(k:Key):Void {
+		protect(function() {
+			h.remove(k);
+			return null;
 		});
 	}
 
-	function protect<Result>(callback:Void->Result):Result {
-		mutex.acquire();
-		try {
-			var result = callback();
-			mutex.release();
-			return result;
-		} catch (error:haxe.Exception) {
-			mutex.release();
-			throw error;
-		}
-	}
-
-	function findUnsafe(key:Key):Value {
-		for (index in 0...values.length) {
-			var entry = values[values.length - index - 1];
-			if (entry.key == key) return entry.value;
-		}
-		throw "Not_found";
-	}
-
-	function hasUnsafe(key:Key):Bool {
-		try {
-			findUnsafe(key);
-			return true;
-		} catch (_:Dynamic) return false;
-	}
-
-	function removeUnsafe(key:Key):Void {
-		var retained = [];
-		for (entry in values) if (entry.key != key) retained.push(entry);
-		values = retained;
+	public function fold<Acc>(f:Key->Value->Acc->Acc, acc:Acc):Acc {
+		return protect(function() return h.fold(f, acc));
 	}
 }

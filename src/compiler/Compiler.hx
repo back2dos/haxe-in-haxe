@@ -159,7 +159,7 @@ class Compiler {
 				Finalization.finalize(tctx);
 				return null;
 			});
-		} catch (_:typing.SourceParser.DisplayInMacroBlock) {
+		} catch (_:typing.TypeloadParse.DisplayInMacroBlock) {
 			DisplayProcessing.loadDisplayModuleInMacro(tctx, displayFileDotPath, true);
 		}
 		Common.enterStage(com, CTypingDone);

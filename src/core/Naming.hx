@@ -37,7 +37,8 @@ class Naming {
 		checkUppercaseIdentifierName(com, path.name, "module", p, 'Module "' + fullPath + '" does not have a valid name.');
 		try {
 			for (part in path.pack) Path.checkPackageName(part);
-		} catch (msg:String) {
+		} catch (e:core.ds.Failure) {
+			var msg = e.message;
 			Common.displayErrorExt(com,
 				Error.makeError(Custom('"' + StringHelper.sEscape(path.pack.join(".")) + '" is not a valid package name:'), p,
 					[Error.makeError(Custom(msg), p)]));

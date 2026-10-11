@@ -1211,6 +1211,17 @@ class JavaLibraryModern extends NativeLibraryBase implements NativeLibrary<JavaL
 		zip = AtomicLazy.fromFun(function() return ZipInput.openIn(filePath));
 	}
 
+	// port: redeclared for the Eval host: as the only implementer of NativeLibrary, Eval's
+	// JIT calls interface methods through this class's own prototype, which lacks
+	// inherited methods ("Field index for getFilePath not found on prototype").
+	override public function addFlag(flag:context.NativeLibraries.NativeLibFlags):Void super.addFlag(flag);
+
+	override public function hasFlag(flag:context.NativeLibraries.NativeLibFlags):Bool return super.hasFlag(flag);
+
+	override public function getName():String return super.getName();
+
+	override public function getFilePath():String return super.getFilePath();
+
 	static function key(path:GlobalTypePath):String return path.pack.join("/") + "#" + path.name;
 
 	function doLoad():Void {

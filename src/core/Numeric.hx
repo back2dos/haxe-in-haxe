@@ -1,11 +1,11 @@
 package core;
 
-// port: from haxe/src/core/numeric.ml.
 class Numeric {
-	//  Taken from OCaml source typing/oprint.ml
-	//
-	// This is a better version of string_of_float which prints without loss of precision
-	// so that float_of_string (float_repres x) = x for all floats x
+	/*  Taken from OCaml source typing/oprint.ml
+
+		This is a better version of string_of_float which prints without loss of precision
+		so that float_of_string (float_repres x) = x for all floats x
+	*/
 	public static function validFloatLexeme(value:String):String {
 		var index = 0;
 		while (index < value.length) {
@@ -28,10 +28,10 @@ class Numeric {
 		if (!Math.isFinite(f)) return f < 0.0 ? "neg_infinity" : "infinity";
 		var floatVal = {
 			var s1 = core.ds.OcamlPrintf.formatG(12, f);
-			if (f == Std.parseFloat(s1)) s1
+			if (f == core.ds.OcamlFloat.ofString(s1)) s1
 			else {
 				var s2 = core.ds.OcamlPrintf.formatG(15, f);
-				if (f == Std.parseFloat(s2)) s2
+				if (f == core.ds.OcamlFloat.ofString(s2)) s2
 				else core.ds.OcamlPrintf.formatG(18, f);
 			}
 		}
@@ -100,6 +100,7 @@ class Numeric {
 		return core.ds.OcamlInt32.ofString(loop(0));
 	}
 
+	// port: float_of_string
 	static function parseFloatToken(value:String):Float {
 		return core.ds.OcamlFloat.ofString(value);
 	}

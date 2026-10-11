@@ -22,6 +22,7 @@ class StringDynArray {
 		length++;
 	}
 
+	// port: `Array.unsafe_get d.arr i`, which callers do on `arr` directly upstream
 	public function get(index:Int):String {
 		return values[index];
 	}

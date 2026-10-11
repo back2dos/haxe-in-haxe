@@ -25,7 +25,7 @@ import compiler.hxb.HxbReader;
 import compiler.hxb.HxbReaderApi;
 import syntax.Parser.ParseResult;
 import typing.TypeloadCacheHook;
-import typing.SourceParser;
+import typing.TypeloadParse;
 
 class Dirty extends haxe.Exception {
 	public final reason:ModuleSkipReason;
@@ -47,7 +47,7 @@ class ServerCache {
 		var isDisplayFile = DisplayPosition.displayPosition.isInFile(com.partScope.fileKeys.get(ffile));
 		switch [isDisplayFile, sctx.currentStdin] {
 			case [true, stdin] if (stdin != null && (com.fileContents.length > 0 || Common.defined(com, Define.DisplayStdin))):
-				return SourceParser.parseFileFromString(com, file, p, stdin);
+				return TypeloadParse.parseFileFromString(com, file, p, stdin);
 			case _:
 				var ftime = Common.fileTime(ffile);
 				var stop = Timer.startTimer(com.timerCtx, ["server", "parser cache"]);
@@ -57,7 +57,7 @@ class ServerCache {
 						if (cfile.cTime != ftime) throw NotFound.raise();
 						ParseSuccess(({pack: cfile.cPackage, declarations: cfile.cDecls} : Package), cfile.cPdi);
 					} catch (_:NotFound) {
-						var parseResult = SourceParser.parseFile(com, rfile, p);
+						var parseResult = TypeloadParse.parseFile(com, rfile, p);
 						var info:String, isUnusual:Bool;
 						switch parseResult {
 							case ParseError(_, _, _):
@@ -84,10 +84,7 @@ class ServerCache {
 										var ident:String = com.partScope.parserState.specialIdentifierFiles.find(fkey);
 										info = "not cached, using \"" + ident + "\" define";
 										isUnusual = true;
-									} catch (e:Dynamic) {
-										// port: ThreadSafeHashtbl.find signals absence with the string "Not_found"
-										if (!(Std.isOfType(e, NotFound)
-											|| (Std.isOfType(e, std.String) && (e : std.String) == "Not_found"))) throw e;
+									} catch (_:NotFound) {
 										cc.cacheFile(fkey, ({file: ffile, classPath: rfile.classPath} : ResolvedFile), ftime, data, pdi);
 										info = "cached";
 										isUnusual = false;
@@ -236,7 +233,7 @@ class ServerCache {
 				var cfile = cc.findFile(fkey);
 				/* We must use the module path here because the file path is absolute and would cause
 					positions in the parsed declarations to differ. */
-				var decls = SourceParser.parseModule(com, mPath, p).declarations;
+				var decls = TypeloadParse.parseModule(com, mPath, p).declarations;
 				return structurallyDifferent(cfile.cDecls, decls);
 			} catch (_:NotFound) {
 				return true;
@@ -685,7 +682,7 @@ class ServerCache {
 	public static function enableCacheMode(sctx:ServerCompilationContext):Void {
 		TypeloadCacheHook.typeModuleHook = (com, delay, mpath, p) -> typeModule(sctx, com, delay, mpath, p);
 		ensureMacroSetup(sctx);
-		SourceParser.parseHook = (com, rfile, p) -> parseFile(sctx, com, rfile, p);
+		TypeloadParse.parseHook = (com, rfile, p) -> parseFile(sctx, com, rfile, p);
 	}
 }
 

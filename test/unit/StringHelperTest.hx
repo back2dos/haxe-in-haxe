@@ -11,6 +11,8 @@ class StringHelperTest {
 		if (StringHelper.removeExtension("Main.hx") != "Main" || StringHelper.extension("Main") != "Main") throw "Extension helpers failed";
 		if (StringHelper.urlEncodeString("a b/é") != "a%20b%2F%C3%A9") throw "URL encoding failed";
 		var utf16 = StringHelper.utf8ToUtf16("A😀", true);
-		if (StringHelper.utf16ToUtf8(utf16.substr(0, utf16.length - 2)) != "A😀") throw "UTF-16 conversion failed";
+		if ([for (i in 0...utf16.length) utf16.charCodeAt(i)].join(",") != "65,0,61,216,0,222,0,0") throw "UTF-16 conversion failed";
+		// Like upstream, only ASCII round-trips: the high byte of other units is copied as is.
+		if (StringHelper.utf16ToUtf8(StringHelper.utf8ToUtf16("Ab", false)) != "Ab") throw "UTF-16 to UTF-8 conversion failed";
 	}
 }

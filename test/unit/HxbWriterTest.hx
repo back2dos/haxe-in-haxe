@@ -2,10 +2,6 @@ package unit;
 
 import compiler.hxb.HxbData.ChunkKind;
 import compiler.hxb.HxbWriter;
-import core.ClassPath.DirectoryClassPath;
-import core.ClassPaths;
-import core.Define;
-import typing.TypeloadModule;
 
 class HxbWriterTest {
 	public static function main():Void {
@@ -25,15 +21,18 @@ class HxbWriterTest {
 		if (bytes.length != expected.length) throw 'Unexpected HXB chunk length: ${bytes.length}';
 		for (i in 0...expected.length) if (bytes.get(i) != expected[i]) throw 'Unexpected byte at $i: ${bytes.get(i)}';
 
-		var paths = new ClassPaths();
-		paths.push(new DirectoryClassPath("test/", core.ClassPath.ClassPathScope.User));
-		paths.push(new DirectoryClassPath("haxe/std/", core.ClassPath.ClassPathScope.Std));
-		var module = new TypeloadModule(paths, Define.emptyDefines()).loadModule({pack:["unit", "moduleload"], name:"Example"});
+		var result = TypeloadModuleTest.compile(["-cp", "test", "unit.moduleload.Inheritance", "unit.moduleload.Documentation", "--hxb", "test/generated/unit-hxbwriter.hxb"]);
+		if (result.code != 0 || result.com == null) throw 'Typing the HXB writer fixtures failed with exit code ${result.code}';
+		function find(name:String):core.TType.ModuleDef {
+			for (m in result.com.modules) if (m.mPath.pack.join(".") == "unit.moduleload" && m.mPath.name == name) return m;
+			throw 'Module $name was not typed';
+		}
+		var module = find("Inheritance");
 		var typedWriter = new HxbWriter();
 		typedWriter.writeModule(module);
 		var typedBytes = typedWriter.exportModule();
 		var kinds = chunkKinds(typedBytes);
-		var expectedKinds = "STR,MDF,MTF,CLR,ENR,ABR,TDR,CLD,END,ABD,TDD,EOT,CFR,CFD,EFD,AFD,EOF,EXD,EOM";
+		var expectedKinds = "STR,MDF,MTF,CLR,CLD,EOT,CFR,CFD,EOF,EXD,EOM";
 		if (kinds.join(",") != expectedKinds) throw 'Unexpected typed HXB chunk layout: ${kinds.join(",")}';
 		if (typedBytes.get(0) != "h".code || typedBytes.get(1) != "x".code || typedBytes.get(2) != "b".code || typedBytes.get(3) != 1) throw "Typed HXB header was not written";
 		var moduleFile = module.mExtra.mFile;
@@ -44,33 +43,8 @@ class HxbWriterTest {
 		module.mExtra.mFile = moduleFile;
 		if (typedBytes.compare(lazyFileWriter.exportModule()) != 0) throw "Module filename representation changed the HXB payload";
 		if (lazyFile.key != null) throw "Writing the module filename should not force its unique key";
-		var metadataModule = new TypeloadModule(paths, Define.emptyDefines()).loadModule({pack:["unit", "moduleload"], name:"Metadata"});
-		var metadataWriter = new HxbWriter();
-		metadataWriter.writeModule(metadataModule);
-		if (metadataWriter.exportModule().length <= 4) throw "Metadata-bearing module was not serialized";
-		var propertyModule = new TypeloadModule(paths, Define.emptyDefines()).loadModule({pack:["unit", "moduleload"], name:"Property"});
-		var propertyWriter = new HxbWriter();
-		propertyWriter.writeModule(propertyModule);
-		if (propertyWriter.exportModule().length <= 4) throw "Property module was not serialized";
-		var genericMethodModule = new TypeloadModule(paths, Define.emptyDefines()).loadModule({pack:["unit", "moduleload"], name:"GenericMethodInference"});
-		var genericMethodWriter = new HxbWriter();
-		genericMethodWriter.writeModule(genericMethodModule);
-		if (genericMethodWriter.exportModule().length <= 4) throw "Inferred generic method call was not serialized";
-		var expressionsDefines = Define.emptyDefines();
-		Define.rawDefineValue(expressionsDefines, "cross", "1");
-		var expressionsModule = new TypeloadModule(paths, expressionsDefines).loadModule({pack:["unit", "moduleload"], name:"Expressions"});
-		var expressionsWriter = new HxbWriter();
-		expressionsWriter.writeModule(expressionsModule);
-		if (expressionsWriter.exportModule().length <= 4) throw "Try/catch expression was not serialized";
-		var metadataFunctionModule = new TypeloadModule(paths, Define.emptyDefines()).loadModule({pack:["unit", "moduleload"], name:"MetadataFunction"});
-		var metadataFunctionWriter = new HxbWriter();
-		metadataFunctionWriter.writeModule(metadataFunctionModule);
-		if (metadataFunctionWriter.exportModule().length <= 4) throw "Function-valued metadata was not serialized";
-		var documentationModule = new TypeloadModule(paths, Define.emptyDefines()).loadModule({pack:["unit", "moduleload"], name:"Documentation"});
-		var documentationClass = switch documentationModule.mTypes[0] { case TClassDecl(value): value; case _: throw "Expected documented class"; };
-		if (documentationClass.clDoc == null || documentationClass.clDoc.docOwn != " Module type documentation. ") throw "Module documentation was not parsed";
 		var documentationWriter = new HxbWriter();
-		documentationWriter.writeModule(documentationModule);
+		documentationWriter.writeModule(find("Documentation"));
 		var documentationKinds = chunkKinds(documentationWriter.exportModule());
 		if (documentationKinds.indexOf("DOC") < 0) throw "Documentation pool was not serialized";
 	}

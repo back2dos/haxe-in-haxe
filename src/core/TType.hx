@@ -17,7 +17,8 @@ import core.Message.CompilerMessage;
 import haxe.ds.IntMap;
 import haxe.ds.StringMap;
 
-// port: from haxe/src/core/tType.ml.
+// port: the PMap-typed fields (fields of anonymous structures and classes, constraint fields) are
+// StringMaps; code that iterates them goes through core.ds.PMap (sorted keys).
 typedef TypeMap<T> = StringMap<T>;
 
 enum FieldKind {
@@ -39,13 +40,13 @@ enum FieldKind {
 
 enum VarAccess {
 	AccNormal;
-	AccNo; // can't be accessed outside of the class itself and its subclasses
-	AccNever; // can't be accessed, even in subclasses
-	AccCtor; // can only be accessed from the constructor
-	AccCall; // perform a method call when accessed
-	AccPrivateCall; // perform a method call when accessed, but private like AccNo
-	AccInline; // similar to Normal but inline when accessed
-	AccRequire(condition:String, message:Null<String>); // set when @:require(cond) fails
+	AccNo; /* can't be accessed outside of the class itself and its subclasses */
+	AccNever; /* can't be accessed, even in subclasses */
+	AccCtor; /* can only be accessed from the constructor */
+	AccCall; /* perform a method call when accessed */
+	AccPrivateCall; /* perform a method call when accessed, but private like AccNo */
+	AccInline; /* similar to Normal but inline when accessed */
+	AccRequire(condition:String, message:Null<String>); /* set when @:require(cond) fails */
 }
 
 enum MethodKind {
@@ -114,11 +115,13 @@ enum T {
 
 @:structInit class TMono {
 	public var tmType:Null<T>;
-	// ```
-	// function fn<A,B:A>() {}
-	// ```
-	// `A` is a down-constraint for `B`
-	// `B` is an up-constraint for `A`
+	/*
+		```
+		function fn<A,B:A>() {}
+		```
+		`A` is a down-constraint for `B`
+		`B` is an up-constraint for `A`
+	*/
 	public var tmDownConstraints:Array<TMonoConstraint>;
 	public var tmUpConstraints:Array<{var type:T; var name:Null<String>;}>;
 	public var tmModifiers:Array<TMonoModifier>;
@@ -151,7 +154,7 @@ enum TMonoConstraintKind {
 enum TMonoModifier {
 	MNullable(callback:T->T);
 	MOpenStructure;
-	MDynamic; // There was a unificaiton against Dynamic, which didn't bind the mono
+	MDynamic; /* There was a unificaiton against Dynamic, which didn't bind the mono */
 }
 
 enum TLazyState {
@@ -399,7 +402,7 @@ enum TFieldAccess {
 	FStatic(cls:TClass, field:TClassField);
 	FAnon(field:TClassField);
 	FDynamic(name:String);
-	FClosure(cls:Null<{var cls:TClass; var params:TParams;}>, field:TClassField); // None class = TAnon
+	FClosure(cls:Null<{var cls:TClass; var params:TParams;}>, field:TClassField); /* None class = TAnon */
 	FEnum(en:TEnum, field:TEnumField);
 }
 
@@ -489,7 +492,7 @@ typedef TInfos = {
 	public var clParams:TypeParams;
 	public var clUsing:Array<{var cls:TClass; var pos:Pos;}>;
 	public var clRestore:Void->Void;
-	// do not insert any fields above
+	/* do not insert any fields above */
 	public var clType:T;
 	public var clKind:TClassKind;
 	public var clFlags:Int;
@@ -505,8 +508,10 @@ typedef TInfos = {
 	public var clInit:Null<TClassField>;
 	public var clBuild:Void->BuildState;
 
-	// These are classes which directly extend or directly implement this class.
-	// Populated automatically in post-processing step (Filters.run)
+	/*
+		These are classes which directly extend or directly implement this class.
+		Populated automatically in post-processing step (Filters.run)
+	*/
 	public var clDescendants:Array<TClass>;
 
 	// port: no explicit constructor: 25 arguments exceed the HashLink JIT limit.
@@ -575,7 +580,7 @@ typedef TInfos = {
 	public var eParams:TypeParams;
 	public var eUsing:Array<{var cls:TClass; var pos:Pos;}>;
 	public var eRestore:Void->Void;
-	// do not insert any fields above
+	/* do not insert any fields above */
 	public var eType:T;
 	public var eFlags:Int;
 	public var eConstrs:TypeMap<TEnumField>;
@@ -618,7 +623,7 @@ typedef TInfos = {
 	public var tParams:TypeParams;
 	public var tUsing:Array<{var cls:TClass; var pos:Pos;}>;
 	public var tRestore:Void->Void;
-	// do not insert any fields above
+	/* do not insert any fields above */
 	public var tType:T;
 
 	public inline function new(tPath:GlobalTypePath, tModule:ModuleDef, tPos:Pos, tNamePos:Pos, tPrivate:Bool, tDoc:Documentation,
@@ -654,7 +659,7 @@ typedef TInfos = {
 	public var aParams:TypeParams;
 	public var aUsing:Array<{var cls:TClass; var pos:Pos;}>;
 	public var aRestore:Void->Void;
-	// do not insert any fields above
+	/* do not insert any fields above */
 	public var aOps:Array<{var op:Binop; var field:TClassField;}>;
 	public var aUnops:Array<{var op:Unop; var flag:UnopFlag; var field:TClassField;}>;
 	public var aImpl:Null<TClass>;
@@ -727,7 +732,7 @@ enum ModuleType {
 }
 
 @:structInit class ModuleDefDisplay {
-	public var mInlineCalls:Array<{var callPos:Pos; var definitionPos:Pos;}>; // calls whatever is at pos1 from pos2
+	public var mInlineCalls:Array<{var callPos:Pos; var definitionPos:Pos;}>; /* calls whatever is at pos1 from pos2 */
 	public var mTypeHints:Array<{var hintPos:Pos; var typePos:Pos;}>;
 	public var mImportPositions:Map<String, Bool>;
 
@@ -745,9 +750,9 @@ enum ModuleDepOrigin {
 	MDepFromTyping;
 	MDepFromImport;
 	MDepFromMacro;
-	// Compiler.include loads module with this special origin, which tells add_dependency not to add as a proper dependency.
+	/* Compiler.include loads module with this special origin, which tells add_dependency not to add as a proper dependency. */
 	MDepFromMacroInclude;
-	// Modules created via Compiler.defineType or Compiler.defineModule will be added as dependency to their "parent" module with this origin.
+	/* Modules created via Compiler.defineType or Compiler.defineModule will be added as dependency to their "parent" module with this origin. */
 	MDepFromMacroDefine;
 }
 
@@ -846,6 +851,15 @@ enum BuildState {
 	BuildMacro(callbacks:Array<Void->Void>);
 }
 
+class TypeException extends haxe.Exception {
+	public final type:T;
+
+	public function new(type:T) {
+		super("Type_exception");
+		this.type = type;
+	}
+}
+
 @:structInit class CoroTypes {
 	public var tcoro:AtomicLazy<TSignature->T>;
 	public var continuation:AtomicLazy<T>;
@@ -909,33 +923,33 @@ enum FlagTClass {
 	CInterface;
 	CAbstract;
 	CFunctionalInterface;
-	CUsed; // Marker for DCE
-	CExcluded; // Marker for exclude macro, turned into CExtern during filters
+	CUsed; /* Marker for DCE */
+	CExcluded; /* Marker for exclude macro, turned into CExtern during filters */
 }
 
 enum FlagTClassField {
 	CfPublic;
 	CfStatic;
-	CfExtern; // This is only set if the field itself is extern, not just the class.
+	CfExtern; /* This is only set if the field itself is extern, not just the class. */
 	CfFinal;
-	CfModifiesThis; // This is set for methods which reassign `this`. E.g. `this = value`
+	CfModifiesThis; /* This is set for methods which reassign `this`. E.g. `this = value` */
 	CfOverride;
 	CfAbstract;
 	CfOverload;
 	CfImpl;
 	CfEnum;
 	CfGeneric;
-	CfDefault; // Interface field with default implementation (only valid on Java)
-	CfPostProcessed; // Marker to indicate the field has been post-processed
-	CfUsed; // Marker for DCE
-	CfMaybeUsed; // Marker for DCE
-	CfNoLookup; // Field cannot be accessed by-name.
+	CfDefault; /* Interface field with default implementation (only valid on Java) */
+	CfPostProcessed; /* Marker to indicate the field has been post-processed */
+	CfUsed; /* Marker for DCE */
+	CfMaybeUsed; /* Marker for DCE */
+	CfNoLookup; /* Field cannot be accessed by-name. */
 	CfAbstractConstructor;
 }
 
 enum FlagTEnum {
 	EnExtern;
-	EnExcluded; // Marker for exclude macro, turned into EnExtern during filters
+	EnExcluded; /* Marker for exclude macro, turned into EnExtern during filters */
 }
 
 enum FlagTVar {
@@ -945,8 +959,8 @@ enum FlagTVar {
 	VAssigned;
 	VCaught;
 	VStatic;
-	VUsedByTyper; // Set if the typer looked up this variable
-	VHxb; // Flag used by hxb
+	VUsedByTyper; /* Set if the typer looked up this variable */
+	VHxb; /* Flag used by hxb */
 	VCoroCaptured;
 	VCoroScope;
 	VCoroRestrictedSuspension;
@@ -962,7 +976,7 @@ class TType {
 		"CUsed",
 		"CExcluded"
 	];
-	// Order has to match declaration for printing
+	/* Order has to match declaration for printing*/
 	public static final flagTClassFieldNames = [
 		"CfPublic",
 		"CfStatic",

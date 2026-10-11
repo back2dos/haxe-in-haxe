@@ -5,7 +5,6 @@ import core.ClassPath.DirectoryClassPath;
 import core.ClassPath.IClassPath;
 import core.StringHelper;
 
-// port: from haxe/src/core/classPaths.ml.
 @:structInit class ResolvedFile {
 	public var file:String;
 	public var classPath:IClassPath;
@@ -19,13 +18,14 @@ import core.StringHelper;
 }
 
 enum FileResolutionSpecificity {
-	SpecificityNormal; // Standard Module.hx file
-	SpecificityPlatformSpecific; // Module.[platform].hx file matching current platform
-	SpecificityCustomExtension; // Module.[custom].hx file matching --custom-extension config
-	SpecificityMacroSpecific; // Module.macro.hx file while in macro context
-	SpecificityCoreApi; // Module.hx takes priority when loading @:coreApi types
+	SpecificityNormal; /* Standard Module.hx file */
+	SpecificityPlatformSpecific; /* Module.[platform].hx file matching current platform */
+	SpecificityCustomExtension; /* Module.[custom].hx file matching --custom-extension config */
+	SpecificityMacroSpecific; /* Module.macro.hx file while in macro context */
+	SpecificityCoreApi; /* Module.hx takes priority when loading @:coreApi types */
 }
 
+// port: the `(resolved_file * file_resolution_specificity)` pair
 @:structInit class FileLookup {
 	public var resolvedFile:ResolvedFile;
 	public var specificity:FileResolutionSpecificity;
@@ -39,10 +39,11 @@ enum FileResolutionSpecificity {
 }
 
 class ClassPaths {
-	// We need to clean-up absolute ("") vs. cwd (".").
+	/* We need to clean-up absolute ("") vs. cwd ("."). */
 	public static final absoluteClassPath:IClassPath = new DirectoryClassPath("", User);
 
 	var paths:Array<IClassPath> = [];
+	// port: a Lookup.hashtbl_lookup; only looked up, never iterated
 	var fileLookupCache:Map<String, Null<FileLookup>> = new Map();
 	var customExtension:Null<String> = null;
 	var platformExtension:String = "";
@@ -73,7 +74,7 @@ class ClassPaths {
 
 	public function find(predicate:IClassPath->Bool):IClassPath {
 		for (path in paths) if (predicate(path)) return path;
-		throw "Not_found";
+		throw core.ds.NotFound.raise();
 	}
 
 	public function iter(callback:IClassPath->Void):Void {
@@ -89,11 +90,11 @@ class ClassPaths {
 		return paths.filter(predicate);
 	}
 
-	public function modify(transform:IClassPath->Array<IClassPath>, classPaths:Array<IClassPath>):Void {
-		var result:Array<IClassPath> = [];
-		for (path in classPaths) result = transform(path).concat(result);
-		result.reverse();
-		paths = result;
+	public function modify(f:IClassPath->Array<IClassPath>, cpl:Array<IClassPath>):Void {
+		var acc:Array<IClassPath> = [];
+		for (cp in cpl) acc = f(cp).concat(acc);
+		acc.reverse();
+		paths = acc;
 		clearCache();
 	}
 
@@ -117,7 +118,7 @@ class ClassPaths {
 	public function findFileNoRaise(file:String):Null<FileLookup> {
 		if (fileLookupCache.exists(file)) return fileLookupCache.get(file);
 		var result:Null<FileLookup> = null;
-		if (isAbsolutePath(file)) {
+		if (core.Path.isAbsolutePath(file)) {
 			if (sys.FileSystem.exists(file)) result = {
 				resolvedFile: {file: file, classPath: absoluteClassPath},
 				specificity: SpecificityNormal
@@ -141,16 +142,27 @@ class ClassPaths {
 	}
 
 	public function relativePath(file:String):String {
-		// port: Path.get_full_path: absolute and normalized, without resolving symbolic links.
-		var fullPath = normalize(core.Path.getFullPath(file));
-		var lowerFullPath = fullPath.toLowerCase();
+		function slashes(path:String) return path.split("\\").join("/");
+		var fpath = slashes(core.Path.getFullPath(file));
+		var fpathLower = lowercaseAscii(fpath);
+		var flen = fpathLower.length;
 		for (path in paths) {
-			var classPath = normalize(path.path).toLowerCase();
-			if (classPath.length > 0
-				&& classPath.length < lowerFullPath.length
-				&& lowerFullPath.substr(0, classPath.length) == classPath) return fullPath.substr(classPath.length);
+			var path = path.path;
+			var spath = lowercaseAscii(slashes(path));
+			var slen = spath.length;
+			if (slen > 0 && slen < flen && fpathLower.substr(0, slen) == spath) return fpath.substr(slen, flen - slen);
 		}
 		return file;
+	}
+
+	// port: String.lowercase_ascii
+	static function lowercaseAscii(s:String):String {
+		var b = new StringBuf();
+		for (i in 0...s.length) {
+			var c = StringTools.fastCodeAt(s, i);
+			b.addChar(c >= "A".code && c <= "Z".code ? c + 32 : c);
+		}
+		return b.toString();
 	}
 
 	public function dump():Void {
@@ -159,19 +171,21 @@ class ClassPaths {
 	}
 
 	function cacheDirectory(classPath:IClassPath, directory:String, search:String, listing:Array<String>):Null<FileLookup> {
-		// This function is invoked for each file in the `dir`.
-		// Each file is checked if it's specific for current platform
-		// (e.g. ends with `.js.hx` while compiling for JS) or current
-		// custom extension (e.g. ends with `.custom.hx` while compiling
-		// with `--custom-extension custom`)
-		//
-		// The lookup cache will store the full file path which is the more
-		// specific in current context (see `file_resolution_specificity` type)
+		/*
+			This function is invoked for each file in the `dir`.
+			Each file is checked if it's specific for current platform
+			(e.g. ends with `.js.hx` while compiling for JS) or current
+			custom extension (e.g. ends with `.custom.hx` while compiling
+			with `--custom-extension custom`)
+
+			The lookup cache will store the full file path which is the more
+			specific in current context (see `file_resolution_specificity` type)
+		*/
 		var found:Null<FileLookup> = null;
 		var searchDirectory = core.ClassPath.DirectoryClassPath.ocamlDirname(search);
 		for (ownName in listing) {
 			var relative = searchDirectory == "." ? ownName : searchDirectory + "/" + ownName;
-			// `representation` is how the file is referenced to. E.g. when it's deduced from a module path.
+			/* `representation` is how the file is referenced to. E.g. when it's deduced from a module path. */
 			var representation:String;
 			var specificity:FileResolutionSpecificity;
 			if (isLoadingCoreApi) {
@@ -181,16 +195,16 @@ class ClassPaths {
 				var suffix = StringHelper.extension(relative);
 				var withoutExtension = StringHelper.removeExtension(relative);
 				var secondExtension = StringHelper.extension(withoutExtension);
-				// The file contains double extension and the secondary one matches current custom extension
+				/* The file contains double extension and the secondary one matches current custom extension */
 				if (customExtension != null && secondExtension == customExtension) {
 					representation = StringHelper.removeExtension(withoutExtension) + suffix;
 					specificity = SpecificityCustomExtension;
 				} else if (platformExtension == secondExtension && secondExtension == ".macro") {
-					// The file contains ".macro.hx" double extension and we are in macro context
+					/* The file contains ".macro.hx" double extension and we are in macro context */
 					representation = StringHelper.removeExtension(withoutExtension) + suffix;
 					specificity = SpecificityMacroSpecific;
 				} else if (platformExtension == secondExtension) {
-					// The file contains double extension and the secondary one matches current platform
+					/* The file contains double extension and the secondary one matches current platform */
 					representation = StringHelper.removeExtension(withoutExtension) + suffix;
 					specificity = SpecificityPlatformSpecific;
 				} else {
@@ -210,6 +224,7 @@ class ClassPaths {
 		return found;
 	}
 
+	// port: OCaml compares constant constructors by declaration order
 	static function specificityRank(specificity:FileResolutionSpecificity):Int {
 		return switch (specificity) {
 			case SpecificityNormal: 0;
@@ -218,13 +233,5 @@ class ClassPaths {
 			case SpecificityMacroSpecific: 3;
 			case SpecificityCoreApi: 4;
 		};
-	}
-
-	static function isAbsolutePath(path:String):Bool {
-		return StringTools.startsWith(path, "/") || ~/^[A-Za-z]:[\\\/]/.match(path);
-	}
-
-	static function normalize(path:String):String {
-		return path.split("\\").join("/");
 	}
 }

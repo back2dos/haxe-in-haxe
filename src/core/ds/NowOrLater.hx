@@ -4,7 +4,10 @@ import sys.thread.Mutex;
 
 class NowOrLater {
 	var now:Mutex = new Mutex();
+	// port: OCaml mutexes are not recursive, Haxe's are: `running` makes `try_lock` fail on
+	// the thread that holds `now` too.
 	var running:Bool = false;
+	// port: `later`, a Saturn single-consumer queue (FIFO)
 	var laterMutex:Mutex = new Mutex();
 	var later:Array<Void->Void> = [];
 
@@ -12,16 +15,10 @@ class NowOrLater {
 
 	public function tryNow(callback:Void->Void):Void {
 		if (!running && now.tryAcquire()) {
-			try {
-				running = true;
-				callback();
-				running = false;
-				now.release();
-			} catch (error:haxe.Exception) {
-				running = false;
-				now.release();
-				throw error;
-			}
+			running = true;
+			callback();
+			running = false;
+			now.release();
 		} else {
 			laterMutex.acquire();
 			later.push(callback);

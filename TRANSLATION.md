@@ -62,7 +62,7 @@ Status 2026-10-09: HXB library input (`--hxb-lib`) works. `hxbReader.ml`,
 `typeloadCacheHook.ml` in `src/typing/TypeloadCacheHook.hx`, the HXB branch of
 `nativeLibraryHandler.ml` in `src/context/NativeLibraryHandler.hx`, and the
 `hxb_reader_api_typeload` class and `load_hxb_module` of `typeloadModule.ml` in
-`src/typing/ModuleTyping.hx`. The ZIP reading that `hxbLib.ml` takes from
+`src/typing/TypeloadModule.hx`. The ZIP reading that `hxbLib.ml` takes from
 `libs/ziplib` is reproduced in `src/core/ZipInput.hx`. Of `commonCache.ml`,
 only the server cache uses the reader (`HxbReader.dump_stats` in
 `cache_context`), so nothing of it is needed by the batch `--hxb-lib` path.
@@ -102,6 +102,15 @@ threads as OCaml's runtime lock does (a documented deviation: the port's
 host threads run in parallel). The upstream test suite's threads step passes
 144/144 on the hxc build.
 
+Status 2026-10-11: the legacy bootstrap path (the hand-written loader and typer
+`TypeloadModule`/`TypeloadParse`, `LegacyGrammar`, `LegacyLexer`,
+`Preprocessor` and `LegacyMain`) moved to `archive/legacy-bootstrap/`. The
+translations of `typeloadModule.ml` and `typeloadParse.ml` took their natural
+names (`src/typing/TypeloadModule.hx`, `TypeloadParse.hx`, formerly
+`ModuleTyping.hx` and `SourceParser.hx`), and the unit tests run the translated
+pipeline. The `core/` counterparts that predated the translation snapshot were
+audited line by line against upstream (see the table).
+
 ## Translation snapshot
 
 **The pending counterpart batch was completed in `2fcd217`.** This inventory records file coverage,
@@ -111,7 +120,7 @@ compiler pipeline is included separately by `test/compile-all.hxml`.
 
 - 126 new draft/support Haxe files across the translation-first batches.
 - 124 upstream ML files have new draft counterparts.
-- 33 upstream ML files have pre-existing counterparts; completeness is unaudited.
+- 33 upstream ML files have pre-existing counterparts; completeness is unaudited (the 21 `core/` ones were audited on 2026-10-11).
 - 0 additional candidate ML files have no corresponding HX file yet.
 
 This follow-up added 59 in-scope counterparts from the previous 69 pending
@@ -145,9 +154,10 @@ Shared HXB-path helpers were extracted from otherwise deferred areas:
 - `codegen/Genxml.hx`: RTTI type serialization before HXB save; the standalone
   XML output backend remains deferred.
 - `context/HxbReaderStats.hx`: shared statistics declarations, without HXB input.
-- `typing/ModuleTyping.hx` and `SourceParser.hx`: source-backed module creation,
-  loading, package rules/remapping, import.hx processing, and parser integration
-  required by `TyperEntry`; the existing bootstrap loader remains separate.
+- `typing/ModuleTyping.hx` and `SourceParser.hx` (now `TypeloadModule.hx` and
+  `TypeloadParse.hx`): source-backed module creation, loading, package
+  rules/remapping, import.hx processing, and parser integration required by
+  `TyperEntry`; the existing bootstrap loader remained separate (now archived).
 
 At the time, display, server, macro-runtime, native-library and target
 dispatch bodies were kept under `archive/deferred/`, outside the build class path.
@@ -167,7 +177,7 @@ conformance, or completion of the pre-existing HXB writer. The subsequent runtim
 - Some exception catches use `Dynamic`; exception-type alignment, OCaml atomics, identity/projections, and persistent-map operations remain for reconciliation.
 - Macro/display/native hooks retained in shared modules do not implement those deferred runtimes.
 - Ordered source traversals remain explicit in the translations; pool identity and serialization ordering still require conformance validation later.
-- Pre-existing `TypeloadModule`, parser and bootstrap paths are not automatically full one-to-one translations. Audit their source coverage before closing the pass.
+- Pre-existing `TypeloadModule`, parser and bootstrap paths are not automatically full one-to-one translations. Audit their source coverage before closing the pass. (The legacy loader, parser and entry point are now archived.)
 
 ## Candidate source coverage
 
@@ -211,45 +221,45 @@ conformance, or completion of the pre-existing HXB writer. The subsequent runtim
 | `context/typecore.ml` | `src/context/Typecore.hx` | Draft translated |
 | `context/typerPass.ml` | `src/context/TyperPass.hx` | Draft translated |
 | `core/abstract.ml` | `src/core/Abstract.hx` | Draft translated |
-| `core/ast.ml` | `src/core/Ast.hx` | Existing, unaudited |
-| `core/classPath.ml` | `src/core/ClassPath.hx` | Existing, unaudited |
-| `core/classPaths.ml` | `src/core/ClassPaths.hx` | Existing, unaudited |
+| `core/ast.ml` | `src/core/Ast.hx` | Translated (audited); module Printer in `AstPrinter.hx`, `map_expr` in `AstExprMapper.hx`, `unescape` in `syntax/Lexer.hx`, module Expr in the class `Ast`; `getValueMeta` returns a StringMap (only looked up) |
+| `core/classPath.ml` | `src/core/ClassPath.hx` | Translated (audited); the virtual class is the interface `IClassPath` |
+| `core/classPaths.ml` | `src/core/ClassPaths.hx` | Translated (audited); the lookup cache is a Map (never iterated) |
 | `core/data/dataReaderApi.ml` | `src/core/data/DataReaderApi.hx` | Draft translated |
 | `core/data/dataWriterApi.ml` | `src/core/data/DataWriterApi.hx` | Draft translated |
-| `core/data/jsonDataApi.ml` | `src/core/data/JsonDataApi.hx` | Existing, unaudited |
+| `core/data/jsonDataApi.ml` | `src/core/data/JsonDataApi.hx` | Translated (audited); reads `core.Json` values |
 | `core/data/metaDataApi.ml` | `src/core/data/MetaDataApi.hx` | Draft translated |
-| `core/define.ml` | `src/core/Define.hx` | Existing, unaudited |
+| `core/define.ml` | `src/core/Define.hx` | Translated (audited); DefineList is `DefineRegistry.hx`, a define is its key string (so `Custom k` and a built-in define `k` are not distinguished), signatures are hex MD5 |
 | `core/displayTypes.ml` | `src/core/DisplayTypes.hx` | Draft translated |
-| `core/ds/atomicLazy.ml` | `src/core/ds/AtomicLazy.hx` | Existing, unaudited |
-| `core/ds/nowOrLater.ml` | `src/core/ds/NowOrLater.hx` | Existing, unaudited |
-| `core/ds/priorityQueue.ml` | `src/core/ds/PriorityQueue.hx` | Existing, unaudited |
-| `core/ds/ring.ml` | `src/core/ds/Ring.hx` | Existing, unaudited |
-| `core/ds/stringDynArray.ml` | `src/core/ds/StringDynArray.hx` | Existing, unaudited |
-| `core/ds/stringPool.ml` | `src/core/ds/StringPool.hx` | Existing, unaudited |
-| `core/ds/threadSafeHashtbl.ml` | `src/core/ds/ThreadSafeHashtbl.hx` | Existing, unaudited |
+| `core/ds/atomicLazy.ml` | `src/core/ds/AtomicLazy.hx` | Translated (audited); a mutex in place of compare-and-set, waiting sleeps instead of `Thread.yield`/`Backoff` |
+| `core/ds/nowOrLater.ml` | `src/core/ds/NowOrLater.hx` | Translated (audited); a flag emulates the non-recursive OCaml mutex |
+| `core/ds/priorityQueue.ml` | `src/core/ds/PriorityQueue.hx` | Translated (audited) |
+| `core/ds/ring.ml` | `src/core/ds/Ring.hx` | Translated (audited) |
+| `core/ds/stringDynArray.ml` | `src/core/ds/StringDynArray.hx` | Translated (audited) |
+| `core/ds/stringPool.ml` | `src/core/ds/StringPool.hx` | Translated (audited); NUL-safe keys on HashLink |
+| `core/ds/threadSafeHashtbl.ml` | `src/core/ds/ThreadSafeHashtbl.hx` | Translated (audited); an `OcamlHashtbl` (String and Int keys) behind a mutex |
 | `core/error.ml` | `src/core/Error.hx` | Draft translated |
-| `core/globals.ml` | `src/core/Globals.hx` | Existing, unaudited |
+| `core/globals.ml` | `src/core/Globals.hx` | Translated (audited); the map/table modules are in `core.ds`, `trace` and the backtrace helpers use the Haxe call stack |
 | `core/inheritDoc.ml` | `src/core/InheritDoc.hx` | Draft translated |
-| `core/message.ml` | `src/core/Message.hx` | Existing, unaudited |
+| `core/message.ml` | `src/core/Message.hx` | Translated (audited); also declares the generated `warning` type (`WarningCode`) |
 | `core/meta.ml` | `src/core/Meta.hx` | Draft translated |
 | `core/naming.ml` | `src/core/Naming.hx` | Draft translated |
 | `core/native.ml` | `src/core/Native.hx` | Draft translated |
-| `core/numeric.ml` | `src/core/Numeric.hx` | Existing, unaudited |
-| `core/path.ml` | `src/core/Path.hx` | Existing, unaudited |
-| `core/socket.ml` | `src/core/Socket.hx` | Audited with the Eval debugger; reads whole frames where `recv` may return fewer bytes |
-| `core/stringError.ml` | `src/core/StringError.hx` | Existing, unaudited |
-| `core/stringHelper.ml` | `src/core/StringHelper.hx` | Existing, unaudited |
+| `core/numeric.ml` | `src/core/Numeric.hx` | Translated (audited); adds `stringOfFloat` (OCaml `string_of_float`) |
+| `core/path.ml` | `src/core/Path.hx` | Translated (audited); `get_full_path`/`get_real_path` on Windows use `FileSystem.fullPath` in place of Extc |
+| `core/socket.ml` | `src/core/Socket.hx` | Translated (audited, also with the Eval debugger); host sockets read whole frames (exact lengths) where `recv` may return fewer bytes |
+| `core/stringError.ml` | `src/core/StringError.hx` | Translated (audited); two-row Levenshtein over UTF-8 bytes |
+| `core/stringHelper.ml` | `src/core/StringHelper.hx` | Translated (audited); byte strings are strings of characters 0-255 |
 | `core/tFunctions.ml` | `src/core/TFunctions.hx` | Draft translated |
 | `core/tOther.ml` | `src/core/TOther.hx` | Draft translated |
 | `core/tPrinting.ml` | `src/core/TPrinting.hx` | Draft translated |
-| `core/tType.ml` | `src/core/TType.hx` | Existing, unaudited |
+| `core/tType.ml` | `src/core/TType.hx` | Translated (audited); PMap fields are StringMaps iterated through `core.ds.PMap` |
 | `core/tUnification.ml` | `src/core/TUnification.hx` | Draft translated |
 | `core/texpr.ml` | `src/core/Texpr.hx` | Draft translated |
 | `core/timer.ml` | `src/core/Timer.hx` | Draft translated |
 | `core/type.ml` | `src/core/Type.hx` | Draft translated |
 | `core/warning.ml` | `src/core/Warning.hx` | Draft translated |
 | `core/withType.ml` | `src/core/WithType.hx` | Draft translated |
-| `core/zip_output.ml` | `src/core/ZipOutput.hx` | Existing, unaudited |
+| `core/zip_output.ml` | `src/core/ZipOutput.hx` | Translated (audited); `Zip` over `haxe.zip.Writer`, written on close |
 | `coro/contTypes.ml` | `src/coro/ContTypes.hx` | Draft translated |
 | `coro/coro.ml` | `src/coro/Coro.hx` | Draft translated |
 | `coro/coroConfig.ml` | `src/coro/CoroConfig.hx` | Draft translated |
@@ -328,8 +338,8 @@ conformance, or completion of the pre-existing HXB writer. The subsequent runtim
 | `typing/typeloadCheck.ml` | `src/typing/TypeloadCheck.hx` | Draft translated |
 | `typing/typeloadFields.ml` | `src/typing/TypeloadFields.hx` | Draft translated |
 | `typing/typeloadFunction.ml` | `src/typing/TypeloadFunction.hx` | Draft translated |
-| `typing/typeloadModule.ml` | `src/typing/ModuleTyping.hx`; legacy `TypeloadModule.hx` | Source pipeline integrated during compile phase; `hxb_reader_api_typeload` and `load_hxb_module` translated |
-| `typing/typeloadParse.ml` | `src/typing/SourceParser.hx`; legacy `TypeloadParse.hx` | Source pipeline integrated during compile phase |
+| `typing/typeloadModule.ml` | `src/typing/TypeloadModule.hx` | Source pipeline integrated during compile phase; `hxb_reader_api_typeload` and `load_hxb_module` translated (the legacy bootstrap loader is in `archive/legacy-bootstrap/`) |
+| `typing/typeloadParse.ml` | `src/typing/TypeloadParse.hx` | Source pipeline integrated during compile phase |
 | `typing/typer.ml` | `src/typing/Typer.hx` | Draft translated |
 | `typing/typerBase.ml` | `src/typing/TyperBase.hx` | Draft translated |
 | `typing/typerDotPath.ml` | `src/typing/TyperDotPath.hx` | Draft translated |
@@ -489,6 +499,3 @@ A scope-review entry is not a blanket exclusion of shared batch-compiler helpers
 Every upstream module now has a counterpart or a recorded reason. What
 remains open:
 
-- an audit of the 33 counterparts that predate the translation snapshot
-  ("Existing, unaudited" above): they pass the conformance suites, but were not
-  checked line by line against upstream.

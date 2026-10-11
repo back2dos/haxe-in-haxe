@@ -107,19 +107,18 @@ class HxbWriterConfig {
 	}
 
 	// port: module WriterConfigReaderJson = WriterConfigReader(JsonDataApi.JsonReaderApi)
-	static final jsonReaderApi:DataReaderApi<Dynamic> = new DataReaderApi<Dynamic>(core.data.JsonDataApi.JsonReaderApi.readOptional,
+	static final jsonReaderApi:DataReaderApi<core.Json.JsonValue> = new DataReaderApi<core.Json.JsonValue>(core.data.JsonDataApi.JsonReaderApi.readOptional,
 		data -> core.data.JsonDataApi.JsonReaderApi.readObject(data).map(f -> {name: f.name, value: f.value}),
 		core.data.JsonDataApi.JsonReaderApi.readArray, core.data.JsonDataApi.JsonReaderApi.readString,
 		core.data.JsonDataApi.JsonReaderApi.readIdent, core.data.JsonDataApi.JsonReaderApi.readBool,
 		core.data.JsonDataApi.JsonReaderApi.readInt, core.data.JsonDataApi.JsonReaderApi.dataToString);
 
-	public static function processJson(config:HxbWriterConfig, json:Dynamic):Void {
+	public static function processJson(config:HxbWriterConfig, json:core.Json.JsonValue):Void {
 		readWriterConfig(jsonReaderApi, config, json);
 	}
 
 	public static function parse(config:HxbWriterConfig, input:String):Void {
-		// port: Json.Reader.read_json over a Sedlex buffer; haxe.Json.parse builds the same values.
-		var json = haxe.Json.parse(input);
+		var json = core.Json.Reader.readJson(input);
 		processJson(config, json);
 	}
 

@@ -240,7 +240,7 @@ class DisplayToplevel {
 			try {
 				cc.findFile(fileKey);
 			} catch (_:core.ds.NotFound) {
-				try typing.SourceParser.parseModuleFile(com, filePath, Globals.nullPos)
+				try typing.TypeloadParse.parseModuleFile(com, filePath, Globals.nullPos)
 				catch (_:Dynamic) {}
 			}
 		});

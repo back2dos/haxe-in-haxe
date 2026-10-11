@@ -6,7 +6,7 @@ import haxe.zip.Entry;
 import haxe.zip.Writer;
 import sys.io.File;
 
-// port: from haxe/src/core/zip_output.ml.
+// port: `class virtual any_output`: the virtual methods fail if not overridden.
 class AnyOutput {
 	public function new() {}
 
@@ -19,6 +19,8 @@ class AnyOutput {
 	}
 }
 
+// port: `Zip.open_out`/`add_entry`/`close_out` (libs/extlib-leftovers zip.ml) over haxe.zip.Writer:
+// the entries are collected and the archive is written on close.
 class ZipOutput extends AnyOutput {
 	final output:sys.io.FileOutput;
 	final writer:Writer;

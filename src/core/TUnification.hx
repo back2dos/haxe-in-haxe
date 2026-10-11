@@ -210,14 +210,6 @@ enum UnifyMinResult {
 	UnifyMinError(errors:Array<UnifyError>, index:Int);
 }
 
-class TypeRecursion extends haxe.Exception {
-	public var type:T;
-
-	public function new(type:T) {
-		super("Recursive type");
-		this.type = type;
-	}
-}
 
 class Monomorph {
 	public static function create():TMono return {
@@ -396,14 +388,14 @@ class Monomorph {
 		inline function getRecursion(t:T):Null<T> {
 			function loop(t:T):Void switch t {
 				case TMono(m2) if (m == m2):
-					throw new TypeRecursion(t);
+					throw new core.TType.TypeException(t);
 				case _:
 					TFunctions.iter(loop, t);
 			}
 			try {
 				loop(t);
 				return null;
-			} catch (e:TypeRecursion) {
+			} catch (e:core.TType.TypeException) {
 				return e.type;
 			}
 		}

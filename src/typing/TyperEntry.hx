@@ -30,7 +30,7 @@ import context.Resolution.*;
 class TyperEntry {
 	public static function loadStdTypes(ctx:TyperContext):Void {
 		var stdTypes:ModuleDef;
-		try stdTypes = ModuleTyping.loadModule(ctx, {pack: [], name: "StdTypes"}, Globals.nullPos)
+		try stdTypes = TypeloadModule.loadModule(ctx, {pack: [], name: "StdTypes"}, Globals.nullPos)
 		catch (e:Dynamic) {
 			switch e {
 				case(core.ds.ExceptionTools.typing(_) => Some({errMessage: ModuleNotFound({pack: [], name: "StdTypes"})})):
@@ -88,7 +88,7 @@ class TyperEntry {
 	}
 
 	public static function loadString(ctx:TyperContext):Void {
-		var m = ModuleTyping.loadModule(ctx, {pack: [], name: "String"}, Globals.nullPos);
+		var m = TypeloadModule.loadModule(ctx, {pack: [], name: "String"}, Globals.nullPos);
 		for (mt in m.mTypes) switch mt {
 			case TClassDecl(c = {clPath: {pack: [], name: "String"}}):
 				var t = TInst(c, []);
@@ -99,7 +99,7 @@ class TyperEntry {
 	}
 
 	public static function loadStd(ctx:TyperContext):Void {
-		var m = ModuleTyping.loadModule(ctx, {pack: [], name: "Std"}, Globals.nullPos);
+		var m = TypeloadModule.loadModule(ctx, {pack: [], name: "Std"}, Globals.nullPos);
 		for (mt in m.mTypes) switch mt {
 			case TClassDecl(c = {clPath: {pack: [], name: "Std"}}):
 				ctx.com.std = c;
@@ -108,7 +108,7 @@ class TyperEntry {
 	}
 
 	public static function loadAny(ctx:TyperContext):Void {
-		var m = ModuleTyping.loadModule(ctx, {pack: [], name: "Any"}, Globals.nullPos);
+		var m = TypeloadModule.loadModule(ctx, {pack: [], name: "Any"}, Globals.nullPos);
 		for (mt in m.mTypes) switch mt {
 			case TAbstractDecl(a) if (a.aPath.name == "Any"):
 				var t = TAbstract(a, []);
@@ -119,7 +119,7 @@ class TyperEntry {
 	}
 
 	public static function loadArray(ctx:TyperContext):Void {
-		var m = ModuleTyping.loadModule(ctx, {pack: [], name: "Array"}, Globals.nullPos);
+		var m = TypeloadModule.loadModule(ctx, {pack: [], name: "Array"}, Globals.nullPos);
 		for (mt in m.mTypes) switch mt {
 			case TClassDecl(c = {clPath: {pack: [], name: "Array"}}):
 				ctx.t.tarray = t -> TInst(c, [t]);
@@ -130,7 +130,7 @@ class TyperEntry {
 	}
 
 	public static function loadUnit(ctx:TyperContext):Void {
-		var m = ModuleTyping.loadModule(ctx, {pack: ["haxe"], name: "Unit"}, Globals.nullPos);
+		var m = TypeloadModule.loadModule(ctx, {pack: ["haxe"], name: "Unit"}, Globals.nullPos);
 		for (mt in m.mTypes) switch mt {
 			case TEnumDecl(en) if (en.ePath.name == "Unit"):
 				ctx.t.tunit = TEnum(en, []);
@@ -140,12 +140,12 @@ class TyperEntry {
 	}
 
 	public static function loadEnumTools(ctx:TyperContext):Void {
-		var m = ModuleTyping.loadModule(ctx, {pack: ["haxe"], name: "EnumTools"}, Globals.nullPos);
+		var m = TypeloadModule.loadModule(ctx, {pack: ["haxe"], name: "EnumTools"}, Globals.nullPos);
 		switch m.mTypes {
 			case [TClassDecl(c1), TClassDecl(c2)]:
 				ctx.g.globalUsing = [{cls: c1, pos: c1.clPos}, {cls: c2, pos: c2.clPos}].concat(ctx.g.globalUsing);
 			case [TClassDecl(c1)]:
-				var m = ModuleTyping.loadModule(ctx, {pack: ["haxe"], name: "EnumValueTools"}, Globals.nullPos);
+				var m = TypeloadModule.loadModule(ctx, {pack: ["haxe"], name: "EnumValueTools"}, Globals.nullPos);
 				switch m.mTypes {
 					case [TClassDecl(c2)]: ctx.g.globalUsing = [
 							{cls: c1, pos: c1.clPos},
@@ -164,7 +164,7 @@ class TyperEntry {
 	public static function loadLocalWrapper(ctx:TyperContext):LocalWrapperApi {
 		// optimized version for Java - use native arrays
 		if (ctx.com.platform == Jvm) {
-			var m = ModuleTyping.loadModule(ctx, {pack: ["jvm"], name: "NativeArray"}, Globals.nullPos);
+			var m = TypeloadModule.loadModule(ctx, {pack: ["jvm"], name: "NativeArray"}, Globals.nullPos);
 			for (md in m.mTypes) switch md {
 				case TClassDecl(cl = {clPath: {pack: ["jvm"], name: "NativeArray"}}):
 					return new CaptureLocalWrapper(ctx.t, cl);
@@ -178,7 +178,7 @@ class TyperEntry {
 
 	public static function loadCoro(ctx:TyperContext):Void {
 		ctx.t.tcoro.tcoro = AtomicLazy.fromFun(function() {
-			var m = ModuleTyping.loadModule(ctx, {pack: ["haxe", "coro"], name: "Coroutine"}, Globals.nullPos);
+			var m = TypeloadModule.loadModule(ctx, {pack: ["haxe", "coro"], name: "Coroutine"}, Globals.nullPos);
 			for (mt in m.mTypes) switch mt {
 				case TAbstractDecl(a = {aPath: {pack: ["haxe", "coro"], name: "Coroutine"}}):
 					return function(signature:TSignature):T return TAbstract(a, [TFun(signature)]);
@@ -187,7 +187,7 @@ class TyperEntry {
 			throw "Could not locate abstract Coroutine<T> (was it redefined?)";
 		});
 		ctx.t.tcoro.continuation = AtomicLazy.fromFun(function() {
-			var m = ModuleTyping.loadModule(ctx, {pack: ["haxe", "coro"], name: "IContinuation"}, Globals.nullPos);
+			var m = TypeloadModule.loadModule(ctx, {pack: ["haxe", "coro"], name: "IContinuation"}, Globals.nullPos);
 			for (mt in m.mTypes) switch mt {
 				case TClassDecl(cl = {clPath: {pack: ["haxe", "coro"], name: "IContinuation"}}):
 					return TInst(cl, [ctx.t.tany]);
@@ -196,7 +196,7 @@ class TyperEntry {
 			throw "Could not locate class IContinuation<T> (was it redefined?)";
 		});
 		ctx.t.tcoro.suspensionResultClass = AtomicLazy.fromFun(function() {
-			var m = ModuleTyping.loadModule(ctx, {pack: ["haxe", "coro"], name: "SuspensionResult"}, Globals.nullPos);
+			var m = TypeloadModule.loadModule(ctx, {pack: ["haxe", "coro"], name: "SuspensionResult"}, Globals.nullPos);
 			for (mt in m.mTypes) switch mt {
 				case TClassDecl(cl = {clPath: {pack: ["haxe", "coro"], name: "SuspensionResult"}}):
 					return cl;
@@ -205,7 +205,7 @@ class TyperEntry {
 			throw "Could not locate class SuspensionResult<T> (was it redefined?)";
 		});
 		ctx.t.tcoro.tasyncIterator = AtomicLazy.fromFun(function() {
-			var m = ModuleTyping.loadModule(ctx, {pack: ["haxe", "coro"], name: "AsyncIterator"}, Globals.nullPos);
+			var m = TypeloadModule.loadModule(ctx, {pack: ["haxe", "coro"], name: "AsyncIterator"}, Globals.nullPos);
 			for (mt in m.mTypes) switch mt {
 				case TTypeDecl(td = {tPath: {pack: ["haxe", "coro"], name: "AsyncIterator"}}):
 					return function(t:T):T return TType(td, [t]);
@@ -213,7 +213,7 @@ class TyperEntry {
 			}
 			throw "Could not locate typedef AsyncIterator<T> (was it redefined?)";
 		});
-		var m = ModuleTyping.loadModule(ctx, {pack: ["haxe"], name: "Exception"}, Globals.nullPos);
+		var m = TypeloadModule.loadModule(ctx, {pack: ["haxe"], name: "Exception"}, Globals.nullPos);
 		for (mt in m.mTypes) switch mt {
 			case TClassDecl(cl = {clPath: {pack: ["haxe"], name: "Exception"}}):
 				ctx.t.texception = TInst(cl, []);
@@ -263,7 +263,7 @@ class TyperEntry {
 			continuationApi: null,
 			doMacro: MacroContext.typeMacro,
 			doLoadMacro: MacroContext.loadMacroPrime,
-			doLoadModule: ModuleTyping.loadModule,
+			doLoadModule: TypeloadModule.loadModule,
 			doLoadTypeDef: Typeload.loadTypeDef,
 			getBuildInfo: InstanceBuilder.getBuildInfo,
 			doFormatString: formatString,

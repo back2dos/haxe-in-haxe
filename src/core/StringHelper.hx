@@ -1,78 +1,100 @@
 package core;
 
-// port: from haxe/src/core/stringHelper.ml.
+import core.ds.Failure;
+import core.ds.InvalidArgument;
+
+// port: OCaml strings are byte strings. The functions below that work byte by byte on
+// identifiers and paths only change ASCII bytes, so they work on characters here.
 class StringHelper {
-	public static function uppercase(value:String):String {
-		var result = new StringBuf();
-		for (index in 0...value.length) {
-			var code = value.charCodeAt(index);
-			result.addChar(code >= 97 && code <= 122 ? code - 32 : code);
+	public static function uppercase(s:String):String {
+		var bytes = new StringBuf();
+		for (idx in 0...s.length) {
+			var code = StringTools.fastCodeAt(s, idx);
+			bytes.addChar(97 <= code && code <= 122 ? code - 32 : code);
 		}
-		return result.toString();
+		return bytes.toString();
 	}
 
-	public static function capitalize(value:String):String {
-		if (value.length == 0) return "";
-		var code = value.charCodeAt(0);
-		return String.fromCharCode(code >= 97 && code <= 122 ? code - 32 : code) + value.substr(1);
-	}
-
-	public static function startsUppercaseIdentifier(value:String):Bool {
-		if (value.length == 0) throw "Identifier name must not be empty";
-		var index = 0;
-		while (value.charAt(index) == "_") {
-			index++;
-			if (index == value.length) return false;
+	public static function capitalize(s:String):String {
+		if (s.length == 0) return "";
+		else {
+			var code = StringTools.fastCodeAt(s, 0);
+			return if (97 <= code && code <= 122) String.fromCharCode(code - 32) + s.substr(1) else s;
 		}
-		var code = value.charCodeAt(index);
-		return code >= "A".code && code <= "Z".code;
 	}
 
-	public static function checkUppercase(value:String):Void {
-		if (value.length == 0) throw "empty part";
-		if (!startsUppercaseIdentifier(value)) throw "Class name must start with an uppercase letter";
+	public static function startsUppercaseIdentifier(x:String):Bool {
+		if (x.length == 0) throw new InvalidArgument("Identifier name must not be empty");
+		else {
+			function loop(p:Int):Bool {
+				return switch StringTools.fastCodeAt(x, p) {
+					case c if (c >= "A".code && c <= "Z".code): true;
+					case "_".code: p + 1 < x.length && loop(p + 1);
+					case _: false;
+				}
+			}
+			return loop(0);
+		}
 	}
 
-	public static function sEscape(value:String, ?hex:Bool = true):String {
-		var result = new StringBuf();
-		for (index in 0...value.length) {
-			var code = value.charCodeAt(index);
-			switch (code) {
-				case 10:
-					result.add("\\n");
-				case 9:
-					result.add("\\t");
-				case 13:
-					result.add("\\r");
-				case 34:
-					result.add('\\"');
-				case 92:
-					result.add("\\\\");
-				case _ if (code < 32 && hex):
-					result.add('\\x${StringTools.hex(code, 2)}');
-				case _:
-					result.addChar(code);
+	public static function checkUppercase(x:String):Void {
+		if (x.length == 0) throw new Failure("empty part");
+		else if (!startsUppercaseIdentifier(x)) throw new Failure("Class name must start with an uppercase letter");
+	}
+
+	public static function sEscape(s:String, hex:Bool = true):String {
+		var b = new StringBuf();
+		for (i in 0...s.length) {
+			switch StringTools.fastCodeAt(s, i) {
+				case "\n".code:
+					b.add("\\n");
+				case "\t".code:
+					b.add("\\t");
+				case "\r".code:
+					b.add("\\r");
+				case "\"".code:
+					b.add("\\\"");
+				case "\\".code:
+					b.add("\\\\");
+				case c if (c < 32 && hex):
+					b.add("\\x" + StringTools.hex(c, 2));
+				case c:
+					b.addChar(c);
 			}
 		}
-		return result.toString();
+		return b.toString();
 	}
 
 	public static function escapeResName(name:String, allowed:Array<String>):String {
 		var result = new StringBuf();
-		// port: OCaml escapes each byte; a non-ASCII character is escaped as its UTF-8 bytes.
+		// port: ExtString.String.replace_chars goes through the bytes; a non-ASCII character
+		// is escaped as its UTF-8 bytes.
 		var bytes = haxe.io.Bytes.ofString(name);
 		for (index in 0...bytes.length) {
-			var code = bytes.get(index);
-			var character = String.fromCharCode(code);
-			if ((code >= "a".code && code <= "z".code)
-				|| (code >= "A".code && code <= "Z".code)
-				|| (code >= "0".code && code <= "9".code)
-				|| character == "_"
-				|| character == "."
-				|| allowed.indexOf(character) >= 0) result.add(character);
-			else result.add('-x$code');
+			var chr = bytes.get(index);
+			if ((chr >= "a".code && chr <= "z".code)
+				|| (chr >= "A".code && chr <= "Z".code)
+				|| (chr >= "0".code && chr <= "9".code)
+				|| chr == "_".code
+				|| chr == ".".code) result.add(charEscaped(chr));
+			else if (allowed.indexOf(String.fromCharCode(chr)) >= 0) result.add(charEscaped(chr));
+			else result.add("-x" + chr);
 		}
 		return result.toString();
+	}
+
+	// port: OCaml's Char.escaped
+	static function charEscaped(c:Int):String {
+		return switch c {
+			case "'".code: "\\'";
+			case "\\".code: "\\\\";
+			case "\n".code: "\\n";
+			case "\t".code: "\\t";
+			case "\r".code: "\\r";
+			case 8: "\\b";
+			case c if (c >= 32 && c <= 126): String.fromCharCode(c);
+			case c: "\\" + StringTools.lpad(Std.string(c), "0", 3);
+		}
 	}
 
 	public static function removeExtension(file:String):String {
@@ -81,87 +103,100 @@ class StringHelper {
 	}
 
 	public static function extension(file:String):String {
-		var dot = file.lastIndexOf(".");
-		return dot < 0 ? file : file.substr(dot);
+		var dotPos = file.lastIndexOf(".");
+		return dotPos < 0 ? file : file.substr(dotPos);
 	}
 
-	// UTF8
+	/* UTF8 */
 
-	public static function toUtf8(value:String, position:core.Globals.Pos):{value:String, utf16Length:Int} {
-		var length = 0;
-		for (code in new haxe.iterators.StringIteratorUnicode(value)) {
-			if ((code >= 0xD800 && code <= 0xDFFF) || code >= 0x110000) throw "Invalid unicode char";
-			length++;
-			if (code > 0x10000) length++;
+	// port: returns (u8, ccount). Haxe strings are always valid Unicode, so the
+	// Malformed_code branch (ISO to utf8) cannot occur.
+	public static function toUtf8(str:String, p:core.Globals.Pos):{value:String, utf16Length:Int} {
+		var u8 = str;
+		var ccount = 0;
+		for (c in new haxe.iterators.StringIteratorUnicode(u8)) {
+			if ((c >= 0xD800 && c <= 0xDFFF) || c >= 0x110000) throw new Failure("Invalid unicode char");
+			ccount++;
+			if (c > 0x10000) ccount++;
 		}
-		return {value: value, utf16Length: length};
+		return {value: u8, utf16Length: ccount};
 	}
 
-	public static function utf16Add(output:StringBuf, code:Int):Void {
-		if (code >= 0 && code < 0x10000) {
-			if (code >= 0xD800 && code <= 0xDFFF) throw 'Invalid unicode char $code';
-			addUtf16Unit(output, code);
-		} else if (code < 0x110000) {
-			var value = code - 0x10000;
-			addUtf16Unit(output, (value >> 10) + 0xD800);
-			addUtf16Unit(output, (value & 1023) + 0xDC00);
-		} else {
-			throw 'Invalid unicode char $code';
+	// port: the buffer holds bytes, one character (0-255) each.
+	public static function utf16Add(buf:StringBuf, c:Int):Void {
+		function add(c:Int) {
+			buf.addChar(c & 0xFF);
+			buf.addChar(c >>> 8);
 		}
+		if (c >= 0 && c < 0x10000) {
+			if (c >= 0xD800 && c <= 0xDFFF) throw new Failure("Invalid unicode char " + c);
+			add(c);
+		} else if (c < 0x110000) {
+			var c = c - 0x10000;
+			add((c >> 10) + 0xD800);
+			add((c & 1023) + 0xDC00);
+		} else
+			throw new Failure("Invalid unicode char " + c);
 	}
 
-	public static function utf8ToUtf16(value:String, zeroTerminated:Bool):String {
-		var result = new StringBuf();
-		for (code in new haxe.iterators.StringIteratorUnicode(value)) utf16Add(result, code);
-		if (zeroTerminated) utf16Add(result, 0);
-		return result.toString();
+	// port: the result is a byte string, one character (0-255) per byte.
+	public static function utf8ToUtf16(str:String, zt:Bool):String {
+		var b = new StringBuf();
+		for (c in new haxe.iterators.StringIteratorUnicode(str)) utf16Add(b, c);
+		if (zt) utf16Add(b, 0);
+		return b.toString();
 	}
 
-	public static function utf16ToUtf8(value:String):String {
-		var result = new StringBuf();
-		var index = 0;
-		while (index + 1 < value.length) {
-			var code = value.charCodeAt(index) | (value.charCodeAt(index + 1) << 8);
-			index += 2;
-			if (code >= 0xD800 && code <= 0xDBFF && index + 1 < value.length) {
-				var low = value.charCodeAt(index) | (value.charCodeAt(index + 1) << 8);
-				if (low >= 0xDC00 && low <= 0xDFFF) {
-					code = 0x10000 + ((code - 0xD800) << 10) + low - 0xDC00;
-					index += 2;
+	// port: `str` is a byte string, one character (0-255) per byte.
+	public static function utf16ToUtf8(str:String):String {
+		var b = new StringBuf();
+		function add(c:Int) b.addChar(c & 0xFF);
+		function get(i:Int) return StringTools.fastCodeAt(str, i) & 0xFF;
+		function loop(i:Int) {
+			while (true) {
+				if (i >= str.length) return;
+				else {
+					var c = get(i);
+					if (c < 0x80) {
+						add(c);
+						i += 2;
+					} else if (c < 0x800) {
+						var c = c | (get(i + 1) << 8);
+						add(c);
+						add(c >> 8);
+						i += 2;
+					} else
+						core.Globals.die("", "stringHelper.ml");
 				}
 			}
-			result.add(String.fromCharCode(code));
 		}
-		return result.toString();
+		loop(0);
+		return b.toString();
 	}
 
-	public static function urlEncode(value:String, addCharacter:String->Void):Void {
-		var bytes = haxe.io.Bytes.ofString(value);
+	public static function urlEncode(s:String, addChar:String->Void):Void {
 		var hex = "0123456789ABCDEF";
-		for (index in 0...bytes.length) {
-			var code = bytes.get(index);
-			if ((code >= "A".code && code <= "Z".code)
-				|| (code >= "a".code && code <= "z".code)
-				|| (code >= "0".code && code <= "9".code)
-				|| code == "_".code
-				|| code == "-".code
-				|| code == ".".code) addCharacter(String.fromCharCode(code));
+		// port: OCaml iterates the bytes
+		var bytes = haxe.io.Bytes.ofString(s);
+		for (i in 0...bytes.length) {
+			var c = bytes.get(i);
+			if ((c >= "A".code && c <= "Z".code)
+				|| (c >= "a".code && c <= "z".code)
+				|| (c >= "0".code && c <= "9".code)
+				|| c == "_".code
+				|| c == "-".code
+				|| c == ".".code) addChar(String.fromCharCode(c));
 			else {
-				addCharacter("%");
-				addCharacter(hex.charAt(code >> 4));
-				addCharacter(hex.charAt(code & 0xF));
+				addChar("%");
+				addChar(hex.charAt(c >> 4));
+				addChar(hex.charAt(c & 0xF));
 			}
 		}
 	}
 
-	public static function urlEncodeString(value:String):String {
-		var result = new StringBuf();
-		urlEncode(value, result.add);
-		return result.toString();
-	}
-
-	static function addUtf16Unit(output:StringBuf, code:Int):Void {
-		output.addChar(code & 0xFF);
-		output.addChar(code >> 8);
+	public static function urlEncodeString(s:String):String {
+		var b = new StringBuf();
+		urlEncode(s, b.add);
+		return b.toString();
 	}
 }
