@@ -604,7 +604,11 @@ class CppCppia {
 			switch constructor.efType {
 				case TFun(sig):
 					script.write(name + " " + Std.string(sig.args.length));
-					for (a in sig.args) script.write(" " + script.stringText(a.name) + " " + script.typeText(a.type));
+					for (a in sig.args) {
+						// port: OCaml evaluates the operands of `^` right to left.
+						var t = script.typeText(a.type);
+						script.write(" " + script.stringText(a.name) + " " + t);
+					}
 					script.write("\n");
 				case _: script.write(name + " 0\n");
 			}
@@ -665,6 +669,9 @@ class CppCppia {
 	}
 }
 
+// port: OCaml evaluates the operands of `^` right to left, and the string and type tables
+// number their entries in first-use order, so where one concatenation registers two
+// entries the right one is computed first (`({ var st = stringText(...); ... })`).
 class ScriptWriter {
 	final ctx:Context;
 	final filename:String;
@@ -912,7 +919,11 @@ class ScriptWriter {
 		comment(funcName);
 		write(op(IaFunction) + staticText(isStatic) + " " + boolText(isDynamic) + " " + stringText(funcName) + " ");
 		write(typeText(ret) + Std.string(args.length) + " ");
-		for (a in args) write(stringText(a.name) + boolText(a.optional) + " " + typeText(a.type) + " ");
+		for (a in args) {
+			// port: OCaml evaluates the operands of `^` right to left.
+			var t = typeText(a.type);
+			write(stringText(a.name) + boolText(a.optional) + " " + t + " ");
+		}
 		write("\n");
 		if (!isInterface) switch fieldExpression {
 			case e = {eexpr: TFunction(functionDef)} if (e != null):
@@ -937,7 +948,9 @@ class ScriptWriter {
 	}
 
 	public function varField(readAcc:CppiaOp, writeAcc:CppiaOp, isExtern:Bool, isStatic:Bool, name:String, varType:T, varExpr:Null<TExpr>):Void {
-		write(op(IaVar) + staticText(isStatic) + " " + op(readAcc) + op(writeAcc) + boolText(isExtern) + " " + stringText(name) + typeText(varType)
+		// port: OCaml evaluates the operands of `^` right to left.
+		var t = typeText(varType);
+		write(op(IaVar) + staticText(isStatic) + " " + op(readAcc) + op(writeAcc) + boolText(isExtern) + " " + stringText(name) + t
 			+ (if (varExpr != null) "1" else "0") + if (doComment) " # " + name + "\n" else "\n");
 		switch varExpr {
 			case null:
@@ -979,8 +992,14 @@ class ScriptWriter {
 			return true;
 		}
 		var wasCast = if (isInterfaceType(toType)) {
-			if (CppCppia.isDynamicInCppia(ctx, expr)) writeCast(op(IaToInterface) + typeText(toType) + " " + typeTextString("Dynamic")) else
-				if (!CppCppia.isMatchingInterfaceType(toType, expr.etype)) writeCast(op(IaToInterface) + typeText(toType) + " " + typeText(expr.etype)) else false;
+			// port: OCaml evaluates the operands of `^` right to left.
+			if (CppCppia.isDynamicInCppia(ctx, expr)) {
+				var d = typeTextString("Dynamic");
+				writeCast(op(IaToInterface) + typeText(toType) + " " + d);
+			} else if (!CppCppia.isMatchingInterfaceType(toType, expr.etype)) {
+				var e = typeText(expr.etype);
+				writeCast(op(IaToInterface) + typeText(toType) + " " + e);
+			} else false;
 		} else {
 			function getArrayExprType(expr:TExpr):ArrayOf return if (CppCppia.isDynamicInCppia(ctx, expr)) ArrayNone else getArrayType(expr.etype);
 			switch [getArrayType(toType), getArrayExprType(expr)] {
@@ -1164,27 +1183,27 @@ class ScriptWriter {
 						case TField({eexpr: TIdent("__global__")}, field):
 							write(op(IaCallGlobal) + stringText(fieldName(field)) + argN + commentOf(fieldName(field)) + "\n");
 						case TField(obj, FStatic(classDef, field)) if (isRealFunction(field)):
-							write(op(IaCallStatic) + instText(classDef) + " " + stringText(field.cfName) + argN
+							write(({ var st = stringText(field.cfName); op(IaCallStatic) + instText(classDef) + " " + st; }) + argN
 								+ commentOf(joinClassPath(classDef.clPath, ".") + "." + field.cfName) + "\n");
 						case TField(obj, FInstance(_, _, field)) if (CppCppia.isThis(obj) && isRealFunction(field)):
-							write(op(IaCallThis) + typeText(obj.etype) + " " + stringText(field.cfName) + argN + commentOf(field.cfName) + "\n");
+							write(({ var st = stringText(field.cfName); op(IaCallThis) + typeText(obj.etype) + " " + st; }) + argN + commentOf(field.cfName) + "\n");
 						case TField(obj, FInstance(_, _, field)) if (CppCppia.isSuper(obj)):
-							write(op(IaCallSuper) + typeText(obj.etype) + " " + stringText(field.cfName) + argN + commentOf(field.cfName) + "\n");
+							write(({ var st = stringText(field.cfName); op(IaCallSuper) + typeText(obj.etype) + " " + st; }) + argN + commentOf(field.cfName) + "\n");
 						/* Cppia does not have a "GetEnumIndex" op code - must use IaCallMember ::hx::EnumBase.__Index */
 						case TField(obj, FInstance(_, _, field)) if (field.cfName == "_hx_getIndex" && CppCppia.scriptTypeString(obj.etype) == "::hx::EnumBase"):
-							write(op(IaCallMember) + typeTextString("::hx::EnumBase") + " " + stringText("__Index") + argN + commentOf("Enum index") + "\n");
+							write(({ var st = stringText("__Index"); op(IaCallMember) + typeTextString("::hx::EnumBase") + " " + st; }) + argN + commentOf("Enum index") + "\n");
 							genExpression(obj);
 						case TField(obj, FInstance(_, _, field)) if (field.cfName == "__Index"
 							|| (!CppCppia.isDynamicInCppia(ctx, obj)) && isRealFunction(field)):
-							write(op(IaCallMember) + typeText(obj.etype) + " " + stringText(field.cfName) + argN + commentOf(field.cfName) + "\n");
+							write(({ var st = stringText(field.cfName); op(IaCallMember) + typeText(obj.etype) + " " + st; }) + argN + commentOf(field.cfName) + "\n");
 							genExpression(obj);
 						case TField(obj, FDynamic(name)) if (isInternalMember(name) || (typeString(obj.etype) == "::String" && name == "cca")):
-							write(op(IaCallMember) + typeText(obj.etype) + " " + stringText(name) + argN + commentOf(name) + "\n");
+							write(({ var st = stringText(name); op(IaCallMember) + typeText(obj.etype) + " " + st; }) + argN + commentOf(name) + "\n");
 							genExpression(obj);
 						case TConst(TSuper):
 							write(op(IaCallSuperNew) + typeText(func.etype) + " " + argN + "\n");
 						case TField(_, FEnum(enumDef, field)):
-							write(op(IaCreateEnum) + enumText(enumDef) + " " + stringText(field.efName) + argN + commentOf(field.efName) + "\n");
+							write(({ var st = stringText(field.efName); op(IaCreateEnum) + enumText(enumDef) + " " + st; }) + argN + commentOf(field.efName) + "\n");
 						case _:
 							write(op(IaCall) + argN + "\n");
 							genExpression(func);
@@ -1226,7 +1245,7 @@ class ScriptWriter {
 						write(op(IaFName) + typeText + " " + stringText(name) + commentOf(name) + "\n");
 						genExpression(obj);
 					case FStatic(classDef, field):
-						write(op(IaFStatic) + instText(classDef) + " " + stringText(field.cfName) + commentOf(field.cfName));
+						write(({ var st = stringText(field.cfName); op(IaFStatic) + instText(classDef) + " " + st; }) + commentOf(field.cfName));
 					case FInstance(_, _, field) if (CppCppia.isThis(obj)):
 						write(op(IaFThisInst) + typeText + " " + stringText(field.cfName) + commentOf(field.cfName));
 					case FInstance(_, _, field):
@@ -1240,7 +1259,7 @@ class ScriptWriter {
 						write(op(IaFName) + typeText + " " + stringText(field.cfName) + commentOf(field.cfName) + "\n");
 						genExpression(obj);
 					case FEnum(enumDef, field):
-						write(op(IaFEnum) + enumText(enumDef) + " " + stringText(field.efName) + commentOf(field.efName));
+						write(({ var st = stringText(field.efName); op(IaFEnum) + enumText(enumDef) + " " + st; }) + commentOf(field.efName));
 				}
 			case TArray(e1, e2):
 				write(op(IaArrayI) + typeText(e1.etype) + "\n");
@@ -1303,7 +1322,12 @@ class ScriptWriter {
 				{key: {name: "className"}, expr: {eexpr: TConst(TString(className))}},
 				{key: {name: "methodName"}, expr: {eexpr: TConst(TString(meth))}}
 			]):
-				write(op(IaPosInfo) + stringText(file) + Std.string(line) + " " + stringText(className) + " " + stringText(meth));
+				{
+					// port: OCaml evaluates the operands of `^` right to left.
+					var m = stringText(meth);
+					var c = stringText(className);
+					write(op(IaPosInfo) + stringText(file) + Std.string(line) + " " + c + " " + m);
+				}
 			case TObjectDecl(values):
 				write(op(IaObjDef) + Std.string(values.length));
 				write(" ");
@@ -1325,7 +1349,7 @@ class ScriptWriter {
 				write(op(IaEnumI) + typeText(TEnum(enumDef, [])) + Std.string(i) + "\n");
 				genExpression(expr);
 			case TEnumIndex(expr):
-				write(op(IaCallMember) + typeTextString("::hx::EnumBase") + " " + stringText("__Index") + "0" + commentOf("Enum index") + "\n");
+				write(({ var st = stringText("__Index"); op(IaCallMember) + typeTextString("::hx::EnumBase") + " " + st; }) + "0" + commentOf("Enum index") + "\n");
 				genExpression(expr);
 			case TSwitch({switchSubject: condition, switchCases: cases, switchDefault: optionalDefault}):
 				write(op(IaSwitch) + Std.string(cases.length) + " " + (if (optionalDefault == null) "0" else "1") + "\n");
@@ -1435,19 +1459,19 @@ class ScriptWriter {
 					switch func {
 						case FuncThis(field, inst):
 							var name = field.cfName;
-							write(op(IaCallThis) + astType(inst) + " " + stringText(name) + argN + commentOf(name) + "\n");
+							write(({ var st = stringText(name); op(IaCallThis) + astType(inst) + " " + st; }) + argN + commentOf(name) + "\n");
 						case FuncInstance(expr, _, field, _) | FuncInterface(expr, _, field):
-							write(op(IaCallMember) + astType(expr.cpptype) + " " + stringText(field.cfName) + argN + commentOf(field.cfName) + "\n");
+							write(({ var st = stringText(field.cfName); op(IaCallMember) + astType(expr.cpptype) + " " + st; }) + argN + commentOf(field.cfName) + "\n");
 							genTreeExpression(expr);
 						case FuncStatic(classDef, _, field, _):
-							write(op(IaCallStatic) + cppInstText(classDef) + " " + stringText(field.cfName) + argN
+							write(({ var st = stringText(field.cfName); op(IaCallStatic) + cppInstText(classDef) + " " + st; }) + argN
 								+ commentOf(joinClassPath(classDef.clPath, ".") + "." + field.cfName) + "\n");
 						case FuncTemplate(_):
 							core.Error.abort("Templated function call not supported in cppia", expression.cpppos);
 						case FuncFromStaticFunction:
 							core.Error.abort("Unexpected FuncFromStaticFunction", expression.cpppos);
 						case FuncEnumConstruct(enumDef, field):
-							write(op(IaCreateEnum) + enumText(enumDef) + " " + stringText(field.efName) + argN + commentOf(field.efName) + "\n");
+							write(({ var st = stringText(field.efName); op(IaCreateEnum) + enumText(enumDef) + " " + st; }) + argN + commentOf(field.efName) + "\n");
 						case FuncSuperConstruct(TCppInst(klass, _)) if (isNativeGenClass(klass) && isNativeClass(klass)):
 							core.Error.abort("Unsupported super for native class constructor", expression.cpppos);
 						case FuncSuperConstruct(childType):
@@ -1455,17 +1479,17 @@ class ScriptWriter {
 						case FuncSuper(_, TCppInst(klass, _), _) if (isNativeGenClass(klass) && isNativeClass(klass)):
 							core.Error.abort("Unsupported super for native class method", expression.cpppos);
 						case FuncSuper(_, objType, field):
-							write(op(IaCallSuper) + astType(objType) + " " + stringText(field.cfName) + argN + commentOf(field.cfName) + "\n");
+							write(({ var st = stringText(field.cfName); op(IaCallSuper) + astType(objType) + " " + st; }) + argN + commentOf(field.cfName) + "\n");
 						case FuncExtern(name, _):
 							write(op(IaCallGlobal) + stringText(name) + argN + commentOf(name) + "\n");
 						case FuncNew(newType):
 							write(op(IaNew) + astType(newType) + argN + "\n");
 						case FuncInternal(obj, "cca", ".") if (obj.cpptype.match(TCppString)):
-							write(op(IaCallMember) + astType(obj.cpptype) + " " + stringText("cca") + argN + commentOf("cca") + "\n");
+							write(({ var st = stringText("cca"); op(IaCallMember) + astType(obj.cpptype) + " " + st; }) + argN + commentOf("cca") + "\n");
 							genTreeExpression(obj);
 						case FuncInternal(obj, name, join):
 							/* abort ("Internal function call '" ^ name ^ "' not supported in cppia") expression.cpppos; */
-							write(op(IaCallMember) + astType(obj.cpptype) + " " + stringText(name) + argN + commentOf(name) + "\n");
+							write(({ var st = stringText(name); op(IaCallMember) + astType(obj.cpptype) + " " + st; }) + argN + commentOf(name) + "\n");
 							genTreeExpression(obj);
 						case FuncExpression(expr):
 							write(op(IaCall) + argN + "\n");
@@ -1475,18 +1499,18 @@ class ScriptWriter {
 				case CppFunction(func, _):
 					switch func {
 						case FuncThis(field, inst):
-							write(op(IaFThisName) + astType(inst) + " " + stringText(field.cfName)
+							write(({ var st = stringText(field.cfName); op(IaFThisName) + astType(inst) + " " + st; })
 								+ commentOf(CppCppia.scriptCpptypeString(inst) + "." + field.cfName));
 						case FuncInternal(expr, name, _):
-							write(op(IaFLink) + astType(expr.cpptype) + " " + stringText(name)
+							write(({ var st = stringText(name); op(IaFLink) + astType(expr.cpptype) + " " + st; })
 								+ commentOf("Internal " + CppCppia.scriptCpptypeString(expr.cpptype) + "." + name) + "\n");
 							genTreeExpression(expr);
 						case FuncInstance(expr, _, field, _) | FuncInterface(expr, _, field):
-							write(op(IaFName) + astType(expr.cpptype) + " " + stringText(field.cfName)
+							write(({ var st = stringText(field.cfName); op(IaFName) + astType(expr.cpptype) + " " + st; })
 								+ commentOf(CppCppia.scriptCpptypeString(expr.cpptype) + "." + field.cfName) + "\n");
 							genTreeExpression(expr);
 						case FuncStatic(classDef, _, field, _):
-							write(op(IaFStatic) + cppInstText(classDef) + " " + stringText(field.cfName) + commentOf(field.cfName));
+							write(({ var st = stringText(field.cfName); op(IaFStatic) + cppInstText(classDef) + " " + st; }) + commentOf(field.cfName));
 						case FuncExpression(expr): matchExpr(expr);
 						case FuncExtern(name, _):
 							core.Error.abort("Can't create extern " + name + " closure", expression.cpppos);
@@ -1501,7 +1525,12 @@ class ScriptWriter {
 							core.Error.abort("Can't create template function closure", expression.cpppos);
 					}
 				case CppPosition(file, line, className, meth):
-					write(op(IaPosInfo) + stringText(file) + Std.string(line) + " " + stringText(className) + " " + stringText(meth));
+					{
+					// port: OCaml evaluates the operands of `^` right to left.
+					var m = stringText(meth);
+					var c = stringText(className);
+					write(op(IaPosInfo) + stringText(file) + Std.string(line) + " " + c + " " + m);
+				}
 				case CppNullCompare("IsNull", e):
 					writeOpLine(IaIsNull);
 					genTreeExpression(e);
@@ -1517,13 +1546,13 @@ class ScriptWriter {
 					write(op(IaADef) + astType(expression.cpptype) + " " + Std.string(exprList.length) + "\n");
 					for (e in exprList) genTreeExpression(e);
 				case CppEnumField(enumDef, field):
-					write(op(IaFEnum) + enumText(enumDef) + " " + stringText(field.efName) + commentOf(field.efName));
+					write(({ var st = stringText(field.efName); op(IaFEnum) + enumText(enumDef) + " " + st; }) + commentOf(field.efName));
 				case CppEnumIndex(obj):
 					/* Cppia does not have a "GetEnumIndex" op code - must use IaCallMember ::hx::EnumBase.__Index */
-					write(op(IaCallMember) + typeTextString("::hx::EnumBase") + " " + stringText("__Index") + "0" + commentOf("Enum index") + "\n");
+					write(({ var st = stringText("__Index"); op(IaCallMember) + typeTextString("::hx::EnumBase") + " " + st; }) + "0" + commentOf("Enum index") + "\n");
 					genTreeExpression(obj);
 				case CppDynamicField(obj, name):
-					write(op(IaFName) + typeTextString("Dynamic") + " " + stringText(name) + commentOf(name) + "\n");
+					write(({ var st = stringText(name); op(IaFName) + typeTextString("Dynamic") + " " + st; }) + commentOf(name) + "\n");
 					genTreeExpression(obj);
 				case CppClassOf(path, native):
 					var klass = joinClassPath(path, ".");
@@ -1670,16 +1699,16 @@ class ScriptWriter {
 			case VarClosure(v) | VarLocal(v):
 				write(op(IaVar) + Std.string(v.tcppvVar.vId) + commentOf(v.tcppvVar.vName));
 			case VarStatic(classDef, _, field):
-				write(op(IaFStatic) + cppInstText(classDef) + " " + stringText(field.cfName) + commentOf(field.cfName));
+				write(({ var st = stringText(field.cfName); op(IaFStatic) + cppInstText(classDef) + " " + st; }) + commentOf(field.cfName));
 			case VarThis(field, thisType):
-				write(op(IaFThisInst) + astType(thisType) + " " + stringText(field.cfName) + commentOf(field.cfName));
+				write(({ var st = stringText(field.cfName); op(IaFThisInst) + astType(thisType) + " " + st; }) + commentOf(field.cfName));
 			case VarInstance(obj, field, _, _) | VarInterface(obj, field):
 				var objType = CppCppia.scriptCpptypeString(obj.cpptype);
-				write(op(IaFLink) + astType(obj.cpptype) + " " + stringText(field.cfName) + commentOf(objType + "." + field.cfName) + "\n");
+				write(({ var st = stringText(field.cfName); op(IaFLink) + astType(obj.cpptype) + " " + st; }) + commentOf(objType + "." + field.cfName) + "\n");
 				genTreeExpression(obj);
 			case VarInternal(obj, _, name):
 				var objType = CppCppia.scriptCpptypeString(obj.cpptype);
-				write(op(IaFLink) + astType(obj.cpptype) + " " + stringText(name) + commentOf(objType + "." + name) + "\n");
+				write(({ var st = stringText(name); op(IaFLink) + astType(obj.cpptype) + " " + st; }) + commentOf(objType + "." + name) + "\n");
 				genTreeExpression(obj);
 				/*
 					and get_array_type elem =

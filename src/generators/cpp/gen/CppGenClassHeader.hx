@@ -75,9 +75,10 @@ class CppGenClassHeader {
 			var prefix = if (isStatic) "static " else "";
 			var signature = funcToCallableString("::hx::Callable", func);
 			output('\t\t$prefix$signature ${func.tcfName}_dyn();\n');
-		}
 
-		output("\n");
+			// port: inside the `if`, as upstream parses `if c then let ... in ...; output "\n"`.
+			output("\n");
+		}
 	}
 
 	public static function genClassHeader(ctx:Context, tcppClass:TcppClass, hFile:SourceWriter, scriptable:Bool, parents:Array<String>):Void {

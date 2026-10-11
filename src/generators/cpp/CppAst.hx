@@ -44,7 +44,7 @@ class PathMap<V> {
 	}
 }
 
-// port: OCaml `Map.Make(Int)`: persistent (`add`/`remove` copy), `bindings` in increasing key order.
+// port: Globals.IntMap (`compare i1 i2 = i2 - i1`): persistent (`add`/`remove` copy), `bindings` in decreasing key order.
 class IntPMap<V> {
 	final entries:haxe.ds.IntMap<V>;
 
@@ -76,7 +76,7 @@ class IntPMap<V> {
 
 	public function bindings():Array<{key:Int, value:V}> {
 		var keys = [for (k in entries.keys()) k];
-		keys.sort(function(a, b) return a < b ? -1 : a > b ? 1 : 0);
+		keys.sort(function(a, b) return b - a);
 		return [for (k in keys) {key: k, value: entries.get(k)}];
 	}
 }
