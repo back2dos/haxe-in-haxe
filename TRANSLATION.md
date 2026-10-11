@@ -26,10 +26,11 @@ reference (results in `test/TESTING.md`):
   `displayOutput.ml`, `displayProcessing.ml`, `completionItem.ml`,
   `genjson.ml`, `jsonRpc.ml`, `jsonrpc_handler.ml`.
 
-Not ported: the Eval debugger (`evalDebug*.ml`), `jsonRpcSocket.ml`, source
-maps, object sizes for `server/memory` (`Memory.memSize`), `server/module`
-(it needs `Genjson.generate_module` over the HXB module cache), the SWF/JVM
-native-library handlers and every target generator. `EvalLock.hx` (OCaml's
+Not ported: the Eval debugger (`evalDebug*.ml`), `jsonRpcSocket.ml`, object
+sizes for `server/memory` (`Memory.memSize`), `server/module` (it needs
+`Genjson.generate_module` over the HXB module cache), the SWF native-library
+handler (`--swf-lib`) and the HL bytecode interpreter. Every target generator
+is translated (see "Target generator coverage"). `EvalLock.hx` (OCaml's
 runtime lock for Eval threads) has no upstream module.
 
 ## History
@@ -148,7 +149,7 @@ At the time, display, server, macro-runtime, native-library and target
 dispatch bodies were kept under `archive/deferred/`, outside the build class path.
 Display, server and the macro runtime have since been translated in `src/`
 (see the history above); `archive/deferred/` now only holds old drafts, and the
-remaining unsupported services (other targets, SWF/JVM libraries) are
+remaining unsupported services (SWF libraries, the HL interpreter) are
 rejected explicitly at their call sites. In-scope typing and filtering paths remain in
 the all-module build. Compilation does not establish runtime correctness,
 conformance, or completion of the pre-existing HXB writer. The subsequent runtime test phase is tracked in
@@ -374,9 +375,39 @@ conformance, or completion of the pre-existing HXB writer. The subsequent runtim
 | `core/json/jsonRpc.ml` | `src/core/json/JsonRpc.hx` | JSON-RPC protocol |
 | `core/json/jsonrpc_handler.ml` | `src/core/json/JsonrpcHandler.hx` | JSON-RPC handler |
 | `typing/typerDisplay.ml` | `src/typing/TyperDisplay.hx` | Display services |
-| `filters/ES6Ctors.ml` | `src/filters/ES6Ctors.hx` | JS target (ES6 constructors) |
-| `generators/genjs.ml` | `src/generators/Genjs.hx` | JS target; output and `.map` byte-identical (fuzzer `diff:js`, upstream unit suite) |
-| `generators/jsSourcemap.ml` | `src/generators/JsSourcemap.hx` | JS target source maps |
+
+## Target generator coverage
+
+Every generator's output is byte-identical to the reference compiler's on the
+differential fuzzer's `diff:<target>` lane (`test/fuzz`; see `test/TESTING.md`)
+and on the hand and upstream cases listed there. Generated programs are not run.
+
+| Upstream under `haxe/src/` | Port | Notes |
+| --- | --- | --- |
+| `compiler/generate.ml` (dispatch) | `src/compiler/Generate.hx` | Translated |
+| `generators/gctx.ml` | `src/generators/Gctx.hx` | Translated |
+| `generators/genshared.ml` | `src/generators/Genshared.hx` | Translated (JVM) |
+| `filters/ES6Ctors.ml` | `src/filters/ES6Ctors.hx` | JS, `-D js-es=6` |
+| `generators/genjs.ml` | `src/generators/Genjs.hx` | JS; `.js` and `.map` byte-identical, also the upstream unit suite and `tests/misc/js` |
+| `generators/jsSourcemap.ml` | `src/generators/JsSourcemap.hx` | JS and Lua source maps (columns in UTF-8 bytes) |
+| `context/sourcemaps.ml` | `src/context/Sourcemaps.hx` | PHP source maps |
+| `generators/genlua.ml` | `src/generators/Genlua.hx` | Lua |
+| `generators/genpy.ml` | `src/generators/Genpy.hx` | Python |
+| `generators/genphp7.ml` | `src/generators/Genphp7.hx`, `src/generators/genphp7/` | PHP |
+| `generators/genneko.ml` | `src/generators/Genneko.hx` | Neko; `libs/neko/*.ml` in `src/libs/neko/` |
+| `generators/genhl.ml` | `src/generators/Genhl.hx` | HashLink bytecode |
+| `generators/hlcode.ml`, `hlopt.ml` | `src/generators/Hlcode.hx`, `Hlopt.hx` | HashLink |
+| `generators/hl2c.ml` | `src/generators/Hl2c.hx` | HL/C; type names hashed from a reproduction of OCaml's `Marshal`; descriptors that marshal a closure fail explicitly |
+| `generators/hlinterp.ml` | `src/generators/Hlinterp.hx` | `check` only (`-D hl-check`); running bytecode (`-D interp`) fails explicitly |
+| `generators/genjvm.ml`, `generators/jvm/*.ml` | `src/generators/Genjvm.hx`, `src/generators/jvm/` | JVM (sequential passes, as upstream with `-D disable-parallelism`) |
+| `codegen/javaModern.ml` | `src/codegen/JavaModern.hx` | Java library input (`hxjava-std.jar`, `--java-lib`) |
+| `generators/gencpp.ml`, `generators/cpp/**/*.ml` | `src/generators/Gencpp.hx`, `src/generators/cpp/` | C++ and cppia |
+| `generators/genswf.ml`, `genswf9.ml`, `flashProps.ml` | `src/generators/Genswf.hx`, `Genswf9.hx`, `FlashProps.hx` | SWF/SWC; `--swf-lib` and PNG bitmaps fail explicitly |
+
+OCaml library code the generators need, reproduced under `src/libs/`: `neko`
+(AST, bytecode compiler and writer), `swflib` (SWF and ABC writers),
+`extc` (zlib 1.3.1 deflate, translated so compressed SWF output is
+byte-identical), `extlib` (`IO` writers) and `ziplib` (SWC ZIP writer).
 
 ## Macro runtime coverage
 
@@ -433,59 +464,10 @@ A scope-review entry is not a blanket exclusion of shared batch-compiler helpers
 | --- | --- |
 | `codegen/genxml.ml` | Standalone XML output deferred; RTTI serializer is in scope and compiled |
 | `codegen/jClass.ml` | Other target/library support |
-| `codegen/javaModern.ml` | Other target/library support |
 | `codegen/swfLoader.ml` | Other target/library support |
-| `context/nativeLibraryHandler.ml` | SWF/JVM library handlers (`SwfLoader`, `JavaModern`); the HXB branch is translated |
-| `context/sourcemaps.ml` | Ordinary output-target source maps |
+| `context/nativeLibraryHandler.ml` | SWF library handler (`SwfLoader`); the HXB and Java (`JavaModern`) branches are translated |
 | `core/json/jsonRpcSocket.ml` | Display/server JSON-RPC transport |
-| `generators/cpp/cppAst.ml` | Ordinary output-target generator/runtime |
-| `generators/cpp/cppAstTools.ml` | Ordinary output-target generator/runtime |
-| `generators/cpp/cppContext.ml` | Ordinary output-target generator/runtime |
-| `generators/cpp/cppError.ml` | Ordinary output-target generator/runtime |
-| `generators/cpp/cppMarshalling.ml` | Ordinary output-target generator/runtime |
-| `generators/cpp/cppRetyper.ml` | Ordinary output-target generator/runtime |
-| `generators/cpp/cppSourceWriter.ml` | Ordinary output-target generator/runtime |
-| `generators/cpp/cppStrings.ml` | Ordinary output-target generator/runtime |
-| `generators/cpp/cppTypeUtils.ml` | Ordinary output-target generator/runtime |
-| `generators/cpp/filters/cppFilterAutoCast.ml` | Ordinary output-target generator/runtime |
-| `generators/cpp/filters/cppFilterValueType.ml` | Ordinary output-target generator/runtime |
-| `generators/cpp/gen/cppCppia.ml` | Ordinary output-target generator/runtime |
-| `generators/cpp/gen/cppGen.ml` | Ordinary output-target generator/runtime |
-| `generators/cpp/gen/cppGenClassHeader.ml` | Ordinary output-target generator/runtime |
-| `generators/cpp/gen/cppGenClassImplementation.ml` | Ordinary output-target generator/runtime |
-| `generators/cpp/gen/cppGenEnum.ml` | Ordinary output-target generator/runtime |
-| `generators/cpp/gen/cppGenInterfaceHeader.ml` | Ordinary output-target generator/runtime |
-| `generators/cpp/gen/cppGenInterfaceImplementation.ml` | Ordinary output-target generator/runtime |
-| `generators/cpp/gen/cppReferences.ml` | Ordinary output-target generator/runtime |
-| `generators/flashProps.ml` | Ordinary output-target generator/runtime |
-| `generators/gctx.ml` | Ordinary output-target generator/runtime |
-| `generators/gencpp.ml` | Ordinary output-target generator/runtime |
-| `generators/genhl.ml` | Ordinary output-target generator/runtime |
-| `generators/genhxold.ml` | Ordinary output-target generator/runtime |
-| `generators/genjvm.ml` | Ordinary output-target generator/runtime |
-| `generators/genlua.ml` | Ordinary output-target generator/runtime |
-| `generators/genneko.ml` | Ordinary output-target generator/runtime |
-| `generators/genphp7.ml` | Ordinary output-target generator/runtime |
-| `generators/genpy.ml` | Ordinary output-target generator/runtime |
-| `generators/genshared.ml` | Ordinary generator preprocessing (JVM metadata and interface generation) |
-| `generators/genswf.ml` | Ordinary output-target generator/runtime |
-| `generators/genswf9.ml` | Ordinary output-target generator/runtime |
-| `generators/hl2c.ml` | Ordinary output-target generator/runtime |
-| `generators/hlcode.ml` | Ordinary output-target generator/runtime |
-| `generators/hlinterp.ml` | Ordinary output-target generator/runtime |
-| `generators/hlopt.ml` | Ordinary output-target generator/runtime |
-| `generators/jvm/jvmAttribute.ml` | Ordinary output-target generator/runtime |
-| `generators/jvm/jvmBuilder.ml` | Ordinary output-target generator/runtime |
-| `generators/jvm/jvmClass.ml` | Ordinary output-target generator/runtime |
-| `generators/jvm/jvmCode.ml` | Ordinary output-target generator/runtime |
-| `generators/jvm/jvmConstantPool.ml` | Ordinary output-target generator/runtime |
-| `generators/jvm/jvmData.ml` | Ordinary output-target generator/runtime |
-| `generators/jvm/jvmFunctions.ml` | Ordinary output-target generator/runtime |
-| `generators/jvm/jvmGlobals.ml` | Ordinary output-target generator/runtime |
-| `generators/jvm/jvmMethod.ml` | Ordinary output-target generator/runtime |
-| `generators/jvm/jvmSignature.ml` | Ordinary output-target generator/runtime |
-| `generators/jvm/jvmVerificationTypeInfo.ml` | Ordinary output-target generator/runtime |
-| `generators/jvm/jvmWriter.ml` | Ordinary output-target generator/runtime |
+| `generators/genhxold.ml` | `-xml *.hx` extern output (auxiliary, with genxml) |
 | `lazy.ml` | OCaml build/runtime adapter; no mechanical compiler-module port |
 | `prebuild.ml` | OCaml build/runtime adapter; no mechanical compiler-module port |
 

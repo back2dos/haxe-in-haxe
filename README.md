@@ -17,9 +17,13 @@ target) and a website with an in-browser playground (`site/`).
   HXB library input (`--hxb-lib`), display services (`--display` JSON-RPC),
   the compilation server (`--wait`, `--connect`, `--server-connect`) and
   haxelib (`-L`/`--library`). The Eval debugger and object-size memory
-  statistics are not ported. Target generators (JS, C++, HL, JVM, ...) are out
-  of scope: the port type-checks, runs programs with `--interp`, writes HXB
-  and, through hxc, C.
+  statistics are not ported.
+- **Target generators.** JS, Lua, Python, PHP, Neko, HashLink (bytecode and
+  HL/C), JVM, C++ (and cppia) and SWF are translated from
+  `haxe/src/generators/`; their output is byte-identical to the reference
+  compiler's on the differential fuzzer (`diff:<target>` lanes) and the
+  upstream cases tried (see `TRANSLATION.md` and `test/TESTING.md`).
+  `--swf-lib` input and the HL bytecode interpreter are not ported.
 - **Upstream test suite.** Every target-independent step of upstream CI
   (`tests/runci/targets/Macro.hx`) passes with the hxc build of the port,
   including the tink_core and hxcoro projects (unit 11372/11372, misc
@@ -99,8 +103,8 @@ sh test/fuzz/build.sh && bin/fuzz/fuzz -j 4 --lane diff:hxb --lane diff:interp  
 `test/fuzz/` ([README](test/fuzz/README.md)) generates random, well-typed
 Haxe programs and compares the port with the reference on each: `diff:<target>`
 lanes require identical diagnostics and output files for any target (`hxb`,
-`interp`, `js`, `lua`, `php`, ...: the check for target generators as they are
-ported), `exec:<a>,<b>` lanes identical program output across targets (e.g.
+`interp`, `js`, `lua`, `php`, ...: the conformance check for the target
+generators), `exec:<a>,<b>` lanes identical program output across targets (e.g.
 `exec:interp,hxc`). Failures are saved with a repro script and reduced.
 
 Conformance compares normalized ZIP member names and the uncompressed `.hxb`
