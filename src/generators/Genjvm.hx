@@ -1108,10 +1108,12 @@ class Genjvm {
 		var classPaths = [];
 		for (javaLib in gctx.gctx.nativeLibs) {
 			if (javaLib.hasFlag(FlagIsStd) || javaLib.hasFlag(FlagIsExtern)) {} else {
-				// port: native Java libraries (--java-lib) are not ported; copying them into the
-				// output lib/ directory is not supported.
-				throw new Failure("haxe-in-haxe: --java-lib native libraries are not supported by the JVM generator (" + javaLib.getFilePath()
-					+ ")");
+				var dir = outDir + "lib/";
+				core.Path.mkdirFromPath(dir);
+				var name = core.Path.nameAndExtension(core.Path.parseFilePath(javaLib.getFilePath()));
+				var b = sys.io.File.getBytes(javaLib.getFilePath());
+				sys.io.File.saveBytes(dir + name, b);
+				classPaths.push("lib/" + name + " \n");
 			}
 		}
 		gctx.gctx.resources.iter(function(name, v) {

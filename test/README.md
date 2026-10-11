@@ -31,6 +31,25 @@ HAXE_REFERENCE=haxe/haxe python3 test/server.py --cases test/conformance-macro-c
 HAXE_REFERENCE=haxe/haxe python3 test/haxelib.py --server
 ```
 
+## Target generators: the upstream unit suite
+
+`unit-targets.py` compiles upstream's unit test suite (`haxe/tests/unit`) with
+the reference and the port for each target, using the upstream
+`compile-<target>.hxml` (js, lua, python, php, neko, hl, hlc, jvm, cpp, cppia,
+cppia-host, flash, flash-no-swc) from one working directory (a copy of
+`tests/unit` in `test/generated/unit-targets/unit`) with separate output
+directories, and compares every output file byte for byte (JAR members by name
+and uncompressed bytes). cpp, cppia-host and hlc only generate sources
+(`-D no-compilation`). The `Date.now()` string of `unit.TestMainNow` (and the
+forms generators derive from it) is the only normalization. utest is cloned as
+`test/upstream.py` does; hxcpp and hxjava come from the default haxelib
+repository; a target whose requirement is missing (e.g. `compc` for
+`compile-flash.hxml`) is reported as SKIP. The generated programs are not run.
+
+```sh
+HAXE_REFERENCE=$PWD/haxe/haxe python3 test/unit-targets.py -j 4 [target ...]
+```
+
 ## Eval-HXB execution
 
 Run:

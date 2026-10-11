@@ -45,6 +45,10 @@ tink_core, hxcoro); cosmocc build OK.
 | `test/fuzz` `diff:hxb` + `diff:interp`, 15% injected errors (3,000 programs) | not run | 0 port failures (1 reference crash) |
 | `test/fuzz` `exec:interp,hxc` (200 portable programs) | n/a | 32 output differences, 1 backend error (open, see the fuzzer section) |
 
+Upstream unit suite per target (`test/unit-targets.py`, 2026-10-11): js, lua,
+python, php, neko, hl, jvm, cpp, cppia, cppia-host, flash-no-swc identical; hlc
+differs only in Marshal-hashed type names (known); flash (SWC) skipped (no `compc`).
+
 Not covered: running the output of non-HXB targets (their generated output is
 compared with the fuzzer's `diff:<target>` lanes, below); `server/memory` sizes
 are host measurements (normalized by `test/server-jsonrpc.py`).
@@ -161,6 +165,55 @@ headers included; other hosts report 0): they are close to the reference's
 | Macro cases | 66/66 |
 | `test/server.py -j 2` | 595/595 |
 
+## Upstream unit suite on every target (`test/unit-targets.py`) — 2026-10-11
+
+`test/unit-targets.py` compiles `haxe/tests/unit` with each upstream
+`compile-<target>.hxml` (the hxmls they include inlined) with the reference and
+the port, from the same working directory into separate output directories,
+and compares every output file byte for byte (JAR members by name and
+uncompressed bytes; the SWF body inflated). Only the time-dependent
+`HelperMacros.getCompilationDate()` string of `unit.TestMainNow` is normalized
+(and its derived forms: hxcpp's `HX_` literal hash, the hl/c constant name), and
+only when it lies inside the window in which the two compilers ran.
+
+```sh
+HAXE_REFERENCE=$PWD/haxe/haxe python3 test/unit-targets.py -j 4
+```
+
+Port: `bin/port/hih` (clang -O2 hxc build of this commit), 4 workers, each
+compilation 1-25 s:
+
+| Target (hxml) | Files compared | Result |
+| --- | --- | --- |
+| js | 2 (`unit.js`, `.map`) | identical |
+| lua | 2 | identical |
+| python (`unit.py` and `-D python-version=3.4` `unit34.py`) | 8 | identical |
+| php | 2,439 | identical |
+| neko | 1 | identical |
+| hl | 1 | identical |
+| hlc (`-D no-compilation`) | 4,604 | 6 differ: hl/c type names (`t$vrt_…`, `t$fun_…`) only, see below |
+| jvm (`compile-jvm-only.hxml`, `native_java/native.jar` built with `haxelib run hxjava`) | `unit.jar` (members) + `lib/native.jar` (members) | identical |
+| cpp (`-D no-compilation`) | 4,906 | identical |
+| cppia | 1 | identical |
+| cppia-host (`-D no-compilation`) | 350 (incl. `cppia.classes`) | identical |
+| flash-no-swc | 1 | identical |
+| flash (`compile-flash.hxml`) | | SKIP: needs `compc` (Flex SDK) to build `native_swf/lib.swc`; `--swf-lib` is also not ported |
+
+Not compared: `compile-macro.hxml` (`--interp`, no output; `test/upstream.py`
+runs it) and the HXB round-trip hxmls (HXB conformance lanes).
+
+Fixed in the port: the JVM generator failed on a non-std `--java-lib`
+(`native_java/native.jar`); it now copies the jar to `lib/` of the output and
+lists it in the manifest's `Class-Path`, as `genjvm.ml` does. `diff:jvm` 100/100
+(seed 2026, size 5) after the change.
+
+Known difference: hl/c names virtual and function types after a hash of the
+OCaml `Marshal` encoding of the type (`hl2c.ml`), which the port's Marshal
+emulation does not reproduce yet for some of these types (6 files of the unit
+suite: `hl/types.c`, `hl/functions.c`, `haxe/rtti/XmlParser.c`, `unit/TestGADT.c`,
+`unit/TestMatch.c`, `unit/issues/Issue2889.c`); being fixed separately. Every
+other byte of the hl/c output matches.
+
 ## Target generators — 2026-10-11
 
 All nine target generators of `haxe/src/generators/` are translated (see
@@ -196,7 +249,7 @@ Per-generator checks during the port (agents' runs, all 0 port failures):
 
 Not ported (fail explicitly): `--swf-lib`, PNG `@:bitmap`, the HL bytecode
 interpreter (`-D interp`), hl2c type descriptors that would marshal an OCaml
-closure, copying a non-std `--java-lib` into the output.
+closure.
 
 Full matrix at this commit: HashLink port conformance 279 + 7, macro cases,
 `--hxb-lib` 279 + 7 and hxblib cases, display 679/679, server 595/595, interp
