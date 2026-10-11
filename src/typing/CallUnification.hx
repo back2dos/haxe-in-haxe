@@ -39,15 +39,14 @@ import typing.FieldAccess.*;
 import typing.FieldCallCandidate.*;
 import typing.CallUnification.*;
 
-// haxe/src/typing/callUnification.ml — mechanical draft; not compile-validated.
 typedef CallAttemptData = {var call:Void->TExpr; var display:Null<core.DisplayTypes.DisplayExceptionKind>;}
 typedef CallAttemptFailure = {var field:TClassField; var error:CompilerError; var display:Null<core.DisplayTypes.DisplayExceptionKind>;}
 typedef CallAttempts = {var candidates:Array<FieldCallCandidateData<CallAttemptData>>; var failures:Array<CallAttemptFailure>;}
 typedef CallParameter = {var name:String; var optional:Bool; var type:T;}
 
 enum OverloadKind {
-	OverloadProper;
-	OverloadMeta;
+	OverloadProper; // @:overload or overload
+	OverloadMeta; // @:overload(function() {})
 	OverloadNone;
 }
 
@@ -91,6 +90,7 @@ class CallUnification {
 				}
 			}
 		}
+		// let force_inline, is_extern = match cf with Some(TInst(c,_),f) -> is_forced_inline (Some c) f, (has_class_flag c CExtern) | _ -> false, false in
 		function typeAgainst(name:String, t:T, e:Expr):TExpr return handleErrors(function() {
 			var e = typeExpr(ctx, e, WithTypeTools.withArgument(t, name));
 			return castOrUnifyRaiseRef(ctx, t, e, e.epos);
@@ -126,6 +126,7 @@ class CallUnification {
 							case EUnop(Spread, Prefix, e): {expr: e, pos: el[0].pos};
 							case _: null;
 						} : null;
+						// these platforms deal with rest args on their own
 						if (ctx.com.config.pfSupportsRestArgs) {
 							inline function typeRest(getType:Void->T):Array<TExpr> return el.map(function(e) return switch e.expr {
 								case EUnop(Spread, Prefix, _): unexpectedSpread(e.pos);
@@ -140,6 +141,7 @@ class CallUnification {
 							}, name);
 							else restError(() -> typeRest(() -> argT), name);
 						} else {
+							// for other platforms make sure rest arguments are wrapped in an array
 							if (spread != null) restError(() -> [typeAgainst(name, t, spread.expr)], name);
 							else if (el.length == 0) restError(() -> [typeAgainst(name, t, {expr: EArrayDecl([]), pos: callp})], name);
 							else {
@@ -150,10 +152,11 @@ class CallUnification {
 								}
 								restError(function() {
 									var e:Expr = {expr: EArrayDecl(el), pos: p};
+									// typer requires dynamic arrays to be explicitly declared as Array<Dynamic>
 									if (follow(argT) == tDynamic) {
 										var dynamicType = makePtpTh(mkTypePath([], "Dynamic"), p);
 										var ct = makePtpCt(mkTypePath([], "Array", [TPType(dynamicType)]), p);
-										e = {expr: ECheckType(e, {type: ct, pos: p}), pos: p};
+										e = {expr: ECheckType(e, {type: ct, pos: p}), pos: p}; // ([arg1, arg2...]:Array<Dynamic>)
 									}
 									return [typeAgainst(name, t, e)];
 								}, name);
@@ -207,7 +210,7 @@ class CallUnification {
 				if (mightSkip || optFollowedByRest) for (cm in bodyCapture.value) if (Message.severity(cm) == MessageSeverity.Error)
 					throw new context.Typecore.WithTypeError(makeError(Custom(cm.cmMessage), cm.cmPos));
 			}
-			// HashLink 2.0 JIT: an early exit through two nested try blocks restores only the innermost trap, leaving a dangling handler; the result is returned after both.
+			// port: HashLink 2.0 JIT: an early exit through two nested try blocks restores only the innermost trap, leaving a dangling handler; the result is returned after both.
 			var result:Array<TExpr> = null;
 			try {
 				try {
@@ -259,6 +262,13 @@ class CallUnification {
 		}
 	}
 
+	/**
+		Unifies `el_typed` against the types from `args` list starting at the beginning
+		of `args` list.
+
+		Returns a tuple of a part of `args` covered by `el_typed`, and a part of `args`
+		not used for `el_typed` unification.
+	*/
 	public static function unifyTypedArgs(tmap:T->T, args:Array<CallParameter>, typed:Array<TExpr>,
 			callPos:Pos):{typed:Array<CallParameter>, remaining:Array<CallParameter>} {
 		var consumed = [];
@@ -287,9 +297,16 @@ class CallUnification {
 	}
 
 	public static function ensureCoroAvailability(com:CommonContext):Void {
+		// In cases where we never actually built a coro state machine, the SuspensionResult structure might
+		// not have been initialized yet. This would normally be handled via the pass flushing in `load_module`,
+		// but because all coro data is loaded from a `build-module` pass, this doesn't trigger in time.
 		com.basic.tcoro.suspensionResultClass.force().clBuild();
 	}
 
+	// Wrap a coroutine call expression from a non-coroutine context with a `.resolveTo(cont)` call.
+	// This ensures that if the coroutine completes synchronously, its result or error is propagated
+	// to the continuation immediately. If the continuation expression `econt` is not pure (e.g. a
+	// constructor call), a temp var is introduced to avoid evaluating it twice.
 	public static function wrapWithResolveTo(com:CommonContext, ecall:TExpr, econt:TExpr, p:Pos):TExpr {
 		var basic = com.basic,
 			b = new coro.CoroElsewhere.TexprBuilder(basic, p),
@@ -308,6 +325,8 @@ class CallUnification {
 				return resolve(ecall, econt);
 			case _:
 		}
+		// Introduce a temp var for the continuation so it is evaluated exactly once, and replace
+		// its occurrence in ecall's argument list with a reference to the local var.
 		var v = allocVar(VGenerated, "_hx_cont", econt.etype, econt.epos),
 			local = b.local(v, v.vPos);
 		var call = switch ecall.eexpr {
@@ -352,6 +371,11 @@ class CallUnification {
 		var forced = isForcedInline(co, fa.faField),
 			kind = hasClassFieldFlag(fa.faField,
 				CfOverload) ? OverloadProper : fa.faField.cfOverloads.length != 0 ? OverloadMeta : OverloadNone;
+		/* Delayed display handling works like this: If in_overload_call_args is set (via attempt_calls calling unify_call_args' below),
+		   the code which normally raises eager Display exceptions (in typerDisplay.ml handle_display) instead stores them in ctx.g.delayed_display.
+		   The overload handling here extracts them and associates the exception with the field call candidates. Afterwards, normal overload resolution
+		   can take place and only then the display callback is actually committed.
+		*/
 		inline function extractDisplay():Null<core.DisplayTypes.DisplayExceptionKind> {
 			var f = ctx.g.delayedDisplay;
 			ctx.g.delayedDisplay = null;
@@ -394,6 +418,7 @@ class CallUnification {
 					typed:Array<TExpr>;
 				typed = try unifyCallArgs(ctx, el, split.remaining, ret, p, isInline, forced, inOverload,
 					fa.faFieldPos) catch (de:context.display.DisplayException) raiseAugmentedDisplay(cf, de.kind);
+				// here
 				typed = elTyped.concat(typed);
 				args = split.typed.concat(split.remaining);
 				var tf = coro ? ctx.t.tcoro.tcoro.force()({args: args, ret: ret}) : TFun({args: args, ret: ret});
@@ -468,8 +493,10 @@ class CallUnification {
 			}
 		}
 		function checkAccess(cf:TClassField):Void {
+			// type_field doesn't check access for overloads, so let's check it here
 			if (co != null) checkFieldAccess(ctx, co, cf, isStatic, p);
 		}
+		// There's always a chance that we never even came across the EDisplay in an argument, so let's look for it (issue #11422).
 		function checkDisplayArgs():Void {
 			if (ctx.m.isDisplayFile) for (e in el) if (Ast.exists(function(def) return switch def {
 				case EDisplay(_): true;
@@ -504,6 +531,7 @@ class CallUnification {
 		function fail():FieldCallCandidateData<Void->TExpr> {
 			var errors:Array<{field:TClassField, error:CompilerError}> = [];
 			for (f in failures) {
+				// If any resolution attempt had a delayed display result, we might as well raise it now.
 				if (f.display != null) raiseAugmentedDisplay(f.field, f.display);
 				errors.push({field: f.field, error: f.error});
 			}
@@ -646,6 +674,8 @@ class CallDispatcher {
 		return e;
 	}
 
+	// Calls `e` with arguments `el`. Does not inspect the callee expression, so it should only be
+	// used with actual expression calls and not with something like field calls.
 	public function exprCall(e:TExpr, typed:Array<TExpr>, el:Array<Expr>):TExpr {
 		checkAssign();
 		inline function defaultCall(t:T):TExpr {
@@ -695,9 +725,12 @@ class CallDispatcher {
 		return loop(e.etype);
 	}
 
+	// Calls the resolve method represented by `sea` with an additional string-expression argument `name`.
 	public function resolveCall(sea:StaticExtensionAccess,
 			name:String):TExpr return fieldCall(sea.seAccess, [sea.seThis, Texpr.Builder.makeString(ctx.t, name, Globals.nullPos)], []);
 
+	// Resolves the accessor function for `fa` and calls it with the provided arguments.
+	// If no accessor function is found (AccessorAnon case), a generic field access is generated instead.
 	public function accessorCall(fa:context.Typecore.FieldAccess, typed:Array<TExpr>,
 			el:Array<Expr>):TExpr return switch FieldAccess.resolveAccessor(fa, mode) {
 			case AccessorFound(accessor):
@@ -713,6 +746,14 @@ class CallDispatcher {
 			case _: raiseTypingError("Could not resolve accessor", p);
 		};
 
+	/* Calls the field represented by `fa` with the typed arguments `el_typed` and the syntactic arguments `el`.
+
+		This function inspects the nature of the field being called and dispatches the call accordingly:
+
+		* If the field is a non-macro method, call it via `make_field_call`.
+		* If the field is a property, resolve the accessor (depending on `mode`) and recurse onto it.
+		* Otherwise, call the field as a normal expression via `expr_call`.
+	*/
 	public function fieldCall(fa:context.Typecore.FieldAccess, typed:Array<TExpr>, el:Array<Expr>):TExpr return switch fa.faField.cfKind {
 		case Method(MethNormal | MethInline | MethDynamic):
 			checkAssign();

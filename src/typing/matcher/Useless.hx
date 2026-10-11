@@ -8,7 +8,10 @@ import typing.matcher.Constructor;
 import typing.matcher.Case;
 import context.Typecore;
 
-// haxe/src/typing/matcher/useless.ml — mechanical draft; not compile-validated.
+/*
+	Implements checks for useless patterns based on http://moscova.inria.fr/~maranget/papers/warn/index.html.
+*/
+
 enum UselessResult {
 	False;
 	Pos(pos:Pos);
@@ -30,6 +33,8 @@ typedef PatternMatrix = Array<Array<PatternData>>;
 }
 
 class Useless {
+	// U part
+
 	public static function specialize(isTuple:Bool, con:ConstructorData, matrix:PatternMatrix):PatternMatrix {
 		var acc:PatternMatrix = [], remaining = matrix.copy();
 		while (remaining.length > 0) {
@@ -71,10 +76,12 @@ class Useless {
 			case PatAny: u(defaultMatrix(matrix), ql);
 			case PatOr(pat1, pat2): u(matrix, [pat1].concat(ql)) || u(matrix, [pat2].concat(ql));
 			case PatBind(_, pat1): loop(pat1);
-			case PatExtractor(_): true;
+			case PatExtractor(_): true; // ?
 		};
 		return loop(q[0]);
 	}
+
+	// U' part
 
 	public static function transferColumn(source:PatternMatrix, target:PatternMatrix):{source:PatternMatrix, target:PatternMatrix} {
 		if (source.length != target.length) throw "Invalid_argument: List.fold_left2";
@@ -193,6 +200,8 @@ class Useless {
 		};
 		return loop(p[0]);
 	}
+
+	// Sane part
 
 	public static function checkCase(ctx:context.Typecore.Typer, previous:Array<CaseRow>, row:CaseRow):Void {
 		var matrix = previous.map(function(row) return row.patterns);

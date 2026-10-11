@@ -38,7 +38,6 @@ import context.Typecore;
 import typing.Calls.*;
 import typing.Fields.*;
 
-// haxe/src/typing/operators.ml — mechanical draft; not compile-validated.
 typedef NormalBinop = {var binopOp:Binop; var binopLhs:TExpr; var binopRhs:TExpr; var binopType:T; var binopNeedsAssign:Bool; var binopSwapped:Bool; var binopPos:Pos;}
 
 enum BinopResultData {
@@ -162,6 +161,12 @@ class Operators {
 		};
 	}
 
+	/*
+		We want to try unifying as an integer and apply side effects.
+		However, in case the value is not a normal Monomorph but one issued
+		from a Dynamic relaxation, we will instead unify with float since
+		we don't want to accidentaly truncate the value
+	*/
 	public static function unifyInt(ctx:Typer, e:TExpr, k:TypeClass):Bool {
 		inline function dyn(t:T):Bool return switch follow(t) {
 			case TDynamic(_): true;
@@ -188,8 +193,14 @@ class Operators {
 		var maybe:TExpr->Bool = null;
 		inline function recurse(e:TExpr, t:T):Bool return switch follow(t) {
 			case TMono(_) | TDynamic(_): maybe(e);
+			// we might have inferenced a tmono into a single field
+			// TODO: check what this did exactly
+			// | TAnon a when !(a.a_status) = Opened -> maybe_dynamic_mono e
 			case _: false;
 		};
+		/*
+			This is some quick analysis that matches the most common cases of dynamic-to-mono convertions
+		*/
 		maybe = function(e) return switch e.eexpr {
 			case TLocal(_): dyn(e.etype);
 			case TArray(e, _): dynArray(e.etype) || recurse(e, e.etype);
@@ -306,6 +317,7 @@ class Operators {
 				mkOp(e1, e2, result);
 			case OpEq | OpNotEq:
 				try {
+					// we only have to check one type here, because unification fails if one is Void and the other is not
 					switch follow(e2.etype) {
 						case TAbstract({aPath: {pack: [], name: "Void"}}, _): Error.raiseTypingError("Cannot compare Void", p);
 						case _:
@@ -373,6 +385,7 @@ class Operators {
 			if (cf.cfExpr == null && !hasClassFieldFlag(cf, CfExtern)) {
 				if (!core.Meta.has(MetaTag.NoExpr, cf.cfMeta)) Common.displayError(ctx.com, "Recursive operator method", p);
 				if (!core.Meta.has(MetaTag.CoreType, a.aMeta)) {
+					// for non core-types we require that the return type is compatible to the native result type
 					var result = makeBinop(ctx, op, core.ds.Record.withFields(e1, {etype: core.Abstract.followWithAbstracts(e1.etype)}),
 						core.ds.Record.withFields(e1, {etype: core.Abstract.followWithAbstracts(e2.etype)}), isAssign, p);
 					var expected = BinopResult.getType(result);
@@ -389,6 +402,11 @@ class Operators {
 								p);
 					}
 				}
+				/*
+					If the `@:op`-field has no expr, then user wants the semantics of an underlying type.
+					which is supposed to make an assignment for AssignOp's.
+					Hence we use `is_assign_op` here instead of `needs_assign`.
+				*/
 				return BinopResult.createNormal(op, e1, e2, ret, isAssign, swapped, p);
 			}
 			if (swapped) {
@@ -400,11 +418,13 @@ class Operators {
 			}
 			return BinopResult.createSpecial(CallUnification.makeStaticCallBetter(ctx, c, cf, tl, [e1, e2], ret, p), needs);
 		}
+		// special case for == and !=: if the second type is a monomorph, assume that we want to unify
+		// it with the first type to preserve comparison semantics.
 		var eq = op == OpEq || op == OpNotEq;
 		if (eq) switch [follow(e1.etype), follow(e2.etype)] {
 			case [TMono(_), _] | [_, TMono(_)]:
 				try core.TUnification.unify(e1.etype, e2.etype)
-				catch (ex:UnificationFailure) {}
+				catch (ex:UnificationFailure) {} // this will fail later again
 			case _:
 		}
 		function loop(findOp:Binop, ops:Array<{op:Binop, field:TClassField}>):BinopResultData {
@@ -439,6 +459,8 @@ class Operators {
 							throw new UnificationFailure([]);
 						case _:
 					}
+					// If either expression is `null` we only allow operator resolving if the argument type
+					// is explicitly Null<T> (issue #3376)
 					if (eq) {
 						checkNull(e2, t2);
 						checkNull(e1, t1);
@@ -491,7 +513,9 @@ class Operators {
 		return try tryAbstractBinopOverloads(ctx, op, e1, rhs, isAssign, p) catch (ex:NotFound) makeBinop(ctx, op, e1, rhs, isAssign, p);
 	}
 
-	public static function withTypeOrValue(wt:WithTypeValue):WithTypeValue return wt == NoValue ? WithTypeTools.value : wt;
+	public static function withTypeOrValue(wt:WithTypeValue):WithTypeValue return wt == NoValue
+		// Even if we expect no value, we still want to type the lhs expression as a value.
+		? WithTypeTools.value : wt;
 
 	public static function typeAssign(ctx:Typer, e1:Expr, e2:Expr, wt:WithTypeValue, p:Pos):TExpr {
 		function rhs(wt:WithTypeValue):TExpr return try typeExpr(ctx, e2, wt) catch (ex:Dynamic) {
@@ -546,6 +570,8 @@ class Operators {
 
 	public static function typeNonAssignOp(ctx:Typer, op:Binop, e1:Expr, e2:Expr, isAssign:Bool, abstractOnly:Bool, wt:WithTypeValue,
 			p:Pos):TExpr {
+		// If the with_type is an abstract which has exactly one applicable @:op method, we can promote it
+		// to the individual arguments (issue #2786).
 		var promoted = switch wt {
 			case WithType(t, _): switch follow(t) {
 					case TAbstract(a,
@@ -562,6 +588,7 @@ class Operators {
 					case TAbstract(a, _): a.aOps.exists(function(o) return Type.enumEq(o.op, op));
 					case _: false;
 				};
+				// The operator could be ambiguous, let's not cast (issue #12145).
 				if (!has) lhs = context.AbstractCast.castOrUnify(ctx, t, lhs, lhs.epos);
 			case _:
 		}
@@ -592,7 +619,10 @@ class Operators {
 		}
 		function loop(acc:AccessKind):TExpr return switch acc {
 			case AKNo(_,
-				p): try api.aknoFallback() catch (ex:NotFound) Error.raiseTypingError("This expression cannot be accessed for writing", p);
+				p):
+				// try abstract operator overloading
+				// type_non_assign_op ctx op e1 e2 true true with_type p
+				try api.aknoFallback() catch (ex:NotFound) Error.raiseTypingError("This expression cannot be accessed for writing", p);
 			case AKSafeNav(sn): safeNavBranch(ctx, sn, function() return loop(sn.snAccess));
 			case AKUsingField(_): Error.raiseTypingError("Invalid operation", p);
 			case AKExpr(e):
@@ -615,6 +645,7 @@ class Operators {
 				set(lhs.vr, sea.seAccess, rhs.e, rhs.r, [lhs.e]);
 			case AKAccess(a, tl, c, base, key):
 				var get = context.AbstractCast.findArrayReadAccess(ctx, a, tl, key, p);
+				// bind complex keys to a variable so they do not make it into the output twice
 				var save = saveLocals(ctx);
 				var vr = new TyperBase.ValueReference(ctx);
 				inline function temp(name:String, e:TExpr):TExpr {
@@ -629,6 +660,9 @@ class Operators {
 				unify(ctx, e.etype, get.ret, p);
 				var write = context.AbstractCast.findArrayWriteAccess(ctx, a, tl, key, e, p);
 				var et = TyperBase.typeModuleType(ctx, TClassDecl(c), p);
+				// | None,None ->
+				//	let ea = mk (TArray(ebase,ekey)) r_get p in
+				//	mk (TBinop(OpAssignOp op,ea,type_expr ctx e2 (WithType.with_type r_get))) r_set p
 				if (write.field.cfExpr == null || get.field.cfExpr == null)
 					Error.raiseTypingError("Invalid array access getter/setter combination", p);
 				var ef = mk(TField(et, FStatic(c, write.field)), write.type, p);
@@ -762,7 +796,7 @@ class Operators {
 			case Spread:
 				return spread();
 			case Not | Neg | NegBits:
-				return findOrMake(accGet(ctx, typeAccessRef(ctx, e.expr, e.pos, MGet, WithTypeTools.value)));
+				return findOrMake(accGet(ctx, typeAccessRef(ctx, e.expr, e.pos, MGet, /* WITHTYPETODO */ WithTypeTools.value)));
 			case Increment | Decrement:
 		}
 		var binop = op == Increment ? OpAdd : OpSub;
@@ -821,11 +855,14 @@ class Operators {
 					var vk = allocVar(VGenerated, "tmp", key.etype, key.epos);
 					var initKey = mk(TVar(vk, key), ctx.com.basic.tvoid, key.epos);
 					var ek = mk(TLocal(vk), key.etype, key.epos);
+					// get
 					var get = mkArrayGetCall(ctx, context.AbstractCast.findArrayReadAccessRaise(ctx, a, tl, ek, p), c, eb, p);
 					var vg = allocVar(VGenerated, "tmp", get.etype, get.epos);
 					var eg = mk(TLocal(vg), vg.vType, p);
 					var initGet = mk(TVar(vg, get), ctx.com.basic.tvoid, p);
+					// op
 					var operation = mk(TBinop(binop, eg, mk(TConst(TInt(1)), ctx.com.basic.tint, p)), eg.etype, p);
+					// set
 					var set = mkArraySetCall(ctx, context.AbstractCast.findArrayWriteAccessRaise(ctx, a, tl, ek, operation, p), c, eb, p);
 					mk(TBlock([initBase, initKey, initGet, set].concat(flag == Postfix ? [eg] : [])), set.etype, p);
 				} catch (ex:NotFound) {
@@ -834,6 +871,6 @@ class Operators {
 			case AKSafeNav(sn): safeNavBranch(ctx, sn, function() return loop(sn.snAccess));
 			case AKUsingField(_) | AKResolve(_, _): Error.raiseTypingError("Invalid operation", p);
 		};
-		return loop(typeAccessRef(ctx, e.expr, e.pos, MSet(null), WithTypeTools.value));
+		return loop(typeAccessRef(ctx, e.expr, e.pos, MSet(null), /* WITHTYPETODO */ WithTypeTools.value));
 	}
 }

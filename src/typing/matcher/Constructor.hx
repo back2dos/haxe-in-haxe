@@ -7,7 +7,6 @@ import core.Globals.Pos;
 import core.TFunctions.*;
 import core.TPrinting.*;
 
-// haxe/src/typing/matcher/constructor.ml — mechanical draft; not compile-validated.
 enum ConstructorKind {
 	ConConst(value:TConstant);
 	ConEnum(en:TEnum, field:TEnumField);
@@ -61,7 +60,7 @@ class Constructor {
 
 	public static function compare(con1:ConstructorData, con2:ConstructorData):Int return switch [con1.kind, con2.kind] {
 		case [ConConst(ct1), ConConst(ct2)]:
-			// OCaml orders constant constructors before payload constructors.
+			// port: OCaml's `compare` orders constant constructors before payload constructors.
 			inline function rank(c:TConstant):Int return switch c {
 				case TNull: 0;
 				case TThis: 1;
@@ -90,9 +89,8 @@ class Constructor {
 			if (r != 0) r else if (p1.pack.length != p2.pack.length) p1.pack.length - p2.pack.length else Reflect.compare(p1.name, p2.name);
 		case [ConFields(_), ConFields(_)]: 0;
 		case [ConArray(i1), ConArray(i2)]: i1 - i2;
-		case _: -1;
+		case _: -1; // Could assert...
 	};
 
-	// Preserve the upstream structural-hash dependency for the compile phase.
 	public static function hash(con:ConstructorData):Int return Hashtbl.hash(con.kind);
 }

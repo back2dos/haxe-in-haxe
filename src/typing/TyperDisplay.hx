@@ -29,7 +29,6 @@ import core.DisplayTypes;
 import core.TType;
 import core.display.CompletionItem;
 
-// haxe/src/typing/typerDisplay.ml
 class TyperDisplay {
 	public static function convertFunctionSignature(ctx:TyperContext, values:haxe.ds.StringMap<Expr>,
 			args:Array<{name:String, optional:Bool, type:T}>,
@@ -139,6 +138,24 @@ class TyperDisplay {
 					}
 				case TNew(c, tl, el):
 					Display.mergeCoreDoc(ctx, TClassDecl(c));
+					/* begin match fst e_ast with
+					| EConst (Regexp (r,opt)) ->
+						let present,absent = List.partition (String.contains opt) ['g';'i';'m';'s';'u'] in
+						let doc flag desc = Printf.sprintf "* %s: %s" (String.make 1 flag) desc in
+						let f c = match c with
+							| 'g' -> doc c "global split and replace"
+							| 'i' -> doc c "case insensitive matching"
+							| 'm' -> doc c "multiline matching"
+							| 's' -> doc c "dot also match newlines"
+							| 'u' -> doc c "use UTF-8 matching"
+							| _ -> die "" __LOC__
+						in
+							DisplayException.send_signatures_raise ctx.com overloads 0 display_arg SKCall
+						let present = match present with [] -> [] | _ -> "\n\nActive flags:\n\n" :: present in
+						let absent = List.map f absent in
+						let absent = match absent with [] -> [] | _ -> "\n\nInactive flags:\n\n" :: absent in
+							DisplayException.send_positions_raise ctx.com []
+					| _ -> */
 					var fa = FieldAccessTools.getConstructorAccess(c, tl, e.epos);
 					var fcc = CallUnification.unifyFieldCall(ctx, fa, el, [], e.epos, false);
 					var cf = fcc.fcField;
@@ -149,6 +166,7 @@ class TyperDisplay {
 					CompletionItem.makeCiClassField(CompletionClassField.make(cf, CFSConstructor, Self(CompletionItem.declOfClass(c)),
 						true),
 						tpair(ctx, Ast.getValueMeta(cf.cfMeta), t));
+				// end
 				case TCall(e1 = {eexpr: TConst(TSuper)}, _):
 					itexpr(e1); // TODO
 				case TCast(e1, _):
@@ -178,7 +196,7 @@ class TyperDisplay {
 			case _:
 				[];
 		};
-		// OCaml evaluates record fields right to left
+		// port: OCaml evaluates record fields right to left
 		var compatibleTypes = compatible;
 		var expectedTypeFollowed = fromType(tFollowed);
 		var expectedType = fromType(t);
@@ -292,7 +310,7 @@ class TyperDisplay {
 				t:T):Array<{t:T, doc:Documentation, values:haxe.ds.StringMap<Expr>}> {
 			var isWackyOverload = !hasClassFieldFlag(cf, CfOverload);
 			function canAccess(cf:TClassField):Bool return co == null ? true : Typecore.canAccess(ctx, co, cf, stat);
-			// List.rev_map
+			// port: List.rev_map
 			var rest = [];
 			for (cf in cf.cfOverloads) rest.unshift({t: map(cf.cfType), cf: cf});
 			var l = [{t: t, cf: cf}].concat(rest);
@@ -583,7 +601,7 @@ class TyperDisplay {
 						raiseToplevel(ctx, dk, withType, name, pn);
 					case _:
 						if (dk == DKDot) displayFields(eAst, e, null) else {
-							// string_list_of_expr_path_raise is in reverse order; upstream joins it as is
+							// port: string_list_of_expr_path_raise is in reverse order; upstream joins it as is
 							var name = try Ast.stringListOfExprPathRaise(eAst).join(".") catch (_:core.ds.Exit) "";
 							var name = name == "null" ? "" : name;
 							var p = eAst.pos;

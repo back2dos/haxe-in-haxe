@@ -15,10 +15,10 @@ import haxe.ds.ObjectMap;
 import haxe.ds.StringMap;
 import typing.TypeloadParse.ParseError;
 
-// Batch-only port of the module-loading and typing path rooted in
-// haxe/src/typing/typeloadModule.ml and typer.ml.
+// port: legacy bootstrap loader and typer used by haxe.LegacyMain, not a translation; the translation
+// of typeloadModule.ml is ModuleTyping.hx. Only makeCurmod is shared with the translated typer.
 class TypeloadModule {
-	// haxe/src/typing/typeloadModule.ml: make_curmod.
+	// port: typeloadModule.ml make_curmod
 	public static function makeCurmod(com:context.Common.CommonContext, g:context.Typecore.TyperGlobals,
 			m:ModuleDef):context.Typecore.TyperModule {
 		return {
@@ -39,7 +39,7 @@ class TypeloadModule {
 	var basicTypes:Map<String, T> = new Map();
 	var basicModule:ModuleDef;
 	var nextModuleId = 0;
-	// tFunctions.ml's alloc_var uses Atomic.fetch_and_add + 1.
+	// port: tFunctions.ml's alloc_var uses Atomic.fetch_and_add + 1.
 	var nextVarId = 1;
 	var currentMethodName = "";
 	var activeTypeParams:StringMap<T> = new StringMap();
@@ -93,7 +93,7 @@ class TypeloadModule {
 			});
 		rejectMacroMetadata(parsed.data.declarations);
 		var module = makeModule(path, resolved.file);
-		modules.set(key, module); // upstream installs the module before creating types.
+		modules.set(key, module); // port: upstream installs the module before creating types.
 		moduleLoadDepth++;
 		try createModuleTypes(module, parsed.data.declarations)
 		catch (error:haxe.Exception) {
@@ -134,13 +134,10 @@ class TypeloadModule {
 		throw error;
 	}
 
-	/** First step of typerEntry.load_std_types. Basic-type rebinding follows once
-		type parameters and abstract typing are available. */
+	// port: first step of typerEntry.load_std_types.
 	public function loadStdTypes():ModuleDef return loadModule({pack: [], name: "StdTypes"});
 
-	/** Initial batch subset of typerEntry.create's standard-library sequence.
-		Enum/iterator/call-stack modules follow once their typed dependencies are
-		available. */
+	// port: subset of typerEntry.create's standard-library sequence.
 	public function loadStdBootstrap():Void {
 		var stdTypes = loadStdTypes();
 		for (name in ["Void", "Int", "Float", "Bool"]) switch findModuleType(stdTypes, name) {
@@ -168,7 +165,7 @@ class TypeloadModule {
 		loadModule({pack: [], name: "StringBuf"});
 	}
 
-	/** Modules in the order they were allocated, matching the batch load graph. */
+	// port: modules in the order they were allocated, matching the batch load graph.
 	public function loadedModules():Array<ModuleDef> {
 		var result = [for (module in modules) module];
 		result.sort(function(a, b) return a.mId - b.mId);
@@ -220,7 +217,7 @@ class TypeloadModule {
 			case _:
 		}
 		moduleImports.set(moduleKey(module.mPath), imports);
-		// Like typeload's first pass, allocate every declaration before looking at
+		// port: like typeload's first pass, allocate every declaration before looking at
 		// fields. This makes references to later declarations in the same module
 		// available while field signatures are built.
 		for (declaration in declarations) switch declaration.definition {
@@ -233,7 +230,7 @@ class TypeloadModule {
 			case EAbstract(value):
 				var abs = makeAbstract(module, value, declaration.pos);
 				module.mTypes.push(TAbstractDecl(abs));
-				// typeloadModule.ml creates a private implementation class for every
+				// port: typeloadModule.ml creates a private implementation class for every
 				// abstract except a fieldless @:coreType declaration.
 				if (value.data.length != 0 || !hasMetadata(value.meta, "coreType")) {
 					var definition:ClassDefinition = {
@@ -287,7 +284,7 @@ class TypeloadModule {
 			module.mStatics = fieldsClass;
 			module.mTypes.push(TClassDecl(fieldsClass));
 		}
-		// typeloadModule.ml initializes all module-level type parameters after the
+		// port: typeloadModule.ml initializes all module-level type parameters after the
 		// shells exist, so recursive constraints can resolve sibling declarations.
 		for (declaration in declarations) switch declaration.definition {
 			case EClass(value):
@@ -313,7 +310,7 @@ class TypeloadModule {
 				}
 			case EImport(_) | EUsing(_) | EStatic(_):
 		}
-		// Typedef bodies are loaded after every declaration and type parameter shell
+		// port: typedef bodies are loaded after every declaration and type parameter shell
 		// exists. This is required for recursive/sibling aliases and keeps their
 		// parameter references (such as Iterator<T>) structural instead of Dynamic.
 		for (declaration in declarations) switch declaration.definition {
@@ -328,7 +325,7 @@ class TypeloadModule {
 				activeTypeParams = previousTypeParams;
 			case _:
 		}
-		// The upstream loader installs inheritance after all module type shells
+		// port: the upstream loader installs inheritance after all module type shells
 		// exist, so references to later declarations in the same module work too.
 		for (declaration in declarations) switch declaration.definition {
 			case EClass(value):
@@ -353,7 +350,7 @@ class TypeloadModule {
 				activeTypeParams = previousTypeParams;
 			case _:
 		}
-		// Standard-library implementation bodies are not needed to resolve the
+		// port: standard-library implementation bodies are not needed to resolve the
 		// signatures used by a user module (notably haxe.Log.trace). Keeping this
 		// pass signature-only also mirrors the dependency loading boundary in the
 		// upstream typer and avoids pulling target-specific implementation code
@@ -523,7 +520,7 @@ class TypeloadModule {
 				}
 			}
 		}
-		// Signatures have to be installed before bodies are typed: a method body
+		// port: signatures have to be installed before bodies are typed: a method body
 		// may call a method declared later in the same class.
 		if (typeBodies) {
 			var typeBodiesNow = function() {
@@ -543,7 +540,7 @@ class TypeloadModule {
 			}
 		} else for (field in fields) switch field.cffKind {
 			case FFun(func) if (func.fExpr != null):
-				// The upstream typer allocates argument IDs even for bodies which this
+				// port: the upstream typer allocates argument IDs even for bodies which this
 				// batch slice defers. Keep the global ID stream deterministic for HXB.
 				for (arg in func.fArgs) makeVar(arg.name.name, TDynamic(null), TVOArgument, arg.name.pos, arg.meta);
 			case _:
@@ -773,8 +770,7 @@ class TypeloadModule {
 		return result;
 	}
 
-	// Small batch-only subset of typer.ml. It deliberately preserves an unknown
-	// type as Dynamic until BasicTypes and Typecore are available.
+	// port: small batch-only subset of typer.ml; an unknown type is kept as Dynamic.
 	function typeFunction(module:ModuleDef, cls:TClass, methodName:String, func:Func, signature:TSignature,
 			?outerLocals:StringMap<TVar>):TExpr {
 		var previousMethodName = currentMethodName;
@@ -1617,7 +1613,7 @@ class TypeloadModule {
 		var resultElement = isFilter ? elementType : pushedValue.etype;
 		var resultType = TInst(arrayClass, [resultElement]);
 		var resultVar = makeGeneratedVar("_g", resultType, arrayPos);
-		// The loop variable is allocated before the iterator temporaries upstream,
+		// port: the loop variable is allocated before the iterator temporaries upstream,
 		// but declarations are emitted in result/counter/source/value order.
 		var resultId = resultVar.vId;
 		resultVar.vId = loopVar.vId;
@@ -1855,7 +1851,7 @@ class TypeloadModule {
 		case _: false;
 	}
 
-	// Direct counterpart of typer.ml's type_call_builtin trace branch. The full
+	// port: counterpart of typer.ml's type_call_builtin trace branch. The full
 	// typer obtains these types through normal access resolution; the batch port
 	// constructs the same typed shape after loading haxe.Log and PosInfos.
 	function typeTrace(module:ModuleDef, cls:TClass, args:Array<Expr>, locals:StringMap<TVar>, pos:Pos):TExpr {
@@ -2167,7 +2163,7 @@ class TypeloadModule {
 				aFields: makeAnonymous(module, fields).aFields,
 				aStatus: Extend([for (path in paths) resolvePath(module, path.path)])
 			});
-		// Structural intersection merging is still outside this batch slice.
+		// port: structural intersections are not merged by this loader.
 		case CTIntersection(_): TDynamic(null);
 	}
 
@@ -2236,7 +2232,7 @@ class TypeloadModule {
 				}
 			}
 			if (imported == null) {
-				// Unqualified standard types resolve from root standard modules even
+				// port: unqualified standard types resolve from root standard modules even
 				// while loading a package-scoped standard module such as haxe.PosInfos.
 				var found = tryLoadModule({pack: [], name: path.tname});
 				var depth = current.mPath.pack.length;
@@ -2256,7 +2252,7 @@ class TypeloadModule {
 		var name = path.tpackage.length == 0 ? resolvedName : (path.tsub == null ? resolvedName : path.tsub);
 		if (path.tpackage.length == 0 && path.tsub != null) name = path.tsub;
 		var type = findModuleType(target, name);
-		if (type == null) return TDynamic(null); // built-ins await BasicTypes/Typecore.
+		if (type == null) return TDynamic(null);
 		var params = [
 			for (param in path.tparams) switch param {
 				case TPType(type):

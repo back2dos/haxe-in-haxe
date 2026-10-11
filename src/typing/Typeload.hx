@@ -46,7 +46,7 @@ using core.ds.ArrayTools;
 
 import core.Define;
 
-// haxe/src/typing/typeload.ml — mechanical draft; not compile-validated.
+// Type instance and type parameter handling.
 enum LoadInstanceParamMode {
 	ParamNormal;
 	ParamSpawnMonos;
@@ -56,7 +56,7 @@ enum LoadInstanceParamMode {
 enum LoadInstanceMode {
 	LoadNormal;
 	LoadReturn;
-	LoadAny;
+	LoadAny; // We don't necessarily know why we're loading, so let's just load anything
 }
 
 class Typeload {
@@ -106,6 +106,9 @@ class Typeload {
 			}
 			p0 = p1;
 		}
+		// This is a bit dodgy. Ideally we would use the position of the `function` keyword, but we don't have that...
+		// Using the name means this is going to complete within the `function` keyword too. Not sure what we
+		// can do about it.
 		checkDisplay(cff.cffName.pos);
 		return displayed;
 	}
@@ -115,6 +118,7 @@ class Typeload {
 		throw NotFound.raise();
 	}
 
+	// raises Type_not_found
 	public static function findTypeInModuleRaise(ctx:Typer, m:ModuleDef, name:String, p:Pos):ModuleType {
 		for (mt in m.mTypes) {
 			if (tPath(mt).name == name) {
@@ -126,8 +130,10 @@ class Typeload {
 		return raiseTypingErrorExt(makeError(TypeNotFound(m.mPath, name, NotDefined), p));
 	}
 
+	/** since load_type_def and load_instance are used in PASS2, they should not access the structure of a type **/
 	public static function findTypeInCurrentModuleContext(ctx:Typer, pack:Array<String>, name:String):ModuleType {
 		if (pack.length == 0) {
+			// Check the types in our own module
 			for (mt in ctx.m.curmod.mTypes) if (tName(mt) == name) return mt;
 			var found = ctx.m.importResolution.findTypeImport(name);
 			ImportHandling.markImportPosition(ctx, found.pos);
@@ -218,16 +224,21 @@ class Typeload {
 			p:Pos):ModuleType return pack.length == 0 ? loadUnqualifiedTypeDef(ctx, mname, tname,
 			p) : loadQualifiedTypeDef(ctx, pack, mname, tname, p);
 
+	/*
+		load a type or a subtype definition
+	*/
 	public static function loadTypeDef(ctx:Typer, p:Pos, t:TypePath):ModuleType {
-		// `t = Parser.magic_type_path` is OCaml structural equality ({[]; ""; []; None})
+		// port: `t = Parser.magic_type_path` is OCaml structural equality ({[]; ""; []; None})
 		if (t.tpackage.length == 0
 			&& t.tname == ""
 			&& (t.tparams == null || t.tparams.length == 0)
 			&& t.tsub == null) context.display.DisplayException.raiseFields(context.display.DisplayToplevel.collect(ctx, TKType, NoValue,
 				true), CRTypeHint,
 				core.DisplayTypes.DisplayTypes.makeSubject(null, p));
+		// The type name is the module name or the module sub-type name
 		var name = t.tsub == null ? t.tname : t.tsub;
 		try {
+			// If there's a sub-type, there's no reason to look in our module or its imports
 			if (t.tsub != null) throw NotFound.raise();
 			return findTypeInCurrentModuleContext(ctx, t.tpackage, name);
 		} catch (exc:Dynamic) {
@@ -416,6 +427,7 @@ class Typeload {
 		return result;
 	}
 
+	// build an instance from a full type
 	public static function loadInstancePrime(ctx:Typer, ptp:PlacedTypePath, getParams:LoadInstanceParamMode, mode:LoadInstanceMode):T {
 		var t = ptp.path;
 		try {
@@ -443,6 +455,7 @@ class Typeload {
 			}
 			return info.buildApply([]);
 		}
+		// TODO: this is currently duplicated, but it seems suspcious anyway...
 		var rest = info.buildKind == BuildGenericBuild && info.buildParams.length == 1 && info.buildParams[0].ttpName == "Rest";
 		var tl = if (t.tparams.length == 0 && !rest) switch getParams {
 			case ParamNormal: loadParams(ctx, info, t.tparams, ptp.posFull);
@@ -485,6 +498,9 @@ class Typeload {
 		throw e;
 	}
 
+	/*
+		build an instance from a complex type
+	*/
 	public static function loadComplexTypePrime(ctx:Typer, allowDisplay:Bool, mode:LoadInstanceMode, hint:TypeHint):T {
 		var p = hint.pos;
 		return switch hint.type {
@@ -569,11 +585,12 @@ class Typeload {
 						if (e != null) raiseTypingError("Expression not allowed here", e.pos);
 					}
 					var pub = true, dyn = false, params:TypeParams = [], isFinal = false;
-					checkFieldAccess(ctx, f);
+					checkFieldAccess(ctx, f); // TODO: do we want to do anything with this?
 					for (access in f.cffAccess) switch access.access {
 						case APublic:
 						case APrivate:
-							if (haxe.io.Path.withoutDirectory(access.pos.pfile) != "NativeIterable.hx") warning(ctx, WDeprecated,
+							if (haxe.io.Path.withoutDirectory(access.pos.pfile) != "NativeIterable.hx") // Terrible workaround for #7436
+								warning(ctx, WDeprecated,
 								"private structure fields are deprecated", access.pos);
 							pub = false;
 						case ADynamic if (switch f.cffKind {
@@ -744,7 +761,7 @@ class Typeload {
 									+ "'", cf.cfPos);
 							case _:
 						}
-					case _:
+					case _: // could be a variable
 				}
 				kept.push(m);
 			case {meta: MetaTag.Overload, exprs: [], pos: p}:
@@ -769,11 +786,16 @@ class Typeload {
 			case _: throw "Iterator is not a typedef";
 		};
 
+	/*
+		load either a type t or Null<Unknown> if not defined
+	*/
 	public static function loadTypeHint(ctx:Typer, pcur:Pos, mode:LoadInstanceMode, t:Null<TypeHint>, opt:Bool = false):T {
 		var type = t == null ? spawnMonomorph(ctx, pcur) : loadComplexType(ctx, true, mode, t);
 		return opt ? ctx.t.tnull(type) : type;
 	}
 
+	// ----------------------------------------------------------------------
+	// PASS 1 & 2 : Module and Class Structure
 	public static function typeTypeParam(ctx:Typer, host:TypeParamHost, path:GlobalTypePath, tp:TypeParam):TypedTypeParam {
 		var name = tp.tpName.name,
 			c = mkClass(ctx.m.curmod, {pack: path.pack.concat([path.name]), name: name}, tp.tpName.pos, tp.tpName.pos);
@@ -820,6 +842,7 @@ class Typeload {
 							case _: [loadComplexType(local, true, LoadNormal, th)];
 						};
 						var constr = load(th);
+						// check against direct recursion
 						function check(t:T):Void switch follow(t) {
 							case TInst(c2, _) if (ttp.ttpClass == c2):
 								raiseTypingError("Recursive constraint parameter is not allowed", th.pos);
@@ -850,7 +873,7 @@ class Typeload {
 			Common.define(com2, Define.CoreApi);
 			Common.define(com2, Define.Sys);
 			allowPackage(com2, "sys");
-			Define.rawDefineValue(com2.defines, "target.threaded", "true");
+			Define.rawDefineValue(com2.defines, "target.threaded", "true"); // hack because we check this in sys.thread classes
 			if (ctx.com.isMacroContext) Common.define(com2, Define.Macro);
 			com2.classPaths.lockContext(ctx.com.customExt, platformNameMacro(ctx.com), true);
 			com2.classPaths.modify(function(cp:core.ClassPath.IClassPath) return switch cp.scope {
@@ -906,6 +929,8 @@ class Typeload {
 					CfPublic)) raiseTypingError("Field " + f.cfName + " has different visibility than core type", p);
 			if (f2.cfDoc == null) f2.cfDoc = f.cfDoc;
 			if (!fieldKindEq(f2.cfKind, f.cfKind)) switch [f2.cfKind, f.cfKind] {
+				// allow to add 'inline'
+				// allow to disable 'inline'
 				case [Method(MethInline), Method(MethNormal)] | [Method(MethNormal), Method(MethInline)]:
 				case _:
 					raiseTypingError("Field " + f.cfName + " has different property access than core type", p);

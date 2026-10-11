@@ -10,7 +10,6 @@ import context.Common;
 import context.Common.CommonContext;
 import context.TyperPass;
 
-// Port of haxe/src/typing/typeloadCacheHook.ml.
 enum FindModuleResult {
 	GoodModule(m:ModuleDef);
 	BadModule(reason:ModuleSkipReason);

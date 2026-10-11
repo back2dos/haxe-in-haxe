@@ -6,9 +6,8 @@ import core.Globals.Pos;
 import core.Ast.Package;
 import syntax.LegacyGrammar;
 
-// Batch-only portion of haxe/src/typing/typeloadParse.ml.  Display parser
-// state, parser caches and stdin replacement are intentionally left to the
-// eventual compiler context.
+// port: legacy bootstrap parsing used by TypeloadModule.hx (haxe.LegacyMain); the translation
+// of typeloadParse.ml is SourceParser.hx.
 @:structInit class ParsedFile {
 	public var file:String;
 	public var data:Package;

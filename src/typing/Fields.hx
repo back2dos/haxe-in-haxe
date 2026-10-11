@@ -39,7 +39,6 @@ import typing.TyperBase.*;
 import typing.FieldAccess;
 import typing.FieldAccess.*;
 
-// haxe/src/typing/fields.ml — mechanical draft; not compile-validated.
 class TypeFieldConfig {
 	public var allowResolve:Bool = true;
 	public var allowDynamic:Bool = true;
@@ -78,6 +77,9 @@ class Fields {
 		throw NotFound.raise();
 	}
 
+	/*
+		temporally remove the constant flag from structures to allow larger unification
+	*/
 	public static function removeConstantFlag<A>(t:T, callback:Bool->A):A {
 		var temporary:Array<TAnon> = [];
 		function loop(t:T):Void switch follow(t) {
@@ -163,6 +165,7 @@ class Fields {
 				inline function normal():AccessKind return AKField(makeAccess(false));
 				if (isSet && m != MethDynamic && !ctx.f.isUntyped)
 					raiseTypingError("Cannot rebind this method : please use 'dynamic' before method declaration", pfield);
+				// For overloads we have to resolve the actual field before we can check accessibility.
 				inline function visibility(c:TClass, isStatic:Bool):Void switch mode {
 					case MCall(_) if (hasClassFieldFlag(f, CfOverload)):
 					case _:
@@ -184,6 +187,7 @@ class Fields {
 							case MSet(_) | MGet: displayError(ctx.com, "Cannot create closure on super method", pfield);
 							case MCall(_):
 						}
+						// We need the actual class type (i.e. a potential child class) for visibility checks.
 						switch follow(e.etype) {
 							case TInst(c, _): visibility(c, false);
 							case _:
@@ -292,6 +296,8 @@ class Fields {
 	public static function classField(ctx:Typer, c:TClass, tl:TParams, name:String,
 			p:Pos):RawClassField return rawClassField(f -> fieldType(ctx, c, tl, f, p), c, tl, name);
 
+	// Resolves field [i] on typed expression [e] using the given [mode].
+	// Note: if mode = MCall, with_type (if known) refers to the return type
 	public static function typeField(cfg:TypeFieldConfig, ctx:Typer, e:TExpr, i:String, p:Pos, mode:AccessMode,
 			withType:WithTypeValue):AccessKind {
 		var pfield = e.epos == p ? p : patchStringPos(p, i),
@@ -331,9 +337,12 @@ class Fields {
 		inline function byTypedef(f:TExpr->T->AccessKind, e:TExpr, td:TDef,
 				tl:TParams):AccessKind return f(e, followWithoutType(applyTypedef(td, tl)));
 		inline function byInterfaces(e:TExpr, c:TClass):AccessKind {
+			// For extern lib types we didn't go through check_interfaces and check_abstract_class, which handles some field
+			// generation. We instead do this lazily here by browsing the implemented interfaces (issue #9768).
 			if (!(hasClassFlag(c, CExtern) && Meta.has(MetaTag.LibType, c.clMeta))) throw NotFound.raise();
 			return byList(function(pair) {
 				var result = classAccess(e, pair.cls, pair.params);
+				// It should be fine to just add the field to our class to make future lookups a bit faster.
 				TClassTools.addField(c, result.field);
 				return result.access;
 			}, c.clImplements);
@@ -397,6 +406,7 @@ class Fields {
 						try {
 							var f = some(fields.get(i));
 							switch f.cfKind {
+								// We previously inferred to read-only, but now we want to write. This can happen in cases like #8079.
 								case Var(acc) if (acc.vWrite == AccNo && isOpen && isSet):
 									var copy = core.ds.Record.copy(acc);
 									copy.vWrite = AccNormal;
@@ -452,6 +462,7 @@ class Fields {
 					if (Meta.has(MetaTag.NoUsing, cf.cfMeta)
 						|| !canAccess(ctx, c, cf, true)
 						|| hasClassFieldFlag(cf, CfImpl)) return check(rest);
+					// We always want to reset monomorphs here because they will be handled again when making the actual call.
 					var current = ctx.e.monomorphs;
 					function next():AccessKind {
 						ctx.e.monomorphs = current;
@@ -592,9 +603,11 @@ class Fields {
 			case TTypeExpr(mt):
 				var infos = tInfos(mt);
 				if (infos.mtPath.name != infos.mtModule.mPath.name) throw NotFound.raise();
+				// TODO: This duplicates some code from typerDotPath.ml
 				var c = infos.mtModule.mStatics;
 				if (c != null && c.clStatics.exists(i)) {
 					var cf = c.clStatics.get(i);
+					// We cannot use e here because in the case of module statics the type could be different (issue #11385).
 					access(TyperBase.typeModuleType(ctx, TClassDecl(c), e.epos), cf, FHStatic(c));
 				} else TyperBase.mkModuleTypeAccess(ctx, Typeload.findTypeInModule(infos.mtModule, i), p);
 			case _: throw NotFound.raise();
@@ -612,6 +625,7 @@ class Fields {
 			switch follow(t) {
 				case TAnon({aStatus: ClassStatics({clKind: KAbstractImpl(a)})}) | TInst({clKind: KAbstractImpl(a)}, _) | TAbstract(a, _)
 					if (special(a)):
+					// the abstract field is not part of the field list, which is only true when it has no expression (issue #2344)
 					displayError(ctx.com, "Field " + i + " cannot be called directly because it has no expression", pfield);
 				case TAnon({aStatus: ClassStatics(c)}) if (c.clFields.exists(i)):
 					displayError(ctx.com, "Static access to instance field " + i + " is not allowed", pfield);
@@ -632,6 +646,10 @@ class Fields {
 	public static function typeFieldDefaultCfg(ctx:Typer, e:TExpr, i:String, p:Pos, mode:AccessMode,
 			withType:WithTypeValue):AccessKind return typeField(TypeFieldConfig.defaultConfig, ctx, e, i, p, mode, withType);
 
+	/**
+		Generates a list of fields for `@:structInit` class `c` with type params `tl`
+		as it's needed for anonymous object syntax.
+	*/
 	public static function getStructInitAnonFields(c:TClass, tl:TParams):haxe.ds.StringMap<TClassField> {
 		var args:Null<Array<{
 			name:String,

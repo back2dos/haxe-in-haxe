@@ -26,7 +26,6 @@ import typing.matcher.MatcherGlobals.*;
 import typing.matcher.MatcherGlobals;
 import core.TUnification.typeIseq;
 
-// haxe/src/typing/matcher/compile.ml — mechanical draft; not compile-validated.
 private class ExtractorFound extends haxe.Exception {
 	public function new() super("Extractor");
 }
@@ -34,7 +33,7 @@ private class ExtractorFound extends haxe.Exception {
 typedef MatcherContext = {var ctx:Typer; var dtTable:haxe.ds.IntMap<Array<DecisionTreeData>>; var matchPos:Pos; var matchDebug:Bool; var dtCount:Int;}
 
 class Compile {
-	// DtTable (Hashtbl.Make(DecisionTree)) as buckets under a key built only from
+	// port: DtTable (Hashtbl.Make(DecisionTree)) as buckets under a key built only from
 	// what DecisionTree.equal compares, so equal trees share a bucket.
 	static function hashconsKey(dt:DecisionTreeKind):Int return switch dt {
 		case Leaf(c): 1 + c.casePos.pmin * 8;
@@ -236,7 +235,7 @@ class Compile {
 		cases = expand(cases);
 		var column = selectColumn(subjects, cases);
 		subjects = column.subjects;
-		cases = expand(column.cases);
+		cases = expand(column.cases); // TODO: is this really necessary?
 		return try compileSwitch(m, subjects, cases) catch (e:ExtractorFound) compileExtractors(m, subjects, cases);
 	}
 
@@ -322,6 +321,9 @@ class Compile {
 			var dt = compileRows(m, ss.concat(subjects), specialize(subject, s.con, cases));
 			return ({scCon: s.con, scUnguarded: s.unguarded, scDt: bind(m, bs, dt)} : typing.matcher.DecisionTree.DecisionSwitchCase);
 		});
+		// This is very awkward: We need to know the first occurrence of the subject expression in the
+		// decision tree before recursing. Ideally, this would be handled automatically during the recursion,
+		// but for this to work we would have to replace some texpr occurrences with subject.
 		var subjectNull = subject,
 			subjectSwitch = subject,
 			subjectDefault = subject;
@@ -344,6 +346,7 @@ class Compile {
 		subjects = subjects.slice(1);
 		if (m.matchDebug)
 			Sys.println('compile_extractor:\n\tsubject: ${sExprPretty(subject)}\n\ttsubjects: ${sSubjects(subjects)}\n\tcases: ${sCases(cases)}');
+		// Find all extractors of the current column and associate them with bindings, if exist
 		var count = 0;
 		var extracted:Array<{row:CaseRow, ex:Null<{extractor:Extractor, i:Int, bindings:Array<Bind>}>}> = [];
 		for (row in cases) {
@@ -368,16 +371,19 @@ class Compile {
 			if (row.patterns.length == 0) throw "assert";
 			var p = row.patterns[0], tail = row.patterns.slice(1);
 			if (item.ex == null) {
+				// If there's no extractor, generate `[pattern1, _, ..., _ ]`
 				result.push({caseData: row.caseData, bindings: row.bindings, patterns: makeOffsetList(0, count, p, any).concat(tail)});
 				continue;
 			}
 			var ex:Extractor = item.ex.extractor;
+			// Replace the _ local with our subject
 			function replace(e:TExpr):TExpr return switch e.eexpr {
 				case TLocal(v) if (v == ex.exVar): subject;
 				case _: core.Texpr.mapExpr(replace, e);
 			};
 			var e = replace(ex.exExpr);
 			var bindings = item.ex.bindings.concat(row.bindings);
+			// See if we already had an equal extractor expression. In that case we can reuse its _hx_tmp
 			var found:Null<{e:TExpr, subject:Subject, i:Int}> = null;
 			for (entry in lut) if (Texpr.equal(e, entry.e)) {
 				found = entry;
@@ -386,6 +392,7 @@ class Compile {
 			var i:Int = item.ex.i;
 			var sub:Subject;
 			if (found == null) {
+				// Generate a local and add it to the subjects so that they become `[subject1, ..., localI, ...]`
 				var v = allocVar(VExtractorVariable, "_hx_tmp", e.etype, e.epos);
 				var ev = mk(TLocal(v), v.vType, e.epos);
 				var binding = makeBindGen(v, v.vPos, e, BindDeferred);
@@ -400,9 +407,19 @@ class Compile {
 			result.push({
 				caseData: row.caseData,
 				bindings: bindings,
+				// For the patterns, generate `[_, ..., extractorPatternI, ..., _]
 				patterns: makeOffsetList(i, count - i, ex.exPattern, any).concat(tail)
 			});
 		}
+		/* At the end of all this we have something like this:
+			var _hx_tmp1 = extractorLhs1(subject);
+			var _hx_tmpN = extractorLhsN(subject);
+			switch [subject, _hx_tmp1, _hx_tmpN] {
+				case [normalSubjectMatch, _, _]:
+				case [_, extractorRhs1, _]:
+				case [_, _, extractorRhsN]:
+			}
+		*/
 		var dt = compileRows(m, [new Subject(subject, null)].concat(ss).concat(subjects), result);
 		return bind(m, bs, dt);
 	}

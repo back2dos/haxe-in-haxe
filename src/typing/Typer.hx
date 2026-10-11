@@ -68,7 +68,6 @@ import typing.Typeload.*;
 import typing.FieldAccess.*;
 import typing.Operators.*;
 
-// haxe/src/typing/typer.ml — mechanical draft; not compile-validated.
 class Typer {
 	static function ensureBlock(e:Expr):Expr return switch e.expr {
 		case EBlock(_): e;
@@ -83,6 +82,8 @@ class Typer {
 	static function checkDisplayType(ctx:TyperContext, t:T,
 			ptp:PlacedTypePath):Void context.display.DisplayEmitter.checkDisplayType(ctx, t, ptp);
 
+	// ----------------------------------------------------------------------
+	// TOOLS
 	public static function terminatorType(ctx:TyperContext, withType:WithTypeValue, p:Pos):T return switch withType {
 		case NoValue: tDynamic;
 		case WithType(t, _): t;
@@ -179,7 +180,9 @@ class Typer {
 				ctx.m.enumWithType = old;
 				switch access {
 					case AKExpr(e): switch follow(e.etype) {
-							case TFun({args: _, ret: ret}) if (expected.isEnum): try core.TUnification.unify(ret, t) catch (exc:Dynamic) {
+							case TFun({args: _, ret: ret}) if (expected.isEnum):
+								// TODO: this is a dodge for #7603
+								try core.TUnification.unify(ret, t) catch (exc:Dynamic) {
 									switch exc {
 										case(core.ds.ExceptionTools.unification(_) => Some(_)):
 										case _: throw exc;
@@ -187,7 +190,7 @@ class Typer {
 								}
 							case _:
 						}
-					case _:
+					case _: // ???
 				}
 				access;
 			case _: throw core.ds.Exit.raise();
@@ -196,6 +199,8 @@ class Typer {
 		}
 	}
 
+	// ----------------------------------------------------------------------
+	// PASS 3 : type expression & check structure
 	public static function unifyMinRaise(ctx:TyperContext, el:Array<TExpr>):T {
 		try return UnifyMin.unifyMinRaise(ctx.t, el)
 		catch (_:typing.UnifyMin.NoValue) {
@@ -228,6 +233,7 @@ class Typer {
 	public static function enumFieldAccess(ctx:TyperContext, en:TEnum, ef:TEnumField, mode:AccessMode, p:Pos, pt:Pos):AccessKind {
 		var et = TyperBase.typeModuleType(ctx, TEnumDecl(en), p),
 			acc = AKExpr(mk(TField(et, FEnum(en, ef)), enumFieldType(ctx, en, ef, p), p));
+		// Should this really be here?
 		return switch mode {
 			case MSet(_): AKNo(acc, p);
 			case _: acc;
@@ -319,6 +325,8 @@ class Typer {
 						switch follow(t) {
 							case TMono(r) if (!isNullable(t)): Monomorph.addModifier(r, MNullable(ctx.t.tnull));
 							case _:
+								// Otherwise there's no need to create a monomorph, we can just type the null literal
+								// the way we expect it.
 						}
 						t;
 					case _: ctx.t.tnull(spawnMonomorph(ctx, p));
@@ -339,6 +347,7 @@ class Typer {
 						case MSet(_): raiseTypingError("Cannot set inline closure", p);
 						case MGet: raiseTypingError("Cannot create closure on inline closure", p);
 						case MCall(_):
+							// create a fake class with a fake field to emulate inlining
 							var c = mkClass(ctx.m.curmod, {pack: ["local"], name: v.vName}, e.epos, Globals.nullPos),
 								cf = mkField(v.vName, v.vType, e.epos, Globals.nullPos);
 							cf.cfParams = params;
@@ -353,11 +362,13 @@ class Typer {
 			};
 		}
 		try {
+			// member variable lookup
 			if (ctx.e.curfun == FunStatic) throw core.ds.NotFound.raise();
 			var raw = classField(ctx, ctx.c.curclass, extractParamTypes(ctx.c.curclass.clParams), i, p);
 			return fieldAccess(ctx, mode, raw.field, raw.owner == null ? FHAnon : FHInstance(raw.owner.cls, raw.owner.params),
 				TyperBase.getThis(ctx, p), p);
 		} catch (_:core.ds.NotFound) {}
+		// static variable lookup
 		if (ctx.c.curclass.clStatics.exists(i)) {
 			var f = ctx.c.curclass.clStatics.get(i),
 				impl = hasClassFieldFlag(f, CfImpl),
@@ -389,6 +400,7 @@ class Typer {
 		try return typeIdentRaise(ctx, i, p, mode, withType)
 		catch (_:core.ds.NotFound) {}
 		try {
+			// lookup type
 			if (TyperBase.isLowerIdent(i, p)) throw core.ds.NotFound.raise();
 			var e:TExpr;
 			try e = TyperBase.typeModuleType(ctx, Typeload.loadTypeDefPrime(ctx, [], i, i, p), p)
@@ -438,16 +450,24 @@ class Typer {
 	public static function handleEfield(ctx:TyperContext, e:ExprDef, p0:Pos, mode:AccessMode, withType:WithTypeValue):AccessKind {
 		function dotPath(first:DotPathPart, next:Array<DotPathPart>):AccessKind {
 			var name = first.name, p = first.pos, path = [first].concat(next);
+			// first, try to resolve the first ident in the chain and access its fields.
+			// this doesn't support untyped identifiers yet, because we want to check fully-qualified
+			// paths first (even in an untyped block)
 			try return fieldChain(ctx, next, typeIdentRaise(ctx, name, p, MGet, WithTypeTools.value), mode, withType)
 			catch (_:core.ds.NotFound) {}
+			// first ident couldn't be resolved, it's probably a fully qualified path - resolve it
 			try return TyperDotPath.resolveDotPath(ctx, path, mode, withType)
 			catch (_:core.ds.NotFound) {}
+			// dot-path resolution failed, it could be an untyped field access that happens to look like a dot-path, e.g. `untyped __global__.String`
+			// TODO: we don't really want to do full type_ident again, just the second part of it
 			try return fieldChain(ctx, next, typeIdent(ctx, name, p, MGet, WithTypeTools.value), mode, withType)
 			catch (exc:Dynamic) {
 				switch exc {
 					case(core.ds.ExceptionTools.typing(_) => Some(err)):
 						switch err.errMessage {
 							case UnknownIdent(_) if (err.errPos == p):
+								// try raising a more sensible error if there was an uppercase-first (module name) part
+								// TODO: we should pass the actual resolution error from resolve_dot_path instead of Not_found
 								try {
 									var pack = [], upper:Null<DotPathPart> = null, sub:Null<String> = null, position:Null<Pos> = null;
 									for (part in path) {
@@ -487,10 +507,17 @@ class Typer {
 				}
 			}
 		}
+		// loop through the given EField expression to figure out whether it's a dot-path that we have to resolve,
+		// or a field access chain
 		function loop(parts:Array<DotPathPart>, expr:Expr):AccessKind return switch expr.expr {
+			// field access - accumulate and check further
 			case EField(e, s, EFNormal): loop([TyperDotPath.mkDotPathPart(s, expr.pos)].concat(parts), e);
+			// it's a dot-path, so it might be either fully-qualified access (pack.Class.field)
+			// or normal field access of a local/global/field identifier, proceed figuring this out
 			case EConst(Ident(i)): dotPath(TyperDotPath.mkDotPathPart(i, expr.pos), parts);
 			case EField(obj, s, EFSafe):
+				// safe navigation field access - definitely NOT a fully-qualified access,
+				// create safe navigation chain from the object expression
 				var on = accGet(ctx, typeAccess(ctx, obj.expr, obj.pos, MGet, WithTypeTools.value)),
 					base = TyperBase.getSafeNavBase(ctx, on);
 				var access = fieldChain(ctx, [TyperDotPath.mkDotPathPart(s, expr.pos)].concat(parts), AKExpr(base.base), mode, withType);
@@ -500,7 +527,10 @@ class Typer {
 					snTempVar: base.tempVar,
 					snAccess: access
 				});
+			// non-ident expr occured: definitely NOT a fully-qualified access,
+			// resolve the field chain against this expression
 			case _: switch typeAccess(ctx, expr.expr, expr.pos, MGet, WithTypeTools.value) {
+					// further field access continues the safe navigation chain (after a non-field access inside the chain)
 					case AKSafeNav(sn): AKSafeNav({
 							snPos: sn.snPos,
 							snBase: sn.snBase,
@@ -572,6 +602,7 @@ class Typer {
 		var a1 = typeAccess(ctx, e1.expr, e1.pos, MGet, WithTypeTools.value),
 			index = typeExpr(ctx, e2, WithTypeTools.value);
 		return switch a1 {
+			// pack the array access inside the safe navigation chain
 			case AKSafeNav(sn): AKSafeNav({
 					snPos: sn.snPos,
 					snBase: sn.snBase,
@@ -676,6 +707,7 @@ class Typer {
 							var result = loop(from.kind == FromField, [followed].concat(seen), from.type);
 							if (result != ODKPlain) matches.unshift(result);
 						}
+						// If the abstract has no casts in the first place, we can assume plain typing (issue #10730)
 						matches.length == 0 ? ODKPlain : matches.length == 1 ? matches[0] : ODKFailed;
 					case TDynamic(t) if (t != null):
 						dynamicParameter = t;
@@ -724,6 +756,7 @@ class Typer {
 					if (StringTools.startsWith(n, "$")) raiseTypingError("Field names starting with a dollar are not allowed", p);
 					var cf = mkField(n, e.etype, Ast.punion(pn, e.epos), pn);
 					if (original != null) {
+						// If we're assigning to an existing field, copy some of its characteristics
 						if (hasClassFieldFlag(original, CfFinal)) addClassFieldFlag(cf, CfFinal);
 						cf.cfKind = original.cfKind;
 					}
@@ -842,11 +875,15 @@ class Typer {
 
 	public static function typeNew(ctx:TyperContext, ptp:PlacedTypePath, el:Array<Expr>, withType:WithTypeValue, forceInline:Bool,
 			p:Pos):TExpr {
+		/*
+			Since macros don't have placed_type_path structure on Haxe side any ENew will have null_pos in `path`.
+			Try to calculate a better pos.
+		*/
 		if (ptp.posFull == Globals.nullPos) {
 			var pp = p;
 			if (el.length > 0 && el[0].pos.pfile == p.pfile && p.pmin < el[0].pos.pmin) {
 				pp = core.ds.Record.copy(p);
-				var min = p.pmin + 4, max = el[0].pos.pmin - 2;
+				var min = p.pmin + 4, max = el[0].pos.pmin - 2; // Additional "1" for an opening bracket
 				pp.pmin = min < max ? min : p.pmin;
 				pp.pmax = max;
 			}
@@ -875,6 +912,7 @@ class Typer {
 			}
 			return switch info.buildKind {
 				case BuildGeneric(c): switch withType {
+						// If we have a matching expected type, use its type parameters.
 						case WithType(t, _): switch follow(t) {
 								case TInst(c, tl) if (core.ds.Key.compare(c.clPath, info.buildPath) == 0): tl;
 								case TInst({clKind: KGenericInstance(c, tl)},
@@ -897,6 +935,7 @@ class Typer {
 		try t = Typeload.loadInstance(ctx, ptp, ParamCustom(getParams), LoadNormal)
 		catch (exc:haxe.Exception) {
 			restore();
+			// If we fail for some reason, process the arguments in case we want to display them (#7650).
 			if (core.ds.ArrayTools.exists(el,
 				e -> DisplayPosition.displayPosition.enclosedIn(e.pos))) for (e in el) typeExpr(ctx, e, WithTypeTools.value);
 			throw exc;
@@ -919,7 +958,7 @@ class Typer {
 			}
 			return unifyConstructor(c, fa);
 		}
-		// Upstream only invokes restore on the failing instance-load path above.
+		// port: upstream only invokes restore on the failing instance-load path above.
 		try return switch AbstractTools.followWithForwardCtor(t) {
 			case TInst(c = {clKind: KTypeParameter(ttp)}, params):
 				if (!TypeloadCheck.isGenericParameter(ctx, c)) raiseTypingError("Only generic type parameters can be constructed", p);
@@ -1159,10 +1198,14 @@ class Typer {
 				Typecore.unify(ctx, rt, tr, p);
 			case _:
 		}
+		// The idea here is: If we have multiple `from Function`, we can
+		// 1. ignore any that have a different argument arity, and
+		// 2. still top-down infer any argument or return type that is equal across all candidates.
 		function matrix(list:Array<T>):Void {
 			var arity = targs.length, m = new UnificationMatrix(arity + 1);
 			for (t in list) switch followWithCoro(t) {
 				case NotCoro(TFun({args: args, ret: ret})) | Coro({args: args, ret: ret}) if (args.length == arity):
+					// We don't want to bind monomorphs because we want the widest type
 					for (i in 0...args.length) m.join(dynamifyMonos(args[i].type), i + 1);
 					m.join(dynamifyMonos(ret), 0);
 				case _:
@@ -1179,12 +1222,16 @@ class Typer {
 				function loop(stack:Array<T>, t:T):Void switch followWithCoro(t) {
 					case NotCoro(TFun({args: args2, ret: tr})) | Coro({args: args2, ret: tr}) if (args2.length == targs.length):
 						for (i in 0...targs.length) maybeUnifyArg(targs[i].type, args2[i].type);
+						// unify for top-down inference unless we are expecting Void
 						maybeUnifyRet(tr);
 					case NotCoro(TAbstract(a, tl)):
 						var froms = TyperBase.getAbstractFroms(ctx, a, tl);
 						if (froms.length == 1) {
 							if (!core.ds.ArrayTools.exists(stack, t2 -> shallowEq(t, t2))) loop([t].concat(stack), froms[0].type);
 						} else {
+							// For cases like nested EitherType, we want a flat list of all possible candidates.
+							// This might be controversial because those could be considered transitive casts,
+							// but it's unclear if that's a bad thing for this kind of inference (issue #10982).
 							var pending = froms.copy(), seen = [], flat = [];
 							while (pending.length > 0) {
 								var next = pending.shift().type;
@@ -1205,6 +1252,7 @@ class Typer {
 			case _:
 		}
 		var ft = isCoroutine ? ctx.t.tcoro.tcoro.force()({args: targs, ret: rt}) : TFun({args: targs, ret: rt});
+		// We want to apply params as if we accessed the function by name (see type_ident_raise).
 		if (withType != NoValue) ft = applyParams(params, Monomorph.spawnConstrainedMonos(t -> t, params), ft);
 		var v:Null<TVar> = null;
 		if (vname != null) {
@@ -1265,7 +1313,7 @@ class Typer {
 				mk(TVar(v, mk(TConst(TNull), ft, p)), ctx.t.tvoid, p),
 				mk(TBinop(OpAssign, mk(TLocal(v), ft, p), e), ft, p)
 			].concat(exprs);
-		} else if (inlined && !ctx.m.isDisplayFile) exprs.unshift(mk(TBlock([]), ctx.t.tvoid, p));
+		} else if (inlined && !ctx.m.isDisplayFile) exprs.unshift(mk(TBlock([]), ctx.t.tvoid, p)); // do not add variable since it will be inlined
 		else exprs.unshift(mk(TVar(v, e), ctx.t.tvoid, p));
 		if (exprs.length == 1) return exprs[0];
 		var block = mk(TBlock(exprs), v.vType, p);
@@ -1401,6 +1449,7 @@ class Typer {
 						raiseTypingError("Cannot return `null` from Void-function", p);
 					case _:
 				}
+				// if we get a Void expression (e.g. from inlining) we don't want to return it (issue #4323)
 				var t = terminatorType(ctx, withType, p);
 				return mk(TBlock([e, mk(TReturn(null), t, p)]), t, e.epos);
 			}
@@ -1410,6 +1459,8 @@ class Typer {
 				case(core.ds.ExceptionTools.typing(_) => Some(err)):
 					var p = err.errPos;
 					checkError(ctx, err);
+					// If we have a bad return, let's generate a return null expression at least. This surpresses various
+					// follow-up errors that come from the fact that the function no longer has a return expression (issue #6445).
 					return mk(TReturn(mk(TConst(TNull), mkMono(), p)), terminatorType(ctx, withType, p), p);
 				case _:
 					throw exc;
@@ -1421,7 +1472,7 @@ class Typer {
 		var tpos = hint.pos,
 			t = Typeload.loadComplexType(ctx, true, LoadNormal, hint);
 		inline function check(pt:T):Void switch follow(pt) {
-			case TMono(_):
+			case TMono(_): // This probably means that Dynamic wasn't bound (issue #4675).
 			case t if (t == tDynamic):
 			case _:
 				raiseTypingError("Cast type parameters must be Dynamic", tpos);
@@ -1539,6 +1590,7 @@ class Typer {
 				var e = loop(e1);
 				ctx.f.meta = current;
 				e;
+			// Allow `${...}` reification because it's a noop and happens easily with macros
 			case MetaTag.Dollar(""): expression();
 			case MetaTag.Dollar(s):
 				displayError(ctx.com, "Reification $" + s + " is not allowed outside of `macro` expression", m.pos);
@@ -1631,7 +1683,9 @@ class Typer {
 						typeExpr(ctx, {expr: ECall(trace, [toStringMeta(first), infos]), pos: p}, NoValue);
 					}
 				}
-			case EField({expr: EConst(Ident("super"))}, _, _): throw core.ds.Exit.raise();
+			case EField({expr: EConst(Ident("super"))}, _, _):
+				// no builtins can be applied to super as it can't be a value
+				throw core.ds.Exit.raise();
 			case EField(on, "bind", kind):
 				var typed = typeExpr(ctx, on, WithTypeTools.value);
 				switch follow(typed.etype) {
@@ -1760,7 +1814,7 @@ class Typer {
 				};
 				var nullable = ctx.t.tnull(e1.etype),
 					name = WithTypeTools.getExpectedName(withType);
-				if (name == null || name == "") name = "tmp";
+				if (name == null || name == "") name = "tmp"; // TODO: why does this happen?
 				e1 = reference.asVar(name, mk(e1.eexpr, nullable, e1.epos));
 				var enull = Builder.makeNull(nullable, e1.epos),
 					condition = mk(TBinop(OpNotEq, e1, enull), ctx.t.tbool, e1.epos),
@@ -1770,6 +1824,10 @@ class Typer {
 			case EBinop(op, a, b): typeBinop(ctx, op, a, b, false, withType, p);
 			case EBlock([]) if (switch withType {
 					case NoValue: false;
+					/*
+						If expected type is unknown then treat `(...) -> {}` as an empty function
+						(just like `function(...) {}`) instead of returning an object.
+					*/
 					case WithType(t, ImplicitReturn): !ExtType.isMono(follow(t));
 					case _: true;
 				}): typeExpr(ctx, {expr: EObjectDecl([]), pos: p}, withType);
@@ -1787,7 +1845,7 @@ class Typer {
 				e = {
 					expr: EMeta({meta: MetaTag.Inline, exprs: []}, {expr: EFor(_, _)})
 				}
-			]): typeArrayComprehension(ctx, e, withType, p);
+			]): typeArrayComprehension(ctx, e, withType, p); // awkward...
 			case EArrayDecl(list) if (list.length > 0 && switch list[0].expr {
 					case EBinop(OpArrow, _, _): true;
 					case _: false;
@@ -1807,7 +1865,9 @@ class Typer {
 								}, withType); else if (list.length == 1 && switch list[0].expr {
 									case EDisplay(_): true;
 									case _: false;
-								}) typeExpr(ctx, list[0], WithTypeTools.withType(tk)); else typeArrayDecl(ctx, list, withType, p);
+								})
+									// This must mean we're just typing the first key of a map declaration (issue #9133).
+									typeExpr(ctx, list[0], WithTypeTools.withType(tk)); else typeArrayDecl(ctx, list, withType, p);
 							case _: typeArrayDecl(ctx, list, withType, p);
 						}
 					case _: typeArrayDecl(ctx, list, withType, p);
@@ -1843,7 +1903,11 @@ class Typer {
 			case EReturn(e):
 				if (!TyperManager.isFunctionContext(ctx)) {
 					displayError(ctx.com, "Return outside function", p);
-					e == null ? Texpr.Builder.makeNull(terminatorType(ctx, withType, p), p) : typeExpr(ctx, e, WithTypeTools.value);
+					e == null ? Texpr.Builder.makeNull(terminatorType(ctx, withType, p), p) :
+						// type the return expression to see if there are more errors
+						// as well as use its type as if there was no `return`, since
+						// that is most likely what was meant
+						typeExpr(ctx, e, WithTypeTools.value);
 				} else typeReturn(ctx, e, withType, p);
 			case EBreak:
 				if (!ctx.e.inLoop) displayError(ctx.com, "Break outside loop", p);

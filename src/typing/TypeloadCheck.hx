@@ -38,7 +38,6 @@ import core.display.CompletionItem.CompletionModuleKind;
 import typing.Typeload;
 import typing.TypeloadCheck.*;
 
-// haxe/src/typing/typeloadCheck.ml — mechanical draft; not compile-validated.
 class BuildCanceled extends haxe.Exception {
 	public final state:BuildState;
 
@@ -56,8 +55,10 @@ enum CheckOverrideKind {
 	OverloadOverride(f:Void->Void);
 }
 
+// Various checks performed while loading types.
 class TypeloadCheck {
 	public static function isGenericParameter(ctx:Typer, c:TClass):Bool {
+		// first check field parameters, then class parameters
 		var name = c.clPath.name;
 		try {
 			lookupParam(name, ctx.f.curfield.cfParams);
@@ -77,7 +78,7 @@ class TypeloadCheck {
 		}
 	}
 
-	public static function validRedefinition(com:CommonContext, map1:T->T, map2:T->T, f1:TClassField, t1:T, f2:TClassField, t2:T):Void {
+	public static function validRedefinition(com:CommonContext, map1:T->T, map2:T->T, f1:TClassField, t1:T, f2:TClassField, t2:T):Void { // child, parent
 		var tctx:TypeParamUnificationContext = {typeParamPairs: [], knownTypeParams: f1.cfParams};
 		var uctx = defaultUnificationContext();
 		uctx.typeParamMode = TpDefinition(tctx);
@@ -147,12 +148,16 @@ class TypeloadCheck {
 							f1.cfPos);
 				}
 			case [_, Var({vWrite: AccNo | AccNever})]:
+				// write variance
 				valid(t1, t2);
 			case [_, Var({vRead: AccNo | AccNever})]:
+				// read variance
 				valid(t2, t1);
 			case [_, _] if (hasClassFieldFlag(f2, CfFinal)):
+				// write variance
 				valid(t1, t2);
 			case _:
+				// in case args differs, or if an interface var
 				typeEq(EqStrict, t1, t2);
 				if (isNull(t1) != isNull(t2)) throw new core.TUnification.Unify_error([CannotUnify(t1, t2)]);
 		}
@@ -213,6 +218,7 @@ class TypeloadCheck {
 		var i = r.cfNew.cfName,
 			hasOverride = hasClassFieldFlag(r.cfNew, CfOverride);
 		checkNativeNameOverride(ctx, r.cfNew, r.cfOld);
+		// allow to define fields that are not defined for this platform version in superclass
 		switch r.cfNew.cfKind {
 			case Var({vRead: AccRequire(_)}):
 				throw NotFound.raise();
@@ -226,7 +232,7 @@ class TypeloadCheck {
 				+ i
 				+ " is 'abstract' and does not provide any implementation to override",
 				p);
-			else addClassFieldFlag(r.cfNew, CfOverride);
+			else addClassFieldFlag(r.cfNew, CfOverride); // our spec requires users to not "override" abstract functions, but our implementation depends on implementations to be declared with "override" ¯\_(ツ)_/¯
 		}
 		if (hasClassFieldFlag(r.cfOld, CfOverload)
 			&& !hasClassFieldFlag(r.cfNew,
@@ -247,7 +253,7 @@ class TypeloadCheck {
 			case [_, Method(MethInline)]:
 				displayError(ctx.com, "Field " + i + " is inlined and cannot be overridden", p);
 			case [a, b] if (fieldKindEq(a, b)):
-			case [Method(MethInline), Method(MethNormal)]:
+			case [Method(MethInline), Method(MethNormal)]: // allow to redefine a method as inlined
 			case _:
 				displayError(ctx.com, "Field " + i + " has different property access than in superclass", p);
 		}
@@ -339,11 +345,13 @@ class TypeloadCheck {
 		if (hasClassFieldFlag(f, CfOverload)) {
 			var overloads = getOverloads(ctx.com, csup, i);
 			for (pair in overloads) switch pair.field.cfKind {
+				// check if any super class fields are vars
 				case Var(_):
 					displayError(ctx.com, "A variable named '" + pair.field.cfName + "' was already declared in a superclass", f.cfPos);
 				case _:
 			}
 			return OverloadOverride(function() {
+				// find the exact field being overridden
 				var r = findOverrideField(ctx, c, f, csup, params, function(csup:TClass, i:String):CastField {
 					for (pair in overloads) if (Overloads.sameOverloadArgs(f.cfType, applyParams(csup.clParams, params, pair.type), f,
 						pair.field)) return pair;
@@ -366,6 +374,7 @@ class TypeloadCheck {
 		}
 		var sup = c.clSuper;
 		if (sup == null) throw NotFound.raise();
+		// rec over class_field
 		var raw = rawClassField(f -> f.cfType, sup.cls, sup.params, i),
 			map = TClassTools.getMapFunction(sup.cls, sup.params);
 		return {map: map, type: applyParams(sup.cls.clParams, sup.params, raw.type), field: raw.field};
@@ -398,7 +407,9 @@ class TypeloadCheck {
 				returnFlow(ctx, e);
 				for (c in cases) returnFlow(ctx, c.expr);
 			case TWhile({eexpr: TConst(TBool(true))}, body, _):
+				// a special case for "inifite" while loops that have no break
 				function loop(e:TExpr):Void switch e.eexpr {
+					// ignore nested loops to not accidentally get one of its breaks
 					case TWhile(_):
 					case TBreak:
 						error();
@@ -514,7 +525,7 @@ class Inheritance {
 					if (!found) throw NotFound.raise();
 				}
 				delay(g, PForce, function() {
-					follow(f2.cfType);
+					follow(f2.cfType); // force evaluation
 					var p = f2.cfNamePos;
 					inline function mkind(m:core.TType.MethodKind):Int return switch m {
 						case MethNormal | MethInline: 0;
@@ -597,7 +608,7 @@ class Inheritance {
 				}
 			}
 		}
-		// Ordered-map traversal is retained through the upstream map adapter.
+		// port: core.ds.PMap.iter visits keys in sorted order, like the OCaml PMap.
 		PMap.iter(function(_:String, cf:TClassField) {
 			checkField(cf);
 			if (hasClassFieldFlag(cf, CfOverload)) {
@@ -652,7 +663,7 @@ class Inheritance {
 		}, TClassTools.getAllFields(csup, params));
 		if (missing.length == 0) return;
 		if (context.display.Diagnostics.errorInDiagnosticsRun(ctx.com, c.clPos)) {
-			// List.rev_map over the cons-built list
+			// port: List.rev_map over the cons-built list
 			var fields = [];
 			for (e in missing) fields.unshift({
 				field: e.field,
@@ -719,13 +730,20 @@ class Inheritance {
 		inline function checkCancelBuild(csup:TClass):Void {
 			var state = csup.clBuild();
 			if (state != Built) {
+				// for macros reason, our super class is not yet built - see #2177
+				// let's reset our build and delay it until we are done
 				c.clMeta = oldMeta;
 				throw new BuildCanceled(state);
 			}
 		}
+		// Pass 1: Check and set relations
 		inline function checkHerit(t:T, isExtends:Bool, p:Pos):Void->Void {
 			function checkInterfacesOrDelay():Void switch c.clBuild() {
 				case BuildMacro(pending):
+					// Ok listen... we're still building this class, which means we can't check its interfaces yet. However,
+					// we do want to check them at SOME point. So we use this pending list which was maybe designed for this
+					// purpose. However, we STILL have to delay the check because at the time pending is handled, the class
+					// is not built yet. See issue #10847.
 					pending.unshift(function() delay(ctx.g, PConnectField, checkInterfacesOrDelay));
 				case _ if (ctx.com.display.dmsFullTyping):
 					checkInterfaces(ctx, c);

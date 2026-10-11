@@ -8,11 +8,10 @@ import typing.matcher.Bind;
 import typing.matcher.Case;
 import typing.matcher.Constructor;
 
-// haxe/src/typing/matcher/decisionTree.ml — mechanical draft; not compile-validated.
 enum TypeFiniteness {
-	Infinite;
-	CompileTimeFinite;
-	RunTimeFinite;
+	Infinite; // type has inifite constructors (e.g. Int, String)
+	CompileTimeFinite; // type is considered finite only at compile-time but has inifite possible run-time values (enum abstracts)
+	RunTimeFinite; // type is truly finite (Bool, enums)
 }
 
 enum DecisionTreeKind {
@@ -139,7 +138,7 @@ class DecisionTree {
 
 	public static function equalBindExpr(e1:TExpr, e2:TExpr):Bool return Texpr.equal(e1, e2);
 
-	// inline: see core.ds.List
+	// port: Ast.safe_for_all2, inlined
 	static inline function all2<A>(f:A->A->Bool, a:Array<A>, b:Array<A>):Bool {
 		var r = a.length == b.length;
 		if (r) for (i in 0...a.length) if (!f(a[i], b[i])) {
@@ -165,6 +164,5 @@ class DecisionTree {
 		case _: false;
 	};
 
-	// Structural hashing is retained as an unresolved runtime dependency.
 	public static function hash(dt:DecisionTreeKind):Int return core.ds.Hashtbl.hash(dt);
 }

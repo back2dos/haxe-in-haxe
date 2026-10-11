@@ -15,18 +15,25 @@ import context.Typecore.FieldHost as FieldAccessHost;
 import context.Typecore.FieldAccess as FieldAccessData;
 import core.ds.NotFound;
 
-// haxe/src/typing/fieldAccess.ml — mechanical draft; not compile-validated.
 enum FieldHost {
+	// Get the plain expression with applied field type parameters.
 	FGet;
+	// Does not apply field type parameters.
 	FCall;
+	// Actual reading, for FClosure and such.
 	FRead;
+	// Used as lhs, no semantic difference to FGet.
 	FWrite;
 }
 
 enum AccessorResolution<A> {
+	// Accessor was found.
 	AccessorFound(value:A);
+	// Accessor was not found, but access was made on anonymous structure.
 	AccessorAnon;
+	// Accessor was not found.
 	AccessorNotFound;
+	// Accessor resolution was attempted on a non-property.
 	AccessorInvalid;
 }
 
@@ -42,6 +49,7 @@ class FieldAccess {
 		};
 	}
 
+	// Creates the `tfield_access` corresponding to this field access, using the provided field.
 	public static function applyFa(cf:TClassField, host:FieldAccessHost):TFieldAccess return switch host {
 		case FHStatic(c): FStatic(c, cf);
 		case FHInstance(c, tl): FInstance(c, tl, cf);
@@ -62,12 +70,14 @@ class FieldAccess {
 		case FHAnon: throw NotFound.raise();
 	};
 
+	// Returns the mapping function to apply type parameters.
 	public static function getMapFunction(fa:FieldAccessData):T->T return switch fa.faHost {
 		case FHStatic(_) | FHAnon: function(t) return t;
 		case FHInstance(c, tl): TClassTools.getMapFunction(c, tl);
 		case FHAbstract(a, tl, _): function(t) return applyParams(a.aParams, tl, t);
 	};
 
+	// Converts the field access to a `TField` node, using the provided `mode`.
 	public static function getFieldExpr(fa:FieldAccessData, mode:FieldHost):TExpr {
 		var cf = fa.faField;
 		var t = mode == FCall ? cf.cfType : fieldType(cf);
@@ -105,9 +115,11 @@ class FieldAccess {
 						switch host {
 							case FHStatic(c):
 								var accessor = c.clStatics.get(name);
+								// TODO: Check if this is correct, there's a case in hxcpp's VirtualArray
 								accessor == null ? AccessorAnon : AccessorFound({field: accessor, host: host});
 							case FHInstance(c, tl):
 								try {
+									// Accessors can be overridden, so we have to check the actual type.
 									var actual = switch follow(t) {
 										case TInst(c, tl): {cls: c, params: tl};
 										case _: {cls: c, params: tl};
@@ -129,6 +141,7 @@ class FieldAccess {
 		};
 	}
 
+	// Resolves the accessor on the field access, using the provided `mode`.
 	public static function resolveAccessor(fa:FieldAccessData, mode:AccessMode):AccessorResolution<FieldAccessData> {
 		return switch findAccessorForField(fa.faHost, fa.faField, fa.faOn.etype, mode) {
 			case AccessorFound(found): AccessorFound(create(fa.faOn, found.field, found.host, fa.faInline, fa.faPos, fa.faFieldPos));

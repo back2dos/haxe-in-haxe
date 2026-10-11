@@ -22,8 +22,6 @@ import core.TUnification.*;
 import core.ds.NotFound;
 import context.display.DeprecationCheck;
 
-// haxe/src/typing/instanceBuilder.ml — mechanical draft; not compile-validated.
-// Macro branches preserve dispatch hooks only; no macro runtime is implemented.
 @:structInit class MacroCallPath {
 	public var path:GlobalTypePath;
 	public var field:String;
@@ -70,7 +68,7 @@ class InstanceBuilder {
 			case _: raiseTypingError("MacroType requires a single expression call parameter", p);
 		};
 		var old = ctx.e.ret;
-		// Typed local: gencpp can't switch on a call through a function-typed field.
+		// port: typed local, gencpp can't switch on a call through a function-typed field.
 		var macroResult:context.Typecore.MacroResult = ctx.g.doMacro(ctx, MMacroType, call.path, call.field, call.args, p);
 		var t = switch macroResult {
 			case MError | MMacroInMacro: spawnMonomorph(ctx, p);
@@ -99,6 +97,9 @@ class InstanceBuilder {
 		ctx.c.getBuildInfos = oldBuild;
 		return t;
 	}
+
+	// --------------------------------------------------------------------------
+	// API EVENTS
 
 	public static function getBuildInfo(ctx:Typer, mtype:ModuleType, p:Pos):BuildInfo {
 		return switch mtype {

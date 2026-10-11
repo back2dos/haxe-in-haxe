@@ -28,7 +28,6 @@ import context.TyperPass;
 import typing.TyperBase.*;
 import optimization.Dce;
 
-// haxe/src/typing/finalization.ml — mechanical draft; not compile-validated.
 enum FinalizationState {
 	Generating;
 	Done;
@@ -36,6 +35,9 @@ enum FinalizationState {
 }
 
 class Finalization {
+	// ----------------------------------------------------------------------
+	// FINALIZATION
+
 	public static function maybeLoadMain(tctx:Typer):Null<ModuleDef> {
 		return tctx.com.main.mainPath == null ? null : Typeload.loadModule(tctx, tctx.com.main.mainPath, nullPos);
 	}
@@ -116,7 +118,7 @@ class Finalization {
 			var allTypes:Array<ModuleType> = ctx.com.moduleLut.fold(function(_, m:ModuleDef,
 					acc:Array<ModuleType>) return m.mTypes.concat(acc), []);
 			var newTypes = allTypes.filter(function(mt) {
-				// OCaml List.memq uses physical identity, including the variant wrapper.
+				// port: OCaml List.memq uses physical identity, including the variant wrapper.
 				for (handled in handledTypes) if (mt == handled) return false;
 				return true;
 			});
@@ -131,7 +133,7 @@ class Finalization {
 		var types:Array<ModuleType> = [];
 		var states:Map<String, FinalizationState> = [];
 		var statics:Map<String, Bool> = [];
-		// Cached path keys (pack#name) rather than joining a fresh string per comparison.
+		// port: cached path keys (pack#name) rather than joining a fresh string per comparison.
 		inline function key(p:GlobalTypePath):String return p.hashKey();
 		inline function staticKey(c:TClass, name:String):String return key(c.clPath) + ":" + name;
 		var loop:ModuleType->Void = null;
@@ -162,7 +164,7 @@ class Finalization {
 					}
 				case TNew(c, _, _):
 					Texpr.iter(e1 -> walkExpr(p, e1),
-						e); // not iterWith: a typed closure passed to its generic parameter is wrapped per call
+						e); // port: not iterWith: a typed closure passed to its generic parameter is wrapped per call
 					loopClass(p, c);
 					function walkConstructor(c:TClass):Void {
 						var k = staticKey(c, "new");
@@ -177,7 +179,7 @@ class Finalization {
 					walkStaticField(p, c, cf);
 				case _:
 					Texpr.iter(e1 -> walkExpr(p, e1),
-						e); // not iterWith: a typed closure passed to its generic parameter is wrapped per call
+						e); // port: not iterWith: a typed closure passed to its generic parameter is wrapped per call
 			}
 		};
 		inline function walkClass(p:GlobalTypePath, c:TClass):Void {
@@ -185,7 +187,7 @@ class Finalization {
 			for (parent in c.clImplements) loopClass(p, parent.cls);
 			var init = TClassTools.getClInit(c);
 			if (init != null) walkExpr(p, init);
-			// Upstream PMap.iter is key-ordered, not insertion/hash order.
+			// port: upstream PMap.iter is key-ordered, not insertion/hash order.
 			var names = [for (name in c.clStatics.keys()) name];
 			names.sort(Reflect.compare);
 			for (name in names) {
@@ -212,7 +214,7 @@ class Finalization {
 						case _:
 					}
 					states.set(k, Done);
-					types.push(t); // upstream conses here and reverses the list at the end
+					types.push(t); // port: upstream conses here and reverses the list at the end
 			}
 		};
 		var sortedModules:Array<ModuleDef> = modules.fold(function(_, m, acc:Array<ModuleDef>) {
@@ -220,7 +222,7 @@ class Finalization {
 			return acc;
 		}, []);
 		sortedModules.sort(function(m1, m2) {
-			// OCaml compares the package list first, then the module name.
+			// port: OCaml compares the package list first, then the module name.
 			var p1 = m1.mPath.pack, p2 = m2.mPath.pack;
 			for (i in 0...Std.int(Math.min(p1.length, p2.length))) {
 				var comparison = Reflect.compare(p1[i], p2[i]);

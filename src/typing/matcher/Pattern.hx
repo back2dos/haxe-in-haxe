@@ -4,7 +4,6 @@ import core.TType;
 import core.Globals.Pos;
 import typing.matcher.Constructor;
 
-// haxe/src/typing/matcher/pattern.ml — mechanical draft; not compile-validated.
 enum PatternKind {
 	PatConstructor(con:ConstructorData, patterns:Array<PatternData>);
 	PatAny;
@@ -26,7 +25,9 @@ enum PatternKind {
 	public inline function clone():PatternData return new PatternData(kind, pos);
 }
 
-typedef Extractor = {var exVar:TVar; var exExpr:TExpr; var exPattern:PatternData;}
+typedef Extractor = {var exVar:TVar; // The _ local used for typing the expression
+	var exExpr:TExpr; // The left side of the =>
+	var exPattern:PatternData;} // The right side of the =>
 
 class Pattern {
 	public static function toString(pat:PatternData):String return switch pat.kind {

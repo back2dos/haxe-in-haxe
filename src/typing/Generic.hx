@@ -31,7 +31,6 @@ import core.WithType;
 import context.Typecore.*;
 import context.Typecore;
 
-// haxe/src/typing/generic.ml — mechanical draft; not compile-validated.
 typedef GenericSubst = {var cls:TClass; var t:T; var expr:Null<TExpr>;}
 typedef GenericContext = {var ctx:Typer; var subst:Array<GenericSubst>; var name:String; var p:Pos; var mg:Null<ModuleDef>; var genericDebug:Bool;}
 
@@ -106,6 +105,7 @@ class Generic {
 
 	public static function genericSubstituteTypeAllowExpr(g:GenericContext, allowExpr:Bool, t:T):T return switch t {
 		case TInst(c = {clKind: KGeneric}, tl):
+			// maybe loop, or generate cascading generics
 			var info = g.ctx.g.getBuildInfo(g.ctx, TClassDecl(c), g.p);
 			var t = info.buildApply(tl.map(function(t) return genericSubstituteTypeAllowExpr(g, true, t)));
 			switch [follow(t), g.mg] {
@@ -120,7 +120,10 @@ class Generic {
 				break;
 			}
 			if (subst == null) map(function(t) return genericSubstituteTypeAllowExpr(g, allowExpr, t),
-				t); else if (subst.expr != null && !allowExpr) subst.expr.etype; else genericSubstituteTypeAllowExpr(g, false, subst.t);
+				t); else
+				// Somewhat awkward: If we allow expression types, use the original KExpr one. This is so
+				// recursing into further KGeneric expands correctly.
+				if (subst.expr != null && !allowExpr) subst.expr.etype; else genericSubstituteTypeAllowExpr(g, false, subst.t);
 		case _: map(function(t) return genericSubstituteTypeAllowExpr(g, allowExpr, t), t);
 	};
 
@@ -146,7 +149,9 @@ class Generic {
 						case TInst(c2, _) if (c == c2): true;
 						case _: false;
 					};
-					if (same) Texpr.mapExprType(build, function(t) return genericSubstituteType(g, t), buildVar, e); else {
+					if (same)
+						// The @:generic class wasn't expanded, let's not recurse to avoid infinite loop (#6430)
+						Texpr.mapExprType(build, function(t) return genericSubstituteType(g, t), buildVar, e); else {
 						var fa;
 						try {
 							fa = quickField(t, cf.cfName);
@@ -155,6 +160,7 @@ class Generic {
 								Error.raiseTypingError('Type ${core.TPrinting.sType(core.TPrinting.printContext(), t)} has no field ${cf.cfName} (possible typing order issue)',
 								e.epos);
 						}
+						// preserve FClosure
 						fa = switch [orig, fa] {
 							case [FClosure(_, _), FInstance(c, tl, cf)]: FClosure({cls: c, params: tl}, cf);
 							case _: fa;
@@ -223,6 +229,7 @@ class Generic {
 	}
 
 	public static function setTypeParameterDependencies(mg:ModuleDef, tl:Array<T>):Void {
+		// ensure that type parameters are set in dependencies
 		var stack = [];
 		function loop(t:T):Void {
 			if (stack.indexOf(t) >= 0) return;
@@ -281,14 +288,18 @@ class Generic {
 		function checkRecursive(t:T):Void switch follow(t) {
 			case TInst(c, tl):
 				switch c.clKind {
-					case KTypeParameter(_): recurse = true;
+					case KTypeParameter(_):
+						// TPTODO
+						// if not (TypeloadCheck.is_generic_parameter ctx c2) && has_ctor_constraint c2 then
+						//	raise_typing_error "Type parameters with a constructor cannot be used non-generically" p;
+						recurse = true;
 					case _:
 				}
 				for (t in tl) checkRecursive(t);
 			case _:
 		};
 		for (t in tl) checkRecursive(t);
-		if (recurse || !ctx.com.display.dmsFullTyping) return TInst(c, tl);
+		if (recurse || !ctx.com.display.dmsFullTyping) return TInst(c, tl); // build a normal instance
 		var g = makeGeneric(ctx, c.clParams, tl, core.Meta.has(MetaTag.Custom(":debug.generic"), c.clMeta), p);
 		var path:core.Globals.GlobalTypePath = {pack: c.clPath.pack, name: c.clPath.name + "_" + g.name};
 		try {
@@ -306,7 +317,7 @@ class Generic {
 			for (s in g.subst) Sys.println('[GENERIC]   ${s.cls.clPath.name}: ${core.TPrinting.sTypeKind(s.t)}'
 				+ (s.expr == null ? "" : " (expr: " + core.TPrinting.sExprDebug(s.expr) + ")"));
 		}
-		c.clBuild();
+		c.clBuild(); // make sure the super class is already setup
 		var mg = makeModule(g, c, path);
 		var ctx = TyperManager.cloneForModule(ctx.g.rootTyper, TypeloadModule.makeCurmod(ctx.com, ctx.g, mg));
 		g.mg = mg;
@@ -329,17 +340,22 @@ class Generic {
 			});
 			var localG:GenericContext = core.ds.Record.withFields(g,
 				{subst: params.map(function(s) return {cls: s.original, t: s.param.ttpType, expr: null}).concat(g.subst)});
-			var field:TClassField = core.ds.Record.withFields(old, {cfExprUnoptimized: null});
+			var field:TClassField = core.ds.Record.withFields(old, {cfExprUnoptimized: null}); // copy
 			field.cfParams = params.map(function(s) return s.param);
 			inline function f():T {
 				follow(old.cfType);
+				// We update here because the follow could resolve some TLazy things that end up modifying flags, such as
+				// the inferred CfOverride from #11010.
 				field.cfFlags = old.cfFlags;
 				removeClassFieldFlag(field, CfPostProcessed);
 				if (localG.genericDebug) Sys.println("[GENERIC] expanding " + old.cfName);
 				var t = genericSubstituteType(localG, old.cfType);
 				inline function update(e:TExpr):Void field.cfExpr = genericSubstituteExpr(localG, e);
 				if (old.cfExpr != null) update(old.cfExpr);
-				else delayLate(ctx.g, PTypeField, function() {
+				else
+					// There can be cases like #11152 where cf_expr isn't ready yet. It should be safe to delay this to the end
+					// of the PTypeField pass.
+					delayLate(ctx.g, PTypeField, function() {
 					if (old.cfExpr != null) update(old.cfExpr);
 					else switch old.cfKind {
 						case Method(_)
@@ -390,6 +406,7 @@ class Generic {
 			cg.clFields.set(f.cfName, f);
 			return f;
 		});
+		// In rare cases the class name can become too long, so let's shorten it (issue #3090).
 		if (cg.clPath.name.length > 254) {
 			var name = getShortName();
 			cg.clMeta.unshift({meta: MetaTag.Native, exprs: [{expr: EConst(String(name, SDoubleQuotes)), pos: p}], pos: nullPos});
@@ -432,6 +449,7 @@ class Generic {
 		if (cf.cfParams.length == 0) Error.raiseTypingError("Function has no type parameters and cannot be generic", p);
 		switch withType {
 			case WithType(t, _):
+				// In cases like #5482, we might have a return type that still needs expansion.
 				unify(ctx, buildInstances(ctx, fcc.fcRet, p), t, p);
 			case _:
 		}
@@ -467,6 +485,14 @@ class Generic {
 		if (found != null) {
 			unifyExisting(found.cfType, found.cfPos);
 			fa = core.ds.Record.withFields(fa, {faField: found});
+			/*
+				java.Lib.array() relies on the ability to shadow @:generic function for certain types
+				see https://github.com/HaxeFoundation/haxe/issues/8393#issuecomment-508685760
+			*/
+			// if cf.cf_name_pos = cf2.cf_name_pos then
+			//	cf2
+			// else
+			//	error ("Cannot specialize @:generic because the generated function name is already used: " ^ name) p
 		} else {
 			inline function finalize(cls:TClass, field:TClassField):Void {
 				follow(cf.cfType);

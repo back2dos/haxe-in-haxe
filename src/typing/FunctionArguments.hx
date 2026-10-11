@@ -31,7 +31,6 @@ import context.AbstractCast;
 import context.SafeCom;
 import optimization.Optimizer;
 
-// haxe/src/typing/functionArguments.ml — mechanical draft; not compile-validated.
 @:structInit class ArgumentWithDefault {
 	public var name:String;
 	public var expr:Null<Expr>;
@@ -58,8 +57,13 @@ class FunctionArguments {
 	};
 
 	public static function typeFunctionArg(com:CommonContext, t:T, e:Null<Expr>, opt:Bool, p:Pos):{type:T, expr:Null<Expr>} {
+		// TODO https://github.com/HaxeFoundation/haxe/issues/8461
+		// delay ctx PTypeField (fun() ->
+		// 	if ExtType.is_void (follow t) then
+		// 		error "Arguments of type Void are not allowed" p
+		// );
 		if (opt) return {type: com.basic.tnull(t), expr: e == null ? {expr: EConst(Ident("null")), pos: Globals.nullPos} : e};
-		// null_pos in this OCaml pattern is a binding, not a position comparison.
+		// port: null_pos in this OCaml pattern is a binding, not a position comparison.
 		if (e != null) switch e.expr {
 			case EConst(Ident("null")):
 				t = com.basic.tnull(t);
@@ -156,6 +160,7 @@ class FunctionArguments {
 		} catch (_:core.ds.Exit) {}
 	}
 
+	// Returns the `(string * bool * Type.t) list` requires by `TFun` .
 	public function forType():Array<{name:String, optional:Bool, type:T}> {
 		if (typeRepr == null) typeRepr = withDefault.map(function(arg) return {name: arg.name, optional: arg.expr != null, type: arg.type});
 		return typeRepr;
@@ -168,6 +173,8 @@ class FunctionArguments {
 		if (!isLast) raiseTypingError("Rest should only be used for the last function argument", pn);
 	}
 
+	// Returns the `(tvar * texpr option) list` for `tf_args`. Also checks the validity of argument names and whether or not
+	// an argument should be displayed.
 	public function forExpr(ctx:TyperContext):Array<{variable:TVar, defaultValue:Null<TExpr>}> {
 		if (exprRepr != null) return exprRepr;
 		inline function makeLocal(name:String, kind:TVarKind, t:T, meta:Metadata, pn:Pos):TVar {
@@ -210,6 +217,7 @@ class FunctionArguments {
 		return acc;
 	}
 
+	// Verifies the validity of any argument typed as `haxe.extern.Rest` and checks default values.
 	public function verifyExtern(ctx:TyperContext):Void {
 		var offset = abstractThis == null ? 0 : 1;
 		if (syntax.length + offset != withDefault.length) throw "Invalid function argument lists";
@@ -222,6 +230,7 @@ class FunctionArguments {
 		}
 	}
 
+	// Brings arguments into context by adding them to `ctx.f.locals`.
 	public function bringIntoContext(ctx:TyperContext):Void {
 		for (arg in forExpr(ctx)) ctx.f.locals = ctx.f.locals.add(arg.variable.vName, arg.variable);
 	}

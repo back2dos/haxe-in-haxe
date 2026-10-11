@@ -5,7 +5,6 @@ import core.Globals.Pos;
 import core.Texpr.Builder;
 import typing.matcher.Bind;
 
-// haxe/src/typing/matcher/subject.ml — mechanical draft; not compile-validated.
 class Subject {
 	final e:TExpr;
 	final bind:Null<Bind>;
@@ -22,6 +21,10 @@ class Subject {
 
 	public function getScopedExpr():{expr:TExpr, reset:Void->Void} {
 		if (bind != null && bind.bStatus == BindDeferred) {
+			// For deferred bindings, we generate `subject = expr` and mark the binding as used so that
+			// subsequent calls to this function do not generate the assignment again. The returned function
+			// can be used to reset the status back to BindDeferred, for cases where we need to initalize
+			// again in an unrelated scope.
 			var assigned = Builder.binop(OpAssign, e, bind.bExpr, e.etype, e.epos);
 			bind.bStatus = BindUsed;
 			return {

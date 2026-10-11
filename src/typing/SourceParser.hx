@@ -67,13 +67,12 @@ import syntax.Lexer;
 	}
 }
 
-/** `exception DisplayInMacroBlock` **/
 class DisplayInMacroBlock extends haxe.Exception {
 	public function new() super("DisplayInMacroBlock");
 }
 
-// Module parser from haxe/src/typing/typeloadParse.ml.
-// The legacy TypeloadParse entry remains available to the bootstrap loader.
+// Parsing of module files into modules.
+// port: typeloadParse.ml (the legacy bootstrap loader uses TypeloadParse.hx instead).
 class SourceParser {
 	public static function parseFileFromString(com:CommonContext, file:String, p:Pos, source:String):ParseResult<Package> {
 		return core.Timer.time(com.timerCtx, ["parsing"], function(source:String) {
@@ -127,7 +126,7 @@ class SourceParser {
 		return parseFileFromString(com, rfile.file, p, contents);
 	}
 
-	// Decode validity is checked before creating a host String, matching Sedlex's
+	// port: decode validity is checked before creating a host String, matching Sedlex's
 	// malformed-input failure rather than allowing replacement characters.
 	static function validUtf8(bytes:haxe.io.Bytes):Bool {
 		var i = 0;
@@ -192,16 +191,18 @@ class SourceParser {
 				remap.value = pack.copy();
 			case null:
 		}
-		// The pre-existing ClassPaths API signals absence as null through this method.
+		// port: findFileNoRaise returns null where upstream raises Not_found.
 		var lookup = classPaths.findFileNoRaise(pack.concat([path.name]).join("/") + ".hx");
 		if (lookup == null) throw NotFound.raise();
 		var rfile = lookup.resolvedFile;
 		if (Sys.systemName() == "Windows") switch path.name.toLowerCase() {
 			case "con", "aux", "prn", "nul", "com1", "com2", "com3", "lpt1", "lpt2", "lpt3":
+				// these names are reserved by the OS - old DOS legacy, such files cannot be easily created but are reported as visible
 				var size = try sys.FileSystem.stat(rfile.file).size catch (_:Dynamic) 0;
 				if (size <= 0) throw NotFound.raise();
 			case _:
 		}
+		// if we try to load a std.xxxx class and resolve a real std file, the package name is not valid, ignore
 		if (path.pack.length > 0 && path.pack[0] == "std") {
 			var key = com.partScope.fileKeys.get(rfile.file);
 			for (cp in classPaths.getStdPaths()) if (UniqueKey.startsWith(key, com.partScope.fileKeys.get(cp.path))) throw NotFound.raise();
@@ -268,6 +269,7 @@ class SourceParser {
 		}
 		var declarations = parsed.data.declarations;
 		if (!same(remap.value, path.pack)) {
+			// build typedefs to redirect to real package
 			var redirected:Array<TypeDecl> = [
 				{
 					definition: EImport({
@@ -313,7 +315,7 @@ class SourceParser {
 	}
 }
 
-/** `TypeloadParse.ConditionDisplay` **/
+// port: module ConditionDisplay of typeloadParse.ml
 class ConditionDisplay {
 	static final tSemver:core.TType.T = TInst(core.TFunctions.mkClass(core.TFunctions.nullModule, {pack: [], name: "SemVer"},
 		Globals.nullPos, Globals.nullPos), []);
@@ -391,7 +393,7 @@ so it should be avoided if backwards-compatibility with earlier versions is need
 	}
 }
 
-/** `TypeloadParse.PdiHandler` **/
+// port: module PdiHandler of typeloadParse.ml
 class PdiHandler {
 	static function isTrue(defines:core.Define.DefineContext, e:Expr):Bool return ParserEntry.isTrue(ParserEntry.eval(defines, e));
 

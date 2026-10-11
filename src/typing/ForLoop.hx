@@ -32,11 +32,10 @@ import context.Typecore;
 import typing.Fields.*;
 import typing.Calls.*;
 
-// haxe/src/typing/forLoop.ml — mechanical draft; not compile-validated.
 typedef UnrollParameters = {var expressionWeight:Int; var forceUnroll:Bool;}
 
 enum IteratorKind {
-	IteratorIntConst(from:TExpr, to:TExpr, ascending:Bool);
+	IteratorIntConst(from:TExpr, to:TExpr, ascending:Bool); // ascending?
 	IteratorIntUnroll(offset:Int, length:Int, ascending:Bool);
 	IteratorInt(from:TExpr, to:TExpr);
 	IteratorArrayDecl(el:Array<TExpr>);
@@ -84,6 +83,7 @@ class IterationKind {
 	public static function tryIteratorUnification(ctx:Typer, e:TExpr):Null<{e:TExpr, t:T}> {
 		switch core.Abstract.followWithAbstracts(e.etype) {
 			case TDynamic(_) | TMono(_):
+				// Unification from these always succeeds, so let's reject it.
 				return null;
 			case _:
 		}
@@ -110,6 +110,9 @@ class IterationKind {
 		}
 	}
 
+	// Builds an IteratorHasNextNext for an expression whose type exposes hasNext/next fields.
+	// The optional [check] callback is called with (acc_next, acc_hasNext) after type_field
+	// succeeds and before build_call; raise Not_found there to reject the iterator.
 	public static function mkHasNextNext(ctx:Typer, e:TExpr, p:Pos, ?check:AccessKind->AccessKind->Void):IteratorData {
 		var v = genLocal(ctx, e.etype, e.epos);
 		var tmp = Texpr.Builder.makeLocal(v, v.vPos);
@@ -121,9 +124,12 @@ class IterationKind {
 		return {itKind: IteratorHasNextNext(v, en, eh), itExpr: e, itType: en.etype};
 	}
 
+	// Try to build an IteratorHasNextNext kind for an async iterator expression.
+	// Raises Not_found if e cannot be resolved to an AsyncIterator<T> (directly or via e.s()).
 	static function tryAsyncIteratorKind(ctx:Typer, e:TExpr, s:String, p:Pos):IteratorData {
 		if (!TyperManager.isCoroutineContext(ctx)) throw NotFound.raise();
 		inline function asyncType(t:T):T return ctx.t.tcoro.tasyncIterator.force()(t);
+		// First, try direct unification with AsyncIterator<T>
 		inline function direct():IteratorData {
 			switch core.Abstract.followWithAbstracts(e.etype) {
 				case TDynamic(_) | TMono(_):
@@ -141,6 +147,7 @@ class IterationKind {
 		try {
 			return direct();
 		} catch (ex:NotFound) {}
+		// Then, try e.s() returning AsyncIterator<T>
 		var pt = spawnMonomorph(ctx, e.epos);
 		var t = asyncType(pt);
 		try {
@@ -189,13 +196,17 @@ class IterationKind {
 				case _: throw NotFound.raise();
 			}
 			try {
+				// first try: do we have an @:arrayAccess getter field?
 				var access = context.AbstractCast.findArrayReadAccessRaise(ctx, a, tl, mk(TConst(TNull), ctx.t.tint, p), p);
 				function getNext(base:TExpr, index:TExpr, t:T,
 						p:Pos):TExpr return CallUnification.makeStaticCallBetter(ctx, c, access.field, tl, [base, index], access.ret, p);
 				{itKind: IteratorCustom(getNext, getLength), itExpr: e, itType: access.ret};
 			} catch (ex:NotFound) {
+				// second try: do we have @:arrayAccess on the abstract itself?
 				if (!core.Meta.has(MetaTag.ArrayAccess, a.aMeta)
+					// let's allow this only for core-type abstracts
 					|| !core.Meta.has(MetaTag.CoreType, a.aMeta)
+					// in which case we assume that a singular type parameter is the element type
 					|| tl.length != 1) throw NotFound.raise();
 				{itKind: IteratorCustom(getNextArrayElement, getLength), itExpr: e, itType: tl[0]};
 			}
@@ -430,7 +441,7 @@ class IterationKind {
 					mk(TVar(tmp, e1), tv, p),
 					mk(TWhile(hasNext, concat(init, e2), NormalWhile), tv, p)
 				]), tv, p);
-			case IteratorDynamic: mk(TBlock([]), tv, p); // Upstream recovery after cannotIterateOn has reported the error.
+			case IteratorDynamic: mk(TBlock([]), tv, p);
 		};
 	}
 }
@@ -532,7 +543,7 @@ class ForLoop {
 				var hasNext = Calls.buildCall(ctx,
 					Fields.typeFieldDefaultCfg(ctx, etmp, "hasNext", etmp.epos, MCall([]), WithTypeTools.withType(ctx.t.tbool)), [],
 					WithTypeTools.value, etmp.epos);
-				var next = Calls.buildCall(ctx, Fields.typeFieldDefaultCfg(ctx, etmp, "next", etmp.epos, MCall([]), WithTypeTools.value),
+				var next = Calls.buildCall(ctx, Fields.typeFieldDefaultCfg(ctx, etmp, "next", etmp.epos, MCall([]), /* WITHTYPETODO */ WithTypeTools.value),
 					[], WithTypeTools.value, etmp.epos);
 				var v = genLocal(ctx, it.t, e1.epos);
 				var ev = Texpr.Builder.makeLocal(v, v.vPos);

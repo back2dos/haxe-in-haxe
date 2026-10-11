@@ -31,20 +31,32 @@ import context.AbstractCast;
 import context.Typecore.TyperManager;
 import typing.FieldAccess.*;
 
-// haxe/src/typing/typerBase.ml — mechanical draft; not compile-validated.
 enum AccessKind {
+	// Access is not possible or allowed.
 	AKNo(access:AccessKind, pos:Pos);
+	// Access on arbitrary expression.
 	AKExpr(e:TExpr);
+	// Safe navigation access chain
 	AKSafeNav(sn:SafeNavAccess);
+	// Access on non-property field.
 	AKField(fa:context.Typecore.FieldAccess);
+	// Access on property field. The field is the property, not the accessor.
 	AKAccessor(fa:context.Typecore.FieldAccess);
+	// Access via static extension.
 	AKUsingField(sea:StaticExtensionAccess);
+	// Access via static extension on property field. The field is the property, not the accessor.
+	// This currently only happens on abstract properties.
 	AKUsingAccessor(sea:StaticExtensionAccess);
+	// Access on abstract via array overload.
 	AKAccess(a:TAbstract, params:TParams, c:TClass, e1:TExpr, e2:TExpr);
+	// Access on abstract via resolve method.
 	AKResolve(sea:StaticExtensionAccess, name:String);
 }
 
-typedef SafeNavAccess = {var snPos:Pos; var snBase:TExpr; var snTempVar:Null<TExpr>; var snAccess:AccessKind;}
+typedef SafeNavAccess = {var snPos:Pos; // position of the safe navigation chain start (the initial ?.field expression)
+	var snBase:TExpr; // starting value to be checked for null
+	var snTempVar:Null<TExpr>; // temp var declaration to store complex base expression
+	var snAccess:AccessKind;} // safe navigation access to be done if the base value is not null
 
 enum ObjectDeclKind {
 	ODKWithStructure(a:TAnon);
@@ -169,6 +181,15 @@ class TyperBase {
 			if (v == null) raiseTypingError("Cannot reference this abstract here", p);
 			mk(TLocal(v), v.vType, p);
 		case FunConstructor | FunMember if (TyperManager.isCoroutineContext(ctx)):
+			// For coroutine member methods, emit `TLocal v` instead of `TConst TThis`.
+			// `typeloadFunction.ml` will later inject  var v = TConst TThis  before the
+			// first use of `v`, so the typed body looks like:
+			//     var _this = this;     <- TVar(v, Some(TConst TThis))
+			//     ... body using TLocal v ...
+			// The coroutine transformer detects `TConst TThis` in the initialiser and
+			// rewrites it to `_hx_continuation._hx_captured` (inline path) or
+			// `_hx_gthis` (thunk path).  All remaining `TLocal v` usages then refer to
+			// this cached value, avoiding repeated field accesses.
 			var v = ctx.f.vthis;
 			if (v == null) {
 				v = addLocal(ctx, VGenerated, genLocalPrefix + "this", ctx.c.tthis, p);
@@ -198,7 +219,7 @@ class TyperBase {
 		case _: false;
 	};
 
-	public static function typeModuleTypeSimple(mt:ModuleType, p:Pos):TExpr return switch mt {
+	public static function typeModuleTypeSimple(mt:ModuleType, p:Pos):TExpr return switch mt { // No checks and building
 		case TClassDecl(c): mk(TTypeExpr(TClassDecl(c)), c.clType, p);
 		case TEnumDecl(e): mk(TTypeExpr(TEnumDecl(e)), e.eType, p);
 		case TTypeDecl(s):
@@ -340,12 +361,13 @@ class TyperBase {
 		var l = a.aFrom.map(t -> {kind: FromType, type: applyParams(a.aParams, pl, t)});
 		for (pair in a.aFromField) {
 			var f = pair.field;
+			// We never want to use the @:from we're currently in because that's recursive (see #10604)
 			if (f == ctx.f.curfield
 				|| AbstractFromConfig.updateConfigFromMeta(AbstractFromConfig.make(), f.cfMeta).ignoredByInference) continue;
 			switch follow(core.TFunctions.fieldType(f)) {
 				case TFun({args: [{type: v}], ret: t}):
 					try {
-						typeEq(EqStrict, t, TAbstract(a, pl.map(duplicate)));
+						typeEq(EqStrict, t, TAbstract(a, pl.map(duplicate))); // unify fields monomorphs
 						l.unshift({kind: FromField, type: v});
 					} catch (_:core.TUnification.Unify_error) {}
 				case _:
@@ -355,6 +377,7 @@ class TyperBase {
 	}
 
 	public static function safeNavBranch(ctx:TyperContext, sn:SafeNavAccess, fThen:Void->TExpr):TExpr {
+		// generate null-check branching for the safe navigation chain
 		var eobj = sn.snBase, enull = Builder.makeNull(eobj.etype, sn.snPos);
 		var eneq = Builder.binop(OpNotEq, eobj, enull, ctx.t.tbool, sn.snPos);
 		var ethen = fThen(), tnull = ctx.t.tnull(ethen.etype);

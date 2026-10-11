@@ -27,7 +27,8 @@ import context.TyperPass;
 import context.Typecore.TyperManager;
 import typing.FunctionArguments;
 
-// haxe/src/typing/typeloadFunction.ml — mechanical draft; not compile-validated.
+// Typing of functions and their arguments.
+
 class TypeloadFunction {
 	public static function saveFieldState(ctx:TyperContext):Void->Void {
 		var locals = ctx.f.locals;
@@ -49,7 +50,11 @@ class TypeloadFunction {
 			{name: "type_function", path: ctx.c.curclass.clPath.pack.concat([ctx.c.curclass.clPath.name, ctx.f.curfield.cfName])});
 		args.bringIntoContext(ctx);
 		if (syntax == null) {
-			if (ignoreError(ctx.com)) syntax = {expr: EBlock([]), pos: p};
+			if (ignoreError(ctx.com))
+				// when we don't care because we're in display mode, just act like
+				// the function has an empty block body. this is fine even if function
+				// defines a return type, because returns aren't checked in this mode
+				syntax = {expr: EBlock([]), pos: p};
 			else if (ctx.e.curfun == FunMember && hasClassFlag(ctx.c.curclass,
 				CAbstract)) raiseTypingError("Function body or abstract modifier required", p);
 			else raiseTypingError("Function body required", p);
@@ -88,6 +93,11 @@ class TypeloadFunction {
 		}
 		switch follow(ret) {
 			case TAbstract({aPath: {pack: [], name: "Void"}}, _):
+			// We have to check for the presence of return expressions here because
+			// in the case of Dynamic ctx.ret is still a monomorph. If we indeed
+			// don't have a return expression we can link the monomorph to Void. We
+			// can _not_ use type_iseq to avoid the Void check above because that
+			// would turn Dynamic returns to Void returns.
 			case TMono(_) if (!hasReturn(e)):
 				unify(ctx, ctx.t.tvoid, ret, p);
 			case _:
@@ -133,7 +143,7 @@ class TypeloadFunction {
 							case _: Texpr.checkExpr(hasV, e);
 						};
 						function insert(l:Array<TExpr>):Array<TExpr> {
-							if (l.length == 0) return [];
+							if (l.length == 0) return []; // should not happen...
 							var first = l[0];
 							return hasV(first) ? [ev].concat(l) : [first].concat(insert(l.slice(1)));
 						}
@@ -207,9 +217,11 @@ class TypeloadFunction {
 			var t = spawnMonomorph(ctxC, p);
 			var r = makeLazy(ctxC.g, t, function() {
 				var ctx = TyperManager.cloneForField(ctxC, cf, cf.cfParams);
-				follow(cfsup.cfType);
+				follow(cfsup.cfType); // make sure it's typed
 				for (cf in cfsup.cfOverloads) follow(cf.cfType);
 				function mapArg(arg:{variable:TVar, defaultValue:Null<TExpr>}):{variable:TVar, defaultValue:Null<TExpr>} {
+					// let's optimize a bit the output by not always copying the default value
+					// into the inherited constructor when it's not necessary for the platform
 					var v = arg.variable, def = arg.defaultValue;
 					inline function nullValue(v:TVar):TExpr return Texpr.Builder.makeNull(v.vType, v.vPos);
 					if (def != null && !ctx.com.config.pfStatic) return {variable: v, defaultValue: nullValue(v)};
@@ -238,7 +250,7 @@ class TypeloadFunction {
 									else def = arg.optional ? Texpr.Builder.makeNull(arg.type, Globals.nullPos) : null;
 									return mapArg({
 										variable: allocVar(VUser(TVOArgument), arg.name, arg.optional ? ctx.t.tnull(arg.type) : arg.type,
-											p),
+											p), // TODO: var pos
 										defaultValue: def
 									});
 								});

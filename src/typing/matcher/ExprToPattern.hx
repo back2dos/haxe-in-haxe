@@ -29,7 +29,6 @@ import context.Typecore;
 import typing.matcher.Pattern;
 import typing.matcher.Constructor;
 
-// haxe/src/typing/matcher/exprToPattern.ml — mechanical draft; not compile-validated.
 typedef PatternContext = {
 	var ctx:Typer;
 	var orLocals:Null<haxe.ds.StringMap<{v:TVar, p:Pos}>>;
@@ -37,6 +36,8 @@ typedef PatternContext = {
 	var currentLocals:haxe.ds.StringMap<{v:TVar, p:Pos}>;
 	var inReification:Bool;
 	var isPostfixMatch:Bool;
+	// Reverses the per-case type substitution; used for extractor expressions
+	// so that they see the original type parameters rather than fresh monos.
 	var unsubst:T->T;
 }
 
@@ -132,7 +133,10 @@ class ExprToPattern {
 			case _: [];
 		};
 		function checkExpr(e:TExpr):PatternKind return switch e.eexpr {
-			case TField(_, FEnum(en, ef)): PatConstructor(conEnum(en, ef, e.epos), []);
+			case TField(_, FEnum(en, ef)):
+				// Let the unification afterwards fail so we don't recover.
+				// (match follow ef.ef_type with TFun _ -> raise Exit | _ -> ());
+				PatConstructor(conEnum(en, ef, e.epos), []);
 			case TField(_, FStatic(c, cf = {cfKind: Var({vWrite: AccNever})})): PatConstructor({kind: ConStatic(c, cf), pos: e.epos}, []);
 			case TConst(ct): PatConstructor({kind: ConConst(ct), pos: e.epos}, []);
 			case TCast(e1, null): checkExpr(e1);
@@ -161,6 +165,7 @@ class ExprToPattern {
 			var restore = Common.disableReportMode(ctx.com);
 			ctx.com.errorExt = function(err) {
 				var ep = err.errPos;
+				// The error might not actually come from here, let's check the position (issue #12098).
 				if (ep.pfile != p.pfile || ep.pmax < p.pmin || ep.pmin > p.pmax) old(err);
 				else throw Exit.raise();
 			};
@@ -211,6 +216,8 @@ class ExprToPattern {
 			if (!isLowerIdent(s) && s.charAt(0) != "`" && s.charAt(0) != "_") Common.displayError(ctx.com,
 				"Unknown identifier : " + s + ", pattern variables must be lower-case or with `var ` prefix", p);
 			var similar = StringError.getSimilar(s, enumerable());
+			// if toplevel then
+			//	warning pctx.ctx (Printf.sprintf "`case %s` has been deprecated, use `case var %s` instead" s s) p
 			if (similar.length > 0) warning(ctx, WTyper,
 				"Potential typo detected (expected similar values are "
 				+ similar.join(", ")
@@ -279,12 +286,14 @@ class ExprToPattern {
 								expected(s.ret);
 								s.args;
 							case _: throw "assert";
-						}; // `make pctx false t e :: loop el tl`: OCaml evaluates the tail first, so arguments are typed last to first.
+						};
+						// port: in `make pctx false t e :: loop el tl` OCaml evaluates the tail first, so arguments are typed last to first.
 						function loopArgs(ei:Int, ai:Int):Array<typing.matcher.Pattern.PatternData> {
 							if (ei == el.length - 1 && ai < args.length && (switch el[ei].expr {
 								case EConst(Ident("_")): true;
 								case _: false;
 							})) {
+								// Allow using final _ to match "multiple" arguments
 								var rest = ai + 1 == args.length ? [] : loopArgs(ei, ai + 1);
 								rest.unshift({kind: PatAny, pos: el[ei].pos});
 								return rest;
@@ -305,6 +314,10 @@ class ExprToPattern {
 							return core.Error.raiseTypingError("Too many arguments", p);
 						}
 						var ps = loopArgs(0, 0);
+						// Rebind any unrefined constructor type-param monos back to their
+						// parameter types. This ensures the case body sees a constrained
+						// type variable rather than a free monomorphism, preserving GADT
+						// constructor type constraints (see #1310).
 						for (i in 0...ef.efParams.length) switch monos[i] {
 							case TMono(m) if (m.tmType == null): Monomorph.doBind(m, ef.efParams[i].ttpType);
 							case _:
@@ -377,6 +390,7 @@ class ExprToPattern {
 				for (item in known) {
 					var cf = item.cf;
 					var e1:Null<Expr> = null;
+					// TODO: This needs a better check, but it's not obvious how to approach this. See #11433
 					if (!(pctx.inReification && (cf.cfName == "pos" || cf.cfName == "posPath" || cf.cfName == "namePos"))) try {
 						e1 = fieldAssoc(cf.cfName, fl);
 					} catch (ex:NotFound) {}
@@ -424,6 +438,8 @@ class ExprToPattern {
 				var restore = saveLocals(ctx);
 				ctx.f.locals = pctx.ctxLocals;
 				var v = addLocal(false, "_", nullPos);
+				// Extractor expressions are typed in the original (non-refined) context
+				// so that type parameters remain visible with their declared identity (#5952).
 				v.vType = pctx.unsubst(v.vType);
 				var typed = typeExpr(ctx, e1, WithTypeTools.value);
 				v.vName = "tmp";
@@ -431,6 +447,8 @@ class ExprToPattern {
 				PatExtractor({exVar: v, exExpr: typed, exPattern: make(pctx, toplevel, typed.etype, e2)});
 			case EBinop(OpEq | OpNotEq | OpLt | OpLte | OpGt | OpGte | OpBoolAnd | OpBoolOr, _,
 				_): loop({expr: EBinop(OpArrow, e, {expr: EConst(Ident("true")), pos: nullPos}), pos: e.pos});
+			// Special case for completion on a pattern local: We don't want to add the local to the context
+			// while displaying (#7319)
 			case EDisplay(e1 = {expr: EConst(Ident(_))}, _) if (ctx.com.display.dmsKind == DMDefault):
 				var locals = ctx.f.locals;
 				var pat = loop(e1);
@@ -439,6 +457,9 @@ class ExprToPattern {
 				displayDeferred(ctx, e1, displayMode(), MGet, WithTypeTools.withType(t));
 				ctx.f.locals = changed;
 				pat;
+			// For signature completion, we don't want to recurse into the inner pattern because there's probably
+			// a EDisplay(_,DMMarked) in there. We can handle display immediately because inner patterns should not
+			// matter (#7326)
 			case EDisplay(e1, DKCall):
 				displayDeferred(ctx, e, displayMode(), MGet, WithTypeTools.withType(t));
 				loop(e1);

@@ -27,7 +27,6 @@ import core.Define;
 import typing.Typer.*;
 import context.Resolution.*;
 
-// haxe/src/typing/typerEntry.ml — mechanical draft; not compile-validated.
 class TyperEntry {
 	public static function loadStdTypes(ctx:TyperContext):Void {
 		var stdTypes:ModuleDef;
@@ -69,6 +68,7 @@ class TyperEntry {
 								try {
 									return !isNull(t, true) && !isExplicitNull(t) ? TAbstract(a, [t]) : t;
 								} catch (err:TypeExit) {
+									// don't force lazy evaluation
 									var r = new TLazy(lazyAvailable(tDynamic));
 									r.value = lazyWait(function() {
 										var t1 = !isNull(t) ? TAbstract(a, [t]) : t;
@@ -134,6 +134,7 @@ class TyperEntry {
 		for (mt in m.mTypes) switch mt {
 			case TEnumDecl(en) if (en.ePath.name == "Unit"):
 				ctx.t.tunit = TEnum(en, []);
+				// ctx.m.importResolution.add(moduleTypeResolution(mt, null, nullPos));
 			case _:
 		}
 	}
@@ -161,6 +162,7 @@ class TyperEntry {
 	}
 
 	public static function loadLocalWrapper(ctx:TyperContext):LocalWrapperApi {
+		// optimized version for Java - use native arrays
 		if (ctx.com.platform == Jvm) {
 			var m = ModuleTyping.loadModule(ctx, {pack: ["jvm"], name: "NativeArray"}, Globals.nullPos);
 			for (md in m.mTypes) switch md {
@@ -170,6 +172,7 @@ class TyperEntry {
 			}
 			throw core.ds.NotFound.raise();
 		}
+		// default implementation - use haxe array
 		return new CaptureLocalWrapper(ctx.t, null);
 	}
 
@@ -289,7 +292,7 @@ class TyperEntry {
 	static function __init__():Void initHooks();
 }
 
-// OCaml objects in load_local_wrapper share captured compiler basic types.
+// port: one class for both OCaml objects of load_local_wrapper; a null nativeClass is the default implementation.
 private class CaptureLocalWrapper implements LocalWrapperApi {
 	final basic:BasicTypes;
 	final nativeClass:Null<TClass>;

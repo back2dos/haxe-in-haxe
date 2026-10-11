@@ -15,7 +15,6 @@ import core.Error;
 import core.Meta;
 import haxe.ds.StringMap;
 
-// haxe/src/typing/unifyMin.ml — mechanical draft; not compile-validated.
 class NoValue extends haxe.Exception {
 	public function new() super("NoValue");
 }
@@ -37,8 +36,12 @@ class UnifyMin {
 				case _: false;
 			};
 		}
+		// First pass: Try normal unification and find out if null is involved.
 		function loop(t:Null<T>, values:Array<TExpr>):{hasError:Bool, type:T} {
-			if (values.length == 0) return {hasError: false, type: t == null ? tDynamic : t};
+			if (values.length == 0) return {hasError: false,
+				// The only way to get here is if all types were Dynamic. We know there's more than 0
+				// because in that case we raise NoValue above.
+				type: t == null ? tDynamic : t};
 			var e = values[0], rest = values.slice(1);
 			if (follow(e.etype) == tDynamic) return loop(t, rest);
 			if (t == null) return loop(chkNull(e) ? basic.tnull(e.etype) : e.etype, rest);
@@ -58,7 +61,7 @@ class UnifyMin {
 		var first = loop(null, el);
 		if (!first.hasError) return first.type;
 		try {
-			// Constant anonymous structures retain every field with a common type.
+			// specific case for const anon : we don't want to hide fields but restrict their common type
 			var fcount = -1;
 			inline function expr(f:TClassField):TExpr return f.cfExpr == null ? mk(TBlock([]), f.cfType, f.cfPos) : f.cfExpr;
 			var fields = new StringMap<Array<TExpr>>();
@@ -97,7 +100,7 @@ class UnifyMin {
 			if (error != "Not_found") throw core.ds.FastThrow.of(error);
 		}
 		try {
-			// Function argument types are contravariant; return types have a common base.
+			// specific case for TFun, see #9579
 			var signature = switch follow(el[0].etype) {
 				case TFun(s): s;
 				case _: throw core.ds.FastThrow.of(new UnifyMinExit());
@@ -123,6 +126,8 @@ class UnifyMin {
 			};
 			return TFun({args: args, ret: ret});
 		} catch (_:UnifyMinExit) {
+			// Second pass: Get all base types (interfaces, super classes and their interfaces) of most general type.
+			// Then for each additional type filter all types that do not unify.
 			var commonTypes = UnifyMinT.collectBaseTypes(first.type);
 			var dynTypes:Array<T> = [];
 			function hasDynamic(c:TClass):Bool return Meta.has(MetaTag.UnifyMinDynamic, c.clMeta)

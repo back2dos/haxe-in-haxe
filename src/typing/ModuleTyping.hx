@@ -1,7 +1,7 @@
 package typing;
 
-// haxe/src/typing/typeloadModule.ml: source module construction and typing.
-// The older TypeloadModule instance loader remains available to its existing callers.
+// Initial typing of modules and their types.
+// port: typeloadModule.ml; TypeloadModule.hx is the separate legacy bootstrap loader.
 import core.Ast;
 import core.Ast as AstTools;
 import core.Ast.*;
@@ -76,6 +76,9 @@ class ModuleTyping {
 		cffKind: d.data
 	};
 
+	/*
+		Build module structure : should be atomic - no type loading is possible
+	*/
 	public static function createModuleTypes(ctx:TyperContext, m:ModuleDef, decls:Array<TypeDecl>,
 			loadp:Pos):{imports:Array<TypeDecl>, declarations:Array<TypedDeclaration>} {
 		var com:CommonContext = ctx.com;
@@ -109,6 +112,7 @@ class ModuleTyping {
 			var priv = d.flags.contains(HPrivate),
 				path = makePath(d.name.name, priv, d.meta, d.name.pos),
 				c = mkClass(m, path, p, d.name.pos);
+			// we shouldn't load any other type until we propertly set cl_build
 			c.clBuild = function() return Error.raiseTypingError(sTypePath(c.clPath)
 				+ " is not ready to be accessed, separate your type declarations in several files", p);
 			c.clPrivate = priv;
@@ -162,6 +166,7 @@ class ModuleTyping {
 					td.tDoc = d.doc;
 					td.tPrivate = priv;
 					td.tMeta = d.meta.copy();
+					// failsafe in case the typedef is not initialized (see #3933)
 					delay(ctx.g, PBuildModule, function() {
 						switch td.tType {
 							case TMono(r) if (r.tmType == null):
@@ -202,7 +207,7 @@ class ModuleTyping {
 						aExtern: d.flags.contains(AbExtern),
 						aEnum: d.flags.contains(AbEnum) || enumPos != null};
 					if (enumPos == null) {
-						if (a.aEnum) a.aMeta.unshift({meta: MetaTag.Enum, exprs: [], pos: nullPos});
+						if (a.aEnum) a.aMeta.unshift({meta: MetaTag.Enum, exprs: [], pos: nullPos}); // HAXE5: remove
 					} else Common.moduleWarning(com, ctx.m.curmod, WDeprecatedEnumAbstract, Warning.fromMeta(d.meta),
 						"`@:enum abstract` is deprecated in favor of `enum abstract`", enumPos);
 					add(decl, TAbstractDecl(a));
@@ -258,12 +263,18 @@ class ModuleTyping {
 			addClassFlag(c, CFinal);
 			add({definition: EClass(d), pos: p}, TClassDecl(c));
 		}
+		// During the initial module_lut#add in type_module, m has no m_types yet by design.
+		// We manually add them here. This and module_lut#add itself should be the only places
+		// in the compiler that call add_module_type.
 		m.mTypes = m.mTypes.concat(types);
 		return {imports: imports, declarations: declarations};
 	}
 
 	public static function initTypeParams(ctx:TyperContext,
-			decls:Array<TypedDeclaration>):Void for (entry in decls) switch [entry.declaration.definition, entry.type] {
+			decls:Array<TypedDeclaration>):Void
+		// here is an additional PASS 1 phase, which define the type parameters for all module types.
+		// Constraints are handled lazily (no other type is loaded) because they might be recursive anyway
+		for (entry in decls) switch [entry.declaration.definition, entry.type] {
 			case [EClass(d), TClassDecl(c)]:
 				c.clParams = Typeload.typeTypeParams(ctx, TPHType, c.clPath, d.params);
 				if (MetadataTools.has(MetaTag.Generic, c.clMeta) && c.clParams.length > 0) c.clKind = KGeneric;
@@ -522,6 +533,7 @@ class ModuleTyping {
 		var result = switch d.data.type {
 			case CTExtend(_, _): type;
 			case CTPath({path: {tpackage: ["haxe", "macro"], tname: "MacroType"}}):
+				// we need to follow MacroType immediately since it might define other module types that we will load afterwards
 				if (t.tType == follow(type)) Error.raiseTypingError("Recursive typedef is not allowed", p);
 				type;
 			case _:
@@ -608,7 +620,7 @@ class ModuleTyping {
 				a.aThis = type;
 				isType = true;
 			case AbExtern:
-				if (a.aImpl != null) addClassFlag(a.aImpl, CExtern);
+				if (a.aImpl != null) addClassFlag(a.aImpl, CExtern); // Hmmmm....
 			case AbPrivate | AbEnum:
 		}
 		a.aFrom.reverse();
@@ -620,6 +632,11 @@ class ModuleTyping {
 		if (MetadataTools.has(MetaTag.InheritDoc, a.aMeta)) delay(local.g, PConnectField, function() InheritDoc.buildAbstractDoc(local, a));
 	}
 
+	/*
+		In this pass, we can access load and access other modules types, but we cannot follow them or access their structure
+		since they have not been setup. We also build a list that will be evaluated the first time we evaluate
+		an expression into the context
+	*/
 	public static function initModuleType(ctx:TyperContext, entry:TypedDeclaration):Void {
 		var p = entry.declaration.pos;
 		switch [entry.declaration.definition, entry.type] {
@@ -658,12 +675,17 @@ class ModuleTyping {
 		}
 	}
 
+	/*
+		Creates a module context for [m] and types [tdecls] using it.
+	*/
 	public static function typeTypesIntoModule(com:CommonContext, g:TyperGlobals, m:ModuleDef, decls:Array<TypeDecl>, p:Pos):TyperContext {
 		var ctx = TyperManager.cloneForModule(g.rootTyper, TypeloadModule.makeCurmod(com, g, m)),
 			created = createModuleTypes(ctx, m, decls, p);
 		initTypeParams(ctx, created.declarations);
 		for (decl in created.imports) initImportsOrUsing(ctx, decl);
+		// setup module types
 		for (decl in created.declarations) initModuleType(ctx, decl);
+		// Make sure that we actually init the context at some point (issue #9012)
 		delay(ctx.g, PConnectField, function() ctx.m.importResolution.resolveLazies());
 		return ctx;
 	}
@@ -696,7 +718,9 @@ class ModuleTyping {
 					}
 				}
 				com.parserCache.add(file, imported);
+				// We use the file path as module name to make it unique. This may or may not be a good idea...
 				var im = makeModule(com, g, {pack: [], name: file}, file, p);
+				// Add empty decls so we don't check the file system all the time.
 				im.mExtra.mKind = exists ? MImport : MFake;
 				if (exists) {
 					com.moduleLut.add(im.mPath, im);
@@ -709,6 +733,9 @@ class ModuleTyping {
 		return decls;
 	}
 
+	/*
+		Creates a new module and types [tdecls] into it.
+	*/
 	public static function typeModule(com:CommonContext, g:TyperGlobals, path:GlobalTypePath, file:String, decls:Array<TypeDecl>, p:Pos,
 			dontCheckPath:Bool = false, isExtern:Bool = false):ModuleDef {
 		var m = makeModule(com, g, path, file, p);
@@ -752,6 +779,7 @@ class ModuleTyping {
 	public static function loadModulePrime(com:CommonContext, g:TyperGlobals, path:GlobalTypePath, p:Pos):ModuleDef {
 		Common.checkCancellation(com);
 		try {
+			// Check current context
 			return com.moduleLut.find(path);
 		} catch (_:NotFound) {}
 		// Check cache
@@ -769,12 +797,14 @@ class ModuleTyping {
 		if (com.moduleNonexistentLut.mem(path) || g.loadOnlyCachedModules) return missing();
 		var isExtern = false, file:String, decls:Array<TypeDecl>, warnings:Array<syntax.Parser.ParseWarning>;
 		try {
+			// Try parsing
 			var parsed = SourceParser.parseModule(com, path, p);
 			file = parsed.file.file;
 			decls = parsed.declarations;
 			warnings = parsed.warnings;
 		} catch (_:NotFound) {
-			// Nothing to parse, try loading extern type; entries are {name, load:(path,pos)->Null<core.Ast.Package>}
+			// Nothing to parse, try loading extern type
+			// port: entries are {name, load:(path,pos)->Null<core.Ast.Package>}
 			isExtern = true;
 			var found:Null<{file:String, decls:Array<TypeDecl>}> = null;
 			for (entry in com.loadExternType) {
@@ -805,7 +835,6 @@ class ModuleTyping {
 	}
 }
 
-// haxe/src/typing/typeloadModule.ml: class hxb_reader_api_typeload.
 class HxbReaderApiTypeload implements compiler.hxb.HxbReaderApi {
 	final com:CommonContext;
 	final g:TyperGlobals;

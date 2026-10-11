@@ -43,20 +43,14 @@ import macros.MacroApi.InvalidExpr;
 import macros.eval.EvalValue.Value;
 import macros.eval.EvalContext.RunTimeException;
 
-/**
-	haxe/src/typing/macroContext.ml.
-
-	Upstream's `Interp` module is `include InterpImpl (= Eval) include BuiltApi (MacroApiImpl)`;
-	here `Interp.f` is the Eval module that defines `f` upstream (EvalContext, EvalMain,
-	EvalEncode, EvalDecode, EvalPrinting) or `macros.MacroApi.MacroApiImpl` for functions
-	defined in macroApi.ml.
-
-	Deliberate deviations:
-	- `HxbWriterConfigReaderEval`/`HxbWriterConfigWriterEval` (functors over EvalDataApi) are
-	  not available: the port's HxbWriterConfig has no DataReaderApi/DataWriterApi functors.
-	  `get/set_hxb_writer_config` therefore raise a macro exception when they would need
-	  them (the `None`/`null` branches are kept).
-**/
+// port: upstream's `Interp` module is `include InterpImpl (= Eval, (* Hlmacro *)) include BuiltApi (MacroApiImpl)`;
+// here `Interp.f` is the Eval module that defines `f` upstream (EvalContext, EvalMain,
+// EvalEncode, EvalDecode, EvalPrinting) or `macros.MacroApi.MacroApiImpl` for functions
+// defined in macroApi.ml.
+// `HxbWriterConfigReaderEval`/`HxbWriterConfigWriterEval` (functors over EvalDataApi) are
+// not available: the port's HxbWriterConfig has no DataReaderApi/DataWriterApi functors.
+// `get/set_hxb_writer_config` therefore raise a macro exception when they would need
+// them (the `None`/`null` branches are kept).
 typedef MacroMethod = {args:Array<{name:String, optional:Bool, type:T}>, ret:T, cls:TClass, field:TClassField};
 
 typedef LoadedMacro = {meth:MacroMethod, module:ModuleDef};
@@ -68,10 +62,9 @@ enum MacroArgType {
 }
 
 class MacroContext {
-	// `macro_interp_cache`
 	public static var macroInterpCache:Null<macros.eval.EvalContext.Context> = null;
 
-	// ExtString.String.nsplit: an empty string has no parts.
+	// port: ExtString.String.nsplit; an empty string has no parts.
 	static function nsplit(s:String, sep:String):Array<String>
 		return s == "" ? [] : s.split(sep);
 
@@ -325,7 +318,7 @@ class MacroContext {
 			excString: macros.eval.EvalContext.excString,
 			getHxbWriterConfig: function() {
 				if (com.hxbWriterConfig != null)
-					// HxbWriterConfigWriterEval.write_writer_config config
+					// port: upstream calls HxbWriterConfigWriterEval.write_writer_config config
 					return
 						macros.eval.EvalContext.excString("Compiler.getHxbWriterConfig is not supported by haxe-in-haxe (no HxbWriterConfig writer over Eval values)");
 				else
@@ -335,7 +328,7 @@ class MacroContext {
 				if (isVNull(v))
 					com.hxbWriterConfig = null;
 				else {
-					// HxbWriterConfigReaderEval.read_writer_config config v
+					// port: upstream calls HxbWriterConfigReaderEval.read_writer_config config v
 					macros.eval.EvalContext.excString("Compiler.setHxbWriterConfig is not supported by haxe-in-haxe (no HxbWriterConfig reader over Eval values)");
 				}
 			}
@@ -610,7 +603,7 @@ class MacroContext {
 		};
 		api.moduleDependency = function(mpath, file) {
 			var m = typingTimer(ctx, false, function(ctx) {
-				var oldDeps = ctx.m.curmod.mExtra.mDeps.copy(); // m_deps is a persistent map upstream
+				var oldDeps = ctx.m.curmod.mExtra.mDeps.copy(); // port: m_deps is a persistent map upstream
 				var m = ModuleTyping.loadModule(ctx, AstTools.parsePath(mpath), p, MDepFromMacro);
 				ctx.m.curmod.mExtra.mDeps = oldDeps;
 				return m;
@@ -901,6 +894,15 @@ class MacroContext {
 		if (display)
 			mctx.com.display = com.display;
 		var mloaded = ModuleTyping.loadModule(mctx, m, p, MDepFromMacro);
+		/* mctx.m <- {
+			curmod = mloaded;
+			import_resolution = new resolution_list ["import";s_type_path cpath];
+			own_resolution = None;
+			enum_with_type = None;
+			module_using = [];
+			import_statements = [];
+			is_display_file = (com.display.dms_kind <> DMNone && DisplayPosition.display_position#is_in_file (Path.UniqueKey.lazy_key mloaded.m_extra.m_file));
+		}; */
 		return {module: mloaded, restore: function() mctx.com.display = old};
 	}
 
@@ -1283,7 +1285,7 @@ class MacroContext {
 		var p = Globals.fakePos("--macro " + e);
 		var e = try {
 			if (e.length == 0)
-				throw "index out of bounds"; // String.get raises Invalid_argument
+				throw "index out of bounds"; // port: String.get raises Invalid_argument
 			if (e.charAt(e.length - 1) == ";")
 				Error.raiseTypingError("Unexpected ;", p);
 			switch ParserEntry.parseExprString(ParserConfig.defaultConfig(com.defines), e, p, parseErrorCallback, false) {
@@ -1355,7 +1357,7 @@ class MacroContext {
 			macroInterpCache.curapi = api;
 	}
 
-	/** Eval-target execution (`--interp`/`--eval`); not reachable from the HXB driver. **/
+	// port: Eval-target execution (`--interp`/`--eval`); not reachable from the HXB driver.
 	public static function interpret(ctx:TyperContext, args:Array<String>):Void {
 		context.Parallel.ManagedPool.release(ctx.com.sctx.pool);
 		var mctx = getMacroContext(ctx);
