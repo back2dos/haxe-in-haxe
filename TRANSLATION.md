@@ -175,7 +175,7 @@ conformance, or completion of the pre-existing HXB writer. The subsequent runtim
 | `codegen/overloads.ml` | `src/codegen/Overloads.hx` | Draft translated |
 | `compiler/args.ml` | `src/compiler/Args.hx` | Existing, unaudited |
 | `compiler/compiler.ml` | `src/compiler/Compiler.hx` | Draft translated |
-| `compiler/generate.ml` | `src/compiler/Generate.hx` | Draft translated |
+| `compiler/generate.ml` | `src/compiler/Generate.hx` | Translated, including `check_auxiliary_output` (`--xml`, `--json`, `-D gen-hx-classes`) |
 | `compiler/haxe.ml` | `src/haxe/Main.hx` | Translated, including client/server entry |
 | `compiler/helper.ml` | `src/compiler/Helper.hx` | Existing, unaudited |
 | `compiler/highLevel.ml` | `src/compiler/HighLevel.hx` | Translated, including haxelib `add_libs` |
@@ -340,7 +340,7 @@ conformance, or completion of the pre-existing HXB writer. The subsequent runtim
 | `context/display/importHandling.ml` | `src/context/display/ImportHandling.hx` | Batch imports and using resolution |
 | `core/display/displayPosition.ml` | `src/core/display/DisplayPosition.hx` | Shared position state |
 | `core/display/javadoc.ml` | `src/core/display/Javadoc.hx` | Documentation parsing |
-| `codegen/genxml.ml` | `src/codegen/Genxml.hx` | RTTI serializer |
+| `codegen/genxml.ml` | `src/codegen/Genxml.hx` | RTTI serializer and `--xml` output; byte-identical (fuzzer, `extra/doc.hxml` for every target, upstream unit suite) |
 | `compiler/compilationCache.ml` | `src/compiler/CompilationCache.hx` | Server cache |
 | `compiler/pipeThings.ml` | `src/compiler/PipeThings.hx` | Client/server transport (host streams, see header) |
 | `compiler/tasks.ml` | `src/compiler/Tasks.hx` | Server maintenance tasks |
@@ -371,7 +371,7 @@ conformance, or completion of the pre-existing HXB writer. The subsequent runtim
 | `context/display/syntaxExplorer.ml` | `src/context/display/SyntaxExplorer.hx` | Display services |
 | `context/memory.ml` | `src/context/Memory.hx` | Request types; object sizes are unavailable on the host runtimes |
 | `core/display/completionItem.ml` | `src/core/display/CompletionItem.hx` | Display services |
-| `core/json/genjson.ml` | `src/core/json/Genjson.hx` | Display serialization |
+| `core/json/genjson.ml` | `src/core/json/Genjson.hx` | Display serialization and `--json` output; byte-identical (fuzzer, `extra/doc.hxml` set, upstream unit suite); `generate_module` is in the server (`DisplayJson`) |
 | `core/json/jsonRpc.ml` | `src/core/json/JsonRpc.hx` | JSON-RPC protocol |
 | `core/json/jsonrpc_handler.ml` | `src/core/json/JsonrpcHandler.hx` | JSON-RPC handler |
 | `typing/typerDisplay.ml` | `src/typing/TyperDisplay.hx` | Display services |
@@ -387,6 +387,7 @@ and on the hand and upstream cases listed there. Generated programs are not run.
 | `compiler/generate.ml` (dispatch) | `src/compiler/Generate.hx` | Translated |
 | `generators/gctx.ml` | `src/generators/Gctx.hx` | Translated |
 | `generators/genshared.ml` | `src/generators/Genshared.hx` | Translated (JVM) |
+| `generators/genhxold.ml` | `src/generators/Genhxold.hx` | `--xml hx` / `-D gen-hx-classes` extern output (`hxclasses/`); byte-identical on the fuzzer and the `extra/ImportAll` std set for every target |
 | `filters/ES6Ctors.ml` | `src/filters/ES6Ctors.hx` | JS, `-D js-es=6` |
 | `generators/genjs.ml` | `src/generators/Genjs.hx` | JS; `.js` and `.map` byte-identical, also the upstream unit suite and `tests/misc/js` |
 | `generators/jsSourcemap.ml` | `src/generators/JsSourcemap.hx` | JS and Lua source maps (columns in UTF-8 bytes) |
@@ -462,12 +463,10 @@ A scope-review entry is not a blanket exclusion of shared batch-compiler helpers
 
 | Upstream under `haxe/src/` | Reason |
 | --- | --- |
-| `codegen/genxml.ml` | Standalone XML output deferred; RTTI serializer is in scope and compiled |
-| `codegen/jClass.ml` | Other target/library support |
+| `codegen/jClass.ml` | Not needed: upstream uses it only as the type of `java_lib_type` (`nativeLibraries.ml`), whose only producer, `JavaModern`'s `lookup`, always returns `None`; the port keeps that payload opaque (`NativeLibraries.JavaClassData`) |
 | `codegen/swfLoader.ml` | Other target/library support |
 | `context/nativeLibraryHandler.ml` | SWF library handler (`SwfLoader`); the HXB and Java (`JavaModern`) branches are translated |
 | `core/json/jsonRpcSocket.ml` | Display/server JSON-RPC transport |
-| `generators/genhxold.ml` | `-xml *.hx` extern output (auxiliary, with genxml) |
 | `lazy.ml` | OCaml build/runtime adapter; no mechanical compiler-module port |
 | `prebuild.ml` | OCaml build/runtime adapter; no mechanical compiler-module port |
 

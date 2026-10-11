@@ -10,8 +10,6 @@ import core.Meta;
 import core.Meta.MetaNotFound;
 import haxe.ds.StringMap;
 
-// port: `generate` (the standalone XML output) is not ported; genTypeString is
-// used by the RTTI filter.
 private typedef Attribute = {name:String, value:String};
 
 private enum RttiXml {
@@ -33,9 +31,18 @@ class Genxml {
 		|| s.indexOf(">") >= 0
 		|| s.indexOf("&") >= 0 ? CData(s) : PCData(s);
 
+	// port: ExtString.String.strip with its default characters " \t\r\n"
+	static function strip(s:String):String {
+		inline function isStrip(c:Int):Bool return c == " ".code || c == "\t".code || c == "\r".code || c == "\n".code;
+		var start = 0, end = s.length;
+		while (start < end && isStrip(StringTools.fastCodeAt(s, start))) start++;
+		while (end > start && isStrip(StringTools.fastCodeAt(s, end - 1))) end--;
+		return s.substring(start, end);
+	}
+
 	static function genDoc(s:String):RttiXml {
 		// remove trailing space and convert newlines
-		s = StringTools.trim(s);
+		s = strip(s);
 		s = s.split("\r\n").join("\n").split("\r").join("\n");
 		return node("haxe_doc", [], [genString(s)]);
 	}
@@ -264,6 +271,24 @@ class Genxml {
 			out.add(s);
 		case CData(s):
 			out.add("<![CDATA[" + s + "]]>");
+	}
+
+	public static function generate(com:context.Common.CommonContext, file:String):Void {
+		function f(_:Null<Bool>):RttiXml {
+			return node("haxe", [], com.types.filter(t -> !Meta.has(Meta.NoDoc, tInfos(t).mtMeta)).map(t -> genTypeDecl(true, t)));
+		}
+		var x = core.Timer.time(com.timerCtx, ["generate", "xml"], f, null);
+
+		function f2(_:Null<Bool>):Null<Bool> {
+			var out = new StringBuf();
+			out.add("<!-- This file can be parsed by haxe.rtti.XmlParser -->\n");
+			writeXml(out, "", x);
+			var ch = sys.io.File.write(file, true);
+			ch.writeString(out.toString());
+			ch.close();
+			return null;
+		}
+		core.Timer.time(com.timerCtx, ["write", "xml"], f2, null);
 	}
 
 	public static function genTypeString(t:ModuleType):String {

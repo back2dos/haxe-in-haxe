@@ -510,7 +510,7 @@ class TFunctions {
 				copy.cfType = loop(f.cfType);
 				fields.set(name, copy);
 			}
-			mkAnon(a.aStatus, fields);
+			TAnon(core.TType.TAnon.withStatusRef(fields, a.aStatusRef));
 		case TLazy(f):
 			var ft = lazyType(f);
 			var ft2 = loop(ft);

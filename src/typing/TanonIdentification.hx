@@ -213,7 +213,7 @@ class TanonIdentification<A> {
 			arity++;
 			fields.set(cf.cfName, core.ds.Record.withFields(cf, {cfType: replaceMono(uctx.equalityKind != EqStricter, cf.cfType)})); // TODO: not very robust
 		}
-		an = {aFields: fields, aStatus: an.aStatus};
+		an = core.TType.TAnon.withStatusRef(fields, an.aStatusRef);
 		return protect(function() {
 			try {
 				return findCompatible(uctx, arity, TAnon(an));

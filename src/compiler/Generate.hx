@@ -21,8 +21,22 @@ class MissingHxbModule extends haxe.Exception {
 
 class Generate {
 	public static function checkAuxiliaryOutput(com:CommonContext, actx:compiler.Args.ArgContext):Void {
-		// port: XML and JSON output (Genhxold, Genxml, Genjson) are not ported and fail explicitly.
-		if (actx.xmlOut != null || actx.jsonOut != null) throw new Failure("XML and JSON auxiliary output are outside the HXB milestone");
+		switch actx.xmlOut {
+			case null:
+			case "hx":
+				generators.Genhxold.generate(com);
+			case file:
+				Common.log(com, "Generating xml: " + file);
+				Path.mkdirFromPath(file);
+				codegen.Genxml.generate(com, file);
+		}
+		switch actx.jsonOut {
+			case null:
+			case file:
+				Common.log(com, "Generating json : " + file);
+				Path.mkdirFromPath(file);
+				core.json.Genjson.generate(com.timerCtx, com.types, file);
+		}
 	}
 
 	public static function createWriter(com:CommonContext, config:WriterTargetConfig):{writer:HxbWriter, close:Void->haxe.io.Bytes} {

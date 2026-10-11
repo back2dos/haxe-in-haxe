@@ -301,16 +301,38 @@ enum AnonStatus {
 	AbstractStatics(abs:TAbstract);
 }
 
+// port: OCaml's `anon_status ref`. `map` (and so apply_params) and tanon_identification build
+// ...new anons sharing the ref of the original, so a later `:=` (e.g. closing the object
+// ...declarations of a function in TypeloadFunction) reaches every copy.
+class AnonStatusRef {
+	public var v:AnonStatus;
+
+	public inline function new(v:AnonStatus) this.v = v;
+}
+
 @:structInit class TAnon {
 	public var aFields:TypeMap<TClassField>;
-	public var aStatus:AnonStatus;
+	public var aStatusRef:AnonStatusRef;
+	public var aStatus(get, set):AnonStatus;
+
+	inline function get_aStatus():AnonStatus return aStatusRef.v;
+
+	inline function set_aStatus(v:AnonStatus):AnonStatus return aStatusRef.v = v;
 
 	public inline function new(aFields:TypeMap<TClassField>, aStatus:AnonStatus) {
 		this.aFields = aFields;
-		this.aStatus = aStatus;
+		this.aStatusRef = new AnonStatusRef(aStatus);
 	}
 
-	public inline function clone():TAnon return new TAnon(aFields, aStatus);
+	// port: `{ a_fields = fields; a_status = a.a_status }`: shares the status ref.
+	public static inline function withStatusRef(aFields:TypeMap<TClassField>, r:AnonStatusRef):TAnon {
+		var a = new TAnon(aFields, null);
+		a.aStatusRef = r;
+		return a;
+	}
+
+	// port: an OCaml record copy shares the status ref.
+	public inline function clone():TAnon return withStatusRef(aFields, aStatusRef);
 }
 
 enum TExprDef {

@@ -476,9 +476,20 @@ class Args {
 		if (com.platform == core.Globals.Platform.Cpp
 			&& !Defines.defined(com.defines, Defines.DisableUnicodeStrings)
 			&& !Defines.defined(com.defines, Defines.HxcppSmartStings)) Defines.define(com.defines, Defines.HxcppSmartStings);
-		// port: native-library class generation (gen_hx_classes) is not ported and fails explicitly.
-		if (Defines.rawDefined(com.defines,
-			"gen_hx_classes")) throw new ArgumentError("Native-library class generation requires the native-library milestone");
+		if (Defines.rawDefined(com.defines, "gen_hx_classes")) {
+			actx.forceTyping = true;
+			actx.preCompilation.unshift(function() {
+				// port: the two library lists have distinct types; the flag and module list are passed in.
+				function processLib(isStd:Bool, modules:Void->Array<GlobalTypePath>) {
+					if (!isStd)
+						for (path in modules()) if (!(path.pack.length == 2 && path.pack[0] == "java" && path.pack[1] == "lang" && path.name == "String"))
+							actx.classes.unshift(path);
+				}
+				for (lib in com.nativeLibs.swfLibs) processLib(lib.hasFlag(context.NativeLibraries.NativeLibFlags.FlagIsStd), () -> lib.listModules());
+				for (lib in com.nativeLibs.javaLibs) processLib(lib.hasFlag(context.NativeLibraries.NativeLibFlags.FlagIsStd), () -> lib.listModules());
+			});
+			actx.xmlOut = "hx";
+		}
 		actx.raiseUsage = function() throw new HelpMessage(usageString(usage, false));
 		return actx;
 	}
