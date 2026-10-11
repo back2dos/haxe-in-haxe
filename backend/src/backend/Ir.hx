@@ -284,6 +284,10 @@ enum Stmt {
 	SReturn(e:Null<Ex>);
 	SThrow(e:Ex);
 	STry(body:Array<Stmt>, catches:Array<{test:Null<Ex->Ex>, l:Local, body:Array<Stmt>}>);
+	// (EmitC) a statement whose only GC point is the slow path of an
+	// allocation or array store: the references live across it are stored in
+	// the shadow stack only on that path (Roots.spills)
+	SCold(id:Int, s:Stmt);
 }
 
 class Program {

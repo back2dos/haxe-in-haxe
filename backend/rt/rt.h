@@ -175,6 +175,20 @@ static inline void *rt_alloc(uint32_t nslots, uint32_t tindex, uint32_t kind) {
 	return rt_alloc_slow(MKHDR(nslots, kind, tindex), bytes);
 }
 
+// the fast path alone: NULL when the allocation buffer is full (the caller
+// then roots its references and calls rt_alloc_slow, see EmitC's cold sites)
+static inline void *rt_alloc_try(uint32_t nslots, uint32_t tindex, uint32_t kind, int zero) {
+	uint32_t bytes = 8 * (nslots + 1);
+	char *p = rt_young_ptr;
+	if (__builtin_expect(rt_young_limit - p >= (intptr_t)bytes, 1)) {
+		rt_young_ptr = p + bytes;
+		*(uint64_t *)p = MKHDR(nslots, kind, tindex);
+		if (zero) memset(p + 8, 0, bytes - 8);
+		return p + 8;
+	}
+	return NULL;
+}
+
 // for objects whose every slot is written before the next GC point
 static inline void *rt_alloc_init(uint32_t nslots, uint32_t tindex, uint32_t kind) {
 	uint32_t bytes = 8 * (nslots + 1);

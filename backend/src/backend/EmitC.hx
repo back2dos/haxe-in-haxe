@@ -471,6 +471,8 @@ class EmitC {
 			case SLoop(body):
 				for (x in body)
 					fs(x);
+			case SCold(_, x):
+				fs(x);
 			case SBreak | SContinue:
 			case SSwitch(e, cases, def):
 				fe(e);
@@ -536,10 +538,44 @@ class EmitC {
 			f.noGc = cand.exists(f);
 	}
 
+	// Wraps the statements whose only GC point is an allocation or an array
+	// store's slow path in SCold (functions without try blocks)
+	function markCold() {
+		var next = 0;
+		function gcFree(e:Ex):Bool
+			return Roots.gcPoint(e) == 0 && !Roots.nestedGc(e);
+		function mark(ss:Array<Stmt>) {
+			for (k in 0...ss.length) {
+				var st = ss[k];
+				switch st {
+					case SArrSet(_, _, ix, v) if (gcFree(ix) && gcFree(v)):
+						ss[k] = SCold(next++, st);
+					case SArrPush(_, _, v) if (gcFree(v)):
+						ss[k] = SCold(next++, st);
+					case SSet(_, e) if (e.match(ENewObj(_) | ENewEnum(_) | ENewClos(_) | ENewBox(_) | ENewAnon(_)) && !Roots.nestedGc(e)):
+						ss[k] = SCold(next++, st);
+					case SIf(_, a, b):
+						mark(a);
+						mark(b);
+					case SLoop(body):
+						mark(body);
+					case SSwitch(_, cases, def):
+						for (c in cases)
+							mark(c.body);
+						mark(def);
+					case _:
+				}
+			}
+		}
+		for (f in p.funcs)
+			if (!f.hasTry) mark(f.body);
+	}
+
 	function prepare() {
 		for (f in p.funcs)
 			byCName.set(cname(f), f);
 		findNoGc();
+		markCold();
 		assignTypes();
 		collectNames();
 		assignNames();
@@ -898,6 +934,7 @@ typedef struct { uint64_t h; int32_t len, hash; uint16_t c[1]; } hx_slit;
 		loops = [];
 		tries = [];
 		var roots = Roots.analyze(f);
+		curRoots = roots;
 		var n = 0;
 		for (l => slot in roots.slots) {
 			refSlot.set(l, slot);
@@ -936,6 +973,75 @@ typedef struct { uint64_t h; int32_t len, hash; uint16_t c[1]; } hx_slit;
 		b = outer;
 	}
 
+	var curRoots:Roots;
+	var coldSpill:Null<Array<Local>>; // while emitting a cold allocation
+
+	// the spilled references of a cold site (the rooted ones are in the frame)
+	function spillList(id:Int):Array<Local> {
+		var l = curRoots.spills.get(id);
+		return l == null ? [] : [for (x in l) if (!refSlot.exists(x)) x];
+	}
+
+	// stores the references (and `extra` more slots) in a pushed area
+	function spillOpen(list:Array<Local>, extra:Int):String {
+		if (list.length + extra == 0) return "";
+		var r = 'void **sp_ = rt_push(${list.length + extra}); ';
+		for (k in 0...list.length)
+			r += 'sp_[$k] = l${list[k].id}; ';
+		return r;
+	}
+
+	function spillClose(list:Array<Local>, extra:Int):String {
+		if (list.length + extra == 0) return "";
+		var r = "";
+		for (k in 0...list.length)
+			r += 'l${list[k].id} = sp_[$k]; ';
+		return r + "rt_sp = sp_; ";
+	}
+
+	// an object allocation; at a cold site, references are rooted only on the slow path
+	function allocCall(nslots:Int, ty:String, init:Bool):String {
+		if (coldSpill == null) return '${init ? "rt_alloc_init" : "rt_alloc"}($nslots, $ty, K_OBJ)';
+		var list = coldSpill;
+		return '({ void *a_ = rt_alloc_try($nslots, $ty, K_OBJ, ${init ? 0 : 1}); if (__builtin_expect(!a_, 0)) { ${spillOpen(list, 0)}a_ = rt_alloc_slow(MKHDR($nslots, K_OBJ, $ty), ${8 * (nslots + 1)}); ${spillClose(list, 0)}} a_; })';
+	}
+
+	function coldStmt(id:Int, s:Stmt, ind:String) {
+		var list = spillList(id);
+		switch s {
+			case SSet(l, e):
+				coldSpill = list;
+				b.add('$ind${local(l)} = ${expr(e)};\n');
+				coldSpill = null;
+			case SArrSet(elem, a, i, v):
+				var slot = refSlot.exists(a) ? '&${local(a)}' : '&sp_[${list.indexOf(a)}]';
+				var arr = local(a);
+				switch elem {
+					case TF64:
+						b.add('$ind{ int32_t i_ = ${expr(i)}; double v_ = ${expr(v)}; if (!hx_aset_f_fast($arr, i_, v_)) { ${spillOpen(list, 0)}hx_aset_slow($slot, i_, AK_F64, hx_d2u(v_)); ${spillClose(list, 0)}} }\n');
+					case TI32 | TBool:
+						b.add('$ind{ int32_t i_ = ${expr(i)}; int32_t v_ = ${expr(v)}; if (!hx_aset_i_fast($arr, i_, v_)) { ${spillOpen(list, 0)}hx_aset_slow($slot, i_, AK_I32, (uint64_t)(uint32_t)v_); ${spillClose(list, 0)}} }\n');
+					case _:
+						var n = list.length;
+						b.add('$ind{ int32_t i_ = ${expr(i)}; void *v_ = ${expr(v)}; if (!hx_aset_p_fast($arr, i_, v_)) { ${spillOpen(list, 1)}sp_[$n] = v_; hx_aset_slow($slot, i_, AK_PTR, (uint64_t)(uintptr_t)&sp_[$n]); ${spillClose(list, 1)}} }\n');
+				}
+			case SArrPush(elem, a, v):
+				var slot = refSlot.exists(a) ? '&${local(a)}' : '&sp_[${list.indexOf(a)}]';
+				var arr = local(a);
+				switch elem {
+					case TF64:
+						b.add('$ind{ double v_ = ${expr(v)}; if (!hx_apush_f_fast($arr, v_)) { ${spillOpen(list, 0)}hx_apush_slow($slot, AK_F64, hx_d2u(v_)); ${spillClose(list, 0)}} }\n');
+					case TI32 | TBool:
+						b.add('$ind{ int32_t v_ = ${expr(v)}; if (!hx_apush_i_fast($arr, v_)) { ${spillOpen(list, 0)}hx_apush_slow($slot, AK_I32, (uint64_t)(uint32_t)v_); ${spillClose(list, 0)}} }\n');
+					case _:
+						var n = list.length;
+						b.add('$ind{ void *v_ = ${expr(v)}; if (!hx_apush_p_fast($arr, v_)) { ${spillOpen(list, 1)}sp_[$n] = v_; hx_apush_slow($slot, AK_PTR, (uint64_t)(uintptr_t)&sp_[$n]); ${spillClose(list, 1)}} }\n');
+				}
+			case _:
+				throw "cold statement";
+		}
+	}
+
 	function popFrame():String
 		return refSlot.keys().hasNext() ? "rt_sp = fr; " : "";
 
@@ -946,6 +1052,8 @@ typedef struct { uint64_t h; int32_t len, hash; uint16_t c[1]; } hx_slit;
 
 	function stmt(s:Stmt, ind:String) {
 		switch s {
+			case SCold(id, x):
+				coldStmt(id, x, ind);
 			case SSet(l, e):
 				b.add('$ind${local(l)} = ${expr(e)};\n');
 			case SExpr(e):
@@ -1247,9 +1355,9 @@ typedef struct { uint64_t h; int32_t len, hash; uint16_t c[1]; } hx_slit;
 				}
 				if (hostProtos.exists(name)) refs.hosts.set(name, true);
 				'$name(${[for (a in args) expr(a)].join(", ")})';
-			case ENewObj(c): 'rt_alloc(${Std.int(Math.max(1, c.nslots))}, ${typeRef(c.tindex)}, K_OBJ)';
+			case ENewObj(c): allocCall(Std.int(Math.max(1, c.nslots)), typeRef(c.tindex), false);
 			case ENewEnum(c, args):
-				var s = '({ void *o = rt_alloc_init(${c.params.length == 0 ? 1 : c.params.length}, ${typeRef(c.tindex)}, K_OBJ); ' + (c.params.length == 0 ? 'FP(o, 0) = 0; ' : '');
+				var s = '({ void *o = ${allocCall(c.params.length == 0 ? 1 : c.params.length, typeRef(c.tindex), true)}; ' + (c.params.length == 0 ? 'FP(o, 0) = 0; ' : '');
 				for (i in 0...args.length) {
 					if (c.params[i].match(TI32 | TBool)) s += 'FP(o, $i) = 0; ';
 					s += load("o", Std.string(at(i, c.params[i])), c.params[i]) + ' = ${expr(args[i])}; ';
@@ -1265,7 +1373,7 @@ typedef struct { uint64_t h; int32_t len, hash; uint16_t c[1]; } hx_slit;
 					};
 				s + "o; })";
 			case ENewClos(l, caps):
-				var s = '({ void *o = rt_alloc_init(${l.captures.length + 1}, ${typeRef(l.tindex)}, K_OBJ); FP(o, 0) = (void *)${funcRef(l.fn)}; ';
+				var s = '({ void *o = ${allocCall(l.captures.length + 1, typeRef(l.tindex), true)}; FP(o, 0) = (void *)${funcRef(l.fn)}; ';
 				for (i in 0...caps.length)
 					s += load("o", Std.string(at(i + 1, l.captures[i].ty)), l.captures[i].ty) + ' = ${expr(caps[i])}; ';
 				s + "o; })";
@@ -1275,9 +1383,9 @@ typedef struct { uint64_t h; int32_t len, hash; uint16_t c[1]; } hx_slit;
 					case TI32 | TBool: "T_REFBOX_I";
 					case _: "T_REFBOX_P";
 				};
-				'({ void *o = rt_alloc_init(1, $tt, K_OBJ); FP(o, 0) = 0; ${load("o", "0", t)} = ${expr(v)}; o; })';
+				'({ void *o = ${allocCall(1, tt, true)}; FP(o, 0) = 0; ${load("o", "0", t)} = ${expr(v)}; o; })';
 			case ENewAnon(sh, vals):
-				var s = '({ void *o = rt_alloc(${sh.nslots}, ${typeRef(sh.tindex)}, K_OBJ); ';
+				var s = '({ void *o = ${allocCall(sh.nslots, typeRef(sh.tindex), false)}; ';
 				for (i in 0...vals.length)
 					s += load("o", Std.string(sh.locs[i]), sh.fields[i].ty) + ' = ${expr(vals[i])}; ';
 				s + "o; })";
@@ -1301,6 +1409,34 @@ static inline void *hx_aget_p(void *a, int32_t i) {
 	return hx_aget_p_slow(a, i);
 }
 static inline uint64_t hx_d2u(double d) { uint64_t u; memcpy(&u, &d, 8); return u; }
+// the fast paths of array stores alone (0: the caller takes the slow path)
+static inline int hx_aset_i_fast(void *a, int32_t i, int32_t v) {
+	if (ARR_KIND(a) == AK_I32 && (uint32_t)i < (uint32_t)ARR_LEN(a)) { ((int32_t *)ARR_DATA(a))[i] = v; return 1; }
+	return 0;
+}
+static inline int hx_aset_f_fast(void *a, int32_t i, double v) {
+	if (ARR_KIND(a) == AK_F64 && (uint32_t)i < (uint32_t)ARR_LEN(a)) { ((double *)ARR_DATA(a))[i] = v; return 1; }
+	return 0;
+}
+static inline int hx_aset_p_fast(void *a, int32_t i, void *v) {
+	if (ARR_KIND(a) == AK_PTR && (uint32_t)i < (uint32_t)ARR_LEN(a)) { void *d = ARR_DATA(a); rt_set_ptr(d, &FP(d, i), v); return 1; }
+	return 0;
+}
+static inline int hx_apush_i_fast(void *a, int32_t v) {
+	void *d = ARR_DATA(a);
+	if (ARR_KIND(a) == AK_I32 && d && (uint32_t)ARR_LEN(a) < (uint32_t)DATA_CAP(d, AK_I32)) { ((int32_t *)d)[ARR_LEN(a)++] = v; return 1; }
+	return 0;
+}
+static inline int hx_apush_f_fast(void *a, double v) {
+	void *d = ARR_DATA(a);
+	if (ARR_KIND(a) == AK_F64 && d && (uint32_t)ARR_LEN(a) < NSLOTS(d)) { ((double *)d)[ARR_LEN(a)++] = v; return 1; }
+	return 0;
+}
+static inline int hx_apush_p_fast(void *a, void *v) {
+	void *d = ARR_DATA(a);
+	if (ARR_KIND(a) == AK_PTR && d && (uint32_t)ARR_LEN(a) < NSLOTS(d)) { rt_set_ptr(d, &FP(d, ARR_LEN(a)), v); ARR_LEN(a)++; return 1; }
+	return 0;
+}
 static inline double hx_u2d(uint64_t u) { double d; memcpy(&d, &u, 8); return d; }
 static inline void hx_aset_i(void **slot, int32_t i, int32_t v) {
 	void *a = *slot;
@@ -1391,6 +1527,8 @@ typedef TypeEntry = {
 // every reference local, since a handler may observe them after any call.
 class Roots {
 	var rooted = new Map<Local, Bool>();
+	// SCold id -> the reference locals live across its slow path, by id
+	public var spills = new Map<Int, Array<Local>>();
 	var points:Array<Map<Local, Bool>> = []; // live sets after each statement
 	public var slots = new Map<Local, Int>();
 	var brk:Array<Map<Local, Bool>> = [];
@@ -1451,6 +1589,8 @@ class Roots {
 					for (c in cases)
 						r = inter(r, seq(c.body, copy(set)));
 					return r;
+				case SCold(_, x):
+					return step(x, set);
 				case SBreak | SContinue:
 				case STry(_, _):
 					throw "try in a function without hasTry";
@@ -1549,7 +1689,7 @@ class Roots {
 		}
 
 	// a GC point nested inside an expression's operands
-	static function nestedGc(e:Ex):Bool {
+	public static function nestedGc(e:Ex):Bool {
 		var r = false;
 		EmitC.iterEx(x -> if (gcPoint(x) > 0 || nestedGc(x)) r = true, e);
 		return r;
@@ -1578,7 +1718,45 @@ class Roots {
 		return union(rest, u);
 	}
 
+	function cold(id:Int, s:Stmt, out:Map<Local, Bool>):Map<Local, Bool> {
+		var pt = copy(out);
+		switch s {
+			case SSet(l, _): pt.set(l, true);
+			case _:
+		}
+		points.push(pt);
+		var live = switch s {
+			case SSet(l, e):
+				var rest = copy(out);
+				rest.remove(l);
+				uses(e, rest);
+				rest;
+			case SArrSet(_, a, i, v):
+				var u = copy(out);
+				u.set(a, true);
+				uses(i, u);
+				uses(v, u);
+				u;
+			case SArrPush(_, a, v):
+				var u = copy(out);
+				u.set(a, true);
+				uses(v, u);
+				u;
+			case _: throw "cold statement";
+		}
+		var list = spills.get(id);
+		if (list == null) spills.set(id, list = []);
+		for (l in live.keys())
+			if (Ir.isRef(l.ty) && list.indexOf(l) < 0) list.push(l);
+		list.sort((x, y) -> x.id - y.id);
+		return live;
+	}
+
 	function stmt(s:Stmt, out:Map<Local, Bool>):Map<Local, Bool> {
+		switch s {
+			case SCold(id, x): return cold(id, x, out);
+			case _:
+		}
 		switch s {
 			case SSet(l, _):
 				var pt = copy(out);
@@ -1657,6 +1835,7 @@ class Roots {
 				uses(e, u);
 				u;
 			case STry(_, _): throw "try in a function without hasTry";
+			case SCold(_, _): throw "unreachable";
 		}
 	}
 }
