@@ -2764,7 +2764,7 @@ class MacroApiImpl {
 				name: "set_custom_js_generator",
 				value: vfun1(f -> {
 					var f = prepareCallback(f, 1);
-					function gen(com:generators.Gctx, jsCtx:generators.Genjs.Ctx):Void {
+					function gen(com:generators.Gctx, jsCtx:generators.Genjs.JsCtx):Void {
 						generators.Genjs.setupKwds(com);
 						var api = encodeObj([
 							fld("outputFile", encodeString(com.file)),

@@ -44,7 +44,8 @@ class JsBuffer {
 	}
 }
 
-class Ctx {
+// port: the `ctx` record (renamed: the generators package is shared by every target).
+class JsCtx {
 	public var com:Gctx;
 	public var buf:JsBuffer;
 	public var chan:Null<haxe.io.Output>;
@@ -71,11 +72,12 @@ class Ctx {
 	public function new() {}
 }
 
-class ObjectStore {
+// port: the `object_store` record (renamed like JsCtx).
+class JsObjectStore {
 	public var osName:String;
-	public var osFields:Array<ObjectStore>; // port: OCaml list, head at index 0
+	public var osFields:Array<JsObjectStore>; // port: OCaml list, head at index 0
 
-	public function new(osName:String, osFields:Array<ObjectStore>) {
+	public function new(osName:String, osFields:Array<JsObjectStore>) {
 		this.osName = osName;
 		this.osFields = osFields;
 	}
@@ -97,7 +99,7 @@ class Genjs {
 
 	public static function dotPath(p:GlobalTypePath):String return sTypePath(p);
 
-	public static function sPath(ctx:Ctx, p:GlobalTypePath):String return if (ctx.jsFlatten) core.Path.flatPath(p) else dotPath(p);
+	public static function sPath(ctx:JsCtx, p:GlobalTypePath):String return if (ctx.jsFlatten) core.Path.flatPath(p) else dotPath(p);
 
 	static final kwds:StringMap<Bool> = new StringMap();
 
@@ -152,7 +154,7 @@ class Genjs {
 
 	public static function anonField(s:String):String return if (kwds.exists(s) || !validJsIdent(s)) "'" + s + "'" else s;
 
-	public static function staticField(ctx:Ctx, c:TClass, f:TClassField):String {
+	public static function staticField(ctx:JsCtx, c:TClass, f:TClassField):String {
 		var s = f.cfName;
 		return switch s {
 			case "length" | "name" if (!hasClassFlag(c, CExtern) || Meta.has(Meta.HxGen, c.clMeta)):
@@ -183,13 +185,13 @@ class Genjs {
 		}
 	}
 
-	static inline function hasFeature(ctx:Ctx, f:String):Bool return Gctx.hasFeature(ctx.com, f);
+	static inline function hasFeature(ctx:JsCtx, f:String):Bool return Gctx.hasFeature(ctx.com, f);
 
-	static inline function addFeature(ctx:Ctx, f:String):Void Gctx.addFeature(ctx.com, f);
+	static inline function addFeature(ctx:JsCtx, f:String):Void Gctx.addFeature(ctx.com, f);
 
 	static function unsupported(p:Pos):Dynamic return Error.abort("This expression cannot be compiled to Javascript", p);
 
-	public static function flush(ctx:Ctx):Void {
+	public static function flush(ctx:JsCtx):Void {
 		var chan = switch ctx.chan {
 			case null:
 				var chan = sys.io.File.write(ctx.com.file, true);
@@ -201,20 +203,20 @@ class Genjs {
 		ctx.buf.clear();
 	}
 
-	public static function spr(ctx:Ctx, s:String):Void {
+	public static function spr(ctx:JsCtx, s:String):Void {
 		ctx.separator = false;
 		JsSourcemap.handleNewlines(ctx.smap, s);
 		ctx.buf.addString(s);
 	}
 
 	// port: Printf.kprintf; callers format the string themselves.
-	public static function print(ctx:Ctx, s:String):Void {
+	public static function print(ctx:JsCtx, s:String):Void {
 		ctx.separator = false;
 		JsSourcemap.handleNewlines(ctx.smap, s);
 		ctx.buf.addString(s);
 	}
 
-	public static function newline(ctx:Ctx):Void {
+	public static function newline(ctx:JsCtx):Void {
 		switch ctx.buf.lastChar() {
 			case "}".code | "{".code | ":".code | ";".code if (!ctx.separator):
 				print(ctx, "\n" + ctx.tabs);
@@ -223,7 +225,7 @@ class Genjs {
 		}
 	}
 
-	public static function newprop(ctx:Ctx):Void {
+	public static function newprop(ctx:JsCtx):Void {
 		switch ctx.buf.lastChar() {
 			case "{".code:
 				print(ctx, "\n" + ctx.tabs);
@@ -232,7 +234,7 @@ class Genjs {
 		}
 	}
 
-	public static function semicolon(ctx:Ctx):Void {
+	public static function semicolon(ctx:JsCtx):Void {
 		switch ctx.buf.lastChar() {
 			case "}".code if (!ctx.separator):
 			case _:
@@ -240,7 +242,7 @@ class Genjs {
 		}
 	}
 
-	public static function concat<A>(ctx:Ctx, s:String, f:A->Void, l:Array<A>):Void {
+	public static function concat<A>(ctx:JsCtx, s:String, f:A->Void, l:Array<A>):Void {
 		for (i in 0...l.length) {
 			if (i > 0) spr(ctx, s);
 			f(l[i]);
@@ -269,7 +271,7 @@ class Genjs {
 		];
 	}
 
-	public static function funBlock(ctx:Ctx, f:TFunc, p:Pos):TExpr {
+	public static function funBlock(ctx:JsCtx, f:TFunc, p:Pos):TExpr {
 		var e = f.tfExpr;
 		var i = f.tfArgs.length;
 		while (i-- > 0) {
@@ -283,7 +285,7 @@ class Genjs {
 		return e;
 	}
 
-	public static function openBlock(ctx:Ctx):Void->Void {
+	public static function openBlock(ctx:JsCtx):Void->Void {
 		var oldt = ctx.tabs;
 		ctx.tabs = "\t" + ctx.tabs;
 		return function() ctx.tabs = oldt;
@@ -299,7 +301,7 @@ class Genjs {
 		}
 	}
 
-	public static function this_(ctx:Ctx):String return switch ctx.inValue {
+	public static function this_(ctx:JsCtx):String return switch ctx.inValue {
 		case null: "this";
 		case _: "$this";
 	}
@@ -309,7 +311,7 @@ class Genjs {
 		case _: false;
 	}
 
-	public static function isDynamicIterator(ctx:Ctx, e:TExpr):Bool {
+	public static function isDynamicIterator(ctx:JsCtx, e:TExpr):Bool {
 		function check(x:TExpr):Bool {
 			function loop(t:T):Bool {
 				return switch follow(t) {
@@ -328,7 +330,7 @@ class Genjs {
 		}
 	}
 
-	public static function genConstant(ctx:Ctx, p:Pos, c:TConstant):Void {
+	public static function genConstant(ctx:JsCtx, p:Pos, c:TConstant):Void {
 		switch c {
 			case TInt(i):
 				print(ctx, Std.string(i));
@@ -356,7 +358,7 @@ class Genjs {
 		}
 	}
 
-	public static function var_(ctx:Ctx):String return if (ctx.esVersion >= 6) "let" else "var";
+	public static function var_(ctx:JsCtx):String return if (ctx.esVersion >= 6) "let" else "var";
 
 	/**
 		Returns `(needs_apply,element_list)` tuple where `needs_apply` indicates if
@@ -366,7 +368,7 @@ class Genjs {
 		If `add_null_context` is provided then `element_list` will have `null` as the
 		first expr if needed.
 	**/
-	public static function applyArgs(addNullContext:Bool = false, ctx:Ctx, el:Array<TExpr>):{apply:Bool, el:Array<TExpr>} {
+	public static function applyArgs(addNullContext:Bool = false, ctx:JsCtx, el:Array<TExpr>):{apply:Bool, el:Array<TExpr>} {
 		if (ctx.esVersion < 6) {
 			var n = el.length;
 			if (n == 1 && !addNullContext) switch el[0].eexpr {
@@ -387,7 +389,7 @@ class Genjs {
 		} else return {apply: false, el: el};
 	}
 
-	public static function genCall(ctx:Ctx, e:TExpr, el:Array<TExpr>, inValue:Bool):Void {
+	public static function genCall(ctx:JsCtx, e:TExpr, el:Array<TExpr>, inValue:Bool):Void {
 		var r = applyArgs(ctx, el);
 		var apply = r.apply, el = r.el;
 		switch [e.eexpr, el] {
@@ -534,7 +536,7 @@ class Genjs {
 		}, []);
 	}
 
-	public static function genCallWithApply(ctx:Ctx, target:TExpr, args:Array<TExpr>):Void {
+	public static function genCallWithApply(ctx:JsCtx, target:TExpr, args:Array<TExpr>):Void {
 		if (args.length != 1) die("`args` for `gen_call_with_apply` must contain exactly one item", "genjs.ml", target.epos);
 		switch target.eexpr {
 			case TField(this_, FInstance(_, _, {cfName: field}) | FAnon({cfName: field}) | FDynamic(field) | FClosure(_, {cfName: field})):
@@ -568,7 +570,7 @@ class Genjs {
 		return loop(e);
 	}
 
-	public static function genExpr(ctx:Ctx, e:TExpr):Void {
+	public static function genExpr(ctx:JsCtx, e:TExpr):Void {
 		var clearMapping = JsSourcemap.addMapping(ctx.smap, e);
 		switch e.eexpr {
 			case TConst(c):
@@ -879,7 +881,7 @@ class Genjs {
 		return c;
 	}
 
-	public static function genFunction(keyword:String = "function", ctx:Ctx, f:TFunc, pos:Pos):Void {
+	public static function genFunction(keyword:String = "function", ctx:JsCtx, f:TFunc, pos:Pos):Void {
 		var oldInValue = ctx.inValue, oldInLoop = ctx.inLoop;
 		ctx.inValue = null;
 		ctx.inLoop = false;
@@ -932,7 +934,7 @@ class Genjs {
 		ctx.separator = true;
 	}
 
-	public static function genBlockElement(newlineAfter:Bool = false, keepBlocks:Bool = false, ctx:Ctx, e:TExpr):Void {
+	public static function genBlockElement(newlineAfter:Bool = false, keepBlocks:Bool = false, ctx:JsCtx, e:TExpr):Void {
 		switch e.eexpr {
 			case TBlock(el) if (!keepBlocks):
 				for (e in el) genBlockElement(newlineAfter, ctx, e);
@@ -958,7 +960,7 @@ class Genjs {
 		}
 	}
 
-	public static function genValue(ctx:Ctx, e:TExpr):Void {
+	public static function genValue(ctx:JsCtx, e:TExpr):Void {
 		var clearMapping = JsSourcemap.addMapping(ctx.smap, e);
 		function assign(e:TExpr):TExpr {
 			return mk(TBinop(OpAssign, mk(TLocal(switch ctx.inValue {
@@ -1063,7 +1065,7 @@ class Genjs {
 		clearMapping();
 	}
 
-	public static function genSyntax(ctx:Ctx, meth:String, args:Array<TExpr>, pos:Pos):Void {
+	public static function genSyntax(ctx:JsCtx, meth:String, args:Array<TExpr>, pos:Pos):Void {
 		switch [meth, args] {
 			case ["construct", _] if (args.length >= 1):
 				var cl = args[0], params = args.slice(1);
@@ -1162,7 +1164,7 @@ class Genjs {
 		}
 	}
 
-	public static function generatePackageCreate(ctx:Ctx, path:GlobalTypePath):Void {
+	public static function generatePackageCreate(ctx:JsCtx, path:GlobalTypePath):Void {
 		var p = path.pack;
 		// port: `acc` is the reversed package prefix, as in upstream; the Hashtbl key is its join.
 		function loop(acc:Array<String>, l:Array<String>, i:Int):Void {
@@ -1209,7 +1211,7 @@ class Genjs {
 		return "[\"" + (parts.join("\"][\"")) + "\"]";
 	}
 
-	public static function genModuleFields(ctx:Ctx, m:ModuleDef, c:TClass, fl:Array<TClassField>):Void {
+	public static function genModuleFields(ctx:JsCtx, m:ModuleDef, c:TClass, fl:Array<TClassField>):Void {
 		for (f in fl) {
 			var name = moduleField(m, f);
 			switch f.cfExpr {
@@ -1236,7 +1238,7 @@ class Genjs {
 		}
 	}
 
-	public static function genClassStaticField(ctx:Ctx, c:TClass, clPath:GlobalTypePath, f:TClassField):Void {
+	public static function genClassStaticField(ctx:JsCtx, c:TClass, clPath:GlobalTypePath, f:TClassField):Void {
 		switch f.cfExpr {
 			case null | {eexpr: TConst(TNull)} if (!hasFeature(ctx, "Type.getClassFields")):
 			case null if (!isPhysicalField(f)):
@@ -1258,7 +1260,7 @@ class Genjs {
 		}
 	}
 
-	public static function canGenClassField(ctx:Ctx, f:TClassField):Bool {
+	public static function canGenClassField(ctx:JsCtx, f:TClassField):Bool {
 		return switch f {
 			case {cfExpr: null | {eexpr: TConst(TNull)}} if (!hasFeature(ctx, "Type.getInstanceFields")):
 				false;
@@ -1269,7 +1271,7 @@ class Genjs {
 		}
 	}
 
-	public static function genClassField(ctx:Ctx, c:TClass, f:TClassField):Void {
+	public static function genClassField(ctx:JsCtx, c:TClass, f:TClassField):Void {
 		checkFieldName(c, f);
 		switch f.cfExpr {
 			case null:
@@ -1285,7 +1287,7 @@ class Genjs {
 		}
 	}
 
-	public static function generateClass__name__(ctx:Ctx, clPath:GlobalTypePath):Void {
+	public static function generateClass__name__(ctx:JsCtx, clPath:GlobalTypePath):Void {
 		if (hasFeature(ctx, "js.Boot.isClass")) {
 			var p = sPath(ctx, clPath);
 			print(ctx, p + ".__name__ = ");
@@ -1294,7 +1296,7 @@ class Genjs {
 		}
 	}
 
-	public static function generateClass__isInterface__(ctx:Ctx, c:TClass):Void {
+	public static function generateClass__isInterface__(ctx:JsCtx, c:TClass):Void {
 		if ((hasClassFlag(c, CInterface)) && hasFeature(ctx, "js.Boot.isInterface")) {
 			var p = sPath(ctx, c.clPath);
 			print(ctx, p + ".__isInterface__ = true");
@@ -1322,7 +1324,7 @@ class Genjs {
 		return [for (p in props) p.name + sep + "\"" + p.field + "\""].join(",");
 	}
 
-	public static function generateClassEs5(ctx:Ctx, c:TClass):Void {
+	public static function generateClassEs5(ctx:JsCtx, c:TClass):Void {
 		var clPath = getGeneratedClassPath(c);
 		var isAbstractImpl = isAbstractImpl(c);
 
@@ -1435,7 +1437,7 @@ class Genjs {
 		flush(ctx);
 	}
 
-	public static function generateClassEs6(ctx:Ctx, c:TClass):Void {
+	public static function generateClassEs6(ctx:JsCtx, c:TClass):Void {
 		var clPath = getGeneratedClassPath(c);
 		var p = sPath(ctx, clPath);
 		var dotp = dotPath(clPath);
@@ -1597,7 +1599,7 @@ class Genjs {
 		flush(ctx);
 	}
 
-	public static function generateClass(ctx:Ctx, c:TClass):Void {
+	public static function generateClass(ctx:JsCtx, c:TClass):Void {
 		ctx.current = c;
 		ctx.idCounter = 0;
 		switch c.clPath {
@@ -1612,7 +1614,7 @@ class Genjs {
 		}
 	}
 
-	public static function generateEnum(ctx:Ctx, e:TEnum):Void {
+	public static function generateEnum(ctx:JsCtx, e:TEnum):Void {
 		var p = sPath(ctx, e.ePath);
 		var dotp = dotPath(e.ePath);
 		var hasEnumFeature = hasFeature(ctx, "has_enum");
@@ -1696,7 +1698,7 @@ class Genjs {
 		flush(ctx);
 	}
 
-	public static function generateStatic(ctx:Ctx, s:{c:TClass, f:TClassField, e:TExpr}):Void {
+	public static function generateStatic(ctx:JsCtx, s:{c:TClass, f:TClassField, e:TExpr}):Void {
 		var c = s.c, f = s.f, e = s.e;
 		switch c.clKind {
 			case KModuleFields(m):
@@ -1711,7 +1713,7 @@ class Genjs {
 		newline(ctx);
 	}
 
-	public static function generateRequire(ctx:Ctx, path:GlobalTypePath, meta:Metadata):Void {
+	public static function generateRequire(ctx:JsCtx, path:GlobalTypePath, meta:Metadata):Void {
 		var m = Meta.get(Meta.JsRequire, meta);
 		var args = m.exprs, mp = m.pos;
 		var p = (sPath(ctx, path));
@@ -1730,13 +1732,13 @@ class Genjs {
 		newline(ctx);
 	}
 
-	public static function needToGenerateInterface(ctx:Ctx, clIface:TClass):Bool {
+	public static function needToGenerateInterface(ctx:JsCtx, clIface:TClass):Bool {
 		return ctx.hasResolveClass /* generate so we can resolve it for whatever reason */
 			|| ctx.hasInterfaceCheck /* generate because we need __interfaces__ for run-time type checks */
 			|| Gctx.isDirectlyUsed(ctx.com, clIface.clMeta) /* generate because it's just directly accessed in code */;
 	}
 
-	public static function generateType(ctx:Ctx, t:ModuleType):Void {
+	public static function generateType(ctx:JsCtx, t:ModuleType):Void {
 		switch t {
 			case TClassDecl(c):
 				switch TClassTools.getClInit(c) {
@@ -1764,11 +1766,11 @@ class Genjs {
 		}
 	}
 
-	public static function setCurrentClass(ctx:Ctx, c:TClass):Void {
+	public static function setCurrentClass(ctx:JsCtx, c:TClass):Void {
 		ctx.current = c;
 	}
 
-	public static function allocCtx(com:Gctx, esVersion:Int):Ctx {
+	public static function allocCtx(com:Gctx, esVersion:Int):JsCtx {
 		var smap:Null<Sourcemap> = if (com.debug || Gctx.defined(com, Define.JsSourceMap) || Gctx.defined(com, Define.SourceMap)) {
 			sourceLastPos: {file: 0, line: 0, col: 0},
 			printComma: false,
@@ -1779,7 +1781,7 @@ class Genjs {
 			mappings: new StringBuf(),
 			currentExpr: null,
 		} else null;
-		var ctx = new Ctx();
+		var ctx = new JsCtx();
 		ctx.com = com;
 		ctx.buf = new JsBuffer();
 		ctx.chan = null;
@@ -1816,7 +1818,7 @@ class Genjs {
 		return ctx;
 	}
 
-	public static function genSingleExpr(ctx:Ctx, e:TExpr, expr:Bool):String {
+	public static function genSingleExpr(ctx:JsCtx, e:TExpr, expr:Bool):String {
 		if (expr) genExpr(ctx, e) else genValue(ctx, e);
 		var str = ctx.buf.contents();
 		ctx.buf.clear();
@@ -1934,10 +1936,10 @@ class Genjs {
 					r;
 				}
 				var anyExposed = exposed.length > 0;
-				var exposedObject = new ObjectStore("", []);
+				var exposedObject = new JsObjectStore("", []);
 				var toplevelExposed:Array<String> = [];
 				if (anyExposed) {
-					var exportMap = new StringMap<ObjectStore>();
+					var exportMap = new StringMap<JsObjectStore>();
 					for (path in exposed) {
 						var parts = path.split(".");
 						function loop(p:Array<String>, i:Int, pre:String):Void {
@@ -1949,7 +1951,7 @@ class Genjs {
 									case pre: (pre + "." + f);
 								}
 								if (!exportMap.exists(path)) {
-									var elts = new ObjectStore(f, []);
+									var elts = new JsObjectStore(f, []);
 									exportMap.set(path, elts);
 									var cobject = switch pre {
 										case "": exposedObject;
@@ -2016,7 +2018,7 @@ class Genjs {
 					newline(ctx);
 				}
 
-				function printObj(f:ObjectStore, root:String):Void {
+				function printObj(f:JsObjectStore, root:String):Void {
 					var path = root + (pathToBrackets(f.osName));
 					print(ctx, path + " = " + path + " || {}");
 					ctx.separator = true;
