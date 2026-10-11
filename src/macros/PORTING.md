@@ -42,9 +42,9 @@ of them exist:
   use `EvalString.createAscii`, `createUnknown`, `createWithLength`.
   "Byte offsets" in upstream are native string indices here.
 - **Positions** are `core.Globals.Pos`; AST/types are `core.Ast`/`core.TType`.
-- **Not ported**: the debugger (`evalDebug*.ml`, debug socket). Code that
-  would use it throws a clear error ("... is not supported by haxe-in-haxe");
-  never fake a result. libuv (`evalLuv.ml`) and mbedtls (`evalSsl.ml`) are
+- **Unsupported natives** throw a clear error ("... is not supported by
+  haxe-in-haxe"); never fake a result. The debugger (`evalDebug*.ml`, debug
+  socket) is translated (`EvalDebug*.hx`). libuv (`evalLuv.ml`) and mbedtls (`evalSsl.ml`) are
   ported over the hxc runtime's natives (`hxc.NativeUv`, `hxc.NativeSsl`);
   on other hosts their natives fail the same way (the `eval.luv` threads and
   synchronization primitives work everywhere).

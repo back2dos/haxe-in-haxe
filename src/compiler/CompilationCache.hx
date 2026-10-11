@@ -252,6 +252,9 @@ class ContextCache {
 
 	public function setJson(j:JsonValue):Void json = j;
 
+	/* Pointers for memory inspection. */
+	public function getPointers():Array<Dynamic> return [files, modules, binaryCache];
+
 	/* access tracking */
 	public function updateAccessTime():Void lastAccessTime = Sys.time();
 
@@ -585,4 +588,7 @@ class Cache {
 			return toRemove.length;
 		}
 	}
+
+	/* Pointers for memory inspection. */
+	public function getPointers():Array<Dynamic> return [contexts, haxelib, directories, nativeLibs];
 }
