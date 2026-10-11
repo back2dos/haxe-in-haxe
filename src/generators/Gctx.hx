@@ -37,9 +37,7 @@ typedef ErrorFunction = String->Pos->Void;
 	public final modules:Array<ModuleDef>;
 	public final main:ContextMain;
 	public final types:Array<ModuleType>;
-	// port: (string,string) Hashtbl.t upstream; the port's resources are bytes in a StringMap
-	// (iteration order differs from OCaml's Hashtbl).
-	public final resources:haxe.ds.StringMap<haxe.io.Bytes>;
+	public final resources:core.ds.OcamlHashtbl<String, haxe.io.Bytes>;
 	public final nativeLibs:Array<context.NativeLibraries.NativeLibraryBase>;
 	public final includeFiles:Array<context.Common.IncludeFile>;
 	public final std:TClass; /* TODO: I would prefer to not have this here, have to check default_cast */

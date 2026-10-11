@@ -2805,7 +2805,7 @@ class MacroApiImpl {
 					var data = decodeBytes(data);
 					if (name == "")
 						failwith("Empty resource name");
-					ccom().resources.set(name, data);
+					ccom().resources.replace(name, data);
 					var m = getApi().currentModule();
 					m.mExtra.mCacheBoundObjects.push(Resource(name, data));
 					vnull;
@@ -2815,8 +2815,7 @@ class MacroApiImpl {
 				name: "get_resources",
 				value: vfun0(() -> {
 					var pmapResources = new StringMap<haxe.io.Bytes>();
-					for (k => v in ccom().resources)
-						pmapResources.set(k, v);
+					ccom().resources.iter((k, v) -> pmapResources.set(k, v));
 					encodeStringMap(encodeBytes, pmapResources);
 				})
 			},
