@@ -107,25 +107,15 @@ class CppContext {
 		return values;
 	}
 
-	// port: `Hashtbl.iter` over `common_ctx.resources`. The port keeps the resources in a
-	// StringMap, so the OCaml table is rebuilt (`Hashtbl.create 0`, one `replace` per
-	// resource, in key order since the original insertion order is not kept) to iterate in
-	// its bucket order.
+	// port: `Hashtbl.iter` over `common_ctx.resources`, collected once for the several passes.
 	public static function resourcesInHashtblOrder(com:Gctx):Array<{name:String, data:haxe.io.Bytes}> {
-		var tbl = new core.ds.OcamlHashtbl<String, haxe.io.Bytes>(core.ds.OcamlHash.hashString, function(a, b) return a == b, 0);
-		for (k in core.ds.PMap.keys(com.resources)) tbl.replace(k, com.resources.get(k));
 		var result = [];
-		tbl.iter(function(name, data) result.push({name: name, data: data}));
+		com.resources.iter(function(name, data) result.push({name: name, data: data}));
 		return result;
 	}
 
-	// port: `try Gctx.find_file common_ctx file with Not_found -> file`; the port's lookup
-	// raises Not_found as the string "Not_found".
 	public static function findFileOr(com:Gctx, file:String):String {
-		return try Gctx.findFile(com, file) catch (e:core.ds.NotFound) file catch (e:String) {
-			if (e != "Not_found") throw e;
-			file;
-		}
+		return try Gctx.findFile(com, file) catch (e:core.ds.NotFound) file;
 	}
 
 	public static function isGcElement(ctx:Context, memberType:Tcpp):Bool
