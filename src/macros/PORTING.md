@@ -53,4 +53,4 @@ of them exist:
 - Each file starts with a comment naming its upstream file and any
   deliberate deviation.
 - Check a module with
-  `haxe/haxe -cp runtime/hl -cp src macros.eval.EvalFoo --no-output -hl /tmp/x.hl`.
+  `haxe/haxe -cp test/hl -cp src macros.eval.EvalFoo --no-output -hl /tmp/x.hl`.

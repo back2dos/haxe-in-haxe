@@ -1,4 +1,4 @@
-// The runtime for the C output of hxc/ (docs/WASM-BACKEND.md).
+// The runtime for the C output of hxc/ (hxc/README.md).
 //
 // Values: Int/Bool are int32_t, Float is double, haxe.Int64 is int64_t,
 // everything else a pointer to a heap object or a static object (string

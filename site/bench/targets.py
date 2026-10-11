@@ -2,11 +2,11 @@
 """Compile-time benchmark of the target generators: the reference compiler and the
 port compile the same projects to every target; outputs must be identical.
 
-    python3 bench/targets.py [-n RUNS] [-p formatter,self] [-t js,lua,...] [--port CMD] [--json out.json]
+    python3 site/bench/targets.py [-n RUNS] [-p formatter,self] [-t js,lua,...] [--port CMD] [--json out.json]
 
 Projects:
   formatter  haxe-formatter 1.9.1 with its six libraries (bin/haxebench/libs, see
-             bench/haxebench.py), the HaxeBenchmarks formatter_noio case
+             site/bench/haxebench.py), the HaxeBenchmarks formatter_noio case
   self       the port's own source (src/, haxe.Main), about 1,000 modules; for JS, the
              hxc tool (the port and the C backend, backend.Main, over hxnodejs)
 Each run is a fresh process with -D disable-parallelism; both compilers run in the
@@ -18,7 +18,7 @@ archives member by member (ZIP containers are not compared).
 import argparse, json, os, platform, resource, shutil, subprocess, sys, time, zipfile
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(__file__).resolve().parents[2]
 LIBS = ROOT / "bin/haxebench/libs"
 REF = os.environ.get("HAXE_REFERENCE", str(ROOT / "haxe/haxe"))
 STD = ROOT / "haxe/std"
@@ -46,7 +46,7 @@ TARGETS = {
 }
 EXTRA = {("formatter", "js"): ["-lib", "hxnodejs"]}
 # the port's JS build is the hxc tool (bin/hxc/wbk.js): the port and the C backend over hxnodejs
-PROJECT_FOR = {("self", "js"): ["-cp", str(ROOT / "src"), "-cp", str(ROOT / "hxc/src"), "-main", "backend.Main", "-lib", "hxnodejs", "-cp", str(ROOT / "runtime/js"), "-w", "-WDeprecated"]}
+PROJECT_FOR = {("self", "js"): ["-cp", str(ROOT / "src"), "-cp", str(ROOT / "hxc/src"), "-main", "backend.Main", "-lib", "hxnodejs", "-cp", str(ROOT / "hxc/js"), "-w", "-WDeprecated"]}
 
 
 def run_once(cmd, cwd, log):

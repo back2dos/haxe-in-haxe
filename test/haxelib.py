@@ -67,7 +67,7 @@ def main():
         subprocess.run(cmd, cwd=proj, env=env, check=True, capture_output=True)
     hl = os.environ.get("HAXE_HL") or shutil.which("hl")
     port_hl = GENERATED / "haxe-in-haxe.hl"
-    subprocess.run([reference, "-cp", str(ROOT / "runtime/hl"), "-cp", str(ROOT / "src"), "-main", "haxe.Main", "-hl", str(port_hl)], cwd=ROOT, env=env, check=True)
+    subprocess.run([reference, "-cp", str(ROOT / "test/hl"), "-cp", str(ROOT / "src"), "-main", "haxe.Main", "-hl", str(port_hl)], cwd=ROOT, env=env, check=True)
     ref_cmd, port_cmd = [reference], [hl, str(port_hl)]
     servers = None
     if opts.server:

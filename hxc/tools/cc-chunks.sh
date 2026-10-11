@@ -18,7 +18,7 @@
 # Objects go to <dir>/obj-<hash of CC and CFLAGS>, so builds with different
 # compilers or options keep their own. With -DHXC_CONST_IDS in CFLAGS every
 # file also depends on ids.h. With clang -flto=thin and ld.lld, ThinLTO uses a
-# cache (<objdir>/thinlto; it saves little after an edit: bench/README.md).
+# cache (<objdir>/thinlto; it saves little after an edit: site/bench/README.md).
 set -eu
 SRC=$1
 BIN=$2

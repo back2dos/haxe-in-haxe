@@ -168,7 +168,7 @@ class Bench {
 	}
 }
 
-// The prototype backends (archive/wasm-prototype) compile for the cross
+// The prototype backends (removed; see the git history) compiled for the cross
 // platform, which has no Sys.
 class Out {
 	public static function int(v:Int):Void {

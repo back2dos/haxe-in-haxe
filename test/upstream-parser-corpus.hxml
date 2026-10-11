@@ -1,4 +1,0 @@
--cp src
--cp test
---run UpstreamParserCorpus
--D eval-call-stack-depth=10000

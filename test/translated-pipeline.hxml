@@ -1,7 +1,0 @@
--cp src
--cp test
--D eval-stack
-# Larger standard-library loads overflow the default Eval call depth while
-# typing from an already-deep call; this only raises the host limit.
--D eval-call-stack-depth=10000
---run TranslatedPipeline

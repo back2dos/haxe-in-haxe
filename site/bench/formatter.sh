@@ -2,10 +2,10 @@
 # Formats the port's Haxe sources with haxe-formatter built by hxc (the C
 # backend, hxc/haxelib), using ./hxformat.json.
 #
-#   sh tools/format-src.sh                 format src/ in place
-#   sh tools/format-src.sh --check         list the files that would change (exit 1 if any)
-#   sh tools/format-src.sh --build         only (re)build the formatter
-#   sh tools/format-src.sh src/typing      format other paths (files or directories)
+#   sh site/bench/formatter.sh                 format src/ in place
+#   sh site/bench/formatter.sh --check         list the files that would change (exit 1 if any)
+#   sh site/bench/formatter.sh --build         only (re)build the formatter
+#   sh site/bench/formatter.sh src/typing      format other paths (files or directories)
 #
 # FORMATTER=<binary> uses an existing formatter build (any target: e.g.
 # `node run.js` works too, the output is the same). Otherwise the formatter is
@@ -23,7 +23,7 @@
 # named. EXCLUDE (an extended regular expression on the path, default below)
 # leaves files untouched; hxformat.json "excludes" works too.
 set -eu
-cd "$(dirname "$0")/.."
+cd "$(dirname "$0")/../.."
 ROOT=$PWD
 HAXE=$ROOT/haxe/haxe
 OUT=$ROOT/bin/formatter/hxformat

@@ -1,4 +1,4 @@
-// Regressions found compiling haxe-formatter with hxc (bench/README.md, 2026-10-09):
+// Regressions found compiling haxe-formatter with hxc (site/bench/README.md, 2026-10-09):
 //   haxe -lib hxc -cp hxc/test/regress -main Regress -dce full --custom-target hxc=bin/regress && bin/regress
 // prints "ok" five times.
 class Regress {

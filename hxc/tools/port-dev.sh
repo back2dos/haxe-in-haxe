@@ -24,7 +24,7 @@ mkdir -p "$OUT"
 export HAXE_STD_PATH=${HAXE_STD_PATH:-$PWD/haxe/std}
 python3 hxc/tools/mkstd.py
 ulimit -s unlimited 2>/dev/null || true
-"$TOOL" "$OUT/hih" -cp src -main haxe.Main -cp runtime/js -D disable-parallelism \
+"$TOOL" "$OUT/hih" -cp src -main haxe.Main -cp hxc/js -D disable-parallelism \
 	-cp bin/hxc/std --custom-target hxc > "$OUT/gen.log" 2>&1 || { cat "$OUT/gen.log"; exit 1; }
 CC="${CC:-clang -O2}" CFLAGS="-w -fno-strict-aliasing -DHXC_NO_SSL -DHXC_NO_UV" \
 	sh hxc/tools/cc-chunks.sh "$OUT/hih_hxc" "$OUT/hih"

@@ -17,11 +17,11 @@ HAXE=${HAXE:-haxe/haxe}
 mkdir -p "$T"
 python3 hxc/tools/mkstd.py
 ulimit -s unlimited 2>/dev/null || true
-ARGS="-cp src -cp hxc/src -cp runtime/js -cp bin/hxc/std -main backend.Main -D disable-parallelism --custom-target hxc"
+ARGS="-cp src -cp hxc/src -cp hxc/js -cp bin/hxc/std -main backend.Main -D disable-parallelism --custom-target hxc"
 if [ -x "$T/tool" ]; then
 	HAXE_STD_PATH=$PWD/haxe/std "$T/tool" "$T/tool" $ARGS > "$T/gen.log" 2>&1 || { cat "$T/gen.log"; exit 1; }
 else
-	"$HAXE" -cp src -cp hxc/src -main backend.Main -lib hxnodejs -cp runtime/js --js bin/hxc/wbk.js -w -WDeprecated
+	"$HAXE" -cp src -cp hxc/src -main backend.Main -lib hxnodejs -cp hxc/js --js bin/hxc/wbk.js -w -WDeprecated
 	HAXE_STD_PATH=$PWD/haxe/std node --stack-size=65500 bin/hxc/wbk.js "$T/tool" $ARGS > "$T/gen.log" 2>&1 || { cat "$T/gen.log"; exit 1; }
 fi
 # the running tool is replaced: write the new binary next to it, then move it

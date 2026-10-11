@@ -1,9 +1,9 @@
 #!/bin/sh
 # Builds the translated compiler (haxe.Main) for each benchmark target.
-# Usage: HAXE=haxe/haxe sh bench/build.sh [js] [hl] [hlc] [jvm] [cpp] [wasm]
+# Usage: HAXE=haxe/haxe sh site/bench/build.sh [js] [hl] [hlc] [jvm] [cpp] [wasm]
 # (wasm needs the hxc C output first: sh hxc/build.sh port)
 set -u
-cd "$(dirname "$0")/.."
+cd "$(dirname "$0")/../.."
 HAXE=${HAXE:-haxe/haxe}
 OUT=bin/bench
 mkdir -p "$OUT"
@@ -11,18 +11,18 @@ targets=${*:-js hl hlc jvm cpp}
 for t in $targets; do
 	start=$(date +%s)
 	case $t in
-		js) "$HAXE" -cp src -main haxe.Main -lib hxnodejs -cp runtime/js --js "$OUT/hih.js" ;;
-		hl) "$HAXE" -cp runtime/hl -cp src -main haxe.Main --hl "$OUT/hih.hl" ;;
+		js) "$HAXE" -cp src -main haxe.Main -lib hxnodejs -cp hxc/js --js "$OUT/hih.js" ;;
+		hl) "$HAXE" -cp test/hl -cp src -main haxe.Main --hl "$OUT/hih.hl" ;;
 		hlc) # needs a compiler with the hl2c fix (HAXE_HLC) and HashLink headers (HL_INCLUDE);
 			# HL_STATIC="libhl.a fmt.o ..." links the (patched) runtime statically
-			rm -rf "$OUT/hlc" && "${HAXE_HLC:-$HAXE}" -cp runtime/hl -cp src -main haxe.Main --hl "$OUT/hlc/main.c" ;
+			rm -rf "$OUT/hlc" && "${HAXE_HLC:-$HAXE}" -cp test/hl -cp src -main haxe.Main --hl "$OUT/hlc/main.c" ;
 			if [ -n "${HL_STATIC:-}" ]; then
 				cc -O2 -std=c11 -w -o "$OUT/hih-hlc" -I "$OUT/hlc" -I "${HL_INCLUDE:-/usr/local/include}" "$OUT/hlc/main.c" $HL_STATIC -lpng16 -lturbojpeg -lvorbisfile -lz -lm -lpthread -ldl
 			else
 				cc -O2 -std=c11 -w -o "$OUT/hih-hlc" -I "$OUT/hlc" -I "${HL_INCLUDE:-/usr/local/include}" "$OUT/hlc/main.c" -L/usr/local/lib -lhl -l:fmt.hdll -lm -Wl,-rpath,/usr/local/lib
 			fi ;;
 		jvm) "$HAXE" -cp src -main haxe.Main -lib hxjava --jvm "$OUT/hih.jar" ;;
-		cpp) # CPP_FLAGS="-D HXCPP_SINGLE_THREAD_MARK" needs bench/patches/hxcpp-single-thread-mark.patch
+		cpp) # CPP_FLAGS="-D HXCPP_SINGLE_THREAD_MARK" needs site/bench/patches/hxcpp-single-thread-mark.patch
 			"$HAXE" -cp src -main haxe.Main -lib hxcpp -D HXCPP_M64 ${CPP_FLAGS:-} --cpp "$OUT/cpp" ;;
 		wasm) # the hxc C output (sh hxc/build.sh port) built like site/build.sh's WebAssembly
 			# (wasm64, wasm exceptions), but for Node with direct file system access (NODERAWFS);

@@ -2,15 +2,14 @@
 
 hxc compiles a typed, filtered Haxe program (the data an HXB archive holds)
 to C, and a C compiler turns that into a native binary or, with Emscripten,
-WebAssembly. It is an explicit scope expansion beyond the port's HXB
-conformance work; the go/no-go that started it is
-[docs/WASM-BACKEND.md](../docs/WASM-BACKEND.md).
+WebAssembly. It started as a scope expansion beyond the port's HXB
+conformance work, to run the compiler natively and in the browser.
 
 Its main program is the port itself: the C build of `haxe.Main` passes the
 HXB conformance suites and every target-independent step of upstream's test
 suite (test/TESTING.md), and compiles itself faster than the OCaml compiler
-with a lower peak RSS (bench/README.md). It also builds other programs, for
-example haxe-formatter (`tools/format-src.sh`), which then formats
+with a lower peak RSS (site/bench/README.md). It also builds other programs, for
+example haxe-formatter (`site/bench/formatter.sh`), which then formats
 `haxe/std` 1.6× faster than its C++ and Node builds with identical output.
 
 | Path | |
@@ -27,7 +26,7 @@ example haxe-formatter (`tools/format-src.sh`), which then formats
 For work on the lowering or the runtime, `sh hxc/tools/dev-tool.sh`
 builds `bin/hxc-dev/tool`, the backend tool compiled by itself with clang
 (regenerating its C takes about 10 s against 65 s for the Node build of
-`hxc/build.sh`; unchanged chunks are not recompiled). `bench/haxebench.py`
+`hxc/build.sh`; unchanged chunks are not recompiled). `site/bench/haxebench.py`
 compiles and runs the HaxeBenchmarks cases with it and the other targets.
 
 `build.sh` builds the backend tool (with the reference compiler, to JS), runs
@@ -53,7 +52,7 @@ sh hxc/build.sh hxc/test/threads Threads && bin/hxc/Threads/prog_c    # another 
 | tcc | development: the port's 20 MB of C compiles in about a second | green (M:1) | code 2–2.5× slower than clang/gcc -O2 |
 | clang -O2 | fastest code (4–10% ahead of gcc -O2 on the self-compile, builds faster; -O3 adds nothing) | OS (1:1) | preferred by the haxelib package |
 | gcc -O2 | release builds | OS (1:1) | |
-| cosmocc -O2 | one binary for Linux, macOS, Windows, the BSDs (x86-64 + aarch64) | OS (1:1) | only Linux x86-64 tested (docs/COSMO.md) |
+| cosmocc -O2 | one binary for Linux, macOS, Windows, the BSDs (x86-64 + aarch64) | OS (1:1) | only Linux x86-64 tested |
 | Emscripten (em++) | the website's playground: wasm64, compiled as C++ so `RT_TRY` is wasm exception handling | none | `site/build.sh`; `EMXX=em++` in `build.sh` for linear-memory wasm |
 
 Every build passes `-fno-strict-aliasing` (slots are read through casts).
@@ -157,14 +156,14 @@ fold into the code as in the single file, but every chunk depends on
 `ids.h`, which changes when a closure, type, field name, signature or
 global is added or removed. Without it (`HXC_IDS=extern`, tcc), `ID(x)`
 declares `extern const int32_t x`, defined in `data.c`: one load more per
-use (about 2% of the self-compile with clang -O2, bench/README.md) and only
+use (about 2% of the self-compile with clang -O2, site/bench/README.md) and only
 the edited chunk, `data.c` and `strings.c` recompile.
 
 After a one-line edit of a function in `src/typing/Operators.hx` (port,
 60 files): a changed string literal rewrites the module's chunk and
 `strings.c`; adding a closure rewrites the chunk, `data.c` and `ids.h`.
 `cc-chunks.sh` then recompiles 2–3 files: about 3 s with clang -O2 instead
-of a 170 s rebuild (bench/README.md has the numbers; the backend tool's
+of a 170 s rebuild (site/bench/README.md has the numbers; the backend tool's
 own run is now most of the edit-to-binary time, see `tools/dev-tool.sh`).
 
 Cross-chunk calls are not inlined without LTO; on the self-compile the
@@ -223,7 +222,7 @@ land right after it, in the order the compiler's tree walks visit them).
   after a major collection. Sizes stay generic rather than tuned to the
   self-compile.
 
-Self-compile, gcc -O2 (bench/README.md, "hxc memory"): live heap at exit
+Self-compile, gcc -O2 (site/bench/README.md, "hxc memory"): live heap at exit
 214 → 170 MB, peak RSS 837 → 467 MB (the reference: 531 MB), CPU 5.7 → 5.0
 s. With a copying old generation the peak is about the old space at the last
 major collection plus what survives it; a mark-sweep or mark-compact old
@@ -257,7 +256,7 @@ and `haxe.atomic` (over `hxc.NativeAtomic`). In the port that is the
 compilation server, the `--connect`/`--cmd` I/O threads, Eval threads
 (`--interp`, `eval.luv`) and the parallel compiler passes (`TaskPool`/
 `Parallel`: filters, analyzer, DCE marking, HXB writing; run without
-`-D disable-parallelism`). Self-compile with clang -O2 (bench/README.md):
+`-D disable-parallelism`). Self-compile with clang -O2 (site/bench/README.md):
 5.20 s sequential, 4.18 s with 4 threads (the OCaml compiler: 6.11 s
 sequential, 4.03 s with 4 domains); the sequential cost is unchanged from
 the green-threads runtime.
@@ -497,7 +496,7 @@ Checked: a Map/sort/exception program and a macro/Reflect/Json program with
 cc, tcc and `-D hxc.static`; `--no-output`, `-D hxc.c-only`, type errors and
 `haxelib run hxc`; `Tls.hx` with `-D hxc.static -D hxc.ssl` and with tcc and
 the system's mbedtls, and `hxc.NativeUv` with `-D hxc.static -D hxc.uv`;
-haxe-formatter (`tools/format-src.sh`). The backend tool built through the
+haxe-formatter (`site/bench/formatter.sh`). The backend tool built through the
 package gives byte-identical C to the source build. Chunked builds (2026-10-10): a Map/closure/exception program with
 clang and tcc (`NATIVE_CC=clang` package), a rebuild reusing every object,
 and `-D hxc.single`.

@@ -2,7 +2,7 @@
 """EXPERIMENTAL: the HaxeBenchmarks cases (github.com/HaxeBenchmarks/benchmark-runner)
 on hxc and the fast Haxe targets, with build times.
 
-    python3 bench/haxebench.py [-n RUNS] [-t hxc,cpp,...] [-c alloc,nbody,...] [--json out.json]
+    python3 site/bench/haxebench.py [-n RUNS] [-t hxc,cpp,...] [-c alloc,nbody,...] [--json out.json]
 
 The runner is cloned into bin/haxebench/runner (its cases; not its lix-based
 driver). Targets:
@@ -21,7 +21,7 @@ Run time is the minimum wall time of RUNS runs. Builds that fail are reported, n
 import argparse, json, os, resource, shutil, subprocess, sys, time
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(__file__).resolve().parents[2]
 HB = ROOT / "bin/haxebench"
 RUNNER = HB / "runner"
 HAXE = os.environ.get("HAXE", str(ROOT / "haxe/haxe"))

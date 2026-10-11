@@ -1,6 +1,6 @@
 package backend;
 
-// The backend tool (docs/WASM-BACKEND.md). Runs the port's compiler
+// The backend tool (hxc/README.md). Runs the port's compiler
 // pipeline, then lowers the filtered program (the data an HXB archive holds)
 // to the IR and writes C: the files of <out>_hxc/ (files.txt lists the .c
 // files to compile; HXC_CHUNK_KB sets the chunk size, default 192) or, with

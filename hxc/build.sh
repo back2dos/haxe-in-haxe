@@ -1,7 +1,7 @@
 #!/bin/sh
 # Builds the backend tool, then compiles a program with it to C and to a
 # native binary (CC, default tcc for fast builds; CC="clang -O2" for speed;
-# CC="cosmocc -O2" for a portable APE binary, see docs/COSMO.md). When EMXX is
+# CC="cosmocc -O2" for a portable APE binary, see hxc/README.md). When EMXX is
 # set (e.g. EMXX=em++), also to linear-memory wasm.
 #   sh hxc/build.sh [source dir] [main class]     (default: hxc/test Bench)
 #   sh hxc/build.sh port                          (the port itself: bin/hxc/hih/hih)
@@ -20,7 +20,7 @@ HAXE=${HAXE:-haxe/haxe}
 CC=${CC:-tcc}
 if [ "${1:-}" = port ]; then
 	OUT=${PORT_OUT:-bin/hxc/hih}
-	ARGS="-cp src -main haxe.Main -cp runtime/js -D disable-parallelism"
+	ARGS="-cp src -main haxe.Main -cp hxc/js -D disable-parallelism"
 	BIN=${BIN:-hih}
 else
 	MAIN=${2:-Bench}
@@ -33,10 +33,10 @@ mkdir -p "$OUT"
 if [ -n "${EMXX:-}" ]; then HXC_SINGLE=1; fi
 export HXC_SINGLE=${HXC_SINGLE:-0}
 # bin/hxc/std: the hxc target's std (hxc/std) with the Eval originals for macros
-# (given last: the last class path wins over earlier ones, e.g. runtime/js)
+# (given last: the last class path wins over earlier ones, e.g. hxc/js)
 python3 hxc/tools/mkstd.py
 if [ -z "${SKIP_TOOL:-}" ]; then
-	"$HAXE" -cp src -cp hxc/src -main backend.Main -lib hxnodejs -cp runtime/js --js bin/hxc/wbk.js -w -WDeprecated
+	"$HAXE" -cp src -cp hxc/src -main backend.Main -lib hxnodejs -cp hxc/js --js bin/hxc/wbk.js -w -WDeprecated
 fi
 # hxnodejs's stdout flush fails on pipes, hence the file
 HAXE_STD_PATH=${HAXE_STD_PATH:-$PWD/haxe/std} node --stack-size=65500 bin/hxc/wbk.js "$OUT/prog" \

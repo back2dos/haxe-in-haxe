@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Benchmark the pinned reference compiler against the translated compiler
-(haxe.Main) built for several targets (see bench/build.sh) and run on the
+(haxe.Main) built for several targets (see site/bench/build.sh) and run on the
 reference's Eval (from source, or from an Eval HXB archive).
 
 Each run compiles a workload to HXB with -D disable-parallelism. Every
@@ -11,7 +11,7 @@ Per run, wall time, CPU time (user + system of the child and its reaped
 descendants, from wait4) and peak RSS are recorded; the report gives the
 minimum and median over N runs.
 
-Usage: HAXE_REFERENCE=haxe/haxe python3 bench/run.py [-n RUNS] [--runs RUNNER=N ...]
+Usage: HAXE_REFERENCE=haxe/haxe python3 site/bench/run.py [-n RUNS] [--runs RUNNER=N ...]
            [-w WORKLOAD ...] [--json FILE] [runner ...]
 
 --json merges the results into FILE (entries are keyed by workload and runner,
@@ -19,7 +19,7 @@ so separate invocations, e.g. a slow runner with -n 1, can fill one file).
 """
 import argparse, datetime, json, os, pathlib, platform, re, resource, shutil, statistics, subprocess, sys, tempfile, time, zipfile
 
-ROOT = pathlib.Path(__file__).resolve().parents[1]
+ROOT = pathlib.Path(__file__).resolve().parents[2]
 BIN = ROOT / "bin/bench"
 STD = ROOT / "haxe/std"
 # The port as an Eval HXB archive, for the eval-hxb runner (built on demand).
@@ -32,7 +32,7 @@ NODE_WASM = os.environ.get("NODE_WASM", "node")
 
 WORKLOADS = {
     # name: (cwd, arguments)
-    "hello": (ROOT / "bench/workloads", ["-cp", ".", "--main", "Hello"]),
+    "hello": (ROOT / "site/bench/workloads", ["-cp", ".", "--main", "Hello"]),
     "trycatch": (ROOT, ["-cp", "test", "--main", "unit.moduleload.TryCatch"]),
     # Many std modules as bare roots.
     "stdlib": (ROOT, """haxe.Json haxe.Serializer haxe.Unserializer haxe.crypto.Sha256 haxe.crypto.Md5
@@ -63,11 +63,11 @@ def runners(reference):
         "hxc": [str(ROOT / "bin/hxc/hih/hih")],
         "hxc-o2": [str(ROOT / "bin/hxc/hih/hih_o2")],
         "hxc-clang": [str(ROOT / "bin/hxc/hih/hih_clang")],  # CC="clang -O2" BIN=hih_clang sh hxc/build.sh port
-        # docs/COSMO.md: Cosmopolitan builds (cosmocc -O2), fat x86-64 + aarch64 and x86-64 only
+        # Cosmopolitan builds (cosmocc -O2), fat x86-64 + aarch64 and x86-64 only
         "hxc-cosmo": ["sh", str(ROOT / "bin/hxc/hih/hih.com")],  # APE: started by the shell without binfmt_misc
         "hxc-cosmo-x86": ["sh", str(ROOT / "bin/hxc/hih/hih_x86.com")],
         # hxc's C compiled by Emscripten (wasm64, wasm exceptions) for Node with
-        # direct file system access (sh bench/build.sh wasm); the site's build uses MEMFS.
+        # direct file system access (sh site/bench/build.sh wasm); the site's build uses MEMFS.
         # memory64 needs Node 24 (NODE_WASM, e.g. emsdk's node)
         "wasm": [NODE_WASM, "--stack-size=65500", str(BIN / "wasm/hih.js")],
     }

@@ -146,7 +146,7 @@ class Build {
 	}
 
 	static function findCc():String {
-		// clang first: 4-10% less CPU than gcc on the self-compile (bench/README.md, 2026-10-09 clang)
+		// clang first: 4-10% less CPU than gcc on the self-compile (site/bench/README.md, 2026-10-09 clang)
 		for (c in ["clang", "cc", "gcc", "tcc"])
 			if (exists(c)) return c;
 		Sys.println("hxc: no C compiler found (clang, cc, gcc or tcc); using cosmocc");

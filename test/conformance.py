@@ -26,7 +26,7 @@ workers, so its own output is otherwise not reproducible run to run.
 By default the port is compiled to HashLink bytecode and executed with `hl`
 (HAXE_HL selects the VM), which is an order of magnitude faster than Eval.
 HAXE_IN_HAXE_PORT replaces that with another prebuilt port command, for
-example "node bin/bench/hih.js" from bench/build.sh.
+example "node bin/bench/hih.js" from site/bench/build.sh.
 --eval additionally executes the port from an Eval HXB archive built by the
 reference and from source on Eval, and requires both to reproduce the
 HashLink output exactly (Eval-HXB host execution parity).
@@ -161,14 +161,14 @@ def main():
     cases = [c for c in parse_cases(ROOT / opts.cases) if not opts.filters or any(f in c["name"] for f in opts.filters)]
     GENERATED.mkdir(parents=True, exist_ok=True)
     if os.environ.get("HAXE_IN_HAXE_PORT"):
-        # Another build of the port, e.g. "node --stack-size=65500 bin/bench/hih.js" (see bench/build.sh).
+        # Another build of the port, e.g. "node --stack-size=65500 bin/bench/hih.js" (see site/bench/build.sh).
         port_cmd = [str(ROOT / a) if (ROOT / a).is_file() else a for a in shlex.split(os.environ["HAXE_IN_HAXE_PORT"])]
     else:
         hl = os.environ.get("HAXE_HL") or shutil.which("hl")
         if not hl:
             raise SystemExit("HashLink (hl) not found; set HAXE_HL")
         port_hl = GENERATED / "haxe-in-haxe.hl"
-        code, _ = run([reference, "-cp", str(ROOT / "runtime/hl"), "-cp", str(ROOT / "src"), "-main", "haxe.Main", "-hl", str(port_hl)], ROOT, GENERATED / "build-hl.log", env)
+        code, _ = run([reference, "-cp", str(ROOT / "test/hl"), "-cp", str(ROOT / "src"), "-main", "haxe.Main", "-hl", str(port_hl)], ROOT, GENERATED / "build-hl.log", env)
         if code != 0:
             raise SystemExit("Building the port for HashLink failed; see " + str(GENERATED / "build-hl.log"))
         port_cmd = [hl, str(port_hl)]

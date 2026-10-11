@@ -1,173 +1,27 @@
-# HXB Execution and Conformance Tests
+# Tests
 
-See [TESTING.md](TESTING.md) for current results. The main harness is
-`conformance.py` (case list `conformance-cases.txt`, discovery
-`discover-cases.py`, exclusions `upstream-hxb-exclusions.md`); the shell
-scripts below are single-fixture versions of the same checks.
+Every harness compares the port with the reference compiler built from
+`haxe/` (`HAXE_REFERENCE`, an absolute path). By default they build and run
+the HashLink build of the port (`test/generated/conformance/haxe-in-haxe.hl`,
+written by `conformance.py`); `HAXE_IN_HAXE_PORT=<command>` runs another
+build, typically `bin/hxc/hih/hih_clang`. Generated files go to
+`test/generated/` (ignored by Git). Current results: [TESTING.md](TESTING.md).
 
-The oracle and initial execution host are the same executable: `haxe` built
-from the sibling `haxe/` submodule at the pinned revision. Do not substitute an
-unrelated system release when recording results.
+| Harness | What it compares |
+| --- | --- |
+| `conformance.py` | HXB archives for every case of a case list: member names and every uncompressed `.hxb` payload; rejected cases must be rejected alike. `--hxb-lib` also loads each archive back with both compilers; `--parallel N` runs the port in parallel mode and compares after normalizing variable ids; `--eval` runs the port from an Eval HXB archive through the reference's `--hxb-lib`. |
+| `conformance-*cases.txt` | The case lists: `conformance-cases.txt` (286 configurations of the upstream test suite that compile to HXB), `-macro-` (66, run macros), `-hxblib-` (archives as libraries), `-upstream-` (upstream CI's macro job), `-party-` (tink_core, hxcoro). `discover-cases.py` (with `macro-probe.patch`) regenerates the main list; `upstream-hxb-exclusions.md` lists what is excluded and why. `display-snippet-cases.py` turns the display snippets into cases. |
+| `fuzz/` | The differential fuzzer: random well-typed programs, compared per target (`diff:<target>`: diagnostics and every output file) or by program output (`exec:<a>,<b>`), with reduction of failures. See [fuzz/README.md](fuzz/README.md). |
+| `interp.py` | Program output and exit code of `--interp` runs. |
+| `upstream.py` | Upstream CI's target-independent job (`tests/runci/targets/Macro.hx`): unit, misc, threads, display, server, the third-party projects. |
+| `display.py` | `--display` JSON-RPC requests from upstream's display tests (completion, hover, definition, references, diagnostics…). Upstream removed `tests/display`; the corpus is extracted from the commit before (`HAXE_DISPLAY_CORPUS` overrides). |
+| `server.py` | The compilation server (`--wait`/`--connect`/`--server-connect`): repeated compiles with cache reuse, edits and invalidation (with the verbose server logs), output, stdin, `--cmd`, errors. |
+| `server-jsonrpc.py` | The `server/*` JSON-RPC methods through a running server, both cache modes. |
+| `eval-debugger.py` | Scripted Eval debugger sessions (breakpoints, stepping, scopes, evaluate). |
+| `haxelib.py` | `-L`/`--library` against a local haxelib repository, batch and through the server. |
+| `unit.hxml`, `unit/` | Unit tests of port modules, run in-process on Eval: `haxe/haxe test/unit.hxml`. |
+| `compile-all.hxml` | Types every port module, including those `haxe.Main` does not reach. |
+| `hl/` | Std overrides for the HashLink build of the port. |
 
-The exact conformance harness also passes the checkout's `haxe/std` explicitly
-to the reference. Setting `HAXE_STD_PATH` alone is insufficient for native
-Haxe: its compiled-in installation path can otherwise leak into serialized
-source positions and produce a false first payload mismatch.
-
-## Compilation server and haxelib
-
-`server.py` starts the reference and the port as compilation servers
-(`--wait`) and sends both the same requests through `--connect`: every
-conformance case several times in a row (cache reuse), an edit/invalidate
-sequence on a scratch project (whose verbose `-v` server logs must also agree),
-program output, stdin forwarding, `--cmd`, errors and `--next` (`misc`), and
-length-prefixed requests over `--server-connect`. `haxelib.py` compiles `-L`
-invocations against a local haxelib repository (`haxelib newrepo` and `haxelib
-dev`, no network), in batch and (`--server`) through the servers.
-
-```sh
-HAXE_REFERENCE=haxe/haxe python3 test/server.py -j 2
-HAXE_REFERENCE=haxe/haxe python3 test/server.py --cases test/conformance-macro-cases.txt --scenario cases -j 2
-HAXE_REFERENCE=haxe/haxe python3 test/haxelib.py --server
-```
-
-## Eval-HXB execution
-
-Run:
-
-```sh
-HAXE_REFERENCE=/absolute/path/to/pinned/haxe \
-  sh test/eval-hxb-execution.sh
-```
-
-This is expected to pass before full compiler conformance. It:
-
-1. compiles the port's Haxe source to an Eval-target HXB with the pinned
-   compiler;
-2. executes the source form of `haxe.Main` to compile a fixture;
-3. loads the compiler archive through `--hxb-lib` and executes `haxe.Main`
-   again with the same arguments;
-4. compares both emitted fixture archives member-by-member.
-
-The compiler archive must contain `eval/haxe/Main.hxb`. A `cross/haxe/Main.hxb`
-member is a portable serialized artifact, but the Eval loader will not select
-it for `--run`. Renaming the prefix is invalid because target configuration is
-part of typing.
-
-This test proves host execution, not self-hosting: the pinned compiler still
-types the port and supplies the Eval runtime. It also does not make the outer
-compiler execute macros on behalf of the compiler under test.
-
-## Compiler conformance
-
-For every compilable Haxe test-suite example, the harness must:
-
-1. run the reference compiler with the example's effective arguments plus an
-   HXB output path;
-2. build this project's compiler as Eval HXB with the reference compiler;
-3. load it through `--hxb-lib` and run it with the identical effective
-   arguments and an HXB output path;
-4. compare the normalized ZIP member-name sets;
-5. compare every uncompressed `.hxb` member payload byte-for-byte.
-
-Do not compare the complete archive files. ZIP timestamps, member ordering,
-headers, and compressor output can differ while the HXB payloads are identical.
-
-The harness must use separate temporary output directories and a stable working
-`test/reference/` only when deliberately cached; generated artifacts belong in
-`test/generated/`. Both are ignored by Git.
-
-The first concrete comparison case is available through:
-
-```sh
-HAXE_REFERENCE=/absolute/path/to/pinned/haxe sh test/conformance.sh
-```
-
-`HAXE_REFERENCE` must be the executable built from this checkout's `haxe/`
-submodule. The harness invokes the port's batch driver from Eval HXB, normalizes
-member names, and uses `cmp` on extracted member payloads. On failure it reports
-the first differing member, byte offset, and module root for a record dump. The
-focused `cross/unit/moduleload/Basic.hxb` payload currently matches exactly;
-the required whole-archive comparison remains red.
-
-Both harnesses use `test/compare-hxb.sh`. It compares the complete normalized
-member-name set and the uncompressed payload of each `.hxb` member; it never
-compares ZIP container bytes. An optional third argument selects one member for
-a focused payload check; this is diagnostic coverage and does not replace the
-subsequent whole-archive comparison.
-
-For an immediate local comparison against the `haxe` executable on `PATH`, run
-`haxe test/conformance.hxml`. This target is expected to fail until the port
-matches the host compiler member-by-member; it reports the first differing
-member or payload byte.
-
-"Compilable" means the reference invocation exits successfully. Tests that
-require a non-HXB target, a runtime, or external services may be discovered but
-are not in the initial conformance set. Macro-bearing tests are likewise
-excluded, with their reason recorded, until the Eval macro milestone. Do not
-treat expected-failure compiler tests as HXB comparison cases.
-
-## Reusing upstream tests before full conformance
-
-The upstream suite is useful in three distinct lanes; do not merge their pass
-criteria:
-
-- `haxe test/upstream-parser-corpus.hxml` parses every pinned upstream unit
-  source and guards the current breadth floor. It includes macro and
-  expected-failure sources because parsing them does not execute or validate
-  them. Its score is a directional parser metric, not compiler conformance.
-- Source-only, macro-free cases may become HXB conformance cases only after the
-  pinned reference compiler accepts their effective HXB invocation. Compare
-  those archives member-by-member with `test/compare-hxb.sh`.
-- Macro, target-runtime, display/server, external-library, and expected-failure
-  cases remain explicitly excluded until their corresponding milestone exists.
-
-The current parser-corpus floor is 1,339 of 1,366 source files. Increasing that
-number is useful progress; it does not mean those files type or emit conforming
-HXB.
-
-`test/upstream-parser-exclusions.md` classifies the 27-source remainder so
-macro-only and target-specific syntax does not displace first-milestone work.
-
-Set `HAXE_PARSER_REPORT_FAILURES=1` to list each rejected source and its first
-parser error while keeping the same coverage assertion.
-
-`HAXE_REFERENCE=/absolute/path/to/pinned/haxe sh test/upstream-hxb-smoke.sh`
-is the intermediate typing/emission lane. Each listed source-only case must be
-accepted by the reference compiler, compile through the port, and produce an
-archive the reference compiler can consume. Payload differences remain visible
-work and do not become conformance passes merely because consumption succeeds.
-Discovered exclusions and their current reasons are recorded in
-`test/upstream-hxb-exclusions.md`.
-
-The current breadth set contains 112 direct source roots and 9 effective HXML
-configurations. A retained pass must type every non-extern field body; an
-unsupported expression is a failure, never an omitted body.
-Reference consumption is still only a smoke check while source classpaths are
-present: the reference compiler may load a dependency omitted from the archive
-from source. Conformance still requires the complete reference member set.
-
-Expression-local IDs and generated temporaries are serialized semantics. If a
-payload differs only in these values, fix typer allocation and transformation
-order; do not canonicalize the payload before comparing it.
-Variable IDs come from a compiler-wide stream, so the alphabetically first
-differing member may only expose an earlier module-scheduling or lowering
-difference. Compare typed dumps as well as the first binary offset before
-assigning the defect to that member.
-
-The current allocation stream first diverges in `haxe.CallStack`'s complex
-enum-pattern lowering: upstream allocates matcher temporaries which the port
-does not yet create, shifting later IDs (including otherwise matching simple
-fixtures). Implement matcher parity; never seed or offset the global counter to
-hide this gap.
-
-Abstract construction is also not ordinary `TNew`: upstream resolves the
-abstract's constructor field and lowers/inlines it through the implementation
-class. Until that path exists, such roots are explicit smoke exclusions; never
-serialize an unresolved constructor placeholder.
-
-The remaining generic `TIdent` fallback is not conformance: upstream only
-creates such nodes for deliberate untyped/display/compiler-intrinsic paths.
-Before treating smoke roots as strict typing coverage, complete inherited,
-`super`, and import resolution, confine `TIdent` to those upstream cases, and
-reject every other unresolved identifier.
+Sequential runs pass `-D disable-parallelism`: the reference itself is not
+deterministic in parallel mode.

@@ -2,7 +2,7 @@ package backend;
 
 import backend.Ir;
 
-// IR -> C against hxc/rt/rt.h (docs/WASM-BACKEND.md).
+// IR -> C against hxc/rt/rt.h (hxc/README.md).
 // Reference locals live across a GC point get shadow-stack slots (`fr[k]`,
 // see Roots); everything else is a plain C local.
 class EmitC {

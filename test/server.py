@@ -431,7 +431,7 @@ def main():
     else:
         hl = os.environ.get("HAXE_HL") or shutil.which("hl")
         port_hl = GENERATED / "haxe-in-haxe.hl"
-        code = subprocess.run([reference, "-cp", str(ROOT / "runtime/hl"), "-cp", str(ROOT / "src"), "-main", "haxe.Main", "-hl", str(port_hl)], cwd=ROOT, env=env).returncode
+        code = subprocess.run([reference, "-cp", str(ROOT / "test/hl"), "-cp", str(ROOT / "src"), "-main", "haxe.Main", "-hl", str(port_hl)], cwd=ROOT, env=env).returncode
         if code != 0:
             raise SystemExit("Building the port for HashLink failed")
         port_cmd = [hl, str(port_hl)]

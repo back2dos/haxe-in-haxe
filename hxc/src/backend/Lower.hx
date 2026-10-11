@@ -10,7 +10,7 @@ import core.TFunctions;
 using core.TFunctions;
 
 // Lowers the filtered typed AST (the data HXB serializes) of everything
-// reachable from `main` to the IR (docs/WASM-BACKEND.md).
+// reachable from `main` to the IR (hxc/README.md).
 //
 // Representation (see Ir.hx): Int/Bool/Float and haxe.Int64 unboxed;
 // everything else is a pointer. Generics are erased: a type parameter is Dynamic (RAny), and values

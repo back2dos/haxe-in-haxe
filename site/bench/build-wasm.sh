@@ -1,11 +1,11 @@
 #!/bin/sh
-# Builds the HL/C output of the compiler (bin/bench/hlc, from `sh bench/build.sh hlc`)
+# Builds the HL/C output of the compiler (bin/bench/hlc, from `sh site/bench/build.sh hlc`)
 # to WebAssembly with Emscripten, for Node.js:
 #
-#   HL_SRC=/path/to/hashlink ZLIB_SRC=/path/to/zlib-1.3.x sh bench/build-wasm.sh
+#   HL_SRC=/path/to/hashlink ZLIB_SRC=/path/to/zlib-1.3.x sh site/bench/build-wasm.sh
 #   HAXE_STD_PATH=$PWD/haxe/std node --liftoff-only --stack-size=60000 bin/bench/wasm/hih.js ...
 #
-# - Stock HashLink runtime (not bench/patches/libhl-allocator.patch), single-threaded
+# - Stock HashLink runtime (not site/bench/patches/libhl-allocator.patch), single-threaded
 #   (HL_NO_THREADS: the compiler then runs its parallel loops inline).
 # - Binaryen's --spill-pointers keeps pointers held in wasm locals visible to
 #   libhl's conservative stack scan.
@@ -16,7 +16,7 @@
 # - Run with --liftoff-only: V8's optimizing tier spends ~20s on the large
 #   functions and the program waits for it.
 set -eu
-cd "$(dirname "$0")/.."
+cd "$(dirname "$0")/../.."
 : "${HL_SRC:?HashLink source directory}" "${ZLIB_SRC:?zlib source directory}"
 OUT=bin/bench/wasm
 mkdir -p "$OUT/obj"

@@ -1,125 +1,55 @@
-# Agent Guide
+# Contributor guide
 
-## Mission and scope
+This file is for people and coding agents changing the port.
 
-Port the Haxe compiler in `haxe/src/` to Haxe in `src/`, keeping the port close
-to upstream. The first functional target was HXB; the current milestone is the
-ordinary target generators (`haxe/src/generators/`: JS, Lua, Python, PHP, Neko,
-HL, JVM, C++, SWF) in `src/generators/`. A ported generator is conforming when
-its output is byte-identical to the reference compiler's for the same
-invocation, checked with the fuzzer's `diff:<target>` lane (`test/fuzz`) on
-generated output only; running the generated programs (`--run`, e2e) is not
-required.
+## Scope
 
-`haxe/` is a Git submodule and the canonical reference. Do not edit its files,
-commit inside it, or update its revision as part of ordinary porting work.
+`src/` is a port of the Haxe compiler in `haxe/src/` that must behave exactly
+like the reference compiler built from the `haxe/` submodule. `hxc/` is the C
+backend that compiles the port (and other programs) to native code. `haxe/` is
+the canonical reference: never edit its files or commit inside it; moving the
+pinned revision is a deliberate change that also ports every upstream commit
+in between and rebuilds the reference (`make -C haxe haxe`).
 
-## Milestones and boundaries
+`haxe/libs/` holds OCaml implementation dependencies. Reproduce the behavior
+they provide (`src/libs/` has the Neko bytecode compiler, swflib, zlib deflate,
+extlib IO, ziplib) rather than porting them mechanically, and only what the
+compiler reaches.
 
-- The first functional milestone is a host-executed, source-only, macro-free
-  compiler which types Haxe programs and emits conforming HXB archives. Use the
-  pinned compiler to build an Eval-target HXB of the port, then execute it with
-  `--hxb-lib` as the first runtime path. HXB is a serialized compiler artifact,
-  not a standalone executable target; this host execution is not self-hosting.
-- HXB-only still requires the complete parsing, module-loading, typing,
-  finalization, and cross-target filtering path. It does not require ordinary
-  target generators or target-specific code generation.
-- Treat macro execution, HXB-library input in the port itself, haxelib
-  integration, display/server services, and self-hosting as later explicit
-  milestones. Loading the port through the pinned compiler's existing
-  `--hxb-lib` support does not require porting HXB-library input. Exclude
-  affected tests with a recorded reason until their milestone is implemented;
-  never fake successful typing or macro results.
-- Macro support requires a separate Eval macro context and Macro API bridge.
-  The Eval runtime needed to execute macros is in scope for that milestone even
-  though exposing `--interp` as a user target is not.
-- `haxe/libs/` contains OCaml implementation dependencies, not modules to port
-  mechanically. Reproduce required behavior with Haxe/runtime APIs. Neko, SWF,
-  and object-size support are not required for HXB; regex, process, filesystem,
-  compression, and TLS support may become necessary for compatible macros.
+## Porting rules
 
-## Implementation rules
-
-### Current phase: runtime testing and integration
-
-The translation snapshot and compilation fixes are committed. The bootstrap
-and all-module builds pass. Exercise the translated HXB pipeline at runtime,
-preserving upstream declarations, branch order, and behavior. Do not replace untranslated behavior with successful no-ops or
-empty stubs, and do not exclude in-scope modules to obtain a passing build.
-Independent file groups may be handled by subagents.
-
-Testing is now authorized. Keep `test/translated-pipeline.hxml` distinct from
-the legacy bootstrap lanes: the existing bootstrap entry point does not execute
-the new typer. Draft translations and successful compilation are not evidence
-of compiler conformance. Track test results in `test/TESTING.md` and source
-coverage in `TRANSLATION.md`.
-
-- Read the corresponding upstream OCaml module before adding or changing a
-  ported Haxe module.
-- Preserve ordering, branch structure, exception/error behavior, and data
-  layout whenever possible. Prefer a direct translation over a redesign.
-- Preserve identity and insertion order for serialized HXB pools and reference
-  indices. Do not derive binary ordering from unspecified `Map` iteration.
-- Keep Haxe modules under `src/` traceable to their `haxe/src/` sources. Add a
-  short source-path comment only when the mapping is not evident from names and
-  layout.
-- Isolate unavoidable semantic differences rather than spreading abstraction
-  layers through the port.
-- After the translation phase, restore and keep the bootstrap build working:
-  `haxe haxe-in-haxe.hxml`.
-
-## Testing rules
-
-- Generators: `sh hxc/tools/port-dev.sh` builds the port (`bin/port/hih`), then
-  `bin/fuzz/fuzz --port $PWD/bin/port/hih --lane diff:<target> -j N` compares
-  its output with the reference compiler's (see `test/fuzz/README.md`).
-
-- The reference compiler is the executable built from the checked-out `haxe/`
-  submodule, not an arbitrary system Haxe installation.
-- HXB conformance means the same normalized ZIP member-name set and
-  byte-for-byte equality of every uncompressed `.hxb` member payload for the
-  same effective invocation. Never compare whole archive bytes: ZIP timestamps,
-  headers, member order, and compressor output are container details.
-- When supported, also verify that the pinned reference compiler can consume
-  produced archives through `--hxb-lib`.
-- Independently verify Eval-HXB host execution: compile the port to an
-  `eval/...` archive with the pinned compiler, execute `haxe.Main` from that
-  archive, and compare its output member-by-member with the source-executed
-  port's output for the same invocation.
-- Cover every upstream test-suite example that the reference compiler can
-  successfully compile to HXB. Exclude expected-failure and non-HXB-target-only
-  cases from that comparison set, while recording why a discovered case is
-  excluded.
-- Run focused conformance cases for a changed subsystem and the full available
-  conformance suite before declaring broad changes complete.
-- The bootstrap build only checks that the port can be compiled to HXB; it is
-  not compiler conformance or proof that the generated artifact can execute.
-- Never commit `bin/`, `test/generated/`, `test/reference/`, or local Haxelib
-  state.
+- Read the upstream OCaml module before adding or changing its Haxe
+  counterpart, and keep the counterpart at the matching path (`typing/typer.ml`
+  becomes `src/typing/Typer.hx`).
+- Preserve function order, branch order, data layout, error messages and
+  exception behavior. Prefer a direct translation over a redesign.
+- Reproduce OCaml semantics that reach the output: `Hashtbl` iteration order
+  (`core.ds.OcamlHashtbl`), `PMap` order (sorted keys), right-to-left
+  evaluation of arguments with side effects, float printing
+  (`core.Numeric`, `core.ds.OcamlPrintf`), 31/63-bit integer behavior.
+  Never derive output order from Haxe `Map` iteration.
+- Never stub out behavior with a silent success. Code the port cannot support
+  fails explicitly with a `// port:` note.
 
 ## Comments
 
-- Comments from the upstream OCaml source stay in the port at the matching
-  place, with upstream's wording (`(** *)` becomes `/** */`).
+- Comments from the upstream source stay at the matching place with upstream's
+  wording (`(** *)` becomes `/** */`).
 - Every other comment in `src/` starts with `// port:` (continuation lines
-  `// ...`): port-specific code, deviations, host-runtime adaptations,
-  OCaml-semantics emulation. Keep them true; remove them with the code they
-  describe.
-- `python3 tools/comment-only-diff.py [REV]` checks that changes to `.hx`
-  files touch only comments and whitespace.
+  `// ...`): deviations, host adaptations, OCaml-semantics emulation. Keep them
+  true and remove them with the code they describe.
 
-## Layout
+## Testing
 
-`src/` is the port, `hxc/` the C target (lowering in `hxc/src`, runtime in
-`hxc/rt`, target std in `hxc/std`), `runtime/` the host std overrides for
-building the port with HashLink or Node, `test/` and `bench/` the harnesses,
-`docs/` design notes, `archive/` reference code outside every build.
-
-## Working conventions
-
-- Treat generated HXB files as diagnostics, not source artifacts.
-- Make the smallest mechanical change that preserves upstream behavior.
-- Document deliberate deviations from upstream adjacent to the changed code or
-  in the change description.
-- The historical `elnabo/haxe_in_haxe` repository is reference material only;
-  verify any idea from it against the current pinned upstream compiler.
+- The reference is the binary built from `haxe/`, never a system Haxe.
+- Conformance means the same normalized ZIP member names and byte-identical
+  uncompressed `.hxb` payloads (never whole-archive bytes), and for the target
+  generators byte-identical output files.
+- Before declaring a change done, run the lanes it can affect
+  (`test/README.md`): HXB conformance and macro cases for anything in typing
+  or filters, the fuzzer's `diff:<target>` lanes for generators, display and
+  server for those services, and the full matrix for broad changes.
+- Fast loop: `sh hxc/tools/port-dev.sh` rebuilds `bin/port/hih` in seconds
+  (`CC=tcc`), then `bin/fuzz/fuzz --port $PWD/bin/port/hih --lane diff:<target>`.
+- Record results in `test/TESTING.md`. Never commit `bin/`, `test/generated/`,
+  `test/reference/` or local haxelib state.
