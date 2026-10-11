@@ -59,9 +59,11 @@ class StringHelper {
 
 	public static function escapeResName(name:String, allowed:Array<String>):String {
 		var result = new StringBuf();
-		for (index in 0...name.length) {
-			var character = name.charAt(index);
-			var code = name.charCodeAt(index);
+		// port: OCaml escapes each byte; a non-ASCII character is escaped as its UTF-8 bytes.
+		var bytes = haxe.io.Bytes.ofString(name);
+		for (index in 0...bytes.length) {
+			var code = bytes.get(index);
+			var character = String.fromCharCode(code);
 			if ((code >= "a".code && code <= "z".code)
 				|| (code >= "A".code && code <= "Z".code)
 				|| (code >= "0".code && code <= "9".code)

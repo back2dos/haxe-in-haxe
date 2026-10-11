@@ -257,7 +257,7 @@ class Gen {
 			m("public static function capa<T>(a:Array<T>):Array<T>\n\treturn a.length > 1000 ? a.slice(0, 1000) : a;"),
 			m("public static function cf(f:Float):Float\n\treturn Math.isNaN(f) ? 0 : f > 1e6 ? 1e6 : f < -1e6 ? -1e6 : f;"),
 			m("public static function fmt(f:Float):String {\n\tif (Math.isNaN(f))\n\t\treturn \"nan\";\n\tif (!Math.isFinite(f))\n\t\treturn f > 0 ? \"inf\" : \"-inf\";\n\tif (Math.abs(f) > 1e9)\n\t\treturn \"big\";\n\treturn Std.string(Math.fround(f * 100.0) / 100.0);\n}"),
-			m("public static function exn(e:Dynamic):String {\n\tif (Std.isOfType(e, Fuel))\n\t\treturn \"fuel\";\n\tif (Std.isOfType(e, String) || Std.isOfType(e, Int) || Std.isOfType(e, Bool))\n\t\treturn Std.string(e);\n\tif (Std.isOfType(e, Err))\n\t\treturn \"Err\" + (e : Err).code;\n\treturn \"other\";\n}"),
+			m("public static function exn(e:Dynamic):String {\n\tif (Std.isOfType(e, Fuel))\n\t\treturn \"fuel\";\n\tif (Std.isOfType(e, String) || Std.isOfType(e, Int) || Std.isOfType(e, Bool))\n\t\treturn Std.string(e);\n\tif (Std.isOfType(e, Err))\n\t\treturn \"Err\" + (e : Err).errCode;\n\treturn \"other\";\n}"),
 			m("public static function id<T>(x:T):T\n\treturn x;"),
 			m("public static function apply<T, U>(x:T, f:T->U):U\n\treturn f(x);"),
 			m("@:generic public static function first<T>(a:Array<T>, d:T):T\n\treturn a.length > 0 ? a[0] : d;"),
@@ -267,7 +267,7 @@ class Gen {
 		return new Block([
 			h,
 			m("class Fuel {\n\tpublic function new() {}\n}"),
-			m("class Err extends haxe.Exception {\n\tpublic var code:Int;\n\n\tpublic function new(code:Int) {\n\t\tsuper(\"err\" + code);\n\t\tthis.code = code;\n\t}\n}"),
+			m("class Err extends haxe.Exception {\n\tpublic var errCode:Int;\n\n\tpublic function new(code:Int) {\n\t\tsuper(\"err\" + code);\n\t\tthis.errCode = code;\n\t}\n}"),
 			m("class Box<T> {\n\tpublic var value:T;\n\n\tpublic function new(v:T) {\n\t\tvalue = v;\n\t}\n\n\tpublic function get():T\n\t\treturn value;\n\n\tpublic function map<U>(f:T->U):Box<U>\n\t\treturn new Box(f(value));\n}"),
 		], false);
 	}
@@ -1947,7 +1947,7 @@ class Gen {
 			ctx.vars.push({name: x, t: ct, mutable: false, callable: false});
 			var b = block(ctx, d - 1, 1 + r.int(2));
 			var report = switch c {
-				case "Err": new Node([S("H.out(\"caught Err \" + " + x + ".code);")]);
+				case "Err": new Node([S("H.out(\"caught Err \" + " + x + ".errCode);")]);
 				case "haxe.Exception": new Node([S("H.out(\"caught \" + H.exn(" + x + "));")]);
 				case "Dynamic": new Node([S("H.out(\"caught \" + H.exn(" + x + "));")]);
 				default: new Node([S("H.out(\"caught " + c + " \" + " + x + ");")]);
