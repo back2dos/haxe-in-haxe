@@ -187,6 +187,7 @@ class Lower {
 					case "Class" | "Enum" if (isStd): TRef(RType);
 					case "EnumValue" if (isStd): TRef(REnum(null));
 					case "UInt" if (isStd): TI32;
+					case "I64" if (a.aPath.pack.join(".") == "hxc"): TI64;
 					case _:
 						if (core.Meta.has(CoreType, a.aMeta)) fail("core type " + a.aPath.name);
 						ty(core.Abstract.getUnderlyingType(a, params));

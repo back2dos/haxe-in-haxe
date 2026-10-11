@@ -913,6 +913,23 @@ void *hx_box_float(double v) {
 	return b;
 }
 
+void *hx_box_i64(int64_t v) {
+	void *b = rt_alloc_init(1, T_BOXI64, K_OBJ);
+	FL(b, 0) = v;
+	return b;
+}
+
+int64_t hx_unbox_i64(void *v) {
+	if (!v) return 0;
+	switch (TINDEX(v)) {
+	case T_BOXINT:
+	case T_BOXBOOL: return FI(v, 0);
+	case T_BOXFLOAT: return hx_f2l(FD(v, 0));
+	case T_BOXI64: return FL(v, 0);
+	default: return 0;
+	}
+}
+
 void *hx_box_bool(int32_t v) {
 	return &bool_boxes[v ? 3 : 1];
 }
@@ -923,6 +940,7 @@ int32_t hx_unbox_int(void *v) {
 	case T_BOXINT:
 	case T_BOXBOOL: return FI(v, 0);
 	case T_BOXFLOAT: return hx_f2i(FD(v, 0));
+	case T_BOXI64: return (int32_t)(uint32_t)(uint64_t)FL(v, 0);
 	default: return 0;
 	}
 }
@@ -933,6 +951,7 @@ double hx_unbox_float(void *v) {
 	case T_BOXINT:
 	case T_BOXBOOL: return FI(v, 0);
 	case T_BOXFLOAT: return FD(v, 0);
+	case T_BOXI64: return (double)FL(v, 0);
 	default: return 0;
 	}
 }
@@ -943,6 +962,7 @@ int32_t hx_unbox_bool(void *v) {
 	case T_BOXINT:
 	case T_BOXBOOL: return FI(v, 0) != 0;
 	case T_BOXFLOAT: return FD(v, 0) != 0;
+	case T_BOXI64: return FL(v, 0) != 0;
 	default: return 1;
 	}
 }
@@ -957,7 +977,8 @@ static void *data_alloc(int32_t kind, int32_t cap, int32_t *real) {
 	case AK_I32:
 		*real = (cap + 1) & ~1;
 		return rt_alloc((cap + 1) / 2, T_ADATA_RAW, K_RAW);
-	case AK_F64: *real = cap; return rt_alloc(cap, T_ADATA_RAW, K_RAW);
+	case AK_F64:
+	case AK_I64: *real = cap; return rt_alloc(cap, T_ADATA_RAW, K_RAW);
 	default: *real = cap; return rt_alloc(cap, T_ADATA_P, K_PARR);
 	}
 }
@@ -1002,7 +1023,8 @@ void hx_arr_grow(void **slot, int32_t need) {
 	uint32_t len = ARR_LEN(a);
 	switch (ARR_KIND(a)) {
 	case AK_I32: memcpy(nd, d, 4 * len); break;
-	case AK_F64: memcpy(nd, d, 8 * len); break;
+	case AK_F64:
+	case AK_I64: memcpy(nd, d, 8 * len); break;
 	default:
 		memcpy(nd, d, 8 * len);
 		// large data is allocated old: its elements may point to young objects
@@ -1022,7 +1044,7 @@ void hx_arr_to_ptr(void **slot) {
 	RT_ROOT(nd);
 	for (uint32_t i = 0; i < len; i++) {
 		a = *slot;
-		void *v = ARR_KIND(a) == AK_I32 ? hx_box_int(((int32_t *)ARR_DATA(a))[i]) : hx_box_float(((double *)ARR_DATA(a))[i]);
+		void *v = ARR_KIND(a) == AK_I32 ? hx_box_int(((int32_t *)ARR_DATA(a))[i]) : ARR_KIND(a) == AK_I64 ? hx_box_i64(((int64_t *)ARR_DATA(a))[i]) : hx_box_float(((double *)ARR_DATA(a))[i]);
 		RT_RELOAD(nd);
 		rt_set_ptr(nd, &FP(nd, i), v);
 	}
@@ -1038,7 +1060,18 @@ int32_t hx_aget_i_slow(void *a, int32_t i) {
 	switch (ARR_KIND(a)) {
 	case AK_I32: return ((int32_t *)ARR_DATA(a))[i];
 	case AK_F64: return hx_f2i(((double *)ARR_DATA(a))[i]);
+	case AK_I64: return (int32_t)(uint32_t)(uint64_t)((int64_t *)ARR_DATA(a))[i];
 	default: return hx_unbox_int(FP(ARR_DATA(a), i));
+	}
+}
+
+int64_t hx_aget_l_slow(void *a, int32_t i) {
+	if (!a || (uint32_t)i >= (uint32_t)ARR_LEN(a)) return 0;
+	switch (ARR_KIND(a)) {
+	case AK_I32: return ((int32_t *)ARR_DATA(a))[i];
+	case AK_F64: return hx_f2l(((double *)ARR_DATA(a))[i]);
+	case AK_I64: return ((int64_t *)ARR_DATA(a))[i];
+	default: return hx_unbox_i64(FP(ARR_DATA(a), i));
 	}
 }
 
@@ -1047,6 +1080,7 @@ double hx_aget_f_slow(void *a, int32_t i) {
 	switch (ARR_KIND(a)) {
 	case AK_I32: return ((int32_t *)ARR_DATA(a))[i];
 	case AK_F64: return ((double *)ARR_DATA(a))[i];
+	case AK_I64: return (double)((int64_t *)ARR_DATA(a))[i];
 	default: return hx_unbox_float(FP(ARR_DATA(a), i));
 	}
 }
@@ -1056,6 +1090,7 @@ void *hx_aget_p_slow(void *a, int32_t i) {
 	switch (ARR_KIND(a)) {
 	case AK_I32: return hx_box_int(((int32_t *)ARR_DATA(a))[i]);
 	case AK_F64: return hx_box_float(((double *)ARR_DATA(a))[i]);
+	case AK_I64: return hx_box_i64(((int64_t *)ARR_DATA(a))[i]);
 	default: return FP(ARR_DATA(a), i);
 	}
 }
@@ -1069,6 +1104,7 @@ static void store_conv(void **slot, int32_t i, int32_t vk, uint64_t v) {
 		switch (vk) {
 		case AK_I32: p = hx_box_int((int32_t)v); break;
 		case AK_F64: { double d; memcpy(&d, &v, 8); p = hx_box_float(d); break; }
+		case AK_I64: p = hx_box_i64((int64_t)v); break;
 		default: p = *(void **)(uintptr_t)v; break;
 		}
 		a = *slot;
@@ -1077,25 +1113,32 @@ static void store_conv(void **slot, int32_t i, int32_t vk, uint64_t v) {
 	}
 	if (vk == AK_PTR) {
 		void *p = *(void **)(uintptr_t)v;
-		int num = !p || TINDEX(p) == T_BOXINT || TINDEX(p) == T_BOXFLOAT || TINDEX(p) == T_BOXBOOL;
-		if (!num || (ak == AK_I32 && TINDEX(p) == T_BOXFLOAT)) {
+		uint32_t t = p ? TINDEX(p) : T_BOXINT;
+		// a value the element kind holds without loss, else the array becomes boxed
+		int fits = ak == AK_I32 ? t == T_BOXINT || t == T_BOXBOOL
+			: ak == AK_F64 ? t == T_BOXINT || t == T_BOXFLOAT || t == T_BOXBOOL
+			: t == T_BOXINT || t == T_BOXBOOL || t == T_BOXI64;
+		if (!fits) {
 			hx_arr_to_ptr(slot);
 			store_conv(slot, i, vk, v);
 			return;
 		}
 		if (ak == AK_I32) ((int32_t *)ARR_DATA(a))[i] = hx_unbox_int(p);
-		else ((double *)ARR_DATA(a))[i] = hx_unbox_float(p);
+		else if (ak == AK_F64) ((double *)ARR_DATA(a))[i] = hx_unbox_float(p);
+		else ((int64_t *)ARR_DATA(a))[i] = hx_unbox_i64(p);
 		return;
 	}
-	double d;
-	memcpy(&d, &v, 8);
-	if (ak == AK_I32 && vk == AK_F64) {
+	if (vk != ak && !(vk == AK_I32 && (ak == AK_F64 || ak == AK_I64))) {
+		// Float into Int, Int64 into Int/Float, Float into Int64: boxed
 		hx_arr_to_ptr(slot);
 		store_conv(slot, i, vk, v);
 		return;
 	}
+	double d;
+	memcpy(&d, &v, 8);
 	if (ak == AK_I32) ((int32_t *)ARR_DATA(a))[i] = (int32_t)v;
-	else ((double *)ARR_DATA(a))[i] = vk == AK_I32 ? (double)(int32_t)v : d;
+	else if (ak == AK_F64) ((double *)ARR_DATA(a))[i] = vk == AK_I32 ? (double)(int32_t)v : d;
+	else ((int64_t *)ARR_DATA(a))[i] = vk == AK_I32 ? (int64_t)(int32_t)v : (int64_t)v;
 }
 
 void hx_aset_slow(void **slot, int32_t i, int32_t vk, uint64_t v) {

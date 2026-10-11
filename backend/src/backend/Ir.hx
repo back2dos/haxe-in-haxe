@@ -9,6 +9,7 @@ enum Ty {
 	TI32;
 	TBool; // an i32 at run time; kept apart so boxing and Std.string know it
 	TF64;
+	TI64; // haxe.Int64 (hxc.I64): an int64_t, boxed in Dynamic
 	TVoid;
 	TRef(r:RefTy);
 }
@@ -206,6 +207,7 @@ enum Ex {
 	EEnumParam(c:CtorInfo, idx:Int, e:Ex);
 	EArrLen(a:Ex);
 	EArrGet(elem:Ty, a:Ex, i:Ex);
+	EArrGetU(elem:Ty, a:Ex, i:Ex); // haxe.ds.Vector: no bounds check (out of range is unspecified)
 	EBoxGet(t:Ty, b:Ex);
 	ECapture(l:LambdaInfo, idx:Int, clos:Ex);
 	EType(t:TypeRef); // runtime type descriptor (Class<T>, Enum<T> values)
@@ -233,6 +235,11 @@ enum ConvOp {
 	I2F; // Int -> Float
 	F2I; // Float -> Int, truncating (Std.int)
 	FNeg;
+	I2L; // Int -> Int64
+	L2I; // Int64 -> Int, the low 32 bits
+	L2F;
+	F2L; // truncating
+	LNeg;
 }
 
 enum BinOp {
@@ -265,6 +272,24 @@ enum BinOp {
 	FLe;
 	FGt;
 	FGe;
+	// Int64 (wrapping; shift counts are Int)
+	LAdd;
+	LSub;
+	LMul;
+	LDiv;
+	LMod;
+	LAnd;
+	LOr;
+	LXor;
+	LShl;
+	LShr;
+	LUShr;
+	LEq;
+	LNe;
+	LLt;
+	LLe;
+	LGt;
+	LGe;
 }
 
 enum Stmt {
@@ -336,6 +361,7 @@ class Ir {
 			case TI32: "i";
 			case TBool: "b";
 			case TF64: "f";
+			case TI64: "l";
 			case TVoid: "v";
 			case TRef(_): "p";
 		}
@@ -344,5 +370,5 @@ class Ir {
 		return t.match(TRef(_));
 
 	public static function isScalar(t:Ty):Bool
-		return t == TI32 || t == TBool || t == TF64;
+		return t == TI32 || t == TBool || t == TF64 || t == TI64;
 }

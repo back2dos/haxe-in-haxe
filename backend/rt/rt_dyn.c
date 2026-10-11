@@ -268,6 +268,7 @@ static void *box_slot(void *o, int32_t slot, char kind) {
 	case 'i': return hx_box_int(FH(o, slot));
 	case 'b': return hx_box_bool(FH(o, slot));
 	case 'f': return hx_box_float(FD(o, slot));
+	case 'l': return hx_box_i64(FL(o, slot));
 	default: return FP(o, slot);
 	}
 }
@@ -277,6 +278,7 @@ static void store_slot(void *o, int32_t slot, char kind, void *v) {
 	case 'i': FH(o, slot) = hx_unbox_int(v); break;
 	case 'b': FH(o, slot) = hx_unbox_bool(v); break;
 	case 'f': FD(o, slot) = hx_unbox_float(v); break;
+	case 'l': FL(o, slot) = hx_unbox_i64(v); break;
 	default: rt_set_ptr(o, &FP(o, slot), v);
 	}
 }
@@ -369,6 +371,7 @@ static void *static_get(const rt_static *s) {
 	case 'i': return hx_box_int(*(int32_t *)s->ptr);
 	case 'b': return hx_box_bool(*(int32_t *)s->ptr);
 	case 'f': return hx_box_float(*(double *)s->ptr);
+	case 'l': return hx_box_i64(*(int64_t *)s->ptr);
 	}
 	return 0;
 }
@@ -380,6 +383,7 @@ static void static_set(const rt_static *s, void *v) {
 	case 'i': *(int32_t *)s->ptr = hx_unbox_int(v); break;
 	case 'b': *(int32_t *)s->ptr = hx_unbox_bool(v); break;
 	case 'f': *(double *)s->ptr = hx_unbox_float(v); break;
+	case 'l': *(int64_t *)s->ptr = hx_unbox_i64(v); break;
 	}
 }
 
@@ -443,6 +447,7 @@ static uint64_t from_boxed(void *v, char k) {
 		memcpy(&u, &d, 8);
 		return u;
 	}
+	case 'l': return (uint64_t)hx_unbox_i64(v);
 	case 'v': return 0;
 	default: return (uint64_t)(uintptr_t)v;
 	}
@@ -487,6 +492,7 @@ uint64_t hx_anon_call_slow(void *o, int32_t fid, int32_t sig, uint64_t *args) {
 			b = hx_box_float(d);
 			break;
 		}
+		case 'l': b = hx_box_i64((int64_t)args[i]); break;
 		default: b = (void *)(uintptr_t)args[i];
 		}
 		slots[i] = b;
@@ -714,10 +720,19 @@ static int is_num(void *v) {
 	return v && (TINDEX(v) == T_BOXINT || TINDEX(v) == T_BOXFLOAT);
 }
 
+static int is_i64(void *v) {
+	return v && (TINDEX(v) == T_BOXI64 || TINDEX(v) == T_BOXINT);
+}
+
+int32_t hxc_Native_isInt64(void *v) {
+	return v && TINDEX(v) == T_BOXI64;
+}
+
 int hx_dyn_eq(void *a, void *b) {
 	if (a == b) return 1;
 	if (!a || !b) return 0;
 	uint32_t ta = TINDEX(a), tb = TINDEX(b);
+	if ((ta == T_BOXI64 || tb == T_BOXI64) && is_i64(a) && is_i64(b)) return hx_unbox_i64(a) == hx_unbox_i64(b);
 	if (is_num(a) && is_num(b)) return hx_unbox_float(a) == hx_unbox_float(b);
 	if (ta == T_BOXBOOL && tb == T_BOXBOOL) return FI(a, 0) == FI(b, 0);
 	if (ta == T_STRING && tb == T_STRING) return hx_str_eq(a, b);
@@ -726,6 +741,10 @@ int hx_dyn_eq(void *a, void *b) {
 }
 
 int32_t hx_dyn_cmp(void *a, void *b) {
+	if (a && b && (TINDEX(a) == T_BOXI64 || TINDEX(b) == T_BOXI64) && is_i64(a) && is_i64(b)) {
+		int64_t x = hx_unbox_i64(a), y = hx_unbox_i64(b);
+		return x < y ? -1 : x > y ? 1 : 0;
+	}
 	if (is_num(a) && is_num(b)) {
 		double x = hx_unbox_float(a), y = hx_unbox_float(b);
 		return x < y ? -1 : x > y ? 1 : 0;
@@ -994,6 +1013,9 @@ int32_t hxc_Native_enumEq(void *a, void *b) {
 			break;
 		case 'f':
 			if (FD(a, f->slot) != FD(b, f->slot)) return 0;
+			break;
+		case 'l':
+			if (FL(a, f->slot) != FL(b, f->slot)) return 0;
 			break;
 		default: {
 			void *x = FP(a, f->slot), *y = FP(b, f->slot);

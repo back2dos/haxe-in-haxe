@@ -9,6 +9,8 @@ extern class Native {
 	static function objHash(o:Dynamic):Int;
 	// physical equality
 	static function refEq(a:Dynamic, b:Dynamic):Bool;
+	// a boxed haxe.Int64 (rt_dyn.c)
+	static function isInt64(v:Dynamic):Bool;
 	// 0 null, 1 Int, 2 Float, 3 Bool, 4 anonymous object, 5 function, 6 class
 	// instance, 7 enum value, 8 String, 9 Array, 10 class or enum value (Class<T>), 11 other
 	static function typeKind(v:Dynamic):Int;

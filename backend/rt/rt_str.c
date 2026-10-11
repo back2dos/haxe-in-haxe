@@ -164,6 +164,12 @@ void *hx_str_of_int(int32_t v) {
 	return hx_str_of_ascii(buf);
 }
 
+void *hx_str_of_i64(int64_t v) {
+	char buf[24];
+	snprintf(buf, sizeof buf, "%lld", (long long)v);
+	return hx_str_of_ascii(buf);
+}
+
 // shortest representation that reads back as the same double, formatted like JavaScript
 void hx_format_float(double v, char *out) {
 	if (v != v) {
@@ -554,6 +560,7 @@ void *hx_std_string(void *v) {
 	case T_STRING: return v;
 	case T_BOXINT: return hx_str_of_int(FI(v, 0));
 	case T_BOXFLOAT: return hx_str_of_float(FD(v, 0));
+	case T_BOXI64: return hx_str_of_i64(FL(v, 0));
 	case T_BOXBOOL: return hx_str_of_bool(FI(v, 0));
 	case T_TYPEOBJ: return hx_str_of_ascii(rt_types[FI(v, 0)].name);
 	case T_ARRAY: {

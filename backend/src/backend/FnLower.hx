@@ -270,12 +270,20 @@ class FnLower {
 		}
 	}
 
+	// haxe.ds.Vector's data (an Array on hxc), as Vector.get inlines it
+	static function isVectorData(t:T):Bool
+		return switch t {
+			case TType(td, _): td.tPath.name == "VectorData" && StringTools.startsWith(td.tPath.pack.join("."), "haxe.ds"); // haxe.ds._Vector.VectorData
+			case TAbstract(a, _): a.aPath.name == "Vector" && a.aPath.pack.join(".") == "haxe.ds";
+			case _: false;
+		}
+
 	public static function isImpure(e:Ex):Bool
 		return switch e {
 			case ECall(_) | ECallDispatch(_) | ECallClos(_) | ECallAnon(_) | ENewObj(_) | ENewEnum(_) | ENewArr(_) | ENewClos(_) | ENewBox(_) | ENewAnon(_) | EBox(_):
 				true;
 			case ECallHost(n, _, _): !isPure(n);
-			case EArrGet(TRef(RAny), _, _): true; // reading an Int/Float array as Dynamic boxes
+			case EArrGet(TRef(RAny), _, _) | EArrGetU(TRef(RAny), _, _): true; // reading an Int/Float array as Dynamic boxes
 			case EAnonGet(_): true; // the slow path may box
 			case _: false;
 		}
@@ -341,6 +349,7 @@ class FnLower {
 		return switch t {
 			case TI32 | TBool: EInt(0);
 			case TF64: EF64(0);
+			case TI64: EConv(I2L, EInt(0));
 			case TVoid: EInt(0);
 			case TRef(_): ENull(t);
 		}
@@ -366,6 +375,11 @@ class FnLower {
 		return switch [from, to] {
 			case [TI32, TF64]: EConv(I2F, x);
 			case [TF64, TI32]: EConv(F2I, x);
+			case [TI32 | TBool, TI64]: EConv(I2L, x);
+			case [TI64, TI32]: EConv(L2I, x);
+			case [TI64, TBool]: EBin(LNe, x, EConv(I2L, EInt(0)));
+			case [TI64, TF64]: EConv(L2F, x);
+			case [TF64, TI64]: EConv(F2L, x);
 			case [TI32, TBool] | [TBool, TI32]: x;
 			case [TF64, TBool]: EBin(FNe, x, EF64(0));
 			case [TBool, TF64]: EConv(I2F, x);
@@ -385,6 +399,7 @@ class FnLower {
 			case TRef(RStr): temp(TRef(RStr), ECallHost(l.native("hx_str_or_null"), [x], TRef(RStr)));
 			case TI32: temp(TRef(RStr), ECallHost(l.native("hx_str_of_int"), [x], TRef(RStr)));
 			case TF64: temp(TRef(RStr), ECallHost(l.native("hx_str_of_float"), [x], TRef(RStr)));
+			case TI64: temp(TRef(RStr), ECallHost(l.native("hx_str_of_i64"), [x], TRef(RStr)));
 			case TBool: temp(TRef(RStr), ECallHost(l.native("hx_str_of_bool"), [x], TRef(RStr)));
 			case _: temp(TRef(RStr), ECallHost(l.native("hx_std_string"), [x], TRef(RStr)));
 		}
@@ -706,7 +721,8 @@ class FnLower {
 				switch tyOf(a) {
 					case TRef(RArr(elem)):
 						var xs = operands([a, i]);
-						coerce(EArrGet(elem, xs[0], coerce(xs[1], tyOf(i), TI32)), elem, tyOf(e));
+						var ix = coerce(xs[1], tyOf(i), TI32);
+						coerce(isVectorData(a.etype) ? EArrGetU(elem, xs[0], ix) : EArrGet(elem, xs[0], ix), elem, tyOf(e));
 					case _:
 						var xs = operands([a, i]);
 						var r = temp(TRef(RAny), ECallHost(l.native("hx_dyn_aget"), [coerce(xs[0], tyOf(a), TRef(RAny)), coerce(xs[1], tyOf(i), TI32)], TRef(RAny)));
@@ -1008,7 +1024,7 @@ class FnLower {
 			var sa = toStr(xa, ta), sb = toStr(xb, tb);
 			return temp(TRef(RStr), ECallHost(l.native("hx_str_concat"), [sa, sb], TRef(RStr)));
 		}
-		var num = (t:Ty) -> t == TI32 || t == TF64 || t == TBool || t.match(TRef(RNull(_)));
+		var num = (t:Ty) -> t == TI32 || t == TF64 || t == TBool || t == TI64 || t.match(TRef(RNull(_)));
 		if (!num(ta) || !num(tb)) {
 			// Dynamic arithmetic
 			var da = coerce(xa, ta, TRef(RAny)), db = coerce(xb, tb, TRef(RAny));
@@ -1020,6 +1036,26 @@ class FnLower {
 			case _: t;
 		};
 		var sa = scalar(ta), sb = scalar(tb);
+		if ((sa == TI64 || sb == TI64) && sa != TF64 && sb != TF64) {
+			// Int64 (hxc.I64 operators): the shift count stays an Int
+			var shift = op == OpShl || op == OpShr || op == OpUShr;
+			var la = coerce(xa, ta, TI64), lb = shift ? coerce(xb, tb, TI32) : coerce(xb, tb, TI64);
+			var r = EBin(switch op {
+				case OpAdd: LAdd;
+				case OpSub: LSub;
+				case OpMult: LMul;
+				case OpDiv: LDiv;
+				case OpMod: LMod;
+				case OpAnd: LAnd;
+				case OpOr: LOr;
+				case OpXor: LXor;
+				case OpShl: LShl;
+				case OpShr: LShr;
+				case OpUShr: LUShr;
+				case _: fail("Int64 operator " + op, e);
+			}, la, lb);
+			return coerce(r, TI64, rt);
+		}
 		var isFloat = sa == TF64 || sb == TF64 || op == OpDiv || rt == TF64 && (op == OpAdd || op == OpSub || op == OpMult || op == OpMod);
 		if (isFloat && !(op == OpAnd || op == OpOr || op == OpXor || op == OpShl || op == OpShr || op == OpUShr)) {
 			var fa = coerce(xa, ta, TF64), fb = coerce(xb, tb, TF64);
@@ -1073,9 +1109,10 @@ class FnLower {
 			var t = xb.match(ENull(_)) ? ta : tb;
 			return Ir.isRef(t) ? EBin(RefEq, x, ENull(t)) : EInt(0);
 		}
-		var scalar = (t:Ty) -> t == TI32 || t == TBool || t == TF64;
+		var scalar = (t:Ty) -> t == TI32 || t == TBool || t == TF64 || t == TI64;
 		if (scalar(ta) && scalar(tb)) {
 			if (ta == TF64 || tb == TF64) return EBin(FEq, coerce(xa, ta, TF64), coerce(xb, tb, TF64));
+			if (ta == TI64 || tb == TI64) return EBin(LEq, coerce(xa, ta, TI64), coerce(xb, tb, TI64));
 			return EBin(Eq, xa, xb);
 		}
 		switch [ta, tb] {
@@ -1091,12 +1128,21 @@ class FnLower {
 
 	function compare(op:Binop, xa:Ex, ta:Ty, xb:Ex, tb:Ty):Ex {
 		var scalar = (t:Ty) -> switch t {
-			case TI32 | TBool | TF64: t;
+			case TI32 | TBool | TF64 | TI64: t;
 			case TRef(RNull(s)): s;
 			case _: null;
 		};
 		var sa = scalar(ta), sb = scalar(tb);
 		if (sa != null && sb != null) {
+			if ((sa == TI64 || sb == TI64) && sa != TF64 && sb != TF64) {
+				var la = coerce(xa, ta, TI64), lb = coerce(xb, tb, TI64);
+				return EBin(switch op {
+					case OpLt: LLt;
+					case OpLte: LLe;
+					case OpGt: LGt;
+					case _: LGe;
+				}, la, lb);
+			}
 			if (sa == TF64 || sb == TF64) {
 				var fa = coerce(xa, ta, TF64), fb = coerce(xb, tb, TF64);
 				return EBin(switch op {
@@ -1214,6 +1260,7 @@ class FnLower {
 				var x = value(e1);
 				switch tyOf(e) {
 					case TF64: EConv(FNeg, coerce(x, t1, TF64));
+					case TI64: EConv(LNeg, coerce(x, t1, TI64));
 					case TI32: EBin(Sub, EInt(0), coerce(x, t1, TI32));
 					case t = TRef(RNull(TI32)): coerce(EBin(Sub, EInt(0), coerce(x, t1, TI32)), TI32, t);
 					case t: coerce(EConv(FNeg, coerce(x, t1, TF64)), TF64, t);

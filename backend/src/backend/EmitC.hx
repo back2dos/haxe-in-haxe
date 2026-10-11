@@ -209,6 +209,7 @@ class EmitC {
 		return switch t {
 			case TI32 | TBool: "int32_t";
 			case TF64: "double";
+			case TI64: "int64_t";
 			case TVoid: "void";
 			case TRef(_): "void *";
 		}
@@ -218,14 +219,16 @@ class EmitC {
 		return switch e {
 			case EInt(_) | EEnumTag(_) | EArrLen(_) | ENot(_) | EInstOf(_, _): "int32_t";
 			case EF64(_): "double";
-			case ENull(t) | EGlobal(_, t) | EUnbox(t, _) | EAnonGet(_, t, _, _) | ECast(t, _) | EArrGet(t, _, _) | EBoxGet(t, _): cty(t);
+			case ENull(t) | EGlobal(_, t) | EUnbox(t, _) | EAnonGet(_, t, _, _) | ECast(t, _) | EArrGet(t, _, _) | EArrGetU(t, _, _) | EBoxGet(t, _): cty(t);
 			case ELocal(l): cty(l.ty);
 			case EField(c, idx, _): cty(c.fields[idx].ty);
 			case EEnumParam(c, idx, _): cty(c.params[idx]);
 			case ECapture(l, idx, _): cty(l.captures[idx].ty);
-			case EConv(I2F | FNeg, _): "double";
-			case EConv(F2I, _): "int32_t";
+			case EConv(I2F | FNeg | L2F, _): "double";
+			case EConv(F2I | L2I, _): "int32_t";
+			case EConv(I2L | F2L | LNeg, _): "int64_t";
 			case EBin(FAdd | FSub | FMul | FDiv | FMod, _, _): "double";
+			case EBin(LAdd | LSub | LMul | LDiv | LMod | LAnd | LOr | LXor | LShl | LShr | LUShr, _, _): "int64_t";
 			case EBin(_, _, _): "int32_t";
 			case ECallHost(_, _, t): cty(t);
 			case _: "void *";
@@ -236,6 +239,7 @@ class EmitC {
 			case TI32: "i";
 			case TBool: "b";
 			case TF64: "f";
+			case TI64: "l";
 			case _: "p";
 		}
 
@@ -293,8 +297,8 @@ class EmitC {
 		return t.match(TI32 | TBool) ? 2 * slot : slot;
 
 	function assignTypes() {
-		var rtNames = ["None", "String", "Int", "Float", "Bool", "Array", "ArrayData", "ArrayData", "haxe.io.Bytes", "haxe.io.BytesBuffer", "StringBuf", "Ref", "Ref", "Ref", "Class", "Overflow", "Native", "ArrayIterator"];
-		var rtSlots:Array<Array<Null<Ty>>> = [[], [], [TI32], [TF64], [TBool], [TI32, TRef(RAny)], [], [], [], [TI32, TRef(RAny)], [TI32, TRef(RAny)], [TRef(RAny)], [TI32], [TF64], [TI32], [], [], [TRef(RAny), TI32]];
+		var rtNames = ["None", "String", "Int", "Float", "Bool", "Array", "ArrayData", "ArrayData", "haxe.io.Bytes", "haxe.io.BytesBuffer", "StringBuf", "Ref", "Ref", "Ref", "Class", "Overflow", "Native", "ArrayIterator", "haxe.Int64"];
+		var rtSlots:Array<Array<Null<Ty>>> = [[], [], [TI32], [TF64], [TBool], [TI32, TRef(RAny)], [], [], [], [TI32, TRef(RAny)], [TI32, TRef(RAny)], [TRef(RAny)], [TI32], [TF64], [TI32], [], [], [TRef(RAny), TI32], [TI64]];
 		for (i in 0...T_FIRST)
 			addType(entry(i < rtNames.length ? rtNames[i] : "Reserved", "TK_RUNTIME", i < rtSlots.length ? rtSlots[i] : [], "rt" + i));
 		for (c in p.classes) {
@@ -436,7 +440,7 @@ class EmitC {
 				f(b);
 			case ENot(a) | EConv(_, a) | EBox(_, a) | EUnbox(_, a) | EField(_, _, a) | EAnonGet(_, _, a, _) | ECast(_, a) | EInstOf(_, a) | EEnumTag(a, _) | EEnumParam(_, _, a) | EArrLen(a) | EBoxGet(_, a) | ECapture(_, _, a) | ENewBox(_, a):
 				f(a);
-			case EArrGet(_, a, i):
+			case EArrGet(_, a, i) | EArrGetU(_, a, i):
 				f(a);
 				f(i);
 			case ECall(_, args) | ECallDispatch(_, _, args) | ECallHost(_, args, _) | ENewEnum(_, args) | ENewArr(_, args) | ENewClos(_, args) | ENewAnon(_, args):
@@ -909,6 +913,7 @@ typedef struct { uint64_t h; int32_t len, hash; uint16_t c[1]; } hx_slit;
 			case TI32: '\treturn hx_box_int($call);\n';
 			case TBool: '\treturn hx_box_bool($call);\n';
 			case TF64: '\treturn hx_box_float($call);\n';
+			case TI64: '\treturn hx_box_i64($call);\n';
 			case TRef(_): '\treturn $call;\n';
 		});
 		r.add("}\n");
@@ -920,6 +925,7 @@ typedef struct { uint64_t h; int32_t len, hash; uint16_t c[1]; } hx_slit;
 			case TI32: 'hx_unbox_int($x)';
 			case TBool: 'hx_unbox_bool($x)';
 			case TF64: 'hx_unbox_float($x)';
+			case TI64: 'hx_unbox_i64($x)';
 			case _: x;
 		}
 
@@ -1019,6 +1025,8 @@ typedef struct { uint64_t h; int32_t len, hash; uint16_t c[1]; } hx_slit;
 				switch elem {
 					case TF64:
 						b.add('$ind{ int32_t i_ = ${expr(i)}; double v_ = ${expr(v)}; if (!hx_aset_f_fast($arr, i_, v_)) { ${spillOpen(list, 0)}hx_aset_slow($slot, i_, AK_F64, hx_d2u(v_)); ${spillClose(list, 0)}} }\n');
+					case TI64:
+						b.add('$ind{ int32_t i_ = ${expr(i)}; int64_t v_ = ${expr(v)}; if (!hx_aset_l_fast($arr, i_, v_)) { ${spillOpen(list, 0)}hx_aset_slow($slot, i_, AK_I64, (uint64_t)v_); ${spillClose(list, 0)}} }\n');
 					case TI32 | TBool:
 						b.add('$ind{ int32_t i_ = ${expr(i)}; int32_t v_ = ${expr(v)}; if (!hx_aset_i_fast($arr, i_, v_)) { ${spillOpen(list, 0)}hx_aset_slow($slot, i_, AK_I32, (uint64_t)(uint32_t)v_); ${spillClose(list, 0)}} }\n');
 					case _:
@@ -1031,6 +1039,8 @@ typedef struct { uint64_t h; int32_t len, hash; uint16_t c[1]; } hx_slit;
 				switch elem {
 					case TF64:
 						b.add('$ind{ double v_ = ${expr(v)}; if (!hx_apush_f_fast($arr, v_)) { ${spillOpen(list, 0)}hx_apush_slow($slot, AK_F64, hx_d2u(v_)); ${spillClose(list, 0)}} }\n');
+					case TI64:
+						b.add('$ind{ int64_t v_ = ${expr(v)}; if (!hx_apush_l_fast($arr, v_)) { ${spillOpen(list, 0)}hx_apush_slow($slot, AK_I64, (uint64_t)v_); ${spillClose(list, 0)}} }\n');
 					case TI32 | TBool:
 						b.add('$ind{ int32_t v_ = ${expr(v)}; if (!hx_apush_i_fast($arr, v_)) { ${spillOpen(list, 0)}hx_apush_slow($slot, AK_I32, (uint64_t)(uint32_t)v_); ${spillClose(list, 0)}} }\n');
 					case _:
@@ -1075,6 +1085,7 @@ typedef struct { uint64_t h; int32_t len, hash; uint16_t c[1]; } hx_slit;
 				var slot = '&${local(a)}';
 				switch elem {
 					case TF64: b.add('${ind}hx_aset_f($slot, ${expr(i)}, ${expr(v)});\n');
+					case TI64: b.add('${ind}hx_aset_l($slot, ${expr(i)}, ${expr(v)});\n');
 					case TI32 | TBool: b.add('${ind}hx_aset_i($slot, ${expr(i)}, ${expr(v)});\n');
 					case _: b.add('$ind{ int32_t i_ = ${expr(i)}; *rt_push(1) = ${expr(v)}; hx_aset_p($slot, i_, rt_sp - 1); rt_sp--; }\n');
 				}
@@ -1082,6 +1093,7 @@ typedef struct { uint64_t h; int32_t len, hash; uint16_t c[1]; } hx_slit;
 				var slot = '&${local(a)}';
 				switch elem {
 					case TF64: b.add('${ind}hx_apush_f($slot, ${expr(v)});\n');
+					case TI64: b.add('${ind}hx_apush_l($slot, ${expr(v)});\n');
 					case TI32 | TBool: b.add('${ind}hx_apush_i($slot, ${expr(v)});\n');
 					case _: b.add('$ind{ *rt_push(1) = ${expr(v)}; hx_apush_p($slot, rt_sp - 1); rt_sp--; }\n');
 				}
@@ -1171,6 +1183,7 @@ typedef struct { uint64_t h; int32_t len, hash; uint16_t c[1]; } hx_slit;
 		return switch t {
 			case TI32 | TBool: "AK_I32";
 			case TF64: "AK_F64";
+			case TI64: "AK_I64";
 			case _: "AK_PTR";
 		}
 
@@ -1178,6 +1191,7 @@ typedef struct { uint64_t h; int32_t len, hash; uint16_t c[1]; } hx_slit;
 		return switch t {
 			case TRef(_): 'rt_set_ptr($o, &FP($o, $idx), $v)';
 			case TF64: 'FD($o, $idx) = $v';
+			case TI64: 'FL($o, $idx) = $v';
 			case _: 'FH($o, $idx) = $v';
 		}
 	}
@@ -1186,6 +1200,7 @@ typedef struct { uint64_t h; int32_t len, hash; uint16_t c[1]; } hx_slit;
 		return switch t {
 			case TRef(_): 'FP($o, $idx)';
 			case TF64: 'FD($o, $idx)';
+			case TI64: 'FL($o, $idx)';
 			case _: 'FH($o, $idx)';
 		}
 
@@ -1194,6 +1209,7 @@ typedef struct { uint64_t h; int32_t len, hash; uint16_t c[1]; } hx_slit;
 			case TI32: 'hx_box_int($x)';
 			case TBool: 'hx_box_bool($x)';
 			case TF64: 'hx_box_float($x)';
+			case TI64: 'hx_box_i64($x)';
 			case _: x;
 		}
 
@@ -1228,6 +1244,7 @@ typedef struct { uint64_t h; int32_t len, hash; uint16_t c[1]; } hx_slit;
 	static function pack(x:String, t:Ty):String
 		return switch t {
 			case TF64: 'hx_d2u($x)';
+			case TI64: '(uint64_t)($x)';
 			case TRef(_): '(uint64_t)(uintptr_t)($x)';
 			case _: '(uint64_t)(uint32_t)($x)';
 		}
@@ -1235,6 +1252,7 @@ typedef struct { uint64_t h; int32_t len, hash; uint16_t c[1]; } hx_slit;
 	static function unpack(x:String, t:Ty):String
 		return switch t {
 			case TF64: 'hx_u2d($x)';
+			case TI64: '(int64_t)($x)';
 			case TRef(_): '(void *)(uintptr_t)($x)';
 			case TVoid: x;
 			case _: '(int32_t)($x)';
@@ -1272,11 +1290,33 @@ typedef struct { uint64_t h; int32_t len, hash; uint16_t c[1]; } hx_slit;
 					case FMul: '($a * $c)';
 					case FDiv: '($a / $c)';
 					case FMod: 'fmod($a, $c)';
+					case LAdd: 'LADD($a, $c)';
+					case LSub: 'LSUB($a, $c)';
+					case LMul: 'LMUL($a, $c)';
+					case LDiv: 'hx_ldiv($a, $c)';
+					case LMod: 'hx_lmod($a, $c)';
+					case LAnd: '($a & $c)';
+					case LOr: '($a | $c)';
+					case LXor: '($a ^ $c)';
+					case LShl: 'LSHL($a, $c)';
+					case LShr: 'LSHR($a, $c)';
+					case LUShr: 'LUSHR($a, $c)';
+					case LEq: '($a == $c)';
+					case LNe: '($a != $c)';
+					case LLt: '($a < $c)';
+					case LLe: '($a <= $c)';
+					case LGt: '($a > $c)';
+					case LGe: '($a >= $c)';
 				}
 			case ENot(x): '!(${expr(x)})';
 			case EConv(I2F, x): '((double)(${expr(x)}))';
 			case EConv(F2I, x): 'hx_f2i(${expr(x)})';
 			case EConv(FNeg, x): '(-(${expr(x)}))';
+			case EConv(I2L, x): '((int64_t)(${expr(x)}))';
+			case EConv(L2I, x): '((int32_t)(uint32_t)(uint64_t)(${expr(x)}))';
+			case EConv(L2F, x): '((double)(${expr(x)}))';
+			case EConv(F2L, x): 'hx_f2l(${expr(x)})';
+			case EConv(LNeg, x): '((int64_t)(0 - (uint64_t)(${expr(x)})))';
 			case EBox(t, x): box(expr(x), t);
 			case EUnbox(t, x): unboxFrom(expr(x), t);
 			case EField(c, idx, obj): load(expr(obj), Std.string(c.locs[idx]), c.fields[idx].ty);
@@ -1306,8 +1346,16 @@ typedef struct { uint64_t h; int32_t len, hash; uint16_t c[1]; } hx_slit;
 			case EArrGet(elem, a, i):
 				switch elem {
 					case TF64: 'hx_aget_f(${expr(a)}, ${expr(i)})';
+					case TI64: 'hx_aget_l(${expr(a)}, ${expr(i)})';
 					case TI32 | TBool: 'hx_aget_i(${expr(a)}, ${expr(i)})';
 					case _: 'hx_aget_p(${expr(a)}, ${expr(i)})';
+				}
+			case EArrGetU(elem, a, i):
+				switch elem {
+					case TF64: 'hx_aget_f_u(${expr(a)}, ${expr(i)})';
+					case TI64: 'hx_aget_l_u(${expr(a)}, ${expr(i)})';
+					case TI32 | TBool: 'hx_aget_i_u(${expr(a)}, ${expr(i)})';
+					case _: 'hx_aget_p_u(${expr(a)}, ${expr(i)})';
 				}
 			case EBoxGet(t, bx): load(expr(bx), "0", t);
 			case ECapture(l, idx, clos): load(expr(clos), Std.string(at(idx + 1, l.captures[idx].ty)), l.captures[idx].ty);
@@ -1368,6 +1416,7 @@ typedef struct { uint64_t h; int32_t len, hash; uint16_t c[1]; } hx_slit;
 				for (i in 0...vs.length)
 					s += switch elem {
 						case TF64: '((double *)ARR_DATA(o))[$i] = ${expr(vs[i])}; ';
+						case TI64: '((int64_t *)ARR_DATA(o))[$i] = ${expr(vs[i])}; ';
 						case TI32 | TBool: '((int32_t *)ARR_DATA(o))[$i] = ${expr(vs[i])}; ';
 						case _: 'rt_set_ptr(ARR_DATA(o), &FP(ARR_DATA(o), $i), ${expr(vs[i])}); ';
 					};
@@ -1379,7 +1428,7 @@ typedef struct { uint64_t h; int32_t len, hash; uint16_t c[1]; } hx_slit;
 				s + "o; })";
 			case ENewBox(t, v):
 				var tt = switch t {
-					case TF64: "T_REFBOX_F";
+					case TF64 | TI64: "T_REFBOX_F"; // 8 raw bytes
 					case TI32 | TBool: "T_REFBOX_I";
 					case _: "T_REFBOX_P";
 				};
@@ -1404,6 +1453,24 @@ static inline double hx_aget_f(void *a, int32_t i) {
 	if (ARR_KIND(a) == AK_F64 && (uint32_t)i < (uint32_t)ARR_LEN(a)) return ((double *)ARR_DATA(a))[i];
 	return hx_aget_f_slow(a, i);
 }
+static inline int64_t hx_aget_l(void *a, int32_t i) {
+	if (ARR_KIND(a) == AK_I64 && (uint32_t)i < (uint32_t)ARR_LEN(a)) return ((int64_t *)ARR_DATA(a))[i];
+	return hx_aget_l_slow(a, i);
+}
+// haxe.ds.Vector reads: the element kind is checked (generic code may create
+// any kind), not the bounds
+static inline int32_t hx_aget_i_u(void *a, int32_t i) {
+	return ARR_KIND(a) == AK_I32 ? ((int32_t *)ARR_DATA(a))[i] : hx_aget_i_slow(a, i);
+}
+static inline double hx_aget_f_u(void *a, int32_t i) {
+	return ARR_KIND(a) == AK_F64 ? ((double *)ARR_DATA(a))[i] : hx_aget_f_slow(a, i);
+}
+static inline int64_t hx_aget_l_u(void *a, int32_t i) {
+	return ARR_KIND(a) == AK_I64 ? ((int64_t *)ARR_DATA(a))[i] : hx_aget_l_slow(a, i);
+}
+static inline void *hx_aget_p_u(void *a, int32_t i) {
+	return ARR_KIND(a) == AK_PTR ? FP(ARR_DATA(a), i) : hx_aget_p_slow(a, i);
+}
 static inline void *hx_aget_p(void *a, int32_t i) {
 	if (ARR_KIND(a) == AK_PTR && (uint32_t)i < (uint32_t)ARR_LEN(a)) return FP(ARR_DATA(a), i);
 	return hx_aget_p_slow(a, i);
@@ -1418,6 +1485,10 @@ static inline int hx_aset_f_fast(void *a, int32_t i, double v) {
 	if (ARR_KIND(a) == AK_F64 && (uint32_t)i < (uint32_t)ARR_LEN(a)) { ((double *)ARR_DATA(a))[i] = v; return 1; }
 	return 0;
 }
+static inline int hx_aset_l_fast(void *a, int32_t i, int64_t v) {
+	if (ARR_KIND(a) == AK_I64 && (uint32_t)i < (uint32_t)ARR_LEN(a)) { ((int64_t *)ARR_DATA(a))[i] = v; return 1; }
+	return 0;
+}
 static inline int hx_aset_p_fast(void *a, int32_t i, void *v) {
 	if (ARR_KIND(a) == AK_PTR && (uint32_t)i < (uint32_t)ARR_LEN(a)) { void *d = ARR_DATA(a); rt_set_ptr(d, &FP(d, i), v); return 1; }
 	return 0;
@@ -1430,6 +1501,11 @@ static inline int hx_apush_i_fast(void *a, int32_t v) {
 static inline int hx_apush_f_fast(void *a, double v) {
 	void *d = ARR_DATA(a);
 	if (ARR_KIND(a) == AK_F64 && d && (uint32_t)ARR_LEN(a) < NSLOTS(d)) { ((double *)d)[ARR_LEN(a)++] = v; return 1; }
+	return 0;
+}
+static inline int hx_apush_l_fast(void *a, int64_t v) {
+	void *d = ARR_DATA(a);
+	if (ARR_KIND(a) == AK_I64 && d && (uint32_t)ARR_LEN(a) < NSLOTS(d)) { ((int64_t *)d)[ARR_LEN(a)++] = v; return 1; }
 	return 0;
 }
 static inline int hx_apush_p_fast(void *a, void *v) {
@@ -1448,6 +1524,11 @@ static inline void hx_aset_f(void **slot, int32_t i, double v) {
 	if (ARR_KIND(a) == AK_F64 && (uint32_t)i < (uint32_t)ARR_LEN(a)) ((double *)ARR_DATA(a))[i] = v;
 	else hx_aset_slow(slot, i, AK_F64, hx_d2u(v));
 }
+static inline void hx_aset_l(void **slot, int32_t i, int64_t v) {
+	void *a = *slot;
+	if (ARR_KIND(a) == AK_I64 && (uint32_t)i < (uint32_t)ARR_LEN(a)) ((int64_t *)ARR_DATA(a))[i] = v;
+	else hx_aset_slow(slot, i, AK_I64, (uint64_t)v);
+}
 static inline void hx_aset_p(void **slot, int32_t i, void **v) {
 	void *a = *slot;
 	if (ARR_KIND(a) == AK_PTR && (uint32_t)i < (uint32_t)ARR_LEN(a)) { void *d = ARR_DATA(a); rt_set_ptr(d, &FP(d, i), *v); }
@@ -1464,6 +1545,12 @@ static inline void hx_apush_f(void **slot, double v) {
 	void *d = ARR_DATA(a);
 	if (ARR_KIND(a) == AK_F64 && d && (uint32_t)ARR_LEN(a) < NSLOTS(d)) ((double *)d)[ARR_LEN(a)++] = v;
 	else hx_apush_slow(slot, AK_F64, hx_d2u(v));
+}
+static inline void hx_apush_l(void **slot, int64_t v) {
+	void *a = *slot;
+	void *d = ARR_DATA(a);
+	if (ARR_KIND(a) == AK_I64 && d && (uint32_t)ARR_LEN(a) < NSLOTS(d)) ((int64_t *)d)[ARR_LEN(a)++] = v;
+	else hx_apush_slow(slot, AK_I64, (uint64_t)v);
 }
 static inline void hx_apush_p(void **slot, void **v) {
 	void *a = *slot;
@@ -1682,7 +1769,7 @@ class Roots {
 	public static function gcPoint(e:Ex):Int
 		return switch e {
 			case ECall(f, _) if (f.noGc): 0;
-			case ECall(_) | ECallDispatch(_) | ECallClos(_) | ECallAnon(_) | EBox(_) | EAnonGet(_) | EArrGet(TRef(RAny), _, _): 1;
+			case ECall(_) | ECallDispatch(_) | ECallClos(_) | ECallAnon(_) | EBox(_) | EAnonGet(_) | EArrGet(TRef(RAny), _, _) | EArrGetU(TRef(RAny), _, _): 1;
 			case ECallHost(n, _, _): FnLower.isPure(n) || FnLower.NOGC.exists(n) ? 0 : 1;
 			case ENewObj(_) | ENewEnum(_) | ENewArr(_) | ENewClos(_) | ENewBox(_) | ENewAnon(_): 2;
 			case _: 0;
