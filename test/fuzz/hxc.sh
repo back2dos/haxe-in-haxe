@@ -1,0 +1,25 @@
+#!/bin/sh
+# The hxc target of the fuzzer: compiles a program to C with the hxc tool
+# (bin/backend/wbk.js, the port plus backend/, built by backend/build.sh) and
+# the C to <out>/prog with HXC_CC (default tcc).
+#   sh test/fuzz/hxc.sh <out dir> <haxe arguments ...>
+set -eu
+OUT=$1
+shift
+ROOT=$(cd "$(dirname "$0")/../.." && pwd)
+CC=${HXC_CC:-tcc}
+# the runtime is compiled once per compiler
+RT=$ROOT/bin/fuzz/rt-$(echo "$CC" | tr -c 'A-Za-z0-9\n' '_')
+FLAGS="-w -fno-strict-aliasing -DHXC_NO_SSL -DHXC_NO_UV -I $ROOT/backend/rt"
+if [ ! -f "$RT/done" ]; then
+	mkdir -p "$RT"
+	for f in "$ROOT"/backend/rt/rt*.c; do
+		$CC $FLAGS -c "$f" -o "$RT/$(basename "$f" .c).o"
+	done
+	touch "$RT/done"
+fi
+# hxnodejs's stdout flush fails on pipes, hence the file
+HXC_SINGLE=1 HAXE_STD_PATH=${HAXE_STD_PATH:-$ROOT/haxe/std} node --stack-size=65500 "$ROOT/bin/backend/wbk.js" "$OUT/prog" "$@" \
+	-cp "$ROOT/backend/std" --custom-target hxc > "$OUT/hxc.log" 2>&1 || { cat "$OUT/hxc.log"; exit 1; }
+cat "$OUT/hxc.log"
+$CC $FLAGS "$OUT/prog.c" "$RT"/rt*.o -lm -lpthread -o "$OUT/prog"
