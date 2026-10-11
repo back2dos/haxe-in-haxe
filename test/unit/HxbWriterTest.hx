@@ -36,8 +36,8 @@ class HxbWriterTest {
 		var expectedKinds = "STR,MDF,MTF,CLR,ENR,ABR,TDR,CLD,END,ABD,TDD,EOT,CFR,CFD,EFD,AFD,EOF,EXD,EOM";
 		if (kinds.join(",") != expectedKinds) throw 'Unexpected typed HXB chunk layout: ${kinds.join(",")}';
 		if (typedBytes.get(0) != "h".code || typedBytes.get(1) != "x".code || typedBytes.get(2) != "b".code || typedBytes.get(3) != 1) throw "Typed HXB header was not written";
-		var moduleFile:String = module.mExtra.mFile;
-		var lazyFile = core.Path.UniqueKey.createLazy(moduleFile);
+		var moduleFile = module.mExtra.mFile;
+		var lazyFile = core.Path.UniqueKey.createLazy(core.Path.UniqueKey.lazyPath(moduleFile));
 		module.mExtra.mFile = lazyFile;
 		var lazyFileWriter = new HxbWriter();
 		lazyFileWriter.writeModule(module);
