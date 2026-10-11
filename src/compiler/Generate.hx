@@ -113,6 +113,32 @@ class Generate {
 		} catch (e:HxbOutputError) com.error("Could not write to " + config.archivePath + ": " + e.message, nullPos);
 	}
 
+	public static function parseSwfHeader(com:CommonContext, h:String):Null<{width:Int, height:Int, fps:Float, color:Int}> {
+		return switch h.split(":") {
+			case [width, height, fps]:
+				{width: intOfString(width), height: intOfString(height), fps: floatOfString(fps), color: 0xFFFFFF};
+			case [width, height, fps, color]:
+				var color = StringTools.startsWith(color, "0x") ? color : "0x" + color;
+				{width: intOfString(width), height: intOfString(height), fps: floatOfString(fps), color: intOfString(color)};
+			case _:
+				com.error("Invalid SWF header format, expected width:height:fps[:color]", nullPos);
+				null;
+		}
+	}
+
+	// port: int_of_string/float_of_string raise Failure on malformed input.
+	static function intOfString(s:String):Int {
+		var v = Std.parseInt(s);
+		if (v == null) throw new Failure("int_of_string");
+		return v;
+	}
+
+	static function floatOfString(s:String):Float {
+		var v = Std.parseFloat(s);
+		if (Math.isNaN(v)) throw new Failure("float_of_string");
+		return v;
+	}
+
 	public static function deleteFile(file:String):Void {
 		try sys.FileSystem.deleteFile(file)
 		catch (_:Dynamic) {}
@@ -127,9 +153,6 @@ class Generate {
 	}
 
 	// port: HXB output is emitted by the after-save callback before backend destruction.
-	// Interpretation (--interp, --run, the Eval target) runs on the port's Eval; the other
-	// code generators are not ported and fail explicitly (their dispatch is kept in
-	// archive/deferred/compiler/GenerateTargets.hx).
 	public static function generate(com:CommonContext, tctx:context.Typecore.Typer, ext:String, actx:compiler.Args.ArgContext):Void {
 		// check file extension. In case of wrong commandline, we don't want
 		// to accidentaly delete a source file.
@@ -153,17 +176,47 @@ class Generate {
 			}
 			timer();
 		} else {
-			var name = switch com.platform {
-				case Eval: "eval";
-				case Cross | CustomTarget(_): "";
-				case p: throw new Failure("Code generation for "
-						+ Globals.platformName(p)
-						+ " is not supported by haxe-in-haxe (HXB and --interp only)");
-			};
-			if (name != "") {
+			var generate:generators.Gctx->Void, name:String;
+			switch com.platform {
+				case Flash:
+					var header = try parseSwfHeader(com, Common.definedValue(com, Define.SwfHeader)) catch (_:NotFound) null;
+					generate = generators.Genswf.generate.bind(header, cast com.nativeLibs.swfLibs, com.flashVersion);
+					name = "swf";
+				case Neko:
+					generate = generators.Genneko.generate.bind(com.nekoLibPaths);
+					name = "neko";
+				case Js:
+					generate = generators.Genjs.generate.bind(com.jsGen);
+					name = "js";
+				case Lua:
+					generate = generators.Genlua.generate;
+					name = "lua";
+				case Php:
+					generate = generators.Genphp7.generate;
+					name = "php";
+				case Cpp:
+					generate = generators.Gencpp.generate;
+					name = "cpp";
+				case Jvm:
+					generate = generators.Genjvm.generate.bind(actx.jvmFlag);
+					name = "jvm";
+				case Python:
+					generate = generators.Genpy.generate;
+					name = "python";
+				case Hl:
+					generate = generators.Genhl.generate;
+					name = "hl";
+				case Eval:
+					generate = function(_) typing.MacroContext.interpret(tctx, []); /* TODO: ? */
+					name = "eval";
+				case Cross | CustomTarget(_):
+					generate = function(_) {};
+					name = "";
+			}
+			if (name == "") {} else {
 				Common.log(com, "Generating " + name + ": " + com.file);
 				Timer.time(com.timerCtx, ["generate", name], function(_:Null<Bool>) {
-					typing.MacroContext.interpret(tctx, []); // TODO: ?
+					generate(Common.toGctx(com));
 					return null;
 				}, null);
 			}

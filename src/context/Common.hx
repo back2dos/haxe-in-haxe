@@ -463,7 +463,7 @@ class Common {
 
 	public static function sCompilerStage(stage:CompilerStage):String return Type.enumConstructor(stage);
 
-	public static function toGctx(com:CommonContext):Dynamic return {
+	public static function toGctx(com:CommonContext):generators.Gctx return {
 		platform: com.platform,
 		defines: com.defines,
 		basic: com.basic,
@@ -482,8 +482,8 @@ class Common {
 		types: com.types,
 		resources: com.resources,
 		nativeLibs: switch com.platform {
-			case Jvm: (cast com.nativeLibs.javaLibs : Array<Dynamic>);
-			case Flash: (cast com.nativeLibs.swfLibs : Array<Dynamic>);
+			case Jvm: [for (l in com.nativeLibs.javaLibs) (cast l : NativeLibraries.NativeLibraryBase)];
+			case Flash: [for (l in com.nativeLibs.swfLibs) (cast l : NativeLibraries.NativeLibraryBase)];
 			case _: [];
 		},
 		includeFiles: com.includeFiles,
