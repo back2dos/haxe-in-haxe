@@ -620,8 +620,8 @@ class CppRetyper {
 							case _:
 								createVariable(field);
 						}
-					/* Dynamic methods are implemented as a physical field holding a closure */
-					case [Method(MethDynamic), {eexpr: TFunction(func)}]:
+					/* Dynamic methods are implemented as a physical field holding a closure, an overriding one shares the field of its parent */
+					case [Method(MethDynamic), {eexpr: TFunction(func)}] if (!isOverride(field)):
 						createDynamicFuncVariable(field, func);
 					/* Some (create_variable { field with cf_expr = None; cf_kind = Var ({ v_read = AccNormal; v_write = AccNormal }) }) */
 					/* Below should cause abstracts which have functions with no implementation to be generated as a field */

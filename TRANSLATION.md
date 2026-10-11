@@ -410,15 +410,15 @@ and on the hand and upstream cases listed there. Generated programs are not run.
 | `generators/genlua.ml` | `src/generators/Genlua.hx` | Lua |
 | `generators/genpy.ml` | `src/generators/Genpy.hx` | Python |
 | `generators/genphp7.ml` | `src/generators/Genphp7.hx`, `src/generators/genphp7/` | PHP |
-| `generators/genneko.ml` | `src/generators/Genneko.hx` | Neko; `libs/neko/*.ml` in `src/libs/neko/` |
-| `generators/genhl.ml` | `src/generators/Genhl.hx` | HashLink bytecode |
-| `generators/hlcode.ml`, `hlopt.ml` | `src/generators/Hlcode.hx`, `Hlopt.hx` | HashLink |
-| `generators/hl2c.ml` | `src/generators/Hl2c.hx` | HL/C; type names hashed from a reproduction of OCaml's `Marshal`; descriptors that marshal a closure fail explicitly |
+| `generators/genneko.ml` | `src/generators/Genneko.hx` | Neko; `libs/neko/*.ml` in `src/libs/neko/`; `nekoc` arguments quoted as upstream 995a7d1fe (Unix `Filename.quote`) |
+| `generators/genhl.ml` | `src/generators/Genhl.hx` | HashLink bytecode; at upstream 995a7d1fe (`lookup` maps and `check` in `Hashtbl` order, `rec_cache` retry, `BaseType.downcast`) |
+| `generators/hlcode.ml`, `hlopt.ml` | `src/generators/Hlcode.hx`, `Hlopt.hx` | HashLink; `hlopt` at upstream 995a7d1fe (null-check folding, backward unused `mov`/`null` pass) |
+| `generators/hl2c.ml` | `src/generators/Hl2c.hx` | HL/C; type names hashed from a reproduction of OCaml's `Marshal`; descriptors that marshal a closure fail explicitly; at upstream 995a7d1fe (`memcpy` byte access) |
 | `generators/hlinterp.ml` | `src/generators/Hlinterp.hx` | complete (values, interpreter loop, `std` natives, error/stack reporting, `check`; `--hl x.hl -D interp` runs the bytecode; the commented-out SPEC section is kept as a comment); OCaml `Str` (used by the regexp natives) is `src/core/ds/OcamlStr.hx` |
-| `generators/genjvm.ml`, `generators/jvm/*.ml` | `src/generators/Genjvm.hx`, `src/generators/jvm/` | JVM (sequential passes, as upstream with `-D disable-parallelism`) |
+| `generators/genjvm.ml`, `generators/jvm/*.ml` | `src/generators/Genjvm.hx`, `src/generators/jvm/` | JVM (sequential passes, as upstream with `-D disable-parallelism`); at upstream 995a7d1fe (overriding dynamic methods share the parent's field) |
 | `codegen/javaModern.ml` | `src/codegen/JavaModern.hx` | Java library input (`hxjava-std.jar`, `--java-lib`) |
-| `generators/gencpp.ml`, `generators/cpp/**/*.ml` | `src/generators/Gencpp.hx`, `src/generators/cpp/` | C++ and cppia |
-| `generators/genswf.ml`, `genswf9.ml`, `flashProps.ml` | `src/generators/Genswf.hx`, `Genswf9.hx`, `FlashProps.hx` | SWF/SWC, including `--swf-lib` merging, PNG `@:bitmap` and JPEG+PNG-alpha bitmaps |
+| `generators/gencpp.ml`, `generators/cpp/**/*.ml` | `src/generators/Gencpp.hx`, `src/generators/cpp/` | C++ and cppia; at upstream 995a7d1fe (`override` specifiers) |
+| `generators/genswf.ml`, `genswf9.ml`, `flashProps.ml` | `src/generators/Genswf.hx`, `Genswf9.hx`, `FlashProps.hx` | SWF/SWC, including `--swf-lib` merging, PNG `@:bitmap` and JPEG+PNG-alpha bitmaps; at upstream 995a7d1fe (rest-argument spread order; `swfParser.ml` changed only labels) |
 | `codegen/swfLoader.ml` | `src/codegen/SwfLoader.hx` | SWF/SWC/ANE library input (`--swf-lib`, `--swf-lib-extern`): extern classes, `enumAbstract:` defines, `@:bind` class removal |
 
 OCaml library code the generators need, reproduced under `src/libs/`: `neko`

@@ -38,6 +38,7 @@ class CppGenClassHeader {
 	}
 
 	public static function genDynamicFunction(ctx:Context, classDef:TClass, isStatic:Bool, func:TcppClassFunction):Void {
+		if (func.tcfIsOverriding) return;
 		var output = ctx.ctxOutput;
 		var prefix = if (isStatic) "\t\tstatic " else "\t\t";
 		var signature = funcToCallableString("::hx::Callable", func);
@@ -51,7 +52,7 @@ class CppGenClassHeader {
 		var attrs:Array<String> = [];
 		// port: fold_static then fold_virtual prepend to the list.
 		if (isStatic) attrs = ["static"].concat(attrs);
-		if (!isStatic && func.tcfIsVirtual) {
+		if (!isStatic && func.tcfIsVirtual && !func.tcfIsOverriding) {
 			if (func.tcfIsExternal && !func.tcfIsScriptable) {
 				var key = '${joinClassPath(classDef.clPath, ".")}.${func.tcfField.cfName}';
 				switch ctx.ctxClassMemberTypes.get(key) {
@@ -69,7 +70,10 @@ class CppGenClassHeader {
 				tcppToString(other);
 		}
 
-		output('\t\t$attributes $returnTypeStr ${func.tcfName}(${printArgList(func.tcfArgs, "")});\n');
+		var overrideSpecifier = if (func.tcfIsVirtual
+			&& (func.tcfIsOverriding || (!isStatic && func.tcfName == "toString" && func.tcfArgs.length == 0))) " override" else "";
+
+		output('\t\t$attributes $returnTypeStr ${func.tcfName}(${printArgList(func.tcfArgs, "")})$overrideSpecifier;\n');
 
 		if ((!func.tcfIsVirtual || !func.tcfIsOverriding) && func.tcfIsReflective) {
 			var prefix = if (isStatic) "static " else "";
@@ -244,22 +248,22 @@ class CppGenClassHeader {
 		if (scriptable) outputH("\t\tstatic ::hx::ScriptFunction __script_construct;\n");
 		outputH("\t\t//~" + className + "();\n\n");
 		outputH("\t\tHX_DO_RTTI_ALL;\n");
-		if (hasTcppClassFlag(tcppClass, MemberGet)) outputH("\t\t::hx::Val __Field(const ::String &inString, ::hx::PropertyAccess inCallProp);\n");
+		if (hasTcppClassFlag(tcppClass, MemberGet)) outputH("\t\t::hx::Val __Field(const ::String &inString, ::hx::PropertyAccess inCallProp) override;\n");
 		if (hasTcppClassFlag(tcppClass, StaticGet))
 			outputH("\t\tstatic bool __GetStatic(const ::String &inString, ::Dynamic &outValue, ::hx::PropertyAccess inCallProp);\n");
 		if (hasTcppClassFlag(tcppClass, MemberSet))
-			outputH("\t\t::hx::Val __SetField(const ::String &inString,const ::hx::Val &inValue, ::hx::PropertyAccess inCallProp);\n");
+			outputH("\t\t::hx::Val __SetField(const ::String &inString, const ::hx::Val &inValue, ::hx::PropertyAccess inCallProp) override;\n");
 		if (hasTcppClassFlag(tcppClass, StaticSet))
 			outputH("\t\tstatic bool __SetStatic(const ::String &inString, ::Dynamic &ioValue, ::hx::PropertyAccess inCallProp);\n");
-		if (hasTcppClassFlag(tcppClass, GetFields)) outputH("\t\tvoid __GetFields(::Array< ::String> &outFields);\n");
+		if (hasTcppClassFlag(tcppClass, GetFields)) outputH("\t\tvoid __GetFields(::Array< ::String> &outFields) override;\n");
 		if (hasTcppClassFlag(tcppClass, Compare))
 			outputH("\t\tint __Compare(const ::hx::Object *inRHS) const { " + "return const_cast<" + className
 				+ " *>(this)->__compare(::Dynamic((::hx::Object *)inRHS)); }\n");
 
 		outputH("\t\tstatic void __register();\n");
 		if (tcppClass.tclContainer != null && tcppClass.tclContainer.match(Current)) {
-			outputH("\t\tvoid __Mark(HX_MARK_PARAMS);\n");
-			outputH("\t\tvoid __Visit(HX_VISIT_PARAMS);\n");
+			outputH("\t\tvoid __Mark(HX_MARK_PARAMS) override;\n");
+			outputH("\t\tvoid __Visit(HX_VISIT_PARAMS) override;\n");
 		}
 
 		if (tcppClass.tclNativeInterfaces.length > 0) {
@@ -276,9 +280,9 @@ class CppGenClassHeader {
 			outputH("\n");
 		}
 
-		outputH("\t\tbool _hx_isInstanceOf(int inClassId);\n");
+		outputH("\t\tbool _hx_isInstanceOf(int inClassId) override;\n");
 		if (tcppClass.tclHaxeInterfaces.length > 0) {
-			outputH("\t\tvoid *_hx_getInterface(int inHash);\n");
+			outputH("\t\tvoid *_hx_getInterface(int inHash) override;\n");
 			/* generate header glue */
 			var alreadyGlued = new haxe.ds.StringMap<Bool>();
 			for (src in tcppClass.tclHaxeInterfaces) {
@@ -318,7 +322,7 @@ class CppGenClassHeader {
 		}
 
 		if (tcppClass.tclInit != null) outputH("\t\tstatic void __init__();\n\n");
-		outputH("\t\t::String __ToString() const { return " + strq(smartClassName) + "; }\n\n");
+		outputH("\t\t::String __ToString() const override { return " + strq(smartClassName) + "; }\n\n");
 
 		if (hasTcppClassFlag(tcppClass, Boot)) outputH("\t\tstatic void __boot();\n");
 

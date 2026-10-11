@@ -906,6 +906,59 @@ class Hlopt {
 			nopCount++;
 		}
 
+		/* an allocating opcode never returns null and ONull is always null */
+		function foldNullChecks():Void {
+			var len = f.code.length;
+			var isTarget = [for (_ in 0...len + 1) false];
+			function mark(i:Int, d:Int):Void {
+				var t = i + 1 + d;
+				if (t >= 0 && t <= len) isTarget[t] = true;
+			}
+			for (i in 0...f.code.length) {
+				switch control(f.code[i]) {
+					case CJAlways(d) | CJCond(d) | CTry(d): mark(i, d);
+					case CSwitch(pl): for (d in pl) mark(i, d);
+					case _:
+				}
+			}
+			function defOf(r:Int, i:Int):Null<Opcode> {
+				/* nearest write to r, only following straight line code and movs */
+				var i = i - 1;
+				while (true) {
+					if (i < 0 || isTarget[i + 1]) return null;
+					var op = f.code[i];
+					var writes = false;
+					opcodeFx((r2, read) -> if (!read && r2 == r) writes = true, op);
+					if (writes) return switch op {
+						case OMov(_, s): defOf(s, i);
+						case _: op;
+					} else switch control(op) {
+						case CNo: i--;
+						case _: return null;
+					}
+				}
+			}
+			for (i in 0...f.code.length) {
+				switch f.code[i] {
+					case OJNotNull(r, d) | OJNull(r, d):
+						var isNull:Null<Bool> = switch defOf(r, i) {
+							case ONew(_) | OStaticClosure(_, _) | OInstanceClosure(_, _, _): false;
+							case ONull(_): true;
+							case _: null;
+						}
+						if (isNull != null) {
+							var taken = switch f.code[i] {
+								case OJNull(_, _): isNull;
+								case _: !isNull;
+							}
+							if (taken) f.code[i] = OJAlways(d) else setNop(i, "nullcheck");
+						}
+					case _:
+				}
+			}
+		}
+		foldNullChecks();
+
 		var g = codeGraph(f);
 		var blocksPos = g.blocksPos, root = g.root;
 
@@ -1185,13 +1238,17 @@ class Hlopt {
 
 		/* nop */
 
-		for (i in 0...f.code.length) {
+		var i = f.code.length - 1;
+		while (i >= 0) {
 			switch op(i) {
-				case OMov(d, r) if (!isLive(d, i + 1)):
+				case OMov(d, r) if (!isLive(d, i + 1) || readCounts[d] == 0):
 					var n = readCounts[r] - 1;
 					readCounts[r] = n;
 					writeCounts[d] = writeCounts[d] - 1;
 					addRegMoved(i, d, r);
+					setNop(i, "unused");
+				case ONull(d) if (!isLive(d, i + 1) || readCounts[d] == 0):
+					writeCounts[d] = writeCounts[d] - 1;
 					setNop(i, "unused");
 				case OJAlways(d) if (d >= 0):
 					var k = 0;
@@ -1207,6 +1264,7 @@ class Hlopt {
 					}
 				case _:
 			}
+			i--;
 		}
 
 		/* reg map */
