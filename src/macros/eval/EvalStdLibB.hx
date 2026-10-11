@@ -482,10 +482,11 @@ class StdObjectMap {
 // `let random = Random.State.make_self_init()`: the host generator is used instead.
 
 class StdMath {
-	// Int32.of_float (mod_float f 2147483648.0); OCaml converts nan to 0 (amd64)
+	// Int32.of_float (mod_float f 2147483648.0); on amd64 OCaml converts nan (also
+	// mod_float of an infinity) to min_int (cvttsd2si's "integer indefinite")
 	static function toInt(f:Float):Int {
 		var m = f % 2147483648.0;
-		if (Math.isNaN(m)) return 0;
+		if (Math.isNaN(m)) return 0x80000000;
 		return Std.int(m);
 	}
 
