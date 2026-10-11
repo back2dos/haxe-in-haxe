@@ -39,6 +39,7 @@ RT_NO= RT_LIBS="-lmbedtls -lmbedx509 -lmbedcrypto -luv" sh hxc/build.sh port   #
 sh hxc/tools/cosmo-deps.sh                              # bin/cosmo-deps (once, ~2 min)
 CC="cosmocc -O2" RT_DEPS=bin/cosmo-deps BIN=hih.com sh hxc/build.sh port       # portable APE
 sh hxc/build.sh hxc/test/threads Threads && bin/hxc/Threads/prog_c    # another program
+NO_CC=1 sh hxc/build.sh port && sh hxc/tools/zig-build.sh aarch64-macos bin/zig/hih   # zig cc cross build (release builds, .github/workflows/build.yml)
 ```
 
 | Compiler | Use | Threads | Notes |
@@ -46,6 +47,7 @@ sh hxc/build.sh hxc/test/threads Threads && bin/hxc/Threads/prog_c    # another 
 | tcc | development: the port's 20 MB of C compiles in about a second | green (M:1) | code 2–2.5× slower than clang/gcc -O2 |
 | clang -O2 | fastest code (4–10% ahead of gcc -O2 on the self-compile, builds faster; -O3 adds nothing) | OS (1:1) | preferred by the haxelib package |
 | gcc -O2 | release builds | OS (1:1) | |
+| zig cc -O2 | release builds for Linux (glibc 2.28+) and macOS, x86-64 and aarch64 (`tools/zig-build.sh`) | OS (1:1) | without mbedtls/libuv; macOS: conditions wait on the real-time clock |
 | cosmocc -O2 | one binary for Linux, macOS, Windows, the BSDs (x86-64 + aarch64) | OS (1:1) | only Linux x86-64 tested |
 | Emscripten (em++) | the website's playground: wasm64, compiled as C++ so `RT_TRY` is wasm exception handling | none | `site/build.sh`; `EMXX=em++` in `build.sh` for linear-memory wasm |
 

@@ -36,6 +36,12 @@
 // parked threads otherwise. Their handles are T_NATIVE objects freed by the
 // collector (rt_native_new).
 #define _GNU_SOURCE
+#ifdef __APPLE__
+// macOS: the ucontext routines (rt_run_main, green threads) need _XOPEN_SOURCE,
+// and _DARWIN_C_SOURCE keeps the rest (MAP_ANONYMOUS, ...) visible
+#define _XOPEN_SOURCE 700
+#define _DARWIN_C_SOURCE
+#endif
 #include "rt_gc.h"
 #include <errno.h>
 #include <stdio.h>
@@ -927,7 +933,7 @@ static void **dead_sp, **dead_hw, **dead_base;
 static void *dead_exn;
 static char *dead_yptr, *dead_ylim;
 
-static pthread_condattr_t mono_attr; // conditions waiting on CLOCK_MONOTONIC
+static pthread_condattr_t mono_attr; // conditions waiting on CLOCK_MONOTONIC (CLOCK_REALTIME on macOS)
 
 // RT_STATS: threads started, contended mutex acquisitions and their waits,
 // collections and the time from a request until every thread had stopped
@@ -953,7 +959,9 @@ static parker *new_parker(void) {
 
 void rt_threads_init(void) {
 	pthread_condattr_init(&mono_attr);
+#ifndef __APPLE__
 	pthread_condattr_setclock(&mono_attr, CLOCK_MONOTONIC);
+#endif
 	main_thread.id = 1;
 	main_thread.state = TS_RUNNING;
 	main_thread.started = 1;
@@ -1208,7 +1216,11 @@ void *hxc_NativeThread_tlsGet(int32_t id) { return tls_get(&self->tls, id); }
 void hxc_NativeThread_tlsSet(int32_t id, void *v) { tls_set(&self->tls, id, v); }
 
 static void deadline_ts(struct timespec *ts, double timeout) {
+#ifdef __APPLE__
+	clock_gettime(CLOCK_REALTIME, ts); // macOS: no pthread_condattr_setclock, conditions wait on the real-time clock
+#else
 	clock_gettime(CLOCK_MONOTONIC, ts);
+#endif
 	double s = (double)ts->tv_sec + (double)ts->tv_nsec * 1e-9 + timeout;
 	ts->tv_sec = (time_t)s;
 	ts->tv_nsec = (long)((s - (double)ts->tv_sec) * 1e9);

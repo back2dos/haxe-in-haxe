@@ -9,6 +9,7 @@
 #   CC="cosmocc -O2" BIN=hih.com sh hxc/build.sh port
 #   CC="cosmocc -O2" RT_DEPS=bin/cosmo-deps BIN=hih.com sh hxc/build.sh port   (with mbedtls/libuv: hxc/tools/cosmo-deps.sh)
 #   HXFLAGS="-D retain" VARIANT=-retain sh hxc/build.sh
+#   NO_CC=1 sh hxc/build.sh port                  (only the C, see hxc/tools/zig-build.sh)
 # The C is written in chunks to $OUT/prog_hxc/ and compiled in parallel, reusing
 # the objects of unchanged chunks (hxc/tools/cc-chunks.sh: JOBS, CFLAGS;
 # HXC_IDS=const|extern, see below; CC="clang -O2 -flto=thin" for ThinLTO);
@@ -36,11 +37,15 @@ export HXC_SINGLE=${HXC_SINGLE:-0}
 # (given last: the last class path wins over earlier ones, e.g. hxc/js)
 python3 hxc/tools/mkstd.py
 if [ -z "${SKIP_TOOL:-}" ]; then
-	"$HAXE" -cp src -cp hxc/src -main backend.Main -lib hxnodejs -cp hxc/js --js bin/hxc/wbk.js -w -WDeprecated
+	# TOOL_LIBS: how hxnodejs is found (default haxelib; without haxelib, e.g. in CI:
+	# TOOL_LIBS="<hxnodejs clone>/extraParams.hxml -cp <hxnodejs clone>/src")
+	"$HAXE" -cp src -cp hxc/src -main backend.Main ${TOOL_LIBS:--lib hxnodejs} -cp hxc/js --js bin/hxc/wbk.js -w -WDeprecated
 fi
 # hxnodejs's stdout flush fails on pipes, hence the file
 HAXE_STD_PATH=${HAXE_STD_PATH:-$PWD/haxe/std} node --stack-size=65500 bin/hxc/wbk.js "$OUT/prog" \
 	$ARGS -cp bin/hxc/std --custom-target hxc ${HXFLAGS:-} > "$OUT/wbk.log" 2>&1 || { cat "$OUT/wbk.log"; exit 1; }
+# NO_CC=1: only the C (e.g. compiled elsewhere with hxc/tools/zig-build.sh)
+if [ -n "${NO_CC:-}" ]; then exit 0; fi
 # slots are read as int32/double/pointer through casts (FI/FD/FP): no strict aliasing
 # without mbedtls/libuv: their natives fail when called (RT_LIBS="-lmbedtls -lmbedx509 -lmbedcrypto -luv" and RT_NO= to link them;
 # with cosmocc, RT_DEPS=bin/cosmo-deps links the static libraries of hxc/tools/cosmo-deps.sh)
