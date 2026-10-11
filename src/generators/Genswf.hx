@@ -435,10 +435,10 @@ class Genswf {
 		});
 		var cid = 0;
 		var classes:Array<F9Class> = [{f9_cid: null, f9_classname: boot_name}]; // port: most recent first
-		// port: Hashtbl.fold over com.resources, prepending (see Genswf9.resource_names).
+		// port: Hashtbl.fold over com.resources, prepending.
 		var res:Array<Tag> = [];
 		for (name in Genswf9.resource_names(com)) {
-			var data = com.resources.get(name);
+			var data = com.resources.find(name);
 			cid++;
 			classes.unshift({f9_cid: cid, f9_classname: sTypePath(Genswf9.resource_path(name))});
 			res.unshift(tag(TBinaryData(cid, data)));

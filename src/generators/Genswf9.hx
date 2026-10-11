@@ -3251,15 +3251,10 @@ class Genswf9 {
 
 	public static function resource_path(name:String):GlobalTypePath return {pack: ["_res"], name: "_" + name.split(".").join("_")};
 
-	// port: the names of com.resources (a Hashtbl upstream) in Hashtbl.iter
-	// order, rebuilt with OcamlHashtbl. The port's StringMap does not keep the
-	// insertion order, which only matters for names sharing a bucket; they are
-	// inserted in ascending order here.
+	// port: the names of com.resources in Hashtbl.iter order.
 	public static function resource_names(com:Gctx):Array<String> {
-		var h = new core.ds.OcamlHashtbl<String, Bool>(core.ds.OcamlHash.hashString, (a, b) -> a == b);
-		for (name in sortedKeys(com.resources)) h.replace(name, true);
 		var names = [];
-		h.iter((name, _) -> names.push(name));
+		com.resources.iter((name, _) -> names.push(name));
 		return names;
 	}
 
