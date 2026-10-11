@@ -7,7 +7,8 @@ port compile the same projects to every target; outputs must be identical.
 Projects:
   formatter  haxe-formatter 1.9.1 with its six libraries (bin/haxebench/libs, see
              bench/haxebench.py), the HaxeBenchmarks formatter_noio case
-  self       the port's own source (src/, haxe.Main), about 1,000 modules
+  self       the port's own source (src/, haxe.Main), about 1,000 modules; for JS, the
+             hxc tool (the port and the C backend, backend.Main, over hxnodejs)
 Each run is a fresh process with -D disable-parallelism; both compilers run in the
 same directory (some outputs embed it). CPU is user + system time of the process
 (os.wait4), best of RUNS; peak RSS is the largest of the runs. The output is
@@ -32,7 +33,7 @@ PROJECTS = {
 # target: (args, output kind:path, extra args per project)
 TARGETS = {
     "hxb": (["--interp", "--no-output", "--hxb", "out/out.zip"], "zip:out/out.zip"),
-    "js": (["-lib", "hxnodejs", "--js", "out/main.js"], "file:out/main.js"),
+    "js": (["--js", "out/main.js"], "file:out/main.js"),
     "lua": (["--lua", "out/main.lua"], "file:out/main.lua"),
     "python": (["--python", "out/main.py"], "file:out/main.py"),
     "php": (["--php", "out/php"], "dir:out/php"),
@@ -43,7 +44,9 @@ TARGETS = {
     "jvm": (["--jvm", "out/main.jar"], "zip:out/main.jar"),
     "swf": (["--swf", "out/main.swf"], "file:out/main.swf"),
 }
-EXTRA = {("self", "js"): ["-cp", str(ROOT / "runtime/js")]}
+EXTRA = {("formatter", "js"): ["-lib", "hxnodejs"]}
+# the port's JS build is the hxc tool (bin/hxc/wbk.js): the port and the C backend over hxnodejs
+PROJECT_FOR = {("self", "js"): ["-cp", str(ROOT / "src"), "-cp", str(ROOT / "hxc/src"), "-main", "backend.Main", "-lib", "hxnodejs", "-cp", str(ROOT / "runtime/js"), "-w", "-WDeprecated"]}
 
 
 def run_once(cmd, cwd, log):
@@ -81,7 +84,7 @@ def bench(compiler, project, target, runs):
             shutil.rmtree(cwd)
         (cwd / "out").mkdir(parents=True)
         with open(WORK / "log.txt", "w") as log:
-            code, wall, cpu, rss = run_once(compiler + PROJECTS[project] + EXTRA.get((project, target), []) + args + ["-D", "disable-parallelism"], cwd, log)
+            code, wall, cpu, rss = run_once(compiler + PROJECT_FOR.get((project, target), PROJECTS[project]) + EXTRA.get((project, target), []) + args + ["-D", "disable-parallelism"], cwd, log)
         if code != 0:
             tail = (WORK / "log.txt").read_text(errors="replace").strip().splitlines()[-3:]
             return {"status": "exit %d: %s" % (code, " | ".join(tail))}, None
@@ -101,9 +104,13 @@ def main():
     ap.add_argument("-t", default=",".join(TARGETS))
     ap.add_argument("--port", default=os.environ.get("HAXE_IN_HAXE_PORT", str(ROOT / "bin/hxc/hih/hih_clang")))
     ap.add_argument("--json")
+    ap.add_argument("--merge", action="store_true", help="replace only the measured project/target entries of an existing --json file")
     a = ap.parse_args()
     WORK.mkdir(parents=True, exist_ok=True)
     results = []
+    if a.merge and a.json and os.path.exists(a.json):
+        keep = set((p, t) for p in a.p.split(",") for t in a.t.split(","))
+        results = [r for r in json.load(open(a.json))["results"] if (r["project"], r["target"]) not in keep]
     for project in a.p.split(","):
         for target in a.t.split(","):
             ref, ref_out = bench([REF], project, target, a.n)
