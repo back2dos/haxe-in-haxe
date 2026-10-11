@@ -904,3 +904,26 @@ the native backend tool (`hxc/tools/dev-tool.sh`):
 | `test/upstream.py`, hxc clang with mbedtls and libuv | 14/14 |
 | JS build of the backend tool, site build (Emscripten wasm64) | build; the wasm compiler runs a test program in Node 24 with the same output as the reference and the native port |
 | A regex test (30 patterns × 10 subjects: match, matchedPos, replace, split, matchSub), hxc vs the previous `hxc.Regex` | identical; 34 lines differ from Eval around zero-width matches, the same before |
+
+## Native Int64, reorganization and comment pass (2026-10-11)
+
+After native `haxe.Int64` on hxc (`hxc.I64`), unchecked `Vector` reads, the
+repository reorganization (`hxc/`, `runtime/`, `docs/`, `archive/`) and the
+comment pass (`src/`, `hxc/`; comment-only, checked with
+`tools/comment-only-diff.py`, and for C by comparing the preprocessed
+sources without comments):
+
+| Check | Result |
+| --- | --- |
+| Conformance, HashLink / hxc clang / hxc clang `--parallel 3` / hxc tcc | 279 PASS + 7 expected failures each |
+| Conformance, macro cases, HashLink / hxc clang `--parallel 3` | 66/66 / 66/66 |
+| Conformance, `--hxb-lib` (HashLink) | 279 PASS + 7 expected failures |
+| Upstream cases / party / hxblib (HashLink) | 135 PASS + 60 expected failures / 2/2 / 7/7 |
+| `test/server.py`, HashLink / hxc clang | 595/595 / 595/595 |
+| `test/upstream.py`, HashLink / hxc clang with mbedtls and libuv | 11/14 (the known `Gc.finalise` ×2 and libuv steps) / 14/14 |
+| `test/display.py` (HashLink) | 679/679 |
+| `test/unit.hxml` | passes (rebuilt against the current API) |
+| Self-compile HXB, hxc build vs the previous one | identical |
+| An Int64 test program (arithmetic, shifts, comparisons, arrays, Dynamic, closures, maps), hxc vs Eval | identical, except that unset `Array<Int64>` elements read 0 on hxc (null on Eval), as on HashLink |
+| `@:nullSafety` with uninitialized fields: error order, port vs reference | identical (after the OCaml-ordered pending table) |
+| Site build (wasm, APE); the wasm compiler and the APE binary run a test program | same output as the reference |
