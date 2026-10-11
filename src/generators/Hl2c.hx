@@ -124,6 +124,11 @@ enum TypeDesc {
 
 class VDescField {
 	public var name:String;
+	// port: the name string itself where strings have an identity
+	// (core.ds.StrTools.hasIdentity): field names are shared between the
+	// virtuals of copies of one class field (`{cf with cf_type = ...}` in
+	// apply_params), and Marshal shares them. Elsewhere the HField, so that a
+	// name is never shared outside its own virtual.
 	public var ident:Dynamic;
 	public var d:TypeDesc;
 
@@ -172,6 +177,10 @@ private class OcamlExtern {
 
 	function lookup(id:Dynamic):Int {
 		if (id == null) return -1;
+		if (Std.isOfType(id, String)) {
+			for (i in 0...ids.length) if (Std.isOfType(ids[i], String) && core.ds.StrTools.physEq(ids[i], id)) return poss[i];
+			return -1;
+		}
 		for (i in 0...ids.length) if (ids[i] == id) return poss[i];
 		return -1;
 	}
@@ -1542,7 +1551,7 @@ class Hl2c {
 					typesDescs.set(t, td);
 					for (i in 0...vp.vfields.length) {
 						var f = vp.vfields[i];
-						arr[i] = new VDescField(f.name, f, makeDesc(f.t));
+						arr[i] = new VDescField(f.name, if (core.ds.StrTools.hasIdentity) f.name else f, makeDesc(f.t));
 					}
 					td;
 			}

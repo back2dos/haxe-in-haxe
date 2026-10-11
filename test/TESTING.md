@@ -49,6 +49,32 @@ Not covered: running the output of non-HXB targets (their generated output is
 compared with the fuzzer's `diff:<target>` lanes, below); `server/memory` sizes
 are host measurements (normalized by `test/server-jsonrpc.py`).
 
+## HL/C type names: Marshal sharing of virtual field names — 2026-10-11
+
+`make_sign` digests `Marshal.to_bytes` of a type descriptor, and Marshal
+shares a string reached twice. Virtual field names are the `cf_name` of the
+anonymous structure's fields, and `{cf with cf_type = ...}` (`apply_params`)
+keeps the string, so the virtuals of two instances of one structure share
+their names (`TestGADT`: `t$fun_46b4cf0`, not `t$fun_9aa6579`), while
+same-named fields of different declarations do not (`Expr.expr` and
+`Function.expr`). The emulation now keys a name by the host string's identity
+(`StrTools.physEq`, as `physNeq`), and the lexer no longer interns identifiers
+on hosts with string identity (hxc, HashLink, JVM), since that made every
+`expr` of a file one string (+1.5% peak RSS on the unit suite, hxc tcc). Hosts
+without string identity keep sharing a name only inside its own virtual.
+
+Upstream unit suite (`compile-each.hxml` + `compile-hlc.hxml` flags,
+`-D no-compilation`, utest from `test/generated/upstream/libs`), hxc tcc build:
+every file identical except the compile date (`TestMainNow.c`, `globals.c`),
+with the reference pinned to one CPU (`taskset -c 0`): with several domains the
+reference's `hl/hashes.c` order changes between its own runs. Before: 9 files
+differed (`types.c`, `TestGADT.c`, `TestMatch.c`, `Issue2889.c`, `XmlParser.c`,
+...). Fuzz (hxc tcc): `diff:hlc` 150/150 (seed 2026, size 5) and 300/300
+(seed 777, size 8); `diff:hl` and `diff:hxb` 100/100. Type descriptors that
+would marshal a class or virtual prototype (its PMaps hold a comparison closure, written
+as a code pointer of the reference binary) still fail explicitly; the unit
+suite reaches none.
+
 ## Upstream moved to 995a7d1fe (from b10fa6e93): non-generator changes — 2026-10-11
 
 Ported the 41 upstream commits outside `src/generators` and `libs/`: `for_remap`
@@ -196,7 +222,7 @@ Per-generator checks during the port (agents' runs, all 0 port failures):
 
 Not ported (fail explicitly): `--swf-lib`, PNG `@:bitmap`, the HL bytecode
 interpreter (`-D interp`), hl2c type descriptors that would marshal an OCaml
-closure, copying a non-std `--java-lib` into the output.
+closure (the PMaps of a class or virtual prototype), copying a non-std `--java-lib` into the output.
 
 Full matrix at this commit: HashLink port conformance 279 + 7, macro cases,
 `--hxb-lib` 279 + 7 and hxblib cases, display 679/679, server 595/595, interp

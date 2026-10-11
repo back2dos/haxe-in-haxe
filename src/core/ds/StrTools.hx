@@ -27,6 +27,12 @@ class StrTools {
 		#end
 	}
 
+	// port: whether physNeq/physEq observe string identity on this host.
+	public static inline final hasIdentity:Bool = #if (hl || jvm || (target.name == "hxc")) true #else false #end;
+
+	// port: OCaml's physical equality `==` on strings (see physNeq).
+	public static inline function physEq(a:Null<String>, b:Null<String>):Bool return !physNeq(a, b);
+
 	// port: `s.substring(start, end)` for 0 <= start <= end <= s.length. On HashLink
 	// substring's optional end index is boxed on every call.
 	public static inline function sub(s:String, start:Int, end:Int):String {
