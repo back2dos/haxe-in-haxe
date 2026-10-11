@@ -400,8 +400,7 @@ class Args {
 					if (parts.length >= 2 && parts[parts.length - 1] == "hxml") {
 						add(HxmlFile(arg));
 					} else {
-						// port: Path.parse_path raises its Failure message as a String.
-						var path = try core.Path.parsePath(arg) catch (_:String) null;
+						var path = try core.Path.parsePath(arg) catch (_:core.ds.Failure) null;
 						if (path == null) add(IncludeModule(arg));
 						else if (core.StringHelper.startsUppercaseIdentifier(path.name)) add(AddClass(path.pack.concat([path.name])));
 						else add(IncludeModule(arg));

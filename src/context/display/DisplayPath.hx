@@ -60,8 +60,19 @@ class TypePathHandler {
 					}
 				}
 			});
-		// port: process_lib over com.native_libs is not translated: SWF/JVM libraries are rejected
-		// by NativeLibraryHandler, so those lists are always empty.
+		function processLib(modules:Array<GlobalTypePath>) {
+			for (m in modules) {
+				var path = m.pack, name = m.name;
+				if (path.join(".") == p.join(".") && path.length == p.length) classes.unshift(name) else {
+					function loop(p1:Array<String>, p2:Array<String>) {
+						if (p1.length == 0) {} else if (p2.length == 0) packages.unshift(p1[0]) else if (p1[0] == p2[0]) loop(p1.slice(1), p2.slice(1));
+					}
+					loop(path, p);
+				}
+			}
+		}
+		for (lib in com.nativeLibs.swfLibs) processLib(lib.listModules());
+		for (lib in com.nativeLibs.javaLibs) processLib(lib.listModules());
 		return {packages: unique(packages), classes: unique(classes)};
 	}
 

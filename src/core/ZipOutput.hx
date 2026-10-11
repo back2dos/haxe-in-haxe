@@ -48,9 +48,12 @@ class ZipOutput extends AnyOutput {
 		var compressed = compressionLevel != 0;
 		var crc32 = crc32Of(data);
 		if (compressed) {
-			// port: haxe.zip.Compress emits a zlib stream, while ZIP stores raw DEFLATE.
-			var zlibData = haxe.zip.Compress.run(data, compressionLevel);
-			data = zlibData.sub(2, zlibData.length - 6);
+			// port: raw DEFLATE, as Zip.add_entry (Zlib.compress ~header:false), in one call
+			var z = libs.extc.Extc.zlibDeflateInit2(compressionLevel, -15);
+			var d = Bytes.alloc(libs.extc.Extc.zlibDeflateBound(z, data.length));
+			var r = libs.extc.Extc.zlibDeflate(z, data, 0, data.length, d, 0, d.length, libs.extc.Zlib.Z_FINISH);
+			libs.extc.Extc.zlibDeflateEnd(z);
+			data = d.sub(0, r.z_wrote);
 		}
 		entries.add({
 			fileName: name,

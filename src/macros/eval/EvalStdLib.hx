@@ -76,7 +76,7 @@ using macros.eval.EvalValue.EvalValueTools;
 //   (hxc/); elsewhere their natives throw "... is not supported by
 //   haxe-in-haxe". Sockets use `hxc.NativeNet` on the hxc host and
 //   `EvalHostNet` on HashLink, and fail likewise on other hosts.
-// - zlib streams are host `haxe.zip.Compress`/`haxe.zip.Uncompress` objects.
+// - zlib streams are libs.extc.Extc streams (Zlib for deflate, Inflater for inflate).
 // - Field lists are `{name, value}` pairs instead of OCaml tuples.
 class EvalStdLib {
 	public static function catchUnixError<A, B>(f:A->B, arg:A):B {
@@ -252,14 +252,14 @@ class EvalStdLib {
 		add(EvalHash.key_haxe_zip_Compress, vl -> switch vl {
 			case [level]:
 				var level = EvalDecode.decodeInt(level);
-				var z = new haxe.zip.Compress(level);
+				var z = libs.extc.Extc.zlibDeflateInit(level);
 				EvalEncode.encodeInstance(EvalHash.key_haxe_zip_Compress, IZip(new Vzlib(z, StdCompress.Z_NO_FLUSH)));
 			case _: die();
 		});
 		add(EvalHash.key_haxe_zip_Uncompress, vl -> switch vl {
 			case [windowBits]:
 				var windowBits = EvalDecode.defaultInt(windowBits, 15);
-				var z = new haxe.zip.Uncompress(windowBits);
+				var z = libs.extc.Extc.zlibInflateInit2(windowBits);
 				EvalEncode.encodeInstance(EvalHash.key_haxe_zip_Uncompress, IZip(new Vzlib(z, StdCompress.Z_NO_FLUSH)));
 			case _: die();
 		});

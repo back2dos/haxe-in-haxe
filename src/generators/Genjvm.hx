@@ -79,13 +79,7 @@ class JarOutput extends JvmOutput {
 	final zip:core.ZipOutput;
 
 	public function new(path:String, compressionLevel:Int) {
-		// port: host runtimes without zlib (hxc) store the entries uncompressed; the
-		// compression of the members is a ZIP container detail.
-		var level = try {
-			haxe.zip.Compress.run(Bytes.alloc(0), compressionLevel);
-			compressionLevel;
-		} catch (_:haxe.exceptions.NotImplementedException) 0;
-		zip = new core.ZipOutput(path, level);
+		zip = new core.ZipOutput(path, compressionLevel);
 	}
 
 	override public function addEntry(content:Bytes, name:String):Void zip.addBytesEntry(content, name);
@@ -1108,10 +1102,12 @@ class Genjvm {
 		var classPaths = [];
 		for (javaLib in gctx.gctx.nativeLibs) {
 			if (javaLib.hasFlag(FlagIsStd) || javaLib.hasFlag(FlagIsExtern)) {} else {
-				// port: native Java libraries (--java-lib) are not ported; copying them into the
-				// output lib/ directory is not supported.
-				throw new Failure("haxe-in-haxe: --java-lib native libraries are not supported by the JVM generator (" + javaLib.getFilePath()
-					+ ")");
+				var dir = outDir + "lib/";
+				core.Path.mkdirFromPath(dir);
+				var name = core.Path.FilePath.nameAndExtension(core.Path.FilePath.parse(javaLib.getFilePath()));
+				var b = sys.io.File.getBytes(javaLib.getFilePath());
+				sys.io.File.saveBytes(dir + name, b);
+				classPaths.push("lib/" + name + " \n");
 			}
 		}
 		gctx.gctx.resources.iter(function(name, v) {

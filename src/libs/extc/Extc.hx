@@ -6,10 +6,8 @@ import libs.extlib.IO.Output;
 import libs.extlib.IO.Input;
 import libs.extlib.IO.NoMoreInput;
 
-// port: the deflate half of haxe/libs/extc/extc.ml (zlib_deflate_init, zlib_op,
-// zip, output_zip), over the zlib translation in Zlib.hx. Inflate (unzip,
-// input_zip) is not ported: nothing on the HXB/SWF output path reads
-// compressed data.
+// port: haxe/libs/extc/extc.ml. Deflate is the zlib translation in Zlib.hx; inflate
+// is haxe.zip.InflateImpl (see Inflater).
 typedef ZResult = {
 	var z_finish:Bool;
 	var z_read:Int;
@@ -36,6 +34,18 @@ class Extc {
 			case _: "Error in `zlib_deflate` (extc_stubs.c): unknown return code from `deflate`";
 		});
 	}
+
+	public static function zlibDeflateBound(z:Zlib, len:Int):Int return z.deflateBound(len);
+
+	public static function zlibInflateInit2(windowBits:Int):Inflater return new Inflater(windowBits);
+
+	public static function zlibInflateInit():Inflater return zlibInflateInit2(15);
+
+	public static function zlibInflate(z:Inflater, src:Bytes, spos:Int, slen:Int, dst:Bytes, dpos:Int, dlen:Int, flush:Int):ZResult {
+		return z.inflate(src, spos, slen, dst, dpos, dlen);
+	}
+
+	public static function zlibInflateEnd(z:Inflater):Void z.end();
 
 	public static function zlibDeflateEnd(z:Zlib):Void {
 		if (z.deflateEnd() != 0) throw new core.ds.Failure("zlib_deflate_end");
@@ -178,5 +188,68 @@ private class ExtcHostInput extends haxe.io.Input {
 
 	override public function readBytes(s:Bytes, pos:Int, len:Int):Int {
 		return try IO.input(ch, s, pos, len) catch (_:NoMoreInput) throw new haxe.io.Eof();
+	}
+}
+
+// port: a zlib inflate stream over haxe.zip.InflateImpl, which reads a whole stream
+// from a haxe.io.Input and cannot be suspended. The input is buffered until it
+// holds the complete stream, which is then inflated at once and its output
+// handed out as `dst` allows: zlib writes partial output for a partial stream,
+// this writes none until the stream is complete. The flush mode makes no
+// difference to the output. The gzip wrapper (windowBits > 15) is not supported.
+class Inflater {
+	final header:Bool;
+	var input:haxe.io.BytesBuffer = new haxe.io.BytesBuffer();
+	var output:Null<Bytes> = null;
+	var outPos = 0;
+
+	public function new(windowBits:Int) {
+		if (windowBits > 15 || windowBits < -15 || (windowBits > -8 && windowBits < 8 && windowBits != 0))
+			throw new core.ds.Failure("zlib_inflate_init");
+		header = windowBits >= 0;
+	}
+
+	public function inflate(src:Bytes, spos:Int, slen:Int, dst:Bytes, dpos:Int, dlen:Int):ZResult {
+		var read = 0;
+		if (output == null) {
+			input.addBytes(src, spos, slen);
+			read = slen;
+			var data = input.getBytes();
+			input = new haxe.io.BytesBuffer();
+			input.add(data);
+			var bi = new haxe.io.BytesInput(data);
+			var out = new haxe.io.BytesBuffer();
+			try {
+				var z = new haxe.zip.InflateImpl(bi, header, header);
+				// port: InflateImpl's window overflows when a stored block is read more than
+				// 32KB at a time
+				var tmp = Bytes.alloc(1 << 15);
+				while (true) {
+					var n = z.readBytes(tmp, 0, tmp.length);
+					out.addBytes(tmp, 0, n);
+					if (n < tmp.length) break;
+				}
+			} catch (_:haxe.io.Eof) {
+				if (slen == 0) throw new core.ds.Failure("zlib_inflate");
+				return {z_finish: false, z_read: read, z_wrote: 0};
+			} catch (_:Dynamic) {
+				throw new core.ds.Failure("zlib_inflate");
+			}
+			// bytes after the end of the stream are not consumed
+			var unused = data.length - bi.position;
+			read -= unused < read ? unused : read;
+			input = null;
+			output = out.getBytes();
+		}
+		var n = output.length - outPos;
+		if (n > dlen) n = dlen;
+		dst.blit(dpos, output, outPos, n);
+		outPos += n;
+		return {z_finish: outPos == output.length, z_read: read, z_wrote: n};
+	}
+
+	public function end():Void {
+		input = null;
+		output = null;
 	}
 }

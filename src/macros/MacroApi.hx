@@ -3017,9 +3017,9 @@ class MacroApiImpl {
 						case Flash: SwfLib;
 						case _: failwith("Unsupported platform");
 					}
-					// port: create_native_lib / NativeLibraryHandler.add_native_lib: Java and SWF
-					// libraries are not part of the port
-					notSupported("Adding native libraries (" + Std.string(kind) + " " + file + ")");
+					var lib = compiler.ParsedArg.ParsedArgTools.createNativeLib(file, false, kind);
+					context.NativeLibraryHandler.addNativeLib(com, lib)();
+					vnull;
 				})
 			},
 			{

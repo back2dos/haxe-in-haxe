@@ -182,7 +182,9 @@ class ZipInput {
 					var n = 0;
 					try {
 						while (n < e.uncompressedSize) {
-							var k = inflate.readBytes(res, n, e.uncompressedSize - n);
+							// port: InflateImpl's window overflows when a stored block is read more
+							// than 32KB at a time
+							var k = inflate.readBytes(res, n, Std.int(Math.min(e.uncompressedSize - n, 1 << 15)));
 							if (k == 0) break;
 							n += k;
 						}

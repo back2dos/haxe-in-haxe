@@ -32,7 +32,7 @@ using macros.eval.EvalValue.EvalValueTools;
 //   snapshotted (`VregexMatch`) so `r_groups` keeps upstream's semantics.
 // - An empty regex match in `map`/`split`/`replace` steps over one code point
 //   instead of one byte (upstream would resume inside a UTF-8 sequence).
-// - zlib is the host `haxe.zip.Compress`; CRC32 is `haxe.crypto.Crc32`.
+// - zlib is libs.extc.Extc; CRC32 is `haxe.crypto.Crc32`.
 // - Dates use the host `Date` (local time via the host's localtime/mktime).
 //   `FileSystem.stat` times have the host's precision.
 // - Sys_error messages are approximated as "<path>: <reason>", with
@@ -731,8 +731,7 @@ class StdBytesBuffer {
 	});
 }
 
-// port: result of a zlib operation (Extc.zresult).
-typedef Zresult = {zFinish:Bool, zRead:Int, zWrote:Int};
+typedef Zresult = libs.extc.Extc.ZResult;
 
 // port: `zfun`: zstream -> src -> spos -> slen -> dst -> dpos -> dlen -> zflush -> zresult.
 typedef Zfun = (z:Dynamic, src:Bytes, spos:Int, slen:Int, dst:Bytes, dpos:Int, dlen:Int, flush:Int) -> Zresult;
@@ -745,26 +744,8 @@ class StdCompress {
 	public static inline final Z_FULL_FLUSH = 3;
 	public static inline final Z_FINISH = 4;
 
-	public static function hostFlushMode(f:Int):haxe.zip.FlushMode {
-		return switch f {
-			case Z_NO_FLUSH: NO;
-			case Z_SYNC_FLUSH: SYNC;
-			case Z_FULL_FLUSH: FULL;
-			case Z_FINISH: FINISH;
-			case _: BLOCK; // port: Z_PARTIAL_FLUSH (haxe.zip.FlushMode.BLOCK upstream)
-		}
-	}
-
-	// port: Extc.zlib_deflate on a host `haxe.zip.Compress` stream (the host deflates the rest of `src`).
 	public static function zlibDeflate(z:Dynamic, src:Bytes, spos:Int, slen:Int, dst:Bytes, dpos:Int, dlen:Int, flush:Int):Zresult {
-		#if (hl || eval || neko || cpp)
-		var c:haxe.zip.Compress = z;
-		c.setFlushMode(hostFlushMode(flush));
-		var r = c.execute(src, spos, dst, dpos);
-		return {zFinish: r.done, zRead: r.read, zWrote: r.write};
-		#else
-		return EvalStdLibA.notSupported("zlib compression");
-		#end
+		return libs.extc.Extc.zlibDeflate(z, src, spos, slen, dst, dpos, dlen, flush);
 	}
 
 	static function thisValue(vthis:Value):Vzlib {
@@ -783,19 +764,15 @@ class StdCompress {
 		var r = try f(self.z, src, srcPos, src.length - srcPos, dst, dstPos, dst.length - dstPos,
 			self.zFlush) catch (_:Dynamic) EvalContext.excString("oops");
 		return EvalEncode.encodeObj([
-			{name: EvalHash.key_done, value: r.zFinish.vbool()},
-			{name: EvalHash.key_read, value: VInt32(r.zRead)},
-			{name: EvalHash.key_write, value: VInt32(r.zWrote)}
+			{name: EvalHash.key_done, value: r.z_finish.vbool()},
+			{name: EvalHash.key_read, value: VInt32(r.z_read)},
+			{name: EvalHash.key_write, value: VInt32(r.z_wrote)}
 		]);
 	}
 
 	public static final close = EvalEncode.vifun0(vthis -> {
-		#if (hl || eval || neko || cpp)
-		(thisValue(vthis).z : haxe.zip.Compress).close();
+		libs.extc.Extc.zlibDeflateEnd(thisValue(vthis).z);
 		return VNull;
-		#else
-		return EvalStdLibA.notSupported("zlib compression");
-		#end
 	});
 
 	public static final execute = EvalEncode.vifun4((vthis, src, srcPos, dst, dstPos) -> {
@@ -805,13 +782,13 @@ class StdCompress {
 	public static final run = EvalEncode.vfun2((s, level) -> {
 		var s = EvalDecode.decodeBytes(s);
 		var level = EvalDecode.decodeInt(level);
-		#if (hl || eval || neko || cpp)
-		// port: deflate_init/deflate_bound/deflate(Z_FINISH)/deflate_end, as Compress.run on the host
-		var r = try haxe.zip.Compress.run(s, level) catch (_:Dynamic) EvalContext.excString("Compression failed");
-		return EvalEncode.encodeBytes(r);
-		#else
-		return EvalStdLibA.notSupported("zlib compression");
-		#end
+		var zip = libs.extc.Extc.zlibDeflateInit(level);
+		var d = Bytes.alloc(libs.extc.Extc.zlibDeflateBound(zip, s.length));
+		d.fill(0, d.length, 0);
+		var r = libs.extc.Extc.zlibDeflate(zip, s, 0, s.length, d, 0, d.length, Z_FINISH);
+		libs.extc.Extc.zlibDeflateEnd(zip);
+		if (!r.z_finish || r.z_read != s.length) EvalContext.excString("Compression failed");
+		return EvalEncode.encodeBytes(d.sub(0, r.z_wrote));
 	});
 
 	public static final setFlushMode = EvalEncode.vifun1((vthis, f) -> {

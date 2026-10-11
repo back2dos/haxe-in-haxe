@@ -43,8 +43,7 @@ using macros.eval.EvalValue.EvalValueTools;
 //   for the thread's `finished` lock.
 // - `sys.thread.Condition` keeps its own mutex on the host: acquire/release/wait
 //   use the condition's lock instead of `Vcondition.cmutex`.
-// - zlib streams (`Vzlib.z`) are host `haxe.zip.Compress`/`haxe.zip.Uncompress`
-//   objects (see `StdCompress`).
+// - zlib streams (`Vzlib.z`) are libs.extc.Extc streams (see `StdCompress`).
 // - `haxe.Resource.listNames` follows the host map's key order (OCaml `Hashtbl`
 //   order cannot be reproduced).
 class StdLibBHelpers {
@@ -2102,22 +2101,12 @@ class StdUncompress {
 		}
 	}
 
-	// port: `Extc.zlib_inflate` on a host `haxe.zip.Uncompress`. The host stream reads
-	// up to the end of `src` and writes up to the end of `dst`, so both are cut
-	// to `slen`/`dlen` when shorter.
 	public static function zlibInflate(z:Dynamic, src:Bytes, spos:Int, slen:Int, dst:Bytes, dpos:Int, dlen:Int, flush:Int):Zresult {
-		var u:haxe.zip.Uncompress = z;
-		if (spos + slen != src.length) src = src.sub(0, spos + slen);
-		var target = dpos + dlen != dst.length ? Bytes.alloc(dpos + dlen) : dst;
-		u.setFlushMode(StdCompress.hostFlushMode(flush));
-		var r = u.execute(src, spos, target, dpos);
-		if (target != dst) dst.blit(dpos, target, dpos, r.write);
-		return {zFinish: r.done, zRead: r.read, zWrote: r.write};
+		return libs.extc.Extc.zlibInflate(z, src, spos, slen, dst, dpos, dlen, flush);
 	}
 
 	public static final close = EvalEncode.vifun0(vthis -> {
-		var u:haxe.zip.Uncompress = thisValue(vthis).z;
-		u.close();
+		libs.extc.Extc.zlibInflateEnd(thisValue(vthis).z);
 		VNull;
 	});
 
@@ -2128,15 +2117,15 @@ class StdUncompress {
 	public static final run = EvalEncode.vfun2((src, bufsize) -> {
 		var src = EvalDecode.decodeBytes(src);
 		var bufsize = EvalDecode.defaultInt(bufsize, 1 << 16);
-		var zip = new haxe.zip.Uncompress();
+		var zip = libs.extc.Extc.zlibInflateInit();
 		var buf = new haxe.io.BytesBuffer();
 		var tmp = Bytes.alloc(bufsize);
 		tmp.fill(0, bufsize, 0);
 		var pos = 0;
 		while (true) {
 			var r = zlibInflate(zip, src, pos, src.length - pos, tmp, 0, bufsize, StdCompress.Z_SYNC_FLUSH);
-			buf.addBytes(tmp, 0, r.zWrote);
-			if (!r.zFinish) pos = pos + r.zRead
+			buf.addBytes(tmp, 0, r.z_wrote);
+			if (!r.z_finish) pos = pos + r.z_read
 			else break;
 		}
 		EvalEncode.encodeBytes(buf.getBytes());

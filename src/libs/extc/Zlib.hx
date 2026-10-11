@@ -640,6 +640,62 @@ class Zlib {
 
 	public inline function getAvailOut():Int return availOut;
 
+	/* =========================================================================
+	 * For the default windowBits of 15 and memLevel of 8, this function returns a
+	 * close to exact, as well as small, upper bound on the compressed size. This
+	 * is an expansion of ~0.03%, plus a small constant.
+	 *
+	 * For any setting other than those defaults for windowBits and memLevel, one
+	 * of two worst case bounds is returned. This is at most an expansion of ~4% or
+	 * ~13%, plus a small constant.
+	 *
+	 * Both the 0.03% and 4% derive from the overhead of stored blocks. The first
+	 * one is for stored blocks of 16383 bytes (memLevel == 8), whereas the second
+	 * is for stored blocks of 127 bytes (the worst case memLevel == 1). The
+	 * expansion results from five bytes of header for each stored block.
+	 *
+	 * The larger expansion of 13% results from a window size less than or equal to
+	 * the symbols buffer size (windowBits <= memLevel + 7). In that case some of
+	 * the data being compressed may have slid out of the sliding window, impeding
+	 * a stored block from being emitted. Then the only choice is a fixed or
+	 * dynamic block, where a fixed block limits the maximum expansion to 9 bits
+	 * per 8-bit byte, plus 10 bits for every block. The smallest block size for
+	 * which this can occur is 255 (memLevel == 2).
+	 *
+	 * Shifts are used to approximate divisions, for speed.
+	 */
+	// port: deflateStateCheck cannot fail on a Zlib object; the gzip wrapper is not ported.
+	public function deflateBound(sourceLen:Int):Int {
+		var fixedlen, storelen, wraplen;
+
+		/* upper bound for fixed blocks with 9-bit literals and length 255
+		   (memLevel == 2, which is the lowest that may not use stored blocks) --
+		   ~13% overhead plus a small constant */
+		fixedlen = sourceLen + (sourceLen >> 3) + (sourceLen >> 8) + (sourceLen >> 9) + 4;
+
+		/* upper bound for stored blocks with length 127 (memLevel == 1) --
+		   ~4% overhead plus a small constant */
+		storelen = sourceLen + (sourceLen >> 5) + (sourceLen >> 7) + (sourceLen >> 11) + 7;
+
+		/* compute wrapper length */
+		switch (wrap) {
+			case 0: /* raw deflate */
+				wraplen = 0;
+			case 1: /* zlib wrapper */
+				wraplen = 6 + (strstart != 0 ? 4 : 0);
+			case _: /* for compiler happiness */
+				wraplen = 6;
+		}
+
+		/* if not default parameters, return one of the conservative bounds */
+		if (w_bits != 15 || hash_bits != 8 + 7)
+			return (w_bits <= hash_bits && level != 0 ? fixedlen : storelen) + wraplen;
+
+		/* default settings: return tight bound for that case -- ~0.03% overhead
+		   plus a small constant */
+		return sourceLen + (sourceLen >> 12) + (sourceLen >> 14) + (sourceLen >> 25) + 13 - 6 + wraplen;
+	}
+
 	/* ========================================================================= */
 	public function deflateEnd():Int {
 		window = null;
