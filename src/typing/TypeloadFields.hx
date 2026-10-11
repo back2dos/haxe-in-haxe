@@ -506,7 +506,7 @@ class TypeloadFields {
 			ctx.c.getBuildInfos = old;
 			switch r {
 				case MError, MMacroInMacro:
-					raiseTypingError("Build failure (" + Globals.sTypePath(cpath) + "." + meth + ")", m.pos);
+					Common.displayError(ctx.com, "Build failure (" + Globals.sTypePath(cpath) + "." + meth + ")", m.pos);
 				case MSuccess(e):
 					fbuild(e);
 			}

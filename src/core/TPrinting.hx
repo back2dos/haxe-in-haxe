@@ -595,20 +595,33 @@ class Printer {
 	};
 
 	public static function sModuleSkipReason(reason:ModuleSkipReason):String {
-		function loop(stack:Array<GlobalTypePath>, reason:ModuleSkipReason):String return switch reason {
-			case DependencyDirty(path, reason):
-				var exists = core.ds.ArrayTools.exists(stack,
-					function(p) return p.name == path.name && p.pack.join(".") == path.pack.join("."));
-				(stack.length == 0 ? "DependencyDirty " : "")
-					+ Globals.sTypePath(path)
-					+ " - "
-					+ (exists ? "rec" : loop([path].concat(stack), reason));
-			case Tainted(cause): "Tainted " + sModuleTaintingReason(cause);
-			case FileChanged(file): "FileChanged " + file;
-			case Shadowed(file): "Shadowed " + file;
-			case LibraryChanged: "LibraryChanged";
-		};
-		return loop([], reason);
+		/* A dependency chain can be as long as the module graph is deep: a buffer and a set, so
+			that the string costs linear time (Printf from the inside out and List.mem on the stack
+			were quadratic, which the server pays once per skipped module). */
+		var buf = new StringBuf();
+		// port: the Hashtbl of paths, keyed by an injective string of the path.
+		var seen = new haxe.ds.StringMap<Bool>();
+		function loop(first:Bool, reason:ModuleSkipReason):Void {
+			switch reason {
+				case DependencyDirty(path, reason):
+					if (first) buf.add("DependencyDirty ");
+					buf.add(Globals.sTypePath(path));
+					buf.add(" - ");
+					var key = path.pack.join("\n") + "\n\n" + path.name;
+					if (seen.exists(key))
+						buf.add("rec")
+					else {
+						seen.set(key, true);
+						loop(false, reason);
+					}
+				case Tainted(cause): buf.add("Tainted " + sModuleTaintingReason(cause));
+				case FileChanged(file): buf.add("FileChanged " + file);
+				case Shadowed(file): buf.add("Shadowed " + file);
+				case LibraryChanged: buf.add("LibraryChanged");
+			}
+		}
+		loop(true, reason);
+		return buf.toString();
 	}
 
 	public static function sModuleCacheState(state:ModuleCacheState):String return switch state {

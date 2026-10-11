@@ -80,7 +80,8 @@ class ExploreClassPathTask extends ServerTask {
 								var name = file.substr(0, l - 3);
 								var dotPos = name.lastIndexOf(".");
 								if (dotPos >= 0) {
-									var secondExt = file.substr(dotPos, name.length - dotPos);
+									/* The second extension without the dot, e.g. "js" for Foo.js.hx. */
+									var secondExt = file.substr(dotPos + 1, name.length - dotPos - 1);
 									if ((com.customExt != null && com.customExt == secondExt)
 										|| platformStr == secondExt) file.substr(0, dotPos);
 									else throw core.ds.Exit.raise();
@@ -172,7 +173,7 @@ class DisplayToplevel {
 					i++;
 				}
 				var tl = acc.concat(tl_.slice(i));
-				TFun({args: tl, ret: tr == tDynamic ? tr_ : tr_});
+				TFun({args: tl, ret: tr == tDynamic ? tr_ : tr});
 			case _:
 				TFun({args: tl_, ret: tr_});
 		};

@@ -250,7 +250,7 @@ class MetaList {
 					doc: "Allows private access from package, type or field.",
 					flags: [HasParam("Target path"), Link("https://haxe.org/manual/lf-access-control.html")]
 				};
-			case Analyzer: {name: ":analyzer", doc: "Used to configure the static analyzer.", flags: []};
+			case Analyzer: {name: ":analyzer", doc: "Used to configure the static analyzer.", flags: [Link("https://haxe.org/manual/cr-static-analyzer.html")]};
 			case Annotation: {
 					name: ":annotation",
 					doc: "Marks a class as a Java annotation",

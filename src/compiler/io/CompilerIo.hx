@@ -107,7 +107,10 @@ class CompilerIo {
 			Sys.print(s);
 			Sys.stdout().flush();
 		},
-		writeErr: function(s) Sys.stderr().writeString(s),
+		writeErr: function(s) {
+			Sys.stderr().writeString(s);
+			Sys.stderr().flush();
+		},
 		writeResult: function(s) Sys.stderr().writeString(s),
 		signalError: function() {},
 		flush: function() Sys.stdout().flush(),

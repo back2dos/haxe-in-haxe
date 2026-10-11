@@ -107,7 +107,22 @@ class FixOverrides {
 			});
 			var fde = f.cfExpr;
 			if (fde == null) throw "Missing override expression";
-			f.cfExpr = {eexpr: TFunction(fd2), etype: fde.etype, epos: fde.epos};
+			var e:TExpr = {eexpr: TFunction(fd2), etype: fde.etype, epos: fde.epos};
+			var tret = signature.ret;
+			var e = if (com.config.pfAddFinalReturn && core.TOther.ExtType.isVoid(follow(fd.tfType))
+				&& !core.TOther.ExtType.isVoid(follow(tret))) {
+				function loop(e:TExpr):TExpr return switch e.eexpr {
+					case TReturn(null): {eexpr: TReturn(mk(TConst(TNull), tret, e.epos)), etype: e.etype, epos: e.epos};
+					case TFunction(_): e;
+					case _: core.Texpr.mapExpr(loop, e);
+				};
+				filters.safe.AddFinalReturn.addFinalReturn({
+					eexpr: TFunction({tfArgs: fd2.tfArgs, tfType: fd2.tfType, tfExpr: loop(fd2.tfExpr)}),
+					etype: e.etype,
+					epos: e.epos
+				});
+			} else e;
+			f.cfExpr = e;
 			f.cfType = TFun({args: args, ret: signature.ret});
 		} else if (f2 != null && fd == null && hasClassFlag(c, CInterface)) {
 			var s = switch followWithCoro(f2.cfType) {

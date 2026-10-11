@@ -1,7 +1,8 @@
 # Translation and compilation status
 
 Snapshot: 2026-09-04. Pinned upstream source:
-`b10fa6e93c0206cc0dc8f7abba98534e3edac248`.
+`995a7d1fe92bfded79798598b8ad243cae05dda6` (moved from
+`b10fa6e93c0206cc0dc8f7abba98534e3edac248` on 2026-10-11).
 
 ## Current coverage (2026-10-09)
 

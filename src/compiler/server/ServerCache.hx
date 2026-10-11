@@ -305,7 +305,7 @@ class ServerCache {
 						ServerMessage.unchangedContent(com, "", file);
 					} else {
 						ServerMessage.notCached(com, "", mPath);
-						if (mExtra.mKind == MFake) com.fakeModules.remove(core.Path.UniqueKey.lazyKey(mExtra.mFile));
+						if (mExtra.mKind == MFake) com.cs.getContext(mExtra.mSign).removeFakeModule(core.Path.UniqueKey.lazyKey(mExtra.mFile));
 						throw new Dirty(FileChanged(file));
 					}
 				}
@@ -474,7 +474,7 @@ class ServerCache {
 						for (t in m.mTypes) TFunctions.tInfos(t).mtRestore();
 						/* The main module gets added when reading hxb already, so let's not add it again. Note that we
 							can't set its m_added ahead of time because we want the rest of the logic here to run. */
-						if (!fromBinary || m != m)
+						if (!fromBinary)
 							com.moduleLut.add(m.mPath, m);
 						handleCacheBoundObjects(com, m.mExtra.mCacheBoundObjects);
 						var typingMode = getTypingMode(com, m.mExtra);
@@ -535,7 +535,7 @@ class ServerCache {
 		var t = Timer.startTimer(com.timerCtx, ["server", "module cache"]);
 		var cc = CommonCache.getCache(com);
 		function skip(mPath:GlobalTypePath, reason:ModuleSkipReason):FindModuleResult {
-			ServerMessage.skippingDep(com, "", mPath, Printer.sModuleSkipReason(reason));
+			ServerMessage.skippingDep(com, "", mPath, () -> Printer.sModuleSkipReason(reason));
 			return BadModule(reason);
 		}
 		function addModules2(fromBinary:Bool, m:ModuleDef):FindModuleResult {

@@ -42,6 +42,8 @@ class PrototypeContext {
 	public final fields:Array<ProtoField> = [];
 	// The instance fields of the prototype. See above.
 	public final instanceFields:Array<ProtoField> = [];
+	// Initial values replacing the ones of an inherited instance field, instead of adding a new one.
+	public final instanceFieldOverrides:Array<ProtoField> = [];
 	// The metadata expression, if exists.
 	public final meta:Null<TExpr>;
 	// Whether or not the prototype is static.
@@ -85,6 +87,11 @@ class PrototypeBuilder {
 	/** Adds an instance (non-static) field. **/
 	public static function addInstanceField(pctx:PrototypeContext, name:Int, v:AtomicLazy<Value>):Void {
 		pctx.instanceFields.push({name: name, value: v});
+	}
+
+	// Changes the initial value of an inherited instance field, keeping its offset.
+	public static function overrideInstanceField(pctx:PrototypeContext, name:Int, v:AtomicLazy<Value>):Void {
+		pctx.instanceFieldOverrides.push({name: name, value: v});
 	}
 
 	/** Forces the lazy field values and assigns them to the prototype. **/
@@ -161,6 +168,11 @@ class PrototypeBuilder {
 					a[i] = fields[i];
 				for (i in 0...pctx.instanceFields.length)
 					a[i + offset] = pctx.instanceFields[i].value.force();
+				for (field in pctx.instanceFieldOverrides)
+					switch names.findOpt(field.name) {
+						case null:
+						case i: a[i] = field.value.force();
+					}
 				initializeFields(pctx, proto);
 			};
 		} else {
@@ -385,8 +397,10 @@ class EvalPrototype {
 						var pos = cf.cfExpr.epos;
 						var name = EvalHash.hash(cf.cfName);
 						var v = AtomicLazy.fromFun(() -> EvalValueTools.vfunction(EvalJit.jitTfunction(ctx, key, name, tf, false, pos)));
+						// an overriding dynamic method only changes the initial value of the parent's field
 						if (meth == MethDynamic)
-							PrototypeBuilder.addInstanceField(pctx, name, v);
+							if (TFunctions.hasClassFieldFlag(cf, CfOverride)) PrototypeBuilder.overrideInstanceField(pctx, name, v)
+							else PrototypeBuilder.addInstanceField(pctx, name, v);
 						PrototypeBuilder.addProtoField(pctx, name, v);
 					case [Var(_), _] if (TFunctions.isPhysicalField(cf)):
 						var name = EvalHash.hash(cf.cfName);

@@ -175,6 +175,16 @@ class Args {
 	public static function parseArgs(args:Array<String>):Array<ParsedArg> {
 		var parsed:Array<ParsedArg> = [];
 		function add(a:ParsedArg) parsed.push(a);
+		// port: hack_loop; arguments from "--run" on are kept as they are.
+		function hackLoop(args:Array<String>):Array<String> {
+			var acc = [];
+			for (i in 0...args.length) {
+				if (args[i] == "--run") return acc.concat(args.slice(i));
+				acc.push(Helper.expandEnv(args[i]));
+			}
+			return acc;
+		}
+		var args = hackLoop(args); /* TODO: test this */
 		// port: the list match `flag :: x :: rest` as a guard on the next token; a flag without its
 		// value falls through to the final `arg :: rest` case, as upstream.
 		var i = 0;

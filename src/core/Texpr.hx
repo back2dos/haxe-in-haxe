@@ -1154,7 +1154,7 @@ class Texpr {
 	}
 
 	public static function forRemap(b:BasicTypes, v:TVar, etype:T, e1:TExpr, e2:TExpr, p:Pos):TExpr {
-		var v2 = allocVar(v.vKind, v.vName, etype, e1.epos);
+		var v2 = allocVar(VGenerated, Globals.genLocalPrefix + v.vName, etype, e1.epos);
 		var ev = mk(TLocal(v2), etype, e1.epos);
 		var t = AbstractTools.followWithAbstracts(etype);
 		var fa = try quickField(t,

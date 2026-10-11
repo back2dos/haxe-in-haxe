@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
 """Display (IDE services) conformance harness for the translated compiler.
 
-The corpus is haxe/tests/display/src/cases/*.hx. Every documented test method
+The corpus is haxe/tests/display/src/cases/*.hx. Upstream removed that suite
+in 3d317d905 (#13015); the harness extracts it from the submodule's history
+(the parent of that commit) into test/generated/display-corpus, or uses the
+tests/display directory named by HAXE_DISPLAY_CORPUS. Every documented test method
 holds a source snippet with `{-N-}` markers; the method body names the display
 requests it issues (fields/toplevel -> display/completion, type/doc/metadataDoc
 -> display/hover, position(s) -> display/definition, usage ->
@@ -30,8 +33,26 @@ Usage: HAXE_REFERENCE=haxe/haxe python3 test/display.py [-j N] [--extended] [nam
 import argparse, concurrent.futures, json, os, pathlib, re, shlex, subprocess, sys, time
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-CASES = ROOT / "haxe/tests/display/src/cases"
-SRC_MISC = ROOT / "haxe/tests/display/src-misc"
+CORPUS_COMMIT = "3d317d905^"  # the last upstream commit with tests/display
+
+
+def corpus_root():
+	if os.environ.get("HAXE_DISPLAY_CORPUS"):
+		return pathlib.Path(os.environ["HAXE_DISPLAY_CORPUS"])
+	if (ROOT / "haxe/tests/display/src/cases").is_dir():
+		return ROOT / "haxe/tests/display"
+	out = ROOT / "test/generated/display-corpus"
+	if not (out / "tests/display/src/cases").is_dir():
+		out.mkdir(parents=True, exist_ok=True)
+		archive = subprocess.run(["git", "-C", str(ROOT / "haxe"), "archive", CORPUS_COMMIT, "tests/display"],
+			check=True, capture_output=True).stdout
+		subprocess.run(["tar", "-x", "-C", str(out)], input=archive, check=True)
+	return out / "tests/display"
+
+
+CORPUS = corpus_root()
+CASES = CORPUS / "src/cases"
+SRC_MISC = CORPUS / "src-misc"
 GENERATED = ROOT / "test/generated/display"
 TIMEOUT = 600
 

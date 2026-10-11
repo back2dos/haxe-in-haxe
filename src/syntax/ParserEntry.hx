@@ -235,6 +235,7 @@ class ParserEntry {
 				["#if", "#elseif", "#else", "#end", "#error", "#line"], "Unknown token")), p);
 		var conds = new ConditionHandler();
 		var dbc = new DeadBlockCollector(conds);
+		var lexerToken = Lexer.makeToken(lctx);
 		var sraw = new Stream<syntax.Lexer.LexedToken>(function(_) return Lexer.sharpToken(lctx, code));
 		inline function preprocessorError(ppe:ParserPreprocessorError, pos:Pos,
 				tk:ParserToken):ParserToken return Parser.syntaxError(ctx, PreprocessorError(ppe), sraw, tk, pos);
@@ -243,7 +244,7 @@ class ParserEntry {
 		var enterMacro:Bool->Pos->ParserToken = null;
 		var skipTokensLoop:Pos->Bool->ParserToken->ParserToken = null;
 		var skipTokens:Pos->Bool->ParserToken = null;
-		nextToken = function() return processToken(Lexer.readToken(lctx, code));
+		nextToken = function() return processToken(lexerToken(code));
 		processToken = function(tk:ParserToken):ParserToken return switch tk.token {
 			case Comment(s):
 				// if encloses_resume (pos tk) then syntax_completion SCComment (pos tk);
@@ -276,7 +277,7 @@ class ParserEntry {
 				processToken(skipTokens(tk.pos, false));
 			case Sharp("if"): processToken(enterMacro(true, tk.pos));
 			case Sharp("error"):
-				var token:ParserToken = Lexer.readToken(lctx, code);
+				var token:ParserToken = lexerToken(code);
 				switch token.token {
 					case Const(String(s, _)): Parser.error(Custom(s), token.pos);
 					case _: Parser.error(Unimplemented, tk.pos);
@@ -299,7 +300,7 @@ class ParserEntry {
 			var condition = Grammar.parseMacroCond(ctx, sraw);
 			if (isIf) conds.condIf(condition.expr);
 			else conds.condElseif(condition.expr, p);
-			var tk:ParserToken = condition.token == null ? Lexer.readToken(lctx, code) : condition.token;
+			var tk:ParserToken = condition.token == null ? lexerToken(code) : condition.token;
 			if (isTrue(eval(defines, condition.expr))) return tk;
 			dbc.openDeadBlock(condition.expr.pos);
 			return skipTokensLoop(p, true, tk);
@@ -308,7 +309,7 @@ class ParserEntry {
 			case Sharp("end"):
 				conds.condEnd(tk.pos);
 				dbc.closeDeadBlock(tk.pos);
-				Lexer.readToken(lctx, code);
+				lexerToken(code);
 			case Sharp("elseif") if (!test):
 				dbc.closeDeadBlock(tk.pos);
 				var condition = Grammar.parseMacroCond(ctx, sraw);
@@ -323,7 +324,7 @@ class ParserEntry {
 			case Sharp("else"):
 				conds.condElse(tk.pos);
 				dbc.closeDeadBlock(tk.pos);
-				Lexer.readToken(lctx, code);
+				lexerToken(code);
 			case Sharp("elseif"):
 				dbc.closeDeadBlock(tk.pos);
 				enterMacro(false, tk.pos);
@@ -337,7 +338,7 @@ class ParserEntry {
 			case Eof: preprocessorError(UnclosedConditional, p, tk);
 			case _: skipTokens(p, test);
 		};
-		skipTokens = function(p, test) return skipTokensLoop(p, test, Lexer.readToken(lctx, code));
+		skipTokens = function(p, test) return skipTokensLoop(p, test, lexerToken(code));
 		var stream = new Stream<syntax.Lexer.LexedToken>(function(_) {
 			var token = nextToken();
 			ctx.cache.push(token);
