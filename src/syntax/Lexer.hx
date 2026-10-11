@@ -1268,7 +1268,29 @@ class Lexer {
 				}
 			}
 		}
-		return b.getBytes().toString();
+		return utf8ToString(b.getBytes());
+	}
+
+	// port: Bytes.toString decodes with TextDecoder on JS hosts, which drops a leading
+	// U+FEFF; the bytes are decoded explicitly instead (they are valid UTF-8 here).
+	static function utf8ToString(bytes:haxe.io.Bytes):String {
+		var out = new StringBuf();
+		var i = 0, len = bytes.length;
+		while (i < len) {
+			var c = bytes.get(i++);
+			if (c >= 0xF0) {
+				c = ((c & 7) << 18) | ((bytes.get(i) & 0x3F) << 12) | ((bytes.get(i + 1) & 0x3F) << 6) | (bytes.get(i + 2) & 0x3F);
+				i += 3;
+			} else if (c >= 0xE0) {
+				c = ((c & 0xF) << 12) | ((bytes.get(i) & 0x3F) << 6) | (bytes.get(i + 1) & 0x3F);
+				i += 2;
+			} else if (c >= 0xC0) {
+				c = ((c & 0x1F) << 6) | (bytes.get(i) & 0x3F);
+				i += 1;
+			}
+			out.addChar(c);
+		}
+		return out.toString();
 	}
 
 	static function keyword(value:String):Token return switch value {
