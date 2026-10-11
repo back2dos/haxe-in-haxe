@@ -2467,7 +2467,7 @@ class Generator {
 	/* Generator parts */
 
 	static function genResources(ctx:GenpyContext):Void {
-		if (ctx.com.resources.keys().hasNext()) {
+		if (ctx.com.resources.length() > 0) {
 			var slashIndex = ctx.com.file.lastIndexOf("/") + 1;
 			var len = ctx.com.file.length - slashIndex;
 			var fileName = ctx.com.file.substr(slashIndex, len);
@@ -2484,12 +2484,7 @@ class Generator {
 
 			spr(ctx, "\n    return {");
 			var first = true;
-			// port: com.resources is a StringMap; the OCaml Hashtbl iteration order is rebuilt
-			// ... by inserting the names in sorted order (upstream inserts them in definition order,
-			// ... which only matters for names sharing a bucket).
-			var h = new OcamlHashtbl<String, haxe.io.Bytes>(OcamlHash.hashString, (a, b) -> a == b, 0);
-			for (k in core.ds.PMap.keys(ctx.com.resources)) h.replace(k, ctx.com.resources.get(k));
-			h.iter(function(k, v) {
+			ctx.com.resources.iter(function(k, v) {
 				var prefix = if (first) {
 					first = false;
 					"";

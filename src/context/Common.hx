@@ -441,7 +441,7 @@ typedef CommonContext = {
 	var features:Map<String, Bool>;
 	var modules:Array<ModuleDef>;
 	var types:Array<ModuleType>;
-	var resources:haxe.ds.StringMap<haxe.io.Bytes>;
+	var resources:core.ds.OcamlHashtbl<String, haxe.io.Bytes>;
 	// target-specific
 	var flashVersion:Float;
 	var nekoLibPaths:Array<String>;
@@ -491,6 +491,11 @@ class Common {
 		timerCtx: com.timerCtx,
 		pool: com.sctx.pool
 	};
+
+	// port: (string,string) Hashtbl.t; OcamlHashtbl keeps OCaml's iteration order, which the
+	// generators' resource output and haxe.Resource.listNames depend on.
+	public static function newResources():core.ds.OcamlHashtbl<String, haxe.io.Bytes>
+		return new core.ds.OcamlHashtbl(core.ds.OcamlHash.hashString, (a:String, b:String) -> a == b);
 
 	public static function enterStage(com:CommonContext, stage:CompilerStage):Void
 		// print_endline (Printf.sprintf "Entering stage %s" (s_compiler_stage stage));
@@ -803,7 +808,7 @@ class Common {
 			moduleNonexistentLut: new HashtblLookup(),
 			fakeModules: new haxe.ds.StringMap(),
 			flashVersion: 10.0,
-			resources: new haxe.ds.StringMap(),
+			resources: newResources(),
 			nativeLibs: NativeLibraries.createNativeLibs(),
 			hxbLibs: [],
 			nekoLibPaths: [],
