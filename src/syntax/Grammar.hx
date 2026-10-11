@@ -1839,6 +1839,18 @@ class Grammar {
 		return null;
 	}
 
+	static function parseFunParamType(ctx:ParserContext, s:S):{name:PlacedName, opt:Bool, t:TypeHint} {
+		if (isTok(s, Question)) {
+			s.junk();
+			var name = tail(function() return ident(s));
+			var t = tail(function() return parseTypeHint(ctx, s));
+			return {name: name, opt: true, t: t};
+		}
+		var name = ident(s);
+		var t = tail(function() return parseTypeHint(ctx, s));
+		return {name: name, opt: false, t: t};
+	}
+
 	static function parseConstraintParams(ctx:ParserContext, s:S):Array<TypeParam> {
 		if (acceptBinop(s, OpLt) == null) return [];
 		var r = tryHead(function() return psepNonempty(Comma, function(s) return parseConstraintParam(ctx, s), s));
@@ -2043,19 +2055,25 @@ class Grammar {
 			l.reverse();
 			return mk(EObjectDecl(l), punion(p0, p1));
 		}
+		// port: the recursion `loop p_end acc` as a loop. A missing ':' calls
+		// `syntax_error ctx (Expected [":"]) s (next_expr key)`, whose argument parses the
+		// rest of the object first: those calls are made once the loop is done, innermost
+		// first, at the stream position where the object ends.
 		var acc:Array<ObjectField> = [{key: name, expr: e}];
 		var pEnd = p0;
+		var missingColons = 0;
 		while (true) {
 			if (acceptTok(s, Comma) == null) break;
-			inline function nextExpr(key):Bool {
+			inline function nextExpr(key) {
 				var e = secureExpr(ctx, s);
 				pEnd = e.pos;
 				acc.unshift({key: key, expr: e});
-				return true;
 			}
 			inline function next(key) {
-				if (acceptTok(s, DblDot) != null) nextExpr(key)
-				else Parser.syntaxError(ctx, Expected([":"]), s, nextExpr(key));
+				if (acceptTok(s, DblDot) != null) nextExpr(key) else {
+					missingColons++;
+					nextExpr(key);
+				}
 			}
 			var r = tryHead(function() return ident(s));
 			if (r != null) {
@@ -2072,6 +2090,7 @@ class Grammar {
 					break;
 			}
 		}
+		for (_ in 0...missingColons) Parser.syntaxError(ctx, Expected([":"]), s, null);
 		return makeObjDecl(acc, pEnd);
 	}
 
@@ -2144,6 +2163,8 @@ class Grammar {
 		var meta = parseMeta(ctx, s);
 		var r = tryHead(function() return dollarIdent(s));
 		if (r != null) {
+			// port: upstream's second case (property accessors, "Cannot define property accessors for local
+			// vars") is unreachable: its first case starts with `popt`, which always matches.
 			var t = popt(function(s) return parseTypeHint(ctx, s), s);
 			return {
 				meta: meta,
@@ -2199,6 +2220,21 @@ class Grammar {
 	static function parseVarDecl(ctx:ParserContext, isFinal:Bool, s:S):EVar {
 		var h = parseVarDeclHead(ctx, isFinal, s);
 		return tail(function() return parseVarAssignmentResume(ctx, h.isFinal, h.name, h.pos, h.t, h.meta, s));
+	}
+
+	static function inlineFunction(s:S):{inl:Bool, pos:Pos} {
+		var tk = peek(s);
+		switch tk.token {
+			case Kwd(Inline):
+				s.junk();
+				var p1 = expectKwd(s, Function);
+				return {inl: true, pos: p1};
+			case Kwd(Function):
+				s.junk();
+				return {inl: false, pos: tk.pos};
+			case _:
+				return fail();
+		}
 	}
 
 	static function parseMacroExpr(ctx:ParserContext, p:Pos, s:S):Expr {
@@ -2620,7 +2656,7 @@ class Grammar {
 				var al = tail(function() return psepTrailing(Comma, function(s) return parseFunParam(ctx, s), s));
 				expectTok(s, PClose);
 				var er = tail(function() return arrowExpr(ctx, s));
-				if (al.length == 0) throw "die";
+				if (al.length == 0) Globals.die("", "grammar.ml");
 				var a0 = al[0];
 				al = [
 					({
@@ -2734,7 +2770,7 @@ class Grammar {
 				return switch e1.expr {
 					case EConst(Ident(n)): exprNext(ctx,
 							mk(EMeta({meta: core.Meta.fromString(n), exprs: [], pos: e1.pos}, eparam), punion(p1, p2)), s);
-					case _: throw "die";
+					case _: Globals.die("", "grammar.ml");
 				}
 			case Dot:
 				s.junk();
@@ -3098,7 +3134,7 @@ class Grammar {
 
 	static function parseMacroIdent(ctx:ParserContext, t:String, p:Pos, s:S):Expr {
 		if (t == "display") {
-			Parser.syntaxWarningWithPos(ctx, core.WarningList.fromString("WIfDisplay"), p);
+			Parser.syntaxWarningWithPos(ctx, core.Message.WarningCode.WIfDisplay, p);
 			if (ctx.config.specialIdentifierFiles != null) ctx.config.specialIdentifierFiles.replace(core.Path.UniqueKey.create(p.pfile),
 				t);
 		}

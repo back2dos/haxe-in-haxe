@@ -13,6 +13,7 @@ import core.ds.StringPool;
 import core.ds.StringDynArray;
 import core.ds.NotFound;
 import compiler.hxb.HxbData.ChunkKind;
+import compiler.hxb.HxbWriterConfig.WriterTargetConfig;
 import typing.TanonIdentification;
 import haxe.io.Bytes;
 import haxe.io.BytesOutput;
@@ -125,6 +126,8 @@ class Pool<K, V> {
 	}
 
 	public function isEmpty():Bool return items.length == 0;
+
+	public function advance(dummy:V):Void items.push(dummy);
 
 	public function finalize():Array<V> {
 		if (closed) throw "assert: pool closed";
@@ -283,7 +286,19 @@ class Chunk {
 		writeU8(v >>> 24);
 	}
 
+	public function writeI64(v:haxe.Int64):Void {
+		writeI32(v.low);
+		writeI32(v.high);
+	}
+
+	public function writeF64(v:Float):Void writeI64(haxe.io.FPHelper.doubleToI64(v));
+
 	public function writeBytes(b:Bytes):Void ch.addBytes(b);
+
+	public function writeUi16(i:Int):Void {
+		writeU8(i);
+		writeU8(i >>> 8);
+	}
 
 	public function getBytes():Bytes return ch.contents();
 
@@ -327,6 +342,8 @@ class Chunk {
 		writeUleb128(l.length);
 		for (x in l) f(x);
 	}
+
+	// port: write_dynarray is writeList: DynArray and list are both Array.
 
 	public function writeOption<B>(v:Null<B>, f:B->Void):Void {
 		if (v == null) writeU8(0)
@@ -425,7 +442,7 @@ typedef ExprChunks = {pre:Chunk, e:Chunk};
 }
 
 class HxbWriter {
-	final generateDocs:Bool;
+	final config:WriterTargetConfig;
 	final warn:(warning:core.Message.WarningCode, msg:String, p:Pos) -> Void;
 	final anonId:TanonIdentification<Dynamic>;
 	final identifiedAnons:IdentityPool<TAnon, Int> = new IdentityPool();
@@ -463,16 +480,24 @@ class HxbWriter {
 	final tInstanceChunk:Chunk;
 	final unboundFrames:Array<UnboundFrame> = [];
 
-	public function new(generateDocumentation:Bool = true, ?warn:(warning:core.Message.WarningCode, msg:String, p:Pos) -> Void,
+	// port: create config warn anon_id; the defaults serve the legacy bootstrap entry.
+	public function new(?config:WriterTargetConfig, ?warn:(warning:core.Message.WarningCode, msg:String, p:Pos) -> Void,
 			?anonId:TanonIdentification<Dynamic>) {
-		this.generateDocs = generateDocumentation;
+		this.config = config != null ? config : new WriterTargetConfig();
 		this.warn = warn != null ? warn : function(_, _, _) {};
 		this.anonId = anonId != null ? anonId : new TanonIdentification();
 		tInstanceChunk = new Chunk(EOM, cp, 32);
 	}
 
-	static function failwith(writer:HxbWriter, msg:String):Dynamic {
-		throw 'Compiler failure while writing hxb chunk ${HxbData.stringOfChunkKind(writer.chunk.kind)} of ${core.Globals.sTypePath(writer.currentModule.mPath)}: $msg';
+	// port: get_backtrace/get_callstack: the host call stack stands in for Printexc's.
+	static function getCallstack():String return haxe.CallStack.toString(haxe.CallStack.callStack());
+
+	static function failwith(writer:HxbWriter, msg:String, backtrace:String):Dynamic {
+		var msg = ("Compiler failure while writing hxb chunk " + HxbData.stringOfChunkKind(writer.chunk.kind) + " of "
+			+ core.Globals.sTypePath(writer.currentModule.mPath) + ": " + msg + "\n")
+			+ "Please submit an issue at https://github.com/HaxeFoundation/haxe/issues/new\n"
+			+ "Attach the following information:";
+		throw new core.Globals.InternalCompilerError(msg, backtrace);
 	}
 
 	// fieldStack == 0 (an empty field stack) can happen for cl_init and in EXD
@@ -573,13 +598,13 @@ class HxbWriter {
 
 	function writeFullPath(pack:Array<String>, mname:String, tname:String):Void {
 		chunk.writeList(pack, chunk.writeString);
-		if (mname == "" || tname == "") failwith(this, 'write_full_path: pack = ${pack.join(".")}, mname = $mname, tname = $tname');
+		if (mname == "" || tname == "") failwith(this, 'write_full_path: pack = ${pack.join(".")}, mname = $mname, tname = $tname', getCallstack());
 		chunk.writeString(mname);
 		chunk.writeString(tname);
 	}
 
 	function maybeWriteDocumentation(doc:Documentation):Void {
-		if (doc != null && generateDocs) {
+		if (doc != null && config.generateDocs) {
 			chunk.writeU8(1);
 			chunk.writeOption(doc.docOwn, function(s) chunk.writeUleb128(docs.getOrAdd(s)));
 			chunk.writeList(doc.docInherited, function(s) chunk.writeUleb128(docs.getOrAdd(s)));
@@ -601,6 +626,7 @@ class HxbWriter {
 		chunk.writeLeb128(p2.pmax - p1.pmin);
 	}
 
+	// port: Meta.to_string; the port's MetadataEntry.meta is Dynamic and may also hold a plain name string.
 	static function metadataName(value:Dynamic):String {
 		if (Std.isOfType(value, StdString)) {
 			var name:String = value;
@@ -1075,7 +1101,7 @@ class HxbWriter {
 				writeTypes(tl);
 				writeFields();
 			case ClassStatics(_) | EnumStatics(_) | AbstractStatics(_):
-				throw "assert false";
+				throw "assert: false";
 		}
 	}
 
@@ -1624,10 +1650,10 @@ class HxbWriter {
 						case TFun({ret: tr}):
 							switch TFunctions.follow(tr) {
 								case TEnum(en, _): en;
-								case _: throw "die";
+								case _: core.Globals.die("", "hxbWriter.ml");
 							}
 						case _:
-							throw "die";
+							core.Globals.die("", "hxbWriter.ml");
 					};
 					writeEnumFieldRef(en, ef);
 					chunk.writeUleb128(i);
@@ -2010,7 +2036,7 @@ class HxbWriter {
 		case KNormal:
 			chunk.writeU8(0);
 		case KTypeParameter(ttp):
-			throw "die";
+			core.Globals.die("", "hxbWriter.ml");
 		case KExpr(e):
 			chunk.writeU8(2);
 			writeExpr(e);
@@ -2076,7 +2102,7 @@ class HxbWriter {
 				writeTypeInstance(t);
 				return null;
 			}, function() {
-				var tPath = try core.Globals.sTypePath(TFunctions.tPath(TFunctions.moduleTypeOfType(t))) catch (_:Dynamic)
+				var tPath = try core.Globals.sTypePath(TFunctions.tPath(TFunctions.moduleTypeOfType(t))) catch (_:core.ds.Exit)
 					core.TPrinting.sType(core.TPrinting.printContext(), t);
 				return '`$source` type `$tPath` for abstract `${core.Globals.sTypePath(a.aPath)}`';
 			}, a.aPos);

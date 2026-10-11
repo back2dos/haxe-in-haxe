@@ -177,23 +177,23 @@ conformance, or completion of the pre-existing HXB writer. The subsequent runtim
 | `codegen/dump.ml` | `src/codegen/Dump.hx` | Draft translated |
 | `codegen/fixOverrides.ml` | `src/codegen/FixOverrides.hx` | Draft translated |
 | `codegen/overloads.ml` | `src/codegen/Overloads.hx` | Draft translated |
-| `compiler/args.ml` | `src/compiler/Args.hx` | Existing, unaudited |
+| `compiler/args.ml` | `src/compiler/Args.hx` | Translated (audited). Deviations: `path` values of `SetMain`/`AddClass` are flat lists; `Terminal_size` columns come from `$COLUMNS`; the arg descriptions omit the never-invoked `Arg.t`; `expand_hxml` is a port-only helper of the legacy bootstrap entry |
 | `compiler/compiler.ml` | `src/compiler/Compiler.hx` | Draft translated |
 | `compiler/generate.ml` | `src/compiler/Generate.hx` | Translated, including `check_auxiliary_output` (`--xml`, `--json`, `-D gen-hx-classes`) |
 | `compiler/haxe.ml` | `src/haxe/Main.hx` | Translated, including client/server entry |
-| `compiler/helper.ml` | `src/compiler/Helper.hx` | Existing, unaudited |
+| `compiler/helper.ml` | `src/compiler/Helper.hx` | Translated (audited); `ExtString` strip/split and `String.sub` semantics emulated |
 | `compiler/highLevel.ml` | `src/compiler/HighLevel.hx` | Translated, including haxelib `add_libs` |
-| `compiler/hxb/hxbData.ml` | `src/compiler/hxb/HxbData.hx` | Existing, unaudited |
+| `compiler/hxb/hxbData.ml` | `src/compiler/hxb/HxbData.hx` | Translated (audited) |
 | `compiler/hxb/hxbLib.ml` | `src/compiler/hxb/HxbLib.hx` | Translated; ZIP reading in `src/core/ZipInput.hx` (from `libs/ziplib/zip.ml`) |
 | `compiler/hxb/hxbReader.ml` | `src/compiler/hxb/HxbReader.hx` | Translated; `hxb_reader_stats` stays in `src/context/HxbReaderStats.hx` |
 | `compiler/hxb/hxbReaderApi.ml` | `src/compiler/hxb/HxbReaderApi.hx` | Translated (virtual class as interface) |
-| `compiler/hxb/hxbWriter.ml` | `src/compiler/hxb/HxbWriter.hx` | Existing, unaudited |
-| `compiler/hxb/hxbWriterConfig.ml` | `src/compiler/hxb/HxbWriterConfig.hx` | Existing, unaudited |
+| `compiler/hxb/hxbWriter.ml` | `src/compiler/hxb/HxbWriter.hx` | Translated (audited). Deviations: effects (`UnboundTTP`) as a handler stack; growable buffer for `SimnBuffer`; texpr type pool keyed by content hash; `write_dynarray` is `writeList` |
+| `compiler/hxb/hxbWriterConfig.ml` | `src/compiler/hxb/HxbWriterConfig.hx` | Translated (audited); the reader/writer functors take a `DataReaderApi`/`DataWriterApi` (Json here, Eval in `MacroContext`); JSON parsed with `haxe.Json` |
 | `compiler/io/compilerIo.ml` | `src/compiler/io/CompilerIo.hx` | Draft translated |
 | `compiler/io/compilerMessage.ml` | `src/compiler/io/CompilerMessage.hx` | Draft translated |
 | `compiler/io/compilerOutput.ml` | `src/compiler/io/CompilerOutput.hx` | Draft translated |
 | `compiler/messageReporting.ml` | `src/compiler/MessageReporting.hx` | Draft translated |
-| `compiler/parsedArg.ml` | `src/compiler/ParsedArg.hx` | Existing, unaudited |
+| `compiler/parsedArg.ml` | `src/compiler/ParsedArg.hx` | Translated (audited); `path` arguments are flat lists |
 | `context/abstractCast.ml` | `src/context/AbstractCast.hx` | Draft translated |
 | `context/common.ml` | `src/context/Common.hx` | Draft translated |
 | `context/coreApiConfig.ml` | `src/context/CoreApiConfig.hx` | Draft translated |
@@ -289,13 +289,13 @@ conformance, or completion of the pre-existing HXB writer. The subsequent runtim
 | `optimization/inlineConstructors.ml` | `src/optimization/InlineConstructors.hx` | Draft translated |
 | `optimization/optimizer.ml` | `src/optimization/Optimizer.hx` | Draft translated |
 | `optimization/optimizerTexpr.ml` | `src/optimization/OptimizerTexpr.hx` | Draft translated |
-| `syntax/grammar.ml` | `src/syntax/Grammar.hx` | Existing, unaudited |
-| `syntax/lexer.ml` | `src/syntax/Lexer.hx` | Existing, unaudited |
+| `syntax/grammar.ml` | `src/syntax/Grammar.hx` | Translated (audited); ppx_parser stream semantics reproduced by hand (see the file header); `parse_obj_decl` defers its missing-`:` errors as upstream's argument evaluation does |
+| `syntax/lexer.ml` | `src/syntax/Lexer.hx` | Translated (audited). Deviation: sedlex rules are a hand-written longest-match scanner over UTF-16 with code-point positions; newlines are recorded after each token; `Ast.unescape` lives here and works on UTF-8 bytes; `Invalid_option` is `InvalidRegexpOption` |
 | `syntax/parser.ml` | `src/syntax/Parser.hx` | Draft translated |
 | `syntax/parserConfig.ml` | `src/syntax/ParserConfig.hx` | Draft translated |
 | `syntax/parserEntry.ml` | `src/syntax/ParserEntry.hx` | Draft translated |
 | `syntax/reification.ml` | `src/syntax/Reification.hx` | Draft translated |
-| `syntax/semver.ml` | `src/syntax/SemVer.hx` | Existing, unaudited |
+| `syntax/semver.ml` | `src/syntax/SemVer.hx` | Translated (audited); `SVNum` holds the 63-bit OCaml int as `Int64` |
 | `typing/callUnification.ml` | `src/typing/CallUnification.hx` | Draft translated |
 | `typing/calls.ml` | `src/typing/Calls.hx` | Draft translated |
 | `typing/fieldAccess.ml` | `src/typing/FieldAccess.hx` | Draft translated |

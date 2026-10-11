@@ -10,7 +10,7 @@ import core.ds.Failure;
 import core.ds.Cancelled;
 import core.ds.NotFound;
 import core.ds.OcamlInt;
-import compiler.Args.ArgContext;
+import compiler.ParsedArg.ArgContext;
 import context.Typecore.Typer;
 import context.TyperPass;
 import Std as StdTools;
@@ -436,7 +436,7 @@ class Compiler {
 }
 
 class Setup {
-	public static function initializeTarget(com:CommonContext, actx:compiler.Args.ArgContext):String {
+	public static function initializeTarget(com:CommonContext, actx:compiler.ParsedArg.ArgContext):String {
 		Common.initPlatform(com);
 		com.classPaths.lockContext(com.customExt, Globals.platformName(com.platform), false);
 		inline function addStd(dir:String):Void

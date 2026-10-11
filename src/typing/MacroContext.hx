@@ -47,10 +47,8 @@ import macros.eval.EvalContext.RunTimeException;
 // here `Interp.f` is the Eval module that defines `f` upstream (EvalContext, EvalMain,
 // EvalEncode, EvalDecode, EvalPrinting) or `macros.MacroApi.MacroApiImpl` for functions
 // defined in macroApi.ml.
-// `HxbWriterConfigReaderEval`/`HxbWriterConfigWriterEval` (functors over EvalDataApi) are
-// not available: the port's HxbWriterConfig has no DataReaderApi/DataWriterApi functors.
-// `get/set_hxb_writer_config` therefore raise a macro exception when they would need
-// them (the `None`/`null` branches are kept).
+// `HxbWriterConfigReaderEval`/`HxbWriterConfigWriterEval` are HxbWriterConfig's reader/writer
+// applied to EvalDataApi's readers/writers.
 typedef MacroMethod = {args:Array<{name:String, optional:Bool, type:T}>, ret:T, cls:TClass, field:TClassField};
 
 typedef LoadedMacro = {meth:MacroMethod, module:ModuleDef};
@@ -317,19 +315,26 @@ class MacroContext {
 			warning: function(w, msg, p, depth) com.warning(w, [], msg, p, depth),
 			excString: macros.eval.EvalContext.excString,
 			getHxbWriterConfig: function() {
-				if (com.hxbWriterConfig != null)
-					// port: upstream calls HxbWriterConfigWriterEval.write_writer_config config
-					return
-						macros.eval.EvalContext.excString("Compiler.getHxbWriterConfig is not supported by haxe-in-haxe (no HxbWriterConfig writer over Eval values)");
-				else
-					return VNull;
+				return switch com.hxbWriterConfig {
+					case null:
+						VNull;
+					case config:
+						compiler.hxb.HxbWriterConfig.writeWriterConfig(macros.eval.EvalDataApi.EvalWriterApi.api(), config);
+				}
 			},
 			setHxbWriterConfig: function(v) {
 				if (isVNull(v))
 					com.hxbWriterConfig = null;
 				else {
-					// port: upstream calls HxbWriterConfigReaderEval.read_writer_config config v
-					macros.eval.EvalContext.excString("Compiler.setHxbWriterConfig is not supported by haxe-in-haxe (no HxbWriterConfig reader over Eval values)");
+					var config = switch com.hxbWriterConfig {
+						case null:
+							var config = new compiler.hxb.HxbWriterConfig();
+							com.hxbWriterConfig = config;
+							config;
+						case config:
+							config;
+					}
+					compiler.hxb.HxbWriterConfig.readWriterConfig(macros.eval.EvalDataApi.EvalReaderApi.api(), config, v);
 				}
 			}
 		};

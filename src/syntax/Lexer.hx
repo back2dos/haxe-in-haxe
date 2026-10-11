@@ -12,12 +12,15 @@ enum LexerErrorMsg {
 	UnterminatedString;
 	UnterminatedRegexp;
 	UnclosedComment;
-	InvalidEscape(value:String, ?msg:String);
 	UnclosedCode;
+	// port: the char is a one-character string (a byte from unescape).
+	InvalidEscape(value:String, ?msg:String);
+	// port: upstream Invalid_option.
 	InvalidRegexpOption;
 	UnterminatedMarkup;
 }
 
+// port: exception Error of error_msg * pos
 class LexerError {
 	public final message:LexerErrorMsg;
 	public final pos:Pos;
@@ -84,18 +87,63 @@ class Lexer {
 		return true;
 	}
 
+	public static function makeFile(file:String):LexerFile return {
+		lfile: file,
+		lline: 1,
+		lmaxline: 1,
+		llines: [{offset: 0, line: 1}],
+		lalines: [{offset: 0, line: 1}],
+		llast: 0x7FFFFFFF,
+		llastindex: 0
+	};
+
+	public static function createContext(file:LexerFile):LexerContext return {
+		file: file,
+		buf: new StringBuf()
+	};
+
+	public static function createTempCtx(file:String):LexerContext return createContext(makeFile(file));
+
+	// port: ThreadSafeHashtbl: a string map guarded by a mutex.
 	static var allFiles = new haxe.ds.StringMap<LexerFile>();
+	static final allFilesMutex = new sys.thread.Mutex();
 
 	public static function createFileCtx(file:String):LexerContext {
-		var ctx = createTempCtx(file);
-		allFiles.set(file, ctx.file);
-		return ctx;
+		var f = makeFile(file);
+		allFilesMutex.acquire();
+		allFiles.set(file, f);
+		allFilesMutex.release();
+		return createContext(f);
+	}
+
+	public static function copyFile(source:LexerFile):LexerFile return {
+		lfile: source.lfile,
+		lline: source.lline,
+		lmaxline: source.lmaxline,
+		llines: source.llines,
+		lalines: source.lalines,
+		llast: source.llast,
+		llastindex: source.llastindex
+	};
+
+	public static function printFile(file:LexerFile):String {
+		// port: llines is kept ascending; upstream prints its newest-first list.
+		var l = file.llines.copy();
+		l.reverse();
+		var sllines = l.map(e -> "(" + e.offset + "," + e.line + ")").join(";");
+		var slalines = file.lalines.map(e -> "(" + e.offset + "," + e.line + ")").join(";");
+		return "lfile: " + file.lfile + "\nlline: " + file.lline + "\nlmaxline: " + file.lmaxline + "\nllines: [" + sllines + "]\nlalines: ["
+			+ slalines + "]\nllast: " + file.llast + "\nllastindex: " + file.llastindex;
+	}
+
+	public static function error(ctx:LexerContext, e:LexerErrorMsg, pos:Int):Dynamic {
+		throw new LexerError(e, {pmin: pos, pmax: pos, pfile: ctx.file.lfile});
 	}
 
 	// resolve a position within a non-haxe file by counting newlines
 	// port: resolve_pos and resolve_file_content_pos in one function.
 	public static function resolveFileContentPos(file:String, content:String):LexerFile {
-		var f = createTempCtx(file).file;
+		var f = makeFile(file);
 		// port: upstream consumes UTF-8 bytes, but stores character offsets.
 		var bytes = haxe.io.Bytes.ofString(content), i = 0, p = 0;
 		while (i < bytes.length) {
@@ -114,12 +162,17 @@ class Lexer {
 	}
 
 	public static function findFile(file:String):LexerFile {
+		// port: ThreadSafeHashtbl.find_or_add
+		allFilesMutex.acquire();
 		var f = allFiles.get(file);
 		if (f == null) {
+			// TODO: It's actually stupid to block the entire Hashtbl while we're reading a file...
+			// port: resolve_file_pos reads the file through a channel; Sys_error gives an empty file.
 			try f = resolveFileContentPos(file, sys.io.File.getContent(file))
-			catch (_:Dynamic) f = createTempCtx(file).file;
+			catch (_:Dynamic) f = makeFile(file);
 			allFiles.set(file, f);
 		}
+		allFilesMutex.release();
 		return f;
 	}
 
@@ -195,19 +248,6 @@ class Lexer {
 		};
 	}
 
-	public static function createTempCtx(file:String):LexerContext return {
-		file: {
-			lfile: file,
-			lline: 1,
-			lmaxline: 1,
-			llines: [{offset: 0, line: 1}],
-			lalines: [{offset: 0, line: 1}],
-			llast: 0x7FFFFFFF,
-			llastindex: 0
-		},
-		buf: new StringBuf()
-	};
-
 	public static function lexbufFromUtf8String(source:String):Lexer return new Lexer(source);
 
 	public static function reset(ctx:LexerContext):Void ctx.buf = new StringBuf();
@@ -279,7 +319,7 @@ class Lexer {
 
 	public static function lexXml(ctx:LexerContext, p:Int, code:Lexer):Int {
 		code.file = ctx.file.lfile;
-		if (p + 1 != code.cp(code.index)) code.fail(InvalidCharacter(code.current().charCodeAt(0)), code.index);
+		if (p + 1 != code.cp(code.index)) code.fail(InvalidCharacter(code.codePointAt(code.index)), code.index);
 		var start = code.index, name = code.xmlName();
 		ctx.buf.add("<" + name);
 		var open = "<" + name, close = "</" + name + ">", depth = 0, inOpen = name != ""; // don't allow self-closing fragments
@@ -333,22 +373,40 @@ class Lexer {
 				code.index++;
 			}
 		}
+		// port: not_xml records each newline as it is lexed.
+		updateLines(ctx, code, start);
 		code.failPos(UnterminatedMarkup, p);
 		return 0;
 	}
 
 	public static function errorMsg(error:LexerErrorMsg):String return switch error {
-		case InvalidCharacter(c): c > 32 && c < 128 ? "Invalid character '" + String.fromCharCode(c) + "'" : "Invalid character 0x" + StringTools.hex(c,
-				2);
+		case InvalidCharacter(c) if (c > 32 && c < 128): "Invalid character '" + String.fromCharCode(c) + "'";
+		case InvalidCharacter(c): "Invalid character 0x" + StringTools.hex(c, 2);
 		case UnterminatedString: "Unterminated string";
 		case UnterminatedRegexp: "Unterminated regular expression";
 		case UnclosedComment: "Unclosed comment";
-		case InvalidEscape(value, null): "Invalid escape sequence \\" + value;
-		case InvalidEscape(value, msg): "Invalid escape sequence \\" + value + ". " + msg;
 		case UnclosedCode: "Unclosed code string";
+		case InvalidEscape(c, null): "Invalid escape sequence \\" + charEscaped(c);
+		case InvalidEscape(c, msg): "Invalid escape sequence \\" + charEscaped(c) + ". " + msg;
 		case InvalidRegexpOption: "Invalid regular expression option";
 		case UnterminatedMarkup: "Unterminated markup literal";
 	};
+
+	// port: Char.escaped, for a one-byte string; other strings are returned unchanged.
+	static function charEscaped(s:String):String {
+		if (s.length != 1) return s;
+		return switch StringTools.fastCodeAt(s, 0) {
+			case "'".code: "\\'";
+			case "\\".code: "\\\\";
+			case "\n".code: "\\n";
+			case "\t".code: "\\t";
+			case "\r".code: "\\r";
+			case 8: "\\b";
+			case c if (c >= 32 && c <= 126): s;
+			case c if (c < 256): "\\" + Std.string(Std.int(c / 100)) + Std.string(Std.int(c / 10) % 10) + Std.string(c % 10);
+			case _: s;
+		}
+	}
 
 	// port: tokenizer: translation of `token`, `sharp_token`, `comment`, `string`,
 	// `string2`, `code_string` and `regexp` from haxe/src/syntax/lexer.ml.
@@ -420,6 +478,16 @@ class Lexer {
 	inline function peek(offset:Int):String return index + offset >= source.length ? "" : source.charAt(index + offset);
 
 	inline function codeAt(i:Int):Int return i < source.length ? StringTools.fastCodeAt(source, i) : -1;
+
+	// port: the code point at UTF-16 index i (sedlex buffers hold code points).
+	function codePointAt(i:Int):Int {
+		var c = codeAt(i);
+		if (c >= 0xD800 && c < 0xDC00) {
+			var d = codeAt(i + 1);
+			if (d >= 0xDC00 && d < 0xE000) return ((c - 0xD800) << 10) + (d - 0xDC00) + 0x10000;
+		}
+		return c;
+	}
 
 	// port: compares in place: called for every operator candidate of every token.
 	function starts(value:String):Bool {
@@ -785,7 +853,7 @@ class Lexer {
 				index++;
 				var buf = new StringBuf();
 				var pmax = string(buf, start);
-				var str = try unescape(buf.toString()) catch (e:InvalidEscapeSequence) fail(InvalidEscape(e.c, e.msg), start + e.i);
+				var str = try unescape(buf.toString()) catch (e:InvalidEscapeSequence) fail(InvalidEscape(String.fromCharCode(e.c), e.msg), start + e.i);
 				return {token: Const(core.Ast.Constant.String(str, SDoubleQuotes)), pos: {pfile: file, pmin: cp(start), pmax: cp(pmax)}};
 			}
 			if (c == "'".code) {
@@ -819,7 +887,8 @@ class Lexer {
 				index += opLen;
 				return make(opTok, start);
 			}
-			return fail(InvalidCharacter(c), start);
+			// port: invalid_char: the code point at the lexeme start.
+			return fail(InvalidCharacter(codePointAt(start)), start);
 		}
 	}
 
@@ -910,7 +979,7 @@ class Lexer {
 	}
 
 	function unescapeFormat(fmt:FormatContext, s:String):String {
-		return try unescape(s) catch (e:InvalidEscapeSequence) fail(InvalidEscape(e.c, e.msg), fmt.quotePmin + e.i);
+		return try unescape(s) catch (e:InvalidEscapeSequence) fail(InvalidEscape(String.fromCharCode(e.c), e.msg), fmt.quotePmin + e.i);
 	}
 
 	// port: string2: single-quoted (format) string. Throws LexExit on eof.
@@ -1053,10 +1122,11 @@ class Lexer {
 					&& isHexC(codeAt(index + 4)) && isHexC(codeAt(index + 5))) {
 					buf.add(source.substr(index, 6));
 					index += 6;
-				} else if (d < 0 || d == "\n".code || d == "\r".code) {
-					// port: a newline after '\\' matches `'\\', Compl '\\'` like any other character.
-					return fail(InvalidCharacter("\\".code), index + 1);
+				} else if (d < 0) {
+					// port: '\\' at eof matches no rule: the `_` case.
+					return core.Globals.die("", "lexer.ml");
 				} else {
+					// port: a newline after '\\' matches `'\\', Compl '\\'` like any other character.
 					return fail(InvalidCharacter("\\".code), index + 1);
 				}
 				continue;
@@ -1085,84 +1155,120 @@ class Lexer {
 		}
 	}
 
-	// port: unescape of haxe/src/core/ast.ml
+	// port: unescape of haxe/src/core/ast.ml, over the UTF-8 bytes of `s` as upstream: the
+	// Invalid_escape_sequence character is a byte and its index a byte offset.
 	public static function unescape(s:String):String {
-		var b = new StringBuf();
-		var i = 0;
-		var n = s.length;
-		while (i < n) {
-			var c = s.charAt(i);
-			if (c != "\\") {
-				b.add(c);
-				i++;
-				continue;
-			}
-			i++;
-			if (i >= n) break;
-			c = s.charAt(i);
-			var fail = function(msg:Null<String>):Dynamic throw new InvalidEscapeSequence(c, i, msg);
-			var inext = i + 1;
-			switch c {
-				case "n":
-					b.add("\n");
-				case "r":
-					b.add("\r");
-				case "t":
-					b.add("\t");
-				case '"' | "'" | "\\":
-					b.add(c);
-				case "0" | "1" | "2" | "3":
-					var oct = s.substr(i, 3);
-					var u = 0;
-					if (oct.length != 3) fail(null);
-					for (k in 0...3) {
-						var d = oct.charCodeAt(k) - "0".code;
-						if (d < 0 || d > 7) fail(null);
-						u = u * 8 + d;
-					}
-					if (u > 127) fail("Values greater than \\177 are not allowed. Use \\u00"
-						+ StringTools.hex(u, 2).toLowerCase()
-						+ " instead.");
-					b.addChar(u);
-					inext += 2;
-				case "x":
-					var hex = s.substr(i + 1, 2);
-					if (hex.length != 2 || !isHexC(hex.charCodeAt(0)) || !isHexC(hex.charCodeAt(1)))
-						fail("Must be followed by a hexadecimal sequence.");
-					var u = Std.parseInt("0x" + hex);
-					if (u > 127) fail("Values greater than \\x7f are not allowed. Use \\u00" + hex + " instead.");
-					b.addChar(u);
-					inext += 2;
-				case "u":
-					var failNoHex = function():Dynamic return
-						fail("Must be followed by a hexadecimal sequence enclosed in curly brackets.");
-					var u:Int, a:Int;
-					var h4 = s.substr(i + 1, 4);
-					if (h4.length == 4 && isHexC(h4.charCodeAt(0)) && isHexC(h4.charCodeAt(1)) && isHexC(h4.charCodeAt(2))
-						&& isHexC(h4.charCodeAt(3))) {
-						u = Std.parseInt("0x" + h4);
-						a = 4;
-					} else {
-						if (s.charAt(i + 1) != "{") failNoHex();
-						var close = s.indexOf("}", i + 3);
-						if (close < 0) failNoHex();
-						var l = close - (i + 2);
-						var hex = s.substr(i + 2, l);
-						for (k in 0...hex.length) if (!isHexC(hex.charCodeAt(k))) failNoHex();
-						if (hex.length == 0) failNoHex();
-						u = Std.parseInt("0x" + hex);
-						if (u > 0x10FFFF) fail("Maximum allowed value for unicode escape sequence is \\u{10FFFF}");
-						a = l + 2;
-					}
-					if (u >= 0xD800 && u < 0xE000) fail("UTF-16 surrogates are not allowed in strings.");
-					b.addChar(u);
-					inext += a;
-				case _:
-					fail(null);
-			}
-			i = inext;
+		if (s.indexOf("\\") < 0) return s;
+		var sb = haxe.io.Bytes.ofString(s);
+		var len = sb.length;
+		var b = new haxe.io.BytesBuffer();
+		// port: String.sub s pos len, raising Invalid_argument out of range.
+		function sub(pos:Int, l:Int):String {
+			if (pos < 0 || l < 0 || pos > len - l) throw new core.ds.InvalidArgument("String.sub / Bytes.sub");
+			return sb.getString(pos, l);
 		}
-		return b.toString();
+		// port: int_of_string, raising Failure.
+		function intOfString(str:String):haxe.Int64 {
+			return try core.ds.OcamlInt.parse(str) catch (_:core.ds.OcamlInt.IntParseFailure) throw new core.ds.Failure("int_of_string");
+		}
+		// port: UTF8.add_uchar (extlib-leftovers/uTF8.ml) for the accepted range.
+		function addUchar(k:Int) {
+			var masq = 0x3F;
+			if (k <= 0x7f) b.addByte(k);
+			else if (k <= 0x7ff) {
+				b.addByte(0xc0 | (k >>> 6));
+				b.addByte(0x80 | (k & masq));
+			} else if (k <= 0xffff) {
+				b.addByte(0xe0 | (k >>> 12));
+				b.addByte(0x80 | ((k >>> 6) & masq));
+				b.addByte(0x80 | (k & masq));
+			} else {
+				b.addByte(0xf0 + (k >>> 18));
+				b.addByte(0x80 | ((k >>> 12) & masq));
+				b.addByte(0x80 | ((k >>> 6) & masq));
+				b.addByte(0x80 | (k & masq));
+			}
+		}
+		// port: the recursion `loop esc i`, as a loop.
+		var esc = false;
+		var i = 0;
+		function failAt(c:Int, i:Int, msg:Null<String>):Dynamic throw new InvalidEscapeSequence(c, i, msg);
+		while (i < len) {
+			var c = sb.get(i);
+			if (esc) {
+				var inext = i + 1;
+				switch c {
+					case 'n'.code:
+						b.addByte('\n'.code);
+					case 'r'.code:
+						b.addByte('\r'.code);
+					case 't'.code:
+						b.addByte('\t'.code);
+					case '"'.code | "'".code | '\\'.code:
+						b.addByte(c);
+					case '0'.code | '1'.code | '2'.code | '3'.code:
+						var u = try intOfString("0o" + sub(i, 3)).low catch (_:Dynamic) failAt(c, i, null);
+						if (u > 127)
+							failAt(c, i, "Values greater than \\177 are not allowed. Use \\u00" + StringTools.hex(u, 2).toLowerCase() + " instead.");
+						b.addByte(u);
+						inext += 2;
+					case 'x'.code:
+						function failNoHex():Dynamic return failAt(c, i, "Must be followed by a hexadecimal sequence.");
+						var hex = try sub(i + 1, 2) catch (_:Dynamic) failNoHex();
+						var u = try intOfString("0x" + hex).low catch (_:Dynamic) failNoHex();
+						if (u > 127) failAt(c, i, "Values greater than \\x7f are not allowed. Use \\u00" + hex + " instead.");
+						b.addByte(u);
+						inext += 2;
+					case 'u'.code:
+						function failNoHex():Dynamic return failAt(c, i, "Must be followed by a hexadecimal sequence enclosed in curly brackets.");
+						var u:Int = 0, a:Int = 0;
+						try {
+							u = intOfString("0x" + sub(i + 1, 4)).low;
+							a = 4;
+						} catch (_:Dynamic) {
+							try {
+								// port: assert (s.[i+1] = '{'); s.[i+1] raises Invalid_argument out of range.
+								if (i + 1 >= len || sb.get(i + 1) != '{'.code) throw "assert";
+								// port: String.index_from s (i+3) '}'
+								if (i + 3 > len) throw new core.ds.InvalidArgument("String.index_from / Bytes.index_from");
+								var close = -1;
+								for (k in i + 3...len) if (sb.get(k) == '}'.code) {
+									close = k;
+									break;
+								}
+								if (close < 0) throw core.ds.NotFound.raise();
+								var l = close - (i + 2);
+								var v = intOfString("0x" + sub(i + 2, l));
+								if (haxe.Int64.compare(v, haxe.Int64.ofInt(0x10FFFF)) > 0)
+									failAt(c, i, "Maximum allowed value for unicode escape sequence is \\u{10FFFF}");
+								u = v.low;
+								a = l + 2;
+							} catch (e:InvalidEscapeSequence) {
+								throw e;
+							} catch (_:Dynamic) {
+								failNoHex();
+							}
+						}
+						if (u >= 0xD800 && u < 0xE000) failAt(c, i, "UTF-16 surrogates are not allowed in strings.");
+						addUchar(u);
+						inext += a;
+					case _:
+						failAt(c, i, null);
+				}
+				esc = false;
+				i = inext;
+			} else {
+				switch c {
+					case '\\'.code:
+						esc = true;
+						i = i + 1;
+					case c:
+						b.addByte(c);
+						i = i + 1;
+				}
+			}
+		}
+		return b.getBytes().toString();
 	}
 
 	static function keyword(value:String):Token return switch value {
@@ -1234,11 +1340,11 @@ private class LexExit extends haxe.Exception {
 }
 
 class InvalidEscapeSequence extends haxe.Exception {
-	public final c:String;
+	public final c:Int;
 	public final i:Int;
 	public final msg:Null<String>;
 
-	public function new(c:String, i:Int, msg:Null<String>) {
+	public function new(c:Int, i:Int, msg:Null<String>) {
 		super("Invalid_escape_sequence");
 		this.c = c;
 		this.i = i;

@@ -193,7 +193,7 @@ class ContextCache {
 				null;
 			case _:
 				function() {
-					var writer = new HxbWriter(config.generateDocumentation, warn, anonIdentification);
+					var writer = new HxbWriter(config, warn, anonIdentification);
 					writer.writeModule(m);
 					return (writer.getChunks() : CachedChunks);
 				}
