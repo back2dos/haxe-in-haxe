@@ -191,7 +191,10 @@ class JvmConstantPool {
 				} else ch.writeRealI32(haxe.io.FPHelper.floatToI32(f));
 			case ConstLong(i64):
 				ch.writeByte(5);
-				writeI64(ch, i64);
+				// port: `write_i64` here is IO.BigEndian.write_i64 (high word first), not the
+				// private method above, which upstream never calls.
+				ch.writeRealI32(i64.high);
+				ch.writeRealI32(i64.low);
 			case ConstDouble(d):
 				ch.writeByte(6);
 				ch.writeDouble(d);
