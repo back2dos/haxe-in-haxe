@@ -17,7 +17,7 @@ class AddFinalReturn {
 				return {eexpr: TReturn({eexpr: TConst(c), epos: p, etype: t}), etype: TypeOps.tDynamic, epos: p};
 			}
 			return switch e.eexpr {
-				case TBlock(el) if (el.length == 0): e;
+				case TBlock(el) if (el.length == 0): {eexpr: TBlock([defReturn(e.epos)]), etype: e.etype, epos: e.epos};
 				case TBlock(el):
 					var rest = el.slice(0, el.length - 1);
 					var last = loop(el[el.length - 1], t);

@@ -275,7 +275,16 @@ class Lexer {
 		}
 	}
 
-	public static function readToken(ctx:LexerContext, code:Lexer):LexedToken {
+	// port: make_token; the sedlex rules are the Lexer.token method, the returned closure
+	// ... sets up the context around it.
+	public static function makeToken(ctx:LexerContext):Lexer->LexedToken {
+		return code -> readTokenWith(ctx, code);
+	}
+
+	// port: token ctx lexbuf
+	public static function readToken(ctx:LexerContext, code:Lexer):LexedToken return makeToken(ctx)(code);
+
+	static function readTokenWith(ctx:LexerContext, code:Lexer):LexedToken {
 		code.file = ctx.file.lfile;
 		var start = code.index;
 		// port: upstream records each newline as it is lexed, so a lexer error sees the lines before it

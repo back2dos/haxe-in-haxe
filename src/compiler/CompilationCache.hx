@@ -90,6 +90,7 @@ class ContextCache {
 	final files:OcamlHashtbl<String, CachedFile> = CompilationCache.stringTable();
 	final modules:OcamlHashtbl<GlobalTypePath, ModuleDef> = CompilationCache.pathTable();
 	final binaryCache:OcamlHashtbl<GlobalTypePath, ModuleCache> = CompilationCache.pathTable();
+	final fakeModules:OcamlHashtbl<String, ModuleDef> = CompilationCache.stringTable();
 	final tmpBinaryCache:OcamlHashtbl<GlobalTypePath, ModuleCache> = CompilationCache.pathTable();
 	final getHxbModuleMutex = new sys.thread.Mutex();
 	final removedFiles:OcamlHashtbl<String, ResolvedFile> = CompilationCache.stringTable();
@@ -204,6 +205,20 @@ class ContextCache {
 		modules.replace(path, m);
 	}
 
+	/* fake modules */
+
+	public function findFakeModule(key:String):ModuleDef {
+		return fakeModules.find(key);
+	}
+
+	public function addFakeModule(key:String, m:ModuleDef):Void {
+		fakeModules.replace(key, m);
+	}
+
+	public function removeFakeModule(key:String):Void {
+		fakeModules.remove(key);
+	}
+
 	public function clearTempCache():Void {
 		tmpBinaryCache.clear();
 	}
@@ -217,6 +232,7 @@ class ContextCache {
 	public function clearModules():Void {
 		modules.clear();
 		binaryCache.clear();
+		fakeModules.clear();
 		clearTempCache();
 		removedFiles.clear();
 		var removed = files.fold(function(key, cfile:CachedFile, acc:Array<String>) {

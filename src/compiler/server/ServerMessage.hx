@@ -126,8 +126,9 @@ class ServerMessage {
 		if (config.printReusing) printEndline(signString(com) + tabs + "reusing " + Globals.sTypePath(m.mPath));
 	}
 
-	public static function skippingDep(com:CommonContext, tabs:String, mpath:GlobalTypePath, reason:String):Void {
-		if (config.printSkippingDep) printEndline(signString(com) + "skipping " + Globals.sTypePath(mpath) + " (" + reason + ")");
+	/* [reason] is only formatted when the message is printed: the string holds the whole dependency chain */
+	public static function skippingDep(com:CommonContext, tabs:String, mpath:GlobalTypePath, reason:Void->String):Void {
+		if (config.printSkippingDep) printEndline(signString(com) + "skipping " + Globals.sTypePath(mpath) + " (" + reason() + ")");
 	}
 
 	public static function unchangedContent(com:CommonContext, tabs:String, file:String):Void {

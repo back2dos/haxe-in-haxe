@@ -225,6 +225,13 @@ class Main {
 
 		/* We are a normal non-server compilation. */
 
+		/* A command line compilation is short-lived, so trade memory for speed like the
+			server does for its compilation domain (see Server.create): a larger minor heap
+			means fewer stop-the-world minor collections and fewer promotions, a larger
+			space_overhead fewer major collections. */
+		// port: the OCaml Gc settings (HAXE_MAIN_MINOR_MB, HAXE_SPACE_OVERHEAD, DynamicGc tuning)
+		// ... have no host-runtime equivalent; the host garbage collector keeps its own settings.
+
 		var sctx = Server.setupServerContext(false, false);
 		var io = CompilerIo.createStdioIo();
 		var requestScope = try Server.createRequestScope(false, io, requestArgs.displayArg) catch (e:core.ds.ArgumentError) {

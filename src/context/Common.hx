@@ -435,7 +435,6 @@ typedef CommonContext = {
 	var overloadCache:Lookup<{path:GlobalTypePath, name:String}, Array<CastField>>;
 	var moduleLut:ModuleLut;
 	var moduleNonexistentLut:Lookup<GlobalTypePath, Bool>;
-	var fakeModules:haxe.ds.StringMap<ModuleDef>;
 	// output
 	var file:String;
 	var features:Map<String, Bool>;
@@ -505,6 +504,10 @@ class Common {
 		var b = com.display.dmsErrorPolicy == EPIgnore;
 		if (b) com.partScope.hasError = true;
 		return b;
+	}
+
+	public static function canRecoverInDisplay(com:CommonContext):Bool {
+		return com.display.dmsErrorPolicy == EPIgnore && !com.display.dmsFullTyping;
 	}
 
 	public static function moduleWarning(com:CommonContext, m:ModuleDef, w:WarningCode, options:Array<Array<WarningOption>>, msg:String,
@@ -806,7 +809,6 @@ class Common {
 			modules: [],
 			moduleLut: new ModuleLut(),
 			moduleNonexistentLut: new HashtblLookup(),
-			fakeModules: new haxe.ds.StringMap(),
 			flashVersion: 10.0,
 			resources: newResources(),
 			nativeLibs: NativeLibraries.createNativeLibs(),
@@ -854,19 +856,8 @@ class Common {
 
 	public static function isCompilation(com:CommonContext):Bool return com.display.dmsKind == DMNone && !isDiagnostics(com);
 
-	/** Returns true when there is an error that should be reported/acted upon.
-		In compilation mode, any has_error is significant.
-		In display mode, has_error can be set transiently during type resolution
-		without producing actual error messages, so we require messages to exist.
-		Diagnostics-only messages (DKMissingFields, DKUnresolvedIdentifier) are
-		not counted as reportable errors — they are diagnostics data that should
-		not prevent context caching. */
 	public static function hasErrorToReport(com:CommonContext):Bool {
-		var reportable = core.ds.ArrayTools.exists(com.partScope.messages, function(cm) return switch cm.cmDiagnosticsKind {
-			case DKMissingFields | DKUnresolvedIdentifier: false;
-			case _: true;
-		});
-		return com.partScope.hasError && (isCompilation(com) || reportable);
+		return com.partScope.hasError && (isCompilation(com) || com.partScope.messages.length != 0);
 	}
 
 	public static function activateMessageCapture(com:CommonContext, buf:{value:Array<CompilerMessage>}):Void->Void {
@@ -932,7 +923,6 @@ class Common {
 		out.modules = [];
 		out.moduleLut = new ModuleLut();
 		out.moduleNonexistentLut = new HashtblLookup();
-		out.fakeModules = new haxe.ds.StringMap();
 		out.loadExternType = []; // !
 		out.basic = newBasicTypes();
 		out.localWrapper = LocalWrapper.nullWrapper;

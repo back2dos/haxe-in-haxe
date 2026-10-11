@@ -281,14 +281,14 @@ class DisplayFields {
 						var m = Meta.get(MetaTag.Forward, a.aMeta);
 						var sl = [];
 						for (e in m.exprs) switch e.expr {
-							case EConst(Ident(s)): sl.push(s);
+							case EConst(Ident(s) | String(s, _)): sl.push(s);
 							case _:
 						}
 						var forwardedFields = loop(PMap.empty(), applyParams(a.aParams, tl, a.aThis));
 						function abstractHasOwnField(fieldName:String):Bool return c.clFields.exists(fieldName)
 							|| c.clStatics.exists(fieldName);
 						PMap.foldi(function(name:String, item:CompletionItemData, acc:StringMap<CompletionItemData>) {
-							if ((sl.length == 0 || sl.contains(name) && isNewItem(acc, name))
+							if ((sl.length == 0 || sl.contains(name)) && isNewItem(acc, name)
 								&& !abstractHasOwnField(name)) return PMap.add(name, item, acc);
 							return acc;
 						}, forwardedFields, items);

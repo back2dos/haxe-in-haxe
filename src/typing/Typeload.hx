@@ -701,11 +701,22 @@ class Typeload {
 			switch exc {
 				case(core.ds.ExceptionTools.typing(_) => Some(err)):
 					switch err.errMessage {
-						case ModuleNotFound({pack: [], name: name})
-							if (context.display.Diagnostics.errorInDiagnosticsRun(ctx.com, err.errPos)):
-							delay(ctx.g, PForce,
-								function() context.display.DisplayToplevel.handleUnresolvedIdentifier(ctx, name, err.errPos, true));
-							return tDynamic;
+						case ModuleNotFound(_) | TypeNotFound(_, _, _):
+							if (context.display.Diagnostics.errorInDiagnosticsRun(ctx.com, err.errPos)) {
+								switch err.errMessage {
+									case ModuleNotFound({pack: [], name: name}):
+										delay(ctx.g, PForce,
+											function() context.display.DisplayToplevel.handleUnresolvedIdentifier(ctx, name, err.errPos, true));
+									case _:
+										Common.displayErrorExt(ctx.com, err);
+								}
+								return tDynamic;
+							} else if (Common.canRecoverInDisplay(ctx.com)
+								&& !(ctx.m.isDisplayFile && DisplayPosition.displayPosition.enclosedIn(err.errPos))) {
+								Common.displayErrorExt(ctx.com, err);
+								return tDynamic;
+							} else
+								throw exc;
 						case _: throw exc;
 					}
 				case _:

@@ -76,6 +76,8 @@ class CompilerMessage {
 		survive across server compilations. */
 	public static function addModuleDiagnostic(com:CommonContext, m:ModuleDef, cm:core.Message.CompilerMessage):Void {
 		if (com.display.dmsFullTyping) m.mExtra.mCacheBoundObjects.push(Message(cm));
+		if (core.Message.severity(cm) == core.Message.MessageSeverity.Error && com.partScope.messageCapture == null)
+			com.partScope.hasError = true;
 		if (Common.isDiagnostics(com)) com.partScope.messages.unshift(cm);
 	}
 
