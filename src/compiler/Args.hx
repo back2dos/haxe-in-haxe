@@ -634,7 +634,7 @@ class Args {
 				default:
 					if (StringTools.endsWith(argument, ".hxml")) parsed.push(HxmlFile(argument));
 					else {
-						var path = try core.Path.parsePath(argument) catch (_:String) null;
+						var path = try core.Path.parsePath(argument) catch (_:core.ds.Failure) null;
 						if (path == null) parsed.push(IncludeModule(argument));
 						else if (core.StringHelper.startsUppercaseIdentifier(path.name))
 							parsed.push(AddClass(path.pack.concat([path.name])));

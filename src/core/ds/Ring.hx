@@ -17,18 +17,28 @@ class Ring<T> {
 	}
 
 	public function iter(callback:T->Void):Void {
-		for (offset in 0...values.length) callback(values[(index + offset) % values.length]);
+		var len = values.length;
+		for (i in 0...len) {
+			var off = index + i;
+			var off = off >= len ? off - len : off;
+			callback(values[off]);
+		}
 	}
 
 	public function fold<Result>(initial:Result, callback:Result->T->Result):Result {
-		var result = initial;
-		for (offset in 0...values.length) result = callback(result, values[(index + offset) % values.length]);
-		return result;
+		var len = values.length;
+		var acc = initial;
+		for (i in 0...len) {
+			var off = index + i;
+			var off = off >= len ? off - len : off;
+			acc = callback(acc, values[off]);
+		}
+		return acc;
 	}
 
 	public function find(predicate:T->Bool):T {
 		for (value in values) if (predicate(value)) return value;
-		throw "Not_found";
+		throw NotFound.raise();
 	}
 
 	public function isFilled():Bool {

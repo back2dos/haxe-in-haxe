@@ -3,8 +3,8 @@ package core;
 import core.Globals.Pos;
 import core.Json.JsonValue;
 
-// port: from haxe/src/core/message.ml.
-
+// port: the modules MessageSeverity and MessageKind become the enums below, their `to_int`
+// functions Message.severityToInt and Message.diagnosticsKindToInt; `t` is CompilerMessage.
 enum MessageSeverity {
 	Error;
 	Warning;
@@ -28,6 +28,8 @@ enum WarningMode {
 	WMDisable;
 }
 
+// port: the `warning` type of the generated warningList.ml (src-json/warning.json; see
+// WarningList.hx), declared here.
 enum abstract WarningCode(String) from String to String {
 	var WAll = "WAll";
 	var WInternal = "WInternal";
@@ -137,10 +139,12 @@ class Message {
 		};
 	}
 
+	// port: cm_severity
 	public static inline function severity(message:CompilerMessage):MessageSeverity {
 		return messageKindSeverity(message.cmMessageKind);
 	}
 
+	// port: cm_code
 	public static function code(message:CompilerMessage):Null<String> {
 		return switch (message.cmMessageKind) {
 			case MKWarning(warning, _): WarningList.warningObj(warning).wName;

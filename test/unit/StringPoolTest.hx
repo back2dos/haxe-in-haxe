@@ -20,7 +20,7 @@ class StringPoolTest {
 			pool.add("three");
 			throw "Finalized pool must reject additions";
 		} catch (error:Dynamic) {
-			if (Std.string(error).indexOf("finalized") < 0) throw error;
+			if (Std.string(error).indexOf("Assert_failure") < 0) throw error;
 		}
 	}
 }

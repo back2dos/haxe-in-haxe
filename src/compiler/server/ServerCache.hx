@@ -84,10 +84,7 @@ class ServerCache {
 										var ident:String = com.partScope.parserState.specialIdentifierFiles.find(fkey);
 										info = "not cached, using \"" + ident + "\" define";
 										isUnusual = true;
-									} catch (e:Dynamic) {
-										// port: ThreadSafeHashtbl.find signals absence with the string "Not_found"
-										if (!(Std.isOfType(e, NotFound)
-											|| (Std.isOfType(e, std.String) && (e : std.String) == "Not_found"))) throw e;
+									} catch (_:NotFound) {
 										cc.cacheFile(fkey, ({file: ffile, classPath: rfile.classPath} : ResolvedFile), ftime, data, pdi);
 										info = "cached";
 										isUnusual = false;

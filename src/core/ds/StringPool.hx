@@ -1,6 +1,7 @@
 package core.ds;
 
 class StringPool {
+	// port: `lut`, a StringHashtbl; only looked up, never iterated
 	var indices:Map<String, Int> = new Map();
 	var items:StringDynArray = new StringDynArray(16);
 	var closed:Bool = false;
@@ -20,7 +21,7 @@ class StringPool {
 	}
 
 	public function add(value:String):Int {
-		if (closed) throw "String pool is finalized";
+		if (closed) throw new haxe.Exception("Assert_failure stringPool.ml");
 		var index = items.length;
 		indices.set(key(value), index);
 		items.add(value);
@@ -43,7 +44,7 @@ class StringPool {
 
 	public function get(value:String):Int {
 		var i = find(value);
-		if (i == null) throw "Not_found";
+		if (i == null) throw NotFound.raise();
 		return i;
 	}
 
@@ -53,7 +54,7 @@ class StringPool {
 	}
 
 	public function finalize():StringDynArray {
-		if (closed) throw "String pool is finalized";
+		if (closed) throw new haxe.Exception("Assert_failure stringPool.ml");
 		closed = true;
 		return items;
 	}

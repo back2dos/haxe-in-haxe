@@ -1,6 +1,5 @@
 package core;
 
-// port: from haxe/src/core/classPath.ml.
 enum ClassPathScope {
 	Std;
 	StdTarget;
@@ -12,6 +11,7 @@ enum FileKind {
 	FFile;
 }
 
+// port: the `(string * string array)` of get_uncached_dir_listing
 @:structInit class DirectoryListing {
 	public var directory:String;
 	public var files:Array<String>;
@@ -24,6 +24,7 @@ enum FileKind {
 	public inline function clone():DirectoryListing return new DirectoryListing(directory, files);
 }
 
+// port: `class virtual class_path`; DirectoryClassPath implements it whole.
 interface IClassPath {
 	public var path(get, never):String;
 	public var scope(get, never):ClassPathScope;
@@ -40,6 +41,7 @@ interface IClassPath {
 class DirectoryClassPath implements IClassPath {
 	final classPath:String;
 	final classPathScope:ClassPathScope;
+	// port: readdir_cache, a Lookup.hashtbl_lookup (only looked up)
 	var directoryCache:Map<String, Null<Array<String>>> = new Map();
 
 	public function new(path:String, scope:ClassPathScope) {
@@ -97,7 +99,7 @@ class DirectoryClassPath implements IClassPath {
 	}
 
 	public function dump():Void {
-		Sys.println('    dir ${scopeString()}: $classPath');
+		Sys.println('    dir ${StringTools.rpad(scopeString(), " ", 9)}: $classPath');
 	}
 
 	public function isStdPath():Bool {

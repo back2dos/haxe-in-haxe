@@ -5,7 +5,6 @@ import sys.net.Host;
 import sys.net.Socket as SysSocket;
 import sys.thread.Mutex;
 
-// port: from haxe/src/core/socket.ml.
 class Socket {
 	final host:String;
 	final port:Int;
@@ -24,6 +23,7 @@ class Socket {
 		return new Socket(host, port);
 	}
 
+	// port: the host socket reads exactly the requested lengths (upstream ignores short reads).
 	public function readString():String {
 		var socket = getSocket();
 		var header = socket.input.read(2);
@@ -50,6 +50,7 @@ class Socket {
 		writeByte(bytes, index + 3, value >>> 24);
 	}
 
+	// port: the locked wrapper and the unlocked `send_string` it shadows, merged.
 	public function sendString(value:String):Void {
 		sendMutex.acquire();
 		try {
@@ -75,7 +76,7 @@ class Socket {
 	}
 
 	function getSocket():SysSocket {
-		if (socket == null) throw "no socket"; // TODO: reconnect?
+		if (socket == null) throw new core.ds.Failure("no socket") /* TODO: reconnect? */;
 		return socket;
 	}
 }

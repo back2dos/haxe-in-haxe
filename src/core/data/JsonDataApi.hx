@@ -1,86 +1,69 @@
 package core.data;
 
-import haxe.DynamicAccess;
+import core.Json;
+import core.Json.JsonValue;
+import core.Json.JsonField;
 
-// port: from haxe/src/core/data/jsonDataApi.ml; the data are haxe.Json values (Dynamic) rather than Json.t.
-@:structInit class JsonField {
-	public var name:String;
-	public var value:Dynamic;
-
-	public inline function new(name:String, value:Dynamic) {
-		this.name = name;
-		this.value = value;
+class JsonDataApi {
+	public static function error(s:String):Dynamic {
+		/* TODO: should this raise something else? */
+		return core.Error.raiseTypingError(s, core.Globals.nullPos);
 	}
-
-	public inline function clone():JsonField return new JsonField(name, value);
 }
 
+// port: module JsonReaderApi (`type data = Json.t`)
 class JsonReaderApi {
-	public static function readOptional(data:Dynamic, callback:Dynamic->Void):Void {
-		if (data != null) callback(data);
+	public static function readOptional(json:JsonValue, f:JsonValue->Void):Void {
+		switch json {
+			case JNull:
+			case _:
+				f(json);
+		}
 	}
 
-	public static function readObject(data:Dynamic):Array<JsonField> {
-		if (data == null || Std.isOfType(data, Array) || !Reflect.isObject(data)) fail('Expected JObject, found ${dataToString(data)}');
-		var fields:DynamicAccess<Dynamic> = cast data;
-		return [for (name in fields.keys()) {name: name, value: fields[name]}];
+	public static function readObject(json:JsonValue):Array<JsonField> {
+		return switch json {
+			case JObject(fl): fl;
+			case _: JsonDataApi.error('Expected JObject, found ${Json.stringOfJson(json)}');
+		}
 	}
 
-	public static function readArray(data:Dynamic):Array<Dynamic> {
-		if (!Std.isOfType(data, Array)) fail('Expected JArray, found ${dataToString(data)}');
-		return cast data;
+	public static function readArray(json:JsonValue):Array<JsonValue> {
+		return switch json {
+			case JArray(l): l;
+			case _: JsonDataApi.error('Expected JArray, found ${Json.stringOfJson(json)}');
+		}
 	}
 
-	public static function readString(data:Dynamic):String {
-		if (!Std.isOfType(data, String)) fail('Expected JString, found ${dataToString(data)}');
-		return cast data;
+	public static function readString(json:JsonValue):String {
+		return switch json {
+			case JString(s): s;
+			case _: JsonDataApi.error('Expected JString, found ${Json.stringOfJson(json)}');
+		}
 	}
 
-	public static function readIdent(data:Dynamic):String {
-		if (!Std.isOfType(data, String)) fail('Expected identifier string, found ${dataToString(data)}');
-		return cast data;
+	public static function readInt(json:JsonValue):Int {
+		return switch json {
+			case JInt(i): i;
+			case _: JsonDataApi.error('Expected JInt, found ${Json.stringOfJson(json)}');
+		}
 	}
 
-	public static function readBool(data:Dynamic):Bool {
-		if (!Std.isOfType(data, Bool)) fail('Expected JBool, found ${dataToString(data)}');
-		return cast data;
+	public static function readIdent(json:JsonValue):String {
+		return switch json {
+			case JString(s): s;
+			case _: JsonDataApi.error('Expected identifier string, found ${Json.stringOfJson(json)}');
+		}
 	}
 
-	public static function readInt(data:Dynamic):Int {
-		if (!Std.isOfType(data, Int)) fail('Expected JInt, found ${dataToString(data)}');
-		return cast data;
+	public static function readBool(json:JsonValue):Bool {
+		return switch json {
+			case JBool(b): b;
+			case _: JsonDataApi.error('Expected JBool, found ${Json.stringOfJson(json)}');
+		}
 	}
 
-	public static function dataToString(data:Dynamic):String {
-		return haxe.Json.stringify(data);
+	public static function dataToString(json:JsonValue):String {
+		return Json.stringOfJson(json);
 	}
-
-	// TODO: should this raise something else?
-	// port: throws the message instead of raising a typing error at null_pos.
-	static function fail(message:String):Dynamic {
-		throw message;
-	}
-}
-
-// port: JsonWriterApi has no upstream counterpart.
-class JsonWriterApi {
-	public static function writeOptional(data:Null<Dynamic>):Dynamic {
-		return data;
-	}
-
-	public static function writeObject(fields:Array<JsonField>):Dynamic {
-		var object:DynamicAccess<Dynamic> = {};
-		for (field in fields) object[field.name] = field.value;
-		return object;
-	}
-
-	public static function writeArray(values:Array<Dynamic>):Dynamic {
-		return values;
-	}
-
-	public static function writeString(value:String):Dynamic return value;
-
-	public static function writeBool(value:Bool):Dynamic return value;
-
-	public static function writeInt(value:Int):Dynamic return value;
 }

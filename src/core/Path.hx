@@ -4,8 +4,9 @@ import sys.FileSystem;
 import sys.io.File;
 import sys.io.FileOutput;
 import sys.thread.Mutex;
+import core.ds.Failure;
 
-// port: from haxe/src/core/path.ml.
+// port: FilePath.t
 @:structInit class FilePathData {
 	public var directory:Null<String>;
 	public var fileName:Null<String>;
@@ -29,27 +30,27 @@ class Path {
 		if (Sys.getCwd() != cwd) Sys.setCwd(cwd);
 	}
 
-	// port: `List.map platform_name platforms` of find_directories, computed once.
-	static final platformNames = ["js", "lua", "neko", "flash", "php", "cpp", "jvm", "python", "hl", "eval"];
 	public static final isWindows = Sys.systemName() == "Windows";
 	public static final pathSep = isWindows ? "\\" : "/";
 	static final mkdirMutex = new Mutex();
 
 	public static function getPathParts(file:String):Array<String> {
-		// this function is quite weird: it tries to determine whether the given
-		// argument is a .hx file path with slashes or a dotted module path and
-		// based on that it returns path "parts", which are basically a list of
-		// either folders or packages (which are folders too) appended by the module name
-		//
-		// TODO: i started doubting my sanity while writing this comment, let's somehow
-		// refactor this stuff so it doesn't mix up file and module paths and doesn't introduce
-		// the weird "path part" entity.
-		var length = file.length;
-		if (length > 3 && file.substr(length - 3) == ".hx") {
-			file = file.substr(0, length - 3); // strip the .hx
-			return file.split("\\").join("/").split("/"); // TODO: wouldn't it be faster to Str.split here?
-		}
-		return file.split(".");
+		/*
+			this function is quite weird: it tries to determine whether the given
+			argument is a .hx file path with slashes or a dotted module path and
+			based on that it returns path "parts", which are basically a list of
+			either folders or packages (which are folders too) appended by the module name
+
+			TODO: i started doubting my sanity while writing this comment, let's somehow
+			refactor this stuff so it doesn't mix up file and module paths and doesn't introduce
+			the weird "path part" entity.
+		*/
+		var l = file.length;
+		if (l > 3 && file.substr(l - 3, 3) == ".hx") {
+			var f = file.substr(0, l - 3); /* strip the .hx */
+			return f.split("\\").join("/").split("/"); /* TODO: wouldn't it be faster to Str.split here? */
+		} else
+			return file.split(".");
 	}
 
 	public static function checkInvalidChar(value:String):Void {
@@ -59,22 +60,27 @@ class Path {
 				|| (code >= "a".code && code <= "z".code)
 				|| (code >= "0".code && code <= "9".code)
 				|| code == "_".code
-				|| code == ".".code)) throw 'Invalid character: ${StringHelper.sEscape(value.charAt(index))}';
+				|| code == ".".code)) throw new Failure("Invalid character: " + StringHelper.sEscape(value.charAt(index)));
 		}
 	}
 
 	public static function checkPackageName(value:String):Void {
-		if (value.length == 0) throw "Package name must not be empty";
-		var code = value.charCodeAt(0);
-		if (!((code >= "a".code && code <= "z".code) || code == "_".code)) throw "Package name must start with a lowercase letter";
+		if (value.length == 0) throw new Failure("Package name must not be empty");
+		else {
+			var code = value.charCodeAt(0);
+			if ((code < "a".code || code > "z".code) && code != "_".code) throw new Failure("Package name must start with a lowercase letter");
+		}
 		checkInvalidChar(value);
 	}
 
 	public static function parsePath(file:String):core.Globals.GlobalTypePath {
 		var parts = getPathParts(file);
-		inline function fail(message:String):Dynamic throw 'Could not process argument $file\n$message';
+		function error(msg:String):Dynamic {
+			var msg = "Could not process argument " + file + "\n" + msg;
+			throw new Failure(msg);
+		}
 		function loop(index:Int, pack:Array<String>):core.Globals.GlobalTypePath {
-			if (index == parts.length) return fail("Package name must not be empty");
+			if (index == parts.length) return error("Package name must not be empty");
 			var value = parts[index];
 			if (index == parts.length - 1) {
 				checkInvalidChar(value);
@@ -87,7 +93,7 @@ class Path {
 			return loop(index + 1, pack);
 		}
 		try return loop(0, [])
-		catch (error:Dynamic) return fail(Std.string(error));
+		catch (e:Failure) return error(e.message);
 	}
 
 	public static function parseTypePath(value:String):{pack:Array<String>, name:String} {
@@ -96,6 +102,7 @@ class Path {
 		return path;
 	}
 
+	// port: Str.full_split over "[/\\]+", walked in place.
 	public static function normalizePath(path:String):String {
 		var acc:Array<String> = [];
 		var start = 0;
@@ -106,7 +113,7 @@ class Path {
 				var value = path.substr(start, index - start);
 				while (index < path.length && (path.charCodeAt(index) == "/".code || path.charCodeAt(index) == "\\".code)) index++;
 				if (value == "." && acc.length == 0) {} else if (value == "..") {
-					if (acc.length == 0) throw "Exit";
+					if (acc.length == 0) throw core.ds.Exit.raise();
 					acc.pop();
 				} else acc.push(value);
 				start = index;
@@ -140,23 +147,20 @@ class Path {
 		if (cwd.length > 1 && StringTools.fastCodeAt(cwd, cwd.length - 1) == "/".code) cwd = cwd.substr(0, cwd.length - 1);
 		var absolutePath = length > 0 && StringTools.fastCodeAt(file, 0) == "/".code ? file : length == 0 ? cwd : cwd + "/" + file;
 		var needsNormalization = length > 0 && StringTools.fastCodeAt(file, length - 1) == "/".code;
-		// port: has_dots_or_double_slash: only the first character of each segment is inspected.
+		// port: has_dots_or_double_slash as a loop: only the first character of each segment is inspected.
 		// (fastCodeAt: every index here is checked against the length, and
 		// charCodeAt boxes its Null<Int> result on HashLink.)
 		var index = 0;
 		while (!needsNormalization && index < length) {
 			var c = StringTools.fastCodeAt(file, index);
 			if (c == ".".code) {
-				// path contains `../` or `./`
-				if (index + 2 < length) needsNormalization = (StringTools.fastCodeAt(file, index + 1) == ".".code
+				if (index + 2 < length) /* path contains `../` or `./` */ needsNormalization = (StringTools.fastCodeAt(file, index + 1) == ".".code
 					&& StringTools.fastCodeAt(file, index + 2) == "/".code)
 					|| StringTools.fastCodeAt(file, index + 1) == "/".code;
-				// path ends with `./` or `..`
-				else if (index + 1 < length) needsNormalization = StringTools.fastCodeAt(file, index + 1) == "/".code
+				else if (index + 1 < length) /* path ends with `./` or `..` */ needsNormalization = StringTools.fastCodeAt(file, index + 1) == "/".code
 					|| StringTools.fastCodeAt(file, index + 1) == ".".code;
-				// path ends with `.`
-				else needsNormalization = true;
-			} else if (c == "/".code && index > 0) needsNormalization = true; // double slash
+				else needsNormalization = true; /* path ends with `.` */
+			} else if (c == "/".code && index > 0) needsNormalization = true; /* double slash */
 			if (!needsNormalization) {
 				while (index < length && StringTools.fastCodeAt(file, index) != "/".code) index++;
 				index++;
@@ -177,10 +181,8 @@ class Path {
 		return "/" + normalized.join("/");
 	}
 
-	/**
-		Returns absolute path (on Windows ensures proper case with drive letter upper-cased)
-		Use for returning positions from IDE support functions
-	**/
+	/** Returns absolute path (on Windows ensures proper case with drive letter upper-cased)
+		Use for returning positions from IDE support functions */
 	public static function getRealPath(path:String):String {
 		// port: Extc.get_real_path fails for a missing file (falling back to `path`);
 		// HashLink's fullPath returns null instead of throwing.
@@ -188,76 +190,122 @@ class Path {
 		return r == null ? path : r;
 	}
 
-	public static function addTrailingSlash(path:String):String return path.length == 0 ? "./" : switch (path.charAt(path.length - 1)) {
-		case "/" | "\\": path;
-		case _: path + "/";
-	};
+	public static function addTrailingSlash(p:String):String {
+		var l = p.length;
+		return if (l == 0) "./" else switch p.charAt(l - 1) {
+			case "\\" | "/": p;
+			case _: p + "/";
+		}
+	}
 
-	public static function removeTrailingSlash(path:String):String {
-		while (path.length > 0
-			&& (path.charAt(path.length - 1) == "/" || path.charAt(path.length - 1) == "\\")) path = path.substr(0, path.length - 1);
-		return path.length == 0 ? "./" : path;
+	public static function removeTrailingSlash(p:String):String {
+		var l = p.length;
+		return if (l == 0) "./" else switch p.charAt(l - 1) {
+			case "\\" | "/": removeTrailingSlash(p.substr(0, l - 1));
+			case _: p;
+		}
 	}
 
 	public static function flatPath(path:{pack:Array<String>, name:String}):String {
-		// Replace _ with _$ in paths to prevent name collisions.
+		/* Replace _ with _$ in paths to prevent name collisions. */
 		var escape = function(value:String) return value.split("_").join("_$");
 		return path.pack.length == 0 ? escape(path.name) : path.pack.map(escape).join("_") + "_" + escape(path.name);
 	}
 
+	// port: the accumulators are arrays in list order; consing is `[x].concat(acc)`.
 	public static function findDirectories(target:String, recursive:Bool, paths:Array<String>):Array<String> {
-		var result:Array<String> = [];
-		function loop(directory:String):Void try {
-			for (file in FileSystem.readDirectory(directory)) if (file != "." && file != "..") {
-				var full = directory + file;
-				if (FileSystem.isDirectory(full)
-					&& file.charCodeAt(0) >= "a".code
-					&& file.charCodeAt(0) <= "z".code
-					&& !(platformNames.indexOf(file) >= 0 && file != target)) {
-					// port: consed onto the accumulator, as upstream
-					if (recursive) {
-						result.unshift(full);
-						loop(full + "/");
-					} else result.unshift(full);
+		var targetDirs = core.Globals.platforms.map(core.Globals.platformName);
+		function loop(acc:Array<String>, dir:String):Array<String> {
+			return try {
+				var entries = try FileSystem.readDirectory(dir) catch (e:Dynamic) throw new SysError(dir + ": " + Std.string(e));
+				var acc2 = acc;
+				for (file in entries) {
+					acc2 = switch file {
+						case "." | "..":
+							acc2;
+						case _ if (isDirectory(dir + file) && file.charCodeAt(0) >= "a".code && file.charCodeAt(0) <= "z".code):
+							if (targetDirs.indexOf(file) >= 0 && file != target) acc2 else {
+								var full = (dir + file);
+								if (recursive) loop([full].concat(acc2), full + "/") else [full].concat(acc2);
+							}
+						case _:
+							acc2;
+					}
 				}
-			}
-		} catch (_:Dynamic) {};
-		for (directory in paths) loop(directory);
-		return result;
+				acc2;
+			} catch (_:SysError) acc;
+		}
+		var acc:Array<String> = [];
+		for (dir in paths) acc = loop(acc, dir);
+		return acc;
 	}
 
-	public static function makeValidFilename(value:String):String return ~/[^A-Za-z0-9_\-\.,]/g.replace(value, "_");
+	// port: Sys.is_directory raises Sys_error for a missing file (a broken symbolic link).
+	static function isDirectory(path:String):Bool {
+		if (!FileSystem.exists(path)) throw new SysError(path + ": No such file or directory");
+		return FileSystem.isDirectory(path);
+	}
+
+	// port: Str works on bytes: a non-ASCII character becomes one `_` per UTF-8 byte.
+	public static function makeValidFilename(s:String):String {
+		var r = ~/[^A-Za-z0-9_\-\.,]/;
+		var b = new StringBuf();
+		for (i in 0...s.length) {
+			var c = s.charAt(i);
+			if (r.match(c)) b.add(StringTools.lpad("", "_", haxe.io.Bytes.ofString(c).length)) else b.add(c);
+		}
+		return b.toString();
+	}
 
 	public static function moduleNameOfFile(file:String):String {
-		var parts = new EReg("[\\\\/]+", "g").split(getRealPath(file));
-		if (parts.length == 0) throw "Unreachable";
-		var name = parts[parts.length - 1].split(".");
-		// 2 parts: file_ext; module_name
-		// more: file_ext; platform_ext; ...module_name
-		return name.length == 1 ? name[0] : name.length == 2 ? name[0] : name.slice(0, name.length - 2).join(".");
+		// port: Str.split drops the empty fields at both ends
+		var parts = new EReg("[/\\\\]+", "g").split(getRealPath(file)).filter(s -> s != "");
+		return switch parts.length {
+			case 0:
+				core.Globals.die("", "path.ml");
+			case n:
+				var s = parts[n - 1];
+				var l = s.split(".");
+				l.reverse();
+				var s = switch l {
+					case [s]: s;
+					/* file_ext; module_name */
+					case [_, s]: s;
+					/* file_ext; platform_ext; ...module_name */
+					case _ if (l.length > 2):
+						var sl = l.slice(2);
+						sl.reverse();
+						sl.join(".");
+					case _: "";
+				}
+				s;
+		}
 	}
 
-	public static function createFile(binary:Bool, extension:String, acc:Array<String>, parts:Array<String>):FileOutput {
-		if (parts.length == 0) throw "Unreachable";
-		var directory = parts.shift();
-		if (parts.length == 0) {
-			directory = makeValidFilename(directory);
-			var maxLength = 200 - extension.length;
-			if (directory.length > maxLength) directory = directory.substr(0, maxLength);
-			return binary ? File.write(acc.concat([directory]).join("/") + extension,
-				true) : File.write(acc.concat([directory]).join("/") + extension, false);
+	// port: `acc` is in path order (upstream: reversed list); it is not mutated.
+	public static function createFile(bin:Bool, ext:String, acc:Array<String>, parts:Array<String>):FileOutput {
+		return switch parts {
+			case []:
+				core.Globals.die("", "path.ml");
+			case [d]:
+				var d = makeValidFilename(d);
+				var maxlen = 200 - ext.length;
+				var d = if (d.length > maxlen) d.substr(0, maxlen) else d;
+				var ch = File.write(acc.concat([d]).join("/") + ext, bin);
+				ch;
+			case _:
+				var d = parts[0];
+				var dir = acc.concat([d]).join("/");
+				mkdirMutex.acquire();
+				try {
+					if (!FileSystem.exists(removeTrailingSlash(dir))) FileSystem.createDirectory(dir);
+				} catch (error:haxe.Exception) {
+					mkdirMutex.release();
+					throw error;
+				}
+				mkdirMutex.release();
+				createFile(bin, ext, acc.concat([d]), parts.slice(1));
 		}
-		var dir = acc.concat([directory]).join("/");
-		mkdirMutex.acquire();
-		try {
-			if (!FileSystem.exists(removeTrailingSlash(dir))) FileSystem.createDirectory(dir);
-		} catch (error:haxe.Exception) {
-			mkdirMutex.release();
-			throw error;
-		}
-		mkdirMutex.release();
-		acc.push(directory);
-		return createFile(binary, extension, acc, parts);
 	}
 
 	public static function mkdirRecursive(base:String, parts:Array<String>):Void {
@@ -275,10 +323,13 @@ class Path {
 		Raises `Unix.Unix_error` exceptions as-is.
 	**/
 	public static function mkdirFromPathUnixErr(path:String):Void {
+		// port: Str.split_delim "" is [] and EReg.split "" is [""]: both create nothing
 		var parts = new EReg("[\\\\/]+", "g").split(path);
-		if (parts.length > 0) {
-			parts.pop();
-			mkdirRecursive("", parts);
+		switch parts {
+			case []: /* path was "" */
+			case _:
+				var dirList = parts.slice(0, parts.length - 1);
+				mkdirRecursive("", dirList);
 		}
 	}
 
@@ -287,14 +338,24 @@ class Path {
 		Converts all `Unix.Unix_error` exceptions to human-readable `Failure msg`.
 	**/
 	public static function mkdirFromPath(path:String):Void try mkdirFromPathUnixErr(path)
-	catch (error:Dynamic) throw Std.string(error);
+	catch (error:haxe.Exception) throw new Failure(error.message);
 
 	public static function fullDotPath(pack:Array<String>, moduleName:String, typeName:String):{pack:Array<String>, name:String}
 		return typeName == moduleName ? {pack: pack, name: moduleName} : {pack: pack.concat([moduleName]), name: typeName};
 
 	public static function fileExtension(file:String):String {
 		var parts = file.split(".");
-		return parts.length == 0 ? "" : parts[parts.length - 1].toLowerCase();
+		return parts.length == 0 ? "" : lowercaseAscii(parts[parts.length - 1]);
+	}
+
+	// port: ExtString.String.lowercase (ASCII only)
+	public static function lowercaseAscii(s:String):String {
+		var b = new StringBuf();
+		for (i in 0...s.length) {
+			var c = StringTools.fastCodeAt(s, i);
+			b.addChar(c >= "A".code && c <= "Z".code ? c + 32 : c);
+		}
+		return b.toString();
 	}
 
 	public static function parseFilePath(path:String):FilePathData {
@@ -337,19 +398,21 @@ class Path {
 	}
 
 	public static function nameAndExtension(path:FilePathData):String {
-		if (path.fileName == null) throw "File path has no name";
+		if (path.fileName == null) throw new Failure("File path has no name");
 		return path.extension == null ? path.fileName : path.fileName + "." + path.extension;
 	}
 }
 
-// Stores a unique key for a file path.
+/**
+	Stores a unique key for a file path.
+**/
 // port: the key type `UniqueKey.t` is String.
 class UniqueKey {
 	/**
 		Returns absolute path guaranteed to be the same for different letter case.
 		Use where equality comparison is required, lowercases the path on Windows
 	**/
-	public static function create(path:String):String return Path.isWindows ? Path.getFullPath(path).toLowerCase() : Path.getFullPath(path);
+	public static function create(path:String):String return Path.isWindows ? Path.lowercaseAscii(Path.getFullPath(path)) : Path.getFullPath(path);
 
 	public static function createLazy(path:String):LazyUniqueKey return {path: path, key: null};
 
@@ -392,6 +455,7 @@ class UniqueKey {
 	public inline function clone():LazyUniqueKey return new LazyUniqueKey(path, key);
 }
 
+// port: module FilePath; parse and name_and_extension are implemented in Path.
 class FilePath {
 	public static function create(directory:Null<String>, fileName:Null<String>, extension:Null<String>,
 			backslash:Bool):FilePathData return {
@@ -405,3 +469,6 @@ class FilePath {
 
 	public static function nameAndExtension(path:FilePathData):String return Path.nameAndExtension(path);
 }
+
+// port: OCaml Sys_error
+class SysError extends haxe.Exception {}

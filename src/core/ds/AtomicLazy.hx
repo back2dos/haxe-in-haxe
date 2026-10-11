@@ -9,6 +9,7 @@ private enum AtomicLazyState<T> {
 }
 
 class AtomicLazy<T> {
+	// port: `state : 'a atomic_state Atomic.t`; the mutex stands in for Atomic.compare_and_set
 	var state:AtomicLazyState<T>;
 	var mutex:AtomicLazyMutex = new AtomicLazyMutex();
 	// port: published with release order after `value` (upstream: Atomic.t); read without the mutex
@@ -54,6 +55,7 @@ class AtomicLazy<T> {
 					return value;
 				case Computing:
 					mutex.release();
+					// port: in place of Thread.yield and Backoff.once
 					Sys.sleep(0.001);
 				case Unset(callback):
 					state = Computing;

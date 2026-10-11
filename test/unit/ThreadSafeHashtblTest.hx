@@ -13,6 +13,6 @@ class ThreadSafeHashtblTest {
 		if (table.findOrAdd("two", function() return ++invoked) != 1 || invoked != 1) throw "Missing key must be created once";
 		if (table.fold(function(_, value, total) return total + value, 0) != 3) throw "Hash table fold failed";
 		table.remove("one");
-		if (table.exists("one")) throw "Hash table removal failed";
+		if (table.mem("one")) throw "Hash table removal failed";
 	}
 }
