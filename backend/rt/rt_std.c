@@ -356,32 +356,7 @@ void *Array_map(void *a, void *f) {
 
 // ---- Math
 
-double Math_NaN(void) { return NAN; }
-double Math_POSITIVE_INFINITY(void) { return INFINITY; }
-double Math_NEGATIVE_INFINITY(void) { return -INFINITY; }
-double Math_PI(void) { return 3.141592653589793; }
-double Math_abs(double x) { return fabs(x); }
-double Math_acos(double x) { return acos(x); }
-double Math_asin(double x) { return asin(x); }
-double Math_atan(double x) { return atan(x); }
-double Math_atan2(double y, double x) { return atan2(y, x); }
-double Math_cos(double x) { return cos(x); }
-double Math_sin(double x) { return sin(x); }
-double Math_tan(double x) { return tan(x); }
-double Math_exp(double x) { return exp(x); }
-double Math_log(double x) { return log(x); }
-double Math_sqrt(double x) { return sqrt(x); }
-double Math_pow(double x, double y) { return pow(x, y); }
-int32_t Math_floor(double x) { return hx_f2i(floor(x)); }
-int32_t Math_ceil(double x) { return hx_f2i(ceil(x)); }
-int32_t Math_round(double x) { return hx_f2i(floor(x + 0.5)); }
-double Math_ffloor(double x) { return floor(x); }
-double Math_fceil(double x) { return ceil(x); }
-double Math_fround(double x) { return floor(x + 0.5); }
-double Math_max(double a, double b) { return a != a || b != b ? NAN : a > b ? a : b; }
-double Math_min(double a, double b) { return a != a || b != b ? NAN : a < b ? a : b; }
-int32_t Math_isNaN(double x) { return x != x; }
-int32_t Math_isFinite(double x) { return isfinite(x); }
+// (NaN ... isFinite: static inline in rt.h)
 double Math_random(void) { return (double)rand() / ((double)RAND_MAX + 1); }
 
 // ---- Date: T_NATIVE object, slot 0 = milliseconds since the epoch (double)

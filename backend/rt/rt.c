@@ -470,10 +470,42 @@ static void reset_tlab(rt_mutator *m, void *arg) {
 
 // a collection, with every other thread stopped (unless another thread
 // collected meanwhile: the caller then retries its allocation)
+static int huge_pages; // RT_HUGE
+
+static char *nursery_alloc(size_t bytes) {
+#if defined(MADV_HUGEPAGE) && !defined(__EMSCRIPTEN__)
+	char *p = (char *)aligned_alloc(2u << 20, (bytes + (2u << 20) - 1) & ~(size_t)((2u << 20) - 1));
+	if (huge_pages) madvise(p, bytes, MADV_HUGEPAGE);
+	return p;
+#else
+	return (char *)malloc(bytes);
+#endif
+}
+
+static int minor_fixed; // RT_MINOR_KB sets the nursery size
+#define MINOR_MAX ((size_t)32 << 20)
+
+// After a minor collection where much of the nursery survived (objects that
+// live a little longer than a nursery cycle, e.g. a tree being built), a
+// larger nursery copies them fewer times: double it. It is empty now.
+static void grow_nursery(void) {
+	free(rt_young_start);
+	minor_size *= 2;
+	rt_young_start = nursery_alloc(minor_size);
+	rt_young_end = rt_young_start + minor_size;
+	if (!getenv("RT_TLAB_KB")) tlab_size = minor_size / 16;
+	if (stats) fprintf(stderr, "gc: nursery grows to %zu KB\n", minor_size >> 10);
+}
+
 static void collect(int full, size_t need) {
 	if (!rt_world_stop()) return;
 	if (full) major(need);
-	else minor();
+	else {
+		char *before = old_ptr;
+		unsigned long m0 = majors;
+		minor();
+		if (!minor_fixed && majors == m0 && minor_size < MINOR_MAX && (size_t)(old_ptr - before) * 8 > minor_size) grow_nursery();
+	}
 	young_next = rt_young_start;
 	rt_mutators_foreach(reset_tlab, NULL);
 	rt_world_resume();
@@ -703,6 +735,7 @@ void rt_init(int ng, int argc, char **argv) {
 #endif
 	const char *m = getenv("RT_MINOR_KB");
 	minor_size = (m ? (size_t)atoi(m) : 4096) << 10;
+	minor_fixed = m != NULL;
 	stats = getenv("RT_STATS") != NULL;
 #ifndef __EMSCRIPTEN__
 	const char *ah = getenv("RT_AHEAD_MB");
@@ -717,12 +750,9 @@ void rt_init(int ng, int argc, char **argv) {
 	// transparent huge pages for the heap: the old space grows by hundreds of
 	// MB and is copied into fresh pages, so 4 KB page faults add up
 	const char *hp = getenv("RT_HUGE");
-	int huge = hp && atoi(hp); // opt-in: it costs more kernel time than it saves here
-	rt_young_start = (char *)aligned_alloc(2u << 20, (minor_size + (2u << 20) - 1) & ~(size_t)((2u << 20) - 1));
-	if (huge) madvise(rt_young_start, minor_size, MADV_HUGEPAGE);
-#else
-	rt_young_start = (char *)malloc(minor_size);
+	huge_pages = hp && atoi(hp); // opt-in: it costs more kernel time than it saves here
 #endif
+	rt_young_start = nursery_alloc(minor_size);
 	rt_young_end = rt_young_start + minor_size;
 	young_next = rt_young_start; // rt_young_ptr = rt_young_limit = NULL: the first allocation takes a TLAB
 	const char *tk = getenv("RT_TLAB_KB");
@@ -740,7 +770,7 @@ void rt_init(int ng, int argc, char **argv) {
 			exit(2);
 		}
 #ifdef MADV_HUGEPAGE
-		if (huge) madvise(regions[i], REGION, MADV_HUGEPAGE);
+		if (huge_pages) madvise(regions[i], REGION, MADV_HUGEPAGE);
 #endif
 	}
 	old_start = old_ptr = regions[0];
@@ -810,7 +840,7 @@ __attribute__((noreturn)) void hx_throw_str(const char *msg) {
 	rt_throw(hx_str_of_ascii(msg));
 }
 
-int32_t hx_f2i(double f) {
+int32_t hx_f2i_slow(double f) {
 	if (!(f == f)) return 0;
 	if (f >= 2147483648.0 || f <= -2147483649.0) return (int32_t)(uint32_t)(int64_t)fmod(f, 4294967296.0);
 	return (int32_t)f;

@@ -19,6 +19,7 @@
 #pragma once
 #include <stdint.h>
 #include <string.h>
+#include <math.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -302,12 +303,57 @@ typedef int rt_lock_t;
 #define ISHR(a, b) ((int32_t)(a) >> ((b) & 31))
 #define IUSHR(a, b) ((int32_t)((uint32_t)(a) >> ((b) & 31)))
 static inline int32_t IMOD(int32_t a, int32_t b) { return b == 0 ? 0 : (b == -1 ? 0 : a % b); }
-int32_t hx_f2i(double f);
+int32_t hx_f2i_slow(double f);
+// Std.int / Int casts: truncation in range; NaN gives 0, wider values wrap
+static inline int32_t hx_f2i(double f) {
+	if (__builtin_expect(f > -2147483649.0 && f < 2147483648.0, 1)) return (int32_t)f;
+	return hx_f2i_slow(f);
+}
+
+// ---- Math: inline (the C compiler maps sqrt, fabs, floor... to instructions);
+// EmitC.RT_INLINE lists them so no prototype is emitted
+static inline double Math_NaN(void) { return NAN; }
+static inline double Math_POSITIVE_INFINITY(void) { return INFINITY; }
+static inline double Math_NEGATIVE_INFINITY(void) { return -INFINITY; }
+static inline double Math_PI(void) { return 3.141592653589793; }
+static inline double Math_abs(double x) { return fabs(x); }
+static inline double Math_acos(double x) { return acos(x); }
+static inline double Math_asin(double x) { return asin(x); }
+static inline double Math_atan(double x) { return atan(x); }
+static inline double Math_atan2(double y, double x) { return atan2(y, x); }
+static inline double Math_cos(double x) { return cos(x); }
+static inline double Math_sin(double x) { return sin(x); }
+static inline double Math_tan(double x) { return tan(x); }
+static inline double Math_exp(double x) { return exp(x); }
+static inline double Math_log(double x) { return log(x); }
+static inline double Math_sqrt(double x) { return sqrt(x); }
+static inline double Math_pow(double x, double y) { return pow(x, y); }
+static inline int32_t Math_floor(double x) { return hx_f2i(floor(x)); }
+static inline int32_t Math_ceil(double x) { return hx_f2i(ceil(x)); }
+static inline int32_t Math_round(double x) { return hx_f2i(floor(x + 0.5)); }
+static inline double Math_ffloor(double x) { return floor(x); }
+static inline double Math_fceil(double x) { return ceil(x); }
+static inline double Math_fround(double x) { return floor(x + 0.5); }
+static inline double Math_max(double a, double b) { return a != a || b != b ? NAN : a > b ? a : b; }
+static inline double Math_min(double a, double b) { return a != a || b != b ? NAN : a < b ? a : b; }
+static inline int32_t Math_isNaN(double x) { return x != x; }
+static inline int32_t Math_isFinite(double x) { return isfinite(x); }
 
 // ---- strings (UTF-16)
 #define STR_LEN(s) (((int32_t *)(s))[0])
 #define STR_CHARS(s) ((uint16_t *)((char *)(s) + 8))
 void *hx_str_alloc(int32_t len);
+// StringBuf (rt_str.c): slot 0 the length, slot 1 the UTF-16 data. addChar's
+// common case inline (EmitC.RT_INLINE: no prototype)
+void StringBuf_addChar_slow(void *b, int32_t c);
+static inline void StringBuf_addChar(void *b, int32_t c) {
+	int32_t len = FI(b, 0);
+	void *d = FP(b, 1);
+	if (__builtin_expect((uint32_t)c < 0x10000 && (uint32_t)len < NSLOTS(d) * 4, 1)) {
+		((uint16_t *)d)[len] = (uint16_t)c;
+		FI(b, 0) = len + 1;
+	} else StringBuf_addChar_slow(b, c);
+}
 void *hx_str_of_ascii(const char *s);
 void *hx_str_of_utf8(const char *s, int32_t n);
 char *hx_str_to_utf8(void *s); // malloc'ed

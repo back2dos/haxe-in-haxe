@@ -172,6 +172,7 @@ class FuncInfo {
 	public var lambda:Null<LambdaInfo>; // closure body: args[0] is the closure
 	public var dispatchSel:Int = -1;
 	public var hasTry:Bool = false;
+	public var noGc:Bool = false; // never reaches a GC point (EmitC.findNoGc): calls to it are not GC points
 	// the Haxe module the function comes from (dot path): EmitC groups the
 	// functions of a module into one C file
 	public var module:String;
@@ -196,7 +197,9 @@ enum Ex {
 	EBox(t:Ty, a:Ex); // scalar -> Dynamic box (cached for small ints)
 	EUnbox(t:Ty, a:Ex); // Dynamic or Null<T> -> scalar (null gives 0)
 	EField(c:ClassInfo, idx:Int, obj:Ex);
-	EAnonGet(name:String, t:Ty, obj:Ex); // structural field read, converted to t
+	// structural field read, converted to t; hint: the layout of an object
+	// literal of the static type (read directly when the object has it)
+	EAnonGet(name:String, t:Ty, obj:Ex, hint:Null<ShapeInfo>);
 	ECast(t:Ty, e:Ex); // unchecked
 	EInstOf(c:ClassInfo, e:Ex);
 	EEnumTag(e:Ex, en:Null<EnumInfo>); // en: the value's enum when known
@@ -308,18 +311,17 @@ class Program {
 		return s;
 	}
 
+	var shapeKeys = new Map<String, ShapeInfo>();
+
 	public function shape(fields:Array<{name:String, ty:Ty}>):ShapeInfo {
 		var fs = fields.copy();
 		fs.sort((a, b) -> a.name < b.name ? -1 : a.name > b.name ? 1 : 0);
-		for (s in shapes)
-			if (s.fields.length == fs.length) {
-				var same = true;
-				for (i in 0...fs.length)
-					if (s.fields[i].name != fs[i].name || Ir.repr(s.fields[i].ty) != Ir.repr(fs[i].ty)) same = false;
-				if (same) return s;
-			}
-		var s = new ShapeInfo(shapes.length, fs);
+		var key = [for (f in fs) f.name + ":" + Ir.repr(f.ty)].join(",");
+		var s = shapeKeys.get(key);
+		if (s != null) return s;
+		s = new ShapeInfo(shapes.length, fs);
 		shapes.push(s);
+		shapeKeys.set(key, s);
 		return s;
 	}
 }

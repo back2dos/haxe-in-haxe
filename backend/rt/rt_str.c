@@ -439,7 +439,7 @@ void StringBuf_add(void *b, void *x) {
 	sb_add_str(b, s);
 }
 
-void StringBuf_addChar(void *b, int32_t c) {
+void StringBuf_addChar_slow(void *b, int32_t c) {
 	RT_ROOT(b);
 	sb_reserve(b_root, 2);
 	RT_RELOAD(b);

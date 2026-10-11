@@ -238,12 +238,43 @@ class FnLower {
 		"String_charCodeAt_i" => true, "hx_str_hash" => true, "hxc_Native_strHash" => true, "hxc_Native_objHash" => true, "hxc_Native_refEq" => true,
 		"hx_unbox_int" => true, "hx_unbox_float" => true, "hx_unbox_bool" => true
 	];
+	// the Math natives: pure, static inline in rt.h
+	public static var MATH = [
+		for (n in ["NaN", "POSITIVE_INFINITY", "NEGATIVE_INFINITY", "PI", "abs", "acos", "asin", "atan", "atan2", "cos", "sin", "tan", "exp", "log", "sqrt", "pow",
+			"floor", "ceil", "round", "ffloor", "fceil", "fround", "max", "min", "isNaN", "isFinite"])
+			"Math_" + n => true
+	];
+	// static inline in rt.h: no prototype is emitted for them
+	public static var RT_INLINE = {
+		var m = MATH.copy();
+		m.set("StringBuf_addChar", true);
+		m;
+	};
+	// natives that never allocate (not GC points), with side effects
+	public static var NOGC = ["Math_random" => true];
+
+	public static function isPure(n:String):Bool
+		return PURE.exists(n) || MATH.exists(n);
+
+	// the layout an object literal of the structural type t gets, when the
+	// field `name` has the representation rt there
+	function anonHint(t:T, name:String, rt:Ty):Null<ShapeInfo> {
+		switch TFunctions.follow(t) {
+			case TAnon(an) if (an.aStatus.match(Closed | Const)):
+				var fs = [for (k => cf in an.aFields) {name: k, ty: ty(cf.cfType)}];
+				var sh = l.getProgram().shape(fs);
+				var i = sh.slot(name);
+				return i > 0 && Ir.repr(sh.fields[i - 1].ty) == Ir.repr(rt) ? sh : null;
+			case _:
+				return null;
+		}
+	}
 
 	public static function isImpure(e:Ex):Bool
 		return switch e {
 			case ECall(_) | ECallDispatch(_) | ECallClos(_) | ECallAnon(_) | ENewObj(_) | ENewEnum(_) | ENewArr(_) | ENewClos(_) | ENewBox(_) | ENewAnon(_) | EBox(_):
 				true;
-			case ECallHost(n, _, _): !PURE.exists(n);
+			case ECallHost(n, _, _): !isPure(n);
 			case EArrGet(TRef(RAny), _, _): true; // reading an Int/Float array as Dynamic boxes
 			case EAnonGet(_): true; // the slow path may box
 			case _: false;
@@ -784,7 +815,7 @@ class FnLower {
 						var x = temp(t, ECallHost(l.native(Lower.nativeName(c) + "_get_" + cf.cfName), [value(obj)], t));
 						coerce(x, t, tyOf(e));
 					case Var(_) if (c.hasClassFlag(CInterface)):
-						EAnonGet(cf.cfName, tyOf(e), value(obj));
+						EAnonGet(cf.cfName, tyOf(e), value(obj), anonHint(obj.etype, cf.cfName, tyOf(e)));
 					case Var(_):
 						var ci = l.classInfo(c);
 						var idx = ci.fieldIndex(cf.cfName);
@@ -817,7 +848,7 @@ class FnLower {
 						coerce(x, TRef(RClos(li.sig)), tyOf(e));
 				}
 			case FAnon(cf):
-				EAnonGet(cf.cfName, tyOf(e), value(obj));
+				EAnonGet(cf.cfName, tyOf(e), value(obj), anonHint(obj.etype, cf.cfName, tyOf(e)));
 			case FDynamic(name):
 				var o = coerce(value(obj), tyOf(obj), TRef(RAny));
 				var r = temp(TRef(RAny), ECallHost(l.native("hx_dyn_get"), [o, EStr(name)], TRef(RAny)));
@@ -825,7 +856,7 @@ class FnLower {
 			case FClosure(cl, cf):
 				if (cl == null) {
 					// a closure of a structural field: just the field's value
-					EAnonGet(cf.cfName, tyOf(e), value(obj));
+					EAnonGet(cf.cfName, tyOf(e), value(obj), anonHint(obj.etype, cf.cfName, tyOf(e)));
 				} else if (cf.cfKind.match(Method(MethDynamic)) && isDynMethod(cl.cls, cf)) {
 					coerce(dynMethod(obj, cl.cls, cf, e), dynSlotTy(cl.cls, cf), tyOf(e));
 				} else methodClosure(obj, cl.cls, cf, e);
@@ -1126,7 +1157,7 @@ class FnLower {
 			case TField(obj, FAnon(cf) | FInstance(_, _, cf)):
 				var t = tyOf(lhs);
 				var o = ELocal(asLocal(value(obj), tyOf(obj)));
-				var x = pure(compute(() -> EAnonGet(cf.cfName, t, o), t, t), t);
+				var x = pure(compute(() -> EAnonGet(cf.cfName, t, o, null), t, t), t);
 				out.push(SAnonSet(cf.cfName, t, o, x));
 				return coerce(x, t, et);
 			case TField(_, FStatic(c, cf)) if (!c.hasClassFlag(CExtern)):

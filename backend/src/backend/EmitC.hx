@@ -218,7 +218,7 @@ class EmitC {
 		return switch e {
 			case EInt(_) | EEnumTag(_) | EArrLen(_) | ENot(_) | EInstOf(_, _): "int32_t";
 			case EF64(_): "double";
-			case ENull(t) | EGlobal(_, t) | EUnbox(t, _) | EAnonGet(_, t, _) | ECast(t, _) | EArrGet(t, _, _) | EBoxGet(t, _): cty(t);
+			case ENull(t) | EGlobal(_, t) | EUnbox(t, _) | EAnonGet(_, t, _, _) | ECast(t, _) | EArrGet(t, _, _) | EBoxGet(t, _): cty(t);
 			case ELocal(l): cty(l.ty);
 			case EField(c, idx, _): cty(c.fields[idx].ty);
 			case EEnumParam(c, idx, _): cty(c.params[idx]);
@@ -390,7 +390,7 @@ class EmitC {
 					names.set(s.name, true);
 		function ex(e:Ex) {
 			switch e {
-				case EAnonGet(n, _, o):
+				case EAnonGet(n, _, o, _):
 					names.set(n, true);
 					ex(o);
 				case ECallAnon(n, _, o, args):
@@ -434,7 +434,7 @@ class EmitC {
 			case EBin(_, a, b):
 				f(a);
 				f(b);
-			case ENot(a) | EConv(_, a) | EBox(_, a) | EUnbox(_, a) | EField(_, _, a) | EAnonGet(_, _, a) | ECast(_, a) | EInstOf(_, a) | EEnumTag(a, _) | EEnumParam(_, _, a) | EArrLen(a) | EBoxGet(_, a) | ECapture(_, _, a) | ENewBox(_, a):
+			case ENot(a) | EConv(_, a) | EBox(_, a) | EUnbox(_, a) | EField(_, _, a) | EAnonGet(_, _, a, _) | ECast(_, a) | EInstOf(_, a) | EEnumTag(a, _) | EEnumParam(_, _, a) | EArrLen(a) | EBoxGet(_, a) | ECapture(_, _, a) | ENewBox(_, a):
 				f(a);
 			case EArrGet(_, a, i):
 				f(a);
@@ -497,9 +497,49 @@ class EmitC {
 	// names, types, field ids; then every function body (with what it refers to)
 	var bodies = new Map<FuncInfo, {text:String, refs:Refs}>();
 
+	// Functions that never reach a GC point: no allocation, no impure native,
+	// no throw, and direct calls only to such functions (the largest such set:
+	// candidates are dropped until none calls a dropped one, so recursion
+	// stays in). A call to one keeps the caller's references in C locals, and
+	// one needs no frame. They also never stop at a safepoint (rt_thread.c),
+	// so another thread's collection cannot move objects under them.
+	function findNoGc() {
+		var cand = new Map<FuncInfo, Bool>();
+		for (f in p.funcs)
+			if (!f.hasTry) cand.set(f, true);
+		function exOk(e:Ex):Bool {
+			var ok = switch e {
+				case ECall(g, _): cand.exists(g);
+				case _: Roots.gcPoint(e) == 0;
+			}
+			if (ok) EmitC.iterEx(x -> if (ok && !exOk(x)) ok = false, e);
+			return ok;
+		}
+		function stOk(s:Stmt):Bool {
+			var ok = switch s {
+				case SArrSet(_) | SArrPush(_) | SAnonSet(_) | SThrow(_) | STry(_): false;
+				case _: true;
+			}
+			if (ok) EmitC.iterStmt(x -> if (ok && !stOk(x)) ok = false, x -> if (ok && !exOk(x)) ok = false, s);
+			return ok;
+		}
+		var changed = true;
+		while (changed) {
+			changed = false;
+			for (f in p.funcs)
+				if (cand.exists(f) && !Lambda.foreach(f.body, stOk)) {
+					cand.remove(f);
+					changed = true;
+				}
+		}
+		for (f in p.funcs)
+			f.noGc = cand.exists(f);
+	}
+
 	function prepare() {
 		for (f in p.funcs)
 			byCName.set(cname(f), f);
+		findNoGc();
 		assignTypes();
 		collectNames();
 		assignNames();
@@ -1118,12 +1158,17 @@ typedef struct { uint64_t h; int32_t len, hash; uint16_t c[1]; } hx_slit;
 			case EBox(t, x): box(expr(x), t);
 			case EUnbox(t, x): unboxFrom(expr(x), t);
 			case EField(c, idx, obj): load(expr(obj), Std.string(c.locs[idx]), c.fields[idx].ty);
-			case EAnonGet(name, t, obj):
+			case EAnonGet(name, t, obj, hint):
 				var ic = nextCache++;
 				var k = kindChar(t);
 				var match = k == "b" || k == "i" ? "(c_->kind == 'i' || c_->kind == 'b')" : 'c_->kind == \'$k\'';
 				var f = fidRef(name);
-				'({ void *o_ = ${expr(obj)}; rt_icache *c_ = rt_ic(o_, $f, &ic_[$ic]); c_->slot > 0 && $match ? ${load("o_", "c_->slot - 1", t)} : ${unboxFrom('hx_anon_get_slow(o_, $f)', t)}; })';
+				var cached = '({ rt_icache *c_ = rt_ic(o_, $f, &ic_[$ic]); c_->slot > 0 && $match ? ${load("o_", "c_->slot - 1", t)} : ${unboxFrom('hx_anon_get_slow(o_, $f)', t)}; })';
+				if (hint != null && hint.tindex >= 0) {
+					// the literal layout of the static type: one type check, a constant slot
+					var i = hint.slot(name) - 1;
+					'({ void *o_ = ${expr(obj)}; __builtin_expect(TINDEX(o_) == ${typeRef(hint.tindex)}, 1) ? ${load("o_", Std.string(hint.locs[i]), t)} : $cached; })';
+				} else '({ void *o_ = ${expr(obj)}; $cached; })';
 			case ECast(_, x): expr(x);
 			case EInstOf(c, x): 'hx_inst(${expr(x)}, ${typeRef(c.tindex)}, ${typeRef(c.tindex + c.lastDescendant - c.id)})';
 			case EEnumTag(x, en):
@@ -1181,7 +1226,8 @@ typedef struct { uint64_t h; int32_t len, hash; uint16_t c[1]; } hx_slit;
 				};
 				'$fn(${[for (i in 0...args.length) i == 1 ? fidRef(n) : expr(args[i])].join(", ")})';
 			case ECallHost(name, args, ret):
-				if (!StringTools.startsWith(name, "hx_") && name != "String_length" && name != "String_charCodeAt_i" && !hostProtos.exists(name)) {
+				if (!StringTools.startsWith(name, "hx_") && name != "String_length" && name != "String_charCodeAt_i" && !FnLower.RT_INLINE.exists(name)
+					&& !hostProtos.exists(name)) {
 					hostProtos.set(name, '${cty(ret)} $name(${args.length == 0 ? "void" : [for (a in args) ctyOf(a)].join(", ")})');
 					hostOrder.push(name);
 				}
@@ -1413,10 +1459,11 @@ class Roots {
 	}
 
 	// GC point of an expression; 2: operands are read after an allocation
-	static function gcPoint(e:Ex):Int
+	public static function gcPoint(e:Ex):Int
 		return switch e {
+			case ECall(f, _) if (f.noGc): 0;
 			case ECall(_) | ECallDispatch(_) | ECallClos(_) | ECallAnon(_) | EBox(_) | EAnonGet(_) | EArrGet(TRef(RAny), _, _): 1;
-			case ECallHost(n, _, _): FnLower.PURE.exists(n) ? 0 : 1;
+			case ECallHost(n, _, _): FnLower.isPure(n) || FnLower.NOGC.exists(n) ? 0 : 1;
 			case ENewObj(_) | ENewEnum(_) | ENewArr(_) | ENewClos(_) | ENewBox(_) | ENewAnon(_): 2;
 			case _: 0;
 		}

@@ -33,10 +33,42 @@ static int32_t find_static_name(const char *name) {
 	return -1;
 }
 
+// the added names by hash (open addressing; entries are index + 1), under extra_lock
+static int32_t *extra_hash;
+static uint32_t extra_cap; // a power of two, at least twice nextra
+
+static uint32_t name_hash(const char *s) {
+	uint32_t h = 2166136261u; // FNV-1a
+	for (; *s; s++)
+		h = (h ^ (uint8_t)*s) * 16777619u;
+	return h;
+}
+
 static int32_t find_extra(const char *name) {
-	for (int i = 0; i < nextra; i++)
-		if (strcmp(extra_name(i), name) == 0) return rt_nfield_names + i;
-	return -1;
+	if (!extra_cap) return -1;
+	for (uint32_t i = name_hash(name) & (extra_cap - 1);; i = (i + 1) & (extra_cap - 1)) {
+		int32_t e = extra_hash[i];
+		if (!e) return -1;
+		if (strcmp(extra_name(e - 1), name) == 0) return rt_nfield_names + e - 1;
+	}
+}
+
+static void hash_extra(int32_t i) {
+	uint32_t j = name_hash(extra_name(i)) & (extra_cap - 1);
+	while (extra_hash[j])
+		j = (j + 1) & (extra_cap - 1);
+	extra_hash[j] = i + 1;
+}
+
+// after appending name nextra - 1
+static void add_extra_hash(void) {
+	if ((uint32_t)nextra * 2 > extra_cap) {
+		free(extra_hash);
+		extra_cap = extra_cap ? extra_cap * 2 : 1024;
+		extra_hash = (int32_t *)calloc(extra_cap, sizeof(int32_t));
+		for (int32_t i = 0; i < nextra; i++)
+			hash_extra(i);
+	} else hash_extra(nextra - 1);
 }
 
 int32_t hx_fid_c(const char *name) {
@@ -58,6 +90,7 @@ static int32_t intern(const char *name) {
 		if (!extra_chunks[c]) extra_chunks[c] = (char **)malloc(EXTRA_CHUNK * sizeof(char *));
 		extra_chunks[c][nextra % EXTRA_CHUNK] = strdup(name);
 		f = rt_nfield_names + nextra++;
+		add_extra_hash();
 	}
 	rt_unlock(&extra_lock);
 	return f;
@@ -76,8 +109,36 @@ static const char *fid_name(int32_t f) {
 	return f < rt_nfield_names ? rt_field_names[f] : extra_name(f - rt_nfield_names);
 }
 
+// a field name as a String, made once: an immortal copy outside the heap,
+// laid out like the string literals (the collector leaves both alone)
+static void **fid_strs;
+static int32_t fid_strs_cap;
+
 static void *fid_str(int32_t f) {
-	return hx_str_of_utf8(fid_name(f), (int32_t)strlen(fid_name(f)));
+	rt_lock(&extra_lock);
+	void *r = f < fid_strs_cap ? fid_strs[f] : NULL;
+	rt_unlock(&extra_lock);
+	if (r) return r;
+	void *s = hx_str_of_utf8(fid_name(f), (int32_t)strlen(fid_name(f)));
+	size_t bytes = 8 + 8 * (size_t)NSLOTS(s);
+	char *copy = (char *)malloc(bytes);
+	memcpy(copy, (char *)s - 8, bytes);
+	r = copy + 8;
+	rt_lock(&extra_lock);
+	if (f >= fid_strs_cap) {
+		int32_t ncap = fid_strs_cap ? fid_strs_cap : 1024;
+		while (ncap <= f)
+			ncap *= 2;
+		fid_strs = (void **)realloc(fid_strs, ncap * sizeof(void *));
+		memset(fid_strs + fid_strs_cap, 0, (ncap - fid_strs_cap) * sizeof(void *));
+		fid_strs_cap = ncap;
+	}
+	if (fid_strs[f]) {
+		free(copy);
+		r = fid_strs[f];
+	} else fid_strs[f] = r;
+	rt_unlock(&extra_lock);
+	return r;
 }
 
 // ---- lookups

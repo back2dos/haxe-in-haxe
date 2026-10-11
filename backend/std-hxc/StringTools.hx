@@ -539,7 +539,7 @@ class StringTools {
 	@:noUsing public static inline function isEof(c:Int):Bool {
 		// hxc: fastCodeAt is `untyped s.cca(index)`, 0 past the end as on cpp/hl
 		// (the only change from haxe/std/StringTools.hx, whose fallback is `false`)
-		#if (flash || cpp || hl || hxc)
+		#if (flash || cpp || hl || target.name == "hxc")
 		return c == 0;
 		#elseif js
 		return c != c; // fast NaN
