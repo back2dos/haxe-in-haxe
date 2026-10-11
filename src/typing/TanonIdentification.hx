@@ -43,7 +43,9 @@ class AnonIdMode {
 }
 
 class TanonIdentification<A> {
-	var pfms:Hashtbl<core.Globals.GlobalTypePath, PathFieldMapping<A>> = new Hashtbl();
+	// port: OCaml Hashtbl order: genjvm iterates this table.
+	var pfms:core.ds.OcamlHashtbl<core.Globals.GlobalTypePath, PathFieldMapping<A>> = new core.ds.OcamlHashtbl(core.ds.OcamlHash.hashPath,
+		context.Common.samePath);
 	var pfmMutex = new sys.thread.Mutex();
 	var pfmByArity:Array<Array<PathFieldMapping<A>>> = [];
 	var addPfmMutex = new sys.thread.Mutex();
@@ -81,7 +83,7 @@ class TanonIdentification<A> {
 		case _: throw "assert";
 	};
 
-	public function getPfms():Hashtbl<core.Globals.GlobalTypePath, PathFieldMapping<A>> return pfms;
+	public function getPfms():core.ds.OcamlHashtbl<core.Globals.GlobalTypePath, PathFieldMapping<A>> return pfms;
 
 	public function addPfm(path:core.Globals.GlobalTypePath, pfm:PathFieldMapping<A>):Void {
 		addPfmMutex.acquire();
