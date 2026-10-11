@@ -9,7 +9,7 @@ import context.Common;
 import context.Typecore;
 import context.Typecore.Typer;
 import context.TyperPass;
-import typing.ModuleTyping;
+import typing.TypeloadModule;
 import typing.Typeload;
 import typing.TypeloadFields;
 import core.Ast;
@@ -124,7 +124,7 @@ class DisplayTexpr {
 		core.ds.PMap.iter(function(_, ef:TEnumField) {
 			if (DisplayPosition.displayPosition.enclosedIn(ef.efPos)) {
 				var sef = findEnumFieldByPosition(se, ef.efNamePos);
-				ModuleTyping.loadEnumField(ctx, en, TEnum(en, extractParamTypes(en.eParams)), {value: false}, 0, sef);
+				TypeloadModule.loadEnumField(ctx, en, TEnum(en, extractParamTypes(en.eParams)), {value: false}, 0, sef);
 			}
 		}, en.eConstrs);
 	}
@@ -151,7 +151,7 @@ class DisplayTexpr {
 			for (cf in c.clOrderedStatics) {
 				if (DisplayPosition.displayPosition.enclosedIn(cf.cfPos)) {
 					var cff = findModuleStaticByPosition(decls, cf.cfNamePos);
-					actuallyCheckDisplayField(ctx, c, ModuleTyping.fieldOfStaticDefinition(cff, cf.cfPos), cf.cfPos);
+					actuallyCheckDisplayField(ctx, c, TypeloadModule.fieldOfStaticDefinition(cff, cf.cfPos), cf.cfPos);
 				}
 				DisplayEmitter.checkDisplayMetadata(ctx, cf.cfMeta);
 			}
@@ -163,8 +163,8 @@ class DisplayTexpr {
 			case EImport(_) | EUsing(_): true;
 			case _: false;
 		});
-		var imports = ModuleTyping.handleImportHx(ctx.com, ctx.g, m, imports, Globals.nullPos);
-		var ctx = ModuleTyping.typeTypesIntoModule(ctx.com, ctx.g, m, imports, Globals.nullPos);
+		var imports = TypeloadModule.handleImportHx(ctx.com, ctx.g, m, imports, Globals.nullPos);
+		var ctx = TypeloadModule.typeTypesIntoModule(ctx.com, ctx.g, m, imports, Globals.nullPos);
 		for (md in m.mTypes) {
 			var infos = tInfos(md);
 			if (DisplayPosition.displayPosition.enclosedIn(infos.mtNamePos)) DisplayEmitter.displayModuleType(ctx, md, infos.mtNamePos);
@@ -190,7 +190,7 @@ class DisplayTexpr {
 			var p = DisplayPosition.displayPosition.get();
 			var cfile = cc.findFile(ctx.com.partScope.fileKeys.get(p.pfile));
 			var path:GlobalTypePath = {pack: cfile.cPackage, name: CompilationCache.getModuleNameOfCfile(p.pfile, cfile)};
-			typing.SourceParser.PdiHandler.handlePdi(ctx.com, cfile.cPdi);
+			typing.TypeloadParse.PdiHandler.handlePdi(ctx.com, cfile.cPdi);
 			// We have to go through type_module_hook because one of the module's dependencies could be
 			// invalid (issue #8991).
 			var m = try ctx.com.moduleLut.find(path) catch (_:core.ds.NotFound) {

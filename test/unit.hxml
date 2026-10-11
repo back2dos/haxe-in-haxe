@@ -1,4 +1,6 @@
 -cp src
 -cp test
 -main unit.UnitMain
+# The translated compiler runs in-process; its recursion exceeds Eval's default call depth (1000).
+-D eval-call-stack-depth=100000
 --interp

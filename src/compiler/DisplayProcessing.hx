@@ -170,7 +170,7 @@ class DisplayProcessing {
 
 	public static function loadDisplayFileStandalone(ctx:Typer, file:String):Void {
 		var com = ctx.com;
-		var parsed = typing.SourceParser.parseModuleFile(com, {file: file, classPath: ctx.com.emptyClassPath}, Globals.nullPos);
+		var parsed = typing.TypeloadParse.parseModuleFile(com, {file: file, classPath: ctx.com.emptyClassPath}, Globals.nullPos);
 		var pack = parsed.data.pack, decls = parsed.data.declarations;
 		var path = core.Path.FilePath.parse(file);
 		var name = path.fileName == null ? "?DISPLAY" : path.fileName;
@@ -182,16 +182,16 @@ class DisplayProcessing {
 			var dir = parts.join(path.backslash ? "\\" : "/");
 			(com.classPaths : core.ClassPaths).add(new core.ClassPath.DirectoryClassPath(dir, User));
 		}
-		typing.ModuleTyping.typeModule(ctx.com, ctx.g, {pack: pack, name: name}, file, decls, Globals.nullPos, true);
+		typing.TypeloadModule.typeModule(ctx.com, ctx.g, {pack: pack, name: name}, file, decls, Globals.nullPos, true);
 	}
 
 	public static function loadDisplayContentStandalone(ctx:Typer, input:String):Void {
 		var com = ctx.com;
 		var file = DisplayProcessingGlobals.fileInputMarker;
 		var p = Globals.filePos(file);
-		var parsed = typing.SourceParser.parseFileFromString(com, file, p, input);
-		var r = typing.SourceParser.handleParserResult(com, p, parsed);
-		typing.ModuleTyping.typeModule(ctx.com, ctx.g, {pack: r.data.pack, name: "?DISPLAY"}, file, r.data.declarations, p, true);
+		var parsed = typing.TypeloadParse.parseFileFromString(com, file, p, input);
+		var r = typing.TypeloadParse.handleParserResult(com, p, parsed);
+		typing.TypeloadModule.typeModule(ctx.com, ctx.g, {pack: r.data.pack, name: "?DISPLAY"}, file, r.data.declarations, p, true);
 	}
 
 	// 4. Display processing before typing

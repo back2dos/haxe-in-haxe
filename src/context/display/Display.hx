@@ -23,12 +23,12 @@ class Display {
 		});
 	}
 
-	public static function parseModule_(com:CommonContext, m:GlobalTypePath, p:Pos):typing.SourceParser.SourceModuleParts {
-		return DisplayPosition.displayPosition.runOutside(function() return typing.SourceParser.parseModule_(com, m, p));
+	public static function parseModule_(com:CommonContext, m:GlobalTypePath, p:Pos):typing.TypeloadParse.SourceModuleParts {
+		return DisplayPosition.displayPosition.runOutside(function() return typing.TypeloadParse.parseModule_(com, m, p));
 	}
 
-	public static function parseModule(ctx:Typer, m:GlobalTypePath, p:Pos):typing.SourceParser.SourceModuleResult {
-		return DisplayPosition.displayPosition.runOutside(function() return typing.SourceParser.parseModule(ctx.com, m, p));
+	public static function parseModule(ctx:Typer, m:GlobalTypePath, p:Pos):typing.TypeloadParse.SourceModuleResult {
+		return DisplayPosition.displayPosition.runOutside(function() return typing.TypeloadParse.parseModule(ctx.com, m, p));
 	}
 
 	public static function preprocessExpr(com:CommonContext, e:Expr):Expr return switch com.display.dmsKind {

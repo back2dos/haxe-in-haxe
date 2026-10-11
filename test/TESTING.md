@@ -965,8 +965,13 @@ Most payload differences came from upstream relying on OCaml semantics:
 
 The HXB writer (`src/compiler/hxb/HxbWriter.hx`), the grammar and the lexer
 were replaced with direct translations of `hxbWriter.ml`, `grammar.ml` and
-`lexer.ml`. The earlier versions are kept as `LegacyGrammar`/`LegacyLexer`
-for the bootstrap entry point (`haxe.LegacyMain`) and its unit tests.
+`lexer.ml`. The earlier versions, with the hand-written bootstrap loader and
+typer and its entry point (`haxe.LegacyMain`), are kept in
+`archive/legacy-bootstrap/`, outside every build. The unit tests
+(`test/unit.hxml`) run the translated lexer, parser and pipeline: they type the
+`test/unit/moduleload` fixtures in-process through `haxe.Main` and inspect the
+modules `Compiler.generateHook` receives (Eval needs
+`-D eval-call-stack-depth=100000` for that).
 
 ### Out of scope for this milestone
 

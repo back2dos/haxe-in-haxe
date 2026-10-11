@@ -1,6 +1,5 @@
 package unit;
 
-import haxe.LegacyMain;
 import sys.FileSystem;
 import sys.io.File;
 import haxe.zip.Reader;
@@ -8,16 +7,18 @@ import haxe.zip.Reader;
 class BatchDriverTest {
 	public static function main():Void {
 		var output = "test/generated/batch-driver.hxb";
-		LegacyMain.run(["-cp", "test", "-D", "batch_driver", "--main", "unit.moduleload.Example", "--hxb", output]);
+		if (sys.FileSystem.exists(output)) sys.FileSystem.deleteFile(output);
+		var code = haxe.Main.run(["-cp", "test", "-D", "batch_driver", "--main", "unit.moduleload.ModuleFields", "--hxb", output]);
+		if (code != 0) throw 'Batch driver failed with exit code $code';
 		if (!FileSystem.exists(output)) throw "Batch driver did not create HXB archive";
 		var input = File.read(output, true);
 		var entries = new Reader(input).read();
 		input.close();
-		if (entries.length != 18) throw "Batch driver archive entry count failed";
+		if (entries.length != 19) throw "Batch driver archive entry count failed";
 		var entry = null;
 		var hasStdTypes = false;
 		for (value in entries) {
-			if (value.fileName == "cross/unit/moduleload/Example.hxb") entry = value;
+			if (value.fileName == "cross/unit/moduleload/ModuleFields.hxb") entry = value;
 			if (value.fileName == "cross/StdTypes.hxb") hasStdTypes = true;
 		}
 		if (entry == null) throw "Batch driver main archive entry is missing";
@@ -26,12 +27,8 @@ class BatchDriverTest {
 		if (bytes.length < 4 || bytes.get(0) != "h".code || bytes.get(1) != "x".code || bytes.get(2) != "b".code || bytes.get(3) != 1) throw "Batch driver HXB header is invalid";
 		var kinds = chunkKinds(bytes);
 		if (kinds.indexOf("MTF") < 0 || kinds.indexOf("MDF") < 0 || kinds.indexOf("EOM") < 0) throw 'Batch driver HXB chunks are incomplete: ${kinds.join(",")}';
-		try {
-			LegacyMain.run(["--interp"]);
-			throw "Unsupported option must fail";
-		} catch (error:Dynamic) {
-			if (Std.string(error).indexOf("Unsupported batch HXB compiler option") < 0) throw error;
-		}
+		Sys.println("BatchDriverTest: the next compiler error is expected");
+		if (haxe.Main.run(["-cp", "test", "--main", "unit.moduleload.Inheritance", "--hxb", output]) == 0) throw "A main class without main function must fail";
 	}
 
 	static function chunkKinds(bytes:haxe.io.Bytes):Array<String> {

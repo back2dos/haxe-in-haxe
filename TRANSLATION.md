@@ -58,7 +58,7 @@ Status 2026-10-09: HXB library input (`--hxb-lib`) works. `hxbReader.ml`,
 `typeloadCacheHook.ml` in `src/typing/TypeloadCacheHook.hx`, the HXB branch of
 `nativeLibraryHandler.ml` in `src/context/NativeLibraryHandler.hx`, and the
 `hxb_reader_api_typeload` class and `load_hxb_module` of `typeloadModule.ml` in
-`src/typing/ModuleTyping.hx`. The ZIP reading that `hxbLib.ml` takes from
+`src/typing/TypeloadModule.hx`. The ZIP reading that `hxbLib.ml` takes from
 `libs/ziplib` is reproduced in `src/core/ZipInput.hx`. Of `commonCache.ml`,
 only the server cache uses the reader (`HxbReader.dump_stats` in
 `cache_context`), so nothing of it is needed by the batch `--hxb-lib` path.
@@ -97,6 +97,15 @@ and `Barrier` on host threads. Eval's `sys.io.Process` follows
 threads as OCaml's runtime lock does (a documented deviation: the port's
 host threads run in parallel). The upstream test suite's threads step passes
 144/144 on the hxc build.
+
+Status 2026-10-11: the legacy bootstrap path (the hand-written loader and typer
+`TypeloadModule`/`TypeloadParse`, `LegacyGrammar`, `LegacyLexer`,
+`Preprocessor` and `LegacyMain`) moved to `archive/legacy-bootstrap/`. The
+translations of `typeloadModule.ml` and `typeloadParse.ml` took their natural
+names (`src/typing/TypeloadModule.hx`, `TypeloadParse.hx`, formerly
+`ModuleTyping.hx` and `SourceParser.hx`), and the unit tests run the translated
+pipeline. The `core/` counterparts that predated the translation snapshot were
+audited line by line against upstream (see the table).
 
 ## Translation snapshot
 
@@ -141,9 +150,10 @@ Shared HXB-path helpers were extracted from otherwise deferred areas:
 - `codegen/Genxml.hx`: RTTI type serialization before HXB save; the standalone
   XML output backend remains deferred.
 - `context/HxbReaderStats.hx`: shared statistics declarations, without HXB input.
-- `typing/ModuleTyping.hx` and `SourceParser.hx`: source-backed module creation,
-  loading, package rules/remapping, import.hx processing, and parser integration
-  required by `TyperEntry`; the existing bootstrap loader remains separate.
+- `typing/ModuleTyping.hx` and `SourceParser.hx` (now `TypeloadModule.hx` and
+  `TypeloadParse.hx`): source-backed module creation, loading, package
+  rules/remapping, import.hx processing, and parser integration required by
+  `TyperEntry`; the existing bootstrap loader remained separate (now archived).
 
 At the time, display, server, macro-runtime, native-library and target
 dispatch bodies were kept under `archive/deferred/`, outside the build class path.
@@ -163,7 +173,7 @@ conformance, or completion of the pre-existing HXB writer. The subsequent runtim
 - Some exception catches use `Dynamic`; exception-type alignment, OCaml atomics, identity/projections, and persistent-map operations remain for reconciliation.
 - Macro/display/native hooks retained in shared modules do not implement those deferred runtimes.
 - Ordered source traversals remain explicit in the translations; pool identity and serialization ordering still require conformance validation later.
-- Pre-existing `TypeloadModule`, parser and bootstrap paths are not automatically full one-to-one translations. Audit their source coverage before closing the pass.
+- Pre-existing `TypeloadModule`, parser and bootstrap paths are not automatically full one-to-one translations. Audit their source coverage before closing the pass. (The legacy loader, parser and entry point are now archived.)
 
 ## Candidate source coverage
 
@@ -324,8 +334,8 @@ conformance, or completion of the pre-existing HXB writer. The subsequent runtim
 | `typing/typeloadCheck.ml` | `src/typing/TypeloadCheck.hx` | Draft translated |
 | `typing/typeloadFields.ml` | `src/typing/TypeloadFields.hx` | Draft translated |
 | `typing/typeloadFunction.ml` | `src/typing/TypeloadFunction.hx` | Draft translated |
-| `typing/typeloadModule.ml` | `src/typing/ModuleTyping.hx`; legacy `TypeloadModule.hx` | Source pipeline integrated during compile phase; `hxb_reader_api_typeload` and `load_hxb_module` translated |
-| `typing/typeloadParse.ml` | `src/typing/SourceParser.hx`; legacy `TypeloadParse.hx` | Source pipeline integrated during compile phase |
+| `typing/typeloadModule.ml` | `src/typing/TypeloadModule.hx` | Source pipeline integrated during compile phase; `hxb_reader_api_typeload` and `load_hxb_module` translated (the legacy bootstrap loader is in `archive/legacy-bootstrap/`) |
+| `typing/typeloadParse.ml` | `src/typing/TypeloadParse.hx` | Source pipeline integrated during compile phase |
 | `typing/typer.ml` | `src/typing/Typer.hx` | Draft translated |
 | `typing/typerBase.ml` | `src/typing/TyperBase.hx` | Draft translated |
 | `typing/typerDotPath.ml` | `src/typing/TyperDotPath.hx` | Draft translated |

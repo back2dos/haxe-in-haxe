@@ -45,7 +45,7 @@ class LegacyMain {
 		var main:Null<GlobalTypePath> = null;
 		var roots:Array<GlobalTypePath> = [];
 		var hxbArgument:Null<String> = null;
-		var parsedArguments = Args.expandHxml(Args.parseArgs(arguments));
+		var parsedArguments = expandHxml(Args.parseArgs(arguments));
 		var hasHxbOutput = core.ds.ArrayTools.exists(parsedArguments, function(argument) return switch argument {
 			case SetHxbOut(_): true;
 			case _: false;
@@ -220,5 +220,31 @@ class LegacyMain {
 
 	static function unsupported(option:String):Void {
 		throw 'Unsupported batch HXB compiler option: $option';
+	}
+
+	// port: used only by the legacy bootstrap entry (LegacyMain): expands HXML markers eagerly,
+	// with the section-local inclusion check of expand_args.
+	static function expandHxml(arguments:Array<ParsedArg>):Array<ParsedArg> {
+		var expanded:Array<ParsedArg> = [];
+		var included:Array<String> = [];
+		function loop(values:Array<ParsedArg>):Void for (argument in values) switch argument {
+			case HxmlFile(path):
+				if (!sys.FileSystem.exists(path)) throw 'File not found: $path';
+				var fullPath = sys.FileSystem.fullPath(path);
+				if (included.indexOf(fullPath) != -1) throw 'Duplicate hxml inclusion: $fullPath';
+				included.push(fullPath);
+				loop(Args.parseArgs(compiler.Helper.parseHxml(path)));
+			case Cwd(path):
+				try Sys.setCwd(path)
+				catch (_:Dynamic) {}
+				expanded.push(argument);
+			case Next | Each:
+				included = [];
+				expanded.push(argument);
+			case _:
+				expanded.push(argument);
+		}
+		loop(arguments);
+		return expanded;
 	}
 }

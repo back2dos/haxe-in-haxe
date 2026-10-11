@@ -465,14 +465,14 @@ class MacroContext {
 		api.getModule = function(s) {
 			return typingTimer(ctx, false, function(ctx) {
 				var path = AstTools.parsePath(s);
-				var m = ModuleTyping.loadModule(ctx, path, p, MDepFromMacro).mTypes.map(typeOfModuleType);
+				var m = TypeloadModule.loadModule(ctx, path, p, MDepFromMacro).mTypes.map(typeOfModuleType);
 				return m;
 			});
 		};
 		api.includeModule = function(s) {
 			typingTimer(ctx, false, function(ctx) {
 				var path = AstTools.parsePath(s);
-				ModuleTyping.loadModule(ctx, path, p, MDepFromMacroInclude);
+				TypeloadModule.loadModule(ctx, path, p, MDepFromMacroInclude);
 				return null;
 			});
 		};
@@ -543,8 +543,8 @@ class MacroContext {
 					previouslyDefinedError(m, mpath, p);
 				} catch (_:NotFound) {
 					ctx.com.cs.taintModule(mpath, DefineType);
-					var mdep = mdep == null ? ctx.m.curmod : ModuleTyping.loadModule(ctx, AstTools.parsePath(mdep), pos, MDepFromMacro);
-					var mnew = ModuleTyping.typeModule(ctx.com, ctx.g, mpath,
+					var mdep = mdep == null ? ctx.m.curmod : TypeloadModule.loadModule(ctx, AstTools.parsePath(mdep), pos, MDepFromMacro);
+					var mnew = TypeloadModule.typeModule(ctx.com, ctx.g, mpath,
 						ctx.com.partScope.fileKeys.generateVirtual(mpath, ctx.com.partScope.compilationStep), [
 						{
 							definition: tdef,
@@ -590,10 +590,10 @@ class MacroContext {
 				if (m != ctx.m.curmod) {
 					previouslyDefinedError(m, mpath, p);
 				} else
-					ModuleTyping.typeTypesIntoModule(ctx.com, ctx.g, ctx.m.curmod, types, pos);
+					TypeloadModule.typeTypesIntoModule(ctx.com, ctx.g, ctx.m.curmod, types, pos);
 			} catch (_:NotFound) {
 				ctx.com.cs.taintModule(mpath, DefineModule);
-				var mnew = ModuleTyping.typeModule(ctx.com, ctx.g, mpath,
+				var mnew = TypeloadModule.typeModule(ctx.com, ctx.g, mpath,
 					ctx.com.partScope.fileKeys.generateVirtual(mpath, ctx.com.partScope.compilationStep), types, pos);
 				mnew.mExtra.mKind = MFake;
 				addDependency(mnew, ctx.m.curmod, MDepFromMacro);
@@ -604,7 +604,7 @@ class MacroContext {
 		api.moduleDependency = function(mpath, file) {
 			var m = typingTimer(ctx, false, function(ctx) {
 				var oldDeps = ctx.m.curmod.mExtra.mDeps.copy(); // port: m_deps is a persistent map upstream
-				var m = ModuleTyping.loadModule(ctx, AstTools.parsePath(mpath), p, MDepFromMacro);
+				var m = TypeloadModule.loadModule(ctx, AstTools.parsePath(mpath), p, MDepFromMacro);
 				ctx.m.curmod.mExtra.mDeps = oldDeps;
 				return m;
 			});
@@ -649,7 +649,7 @@ class MacroContext {
 						policies: il.map(function(i) return Type.createEnumIndex(ModuleCheckPolicy, i)),
 						recursive: b
 					});
-				ctx.com.moduleLut.iter(function(_, m) m.mExtra.mCheckPolicy = ModuleTyping.getPolicy(ctx.g, m.mPath));
+				ctx.com.moduleLut.iter(function(_, m) m.mExtra.mCheckPolicy = TypeloadModule.getPolicy(ctx.g, m.mPath));
 			}
 			add(ctx);
 			if (ctx.g.macros != null)
@@ -703,8 +703,8 @@ class MacroContext {
 
 	public static function initMacroInterp(mctx:TyperContext, mint:macros.eval.EvalContext.Context):Void {
 		var p = Globals.nullPos;
-		ModuleTyping.loadModule(mctx, {pack: ["haxe", "macro"], name: "Expr"}, p, MDepFromMacro);
-		ModuleTyping.loadModule(mctx, {pack: ["haxe", "macro"], name: "Type"}, p, MDepFromMacro);
+		TypeloadModule.loadModule(mctx, {pack: ["haxe", "macro"], name: "Expr"}, p, MDepFromMacro);
+		TypeloadModule.loadModule(mctx, {pack: ["haxe", "macro"], name: "Type"}, p, MDepFromMacro);
 		macros.eval.EvalMain.init(mint);
 		macroInterpCache = mint;
 	}
@@ -893,7 +893,7 @@ class MacroContext {
 		var old = mctx.com.display;
 		if (display)
 			mctx.com.display = com.display;
-		var mloaded = ModuleTyping.loadModule(mctx, m, p, MDepFromMacro);
+		var mloaded = TypeloadModule.loadModule(mctx, m, p, MDepFromMacro);
 		/* mctx.m <- {
 			curmod = mloaded;
 			import_resolution = new resolution_list ["import";s_type_path cpath];
