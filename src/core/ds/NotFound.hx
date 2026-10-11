@@ -1,15 +1,15 @@
 package core.ds;
 
-/** Shared representation of OCaml Not_found. */
+// port: OCaml Not_found.
 class NotFound extends haxe.Exception {
-	// Thrown as a shared instance: constructing a haxe.Exception captures a stack
+	// port: thrown as a shared instance: constructing a haxe.Exception captures a stack
 	// trace, and lookups throw Not_found tens of thousands of times per build.
 	public static final instance = new NotFound();
 
-	// Throw site helper: `throw X.raise()`. On HashLink the shared instance is
+	// port: throw site helper: `throw X.raise()`. On HashLink the shared instance is
 	// thrown with rethrow, which skips libhl's native stack capture per throw.
 	public static inline function raise():NotFound {
-		// -D hih-fresh-not-found: a new instance per throw, for debug stack traces
+		// port: -D hih-fresh-not-found: a new instance per throw, for debug stack traces
 		#if hih_fresh_not_found
 		return new NotFound();
 		#else

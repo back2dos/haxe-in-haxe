@@ -2,12 +2,10 @@ package core.ds;
 
 import haxe.Int64;
 
-/**
-	C printf float conversions as used by OCaml's `Printf.sprintf "%.<p>g"`
-	(glibc: exact decimal expansion, round-half-even on exact ties).
-**/
+// port: C printf float conversions as used by OCaml's `Printf.sprintf "%.<p>g"`
+// (glibc: exact decimal expansion, round-half-even on exact ties).
 class OcamlPrintf {
-	/** Exact decimal digits of a finite, nonzero |f|: value = digits * 10^exp10. **/
+	// port: exact decimal digits of a finite, nonzero |f|: value = digits * 10^exp10.
 	static function exactDecimal(f:Float):{digits:String, exp10:Int} {
 		var bits = haxe.io.FPHelper.doubleToI64(f);
 		var high = Int64.getHigh(bits), low = Int64.getLow(bits);
@@ -20,7 +18,7 @@ class OcamlPrintf {
 			mantHigh |= 0x100000;
 			exp2 = e - 1075;
 		}
-		// little-endian base 10000 limbs
+		// port: little-endian base 10000 limbs
 		var big:Array<Int> = [0];
 		inline function mulAdd(k:Int, add:Int):Void {
 			var carry = add;
@@ -46,7 +44,7 @@ class OcamlPrintf {
 			}
 			if (n > 0) mulAdd(1 << n, 0);
 		} else {
-			// m * 2^-k = m * 5^k / 10^k
+			// port: m * 2^-k = m * 5^k / 10^k
 			var n = -exp2;
 			exp10 = exp2;
 			while (n >= 6) {
@@ -69,7 +67,7 @@ class OcamlPrintf {
 		return {digits: buf.toString(), exp10: exp10};
 	}
 
-	/** `Printf.sprintf "%.<precision>g" f` **/
+	// port: `Printf.sprintf "%.<precision>g" f`
 	public static function formatG(precision:Int, f:Float):String {
 		if (Math.isNaN(f)) return "nan";
 		if (!Math.isFinite(f)) return f < 0 ? "-inf" : "inf";
@@ -79,7 +77,7 @@ class OcamlPrintf {
 		if (f == 0) return sign + "0";
 		var d = exactDecimal(Math.abs(f));
 		var digits = d.digits;
-		// decimal exponent of the first digit
+		// port: decimal exponent of the first digit
 		var x = digits.length - 1 + d.exp10;
 		var sig:Array<Int> = [];
 		for (i in 0...p) sig.push(i < digits.length ? StringTools.fastCodeAt(digits, i) - 48 : 0);
@@ -114,7 +112,7 @@ class OcamlPrintf {
 		var buf = new StringBuf();
 		buf.add(sign);
 		if (x < -4 || x >= p) {
-			// exponential, trailing zeros removed
+			// port: exponential, trailing zeros removed
 			var last = p - 1;
 			while (last > 0 && sig[last] == 0) last--;
 			buf.add(sig[0]);
@@ -127,7 +125,7 @@ class OcamlPrintf {
 			if (ax < 10) buf.add("0");
 			buf.add(ax);
 		} else {
-			// fixed with p - 1 - x decimals, trailing zeros removed
+			// port: fixed with p - 1 - x decimals, trailing zeros removed
 			var intPart = new StringBuf();
 			var frac:Array<Int> = [];
 			if (x < 0) {

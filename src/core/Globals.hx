@@ -1,7 +1,7 @@
 package core;
 
-// Port of the foundational definitions in haxe/src/core/globals.ml.
-// A class rather than a structure so static targets access fields directly;
+// port: from haxe/src/core/globals.ml.
+// port: a class rather than a structure so static targets access fields directly;
 // @:structInit keeps `{pfile:..., pmin:..., pmax:...}` literals working.
 @:structInit class Pos {
 	public var pfile:String;
@@ -17,7 +17,7 @@ package core;
 	public inline function clone():Pos return new Pos(pfile, pmin, pmax);
 }
 
-// A class so map keys (module lookups) compare without reflection; see
+// port: a class so map keys (module lookups) compare without reflection; see
 // core.ds.Key. @:structInit keeps `{pack:..., name:...}` literals working.
 @:structInit class GlobalTypePath {
 	public var pack:Array<String>;
@@ -28,7 +28,7 @@ package core;
 		this.name = name;
 	}
 
-	// "pack.name#" style key, cached while pack and name are unchanged (HXB pools).
+	// port: "pack.name#" style key, cached while pack and name are unchanged (HXB pools).
 	var keyCache:Null<String> = null;
 	var keyPack:Null<Array<String>> = null;
 	var keyName:Null<String> = null;
@@ -105,6 +105,7 @@ class Globals {
 
 	public static final nullPos:Pos = fakePos("?");
 
+	/** Expected to match `haxe.display.Display.Platform`. **/
 	public static function platformName(platform:Platform):String {
 		return switch (platform) {
 			case Cross: "cross";
@@ -158,12 +159,16 @@ class Globals {
 	public static function patchStringPos(pos:Pos,
 			value:String):Pos return {pfile: pos.pfile, pmin: pos.pmax - value.length, pmax: pos.pmax};
 
-	// Like globals.ml, this only appends the build portion of the supplied version.
+	// port: like globals.ml, this only appends the build portion of the supplied version.
 	public static function sVersionFull(version:CompilerVersion):String return version.extra == null ? sVersion : sVersion
 		+ "+"
 		+ version.extra.build;
 
-	// globals.ml:195: preserve the failure payload and source location with a Haxe stack.
+	/**
+		Terminates compiler process and prints user-friendly instructions about filing an issue.
+		Usage: `die message __LOC__`, where `__LOC__` is a built-in ocaml constant
+	**/
+	// port: `source` stands for `__LOC__`; the backtrace is the Haxe call stack.
 	public static function die(msg:String, source:String, ?p:Pos):Dynamic {
 		var prefix = p == null ? "" : p.pfile + ":" + p.pmin + ": ";
 		var message = prefix
@@ -180,6 +185,7 @@ class Globals {
 	}
 }
 
+// msg * backtrace
 class InternalCompilerError extends haxe.Exception {
 	public final backtrace:String;
 

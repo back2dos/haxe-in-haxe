@@ -2,7 +2,7 @@ package core;
 
 import core.Ast;
 
-// haxe/src/core/ast.ml: map_expr's mutually recursive local functions.
+// port: from haxe/src/core/ast.ml: map_expr's mutually recursive local functions.
 class AstExprMapper {
 	final loop:Expr->Expr;
 

@@ -11,8 +11,6 @@ import core.ds.Stream;
 import core.Message.WarningCode;
 import syntax.Lexer.LexerContext;
 
-// Draft mechanical translation of haxe/src/syntax/parser.ml; unvalidated.
-// Display branches retain calls to the upstream-shaped display hooks.
 enum ParserPreprocessorError {
 	InvalidEnd;
 	InvalidElse;
@@ -90,7 +88,7 @@ class ParserError extends haxe.Exception {
 class TypePathCompletion extends haxe.Exception {
 	public final pack:Array<String>;
 	public final type:Null<{name:String, isSub:Bool}>;
-	public final inImport:Bool;
+	public final inImport:Bool; // in import
 	public final pos:Pos;
 
 	public function new(pack, type, inImport, pos) {
@@ -320,6 +318,7 @@ class Parser {
 	}
 
 	public static function getDoc(ctx:ParserContext, s:Stream<syntax.Lexer.LexedToken>):Null<String> {
+		// do the peek first to make sure we fetch the doc
 		if (s.peek() == null || ctx.lastDoc == null) return null;
 		var doc = ctx.lastDoc.doc;
 		ctx.lastDoc = null;
@@ -501,7 +500,8 @@ class Parser {
 		var end = Lexer.lexXml(ctx.lexerCtx, p1.pmin, ctx.code);
 		var xml = Lexer.contents(ctx.lexerCtx);
 		return makeMeta(core.Meta.Markup, [],
-			{expr: EConst(String(xml, SDoubleQuotes)), pos: {pfile: p1.pfile, pmin: p1.pmin, pmax: end}}, p1);
+			{expr: EConst(String(xml, SDoubleQuotes)), // STRINGTODO: distinct kind?
+				pos: {pfile: p1.pfile, pmin: p1.pmin, pmax: end}}, p1);
 	}
 
 	public static function punionNext(ctx:ParserContext, p1:Pos,
@@ -549,6 +549,9 @@ class Parser {
 		if (!ctx.config.inDisplayFile || !isCompletion(ctx)) throw core.ds.Stream.StreamFailure.raise();
 		var next:ParserToken = s.peek();
 		if (next != null) switch next.token {
+			// If there's an identifier coming up, it's probably an incomplete type
+			// declaration. Let's just raise syntax completion in that case because
+			// the parser would fail otherwise anyway.
 			case Const(Ident(name)) if (DisplayPosition.displayPosition.enclosedIn(next.pos)):
 				syntaxCompletion(flags.length == 0 ? SCTypeDecl(mode) : SCAfterTypeFlag(flags.map(function(entry) return entry.flag)),
 					name, next.pos);
@@ -567,6 +570,7 @@ class Parser {
 		var next:ParserToken = s.peek();
 		var pmin = next == null || next.token == Eof ? 0x7FFFFFFF : next.pos.pmin;
 		var p:Pos = DisplayPosition.displayPosition.get();
+		// print_endline (Printf.sprintf "(%i <= %i) (%i >= %i)" pmax p.pmin pmin p.pmax);
 		if (pmax <= p.pmin && pmin >= p.pmax) {
 			var so:Null<String> = null;
 			if (next != null) {
@@ -584,7 +588,8 @@ class Parser {
 	public static function checkSignatureMark(ctx:ParserContext, e:Expr, p1:Pos, p2:Pos):Expr {
 		if (!isSignatureDisplay(ctx)) return e;
 		var p = Ast.punion(p1, p2);
-		if (true || !ctx.config.wasAutoTriggered) return DisplayPosition.enclosesPositionGt(DisplayPosition.displayPosition.get(),
+		if (true || !ctx.config.wasAutoTriggered) // TODO: #6383
+			return DisplayPosition.enclosesPositionGt(DisplayPosition.displayPosition.get(),
 			p) ? mkDisplayExpr(e, DKMarked) : e;
 		return DisplayPosition.displayPosition.get().pmin == p1.pmax ? mkDisplayExpr(e, DKMarked) : e;
 	}

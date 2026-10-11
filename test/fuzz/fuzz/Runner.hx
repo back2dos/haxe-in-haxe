@@ -136,7 +136,7 @@ class Runner {
 			output: "file:main.swf",
 			run: null
 		});
-		// the program compiled to C by hxc (the port with backend/), built with tcc
+		// the program compiled to C by hxc (the port with hxc/), built with tcc
 		add({
 			name: "hxc",
 			args: [],

@@ -2,17 +2,12 @@ package core.ds;
 
 import haxe.macro.Expr;
 
-/** OCaml record updates are shallow copies, retaining every unchanged field. */
+// port: OCaml record updates are shallow copies, retaining every unchanged field.
 class Record {
-	/**
-		Shallow copy. Records that became classes (for direct field access on
-		static targets) are cloned with their class; Reflect.copy would return
-		an anonymous object (JS, C++) or null (JVM).
-	**/
-	/**
-		Shallow copy, resolved at compile time: a record class's clone() when the
-		static type has one, otherwise copyDynamic.
-	**/
+	// port: shallow copy, resolved at compile time: a record class's clone() when the
+	// static type has one, otherwise copyDynamic. Records that became classes (for
+	// direct field access on static targets) are cloned with their class;
+	// Reflect.copy would return an anonymous object (JS, C++) or null (JVM).
 	public static macro function copy(record:Expr):Expr {
 		var t = try haxe.macro.Context.follow(haxe.macro.Context.typeof(record)) catch (_:Dynamic) null;
 		switch t {
@@ -25,8 +20,8 @@ class Record {
 
 	public static function copyDynamic<T>(o:T):T {
 		#if !macro
-		if (std.Type.getClass(o) == null) return Reflect.copy(o); // anonymous record
-		// record classes all have clone(); Reflect.copy would lose the class
+		if (std.Type.getClass(o) == null) return Reflect.copy(o); // port: anonymous record
+		// port: record classes all have clone(); Reflect.copy would lose the class
 		var clone = Reflect.field(o, "clone");
 		if (clone != null) return Reflect.callMethod(o, clone, []);
 		#end

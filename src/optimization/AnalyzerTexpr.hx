@@ -14,7 +14,6 @@ import optimization.OptimizerTexpr.*;
 import context.PurityState;
 import optimization.AnalyzerConfig;
 
-// haxe/src/optimization/analyzerTexpr.ml — mechanical draft; not compiled or validated.
 class AnalyzerTexpr {
 	public static function sExprPretty(e:TExpr):String return core.TPrinting.sExprPretty(false, "", false,
 		core.TPrinting.sType.bind(core.TPrinting.printContext()), e);
@@ -71,7 +70,8 @@ class AnalyzerTexpr {
 
 	public static function canThrow(e:TExpr):Bool return switch e.eexpr {
 		case TConst(_) | TLocal(_) | TTypeExpr(_) | TFunction(_) | TBlock(_): false;
-		case TCall(_, _) | TNew(_, _, _) | TThrow(_) | TField(_, _) | TArray(_, _): true;
+		case TCall(_, _) | TNew(_, _, _) | TThrow(_)
+			| TField(_, _) | TArray(_, _): true; // sigh
 		case TCast(_, mt) if (mt != null): true;
 		case _: checkExpr(canThrow, e);
 	};
@@ -112,11 +112,12 @@ class AnalyzerTexpr {
 		return canBeUsedAsValueLoop(com, e);
 	}
 
-	// static, with com passed along: a closure per call and per node otherwise
+	// port: static, with com passed along: a closure per call and per node otherwise
 	static function canBeUsedAsValueLoop(com:context.SafeCom.SafeContext, e:TExpr):Bool return switch e.eexpr {
 		case TBlock([e]): canBeUsedAsValueLoop(com, e);
 		case TBlock(_) | TSwitch(_) | TTry(_, _) | TReturn(_) | TThrow(_) | TBreak | TContinue: false;
 		case TCall({eexpr: TConst(TString("phi"))}, _): false;
+		// | TCall _ | TNew _ when (match com.platform with Cpp | Php -> true | _ -> false) -> raise Exit
 		case TUnop(Increment | Decrement, _, _) if (!targetHandlesUnops(com)): false;
 		case TFunction(_): true;
 		case _: !core.Texpr.checkExprWithScom(cannotBeUsedAsValue, com, e);
@@ -129,7 +130,7 @@ class AnalyzerTexpr {
 
 	public static function isReallyUnbound(s:String):Bool return s != "`trace" && s != "__int__";
 
-	// Deviation: a fresh EReg per use (an EReg keeps its last match; the analyzer runs on several threads)
+	// port: a fresh EReg per use (an EReg keeps its last match; the analyzer runs on several threads)
 	static inline function r():EReg return ~/^[A-Za-z0-9_]+$/;
 
 	public static function isUnboundCallThatMightHaveSideEffects(s:String, el:Array<TExpr>):Bool return switch [s, el] {
@@ -140,6 +141,7 @@ class AnalyzerTexpr {
 	public static function maybeInheritVarName(v:TVar, alias:TVar):Void if (v.vName != alias.vName) switch [alias.vKind, v.vKind] {
 		case [VUser(_), VUser(_)]:
 		case [VUser(_), _]:
+			// If we go from a user variable to something else, we probably want to inherit the name.
 			v.vName = alias.vName;
 		case _:
 	}
@@ -162,6 +164,7 @@ class AnalyzerTexpr {
 			case TAbstract(a, tl): !Meta.has(NotNull, a.aMeta) && nullable(applyParams(a.aParams, tl, a.aThis));
 			case _: true;
 		};
+		// Check equality again to cover cases where TMono became t_dynamic
 		if (t1 == t2) return true;
 		return switch [follow(t1), follow(t2)] {
 			case [TDynamic(_), _] | [_, TDynamic(_)]: false;
@@ -174,6 +177,18 @@ class AnalyzerTexpr {
 	public static function dynarrayMapi<A>(f:Int->A->A, d:Array<A>):Void for (i in 0...d.length) d[i] = f(i, d[i]);
 }
 
+/*
+	This module rewrites some expressions to reduce the amount of special cases for subsequent analysis. After analysis
+	it restores some of these expressions back to their original form.
+
+	The following expressions are removed from the AST after `apply` has run:
+	- OpBoolAnd and OpBoolOr binary operations are rewritten to TIf
+	- OpAssignOp on a variable is rewritten to OpAssign
+	- Prefix increment/decrement operations are rewritten to OpAssign
+	- Postfix increment/decrement operations are rewritten to a TBlock with OpAssign and OpAdd/OpSub
+	- `do {} while(true)` is rewritten to `while(true) {}`
+	- TWhile expressions are rewritten to `while (true)` with appropriate conditional TBreak
+*/
 class TexprFilter {
 	public static function apply(com:context.SafeCom.SafeContext, e:TExpr):TExpr {
 		function loop(e:TExpr):TExpr return switch e.eexpr {
@@ -211,6 +226,11 @@ class TexprFilter {
 	}
 }
 
+/*
+	An InterferenceReport represents in which way a given code may be influenced and
+	how it might influence other code itself. It keeps track of read and write operations
+	for both variable and fields, as well as a generic state read and write.
+*/
 @:structInit class InterferenceReportData {
 	public var irVarReads:haxe.ds.IntMap<Bool>;
 	public var irVarWrites:haxe.ds.IntMap<Bool>;
@@ -278,6 +298,7 @@ class InterferenceReport {
 	public static function fromTexpr(e:TExpr):InterferenceReportData {
 		var ir = create();
 		function loop(e:TExpr):Void switch e.eexpr {
+			// vars
 			case TLocal(v):
 				setVarRead(ir, v);
 				if (hasVarFlag(v, VCaptured)) setStateRead(ir);
@@ -296,6 +317,7 @@ class InterferenceReport {
 			case TUnop(Increment | Decrement, _, {eexpr: TLocal(v)}):
 				setVarRead(ir, v);
 				setVarWrite(ir, v);
+			// fields
 			case TField(e1, fa):
 				loop(e1);
 				if (!isReadOnlyFieldAccess(e1, fa)) setFieldRead(ir, fieldName(fa));
@@ -314,6 +336,7 @@ class InterferenceReport {
 				setFieldRead(ir, name);
 				setFieldWrite(ir, name);
 				loop(e1);
+			// array
 			case TArray(e1, e2):
 				setStateRead(ir);
 				loop(e1);
@@ -334,6 +357,7 @@ class InterferenceReport {
 				setStateWrite(ir);
 				loop(e1);
 				loop(e2);
+			// state
 			case TCall({eexpr: TIdent(s)}, el) if (!AnalyzerTexpr.isUnboundCallThatMightHaveSideEffects(s, el)):
 				for (e in el) loop(e);
 			case TNew(c, _, el) if (c.clConstructor != null && PurityStateTools.isPure(c, c.clConstructor)):
@@ -440,6 +464,21 @@ class FusionState {
 	}
 }
 
+/*
+	Fusion tries to join expressions together in order to make the output "look nicer". To that end,
+	several transformations occur:
+
+	- `var x; x = e;` is transformed to `var x = e;`
+	- `var x; if(e1) x = e2 else x = e3` is transformed to `var x = e1 ? e2 : e3` on targets that
+	  deal well with that.
+	- `var x = e;` is transformed to `e` if `x` is unused.
+	- Some block-level increment/decrement unary operators are put back into value places and the
+	  transformation of their postfix variant is reversed.
+	- `x = x op y` is transformed (back) to `x op= y` on targets that deal well with that.
+
+	Most importantly, any `var v = e;` might be fused into expressions that follow it in the same
+	block if there is no interference.
+*/
 class Fusion {
 	public static function isAssignOp(op:Binop):Bool return switch op {
 		case OpAdd | OpMult | OpDiv | OpSub | OpAnd | OpOr | OpXor | OpShl | OpShr | OpUShr | OpMod: true;
@@ -466,6 +505,8 @@ class Fusion {
 			+ "\nINTO: "
 			+ core.TPrinting.sExprPretty(true, "", false, core.TPrinting.sType.bind(core.TPrinting.printContext()),
 				mk(TBlock(el), tDynamic, Globals.nullPos)));
+		// This function walks the AST in order of evaluation and tries to find an occurrence of v1. If successful, that occurrence is
+		// replaced with e1. If there's an interference "on the way" the replacement is canceled.
 		function replace(e:TExpr):TExpr {
 			inline function explore(e:TExpr):TExpr {
 				var old = blocked;
@@ -476,6 +517,9 @@ class Fusion {
 			}
 			inline function handleEl(el:Array<TExpr>):Array<TExpr> {
 				if (AnalyzerTexpr.targetHandlesSideEffectOrder(com)) return el.map(replace);
+				// This mess deals with the fact that the order of evaluation is undefined for call
+				// arguments on these targets. Even if we find a replacement, we pretend that we
+				// didn't in order to find possible interferences in later call arguments.
 				var reallyFound = found;
 				var el = el.map(e -> {
 					found = false;
@@ -489,6 +533,7 @@ class Fusion {
 			inline function handleCall(e:TExpr, el:Array<TExpr>):{expr:TExpr, args:Array<TExpr>}
 				return switch com.platform {
 					case Neko:
+						// Neko has this reversed at the moment (issue #4787)
 						var el = el.map(replace);
 						var e = replace(e);
 						{expr: e, args: el};
@@ -518,6 +563,7 @@ class Fusion {
 					};
 					if (!found) throw new TypeExit();
 					withExpr(e, TSwitch(mkSwitch(subject, s.switchCases, s.switchDefault, s.switchExhaustive)));
+				// locals
 				case TLocal(v2) if (v1 == v2 && !blocked):
 					found = true;
 					AnalyzerTexpr.typeChangeOk(com, v1.vType, value.etype) ? value : mk(TCast(value, null), v1.vType, e.epos);
@@ -530,6 +576,7 @@ class Fusion {
 					var e2 = replace(e2);
 					if (!found && ir.irVarReads.exists(v.vId)) throw new TypeExit();
 					withExpr(e, TBinop(OpAssign, e1, e2));
+				// Never fuse into write-positions (issue #7298)
 				case TBinop(OpAssignOp(_), {eexpr: TLocal(v)},
 					_) | TUnop(Increment | Decrement, _, {eexpr: TLocal(v)}) if (v1 == v): throw new TypeExit();
 				case TBinop(op = OpAssignOp(_), e1 = {eexpr: TLocal(v)}, e2):
@@ -538,6 +585,7 @@ class Fusion {
 					withExpr(e, TBinop(op, e1, e2));
 				case TUnop(Increment | Decrement, _,
 					{eexpr: TLocal(v)}) if (ir.irVarReads.exists(v.vId) || ir.irVarWrites.exists(v.vId)): throw new TypeExit();
+				// fields
 				case TField(e1, fa):
 					var e1 = replace(e1);
 					if (!found
@@ -561,6 +609,7 @@ class Fusion {
 						|| ir.irStateRead
 						|| ir.irFieldWrites.exists(fieldName(fa))
 						|| ir.irStateWrite): throw new TypeExit();
+				// array
 				case TArray(e1, e2):
 					var e1 = replace(e1);
 					var e2 = replace(e2);
@@ -580,6 +629,7 @@ class Fusion {
 					if (!found && ir.irStateRead) throw new TypeExit();
 					withExpr(e, TBinop(op, withExpr(ef, TArray(e1, e2)), e3));
 				case TUnop(Increment | Decrement, _, {eexpr: TArray(_, _)}) if (ir.irStateRead || ir.irStateWrite): throw new TypeExit();
+				// state
 				case TCall({eexpr: TIdent(s)}, el) if (!AnalyzerTexpr.isUnboundCallThatMightHaveSideEffects(s, el)): e;
 				case TNew(c, tl, el) if (c.clConstructor != null && PurityStateTools.isPure(c, c.clConstructor)):
 					var el = handleEl(el);
@@ -610,11 +660,13 @@ class Fusion {
 							|| InterferenceReport.hasAnyFieldWrite(ir))) throw new TypeExit();
 					withExpr(e, TCall(r.expr, r.args));
 				case TObjectDecl(fl):
+					// TODO can something be cleaned up here?
+					// The C# generator has trouble with evaluation order in structures (#7531).
 					var el = handleEl(fl.map(f -> f.expr));
 					if (!found && (ir.irStateWrite || InterferenceReport.hasAnyFieldWrite(ir))) throw new TypeExit();
 					if (fl.length != el.length) throw "Invalid_argument: List.map2";
 					withExpr(e, TObjectDecl([for (i in 0...fl.length) {key: fl[i].key, expr: el[i]}]));
-				case TArrayDecl(el): withExpr(e, TArrayDecl(handleEl(el)));
+				case TArrayDecl(el): withExpr(e, TArrayDecl(handleEl(el))); // if not !found && (has_state_write ir || has_any_field_write ir) then raise Exit;
 				case TBinop(op, e1, e2) if (com.platform == Cpp):
 					var e1 = replace(e1);
 					var temp = found;
@@ -645,9 +697,12 @@ class Fusion {
 		}
 	}
 
+	// Handles block-level expressions, e.g. by removing side-effect-free ones and recursing into compound constructs like
+	// array or object declarations. The resulting element list is reversed.
+	// INFO: `el` is a reversed list of expressions in a block.
 	public static function blockElement(config:AnalyzerConfigData, state:FusionState, loopBottom:Bool, acc:Array<TExpr>,
 			el:Array<TExpr>):Array<TExpr> {
-		// Upstream walks OCaml lists (`e :: acc`, `e1 :: rest`); with arrays that is a
+		// port: upstream walks OCaml lists (`e :: acc`, `e1 :: rest`); with arrays that is a
 		// copy per step. Same order here: `stack` is the work list with its head at the
 		// end, `accRev` the accumulator with its head at the end.
 		var stack = el.copy();
@@ -670,6 +725,7 @@ class Fusion {
 					state.decReads(v);
 				case TField(_, fa) if (PurityStateTools.isExplicitlyImpure(fa)):
 					accRev.push(e);
+				// no-side-effect
 				case TFunction(_) | TConst(_) | TTypeExpr(_):
 				case TMeta(meta = {meta: core.MetaList.StrictMeta.Pure}, _) if (PurityStateTools.getPurityFromMeta([meta]) == Pure):
 				case TCall({eexpr: TField(e1, fa)}, args) if (PurityStateTools.isPureFieldAccess(fa) && config.localDce):
@@ -684,13 +740,14 @@ class Fusion {
 					var folded = Optimizer.checkConstantSwitch(s);
 					if (folded == null) accRev.push(e)
 					else stack.push(folded);
+				// no-side-effect composites
 				case TParenthesis(e1) | TMeta(_, e1) | TCast(e1, null) | TField(e1, _) | TUnop(_, _, e1) | TEnumIndex(e1) |
 					TEnumParameter(e1, _, _):
 					stack.push(e1);
 				case TArray(e1, e2) | TBinop(_, e1, e2):
 					stack.push(e2);
 					stack.push(e1);
-				case TArrayDecl(args) | TCall({eexpr: TField(_, FEnum(_, _))}, args):
+				case TArrayDecl(args) | TCall({eexpr: TField(_, FEnum(_, _))}, args): // TODO: check e1 of FEnum
 					pushAll(args);
 				case TObjectDecl(fl):
 					pushAll(fl.map(f -> f.expr));
@@ -752,7 +809,7 @@ class Fusion {
 			}
 			return b;
 		}
-		// Upstream recurses over OCaml lists (`first :: rest`, `first :: acc`); slicing and
+		// port: upstream recurses over OCaml lists (`first :: rest`, `first :: acc`); slicing and
 		// prepending arrays at each step was quadratic. Same steps here as a loop: the
 		// accumulator is reversed (head at the end) and `rest` is arr[restOff..].
 		function fuse(acc0:Array<TExpr>, el0:Array<TExpr>):Array<TExpr> {
@@ -852,7 +909,7 @@ class Fusion {
 						continue;
 					case TVar(v1, e1) if (e1 != null && canBeFused(v1, e1)):
 						if (restLength > 0) switch rest0().eexpr {
-							// v2 intentionally shadows the declaration variable, as upstream's pattern does.
+							// port: upstream's pattern rebinds v1 to this local, shadowing the declaration; v2 is that binding.
 							case TUnop(op = Increment | Decrement, Prefix, {eexpr: TLocal(v2)}):
 								var found = false;
 								function replace(e:TExpr):TExpr return switch e.eexpr {
@@ -888,6 +945,8 @@ class Fusion {
 								case TReturn(e2) if (e2 != null):
 									inner = e2;
 									wrap = e -> withExpr(e2, TReturn(e));
+								// This is not sound if e21 contains the variable (issue #7704)
+								// | TBinop(OpAssign,e21,e22) -> e22,(fun e -> {e2 with eexpr = TBinop(OpAssign,e21,e)})
 								case TVar(v, e2) if (e2 != null):
 									inner = e2;
 									wrap = e -> withExpr(e2, TVar(v, e));
@@ -939,6 +998,7 @@ class Fusion {
 			el = el.map(loop);
 			el.reverse();
 			el = blockElementTimed(bottom, [], el);
+			// fuse flips element order, but block_element doesn't care and flips it back
 			el = timedFuse(el);
 			el = blockElementTimed(false, [], el);
 			while (true) {
@@ -1157,8 +1217,9 @@ class Purity {
 		}
 		inline function checkWrite(e:TExpr):Void switch e.eexpr {
 			case TLocal(v):
-				if (core.TOther.ExtType.hasReferenceSemantics(v.vType)) taintRaise(node);
-			case TField({eexpr: TConst(TThis)}, _) if (isCtor):
+				if (core.TOther.ExtType.hasReferenceSemantics(v.vType)) taintRaise(node); // Writing to a ref type means impurity.
+				// Writing to locals does not violate purity.
+			case TField({eexpr: TConst(TThis)}, _) if (isCtor): // A constructor can write to its own fields without violating purity.
 			case _:
 				taintRaise(node);
 		}
@@ -1183,7 +1244,7 @@ class Purity {
 				if (c.clSuper != null && c.clSuper.cls.clConstructor != null) {
 					checkField(c.clSuper.cls, c.clSuper.cls.clConstructor);
 					for (e in el) loop(e);
-				} else taintRaise(node);
+				} else taintRaise(node); // Can that even happen?
 			case TCall({eexpr: TIdent(s)}, el) if (!AnalyzerTexpr.isUnboundCallThatMightHaveSideEffects(s, el)):
 				for (e in el) loop(e);
 			case TCall(_, _):
@@ -1199,7 +1260,9 @@ class Purity {
 			case _:
 				if (cf.cfExpr == null) {
 					if (!PurityStateTools.isPure(c, cf)) taint(node);
-				} else if (hasClassFieldFlag(cf, CfExtern) || Meta.has(FunctionCode, cf.cfMeta) || Meta.has(HlNative, cf.cfMeta)
+				}
+				// TODO: The function code check shouldn't be here I guess.
+				else if (hasClassFieldFlag(cf, CfExtern) || Meta.has(FunctionCode, cf.cfMeta) || Meta.has(HlNative, cf.cfMeta)
 					|| Meta.has(HlNative, c.clMeta)) {
 					if (!PurityStateTools.isPure(c, cf)) taint(node);
 				} else try {

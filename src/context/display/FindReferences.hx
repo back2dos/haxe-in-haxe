@@ -11,7 +11,6 @@ import context.display.Statistics;
 import core.DisplayTypes;
 import core.TType;
 
-// haxe/src/context/display/findReferences.ml
 class FindReferences {
 	public static function findPossibleReferences(tctx:Typer, cs:Cache):Void {
 		var r = ReferencePosition.get();
@@ -39,7 +38,7 @@ class FindReferences {
 		return usages;
 	}
 
-	/** This probably exists somewhere already but I can't find it **/
+	// This probably exists somewhere already but I can't find it
 	public static function isVarField(cf:TClassField):Bool return switch cf.cfKind {
 		case Method(_): false;
 		case Var(_): true;

@@ -62,24 +62,22 @@ import macros.eval.EvalStdLibB.StdLibBHelpers;
 
 using macros.eval.EvalValue.EvalValueTools;
 
-/**
-	haxe/src/macro/eval/evalStdLib.ml: the shared helpers (lines 1-44) and the
-	registration of the standard library natives (`init_fields` .. the end).
-	The `StdX` modules are in `EvalStdLibA` (first half) and `EvalStdLibB`.
-
-	Deviations:
-	- `catch_unix_error`: the host raises no `Unix_error`; any host exception
-	  other than an interpreter exception (`RunTimeException`) or `Not_found`
-	  becomes an Eval string exception carrying the host message.
-	- `hashtbl_keys` follows the host map's key order (OCaml `Hashtbl` order is
-	  not reproduced).
-	- libuv (`EvalLuv`) and mbedtls (`EvalSsl`) work on the hxc host
-	  (backend/); elsewhere their natives throw "... is not supported by
-	  haxe-in-haxe". Sockets use BSD sockets on the hxc host and
-	  fail likewise on other hosts.
-	- zlib streams are host `haxe.zip.Compress`/`haxe.zip.Uncompress` objects.
-	- Field lists are `{name, value}` pairs instead of OCaml tuples.
-**/
+// port: haxe/src/macro/eval/evalStdLib.ml: the shared helpers (lines 1-44) and the
+// registration of the standard library natives (`init_fields` .. the end).
+// The `StdX` modules are in `EvalStdLibA` (first half) and `EvalStdLibB`.
+//
+// Deviations:
+// - `catch_unix_error`: the host raises no `Unix_error`; any host exception
+//   other than an interpreter exception (`RunTimeException`) or `Not_found`
+//   becomes an Eval string exception carrying the host message.
+// - `hashtbl_keys` follows the host map's key order (OCaml `Hashtbl` order is
+//   not reproduced).
+// - libuv (`EvalLuv`) and mbedtls (`EvalSsl`) work on the hxc host
+//   (hxc/); elsewhere their natives throw "... is not supported by
+//   haxe-in-haxe". Sockets use `hxc.NativeNet` on the hxc host and
+//   `EvalHostNet` on HashLink, and fail likewise on other hosts.
+// - zlib streams are host `haxe.zip.Compress`/`haxe.zip.Uncompress` objects.
+// - Field lists are `{name, value}` pairs instead of OCaml tuples.
 class EvalStdLib {
 	public static function catchUnixError<A, B>(f:A->B, arg:A):B {
 		try {
@@ -191,7 +189,7 @@ class EvalStdLib {
 		add(EvalHash.key_Date, vl -> {
 			switch vl.map(EvalDecode.decodeInt) {
 				case [y, m, d, h, mi, s]:
-					// Unix.mktime of the local time
+					// port: Unix.mktime of the local time
 					var f = catchUnixError(_ -> new Date(y, m, d, h, mi, s).getTime() / 1000.0, null);
 					EvalEncode.encodeInstance(EvalHash.key_Date, IDate(f));
 				case _: die();
@@ -244,7 +242,7 @@ class EvalStdLib {
 		});
 		add(EvalHash.key_eval_vm_NativeSocket, _ -> {
 			#if (target.name == "hxc" || hl)
-			// catch_unix_error Unix.socket PF_INET SOCK_STREAM 0
+			// port: catch_unix_error Unix.socket PF_INET SOCK_STREAM 0
 			var fd = macros.eval.EvalStdLibB.StdSocket.check(#if hl macros.eval.EvalHostNet #else hxc.NativeNet #end.socket(), "socket");
 			EvalEncode.encodeInstance(EvalHash.key_eval_vm_NativeSocket, ISocket(fd));
 			#else
@@ -278,7 +276,7 @@ class EvalStdLib {
 			EvalEncode.encodeInstance(EvalHash.key_sys_net_Mutex, IMutex(mutex));
 		});
 		add(EvalHash.key_sys_net_Semaphore, vl -> {
-			// List.hd
+			// port: List.hd
 			if (vl.length == 0) throw new Failure("hd");
 			var v = vl[0];
 			var sem = new sys.thread.Semaphore(EvalDecode.decodeInt(v));

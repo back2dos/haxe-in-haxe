@@ -22,7 +22,6 @@ import context.Typecore.*;
 import context.Typecore;
 import context.TyperPass;
 
-// haxe/src/typing/strictMeta.ml — mechanical draft; not compile-validated.
 class StrictMeta {
 	static function efield(e:Expr, name:String):ExprDef return EField(e, name, EFNormal);
 
@@ -117,6 +116,7 @@ class StrictMeta {
 		function loop(e:Expr, pack:Array<String>, name:Array<String>):core.Ast.TypePath return switch e.expr {
 			case EField(inner, f, _) if (f.charAt(0).toLowerCase() != f.charAt(0)):
 				if (name.length > 1) {
+					// too many name paths
 					displayError(com, "Unexpected " + f, e.pos);
 					throw core.ds.Exit.raise();
 				}
@@ -186,6 +186,8 @@ class StrictMeta {
 		switch t {
 			case TInst(c, _):
 				var v = getMetaString(c.clMeta, MetaTag.Annotation);
+				// We explicitly set this to the default retention policy CLASS. This allows us to treat
+				// @:strict as default CLASS and @:meta as default RUNTIME.
 				args.push({expr: EConst(String(v == null ? "CLASS" : v, SDoubleQuotes)), pos: pos});
 			case _:
 		}

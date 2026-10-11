@@ -17,7 +17,6 @@ import core.DisplayTypes;
 import core.TType;
 import core.display.CompletionItem;
 
-// haxe/src/context/display/displayEmitter.ml
 class DisplayEmitter {
 	public static function symbolOfModuleType(mt:ModuleType):Symbol return switch mt {
 		case TClassDecl(c): SKClass(c);

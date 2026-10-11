@@ -3,7 +3,6 @@ package compiler;
 import core.TType;
 import compiler.CompilationCache;
 
-// Port of haxe/src/compiler/tasks.ml.
 class ClassMaintenanceTask extends ServerTask {
 	final cs:Cache;
 	final c:TClass;

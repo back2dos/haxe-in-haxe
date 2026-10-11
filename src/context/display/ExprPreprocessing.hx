@@ -6,7 +6,6 @@ import core.DisplayTypes.DisplayModeValue;
 import core.display.DisplayPosition;
 import core.Ast;
 
-// haxe/src/context/display/exprPreprocessing.ml
 class ExprPreprocessing {
 	public static function findBeforePos(wasAutoTriggered:Bool, dm:DisplayModeValue, e:Expr):Expr {
 		var displayPos = DisplayPosition.displayPosition.get();
@@ -35,12 +34,17 @@ class ExprPreprocessing {
 				if (e.pos.pmin >= pr.pmax) return [mkNull(pr)].concat(el.slice(i));
 				return [e].concat(loop(i + 1));
 			}
+			/* print_endline (Printf.sprintf "%i-%i: PR" pr.pmin pr.pmax);
+			List.iter (fun e ->
+				print_endline (Printf.sprintf "%i-%i: %s" (pos e).pmin (pos e).pmax (Ast.s_expr e));
+			) el; */
 			if (el.length == 0) return [mkNull(pr)];
 			if (el[0].pos.pmin >= pr.pmax) return [mkNull(pr)].concat(el);
 			return loop(0);
 		}
 		var inPattern = false;
 		function loop(e:Expr):Expr {
+			// print_endline (Printf.sprintf "%i-%i: %s" (pos e).pmin (pos e).pmax (Ast.s_expr e));
 			return switch e.expr {
 				case EFunction(FKNamed({pos: p}, _), _) if (isAnnotated(p) && isCompletion):
 					throw core.ds.Exit.raise();
@@ -73,7 +77,7 @@ class ExprPreprocessing {
 							acc.push(v2);
 						}
 					}
-					// loop2 returns the variables in order, then `EVars (List.rev vl)` reverses them
+					// port: loop2 returns the variables in order, then `EVars (List.rev vl)` reverses them
 					acc.reverse();
 					var e:Expr = {expr: EVars(acc), pos: e.pos};
 					if (wasAnnotated) e else throw core.ds.Exit.raise();
@@ -141,7 +145,8 @@ class ExprPreprocessing {
 						if (i == cases.length - 1) {
 							var p1 = c1.pos;
 							var ec = if (def == null) {
-								if (e.pos.pmax > displayPos.pmin) markCase(c1.expr, p1) // no default, must be the last case
+								if (e.pos.pmax > displayPos.pmin) // this is so we don't trigger if we're on the }
+									markCase(c1.expr, p1) // no default, must be the last case
 								else c1.expr;
 							} else {
 								var p2 = def.pos;

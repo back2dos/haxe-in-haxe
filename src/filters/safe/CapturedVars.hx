@@ -7,8 +7,7 @@ import core.Texpr;
 import filters.LocalUsage;
 import haxe.ds.IntMap;
 
-// haxe/src/filters/safe/capturedVars.ml — mechanical draft; not compiled or validated.
-// Persistent-map snapshots use copies. Sorted integer keys retain OCaml PMap fold order.
+// port: persistent-map snapshots use copies. Sorted integer keys retain OCaml PMap fold order.
 class CapturedVars {
 	static function ids<T>(m:IntMap<T>):Array<Int> {
 		var a = [for (i in m.keys()) i];
@@ -16,6 +15,24 @@ class CapturedVars {
 		return a;
 	}
 
+	// BLOCK VARIABLES CAPTURE
+	/*
+		For some platforms, it will simply mark the variables which are used in closures
+		using the v_capture flag so it can be processed in a more optimized
+
+		For Flash/JS platforms, it will ensure that variables used in loop sub-functions
+		have an unique scope. It transforms the following expression :
+
+		for( x in array )
+			funs.push(function() return x++);
+
+		Into the following :
+
+		for( _x in array ) {
+			var x = [_x];
+			funs.push(function(x) { function() return x[0]++; }(x));
+		}
+	*/
 	public static function capturedVars(scom:context.SafeCom.SafeContext, impl:context.Common.LocalWrapperApi, forCoro:Bool,
 			e:TExpr):TExpr {
 		inline function mkVar(v:TVar, used:IntMap<T>):TVar {
@@ -39,6 +56,10 @@ class CapturedVars {
 					});
 					TTry(wrap(used, expr), catches);
 				case TFunction(f):
+					/*
+						list variables that are marked as used, but also used in that
+						function and which are not declared inside it !
+					*/
 					var fused = new IntMap<TVar>();
 					var tmpUsed = used.copy();
 					function browse(u:Usage):Void switch u {
@@ -52,6 +73,7 @@ class CapturedVars {
 					LocalUsage.localUsage(browse, e);
 					var vars:Array<TVar> = [];
 					for (id in ids(fused)) vars.unshift(fused.get(id));
+					// in case the variable has been marked as used in a parallel scope...
 					var fexpr = wrap(used, f.tfExpr);
 					var fargs = f.tfArgs.map(function(a) {
 						if (!used.exists(a.variable.vId)) return a;
@@ -60,7 +82,12 @@ class CapturedVars {
 						return {variable: vtmp, defaultValue: a.defaultValue};
 					});
 					var e = TypeOps.mk(TFunction(({tfArgs: fargs, tfType: f.tfType, tfExpr: fexpr} : core.TType.TFunc)), e.etype, e.epos);
+					/*
+						Create a new function scope to make sure that the captured loop variable
+						will not be overwritten in next loop iteration
+					*/
 					if (scom.platformConfig.pfCapturePolicy != CPLoopVars) return e;
+					// We don't want to duplicate any variable declarations, so let's make copies (issue #3902).
 					var newVars = vars.map(v -> {id: v.vId, variable: TypeOps.allocVar(v.vKind, v.vName, v.vType, v.vPos)});
 					function loop(e:TExpr):TExpr return switch e.eexpr {
 						case TLocal(v):
@@ -109,6 +136,9 @@ class CapturedVars {
 		function outLoop(e:TExpr):TExpr {
 			switch e.eexpr {
 				case TWhile(_, _, _):
+					/*
+						collect variables that are declared in loop but used in subfunctions
+					*/
 					var vars = new core.ds.ScopedIntMap();
 					var used = new IntMap<TVar>();
 					var depth = 0;
@@ -137,19 +167,22 @@ class CapturedVars {
 			}
 		}
 		inline function allVars(e:TExpr):IntMap<TVar> {
-			// Scoped maps: restoring a saved PMap is a rollback rather than a copy per scope.
+			// port: scoped maps: restoring a saved PMap is a rollback rather than a copy per scope.
 			var vars = new core.ds.ScopedIntMap();
 			var used = new IntMap<TVar>();
 			var inLoop = false;
-			var loopVars = new core.ds.ScopedIntMap(); /* 1 when assigned */ var assigned = new IntMap<TVar>();
+			var loopVars = new core.ds.ScopedIntMap(); // port: 1 when assigned
+			var assigned = new IntMap<TVar>();
 			var depth = 0;
 			inline function markAssigned(v:TVar):Void {
 				assigned.set(v.vId, v);
+				// Remove from vars lookup because we're done with it
 				vars.remove(v.vId);
 			}
 			inline function checkLoopVar(v:TVar, isAssign:Bool):Void {
 				if (!inLoop) return;
 				if (loopVars.exists(v.vId)) {
+					// If we have both read and write in the same loop we need to wrap.
 					if (isAssign != (loopVars.get(v.vId) == 1)) markAssigned(v);
 				} else loopVars.set(v.vId, isAssign ? 1 : 0);
 			}
@@ -181,14 +214,18 @@ class CapturedVars {
 					}
 				case Assign(v):
 					if (vars.exists(v.vId)) {
+						// different depth - needs wrap
 						if (vars.get(v.vId) != depth) {
 							used.set(v.vId, v);
 							markAssigned(v);
-						} else if (used.exists(v.vId)) markAssigned(v);
+						}
+						// same depth but assigned after being used on a different depth - needs wrap
+						else if (used.exists(v.vId)) markAssigned(v);
 						else checkLoopVar(v, true);
 					}
 			}
 			LocalUsage.localUsage(collectVars, e);
+			// mark all capture variables - also used in rename_local_vars at later stage
 			for (id in ids(used)) {
 				var v = used.get(id);
 				TypeOps.addVarFlag(v, VCaptured);

@@ -8,7 +8,6 @@ import core.TOther.ExtType;
 import core.Meta;
 import core.Error;
 
-// haxe/src/filters/safe/safeFilters.ml — mechanical draft; not compiled or validated.
 class SafeFilters {
 	public static function fixReturnDynamicFromVoidFunction(_:Dynamic, e:TExpr):TExpr {
 		function loop(returnIsVoid:Bool, e:TExpr):TExpr {
@@ -82,7 +81,7 @@ class SafeFilters {
 					++num;
 					curNum = num;
 					didFound = -1;
-					var newE = core.Texpr.mapExpr(run, e);
+					var newE = core.Texpr.mapExpr(run, e); // assuming that no loop will be found in the condition
 					if (didFound != -1) newE = addLoopLabel(didFound, newE);
 					didFound = lastFound;
 					inSwitch = lastSwitch;

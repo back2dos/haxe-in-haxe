@@ -9,13 +9,16 @@ import core.Texpr.Builder;
 import core.Meta;
 import core.Globals.Pos;
 
-// haxe/src/codegen/codegen.ml — mechanical draft; not compile-validated.
+// port: the Str.full_split results of interpolate_code.
 private enum CodePart {
 	Text(value:String);
 	Delim(value:String);
 }
 
 class Codegen {
+	// -------------------------------------------------------------------------- //
+	// TOOLS
+
 	public static function hasProperties(c:TClass):Bool {
 		for (f in c.clOrderedFields) switch f.cfKind {
 			case Var({vRead: AccCall | AccPrivateCall}) | Var({vWrite: AccCall | AccPrivateCall}):
@@ -46,6 +49,9 @@ class Codegen {
 		return acc;
 	}
 
+	// -------------------------------------------------------------------------- //
+	// MISC FEATURES
+
 	public static function isVolatile(t:T):Bool return switch t {
 		case TMono(r): r.tmType != null && isVolatile(r.tmType);
 		case TLazy(f): isVolatile(lazyType(f));
@@ -55,6 +61,10 @@ class Codegen {
 
 	public static function bytesSerialize(data:haxe.io.Bytes):String return haxe.crypto.Base64.encode(data);
 
+	/*
+		Build a default safe-cast expression :
+		{ var $t = <e>; if( Std.is($t,<t>) ) $t else throw "Class cast error"; }
+	*/
 	public static function defaultCast(api:BasicTypes, std:TClass, e:TExpr, texpr:ModuleType, t:T, p:Pos, vtmp:String = "$t"):TExpr {
 		var v = allocVar(VGenerated, vtmp, e.etype, e.epos);
 		var decl = mk(TVar(v, e), api.tvoid, p);
@@ -71,7 +81,7 @@ class Codegen {
 
 	public static function interpolateCode<A>(error:String->Pos->Void, code:String, tl:Array<A>, fString:String->Void, fExpr:A->Void,
 			p:Pos):Void {
-		// Str.full_split does not insert empty Text tokens between delimiters.
+		// port: Str.full_split does not insert empty Text tokens between delimiters.
 		var parts:Array<CodePart> = [], start = 0;
 		for (j in 0...code.length) if (code.charAt(j) == "{" || code.charAt(j) == "}") {
 			if (j > start) parts.push(Text(code.substring(start, j)));
@@ -125,6 +135,7 @@ class UnificationCallback {
 	};
 }
 
+// Static extensions for classes
 class ExtClass {
 	public static function addStaticInit(c:TClass, cf:TClassField, e:TExpr, p:Pos):Void {
 		var ethis = Builder.makeStaticThis(c, p);

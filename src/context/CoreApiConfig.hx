@@ -6,7 +6,12 @@ import core.Meta;
 import core.data.MetaDataApi;
 import core.Error;
 
-// Draft mechanical translation of haxe/src/context/coreApiConfig.ml; unvalidated.
+/**
+	Determines how the core API check is performed for a class.
+	- On: Always perform the core API check.
+	- Off: Never check. Can be set explicitly to override an Implied check.
+	- Implied: Check only if a core definition type exists, otherwise ignore.
+**/
 enum CoreApiCheck {
 	On;
 	Off;
@@ -58,15 +63,26 @@ class CoreApiConfig {
 		return config;
 	}
 
+	/**
+		Returns true if the given file path is in an implied core API location:
+		- Directly in a `_std/` directory (non-recursive, e.g. `_std/Array.hx`)
+		- In `_std/haxe/` (recursive)
+		- In `_std/sys/` (recursive)
+	**/
 	public static function isImpliedCoreApiFile(filePath:String):Bool {
+		// Normalize path separators to forward slashes
 		var normalizedPath = filePath.split("\\").join("/");
 		var marker = "/_std/";
 		var index = normalizedPath.indexOf(marker);
 		if (index == -1) return false;
 		var afterStd = normalizedPath.substr(index + marker.length);
+		// Implied for: direct file in _std/, or files in _std/haxe/ or _std/sys/ subdirectories
 		return afterStd.indexOf("/") == -1 || StringTools.startsWith(afterStd, "haxe/") || StringTools.startsWith(afterStd, "sys/");
 	}
 
+	/**
+		Determines the core_api_check value for a class based on its metadata and file location.
+	**/
 	public static function getCoreApiCheck(meta:Metadata, filePath:String):CoreApiCheck {
 		var entry = try Meta.get(Meta.CoreApi, meta) catch (_:core.Meta.MetaNotFound) null;
 		return entry != null ? ofCoreApiMetadataEntry(entry).check : isImpliedCoreApiFile(filePath) ? Implied : Off;

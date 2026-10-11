@@ -1,6 +1,6 @@
 package core;
 
-// Port of haxe/src/core/classPath.ml.
+// port: from haxe/src/core/classPath.ml.
 enum ClassPathScope {
 	Std;
 	StdTarget;
@@ -82,7 +82,7 @@ class DirectoryClassPath implements IClassPath {
 		return listing == null ? null : {directory: directory, files: listing};
 	}
 
-	// OCaml Filename.dirname (Unix): "Main.hx" is ".", unlike haxe.io.Path.directory.
+	// port: OCaml Filename.dirname (Unix): "Main.hx" is ".", unlike haxe.io.Path.directory.
 	public static function ocamlDirname(name:String):String {
 		inline function isSep(n:Int):Bool return name.charCodeAt(n) == "/".code;
 		if (name == "") return ".";

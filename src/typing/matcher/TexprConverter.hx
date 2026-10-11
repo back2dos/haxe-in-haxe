@@ -24,7 +24,6 @@ import typing.matcher.Case;
 import typing.matcher.Bind;
 import typing.matcher.MatcherGlobals.*;
 
-// haxe/src/typing/matcher/texprConverter.ml — mechanical draft; not compile-validated.
 enum MatchKind {
 	SKValue;
 	SKEnum;
@@ -126,7 +125,9 @@ class TexprConverter {
 						}
 					case ConStatic({clKind: KAbstractImpl(a)}, _): TAbstract(a, extractParamTypes(a.aParams));
 					case ConTypeExpr(mt): ExprToPattern.getGeneralModuleType(ctx, mt, e.epos);
-					case ConFields(_) | ConStatic(_, _): tDynamic;
+					case ConFields(_) | ConStatic(_, _):
+						// error "Could not determine switch kind, make sure the type is known" e.epos;
+						tDynamic;
 				};
 			case _:
 		}
@@ -165,7 +166,7 @@ class TexprConverter {
 				case TInst({clPath: {pack: [], name: "String"}},
 					_) | TInst({clKind: KTypeParameter(_)}, _): {kind: SKValue, finiteness: Infinite};
 				case TInst({clPath: {pack: [], name: "Array"}}, _): {kind: SKLength, finiteness: Infinite};
-				// `all` is still empty here and the constructors are distinct, so they are pushed without add's linear search.
+				// port: `all` is still empty here and the constructors are distinct, so they are pushed without add's linear search.
 				case TEnum(en, _):
 					if (!deep) {
 						var names = [for (n in en.eConstrs.keys()) n];
@@ -179,7 +180,7 @@ class TexprConverter {
 				case _: {kind: SKValue, finiteness: Infinite};
 			};
 		var classified = loop(false, t);
-		// Unguarded enum constructors are removed in one pass at the end (by field identity) rather than one filter per case.
+		// port: unguarded enum constructors are removed in one pass at the end (by field identity) rather than one filter per case.
 		var removedEnum:Null<haxe.ds.ObjectMap<core.TType.TEnumField, Bool>> = null;
 		for (sc in cases) {
 			var compatible = switch sc.scCon.kind {
@@ -245,7 +246,7 @@ class TexprConverter {
 			if (dt.dtTexpr != null) return dt.dtTexpr;
 			var e:Null<TExpr> = switch dt.dtT {
 				case Leaf(c): c.caseExpr == null ? mk(TBlock([]), ctx.t.tvoid, c.casePos) : c.caseExpr;
-				case Switch(subject, [sc = {scCon: {kind: ConFields(_)}}], _):
+				case Switch(subject, [sc = {scCon: {kind: ConFields(_)}}], _): // TODO: Can we improve this by making it more general?
 					var e = loop(rec, params, sc.scDt);
 					e == null ? null : core.TFunctions.concat(subject, e);
 				case Switch(subject, cases, def):
@@ -325,6 +326,7 @@ class TexprConverter {
 						edef, edef != null || ctors.finiteness == RunTimeFinite || ctors.finiteness == CompileTimeFinite)),
 						tSwitch, dt.dtPos);
 				case Guard(cond, a, b):
+					// Normal guards are considered toplevel if we're in the toplevel switch.
 					var top = rec != Deep;
 					var thenE = loop(rec, params, a);
 					if (thenE == null) null; else {
@@ -358,7 +360,10 @@ class TexprConverter {
 					if (thenE == null) {
 						if (top) {
 							var elseE = loop(rec, params, b);
-							elseE == null ? null : mk(TBlock([subject, elseE]), elseE.etype, elseE.epos);
+							elseE == null ? null :
+								// In some cases like extractors, the original e expression might be significant for the
+								// output, so let's make sure it appears there (issue #11738).
+								mk(TBlock([subject, elseE]), elseE.etype, elseE.epos);
 						} else if (Common.ignoreError(com)) mk(TConst(TNull), mkMono(), b.dtPos);
 						else reportNotExhaustive(lookup, subject, [{con: {kind: ConConst(TNull), pos: dt.dtPos}, params: []}]);
 					} else {

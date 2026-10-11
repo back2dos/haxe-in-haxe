@@ -2,13 +2,9 @@ package macros.eval;
 
 import macros.eval.EvalValue;
 
-/**
-	haxe/src/macro/eval/evalArray.ml.
-
-	Deviation: OCaml arrays have a fixed length; `avalues` is a Haxe array whose
-	length plays the role of `Array.length a.avalues` (capacity). Reallocation
-	sizes follow upstream.
-**/
+// port: OCaml arrays have a fixed length; `avalues` is a Haxe array whose
+// length plays the role of `Array.length a.avalues` (capacity). Reallocation
+// sizes follow upstream.
 class EvalArray {
 	public static function create(values:Array<Value>):Varray return new Varray(values, values.length);
 
@@ -196,13 +192,13 @@ class EvalArray {
 		return create(sub(a.avalues, pos, end - pos));
 	}
 
-	/** OCaml's Array.sort is a heap sort (not stable); the order of equal elements follows it. **/
+	// port: OCaml's Array.sort is a heap sort (not stable); the order of equal elements follows it.
 	public static function sort(a:Varray, f:Value->Value->Int):Void {
 		a.avalues = sub(a.avalues, 0, a.alength);
 		ocamlArraySort(f, a.avalues);
 	}
 
-	/** stdlib/array.ml `sort` (heap sort with bottom-up sift), translated directly. **/
+	// port: stdlib/array.ml `sort` (heap sort with bottom-up sift), translated directly.
 	static function ocamlArraySort(cmp:Value->Value->Int, a:Array<Value>):Void {
 		inline function maxson(l:Int, i:Int):Int {
 			var i31 = i + i + i + 1;

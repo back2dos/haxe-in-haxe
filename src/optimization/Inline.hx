@@ -15,7 +15,6 @@ import core.Meta;
 import core.Error;
 import optimization.OptimizerTexpr.*;
 
-// haxe/src/optimization/inline.ml — mechanical draft; not compiled or validated.
 @:structInit class InlineContext {
 	public var scom:SafeContext;
 	public var typer:Null<context.Typecore.Typer>;
@@ -140,19 +139,19 @@ class Inline {
 				!Math.isFinite(f)
 				|| Math.isNaN(f)
 				|| f <= -2147483649.0
-				|| f >= 2147483648.0 ? null : mk(TConst(TInt(Std.int(f))), b.tint, p);
+				|| f >= 2147483648.0 ? null /* out range, keep platform-specific behavior */ : mk(TConst(TInt(Std.int(f))), b.tint, p);
 			case ["Math", "ceil", [{eexpr: TConst(TFloat(s))}]]:
 				var f = core.ds.OcamlFloat.ofString(s);
 				!Math.isFinite(f)
 				|| Math.isNaN(f)
 				|| f <= -2147483649.0
-				|| f >= 2147483647.0 ? null : mk(TConst(TInt(Math.ceil(f))), b.tint, p);
+				|| f >= 2147483647.0 ? null /* out range, keep platform-specific behavior */ : mk(TConst(TInt(Math.ceil(f))), b.tint, p);
 			case ["Math", "floor", [{eexpr: TConst(TFloat(s))}]]:
 				var f = core.ds.OcamlFloat.ofString(s);
 				!Math.isFinite(f)
 				|| Math.isNaN(f)
 				|| f <= -2147483648.0
-				|| f >= 2147483648.0 ? null : mk(TConst(TInt(Math.floor(f))), b.tint, p);
+				|| f >= 2147483648.0 ? null /* out range, keep platform-specific behavior */ : mk(TConst(TInt(Math.floor(f))), b.tint, p);
 			case ["java.Lib", "lock", [obj, block]]: mkUntypedCall("__lock__", p, [obj, mkBlock(block)]);
 			case _: null;
 		};
@@ -195,14 +194,17 @@ class Inline {
 					case _: e;
 				};
 				switch skipCast(t).eexpr {
+					// generate simple typeof checks for basic types
 					case TTypeExpr(TClassDecl({clPath: {pack: [], name: "String"}})): typeof("string");
 					case TTypeExpr(TAbstractDecl({aPath: {pack: [], name: "Bool"}})): typeof("boolean");
 					case TTypeExpr(TAbstractDecl({aPath: {pack: [], name: "Float"}})): typeof("number");
 					case TTypeExpr(TAbstractDecl({aPath: {pack: [], name: "Int"}})) if (trivial(o)):
+						// generate typeof(o) == "number" && (o|0) === o check
 						var lhs = mk(TBinop(OpOr, o, mk(TConst(TInt(0)), b.tint, p)), b.tint, p);
 						var check = Texpr.Builder.fcall(jsSyntax(), "strictEq", [lhs, o], b.tbool, p);
 						mk(TBinop(OpBoolAnd, typeof("number"), check), b.tbool, p);
 					case TTypeExpr(TClassDecl({clPath: {pack: [], name: "Array"}})):
+						// generate (o instanceof Array) && o.__enum__ == null check
 						var iof = Texpr.Builder.fcall(jsSyntax(), "instanceof", [o, t], b.tbool, p);
 						if (!core.Define.defined(scom.defines, core.Define.JsEnumsAsArrays)) iof; else {
 							var en = mk(TField(o, FDynamic("__enum__")), tDynamic, p);
@@ -249,6 +251,7 @@ class Inline {
 	}
 
 	public static function inlineDefaultConfig(cf:TClassField, t:T):InlineConfig {
+		// type substitution on both class and function type parameters
 		function getParams(c:TClass, pl:TParams):{params:TypeParams, types:TParams} {
 			if (c.clSuper == null) return {params: c.clParams, types: pl};
 			var sup = c.clSuper;
@@ -331,7 +334,9 @@ class Inline {
 		var vthis = state.initialize();
 		var inLoop = false;
 		inline function returnType(t:T, el:Array<TExpr>):T {
+			// If the function return is Dynamic or Void, stick to it.
 			if (follow(f.tfType) == tDynamic || core.TOther.ExtType.isVoid(follow(f.tfType))) return f.tfType;
+			// If the expression is Void, find common type of its branches.
 			if (core.TOther.ExtType.isVoid(t)) return typing.UnifyMin.unifyMinRaise(scom.basic, el);
 			return t;
 		}
@@ -347,7 +352,7 @@ class Inline {
 				var r = switch e.eexpr {
 					case TReturn(_): true;
 					case TFunction(_): false;
-					case TIf(_, _, null) | TSwitch({switchDefault: null}) | TWhile(_, _, NormalWhile): false;
+					case TIf(_, _, null) | TSwitch({switchDefault: null}) | TWhile(_, _, NormalWhile): false; // we might not enter this code at all
 					case TTry(a, catches): all(hasTermReturn, [a].concat(catches.map(c -> c.expr)));
 					case TIf(cond, a, b): hasTermReturn(cond) || hasTermReturn(a) && hasTermReturn(b);
 					case TSwitch(s): hasTermReturn(s.switchSubject) || all(hasTermReturn,
@@ -384,7 +389,9 @@ class Inline {
 				case TVar(v, eo):
 					if (hasVarFlag(v,
 						VStatic)) Error.raiseTypingError("Inline functions cannot have static locals",
-							v.vPos); /* OCaml evaluates the constructor arguments right-to-left: map eo before declaring v */ var eo = eo == null ? null : map(false,
+							v.vPos);
+					// port: OCaml evaluates the constructor arguments right-to-left: map eo before declaring v
+					var eo = eo == null ? null : map(false,
 						false, eo);
 					var v = state.declare(v).iSubst;
 					withExpr(e, TVar(v, eo));
@@ -420,7 +427,9 @@ class Inline {
 				case TTry(e1, catches):
 					var t = !term ? e.etype : returnType(e.etype,
 						[e1].concat(catches.map(c ->
-							c.expr))); /* right-to-left constructor arguments: catches before the body */ var catches = catches.map(c -> {
+							c.expr)));
+					// port: right-to-left constructor arguments: catches before the body
+					var catches = catches.map(c -> {
 						variable: state.declare(c.variable).iSubst,
 						expr: map(term, false, c.expr)
 					});
@@ -509,6 +518,8 @@ class Inline {
 					var e1 = map(false, true, e1);
 					withExpr(e, TCall(e1, el.map(e -> map(false, false, e))));
 				case TConst(TSuper): Error.raiseTypingError("Cannot inline function containing super", po);
+				// Special case for @:ast-wrapped TSwitch nodes: If the recursion alters the type of the TSwitch node, we also want
+				// to alter the type of the TMeta node.
 				case TMeta(m = {meta: core.MetaList.StrictMeta.Ast}, e1) if (term):
 					var e1 = map(term, inCall, e1);
 					{eexpr: TMeta(m, e1), etype: e1.etype, epos: e.epos};
@@ -539,6 +550,7 @@ class Inline {
 		return e;
 	}
 
+	// Same as type_inline, but modifies the function body to add field inits
 	public static function typeInlineCtor(ictx:InlineContext, c:TClass, cf:TClassField, tf:TFunc, ethis:TExpr, el:Array<TExpr>,
 			po:Pos):TExpr {
 		var cparams = extractParamTypes(c.clParams);
@@ -563,24 +575,31 @@ class Inline {
 	public static function inlineRestParams(ctx:context.Typecore.Typer, f:TFunc, params:Array<TExpr>, mapType:T->T, p:Pos):Array<TExpr> {
 		if (!ctx.com.config.pfSupportsRestArgs) return params;
 		function loop(args:Array<{variable:TVar, defaultValue:Null<TExpr>}>, params:Array<TExpr>):Array<TExpr> {
+			// last argument expects rest parameters
 			if (args.length == 1 && core.TOther.ExtType.isRest(follow(args[0].variable.vType))) {
 				switch params {
+					// In case of `...rest` just use `rest`
 					case [{eexpr: TUnop(Spread, Prefix, e)}]:
 						return [e];
 					case _:
 				}
+				// In other cases: `haxe.Rest.of([param1, param2, ...])`
 				var v = args[0].variable;
 				return switch follow(mapType(v.vType)) {
 					case TAbstract(a = {aPath: {pack: ["haxe"], name: "Rest"}, aImpl: c}, [t]) if (c != null):
 						var cf = c.clStatics.get("of");
 						if (cf == null) throw "Can't find haxe.Rest.of function";
 						var pos = punionEl(p, params);
+						// [param1, param2, ...]
+						// If we don't know the type (e.g. the rest argument is a field type parameter) then we need
+						// to find a common type via unify_min.
 						var paramType = switch follow(t) {
 							case TMono(_): context.Typecore.unifyMin(ctx, params);
 							case _: t;
 						};
 						var array = mk(TArrayDecl(params), ctx.t.tarray(paramType), pos);
 						[
+							// haxe.Rest.of(array)
 							typing.CallUnification.makeStaticCallBetter(ctx, c, cf, [t], [array], TAbstract(a, [paramType]), pos)
 						];
 					case _: throw "Unexpected rest arguments type";
@@ -595,7 +614,7 @@ class Inline {
 }
 
 class InlineState {
-	// Deviation: upstream conses onto md.m_inline_calls (`x :: l`, then an assignment), which
+	// port: upstream conses onto md.m_inline_calls (`x :: l`, then an assignment), which
 	// is memory safe when parallel filter workers inline into classes of the same module; the
 	// port's list is a shared Haxe array mutated in place, so concurrent unshifts are serialized.
 	static final inlineCallsMutex = new sys.thread.Mutex();
@@ -672,9 +691,15 @@ class InlineState {
 	}
 
 	function getSubstitutions(p:Pos):{vars:Array<{variable:TVar, expr:Null<TExpr>}>, subst:haxe.ds.IntMap<{kind:VarInlineKind, expr:TExpr}>} {
+		/*
+			if variables are not written and used with a const value, let's substitute
+			with the actual value, either create a temp var
+		*/
 		var subst = new haxe.ds.IntMap<{kind:VarInlineKind, expr:TExpr}>();
 		function constant(e:TExpr):Bool return switch e.eexpr {
-			case TLocal(_) | TConst(TThis) | TObjectDecl(_) | TArrayDecl(_): false;
+			case TLocal(_)
+				| TConst(TThis) // not really, but should not be move inside a function body
+				| TObjectDecl(_) | TArrayDecl(_): false;
 			case TFunction(_) | TField(_, FEnum(_, _)) | TTypeExpr(_) | TConst(_): true;
 			case _: !checkExpr(e -> !constant(e), e);
 		};
@@ -696,6 +721,7 @@ class InlineState {
 			var e = item.expr;
 			inline function accept(kind:VarInlineKind) subst.set(i.iSubst.vId, {kind: kind, expr: e});
 			inline function reject():Void {
+				// mark the replacement local for the analyzer
 				if (i.iRead + i.iCalled <= 1 && !i.iWrite) i.iSubst.vKind = VGenerated;
 				vars.unshift({variable: i.iSubst, expr: e});
 			}
@@ -719,8 +745,11 @@ class InlineState {
 					case VIDoNotInline:
 						reject();
 					case VIInlineIfCalled:
+						// "Accept" it so it is added to the substitutions.
 						accept(kind);
+						// If it is read more than once, we still have to reject because we need a local.
 						if (i.iRead > 1) reject();
+						// Otherwise we don't!
 				}
 			}
 		}
@@ -728,6 +757,10 @@ class InlineState {
 	}
 
 	public function initialize():Null<TVar> {
+		// use default values for null/unset arguments
+		/*
+			Build the expr/var subst list
+		*/
 		inline function setVars(pl:Array<TExpr>, al:Array<{variable:TVar, defaultValue:Null<TExpr>}>):Void {
 			var acc = [];
 			var index = 0;
@@ -738,10 +771,19 @@ class InlineState {
 				var e:TExpr;
 				if (index < pl.length) {
 					e = pl[index++];
+					/*
+						if we pass a Null<T> var to an inlined method that needs a T.
+						we need to force a local var to be created on some platforms.
+					*/
 					if (scom.platformConfig.pfStatic && !isNullable(v.vType) && isNull(e.etype)) l.iForceTemp = true;
+					/*
+						if we cast from Dynamic, create a local var as well to do the cast
+						once and allow DCE to perform properly.
+					*/
 					if ((follow(v.vType) == tDynamic) != (follow(e.etype) == tDynamic)) e = mk(TCast(e, null), v.vType, e.epos);
 					switch [e.eexpr, opt] {
 						case [TConst(TNull), c] if (c != null):
+							// issue #9357
 							e = {eexpr: c.eexpr, etype: c.etype, epos: e.epos};
 						case [_, c] if (c != null && (switch c.eexpr {
 							case TConst(TNull): false;
@@ -756,11 +798,12 @@ class InlineState {
 						hadSideEffect = true;
 						l.iForceTemp = true;
 					}
+					// We use a null expression because we only care about the type (for abstract casts).
 					if (l.iAbstractThis) l.iSubst.vExtra = varExtra([], withExpr(e, TConst(TNull)));
 				} else e = opt == null ? mk(TConst(TNull), v.vType, v.vPos) : opt;
 				acc.unshift({local: l, expr: e});
 			}
-			inlinedVars = acc;
+			inlinedVars = acc; // Order is reversed due to tail-recursion
 		}
 		return switch ethis.eexpr {
 			case TConst(TNull):
@@ -788,13 +831,20 @@ class InlineState {
 				var sub = subst.get(v.vId);
 				if (sub == null) e; else switch sub.kind {
 					case VIInline: switch sub.expr.eexpr {
+							// If we inline a function expression, we have to duplicate its locals.
 							case TFunction(_): duplicateTvars(eIdentity, sub.expr);
 							case TCast(e1, null) if (inAssignment): e1;
 							case _: sub.expr;
 						}
+					// We allow inlining function expressions into call-places. However, we have to substitute
+					// their locals to avoid duplicate declarations.
 					case VIInlineIfCalled if (inCall): duplicateTvars(eIdentity, sub.expr);
 					case _: e;
 				}
+			/*
+				This case is a hack for https://github.com/HaxeFoundation/haxe/issues/9355
+				on top of a hack for https://github.com/HaxeFoundation/haxe/issues/2401
+			*/
 			case TCall(e1 = {eexpr: TField(_, FStatic({clPath: {pack: [], name: "Std"}}, {cfName: "string"}))}, [e2]):
 				var mapped = inlineParams(true, false, e2);
 				if (!fastEq(follow(e2.etype), follow(mapped.etype))) mapped = withExpr(e2, TCast(mapped, null));
@@ -816,7 +866,9 @@ class InlineState {
 		md.mInlineCalls.unshift({definitionPos: cf.cfNamePos, callPos: endPos});
 		inlineCallsMutex.release();
 		inline function wrap(e:TExpr):TExpr {
+			// we can't mute the type of the expression because it is not correct to do so
 			var etype = hasParams ? mapType(e.etype) : e.etype;
+			// if the expression is "untyped" and we don't want to unify it accidentally !
 			try {
 				switch follow(e.etype) {
 					case TMono(_) | TInst({clKind: KTypeParameter(_)}, _):
@@ -868,6 +920,7 @@ class InlineState {
 					switch a.aStatus {
 						case ClassStatics({clKind: KAbstractImpl(a)}) if (hasClassFieldFlag(cf,
 							CfImpl)): if (!hasClassFieldFlag(cf, CfAbstractConstructor)) {
+								// the first argument must unify with a_this for abstract implementation functions
 								if (tl.length == 0) throw "Failure: tl";
 								var args = [{name: "", optional: false, type: mapType(a.aThis)}].concat(tl.slice(1));
 								context.Typecore.unifyRaise(mt, TFun({args: args, ret: tret}), p);
@@ -893,6 +946,10 @@ class InlineState {
 			return v;
 		}
 		mapExprTypeLocal = function(mapType:T->T, e:TExpr):TExpr {
+			/*
+				No need to change typing of arguments of inlined call
+				because they were already properly typed prior to inlining.
+			*/
 			var mapper = params.contains(e) ? t->t : mapType;
 			var e = Texpr.mapExprType(e -> mapExprTypeLocal(mapper, e), mapper, v -> mapVar(mapper, v), e);
 			return typing.OverloadResolution.maybeReapplyOverloadCall(e);

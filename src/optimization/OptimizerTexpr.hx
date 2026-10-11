@@ -9,8 +9,8 @@ import context.PurityState.PurityStateTools as PurityState;
 import haxe.ds.IntMap;
 import haxe.Int64;
 
-// haxe/src/optimization/optimizerTexpr.ml — mechanical draft; not compiled or validated.
 class OptimizerTexpr {
+	// tells if an expression causes side effects. This does not account for potential null accesses (fields/arrays/ops)
 	public static function hasSideEffect(e:TExpr):Bool {
 		return switch e.eexpr {
 			case TConst(_) | TLocal(_) | TTypeExpr(_) | TFunction(_) | TIdent(_): false;
@@ -87,7 +87,7 @@ class OptimizerTexpr {
 			return Math.isFinite(f) && core.ds.OcamlFloat.ofString(fstr) == f ? constant(TFloat(fstr)) : e;
 		}
 		inline function comparison(a:Float, b:Float):TExpr {
-			// OCaml compare gives NaN a total ordering; preserve that distinction from IEEE comparisons.
+			// port: OCaml compare gives NaN a total ordering; preserve that distinction from IEEE comparisons.
 			var cmp = Math.isNaN(a) ? (Math.isNaN(b) ? 0 : -1) : Math.isNaN(b) ? 1 : a < b ? -1 : a > b ? 1 : 0;
 			return switch op {
 				case OpEq: constant(TBool(cmp == 0));
@@ -108,9 +108,9 @@ class OptimizerTexpr {
 					case OpAdd: isNumeric(e1.etype);
 					case OpSub | OpShr | OpShl: true;
 					case _: false;
-				}): e1;
+				}): e1; // bits operations might cause overflow
 			case [_, TConst(TInt(1))] if (op == OpMult): e1;
-			case [_, TConst(TFloat(v))] if ((op == OpAdd || op == OpSub) && core.ds.OcamlFloat.ofString(v) == 0 && isFloat(e1.etype)): e1;
+			case [_, TConst(TFloat(v))] if ((op == OpAdd || op == OpSub) && core.ds.OcamlFloat.ofString(v) == 0 && isFloat(e1.etype)): e1; // bits operations might cause overflow
 			case [_, TConst(TFloat(v))] if (op == OpMult && core.ds.OcamlFloat.ofString(v) == 1 && isFloat(e1.etype)): e1;
 			case [TConst(TNull), TConst(TNull)]: switch op {
 					case OpEq: constant(TBool(true));
@@ -227,7 +227,7 @@ class OptimizerTexpr {
 					case _: e;
 				};
 				transform(e, esub);
-			case [Neg, TConst(TInt(i))]: TypeOps.mk(TConst(TInt((-i) | 0)), e.etype, e.epos); // Int32.neg wraps
+			case [Neg, TConst(TInt(i))]: TypeOps.mk(TConst(TInt((-i) | 0)), e.etype, e.epos); // port: Int32.neg wraps
 			case [NegBits, TConst(TInt(i))]: TypeOps.mk(TConst(TInt(~i)), e.etype, e.epos);
 			case [Neg, TConst(TFloat(f))]:
 				var v = 0.0 - core.ds.OcamlFloat.ofString(f);

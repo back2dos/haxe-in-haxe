@@ -12,7 +12,6 @@ import typing.FieldCallCandidate;
 import typing.FieldCallCandidate.FieldCallCandidateData;
 import codegen.Overloads;
 
-// haxe/src/typing/overloadResolution.ml — mechanical draft; not compile-validated.
 @:structInit class ResolvedOverload {
 	public var cls:TClass;
 	public var field:TClassField;
@@ -28,6 +27,12 @@ import codegen.Overloads;
 }
 
 class OverloadResolution {
+	// Try the functional-interface conversion path: if [t_param] is a SAM class
+	// and [t_arg] is a function type, unify the function against the SAM method's
+	// signature (mirroring what AbstractCast does at cast time). Returns true if
+	// compatible. Used during overload candidate filtering so SAM-parameter
+	// overloads aren't discarded before the cast layer runs — but unlike a blind
+	// accept, this still rejects lambdas whose shape doesn't match the SAM.
 	public static function tryFunctionalInterfaceMatch(tParam:T, tArg:T):Bool {
 		return switch [follow(tParam), follow(tArg)] {
 			case [TInst(c, tl), TFun(_)] if (hasClassFlag(c, CFunctionalInterface)):
@@ -66,7 +71,7 @@ class OverloadResolution {
 								case TAbstract(a, [element])
 									if (a.aPath.pack.join(".") == "haxe" && a.aPath.name == "Rest" && tl.length == 1):
 									try {
-										// Preserve upstream's use of the tail after the failed argument.
+										// port: upstream also continues with the tail after the failed argument.
 										var tail = rest.map(function(e) {
 											unify(element, e.etype);
 											return e;
@@ -108,6 +113,11 @@ class OverloadResolution {
 
 	public static function filterOverloads<A>(candidates:Array<FieldCallCandidateData<A>>):Null<A> {
 		var reduced = codegen.Overloads.Resolution.reduceCompatible(candidates);
+		// let st = s_type (print_context()) in
+		// print_endline (Printf.sprintf "Ambiguous overload for %s(%s)" name (String.concat ", " (List.map (fun e -> st e.etype) el)));
+		// List.iter (fun (_,t,(c,cf)) ->
+		// 	print_endline (Printf.sprintf "\tCandidate: %s.%s(%s)" (s_type_path c.cl_path) cf.cf_name (st t));
+		// ) resolved;
 		return reduced.length == 0 ? null : reduced[0].fcData;
 	}
 
@@ -162,6 +172,18 @@ class OverloadResolution {
 			el);
 	}
 
+	/*
+		After inlining or generic substitution, [Type.map_expr_type] has re-resolved
+		TField nodes by name through [quick_field], which collapses an overloaded
+		method to its first declared overload while leaving the field's applied type
+		untouched. This restores the correct overload on such call nodes (other nodes
+		are returned unchanged - hence [maybe_]).
+
+		The matching overload is re-selected structurally from the (already mapped)
+		argument types and just the field reference is restored, which is what code
+		generation relies on. This needs no typer: the arguments are already typed,
+		so resolution only unifies their types against each candidate.
+	*/
 	public static function maybeReapplyOverloadCall(e:TExpr):TExpr {
 		return switch e.eexpr {
 			case TCall(ef = {eexpr: TField(e1, fa)}, el):

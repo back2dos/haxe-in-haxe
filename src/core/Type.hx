@@ -1,7 +1,7 @@
 package core;
 
-// haxe/src/core/type.ml — mechanical draft; not compiled or validated.
-// OCaml's include facade is represented by the original TType, TFunctions,
+// port: from haxe/src/core/type.ml.
+// port: OCaml's include facade is represented by the original TType, TFunctions,
 // TPrinting, TUnification, Texpr and TOther modules and their imports at use sites.
 import core.TType;
 import core.TFunctions;

@@ -20,11 +20,19 @@ import optimization.AnalyzerTexpr.*;
 import optimization.AnalyzerConfig;
 import optimization.OptimizerTexpr.*;
 
-// haxe/src/optimization/analyzer.ml — mechanical draft; not compiled or validated.
+/* File organization:
+	* analyzer.ml: The controlling file with all graph-based optimizations
+	* analyzerConfig.ml: The general configuration which is used in multiple modules
+	* analyzerTexpr.ml: Transformations and query functions on texpr, independent of graph/blocks
+	* analyzerTexprTransformer.ml: Translation of texpr to graph/blocks
+	* analyzerTypes.ml: Definition of graph, block and the analyzer context
+*/
 class Analyzer {
 	public static function initHooks():Void context.Typecore.analyzerRunOnExprRef = function(com, identifier, e) {
 		var scom = context.SafeCom.ofCom(com);
 		var config = AnalyzerConfig.getBaseConfig(scom);
+		// We always want to optimize because const propagation might be required to obtain
+		// a constant expression for inline field initializations (see issue #4977).
 		config.optimize = true;
 		return Run.runOnExpr(Run.createAnalyzerContext(scom, config, identifier, e), e);
 	};
@@ -32,6 +40,15 @@ class Analyzer {
 	static function __init__():Void initHooks();
 }
 
+/*
+	Ssa changes the expressions of a graph to conform to SSA rules. All variables are assigned to only once
+	and SSA-phi expressions are created where necessary.
+
+	The first pass inserts SSA-phi expressions for each variable in the dominance frontier of all its defining
+	blocks.
+
+	The second pass then creates and renames variables to ensure SSA property.
+*/
 class Ssa {
 	public static function addPhi(g:GraphData, bb:BasicBlockData, v:TVar):Void {
 		var p = bb.bbPos;
@@ -153,18 +170,42 @@ class Ssa {
 
 interface DataFlowApi<L, C> {
 	public var flag(default, null):CfgEdgeFlag;
+	// The bottom element of the lattice
 	public var bottom(default, null):L;
+	// The top element of the lattice
 	public var top(default, null):L;
+	// Whether or not conditional branches are checked
 	public var conditional(default, null):Bool;
 	public function toString(t:L):String;
+	// The transfer function
 	public function transfer(actx:AnalyzerContext, ctx:C, bb:BasicBlockData, e:TExpr):L;
+	// The equality function
 	public function equals(a:L, b:L):Bool;
+	// Lattice cell getter
 	public function getCell(ctx:C, id:Int):L;
+	// Lattice cell setter
 	public function setCell(ctx:C, id:Int, t:L):Void;
+	// The initialization function which is called at the start
 	public function init(ctx:AnalyzerContext):C;
+	// The commit function which is called at the end
 	public function commit(actx:AnalyzerContext, ctx:C):Void;
 }
 
+/*
+	DataFlow provides a framework for data flow analysis. It follows CFG edges from the root of the graph
+	and visits the expressions and SSA-phi expressions of blocks on its way.
+
+	If such an expression assigns to a variable (TVar or TBinop(OpAsssign)), all uses of that variable are
+	checked by following the variable's SSA edges.
+
+	A conditional branch edge (CFGCondBranch and CFGCondElse) is only followed if the available information
+	suggests that it might be executable. This causes information from dead branches to not be taken into
+	account.
+
+	For SSA-phi nodes, only those incoming edges which are considered to be executable are processed.
+
+	The algorithm continues until no further changes occur.
+*/
 class DataFlow<L, C> {
 	var api:DataFlowApi<L, C>;
 
@@ -259,6 +300,13 @@ class DataFlow<L, C> {
 	}
 }
 
+/*
+	ConstPropagation implements sparse conditional constant propagation using the DataFlow algorithm. Its lattice consists of
+	constants and enum values, but only the former are propagated. Enum values are treated as immutable data tuples and allow
+	extracting constants, their index or other enum values.
+
+	This module also deals with binop/unop optimization and standard API inlining.
+*/
 enum ConstLattice {
 	Top;
 	Bottom;
@@ -425,6 +473,11 @@ class ConstPropagation {
 	public static function apply(actx:AnalyzerContext):Void new DataFlow(new ConstPropagationImpl()).apply(actx);
 }
 
+/*
+	Propagates local variables to other local variables.
+
+	Respects scopes on targets where it matters (all except JS).
+*/
 enum CopyLattice {
 	CopyTop;
 	CopyBottom;
@@ -480,6 +533,9 @@ class CopyPropagationImpl implements DataFlowApi<CopyLattice, haxe.ds.IntMap<Cop
 					switch getCell(ctx, v.vId) {
 						case Local(w):
 							if (!typeChangeOk(actx.com, w.vType, v.vType)) leave();
+							// This restriction is in place due to how we currently reconstruct the AST. Multiple SSA-vars may be turned back to
+							// the same origin var, which creates interference that is not tracked in the analysis. We address this by only
+							// considering variables whose origin-variables are assigned to at most once.
 							var origin = getVarOrigin(actx.graph, w);
 							switch getVarInfo(actx.graph, origin).viWrites {
 								case [decl] if (inScope(bb, decl)):
@@ -509,6 +565,17 @@ class CopyPropagation {
 	public static function apply(actx:AnalyzerContext):Void new DataFlow(new CopyPropagationImpl()).apply(actx);
 }
 
+/*
+	LocalDce implements a mark & sweep dead code elimination. The mark phase follows the CFG edges of the graphs to find
+	variable usages and marks variables accordingly. If ConstPropagation was run before, only CFG edges which are
+	considered executable are processed.
+
+	If a variable is marked as used, its reaching definition is recursively marked as used too. Furthermore its
+	value is processed as an expression.
+
+	The sweep phase removes all variable declarations and assignments of unused variables, keeping only the assigned
+	expression in case of side-effects.
+*/
 class LocalDce {
 	public static function hasSideEffect(e:TExpr):Bool return switch e.eexpr {
 		case TConst(_) | TLocal(_) | TTypeExpr(_) | TFunction(_) | TIdent(_): false;
@@ -541,6 +608,8 @@ class LocalDce {
 			catch (_:NotFound) {}
 			var reaching = Ssa.getReachingDef(ctx.graph, v);
 			if (reaching == null) {
+				// We don't want to fully recurse for the origin variable because we don't care about its
+				// reaching definition (issue #10972). Simply marking it as being used should be sufficient.
 				var origin = getVarOrigin(ctx.graph, v);
 				if (!used(origin)) addVarFlag(origin, VAnalyzed);
 			} else use(reaching);
@@ -683,7 +752,7 @@ class Debug {
 		for (vi in g.gVarInfos) if (vi.viValue != null) {
 			var value = vi.viValue;
 			var n1 = 'n${value.bb.bbId}:${exprName(value.target)}';
-			for (edge in vi.viSsaEdges) if (value.bb != edge.bb)
+			for (edge in vi.viSsaEdges) if (value.bb != edge.bb) // intra-node edges look stupid in dot
 				ch.writeString('$n1 -> n${edge.bb.bbId}:${exprName(edge.target)}[color=lightblue,constraint=false];\n');
 		}
 	}
@@ -775,14 +844,14 @@ class Debug {
 private typedef ExceptionOutput = {var value:Dynamic; var mutex:sys.thread.Mutex;}
 
 class Run {
-	// actx.withTimer without the dynamic call (the field holds a polymorphic
+	// port: actx.withTimer without the dynamic call (the field holds a polymorphic
 	// function, which Haxe can only type as Dynamic)
 	public static inline function timed<A>(actx:AnalyzerContext, s:Array<String>,
 			f:Void->A):A return withTimer(actx.com.timerCtx, actx.config.detailTimes, actx.identifier, s, f);
 
 	public static function withTimer<A>(timerCtx:core.Timer.TimerContext, level:Int, identifier:Null<String>, s:Array<String>,
 			f:Void->A):A {
-		// Timer.time only calls f when times are not measured; skip building the id and wrapper.
+		// port: Timer.time only calls f when times are not measured; skip building the id and wrapper.
 		if (timerCtx.measureTimes == core.Timer.MeasureTimes.No) return f();
 		var id = core.Timer.determineId(level, ["analyzer"], s, identifier);
 		return core.Timer.time(timerCtx, id, function(_:Null<Bool>) return f(), null);
@@ -795,6 +864,8 @@ class Run {
 			com: com,
 			config: config,
 			graph: g,
+			// For CPP we want to use variable names which are "probably" not used by users in order to
+			// avoid problems with the debugger, see https://github.com/HaxeFoundation/hxcpp/issues/365
 			tempVarName: com.platform == Cpp ? "_hx_tmp" : "tmp",
 			withTimer: function(s, f) return withTimer(com.timerCtx, config.detailTimes, identifier, s, f),
 			identifier: identifier,
@@ -823,6 +894,7 @@ class Run {
 				t = e.etype;
 				real = true;
 			case _:
+				// Wrap expression in a function so we don't have to treat it as a special case throughout.
 				var ret = e.etype;
 				tf = {tfArgs: [], tfType: ret, tfExpr: mk(TReturn(e), tDynamic, e.epos)};
 				t = tfun([], ret);
@@ -841,6 +913,7 @@ class Run {
 		e = optimization.Analyzer.Run.timed(actx, ["<-", "cleanup"], function() return Cleanup.apply(actx.com, e));
 		if (actx.com.debug) addDebugExpr(actx, "after cleanup", e);
 		if (isRealFunction) return e;
+		// Get rid of the wrapping function and its return expressions.
 		return switch e.eexpr {
 			case TFunction(tf):
 				inline function getT(t:T):T return core.TOther.ExtType.isVoid(t) ? tf.tfType : t;
@@ -850,7 +923,9 @@ class Run {
 				};
 				function loop(e:TExpr):TExpr return switch e.eexpr {
 					case TBlock([e1]): loop(e1);
+					// If there's a complex expression, keep the function and generate a call to it.
 					case TBlock(_) | TIf(_, _, _) | TSwitch(_) | TTry(_, _) if (dislikesComplex): throw new TypeExit();
+					// Remove generated return
 					case TReturn(inner) if (inner != null): inner;
 					case TBlock(el): if (el.length == 0) e; else {
 							var last = loop(el[el.length - 1]);

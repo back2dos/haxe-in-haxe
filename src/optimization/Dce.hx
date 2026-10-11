@@ -11,7 +11,6 @@ import core.TFunctions.NotFound;
 import core.Meta;
 import context.SafeCom;
 
-// haxe/src/optimization/dce.ml — mechanical draft; not compiled or validated.
 enum DceMode {
 	DceNo;
 	DceStd;
@@ -35,9 +34,9 @@ enum DceMode {
 	public var usedMutex:sys.thread.Mutex;
 	public var featureMutex:sys.thread.Mutex;
 	public var addFeatureManager:core.ds.NowOrLater;
-	// `expr dce` as a closure, created once per record (clone() leaves it null).
+	// port: `expr dce` as a closure, created once per record (clone() leaves it null).
 	public var visit:Null<TExpr->Void> = null;
-	// markT's type stack, reused across calls; a nested markT only scans its own part.
+	// port: markT's type stack, reused across calls; a nested markT only scans its own part.
 	public var typeStack:Array<T> = [];
 
 	public inline function new(scom:SafeContext, mscom:Null<SafeContext>, full:Bool, stdDirs:Array<String>, debug:Bool,
@@ -90,6 +89,9 @@ class Dce {
 		throw "Invalid_argument: Option.get";
 	}
 
+	// checking
+
+	// check for @:keepSub metadata, which forces @:keep on child classes
 	public static function superForcesKeep(c:TClass):Bool return Meta.has(KeepSub, c.clMeta)
 		|| exists(ct -> superForcesKeep(ct.cls), c.clImplements)
 		|| c.clSuper != null
@@ -107,6 +109,7 @@ class Dce {
 
 	public static var keepMetas:Array<core.MetaList.StrictMeta> = [Keep, Expose];
 
+	// check if a class is kept entirely
 	public static function keepWholeClass(dce:DceData,
 			c:TClass):Bool return Meta.hasOneOf(keepMetas, c.clMeta)
 			|| !(dce.full || isStdFile(dce, core.Path.UniqueKey.lazyPath(c.clModule.mExtra.mFile)) || Meta.has(Dce, c.clMeta))
@@ -123,8 +126,10 @@ class Dce {
 			en:TEnum):Bool return Meta.hasOneOf(keepMetas, en.eMeta)
 			|| !(dce.full || isStdFile(dce, core.Path.UniqueKey.lazyPath(en.eModule.mExtra.mFile)) || Meta.has(Dce, en.eMeta));
 
+	// check if a field carries @:dce, forcing it to be DCE-eligible even if its class is kept
 	public static function fieldForcesDce(cf:TClassField):Bool return Meta.has(Dce, cf.cfMeta);
 
+	// check if a class has any field marked with @:dce
 	public static function classHasDceField(c:TClass):Bool return exists(fieldForcesDce, c.clOrderedFields)
 		|| exists(fieldForcesDce, c.clOrderedStatics)
 		|| c.clConstructor != null
@@ -142,10 +147,16 @@ class Dce {
 		pos: Globals.mkZeroRangePos(p)
 	};
 
+	/*
+		Check if a field is kept.
+		`keep_field` is checked to determine the DCE entry points, i.e. all fields that have `@:keep` or kept for other reasons.
+		And then it is used at the end to check which fields can be filtered from their classes.
+	*/
 	public static function keepField(dce:DceData, cf:TClassField, c:TClass, kind:ClassFieldRefKind):Bool {
 		var stat = kind == CfrStatic;
 		if (Meta.hasOneOf(keepMetas, cf.cfMeta) || hasClassFieldFlag(cf, CfUsed) || cf.cfName == "__init__"
 			|| hasClassFieldFlag(cf, CfExtern) || !stat && overridesExternField(cf, c)) return true;
+		// parent class kept constructor
 		if (kind == CfrConstructor
 			&& c.clSuper != null
 			&& c.clSuper.cls.clConstructor != null
@@ -160,6 +171,8 @@ class Dce {
 			case _: false;
 		};
 	}
+
+	// marking
 
 	public static function checkFeature(dce:DceData, s:String):Void {
 		try {
@@ -184,6 +197,7 @@ class Dce {
 		dce.addFeatureManager.tryNow(function() c.clModule.mExtra.mFeatures.set(s, true));
 	}
 
+	// mark a field as kept
 	public static function markField(dce:DceData, c:TClass, cf:TClassField, kind:ClassFieldRefKind):Void {
 		inline function add(owner:TClass, cf:TClassField):Void if (!hasClassFieldFlag(cf, CfUsed)) {
 			dce.fieldMarkerMutex.acquire();
@@ -217,14 +231,17 @@ class Dce {
 
 	public static function updateMarkedClassFields(dce:DceData, c:TClass):Void {
 		dce = pushClass(dce, c);
+		// mark all :?used fields as surely :used now
 		for (cf in c.clOrderedStatics) if (hasClassFieldFlag(cf, CfMaybeUsed)) markField(dce, c, cf, CfrStatic);
 		for (cf in c.clOrderedFields) if (hasClassFieldFlag(cf, CfMaybeUsed)) markField(dce, c, cf, CfrMember);
+		// we always have to keep super classes and implemented interfaces
 		var init = core.TOther.TClassTools.getClInit(c);
 		if (init != null) dce.followExpr(dce, init);
 		for (ct in c.clImplements) markClass(dce, ct.cls);
 		if (c.clSuper != null) markClass(dce, c.clSuper.cls);
 	}
 
+	// mark a class as kept. If the class has fields marked as @:?keep, make sure to keep them
 	public static function markClass(dce:DceData, c:TClass):Void if (!hasClassFlag(c, CUsed)) {
 		dce.usedMutex.acquire();
 		if (!hasClassFlag(c, CUsed)) {
@@ -241,7 +258,7 @@ class Dce {
 		return keys;
 	}
 
-	// Metadata is replaced, never changed in place: marking runs in parallel and readers
+	// port: metadata is replaced, never changed in place: marking runs in parallel and readers
 	// don't lock (upstream conses onto immutable lists).
 	public static function markEnum(dce:DceData, en:TEnum):Void if (!Meta.has(Used, en.eMeta)) {
 		dce.usedMutex.acquire();
@@ -266,7 +283,8 @@ class Dce {
 		} else dce.usedMutex.release();
 	}
 
-	// The stack is pushed and popped instead of rebuilt per level (upstream conses onto a list).
+	// mark a type as kept
+	// port: the stack is pushed and popped instead of rebuilt per level (upstream conses onto a list).
 	public static function markT(dce:DceData, p:Pos, t:T):Void {
 		var stack = dce.typeStack;
 		markTLoop(dce, p, stack, stack.length, t);
@@ -312,6 +330,7 @@ class Dce {
 		case TEnumDecl(en):
 			markEnum(dce, en);
 		case TAbstractDecl(a):
+			// abstract 'feature' is defined as the abstract type beeing used as a value, not as a type
 			if (!Meta.has(ValueUsed, a.aMeta)) a.aMeta = [
 				({meta: core.MetaList.StrictMeta.ValueUsed, exprs: [], pos: Globals.mkZeroRangePos(a.aPos)} : core.Ast.MetadataEntry)
 			].concat(a.aMeta);
@@ -319,18 +338,24 @@ class Dce {
 		case TTypeDecl(_):
 	}
 
+	// find all dependent fields by checking implementing/subclassing types
 	public static function markDependentFields(dce:DceData, sup:TClass, name:String, kind:ClassFieldRefKind):Void {
 		function loop(c:TClass):Void {
 			var cf = (kind == CfrStatic ? c.clStatics : c.clFields).get(name);
 			if (cf == null) {
+				// if the field is not present on current class, it might come from a base class
 				if (c.clSuper != null) loop(c.clSuper.cls);
 				return;
 			}
+			// if it's clear that the class is kept, the field has to be kept as well. This is also true for
+			// extern interfaces because we cannot remove fields from them
 			if (hasClassFlag(c,
 				CUsed) || hasClassFlag(sup, CInterface) && hasClassFlag(sup, CExtern)) markField(pushClass(dce, c), c, cf, kind);
+			// otherwise it might be kept if the class is kept later, so mark it as :?used
 			else if (!hasClassFieldFlag(cf, CfMaybeUsed)) {
 				dce.fieldMarkerMutex.acquire();
 				if (hasClassFlag(c, CUsed)) {
+					// Lost the race against CUsed
 					dce.fieldMarkerMutex.release();
 					markField(pushClass(dce, c), c, cf, kind);
 				} else {
@@ -345,6 +370,8 @@ class Dce {
 		}
 		inheritance(sup);
 	}
+
+	// expr and field evaluation
 
 	public static function opt<A>(f:A->Void, e:Null<A>):Void if (e != null) f(e);
 
@@ -363,13 +390,18 @@ class Dce {
 		case TDynamic(t) if (t != null):
 			toString(dce, stack, t);
 		case TEnum(_, _) | TFun(_) | TAnon(_) | TAbstract(_, _) | TDynamic(_):
+			// if we to_string these it does not imply that we need all its sub-types
 	}
 
+	// resolve a field by name across the class, its super classes, implemented interfaces and type
+	// parameter constraints, returning the class that actually defines it. Raises Not_found if absent.
 	public static function resolveField(dce:DceData, c:TClass, name:String, kind:ClassFieldRefKind):{cls:TClass, field:TClassField} {
 		try return {cls: c, field: findField(c, name, kind)} catch (_:NotFound) {}
 		try {
 			if (hasClassFlag(c, CInterface)) {
-				for (ct in c.clImplements) {/* HashLink 2.0 JIT: an early exit through two nested try blocks restores only the innermost trap, leaving a dangling handler */ var r = try
+				for (ct in c.clImplements) {
+					// port: HashLink 2.0 JIT: an early exit through two nested try blocks restores only the innermost trap, leaving a dangling handler
+					var r = try
 					resolveField(dce, ct.cls, name, kind) catch (_:NotFound) null;
 					if (r != null) return r;
 				}
@@ -397,6 +429,8 @@ class Dce {
 		}
 	}
 
+	// keep a type's toString, unless that field opts out of being implicitly kept with @:dce
+	// (it is only pulled in by Std.string/trace/Array.join, never by an explicit call)
 	public static function keepToString(dce:DceData, c:TClass):Void {
 		try {
 			var r = resolveField(dce, c, "toString", CfrMember);
@@ -414,6 +448,7 @@ class Dce {
 		mutex.release();
 	}
 
+	// don't add @:directlyUsed if it's used within the class itself. this can happen with extern inline methods
 	public static function markDirectlyUsedClass(dce:DceData,
 			c:TClass):Void if (c != dce.curclass && !Meta.has(DirectlyUsed, c.clMeta)) protect(dce.usedMutex, function() {
 			if (!Meta.has(DirectlyUsed, c.clMeta)) c.clMeta = [
@@ -444,6 +479,7 @@ class Dce {
 			markDirectlyUsedEnum(dce, en);
 			for (t in pl) markDirectlyUsedT(dce, p, t);
 		case TAbstract(a, pl) if (Meta.has(MultiType, a.aMeta)):
+			// this is copy-pasted from mark_t
 			try markDirectlyUsedT(dce, p, context.AbstractCast.findMultitypeSpecialization(dce.scom.platform, a, pl, p).type)
 			catch (_:core.Error.TypingError) {}
 		case TAbstract(a, pl):
@@ -549,6 +585,7 @@ class Dce {
 				markClass(dce, c);
 				markField(dce, c, cf, CfrStatic);
 			case FInstance(c, _, cf):
+				// mark_instance_field_access c cf;
 				markClass(dce, c);
 				markField(dce, c, cf, CfrMember);
 			case FClosure(ct, cf) if (ct != null):
@@ -620,10 +657,12 @@ class Dce {
 				dce.curclass.clModule.mExtra.mFeatures.set(ft, true);
 				checkFeature(dce, ft);
 				visit(inner);
+			// keep toString method of T when array<T>.join() or array<T>.toString() is called
 			case TCall(ef = {eexpr: TField(_, FInstance({clPath: {pack: [], name: "Array"}}, pl, {cfName: "join" | "toString"}))}, args):
 				for (t in pl) toString(dce, [], t);
 				visit(ef);
 				for (a in args) visit(a);
+			// keep toString method when the class is argument to Std.string or haxe.Log.trace
 			case TCall(ef = {eexpr: TField({eexpr: TTypeExpr(TClassDecl(c))}, FStatic(_, {cfName: name}))}, args)
 				if (args.length > 0
 					&& (Globals.sTypePath(c.clPath) == "haxe.Log"
@@ -656,6 +695,7 @@ class Dce {
 				pair(e1, e2);
 			case TBinop(op = OpAdd | OpAssignOp(OpAdd), e1, e2)
 				if ((isString(e1.etype) || isString(e2.etype)) && !(isConstString(e1) && isConstString(e2))):
+				// add array_write if we're doing += to an array element, since this pattern comes before the array_write one
 				switch [op, e1.eexpr] {
 					case [OpAssignOp(_), TArray({etype: t}, _)] if (isArray(t)): checkAndAddFeature(dce, "array_write");
 					case _:
@@ -731,10 +771,12 @@ class Dce {
 	}
 
 	public static function fixAccessors(types:Array<ModuleType>):Void for (mt in types) switch mt {
+		// filter empty abstract implementation classes (issue #1885).
 		case TClassDecl(c = {clKind: KAbstractImpl(_)})
 			if (c.clOrderedStatics.length == 0 && c.clOrderedFields.length == 0 && !hasClassFlag(c, CUsed)):
 			addClassFlag(c, CExtern);
 		case TClassDecl(c = {clKind: KAbstractImpl(a)}) if (a.aEnum):
+			// also filter abstract implementation classes that have only @:enum fields (issue #2858)
 			if (!exists(cf -> !hasClassFieldFlag(cf, CfEnum), c.clOrderedStatics)) addClassFlag(c, CExtern);
 		case TClassDecl(c):
 			function hasAccessor(c:TClass, name:String,
@@ -780,6 +822,8 @@ class Dce {
 				inline function loop(kind:ClassFieldRefKind, cf:TClassField):Void {
 					var ref = mkClassFieldRef(c, cf, kind, dce.scom.isMacroContext);
 					feature(ref, classFeatures.concat(extractIfFeature(cf.cfMeta)));
+					// Have to delay mark_field so that we see all @:ifFeature
+					// a @:dce field is not kept just because its class is: it must be reached like in full DCE
 					if (keepClass && !fieldForcesDce(cf) || isStruct || keepField(dce, cf, c,
 						kind)) delayed.unshift(function() markField(dce, c, cf, kind));
 				}
@@ -807,6 +851,7 @@ class Dce {
 		for (k in dce.checkedFeatures.keys()) dce.features.remove(k);
 		dce.checkedFeatures.clear();
 		dce.addFeatureManager.handleLater();
+		// extend to dependent (= overriding/implementing) class fields
 		context.Parallel.ParallelArray.iter(pool, function(item) {
 			var c:TClass = item.cls;
 			var cf:TClassField = item.field;
@@ -851,9 +896,12 @@ class Dce {
 						case _:
 					}
 				}
+				// a kept-whole class only reaches this branch because of @:dce fields:
+				// keep all of its fields except the @:dce ones that DCE did not reach
 				var classKept = keepWholeClass(dce, c);
 				inline function keep(cf:TClassField,
 						kind:ClassFieldRefKind):Bool return classKept && !fieldForcesDce(cf) || keepField(dce, cf, c, kind);
+				// add :keep so subsequent filter calls do not process class fields again
 				c.clMeta.unshift(mkKeepMeta(c.clPos));
 				inline function filter(cf:TClassField, kind:ClassFieldRefKind):Bool {
 					var b = keep(cf, kind);
@@ -869,8 +917,10 @@ class Dce {
 				c.clOrderedFields = c.clOrderedFields.filter(cf -> filter(cf, CfrMember));
 				if (c.clConstructor != null && !keep(c.clConstructor, CfrConstructor)) c.clConstructor = null;
 				var nonExtern = exists(isPhysicalField, c.clOrderedFields) || exists(isPhysicalField, c.clOrderedStatics);
+				// we keep a class if it is kept whole, was used or has a used field
 				if (classKept || hasClassFlag(c, CUsed) || nonExtern) acc.unshift(mt);
 				else if (core.TOther.TClassTools.getClInit(c) != null && Meta.has(KeepInit, c.clMeta)) {
+					// it means that we only need the __init__ block
 					addClassFlag(c, CExtern);
 					acc.unshift(mt);
 				} else if (dce.debug) Sys.println("[DCE] Removed class " + Globals.sTypePath(c.clPath));
@@ -907,12 +957,17 @@ class Dce {
 			featureMutex: new sys.thread.Mutex(),
 			addFeatureManager: new core.ds.NowOrLater()
 		};
+		// first step: get all entry points, which is the main method and all class methods which are marked with @:keep
 		core.Timer.time(scom.timerCtx, ["filters", "dce", "collect"], function(_:Null<Bool>) collectEntryPoints(dce, types), null);
+		// second step: initiate DCE passes and keep going until no new fields were added
 		core.Timer.time(scom.timerCtx, ["filters", "dce", "mark"], function(_:Null<Bool>) mark(pool, dce), null);
+		// third step: filter types
 		if (mode != DceNo) types = core.Timer.time(scom.timerCtx, ["filters", "dce", "sweep"],
 			function(_:Null<Bool>) return sweep(dce, types), null);
 		core.Timer.time(scom.timerCtx, ["filters", "dce", "cleanup"], function(_:Null<Bool>) {
+			// extra step to adjust properties that had accessors removed (required for Php and Cpp)
 			fixAccessors(types);
+			// remove "override" from fields that do not override anything anymore
 			for (mt in types) switch mt {
 				case TClassDecl(c):
 					for (cf in c.clOrderedFields) if (hasClassFieldFlag(cf, CfOverride)) {
@@ -929,6 +984,9 @@ class Dce {
 					}
 				case _:
 			}
+			/*
+				Mark extern classes as really used if they are extended by non-extern ones.
+			*/
 			for (mt in types) switch mt {
 				case TClassDecl(c) if (c.clSuper != null && !hasClassFlag(c, CExtern) && hasClassFlag(c.clSuper.cls, CExtern)):
 					markDirectlyUsedClass(dce, c.clSuper.cls);
@@ -936,6 +994,7 @@ class Dce {
 					for (ct in c.clImplements) if (hasClassFlag(ct.cls, CExtern)) markDirectlyUsedClass(dce, ct.cls);
 				case _:
 			}
+			// cleanup added fields metadata - compatibility with compilation server
 			for (cf in dce.markedFields.value) removeClassFieldFlag(cf, CfUsed);
 		}, null);
 		return types;

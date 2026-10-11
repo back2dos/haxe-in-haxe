@@ -9,7 +9,6 @@ import core.TPrinting;
 import core.Meta;
 import core.Abstract;
 
-// haxe/src/typing/matcher/matcherGlobals.ml — mechanical draft; not compile-validated.
 class InternalMatchFailure extends haxe.Exception {
 	public function new() super("Internal_match_failure");
 }
@@ -24,6 +23,7 @@ class MatcherGlobals {
 		return [for (_ in 0...left) other].concat([middle]).concat([for (_ in 0...right) other]);
 	}
 
+	// Like is_explicit_null, but follows abstract underlying types.
 	public static function isExplicitNullOrAbstractOverThat(t:T):Bool return switch t {
 		case TMono(r): r.tmType != null && isExplicitNullOrAbstractOverThat(r.tmType);
 		case TAbstract(a, [_]) if (a.aPath.pack.length == 0 && a.aPath.name == "Null"): true;

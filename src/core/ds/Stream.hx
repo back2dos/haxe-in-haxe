@@ -1,22 +1,20 @@
 package core.ds;
 
-/**
-	The lazy, counted token stream operations used by OCaml's Stream parsers.
-	@:generic so the buffer is a typed array on static targets (HashLink
-	otherwise boxes every Array<T> of a type parameter in an ArrayDyn).
-**/
+// port: the lazy, counted token stream operations used by OCaml's Stream parsers.
+// @:generic so the buffer is a typed array on static targets (HashLink
+// otherwise boxes every Array<T> of a type parameter in an ArrayDyn).
 @:generic
 class Stream<T> {
 	final produce:Int->Null<T>;
 	final buffered:Array<T> = [];
-	var head = 0; // buffered[head] is the next token: junk advances it instead of shifting
+	var head = 0; // port: buffered[head] is the next token: junk advances it instead of shifting
 	var consumed = 0;
 	var produced = 0;
 	var ended = false;
 
+	// port: Stream.from and Stream.of_list: a generic class has no statics, construct with new.
 	public function new(produce:Int->Null<T>) this.produce = produce;
 
-	// Stream.from and Stream.of_list: a generic class has no statics, construct with new.
 	public function count():Int return consumed;
 
 	inline function fill(n:Int):Void {
@@ -35,7 +33,7 @@ class Stream<T> {
 		return buffered.slice(head, head + n);
 	}
 
-	// Without the npeek copy: the parser peeks at every token.
+	// port: without the npeek copy: the parser peeks at every token.
 	public function peek():Null<T> {
 		fill(1);
 		return buffered.length > head ? buffered[head] : null;
@@ -68,10 +66,10 @@ class Stream<T> {
 }
 
 class StreamFailure extends haxe.Exception {
-	// Shared instance; see NotFound. The parser backtracks through this constantly.
+	// port: shared instance; see NotFound. The parser backtracks through this constantly.
 	public static final instance = new StreamFailure();
 
-	// Throw site helper: `throw X.raise()`. On HashLink the shared instance is
+	// port: throw site helper: `throw X.raise()`. On HashLink the shared instance is
 	// thrown with rethrow, which skips libhl's native stack capture per throw.
 	public static inline function raise():StreamFailure {
 		#if hl hl.Api.rethrow(instance); #end

@@ -2,7 +2,6 @@ package coro;
 
 import core.TType;
 
-// haxe/src/coro/contTypes.ml — mechanical draft; not compile-validated.
 @:structInit class ContinuationApi {
 	public var baseContinuationClass:TClass;
 	public var suspensionState:T;

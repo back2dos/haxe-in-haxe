@@ -7,8 +7,10 @@ import core.Error;
 import filters.exception.Exceptions;
 import filters.exception.ExceptionFunctions;
 
-// haxe/src/filters/exception/saveStacks.ml — mechanical draft; not compiled or validated.
 class SaveStacks {
+	/**
+		Inserts `haxe.NativeStackTrace.saveStack(e)` in non-haxe.Exception catches.
+	**/
 	public static function insertSaveStacks(ectx:ExceptionContext, scom:context.SafeCom.SafeContext):TExpr->TExpr {
 		function containsInsertionPoints(e:TExpr):Bool return switch e.eexpr {
 			case TTry(body, catches): core.ds.ArrayTools.exists(catches,
@@ -46,9 +48,18 @@ class SaveStacks {
 		return e -> containsInsertionPoints(e) ? run(e) : e;
 	}
 
+	/**
+		Adds `this.__shiftStack()` calls to constructors of classes which extend `haxe.Exception`
+	**/
 	static function patchConstructorsContext(ectx:ExceptionContext):ModuleType->Void {
 		var exception = ectx.haxeException.force();
 		switch exception.type {
+			/*
+				Add only if `__shiftStack` method exists and has a constructor.
+
+				If it doesn't have a constructor, that means it wasn't called and was removed during DCE.
+				In this case, there is no need to patch it because the exception is never instantiated.
+			*/
 			case TInst(cls, _) if (cls.clFields.exists("__shiftStack") && cls.clConstructor != null):
 			case _:
 				return function(_) {};

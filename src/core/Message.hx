@@ -3,7 +3,7 @@ package core;
 import core.Globals.Pos;
 import core.Json.JsonValue;
 
-// Port of haxe/src/core/message.ml.
+// port: from haxe/src/core/message.ml.
 
 enum MessageSeverity {
 	Error;

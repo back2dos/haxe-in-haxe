@@ -10,26 +10,52 @@ import compiler.server.ServerCompilationContext;
 import context.Common;
 import context.Parallel.ManagedPool;
 
-// Port of haxe/src/compiler/haxe.ml.
+/*
+	Conventions:
+	- e: expression (typed or untyped)
+	- c: class
+	- en: enum
+	- td: typedef (tdef)
+	- a: abstract
+	- an: anon
+	- tf: tfunc
+	- cf: class_field
+	- ef: enum_field
+	- t: type (t)
+	- ct: complex_type
+	- v: local variable (tvar)
+	- m: module (module_def)
+	- mt: module_type
+	- p: pos
+
+	"param" refers to type parameters
+	"arg" refers to function arguments
+	leading s_ means function returns string
+	trailing l means list (but we also use natural plurals such as "metas")
+	semantic suffixes may be used freely (e.g. e1, e_if, e')
+*/
+
+// port: haxe/src/compiler/haxe.ml
 class Main {
 	static function main():Void {
 		#if js
-		// Like OCaml, only record backtraces with OCAMLRUNPARAM=b: the compiler
+		// port: like OCaml, only record backtraces with OCAMLRUNPARAM=b: the compiler
 		// throws exceptions for ordinary control flow (see runtime/hl for HashLink).
 		var ocamlrunparam = Sys.getEnv("OCAMLRUNPARAM");
 		if (ocamlrunparam == null || ocamlrunparam.indexOf("b") < 0) js.Syntax.code("Error.stackTraceLimit = 0");
 		#end
+		// port: in place of upstream's DynamicGc tuning (HashLink only, see GcPolicy)
 		core.ds.GcPolicy.init();
 		Sys.exit(run(Sys.args()));
 	}
 
-	// Upstream assigns these forward references during OCaml module
+	// port: upstream assigns these forward references during OCaml module
 	// initialization. Static initialization order differs between Haxe
 	// targets, so they are (re)assigned once all statics are initialized.
 	public static function initHooks():Void {
 		core.Type.initialize();
 		core.TUnification.initHooks();
-		context.AbstractCast.install(); // the JVM initializes classes lazily
+		context.AbstractCast.install(); // port: the JVM initializes classes lazily
 		typing.Typer.initialize();
 		typing.TyperEntry.initHooks();
 		typing.TypeloadFunction.initHooks();
@@ -53,7 +79,7 @@ class Main {
 		return parts.map(p -> Std.string(Std.parseInt(p))).join(".");
 	}
 
-	// Ipaddr.V6.of_string: eight groups of up to four hex digits, at most one `::`
+	// port: Ipaddr.V6.of_string: eight groups of up to four hex digits, at most one `::`
 	// standing for one or more zero groups; the last two groups may be an IPv4 address.
 	static function isV6(s:String):Bool {
 		if (s.indexOf(":") < 0 || !~/^[0-9a-fA-F:.]+$/.match(s)) return false;
@@ -77,12 +103,10 @@ class Main {
 		return a != null && b != null && a + b <= 7;
 	}
 
-	/**
-		`Ipaddr.with_port_of_string ~default:(-1)`: an IPv4 or IPv6 address with an
-		optional port (`a.b.c.d:port`, `[v6]:port`). Returns null for `Error _`.
-		IPv6 addresses are kept as written (`V6.to_string` normalization is not
-		reproduced; the host socket API cannot use them).
-	**/
+	// port: `Ipaddr.with_port_of_string ~default:(-1)`: an IPv4 or IPv6 address with an
+	// optional port (`a.b.c.d:port`, `[v6]:port`). Returns null for `Error _`.
+	// IPv6 addresses are kept as written (`V6.to_string` normalization is not
+	// reproduced; the host socket API cannot use them).
 	static function ipWithPortOfString(hp:String):Null<{ip:IpAddr, port:Int}> {
 		function port(s:String):Null<Int> return isDigits(s) ? Std.parseInt(s) : null;
 		var v4 = parseV4(hp);
@@ -137,7 +161,7 @@ class Main {
 
 	public static function run(args:Array<String>):Int {
 		initHooks();
-		// The port is executed by a host compiler, so the std location of the
+		// port: the port is executed by a host compiler, so the std location of the
 		// executable is not meaningful; HAXE_IN_HAXE_STD_PATH overrides the
 		// HAXE_STD_PATH the host may have rewritten for --run.
 		var std = Sys.getEnv("HAXE_IN_HAXE_STD_PATH");
@@ -149,7 +173,7 @@ class Main {
 		} catch (e:BadArg) {
 			return badArg(e.message);
 		} catch (e:core.ds.Failure) {
-			// An uncaught OCaml exception
+			// port: an uncaught OCaml exception
 			Sys.stderr().writeString("Fatal error: exception Failure(\"" + e.message + "\")\n");
 			return 2;
 		}
@@ -203,7 +227,7 @@ class Main {
 			ServerCompilationContext.dispose(sctx);
 			return badArg(e.message);
 		} catch (e:core.ds.Exit) {
-			// handle_jsonrpc_error raised Exit after sending the error: an uncaught OCaml exception
+			// port: handle_jsonrpc_error raised Exit after sending the error: an uncaught OCaml exception
 			ServerCompilationContext.dispose(sctx);
 			io.flush();
 			Sys.stderr().writeString("Fatal error: exception Stdlib.Exit\n");
@@ -226,7 +250,7 @@ class Main {
 		return code;
 	}
 
-	// Upstream reports an uncaught OCaml exception with its backtrace.
+	// port: upstream reports an uncaught OCaml exception with its backtrace.
 	static function reportInternalError(e:Dynamic):Void {
 		var stack = Std.isOfType(e, haxe.Exception) ? (cast(e, haxe.Exception)).stack : haxe.CallStack.exceptionStack();
 		Sys.stderr().writeString(haxe.CallStack.toString(stack) + "\n" + Std.string(e) + "\n");
@@ -238,5 +262,5 @@ class Main {
 	}
 }
 
-/** `bad_arg`: prints the message and exits with code 1. **/
+// port: raised for `bad_arg`; run prints the message and returns exit code 1.
 private class BadArg extends haxe.Exception {}

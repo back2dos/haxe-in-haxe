@@ -3,8 +3,8 @@ package filters.safe;
 import core.TType;
 import core.TFunctions as TypeOps;
 
-// haxe/src/filters/safe/addFinalReturn.ml — mechanical draft; not compiled or validated.
 class AddFinalReturn {
+	// Adds final returns to functions as required by some platforms
 	public static function addFinalReturn(e:TExpr):TExpr {
 		function loop(e:TExpr, t:T):TExpr {
 			inline function defReturn(p:core.Globals.Pos):TExpr {

@@ -2,7 +2,6 @@ package core.ds;
 
 private typedef AtomicLazyMutex = sys.thread.Mutex;
 
-// Port of haxe/src/core/ds/atomicLazy.ml.
 private enum AtomicLazyState<T> {
 	Unset(callback:Void->T);
 	Computing;
@@ -12,7 +11,7 @@ private enum AtomicLazyState<T> {
 class AtomicLazy<T> {
 	var state:AtomicLazyState<T>;
 	var mutex:AtomicLazyMutex = new AtomicLazyMutex();
-	// published with release order after `value` (upstream: Atomic.t); read without the mutex
+	// port: published with release order after `value` (upstream: Atomic.t); read without the mutex
 	final ready = new haxe.atomic.AtomicBool(false);
 	var value:Null<T> = null;
 
@@ -45,7 +44,7 @@ class AtomicLazy<T> {
 	}
 
 	public function force():T {
-		// Lock-free fast path, like upstream's Atomic.get: Set is final once published.
+		// port: lock-free fast path, like upstream's Atomic.get: Set is final once published.
 		if (ready.load()) return value;
 		while (true) {
 			mutex.acquire();

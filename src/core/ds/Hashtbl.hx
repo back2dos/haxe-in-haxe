@@ -2,10 +2,11 @@ package core.ds;
 
 import Type as StdType;
 
-/** Structurally keyed table. Binding stacks preserve OCaml add/find/remove behavior.
-	Iteration is deterministic insertion order; callers must not use it as binary pool order. */
+// port: OCaml Hashtbl with structural keys. Binding stacks preserve OCaml
+// add/find/remove behavior. Iteration is deterministic (newest binding first) but
+// not upstream's bucket order; callers must not use it as binary pool order.
 class Hashtbl<K, V> {
-	// Bounded structural hashing for grouping tables; hash values are not serialized.
+	// port: bounded structural hashing for grouping tables; hash values are not serialized.
 	public static function hash(value:Dynamic):Int {
 		var budget = 100, meaningful = 10, result = 0;
 		inline function mix(v:Int):Void result = (result * 65599 + v) | 0;
@@ -54,9 +55,9 @@ class Hashtbl<K, V> {
 		return result & 0x3fffffff;
 	}
 
-	// Newest binding first, as upstream's bucket lists; this is also the iteration order.
+	// port: newest binding first, as upstream's bucket lists; this is also the iteration order.
 	var entries:Array<MapEntry<K, V>> = [];
-	// Lookup index by Key.canonical (newest binding first per bucket). A key
+	// port: lookup index by Key.canonical (newest binding first per bucket). A key
 	// without a canonical form switches the table to linear scans with
 	// Key.compare, which is the reference behavior.
 	var index:Null<haxe.ds.StringMap<Array<MapEntry<K, V>>>> = new haxe.ds.StringMap();

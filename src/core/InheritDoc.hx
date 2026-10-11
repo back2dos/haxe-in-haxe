@@ -8,7 +8,7 @@ import core.TFunctions;
 import core.TFunctions.*;
 import typing.Typeload;
 
-// Mechanical translation of haxe/src/core/inheritDoc.ml. Draft; not compiled or tested.
+// port: from haxe/src/core/inheritDoc.ml.
 class InheritDoc {
 	public static function exprToTarget(e:Expr):{path:GlobalTypePath, sub:Null<String>} {
 		function loop(e:Expr):Array<String> return switch e.expr {
@@ -51,6 +51,10 @@ class InheritDoc {
 		catch (_:Dynamic) throw NotFound.raise();
 	}
 
+	/**
+		Finds `@:inheritDoc` meta in `meta` and populates `doc_inherited` field of `doc`
+		with found docs.
+	**/
 	public static function buildDoc(ctx:context.Typecore.Typer, doc:{value:Documentation}, meta:Metadata,
 			?noArgsCb:(Documentation->Void)->Void):Void {
 		function add(d:Documentation):Void {
@@ -67,6 +71,9 @@ class InheritDoc {
 		}
 	}
 
+	/**
+		Populates `doc_inherited` field of `c.cl_doc`
+	**/
 	public static function buildClassDoc(ctx:context.Typecore.Typer, c:TClass):Void {
 		if (c.clDoc != null && c.clDoc.docInherited.length != 0) c.clDoc.docInherited = [];
 		var doc = {value: c.clDoc};
@@ -79,6 +86,9 @@ class InheritDoc {
 		c.clDoc = doc.value;
 	}
 
+	/**
+		Populates `doc_inherited` field of `enm.e_doc`
+	**/
 	public static function buildEnumDoc(ctx:context.Typecore.Typer, en:TEnum):Void {
 		if (en.eDoc != null && en.eDoc.docInherited.length != 0) en.eDoc.docInherited = [];
 		var doc = {value: en.eDoc};
@@ -86,6 +96,9 @@ class InheritDoc {
 		en.eDoc = doc.value;
 	}
 
+	/**
+		Populates `doc_inherited` field of `a.a_doc`
+	**/
 	public static function buildAbstractDoc(ctx:context.Typecore.Typer, a:TAbstract):Void {
 		if (a.aDoc != null && a.aDoc.docInherited.length != 0) a.aDoc.docInherited = [];
 		var doc = {value: a.aDoc};
@@ -93,6 +106,9 @@ class InheritDoc {
 		a.aDoc = doc.value;
 	}
 
+	/**
+		Populates `doc_inherited` field of `cf.cf_doc`
+	**/
 	public static function buildClassFieldDoc(ctx:context.Typecore.Typer, cOpt:Null<TClass>, cf:TClassField):Void {
 		if (cf.cfDoc != null && cf.cfDoc.docInherited.length != 0) cf.cfDoc.docInherited = [];
 		var doc = {value: cf.cfDoc};
@@ -106,6 +122,9 @@ class InheritDoc {
 		cf.cfDoc = doc.value;
 	}
 
+	/**
+		Populates `doc_inherited` field of `ef.ef_doc`
+	**/
 	public static function buildEnumFieldDoc(ctx:context.Typecore.Typer, ef:TEnumField):Void {
 		if (ef.efDoc != null && ef.efDoc.docInherited.length != 0) ef.efDoc.docInherited = [];
 		var doc = {value: ef.efDoc};
@@ -113,10 +132,15 @@ class InheritDoc {
 		ef.efDoc = doc.value;
 	}
 
+	/**
+		Collects `Ast.documentation` for a provided `target`
+		The `target` is an AST expr representing a dot path for a type or a field.
+		E.g. `my.pack.MyType` or `my.pack.MyType.field`
+	**/
 	public static function getTargetDoc(ctx:context.Typecore.Typer, eTarget:Expr):Documentation {
 		var target = exprToTarget(eTarget);
 		var path = target.path;
-		// Not inline: HashLink 2.0 JIT: an early exit through two nested try blocks restores only the innermost trap, leaving a dangling handler (resolveField's try sits inside the try below).
+		// port: not inline: HashLink 2.0 JIT: an early exit through two nested try blocks restores only the innermost trap, leaving a dangling handler (resolveField's try sits inside the try below).
 		function resolveField(fieldName:String):Documentation {
 			var reversed = path.pack.copy();
 			reversed.reverse();
@@ -159,7 +183,9 @@ class InheritDoc {
 			case _: throw NotFound.raise();
 		};
 		try {
+			// type
 			if (target.sub == null) return resolveTypeT(findType(ctx, LoadNormal, Ast.mkTypePath(path.pack, path.name), eTarget.pos));
+			// field or sub type
 			if (Ast.isLowerIdent(target.sub)) return resolveField(target.sub);
 			var doc = try resolveTypeT(findType(ctx, LoadNormal, Ast.mkTypePath(path.pack, path.name, [], target.sub),
 				eTarget.pos)) catch (_:NotFound) resolveField(target.sub);

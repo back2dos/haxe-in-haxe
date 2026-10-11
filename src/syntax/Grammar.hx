@@ -11,9 +11,7 @@ import core.display.DisplayPosition;
 import core.DisplayTypes.DisplayModeValue;
 import syntax.Parser;
 
-// Mechanical translation of haxe/src/syntax/grammar.ml.
-//
-// ppx_parser semantics (see ppx_parser lib/parser.ml): a `match%parser` case is
+// port: ppx_parser semantics (see ppx_parser lib/parser.ml): a `match%parser` case is
 // selected by its first element. A terminal first element is matched against
 // Stream.peek (guards are evaluated before junking); a call first element is
 // selected unless it raises Stream.Failure. Once selected, any later element
@@ -30,7 +28,7 @@ private enum DeclResult<T> {
 class Grammar {
 	static var parsingMacroCond = false;
 
-	// Entry points used by ParserEntry.
+	// port: entry points used by ParserEntry.
 
 	public static function parseFileStream(ctx:ParserContext, s:S):Package {
 		var r = parseFile(ctx, s);
@@ -39,7 +37,7 @@ class Grammar {
 
 	public static function parseExpressionStream(ctx:ParserContext, s:S):Expr return expr(ctx, s);
 
-	// ppx_parser helpers
+	// port: ppx_parser helpers
 
 	static inline function peek(s:S):ParserToken return s.peek();
 
@@ -48,11 +46,11 @@ class Grammar {
 		catch (_:StreamFailure) throw new StreamError("Parse error.");
 	}
 
-	// Inline so the result is the caller's concrete {v:T} (HashLink otherwise
+	// port: inline so the result is the caller's concrete {v:T} (HashLink otherwise
 	// converts the generic structure with a dynamic lookup per call).
 	static inline function tryHead<T>(f:Void->T):Null<{v:T}> {
 		var r:Null<{v:T}> = null;
-		// Stream.Failure is only ever thrown as the shared instance: an identity
+		// port: Stream.Failure is only ever thrown as the shared instance: an identity
 		// test instead of the typed catch's Exception.caught and type check.
 		try r = {v: f()} catch (e:haxe.Exception) {
 			if (e != StreamFailure.instance) throw e;
@@ -78,7 +76,7 @@ class Grammar {
 		return tk != null && Type.enumEq(tk.token, t);
 	}
 
-	// Accept a token without arguments: returns its position, or null.
+	// port: accept a token without arguments: returns its position, or null.
 	static function acceptTok(s:S, t:Token):Null<Pos> {
 		var tk = peek(s);
 		if (tk != null && Type.enumEq(tk.token, t)) {
@@ -130,7 +128,7 @@ class Grammar {
 
 	static function pn(name:String, p:Pos):PlacedName return {name: name, pos: p};
 
-	// popt, plist and the psep* helpers are inline for the same reason, and
+	// port: popt, plist and the psep* helpers are inline for the same reason, and
 	// because HashLink builds an Array<T> of a type parameter as an ArrayDyn.
 	public static inline function popt<T>(f:S->T, s:S):Null<T> {
 		var r = tryHead(function() return f(s));
@@ -309,7 +307,7 @@ class Grammar {
 		if (p2 != null) Parser.syntaxError(ctx, Custom("`final var` is not supported, use `final` instead"), s, null, punion(p1, p2));
 	}
 
-	// Declarations
+	// port: declarations
 
 	static function parseFile(ctx:ParserContext, s:S):{pack:Array<String>, decls:Array<TypeDecl>} {
 		if (isKwd(s, Package)) {
@@ -348,7 +346,8 @@ class Grammar {
 			} catch (e:TypePathCompletion) {
 				if (e.pack.length == 0 && e.type != null && !e.type.isSub) {
 					var name = e.type.name;
-					// resolve imports (upstream iterates the reversed accumulator)
+					// resolve imports
+					// port: upstream iterates the reversed accumulator
 					var racc = acc.copy();
 					racc.reverse();
 					for (d in racc) switch d.definition {
@@ -1018,7 +1017,7 @@ class Grammar {
 				case DError(msg):
 					Parser.handleStreamError(ctx, msg, s);
 					if (!resume(ctx, tdecl, true, s)) {
-						// upstream returns the (reversed) accumulator here
+						// port: upstream returns the (reversed) accumulator here
 						var l = acc.copy();
 						l.reverse();
 						return {fields: l, pos: Parser.lastPos(ctx, s)};
@@ -1298,7 +1297,7 @@ class Grammar {
 		return parseTypePath2(ctx, p0, pack, n.name, n.pos, s);
 	}
 
-	// pack is in reverse order (head = innermost), as upstream.
+	// port: pack is in reverse order (head = innermost), as upstream.
 	static function parseTypePath2(ctx:ParserContext, p0:Null<Pos>, pack:Array<String>, name:String, p1:Pos, s:S):PlacedTypePath {
 		inline function revPack(l:Array<String>):Array<String> {
 			var r = l.copy();
@@ -1907,7 +1906,7 @@ class Grammar {
 		}
 	}
 
-	// Blocks
+	// port: blocks
 
 	static function block1(ctx:ParserContext, s:S):ExprDef {
 		var r = tryHead(function() return dollarIdent(s));
@@ -2126,7 +2125,7 @@ class Grammar {
 				el.reverse();
 			} else {
 				var r = resumeOrFail(p1);
-				// upstream applies List.rev to the resumed list as well
+				// port: upstream applies List.rev to the resumed list as well
 				el = r.el.copy();
 				el.reverse();
 				p2 = r.p;
@@ -2181,7 +2180,7 @@ class Grammar {
 			if (!isTok(s, Comma)) return vl;
 			s.junk();
 			var h = tail(function() return parseVarDeclHead(ctx, isFinal, s));
-			// upstream shadows `final` with the head's result for the rest of the list
+			// port: upstream shadows `final` with the head's result for the rest of the list
 			isFinal = h.isFinal;
 			vl.push(parseVarAssignmentResume(ctx, h.isFinal, h.name, h.pos, h.t, h.meta, s));
 		}
@@ -2341,7 +2340,7 @@ class Grammar {
 		}
 	}
 
-	// Expressions
+	// port: expressions
 
 	public static function expr(ctx:ParserContext, s:S):Expr {
 		var r = tryHead(function() return parseMetaEntry(ctx, s));
@@ -2502,6 +2501,13 @@ class Grammar {
 				s.junk();
 				var e = tail(function() return expr(ctx, s));
 				return Parser.makeUnop(Neg, e, p);
+			// /* removed unary + : this cause too much syntax errors go unnoticed, such as "a + + 1" (missing 'b')
+			// 					without adding anything to the language
+			// | [ (Binop OpAdd,p1) ] ->
+			// 	(match%parser s with
+			// 	| [ (Const (Int i),p); [%let e = expr_next ctx (EConst (Int i),p)] ] -> e
+			// 	| [ (Const (Float f),p); [%let e = expr_next ctx (EConst (Float f),p)] ] -> e
+			// 	| [ ] -> serror()) */
 			case Kwd(For):
 				s.junk();
 				expectTok(s, POpen);
@@ -2601,7 +2607,7 @@ class Grammar {
 		}
 	}
 
-	// The POpen case of `expr`.
+	// port: the POpen case of `expr`.
 	static function parseParenthesis(ctx:ParserContext, p1:Pos, s:S):Expr {
 		var tk = peek(s);
 		switch tk.token {
@@ -3075,7 +3081,7 @@ class Grammar {
 		return Parser.syntaxError(ctx, Expected(["expression"]), s, Parser.mkNullExpr(Parser.punionNext(ctx, plast, s)));
 	}
 
-	// Conditional compilation
+	// port: conditional compilation
 
 	static function validateMacroCond(ctx:ParserContext, s:S, e:Expr):Expr {
 		return switch e.expr {

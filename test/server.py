@@ -31,7 +31,7 @@ request is the first compilation of a server (HXB written to and exported
 from the cache, no restoring).
 
 HAXE_IN_HAXE_PORT replaces the HashLink build with another prebuilt port
-command (as in conformance.py), e.g. bin/backend/hih/hih (backend/build.sh port).
+command (as in conformance.py), e.g. bin/hxc/hih/hih (hxc/build.sh port).
 
 Usage: HAXE_REFERENCE=haxe/haxe python3 test/server.py [-j N] [--rounds N] [--hxb-cache] [--fresh]
            [--scenario cases|edit|misc|server-connect|all] [--cases FILE] [name-substring ...]
@@ -426,7 +426,7 @@ def main():
     env["HAXE_IN_HAXE_STD_PATH"] = str(STD)
     GENERATED.mkdir(parents=True, exist_ok=True)
     if os.environ.get("HAXE_IN_HAXE_PORT"):
-        # a prebuilt port command (e.g. the hxc build bin/backend/hih/hih), as in conformance.py
+        # a prebuilt port command (e.g. the hxc build bin/hxc/hih/hih), as in conformance.py
         port_cmd = [str(ROOT / a) if (ROOT / a).is_file() else a for a in shlex.split(os.environ["HAXE_IN_HAXE_PORT"])]
     else:
         hl = os.environ.get("HAXE_HL") or shutil.which("hl")

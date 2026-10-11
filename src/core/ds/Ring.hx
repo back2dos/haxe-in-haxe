@@ -1,6 +1,5 @@
 package core.ds;
 
-// Port of haxe/src/core/ds/ring.ml.
 class Ring<T> {
 	var values:Array<T>;
 	var index:Int = 0;

@@ -25,8 +25,6 @@ import context.Lookup;
 import context.PlatformConfig;
 import compiler.io.CompilerIo;
 
-// haxe/src/context/common.ml — mechanical draft; not compile-validated.
-// Shared declarations and deferred runtime hooks are retained without implementing their services.
 enum PackageRule {
 	Forbidden;
 	Remap(name:String);
@@ -75,7 +73,7 @@ class Stats {
 	public inline function clone():CallbackList return new CallbackList(value);
 }
 
-// (string*pos) list -> (WarningList.warning*string*pos) list -> unit
+// port: (string*pos) list -> (WarningList.warning*string*pos) list -> unit
 typedef NullSafetyReportCallback = Array<{msg:String, pos:Pos}>->Array<{warning:WarningCode, msg:String, pos:Pos}>->Void;
 
 class CompilerCallbacks {
@@ -154,21 +152,21 @@ class FileKeys {
 }
 
 enum CompilerStage {
-	CCreated;
-	CInitialized;
-	CInitMacrosStart;
-	CInitMacrosDone;
-	CTypingDone;
-	CFilteringStart;
-	CAnalyzerStart;
-	CAnalyzerDone;
-	CSaveStart;
-	CSaveDone;
-	CDceStart;
-	CDceDone;
-	CFilteringDone;
-	CGenerationStart;
-	CGenerationDone;
+	CCreated; // Context was just created
+	CInitialized; // Context was initialized (from CLI args and such).
+	CInitMacrosStart; // Init macros are about to run.
+	CInitMacrosDone; // Init macros did run - at this point the signature is locked.
+	CTypingDone; // The typer is done - at this point com.types/modules/main is filled.
+	CFilteringStart; // Filtering just started (nothing changed yet).
+	CAnalyzerStart; // Some filters did run, the analyzer is about to run.
+	CAnalyzerDone; // The analyzer just finished.
+	CSaveStart; // The type state is about to be saved.
+	CSaveDone; // The type state has been saved - at this point we can destroy things.
+	CDceStart; // DCE is about to run - everything is still available.
+	CDceDone; // DCE just finished.
+	CFilteringDone; // Filtering just finished.
+	CGenerationStart; // Generation is about to begin.
+	CGenerationDone; // Generation just finished.
 }
 
 enum ReportMode {
@@ -192,7 +190,7 @@ class ModuleLut extends HashtblLookup<GlobalTypePath, ModuleDef> {
 					+ sTypePath(path2)
 					+ " is loaded with a different case than "
 					+ sTypePath(m.mPath), p);
-			// Digest signatures are already hexadecimal in the Haxe port.
+			// port: Digest signatures are already hexadecimal, so Digest.to_hex is not needed.
 			var m2 = find(path2),
 				hex1 = m.mExtra.mSign,
 				hex2 = m2.mExtra.mSign;
@@ -354,10 +352,13 @@ enum ParseInputResult {
 
 @:structInit class ResultHandler {
 	public var sendResult:JsonValue->Void;
-	// 'a . Json.t -> 'a: never returns
+	// port: 'a . Json.t -> 'a: never returns
 	public var sendResultRaise:JsonValue->Dynamic;
 	public var sendError:Array<JsonValue>->Void;
 	public var sendErrorRaise:Array<JsonValue>->Dynamic;
+
+	/** Finalize message output at the end of compilation.
+		Handles error signaling, timer reports, log file writing, etc. */
 	public var flushMessages:Bool->CommonContext->Void;
 	public var setCom:CommonContext->ParseInputResult;
 
@@ -375,13 +376,13 @@ enum ParseInputResult {
 		flushMessages, setCom);
 }
 
-// (string * (path -> pos -> Ast.package option))
+// port: (string * (path -> pos -> Ast.package option))
 typedef ExternTypeLoader = {name:String, load:GlobalTypePath->Pos->Null<Package>};
-// (string list * metadata_entry * (bool * bool * bool))
+// port: (string list * metadata_entry * (bool * bool * bool))
 typedef GlobalMetadataEntry = {path:Array<String>, meta:MetadataEntry, recursive:Bool, toTypes:Bool, toFields:Bool};
-// (Path.UniqueKey.t * string option)
+// port: (Path.UniqueKey.t * string option)
 typedef FileContent = {fileKey:String, content:Null<String>};
-// (string * string): file, position ("top"/"bottom"/"inline")
+// port: (string * string): file, position ("top"/"bottom"/"inline")
 typedef IncludeFile = {file:String, position:String};
 
 typedef CommonContext = {
@@ -393,6 +394,7 @@ typedef CommonContext = {
 	var cache:Null<compiler.CompilationCache.ContextCache>;
 	var isMacroContext:Bool;
 	var timerCtx:core.Timer.TimerContext;
+	// config
 	var parsedArgs:Array<compiler.ParsedArg>;
 	var display:DisplaySettings;
 	var debug:Bool;
@@ -406,6 +408,7 @@ typedef CommonContext = {
 	var classPaths:core.ClassPaths;
 	var main:{mainPath:Null<GlobalTypePath>, mainFile:Null<String>, mainExpr:Null<TExpr>};
 	var packageRules:haxe.ds.StringMap<PackageRule>;
+	// communication
 	var error:String->Pos->Void;
 	var errorExt:CompilerError->Void;
 	var info:(msg:String, p:Pos, ?depth:Int) -> Void;
@@ -415,13 +418,15 @@ typedef CommonContext = {
 	var filterMessages:(CompilerMessage->Bool)->Void;
 	var runCommand:String->Int;
 	var runCommandArgs:String->Array<String>->Int;
-	var loadExternType:Array<ExternTypeLoader>;
+	// typing setup
+	var loadExternType:Array<ExternTypeLoader>; // allow finding types which are not in sources
 	var callbacks:CompilerCallbacks;
 	var defines:DefineContext;
 	var userDefines:haxe.ds.StringMap<core.Define.UserDefine>;
 	var userMetas:haxe.ds.StringMap<core.Meta.UserMeta>;
 	var getMacros:Void->Null<CommonContext>;
 	var localWrapper:LocalWrapperApi;
+	// typing state
 	var std:TClass;
 	var globalMetadata:Array<GlobalMetadataEntry>;
 	var fileContents:Array<FileContent>;
@@ -431,17 +436,20 @@ typedef CommonContext = {
 	var moduleLut:ModuleLut;
 	var moduleNonexistentLut:Lookup<GlobalTypePath, Bool>;
 	var fakeModules:haxe.ds.StringMap<ModuleDef>;
+	// output
 	var file:String;
 	var features:Map<String, Bool>;
 	var modules:Array<ModuleDef>;
 	var types:Array<ModuleType>;
 	var resources:haxe.ds.StringMap<haxe.io.Bytes>;
+	// target-specific
 	var flashVersion:Float;
 	var nekoLibPaths:Array<String>;
 	var includeFiles:Array<IncludeFile>;
 	var nativeLibs:NativeLibraries.NativeLibrariesData;
 	var hxbLibs:Array<AbstractHxbLib>;
 	var jsGen:Null<Void->Void>;
+	// misc
 	var basic:BasicTypes;
 	var memoryMarker:Array<Float>;
 	var hxbReaderApi:Null<compiler.hxb.HxbReaderApi>;
@@ -484,7 +492,9 @@ class Common {
 		pool: com.sctx.pool
 	};
 
-	public static function enterStage(com:CommonContext, stage:CompilerStage):Void com.stage = stage;
+	public static function enterStage(com:CommonContext, stage:CompilerStage):Void
+		// print_endline (Printf.sprintf "Entering stage %s" (s_compiler_stage stage));
+		com.stage = stage;
 
 	public static function ignoreError(com:CommonContext):Bool {
 		var b = com.display.dmsErrorPolicy == EPIgnore;
@@ -498,6 +508,8 @@ class Common {
 			MKWarning(w, options))));
 		com.warning(w, options, msg, p);
 	}
+
+	// Defines
 
 	public static function defined(com:CommonContext, s:String):Bool return Define.defined(com.defines, s);
 
@@ -613,6 +625,7 @@ class Common {
 			case Cross:
 				return defaultConfig;
 			case CustomTarget(_):
+				// impossible to reach. see update_platform_config
 				throw core.ds.Exit.raise();
 			case Js:
 				var es6 = getEsVersion(com.defines) >= 6;
@@ -620,7 +633,7 @@ class Common {
 				c.pfSys = false;
 				c.pfCapturePolicy = es6 ? CPNone : CPLoopVars;
 				c.pfReservedTypePaths = [path([], "Object"), path([], "Error")];
-				c.pfThisBeforeSuper = !es6;
+				c.pfThisBeforeSuper = !es6; // cannot access `this` before `super()` when generating ES6 classes
 				c.pfSupportsRestArgs = true;
 				c.pfExceptions.ecNativeThrows = [path(["js", "lib"], "Error"), path(["haxe"], "Exception")];
 				c.pfExceptions.ecAvoidWrapping = false;
@@ -715,7 +728,7 @@ class Common {
 		return c;
 	}
 
-	// Shared configuration helper from haxe/src/generators/gctx.ml, get_es_version.
+	// port: Gctx.get_es_version from haxe/src/generators/gctx.ml.
 	static function getEsVersion(defines:DefineContext):Int {
 		try {
 			var version = StdTools.parseInt(Define.definedValue(defines, Define.JsEs));
@@ -749,8 +762,8 @@ class Common {
 
 	public static function create(sctx:compiler.server.ServerCompilationContext, requestScope:RequestScope, partScope:PartScope,
 			displayMode:DisplaySettings):CommonContext {
-		// OCaml links Type's reference initialization before constructing basic types.
-		// Explicit setup retains that step when callers import the split modules.
+		// port: OCaml runs Type's reference initialization at link time, before basic types
+		// are constructed; here it is an explicit call.
 		core.Type.initialize();
 		var com:CommonContext = null;
 		com = {
@@ -836,6 +849,13 @@ class Common {
 
 	public static function isCompilation(com:CommonContext):Bool return com.display.dmsKind == DMNone && !isDiagnostics(com);
 
+	/** Returns true when there is an error that should be reported/acted upon.
+		In compilation mode, any has_error is significant.
+		In display mode, has_error can be set transiently during type resolution
+		without producing actual error messages, so we require messages to exist.
+		Diagnostics-only messages (DKMissingFields, DKUnresolvedIdentifier) are
+		not counted as reportable errors — they are diagnostics data that should
+		not prevent context caching. */
 	public static function hasErrorToReport(com:CommonContext):Bool {
 		var reportable = core.ds.ArrayTools.exists(com.partScope.messages, function(cm) return switch cm.cmDiagnosticsKind {
 			case DKMissingFields | DKUnresolvedIdentifier: false;
@@ -889,11 +909,13 @@ class Common {
 	}
 
 	public static function clone(com:CommonContext, isMacroContext:Bool):CommonContext {
-		// Shallow copy preserves the explicitly retained references; every upstream reinit follows.
+		// keeps
+		// port: the shallow copy keeps the fields upstream copies; the reinits follow.
 		var out:CommonContext = cast core.ds.Record.copy(com);
-		// global_metadata is an immutable list upstream (prepended to): the clone keeps a snapshot
+		// port: global_metadata is an immutable list upstream (prepended to): the clone keeps a snapshot
 		out.globalMetadata = com.globalMetadata.copy();
 		out.defines = {values: com.defines.values, definesSignature: com.defines.definesSignature};
+		// reinits
 		out.cache = null;
 		out.stage = CCreated;
 		out.features = new Map();
@@ -906,20 +928,20 @@ class Common {
 		out.moduleLut = new ModuleLut();
 		out.moduleNonexistentLut = new HashtblLookup();
 		out.fakeModules = new haxe.ds.StringMap();
-		out.loadExternType = [];
+		out.loadExternType = []; // !
 		out.basic = newBasicTypes();
 		out.localWrapper = LocalWrapper.nullWrapper;
 		out.std = nullClass;
 		out.moduleToFile = new HashtblLookup();
 		out.parserCache = new HashtblLookup();
-		out.overloadCache = new HashtblLookup();
+		out.overloadCache = new HashtblLookup(); // !
 		out.isMacroContext = isMacroContext;
 		out.hxbReaderApi = null;
 		out.hxbReaderStats = HxbReaderStats.create();
 		return out;
 	}
 
-	// Extc.sys_filetime returns zero when stat fails (including absent import.hx).
+	// port: Extc.filetime returns zero when stat fails (including absent import.hx).
 	public static function fileTime(file:String):Float return try sys.FileSystem.stat(file).mtime.getTime() / 1000.0 catch (_:Dynamic) 0.;
 
 	public static final flashVersions = [
@@ -932,6 +954,7 @@ class Common {
 
 	public static function updatePlatformConfig(com:CommonContext):Void switch com.platform {
 		case CustomTarget(_):
+			// do nothing, configured with macro api
 		case _:
 			com.config = getConfig(com);
 	};
@@ -947,6 +970,7 @@ class Common {
 				if (core.Path.fileExtension(com.file) == "c") define(com, Define.Hlc);
 			case _:
 		}
+		// Set the source header, unless the user has set one already or the platform sets a custom one
 		if (!defined(com,
 			Define.SourceHeader) && com.platform != Hl) defineValue(com, Define.SourceHeader,
 				"Generated by Haxe " + sVersionFull(com.sctx.version));
@@ -1012,6 +1036,14 @@ class Common {
 		}
 	}
 
+	/*
+		TODO: The has_dce check is there because we mark types with @:directlyUsed in the DCE filter,
+		which is not run in dce=no and thus we can't know if a type is used directly or not,
+		so we just assume that they are.
+
+		If we had dce filter always running (even with dce=no), we would have types marked with @:directlyUsed
+		and we wouldn't need to generate unnecessary imports in dce=no, but that's good enough for now.
+	*/
 	public static function isDirectlyUsed(com:CommonContext, meta:Metadata):Bool return !hasDce(com) || Meta.has(Meta.DirectlyUsed, meta);
 
 	public static function hasFeature(com:CommonContext, f:String):Bool {
@@ -1072,7 +1104,7 @@ class Common {
 
 	public static function findFile(com:CommonContext, f:String):String return com.classPaths.findFile(f).file;
 
-	// memSize is preserved in deferred/diagnostics/CommonMemory.hx for the later diagnostics milestone.
+	// port: mem_size is Memory.memSize.
 	public static function hash(f:String):Int {
 		var h = 0;
 		for (i in 0...f.length) h = h * 223 + f.charCodeAt(i);
@@ -1143,6 +1175,7 @@ class Common {
 			}
 			if (c == null) throw "Invalid_argument: option is None";
 		}
+		// must be present at this point
 		if (com.main.mainExpr == null) throw "Invalid_argument: option is None";
 		return {name: path.name, cls: c, expr: com.main.mainExpr};
 	}

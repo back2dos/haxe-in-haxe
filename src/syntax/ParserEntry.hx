@@ -13,7 +13,7 @@ import syntax.Lexer.LexerContext;
 import syntax.SemVer;
 import core.ds.Stream;
 
-// Draft mechanical translation of haxe/src/syntax/parserEntry.ml; unvalidated.
+// eval
 enum SmallType {
 	TNull;
 	TBool(value:Bool);
@@ -155,7 +155,7 @@ class ParserEntry {
 		case [TString(_), TFloat(_)], [TFloat(_), TString(_)], [_, TVersion(_)],
 			[TVersion(_), _]: throw new ComparisonError("Cannot compare "
 				+ sValue(v1) + " and " + sValue(v2));
-		case _: throw new ComparisonExit();
+		case _: throw new ComparisonExit(); // always false
 	};
 
 	static function numeric(s:String):Float {
@@ -174,7 +174,7 @@ class ParserEntry {
 		case EParenthesis(e): eval(ctx, e);
 		case EBinop(op, e1, e2):
 			var values = evalBinopExprs(ctx, e1, e2);
-			// A single try: HashLink mishandles returning from a nested try here.
+			// port: a single try: HashLink mishandles returning from a nested try here.
 			function compare(op:Int->Int->Bool):SmallType {
 				var c:Int;
 				try c = cmp(values.left, values.right)
@@ -201,6 +201,9 @@ class ParserEntry {
 		case _: Parser.error(Custom("Invalid condition expression"), e.pos);
 	};
 
+	/**
+		Attempt to auto-cast operands to a common type
+	**/
 	public static function evalBinopExprs(ctx:DefineContext, e1:Expr, e2:Expr):{left:SmallType, right:SmallType} {
 		var v1 = eval(ctx, e1);
 		var v2 = eval(ctx, e2);
@@ -220,6 +223,7 @@ class ParserEntry {
 		return {left: v1, right: v2};
 	}
 
+	// parse main
 	public static function parse<T>(config:ParserConfiguration, entry:ParserContext->Stream<syntax.Lexer.LexedToken>->T,
 			lctx:LexerContext, code:Lexer, file:String):ParseResult<T> {
 		var defines = config.defines;
@@ -242,6 +246,7 @@ class ParserEntry {
 		nextToken = function() return processToken(Lexer.readToken(lctx, code));
 		processToken = function(tk:ParserToken):ParserToken return switch tk.token {
 			case Comment(s):
+				// if encloses_resume (pos tk) then syntax_completion SCComment (pos tk);
 				var len = s.length;
 				if (len > 0 && s.charAt(0) == "*") ctx.lastDoc = {
 					doc: s.substr(1, len - (len > 1 && s.charAt(len - 1) == "*" ? 2 : 1)),
@@ -251,7 +256,9 @@ class ParserEntry {
 			case CommentLine(_):
 				if (ctx.config.inDisplayFile) {
 					var p = tk.pos;
+					// Completion at the / should not pick up the comment (issue #9133)
 					if (Parser.isCompletion(ctx)) p = {pfile: p.pfile, pmin: p.pmin + 1, pmax: p.pmax};
+					// The > 0 check is to deal with the special case of line comments at the beginning of the file (issue #10322)
 					if (DisplayPosition.displayPosition.enclosedIn(p) && p.pmin > 0) Parser.syntaxCompletion(SCComment, null, tk.pos);
 				}
 				nextToken();
@@ -339,6 +346,9 @@ class ParserEntry {
 		try {
 			var data = parseEntry(stream);
 			var next:ParserToken = stream.peek();
+			// null: Eof could already have been consumed
+			// Eof: This is what we want
+			// anything else: This isn't
 			if (next != null && next.token != Eof) Parser.error(Unexpected(next.token), next.pos);
 			var errors = ctx.syntaxErrors.copy();
 			errors.reverse();
@@ -394,7 +404,7 @@ class ParserEntry {
 		return result;
 	}
 
-	/** `String.make n ' '`, by doubling (StringTools.lpad is quadratic on hxcpp). **/
+	// port: `String.make n ' '`, by doubling (StringTools.lpad is quadratic on hxcpp).
 	static function makeSpaces(n:Int):String {
 		var r = "", chunk = " ";
 		while (n > 0) {

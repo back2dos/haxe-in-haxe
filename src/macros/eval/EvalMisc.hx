@@ -11,7 +11,6 @@ import macros.eval.EvalExceptions.EvalExceptions.unexpectedValue;
 
 using macros.eval.EvalValue.EvalValueTools;
 
-/** haxe/src/macro/eval/evalMisc.ml. **/
 class EvalMisc {
 	public static function throwString(s:String, p:Pos):Dynamic {
 		return EvalContext.throwValue(EvalString.createUnknown(s), p);
@@ -154,7 +153,7 @@ class EvalMisc {
 			case [VString(s1), VString(s2)]:
 				var s1_ = s1.sstring;
 				var s2_ = s2.sstring;
-				// String.compare on the UTF-8 bytes
+				// port: String.compare on the UTF-8 bytes
 				var r = EvalString.compareCodePoints(s1_, s2_);
 				if (r == 0) CEq else if (r < 0) CInf else CSup;
 			case [VFunction(a, _), VFunction(b, _)]: if (Reflect.compareMethods(a, b)) CEq else CUndef;
@@ -183,7 +182,7 @@ class EvalMisc {
 		return true;
 	}
 
-	/** OCaml physical equality `==` on values (immediates compare by value). **/
+	// port: OCaml physical equality `==` on values (immediates compare by value).
 	static function physicalEquals(a:Value, b:Value):Bool {
 		return switch [a, b] {
 			case [VNull, VNull] | [VTrue, VTrue] | [VFalse, VFalse]: true;
@@ -349,7 +348,7 @@ class EvalMisc {
 
 	public static function opMod(p:Pos, v1:Value, v2:Value):Value {
 		return switch [v1, v2] {
-			// Int32.rem: Division_by_zero gives nan; min_int rem -1 is 0 (avoids the host's overflow trap)
+			// port: Int32.rem: Division_by_zero gives nan; min_int rem -1 is 0 (avoids the host's overflow trap)
 			case [VInt32(i1), VInt32(i2)]: if (i2 == 0) VFloat(Math.NaN) else if (i2 == -1) EvalValueTools.vint32(0) else
 					EvalValueTools.vint32(i1 % i2);
 			case [VFloat(f1), VFloat(f2)]: VFloat(f1 % f2);

@@ -4,17 +4,15 @@ import haxe.io.Bytes;
 import haxe.io.BytesInput;
 import core.ds.Failure;
 
-/**
-	haxe/libs/extc/process.ml: the subprocesses behind Eval's sys.io.Process,
-	over the host's sys.io.Process.
-
-	Upstream spawns with Unix.create_process (posix_spawnp). When that fails
-	because the command is not found, `run` returns a process whose stdout is
-	at EOF, whose stderr holds the error message and whose exit code is 127.
-	Host processes fork first and report a failed exec only through their own
-	exit code (1 on HashLink), so the command is looked up in PATH here, as
-	posix_spawnp does, before the host process is created.
-**/
+// port: haxe/libs/extc/process.ml: the subprocesses behind Eval's sys.io.Process,
+// over the host's sys.io.Process.
+//
+// Upstream spawns with Unix.create_process (posix_spawnp). When that fails
+// because the command is not found, `run` returns a process whose stdout is
+// at EOF, whose stderr holds the error message and whose exit code is 127.
+// Host processes fork first and report a failed exec only through their own
+// exit code (1 on HashLink), so the command is looked up in PATH here, as
+// posix_spawnp does, before the host process is created.
 class EvalProcess {
 	final host:Null<sys.io.Process>;
 	final failedStderr:Null<BytesInput>;
@@ -27,7 +25,7 @@ class EvalProcess {
 	}
 
 	public static function run(cmd:String, args:Null<Array<String>>):EvalProcess {
-		// with args = None upstream runs /bin/sh -c (cmd.exe on Windows), which always exists
+		// port: with args = None upstream runs /bin/sh -c (cmd.exe on Windows), which always exists
 		if (args != null && Sys.systemName() != "Windows" && !commandExists(cmd)) {
 			var msg = "create_process(" + cmd + "): No such file or directory\n";
 			return new EvalProcess(null, new BytesInput(Bytes.ofString(msg)), 127);
@@ -35,10 +33,10 @@ class EvalProcess {
 		return new EvalProcess(new sys.io.Process(cmd, args), null, null);
 	}
 
-	/** The execvp/posix_spawnp lookup: a path with a slash is used as is, otherwise PATH is searched. **/
+	// port: the execvp/posix_spawnp lookup: a path with a slash is used as is, otherwise PATH is searched.
 	static function commandExists(cmd:String):Bool {
 		inline function isExecutableFile(path:String):Bool {
-			// 73 = 0o111: some execute bit
+			// port: 73 = 0o111: some execute bit
 			return sys.FileSystem.exists(path) && !sys.FileSystem.isDirectory(path) && (sys.FileSystem.stat(path).mode & 73) != 0;
 		}
 		if (cmd.indexOf("/") >= 0)

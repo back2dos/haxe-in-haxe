@@ -1,6 +1,5 @@
 package compiler;
 
-// Help rows from haxe/src/compiler/args.ml; callbacks are never part of usage rendering.
 @:structInit class ArgumentDescription {
 	public var category:String;
 	public var names:Array<String>;
@@ -20,6 +19,13 @@ package compiler;
 }
 
 class ArgumentDescriptions {
+	/** Static arg descriptions used for generating help strings via [usage_string].
+		[usage_string] only reads the category, primary-flag names, hint, and doc
+		fields — the [Arg.t] value is never invoked, so [Arg.Unit ignore] is used
+		everywhere.  Entries with an empty primary-flag list ([ok = []]) are already
+		filtered out by [usage_string], so they are omitted here. */
+	// port: basic_args_descriptions and adv_args_descriptions (advanced = true) of args.ml in one
+	// list, without the Arg.t values.
 	public static final all:Array<ArgumentDescription> = [
 		{
 			"category": "Target",

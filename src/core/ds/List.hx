@@ -1,11 +1,9 @@
 package core.ds;
 
-/**
-	Array-backed OCaml list operations; paired operations reject unequal lengths.
-	Inline: HashLink passes an Array<T> of a type parameter as a boxed ArrayDyn
-	(an allocation and dynamic element access per call); inlining keeps the
-	caller's concrete array type.
-**/
+// port: array-backed OCaml List operations; paired operations reject unequal lengths.
+// Inline: HashLink passes an Array<T> of a type parameter as a boxed ArrayDyn
+// (an allocation and dynamic element access per call); inlining keeps the
+// caller's concrete array type.
 class List {
 	static function sameLength(a:Int, b:Int):Void {
 		if (a != b) throw new haxe.exceptions.ArgumentException("lists", "different lengths");

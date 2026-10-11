@@ -1,13 +1,11 @@
 package core.ds;
 
-/**
-	OCaml's polymorphic `Hashtbl.hash` (caml_hash with count 10, limit 100,
-	seed 0) for the value shapes the display services use as hash table keys:
-	strings, ints, lists, tuples and records. The value is described with
-	`OcamlValue`, mirroring the runtime representation (immediates and blocks
-	with a tag), and traversed breadth first exactly like runtime/hash.c.
-	Combined with `OcamlHashtbl`, this reproduces upstream iteration order.
-**/
+// port: OCaml's polymorphic `Hashtbl.hash` (caml_hash with count 10, limit 100,
+// seed 0) for the value shapes used as hash table keys: strings, ints, lists,
+// tuples and records. The value is described with `OcamlValue`, mirroring the
+// runtime representation (immediates and blocks with a tag), and traversed
+// breadth first exactly like runtime/hash.c. Combined with `OcamlHashtbl`, this
+// reproduces upstream iteration order.
 enum OcamlValue {
 	OInt(i:Int);
 	OString(s:String);
@@ -25,14 +23,14 @@ class OcamlHash {
 			var v = queue[rd++];
 			switch v {
 				case OInt(i):
-					// Val_long(i) = 2i+1; the 32-bit fold of the tagged value
+					// port: Val_long(i) = 2i+1; the 32-bit fold of the tagged value
 					h = mix(h, (i << 1) | 1);
 					num--;
 				case OString(s):
 					h = mixString(h, s);
 					num--;
 				case OBlock(tag, fields):
-					// Cleanhd_hd: wosize << 10 | tag
+					// port: Cleanhd_hd: wosize << 10 | tag
 					h = mix(h, (fields.length << 10) | tag);
 					for (f in fields) {
 						if (queue.length >= sz) break;
@@ -57,11 +55,11 @@ class OcamlHash {
 		return v;
 	}
 
-	/** `Globals.path`: `(string list * string)`. **/
+	// port: `Globals.path`: `(string list * string)`.
 	public static function ofPath(pack:Array<String>,
 			name:String):OcamlValue return OBlock(0, [ofList([for (s in pack) OString(s)]), OString(name)]);
 
-	/** `Globals.pos`: `{pfile; pmin; pmax}`. **/
+	// port: `Globals.pos`: `{pfile; pmin; pmax}`.
 	public static function ofPos(p:core.Globals.Pos):OcamlValue return OBlock(0, [OString(p.pfile), OInt(p.pmin), OInt(p.pmax)]);
 
 	public static function hashString(s:String):Int return hash(OString(s));

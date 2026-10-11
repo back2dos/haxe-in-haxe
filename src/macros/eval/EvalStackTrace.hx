@@ -5,7 +5,6 @@ import macros.eval.EvalValue;
 import macros.eval.EvalContext;
 import macros.eval.EvalEncode;
 
-/** haxe/src/macro/eval/evalStackTrace.ml. **/
 class EvalStackTrace {
 	public static function makeStack(envs:Array<{pos:Pos, kind:EnvKind}>):Value {
 		var l:Array<Value> = [];

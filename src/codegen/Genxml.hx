@@ -10,8 +10,8 @@ import core.Meta;
 import core.Meta.MetaNotFound;
 import haxe.ds.StringMap;
 
-// haxe/src/codegen/genxml.ml: shared RTTI serialization. The standalone XML
-// output command is outside the HXB milestone; genTypeString is used by filters.
+// port: `generate` (the standalone XML output) is not ported; genTypeString is
+// used by the RTTI filter.
 private typedef Attribute = {name:String, value:String};
 
 private enum RttiXml {
@@ -34,6 +34,7 @@ class Genxml {
 		|| s.indexOf("&") >= 0 ? CData(s) : PCData(s);
 
 	static function genDoc(s:String):RttiXml {
+		// remove trailing space and convert newlines
 		s = StringTools.trim(s);
 		s = s.split("\r\n").join("\n").split("\r").join("\n");
 		return node("haxe_doc", [], [genString(s)]);
@@ -224,7 +225,7 @@ class Genxml {
 		}
 	}
 
-	// XML-Light PCData escaping, including its preservation of numeric entities.
+	// port: XML-Light's `Xml.to_string (Xml.PCData s)`, including its preservation of numeric entities.
 	static function escapeEntities(value:String):String {
 		var out = new StringBuf();
 		for (i in 0...value.length) out.add(switch value.charAt(i) {

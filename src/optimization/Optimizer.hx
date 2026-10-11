@@ -12,7 +12,9 @@ import optimization.OptimizerTexpr;
 import optimization.Inline;
 import filters.safe.Sanitize;
 
-// haxe/src/optimization/optimizer.ml — mechanical draft; not compiled or validated.
+// ----------------------------------------------------------------------
+// REDUCE
+
 class Optimizer {
 	public static function checkEnumConstructionArgs(el:Array<TExpr>, index:Int):Bool {
 		var result = true;
@@ -24,6 +26,7 @@ class Optimizer {
 		return switch e.eexpr {
 			case TConst(TInt(_) | TFloat(_) | TString(_) | TBool(_) | TNull): e;
 			case TConst(TThis | TSuper): null;
+			// Don't care about inline, if we know the value it makes no difference.
 			case TField(_, FStatic(_, cf = {cfKind: Var({vWrite: AccNever})})): cf.cfExpr == null ? null : extractConstantValue(cf.cfExpr);
 			case TField(_, FEnum(_, _)): e;
 			case TParenthesis(e1): extractConstantValue(e1);
@@ -40,6 +43,7 @@ class Optimizer {
 		switch subject.eexpr {
 			case TConst(ct) if (ct != TSuper && ct != TThis):
 				for (c in sw.switchCases) {
+					// Map everything first so that we find unknown things eagerly.
 					var patterns = [];
 					for (e2 in c.casePatterns) {
 						var e2 = extractConstantValue(e2);
@@ -58,7 +62,7 @@ class Optimizer {
 	public static function reduceControlFlow(scom:context.SafeCom.SafeContext, e:TExpr):TExpr {
 		return switch e.eexpr {
 			case TIf({eexpr: TConst(TBool(t))}, e1, e2): t ? e1 : e2 == null ? TypeOps.mk(TBlock([]), e.etype, e.epos) : e2;
-			case TWhile({eexpr: TConst(TBool(false))}, sub, flag): flag == NormalWhile ? TypeOps.mk(TBlock([]), e.etype, e.epos) : e;
+			case TWhile({eexpr: TConst(TBool(false))}, sub, flag): flag == NormalWhile ? TypeOps.mk(TBlock([]), e.etype, e.epos) /* erase sub */ : e; // we cant remove while since sub can contain continue/break
 			case TSwitch(sw):
 				var reduced = checkConstantSwitch(sw);
 				reduced == null ? e : reduced;
@@ -71,6 +75,7 @@ class Optimizer {
 				TEnumParameter({eexpr: TParenthesis({eexpr: TCall({eexpr: TField(_, FEnum(_, ef1))}, el)})}, ef2, i)
 				if (ef1 == ef2 && checkEnumConstructionArgs(el, i)): i >= 0 && i < el.length ? el[i] : e;
 			case TCast(_, null):
+				// TODO: figure out what's wrong with these targets
 				var requireCast = switch scom.platform {
 					case Cpp | Flash | Jvm: true;
 					case _: false;
@@ -80,7 +85,7 @@ class Optimizer {
 		};
 	}
 
-	// The mapping closure is made once per traversal and passed down (one per node otherwise).
+	// port: the mapping closure is made once per traversal and passed down (one per node otherwise).
 	public static function reduceLoop(scom:context.SafeCom.SafeContext, stack:core.TUnification.RecStack<TClassField>, e:TExpr):TExpr {
 		var fn:TExpr->TExpr = null;
 		fn = x -> reduceLoopWith(scom, stack, fn, x);
@@ -145,6 +150,8 @@ class Optimizer {
 
 	public static function reduceExpression(scom:context.SafeCom.SafeContext, e:TExpr):TExpr {
 		if (!scom.foptimize) return e;
+		// We go through rec_stack_default here so that the current field is on inline_stack. This prevents self-recursive
+		// inlining (#7569).
 		var stack = core.TUnification.newRecStack();
 		return core.TUnification.recStackDefault(stack, scom.curfield, cf -> cf == scom.curfield, () -> reduceLoop(scom, stack, e), e);
 	}
@@ -176,7 +183,17 @@ class Optimizer {
 				var c1 = makeConstantExpressionWithStack(scom, stack, e1, concatStrings);
 				c1 == null ? null : TypeOps.mk(TMeta(m, c1), e.etype, e.epos);
 			case TTypeExpr(_): e;
-			// Upstream deliberately disables constant static-call inlining (#4254).
+			// try to inline static function calls
+			// Disabled for now, see #4254.
+			/* 	| TCall ({ etype = TFun(_,ret); eexpr = TField (_,FStatic (c,cf)) },el) ->
+				(try
+					let func = match cf.cf_expr with Some ({eexpr = TFunction func}) -> func | _ -> raise Not_found in
+					let ethis = mk (TConst TThis) t_dynamic e.epos in
+					let inl = (try type_inline ctx cf func ethis el ret None e.epos false with Error (Custom _,_) -> None) in
+					(match inl with
+					| None -> None
+					| Some e -> make_constant_expression ctx e)
+				with Not_found -> None) */
 			case _: null;
 		};
 	}

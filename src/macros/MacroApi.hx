@@ -22,11 +22,9 @@ import context.PlatformConfig;
 import macros.eval.EvalValue.Value;
 import haxe.ds.StringMap;
 
-/**
-	haxe/src/macro/macroApi.ml: the compiler side of the macro API (`compiler_api`)
-	and the encoding/decoding of compiler values. Upstream is a functor over the
-	interpreter; there is only Eval here, so it uses Eval's values directly.
-**/
+// port: haxe/src/macro/macroApi.ml: the compiler side of the macro API (`compiler_api`)
+// and the encoding/decoding of compiler values. Upstream is a functor over the
+// interpreter; there is only Eval here, so it uses Eval's values directly.
 class InvalidExpr extends haxe.Exception {
 	public static final instance = new InvalidExpr();
 
@@ -51,10 +49,11 @@ class Abort extends haxe.Exception {
 
 typedef MacroValue = macros.eval.EvalValue.Value;
 
+// port: `'value compiler_api`. A structure rather than a class: a constructor
+// would take one argument per field, more than HashLink's JIT allows in a call.
+
 /**
-	Our access to the compiler from the macro api (`'value compiler_api`).
-	A structure rather than a class: a constructor would take one argument per
-	field, more than HashLink's JIT allows in a call.
+	Our access to the compiler from the macro api
 **/
 typedef CompilerApi = {
 	var pos:Pos;
@@ -72,7 +71,7 @@ typedef CompilerApi = {
 	var onTypeNotFound:(String->MacroValue)->Void;
 	var parseString:String->Pos->Bool->Expr;
 	var registerFileContents:String->String->Void;
-	// `parse f s`: runs the parser function `f` on the source `s`
+	// port: `parse f s`: runs the parser function `f` on the source `s`
 	var parse:(syntax.Parser.ParserContext->core.ds.Stream<syntax.Lexer.LexedToken>->Dynamic)->String->Dynamic;
 	var typeExpr:Expr->TExpr;
 	var resolveType:ComplexType->Pos->T;
@@ -101,11 +100,11 @@ typedef CompilerApi = {
 	var encodeExpr:Expr->MacroValue;
 	var encodeCtype:TypeHint->MacroValue;
 	var decodeType:MacroValue->T;
-	// optional arguments are explicit: HashLink cannot call a closure typed with them through a structure field
+	// port: optional arguments are explicit: HashLink cannot call a closure typed with them through a structure field
 	var info:(msg:String, p:Pos, depth:Int) -> Void;
 	var warning:(w:core.Message.WarningCode, msg:String, p:Pos, depth:Int) -> Void;
 	var displayError:(msg:String, p:Pos, sub:Null<Array<core.Error.MacroError>>) -> Void;
-	// `with_imports imports usings f`
+	// port: `with_imports imports usings f`
 	var withImports:Array<Import>->Array<Array<PlacedName>>->(Void->Dynamic)->Dynamic;
 	var withOptions:CompilerOptions->(Void->Dynamic)->Dynamic;
 	var excString:String->Dynamic;
@@ -114,12 +113,14 @@ typedef CompilerApi = {
 }
 
 class CompilerApiTools {
-	/** `{ api with ... }`: a shallow copy. **/
+	// port: `{ api with ... }`: a shallow copy.
 	public static function clone(api:CompilerApi):CompilerApi return Reflect.copy(api);
 
 	/**
-		A null compiler API that holds no references to any compilation context,
-		used to clear the interpreter's curapi between compilations. Any access fails.
+		A null compiler API that holds no references to any compilation context.
+		Used to clear the eval interpreter's curapi between compilations so that
+		the compilation context can be garbage collected. Any accidental access
+		raises [Globals.Ice].
 	**/
 	public static function nullApi():CompilerApi {
 		inline function die():Dynamic return core.Globals.die("Macro API accessed after compilation cleanup", "MacroApi.nullApi");
@@ -213,16 +214,16 @@ enum EnumType {
 	IStringLiteralKind;
 }
 
-/** An object field of an encoded anonymous object (`string * value`). **/
+// port: an object field of an encoded anonymous object (`string * value`).
 private typedef ObjField = {name:String, value:Value};
 
-/** The result of `decode_enum` (`int * value list`). **/
+// port: the result of `decode_enum` (`int * value list`).
 private typedef DecodedEnum = {index:Int, args:Array<Value>};
 
-/** The result of `decode_enum_with_pos` (`(int * value list) * pos`). **/
+// port: the result of `decode_enum_with_pos` (`(int * value list) * pos`).
 private typedef DecodedEnumWithPos = {index:Int, args:Array<Value>, pos:Pos};
 
-/** A decoded type definition (`Globals.path * Ast.type_def * pos`). **/
+// port: a decoded type definition (`Globals.path * Ast.type_def * pos`).
 typedef DecodedTypeDef = {path:GlobalTypePath, def:TypeDef, pos:Pos};
 
 class MacroApi {
@@ -245,29 +246,27 @@ class MacroApi {
 	}
 }
 
-/**
-	Our macro api functor (`MacroApiImpl(InterpImpl)`), instantiated for Eval.
+// ------------------------------------------------------------------------------------------------------------- //
+// Our macro api functor
 
-	Upstream's `InterpImpl` is `Eval` (EvalEncode, EvalDecode, EvalValue,
-	EvalContext and EvalMain included in that order); its members are bound in
-	the first section below so that the rest of the module reads like upstream.
-
-	Deviations:
-	- OCaml evaluates the elements of a list literal (and the arguments of an
-	  application) right to left. Where an element can have an observable side
-	  effect (forcing lazy types, building classes, encoding typed expressions),
-	  the elements are evaluated into locals in that order before building the
-	  list; the order of the encoded fields is unchanged. Decoders and the pure
-	  AST encoders are evaluated left to right.
-	- `Stack_overflow` cannot be caught portably; the `try ... with
-	  Stack_overflow -> raise Invalid_expr` wrappers of decode_expr/decode_texpr
-	  are not reproduced.
-	- Services the port does not have (compilation server cache, native
-	  libraries, the JS generator) fail with an explicit error.
-**/
+// port: `MacroApiImpl(InterpImpl)`, instantiated for Eval. Upstream's
+// `InterpImpl` is `Eval` (EvalEncode, EvalDecode, EvalValue, EvalContext and
+// EvalMain included in that order); its members are bound in the first section
+// below so that the rest of the module reads like upstream.
+// Deviations:
+// - OCaml evaluates the elements of a list literal (and the arguments of an
+//   application) right to left. Where an element can have an observable side
+//   effect (forcing lazy types, building classes, encoding typed expressions),
+//   the elements are evaluated into locals in that order before building the
+//   list; the order of the encoded fields is unchanged. Decoders and the pure
+//   AST encoders are evaluated left to right.
+// - `Stack_overflow` cannot be caught portably; the `try ... with
+//   Stack_overflow -> raise Invalid_expr` wrappers of decode_expr/decode_texpr
+//   are not reproduced.
+// - Services the port does not have (native libraries, the JS generator) fail
+//   with an explicit error.
 class MacroApiImpl {
-	// ---------------------------------------------------------------------- //
-	// InterpImpl (Eval)
+	// port: InterpImpl (Eval)
 	static final vnull:Value = VNull;
 
 	static inline function vint(i:Int):Value return VInt32(i);
@@ -282,7 +281,7 @@ class MacroApiImpl {
 
 	static inline function encodeString(s:String):Value return macros.eval.EvalEncode.encodeString(s);
 
-	// EvalMain.encode_obj = EvalEncode.encode_obj_s
+	// port: EvalMain.encode_obj = EvalEncode.encode_obj_s
 	static inline function encodeObj(l:Array<ObjField>):Value return macros.eval.EvalEncode.encodeObjS(l);
 
 	static inline function encodeLazy(l:AtomicLazy<Value>):Value return macros.eval.EvalEncode.encodeLazy(l);
@@ -310,7 +309,7 @@ class MacroApiImpl {
 
 	static inline function encodeUnsafe(o:Dynamic):Value return macros.eval.EvalEncode.encodeUnsafe(o);
 
-	// EvalMain.field v f = EvalField.field v (EvalHash.hash f)
+	// port: EvalMain.field v f =EvalField.field v (EvalHash.hash f)
 	static inline function field(v:Value, f:String):Value return macros.eval.EvalField.field(v, macros.eval.EvalHash.hash(f));
 
 	static inline function decodeBool(v:Value):Bool return macros.eval.EvalDecode.decodeBool(v);
@@ -346,32 +345,31 @@ class MacroApiImpl {
 
 	static inline function valueToExpr(v:Value, p:Pos):Expr return macros.eval.EvalMain.valueToExpr(v, p);
 
-	// Deviation: returns `Digest.to_hex` of upstream's raw digest (see EvalMain)
+	// port: returns `Digest.to_hex` of upstream's raw digest (see EvalMain)
 	static inline function valueSignature(v:Value):String return macros.eval.EvalMain.valueSignature(v);
 
 	static inline function encodeBytes(b:haxe.io.Bytes):Value return macros.eval.EvalEncode.encodeBytes(b);
 
-	static inline function decodeBytes(v:Value):haxe.io.Bytes return macros.eval.EvalDecode.decodeBytes(v);
+	static inline function decodeBytes(v:Value):haxe.io.Bytes return macros.eval.EvalDecode.decodeBytes(v); // haxe.io.Bytes
 
-	// EvalMain.prepare_callback = EvalMisc.prepare_callback
+	// port: EvalMain.prepare_callback = EvalMisc.prepare_callback
 	static inline function prepareCallback(v:Value, nargs:Int):Array<Value>->Value return macros.eval.EvalMisc.prepareCallback(v, nargs);
 
 	static inline function getApiCallPos():Pos return macros.eval.EvalMain.getApiCallPos();
 
 	static inline function associateEnumValuePos(v:Value, p:Pos):Void macros.eval.EvalValue.EvalValueTools.associateEnumValuePos(v, p);
 
-	// ---------------------------------------------------------------------- //
-	// Helpers
+	// port: Helpers
 
 	static inline function fld(name:String, value:Value):ObjField return {name: name, value: value};
 
-	/** OCaml `v = vnull`. **/
+	// port: OCaml `v = vnull`.
 	static function isNull(v:Value):Bool return switch v {
 		case VNull: true;
 		case _: false;
 	}
 
-	/** OCaml structural equality on positions. **/
+	// port: OCaml structural equality on positions.
 	static function posEq(a:Pos, b:Pos):Bool return a.pfile == b.pfile && a.pmin == b.pmin && a.pmax == b.pmax;
 
 	static function isNotFound(e:Dynamic):Bool return Std.isOfType(e, NotFound)
@@ -379,8 +377,7 @@ class MacroApiImpl {
 
 	static function notSupported(what:String):Dynamic throw new core.ds.Failure(what + " is not supported by haxe-in-haxe");
 
-	// ---------------------------------------------------------------------- //
-	// The whole encoding/decoding of compiler values from/to interpreter values
+	// The whole encoding/decoding of compiler values from/to interpreter values based on interpreter api
 
 	static function vnullOr<A>(f:A->Value, v:Null<A>):Value return v == null ? vnull : f(v);
 
@@ -1168,7 +1165,7 @@ class MacroApiImpl {
 	}
 
 	public static function decodeExpr(v:Value):Expr {
-		// upstream: `try loop v with Stack_overflow -> raise Invalid_expr`
+		// port: upstream has `try loop v with Stack_overflow -> raise Invalid_expr`
 		return decodeExprLoop(v);
 	}
 
@@ -1324,11 +1321,9 @@ class MacroApiImpl {
 		]);
 	}
 
-	/**
-		`i.mt_meta <- m`: upstream's `t_infos` returns the type's own record,
-		while `TFunctions.tInfos` returns a copy, so the update is applied to
-		the module type itself.
-	**/
+	// port: `i.mt_meta <- m`: upstream's `t_infos` returns the type's own record,
+	// while `TFunctions.tInfos` returns a copy, so the update is applied to
+	// the module type itself.
 	static function setMtMeta(t:ModuleType, m:Metadata):Void {
 		switch t {
 			case TClassDecl(c):
@@ -1344,7 +1339,7 @@ class MacroApiImpl {
 
 	public static function encodeMtype(t:ModuleType, fields:Array<ObjField>):Value {
 		var i = tInfos(t);
-		// evaluated right to left as upstream's list literal
+		// port: evaluated right to left as upstream's list literal
 		var params = encodeTypeParams(i.mtParams);
 		var doc = vnullOr(encodeString, Ast.getOwnDocOpt(i.mtDoc));
 		var meta = encodeMeta(i.mtMeta, m -> setMtMeta(t, m));
@@ -1815,7 +1810,7 @@ class MacroApiImpl {
 
 	public static function encodeTexpr(e:TExpr):Value {
 		function loop(e:TExpr):Value {
-			// the elements of each upstream list literal are evaluated right to left
+			// port: the elements of each upstream list literal are evaluated right to left
 			var r:{tag:Int, pl:Array<Value>} = switch e.eexpr {
 				case TConst(c):
 					{tag: 0, pl: [encodeTconst(c)]};
@@ -2031,7 +2026,7 @@ class MacroApiImpl {
 	}
 
 	public static function decodeTexpr(v:Value):TExpr {
-		// upstream: `try loop v with Stack_overflow -> raise Invalid_expr`
+		// port: upstream has `try loop v with Stack_overflow -> raise Invalid_expr`
 		return decodeTexprLoop(v);
 	}
 
@@ -2115,7 +2110,7 @@ class MacroApiImpl {
 		var isExtern = decodeOptBool(field(v, "isExtern"));
 		var fields = decodeArray(field(v, "fields")).map(decodeField);
 		var doc = decodeDoc(field(v, "doc"));
-		// `mk fl dl`: d_params is decoded when the definition is built
+		// port: `mk fl dl`: d_params is decoded when the definition is built
 		function params():Array<TypeParam> return decodeTparams(field(v, "params"));
 		var tdef:TypeDef = switch decodeEnum(field(v, "kind")) {
 			case {index: 0, args: []}:
@@ -2643,7 +2638,7 @@ class MacroApiImpl {
 					} catch (_:core.ds.Exit) {
 						vnull;
 					} catch (_:TypeExit) {
-						// the port's TExprToExpr raises TypeExit where upstream raises Exit
+						// port: TExprToExpr raises TypeExit where upstream raises Exit
 						vnull;
 					}
 				})
@@ -2769,7 +2764,7 @@ class MacroApiImpl {
 				name: "set_custom_js_generator",
 				value: vfun1(f -> {
 					var f = prepareCallback(f, 1);
-					// The JS generator (Genjs) is not part of the port: the generator is
+					// port: the JS generator (Genjs) is not part of the port: the generator is
 					// registered as upstream does, but running it fails explicitly.
 					var com = ccom();
 					com.jsGen = () -> {
@@ -2973,7 +2968,7 @@ class MacroApiImpl {
 						case Flash: SwfLib;
 						case _: failwith("Unsupported platform");
 					}
-					// create_native_lib / NativeLibraryHandler.add_native_lib: Java and SWF
+					// port: create_native_lib / NativeLibraryHandler.add_native_lib: Java and SWF
 					// libraries are not part of the port
 					notSupported("Adding native libraries (" + Std.string(kind) + " " + file + ")");
 				})

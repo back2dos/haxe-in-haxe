@@ -12,7 +12,6 @@ import core.TPrinting;
 import syntax.Lexer;
 import context.Common;
 
-// haxe/src/compiler/messageReporting.ml — mechanical draft; not compile-validated.
 typedef ErrorContext = {
 	var absolutePositions:Bool;
 	var sourceLines:Map<String, Array<String>>;
@@ -67,8 +66,8 @@ class MessageReporting {
 		return lines;
 	}
 
-	// Deviation: source lines hold one char per byte, as OCaml strings do, so that
-	// byte columns slice them; the excerpt is turned back into (UTF-8) text when printed.
+	// port: source lines hold one char per byte, as OCaml strings do, so that byte
+	// columns slice them; the excerpt is turned back into (UTF-8) text when printed.
 	static function byteString(s:String):String {
 		var b = haxe.io.Bytes.alloc(s.length);
 		for (i in 0...s.length) b.set(i, StringTools.fastCodeAt(s, i));
@@ -104,10 +103,12 @@ class MessageReporting {
 	}
 
 	public static function compilerPrettyMessageString(defines:DefineContext, ctx:ErrorContext, cm:MessageData):Null<String> {
+		// Filter some messages that don't add much when using this message renderer
 		if (cm.cmMessage == "End of overload failure reasons") return null;
 		ctx.lastPositions.set(cm.cmDepth, cm.cmPos);
 		var isNull = samePos(cm.cmPos, Globals.nullPos) || cm.cmPos.pmin == -1;
 		function unknown(file:String):Bool return file == "" || file == "?";
+		// Extract informations from position
 		var l1:Int, p1:Int, l2:Int, p2:Int, epos:String, lines:Array<{line:Int, text:String}>;
 		if (isNull) {
 			l1 = -1;
@@ -134,6 +135,7 @@ class MessageReporting {
 			epos = cm.cmPos.pfile;
 			lines = [];
 		}
+		// If 4 lines or less, display all; if more, crop the middle
 		if (lines.length > 4) {
 			var head = lines[0], indent = 0, found = false;
 			while (!found && indent < head.text.length - 1) {
@@ -179,20 +181,31 @@ class MessageReporting {
 			case Error: "ERROR";
 		};
 		label = cm.cmDepth > 0 ? " -> " : noColor ? "[" + label + "]" : " " + label + " ";
-		var out = heading ? background + label + reset + " " + (cm.cmFromMacro ? color + "(macro) " + reset : "") + epos + "\n\n" : "";
+		var out = heading ? background
+			+ label
+			+ reset
+			+ " " // Severity heading
+			+ (cm.cmFromMacro ? color + "(macro) " + reset : "") // Macro context indicator
+			+ epos // File + line pointer
+			+ "\n\n" : "";
+		// Macros can send all sorts of bad positions; avoid failing too hard
 		inline function safeSub(s:String, pos:Int, len:Int):String {
 			if (len < 0) return "";
 			if (pos < 0) pos = 0;
 			if (pos >= s.length) return "";
 			if (pos + len > s.length) len = s.length - pos;
 			try return s.substr(pos, len)
+			// Should not happen anymore, but still better than a crash if I missed some case...
 			catch (_:haxe.exceptions.ArgumentException) return "[" + s + ";" + pos + ";" + len + "]";
 		}
+		// Error source
 		if (source) for (entry in lines) {
 			var l = entry.line,
 				gutter = gutterLen - Std.string(l).length - 1,
+				// Replace tabs with 1 space to avoid column misalignments
 				line = entry.text.split("\t").join(" "),
 				len = line.length;
+			// Source code at that line
 			var text = if (l == 0) dim + line + reset; else if (l1 == l2) (p1 > 1 ? dim + safeSub(line, 0, p1 - 1) : "") + reset + bold
 				+ safeSub(line, p1 - 1,
 					p2 - p1) + reset + dim + safeSub(line, p2 - 1,
@@ -200,18 +213,23 @@ class MessageReporting {
 				+ safeSub(line, p1 - 1,
 					len - p1 + 1) + reset; else if (l == l2) bold + safeSub(line, 0, p2 - 1) + reset + dim
 				+ safeSub(line, p2 - 1, len - p2 + 1) + reset; else bold + line + reset;
+			// left-padded line number
 			out += (gutter < 1 ? "" : repeat(" ", gutter)) + (l == 0 ? "-" : Std.string(l)) + " | " + byteString(text) + "\n";
 		}
+		// Error position marker
 		if (marker) out += repeat(" ", gutterLen)
 			+ "|"
 			+ (l1 == l2 ? repeat(" ", p1) + color + repeat("^", p1 == p2 ? 1 : p2 - p1) + reset : "")
 			+ "\n";
+		// Error message
 		for (str in (cast cm.cmMessage : String).split("\n")) out += repeat(" ", gutterLen)
 			+ "| "
+			// Remove "... " prefix
 			+ (StringTools.startsWith(str, "... ") ? str.substr(4) : str)
 			+ "\n";
 		ctx.previous = {pos: isNull ? Globals.nullPos : cm.cmPos, severity: sev, depth: cm.cmDepth};
 		ctx.gutter.set(cm.cmDepth, gutterLen);
+		// Indent sub errors
 		if (cm.cmDepth > 0) {
 			var indent = 0;
 			for (d in 0...cm.cmDepth) indent += ctx.gutter.exists(d) ? ctx.gutter.get(d) : 3;
@@ -230,6 +248,7 @@ class MessageReporting {
 	}
 
 	public static function compilerIndentedMessageString(ctx:ErrorContext, cm:MessageData):Null<String> {
+		// Filter some messages that don't add much when using this message renderer
 		if (cm.cmMessage == "End of overload failure reasons") return null;
 		var str = switch Message.severity(cm) {
 			case Warning: "Warning : " + cm.cmMessage;
@@ -297,6 +316,11 @@ class MessageReporting {
 		return lines.join("\n");
 	}
 
+	/** Format and dispatch compiler messages.
+		[defines] controls formatting options, [messages] is the ordered list of
+		messages (oldest first, i.e. already reversed from the accumulation order),
+		[set_error] is called when a formatter configuration
+		error is encountered, and [on_message sev str] receives each formatted message. */
 	public static function displayMessagesFrom(defines:DefineContext, messages:Array<MessageData>, setError:Void->Void,
 			onMessage:core.Message.MessageSeverity->String->Void):Void {
 		var ctx = createErrorContext(Define.defined(defines, Define.MessageAbsolutePositions));
@@ -352,6 +376,8 @@ class MessageReporting {
 		if (logMessages) closeLogs();
 	}
 
+	/** Convenience wrapper that extracts defines and messages from a compilation context.
+		Reverses [ctx.messages] (which accumulates newest-first) to oldest-first order. */
 	public static function displayMessages(com:CommonContext, onMessage:core.Message.MessageSeverity->String->Void):Void {
 		var messages = com.partScope.messages.copy();
 		messages.reverse();

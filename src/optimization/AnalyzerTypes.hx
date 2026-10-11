@@ -9,18 +9,25 @@ import core.TPrinting;
 import context.SafeCom;
 import optimization.AnalyzerConfig;
 
-// haxe/src/optimization/analyzerTypes.ml — mechanical draft; not compiled or validated.
+/*
+	A BasicBlock represents a node in the control flow. It has expression elements similar to TBlock in the AST,
+	but also holds additional information related to control flow and variables.
+
+	Basic blocks are created whenever it is relevant for control flow. They differ from TBlock in that only their
+	final element can be a control flow expression (the terminator). As a consequence, a given TBlock is split up
+	into several basic blocks when control flow expressions are encountered.
+*/
 enum BlockKind {
-	BKRoot;
-	BKNormal;
-	BKFunctionBegin(tf:TFunc);
-	BKFunctionEnd;
-	BKSub;
-	BKConditional;
-	BKLoopHead;
-	BKException;
-	BKUnreachable;
-	BKCatch(v:TVar);
+	BKRoot; // The unique root block of the graph
+	BKNormal; // A normal block
+	BKFunctionBegin(tf:TFunc); // Entry block of a function
+	BKFunctionEnd; // Exit block of a function
+	BKSub; // A sub block
+	BKConditional; // A "then", "else" or "case" block
+	BKLoopHead; // Header block of a loop
+	BKException; // Relay block for exceptions
+	BKUnreachable; // The unique unreachable block
+	BKCatch(v:TVar); // A catch block
 }
 
 enum FlagBlock {
@@ -28,24 +35,24 @@ enum FlagBlock {
 }
 
 enum CfgEdgeFlag {
-	FlagExecutable;
-	FlagDce;
-	FlagCopyPropagation;
+	FlagExecutable; // Used by constant propagation to handle live edges
+	FlagDce; // Used by DCE to keep track of handled edges
+	FlagCopyPropagation; // Used by copy propagation to track handled eges
 }
 
 enum CfgEdgeKind {
-	CFGGoto;
-	CFGFunction;
-	CFGMaybeThrow;
-	CFGCondBranch(e:TExpr);
-	CFGCondElse;
+	CFGGoto; // An unconditional branch
+	CFGFunction; // Link to a function
+	CFGMaybeThrow; // The block may or may not throw an exception
+	CFGCondBranch(e:TExpr); // A conditional branch
+	CFGCondElse; // A conditional alternative (else,default)
 }
 
 @:structInit class CfgEdge {
-	public var cfgFrom:BasicBlockData;
-	public var cfgTo:BasicBlockData;
-	public var cfgKind:CfgEdgeKind;
-	public var cfgFlags:Array<CfgEdgeFlag>;
+	public var cfgFrom:BasicBlockData; // The source block
+	public var cfgTo:BasicBlockData; // The target block
+	public var cfgKind:CfgEdgeKind; // The edge kind
+	public var cfgFlags:Array<CfgEdgeFlag>; // Edge flags
 
 	public inline function new(cfgFrom:BasicBlockData, cfgTo:BasicBlockData, cfgKind:CfgEdgeKind, cfgFlags:Array<CfgEdgeFlag>) {
 		this.cfgFrom = cfgFrom;
@@ -58,14 +65,14 @@ enum CfgEdgeKind {
 }
 
 enum SyntaxEdge {
-	SEIfThen(bbThen:BasicBlockData, bbNext:BasicBlockData, p:Pos);
-	SEIfThenElse(bbThen:BasicBlockData, bbElse:BasicBlockData, bbNext:BasicBlockData, t:T, p:Pos);
-	SESwitch(ss:SyntaxSwitch);
-	SETry(bbTry:BasicBlockData, bbExc:BasicBlockData, catches:Array<{v:TVar, bb:BasicBlockData}>, bbNext:BasicBlockData, p:Pos);
-	SEWhile(bbBody:BasicBlockData, bbNext:BasicBlockData, p:Pos);
-	SESubBlock(bbSub:BasicBlockData, bbNext:BasicBlockData);
-	SEMerge(bb:BasicBlockData);
-	SENone;
+	SEIfThen(bbThen:BasicBlockData, bbNext:BasicBlockData, p:Pos); // `if` with "then" and "next"
+	SEIfThenElse(bbThen:BasicBlockData, bbElse:BasicBlockData, bbNext:BasicBlockData, t:T, p:Pos); // `if` with "then", "else" and "next"
+	SESwitch(ss:SyntaxSwitch); // `switch` with cases, "default" and "next"
+	SETry(bbTry:BasicBlockData, bbExc:BasicBlockData, catches:Array<{v:TVar, bb:BasicBlockData}>, bbNext:BasicBlockData, p:Pos); // `try` with "exc", catches and "next"
+	SEWhile(bbBody:BasicBlockData, bbNext:BasicBlockData, p:Pos); // `while` with "body" and "next"
+	SESubBlock(bbSub:BasicBlockData, bbNext:BasicBlockData); // "sub" with "next"
+	SEMerge(bb:BasicBlockData); // Merge to same block
+	SENone; // No syntax exit
 }
 
 @:structInit class SyntaxSwitch {
@@ -98,24 +105,27 @@ enum TerminatorKind {
 }
 
 @:structInit class BasicBlockData {
-	public var bbId:Int;
-	public var bbType:T;
-	public var bbPos:Pos;
-	public var bbKind:BlockKind;
-	public var bbClosed:Bool;
+	public var bbId:Int; // The unique ID of the block
+	public var bbType:T; // The block type
+	public var bbPos:Pos; // The block position
+	public var bbKind:BlockKind; // The block kind
+	public var bbClosed:Bool; // Whether or not the block has been closed
 	public var bbFlags:Int;
-	public var bbEl:Array<TExpr>;
-	public var bbPhi:Array<TExpr>;
+	// elements
+	public var bbEl:Array<TExpr>; // The block expressions
+	public var bbPhi:Array<TExpr>; // SSA-phi expressions
 	public var bbTerminator:TerminatorKind;
-	public var bbOutgoing:Array<CfgEdge>;
-	public var bbIncoming:Array<CfgEdge>;
-	public var bbDominator:BasicBlockData;
-	public var bbDominated:Array<BasicBlockData>;
-	public var bbDf:Array<BasicBlockData>;
-	public var bbSyntaxEdge:SyntaxEdge;
-	public var bbLoopGroups:Array<Int>;
-	public var bbScopes:Array<Int>;
-	public var bbVarWrites:Array<TVar>;
+	// relations
+	public var bbOutgoing:Array<CfgEdge>; // Outgoing edges
+	public var bbIncoming:Array<CfgEdge>; // Incoming edges
+	public var bbDominator:BasicBlockData; // The block's dominator
+	public var bbDominated:Array<BasicBlockData>; // The dominated blocks
+	public var bbDf:Array<BasicBlockData>; // The dominance frontier
+	public var bbSyntaxEdge:SyntaxEdge; // The syntactic edge
+	public var bbLoopGroups:Array<Int>; // The loop groups this block belongs to
+	public var bbScopes:Array<Int>; // The scopes this block belongs to
+	// variables
+	public var bbVarWrites:Array<TVar>; // List of assigned variables
 
 	public inline function new(bbId:Int, bbType:T, bbPos:Pos, bbKind:BlockKind, bbClosed:Bool, bbFlags:Int, bbEl:Array<TExpr>,
 			bbPhi:Array<TExpr>, bbTerminator:TerminatorKind, bbOutgoing:Array<CfgEdge>, bbIncoming:Array<CfgEdge>,
@@ -185,6 +195,8 @@ class BasicBlock {
 
 	public static function hasFlag(edge:CfgEdge, flag:CfgEdgeFlag):Bool return edge.cfgFlags.contains(flag);
 
+	// expressions
+
 	public static function addTexpr(bb:BasicBlockData, e:TExpr) bb.bbEl.push(e);
 
 	public static function getTexpr(bb:BasicBlockData, luk:TExprLookupTarget):TExpr return switch luk {
@@ -195,6 +207,8 @@ class BasicBlock {
 				case TermNone | TermReturn(_) | TermBreak(_) | TermContinue(_): throw "AnalyzerTypes.getTexpr";
 			}
 	};
+
+	// edges
 
 	public static function setSyntaxEdge(bb:BasicBlockData, se:SyntaxEdge) bb.bbSyntaxEdge = se;
 
@@ -255,6 +269,10 @@ class BasicBlock {
 	}
 }
 
+/*
+	A Graph contains all relevant information for a given method. It is built from the field expression
+	and then refined in subsequent modules such as Ssa.
+*/
 @:structInit class TFuncInfo {
 	public var bb:BasicBlockData;
 	public var type:T;
@@ -284,14 +302,14 @@ class BasicBlock {
 }
 
 @:structInit class VarInfo {
-	public var viVar:TVar;
-	public var viExtra:Null<TVarExtra>;
-	public var viBbDeclare:BasicBlockData;
-	public var viOrigin:TVar;
-	public var viWrites:Array<BasicBlockData>;
-	public var viValue:Null<TExprLookup>;
-	public var viSsaEdges:Array<TExprLookup>;
-	public var viReachingDef:Null<TVar>;
+	public var viVar:TVar; // The variable itself
+	public var viExtra:Null<TVarExtra>; // The original v_extra
+	public var viBbDeclare:BasicBlockData; // The block where this variable was declared
+	public var viOrigin:TVar; // The origin variable of this variable
+	public var viWrites:Array<BasicBlockData>; // A list of blocks that assign to this variable
+	public var viValue:Null<TExprLookup>; // The value of this variable, if known
+	public var viSsaEdges:Array<TExprLookup>; // The expressions this variable influences
+	public var viReachingDef:Null<TVar>; // The current reaching definition variable of this variable
 
 	public inline function new(viVar:TVar, viExtra:Null<TVarExtra>, viBbDeclare:BasicBlockData, viOrigin:TVar,
 			viWrites:Array<BasicBlockData>, viValue:Null<TExprLookup>, viSsaEdges:Array<TExprLookup>, viReachingDef:Null<TVar>) {
@@ -310,13 +328,13 @@ class BasicBlock {
 }
 
 @:structInit class GraphData {
-	public var gRoot:BasicBlockData;
-	public var gExit:BasicBlockData;
-	public var gUnreachable:BasicBlockData;
-	public var gFunctions:haxe.ds.IntMap<TFuncInfo>;
-	public var gNodes:Array<BasicBlockData>;
-	public var gVarInfos:Array<VarInfo>;
-	public var gLoops:haxe.ds.IntMap<BasicBlockData>;
+	public var gRoot:BasicBlockData; // The unique root block
+	public var gExit:BasicBlockData; // The unique exit block
+	public var gUnreachable:BasicBlockData; // The unique unreachable block
+	public var gFunctions:haxe.ds.IntMap<TFuncInfo>; // A map of functions, indexed by their block IDs
+	public var gNodes:Array<BasicBlockData>; // A list of all blocks
+	public var gVarInfos:Array<VarInfo>; // A map of variable information
+	public var gLoops:haxe.ds.IntMap<BasicBlockData>; // A map containing loop information
 
 	public inline function new(gRoot:BasicBlockData, gExit:BasicBlockData, gUnreachable:BasicBlockData,
 			gFunctions:haxe.ds.IntMap<TFuncInfo>, gNodes:Array<BasicBlockData>, gVarInfos:Array<VarInfo>,
@@ -333,7 +351,9 @@ class BasicBlock {
 	public inline function clone():GraphData return new GraphData(gRoot, gExit, gUnreachable, gFunctions, gNodes, gVarInfos, gLoops);
 }
 
-// A class rather than a structure: HashLink accesses structures through
+// inference
+
+// port: a class rather than a structure: HashLink accesses structures through
 // virtual tables (a conversion per IntMap lookup).
 @:structInit private class DomBbInfo {
 	public var bb:BasicBlockData;
@@ -359,6 +379,8 @@ class BasicBlock {
 }
 
 class Graph {
+	// variables
+
 	public static function createVarInfo(g:GraphData, bb:BasicBlockData, v:TVar):VarInfo {
 		var vi:VarInfo = {
 			viVar: v,
@@ -413,6 +435,8 @@ class Graph {
 	public static function addSsaEdge(g:GraphData, v:TVar, bb:BasicBlockData,
 			luk:TExprLookupTarget) getVarInfo(g, v).viSsaEdges.unshift({bb: bb, target: luk});
 
+	// nodes
+
 	public static function addFunction(g:GraphData, tf:TFunc, t:T, p:Pos, bb:BasicBlockData) g.gFunctions.set(bb.bbId, {
 		bb: bb,
 		type: t,
@@ -454,6 +478,8 @@ class Graph {
 
 	public static function iterEdges(g:GraphData, f:CfgEdge->Void):Void iterEdgesFrom(g, g.gRoot, f);
 
+	// graph
+
 	public static function create(t:T, p:Pos):GraphData {
 		var root = BasicBlock.create(1, BKRoot, t, p);
 		var unreachable = BasicBlock.create(0, BKUnreachable, tDynamic, Globals.nullPos);
@@ -478,6 +504,8 @@ class Graph {
 			Sys.println('Incoming edge ${edge.cfgTo.bbId} <- ${edge.cfgFrom.bbId} has no matching outgoing edge');
 	}
 
+	// Infers the immediate dominators for all reachable blocks. This function can be run multiple times
+	// in case an update is necessary.
 	public static function inferImmediateDominators(g:GraphData):Void {
 		var info = new haxe.ds.IntMap<DomBbInfo>();
 		var nodes:Array<DomBbInfo> = [];
@@ -495,7 +523,7 @@ class Graph {
 			bbi.idom = bbi;
 			bbi.label = bbi;
 			bbi.ancestor = bbi;
-			// The OCaml record update keeps the original self-references for a non-root node.
+			// port: the OCaml record update keeps the original self-references for a non-root node.
 			if (bb != parent) {
 				var copy:DomBbInfo = core.ds.Record.copy(bbi);
 				copy.parent = info.get(parent.bbId);
@@ -562,6 +590,7 @@ class Graph {
 		}
 	}
 
+	// Infers the dominance frontier for all reachable blocks. This function should only be run once.
 	public static function inferDominanceFrontier(g:GraphData):Void iterEdges(g, function(edge) {
 		var bb = edge.cfgFrom;
 		while (bb != g.gUnreachable && bb != edge.cfgTo && bb != edge.cfgTo.bbDominator) {
@@ -571,6 +600,7 @@ class Graph {
 		}
 	});
 
+	// Infers variable declarations and definitions. This function should only be run once.
 	public static function inferVarWrites(g:GraphData):Void iterDomTree(g, function(bb) {
 		switch bb.bbKind {
 			case BKCatch(v):
@@ -595,6 +625,8 @@ class Graph {
 		BasicBlock.terminatorIter(infer, bb.bbTerminator);
 	});
 
+	// Infers the scopes of all reachable blocks. This function can be run multiple times
+	// in case an update is necessary
 	public static function inferScopes(g:GraphData):Void {
 		var nextScopeId = 0;
 		inline function nextScope(scopes:Array<Int>):Array<Int> return [++nextScopeId].concat(scopes);

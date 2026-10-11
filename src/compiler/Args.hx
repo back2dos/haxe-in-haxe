@@ -61,9 +61,10 @@ import compiler.Helper.HelpMessage;
 		didSomething, forceTyping, preCompilation, interp, jvmFlag, swfVersion, hxbLibs, nativeLibs, raiseUsage, displayArg, measureTimes);
 }
 
-// Port of the parse_args portion of haxe/src/compiler/args.ml.
 class Args {
-	// haxe/src/compiler/args.ml: to_raw_args (the --connect wire format) and expand_args.
+	/** Serialize a [parsed_arg list] back to CLI tokens for the [--connect] wire
+		protocol.  Each variant is mapped to the string(s) a user would type.
+		This is used to forward a client's arguments to a remote compilation server. */
 	public static function toRawArgs(args:Array<ParsedArg>):Array<String> {
 		function raw(arg:ParsedArg):Array<String> return switch arg {
 			case SetPlatform(platform, file): [
@@ -158,6 +159,7 @@ class Args {
 				case Next:
 					if (current.length > 0) addPart(current, []);
 					current = [];
+					// reset hxml_stack so the same hxml can be included in a subsequent section
 					hxmlStack = [];
 				case Each:
 					each = current;
@@ -229,6 +231,7 @@ class Args {
 	}
 
 	public static function stringOfRequestArgs(req:RequestArgs):String {
+		// quote arguments that contain whitespace for clearer output
 		function quote(s:String):String return s.indexOf(" ") >= 0 || s.indexOf("\t") >= 0 ? haxe.Json.stringify(s) : s;
 		var mode = switch req.serverMode {
 			case SMNone: "None";
@@ -298,6 +301,9 @@ class Args {
 
 	static function globalPath(parts:Array<String>):GlobalTypePath return {pack: parts.slice(0, -1), name: parts[parts.length - 1]};
 
+	/** Apply a single-part [parsed_arg list] to [com], returning the populated
+		[arg_context].  Higher-level concerns ([Next], [Each], [AddLib] expansion,
+		hxml expansion) are handled by [Compiler.HighLevel.process_params]. */
 	public static function processArgs(com:CommonContext):ArgContext {
 		var actx:ArgContext = {
 			classes: [{pack: [], name: "Std"}],
@@ -335,10 +341,12 @@ class Args {
 					case Flash: Flash;
 					case Neko: Neko;
 					case Php:
+						// --php also adds the php.Boot class
 						actx.classes.unshift({pack: ["php"], name: "Boot"});
 						Php;
 					case Cpp: Cpp;
 					case Jvm:
+						// --jvm also sets the jvm_flag
 						actx.jvmFlag = true;
 						Jvm;
 					case Python: Python;
@@ -346,6 +354,7 @@ class Args {
 				};
 				Common.setPlatform(com, platform, file);
 			case SetCppiaTarget(file):
+				// --cppia: enable cppia define and target cpp
 				Common.define(com, Defines.Cppia);
 				Common.setPlatform(com, Cpp, file);
 			case SetCustomTarget(name, path):
@@ -360,11 +369,14 @@ class Args {
 				if (com.main.mainPath != null) throw new ArgumentError("Multiple --main classes specified");
 				var path = globalPath(path);
 				com.main.mainPath = path;
+				// --main also adds the class for compilation (matches old parse_args behaviour)
 				actx.classes.unshift(path);
-			case AddLib(_) | HaxelibGlobal: // Expanded by the request layer.
+			case AddLib(_) | HaxelibGlobal:
+				// handled at the process_params level
 			case Define(flag, value):
 				if (value == null) Common.externalDefine(com, flag);
 				else Common.externalDefineValue(com, flag, value);
+				// --no-opt also disables the foptimize flag (mirroring parse_args behavior)
 				if (flag == "no-opt") com.foptimize = false;
 			case Undefine(flag):
 				Common.externalUndefine(com, flag);
@@ -374,10 +386,12 @@ class Args {
 				Common.define(com, Defines.Debug);
 				com.debug = true;
 			case Interp:
+				// --interp: define interp, set eval platform, mark actx.interp
 				Common.define(com, Defines.Interp);
 				Common.setPlatform(com, Eval, "");
 				actx.interp = true;
-			case Run(_, _) | RunX(_): // Expanded by the request layer.
+			case Run(_, _) | RunX(_):
+				// --run / -x: handled at process_params level
 			case AddResource(file, name):
 				file = try Common.findFile(com, file) catch (_:NotFound) file;
 				var data:haxe.io.Bytes;
@@ -434,10 +448,16 @@ class Args {
 			case SetPrompt:
 				Helper.prompt = true;
 			case Cwd(dir):
+				// Re-apply chdir: process_params applies it eagerly for hxml resolution,
+				// but entry restores the original cwd before execute_ctx, so we must
+				// re-apply here to compile in the right directory.
 				try Sys.setCwd(dir)
 				catch (_:Dynamic) throw new ArgumentError("Invalid directory: " + dir);
 				actx.didSomething = true;
-			case HxmlFile(_) | Next | Each | Expand(_) | ServerListen(_) | ServerConnect(_) | Connect(_): // Request-layer directives.
+			case HxmlFile(_) | Next | Each | Expand(_) | ServerListen(_) | ServerConnect(_) | Connect(_):
+				// hxml files should have been expanded before reaching process_args
+				// batch directives handled at process_params level
+				// server modes handled at process_params level
 			case ShowVersion:
 				throw new HelpMessage(Globals.sVersionFull(com.sctx.version));
 			case ShowHelp:
@@ -456,13 +476,15 @@ class Args {
 		if (com.platform == core.Globals.Platform.Cpp
 			&& !Defines.defined(com.defines, Defines.DisableUnicodeStrings)
 			&& !Defines.defined(com.defines, Defines.HxcppSmartStings)) Defines.define(com.defines, Defines.HxcppSmartStings);
+		// port: native-library class generation (gen_hx_classes) is not ported and fails explicitly.
 		if (Defines.rawDefined(com.defines,
 			"gen_hx_classes")) throw new ArgumentError("Native-library class generation requires the native-library milestone");
 		actx.raiseUsage = function() throw new HelpMessage(usageString(usage, false));
 		return actx;
 	}
 
-	/** Expands HXML markers using the same eager, section-local inclusion rules as args.ml. */
+	// port: used only by the legacy bootstrap entry (LegacyMain): expands HXML markers eagerly,
+	// with the section-local inclusion check of expand_args.
 	public static function expandHxml(arguments:Array<ParsedArg>):Array<ParsedArg> {
 		var expanded:Array<ParsedArg> = [];
 		var included:Array<String> = [];
@@ -487,6 +509,14 @@ class Args {
 		return expanded;
 	}
 
+	/** Pre-parse a flat string list into a [parsed_arg list].
+		This does NOT expand hxml files (they become [HxmlFile] markers) and does
+		NOT call out to haxelib (libraries become [AddLib] markers). Both are
+		handled lazily when the request is later processed.
+
+		The translation is mostly 1-to-1: one CLI flag group → one [parsed_arg].
+		Compound expansions (e.g. adding [php.Boot] for [--php], setting
+		[actx.interp] for [--interp]) are deferred to [process_args]. */
 	public static function parseArgs(arguments:Array<String>):Array<ParsedArg> {
 		var parsed:Array<ParsedArg> = [];
 		var index = 0;
@@ -526,12 +556,14 @@ class Args {
 				case "--cppia", "-cppia":
 					parsed.push(SetCppiaTarget(requiredArgument(argument, arguments, index++)));
 				case "-x":
+					// -x is non-terminal: subsequent args remain build args
 					parsed.push(RunX(requiredArgument(argument, arguments, index++)));
 				case "--interp":
 					parsed.push(Interp);
 				case "--run":
 					var path = requiredArgument(argument, arguments, index++);
 					parsed.push(Run(path, arguments.slice(index)));
+					// --run consumes all remaining tokens as runtime args
 					return parsed;
 				case "--class-path", "-p", "-cp":
 					parsed.push(AddClassPath(requiredArgument(argument, arguments, index++)));
@@ -555,6 +587,7 @@ class Args {
 					parsed.push(SetDebug);
 				case "--version", "-version":
 					parsed.push(ShowVersion);
+					// consume remaining args - ShowVersion raises immediately in process_args
 					return parsed;
 				case "--help", "-h", "-help":
 					parsed.push(ShowHelp);
@@ -652,7 +685,6 @@ class Args {
 	}
 }
 
-// Request structures from args.ml.
 @:structInit class PartArgs {
 	public var args:Array<ParsedArg>;
 	public var runtimeArgs:Array<String>;

@@ -17,8 +17,7 @@ import core.Message.CompilerMessage;
 import haxe.ds.IntMap;
 import haxe.ds.StringMap;
 
-// Direct structural port of haxe/src/core/tType.ml.  This is deliberately a
-// data model only; typing operations belong to the typing modules.
+// port: from haxe/src/core/tType.ml.
 typedef TypeMap<T> = StringMap<T>;
 
 enum FieldKind {
@@ -40,13 +39,13 @@ enum FieldKind {
 
 enum VarAccess {
 	AccNormal;
-	AccNo;
-	AccNever;
-	AccCtor;
-	AccCall;
-	AccPrivateCall;
-	AccInline;
-	AccRequire(condition:String, message:Null<String>);
+	AccNo; // can't be accessed outside of the class itself and its subclasses
+	AccNever; // can't be accessed, even in subclasses
+	AccCtor; // can only be accessed from the constructor
+	AccCall; // perform a method call when accessed
+	AccPrivateCall; // perform a method call when accessed, but private like AccNo
+	AccInline; // similar to Normal but inline when accessed
+	AccRequire(condition:String, message:Null<String>); // set when @:require(cond) fails
 }
 
 enum MethodKind {
@@ -115,6 +114,11 @@ enum T {
 
 @:structInit class TMono {
 	public var tmType:Null<T>;
+	// ```
+	// function fn<A,B:A>() {}
+	// ```
+	// `A` is a down-constraint for `B`
+	// `B` is an up-constraint for `A`
 	public var tmDownConstraints:Array<TMonoConstraint>;
 	public var tmUpConstraints:Array<{var type:T; var name:Null<String>;}>;
 	public var tmModifiers:Array<TMonoModifier>;
@@ -147,7 +151,7 @@ enum TMonoConstraintKind {
 enum TMonoModifier {
 	MNullable(callback:T->T);
 	MOpenStructure;
-	MDynamic;
+	MDynamic; // There was a unificaiton against Dynamic, which didn't bind the mono
 }
 
 enum TLazyState {
@@ -156,7 +160,7 @@ enum TLazyState {
 	LWait(callback:Void->T);
 }
 
-// tlazy ref: forcing a lazy type updates the cell that every TLazy sharing it sees.
+// port: tlazy ref: forcing a lazy type updates the cell that every TLazy sharing it sees.
 class TLazy {
 	public var value:TLazyState;
 
@@ -176,13 +180,13 @@ class TLazy {
 }
 
 typedef TParams = Array<T>;
-/** An `a_from_field`/`a_to_field` entry: `(t * tclass_field)`. */
-/** `(tclass * tparams)`, as in `cl_super`/`cl_implements`. */
+// port: `(tclass * tparams)`, as in `cl_super`/`cl_implements`.
 typedef ClassAndParams = {var cls:TClass; var params:TParams;};
 
+// port: an `a_from_field`/`a_to_field` entry: `(t * tclass_field)`.
 typedef CastField = {var type:T; var field:TClassField;};
 
-/** `Abstract.find_to_from` result: `(tabstract * tparams * (t * tclass_field))`. */
+// port: `Abstract.find_to_from` result: `(tabstract * tparams * (t * tclass_field))`.
 typedef AbstractCastField = {var abs:TAbstract; var params:TParams; var field:CastField;};
 
 @:structInit class TypedTypeParam {
@@ -373,11 +377,11 @@ enum TFieldAccess {
 	FStatic(cls:TClass, field:TClassField);
 	FAnon(field:TClassField);
 	FDynamic(name:String);
-	FClosure(cls:Null<{var cls:TClass; var params:TParams;}>, field:TClassField);
+	FClosure(cls:Null<{var cls:TClass; var params:TParams;}>, field:TClassField); // None class = TAnon
 	FEnum(en:TEnum, field:TEnumField);
 }
 
-// A class rather than a structure so static targets access fields directly;
+// port: a class rather than a structure so static targets access fields directly;
 // @:structInit keeps `{eexpr:..., etype:..., epos:...}` literals working.
 @:structInit class TExpr {
 	public var eexpr:TExprDef;
@@ -463,6 +467,7 @@ typedef TInfos = {
 	public var clParams:TypeParams;
 	public var clUsing:Array<{var cls:TClass; var pos:Pos;}>;
 	public var clRestore:Void->Void;
+	// do not insert any fields above
 	public var clType:T;
 	public var clKind:TClassKind;
 	public var clFlags:Int;
@@ -477,9 +482,12 @@ typedef TInfos = {
 	public var clConstructor:Null<TClassField>;
 	public var clInit:Null<TClassField>;
 	public var clBuild:Void->BuildState;
+
+	// These are classes which directly extend or directly implement this class.
+	// Populated automatically in post-processing step (Filters.run)
 	public var clDescendants:Array<TClass>;
 
-	// No explicit constructor: 25 arguments exceed the HashLink JIT limit.
+	// port: no explicit constructor: 25 arguments exceed the HashLink JIT limit.
 	public function clone():TClass return {
 		clPath: clPath,
 		clModule: clModule,
@@ -545,6 +553,7 @@ typedef TInfos = {
 	public var eParams:TypeParams;
 	public var eUsing:Array<{var cls:TClass; var pos:Pos;}>;
 	public var eRestore:Void->Void;
+	// do not insert any fields above
 	public var eType:T;
 	public var eFlags:Int;
 	public var eConstrs:TypeMap<TEnumField>;
@@ -587,6 +596,7 @@ typedef TInfos = {
 	public var tParams:TypeParams;
 	public var tUsing:Array<{var cls:TClass; var pos:Pos;}>;
 	public var tRestore:Void->Void;
+	// do not insert any fields above
 	public var tType:T;
 
 	public inline function new(tPath:GlobalTypePath, tModule:ModuleDef, tPos:Pos, tNamePos:Pos, tPrivate:Bool, tDoc:Documentation,
@@ -622,6 +632,7 @@ typedef TInfos = {
 	public var aParams:TypeParams;
 	public var aUsing:Array<{var cls:TClass; var pos:Pos;}>;
 	public var aRestore:Void->Void;
+	// do not insert any fields above
 	public var aOps:Array<{var op:Binop; var field:TClassField;}>;
 	public var aUnops:Array<{var op:Unop; var flag:UnopFlag; var field:TClassField;}>;
 	public var aImpl:Null<TClass>;
@@ -638,7 +649,7 @@ typedef TInfos = {
 	public var aExtern:Bool;
 	public var aEnum:Bool;
 
-	// No explicit constructor: 25 arguments exceed the HashLink JIT limit.
+	// port: no explicit constructor: 25 arguments exceed the HashLink JIT limit.
 	public function clone():TAbstract return {
 		aPath: aPath,
 		aModule: aModule,
@@ -694,7 +705,7 @@ enum ModuleType {
 }
 
 @:structInit class ModuleDefDisplay {
-	public var mInlineCalls:Array<{var callPos:Pos; var definitionPos:Pos;}>;
+	public var mInlineCalls:Array<{var callPos:Pos; var definitionPos:Pos;}>; // calls whatever is at pos1 from pos2
 	public var mTypeHints:Array<{var hintPos:Pos; var typePos:Pos;}>;
 	public var mImportPositions:Map<String, Bool>;
 
@@ -712,7 +723,9 @@ enum ModuleDepOrigin {
 	MDepFromTyping;
 	MDepFromImport;
 	MDepFromMacro;
+	// Compiler.include loads module with this special origin, which tells add_dependency not to add as a proper dependency.
 	MDepFromMacroInclude;
+	// Modules created via Compiler.defineType or Compiler.defineModule will be added as dependency to their "parent" module with this origin.
 	MDepFromMacroDefine;
 }
 
@@ -874,33 +887,33 @@ enum FlagTClass {
 	CInterface;
 	CAbstract;
 	CFunctionalInterface;
-	CUsed;
-	CExcluded;
+	CUsed; // Marker for DCE
+	CExcluded; // Marker for exclude macro, turned into CExtern during filters
 }
 
 enum FlagTClassField {
 	CfPublic;
 	CfStatic;
-	CfExtern;
+	CfExtern; // This is only set if the field itself is extern, not just the class.
 	CfFinal;
-	CfModifiesThis;
+	CfModifiesThis; // This is set for methods which reassign `this`. E.g. `this = value`
 	CfOverride;
 	CfAbstract;
 	CfOverload;
 	CfImpl;
 	CfEnum;
 	CfGeneric;
-	CfDefault;
-	CfPostProcessed;
-	CfUsed;
-	CfMaybeUsed;
-	CfNoLookup;
+	CfDefault; // Interface field with default implementation (only valid on Java)
+	CfPostProcessed; // Marker to indicate the field has been post-processed
+	CfUsed; // Marker for DCE
+	CfMaybeUsed; // Marker for DCE
+	CfNoLookup; // Field cannot be accessed by-name.
 	CfAbstractConstructor;
 }
 
 enum FlagTEnum {
 	EnExtern;
-	EnExcluded;
+	EnExcluded; // Marker for exclude macro, turned into EnExtern during filters
 }
 
 enum FlagTVar {
@@ -910,8 +923,8 @@ enum FlagTVar {
 	VAssigned;
 	VCaught;
 	VStatic;
-	VUsedByTyper;
-	VHxb;
+	VUsedByTyper; // Set if the typer looked up this variable
+	VHxb; // Flag used by hxb
 	VCoroCaptured;
 	VCoroScope;
 	VCoroRestrictedSuspension;
@@ -927,6 +940,7 @@ class TType {
 		"CUsed",
 		"CExcluded"
 	];
+	// Order has to match declaration for printing
 	public static final flagTClassFieldNames = [
 		"CfPublic",
 		"CfStatic",

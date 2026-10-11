@@ -15,8 +15,7 @@ import compiler.hxb.HxbData;
 import compiler.hxb.HxbWriter;
 import syntax.Parser.ParserDisplayInformation;
 
-// Port of haxe/src/compiler/compilationCache.ml.
-// Digest.t signatures are hexadecimal strings in the port (see Define.getSignature).
+// port: Digest.t signatures are hexadecimal strings (see Define.getSignature).
 @:structInit class CachedFile {
 	public var cFilePath:ResolvedFile;
 	public var cTime:Float;
@@ -70,13 +69,13 @@ class CompilationCache {
 		}
 	}
 
-	// Tables whose iteration order shows in display/server output are OcamlHashtbl
+	// port: tables whose iteration order shows in display/server output are OcamlHashtbl
 	// with OCaml's polymorphic hash, so they iterate like upstream's Hashtbl.
 	public static function stringTable<V>():OcamlHashtbl<String, V> return new OcamlHashtbl(OcamlHash.hashString, (a, b) -> a == b, 0);
 
 	public static function pathTable<V>():OcamlHashtbl<GlobalTypePath, V> return new OcamlHashtbl(OcamlHash.hashPath, pathEq, 0);
 
-	/** OCaml structural equality on type paths. **/
+	// port: OCaml structural equality on type paths.
 	public static function pathEq(a:GlobalTypePath,
 			b:GlobalTypePath):Bool return a.name == b.name && a.pack.length == b.pack.length && a.pack.join(".") == b.pack.join(".");
 
@@ -149,8 +148,8 @@ class ContextCache {
 				tmpBinaryCache.find(path);
 			} catch (_:NotFound) {
 				var mc = binaryCache.find(path);
-				var mExtra = mc.mcExtra.clone(); // { mc.mc_extra with m_deps = mc.mc_extra.m_deps }
-				mExtra.mDeps = mc.mcExtra.mDeps.copy(); // m_deps is a persistent map upstream
+				var mExtra = mc.mcExtra.clone(); // port: { mc.mc_extra with m_deps = mc.mc_extra.m_deps }
+				mExtra.mDeps = mc.mcExtra.mDeps.copy(); // port: m_deps is a persistent map upstream
 				var mc:ModuleCache = {
 					mcPath: mc.mcPath,
 					mcId: mc.mcId,
@@ -174,7 +173,7 @@ class ContextCache {
 
 	public function addBinaryCache(m:ModuleDef, chunks:CachedChunks):Void {
 		var mExtra = m.mExtra.clone();
-		mExtra.mDeps = m.mExtra.mDeps.copy(); // m_deps is a persistent map upstream
+		mExtra.mDeps = m.mExtra.mDeps.copy(); // port: m_deps is a persistent map upstream
 		mExtra.mCacheState = MSGood;
 		mExtra.mDisplayDeps = null;
 		binaryCache.replace(m.mPath, {
@@ -353,7 +352,7 @@ class Cache {
 	public function addInfo(sign:String, desc:String, platform:core.Globals.Platform, classPaths:core.ClassPaths,
 			defines:core.Define.DefineContext):Int {
 		var cc = getContext(sign);
-		// PMap.foldi with a cons accumulator: descending key order
+		// port: PMap.foldi with a cons accumulator: descending key order
 		var keys = [for (k in defines.values.keys()) k];
 		keys.sort(Reflect.compare);
 		keys.reverse();

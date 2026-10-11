@@ -1,7 +1,7 @@
 package core.data;
 
-// Mechanical translation of haxe/src/core/data/dataReaderApi.ml. Draft; not compiled or tested.
-// An OCaml module signature is represented as a structural record of functions.
+// port: from haxe/src/core/data/dataReaderApi.ml.
+// port: an OCaml module signature is represented as a structural record of functions.
 @:structInit class DataReaderApi<Data> {
 	public var readOptional:Data->(Data->Void)->Void;
 	public var readObject:Data->Array<{name:String, value:Data}>;

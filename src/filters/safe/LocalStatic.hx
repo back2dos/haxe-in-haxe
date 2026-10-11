@@ -22,7 +22,6 @@ import haxe.ds.IntMap;
 	public inline function clone():LsContext return new LsContext(scom, lut, addedFields);
 }
 
-// haxe/src/filters/safe/localStatic.ml — mechanical draft; not compiled or validated.
 class LocalStatic {
 	public static function promoteLocalStatic(lsctx:LsContext, run:TExpr->TExpr, v:TVar, eo:Null<TExpr>):Void {
 		var name = lsctx.scom.curfield.cfName + "_" + v.vName;
@@ -82,6 +81,7 @@ class LocalStatic {
 			cf.cfExpr = loop(false, false, eo);
 		}
 		lsctx.addedFields.unshift(cf);
+		// Add to lookup early so that the duplication check works.
 		c.clStatics.set(cf.cfName, cf);
 		lsctx.lut.set(v.vId, cf);
 	}
@@ -111,6 +111,7 @@ class LocalStatic {
 			};
 		}
 		var e = run(e);
+		// Add to ordered list in reverse order
 		for (cf in lsctx.addedFields) c.clOrderedStatics.unshift(cf);
 		return e;
 	}

@@ -13,7 +13,6 @@ import core.TOther.*;
 import core.TOther;
 import core.Globals.*;
 
-// haxe/src/typing/tanon_identification.ml — mechanical draft; not compile-validated.
 typedef PathFieldMapping<A> = {var pfmPath:core.Globals.GlobalTypePath; var pfmParams:TypeParams; var pfmFields:TypeMap<TClassField>; var pfmConverted:Null<Array<{name:String, value:A}>>; var pfmArity:Int;}
 
 class AnonIdMode {
@@ -134,6 +133,7 @@ class TanonIdentification<A> {
 					ms;
 				case _: throw new Unify_error([UnifyCustom("bad type")]);
 			};
+			// Check if we applied Void to a return type parameter... (#3463)
 			for (t in monos) switch follow(t) {
 				case TMono(r):
 					Monomorph.bind(r, tDynamic);
@@ -209,7 +209,7 @@ class TanonIdentification<A> {
 		for (n in names) {
 			var cf = an.aFields.get(n);
 			arity++;
-			fields.set(cf.cfName, core.ds.Record.withFields(cf, {cfType: replaceMono(uctx.equalityKind != EqStricter, cf.cfType)}));
+			fields.set(cf.cfName, core.ds.Record.withFields(cf, {cfType: replaceMono(uctx.equalityKind != EqStricter, cf.cfType)})); // TODO: not very robust
 		}
 		an = {aFields: fields, aStatus: an.aStatus};
 		return protect(function() {

@@ -5,7 +5,7 @@ import core.Globals;
 import core.Ast as AstTools;
 import core.Meta as MetadataTools;
 
-// haxe/src/core/ast.ml, module Printer.
+// port: from haxe/src/core/ast.ml, module Printer.
 class AstPrinter {
 	public static function sExprInner(tabs:String, e:Expr):String {
 		function expr(e:Expr):String return sExprInner(tabs, e);
@@ -84,7 +84,7 @@ class AstPrinter {
 
 	public static function sComplexType(tabs:String, t:ComplexType):String return switch t {
 		case CTPath(p): sComplexTypePath(tabs, p);
-		// Preserve upstream's conditional grouping, including the nonempty argument branch.
+		// port: preserve upstream's conditional grouping, including the nonempty argument branch.
 		case CTFunction(args, ret): args.length > 0 ? [for (a in args) sComplexType(tabs, a.type)].join(" -> ") : "Void -> "
 				+ sComplexType(tabs, ret.type);
 		case CTAnonymous(fl): "{ " + [for (f in fl) sClassField(tabs, f)].join("; ") + "}";

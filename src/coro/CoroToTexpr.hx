@@ -17,8 +17,7 @@ import coro.CoroFunctions;
 import coro.CoroFunctions.*;
 import coro.ContTypes;
 
-// haxe/src/coro/coroToTexpr.ml — mechanical draft; not compile-validated.
-// IntSet iteration is descending, matching the upstream comparator b - a.
+// port: IntSet iteration is descending, matching the upstream comparator b - a.
 class CoroIntSet {
 	var ids:Map<Int, Bool> = [];
 
@@ -68,6 +67,7 @@ class SuspensionCalls {
 		return {call: b.varInit(v, create), result: b.local(v, p)};
 	}
 
+	// Returns (esubject, eres, eerror) field accesses on ecororesult
 	public static function unpackResultFields(ctx:CoroCtx, cont:ContinuationApi, result:TExpr):{subject:TExpr, result:TExpr, error:TExpr} {
 		inline function base(cf:TClassField,
 				t:T):TExpr return ctx.builder.instanceField(result, cont.suspensionResultClass, [ctx.typer.com.basic.tany], cf, t);
@@ -87,6 +87,7 @@ class SuspensionCalls {
 		var b = ctx.builder;
 		var p = call.csPos;
 		var outcome = call.csKind;
+		// Always-suspending: call + return suspended singleton
 		if (outcome.noReturn && outcome.noThrow) return {
 			call: b.voidBlock([
 				CoroToTexpr.makeSuspendingCall(ctx.typer.com.basic, cont, call,
@@ -94,6 +95,7 @@ class SuspensionCalls {
 			]),
 			check: b.voidBlock([b.makeReturn(makeSuspendedReturn(b, cont, p))])
 		};
+		// Generic version: call + switch
 		var assigned = makeSuspensionCallAndAssign(ctx, cont, call, exprs.econtinuation);
 		var fields = unpackResultFields(ctx, cont, assigned.result);
 		var suspended = b.voidBlock([b.makeReturn(makeSuspendedReturn(b, cont, p))]);
@@ -102,6 +104,7 @@ class SuspensionCalls {
 			case SusResult: b.assign((exprs.etmpResult).force(), fields.result);
 		};
 		var thrown = b.voidBlock([b.assign(exprs.etmpError, fields.error), b.makeBreak(p)]);
+		// Callee can't throw: skip the Thrown case entirely.
 		var check = outcome.noThrow ? makeCustomControlSwitch(b, fields.subject,
 			[{controls: [CoroPending], e: suspended}, {controls: [CoroReturned], e: returned}],
 			p) : makeControlSwitch(b, fields.subject, suspended, returned, thrown, p);
@@ -117,6 +120,11 @@ class SuspensionCalls {
 		return {call: assigned.call, check: b.makeReturn(assigned.result)};
 	}
 
+	// Generate an inline call+result check for a no_suspend callee.
+	// Returns (call_stmt, check_stmt) — assembled into a void_block by the caller.
+	// For single-state coroutines there is no enclosing while loop, so the Thrown
+	// branch emits the full error-handler inline instead of using `break`.
+	// If the callee also has no_throw, the result is set directly without any switch.
 	public static function makeSyncCallAndCheck(ctx:CoroCtx, cont:ContinuationApi, exprs:CoroToTexprExprs, call:CoroSuspend,
 			e:Null<TExpr>):{
 		call:TExpr,
@@ -127,7 +135,11 @@ class SuspensionCalls {
 		var assigned = makeSuspensionCallAndAssign(ctx, cont, call, exprs.econtinuation);
 		var fields = unpackResultFields(ctx, cont, assigned.result);
 		var returned = e == null ? b.voidBlockAt([], p) : b.assign(e, fields.result);
+		// Callee can't throw, and we know it can't suspend (no_suspend = true),
+		// so the result is always Returned. No switch needed.
 		if (call.csKind.noThrow) return {call: assigned.call, check: returned};
+		// Single-state: no while loop to break out of.
+		// Emit the error handler directly (equivalent to eexchandle).
 		var thrown = ctx.numStates == 1 ? b.voidBlock([
 			b.assign(exprs.etmpError, fields.error),
 			b.assign(exprs.eerror, exprs.etmpError),
@@ -145,6 +157,7 @@ class SuspensionCalls {
 
 class CoroToTexpr {
 	public static function makeSuspendingCall(basic:BasicTypes, cont:ContinuationApi, call:CoroSuspend, econtinuation:TExpr):TExpr {
+		// lose Coroutine<T> type for the called function not to confuse further filters and generators
 		var tfun = switch followWithCoro(call.csFun.etype) {
 			case Coro({args: args, ret: ret}):
 				var expanded = Common.expandCoroType(basic, args, ret);
@@ -161,6 +174,7 @@ class CoroToTexpr {
 		var b = ctx.builder;
 		var first = states[0];
 		var argStates = new CoroIntSet().add(first.csId);
+		// Keep an extra table of all vars and what states they appear in, easier check if a var is used across states this way.
 		var usages:Map<Int, CoroIntSet> = [];
 		for (a in tfArgs) usages.set(a.variable.vId, argStates);
 		for (state in states) {
@@ -177,7 +191,12 @@ class CoroToTexpr {
 			for (e in state.csEl) loop(e);
 			if (state.csElTail != null) for (e in state.csElTail) loop(e);
 		}
-		// `Hashtbl.create 0`: the result lists the fields in OCaml's bucket order (Hashtbl.to_seq_values)
+		/*
+		 * Each variable which is used across multiple states is given a field in the continuation class to store it's value
+		 * during suspension.
+		 * TODO : Instead of giving each variable a field have a set of "slots" which can be used by a field if no other variable is currently using it.
+		 */
+		// port: `Hashtbl.create 0`: the result lists the fields in OCaml's bucket order (Hashtbl.to_seq_values)
 		var fields = new core.ds.OcamlHashtbl<Int, TClassField>(core.ds.OcamlHashtbl.hashInt, function(a, b) return a == b);
 		inline function setField(id:Int, field:TClassField):Void fields.replace(id, field);
 		inline function across(id:Int):Bool {
@@ -188,6 +207,9 @@ class CoroToTexpr {
 		for (a in tfArgs) {
 			var v:TVar = a.variable;
 			setField(v.vId, mkField('_hx_hoisted${v.vId}', v.vType, v.vPos, v.vPos));
+			// Create a fresh restored var rather than reusing the original argument variable.
+			// This prevents the same v_id appearing as both an outer function parameter and
+			// a TVar declaration inside the state machine body (which confuses renameVars).
 			first.csMappedLocal.set(v.vId, allocVar(VGenerated, '_hx_restored${v.vId}', v.vType, v.vPos));
 			forced.set(v.vId, true);
 		}
@@ -234,6 +256,8 @@ class CoroToTexpr {
 						case _: core.Texpr.mapExpr(mapper, e);
 					}
 				case TLocal(v) if (across(v.vId) || forced.exists(v.vId)):
+					// Each state generates new local variables for variables which are used across states.
+					// Here we generate and store those new variables and remap local access to them
 					state.csReads.add(v.vId);
 					{var recordCopy39 = core.ds.Record.copy(e); recordCopy39.eexpr = TLocal(localMapping(v)); recordCopy39;};
 				case TCall({eexpr: TLocal(v)}, []) if (ctx.deferredExprs.exists(v.vId)): mapper(ctx.deferredExprs.get(v.vId)());
@@ -242,6 +266,12 @@ class CoroToTexpr {
 			state.csEl = state.csEl.map(mapper);
 			if (state.csElTail != null) state.csElTail = state.csElTail.map(mapper);
 		}
+		// Remove hoisted fields for variables that are never saved or restored:
+		// - Force-hoisted function args that are never actually read in the state machine
+		//   (e.g., a discarded `_` or an unused `node` parameter).
+		// - Any cross-state field that ended up with no actual reads or writes.
+		// Removing these avoids passing dead constructor parameters and emitting
+		// prototype fields that are never accessed.
 		var used = new CoroIntSet();
 		for (s in states) used = used.union(s.csWrites.union(s.csReads));
 		var unused = [];
@@ -249,6 +279,8 @@ class CoroToTexpr {
 		for (id in unused) fields.remove(id);
 		for (state in states) {
 			var restoring = [];
+			// We don't want to restore a variable which is declared in this state
+			// Doing so would mean if the var is an argument the arguments value would be overwritten by whatever is in the hoisted field
 			for (id in state.csWrites.union(state.csReads)
 				.elements()) if (!core.ds.ArrayTools.exists(state.csDeclarations, function(v) return v.vId == id)) {
 					var v = state.csMappedLocal.get(id);
@@ -290,6 +322,8 @@ class CoroToTexpr {
 	} {
 		var com = ctx.typer.com;
 		var b = ctx.builder;
+		// In a single-state coroutine there is no while/switch dispatch loop, so
+		// gotoLabel is never read.
 		var single = ctx.numStates == 1;
 		inline function setState(id:Int):TExpr return b.assign(exprs.egoto, b.int(id, p));
 		inline function setControl(c:CoroControl):TExpr return b.assign(exprs.estate, b.int(c, p));
@@ -353,6 +387,9 @@ class CoroToTexpr {
 				case NextReturnVoid: addState(-1, [setControl(CoroReturned), ereturn], null);
 				case NextReturn(e): addState(-1, [setControl(CoroReturned), b.assign(exprs.eresult, e), ereturn], null);
 				case NextThrow(e1):
+					// In multi-state mode the break exits the while/switch loop to reach the
+					// outer error handler.  In single-state mode there is no loop, so no break
+					// is needed — the error handler follows the body naturally.
 					var tmp = {
 						var recordCopy37 = core.ds.Record.copy(exprs.etmpError);
 						recordCopy37.epos = e1.epos;
@@ -380,7 +417,7 @@ class CoroToTexpr {
 					var catches = c.ccCatches.copy();
 					catches.reverse();
 					for (ca in catches) cond = switch follow(ca.v.vType) {
-						case TDynamic(_): setState(ca.cb.cbId);
+						case TDynamic(_): setState(ca.cb.cbId); // no next
 						case _: b.ifThenElse(stdIs((exprs.etmpErrorUnwrapped).force(), ca.v.vType), setState(ca.cb.cbId), cond,
 								com.basic.tvoid);
 					};
@@ -438,6 +475,7 @@ class CoroToTexpr {
 			switchExhaustive: true
 		}), com.basic.tvoid, p);
 		etry = b.voidBlock([etry, handler]);
+		// If there is no catch we don't need to pseudo-goto back into the state loop, so we don't need a control loop.
 		eloop = ctx.hasCatch ? mk(TWhile(b.bool(true, p), etry, NormalWhile), com.basic.tvoid, p) : etry;
 		return {
 			expr: eloop,

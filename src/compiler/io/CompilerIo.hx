@@ -3,8 +3,7 @@ package compiler.io;
 import haxe.io.Input;
 import haxe.io.Output;
 
-// haxe/src/compiler/io/compilerIo.ml — mechanical draft; not compile-validated.
-// Output pipes use host thread/deque primitives.
+/** Abstract IO handle for a compilation request. */
 typedef CompilerIoData = {
 	var stdout:Output;
 	var stderr:Output;
@@ -18,9 +17,17 @@ typedef CompilerIoData = {
 	var close:Void->Void;
 }
 
+/** Compiler IO abstraction.
+
+	This module provides the IO channels and protocol-aware output routing
+	for a single compilation request.
+
+	The protocol encoding is fully encapsulated via generic callbacks. */
 class CompilerIo {
-	// Haxe Output replaces the Unix descriptor; a deque retains the asynchronous
-	// reader and close/join ordering without an OS pipe dependency.
+	/* Create a Unix pipe with a background reader thread that forwards chunks
+		to [write_fn].  Returns [(out_channel, thread)]. */
+	// port: a PipeOutput (a deque drained by a reader thread) stands in for the Unix pipe and
+	// is both the channel and the thread to join.
 	public static function makeOutputPipe(writeFn:String->Void):{output:Output, thread:PipeOutput} {
 		var output = new PipeOutput(writeFn);
 		return {output: output, thread: output};
@@ -55,6 +62,7 @@ class CompilerIo {
 
 	public static function close(io:CompilerIoData):Void io.close();
 
+	/** Create a pipe-backed IO handle with explicit callbacks. */
 	public static function create(writeOut:String->Void, writeErr:String->Void, writeResult:String->Void, signalError:Void->Void,
 			stdin:Input):CompilerIoData {
 		var out = makeOutputPipe(writeOut), err = makeOutputPipe(writeErr), closed = false;
@@ -89,6 +97,7 @@ class CompilerIo {
 		};
 	}
 
+	/** Create a stdio-based IO handle for non-server (CLI) mode. */
 	public static function createStdioIo():CompilerIoData return {
 		stdout: Sys.stdout(),
 		stderr: Sys.stderr(),
@@ -127,7 +136,7 @@ private class PipeOutput extends Output {
 		});
 	}
 
-	// Like an OCaml out_channel, writes are buffered (65536 bytes) until flushed;
+	// port: like an OCaml out_channel, writes are buffered (65536 bytes) until flushed;
 	// the pipe then delivers them in chunks of at most 1024 bytes.
 	var buffer = new haxe.io.BytesBuffer();
 

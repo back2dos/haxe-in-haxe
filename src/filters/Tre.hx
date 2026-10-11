@@ -8,7 +8,6 @@ import core.Meta;
 import core.TOther.ExtType;
 import core.Define;
 
-// haxe/src/filters/tre.ml — mechanical draft; not compiled or validated.
 class Tre {
 	public static function collectNewArgsValues(ctx:context.SafeCom.SafeContext, args:Array<TExpr>, declarations:Array<TExpr>,
 			values:Array<TExpr>, n:Int):{
@@ -101,6 +100,7 @@ class Tre {
 	public static function fnArgsVars(fn:TFunc):Array<TVar> return fn.tfArgs.map(a -> a.variable);
 
 	public static function isRecursiveNamedLocalCall(fnVar:TVar, callee:TExpr, args:Array<TExpr>):Bool return switch callee.eexpr {
+		// named local function
 		case TLocal(v): v == fnVar;
 		case _: false;
 	};
@@ -108,10 +108,12 @@ class Tre {
 	public static function isRecursiveMethodCall(cls:TClass, field:TClassField, callee:TExpr, args:Array<TExpr>):Bool {
 		return switch callee.eexpr {
 			case TField(_, FStatic(_, cf)):
+				// member abstract function
 				if (args.length > 0) switch args[0].eexpr {
 					case TLocal(v) if (TypeOps.hasClassFieldFlag(cf, CfImpl)): return cf == field && Meta.has(This, v.vMeta);
 					case _:
 				}
+				// static method
 				cf == field;
 			case _: false;
 		};
@@ -121,15 +123,20 @@ class Tre {
 		var addLoop = false;
 		function transformExpr(cancelTre:Bool, functionEnd:Bool, e:TExpr):TExpr {
 			return switch e.eexpr {
+				// cancel tre inside of loops bodies
 				case TWhile(_, _, _): core.Texpr.mapExpr(e -> transformExpr(true, false, e), e);
+				// cancel tre inside of try blocks
 				case TTry(eTry, catches):
 					var eTry = transformExpr(true, functionEnd, eTry);
 					var catches = catches.map(c -> {variable: c.variable, expr: transformExpr(cancelTre, functionEnd, c.expr)});
 					TypeOps.mk(TTry(eTry, catches), e.etype, e.epos);
+				// named local function
 				case TBinop(OpAssign, eVar = {eexpr: TLocal(v = {vKind: VUser(TVOLocalFunction)})}, eFn = {eexpr: TFunction(localFn)}):
 					var transformed = transformFunction(ctx, (callee, args) -> isRecursiveNamedLocalCall(v, callee, args), localFn);
 					TypeOps.mk(TBinop(OpAssign, eVar, TypeOps.mk(TFunction(transformed), eFn.etype, eFn.epos)), e.etype, e.epos);
+				// anonymous function
 				case TFunction(_): e;
+				// return a recursive call to current function
 				case TReturn({eexpr: TCall(callee, args)}) if (!cancelTre && isRecursiveCall(callee, args)):
 					addLoop = true;
 					replacementForTReturn(ctx, fn, args, e.epos);
@@ -170,11 +177,15 @@ class Tre {
 
 	public static function hasTailRecursion(isRecursiveCall:TExpr->Array<TExpr>->Bool, cancelTre:Bool, functionEnd:Bool, e:TExpr):Bool {
 		return switch e.eexpr {
+			// cancel tre inside of loops bodies
 			case TWhile(_, _, _): core.Texpr.checkExpr(e -> hasTailRecursion(isRecursiveCall, true, false, e), e);
+			// cancel tre inside of try blocks
 			case TTry(body, catches): hasTailRecursion(isRecursiveCall, true, functionEnd,
 					body) || core.ds.ArrayTools.exists(catches, c -> hasTailRecursion(isRecursiveCall, cancelTre, functionEnd, c.expr));
+			// named local function
 			case TBinop(OpAssign, {eexpr: TLocal(v = {vKind: VUser(TVOLocalFunction)})}, {eexpr: TFunction(fn)}):
 				hasTailRecursion((callee, args) -> isRecursiveNamedLocalCall(v, callee, args), false, true, fn.tfExpr);
+			// anonymous function
 			case TFunction(_): false;
 			case TReturn({eexpr: TCall(callee, args)}): !cancelTre && isRecursiveCall(callee, args);
 			case TBlock(exprs):
@@ -209,6 +220,7 @@ class Tre {
 						case _: TypeOps.hasClassFieldFlag(ctx.curfield, CfFinal);
 					};
 					var recursive = (callee, args) -> eligible && isRecursiveMethodCall(ctx.curclass, ctx.curfield, callee, args);
+					// print_endline ("TRE: " ^ ctx.f.curfield.cf_pos.pfile ^ ": " ^ ctx.f.curfield.cf_name);
 					hasTailRecursion(recursive, false, true,
 						fn.tfExpr) ? TypeOps.mk(TFunction(transformFunction(ctx, recursive, fn)), e.etype, e.epos) : e;
 				case _: e;

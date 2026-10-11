@@ -27,7 +27,6 @@ import syntax.Parser.ParseResult;
 import typing.TypeloadCacheHook;
 import typing.SourceParser;
 
-// Port of haxe/src/compiler/server/serverCache.ml.
 class Dirty extends haxe.Exception {
 	public final reason:ModuleSkipReason;
 
@@ -86,7 +85,7 @@ class ServerCache {
 										info = "not cached, using \"" + ident + "\" define";
 										isUnusual = true;
 									} catch (e:Dynamic) {
-										// ThreadSafeHashtbl.find signals absence with the string "Not_found"
+										// port: ThreadSafeHashtbl.find signals absence with the string "Not_found"
 										if (!(Std.isOfType(e, NotFound)
 											|| (Std.isOfType(e, std.String) && (e : std.String) == "Not_found"))) throw e;
 										cc.cacheFile(fkey, ({file: ffile, classPath: rfile.classPath} : ResolvedFile), ftime, data, pdi);
@@ -108,7 +107,7 @@ class ServerCache {
 	}
 
 	static function stat(dir:String):Float {
-		// Unix.stat raises Unix_error when the directory is gone.
+		// port: Unix.stat raises Unix_error when the directory is gone.
 		return sys.FileSystem.stat(core.Path.removeTrailingSlash(dir)).mtime.getTime() / 1000.0;
 	}
 
@@ -190,7 +189,7 @@ class ServerCache {
 		return if (fullTyping) FullTyping else AllowPartialTyping;
 	}
 
-	// OCaml structural inequality (`<>`) on parsed declarations.
+	// port: OCaml structural inequality (`<>`) on parsed declarations.
 	static function structurallyDifferent(a:Dynamic, b:Dynamic):Bool {
 		function eq(a:Dynamic, b:Dynamic):Bool {
 			if (a == b) return true;
@@ -318,7 +317,7 @@ class ServerCache {
 				return com.cs.getContext(sign).findModuleExtra(mpath);
 			}
 			function checkDependencies() {
-				// PMap.iter: ascending module ids
+				// port: PMap.iter: ascending module ids
 				var keys = [for (k in mExtra.mDeps.keys()) k];
 				keys.sort((a, b) -> a - b);
 				for (k in keys) {
@@ -427,7 +426,7 @@ class ServerCache {
 		}
 	}
 
-	/** `new HxbReader.hxb_reader path com.hxb_reader_stats (if Common.defined com Define.HxbTimes then Some com.timer_ctx else None)` **/
+	// port: `new HxbReader.hxb_reader path com.hxb_reader_stats (if Common.defined com Define.HxbTimes then Some com.timer_ctx else None)`
 	public static function createHxbReader(com:CommonContext, path:GlobalTypePath):HxbReader {
 		return new HxbReader(path, com.hxbReaderStats, if (Common.defined(com, Define.HxbTimes)) com.timerCtx else null);
 	}
@@ -484,7 +483,7 @@ class ServerCache {
 						var typingMode = getTypingMode(com, m.mExtra);
 						var deps = if (typingMode == FullTyping) m.mExtra.mDeps else
 							(m.mExtra.mDisplayDeps != null ? m.mExtra.mDisplayDeps : m.mExtra.mDeps);
-						// PMap.iter: ascending module ids
+						// port: PMap.iter: ascending module ids
 						var keys = [for (k in deps.keys()) k];
 						keys.sort((a, b) -> a - b);
 						for (k in keys) {
@@ -690,7 +689,7 @@ class ServerCache {
 	}
 }
 
-/** `hxb_reader_api_server`: the reader callbacks used when restoring modules from the binary cache. **/
+// port: `hxb_reader_api_server`: the reader callbacks used when restoring modules from the binary cache.
 class HxbReaderApiServer implements HxbReaderApi {
 	final com:CommonContext;
 	final cc:ContextCache;
@@ -707,7 +706,7 @@ class HxbReaderApiServer implements HxbReaderApi {
 		/* Creating a new m_extra because if we keep the same reference, display requests */
 		/* can alter it with bad data (for example adding dependencies that are not cached) */
 		var mExtra = mc.mcExtra.clone();
-		mExtra.mDeps = mc.mcExtra.mDeps.copy(); // m_deps is a persistent map upstream
+		mExtra.mDeps = mc.mcExtra.mDeps.copy(); // port: m_deps is a persistent map upstream
 		mExtra.mDisplayDeps = null;
 		return {
 			mId: mc.mcId,

@@ -7,6 +7,8 @@ import core.Error.*;
 import core.TUnification.UnifyError;
 import core.TUnification.TUnification.fastEq;
 import core.Timer;
+import core.ds.OcamlHash;
+import core.ds.OcamlHashtbl;
 import core.Warning;
 import core.Message.WarningCode;
 import core.Message.WarningOption;
@@ -30,7 +32,6 @@ import core.TFunctions.*;
 import core.TOther.*;
 import core.TOther;
 
-// haxe/src/typing/nullSafety.ml — mechanical draft; not compile-validated.
 typedef SafetyMessage = {var smMsg:String; var smPos:Pos; var smModule:ModuleDef;}
 typedef SafetyWarning = {var swWarning:WarningCode; var swOptions:Array<Array<WarningOption>>; var swMsg:String; var swPos:Pos; var swModule:ModuleDef;}
 
@@ -51,6 +52,7 @@ enum ScopeType {
 	STNormal;
 	STLoop;
 	STClosure;
+	// A closure which gets executed along the "normal" program flow without being delayed or stored somewhere
 	STImmediateClosure;
 }
 
@@ -62,10 +64,34 @@ enum SafetyMode {
 }
 
 enum SafetySubject {
+	/*
+		Fields accessed through a static access are identified by the class path and the field name.
+		E.g.
+			`pack.MyClass.field` is `((["pack"], "MyClass"), ["field"])`
+			`pack.MyClass.field.sub` is `((["pack"], "MyClass"), ["field"; "sub"])`
+	*/
 	SFieldOfClass(path:core.Globals.GlobalTypePath, fields:Array<String>);
+	/*
+		Fields accessed through a local variable are identified by the var id and the field name.
+		E.g.
+			`v.field` is `(v.v_id, ["field"])`
+			`v.field.sub` is `(v.v_id, ["field"; "sub"])`
+	*/
 	SFieldOfLocalVar(id:Int, fields:Array<String>);
+	/*
+		Fields accessed through `this` are identified by their names.
+		E.g.
+			`this.field` is `["field"]`
+			`this.field.sub` is `["field"; "sub"]`
+	*/
 	SFieldOfThis(fields:Array<String>);
+	/*
+		Local variables - by tvar.v_id
+	*/
 	SLocalVar(id:Int);
+	/*
+		For expressions, which cannot be checked agains `null` to become safe
+	*/
 	SNotSuitable;
 }
 
@@ -82,7 +108,7 @@ class SafetyUnifyError extends haxe.Exception {
 	}
 }
 
-// Structural subject keys preserve field-path identity without depending on Map enumeration.
+// port: (safety_subject, texpr) Hashtbl.t; structural subject keys preserve field-path identity without depending on Map enumeration.
 class SafetyTable {
 	var entries:Array<{subject:SafetySubject, expr:TExpr}> = [];
 
@@ -159,8 +185,14 @@ class NullSafety {
 		}
 	}
 
+	/**
+		Shadow Type.error to avoid raising unification errors, which should not be raised from null-safety checks
+	*/
 	public static function safetyError(a:T, b:T, access:ErrorAccessKind):Void throw new SafetyUnifyError(a, b, access);
 
+	/**
+		Terminates compiler process and prints user-friendly instructions about filing an issue in compiler repo.
+	*/
 	public static function fail(hxpos:Pos, mlpos:{file:String, line:Int}, msg:Null<String> = null):Dynamic {
 		var message = Lexer.getErrorPos(function(file, line) return '$file:$line:', hxpos)
 			+ ": Null safety: "
@@ -172,8 +204,14 @@ class NullSafety {
 
 	static var printContext = core.TPrinting.printContext();
 
+	/**
+		Returns human-readable string representation of specified type
+	*/
 	public static function strType(t:T):String return core.TPrinting.sType(printContext, t);
 
+	/**
+		Returns human-readable representation of specified expression
+	*/
 	public static function strExpr(e:TExpr):String return core.TPrinting.sExprPretty(false, "\t", true, strType, e);
 
 	public static function isStringType(t:T):Bool return switch t {
@@ -182,6 +220,9 @@ class NullSafety {
 		case _: false;
 	};
 
+	/**
+		Check for explicit `Null<>` typing
+	*/
 	public static function isNullableType(t:T, dynamicIsNullable:Bool = false):Bool return switch t {
 		case TMono(r): r.tmType == null ? isNullableMono(r) : isNullableType(r.tmType);
 		case TAbstract({aPath: {pack: [], name: "Null"}}, [_]): true;
@@ -193,12 +234,20 @@ class NullSafety {
 		case _: false;
 	};
 
+	/**
+		If `expr` is a TCast or TMeta, returns underlying expression (recursively bypassing nested casts).
+		Otherwise returns `expr` as is.
+		If `stay_safe` is true, then casts to non-nullable types won't be revealed and an expression will stay intact.
+	*/
 	public static function revealExpr(e:TExpr, staySafe:Bool = true):TExpr return switch e.eexpr {
 		case TCast(inner, _) if (!staySafe || isNullableType(e.etype)): revealExpr(inner);
 		case TMeta(_, inner): revealExpr(inner);
 		case _: e;
 	};
 
+	/**
+		Try to get a human-readable representation of an `expr`
+	*/
 	public static function symbolName(e:TExpr):String return switch revealExpr(e, false).eexpr {
 		case TField(_, access): fieldName(access);
 		case TIdent(name): name;
@@ -226,6 +275,10 @@ class NullSafety {
 		case _: SNotSuitable;
 	};
 
+	/**
+		Check if provided expression is a subject to null safety.
+		E.g. a call cannot be such a subject, because we cannot track null-state of the call result.
+	*/
 	public static function isSuitable(mode:SafetyMode, e:TExpr):Bool return switch Texpr.skip(e).eexpr {
 		case TField({eexpr: TConst(TThis)}, FInstance(_, _, _)) | TField({eexpr: TLocal(_)}, FInstance(_, _, _) | FAnon(_)) |
 			TField({eexpr: TTypeExpr(_)}, FStatic(_, _)) | TLocal(_): true;
@@ -234,6 +287,14 @@ class NullSafety {
 		case _: false;
 	};
 
+	/**
+		Returns a list of metadata attached to `callee` arguments.
+		E.g. for
+		```
+		function(@:meta1 a:Type1, b:Type2, @:meta2 c:Type3)
+		```
+		will return `[ [@:meta1], [], [@:meta2] ]`
+	*/
 	public static function getArgumentsMeta(callee:TExpr, count:Int):Array<Metadata> {
 		inline function empty():Array<Metadata> return [for (_ in 0...count) []];
 		return switch callee.eexpr {
@@ -249,11 +310,17 @@ class NullSafety {
 		};
 	}
 
+	/**
+		Check if `expr` is a `trace` (not a call, but identifier itself)
+	*/
 	public static function isTrace(e:TExpr):Bool return switch e.eexpr {
 		case TIdent("`trace") | TField(_, FStatic({clPath: {pack: ["haxe"], name: "Log"}}, {cfName: "trace"})): true;
 		case _: false;
 	};
 
+	/**
+		If `t` represents `Null<SomeType>` this function returns `SomeType`.
+	*/
 	public static function unfoldNull(t:T):T return switch t {
 		case TMono(r): r.tmType == null ? t : unfoldNull(r.tmType);
 		case TAbstract({aPath: {pack: [], name: "Null"}}, [t]): unfoldNull(t);
@@ -269,6 +336,10 @@ class NullSafety {
 		case FEnum(_, ef): ef.efName;
 	};
 
+	/**
+		Collect nullable local vars which are checked against `null`.
+		Returns a tuple of (vars_checked_to_be_null * vars_checked_to_be_not_null) in case `condition` evaluates to `true`.
+	*/
 	public static function processCondition(mode:SafetyMode, condition:TExpr, nullable:TExpr->Bool,
 			callback:TExpr->Void):{nulls:Array<TExpr>, notNulls:Array<TExpr>} {
 		var nulls = [], notNulls = [];
@@ -286,6 +357,7 @@ class NullSafety {
 			case TUnop(Not, Prefix, e):
 				traverse(!positive, e);
 			case TBinop(OpAssign, checked, e) if (isSuitable(mode, checked) && nullable(e)):
+				// remove expr from both list if there is `e = nullable` in condition
 				remove(checked);
 			case TBlock(el):
 				for (e in el) traverse(positive, e);
@@ -306,7 +378,7 @@ class NullSafety {
 				for (_ in [left, right]) {
 					var r = processCondition(mode, left, nullable, callback);
 					for (e in r.notNulls) add(true, e);
-				} // Upstream deliberately calls left_expr in both iterations.
+				} // port: upstream also passes left_expr in both iterations.
 			case TBinop(OpBoolOr, left, right) if (!positive):
 				traverse(positive, left);
 				traverse(positive, right);
@@ -324,6 +396,9 @@ class NullSafety {
 		return {nulls: nulls, notNulls: notNulls};
 	}
 
+	/**
+		Check if metadata contains @:nullSafety(Off) meta
+	**/
 	public static function containsUnsafeMeta(meta:Metadata):Bool {
 		for (m in meta) switch [(m.meta : MetaTag), m.exprs] {
 			case [MetaTag.NullSafety, [{expr: EConst(Ident("Off"))}]]:
@@ -333,6 +408,9 @@ class NullSafety {
 		return false;
 	}
 
+	/**
+		Check if metadata contains @:nullSafety or @:nullSafety(true) meta
+	**/
 	public static function containsSafeMeta(meta:Metadata):Bool {
 		for (m in meta) switch [(m.meta : MetaTag), m.exprs] {
 			case [MetaTag.NullSafety, []] | [
@@ -370,18 +448,27 @@ class NullSafety {
 				addError(report, m, "Invalid argument for @:nullSafety meta", entry.pos);
 		}
 
+	/**
+		Check if specified `field` represents a `var` field which will exist at runtime.
+	*/
 	public static function shouldBeInitialized(cf:TClassField):Bool return !hasClassFieldFlag(cf, CfExtern) && (switch cf.cfKind {
 		case Var({vRead: AccNormal | AccInline | AccNo}) | Var({vWrite: AccNormal | AccNo}): true;
 		case Var(_): core.Meta.has(MetaTag.IsVar, cf.cfMeta);
 		case _: false;
 	});
 
+	/**
+		Check if all items of the `needle` list exist in the same order in the beginning of the `haystack` list.
+	*/
 	public static function listStartsWithList(hay:Array<String>, needle:Array<String>):Bool {
 		if (needle.length > hay.length) return false;
 		for (i in 0...needle.length) if (hay[i] != needle[i]) return false;
 		return true;
 	}
 
+	/**
+		Run null safety checks.
+	*/
 	public static function run(com:context.Common.CommonContext, types:Array<ModuleType>):Void {
 		var report:SafetyReport = Timer.time(com.timerCtx, ["null safety"], function(_:Null<Bool>) {
 			var r:SafetyReport = {
@@ -424,10 +511,15 @@ class Unificator {
 
 	public function new() {}
 
+	/**
+		Check if it's possible to pass a value of type `a` to a place where a value of type `b` is expected.
+		Raises `Safety_error` exception if it's not.
+	*/
 	public function unify(a:T, b:T, ?access:ErrorAccessKind):Void {
 		if (access == null) access = Root;
 		if (a == b) return;
 		switch [a, b] {
+			// if b (to_type) is nullable anon, we still need to check fields nullability
 			case [
 				TAbstract({aPath: {pack: [], name: "Null"}}, [TAnon(aa)]),
 				TAbstract({aPath: {pack: [], name: "Null"}}, [TAnon(ba)])
@@ -435,6 +527,8 @@ class Unificator {
 				unifyAnonToAnon(aa, ba);
 			case [TInst(c, params), TAbstract({aPath: {pack: [], name: "Null"}}, [TAnon(ba)])]:
 				unifyClassToAnon(c, params, ba);
+			// if `b` is nullable, no more checks needed
+			// Dynamic is inherently nullable and accepts any value, including Null<T>
 			case [_, TAbstract({aPath: {pack: [], name: "Null"}}, [_])] | [_, TDynamic(_)]:
 			case [TAbstract({aPath: {pack: [], name: "Null"}}, [_]), _] if (!NullSafety.isNullableType(b)):
 				NullSafety.safetyError(a, b, access);
@@ -446,6 +540,7 @@ class Unificator {
 				unifyClassToAnon(c, params, ba);
 			case [TFun(sa), TFun(sb)]:
 				unifyFunctions(sa, sb);
+			// patterns below are used to reveal real type
 			case [TLazy(f), _]:
 				unify(lazyType(f), b);
 			case [_, TLazy(f)]:
@@ -497,21 +592,30 @@ class Unificator {
 	}
 
 	function unifyFunctions(a:TSignature, b:TSignature):Void {
+		// check return type
 		switch (b.ret : T) {
 			case TAbstract({aPath: {pack: [], name: "Void"}}, []):
 			case _:
 				unify(a.ret, b.ret, FunctionReturn);
 		}
+		// check arguments
 		for (i in 0...Std.int(Math.min(a.args.length,
 			b.args.length))) unify(b.args[i].type, a.args[i].type, FunctionArgument(i + 1, a.args.length));
 	}
 }
 
+/**
+	A class which is used to check if an anonymous function passed to a method will be executed
+	before that method execution is finished.
+*/
 class ImmediateExecution {
 	var cache:haxe.ds.ObjectMap<TClassField, Map<Int, Bool>> = new haxe.ds.ObjectMap();
 
 	public function new() {}
 
+	/**
+		Get cached results of the previous checks for the specified `field`
+	*/
 	function getCache(field:TClassField):Map<Int, Bool> {
 		var found = cache.get(field);
 		if (found == null) {
@@ -521,12 +625,19 @@ class ImmediateExecution {
 		return found;
 	}
 
+	/**
+		Check if a lambda passed to `arg_num`th argument of the `callee` function will be executed immediately without
+		delaying it or storing it somewhere else.
+	*/
 	public function check(callee:TExpr, argNum:Int):Bool return switch NullSafety.revealExpr(callee).eexpr {
 		case TField(_, FClosure({cls: cls}, field = {cfKind: Method(MethNormal | MethInline)})) |
 			TField(_, FStatic(cls, field = {cfKind: Method(MethNormal | MethInline)})) |
 			TField(_, FInstance(cls, _, field = {cfKind: Method(MethNormal | MethInline)})):
 			if (PurityState.isPure(cls,
-				field)) true; else if (cls.clPath.pack.length == 0 && cls.clPath.name == "Array") true; else switch field.cfExpr {
+				field)) true; else
+				// known to be pure
+				if (cls.clPath.pack.length == 0 && cls.clPath.name == "Array") true; else switch field.cfExpr {
+				// try to analyze function code
 				case {eexpr: TFunction(fn)} if (hasClassFieldFlag(field,
 					CfFinal) || !FiltersCommon.isOverridden(cls, field)): if (argNum < 0 || argNum >= fn.tfArgs.length) false; else {
 						var c = getCache(field);
@@ -543,6 +654,9 @@ class ImmediateExecution {
 		case _: false;
 	};
 
+	/**
+		Check if `fn_var` is passed somewhere else in `expr` (stored to a var/field, captured by a closure etc.)
+	*/
 	function isStored(v:TVar, e:TExpr):Bool return switch e.eexpr {
 		case TThrow({eexpr: TLocal(local)}) | TReturn({eexpr: TLocal(local)}) | TCast({eexpr: TLocal(local)}, _) |
 			TMeta(_, {eexpr: TLocal(local)}) | TBinop(OpAssign, _, {eexpr: TLocal(local)}) if (local.vId == v.vId): true;
@@ -567,11 +681,15 @@ class ImmediateExecution {
 	};
 }
 
+/**
+	Each loop or function should have its own safety scope.
+*/
 class SafetyScope {
 	var mode:SafetyMode;
 	var type:ScopeType;
 	var safe:SafetyTable;
 	var never:SafetyTable;
+	/** Local vars declared in current scope */
 	var declarations:Map<Int, TVar> = [];
 
 	public function new(mode:SafetyMode, type:ScopeType, safe:SafetyTable, never:SafetyTable) {
@@ -587,26 +705,49 @@ class SafetyScope {
 
 	public function getType():ScopeType return type;
 
+	/**
+		Reset local vars safety to the specified state
+	*/
 	public function resetTo(state:SafetyTable):Void {
 		safe.clear();
 		for (e in state.all()) safe.set(e.subject, e.expr);
 	}
 
+	/**
+		Should be called for each local var declared
+	*/
 	public function declareVar(v:TVar):Void declarations.set(v.vId, v);
 
+	/**
+		Check if local var was declared in this scope
+	*/
 	public function ownsVar(v:TVar):Bool return declarations.exists(v.vId);
 
+	/**
+		Check if local variable declared in this scope is guaranteed to not have a `null` value.
+	*/
 	public function isSafe(e:TExpr):Bool {
 		if (!NullSafety.isNullableType(e.etype)) return true;
 		var s = getSubject(e);
 		return s != SNotSuitable && !never.has(s) && safe.has(s);
+		/* not (Hashtbl.mem never_safe local_var.v_id)
+		&& (
+			Hashtbl.mem safe_locals local_var.v_id
+			|| not (is_nullable_type local_var.v_type)
+		) */
 	}
 
+	/**
+		Add variable to the list of safe locals.
+	*/
 	public function addToSafety(e:TExpr):Void {
 		var s = getSubject(e);
 		if (s != SNotSuitable) safe.set(s, e);
 	}
 
+	/**
+		Remove variable from the list of safe locals.
+	*/
 	public function removeFromSafety(e:TExpr, forever:Bool = false):Void {
 		var s = getSubject(e);
 		if (s != SNotSuitable) {
@@ -615,11 +756,22 @@ class SafetyScope {
 		}
 	}
 
+	/**
+		Remove locals, which don't exist in `sample`, from safety.
+	*/
 	public function filterSafety(sample:SafetyTable):Void for (e in safe.copy().all()) if (!sample.has(e.subject)) safe.remove(e.subject);
 
+	/**
+		Should be called upon assigning a value to `expr`.
+		Removes subjects like `expr.subField` from safety.
+	*/
 	public function reassigned(e:TExpr):Void {
 		var subject = getSubject(e);
 		if (subject == SNotSuitable) return;
+		/*
+			If this is an assignment to a field, drop all safe field accesses first,
+			because it could alter an object of those field accesses.
+		*/
 		switch subject {
 			case SFieldOfClass(_, _) | SFieldOfLocalVar(_, _) | SFieldOfThis(_):
 				dropSafeFieldsInStrictMode();
@@ -646,8 +798,15 @@ class SafetyScope {
 		for (s in remove) safe.remove(s);
 	}
 
+	/**
+		Should be called upon a call.
+		In Strict mode making a call removes all field accesses from safety.
+	*/
 	public function callMade():Void dropSafeFieldsInStrictMode();
 
+	/**
+		Un-safe all field accesses if safety mode is one of strict modes
+	*/
 	function dropSafeFieldsInStrictMode():Void {
 		if (mode == SMOff || mode == SMLoose) return;
 		var remove = [];
@@ -659,9 +818,15 @@ class SafetyScope {
 		for (s in remove) safe.remove(s);
 	}
 
+	/**
+		Wrapper for `get_subject` function
+	*/
 	public function getSubject(e:TExpr):SafetySubject return NullSafety.getSubject(mode, e);
 }
 
+/**
+	Class to simplify collecting lists of local vars, fields and other symbols checked against `null`.
+*/
 class LocalSafety {
 	var mode:SafetyMode;
 	var scopes:Array<SafetyScope>;
@@ -671,17 +836,32 @@ class LocalSafety {
 		clear();
 	}
 
+	/**
+		Drop collected data
+	*/
 	public function clear():Void scopes = [new SafetyScope(mode, STNormal, new SafetyTable(), new SafetyTable())];
 
+	/**
+		Get the latest created scope.
+	*/
 	function current():SafetyScope {
 		if (scopes.length == 0) return NullSafety.fail(nullPos, {file: "nullSafety.ml", line: 810}, "List of scopes should never end.");
 		return scopes[0];
 	}
 
+	/**
+		Get a copy of hashtable, which stores currently safe locals
+	*/
 	public function getSafeLocalsCopy():SafetyTable return current().getSafeLocals().copy();
 
+	/**
+		Remove locals, which don't exist in `sample`, from safety.
+	*/
 	public function filterSafety(sample:SafetyTable):Void current().filterSafety(sample);
 
+	/**
+		Should be called upon local function declaration.
+	*/
 	public function functionDeclared(immediate:Bool, fn:TFunc):Void {
 		var s = immediate
 			|| mode == SMLoose ? new SafetyScope(mode, STImmediateClosure, current().getSafeLocals(),
@@ -690,11 +870,18 @@ class LocalSafety {
 		for (a in fn.tfArgs) s.declareVar(a.variable);
 	}
 
+	/**
+		Should be called upon standalone block declaration.
+	*/
 	public function blockDeclared():Void scopes.unshift(new SafetyScope(mode, STNormal, current().getSafeLocals(),
 		current().getNeverSafe()));
 
+	/**
+		Should be called upon entering a loop.
+	*/
 	public function loopDeclared(e:TExpr):Void {
 		scopes.unshift(new SafetyScope(mode, STLoop, current().getSafeLocals(), current().getNeverSafe()));
+		// let scope = new safety_scope mode STLoop (Hashtbl.create 100) (Hashtbl.create 100) in
 		switch e.eexpr {
 			case TWhile(_, _, _):
 			case _:
@@ -702,17 +889,26 @@ class LocalSafety {
 		}
 	}
 
+	/**
+		Should be called upon leaving local function declaration.
+	*/
 	public function scopeClosed():Void {
 		if (scopes.length == 0) NullSafety.fail(nullPos, {file: "nullSafety.ml", line: 862}, "No scopes left.");
 		if (scopes.length == 1) NullSafety.fail(nullPos, {file: "nullSafety.ml", line: 863}, "Cannot close the last scope.");
 		scopes.shift();
 	}
 
+	/**
+		Should be called for each local var declared
+	*/
 	public function declareVar(v:TVar, isSafe:Bool = false):Void {
 		current().declareVar(v);
 		if (isSafe) current().addToSafety({eexpr: TVar(v, null), etype: v.vType, epos: v.vPos});
 	}
 
+	/**
+		Check if local variable is guaranteed to not have a `null` value.
+	*/
 	public function isSafe(e:TExpr):Bool {
 		if (!NullSafety.isNullableType(e.etype)) return true;
 		var captured = false;
@@ -730,6 +926,10 @@ class LocalSafety {
 		return (mode == SMLoose || !captured) && current().isSafe(e);
 	}
 
+	/**
+		This method should be called upon passing `while`.
+		It collects locals which are checked against `null` and executes callbacks for expressions with proper statuses of locals.
+	*/
 	public function processWhile(e:TExpr, nullable:TExpr->Bool, condition:TExpr->Void, body:(Void->Void)->TExpr->Void):Void switch e.eexpr {
 		case TWhile(cond, b, DoWhile):
 			var original = getSafeLocalsCopy();
@@ -745,6 +945,7 @@ class LocalSafety {
 			condition(cond);
 			var checked = NullSafety.processCondition(mode, cond, nullable, function(_) {});
 			var original = getSafeLocalsCopy();
+			/** execute `body` with known not-null variables */
 			for (e in checked.notNulls) current().addToSafety(e);
 			body(function() {
 				for (e in checked.notNulls) current().addToSafety(e);
@@ -754,17 +955,27 @@ class LocalSafety {
 			NullSafety.fail(e.epos, {file: "nullSafety.ml", line: 934}, "Expected TWhile");
 	};
 
+	/**
+		Should be called for bodies of loops (for, while)
+	*/
 	public function processLoopBody(first:Void->Void, intermediate:Null<Void->Void>, second:Void->Void):Void {
 		var original = getSafeLocalsCopy();
+		/** The first check to find out which vars will become unsafe in a loop */
 		first();
+		// If local var became safe in a loop, then we need to remove it from safety to make it unsafe outside of a loop again
 		filterSafety(original);
 		if (intermediate != null) intermediate();
+		/** The second check with unsafe vars removed from safety */
 		second();
 	}
 
+	/**
+		This method should be called upon passing `try`.
+	*/
 	public function processTry(body:TExpr, catches:Array<{variable:TVar, expr:TExpr}>, check:TExpr->Void):Void {
 		var original = getSafeLocalsCopy();
 		check(body);
+		// Remove locals which became safe inside of a try block from safety
 		filterSafety(original);
 		var after = getSafeLocalsCopy();
 		var afterCatches = getSafeLocalsCopy();
@@ -776,47 +987,70 @@ class LocalSafety {
 		current().resetTo(afterCatches);
 	}
 
+	/**
+		This method should be called upon passing `if`.
+		It collects locals which are checked against `null` and executes callbacks for expressions with proper statuses of locals.
+	*/
 	public function processIf(e:TExpr, nullable:TExpr->Bool, condition:TExpr->Void, body:TExpr->Void):Void switch e.eexpr {
 		case TIf(cond, thenBody, elseBody):
 			condition(cond);
 			var checked = NullSafety.processCondition(mode, cond, nullable, function(_) {});
+			// Don't touch expressions, which already was safe before this `if`
 			var notNulls = checked.notNulls.filter(function(e) return !isSafe(e));
 			var notCond:TExpr = {eexpr: TUnop(Not, Prefix, cond), etype: cond.etype, epos: cond.epos};
 			var elseNotNulls = NullSafety.processCondition(mode, notCond, nullable, function(_) {})
 				.notNulls.filter(function(e) return !isSafe(e));
 			var initial = getSafeLocalsCopy();
+			/** execute `if_body` with known not-null variables */
 			for (e in notNulls) current().addToSafety(e);
 			body(thenBody);
 			var afterIf = getSafeLocalsCopy();
+			// List.iter self#get_current_scope#remove_from_safety not_nulls;
 			current().resetTo(initial);
+			/** execute `else_body` with known not-null variables */
 			inline function deadEnd(body:TExpr,
 					vars:Array<TExpr>):Void if (DeadEnd.hasDeadEnd(body)) for (e in vars) current().addToSafety(e);
 			if (elseBody == null) {
+				/*
+					`if` gets executed only when each of `nulls_in_if` is `null`.
+					That means if they become safe in `if`, then they are safe after `if` too.
+				*/
 				for (e in checked.nulls) if (afterIf.has(current().getSubject(e))) current().addToSafety(e);
+				// These became unsafe in `if`
 				for (e in initial.all()) if (!afterIf.has(e.subject)) current().removeFromSafety(e.expr);
+				/** If `if_body` terminates execution, then bypassing `if` means `else_not_nulls` are safe now */
 				deadEnd(thenBody, elseNotNulls);
 			} else {
 				for (e in elseNotNulls) current().addToSafety(e);
 				body(elseBody);
 				var afterElse = getSafeLocalsCopy();
 				current().resetTo(initial);
+				// something was safe before `if..else`, but became unsafe in `if` or in `else`
 				for (e in initial.all()) {
 					if (!afterIf.has(e.subject) || !afterElse.has(e.subject)) current().removeFromSafety(e.expr);
 					afterIf.remove(e.subject);
 					afterElse.remove(e.subject);
 				}
+				// something became safe in both `if` and `else`
 				for (e in afterIf.all()) if (afterElse.has(e.subject)) current().addToSafety(e.expr);
+				/** If `if_body` terminates execution, then bypassing `if` means `else_not_nulls` are safe now */
 				deadEnd(thenBody, elseNotNulls);
+				/** If `else_body` terminates execution, then bypassing `else` means `not_nulls` are safe now */
 				deadEnd(elseBody, notNulls);
 			}
 		case _:
 			NullSafety.fail(e.epos, {file: "nullSafety.ml", line: 1016}, "Expected TIf");
 	};
 
+	/**
+		Handle boolean AND outside of `if` condition.
+	*/
 	public function processAnd(left:TExpr, right:TExpr, nullable:TExpr->Bool, callback:TExpr->Void):Void {
 		callback(left);
 		var original = getSafeLocalsCopy();
+		// save not_nulls for `a != null && a > 0`
 		var checked = NullSafety.processCondition(mode, left, nullable, function(_) {});
+		// create temp scope for right_expr
 		var temp = new SafetyScope(mode, STNormal, original.copy(), new SafetyTable());
 		for (e in checked.notNulls) temp.addToSafety(e);
 		scopes.unshift(temp);
@@ -828,9 +1062,14 @@ class LocalSafety {
 		current().resetTo(finalSafe);
 	}
 
+	/**
+		Handle boolean OR outside of `if` condition.
+	*/
 	public function processOr(left:TExpr, right:TExpr, nullable:TExpr->Bool, callback:TExpr->Void):Void {
 		var original = getSafeLocalsCopy();
+		// save nulls for `a == null || a > 0`
 		var checked = NullSafety.processCondition(mode, left, nullable, callback);
+		// create temp scope for right_expr
 		var temp = new SafetyScope(mode, STNormal, original.copy(), new SafetyTable());
 		for (e in checked.nulls) temp.addToSafety(e);
 		scopes.unshift(temp);
@@ -842,6 +1081,9 @@ class LocalSafety {
 		current().resetTo(finalSafe);
 	}
 
+	/**
+		Remove subject from the safety list if a nullable value is assigned or if an object with safe field is reassigned.
+	*/
 	public function handleAssignment(nullable:TExpr->Bool, left:TExpr, right:TExpr):Void {
 		if (NullSafety.isSuitable(mode, left)) current().reassigned(left);
 		if (nullable(right)) switch left.eexpr {
@@ -863,6 +1105,9 @@ class LocalSafety {
 	public function callMade():Void current().callMade();
 }
 
+/**
+	This class is used to recursively check typed expressions for null-safety
+*/
 class ExprChecker {
 	var m:ModuleDef;
 	var mode:SafetyMode;
@@ -872,7 +1117,7 @@ class ExprChecker {
 	var localSafety:LocalSafety;
 	var returnTypes:Array<T> = [];
 	var inClosure = false;
-	var isPretending = false;
+	var isPretending = false; // if this flag is `true` then spotted errors and warnings will not be reported
 
 	public function new(m:ModuleDef, mode:SafetyMode, immediate:ImmediateExecution, report:SafetyReport,
 			options:Array<Array<WarningOption>>) {
@@ -884,6 +1129,9 @@ class ExprChecker {
 		localSafety = new LocalSafety(mode);
 	}
 
+	/**
+		Get safety mode for this expression checker
+	*/
 	public function getMode():SafetyMode return mode;
 
 	function firstValid(positions:Array<Pos>):Pos {
@@ -891,18 +1139,26 @@ class ExprChecker {
 		return nullPos;
 	}
 
+	/**
+		Register an error
+	*/
 	public function error(msg:String,
 			positions:Array<Pos>):Void if (!isPretending) NullSafety.addError(report, m, msg, firstValid(positions));
 
 	public function errorUnify(trace:Array<UnifyError>,
 			p:Pos):Void if (!isPretending) NullSafety.addError(report, m, BetterErrors.betterErrorMessage(trace), p);
 
+	/**
+		Register a warning
+	*/
 	public function warning(type:WarningCode, msg:String,
-			positions:Array<Pos>):Void if (!isPretending) NullSafety.addWarning(report, m, type, options, msg, firstValid(positions));
+			positions:Array<Pos>):Void if (!isPretending) // TODO field options
+		NullSafety.addWarning(report, m, type, options, msg, firstValid(positions));
 
 	function checkBinopRedundantNullChecks(e:TExpr):Void switch Texpr.skip(e).eexpr {
 		case TBinop(OpEq | OpNotEq, {eexpr: TConst(TNull)}, expr) | TBinop(OpEq | OpNotEq, expr, {eexpr: TConst(TNull)}) |
 			TBinop(OpAssignOp(OpNullCoal), expr, _) | TBinop(OpNullCoal, expr, _):
+			// TODO field options
 			if (!NullSafety.isNullableType(expr.etype,
 				true)) warning(WRedundantNullCheck, "The operand type is not nullable, so null-check should be redundant.",
 					[expr.epos, e.epos]);
@@ -912,6 +1168,10 @@ class ExprChecker {
 		case _:
 	};
 
+	/**
+		Check if `e` is nullable even if the type is reported not-nullable.
+		Haxe type system lies sometimes.
+	*/
 	public function isNullableExpr(e:TExpr):Bool {
 		e = NullSafety.revealExpr(e);
 		return switch e.eexpr {
@@ -945,6 +1205,13 @@ class ExprChecker {
 		};
 	}
 
+	/**
+		Check if `expr` can be passed to a place where `to_type` is expected.
+		This method has side effects:
+		- it logs an error if `expr` has a type parameter incompatible with the type parameter of `to_type`.
+			E.g.: `Array<Null<String>>` vs `Array<String>` returns `true`, but also adds a compilation error.
+		- it logs an error on anon structure field nullability mismatch to report specific field error and returns `true`.
+	*/
 	public function canPassExpr(expr:TExpr, toType:T, p:Pos):Bool {
 		inline function tryUnify(expr:TExpr, toType:T):Bool {
 			if (isNullableExpr(expr) && !NullSafety.isNullableType(toType, true)) return false;
@@ -960,6 +1227,7 @@ class ExprChecker {
 					case _: [CannotUnify(ex.a, ex.b)];
 				};
 				errorUnify(errors, p);
+				// returning `true` because error is already logged in the line above
 				return true;
 			} catch (ex:Dynamic) {
 				return NullSafety.fail(expr.epos, {file: "nullSafety.ml", line: 1240}, "Null safety unification failure");
@@ -993,6 +1261,9 @@ class ExprChecker {
 		};
 	}
 
+	/**
+		Should be called for the root expressions of a method or for then initialization expressions of fields.
+	*/
 	public function checkRootExpr(e:TExpr):Void {
 		checkExpr(e);
 		localSafety.clear();
@@ -1000,6 +1271,9 @@ class ExprChecker {
 		inClosure = false;
 	}
 
+	/**
+		Recursively checks an expression
+	*/
 	function checkExpr(e:TExpr):Void switch e.eexpr {
 		case TConst(_) | TLocal(_) | TTypeExpr(_) | TIdent(_):
 		case TArray(arr, idx):
@@ -1034,6 +1308,7 @@ class ExprChecker {
 		case TSwitch(s):
 			checkSwitch(s, e.epos);
 		case TTry(body, catches):
+			// Check try...catch
 			localSafety.processTry(body, catches, checkExpr);
 		case TReturn(inner) if (inner != null):
 			checkReturn(inner, e.epos);
@@ -1051,15 +1326,21 @@ class ExprChecker {
 		case TEnumIndex(idx):
 			checkEnumIndex(idx, e.epos);
 		case TEnumParameter(inner, _, _):
-			checkExpr(inner);
+			checkExpr(inner); /** Checking enum value itself is not needed here because this expr always follows after TEnumIndex */
 	};
 
+	/**
+		Check expressions in a block
+	*/
 	function checkBlock(el:Array<TExpr>, p:Pos):Void {
 		localSafety.blockDeclared();
 		for (e in el) checkExpr(e);
 		localSafety.scopeClosed();
 	}
 
+	/**
+		Don't allow to use nullable values as items in declaration of not-nullable arrays
+	*/
 	function checkArrayDecl(items:Array<TExpr>, type:T, p:Pos):Void {
 		switch core.Abstract.followWithAbstracts(type) {
 			case TInst({clPath: {pack: [], name: "Array"}}, [itemType]):
@@ -1072,11 +1353,17 @@ class ExprChecker {
 		for (e in items) checkExpr(e);
 	}
 
+	/**
+		Deal with nullable enum values
+	*/
 	function checkEnumIndex(idx:TExpr, p:Pos):Void {
 		if (isNullableExpr(idx)) error("Cannot access nullable enum value.", [idx.epos, p]);
 		checkExpr(idx);
 	}
 
+	/**
+		Don't use nullable value as a condition in `while`
+	*/
 	function checkWhile(e:TExpr):Void switch e.eexpr {
 		case TWhile(_, _, _):
 			function condition(cond:TExpr):Void {
@@ -1084,41 +1371,59 @@ class ExprChecker {
 				checkExpr(cond);
 			}
 			localSafety.loopDeclared(e);
-			localSafety.processWhile(e, isNullableExpr, condition, function(effect, body) checkLoopBody(effect, body));
+			localSafety.processWhile(e, isNullableExpr, condition, /* self#check_loop_body; */ function(effect, body) checkLoopBody(effect, body));
 			localSafety.scopeClosed();
 		case _:
 			NullSafety.fail(e.epos, {file: "nullSafety.ml", line: 1381}, "Expected TWhile.");
 	};
 
+	/**
+		Handle safety inside of loops
+	*/
 	function checkLoopBody(effect:Null<Void->Void>, body:TExpr):Void localSafety.processLoopBody(function() {
+		// Start pretending to ignore errors
 		isPretending = true;
 		checkExpr(body);
 	}, effect, function() {
+		// Now we know, which vars will become unsafe in this loop. Stop pretending and check again
 		isPretending = false;
 		checkExpr(body);
 	});
 
+	/**
+		Don't throw nullable values
+	*/
 	function checkThrow(e:TExpr, p:Pos):Void {
 		if (isNullableExpr(e)) error("Cannot throw nullable value.", [p, e.epos]);
 		checkExpr(e);
 	}
 
+	/**
+		Don't cast nullable expressions to not-nullable types
+	*/
 	function checkCast(e:TExpr, to:T, p:Pos):Void {
 		checkExpr(e);
 		switch to {
+			// untyped cast
 			case TMono(_):
+			// typed cast and type check
 			case _:
 				if (!canPassExpr(e, to, p)) error("Cannot cast nullable value to not nullable type.", [p, e.epos]);
 		}
 	}
 
+	/**
+		Check safety in a function
+	*/
 	function checkFunction(fn:TFunc, immediateExecution:Bool = false):Void {
 		localSafety.functionDeclared(immediateExecution, fn);
 		returnTypes.unshift(fn.tfType);
 		if (immediateExecution || mode == SMLoose) {
 			var original = localSafety.getSafeLocalsCopy();
+			// Start pretending to ignore errors
 			isPretending = true;
 			checkExpr(fn.tfExpr);
+			// Now we know, which vars will become unsafe in this closure. Stop pretending and perform real check
 			isPretending = false;
 			localSafety.filterSafety(original);
 			checkExpr(fn.tfExpr);
@@ -1127,6 +1432,9 @@ class ExprChecker {
 		localSafety.scopeClosed();
 	}
 
+	/**
+		Don't return nullable values as not-nullable return types.
+	*/
 	function checkReturn(e:TExpr, p:Pos):Void {
 		checkExpr(e);
 		if (returnTypes.length > 0 && !canPassExpr(e, returnTypes[0],
@@ -1134,6 +1442,9 @@ class ExprChecker {
 				[p, e.epos]);
 	}
 
+	/**
+		Check safety in `switch` expressions.
+	*/
 	function checkSwitch(s:TSwitch, p:Pos):Void {
 		var target:TExpr = s.switchSubject;
 		if (isNullableExpr(target)) error("Cannot switch on nullable value.", [target.epos, p]);
@@ -1142,6 +1453,9 @@ class ExprChecker {
 		if (s.switchDefault != null) checkExpr(s.switchDefault);
 	}
 
+	/**
+		Check safety in `if` expressions
+	*/
 	function checkIf(e:TExpr):Void {
 		function condition(cond:TExpr):Void {
 			if (isNullableExpr(cond)) error('Cannot use nullable value as condition in "if".', [cond.epos, e.epos]);
@@ -1150,6 +1464,9 @@ class ExprChecker {
 		localSafety.processIf(e, isNullableExpr, condition, checkExpr);
 	}
 
+	/**
+		Check array access on nullable values or using nullable indexes
+	*/
 	function checkArrayAccess(arr:TExpr, idx:TExpr, p:Pos):Void {
 		if (isNullableExpr(arr)) error("Cannot perform array access on nullable value.", [p, arr.epos]);
 		if (isNullableExpr(idx)) error("Cannot use nullable value as an index for array access.", [p, idx.epos]);
@@ -1157,6 +1474,9 @@ class ExprChecker {
 		checkExpr(idx);
 	}
 
+	/**
+		Don't perform unsafe binary operations
+	*/
 	function checkBinop(op:Binop, left:TExpr, right:TExpr, p:Pos):Void {
 		inline function both():Void {
 			checkExpr(left);
@@ -1169,6 +1489,7 @@ class ExprChecker {
 				localSafety.processAnd(left, right, isNullableExpr, checkExpr);
 			case OpBoolOr:
 				localSafety.processOr(left, right, isNullableExpr, checkExpr);
+			// String concatenation is safe if one of operands is safe
 			case OpAdd | OpAssignOp(OpAdd) if (NullSafety.isStringType(left.etype) || NullSafety.isStringType(right.etype)):
 				both();
 				if (NullSafety.isNullableType(left.etype)
@@ -1188,17 +1509,25 @@ class ExprChecker {
 		}
 	}
 
+	/**
+		Don't perform unops on nullable values
+	*/
 	function checkUnop(e:TExpr, p:Pos):Void {
 		if (isNullableExpr(e)) error("Cannot perform unary operation on nullable value.", [p, e.epos]);
 		checkExpr(e);
 	}
 
+	/**
+		Don't assign nullable value to not-nullable variable on var declaration
+	*/
 	function checkVar(v:TVar, init:Null<TExpr>, p:Pos):Void {
 		localSafety.declareVar(v);
 		if (init == null) return;
 		switch init.eexpr {
+			// Local named functions like `function fn() {}`, which are generated as `var fn = null; fn = function(){}`
 			case TConst(TNull) if (Type.enumEq(v.vKind, VUser(TVOLocalFunction))):
 				return;
+			// Coroutines and parameterized functions are also generated as `var v = null; v = function...` with VGenerated kind
 			case TConst(TNull) if (v.vKind == VGenerated):
 				switch followWithCoro(v.vType) {
 					case Coro(_) | NotCoro(TFun(_)): return;
@@ -1209,11 +1538,17 @@ class ExprChecker {
 		checkBinop(OpAssign, {eexpr: TLocal(v), epos: v.vPos, etype: v.vType}, init, p);
 	}
 
+	/**
+		Make sure nobody tries to access a field on a nullable value
+	*/
 	function checkField(target:TExpr, access:TFieldAccess, p:Pos):Void {
 		checkExpr(target);
 		if (isNullableExpr(target)) error('Cannot access "${NullSafety.accessedFieldName(access)}" of a nullable value.', [p, target.epos]);
 	}
 
+	/**
+		Check constructor invocation: don't pass nullable values to not-nullable arguments
+	*/
 	function checkNew(e:TExpr):Void switch e.eexpr {
 		case TNew(cls, params, args):
 			var ctor = null;
@@ -1230,6 +1565,9 @@ class ExprChecker {
 			NullSafety.fail(e.epos, {file: "nullSafety.ml", line: 1584}, "TNew expected");
 	};
 
+	/**
+		Check calls: don't call a nullable value, dont' pass nulable values to not-nullable arguments
+	*/
 	function checkCall(callee:TExpr, args:Array<TExpr>, p:Pos):Void {
 		if (isNullableExpr(callee)) error("Cannot call a nullable value.", [callee.epos, p]);
 		switch callee.eexpr {
@@ -1260,6 +1598,9 @@ class ExprChecker {
 		localSafety.callMade();
 	}
 
+	/**
+		Check if specified expressions can be passed to a call which expects `types`.
+	*/
 	function checkArgs(callee:TExpr, args:Array<TExpr>, types:Array<{name:String, optional:Bool, type:T}>):Void {
 		var meta = NullSafety.getArgumentsMeta(callee, types.length);
 		var count = Std.int(Math.min(args.length, Math.min(types.length, meta.length)));
@@ -1307,9 +1648,13 @@ class ClassChecker {
 			case _: [];
 		});
 		isSafeClass = NullSafety.safetyEnabled(clsMeta);
+		// TODO: field meta
 		checker = new ExprChecker(m, SMLoose, immediate, report, Warning.fromMeta(clsMeta));
 	}
 
+	/**
+		Entry point for checking a class
+	*/
 	public function check():Void {
 		NullSafety.validateSafetyMeta(report, m, clsMeta);
 		if (isSafeClass && !hasClassFlag(cls, CExtern) && !hasClassFlag(cls, CInterface)) checkVarFields();
@@ -1330,6 +1675,14 @@ class ClassChecker {
 		for (f in cls.clOrderedStatics) field(true, f);
 	}
 
+	/**
+		Check if a getter/setter for non-nullable property return safe values.
+		E.g.
+		```
+		var str(get,never):String;
+		function get_str() return (null:Null<String>); //should fail null safety check
+		```
+	*/
 	function checkAccessors(isStatic:Bool, field:TClassField):Void switch field.cfKind {
 		case Var(access) if (!NullSafety.isNullableType(field.cfType)):
 			var fields = isStatic ? cls.clStatics : cls.clFields;
@@ -1350,20 +1703,33 @@ class ClassChecker {
 		case _:
 	};
 
+	/**
+		Get safety mode for the current class
+	*/
 	function classSafetyMode():SafetyMode {
 		if (mode == null) mode = NullSafety.getSafetyMode(clsMeta);
 		return mode;
 	}
 
+	/**
+		Get an instance of expression checker with safety mode set to `mode`
+	*/
 	function getChecker(mode:SafetyMode):ExprChecker {
-		if (checker.getMode() != mode) checker = new ExprChecker(m, mode, immediate, report, Warning.fromMeta(clsMeta));
+		if (checker.getMode() != mode) // TODO field meta
+			checker = new ExprChecker(m, mode, immediate, report, Warning.fromMeta(clsMeta));
 		return checker;
 	}
 
+	/**
+		Check if field should be checked by null safety
+	*/
 	function isInSafety(field:TClassField):Bool return isSafeClass
 		&& !NullSafety.containsUnsafeMeta(field.cfMeta)
 		|| NullSafety.safetyEnabled(field.cfMeta);
 
+	/**
+		Extract `tf_expr` from `com.main.main_expr` if this expr in current class
+	*/
 	function getMainTfExpr(main:Null<TExpr>):Null<TExpr> {
 		if (main == null) return null;
 		return switch main.eexpr {
@@ -1375,6 +1741,9 @@ class ClassChecker {
 		};
 	}
 
+	/**
+		Check `var` fields are initialized properly
+	*/
 	public function checkVarFields():Void {
 		function field(isStatic:Bool, f:TClassField):Void {
 			NullSafety.validateSafetyMeta(report, m, f.cfMeta);
@@ -1391,12 +1760,13 @@ class ClassChecker {
 		checkFieldsInitializationInConstructor();
 	}
 
-	function pendingFields(fields:Array<TClassField>):Map<String, TClassField> {
-		var pending:Map<String, TClassField> = [];
+	// port: the pending fields are an OCaml-ordered table, so errors come in upstream's Hashtbl.iter order
+	function pendingFields(fields:Array<TClassField>):OcamlHashtbl<String, TClassField> {
+		var pending = new OcamlHashtbl<String, TClassField>(OcamlHash.hashString, (a, b) -> a == b, 20);
 		for (f in fields) if (NullSafety.shouldBeInitialized(f)
 			&& !NullSafety.isNullableType(f.cfType)
 			&& !NullSafety.containsUnsafeMeta(f.cfMeta)
-			&& f.cfExpr == null) pending.set(f.cfName, f);
+			&& f.cfExpr == null) pending.add(f.cfName, f);
 		return pending;
 	}
 
@@ -1406,51 +1776,62 @@ class ClassChecker {
 		if (init != null) checkFieldsInitialization(pending, init, true, classSafetyMode());
 		var main = getMainTfExpr(mainExpr);
 		if (main != null) checkFieldsInitialization(pending, main, true, classSafetyMode());
-		for (name in pending.keys()) checker.error('Field "$name" is not nullable thus should have an initial value.',
-			[pending.get(name).cfPos]);
+		pending.iter((name, field) -> checker.error('Field "$name" is not nullable thus should have an initial value.', [field.cfPos]));
 	}
 
+	/**
+		Check instance fields without initial values are properly initialized in constructor
+	*/
 	function checkFieldsInitializationInConstructor():Void {
 		var pending = pendingFields(cls.clOrderedFields);
 		switch cls.clConstructor {
 			case {cfMeta: meta, cfExpr: {eexpr: TFunction({tfExpr: e})}}:
+				// Get the safety mode for the constructor
+				// Always traverse to track field initialization, but use the constructor's mode for safety checks
 				checkFieldsInitialization(pending, e, false, NullSafety.getSafetyMode(clsMeta.concat(meta)));
 			case _:
 		}
-		for (name in pending.keys())
-			checker.error('Field "$name" is not nullable thus should have an initial value or should be initialized in constructor.',
-				[pending.get(name).cfPos]);
+		pending.iter((name, field) -> checker.error('Field "$name" is not nullable thus should have an initial value or should be initialized in constructor.',
+			[field.cfPos]));
 	}
 
-	function checkFieldsInitialization(pending:Map<String, TClassField>, expr:TExpr, isStatic:Bool,
-			mode:SafetyMode):Map<String, TClassField> {
+	function checkFieldsInitialization(pending:OcamlHashtbl<String, TClassField>, expr:TExpr, isStatic:Bool,
+			mode:SafetyMode):OcamlHashtbl<String, TClassField> {
+		// Compiler-autogenerated local vars for transfering `this` to local functions
 		var thisVars:Map<Int, TVar> = [];
-		inline function unsafeUsage(list:Map<String, TClassField>, mode:SafetyMode, e:TExpr):Void {
-			if (!list.keys().hasNext()) return;
+		inline function unsafeUsage(list:OcamlHashtbl<String, TClassField>, mode:SafetyMode, e:TExpr):Void {
+			if (list.length() == 0) return;
 			inline function maybeError(mode:SafetyMode, msg:String, p:Pos):Void if (mode != SMOff) checker.error(msg, [p]);
 			function loop(mode:SafetyMode, e:TExpr):Void switch e.eexpr {
 				case TField({eexpr: TConst(TThis)}, FInstance(_, _, field)) if (!isStatic):
-					if (list.exists(field.cfName)) maybeError(mode, "Cannot use field " + field.cfName + " until initialization.", e.epos);
+					if (list.mem(field.cfName)) maybeError(mode, "Cannot use field " + field.cfName + " until initialization.", e.epos);
 				case TField(_, FStatic(_, field)) if (isStatic):
-					if (list.exists(field.cfName)) maybeError(mode, "Cannot use field " + field.cfName + " until initialization.", e.epos);
+					if (list.mem(field.cfName)) maybeError(mode, "Cannot use field " + field.cfName + " until initialization.", e.epos);
 				case TField({eexpr: TConst(TThis)}, FClosure(_, field)):
 					maybeError(mode, "Cannot use method " + field.cfName + " until all instance fields are initialized.", e.epos);
 				case TCall({eexpr: TField({eexpr: TConst(TThis)}, FInstance(_, _, field))}, args):
 					maybeError(mode, "Cannot call method " + field.cfName + " until all instance fields are initialized.", e.epos);
 					for (e in args) loop(mode, e);
 				case TConst(TThis):
+					// Using `this` before all fields are initialized is an error in all modes except Off
 					maybeError(mode, 'Cannot use "this" until all instance fields are initialized.', e.epos);
 				case TLocal(v) if (thisVars.exists(v.vId)):
 					maybeError(mode, 'Cannot use "this" until all instance fields are initialized.', e.epos);
 				case TMeta(meta = {meta: MetaTag.NullSafety}, inner):
+					// Extract the safety mode from the metadata and apply it
 					var metaMode = NullSafety.getSafetyMode([meta]);
 					Texpr.iter(function(e) loop(metaMode, e), inner);
 				case TMeta(_, inner):
 					Texpr.iter(function(e) loop(mode, e), inner);
 				case TBinop(OpAssign, left, right):
+					// For assignments, check the right side and any subexpressions in the left side,
+					// but don't treat a direct field assignment target as a field read.
 					switch left.eexpr {
+						// Direct instance field assignment: skip checking the target
 						case TField({eexpr: TConst(TThis)}, FInstance(_, _, _)) if (!isStatic):
+						// Direct static field assignment: skip checking the target
 						case TField(_, FStatic(_, _)) if (isStatic):
+						// For other assignment targets (e.g., array[i] = x), check for unsafe usage
 						case _: loop(mode, left);
 					}
 					loop(mode, right);
@@ -1459,17 +1840,22 @@ class ClassChecker {
 			};
 			loop(mode, e);
 		}
-		function traverse(list:Map<String, TClassField>, mode:SafetyMode, e:TExpr):Map<String, TClassField> {
+		function traverse(list:OcamlHashtbl<String, TClassField>, mode:SafetyMode, e:TExpr):OcamlHashtbl<String, TClassField> {
 			switch e.eexpr {
 				case TBinop(OpAssign, {eexpr: TField({eexpr: TConst(TThis)}, FInstance(_, _, field))}, right) if (!isStatic):
+					// Traverse right side to handle nested assignments
 					traverse(list, mode, right);
 					list.remove(field.cfName);
 				case TBinop(OpAssign, {eexpr: TField(_, FStatic(_, field))}, right) if (isStatic):
+					// Traverse right side to handle nested assignments
 					traverse(list, mode, right);
 					list.remove(field.cfName);
 				case TMeta(meta = {meta: MetaTag.NullSafety}, inner):
+					// When @:nullSafety(...) wraps an assignment, unwrap and process the assignment
+					// with the appropriate safety mode for the right-hand side
 					traverse(list, NullSafety.getSafetyMode([meta]), inner);
 				case TMeta(_, inner):
+					// For other metadata, just unwrap and continue
 					traverse(list, mode, inner);
 				case TWhile(cond, body, DoWhile):
 					unsafeUsage(list, mode, cond);
@@ -1480,8 +1866,9 @@ class ClassChecker {
 					var a = traverse(list.copy(), mode, thenBody);
 					var b = traverse(list.copy(), mode, elseBody);
 					list.clear();
-					for (name in a.keys()) list.set(name, a.get(name));
-					for (name in b.keys()) list.set(name, b.get(name));
+					a.iter(list.replace);
+					b.iter(list.replace);
+				// var _gthis = this
 				case TVar(v, {eexpr: TConst(TThis)}):
 					thisVars.set(v.vId, v);
 				case _:

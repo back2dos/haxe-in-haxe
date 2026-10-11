@@ -36,11 +36,28 @@ import haxe.ds.StringMap;
 }
 
 @:structInit class RenameScope {
+	/** Parent scope **/
 	public var parent:Null<RenameScope>;
+	/** Child scopes **/
 	public var children:Array<RenameScope>;
+	/**
+		Pairs of "variable declared => the list of variables it overlaps with".
+		That list contains variables, which were declared _before_ the current one, but
+		used _after_ the current one was declared.
+		Example:
+		```
+		var a = 123;
+		var b = 324;
+		trace(a);
+		```
+		in this example `b` overlaps with `a`.
+	**/
 	public var ownVars:Array<{variable:TVar, overlaps:Overlaps}>;
+	/** Variables declared outside of this scope, but used inside of it **/
 	public var foreignVars:Overlaps;
+	/** List of variables used in current loop **/
 	public var loopVars:Overlaps;
+	/** Current loops depth **/
 	public var loopCount:Int;
 
 	public inline function new(parent:Null<RenameScope>, children:Array<RenameScope>, ownVars:Array<{variable:TVar, overlaps:Overlaps}>,
@@ -63,6 +80,7 @@ import haxe.ds.StringMap;
 	public var rcSwitchCasesNoBlocks:Bool;
 	public var rcScope:context.PlatformConfig.VarScope;
 	public var rcReserved:StringMap<Bool>;
+	/** Scope a variable is declared in **/
 	public var rcVarOrigins:IntMap<RenameScope>;
 
 	public inline function new(rcHoisting:Bool, rcNoShadowing:Bool, rcNoCatchVarShadowing:Bool, rcSwitchCasesNoBlocks:Bool,
@@ -80,8 +98,7 @@ import haxe.ds.StringMap;
 		rcSwitchCasesNoBlocks, rcScope, rcReserved, rcVarOrigins);
 }
 
-// haxe/src/filters/renameVars.ml — mechanical draft; not compiled or validated.
-// Persistent map/list snapshots are explicitly copied where mutation would change sharing semantics.
+// port: persistent map/list snapshots are explicitly copied where mutation would change sharing semantics.
 class Overlaps {
 	public var ovVars:Array<TVar> = [];
 	public var ovLut:IntMap<Bool> = new IntMap();
@@ -131,8 +148,17 @@ class Overlaps {
 }
 
 class RenameVars {
+	/**
+		For initialization.
+		Make the `name` a reserved word.
+		No local variable will be allowed to have such name.
+	**/
 	public static function reserveInit(ri:RenameInit, name:String):Void ri.riReserved.set(name, true);
 
+	/**
+		Make all module-level names reserved.
+		No local variable will have a name matching a module-level declaration.
+	**/
 	public static function reserveAllTypes(ri:RenameInit, types:Array<ModuleType>, pathToName:GlobalTypePath->String):Void {
 		for (mt in types) {
 			var infos = TypeOps.tInfos(mt);
@@ -161,6 +187,9 @@ class RenameVars {
 		}
 	}
 
+	/**
+		Initialize the context for local variables renaming
+	**/
 	public static function init(config:context.PlatformConfig, types:Array<ModuleType>):RenameInit {
 		var ri:RenameInit = {
 			riScope: config.pfScoping.vsScope,
@@ -193,8 +222,16 @@ class RenameVars {
 		return ri;
 	}
 
+	/**
+		Make `name` a reserved word.
+		No local variable will be allowed to have such name.
+	**/
 	public static function reserveCtx(rc:RenameContext, name:String):Void rc.rcReserved.set(name, true);
 
+	/**
+		Make `name` a reserved word.
+		No local variable will be allowed to have such name.
+	**/
 	public static function reserve(reserved:StringMap<Bool>, name:String):Void reserved.set(name, true);
 
 	public static function createScope(parent:Null<RenameScope>):RenameScope {
@@ -210,6 +247,9 @@ class RenameVars {
 		return scope;
 	}
 
+	/**
+		Invoked for each `TVar v` texpr_expr
+	**/
 	public static function declareVar(rc:RenameContext, scope:RenameScope, v:TVar):Void {
 		var overlaps:Overlaps;
 		if (!rc.rcHoisting || scope.foreignVars.isEmpty()) overlaps = scope.loopCount == 0 ? Overlaps.create() : scope.loopVars.copy();
@@ -228,8 +268,13 @@ class RenameVars {
 
 	public static function unboundVariable(v:TVar):Dynamic throw "Unbound variable: " + v.vName + "<" + v.vId + ">";
 
+	/**
+		Invoked for each `TLocal v` texr_expr
+	**/
 	public static function determineOverlaps(rc:RenameContext, scope:RenameScope, v:TVar):Void {
 		for (decl in scope.ownVars) {
+			// If we find a declaration that already knows us, we don't have to keep
+			// looping because we can be sure that we've been here before.
 			if (decl.variable == v || decl.overlaps.mem(v.vId)) return;
 			decl.overlaps.add(v);
 		}
@@ -262,6 +307,9 @@ class RenameVars {
 		if (scope.loopCount == 0) scope.loopVars.reset();
 	}
 
+	/**
+		Collect all the variables declared and used in `e` expression.
+	**/
 	public static function collectVars(rc:RenameContext, scope:RenameScope, e:TExpr, inBlock:Bool = false):Void {
 		var childInBlock = switch e.eexpr {
 			case TBlock(_) | TFunction(_): true;
@@ -333,10 +381,13 @@ class RenameVars {
 		}
 	}
 
-	// Deviation: a fresh EReg per use; an EReg keeps its last match, and this
+	// port: a fresh EReg per use; an EReg keeps its last match, and this
 	// runs on several threads at once (upstream's Str.regexp is immutable)
 	static inline function trailingNumbers():EReg return ~/[0-9]+$/;
 
+	/**
+		Rename `v` if needed
+	**/
 	public static function maybeRenameVar(rc:RenameContext, reserved:StringMap<Bool>, entry:{variable:TVar, overlaps:Overlaps}):Void {
 		var v = entry.variable;
 		inline function commit(name:String):Void {
@@ -354,6 +405,7 @@ class RenameVars {
 			] : core.Ast.Metadata).concat(v.vMeta);
 			v.vName = name;
 		}
+		// chop escape char for all local variables generated
 		if (v.vName.charAt(0) == core.Globals.genLocalPrefix.charAt(0)) commit("_g" + trailingNumbers().replace(v.vName.substr(1), ""));
 		var name = v.vName;
 		var count = 0;
@@ -365,6 +417,9 @@ class RenameVars {
 		if (willBeReserved(rc, v)) reserve(reserved, v.vName);
 	}
 
+	/**
+		Rename variables found in `scope`
+	**/
 	public static function renameVars(rc:RenameContext, scope:RenameScope):Void {
 		var reserved = rc.rcReserved.copy();
 		if ((rc.rcHoisting || rc.rcNoShadowing) && !scope.foreignVars.isEmpty()) scope.foreignVars.iter(v -> reserve(reserved, v.vName));
@@ -374,6 +429,9 @@ class RenameVars {
 		for (child in scope.children) renameVars(rc, child);
 	}
 
+	/**
+		Rename local variables in `e` expression if needed.
+	**/
 	public static function run(clPath:GlobalTypePath, ri:RenameInit, e:TExpr):TExpr {
 		var rc:RenameContext = {
 			rcScope: ri.riScope,

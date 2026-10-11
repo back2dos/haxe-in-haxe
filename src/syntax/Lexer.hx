@@ -7,8 +7,6 @@ import core.Ast.Token;
 import core.Ast.Unop;
 import core.Globals.Pos;
 
-// Port of the batch-tokenization portion of haxe/src/syntax/lexer.ml.
-// XML lexing and display-specific parser entry points remain with the parser.
 enum LexerErrorMsg {
 	InvalidCharacter(code:Int);
 	UnterminatedString;
@@ -42,7 +40,7 @@ class LexerError {
 	public inline function clone():LexedToken return new LexedToken(token, pos);
 }
 
-// llines is kept in ascending order (upstream's newest-first list, without O(n) prepends).
+// port: llines is kept in ascending order (upstream's newest-first list, without O(n) prepends).
 @:structInit class LexerFile {
 	public var lfile:String;
 	public var lline:Int;
@@ -94,9 +92,11 @@ class Lexer {
 		return ctx;
 	}
 
+	// resolve a position within a non-haxe file by counting newlines
+	// port: resolve_pos and resolve_file_content_pos in one function.
 	public static function resolveFileContentPos(file:String, content:String):LexerFile {
 		var f = createTempCtx(file).file;
-		// Upstream consumes UTF-8 bytes, but stores character offsets.
+		// port: upstream consumes UTF-8 bytes, but stores character offsets.
 		var bytes = haxe.io.Bytes.ofString(content), i = 0, p = 0;
 		while (i < bytes.length) {
 			var c = bytes.get(i++), inc = 1;
@@ -124,6 +124,7 @@ class Lexer {
 	}
 
 	public static function findLine(p:Int, f:LexerFile):{line:Int, column:Int} {
+		// rebuild cache if we have a new line
 		if (f.lmaxline != f.lline) {
 			f.lmaxline = f.lline;
 			f.lalines = f.llines.copy();
@@ -237,7 +238,7 @@ class Lexer {
 	public static function readToken(ctx:LexerContext, code:Lexer):LexedToken {
 		code.file = ctx.file.lfile;
 		var start = code.index;
-		// upstream records each newline as it is lexed, so a lexer error sees the lines before it
+		// port: upstream records each newline as it is lexed, so a lexer error sees the lines before it
 		var result = try code.token() catch (e:LexerError) {
 			updateLines(ctx, code, start);
 			throw e;
@@ -254,6 +255,7 @@ class Lexer {
 		return result;
 	}
 
+	// https://www.w3.org/TR/xml/#sec-common-syn plus '$' for JSX
 	static function xmlNameStart(code:Int):Bool return code == 36 || code == 58 || code == 95 || (code >= 65 && code <= 90)
 		|| (code >= 97 && code <= 122) || (code >= 0xC0 && code <= 0xD6) || (code >= 0xD8 && code <= 0xF6)
 		|| (code >= 0xF8 && code <= 0x2FF) || (code >= 0x370 && code <= 0x37D) || (code >= 0x37F && code <= 0x1FFF)
@@ -280,9 +282,10 @@ class Lexer {
 		if (p + 1 != code.cp(code.index)) code.fail(InvalidCharacter(code.current().charCodeAt(0)), code.index);
 		var start = code.index, name = code.xmlName();
 		ctx.buf.add("<" + name);
-		var open = "<" + name, close = "</" + name + ">", depth = 0, inOpen = name != "";
+		var open = "<" + name, close = "</" + name + ">", depth = 0, inOpen = name != ""; // don't allow self-closing fragments
 		while (!code.eof()) {
 			var offset = code.index;
+			// closing tag
 			if (code.starts("</")) {
 				code.index += 2;
 				code.xmlName();
@@ -290,6 +293,7 @@ class Lexer {
 					code.index++;
 					var tag = code.source.substr(offset, code.index - offset);
 					ctx.buf.add(tag);
+					// If it matches our document close tag, finish or decrease depth.
 					if (tag == close) {
 						if (depth == 0) {
 							updateLines(ctx, code, start);
@@ -302,18 +306,22 @@ class Lexer {
 				}
 				code.index = offset;
 			}
+			// opening tag
 			if (code.current() == "<") {
 				code.index++;
 				code.xmlName();
 				var tag = code.source.substr(offset, code.index - offset);
 				ctx.buf.add(tag);
+				// If it matches our document open tag, increase depth and set in_open to true.
 				if (tag == open) {
 					depth++;
 					inOpen = true;
 				} else inOpen = false;
-			} else if (code.starts("/>")) {
+			} else if (code.starts("/>")) { // />
 				code.index += 2;
 				ctx.buf.add("/>");
+				// We only care about this if we are still in the opening tag, i.e. if it wasn't closed yet.
+				// In that case, decrease depth and finish if it's 0.
 				if (inOpen) depth--;
 				if (depth < 0) {
 					updateLines(ctx, code, start);
@@ -342,7 +350,7 @@ class Lexer {
 		case UnterminatedMarkup: "Unterminated markup literal";
 	};
 
-	// Tokenizer: translation of `token`, `sharp_token`, `comment`, `string`,
+	// port: tokenizer: translation of `token`, `sharp_token`, `comment`, `string`,
 	// `string2`, `code_string` and `regexp` from haxe/src/syntax/lexer.ml.
 	// Sedlex longest-match semantics are reproduced by hand: where several
 	// rules apply at the current position, the longest lexeme wins and ties go
@@ -350,13 +358,13 @@ class Lexer {
 	var source:String;
 	var file:String;
 	var index:Int;
-	// Deviation from upstream (memory only): identifiers are interned per file,
+	// port: identifiers are interned per file (a memory-only deviation),
 	// so the AST holds one string per name instead of one per occurrence. The
 	// identity of identifier strings is never observed (only position file
 	// names are compared physically, core.ds.StrTools.physNeq).
 	var idents:Map<String, String>;
 
-	// UTF-16 indices of the surrogate pairs of `source` (null without any): sedlex
+	// port: UTF-16 indices of the surrogate pairs of `source` (null without any): sedlex
 	// positions count code points, so a pair is one position (see `cp`).
 	var pairs:Null<Array<Int>>;
 
@@ -374,7 +382,7 @@ class Lexer {
 		idents = new Map();
 	}
 
-	/** The position (code point offset) of the UTF-16 index `i`. **/
+	// port: the position (code point offset) of the UTF-16 index `i`.
 	inline function cp(i:Int):Int return pairs == null ? i : cpPairs(i);
 
 	function cpPairs(i:Int):Int {
@@ -413,7 +421,7 @@ class Lexer {
 
 	inline function codeAt(i:Int):Int return i < source.length ? StringTools.fastCodeAt(source, i) : -1;
 
-	// Compares in place: called for every operator candidate of every token.
+	// port: compares in place: called for every operator candidate of every token.
 	function starts(value:String):Bool {
 		var n = value.length;
 		if (index + n > source.length) return false;
@@ -451,8 +459,8 @@ class Lexer {
 
 	static inline function isIdentPart(c:String):Bool return isIdentStart(c) || isDigit(c);
 
-	// Regexp fragments: each returns the end index of a match starting at i, or -1.
-	// integer = ('1'..'9', Star sep_digit) | '0'
+	// port: regexp fragments: each returns the end index of a match starting at i, or -1.
+	// port: integer = ('1'..'9', Star sep_digit) | '0'
 	function mInteger(i:Int):Int {
 		var c = codeAt(i);
 		if (c == "0".code) return i + 1;
@@ -460,7 +468,7 @@ class Lexer {
 		return -1;
 	}
 
-	// Star (Opt '_', digit-class)
+	// port: Star (Opt '_', digit-class)
 	function mSepDigits(i:Int, cls:Int->Bool):Int {
 		while (true) {
 			var c = codeAt(i);
@@ -470,13 +478,13 @@ class Lexer {
 		}
 	}
 
-	// Plus (digit-class, Star sep_digit-class), which is digit-class (Opt '_' digit-class)*
+	// port: Plus (digit-class, Star sep_digit-class), which is digit-class (Opt '_' digit-class)*
 	function mPlusDigits(i:Int, cls:Int->Bool):Int {
 		if (!cls(codeAt(i))) return -1;
 		return mSepDigits(i + 1, cls);
 	}
 
-	// Plus integer
+	// port: Plus integer
 	function mPlusInteger(i:Int):Int {
 		var e = mInteger(i);
 		if (e < 0) return -1;
@@ -487,7 +495,7 @@ class Lexer {
 		}
 	}
 
-	// Opt '_', (chars), Plus integer   (returns i when absent)
+	// port: Opt '_', (chars), Plus integer   (returns i when absent)
 	function mOptSuffix(i:Int, chars:String):Int {
 		var j = i;
 		if (codeAt(j) == "_".code) j++;
@@ -502,7 +510,7 @@ class Lexer {
 		return e == i ? -1 : e;
 	}
 
-	// ('e'|'E'), Opt ('+'|'-'), Plus integer_digits, Opt float_suffix
+	// port: ('e'|'E'), Opt ('+'|'-'), Plus integer_digits, Opt float_suffix
 	function mExponent(i:Int):Int {
 		var c = codeAt(i);
 		if (c != "e".code && c != "E".code) return -1;
@@ -515,7 +523,7 @@ class Lexer {
 	}
 
 	function numberToken(start:Int):Null<LexedToken> {
-		// candidates in rule order; kind 0 = int, 1 = float, 2 = interval
+		// port: candidates in rule order; kind 0 = int, 1 = float, 2 = interval
 		var bestEnd = -1, bestKind = 0;
 		inline function cand(end:Int, kind:Int) {
 			if (end > bestEnd) {
@@ -523,50 +531,50 @@ class Lexer {
 				bestKind = kind;
 			}
 		}
-		// "0x", Plus hex_digits, Opt integer_suffix
+		// port: "0x", Plus hex_digits, Opt integer_suffix
 		if (starts("0x")) {
 			var e = mPlusDigits(start + 2, isHexC);
 			if (e >= 0) cand(mOptSuffix(e, "iu"), 0);
 		}
-		// "0b", Plus bin_digits, Opt integer_suffix
+		// port: "0b", Plus bin_digits, Opt integer_suffix
 		if (starts("0b")) {
 			var e = mPlusDigits(start + 2, function(c) return c == "0".code || c == "1".code);
 			if (e >= 0) cand(mOptSuffix(e, "iu"), 0);
 		}
 		var ei = mInteger(start);
 		if (ei >= 0) {
-			// integer, Opt integer_suffix
+			// port: integer, Opt integer_suffix
 			cand(mOptSuffix(ei, "iu"), 0);
-			// integer, float_suffix
+			// port: integer, float_suffix
 			var e = mReqSuffix(ei, "f");
 			if (e >= 0) cand(e, 1);
-			// integer, '.', Plus integer_digits, Opt float_suffix
+			// port: integer, '.', Plus integer_digits, Opt float_suffix
 			if (codeAt(ei) == ".".code) {
 				var e = mPlusDigits(ei + 1, isDigitC);
 				if (e >= 0) cand(mOptSuffix(e, "f"), 1);
 			}
 		}
-		// '.', Plus integer_digits, Opt float_suffix
+		// port: '.', Plus integer_digits, Opt float_suffix
 		if (codeAt(start) == ".".code) {
 			var e = mPlusDigits(start + 1, isDigitC);
 			if (e >= 0) cand(mOptSuffix(e, "f"), 1);
 		}
 		if (ei >= 0) {
-			// integer, ('e'|'E'), Opt ('+'|'-'), Plus integer_digits, Opt float_suffix
+			// port: integer, ('e'|'E'), Opt ('+'|'-'), Plus integer_digits, Opt float_suffix
 			var e = mExponent(ei);
 			if (e >= 0) cand(e, 1);
-			// integer, '.', Star digit, ('e'|'E'), ...
+			// port: integer, '.', Star digit, ('e'|'E'), ...
 			if (codeAt(ei) == ".".code) {
 				var j = ei + 1;
 				while (isDigitC(codeAt(j))) j++;
 				var e = mExponent(j);
 				if (e >= 0) cand(e, 1);
 			}
-			// integer, "..."
+			// port: integer, "..."
 			if (source.substr(ei, 3) == "...") cand(ei + 3, 2);
 		}
 		if (bestEnd < 0) return null;
-		// "." and "..." can only compete with the '.'-led float rule
+		// port: "." and "..." can only compete with the '.'-led float rule
 		if (codeAt(start) == ".".code && source.substr(start, 3) == "..." && 3 > bestEnd - start) return null;
 		index = bestEnd;
 		var s = core.ds.StrTools.sub(source, start, bestEnd);
@@ -604,7 +612,7 @@ class Lexer {
 		return Const(core.Ast.Constant.Float(r.literal, r.suffix));
 	}
 
-	// ident | idtype (end index or -1)
+	// port: ident | idtype (end index or -1)
 	function mIdent(i:Int):Int {
 		var j = i;
 		while (codeAt(j) == "_".code) j++;
@@ -615,7 +623,7 @@ class Lexer {
 			return j;
 		}
 		if (j > i) {
-			// Plus '_' | Plus '_', '0'..'9', Star (...)
+			// port: Plus '_' | Plus '_', '0'..'9', Star (...)
 			if (isDigitC(c)) {
 				j++;
 				while (isIdentPartC(codeAt(j))) j++;
@@ -625,7 +633,7 @@ class Lexer {
 		return -1;
 	}
 
-	// `ident` only (used by '#', ident): lowercase start after underscores, or underscores.
+	// port: `ident` only (used by '#', ident): lowercase start after underscores, or underscores.
 	function mLowerIdent(i:Int):Int {
 		var j = i;
 		while (codeAt(j) == "_".code) j++;
@@ -645,7 +653,7 @@ class Lexer {
 		return -1;
 	}
 
-	// "??=" is spelled as a join: gencpp emits string literals unescaped and
+	// port: "??=" is spelled as a join: gencpp emits string literals unescaped and
 	// "??=" is the C++ trigraph for "#".
 	static final operators:Array<{text:String, token:Token}> = [
 		{text: "++", token: Unop(Increment)},
@@ -663,9 +671,12 @@ class Lexer {
 		{text: "||=", token: Binop(OpAssignOp(OpBoolOr))},
 		{text: "&&=", token: Binop(OpAssignOp(OpBoolAnd))},
 		{text: ["??", "="].join(""), token: Binop(OpAssignOp(OpNullCoal))},
+		// //| ">>=" -> mk lexbuf (Binop (OpAssignOp OpShr))
+		// //| ">>>=" -> mk lexbuf (Binop (OpAssignOp OpUShr))
 		{text: "==", token: Binop(OpEq)},
 		{text: "!=", token: Binop(OpNotEq)},
 		{text: "<=", token: Binop(OpLte)},
+		// //| ">=" -> mk lexbuf (Binop OpGte)
 		{text: "&&", token: Binop(OpBoolAnd)},
 		{text: "||", token: Binop(OpBoolOr)},
 		{text: "<<", token: Binop(OpShl)},
@@ -700,11 +711,11 @@ class Lexer {
 		{text: "@", token: At}
 	];
 
-	// Typed views of `operators`, so the per-token scan reads no structures.
+	// port: Typed views of `operators`, so the per-token scan reads no structures.
 	static final opTexts:Array<String> = [for (o in operators) o.text];
 	static final opTokens:Array<Token> = [for (o in operators) o.token];
 	static final opFirst:Array<Int> = [for (text in opTexts) StringTools.fastCodeAt(text, 0)];
-	// Operator indices grouped by first character (in table order), so a token
+	// port: Operator indices grouped by first character (in table order), so a token
 	// only tries the operators that can match it: opByFirst[opFirstStart[c]] ...
 	// opByFirst[opFirstStart[c + 1] - 1]. Flat Int arrays (an Array<Array<Int>>
 	// would be read through a dynamic cast on HashLink).
@@ -734,7 +745,7 @@ class Lexer {
 				index++;
 				continue;
 			}
-			// Find the longest fixed-text operator.
+			// port: Find the longest fixed-text operator.
 			var opLen = 0, opTok:Token = null;
 			if (c >= 0 && c < 128) for (k in opFirstStart[c]...opFirstStart[c + 1]) {
 				var i = opByFirst[k];
@@ -812,12 +823,12 @@ class Lexer {
 		}
 	}
 
-	// sharp_token (without the file context handled by the static wrapper).
+	// port: sharp_token (without the file context handled by the static wrapper).
 	function sharpTokenRaw():LexedToken {
 		while (true) {
 			var start = index;
 			var c = codeAt(index);
-			// sharp_ident
+			// port: sharp_ident
 			if (isLowerC(c) || isUpperC(c) || c == "_".code) {
 				var j = index + 1;
 				while (true) {
@@ -850,10 +861,10 @@ class Lexer {
 		}
 	}
 
-	// comment: stores the content, returns the end of "*/".
+	// port: comment: stores the content, returns the end of "*/".
 	function comment(buf:StringBuf, pmin:Int):Int {
 		index += 2;
-		// The text up to "*/" in one piece (not a one-character string per character).
+		// port: The text up to "*/" in one piece (not a one-character string per character).
 		var end = index > source.length ? -1 : source.indexOf("*/", index);
 		if (end < 0) {
 			if (index < source.length) {
@@ -867,7 +878,7 @@ class Lexer {
 		return index;
 	}
 
-	// string: stores the raw content of a double-quoted string, returns the end of the closing quote.
+	// port: string: stores the raw content of a double-quoted string, returns the end of the closing quote.
 	function string(buf:StringBuf, pmin:Int):Int {
 		while (true) {
 			if (eof()) return fail(UnterminatedString, pmin);
@@ -902,7 +913,7 @@ class Lexer {
 		return try unescape(s) catch (e:InvalidEscapeSequence) fail(InvalidEscape(e.c, e.msg), fmt.quotePmin + e.i);
 	}
 
-	// string2: single-quoted (format) string. Throws LexExit on eof.
+	// port: string2: single-quoted (format) string. Throws LexExit on eof.
 	function string2(buf:StringBuf, fmt:FormatContext):Int {
 		while (true) {
 			if (eof()) throw new LexExit();
@@ -948,7 +959,7 @@ class Lexer {
 		}
 	}
 
-	// code_string: the `${...}` part of a format string. Returns the (reset) store buffer.
+	// port: code_string: the `${...}` part of a format string. Returns the (reset) store buffer.
 	function codeString(buf:StringBuf, fmt:FormatContext):StringBuf {
 		var openBraces = 0;
 		while (true) {
@@ -999,7 +1010,7 @@ class Lexer {
 			}
 			if (starts("/*")) {
 				var pmin = index;
-				// comments are dropped from the code part
+				// port: comments are dropped from the code part
 				comment(new StringBuf(), pmin);
 				continue;
 			}
@@ -1014,7 +1025,7 @@ class Lexer {
 		}
 	}
 
-	// regexp: stores the processed pattern; pmax is the end of the closing '/'
+	// port: regexp: stores the processed pattern; pmax is the end of the closing '/'
 	// (upstream evaluates `lexeme_end` before parsing the options).
 	function regexp(buf:StringBuf, pmin:Int):{options:String, pmax:Int} {
 		while (true) {
@@ -1043,8 +1054,7 @@ class Lexer {
 					buf.add(source.substr(index, 6));
 					index += 6;
 				} else if (d < 0 || d == "\n".code || d == "\r".code) {
-					// '\\' followed by eof/newline: the backslash alone is stored by the Plus(Compl ..) rule? No:
-					// Plus (Compl ('\\' | ...)) cannot match '\\', so this is `'\\', Compl '\\'` (newline) or die.
+					// port: a newline after '\\' matches `'\\', Compl '\\'` like any other character.
 					return fail(InvalidCharacter("\\".code), index + 1);
 				} else {
 					return fail(InvalidCharacter("\\".code), index + 1);
@@ -1075,7 +1085,7 @@ class Lexer {
 		}
 	}
 
-	// haxe/src/core/ast.ml: unescape
+	// port: unescape of haxe/src/core/ast.ml
 	public static function unescape(s:String):String {
 		var b = new StringBuf();
 		var i = 0;

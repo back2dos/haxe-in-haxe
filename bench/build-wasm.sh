@@ -5,7 +5,7 @@
 #   HL_SRC=/path/to/hashlink ZLIB_SRC=/path/to/zlib-1.3.x sh bench/build-wasm.sh
 #   HAXE_STD_PATH=$PWD/haxe/std node --liftoff-only --stack-size=60000 bin/bench/wasm/hih.js ...
 #
-# - Stock HashLink runtime (not bench/libhl-allocator.patch), single-threaded
+# - Stock HashLink runtime (not bench/patches/libhl-allocator.patch), single-threaded
 #   (HL_NO_THREADS: the compiler then runs its parallel loops inline).
 # - Binaryen's --spill-pointers keeps pointers held in wasm locals visible to
 #   libhl's conservative stack scan.

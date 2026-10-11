@@ -10,7 +10,6 @@ import core.Ast;
 import core.DisplayTypes;
 import core.TType;
 
-// haxe/src/context/display/syntaxExplorer.ml
 enum ReferenceKind {
 	KVar;
 	KIdent;

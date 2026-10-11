@@ -10,7 +10,7 @@ import core.TPrinting.*;
 import core.TUnification.UnifyError;
 import core.TOther.TClassTools;
 
-// Mechanical translation of haxe/src/core/error.ml. Draft; not compiled or tested.
+// port: from haxe/src/core/error.ml.
 enum CallError {
 	NotEnoughArguments(args:Array<{name:String, optional:Bool, type:T}>);
 	TooManyArguments;
@@ -37,6 +37,7 @@ enum TypeNotFoundReason {
 @:structInit class CompilerError {
 	public var errMessage:ErrorMsg;
 	public var errPos:Pos;
+	// Reverse list of sub errors. Use Error.recurse_error to handle an error and its sub errors with depth.
 	public var errSub:Array<CompilerError>;
 
 	public inline function new(errMessage:ErrorMsg, errPos:Pos, errSub:Array<CompilerError>) {
@@ -116,6 +117,9 @@ class Error {
 		return str.length > 150 ? str.substr(0, 147) + "..." : str;
 	}
 
+	/**
+		Should be called for each complementary error message.
+	**/
 	public static function complMsg(s:String):String return "... " + s;
 
 	public static function unifyErrorMsg(ctx:PrintContext, err:UnifyError):String return switch err {
@@ -176,6 +180,7 @@ class Error {
 		case CannotSkipNonNullable(s): "Cannot skip non-nullable argument " + s;
 	};
 
+	// Global error helpers
 	public static function raiseError(err:CompilerError):Dynamic throw new TypingError(err);
 
 	public static function raiseErrorMsg(msg:ErrorMsg, p:Pos):Dynamic return raiseError(makeError(msg, p));
@@ -315,6 +320,7 @@ class BetterErrors {
 		return root;
 	}
 
+	// non-recursive s_type
 	public static function sType(ctx:PrintContext, t:T):String return switch t {
 		case TMono(r): core.TPrinting.MonomorphPrinting.sMono(sType, ctx, false, r);
 		case TEnum(e, tl): Globals.sTypePath(e.ePath) + sTypeParams(ctx, tl);
@@ -324,6 +330,7 @@ class BetterErrors {
 			}
 		case TType(t, tl): Globals.sTypePath(t.tPath) + sTypeParams(ctx, tl);
 		case TAbstract(a, tl): Globals.sTypePath(a.aPath)
+			// show next scope of type parameter instead of Null<...>
 			+ (a.aPath.pack.length == 0 && a.aPath.name == "Null" ? sTypeParamsExpanded(ctx, tl) : sTypeParams(ctx, tl));
 		case TFun({args: []}): "() -> ...";
 		case TFun(s):
@@ -376,6 +383,7 @@ class BetterErrors {
 				if (access.accMessages.length > 0) message.add(Error.unifyErrorMsg(ctx, access.accMessages[0]));
 				inline function withInfo(t:T,
 						info:AccessKindInfo):String return (info.isOptional ? "?" : "")
+						// remove Null<...> if optional
 						+ sType(ctx, info.isOptional ? followWithoutType(t) : t);
 				return {
 					actual: withInfo(access.accActual, access.accActualInfo),

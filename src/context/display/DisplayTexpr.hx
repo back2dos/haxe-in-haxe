@@ -15,7 +15,6 @@ import typing.TypeloadFields;
 import core.Ast;
 import core.TType;
 
-// haxe/src/context/display/displayTexpr.ml
 class DisplayTexpr {
 	static inline function posEq(a:Pos, b:Pos):Bool return a.pfile == b.pfile && a.pmin == b.pmin && a.pmax == b.pmax;
 
@@ -195,8 +194,8 @@ class DisplayTexpr {
 			// We have to go through type_module_hook because one of the module's dependencies could be
 			// invalid (issue #8991).
 			var m = try ctx.com.moduleLut.find(path) catch (_:core.ds.NotFound) {
-				// TypeloadCacheHook.type_module_hook: the batch compiler has no module cache, so the
-				// hook reports NoModule (the server installs ServerCache.type_module).
+				// port: TODO the TypeloadCacheHook.type_module_hook fallback (restoring a cached or binary
+				// module) is not translated; a module missing from module_lut is not checked.
 				throw core.ds.NotFound.raise();
 			};
 			checkDisplayModule(ctx, cfile.cDecls, m);

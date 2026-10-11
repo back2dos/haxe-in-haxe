@@ -1,12 +1,10 @@
 package core.ds;
 
-/**
-	An Int -> Int map with cheap snapshots, standing in for an OCaml persistent
-	map that is saved and restored around a scope (`let old = !vars in ...;
-	vars := old`). Copying a mutable map at every scope is quadratic in large
-	functions; `mark` and `rollback` undo just the sets and removes made since
-	the mark.
-**/
+// port: an Int -> Int map with cheap snapshots, standing in for an OCaml persistent
+// map that is saved and restored around a scope (`let old = !vars in ...;
+// vars := old`). Copying a mutable map at every scope is quadratic in large
+// functions; `mark` and `rollback` undo just the sets and removes made since
+// the mark.
 class ScopedIntMap {
 	final map = new haxe.ds.IntMap<Int>();
 	final logKeys:Array<Int> = [];

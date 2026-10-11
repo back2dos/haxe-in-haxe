@@ -7,19 +7,27 @@ import core.TUnification;
 import core.TOther.*;
 import context.Common;
 
-// haxe/src/codegen/fixOverrides.ml — mechanical shared-filter draft; not compile-validated.
+// -------------------------------------------------------------------------- //
+// FIX OVERRIDES
+
+/*
+	on some platforms which doesn't support type parameters, we must have the
+	exact same type for overridden/implemented function as the original one
+*/
 class FixOverrides {
 	public static function findField(com:CommonContext, c:TClass, f:TClassField):TClassField {
 		try {
 			var s = c.clSuper;
+			// cpp.FastIterator: This is a strongly typed 'extern' and the usual rules don't apply
 			if (s == null || (s.cls.clPath.pack.join(".") == "cpp" && s.cls.clPath.name == "FastIterator")) throw "Not_found";
 			return findField(com, s.cls, f);
 		} catch (e:Dynamic) {
 			if (e != "Not_found") throw e;
 		}
 		try {
-			if (com.platform == Cpp || com.platform == Hl) throw "Not_found";
-			// HashLink 2.0 JIT: an early exit through two nested try blocks restores only the innermost trap, leaving a dangling handler.
+			if (com.platform == Cpp || com.platform == Hl) throw "Not_found"; // uses delegation for interfaces
+			// port: HashLink 2.0 JIT: an early exit through two nested try blocks restores
+			// only the innermost trap, leaving a dangling handler.
 			for (parent in c.clImplements) {
 				var r = try findField(com, parent.cls, f) catch (e:Dynamic) {
 					if (e != "Not_found") throw e;
@@ -62,6 +70,8 @@ class FixOverrides {
 				var next = cur;
 				try {
 					typeEq(EqStrict, monomorphs(c.clParams, monomorphs(f.cfParams, v.vType)), t2);
+					// Flash generates type parameters with a single constraint as that constraint type, so we
+					// have to detect this case and change the variable (issue #2712).
 					switch follow(v.vType) {
 						case TInst(cp = {clKind: KTypeParameter(ttp)}, _) if (com.platform == Flash):
 							if (getConstraints(ttp).length == 1
@@ -111,6 +121,7 @@ class FixOverrides {
 
 	public static function fixOverrides(com:CommonContext, t:ModuleType):Void switch t {
 		case TClassDecl(c):
+			// overrides can be removed from interfaces
 			if (hasClassFlag(c, CInterface)) c.clOrderedFields = c.clOrderedFields.filter(function(f) {
 				try {
 					if (findField(com, c, f) == f) throw "Not_found";
@@ -129,6 +140,10 @@ class FixOverrides {
 		case _:
 	};
 
+	/*
+		PHP does not allow abstract classes extending other abstract classes to override any fields, so these duplicates
+		must be removed from the child interface
+	*/
 	public static function fixAbstractInheritance(com:CommonContext, t:ModuleType):Void switch t {
 		case TClassDecl(c) if (hasClassFlag(c, CInterface)):
 			c.clOrderedFields = c.clOrderedFields.filter(function(f) {

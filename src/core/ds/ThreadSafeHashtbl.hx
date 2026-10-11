@@ -2,7 +2,6 @@ package core.ds;
 
 import sys.thread.Mutex;
 
-// Port of haxe/src/core/ds/threadSafeHashtbl.ml.
 class ThreadSafeHashtbl<Key, Value> {
 	var values:Array<{key:Key, value:Value}> = [];
 	var mutex:Mutex = new Mutex();

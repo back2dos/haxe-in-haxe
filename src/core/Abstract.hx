@@ -11,7 +11,7 @@ import core.TPrinting.*;
 import core.MetaList.StrictMeta;
 import core.Meta as MetadataTools;
 
-// Mechanical translation of haxe/src/core/abstract.ml. Draft; not compiled or tested.
+// port: from haxe/src/core/abstract.ml.
 class Abstract {
 	public static function buildAbstract(a:TAbstract):Void {
 		if (a.aImpl != null) a.aImpl.clBuild();
@@ -74,6 +74,10 @@ class Abstract {
 		return findCastField(uctx, function(uctx) return unifiesTo(uctx, a, b, ab, tl) ? null : findFieldTo(uctx, a, b, ab, tl));
 	}
 
+	/**
+		Returns type parameters and the list of types, which should be known at compile time
+		to be able to choose multitype specialization.
+	**/
 	public static function findMultitypeParams(a:TAbstract, pl:TParams):{types:TParams, definitiveTypes:TParams} {
 		var meta = MetadataTools.get(MetadataTools.MultiType, a.aMeta);
 		if (meta.exprs.length == 0) return {types: pl, definitiveTypes: pl};
@@ -131,7 +135,8 @@ class Abstract {
 					getUnderlyingTypeWithStack(stack, a, tl);
 				case _: t;
 			};
-			// Traverse even for returnFirst, to preserve recursive-abstract detection.
+			// Even if only the first underlying type was requested
+			// keep traversing to detect mutually recursive abstracts
 			var result = recStackLoop(stack, TAbstract(a, pl), loop, t);
 			return returnFirst ? t : result;
 		}

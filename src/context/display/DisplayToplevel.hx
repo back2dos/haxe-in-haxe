@@ -23,7 +23,6 @@ import core.DisplayTypes;
 import core.TType;
 import core.display.CompletionItem;
 
-// haxe/src/context/display/displayToplevel.ml
 class ExploreClassPathTask extends ServerTask {
 	final com:CommonContext;
 	final checked:haxe.ds.StringMap<Bool>;
@@ -97,13 +96,13 @@ class ExploreClassPathTask extends ServerTask {
 	}
 
 	static function isDirectory(path:String):Bool {
-		// Sys.is_directory raises Sys_error for a dangling entry; that aborts the directory like upstream
+		// port: Sys.is_directory raises Sys_error for a dangling entry; that aborts the directory like upstream
 		if (!sys.FileSystem.exists(path)) throw new SysError();
 		return sys.FileSystem.isDirectory(path);
 	}
 }
 
-/** OCaml's `Sys_error` raised by directory functions. **/
+// port: OCaml's `Sys_error` raised by directory functions.
 private class SysError extends haxe.Exception {
 	public function new() super("Sys_error");
 }
@@ -619,7 +618,7 @@ class DisplayToplevel {
 			return {s: s, it: it, i: i};
 		});
 		haxe.ds.ArraySort.sort(cl, (a, b) -> Reflect.compare(a.i, b.i));
-		// StringError.filter_similar
+		// port: StringError.filter_similar
 		var similar = [];
 		for (e in cl) {
 			if (e.i <= Std.int((e.s.length < i.length ? e.s.length : i.length) / 3)) similar.push(e)

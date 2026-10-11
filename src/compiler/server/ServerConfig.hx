@@ -1,6 +1,5 @@
 package compiler.server;
 
-// Port of haxe/src/compiler/server/serverConfig.ml.
 class ServerConfig {
 	public static var doNotCheckModules = false;
 

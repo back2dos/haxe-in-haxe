@@ -3,7 +3,7 @@ package core;
 import core.Globals.Platform;
 import haxe.ds.StringMap;
 
-// Generated data translated from haxe/src-json/define.json following prebuild.ml.
+// port: generated data translated from haxe/src-json/define.json following prebuild.ml.
 enum DefineParameter {
 	HasParam(value:String);
 	Platforms(values:Array<Platform>);

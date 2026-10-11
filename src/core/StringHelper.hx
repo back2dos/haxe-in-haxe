@@ -1,6 +1,6 @@
 package core;
 
-// Port of haxe/src/core/stringHelper.ml.
+// port: from haxe/src/core/stringHelper.ml.
 class StringHelper {
 	public static function uppercase(value:String):String {
 		var result = new StringBuf();
@@ -82,6 +82,8 @@ class StringHelper {
 		var dot = file.lastIndexOf(".");
 		return dot < 0 ? file : file.substr(dot);
 	}
+
+	// UTF8
 
 	public static function toUtf8(value:String, position:core.Globals.Pos):{value:String, utf16Length:Int} {
 		var length = 0;

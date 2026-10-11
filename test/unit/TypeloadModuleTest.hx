@@ -30,7 +30,7 @@ class TypeloadModuleTest {
 			if ('$error'.indexOf("requires the Eval macro milestone") == -1) throw error;
 		}
 		var module = loader.loadModule({pack:["unit", "moduleload"], name:"Example"});
-		if (module.mId != 0 || module.mTypes.length != 5 || module.mExtra.mFile != sys.FileSystem.fullPath("test/unit/moduleload/Example.hx")) throw "Module loading failed";
+		if (module.mId != 0 || module.mTypes.length != 5 || core.Path.UniqueKey.lazyPath(module.mExtra.mFile) != sys.FileSystem.fullPath("test/unit/moduleload/Example.hx")) throw "Module loading failed";
 		if (loader.loadModule({pack:["unit", "moduleload"], name:"Example"}) != module) throw "Module cache failed";
 		var names = [for (type in module.mTypes) switch type { case TClassDecl(value): value.clPath.name; case TEnumDecl(value): value.ePath.name; case TTypeDecl(value): value.tPath.name; case TAbstractDecl(value): value.aPath.name; }];
 		if (names.join(",") != "Example,Choice,Alias,Count,Count_Impl_") throw "Module shells failed";

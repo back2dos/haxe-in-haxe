@@ -19,20 +19,18 @@ import typing.CallUnification;
 import core.ds.NotFound;
 import context.SafeCom.SafeContext;
 
-// Draft mechanical translation of haxe/src/context/abstractCast.ml; unvalidated.
-// Macro dispatch retains the upstream hook; its runtime remains a later milestone.
-// find_array_read_access / find_array_write_access results (OCaml tuples)
+// port: find_array_read_access / find_array_write_access results (OCaml tuples)
 typedef ArrayReadAccess = {field:TClassField, type:T, ret:T, index:TExpr};
 typedef ArrayWriteAccess = {field:TClassField, type:T, ret:T, index:TExpr, value:TExpr};
-// prepare_array_access_field result: (map, check_constraints, get_ta)
+// port: prepare_array_access_field result: (map, check_constraints, get_ta)
 typedef PreparedArrayAccess = {map:T->T, checkConstraints:Void->Void, getTa:Void->T};
-// find_to_field result: (t, cf, monos)
+// port: find_to_field result: (t, cf, monos)
 typedef ToField = {type:T, field:TClassField, monos:TParams};
-// find_multitype_specialization' result: (cf, field_monos, m, tl)
+// port: find_multitype_specialization' result: (cf, field_monos, m, tl)
 typedef MultitypeSpecializationFull = {field:TClassField, fieldMonos:TParams, type:T, params:TParams};
-// find_multitype_specialization result: (cf, m)
+// port: find_multitype_specialization result: (cf, m)
 typedef MultitypeSpecialization = {field:TClassField, type:T};
-// handle_abstract_casts find_abstract result: (a, pl, e)
+// port: handle_abstract_casts find_abstract result: (a, pl, e)
 typedef MultitypeAbstractExpr = {abs:TAbstract, params:TParams, expr:TExpr};
 
 class AbstractCast {
@@ -66,6 +64,10 @@ class AbstractCast {
 
 	public static function doCheckCast(ctx:context.Typecore.Typer, uctx:UnificationContext, tleft:T, eright:TExpr, p:Pos):TExpr {
 		inline function recurse(cf:TClassField, f:Void->TExpr):TExpr {
+			/*
+				Without this special check for macro @:from methods we will always get "Recursive implicit cast" error
+				unlike non-macro @:from methods, which generate unification errors if no other @:from methods are involved.
+			*/
 			switch cf.cfKind {
 				case Method(MethMacro):
 					if (castStack.length > 0 && castStack[0] == cf)
@@ -133,6 +135,12 @@ class AbstractCast {
 						Error.raiseTypingError("Cannot use this function as a functional interface because it has unknown types: "
 							+ core.TPrinting.sType(core.TPrinting.printContext(), right),
 							p);
+					// Wrap the function expression in a TCast to the SAM type so
+					// the SAM TInst lives in the typed AST. Without this the
+					// genjvm AST scan can't see SAM conversions in argument
+					// position (TNew has no callee subexpression; the
+					// constructor's parameter types are unreachable), and the
+					// emitted closure would not implement the SAM interface.
 					core.TFunctions.mkCast(eright, left, p);
 				case _: throw NotFound.raise();
 			};
@@ -269,6 +277,8 @@ class AbstractCast {
 		}
 	}
 
+	// TODO: This duplicates pretty much all the code from unifies_to_field. The only reason for that is
+	// that we want the monos so we can apply them to the type. Surely we can design our data better here...
 	public static function findToField(uctx:core.TUnification.UnificationContext, b:T, ab:TAbstract, tl:TParams):ToField {
 		var a = TAbstract(ab, tl);
 		inline function check(t:T, cf:TClassField):ToField return switch core.TFunctions.follow(cf.cfType) {
@@ -280,6 +290,7 @@ class AbstractCast {
 				var uctx = core.TUnification.getAbstractContext(uctx, a, b, ab);
 				var unifyFunc = core.TUnification.getAbstractUnifyFunc(uctx, EqStrict);
 				var athis = map(ab.aThis);
+				// we cannot allow implicit casts when the this type is not completely known yet
 				if (MetadataTools.has(StrictMeta.MultiType, ab.aMeta)
 					&& core.TFunctions.hasMono(athis)) throw new core.TUnification.Unify_error([]);
 				var equalityContext = core.ds.Record.copy(uctx);
@@ -344,12 +355,15 @@ class AbstractCast {
 					case _: throw "abstractCast: invalid implementation";
 				};
 				if (!MetadataTools.has(StrictMeta.MultiType, a.aMeta)) {
+					// This must have been a @:generic expansion with a { new } constraint (issue #4364). In this case
+					// let's construct the underlying type.
 					switch Abstract.getUnderlyingType(a, pl) {
 						case TInst(c, tl): {eexpr: TNew(c, tl, el), etype: TInst(c, tl), epos: e.epos};
 						case _: Error.raiseTypingError("Cannot construct "
 								+ core.TPrinting.sType(core.TPrinting.printContext(), TAbstract(a, pl)), e.epos);
 					}
 				} else {
+					// a TNew of an abstract implementation is only generated if it is a multi type abstract
 					var found = findMultitypeSpecializationFull(scom.platform, a, pl, e.epos);
 					var cf:TClassField = found.field;
 					var m:T = found.type;
@@ -462,6 +476,7 @@ class AbstractCast {
 								var ecall = filters.exception.ExceptionFunctions.makeCall(scom, ef, el, funType.signature.ret, e.epos);
 								maybeCast(ecall, e.etype, e.epos);
 							} catch (_:NotFound) {
+								// quick_field raises Not_found if m is an abstract, we have to replicate the 'using' call here
 								switch core.TFunctions.follow(m) {
 									case TAbstract(a, pl) if (a.aImpl != null):
 										var c = a.aImpl;

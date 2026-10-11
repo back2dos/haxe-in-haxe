@@ -17,7 +17,7 @@ bin/fuzz/fuzz --help
 ```
 
 It needs the reference (`haxe/haxe`, or `HAXE_REFERENCE`) and a build of the
-port (`bin/backend/hih/hih_clang` from `backend/build.sh port`, or
+port (`bin/hxc/hih/hih_clang` from `hxc/build.sh port`, or
 `HAXE_IN_HAXE_PORT`/`--port`). The generator also runs on Eval
 (`haxe -cp test/fuzz --run Fuzz --emit DIR -n 10`); a seed produces the same
 program on every host.
@@ -36,7 +36,7 @@ are the same for both sides.
 
 Built-in targets (`--list`): `hxb`, `interp`, `js`, `lua`, `python`, `neko`,
 `hl`, `hlc`, `php`, `cpp` (`-D no-compilation`), `jvm`, `swf`, and `hxc` (the
-program compiled to C by the hxc tool, `bin/backend/wbk.js`, and tcc;
+program compiled to C by the hxc tool, `bin/hxc/wbk.js`, and tcc;
 `HXC_CC` picks another C compiler; see `hxc.sh`). Add others with
 `--target-def 'name|--flag {out}/file|file:file|runner {out}/file'`.
 

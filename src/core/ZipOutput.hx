@@ -6,7 +6,7 @@ import haxe.zip.Entry;
 import haxe.zip.Writer;
 import sys.io.File;
 
-// Port of haxe/src/core/zip_output.ml.
+// port: from haxe/src/core/zip_output.ml.
 class AnyOutput {
 	public function new() {}
 
@@ -37,10 +37,8 @@ class ZipOutput extends AnyOutput {
 		addBytesEntry(Bytes.ofString(content), name);
 	}
 
-	/**
-		Adds binary data without round-tripping it through a Haxe String. HXB
-		modules are byte streams, so archive generation must retain every byte.
-	**/
+	// port: adds binary data without round-tripping it through a Haxe String. HXB
+	// modules are byte streams, so archive generation must retain every byte.
 	public function addBytesEntry(content:Bytes, name:String):Void {
 		if (closed) throw "Output is closed";
 		var data = content;
@@ -48,7 +46,7 @@ class ZipOutput extends AnyOutput {
 		var compressed = compressionLevel != 0;
 		var crc32 = crc32Of(data);
 		if (compressed) {
-			// haxe.zip.Compress emits a zlib stream, while ZIP stores raw DEFLATE.
+			// port: haxe.zip.Compress emits a zlib stream, while ZIP stores raw DEFLATE.
 			var zlibData = haxe.zip.Compress.run(data, compressionLevel);
 			data = zlibData.sub(2, zlibData.length - 6);
 		}
@@ -63,7 +61,7 @@ class ZipOutput extends AnyOutput {
 		});
 	}
 
-	// Table-driven CRC-32, as in zlib (upstream's Zip uses zlib's crc32);
+	// port: table-driven CRC-32, as in zlib (upstream's Zip uses zlib's crc32);
 	// haxe.crypto.Crc32 computes it bit by bit.
 	static final crcTable:haxe.ds.Vector<Int> = {
 		var t = new haxe.ds.Vector<Int>(256);

@@ -18,14 +18,13 @@ import haxe.io.Bytes;
 import haxe.io.BytesOutput;
 import String as StdString;
 
-// Mechanical translation of haxe/src/compiler/hxb/hxbWriter.ml.
-//
-// Deliberate representation differences:
+// port: representation differences:
 // - OCaml effects (UnboundTTP / UnboundTTPWithoutPosition) are modelled with an
 //   explicit handler stack, see catchUnboundTtp / performUnboundTtp.
 // - PMap iteration order (ascending OCaml string/int compare) is reproduced by
 //   sorting the keys of the port's hash maps.
-// - PosWriter compares file names by value; upstream compares them physically.
+// - PosWriter compares file names with StrTools.physNeq, which falls back to
+//   structural comparison on hosts without string identity.
 
 function binopIndex(op:Binop):Int return switch op {
 	case OpAdd: 0;
@@ -70,7 +69,7 @@ function unopIndex(op:Unop, flag:UnopFlag):Int return switch [op, flag] {
 	case [Spread, Postfix]: 11;
 }
 
-// OCaml `compare` on strings: byte-wise lexicographic. Code point order is
+// port: OCaml `compare` on strings: byte-wise lexicographic. Code point order is
 // identical to UTF-8 byte order.
 function compareOcamlString(a:String, b:String):Int {
 	var la = a.length, lb = b.length;
@@ -83,7 +82,7 @@ function compareOcamlString(a:String, b:String):Int {
 	return la == lb ? 0 : (la < lb ? -1 : 1);
 }
 
-// Keys of a PMap-backed string map, in PMap (ascending) order.
+// port: keys of a PMap-backed string map, in PMap (ascending) order.
 function sortedKeys<V>(m:haxe.ds.StringMap<V>):Array<String> {
 	var keys = [for (k in m.keys()) k];
 	keys.sort(compareOcamlString);
@@ -201,9 +200,9 @@ class HashedIdentityPool<K, V> {
 	}
 }
 
-// Pool of binary type-instance encodings (StringPool over Bytes.unsafe_to_string upstream).
-// Keyed by a content hash with byte comparison (a hex string key allocated
-// twice per lookup).
+// port: pool of binary type-instance encodings (StringPool over Bytes.unsafe_to_string upstream).
+// Keyed by a content hash with byte comparison, rather than a hex string key
+// allocated twice per lookup.
 class BytesPool {
 	final lut:Map<Int, Array<Int>> = new Map();
 
@@ -227,7 +226,7 @@ class BytesPool {
 	}
 }
 
-// SimnBuffer equivalent: a growable byte buffer whose contents can be read repeatedly.
+// port: SimnBuffer equivalent: a growable byte buffer whose contents can be read repeatedly.
 class ByteBuffer {
 	var buffer:Bytes;
 
@@ -323,7 +322,7 @@ class Chunk {
 
 	public function writeString(s:String):Void writeUleb128(cp.getOrAdd(s));
 
-	// inline: see core.ds.List (HashLink boxes Array<B> of a type parameter)
+	// port: inline: see core.ds.List (HashLink boxes Array<B> of a type parameter)
 	public inline function writeList<B>(l:Array<B>, f:B->Void):Void {
 		writeUleb128(l.length);
 		for (x in l) f(x);
@@ -413,7 +412,7 @@ class PosWriter {
 
 typedef ExprChunks = {pre:Chunk, e:Chunk};
 
-// A class rather than a structure: HashLink accesses structures through
+// port: a class rather than a structure: HashLink accesses structures through
 // virtual tables (a conversion per pop).
 @:structInit private class UnboundFrame {
 	public final source:Void->String;
@@ -476,9 +475,10 @@ class HxbWriter {
 		throw 'Compiler failure while writing hxb chunk ${HxbData.stringOfChunkKind(writer.chunk.kind)} of ${core.Globals.sTypePath(writer.currentModule.mPath)}: $msg';
 	}
 
+	// fieldStack == 0 (an empty field stack) can happen for cl_init and in EXD
 	function inNestedScope():Bool return fieldStack > 1;
 
-	// Effects
+	// port: effects
 
 	function moduleFilePos():Pos return core.Globals.filePos(moduleFile(currentModule));
 
@@ -498,7 +498,7 @@ class HxbWriter {
 		return r;
 	}
 
-	// catchUnboundTtp(() -> writeTexprTypeInstance(fctx, e.etype), () -> "texpr type", e.epos)
+	// port: catchUnboundTtp(() -> writeTexprTypeInstance(fctx, e.etype), () -> "texpr type", e.epos)
 	// without a closure per expression node.
 	static function texprTypeSource():String return "texpr type";
 
@@ -542,7 +542,7 @@ class HxbWriter {
 	}
 
 	function startTemporaryChunk<A>(initialSize:Int):(Chunk->A)->A {
-		var newChunk = new Chunk(EOM, cp, initialSize);
+		var newChunk = new Chunk(EOM, /* TODO: something else? */ cp, initialSize);
 		var oldChunk = chunk;
 		chunk = newChunk;
 		return function(f) {
@@ -1172,6 +1172,8 @@ class HxbWriter {
 		} catch (_:NotFound) {
 			var r = performUnboundTtp();
 			var msg = 'Unbound type parameter ${core.Globals.sTypePath(ttp.ttpClass.clPath)} while writing ${r.source}';
+			// if not (Hashtbl.mem writer.unbound_ttp (msg, p)) then begin
+			// 	Hashtbl.add writer.unbound_ttp (msg, p) true;
 			try unboundTtp.get(ttp)
 			catch (_:NotFound) {
 				unboundTtp.add(ttp, true);
@@ -1183,7 +1185,7 @@ class HxbWriter {
 		}
 	}
 
-	// write_type_instance's local helpers, as methods so each call does not allocate closures.
+	// port: write_type_instance's local helpers, as methods so each call does not allocate closures.
 	function writeFunctionArg(a:{name:String, optional:Bool, type:T}) {
 		chunk.writeString(a.name);
 		chunk.writeBool(a.optional);
@@ -1197,6 +1199,72 @@ class HxbWriter {
 		writeInlinedList(offset, max, chunk.writeU8, fFirst, fElt, l);
 	}
 
+	/*
+		simple references:
+			0 - mono
+			1 -> type ttp
+			2 -> field ttp
+			3 -> local ttp
+			4 -> Dynamic
+
+		special references:
+			10 - class statics
+			11 - enum statics
+			12 - abstract statics
+			13 - KExpr
+
+		void functions:
+			20: () -> Void
+			21: (A) -> Void
+			22: (A, B) -> Void
+			23: (A, B, C) -> Void
+			24: (A, B, C) -> Void
+			29: (?) -> Void
+
+		non-void functions:
+			30: () -> T
+			31: (A) -> T
+			32: (A, B) -> T
+			33: (A, B, C) -> T
+			34: (A, B, C, D) -> T
+			39: (?) -> T
+
+		class:
+			40: C
+			41: C<A>
+			42: C<A, B>
+			49: C<?>
+
+		enum:
+			50: E
+			51: E<A>
+			52: E<A, B>
+			59: E<?>
+
+		typedef:
+			60: T
+			61: T<A>
+			62: T<A, B>
+			69: T<?>
+
+		abstract:
+			70: A
+			71: A<A>
+			72: A<A, B>
+			79: A<?>
+
+		anons:
+			80: {}
+			81: any anon
+			89: Dynamic<T>
+
+		concrete types:
+			100: Void
+			101: Int
+			102: Float
+			103: Bool
+			104: String
+	*/
 	function writeTypeInstance(t:T):Void {
 		switch t {
 			case TAbstract({aPath: {pack: [], name: "Void"}}, []):
@@ -2056,7 +2124,7 @@ class HxbWriter {
 	}
 
 	// Module
-	// PMap.foldi (fun s f acc -> (s,f) :: acc) m []: descending key order.
+	// port: PMap.foldi (fun s f acc -> (s,f) :: acc) m []: descending key order.
 	static function enumConstructorsDescending(e:TEnum):Array<{name:String, ef:TEnumField}> {
 		var keys = sortedKeys(e.eConstrs);
 		keys.reverse();
@@ -2139,7 +2207,7 @@ class HxbWriter {
 		catchUnboundTtpModule(function() doWriteModule(m));
 	}
 
-	// The top-level effect handler of upstream write_module is performUnboundTtp's
+	// port: the top-level effect handler of upstream write_module is performUnboundTtp's
 	// empty-stack branch.
 	inline function catchUnboundTtpModule(f:Void->Void):Void f();
 
@@ -2368,7 +2436,7 @@ class HxbWriter {
 	static function chunkOrder(kind:ChunkKind):Int return Type.enumIndex(kind);
 
 	function getSortedChunks():Array<Chunk> {
-		// List.sort is stable; Array.sort in Haxe is not guaranteed to be.
+		// port: List.sort is stable; Array.sort in Haxe is not guaranteed to be.
 		var l = chunks.copy();
 		haxe.ds.ArraySort.sort(l, function(chunk1, chunk2) return chunkOrder(chunk1.kind) - chunkOrder(chunk2.kind));
 		return l;

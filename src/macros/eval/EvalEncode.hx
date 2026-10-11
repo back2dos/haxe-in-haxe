@@ -10,13 +10,9 @@ import macros.eval.EvalHash;
 
 using macros.eval.EvalValue.EvalValueTools;
 
-/**
-	haxe/src/macro/eval/evalEncode.ml.
-
-	Deviation: `ctx.get_object_prototype` returns only the prototype here; the
-	sorted field list it also returns upstream is computed by `sortObjectFields`
-	(the same stable sort on the hashed names).
-**/
+// port: `ctx.get_object_prototype` returns only the prototype here; the
+// sorted field list it also returns upstream is computed by `sortObjectFields`
+// (the same stable sort on the hashed names).
 class EvalEncode {
 	// Functions
 	public static function vifun0(f:Value->Value):Value return VFunction(vl -> switch vl {
@@ -56,12 +52,12 @@ class EvalEncode {
 		case [v0, v1, v2]: f(v0, v1, v2, VNull, VNull);
 		case [v0, v1, v2, v3]: f(v0, v1, v2, v3, VNull);
 		case [v0, v1, v2, v3, v4]: f(v0, v1, v2, v3, v4);
-		case _: EvalExceptions.invalidCallArgNumber(4, vl.length); // sic (upstream)
+		case _: EvalExceptions.invalidCallArgNumber(4, vl.length); // port: sic (upstream)
 	}, false);
 
 	public static function vfun0(f:Void->Value):Value return VFunction(vl -> switch vl {
 		case []: f();
-		case _: EvalExceptions.invalidCallArgNumber(1, vl.length); // sic (upstream)
+		case _: EvalExceptions.invalidCallArgNumber(1, vl.length); // port: sic (upstream)
 	}, true);
 
 	public static function vfun1(f:Value->Value):Value return VFunction(vl -> switch vl {
@@ -129,14 +125,14 @@ class EvalEncode {
 
 	// Objects
 
-	/** The field list sorted as evalPrototype.ml `get_object_prototype` sorts it (List.sort is stable). **/
+	// port: the field list sorted as evalPrototype.ml `get_object_prototype` sorts it (List.sort is stable).
 	public static function sortObjectFields(l:Array<{name:Int, value:Value}>):Array<{name:Int, value:Value}> {
 		var sorted = l.copy();
 		haxe.ds.ArraySort.sort(sorted, (f1, f2) -> if (f1.name == f2.name) 0 else if (f1.name < f2.name) -1 else 1);
 		return sorted;
 	}
 
-	/** `ctx.get_object_prototype ctx l`: the prototype and the sorted fields. **/
+	// port: `ctx.get_object_prototype ctx l`: the prototype and the sorted fields.
 	public static function getObjectPrototype(ctx:Context,
 			l:Array<{name:Int, value:Value}>):{proto:Vprototype, sorted:Array<{name:Int, value:Value}>} {
 		var sorted = sortObjectFields(l);
@@ -244,7 +240,7 @@ class EvalEncode {
 	public static final encodeObjectMapDirect:core.ds.OcamlHashtbl<Value, Value>->
 		Value = createCachedInstance(EvalHash.key_haxe_ds_ObjectMap, s -> IObjectMap(s));
 
-	/** `m` is upstream's string PMap; the resulting map is ordered by key either way. **/
+	// port: `m` is upstream's string PMap; the resulting map is ordered by key either way.
 	public static function encodeStringMap<T>(convert:T->Value, m:Map<String, T>):Value {
 		var h = new RuntimeStringHashtbl<Value>();
 		var keys = [for (k in m.keys()) k];

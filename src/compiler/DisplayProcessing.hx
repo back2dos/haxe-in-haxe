@@ -16,7 +16,6 @@ import context.display.DisplayJson;
 import core.DisplayTypes;
 import core.TType;
 
-// haxe/src/compiler/displayProcessing.ml
 enum DisplayPathKind {
 	DPKNormal(path:GlobalTypePath);
 	DPKMacro(path:GlobalTypePath);

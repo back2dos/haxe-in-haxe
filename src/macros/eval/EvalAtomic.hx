@@ -8,14 +8,10 @@ import macros.eval.EvalDecode.decodeBool;
 import macros.eval.EvalDecode.decodeInt;
 import macros.eval.EvalExceptions.EvalExceptions.unexpectedValue;
 
-/**
-	haxe/src/macro/eval/evalAtomic.ml.
-
-	Deviation: OCaml's `Atomic.t` is a mutable cell (`{v}`) whose operations
-	are made atomic by one global lock; the compare-and-set retry loops become
-	a single locked read-modify-write with the same result. Atomic ints are
-	32-bit Haxe Ints (upstream: 63-bit OCaml ints).
-**/
+// port: OCaml's `Atomic.t` is a mutable cell (`{v}`) here, whose operations
+// are made atomic by one global lock; the compare-and-set retry loops become
+// a single locked read-modify-write with the same result. Atomic ints are
+// 32-bit Haxe Ints (upstream: 63-bit OCaml ints).
 class EvalAtomic {
 	static final lock = new sys.thread.Mutex();
 

@@ -7,8 +7,10 @@ import core.Globals;
 import core.Globals.*;
 import core.TFunctions.*;
 
-// haxe/src/coro/coroElsewhere.ml — mechanical draft; not compile-validated.
-// OCaml methods named Haxe keywords use a make prefix.
+/*
+	Code that should eventually be moved elsewhere.
+*/
+// port: OCaml methods named Haxe keywords use a make prefix.
 class TexprBuilder {
 	var basic:BasicTypes;
 	var defaultPos:Pos;

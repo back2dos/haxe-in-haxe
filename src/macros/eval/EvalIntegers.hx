@@ -11,35 +11,31 @@ import macros.eval.EvalDecode.decodeInt;
 import macros.eval.EvalDecode.decodeString;
 import macros.eval.EvalMisc.throwString;
 
-/**
-	haxe/src/macro/eval/evalIntegers.ml.
-
-	Int64 is `haxe.Int64`; UInt64 values are `haxe.Int64` bit patterns and the
-	unsigned operations of the `integers` library (Unsigned.UInt64) are
-	implemented explicitly below. `Size_t` is 64 bits wide.
-**/
+// port: Int64 is `haxe.Int64`; UInt64 values are `haxe.Int64` bit patterns and the
+// unsigned operations of the `integers` library (Unsigned.UInt64) are
+// implemented explicitly below. `Size_t` is 64 bits wide.
 class EvalIntegers {
-	// Unsigned.UInt64
+	// port: Unsigned.UInt64
 	public static final uint64MaxInt:Int64 = Int64.make(-1, -1);
 
-	/** UInt64.div; raises Division_by_zero. **/
+	// port: UInt64.div; raises Division_by_zero.
 	public static function uint64Div(a:Int64, b:Int64):Int64 return uint64DivRem(a, b).q;
 
-	/** UInt64.rem; raises Division_by_zero. **/
+	// port: UInt64.rem; raises Division_by_zero.
 	public static function uint64Rem(a:Int64, b:Int64):Int64 return uint64DivRem(a, b).r;
 
 	static function uint64DivRem(a:Int64, b:Int64):{q:Int64, r:Int64} {
 		if (Int64.isZero(b)) throw new DivisionByZero();
 		if (Int64.ucompare(a, b) < 0) return {q: Int64.ofInt(0), r: a};
 		if (b.high < 0) {
-			// b >= 2^63 and a >= b: the quotient is 1
+			// port: b >= 2^63 and a >= b: the quotient is 1
 			return {q: Int64.ofInt(1), r: Int64.sub(a, b)};
 		}
 		if (a.high >= 0) {
 			var d = Int64.divMod(a, b);
 			return {q: d.quotient, r: d.modulus};
 		}
-		// a >= 2^63, b < 2^63: long division by bits
+		// port: a >= 2^63, b < 2^63: long division by bits
 		var q = Int64.ofInt(0), r = Int64.ofInt(0);
 		var i = 63;
 		while (i >= 0) {
@@ -53,7 +49,7 @@ class EvalIntegers {
 		return {q: q, r: r};
 	}
 
-	/** UInt64.to_string (unsigned decimal). **/
+	// port: UInt64.to_string (unsigned decimal).
 	public static function uint64ToString(u:Int64):String {
 		if (u.high >= 0) return Int64.toStr(u);
 		var q = Int64.div(Int64.ushr(u, 1), Int64.ofInt(5));
@@ -61,7 +57,7 @@ class EvalIntegers {
 		return Int64.toStr(q) + Std.string(r.low);
 	}
 
-	/** UInt64.of_string: integers' C parser (sign, 0x/0o/0b/0u prefixes, '_'); raises Failure. **/
+	// port: UInt64.of_string: integers' C parser (sign, 0x/0o/0b/0u prefixes, '_'); raises Failure.
 	public static function uint64OfString(s:String):Int64 {
 		inline function fail():Dynamic throw new core.ds.Failure("UInt64.of_string");
 		var i = 0, sign = 1, base = 10;
@@ -111,7 +107,7 @@ class EvalIntegers {
 		return sign < 0 ? Int64.neg(r) : r;
 	}
 
-	// Signed Int64 division (OCaml: min_int / -1 = min_int, rem = 0; Division_by_zero)
+	// port: signed Int64 division (OCaml: min_int / -1 = min_int, rem = 0; Division_by_zero)
 
 	static function int64Div(a:Int64, b:Int64):Int64 {
 		if (Int64.isZero(b)) throw new DivisionByZero();
@@ -544,7 +540,7 @@ class EvalIntegers {
 	];
 }
 
-/** OCaml's Division_by_zero. **/
+// port: OCaml's Division_by_zero.
 class DivisionByZero extends haxe.Exception {
 	public function new() super("Division_by_zero");
 }

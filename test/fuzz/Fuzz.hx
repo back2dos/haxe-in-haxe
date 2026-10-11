@@ -27,7 +27,7 @@ Targets: hxb interp js lua python neko hl hlc php cpp jvm swf hxc, or --target-d
 
 Options:
   --ref CMD           reference compiler (default $HAXE_REFERENCE or haxe/haxe)
-  --port CMD          port compiler (default $HAXE_IN_HAXE_PORT or bin/backend/hih/hih_clang)
+  --port CMD          port compiler (default $HAXE_IN_HAXE_PORT or bin/hxc/hih/hih_clang)
   --run               diff lanes also run both outputs and compare program output
   -n, --count N       number of programs (default 100; 0: until --time)
   --time S            stop after S seconds
@@ -89,7 +89,7 @@ Options:
 			ref = root + "/haxe/haxe";
 		var port = Sys.getEnv("HAXE_IN_HAXE_PORT");
 		if (port == null)
-			port = root + "/bin/backend/hih/hih_clang";
+			port = root + "/bin/hxc/hih/hih_clang";
 		var laneSpecs = [];
 		var run = false;
 		var defines = [];

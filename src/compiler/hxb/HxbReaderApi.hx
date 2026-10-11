@@ -4,8 +4,7 @@ import core.Globals.GlobalTypePath;
 import core.TType;
 import compiler.hxb.HxbData.TypingMode;
 
-// Port of haxe/src/compiler/hxb/hxbReaderApi.ml. The virtual class becomes an
-// interface.
+// port: the virtual class becomes an interface.
 interface HxbReaderApi {
 	function makeModule(path:GlobalTypePath, file:String):ModuleDef;
 	function addModule(m:ModuleDef):Void;

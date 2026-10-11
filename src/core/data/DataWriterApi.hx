@@ -1,6 +1,6 @@
 package core.data;
 
-// Mechanical translation of haxe/src/core/data/dataWriterApi.ml. Draft; not compiled or tested.
+// port: from haxe/src/core/data/dataWriterApi.ml.
 @:structInit class DataWriterApi<Data> {
 	public var writeOptional:Null<Data>->Data;
 	public var writeObject:Array<{name:String, value:Data}>->Data;

@@ -9,21 +9,95 @@ byte-identical `.hxb` payloads.
 ```sh
 make -C haxe haxe
 HAXE=haxe/haxe sh bench/build.sh js hl jvm   # needs hxnodejs, hxjava
-# C++ needs hxcpp from git with bench/hxcpp-single-thread-mark.patch:
+# C++ needs hxcpp from git with bench/patches/hxcpp-single-thread-mark.patch:
 CPP_FLAGS="-D HXCPP_SINGLE_THREAD_MARK" sh bench/build.sh cpp
-# HL/C needs a compiler with bench/hl2c-virtual-field-cast.patch and HashLink headers:
+# HL/C needs a compiler with bench/patches/hl2c-virtual-field-cast.patch and HashLink headers:
 HAXE_HLC=/path/to/patched/haxe HL_INCLUDE=/path/to/hashlink/src sh bench/build.sh hlc
-# with bench/libhl-allocator.patch applied to HashLink (built with -ftls-model=initial-exec):
+# with bench/patches/libhl-allocator.patch applied to HashLink (built with -ftls-model=initial-exec):
 HL_STATIC="libhl.a fmt.o dxt.o sha1.o" sh bench/build.sh hlc   # static link
 # the HashLink JIT loads libhl.so: point it at the patched build
 LD_LIBRARY_PATH=/path/to/patched/hashlink HAXE_REFERENCE=haxe/haxe python3 bench/run.py -n 7
 ```
 
+## HaxeBenchmarks: hxc against the fast targets (2026-10-11)
+
+`python3 bench/haxebench.py [-n RUNS] [-t targets] [-c cases] [--clean] [--json out]`
+builds and runs the cases of
+[HaxeBenchmarks/benchmark-runner](https://github.com/HaxeBenchmarks/benchmark-runner)
+(cloned into `bin/haxebench`, with crypto and the formatter's libraries at
+the revisions the runner pins) on hxc and the other targets, with the pinned
+`haxe/haxe`. hxc builds use the native backend tool (`hxc/tools/dev-tool.sh`:
+the lowering no longer goes through Node). Wall time in seconds, best of 3,
+clean builds, 4 cores; bold: the fastest. hxcpp is 4.3.0 from git, HL/C uses
+HashLink master (2.0.0, 3b7bd74) with `gcc -O2`, the HL JIT the same
+build, JVM is OpenJDK 21, JS is Node 22 with hxnodejs.
+
+| case | hxc before | hxc (clang) | hxc (tcc) | hxcpp | HL/C | HL JIT | JVM | JS |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| alloc | 1.17 | 1.80 | **1.37** | 1.71 | 2.48 | 2.52 | 2.03 | 12.08 |
+| bcrypt | 2.53 | 2.59 (2.46 with unchecked Vector reads) | 10.26 | **2.41** | 3.56 | 5.01 | 2.55 | 2.97 |
+| binarytrees | 1.22 | 0.76 | 1.99 | 0.81 | 4.15 | 4.36 | **0.67** | 1.30 |
+| json | broken | 0.42 | 1.03 | 0.58 | 1.37 | 1.52 | 0.54 | **0.30** |
+| mandelbrot | 1.52 | **0.50** | 3.37 | 1.36 | 22.78 | 23.68 | 1.08 | 0.90 |
+| mandelbrot_anon | 1.52 | 0.95 | 4.95 | 8.08 | 32.79 | 34.21 | 1.12 | **0.89** |
+| nbody | 0.92 | 0.75 | 2.77 | **0.72** | 1.14 | 1.58 | 0.81 | 0.92 |
+| sha256 | 0.22 | 0.21 | 0.64 | 0.23 | 0.34 | 0.65 | **0.16** | 0.26 |
+| sha512 | 0.17 | 0.13 (0.018 with native Int64) | 0.54 | **0.03** | 0.05 | 0.08 | 0.13 | 0.32 |
+| formatter_noio | 6.48 | **5.07** | 12.63 | crashes | 16.52 | 17.18 | 5.18 | 17.35 |
+
+"Before" is hxc at the start of this work (bcrypt, sha512 and formatter_noio:
+the first measurement, after the first changes; the earlier harness rounded
+to about 50 ms). Build time (s) of a few, clean:
+
+| case | hxc (clang) | hxc (tcc) | hxcpp | HL/C | JVM |
+| --- | --- | --- | --- | --- | --- |
+| alloc | 0.9 | 0.2 | 33.2 | 2.9 | 0.5 |
+| nbody | 0.9 | 0.2 | 31.3 | 3.0 | 0.5 |
+| json | 1.0 | 0.2 | 37.7 | 3.1 | 0.5 |
+| formatter_noio | 5.0 | 1.1 | crashes | 14.8 | 1.3 |
+
+What changed, by case:
+
+- mandelbrot (1.52 → 0.50): the `Math` natives are inline (`sqrt` is one
+  instruction), and calls to functions that never reach a GC point
+  (`EmitC.findNoGc`: the constructors here) are not GC points, so the
+  objects stay in registers instead of shadow-stack slots.
+- mandelbrot_anon (1.52 → 0.95): structural reads check the literal layout
+  of the static type first (one type-index compare, a constant slot).
+- json (failed → 0.42): `StringTools.isEof` tested `#if hxc`, which a custom
+  target does not define (it defines `target.name`), so the parser read past
+  the end; then field names added at run time by hash instead of a linear
+  `strcmp` scan (31% of the time), field-name strings made once, an inline
+  `StringBuf.addChar` fast path.
+- binarytrees (1.22 → 0.76): the nursery doubles (to 32 MB) while much of it
+  survives each minor collection: the tree being built was copied at every
+  one.
+- formatter_noio (6.48 → 5.07, the JVM's 5.18): the regex engine skips start
+  positions a match cannot begin at, tries anchored patterns once and caches
+  parsed patterns; `Array.concat` in one copy; `indexOf` by first unit.
+- everywhere: cold sites (the references live across an allocation or array
+  store are stored in the shadow stack only on its slow path) and frames
+  without zeroing (the collector zeroes the slots above the stack top).
+
+The self-compile: 5.2 s → about 4.9–5.0 s CPU (same HXB output; peak RSS
+455 → 468 MB).
+
+Later the same day: `haxe.Int64` is native on hxc (`hxc.I64`, an `int64_t`;
+it was a class of two Ints, so every operation allocated) and reads through
+`haxe.ds.Vector` skip the bounds check: sha512 0.13 → **0.018** s (hxcpp
+0.025), bcrypt 2.59 → 2.46 s (hxcpp 2.41).
+
+Not done: alloc keeps up to 500 MB live and varies between 1.2 and 2.2 s
+with when the copying major collections happen. hxcpp crashes on
+formatter_noio (the case's own comment says so). hxc's
+`EReg.replace`/`split` differ from Eval (PCRE) around zero-width matches
+(`(?=b)` with `g`, splitting `""`), as before these changes.
+
 ## hxc: chunked C output, parallel and incremental builds (2026-10-10)
 
-The emitter now writes the port's C as 60 files (`bin/backend/hih/prog_hxc/`:
-58 chunks of about 192 KB, `strings.c`, `data.c`; backend/README.md
-"Chunked output") compiled in parallel by `backend/tools/cc-chunks.sh`,
+The emitter now writes the port's C as 60 files (`bin/hxc/hih/prog_hxc/`:
+58 chunks of about 192 KB, `strings.c`, `data.c`; hxc/README.md
+"Chunked output") compiled in parallel by `hxc/tools/cc-chunks.sh`,
 which reuses unchanged objects. Shared 4-core machine (load 2–3.5 during
 the builds), `-j4`, `-w -fno-strict-aliasing -DHXC_NO_SSL -DHXC_NO_UV`, the
 10 runtime files included:
@@ -153,7 +227,7 @@ allocation (a moving-GC bug).
 Peak RSS and CPU time (user + system), minimum of 3–5 interleaved runs,
 `-D disable-parallelism --interp --no-output --hxb`; `self` compiles a
 snapshot of `src`; every archive byte-identical to the reference. Before:
-commit d2bbaad; after: 4dc6b64 (details in backend/README.md, "Memory").
+commit d2bbaad; after: 4dc6b64 (details in hxc/README.md, "Memory").
 The machine was slower than in the sections below (the reference took
 5.7–5.9 s for `self`).
 
@@ -210,7 +284,7 @@ more collection time if marking costs what copying does.
 
 ## hxc: clang vs gcc (2026-10-09)
 
-The same generated C of the port (`bin/backend/hih/prog.c`), built with
+The same generated C of the port (`bin/hxc/hih/prog.c`), built with
 `-w -fno-strict-aliasing` and each optimizer, self-compile CPU time
 (`/tmp/claude-0/cpu.py -n 5`, two alternating rounds, load 2-3):
 
@@ -222,7 +296,7 @@ The same generated C of the port (`bin/backend/hih/prog.c`), built with
 
 clang -O2 is 4-10% faster on the large workload and builds faster; -O3 adds
 nothing. The clang build passes conformance (279 + 7 expected failures, macro
-cases 66/66). The haxelib package (`backend/haxelib/hxc/Build.hx`) now
+cases 66/66). The haxelib package (`hxc/haxelib/hxc/Build.hx`) now
 prefers clang when it is installed. cosmocc is GCC-based, so the portable
 builds are unaffected.
 
@@ -279,7 +353,7 @@ use extra threads for JIT and GC, so their CPU time exceeds wall time).
 
 ## hxc backend: faster than the OCaml compiler (2026-10-09)
 
-The port compiled by `backend/` (the hxc target: C, gcc -O2) now beats the
+The port compiled by `hxc/` (the hxc target: C, gcc -O2) now beats the
 reference. CPU time (user + system), minimum of 3 runs, `-D disable-parallelism`,
 outputs byte-identical:
 
@@ -303,7 +377,7 @@ benchmark.
 ## Experimental HXB → native/wasm backend: go/no-go (2026-10-09)
 
 Details, numbers and caveats are in [WASM-BACKEND.md](WASM-BACKEND.md);
-the prototype is in `backend/`. One typed IR, lowered from the filtered
+the prototype is in `hxc/`. One typed IR, lowered from the filtered
 typed AST that HXB serializes, feeds a WasmGC emitter and a C emitter, and
 every route printed identical output.
 
@@ -331,7 +405,7 @@ every route printed identical output.
   the same as in V8 (14× native `setjmp`).
 - **The ~20 s V8 stall is caused by `setjmp`.** Emscripten's lowering of
   `hl_trap` makes ten functions 45% of the module; V8 waits at exit for
-  their optimization. For today's build, `backend/tools/wasm_hints.py`
+  their optimization. For today's build, `archive/wasm-prototype/wasm_hints.py`
   marks functions of 100 KB and more as Liftoff-only (run with
   `--experimental-wasm-compilation-hints --no-wasm-dynamic-tiering`). This
   brings the self-compile from 25–31 s to 17.5–18 s with identical output.
@@ -759,7 +833,7 @@ all allocation) or a cheaper allocator.
 - **Go** (hx2go). The pinned compiler has no Go target; the
   [hx2go](https://github.com/go2hx/hx2go) custom target (git `2739b6c`)
   generates Go that only builds and runs after patching:
-  `HAXE=haxe/haxe sh bench/hx2go/build.sh` produces `bin/bench/hih-go`. With
+  `HAXE=haxe/haxe sh archive/hx2go/build.sh` produces `bin/bench/hih-go`. With
   those patches it passes the full conformance suite (282 cases) and runs
   every workload, but it's the slowest build: `stdlib` 5.10s (20× the
   reference; HL/C 0.48s, JS 2.21s, JVM 3.09s in the same run), `hello`
@@ -767,7 +841,7 @@ all allocation) or a cheaper allocator.
   port's exception-based control flow, and a quarter is GC; much of the rest
   goes through reflection-based dynamic calls.
   The fixes, all specific to hx2go 2739b6c:
-  - Source (`bench/hx2go/source.patch`, applied to a copy of `src`): rename
+  - Source (`archive/hx2go/source.patch`, applied to a copy of `src`): rename
     two exception fields called `error` (hx2go's `haxe.Exception` defines
     `error()`); explicit null checks for the two enum-valued default
     arguments (hx2go drops callee-side defaults); `catch (e:NotFound)`
@@ -833,7 +907,7 @@ all allocation) or a cheaper allocator.
   initializes classes lazily, so `haxe.Main.initHooks` installs every forward
   reference explicitly. Java can't change the working directory, so
   `core.Path.restoreCwd` skips `Sys.setCwd` when the directory didn't change.
-- **JS.** Needs hxnodejs for `sys`. `bench/js-shims` holds single-threaded
+- **JS.** Needs hxnodejs for `sys`. `runtime/js` holds single-threaded
   `sys.thread` stand-ins; the compiler only spawns workers when parallelism is
   enabled. Building with `-D analyzer-optimize` currently produces different
   (non-conforming) output on JS, so all targets are built without it. Larger

@@ -1,11 +1,9 @@
 package core.ds;
 
-/**
-	Persistent `Globals.IntMap` (haxe/src/core/globals.ml): an OCaml `Map` over
-	ints compared with `compare i1 i2 = i2 - i1`, so "increasing" key order is
-	decreasing numeric order. Kept as parallel arrays sorted in that order;
-	`fold` and `iter` visit keys in it, like `Map.fold` and `Map.iter`.
-**/
+// port: persistent `Globals.IntMap` (haxe/src/core/globals.ml): an OCaml `Map` over
+// ints compared with `compare i1 i2 = i2 - i1`, so "increasing" key order is
+// decreasing numeric order. Kept as parallel arrays sorted in that order;
+// `fold` and `iter` visit keys in it, like `Map.fold` and `Map.iter`.
 class GlobalsIntMap<V> {
 	final keys:Array<Int>;
 	final values:Array<V>;
@@ -15,12 +13,12 @@ class GlobalsIntMap<V> {
 		this.values = values;
 	}
 
-	// The map is persistent, so one empty instance is shared (OCaml's Map.empty).
+	// port: the map is persistent, so one empty instance is shared (OCaml's Map.empty).
 	static final emptyMap:GlobalsIntMap<Dynamic> = new GlobalsIntMap([], []);
 
 	public static inline function empty<V>():GlobalsIntMap<V> return cast emptyMap;
 
-	// index of the first key not above `key` (keys are sorted in decreasing order)
+	// port: index of the first key not above `key` (keys are sorted in decreasing order)
 	function lowerBound(key:Int):Int {
 		var lo = 0, hi = keys.length;
 		while (lo < hi) {

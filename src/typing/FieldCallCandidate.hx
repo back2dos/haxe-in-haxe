@@ -3,13 +3,21 @@ package typing;
 import core.TType;
 import core.TPrinting;
 
-// haxe/src/typing/fieldCallCandidate.ml — mechanical draft; not compile-validated.
+// This record holds transient information about an (attempted) call on a field. It is created when resolving
+// field calls and is passed to overload filters.
 @:structInit class FieldCallCandidateData<A> {
+	// The argument expressions for this call and whether or not the argument is optional on the
+	// target function.
 	public var fcArgs:Array<TExpr>;
+	// The applied return type.
 	public var fcRet:T;
+	// The applied function type.
 	public var fcType:T;
+	// The class field being called.
 	public var fcField:TClassField;
+	// The field monomorphs that were created for this call.
 	public var fcMonos:Array<T>;
+	// The custom data associated with this call.
 	public var fcData:A;
 
 	public inline function new(fcArgs:Array<TExpr>, fcRet:T, fcType:T, fcField:TClassField, fcMonos:Array<T>, fcData:A) {

@@ -35,7 +35,6 @@ import compiler.server.ServerMessage;
 import compiler.server.ServerCompilationContext;
 import context.CommonCache;
 
-// haxe/src/compiler/compiler.ml
 class Compiler {
 	public static function errorExt(com:CommonContext, err:core.Error.CompilerError):Void com.errorExt(err);
 
@@ -88,8 +87,11 @@ class Compiler {
 		var result = if (len > 3 && cmd.substr(0, 3) == "cd ") {
 			Sys.setCwd(cmd.substr(3));
 			0;
-		} else if (!com.sctx.isServer) // In non-server mode, inherit stdin/stdout/stderr so that interactive commands work
-			Sys.command(cmd); else // In server mode, capture stdout/stderr through the output target and
+		} else if (!com.sctx.isServer)
+			// In non-server mode, inherit stdin/stdout/stderr so that interactive commands work
+			Sys.command(cmd);
+		else
+			// In server mode, capture stdout/stderr through the output target and
 			// forward the client's stdin from request_scope.
 			PipeThings.runCommand(io, cmd);
 		return result;
@@ -117,6 +119,7 @@ class Compiler {
 		}
 	}
 
+	/** Creates the typer context and types [classes] into it. */
 	public static function doType(com:CommonContext, mctx:Null<Typer>, actx:ArgContext,
 			displayFileDotPath:DisplayProcessing.DisplayPathKind):{
 		typer:Typer,
@@ -132,7 +135,7 @@ class Compiler {
 		for (path in configMacros) mctx = typing.MacroContext.callInitMacro(com, mctx, path);
 		Common.enterStage(com, CInitMacrosDone);
 		checkDefines(com);
-		Common.updatePlatformConfig(com);
+		Common.updatePlatformConfig(com); // make sure to adapt all flags changes defined during init macros
 		ServerMessage.compilerStage(com);
 		var macros = mctx == null ? null : mctx.g.macros;
 		Setup.initNativeLibs(com, actx.nativeLibs);
@@ -194,7 +197,7 @@ class Compiler {
 				return null;
 			}), null);
 
-	// Not upstream: experimental code generators (backend/) receive the filtered program here. Always null in the compiler itself.
+	// port: experimental code generators (hxc/) receive the filtered program here; always null in the compiler itself.
 	public static var generateHook:Null<CommonContext->Void> = null;
 
 	public static function compile(com:CommonContext, actx:ArgContext, sctx:ServerCompilationContext):Void {
@@ -214,8 +217,9 @@ class Compiler {
 				}
 			case _: null;
 		};
+		// Initialize target: This allows access to the appropriate std packages and sets the -D defines.
 		var ext = Setup.initializeTarget(com, actx);
-		Common.updatePlatformConfig(com);
+		Common.updatePlatformConfig(com); // make sure to adapt all flags changes defined after platform
 		ServerCache.afterTargetInit(sctx, com);
 		Timer.time(com.timerCtx, ["init"], function(_:Null<Bool>) {
 			var callbacks = actx.preCompilation.copy();
@@ -229,6 +233,7 @@ class Compiler {
 		if (actx.classes.length == 1 && actx.classes[0].pack.length == 0 && actx.classes[0].name == "Std" && !actx.forceTyping) {
 			if (actx.cmds.length == 0 && !actx.didSomething) actx.raiseUsage();
 		} else {
+			// Actual compilation starts here
 			var typed = Timer.time(com.timerCtx, ["typing"], function(_:Null<Bool>) return doType(com, mctx, actx, displayFileDotPath),
 				null),
 				tctx = typed.typer;
@@ -259,7 +264,7 @@ class Compiler {
 			Common.enterStage(com, CGenerationDone);
 			ServerMessage.compilerStage(com);
 		}
-		// The Haxe host owns signal handling; this port does not install OCaml Sys.catch_break.
+		// port: the Haxe host owns signal handling; there is no Sys.catch_break.
 		com.callbacks.run(com.errorExt, com.callbacks.getAfterGeneration());
 		if (!actx.noOutput) {
 			var commands = actx.cmds.copy();
@@ -312,6 +317,7 @@ class Compiler {
 			DisplayOutput.handleSyntaxCompletion(com, e.completion.kind, e.completion.subject);
 			error(com, "Error: No completion point was found", nullPos);
 		} catch (e:context.display.DisplayException) DisplayOutput.handleDisplayException(com, e.kind)
+		// We don't want these to be caught by the catchall below
 		catch (e:Abort) throw e
 		catch (e:macros.eval.EvalTypes.SysExit) throw e
 		catch (e:context.display.DisplayJson.JsonCompleted) throw e
@@ -333,6 +339,8 @@ class Compiler {
 	public static function finalize(com:CommonContext):Void {
 		CompilerIo.flush(com.requestScope.io);
 		for (lib in com.hxbLibs) lib.close();
+		// In server mode any open libs are closed by the lib_build_task. In offline mode
+		// we should do it here to be safe.
 		if (!com.sctx.isServer) {
 			for (lib in com.nativeLibs.javaLibs) lib.close();
 			for (lib in com.nativeLibs.swfLibs) lib.close();
@@ -452,7 +460,7 @@ class Setup {
 					} else 0;
 				};
 				if (version < 5) throw new Failure("Invalid -D js-es value, minimal supported version is 5");
-				if (version >= 5) Common.rawDefine(com, "js_es5");
+				if (version >= 5) Common.rawDefine(com, "js_es5"); // backward-compatibility
 				addStd("js");
 				"js";
 			case Lua:
@@ -597,6 +605,8 @@ class Setup {
 class ContextFlush {
 	public static function flushContext(com:CommonContext):Void switch com.partScope.reportMode {
 		case RMDiagnostics(_):
+			// In diagnostics mode, messages are already in the unified buffer.
+			// Output happens via DisplayOutput.emit_diagnostics, not flush_messages.
 		case _:
 			CompilerOutput.flushMessages(com.requestScope.resultHandler, Common.hasErrorToReport(com), com);
 	};

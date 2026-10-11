@@ -4,8 +4,8 @@ import core.Json.JsonValue;
 import compiler.CompilationCache;
 import context.Memory;
 
-// haxe/src/context/display/displayMemory.ml
-// Every request reports object sizes (Objsize); see context/Memory.hx.
+// port: every request reports object sizes (Objsize), which Memory.memSize does not support,
+// so the request bodies are not translated.
 class DisplayMemory {
 	public static function getMemoryJson(cs:Cache, mreq:MemoryRequest):JsonValue {
 		Memory.memSize(cs);

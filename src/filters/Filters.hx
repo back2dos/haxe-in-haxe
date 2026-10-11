@@ -37,9 +37,7 @@ import optimization.Optimizer;
 import optimization.InlineConstructors;
 import haxe.ds.StringMap;
 
-// haxe/src/filters/filters.ml — mechanical draft; not compiled or validated.
-// Target-specific and later-milestone calls remain unresolved hooks, preserving pipeline order.
-// save_class_state: the saved fields of one class field (mk_field_restore)
+// port: save_class_state: the saved fields of one class field (mk_field_restore)
 private typedef FieldRestoreState = {name:String, kind:FieldKind, expr:Null<TExpr>, type:T, meta:Metadata, params:TypeParams};
 private typedef FieldRestore = {field:TClassField, state:FieldRestoreState, overloads:Array<{field:TClassField, state:FieldRestoreState}>};
 
@@ -47,6 +45,9 @@ class Filters {
 	public static function getNativeName(meta:Metadata):{name:String, pos:Pos}
 		return Native.getNativeName(meta);
 
+	// PASS 2 begin
+
+	// Applies exclude macro (which turns types into externs)
 	public static function applyMacroExclude(t:ModuleType):Void switch t {
 		case TClassDecl(c) if (TypeOps.hasClassFlag(c, CExcluded)):
 			TypeOps.addClassFlag(c, CExtern);
@@ -55,6 +56,7 @@ class Filters {
 		case _:
 	}
 
+	// Removes extern and macro fields, also checks for Void fields
 	public static function removeExternFields(scom:SafeContext, t:ModuleType):Void switch t {
 		case TClassDecl(c):
 			if (!Define.defined(scom.defines, Define.DocGen)) {
@@ -72,6 +74,11 @@ class Filters {
 		case _:
 	}
 
+	// PASS 2 end
+
+	// PASS 3 begin
+
+	// Checks if a private class' path clashes with another path
 	public static function checkPrivatePath(com:CommonContext, t:ModuleType):Void switch t {
 		case TClassDecl(c) if (c.clPrivate):
 			var rpath:core.Globals.GlobalTypePath = {pack: c.clModule.mPath.pack, name: "_" + c.clModule.mPath.name};
@@ -80,6 +87,7 @@ class Filters {
 		case _:
 	}
 
+	// Adds the __rtti field if required
 	public static function addRtti(scom:SafeContext, t:ModuleType):Void {
 		function hasRtti(c:TClass):Bool return Meta.has(Rtti, c.clMeta) || c.clSuper != null && hasRtti(c.clSuper.cls);
 		switch t {
@@ -93,6 +101,7 @@ class Filters {
 		}
 	}
 
+	// Adds the __meta__ field if required
 	public static function addMetaField(com:CommonContext, t:ModuleType):Void switch t {
 		case TClassDecl(c):
 			var e = Texpr.buildMetadata(com.basic, t);
@@ -101,6 +110,7 @@ class Filters {
 				var cf = TypeOps.mkField("__meta__", e.etype, e.epos, Globals.nullPos, true, true);
 				cf.cfExpr = e;
 				if (TypeOps.hasClassFlag(c, CInterface) && com.platform == Jvm) {
+					// borrowed from gencommon, but I did wash my hands afterwards
 					var path:core.Globals.GlobalTypePath = {pack: c.clPath.pack, name: c.clPath.name + "_HxMeta"};
 					var ncls = TypeOps.mkClass(c.clModule, path, c.clPos, Globals.nullPos);
 					ncls.clOrderedStatics.unshift(cf);
@@ -115,12 +125,14 @@ class Filters {
 		case _:
 	}
 
+	// Removes interfaces tagged with @:remove metadata
 	public static function checkRemoveMetadata(t:ModuleType):Void switch t {
 		case TClassDecl(c):
 			c.clImplements = c.clImplements.filter(c -> !Meta.has(Remove, c.cls.clMeta));
 		case _:
 	}
 
+	// Checks for Void class fields
 	public static function checkVoidField(t:ModuleType):Void {
 		inline function check(f:TClassField):Void switch TypeOps.follow(f.cfType) {
 			case TAbstract({aPath: {pack: [], name: "Void"}}, _):
@@ -135,6 +147,9 @@ class Filters {
 		}
 	}
 
+	// Interfaces have no 'super', but can extend many other interfaces.
+	// This makes the first extended (implemented) interface the super for efficiency reasons (you can get one for 'free')
+	// and leaves the remaining ones as 'implemented'
 	public static function promoteFirstInterfaceToSuper(t:ModuleType):Void switch t {
 		case TClassDecl(c) if (TypeOps.hasClassFlag(c, CInterface)):
 			if (c.clImplements.length > 0) switch c.clImplements[0].cls.clPath {
@@ -165,6 +180,8 @@ class Filters {
 		}
 	}
 
+	// PASS 3 end
+
 	public static function iterExpressions(fl:Array<TExpr->Void>, mt:ModuleType):Void switch mt {
 		case TClassDecl(c):
 			inline function field(cf:TClassField):Void {
@@ -178,8 +195,11 @@ class Filters {
 
 	public static function destructionBeforeDce(pool:Null<TaskPool>, scom:SafeContext, allTypes:Array<ModuleType>):Void {
 		var filters:Array<ModuleType->Void> = [
-			 FiltersCommon.removeGenericBase, scom.platform == Hl ? function(_) {} : applyMacroExclude,
-			t -> removeExternFields(scom, t),                                      checkRemoveMetadata
+			FiltersCommon.removeGenericBase,
+			scom.platform == Hl ? function(_) {} : applyMacroExclude,
+			t -> removeExternFields(scom, t),
+			// check @:remove metadata before DCE so it is ignored there (issue #2923)
+			checkRemoveMetadata
 		];
 		Parallel.ParallelArray.iter(pool, function(mt) {
 			for (f in filters) f(mt);
@@ -197,20 +217,21 @@ class Filters {
 			var scom = SafeCom.adaptScomToMt(scom, mt);
 			if (scom.platform != Jvm) AddFieldInits.addFieldInits(scom.curclass.clPath, rename, scom, mt);
 			checkVoidField(mt);
-			if (scom.platform == Cpp) promoteFirstInterfaceToSuper(mt);
+			if (scom.platform == Cpp) promoteFirstInterfaceToSuper(mt); // accesses cl_super, cl_implements
 			if (scom.platformConfig.pfReservedTypePaths.length != 0) checkReservedTypePaths(scom, mt);
 		}, allTypes);
 	}
 
 	public static function destructionOnCom(scom:SafeContext, com:CommonContext, types:Array<ModuleType>):Void {
 		var filters:Array<SafeContext->ModuleType->Void> = [
-			(_, mt) -> addRtti(scom, mt),
+			(_, mt) -> addRtti(scom, mt), // accesses cl_super
 			(_, mt) -> checkPrivatePath(com, mt),
 			(_, mt) -> {
 				if (com.platform != Hl) addMetaField(com, mt);
 			},
 			(_, mt) -> commitFeatures(com, mt)
 		];
+		// These aren't actually safe. The logic works fine regardless, we just can't parallelize this at the moment.
 		SafeCom.runTypeFiltersSafe(scom, filters, types);
 	}
 
@@ -224,6 +245,7 @@ class Filters {
 			});
 			Common.enterStage(com, CDceStart);
 			var allTypes = FilterContext.withTimer(scom.timerCtx, detailTimes, "dce", null, function() {
+				// DCE
 				var mode:String;
 				try mode = Define.definedValue(scom.defines, Define.Dce)
 				catch (_:Dynamic) mode = "no";
@@ -241,6 +263,7 @@ class Filters {
 			var allTypesArray = allTypes.copy();
 			Common.enterStage(com, CDceDone);
 			Finalization.maybeAddEntrypoint(com);
+			// This has to run after DCE, or otherwise its condition always holds.
 			if (ectx != null && Common.hasFeature(com, "haxe.NativeStackTrace.exceptionStack"))
 				Parallel.ParallelArray.iter(pool, mt -> SafeCom.runExpressionFiltersSafe(scom, detailTimes, [
 					{name: "insert_save_stacks", run: (scom, e) -> SaveStacks.insertSaveStacks(ectx, scom)(e)}
@@ -283,12 +306,14 @@ class Filters {
 			case TAnon(an):
 				if (!visitedAnons.contains(an)) {
 					visitedAnons.unshift(an);
+					// port: sorted like PMap.iter
 					var keys = [for (k in an.aFields.keys()) k];
 					keys.sort(Reflect.compare);
 					for (k in keys) checkT(m, an.aFields.get(k).cfType);
 				}
 			case TMono(r):
 				if (r.tmType != null) checkT(m, r.tmType);
+				// Bind any still open monomorph that's part of a signature to Any now (issue #10653)
 				else if (closeMonomorphs) Monomorph.doBind(r, scom.basic.tany);
 			case TLazy(f):
 				checkT(m, TypeOps.lazyType(f));
@@ -309,13 +334,16 @@ class Filters {
 		}
 	}
 
+	// Saves a class state so it can be restored later, e.g. after DCE or native path rewrite
 	public static function saveClassState(compilationStep:Int, t:ModuleType):Void {
+		// Update m_processed here. This means that nothing should add a dependency afterwards because
+		// then the module is immediately considered uncached again
 		TypeOps.tModule(t).mExtra.mProcessed = compilationStep;
 		switch t {
 			case TClassDecl(c):
 				var vars:Array<{variable:TVar, type:T}> = [];
 				function saveVars(e:TExpr):Void {
-					// push, not unshift (quadratic): entries only restore each var's type, so order is irrelevant
+					// port: push, not unshift (quadratic): entries only restore each var's type, so order is irrelevant
 					inline function add(v:TVar):Void vars.push({variable: v, type: v.vType});
 					switch e.eexpr {
 						case TFunction(fn):
@@ -330,7 +358,7 @@ class Filters {
 				}
 				inline function mkOverloadRestore(f:TClassField):FieldRestoreState {
 					TypeOps.addClassFieldFlag(f, CfPostProcessed);
-					// cf_meta and cf_params are immutable lists upstream; the port's arrays are
+					// port: cf_meta and cf_params are immutable lists upstream; the port's arrays are
 					// modified in place, so the saved state holds copies.
 					return {
 						name: f.cfName,
@@ -493,6 +521,8 @@ class Filters {
 				case TClassDecl(cls):
 					for (iface in cls.clImplements) TypeOps.addDescendant(iface.cls, cls);
 					if (cls.clSuper != null) TypeOps.addDescendant(cls.clSuper.cls, cls);
+					// Save cf_expr_unoptimized early: We want to inline with the original expression
+					// on the next compilation.
 					if (!cached) {
 						inline function field(cf:TClassField):Void {
 							if (cf.cfExpr != null && cf.cfExprUnoptimized == null && mightNeedCfUnoptimized(cls,
@@ -508,6 +538,15 @@ class Filters {
 		});
 		var newTypesArray = newTypes.copy();
 		var allTypesArray:Array<ModuleType> = com.types.copy();
+		/* IMPORTANT:
+			There may be types in new_types which have already been post-processed, but then had their m_processed flag unset
+			because they received an additional dependency. This could happen in cases such as @:generic methods in #10635.
+			It is important that all filters from here up to save_class_state only process fields which do not have the
+			CfPostProcessed flag set.
+
+			This is mostly covered by run_expression_filters_safe already, but any new additions which don't utilize that have
+			to be aware of this.
+		*/
 		DeprecationCheck.run(com, newTypes);
 		NullSafety.run(com, newTypes);
 		var rename = RenameVars.init(scom.platformConfig, com.types);

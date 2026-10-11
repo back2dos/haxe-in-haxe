@@ -6,7 +6,6 @@ import macros.eval.EvalContext;
 
 using macros.eval.EvalValue.EvalValueTools;
 
-/** haxe/src/macro/eval/evalField.ml. **/
 class EvalField {
 	public static final noField:Value = VNull;
 

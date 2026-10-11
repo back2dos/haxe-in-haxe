@@ -42,7 +42,6 @@ import typing.FieldAccess;
 import typing.FieldAccess.*;
 import typing.CallUnification.*;
 
-// haxe/src/typing/calls.ml — mechanical draft; not compile-validated.
 class Calls {
 	public static function makeCall(ctx:TyperContext, e:TExpr, params:Array<TExpr>, t:T, p:Pos, ?forceInline:Bool):TExpr {
 		if (forceInline == null) forceInline = false;
@@ -74,7 +73,9 @@ class Calls {
 			}
 			if (!forceInline) {
 				if (!needsInline(ctx, cl, f)) throw core.ds.Exit.raise();
-			} else if (cl != null) ctx.com.callbacks.addBeforeSave(function() {
+			} else if (cl != null)
+				// Delay this to filters because that's when cl_descendants is set.
+				ctx.com.callbacks.addBeforeSave(function() {
 				function hasOverride(c:TClass):Bool {
 					if (c.clFields.exists(f.cfName)) return true;
 					for (child in c.clDescendants) if (hasOverride(child)) return true;
@@ -85,13 +86,15 @@ class Calls {
 					+ " because it is overridden", p);
 			});
 			var config = InlineTools.inlineConfig(cl, f, params, t);
-			follow(f.cfType);
+			follow(f.cfType); // force evaluation
 			switch [cl, ctx.c.curclass.clKind, params.length == 0 ? null : params[0]] {
 				case [c, KAbstractImpl(_), {eexpr: TLocal({vMeta: vmeta})}] if (c == ctx.c.curclass):
 					if (!hasClassFieldFlag(f, CfAbstractConstructor)
 						&& Meta.has(MetaTag.This, vmeta)
 						&& hasClassFieldFlag(f, CfModifiesThis)) {
-						if (TyperBase.assignToThisIsAllowed(ctx)) addClassFieldFlag(ctx.f.curfield, CfModifiesThis);
+						if (TyperBase.assignToThisIsAllowed(ctx))
+							// Current method needs to infer CfModifiesThis flag, since we are calling a method, which modifies `this`
+							addClassFieldFlag(ctx.f.curfield, CfModifiesThis);
 						else raiseTypingError("Abstract 'this' value can only be modified inside an inline function. '"
 							+ f.cfName
 							+ "' modifies 'this'", p);
@@ -113,7 +116,13 @@ class Calls {
 						case expression = {eexpr: TFunction(fd)}:
 							f.cfExprUnoptimized = expression;
 							return inlineFunction(fd);
-						case _: throw core.ds.Exit.raise();
+						case _:
+							/*
+								we can't inline because there is most likely a loop in the typing.
+								this can be caused by mutually recursive vars/functions, some of them
+								being inlined or not. In that case simply ignore inlining.
+							*/
+							throw core.ds.Exit.raise();
 					}
 			}
 		} catch (_:core.ds.Exit) {
@@ -160,18 +169,20 @@ class Calls {
 		case _: sea.seThis.etype;
 	};
 
-	// accGet's local inline_read; a static function, so accGet allocates no closure for it.
+	// port: accGet's local inline_read; a static function, so accGet allocates no closure for it.
 	static function accGetInlineRead(ctx:TyperContext, fa:FieldAccessData):TExpr {
 		var cf = fa.faField, p = fa.faPos;
+		// do not create a closure for static calls
 		var apply:T->T = switch fa.faHost {
 			case FHStatic(_) | FHInstance(_, _): t -> t;
 			case FHAbstract(a, _, _): if (a.aEnum) {
+					// Enum abstracts have to apply their type parameters because they are basically statics with type params (#8700).
 					var monos = Monomorph.spawnConstrainedMonos(t -> t, a.aParams);
 					t -> applyParams(a.aParams, monos, t);
 				} else t->t;
 			case _: throw "Invalid inline field host";
 		};
-		follow(cf.cfType);
+		follow(cf.cfType); // force computing
 		if (!ctx.com.display.dmsInline) return FieldAccess.getFieldExpr(fa, FRead);
 		return switch [cf.cfKind, cf.cfExpr] {
 			case [Method(_), _]:
@@ -238,6 +249,7 @@ class Calls {
 			case AKAccess(_): throw "Unresolved abstract array access";
 			case AKResolve(sea, name): dispatcher(sea.seAccess.faPos).resolveCall(sea, name);
 			case AKUsingAccessor(sea) | AKUsingField(sea) if (ctx.f.inDisplay):
+				// Generate a TField node so we can easily match it for position/usage completion (issue #1968)
 				var field = FieldAccess.getFieldExpr(sea.seAccess, FGet),
 					stored = storeTypedExpr(ctx.com, sea.seThis, field.epos);
 				var meta:core.Ast.MetadataEntry = {
@@ -251,7 +263,9 @@ class Calls {
 				};
 				mk(TMeta(meta, field), t, field.epos);
 			case AKField(fa): switch fa.faField.cfKind {
-					case Method(MethMacro): ctx.f.inDisplay ? FieldAccess.getFieldExpr(fa,
+					case Method(MethMacro):
+						// If we are in display mode, we're probably hovering a macro call subject. Just generate a normal field.
+						ctx.f.inDisplay ? FieldAccess.getFieldExpr(fa,
 							FRead) : raiseTypingError("Invalid macro access", fa.faPos);
 					case _: fa.faInline ? accGetInlineRead(ctx, fa) : FieldAccess.getFieldExpr(fa, FRead);
 				}
@@ -260,17 +274,19 @@ class Calls {
 			case AKUsingField(sea):
 				var e = sea.seThis,
 					field = FieldAccess.getFieldExpr(sea.seAccess, FGet);
+				// build a closure with first parameter applied
 				switch follow(field.etype) {
 					case TFun({args: allArgs, ret: ret}) if (allArgs.length > 0):
 						var p = sea.seAccess.faPos, args = allArgs.slice(1);
 						unify(ctx, abstractUsingParamType(sea), allArgs[0].type, e.epos);
 						var callbackType = TFun({args: args, ret: ret}),
 							wrapperType = TFun({args: [{name: "_e", optional: false, type: e.etype}], ret: callbackType});
+						// arguments might not have names in case of variable fields of function types, so we generate one (issue #2495)
 						var vars = args.map(function(arg) {
 							var t = arg.optional ? ctx.t.tnull(arg.type) : arg.type;
 							return {
 								optional: arg.optional,
-								variable: arg.name == "" ? genLocal(ctx, t, e.epos) : allocVar(VGenerated, arg.name, t, e.epos)
+								variable: arg.name == "" ? genLocal(ctx, t, e.epos) : allocVar(VGenerated, arg.name, t, e.epos) // TODO: var pos
 							};
 						});
 						var ve = allocVar(VGenerated, "_e", e.etype, e.epos);
@@ -316,7 +332,9 @@ class Calls {
 			case AKUsingField(sea):
 				var e = dispatch.fieldCall(sea.seAccess, [sea.seThis], el);
 				switch sea.seAccess.faHost {
-					case FHAbstract(_) if (!ctx.allowTransform): switch e.eexpr {
+					case FHAbstract(_) if (!ctx.allowTransform):
+						// transform XXXImpl.field(this,args) back into this.field(args)
+						switch e.eexpr {
 							case TCall(f = {eexpr: TField(_, name)},
 								args) if (args.length > 0): e = mk(TCall(mk(TField(args[0], name), tDynamic, f.epos), args.slice(1)),
 									e.etype, e.epos);
@@ -331,7 +349,9 @@ class Calls {
 			case AKAccessor(fa): AKExpr(dispatch.exprCall(getAccessor(fa, []), [], el));
 			case AKUsingAccessor(sea): AKExpr(dispatch.exprCall(getAccessor(sea.seAccess, [sea.seThis]), [], el));
 			case AKExpr(e): AKExpr(dispatch.exprCall(e, [], el));
-			case AKSafeNav(sn): AKSafeNav({
+			case AKSafeNav(sn):
+				// pack the call inside the safe navigation chain
+				AKSafeNav({
 					snPos: sn.snPos,
 					snBase: sn.snBase,
 					snTempVar: sn.snTempVar,
@@ -352,6 +372,7 @@ class Calls {
 	public static function callToString(ctx:TyperContext, e:TExpr, resume:Bool = false):TExpr {
 		if (!ctx.allowTransform) return mk(e.eexpr, ctx.t.tstring, e.epos);
 		inline function generate(e:TExpr):TExpr {
+			// Ignore visibility of the toString field.
 			ctx.f.meta.unshift({meta: MetaTag.PrivateAccess, exprs: [], pos: e.epos});
 			var acc = Fields.typeField(TypeFieldConfig.create(resume), ctx, e, "toString", e.epos, MCall([]),
 				WithTypeTools.withType(ctx.t.tstring));
@@ -359,6 +380,7 @@ class Calls {
 			return buildCall(ctx, acc, [], WithTypeTools.withType(ctx.t.tstring), e.epos);
 		}
 		if (ctx.com.config.pfStatic && !isNullable(e.etype)) return generate(e);
+		// generate `if(e == null) 'null' else e.toString()`
 		var stringNull = mk(TConst(TString("null")), ctx.t.tstring, e.epos);
 		if (needsTempVar(e)) {
 			var tmp = allocVar(VGenerated, "tmp", e.etype, e.epos),
@@ -420,6 +442,11 @@ class Calls {
 			case TFunction(_) | TLocal({vKind: VUser(TVOLocalFunction)}):
 			case TField(_, FStatic(_, cf) | FInstance(_, _, cf)) if (immutable(cf)):
 			case TField(eobj, FClosure(pair, cf)) if (pair != null && immutable(cf)):
+				/*
+					if we're binding an instance method, we don't really need to create a closure for it,
+					since we'll create a closure for the binding anyway, instead store the instance and
+					call its method inside a bind-generated closure
+				*/
 				var vobj = allocVar(VGenerated, genLocalPrefix, eobj.etype, eobj.epos);
 				declarations.unshift(mk(TVar(vobj, eobj), ctx.t.tvoid, eobj.epos));
 				e = mk(TField(mk(TLocal(vobj), eobj.etype, eobj.epos), FInstance(pair.cls, pair.params, cf)), e.etype, e.epos);
@@ -435,7 +462,7 @@ class Calls {
 				snPos: p,
 				snBase: base.base,
 				snTempVar: base.tempVar,
-				snAccess: AKExpr(e)
+				snAccess: AKExpr(e) // This is weird, but it's not used by safe_nav_branch.
 			};
 			body = TyperBase.safeNavBranch(ctx, sn, () -> makeCall(ctx, base.base, ordered, ret, p));
 		} else body = makeCall(ctx, e, ordered, ret, p);
@@ -456,7 +483,9 @@ class Calls {
 		var hasAbstractArrayAccess = false;
 		try return switch follow(e1.etype) {
 			case TAbstract(a, pl) if (a.aImpl != null && a.aArray.length != 0): switch mode {
-					case MSet(_): AKAccess(a, pl, a.aImpl, e1, e2);
+					case MSet(_):
+						// resolve later
+						AKAccess(a, pl, a.aImpl, e1, e2);
 					case _:
 						hasAbstractArrayAccess = true;
 						var f = AbstractCast.findArrayReadAccess(ctx, a, pl, e2, p);
@@ -495,12 +524,17 @@ class Calls {
 		return AKExpr(mk(TArray(e1, e2), pt, p));
 	}
 
+	/*
+		given chain of fields as the `path` argument and an `access_mode->access_kind` getter for some starting expression as `e`,
+		return a new `access_mode->access_kind` getter for the whole field access chain.
+	*/
 	public static function fieldChain(ctx:TyperContext, path:Array<DotPathPart>, access:AccessKind, mode:AccessMode,
 			withType:WithTypeValue):AccessKind {
 		for (i in 0...path.length) {
 			var e = accGet(ctx, access),
 				part = path[i],
 				intermediate = i < path.length - 1;
+			// intermediate field access are just reading the value
 			access = Fields.typeFieldDefaultCfg(ctx, e, part.name, part.pos, intermediate ? MGet : mode,
 				intermediate ? WithTypeTools.value : withType);
 		}

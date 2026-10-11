@@ -58,10 +58,9 @@ import typing.Typeload.*;
 import typing.TypeloadFields.FieldError.*;
 import typing.TypeloadFields.TypeloadFields.*;
 
-// haxe/src/typing/typeloadFields.ml — mechanical draft; not compile-validated.
-// Display/macro hooks are retained at their source call sites; their services are deferred.
+// Logic for building fields.
 @:structInit class ClassInitCtx {
-	public var tclass:TClass;
+	public var tclass:TClass; // I don't trust ctx.c.curclass because it's mutable.
 	public var isLib:Bool;
 	public var coreApiCheck:CoreApiCheck;
 	public var isClassDebug:Bool;
@@ -111,6 +110,8 @@ import typing.TypeloadFields.TypeloadFields.*;
 	public var fieldKind:ClassFieldRefKind;
 	public var displayModifier:Null<PlacedAccess>;
 	public var doBind:Bool;
+	// If true, cf_expr = None makes a difference in the logic. We insert a dummy expression in
+	// display mode in order to address this.
 	public var exprPresenceMatters:Bool;
 	public var hadError:Bool;
 
@@ -170,7 +171,7 @@ class FieldError {
 		}
 	}
 
-	// Preserve the source's duplicated fctx parameter.
+	// port: upstream also takes fctx twice.
 	public static function invalidModifierCombination(first:FieldInitCtx, com:CommonContext, fctx:FieldInitCtx, a:String, b:String,
 			p:Pos):Void maybeDisplayError(com, fctx, "Invalid modifier combination: " + a + " + " + b, p);
 
@@ -259,11 +260,15 @@ class TypeloadFields {
 		}
 	}
 
+	/**** end of strict meta handling *****/
 	public static function getMethodArgs(field:TClassField):Array<{variable:TVar, defaultValue:Null<TExpr>}> return switch field.cfExpr {
 		case {eexpr: TFunction(f)}: f.tfArgs;
 		case _: throw NotFound.raise();
 	};
 
+	/**
+		Get super constructor data required for @:structInit descendants.
+	*/
 	public static function getStructInitSuperInfo(ctx:Typer, c:TClass,
 			p:Pos):{args:Array<{variable:TVar, defaultValue:Null<TExpr>}>, expr:Null<TExpr>, types:Array<{name:String, optional:Bool, type:T}>} {
 		if (c.clSuper == null || c.clSuper.cls.clConstructor == null) return {args: [], expr: null, types: []};
@@ -291,6 +296,9 @@ class TypeloadFields {
 		return {args: argsRev, expr: mk(TCall(mk(TConst(TSuper), TInst(s.cls, s.params), p), exprsRev), ctx.t.tvoid, p), types: typesRev};
 	}
 
+	/**
+		Generates a constructor for a @:structInit class `c` if it does not have one yet.
+	*/
 	public static function ensureStructInitConstructor(ctx:Typer, c:TClass, astFields:Array<ClassField>, p:Pos):Void {
 		if (c.clConstructor != null) return;
 		inline function fieldHasDefault(name:String):Bool return core.ds.ArrayTools.exists(astFields, function(f) {
@@ -317,7 +325,10 @@ class TypeloadFields {
 				ef = mk(TField(ethis, FInstance(c, params, cf)), cf.cfType, p),
 				ev = mk(TLocal(v), v.vType, p);
 			if (opt && !MetadataTools.has(Optional, v.vMeta)) v.vMeta.unshift(meta(Optional));
+			// this.field = <constructor_argument>
 			var assign = mk(TBinop(OpAssign, ef, ev), cf.cfType, p),
+				// <constructor_argument> != null
+				// if(<constructor_argument> != null) this.field = <constructor_argument>
 				e = hasDefault ? mk(TIf(mk(TBinop(OpNotEq, ev, nullExpr(t, p)), ctx.t.tbool, p), assign, null), ctx.t.tvoid, p) : assign;
 			var text = genDocTextOpt(cf.cfDoc);
 			if (text != null) {
@@ -364,6 +375,7 @@ class TypeloadFields {
 					var pos = accessPos(AMacro, f.cffAccess);
 					raiseTypingError("Invalid modifier: macro on abstract constructor", pos);
 				} catch (_:NotFound) {}
+				// We don't want the generated expression positions to shadow the real code.
 				p = Record.withFields(p, {pmax: p.pmin});
 				var expr = fu.fExpr == null ? null : switch fu.fExpr.expr {
 					case EBlock(el): ae(EBlock([init(p)].concat(el).concat([ret(p)])), p);
@@ -510,7 +522,8 @@ class TypeloadFields {
 				};
 				function() fbuild(buildEnumAbstract(ctx, c, a, fvars(), a.aNamePos));
 			case TClassDecl(c):
-				// tInfos is a projection object in Haxe, so assigning mtUsing on it would
+				// Go for @:using in parents and interfaces
+				// port: tInfos is a projection object in Haxe, so assigning mtUsing on it would
 				// only replace the projected field. Mutate the shared array instead.
 				inline function inheritUsing(s:ClassAndParams):Void for (entry in tInfos(TClassDecl(s.cls)).mtUsing) ti.mtUsing.push(entry);
 				delayLate(ctx.g, PConnectField, function() {
@@ -520,13 +533,15 @@ class TypeloadFields {
 				null;
 			case _: null;
 		};
+		// let errors go through to prevent resume if build fails
 		builds.reverse();
 		for (f in builds) f();
-		// tInfos is a projection: read the metadata again, build macros may have replaced it
+		// port: tInfos is a projection: read the metadata again, build macros may have replaced it
 		for (m in tInfos(mt).mtMeta) if (m.meta == core.MetaList.StrictMeta.Using) for (e in m.exprs) try {
 			var path = stringPosListOfExprPathRaise(e);
 			path.reverse();
 			var r = ImportHandling.handleUsing(ctx, path, e.pos);
+			// Delay for #10107, but use delay_late to make sure base classes run before their children do.
 			delayLate(ctx.g, PConnectField, function() {
 				var filtered = r.filterClasses(r.types);
 				filtered.reverse();
@@ -631,7 +646,7 @@ class TypeloadFields {
 	public static function createTyperContextForField(ctx:Typer, cctx:ClassInitCtx, fctx:FieldInitCtx, cff:ClassField,
 			cf:TClassField):Typer {
 		DeprecationCheck.checkIs(ctx.com, ctx.m.curmod, ctx.c.curclass.clMeta, cff.cffMeta, cff.cffName.name, cff.cffMeta, cff.cffName.pos);
-		var params = fctx.isStatic && !fctx.isAbstractMember && !MetadataTools.has(LibType, cctx.tclass.clMeta) ? [] : ctx.typeParams;
+		var params = fctx.isStatic && !fctx.isAbstractMember && !MetadataTools.has(LibType, cctx.tclass.clMeta) /* TODO: remove this */ ? [] : ctx.typeParams;
 		ctx = TyperManager.cloneForField(ctx, cf, params);
 		var c = cctx.tclass;
 		if (fctx.isAbstract && !MetadataTools.has(LibType, c.clMeta)) {
@@ -669,14 +684,15 @@ class TypeloadFields {
 	}
 
 	public static function transformAbstractField2(ctx:Typer, a:TAbstract,
-			cff:ClassField):ClassField return transformAbstractField(ctx.com, TExprToExpr.convertTypeHint(a.aThis),
+			cff:ClassField):ClassField return transformAbstractField(ctx.com, TExprToExpr.convertTypeHint(a.aThis), // TODO: better pos?
 			TExprToExpr.convertTypeHint(TAbstract(a, extractParamTypes(a.aParams))), a, cff);
 
 	public static function transformField(ctx:Typer, cctx:ClassInitCtx, c:TClass, f:ClassField, fields:Array<ClassField>,
 			p:Pos):ClassField {
 		if (cctx.abstractType != null) f = transformAbstractField2(ctx, cctx.abstractType, f);
 		if (hasAccess(AMacro, f.cffAccess) && ctx.g.macros != null && ctx.g.macros.typer.com.moduleLut.getTypeLut().mem(c.clPath)) {
-			// cff_name is a (name, pos) pair compared structurally upstream
+			// assume that if we had already a macro with the same name, it has not been changed during the @:build operation
+			// port: cff_name is a (name, pos) pair compared structurally upstream
 			if (!core.ds.ArrayTools.exists(fields,
 				function(f2) return f2.cffName.name == f.cffName.name
 					&& f2.cffName.pos.pfile == f.cffName.pos.pfile
@@ -783,7 +799,7 @@ class TypeloadFields {
 
 	public static function checkAbstract(ctx:Typer, cctx:ClassInitCtx, fctx:FieldInitCtx, a:TAbstract, c:TClass, cf:TClassField, fd:Func,
 			t:T, ret:T, p:Pos):Void {
-		if (fctx.isAbstractConstructor && a.aConstructor == null) a.aConstructor = cf;
+		if (fctx.isAbstractConstructor && a.aConstructor == null) a.aConstructor = cf; // TODO: this is pretty dumb, it deals with the overload case
 		var m = mkMono(), ta = TAbstract(a, a.aParams.map(function(_) return mkMono())),
 			tthis = fctx.isAbstractMember || MetadataTools.has(To, cf.cfMeta) ? monomorphs(a.aParams, a.aThis) : a.aThis;
 		var allowsNoExpr = MetadataTools.has(CoreType, a.aMeta);
@@ -795,6 +811,7 @@ class TypeloadFields {
 		}
 		inline function handleFrom():Void {
 			var r = makeLazy(ctx.g, t, function() {
+				// the return type of a from-function must be the abstract, not the underlying type
 				if (!fctx.isMacro) try {
 					typeEq(EqStrict, ret, ta);
 				} catch (e:Unify_error) {
@@ -816,11 +833,14 @@ class TypeloadFields {
 				case [Var(_), _]:
 					raiseTypingError("Invalid metadata: @:to must be used on method of abstract", p);
 				case [Method(_), TFun(s)] if (!fctx.isAbstractMember && !validArgs(s.args)):
-					if (!MetadataTools.has(MultiType, a.aMeta)) raiseTypingError("static @:to method should have one argument", p);
+					if (!MetadataTools.has(MultiType, a.aMeta)) // TODO: get rid of this check once multitype is removed
+						raiseTypingError("static @:to method should have one argument", p);
 				case [Method(_), TFun(s)] if (fctx.isAbstractMember && !validArgs(s.args)):
-					if (!MetadataTools.has(MultiType, a.aMeta)) raiseTypingError("@:to method should have no arguments", p);
+					if (!MetadataTools.has(MultiType, a.aMeta)) // TODO: get rid of this check once multitype is removed
+						raiseTypingError("@:to method should have no arguments", p);
 				case _:
 			}
+			// TODO: this doesn't seem quite right...
 			if (!hasClassFieldFlag(cf, CfImpl)) addClassFieldFlag(cf, CfImpl);
 			inline function resolveM(args:Array<T>):T {
 				try {
@@ -850,6 +870,7 @@ class TypeloadFields {
 					if (ctor == null)
 						raiseTypingError("Constructor of multi-type abstract must be defined before the individual @:to-functions are",
 							cf.cfPos);
+					// delay ctx PFinal (fun () -> unify ctx m tthis f.cff_pos);
 					args = switch follow(monomorphs(a.aParams, ctor.cfType)) {
 						case TFun(s): s.args.map(function(v) return v.type);
 						case _: Globals.die("", "typeloadFields.ml");
@@ -935,7 +956,7 @@ class TypeloadFields {
 			case _:
 				raiseTypingError("Invalid @:op expresssions, should be an operator or a call", e.pos);
 		}
-		// Iterate a snapshot: handleTo may prepend @:multiType, and upstream iterates an immutable list.
+		// port: iterate a snapshot: handleTo may prepend @:multiType, and upstream iterates an immutable list.
 		for (entry in cf.cfMeta.copy()) switch entry.meta {
 			case From:
 				handleFrom();
@@ -962,7 +983,7 @@ class TypeloadFields {
 
 	public static function typeOpt(ctx:Typer, cctx:ClassInitCtx, fctx:FieldInitCtx, p:Pos, mode:LoadInstanceMode, t:Null<TypeHint>):T {
 		var c = cctx.tclass,
-			trulyExtern = (hasClassFlag(c, CExtern) || fctx.isExtern) && !fctx.isInline;
+			trulyExtern = (hasClassFlag(c, CExtern) || fctx.isExtern) && !fctx.isInline; // if it's inline, we can infer the type from the expression
 		if (t == null && (trulyExtern || hasClassFlag(c, CInterface))) {
 			displayError(ctx.com, "Type required for extern classes and interfaces", p);
 			return tDynamic;
@@ -990,7 +1011,7 @@ class TypeloadFields {
 		});
 		inline function propertyType():T {
 			var property = name.substr(4),
-				cf = PMap.find(property, fctx.isStatic ? c.clStatics : c.clFields);
+				cf = PMap.find(property, fctx.isStatic ? c.clStatics : c.clFields); // TODO: inheritance?
 			return switch [kind.force(), cf.cfKind] {
 				case [MKGetter, Var({vRead: AccCall | AccPrivateCall})] | [MKSetter, Var({vWrite: AccCall | AccPrivateCall})]: cf.cfType;
 				case _: throw NotFound.raise();
@@ -1025,12 +1046,15 @@ class TypeloadFields {
 		var name = f.cffName.name;
 		var params:TypeParams = TypeloadFunction.typeFunctionParams(ctx, fd, TPHMethod, name);
 		if (fctx.isGeneric && params.length == 0) raiseTypingError("Generic functions must have type parameters", p);
+		// remove display of first argument which will contain the "this" expression
 		if (fctx.isMacro && !ctx.com.isMacroContext && !fctx.isStatic) fd = Record.withFields(fd,
 			{fArgs: fd.fArgs.length == 0 ? [] : fd.fArgs.slice(1)});
 		if (fctx.isMacro) {
 			if (ctx.com.isMacroContext) {
+				// a class with a macro cannot be extern in macro context (issue #2015)
 				removeClassFlag(c, CExtern);
 				var texpr = makePtpCt(mkTypePath(["haxe", "macro"], "Expr"), Globals.nullPos);
+				// ExprOf type parameter might contain platform-specific type, let's replace it by Expr
 				inline function noExprOf(th:TypeHint):TypeHint return switch th.type {
 					case CTPath({
 						path: {
@@ -1102,7 +1126,7 @@ class TypeloadFields {
 				case {type: CTPath({path: tp}), pos: p} if (tp.tpackage.length == 0 && tp.tname == "Void"):
 					if (ctx.m.isDisplayFile
 						&& DisplayPosition.displayPosition.enclosedIn(p)) Typeload.loadInstance(ctx, makePtp(tp, p), ParamNormal,
-							LoadReturn, true);
+							LoadReturn, true); // VOIDTODO
 				case _:
 					raiseTypingError("A class constructor can't have a return type", p);
 			}
@@ -1128,6 +1152,7 @@ class TypeloadFields {
 		if (!isCoroutine) t = TFun({args: targs, ret: ret});
 		else if (CoroConfig.ofMetaList(cf.cfMeta).transformed) {
 			if (targs.length == 0) throw new haxe.Exception("Invalid transformed coroutine signature");
+			// Ignore leading continuation for actual signature
 			var tail = targs.slice(1), actualRet = switch follow(ret) {
 				case TInst({clPath: {pack: ["haxe", "coro"], name: "SuspensionResult"}}, [ret]): ret;
 				case t: raiseTypingError("Return type of @:coroutine(transformed) functions must be SuspensionResult (found "
@@ -1189,6 +1214,7 @@ class TypeloadFields {
 		else {
 			if (fctx.isDisplayField) {
 				delay(ctx.g, PTypeField, function() {
+					// We never enter type_function so we're missing out on the argument processing there. Let's do it here.
 					var local = TyperManager.cloneForExpr(ctx, fmode, functionMode);
 					args.forExpr(local);
 				});
@@ -1242,6 +1268,9 @@ class TypeloadFields {
 				if (found == null) throw NotFound.raise();
 				var t2 = found.type, f2 = found.field;
 				for (m in f.cffMeta) if (m.meta == core.MetaList.StrictMeta.Deprecated) f2.cfMeta.unshift(m);
+				// Now that we know there is a field, we have to delay the actual unification even further. The reason is that unification could resolve
+				// TLazy, which would then cause field typing before we're done with our PConnectField pass. This could cause interface fields to not
+				// be generated in time.
 				delay(ctx.g, PForce, function() {
 					try {
 						switch f2.cfKind {
@@ -1342,6 +1371,7 @@ class TypeloadFields {
 		};
 		var setAccess = switch set.name {
 			case "null":
+				// standard flash library read-only variables can't be accessed for writing, even in subclasses
 				hasClassFlag(c, CExtern)
 				&& c.clPath.pack.length > 0
 				&& c.clPath.pack[0] == "flash"
@@ -1365,6 +1395,9 @@ class TypeloadFields {
 		return cf;
 	}
 
+	/**
+		Emit compilation error on `final static function`
+	*/
 	public static function rejectFinalStaticMethod(ctx:Typer, cctx:ClassInitCtx, fctx:FieldInitCtx, f:ClassField):Void {
 		if (fctx.isStatic && fctx.isFinal && !hasClassFlag(cctx.tclass, CExtern)) {
 			var p:Pos;
@@ -1423,6 +1456,7 @@ class TypeloadFields {
 		}
 		if (ctx.com.platform != Jvm || externClass) return true;
 		for (f2 in fs) if (f != f2 && Overloads.sameOverloadArgs(f.cfType, f2.cfType, f, f2, ambiguateFuns)) {
+			// Don't bother checking this on externs and assume the users know what they're doing (issue #11131)
 			if (hasClassFieldFlag(f, CfExtern) && hasClassFieldFlag(f2, CfExtern)) return true;
 			displayErrorExt(ctx.com,
 				makeError(Custom("Another overloaded field of similar signature was already declared : "
@@ -1435,6 +1469,7 @@ class TypeloadFields {
 	}
 
 	public static function checkOverloads(ctx:Typer, c:TClass):Void {
+		// check if field with same signature was declared more than once
 		var isExtern = hasClassFlag(c, CExtern);
 		function checkField(f:TClassField):Void {
 			if (hasClassFieldFlag(f, CfOverload)) {
@@ -1448,6 +1483,7 @@ class TypeloadFields {
 	}
 
 	public static function finalizeClass(cctx:ClassInitCtx):Void {
+		// push delays in reverse order so they will be run in correct order
 		for (pair in cctx.delayedExpr) if (pair.lazy != null) delay(pair.ctx.g, PTypeField, function() {
 			lazyType(pair.lazy);
 		});
@@ -1630,6 +1666,9 @@ class TypeloadFields {
 			case _:
 				throw new haxe.Exception("Invalid class static type");
 		});
+		/*
+			make sure a default contructor with same access as super one will be added to the class structure at some point.
+		*/
 		var hasStructInit = false, structInitPos = Globals.nullPos;
 		try {
 			structInitPos = MetadataTools.get(StructInit, c.clMeta).pos;
@@ -1654,13 +1693,14 @@ class TypeloadFields {
 				makeError(Custom("This class has uninitialized final vars, which requires a constructor"), p,
 					[makeError(Custom("Example of an uninitialized final var"), cf.cfNamePos)]));
 		}
+		// add_constructor does not deal with overloads correctly
 		if (!hasStructInit && !com.config.pfOverload) delayLate(ctxC.g, PConnectField,
 			() -> TypeloadFunction.addConstructor(ctxC, c, cctx.forceConstructor, p));
 		finalizeClass(cctx);
 	}
 }
 
-// haxe/src/typing/typeloadFields.ml:664-894, TypeBinding — mechanical draft.
+// port: module TypeBinding of typeloadFields.ml
 class TypeBinding {
 	public static function bindType(ctx:Typer, cctx:ClassInitCtx, fctx:FieldInitCtx, cf:TClassField, r:TLazy, p:Pos):Void {
 		var c = cctx.tclass;
@@ -1671,6 +1711,7 @@ class TypeBinding {
 			case TMono(mono): mono.tmType != null && isFullType(mono.tmType);
 			case TAbstract(_, _) | TInst(_, _) | TEnum(_, _) | TLazy(_) | TDynamic(_) | TAnon(_) | TType(_, _): true;
 		};
+		// force macro system loading of this class in order to get completion
 		inline function forceMacro(display:Bool):Void delay(ctx.g, PTypeField, function() {
 			try {
 				ctx.g.doMacro(ctx, MDisplay, c.clPath, cf.cfName, [], p);
@@ -1731,14 +1772,18 @@ class TypeBinding {
 		if (hasClassFlag(c, CInterface)) unexpectedExpression(ctx.com, fctx, "Initialization on field of interface", astExpr.pos);
 		cf.cfMeta.unshift({meta: StrictMeta.Value, exprs: [astExpr], pos: Globals.mkZeroRangePos(cf.cfPos)});
 		inline function checkCast(e:TExpr):TExpr {
+			// insert cast to keep explicit field type (issue #1901)
 			if (typeIseq(e.etype, cf.cfType)) return e;
 			return switch [e.eexpr, follow(cf.cfType)] {
 				case [TConst(TInt(i)), TAbstract({aPath: {pack: [], name: "Float"}},
-					_)]: Record.withFields(e, {eexpr: TConst(TFloat(Std.string(i))), etype: cf.cfType});
+					_)]:
+					// turn int constant to float constant if expected type is float
+					Record.withFields(e, {eexpr: TConst(TFloat(Std.string(i))), etype: cf.cfType});
 				case _: mkCast(e, cf.cfType, e.epos);
 			};
 		}
 		var r = makeUnforcedLazy(t, function() {
+			// type constant init fields (issue #1956)
 			if (!ctx.g.returnPartialType || switch astExpr.expr {
 					case EConst(_): true;
 					case _: false;
@@ -1770,6 +1815,7 @@ class TypeBinding {
 							e;
 						} else requireConstantExpression(e, "Extern variable initialization must be a constant value");
 					case Var(_) if (!isPhysicalField(cf)):
+						// disallow initialization of non-physical fields (issue #1958)
 						unexpectedExpression(ctx.com, fctx, "on field that is not a real variable", p);
 						e;
 					case Var(_) if (!fctx.isStatic):
@@ -1850,6 +1896,10 @@ class TypeBinding {
 						case NormalOverride(rctx): TypeloadCheck.checkCallSuper(ctx.com, rctx, body);
 						case _:
 					}
+					// Disabled for now, see https://github.com/HaxeFoundation/haxe/issues/3033
+					// List.iter (fun (v,_) ->
+					//	if v.v_name <> "_" && has_mono v.v_type then warning ctx WTemp "Uninferred function argument, please add a type-hint" v.v_pos;
+					// ) fargs;
 					var tf:TFunc = {tfArgs: args.forExpr(ctx), tfType: ret, tfExpr: body};
 					if (fctx.fieldKind == CfrInit) switch body.eexpr {
 						case TBlock([]) | TBlock([{eexpr: TConst(_)}]) | TConst(_) | TObjectDecl([]):

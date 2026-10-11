@@ -4,8 +4,8 @@ import core.Globals.GlobalTypePath;
 import core.Globals.Pos;
 import core.Ast;
 
-// haxe/src/context/nativeLibraries.ml — mechanical declaration draft; unvalidated.
-// Native library implementations remain out of scope; only shared interfaces/data are declared.
+// port: native library implementations are out of scope; only the shared interfaces and data
+// are declared.
 enum NativeLibFlags {
 	FlagIsStd;
 	FlagIsExtern;
@@ -43,8 +43,8 @@ interface NativeLibrary<A, Data> {
 	public function getData():Data;
 }
 
-// Opaque payloads owned by the deferred native-library loaders. No backend API
-// is exposed to the source-only HXB path.
+// port: opaque payloads owned by the deferred native-library loaders (JClass.jclass,
+// As3hl.hl_class, Swf.swf). No backend API is exposed to the source-only HXB path.
 interface JavaClassData {}
 interface SwfClassData {}
 interface SwfData {}

@@ -13,7 +13,6 @@ import core.Error;
 import filters.FilterContext;
 import sys.thread.Mutex;
 
-// Draft mechanical translation of haxe/src/context/safeCom.ml; unvalidated.
 @:structInit class SavedWarning {
 	public var wModule:ModuleDef;
 	public var wWarning:WarningCode;
@@ -93,7 +92,7 @@ import sys.thread.Mutex;
 
 class SafeCom {
 	public static function ofCom(com:context.Common.CommonContext):SafeContext {
-		// Typed so the method values are bound closures (read through Dynamic they are unbound on JS).
+		// port: typed so the method values are bound closures (read through Dynamic they are unbound on JS).
 		var moduleLut:context.Common.ModuleLut = com.moduleLut;
 		return {
 			basic: com.basic,
@@ -227,7 +226,7 @@ class SafeCom {
 					}
 					for (overloadField in cf.cfOverloads) processField(overloadField);
 				}
-				// Upstream iterates immutable lists; filters such as local_statics add fields while we iterate.
+				// port: upstream iterates immutable lists; filters such as local_statics add fields while we iterate.
 				for (cf in c.clOrderedFields.copy()) processField(cf);
 				for (cf in c.clOrderedStatics.copy()) processField(cf);
 				if (c.clConstructor != null) processField(c.clConstructor);

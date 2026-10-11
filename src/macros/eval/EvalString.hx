@@ -2,14 +2,10 @@ package macros.eval;
 
 import macros.eval.EvalValue;
 
-/**
-	haxe/src/macro/eval/evalString.ml.
-
-	Upstream strings are UTF-8 with character (code point) indices and cached
-	byte offsets. Here a string is native; "byte offsets" are native string
-	indices, and character indices are code points. Strings without surrogate
-	pairs (`sbmp`) need no offset computation.
-**/
+// port: upstream strings are UTF-8 with character (code point) indices and cached
+// byte offsets. Here a string is native; "byte offsets" are native string
+// indices, and character indices are code points. Strings without surrogate
+// pairs (`sbmp`) need no offset computation.
 class EvalString {
 	public static inline function vstring(s:Vstring):Value return VString(s);
 
@@ -59,7 +55,7 @@ class EvalString {
 		return createUnknownVstring(buf.toString());
 	}
 
-	/** Native index of the character (code point) at `cIndex`. **/
+	// port: native index of the character (code point) at `cIndex`.
 	public static function getOffset(s:Vstring, cIndex:Int):Int {
 		if (s.sbmp) return cIndex;
 		var str = s.sstring;
@@ -80,7 +76,7 @@ class EvalString {
 		};
 	}
 
-	/** Native index `b` moved by `cLength` characters (UTF8.move). **/
+	// port: native index `b` moved by `cLength` characters (UTF8.move).
 	public static function move(s:Vstring, b:Int, cLength:Int):Int {
 		if (s.sbmp) return b + cLength;
 		var str = s.sstring;
@@ -91,7 +87,7 @@ class EvalString {
 		return b;
 	}
 
-	/** The code point at character index `cIndex`. **/
+	// port: the code point at character index `cIndex`.
 	public static function charAt(s:Vstring, cIndex:Int):Int {
 		var str = s.sstring;
 		var b = getOffset(s, cIndex);
@@ -109,10 +105,8 @@ class EvalString {
 
 	public static function fromCharCode(i:Int):Vstring return new Vstring(stringOfCharCode(i), 1, i < 0x10000);
 
-	/**
-		Upstream returns a function searching from (cIndex, bIndex); this returns
-		that search (character index, start and end native index) or throws NotFound.
-	**/
+	// port: the returned search function yields the character index and the start
+	// and end native indices instead of upstream's tuple.
 	public static function findSubstring(self:Vstring, sub:Vstring, reverse:Bool):(cIndex:Int, bIndex:Int) -> {c: Int, b: Int, e: Int} {
 		var clThis = self.slength;
 		var clSub = sub.slength;
@@ -129,7 +123,7 @@ class EvalString {
 			return function(cIndex, bIndex) {
 				while (true) {
 					if (cIndex > clThis - clSub || bIndex >= blThis) {
-						// an empty needle matches at the end
+						// port: an empty needle matches at the end
 						if (blSub == 0 && cIndex <= clThis && bIndex <= blThis) return {c: cIndex, b: bIndex, e: bIndex};
 						throw core.ds.NotFound.raise();
 					}
@@ -182,14 +176,14 @@ class EvalString {
 		return new Vstring(self.sstring.substring(b1, b2), cLength, self.sbmp);
 	}
 
-	/** OCaml's String.compare on the UTF-8 encodings: code point order. **/
+	// port: OCaml's String.compare on the UTF-8 encodings: code point order.
 	public static function compareCodePoints(a:String, b:String):Int {
 		var n = a.length < b.length ? a.length : b.length;
 		for (i in 0...n) {
 			var x = StringTools.fastCodeAt(a, i),
 				y = StringTools.fastCodeAt(b, i);
 			if (x != y) {
-				// surrogates encode code points above every other UTF-16 unit
+				// port: surrogates encode code points above every other UTF-16 unit
 				var sx = x >= 0xD800 && x <= 0xDFFF,
 					sy = y >= 0xD800 && y <= 0xDFFF;
 				if (sx != sy) return sx ? 1 : -1;
@@ -199,7 +193,7 @@ class EvalString {
 		return a.length == b.length ? 0 : a.length < b.length ? -1 : 1;
 	}
 
-	// VStringBuffer
+	// port: module VStringBuffer
 
 	public static function bufferCreate():VstringBuffer return new VstringBuffer();
 
@@ -213,7 +207,7 @@ class EvalString {
 		self.blength += cLen;
 	}
 
-	// Buffer.clear: a fresh host buffer
+	// port: Buffer.clear: a fresh host buffer
 	public static function bufferClear(self:VstringBuffer):Void {
 		self.bbuffer = new StringBuf();
 		self.blength = 0;

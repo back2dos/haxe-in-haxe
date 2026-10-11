@@ -14,26 +14,22 @@ import macros.eval.EvalHash;
 
 using macros.eval.EvalValue.EvalValueTools;
 
-/**
-	haxe/src/macro/eval/evalPrototype.ml.
-
-	Deviations:
-	- `Context.getObjectPrototype` is typed `(ctx, Array<Int>) -> Vprototype`
-	  (Haxe has no polymorphic record fields): it takes the hashed field names
-	  in any order and returns the prototype. The upstream function, returning
-	  the sorted `(name, value)` list too, is `getObjectPrototypeSorted`; callers
-	  that need the sorted values use it (or `sortObjectFields`).
-	- `object_name_cache` is keyed by the sorted hashed names joined with ",".
-	- `ctx.overrides` is keyed by `sTypePath(path) + "." + fieldName`.
-**/
+// port: deviations:
+// - `Context.getObjectPrototype` is typed `(ctx, Array<Int>) -> Vprototype`
+//   (Haxe has no polymorphic record fields): it takes the hashed field names
+//   in any order and returns the prototype. The upstream function, returning
+//   the sorted `(name, value)` list too, is `getObjectPrototypeSorted`; callers
+//   that need the sorted values use it (or `sortObjectFields`).
+// - `object_name_cache` is keyed by the sorted hashed names joined with ",".
+// - `ctx.overrides` is keyed by `sTypePath(path) + "." + fieldName`.
 typedef ProtoField = {name:Int, value:AtomicLazy<Value>};
 
-/** A finalized prototype and the function initializing its fields. **/
+// port: A finalized prototype and the function initializing its fields.
 typedef ProtoInit = {proto:Vprototype, init:Vprototype->Void};
 
 typedef StaticDelay = {persistent:Bool, f:Vprototype->Void};
 
-/** PrototypeBuilder.prototype_context **/
+// port: PrototypeBuilder.prototype_context
 class PrototypeContext {
 	public final ctx:Context;
 	// The hashed path of the prototype.
@@ -193,7 +189,7 @@ class PrototypeBuilder {
 		return {proto: proto, init: f};
 	}
 
-	// evalPrototype.ml's `eval_expr`, used by `finalize` (defined before the module upstream).
+	// port: evalPrototype.ml's `eval_expr`, used by `finalize` (defined before the module upstream).
 	static inline function evalExpr(ctx:Context, kind:EnvKind, e:TExpr):Null<Value> return EvalPrototype.evalExpr(ctx, kind, e);
 }
 
@@ -247,7 +243,7 @@ class EvalPrototype {
 		return core.Meta.has(StrictMeta.Persistent, cf.cfMeta);
 	}
 
-	// `Some {eexpr = TFunction tf}` (null-safe; Haxe structure patterns do not check for null)
+	// port: `Some {eexpr = TFunction tf}` (null-safe; Haxe structure patterns do not check for null)
 	static function tfunctionOf(e:Null<TExpr>):Null<TFunc> {
 		if (e == null) return null;
 		return switch e.eexpr {
@@ -256,7 +252,7 @@ class EvalPrototype {
 		}
 	}
 
-	// OCaml `compare` on strings (PMap order)
+	// port: OCaml `compare` on strings (PMap order)
 	static function compareString(a:String, b:String):Int return a == b ? 0 : (a < b ? -1 : 1);
 
 	public static function createStaticPrototype(ctx:Context, mt:ModuleType):{init:ProtoInit, delays:Array<StaticDelay>} {
@@ -342,7 +338,7 @@ class EvalPrototype {
 							EvalEncode.encodeEnumValue(key, ef.efIndex, [], ef.efPos);
 					}
 				}
-				// PMap.iter: ascending key order
+				// port: PMap.iter: ascending key order
 				var constrNames = [for (k in en.eConstrs.keys()) k];
 				constrNames.sort(compareString);
 				for (name in constrNames)
@@ -405,7 +401,7 @@ class EvalPrototype {
 		return PrototypeBuilder.finalize(pctx);
 	}
 
-	/** Upstream `List.sort` (stable) on the hashed names. **/
+	// port: upstream `List.sort` (stable) on the hashed names.
 	public static function sortObjectFields<T>(l:Array<{name:Int, value:T}>):Array<{name:Int, value:T}> {
 		var l = l.copy();
 		haxe.ds.ArraySort.sort(l, (f1, f2) -> {
@@ -417,7 +413,7 @@ class EvalPrototype {
 		return l;
 	}
 
-	/** Upstream `get_object_prototype`: the prototype and the sorted fields. **/
+	// port: upstream `get_object_prototype`: the prototype and the sorted fields.
 	public static function getObjectPrototypeSorted<T>(ctx:Context,
 			l:Array<{name:Int, value:T}>):{proto:Vprototype, sorted:Array<{name:Int, value:T}>} {
 		var l = sortObjectFields(l);
@@ -446,7 +442,7 @@ class EvalPrototype {
 		return {proto: proto, sorted: l};
 	}
 
-	/** The function stored in `Context.getObjectPrototype` (see the module comment). **/
+	// port: the function stored in `Context.getObjectPrototype` (see the module comment).
 	public static function getObjectPrototype(ctx:Context, l:Array<Int>):Vprototype {
 		return getObjectPrototypeSorted(ctx, l.map(i -> {name: i, value: (null : Null<Value>)})).proto;
 	}

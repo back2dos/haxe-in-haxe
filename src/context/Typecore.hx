@@ -23,8 +23,6 @@ import Type as StdType;
 import core.Error.Error;
 import core.Error.ErrorMsg;
 
-// Draft mechanical translation of haxe/src/context/typecore.ml; unvalidated.
-// Macro and display callbacks retain their shape; their runtimes are not implemented here.
 @:structInit class TypePatch {
 	public var tpType:Null<ComplexType>;
 	public var tpRemove:Bool;
@@ -57,8 +55,8 @@ enum MacroMode {
 
 enum AccessMode {
 	MGet;
-	MSet(rhs:Null<Expr>);
-	MCall(args:Array<Expr>);
+	MSet(rhs:Null<Expr>); // rhs, if exists
+	MCall(args:Array<Expr>); // call arguments
 }
 
 @:structInit class TyperModule {
@@ -174,6 +172,7 @@ enum FunctionMode {
 	public var macros:Null<{finalize:Void->Void, typer:Typer}>;
 	public var moduleCheckPolicies:Array<{pack:Array<String>, policies:Array<ModuleCheckPolicy>, recursive:Bool}>;
 	public var globalUsing:Array<{cls:TClass, pos:Pos}>;
+	// Indicates that Typer.create() finished building this instance
 	public var complete:Bool;
 	public var typeHints:Array<{display:ModuleDefDisplay, pos:Pos, type:T}>;
 	public var loadOnlyCachedModules:Bool;
@@ -183,6 +182,7 @@ enum FunctionMode {
 	public var delayedDisplay:Null<core.DisplayTypes.DisplayExceptionKind>;
 	public var callArgContext:Null<CallArgContext>;
 	public var rootTyper:Typer;
+	// api
 	public var continuationApi:Null<coro.ContTypes.ContinuationApi>;
 	public var doMacro:Typer->MacroMode->GlobalTypePath->String->Array<Expr>->Pos->MacroResult;
 	public var doLoadMacro:Typer->Bool->GlobalTypePath->String->Pos->typing.MacroContext.MacroMethod;
@@ -192,7 +192,7 @@ enum FunctionMode {
 	public var doFormatString:Typer->String->Pos->Expr;
 	public var doLoadCoreClass:Typer->TClass->TClass;
 
-	// No explicit constructor: 25 arguments exceed the HashLink JIT limit.
+	// port: no explicit constructor: 25 arguments exceed the HashLink JIT limit.
 	public function clone():TyperGlobals return {
 		delayed: delayed,
 		delayedMinIndex: delayedMinIndex,
@@ -222,6 +222,8 @@ enum FunctionMode {
 	};
 }
 
+// typer_expr holds information that is specific to a (function) expresssion, whereas typer_field
+// is shared by local TFunctions.
 @:structInit class TyperExpr {
 	public var curfun:CurrentFun;
 	public var functionMode:FunctionMode;
@@ -277,6 +279,7 @@ enum FunctionMode {
 }
 
 @:structInit class Typer {
+	// shared
 	public var com:context.Common.CommonContext;
 	public var t:BasicTypes;
 	public var g:TyperGlobals;
@@ -288,6 +291,7 @@ enum FunctionMode {
 	public var typeParams:TypeParams;
 	public var allowInline:Bool;
 	public var allowTransform:Bool;
+	// events
 	public var memoryMarker:Array<Float>;
 
 	public inline function new(com:context.Common.CommonContext, t:BasicTypes, g:TyperGlobals, m:TyperModule, c:TyperClass, f:TyperField,
@@ -318,11 +322,19 @@ enum FieldHost {
 }
 
 @:structInit class FieldAccess {
+	// The expression on which the field is accessed. For abstracts, this is a type expression
+	// to the implementation class.
 	public var faOn:TExpr;
+	// The field being accessed. Note that in case of overloads, this might refer to the main field which
+	// hosts other overloads in its cf_overloads.
 	public var faField:TClassField;
+	// The host of the field.
 	public var faHost:FieldHost;
+	// Whether or not to inline the access. This can be set for non-inline fields via `inline call()` syntax.
 	public var faInline:Bool;
+	// The position of the field access expression in syntax.
 	public var faPos:Pos;
+	// The position of the field name accessed on `fa_on`.
 	public var faFieldPos:Null<Pos>;
 
 	public inline function new(faOn:TExpr, faField:TClassField, faHost:FieldHost, faInline:Bool, faPos:Pos, faFieldPos:Null<Pos>) {
@@ -338,7 +350,9 @@ enum FieldHost {
 }
 
 @:structInit class StaticExtensionAccess {
+	// The `this` expression which should be passed as first argument.
 	public var seThis:TExpr;
+	// The field access information.
 	public var seAccess:FieldAccess;
 
 	public inline function new(seThis:TExpr, seAccess:FieldAccess) {
@@ -384,7 +398,7 @@ class ForbidPackage extends haxe.Exception {
 class WithTypeError extends haxe.Exception {
 	public final error:core.Error.CompilerError;
 
-	// The message is what Printexc.to_string prints for the uncaught OCaml exception.
+	// port: the message is what Printexc.to_string prints for the uncaught OCaml exception.
 	public function new(error:core.Error.CompilerError) {
 		super("Typecore.WithTypeError(_)");
 		this.error = error;
@@ -483,9 +497,14 @@ class TyperManager {
 		var e = createCtxE(curfun, inFunction);
 		switch curfun {
 			case FunMember, FunMemberAbstract, FunStatic, FunConstructor:
+				// Monomorphs from field arguments and return types are created before
+				// ctx.e is cloned, so they have to be absorbed here. A better fix might
+				// be to clone ctx.e earlier, but that comes with its own challenges.
 				e.monomorphs = ctx.e.monomorphs;
 				ctx.e.monomorphs = [];
 			case FunMemberAbstractLocal, FunMemberClassLocal:
+				// We don't need to do this for local functions because the cloning happens
+				// earlier there.
 		}
 		return create(ctx, ctx.m, ctx.c, ctx.f, e, PTypeField, ctx.typeParams);
 	}
@@ -637,7 +656,9 @@ class Typecore {
 
 	public static function unifyRaiseCustom(uctx:core.TUnification.UnificationContext, t1:T, t2:T, p:Pos):Void {
 		try TUnification.unifyCustom(uctx, t1, t2)
-		catch (err:core.TUnification.Unify_error) Error.raiseErrorMsg(Unify(err.errors), p);
+		catch (err:core.TUnification.Unify_error)
+			// no untyped check
+			Error.raiseErrorMsg(Unify(err.errors), p);
 	}
 
 	public static function unifyRaise(a:T, b:T, p:Pos):Void unifyRaiseCustom(TUnification.defaultUnificationContext(), a, b, p);
@@ -653,6 +674,7 @@ class Typecore {
 			case VUser(_):
 				try {
 					var previous = ctx.f.locals.find(n);
+					// ignore std lib
 					var inStd = false;
 					for (path in ctx.com.classPaths.getStdPaths()) if (StringTools.startsWith(p.pfile, path.path)) {
 						inStd = true;
@@ -681,7 +703,7 @@ class Typecore {
 		case _: false;
 	};
 
-	// Task lists are stacks with the top at the end of the array (upstream conses onto
+	// port: task lists are stacks with the top at the end of the array (upstream conses onto
 	// lists; unshift/shift at the front were quadratic). Same order.
 	public static function delay(g:TyperGlobals, p:TyperPass, f:Void->Void):Void {
 		var index = passIndex(p);
@@ -704,7 +726,7 @@ class Typecore {
 			f();
 	}
 
-	// `where` is polymorphic and unused upstream (debug information only).
+	// port: `where` is polymorphic and unused upstream (debug information only).
 	public static function flushPass<W>(g:TyperGlobals, p:TyperPass, where:W):Void {
 		var index = g.delayedMinIndex;
 		while (index <= passIndex(p)) {
@@ -721,6 +743,7 @@ class Typecore {
 				flushPass(g, p, where);
 				return;
 			} else {
+				// Done with this pass (for now), update min index to next one
 				index++;
 				g.delayedMinIndex = index;
 			}
@@ -756,6 +779,7 @@ class Typecore {
 		case _: false;
 	};
 
+	/** checks if we can access to a given class field using current context **/
 	public static function canAccess(ctx:Typer, c:TClass, cf:TClassField, stat:Bool, checkProp:Bool = false, isSetter:Bool = false):Bool {
 		var isPrivateProp = checkProp && switch cf.cfKind {
 			case Var({vRead: AccPrivateCall}) if (!isSetter): true;
@@ -765,6 +789,7 @@ class Typecore {
 		if (!isPrivateProp && core.TFunctions.hasClassFieldFlag(cf, CfPublic)) return true;
 		if (c == ctx.c.curclass) return true;
 		if (ctx.m.curmod.mStatics != null && c == ctx.m.curmod.mStatics) return true;
+		// has metadata path
 		function makePath(c:TClass, f:TClassField):Array<String> return switch c.clKind {
 			case KAbstractImpl(a): a.aPath.pack.concat([a.aPath.name, f.cfName]);
 			case KGenericInstance(c, _): makePath(c, f);
@@ -779,6 +804,8 @@ class Typecore {
 		function chkPath(sub:Array<String>, full:Array<String>, isCurrentPath:Bool):Bool {
 			for (i in 0...sub.length) {
 				if (i >= full.length || sub[i] != full[i]) return false;
+				// means it's a path of a superclass or implemented interface &&
+				// it's the last part of path in a meta && it denotes a package
 				if (!isCurrentPath && i == sub.length - 1 && !core.StringHelper.startsUppercaseIdentifier(sub[i])) return false;
 			}
 			return true;
@@ -787,6 +814,8 @@ class Typecore {
 			function loop(metadata:Metadata):Bool {
 				for (m in metadata) if (m.meta == meta) for (e in m.exprs) switch e.expr {
 					case EConst(Ident("std")):
+						// If we have `@:allow(std)`, check if our path has exactly two elements
+						// (type name + field name)
 						if (entry.path.length == 2) return true;
 					case _:
 						var p = exprPath([], e);
@@ -808,6 +837,7 @@ class Typecore {
 		function loop(c:TClass):Bool {
 			try {
 				if (has(StrictMeta.Access, ctx.c.curclass, ctx.f.curfield, {path: makePath(c, cf), isCurrent: true})) return true;
+				// if our common ancestor declare/override the field, then we can access it
 				function allowed(f:TClassField):Bool {
 					if (core.TFunctions.extendsClass(ctx.c.curclass, c)) return true;
 					for (p in curPaths) if (has(StrictMeta.Allow, c, f, p)) return true;
@@ -818,6 +848,7 @@ class Typecore {
 					var constructor = c.clConstructor;
 					if (constructor != null) {
 						if (allowed(constructor)) found = true;
+						// maybe it's an inherited auto-generated constructor
 						else if (constructor.cfExpr != null) throw NotFound.raise();
 					}
 				} else {
@@ -828,6 +859,7 @@ class Typecore {
 			} catch (_:NotFound) return false;
 		}
 		if (loop(c)) return true;
+		// access is also allowed of we access a type parameter which is constrained to our (base) class
 		switch c.clKind {
 			case KTypeParameter(ttp):
 				for (t in core.TFunctions.getConstraints(ttp)) switch core.TFunctions.follow(t) {
@@ -843,6 +875,7 @@ class Typecore {
 		if (!ctx.f.isUntyped && !canAccess(ctx, c, f, stat)) Common.displayError(ctx.com, "Cannot access private field " + f.cfName, p);
 	}
 
+	/** removes the first argument of the class field's function type and all its overloads **/
 	public static function prepareUsingField(cf:TClassField):TClassField return switch core.TFunctions.follow(cf.cfType) {
 		case TFun(sig) if (sig.args.length > 0):
 			var tf = sig.args[0].type;
@@ -851,6 +884,7 @@ class Typecore {
 				case TFun(overloadSig) if (overloadSig.args.length > 0):
 					var tfo = core.TFunctions.applyParams(cfo.cfParams, core.TFunctions.extractParamTypes(cfo.cfParams),
 						overloadSig.args[0].type);
+					// ignore overloads which have a different first argument
 					if (TUnification.typeIseq(tf, tfo)) {
 						var copy:TClassField = core.ds.Record.copy(cfo);
 						copy.cfType = TFun({args: overloadSig.args.slice(1), ret: overloadSig.ret});

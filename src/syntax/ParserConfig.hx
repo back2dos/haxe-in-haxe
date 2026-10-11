@@ -8,7 +8,6 @@ import context.Common.CommonContext;
 import core.Define.DefineContext;
 import syntax.Parser.ParserConfiguration;
 
-// Draft mechanical translation of haxe/src/syntax/parserConfig.ml; unvalidated.
 class ParserConfig {
 	public static function defaultConfig(defines:DefineContext):ParserConfiguration return Parser.createConfig(defines, false, false,
 		DMNone, false, null);

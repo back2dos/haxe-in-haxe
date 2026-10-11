@@ -20,7 +20,6 @@ import context.AbstractCast;
 import typing.matcher.Pattern;
 import typing.matcher.Bind;
 
-// haxe/src/typing/matcher/case.ml — mechanical draft; not compile-validated.
 @:structInit class CaseData {
 	public var caseGuard:Null<TExpr>;
 	public var caseExpr:Null<TExpr>;
@@ -49,7 +48,26 @@ import typing.matcher.Bind;
 	public inline function clone():CaseRow return new CaseRow(caseData, bindings, patterns);
 }
 
+/*
+	Switch-level type parameter refinement.
+
+	Two kinds of type variables participate:
+	1. Formal type parameters from ctx.type_params (TInst with KTypeParameter).
+	2. Free (unbound) monomorphisms in the type arguments of the top-level
+	   enum / enum-abstract subject types (or tuple elements thereof).
+
+	The analysis of *which* free monomorphisms are eligible for substitution is
+	done once per switch by collect_free_monos, before any cases are examined.
+	Per-case, make_subst creates fresh copies so that each case can independently
+	refine the type through pattern matching.
+*/
+
 class Case {
+	// Collect free (unbound) monomorphisms from the type arguments of direct
+	// enum / enum-abstract subjects. Only top-level positions are examined:
+	// for a single subject, its enum-abstract or enum type args; for a tuple
+	// subject (TFun(args, fake_tuple_type)), each element independently.
+	// Nested field types (e.g. in a structural match) are NOT traversed.
 	public static function collectFreeMonos(t:T):Array<TMono> {
 		var acc:Array<TMono> = [];
 		function walk(ty:T):Void {
@@ -99,6 +117,8 @@ class Case {
 		return acc;
 	}
 
+	// Create a per-case substitution from pre-collected free monomorphs and
+	// the formal type parameters. Returns (subst, rebind_unrefined, unsubst).
 	public static function makeSubst(ctx:Typer, freeMonos:Array<TMono>):{subst:T->T, rebindUnrefined:Void->Void, unsubst:T->T} {
 		var params:TypeParams = ctx.typeParams;
 		var tpClasses = params.map(function(ttp) return ttp.ttpClass);
@@ -116,9 +136,14 @@ class Case {
 			fmMemo.unshift({original: original, mono: m});
 			return m;
 		}
+		// subst: replaces formal type params everywhere, and replaces
+		// collected free monos wherever they appear.
 		function subst(ty:T):T return switch ty {
 			case TMono(m):
-				if (m.tmType != null) subst(m.tmType); else if (core.ds.ArrayTools.exists(freeMonos,
+				if (m.tmType != null) subst(m.tmType); else
+					// Only substitute free monos that were pre-collected from
+					// top-level enum/enum-abstract subject type arguments.
+					if (core.ds.ArrayTools.exists(freeMonos,
 					function(other) return m == other)) TMono(getOrCreateFree(m)); else ty;
 			case TInst(c = {clKind: KTypeParameter(_)},
 				[]) if (core.ds.ArrayTools.exists(tpClasses, function(other) return c == other)): TMono(getOrCreateTp(c));
@@ -131,6 +156,7 @@ class Case {
 			return switch ty {
 				case TMono(m):
 					if (m.tmType != null) unsubst(m.tmType) else {
+						// Physical equality (==) for monomorph identity
 						var original:Null<T> = null;
 						for (entry in tpMemo) if (m == entry.mono) {
 							original = TInst(entry.original, []);
@@ -185,6 +211,7 @@ class Case {
 			unsubst: substitution.unsubst
 		};
 		var pat = ExprToPattern.make(pctx, true, subst(t), e);
+		// For any type-param mono not refined by the pattern, rebind it to T
 		substitution.rebindUnrefined();
 		var guard = if (eg == null) null else {
 			var e = typeExpr(ctx, eg, WithTypeTools.value);

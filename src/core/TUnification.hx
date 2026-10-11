@@ -12,8 +12,8 @@ import core.TUnification.TUnification.*;
 import core.MetaList.StrictMeta;
 import core.Meta as MetadataTools;
 
-// haxe/src/core/tUnification.ml — mechanical draft; not compile-validated.
-// OCaml record updates copy the context but share all recursion-stack cells.
+// port: from haxe/src/core/tUnification.ml.
+// port: OCaml record updates copy the context but share all recursion-stack cells.
 enum UnifyError {
 	CannotUnify(a:T, b:T);
 	CannotUnifyImplementation(a:T, b:T);
@@ -23,12 +23,13 @@ enum UnifyError {
 	HasExtraField(t:T, name:String);
 	InvalidKind(name:String, a:FieldKind, b:FieldKind);
 	InvalidVisibility(name:String);
+	// optional acc_actual, optional acc_expected, field name
 	NotMatchingOptional(actual:Bool, expected:Bool, name:String);
 	InvariantParameter(index:Int);
 	ConstraintFailure(name:String);
 	MissingOverload(field:TClassField, t:T);
-	FinalInvariance(actual:Bool, expected:Bool);
-	InvalidFunctionArgument(index:Int, total:Int);
+	FinalInvariance(actual:Bool, expected:Bool); // nice band name
+	InvalidFunctionArgument(index:Int, total:Int); // index, total
 	InvalidReturnType;
 	UnifyCustom(message:String);
 }
@@ -64,7 +65,7 @@ enum TypeParamMode {
 	TpDefinition(context:TypeParamUnificationContext);
 }
 
-// Upstream wraps a mutable list in a record; the array itself is the stack here.
+// port: upstream wraps a mutable list in a record; the array itself is the stack here.
 typedef RecStack<A> = Array<A>;
 
 enum NullFollowMode {
@@ -87,18 +88,18 @@ enum NullFollowMode {
 
 @:structInit class UnificationContext {
 	public var allowTransitiveCast:Bool;
-	public var allowAbstractCast:Bool;
-	public var allowDynamicToCast:Bool;
+	public var allowAbstractCast:Bool; // allows a non-transitive abstract cast (from,to,@:from,@:to)
+	public var allowDynamicToCast:Bool; // allows a cast from dynamic to non-dynamic
 	public var allowArgNameMismatch:Bool;
-	public var allowOptionalMismatch:Bool;
+	public var allowOptionalMismatch:Bool; // allows optional vs. non-optional fields
 	public var allowFinalInvariance:Bool;
 	public var equalityKind:EqKind;
 	public var equalityUnderlying:Bool;
 	public var strictFieldKind:Bool;
-	public var opaqueFieldParams:Bool;
+	public var opaqueFieldParams:Bool; // treat cf_params as opaque: don't substitute them with fresh monomorphs during unification
 	public var typeParamMode:TypeParamMode;
 	public var nullFollowMode:NullFollowMode;
-	// The stacks are allocated on first access: most unifications never reach
+	// port: the stacks are allocated on first access: most unifications never reach
 	// them, and a default context is built for each one. Any access (including
 	// clone) allocates, so contexts copied from this one share its stacks.
 	public var unifyStack(get, set):RecStack<TypePair>;
@@ -235,6 +236,8 @@ class Monomorph {
 		case _: false;
 	});
 
+	// constraining
+
 	public static function addUpConstraint(m:TMono, c:{type:T, name:Null<String>}):Void {
 		m.tmUpConstraints.unshift(c);
 		switch c.type {
@@ -266,13 +269,15 @@ class Monomorph {
 	public static function constrainToType(m:TMono, name:Null<String>,
 			t:T):Void for (c in constraintOfType(name, t)) addDownConstraint(m, c);
 
-	// Printing calls this: it must not mutate the monomorph graph.
+	// Note: This function is called by printing and others and should thus not modify state.
+
 	public static function classifyDownConstraints(m:TMono):TMonoConstraintKind {
 		var types:Array<{type:T, name:Null<String>}> = [], fields = PMap.empty(), isOpen = false, visited = [m];
 		function check(c:TMonoConstraint):Void switch c {
 			case MMono(m2, name):
 				if (visited.indexOf(m2) < 0) {
 					visited.unshift(m2);
+					// Recursively inherit constraints.
 					if (m2.tmType == null) for (c in m2.tmDownConstraints) check(c);
 					else for (c in constraintOfType(name, m2.tmType)) check(c);
 				}
@@ -341,7 +346,10 @@ class Monomorph {
 		else check();
 	}
 
+	// binding
+
 	public static function doBind(m:TMono, t:T):Void {
+		// assert(m.tm_type = None); // TODO: should be here, but matcher.ml does some weird bind handling at the moment.
 		for (mod in m.tmModifiers) switch mod {
 			case MNullable(f):
 				t = f(t);
@@ -354,6 +362,8 @@ class Monomorph {
 
 	public static function bind(m:TMono, t:T):Void switch t {
 		case TAnon(_) if (m.tmModifiers.indexOf(MOpenStructure) >= 0):
+			// If we assign an open structure monomorph to another structure, the semantics want us to merge the
+			// fields. This is kinda weird, but that's how it has always worked.
 			constrainToType(m, null, t);
 			close(m);
 		case TMono(m2):
@@ -367,6 +377,8 @@ class Monomorph {
 			}
 		case _:
 			checkUpConstraints(m, t);
+			// Due to recursive constraints like in #9603, we tentatively bind the monomorph to the type we're checking
+			// against before checking the constraints.
 			m.tmType = t;
 			var kind = classifyDownConstraints(m);
 			try {
@@ -399,13 +411,16 @@ class Monomorph {
 			case CUnknown:
 				if (isDynamic(m)) doBind(m, tDynamic);
 			case CTypes([{type: t, name: _}]):
+				// TODO: silently not binding doesn't seem correct, but it's likely better than infinite recursion
 				if (getRecursion(t) == null) doBind(m, t);
 			case CTypes(_), CMixed(_):
 			case CStructural(fields, _):
+				// We found a bunch of fields but no type, create a merged structure type and bind to that
 				PMap.iter(function(_, cf:TClassField) {
 					var t = getRecursion(cf.cfType);
 					if (t != null) {
-						var pctx = printContext(); /* OCaml evaluates the sprintf arguments right to left */ var sf = sType(pctx,
+						// port: OCaml evaluates the sprintf arguments right to left
+						var pctx = printContext(); var sf = sType(pctx,
 							cf.cfType);
 						var s = sType(pctx, t) + " appears in { " + cf.cfName + ": " + sf + " }";
 						throw new Unify_error([UnifyCustom("Recursive type"), UnifyCustom(s)]);
@@ -439,7 +454,7 @@ class TUnification {
 		error([ConstraintFailure(name)].concat(e.errors));
 	}
 
-	// These reference cells are initialized below, as in upstream's trailing assignments.
+	// port: upstream's trailing `unify_ref := ...` assignments are these initializers.
 	public static var unifyRef:UnificationContext->T->T->Void = unifyCustom;
 	public static var unifyMinRef:UnificationContext->T->Array<T>->UnifyMinResult = UnifyMinT.unifyMin;
 
@@ -466,6 +481,7 @@ class TUnification {
 		applyParamsStack: null
 	};
 
+	// Unify like targets (e.g. Java) probably would.
 	public static var nativeUnificationContext:UnificationContext = makeNativeContext();
 
 	static function makeNativeContext():UnificationContext {
@@ -493,6 +509,7 @@ class TUnification {
 	}
 
 	public static function link(uctx:UnificationContext, e:TMono, a:T, b:T):Bool {
+		// tell if setting a == b will create a type-loop
 		function loop(t:T):Bool {
 			if (t == a) return true;
 			return switch t {
@@ -517,6 +534,7 @@ class TUnification {
 					}
 			}
 		}
+		// tell is already a ~= b
 		if (loop(b)) return follow(b) == a;
 		if (b == tDynamic) {
 			if (!Monomorph.isDynamic(e)) Monomorph.addModifier(e, MDynamic);
@@ -611,6 +629,11 @@ class TUnification {
 		}
 	}
 
+	// perform unification with subtyping.
+	// the first type is always the most down in the class hierarchy
+	// it's also the one that is pointed by the position.
+	// It's actually a typecheck of  A :> B where some mutations can happen
+
 	public static function cannotUnify(a:T, b:T):UnifyError return CannotUnify(a, b);
 
 	public static function invalidField(n:String):UnifyError return InvalidFieldType(n);
@@ -628,6 +651,7 @@ class TUnification {
 		case AccCall, AccPrivateCall: false;
 	};
 
+	// we can restrict access as soon as both are runtime-compatible
 	public static function unifyVarAccess(c:UnificationContext, a:VarAccess, b:VarAccess):Bool {
 		if (StdType.enumEq(a, b)) return true;
 		return switch [a, b] {
@@ -914,6 +938,8 @@ class TUnification {
 				if (ea != eb) error([cannotUnify(a, b)]);
 				unifyTypeParams(c, a, b, tl1, tl2);
 			case [TAbstract(ab1, [t1]), TAbstract(ab2, [t2])] if (pathIs(ab1.aPath, "", "Null") && pathIs(ab2.aPath, "", "Null")):
+				// Unify the wrapped types directly so a monomorph on either side binds to the
+				// unwrapped type instead of capturing the whole Null<...> - see #11077
 				try {
 					unifyCustom(c, t1, t2);
 				} catch (e:Unify_error) {
@@ -935,6 +961,7 @@ class TUnification {
 				try {
 					unifyTypeParams(c, a, b, tl1, tl2);
 				} catch (first:Unify_error) {
+					// the type could still have a from/to relation to itself (issue #3494)
 					try {
 						unifyAbstracts(c, a, b, a1, tl1, a2, tl2);
 					} catch (_:Unify_error) {
@@ -989,7 +1016,6 @@ class TUnification {
 							unifyCustom(nested, s1.ret, s2.ret);
 							i++;
 					}
-					// Source iterates the second argument list first for contravariance.
 					List.iter2(function(v1, v2) {
 						if (v1.optional && !v2.optional) error([
 							CannotUnify(v1.type, v2.type),
@@ -997,7 +1023,7 @@ class TUnification {
 						]);
 						unifyCustom(nested, v1.type, v2.type);
 						i++;
-					}, s2.args, s1.args);
+					}, s2.args, s1.args); // contravariance
 				} catch (e:Unify_error) {
 					error([
 						cannotUnify(a, b),
@@ -1006,6 +1032,7 @@ class TUnification {
 				}
 			case [TInst(cl, tl), TAnon(an)]:
 				if (PMap.isEmpty(an.aFields)) switch cl.clKind {
+					// one of the constraints must unify with { }
 					case KTypeParameter(p): if (!core.ds.ArrayTools.exists(getConstraints(p), function(t) return switch follow(t) {
 							case TInst(_, _), TAnon(_): true;
 							case _: false;
@@ -1015,6 +1042,8 @@ class TUnification {
 				cl.clBuild();
 				try {
 					PMap.iter(function(n, f2) {
+						// introducing monomorphs while unifying might create infinite loops - see #2315
+						// let's store these monomorphs and make sure we reach a fixed point
 						var monos:Array<T> = [];
 						function makeType(f:TClassField):T {
 							if (c.opaqueFieldParams || f.cfParams.length == 0) return f.cfType;
@@ -1033,6 +1062,7 @@ class TUnification {
 						if (hasClassFieldFlag(f2, CfPublic) && !hasClassFieldFlag(f1, CfPublic)) error([invalidVisibility(n)]);
 						switch f2.cfKind {
 							case Var({vRead: AccNo}), Var({vRead: AccNever}):
+								// we will do a recursive unification, so let's check for possible recursion
 								var old = c.unifyNewMonos;
 								c.unifyNewMonos = monos.concat(old);
 								recStack(c.unifyStack, pair(ft, f2.cfType),
@@ -1046,6 +1076,7 @@ class TUnification {
 								}, function(l) error([invalidField(n)].concat(l)));
 								c.unifyNewMonos = old;
 							case Method(MethNormal), Method(MethInline), Var({vWrite: AccNo}), Var({vWrite: AccNever}):
+								// same as before, but unification is reversed (read-only var)
 								var old = c.unifyNewMonos;
 								c.unifyNewMonos = monos.concat(old);
 								recStack(c.unifyStack, pair(f2.cfType, ft),
@@ -1059,6 +1090,7 @@ class TUnification {
 								}, function(l) error([invalidField(n)].concat(l)));
 								c.unifyNewMonos = old;
 							case _:
+								// will use fast_eq, which have its own stack
 								try {
 									unifyWithAccess(c, f1, ft, f2);
 								} catch (e:Unify_error) {
@@ -1067,6 +1099,7 @@ class TUnification {
 						}
 						for (f2o in f2.cfOverloads) if (!core.ds.ArrayTools.exists([f1].concat(f1.cfOverloads),
 							function(f1o) return typeIseqCustom(c, f1o.cfType, f2o.cfType))) error([MissingOverload(f1, f2o.cfType)]);
+						// we mark the field as :?used because it might be used through the structure
 						if (!hasClassFieldFlag(f1, CfMaybeUsed)) {
 							addClassFieldFlag(f1, CfMaybeUsed);
 							switch f2.cfKind {
@@ -1117,6 +1150,7 @@ class TUnification {
 			case [TInst(cl, tl), TAbstract(ab, [t1])] if (pathIs(ab.aPath, "haxe", "Constructible")):
 				try {
 					switch cl.clKind {
+						// type parameters require an equal Constructible constraint
 						case KTypeParameter(p): if (!core.ds.ArrayTools.exists(getConstraints(p), function(t) return switch follow(t) {
 								case TAbstract(ab, [t2]) if (pathIs(ab.aPath, "haxe", "Constructible")): typeIseqCustom(c, t1, t2);
 								case _: false;
@@ -1181,6 +1215,7 @@ class TUnification {
 					case KTypeParameter(p): p;
 					case _: Globals.die("", "tUnification.ml");
 				};
+				// one of the constraints must satisfy the abstract
 				if (!core.ds.ArrayTools.exists(getConstraints(p), function(t) {
 					var t = applyParams(cl.clParams, pl, t);
 					try {
@@ -1354,6 +1389,7 @@ class TUnification {
 					var c = getAbstractContext(c, a, b, ab),
 						f = getAbstractUnifyFunc(c, EqStrict),
 						athis = map(ab.aThis);
+					// we cannot allow implicit casts when the this type is not completely known yet
 					if (MetadataTools.has(MultiType, ab.aMeta) && hasMono(athis)) throw new Unify_error([]);
 					withVariance(c, function(a, b) typeEqCustom(core.ds.Record.withFields(c, {equalityKind: EqStrict}), a, b), athis,
 						map(ta));
@@ -1451,14 +1487,17 @@ class TUnification {
 	public static function unifyWithAccess(c:UnificationContext, f1:TClassField, t1:T, f2:TClassField):Void {
 		var c = getNestedContext(c);
 		switch f2.cfKind {
+			// write only
 			case Var({vRead: AccNo}), Var({vRead: AccNever}):
 				unifyCustom(c, f2.cfType, t1);
+			// read only
 			case Method(MethNormal), Method(MethInline), Var({vWrite: AccNo}), Var({vWrite: AccNever}):
 				var final1 = hasClassFieldFlag(f1, CfFinal),
 					final2 = hasClassFieldFlag(f2, CfFinal);
 				if (final1 != final2 && !c.allowFinalInvariance) throw new Unify_error([CannotUnify(f2.cfType,
 					f1.cfType), FinalInvariance(final2, final1)]);
 				unifyCustom(c, t1, f2.cfType);
+			// read/write
 			case _:
 				withVariance(c, function(a, b) typeEqCustom(core.ds.Record.withFields(c, {equalityKind: EqBothDynamic}), a, b), t1,
 					f2.cfType);
@@ -1496,6 +1535,7 @@ class UnifyMinT {
 				tl.unshift(t);
 			case TType(td, pl):
 				loop(applyTypedef(td, pl));
+				// prioritize the most generic definition
 				tl.unshift(t);
 			case TLazy(f):
 				loop(lazyType(f));

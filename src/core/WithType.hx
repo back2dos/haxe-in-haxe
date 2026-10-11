@@ -2,7 +2,7 @@ package core;
 
 import core.TType.T;
 
-// Mechanical translation of haxe/src/core/withType.ml. Draft; not compiled or tested.
+// port: from haxe/src/core/withType.ml.
 @:structInit class WithTypeSourceInformation {
 	public var siName:String;
 	public var siDoc:Null<String>;

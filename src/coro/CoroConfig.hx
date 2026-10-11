@@ -6,7 +6,6 @@ import core.data.DataReaderApi;
 import core.TFunctions.NotFound;
 import core.data.MetaDataApi;
 
-// haxe/src/coro/coroConfig.ml — mechanical draft; not compile-validated.
 @:structInit class CoroAssert {
 	public var numStates:Null<Int>;
 	public var numHoisted:Null<Int>;

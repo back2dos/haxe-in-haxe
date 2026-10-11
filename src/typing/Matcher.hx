@@ -24,7 +24,6 @@ import typing.matcher.ExprToPattern;
 import typing.matcher.TexprConverter;
 import typing.matcher.MatcherGlobals;
 
-// haxe/src/typing/matcher.ml (module Match) — mechanical draft; not compile-validated.
 @:structInit class MatchCase {
 	public var patterns:Array<Expr>;
 	public var guard:Null<Expr>;
@@ -89,7 +88,7 @@ class Matcher {
 				}
 			case _:
 		}
-		// collect_free_monos is disabled in the pinned upstream entry point too.
+		// var freeMonos = Case.collectFreeMonos(subject.type);
 		var rows:Array<CaseRow> = cases.map(function(c):CaseRow {
 			var cp = c.pos;
 			if (c.expr != null
@@ -103,10 +102,18 @@ class Matcher {
 		inline function inferSwitchType():T return switch withType {
 			case NoValue: ctx.t.tvoid;
 			case Value(_):
-				if (rows.length == 0) ctx.t.tvoid else {
+				if (rows.length == 0)
+					// If there are no cases we assume Void. This then causes a "Cannot use Void as value" error.
+					// Note that we cannot rely on an exhaustiveness error because the switch could be over an empty enum.
+					ctx.t.tvoid
+				else {
 					var el = rows.map(function(row) {
 						var e = row.caseData.caseExpr;
-						return e == null ? mk(TBlock([]), ctx.t.tvoid, row.caseData.casePos) : switch e.eexpr {
+						return e == null
+							// If we have no block we have to use the `case pattern` position because that's all we have.
+							? mk(TBlock([]), ctx.t.tvoid, row.caseData.casePos)
+							// If we have a block, use the position of the last element.
+							: switch e.eexpr {
 							case TBlock(values) if (values.length > 0): values[values.length - 1];
 							case _: e;
 						};

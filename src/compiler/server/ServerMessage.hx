@@ -7,7 +7,6 @@ import core.Define;
 import context.Common;
 import compiler.CompilationCache.CachedDirectory;
 
-// Port of haxe/src/compiler/server/serverMessage.ml.
 @:structInit class ServerMessageOptions {
 	public var printCompilerStage:Bool;
 	public var printAddedDirectory:Bool;
@@ -63,14 +62,14 @@ class ServerMessage {
 		printNewContext: false
 	};
 
-	// OCaml print_endline: writes the line and flushes stdout.
+	// port: OCaml print_endline: writes the line and flushes stdout.
 	static function printEndline(s:String):Void {
 		var out = Sys.stdout();
 		out.writeString(s + "\n");
 		out.flush();
 	}
 
-	// Printf "%Ni": right-aligned in a field of width N.
+	// port: Printf "%Ni": right-aligned in a field of width N.
 	static function pad(s:String, width:Int):String {
 		return StringTools.lpad(s, " ", width);
 	}
@@ -99,7 +98,7 @@ class ServerMessage {
 			+ dirs.map(dir -> "\"" + dir.cPath + "\"").join(", ") + "]");
 	}
 
-	// Printf "%2.0f"
+	// port: Printf "%2.0f"
 	static function float0(f:Float):String {
 		return pad(Std.string(Math.fround(f)), 2);
 	}
@@ -143,7 +142,7 @@ class ServerMessage {
 		if (config.printClassPathsChanged) printEndline(signString(com) + "class paths changed, resetting directories");
 	}
 
-	// JS: functions have their own `arguments`; on C++, @:native would turn the call into a global function
+	// port: JS functions have their own `arguments`; on C++, @:native would turn the call into a global function
 	#if js @:native("arguments_") #end
 	public static function arguments(data:String):Void {
 		if (config.printArguments) printEndline("Processing Arguments " + data);
@@ -157,7 +156,7 @@ class ServerMessage {
 		if (config.printDefines) {
 			var buffer = new StringBuf();
 			buffer.add("Defines ");
-			// PMap.iter: ascending key order
+			// port: PMap.iter: ascending key order
 			var keys = [for (k in com.defines.values.keys()) k];
 			keys.sort(Reflect.compare);
 			for (k in keys) buffer.add(k + "=" + com.defines.values.get(k) + ",");
@@ -167,7 +166,7 @@ class ServerMessage {
 	}
 
 	public static function signature(com:CommonContext, tabs:String, sign:String):Void {
-		// Signatures are already hexadecimal in the port (Digest.to_hex).
+		// port: signatures are already hexadecimal (Digest.to_hex).
 		if (config.printSignature) printEndline("Using signature " + sign);
 	}
 
@@ -183,7 +182,7 @@ class ServerMessage {
 		}
 	}
 
-	// Printf "%.3f"
+	// port: Printf "%.3f"
 	static function formatSeconds(t:Float):String {
 		var ms = Math.round(t * 1000);
 		var s = Std.string(Std.int(ms / 1000)), frac = Std.string(ms % 1000);

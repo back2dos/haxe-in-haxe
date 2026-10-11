@@ -15,16 +15,14 @@ import macros.eval.EvalExceptions.Return;
 
 using macros.eval.EvalValue.EvalValueTools;
 
-/**
-	The closures the JIT produces: an emitter is applied to its compile-time
-	arguments and returns an `Emitter` (`env -> value`).
-**/
+// port: the closures the JIT produces: an emitter is applied to its compile-time
+// arguments and returns an `Emitter` (`env -> value`).
 typedef Emitter = Env->Value;
 
-/** `env -> value -> unit` argument setters of `process_arguments`. **/
+// port: `env -> value -> unit` argument setters of `process_arguments`.
 typedef ArgSetter = Env->Value->Void;
 
-/** One `catch` of `emit_try`: `(exec, path, varacc)`. **/
+// port: one `catch` of `emit_try`: `(exec, path, varacc)`.
 class TryCatch {
 	public final exec:Emitter;
 	public final path:Int;
@@ -37,28 +35,25 @@ class TryCatch {
 	}
 }
 
-/**
-	haxe/src/macro/eval/evalEmitter.ml.
-
-	Deviations:
-	- OCaml partial application (`emit_x a b env`) becomes a function of the
-	  compile-time arguments returning an `Emitter` closure. Emitters that upstream
-	  uses unapplied (`emit_null`, `emit_new_array`, `emit_return_null`,
-	  `emit_break`, `emit_continue`) are static `Emitter` values.
-	- `Std.finally` is a catch-all that pops the environment and rethrows.
-	- `emit_closure`/`create_closure`: the `(slot, value) array` of captured
-	  references is split into a slot array (computed once at JIT time) and a value
-	  array (filled per closure creation), which avoids one tuple per capture.
-	- Out-of-bounds `Array.unsafe_get`/`unsafe_set` on vectors is undefined in
-	  upstream; a Haxe array would return null or grow, so these raise
-	  `Invalid_argument "index out of bounds"` (OCaml's checked-access error), as
-	  does the checked `ev.eargs.(i)` of `emit_enum_parameter_read`.
-	- `Array.make`'s `Invalid_argument` for sizes above `Sys.max_array_length`
-	  cannot happen for 32-bit sizes, so that branch of `emit_new_vector_int` is
-	  not reproduced.
-	- The debugger is not ported: `emit_try` still records caught types when
-	  `ctx.debug.supportDebugger` is set (it never is in haxe-in-haxe).
-**/
+// port: deviations:
+// - OCaml partial application (`emit_x a b env`) becomes a function of the
+//   compile-time arguments returning an `Emitter` closure. Emitters that upstream
+//   uses unapplied (`emit_null`, `emit_new_array`, `emit_return_null`,
+//   `emit_break`, `emit_continue`) are static `Emitter` values.
+// - `Std.finally (pop_environment)` pops the environment on normal return only
+//   (see createFunctionNoret).
+// - `emit_closure`/`create_closure`: the `(slot, value) array` of captured
+//   references is split into a slot array (computed once at JIT time) and a value
+//   array (filled per closure creation), which avoids one tuple per capture.
+// - Out-of-bounds `Array.unsafe_get`/`unsafe_set` on vectors is undefined in
+//   upstream; a Haxe array would return null or grow, so these raise
+//   `Invalid_argument "index out of bounds"` (OCaml's checked-access error), as
+//   does the checked `ev.eargs.(i)` of `emit_enum_parameter_read`.
+// - `Array.make`'s `Invalid_argument` for sizes above `Sys.max_array_length`
+//   cannot happen for 32-bit sizes, so that branch of `emit_new_vector_int` is
+//   not reproduced.
+// - The debugger is not ported: `emit_try` still records caught types when
+//   `ctx.debug.supportDebugger` is set (it never is in haxe-in-haxe).
 class EvalEmitter {
 	// Helper
 	public static function unexpectedValueP(v:Value, s:String, p:Pos):Dynamic {
@@ -121,8 +116,7 @@ class EvalEmitter {
 		if (env.envStackDepth > EvalContext.getCtx().maxStackDepth) EvalContext.excString("Stack overflow");
 	}
 
-	/** Evaluates [execs] in order (`List.map (apply env) execs`). **/
-	// An argument array allocated at its size (pushing grows it several times on HashLink).
+	// port: an argument array allocated at its size (pushing grows it several times on HashLink).
 	static inline function presized(n:Int):Array<Value> {
 		#if hl
 		return cast hl.types.ArrayObj.alloc(new hl.NativeArray<Value>(n));
@@ -133,13 +127,14 @@ class EvalEmitter {
 		#end
 	}
 
+	// port: evaluates [execs] in order (`List.map (apply env) execs`).
 	static inline function applyAll(execs:Array<Emitter>, env:Env):Array<Value> {
 		var vl = presized(execs.length);
 		for (i in 0...execs.length) vl[i] = execs[i](env);
 		return vl;
 	}
 
-	/** `vthis :: List.map (apply env) execs` without an intermediate array. **/
+	// port: `vthis :: List.map (apply env) execs` without an intermediate array.
 	static inline function applyAllThis(vthis:Value, execs:Array<Emitter>, env:Env):Array<Value> {
 		var vl = presized(execs.length + 1);
 		vl[0] = vthis;
@@ -261,7 +256,7 @@ class EvalEmitter {
 		return function(env:Env):Value {
 			return switch exec(env) {
 				case VInt32(i):
-					// IntMap.find raising Not_found: emitters are never null
+					// port: IntMap.find raising Not_found: emitters are never null
 					var f = cases.findOpt(i);
 					if (f == null) execDef(env) else f(env);
 				case VNull:
@@ -300,13 +295,13 @@ class EvalEmitter {
 		}
 	}
 
-	/** The tail recursion on `Continue` is a loop. **/
+	// port: the tail recursion on `Continue` is a loop.
 	public static function runWhileContinue(execCond:Emitter, execBody:Emitter, env:Env):Void {
 		while (true) {
 			try {
 				while (EvalMisc.isTrue(execCond(env))) {
 					execBody(env);
-					core.ds.GcPolicy.tick(); // loops allocate without calls or typing
+					core.ds.GcPolicy.tick(); // port: loops allocate without calls or typing
 					EvalLock.tick();
 				}
 				return;
@@ -369,7 +364,7 @@ class EvalEmitter {
 				var v = exc.value;
 				eval.caughtException = VNull;
 				restore();
-				// Frames left by the throw are popped first (see createFunction): upstream's
+				// port: frames left by the throw are popped first (see createFunction): upstream's
 				// finally has popped them by the time its handler builds the stack.
 				while (true) {
 					var env2 = eval.env;
@@ -462,7 +457,7 @@ class EvalEmitter {
 	// Type.call() - immediate
 
 	public static function emitProtoFieldCall(v:AtomicLazy<Vfunc>, execs:Array<Emitter>, p:Pos):Emitter {
-		// Forced once per call site: reading the generic AtomicLazy's value back as a
+		// port: forced once per call site: reading the generic AtomicLazy's value back as a
 		// function is a dynamic cast on HashLink.
 		var forced:Null<Vfunc> = null;
 		return function(env:Env):Value {
@@ -519,7 +514,7 @@ class EvalEmitter {
 	// new() - immediate + this-binding
 
 	public static function emitConstructorCall(proto:Vprototype, v:AtomicLazy<Vfunc>, execs:Array<Emitter>, p:Pos):Emitter {
-		// Forced once per call site: reading the generic AtomicLazy's value back as a
+		// port: forced once per call site: reading the generic AtomicLazy's value back as a
 		// function is a dynamic cast on HashLink.
 		var forced:Null<Vfunc> = null;
 		return function(env:Env):Value {
@@ -555,7 +550,7 @@ class EvalEmitter {
 	}
 
 	public static function emitSuperCall(v:AtomicLazy<Vfunc>, execs:Array<Emitter>, p:Pos):Emitter {
-		// Forced once per call site: reading the generic AtomicLazy's value back as a
+		// port: forced once per call site: reading the generic AtomicLazy's value back as a
 		// function is a dynamic cast on HashLink.
 		var forced:Null<Vfunc> = null;
 		return function(env:Env):Value {
@@ -1150,7 +1145,7 @@ class EvalEmitter {
 		if (nv > nf) EvalContext.excString('Bad number of arguments: 0 vs. ${nv - nf}');
 	}
 
-	// Upstream wraps each call in `Std.finally (pop_environment)`. A try is a setjmp
+	// port: upstream wraps each call in `Std.finally (pop_environment)`. A try is a setjmp
 	// on HashLink/C, so the environment is popped on normal return only; after an
 	// exception, frames are popped where it is caught (emit_try, catch_exceptions)
 	// before anything reads eval.env, which is the state upstream's finally leaves.
@@ -1198,10 +1193,8 @@ class EvalEmitter {
 		}
 	}
 
-	/**
-		[mapping] is upstream's `(i, slot) array`, as two parallel arrays: the
-		closure's capture slots [mappingI] and the outer capture slots [mappingSlot].
-	**/
+	// port: [mapping] is upstream's `(i, slot) array`, as two parallel arrays: the
+	// closure's capture slots [mappingI] and the outer capture slots [mappingSlot].
 	public static function emitClosure(ctx:Context, mappingI:Array<Int>, mappingSlot:Array<Int>, eci:EnvInfo, hasret:Bool, exec:Emitter,
 			fl:Array<ArgSetter>):Emitter {
 		return function(env:Env):Value {

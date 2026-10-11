@@ -18,7 +18,6 @@ import core.DisplayTypes;
 import core.TType;
 import core.display.CompletionItem;
 
-// haxe/src/context/display/diagnosticsPrinter.ml
 @:structInit class Diagnostic {
 	public var diagKind:MessageKind;
 	public var diagPos:Pos;
@@ -69,6 +68,11 @@ class DiagnosticsPrinter {
 	/**
 		Convert a single missing_fields_diagnostics to its JSON form and
 		store it as a [Message.t] with [DKMissingFields].
+
+		The JSON carries: moduleType, moduleFile, and a single entry
+		(with "fields" and "cause"). The printer groups entries by
+		position, handles cross-entry field deduplication, and wraps
+		them in the final "entries" array.
 	**/
 	public static function makeMissingFieldsMessage(mf:MissingFieldsDiagnostics):CompilerMessage {
 		var jctx = Genjson.createMinimalConfig();
@@ -201,7 +205,7 @@ class DiagnosticsPrinter {
 			} else if (d.cmDepth > 0 && current != null) {
 				var diag = current;
 				var depth = d.cmDepth;
-				// ExtString.String.nsplit "" returns []
+				// port: ExtString.String.nsplit "" returns []
 				var lines = d.cmMessage == "" ? [] : d.cmMessage.split("\n");
 				if (lines.length == 0) continue;
 				var s = lines[0];
@@ -215,6 +219,8 @@ class DiagnosticsPrinter {
 				add(d.cmDiagnosticsKind, d.cmPos, core.Message.Message.severity(d), core.Message.Message.code(d), d.cmJson);
 			} else {
 				// Do not add errors with depth greater than one as top level diagnostic.
+				// This could happen when running diagnostics for a file that is wentioned in
+				// sub errors of a file not included for diagnostics.
 			}
 		}
 		// Group MissingFields entries by position and emit combined diagnostics.
@@ -309,7 +315,7 @@ class DiagnosticsPrinter {
 			}
 		});
 		var jl = diagnostics.fold(function(file, diag:Array<Diagnostic>, acc:Array<JsonValue>) {
-			// List.rev_map
+			// port: List.rev_map
 			var jl = [];
 			for (diag in diag) jl.unshift(JObject([
 				kv("kind", JInt(core.Message.Message.diagnosticsKindToInt(diag.diagKind))),

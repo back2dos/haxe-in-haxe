@@ -4,16 +4,24 @@ import haxe.io.Bytes;
 import haxe.io.Input;
 import compiler.io.CompilerIo;
 
-/**
-	Port of haxe/src/compiler/pipeThings.ml: IO piping between the compilation
-	server and its clients.
+/** Handles IO piping between the compilation server and its clients.
 
-	Host differences: Haxe inputs cannot be polled with `Unix.select`, so the
-	stdin forwarders below cannot be interrupted while blocked in a read.
-	`run_command` polls the server-side stdin when it is a `ForwardedInput`
-	(the client stdin forwarded by `Server`); the client's own stdin forwarder
-	(`poll`) is left running instead of being joined, and ends with the process.
-**/
+	In server mode, the compiler runs as a long-lived process.  Client
+	requests arrive over a socket, and we need to redirect the compilation's
+	stdin/stdout/stderr through the socket rather than using the server
+	process's own file descriptors.
+
+	Protocol encoding (how stdout/stderr/errors are multiplexed) is handled
+	by {!CompilerIo} via its opaque {!CompilerIo.protocol} type.  This module
+	provides the client-side socket communication ([poll], [ssend]) and the
+	server-side subprocess runner ({!run_command}).
+
+	Stdin data from the client is forwarded as raw bytes after the null-terminated
+	argument string, so newlines in stdin require no special encoding. */
+// port: Haxe inputs cannot be polled with `Unix.select`. `run_command` forwards the
+// server-side stdin only when it is a `ForwardedInput` (the client stdin forwarded by
+// `Server`) and polls its queue; `poll` reads descriptor 0 through `RawStdin` and
+// joins the forwarding thread only when `RawStdin.interruptible`.
 class PipeThings {
 	/** Reads all available data from [channel] in 1024-byte chunks,
 		passing each chunk to [f]. Stops on EOF or Unix error. */
@@ -26,7 +34,11 @@ class PipeThings {
 	}
 
 	/** Runs a shell command in server mode, forwarding stdin from the client
-		and capturing stdout/stderr through the socket protocol. */
+		and capturing stdout/stderr through the socket protocol.
+		Uses {!Process.run} to create the child process so we can connect
+		the child's stdin to the client's forwarded data and properly signal
+		EOF when the client closes its end. */
+	// port: sys.io.Process stands in for Process.run.
 	public static function runCommand(io:CompilerIoData, cmd:String):Int {
 		var writeOut = function(s) CompilerIo.writeOut(io, s);
 		var writeErr = function(s) CompilerIo.writeErr(io, s);
@@ -36,7 +48,10 @@ class PipeThings {
 		var perr = proc.stderr;
 		var bout = Bytes.alloc(1024);
 		var berr = Bytes.alloc(1024);
-		/* Use a flag to signal the stdin-forwarding thread to stop. */
+		/* Use a flag to signal the stdin-forwarding thread to stop.
+			The thread uses Unix.select with a timeout so it can check this flag
+			periodically, avoiding a hang when the child exits but the client
+			hasn't closed its stdin (e.g. interactive use or partial writes). */
 		var stopStdin = false;
 		var tin = switch CompilerIo.getStdin(io) {
 			case stdinPipe if (Std.isOfType(stdinPipe, ForwardedInput)):
@@ -154,25 +169,23 @@ class PipeThings {
 	}
 }
 
-/**
-	The client's stdin as `Unix.select` + `Unix.read` on descriptor 0 see it
-	(PipeThings.poll). `read` returns the byte count read (at most the buffer
-	length, as soon as any data is available), 0 at end of input, or -1 when
-	nothing arrived within [timeout] seconds.
-
-	Host difference: Haxe's `Sys.stdin()` is a C `FILE`; reading it blocks until
-	the whole buffer is filled and holds the stream lock, so glibc's `exit`
-	(which locks every stream to flush it) hangs while the forwarding thread
-	waits for input. On HashLink, descriptor 0 is polled through the std
-	library's `select` and read with `read(2)` (the natives behind
-	sys.net.Socket.select and sys.io.Process, given a handle whose descriptor
-	is 0). Elsewhere it falls back to byte reads of `Sys.stdin()`, which cannot
-	be interrupted (`interruptible` is false: the thread is not joined).
-**/
+// port: the client's stdin as `Unix.select` + `Unix.read` on descriptor 0 see it
+// (PipeThings.poll). `read` returns the byte count read (at most the buffer
+// length, as soon as any data is available), 0 at end of input, or -1 when
+// nothing arrived within [timeout] seconds.
+//
+// Haxe's `Sys.stdin()` is a C `FILE`; reading it blocks until the whole buffer
+// is filled and holds the stream lock, so glibc's `exit` (which locks every
+// stream to flush it) hangs while the forwarding thread waits for input. On
+// HashLink, descriptor 0 is polled through the std library's `select` and read
+// with `read(2)` (the natives behind sys.net.Socket.select and sys.io.Process,
+// given a handle whose descriptor is 0). Elsewhere it falls back to byte reads
+// of `Sys.stdin()`, which cannot be interrupted (`interruptible` is false: the
+// thread is not joined).
 class RawStdin {
 	#if hl
 	public static inline final interruptible = true;
-	// hl_socket { int sock } and vprocess { finalize; int oread; ... } with descriptor 0
+	// port: hl_socket { int sock } and vprocess { finalize; int oread; ... } with descriptor 0
 	static var socket:Null<hl.Abstract<"hl_socket">> = null;
 	static var process:Null<hl.Abstract<"hl_process">> = null;
 	static var selectTmp:Null<hl.Bytes> = null;
@@ -214,12 +227,10 @@ class RawStdin {
 	#end
 }
 
-/**
-	Server-side stdin of a request: bytes the client sends after its
-	null-terminated arguments, fed by a forwarding thread. Upstream uses a Unix
-	pipe (`SocketRequest.setup_client_stdin_forward`); here a queue of chunks,
-	with an empty chunk marking end of input.
-**/
+// port: server-side stdin of a request: bytes the client sends after its
+// null-terminated arguments, fed by a forwarding thread. Upstream uses a Unix
+// pipe (`SocketRequest.setup_client_stdin_forward`); here a queue of chunks,
+// with an empty chunk marking end of input.
 class ForwardedInput extends Input {
 	final queue = new sys.thread.Deque<Bytes>();
 	var current:Null<Bytes> = null;
@@ -236,7 +247,7 @@ class ForwardedInput extends Input {
 		queue.add(Bytes.alloc(0));
 	}
 
-	/** Returns the next chunk, an empty chunk at end of input, or null after [timeout] seconds. **/
+	// port: returns the next chunk, an empty chunk at end of input, or null after [timeout] seconds.
 	public function poll(timeout:Float):Null<Bytes> {
 		if (current != null && pos < current.length) {
 			var chunk = current.sub(pos, current.length - pos);

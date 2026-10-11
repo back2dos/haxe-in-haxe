@@ -13,10 +13,15 @@ import optimization.AnalyzerTypes.Graph.*;
 import optimization.AnalyzerTexpr.*;
 import optimization.OptimizerTexpr.*;
 
-// haxe/src/optimization/analyzerTexprTransformer.ml — mechanical draft; not compiled or validated.
 private typedef BlockValue = {var bb:BasicBlockData; var value:TExpr;}
 private typedef BlockValues = {var bb:BasicBlockData; var values:Array<TExpr>;}
 
+/*
+	Transforms an expression to a graph, and a graph back to an expression. This module relies on TexprFilter being
+	run first.
+
+	The created graph is intact and can immediately be transformed back to an expression, or used for analysis first.
+*/
 class AnalyzerTexprTransformer {
 	public static function buildFunc(ctx:AnalyzerContext, bb:BasicBlockData, tf:TFunc, t:T,
 			p:Pos):{root:BasicBlockData, exit:BasicBlockData} {
@@ -38,7 +43,7 @@ class AnalyzerTexprTransformer {
 		case TermContinue(p): mk(TContinue, tDynamic, p);
 		case TermReturnValue(e, p): mk(TReturn(e), tDynamic, p);
 		case TermThrow(e, p): mk(TThrow(e), tDynamic, p);
-		case TermCondBranch(e): e;
+		case TermCondBranch(e): e; // TODO: this shouldn't be here
 		case _: null;
 	};
 
@@ -133,7 +138,7 @@ class AnalyzerTexprTransformer {
 	public static function toTexpr(ctx:AnalyzerContext):TExpr return func(ctx, ctx.entry.bbId);
 }
 
-// The upstream mutually recursive local functions live in a per-function object.
+// port: the upstream mutually recursive local functions live in a per-function object.
 private class FunctionGraphBuilder {
 	var ctx:AnalyzerContext;
 	var g:GraphData;
@@ -165,7 +170,7 @@ private class FunctionGraphBuilder {
 		addCfgEdge(bb, root, CFGFunction);
 		var last = block(root, tf.tfExpr);
 		closeNode(last);
-		addCfgEdge(last, exit, CFGGoto);
+		addCfgEdge(last, exit, CFGGoto); // implied return
 		closeNode(exit);
 		return {root: root, exit: exit};
 	}
@@ -211,7 +216,7 @@ private class FunctionGraphBuilder {
 
 	function noVoid(t:T, p:Pos):Void if (core.TOther.ExtType.isVoid(follow(t))) core.Error.raiseTypingError("Cannot use Void as value", p);
 
-	// name_stack is consed and popped with List.tl upstream; here its top is the array's last element.
+	// port: name_stack is consed and popped with List.tl upstream; here its top is the array's last element.
 	var popName:Void->Void = null;
 
 	function pushName(s:String):Void->Void {
@@ -369,10 +374,10 @@ private class FunctionGraphBuilder {
 				}): true;
 			case FStatic(_, {cfKind: Method(MethDynamic)}): false;
 			case FEnum(_, _): true;
-			case FDynamic("cca" | "__Index" | "__s"): true;
+			case FDynamic("cca" | "__Index" | "__s"): true; // This is quite retarded, but we have to deal with this somehow...
 			case _: switch [follow(e.etype), follow(e1.etype)] {
 					case [TFun(_), TInst(_, _)]: false;
-					case [TFun(_), _]: true;
+					case [TFun(_), _]: true; // We don't know what's going on here, don't create a temp var (see #5082).
 					case _: false;
 				}
 		};
@@ -404,6 +409,7 @@ private class FunctionGraphBuilder {
 
 	function declareVarAndAssign(bb:BasicBlockData, v:TVar, e:TExpr, p:Pos):BasicBlockData {
 		noVoid(v.vType, p);
+		// TODO: this section shouldn't be here because it can be handled as part of the normal value processing
 		function strip(bb:BasicBlockData, e:TExpr):BlockValue return switch e.eexpr {
 			case TParenthesis(a): strip(bb, a);
 			case TBlock(el):
@@ -493,6 +499,7 @@ private class FunctionGraphBuilder {
 	}
 
 	function blockElement(bb:BasicBlockData, e:TExpr):BasicBlockData return switch e.eexpr {
+		// variables
 		case TVar(v, null):
 			addTexpr(bb, e);
 			bb;
@@ -511,6 +518,7 @@ private class FunctionGraphBuilder {
 			}
 			close();
 			bb;
+		// branching
 		case TMeta({meta: core.MetaList.StrictMeta.MergeBlock}, {eexpr: TBlock(el)}): blockEl(true, bb, el);
 		case TBlock([]) if (core.TOther.ExtType.isVoid(follow(e.etype))): bb;
 		case TBlock(el):
@@ -620,6 +628,8 @@ private class FunctionGraphBuilder {
 			var bodyNext = block(body, e2);
 			var loopBreaks = close();
 			var next = if (loopBreaks.length == 0) {
+				// The loop appears to be infinite, let's assume that something within it throws.
+				// Otherwise DCE's mark-pass won't see its body and removes everything.
 				addCfgEdge(body, exit, CFGMaybeThrow);
 				g.gUnreachable;
 			} else createNode(BKNormal, bb.bbType, bb.bbPos);
@@ -638,6 +648,7 @@ private class FunctionGraphBuilder {
 			var close = beginTry(bx);
 			var tn = block(bt, e1);
 			close();
+			// We always want to keep catch-blocks, so let's add a pseudo CFG edge if it's unreachable.
 			if (bx.bbIncoming.length == 0) addCfgEdge(tn == g.gUnreachable ? bt : tn, bx, CFGMaybeThrow);
 			var reachable = tn != g.gUnreachable;
 			var cs = catches.map(c -> {
@@ -659,6 +670,7 @@ private class FunctionGraphBuilder {
 			closeNode(bx);
 			closeNode(bb);
 			next;
+		// control flow
 		case TReturn(null):
 			addCfgEdge(bb, exit, CFGGoto);
 			addTerminator(bb, TermReturn(e.epos));
@@ -686,6 +698,7 @@ private class FunctionGraphBuilder {
 				else for (bx in tryStack) addCfgEdge(r.bb, bx, CFGGoto);
 				addTerminator(r.bb, TermThrow(r.value, e.epos));
 			}
+		// side_effects
 		case TCall({eexpr: TIdent(s)}, el) if (isReallyUnbound(s)):
 			checkUnboundCall(s, el);
 			addTexpr(bb, e);
@@ -728,7 +741,9 @@ private class FunctionGraphBuilder {
 			var r = value(bb, e1);
 			addTexpr(r.bb, withExpr(e, TField(r.value, fa)));
 			r.bb;
+		// no-side-effect
 		case TEnumParameter(_, _, _) | TEnumIndex(_) | TFunction(_) | TConst(_) | TTypeExpr(_) | TLocal(_) | TIdent(_): bb;
+		// no-side-effect composites
 		case TParenthesis(e1) | TMeta(_, e1) | TField(e1, _) | TUnop(_, _, e1): blockElement(bb, e1);
 		case TArray(e1, e2) | TBinop(_, e1, e2): blockElement(blockElement(bb, e1), e2);
 		case TArrayDecl(el): blockEl(false, bb, el);

@@ -9,7 +9,8 @@ class PathTest {
 		var source = Path.parsePath("foo\\bar/Baz.hx");
 		if (source.pack.join(".") != "foo.bar" || source.name != "Baz") throw "Path parsing failed";
 		var std = Path.parseTypePath("foo._std.Bar");
-		if (std.pack.join(".") != "foo" || std.name != "Bar") throw "_std path parsing failed";
+		// path.ml parse_path: `_ :: "_std" :: l` drops the segment before _std too
+		if (std.pack.length != 0 || std.name != "Bar") throw "_std path parsing failed";
 		var invalid = false;
 		try Path.parsePath("Foo.Bar") catch (error:Dynamic) invalid = Std.string(error).indexOf("Could not process argument Foo.Bar") == 0;
 		if (!invalid) throw "Invalid package path was accepted";

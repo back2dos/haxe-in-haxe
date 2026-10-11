@@ -10,7 +10,6 @@ import core.Ast;
 import core.Meta;
 import core.DisplayTypes;
 
-// haxe/src/context/display/documentSymbols.ml
 class DocumentSymbols {
 	public static function collectModuleSymbols(mname:Null<{file:String, name:String}>, withLocals:Bool,
 			data:Package):Array<SymbolInformationData> {
@@ -126,7 +125,7 @@ class DocumentSymbols {
 	}
 }
 
-/** `DocumentSymbols.Printer` **/
+// port: DocumentSymbols.Printer
 class DocumentSymbolsPrinter {
 	static inline function kv(n:String, v:JsonValue):JsonField return {name: n, value: v};
 
@@ -161,11 +160,11 @@ class DocumentSymbolsPrinter {
 	}
 }
 
-/** OCaml `Str` regular expressions, translated to `EReg`. **/
+// port: OCaml `Str` regular expressions, translated to `EReg`.
 class StrRegexp {
 	public static function regexpCaseFold(s:String):EReg return new EReg(translate(s), "i");
 
-	/** Str syntax: `\(` `\)` group, `\|` alternative, `\{` literal; `(`, `)`, `|`, `{` `}` are literal. **/
+	// port: Str syntax: `\(` `\)` group, `\|` alternative, `\{` literal; `(`, `)`, `|`, `{` `}` are literal.
 	public static function translate(s:String):String {
 		var b = new StringBuf();
 		var i = 0;

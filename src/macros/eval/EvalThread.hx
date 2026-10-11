@@ -3,19 +3,15 @@ package macros.eval;
 import macros.eval.EvalValue;
 import macros.eval.EvalContext;
 
-/**
-	haxe/src/macro/eval/evalThread.ml.
-
-	Deviations:
-	- `Deque` locks and waits on `dcond` (a host `sys.thread.Condition` owns its
-	  mutex); `dmutex` is not used by these functions.
-	- `ctx.next_thread_id` and `ctx.evals` are plain fields guarded by
-	  `threadLock` (upstream: an `Atomic.t` and a `ThreadSafeHashtbl`).
-	- The debugger is not ported, so no thread events are sent and the eval's
-	  breakpoint is a fresh disabled one (evalDebugMisc.ml `make_breakpoint`).
-	- OCaml domains (`spawn_domain`) and threads both become host threads,
-	  which run Eval code holding `EvalLock` (OCaml's runtime lock).
-**/
+// port: deviations:
+// - `Deque` locks and waits on `dcond` (a host `sys.thread.Condition` owns its
+//   mutex); `dmutex` is not used by these functions.
+// - `ctx.next_thread_id` and `ctx.evals` are plain fields guarded by
+//   `threadLock` (upstream: an `Atomic.t` and a `ThreadSafeHashtbl`).
+// - The debugger is not ported, so no thread events are sent and the eval's
+//   breakpoint is a fresh disabled one (evalDebugMisc.ml `make_breakpoint`).
+// - OCaml domains (`spawn_domain`) and threads both become host threads,
+//   which run Eval code holding `EvalLock` (OCaml's runtime lock).
 class Deque {
 	public static function create():Vdeque return new Vdeque();
 
@@ -27,7 +23,7 @@ class Deque {
 	}
 
 	public static function pop(self:Vdeque, blocking:Bool):Null<Value> {
-		// a blocking pop waits without the Eval lock (Condition.wait releases OCaml's runtime lock)
+		// port: a blocking pop waits without the Eval lock (Condition.wait releases OCaml's runtime lock)
 		return if (blocking) EvalLock.blocking(() -> popHost(self, true)) else popHost(self, false);
 	}
 
@@ -52,7 +48,7 @@ class Deque {
 class EvalThread {
 	static final threadLock = new sys.thread.Mutex();
 
-	// evalDebugMisc.ml `breakpoint_id`
+	// port: evalDebugMisc.ml `breakpoint_id`
 	static var breakpointId = 0;
 
 	public static function createEval(tthread:Vthread):Eval {
@@ -67,7 +63,7 @@ class EvalThread {
 	public static function run(ctx:Context, tthread:Vthread, f:Void->Value):Void {
 		var newEval = createEval(tthread);
 		var id = tthread.threadId;
-		// the debug socket is not ported: no thread events
+		// port: the debug socket is not ported: no thread events
 		inline function maybeSendThreadEvent(reason:String):Void {}
 		threadLock.acquire();
 		ctx.evals.set(id, newEval);

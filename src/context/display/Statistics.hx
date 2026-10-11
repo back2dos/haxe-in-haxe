@@ -14,7 +14,6 @@ import core.Meta;
 import core.DisplayTypes;
 import core.TType;
 
-// haxe/src/context/display/statistics.ml
 enum Relation {
 	Implemented;
 	Extended;
@@ -265,11 +264,61 @@ class Statistics {
 			if (m != null) loop2(m);
 		}
 		loop2(com);
+		// TODO: Using syntax-exploration here is technically fine, but I worry about performance in real codebases.
+		/* let find_symbols = Hashtbl.fold (fun _ kind acc ->
+			let name = string_of_symbol kind in
+			(name,kind) :: acc
+		) symbols [] in
+		let additional_modules = SyntaxExplorer.explore_uncached_modules ctx (CompilationServer.force()) find_symbols in
+		List.iter (fun md ->
+			List.iter f md.m_types
+		) additional_modules; */
+		/* let deal_with_imports paths =
+			let check_subtype m s p =
+				try
+					let mt = List.find (fun mt -> snd (t_infos mt).mt_path = s) m.m_types in
+					add_relation (t_infos mt).mt_name_pos (Referenced,p);
+					Some mt
+				with Not_found ->
+					None
+			in
+			let check_module path p =
+				let m = ctx.g.do_load_module ctx path p in
+				m
+			in
+			let check_field c s p =
+				let cf = PMap.find s c.cl_statics in
+				add_relation cf.cf_name_pos (Referenced,p)
+			in
+			let check_subtype_field m ssub psub sfield pfield = match check_subtype m ssub psub with
+				| Some (TClassDecl c) -> check_field c sfield pfield
+				| _ -> ()
+			in
+			PMap.iter (fun p (_,path) ->
+				match ImportHandling.convert_import_to_something_usable { p with pmin = p.pmax - 1; pmax = p.pmax - 1 } path,List.rev path with
+				| (IDKSubType(sl,s1,s2),_),(_,psubtype) :: (_,pmodule) :: _ ->
+					let m = check_module (sl,s1) pmodule in
+					(*ignore(check_subtype m s1 pmodule);*)
+					ignore(check_subtype m s2 psubtype)
+				| (IDKModuleField(sl,s1,s2),_),(_,pfield) :: (_,pmodule) :: _ ->
+					let m = check_module (sl,s1) pmodule in
+					check_subtype_field m s1 pmodule s2 pfield
+				| (IDKSubTypeField(sl,s1,s2,s3),_),(_,pfield) :: (_,psubtype) :: (_,pmodule) :: _ ->
+					let m = check_module (sl,s1) pmodule in
+					check_subtype_field m s2 psubtype s3 pfield
+				| (IDKModule(sl,s),_),(_,pmodule) :: _ ->
+					let m = check_module (sl,s) pmodule in
+					ignore(check_subtype m s pmodule);
+				| _ ->
+					()
+			) paths
+		in
+		if false then deal_with_imports ctx.com.shared.shared_display_information.import_positions; */
 		return {symbols: symbols, relations: relations};
 	}
 }
 
-/** `Statistics.Printer` **/
+// port: Statistics.Printer
 class StatisticsPrinter {
 	static inline function kv(n:String, v:JsonValue):JsonField return {name: n, value: v};
 

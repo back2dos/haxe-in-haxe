@@ -5,7 +5,6 @@ import core.TFunctions.*;
 import coro.CoroTypes;
 import coro.CoroElsewhere.TexprBuilder;
 
-// haxe/src/coro/coroFunctions.ml — mechanical draft; not compile-validated.
 enum abstract CoroControl(Int) to Int {
 	var CoroPending = 0;
 	var CoroReturned = 1;
@@ -97,6 +96,10 @@ class CoroFunctions {
 		}
 	}
 
+	/** Walk all blocks reachable from [cb], calling [f] exactly once per block.
+		Uses a local visited table to handle back-edges (NextBreak/Continue/etc.)
+		safely without cycles.  The number of times [f] is called equals the number
+		of states the coroutine will produce. **/
 	public static function coroWalk(f:CoroBlock->Void, cb:CoroBlock):Void {
 		var visited:Map<Int, Bool> = [];
 		function loop(cb:CoroBlock):Void if (!visited.exists(cb.cbId)) {

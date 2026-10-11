@@ -1,7 +1,7 @@
 # Haxe in Haxe
 
 A close-to-line-by-line port of the Haxe compiler from OCaml (`haxe/src`) to
-Haxe (`src/`), plus an experimental C backend for it (`backend/`, the "hxc"
+Haxe (`src/`), plus an experimental C backend for it (`hxc/`, the "hxc"
 target) and a website with an in-browser playground (`site/`).
 
 ## Current state
@@ -36,19 +36,22 @@ target) and a website with an in-browser playground (`site/`).
 Results and dates: [`test/TESTING.md`](test/TESTING.md) (tests),
 [`bench/README.md`](bench/README.md) (performance and memory),
 [`TRANSLATION.md`](TRANSLATION.md) (module mapping),
-[`backend/README.md`](backend/README.md) (hxc).
+[`hxc/README.md`](hxc/README.md) (hxc).
 
 ## Repository layout
 
-- `haxe/`: the pinned `haxefoundation/haxe` submodule, the source being ported
-  and the behavioral reference. Never edited here.
-- `src/`: the port, traceable to `haxe/src/` module by module.
-- `backend/`: the hxc C backend, its runtime (`rt/`), its std (`std-hxc/`) and
-  the haxelib package (`haxelib/`).
-- `test/`: conformance, upstream-suite, display, server and haxelib harnesses.
-- `bench/`: benchmark scripts and results. `site/`: the website.
-- `tools/format-src.sh`, `hxformat.json`: source formatting.
-- `deferred/`: old drafts of target dispatch outside the build.
+| Path | |
+| --- | --- |
+| `haxe/` | The pinned `haxefoundation/haxe` submodule: the source being ported and the behavioral reference. Never edited here. |
+| `src/` | The port, traceable to `haxe/src/` module by module. Comments that are not from upstream start with `// port:`. |
+| `runtime/` | Host-specific std overrides for building the port with other targets: `hl/` (HashLink), `js/` (Node, for the JS build of the hxc tool). |
+| `hxc/` | The hxc C target: the lowering and emitter (`src/`), the C runtime (`rt/`), the target's std (`std/`), tools (`tools/`), test programs (`test/`), the haxelib package (`haxelib/`). |
+| `test/` | Conformance, upstream-suite, display, server and haxelib harnesses; `TESTING.md` records the results. |
+| `bench/` | Benchmark harnesses (`run.py`, `haxebench.py`, `interp.py`), workloads, target patches, results. |
+| `docs/` | Design notes: the HXB → native/wasm backend decision (`WASM-BACKEND.md`), Cosmopolitan builds (`COSMO.md`). |
+| `site/` | The website and playground. |
+| `tools/` | `format-src.sh` (with `hxformat.json`), `comment-only-diff.py`. |
+| `archive/` | Code kept for reference, outside every build: earlier drafts, experiments and prototypes (see `archive/README.md`). |
 
 ## Setup
 
@@ -64,21 +67,21 @@ The reference compiler is always the one built from `haxe/`, not a system Haxe.
 
 ```sh
 haxe/haxe haxe-in-haxe.hxml           # bootstrap build: bin/haxe-in-haxe.hxb
-haxe/haxe compile-all.hxml            # every port module: bin/haxe-in-haxe.all.eval.hxb
+haxe/haxe test/compile-all.hxml       # every port module: bin/haxe-in-haxe.all.eval.hxb
 haxe/haxe -cp runtime/hl -cp src -main haxe.Main -hl bin/haxe-in-haxe.hl   # HashLink build (HashLink master)
 HAXE_STD_PATH=$PWD/haxe/std hl bin/haxe-in-haxe.hl -cp app --main Main --interp
 ```
 
 The first two only check that the port compiles. `sh test/eval-hxb-execution.sh`
 runs the port from an Eval HXB archive through the reference's `--hxb-lib`.
-`sh examples/run.sh hello` compiles and runs a small example
-([`examples/README.md`](examples/README.md)).
+`sh archive/examples/run.sh hello` compiles and runs a small example
+([`archive/examples/README.md`](archive/examples/README.md)).
 
 ## Tests
 
 All harnesses take the reference from `HAXE_REFERENCE` and run the port's
 HashLink build by default; `HAXE_IN_HAXE_PORT=<command>` runs another build
-(for example the hxc binary `bin/backend/hih/hih_clang`).
+(for example the hxc binary `bin/hxc/hih/hih_clang`).
 
 ```sh
 python3 test/conformance.py -j 8                                          # HXB conformance (286 cases)
@@ -114,18 +117,18 @@ test/translated-pipeline.hxml`.
 
 ## hxc: the port as a native binary
 
-`backend/build.sh port` compiles the port to C with the backend and then with
+`hxc/build.sh port` compiles the port to C with the backend and then with
 `CC` (default tcc). clang -O2 is the fastest build (4–10% ahead of gcc -O2);
 tcc builds in about a second; cosmocc makes one portable binary for Linux,
 macOS, Windows and the BSDs.
 
 ```sh
-sh backend/build.sh port                                                      # tcc: bin/backend/hih/hih
+sh hxc/build.sh port                                                      # tcc: bin/hxc/hih/hih
 CC="clang -O2" BIN=hih_clang RT_NO= RT_LIBS="-lmbedtls -lmbedx509 -lmbedcrypto -luv" \
-  sh backend/build.sh port                                                    # with system mbedtls/libuv
-sh backend/tools/cosmo-deps.sh && CC="cosmocc -O2" RT_DEPS=bin/cosmo-deps BIN=hih.com sh backend/build.sh port
-bin/backend/hih/hih_clang -cp app --main Main --interp
-bin/backend/hih/hih_clang -cp app --main Main --hxb out.zip --no-output -D disable-parallelism
+  sh hxc/build.sh port                                                    # with system mbedtls/libuv
+sh hxc/tools/cosmo-deps.sh && CC="cosmocc -O2" RT_DEPS=bin/cosmo-deps BIN=hih.com sh hxc/build.sh port
+bin/hxc/hih/hih_clang -cp app --main Main --interp
+bin/hxc/hih/hih_clang -cp app --main Main --hxb out.zip --no-output -D disable-parallelism
 ```
 
 Without `-D disable-parallelism`, a gcc/clang/cosmocc build runs the parallel
@@ -135,10 +138,10 @@ compiler passes (filters, analyzer, DCE marking, HXB writing) on OS threads.
 ## hxc for your own programs
 
 The haxelib package lets your own Haxe type the program and hxc turn it into
-C ([`backend/haxelib/README.md`](backend/haxelib/README.md)):
+C ([`hxc/haxelib/README.md`](hxc/haxelib/README.md)):
 
 ```sh
-sh backend/haxelib/build.sh                       # bin/haxelib/hxc.zip (cosmocc on PATH)
+sh hxc/haxelib/build.sh                       # bin/haxelib/hxc.zip (cosmocc on PATH)
 haxelib install bin/haxelib/hxc.zip
 haxe -lib hxc -cp src -main Main --custom-target hxc=bin/main
 ```
