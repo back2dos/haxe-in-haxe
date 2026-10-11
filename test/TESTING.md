@@ -20,6 +20,7 @@ the Git log of this file.
 | `eval-debugger.py` | – | 6/6 |
 | `upstream.py` (target-independent CI job) | all but 5 tests (finalisers, libuv) | 14/14 steps: unit 11372/11372, misc 684/684, threads 144/144, tink_core, hxcoro |
 | Unit tests (`unit.hxml`) | pass | – |
+| `unit-targets.py` (upstream unit suite per target) | – | js, lua, python, php, neko, hl, hlc, jvm, cpp, cppia, cppia host, flash without SWC: identical; flash with SWC skipped (needs `compc`) |
 
 Fuzzer, `diff:` lanes on the hxc build (150 programs each, size 5, seed 2026):
 hxb, interp, js, lua, python, neko, hl, hlc, cpp, jvm and swf 150/150; php
@@ -29,18 +30,20 @@ options and on the upstream cases listed below.
 
 ## Target generators
 
+Every target also compiles upstream's unit suite identically (`unit-targets.py`, above).
+
 | Target | Beyond the fuzzer |
 | --- | --- |
-| JS | upstream unit suite (`.js` and `.map`, modulo one `Date.now()` macro), `tests/misc/js`, `js-es`, `js-classic`, `js-unflatten`, source maps, `@:expose`, `@:jsRequire` |
-| Lua | upstream unit suite, `tests/misc/lua`, `lua-vanilla`, `lua-jit`, `lua-ver` |
+| JS |  `tests/misc/js`, `js-es`, `js-classic`, `js-unflatten`, source maps, `@:expose`, `@:jsRequire` |
+| Lua | `tests/misc/lua`, `lua-vanilla`, `lua-jit`, `lua-ver` |
 | Python | 153 conformance cases in three modes, `@:pythonImport`, `KwArgs`, `VarArgs` |
 | PHP | `tests/misc/php` (8 projects), `php-prefix`, `php-lib`, `php-front`, source maps |
-| Neko | upstream unit suite (modulo the compile date), `neko-source`, `neko-v1`, `use-nekoc` |
+| Neko | `neko-source`, `neko-v1`, `use-nekoc` |
 | HashLink, HL/C | the port's own sources to `.hl`, `hl-ver`, `hl-check`, `hl-profile`; `-D interp` runs the bytecode |
 | JVM | std-heavy programs, `--jvm dir/`, `jvm.dynamic-level`, `--java-lib` |
 | C++ | 109 conformance cases (also `cppia -debug`), the port's own sources (2,447 files, cppia script) |
 | SWF | SWC, embedded files and bitmaps (JPEG, GIF, PNG), sounds, `--swf-lib` with SWCs from upstream and from the reference, compression levels |
-| `--xml`, `--json`, `gen-hx-classes` | the API documentation build of the whole std for 10 targets, upstream unit suite |
+| `--xml`, `--json`, `gen-hx-classes` | the API documentation build of the whole std for 10 targets |
 
 Compile times of every target on two real projects: `site/bench/targets.py`.
 
@@ -54,7 +57,11 @@ Compile times of every target on two real projects: `site/bench/targets.py`.
 - HashLink build: a few upstream tests need `Gc.finalise` or a libuv loop,
   which that build does not provide.
 - HL/C: type descriptors that upstream hashes from an OCaml `Marshal` of a
-  closure fail explicitly (the reference crashes on the one known input).
+  closure fail explicitly (the reference crashes on the one known input). The
+  hashes depend on which field name strings are physically shared, which the
+  port reproduces only on hosts with string identity (hxc, HashLink, JVM).
+- HL/C: the reference writes `hl/hashes.c` in the order its parallel workers
+  reach the strings; it matches the port when the reference runs on one CPU.
 - `-D dump=pretty --swf`: about 10 dump files of flash std enum abstracts
   differ (an abstract and its implementation write the same file name).
 - `--main lower.case`: "Type not found" where the reference reports an
