@@ -45,6 +45,30 @@ Not covered: running the output of non-HXB targets (their generated output is
 compared with the fuzzer's `diff:<target>` lanes, below); `server/memory` sizes
 are host measurements (normalized by `test/server-jsonrpc.py`).
 
+## Upstream moved to 995a7d1fe (from b10fa6e93): non-generator changes — 2026-10-11
+
+Ported the 41 upstream commits outside `src/generators` and `libs/`: `for_remap`
+allocates a `VGenerated` `` `name`` variable (changes HXB output of `for` over
+iterator abstracts), `AddFinalReturn` on empty blocks and in `FixOverrides` (C++
+void overrides of generic methods), Eval instance-field overrides for overriding
+dynamic methods, `com.fake_modules` moved to the context cache, display recovery
+from missing types (`load_complex_type`, `can_recover_in_display`), build-macro
+failure as `display_error`, `@:forward` string names in completion,
+`has_error_to_report`, lazy server skip reasons, `expand_env` on every argument,
+`make_token`, the `:analyzer` meta link. The OCaml `Gc` tuning in `haxe.ml` has no
+host equivalent (a `// port:` note).
+
+Results against the new reference (hxc tcc build): conformance 279 + 7 (no
+expectation changed), macro 66/66, `server.py` 595/595, `display.py` 679/679 (the
+corpus `tests/display` was removed upstream in 3d317d905; `display.py` now extracts
+it from the submodule history, or takes `HAXE_DISPLAY_CORPUS`), fuzz `diff:hxb` and
+`diff:interp` 320/320 each. Hand cases, each identical to the new reference and
+different from b10fa6e: HXB of `for` loops over abstract iterators (eval and js),
+the unit test of #13043 under `--interp` (old: 5 failures), C++ output of #13046,
+JSON-RPC definition/hover/completion/diagnostics with 9 kinds of broken `Util`
+module (unknown type, missing/private module type, failing build macro, missing
+import) and `@:forward("length", push, "pop", concat)` completion (81 requests).
+
 ## Auxiliary output: `--xml`, `--json`, `--xml hx` / `-D gen-hx-classes` — 2026-10-11
 
 `compiler/generate.ml` `check_auxiliary_output`, `genxml.ml` `generate`,
