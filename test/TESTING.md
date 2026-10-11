@@ -37,6 +37,36 @@ Not covered: `server/*` JSON-RPC methods through a server, the Eval debugger,
 memory statistics, running the output of non-HXB targets (their generated
 output is compared with the fuzzer's `diff:<target>` lanes, below).
 
+## Auxiliary output: `--xml`, `--json`, `--xml hx` / `-D gen-hx-classes` — 2026-10-11
+
+`compiler/generate.ml` `check_auxiliary_output`, `genxml.ml` `generate`,
+`genjson.ml` `generate` and `generators/genhxold.ml`. All byte-identical to the
+reference:
+
+- Fuzzer (`--target-def`, 300 programs each, 0 differences): `--xml {out}/out.xml
+  --interp --no-output -D doc-gen`; `--json {out}/out.json --interp --no-output`;
+  `--xml` + `--json` + `--js` with `-D doc-gen` (`dir:.`); `--xml hx --js ... -D doc-gen`
+  (`dir:../hxclasses`); 200 each of `--xml`/`--json` with `--cpp -D no-compilation` and
+  `--json` with `--jvm`.
+- `haxe/extra/doc.hxml` (the API documentation build: `ImportAll.run()`, `--dce no`,
+  `-D doc-gen`): the 10 XML files (neko, js, flash, php, cpp, jvm, python, macro, lua,
+  hl) and the same set as `--json`; `-D gen-hx-classes` on the same std set for each of
+  the 10 targets (603 to 1703 `hxclasses/` files each).
+- Upstream `tests/unit` (`compile-each.hxml`) with `--xml` + `--json` for js, interp,
+  neko, python, lua, hl, php (jvm and cpp need hxjava/hxcpp in the upstream haxelib
+  repository: not run).
+- Hand cases: build-macro fields with docs (`\r\n`, `<`, `&`), custom metadata,
+  `Compiler.addMetadata` (`@:noDoc`, `@:native`), `@:rtti`, `--macro include(...)`, with
+  and without `-D doc-gen`, on 9 targets; `--swf-lib` with `-D gen-hx-classes`.
+
+Fixed on the way: the anon status is now a shared cell (`TType.AnonStatusRef`, OCaml's
+`anon_status ref`): `map`/`apply_params` copies share it, so closing a function's object
+declarations reaches the copies (a `@:generic` instance over `{foo: 1}` showed
+`AConst` instead of `AClosed` in `--json`). `genhxold` sorts with OCaml's heap sort
+(`cpp.Native` and the JVM `StringBuf` have ties after native renames).
+After the anon status change (hxc tcc build): conformance 279 + 7, macro 66/66,
+server 595/595.
+
 ## Eval debugger, `server/*` JSON-RPC methods and memory — 2026-10-11
 
 The Eval debugger (`evalDebug*.ml`, `jsonRpcSocket.ml`; `-D
