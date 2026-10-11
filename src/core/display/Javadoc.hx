@@ -1,6 +1,6 @@
 package core.display;
 
-// haxe/src/core/display/javadoc.ml
+// port: from haxe/src/core/display/javadoc.ml
 private enum DocTag {
 	Returns(value:String);
 	Deprecated(value:String);
@@ -66,6 +66,7 @@ class Javadoc {
 			};
 			tags.unshift(tag);
 		}
+		// Returns the first non-whitespace character while counting indentation.
 		function newline(p:Int):Null<{char:String, pos:Int, indent:Int}> {
 			var hadStar = false, indent = 0;
 			while (p < length) {
@@ -85,6 +86,7 @@ class Javadoc {
 			}
 			return null;
 		}
+		// Returns (position of last real char, position of next char)
 		function lastCharPosOnLine(p:Int):{last:Int, next:Int} {
 			var last = p, next = p;
 			while (next < length) switch doc.charAt(next) {
@@ -112,6 +114,7 @@ class Javadoc {
 				var name = doc.substring(p, split),
 					valueBuf = new StringBuf(),
 					start = split + 1;
+				// Append lines that have higher indentation.
 				while (true) {
 					var end = lastCharPosOnLine(start);
 					valueBuf.add(doc.substr(start, end.last - start + 1));

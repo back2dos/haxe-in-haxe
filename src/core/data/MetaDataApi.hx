@@ -4,10 +4,16 @@ import core.Ast;
 import core.Error;
 import core.AstPrinter as Printer;
 
-// Mechanical translation of haxe/src/core/data/metaDataApi.ml. Draft; not compiled or tested.
+// port: from haxe/src/core/data/metaDataApi.ml.
 class MetaDataApi {
 	public static function error(s:String, pos:core.Globals.Pos):Dynamic return Error.raiseTypingError(s, pos);
 
+	/**
+		Converts metadata arguments (expr list) into an EObjectDecl expression.
+		Each argument must be either:
+		  - `EConst (Ident key)` which is treated as `key = true`
+		  - `EBinop (OpAssign, EConst (Ident key), value)` which is treated as `key = value`
+	**/
 	public static function ofMetadataEntry(entry:MetadataEntry):Expr {
 		var fields:Array<ObjectField> = [
 			for (expr in entry.exprs) switch expr.expr {

@@ -1,6 +1,6 @@
 package core;
 
-// Port of haxe/libs/json/json.ml.
+// port: from haxe/libs/json/json.ml (a library, reproduced with Haxe APIs).
 enum JsonValue {
 	JString(value:String);
 	JFloat(value:Float);
@@ -83,7 +83,7 @@ class Json {
 
 	static function writeFloat(write:String->Void, value:Float):Void {
 		if (Math.isNaN(value) || !Math.isFinite(value)) throw new core.ds.Failure("NaN and infinity floats are unsupported in JSON");
-		// json.ml: Printf "%.16g", or "%.17g" if that does not read back exactly
+		// port: json.ml: Printf "%.16g", or "%.17g" if that does not read back exactly
 		var s = core.ds.OcamlPrintf.formatG(16, value);
 		var s = Std.parseFloat(s) == value ? s : core.ds.OcamlPrintf.formatG(17, value);
 		write(s);

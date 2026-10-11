@@ -1,7 +1,11 @@
 package core;
 
-// Port of haxe/src/core/numeric.ml.
+// port: from haxe/src/core/numeric.ml.
 class Numeric {
+	//  Taken from OCaml source typing/oprint.ml
+	//
+	// This is a better version of string_of_float which prints without loss of precision
+	// so that float_of_string (float_repres x) = x for all floats x
 	public static function validFloatLexeme(value:String):String {
 		var index = 0;
 		while (index < value.length) {
@@ -12,14 +16,13 @@ class Numeric {
 		return value + ".";
 	}
 
-	/** OCaml Stdlib `string_of_float`: `valid_float_lexeme (sprintf "%.12g" f)`. **/
+	// port: OCaml Stdlib `string_of_float`: `valid_float_lexeme (sprintf "%.12g" f)`.
 	public static function stringOfFloat(f:Float):String {
 		if (Math.isNaN(f)) return "nan";
 		if (!Math.isFinite(f)) return f < 0.0 ? "-inf" : "inf";
 		return validFloatLexeme(core.ds.OcamlPrintf.formatG(12, f));
 	}
 
-	/** numeric.ml `float_repres`: shortest of %.12g/%.15g/%.18g that reads back as `f`. **/
 	public static function floatRepres(f:Float):String {
 		if (Math.isNaN(f)) return "nan";
 		if (!Math.isFinite(f)) return f < 0.0 ? "neg_infinity" : "infinity";

@@ -8,7 +8,7 @@ import core.Message.WarningMode;
 import core.Message.WarningOption;
 import syntax.Lexer;
 
-// Mechanical translation of haxe/src/core/warning.ml. Draft; not compiled or tested.
+// port: from haxe/src/core/warning.ml.
 class Warning {
 	public static function parseOptionsFromLexer(lexer:Lexer, ps:Pos):Array<WarningOption> {
 		inline function fail(msg:String,
@@ -45,7 +45,7 @@ class Warning {
 			switch arg.expr {
 				case EConst(String(s, _)):
 					var p = arg.pos;
-					acc.push(parseOptions(s, {pfile: p.pfile, pmin: p.pmin + 1, pmax: p.pmax - 1}));
+					acc.push(parseOptions(s, {pfile: p.pfile, pmin: p.pmin + 1, pmax: p.pmax - 1})); // pmin is on the quote
 				case _:
 					Error.raiseTypingError("String expected", arg.pos);
 			}

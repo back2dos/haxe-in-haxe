@@ -9,7 +9,7 @@ import core.TFunctions;
 import core.TFunctions.*;
 import core.AstPrinter;
 
-// Mechanical translation of haxe/src/core/tPrinting.ml. Draft; not compiled or tested.
+// port: from haxe/src/core/tPrinting.ml.
 typedef PrintContext = Array<{mono:TMono, id:Int}>;
 
 class MonomorphPrinting {
@@ -336,6 +336,9 @@ class TPrinting {
 		};
 	}
 
+	/**
+		Shortcut to pretty-printing expressions for debugging purposes.
+	**/
 	public static function sExprDebug(e:TExpr):String {
 		var ctx = printContext();
 		return sExprPretty(false, "  ", false, function(t) return sType(ctx, t), e);
@@ -627,8 +630,8 @@ class Printer {
 		],
 		["m_processed", Std.string(me.mProcessed)],
 		["m_kind", sModuleKind(me.mKind)],
-		["m_binded_res", ""],
-		["m_features", ""] // The last two are also TODOs upstream.
+		["m_binded_res", ""], // TODO
+		["m_features", ""] // TODO
 	]);
 
 	public static function sModuleDef(m:ModuleDef):String return record("", [

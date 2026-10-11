@@ -2,7 +2,7 @@ package core.data;
 
 import haxe.DynamicAccess;
 
-// Port of haxe/src/core/data/jsonDataApi.ml.
+// port: from haxe/src/core/data/jsonDataApi.ml; the data are haxe.Json values (Dynamic) rather than Json.t.
 @:structInit class JsonField {
 	public var name:String;
 	public var value:Dynamic;
@@ -55,11 +55,14 @@ class JsonReaderApi {
 		return haxe.Json.stringify(data);
 	}
 
+	// TODO: should this raise something else?
+	// port: throws the message instead of raising a typing error at null_pos.
 	static function fail(message:String):Dynamic {
 		throw message;
 	}
 }
 
+// port: JsonWriterApi has no upstream counterpart.
 class JsonWriterApi {
 	public static function writeOptional(data:Null<Dynamic>):Dynamic {
 		return data;

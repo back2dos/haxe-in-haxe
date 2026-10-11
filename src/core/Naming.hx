@@ -6,7 +6,7 @@ import core.TType.TVarOrigin;
 import context.Common;
 import syntax.Lexer;
 
-// Mechanical translation of haxe/src/core/naming.ml. Draft; not compiled or tested.
+// port: from haxe/src/core/naming.ml.
 class Naming {
 	public static function displayIdentifierError(com:CommonContext, msg:String, p:Pos, ?prependMsg:String):Void {
 		Common.displayError(com, (prependMsg == null ? "" : prependMsg + " ") + msg, p);
@@ -21,6 +21,7 @@ class Naming {
 	}
 
 	public static function checkFieldName(com:CommonContext, name:String, p:Pos):Void {
+		// "new" is the only keyword allowed in field names
 		if (name != "new") checkIdentifierName(com, name, "field", p);
 	}
 
@@ -44,7 +45,7 @@ class Naming {
 	}
 
 	public static function checkLocalVariableName(com:CommonContext, name:String, origin:TVarOrigin, p:Pos):Void {
-		if (name == "this") return;
+		if (name == "this") return; // TODO: vars named `this` should technically be VGenerated, not VUser
 		var kind = switch origin {
 			case TVOLocalVariable: "variable";
 			case TVOArgument: "function argument";

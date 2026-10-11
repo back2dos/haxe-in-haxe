@@ -5,7 +5,7 @@ import sys.net.Host;
 import sys.net.Socket as SysSocket;
 import sys.thread.Mutex;
 
-// Port of haxe/src/core/socket.ml.
+// port: from haxe/src/core/socket.ml.
 class Socket {
 	final host:String;
 	final port:Int;
@@ -75,7 +75,7 @@ class Socket {
 	}
 
 	function getSocket():SysSocket {
-		if (socket == null) throw "no socket";
+		if (socket == null) throw "no socket"; // TODO: reconnect?
 		return socket;
 	}
 }

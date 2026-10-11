@@ -18,7 +18,7 @@ import core.json.Genjson.*;
 import core.Meta;
 import core.TType;
 
-// haxe/src/core/display/completionItem.ml
+// port: from haxe/src/core/display/completionItem.ml
 enum ToplevelKind {
 	TKExpr(p:Pos);
 	TKType;
@@ -497,7 +497,7 @@ enum PackageContentKind {
 	}
 }
 
-/** `CompletionType.t`. **/
+// port: `CompletionType.t`.
 enum CompletionTypeKind {
 	CTMono;
 	CTInst(pwp:CtPathWithParams);
@@ -590,7 +590,7 @@ class CompletionType {
 
 	public static function fromType(getImportStatus:GlobalTypePath->ImportStatus, ?values:haxe.ds.StringMap<Expr>, t:T):CompletionTypeKind {
 		var empty = new haxe.ds.StringMap<Expr>();
-		// OCaml evaluates record fields right to left: the parameters are converted before the import status is looked up.
+		// port: OCaml evaluates record fields right to left: the parameters are converted before the import status is looked up.
 		function ppath(mpath:GlobalTypePath, tpath:GlobalTypePath, tl:Array<T>):CtPathWithParams {
 			var params = tl.map(t -> fromType_(empty, t));
 			var is = getImportStatus(tpath);
@@ -753,14 +753,14 @@ class CompletionItem {
 	};
 
 	static function pad(i:Int, width:Int):String {
-		// Printf "%0Ni"
+		// port: Printf "%0Ni"
 		var neg = i < 0;
 		var s = Std.string(neg ? -i : i);
 		while (s.length < (neg ? width - 1 : width)) s = "0" + s;
 		return neg ? "-" + s : s;
 	}
 
-	/** The sort key `(int,string)` of upstream; compared lexicographically. **/
+	// port: the sort key `(int,string)` of upstream; compared lexicographically.
 	public static function getSortIndex(tk:ToplevelKind, item:CompletionItemData, p:Pos, expectedName:Null<String>):{i:Int, s:String} {
 		return switch item.ciKind {
 			case ITLocal(v):

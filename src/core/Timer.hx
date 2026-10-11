@@ -3,8 +3,8 @@ package core;
 import haxe.ds.StringMap;
 import sys.thread.Thread;
 
-// Mechanical translation of haxe/src/core/timer.ml. Draft; not compiled or tested.
-// OCaml Domain identity uses the host runtime's thread identity here.
+// port: from haxe/src/core/timer.ml.
+// port: OCaml Domain identity uses the host runtime's thread identity here.
 @:structInit class TimerInfo {
 	public var id:Array<String>;
 	public var total:Float;
@@ -152,6 +152,8 @@ class Timer {
 			return 0;
 		}
 	}
+
+	// reporting
 
 	public static final timerThreshold = 0.01;
 

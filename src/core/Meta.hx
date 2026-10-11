@@ -8,7 +8,7 @@ import core.Globals.Pos;
 import core.MetaList;
 import haxe.ds.StringMap;
 
-// Mechanical translation of haxe/src/core/meta.ml. Draft; not compiled or tested.
+// port: from haxe/src/core/meta.ml.
 @:structInit class UserMeta {
 	public var doc:String;
 	public var flags:Array<MetaParameter>;
@@ -61,11 +61,11 @@ class MetaNotFound extends core.ds.NotFound {
 }
 
 class Meta {
-	// Structural equality (OCaml's =); comparing indices first avoids the deep
+	// port: structural equality (OCaml's =); comparing indices first avoids the deep
 	// comparison for the common mismatch.
 	// The legacy bootstrap stores some metadata names as plain strings, which never match.
 	#if hl
-	// One type-pointer test instead of a checked Dynamic->enum cast per entry.
+	// port: one type-pointer test instead of a checked Dynamic->enum cast per entry.
 	// hl.Type comparison calls hl_same_type; the type pointers are compared directly.
 	static final strictMetaType:hl.Bytes = untyped $unsafecast(hl.Type.getDynamic(StrictMeta.Used));
 
@@ -89,7 +89,7 @@ class Meta {
 		return false;
 	}
 
-	// Meta.get without the exception, for callers that catch MetaNotFound.
+	// port: Meta.get without the exception, for callers that catch MetaNotFound.
 	public static function getOpt(m:StrictMeta, ml:Metadata):Null<MetadataEntry> {
 		for (entry in ml) if (metaEq(m, entry.meta)) return entry;
 		return null;

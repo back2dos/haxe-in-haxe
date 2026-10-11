@@ -10,7 +10,7 @@ import core.json.Genjson;
 import core.json.Genjson.GenjsonContext;
 import core.display.CompletionItem;
 
-// haxe/src/core/displayTypes.ml
+// port: from haxe/src/core/displayTypes.ml
 enum SymbolKindValue {
 	Class;
 	Interface;
@@ -381,10 +381,10 @@ enum MissingFieldCause {
 @:structInit class DiagnosticsContext {
 	public var replaceableCode:Array<ReplaceableCode>;
 
-	/** `(pos,bool ref) PMap.t`, keyed by `ImportHandling.importPositionKey`. **/
+	// port: `(pos,bool ref) PMap.t`, keyed by `ImportHandling.key`.
 	public var importPositions:Map<String, {pos:Pos, used:{value:Bool}}>;
 
-	/** `(Path.UniqueKey.t,(pos * expr) list) Hashtbl.t` **/
+	// port: `(Path.UniqueKey.t,(pos * expr) list) Hashtbl.t`
 	public var deadBlocks:core.ds.OcamlHashtbl<String, Array<{pos:Pos, expr:Expr}>>;
 
 	public var messages:Array<core.Message.CompilerMessage>;

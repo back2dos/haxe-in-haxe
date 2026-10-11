@@ -12,7 +12,7 @@ import haxe.ds.StringMap;
 import haxe.ds.IntMap;
 import sys.thread.Mutex;
 
-// Mechanical translation of haxe/src/core/tFunctions.ml. Draft; not compiled or tested.
+// port: from haxe/src/core/tFunctions.ml.
 typedef NotFound = core.ds.NotFound;
 typedef Exit = core.ds.Exit;
 
@@ -67,6 +67,8 @@ class TFunctions {
 
 	public static function getMeta(m:StrictMeta, ml:Metadata):MetadataEntry return MetadataTools.get(m, ml);
 
+	// Flags
+
 	public static function hasFlag(flags:Int, flag:Int):Bool return flags & (1 << flag) > 0;
 
 	public static function setFlag(flags:Int, flag:Int):Int return flags | (1 << flag);
@@ -114,7 +116,9 @@ class TFunctions {
 		case _: false;
 	}
 
-	// Atomic.fetch_and_add counters, as upstream.
+	// ======= General utility =======
+
+	// port: Atomic.fetch_and_add counters, as upstream.
 	static final varUid = new haxe.atomic.AtomicInt(0);
 	static final moduleUid = new haxe.atomic.AtomicInt(0);
 
@@ -135,7 +139,7 @@ class TFunctions {
 		};
 	}
 
-	// `let uid = fst alloc_var' in Atomic.fetch_and_add uid 1 + 1` (hxb_reader_api_typeload#get_var_id).
+	// port: `let uid = fst alloc_var' in Atomic.fetch_and_add uid 1 + 1` (hxb_reader_api_typeload#get_var_id).
 	public static function allocVarId():Int return varUid.add(1) + 1;
 
 	public static function allocMid():Int return moduleUid.add(1) + 1;
@@ -152,7 +156,7 @@ class TFunctions {
 
 	public static function mkCast(e:TExpr, t:T, p:Pos):TExpr return mk(TCast(e, null), t, p);
 
-	// `null` is a Haxe keyword.
+	// port: `null` is a Haxe keyword.
 	public static function nullExpr(t:T, p:Pos):TExpr return mk(TConst(TNull), t, p);
 
 	public static function mkMono():T return TMono(monomorphCreateRef());
@@ -282,7 +286,7 @@ class TFunctions {
 		return f;
 	}
 
-	// Digest values use hexadecimal strings in this port (see Define.getSignature).
+	// port: digest values use hexadecimal strings in this port (see Define.getSignature).
 	public static final nullModule:ModuleDef = {
 		mId: allocMid(),
 		mPath: {pack: [], name: ""},
@@ -373,6 +377,7 @@ class TFunctions {
 
 	public static function addDependency(m:ModuleDef, mdep:ModuleDef, origin:ModuleDepOrigin, skipPostprocess:Bool = false):Void {
 		switch origin {
+			// These module dependency origins should not add as a dependency
 			case MDepFromMacroInclude:
 				return;
 			case _:
@@ -381,6 +386,7 @@ class TFunctions {
 			addDependencyMutex.acquire();
 			try {
 				m.mExtra.mDeps.set(mdep.mId, createDependency(mdep, origin));
+				// In case the module is cached, we'll have to run post-processing on it again (issue #10635)
 				if (!skipPostprocess) m.mExtra.mProcessed = 0;
 			} catch (e:haxe.Exception) {
 				addDependencyMutex.release();
@@ -392,7 +398,7 @@ class TFunctions {
 
 	public static function argName(a:{variable:TVar, defaultValue:Null<TExpr>}):String return a.variable.vName;
 
-	// OCaml overlays the common leading record fields. Haxe needs explicit projections.
+	// port: OCaml overlays the common leading record fields. Haxe needs explicit projections.
 	public static function tInfos(t:ModuleType):TInfos return switch t {
 		case TClassDecl(c): {
 				mtPath: c.clPath,
@@ -444,7 +450,7 @@ class TFunctions {
 			};
 	};
 
-	// Direct switch: tInfos allocates its record on every call.
+	// port: direct switch: tInfos allocates its record on every call.
 	public static function tPath(t:ModuleType):GlobalTypePath return switch t {
 		case TClassDecl(c): c.clPath;
 		case TEnumDecl(e): e.ePath;
@@ -490,7 +496,7 @@ class TFunctions {
 	public static function lazyWait(f:Void->T):TLazyState return LWait(f);
 
 	public static function map(loop:T->T, t:T):T return switch t {
-		case TMono(r): r.tmType == null ? t : loop(r.tmType);
+		case TMono(r): r.tmType == null ? t : loop(r.tmType); // erase
 		case TEnum(_, []) | TInst(_, []) | TType(_, []) | TAbstract(_, []): t;
 		case TEnum(e, tl): TEnum(e, tl.map(loop));
 		case TInst(c, tl): TInst(c, tl.map(loop));
@@ -557,6 +563,7 @@ class TFunctions {
 		return loop(t);
 	}
 
+	// substitute parameters with other types
 	public static function applyParams(cparams:TypeParams, params:TParams, t:T, ?stack:ApplyParamsStack):T {
 		if (cparams.length == 0) return t;
 		if (cparams.length != params.length) throw new ApplyParamsMismatch();
@@ -568,6 +575,37 @@ class TFunctions {
 			case TType(td, tl):
 				var applied = tl.map(loop);
 				if (stack != null) {
+					// E.g.:
+					// ```
+					// typedef Rec<T> = { function method():Rec<Array<T>> }
+					// ```
+					// We need to make sure that we are not applying the result of previous
+					// application to the same place, which would mean the result of current
+					// application would go into `apply_params` again and then again and so on.
+					//
+					// Argument `stack` holds all previous results of `apply_params` to typedefs in current
+					// unification process.
+					//
+					// Imagine we are trying to unify `Rec<Int>` with something.
+					//
+					// Once `apply_params Array<T> Int Rec<Array<T>>` is called for the first time the result
+					// will be `Rec< Array<Int> >`. Store `Array<Int>` into `stack`
+					//
+					// Then the next params application looks like this:
+					// 	`apply_params Array<T> Array<Int> Rec<Array<T>>`
+					// Notice the second argument is actually the result of a previous `apply_params` call.
+					// And the result of the current call is `Rec< Array<Array<Int>> >`.
+					//
+					// The third call would be:
+					// 	`apply_params Array<T> Array<Array<Int>> Rec<Array<T>>`
+					// and so on.
+					//
+					// To stop infinite params application we need to check that we are trying to apply params
+					// produced by the previous `apply_params Array<Int> _ Rec<Array<T>>` to the same `Rec<Array<T>>`
+					//
+					// `old.subject == t`: Check the place that we're applying to is the same `Rec<Array<T>>`
+					// `old.params == params`: Check that params we're applying are the same params
+					// produced by the previous call to `apply_params Array<T> _ Rec<Array<T>>`
 					for (old in stack.value) if (old.subject == t && old.params == params) throw new ApplyParamsRecursion();
 					stack.value.unshift({subject: t, params: applied});
 				}
@@ -582,6 +620,7 @@ class TFunctions {
 				result;
 			case TInst(_, []): t;
 			case TInst(c, [TMono(r)]) if (r.tmType != null && t == r.tmType):
+				// for dynamic
 				var pt = mkMono();
 				var result = TInst(c, [pt]);
 				switch pt {
@@ -684,6 +723,13 @@ class TFunctions {
 			}
 		case TType(td, tl): isNullable(applyTypedef(td, tl), noLazy);
 		case TFun(_): false;
+		// Type parameters will most of the time be nullable objects, so we don't want to make it hard for users
+		// to have to specify Null<T> all over the place, so while they could be a basic type, let's assume they will not.
+		//
+		// This will still cause issues with inlining and haxe.rtti.Generic. In that case proper explicit Null<T> is required to
+		// work correctly with basic types. This could still be fixed by redoing a nullability inference on the typed AST.
+		//
+		// | TInst ({ cl_kind = KTypeParameter },_) -> false
 		case TAbstract(a, _) if (MetadataTools.has(MetadataTools.CoreType, a.aMeta)): !MetadataTools.has(MetadataTools.NotNull, a.aMeta);
 		case TAbstract(a, tl): !MetadataTools.has(MetadataTools.NotNull, a.aMeta) && isNullable(applyParams(a.aParams, tl, a.aThis));
 		case _: true;
@@ -701,6 +747,7 @@ class TFunctions {
 		case _: false;
 	};
 
+	// Determines if we have a Null<T>. Unlike is_null, this returns true even if the wrapped type is nullable itself.
 	public static function isExplicitNull(t:T):Bool return switch t {
 		case TMono(r): r.tmType == null ? isNullableMono(r) : isExplicitNull(r.tmType);
 		case TAbstract(a, [_]) if (isNullPath(a)): true;
@@ -768,7 +815,7 @@ class TFunctions {
 		case TType(t, _): TTypeDecl(t);
 		case TAbstract(a, _): TAbstractDecl(a);
 		case TLazy(f): moduleTypeOfType(lazyType(f));
-		// Upstream raises Exit (not TypeExit) here; callers convert it to Not_found.
+		// port: upstream raises Exit (not TypeExit) here; callers convert it to Not_found.
 		case TMono(r):
 			if (r.tmType == null) throw Exit.raise();
 			moduleTypeOfType(r.tmType);
@@ -801,6 +848,8 @@ class TFunctions {
 			});
 		case _: false;
 	};
+
+	// ======= Field utility =======
 
 	public static function fieldName(f:TFieldAccess):String return switch f {
 		case FAnon(f) | FInstance(_, _, f) | FStatic(_, f) | FClosure(_, f): f.cfName;
@@ -856,6 +905,8 @@ class TFunctions {
 				}
 			case _:
 				if (!hasClassFlag(c, CInterface)) throw NotFound.raise();
+				// an interface can implements other interfaces without
+				// having to redeclare its fields
 				for (impl in c.clImplements) try {
 					var result = rawClassField(buildType, impl.cls, impl.params.map(apply), i);
 					return {owner: result.owner, type: applyParams(impl.cls.clParams, impl.params, result.type), field: result.field};
@@ -875,7 +926,7 @@ class TFunctions {
 				case ClassStatics(c): FStatic(c, findMap(c.clStatics, n));
 				case AbstractStatics(a):
 					if (a.aImpl == null) throw NotFound.raise();
-					FStatic(a.aImpl, findMap(a.aImpl.clStatics, n));
+					FStatic(a.aImpl, findMap(a.aImpl.clStatics, n)); // is that right?
 				case _: FAnon(findMap(a.aFields, n));
 			}
 		case TDynamic(_): FDynamic(n);
@@ -922,6 +973,10 @@ class TFunctions {
 		case _: t;
 	};
 
+	/**
+		Check if type `t` has meta `m`.
+		Does not follow typedefs, monomorphs etc.
+	**/
 	public static function typeHasMeta(t:T, m:StrictMeta):Bool return switch t {
 		case TEnum(e, _): hasMeta(m, e.eMeta);
 		case TInst(c, _): hasMeta(m, c.clMeta);
@@ -929,6 +984,8 @@ class TFunctions {
 		case TAbstract(a, _): hasMeta(m, a.aMeta);
 		case _: false;
 	};
+
+	// tvar
 
 	public static function varExtra(params:TypeParams, e:Null<TExpr>):TVarExtra return {vParams: params, vExpr: e};
 

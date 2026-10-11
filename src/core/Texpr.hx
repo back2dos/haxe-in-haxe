@@ -11,7 +11,7 @@ import core.TPrinting.*;
 import core.Error;
 import core.Abstract as AbstractTools;
 
-// haxe/src/core/texpr.ml — mechanical draft; not compiled or validated.
+// port: from haxe/src/core/texpr.ml.
 class Texpr {
 	public static function iter(f:TExpr->Void, e:TExpr):Void switch e.eexpr {
 		case TConst(_) | TLocal(_) | TBreak | TContinue | TTypeExpr(_) | TIdent(_):
@@ -49,7 +49,7 @@ class Texpr {
 			for (c in catches) f(c.expr);
 	}
 
-	// iter with an argument passed through, for recursive walkers that would
+	// port: iter with an argument passed through, for recursive walkers that would
 	// otherwise allocate a closure per node (`iterWith(walk,x,e)`).
 	public static function iterWith<A>(f:A->TExpr->Void, x:A, e:TExpr):Void switch e.eexpr {
 		case TConst(_) | TLocal(_) | TBreak | TContinue | TTypeExpr(_) | TIdent(_):
@@ -87,7 +87,7 @@ class Texpr {
 			for (c in catches) f(x, c.expr);
 	}
 
-	// These generic array helpers are inline: see core.ds.List.
+	// port: these generic array helpers are inline: see core.ds.List.
 	public static inline function exists<A>(f:A->Bool, el:Array<A>):Bool {
 		var r = false;
 		for (e in el) if (f(e)) {
@@ -106,6 +106,11 @@ class Texpr {
 		return r;
 	}
 
+	/**
+		Returns `true` if `predicate` is evaluated to `true` for at least one of sub-expressions.
+		Returns `false` otherwise.
+		Does not evaluate `predicate` for the `e` expression.
+	**/
 	public static function checkExpr(f:TExpr->Bool, e:TExpr):Bool return switch e.eexpr {
 		case TConst(_) | TLocal(_) | TBreak | TContinue | TTypeExpr(_) | TIdent(_): false;
 		case TArray(a, b) | TBinop(_, a, b) | TWhile(a, b, _): f(a) || f(b);
@@ -125,7 +130,7 @@ class Texpr {
 		case TTry(a, catches): f(a) || exists(c -> f(c.expr), catches);
 	};
 
-	// checkExpr with an argument passed through (see iterWith).
+	// port: checkExpr with an argument passed through (see iterWith).
 	public static function checkExprWith<A>(f:A->TExpr->Bool, x:A, e:TExpr):Bool {
 		switch e.eexpr {
 			case TConst(_) | TLocal(_) | TBreak | TContinue | TTypeExpr(_) | TIdent(_):
@@ -166,7 +171,7 @@ class Texpr {
 		}
 	}
 
-	// Non-generic copies: on HashLink a typed function passed to a generic parameter is
+	// port: non-generic copies: on HashLink a typed function passed to a generic parameter is
 	// wrapped in a new closure on every call, which is what these helpers avoid.
 	static function mapListWithScom(f:context.SafeCom.SafeContext->TExpr->TExpr, x:context.SafeCom.SafeContext,
 			el:Array<TExpr>):Array<TExpr> {
@@ -174,7 +179,7 @@ class Texpr {
 			var cur = el[i], y = f(x, cur);
 			if (y != cur) {
 				var r = el.copy();
-				r[i] = y; // one allocation of the final length
+				r[i] = y; // port: one allocation of the final length
 				for (j in i + 1...el.length) r[j] = f(x, el[j]);
 				return r;
 			}
@@ -356,7 +361,7 @@ class Texpr {
 			var cur = el[i], y = f(x, cur);
 			if (y != cur) {
 				var r = el.copy();
-				r[i] = y; // one allocation of the final length
+				r[i] = y; // port: one allocation of the final length
 				for (j in i + 1...el.length) r[j] = f(x, el[j]);
 				return r;
 			}
@@ -535,7 +540,7 @@ class Texpr {
 
 	public static function withExpr(e:TExpr, def:TExprDef):TExpr return {eexpr: def, etype: e.etype, epos: e.epos};
 
-	// Deviation: upstream rebuilds every node; here a node whose children all come back
+	// port: upstream rebuilds every node; here a node whose children all come back
 	// unchanged is returned as is (texprs are immutable; this saves most allocations
 	// of identity-like passes). Evaluation order is unchanged.
 	static function mapList(f:TExpr->TExpr, el:Array<TExpr>):Array<TExpr> {
@@ -543,7 +548,7 @@ class Texpr {
 			var x = el[i], y = f(x);
 			if (y != x) {
 				var r = el.copy();
-				r[i] = y; // one allocation of the final length
+				r[i] = y; // port: one allocation of the final length
 				for (j in i + 1...el.length) r[j] = f(el[j]);
 				return r;
 			}
@@ -680,13 +685,13 @@ class Texpr {
 		return withExpr(e, def);
 	}
 
-	// mapExpr with an argument passed through (see iterWith).
+	// port: mapExpr with an argument passed through (see iterWith).
 	static function mapListWith<A>(f:A->TExpr->TExpr, x:A, el:Array<TExpr>):Array<TExpr> {
 		for (i in 0...el.length) {
 			var cur = el[i], y = f(x, cur);
 			if (y != cur) {
 				var r = el.copy();
-				r[i] = y; // one allocation of the final length
+				r[i] = y; // port: one allocation of the final length
 				for (j in i + 1...el.length) r[j] = f(x, el[j]);
 				return r;
 			}
@@ -853,6 +858,7 @@ class Texpr {
 				def = TField(a, fa);
 			case TNew(c, pl, el):
 				et = ft(e.etype);
+				// make sure that we use the class corresponding to the replaced type
 				var t = switch c.clKind {
 					case KTypeParameter(_) | KGeneric: et;
 					case _: ft(TInst(c, pl));
@@ -867,7 +873,7 @@ class Texpr {
 					case t: TUnification.error([hasNoField(t, "new")]);
 				}
 				return {eexpr: TNew(c, pl, el.map(f)), etype: et, epos: e.epos};
-			// OCaml evaluates constructor and tuple arguments right-to-left.
+			// port: OCaml evaluates constructor and tuple arguments right-to-left.
 			case TVar(v, eo):
 				var eo = eo == null ? null : f(eo);
 				def = TVar(fv(v), eo);
@@ -935,7 +941,7 @@ class Texpr {
 		case [TVar(v, a), TVar(w, b)] if (a != null && b != null): v == w && equal(a, b);
 		case [TIf(c, a, null), TIf(d, b, null)]: equal(c, d) && equal(a, b);
 		case [TIf(c, a, x), TIf(d, b, y)] if (x != null && y != null): equal(c, d) && equal(a, b) && equal(x, y);
-		// Preserve upstream's eb2/eb2 comparison literally.
+		// port: upstream's eb2/eb2 comparison is preserved literally.
 		case [TWhile(c, a, flag), TWhile(d, b, flag2)]: equal(c, d) && equal(b, b) && flag == flag2;
 		case [TSwitch(a), TSwitch(b)]: equal(a.switchSubject,
 				b.switchSubject) && all2((a:TSwitchCase,
@@ -947,6 +953,7 @@ class Texpr {
 		case [TThrow(a), TThrow(b)]: equal(a, b);
 		case [TCast(a, null), TCast(b, null)]: equal(a, b);
 		case [TCast(a, mt), TCast(b, nt)] if (mt != null && nt != null): equal(a, b) && mt == nt;
+		// TODO: cheating?
 		case [TMeta(a, e), TMeta(b, f)]: StdType.enumEq(a.meta,
 				b.meta) && all2((e, f) -> core.AstPrinter.sExpr(e) == core.AstPrinter.sExpr(f), a.exprs, b.exprs) && equal(e, f);
 		case [TBreak, TBreak] | [TContinue, TContinue]: true;
@@ -1034,7 +1041,7 @@ class Texpr {
 			return r.value;
 		}
 		var mapped = mapExpr(map, e);
-		// Upstream foldmap builds switch cases by cons without reversing them.
+		// port: upstream foldmap builds switch cases by cons without reversing them.
 		switch mapped.eexpr {
 			case TSwitch(s):
 				s.switchCases.reverse();
@@ -1050,6 +1057,7 @@ class Texpr {
 		return mk(TIf(Builder.mkParent(mk(cond, b.tbool, p)), mk(TBinop(OpAssign, v, c), t, p), null), b.tvoid, p);
 	}
 
+	// Tells if the constructor might be called without any issue whatever its parameters
 	public static function constructorSideEffects(e:TExpr):Bool return switch e.eexpr {
 		case TBinop(op, _, _) if (op != OpAssign): true;
 		case TField(_, FEnum(_, _)): false;
@@ -1060,7 +1068,7 @@ class Texpr {
 
 	public static function replaceSeparators(s:String, c:String):String return s.split("_").join(c);
 
-	// OCaml Int32.of_string accepts unsigned bit patterns for explicit base prefixes.
+	// port: OCaml Int32.of_string accepts unsigned bit patterns for explicit base prefixes.
 	static function int32OfString(source:String):Int {
 		var s = source.split("_").join("");
 		var i = 0;
@@ -1100,7 +1108,7 @@ class Texpr {
 			if (value > limit) throw "Int32.of_string";
 		}
 		if (value > 2147483647.0) value -= 4294967296.0;
-		// `| 0`: Int32 wrap-around on hosts with unbounded Int arithmetic (JS: -(-2147483648))
+		// port: `| 0`: Int32 wrap-around on hosts with unbounded Int arithmetic (JS: -(-2147483648))
 		var result = Std.int(value);
 		return negative ? (-result) | 0 : result;
 	}
@@ -1115,7 +1123,7 @@ class Texpr {
 				mk(TConst(TFloat(s)), b.tfloat, p);
 			}
 		case Float(s, _): mk(TConst(TFloat(s)), b.tfloat, p);
-		case String(s, _): mk(TConst(TString(s)), b.tstring, p);
+		case String(s, _): mk(TConst(TString(s)), b.tstring, p); // STRINGTODO: qs?
 		case Ident("true"): mk(TConst(TBool(true)), b.tbool, p);
 		case Ident("false"): mk(TConst(TBool(false)), b.tbool, p);
 		case Ident("null"): mk(TConst(TNull), b.tnull(mkMono()), p);
@@ -1177,6 +1185,9 @@ class Texpr {
 		var block = flag == NormalWhile ? concat(cond, e2) : concat(e2, cond);
 		return mk(TWhile(mk(TConst(TBool(true)), b.tbool, p), block, NormalWhile), t, p);
 	}
+
+	// --------------------------------------------------------------------------
+	// BUILD META DATA OBJECT
 
 	public static function buildMetadata(api:BasicTypes, t:ModuleType):Null<TExpr> {
 		var p:Pos;
@@ -1407,6 +1418,12 @@ class Texpr {
 		return {vars: unknown, accessesThis: accessesThis};
 	}
 
+	/**
+		If `e` contains a sequence of unsafe casts, then look if that sequence
+		already has casts to `t` and return the bottom-most of such casts.
+		If `require_cast` is `false` and the first non-cast expression has type `t`, then return that expression without any casts.
+		In other cases return `e` as-is.
+	**/
 	public static function reduceUnsafeCasts(e:TExpr, t:T, requireCast:Bool = false):TExpr {
 		inline function same(a:T, b:T):Bool return fastEq(followWithoutNull(a), followWithoutNull(b));
 		function loop(e:TExpr):TExpr return switch e.eexpr {
@@ -1422,6 +1439,11 @@ class Texpr {
 		};
 	}
 
+	/**
+		Returns a position spanning from the first expr to the last expr in `el`.
+		Returns `default_pos` if `el` is empty or values of `pfile` of the first and
+		the last positions are different.
+	**/
 	public static function punionEl(defaultPos:Pos, el:Array<TExpr>):Pos {
 		if (el.length == 0) return defaultPos;
 		if (el.length == 1) return el[0].epos;
@@ -1457,6 +1479,7 @@ class Texpr {
 	};
 }
 
+// Collection of functions that return expressions
 class Builder {
 	public static function makeStaticThis(c:TClass, p:Pos):TExpr return mk(TTypeExpr(TClassDecl(c)), c.clType, p);
 
@@ -1537,6 +1560,7 @@ private class BreakOrContinue {
 }
 
 class DeadEnd {
+	// Checks if execution of provided expression is guaranteed to be terminated with `return`, `throw`, `break` or `continue`.
 	public static function hasDeadEnd(e:TExpr):Bool {
 		function loop(e:TExpr):Bool {
 			inline function inLoop(e:TExpr):Bool {
@@ -1546,20 +1570,22 @@ class DeadEnd {
 			return switch e.eexpr {
 				case TContinue | TBreak: throw new BreakOrContinue();
 				case TThrow(a): loop(a) || true;
-				case TReturn(a) if (a != null): loop(a) || true;
+				case TReturn(a) if (a != null): loop(a) || true; // recurse first, could be `return continue`
 				case TReturn(null): true;
-				case TFunction(_): false;
+				case TFunction(_): false; // This isn't executed, so don't recurse
 				case TIf(cond, a, b) if (b != null): loop(cond) || loop(a) && loop(b);
 				case TIf(cond, _, null): loop(cond);
 				case TSwitch(s):
 					loop(s.switchSubject)
 					|| Texpr.isExhaustive(s)
 					&& Texpr.all((c:TSwitchCase) -> Texpr.exists(loop, c.casePatterns) || loop(c.caseExpr), s.switchCases)
-					&& (s.switchDefault == null || loop(s.switchDefault));
+					&& (s.switchDefault == null || loop(s.switchDefault)); // true because we know it's exhaustive
 				case TBinop(OpBoolAnd, a, b): loop(a) || Texpr.isTrueExpr(a) && loop(b);
 				case TBinop(OpBoolOr, a, b): loop(a) || Texpr.isFalseExpr(a) && loop(b);
 				case TWhile(cond, body, flag): loop(cond) || (flag == DoWhile || Texpr.isTrueExpr(cond)) && inLoop(body);
 				case TTry(a, []): loop(a);
+				// The try expression is irrelevant because we have to conservatively assume that
+				// anything could throw control flow into the catch expressions.
 				case TTry(_, catches): Texpr.all(c -> loop(c.expr), catches);
 				case _: Texpr.checkExpr(loop, e);
 			};

@@ -2,7 +2,7 @@ package core;
 
 import haxe.io.Bytes;
 
-// The reading half of haxe/libs/ziplib/zip.ml (open_in, entries, read_entry,
+// port: the reading half of haxe/libs/ziplib/zip.ml (open_in, entries, read_entry,
 // close_in), which hxbLib.ml uses. haxe/libs/ is an OCaml dependency rather
 // than a module to port, so this reproduces its behaviour with Haxe APIs:
 // the central directory is read when the archive is opened, and entries are
@@ -46,11 +46,12 @@ class ZipInput {
 		this.comment = comment;
 	}
 
+	// Determine if a file name is a directory (ends with /)
 	static function filenameIsDirectory(name:String):Bool {
 		return name.length > 0 && name.charAt(name.length - 1) == "/";
 	}
 
-	// read_ecd: locate the end of central directory record from the end of the file.
+	// Read end of central directory record
 	static function readEcd(filename:String, ic:sys.io.FileInput):{
 		entries:Int,
 		size:Int,
@@ -92,6 +93,7 @@ class ZipInput {
 		};
 	}
 
+	// Read central directory
 	static function readCd(filename:String, ic:sys.io.FileInput, cdEntries:Int, cdOffset:Int, cdSize:Int):Array<ZipEntry> {
 		ic.seek(cdOffset, SeekBegin);
 		var cd = try ic.read(cdSize) catch (_:haxe.io.Eof) throw new ZipError(filename, "", "end-of-file while reading central directory");
@@ -135,6 +137,7 @@ class ZipInput {
 		return e;
 	}
 
+	// Open a ZIP file for reading
 	public static function openIn(filename:String):ZipInput {
 		var ic = sys.io.File.read(filename, true);
 		var ecd = readEcd(filename, ic);
@@ -142,10 +145,12 @@ class ZipInput {
 		return new ZipInput(filename, ic, entries, ecd.comment);
 	}
 
+	// Close a ZIP file opened for reading
 	public function closeIn():Void {
 		channel.close();
 	}
 
+	// Position on an entry
 	function gotoEntry(e:ZipEntry):Void {
 		try {
 			channel.seek(e.fileOffset, SeekBegin);
@@ -160,6 +165,7 @@ class ZipInput {
 		}
 	}
 
+	// Read the contents of an entry as a string
 	public function readEntry(e:ZipEntry):Bytes {
 		gotoEntry(e);
 		switch e.methd {

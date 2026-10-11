@@ -5,7 +5,7 @@ import sys.io.File;
 import sys.io.FileOutput;
 import sys.thread.Mutex;
 
-// Port of haxe/src/core/path.ml.
+// port: from haxe/src/core/path.ml.
 @:structInit class FilePathData {
 	public var directory:Null<String>;
 	public var fileName:Null<String>;
@@ -23,23 +23,31 @@ import sys.thread.Mutex;
 }
 
 class Path {
-	// Unix.chdir back to a saved directory. Skips the call when the directory did
+	// port: Unix.chdir back to a saved directory. Skips the call when the directory did
 	// not change, so hosts without chdir support (JVM) can run the batch driver.
 	public static function restoreCwd(cwd:String):Void {
 		if (Sys.getCwd() != cwd) Sys.setCwd(cwd);
 	}
 
-	// Globals.platforms is not ported yet; this is its current fixed target-name list.
+	// port: `List.map platform_name platforms` of find_directories, computed once.
 	static final platformNames = ["js", "lua", "neko", "flash", "php", "cpp", "jvm", "python", "hl", "eval"];
 	public static final isWindows = Sys.systemName() == "Windows";
 	public static final pathSep = isWindows ? "\\" : "/";
 	static final mkdirMutex = new Mutex();
 
 	public static function getPathParts(file:String):Array<String> {
+		// this function is quite weird: it tries to determine whether the given
+		// argument is a .hx file path with slashes or a dotted module path and
+		// based on that it returns path "parts", which are basically a list of
+		// either folders or packages (which are folders too) appended by the module name
+		//
+		// TODO: i started doubting my sanity while writing this comment, let's somehow
+		// refactor this stuff so it doesn't mix up file and module paths and doesn't introduce
+		// the weird "path part" entity.
 		var length = file.length;
 		if (length > 3 && file.substr(length - 3) == ".hx") {
-			file = file.substr(0, length - 3);
-			return file.split("\\").join("/").split("/");
+			file = file.substr(0, length - 3); // strip the .hx
+			return file.split("\\").join("/").split("/"); // TODO: wouldn't it be faster to Str.split here?
 		}
 		return file.split(".");
 	}
@@ -72,7 +80,7 @@ class Path {
 				checkInvalidChar(value);
 				return {pack: pack, name: value};
 			}
-			// `_ :: ("_std" :: l) -> loop l` drops "_std" and the part before it.
+			// port: `_ :: ("_std" :: l) -> loop l` drops "_std" and the part before it.
 			if (parts[index + 1] == "_std") return loop(index + 2, pack);
 			checkPackageName(value);
 			pack.push(value);
@@ -117,28 +125,38 @@ class Path {
 		return first == "\\".code && isWindows;
 	}
 
+	/**
+		Returns absolute path.
+		Resolves `.`, `..`, double slashes and trailing slashesw.
+		Doesn't resolve symbolic links.
+		Doesn't fix path case on Windows.
+		Doesn't access file system (see https://github.com/HaxeFoundation/haxe/issues/9509#issuecomment-636360777)
+	**/
 	public static function getFullPath(file:String):String {
 		if (isWindows) return try FileSystem.fullPath(file) catch (_:Dynamic) file;
 		var length = file.length;
-		// Unix.getcwd has no trailing slash, unlike Sys.getCwd.
+		// port: Unix.getcwd has no trailing slash, unlike Sys.getCwd.
 		var cwd = Sys.getCwd();
 		if (cwd.length > 1 && StringTools.fastCodeAt(cwd, cwd.length - 1) == "/".code) cwd = cwd.substr(0, cwd.length - 1);
 		var absolutePath = length > 0 && StringTools.fastCodeAt(file, 0) == "/".code ? file : length == 0 ? cwd : cwd + "/" + file;
 		var needsNormalization = length > 0 && StringTools.fastCodeAt(file, length - 1) == "/".code;
-		// has_dots_or_double_slash: only the first character of each segment is inspected.
+		// port: has_dots_or_double_slash: only the first character of each segment is inspected.
 		// (fastCodeAt: every index here is checked against the length, and
 		// charCodeAt boxes its Null<Int> result on HashLink.)
 		var index = 0;
 		while (!needsNormalization && index < length) {
 			var c = StringTools.fastCodeAt(file, index);
 			if (c == ".".code) {
+				// path contains `../` or `./`
 				if (index + 2 < length) needsNormalization = (StringTools.fastCodeAt(file, index + 1) == ".".code
 					&& StringTools.fastCodeAt(file, index + 2) == "/".code)
 					|| StringTools.fastCodeAt(file, index + 1) == "/".code;
+				// path ends with `./` or `..`
 				else if (index + 1 < length) needsNormalization = StringTools.fastCodeAt(file, index + 1) == "/".code
 					|| StringTools.fastCodeAt(file, index + 1) == ".".code;
+				// path ends with `.`
 				else needsNormalization = true;
-			} else if (c == "/".code && index > 0) needsNormalization = true;
+			} else if (c == "/".code && index > 0) needsNormalization = true; // double slash
 			if (!needsNormalization) {
 				while (index < length && StringTools.fastCodeAt(file, index) != "/".code) index++;
 				index++;
@@ -159,8 +177,12 @@ class Path {
 		return "/" + normalized.join("/");
 	}
 
+	/**
+		Returns absolute path (on Windows ensures proper case with drive letter upper-cased)
+		Use for returning positions from IDE support functions
+	**/
 	public static function getRealPath(path:String):String {
-		// Extc.get_real_path fails for a missing file (falling back to `path`);
+		// port: Extc.get_real_path fails for a missing file (falling back to `path`);
 		// HashLink's fullPath returns null instead of throwing.
 		var r = try FileSystem.fullPath(path) catch (_:Dynamic) null;
 		return r == null ? path : r;
@@ -178,6 +200,7 @@ class Path {
 	}
 
 	public static function flatPath(path:{pack:Array<String>, name:String}):String {
+		// Replace _ with _$ in paths to prevent name collisions.
 		var escape = function(value:String) return value.split("_").join("_$");
 		return path.pack.length == 0 ? escape(path.name) : path.pack.map(escape).join("_") + "_" + escape(path.name);
 	}
@@ -191,7 +214,7 @@ class Path {
 					&& file.charCodeAt(0) >= "a".code
 					&& file.charCodeAt(0) <= "z".code
 					&& !(platformNames.indexOf(file) >= 0 && file != target)) {
-					// consed onto the accumulator, as upstream
+					// port: consed onto the accumulator, as upstream
 					if (recursive) {
 						result.unshift(full);
 						loop(full + "/");
@@ -209,6 +232,8 @@ class Path {
 		var parts = new EReg("[\\\\/]+", "g").split(getRealPath(file));
 		if (parts.length == 0) throw "Unreachable";
 		var name = parts[parts.length - 1].split(".");
+		// 2 parts: file_ext; module_name
+		// more: file_ext; platform_ext; ...module_name
 		return name.length == 1 ? name[0] : name.length == 2 ? name[0] : name.slice(0, name.length - 2).join(".");
 	}
 
@@ -245,6 +270,10 @@ class Path {
 		}
 	}
 
+	/**
+		Recursively creates `path`.
+		Raises `Unix.Unix_error` exceptions as-is.
+	**/
 	public static function mkdirFromPathUnixErr(path:String):Void {
 		var parts = new EReg("[\\\\/]+", "g").split(path);
 		if (parts.length > 0) {
@@ -253,6 +282,10 @@ class Path {
 		}
 	}
 
+	/**
+		Recursively creates `path`.
+		Converts all `Unix.Unix_error` exceptions to human-readable `Failure msg`.
+	**/
 	public static function mkdirFromPath(path:String):Void try mkdirFromPathUnixErr(path)
 	catch (error:Dynamic) throw Std.string(error);
 
@@ -309,23 +342,44 @@ class Path {
 	}
 }
 
+// Stores a unique key for a file path.
+// port: the key type `UniqueKey.t` is String.
 class UniqueKey {
+	/**
+		Returns absolute path guaranteed to be the same for different letter case.
+		Use where equality comparison is required, lowercases the path on Windows
+	**/
 	public static function create(path:String):String return Path.isWindows ? Path.getFullPath(path).toLowerCase() : Path.getFullPath(path);
 
 	public static function createLazy(path:String):LazyUniqueKey return {path: path, key: null};
 
+	/**
+		Calculates a key or retrieve a cached key.
+	**/
 	public static function lazyKey(value:LazyUniqueKey):String {
 		if (value.key == null) value.key = create(value.path);
 		return value.key;
 	}
 
+	/**
+		Returns original path, which was used to create `lazy_t`
+	**/
 	public static function lazyPath(value:LazyUniqueKey):String return value.path;
 
+	/**
+		Check if the first key starts with the second key
+	**/
 	public static function startsWith(subject:String, start:String):Bool return StringTools.startsWith(subject, start);
 
+	/**
+		Get string representation of a key
+	**/
 	public static function toString(key:String):String return key;
 }
 
+/**
+	Stores an original file path along with a lazily-calculated key.
+**/
 @:structInit class LazyUniqueKey {
 	public var path:String;
 	public var key:Null<String>;

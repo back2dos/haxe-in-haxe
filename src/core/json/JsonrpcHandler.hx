@@ -4,7 +4,7 @@ import core.Json.JsonValue;
 import core.Json.JsonField;
 import core.json.JsonRpc;
 
-// haxe/src/core/json/jsonrpc_handler.ml
+// port: from haxe/src/core/json/jsonrpc_handler.ml
 enum HaxeJsonError {
 	MissingField(name:String, on:String);
 	BadType(desc:String, expected:String);

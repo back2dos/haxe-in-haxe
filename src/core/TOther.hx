@@ -8,7 +8,7 @@ import core.TFunctions;
 import core.TFunctions.*;
 import haxe.ds.StringMap;
 
-// Mechanical translation of haxe/src/core/tOther.ml. Draft; not compiled or tested.
+// port: from haxe/src/core/tOther.ml.
 class TExprToExpr {
 	public static function tpath(path:GlobalTypePath, modulePath:GlobalTypePath, params:Array<TypeParamOrConst>):ComplexType {
 		return Ast.makePtpCt(path.name == modulePath.name ? Ast.mkTypePath(path.pack, path.name,
@@ -29,6 +29,7 @@ class TExprToExpr {
 			pl) if (c.clKind.match(KExpr(_)) || c.clKind.match(KTypeParameter(_))): tpath({pack: [], name: c.clPath.name},
 				{pack: [], name: c.clPath.name}, pl.map(tparam));
 		case TInst(c, pl): tpath(c.clPath, c.clModule.mPath, pl.map(tparam));
+		// recurse on type-type
 		case TType(td,
 			pl): StringTools.startsWith(td.tPath.name, "#") ? convertType(follow(t)) : tpath(td.tPath, td.tModule.mPath, pl.map(tparam));
 		case TAbstract(a, pl): tpath(a.aPath, a.aModule.mPath, pl.map(tparam));
@@ -169,6 +170,7 @@ class TExprToExpr {
 					pos: Globals.nullPos
 				} : core.Ast.SwitchDefault) : ({expr: de, pos: de.pos} : core.Ast.SwitchDefault);
 				ESwitch(convertExpr(s.switchSubject), cases, def);
+			// these are considered complex, so the AST is handled in TMeta(Meta.Ast)
 			case TEnumIndex(_) | TEnumParameter(_, _, _): throw "Complex enum AST requires @:ast metadata";
 			case TTry(e, catches):
 				var e1 = convertExpr(e);
@@ -324,7 +326,7 @@ class TOther {
 	});
 }
 
-// `TClass` is also the typed record name; the helper module uses a distinct name.
+// port: `TClass` is also the typed record name; the helper module uses a distinct name.
 class TClassTools {
 	public static function getMemberFields(selfToo:Bool, c0:TClass, tl:TParams):StringMap<{cls:TClass, field:TClassField}> {
 		function loop(acc:StringMap<{cls:TClass, field:TClassField}>, c:TClass, tl:TParams):StringMap<{cls:TClass, field:TClassField}> {
@@ -391,6 +393,9 @@ class TClassTools {
 	}
 
 	public static function getSingularInterfaceField(fields:Array<TClassField>):Null<TClassField> {
+		// Re-declarations of java.lang.Object members (equals/hashCode/toString)
+		// on an interface must not count toward the SAM check — JLS §9.8.
+		// Matched by name+arity since these are unique on Object.
 		inline function isObjectMember(cf:TClassField):Bool return switch [cf.cfName, follow(cf.cfType)] {
 			case ["equals", TFun({args: [_]})] | ["hashCode", TFun({args: []})] | ["toString", TFun({args: []})]: true;
 			case _: false;

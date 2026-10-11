@@ -6,8 +6,9 @@ import core.Globals;
 import core.Globals.Pos;
 import core.ds.NotFound;
 
-// haxe/src/core/native.ml — mechanical draft; not compile-validated.
+// port: from haxe/src/core/native.ml.
 class Native {
+	/** retrieve string from @:native metadata or raise Not_found **/
 	public static function getNativeName(meta:Metadata):{name:String, pos:Pos} {
 		for (entry in meta) if (entry.meta == Meta.Native && entry.exprs.length == 1) {
 			return switch entry.exprs {
@@ -18,6 +19,7 @@ class Native {
 		throw NotFound.raise();
 	}
 
+	// Rewrites class or enum paths if @:native metadata is set
 	public static function applyNativePaths(t:ModuleType):Void {
 		inline function real(meta:Metadata, name:String):{meta:MetadataEntry, name:String} {
 			var native = getNativeName(meta);

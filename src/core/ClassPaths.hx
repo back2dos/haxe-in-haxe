@@ -5,7 +5,7 @@ import core.ClassPath.DirectoryClassPath;
 import core.ClassPath.IClassPath;
 import core.StringHelper;
 
-// Port of haxe/src/core/classPaths.ml.
+// port: from haxe/src/core/classPaths.ml.
 @:structInit class ResolvedFile {
 	public var file:String;
 	public var classPath:IClassPath;
@@ -19,11 +19,11 @@ import core.StringHelper;
 }
 
 enum FileResolutionSpecificity {
-	SpecificityNormal;
-	SpecificityPlatformSpecific;
-	SpecificityCustomExtension;
-	SpecificityMacroSpecific;
-	SpecificityCoreApi;
+	SpecificityNormal; // Standard Module.hx file
+	SpecificityPlatformSpecific; // Module.[platform].hx file matching current platform
+	SpecificityCustomExtension; // Module.[custom].hx file matching --custom-extension config
+	SpecificityMacroSpecific; // Module.macro.hx file while in macro context
+	SpecificityCoreApi; // Module.hx takes priority when loading @:coreApi types
 }
 
 @:structInit class FileLookup {
@@ -39,6 +39,7 @@ enum FileResolutionSpecificity {
 }
 
 class ClassPaths {
+	// We need to clean-up absolute ("") vs. cwd (".").
 	public static final absoluteClassPath:IClassPath = new DirectoryClassPath("", User);
 
 	var paths:Array<IClassPath> = [];
@@ -140,7 +141,7 @@ class ClassPaths {
 	}
 
 	public function relativePath(file:String):String {
-		// Path.get_full_path: absolute and normalized, without resolving symbolic links.
+		// port: Path.get_full_path: absolute and normalized, without resolving symbolic links.
 		var fullPath = normalize(core.Path.getFullPath(file));
 		var lowerFullPath = fullPath.toLowerCase();
 		for (path in paths) {
@@ -158,10 +159,19 @@ class ClassPaths {
 	}
 
 	function cacheDirectory(classPath:IClassPath, directory:String, search:String, listing:Array<String>):Null<FileLookup> {
+		// This function is invoked for each file in the `dir`.
+		// Each file is checked if it's specific for current platform
+		// (e.g. ends with `.js.hx` while compiling for JS) or current
+		// custom extension (e.g. ends with `.custom.hx` while compiling
+		// with `--custom-extension custom`)
+		//
+		// The lookup cache will store the full file path which is the more
+		// specific in current context (see `file_resolution_specificity` type)
 		var found:Null<FileLookup> = null;
 		var searchDirectory = core.ClassPath.DirectoryClassPath.ocamlDirname(search);
 		for (ownName in listing) {
 			var relative = searchDirectory == "." ? ownName : searchDirectory + "/" + ownName;
+			// `representation` is how the file is referenced to. E.g. when it's deduced from a module path.
 			var representation:String;
 			var specificity:FileResolutionSpecificity;
 			if (isLoadingCoreApi) {
@@ -171,13 +181,16 @@ class ClassPaths {
 				var suffix = StringHelper.extension(relative);
 				var withoutExtension = StringHelper.removeExtension(relative);
 				var secondExtension = StringHelper.extension(withoutExtension);
+				// The file contains double extension and the secondary one matches current custom extension
 				if (customExtension != null && secondExtension == customExtension) {
 					representation = StringHelper.removeExtension(withoutExtension) + suffix;
 					specificity = SpecificityCustomExtension;
 				} else if (platformExtension == secondExtension && secondExtension == ".macro") {
+					// The file contains ".macro.hx" double extension and we are in macro context
 					representation = StringHelper.removeExtension(withoutExtension) + suffix;
 					specificity = SpecificityMacroSpecific;
 				} else if (platformExtension == secondExtension) {
+					// The file contains double extension and the secondary one matches current platform
 					representation = StringHelper.removeExtension(withoutExtension) + suffix;
 					specificity = SpecificityPlatformSpecific;
 				} else {

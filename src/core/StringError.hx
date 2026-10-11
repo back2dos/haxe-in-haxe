@@ -1,8 +1,9 @@
 package core;
 
-// Port of haxe/src/core/stringError.ml.
+// port: from haxe/src/core/stringError.ml.
 class StringError {
-	// Same distance as the matrix in stringError.ml, computed with two rows.
+	// Source: http://en.wikibooks.org/wiki/Algorithm_implementation/Strings/Levenshtein_distance#OCaml
+	// port: same distance as the matrix in stringError.ml, computed with two rows.
 	public static function levenshtein(first:String, second:String):Int {
 		var n = first.length, m = second.length;
 		if (n == 0) return m;

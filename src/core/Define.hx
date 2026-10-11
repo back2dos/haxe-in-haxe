@@ -5,7 +5,7 @@ import haxe.ds.StringMap;
 import core.DefineRegistry;
 import core.Globals.Platform;
 
-// haxe/src/core/define.ml; registry data follows pinned prebuild.ml and define.json.
+// port: from haxe/src/core/define.ml; registry data follows pinned prebuild.ml and define.json.
 // Digests remain hexadecimal to avoid arbitrary binary bytes in Haxe Strings.
 @:structInit class UserDefine {
 	public var doc:String;
@@ -368,7 +368,7 @@ class Define {
 		return ctx.values.exists(key);
 	}
 
-	/** Throws when the define is absent, like PMap.find in the OCaml source. */
+	// port: throws when the define is absent, like PMap.find in the OCaml source.
 	public static function rawDefinedValue(ctx:DefineContext, key:String):String {
 		var value = ctx.values.get(key);
 		if (value == null && !ctx.values.exists(key)) throw core.ds.NotFound.raise();
@@ -402,9 +402,10 @@ class Define {
 
 		var defines:Array<String> = [];
 		for (key => value in ctx.values) {
-			// Keep this normalization synchronized with conditional-compilation
-			// identifier parsing, as in define.ml.
+			// don't make much difference between these special compilation flags
 			var sanitized = key.split("-").join("_");
+			// If we add something here that might be used in conditional compilation it should be added to
+			// Grammar.parse_macro_ident as well (issue #5682).
 			if (signatureNeutral.indexOf(sanitized) >= 0) continue;
 			var entry = sanitized + "=" + value;
 			if (defines.indexOf(entry) == -1) defines.push(entry);

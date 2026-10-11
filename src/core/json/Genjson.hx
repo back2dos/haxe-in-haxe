@@ -9,7 +9,7 @@ import core.Ast;
 import core.Meta;
 import core.TType;
 
-// haxe/src/core/json/genjson.ml
+// port: from haxe/src/core/json/genjson.ml
 @:structInit class GenjsonContext {
 	public var generateAbstractImpl:Bool;
 	public var generateMemberBodies:Bool;
@@ -45,7 +45,7 @@ class Genjson {
 
 	public static inline function jobject(l:Array<JsonField>):JsonValue return JObject(l);
 
-	/** A `(name,value)` pair of an object. **/
+	// port: a `(name,value)` pair of an object.
 	public static inline function kv(name:String, value:JsonValue):JsonField return {name: name, value: value};
 
 	public static final jtodo:JsonValue = JNull;
@@ -302,7 +302,7 @@ class Genjson {
 
 	public static function generateAnon(ctx:GenjsonContext, an:TAnon):JsonValue {
 		function generateAnonFields():JsonValue {
-			// PMap.fold conses in key order: the result is in reverse key order
+			// port: PMap.fold conses in key order: the result is in reverse key order
 			var fields = core.ds.PMap.fold(function(cf:TClassField, acc:Array<JsonValue>) {
 				acc.unshift(generateClassField(ctx, CFSMember, cf));
 				return acc;
@@ -427,7 +427,7 @@ class Genjson {
 		]);
 	}
 
-	// Upstream keeps the full texpr serializer commented out and returns jtodo.
+	// port: upstream keeps the full texpr serializer commented out and returns jtodo.
 	public static function generateTexpr(ctx:GenjsonContext, e:TExpr):JsonValue return jtodo;
 
 	// fields
@@ -483,7 +483,7 @@ class Genjson {
 			if (value == null) {
 				if (Meta.has(core.MetaList.StrictMeta.Custom(":testHack"), cf.cfMeta)) {
 					if (cf.cfExpr != null) jobject([
-						kv("testHack",
+						kv("testHack", // TODO: haha
 							jstring(core.TPrinting.sExprPretty(false, "", false, core.TPrinting.sType.bind(core.TPrinting.printContext()),
 								cf.cfExpr)))
 					])
@@ -653,7 +653,9 @@ class Genjson {
 		return jobject(fields1);
 	}
 
-	// module (generate_module) needs the HXB module cache of the server; see DisplayJson.
+	// module
+
+	// port: generate_module is not ported: it needs the HXB module cache of the server (see DisplayJson).
 
 	public static function createFullConfig():GenjsonContext return {
 		generateAbstractImpl: false,

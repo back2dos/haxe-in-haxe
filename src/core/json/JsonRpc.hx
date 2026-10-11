@@ -3,7 +3,7 @@ package core.json;
 import core.Json.JsonValue;
 import core.Json.JsonField;
 
-// haxe/src/core/json/jsonRpc.ml
+// port: from haxe/src/core/json/jsonRpc.ml
 enum JsonRpcErrorKind {
 	ParseError(s:String);
 	InvalidRequest(s:String);

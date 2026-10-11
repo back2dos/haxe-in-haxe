@@ -3,8 +3,7 @@ package core;
 import core.Globals.Pos;
 import core.Globals.GlobalTypePath;
 
-// Port of haxe/src/core/ast.ml.  This module intentionally keeps source AST
-// nodes separate from the typed AST in typer.ml.
+// port: from haxe/src/core/ast.ml.
 
 enum Keyword {
 	Function;
@@ -94,6 +93,7 @@ enum Unop {
 enum StringLiteralKind {
 	SDoubleQuotes;
 	SSingleQuotes;
+	// | SMarkup
 }
 
 enum Constant {
@@ -149,7 +149,7 @@ enum QuoteStatus {
 
 enum FunctionKind {
 	FKAnonymous;
-	FKNamed(name:PlacedName, isInline:Bool);
+	FKNamed(name:PlacedName, isInline:Bool); // bool for `inline`
 	FKArrow;
 }
 
@@ -293,8 +293,42 @@ enum ImportMode {
 typedef Metadata = Array<MetadataEntry>;
 typedef Documentation = Null<DocBlock>;
 
+/**
+	This structure represents a documentation comment of a symbol.
+
+	Use `Ast.get_doc_text` to generate a final user-readable text for a doc_block.
+**/
 @:structInit class DocBlock {
+	/** Contains own docs written nearby the symbol in Haxe code **/
 	public var docOwn:Null<String>;
+
+	// This field is for docs pointed by @:inheritDoc meta.
+	//
+	// It's populated with `InheritDoc.build_*` functions.
+	// Each string in this list is compiled of a doc a single @:inheritDoc points to.
+	//
+	// E.g. calling `InheritDoc.build_class_field_doc` for `field4` (from sample below)
+	// will produce `doc_inherited = ["Own field3 doc"; "Own field2 doc\nOwn field1 doc"]`.
+	//
+	// Sample:
+	// ```
+	// class MyClass {
+	//
+	// 	/** Own field1 doc */
+	// 	function field1();
+	//
+	// 	/** Own field2 doc */
+	// 	@:inheritDoc(MyClass.field1) function field2();
+	//
+	// 	/** Own field3 doc */
+	// 	function field2();
+	//
+	// 	/** Own field4 doc */
+	// 	@:inheritDoc(MyClass.field3)
+	// 	@:inheritDoc(MyClass.field2)
+	// 	function field4();
+	// }
+	// ```
 	public var docInherited:Array<String>;
 
 	public inline function new(docOwn:Null<String>, docInherited:Array<String>) {
@@ -857,9 +891,11 @@ class Ast {
 			evMeta: meta == null ? [] : meta
 		};
 
+	// Type path related functions
+
 	public static function stringPosListOfExprPathRaise(e:Expr):Array<PlacedName> return switch e.expr {
 		case EConst(Ident(name)): ([{name: name, pos: e.pos}] : Array<core.Ast.PlacedName>);
-		case EField(inner, name, _): ([{name: name, pos: e.pos}] : Array<core.Ast.PlacedName>).concat(stringPosListOfExprPathRaise(inner));
+		case EField(inner, name, _): ([{name: name, pos: e.pos}] : Array<core.Ast.PlacedName>).concat(stringPosListOfExprPathRaise(inner)); // wrong p?
 		case _: throw core.ds.Exit.raise();
 	};
 
@@ -939,19 +975,22 @@ class Ast {
 		return result;
 	}
 
-	// haxe/src/core/ast.ml: match_path.
 	public static function matchPath(recursive:Bool, path:Array<String>, pattern:Array<String>):Bool {
 		function loop(top:Bool, pi:Int, mi:Int):Bool {
 			if (mi < pattern.length && pattern[mi] == "**") {
+				// trailing ** matches any remainder, at any depth
 				if (mi + 1 == pattern.length) return true;
+				// ** matches zero segments here, or one or more by consuming sl1
 				return loop(false, pi, mi + 1) || (pi < path.length && loop(false, pi + 1, mi));
 			}
 			if (pi == path.length && mi == pattern.length) return true;
+			// always recurse into types of package paths
 			if (pi + 1 < path.length && mi + 1 == pattern.length && isLowerIdent(pattern[mi]) && !isLowerIdent(path[pi + 1]))
 				return path[pi] == pattern[mi];
 			if (pi + 1 == path.length && mi == pattern.length && top) return true;
 			if (mi == pattern.length) return recursive;
 			if (pi == path.length) return false;
+			// * matches exactly one segment
 			return (pattern[mi] == "*" || path[pi] == pattern[mi]) && loop(false, pi + 1, mi + 1);
 		}
 		return loop(true, 0, 0);
@@ -1005,6 +1044,11 @@ class Ast {
 
 	public static function docFromStringOpt(value:Null<String>):Documentation return value == null ? null : docFromString(value);
 
+	/**
+		Generates full doc block text out of `doc_block` structure
+		by concatenating `d.doc_own` and all entries of `d.doc_inherited` with new lines
+		in between.
+	**/
 	public static function genDocText(doc:DocBlock):String return (doc.docOwn == null ? [] : [doc.docOwn]).concat(doc.docInherited)
 		.join("\n");
 
