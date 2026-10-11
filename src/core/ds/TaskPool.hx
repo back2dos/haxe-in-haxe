@@ -56,7 +56,7 @@ class TaskPool {
 		#else
 		// port: HashLink JIT: threads stay scoped to the call. With persistent workers it
 		// crashed intermittently, most likely through the races in libhl's lazy type
-		// initialisation that bench/libhl-allocator.patch fixes for HL/C (the JIT
+		// initialisation that bench/patches/libhl-allocator.patch fixes for HL/C (the JIT
 		// loads the system libhl).
 		var spawned = 0;
 		try {

@@ -36,7 +36,7 @@ using macros.eval.EvalValue.EvalValueTools;
 // - `Math.random`/`Std.random` use the host generator instead of OCaml's
 //   `Random.State`.
 // - Sockets (`eval.vm.NativeSocket`) use BSD sockets through `hxc.NativeNet`
-//   on the hxc host (backend/) and `EvalHostNet` on HashLink; on other hosts
+//   on the hxc host (hxc/) and `EvalHostNet` on HashLink; on other hosts
 //   every native throws a clear error.
 // - Threads are host threads: `exit` of a `Thread`-mode thread behaves as
 //   upstream's `Domain` branch (there is no `Thread.exit`), and `join` waits
@@ -945,8 +945,8 @@ private typedef SocketHost = hxc.NativeNet;
 private typedef SocketHost = macros.eval.EvalHostNet;
 #end
 
-// port: sockets: on the hxc host (backend/) the natives call BSD sockets through
-// `hxc.NativeNet` (backend/rt/rt_net.c) where upstream calls OCaml's Unix
+// port: sockets: on the hxc host (hxc/) the natives call BSD sockets through
+// `hxc.NativeNet` (hxc/rt/rt_net.c) where upstream calls OCaml's Unix
 // module; a socket is its file descriptor. On HashLink, EvalHostNet offers
 // the same interface over the host's sys.net.Socket. Other hosts keep
 // upstream's names and argument checks, then fail ("... is not supported by

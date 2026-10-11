@@ -22,7 +22,7 @@ import hxc.NativeUv as Uv;
 using macros.eval.EvalValue.EvalValueTools;
 
 // port: upstream calls the OCaml luv library (libuv bindings). On the hxc host
-// (backend/) libuv is reached through `hxc.NativeUv` (backend/rt/rt_uv.c),
+// (hxc/) libuv is reached through `hxc.NativeUv` (hxc/rt/rt_uv.c),
 // and this module also carries the parts of luv that are OCaml code
 // (callback bookkeeping, result conversion, `Buffer`, the request life cycle
 // of `File`), following luv's sources. On other hosts, and in hxc builds

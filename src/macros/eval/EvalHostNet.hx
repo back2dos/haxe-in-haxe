@@ -6,7 +6,7 @@ import sys.net.Host;
 import sys.net.Socket;
 
 // port: HashLink host for the Eval socket natives (EvalStdLibB.hx StdSocket): the
-// interface of the hxc target's `hxc.NativeNet` (backend/std-hxc), which
+// interface of the hxc target's `hxc.NativeNet` (hxc/std), which
 // stands for OCaml's Unix module, over the host's sys.net.Socket.
 //
 // Host differences: sockets are numbered handles into a table rather than

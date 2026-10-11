@@ -1807,7 +1807,7 @@ class StdGc {
 	public static final counters = EvalEncode.vfun0(() -> unsupported("counters"));
 
 	#if (target.name == "hxc")
-	// port: the hxc host GC has OCaml's finalisers (backend/rt/rt.c)
+	// port: the hxc host GC has OCaml's finalisers (hxc/rt/rt.c)
 	public static final finalise = EvalEncode.vfun2((f, v) -> {
 		hxc.NativeGc.finalise((v:Value) -> {
 			EvalMisc.callValue(f, [v]);

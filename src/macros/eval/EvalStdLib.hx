@@ -73,7 +73,7 @@ using macros.eval.EvalValue.EvalValueTools;
 // - `hashtbl_keys` follows the host map's key order (OCaml `Hashtbl` order is
 //   not reproduced).
 // - libuv (`EvalLuv`) and mbedtls (`EvalSsl`) work on the hxc host
-//   (backend/); elsewhere their natives throw "... is not supported by
+//   (hxc/); elsewhere their natives throw "... is not supported by
 //   haxe-in-haxe". Sockets use `hxc.NativeNet` on the hxc host and
 //   `EvalHostNet` on HashLink, and fail likewise on other hosts.
 // - zlib streams are host `haxe.zip.Compress`/`haxe.zip.Uncompress` objects.

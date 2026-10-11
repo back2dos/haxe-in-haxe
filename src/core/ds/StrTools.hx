@@ -12,7 +12,7 @@ class StrTools {
 	}
 
 	// port: OCaml's physical inequality `!=` on strings. HashLink compares the
-	// character buffers, the JVM and hxc (backend/) references; other hosts have no
+	// character buffers, the JVM and hxc (hxc/) references; other hosts have no
 	// string identity and fall back to structural inequality (positions are then
 	// encoded more compactly than upstream when a macro rebuilt a file name).
 	public static inline function physNeq(a:Null<String>, b:Null<String>):Bool {

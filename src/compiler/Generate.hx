@@ -129,7 +129,7 @@ class Generate {
 	// port: HXB output is emitted by the after-save callback before backend destruction.
 	// Interpretation (--interp, --run, the Eval target) runs on the port's Eval; the other
 	// code generators are not ported and fail explicitly (their dispatch is kept in
-	// deferred/compiler/GenerateTargets.hx).
+	// archive/deferred/compiler/GenerateTargets.hx).
 	public static function generate(com:CommonContext, tctx:context.Typecore.Typer, ext:String, actx:compiler.Args.ArgContext):Void {
 		// check file extension. In case of wrong commandline, we don't want
 		// to accidentaly delete a source file.

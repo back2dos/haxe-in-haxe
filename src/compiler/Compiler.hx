@@ -197,7 +197,7 @@ class Compiler {
 				return null;
 			}), null);
 
-	// port: experimental code generators (backend/) receive the filtered program here; always null in the compiler itself.
+	// port: experimental code generators (hxc/) receive the filtered program here; always null in the compiler itself.
 	public static var generateHook:Null<CommonContext->Void> = null;
 
 	public static function compile(com:CommonContext, actx:ArgContext, sctx:ServerCompilationContext):Void {

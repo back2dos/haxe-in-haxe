@@ -10,7 +10,7 @@ import macros.eval.EvalExceptions;
 using macros.eval.EvalValue.EvalValueTools;
 
 // port: upstream calls the OCaml mbedtls bindings (haxe/libs/mbedtls). On the hxc
-// host (backend/) they are `hxc.NativeSsl` (backend/rt/rt_ssl.c); on other
+// host (hxc/) they are `hxc.NativeSsl` (hxc/rt/rt_ssl.c); on other
 // hosts the constructors and natives fail with "mbedtls (...) is not supported
 // by haxe-in-haxe".
 //
