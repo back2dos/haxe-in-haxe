@@ -29,8 +29,8 @@ the revisions the runner pins) on hxc and the other targets, with the pinned
 `haxe/haxe`. hxc builds use the native backend tool (`backend/tools/dev-tool.sh`:
 the lowering no longer goes through Node). Wall time in seconds, best of 3,
 clean builds, 4 cores; bold: the fastest. hxcpp is 4.3.0 from git, HL/C uses
-the installed libhl 1.15 with `gcc -O2`, JVM is OpenJDK 21, JS is Node 22
-with hxnodejs.
+HashLink master (2.0.0, 3b7bd74) with `gcc -O2`, the HL JIT the same
+build, JVM is OpenJDK 21, JS is Node 22 with hxnodejs.
 
 | case | hxc before | hxc (clang) | hxc (tcc) | hxcpp | HL/C | HL JIT | JVM | JS |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
