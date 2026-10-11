@@ -24,7 +24,7 @@ import context.Common;
 	public inline function clone():DeprecationContext return new DeprecationContext(com, classMeta, fieldMeta, curmod);
 }
 
-// haxe/src/context/display/deprecationCheck.ml; warnings are required outside display services.
+// port: deprecation warnings are needed outside display services as well.
 class DeprecationCheck {
 	public static function createContext(com:CommonContext):DeprecationContext
 		return {
@@ -96,6 +96,7 @@ class DeprecationCheck {
 			case TNew(c, _, el):
 				for (arg in el) loop(arg);
 				checkClass(ctx, c, e.epos);
+				// The AST doesn't carry the correct overload for TNew, so let's ignore this case... (#8557).
 				if (c.clConstructor != null && c.clConstructor.cfOverloads.length == 0) checkCf(ctx, c.clConstructor, e.epos);
 			case TTypeExpr(mt) | TCast(_, mt) if (mt != null):
 				checkModuleType(ctx, mt, e.epos);

@@ -15,7 +15,6 @@ import core.DisplayTypes;
 import core.TType;
 import core.display.CompletionItem;
 
-// haxe/src/context/display/display.ml
 class Display {
 	public static function mergeCoreDoc(ctx:Typer, mtype:ModuleType):Void {
 		DisplayPosition.displayPosition.runOutside(function() {
@@ -39,13 +38,13 @@ class Display {
 		case _: e;
 	};
 
-	/** OCaml's polymorphic comparison of `(int,string)` sort keys. **/
+	// port: OCaml's polymorphic comparison of `(int,string)` sort keys.
 	public static function compareSortIndex(a:{i:Int, s:String}, b:{i:Int, s:String}):Int {
 		if (a.i != b.i) return a.i < b.i ? -1 : 1;
 		return compareStrings(a.s, b.s);
 	}
 
-	/** OCaml's `compare` on strings: byte-wise on the UTF-8 encoding. **/
+	// port: OCaml's `compare` on strings: byte-wise on the UTF-8 encoding.
 	public static function compareStrings(a:String, b:String):Int {
 		if (a == b) return 0;
 		var ba = haxe.io.Bytes.ofString(a), bb = haxe.io.Bytes.ofString(b);
@@ -124,7 +123,7 @@ class Display {
 	}
 }
 
-/** `Display.ReferencePosition` **/
+// port: Display.ReferencePosition
 class ReferencePosition {
 	static var referencePosition:{name:String, pos:Pos, kind:Symbol} = {name: "", pos: Globals.nullPos, kind: SKOther};
 

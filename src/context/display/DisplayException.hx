@@ -17,9 +17,7 @@ import core.DisplayTypes;
 import core.TType;
 import core.display.CompletionItem;
 
-// haxe/src/context/display/displayException.ml
-
-/** `((args,ret),ctf),doc` of a signature, as produced by TyperDisplay.convert_function_signature. **/
+// port: `((args,ret),ctf),doc` of a signature, as produced by TyperDisplay.convert_function_signature.
 typedef SignatureInfo = {sig:{args:Array<{name:String, optional:Bool, type:T}>, ret:T, ctf:CtFunction}, doc:Documentation};
 
 class DisplayException extends haxe.Exception {
@@ -70,7 +68,7 @@ class DisplayException extends haxe.Exception {
 			function indexFrom(o:Int, c:Int):{o:Int, cost:Int} {
 				var cost = 0;
 				while (true) {
-					// String.get raises Invalid_argument past the end
+					// port: String.get raises Invalid_argument past the end
 					if (o >= s.length) throw new core.ds.InvalidArgument("index out of bounds");
 					var c2 = StringTools.fastCodeAt(s, o);
 					if (c2 == c) return {o: o, cost: cost};
@@ -129,6 +127,7 @@ class DisplayException extends haxe.Exception {
 			subj:CompletionSubject):JsonValue {
 		lastCompletionResult = fields.copy();
 		var needsFiltering = ServerConfig.maxCompletionItems > 0 && lastCompletionResult.length > ServerConfig.maxCompletionItems;
+		// let p_before = subj.s_insert_pos in
 		var subj = patchCompletionSubject(subj);
 		var r = if (needsFiltering) filterSomehow(ctx, fields, kind, subj) else {
 			var i = 0;
@@ -137,6 +136,13 @@ class DisplayException extends haxe.Exception {
 		var didFilter = r.length == ServerConfig.maxCompletionItems;
 		lastCompletionPos = didFilter ? subj.sStartPos : null;
 		var filterString = subj.sName == null ? "" : subj.sName;
+		/* print_endline (Printf.sprintf "FIELDS OUTPUT:\n\tfilter_string: %s\n\t    num items: %i\n\t        start: %s\n\t     position: %s\n\t   before cut: %s"
+			filter_string
+			num_items
+			(Printer.s_pos subj.s_start_pos)
+			(Printer.s_pos subj.s_insert_pos)
+			(Printer.s_pos p_before)
+		); */
 		return jobject([
 			kv("items", jarray(r.items)),
 			kv("isIncomplete", jbool(didFilter)),
@@ -147,7 +153,7 @@ class DisplayException extends haxe.Exception {
 	}
 
 	public static function argIndex(signatures:Array<SignatureInfo>, signatureIndex:Int, paramIndex:Int):Int {
-		// List.nth raises Invalid_argument for a negative index and Failure past the end
+		// port: List.nth raises Invalid_argument for a negative index and Failure past the end
 		if (signatureIndex < 0) return paramIndex;
 		if (signatureIndex >= signatures.length) throw new core.ds.Failure("nth");
 		var args = signatures[signatureIndex].sig.args;

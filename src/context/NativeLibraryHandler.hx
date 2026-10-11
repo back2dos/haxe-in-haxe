@@ -3,9 +3,8 @@ package context;
 import compiler.ParsedArg.NativeLibArg;
 import context.Common.CommonContext;
 
-// Port of haxe/src/context/nativeLibraryHandler.ml. Only the HXB library
-// branch is implemented: SWF and JVM libraries (SwfLoader, JavaModern) belong
-// to target milestones outside HXB and are rejected explicitly.
+// port: only the HXB library branch is implemented: SWF and JVM libraries (SwfLoader,
+// JavaModern) belong to target milestones outside HXB and are rejected explicitly.
 class NativeLibraryHandler {
 	public static function addNativeLib(com:CommonContext, lib:NativeLibArg):Void->Void {
 		var file = lib.libFile;

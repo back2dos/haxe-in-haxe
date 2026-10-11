@@ -6,9 +6,17 @@ import core.TType;
 import core.Meta;
 import core.Error;
 
-// Draft mechanical translation of haxe/src/context/purityState.ml; unvalidated.
-// Fields begin MaybePure unless metadata specifies otherwise; inherited promises
-// become ExpectPure and are checked by the later purity inference pass.
+/*
+	PurityState represents whether or not something has a side-effect. Unless otherwise stated
+	by using `@:pure` (equivalent to `@:pure(true)`) or `@:pure(false)`, fields are originally
+	supposed to be "maybe pure". Once all types and fields are known, this is refined by
+	AnalyzerTexpr.Purity.
+
+	There's a special case for fields that override a parent class field or implement an
+	interface field: If the overridden/implemented field is explicitly marked as pure,
+	the type loader marks the overriding/implementing as "expected pure". If during purity
+	inference this assumption does not hold, an error is shown.
+*/
 enum PurityState {
 	Pure;
 	Impure;

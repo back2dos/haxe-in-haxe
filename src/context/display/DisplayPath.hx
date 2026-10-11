@@ -14,7 +14,6 @@ import core.DisplayTypes;
 import core.TType;
 import core.display.CompletionItem;
 
-// haxe/src/context/display/displayPath.ml
 class TypePathHandler {
 	public static function unique(l:Array<String>):Array<String> {
 		var l = l.copy();
@@ -61,7 +60,8 @@ class TypePathHandler {
 					}
 				}
 			});
-		// Native libraries (SWF/JVM) are a later milestone; com.native_libs holds none.
+		// port: process_lib over com.native_libs is not translated: SWF/JVM libraries are rejected
+		// by NativeLibraryHandler, so those lists are always empty.
 		return {packages: unique(packages), classes: unique(classes)};
 	}
 

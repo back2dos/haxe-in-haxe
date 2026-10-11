@@ -13,7 +13,6 @@ import core.Message;
 import core.DisplayTypes;
 import core.TType;
 
-// haxe/src/context/display/diagnostics.ml
 class Diagnostics {
 	public static function addReplaceableCode(ctx:DiagnosticsContext, reason:String, replacement:String, displayRange:Pos,
 			replaceRange:Pos):Void {

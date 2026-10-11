@@ -4,7 +4,7 @@ import core.Timer;
 import core.ds.TaskPool;
 import sys.thread.Mutex;
 
-// haxe/src/context/parallel.ml; TaskPool isolates host threading differences.
+// port: core.ds.TaskPool stands in for Domainslib.Task.pool and isolates host threading differences.
 @:structInit class ManagedPoolData {
 	public var setup:Void->TaskPool;
 	public var pool:Null<TaskPool>;
@@ -75,6 +75,10 @@ class ParallelSeq {
 	public static function iter<A>(pool:Null<TaskPool>, f:A->Void, seq:Iterator<A>):Void ParallelArray.iter(pool, f, [for (a in seq) a]);
 }
 
+// A pool that can be acquired on demand and released when idle.
+// Unlike AtomicLazy, supports teardown and re-creation so that
+// domain workers don't stay alive during phases that don't need them
+// (e.g. eval interpretation).
 class ManagedPool {
 	public static function create(setup:Void->TaskPool):ManagedPoolData return {setup: setup, pool: null, mutex: new Mutex()};
 

@@ -4,7 +4,6 @@ import core.Globals;
 import core.Path;
 import core.Define;
 
-// haxe/src/context/dotGraph.ml — mechanical draft; not compile-validated.
 class DotGraph {
 	public static function platformNameMacro(com:SafeCom.SafeContext):String return Define.defined(com.defines,
 		Define.Macro) ? "macro" : Globals.platformName(com.platform);

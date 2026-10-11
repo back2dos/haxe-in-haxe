@@ -8,11 +8,10 @@ import syntax.ParserEntry;
 import syntax.Lexer;
 import core.Error as CompilerError;
 
-// Draft mechanical translation of haxe/src/context/formatString.ml; unvalidated.
 class FormatString {
-	// OCaml strings are bytes: offsets, lengths and positions count UTF-8 bytes, not characters.
+	// port: OCaml strings are bytes: offsets, lengths and positions count UTF-8 bytes, not characters.
 	static function subBytes(b:haxe.io.Bytes, start:Int, len:Int):String {
-		// HashLink's Bytes.getString stops at a NUL byte
+		// port: HashLink's Bytes.getString stops at a NUL byte
 		var out = new StringBuf();
 		var i = start, end = start + len;
 		while (i < end) {
@@ -95,6 +94,7 @@ class FormatString {
 			}
 			var next = s.get(pos);
 			if (next == "$".code) {
+				// double $
 				addSub(start, pos);
 				parse(pos + 1, pos + 1);
 			} else if (next == "{".code) {
@@ -111,7 +111,9 @@ class FormatString {
 				var length = end - pos;
 				add(EConst(Ident(subBytes(s, pos, length))), length);
 				parse(pos + length, pos + length);
-			} else parse(start, pos);
+			} else
+				// keep as-it
+				parse(start, pos);
 		};
 		parse(0, 0);
 		if (result == null) throw "formatString: missing expression";

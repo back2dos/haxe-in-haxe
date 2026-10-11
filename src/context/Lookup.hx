@@ -3,7 +3,6 @@ package context;
 import core.ds.PersistentMap;
 import core.ds.Hashtbl;
 
-// Draft mechanical translation of haxe/src/context/lookup.ml; unvalidated.
 interface Lookup<K, V> {
 	public function add(key:K, value:V):Void;
 	public function remove(key:K):Void;

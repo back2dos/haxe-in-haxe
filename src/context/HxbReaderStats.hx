@@ -1,7 +1,7 @@
 package context;
 
-// Shared counters from haxe/src/compiler/hxb/hxbReader.ml:21-29.
-// Incremented by compiler.hxb.HxbReader.
+// port: hxb_reader_stats and create_hxb_reader_stats from haxe/src/compiler/hxb/hxbReader.ml;
+// incremented by compiler.hxb.HxbReader.
 @:structInit class HxbReaderStatsData {
 	public var modulesFullyRestored:Int;
 	public var modulesPartiallyRestored:Int;

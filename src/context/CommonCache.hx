@@ -18,8 +18,7 @@ import compiler.CompilationCache;
 import compiler.hxb.HxbData;
 import compiler.hxb.HxbWriterConfig;
 
-// Port of haxe/src/context/commonCache.ml.
-// Native libraries (SWF/JVM) are not ported; `lib` is the NativeLibrary interface.
+// port: native libraries (SWF/JVM) are not ported; `lib` is the NativeLibrary interface.
 class LibBuildTask extends ServerTask {
 	final cs:Cache;
 	final file:String;
@@ -134,7 +133,7 @@ class CommonCache {
 				function warn(w:core.Message.WarningCode, s:String, p:Pos):Void com.warning(w, com.warningOptions, s, p);
 				var config:WriterTargetConfig = switch com.hxbWriterConfig {
 					case null:
-						new WriterTargetConfig(); // HxbWriterConfig.create_target_config ()
+						new WriterTargetConfig(); // port: HxbWriterConfig.create_target_config ()
 					case config:
 						if (com.isMacroContext) config.macroConfig else config.targetConfig;
 				}

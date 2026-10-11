@@ -14,7 +14,6 @@ import core.Warning;
 import core.WarningList;
 import Type as StdType;
 
-// Draft mechanical translation of haxe/src/context/resolution.ml; unvalidated.
 enum ResolutionKind {
 	RTypeImport(alias:String, type:ModuleType);
 	RClassFieldImport(alias:String, cls:TClass, field:TClassField);
@@ -94,6 +93,9 @@ class ResolutionList {
 
 	public function add(res:ResolvedImport):Void {
 		list = [res].concat(list);
+		// If we import a type, we automatically want to import all its constructors in case of
+		// enums and enum abstracts. We add a RLazy in front of the list so that it takes priority
+		// over the type itself. When resolved, it will insert its fields into the resolution list.
 		switch res.rKind {
 			case RTypeImport(_, mt):
 				var expanded = expandEnumConstructors(mt);
@@ -192,6 +194,7 @@ class ResolutionList {
 		cachedTypeImports = true;
 		typeImportCache = [];
 		var index = list.length;
+		// loop first to retain correct order
 		while (index > 0) {
 			var res = list[--index];
 			switch res.rKind {

@@ -29,8 +29,7 @@ enum ImportDisplayKind {
 	IDK;
 }
 
-// haxe/src/context/display/importHandling.ml
-// The preexisting Haxe ModuleDefDisplay model stores position keys as strings.
+// port: ModuleDefDisplay.mImportPositions is keyed by position strings (see key).
 class ImportHandling {
 	public static function convertImportToSomethingUsable(pt:Pos, path:Array<PlacedName>):{kind:ImportDisplayKind, pos:Pos} {
 		var pack:Array<String> = [],
@@ -62,7 +61,7 @@ class ImportHandling {
 		return {kind: IDK, pos: Globals.nullPos};
 	}
 
-	// Injective (the file comes last) and much cheaper than JSON-encoding the position per lookup.
+	// port: injective (the file comes last) and much cheaper than JSON-encoding the position per lookup.
 	public static function key(p:Pos):String return p.pmin + ":" + p.pmax + ":" + p.pfile;
 
 	public static function posOfKey(k:String):Pos {
@@ -70,7 +69,7 @@ class ImportHandling {
 		return {pfile: k.substr(j + 1), pmin: Std.parseInt(k.substr(0, i)), pmax: Std.parseInt(k.substr(i + 1, j - i - 1))};
 	}
 
-	/** OCaml's `compare` on positions: file, then pmin, then pmax. **/
+	// port: OCaml's `compare` on positions: file, then pmin, then pmax.
 	public static function comparePos(a:Pos, b:Pos):Int {
 		var c = context.display.Display.compareStrings(a.pfile, b.pfile);
 		if (c != 0) return c;
@@ -79,7 +78,7 @@ class ImportHandling {
 		return 0;
 	}
 
-	/** `PMap.iter` over `m_import_positions`: in position order. **/
+	// port: `PMap.iter` over `m_import_positions`: in position order.
 	public static function iterImportPositions(positions:Map<String, Bool>, f:String->Pos->Bool->Void):Void {
 		var l = [for (k in positions.keys()) {key: k, pos: posOfKey(k)}];
 		l.sort((a, b) -> comparePos(a.pos, b.pos));
@@ -133,6 +132,7 @@ class ImportHandling {
 		inline function checkPrivate(t:ModuleType, p:Pos):Void {
 			if (ctx.m.curmod != tModule(t) && tPrivate(t)) errorPrivate(p);
 		}
+		// TODO: cleaner way to get module fields?
 		inline function staticNames():Array<String> {
 			if (md.mStatics == null) return [];
 			var names = PMap.keys(md.mStatics.clStatics);
@@ -208,10 +208,12 @@ class ImportHandling {
 						if (name != null) checkAlias(sub, name.name, name.pos);
 						ctx.m.importResolution.add(moduleTypeResolution(sub, alias, p));
 					} catch (_:NotFound) {
+						// this might be a static property, wait later to check
 						function findMainTypeStatic():Null<ResolvedImport> {
 							try {
 								var main = findType(tname);
-								// HashLink 2.0 JIT: an early exit through two nested try blocks restores only the innermost trap, leaving a dangling handler; the result is returned from the outer try only.
+								// port: HashLink 2.0 JIT: an early exit through two nested try blocks restores only the
+								// innermost trap, leaving a dangling handler; the result is returned from the outer try only.
 								var resolved = try addStaticInit(main, alias, subName) catch (_:NotFound) {
 									var info = switch resolveTypedef(main) {
 										case TClassDecl(c): {
@@ -235,7 +237,7 @@ class ImportHandling {
 												names: staticNames()
 											};
 									};
-									// PMap.foldi builds source candidate lists in reverse key order.
+									// port: PMap.foldi builds source candidate lists in reverse key order.
 									switch resolveTypedef(main) {
 										case TClassDecl(_) | TEnumDecl(_): info.names.reverse();
 										case TAbstractDecl(a) if (a.aImpl != null): info.names.reverse();
@@ -334,7 +336,9 @@ class ImportHandling {
 	public static function initUsing(ctx:Typer, path:Array<PlacedName>, p:Pos):Void {
 		var result = handleUsing(ctx, path, p), types = result.types.copy();
 		types.reverse();
+		// do the import first
 		for (mt in types) ctx.m.importResolution.add(Resolution.moduleTypeResolution(mt, null, p));
+		// delay the using since we need to resolve typedefs
 		delayLate(ctx.g, PConnectField, () -> ctx.m.moduleUsing = result.filterClasses(result.types).concat(ctx.m.moduleUsing));
 	}
 }

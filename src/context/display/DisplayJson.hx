@@ -22,9 +22,7 @@ import context.Common;
 import core.DisplayTypes;
 import core.TType;
 
-// haxe/src/context/display/displayJson.ml
-
-/** `exception JsonCompleted` **/
+// port: exception JsonCompleted
 class JsonCompleted extends haxe.Exception {
 	public function new() super("JsonCompleted");
 }
@@ -120,7 +118,7 @@ class ApiError extends haxe.Exception {
 }
 
 class DisplayJson {
-	/** Generate the JSON of our times. **/
+	// Generate the JSON of our times.
 	public static function jsonOfTimes(root:core.Timer.TimerNode):Null<JsonValue> {
 		function loop(node:core.Timer.TimerNode):Null<JsonValue> {
 			if (node == root || node.time > 0.0009) {
@@ -152,11 +150,15 @@ class DisplayJson {
 
 	public static function sendJson(io:CompilerIoData, json:JsonValue):Void sendString(io, Json.stringOfJson(json));
 
-	/**
+	/*
 		send_string_raise writes the string to io and then raises JsonCompleted.
 		JsonCompleted is a control-flow exception signaling that a JSON-RPC response has been
-		sent and no further output should be produced.
-	**/
+		sent and no further output should be produced. It is caught by catch_completion_and_exit
+		which calls finalize and exits cleanly.
+		Raising is necessary for call-sites that send their response from within compilation
+		(display output handlers, deferred callbacks, flush_context), where we need to abort
+		further processing once the response is sent.
+	*/
 	public static function sendStringRaise<R>(io:CompilerIoData, j:String):R {
 		sendString(io, j);
 		throw new JsonCompleted();
@@ -165,13 +167,13 @@ class DisplayJson {
 	public static function sendJsonRaise<R>(io:CompilerIoData, json:JsonValue):R return sendStringRaise(io, Json.stringOfJson(json));
 
 	public static function findModule(com:CommonContext, cc:ContextCache, path:GlobalTypePath):ModuleDef {
-		// hxb_reader_api_com#find_module
+		// port: hxb_reader_api_com#find_module
 		try {
 			return com.moduleLut.find(path);
 		} catch (_:core.ds.NotFound) {
 			var m = cc.findModuleOpt(path);
 			if (m != null) return m;
-			// Throws Not_found when the module is not in the binary cache either.
+			// port: throws Not_found when the module is not in the binary cache either.
 			cc.getHxbModule(path);
 			throw new core.ds.Failure("Reading modules from the HXB cache requires HXB input, which is not supported by haxe-in-haxe");
 		}
@@ -179,7 +181,8 @@ class DisplayJson {
 
 	public static function apiError<R>(j:JsonValue):R throw new ApiError(j);
 
-	/** server/configure print settings (`ServerMessage.set_by_name`); installed by the server. **/
+	// port: server/configure print settings (ServerMessage.set_by_name); nothing assigns this hook,
+	// so the request fails.
 	public static var serverMessageSetByName:(String,
 		Bool) -> Void = function(name,
 				value)
@@ -511,7 +514,7 @@ class DisplayJson {
 					var cc = cs.getContext(sign);
 					try {
 						var m = findModule(hctx.com, cc, path);
-						// Genjson.generate_module needs the HXB module cache of the server
+						// port: TODO Genjson.generate_module (over the server's HXB module cache) is not translated
 						throw new core.ds.Failure("server/module requires the server's HXB module cache, which is not supported by haxe-in-haxe");
 					} catch (_:core.ds.NotFound) {
 						return Error(jstring("No such module"));

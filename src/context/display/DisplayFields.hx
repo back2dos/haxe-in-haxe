@@ -19,7 +19,6 @@ import core.DisplayTypes;
 import core.TType;
 import core.display.CompletionItem;
 
-// haxe/src/context/display/displayFields.ml
 class DisplayFields {
 	public static function getSubmoduleFields(ctx:Typer, path:GlobalTypePath):Array<CompletionItemData> {
 		var m = ctx.com.moduleLut.find(path);

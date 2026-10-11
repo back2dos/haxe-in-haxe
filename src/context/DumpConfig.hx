@@ -3,7 +3,6 @@ package context;
 import core.Define;
 import core.Define.DefineContext;
 
-// Draft mechanical translation of haxe/src/context/dumpConfig.ml; unvalidated.
 enum DumpMode {
 	NoDump;
 	Ast;
