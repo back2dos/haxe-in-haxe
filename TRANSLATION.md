@@ -28,8 +28,8 @@ reference (results in `test/TESTING.md`):
 
 Not ported: the Eval debugger (`evalDebug*.ml`), `jsonRpcSocket.ml`, object
 sizes for `server/memory` (`Memory.memSize`), `server/module` (it needs
-`Genjson.generate_module` over the HXB module cache), the SWF native-library
-handler (`--swf-lib`) and the HL bytecode interpreter. Every target generator
+`Genjson.generate_module` over the HXB module cache) and the HL bytecode
+interpreter. Every target generator
 is translated (see "Target generator coverage"). `EvalLock.hx` (OCaml's
 runtime lock for Eval threads) has no upstream module.
 
@@ -149,7 +149,7 @@ At the time, display, server, macro-runtime, native-library and target
 dispatch bodies were kept under `archive/deferred/`, outside the build class path.
 Display, server and the macro runtime have since been translated in `src/`
 (see the history above); `archive/deferred/` now only holds old drafts, and the
-remaining unsupported services (SWF libraries, the HL interpreter) are
+remaining unsupported services (the HL interpreter) are
 rejected explicitly at their call sites. In-scope typing and filtering paths remain in
 the all-module build. Compilation does not establish runtime correctness,
 conformance, or completion of the pre-existing HXB writer. The subsequent runtime test phase is tracked in
@@ -197,7 +197,7 @@ conformance, or completion of the pre-existing HXB writer. The subsequent runtim
 | `context/dumpConfig.ml` | `src/context/DumpConfig.hx` | Draft translated |
 | `context/formatString.ml` | `src/context/FormatString.hx` | Draft translated |
 | `context/lookup.ml` | `src/context/Lookup.hx` | Draft translated |
-| `context/nativeLibraryHandler.ml` | `src/context/NativeLibraryHandler.hx` | HXB library branch; SWF/JVM libraries rejected explicitly |
+| `context/nativeLibraryHandler.ml` | `src/context/NativeLibraryHandler.hx` | HXB, JVM (`JavaModern`) and SWF (`SwfLoader`) branches |
 | `context/nativeLibraries.ml` | `src/context/NativeLibraries.hx` | Draft translated |
 | `context/parallel.ml` | `src/context/Parallel.hx` | Draft translated |
 | `context/platformConfig.ml` | `src/context/PlatformConfig.hx` | Draft translated |
@@ -402,12 +402,18 @@ and on the hand and upstream cases listed there. Generated programs are not run.
 | `generators/genjvm.ml`, `generators/jvm/*.ml` | `src/generators/Genjvm.hx`, `src/generators/jvm/` | JVM (sequential passes, as upstream with `-D disable-parallelism`) |
 | `codegen/javaModern.ml` | `src/codegen/JavaModern.hx` | Java library input (`hxjava-std.jar`, `--java-lib`) |
 | `generators/gencpp.ml`, `generators/cpp/**/*.ml` | `src/generators/Gencpp.hx`, `src/generators/cpp/` | C++ and cppia |
-| `generators/genswf.ml`, `genswf9.ml`, `flashProps.ml` | `src/generators/Genswf.hx`, `Genswf9.hx`, `FlashProps.hx` | SWF/SWC; `--swf-lib` and PNG bitmaps fail explicitly |
+| `generators/genswf.ml`, `genswf9.ml`, `flashProps.ml` | `src/generators/Genswf.hx`, `Genswf9.hx`, `FlashProps.hx` | SWF/SWC, including `--swf-lib` merging, PNG `@:bitmap` and JPEG+PNG-alpha bitmaps |
+| `codegen/swfLoader.ml` | `src/codegen/SwfLoader.hx` | SWF/SWC/ANE library input (`--swf-lib`, `--swf-lib-extern`): extern classes, `enumAbstract:` defines, `@:bind` class removal |
+| `generators/genhxold.ml` | `src/generators/Genhxold.hx` | `-D gen-hx-classes` extern output (`hxclasses/`) |
 
 OCaml library code the generators need, reproduced under `src/libs/`: `neko`
-(AST, bytecode compiler and writer), `swflib` (SWF and ABC writers),
-`extc` (zlib 1.3.1 deflate, translated so compressed SWF output is
-byte-identical), `extlib` (`IO` writers) and `ziplib` (SWC ZIP writer).
+(AST, bytecode compiler and writer), `swflib` (SWF, AS2 action and ABC
+readers and writers, `as3hlparse` parse/flatten, `png` reading; `swfPic` and
+the dump printers have no compiler caller), `extc` (zlib 1.3.1 deflate,
+translated so compressed SWF output is byte-identical; inflate over the std's
+`haxe.zip.InflateImpl`, deterministic for valid streams), `extlib` (`IO`
+readers and writers) and `ziplib` (SWC ZIP writer; reading in
+`src/core/ZipInput.hx`).
 
 ## Macro runtime coverage
 
@@ -464,10 +470,7 @@ A scope-review entry is not a blanket exclusion of shared batch-compiler helpers
 | --- | --- |
 | `codegen/genxml.ml` | Standalone XML output deferred; RTTI serializer is in scope and compiled |
 | `codegen/jClass.ml` | Other target/library support |
-| `codegen/swfLoader.ml` | Other target/library support |
-| `context/nativeLibraryHandler.ml` | SWF library handler (`SwfLoader`); the HXB and Java (`JavaModern`) branches are translated |
 | `core/json/jsonRpcSocket.ml` | Display/server JSON-RPC transport |
-| `generators/genhxold.ml` | `-xml *.hx` extern output (auxiliary, with genxml) |
 | `lazy.ml` | OCaml build/runtime adapter; no mechanical compiler-module port |
 | `prebuild.ml` | OCaml build/runtime adapter; no mechanical compiler-module port |
 

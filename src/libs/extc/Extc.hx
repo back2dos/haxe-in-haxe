@@ -3,6 +3,8 @@ package libs.extc;
 import haxe.io.Bytes;
 import libs.extlib.IO;
 import libs.extlib.IO.Output;
+import libs.extlib.IO.Input;
+import libs.extlib.IO.NoMoreInput;
 
 // port: the deflate half of haxe/libs/extc/extc.ml (zlib_deflate_init, zlib_op,
 // zip, output_zip), over the zlib translation in Zlib.hx. Inflate (unzip,
@@ -74,6 +76,51 @@ class Extc {
 		return s;
 	}
 
+	// port: an extlib IO.input seen as a haxe.io.Input, for InflateImpl.
+	static function hostInput(ch:Input):haxe.io.Input return new ExtcHostInput(ch);
+
+	static function inflater(i:haxe.io.Input):haxe.zip.InflateImpl {
+		return try new haxe.zip.InflateImpl(i, true, true) catch (_:Dynamic) throw new core.ds.Failure("zlib_inflate");
+	}
+
+	public static function unzip(str:Bytes):Bytes {
+		var z = inflater(new haxe.io.BytesInput(str));
+		var buf = new haxe.io.BytesBuffer();
+		var tmp = Bytes.alloc(1 << 14);
+		try {
+			while (true) {
+				var n = z.readBytes(tmp, 0, tmp.length);
+				buf.addBytes(tmp, 0, n);
+				if (n < tmp.length) break;
+			}
+		} catch (e:core.ds.Failure) {
+			throw e;
+		} catch (_:Dynamic) {
+			throw new core.ds.Failure("zlib_inflate");
+		}
+		return buf.getBytes();
+	}
+
+	// port: input_zip inflates lazily from `ch` like upstream's 64KB refills.
+	public static function inputZip(?bufsize:Int = 65536, ch:Input):Input {
+		var z:Null<haxe.zip.InflateImpl> = null;
+		function get():haxe.zip.InflateImpl {
+			if (z == null) z = inflater(hostInput(ch));
+			return z;
+		}
+		function input(s:Bytes, p:Int, l:Int):Int {
+			var n = try get().readBytes(s, p, l) catch (e:core.ds.Failure) throw e catch (e:NoMoreInput) throw e catch (_:Dynamic) throw new core.ds.Failure("zlib_inflate");
+			if (n == 0) throw new NoMoreInput();
+			return n;
+		}
+		var one = Bytes.alloc(1);
+		function read():Int {
+			input(one, 0, 1);
+			return one.get(0);
+		}
+		return IO.createIn(read, input, () -> {});
+	}
+
 	public static function outputZip(?bufsize:Int = 65536, ?level:Int = 9, ch:Output):Output {
 		var z = zlibDeflateInit(level);
 		var out = Bytes.alloc(bufsize);
@@ -115,5 +162,21 @@ class Extc {
 			flush(false);
 			ch.outFlush();
 		}, close);
+	}
+}
+
+private class ExtcHostInput extends haxe.io.Input {
+	final ch:Input;
+
+	public function new(ch:Input) {
+		this.ch = ch;
+	}
+
+	override public function readByte():Int {
+		return try IO.read(ch) catch (_:NoMoreInput) throw new haxe.io.Eof();
+	}
+
+	override public function readBytes(s:Bytes, pos:Int, len:Int):Int {
+		return try IO.input(ch, s, pos, len) catch (_:NoMoreInput) throw new haxe.io.Eof();
 	}
 }
