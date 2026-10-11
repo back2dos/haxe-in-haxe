@@ -725,13 +725,12 @@ class Genlua {
 	}
 
 	// port: (Hashtbl.fold (fun name data acc -> (name,data) :: acc) ctx.com.resources []). The
-	// port's resources are a StringMap, so OCaml's table is rebuilt (keys in sorted order: the
-	// insertion order is lost, which only matters for keys that share a bucket).
+	// port's resources are a StringMap, so OCaml's table is rebuilt by inserting the names in the
+	// map's iteration order: the insertion order on the hxc host, whose StringMap keeps it (on
+	// other hosts, names sharing a bucket may come out in another order).
 	static function resourcesFold(resources:StringMap<haxe.io.Bytes>):Array<{name:String, data:haxe.io.Bytes}> {
 		var h = new core.ds.OcamlHashtbl<String, haxe.io.Bytes>(core.ds.OcamlHash.hashString, (a, b) -> a == b, 0);
-		var keys = [for (k in resources.keys()) k];
-		keys.sort(Reflect.compare);
-		for (k in keys) h.replace(k, resources.get(k));
+		for (k => v in resources) h.replace(k, v);
 		var acc = [];
 		h.iter((name, data) -> acc.unshift({name: name, data: data}));
 		return acc;
