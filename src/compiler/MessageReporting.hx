@@ -67,6 +67,14 @@ class MessageReporting {
 		return lines;
 	}
 
+	// Deviation: source lines hold one char per byte, as OCaml strings do, so that
+	// byte columns slice them; the excerpt is turned back into (UTF-8) text when printed.
+	static function byteString(s:String):String {
+		var b = haxe.io.Bytes.alloc(s.length);
+		for (i in 0...s.length) b.set(i, StringTools.fastCodeAt(s, i));
+		return b.toString();
+	}
+
 	public static function errorPrinter(file:String, line:Int):String return file + ":" + line + ":";
 
 	public static function createErrorContext(absolute:Bool):ErrorContext return {
@@ -192,7 +200,7 @@ class MessageReporting {
 				+ safeSub(line, p1 - 1,
 					len - p1 + 1) + reset; else if (l == l2) bold + safeSub(line, 0, p2 - 1) + reset + dim
 				+ safeSub(line, p2 - 1, len - p2 + 1) + reset; else bold + line + reset;
-			out += (gutter < 1 ? "" : repeat(" ", gutter)) + (l == 0 ? "-" : Std.string(l)) + " | " + text + "\n";
+			out += (gutter < 1 ? "" : repeat(" ", gutter)) + (l == 0 ? "-" : Std.string(l)) + " | " + byteString(text) + "\n";
 		}
 		if (marker) out += repeat(" ", gutterLen)
 			+ "|"
