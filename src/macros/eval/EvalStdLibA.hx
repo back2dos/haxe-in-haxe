@@ -1777,14 +1777,55 @@ class StdGc {
 
 	static function unsupported(name:String):Dynamic return EvalStdLibA.notSupported("Gc." + name);
 
-	public static final allocatedBytes = EvalEncode.vfun0(() -> unsupported("allocated_bytes"));
+	// port: the host has no OCaml GC statistics. The statistics are zero except the heap
+	// size, which the hxc host measures (as `heap_words`, 8-byte words).
+	static function hostStats():Value {
+		var heapWords = #if (target.name == "hxc") Std.int(hxc.NativeGc.heapBytes() / 8) #else 0 #end;
+		return EvalEncode.encodeObj([
+			{name: key_minor_words, value: VFloat(0.)},
+			{name: key_promoted_words, value: VFloat(0.)},
+			{name: key_major_words, value: VFloat(0.)},
+			{name: key_minor_collections, value: VInt32(0)},
+			{name: key_major_collections, value: VInt32(0)},
+			{name: key_heap_words, value: VInt32(heapWords)},
+			{name: key_heap_chunks, value: VInt32(0)},
+			{name: key_live_words, value: VInt32(0)},
+			{name: key_live_blocks, value: VInt32(0)},
+			{name: key_free_words, value: VInt32(0)},
+			{name: key_free_blocks, value: VInt32(0)},
+			{name: key_largest_free, value: VInt32(0)},
+			{name: key_fragments, value: VInt32(0)},
+			{name: key_compactions, value: VInt32(0)},
+			{name: key_top_heap_words, value: VInt32(heapWords)},
+			{name: key_stack_size, value: VInt32(0)}
+		]);
+	}
+
+	// port: Gc.control is kept for get/set (OCaml 5.2's defaults) and has no effect on the host GC.
+	static var control = {
+		minorHeapSize: 262144,
+		majorHeapIncrement: 15,
+		spaceOverhead: 120,
+		verbose: 0,
+		maxOverhead: 500,
+		stackLimit: 134217728,
+		allocationPolicy: 2
+	};
+
+	public static final allocatedBytes = EvalEncode.vfun0(() -> VFloat(0.));
 
 	public static final compact = EvalEncode.vfun0(() -> {
 		hostCollect();
 		return VNull;
 	});
 
-	public static final counters = EvalEncode.vfun0(() -> unsupported("counters"));
+	public static final counters = EvalEncode.vfun0(() -> {
+		EvalEncode.encodeObj([
+			{name: key_minor_words, value: VFloat(0.)},
+			{name: key_promoted_words, value: VFloat(0.)},
+			{name: key_major_words, value: VFloat(0.)}
+		]);
+	});
 
 	#if (target.name == "hxc")
 	// port: the hxc host GC has OCaml's finalisers (hxc/rt/rt.c)
@@ -1809,14 +1850,29 @@ class StdGc {
 		return VNull;
 	});
 
-	public static final get = EvalEncode.vfun0(() -> unsupported("get"));
+	public static final get = EvalEncode.vfun0(() -> {
+		EvalEncode.encodeObj([
+			{name: key_minor_heap_size, value: VInt32(control.minorHeapSize)},
+			{name: key_major_heap_increment, value: VInt32(control.majorHeapIncrement)},
+			{name: key_space_overhead, value: VInt32(control.spaceOverhead)},
+			{name: key_verbose, value: VInt32(control.verbose)},
+			{name: key_max_overhead, value: VInt32(control.maxOverhead)},
+			{name: key_stack_limit, value: VInt32(control.stackLimit)},
+			{name: key_allocation_policy, value: VInt32(control.allocationPolicy)}
+		]);
+	});
 
 	public static final major = EvalEncode.vfun0(() -> {
 		hostCollect();
 		return VNull;
 	});
 
-	public static final majorSlice = EvalEncode.vfun1(n -> unsupported("major_slice"));
+	// port: OCaml 5's Gc.major_slice returns 0
+	public static final majorSlice = EvalEncode.vfun1(n -> {
+		EvalDecode.decodeInt(n);
+		hostCollect(false);
+		VInt32(0);
+	});
 
 	public static final minor = EvalEncode.vfun0(() -> {
 		hostCollect(false);
@@ -1831,14 +1887,26 @@ class StdGc {
 		return unsupported("print_stat");
 	});
 
-	public static final quickStat = EvalEncode.vfun0(() -> unsupported("quick_stat"));
+	public static final quickStat = EvalEncode.vfun0(() -> hostStats());
 
 	public static final set = EvalEncode.vfun1(r -> {
-		EvalDecode.decodeObject(r);
-		return unsupported("set");
+		var r = EvalDecode.decodeObject(r);
+		function field(key) return EvalDecode.decodeInt(EvalField.objectField(r, key));
+		control = {
+			minorHeapSize: field(key_minor_heap_size),
+			majorHeapIncrement: field(key_major_heap_increment),
+			spaceOverhead: field(key_space_overhead),
+			verbose: field(key_verbose),
+			maxOverhead: field(key_max_overhead),
+			stackLimit: field(key_stack_limit),
+			allocationPolicy: control.allocationPolicy
+		};
+		/* Awkward hack to avoid warning. */
+		control.allocationPolicy = field(key_allocation_policy);
+		return VNull;
 	});
 
-	public static final stat = EvalEncode.vfun0(() -> unsupported("stat"));
+	public static final stat = EvalEncode.vfun0(() -> hostStats());
 }
 
 class StdHost {

@@ -225,7 +225,7 @@ class Dump {
 	public static function dumpDependencies(com:CommonContext, ?targetOverride:String):Void {
 		var target = targetOverride == null ? Common.platformNameMacro(com) : targetOverride;
 		var out = createDumpfile([], [com.partScope.dumpConfig.dumpPath, target, "dependencies"]);
-		var deps:Map<String, Array<ModuleDef>> = [];
+		var deps = new core.ds.OcamlHashtbl<String, Array<ModuleDef>>(core.ds.OcamlHash.hashString, (a, b) -> a == b, 0);
 		for (m in com.modules) {
 			out.buffer.add(Path.UniqueKey.lazyPath(m.mExtra.mFile) + ":\n");
 			var keys = [for (key in m.mExtra.mDeps.keys()) key];
@@ -243,18 +243,16 @@ class Dump {
 				};
 				var file = Path.UniqueKey.lazyPath(extra.mFile);
 				out.buffer.add("\t" + prefix + file + "\n");
-				var previous = deps.get(file);
-				deps.set(file, [m].concat(previous == null ? [] : previous));
+				var l = deps.findOpt(file);
+				deps.replace(file, [m].concat(l == null ? [] : l));
 			}
 		}
 		out.close();
 		var out = createDumpfile([], [com.partScope.dumpConfig.dumpPath, target, "dependants"]);
-		// port: StringMap order instead of upstream's Hashtbl.iter order; this
-		// diagnostic does not affect HXB output.
-		for (file in deps.keys()) {
-			out.buffer.add(file + ":\n");
-			for (m in deps.get(file)) out.buffer.add("\t" + Path.UniqueKey.lazyPath(m.mExtra.mFile) + "\n");
-		}
+		deps.iter(function(n, ml) {
+			out.buffer.add(n + ":\n");
+			for (m in ml) out.buffer.add("\t" + Path.UniqueKey.lazyPath(m.mExtra.mFile) + "\n");
+		});
 		out.close();
 	}
 

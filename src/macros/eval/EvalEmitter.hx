@@ -52,8 +52,6 @@ class TryCatch {
 // - `Array.make`'s `Invalid_argument` for sizes above `Sys.max_array_length`
 //   cannot happen for 32-bit sizes, so that branch of `emit_new_vector_int` is
 //   not reproduced.
-// - The debugger is not ported: `emit_try` still records caught types when
-//   `ctx.debug.supportDebugger` is set (it never is in haxe-in-haxe).
 class EvalEmitter {
 	// Helper
 	public static function unexpectedValueP(v:Value, s:String, p:Pos):Dynamic {

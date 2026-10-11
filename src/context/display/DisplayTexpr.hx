@@ -194,9 +194,19 @@ class DisplayTexpr {
 			// We have to go through type_module_hook because one of the module's dependencies could be
 			// invalid (issue #8991).
 			var m = try ctx.com.moduleLut.find(path) catch (_:core.ds.NotFound) {
-				// port: TODO the TypeloadCacheHook.type_module_hook fallback (restoring a cached or binary
-				// module) is not translated; a module missing from module_lut is not checked.
-				throw core.ds.NotFound.raise();
+				switch typing.TypeloadCacheHook.typeModuleHook(ctx.com, function(pass, f) Typecore.delay(ctx.g, pass, f), path, Globals.nullPos) {
+					case NoModule | BadModule(_) | BadBinaryModule(_, _):
+						throw core.ds.NotFound.raise();
+					case BinaryModule(mc):
+						var api:compiler.hxb.HxbReaderApi = new typing.TypeloadModule.HxbReaderApiTypeload(ctx.com, ctx.g,
+							TypeloadModule.loadModulePrime, p);
+						var reader = new compiler.hxb.HxbReader(path, ctx.com.hxbReaderStats,
+							if (Common.defined(ctx.com, core.Define.HxbTimes)) ctx.com.timerCtx else null);
+						var m = reader.readChunks(api, mc.mcChunks);
+						m;
+					case GoodModule(m):
+						m;
+				}
 			};
 			checkDisplayModule(ctx, cfile.cDecls, m);
 		} catch (_:core.ds.NotFound) {}
