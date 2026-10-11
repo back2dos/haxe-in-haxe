@@ -73,18 +73,38 @@ import haxe.ds.StringMap;
 	public inline function clone():RenameScope return new RenameScope(parent, children, ownVars, foreignVars, loopVars, loopCount);
 }
 
+// port: a `bool StringMap.t` extended from another one. OCaml's StringMap.add shares the
+// map it extends; copying a haxe.ds.StringMap instead made every scope copy all reserved
+// names (with ReserveAllTypesFlat, every type of the program). Names added here are
+// looked up before the base, which is not modified while this set is in use.
+class ReservedNames {
+	final base:Null<ReservedNames>;
+	final baseMap:Null<StringMap<Bool>>;
+	final own = new StringMap<Bool>();
+
+	public function new(base:Null<ReservedNames>, baseMap:Null<StringMap<Bool>>) {
+		this.base = base;
+		this.baseMap = baseMap;
+	}
+
+	public function exists(name:String):Bool
+		return own.exists(name) || (baseMap != null && baseMap.exists(name)) || (base != null && base.exists(name));
+
+	public function set(name:String, value:Bool):Void own.set(name, value);
+}
+
 @:structInit class RenameContext {
 	public var rcHoisting:Bool;
 	public var rcNoShadowing:Bool;
 	public var rcNoCatchVarShadowing:Bool;
 	public var rcSwitchCasesNoBlocks:Bool;
 	public var rcScope:context.PlatformConfig.VarScope;
-	public var rcReserved:StringMap<Bool>;
+	public var rcReserved:ReservedNames;
 	/** Scope a variable is declared in **/
 	public var rcVarOrigins:IntMap<RenameScope>;
 
 	public inline function new(rcHoisting:Bool, rcNoShadowing:Bool, rcNoCatchVarShadowing:Bool, rcSwitchCasesNoBlocks:Bool,
-			rcScope:context.PlatformConfig.VarScope, rcReserved:StringMap<Bool>, rcVarOrigins:IntMap<RenameScope>) {
+			rcScope:context.PlatformConfig.VarScope, rcReserved:ReservedNames, rcVarOrigins:IntMap<RenameScope>) {
 		this.rcHoisting = rcHoisting;
 		this.rcNoShadowing = rcNoShadowing;
 		this.rcNoCatchVarShadowing = rcNoCatchVarShadowing;
@@ -232,7 +252,7 @@ class RenameVars {
 		Make `name` a reserved word.
 		No local variable will be allowed to have such name.
 	**/
-	public static function reserve(reserved:StringMap<Bool>, name:String):Void reserved.set(name, true);
+	public static function reserve(reserved:ReservedNames, name:String):Void reserved.set(name, true);
 
 	public static function createScope(parent:Null<RenameScope>):RenameScope {
 		var scope:RenameScope = {
@@ -388,7 +408,7 @@ class RenameVars {
 	/**
 		Rename `v` if needed
 	**/
-	public static function maybeRenameVar(rc:RenameContext, reserved:StringMap<Bool>, entry:{variable:TVar, overlaps:Overlaps}):Void {
+	public static function maybeRenameVar(rc:RenameContext, reserved:ReservedNames, entry:{variable:TVar, overlaps:Overlaps}):Void {
 		var v = entry.variable;
 		inline function commit(name:String):Void {
 			v.vMeta = ([
@@ -421,7 +441,7 @@ class RenameVars {
 		Rename variables found in `scope`
 	**/
 	public static function renameVars(rc:RenameContext, scope:RenameScope):Void {
-		var reserved = rc.rcReserved.copy();
+		var reserved = new ReservedNames(rc.rcReserved, null);
 		if ((rc.rcHoisting || rc.rcNoShadowing) && !scope.foreignVars.isEmpty()) scope.foreignVars.iter(v -> reserve(reserved, v.vName));
 		var own = scope.ownVars.copy();
 		own.reverse();
@@ -439,7 +459,7 @@ class RenameVars {
 			rcNoShadowing: ri.riNoShadowing,
 			rcNoCatchVarShadowing: ri.riNoCatchVarShadowing,
 			rcSwitchCasesNoBlocks: ri.riSwitchCasesNoBlocks,
-			rcReserved: ri.riReserved.copy(),
+			rcReserved: new ReservedNames(null, ri.riReserved),
 			rcVarOrigins: new IntMap()
 		};
 		if (ri.riReserveCurrentTopLevelSymbol) reserveCtx(rc, clPath.pack.length == 0 ? clPath.name : clPath.pack[0]);
