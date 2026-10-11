@@ -8,9 +8,9 @@ import syntax.Parser;
 import core.ds.Stream;
 import core.Warning.Warning;
 
-// Batch-only recursive descent port of the declaration/expression path in
-// haxe/src/syntax/grammar.ml.  Display recovery and XML remain parser-entry
-// responsibilities and are intentionally not represented here.
+// port: hand-written, batch-only recursive descent version of the declaration/expression
+// path of grammar.ml, kept for the legacy bootstrap path; the translated pipeline uses
+// Grammar. Display recovery and XML are not represented here.
 class LegacyGrammar {
 	public static function parseFileStream(ctx:ParserContext, s:Stream<LexedToken>):Package {
 		var grammar = new LegacyGrammar([]);
@@ -226,7 +226,7 @@ class LegacyGrammar {
 			var flags:Array<TypedefFlag> = [];
 			if (hasAccess(accesses, AExtern)) flags.push(TDExtern);
 			if (hasAccess(accesses, APrivate)) flags.push(TDPrivate);
-			// grammar.ml consumes an optional semicolon but excludes it from the
+			// port: grammar.ml consumes an optional semicolon but excludes it from the
 			// declaration range.
 			var declarationEnd:Pos = end == null ? data.pos : {pfile: end.pos.pfile, pmin: end.pos.pmin, pmax: end.pos.pmin};
 			return decl(ETypedef({
@@ -378,7 +378,7 @@ class LegacyGrammar {
 		var doc = documentation(), meta = metadata();
 		var start = current().pos;
 		var accesses = access(true);
-		// Conditional compilation can leave a documentation comment immediately
+		// port: conditional compilation can leave a documentation comment immediately
 		// before the closing brace after its documented field is removed.
 		if (is(BrClose)) return null;
 		if (hasAccess(accesses, AFinal) && ! is(Kwd(Var)) && ! is(Kwd(Function))) {
@@ -541,7 +541,7 @@ class LegacyGrammar {
 		var t = current();
 		return switch t.token {
 			case At:
-				// Expression metadata (for example @:privateAccess value) wraps the
+				// port: expression metadata (for example @:privateAccess value) wraps the
 				// full following expression in grammar.ml (`make_meta ... secure_expr`),
 				// including postfix access and assignment. Parsing only a unary
 				// would drop `.field` continuations (`@:privateAccess host.top = prev`).
@@ -683,7 +683,7 @@ class LegacyGrammar {
 				postfix(casted);
 			case _:
 				var value = primary();
-				// Upstream returns statement blocks directly and only continues into
+				// port: upstream returns statement blocks directly and only continues into
 				// postfix parsing for object literals. Otherwise a following prefix
 				// `++`/`--` statement is attached to the preceding `}`.
 				switch value.expr {
@@ -756,8 +756,7 @@ class LegacyGrammar {
 					expr(EMeta({meta: metadataTag("inline", true), exprs: [], pos: t.pos}, value), union(t.pos, value.pos));
 				}
 			case Kwd(Macro):
-				// Macro fields are rejected by the source-only typer, but their bodies
-				// still have to parse so the declaration can reach that boundary.
+				// port: macro bodies still have to parse so the declaration reaches the typer.
 				var value = unary();
 				value.pos = union(t.pos, value.pos);
 				value;
@@ -855,7 +854,7 @@ class LegacyGrammar {
 	function objectOrIdentifier():Expr {
 		var t = current();
 		if (accept(BrOpen) != null) {
-			// Upstream tries an object key (`$ident`, plain ident, or string
+			// port: upstream tries an object key (`$ident`, plain ident, or string
 			// literal) followed by `:` first and parses a block otherwise, so
 			// `{ @:meta ... }` is a block. Only treating the brace as an
 			// object when the *key-shaped* token is followed by `:` keeps
@@ -1044,7 +1043,7 @@ class LegacyGrammar {
 			return {type: optional ? CTOptional({type: complex, pos: union(start, close)}) : complex, pos: union(start, close)};
 		}
 		if (accept(BrOpen) != null) {
-			// parse_type_anonymous in grammar.ml uses the ordinary class-field
+			// port: parse_type_anonymous in grammar.ml uses the ordinary class-field
 			// grammar. This is needed by StdTypes' Iterator/Iterable typedefs.
 			var extensions:Array<PlacedTypePath> = [];
 			while (accept(Binop(OpGt)) != null) {
@@ -1060,7 +1059,7 @@ class LegacyGrammar {
 			complex = extensions.length == 0 ? CTAnonymous(fields) : CTExtend(extensions, fields);
 			return {type: optional ? CTOptional({type: complex, pos: union(start, end)}) : complex, pos: union(start, end)};
 		}
-		// `default` in type position means "use the default type argument"
+		// port: `default` in type position means "use the default type argument"
 		// (grammar.ml maps it to `$._hx_default`).
 		var defaultToken = acceptKwd(Default);
 		if (defaultToken != null) {
@@ -1234,7 +1233,7 @@ class LegacyGrammar {
 				next();
 				if (StringTools.startsWith(v, "*")) {
 					value = v.substr(1);
-					// Haxe accepts the common `**/` closing style and excludes its
+					// port: Haxe accepts the common `**/` closing style and excludes its
 					// extra star from the documentation text.
 					if (StringTools.endsWith(value, "*")) value = value.substr(0, value.length - 1);
 				}
@@ -1245,7 +1244,7 @@ class LegacyGrammar {
 		}
 	}
 
-	// The old batch loader consumes string metadata; parser-entry consumers use upstream StrictMeta.
+	// port: the old batch loader consumes string metadata; parser-entry consumers use upstream StrictMeta.
 	function metadataTag(name:String, strict:Bool):Dynamic {
 		if (!canonicalMetadata) return name;
 		return strict ? core.Meta.parse(name) : core.Meta.fromString(name);
@@ -1267,7 +1266,7 @@ class LegacyGrammar {
 				}
 				expect(PClose);
 			}
-			// grammar.ml parse_meta_entry: punion p1 p, where p is the meta name position.
+			// port: grammar.ml parse_meta_entry: punion p1 p, where p is the meta name position.
 			result.push({meta: metadataTag([for (n in name) n.name].join("."), strict), exprs: values, pos: union(start, end)});
 		}
 		return result;
@@ -1390,7 +1389,7 @@ class LegacyGrammar {
 		case _: null;
 	};
 
-	// Pratt levels (higher binds tighter) mirror haxe/src/syntax/parser.ml's
+	// port: pratt levels (higher binds tighter) mirror haxe/src/syntax/parser.ml's
 	// precedence order: bitwise operators bind tighter than equality/comparison
 	// operators, so `n & mask != 0` parses as `(n & mask) != 0`. Deliberate
 	// deviations retained from the previous table: OpOr/OpXor/OpAnd keep

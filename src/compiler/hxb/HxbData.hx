@@ -2,33 +2,54 @@ package compiler.hxb;
 
 import haxe.io.BytesOutput;
 
-// Port of haxe/src/compiler/hxb/hxbData.ml.
+/*
+	MD = module
+	MT = module type
+	CL = class
+	EN = enum
+	AB = abstract
+	TD = typedef
+	OB = anonymous object
+	CF = class field
+	EF = enum field
+	OF = object field
+	EX = expression
+	EO = end of (Types | Fields | Module)
+	..F = forward definition
+	..R = reference
+	..D = definition
+*/
 enum ChunkKind {
-	STR;
-	DOC;
-	MDF;
-	MTF;
-	IMP;
-	CLR;
-	ENR;
-	ABR;
-	TDR;
-	OFR;
-	OFD;
-	OBD;
-	CLD;
-	END;
-	ABD;
-	TDD;
-	EOT;
-	EFR;
-	CFR;
-	CFD;
-	EFD;
-	AFD;
-	EOF;
-	EXD;
-	EOM;
+	STR; // string pool
+	DOC; // doc pool
+	MDF; // module forward
+	MTF; // module types forward
+	// Module type references
+	IMP; // imports
+	CLR; // class references
+	ENR; // enum references
+	ABR; // abstract references
+	TDR; // typedef references
+	// Anonymous objects
+	OFR; // object field references
+	OFD; // object field definitions
+	OBD; // object definitions
+	// Own module type definitions
+	CLD; // class definition
+	END; // enum definition
+	ABD; // abstract definition
+	TDD; // typedef definition
+	EOT; // end of module types
+	// Field references
+	EFR; // enum field references
+	CFR; // class field references
+	// Own field definitions
+	CFD; // class fields
+	EFD; // enum fields
+	AFD; // abstract fields
+	EOF; // end of fields
+	EXD; // class field expressions
+	EOM; // end of module
 }
 
 typedef CachedChunk = {kind:ChunkKind, data:haxe.io.Bytes};

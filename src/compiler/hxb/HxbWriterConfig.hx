@@ -2,7 +2,6 @@ package compiler.hxb;
 
 import haxe.DynamicAccess;
 
-// Port of haxe/src/compiler/hxb/hxbWriterConfig.ml.
 class WriterTargetConfig {
 	public var generate:Bool = true;
 	public var exclude:Array<Array<String>> = [];

@@ -10,7 +10,7 @@ import syntax.Lexer.LexedToken;
 import syntax.Lexer.LexerError;
 import syntax.Lexer.LexerErrorMsg;
 
-// Tokenizer used only by the legacy bootstrap loader (LegacyGrammar and
+// port: tokenizer used only by the legacy bootstrap loader (LegacyGrammar and
 // Preprocessor). The translated pipeline uses syntax.Lexer, which follows
 // haxe/src/syntax/lexer.ml.
 class LegacyLexer {

@@ -12,9 +12,9 @@ import syntax.Lexer.LexedToken;
 import syntax.SemVer.SemVer;
 import syntax.SemVer.SemVerTools;
 
-// Port of the batch conditional-compilation path in
-// haxe/src/syntax/parserEntry.ml.  It deliberately produces parser-ready
-// tokens; parsing ordinary Haxe declarations remains Grammar's responsibility.
+// port: legacy bootstrap preprocessor, used only by LegacyGrammar: the batch
+// conditional-compilation path of parserEntry.ml, producing parser-ready tokens.
+// The translated pipeline uses ParserEntry.
 enum PreprocessorErrorMsg {
 	InvalidEnd;
 	InvalidElse;
@@ -105,17 +105,17 @@ class Preprocessor {
 						}
 					}
 				case Sharp("line"):
-					// parserEntry updates lexer line metadata here. Batch parsing only needs
+					// port: parserEntry updates lexer line metadata here. Batch parsing only needs
 					// source offsets, so consume the argument and leave positions untouched.
 					if (isActive(frames) && index < tokens.length) index++;
 				case Sharp(name):
 					fail(UnknownDirective(name), item.pos);
 				case Comment(value):
-					// Preserve documentation comments for Grammar.documentation(). Other
+					// port: preserve documentation comments for LegacyGrammar.documentation(). Other
 					// comments are trivia and would otherwise appear inside expressions.
 					if (isActive(frames) && StringTools.startsWith(value, "*")) output.push(item);
 				case CommentLine(_):
-					// Line comments are trivia.
+					// port: line comments are trivia.
 				case Eof:
 					if (frames.length != 0) fail(UnclosedConditional, frames[frames.length - 1].pos);
 					output.push(item);

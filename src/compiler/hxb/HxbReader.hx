@@ -25,14 +25,12 @@ import compiler.hxb.HxbReaderApi;
 import context.HxbReaderStats.HxbReaderStatsData;
 import haxe.io.Bytes;
 
-// Mechanical translation of haxe/src/compiler/hxb/hxbReader.ml.
-//
-// Representation notes:
+// port: representation notes:
 // - `hxb_reader_stats` is context.HxbReaderStats (shared with Common), so
 //   create_hxb_reader_stats is HxbReaderStats.create.
 // - OCaml lists become arrays. Where upstream builds a list by consing
-//   (class fields in MTF), the array is filled from the back so the resulting
-//   order matches upstream's.
+//   (class fields in MTF), the array is reversed after reading so the
+//   resulting order matches upstream's.
 // - Records copied with `{ r with ... }` are fresh objects here as well
 //   (positions in particular are never mutated in place).
 
@@ -57,7 +55,7 @@ function createFieldReaderContext(p:Pos, ts:Array<T>, vars:Array<TVar>, tthis:Nu
 	tthis: tthis
 };
 
-// module ClassFieldInfo
+// port: module ClassFieldInfo
 @:structInit class ClassFieldInfo {
 	public var typeParameters:Array<TypedTypeParam>;
 
@@ -66,7 +64,7 @@ function createFieldReaderContext(p:Pos, ts:Array<T>, vars:Array<TVar>, tthis:Nu
 	public static function create(params:Array<TypedTypeParam>):ClassFieldInfo return {typeParameters: params};
 }
 
-// module ClassFieldInfos
+// port: module ClassFieldInfos
 class ClassFieldInfos {
 	public final infos:Array<ClassFieldInfo> = [];
 
@@ -95,7 +93,7 @@ class ClassFieldInfos {
 	}
 }
 
-// module BytesWithPosition
+// port: module BytesWithPosition
 class BytesWithPosition {
 	public final bytes:Bytes;
 	public var pos:Int;
@@ -154,7 +152,7 @@ class BytesWithPosition {
 }
 
 function readUleb128(ch:BytesWithPosition):Int {
-	// Upstream recurses: (b land 0x7F) lor ((read_uleb128 ch) lsl 7).
+	// port: upstream recurses: (b land 0x7F) lor ((read_uleb128 ch) lsl 7).
 	var result = 0;
 	var shift = 0;
 	while (true) {
@@ -179,7 +177,7 @@ function readLeb128(ch:BytesWithPosition):Int {
 			break;
 		}
 	}
-	// OCaml ints are wider than 32 bits; a shift past the Int width keeps acc.
+	// port: OCaml ints are wider than 32 bits; a shift past the Int width keeps acc.
 	return if ((last & 0x40) != 0) (shift < 32 ? acc | ((~0) << shift) : acc) else acc;
 }
 
@@ -275,7 +273,7 @@ class HxbReader {
 		return bytesToString(b);
 	}
 
-	// Bytes.unsafe_to_string. Deviation: HashLink's Bytes.getString stops at
+	// port: Bytes.unsafe_to_string. HashLink's Bytes.getString stops at
 	// the first NUL byte, so strings containing NUL ("\x00" literals) are
 	// decoded segment by segment (NUL never occurs inside a UTF-8 sequence).
 	static function bytesToString(b:Bytes):String {
@@ -295,7 +293,7 @@ class HxbReader {
 	}
 
 	// Basic compounds
-	// inline: see core.ds.List (HashLink boxes Array<B> of a type parameter)
+	// port: inline: see core.ds.List (HashLink boxes Array<B> of a type parameter)
 	public inline function readList<A>(f:Void->A):Array<A> {
 		var l = uleb();
 		return [for (_ in 0...l) f()];
@@ -878,7 +876,7 @@ class HxbReader {
 				var a = readAbstractRef();
 				// self#make_lazy_type_dynamic (fun () ->
 				TType(abstractModuleType(a.force(), []), []);
-			// )
+				// )
 			case 13:
 				var e = readExpr();
 				var c = TFunctions.nullClass.clone();
@@ -991,20 +989,28 @@ class HxbReader {
 				makeLazyTypeDynamic(function() return TType(t.force(), tl));
 			case 70:
 				var a = readAbstractRef();
+				// self#make_lazy_type_dynamic (fun () ->
 				TAbstract(a.force(), []);
+				// )
 			case 71:
 				var a = readAbstractRef();
 				var t1 = readTypeInstance();
+				// self#make_lazy_type_dynamic (fun () ->
 				TAbstract(a.force(), [t1]);
+				// )
 			case 72:
 				var a = readAbstractRef();
 				var t1 = readTypeInstance();
 				var t2 = readTypeInstance();
+				// self#make_lazy_type_dynamic (fun () ->
 				TAbstract(a.force(), [t1, t2]);
+				// )
 			case 79:
 				var a = readAbstractRef();
 				var tl = readTypes();
+				// self#make_lazy_type_dynamic (fun () ->
 				TAbstract(a.force(), tl);
+				// )
 			case 80:
 				emptyAnon;
 			case 81:
@@ -1566,7 +1572,7 @@ class HxbReader {
 		cf.cfNamePos = pp.p2;
 		cf.cfOverloads = overloads;
 		cf.cfMeta = cfMeta;
-		// Fresh list values: Haxe arrays are mutable, OCaml lists are not.
+		// port: fresh list values: Haxe arrays are mutable, OCaml lists are not.
 		cf.cfParams = [];
 		return cf;
 	}
@@ -1711,7 +1717,7 @@ class HxbReader {
 	}
 
 	// Module types
-	// read_common_module_type takes the tinfos view of a module type
+	// port: read_common_module_type takes the tinfos view of a module type
 	// (Obj.magic upstream); the setters below write the corresponding fields.
 	public function readCommonModuleType(mt:ModuleType):Void {
 		var private_ = readBool();
@@ -2225,7 +2231,7 @@ class HxbReader {
 
 					c.clConstructor = readOption(readField);
 					c.clInit = readOption(readField);
-					// Upstream conses each field read onto the accumulator, so
+					// port: upstream conses each field read onto the accumulator, so
 					// the list holds them in reverse reading order.
 					function readFields(i:Int):{l:Array<TClassField>, pm:haxe.ds.StringMap<TClassField>} {
 						var accL = [];
@@ -2263,7 +2269,7 @@ class HxbReader {
 						ef.efPos = pp.p1;
 						ef.efNamePos = pp.p2;
 						ef.efIndex = index;
-						// Fresh list values: Haxe arrays are mutable, OCaml lists are not.
+						// port: fresh list values: Haxe arrays are mutable, OCaml lists are not.
 						ef.efParams = [];
 						ef.efMeta = [];
 						return ef;

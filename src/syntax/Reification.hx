@@ -7,11 +7,11 @@ import core.Ast.Ast.*;
 import core.Globals.*;
 import core.Globals.Pos;
 
-// haxe/src/syntax/reification.ml — mechanical draft; not compile-validated.
 class Reification {
 	public static function reify(inMacro:Bool):{toExpr:Expr->Expr, toCtype:TypeHint->Pos->Expr, toTypeDef:TypeDecl->Expr} {
 		var currentPos:Null<Expr> = null;
 		inline function en(ename:String, name:String, values:Array<Expr>, p:Pos):Expr {
+			// We don't want the position of the call expression to span the entire call (#6396).
 			var min:core.Globals.Pos = {pfile: p.pfile, pmin: p.pmin, pmax: p.pmin};
 			var constructor:Expr = {expr: EConst(Ident(name)), pos: min};
 			return values.length == 0 ? constructor : {expr: ECall(constructor, values), pos: min};
@@ -106,6 +106,8 @@ class Reification {
 			if (t.tpackage.length == 0 && t.tname.length > 1 && t.tname.charAt(0) == "$") {
 				var ei:Expr = {expr: EConst(Ident(t.tname.substr(1))), pos: p};
 				if (t.tparams.length == 0) return ei;
+				// `macro : $TP<Int>` conveys the intent to use TP and overwrite the
+				// type parameters.
 				return obj([
 					fld("pack", field(ei, "pack", p)),
 					fld("name", field(ei, "name", p)),
@@ -125,7 +127,9 @@ class Reification {
 			if (t.tsub != null) fields.push(fld("sub", toString(t.tsub, p)));
 			return obj(fields, p);
 		}
-		function toTypeHint(t:TypeHint, _:Pos):Expr return toCtype(t, t.pos);
+		function toTypeHint(t:TypeHint, _:Pos):Expr
+			// to_obj ["type",to_ctype t p;"pos",to_pos p] p
+			return toCtype(t, t.pos);
 		toCtype = function(t, p) return switch t.type {
 			case CTPath({
 				path: {
@@ -331,6 +335,7 @@ class Reification {
 								}
 							]);
 						case [StrictMeta.Dollar("b"), _]: expr("EBlock", [e1]);
+						// TODO: can $v and $i be implemented better?
 						case [StrictMeta.Dollar("v"), _]: switch e1.expr {
 								case EParenthesis({
 									expr: ECheckType(e2, {type: CTPath({path: {tname: "String", tpackage: []}})})

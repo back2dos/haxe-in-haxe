@@ -12,7 +12,6 @@ import context.Common.AbstractHxbLib;
 import context.Common.CommonContext;
 import haxe.io.Bytes;
 
-// Port of haxe/src/compiler/hxb/hxbLib.ml.
 class HxbLibrary implements AbstractHxbLib {
 	final timerCtx:TimerContext;
 	final filePath:String;
@@ -21,7 +20,7 @@ class HxbLibrary implements AbstractHxbLib {
 	final zip:AtomicLazy<ZipInput>;
 
 	var cachedFiles:Array<String> = [];
-	// Hashtbl keyed by (pack,name); find returns the latest binding.
+	// port: upstream's Hashtbl keyed by (pack,name), keyed by `key` here; lookups see the latest binding.
 	final modules:Map<String, {filename:String, entry:ZipEntry}> = new Map();
 	var closed = false;
 	var loaded = false;

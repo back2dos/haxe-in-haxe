@@ -13,7 +13,6 @@ import syntax.Parser;
 import core.DisplayTypes;
 import core.display.CompletionItem;
 
-// haxe/src/compiler/displayOutput.ml
 class DisplayOutput {
 	// Mode processing
 	public static function handleSyntaxCompletion(com:CommonContext, kind:SyntaxCompletion, subj:CompletionSubject):Void {

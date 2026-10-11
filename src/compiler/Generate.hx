@@ -15,13 +15,13 @@ import compiler.hxb.HxbWriter;
 import compiler.hxb.HxbData;
 import compiler.hxb.HxbWriterConfig;
 
-// haxe/src/compiler/generate.ml; deferred backend dispatch retained in deferred/compiler/GenerateTargets.hx.
 class MissingHxbModule extends haxe.Exception {
 	public function new() super("Missing_hxb_module");
 }
 
 class Generate {
 	public static function checkAuxiliaryOutput(com:CommonContext, actx:compiler.Args.ArgContext):Void {
+		// port: XML and JSON output (Genhxold, Genxml, Genjson) are not ported and fail explicitly.
 		if (actx.xmlOut != null || actx.jsonOut != null) throw new Failure("XML and JSON auxiliary output are outside the HXB milestone");
 	}
 
@@ -40,6 +40,7 @@ class Generate {
 		}> {
 		return switch m.mExtra.mKind {
 			case MCode | MMacro | MFake | MExtern:
+				// Printf.eprintf "Export module %s\n" (s_type_path m.m_path);
 				var path = [platform].concat(m.mPath.pack).concat([m.mPath.name]).join("/") + ".hxb";
 				if (fromCache) {
 					var cache = try cc.getHxbModule(m.mPath) catch (e:Dynamic) {
@@ -125,10 +126,13 @@ class Generate {
 		}
 	}
 
-	// HXB output is emitted by the after-save callback before backend destruction.
+	// port: HXB output is emitted by the after-save callback before backend destruction.
 	// Interpretation (--interp, --run, the Eval target) runs on the port's Eval; the other
-	// code generators are not ported and fail explicitly.
+	// code generators are not ported and fail explicitly (their dispatch is kept in
+	// deferred/compiler/GenerateTargets.hx).
 	public static function generate(com:CommonContext, tctx:context.Typecore.Typer, ext:String, actx:compiler.Args.ArgContext):Void {
+		// check file extension. In case of wrong commandline, we don't want
+		// to accidentaly delete a source file.
 		if (Path.fileExtension(com.file) == ext) deleteFile(com.file);
 		if (com.platform == Flash || com.platform == Cpp || com.platform == Hl) for (t in com.types) codegen.FixOverrides.fixOverrides(com,
 			t);
@@ -159,7 +163,7 @@ class Generate {
 			if (name != "") {
 				Common.log(com, "Generating " + name + ": " + com.file);
 				Timer.time(com.timerCtx, ["generate", name], function(_:Null<Bool>) {
-					typing.MacroContext.interpret(tctx, []);
+					typing.MacroContext.interpret(tctx, []); // TODO: ?
 					return null;
 				}, null);
 			}

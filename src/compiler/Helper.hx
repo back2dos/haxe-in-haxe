@@ -1,6 +1,5 @@
 package compiler;
 
-// Port of haxe/src/compiler/helper.ml.
 class HelpMessage {
 	public final message:String;
 

@@ -1,9 +1,11 @@
 package syntax;
 
-// Port of haxe/src/syntax/semver.ml.
+/**
+	A single version within semver string (e.g major or minor or patch)
+**/
 enum SemVerPart {
 	SVNum(value:Int);
-	SVStr(value:String);
+	SVStr(value:String); // `alpha`, `pre`, `rc` etc.
 }
 
 @:structInit class SemVer {
@@ -31,17 +33,27 @@ class SemVerTools {
 		return release + (version.pre == null ? "" : "-" + version.pre.map(stringPart).join("."));
 	}
 
+	/**
+		Parse SemVer string
+	**/
 	public static function parseVersion(input:String):SemVer {
 		var dash = input.indexOf("-");
+		// 1.2.3
 		if (dash < 0) return {release: parseRelease(input, input), pre: null};
+		// 1.2.3-
 		if (dash + 1 == input.length) invalid(input);
 
+		// 1.2.3-alpha.1+23
 		var pre = input.substr(dash + 1);
+		// remove build meta
 		var plus = pre.indexOf("+");
 		if (plus >= 0) pre = pre.substr(0, plus);
 		return {release: parseRelease(input.substr(0, dash), input), pre: parse(pre)};
 	}
 
+	/**
+		@see https://semver.org/#spec-item-11
+	**/
 	public static function compareVersion(a:SemVer, b:SemVer):Int {
 		var release = compareLists(a.release, b.release);
 		if (release != 0) return release;

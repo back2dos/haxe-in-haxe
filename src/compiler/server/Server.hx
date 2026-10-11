@@ -13,16 +13,13 @@ import core.ds.Failure;
 import core.ds.Cancelled;
 import core.Timer;
 
-/**
-	Port of haxe/src/compiler/server/server.ml.
-
-	Host mapping: Unix sockets become `sys.net.Socket`, the worker domain a
-	`sys.thread.Thread`, `Semaphore.Counting` a `sys.thread.Semaphore`, and the
-	stdin pipe of a request a `PipeThings.ForwardedInput`. `Unix.Unix_error`
-	corresponds to the host's socket exceptions (anything but `haxe.io.Eof`,
-	which is OCaml's zero-length read). The host socket API has IPv4 only, and no
-	`getsockopt SO_ERROR`; a failed write closes the connection instead.
-**/
+// port: Unix sockets become `sys.net.Socket`, the worker domain a
+// `sys.thread.Thread`, `Semaphore.Counting` a `sys.thread.Semaphore`, and the
+// stdin pipe of a request a `PipeThings.ForwardedInput`. `Unix.Unix_error`
+// corresponds to the host's socket exceptions (anything but `haxe.io.Eof`,
+// which is OCaml's zero-length read). The host socket API has IPv4 only, and no
+// `getsockopt SO_ERROR`; a failed write closes the connection instead. The worker
+// domain's minor heap setup (Gc.set) is not ported.
 typedef ServerConnection = {
 	var read:Void->String;
 	var write:String->Void;
@@ -32,7 +29,7 @@ typedef ServerConnection = {
 
 typedef ServerAccept = Void->ServerConnection;
 
-/** `Ipaddr.t`: the address of `--wait`/`--connect` (see `haxe.Main.parseHostPort`). **/
+// port: `Ipaddr.t`: the address of `--wait`/`--connect` (see `haxe.Main.parseHostPort`).
 enum IpAddr {
 	V4(ip:String);
 	V6(ip:String);
@@ -89,7 +86,7 @@ class Server {
 		return stdin;
 	}
 
-	// IO.read_i32: little-endian signed 32-bit
+	// port: IO.read_i32: little-endian signed 32-bit
 	static function readI32(input:Input):Int {
 		input.bigEndian = false;
 		return input.readInt32();
@@ -162,15 +159,16 @@ class Server {
 		return if (hasError) 1 else 0;
 	}
 
-	// Unix.error_message of the failed connect; the host reports "Failed to connect".
+	// port: Unix.error_message of the failed connect; the host reports "Failed to connect".
 	static function connectErrorMessage(e:Dynamic):String {
 		var s = Std.string(e);
 		return if (s.indexOf("Failed to connect") >= 0) "Connection refused" else s;
 	}
 
-	/* SocketRequest */
+	// port: module SocketRequest
 	public static function setupClientStdinForward(overflow:Bytes, sin:sys.net.Socket):Input {
-		/* Set up stdin forwarding: a thread reads from the client socket and feeds the request's stdin. */
+		/* Set up stdin forwarding: create a pipe and a thread that reads
+			from the client socket and writes to the pipe. */
 		var stdin = new ForwardedInput();
 		sys.thread.Thread.create(function() {
 			var buf = Bytes.alloc(1024);
@@ -234,7 +232,10 @@ class Server {
 			}
 		}
 		var data = readLoop(0);
-		/* Switch to blocking mode before spawning the stdin forwarding thread. */
+		/* Switch to blocking mode before spawning the stdin forwarding thread.
+			The socket was set to non-blocking for the request-parsing phase above
+			(to handle slow clients with retries), but the forwarding thread needs
+			blocking recv to avoid exiting prematurely on EWOULDBLOCK. */
 		sin.setBlocking(true);
 		return data;
 	}
@@ -280,7 +281,7 @@ class Server {
 		ServerMessage.stats(requestScope.stats, Sys.time() - t0);
 	}
 
-	/* WorkerDomain */
+	// port: module WorkerDomain
 	static function workerShutdown(rq:RequestQueue):Void {
 		/* Drain remaining requests by closing their connections, then return
 			without recursing to exit the loop gracefully. */
@@ -307,7 +308,7 @@ class Server {
 		return CompilerIo.create(writeOut, writeErr, writeResult, signalError, conn.getStdin());
 	}
 
-	// Printexc.to_string
+	// port: Printexc.to_string
 	static function exceptionString(e:Dynamic):String {
 		if (Std.isOfType(e, Failure)) return "Failure(\"" + (e : Failure).message + "\")";
 		if (Std.isOfType(e, core.ds.NotFound)) return "Not_found";
@@ -346,7 +347,7 @@ class Server {
 				CompilerIo.writeErr(io, estr + "\n");
 			} catch (_:Dynamic) {}
 			if (Helper.isDebugRun) Sys.println(estr + "\n" + haxe.CallStack.toString(haxe.CallStack.exceptionStack()));
-			// Out_of_memory: the host reports it as an ordinary error
+			// port: Out_of_memory: the host reports it as an ordinary error
 			return if (estr == "Out of memory") Oom else Errored;
 		}
 	}
@@ -357,7 +358,7 @@ class Server {
 			var cs = sctx.cs;
 			function loop() {
 				while (true) {
-					// Eval threads left by a request (--interp) run while the worker waits
+					// port: Eval threads left by a request (--interp) run while the worker waits
 					// (it holds the Eval lock otherwise, see macros.eval.EvalLock)
 					macros.eval.EvalLock.blocking(() -> {
 						rq.semaphore.acquire();
@@ -377,7 +378,7 @@ class Server {
 									RequestQueue.wakeUp(rq);
 								}
 							case requests:
-								// rq.requests is a list consed at the head: take its first element
+								// port: rq.requests is a list consed at the head: take its first element
 								var request = requests.shift();
 								rq.mutex.release();
 								sctx.currentStdin = request.stdin;
@@ -409,6 +410,7 @@ class Server {
 
 	public static function setupServerContext(verbose:Bool, isServer:Bool):ServerCompilationContext {
 		if (verbose) ServerMessage.enableAll();
+		// port: Sys.catch_break is not called (the host owns signal handling).
 		/* Create server context and set up hooks for parsing and typing */
 		var sctx = ServerCompilationContext.create(verbose, isServer);
 		ServerCache.enableCacheMode(sctx);
@@ -453,7 +455,7 @@ class Server {
 		return 0;
 	}
 
-	// Unix.Unix_error: socket failures other than end of file
+	// port: Unix.Unix_error: socket failures other than end of file
 	static function isUnixError(e:Dynamic):Bool {
 		return Std.isOfType(e, haxe.io.Error) || (Std.isOfType(e, String) && !Std.isOfType(e, Failure));
 	}
@@ -476,7 +478,7 @@ class Server {
 			case V6(ip): throw new Failure("IPv6 addresses are not supported by the host socket API (" + ip + ")");
 		}
 		var sock = new sys.net.Socket();
-		// SO_REUSEADDR: the host's bind sets it
+		// port: SO_REUSEADDR: the host's bind sets it
 		try sock.bind(new sys.net.Host(host), port)
 		catch (_:Dynamic) throw new Failure("Couldn't wait on " + host + ":" + port);
 		ServerMessage.socketMessage("Waiting on " + host + ":" + port);
@@ -498,7 +500,8 @@ class Server {
 				if (!closed) {
 					closed = true;
 					/* Shutdown before close to ensure FIN is sent to the client even if
-						the stdin-forwarding thread has a pending recv on the same fd. */
+						the stdin-forwarding thread has a pending recv on the same fd.
+						Unix.close alone may not send FIN while another thread blocks on recv. */
 					try sin.shutdown(true, true)
 					catch (_:Dynamic) {}
 					try sin.close()

@@ -6,7 +6,6 @@ import core.ds.TaskPool;
 import context.Parallel;
 import compiler.CompilationCache;
 
-// Port of haxe/src/compiler/server/serverCompilationContext.ml.
 @:structInit class ServerCompilationContext {
 	public var isServer:Bool;
 	public var version:core.Globals.CompilerVersion;
@@ -59,7 +58,7 @@ import compiler.CompilationCache;
 			minor: Globals.versionMinor,
 			revision: Globals.versionRevision,
 			pre: Globals.versionPre,
-			extra: null // Version.version_extra: the port has no build revision
+			extra: null // port: Version.version_extra: there is no build revision
 		};
 	}
 

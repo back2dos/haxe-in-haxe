@@ -9,7 +9,6 @@ import compiler.server.ServerCompilationContext;
 import core.ds.ArgumentError;
 import core.ds.NotFound;
 
-// Port of haxe/src/compiler/highLevel.ml.
 class HighLevel {
 	public static function addLibs(timerCtx:core.Timer.TimerContext, libsCwd:{libs:Array<String>, cwd:String}, args:Array<String>,
 			cs:Cache, hasDisplay:Bool):Array<String> {
@@ -21,7 +20,7 @@ class HighLevel {
 		function callHaxelib():Array<String> {
 			var args = (if (globalRepo) ["--global"] else ["--cwd", cwd]).concat(["path"]).concat(libs);
 			var proc = try new sys.io.Process("haxelib", args) catch (e:Dynamic) throw new UnixError(Std.string(e), "haxelib");
-			// Unix.open_process_args_full: stdout and stderr are read to the end
+			// port: Unix.open_process_args_full: stdout and stderr are read to the end
 			var errBytes:haxe.io.Bytes = null;
 			var errDone = new sys.thread.Lock();
 			sys.thread.Thread.create(function() {
@@ -64,7 +63,7 @@ class HighLevel {
 					}
 				}
 				var acc:Array<String> = [];
-				// List.fold_left over the reversed lines, consing onto acc
+				// port: List.fold_left over the reversed lines, consing onto acc
 				var rev = lines.copy();
 				rev.reverse();
 				for (l in rev) {
@@ -90,7 +89,7 @@ class HighLevel {
 		}
 	}
 
-	// Std.input_list: the lines of a channel, without their terminators
+	// port: Std.input_list: the lines of a channel, without their terminators
 	static function inputList(s:String):Array<String> {
 		if (s == "") return [];
 		var lines = s.split("\n");
@@ -148,7 +147,7 @@ class HighLevel {
 	}
 }
 
-/** `Unix.Unix_error` raised while starting haxelib. **/
+// port: `Unix.Unix_error` raised while starting haxelib.
 private class UnixError extends haxe.Exception {
 	public final arg:String;
 
