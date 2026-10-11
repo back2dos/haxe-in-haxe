@@ -5,7 +5,9 @@
 #   package ...;  #if eval <original> #else <hxc implementation> #end
 import os, re, sys
 root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-src, out, std = os.path.join(root, "std"), os.path.join(root, "..", "bin", "hxc", "std"), os.path.join(root, "..", "haxe", "std")
+# HAXE_STD_PATH: the upstream std (default haxe/std; a worktree without the submodule sets it)
+src, out = os.path.join(root, "std"), os.path.join(root, "..", "bin", "hxc", "std")
+std = os.environ.get("HAXE_STD_PATH") or os.path.join(root, "..", "haxe", "std")
 def split_package(text):
     m = re.search(r"^\s*package\s+[\w.]*\s*;", text, re.M)
     return (m.group(0).strip(), text[:m.start()] + text[m.end():]) if m else ("", text)

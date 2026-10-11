@@ -10,6 +10,8 @@
 # sources). CC: the C compiler (default clang -O2; tcc compiles in about a
 # second, the port then runs about 2.5 times slower). The ids are const
 # globals (not HXC_CONST_IDS), so a new name does not recompile every chunk.
+# HAXE_STD_PATH: the upstream std (default haxe/std; set it in a worktree
+# without the submodule).
 set -eu
 cd "$(dirname "$0")/../.."
 TOOL=${HXC_TOOL:-bin/hxc-dev/tool}
@@ -19,9 +21,10 @@ if [ ! -x "$TOOL" ]; then
 fi
 OUT=bin/port
 mkdir -p "$OUT"
+export HAXE_STD_PATH=${HAXE_STD_PATH:-$PWD/haxe/std}
 python3 hxc/tools/mkstd.py
 ulimit -s unlimited 2>/dev/null || true
-HAXE_STD_PATH=$PWD/haxe/std "$TOOL" "$OUT/hih" -cp src -main haxe.Main -cp runtime/js -D disable-parallelism \
+"$TOOL" "$OUT/hih" -cp src -main haxe.Main -cp runtime/js -D disable-parallelism \
 	-cp bin/hxc/std --custom-target hxc > "$OUT/gen.log" 2>&1 || { cat "$OUT/gen.log"; exit 1; }
 CC="${CC:-clang -O2}" CFLAGS="-w -fno-strict-aliasing -DHXC_NO_SSL -DHXC_NO_UV" \
 	sh hxc/tools/cc-chunks.sh "$OUT/hih_hxc" "$OUT/hih"
