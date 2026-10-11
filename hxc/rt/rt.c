@@ -7,6 +7,9 @@
 #include <math.h>
 #include <sys/mman.h>
 #include <unistd.h>
+#ifdef __COSMOPOLITAN__
+#include <cosmo.h> // IsWindows
+#endif
 
 #ifdef __TINYC__ // tcc, for fast development builds: no bit-scan builtin
 static inline int __builtin_ctzll(uint64_t m) {
@@ -338,7 +341,11 @@ static void minor_(void) {
 // mallocs a to-space sized from what may survive and frees the from-space.
 
 #ifndef __EMSCRIPTEN__
-#define REGION (16ull << 30)
+// 16 GB each; Windows commits what is mapped (Cosmopolitan builds), so there
+// they are 2 GB by default (RT_REGION_MB), and a reservation that fails is
+// retried at half the size down to 512 MB
+static size_t region_bytes = 16ull << 30;
+#define REGION region_bytes
 static char *regions[2];
 static int cur_region;
 // pages of each region already faulted in: populated in large batches ahead
@@ -833,8 +840,19 @@ void rt_init(int ng, int argc, char **argv) {
 	old_end = old_start + (32u << 20);
 	size_t stack_slots = 4u << 20;
 #else
+	const char *rm = getenv("RT_REGION_MB");
+	if (rm) region_bytes = (size_t)atoi(rm) << 20;
+#ifdef __COSMOPOLITAN__
+	else if (IsWindows()) region_bytes = (size_t)2 << 30;
+#endif
 	for (int i = 0; i < 2; i++) {
 		regions[i] = mmap(NULL, REGION, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
+		if (regions[i] == MAP_FAILED && region_bytes > ((size_t)512 << 20)) {
+			if (i == 1) munmap(regions[0], REGION);
+			region_bytes /= 2;
+			i = -1;
+			continue;
+		}
 		if (regions[i] == MAP_FAILED) {
 			fputs("cannot reserve heap\n", stderr);
 			exit(2);
@@ -846,6 +864,7 @@ void rt_init(int ng, int argc, char **argv) {
 	old_start = old_ptr = regions[0];
 	const char *om = getenv("RT_OLD_MB");
 	old_end = old_start + ((size_t)(om ? atoi(om) : 256) << 20); // fewer major collections early on
+	if (old_end > old_start + REGION) old_end = old_start + REGION;
 	size_t stack_slots = 16u << 20;
 #endif
 #ifdef __EMSCRIPTEN__
@@ -855,6 +874,9 @@ void rt_init(int ng, int argc, char **argv) {
 	// the main C stack (rt_run_main)
 	(void)stack_slots;
 	size_t sbytes = (size_t)1 << 30, page = (size_t)sysconf(_SC_PAGESIZE);
+#ifdef __COSMOPOLITAN__
+	if (IsWindows()) sbytes = (size_t)256 << 20; // committed when mapped
+#endif
 	char *sstack = mmap(NULL, sbytes + page, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
 	if (sstack == MAP_FAILED) {
 		fputs("cannot reserve the shadow stack\n", stderr);

@@ -476,6 +476,9 @@ void rt_run_main(void (*body)(void)) { body(); }
 #include <sys/mman.h>
 #include <ucontext.h>
 #include <unistd.h>
+#ifdef __COSMOPOLITAN__
+#include <cosmo.h> // IsWindows
+#endif
 
 #define CSTACK_BYTES ((size_t)64 << 20) // reserved, committed as touched
 #define SSTACK_BYTES ((size_t)64 << 20) // shadow stack (the main thread's is 1 GB, rt.c)
@@ -1504,19 +1507,44 @@ int rt_wait_fd(int fd, int write, double timeout) {
 // compiler is built with, lets the main fiber's stack grow to 1 GB, and deep
 // recursion in the port (the typer, Eval-interpreted code, the hxc regular
 // expression engine) needs more than the default 8 MB process stack.
+#if defined(__APPLE__) && defined(__aarch64__)
+// macOS on arm64 has no working ucontext (getcontext fails): rt_call_on_stack
+// calls fn on the stack below top, then returns on the caller's stack
+void rt_call_on_stack(void *top, void (*fn)(void));
+__asm__(".text\n"
+	".p2align 2\n"
+	".private_extern _rt_call_on_stack\n"
+	".globl _rt_call_on_stack\n"
+	"_rt_call_on_stack:\n"
+	"	stp x29, x30, [sp, #-16]!\n"
+	"	mov x29, sp\n"
+	"	mov sp, x0\n"
+	"	blr x1\n"
+	"	mov sp, x29\n"
+	"	ldp x29, x30, [sp], #16\n"
+	"	ret\n");
+#else
 static ucontext_t run_main_ret, run_main_ctx;
 static void (*run_main_body)(void);
 static void run_main_entry(void) { run_main_body(); }
+#endif
 
 void rt_run_main(void (*body)(void)) {
 	const char *e = getenv("RT_STACK_MB");
-	size_t bytes = (size_t)(e ? atoi(e) : 1024) << 20;
+	int mb = 1024;
+#ifdef __COSMOPOLITAN__
+	if (IsWindows()) mb = 256; // Windows commits what is mapped
+#endif
+	size_t bytes = (size_t)(e ? atoi(e) : mb) << 20;
 	char *stack = bytes ? (char *)map_stack(bytes) : NULL;
 	if (!stack) {
 		body();
 		return;
 	}
 	mprotect(stack, (size_t)sysconf(_SC_PAGESIZE), PROT_NONE);
+#if defined(__APPLE__) && defined(__aarch64__)
+	rt_call_on_stack(stack + bytes, body);
+#else
 	run_main_body = body;
 	getcontext(&run_main_ctx);
 	run_main_ctx.uc_stack.ss_sp = stack;
@@ -1524,6 +1552,7 @@ void rt_run_main(void (*body)(void)) {
 	run_main_ctx.uc_link = &run_main_ret;
 	makecontext(&run_main_ctx, run_main_entry, 0);
 	swapcontext(&run_main_ret, &run_main_ctx);
+#endif
 }
 
 #endif
