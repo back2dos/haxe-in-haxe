@@ -1,16 +1,9 @@
-# hxc/: hxc, a C backend for Haxe (EXPERIMENTAL)
+# hxc: a C backend for Haxe
 
-hxc compiles a typed, filtered Haxe program (the data an HXB archive holds)
-to C, and a C compiler turns that into a native binary or, with Emscripten,
-WebAssembly. It started as a scope expansion beyond the port's HXB
-conformance work, to run the compiler natively and in the browser.
-
-Its main program is the port itself: the C build of `haxe.Main` passes the
-HXB conformance suites and every target-independent step of upstream's test
-suite (test/TESTING.md), and compiles itself faster than the OCaml compiler
-with a lower peak RSS (site/bench/README.md). It also builds other programs, for
-example haxe-formatter (`site/bench/formatter.sh`), which then formats
-`haxe/std` 1.6× faster than its C++ and Node builds with identical output.
+hxc compiles a typed, filtered Haxe program (what an HXB archive holds) to C.
+A C compiler then builds a native binary, or Emscripten WebAssembly. Its main
+program is the port itself (`haxe.Main`); it also builds other programs, such
+as haxe-formatter (`site/bench/formatter.sh`).
 
 | Path | |
 | --- | --- |
@@ -18,6 +11,7 @@ example haxe-formatter (`site/bench/formatter.sh`), which then formats
 | `rt/` | The C runtime: `rt.c` (GC, allocation, exceptions, finalisers), `rt_thread.c` (threads), `rt_dyn.c` (Dynamic access, maps), `rt_str.c`, `rt_std.c`, `rt_sys.c`, `rt_net.c` (sockets), `rt_ssl.c` (mbedtls), `rt_uv.c` (libuv), `rt_census.c` (heap census); `rt.h`, `rt_gc.h`. |
 | `std/` | The hxc target's std: overrides of the Haxe std (`sys.thread`, `sys.net`, `sys.ssl`, `sys.io`, `haxe.atomic`, `EReg`, ...) and the `hxc.Native*` externs implemented by the runtime. `tools/mkstd.py` merges it with the Eval originals needed for macros into `bin/hxc/std`. |
 | `haxelib/` | The `hxc` haxelib package: the target for your own Haxe (below). |
+| `js/` | Std overrides for the JS build of the backend tool (`bin/hxc/wbk.js`, Node with hxnodejs), also on the class path of the port's hxc builds. |
 | `test/` | Test and benchmark programs: `threads/`, `natives/` (Luv, LuvThreads, Tls), `exc/`, `regress/`, `Bench.hx`. |
 | `tools/` | `dev-tool.sh` (the native backend tool), `cc-chunks.sh` (parallel compilation of the chunks), `mkstd.py` (`bin/hxc/std`), `cosmo-deps.sh` and `cosmo-patches/` (mbedtls/libuv for Cosmopolitan), `mkunicode.py` (regex tables). |
 
