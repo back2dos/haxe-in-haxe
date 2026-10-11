@@ -143,7 +143,7 @@ class ParserEntry {
 
 	public static function parseVersion(s:String, p:Pos):SmallType {
 		try return TVersion(SemVerTools.parseVersion(s))
-		catch (err:Dynamic) return Parser.error(Custom(Std.string(err)), p);
+		catch (err:core.ds.InvalidArgument) return Parser.error(Custom(err.message), p);
 	}
 
 	public static function cmp(v1:SmallType, v2:SmallType):Int return switch [v1, v2] {

@@ -1,17 +1,7 @@
 package compiler;
 
-// port: the platforms a target flag selects (upstream uses Globals.platform).
-enum Platform {
-	Js;
-	Lua;
-	Flash;
-	Neko;
-	Php;
-	Cpp;
-	Jvm;
-	Python;
-	Hl;
-}
+import core.Globals.GlobalTypePath;
+import core.Globals.Platform;
 
 enum NativeLibKind {
 	JavaLib;
@@ -62,6 +52,7 @@ enum ParsedArg {
 	AddClassPath(path:String);
 	AddLibClassPath(path:String);
 	AddHxbLib(file:String);
+	// port: the `path` (pack, name) as the flat list pack @ [name].
 	SetMain(path:Array<String>);
 	AddLib(name:String);
 	HaxelibGlobal;
@@ -92,6 +83,7 @@ enum ParsedArg {
 	SetMeasureTimes;
 	AddWarning(setting:String);
 
+	// port: the `path` (pack, name) as the flat list pack @ [name].
 	AddClass(path:Array<String>);
 	IncludeModule(module:String);
 	SetPrompt;
@@ -114,4 +106,63 @@ enum ParsedArg {
 	ShowHelpMetas;
 	ShowHelpUserDefines;
 	ShowHelpUserMetas;
+}
+
+@:structInit class ArgContext {
+	public var classes:Array<GlobalTypePath>;
+	public var xmlOut:Null<String>;
+	public var hxbOut:Null<String>;
+	public var jsonOut:Null<String>;
+	public var cmds:Array<String>;
+	public var configMacros:Array<String>;
+	public var noOutput:Bool;
+	public var didSomething:Bool;
+	public var forceTyping:Bool;
+	public var preCompilation:Array<Void->Void>;
+	public var interp:Bool;
+	public var jvmFlag:Bool;
+	public var swfVersion:Bool;
+	public var hxbLibs:Array<NativeLibArg>;
+	public var nativeLibs:Array<NativeLibArg>;
+	public var raiseUsage:Void->Void;
+	public var displayArg:Null<String>;
+
+	public var measureTimes:Bool;
+
+	public inline function new(classes:Array<GlobalTypePath>, xmlOut:Null<String>, hxbOut:Null<String>, jsonOut:Null<String>,
+			cmds:Array<String>, configMacros:Array<String>, noOutput:Bool, didSomething:Bool, forceTyping:Bool,
+			preCompilation:Array<Void->Void>, interp:Bool, jvmFlag:Bool, swfVersion:Bool, hxbLibs:Array<NativeLibArg>,
+			nativeLibs:Array<NativeLibArg>, raiseUsage:Void->Void, displayArg:Null<String>, measureTimes:Bool) {
+		this.classes = classes;
+		this.xmlOut = xmlOut;
+		this.hxbOut = hxbOut;
+		this.jsonOut = jsonOut;
+		this.cmds = cmds;
+		this.configMacros = configMacros;
+		this.noOutput = noOutput;
+		this.didSomething = didSomething;
+		this.forceTyping = forceTyping;
+		this.preCompilation = preCompilation;
+		this.interp = interp;
+		this.jvmFlag = jvmFlag;
+		this.swfVersion = swfVersion;
+		this.hxbLibs = hxbLibs;
+		this.nativeLibs = nativeLibs;
+		this.raiseUsage = raiseUsage;
+		this.displayArg = displayArg;
+		this.measureTimes = measureTimes;
+	}
+
+	public inline function clone():ArgContext return new ArgContext(classes, xmlOut, hxbOut, jsonOut, cmds, configMacros, noOutput,
+		didSomething, forceTyping, preCompilation, interp, jvmFlag, swfVersion, hxbLibs, nativeLibs, raiseUsage, displayArg, measureTimes);
+}
+
+class ParsedArgTools {
+	public static function createNativeLib(file:String, extern_:Bool, kind:NativeLibKind):NativeLibArg {
+		return {
+			libFile: file,
+			libExtern: extern_,
+			libKind: kind
+		};
+	}
 }

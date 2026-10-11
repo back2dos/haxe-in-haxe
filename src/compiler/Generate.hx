@@ -20,7 +20,7 @@ class MissingHxbModule extends haxe.Exception {
 }
 
 class Generate {
-	public static function checkAuxiliaryOutput(com:CommonContext, actx:compiler.Args.ArgContext):Void {
+	public static function checkAuxiliaryOutput(com:CommonContext, actx:compiler.ParsedArg.ArgContext):Void {
 		// port: XML and JSON output (Genhxold, Genxml, Genjson) are not ported and fail explicitly.
 		if (actx.xmlOut != null || actx.jsonOut != null) throw new Failure("XML and JSON auxiliary output are outside the HXB milestone");
 	}
@@ -29,7 +29,7 @@ class Generate {
 		if (config.hxbVersion != HxbData.VERSION) throw new Failure("Unsupported HXB version: " + config.hxbVersion);
 		var anonIdentification = new typing.TanonIdentification<Dynamic>();
 		function warn(w:core.Message.WarningCode, s:String, p:Pos):Void com.warning(w, com.warningOptions, s, p);
-		var writer = new HxbWriter(config.generateDocumentation, warn, anonIdentification);
+		var writer = new HxbWriter(config, warn, anonIdentification);
 		return {writer: writer, close: writer.exportModule};
 	}
 
@@ -153,7 +153,7 @@ class Generate {
 	}
 
 	// port: HXB output is emitted by the after-save callback before backend destruction.
-	public static function generate(com:CommonContext, tctx:context.Typecore.Typer, ext:String, actx:compiler.Args.ArgContext):Void {
+	public static function generate(com:CommonContext, tctx:context.Typecore.Typer, ext:String, actx:compiler.ParsedArg.ArgContext):Void {
 		// check file extension. In case of wrong commandline, we don't want
 		// to accidentaly delete a source file.
 		if (Path.fileExtension(com.file) == ext) deleteFile(com.file);

@@ -1,118 +1,142 @@
 package compiler.hxb;
 
-import haxe.DynamicAccess;
+import core.Globals.nullPos;
+import core.data.DataReaderApi;
+import core.data.DataWriterApi;
 
 class WriterTargetConfig {
-	public var generate:Bool = true;
-	public var exclude:Array<Array<String>> = [];
-	public var include:Array<Array<String>> = [];
-	public var hxbVersion:Int = HxbData.VERSION;
-	public var generateDocumentation:Bool = true;
+	public var generate:Bool;
+	public var exclude:Array<Array<String>>;
+	public var include:Array<Array<String>>;
+	public var hxbVersion:Int;
+	public var generateDocs:Bool;
 
-	public function new() {}
+	// port: create_target_config
+	public function new() {
+		generate = true;
+		exclude = [];
+		include = [];
+		hxbVersion = HxbData.VERSION;
+		generateDocs = true;
+	}
 }
 
+// port: the record type t; `new` is create.
 class HxbWriterConfig {
-	public var archivePath:String = "";
-	public var targetConfig:WriterTargetConfig = new WriterTargetConfig();
-	public var macroConfig:WriterTargetConfig = new WriterTargetConfig();
+	public var archivePath:String;
+	public final targetConfig:WriterTargetConfig;
+	public final macroConfig:WriterTargetConfig;
 
-	public function new() {}
+	public function new() {
+		archivePath = "";
+		targetConfig = new WriterTargetConfig();
+		macroConfig = new WriterTargetConfig();
+	}
+
+	static function error(s:String):Dynamic {
+		return core.Error.raiseTypingError(s, nullPos);
+	}
+
+	// port: ExtString.String.nsplit (an empty string has no parts).
+	static function nsplit(s:String, sep:String):Array<String> return s == "" ? [] : s.split(sep);
+
+	// port: module WriterConfigReader (API : DataReaderApi.DataReaderApi), with the API as an argument.
+	public static function readTargetConfig<Data>(api:DataReaderApi<Data>, config:WriterTargetConfig, fl:Array<{name:String, value:Data}>):Void {
+		for (f in fl) {
+			var data = f.value;
+			switch f.name {
+				case "generate":
+					config.generate = api.readBool(data);
+				case "exclude":
+					api.readOptional(data, function(data) {
+						var l = api.readArray(data);
+						config.exclude = l.map(data -> nsplit(api.readString(data), "."));
+					});
+				case "include":
+					api.readOptional(data, function(data) {
+						var l = api.readArray(data);
+						config.include = l.map(data -> nsplit(api.readString(data), "."));
+					});
+				case "hxbVersion":
+					config.hxbVersion = api.readInt(data);
+				case "generateDocumentation":
+					config.generateDocs = api.readBool(data);
+				case s:
+					error("Unknown key for target config: " + s);
+			}
+		}
+	}
+
+	public static function readWriterConfig<Data>(api:DataReaderApi<Data>, config:HxbWriterConfig, data:Data):Void {
+		function read(data:Data) {
+			var fl = api.readObject(data);
+			for (f in fl) {
+				var data = f.value;
+				switch f.name {
+					case "archivePath":
+						config.archivePath = api.readString(data);
+					case "targetConfig":
+						api.readOptional(data, data -> readTargetConfig(api, config.targetConfig, api.readObject(data)));
+					case "macroConfig":
+						api.readOptional(data, data -> readTargetConfig(api, config.macroConfig, api.readObject(data)));
+					case s:
+						error("Unknown key for writer config: " + s);
+				}
+			}
+		}
+		api.readOptional(data, read);
+	}
+
+	// port: module WriterConfigWriter (API : DataWriterApi.DataWriterApi), with the API as an argument.
+	public static function writeTargetConfig<Data>(api:DataWriterApi<Data>, config:WriterTargetConfig):Data {
+		return api.writeObject([
+			{name: "generate", value: api.writeBool(config.generate)},
+			{name: "exclude", value: api.writeArray(config.exclude.map(sl -> api.writeString(sl.join("."))))},
+			{name: "include", value: api.writeArray(config.include.map(sl -> api.writeString(sl.join("."))))},
+			{name: "hxbVersion", value: api.writeInt(config.hxbVersion)},
+			{name: "generateDocumentation", value: api.writeBool(config.generateDocs)},
+		]);
+	}
+
+	public static function writeWriterConfig<Data>(api:DataWriterApi<Data>, config:HxbWriterConfig):Data {
+		return api.writeObject([
+			{name: "archivePath", value: api.writeString(config.archivePath)},
+			{name: "targetConfig", value: writeTargetConfig(api, config.targetConfig)},
+			{name: "macroConfig", value: writeTargetConfig(api, config.macroConfig)},
+		]);
+	}
+
+	// port: module WriterConfigReaderJson = WriterConfigReader(JsonDataApi.JsonReaderApi)
+	static final jsonReaderApi:DataReaderApi<Dynamic> = new DataReaderApi<Dynamic>(core.data.JsonDataApi.JsonReaderApi.readOptional,
+		data -> core.data.JsonDataApi.JsonReaderApi.readObject(data).map(f -> {name: f.name, value: f.value}),
+		core.data.JsonDataApi.JsonReaderApi.readArray, core.data.JsonDataApi.JsonReaderApi.readString,
+		core.data.JsonDataApi.JsonReaderApi.readIdent, core.data.JsonDataApi.JsonReaderApi.readBool,
+		core.data.JsonDataApi.JsonReaderApi.readInt, core.data.JsonDataApi.JsonReaderApi.dataToString);
+
+	public static function processJson(config:HxbWriterConfig, json:Dynamic):Void {
+		readWriterConfig(jsonReaderApi, config, json);
+	}
 
 	public static function parse(config:HxbWriterConfig, input:String):Void {
-		processJson(config, haxe.Json.parse(input));
+		// port: Json.Reader.read_json over a Sedlex buffer; haxe.Json.parse builds the same values.
+		var json = haxe.Json.parse(input);
+		processJson(config, json);
 	}
 
 	public static function processArgument(file:String):HxbWriterConfig {
 		var config = new HxbWriterConfig();
-		if (extension(file) == "json") {
-			var content:String;
-			try content = sys.io.File.getContent(file)
-			catch (error:Dynamic) throw 'Could not open file $file: ${Std.string(error)}';
-			parse(config, content);
-		} else {
-			config.archivePath = file;
+		switch core.Path.fileExtension(file) {
+			case "json":
+				var data = try sys.io.File.getContent(file) catch (exc:Dynamic) {
+					// port: Printexc.to_string of the Sys_error raised by open_in.
+					var exc = if (!sys.FileSystem.exists(file)) "Sys_error(\"" + file + ": No such file or directory\")" else Std.string(exc);
+					error("Could not open file " + file + ": " + exc);
+				}
+				parse(config, data);
+			case _:
+				config.archivePath = file;
 		}
+		// port: `Some config`
 		return config;
-	}
-
-	public static function toJson(config:HxbWriterConfig):String {
-		return haxe.Json.stringify({
-			archivePath: config.archivePath,
-			targetConfig: targetToJson(config.targetConfig),
-			macroConfig: targetToJson(config.macroConfig)
-		});
-	}
-
-	static function processJson(config:HxbWriterConfig, data:Dynamic):Void {
-		if (data == null) return;
-		var fields:DynamicAccess<Dynamic> = cast data;
-		for (name in fields.keys()) switch (name) {
-			case "archivePath":
-				config.archivePath = string(fields[name]);
-			case "targetConfig":
-				if (fields[name] != null) readTargetConfig(config.targetConfig, fields[name]);
-			case "macroConfig":
-				if (fields[name] != null) readTargetConfig(config.macroConfig, fields[name]);
-			case _:
-				fail('Unknown key for writer config: $name');
-		}
-	}
-
-	static function readTargetConfig(config:WriterTargetConfig, data:Dynamic):Void {
-		var fields:DynamicAccess<Dynamic> = cast data;
-		for (name in fields.keys()) switch (name) {
-			case "generate":
-				config.generate = bool(fields[name]);
-			case "exclude":
-				if (fields[name] != null) config.exclude = paths(fields[name]);
-			case "include":
-				if (fields[name] != null) config.include = paths(fields[name]);
-			case "hxbVersion":
-				config.hxbVersion = integer(fields[name]);
-			case "generateDocumentation":
-				config.generateDocumentation = bool(fields[name]);
-			case _:
-				fail('Unknown key for target config: $name');
-		}
-	}
-
-	static function targetToJson(config:WriterTargetConfig):Dynamic {
-		return {
-			generate: config.generate,
-			exclude: config.exclude.map(function(path) return path.join(".")),
-			include: config.include.map(function(path) return path.join(".")),
-			hxbVersion: config.hxbVersion,
-			generateDocumentation: config.generateDocumentation
-		};
-	}
-
-	static function paths(data:Dynamic):Array<Array<String>> {
-		if (!Std.isOfType(data, Array)) fail("Expected array");
-		return (cast(data, Array<Dynamic>)).map(function(path) return string(path).split("."));
-	}
-
-	static function string(value:Dynamic):String {
-		if (!Std.isOfType(value, String)) fail("Expected string");
-		return cast value;
-	}
-
-	static function bool(value:Dynamic):Bool {
-		if (!Std.isOfType(value, Bool)) fail("Expected boolean");
-		return cast value;
-	}
-
-	static function integer(value:Dynamic):Int {
-		if (!Std.isOfType(value, Int)) fail("Expected integer");
-		return cast value;
-	}
-
-	static function extension(file:String):String {
-		var dot = file.lastIndexOf(".");
-		return dot < 0 ? "" : file.substr(dot + 1);
-	}
-
-	static function fail(message:String):Dynamic {
-		throw message;
 	}
 }
