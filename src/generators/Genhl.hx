@@ -214,6 +214,14 @@ class Genhl {
 	// port: the HAbstract identity of the "macro_pos" literal
 	static final macroPosIdent:Dynamic = {};
 
+	// port: ocamlopt shares identical structured constants of a compilation unit, so
+	// these literal types are physically equal wherever genhl.ml writes them (tsame on
+	// HArray is physical).
+	static final cHArrayDyn = HArray(HDyn);
+	static final cHRefI32 = HRef(HI32);
+	static final cHRefBool = HRef(HBool);
+	static final cHFunBytes = HFun([], HBytes);
+
 	static function makeAssigns(l:Array<Lassign>, sorted:Bool = false):Array<Assign> {
 		var l = if (sorted) listSort((a:Lassign, b:Lassign) -> a.laPos - b.laPos, l) else l;
 		return [for (a in l) {name: a.laName, pos: a.laPos, scopeEnd: a.laScopeEnd}];
@@ -1059,11 +1067,11 @@ class Genhl {
 	static function setOp(ctx:HlContext, pos:Int, o:Opcode):Void ctx.m.mops[pos] = o;
 
 	static function allocArray(ctx:HlContext, size:Int, et:Ttype):Int {
-		var a = allocTmp(ctx, HArray(HDyn));
+		var a = allocTmp(ctx, cHArrayDyn);
 		var b = allocTmp(ctx, HArray(et));
 		var rt = allocTmp(ctx, HType);
 		op(ctx, OType(rt, et));
-		op(ctx, OCall2(a, allocStd(ctx, "alloc_array", [HType, HI32], HArray(HDyn)), rt, size));
+		op(ctx, OCall2(a, allocStd(ctx, "alloc_array", [HType, HI32], cHArrayDyn), rt, size));
 		op(ctx, OUnsafeCast(b, a));
 		return b;
 	}
@@ -1299,22 +1307,22 @@ class Genhl {
 			case HUI8 | HUI16 | HI32:
 				var len = allocTmp(ctx, HI32);
 				hold(ctx, len);
-				var lref = allocTmp(ctx, HRef(HI32));
+				var lref = allocTmp(ctx, cHRefI32);
 				var bytes = allocTmp(ctx, HBytes);
 				op(ctx, ORef(lref, len));
 				var a = castTo(ctx, r, HI32, p);
-				op(ctx, OCall2(bytes, allocStd(ctx, "itos", [HI32, HRef(HI32)], HBytes), a, lref));
+				op(ctx, OCall2(bytes, allocStd(ctx, "itos", [HI32, cHRefI32], HBytes), a, lref));
 				var out = allocTmp(ctx, ctx.tstring);
 				op(ctx, OCall2(out, allocFunPath(ctx, {pack: [], name: "String"}, "__alloc__"), bytes, len));
 				free(ctx, len);
 				return out;
 			case HF32 | HF64:
 				var len = allocTmp(ctx, HI32);
-				var lref = allocTmp(ctx, HRef(HI32));
+				var lref = allocTmp(ctx, cHRefI32);
 				var bytes = allocTmp(ctx, HBytes);
 				op(ctx, ORef(lref, len));
 				var a = castTo(ctx, r, HF64, p);
-				op(ctx, OCall2(bytes, allocStd(ctx, "ftos", [HF64, HRef(HI32)], HBytes), a, lref));
+				op(ctx, OCall2(bytes, allocStd(ctx, "ftos", [HF64, cHRefI32], HBytes), a, lref));
 				var out = allocTmp(ctx, ctx.tstring);
 				op(ctx, OCall2(out, allocFunPath(ctx, {pack: [], name: "String"}, "__alloc__"), bytes, len));
 				return out;
@@ -2280,7 +2288,7 @@ class Genhl {
 							var v = evalTo(ctx, ev, toType(ctx, ft));
 							op(ctx, ODynSet(r, allocString(ctx, s), v));
 							if (s == "toString" && isToString(ev.etype)) {
-								var f = allocTmp(ctx, HFun([], HBytes));
+								var f = allocTmp(ctx, cHFunBytes);
 								op(ctx, OInstanceClosure(f, allocFunPath(ctx, {pack: [], name: "String"}, "call_toString"), r));
 								op(ctx, ODynSet(r, allocString(ctx, "__string"), f));
 							}
@@ -2818,7 +2826,7 @@ class Genhl {
 						if (tmp != r) {
 							var re = allocTmp(ctx, HBool);
 							op(ctx, OBool(re, true));
-							var ren = allocTmp(ctx, HRef(HBool));
+							var ren = allocTmp(ctx, cHRefBool);
 							op(ctx, ORef(ren, re));
 							op(ctx, OCall2(r, allocFunPath(ctx, {pack: ["hl", "types"], name: "ArrayDyn"}, "alloc"), tmp, ren));
 						}
@@ -3345,13 +3353,7 @@ class Genhl {
 					case TClassDecl(c): c;
 					case _: die("", "genhl.ml");
 				}, [], false);
-				// port: com.resources is a StringMap in the port; the OCaml Hashtbl is rebuilt with
-				// the bindings added in key order (upstream: in the order the resources were added).
-				var h = new core.ds.OcamlHashtbl<String, haxe.io.Bytes>(core.ds.OcamlHash.hashString, (a, b) -> a == b);
-				var names = [for (k in ctx.com.resources.keys()) k];
-				haxe.ds.ArraySort.sort(names, strCompare);
-				for (k in names) h.replace(k, ctx.com.resources.get(k));
-				var res:Array<{k:String, v:haxe.io.Bytes}> = h.fold((k, v, acc:Array<{k:String, v:haxe.io.Bytes}>) -> {
+				var res:Array<{k:String, v:haxe.io.Bytes}> = ctx.com.resources.fold((k, v, acc:Array<{k:String, v:haxe.io.Bytes}>) -> {
 					acc.unshift({k: k, v: v});
 					acc;
 				}, []);
