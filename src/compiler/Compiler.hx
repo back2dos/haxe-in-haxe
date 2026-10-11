@@ -320,6 +320,7 @@ class Compiler {
 		// We don't want these to be caught by the catchall below
 		catch (e:Abort) throw e
 		catch (e:macros.eval.EvalTypes.SysExit) throw e
+		catch (e:generators.Hlinterp.SysExit) throw e
 		catch (e:context.display.DisplayJson.JsonCompleted) throw e
 		catch (e:Cancelled) throw e
 		catch (e:Dynamic) {
@@ -355,6 +356,11 @@ class Compiler {
 			finalize(com);
 			return 0;
 		} catch (e:macros.eval.EvalTypes.SysExit) {
+			if (e.code != 0) com.partScope.hasError = true;
+			ContextFlush.flushContext(com);
+			finalize(com);
+			return e.code;
+		} catch (e:generators.Hlinterp.SysExit) {
 			if (e.code != 0) com.partScope.hasError = true;
 			ContextFlush.flushContext(com);
 			finalize(com);
