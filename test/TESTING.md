@@ -971,7 +971,11 @@ typer and its entry point (`haxe.LegacyMain`), are kept in
 (`test/unit.hxml`) run the translated lexer, parser and pipeline: they type the
 `test/unit/moduleload` fixtures in-process through `haxe.Main` and inspect the
 modules `Compiler.generateHook` receives (Eval needs
-`-D eval-call-stack-depth=100000` for that).
+`-D eval-call-stack-depth=100000` for that). After the archive and the audit of the
+`core/` counterparts (2026-10-11, hxc tcc build): conformance 279 PASS + 7
+expected failures, macro cases 66/66, `server.py` 595/595, `display.py`
+679/679, `diff:hxb` + `diff:interp` on 520 programs 1,040 identical,
+`test/unit.hxml` passes.
 
 ### Out of scope for this milestone
 
