@@ -135,9 +135,17 @@ static rt_native *natives;
 static size_t nnatives, natives_cap;
 static rt_lock_t natives_lock = RT_LOCK_INIT;
 
-void *rt_native_new(void *p, void (*free_fn)(void *)) {
-	void *o = rt_alloc(1, T_NATIVE, K_RAW);
+void *rt_native_new(void *p, void (*free_fn)(void *)) { return rt_native_new_refs(p, free_fn, 0); }
+
+// with nrefs reference slots after the handle (slots 1..nrefs, NULL at first,
+// set with rt_set_ptr): what the C resource points into stays alive while the
+// handle does. The object is then K_PARR; slot 0 (outside the heap) is left
+// alone by the collector.
+void *rt_native_new_refs(void *p, void (*free_fn)(void *), uint32_t nrefs) {
+	void *o = rt_alloc(1 + nrefs, T_NATIVE, nrefs ? K_PARR : K_RAW);
 	FP(o, 0) = p;
+	for (uint32_t i = 1; i <= nrefs; i++)
+		FP(o, i) = NULL;
 	rt_lock(&natives_lock);
 	if (nnatives == natives_cap) {
 		natives_cap = natives_cap ? natives_cap * 2 : 256;
@@ -150,14 +158,23 @@ void *rt_native_new(void *p, void (*free_fn)(void *)) {
 	return o;
 }
 
-// after a collection of the nursery (and of [lo, hi) for a major one)
+// after a collection of the nursery (and of [lo, hi) for a major one). The
+// handles found dead together are freed newest first: a resource that points
+// into another one (an SSL context into its configuration) is usually created
+// after it.
+static rt_native *dead_natives;
+static size_t dead_cap;
 static void sweep_natives(char *lo, char *hi) {
-	size_t live = 0;
+	size_t live = 0, ndead = 0;
 	for (size_t i = 0; i < nnatives; i++) {
 		void *o = natives[i].obj;
 		if (in_young(o) || ((char *)o >= lo && (char *)o < hi)) {
 			if (KIND(o) != K_FWD) {
-				natives[i].free_fn(natives[i].p);
+				if (ndead == dead_cap) {
+					dead_cap = dead_cap ? dead_cap * 2 : 64;
+					dead_natives = (rt_native *)realloc(dead_natives, dead_cap * sizeof(rt_native));
+				}
+				dead_natives[ndead++] = natives[i];
 				continue;
 			}
 			o = FP(o, 0);
@@ -166,6 +183,10 @@ static void sweep_natives(char *lo, char *hi) {
 		natives[live++].obj = o;
 	}
 	nnatives = live;
+	while (ndead) {
+		ndead--;
+		dead_natives[ndead].free_fn(dead_natives[ndead].p);
+	}
 }
 
 static void scan_roots(void *(*fwd)(void *)) {
