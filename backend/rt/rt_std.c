@@ -54,7 +54,7 @@ void *Array_concat(void *a, void *b) {
 		RT_RELOAD(b);
 		if (i >= ARR_LEN(b)) break;
 		void *v = aget_boxed(b, i);
-		*rt_sp++ = v;
+		*rt_push(1) = v;
 		hx_apush_slow(r_root, AK_PTR, (uint64_t)(uintptr_t)(rt_sp - 1));
 		rt_sp--;
 	}
@@ -340,7 +340,7 @@ void *Array_filter(void *a, void *f) {
 		RT_RELOAD(a);
 		if (i >= ARR_LEN(a)) break;
 		void *v = aget_boxed(a, i);
-		*rt_sp++ = v;
+		*rt_push(1) = v;
 		RT_RELOAD(f);
 		int32_t keep = ((int32_t(*)(void *, void *))CLOS_FN(f))(f, v);
 		if (keep) hx_apush_slow(r_root, AK_PTR, (uint64_t)(uintptr_t)(rt_sp - 1));
@@ -362,7 +362,7 @@ void *Array_map(void *a, void *f) {
 		void *v = aget_boxed(a, i);
 		RT_RELOAD(f);
 		void *m = ((void *(*)(void *, void *))CLOS_FN(f))(f, v);
-		*rt_sp++ = m;
+		*rt_push(1) = m;
 		hx_apush_slow(r_root, AK_PTR, (uint64_t)(uintptr_t)(rt_sp - 1));
 		rt_sp--;
 	}

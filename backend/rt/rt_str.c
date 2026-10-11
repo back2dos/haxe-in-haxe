@@ -388,7 +388,7 @@ void *String_split(void *s, void *delim) {
 				}
 		int32_t end = at < 0 ? n : at;
 		void *part = substr_range(s, start, end - start);
-		*rt_sp++ = part;
+		*rt_push(1) = part;
 		hx_apush_slow(arr_root, AK_PTR, (uint64_t)(uintptr_t)(rt_sp - 1));
 		rt_sp--;
 		if (at < 0) break;

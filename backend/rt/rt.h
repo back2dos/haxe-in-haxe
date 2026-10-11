@@ -142,6 +142,11 @@ extern const int32_t rt_bound_types[];
 extern char *rt_young_start, *rt_young_end;
 extern RT_TLS char *rt_young_ptr, *rt_young_limit;
 extern RT_TLS void **rt_sp; // shadow stack top
+// The highest rt_sp since the last collection. Each collection zeroes the
+// slots in [rt_sp, rt_sp_hw), so a slot above rt_sp holds 0 or a reference
+// stored since: a new frame needs no zeroing, whatever the collector finds in
+// it is a valid (if dead) reference. Every push goes through rt_push.
+extern RT_TLS void **rt_sp_hw;
 extern RT_TLS void **rt_stack_base; // shadow stack bottom (of the running thread)
 extern void **rt_globals;
 void *rt_alloc_slow(uint64_t header, uint32_t bytes);
@@ -196,8 +201,15 @@ static inline void rt_set_ptr(void *obj, void **slot, void *val) {
 			if ((char *)prev < rt_young_start || (char *)prev >= rt_young_end) rt_write_barrier(obj, slot, val);
 }
 
+static inline void **rt_push(uint32_t n) {
+	void **f = rt_sp;
+	rt_sp = f + n;
+	if (rt_sp > rt_sp_hw) rt_sp_hw = rt_sp;
+	return f;
+}
+
 // natives keep references across allocations in shadow-stack slots
-#define RT_ROOT(var) void **var##_root = rt_sp++; *var##_root = (void *)(var)
+#define RT_ROOT(var) void **var##_root = rt_push(1); *var##_root = (void *)(var)
 #define RT_RELOAD(var) (var = *var##_root)
 #define RT_UNROOT(n) (rt_sp -= (n))
 

@@ -907,7 +907,21 @@ typedef struct { uint64_t h; int32_t len, hash; uint16_t c[1]; } hx_slit;
 		b = new StringBuf();
 		nextLabel = 0;
 		nextCache = 0;
-		if (n > 0) b.add('\tvoid **fr = rt_sp;\n\trt_sp += $n;\n\tmemset(fr, 0, $n * sizeof(void *));\n');
+		// no zeroing for the collector: it zeroes the slots above the stack top
+		// (rt.h rt_sp_hw); only the slots of locals that may be read before
+		// they are set start as null (all of them with a try block)
+		if (n > 0) {
+			b.add('\tvoid **fr = rt_push($n);\n');
+			if (f.hasTry) b.add('\tmemset(fr, 0, $n * sizeof(void *));\n') else {
+				var zero = new Map<Int, Bool>();
+				for (l in Roots.maybeUnset(f))
+					if (refSlot.exists(l)) zero.set(refSlot.get(l), true);
+				var ks = [for (k in zero.keys()) k];
+				ks.sort((x, y) -> x - y);
+				for (k in ks)
+					b.add('\tfr[$k] = 0;\n');
+			}
+		}
 		var vol = f.hasTry ? "volatile " : "";
 		for (a in f.args)
 			if (refSlot.exists(a)) b.add('\tfr[${refSlot.get(a)}] = a${a.id};\n');
@@ -954,14 +968,14 @@ typedef struct { uint64_t h; int32_t len, hash; uint16_t c[1]; } hx_slit;
 				switch elem {
 					case TF64: b.add('${ind}hx_aset_f($slot, ${expr(i)}, ${expr(v)});\n');
 					case TI32 | TBool: b.add('${ind}hx_aset_i($slot, ${expr(i)}, ${expr(v)});\n');
-					case _: b.add('$ind{ int32_t i_ = ${expr(i)}; *rt_sp++ = ${expr(v)}; hx_aset_p($slot, i_, rt_sp - 1); rt_sp--; }\n');
+					case _: b.add('$ind{ int32_t i_ = ${expr(i)}; *rt_push(1) = ${expr(v)}; hx_aset_p($slot, i_, rt_sp - 1); rt_sp--; }\n');
 				}
 			case SArrPush(elem, a, v):
 				var slot = '&${local(a)}';
 				switch elem {
 					case TF64: b.add('${ind}hx_apush_f($slot, ${expr(v)});\n');
 					case TI32 | TBool: b.add('${ind}hx_apush_i($slot, ${expr(v)});\n');
-					case _: b.add('$ind{ *rt_sp++ = ${expr(v)}; hx_apush_p($slot, rt_sp - 1); rt_sp--; }\n');
+					case _: b.add('$ind{ *rt_push(1) = ${expr(v)}; hx_apush_p($slot, rt_sp - 1); rt_sp--; }\n');
 				}
 			case SIf(c, x, y):
 				b.add('${ind}if (${expr(c)}) {\n');
@@ -1383,6 +1397,72 @@ class Roots {
 	var cont:Array<Map<Local, Bool>> = [];
 
 	function new() {}
+
+	// locals that may be read before any assignment (the arguments are set)
+	public static function maybeUnset(f:FuncInfo):Array<Local> {
+		var bad = new Map<Local, Bool>();
+		function reads(e:Ex, set:Map<Local, Bool>) {
+			var u = new Map<Local, Bool>();
+			uses(e, u);
+			for (l in u.keys())
+				if (!set.exists(l)) bad.set(l, true);
+		}
+		function read(l:Local, set:Map<Local, Bool>)
+			if (!set.exists(l)) bad.set(l, true);
+		// returns the locals set after ss (a superset of `set`); paths that
+		// end (return, break...) keep the set they had: conservative
+		var step:(Stmt, Map<Local, Bool>) -> Map<Local, Bool> = null;
+		function seq(ss:Array<Stmt>, set:Map<Local, Bool>):Map<Local, Bool> {
+			for (st in ss)
+				set = step(st, set);
+			return set;
+		}
+		function inter(a:Map<Local, Bool>, b:Map<Local, Bool>):Map<Local, Bool>
+			return [for (k in a.keys()) if (b.exists(k)) k => true];
+		step = function(st:Stmt, set:Map<Local, Bool>):Map<Local, Bool> {
+			switch st {
+				case SSet(l, e):
+					reads(e, set);
+					var r = copy(set);
+					r.set(l, true);
+					return r;
+				case SExpr(e) | SThrow(e) | SSetGlobal(_, e):
+					reads(e, set);
+				case SReturn(e):
+					if (e != null) reads(e, set);
+				case SSetField(_, _, o, v) | SBoxSet(_, o, v) | SAnonSet(_, _, o, v):
+					reads(o, set);
+					reads(v, set);
+				case SArrSet(_, a, i, v):
+					read(a, set);
+					reads(i, set);
+					reads(v, set);
+				case SArrPush(_, a, v):
+					read(a, set);
+					reads(v, set);
+				case SIf(c, x, y):
+					reads(c, set);
+					return inter(seq(x, copy(set)), seq(y, copy(set)));
+				case SLoop(body):
+					seq(body, copy(set));
+				case SSwitch(e, cases, def):
+					reads(e, set);
+					var r = seq(def, copy(set));
+					for (c in cases)
+						r = inter(r, seq(c.body, copy(set)));
+					return r;
+				case SBreak | SContinue:
+				case STry(_, _):
+					throw "try in a function without hasTry";
+			}
+			return set;
+		};
+		var entry = new Map<Local, Bool>();
+		for (a in f.args)
+			entry.set(a, true);
+		seq(f.body, entry);
+		return [for (l in f.locals) if (bad.exists(l)) l];
+	}
 
 	public static function analyze(f:FuncInfo):Roots {
 		var r = new Roots();

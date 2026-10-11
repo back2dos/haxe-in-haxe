@@ -473,8 +473,7 @@ uint64_t hx_anon_call_slow(void *o, int32_t fid, int32_t sig, uint64_t *args) {
 	char rk = strchr(k, '_')[1];
 	RT_ROOT(o);
 	// box the arguments into rooted slots
-	void **slots = rt_sp;
-	rt_sp += n;
+	void **slots = rt_push(n);
 	for (int32_t i = 0; i < n; i++)
 		slots[i] = 0;
 	for (int32_t i = 0; i < n; i++) {
@@ -543,8 +542,7 @@ void *hx_dyn_call(void *f, void *args) {
 	RT_UNROOT(2);
 	// the array data may move during boxing inside the callee: copy into rooted slots
 	int32_t n = ARR_LEN(args);
-	void **slots = rt_sp;
-	rt_sp += n;
+	void **slots = rt_push(n);
 	for (int32_t i = 0; i < n; i++)
 		slots[i] = FP(ARR_DATA(args), i);
 	void *r = call_boxed(f, slots, n);
@@ -637,8 +635,7 @@ static int call_field_builtin(void *o, const char *nm, void *args, void **res) {
 	RT_ROOT(o);
 	RT_ROOT(args);
 	// the arguments boxed into rooted slots
-	void **slots = rt_sp;
-	rt_sp += n;
+	void **slots = rt_push(n);
 	for (int32_t i = 0; i < n; i++)
 		slots[i] = 0;
 	for (int32_t i = 0; i < n; i++) {
@@ -707,8 +704,8 @@ void *hx_dyn_aget(void *a, int32_t i) {
 
 void hx_dyn_aset(void *a, int32_t i, void *v) {
 	if (!a || TINDEX(a) != T_ARRAY) hx_throw_str("Invalid array access");
-	*rt_sp++ = a;
-	*rt_sp++ = v;
+	*rt_push(1) = a;
+	*rt_push(1) = v;
 	hx_aset_slow(rt_sp - 2, i, AK_PTR, (uint64_t)(uintptr_t)(rt_sp - 1));
 	rt_sp -= 2;
 }
@@ -926,7 +923,7 @@ void *hxc_Native_enumCtorNames(void *e) {
 	RT_ROOT(a);
 	for (int32_t i = 0; i < n; i++) {
 		void *s = hx_str_of_ascii(rt_types[rt_types[t].ctors[i]].name);
-		*rt_sp++ = s;
+		*rt_push(1) = s;
 		hx_apush_slow(a_root, AK_PTR, (uint64_t)(uintptr_t)(rt_sp - 1));
 		rt_sp--;
 	}
@@ -1015,14 +1012,14 @@ static void *names_array(const rt_type *ty, int with_methods) {
 	RT_ROOT(a);
 	for (uint32_t i = 0; i < ty->nfields; i++) {
 		void *s = fid_str(ty->fields[i].fid);
-		*rt_sp++ = s;
+		*rt_push(1) = s;
 		hx_apush_slow(a_root, AK_PTR, (uint64_t)(uintptr_t)(rt_sp - 1));
 		rt_sp--;
 	}
 	if (with_methods)
 		for (uint32_t i = 0; i < ty->nmethods; i++) {
 			void *s = fid_str(ty->methods[i].fid);
-			*rt_sp++ = s;
+			*rt_push(1) = s;
 			hx_apush_slow(a_root, AK_PTR, (uint64_t)(uintptr_t)(rt_sp - 1));
 			rt_sp--;
 		}
@@ -1048,7 +1045,7 @@ void *hxc_Native_fields(void *o) {
 			RT_RELOAD(o);
 			ov = FP(o, 0);
 			void *s = fid_str(hx_unbox_int(FP(ov, i)));
-			*rt_sp++ = s;
+			*rt_push(1) = s;
 			hx_apush_slow(a_root, AK_PTR, (uint64_t)(uintptr_t)(rt_sp - 1));
 			rt_sp--;
 		}

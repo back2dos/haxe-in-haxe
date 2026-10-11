@@ -493,7 +493,7 @@ typedef struct rt_thread {
 	int permit; // unparked while not parked: the next park returns at once
 	ucontext_t ctx;
 	char *cstack; // NULL for the main thread (its stack is rt_run_main's)
-	void **sbase, **sp; // shadow stack (saved while not running)
+	void **sbase, **sp, **hw; // shadow stack (saved while not running; hw: rt_sp_hw)
 	rt_handler *hcur;
 	void *exn;
 	void *job; // the entry closure until the thread starts (a GC root)
@@ -584,6 +584,7 @@ void rt_threads_scan(void *(*fwd)(void *)) {
 		if (t == cur) continue; // its stack and rt_exn are the globals rt.c scans
 		for (void **s = t->sbase; s < t->sp; s++)
 			if (*s) *s = fwd(*s);
+		rt_zero_above(t->sp, &t->hw);
 		if (t->exn) t->exn = fwd(t->exn);
 	}
 }
@@ -693,10 +694,12 @@ static void schedule(void) {
 	next->state = TS_RUNNING;
 	if (next == prev) return;
 	prev->sp = rt_sp;
+	prev->hw = rt_sp_hw;
 	prev->sbase = rt_stack_base;
 	prev->hcur = rt_hcur;
 	prev->exn = rt_exn;
 	rt_sp = next->sp;
+	rt_sp_hw = next->hw;
 	rt_stack_base = next->sbase;
 	rt_hcur = next->hcur;
 	rt_exn = next->exn;
@@ -723,7 +726,7 @@ static void thread_exit(void) {
 static void thread_main(void) {
 	reap();
 	rt_thread *t = cur;
-	void **job = rt_sp++;
+	void **job = rt_push(1);
 	*job = t->job;
 	t->job = NULL;
 	RT_TRY(h)
@@ -754,7 +757,7 @@ int32_t hxc_NativeThread_spawn(void *job) {
 		hx_throw_str("cannot allocate the stacks of a new thread");
 	}
 	mprotect(t->cstack, page_size, PROT_NONE); // guard page: overflow faults
-	t->sp = t->sbase;
+	t->sp = t->hw = t->sbase;
 	t->deadline = -1;
 	t->job = job;
 	getcontext(&t->ctx);
@@ -920,7 +923,7 @@ static int32_t by_id_cap, next_id = 2;
 static rt_mutator dead_mut; // remembered sets of threads that ended (under wl)
 static RT_TLS rt_thread *self;
 // dead_mut's remembered set has no TLAB or stack: its refs point here
-static void **dead_sp, **dead_base;
+static void **dead_sp, **dead_hw, **dead_base;
 static void *dead_exn;
 static char *dead_yptr, *dead_ylim;
 
@@ -956,6 +959,7 @@ void rt_threads_init(void) {
 	main_thread.started = 1;
 	main_thread.pk = new_parker();
 	dead_mut.sp_ref = &dead_sp;
+	dead_mut.hw_ref = &dead_hw;
 	dead_mut.base_ref = &dead_base;
 	dead_mut.exn_ref = &dead_exn;
 	dead_mut.yptr_ref = &dead_yptr;
@@ -1116,7 +1120,7 @@ static void thread_exit(void) {
 static void *thread_start(void *arg) {
 	rt_thread *t = (rt_thread *)arg;
 	self = t;
-	rt_sp = rt_stack_base = t->sbase;
+	rt_sp = rt_stack_base = rt_sp_hw = t->sbase;
 	rt_young_ptr = rt_young_limit = NULL;
 	rt_hcur = NULL;
 	rt_exn = NULL;
@@ -1125,7 +1129,7 @@ static void *thread_start(void *arg) {
 	t->started = 1;
 	pthread_mutex_unlock(&wl);
 	rt_blocking_leave();
-	void **job = rt_sp++;
+	void **job = rt_push(1);
 	*job = t->job;
 	t->job = NULL;
 	RT_TRY(h)

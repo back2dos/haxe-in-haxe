@@ -9,7 +9,7 @@
 // none, there is one mutator, over the globals (the green scheduler swaps
 // them).
 typedef struct rt_mutator {
-	void ***sp_ref, ***base_ref;
+	void ***sp_ref, ***hw_ref, ***base_ref;
 	void **exn_ref;
 	char **yptr_ref, **ylim_ref;
 	void ***rem; // remembered set: slots of old objects that may hold young pointers
@@ -22,6 +22,7 @@ typedef struct rt_mutator {
 
 extern RT_TLS rt_mutator *rt_mut; // the running thread's
 void rt_mutator_bind(rt_mutator *m); // points m at the calling thread's TLS variables
+void rt_zero_above(void **sp, void ***hw); // rt.c: after a collection, see rt_sp_hw
 void rt_threads_init(void); // rt_thread.c, from rt_init: the main thread's record and mutator
 
 // rt_thread.c. Every registered mutator, in a safe region or stopped at a

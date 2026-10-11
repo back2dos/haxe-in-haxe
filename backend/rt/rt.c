@@ -30,6 +30,7 @@ static char *young_next; // free part of the nursery: TLABs are taken from here
 RT_TLS char *rt_young_ptr, *rt_young_limit;
 static char *old_start, *old_ptr, *old_end;
 RT_TLS void **rt_sp;
+RT_TLS void **rt_sp_hw;
 RT_TLS void **rt_stack_base; // the running thread's shadow stack (green threads swap it)
 void **rt_globals;
 static int nglobals;
@@ -471,30 +472,77 @@ static void reset_tlab(rt_mutator *m, void *arg) {
 // a collection, with every other thread stopped (unless another thread
 // collected meanwhile: the caller then retries its allocation)
 static int huge_pages; // RT_HUGE
-
-static char *nursery_alloc(size_t bytes) {
-#if defined(MADV_HUGEPAGE) && !defined(__EMSCRIPTEN__)
-	char *p = (char *)aligned_alloc(2u << 20, (bytes + (2u << 20) - 1) & ~(size_t)((2u << 20) - 1));
-	if (huge_pages) madvise(p, bytes, MADV_HUGEPAGE);
-	return p;
-#else
-	return (char *)malloc(bytes);
-#endif
-}
-
 static int minor_fixed; // RT_MINOR_KB sets the nursery size
 #define MINOR_MAX ((size_t)32 << 20)
+
+// The nursery: a reserved range (pages committed as touched) that it grows
+// and shrinks in, so resizing allocates nothing. Under Emscripten, malloc'ed
+// at its size, and it does not grow.
+static char *nursery_alloc(size_t bytes) {
+#ifdef __EMSCRIPTEN__
+	return (char *)malloc(bytes);
+#else
+	size_t reserve = bytes > MINOR_MAX ? bytes : MINOR_MAX;
+	char *p = mmap(NULL, reserve + (2u << 20), PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
+	if (p == MAP_FAILED) {
+		fputs("cannot reserve the nursery\n", stderr);
+		exit(2);
+	}
+	p = (char *)(((uintptr_t)p + (2u << 20) - 1) & ~(uintptr_t)((2u << 20) - 1)); // 2 MB aligned (huge pages)
+#ifdef MADV_HUGEPAGE
+	if (huge_pages) madvise(p, reserve, MADV_HUGEPAGE);
+#endif
+	return p;
+#endif
+}
 
 // After a minor collection where much of the nursery survived (objects that
 // live a little longer than a nursery cycle, e.g. a tree being built), a
 // larger nursery copies them fewer times: double it. It is empty now.
-static void grow_nursery(void) {
-	free(rt_young_start);
-	minor_size *= 2;
-	rt_young_start = nursery_alloc(minor_size);
+// It pays only when the survivors stay about the same with a larger nursery
+// (they are copied once per collection); when they grow with it (everything
+// lives long), the growth is undone and not tried again.
+static size_t grown_from, survived_before_growth;
+#ifdef __EMSCRIPTEN__
+#define GROWTH_UNSUPPORTED 1
+#else
+#define GROWTH_UNSUPPORTED 0
+#endif
+static int growth_off;
+
+static void resize_nursery(size_t size) {
+#ifndef __EMSCRIPTEN__
+	if (size < minor_size) madvise(rt_young_start + size, minor_size - size, MADV_DONTNEED);
+#endif
+	minor_size = size;
 	rt_young_end = rt_young_start + minor_size;
 	if (!getenv("RT_TLAB_KB")) tlab_size = minor_size / 16;
-	if (stats) fprintf(stderr, "gc: nursery grows to %zu KB\n", minor_size >> 10);
+	if (stats) fprintf(stderr, "gc: nursery %zu KB\n", minor_size >> 10);
+}
+
+static void adapt_nursery(size_t survived) {
+	if (grown_from) {
+		if (survived > survived_before_growth + survived_before_growth / 2) {
+			resize_nursery(grown_from);
+			growth_off = 1;
+		}
+		grown_from = 0;
+	} else if (!growth_off && !GROWTH_UNSUPPORTED && minor_size < MINOR_MAX && survived * 8 > minor_size) {
+		grown_from = minor_size;
+		survived_before_growth = survived;
+		resize_nursery(minor_size * 2);
+	}
+}
+
+// the slots a thread's frames left above its stack top (see rt_sp_hw)
+void rt_zero_above(void **sp, void ***hw) {
+	if (*hw > sp) memset(sp, 0, (size_t)((char *)*hw - (char *)sp));
+	*hw = sp;
+}
+
+static void zero_mutator_stack(rt_mutator *m, void *arg) {
+	(void)arg;
+	rt_zero_above(*m->sp_ref, m->hw_ref);
 }
 
 static void collect(int full, size_t need) {
@@ -504,10 +552,12 @@ static void collect(int full, size_t need) {
 		char *before = old_ptr;
 		unsigned long m0 = majors;
 		minor();
-		if (!minor_fixed && majors == m0 && minor_size < MINOR_MAX && (size_t)(old_ptr - before) * 8 > minor_size) grow_nursery();
+		if (!minor_fixed && majors == m0) adapt_nursery((size_t)(old_ptr - before));
 	}
 	young_next = rt_young_start;
 	rt_mutators_foreach(reset_tlab, NULL);
+	rt_zero_above(rt_sp, &rt_sp_hw);
+	rt_mutators_foreach(zero_mutator_stack, NULL);
 	rt_world_resume();
 }
 
@@ -614,8 +664,7 @@ static void run_finalisers(int propagate) {
 			rt_unlock(&finals_lock);
 			break;
 		}
-		void **r = rt_sp;
-		rt_sp += 2;
+		void **r = rt_push(2);
 		r[0] = final_queue[final_qhead].fn;
 		r[1] = final_queue[final_qhead].val;
 		if (++final_qhead == final_qlen) final_qhead = final_qlen = 0;
@@ -793,6 +842,7 @@ void rt_init(int ng, int argc, char **argv) {
 	mprotect(sstack + sbytes, page, PROT_NONE);
 	rt_stack_base = rt_sp = (void **)sstack;
 #endif
+	rt_sp_hw = rt_sp;
 	rt_threads_init();
 	nglobals = ng;
 	rt_globals = (void **)calloc(ng + 1, sizeof(void *));
@@ -815,6 +865,7 @@ void rt_init(int ng, int argc, char **argv) {
 // binds a mutator to the calling thread's runtime state
 void rt_mutator_bind(rt_mutator *m) {
 	m->sp_ref = &rt_sp;
+	m->hw_ref = &rt_sp_hw;
 	m->base_ref = &rt_stack_base;
 	m->exn_ref = &rt_exn;
 	m->yptr_ref = &rt_young_ptr;
