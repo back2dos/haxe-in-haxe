@@ -39,16 +39,25 @@ class EvalProcess {
 			// port: 73 = 0o111: some execute bit
 			return sys.FileSystem.exists(path) && !sys.FileSystem.isDirectory(path) && (sys.FileSystem.stat(path).mode & 73) != 0;
 		}
-		if (cmd.indexOf("/") >= 0)
-			return sys.FileSystem.exists(cmd);
+		// port: PATHEXT is only set on Windows, where the Cosmopolitan build of the
+		// ... port (Sys.systemName() is "Linux" there) also finds programs by extension
+		var pathExt = Sys.getEnv("PATHEXT");
+		var exts = pathExt == null ? [""] : [""].concat(pathExt.split(";"));
+		if (cmd.indexOf("/") >= 0 || (pathExt != null && cmd.indexOf("\\") >= 0)) {
+			for (ext in exts)
+				if (sys.FileSystem.exists(cmd + ext))
+					return true;
+			return false;
+		}
 		if (cmd == "")
 			return false;
 		var path = Sys.getEnv("PATH");
 		if (path == null)
 			path = "/bin:/usr/bin";
 		for (dir in path.split(":"))
-			if (isExecutableFile((dir == "" ? "." : dir) + "/" + cmd))
-				return true;
+			for (ext in exts)
+				if (isExecutableFile((dir == "" ? "." : dir) + "/" + cmd + ext))
+					return true;
 		return false;
 	}
 

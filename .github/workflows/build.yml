@@ -1,0 +1,377 @@
+# Builds the port (haxe.Main compiled to C by hxc) for Linux and macOS
+# (x86_64, aarch64) with zig cc, and as a Cosmopolitan APE binary that is also
+# the Windows build; tests each on a native runner and publishes them:
+# a rolling `nightly` pre-release on pushes to main, a release on v* tags.
+#
+# Release assets (https://github.com/<repo>/releases/download/<tag>/<asset>):
+#   haxe-in-haxe-linux-x86_64.tar.gz   haxe-in-haxe-linux-aarch64.tar.gz
+#   haxe-in-haxe-macos-x86_64.tar.gz   haxe-in-haxe-macos-aarch64.tar.gz
+#   haxe-in-haxe-windows-x86_64.zip    (the APE binary as haxe-in-haxe.exe)
+#   haxe-in-haxe.com                   (the APE binary, std embedded)
+#   haxe-in-haxe-licenses.zip          (the licenses of haxe-in-haxe.com)
+name: build
+
+on:
+  push:
+    branches: [main, ci-zig]
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+
+env:
+  OCAML_VERSION: 5.3.0
+  ZIG_VERSION: 0.17.0
+  COSMOCC_VERSION: 4.0.2
+  HXNODEJS_COMMIT: f88685a70b2e4f03dbe0a824ce90ea8b56b27753
+
+jobs:
+  # the reference compiler (built from the haxe/ submodule) and the port's C
+  generate:
+    runs-on: ubuntu-24.04
+    env:
+      OPAMYES: 1
+      PLATFORM: linux64
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: true
+
+      - name: Reference compiler revision
+        id: ref
+        run: echo "rev=$(git -C haxe rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache the reference compiler
+        id: cache-haxe
+        uses: actions/cache@v6
+        with:
+          path: haxe/haxe
+          key: haxe-${{ runner.os }}-${{ runner.arch }}-${{ env.OCAML_VERSION }}-${{ steps.ref.outputs.rev }}
+
+      - name: System packages
+        run: |
+          sudo apt-get update -qqy
+          sudo apt-get install -qqy opam libpcre2-dev zlib1g-dev libmbedtls-dev ninja-build
+
+      - name: Cache opam
+        if: steps.cache-haxe.outputs.cache-hit != 'true'
+        id: cache-opam
+        uses: actions/cache@v6
+        with:
+          path: ~/.opam/
+          key: opam-${{ runner.os }}-${{ runner.arch }}-${{ env.OCAML_VERSION }}-${{ hashFiles('haxe/haxe.opam') }}
+
+      - name: Neko (for the opam package conf-neko)
+        if: steps.cache-haxe.outputs.cache-hit != 'true' && steps.cache-opam.outputs.cache-hit != 'true'
+        uses: ./haxe/.github/actions/setup-neko
+
+      - name: OCaml libraries
+        if: steps.cache-haxe.outputs.cache-hit != 'true' && steps.cache-opam.outputs.cache-hit != 'true'
+        run: |
+          set -ex
+          opam init -c "$OCAML_VERSION" --disable-sandboxing
+          opam pin add haxe ./haxe --no-action
+          opam install haxe --deps-only --assume-depexts
+          opam list
+
+      - name: Build the reference compiler
+        if: steps.cache-haxe.outputs.cache-hit != 'true'
+        run: |
+          set -ex
+          eval $(opam env)
+          make -C haxe -s -j"$(nproc)" haxe
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+
+      - name: hxnodejs
+        run: |
+          git init -q "$RUNNER_TEMP/hxnodejs"
+          git -C "$RUNNER_TEMP/hxnodejs" fetch -q --depth 1 https://github.com/HaxeFoundation/hxnodejs "$HXNODEJS_COMMIT"
+          git -C "$RUNNER_TEMP/hxnodejs" checkout -q FETCH_HEAD
+
+      - name: Generate the port's C
+        run: |
+          set -ex
+          haxe/haxe --version
+          TOOL_LIBS="$RUNNER_TEMP/hxnodejs/extraParams.hxml -cp $RUNNER_TEMP/hxnodejs/src" NO_CC=1 sh hxc/build.sh port
+          ls bin/hxc/hih/prog_hxc | wc -l
+          du -sh bin/hxc/hih/prog_hxc
+
+      - name: Pack the C and the std
+        run: |
+          set -ex
+          mkdir -p dist
+          tar czf dist/port-c.tar.gz -C bin/hxc/hih prog_hxc
+          tar czf dist/std.tar.gz -C haxe std
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: port-c
+          path: dist/
+          retention-days: 7
+
+  # zig cc cross builds from Linux, one target per job
+  build:
+    needs: generate
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux-x86_64
+            target: x86_64-linux-gnu.2.28
+          - name: linux-aarch64
+            target: aarch64-linux-gnu.2.28
+          - name: macos-x86_64
+            target: x86_64-macos
+          - name: macos-aarch64
+            target: aarch64-macos
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          name: port-c
+          path: dist
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: ${{ env.ZIG_VERSION }}
+      - name: Compile
+        run: |
+          set -ex
+          mkdir -p bin/hxc/hih
+          tar xzf dist/port-c.tar.gz -C bin/hxc/hih
+          sh hxc/tools/zig-build.sh ${{ matrix.target }} bin/zig/haxe-in-haxe
+          file bin/zig/haxe-in-haxe
+      - name: Package
+        run: |
+          set -ex
+          P=haxe-in-haxe-${{ matrix.name }}
+          mkdir -p "pkg/$P"
+          cp bin/zig/haxe-in-haxe LICENSE COPYING "pkg/$P/"
+          tar xzf dist/std.tar.gz -C "pkg/$P"
+          cat > "pkg/$P/README.txt" <<EOF
+          haxe-in-haxe: the Haxe compiler ported to Haxe, compiled to C (https://github.com/${{ github.repository }}).
+          Commit ${{ github.sha }}, target ${{ matrix.target }} (built with zig cc, without TLS and libuv).
+
+          Use it like haxe, with HAXE_STD_PATH pointing at the std directory next to it:
+            export HAXE_STD_PATH=\$PWD/std
+            ./haxe-in-haxe -main Main --interp
+          macOS: a browser download is quarantined; xattr -d com.apple.quarantine haxe-in-haxe
+          EOF
+          tar czf "$P.tar.gz" -C pkg "$P"
+          ls -l "$P.tar.gz"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: haxe-in-haxe-${{ matrix.name }}
+          path: haxe-in-haxe-${{ matrix.name }}.tar.gz
+          retention-days: 14
+
+  # the Cosmopolitan APE binary (Linux, macOS, Windows, BSDs), with mbedtls and libuv
+  cosmo:
+    needs: generate
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          name: port-c
+          path: dist
+      - name: Cache cosmocc
+        id: cache-cosmocc
+        uses: actions/cache@v6
+        with:
+          path: ~/cosmocc
+          key: cosmocc-${{ env.COSMOCC_VERSION }}
+      - name: Install cosmocc
+        if: steps.cache-cosmocc.outputs.cache-hit != 'true'
+        run: |
+          set -ex
+          curl -sSfL --retry 3 -o "$RUNNER_TEMP/cosmocc.zip" "https://github.com/jart/cosmopolitan/releases/download/$COSMOCC_VERSION/cosmocc-$COSMOCC_VERSION.zip"
+          mkdir -p ~/cosmocc
+          unzip -q "$RUNNER_TEMP/cosmocc.zip" -d ~/cosmocc
+      - name: APE loader
+        run: |
+          # run APE tools directly (not through binfmt_misc handlers such as WINE's)
+          sudo cp ~/cosmocc/bin/ape-x86_64.elf /usr/bin/ape
+          sudo sh -c "echo ':APE:M::MZqFpD::/usr/bin/ape:' > /proc/sys/fs/binfmt_misc/register" || true
+          sudo sh -c "echo ':APE-jart:M::jartsr::/usr/bin/ape:' > /proc/sys/fs/binfmt_misc/register" || true
+          echo "$HOME/cosmocc/bin" >> "$GITHUB_PATH"
+      - name: Cache mbedtls and libuv
+        uses: actions/cache@v6
+        with:
+          path: bin/cosmo-deps
+          key: cosmo-deps-${{ env.COSMOCC_VERSION }}-${{ hashFiles('hxc/tools/cosmo-deps.sh', 'hxc/tools/cosmo-patches/*') }}
+      - name: Compile
+        run: |
+          set -ex
+          cosmocc --version
+          sh hxc/tools/cosmo-deps.sh bin/cosmo-deps
+          mkdir -p bin/hxc/hih
+          tar xzf dist/port-c.tar.gz -C bin/hxc/hih
+          D=bin/cosmo-deps
+          mkdir -p bin/cosmo
+          RT="rt rt_dyn rt_std rt_str rt_sys rt_net rt_ssl rt_uv rt_thread rt_census"
+          CC="cosmocc -O2" CFLAGS="-w -fno-strict-aliasing -DHXC_CONST_IDS -I$D/include" \
+            LIBS="-lm -L$D/lib -lmbedtls -lmbedx509 -lmbedcrypto -luv" RT_FILES="$RT" \
+            sh hxc/tools/cc-chunks.sh bin/hxc/hih/prog_hxc bin/cosmo/hih.com
+      - name: Package
+        run: |
+          set -ex
+          mkdir -p pkg/std-zip out
+          tar xzf dist/std.tar.gz -C pkg/std-zip
+          # the std in the binary's own zip (rt.c reads /zip/std when HAXE_STD_PATH is unset)
+          cp bin/cosmo/hih.com out/haxe-in-haxe.com
+          (cd pkg/std-zip && zip -qr -9 ../../out/haxe-in-haxe.com std)
+          mkdir -p pkg/licenses
+          cp LICENSE COPYING bin/cosmo-deps/LICENSE.mbedtls bin/cosmo-deps/LICENSE.libuv pkg/licenses/
+          (cd pkg/licenses && zip -q -9 ../../out/haxe-in-haxe-licenses.zip *)
+          P=haxe-in-haxe-windows-x86_64
+          mkdir -p "pkg/$P"
+          cp out/haxe-in-haxe.com "pkg/$P/haxe-in-haxe.exe"
+          cp pkg/licenses/* "pkg/$P/"
+          cp -r pkg/std-zip/std "pkg/$P/"
+          cat > "pkg/$P/README.txt" <<EOF
+          haxe-in-haxe: the Haxe compiler ported to Haxe, compiled to C (https://github.com/${{ github.repository }}).
+          Commit ${{ github.sha }}. A Cosmopolitan (https://justine.lol/cosmopolitan/) build with mbedtls and libuv:
+          the same file runs on Linux, macOS and the BSDs as haxe-in-haxe.com.
+
+          The standard library is embedded in the executable; set HAXE_STD_PATH to use the std directory instead.
+            haxe-in-haxe.exe -main Main --interp
+          EOF
+          (cd pkg && zip -qr -9 "../out/$P.zip" "$P")
+          ls -l out
+      - uses: actions/upload-artifact@v7
+        with:
+          name: haxe-in-haxe-cosmo
+          path: out/
+          retention-days: 14
+
+  test:
+    needs: [build, cosmo]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            pkg: linux-x86_64
+          - os: ubuntu-24.04-arm
+            pkg: linux-aarch64
+          - os: macos-15-intel
+            pkg: macos-x86_64
+          - os: macos-latest
+            pkg: macos-aarch64
+          - os: windows-latest
+            pkg: windows-x86_64
+          - os: windows-11-arm
+            pkg: windows-x86_64
+          - os: ubuntu-24.04
+            pkg: com
+          - os: macos-latest
+            pkg: com
+    runs-on: ${{ matrix.os }}
+    continue-on-error: ${{ matrix.os == 'windows-11-arm' }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          sparse-checkout: hxc/tools
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - uses: actions/download-artifact@v8
+        with:
+          name: ${{ (matrix.pkg == 'com' || startsWith(matrix.pkg, 'windows')) && 'haxe-in-haxe-cosmo' || format('haxe-in-haxe-{0}', matrix.pkg) }}
+          path: dl
+      - name: Unpack
+        id: unpack
+        run: |
+          set -ex
+          case "${{ matrix.pkg }}" in
+            com)
+              mkdir -p t && cp dl/haxe-in-haxe.com t/ && chmod +x t/haxe-in-haxe.com
+              echo "bin=$PWD/t/haxe-in-haxe.com" >> "$GITHUB_OUTPUT"
+              echo "std=" >> "$GITHUB_OUTPUT" ;;
+            windows-*)
+              unzip -q dl/haxe-in-haxe-${{ matrix.pkg }}.zip -d t
+              echo "bin=$PWD/t/haxe-in-haxe-${{ matrix.pkg }}/haxe-in-haxe.exe" >> "$GITHUB_OUTPUT"
+              echo "std=$PWD/t/haxe-in-haxe-${{ matrix.pkg }}/std" >> "$GITHUB_OUTPUT" ;;
+            *)
+              mkdir -p t && tar xzf dl/haxe-in-haxe-${{ matrix.pkg }}.tar.gz -C t
+              echo "bin=$PWD/t/haxe-in-haxe-${{ matrix.pkg }}/haxe-in-haxe" >> "$GITHUB_OUTPUT"
+              echo "std=$PWD/t/haxe-in-haxe-${{ matrix.pkg }}/std" >> "$GITHUB_OUTPUT" ;;
+          esac
+          ls -l t t/*
+      - name: Smoke test
+        run: |
+          if [ -n "${{ steps.unpack.outputs.std }}" ]; then export HAXE_STD_PATH="${{ steps.unpack.outputs.std }}"; fi
+          SMOKE_DIR="$RUNNER_TEMP/smoke" sh hxc/tools/smoke.sh "${{ steps.unpack.outputs.bin }}"
+      - name: Smoke test (embedded std)
+        if: startsWith(matrix.pkg, 'windows')
+        run: SMOKE_DIR="$RUNNER_TEMP/smoke-zip" sh hxc/tools/smoke.sh "${{ steps.unpack.outputs.bin }}"
+      - name: Smoke test (PowerShell, Windows paths)
+        if: startsWith(matrix.pkg, 'windows')
+        shell: pwsh
+        run: |
+          $env:HAXE_STD_PATH = (Resolve-Path "t/haxe-in-haxe-${{ matrix.pkg }}/std").Path
+          $exe = (Resolve-Path "t/haxe-in-haxe-${{ matrix.pkg }}/haxe-in-haxe.exe").Path
+          New-Item -ItemType Directory -Force ps | Out-Null
+          Set-Location ps
+          Set-Content Main.hx 'class Main { static function main() { trace("hello from " + #if sys Sys.systemName() #else "js" #end); } }'
+          & $exe -main Main --interp
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          & $exe -main Main --js out.js
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          node out.js
+          & $exe -cp . -main Main --hxb out.hxb
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          Get-Item out.hxb
+
+  # nightly on main, a release on v* tags
+  release:
+    needs: test
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: haxe-in-haxe-*
+          path: assets
+          merge-multiple: true
+      - name: Publish
+        run: |
+          set -ex
+          ls -l assets
+          SHORT=$(echo "$GITHUB_SHA" | cut -c1-9)
+          NOTES="Built from $GITHUB_SHA.
+
+          - haxe-in-haxe-<os>-<arch>.tar.gz: Linux and macOS builds (zig cc, without TLS and libuv), with std/; set HAXE_STD_PATH to it.
+          - haxe-in-haxe-windows-x86_64.zip: the Cosmopolitan build as haxe-in-haxe.exe, with mbedtls and libuv.
+          - haxe-in-haxe.com: the same Cosmopolitan binary for Linux, macOS, Windows and the BSDs, with the std embedded. Its licenses (LICENSE, COPYING, LICENSE.mbedtls, LICENSE.libuv) are in haxe-in-haxe-licenses.zip; every archive carries its own."
+          if [ "$GITHUB_REF_TYPE" = tag ]; then
+            TAG=$GITHUB_REF_NAME
+            gh release create "$TAG" --verify-tag --title "haxe-in-haxe $TAG" --notes "$NOTES" assets/*
+          else
+            TAG=nightly
+            if gh release view "$TAG" > /dev/null 2>&1; then
+              # move the tag, then replace the assets in place (the download URLs stay valid)
+              gh api -X PATCH "repos/$GH_REPO/git/refs/tags/$TAG" -f sha="$GITHUB_SHA" -F force=true
+              gh release upload "$TAG" assets/* --clobber
+              gh release edit "$TAG" --prerelease --title "Nightly ($SHORT)" --notes "$NOTES"
+            else
+              gh release create "$TAG" --prerelease --target "$GITHUB_SHA" --title "Nightly ($SHORT)" --notes "$NOTES" assets/*
+            fi
+          fi
