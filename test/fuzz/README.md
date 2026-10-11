@@ -25,9 +25,10 @@ program on every host.
 ## Lanes
 
 A lane compares two sides on each program. Programs are written to
-`<out>/work/w<N>/src`, and each side compiles from its own directory with
-`-cp ../src -main Main -D disable-parallelism`, so paths embedded in output
-are the same for both sides.
+`<out>/work/w<N>/src`, and each side compiles in turn from the same directory,
+`<out>/work/w<N>/cwd` (afterwards renamed to the side's label, `ref` or `port`),
+with `-cp ../src -main Main -D disable-parallelism`, so paths embedded in output
+(including the working directory) are the same for both sides.
 
 | Lane | Sides | Compared |
 | --- | --- | --- |

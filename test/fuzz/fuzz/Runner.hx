@@ -201,13 +201,19 @@ class Runner {
 	public static function runSide(side:Side, work:String, run:Bool):SideResult {
 		var dir = work + "/" + side.label;
 		rmrf(dir);
-		FileSystem.createDirectory(dir + "/out");
+		// both sides compile in <work>/cwd (then renamed to <work>/<label>): output that
+		// embeds the working directory (gencpp's __files__.cpp, source maps of the null
+		// position, fdb paths) is then the same for both
+		var cwd = work + "/cwd";
+		rmrf(cwd);
+		FileSystem.createDirectory(cwd + "/out");
 		// as test/conformance.py: both compilers use the checkout's std
 		var std = shellQuote(root + "/haxe/std");
 		var env = "HAXE_STD_PATH=" + std + " HAXE_IN_HAXE_STD_PATH=" + std + " ";
-		var cmd = "cd " + shellQuote(dir) + " && " + env + "timeout " + compileTimeout + " " + commandLine(side, "out")
+		var cmd = "cd " + shellQuote(cwd) + " && " + env + "timeout " + compileTimeout + " " + commandLine(side, "out")
 			+ " > compile.log 2>&1 < /dev/null; echo $? > compile.code";
 		sh(cmd);
+		FileSystem.rename(cwd, dir);
 		var code = readCode(dir + "/compile.code");
 		var res:SideResult = {
 			code: code,
