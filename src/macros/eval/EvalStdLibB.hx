@@ -911,19 +911,19 @@ class StdReflect {
 }
 
 class StdResource {
-	static function resources():haxe.ds.StringMap<Bytes> return EvalContext.getCtx().curapi.getCom().resources;
+	static function resources():core.ds.OcamlHashtbl<String, Bytes> return EvalContext.getCtx().curapi.getCom().resources;
 
 	public static final listNames = EvalEncode.vfun0(() -> {
-		EvalEncode.encodeArray([for (k in EvalStdLib.hashtblKeys(resources())) EvalString.createUnknown(k)]);
+		EvalEncode.encodeArray([for (k in resources().fold((k, _, acc:Array<String>) -> [k].concat(acc), [])) EvalString.createUnknown(k)]);
 	});
 
 	public static final getString = EvalEncode.vfun1(name -> {
-		var s = resources().get(EvalDecode.decodeString(name));
+		var s = resources().findOpt(EvalDecode.decodeString(name));
 		s == null ? VNull : EvalString.createUnknown(s.toString());
 	});
 
 	public static final getBytes = EvalEncode.vfun1(name -> {
-		var s = resources().get(EvalDecode.decodeString(name));
+		var s = resources().findOpt(EvalDecode.decodeString(name));
 		s == null ? VNull : EvalEncode.encodeBytes(s);
 	});
 }
