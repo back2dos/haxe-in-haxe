@@ -4940,8 +4940,8 @@ class Genhl {
 		if (Gctx.defined(com, Define.Interp)) {
 			try {
 				var t = core.Timer.startTimer(com.timerCtx, ["generate", "hl", "interp"]);
-				// port: Hlinterp.create / Hlinterp.add_code (running the bytecode) are not ported.
-				throw new Failure("haxe-in-haxe: the HashLink interpreter (hlinterp.ml) is not ported");
+				var ctx = Hlinterp.create(true);
+				Hlinterp.addCode(ctx, code);
 				t();
 			} catch (e:Failure) {
 				Error.abort(e.message, nullPos);

@@ -404,7 +404,7 @@ and on the hand and upstream cases listed there. Generated programs are not run.
 | `generators/genhl.ml` | `src/generators/Genhl.hx` | HashLink bytecode |
 | `generators/hlcode.ml`, `hlopt.ml` | `src/generators/Hlcode.hx`, `Hlopt.hx` | HashLink |
 | `generators/hl2c.ml` | `src/generators/Hl2c.hx` | HL/C; type names hashed from a reproduction of OCaml's `Marshal`; descriptors that marshal a closure fail explicitly |
-| `generators/hlinterp.ml` | `src/generators/Hlinterp.hx` | `check` only (`-D hl-check`); running bytecode (`-D interp`) fails explicitly |
+| `generators/hlinterp.ml` | `src/generators/Hlinterp.hx` | complete (values, interpreter loop, `std` natives, error/stack reporting, `check`; `--hl x.hl -D interp` runs the bytecode; the commented-out SPEC section is kept as a comment); OCaml `Str` (used by the regexp natives) is `src/core/ds/OcamlStr.hx` |
 | `generators/genjvm.ml`, `generators/jvm/*.ml` | `src/generators/Genjvm.hx`, `src/generators/jvm/` | JVM (sequential passes, as upstream with `-D disable-parallelism`) |
 | `codegen/javaModern.ml` | `src/codegen/JavaModern.hx` | Java library input (`hxjava-std.jar`, `--java-lib`) |
 | `generators/gencpp.ml`, `generators/cpp/**/*.ml` | `src/generators/Gencpp.hx`, `src/generators/cpp/` | C++ and cppia |
