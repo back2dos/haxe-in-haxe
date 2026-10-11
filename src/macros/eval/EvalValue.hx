@@ -6,18 +6,13 @@ import core.ds.GlobalsIntMap;
 import core.ds.OcamlHashtbl;
 import haxe.io.Bytes;
 
-/**
-	haxe/src/macro/eval/evalValue.ml.
-
-	Deviations:
-	- Strings (`Vstring`) hold a native string. Their length and indices are in
-	  code points, as Eval's UTF-8 strings, see `EvalString`.
-	- libuv handles (`Vhandle`) and mbedtls instances hold host objects; they
-	  only exist on hosts implementing them (see `EvalLuv`, `EvalSsl`). OCaml
-	  domains are not implemented.
-	- `IObjectMap` cannot reproduce OCaml's structural hash of runtime values,
-	  so its iteration order is that of a single bucket (newest first).
-**/
+// port: deviations:
+// - Strings (`Vstring`) hold a native string. Their length and indices are in
+//   code points, as Eval's UTF-8 strings, see `EvalString`.
+// - libuv handles (`Vhandle`) and mbedtls instances hold host objects; they
+//   only exist on hosts implementing them (see `EvalLuv`, `EvalSsl`).
+// - `IObjectMap` cannot reproduce OCaml's structural hash of runtime values,
+//   so its iteration order is that of a single bucket (newest first).
 enum Cmp {
 	CEq;
 	CSup;
@@ -27,9 +22,10 @@ enum Cmp {
 
 class Vstring {
 	public final sstring:String;
-	// length in code points
+	// The length of the string.
+	// port: in code points
 	public final slength:Int;
-	// sstring has no surrogate pairs: code point indices are string indices
+	// port: sstring has no surrogate pairs: code point indices are string indices
 	public final sbmp:Bool;
 
 	public function new(sstring:String, slength:Int, sbmp:Bool) {
@@ -46,7 +42,7 @@ class VstringBuffer {
 	public function new() {}
 }
 
-/** `RuntimeStringHashtbl`: a mutable reference to a string map, iterated in key order. **/
+// port: `RuntimeStringHashtbl`: a mutable reference to a string map, iterated in key order.
 class RuntimeStringHashtbl<V> {
 	var map:Map<String, {key:Vstring, value:V}>;
 
@@ -64,7 +60,7 @@ class RuntimeStringHashtbl<V> {
 
 	public function findOpt(key:Vstring):Null<{key:Vstring, value:V}> return map.get(key.sstring);
 
-	// StringMap order: OCaml's String.compare on the UTF-8 bytes, i.e. code point order
+	// port: StringMap order: OCaml's String.compare on the UTF-8 bytes, i.e. code point order
 	public function sortedKeys():Array<String> {
 		var keys = [for (k in map.keys()) k];
 		keys.sort(EvalString.compareCodePoints);
@@ -93,7 +89,7 @@ class RuntimeStringHashtbl<V> {
 	}
 }
 
-/** `RuntimeIntHashtbl`: `IntHashtbl` (an OCaml `Hashtbl` with `Int.hash`). **/
+// port: `RuntimeIntHashtbl`: `IntHashtbl` (an OCaml `Hashtbl` with `Int.hash`).
 class RuntimeIntHashtbl<V> {
 	public final h:OcamlHashtbl<Int, V>;
 
@@ -120,15 +116,13 @@ class RuntimeIntHashtbl<V> {
 	public function size():Int return h.length();
 }
 
-/**
-	`RuntimeInt64Hashtbl`: `Int64Hashtbl`, hashed with OCaml's polymorphic hash on
-	boxed int64s (custom block), which is not reproduced: one bucket, newest first.
-**/
+// port: `RuntimeInt64Hashtbl`: `Int64Hashtbl`, hashed with OCaml's polymorphic hash on
+// boxed int64s (custom block), which is not reproduced: one bucket, newest first.
 class RuntimeInt64Hashtbl<V> {
 	public final h:OcamlHashtbl<haxe.Int64, V>;
 
 	public function new(?h:OcamlHashtbl<haxe.Int64, V>) this.h = h == null ? new OcamlHashtbl(_ -> 0,
-		(a:haxe.Int64, b:haxe.Int64) -> a == b, 0) : h; // typed: Int64 equality, not physical (hxc boxes Int64)
+		(a:haxe.Int64, b:haxe.Int64) -> a == b, 0) : h; // port: typed: Int64 equality, not physical (hxc boxes Int64)
 
 	public function add(key:haxe.Int64, v:V):Void h.replace(key, v);
 
@@ -151,13 +145,13 @@ class RuntimeInt64Hashtbl<V> {
 	public function size():Int return h.length();
 }
 
-/** Regular expression state. Upstream keeps PCRE2 handles; this uses the host EReg. **/
+// port: regular expression state. Upstream keeps PCRE2 handles; this uses the host EReg.
 class Vregex {
 	public final r:EReg;
 	public final rRexString:Vstring;
 	public final rGlobal:Bool;
 	public var rString:String = "";
-	// `r_groups`: snapshots of the last match (empty when no match was made)
+	// port: `r_groups`: snapshots of the last match (empty when no match was made)
 	public var rGroups:Array<VregexMatch> = [];
 
 	public function new(r:EReg, rRexString:Vstring, rGlobal:Bool) {
@@ -167,11 +161,9 @@ class Vregex {
 	}
 }
 
-/**
-	One PCRE2 `substrings` value: native offsets of group 0 and the group
-	substrings (`null` for unset groups), taken from the host EReg right after
-	the match so that later host matches do not affect it.
-**/
+// port: one PCRE2 `substrings` value: native offsets of group 0 and the group
+// substrings (`null` for unset groups), taken from the host EReg right after
+// the match so that later host matches do not affect it.
 class VregexMatch {
 	public final first:Int;
 	public final last:Int;
@@ -184,7 +176,7 @@ class VregexMatch {
 	}
 }
 
-/** zlib stream for haxe.zip.Compress/Uncompress (state kept by the std natives). **/
+// port: zlib stream for haxe.zip.Compress/Uncompress (state kept by the std natives).
 class Vzlib {
 	public var z:Dynamic;
 	public var zFlush:Int;
@@ -202,11 +194,9 @@ enum VprototypeKind {
 	PObject;
 }
 
-/**
-	libuv handles (eval.luv). The payloads are host objects (see `EvalLuv`):
-	integer ids of the host's libuv objects, `EvalLuv.LuvBuffer` for buffers,
-	Bytes for socket addresses, `EvalLuv.LuvRedirection` for redirections.
-**/
+// port: libuv handles (eval.luv). The payloads are host objects (see `EvalLuv`):
+// integer ids of the host's libuv objects, `EvalLuv.LuvBuffer` for buffers,
+// Bytes for socket addresses, `EvalLuv.LuvRedirection` for redirections.
 enum Vhandle {
 	HLoop(h:Dynamic);
 	HIdle(h:Dynamic);
@@ -295,8 +285,10 @@ class Vprototype {
 	public final pinstanceFields:Array<Value>;
 	// Map from hashed name to field offset (in pinstanceFields).
 	public final pinstanceNames:GlobalsIntMap<Int>;
-	// The parent prototype in case of inheritance (static inheritance too, for Type.getSuperClass).
+	// The parent prototype in case of inheritance. Static inheritance is reflected here
+	// as well because that information is requires for Type.getSuperClass.
 	public final pparent:Null<Vprototype>;
+	// The [vprototype_kind].
 	public final pkind:VprototypeKind;
 	// The value of this prototype, i.e. VPrototype(this).
 	public var pvalue:Value;
@@ -341,7 +333,8 @@ enum VinstanceKind {
 	ITypeDecl(m:core.TType.ModuleType);
 	ILazyType(l:core.TType.TLazy, f:Void->Value);
 	IRef(o:Dynamic);
-	// SSL (contexts are host handles: hxc.NativeSsl on the hxc host)
+	// SSL
+	// port: contexts are host handles (hxc.NativeSsl on the hxc host)
 	IMbedtlsConfig(c:Dynamic);
 	IMbedtlsCtrDrbg(c:Dynamic);
 	IMbedtlsEntropy(c:Dynamic);
@@ -357,8 +350,10 @@ enum VinstanceKind {
 class Vinstance {
 	// The fields of this instance.
 	public final ifields:Array<Value>;
-	// The prototype of this instance. Field offsets for ifields are in iproto.pinstanceNames.
+	// The prototype of this instance. Field offsets for ifields can be found using
+	// iproto.pinstance_names.
 	public final iproto:Vprototype;
+	// The [vinstance_kind].
 	public var ikind:VinstanceKind;
 
 	public function new(ifields:Array<Value>, iproto:Vprototype, ikind:VinstanceKind) {
@@ -392,7 +387,7 @@ class VenumValue {
 	}
 }
 
-// All run on host threads. `finished` is released when the thread's function returns;
+// port: all run on host threads. `finished` is released when the thread's function returns;
 // the host has no Thread.join (deviation: upstream joins the OCaml thread/domain).
 // `LuvThread`: an eval.luv thread or thread pool worker (EvalLuv.hx).
 enum VthreadMode {
@@ -436,11 +431,11 @@ class Vcondition {
 	public function new() {}
 }
 
-/** Reentrant mutex owned by a thread id (DomainMutex upstream). **/
+// port: a reentrant mutex owned by a thread id.
 class DomainMutex {
 	final dmutex = new sys.thread.Mutex();
-	var downer = -1;
-	var ddepth = 0;
+	var downer = -1; // owner domain_id, or -1 if unlocked
+	var ddepth = 0; // reentrant depth, only accessed by owner
 
 	public function new() {}
 
@@ -478,7 +473,7 @@ class DomainMutex {
 class EvalValueTools {
 	public static function vstringEqual(s1:Vstring, s2:Vstring):Bool return s1 == s2 || s1.sstring == s2.sstring;
 
-	/** `same_handle`: the host objects compare physically (ids by value). **/
+	// port: the host objects compare physically (ids by value).
 	public static function sameHandle(h1:Vhandle, h2:Vhandle):Bool {
 		return switch [h1, h2] {
 			case [HLoop(h1), HLoop(h2)] | [HIdle(h1), HIdle(h2)] | [HTimer(h1), HTimer(h2)] | [HAsync(h1), HAsync(h2)] |
@@ -489,7 +484,7 @@ class EvalValueTools {
 				[HThreadPoolRequest(h1), HThreadPoolRequest(h2)] | [HFileModeNumeric(h1), HFileModeNumeric(h2)] |
 				[HFsEvent(h1), HFsEvent(h2)] | [HOnce(h1), HOnce(h2)] | [HMutex(h1), HMutex(h2)] | [HRwLock(h1), HRwLock(h2)] |
 				[HSemaphore(h1), HSemaphore(h2)] | [HCondition(h1), HCondition(h2)] | [HBarrier(h1), HBarrier(h2)] |
-				[HFsPoll(h1), HFsPoll(h2)] | [HPrepare(h1), HPrepare(h2)] | [HCheck(h1), HCheck(h2)] | [HThread(h1), HThread(h2)]: // Luv.Thread.equal: one EvalLuv.LuvThread per host thread
+				[HFsPoll(h1), HFsPoll(h2)] | [HPrepare(h1), HPrepare(h2)] | [HCheck(h1), HCheck(h2)] | [HThread(h1), HThread(h2)]: // port: Luv.Thread.equal: one EvalLuv.LuvThread per host thread
 				h1 == h2;
 			case _: false;
 		}
@@ -516,14 +511,14 @@ class EvalValueTools {
 			case [VHandle(h1), VHandle(h2)]: sameHandle(h1, h2);
 			case [VLazy(f1), _]: equals(f1.force(), b);
 			case [_, VLazy(f2)]: equals(a, f2.force());
-			// physical equality on the remaining values (immediates and boxed int64s)
+			// port: upstream's `a == b` (physical) on the remaining values; Int64s compare by value here
 			case [VInt64(a), VInt64(b)]: a == b;
 			case [VUInt64(a), VUInt64(b)]: a == b;
 			case _: false;
 		}
 	}
 
-	/** `ValueHashtbl`: Hashtbl.Make with `equals` and a constant hash. **/
+	// port: `ValueHashtbl`: Hashtbl.Make with `equals` and a constant hash.
 	public static function createValueHashtbl<V>():OcamlHashtbl<Value, V> return new OcamlHashtbl(_ -> 0, equals, 0);
 
 	public static final vnull = VNull;
@@ -544,7 +539,7 @@ class EvalValueTools {
 
 	public static inline function vobject(o:Vobject):Value return VObject(o);
 
-	// Small ints are shared: values are immutable and identity is not observable,
+	// port: small ints are shared: values are immutable and identity is not observable,
 	// and HashLink allocations cost more than OCaml's (deviation: upstream boxes each).
 	static final smallInts:Array<Value> = [for (i in -128...1024) VInt32(i)];
 

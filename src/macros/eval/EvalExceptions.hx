@@ -9,15 +9,11 @@ import macros.eval.EvalValue;
 import macros.eval.EvalContext;
 import macros.eval.EvalHash;
 
-/**
-	haxe/src/macro/eval/evalExceptions.ml.
-
-	Deviations:
-	- `catch_exceptions ctx ?final f p` is `catchExceptions(ctx, f, p, ?finalFn)`
-	  and returns a `haxe.ds.Option` (upstream `option`).
-	- OCaml's `Stack_overflow` is recognised as a host exception whose string
-	  form is "Stack overflow" (what HashLink and Eval throw).
-**/
+// port: deviations:
+// - `catch_exceptions ctx ?final f p` is `catchExceptions(ctx, f, p, ?finalFn)`
+//   and returns a `haxe.ds.Option` (upstream `option`).
+// - OCaml's `Stack_overflow` is recognised as a host exception whose string
+//   form is "Stack overflow" (what HashLink and Eval throw).
 class Break extends haxe.Exception {
 	public static final instance = new Break();
 
@@ -109,7 +105,7 @@ class EvalExceptions {
 		}
 	}
 
-	/** Upstream's `ctx` argument is the eval (thread) state. **/
+	// port: upstream's `ctx` argument is the eval (thread) state.
 	public static function buildExceptionStack(ctx:Eval, env:Env):Void {
 		var eval = env.envEval;
 		function loop(acc:Array<Env>, env2:Env):Array<Env> {
@@ -171,7 +167,7 @@ class EvalExceptions {
 		} catch (e:RunTimeException) {
 			var v = e.value, evalStack = e.envs, p2 = e.pos;
 			eval.caughtException = VNull;
-			// Restored before the stack is built: frames are not popped during unwinding
+			// port: restored before the stack is built: frames are not popped during unwinding
 			// (EvalEmitter.createFunction), upstream's finally popped them.
 			eval.env = env;
 			if (env != null) buildExceptionStack(eval, env);
@@ -280,7 +276,7 @@ class EvalExceptions {
 				} else {
 					p = if (isNullPos(p2)) p else p2;
 				}
-				// List.fold_left consing (position, count): built in order here, then reversed
+				// port: List.fold_left consing (position, count): built in order here, then reversed
 				var counted:Array<{pos:Pos, n:Int}> = [];
 				for (p in stack) {
 					if (counted.length > 0 && posEq(counted[counted.length - 1].pos, p))

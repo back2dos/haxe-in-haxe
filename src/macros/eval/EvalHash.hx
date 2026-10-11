@@ -2,12 +2,10 @@ package macros.eval;
 
 import haxe.io.Bytes;
 
-/**
-	haxe/src/macro/eval/evalHash.ml. `hash` is OCaml's `Hashtbl.hash` on the
-	string's UTF-8 bytes (caml_hash: MurmurHash3 mixing, then masked to 30 bits),
-	so hashed names, and every ordering derived from them (object field order,
-	`Reflect.fields`), match the reference compiler.
-**/
+// port: `hash` is OCaml's `Hashtbl.hash` on the
+// string's UTF-8 bytes (caml_hash: MurmurHash3 mixing, then masked to 30 bits),
+// so hashed names, and every ordering derived from them (object field order,
+// `Reflect.fields`), match the reference compiler.
 class EvalHash {
 	static final reverseMap:Map<Int, String> = new Map();
 
@@ -25,7 +23,7 @@ class EvalHash {
 
 	public static function pathHash(path:core.Globals.GlobalTypePath):Int return hash(core.Globals.sTypePath(path));
 
-	// 32-bit multiplication on every target (JS numbers lose the low bits)
+	// port: 32-bit multiplication on every target (JS numbers lose the low bits)
 	static inline function mul32(a:Int, b:Int):Int return ((a & 0xFFFF) * b + ((((a >>> 16) * b) & 0xFFFF) << 16)) | 0;
 
 	static inline function rotl32(x:Int, n:Int):Int return (x << n) | (x >>> (32 - n));
@@ -62,7 +60,7 @@ class EvalHash {
 			case _:
 		}
 		h ^= len;
-		// FINAL_MIX
+		// port: FINAL_MIX of the OCaml runtime's hash.c
 		h ^= h >>> 16;
 		h = mul32(h, 0x85ebca6b);
 		h ^= h >>> 13;
@@ -258,5 +256,5 @@ class EvalHash {
 	public static final key_haxe_atomic_AtomicBool = hash("haxe.atomic.AtomicBool");
 	public static final key_haxe_atomic_AtomicInt = hash("haxe.atomic.AtomicInt");
 	public static final key_haxe_atomic_AtomicObject = hash("haxe.atomic.AtomicObject");
-	public static final key_eval_integers_Int64 = hash("eval.integers._Int64.Int64_Impl_");
+	public static final key_eval_integers_Int64 = hash("eval.integers._Int64.Int64_Impl_"); // TODO: wonky...
 }

@@ -18,20 +18,16 @@ import macros.eval.EvalJitContext;
 
 using macros.eval.EvalValue.EvalValueTools;
 
-/**
-	haxe/src/macro/eval/evalJit.ml.
-
-	Deviations:
-	- Upstream shadows `jit_tfunction` and `jit_expr`: the recursive JIT functions
-	  over a `JitContext` are `jitTfunctionRec`/`jitExprRec`; the context-level
-	  entry points keep the names `jitTfunction`/`jitExpr`. `jitExpr` returns
-	  `{jit, f}` for upstream's `(jit, f)` pair.
-	- The debugger is not ported: there is no debug socket, so the
-	  `EvalDebug.debug_loop` wrapping at the end of `jit_expr` is omitted (it only
-	  runs when a debug socket is connected). Branches testing
-	  `ctx.debug.supportDebugger` are translated but never taken.
-	- `ctx.overrides` is keyed by `"<dot path>.<field>"`.
-**/
+// port: deviations:
+// - Upstream shadows `jit_tfunction` and `jit_expr`: the recursive JIT functions
+//   over a `JitContext` are `jitTfunctionRec`/`jitExprRec`; the context-level
+//   entry points keep the names `jitTfunction`/`jitExpr`. `jitExpr` returns
+//   `{jit, f}` for upstream's `(jit, f)` pair.
+// - The debugger is not ported: there is no debug socket, so the
+//   `EvalDebug.debug_loop` wrapping at the end of `jit_expr` is omitted (it only
+//   runs when a debug socket is connected). Branches testing
+//   `ctx.debug.supportDebugger` are translated but never taken.
+// - `ctx.overrides` is keyed by `"<dot path>.<field>"`.
 class EvalJit {
 	// Helper
 	public static function ropePath(t:T):String {
@@ -55,7 +51,7 @@ class EvalJit {
 		}
 	}
 
-	/** OCaml `float_of_string` on a lexed float literal. **/
+	// port: OCaml `float_of_string` on a lexed float literal.
 	static function floatOfString(s:String):Float {
 		return core.ds.OcamlFloat.ofString(s);
 	}
@@ -91,7 +87,7 @@ class EvalJit {
 		return true;
 	}
 
-	/** `PMap.foldi (fun k _ acc -> (hash k,()) :: acc) an.a_fields []` (keys only). **/
+	// port: `PMap.foldi (fun k _ acc -> (hash k,()) :: acc) an.a_fields []` (keys only).
 	static function anonFieldKeys(an:TAnon):Array<Int> {
 		return core.ds.PMap.foldi((k, _, acc:Array<Int>) -> {
 			acc.unshift(EvalHash.hash(k));
@@ -296,7 +292,7 @@ class EvalJit {
 						acc.unshift({i: c.slot, vid: vid, declared: c.declared});
 						acc;
 					}, []);
-					// List.sort is stable; capture slots are distinct
+					// port: List.sort is stable; capture slots are distinct
 					haxe.ds.ArraySort.sort(captures, (a, b) -> a.i < b.i ? -1 : (a.i > b.i ? 1 : 0));
 					// Check if the out-of-scope var is in the outer scope because otherwise we have to promote outwards.
 					for (v in jitClosure.capturesOutsideScope) EvalJitContext.getCaptureSlot(jit, v);
@@ -320,7 +316,7 @@ class EvalJit {
 					var exec = jitExprRec(jit, false, sw.switchSubject);
 					var h:GlobalsIntMap<Emitter> = GlobalsIntMap.empty();
 					var max = 0;
-					var min = 0x7FFFFFFF; // max_int: upstream's 63-bit int, larger than any case value
+					var min = 0x7FFFFFFF; // port: max_int: upstream's 63-bit int, larger than any case value
 					var minUnset = true;
 					for (c in sw.switchCases) {
 						var el = c.casePatterns, ce = c.caseExpr;
@@ -343,10 +339,10 @@ class EvalJit {
 					}
 					var execDef = jitDefault(jit, ret, sw.switchDefault);
 					if (minUnset) {
-						// upstream: min = max_int, so l = max - max_int + 1 <= 0
+						// port: upstream: min = max_int, so l = max - max_int + 1 <= 0
 						return EvalEmitter.emitIntSwitchMap(exec, h, execDef, sw.switchSubject.epos);
 					}
-					// 64-bit arithmetic as upstream (no 32-bit overflow)
+					// port: 64-bit arithmetic as upstream (no 32-bit overflow)
 					var l:Float = (max : Float) - (min : Float) + 1;
 					if (l > 0 && l < 256) {
 						var li = Std.int(l);
@@ -359,7 +355,20 @@ class EvalJit {
 						return EvalEmitter.emitIntSwitchArray(-min, exec, cases, execDef, sw.switchSubject.epos);
 					} else
 						return EvalEmitter.emitIntSwitchMap(exec, h, execDef, sw.switchSubject.epos);
-				/* | TSwitch(e1,cases,def) when is_string e1.etype -> (commented out upstream: emit_string_switch_map) */
+				/* | TSwitch(e1,cases,def) when is_string e1.etype ->
+					let exec = jit_expr jit false e1 in
+					let h = ref PMap.empty in
+					List.iter (fun (el,e) ->
+						push_scope jit e.epos;
+						let exec = jit_expr jit return e in
+						List.iter (fun e -> match e.eexpr with
+							| TConst (TString s) -> h := PMap.add s exec !h;
+							| _ -> die "" __LOC__
+						) el;
+						pop_scope jit;
+					) cases;
+					let exec_def = jit_default jit return def in
+					emit_string_switch_map exec !h exec_def e1.epos */
 				case TSwitch(sw):
 					var exec = jitExprRec(jit, false, sw.switchSubject);
 					var execs = [];
@@ -585,17 +594,17 @@ class EvalJit {
 				case TIdent(s):
 					return core.Error.raiseTypingError("Unknown identifier: " + s, e.epos);
 				case TCast(_, _):
-					// unreachable: TCast(_, Some _) and TCast(_, None) are handled above
+					// port: unreachable: TCast(_, Some _) and TCast(_, None) are handled above
 					return Globals.die("", "evalJit.ml:TCast");
 			}
 		}
 		var f = loop(e);
-		// Upstream wraps [f] in `EvalDebug.debug_loop` when a debug socket is
+		// port: upstream wraps [f] in `EvalDebug.debug_loop` when a debug socket is
 		// connected. The debugger is not supported by haxe-in-haxe.
 		return f;
 	}
 
-	/** Groups the block's emitters into `emit_seq8`/`emit_seq4`/`emit_seq2` until one remains. **/
+	// port: groups the block's emitters into `emit_seq8`/`emit_seq4`/`emit_seq2` until one remains.
 	static function step(el:Array<Emitter>):Emitter {
 		var a = el;
 		var i = a.length - 1;
@@ -626,7 +635,7 @@ class EvalJit {
 		}
 	}
 
-	/** The `TCall` case of `jit_expr`. **/
+	// port: the `TCall` case of `jit_expr`.
 	static function jitCall(jit:JitContext, ctx:Context, e:TExpr, e1:TExpr, el:Array<TExpr>):Emitter {
 		switch e1.eexpr {
 			case TField({eexpr: TConst(TSuper), epos: pv}, FInstance(c, _, cf)):
@@ -750,7 +759,7 @@ class EvalJit {
 			}
 		];
 		if (!isStatic) fl.unshift(EvalEmitter.executeSetLocal(0));
-		// List.fold_right over the arguments: the last argument's default is concatenated first.
+		// port: List.fold_right over the arguments: the last argument's default is concatenated first.
 		var e = tf.tfExpr;
 		var k = tf.tfArgs.length - 1;
 		while (k >= 0) {

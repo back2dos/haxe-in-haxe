@@ -5,16 +5,14 @@ import haxe.io.Bytes;
 import sys.net.Host;
 import sys.net.Socket;
 
-/**
-	HashLink host for the Eval socket natives (EvalStdLibB.hx StdSocket): the
-	interface of the hxc target's `hxc.NativeNet` (backend/std-hxc), which
-	stands for OCaml's Unix module, over the host's sys.net.Socket.
-
-	Host differences: sockets are numbered handles into a table rather than
-	file descriptors, and the host API reports failures as exceptions whose
-	text replaces `Unix.error_message` (`strerror` returns the last one).
-	Addresses are host-order IPv4 ints, as in `hxc.NativeNet`.
-**/
+// port: HashLink host for the Eval socket natives (EvalStdLibB.hx StdSocket): the
+// interface of the hxc target's `hxc.NativeNet` (backend/std-hxc), which
+// stands for OCaml's Unix module, over the host's sys.net.Socket.
+//
+// Host differences: sockets are numbered handles into a table rather than
+// file descriptors, and the host API reports failures as exceptions whose
+// text replaces `Unix.error_message` (`strerror` returns the last one).
+// Addresses are host-order IPv4 ints, as in `hxc.NativeNet`.
 class EvalHostNet {
 	static final sockets = new Map<Int, Socket>();
 	static var nextHandle = 3;
@@ -115,7 +113,7 @@ class EvalHostNet {
 		return try get(h).output.writeBytes(b, pos, len) catch (e:Dynamic) fail(e);
 	}
 
-	/** Unix.select: sets the entries of handles that are not ready to -1. **/
+	// port: Unix.select: sets the entries of handles that are not ready to -1.
 	public static function select(read:Array<Int>, write:Array<Int>, others:Array<Int>, timeout:Float):Int {
 		return try {
 			var r = Socket.select([for (h in read) get(h)], [for (h in write) get(h)], [for (h in others) get(h)],

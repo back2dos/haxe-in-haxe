@@ -9,22 +9,18 @@ import macros.eval.EvalExceptions;
 
 using macros.eval.EvalValue.EvalValueTools;
 
-/**
-	haxe/src/macro/eval/evalSsl.ml.
-
-	Upstream calls the OCaml mbedtls bindings (haxe/libs/mbedtls). On the hxc
-	host (backend/) they are `hxc.NativeSsl` (backend/rt/rt_ssl.c); on other
-	hosts the constructors and natives fail with "mbedtls (...) is not supported
-	by haxe-in-haxe".
-
-	Deviations:
-	- `mbedtls_ssl_set_bio` takes the socket descriptor: the BIO calls send/recv
-	  in C instead of calling back `Unix.send`/`Unix.recv`. A failing send/recv
-	  makes the BIO return an mbedtls error and the native then raises the
-	  `Unix_error` as `catch_unix_error` would format it (upstream lets the OCaml
-	  exception escape through mbedtls).
-	- Field lists are `{name, value}` pairs; `init_fields` is passed as a function.
-**/
+// port: upstream calls the OCaml mbedtls bindings (haxe/libs/mbedtls). On the hxc
+// host (backend/) they are `hxc.NativeSsl` (backend/rt/rt_ssl.c); on other
+// hosts the constructors and natives fail with "mbedtls (...) is not supported
+// by haxe-in-haxe".
+//
+// Deviations:
+// - `mbedtls_ssl_set_bio` takes the socket descriptor: the BIO calls send/recv
+//   in C instead of calling back `Unix.send`/`Unix.recv`. A failing send/recv
+//   makes the BIO return an mbedtls error and the native then raises the
+//   `Unix_error` as `catch_unix_error` would format it (upstream lets the OCaml
+//   exception escape through mbedtls).
+// - Field lists are `{name, value}` pairs; `init_fields` is passed as a function.
 class EvalSsl {
 	static function asX509Crt(vthis:Value):Dynamic {
 		return switch vthis {
@@ -120,7 +116,7 @@ class EvalSsl {
 	}
 
 	#if (target.name == "hxc")
-	/** The `Unix_error` of a failed BIO send/recv (see the module comment). **/
+	// port: the `Unix_error` of a failed BIO send/recv (see the module comment).
 	static function checkBio(ssl:Dynamic, r:Int):Int {
 		var err = hxc.NativeSsl.bioError(ssl);
 		if (err != 0)
@@ -279,7 +275,7 @@ class EvalSsl {
 			{
 				name: "seed",
 				value: EvalEncode.vifun2((self, entropy, custom) -> {
-					// the custom string is ignored by the bindings (mbedtls_stubs.c)
+					// port: the custom string is ignored by the bindings (mbedtls_stubs.c)
 					var ctr = asCtrDrbg(self);
 					VInt32(hxc.NativeSsl.ctrDrbgSeed(ctr, asEntropy(entropy)));
 				})
@@ -384,7 +380,7 @@ class EvalSsl {
 			},
 		]);
 		#end
-		// hx_get_ssl_*_flags (libs/mbedtls/mbedtls_stubs.c): the values of mbedtls/ssl.h.
+		// port: hx_get_ssl_*_flags (libs/mbedtls/mbedtls_stubs.c): the values of mbedtls/ssl.h.
 		// They are plain data, registered on every host.
 		function statics(a:Array<{name:String, value:Int}>) return [for (f in a) {name: f.name, value: f.value.vint()}];
 		initFields({pack: ["mbedtls"], name: "SslAuthmode"}, statics([

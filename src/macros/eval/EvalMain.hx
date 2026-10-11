@@ -16,23 +16,21 @@ import macros.eval.EvalHash;
 
 using macros.eval.EvalValue.EvalValueTools;
 
-/**
-	haxe/src/macro/eval/evalMain.ml (and eval.ml, which only includes modules).
-
-	Deviations:
-	- The debugger is not ported: `support_debugger` is always false, and
-	  `-D eval-debugger` fails with "the Eval debugger is not supported by
-	  haxe-in-haxe" instead of starting a debug socket.
-	- `Luv.Error.set_on_unhandled_exception` sets `EvalLuv.exceptionHandler`
-	  (libuv works on the hxc host only, see `EvalLuv`).
-	- The debug record shared between contexts (`GlobalState.debug`) is
-	  `EvalMain.globalDebug`.
-	- `valueSignature` returns the MD5 digest as a lowercase hex string
-	  (the port keeps digests hexadecimal; upstream callers apply
-	  `Digest.to_hex` to the raw digest).
-	- The thread info is created after the context record, because the
-	  thread id counter (`next_thread_id`) is a field of the context here.
-**/
+// port: also covers eval.ml, which only includes modules.
+//
+// Deviations:
+// - The debugger is not ported: `support_debugger` is always false, and
+//   `-D eval-debugger` fails with "the Eval debugger is not supported by
+//   haxe-in-haxe" instead of starting a debug socket.
+// - `Luv.Error.set_on_unhandled_exception` sets `EvalLuv.exceptionHandler`
+//   (libuv works on the hxc host only, see `EvalLuv`).
+// - The debug record shared between contexts (`GlobalState.debug`) is
+//   `EvalMain.globalDebug`.
+// - `valueSignature` returns the MD5 digest as a lowercase hex string
+//   (the port keeps digests hexadecimal; upstream callers apply
+//   `Digest.to_hex` to the raw digest).
+// - The thread info is created after the context record, because the
+//   thread id counter (`next_thread_id`) is a field of the context here.
 class EvalMain {
 	static var globalDebug:Null<Debug> = null;
 
@@ -40,7 +38,7 @@ class EvalMain {
 		return new Failure("the Eval debugger is not supported by haxe-in-haxe");
 	}
 
-	// OCaml int_of_string
+	// port: OCaml int_of_string
 	static function intOfString(s:String):Int {
 		if (!~/^[-+]?(0[xX][0-9a-fA-F_]+|[0-9][0-9_]*)$/.match(s)) throw new Failure("int_of_string");
 		var i = Std.parseInt(StringTools.replace(s, "_", ""));
@@ -65,7 +63,7 @@ class EvalMain {
 			case null:
 				var supportDebugger = context.Common.defined(com, core.Define.EvalDebugger);
 				if (supportDebugger) {
-					// The debug socket (EvalDebugSocket) is not ported.
+					// port: the debug socket (EvalDebugSocket) is not ported.
 					throw debuggerNotSupported();
 				}
 				var debug2 = new Debug();
@@ -104,6 +102,8 @@ class EvalMain {
 		}
 		// If no user-defined exception handler is set then follow libuv behavior.
 		// Which is printing an error to stderr and exiting with code 2.
+		// Use get_ctx() to access the current context dynamically instead of capturing
+		// `com` directly, so the compilation context can be garbage collected between requests.
 		EvalLuv.exceptionHandler = ex -> {
 			if (Std.isOfType(ex, macros.eval.EvalTypes.SysExit)) {
 				throw ex;
@@ -159,7 +159,7 @@ class EvalMain {
 		}
 	}
 
-	// Unsigned.UInt64.to_string
+	// port: Unsigned.UInt64.to_string
 	static function uint64ToString(u:haxe.Int64):String {
 		if (u.high >= 0) return haxe.Int64.toStr(u);
 		var q = haxe.Int64.div(haxe.Int64.ushr(u, 1), 5);
@@ -183,7 +183,7 @@ class EvalMain {
 			} else {
 				scache.set(s, scacheLength++);
 				addc('y');
-				// EvalStdLib.StdStringTools.url_encode
+				// port: EvalStdLib.StdStringTools.url_encode
 				var s = core.StringHelper.urlEncodeString(s);
 				add(Std.string(s.length));
 				addc(':');
@@ -206,7 +206,7 @@ class EvalMain {
 		}
 		var customCount = 0;
 		// Custom format: enumerate custom entities as name_char0, name_char1 etc.
-		// (upstream caches the value passed to value_signature here, not the current one)
+		// port: upstream caches the value passed to value_signature here, not the current one
 		inline function customName(nameChar:String) {
 			cacheValue(v, () -> {
 				addc('F');
@@ -431,7 +431,7 @@ class EvalMain {
 								EvalMisc.setInstanceField(i, EvalHash.key_native_stack, stack);
 						}
 					case _:
-						// built by consing upstream: newest first
+						// port: built by consing upstream: newest first
 						var stack:Array<Value> = [];
 						var subs = err.errSub.copy();
 						subs.reverse();
@@ -452,10 +452,11 @@ class EvalMain {
 		}
 	}
 
-	// Ast.efield
+	// port: Ast.efield
 	static inline function efield(e:Expr, s:String):ExprDef return EField(e, s, EFNormal);
 
-	// MacroApi.haxe_float: convert float value to haxe expression, handling inf/-inf/nan
+	// port: MacroApi.haxe_float
+	// convert float value to haxe expression, handling inf/-inf/nan
 	static function haxeFloat(f:Float, p:Pos):Expr {
 		var std:Expr = {expr: EConst(Ident("std")), pos: p};
 		var math:Expr = {expr: efield(std, "Math"), pos: p};
@@ -480,7 +481,7 @@ class EvalMain {
 			var mt = EvalContext.getCtx().typeCache.find(i);
 			inline function makePath(t:ModuleType):Expr {
 				function loop(l:Array<String>, idx:Int):Expr {
-					// `l` is reversed: l[idx] is the head
+					// port: `l` is reversed: l[idx] is the head
 					return switch l.length - idx {
 						case 0: Globals.die("", "evalMain.ml value_to_expr");
 						case 1: {expr: EConst(Ident(l[idx])), pos: p};
@@ -573,7 +574,7 @@ class EvalMain {
 		}
 	}
 
-	/** `encode_obj = encode_obj_s` **/
+	// port: `encode_obj = encode_obj_s`
 	public static function encodeObj(l:Array<{name:String, value:Value}>):Value return EvalEncode.encodeObjS(l);
 
 	public static function field(v:Value, f:String):Value return EvalField.field(v, EvalHash.hash(f));
@@ -585,7 +586,7 @@ class EvalMain {
 	public static function evalExpr(ctx:Context,
 			e:TExpr):Null<Value> return if (ctx.hadError) null else EvalPrototype.evalExpr(ctx, EKEntrypoint, e);
 
-	/** Returns the errors as upstream's list: the most recent first. **/
+	// port: returns the errors as upstream's list: the most recent first.
 	public static function handleDecodingError(f:String->Void, v:Value, t:T):Array<{msg:String, line:Int}> {
 		var line = 1;
 		var errors:Array<{msg:String, line:Int}> = [];
@@ -698,7 +699,7 @@ class EvalMain {
 	public static function getApiCallPos():Pos {
 		var eval = EvalContext.getEval(EvalContext.getCtx());
 		var env = eval.env;
-		if (env == null) throw new Failure("Option.get"); // No_value upstream
+		if (env == null) throw new Failure("Option.get"); // port: No_value upstream
 		var env = switch env.envParent {
 			case null: env;
 			case env: env;

@@ -6,12 +6,8 @@ import macros.eval.EvalValue;
 import macros.eval.EvalContext;
 import macros.eval.EvalString;
 
-/**
-	haxe/src/macro/eval/evalPrinting.ml.
-
-	Floats are printed with `Numeric.floatRepres` (numeric.ml `float_repres`,
-	i.e. C's %.12g/%.15g/%.18g).
-**/
+// port: floats are printed with `Numeric.floatRepres` (numeric.ml `float_repres`,
+// i.e. C's %.12g/%.15g/%.18g).
 class EvalPrinting {
 	public static final rbropen = EvalString.createAscii("{");
 	public static final rbrclose = EvalString.createAscii("}");
@@ -37,7 +33,7 @@ class EvalPrinting {
 		return neg ? "-" + s : s;
 	}
 
-	/** `Unix.localtime` of seconds since the epoch, printed as %.4d-%.2d-%.2d %.2d:%.2d:%.2d. **/
+	// port: `Unix.localtime` of seconds since the epoch, printed as %.4d-%.2d-%.2d %.2d:%.2d:%.2d.
 	public static function sDate(d:Float):Vstring {
 		var t = Date.fromTime(d * 1000.);
 		return EvalString.createAscii(pad(t.getFullYear(), 4) + "-" + pad(t.getMonth() + 1, 2) + "-" + pad(t.getDate(), 2) + " "
@@ -145,7 +141,7 @@ class EvalPrinting {
 		}
 	}
 
-	/** `s_value ?(indent_level=0) depth v` **/
+	// port: `s_value ?(indent_level=0) depth v`
 	public static function sValue(depth:Int, v:Value, indentLevel:Int = 0):Vstring {
 		inline function callToString():Vstring {
 			var vf = EvalField.fieldRaise(v, EvalHash.key_toString);

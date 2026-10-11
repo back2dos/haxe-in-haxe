@@ -8,18 +8,14 @@ import core.ds.NotFound;
 import core.ds.OcamlHashtbl;
 import macros.eval.EvalContext;
 
-/**
-	haxe/src/macro/eval/evalJitContext.ml.
-
-	Deviations:
-	- The scope stack is an array whose top is its last element (upstream: list
-	  head). `IntHashtbl.length scope.locals` counts every `add`, including
-	  repeated keys; `Scope.locals` is a `Map`, so the add count of each scope is
-	  kept in the parallel array `scopeSizes`.
-	- The debugger is not ported (`supportDebugger` stays false); the debug-only
-	  bookkeeping (`captureInfos`, `localIds`, `localInfos`) is still translated
-	  because it is plain data.
-**/
+// port: deviations:
+// - The scope stack is an array whose top is its last element (upstream: list
+//   head). `IntHashtbl.length scope.locals` counts every `add`, including
+//   repeated keys; `Scope.locals` is a `Map`, so the add count of each scope is
+//   kept in the parallel array `scopeSizes`.
+// - The debugger is not ported (`supportDebugger` stays false); the debug-only
+//   bookkeeping (`captureInfos`, `localIds`, `localInfos`) is still translated
+//   because it is plain data.
 enum Varacc {
 	Local(i:Int);
 	Env(i:Int);
@@ -33,9 +29,10 @@ enum Varacc {
 **/
 class JitContext {
 	public final ctx:Context;
-	// The scope stack (top = last element).
+	// The scope stack.
+	// port: top = last element
 	public var scopes:Array<Scope>;
-	// Number of `add`s into each scope's `locals` (IntHashtbl.length), parallel to `scopes`.
+	// port: number of `add`s into each scope's `locals` (IntHashtbl.length), parallel to `scopes`.
 	public var scopeSizes:Array<Int>;
 	// The captured variables declared in this context. Maps variable IDs to capture slots.
 	public var captures:OcamlHashtbl<Int, CaptureSlot>;
@@ -49,7 +46,8 @@ class JitContext {
 	public var hasNonfinalReturn:Bool;
 	// The name of capture variables. Maps local slots to variable names. Only filled in debug mode.
 	public var captureInfos:Map<Int, VarInfo>;
-	// Variables which are accessed but not declared in this scope (list order: newest first).
+	// Variables which are accessed but not declared in this scope.
+	// port: list order: newest first
 	public var capturesOutsideScope:Array<TVar>;
 
 	public function new(ctx:Context) {
@@ -66,7 +64,7 @@ class JitContext {
 	}
 }
 
-/** `(int * bool)`: capture slot and whether the variable is declared in this context. **/
+// port: `(int * bool)`: capture slot and whether the variable is declared in this context.
 class CaptureSlot {
 	public final slot:Int;
 	public final declared:Bool;
@@ -88,7 +86,8 @@ class EvalJitContext {
 	/** Creates a new context **/
 	public static function create(ctx:Context):JitContext return new JitContext(ctx);
 
-	/** Returns the number of locals in the top scope of [jit] (upstream: `num_locals scope`). **/
+	// port: takes the top scope of [jit] and reads its add count from `scopeSizes`.
+	/** Returns the number of locals in [scope]. **/
 	static inline function numLocalsOfTop(jit:JitContext):Int return jit.scopeSizes[jit.scopeSizes.length - 1];
 
 	/** Pushes a new scope onto context [jit]. **/

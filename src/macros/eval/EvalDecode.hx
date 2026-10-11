@@ -6,13 +6,9 @@ import macros.eval.EvalExceptions.EvalExceptions.unexpectedValue;
 
 using macros.eval.EvalValue.EvalValueTools;
 
-/**
-	haxe/src/macro/eval/evalDecode.ml.
-
-	Deviations: options are `Null<T>` (as elsewhere in the port); enum
-	decoders return `{index, args}`; `decode_int` of a float truncates to a
-	32-bit Int (upstream: OCaml `int_of_float`, 63 bits).
-**/
+// port: options are `Null<T>` (as elsewhere in the port); enum
+// decoders return `{index, args}`; `decode_int` of a float truncates to a
+// 32-bit Int (upstream: OCaml `int_of_float`, 63 bits).
 class EvalDecode {
 	public static function decodeObject(v:Value):Vobject {
 		return switch v.vresolve() {
@@ -98,10 +94,10 @@ class EvalDecode {
 		}
 	}
 
-	/** OCaml `Int32.of_float` / `int_of_float`: truncation toward zero. **/
+	// port: OCaml `Int32.of_float` / `int_of_float`: truncation toward zero.
 	static function truncFloat(f:Float):Int {
 		if (Math.isNaN(f) || f >= 2147483648.0 || f <= -2147483649.0) {
-			// out of range: wrap like the low 32 bits of a 64-bit conversion
+			// port: out of range: wrap like the low 32 bits of a 64-bit conversion
 			if (!Math.isFinite(f)) return 0;
 			var t = f < 0 ? Math.ceil(f) : Math.floor(f);
 			var m = t % 4294967296.0;

@@ -2,11 +2,7 @@ package macros.eval;
 
 import macros.eval.EvalValue;
 
-/**
-	haxe/src/macro/eval/evalDataApi.ml. The modules are classes with static
-	functions; `readerApi`/`writerApi` are the `DataReaderApi`/`DataWriterApi`
-	records that the functor applications in macroContext.ml take.
-**/
+// port: the modules are classes with static functions.
 class EvalReaderApi {
 	public static function readOptional(v:Value, f:Value->Void):Void {
 		switch v {

@@ -21,61 +21,56 @@ import hxc.NativeUv as Uv;
 
 using macros.eval.EvalValue.EvalValueTools;
 
-/**
-	haxe/src/macro/eval/evalLuv.ml.
-
-	Upstream calls the OCaml luv library (libuv bindings). On the hxc host
-	(backend/) libuv is reached through `hxc.NativeUv` (backend/rt/rt_uv.c),
-	and this module also carries the parts of luv that are OCaml code
-	(callback bookkeeping, result conversion, `Buffer`, the request life cycle
-	of `File`), following luv's sources. On other hosts, and in hxc builds
-	without libuv (-DHXC_NO_UV), every eval.luv native fails with "libuv
-	(eval.luv) is not supported by haxe-in-haxe", except `Thread`, `Once`,
-	`Mutex`, `RwLock`, `Semaphore`, `Condition` and `Barrier`, which need no
-	libuv here (see below).
-
-	Representation (see `Vhandle`): loops, handles, requests and directories
-	are integer ids of the host; threads, thread pool requests and
-	synchronization objects are the classes at the end of this module; files
-	are descriptors;
-	`Luv.Buffer.t` (a Bigarray) is `LuvBuffer`, a view on a Bytes, so `sub`
-	shares memory as upstream; socket addresses are Bytes holding a
-	`sockaddr_storage`; a process redirection is a `LuvRedirection`.
-
-	libuv runs callbacks inside `uv_run` only: `Loop.run` passes `dispatch` to
-	the host, which reports each event by handle or request id. As luv's
-	trampolines do, exceptions escaping a callback go to the unhandled
-	exception handler (`Luv.Error.set_on_unhandled_exception`, installed by
-	`EvalMain.create`).
-
-	Deviations:
-	- Threads (luv: libuv's OS threads, its thread pool and its
-	  synchronization primitives) are host threads (`sys.thread`), with the
-	  primitives written over host locks (`LuvThreadHandle`, `LuvThreadPool`,
-	  `LuvSync` below). On the hxc host these are green threads: no
-	  parallelism, and a thread only gives way where it blocks or allocates
-	  (backend/README.md). `ThreadPool.queueWork` runs the work on a pool
-	  thread (UV_THREADPOOL_SIZE of them, default 4), which signals an async
-	  handle of the loop, whose callback calls the after-work callback, as
-	  libuv does; `Request.cancel` cancels work no pool thread took yet.
-	  `Thread.create` ignores the stack size. Error results of the primitives
-	  are luv error indices directly.
-	- Memory of handles is released when their close completes; requests
-	  made by the natives are released when they complete; nothing else is
-	  finalized (upstream relies on the OCaml GC).
-	- Reads go through host memory: the data of a read is copied into the
-	  buffer `allocate` returned (luv reads into it directly).
-	- `Bigarray` bounds errors are `InvalidArgument`; `Buffer.blitToBytes` and
-	  `blitFromBytes` fail on out-of-range copies (upstream's memcpy does not
-	  check).
-**/
+// port: upstream calls the OCaml luv library (libuv bindings). On the hxc host
+// (backend/) libuv is reached through `hxc.NativeUv` (backend/rt/rt_uv.c),
+// and this module also carries the parts of luv that are OCaml code
+// (callback bookkeeping, result conversion, `Buffer`, the request life cycle
+// of `File`), following luv's sources. On other hosts, and in hxc builds
+// without libuv (-DHXC_NO_UV), every eval.luv native fails with "libuv
+// (eval.luv) is not supported by haxe-in-haxe", except `Thread`, `Once`,
+// `Mutex`, `RwLock`, `Semaphore`, `Condition` and `Barrier`, which need no
+// libuv here (see below).
+//
+// Representation (see `Vhandle`): loops, handles, requests and directories
+// are integer ids of the host; threads, thread pool requests and
+// synchronization objects are the classes at the end of this module; files
+// are descriptors;
+// `Luv.Buffer.t` (a Bigarray) is `LuvBuffer`, a view on a Bytes, so `sub`
+// shares memory as upstream; socket addresses are Bytes holding a
+// `sockaddr_storage`; a process redirection is a `LuvRedirection`.
+//
+// libuv runs callbacks inside `uv_run` only: `Loop.run` passes `dispatch` to
+// the host, which reports each event by handle or request id. As luv's
+// trampolines do, exceptions escaping a callback go to the unhandled
+// exception handler (`Luv.Error.set_on_unhandled_exception`, installed by
+// `EvalMain.create`).
+//
+// Deviations:
+// - Threads (luv: libuv's OS threads, its thread pool and its
+//   synchronization primitives) are host threads (`sys.thread`), with the
+//   primitives written over host locks (`LuvThreadHandle`, `LuvThreadPool`,
+//   `LuvSync` below); they run Eval code holding `EvalLock`.
+//   `ThreadPool.queueWork` runs the work on a pool
+//   thread (UV_THREADPOOL_SIZE of them, default 4), which signals an async
+//   handle of the loop, whose callback calls the after-work callback, as
+//   libuv does; `Request.cancel` cancels work no pool thread took yet.
+//   `Thread.create` ignores the stack size. Error results of the primitives
+//   are luv error indices directly.
+// - Memory of handles is released when their close completes; requests
+//   made by the natives are released when they complete; nothing else is
+//   finalized (upstream relies on the OCaml GC).
+// - Reads go through host memory: the data of a read is copied into the
+//   buffer `allocate` returned (luv reads into it directly).
+// - `Bigarray` bounds errors are `InvalidArgument`; `Buffer.blitToBytes` and
+//   `blitFromBytes` fail on out-of-range copies (upstream's memcpy does not
+//   check).
 class EvalLuv {
-	// ---- host access
+	// port: ---- host access
 	static function notSupported():Dynamic {
 		return EvalContext.excString("libuv (eval.luv) is not supported by haxe-in-haxe");
 	}
 
-	/** Whether eval.luv works on this host. **/
+	// port: whether eval.luv works on this host.
 	public static function available():Bool {
 		#if (target.name == "hxc")
 		return Uv.available();
@@ -84,7 +79,7 @@ class EvalLuv {
 		#end
 	}
 
-	// handle kinds and host events (rt_uv.c)
+	// port: handle kinds and host events (rt_uv.c)
 	static inline final HK_IDLE = 0;
 	static inline final HK_PREPARE = 1;
 	static inline final HK_CHECK = 2;
@@ -110,7 +105,7 @@ class EvalLuv {
 
 	static function i64():Int64 return Int64.make(Uv.i64Hi(), Uv.i64Lo());
 
-	// ---- luv's callback bookkeeping (Handle.set_reference, Request.set_callback)
+	// port: ---- luv's callback bookkeeping (Handle.set_reference, Request.set_callback)
 	static final handleCallbacks = new Map<Int, LuvHandleCallbacks>();
 	static final requestCallbacks = new Map<Int, Int->Void>();
 
@@ -123,7 +118,7 @@ class EvalLuv {
 		return c;
 	}
 
-	/** The host's event dispatcher, passed to `uv_run` (see the module comment). **/
+	// port: the host's event dispatcher, passed to `uv_run` (see the module comment).
 	static function dispatch(id:Int, event:Int, a:Int, b:Dynamic):Void {
 		switch event {
 			case EV_CLOSE:
@@ -153,7 +148,7 @@ class EvalLuv {
 		}
 	}
 
-	/** luv's `Error.catch_exceptions`. **/
+	// port: luv's `Error.catch_exceptions`.
 	static function catchExceptions<T>(f:T->Void, v:T):Void {
 		try {
 			f(v);
@@ -162,16 +157,14 @@ class EvalLuv {
 		}
 	}
 
-	/** `Luv.Error.set_on_unhandled_exception`: set by `EvalMain.create`, then by `UVError.setOnUnhandledException`. **/
+	// port: `Luv.Error.set_on_unhandled_exception`: set by `EvalMain.create`, then by `UVError.setOnUnhandledException`.
 	public static var exceptionHandler:Dynamic->Void = e -> throw e;
 
 	static function unhandledException(e:Dynamic):Void exceptionHandler(e);
 
-	/**
-		uv_run waits without the Eval lock (luv's `Loop.run` releases OCaml's
-		runtime lock) and its callbacks take it. A callback that activates the
-		lock (by starting a thread) holds it until it returns.
-	**/
+	// port: uv_run waits without the Eval lock (luv's `Loop.run` releases OCaml's
+	// runtime lock) and its callbacks take it. A callback that activates the
+	// lock (by starting a thread) holds it until it returns.
 	static function loopRun(loop:Int, mode:Int):Bool {
 		EvalLock.leave();
 		var r = try Uv.loopRun(loop, mode, lockedDispatch) catch (e:Dynamic) {
@@ -192,7 +185,7 @@ class EvalLuv {
 		EvalLock.leave();
 	}
 
-	// ---- encoders/decoders
+	// port: ---- encoders/decoders
 
 	public static function encodeUvError(code:Int):Value return Uv.errIndex(code).vint();
 
@@ -227,12 +220,12 @@ class EvalLuv {
 
 	static function error(code:Int):Value return EvalEncode.encodeEnumValue(EvalHash.key_eval_luv_Result, 1, [encodeUvError(code)], null);
 
-	/** `encode_result f` of a host result: a negative code is an error. **/
+	// port: `encode_result f` of a host result: a negative code is an error.
 	static function encodeResult(r:Int, f:Int->Value):Value return r < 0 ? error(r) : ok(f(r));
 
 	static function encodeUnitResult(r:Int):Value return r < 0 ? error(r) : ok(VNull);
 
-	/** `encode_callback`: the callback receiving one `Result`. **/
+	// port: `encode_callback`: the callback receiving one `Result`.
 	static function encodeCallback(vCallback:Value):Value->Void {
 		var cb = EvalMisc.prepareCallback(vCallback, 1);
 		return result -> cb([result]);
@@ -254,6 +247,9 @@ class EvalLuv {
 		return switch EvalDecode.decodeHandle(v) {
 			case HIdle(t) | HTimer(t) | HAsync(t) | HPipe(t) | HTcp(t) | HTty(t) | HUdp(t) | HSignal(t) | HProcess(t) | HFsEvent(t) |
 				HFsPoll(t) | HPrepare(t) | HCheck(t): t;
+			/* TODO
+				| HPoll t -> Handle.coerce t
+			 */
 			case _: EvalExceptions.unexpectedValue(v, "eval.luv.Handle");
 		}
 	}
@@ -319,37 +315,37 @@ class EvalLuv {
 
 	static function decodeUdpMembership(v:Value):Bool {
 		return switch EvalDecode.decodeInt(v) {
-			case 0: false; // LEAVE_GROUP
-			case 1: true; // JOIN_GROUP
+			case 0: false; // port: LEAVE_GROUP
+			case 1: true; // port: JOIN_GROUP
 			case _: EvalExceptions.unexpectedValue(v, "eval.luv.Udp.UdpMembership");
 		}
 	}
 
-	/** `Sockaddr.Socket_type.to_c` of `decode_socket_type`. **/
+	// port: `Sockaddr.Socket_type.to_c` of `decode_socket_type`.
 	static function decodeSocketType(v:Value):Int {
 		var e = EvalDecode.decodeEnum(v);
 		return switch [e.index, e.args] {
-			case [0, []]: Uv.constant(4, 0); // STREAM
-			case [1, []]: Uv.constant(4, 1); // DGRAM
-			case [2, []]: Uv.constant(4, 2); // RAW
-			case [3, [v]]: EvalDecode.decodeInt(v); // OTHER
+			case [0, []]: Uv.constant(4, 0); // port: STREAM
+			case [1, []]: Uv.constant(4, 1); // port: DGRAM
+			case [2, []]: Uv.constant(4, 2); // port: RAW
+			case [3, [v]]: EvalDecode.decodeInt(v); // port: OTHER
 			case _: EvalExceptions.unexpectedValue(v, "eval.luv.SockAddr.SocketType");
 		}
 	}
 
-	/** `Sockaddr.Address_family.to_c` of `decode_address_family`. **/
+	// port: `Sockaddr.Address_family.to_c` of `decode_address_family`.
 	static function decodeAddressFamily(v:Value):Int {
 		var e = EvalDecode.decodeEnum(v);
 		return switch [e.index, e.args] {
-			case [0, []]: Uv.constant(3, 0); // UNSPEC
-			case [1, []]: Uv.constant(3, 1); // INET
-			case [2, []]: Uv.constant(3, 2); // INET6
-			case [3, [v]]: EvalDecode.decodeInt(v); // OTHER
+			case [0, []]: Uv.constant(3, 0); // port: UNSPEC
+			case [1, []]: Uv.constant(3, 1); // port: INET
+			case [2, []]: Uv.constant(3, 2); // port: INET6
+			case [3, [v]]: EvalDecode.decodeInt(v); // port: OTHER
 			case _: EvalExceptions.unexpectedValue(v, "eval.luv.SockAddr.AddressType");
 		}
 	}
 
-	/** `encode_address_family` of `Address_family.from_c`. **/
+	// port: `encode_address_family` of `Address_family.from_c`.
 	static function encodeAddressFamily(a:Int):Value {
 		var r = if (a == Uv.constant(3,
 			0)) {index: 0, args: []} else if (a == Uv.constant(3,
@@ -357,7 +353,7 @@ class EvalLuv {
 		return EvalEncode.encodeEnumValue(EvalHash.key_eval_luv_AddressFamily, r.index, r.args, null);
 	}
 
-	/** `encode_socket_type` of `Socket_type.from_c`. **/
+	// port: `encode_socket_type` of `Socket_type.from_c`.
 	static function encodeSocketType(a:Int):Value {
 		var r = if (a == Uv.constant(4,
 			0)) {index: 0, args: []} else if (a == Uv.constant(4,
@@ -400,17 +396,17 @@ class EvalLuv {
 		case v: EvalExceptions.unexpectedValue(v, "eval.luv.Check");
 	}
 
-	/** `File.Mode.to_c` of `decode_file_mode`. **/
+	// port: `File.Mode.to_c` of `decode_file_mode`.
 	static function decodeFileMode(v:Value):Int {
 		var e = EvalDecode.decodeEnum(v);
 		return switch [e.index, e.args] {
 			case [i, []] if (i >= 0 && i <= 21): Uv.constant(1, i);
-			case [22, [v2]]: EvalDecode.decodeInt(v2); // NUMERIC
+			case [22, [v2]]: EvalDecode.decodeInt(v2); // port: NUMERIC
 			case _: EvalExceptions.unexpectedValue(v, "eval.luv.File.FileMode");
 		}
 	}
 
-	/** `Mode.list_to_c` of `decode_file_mode_list`. **/
+	// port: `Mode.list_to_c` of `decode_file_mode_list`.
 	static function decodeFileModeList(v:Value):Int {
 		var r = 0;
 		for (m in EvalDecode.decodeArray(v).map(decodeFileMode)) r |= m;
@@ -434,7 +430,7 @@ class EvalLuv {
 		case _: EvalExceptions.unexpectedValue(v, "eval.luv.Dir");
 	}
 
-	/** `encode_dirent` of a host dirent (kind index, name). **/
+	// port: `encode_dirent` of a host dirent (kind index, name).
 	static function encodeDirent(kind:Int, name:Bytes):Value {
 		return EvalEncode.encodeObj([
 			{name: EvalHash.key_kind, value: kind.vint()},
@@ -447,7 +443,7 @@ class EvalLuv {
 			{
 				name: EvalHash.key_next,
 				value: EvalEncode.vfun0(() -> {
-					// Directory_scan.next: the scan stops at the end
+					// port: Directory_scan.next: the scan stops at the end
 					var e = Uv.fsScandirNext(req);
 					if (e == null) {
 						Uv.fsCleanup(req);
@@ -471,7 +467,7 @@ class EvalLuv {
 		return EvalDecode.decodeArray(v).map(EvalDecode.decodeInt);
 	}
 
-	/** `Open_flag.to_c` of `decode_file_open_flag`. **/
+	// port: `Open_flag.to_c` of `decode_file_open_flag`.
 	static function decodeFileOpenFlag(v:Value):Int {
 		var i = EvalDecode.decodeInt(v);
 		if (i < 0 || i > 20) return EvalExceptions.unexpectedValue(v, "eval.luv.File.FileOpenFlag");
@@ -552,7 +548,7 @@ class EvalLuv {
 	static function f(name:String, value:Value):{name:String, value:Value}
 		return {name: name, value: value};
 
-	/** Buffers as one Bytes plus their sizes, for the host's iovecs. **/
+	// port: buffers as one Bytes plus their sizes, for the host's iovecs.
 	static function flatten(l:Array<LuvBuffer>):{data:Bytes, sizes:Array<Int>} {
 		var total = 0;
 		for (b in l) total += b.length;
@@ -565,7 +561,7 @@ class EvalLuv {
 		return {data: data, sizes: [for (b in l) b.length]};
 	}
 
-	/** Copies `n` bytes read into the host request's memory to the buffers, in order. **/
+	// port: copies `n` bytes read into the host request's memory to the buffers, in order.
 	static function copyOut(req:Int, l:Array<LuvBuffer>, n:Int):Void {
 		var src = 0;
 		for (b in l) {
@@ -576,7 +572,7 @@ class EvalLuv {
 		}
 	}
 
-	// ---- UVError
+	// port: ---- UVError
 	public static final uvErrorFields:Array<{name:String, value:Value}> = [
 		f("toString", EvalEncode.vfun1(v -> {
 			var e = decodeUvError(v);
@@ -596,6 +592,7 @@ class EvalLuv {
 				var msg = if (Std.isOfType(ex, core.Error.TypingError)) {
 						var err = (ex : core.Error.TypingError).error;
 						switch err.errMessage {
+							// TODO beware of err_sub here
 							case Custom(msg):
 								// Eval interpreter rethrows runtime exceptions as `Custom "Exception message\nException stack"`
 								var i = msg.indexOf("\n");
@@ -622,14 +619,14 @@ class EvalLuv {
 		})),
 	];
 
-	// ---- Loop
+	// port: ---- Loop
 	public static final loopFields:Array<{name:String, value:Value}> = [
 		f("run", EvalEncode.vfun2((v1, v2) -> {
 			var loop = decodeLoop(v1);
 			var mode = switch EvalDecode.decodeInt(v2) {
-					case 0: 0; // DEFAULT
-					case 1: 1; // ONCE
-					case 2: 2; // NOWAIT
+					case 0: 0; // port: DEFAULT
+					case 1: 1; // port: ONCE
+					case 2: 2; // port: NOWAIT
 					case _: EvalExceptions.unexpectedValue(v2, "valid loop run mode");
 				}
 			loopRun(loop, mode).vbool();
@@ -671,12 +668,12 @@ class EvalLuv {
 
 	public static final loopOptionFields:Array<{name:String, value:Value}> = [f("sigprof", Uv.constant(5, 9).vint())];
 
-	// ---- Handle
+	// port: ---- Handle
 	public static final handleFields:Array<{name:String, value:Value}> = [
 		f("close", EvalEncode.vfun2((v1, v2) -> {
 			var handle = decodeLuvHandle(v1);
 			var cb = EvalMisc.prepareCallback(v2, 0);
-			// Handle.close: nothing when already closing
+			// port: Handle.close: nothing when already closing
 			if (!Uv.handleIsClosing(handle)) {
 				callbacks(handle).close = () -> catchExceptions(_ -> cb([]), null);
 				Uv.handleClose(handle);
@@ -725,7 +722,7 @@ class EvalLuv {
 		})),
 	];
 
-	// ---- Idle, Prepare, Check (luv's Loop_watcher)
+	// port: ---- Idle, Prepare, Check (luv's Loop_watcher)
 
 	static function watcherFields(kind:Int, decode:Value->Int, wrap:Int->Vhandle):Array<{name:String, value:Value}> {
 		return [
@@ -748,7 +745,7 @@ class EvalLuv {
 
 	public static final idleFields = watcherFields(HK_IDLE, decodeIdle, i -> HIdle(i));
 
-	// ---- Timer
+	// port: ---- Timer
 	public static final timerFields:Array<{name:String, value:Value}> = [
 		f("init", EvalEncode.vfun1(v -> {
 			var loop = decodeLoop(v);
@@ -786,7 +783,7 @@ class EvalLuv {
 		})),
 	];
 
-	// ---- Async
+	// port: ---- Async
 	public static final asyncFields:Array<{name:String, value:Value}> = [
 		f("init", EvalEncode.vfun2((v1, v2) -> {
 			var loop = decodeLoop(v1);
@@ -804,7 +801,7 @@ class EvalLuv {
 		})),
 	];
 
-	// ---- Buffer (luv's buffer.ml over Bigarray)
+	// port: ---- Buffer (luv's buffer.ml over Bigarray)
 
 	static function charOfInt(i:Int):Int {
 		if (i < 0 || i > 255) throw new InvalidArgument("char_of_int");
@@ -929,7 +926,7 @@ class EvalLuv {
 			var buffer = decodeBuffer(v1);
 			var source = EvalDecode.decodeBytes(v2);
 			var offset = EvalDecode.decodeInt(v3);
-			// memcpy of Bytes.length bytes from source + offset
+			// port: memcpy of Bytes.length bytes from source + offset
 			buffer.bytes.blit(buffer.offset, source, offset, source.length);
 			VNull;
 		})),
@@ -942,7 +939,7 @@ class EvalLuv {
 		})),
 	];
 
-	// ---- SockAddr
+	// port: ---- SockAddr
 
 	static function sockaddrFrom(host:String, port:Int, v6:Bool):Value {
 		var storage = Bytes.alloc(Uv.sockaddrSize());
@@ -975,13 +972,13 @@ class EvalLuv {
 		})),
 	];
 
-	/** luv's `Sockaddr.wrap_c_getter`. **/
+	// port: luv's `Sockaddr.wrap_c_getter`.
 	static function sockName(handle:Int, peer:Bool):Value {
 		var storage = Bytes.alloc(Uv.sockaddrSize());
 		return encodeResult(Uv.sockName(handle, peer, storage), _ -> encodeSockaddr(storage));
 	}
 
-	/** A request whose completion calls `f` with its status, released afterwards. **/
+	// port: A request whose completion calls `f` with its status, released afterwards.
 	static function statusRequest(f:Int->Void):Int {
 		var req = Uv.reqNew();
 		requestCallbacks.set(req, status -> {
@@ -991,7 +988,7 @@ class EvalLuv {
 		return req;
 	}
 
-	/** luv's pattern for a request taking a unit callback: an immediate error calls back directly. **/
+	// port: luv's pattern for a request taking a unit callback: an immediate error calls back directly.
 	static function unitRequest(callback:Value->Void, start:Int->Int):Void {
 		var req = statusRequest(status -> catchExceptions(callback, encodeUnitResult(status)));
 		var r = start(req);
@@ -1002,7 +999,7 @@ class EvalLuv {
 		}
 	}
 
-	// ---- Tcp
+	// port: ---- Tcp
 	public static final tcpFields:Array<{name:String, value:Value}> = [
 		f("init", EvalEncode.vfun2((v1, v2) -> {
 			var loop = decodeLoop(v1);
@@ -1049,7 +1046,7 @@ class EvalLuv {
 		f("closeReset", EvalEncode.vfun2((v1, v2) -> {
 			var tcp = decodeTcp(v1);
 			var callback = encodeCallback(v2);
-			// TCP.close_reset: the handle is released before the callback
+			// port: TCP.close_reset: the handle is released before the callback
 			unitRequest(callback, req -> {
 				var r = Uv.tcpCloseReset(tcp, req);
 				if (r >= 0) handleCallbacks.remove(tcp);
@@ -1059,10 +1056,10 @@ class EvalLuv {
 		})),
 	];
 
-	// ---- Udp
+	// port: ---- Udp
 
 	static function encodeUdpFlag(flags:Int):Array<Value> {
-		// convert_flag folds PARTIAL, MMSG_CHUNK, MMSG_FREE onto the front of the list
+		// port: convert_flag folds PARTIAL, MMSG_CHUNK, MMSG_FREE onto the front of the list
 		var l = [];
 		if (flags & Uv.constant(11, 0) != 0) l.unshift(0.vint());
 		if (flags & Uv.constant(11, 1) != 0) l.unshift(1.vint());
@@ -1070,7 +1067,7 @@ class EvalLuv {
 		return l;
 	}
 
-	/** luv's read/recv allocation: the buffer `allocate` returns (Buffer.create by default). **/
+	// port: luv's read/recv allocation: the buffer `allocate` returns (Buffer.create by default).
 	static function allocator(v:Value):(Int->LuvBuffer) {
 		var allocate = EvalDecode.decodeOptional(v -> {
 			var cb = EvalMisc.prepareCallback(v, 1);
@@ -1171,7 +1168,7 @@ class EvalLuv {
 			var udp = decodeUdp(v1);
 			var callback = encodeCallback(v2);
 			var allocate = allocator(v3);
-			// UDP.recv_start
+			// port: UDP.recv_start
 			var lastAllocatedBuffer:Null<LuvBuffer> = null;
 			var c = callbacks(udp);
 			c.allocate = size -> {
@@ -1228,7 +1225,7 @@ class EvalLuv {
 			unitRequest(callback, req -> Uv.udpSend(udp, req, d.data, d.sizes, null));
 			VNull;
 		})),
-		// upstream registers trySend under the name "send" too
+		// port: upstream registers trySend under the name "send" too
 		f("send", EvalEncode.vfun2((v1, v2) -> {
 			var udp = decodeUdp(v1);
 			var l = decodeBuffers(v2);
@@ -1237,7 +1234,7 @@ class EvalLuv {
 		})),
 	];
 
-	// ---- Pipe
+	// port: ---- Pipe
 	public static final pipeFields:Array<{name:String, value:Value}> = [
 		f("init", EvalEncode.vfun2((v1, v2) -> {
 			var loop = decodeLoop(v1);
@@ -1291,16 +1288,16 @@ class EvalLuv {
 		f("chmod", EvalEncode.vfun2((v1, v2) -> {
 			var pipe = decodePipe(v1);
 			var mode = switch EvalDecode.decodeInt(v2) {
-					case 0: 0; // READABLE
-					case 1: 1; // WRITABLE
-					case 2: 2; // READABLE, WRITABLE
+					case 0: 0; // port: READABLE
+					case 1: 1; // port: WRITABLE
+					case 2: 2; // port: READABLE, WRITABLE
 					case _: EvalExceptions.unexpectedValue(v2, "eval.luv.Pipe.PipeMode");
 				}
 			encodeUnitResult(Uv.pipeChmod(pipe, mode));
 		})),
 	];
 
-	// ---- Tty
+	// port: ---- Tty
 	public static final ttyFields:Array<{name:String, value:Value}> = [
 		f("init", EvalEncode.vfun2((v1, v2) -> {
 			var loop = decodeLoop(v1);
@@ -1310,9 +1307,9 @@ class EvalLuv {
 		f("setMode", EvalEncode.vfun2((v1, v2) -> {
 			var tty = decodeTty(v1);
 			var mode = switch EvalDecode.decodeInt(v2) {
-					case 0: 0; // NORMAL
-					case 1: 1; // RAW
-					case 2: 2; // IO
+					case 0: 0; // port: NORMAL
+					case 1: 1; // port: RAW
+					case 2: 2; // port: IO
 					case _: EvalExceptions.unexpectedValue(v2, "eval.luv.Tty.TtyMode");
 				}
 			encodeUnitResult(Uv.ttySetMode(tty, mode));
@@ -1332,8 +1329,8 @@ class EvalLuv {
 		})),
 		f("setVTermState", EvalEncode.vfun1(v -> {
 			var state = switch EvalDecode.decodeInt(v) {
-					case 0: 0; // SUPPORTED
-					case 1: 1; // UNSUPPORTED
+					case 0: 0; // port: SUPPORTED
+					case 1: 1; // port: UNSUPPORTED
 					case _: EvalExceptions.unexpectedValue(v, "eval.luv.Tty.VTermState");
 				}
 			Uv.ttySetVTermState(state);
@@ -1344,7 +1341,7 @@ class EvalLuv {
 		})),
 	];
 
-	// ---- Stream
+	// port: ---- Stream
 	public static final streamFields:Array<{name:String, value:Value}> = [
 		f("shutdown", EvalEncode.vfun2((v1, v2) -> {
 			var stream = decodeStream(v1);
@@ -1356,7 +1353,7 @@ class EvalLuv {
 			var stream = decodeStream(v1);
 			var backlog = EvalDecode.decodeOptional(v -> EvalDecode.decodeInt(v), v3);
 			var callback = encodeCallback(v2);
-			// Stream.listen (the default backlog is SOMAXCONN)
+			// port: Stream.listen (the default backlog is SOMAXCONN)
 			callbacks(stream).connection = status -> catchExceptions(callback, encodeUnitResult(status));
 			var r = Uv.streamListen(stream, backlog == null ? 4096 : backlog);
 			if (r < 0) callback(error(r));
@@ -1371,7 +1368,7 @@ class EvalLuv {
 			var stream = decodeStream(v1);
 			var callback = encodeCallback(v2);
 			var allocate = allocator(v3);
-			// Stream.read_start
+			// port: Stream.read_start
 			var lastAllocatedBuffer:Null<LuvBuffer> = null;
 			var c = callbacks(stream);
 			c.allocate = suggestedSize -> {
@@ -1393,7 +1390,7 @@ class EvalLuv {
 						ok(encodeBuffer(buffer));
 					} else {
 						lastAllocatedBuffer = null;
-						error(nreadOrError == 0 ? Uv.errCode(71) : nreadOrError); // Error.result_from_c 0 is `UNKNOWN
+						error(nreadOrError == 0 ? Uv.errCode(71) : nreadOrError); // port: Error.result_from_c 0 is `UNKNOWN
 					}
 				catchExceptions(callback, result);
 			};
@@ -1447,7 +1444,7 @@ class EvalLuv {
 		})),
 	];
 
-	/** luv's `Stream.write_general`: the callback receives the bytes written. **/
+	// port: luv's `Stream.write_general`: the callback receives the bytes written.
 	static function write(stream:Int, buffers:Array<LuvBuffer>, sendHandle:Int, callback:(Value, Int) -> Void):Void {
 		var d = flatten(buffers);
 		var bytes = d.data.length;
@@ -1464,7 +1461,7 @@ class EvalLuv {
 		}
 	}
 
-	// ---- Signal
+	// port: ---- Signal
 	public static final signumFields:Array<{name:String, value:Value}> = [
 		f("SIGABRT", Uv.constant(5, 0).vint()),
 		f("SIGFPE", Uv.constant(5, 1).vint()),
@@ -1506,7 +1503,7 @@ class EvalLuv {
 		})),
 	];
 
-	// ---- Process
+	// port: ---- Process
 	public static final processFields:Array<{name:String, value:Value}> = [
 		f("stdin", 0.vint()),
 		f("stdout", 1.vint()),
@@ -1573,6 +1570,7 @@ class EvalLuv {
 					var windowsHide = get(EvalHash.key_windowsHide, EvalDecode.decodeBool);
 					var windowsHideConsole = get(EvalHash.key_windowsHideConsole, EvalDecode.decodeBool);
 					var windowsHideGui = get(EvalHash.key_windowsHideGui, EvalDecode.decodeBool);
+					// Process.spawn ~loop ?detached cmd args
 					spawn(loop, cmd, args, onExit, environment, workingDirectory, redirect, uid, gid, windowsVerbatimArguments, detached,
 						windowsHide, windowsHideConsole, windowsHideGui);
 				}
@@ -1593,13 +1591,13 @@ class EvalLuv {
 		})),
 	];
 
-	/** luv's `Process.spawn`. **/
+	// port: luv's `Process.spawn`.
 	static function spawn(loop:Int, path:Bytes, arguments:Array<Bytes>, onExit:Null<(Int, Int64, Int) -> Void>,
 			environment:Null<Array<{name:String, value:Bytes}>>, workingDirectory:Null<Bytes>, redirect:Null<Array<LuvRedirection>>,
 			uid:Null<Int>, gid:Null<Int>, windowsVerbatimArguments:Null<Bool>, detached:Null<Bool>, windowsHide:Null<Bool>,
 			windowsHideConsole:Null<Bool>, windowsHideGui:Null<Bool>):Int {
 		var envHasEquals = environment != null && Lambda.exists(environment, e -> e.name.indexOf("=") >= 0);
-		if (envHasEquals) return Uv.errCode(34); // EINVAL
+		if (envHasEquals) return Uv.errCode(34); // port: EINVAL
 		var env = environment == null ? null : environment.map(e -> {
 			var b = new haxe.io.BytesBuffer();
 			b.addString(e.name);
@@ -1634,7 +1632,7 @@ class EvalLuv {
 		return r;
 	}
 
-	// ---- Request
+	// port: ---- Request
 	public static final requestFields:Array<{name:String, value:Value}> = [
 		f("cancel", EvalEncode.vfun1(v -> {
 			encodeUnitResult(switch v {
@@ -1645,9 +1643,9 @@ class EvalLuv {
 		})),
 	];
 
-	// ---- Dns
+	// port: ---- Dns
 
-	/** A request of the user's, or a fresh one released after completion. **/
+	// port: A request of the user's, or a fresh one released after completion.
 	static function orMake(request:Null<Int>):{req:Int, release:Bool} {
 		return request == null ? {req: Uv.reqNew(), release: true} : {req: request, release: false};
 	}
@@ -1711,7 +1709,7 @@ class EvalLuv {
 						}
 						r;
 					});
-					// DNS.getaddrinfo: hints are passed when any of them is given
+					// port: DNS.getaddrinfo: hints are passed when any of them is given
 					hasHints = fa != null || st != null || pr != null || fl != null;
 					if (fa != null) family = fa;
 					if (st != null) socktype = st;
@@ -1787,7 +1785,7 @@ class EvalLuv {
 		})),
 	];
 
-	// ---- File (luv's file.ml: Async.async and Sync.sync over the host's uv_fs_* calls)
+	// port: ---- File (luv's file.ml: Async.async and Sync.sync over the host's uv_fs_* calls)
 	static inline final FS_OPEN = 0;
 	static inline final FS_CLOSE = 1;
 	static inline final FS_READ = 2;
@@ -1825,7 +1823,7 @@ class EvalLuv {
 	static inline final FS_LCHOWN = 34;
 	static inline final FS_FCHOWN = 35;
 
-	/** luv's `Returns`: the result of a completed request, and whether success cleans it up. **/
+	// port: luv's `Returns`: the result of a completed request, and whether success cleans it up.
 	static function returnsError(req:Int):Value return encodeUnitResult(Uv.fsResult(req));
 
 	static function returnsFile(req:Int):Value return encodeResult(Uv.fsResult(req), fd -> VHandle(HFile(fd)));
@@ -1868,12 +1866,10 @@ class EvalLuv {
 
 	static function returnsString(req:Int):Value return encodeResult(Uv.fsResult(req), _ -> Uv.fsPtrString(req).vnativeString());
 
-	/**
-		One luv File function. `vloop` VNull: `File.Sync` (the result is returned);
-		otherwise `File.Async` (the result goes to `vcallback`). `cleanupOnSuccess`:
-		`clean_up_request_on_success` (false for scandir). `after` runs where luv's
-		`cleanup` does (reads copy their data out there).
-	**/
+	// port: one luv File function. `vloop` VNull: `File.Sync` (the result is returned);
+	// otherwise `File.Async` (the result goes to `vcallback`). `cleanupOnSuccess`:
+	// `clean_up_request_on_success` (false for scandir). `after` runs where luv's
+	// `cleanup` does (reads copy their data out there).
 	static function fsCall(sync:Bool, vloop:Value, vrequest:Value, vcallback:Value, op:Int, p1:Null<Bytes>, p2:Null<Bytes>, i1:Int,
 			i2:Int, i3:Int, f1:Float, f2:Float, buffers:Null<Array<LuvBuffer>>, returns:Int->Value, cleanupOnSuccess:Bool = true):Value {
 		var write = op == FS_WRITE;
@@ -1885,17 +1881,17 @@ class EvalLuv {
 			}
 		}
 		if (sync) {
-			// Sync.sync
+			// port: Sync.sync
 			var req = Uv.reqNew();
 			var immediateResult = Uv.fs(op, -1, req, p1, p2, i1, i2, i3, f1, f2, d == null ? null : d.data, d == null ? null : d.sizes);
 			cleanup(req);
 			var result = if (immediateResult < 0) error(immediateResult) else returns(req);
 			if (cleanupOnSuccess || immediateResult < 0) Uv.fsCleanup(req);
-			// a scan keeps its request until scandir_end
+			// port: a scan keeps its request until scandir_end
 			if (cleanupOnSuccess || immediateResult < 0) Uv.reqFree(req);
 			return result;
 		}
-		// Async.async
+		// port: Async.async
 		var loop = decodeLoop(vloop);
 		var request = EvalDecode.decodeOptional(decodeFileRequest, vrequest);
 		var callback = encodeCallback(vcallback);
@@ -1927,7 +1923,7 @@ class EvalLuv {
 		return r;
 	}
 
-	/** `F.mode_opt`: the default mode when none is given. **/
+	// port: `F.mode_opt`: the default mode when none is given.
 	static function modeOpt(v:Value, def:Int):Int {
 		var mode = EvalDecode.decodeOptional(decodeFileModeList, v);
 		return mode == null ? def : mode;
@@ -1973,7 +1969,7 @@ class EvalLuv {
 		})),
 		f("open", EvalEncode.vfun6((vloop, vpath, vflags, vmode, vrequest, vcallback) -> {
 			var flags = openFlags(vflags);
-			var mode = modeOpt(vmode, 420); // Mode.file_default: 0o644
+			var mode = modeOpt(vmode, 420); // port: Mode.file_default: 0o644
 			fsCall(false, vloop, vrequest, vcallback, FS_OPEN, path(vpath), null, flags, mode, 0, 0, 0, null, returnsFile);
 		})),
 		f("close", EvalEncode.vfun4((vfile, vloop, vrequest, vcallback) -> {
@@ -2004,7 +2000,7 @@ class EvalLuv {
 			fsCall(false, vloop, vrequest, vcallback, FS_MKDTEMP, path(vpath), null, 0, 0, 0, 0, 0, null, returnsPath);
 		})),
 		f("mkdir", EvalEncode.vfun5((vloop, vpath, vmode, vrequest, vcallback) -> {
-			var mode = modeOpt(vmode, 493); // Mode.directory_default: 0o755
+			var mode = modeOpt(vmode, 493); // port: Mode.directory_default: 0o755
 			fsCall(false, vloop, vrequest, vcallback, FS_MKDIR, path(vpath), null, mode, 0, 0, 0, 0, null, returnsError);
 		})),
 		f("rmdir", EvalEncode.vfun4((vloop, vpath, vrequest, vcallback) -> {
@@ -2260,7 +2256,7 @@ class EvalLuv {
 		})),
 	];
 
-	// ---- Dir
+	// port: ---- Dir
 
 	static function readdirEntries(v:Value):Int {
 		var numberOfEntries = EvalDecode.decodeOptional(EvalDecode.decodeInt, v);
@@ -2303,7 +2299,7 @@ class EvalLuv {
 		})),
 	];
 
-	// ---- FsEvent
+	// port: ---- FsEvent
 	public static final fsEventFields:Array<{name:String, value:Value}> = [
 		f("init", EvalEncode.vfun1(v -> {
 			var loop = decodeLoop(v);
@@ -2318,14 +2314,14 @@ class EvalLuv {
 					(flags.contains(0) ? Uv.constant(12,
 						2) : 0) | (flags.contains(1) ? Uv.constant(12, 3) : 0) | (flags.contains(2) ? Uv.constant(12, 4) : 0);
 				}
-			// FS_event.start
+			// port: FS_event.start
 			callbacks(event).data = (status, b) -> {
 				var result = if (status < 0) error(status) else {
 						var a:Array<Dynamic> = b;
 						var events:Int = a[1];
 						var vevents = [];
-						if (events & Uv.constant(12, 0) != 0) vevents.push(0.vint()); // RENAME
-						if (events & Uv.constant(12, 1) != 0) vevents.push(1.vint()); // CHANGE
+						if (events & Uv.constant(12, 0) != 0) vevents.push(0.vint()); // port: RENAME
+						if (events & Uv.constant(12, 1) != 0) vevents.push(1.vint()); // port: CHANGE
 						ok(EvalEncode.encodeObj([
 							{name: EvalHash.key_file, value: EvalEncode.encodeNullable(EvalValueTools.vnativeString, (a[0] : Null<Bytes>))},
 							{name: EvalHash.key_events, value: EvalEncode.encodeArray(vevents)}
@@ -2343,9 +2339,9 @@ class EvalLuv {
 		})),
 	];
 
-	// ---- threads and synchronization (see the module comment)
+	// port: ---- threads and synchronization (see the module comment)
 
-	/** A `Result.Error` of a luv `Error.t` index (the primitives below report indices, not libuv codes). **/
+	// port: A `Result.Error` of a luv `Error.t` index (the primitives below report indices, not libuv codes).
 	static function errorIndex(i:Int):Value return EvalEncode.encodeEnumValue(EvalHash.key_eval_luv_Result, 1, [i.vint()], null);
 
 	static function encodeIndexResult(i:Int):Value return i == 0 ? ok(VNull) : errorIndex(i);
@@ -2381,7 +2377,7 @@ class EvalLuv {
 			}, v2);
 			var work = prepareLuvCallback(v3);
 			var callback = encodeCallback(v4);
-			// Thread_pool.queue_work: the work runs on a pool thread, then the callback on the
+			// port: Thread_pool.queue_work: the work runs on a pool thread, then the callback on the
 			// loop, reached through an async handle the pool signals (see LuvThreadPool)
 			var request = request == null ? new LuvWorkRequest() : request;
 			var r = Uv.handleInit(HK_ASYNC, loop, 0, 0);
@@ -2406,7 +2402,7 @@ class EvalLuv {
 		f("setSize", EvalEncode.vfun2((v1, v2) -> {
 			var size = EvalDecode.decodeInt(v1);
 			var ifNotAlreadySet = EvalDecode.decodeOptional(EvalDecode.decodeBool, v2);
-			// luv's Thread_pool.set_size: sets UV_THREADPOOL_SIZE, read when a pool starts
+			// port: luv's Thread_pool.set_size: sets UV_THREADPOOL_SIZE, read when a pool starts
 			if (!(ifNotAlreadySet == true && Sys.getEnv("UV_THREADPOOL_SIZE") != null))
 				Sys.putEnv("UV_THREADPOOL_SIZE", Std.string(size));
 			VNull;
@@ -2419,9 +2415,9 @@ class EvalLuv {
 		})),
 		f("create", EvalEncode.vfun2((v1, v2) -> {
 			var fn = prepareLuvCallback(v1);
-			// ignored: host threads have a fixed stack size
+			// port: ignored: host threads have a fixed stack size
 			var stackSize = EvalDecode.decodeOptional(EvalDecode.decodeInt, v2);
-			// luv's Thread.create runs the function under Error.catch_exceptions
+			// port: luv's Thread.create runs the function under Error.catch_exceptions
 			ok(VHandle(HThread(LuvThreadHandle.create(() -> catchExceptions(_ -> fn(), null)))));
 		})),
 		f("join", EvalEncode.vfun1(v -> {
@@ -2556,7 +2552,7 @@ class EvalLuv {
 	public static final barrierFields:Array<{name:String, value:Value}> = [
 		f("init", EvalEncode.vfun1(v -> {
 			var count = EvalDecode.decodeInt(v);
-			// uv_barrier_init: pthread_barrier_init fails with EINVAL for a count of 0
+			// port: uv_barrier_init: pthread_barrier_init fails with EINVAL for a count of 0
 			count == 0 ? errorIndex(LuvSync.EINVAL) : ok(VHandle(HBarrier(new LuvBarrier(count))));
 		})),
 		f("destroy", EvalEncode.vfun1(v -> {
@@ -2568,7 +2564,7 @@ class EvalLuv {
 		})),
 	];
 
-	// ---- Env, Time, Path, Random, Network
+	// port: ---- Env, Time, Path, Random, Network
 	public static final envFields:Array<{name:String, value:Value}> = [
 		f("getEnv", EvalEncode.vfun1(v -> {
 			var name = EvalDecode.decodeString(v);
@@ -2645,7 +2641,7 @@ class EvalLuv {
 				case v: EvalExceptions.unexpectedValue(v, "eval.luv.Random.RandomRequest");
 			}, v3);
 			var callback = encodeCallback(v4);
-			// Random.random
+			// port: Random.random
 			var release = request == null;
 			var req = request == null ? Uv.reqNew() : request;
 			requestCallbacks.set(req, status -> {
@@ -2713,7 +2709,7 @@ class EvalLuv {
 		})),
 	];
 
-	// ---- FsPoll
+	// port: ---- FsPoll
 	public static final fsPollFields:Array<{name:String, value:Value}> = [
 		f("init", EvalEncode.vfun1(v -> {
 			var loop = decodeLoop(v);
@@ -2724,7 +2720,7 @@ class EvalLuv {
 			var path = EvalDecode.decodeNativeString(v2);
 			var interval = EvalDecode.decodeOptional(EvalDecode.decodeInt, v3);
 			var callback = encodeCallback(v4);
-			// FS_poll.start (the default interval is 2000 ms)
+			// port: FS_poll.start (the default interval is 2000 ms)
 			callbacks(poll).data = (status, b) -> {
 				var result = if (status < 0) error(status) else {
 						var a:Array<Dynamic> = b;
@@ -2745,7 +2741,7 @@ class EvalLuv {
 		})),
 	];
 
-	// ---- Resource, SystemInfo, Pid, Passwd, Metrics
+	// port: ---- Resource, SystemInfo, Pid, Passwd, Metrics
 
 	static function memoryValue(which:Int):Value {
 		Uv.memory(which);
@@ -2896,18 +2892,16 @@ class EvalLuv {
 		f("hex", Uv.constant(9, 4).vint()),
 	];
 
-	/**
-		The field lists to register: unchanged when libuv is available, otherwise
-		every entry fails with the not-supported error. (The thread and
-		synchronization lists are registered as they are.)
-	**/
+	// port: the field lists to register: unchanged when libuv is available, otherwise
+	// every entry fails with the not-supported error. (The thread and
+	// synchronization lists are registered as they are.)
 	public static function fields(l:Array<{name:String, value:Value}>):Array<{name:String, value:Value}> {
 		if (available()) return l;
 		return [for (e in l) {name: e.name, value: VFunction(_ -> notSupported(), true)}];
 	}
 }
 
-/** The callbacks luv keeps in a handle (`Handle.set_reference`). **/
+// port: the callbacks luv keeps in a handle (`Handle.set_reference`).
 class LuvHandleCallbacks {
 	public var close:Null<Void->Void>;
 	public var cb:Null<Int->Void>;
@@ -2919,7 +2913,7 @@ class LuvHandleCallbacks {
 	public function new() {}
 }
 
-/** `Luv.Buffer.t`: a one-dimensional char Bigarray, here a view on a Bytes. **/
+// port: `Luv.Buffer.t`: a one-dimensional char Bigarray, here a view on a Bytes.
 class LuvBuffer {
 	public final bytes:Bytes;
 	public final offset:Int;
@@ -2933,14 +2927,14 @@ class LuvBuffer {
 
 	public static function create(size:Int):LuvBuffer return new LuvBuffer(Bytes.alloc(size), 0, size);
 
-	/** `Array1.sub`. **/
+	// port: `Array1.sub`.
 	public function sub(offset:Int, length:Int):LuvBuffer {
 		if (offset < 0 || length < 0 || offset + length > this.length) throw new InvalidArgument("Bigarray.sub: bad sub-array");
 		return new LuvBuffer(bytes, this.offset + offset, length);
 	}
 }
 
-/** `Luv.Process.redirection`: child fd, kind (1 pipe, 2 fd, 3 stream), pipe flags, fd or stream. **/
+// port: `Luv.Process.redirection`: child fd, kind (1 pipe, 2 fd, 3 stream), pipe flags, fd or stream.
 class LuvRedirection {
 	public final fd:Int;
 	public final kind:Int;
@@ -2955,11 +2949,9 @@ class LuvRedirection {
 	}
 }
 
-/**
-	`Luv.Thread.t` (a `uv_thread_t`): a host thread. There is one object per
-	host thread, so `Thread.equal` is physical equality. `finished` (threads
-	made by `Thread.create`) is released when the thread's function returns.
-**/
+// port: `Luv.Thread.t` (a `uv_thread_t`): a host thread. There is one object per
+// host thread, so `Thread.equal` is physical equality. `finished` (threads
+// made by `Thread.create`) is released when the thread's function returns.
 class LuvThreadHandle {
 	static final current = new sys.thread.Tls<LuvThreadHandle>();
 
@@ -2970,7 +2962,7 @@ class LuvThreadHandle {
 		this.finished = finished;
 	}
 
-	/** `Thread.self`. **/
+	// port: `Thread.self`.
 	public static function self():LuvThreadHandle {
 		var t = current.value;
 		if (t == null) {
@@ -2980,7 +2972,7 @@ class LuvThreadHandle {
 		return t;
 	}
 
-	/** `Thread.create`: `fn` runs on a new host thread. **/
+	// port: `Thread.create`: `fn` runs on a new host thread.
 	public static function create(fn:Void->Void):LuvThreadHandle {
 		var finished = new sys.thread.Lock();
 		var t = new LuvThreadHandle(finished);
@@ -3001,15 +2993,13 @@ class LuvThreadHandle {
 		return t;
 	}
 
-	/**
-		`Thread.join`: 0 or a luv error index. Joining the calling thread fails
-		(pthread_join's EDEADLK, which luv reports as `UNKNOWN`); a thread not
-		made by `Thread.create` is waited for forever (it is never joinable
-		before the process exits). Joining again returns at once.
-	**/
+	// port: `Thread.join`: 0 or a luv error index. Joining the calling thread fails
+	// (pthread_join's EDEADLK, which luv reports as `UNKNOWN`); a thread not
+	// made by `Thread.create` is waited for forever (it is never joinable
+	// before the process exits). Joining again returns at once.
 	public function join():Int {
 		if (current.value == this) return LuvSync.UNKNOWN;
-		if (joined) return LuvSync.ESRCH; // the thread is gone
+		if (joined) return LuvSync.ESRCH; // port: the thread is gone
 		if (finished == null) {
 			new sys.thread.Lock().wait();
 			return 0;
@@ -3020,26 +3010,24 @@ class LuvThreadHandle {
 	}
 }
 
-/** `Luv.Thread_pool.Request.t`. **/
+// port: `Luv.Thread_pool.Request.t`.
 class LuvWorkRequest {
-	/** 0 never queued, 1 queued, 2 running, 3 done or cancelled (LuvThreadPool's guard). **/
+	// port: 0 never queued, 1 queued, 2 running, 3 done or cancelled (LuvThreadPool's guard).
 	public var state = 0;
 
 	public var work:Null<Void->Void>;
 
-	/** Called when the work completes or is cancelled: 0 or a luv error index. **/
+	// port: called when the work completes or is cancelled: 0 or a luv error index.
 	public var done:Null<Int->Void>;
 
 	public function new() {}
 }
 
-/**
-	libuv's thread pool for `ThreadPool.queueWork`: `UV_THREADPOOL_SIZE`
-	(default 4, read when the first work is queued) host threads take queued
-	work in order. On the hxc host these are green threads, so work runs
-	interleaved with the other threads, not in parallel (libuv's own pool of
-	real threads still serves the file system and DNS requests).
-**/
+// port: libuv's thread pool for `ThreadPool.queueWork`: `UV_THREADPOOL_SIZE`
+// (default 4, read when the first work is queued) host threads take queued
+// work in order. The work runs Eval code, so it holds `EvalLock` and does not
+// run in parallel with other Eval code (libuv's own pool still serves the file
+// system and DNS requests).
 class LuvThreadPool {
 	static final guard = new sys.thread.Mutex();
 	static var queue:Null<sys.thread.Deque<LuvWorkRequest>>;
@@ -3052,14 +3040,14 @@ class LuvThreadPool {
 		queue.add(r);
 	}
 
-	/** `uv_cancel` of a work request: 0 or a luv error index. **/
+	// port: `uv_cancel` of a work request: 0 or a luv error index.
 	public static function cancel(r:LuvWorkRequest):Int {
 		guard.acquire();
 		var state = r.state;
 		if (state == 1) r.state = 3;
 		guard.release();
 		return switch state {
-			case 0: LuvSync.EINVAL; // not a work request yet
+			case 0: LuvSync.EINVAL; // port: not a work request yet
 			case 1:
 				r.done(LuvSync.ECANCELED);
 				0;
@@ -3074,7 +3062,7 @@ class LuvThreadPool {
 				var n = Std.parseInt(s);
 				n == null ? 0 : n;
 		}
-		// libuv: at least 1, at most 1024
+		// port: libuv: at least 1, at most 1024
 		if (size < 1) size = 1;
 		if (size > 1024) size = 1024;
 		var q = new sys.thread.Deque<LuvWorkRequest>();
@@ -3090,7 +3078,7 @@ class LuvThreadPool {
 			var run = r.state == 1;
 			if (run) r.state = 2;
 			guard.release();
-			if (!run) continue; // cancelled
+			if (!run) continue; // port: cancelled
 			EvalLock.enter();
 			try r.work()
 			catch (e:Dynamic) {
@@ -3106,14 +3094,12 @@ class LuvThreadPool {
 	}
 }
 
-/**
-	luv's `Mutex`, `Rwlock`, `Semaphore`, `Condition`, `Barrier` and `Once`
-	over host threads: a guard mutex for the state, and a Lock per waiting
-	thread, released to wake it (which then checks the state again). They do
-	not need libuv, and on the hxc host they block only the calling green
-	thread. Results are 0 or a luv `Error.t` index (evalLuv.ml
-	encode_uv_error order), for the error codes libuv returns.
-**/
+// port: luv's `Mutex`, `Rwlock`, `Semaphore`, `Condition`, `Barrier` and `Once`
+// over host threads: a guard mutex for the state, and a Lock per waiting
+// thread, released to wake it (which then checks the state again). They do
+// not need libuv, and a waiting thread gives up `EvalLock`. Results are 0 or
+// a luv `Error.t` index (evalLuv.ml encode_uv_error order), for the error
+// codes libuv returns.
 class LuvSync {
 	public static inline final EAGAIN = 5;
 	public static inline final EBUSY = 22;
@@ -3128,14 +3114,14 @@ class LuvSync {
 
 	public function new() {}
 
-	/** With the guard held: waits (guard released) until woken or `timeout` seconds pass; false on timeout. **/
+	// port: with the guard held: waits (guard released) until woken or `timeout` seconds pass; false on timeout.
 	function await(?timeout:Float):Bool {
 		var l = new sys.thread.Lock();
 		waiters.push(l);
 		guard.release();
 		var r = EvalLock.blocking(() -> l.wait(timeout));
 		guard.acquire();
-		if (!r && waiters.remove(l) == false) r = true; // woken meanwhile
+		if (!r && waiters.remove(l) == false) r = true; // port: woken meanwhile
 		return r;
 	}
 
@@ -3150,7 +3136,7 @@ class LuvSync {
 	}
 }
 
-/** `uv_mutex_t`: locking a non-recursive mutex the thread holds deadlocks, as with pthreads. **/
+// port: `uv_mutex_t`: locking a non-recursive mutex the thread holds deadlocks, as with pthreads.
 class LuvMutex extends LuvSync {
 	final recursive:Bool;
 	var owner:Null<LuvThreadHandle>;
@@ -3203,7 +3189,7 @@ class LuvMutex extends LuvSync {
 	}
 }
 
-/** `uv_rwlock_t` (readers are not held back by waiting writers, as glibc's default). **/
+// port: `uv_rwlock_t` (readers are not held back by waiting writers, as glibc's default).
 class LuvRwLock extends LuvSync {
 	var readers = 0;
 	var writer = false;
@@ -3253,7 +3239,7 @@ class LuvRwLock extends LuvSync {
 	}
 }
 
-/** `uv_sem_t`. **/
+// port: `uv_sem_t`.
 class LuvSemaphore extends LuvSync {
 	var count:Int;
 
@@ -3285,7 +3271,7 @@ class LuvSemaphore extends LuvSync {
 	}
 }
 
-/** `uv_cond_t`. **/
+// port: `uv_cond_t`.
 class LuvCondition extends LuvSync {
 	public function signal():Void {
 		guard.acquire();
@@ -3303,7 +3289,7 @@ class LuvCondition extends LuvSync {
 		timedWaitSeconds(mutex, null);
 	}
 
-	/** `uv_cond_timedwait`: `timeout` in nanoseconds. **/
+	// port: `uv_cond_timedwait`: `timeout` in nanoseconds.
 	public function timedWait(mutex:LuvMutex, timeout:Int):Int {
 		return timedWaitSeconds(mutex, Math.max(0.0, timeout / 1e9)) ? 0 : LuvSync.ETIMEDOUT;
 	}
@@ -3317,7 +3303,7 @@ class LuvCondition extends LuvSync {
 		var r = EvalLock.blocking(() -> l.wait(timeout));
 		if (!r) {
 			guard.acquire();
-			if (waiters.remove(l) == false) r = true; // signalled meanwhile
+			if (waiters.remove(l) == false) r = true; // port: signalled meanwhile
 			guard.release();
 		}
 		mutex.lock();
@@ -3325,7 +3311,7 @@ class LuvCondition extends LuvSync {
 	}
 }
 
-/** `uv_barrier_t`: `wait` is true in one thread per cycle, the last to arrive. **/
+// port: `uv_barrier_t`: `wait` is true in one thread per cycle, the last to arrive.
 class LuvBarrier extends LuvSync {
 	final count:Int;
 	var arrived = 0;
@@ -3353,9 +3339,9 @@ class LuvBarrier extends LuvSync {
 	}
 }
 
-/** `uv_once_t`: other threads calling `once` meanwhile wait until the function has run. **/
+// port: `uv_once_t`: other threads calling `once` meanwhile wait until the function has run.
 class LuvOnce extends LuvSync {
-	var state = 0; // 0 not run, 1 running, 2 done
+	var state = 0; // port: 0 not run, 1 running, 2 done
 
 	public function once(f:Void->Void):Void {
 		guard.acquire();
@@ -3382,7 +3368,7 @@ class LuvOnce extends LuvSync {
 	}
 }
 
-#if !(target.name == "hxc") /** Hosts without libuv: `EvalLuv.available()` is false and no field reaches these. **/
+#if !(target.name == "hxc") // port: hosts without libuv: `EvalLuv.available()` is false and no field reaches these.
 private class Uv {
 	static function no():Dynamic return throw new Failure("libuv is not available on this host");
 
@@ -3404,7 +3390,7 @@ private class Uv {
 
 	public static function translateSysError(e:Int):Int return no();
 
-	// evaluated while the field lists are built; the values are discarded by `EvalLuv.fields`
+	// port: evaluated while the field lists are built; the values are discarded by `EvalLuv.fields`
 	public static function constant(group:Int, index:Int):Int return 0;
 
 	public static function versionString():String return "";

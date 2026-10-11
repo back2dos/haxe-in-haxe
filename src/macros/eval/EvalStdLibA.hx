@@ -18,33 +18,31 @@ import macros.eval.EvalString;
 
 using macros.eval.EvalValue.EvalValueTools;
 
-/**
-	haxe/src/macro/eval/evalStdLib.ml, lines 45-1484 (StdEvalVector to StdLock,
-	`outside_bounds` and `lineEnd`). The shared helpers of lines 1-44 are in
-	`EvalStdLib`, the rest of the file is in `EvalStdLibB` and `EvalStdLib`.
-
-	Deliberate deviations (the OCaml libraries are replaced by host APIs):
-	- "Byte offsets" are native string indices (see PORTING.md). Bytes <-> string
-	  conversions decode/encode UTF-8 on the host; invalid UTF-8 cannot be held
-	  in a native string.
-	- EReg uses the host `EReg` instead of PCRE2 (see `StdEReg`). HashLink's
-	  regexp also uses PCRE2 with UTF|UCP, plus ALT_BSUX, ALLOW_EMPTY_CLASS and
-	  MATCH_UNSET_BACKREF; compile errors have the host's message. Matches are
-	  snapshotted (`VregexMatch`) so `r_groups` keeps upstream's semantics.
-	- An empty regex match in `map`/`split`/`replace` steps over one code point
-	  instead of one byte (upstream would resume inside a UTF-8 sequence).
-	- zlib is the host `haxe.zip.Compress`; CRC32 is `haxe.crypto.Crc32`.
-	- Dates use the host `Date` (local time via the host's localtime/mktime).
-	  `FileSystem.stat` times have the host's precision.
-	- Sys_error messages are approximated as "<path>: <reason>", with
-	  "No such file or directory" when the path does not exist.
-	- OCaml's Gc statistics/control, Dynlink plugins and the debugger are not
-	  available: those natives fail with "... is not supported by haxe-in-haxe".
-	  Gc collection requests run the host collector when there is one.
-	- `StdLock` waits on the condition's own mutex (host `sys.thread.Condition`
-	  owns its mutex), so `Vlock.lmutex` is unused.
-	- `StdHost.int32Addr` returns the dotted address string (no `inet_addr`).
-**/
+// port: haxe/src/macro/eval/evalStdLib.ml, lines 45-1484 (StdEvalVector to StdLock,
+// `outside_bounds` and `lineEnd`). The shared helpers of lines 1-44 are in
+// `EvalStdLib`, the rest of the file is in `EvalStdLibB` and `EvalStdLib`.
+//
+// Deliberate deviations (the OCaml libraries are replaced by host APIs):
+// - "Byte offsets" are native string indices (see PORTING.md). Bytes <-> string
+//   conversions decode/encode UTF-8 on the host; invalid UTF-8 cannot be held
+//   in a native string.
+// - EReg uses the host `EReg` instead of PCRE2 (see `StdEReg`). HashLink's
+//   regexp also uses PCRE2 with UTF|UCP, plus ALT_BSUX, ALLOW_EMPTY_CLASS and
+//   MATCH_UNSET_BACKREF; compile errors have the host's message. Matches are
+//   snapshotted (`VregexMatch`) so `r_groups` keeps upstream's semantics.
+// - An empty regex match in `map`/`split`/`replace` steps over one code point
+//   instead of one byte (upstream would resume inside a UTF-8 sequence).
+// - zlib is the host `haxe.zip.Compress`; CRC32 is `haxe.crypto.Crc32`.
+// - Dates use the host `Date` (local time via the host's localtime/mktime).
+//   `FileSystem.stat` times have the host's precision.
+// - Sys_error messages are approximated as "<path>: <reason>", with
+//   "No such file or directory" when the path does not exist.
+// - OCaml's Gc statistics/control, Dynlink plugins and the debugger are not
+//   available: those natives fail with "... is not supported by haxe-in-haxe".
+//   Gc collection requests run the host collector when there is one.
+// - `StdLock` waits on the condition's own mutex (host `sys.thread.Condition`
+//   owns its mutex), so `Vlock.lmutex` is unused.
+// - `StdHost.int32Addr` returns the dotted address string (no `inet_addr`).
 class EvalStdLibA {
 	public static function outsideBounds():Dynamic {
 		var haxe_io_Error = EvalContext.getStaticPrototype(EvalContext.getCtx(), EvalHash.key_haxe_io_Error, Globals.nullPos);
@@ -56,7 +54,7 @@ class EvalStdLibA {
 			case _: "\n";
 		}
 
-	/** Sys_error message: "<path>: <reason>". **/
+	// port: Sys_error message: "<path>: <reason>".
 	public static function sysErrorMessage(path:String, e:Dynamic):String {
 		var exists = try sys.FileSystem.exists(path) catch (_:Dynamic) false;
 		return if (!exists) path + ": No such file or directory" else path + ": " + Std.string(e);
@@ -65,7 +63,7 @@ class EvalStdLibA {
 	public static function notSupported(what:String):Dynamic return EvalContext.excString(what + " is not supported by haxe-in-haxe");
 }
 
-/** evalBytes.ml `read_*`/`write_*` (Bytes.get/set raise Invalid_argument out of bounds). **/
+// port: evalBytes.ml `read_*`/`write_*` (Bytes.get/set raise Invalid_argument out of bounds).
 private class BytesIo {
 	public static inline function check(b:Bytes, i:Int):Void {
 		if (i < 0 || i >= b.length) throw new InvalidArgument("index out of bounds");
@@ -123,7 +121,7 @@ private class BytesIo {
 }
 
 class StdEvalVector {
-	// upstream `this` (a Haxe keyword)
+	// port: upstream `this` (a Haxe keyword)
 	static function thisValue(v:Value):Vvector {
 		return switch v {
 			case VVector(vv): vv;
@@ -131,7 +129,7 @@ class StdEvalVector {
 		}
 	}
 
-	/** OCaml Array.blit (overlap-safe, Invalid_argument on bad ranges). **/
+	// port: OCaml Array.blit (overlap-safe, Invalid_argument on bad ranges).
 	static function arrayBlit(src:Array<Value>, srcPos:Int, dst:Array<Value>, dstPos:Int, len:Int):Void {
 		if (len < 0 || srcPos < 0 || srcPos > src.length - len || dstPos < 0 || dstPos > dst.length - len)
 			throw new InvalidArgument("Array.blit");
@@ -367,7 +365,7 @@ class StdBytes {
 		}
 	}
 
-	/** Bytes.sub (Invalid_argument on a bad range). **/
+	// port: Bytes.sub (Invalid_argument on a bad range).
 	static function bytesSub(b:Bytes, pos:Int, len:Int):Bytes {
 		if (pos < 0 || len < 0 || pos > b.length - len) throw new InvalidArgument("String.sub / Bytes.sub");
 		return b.sub(pos, len);
@@ -401,7 +399,7 @@ class StdBytes {
 
 	static inline function outsideBounds():Dynamic return EvalStdLibA.outsideBounds();
 
-	/** OCaml's polymorphic compare on bytes: -1, 0 or 1. **/
+	// port: OCaml's polymorphic compare on bytes: -1, 0 or 1.
 	static function compareBytes(a:Bytes, b:Bytes):Int {
 		var la = a.length, lb = b.length;
 		var n = la < lb ? la : lb;
@@ -524,7 +522,7 @@ class StdBytes {
 		var self = thisValue(vthis);
 		var pos = EvalDecode.decodeInt(pos);
 		var v = EvalDecode.num(v);
-		// not caught upstream: Invalid_argument escapes
+		// port: not caught upstream: Invalid_argument escapes
 		BytesIo.writeI32(self, pos, haxe.io.FPHelper.floatToI32(v));
 		return VNull;
 	});
@@ -577,7 +575,7 @@ class StdBytes {
 		return EvalEncode.encodeString(buf.toString());
 	});
 
-	/** extlib UTF8.validate: true when well-formed (up to 6-byte sequences, no overlongs). **/
+	// port: extlib UTF8.validate: true when well-formed (up to 6-byte sequences, no overlongs).
 	public static function utf8Valid(b:Bytes):Bool {
 		var len = b.length;
 		function trail(c:Int, i:Int, a:Int):Int {
@@ -717,11 +715,9 @@ class StdBytesBuffer {
 		return VNull;
 	});
 
-	/**
-		`Buffer.contents` copies and leaves the buffer usable; the host
-		`BytesBuffer.getBytes` invalidates it, so the instance gets a new buffer
-		holding a copy of the contents.
-	**/
+	// port: `Buffer.contents` copies and leaves the buffer usable; the host
+	// `BytesBuffer.getBytes` invalidates it, so the instance gets a new buffer
+	// holding a copy of the contents.
 	public static final getBytes = EvalEncode.vifun0(vthis -> {
 		var self = thisValue(vthis);
 		var b = self.getBytes();
@@ -735,14 +731,14 @@ class StdBytesBuffer {
 	});
 }
 
-/** Result of a zlib operation (Extc.zresult). **/
+// port: result of a zlib operation (Extc.zresult).
 typedef Zresult = {zFinish:Bool, zRead:Int, zWrote:Int};
 
-/** `zfun`: zstream -> src -> spos -> slen -> dst -> dpos -> dlen -> zflush -> zresult. **/
+// port: `zfun`: zstream -> src -> spos -> slen -> dst -> dpos -> dlen -> zflush -> zresult.
 typedef Zfun = (z:Dynamic, src:Bytes, spos:Int, slen:Int, dst:Bytes, dpos:Int, dlen:Int, flush:Int) -> Zresult;
 
 class StdCompress {
-	// Extc.zflush, numbered as zlib's flush constants
+	// port: Extc.zflush, numbered as zlib's flush constants
 	public static inline final Z_NO_FLUSH = 0;
 	public static inline final Z_PARTIAL_FLUSH = 1;
 	public static inline final Z_SYNC_FLUSH = 2;
@@ -755,11 +751,11 @@ class StdCompress {
 			case Z_SYNC_FLUSH: SYNC;
 			case Z_FULL_FLUSH: FULL;
 			case Z_FINISH: FINISH;
-			case _: BLOCK; // Z_PARTIAL_FLUSH (haxe.zip.FlushMode.BLOCK upstream)
+			case _: BLOCK; // port: Z_PARTIAL_FLUSH (haxe.zip.FlushMode.BLOCK upstream)
 		}
 	}
 
-	/** Extc.zlib_deflate on a host `haxe.zip.Compress` stream (the host deflates the rest of `src`). **/
+	// port: Extc.zlib_deflate on a host `haxe.zip.Compress` stream (the host deflates the rest of `src`).
 	public static function zlibDeflate(z:Dynamic, src:Bytes, spos:Int, slen:Int, dst:Bytes, dpos:Int, dlen:Int, flush:Int):Zresult {
 		#if (hl || eval || neko || cpp)
 		var c:haxe.zip.Compress = z;
@@ -810,7 +806,7 @@ class StdCompress {
 		var s = EvalDecode.decodeBytes(s);
 		var level = EvalDecode.decodeInt(level);
 		#if (hl || eval || neko || cpp)
-		// deflate_init/deflate_bound/deflate(Z_FINISH)/deflate_end, as Compress.run on the host
+		// port: deflate_init/deflate_bound/deflate(Z_FINISH)/deflate_end, as Compress.run on the host
 		var r = try haxe.zip.Compress.run(s, level) catch (_:Dynamic) EvalContext.excString("Compression failed");
 		return EvalEncode.encodeBytes(r);
 		#else
@@ -836,7 +832,7 @@ class StdContext {
 	public static final addBreakpoint = EvalEncode.vfun2((file, line) -> {
 		var file = EvalDecode.decodeString(file);
 		var line = EvalDecode.decodeInt(line);
-		// EvalDebugMisc.add_breakpoint: the debugger is not ported
+		// port: EvalDebugMisc.add_breakpoint: the debugger is not ported
 		EvalStdLibA.notSupported("The Eval debugger (breakpoints)");
 		return VNull;
 	});
@@ -864,7 +860,7 @@ class StdContext {
 		if (plugins.exists(filePath))
 			return plugins.get(filePath);
 		else {
-			// Dynlink.loadfile: native plugins cannot be loaded
+			// port: Dynlink.loadfile: native plugins cannot be loaded
 			return EvalStdLibA.notSupported("Loading native plugins (" + filePath + ")");
 		}
 	});
@@ -888,13 +884,13 @@ class StdDate {
 		}
 	}
 
-	/** Unix.localtime/gmtime take a time_t (truncated); the host Date gives both views. **/
+	// port: Unix.localtime/gmtime take a time_t (truncated); the host Date gives both views.
 	static function tm(d:Float):Date {
 		var t = d < 0 ? Math.fceil(d) : Math.ffloor(d);
 		return Date.fromTime(t * 1000.);
 	}
 
-	/** Unix.mktime (tm_isdst/tm_wday/tm_yday ignored): seconds of a local time. **/
+	// port: Unix.mktime (tm_isdst/tm_wday/tm_yday ignored): seconds of a local time.
 	static function mktime(year:Int, mon:Int, mday:Int, hour:Int, min:Int, sec:Int):Float {
 		return new Date(year, mon, mday, hour, min, sec).getTime() / 1000.;
 	}
@@ -956,13 +952,13 @@ class StdDate {
 
 	public static final getTimezoneOffset = EvalEncode.vifun0(vthis -> {
 		var t = tm(thisValue(vthis));
-		// mktime of the local and of the UTC broken-down times
+		// port: mktime of the local and of the UTC broken-down times
 		var tsLocal = mktime(t.getFullYear(), t.getMonth(), t.getDate(), t.getHours(), t.getMinutes(), t.getSeconds());
 		var tsUTC = mktime(t.getUTCFullYear(), t.getUTCMonth(), t.getUTCDate(), t.getUTCHours(), t.getUTCMinutes(), t.getUTCSeconds());
 		return VInt32(Std.int((tsUTC - tsLocal) / 60.));
 	});
 
-	// Unix.time (whole seconds)
+	// port: Unix.time (whole seconds)
 	public static final now = EvalEncode.vfun0(() -> encodeDate(Math.ffloor(Sys.time())));
 
 	public static final toString = EvalEncode.vifun0(vthis -> EvalString.vstring(EvalPrinting.sDate(thisValue(vthis))));
@@ -996,20 +992,18 @@ class StdDeque {
 	});
 }
 
-/**
-	Upstream compiles with PCRE2 (`UTF|UCP` plus the i/s/m options) and keeps
-	the subject and the `substrings` of the last match. Here the host `EReg`
-	(compiled with the same options, `g` handled by this module) performs each
-	single match through `matchSub(s, pos, len)`, which like `Pcre2.exec ~pos`
-	searches `s[0 .. pos+len)` from `pos`. The match is snapshotted as a
-	`VregexMatch`; group substrings come from the host's `matched(n)` for the
-	host's `matchedNum()` groups (capture count + 1, as `num_of_subs`).
-	`replace` reimplements `Pcre2.replace`/`replace_first` and its template
-	syntax (`$n`, `${n}`-less digits, `$$`, `$&`, `` $` ``, `$'`, `$+`, `$!`);
-	its "nonexistent subpattern" check needs the capture count, which the host
-	only reports after a successful match, so a template naming a missing
-	group fails only when the pattern matches.
-**/
+// port: upstream compiles with PCRE2 (`UTF|UCP` plus the i/s/m options) and keeps
+// the subject and the `substrings` of the last match. Here the host `EReg`
+// (compiled with the same options, `g` handled by this module) performs each
+// single match through `matchSub(s, pos, len)`, which like `Pcre2.exec ~pos`
+// searches `s[0 .. pos+len)` from `pos`. The match is snapshotted as a
+// `VregexMatch`; group substrings come from the host's `matched(n)` for the
+// host's `matchedNum()` groups (capture count + 1, as `num_of_subs`).
+// `replace` reimplements `Pcre2.replace`/`replace_first` and its template
+// syntax (`$n`, `${n}`-less digits, `$$`, `$&`, `` $` ``, `$'`, `$+`, `$!`);
+// its "nonexistent subpattern" check needs the capture count, which the host
+// only reports after a successful match, so a template naming a missing
+// group fails only when the pattern matches.
 class StdEReg {
 	public static function create(r:String, opt:String):VinstanceKind {
 		var global = false;
@@ -1026,14 +1020,14 @@ class StdEReg {
 					throw new Failure("Unsupported regexp option '" + c + "'");
 			}
 		}
-		// `UTF :: `UCP :: flags: the host always compiles with UTF and UCP
+		// port: `UTF :: `UCP :: flags: the host always compiles with UTF and UCP
 		var rex = try new EReg(hostPattern(r), hostOpt.toString()) catch (e:Dynamic) throw new Failure(Std.string(e));
 		var pcre = new Vregex(rex, EvalString.createAscii('~/$r/$opt'), global);
 		return IRegex(pcre);
 	}
 
-	/** PCRE2 takes the pattern with its length; the HashLink host passes a
-		NUL-terminated string, so NUL characters become the `\x00` escape. **/
+	// port: PCRE2 takes the pattern with its length; the HashLink host passes a
+	// NUL-terminated string, so NUL characters become the `\x00` escape.
 	static function hostPattern(r:String):String {
 		#if hl
 		if (r.indexOf("\x00") < 0) return r;
@@ -1054,7 +1048,7 @@ class StdEReg {
 		return try r.matchedNum() catch (_:Dynamic) 0;
 	}
 
-	/** `Pcre2.exec ~pos` on `s[0 .. pos+len)`; null for Not_found. **/
+	// port: `Pcre2.exec ~pos` on `s[0 .. pos+len)`; null for Not_found.
 	public static function exec(rex:Vregex, s:String, pos:Int, len:Int = -1):Null<VregexMatch> {
 		var r = rex.r;
 		if (!r.matchSub(s, pos, len)) return null;
@@ -1066,7 +1060,7 @@ class StdEReg {
 		return new VregexMatch(p.pos, p.pos + p.len, groups);
 	}
 
-	/** Native width of the code point at `i` (where upstream steps one byte after an empty match). **/
+	// port: native width of the code point at `i` (where upstream steps one byte after an empty match).
 	static function charWidth(s:String, i:Int):Int {
 		var c = StringTools.fastCodeAt(s, i);
 		if (c >= 0xD800 && c <= 0xDBFF && i + 1 < s.length) {
@@ -1082,7 +1076,7 @@ class StdEReg {
 		if (n < 0 || n >= substrings.groups.length) return EvalContext.excString("Invalid group");
 		var sub = substrings.groups[n];
 		if (sub == null) return VNull;
-		// group offsets are only needed for group 0
+		// port: group offsets are only needed for group 0
 		return if (n == 0) f(substrings.first, substrings.last, sub) else f(-1, -1, sub);
 	}
 
@@ -1093,7 +1087,7 @@ class StdEReg {
 		}
 	}
 
-	/** OCaml Str.quote. **/
+	// port: OCaml Str.quote.
 	static function strQuote(s:String):String {
 		var buf = new StringBuf();
 		for (i in 0...s.length) {
@@ -1159,7 +1153,7 @@ class StdEReg {
 		return EvalString.createUnknown(buf.toString());
 	});
 
-	// upstream `match'`
+	// port: upstream `match'`
 	public static final match = EvalEncode.vifun1((vthis, s) -> {
 		var self = thisValue(vthis);
 		var s = EvalDecode.decodeString(s);
@@ -1174,7 +1168,7 @@ class StdEReg {
 		}
 	});
 
-	// alias of `match` (the name used by the `init_*` tables)
+	// port: alias of `match` (the name used by the `init_*` tables)
 	public static final matchValue = match;
 
 	public static final matched = EvalEncode.vifun1((vthis, n) -> {
@@ -1190,7 +1184,7 @@ class StdEReg {
 
 	public static final matchedPos = EvalEncode.vifun0(vthis -> {
 		var self = thisValue(vthis);
-		// upstream converts byte offsets to character offsets; here native offsets to code points
+		// port: upstream converts byte offsets to character offsets; here native offsets to code points
 		function charOffset(s:String, i:Int):Int return EvalString.codePointLength(s.substring(0, i));
 		return maybeRun(self, 0, (first, last, _) -> {
 			var first = charOffset(self.rString, first);
@@ -1233,15 +1227,15 @@ class StdEReg {
 		}
 	});
 
-	// Pcre2.subst elements
-	static inline final SUBST_STRING = 0; // (ix, len) in the template
+	// port: Pcre2.subst elements
+	static inline final SUBST_STRING = 0; // port: (ix, len) in the template
 	static inline final BACKREF = 1;
 	static inline final MATCH = 2;
 	static inline final PRE_MATCH = 3;
 	static inline final POST_MATCH = 4;
 	static inline final LAST_PAREN_MATCH = 5;
 
-	/** Pcre2.subst: the elements (in order), the highest backreference and whether `$+` is used. **/
+	// port: Pcre2.subst: the elements (in order), the highest backreference and whether `$+` is used.
 	static function subst(str:String):{elements:Array<{kind:Int, a:Int, b:Int}>, maxBr:Int, withLp:Bool} {
 		var maxBr = 0;
 		var withLp = false;
@@ -1306,7 +1300,7 @@ class StdEReg {
 		return {elements: acc, maxBr: maxBr, withLp: withLp};
 	}
 
-	/** Pcre2.calc_trans_lst: the replacement text of one match. **/
+	// port: Pcre2.calc_trans_lst: the replacement text of one match.
 	static function calcTrans(m:VregexMatch, subj:String, templ:String, elements:Array<{kind:Int, a:Int, b:Int}>):String {
 		var buf = new StringBuf();
 		for (e in elements) {
@@ -1314,7 +1308,7 @@ class StdEReg {
 				case SUBST_STRING:
 					buf.addSub(templ, e.a, e.b);
 				case BACKREF:
-					if (e.a == 0) buf.add(Sys.programPath()); // Sys.argv.(0) upstream
+					if (e.a == 0) buf.add(Sys.programPath()); // port: Sys.argv.(0) upstream
 					else {
 						var g = m.groups[e.a];
 						if (g != null) buf.add(g);
@@ -1325,7 +1319,7 @@ class StdEReg {
 					buf.addSub(subj, 0, m.first);
 				case POST_MATCH:
 					buf.addSub(subj, m.last, subj.length - m.last);
-				case _: // LAST_PAREN_MATCH
+				case _: // port: LAST_PAREN_MATCH
 					var i = m.groups.length - 1;
 					while (m.groups[i] == null)
 						i--;
@@ -1430,11 +1424,11 @@ class StdEReg {
 	});
 }
 
-/** File open flags of `create_out` (Open_creat is always added). **/
+// port: file open flags of `create_out` (Open_creat is always added).
 enum OutFlags {
-	OAppend; // [Open_append]
-	OUpdate; // [Open_rdonly; Open_wronly]
-	OWrite; // [Open_wronly; Open_trunc]
+	OAppend; // port: [Open_append]
+	OUpdate; // port: [Open_rdonly; Open_wronly]
+	OWrite; // port: [Open_wronly; Open_trunc]
 }
 
 class StdFile {
@@ -1448,7 +1442,7 @@ class StdFile {
 			switch flags {
 				case OAppend: sys.io.File.append(path, binary);
 				case OUpdate:
-					// Open_creat
+					// port: Open_creat
 					if (!sys.FileSystem.exists(path)) sys.io.File.saveBytes(path, Bytes.alloc(0));
 					sys.io.File.update(path, binary);
 				case OWrite: sys.io.File.write(path, binary);
@@ -1572,7 +1566,7 @@ class StdFileInput {
 		var pos = EvalDecode.decodeInt(pos);
 		var len = EvalDecode.decodeInt(len);
 		if (pos < 0 || len < 0 || pos > bytes.length - len) throw new InvalidArgument("input");
-		// `input` returns 0 at end of file; the host raises Eof
+		// port: `input` returns 0 at end of file; the host raises Eof
 		var i = if (len == 0) 0 else try EvalLock.blocking(() -> t.ch.readBytes(bytes, pos, len)) catch (_:haxe.io.Eof) 0;
 		if (i == 0) {
 			t.eof.v = true;
@@ -1716,7 +1710,7 @@ class StdFileSystem {
 	public static final fullPath = EvalEncode.vfun1(relPath -> {
 		var relPath = EvalDecode.decodeString(relPath);
 		var p = try sys.FileSystem.fullPath(relPath) catch (_:Dynamic) null;
-		// Extc.get_full_path fails with Failure "get_full_path"
+		// port: Extc.get_full_path fails with Failure "get_full_path"
 		if (p == null) return EvalContext.excString('Failure("get_full_path")');
 		return EvalString.createUnknown(p);
 	});
@@ -1757,13 +1751,13 @@ class StdFileSystem {
 			{name: EvalHash.key_nlink, value: VInt32(s.nlink)},
 			{name: EvalHash.key_rdev, value: VInt32(s.rdev)},
 			{name: EvalHash.key_size, value: VInt32(s.size)},
-			// st_perm
+			// port: st_perm
 			{name: EvalHash.key_mode, value: VInt32(s.mode & 0xFFF)},
 		]);
 	});
 }
 
-/** OCaml's Gc is not available: statistics and control fail, collections use the host collector. **/
+// port: OCaml's Gc is not available: statistics and control fail, collections use the host collector.
 class StdGc {
 	public static final key_minor_heap_size = EvalHash.hash("minor_heap_size");
 	public static final key_major_heap_increment = EvalHash.hash("major_heap_increment");
@@ -1795,7 +1789,7 @@ class StdGc {
 		#elseif cpp
 		cpp.vm.Gc.run(true);
 		#elseif (target.name == "hxc")
-		// a collection, then the finalisers it found due (rt.c)
+		// port: a collection, then the finalisers it found due (rt.c)
 		hxc.NativeGc.collect(full);
 		hxc.NativeGc.runFinalisers();
 		#end
@@ -1813,7 +1807,7 @@ class StdGc {
 	public static final counters = EvalEncode.vfun0(() -> unsupported("counters"));
 
 	#if (target.name == "hxc")
-	// the hxc host GC has OCaml's finalisers (backend/rt/rt.c)
+	// port: the hxc host GC has OCaml's finalisers (backend/rt/rt.c)
 	public static final finalise = EvalEncode.vfun2((f, v) -> {
 		hxc.NativeGc.finalise((v:Value) -> {
 			EvalMisc.callValue(f, [v]);
@@ -1821,12 +1815,12 @@ class StdGc {
 		VNull;
 	});
 
-	// finalisers run one after the other already
+	// port: finalisers run one after the other already
 	public static final finaliseRelease = EvalEncode.vfun0(() -> VNull);
 	#else
 	public static final finalise = EvalEncode.vfun2((f, v) -> unsupported("finalise"));
 
-	// no finalisers are ever registered
+	// port: no finalisers are ever registered
 	public static final finaliseRelease = EvalEncode.vfun0(() -> VNull);
 	#end
 
@@ -1868,7 +1862,7 @@ class StdGc {
 }
 
 class StdHost {
-	/** Dotted address of a host-order int32 (upstream returns `Unix.inet_addr`). **/
+	// port: dotted address of a host-order int32 (upstream returns `Unix.inet_addr`).
 	public static function int32Addr(h:Int):String {
 		var base = h & 0xFFFFFF;
 		return '${h >>> 24}.${base >>> 16}.${(base >>> 8) & 0xFF}.${base & 0xFF}';
@@ -1876,7 +1870,7 @@ class StdHost {
 
 	public static final localhost = EvalEncode.vfun0(() -> {
 		#if (target.name == "hxc")
-		// catch_unix_error Unix.gethostname
+		// port: catch_unix_error Unix.gethostname
 		var name = hxc.NativeNet.gethostname();
 		if (name == null) macros.eval.EvalStdLibB.StdSocket.unixError("gethostname");
 		return EvalString.createUnknown(name);
@@ -1888,7 +1882,7 @@ class StdHost {
 	public static final hostReverse = EvalEncode.vfun1(ip -> {
 		var ip = EvalDecode.decodeI32(ip);
 		#if (target.name == "hxc")
-		// Unix.gethostbyaddr raises Not_found
+		// port: Unix.gethostbyaddr raises Not_found
 		var name = hxc.NativeNet.reverse(ip);
 		if (name == null) EvalContext.excString("Could not reverse host");
 		#else
@@ -1905,7 +1899,7 @@ class StdHost {
 	public static final resolve = EvalEncode.vfun1(name -> {
 		var name = EvalDecode.decodeString(name);
 		#if (target.name == "hxc")
-		// Unix.gethostbyname raises Not_found; the address is h_addr_list.(0)
+		// port: Unix.gethostbyname raises Not_found; the address is h_addr_list.(0)
 		var a = hxc.NativeNet.resolve(name);
 		if (a == null) EvalContext.excString('Could not resolve host $name');
 		return VInt32(a[0]);
@@ -1919,10 +1913,16 @@ class StdHost {
 	});
 }
 
-/*
-	Yield between spin-loop iterations when waiting on a lock with a timeout
-	(Unix.sleepf 0.0 upstream, releasing the runtime lock).
- */
+// Yield between spin-loop iterations when waiting on a lock or semaphore
+// with a timeout. Unix.sleepf 0.0 calls caml_enter_blocking_section /
+// caml_leave_blocking_section, which releases the OCaml domain lock for the
+// duration of the nanosleep. This is required for Thread and LuvThread modes,
+// where all threads share one domain lock: without it, the spinning thread
+// holds the domain lock and prevents other threads from running OCaml code
+// (including the code that would release the lock), causing a deadlock.
+// For Domain mode this is also safe — each domain has its own lock — and the
+// brief syscall is a reasonable price for correct cross-mode behaviour.
+// port: the port yields with `EvalLock.yieldNow`, which gives up the Eval lock.
 class StdLock {
 	static function thisValue(vthis:Value):Vlock {
 		return switch vthis {

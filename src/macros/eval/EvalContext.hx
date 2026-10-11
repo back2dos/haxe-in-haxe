@@ -11,13 +11,9 @@ import macros.eval.EvalHash;
 
 using macros.eval.EvalValue.EvalValueTools;
 
-/**
-	haxe/src/macro/eval/evalContext.ml.
-
-	The debugger (breakpoints, socket, debug scopes) is not ported: its state
-	is kept so that the shared code paths read it, and `supportDebugger` stays
-	false. Per-thread `eval` state uses a thread-local map keyed by thread id.
-**/
+// port: the debugger (breakpoints, socket, debug scopes) is not ported: its state
+// is kept so that the shared code paths read it, and `supportDebugger` stays
+// false. Per-thread `eval` state is a host thread-local (`sys.thread.Tls`).
 @:structInit class VarInfo {
 	public var viName:String;
 	public var viPos:Pos;
@@ -90,16 +86,16 @@ enum EnvKind {
 	}
 }
 
-/** Per-environment debug information. These values are only modified while debugging. **/
-// Environment slots: a bare native array on HashLink (haxe.ds.Vector is an Array there).
+// port: environment slots: a bare native array on HashLink (haxe.ds.Vector is an Array there).
 typedef ValueSlots = #if hl hl.NativeArray<Value> #else haxe.ds.Vector<Value> #end;
 
+/** Per-environment debug information. These values are only modified while debugging. **/
 class EnvDebug {
 	// The timer function to execute when the environment finishes executing
 	public final timer:Void->Void;
 	// The current scope stack.
 	public var scopes:Array<Scope>;
-	// The current line being executed.
+	// The current line being executed. This in conjunction with `env_info.pfile` is used to find breakpoints.
 	public var line:Int;
 	// The current expression being executed
 	public var debugExpr:String;
@@ -126,11 +122,14 @@ class Env {
 	public final envDebug:EnvDebug;
 	// The position at which the current environment was left, e.g. by a call.
 	public var envLeavePmin:Int = 0;
+	// The position at which the current environment was left, e.g. by a call.
 	public var envLeavePmax:Int = 0;
-	// The environment's local variables.
-	// Vectors (native arrays on HashLink): one allocation, unchecked access.
+	// The environment's local variables. Indices are determined during compile-time, or can be obtained
+	// through `scope.locals` when debugging.
+	// port: vectors (native arrays on HashLink): one allocation, unchecked access.
 	public final envLocals:ValueSlots;
-	// The environment's captured local variables.
+	// The reference to the environment's captured local variables. Indices are determined during compile-time,
+	// or can be obtained through `env_info.capture_infos`.
 	public final envCaptures:ValueSlots;
 	// Map of extra variables added while debugging. Keys are hashed variable names.
 	public var envExtraLocals:GlobalsIntMap<Value>;
@@ -167,7 +166,7 @@ class Eval {
 	public var caughtException:Value = VNull;
 	// The value which was last returned.
 	public var lastReturn:Null<Value> = null;
-	// Thread-local storage (sys.thread.Tls), keyed by tls id
+	// port: thread-local storage (sys.thread.Tls), keyed by tls id
 	public final evalStorage:Map<Int, Value> = new Map();
 
 	public function new(thread:Vthread, breakpoint:Breakpoint) {
@@ -255,11 +254,14 @@ enum ExceptionMode {
 	CatchNone;
 }
 
-/** Per-context debug information (the debugger itself is not ported). **/
+// port: the debugger itself is not ported.
+
+/** Per-context debug information **/
 class Debug {
 	// The registered breakpoints
 	public final breakpoints:Map<Int, Map<Int, Breakpoint>> = new Map();
-	// Whether or not debugging is supported.
+	// Whether or not debugging is supported. Has various effects on the amount of
+	// data being retained at run-time.
 	public var supportDebugger:Bool = false;
 	// The current exception mode
 	public var exceptionMode:ExceptionMode = CatchUncaught;
@@ -276,7 +278,7 @@ class Context {
 	public var hadError:Bool = false;
 	public var curapi:macros.MacroApi.CompilerApi;
 	public var typeCache:GlobalsIntMap<core.TType.ModuleType> = GlobalsIntMap.empty();
-	public final overrides:Map<String, Bool> = new Map(); // keyed by "path.field"
+	public final overrides:Map<String, Bool> = new Map(); // port: keyed by "path.field"
 	public final timerCtx:core.Timer.TimerContext;
 	public var args:Array<String> = [];
 	// prototypes
@@ -288,7 +290,7 @@ class Context {
 	public var constructors:GlobalsIntMap<AtomicLazy<Value>> = GlobalsIntMap.empty();
 	public final fakeProtoCache:Map<Int, Vprototype> = new Map();
 	public final fileKeys:context.Common.FileKeys;
-	public final objectNameCache:Map<String, Int> = new Map(); // keyed by the joined hashed names
+	public final objectNameCache:Map<String, Int> = new Map(); // port: keyed by the joined hashed names
 	public var getObjectPrototype:(ctx:Context, fields:Array<Int>) -> Vprototype;
 	// eval
 	public var nextThreadId:Int = 0;
@@ -327,7 +329,7 @@ class GlobalState {
 	public static final macroLib:Map<String, Value> = new Map();
 }
 
-/** RunTimeException upstream: an exception value thrown by interpreted code. **/
+// port: RunTimeException upstream: an exception value thrown by interpreted code.
 class RunTimeException extends haxe.Exception {
 	public final value:Value;
 	public final envs:Array<Env>;
@@ -362,8 +364,7 @@ class EvalContext {
 	// Misc
 	static final currentEval = new sys.thread.Tls<Eval>();
 
-	/** The current thread's eval state (Thread_local_storage.get_exn upstream). **/
-	// Thread-local reads are a native call and a cast on HashLink. While a single
+	// port: thread-local reads are a native call and a cast on HashLink. While a single
 	// thread has set an eval, it is also kept in a static; a second thread switches
 	// to the thread-local value for good (which is always set).
 	static var singleEval:Null<Eval> = null;
@@ -371,13 +372,14 @@ class EvalContext {
 	static var singleThread:Null<sys.thread.Thread> = null;
 	static var multiThreaded = false;
 
+	// port: `Thread_local_storage.get_exn ctx.eval`
 	public static function getEval(ctx:Context):Eval {
 		var e = multiThreaded ? currentEval.value : singleEval;
 		if (e == null) throw NotFound.raise();
 		return e;
 	}
 
-	/** `Thread_local_storage.get_opt ctx.eval`: the current host thread's own eval, if set. **/
+	// port: `Thread_local_storage.get_opt ctx.eval`: the current host thread's own eval, if set.
 	public static function getEvalOpt(ctx:Context):Null<Eval> return currentEval.value;
 
 	public static function setEval(ctx:Context, e:Eval):Void {
@@ -408,7 +410,7 @@ class EvalContext {
 
 	public static inline function callFunction(f:Vfunc, vl:Array<Value>):Value return f(vl);
 
-	/** (hashed name, value) pairs; the list order of the upstream folds. **/
+	// port: (hashed name, value) pairs; the list order of the upstream folds.
 	public static function objectFields(o:Vobject):Array<{name:Int, value:Value}> {
 		return switch o.oproto {
 			case OProto(proto):
@@ -492,7 +494,7 @@ class EvalContext {
 		};
 	}
 
-	// Array.make n vnull: one allocation instead of growing a comprehension.
+	// port: Array.make n vnull: one allocation instead of growing a comprehension.
 	static function makeNullArray(n:Int):ValueSlots {
 		var a = new ValueSlots(n);
 		for (i in 0...n) a[i] = VNull;
@@ -500,7 +502,7 @@ class EvalContext {
 	}
 
 	public static function pushEnvironment(ctx:Context, info:EnvInfo):Env {
-		core.ds.GcPolicy.tick(); // macro code allocates without typing anything
+		core.ds.GcPolicy.tick(); // port: macro code allocates without typing anything
 		EvalLock.tick();
 		var eval = getEval(ctx);
 		var timer = if (ctx.detailTimes) core.Timer.startTimer(ctx.timerCtx,
@@ -512,7 +514,7 @@ class EvalContext {
 		var env = new Env(info, debug, locals, captures, GlobalsIntMap.empty(), info.kind == EKEntrypoint ? null : eval.env, stackDepth,
 			eval);
 		eval.env = env;
-		// function breakpoints need the debugger socket, which is not ported
+		// port: function breakpoints need the debugger socket, which is not ported
 		return env;
 	}
 

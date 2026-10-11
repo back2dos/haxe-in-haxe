@@ -26,29 +26,27 @@ import compiler.io.CompilerIo;
 
 using macros.eval.EvalValue.EvalValueTools;
 
-/**
-	haxe/src/macro/eval/evalStdLib.ml, second half (lines 1485-3367: `StdLog` ..
-	`StdNativeString`; `lineEnd` is `EvalStdLibA.lineEnd`). Each `module StdX` is class `StdX`.
-
-	Deviations (see also the comments at each site):
-	- Natives are `static final` values; upstream aliases between modules
-	  (`fastCodeAt = StdString.charCodeAt`, ...) are read-only properties so they
-	  do not depend on the static initialisation order of the classes.
-	- `Math.random`/`Std.random` use the host generator instead of OCaml's
-	  `Random.State`.
-	- Sockets (`eval.vm.NativeSocket`) use BSD sockets through `hxc.NativeNet`
-	  on the hxc host (backend/); on other hosts every native throws a clear
-	  error.
-	- Threads only have the host `Thread` mode: `exit` behaves as upstream's
-	  `Domain` branch (threads are spawned with `spawn_domain`), `join` is not
-	  supported (the host thread API has no join).
-	- `sys.thread.Condition` keeps its own mutex on the host: acquire/release/wait
-	  use the condition's lock instead of `Vcondition.cmutex`.
-	- zlib streams (`Vzlib.z`) are host `haxe.zip.Compress`/`haxe.zip.Uncompress`
-	  objects (see `StdCompress`).
-	- `haxe.Resource.listNames` follows the host map's key order (OCaml `Hashtbl`
-	  order cannot be reproduced).
-**/
+// port: haxe/src/macro/eval/evalStdLib.ml, second half (lines 1485-3367: `StdLog` ..
+// `StdNativeString`; `lineEnd` is `EvalStdLibA.lineEnd`). Each `module StdX` is class `StdX`.
+//
+// Deviations (see also the comments at each site):
+// - Natives are `static final` values; upstream aliases between modules
+//   (`fastCodeAt = StdString.charCodeAt`, ...) are read-only properties so they
+//   do not depend on the static initialisation order of the classes.
+// - `Math.random`/`Std.random` use the host generator instead of OCaml's
+//   `Random.State`.
+// - Sockets (`eval.vm.NativeSocket`) use BSD sockets through `hxc.NativeNet`
+//   on the hxc host (backend/) and `EvalHostNet` on HashLink; on other hosts
+//   every native throws a clear error.
+// - Threads are host threads: `exit` of a `Thread`-mode thread behaves as
+//   upstream's `Domain` branch (there is no `Thread.exit`), and `join` waits
+//   for the thread's `finished` lock.
+// - `sys.thread.Condition` keeps its own mutex on the host: acquire/release/wait
+//   use the condition's lock instead of `Vcondition.cmutex`.
+// - zlib streams (`Vzlib.z`) are host `haxe.zip.Compress`/`haxe.zip.Uncompress`
+//   objects (see `StdCompress`).
+// - `haxe.Resource.listNames` follows the host map's key order (OCaml `Hashtbl`
+//   order cannot be reproduced).
 class StdLibBHelpers {
 	public static function encodeListIterator(l:Array<Value>):Value {
 		var l = l;
@@ -81,14 +79,14 @@ class StdLibBHelpers {
 		});
 	}
 
-	/** `List.nth`: Failure "nth" past the end, Invalid_argument "List.nth" for a negative index. **/
+	// port: `List.nth`: Failure "nth" past the end, Invalid_argument "List.nth" for a negative index.
 	public static function listNth<T>(l:Array<T>, n:Int):T {
 		if (n < 0) throw new InvalidArgument("List.nth");
 		if (n >= l.length) throw new Failure("nth");
 		return l[n];
 	}
 
-	/** Physical equality (`==`) on values. **/
+	// port: physical equality (`==`) on values.
 	public static function physicalEquals(a:Value, b:Value):Bool {
 		return switch [a, b] {
 			case [VNull, VNull] | [VTrue, VTrue] | [VFalse, VFalse]: true;
@@ -106,7 +104,7 @@ class StdLibBHelpers {
 		}
 	}
 
-	/** OCaml `int_of_float` (amd64) followed by `Int32.of_int`. **/
+	// port: OCaml `int_of_float` (amd64) followed by `Int32.of_int`.
 	public static function intOfFloat(f:Float):Int {
 		if (Math.isNaN(f) || f >= 9223372036854775808.0 || f <= -9223372036854775808.0) return 0;
 		var t = f < 0 ? Math.fceil(f) : Math.ffloor(f);
@@ -116,7 +114,7 @@ class StdLibBHelpers {
 		return Std.int(m);
 	}
 
-	/** Host errors standing for upstream's `Failure`/`Unix_error` in `process_catch`. **/
+	// port: host errors standing for upstream's `Failure`/`Unix_error` in `process_catch`.
 	public static function processCatch<A, B>(f:A->B, arg:A):B {
 		try {
 			return f(arg);
@@ -479,10 +477,10 @@ class StdObjectMap {
 	});
 }
 
-// `let random = Random.State.make_self_init()`: the host generator is used instead.
+// port: `let random = Random.State.make_self_init()`: the host generator is used instead.
 
 class StdMath {
-	// Int32.of_float (mod_float f 2147483648.0); OCaml converts nan to 0 (amd64)
+	// port: Int32.of_float (mod_float f 2147483648.0); OCaml converts nan to 0 (amd64)
 	static function toInt(f:Float):Int {
 		var m = f % 2147483648.0;
 		if (Math.isNaN(m)) return 0;
@@ -496,7 +494,7 @@ class StdMath {
 
 	public static final abs = EvalEncode.vfun1(v -> {
 		switch v {
-			case VInt32(i): VInt32(i < 0 ? -i : i); // Int32.abs (min_int stays min_int)
+			case VInt32(i): VInt32(i < 0 ? -i : i); // port: Int32.abs (min_int stays min_int)
 			case VFloat(f): VFloat(Math.abs(f));
 			case _: EvalExceptions.unexpectedValue(v, "number");
 		}
@@ -649,7 +647,7 @@ class StdCondition {
 		}
 	}
 
-	// The host condition owns its mutex: Mutex.lock cond.cmutex
+	// port: the host condition owns its mutex: Mutex.lock cond.cmutex
 	public static final acquire = EvalEncode.vifun0(vthis -> {
 		var cond = thisValue(vthis);
 		EvalLock.acquireCondition(cond.cond);
@@ -822,7 +820,7 @@ class StdReflect {
 		}
 	});
 
-	// field' upstream
+	// port: field' upstream
 	public static final fieldValue = EvalEncode.vfun2((o, name) -> {
 		if (o.match(VNull)) VNull
 		else EvalField.dynamicField(o, EvalHash.hash(EvalDecode.decodeVstring(name).sstring));
@@ -947,14 +945,12 @@ private typedef SocketHost = hxc.NativeNet;
 private typedef SocketHost = macros.eval.EvalHostNet;
 #end
 
-/**
-	Sockets: on the hxc host (backend/) the natives call BSD sockets through
-	`hxc.NativeNet` (backend/rt/rt_net.c) where upstream calls OCaml's Unix
-	module; a socket is its file descriptor. On HashLink, EvalHostNet offers
-	the same interface over the host's sys.net.Socket. Other hosts keep
-	upstream's names and argument checks, then fail ("... is not supported by
-	haxe-in-haxe").
-**/
+// port: sockets: on the hxc host (backend/) the natives call BSD sockets through
+// `hxc.NativeNet` (backend/rt/rt_net.c) where upstream calls OCaml's Unix
+// module; a socket is its file descriptor. On HashLink, EvalHostNet offers
+// the same interface over the host's sys.net.Socket. Other hosts keep
+// upstream's names and argument checks, then fail ("... is not supported by
+// haxe-in-haxe").
 class StdSocket {
 	static function thisValue(vthis:Value):Dynamic {
 		return switch vthis {
@@ -964,7 +960,7 @@ class StdSocket {
 	}
 
 	#if (target.name == "hxc" || hl)
-	/** `catch_unix_error`: `Unix_error(err, cmd, args)` becomes "message(cmd, args)". **/
+	// port: `catch_unix_error`: `Unix_error(err, cmd, args)` becomes "message(cmd, args)".
 	public static function unixError(cmd:String):Dynamic {
 		return EvalContext.excString(SocketHost.strerror(SocketHost.errno()) + "(" + cmd + ", )");
 	}
@@ -1116,7 +1112,7 @@ class StdSocket {
 		var writeFds = [for (p in write) p.fd];
 		var othersFds = [for (p in others) p.fd];
 		check(EvalLock.blocking(() -> SocketHost.select(readFds, writeFds, othersFds, timeout)), "select");
-		// Unix.select lists the ready descriptors in reverse input order; List.assq
+		// port: Unix.select lists the ready descriptors in reverse input order; List.assq
 		// maps each back to the first pair holding it
 		function ready(pairs:Array<{fd:Int, v:Value}>, fds:Array<Int>):Array<Value> {
 			var l = [];
@@ -1162,7 +1158,7 @@ class StdSocket {
 		var self = thisValue(vthis);
 		var char = EvalDecode.decodeInt(char);
 		#if (target.name == "hxc" || hl)
-		// char_of_int
+		// port: char_of_int
 		if (char < 0 || char > 255) throw new InvalidArgument("char_of_int");
 		var buf = Bytes.alloc(1);
 		buf.set(0, char);
@@ -1210,9 +1206,9 @@ class StdSocket {
 	public static final shutdown = EvalEncode.vifun2((vthis, read, write) -> {
 		var self = thisValue(vthis);
 		var mode = switch [read, write] {
-				case [VTrue, VTrue]: 2; // SHUTDOWN_ALL
-				case [VTrue, _]: 0; // SHUTDOWN_RECEIVE
-				case [_, VTrue]: 1; // SHUTDOWN_SEND
+				case [VTrue, VTrue]: 2; // port: SHUTDOWN_ALL
+				case [VTrue, _]: 0; // port: SHUTDOWN_RECEIVE
+				case [_, VTrue]: 1; // port: SHUTDOWN_SEND
 				case _: EvalContext.excString("Nothing to shut down");
 			}
 		#if (target.name == "hxc" || hl)
@@ -1231,7 +1227,7 @@ class StdStd {
 		case _: VFalse;
 	});
 
-	// is' upstream
+	// port: is' upstream
 	public static var isValue(get, never):Value;
 
 	static inline function get_isValue() return isOfType;
@@ -1577,7 +1573,7 @@ class StdStringTools {
 			return if (p1 != null && p2 != null) (p1 << 4) | p2 else null;
 		}
 		function expectHex(i:Int):Int {
-			// String.unsafe_get: reading past the end is not checked upstream
+			// port: String.unsafe_get: reading past the end is not checked upstream
 			return if (i < len && StringTools.fastCodeAt(s, i) == "%".code) {
 				var c = decodeHex(i + 1);
 				if (c == null) EvalContext.excString("Malformed")
@@ -1617,7 +1613,7 @@ class StdStringTools {
 				add(EvalString.createAscii(" "));
 				i += 1;
 			} else {
-				// upstream adds the byte; here the native character
+				// port: upstream adds the byte; here the native character
 				add(EvalString.createUnknownVstring(s.charAt(i)));
 				i += 1;
 			}
@@ -1696,7 +1692,7 @@ class StdSys {
 
 	public static final putEnv = EvalEncode.vfun2((s, v) -> {
 		if (v.match(VNull)) {
-			// Luv.Env.unsetenv upstream
+			// port: Luv.Env.unsetenv upstream
 			Sys.putEnv(EvalDecode.decodeString(s), null);
 			VNull;
 		} else {
@@ -1740,7 +1736,7 @@ class StdSys {
 
 	static var cachedSysName:Null<String> = null;
 
-	// Upstream runs `uname` on Unix (mapping Darwin to Mac); the host's Sys.systemName is used here.
+	// port: upstream runs `uname` on Unix (mapping Darwin to Mac); the host's Sys.systemName is used here.
 	public static final systemName = EvalEncode.vfun0(() -> {
 		var s = switch cachedSysName {
 				case null:
@@ -1779,7 +1775,7 @@ class StdThread {
 			case LuvThread(_):
 				// Caught by catch_exceptions
 				throw new macros.MacroApi.Abort();
-			// upstream `Domain _` branch: the host only has threads, spawned as domains upstream
+			// port: upstream's `Domain _` branch, also taken for `Thread _` (upstream: `Thread.exit()`)
 			case _:
 				var ctx = EvalContext.getCtx();
 				var path = EvalHash.key_eval_vm_NativeThreadExit;
@@ -1798,7 +1794,7 @@ class StdThread {
 	public static final join = EvalEncode.vfun1(thread -> {
 		switch thisValue(thread).threadMode {
 			case Domain(_, finished) | Thread(_, finished):
-				// wait, then release again so that later joins return at once
+				// port: wait, then release again so that later joins return at once
 				EvalLock.blocking(() -> finished.wait());
 				finished.release();
 			case LuvThread(t):
@@ -1829,7 +1825,7 @@ class StdThread {
 	});
 
 	public static final yield = EvalEncode.vfun0(() -> {
-		// Thread.yield / Domain.cpu_relax upstream
+		// port: Thread.yield / Domain.cpu_relax upstream
 		EvalLock.yieldNow();
 		VNull;
 	});
@@ -1843,7 +1839,7 @@ class StdTls {
 		}
 	}
 
-	// TlsStorage is keyed by the Tls value upstream; here by its id
+	// port: TlsStorage is keyed by the Tls value upstream; here by its id
 	public static final getValue = EvalEncode.vifun0(vthis -> {
 		var id = thisValue(vthis);
 		try {
@@ -2105,11 +2101,9 @@ class StdUncompress {
 		}
 	}
 
-	/**
-		`Extc.zlib_inflate` on a host `haxe.zip.Uncompress`. The host stream reads
-		up to the end of `src` and writes up to the end of `dst`, so both are cut
-		to `slen`/`dlen` when shorter.
-	**/
+	// port: `Extc.zlib_inflate` on a host `haxe.zip.Uncompress`. The host stream reads
+	// up to the end of `src` and writes up to the end of `dst`, so both are cut
+	// to `slen`/`dlen` when shorter.
 	public static function zlibInflate(z:Dynamic, src:Bytes, spos:Int, slen:Int, dst:Bytes, dpos:Int, dlen:Int, flush:Int):Zresult {
 		var u:haxe.zip.Uncompress = z;
 		if (spos + slen != src.length) src = src.sub(0, spos + slen);
@@ -2162,7 +2156,7 @@ class StdUtf8 {
 
 	public static final addChar = EvalEncode.vifun1((vthis, c) -> {
 		var c = EvalDecode.decodeInt(c);
-		// UCharExt.uchar_of_int
+		// port: UCharExt.uchar_of_int
 		if (c < 0 || c >= 0x8000000) throw new InvalidArgument("UChar.uchar_of_int");
 		thisValue(vthis).addChar(c);
 		VNull;
@@ -2183,7 +2177,7 @@ class StdUtf8 {
 		var s = EvalDecode.decodeString(s);
 		var buf = new StringBuf();
 		for (uc in new haxe.iterators.StringIteratorUnicode(s)) {
-			// UCharExt.char_of
+			// port: UCharExt.char_of
 			if (uc > 255) throw new InvalidArgument("UChar.char_of");
 			buf.addChar(uc);
 		}
@@ -2221,7 +2215,7 @@ class StdUtf8 {
 
 	public static final validate = EvalEncode.vfun1(s -> {
 		var s = EvalDecode.decodeString(s);
-		// native strings only fail to be valid with lone surrogates
+		// port: native strings only fail to be valid with lone surrogates
 		var valid = true;
 		var i = 0;
 		while (i < s.length) {
@@ -2267,7 +2261,7 @@ class StdNativeString {
 	});
 
 	public static final concat = EvalEncode.vfun2((v1, v2) -> {
-		// `let ... and ...`: both are evaluated before the concatenation
+		// port: `let ... and ...`: both are evaluated before the concatenation
 		var s1 = EvalDecode.decodeNativeString(v1);
 		var s2 = EvalDecode.decodeNativeString(v2);
 		var b = Bytes.alloc(s1.length + s2.length);
