@@ -140,8 +140,9 @@ void *hxc_NativeSys_systemName(void) {
 #endif
 }
 
-// Windows (Cosmopolitan builds, WIN_HOST): there is no /bin/sh, so shell
-// commands run through cmd.exe /c; execvp does not try the .exe extension, so
+// Windows (Cosmopolitan builds, WIN_HOST): there is no /bin/sh, so a shell
+// command runs its program directly when it is a plain command
+// (posix_words), otherwise through cmd.exe /c; execvp does not try the .exe extension, so
 // win_argv looks programs up in PATH itself (.exe, .com, then .cmd and .bat
 // through cmd.exe); a program that is not Cosmopolitan's own reports its raw
 // exit code as the wait status
@@ -182,8 +183,8 @@ static char *win_find(const char *name, const char *ext) {
 }
 
 // argv (malloc'ed, NULL-terminated, *n + 2 entries) for Windows: the program
-// found in PATH, a script through cmd.exe /c; updates *n
-static char **win_argv(char **argv, int32_t *n) {
+// found in PATH, a script through cmd.exe /c; updates *n, sets *found
+static char **win_argv(char **argv, int32_t *n, int *found) {
 	const char *base = argv[0];
 	for (const char *q = argv[0]; *q; q++)
 		if (*q == '/' || *q == '\\') base = q + 1;
@@ -198,6 +199,7 @@ static char **win_argv(char **argv, int32_t *n) {
 		if (!f) f = win_find(argv[0], ".bat");
 		script = f != NULL;
 	}
+	if (found) *found = f != NULL;
 	if (!f) return argv;
 	free(argv[0]);
 	argv[0] = f;
@@ -209,6 +211,90 @@ static char **win_argv(char **argv, int32_t *n) {
 	free(argv);
 	*n += 2;
 	return a;
+}
+
+// The words of a POSIX shell command (Sys.command(cmd, args) quotes args so
+// in Eval and in the hxc std, as Sys.systemName() is POSIX's), or NULL when
+// it is more than a plain command: unquoted | & ; < > ( ) $ ` * ? [ #, ~ or =
+// in the first word. Windows only: such commands run through cmd.exe /c.
+static char **posix_words(const char *c, int32_t *n) {
+	size_t len = strlen(c);
+	char **w = (char **)malloc(sizeof(char *) * (len / 2 + 3));
+	char *buf = (char *)malloc(len + 1);
+	int32_t k = 0;
+	const char *p = c;
+	for (;;) {
+		while (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r') p++;
+		if (!*p) break;
+		size_t b = 0;
+		int start = 1;
+		while (*p && *p != ' ' && *p != '\t' && *p != '\n' && *p != '\r') {
+			char ch = *p;
+			if (ch == '\'') {
+				const char *e = strchr(p + 1, '\'');
+				if (!e) goto fail;
+				memcpy(buf + b, p + 1, (size_t)(e - p - 1));
+				b += (size_t)(e - p - 1);
+				p = e + 1;
+			} else if (ch == '"') {
+				p++;
+				while (*p && *p != '"') {
+					if (*p == '$' || *p == '`') goto fail;
+					if (*p == '\\' && (p[1] == '"' || p[1] == '\\' || p[1] == '$' || p[1] == '`')) p++;
+					buf[b++] = *p++;
+				}
+				if (*p != '"') goto fail;
+				p++;
+			} else if (ch == '\\') {
+				if (!p[1]) goto fail;
+				buf[b++] = p[1];
+				p += 2;
+			} else {
+				if (strchr("|&;<>()$`*?[", ch) || (start && (ch == '#' || ch == '~')) || (k == 0 && ch == '=')) goto fail;
+				buf[b++] = ch;
+				p++;
+			}
+			start = 0;
+		}
+		buf[b] = 0;
+		w[k++] = strdup(buf);
+	}
+	free(buf);
+	if (k == 0) {
+		free(w);
+		return NULL;
+	}
+	w[k] = NULL;
+	*n = k - 1;
+	return w;
+fail:
+	free(buf);
+	for (int32_t i = 0; i < k; i++) free(w[i]);
+	free(w);
+	return NULL;
+}
+
+// Windows: argv (n + 1 entries) for a shell command: the program when it is a
+// plain command of a program found in PATH, otherwise cmd.exe /c
+static char **win_shell_argv(char *c, int32_t *n) {
+	char **w = posix_words(c, n);
+	if (w) {
+		int found = 0;
+		w = win_argv(w, n, &found);
+		if (found) {
+			free(c);
+			return w;
+		}
+		for (int32_t i = 0; i <= *n; i++) free(w[i]);
+		free(w);
+	}
+	char **argv = (char **)malloc(sizeof(char *) * 4);
+	argv[0] = strdup("cmd.exe");
+	argv[1] = strdup("/c");
+	argv[2] = c;
+	argv[3] = NULL;
+	*n = 2;
+	return argv;
 }
 
 // runs argv (n + 1 malloc'ed strings) with this process's standard streams, frees it
@@ -237,12 +323,9 @@ int32_t hxc_NativeSys_command(void *cmd) {
 	char *c = hx_str_to_utf8(cmd);
 	fflush(stdout);
 	if (WIN_HOST) {
-		char **argv = (char **)malloc(sizeof(char *) * 4);
-		argv[0] = strdup("cmd.exe");
-		argv[1] = strdup("/c");
-		argv[2] = c;
-		argv[3] = NULL;
-		return spawn_wait(argv, 2);
+		int32_t n;
+		char **argv = win_shell_argv(c, &n);
+		return spawn_wait(argv, n);
 	}
 	int r;
 	RT_BLOCKING(r = system(c)); // c is malloc'ed: no heap pointer
@@ -260,7 +343,7 @@ int32_t hxc_NativeSys_commandArgs(void *cmd, void *args) {
 	argv[0] = hx_str_to_utf8(cmd);
 	for (int32_t i = 0; i < n; i++) argv[i + 1] = hx_str_to_utf8(hx_aget_p_slow(args, i));
 	argv[n + 1] = NULL;
-	argv = win_argv(argv, &n);
+	argv = win_argv(argv, &n, NULL);
 	return spawn_wait(argv, n);
 }
 
@@ -503,10 +586,13 @@ int32_t hxc_NativeSys_processRun(void *cmd, void *args, void *fds) {
 		argv[0] = hx_str_to_utf8(cmd);
 		for (int32_t i = 0; i < n; i++) argv[i + 1] = hx_str_to_utf8(hx_aget_p_slow(args, i));
 		argv[n + 1] = NULL;
-		if (WIN_HOST) argv = win_argv(argv, &n);
+		if (WIN_HOST) argv = win_argv(argv, &n, NULL);
+	} else if (WIN_HOST) {
+		free(argv);
+		argv = win_shell_argv(hx_str_to_utf8(cmd), &n);
 	} else {
-		argv[0] = strdup(WIN_HOST ? "cmd.exe" : "/bin/sh");
-		argv[1] = strdup(WIN_HOST ? "/c" : "-c");
+		argv[0] = strdup("/bin/sh");
+		argv[1] = strdup("-c");
 		argv[2] = hx_str_to_utf8(cmd);
 		argv[3] = NULL;
 		n = 2;
