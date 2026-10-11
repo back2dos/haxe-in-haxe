@@ -3,7 +3,9 @@ package core;
 import core.Globals.Pos;
 import core.Globals.GlobalTypePath;
 
-// port: from haxe/src/core/ast.ml.
+// port: the module Printer is AstPrinter.hx, map_expr's local functions are AstExprMapper.hx,
+// unescape (and Invalid_escape_sequence) is in syntax/Lexer.hx. The functions of the module Expr
+// are in the class Ast.
 
 enum Keyword {
 	Function;
@@ -93,7 +95,7 @@ enum Unop {
 enum StringLiteralKind {
 	SDoubleQuotes;
 	SSingleQuotes;
-	// | SMarkup
+	/* | SMarkup */
 }
 
 enum Constant {
@@ -302,6 +304,7 @@ typedef Documentation = Null<DocBlock>;
 	/** Contains own docs written nearby the symbol in Haxe code **/
 	public var docOwn:Null<String>;
 
+	// port: upstream's doc comment as line comments: its sample's doc comments would end a block comment.
 	// This field is for docs pointed by @:inheritDoc meta.
 	//
 	// It's populated with `InheritDoc.build_*` functions.
@@ -750,6 +753,7 @@ enum TypeDef {
 }
 
 class Ast {
+	// port: Expr.dump_with_pos
 	public static function dumpWithPos(e:Expr):String {
 		var buf = new StringBuf();
 		inline function line(tabs:String, p:Pos,
@@ -856,13 +860,7 @@ class Ast {
 					add("EIs");
 					loop(a);
 				case EDisplay(a, k):
-					add("EDisplay " + switch k {
-						case DKCall: "DKCall";
-						case DKDot: "DKDot";
-						case DKStructure: "DKStructure";
-						case DKMarked: "DKMarked";
-						case DKPattern(_): "DKPattern";
-					});
+					add("EDisplay " + sDisplayKind(k));
 					loop(a);
 				case ETernary(a, b, c):
 					add("ETernary");
@@ -881,6 +879,7 @@ class Ast {
 		return buf.toString();
 	}
 
+	// port: mk_evar with the optional arguments last; mkEVar takes them in upstream order.
 	public static function mkEvar(name:PlacedName, ?type:TypeHint, ?expr:Expr, ?meta:Metadata, isFinal:Bool = false,
 			isStatic:Bool = false):EVar return {
 			evName: name,
@@ -891,11 +890,11 @@ class Ast {
 			evMeta: meta == null ? [] : meta
 		};
 
-	// Type path related functions
+	/* Type path related functions */
 
 	public static function stringPosListOfExprPathRaise(e:Expr):Array<PlacedName> return switch e.expr {
 		case EConst(Ident(name)): ([{name: name, pos: e.pos}] : Array<core.Ast.PlacedName>);
-		case EField(inner, name, _): ([{name: name, pos: e.pos}] : Array<core.Ast.PlacedName>).concat(stringPosListOfExprPathRaise(inner)); // wrong p?
+		case EField(inner, name, _): ([{name: name, pos: e.pos}] : Array<core.Ast.PlacedName>).concat(stringPosListOfExprPathRaise(inner)); /* wrong p? */
 		case _: throw core.ds.Exit.raise();
 	};
 
@@ -956,12 +955,22 @@ class Ast {
 		}
 	}
 
+	public static function safeForAll2<A, B>(f:A->B->Bool, a:Array<A>, b:Array<B>):Bool {
+		// port: List.for_all2 raises Invalid_argument for lists of different lengths
+		if (a.length != b.length) return false;
+		return try {
+			for (i in 0...a.length) if (!f(a[i], b[i])) return false;
+			true;
+		} catch (_:Dynamic) false;
+	}
+
 	public static function removeDuplicates<T>(keep:T->T->Bool, items:Array<T>):Array<T> {
 		if (items.length == 0) return [];
 		var first = items[0];
 		return [first].concat(removeDuplicates(keep, items.slice(1).filter(item -> keep(first, item))));
 	}
 
+	// port: a StringMap in place of the PMap (callers only look values up)
 	public static function getValueMeta(meta:Metadata):haxe.ds.StringMap<Expr> {
 		var result = new haxe.ds.StringMap<Expr>();
 		try {
@@ -978,19 +987,19 @@ class Ast {
 	public static function matchPath(recursive:Bool, path:Array<String>, pattern:Array<String>):Bool {
 		function loop(top:Bool, pi:Int, mi:Int):Bool {
 			if (mi < pattern.length && pattern[mi] == "**") {
-				// trailing ** matches any remainder, at any depth
+				/* trailing ** matches any remainder, at any depth */
 				if (mi + 1 == pattern.length) return true;
-				// ** matches zero segments here, or one or more by consuming sl1
+				/* ** matches zero segments here, or one or more by consuming sl1 */
 				return loop(false, pi, mi + 1) || (pi < path.length && loop(false, pi + 1, mi));
 			}
 			if (pi == path.length && mi == pattern.length) return true;
-			// always recurse into types of package paths
+			/* always recurse into types of package paths */
 			if (pi + 1 < path.length && mi + 1 == pattern.length && isLowerIdent(pattern[mi]) && !isLowerIdent(path[pi + 1]))
 				return path[pi] == pattern[mi];
 			if (pi + 1 == path.length && mi == pattern.length && top) return true;
 			if (mi == pattern.length) return recursive;
 			if (pi == path.length) return false;
-			// * matches exactly one segment
+			/* * matches exactly one segment */
 			return (pattern[mi] == "*" || path[pi] == pattern[mi]) && loop(false, pi + 1, mi + 1);
 		}
 		return loop(true, 0, 0);
@@ -1008,7 +1017,7 @@ class Ast {
 	public static function mapExpr(loop:Expr->Expr, e:Expr):Expr return new AstExprMapper(loop).map(e);
 
 	public static function mkTypePath(pack:Array<String>, name:String, ?params:Array<TypeParamOrConst>, ?sub:String):TypePath {
-		if (name == "") throw "Empty module name is not allowed";
+		if (name == "") throw new core.ds.InvalidArgument("Empty module name is not allowed");
 		return {
 			tpackage: pack,
 			tname: name,
@@ -1033,8 +1042,12 @@ class Ast {
 
 	public static function makePtpCt(path:TypePath, posFull:Pos, ?posPath:Pos):ComplexType return CTPath(makePtp(path, posFull, posPath));
 
+	public static function makePtpCtNull(path:TypePath):ComplexType return CTPath(makePtp(path, Globals.nullPos));
+
 	public static function makePtpTh(path:TypePath, posFull:Pos,
 			?posPath:Pos):TypeHint return {type: makePtpCt(path, posFull, posPath), pos: posFull};
+
+	public static function makePtpThNull(path:TypePath):TypeHint return makePtpTh(path, Globals.nullPos);
 
 	public static function ctMono():ComplexType return makePtpCt(mkTypePath(["$"], "_hx_mono"), Globals.nullPos);
 
@@ -1073,6 +1086,8 @@ class Ast {
 		case Neg | NegBits | Spread: false;
 	};
 
+	public static function baseClassName(path:GlobalTypePath):String return path.name;
+
 	public static function punion(a:Pos,
 			b:Pos):Pos return {pfile: a.pfile, pmin: a.pmin < b.pmin ? a.pmin : b.pmin, pmax: a.pmax > b.pmax ? a.pmax : b.pmax};
 
@@ -1084,6 +1099,7 @@ class Ast {
 	}
 
 	public static function parsePath(value:String):TypePathParts {
+		// port: like the current extlib, nsplit "" is [""]: both give ([], "")
 		var parts = value.split(".");
 		var name = parts.pop();
 		return {pack: parts, name: name};
@@ -1226,6 +1242,21 @@ class Ast {
 		case Spread: "...";
 	};
 
+	public static function efield(e:Expr, s:String):ExprDef return EField(e, s, EFNormal);
+
+	public static function sObjectKeyName(name:String, q:QuoteStatus):String return switch q {
+		case DoubleQuotes: "\"" + StringHelper.sEscape(name) + "\"";
+		case NoQuotes: name;
+	};
+
+	public static function sDisplayKind(dk:DisplayKind):String return switch dk {
+		case DKCall: "DKCall";
+		case DKDot: "DKDot";
+		case DKStructure: "DKStructure";
+		case DKMarked: "DKMarked";
+		case DKPattern(_): "DKPattern";
+	};
+
 	public static function stringListOfExprPathRaise(e:Expr, ?rootCb:String->Array<String>):Array<String> return switch e.expr {
 		case EConst(Ident(i)): rootCb == null ? [i] : rootCb(i);
 		case EField(e, f, _): [f].concat(stringListOfExprPathRaise(e, rootCb));
@@ -1239,6 +1270,27 @@ class Ast {
 		return {expr: EField(e, path.name, EFNormal), pos: p};
 	}
 
+	/* module Expr */
+	public static function ensureBlock(e:Expr):Expr return switch e.expr {
+		case EBlock(_): e;
+		case _: {expr: EBlock([e]), pos: pos(e)};
+	};
+
+	public static function fieldAssoc(name:String, fl:Array<ObjectField>):Expr {
+		for (f in fl) if (f.key.name == name) return f.expr;
+		throw core.ds.NotFound.raise();
+	}
+
+	public static function fieldMemAssoc(name:String, fl:Array<ObjectField>):Bool {
+		for (f in fl) if (f.key.name == name) return true;
+		return false;
+	}
+
+	public static function findIdent(e:Expr):Null<String> return switch e.expr {
+		case EConst(Ident(s)): s;
+		case _: null;
+	};
+
 	public static function hasMetaOption(metas:Metadata, meta:core.MetaList.StrictMeta, s:String):Bool {
 		for (entry in metas) if (core.Meta.metaEq(meta, entry.meta)) for (e in entry.exprs) switch e.expr {
 			case EConst(Ident(s2)) if (s == s2):
@@ -1246,6 +1298,16 @@ class Ast {
 			case _:
 		}
 		return false;
+	}
+
+	public static function getMetaOptions(metas:Metadata, meta:core.MetaList.StrictMeta):Array<String> {
+		for (entry in metas) if (core.Meta.metaEq(meta, entry.meta)) return [
+			for (e in entry.exprs) switch e.expr {
+				case EConst(Ident(s2)): s2;
+				case _: continue;
+			}
+		];
+		return [];
 	}
 }
 

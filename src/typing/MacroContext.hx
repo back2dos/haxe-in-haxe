@@ -358,8 +358,8 @@ class MacroContext {
 		inline function mkTypePath(path:GlobalTypePath, ?sub:String):TypePath {
 			try
 				return AstTools.mkTypePath(path.pack, path.name, null, sub)
-			catch (s:String)
-				return comApi.excString(s);
+			catch (e:core.ds.InvalidArgument)
+				return comApi.excString(e.message);
 		}
 		var api = macros.MacroApi.CompilerApiTools.clone(comApi);
 		api.getType = function(s) {

@@ -1,6 +1,8 @@
 package core;
 
-// port: from haxe/src/core/globals.ml.
+// port: IntMap, StringMap, Int32Map, IntHashtbl, Int64Hashtbl and StringHashtbl are provided by
+// core.ds (OcamlHashtbl, PMap, GlobalsIntMap) and the Haxe maps; the exception Cancelled is
+// core.ds.Cancelled.
 // port: a class rather than a structure so static targets access fields directly;
 // @:structInit keeps `{pfile:..., pmin:..., pmax:...}` literals working.
 @:structInit class Pos {
@@ -17,7 +19,7 @@ package core;
 	public inline function clone():Pos return new Pos(pfile, pmin, pmax);
 }
 
-// port: a class so map keys (module lookups) compare without reflection; see
+// port: `path`; a class so map keys (module lookups) compare without reflection; see
 // core.ds.Key. @:structInit keeps `{pack:..., name:...}` literals working.
 @:structInit class GlobalTypePath {
 	public var pack:Array<String>;
@@ -105,6 +107,25 @@ class Globals {
 
 	public static final nullPos:Pos = fakePos("?");
 
+	public static final noColor = false;
+	public static final cReset = if (noColor) "" else "\x1b[0m";
+	public static final cDim = if (noColor) "" else "\x1b[2m";
+
+	// port: the OCaml source location (Printexc.location) is the Haxe call site.
+	static function locShort(loc:haxe.PosInfos):String return loc.fileName + ":" + loc.lineNumber;
+
+	public static function trace(s:String, ?loc:haxe.PosInfos):Void {
+		Sys.println(cDim + locShort(loc) + ":" + cReset + " " + s);
+	}
+
+	// port: the Haxe call stack in place of Printexc.get_callstack
+	public static function traceCallStack(n:Int = 5, ?loc:haxe.PosInfos):Void {
+		if (!(n >= 0)) throw new haxe.Exception("Assert_failure globals.ml");
+		Sys.println(cDim + locShort(loc) + ":" + cReset);
+		var stack = haxe.CallStack.callStack().slice(1, n + 1);
+		for (item in stack) Sys.println("  called from " + StringTools.trim(haxe.CallStack.toString([item]).split("\n").join(" ")));
+	}
+
 	/** Expected to match `haxe.display.Display.Platform`. **/
 	public static function platformName(platform:Platform):String {
 		return switch (platform) {
@@ -156,8 +177,9 @@ class Globals {
 
 	public static function startsWith(value:String, char:String):Bool return value.length > 0 && value.charAt(0) == char;
 
+	// port: String.length counts the UTF-8 bytes
 	public static function patchStringPos(pos:Pos,
-			value:String):Pos return {pfile: pos.pfile, pmin: pos.pmax - value.length, pmax: pos.pmax};
+			value:String):Pos return {pfile: pos.pfile, pmin: pos.pmax - haxe.io.Bytes.ofString(value).length, pmax: pos.pmax};
 
 	// port: like globals.ml, this only appends the build portion of the supplied version.
 	public static function sVersionFull(version:CompilerVersion):String return version.extra == null ? sVersion : sVersion
@@ -184,9 +206,20 @@ class Globals {
 			+ "the following information:";
 		throw new InternalCompilerError(message, source + "\n" + haxe.CallStack.toString(haxe.CallStack.callStack().slice(1, 21)));
 	}
+
+	public static function dumpCallstack():Void {
+		Sys.println(haxe.CallStack.toString(haxe.CallStack.callStack().slice(0, 200)));
+	}
+
+	public static function dumpBacktrace():Void {
+		Sys.println(haxe.CallStack.toString(haxe.CallStack.exceptionStack()));
+	}
+
+	public static final i32_31 = 31;
 }
 
-// msg * backtrace
+/* msg * backtrace */
+// port: exception Ice
 class InternalCompilerError extends haxe.Exception {
 	public final backtrace:String;
 

@@ -116,7 +116,7 @@ compiler pipeline is included separately by `test/compile-all.hxml`.
 
 - 126 new draft/support Haxe files across the translation-first batches.
 - 124 upstream ML files have new draft counterparts.
-- 33 upstream ML files have pre-existing counterparts; completeness is unaudited.
+- 33 upstream ML files have pre-existing counterparts; completeness is unaudited (the 21 `core/` ones were audited on 2026-10-11).
 - 0 additional candidate ML files have no corresponding HX file yet.
 
 This follow-up added 59 in-scope counterparts from the previous 69 pending
@@ -217,45 +217,45 @@ conformance, or completion of the pre-existing HXB writer. The subsequent runtim
 | `context/typecore.ml` | `src/context/Typecore.hx` | Draft translated |
 | `context/typerPass.ml` | `src/context/TyperPass.hx` | Draft translated |
 | `core/abstract.ml` | `src/core/Abstract.hx` | Draft translated |
-| `core/ast.ml` | `src/core/Ast.hx` | Existing, unaudited |
-| `core/classPath.ml` | `src/core/ClassPath.hx` | Existing, unaudited |
-| `core/classPaths.ml` | `src/core/ClassPaths.hx` | Existing, unaudited |
+| `core/ast.ml` | `src/core/Ast.hx` | Translated (audited); module Printer in `AstPrinter.hx`, `map_expr` in `AstExprMapper.hx`, `unescape` in `syntax/Lexer.hx`, module Expr in the class `Ast`; `getValueMeta` returns a StringMap (only looked up) |
+| `core/classPath.ml` | `src/core/ClassPath.hx` | Translated (audited); the virtual class is the interface `IClassPath` |
+| `core/classPaths.ml` | `src/core/ClassPaths.hx` | Translated (audited); the lookup cache is a Map (never iterated) |
 | `core/data/dataReaderApi.ml` | `src/core/data/DataReaderApi.hx` | Draft translated |
 | `core/data/dataWriterApi.ml` | `src/core/data/DataWriterApi.hx` | Draft translated |
-| `core/data/jsonDataApi.ml` | `src/core/data/JsonDataApi.hx` | Existing, unaudited |
+| `core/data/jsonDataApi.ml` | `src/core/data/JsonDataApi.hx` | Translated (audited); reads `core.Json` values |
 | `core/data/metaDataApi.ml` | `src/core/data/MetaDataApi.hx` | Draft translated |
-| `core/define.ml` | `src/core/Define.hx` | Existing, unaudited |
+| `core/define.ml` | `src/core/Define.hx` | Translated (audited); DefineList is `DefineRegistry.hx`, a define is its key string (so `Custom k` and a built-in define `k` are not distinguished), signatures are hex MD5 |
 | `core/displayTypes.ml` | `src/core/DisplayTypes.hx` | Draft translated |
-| `core/ds/atomicLazy.ml` | `src/core/ds/AtomicLazy.hx` | Existing, unaudited |
-| `core/ds/nowOrLater.ml` | `src/core/ds/NowOrLater.hx` | Existing, unaudited |
-| `core/ds/priorityQueue.ml` | `src/core/ds/PriorityQueue.hx` | Existing, unaudited |
-| `core/ds/ring.ml` | `src/core/ds/Ring.hx` | Existing, unaudited |
-| `core/ds/stringDynArray.ml` | `src/core/ds/StringDynArray.hx` | Existing, unaudited |
-| `core/ds/stringPool.ml` | `src/core/ds/StringPool.hx` | Existing, unaudited |
-| `core/ds/threadSafeHashtbl.ml` | `src/core/ds/ThreadSafeHashtbl.hx` | Existing, unaudited |
+| `core/ds/atomicLazy.ml` | `src/core/ds/AtomicLazy.hx` | Translated (audited); a mutex in place of compare-and-set, waiting sleeps instead of `Thread.yield`/`Backoff` |
+| `core/ds/nowOrLater.ml` | `src/core/ds/NowOrLater.hx` | Translated (audited); a flag emulates the non-recursive OCaml mutex |
+| `core/ds/priorityQueue.ml` | `src/core/ds/PriorityQueue.hx` | Translated (audited) |
+| `core/ds/ring.ml` | `src/core/ds/Ring.hx` | Translated (audited) |
+| `core/ds/stringDynArray.ml` | `src/core/ds/StringDynArray.hx` | Translated (audited) |
+| `core/ds/stringPool.ml` | `src/core/ds/StringPool.hx` | Translated (audited); NUL-safe keys on HashLink |
+| `core/ds/threadSafeHashtbl.ml` | `src/core/ds/ThreadSafeHashtbl.hx` | Translated (audited); an `OcamlHashtbl` (String and Int keys) behind a mutex |
 | `core/error.ml` | `src/core/Error.hx` | Draft translated |
-| `core/globals.ml` | `src/core/Globals.hx` | Existing, unaudited |
+| `core/globals.ml` | `src/core/Globals.hx` | Translated (audited); the map/table modules are in `core.ds`, `trace` and the backtrace helpers use the Haxe call stack |
 | `core/inheritDoc.ml` | `src/core/InheritDoc.hx` | Draft translated |
-| `core/message.ml` | `src/core/Message.hx` | Existing, unaudited |
+| `core/message.ml` | `src/core/Message.hx` | Translated (audited); also declares the generated `warning` type (`WarningCode`) |
 | `core/meta.ml` | `src/core/Meta.hx` | Draft translated |
 | `core/naming.ml` | `src/core/Naming.hx` | Draft translated |
 | `core/native.ml` | `src/core/Native.hx` | Draft translated |
-| `core/numeric.ml` | `src/core/Numeric.hx` | Existing, unaudited |
-| `core/path.ml` | `src/core/Path.hx` | Existing, unaudited |
-| `core/socket.ml` | `src/core/Socket.hx` | Existing, unaudited |
-| `core/stringError.ml` | `src/core/StringError.hx` | Existing, unaudited |
-| `core/stringHelper.ml` | `src/core/StringHelper.hx` | Existing, unaudited |
+| `core/numeric.ml` | `src/core/Numeric.hx` | Translated (audited); adds `stringOfFloat` (OCaml `string_of_float`) |
+| `core/path.ml` | `src/core/Path.hx` | Translated (audited); `get_full_path`/`get_real_path` on Windows use `FileSystem.fullPath` in place of Extc |
+| `core/socket.ml` | `src/core/Socket.hx` | Translated (audited); host sockets read exact lengths |
+| `core/stringError.ml` | `src/core/StringError.hx` | Translated (audited); two-row Levenshtein over UTF-8 bytes |
+| `core/stringHelper.ml` | `src/core/StringHelper.hx` | Translated (audited); byte strings are strings of characters 0-255 |
 | `core/tFunctions.ml` | `src/core/TFunctions.hx` | Draft translated |
 | `core/tOther.ml` | `src/core/TOther.hx` | Draft translated |
 | `core/tPrinting.ml` | `src/core/TPrinting.hx` | Draft translated |
-| `core/tType.ml` | `src/core/TType.hx` | Existing, unaudited |
+| `core/tType.ml` | `src/core/TType.hx` | Translated (audited); PMap fields are StringMaps iterated through `core.ds.PMap` |
 | `core/tUnification.ml` | `src/core/TUnification.hx` | Draft translated |
 | `core/texpr.ml` | `src/core/Texpr.hx` | Draft translated |
 | `core/timer.ml` | `src/core/Timer.hx` | Draft translated |
 | `core/type.ml` | `src/core/Type.hx` | Draft translated |
 | `core/warning.ml` | `src/core/Warning.hx` | Draft translated |
 | `core/withType.ml` | `src/core/WithType.hx` | Draft translated |
-| `core/zip_output.ml` | `src/core/ZipOutput.hx` | Existing, unaudited |
+| `core/zip_output.ml` | `src/core/ZipOutput.hx` | Translated (audited); `Zip` over `haxe.zip.Writer`, written on close |
 | `coro/contTypes.ml` | `src/coro/ContTypes.hx` | Draft translated |
 | `coro/coro.ml` | `src/coro/Coro.hx` | Draft translated |
 | `coro/coroConfig.ml` | `src/coro/CoroConfig.hx` | Draft translated |
@@ -496,6 +496,6 @@ remains open:
 - the Eval debugger, `server/module`, `server/memory` object sizes and
   `jsonRpcSocket.ml`;
 - a harness for the `server/*` JSON-RPC methods through a running server;
-- an audit of the 33 counterparts that predate the translation snapshot
-  ("Existing, unaudited" above): they pass the conformance suites, but were not
-  checked line by line against upstream.
+- an audit of the 9 remaining counterparts that predate the translation snapshot
+  ("Existing, unaudited" above: `compiler/` and `syntax/`): they pass the
+  conformance suites, but were not checked line by line against upstream.

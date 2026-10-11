@@ -15,7 +15,7 @@ class AstPrinter {
 			case EBinop(op, a, b): expr(a) + " " + AstTools.sBinop(op) + " " + expr(b);
 			case EField(e, f, k): expr(e) + (k == EFNormal ? "." : "?.") + f;
 			case EParenthesis(e): "(" + expr(e) + ")";
-			case EObjectDecl(fl): "{ " + [for (f in fl) objectKey(f.key.name, f.key.quote) + " : " + expr(f.expr)].join(", ") + " }";
+			case EObjectDecl(fl): "{ " + [for (f in fl) AstTools.sObjectKeyName(f.key.name, f.key.quote) + " : " + expr(f.expr)].join(", ") + " }";
 			case EArrayDecl(el): "[" + sExprList(tabs, el, ", ") + "]";
 			case ECall(e, el): expr(e) + "(" + sExprList(tabs, el, ", ") + ")";
 			case ENew(t, el): "new " + sComplexTypePath(tabs, t) + "(" + sExprList(tabs, el, ", ") + ")";
@@ -51,20 +51,9 @@ class AstPrinter {
 			case ETernary(a, b, c): expr(a) + " ? " + expr(b) + " : " + expr(c);
 			case ECheckType(e, t): "(" + expr(e) + " : " + sComplexType(tabs, t.type) + ")";
 			case EMeta(m, e): sMetadata(tabs, m) + " " + expr(e);
-			case EDisplay(e, k): "#DISPLAY(" + expr(e) + ", " + sDisplayKind(k) + ")";
+			case EDisplay(e, k): "#DISPLAY(" + expr(e) + ", " + AstTools.sDisplayKind(k) + ")";
 		};
 	}
-
-	static function objectKey(name:String,
-			quote:QuoteStatus):String return quote == NoQuotes ? name : '"' + StringHelper.sEscape(name) + '"';
-
-	static function sDisplayKind(k:DisplayKind):String return switch k {
-		case DKCall: "DKCall";
-		case DKDot: "DKDot";
-		case DKStructure: "DKStructure";
-		case DKMarked: "DKMarked";
-		case DKPattern(b): "DKPattern " + Std.string(b);
-	};
 
 	public static function sExprList(tabs:String, el:Array<Expr>, sep:String):String return [for (e in el) sExprInner(tabs, e)].join(sep);
 

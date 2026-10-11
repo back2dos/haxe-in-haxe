@@ -5,8 +5,9 @@ import haxe.ds.StringMap;
 import core.DefineRegistry;
 import core.Globals.Platform;
 
-// port: from haxe/src/core/define.ml; registry data follows pinned prebuild.ml and define.json.
-// Digests remain hexadecimal to avoid arbitrary binary bytes in Haxe Strings.
+// port: the generated DefineList (prebuild.ml over src-json/define.json) is DefineRegistry. A
+// strict_defined is its key string (Define.Custom is the identity), so `infos` looks a key up in the
+// user defines first, then in the registry. Signatures are hexadecimal MD5 digests.
 @:structInit class UserDefine {
 	public var doc:String;
 	public var flags:Array<DefineParameter>;
@@ -52,6 +53,7 @@ enum DefineOrigin {
 		dReserved);
 }
 
+// port: `define`; `values` is a persistent map (copied on write) as PMap is
 @:structInit class DefineContext {
 	public var values:StringMap<String>;
 	public var definesSignature:Null<String>;
@@ -158,10 +160,12 @@ class Define {
 	public static function getDefineList(userDefines:StringMap<UserDefine>):Array<{name:String, info:DefineInfos}> {
 		var all = [for (entry in DefineRegistry.all) infos(entry.key, userDefines)];
 		for (key in userDefines.keys()) all.push(infos(key, userDefines));
-		all.sort((a, b) -> Reflect.compare(a.name, b.name));
+		// port: List.sort is stable
+		haxe.ds.ArraySort.sort(all, (a, b) -> Reflect.compare(a.name, b.name));
 		return all;
 	}
 
+	// port: DefineList.is_signature_neutral
 	public static final signatureNeutral:Array<String> = [
 		"times.analyzer",
 		"analyzer_times",
@@ -401,15 +405,17 @@ class Define {
 		if (ctx.definesSignature != null) return ctx.definesSignature;
 
 		var defines:Array<String> = [];
-		for (key => value in ctx.values) {
-			// don't make much difference between these special compilation flags
-			var sanitized = key.split("-").join("_");
-			// If we add something here that might be used in conditional compilation it should be added to
-			// Grammar.parse_macro_ident as well (issue #5682).
+		for (k => v in ctx.values) {
+			/* don't make much difference between these special compilation flags */
+			var sanitized = k.split("-").join("_");
+			/* If we add something here that might be used in conditional compilation it should be added to
+				Grammar.parse_macro_ident as well (issue #5682).
+			*/
 			if (signatureNeutral.indexOf(sanitized) >= 0) continue;
-			var entry = sanitized + "=" + value;
-			if (defines.indexOf(entry) == -1) defines.push(entry);
+			defines.push(sanitized + "=" + v);
 		}
+		// port: `Ast.remove_duplicates (fun a b -> a != b)` compares physically and so removes
+		// nothing from these freshly built strings.
 		defines.sort(Reflect.compare);
 		ctx.definesSignature = Md5.encode(defines.join("@"));
 		return ctx.definesSignature;

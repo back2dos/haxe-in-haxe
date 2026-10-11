@@ -2,7 +2,7 @@ package core;
 
 import core.Ast;
 
-// port: from haxe/src/core/ast.ml: map_expr's mutually recursive local functions.
+// port: map_expr of ast.ml: its mutually recursive local functions, and the mapping itself (`map`).
 class AstExprMapper {
 	final loop:Expr->Expr;
 
@@ -159,11 +159,13 @@ class AstExprMapper {
 			case ETry(e, catches):
 				var e = loop(e);
 				ETry(e, catches.map(function(c) {
+					// port: the tuple `n,Option.map type_hint t,loop e,p` is evaluated right to left
+					var e = loop(c.expr);
 					var t = optHint(c.type);
 					return ({
 						name: c.name,
 						type: t,
-						expr: loop(c.expr),
+						expr: e,
 						pos: c.pos
 					} : core.Ast.Catch);
 				}));
