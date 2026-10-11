@@ -522,16 +522,9 @@ class Genjs {
 		}
 	}
 
-	// port: `Hashtbl.fold (fun name data acc -> (name,data) :: acc) ctx.com.resources []`. The port keeps
-	// resources in a StringMap without insertion order; they are re-added (in sorted key order) to an
-	// OCaml-compatible Hashtbl so the fold order matches upstream whenever no two resources collide
-	// in a bucket.
+	// port: `Hashtbl.fold (fun name data acc -> (name,data) :: acc) ctx.com.resources []`.
 	static function resourcesFold(com:Gctx):Array<{name:String, data:haxe.io.Bytes}> {
-		var h = new core.ds.OcamlHashtbl<String, haxe.io.Bytes>(core.ds.OcamlHash.hashString, (a, b) -> a == b, 0);
-		var keys = [for (k in com.resources.keys()) k];
-		keys.sort(Reflect.compare);
-		for (k in keys) h.add(k, com.resources.get(k));
-		return h.fold(function(name, data, acc:Array<{name:String, data:haxe.io.Bytes}>) {
+		return com.resources.fold(function(name, data, acc:Array<{name:String, data:haxe.io.Bytes}>) {
 			return [{name: name, data: data}].concat(acc);
 		}, []);
 	}
