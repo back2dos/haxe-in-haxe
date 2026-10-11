@@ -192,6 +192,12 @@ class Generate {
 		} else {
 			var generate:generators.Gctx->Void, name:String;
 			switch com.platform {
+				// port: -D hih_no_generators (the playground's WebAssembly build) leaves the target
+				// generators out of the binary
+				#if hih_no_generators
+				case Flash | Neko | Js | Lua | Php | Cpp | Jvm | Python | Hl:
+					throw new Failure("haxe-in-haxe: this build has no target generators (-D hih_no_generators)");
+				#else
 				case Flash:
 					var header = try parseSwfHeader(com, Common.definedValue(com, Define.SwfHeader)) catch (_:NotFound) null;
 					generate = generators.Genswf.generate.bind(header, cast com.nativeLibs.swfLibs, com.flashVersion);
@@ -220,6 +226,7 @@ class Generate {
 				case Hl:
 					generate = generators.Genhl.generate;
 					name = "hl";
+				#end
 				case Eval:
 					generate = function(_) typing.MacroContext.interpret(tctx, []); /* TODO: ? */
 					name = "eval";

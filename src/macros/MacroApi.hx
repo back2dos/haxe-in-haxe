@@ -2762,6 +2762,10 @@ class MacroApiImpl {
 			},
 			{
 				name: "set_custom_js_generator",
+				// port: without the target generators (-D hih_no_generators, the playground's build), no JS generator to drive
+				#if hih_no_generators
+				value: vfun1(f -> notSupported("set_custom_js_generator without the target generators"))
+				#else
 				value: vfun1(f -> {
 					var f = prepareCallback(f, 1);
 					function gen(com:generators.Gctx, jsCtx:generators.Genjs.JsCtx):Void {
@@ -2817,6 +2821,7 @@ class MacroApiImpl {
 					};
 					vnull;
 				})
+				#end
 			},
 			{
 				name: "flush_disk_cache",

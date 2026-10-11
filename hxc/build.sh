@@ -5,6 +5,7 @@
 # set (e.g. EMXX=em++), also to linear-memory wasm.
 #   sh hxc/build.sh [source dir] [main class]     (default: hxc/test Bench)
 #   sh hxc/build.sh port                          (the port itself: bin/hxc/hih/hih)
+#   PORT_OUT=bin/hxc/hih-web HXFLAGS="-D hih_no_generators" sh hxc/build.sh port   (another output directory, other defines)
 #   CC="cosmocc -O2" BIN=hih.com sh hxc/build.sh port
 #   CC="cosmocc -O2" RT_DEPS=bin/cosmo-deps BIN=hih.com sh hxc/build.sh port   (with mbedtls/libuv: hxc/tools/cosmo-deps.sh)
 #   HXFLAGS="-D retain" VARIANT=-retain sh hxc/build.sh
@@ -18,7 +19,7 @@ cd "$(dirname "$0")/.."
 HAXE=${HAXE:-haxe/haxe}
 CC=${CC:-tcc}
 if [ "${1:-}" = port ]; then
-	OUT=bin/hxc/hih
+	OUT=${PORT_OUT:-bin/hxc/hih}
 	ARGS="-cp src -main haxe.Main -cp runtime/js -D disable-parallelism"
 	BIN=${BIN:-hih}
 else
