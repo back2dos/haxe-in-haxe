@@ -43,3 +43,9 @@ See [test/README.md](test/README.md) for the other harnesses.
 ## hxc for other programs
 
 [hxc/haxelib/README.md](hxc/haxelib/README.md)
+
+## License
+
+GPL-2.0-or-later, like the Haxe compiler it is ported from; the hxc runtime
+and standard library, which end up in compiled programs, are MIT. Details:
+[LICENSE](LICENSE).
