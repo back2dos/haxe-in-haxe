@@ -374,6 +374,9 @@ conformance, or completion of the pre-existing HXB writer. The subsequent runtim
 | `core/json/jsonRpc.ml` | `src/core/json/JsonRpc.hx` | JSON-RPC protocol |
 | `core/json/jsonrpc_handler.ml` | `src/core/json/JsonrpcHandler.hx` | JSON-RPC handler |
 | `typing/typerDisplay.ml` | `src/typing/TyperDisplay.hx` | Display services |
+| `filters/ES6Ctors.ml` | `src/filters/ES6Ctors.hx` | JS target (ES6 constructors) |
+| `generators/genjs.ml` | `src/generators/Genjs.hx` | JS target; output and `.map` byte-identical (fuzzer `diff:js`, upstream unit suite) |
+| `generators/jsSourcemap.ml` | `src/generators/JsSourcemap.hx` | JS target source maps |
 
 ## Macro runtime coverage
 
@@ -435,7 +438,6 @@ A scope-review entry is not a blanket exclusion of shared batch-compiler helpers
 | `context/nativeLibraryHandler.ml` | SWF/JVM library handlers (`SwfLoader`, `JavaModern`); the HXB branch is translated |
 | `context/sourcemaps.ml` | Ordinary output-target source maps |
 | `core/json/jsonRpcSocket.ml` | Display/server JSON-RPC transport |
-| `filters/ES6Ctors.ml` | Other target/library support |
 | `generators/cpp/cppAst.ml` | Ordinary output-target generator/runtime |
 | `generators/cpp/cppAstTools.ml` | Ordinary output-target generator/runtime |
 | `generators/cpp/cppContext.ml` | Ordinary output-target generator/runtime |
@@ -460,7 +462,6 @@ A scope-review entry is not a blanket exclusion of shared batch-compiler helpers
 | `generators/gencpp.ml` | Ordinary output-target generator/runtime |
 | `generators/genhl.ml` | Ordinary output-target generator/runtime |
 | `generators/genhxold.ml` | Ordinary output-target generator/runtime |
-| `generators/genjs.ml` | Ordinary output-target generator/runtime |
 | `generators/genjvm.ml` | Ordinary output-target generator/runtime |
 | `generators/genlua.ml` | Ordinary output-target generator/runtime |
 | `generators/genneko.ml` | Ordinary output-target generator/runtime |
@@ -473,7 +474,6 @@ A scope-review entry is not a blanket exclusion of shared batch-compiler helpers
 | `generators/hlcode.ml` | Ordinary output-target generator/runtime |
 | `generators/hlinterp.ml` | Ordinary output-target generator/runtime |
 | `generators/hlopt.ml` | Ordinary output-target generator/runtime |
-| `generators/jsSourcemap.ml` | Ordinary output-target generator/runtime |
 | `generators/jvm/jvmAttribute.ml` | Ordinary output-target generator/runtime |
 | `generators/jvm/jvmBuilder.ml` | Ordinary output-target generator/runtime |
 | `generators/jvm/jvmClass.ml` | Ordinary output-target generator/runtime |

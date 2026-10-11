@@ -59,7 +59,8 @@ class Codegen {
 		case _: false;
 	};
 
-	public static function bytesSerialize(data:haxe.io.Bytes):String return haxe.crypto.Base64.encode(data);
+	// port: ExtLib's Base64.str_encode writes no '=' padding.
+	public static function bytesSerialize(data:haxe.io.Bytes):String return haxe.crypto.Base64.encode(data, false);
 
 	/*
 		Build a default safe-cast expression :

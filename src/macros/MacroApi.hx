@@ -2764,11 +2764,56 @@ class MacroApiImpl {
 				name: "set_custom_js_generator",
 				value: vfun1(f -> {
 					var f = prepareCallback(f, 1);
-					// port: the JS generator (Genjs) is not part of the port: the generator is
-					// registered as upstream does, but running it fails explicitly.
+					function gen(com:generators.Gctx, jsCtx:generators.Genjs.Ctx):Void {
+						generators.Genjs.setupKwds(com);
+						var api = encodeObj([
+							fld("outputFile", encodeString(com.file)),
+							fld("types", encodeArray(com.types.map(t -> encodeType(typeOfModuleType(t))))),
+							fld("main", (switch com.main.mainExpr {
+								case null: vnull;
+								case e: encodeTexpr(e);
+							})),
+							fld("generateValue", vfun1(v -> {
+								var e = decodeTexpr(v);
+								var str = generators.Genjs.genSingleExpr(jsCtx, e, false);
+								encodeString(str);
+							})),
+							fld("isKeyword", vfun1(v -> vbool(generators.Genjs.isKeyword(decodeString(v))))),
+							fld("hasFeature", vfun1(v -> vbool(generators.Gctx.hasFeature(com, decodeString(v))))),
+							fld("addFeature", vfun1(v -> {
+								generators.Gctx.addFeature(com, decodeString(v));
+								vnull;
+							})),
+							fld("quoteString", vfun1(v -> encodeString("\"" + core.StringHelper.sEscape(decodeString(v)) + "\""))),
+							fld("buildMetaData", vfun1(t -> switch core.Texpr.buildMetadata(com.basic, decodeTypeDecl(t)) {
+								case null: vnull;
+								case e: encodeTexpr(e);
+							})),
+							fld("generateStatement", vfun1(v -> {
+								var e = decodeTexpr(v);
+								var str = generators.Genjs.genSingleExpr(jsCtx, e, true);
+								encodeString(str);
+							})),
+							fld("setTypeAccessor", vfun1(callb -> {
+								var callb = prepareCallback(callb, 1);
+								jsCtx.typeAccessor = t -> decodeString(callb([encodeType(typeOfModuleType(t))]));
+								vnull;
+							})),
+							fld("setCurrentClass", vfun1(c -> {
+								generators.Genjs.setCurrentClass(jsCtx, switch decodeTypeDecl(c) {
+									case TClassDecl(c): c;
+									case _: Globals.die("", "macroApi.ml");
+								});
+								vnull;
+							})),
+						]);
+						f([api]);
+					}
 					var com = ccom();
 					com.jsGen = () -> {
-						notSupported("Custom JS generators (Compiler.setCustomJSGenerator)");
+						core.Path.mkdirFromPath(com.file);
+						var jsCtx = generators.Genjs.allocCtx(Common.toGctx(com), generators.Gctx.getEsVersion(com.defines));
+						gen(Common.toGctx(com), jsCtx);
 					};
 					vnull;
 				})
