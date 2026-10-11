@@ -36,7 +36,38 @@ class Regex {
 	var src:String;
 	var p:Int;
 
+	// the code units a match can start with (inclusive pairs; null: any, or
+	// the match may be empty); anchored: only at position 0
+	var first:Null<Array<Int>>;
+	var anchored:Bool;
+
+	// parsed patterns by options and source, shared by the instances (read
+	// lock-free: a new map is published whole, never changed afterwards)
+	static var cache:Map<String, Regex> = new Map();
+
 	public function new(pattern:String, opt:String) {
+		var key = opt + "/" + pattern;
+		var c = cache.get(key);
+		if (c == null) {
+			parse(pattern, opt);
+			var next = new Map<String, Regex>();
+			for (k => v in cache)
+				next.set(k, v);
+			next.set(key, this);
+			cache = next;
+		} else {
+			prog = c.prog;
+			icase = c.icase;
+			multiline = c.multiline;
+			dotall = c.dotall;
+			ngroups = c.ngroups;
+			first = c.first;
+			anchored = c.anchored;
+			caps = [for (_ in 0...ngroups * 2) -1];
+		}
+	}
+
+	function parse(pattern:String, opt:String) {
 		for (i in 0...opt.length)
 			switch StringTools.fastCodeAt(opt, i) {
 				case "i".code: icase = true;
@@ -53,6 +84,36 @@ class Regex {
 		prog = [RGroup(0, alts)];
 		caps = [for (_ in 0...ngroups * 2) -1];
 		src = null;
+		anchored = !multiline && startsAnchored(alts);
+		first = icase ? null : firstOfAlts(alts);
+	}
+
+	static function startsAnchored(alts:Array<Array<RNode>>):Bool {
+		for (a in alts)
+			if (a.length == 0 || !a[0].match(RStart)) return false;
+		return true;
+	}
+
+	// what a match of the alternatives starts with (see `first`)
+	static function firstOfAlts(alts:Array<Array<RNode>>):Null<Array<Int>> {
+		var r = [];
+		for (a in alts) {
+			var f = firstOfSeq(a);
+			if (f == null) return null;
+			r = r.concat(f);
+		}
+		return normalize(r);
+	}
+
+	static function firstOfSeq(nodes:Array<RNode>):Null<Array<Int>> {
+		if (nodes.length == 0) return null;
+		return switch nodes[0] {
+			case RChar(c): [c, c];
+			case RSet(r, false): r;
+			case RGroup(_, alts): firstOfAlts(alts);
+			case RRepeat(body, min, _, _) if (min > 0): firstOfSeq(body);
+			case _: null;
+		}
 	}
 
 	// searches s[pos, pos + len) for the leftmost match
@@ -60,7 +121,16 @@ class Regex {
 		s = str;
 		limit = pos + len;
 		var start = pos;
-		while (start <= limit) {
+		// `^` only matches at 0
+		var last = anchored ? (pos == 0 ? 0 : -1) : limit;
+		var f = first;
+		while (start <= last) {
+			if (f != null) {
+				// skip the positions a match cannot start at
+				while (start < limit && !inRanges(f, code(start)))
+					start++;
+				if (start >= limit) break;
+			}
 			for (i in 0...caps.length)
 				caps[i] = -1;
 			if (seq(prog, 0, start, done)) return true;

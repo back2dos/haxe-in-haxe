@@ -443,8 +443,10 @@ static inline void *hx_arr_new(int32_t kind, int32_t len) {
 	return hx_arr_new_n(kind, len);
 }
 void hx_arr_grow(void **slot, int32_t need);
-int32_t hx_aget_i_slow(void *a, int32_t i);
-double hx_aget_f_slow(void *a, int32_t i);
+// reading an Int or Float element never allocates or writes: pure, so the
+// C compiler can keep the array's kind, length and data in registers
+int32_t hx_aget_i_slow(void *a, int32_t i) __attribute__((pure));
+double hx_aget_f_slow(void *a, int32_t i) __attribute__((pure));
 void *hx_aget_p_slow(void *a, int32_t i);
 void hx_aset_slow(void **slot, int32_t i, int32_t kind, uint64_t v);
 int32_t hx_apush_slow(void **slot, int32_t kind, uint64_t v); // the index of the new element

@@ -29,6 +29,23 @@ void *Array_copy(void *a) {
 }
 
 void *Array_concat(void *a, void *b) {
+	if (ARR_KIND(a) == ARR_KIND(b)) {
+		// same element kind: one allocation, two copies
+		int32_t na = ARR_LEN(a), nb = ARR_LEN(b);
+		RT_ROOT(a);
+		RT_ROOT(b);
+		void *r = hx_arr_new(ARR_KIND(a), na + nb);
+		RT_RELOAD(a);
+		RT_RELOAD(b);
+		RT_UNROOT(2);
+		if (na + nb > 0) {
+			size_t es = (size_t)elem_size(a);
+			memcpy(ARR_DATA(r), ARR_DATA(a), es * na);
+			memcpy((char *)ARR_DATA(r) + es * na, ARR_DATA(b), es * nb);
+			if (ARR_KIND(r) == AK_PTR) rt_barrier_range(ARR_DATA(r), (void **)ARR_DATA(r), na + nb);
+		}
+		return r;
+	}
 	RT_ROOT(a);
 	RT_ROOT(b);
 	void *r = Array_copy(a);

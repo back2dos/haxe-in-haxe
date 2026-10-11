@@ -272,8 +272,11 @@ int32_t String_indexOf(void *s, void *sub, void *start) {
 	int32_t n = STR_LEN(s), m = STR_LEN(sub), from = opt_int(start, 0);
 	if (from < 0) from = 0;
 	uint16_t *c = STR_CHARS(s), *d = STR_CHARS(sub);
+	if (m == 0) return from <= n ? from : -1;
+	// the first unit, then the rest
+	uint16_t d0 = d[0];
 	for (int32_t i = from; i + m <= n; i++)
-		if (memcmp(c + i, d, 2 * (size_t)m) == 0) return i;
+		if (c[i] == d0 && memcmp(c + i + 1, d + 1, 2 * (size_t)(m - 1)) == 0) return i;
 	return -1;
 }
 
@@ -281,8 +284,10 @@ int32_t String_lastIndexOf(void *s, void *sub, void *start) {
 	int32_t n = STR_LEN(s), m = STR_LEN(sub), from = opt_int(start, n);
 	if (from > n - m) from = n - m;
 	uint16_t *c = STR_CHARS(s), *d = STR_CHARS(sub);
+	if (m == 0) return from >= 0 ? from : -1;
+	uint16_t d0 = d[0];
 	for (int32_t i = from; i >= 0; i--)
-		if (memcmp(c + i, d, 2 * (size_t)m) == 0) return i;
+		if (c[i] == d0 && memcmp(c + i + 1, d + 1, 2 * (size_t)(m - 1)) == 0) return i;
 	return -1;
 }
 

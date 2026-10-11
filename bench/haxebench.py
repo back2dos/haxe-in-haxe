@@ -29,6 +29,19 @@ STD = ROOT / "haxe/std"
 TOOL = ROOT / "bin/hxc-dev/tool"
 HL_SRC = Path(os.environ.get("HL_SRC", HB / "hlsrc/src"))
 
+# git clones into bin/haxebench/libs: (dir, url, revision)
+LIBS = [
+    ("crypto", "https://github.com/HaxeFoundation/crypto.git", "HEAD"),
+    ("formatter", "https://github.com/HaxeCheckstyle/haxe-formatter.git", "v1.9.1"),
+    ("tokentree", "https://github.com/HaxeCheckstyle/tokentree.git", "v1.0.23"),
+    ("haxeparser", "https://github.com/Simn/haxeparser.git", "e5746bfc55c09a3694db42738ff575b91441971a"),
+    ("hxparse", "https://github.com/Simn/hxparse.git", "876070ec62a4869de60081f87763e23457a3bda8"),
+    ("json2object", "https://github.com/elnabo/json2object.git", "a75859de1e966c09e73591b6c9186086c143fe60"),
+    ("hxargs", "https://github.com/simn/hxargs.git", "1d8ec84f641833edd6f0cb2e4290b7524fd27219"),
+    ("hxjsonast", "https://github.com/nadako/hxjsonast.git", "1.1.0"),
+]
+FORMATTER_CPS = ["formatter/src", "tokentree/src", "haxeparser/src", "hxparse/src", "json2object/src", "hxargs", "hxjsonast/src"]
+
 # name: (case dir, main class, extra class paths, defines)
 CASES = {
     "alloc": ("alloc", "BMAllocCode", [], []),
@@ -40,6 +53,8 @@ CASES = {
     "nbody": ("nbody", "BMNBodyCode", [], []),
     "sha256": ("sha256", "BMSHA256Code", [], []),
     "sha512": ("sha512", "BMSHA512Code", [str(HB / "libs/crypto/src")], []),
+    # haxe-formatter 1.9.1 formatting its own src/ (60 times), libraries as the runner pins them
+    "formatter_noio": ("formatter_noio", "BMFormatterNoIOCode", [str(HB / "libs" / d) for d in FORMATTER_CPS], [d.split("/")[0] for d in FORMATTER_CPS]),
 }
 TARGETS = ["hxc", "hxc-tcc", "cpp", "hlc", "hl", "jvm", "js"]
 
@@ -131,8 +146,13 @@ def main():
     a = ap.parse_args()
     if not RUNNER.exists():
         subprocess.check_call(["git", "clone", "-q", "https://github.com/HaxeBenchmarks/benchmark-runner.git", str(RUNNER)])
-    if not (HB / "libs/crypto").exists():
-        subprocess.check_call(["git", "clone", "-q", "https://github.com/HaxeFoundation/crypto.git", str(HB / "libs/crypto")])
+    for d, url, rev in LIBS:
+        if not (HB / "libs" / d).exists():
+            subprocess.check_call(["git", "clone", "-q", url, str(HB / "libs" / d)])
+            subprocess.check_call(["git", "-C", str(HB / "libs" / d), "checkout", "-q", rev])
+    data = RUNNER / "cases/formatter_noio/data"
+    if not data.exists():
+        shutil.copytree(HB / "libs/formatter/src", data)
     results = {}
     if a.json and os.path.exists(a.json):
         results = json.load(open(a.json))
