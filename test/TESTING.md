@@ -889,3 +889,18 @@ libuv):
 A GC deduplicating promoted strings was tried and dropped: 10 macro cases
 differed, because `StrTools.physNeq` (OCaml's `!=` on position file names)
 observes string identity.
+
+## hxc performance work (2026-10-11)
+
+After the changes in bench/README.md ("HaxeBenchmarks"), the port built by
+the native backend tool (`backend/tools/dev-tool.sh`):
+
+| Check | Result |
+| --- | --- |
+| Self-compile HXB vs the previous hxc build (clang, tcc) | identical (436 members) |
+| Conformance, hxc clang / clang `--parallel 3` / tcc / cosmocc | 279 PASS + 7 expected failures each |
+| Conformance, macro cases, hxc clang `--parallel 3` | 66/66 |
+| `test/server.py`, hxc clang | 595/595 |
+| `test/upstream.py`, hxc clang with mbedtls and libuv | 14/14 |
+| JS build of the backend tool, site build (Emscripten wasm64) | build; the wasm compiler runs a test program in Node 24 with the same output as the reference and the native port |
+| A regex test (30 patterns × 10 subjects: match, matchedPos, replace, split, matchSub), hxc vs the previous `hxc.Regex` | identical; 34 lines differ from Eval around zero-width matches, the same before |

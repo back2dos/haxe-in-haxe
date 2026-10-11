@@ -24,6 +24,12 @@ example haxe-formatter (`tools/format-src.sh`), which then formats
 
 ## Builds
 
+For work on the lowering or the runtime, `sh backend/tools/dev-tool.sh`
+builds `bin/hxc-dev/tool`, the backend tool compiled by itself with clang
+(regenerating its C takes about 10 s against 65 s for the Node build of
+`backend/build.sh`; unchanged chunks are not recompiled). `bench/haxebench.py`
+compiles and runs the HaxeBenchmarks cases with it and the other targets.
+
 `build.sh` builds the backend tool (with the reference compiler, to JS), runs
 it on a program and compiles the C with `CC` (default tcc). The C is written
 in chunks (`<out>/prog_hxc/`, see "Chunked output" below) compiled in
@@ -78,8 +84,31 @@ its parallel passes unless *its* invocation passes that define.
   index; anonymous and `Dynamic` field access use field ids and inline
   caches. Dynamic methods have a slot holding their current function, so
   they can be reassigned.
-- **Roots** (`EmitC.Roots`): only references live across a call or an
-  allocation get shadow-stack slots; everything else is a plain C local.
+- **Roots** (`EmitC.Roots`): only references live across a GC point get
+  shadow-stack slots; everything else is a plain C local. Three things
+  keep GC points rare:
+  - *No-GC functions* (`EmitC.findNoGc`): a function that never allocates,
+    throws or calls an impure native, and only calls such functions, is
+    not a GC point for its callers (recursion included: the largest such
+    set). Getters, tree walks and the `Math` natives (inline in `rt.h`)
+    leave the caller's references in registers. Such functions never stop
+    at a safepoint either, so another thread's collection cannot move
+    objects under them.
+  - *Cold sites* (`EmitC.markCold`, `SCold`): an allocation or array
+    set/push whose operands are GC-free collects only on its slow path. The
+    references live across it stay in C locals and are stored in a pushed
+    area (and reloaded) only around the slow call (`rt_alloc_try`,
+    `hx_aset_*_fast`), the way a stack map would let a collector find them.
+  - *No frame zeroing*: frames are pushed with `rt_push`, which raises the
+    thread's high-water mark (`rt_sp_hw`); each collection zeroes the slots
+    between the stack top and that mark, so a slot holds null or a
+    reference stored since the last collection. Only functions with a
+    `try` block zero their frame; `Roots.maybeUnset` would zero the slots of
+    locals read before being set (none in the port: Haxe's definite
+    assignment).
+- **Structural reads** carry the layout of an object literal of their static
+  type (`EAnonGet`'s hint): one type-index check and a constant slot,
+  before the inline cache.
 - **Exceptions**: `try` becomes the `RT_TRY` macros: `_setjmp`/`_longjmp`
   natively (GCC treats `__builtin_setjmp` too optimistically at `-O2`), a
   C++ `try`/`catch` under Emscripten.
@@ -170,8 +199,11 @@ Object layouts (`rt/rt.h`): a header word, then 8-byte slots.
 
 ### GC and memory policy
 
-A precise generational copying collector: a 4 MB nursery (`RT_MINOR_KB`)
-and a copying old generation, roots from the shadow stack, a write barrier
+A precise generational copying collector: a nursery of 4 MB, doubling up to
+32 MB while much of it survives each minor collection (objects that live a
+little longer than a nursery cycle, e.g. a tree being built, are then copied
+fewer times; a doubling after which the survivors grew as much is undone and
+not retried; `RT_MINOR_KB` fixes the size), and a copying old generation, roots from the shadow stack, a write barrier
 recording old-to-young slots, depth-first copying (an object's descendants
 land right after it, in the order the compiler's tree walks visit them).
 

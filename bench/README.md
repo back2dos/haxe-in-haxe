@@ -19,6 +19,79 @@ HL_STATIC="libhl.a fmt.o dxt.o sha1.o" sh bench/build.sh hlc   # static link
 LD_LIBRARY_PATH=/path/to/patched/hashlink HAXE_REFERENCE=haxe/haxe python3 bench/run.py -n 7
 ```
 
+## HaxeBenchmarks: hxc against the fast targets (2026-10-11)
+
+`python3 bench/haxebench.py [-n RUNS] [-t targets] [-c cases] [--clean] [--json out]`
+builds and runs the cases of
+[HaxeBenchmarks/benchmark-runner](https://github.com/HaxeBenchmarks/benchmark-runner)
+(cloned into `bin/haxebench`, with crypto and the formatter's libraries at
+the revisions the runner pins) on hxc and the other targets, with the pinned
+`haxe/haxe`. hxc builds use the native backend tool (`backend/tools/dev-tool.sh`:
+the lowering no longer goes through Node). Wall time in seconds, best of 3,
+clean builds, 4 cores; bold: the fastest. hxcpp is 4.3.0 from git, HL/C uses
+the installed libhl 1.15 with `gcc -O2`, JVM is OpenJDK 21, JS is Node 22
+with hxnodejs.
+
+| case | hxc before | hxc (clang) | hxc (tcc) | hxcpp | HL/C | HL JIT | JVM | JS |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| alloc | 1.17 | 1.80 | **1.37** | 1.71 | 2.48 | 2.52 | 2.03 | 12.08 |
+| bcrypt | 2.53 | 2.59 | 10.26 | **2.41** | 3.56 | 5.01 | 2.55 | 2.97 |
+| binarytrees | 1.22 | 0.76 | 1.99 | 0.81 | 4.15 | 4.36 | **0.67** | 1.30 |
+| json | broken | 0.42 | 1.03 | 0.58 | 1.37 | 1.52 | 0.54 | **0.30** |
+| mandelbrot | 1.52 | **0.50** | 3.37 | 1.36 | 22.78 | 23.68 | 1.08 | 0.90 |
+| mandelbrot_anon | 1.52 | 0.95 | 4.95 | 8.08 | 32.79 | 34.21 | 1.12 | **0.89** |
+| nbody | 0.92 | 0.75 | 2.77 | **0.72** | 1.14 | 1.58 | 0.81 | 0.92 |
+| sha256 | 0.22 | 0.21 | 0.64 | 0.23 | 0.34 | 0.65 | **0.16** | 0.26 |
+| sha512 | 0.17 | 0.13 | 0.54 | **0.03** | 0.05 | 0.08 | 0.13 | 0.32 |
+| formatter_noio | 6.48 | **5.07** | 12.63 | crashes | 16.52 | 17.18 | 5.18 | 17.35 |
+
+"Before" is hxc at the start of this work (bcrypt, sha512 and formatter_noio:
+the first measurement, after the first changes; the earlier harness rounded
+to about 50 ms). Build time (s) of a few, clean:
+
+| case | hxc (clang) | hxc (tcc) | hxcpp | HL/C | JVM |
+| --- | --- | --- | --- | --- | --- |
+| alloc | 0.9 | 0.2 | 33.2 | 2.9 | 0.5 |
+| nbody | 0.9 | 0.2 | 31.3 | 3.0 | 0.5 |
+| json | 1.0 | 0.2 | 37.7 | 3.1 | 0.5 |
+| formatter_noio | 5.0 | 1.1 | crashes | 14.8 | 1.3 |
+
+What changed, by case:
+
+- mandelbrot (1.52 → 0.50): the `Math` natives are inline (`sqrt` is one
+  instruction), and calls to functions that never reach a GC point
+  (`EmitC.findNoGc`: the constructors here) are not GC points, so the
+  objects stay in registers instead of shadow-stack slots.
+- mandelbrot_anon (1.52 → 0.95): structural reads check the literal layout
+  of the static type first (one type-index compare, a constant slot).
+- json (failed → 0.42): `StringTools.isEof` tested `#if hxc`, which a custom
+  target does not define (it defines `target.name`), so the parser read past
+  the end; then field names added at run time by hash instead of a linear
+  `strcmp` scan (31% of the time), field-name strings made once, an inline
+  `StringBuf.addChar` fast path.
+- binarytrees (1.22 → 0.76): the nursery doubles (to 32 MB) while much of it
+  survives each minor collection: the tree being built was copied at every
+  one.
+- formatter_noio (6.48 → 5.07, the JVM's 5.18): the regex engine skips start
+  positions a match cannot begin at, tries anchored patterns once and caches
+  parsed patterns; `Array.concat` in one copy; `indexOf` by first unit.
+- everywhere: cold sites (the references live across an allocation or array
+  store are stored in the shadow stack only on its slow path) and frames
+  without zeroing (the collector zeroes the slots above the stack top).
+
+The self-compile: 5.2 s → about 4.9–5.0 s CPU (same HXB output; peak RSS
+455 → 468 MB).
+
+Not done: sha512 uses `haxe.Int64`, a class of two Ints on hxc, so every
+operation allocates; hxcpp and HL have a native 64-bit integer (a TI64
+representation in the backend would be needed). bcrypt reads a `Vector`
+(an Array: kind and bounds check per read; hxcpp does not check). alloc
+keeps up to 500 MB live and varies between 1.2 and 2.2 s with when the
+copying major collections happen. hxcpp crashes on formatter_noio (the
+case's own comment says so). hxc's `EReg.replace`/`split` differ from Eval
+(PCRE) around zero-width matches (`(?=b)` with `g`, splitting `""`), as
+before these changes.
+
 ## hxc: chunked C output, parallel and incremental builds (2026-10-10)
 
 The emitter now writes the port's C as 60 files (`bin/backend/hih/prog_hxc/`:
