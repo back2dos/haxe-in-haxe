@@ -7,7 +7,15 @@ Earlier checkpoints are in the Git history of this file.
 Latest result per lane, from the dated sections below (newest first; the
 "C build of the port (hxc): memory work" section is at the end).
 
-Full matrix (e221106, 2026-10-09 night): everything green.
+Full matrix (ba6d07d, 2026-10-11): everything green.
+HashLink port: conformance 279 + 7 (also with `--hxb-lib`), macro 66/66, hxblib 7/7,
+display 679/679, server 595/595, interp 275 + the known `eval-eventLoop-compile` race;
+unit tests. hxc clang: conformance 279 + 7, macro 66/66, `--parallel 3`, server
+595/595, display 679/679, `test/upstream.py` 14/14, server JSON-RPC 107/107 (both
+cache modes), Eval debugger 6/6; fuzz `diff:` hxb, interp, js, lua, python, neko, hl,
+hlc, cpp, jvm, swf 150/150 each, php 149 + 1 reference failure (size 5, seed 2026).
+Earlier full matrix (e221106, 2026-10-09 night), for the lanes not rerun since:
+
 HashLink port: conformance 279 + 7 (also with `--hxb-lib`), macro 66/66, hxblib 7/7,
 upstream cases 133 + 62 rejected by both, party 2/2, display 679/679, server 595/595,
 bootstrap and JS tool builds; `test/upstream.py` 11/14 steps, the 3 others failing only on
@@ -33,9 +41,9 @@ tink_core, hxcoro); cosmocc build OK.
 | `test/fuzz` `diff:hxb` + `diff:interp`, 15% injected errors (3,000 programs) | not run | 0 port failures (1 reference crash) |
 | `test/fuzz` `exec:interp,hxc` (200 portable programs) | n/a | 32 output differences, 1 backend error (open, see the fuzzer section) |
 
-Not covered: `server/*` JSON-RPC methods through a server, the Eval debugger,
-memory statistics, running the output of non-HXB targets (their generated
-output is compared with the fuzzer's `diff:<target>` lanes, below).
+Not covered: running the output of non-HXB targets (their generated output is
+compared with the fuzzer's `diff:<target>` lanes, below); `server/memory` sizes
+are host measurements (normalized by `test/server-jsonrpc.py`).
 
 ## Auxiliary output: `--xml`, `--json`, `--xml hx` / `-D gen-hx-classes` — 2026-10-11
 
