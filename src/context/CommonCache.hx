@@ -62,7 +62,7 @@ class CommonCache {
 			/* The first build has to load, afterwards we install a direct lib#build call. */
 			lib.load();
 			com.loadExternType = com.loadExternType.map(function(entry:context.Common.ExternTypeLoader):context.Common.ExternTypeLoader {
-				return entry.name == lib.getFilePath() ? {name: entry.name, load: lib.build} : entry;
+				return entry.name == lib.getFilePath() ? {name: entry.name, load: function(path, p) return lib.build(path, p)} : entry;
 			});
 			return lib.build(path, p);
 		}

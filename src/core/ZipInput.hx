@@ -175,13 +175,30 @@ class ZipInput {
 			case Deflated:
 				var data = channel.read(e.compressedSize);
 				var res = Bytes.alloc(e.uncompressedSize);
-				var z = new haxe.zip.Uncompress(-15);
-				var r = try z.execute(data, 0, res, 0) catch (_:Dynamic) {
+				var z = try new haxe.zip.Uncompress(-15) catch (_:haxe.exceptions.NotImplementedException) null;
+				var written = if (z == null) {
+					// port: host runtimes without zlib (hxc) inflate with the pure Haxe haxe.zip.InflateImpl.
+					var inflate = new haxe.zip.InflateImpl(new haxe.io.BytesInput(data), false, false);
+					var n = 0;
+					try {
+						while (n < e.uncompressedSize) {
+							var k = inflate.readBytes(res, n, e.uncompressedSize - n);
+							if (k == 0) break;
+							n += k;
+						}
+					} catch (_:Dynamic) {
+						throw new ZipError(filename, e.filename, "decompression error");
+					}
+					n;
+				} else {
+					var r = try z.execute(data, 0, res, 0) catch (_:Dynamic) {
+						z.close();
+						throw new ZipError(filename, e.filename, "decompression error");
+					};
 					z.close();
-					throw new ZipError(filename, e.filename, "decompression error");
-				};
-				z.close();
-				if (r.write != e.uncompressedSize) throw new ZipError(filename, e.filename,
+					r.write;
+				}
+				if (written != e.uncompressedSize) throw new ZipError(filename, e.filename,
 					"wrong size for deflated entry (not enough data)");
 				if (haxe.crypto.Crc32.make(res) != e.crc) throw new ZipError(filename, e.filename, "CRC mismatch");
 				return res;
