@@ -35,14 +35,14 @@ build, JVM is OpenJDK 21, JS is Node 22 with hxnodejs.
 | case | hxc before | hxc (clang) | hxc (tcc) | hxcpp | HL/C | HL JIT | JVM | JS |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | alloc | 1.17 | 1.80 | **1.37** | 1.71 | 2.48 | 2.52 | 2.03 | 12.08 |
-| bcrypt | 2.53 | 2.59 | 10.26 | **2.41** | 3.56 | 5.01 | 2.55 | 2.97 |
+| bcrypt | 2.53 | 2.59 (2.46 with unchecked Vector reads) | 10.26 | **2.41** | 3.56 | 5.01 | 2.55 | 2.97 |
 | binarytrees | 1.22 | 0.76 | 1.99 | 0.81 | 4.15 | 4.36 | **0.67** | 1.30 |
 | json | broken | 0.42 | 1.03 | 0.58 | 1.37 | 1.52 | 0.54 | **0.30** |
 | mandelbrot | 1.52 | **0.50** | 3.37 | 1.36 | 22.78 | 23.68 | 1.08 | 0.90 |
 | mandelbrot_anon | 1.52 | 0.95 | 4.95 | 8.08 | 32.79 | 34.21 | 1.12 | **0.89** |
 | nbody | 0.92 | 0.75 | 2.77 | **0.72** | 1.14 | 1.58 | 0.81 | 0.92 |
 | sha256 | 0.22 | 0.21 | 0.64 | 0.23 | 0.34 | 0.65 | **0.16** | 0.26 |
-| sha512 | 0.17 | 0.13 | 0.54 | **0.03** | 0.05 | 0.08 | 0.13 | 0.32 |
+| sha512 | 0.17 | 0.13 (0.018 with native Int64) | 0.54 | **0.03** | 0.05 | 0.08 | 0.13 | 0.32 |
 | formatter_noio | 6.48 | **5.07** | 12.63 | crashes | 16.52 | 17.18 | 5.18 | 17.35 |
 
 "Before" is hxc at the start of this work (bcrypt, sha512 and formatter_noio:
@@ -82,15 +82,16 @@ What changed, by case:
 The self-compile: 5.2 s → about 4.9–5.0 s CPU (same HXB output; peak RSS
 455 → 468 MB).
 
-Not done: sha512 uses `haxe.Int64`, a class of two Ints on hxc, so every
-operation allocates; hxcpp and HL have a native 64-bit integer (a TI64
-representation in the backend would be needed). bcrypt reads a `Vector`
-(an Array: kind and bounds check per read; hxcpp does not check). alloc
-keeps up to 500 MB live and varies between 1.2 and 2.2 s with when the
-copying major collections happen. hxcpp crashes on formatter_noio (the
-case's own comment says so). hxc's `EReg.replace`/`split` differ from Eval
-(PCRE) around zero-width matches (`(?=b)` with `g`, splitting `""`), as
-before these changes.
+Later the same day: `haxe.Int64` is native on hxc (`hxc.I64`, an `int64_t`;
+it was a class of two Ints, so every operation allocated) and reads through
+`haxe.ds.Vector` skip the bounds check: sha512 0.13 → **0.018** s (hxcpp
+0.025), bcrypt 2.59 → 2.46 s (hxcpp 2.41).
+
+Not done: alloc keeps up to 500 MB live and varies between 1.2 and 2.2 s
+with when the copying major collections happen. hxcpp crashes on
+formatter_noio (the case's own comment says so). hxc's
+`EReg.replace`/`split` differ from Eval (PCRE) around zero-width matches
+(`(?=b)` with `g`, splitting `""`), as before these changes.
 
 ## hxc: chunked C output, parallel and incremental builds (2026-10-10)
 

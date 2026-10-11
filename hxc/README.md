@@ -72,7 +72,10 @@ its parallel passes unless *its* invocation passes that define.
 ## The emitter
 
 - **Lowering** (`Lower.hx`, `FnLower.hx`): everything reachable from `main`.
-  `Int`, `Bool` and `Float` are unboxed; everything else is a pointer.
+  `Int`, `Bool`, `Float` and `haxe.Int64` are unboxed (`haxe.Int64` is
+  `hxc.I64`, an `int64_t`, with arrays of 8-byte elements); everything else
+  is a pointer. Reads through `haxe.ds.Vector` check the element kind but not
+  the bounds (out of range is unspecified for `Vector`).
   Generics are erased (a type parameter is `Dynamic`), with boxing,
   unboxing and adapter closures where a declared type and a use-site type
   differ (calls, returns, field and enum-argument access). Function bodies
