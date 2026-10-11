@@ -2,9 +2,10 @@ package libs.extlib;
 
 import haxe.io.Bytes;
 
-// port: the subset of OCaml extlib's IO module (opam extlib, src/IO.ml) that
-// swflib and genswf write with: `'a IO.output` is the record of closures
-// below, and the little-endian/bits writers keep extlib's checks.
+// port: the subset of OCaml extlib's IO module (opam extlib 1.8.0, src/IO.ml)
+// that swflib, png and genswf read and write with: `IO.input` and `'a IO.output`
+// are the records of closures below, and the little-endian/big-endian/bits
+// readers and writers keep extlib's checks (64-bit build: read_i32 is read_i31).
 class Output {
 	public var outWrite:Int->Void;
 	public var outOutput:Bytes->Int->Int->Int;
@@ -19,9 +20,42 @@ class Output {
 	}
 }
 
+class Input {
+	public var inRead:Void->Int;
+	public var inInput:Bytes->Int->Int->Int;
+	public var inClose:Void->Void;
+
+	public function new(read, input, close) {
+		this.inRead = read;
+		this.inInput = input;
+		this.inClose = close;
+	}
+}
+
+class NoMoreInput extends haxe.Exception {
+	public function new() super("No_more_input");
+}
+
+class InputClosed extends haxe.Exception {
+	public function new() super("Input_closed");
+}
+
 class Overflow extends haxe.Exception {}
 class BitsError extends haxe.Exception {}
 class OutputClosed extends haxe.Exception {}
+
+// port: the bits reader state (`input bc`).
+class InBits {
+	public final ch:Input;
+	public var nbits:Int;
+	public var bits:Int;
+
+	public function new(ch:Input) {
+		this.ch = ch;
+		nbits = 0;
+		bits = 0;
+	}
+}
 
 // port: the bits writer state (`'a bc`).
 class OutBits {
@@ -37,6 +71,234 @@ class OutBits {
 }
 
 class IO {
+	public static function createIn(read:Void->Int, input:Bytes->Int->Int->Int, close:Void->Void):Input return new Input(read, input, close);
+
+	// port: `read` returns the char as its code (0..255).
+	public static inline function read(i:Input):Int return i.inRead();
+
+	public static function nread(i:Input, n:Int):Bytes {
+		if (n < 0) throw new core.ds.InvalidArgument("IO.nread");
+		if (n == 0) return Bytes.alloc(0);
+		var s = Bytes.alloc(n);
+		var l = n;
+		var p = 0;
+		try {
+			while (l > 0) {
+				var r = i.inInput(s, p, l);
+				if (r == 0) throw new NoMoreInput();
+				p += r;
+				l -= r;
+			}
+			return s;
+		} catch (e:NoMoreInput) {
+			if (p == 0) throw e;
+			return s.sub(0, p);
+		}
+	}
+
+	// port: OCaml strings are bytes; the port decodes the bytes read (as UTF-8).
+	public static function nreadString(i:Input, n:Int):String return nread(i, n).toString();
+
+	public static function input(i:Input, s:Bytes, p:Int, l:Int):Int {
+		var sl = s.length;
+		if (p + l > sl || p < 0 || l < 0) throw new core.ds.InvalidArgument("IO.input");
+		if (l == 0) return 0 else return i.inInput(s, p, l);
+	}
+
+	public static function reallyInput(i:Input, s:Bytes, p:Int, l2:Int):Int {
+		var sl = s.length;
+		if (p + l2 > sl || p < 0 || l2 < 0) throw new core.ds.InvalidArgument("IO.really_input");
+		var l = l2;
+		while (l > 0) {
+			var r = i.inInput(s, p, l);
+			if (r == 0) throw new haxe.Exception("Sys_blocked_io");
+			p += r;
+			l -= r;
+		}
+		return l2;
+	}
+
+	public static function reallyNread(i:Input, n:Int):Bytes {
+		if (n < 0) throw new core.ds.InvalidArgument("IO.really_nread");
+		if (n == 0) return Bytes.alloc(0);
+		var s = Bytes.alloc(n);
+		reallyInput(i, s, 0, n);
+		return s;
+	}
+
+	public static function closeIn(i:Input):Void {
+		i.inClose();
+		i.inRead = () -> throw new InputClosed();
+		i.inInput = (_, _, _) -> throw new InputClosed();
+		i.inClose = () -> throw new InputClosed();
+	}
+
+	public static function inputBytes(s:Bytes):Input {
+		var pos = 0;
+		var len = s.length;
+		return createIn(() -> {
+			if (pos >= len) throw new NoMoreInput();
+			var c = s.get(pos);
+			pos++;
+			c;
+		}, (sout, p, l) -> {
+			if (pos >= len) throw new NoMoreInput();
+			var n = (if (pos + l > len) len - pos else l);
+			sout.blit(p, s, pos, n);
+			pos += n;
+			n;
+		}, () -> {});
+	}
+
+	public static inline function inputString(s:Bytes):Input return inputBytes(s);
+
+	// port: Stdlib in_channel over a host input; End_of_file is haxe.io.Eof.
+	public static function inputChannel(ch:haxe.io.Input):Input {
+		return createIn(() -> {
+			try ch.readByte() catch (_:haxe.io.Eof) throw new NoMoreInput();
+		}, (s, p, l) -> {
+			var n = try ch.readBytes(s, p, l) catch (_:haxe.io.Eof) 0;
+			if (n == 0) throw new NoMoreInput();
+			n;
+		}, () -> ch.close());
+	}
+
+	public static function posIn(i:Input):{ch:Input, pos:Void->Int} {
+		var p = 0;
+		var ch = createIn(() -> {
+			var c = i.inRead();
+			p++;
+			c;
+		}, (s, sp, l) -> {
+			var n = i.inInput(s, sp, l);
+			p += n;
+			n;
+		}, i.inClose);
+		return {ch: ch, pos: () -> p};
+	}
+
+	public static inline function readByte(i:Input):Int return i.inRead();
+
+	public static function readSignedByte(i:Input):Int {
+		var c = i.inRead();
+		return if (c & 128 != 0) c - 256 else c;
+	}
+
+	// port: read_string returns the bytes up to the NUL, decoded as UTF-8.
+	public static function readBytesNul(i:Input):Bytes {
+		var b = new haxe.io.BytesBuffer();
+		while (true) {
+			var c = i.inRead();
+			if (c == 0) break;
+			b.addByte(c);
+		}
+		return b.getBytes();
+	}
+
+	public static function readString(i:Input):String return readBytesNul(i).toString();
+
+	public static function readUi16(i:Input):Int {
+		var ch1 = readByte(i);
+		var ch2 = readByte(i);
+		return ch1 | (ch2 << 8);
+	}
+
+	public static function readI16(i:Input):Int {
+		var ch1 = readByte(i);
+		var ch2 = readByte(i);
+		var n = ch1 | (ch2 << 8);
+		return if (ch2 & 128 != 0) n - 65536 else n;
+	}
+
+	// port: read_32 ~i31; the sign-extended value fits the port's 32-bit Int.
+	static function read32(i31:Bool, ch:Input):Int {
+		var ch1 = readByte(ch);
+		var ch2 = readByte(ch);
+		var ch3 = readByte(ch);
+		var ch4 = readByte(ch);
+		if (ch4 & 128 != 0) {
+			if (i31 && ch4 & 64 == 0) throw new Overflow("read_i31");
+		} else {
+			if (i31 && ch4 & 64 != 0) throw new Overflow("read_i31");
+		}
+		return ch1 | (ch2 << 8) | (ch3 << 16) | (ch4 << 24);
+	}
+
+	public static function readI31(ch:Input):Int return read32(true, ch);
+
+	public static function readI32AsInt(ch:Input):Int return read32(false, ch);
+
+	public static function readI32(ch:Input):Int return read32(true, ch);
+
+	public static function readRealI32(ch:Input):Int {
+		var ch1 = readByte(ch);
+		var ch2 = readByte(ch);
+		var ch3 = readByte(ch);
+		var base = ch1 | (ch2 << 8) | (ch3 << 16);
+		var big = readByte(ch) << 24;
+		return base | big;
+	}
+
+	public static function readDouble(ch:Input):Float {
+		var low = readRealI32(ch);
+		var high = readRealI32(ch);
+		return haxe.io.FPHelper.i64ToDouble(low, high);
+	}
+
+	// port: IO.BigEndian.read_i32 (read_i31).
+	public static function beReadI32(ch:Input):Int {
+		var ch4 = readByte(ch);
+		var ch3 = readByte(ch);
+		var ch2 = readByte(ch);
+		var ch1 = readByte(ch);
+		if (ch4 & 128 != 0) {
+			if (ch4 & 64 == 0) throw new Overflow("read_i31");
+		} else {
+			if (ch4 & 64 != 0) throw new Overflow("read_i31");
+		}
+		return ch1 | (ch2 << 8) | (ch3 << 16) | (ch4 << 24);
+	}
+
+	public static function beReadRealI32(ch:Input):Int {
+		var big = readByte(ch) << 24;
+		var ch3 = readByte(ch);
+		var ch2 = readByte(ch);
+		var ch1 = readByte(ch);
+		var base = ch1 | (ch2 << 8) | (ch3 << 16);
+		return base | big;
+	}
+
+	public static function inputBits(ch:Input):InBits return new InBits(ch);
+
+	public static function readBits(b:InBits, n:Int):Int {
+		if (b.nbits >= n) {
+			var c = b.nbits - n;
+			// port: (1 lsl n) - 1 for n <= 31 on a 32-bit Int.
+			var k = (b.bits >> c) & (n >= 32 ? -1 : (1 << n) - 1);
+			b.nbits = c;
+			return k;
+		} else {
+			var k = readByte(b.ch);
+			if (b.nbits >= 24) {
+				if (n > 31) throw new BitsError("Bits_error");
+				var c = 8 + b.nbits - n;
+				var d = b.bits & ((1 << b.nbits) - 1);
+				var d = (d << (8 - c)) | (k >> c);
+				b.bits = k;
+				b.nbits = c;
+				return d;
+			} else {
+				b.bits = (b.bits << 8) | k;
+				b.nbits = b.nbits + 8;
+				return readBits(b, n);
+			}
+		}
+	}
+
+	public static function dropBits(b:InBits):Void {
+		b.nbits = 0;
+	}
+
 	public static function createOut(write:Int->Void, output:Bytes->Int->Int->Int, flush:Void->Void, close:Void->Dynamic):Output
 		return new Output(write, output, close, flush);
 
@@ -118,6 +380,11 @@ class IO {
 		if (n < 0 || n > 0xFFFF) throw new Overflow("write_ui16");
 		writeByte(ch, n);
 		writeByte(ch, n >>> 8);
+	}
+
+	public static function writeI16(ch:Output, n:Int):Void {
+		if (n < -0x8000 || n > 0x7FFF) throw new Overflow("write_i16");
+		if (n < 0) writeUi16(ch, 65536 + n) else writeUi16(ch, n);
 	}
 
 	public static function write32(ch:Output, n:Int):Void {

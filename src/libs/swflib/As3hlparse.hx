@@ -3,9 +3,7 @@ package libs.swflib;
 import libs.swflib.As3;
 import libs.swflib.As3hl;
 
-// port: haxe/libs/swflib/as3hlparse.ml, the parts the generator reaches:
-// stack_delta and the FLATTEN section. The hl -> as3 `parse` direction reads
-// SWF libraries and is not ported.
+// port: haxe/libs/swflib/as3hlparse.ml; MultiArray.t and DynArray.t are Arrays.
 class As3hlparse {
 	static function assertFalse():Dynamic throw new core.ds.Failure("assert false");
 
@@ -88,6 +86,379 @@ class As3hlparse {
 				case _: -1;
 			});
 		case HUnk(_): assertFalse();
+	}
+
+	// port: ExtString.String.nsplit; an empty string has no parts.
+	static function nsplit(s:String, sep:String):Array<String> return s == "" ? [] : s.split(sep);
+
+	static inline function get<T>(t:Array<T>, i:Index):T return As3parse.iget(t, i);
+
+	static inline function no_nz(i:IndexNz):Index return As3parse.no_nz(i);
+
+	static inline function idx(n:Index):Int return n - 1;
+
+	static function ident(ctx:ParseCtx, i:Index):HlIdent return get(ctx.as3.as3_idents, i);
+
+	static function name(ctx:ParseCtx, n:Index):HlName return ctx.names[idx(n)];
+
+	static function method_type(ctx:ParseCtx, n:IndexNz):HlMethod return ctx.methods[idx(no_nz(n))];
+
+	static function getclass(ctx:ParseCtx, n:IndexNz):HlClass return ctx.classes[idx(no_nz(n))];
+
+	static function parse_opcode(ctx:ParseCtx, i:Int, op:As3Opcode):HlOpcode return switch op {
+		case A3BreakPoint: HBreakPoint;
+		case A3Nop: HNop;
+		case A3Throw: HThrow;
+		case A3GetSuper(n): HGetSuper(name(ctx, n));
+		case A3SetSuper(n): HSetSuper(name(ctx, n));
+		case A3DxNs(s): HDxNs(ident(ctx, s));
+		case A3DxNsLate: HDxNsLate;
+		case A3RegKill(r): HRegKill(r);
+		case A3Label: HLabel;
+		case A3Jump(j, n):
+			ctx.jumps.unshift({i: i, pos: ctx.pos});
+			HJump(j, n);
+		case A3Switch(n, infos):
+			ctx.jumps.unshift({i: i, pos: ctx.pos - As3code.length(op)});
+			HSwitch(n, infos);
+		case A3PushWith: HPushWith;
+		case A3PopScope: HPopScope;
+		case A3ForIn: HForIn;
+		case A3HasNext: HHasNext;
+		case A3Null: HNull;
+		case A3Undefined: HUndefined;
+		case A3ForEach: HForEach;
+		case A3SmallInt(n): HSmallInt(n);
+		case A3Int(n): HInt(n);
+		case A3True: HTrue;
+		case A3False: HFalse;
+		case A3NaN: HNaN;
+		case A3Pop: HPop;
+		case A3Dup: HDup;
+		case A3Swap: HSwap;
+		case A3String(i): HString(ident(ctx, i));
+		case A3IntRef(i): HIntRef(get(ctx.as3.as3_ints, i));
+		case A3UIntRef(i): HUIntRef(get(ctx.as3.as3_uints, i));
+		case A3Float(f): HFloat(get(ctx.as3.as3_floats, f));
+		case A3Scope: HScope;
+		case A3Namespace(n): HNamespace(ctx.namespaces[idx(n)]);
+		case A3Next(r1, r2): HNext(r1, r2);
+		case A3Function(f): HFunction(method_type(ctx, f));
+		case A3CallStack(n): HCallStack(n);
+		case A3Construct(n): HConstruct(n);
+		case A3CallMethod(s, n): HCallMethod(s, n);
+		case A3CallStatic(m, n): HCallStatic(ctx.methods[idx(m)], n);
+		case A3CallSuper(p, n): HCallSuper(name(ctx, p), n);
+		case A3CallProperty(p, n): HCallProperty(name(ctx, p), n);
+		case A3RetVoid: HRetVoid;
+		case A3Ret: HRet;
+		case A3ConstructSuper(n): HConstructSuper(n);
+		case A3ConstructProperty(p, n): HConstructProperty(name(ctx, p), n);
+		case A3CallPropLex(p, n): HCallPropLex(name(ctx, p), n);
+		case A3CallSuperVoid(p, n): HCallSuperVoid(name(ctx, p), n);
+		case A3CallPropVoid(p, n): HCallPropVoid(name(ctx, p), n);
+		case A3ApplyType(n): HApplyType(n);
+		case A3Object(n): HObject(n);
+		case A3Array(n): HArray(n);
+		case A3NewBlock: HNewBlock;
+		case A3ClassDef(n): HClassDef(getclass(ctx, n));
+		case A3GetDescendants(p): HGetDescendants(name(ctx, p));
+		case A3Catch(n): HCatch(n);
+		case A3FindPropStrict(p): HFindPropStrict(name(ctx, p));
+		case A3FindProp(p): HFindProp(name(ctx, p));
+		case A3FindDefinition(p): HFindDefinition(name(ctx, p));
+		case A3GetLex(p): HGetLex(name(ctx, p));
+		case A3SetProp(p): HSetProp(name(ctx, p));
+		case A3Reg(r): HReg(r);
+		case A3SetReg(r): HSetReg(r);
+		case A3GetGlobalScope: HGetGlobalScope;
+		case A3GetScope(n): HGetScope(n);
+		case A3GetProp(p): HGetProp(name(ctx, p));
+		case A3InitProp(p): HInitProp(name(ctx, p));
+		case A3DeleteProp(p): HDeleteProp(name(ctx, p));
+		case A3GetSlot(n): HGetSlot(n);
+		case A3SetSlot(n): HSetSlot(n);
+		case A3ToString: HToString;
+		case A3ToXml: HToXml;
+		case A3ToXmlAttr: HToXmlAttr;
+		case A3ToInt: HToInt;
+		case A3ToUInt: HToUInt;
+		case A3ToNumber: HToNumber;
+		case A3ToBool: HToBool;
+		case A3ToObject: HToObject;
+		case A3CheckIsXml: HCheckIsXml;
+		case A3Cast(p): HCast(name(ctx, p));
+		case A3AsAny: HAsAny;
+		case A3AsString: HAsString;
+		case A3AsType(p): HAsType(name(ctx, p));
+		case A3AsObject: HAsObject;
+		case A3IncrReg(r): HIncrReg(r);
+		case A3DecrReg(r): HDecrReg(r);
+		case A3Typeof: HTypeof;
+		case A3InstanceOf: HInstanceOf;
+		case A3IsType(p): HIsType(name(ctx, p));
+		case A3IncrIReg(r): HIncrIReg(r);
+		case A3DecrIReg(r): HDecrIReg(r);
+		case A3This: HThis;
+		case A3SetThis: HSetThis;
+		case A3DebugReg(id, r, n): HDebugReg(ident(ctx, id), r, n);
+		case A3DebugLine(n): HDebugLine(n);
+		case A3DebugFile(p): HDebugFile(ident(ctx, p));
+		case A3BreakPointLine(n): HBreakPointLine(n);
+		case A3Timestamp: HTimestamp;
+		case A3Op(op): HOp(op);
+		case A3Unk(n): HUnk(n);
+	}
+
+	static function parse_code(ctx:ParseCtx, f:As3Function, trys:Array<HlTryCatch>):Array<HlOpcode> {
+		var code = f.fun3_code;
+		var old_pos = ctx.pos, old_jumps = ctx.jumps;
+		var indexes:Array<Int> = [];
+		ctx.pos = 0;
+		ctx.jumps = [];
+		function codepos(pos:Int, delta:Int):Int {
+			// port: MultiArray.get raises outside the array (caught: -1).
+			var p = pos + delta;
+			var id = (if (p >= 0 && p < indexes.length) indexes[p] else -1);
+			if (id == -1) {
+				/*Printf.eprintf "MISALIGNED JUMP AT %d %c %d IN #%d\n" pos (if delta < 0 then '-' else '+') (if delta < 0 then -delta else delta) (idx (no_nz f.fun3_id));*/
+				if (pos < 0 || pos >= indexes.length) throw new core.ds.InvalidArgument("index out of bounds");
+				return indexes[pos]; /* jump 0 */
+			} else
+				return id;
+		}
+		var hcode = [];
+		for (i in 0...code.length) {
+			var op = code[i];
+			var len = As3code.length(op);
+			indexes.push(i);
+			for (k in 2...len + 1) indexes.push(-1);
+			ctx.pos = ctx.pos + len;
+			hcode.push(parse_opcode(ctx, i, op));
+		}
+		/* in case we have a dead-jump at the end of code */
+		indexes.push(code.length);
+		/* patch jumps */
+		for (jp in ctx.jumps) {
+			var j = jp.i, pos = jp.pos;
+			hcode[j] = (switch hcode[j] {
+				case HJump(jc, n):
+					HJump(jc, codepos(pos, n) - j);
+				case HSwitch(n, infos):
+					HSwitch(codepos(pos, n) - j, [for (n in infos) codepos(pos, n) - j]);
+				case _:
+					assertFalse();
+			});
+		}
+		/* patch try/catches */
+		for (i in 0...trys.length) {
+			var t = trys[i];
+			trys[i] = {
+				hltc_start: codepos(0, t.hltc_start),
+				hltc_end: codepos(0, t.hltc_end),
+				hltc_handle: codepos(0, t.hltc_handle),
+				hltc_type: t.hltc_type,
+				hltc_name: t.hltc_name,
+			};
+		}
+		ctx.pos = old_pos;
+		ctx.jumps = old_jumps;
+		return hcode;
+	}
+
+	static function parse_metadata(ctx:ParseCtx, m:As3Metadata):HlMetadata {
+		return {
+			hlmeta_name: ident(ctx, m.meta3_name),
+			hlmeta_data: [for (d in m.meta3_data) {k: d.k == null ? null : ident(ctx, d.k), v: ident(ctx, d.v)}],
+		};
+	}
+
+	static function parse_method(ctx:ParseCtx, m:As3Method):HlMethodField {
+		return {
+			hlm_type: method_type(ctx, m.m3_type),
+			hlm_final: m.m3_final,
+			hlm_override: m.m3_override,
+			hlm_kind: m.m3_kind,
+		};
+	}
+
+	static function parse_value(ctx:ParseCtx, v:As3Value):HlValue return switch v {
+		case A3VNone: HVNone;
+		case A3VNull: HVNull;
+		case A3VBool(b): HVBool(b);
+		case A3VString(s): HVString(ident(ctx, s));
+		case A3VInt(i): HVInt(get(ctx.as3.as3_ints, i));
+		case A3VUInt(i): HVUInt(get(ctx.as3.as3_uints, i));
+		case A3VFloat(f): HVFloat(get(ctx.as3.as3_floats, f));
+		case A3VNamespace(n, ns): HVNamespace(n, ctx.namespaces[idx(ns)]);
+	}
+
+	static function parse_var(ctx:ParseCtx, v:As3Var):HlVarField {
+		return {
+			hlv_type: v.v3_type == null ? null : name(ctx, v.v3_type),
+			hlv_value: parse_value(ctx, v.v3_value),
+			hlv_const: v.v3_const,
+		};
+	}
+
+	static function parse_field_kind(ctx:ParseCtx, k:As3FieldKind):HlFieldKind return switch k {
+		case A3FMethod(m): HFMethod(parse_method(ctx, m));
+		case A3FVar(v): HFVar(parse_var(ctx, v));
+		case A3FFunction(f): HFFunction(method_type(ctx, f));
+		case A3FClass(c): HFClass(getclass(ctx, c));
+	}
+
+	static function parse_field(ctx:ParseCtx, f:As3Field):HlField {
+		return {
+			hlf_name: name(ctx, f.f3_name),
+			hlf_slot: f.f3_slot,
+			hlf_kind: parse_field_kind(ctx, f.f3_kind),
+			hlf_metas: switch f.f3_metas {
+				case null: null;
+				case a: [for (i in a) parse_metadata(ctx, get(ctx.as3.as3_metadatas, no_nz(i)))];
+			},
+		};
+	}
+
+	static function parse_namespace(ctx:ParseCtx, ns:As3Namespace):HlNamespace return switch ns {
+		case A3NPrivate(id): HNPrivate(id == null ? null : ident(ctx, id));
+		case A3NPublic(id): HNPublic(id == null ? null : ident(ctx, id));
+		case A3NInternal(id): HNInternal(id == null ? null : ident(ctx, id));
+		case A3NProtected(id): HNProtected(ident(ctx, id));
+		case A3NNamespace(id): HNNamespace(ident(ctx, id));
+		case A3NExplicit(id): HNExplicit(ident(ctx, id));
+		case A3NStaticProtected(id): HNStaticProtected(id == null ? null : ident(ctx, id));
+	}
+
+	static function parse_nset(ctx:ParseCtx, l:As3NsSet):HlNsSet return [for (n in l) ctx.namespaces[idx(n)]];
+
+	static function parse_name(names:Array<As3MultiName>, ctx:ParseCtx, n:As3MultiName):HlName return switch n {
+		case A3MName(id, ns):
+			switch ctx.namespaces[idx(ns)] {
+				case HNPublic(p):
+					var pack = (switch p {
+						case null: [];
+						case i: nsplit(i, ".");
+					});
+					HMPath(pack, ident(ctx, id));
+				case ns:
+					HMName(ident(ctx, id), ns);
+			}
+		case A3MNSAny(id): HMNSAny(ident(ctx, id));
+		case A3MAny: HMAny;
+		case A3MMultiName(id, ns): HMMultiName(id == null ? null : ident(ctx, id), ctx.nsets[idx(ns)]);
+		case A3MRuntimeName(id): HMRuntimeName(ident(ctx, id));
+		case A3MRuntimeNameLate: HMRuntimeNameLate;
+		case A3MMultiNameLate(ns): HMMultiNameLate(ctx.nsets[idx(ns)]);
+		case A3MAttrib(multi): HMAttrib(parse_name(names, ctx, multi));
+		case A3MParams(id, pl):
+			// port: OCaml evaluates the constructor arguments right to left.
+			var params = [for (id in pl) if (idx(id) == -1) HMAny else parse_name(names, ctx, names[idx(id)])];
+			HMParams(parse_name(names, ctx, names[idx(id)]), params);
+	}
+
+	static function parse_try_catch(ctx:ParseCtx, t:As3TryCatch):HlTryCatch {
+		return {
+			hltc_start: t.tc3_start,
+			hltc_end: t.tc3_end,
+			hltc_handle: t.tc3_handle,
+			hltc_type: t.tc3_type == null ? null : name(ctx, t.tc3_type),
+			hltc_name: t.tc3_name == null ? null : name(ctx, t.tc3_name),
+		};
+	}
+
+	static function parse_function(ctx:ParseCtx, f:As3Function):HlFunction {
+		return {
+			hlf_stack_size: f.fun3_stack_size,
+			hlf_nregs: f.fun3_nregs,
+			hlf_init_scope: f.fun3_init_scope,
+			hlf_max_scope: f.fun3_max_scope,
+			hlf_code: [], /* keep for later */
+			hlf_trys: [for (t in f.fun3_trys) parse_try_catch(ctx, t)],
+			hlf_locals: [
+				for (f in f.fun3_locals) {
+					if (f.f3_metas != null) assertFalse();
+					switch f.f3_kind {
+						case A3FVar(v):
+							/* v3_value can be <> None if it's a fun parameter with a default value
+								- which looks like a bug of the AS3 compiler */
+							({
+								name: name(ctx, f.f3_name),
+								type: v.v3_type == null ? null : name(ctx, v.v3_type),
+								slot: f.f3_slot,
+								const: v.v3_const
+							} : HlLocal);
+						case _:
+							assertFalse();
+					}
+				}
+			],
+		};
+	}
+
+	static function parse_method_type(ctx:ParseCtx, idx:Int, f:Null<As3Function>):HlMethod {
+		var m = ctx.as3.as3_method_types[idx];
+		var r = new HlMethod();
+		r.hlmt_index = idx + ctx.delta_mt;
+		r.hlmt_ret = m.mt3_ret == null ? null : name(ctx, m.mt3_ret);
+		r.hlmt_args = [for (a in m.mt3_args) a == null ? null : name(ctx, a)];
+		r.hlmt_native = m.mt3_native;
+		r.hlmt_var_args = m.mt3_var_args;
+		r.hlmt_arguments_defined = m.mt3_arguments_defined;
+		r.hlmt_uses_dxns = m.mt3_uses_dxns;
+		r.hlmt_new_block = m.mt3_new_block;
+		r.hlmt_unused_flag = m.mt3_unused_flag;
+		r.hlmt_debug_name = m.mt3_debug_name == null ? null : ident(ctx, m.mt3_debug_name);
+		r.hlmt_dparams = m.mt3_dparams == null ? null : [for (v in m.mt3_dparams) parse_value(ctx, v)];
+		r.hlmt_pnames = m.mt3_pnames == null ? null : [for (i in m.mt3_pnames) i == null ? null : ident(ctx, i)];
+		r.hlmt_function = f == null ? null : parse_function(ctx, f);
+		return r;
+	}
+
+	static function parse_class(ctx:ParseCtx, c:As3Class, s:As3Static, index:Int):HlClass {
+		var r = new HlClass();
+		r.hlc_index = index + ctx.delta_cl;
+		r.hlc_name = name(ctx, c.cl3_name);
+		r.hlc_super = c.cl3_super == null ? null : name(ctx, c.cl3_super);
+		r.hlc_sealed = c.cl3_sealed;
+		r.hlc_final = c.cl3_final;
+		r.hlc_interface = c.cl3_interface;
+		r.hlc_namespace = c.cl3_namespace == null ? null : ctx.namespaces[idx(c.cl3_namespace)];
+		r.hlc_implements = [for (n in c.cl3_implements) name(ctx, n)];
+		r.hlc_construct = method_type(ctx, c.cl3_construct);
+		r.hlc_fields = [for (f in c.cl3_fields) parse_field(ctx, f)];
+		r.hlc_static_construct = method_type(ctx, s.st3_method);
+		r.hlc_static_fields = [for (f in s.st3_fields) parse_field(ctx, f)];
+		return r;
+	}
+
+	static function parse_static(ctx:ParseCtx, s:As3Static):HlStatic {
+		return {
+			hls_method: method_type(ctx, s.st3_method),
+			hls_fields: [for (f in s.st3_fields) parse_field(ctx, f)],
+		};
+	}
+
+	public static function parse(?delta_mt:Int = 0, ?delta_cl:Int = 0, t:As3Tag):HlTag {
+		var ctx = new ParseCtx(t, delta_mt, delta_cl);
+		ctx.namespaces = [for (ns in t.as3_namespaces) parse_namespace(ctx, ns)];
+		ctx.nsets = [for (l in t.as3_nsets) parse_nset(ctx, l)];
+		ctx.names = [for (n in t.as3_names) parse_name(t.as3_names, ctx, n)];
+		// port: Hashtbl.add/find: the latest function of a method index wins.
+		var hfunctions = new Map<Int, As3Function>();
+		for (f in t.as3_functions) hfunctions.set(idx(no_nz(f.fun3_id)), f);
+		ctx.methods = [for (i in 0...t.as3_method_types.length) parse_method_type(ctx, i, hfunctions.get(i))];
+		ctx.classes = [for (i in 0...t.as3_classes.length) parse_class(ctx, t.as3_classes[i], t.as3_statics[i], i)];
+		var inits = [for (s in t.as3_inits) parse_static(ctx, s)];
+		for (f in t.as3_functions) {
+			switch (method_type(ctx, f.fun3_id)).hlmt_function {
+				case null:
+					assertFalse();
+				case fl:
+					fl.hlf_code = parse_code(ctx, f, fl.hlf_trys);
+			}
+		}
+		return inits;
 	}
 
 	/* ************************************************************************ */
@@ -594,7 +965,7 @@ class As3hlparse {
 
 	static function nsSetKey(l:HlNsSet):String return l.length + "[" + [for (ns in l) nsKey(ns)].join(",") + "]";
 
-	static function nameKey(n:HlName):String return switch n {
+	public static function nameKey(n:HlName):String return switch n {
 		case HMPath(pack, name): "P" + pack.length + "(" + [for (p in pack) optKey(p)].join("") + ")" + optKey(name);
 		case HMName(i, ns): "N" + optKey(i) + nsKey(ns);
 		case HMMultiName(i, ns): "M" + optKey(i) + nsSetKey(ns);
@@ -658,4 +1029,24 @@ private class FlattenCtx {
 	var fjumps:Array<Int>;
 
 	public function new() {}
+}
+
+@:allow(libs.swflib.As3hlparse)
+private class ParseCtx {
+	final as3:As3Tag;
+	var namespaces:Array<HlNamespace> = [];
+	var nsets:Array<HlNsSet> = [];
+	var names:Array<HlName> = [];
+	var methods:Array<HlMethod> = [];
+	var classes:Array<HlClass> = [];
+	var jumps:Array<{i:Int, pos:Int}> = [];
+	var pos = 0;
+	final delta_mt:Int;
+	final delta_cl:Int;
+
+	public function new(as3, delta_mt, delta_cl) {
+		this.as3 = as3;
+		this.delta_mt = delta_mt;
+		this.delta_cl = delta_cl;
+	}
 }

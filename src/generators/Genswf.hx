@@ -13,6 +13,7 @@ import core.ds.NotFound;
 import libs.extlib.IO;
 import libs.swflib.Swf;
 import libs.swflib.As3hl;
+import libs.swflib.Png;
 
 private enum DependencyKind {
 	DKInherit;
@@ -89,7 +90,13 @@ private class InputString {
 		var ch2 = read_byte();
 		var ch3 = read_byte();
 		var ch4 = read_byte();
-		// port: the 63-bit read_i32 never overflows; the port's Int is 32-bit.
+		// port: extlib's read_i32 is read_i31 (Overflow outside the 31-bit range); the
+		// sign-extended value fits the port's 32-bit Int.
+		if (ch4 & 128 != 0) {
+			if (ch4 & 64 == 0) throw new libs.extlib.IO.Overflow("read_i31");
+		} else {
+			if (ch4 & 64 != 0) throw new libs.extlib.IO.Overflow("read_i31");
+		}
 		return ch1 | (ch2 << 8) | (ch3 << 16) | (ch4 << 24);
 	}
 }
@@ -479,8 +486,32 @@ class Genswf {
 											There is a bug in Flash PNG decoder for 24-bits PNGs : Color such has 0xFF00FF is decoded as 0xFE00FE.
 											In that particular case, we will then embed the decoded PNG bytes instead.
 										*/
-										// port: png.ml and zlib inflate (Extc.unzip) are not ported.
-										throw new core.ds.Failure("haxe-in-haxe: PNG bitmaps (@:bitmap) are not supported: png.ml is not ported");
+										try {
+											var png = Png.parse(IO.inputString(data));
+											var h = Png.header(png);
+											switch h.png_color {
+												case ClTrueColor(TBits8, NoAlpha):
+													// port: `png_width * png_height * 4 > Sys.max_string_length` never
+													// holds for 31-bit dimensions on 64-bit OCaml; the warning and Exit
+													// branch is unreachable.
+													var data = libs.extc.Extc.unzip(Png.data(png));
+													var raw_data = Png.filter(png, data);
+													var cmp_data = libs.extc.Extc.zip(raw_data);
+													tag(true, TBitsLossless2({
+														bll_id: cid,
+														bll_format: 5,
+														bll_width: h.png_width,
+														bll_height: h.png_height,
+														bll_data: cmp_data
+													}));
+												case _: raw();
+											}
+										} catch (_:core.ds.Exit) {
+											raw();
+										} catch (_:Dynamic) {
+											com.error("Failed to decode this PNG " + file, p);
+											raw();
+										}
 									case _: raw();
 								});
 								var rest = loop(i + 1);
@@ -496,8 +527,35 @@ class Genswf {
 									case BPNG:
 									case _: Error.abort("Alpha channel must be a PNG file", p2);
 								}
-								// port: png.ml and zlib inflate (Extc.unzip) are not ported.
-								throw new core.ds.Failure("haxe-in-haxe: PNG alpha channels (@:bitmap) are not supported: png.ml is not ported");
+								var png = Png.parse(IO.inputString(adata));
+								var h = Png.header(png);
+								var amask = (switch h.png_color {
+									case ClTrueColor(TBits8, HaveAlpha):
+										var data = libs.extc.Extc.unzip(Png.data(png));
+										var raw_data = Png.filter(png, data);
+										var alpha = Bytes.alloc(h.png_width * h.png_height);
+										alpha.fill(0, alpha.length, 0);
+										// port: the upstream loop also runs for i = Bytes.length alpha, an unsafe
+										// write of raw_data's padding byte (0) past the end that has no effect.
+										for (i in 0...alpha.length) alpha.set(i, raw_data.get(i << 2));
+										libs.extc.Extc.zip(alpha);
+									case _:
+										Error.abort("PNG file must contain 8 bit alpha channel", p2);
+								});
+								cid++;
+								classes.unshift({f9_cid: cid, f9_classname: sTypePath(c.clPath)});
+								// port: `tag (...) :: loop l` evaluates `loop l` first, so the
+								// tag reads cid after the following metadata.
+								var rest = loop(i + 1);
+								return [
+									tag(TBitsJPEG3({
+										bd_id: cid,
+										bd_data: ddata,
+										bd_table: null,
+										bd_alpha: amask,
+										bd_deblock: 0
+									}))
+								].concat(rest);
 							case _:
 						}
 						if (Meta.metaEq(Meta.File, m.meta)) switch m.exprs {
@@ -651,16 +709,159 @@ class Genswf {
 		return res.concat(bmp).concat(code).concat(clips);
 	}
 
-	public static function generate(swf_header:Null<{width:Int, height:Int, fps:Float, color:Int}>, swf_libs:Array<Dynamic>, flash_version:Float, com:Gctx):Void {
+	static function merge(com:Gctx, flash_version:Float, file:String, priority:Bool, swf1:SwfData, swf2:SwfData):SwfData {
+		var h1 = swf1.header, tags1 = swf1.tags;
+		var h2 = swf2.header, tags2 = swf2.tags;
+		/* prioritize header+bgcolor for first swf */
+		var header:Header = if (priority) {
+			h_version: Std.int(Math.max(h2.h_version, flash_version_tag(flash_version))),
+			h_size: h2.h_size,
+			h_fps: h2.h_fps,
+			h_frame_count: h2.h_frame_count,
+			h_compressed: h2.h_compressed
+		} else h1;
+		var tags1 = if (priority) tags1.filter(t -> !t.tdata.match(TSetBgColor(_))) else tags1;
+		/* remove unused tags */
+		var use_stage = priority && Gctx.defined(com, Define.FlashUseStage);
+		var classes:Array<F9Class> = [];
+		var nframe = 0;
+		var tags2 = tags2.filter(function(t) {
+			return switch t.tdata {
+				case TPlaceObject2(_) | TPlaceObject3(_) | TRemoveObject2(_) | TRemoveObject(_):
+					use_stage;
+				case TShowFrame:
+					nframe++;
+					use_stage;
+				case TFilesAttributes(_) | TEnableDebugger2(_) | TScenes(_):
+					false;
+				case TMetaData(_):
+					!Gctx.defined(com, Define.SwfMetadata);
+				case TSetBgColor(_):
+					priority;
+				case TExport(el) if (nframe == 0 && flash_version >= 9.):
+					var el = el.filter(function(e) {
+						var path = Ast.parsePath(e.exp_name);
+						var b = Lambda.exists(com.types, t -> pathEq(tPath(t), path));
+						if (!b && path.pack.length == 0) for (t in com.types) {
+							if (tPath(t).name == path.name) Error.abort("Linkage name '" + path.name + "' in '" + file + "' should be '" + sTypePath(tPath(t)) + "'",
+								tInfos(t).mtPos);
+						}
+						return b;
+					});
+					classes = classes.concat([for (e in el) ({f9_cid: e.exp_id, f9_classname: e.exp_name} : F9Class)]);
+					false;
+				case TF9Classes(el) if (nframe == 0):
+					classes = classes.concat(el.filter(e -> e.f9_cid != null));
+					false;
+				case _:
+					true;
+			}
+		});
+		/* rebuild character ids */
+		var max_id = -1;
+		for (t in tags1) libs.swflib.SwfParser.scan(function(id) {
+			if (id > max_id) max_id = id;
+			return id;
+		}, id -> id, t);
+		max_id++;
+		function loop(t:Tag) {
+			libs.swflib.SwfParser.scan(id -> id + max_id, id -> id + max_id, t);
+			switch t.tdata {
+				case TClip(c):
+					for (t in c.c_tags) loop(t);
+				case _:
+			}
+		}
+		for (t in tags2) loop(t);
+		var classes = [
+			for (e in classes)
+				switch e.f9_cid {
+					case null: e;
+					case id: ({f9_cid: id + max_id, f9_classname: e.f9_classname} : F9Class);
+				}
+		];
+		/* merge timelines */
+		var out:Array<Tag> = [];
+		var i1 = 0, i2 = 0;
+		while (true) {
+			var t1 = i1 < tags1.length ? tags1[i1] : null;
+			var t2 = i2 < tags2.length ? tags2[i2] : null;
+			// port: the list patterns of `loop l1 l2`, in order.
+			if (t1 != null && t1.tdata.match(TSetBgColor(_) | TEnableDebugger2(_) | TFilesAttributes(_))) {
+				out.push(t1);
+				i1++;
+			} else if (t2 != null && t2.tdata.match(TSetBgColor(_))) {
+				out.push(t2);
+				i2++;
+			} else if (t1 != null && t2 != null && t1.tdata.match(TShowFrame) && t2.tdata.match(TShowFrame)) {
+				out.push(tag(TShowFrame));
+				i1++;
+				i2++;
+			} else if (t1 != null && t1.tdata.match(TF9Classes(_))) {
+				switch t1.tdata {
+					case TF9Classes(el):
+						/* merge all classes together */
+						out.push(tag(TF9Classes(classes.concat(el))));
+					case _:
+				}
+				i1++;
+			} else if (t1 != null && t2 != null && t2.tdata.match(TShowFrame)) {
+				/* wait until we finish frame on other swf */
+				out.push(t1);
+				i1++;
+			} else if (t2 != null) {
+				out.push(t2);
+				i2++;
+			} else if (t1 != null) {
+				out.push(t1);
+				i1++;
+			} else
+				break;
+		}
+		return {header: header, tags: out};
+	}
+
+	public static function generate(swf_header:Null<{width:Int, height:Int, fps:Float, color:Int}>,
+			swf_libs:Array<context.NativeLibraries.NativeLibrary<context.NativeLibraries.SwfLibType, SwfData>>, flash_version:Float, com:Gctx):Void {
 		var swc:Null<{cat:String}> = if (Gctx.defined(com, Define.Swc)) {cat: ""} else null;
 		var file = (switch com.file.indexOf("@") {
 			case -1: com.file;
 			case i: com.file.substr(0, i);
 		});
 		/* list exports */
-		// port: SWF library input (SwfLoader) is not ported; --swf-lib is rejected
-		// when the library is added, so swf_libs is always empty here.
-		if (swf_libs.length != 0) throw new core.ds.Failure("haxe-in-haxe: SWF library input (--swf-lib) is not supported");
+		// port: `exports` is filled but never read upstream; it is kept for parity.
+		var exports = new Map<String, Bool>();
+		var toremove:Array<GlobalTypePath> = [];
+		for (swf_lib in swf_libs) {
+			var tags = swf_lib.getData().tags;
+			for (t in tags) {
+				switch t.tdata {
+					case TExport(l):
+						for (e in l) exports.set(e.exp_name, true);
+					case TF9Classes(el):
+						for (e in el) {
+							if (e.f9_cid != null) for (t in com.types) {
+								var extern_ = (switch t {
+									case TClassDecl(c): hasClassFlag(c, CExtern);
+									case TEnumDecl(e): hasEnumFlag(e, EnExtern);
+									case TAbstractDecl(a): false;
+									case TTypeDecl(t): false;
+								});
+								if (!extern_ && sTypePath(tPath(t)) == e.f9_classname) switch t {
+									case TClassDecl(c):
+										if (Meta.has(Meta.Bind, c.clMeta))
+											toremove.unshift(tPath(t))
+										else
+											Error.abort("Class already exists in '" + file + "', use @:bind to redefine it", tInfos(t).mtPos);
+									case _:
+										Error.abort("Invalid redefinition of class defined in '" + file + "'", tInfos(t).mtPos);
+								}
+							}
+						}
+					case _:
+				}
+			}
+		}
 		/* build haxe swf */
 		var tags = build_swf9(com, file, swc);
 		var hb = (switch swf_header {
@@ -706,6 +907,12 @@ class Genswf {
 			tags: fattr.concat(meta_data).concat([bg, scene]).concat(debug).concat(swf_script_limits).concat(tags).concat([tag(TShowFrame)])
 		};
 		/* merge swf libraries */
+		var priority = (swf_header == null);
+		for (swf_lib in swf_libs) {
+			swf = merge(com, flash_version, file, priority, swf,
+				codegen.SwfLoader.remove_classes(toremove, swf_lib.getData(), swf_lib.listModules()));
+			priority = false;
+		}
 		var swf = switch swf {
 			case {header: header, tags: tags} if (Gctx.defined(com, Define.SwfPreloaderFrame)):
 				function loop(l:Array<Tag>, i:Int):Array<Tag> {
@@ -733,7 +940,7 @@ class Genswf {
 		var stop = core.Timer.startTimer(com.timerCtx, ["write", "swf"]);
 		try {
 			var level = (try core.ds.OcamlInt.ofString(Gctx.definedValue(com, Define.SwfCompressLevel)) catch (_:NotFound) 9);
-			libs.swflib.SwfParser.init(ch -> libs.extc.Extc.outputZip(65536, level, ch));
+			libs.swflib.SwfParser.init(ch -> libs.extc.Extc.inputZip(ch), ch -> libs.extc.Extc.outputZip(65536, level, ch));
 			switch swc {
 				case null:
 					var ch = IO.outputChannel(sys.io.File.write(file, true));

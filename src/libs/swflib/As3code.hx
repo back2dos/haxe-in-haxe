@@ -2,10 +2,13 @@ package libs.swflib;
 
 import libs.extlib.IO;
 import libs.extlib.IO.Output;
+import libs.extlib.IO.Input;
 import libs.swflib.As3;
 
-// port: the writer side of haxe/libs/swflib/as3code.ml (length, write). The
-// f_int_length/f_int_write hooks that As3parse installs are direct calls.
+// port: haxe/libs/swflib/as3code.ml without the dump printers (dump_op, dump_jump,
+// dump), which no compiler path calls. The
+// f_int_length/f_int_read/f_int_write hooks that As3parse installs are direct
+// calls; MultiArray.t is an Array.
 class As3code {
 	static inline function int_length(i:Int):Int return As3parse.int_length(i);
 
@@ -28,6 +31,30 @@ class As3code {
 		write_byte(ch, n >> 8);
 		write_byte(ch, n >> 16);
 	}
+
+	static inline function read_int(ch:Input):Int return As3parse.read_int(ch);
+
+	static inline function read_index(ch:Input):Index return read_int(ch);
+
+	static inline function read_index_nz(ch:Input):IndexNz return read_int(ch);
+
+	static function read_i24(ch:Input):Int {
+		var a = IO.readByte(ch);
+		var b = IO.readByte(ch);
+		var c = IO.readByte(ch);
+		var n = a | (b << 8) | (c << 16);
+		if (c & 128 != 0)
+			return n - (1 << 24)
+		else
+			return n;
+	}
+
+	// port: the `ops` table (opcode -> As3Op), the inverse of op_id.
+	static final ops:Map<Int, As3Op> = {
+		var h = new Map<Int, As3Op>();
+		for (o in As3Op.createAll()) h.set(op_id(o), o);
+		h;
+	};
 
 	static function op_id(op:As3Op):Int return switch op {
 		case A3OAs: 0x87;
@@ -125,6 +152,226 @@ class As3code {
 		case A3Switch(_, cases):
 			var ncases = cases.length;
 			1 + 3 + int_length(ncases - 1) + 3 * ncases;
+	}
+
+	static function jump(ch:Input, kind:As3Jump):As3Opcode return A3Jump(kind, read_i24(ch));
+
+	// port: the end of the code (No_more_input) raises Exit; null stands for it.
+	static function opcode(ch:Input):Null<As3Opcode> {
+		var op = try IO.readByte(ch) catch (_:libs.extlib.IO.NoMoreInput) return null;
+		return switch op {
+			case 0x01: A3BreakPoint;
+			case 0x02: A3Nop;
+			case 0x03: A3Throw;
+			case 0x04: A3GetSuper(read_index(ch));
+			case 0x05: A3SetSuper(read_index(ch));
+			case 0x06: A3DxNs(read_index(ch));
+			case 0x07: A3DxNsLate;
+			case 0x08: A3RegKill(read_int(ch));
+			case 0x09: A3Label;
+			/* 0x0A -> NONE */
+			/* 0x0B -> NONE */
+			case 0x0C: jump(ch, J3NotLt);
+			case 0x0D: jump(ch, J3NotLte);
+			case 0x0E: jump(ch, J3NotGt);
+			case 0x0F: jump(ch, J3NotGte);
+			case 0x10: jump(ch, J3Always);
+			case 0x11: jump(ch, J3True);
+			case 0x12: jump(ch, J3False);
+			case 0x13: jump(ch, J3Eq);
+			case 0x14: jump(ch, J3Neq);
+			case 0x15: jump(ch, J3Lt);
+			case 0x16: jump(ch, J3Lte);
+			case 0x17: jump(ch, J3Gt);
+			case 0x18: jump(ch, J3Gte);
+			case 0x19: jump(ch, J3PhysEq);
+			case 0x1A: jump(ch, J3PhysNeq);
+			case 0x1B:
+				var def = read_i24(ch);
+				var n = read_int(ch) + 1;
+				var cases = [];
+				for (_ in 0...n) cases.push(read_i24(ch));
+				A3Switch(def, cases);
+			case 0x1C: A3PushWith;
+			case 0x1D: A3PopScope;
+			case 0x1E: A3ForIn;
+			case 0x1F: A3HasNext;
+			case 0x20: A3Null;
+			case 0x21: A3Undefined;
+			/* 0x22 -> NONE */
+			case 0x23: A3ForEach;
+			case 0x24: A3SmallInt(IO.readSignedByte(ch));
+			case 0x25: A3Int(read_int(ch));
+			case 0x26: A3True;
+			case 0x27: A3False;
+			case 0x28: A3NaN;
+			case 0x29: A3Pop;
+			case 0x2A: A3Dup;
+			case 0x2B: A3Swap;
+			case 0x2C: A3String(read_index(ch));
+			case 0x2D: A3IntRef(read_index(ch));
+			case 0x2E: A3UIntRef(read_index(ch));
+			case 0x2F: A3Float(read_index(ch));
+			case 0x30: A3Scope;
+			case 0x31: A3Namespace(read_index(ch));
+			case 0x32:
+				var r1 = read_int(ch);
+				var r2 = read_int(ch);
+				A3Next(r1, r2);
+			/* 0x33 - 0x3F -> NONE */
+			case 0x40: A3Function(read_index_nz(ch));
+			case 0x41: A3CallStack(read_int(ch));
+			case 0x42: A3Construct(read_int(ch));
+			case 0x43:
+				var id = read_int(ch);
+				var nargs = read_int(ch);
+				A3CallMethod(id, nargs);
+			case 0x44:
+				var id = read_index(ch);
+				var nargs = read_int(ch);
+				A3CallStatic(id, nargs);
+			case 0x45:
+				var id = read_index(ch);
+				var nargs = read_int(ch);
+				A3CallSuper(id, nargs);
+			case 0x46:
+				var id = read_index(ch);
+				var nargs = read_int(ch);
+				A3CallProperty(id, nargs);
+			case 0x47: A3RetVoid;
+			case 0x48: A3Ret;
+			case 0x49: A3ConstructSuper(read_int(ch));
+			case 0x4A:
+				var id = read_index(ch);
+				var nargs = read_int(ch);
+				A3ConstructProperty(id, nargs);
+			/* 0x4B -> NONE */
+			case 0x4C:
+				var id = read_index(ch);
+				var nargs = read_int(ch);
+				A3CallPropLex(id, nargs);
+			/* 0x4D -> NONE */
+			case 0x4E:
+				var id = read_index(ch);
+				var nargs = read_int(ch);
+				A3CallSuperVoid(id, nargs);
+			case 0x4F:
+				var id = read_index(ch);
+				var nargs = read_int(ch);
+				A3CallPropVoid(id, nargs);
+			/* 0x50 - 0x52 -> NONE */
+			case 0x53: A3ApplyType(read_int(ch));
+			/* 0x54 -> NONE */
+			case 0x55: A3Object(read_int(ch));
+			case 0x56: A3Array(read_int(ch));
+			case 0x57: A3NewBlock;
+			case 0x58: A3ClassDef(read_index_nz(ch));
+			case 0x59: A3GetDescendants(read_index(ch));
+			case 0x5A: A3Catch(read_int(ch));
+			/* 0x5B -> NONE */
+			/* 0x5C -> NONE */
+			case 0x5D: A3FindPropStrict(read_index(ch));
+			case 0x5E: A3FindProp(read_index(ch));
+			case 0x5F: A3FindDefinition(read_index(ch));
+			case 0x60: A3GetLex(read_index(ch));
+			case 0x61: A3SetProp(read_index(ch));
+			case 0x62: A3Reg(read_int(ch));
+			case 0x63: A3SetReg(read_int(ch));
+			case 0x64: A3GetGlobalScope;
+			case 0x65: A3GetScope(IO.readByte(ch));
+			case 0x66: A3GetProp(read_index(ch));
+			/* 0x67 -> NONE */
+			case 0x68: A3InitProp(read_index(ch));
+			/* 0x69 -> NONE */
+			case 0x6A: A3DeleteProp(read_index(ch));
+			/* 0x6B -> NONE */
+			case 0x6C: A3GetSlot(read_int(ch));
+			case 0x6D: A3SetSlot(read_int(ch));
+			/* 0x6E -> DEPRECATED getglobalslot */
+			/* 0x6F -> DEPRECATED setglobalslot */
+			case 0x70: A3ToString;
+			case 0x71: A3ToXml;
+			case 0x72: A3ToXmlAttr;
+			case 0x73: A3ToInt;
+			case 0x74: A3ToUInt;
+			case 0x75: A3ToNumber;
+			case 0x76: A3ToBool;
+			case 0x77: A3ToObject;
+			case 0x78: A3CheckIsXml;
+			/* 0x79 -> NONE */
+			case 0x80: A3Cast(read_index(ch));
+			/* 0x81 -> DEPRECATED asbool */
+			case 0x82: A3AsAny;
+			/* 0x83 -> DEPRECATED asint */
+			/* 0x84 -> DEPRECATED asnumber */
+			case 0x85: A3AsString;
+			case 0x86: A3AsType(read_index(ch));
+			/* 0x87 -> OP */
+			/* 0x88 -> DEPRECATED asuint */
+			case 0x89: A3AsObject;
+			/* 0x8A - 0x8F -> NONE */
+			/* 0x90 - 0x91 -> OP */
+			case 0x92: A3IncrReg(read_int(ch));
+			/* 0x93 -> OP */
+			case 0x94: A3DecrReg(read_int(ch));
+			case 0x95: A3Typeof;
+			/* 0x96 -> OP */
+			/* 0x97 -> OP */
+			/* 0x98 - 0x9F -> NONE */
+			/* 0xA0 - 0xB0 -> OP */
+			case 0xB1: A3InstanceOf;
+			case 0xB2: A3IsType(read_index(ch));
+			/* 0xB3 -> OP */
+			/* 0xB4 -> OP */
+			/* 0xB5 - 0xBF -> NONE */
+			/* 0xC0 -> OP */
+			/* 0xC1 -> OP */
+			case 0xC2: A3IncrIReg(read_int(ch));
+			case 0xC3: A3DecrIReg(read_int(ch));
+			/* 0xC4 - 0xC7 -> OP */
+			/* 0xC8 - 0xCF -> NONE */
+			case 0xD0: A3This;
+			case 0xD1: A3Reg(1);
+			case 0xD2: A3Reg(2);
+			case 0xD3: A3Reg(3);
+			case 0xD4: A3SetThis;
+			case 0xD5: A3SetReg(1);
+			case 0xD6: A3SetReg(2);
+			case 0xD7: A3SetReg(3);
+			/* 0xD8 - 0xEE -> NONE */
+			case 0xEF:
+				if (IO.readByte(ch) != 1) throw new core.ds.Failure("assert false");
+				var name = read_index(ch);
+				var reg = IO.readByte(ch) + 1;
+				var line = read_int(ch);
+				A3DebugReg(name, reg, line);
+			case 0xF0: A3DebugLine(read_int(ch));
+			case 0xF1: A3DebugFile(read_index(ch));
+			case 0xF2: A3BreakPointLine(read_int(ch));
+			case 0xF3: A3Timestamp;
+			/* 0xF4 - 0xFF -> NONE */
+			case _:
+				switch ops.get(op) {
+					case null:
+						Sys.print("Unknown opcode 0x" + StringTools.hex(op, 2) + "\n");
+						A3Unk(op);
+					case o:
+						A3Op(o);
+				}
+		}
+	}
+
+	public static function parse(ch:Input, len:Int):Array<As3Opcode> {
+		var data = IO.nread(ch, len);
+		var ch = IO.inputString(data);
+		var a = [];
+		while (true) {
+			switch opcode(ch) {
+				case null: break;
+				case op: a.push(op);
+			}
+		}
+		return a;
 	}
 
 	public static function write(ch:Output, op:As3Opcode):Void {

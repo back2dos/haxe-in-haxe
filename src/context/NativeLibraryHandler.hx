@@ -3,15 +3,13 @@ package context;
 import compiler.ParsedArg.NativeLibArg;
 import context.Common.CommonContext;
 
-// port: SWF libraries (SwfLoader) belong to a target milestone outside HXB and are
-// rejected explicitly.
 class NativeLibraryHandler {
 	public static function addNativeLib(com:CommonContext, lib:NativeLibArg):Void->Void {
 		var file = lib.libFile;
 		var isExtern = lib.libExtern;
 		return switch lib.libKind {
 			case SwfLib:
-				throw new core.ds.ArgumentError("SWF library input (" + file + ") is not supported by haxe-in-haxe");
+				codegen.SwfLoader.add_swf_lib(com, file, isExtern);
 			case JavaLib:
 				function add(file:String):Void->Void {
 					var std = file == "lib/hxjava-std.jar";
