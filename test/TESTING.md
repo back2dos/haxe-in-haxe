@@ -34,7 +34,51 @@ tink_core, hxcoro); cosmocc build OK.
 | `test/fuzz` `exec:interp,hxc` (200 portable programs) | n/a | 32 output differences, 1 backend error (open, see the fuzzer section) |
 
 Not covered: `server/*` JSON-RPC methods through a server, the Eval debugger,
-memory statistics, non-HXB targets (see `upstream-hxb-exclusions.md`).
+memory statistics, running the output of non-HXB targets (their generated
+output is compared with the fuzzer's `diff:<target>` lanes, below).
+
+## Target generators — 2026-10-11
+
+All nine target generators of `haxe/src/generators/` are translated (see
+`TRANSLATION.md`). Their output is compared with the reference compiler's,
+byte for byte, by the fuzzer's `diff:<target>` lanes; the generated programs
+are not run. Both sides of a lane now compile from the same directory, so
+output that embeds the working directory (gencpp's `__files__.cpp`, PHP source
+maps of the null position, SWF `fdb` paths) is comparable; the `hlc` lane
+passes `-D no-compilation` like `cpp`.
+
+```sh
+sh hxc/tools/port-dev.sh                     # bin/port/hih (fast build; CC=tcc for a 10 s rebuild)
+bin/fuzz/fuzz --port $PWD/bin/port/hih --lane diff:js -j 4 -n 500
+```
+
+Validation at merge (clang -O2 hxc build, seed 2026, size 5, 150 programs per
+lane): `diff:` hxb, js, lua, python, neko, hl, hlc, cpp, jvm, swf 150/150 each;
+php 149 + 1 reference failure (genphp7.ml line 2326, reproduced alike).
+
+Per-generator checks during the port (agents' runs, all 0 port failures):
+
+| Target | Fuzz programs | Other cases, all byte-identical |
+| --- | --- | --- |
+| JS | ~2,750 (defaults, `js-es=5`/`6`, `js-classic`, `js-unflatten`, `source-map`, `js-enums-as-arrays`, `shallow-expose`) | upstream unit suite (`.js` modulo a `Date.now()` macro, `.map`), `tests/misc/js/projects`, `@:expose`, `@:jsRequire`, `-debug` |
+| Lua | 900 (also `lua-jit -lua-vanilla -debug` with `.map`) | upstream unit suite, `tests/misc/lua`, `lua-ver=5.1` |
+| Python | 650 | 153 conformance cases ×3 (plain, `-debug`, `-dce no -debug`), `@:pythonImport`, `KwArgs`/`VarArgs` |
+| PHP | 850 (also `php-prefix`, `source-map -D real-position`) | `tests/misc/php/projects` (8), std-heavy `-dce no`, `php-lib`/`php-front` |
+| Neko | 650 | upstream unit suite (`.n` modulo the compile date), `neko-source`, `neko-v1`, `use-nekoc` |
+| HL | 300 `hl` + 340 `hlc` | the port's own sources to `.hl`, `hl-ver`, `hl-check`, `hl-profile`, `-debug` |
+| JVM | 590 (incl. `--mutate 10`) | std-heavy programs, `-debug`, `jvm.dynamic-level=0`, `--jvm dir/` |
+| C++ | 570 (same-directory; `cppia`, `scriptable`, `-debug`, `HXCPP_M64`) | 109 conformance cases (also `cppia -debug`), the port's own sources (2,447 files, cppia script) |
+| SWF | 1,050 (incl. `--mutate 20`) | SWC, `@:file`/`@:bitmap` (JPEG, GIF)/`@:sound` (WAV, MP3), swf-header, compression levels (zlib 1.3.1 deflate translated) |
+
+Not ported (fail explicitly): `--swf-lib`, PNG `@:bitmap`, the HL bytecode
+interpreter (`-D interp`), hl2c type descriptors that would marshal an OCaml
+closure, copying a non-std `--java-lib` into the output.
+
+Full matrix at this commit: HashLink port conformance 279 + 7, macro cases,
+`--hxb-lib` 279 + 7 and hxblib cases, display 679/679, server 595/595, interp
+275 + 1 (the known `eval-eventLoop-compile` race); hxc clang conformance
+279 + 7, macro cases, `--parallel 3`, server 595/595, `test/upstream.py` 14/14;
+unit tests pass.
 
 ## Differential fuzzer — 2026-10-11
 
