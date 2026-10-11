@@ -3,8 +3,13 @@
 ## Mission and scope
 
 Port the Haxe compiler in `haxe/src/` to Haxe in `src/`, keeping the port close
-to upstream. The first functional target is HXB. Do not implement, restore, or
-test other code-generation targets unless a task explicitly expands the scope.
+to upstream. The first functional target was HXB; the current milestone is the
+ordinary target generators (`haxe/src/generators/`: JS, Lua, Python, PHP, Neko,
+HL, JVM, C++, SWF) in `src/generators/`. A ported generator is conforming when
+its output is byte-identical to the reference compiler's for the same
+invocation, checked with the fuzzer's `diff:<target>` lane (`test/fuzz`) on
+generated output only; running the generated programs (`--run`, e2e) is not
+required.
 
 `haxe/` is a Git submodule and the canonical reference. Do not edit its files,
 commit inside it, or update its revision as part of ordinary porting work.
@@ -64,6 +69,10 @@ coverage in `TRANSLATION.md`.
   `haxe haxe-in-haxe.hxml`.
 
 ## Testing rules
+
+- Generators: `sh hxc/tools/port-dev.sh` builds the port (`bin/port/hih`), then
+  `bin/fuzz/fuzz --port $PWD/bin/port/hih --lane diff:<target> -j N` compares
+  its output with the reference compiler's (see `test/fuzz/README.md`).
 
 - The reference compiler is the executable built from the checked-out `haxe/`
   submodule, not an arbitrary system Haxe installation.
