@@ -1156,7 +1156,7 @@ class Genphp7 {
 		var ctx = new PhpGeneratorContext(com, Gctx.defined(com, Define.RealPosition),
 			strSplit(Gctx.definedValueSafe(com, Define.PhpPrefix), c -> c == ".".code), getBoot(com), new haxe.ds.StringMap(),
 			new haxe.ds.StringMap(), new StringBuf());
-		var gen = new Generator(ctx);
+		var gen = new PhpGenerator(ctx);
 		gen.initialize();
 		function generate(comType:ModuleType):Void {
 			var wrapper = getWrapper(comType);
@@ -1173,9 +1173,7 @@ class Genphp7 {
 		}
 		for (t in com.types) generate(t);
 		gen.finalize();
-		// port: com.resources is a StringMap (Hashtbl upstream); the iteration order only decides the order
-		// in which the resource files are written.
-		for (name => data in com.resources) writeResource(com.file, name, data);
+		com.resources.iter((name, data) -> writeResource(com.file, name, data));
 		clearWrappers();
 	}
 }
@@ -1183,7 +1181,8 @@ class Genphp7 {
 /**
 	Handles generation process
 */
-class Generator {
+// port: `generator` upstream; renamed because another generator module declares generators.Generator.
+class PhpGenerator {
 	final ctx:PhpGeneratorContext;
 	var buildDir = "";
 	final rootDir:String;
