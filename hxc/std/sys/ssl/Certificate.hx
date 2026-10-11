@@ -1,11 +1,11 @@
+// hxc: haxe/std/eval/_std/sys/ssl/Certificate.hx over hxc.NativeSsl (rt_ssl.c);
+// as there, parse errors are ignored
+
 package sys.ssl;
 
 import haxe.io.Bytes;
 import hxc.NativeSsl;
 
-// hxc target (hxc/): X.509 certificate chains, as the Eval implementation
-// (haxe/std/eval/_std/sys/ssl/Certificate.hx) over hxc.NativeSsl (rt_ssl.c).
-// As there, parse errors are ignored.
 @:coreApi
 class Certificate {
 	var native:Dynamic;

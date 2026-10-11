@@ -1,9 +1,21 @@
+// hxc: haxe/std/haxe/ds/ObjectMap.hx as a compact insertion-ordered hash table (as
+// in Python and JS): entries are appended to parallel arrays, an
+// open-addressing index (0 empty, -1 removed, else entry + 1) finds them.
+// Iteration follows insertion order. IntMap, StringMap and ObjectMap are the
+// same code but for the key type, hash and equality.
+
 package haxe.ds;
 
-// hxc target (hxc/): a compact insertion-ordered hash table (as in
-// Python and JS): entries are appended to parallel arrays, an open-addressing
-// index (0 empty, -1 removed, else entry + 1) finds them. Iteration follows
-// insertion order. Generated from one template for String, Int and object keys.
+/**
+	ObjectMap allows mapping of object keys to arbitrary values.
+
+	On static targets, the keys are considered to be strong references. Refer
+	to `haxe.ds.WeakMap` for a weak reference version.
+
+	See `Map` for documentation details.
+
+	@see https://haxe.org/manual/std-Map.html
+**/
 class ObjectMap<K:{}, T> implements haxe.Constraints.IMap<K, T> {
 	var index:Array<Int>;
 	var hashes:Array<Int>;
@@ -13,6 +25,9 @@ class ObjectMap<K:{}, T> implements haxe.Constraints.IMap<K, T> {
 	var live:Int;
 	var mask:Int;
 
+	/**
+		Creates a new ObjectMap.
+	**/
 	public function new()
 		reset(0); // the index is allocated by the first set
 
@@ -47,14 +62,23 @@ class ObjectMap<K:{}, T> implements haxe.Constraints.IMap<K, T> {
 		return r;
 	}
 
+	/**
+		See `Map.get`
+	**/
 	public function get(k:K):Null<T> {
 		var e = find(k, hashOf(k));
 		return e < 0 ? null : vs[e];
 	}
 
+	/**
+		See `Map.exists`
+	**/
 	public function exists(k:K):Bool
 		return find(k, hashOf(k)) >= 0;
 
+	/**
+		See `Map.set`
+	**/
 	public function set(k:K, v:T):Void {
 		var h = hashOf(k);
 		var e = find(k, h);
@@ -75,6 +99,9 @@ class ObjectMap<K:{}, T> implements haxe.Constraints.IMap<K, T> {
 		index[i] = n + 1;
 	}
 
+	/**
+		See `Map.remove`
+	**/
 	public function remove(k:K):Bool {
 		if (live == 0) return false;
 		var h = hashOf(k);
@@ -116,15 +143,33 @@ class ObjectMap<K:{}, T> implements haxe.Constraints.IMap<K, T> {
 			}
 	}
 
+	/**
+		See `Map.keys`
+
+		(java) Implementation detail: Do not `set()` any new value while
+		iterating, as it may cause a resize, which will break iteration.
+	**/
 	public function keys():Iterator<K>
 		return new ObjectMapIterator(this, true);
 
+	/**
+		See `Map.iterator`
+
+		(java) Implementation detail: Do not `set()` any new value while
+		iterating, as it may cause a resize, which will break iteration.
+	**/
 	public function iterator():Iterator<T>
 		return cast new ObjectMapIterator(this, false);
 
+	/**
+		See `Map.keyValueIterator`
+	**/
 	@:runtime public inline function keyValueIterator():KeyValueIterator<K, T>
 		return new haxe.iterators.MapKeyValueIterator(this);
 
+	/**
+		See `Map.copy`
+	**/
 	public function copy():ObjectMap<K, T> {
 		var m = new ObjectMap<K, T>();
 		for (j in 0...ks.length)
@@ -132,6 +177,9 @@ class ObjectMap<K:{}, T> implements haxe.Constraints.IMap<K, T> {
 		return m;
 	}
 
+	/**
+		See `Map.toString`
+	**/
 	public function toString():String {
 		var b = new StringBuf();
 		b.add("[");
@@ -148,6 +196,9 @@ class ObjectMap<K:{}, T> implements haxe.Constraints.IMap<K, T> {
 		return b.toString();
 	}
 
+	/**
+		See `Map.clear`
+	**/
 	public function clear():Void
 		reset(0);
 

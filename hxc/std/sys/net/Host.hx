@@ -1,9 +1,10 @@
+// hxc: haxe/std/eval/_std/sys/net/Host.hx: IPv4 host names through
+// hxc.NativeNet, as the Eval natives do; `ip` is the host-order IPv4
+
 package sys.net;
 
 import hxc.NativeNet;
 
-// hxc target (hxc/): IPv4 host names through hxc.NativeNet, as the Eval
-// natives (haxe/std/eval/_std/sys/net/Host.hx) do. `ip` is the host-order IPv4.
 class Host {
 	public var host(default, null):String;
 	public var ip(default, null):Int;

@@ -1,8 +1,13 @@
+// hxc: haxe/std/sys/io/FileInput.hx, a file descriptor read through
+// hxc.NativeSys
+
 package sys.io;
 
 import hxc.NativeSys;
 
-// hxc target (hxc/): a file descriptor read through hxc.NativeSys.
+/**
+	Use `sys.io.File.read` to create a `FileInput`.
+**/
 class FileInput extends haxe.io.Input {
 	var fd:Int;
 	var atEof = false;

@@ -19,8 +19,8 @@ example haxe-formatter (`tools/format-src.sh`), which then formats
 | `rt/` | The C runtime: `rt.c` (GC, allocation, exceptions, finalisers), `rt_thread.c` (threads), `rt_dyn.c` (Dynamic access, maps), `rt_str.c`, `rt_std.c`, `rt_sys.c`, `rt_net.c` (sockets), `rt_ssl.c` (mbedtls), `rt_uv.c` (libuv), `rt_census.c` (heap census); `rt.h`, `rt_gc.h`. |
 | `std/` | The hxc target's std: overrides of the Haxe std (`sys.thread`, `sys.net`, `sys.ssl`, `sys.io`, `haxe.atomic`, `EReg`, ...) and the `hxc.Native*` externs implemented by the runtime. `tools/mkstd.py` merges it with the Eval originals needed for macros into `bin/hxc/std`. |
 | `haxelib/` | The `hxc` haxelib package: the target for your own Haxe (below). |
-| `bench/` | Test and benchmark programs: `threads/`, `natives/` (Luv, LuvThreads, Tls), `exc/`, `regress/`, `Bench.hx`. |
-| `tools/` | `cosmo-deps.sh` (mbedtls/libuv for Cosmopolitan), `mkunicode.py` (regex tables), `besttime.py`, and the prototype's baseline builders and wasm runners. |
+| `test/` | Test and benchmark programs: `threads/`, `natives/` (Luv, LuvThreads, Tls), `exc/`, `regress/`, `Bench.hx`. |
+| `tools/` | `dev-tool.sh` (the native backend tool), `cc-chunks.sh` (parallel compilation of the chunks), `mkstd.py` (`bin/hxc/std`), `cosmo-deps.sh` and `cosmo-patches/` (mbedtls/libuv for Cosmopolitan), `mkunicode.py` (regex tables). |
 
 ## Builds
 
@@ -162,7 +162,7 @@ After a one-line edit of a function in `src/typing/Operators.hx` (port,
 `strings.c`; adding a closure rewrites the chunk, `data.c` and `ids.h`.
 `cc-chunks.sh` then recompiles 2–3 files: about 3 s with clang -O2 instead
 of a 170 s rebuild (bench/README.md has the numbers; the backend tool's
-own run, 55 s under Node, is now most of the edit-to-binary time).
+own run is now most of the edit-to-binary time, see `tools/dev-tool.sh`).
 
 Cross-chunk calls are not inlined without LTO; on the self-compile the
 chunked build is as fast as the single file (within noise with
@@ -200,10 +200,11 @@ Object layouts (`rt/rt.h`): a header word, then 8-byte slots.
 ### GC and memory policy
 
 A precise generational copying collector: a nursery of 4 MB, doubling up to
-32 MB while much of it survives each minor collection (objects that live a
-little longer than a nursery cycle, e.g. a tree being built, are then copied
-fewer times; a doubling after which the survivors grew as much is undone and
-not retried; `RT_MINOR_KB` fixes the size), and a copying old generation, roots from the shadow stack, a write barrier
+32 MB while more than an eighth of it survives each minor collection (objects
+that live a little longer than a nursery cycle, e.g. a tree being built, are
+then copied fewer times; a doubling after which the survivors grew by more
+than half is undone and not retried; `RT_MINOR_KB` fixes the size), and a
+copying old generation, roots from the shadow stack, a write barrier
 recording old-to-young slots, depth-first copying (an object's descendants
 land right after it, in the order the compiler's tree walks visit them).
 

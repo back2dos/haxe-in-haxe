@@ -1,10 +1,10 @@
+// hxc: haxe/std/eval/_std/sys/ssl/Key.hx over hxc.NativeSsl (rt_ssl.c)
+
 package sys.ssl;
 
 import haxe.io.Bytes;
 import hxc.NativeSsl;
 
-// hxc target (hxc/): private and public keys, as the Eval implementation
-// (haxe/std/eval/_std/sys/ssl/Key.hx) over hxc.NativeSsl (rt_ssl.c).
 @:coreApi
 class Key {
 	var native:Dynamic;

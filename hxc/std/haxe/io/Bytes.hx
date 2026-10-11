@@ -1,7 +1,9 @@
+// hxc: haxe/std/eval/_std/haxe/io/Bytes.hx (an extern), a byte buffer in the
+// runtime (rt_std.c). Members involving Int64 are inline Haxe so the runtime
+// never builds Haxe objects.
+
 package haxe.io;
 
-// hxc target (hxc/): a byte buffer in the runtime (rt_std.c). Members
-// involving Int64 are inline Haxe so the runtime never builds Haxe objects.
 extern class Bytes {
 	var length(get, never):Int;
 	private function get_length():Int;

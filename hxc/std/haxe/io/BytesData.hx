@@ -1,6 +1,8 @@
+// hxc: haxe/std/eval/_std/haxe/io/BytesData.hx: Bytes is its own data;
+// indexing reads and writes bytes
+
 package haxe.io;
 
-// hxc target (hxc/): Bytes is its own data; indexing reads and writes bytes.
 abstract BytesData(Bytes) from Bytes to Bytes {
 	public var length(get, never):Int;
 

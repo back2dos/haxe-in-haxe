@@ -1,10 +1,13 @@
+// hxc: haxe/std/hl/_std/haxe/atomic/AtomicInt.hx over an atomic cell of
+// rt_thread.c (hxc.NativeAtomic), with the docs of
+// haxe/std/haxe/atomic/AtomicInt.hx
+
 package haxe.atomic;
 
 import hxc.NativeAtomic;
 
 /**
 	Atomic integer.
-	(hxc target, hxc/: an atomic cell of rt_thread.c, see hxc.NativeAtomic.)
 **/
 abstract AtomicInt(Dynamic) {
 	public inline function new(value:Int):Void {

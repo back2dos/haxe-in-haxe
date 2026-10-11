@@ -1,4 +1,4 @@
-// EXPERIMENTAL runtime for the C output of hxc/; see rt.h.
+// The runtime for the C output of hxc/; see rt.h.
 // RT_CENSUS=1: a heap census at exit (after a major collection, so only live
 // objects are counted); RT_CENSUS=2 also after every major collection.
 // Reports live bytes and object counts per type, what the same data would

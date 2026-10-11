@@ -1,11 +1,11 @@
 package backend;
 
-// EXPERIMENTAL code generator (docs/WASM-BACKEND.md). Runs the port's
-// compiler pipeline, then lowers the filtered program (the data an HXB
-// archive holds) to the shared IR and writes C: the files of <out>_hxc/
-// (files.txt lists the .c files to compile; HXC_CHUNK_KB sets the chunk
-// size, default 192) or, with HXC_SINGLE=1, one file <out>.c:
-//   node wbk.js <out> <haxe arguments...>
+// The backend tool (docs/WASM-BACKEND.md). Runs the port's compiler
+// pipeline, then lowers the filtered program (the data an HXB archive holds)
+// to the IR and writes C: the files of <out>_hxc/ (files.txt lists the .c
+// files to compile; HXC_CHUNK_KB sets the chunk size, default 192) or, with
+// HXC_SINGLE=1, one file <out>.c:
+//   node bin/hxc/wbk.js <out> <haxe arguments...> --custom-target hxc
 class Main {
 	static function chunkKb():Int {
 		var v = Sys.getEnv("HXC_CHUNK_KB");

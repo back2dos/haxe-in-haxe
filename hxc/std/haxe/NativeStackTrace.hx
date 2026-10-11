@@ -1,8 +1,9 @@
+// hxc: haxe/std/eval/_std/haxe/NativeStackTrace.hx without native stack traces
+
 package haxe;
 
 import haxe.CallStack.StackItem;
 
-// hxc target (hxc/): no native stack traces.
 @:noCompletion
 class NativeStackTrace {
 	@:ifFeature('haxe.NativeStackTrace.exceptionStack')

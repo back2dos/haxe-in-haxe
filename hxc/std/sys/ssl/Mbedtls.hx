@@ -1,10 +1,10 @@
+// hxc: haxe/std/eval/_std/sys/ssl/Mbedtls.hx (the shared mbedtls state of
+// sys.ssl) over hxc.NativeSsl (rt_ssl.c) instead of the mbedtls.* classes
+
 package sys.ssl;
 
 import hxc.NativeSsl;
 
-// hxc target (hxc/): the shared mbedtls state of sys.ssl, as the Eval
-// implementation (haxe/std/eval/_std/sys/ssl/Mbedtls.hx) over hxc.NativeSsl
-// (rt_ssl.c) instead of the mbedtls.* classes.
 class Mbedtls {
 	static var entropy:Dynamic;
 	static var ctr:Dynamic;

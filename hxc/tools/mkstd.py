@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-# EXPERIMENTAL: builds bin/hxc/std (the hxc target's std overrides) from
-# hxc/std. The macro context (Eval) shares class paths with the
-# program, so every override keeps the original std source for Eval:
+# Builds bin/hxc/std (the hxc target's std overrides) from hxc/std. The macro
+# context (Eval) shares class paths with the program, so every override keeps
+# the original std source for Eval:
 #   package ...;  #if eval <original> #else <hxc implementation> #end
 import os, re, sys
 root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))

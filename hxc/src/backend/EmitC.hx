@@ -2,9 +2,9 @@ package backend;
 
 import backend.Ir;
 
-// EXPERIMENTAL (docs/WASM-BACKEND.md): IR -> C against hxc/rt/rt.h.
-// Reference locals live across a call or allocation get shadow-stack slots
-// (`fr[k]`, see Roots); everything else is a plain C local.
+// IR -> C against hxc/rt/rt.h (docs/WASM-BACKEND.md).
+// Reference locals live across a GC point get shadow-stack slots (`fr[k]`,
+// see Roots); everything else is a plain C local.
 class EmitC {
 	static inline var T_FIRST = 32;
 
@@ -35,9 +35,8 @@ class EmitC {
 	// S_* (string literals, named by a hash of their content). Names stay the
 	// same when unrelated code changes, so with chunked output (emitChunks) an
 	// edit changes few C files. The numbers are defined once: `#define`s in
-	// ids.h (HXC_CONST_IDS, folded into the code like literals) or const
-	// globals in data.c (the default for chunks: no file but data.c depends
-	// on them).
+	// ids.h (HXC_CONST_IDS, folded into the code like literals) or, without
+	// it, const globals in data.c (no file but data.c depends on them).
 	var ids = new Map<String, Int>(); // id name -> value
 	var idOrder:Array<String> = [];
 	var typeNames:Array<String> = []; // type index -> C expression (program types: TY_* ids)
@@ -54,7 +53,7 @@ class EmitC {
 		return new EmitC(p).runSingle();
 
 	// chunked output: hxc.h (program-independent), ids.h, strings.c, data.c and
-	// one file per group of modules of about `chunkBytes` of C (see `pack`).
+	// one file per group of modules of about `chunkBytes` of C (see `packChunks`).
 	public static function emitChunks(p:Program, chunkBytes:Int):Array<{name:String, content:String}> {
 		var e = new EmitC(p);
 		e.single = false;
@@ -1608,10 +1607,12 @@ typedef TypeEntry = {
 };
 
 // Which reference locals must live in shadow-stack slots: those live across a
-// GC point (a call or allocation), like the live slots an OCaml frame table
-// records. The others stay in C locals (registers). Slots are colored so
-// locals never live together share one. Functions with a try block root
-// every reference local, since a handler may observe them after any call.
+// GC point (an allocation or a call that may collect: gcPoint), like the live
+// slots an OCaml frame table records; at a cold site they are spilled on its
+// slow path instead (spills). The others stay in C locals (registers). Slots
+// are colored so locals never live together share one. Functions with a try
+// block root every reference local, since a handler may observe them after
+// any call.
 class Roots {
 	var rooted = new Map<Local, Bool>();
 	// SCold id -> the reference locals live across its slow path, by id

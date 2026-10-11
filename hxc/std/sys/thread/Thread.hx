@@ -22,9 +22,9 @@
 
 package sys.thread;
 
-// hxc target (hxc/): haxe/std/sys/thread/Thread.hx over green threads
-// (ThreadImpl: rt_thread.c), without the target.threaded check and `events`.
-// The process exits when the main thread's main() returns, as on hl and cpp.
+// hxc: haxe/std/sys/thread/Thread.hx over the runtime's threads (ThreadImpl:
+// rt_thread.c), without the target.threaded check and `events`. The process
+// exits when the main thread's main() returns, as on hl and cpp.
 
 import sys.thread.ThreadCallback;
 
@@ -66,7 +66,7 @@ class Thread {
 	static var idCounter : Int; // TODO: Should probably be an AtomicInt
 	static var globalCallbacks : ThreadCallbackManager;
 
-	// no `events`: the hxc target does not define target.threaded, so
+	// hxc: no `events`: the hxc target does not define target.threaded, so
 	// haxe.EventLoop has no per-thread loops
 
 	public final id : Int;

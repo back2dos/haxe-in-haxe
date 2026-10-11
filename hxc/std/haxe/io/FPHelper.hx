@@ -1,6 +1,8 @@
+// hxc: haxe/std/eval/_std/haxe/io/FPHelper.hx (an extern), float bit patterns
+// in the runtime (rt_std.c)
+
 package haxe.io;
 
-// hxc target (hxc/): float bit patterns in the runtime (rt_std.c).
 extern class FPHelper {
 	static function i32ToFloat(i:Int):Float;
 	static function floatToI32(f:Float):Int;

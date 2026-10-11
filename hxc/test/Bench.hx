@@ -1,6 +1,5 @@
-// Allocation-heavy enum/match benchmark for the experimental backends
-// (hxc/README.md): builds random expression trees, simplifies and
-// evaluates them. Integer results are masked so every target agrees.
+// Allocation-heavy enum/match benchmark for hxc (hxc/README.md): builds
+// random expression trees, simplifies and evaluates them. Integer results are masked so every target agrees.
 enum Expr {
 	Num(v:Int);
 	Var(i:Int);
@@ -169,7 +168,8 @@ class Bench {
 	}
 }
 
-// The prototype backends compile for the cross platform, which has no Sys.
+// The prototype backends (archive/wasm-prototype) compile for the cross
+// platform, which has no Sys.
 class Out {
 	public static function int(v:Int):Void {
 		#if cross

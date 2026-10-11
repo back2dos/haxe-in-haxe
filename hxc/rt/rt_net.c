@@ -1,4 +1,4 @@
-// EXPERIMENTAL runtime for the C output of hxc/: BSD sockets behind
+// The runtime for the C output of hxc/: BSD sockets behind
 // hxc.NativeNet (hxc/std/hxc/NativeNet.hx), standing for the OCaml
 // Unix functions the Eval natives of eval.vm.NativeSocket and sys.net.Host
 // call upstream (haxe/src/macro/eval/evalStdLib.ml StdSocket, StdHost).

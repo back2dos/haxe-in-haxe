@@ -1,8 +1,8 @@
-// EXPERIMENTAL runtime for the C output of hxc/ (docs/WASM-BACKEND.md).
+// The runtime for the C output of hxc/ (docs/WASM-BACKEND.md).
 //
-// Values: Int/Bool are int32_t, Float is double, everything else a pointer to
-// a heap object or a static object (string literals, small-int boxes, type
-// objects), or NULL.
+// Values: Int/Bool are int32_t, Float is double, haxe.Int64 is int64_t,
+// everything else a pointer to a heap object or a static object (string
+// literals, small-int boxes, type objects), or NULL.
 //
 // Objects: the pointer addresses the payload, a header word precedes it.
 // Payload = 8-byte slots; Int/Bool use the low 4 bytes of a slot, or half
@@ -14,7 +14,7 @@
 // GC: precise and generational in the style of OCaml's: bump allocation in a
 // nursery, copying minor collections promote survivors, the old space is
 // collected by copying too (for now). Roots: the shadow stack (reference
-// locals live across a call or allocation, see EmitC.Roots), the globals
+// locals live across a GC point, see EmitC.Roots), the globals
 // table, the remembered set (write barrier) and natives' own rooted slots.
 #pragma once
 #include <stdint.h>
@@ -355,7 +355,7 @@ static inline int32_t hx_f2i(double f) {
 }
 
 // ---- Math: inline (the C compiler maps sqrt, fabs, floor... to instructions);
-// EmitC.RT_INLINE lists them so no prototype is emitted
+// FnLower.RT_INLINE lists them so no prototype is emitted
 static inline double Math_NaN(void) { return NAN; }
 static inline double Math_POSITIVE_INFINITY(void) { return INFINITY; }
 static inline double Math_NEGATIVE_INFINITY(void) { return -INFINITY; }
@@ -388,7 +388,7 @@ static inline int32_t Math_isFinite(double x) { return isfinite(x); }
 #define STR_CHARS(s) ((uint16_t *)((char *)(s) + 8))
 void *hx_str_alloc(int32_t len);
 // StringBuf (rt_str.c): slot 0 the length, slot 1 the UTF-16 data. addChar's
-// common case inline (EmitC.RT_INLINE: no prototype)
+// common case inline (FnLower.RT_INLINE: no prototype)
 void StringBuf_addChar_slow(void *b, int32_t c);
 static inline void StringBuf_addChar(void *b, int32_t c) {
 	int32_t len = FI(b, 0);
@@ -449,7 +449,7 @@ extern uint64_t rt_type_objs[];
 // structural access (anonymous structures, interfaces): inline cache per site
 typedef struct {
 	uint32_t t; // type index the entry is for (0: empty)
-	int32_t slot; // >0: field slot + 1 ... see rt_icache_fill; 0: method; -1: not a physical field
+	int32_t slot; // >0: field slot + 1 ... see icache_fill (rt_dyn.c); 0: method; -1: not a physical field
 	char kind;
 	void *fn; // method implementation
 	int32_t sig; // method's bound signature

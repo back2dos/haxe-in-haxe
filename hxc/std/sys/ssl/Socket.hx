@@ -1,16 +1,15 @@
+// hxc: haxe/std/eval/_std/sys/ssl/Socket.hx over hxc.NativeSsl (rt_ssl.c),
+// whose BIO sends and receives on the descriptor of the sys.net.Socket.
+// hxc: mbedtls's WANT_READ/WANT_WRITE results (non-blocking sockets) throw
+// haxe.io.Error.Blocked (Eval tests for -1, which mbedtls never returns), and
+// a failed send/recv throws its system error (as Eval's Unix_error) instead
+// of Eof. With green threads TLS I/O blocks the whole process (hxc/README.md).
+
 package sys.ssl;
 
 import haxe.io.Bytes;
 import hxc.NativeSsl;
 
-// hxc target (hxc/): TLS sockets, as the Eval implementation
-// (haxe/std/eval/_std/sys/ssl/Socket.hx) over hxc.NativeSsl (rt_ssl.c), whose
-// BIO sends and receives on the descriptor of the sys.net.Socket.
-// Differences: mbedtls's WANT_READ/WANT_WRITE results (non-blocking sockets)
-// throw haxe.io.Error.Blocked (Eval tests for -1, which mbedtls never
-// returns), and a failed send/recv throws its system error (as Eval's
-// Unix_error) instead of Eof. TLS I/O blocks the whole process, green threads
-// included (hxc/README.md).
 private class SocketInput extends haxe.io.Input {
 	@:allow(sys.ssl.Socket) private var socket:Socket;
 

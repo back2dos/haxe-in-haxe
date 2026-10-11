@@ -1,10 +1,13 @@
+// hxc: haxe/std/hl/_std/haxe/atomic/AtomicObject.hx over an atomic cell of
+// rt_thread.c (hxc.NativeAtomic), with the docs of
+// haxe/std/haxe/atomic/AtomicObject.hx
+
 package haxe.atomic;
 
 import hxc.NativeAtomic;
 
 /**
 	Atomic object. Use with care, this does not magically make it thread-safe to mutate objects.
-	(hxc target, hxc/: an atomic cell of rt_thread.c, see hxc.NativeAtomic.)
 **/
 abstract AtomicObject<T:{}>(Dynamic) {
 	public inline function new(value:T):Void {

@@ -1,5 +1,6 @@
-// hxc target (hxc/): EReg over hxc.Regex, following hl/_std/EReg.hx
-// with the regexp_* natives replaced by the Haxe engine.
+// hxc: haxe/std/hl/_std/EReg.hx over hxc.Regex (a Haxe engine in place of the
+// regexp_* natives)
+
 @:coreApi final class EReg {
 	var r:hxc.Regex;
 	var last:String;
@@ -170,7 +171,8 @@
 	}
 
 	public static function escape(s:String):String {
-		// a fresh EReg per call: an EReg keeps its last match, and threads may escape at the same time
+		// hxc: a fresh EReg per call (an EReg keeps its last match, and threads may
+		// escape at the same time)
 		return new EReg("[\\[\\]{}()*+?.\\\\\\^$|]", "g").map(s, function(r) return "\\" + r.matched(0));
 	}
 }

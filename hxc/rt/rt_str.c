@@ -1,4 +1,4 @@
-// EXPERIMENTAL runtime for hxc/: UTF-16 strings, number formatting,
+// The hxc runtime: UTF-16 strings, number formatting,
 // String / StringBuf / Std natives.
 #include "rt.h"
 #include <stdio.h>

@@ -1,6 +1,6 @@
 #!/bin/sh
-# EXPERIMENTAL: builds mbedtls and libuv as fat (x86-64 + aarch64) static
-# libraries with cosmocc, for the Cosmopolitan builds of the hxc runtime
+# Builds mbedtls and libuv as fat (x86-64 + aarch64) static libraries with
+# cosmocc, for the Cosmopolitan builds of the hxc runtime
 # (hxc/haxelib/build.sh, site/build.sh, `-D hxc.static`; see docs/COSMO.md).
 #
 #   sh hxc/tools/cosmo-deps.sh [out dir]      (default: bin/cosmo-deps)

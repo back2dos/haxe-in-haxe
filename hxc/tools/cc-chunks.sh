@@ -1,8 +1,8 @@
 #!/bin/sh
-# EXPERIMENTAL: compiles the chunked C output of the backend (the .c files
-# <dir>/files.txt lists, see hxc/README.md "Chunked output") and the
-# runtime in parallel, reusing the object files that are newer than their
-# source and headers, then links <binary>.
+# Compiles the chunked C output of the backend (the .c files <dir>/files.txt
+# lists, see hxc/README.md "Chunked output") and the runtime in parallel,
+# reusing the object files that are newer than their source and headers, then
+# links <binary>.
 #
 #   CC="clang -O2" CFLAGS="..." sh hxc/tools/cc-chunks.sh <dir> <binary>
 #

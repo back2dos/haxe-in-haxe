@@ -1,4 +1,4 @@
-// EXPERIMENTAL runtime for the C output of hxc/: operating-system
+// The runtime for the C output of hxc/: operating-system
 // primitives behind hxc.NativeSys (hxc/std/hxc/NativeSys.hx). POSIX.
 #define _GNU_SOURCE
 #include "rt.h"

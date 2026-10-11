@@ -1,8 +1,8 @@
 #!/bin/sh
-# EXPERIMENTAL: builds the backend tool, then compiles a program with it to C
-# and to a native binary (CC, default tcc for fast builds; CC="gcc -O2" for
-# speed; CC="cosmocc -O2" for a portable APE binary, see docs/COSMO.md).
-# When EMXX is set (e.g. EMXX=em++), also to linear-memory wasm.
+# Builds the backend tool, then compiles a program with it to C and to a
+# native binary (CC, default tcc for fast builds; CC="clang -O2" for speed;
+# CC="cosmocc -O2" for a portable APE binary, see docs/COSMO.md). When EMXX is
+# set (e.g. EMXX=em++), also to linear-memory wasm.
 #   sh hxc/build.sh [source dir] [main class]     (default: hxc/test Bench)
 #   sh hxc/build.sh port                          (the port itself: bin/hxc/hih/hih)
 #   CC="cosmocc -O2" BIN=hih.com sh hxc/build.sh port

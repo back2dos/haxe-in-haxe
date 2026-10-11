@@ -1,6 +1,8 @@
+// hxc: haxe/std/eval/_std/haxe/io/BytesBuffer.hx (an extern), a growable byte
+// buffer in the runtime (rt_std.c)
+
 package haxe.io;
 
-// hxc target (hxc/): a growable byte buffer in the runtime (rt_std.c).
 extern class BytesBuffer {
 	var length(get, never):Int;
 	function new():Void;

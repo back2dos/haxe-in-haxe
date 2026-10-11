@@ -1,4 +1,4 @@
-// EXPERIMENTAL runtime for the C output of hxc/: threads behind
+// The runtime for the C output of hxc/: threads behind
 // hxc.NativeThread (hxc/std/hxc/NativeThread.hx), the base of the hxc
 // sys.thread package (hxc/std/sys/thread) and of haxe.atomic.
 //

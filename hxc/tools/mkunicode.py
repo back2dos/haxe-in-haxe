@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-# EXPERIMENTAL: writes hxc/std/hxc/RegexUnicode.hx, the Unicode tables
-# of the hxc regular expression engine (hxc/Regex.hx), from Python's
-# unicodedata. They follow PCRE2 10.42 with PCRE2_UTF | PCRE2_UCP (what Eval
-# and HashLink compile EReg with):
+# Writes hxc/std/hxc/RegexUnicode.hx, the Unicode tables of the hxc regular
+# expression engine (hxc/Regex.hx), from Python's unicodedata. They follow
+# PCRE2 10.42 with PCRE2_UTF | PCRE2_UCP (what Eval and HashLink compile EReg
+# with):
 #   \d  \p{Nd}
 #   \w  \p{L} | \p{N} | _
 #   \s  \p{Z} | \h | \v

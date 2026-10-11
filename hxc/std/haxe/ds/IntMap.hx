@@ -1,9 +1,18 @@
+// hxc: haxe/std/haxe/ds/IntMap.hx as a compact insertion-ordered hash table (as
+// in Python and JS): entries are appended to parallel arrays, an
+// open-addressing index (0 empty, -1 removed, else entry + 1) finds them.
+// Iteration follows insertion order. IntMap, StringMap and ObjectMap are the
+// same code but for the key type, hash and equality.
+
 package haxe.ds;
 
-// hxc target (hxc/): a compact insertion-ordered hash table (as in
-// Python and JS): entries are appended to parallel arrays, an open-addressing
-// index (0 empty, -1 removed, else entry + 1) finds them. Iteration follows
-// insertion order. Generated from one template for String, Int and object keys.
+/**
+	IntMap allows mapping of Int keys to arbitrary values.
+
+	See `Map` for documentation details.
+
+	@see https://haxe.org/manual/std-Map.html
+**/
 class IntMap<T> implements haxe.Constraints.IMap<Int, T> {
 	var index:Array<Int>;
 	var hashes:Array<Int>;
@@ -13,6 +22,9 @@ class IntMap<T> implements haxe.Constraints.IMap<Int, T> {
 	var live:Int;
 	var mask:Int;
 
+	/**
+		Creates a new IntMap.
+	**/
 	public function new()
 		reset(0); // the index is allocated by the first set
 
@@ -48,14 +60,23 @@ class IntMap<T> implements haxe.Constraints.IMap<Int, T> {
 		return r;
 	}
 
+	/**
+		See `Map.get`
+	**/
 	public function get(k:Int):Null<T> {
 		var e = find(k, hashOf(k));
 		return e < 0 ? null : vs[e];
 	}
 
+	/**
+		See `Map.exists`
+	**/
 	public function exists(k:Int):Bool
 		return find(k, hashOf(k)) >= 0;
 
+	/**
+		See `Map.set`
+	**/
 	public function set(k:Int, v:T):Void {
 		var h = hashOf(k);
 		var e = find(k, h);
@@ -76,6 +97,9 @@ class IntMap<T> implements haxe.Constraints.IMap<Int, T> {
 		index[i] = n + 1;
 	}
 
+	/**
+		See `Map.remove`
+	**/
 	public function remove(k:Int):Bool {
 		if (live == 0) return false;
 		var h = hashOf(k);
@@ -117,15 +141,33 @@ class IntMap<T> implements haxe.Constraints.IMap<Int, T> {
 			}
 	}
 
+	/**
+		See `Map.keys`
+
+		(java) Implementation detail: Do not `set()` any new value while
+		iterating, as it may cause a resize, which will break iteration.
+	**/
 	public function keys():Iterator<Int>
 		return new IntMapIterator(this, true);
 
+	/**
+		See `Map.iterator`
+
+		(java) Implementation detail: Do not `set()` any new value while
+		iterating, as it may cause a resize, which will break iteration.
+	**/
 	public function iterator():Iterator<T>
 		return cast new IntMapIterator(this, false);
 
+	/**
+		See `Map.keyValueIterator`
+	**/
 	@:runtime public inline function keyValueIterator():KeyValueIterator<Int, T>
 		return new haxe.iterators.MapKeyValueIterator(this);
 
+	/**
+		See `Map.copy`
+	**/
 	public function copy():IntMap<T> {
 		var m = new IntMap<T>();
 		for (j in 0...ks.length)
@@ -133,6 +175,9 @@ class IntMap<T> implements haxe.Constraints.IMap<Int, T> {
 		return m;
 	}
 
+	/**
+		See `Map.toString`
+	**/
 	public function toString():String {
 		var b = new StringBuf();
 		b.add("[");
@@ -149,6 +194,9 @@ class IntMap<T> implements haxe.Constraints.IMap<Int, T> {
 		return b.toString();
 	}
 
+	/**
+		See `Map.clear`
+	**/
 	public function clear():Void
 		reset(0);
 

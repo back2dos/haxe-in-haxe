@@ -20,6 +20,8 @@
  * DEALINGS IN THE SOFTWARE.
  */
 
+// hxc: haxe/std/Math.hx, hxc taking the Float floor/ceil/round branch
+
 /**
 	This class defines mathematical functions and constants.
 
@@ -227,7 +229,7 @@ extern class Math {
 	**/
 	static function random():Float;
 
-	#if (flash || cpp || eval || target.name == "hxc") // hxc: Math_ffloor/fceil/fround (rt_std.c); Int floor would wrap infinities to 0
+	#if (flash || cpp || eval || target.name == "hxc") // hxc: Math_ffloor/fceil/fround (inline in rt.h); Int floor would wrap infinities to 0
 	/**
 		Returns the largest integer value that is not greater than `v`, as a `Float`.
 

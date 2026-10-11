@@ -1,13 +1,13 @@
+// hxc: haxe/std/eval/_std/sys/net/Socket.hx: TCP sockets over hxc.NativeNet
+// (rt_net.c, file descriptors). Non-blocking sockets throw
+// haxe.io.Error.Blocked when not ready.
+
 package sys.net;
 
 import haxe.io.Bytes;
 import haxe.io.Error;
 import hxc.NativeNet;
 
-// hxc target (hxc/): TCP sockets over hxc.NativeNet (rt_net.c, file
-// descriptors), shaped like the Eval implementation
-// (haxe/std/eval/_std/sys/net/Socket.hx). Non-blocking sockets throw
-// haxe.io.Error.Blocked when not ready.
 private class SocketOutput extends haxe.io.Output {
 	var socket:Socket;
 
@@ -120,7 +120,7 @@ class Socket {
 	}
 
 	public function bind(host:Host, port:Int):Void {
-		// as HashLink's socket_bind: a server restarted on its port does not
+		// hxc: as HashLink's socket_bind: a server restarted on its port does not
 		// wait for the previous connections' TIME_WAIT (the compilation server
 		// relies on it, see src/compiler/server/Server.hx initWaitSocket)
 		NativeNet.setReuseAddr(fd, true);

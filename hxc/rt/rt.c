@@ -1,4 +1,4 @@
-// EXPERIMENTAL runtime for the C output of hxc/; see rt.h.
+// The runtime for the C output of hxc/; see rt.h.
 // GC, startup, exceptions, boxes, arrays.
 #define _GNU_SOURCE // madvise (cosmocc)
 #include "rt_gc.h"
@@ -171,7 +171,7 @@ static void sweep_natives(char *lo, char *hi) {
 static void scan_roots(void *(*fwd)(void *)) {
 	for (void **s = rt_stack_base; s < rt_sp; s++)
 		if (*s) *s = fwd(*s);
-	rt_threads_scan(fwd); // the other green threads' shadow stacks
+	rt_threads_scan(fwd); // the other threads' shadow stacks, entry closures, Tls values
 	for (int i = 0; i < nglobals; i++)
 		if (rt_globals[i]) rt_globals[i] = fwd(rt_globals[i]);
 	if (rt_exn) rt_exn = fwd(rt_exn);
@@ -469,8 +469,6 @@ static void reset_tlab(rt_mutator *m, void *arg) {
 	*m->ylim_ref = NULL;
 }
 
-// a collection, with every other thread stopped (unless another thread
-// collected meanwhile: the caller then retries its allocation)
 static int huge_pages; // RT_HUGE
 static int minor_fixed; // RT_MINOR_KB sets the nursery size
 #define MINOR_MAX ((size_t)32 << 20)
@@ -545,6 +543,8 @@ static void zero_mutator_stack(rt_mutator *m, void *arg) {
 	rt_zero_above(*m->sp_ref, m->hw_ref);
 }
 
+// a collection, with every other thread stopped (unless another thread
+// collected meanwhile: the caller then retries its allocation)
 static void collect(int full, size_t need) {
 	if (!rt_world_stop()) return;
 	if (full) major(need);

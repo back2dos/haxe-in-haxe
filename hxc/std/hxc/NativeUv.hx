@@ -2,7 +2,7 @@ package hxc;
 
 import haxe.io.Bytes;
 
-// hxc target (hxc/): libuv (rt_uv.c) behind the Eval natives of eval.luv.*
+// libuv (rt_uv.c) behind the Eval natives of eval.luv.*
 // (src/macros/eval/EvalLuv.hx), standing for the OCaml luv library.
 //
 // Loops, handles, requests, directories and synchronization objects are

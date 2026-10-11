@@ -1,7 +1,7 @@
 package hxc;
 
-// hxc target (hxc/): runtime intrinsics for the std implementations
-// (rt_dyn.c). Type and Reflect are Haxe code over these.
+// Runtime intrinsics for the std implementations (rt_dyn.c). Type and Reflect
+// are Haxe code over these.
 extern class Native {
 	// hash of a string's contents, cached in the string
 	static function strHash(s:String):Int;

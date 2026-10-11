@@ -1,11 +1,11 @@
-// EXPERIMENTAL runtime for the C output of hxc/: mbedtls behind
+// The runtime for the C output of hxc/: mbedtls behind
 // hxc.NativeSsl (hxc/std/hxc/NativeSsl.hx), mirroring the OCaml
 // bindings haxe/libs/mbedtls/mbedtls_stubs.c used by
 // haxe/src/macro/eval/evalSsl.ml.
 //
 // Contexts are T_NATIVE objects whose slot 0 holds the malloc'ed mbedtls
-// context. The runtime has no finalizers, so contexts are never freed
-// (upstream frees them from OCaml custom-block finalizers).
+// context. They are not registered with rt_native_new, so contexts are never
+// freed (upstream frees them from OCaml custom-block finalizers).
 //
 // Deviation: upstream's BIO callbacks call OCaml's Unix.send/Unix.recv, whose
 // Unix_error escapes through mbedtls. Here the BIO is C send/recv on the

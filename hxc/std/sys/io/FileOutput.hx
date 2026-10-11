@@ -1,8 +1,13 @@
+// hxc: haxe/std/sys/io/FileOutput.hx, a file descriptor written through
+// hxc.NativeSys
+
 package sys.io;
 
 import hxc.NativeSys;
 
-// hxc target (hxc/): a file descriptor written through hxc.NativeSys.
+/**
+	Use `sys.io.File.write` to create a `FileOutput`.
+**/
 class FileOutput extends haxe.io.Output {
 	var fd:Int;
 	var one:haxe.io.Bytes;

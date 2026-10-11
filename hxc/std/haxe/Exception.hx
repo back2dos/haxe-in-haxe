@@ -1,7 +1,7 @@
+// hxc: haxe/std/hl/_std/haxe/Exception.hx without native stack traces
+
 package haxe;
 
-// hxc target (hxc/): like runtime/hl/haxe/Exception.hx without native
-// stack traces. The compiler throws exceptions for control flow.
 class Exception {
 	public var message(get, never):String;
 	public var stack(get, never):CallStack;
@@ -12,7 +12,7 @@ class Exception {
 	@:noCompletion var __previousException:Null<Exception>;
 	@:noCompletion var __nativeException:Any;
 
-	// caught/thrown are called by the backend for each catch and throw of a
+	// hxc: caught/thrown are called by the backend for each catch and throw of a
 	// haxe.Exception (FnLower.tryStmt, TThrow), not by typed code: keep them
 	// under -dce full
 	@:keep static function caught(value:Any):Exception {

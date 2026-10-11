@@ -1,4 +1,4 @@
-// EXPERIMENTAL runtime for hxc/: the interface between the collector
+// The hxc runtime: the interface between the collector
 // (rt.c) and the threads (rt_thread.c). Not included by generated code.
 #pragma once
 #include "rt.h"
@@ -25,9 +25,10 @@ void rt_mutator_bind(rt_mutator *m); // points m at the calling thread's TLS var
 void rt_zero_above(void **sp, void ***hw); // rt.c: after a collection, see rt_sp_hw
 void rt_threads_init(void); // rt_thread.c, from rt_init: the main thread's record and mutator
 
-// rt_thread.c. Every registered mutator, in a safe region or stopped at a
-// safepoint, except the caller (the collector); only valid between
-// rt_world_stop and rt_world_resume.
+// rt_thread.c. Every registered mutator, the caller's (the collector's) and
+// the one of the threads that ended included; the others are in a safe region
+// or stopped at a safepoint. Only valid between rt_world_stop and
+// rt_world_resume.
 void rt_mutators_foreach(void (*f)(rt_mutator *m, void *arg), void *arg);
 #if RT_MT
 // Stops every other thread at a safepoint or in a safe region. Returns 0 if

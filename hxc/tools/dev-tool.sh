@@ -1,6 +1,6 @@
 #!/bin/sh
-# EXPERIMENTAL: the native backend tool for fast iteration on the lowering and
-# the runtime: bin/hxc-dev/tool (the port + C backend, built with clang -O2).
+# The native backend tool for fast iteration on the lowering and the runtime:
+# bin/hxc-dev/tool (the port + C backend, built with clang -O2).
 #
 #   sh hxc/tools/dev-tool.sh
 #

@@ -1,7 +1,7 @@
 package hxc;
 
-// hxc target (hxc/): operating-system primitives (rt_sys.c). The std
-// classes (Sys, sys.io.*, sys.FileSystem) are Haxe code over these.
+// Operating-system primitives (rt_sys.c). The std classes (Sys, sys.io.*,
+// sys.FileSystem) are Haxe code over these.
 extern class NativeSys {
 	static function print(s:String):Void;
 	static function printErr(s:String):Void;

@@ -1,7 +1,7 @@
 #!/bin/sh
-# EXPERIMENTAL: assembles the hxc haxelib package in bin/haxelib/hxc and
-# zips it to bin/haxelib/hxc.zip (`haxelib install bin/haxelib/hxc.zip`, or
-# `haxelib dev hxc bin/haxelib/hxc` while testing).
+# Assembles the hxc haxelib package in bin/haxelib/hxc and zips it to
+# bin/haxelib/hxc.zip (`haxelib install bin/haxelib/hxc.zip`, or `haxelib dev
+# hxc bin/haxelib/hxc` while testing).
 #
 #   sh hxc/haxelib/build.sh
 #

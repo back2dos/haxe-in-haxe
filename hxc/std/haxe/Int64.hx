@@ -20,8 +20,8 @@
  * DEALINGS IN THE SOFTWARE.
  */
 
-// hxc target (hxc/): haxe/std/hl/_std/haxe/Int64.hx (its native branch), over
-// hxc.I64 (an int64_t in the generated C) instead of hl.I64; isInt64 is a runtime native.
+// hxc: haxe/std/hl/_std/haxe/Int64.hx (its native branch) over hxc.I64 (an
+// int64_t in the generated C) instead of hl.I64; isInt64 is a runtime native
 package haxe;
 
 using haxe.Int64;

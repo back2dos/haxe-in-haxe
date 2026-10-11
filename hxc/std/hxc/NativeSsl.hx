@@ -1,8 +1,8 @@
 package hxc;
 
-// hxc target (hxc/): mbedtls (rt_ssl.c) behind the Eval natives of
-// mbedtls.* and sys.ssl.* (src/macros/eval/EvalSsl.hx), mirroring the OCaml
-// bindings haxe/libs/mbedtls/mbedtls.ml. Contexts are opaque runtime handles.
+// mbedtls (rt_ssl.c) behind the Eval natives of mbedtls.* and sys.ssl.*
+// (src/macros/eval/EvalSsl.hx), mirroring the OCaml bindings
+// haxe/libs/mbedtls/mbedtls.ml. Contexts are opaque runtime handles.
 extern class NativeSsl {
 	static function strerror(code:Int):String;
 	static function ctrDrbgInit():Dynamic;

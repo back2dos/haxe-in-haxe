@@ -1,4 +1,4 @@
-// Checks the hxc sys.thread package (green threads, hxc/rt/rt_thread.c):
+// Checks the hxc sys.thread package (OS or green threads, hxc/rt/rt_thread.c):
 //   sh hxc/build.sh hxc/test/threads Threads && bin/hxc/Threads/prog_c
 // Prints "ok <name>" per check and "done" at the end; exits 1 on a failure.
 import sys.thread.Condition;
@@ -225,7 +225,8 @@ class Threads {
 		check("gc", results.length == 4 && results.filter(s -> s == 499500).length == 4);
 	}
 
-	// a thread that spins without blocking gives way at minor collections
+	// a thread that spins without blocking gives way at minor collections (green
+	// threads)
 	static function preempt() {
 		var flag = false, keep:Array<Int> = null;
 		Thread.create(() -> flag = true);
@@ -234,8 +235,8 @@ class Threads {
 		check("preempt at allocation", flag && keep != null);
 	}
 
-	// contention with allocation everywhere: threads are switched out at minor
-	// collections, also between queueing themselves and parking
+	// contention with allocation everywhere: green threads are switched out at
+	// minor collections, also between queueing themselves and parking
 	// (run with RT_MINOR_KB=8 to make that frequent)
 	static function stress() {
 		var m = new Mutex(), q = new Deque<Array<Int>>(), sem = new Semaphore(0), done = new Lock();

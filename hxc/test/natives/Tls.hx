@@ -76,7 +76,7 @@ class Tls {
 
 		if (args.length > 2) {
 			// a GET verified with the system CAs (DEFAULT_CA, Certificate.loadDefaults)
-			// written out: the hxc target can't assign haxe.Http's dynamic methods yet
+			// written out rather than through haxe.Http
 			var host = args[2];
 			var s = new Socket();
 			var status = "";

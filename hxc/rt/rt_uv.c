@@ -1,4 +1,4 @@
-// EXPERIMENTAL runtime for the C output of hxc/: libuv behind
+// The runtime for the C output of hxc/: libuv behind
 // hxc.NativeUv (hxc/std/hxc/NativeUv.hx), standing for the OCaml luv
 // library that haxe/src/macro/eval/evalLuv.ml calls (src/macros/eval/EvalLuv.hx).
 //
@@ -410,12 +410,13 @@ int32_t hxc_NativeUv_loopInit(void) {
 	return obj_add(l);
 }
 
-// Loop.run and green threads (rt_thread.c): uv_run blocks the OS thread, so
-// while other green threads exist (eval.luv thread pool work, threads that
-// signal an Async, ...) the loop is run without blocking in libuv: one
-// UV_RUN_NOWAIT iteration at a time, waiting in between in the scheduler for
-// the loop's backend descriptor (or its next timer), so the other threads run
-// meanwhile. UV_RUN_ONCE ends after an iteration that reported an event.
+// Loop.run and threads (rt_thread.c): uv_run blocks outside a safe region
+// (OS threads) or blocks the whole process (green threads), so while other
+// threads exist (eval.luv thread pool work, threads that signal an Async,
+// ...) the loop is run without blocking in libuv: one UV_RUN_NOWAIT
+// iteration at a time, waiting in between for the loop's backend descriptor
+// (or its next timer) with rt_wait_fd (a safe region with OS threads, the
+// scheduler with green threads), so the other threads run meanwhile. UV_RUN_ONCE ends after an iteration that reported an event.
 // libuv registers new watchers with the backend only at its next poll, so
 // while some are queued the next iteration follows without waiting. With one
 // thread uv_run is called as is; a thread spawned by a callback meanwhile
@@ -437,7 +438,7 @@ static int watchers_queued(uv_loop_t *loop) {
 	return q[0] != (void *)q;
 }
 
-// waits, letting the other green threads run, until the loop has work
+// waits, letting the other threads run, until the loop has work
 static void coop_wait(uv_loop_t *loop) {
 	if (!uv_loop_alive(loop)) return;
 	if (watchers_queued(loop)) {

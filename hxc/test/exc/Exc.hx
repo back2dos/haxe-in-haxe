@@ -1,5 +1,5 @@
-// Exception-heavy microbenchmark for the experimental backends: the compiler
-// uses exceptions for control flow (parser backtracking, lookups).
+// Exception-heavy microbenchmark for hxc: the compiler uses exceptions for
+// control flow (parser backtracking, lookups).
 class Miss {
 	public var depth:Int;
 

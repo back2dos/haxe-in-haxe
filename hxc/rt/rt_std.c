@@ -1,4 +1,4 @@
-// EXPERIMENTAL runtime for hxc/: Array, Math, Date, Bytes, BytesBuffer,
+// The hxc runtime: Array, Math, Date, Bytes, BytesBuffer,
 // FPHelper natives.
 #include "rt.h"
 #include <stdio.h>

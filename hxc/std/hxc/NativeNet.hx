@@ -1,10 +1,10 @@
 package hxc;
 
-// hxc target (hxc/): BSD sockets (rt_net.c) behind the Eval natives of
-// `eval.vm.NativeSocket` and `sys.net.Host` (src/macros/eval/EvalStdLibB.hx
-// StdSocket, EvalStdLibA.hx StdHost), standing for OCaml's Unix module.
-// Sockets are file descriptors. Functions returning Int give -1 on failure
-// with the C errno in `errno()`; `strerror` is OCaml's `Unix.error_message`.
+// BSD sockets (rt_net.c) behind the Eval natives of `eval.vm.NativeSocket`
+// and `sys.net.Host` (src/macros/eval/EvalStdLibB.hx StdSocket,
+// EvalStdLibA.hx StdHost), standing for OCaml's Unix module. Sockets are file
+// descriptors. Functions returning Int give -1 on failure with the C errno in
+// `errno()`; `strerror` is OCaml's `Unix.error_message`.
 extern class NativeNet {
 	static function errno():Int;
 	static function strerror(err:Int):String;

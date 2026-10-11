@@ -11,7 +11,7 @@ using StringTools;
 // Haxe types the program and writes it as HXB; after generation, the bundled
 // compiler lowers that archive to C (<out>_hxc/) and a C compiler builds <out>.
 //
-//   -D hxc.cc=<command>   C compiler (default: $HXC_CC, else cc, gcc, clang, tcc)
+//   -D hxc.cc=<command>   C compiler (default: $HXC_CC, else the first of clang, cc, gcc, tcc)
 //   -D hxc.static         fully static, portable binary with cosmocc
 //   -D hxc.debug          -O0 -g
 //   -D hxc.c-only         stop after writing the C (<out>_hxc/, or <out>.c with hxc.single)

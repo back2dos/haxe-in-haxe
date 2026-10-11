@@ -1,9 +1,18 @@
+// hxc: haxe/std/haxe/ds/StringMap.hx as a compact insertion-ordered hash table (as
+// in Python and JS): entries are appended to parallel arrays, an
+// open-addressing index (0 empty, -1 removed, else entry + 1) finds them.
+// Iteration follows insertion order. IntMap, StringMap and ObjectMap are the
+// same code but for the key type, hash and equality.
+
 package haxe.ds;
 
-// hxc target (hxc/): a compact insertion-ordered hash table (as in
-// Python and JS): entries are appended to parallel arrays, an open-addressing
-// index (0 empty, -1 removed, else entry + 1) finds them. Iteration follows
-// insertion order. Generated from one template for String, Int and object keys.
+/**
+	StringMap allows mapping of String keys to arbitrary values.
+
+	See `Map` for documentation details.
+
+	@see https://haxe.org/manual/std-Map.html
+**/
 class StringMap<T> implements haxe.Constraints.IMap<String, T> {
 	var index:Array<Int>;
 	var hashes:Array<Int>;
@@ -13,6 +22,9 @@ class StringMap<T> implements haxe.Constraints.IMap<String, T> {
 	var live:Int;
 	var mask:Int;
 
+	/**
+		Creates a new StringMap.
+	**/
 	public function new()
 		reset(0); // the index is allocated by the first set
 
@@ -47,14 +59,23 @@ class StringMap<T> implements haxe.Constraints.IMap<String, T> {
 		return r;
 	}
 
+	/**
+		See `Map.get`
+	**/
 	public function get(k:String):Null<T> {
 		var e = find(k, hashOf(k));
 		return e < 0 ? null : vs[e];
 	}
 
+	/**
+		See `Map.exists`
+	**/
 	public function exists(k:String):Bool
 		return find(k, hashOf(k)) >= 0;
 
+	/**
+		See `Map.set`
+	**/
 	public function set(k:String, v:T):Void {
 		var h = hashOf(k);
 		var e = find(k, h);
@@ -75,6 +96,9 @@ class StringMap<T> implements haxe.Constraints.IMap<String, T> {
 		index[i] = n + 1;
 	}
 
+	/**
+		See `Map.remove`
+	**/
 	public function remove(k:String):Bool {
 		if (live == 0) return false;
 		var h = hashOf(k);
@@ -116,15 +140,33 @@ class StringMap<T> implements haxe.Constraints.IMap<String, T> {
 			}
 	}
 
+	/**
+		See `Map.keys`
+
+		(java) Implementation detail: Do not `set()` any new value while
+		iterating, as it may cause a resize, which will break iteration.
+	**/
 	public function keys():Iterator<String>
 		return new StringMapIterator(this, true);
 
+	/**
+		See `Map.iterator`
+
+		(java) Implementation detail: Do not `set()` any new value while
+		iterating, as it may cause a resize, which will break iteration.
+	**/
 	public function iterator():Iterator<T>
 		return cast new StringMapIterator(this, false);
 
+	/**
+		See `Map.keyValueIterator`
+	**/
 	@:runtime public inline function keyValueIterator():KeyValueIterator<String, T>
 		return new haxe.iterators.MapKeyValueIterator(this);
 
+	/**
+		See `Map.copy`
+	**/
 	public function copy():StringMap<T> {
 		var m = new StringMap<T>();
 		for (j in 0...ks.length)
@@ -132,6 +174,9 @@ class StringMap<T> implements haxe.Constraints.IMap<String, T> {
 		return m;
 	}
 
+	/**
+		See `Map.toString`
+	**/
 	public function toString():String {
 		var b = new StringBuf();
 		b.add("[");
@@ -148,6 +193,9 @@ class StringMap<T> implements haxe.Constraints.IMap<String, T> {
 		return b.toString();
 	}
 
+	/**
+		See `Map.clear`
+	**/
 	public function clear():Void
 		reset(0);
 

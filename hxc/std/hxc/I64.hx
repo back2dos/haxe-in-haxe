@@ -20,8 +20,8 @@
  * DEALINGS IN THE SOFTWARE.
  */
 
-// hxc target (hxc/): haxe/std/hl/I64.hx as hxc.I64, the int64_t of the C
-// backend (Lower.ty maps it to TI64); the operators are the backend's own.
+// The int64_t of the C backend, after haxe/std/hl/I64.hx (Lower.ty maps it
+// to TI64); the operators are the backend's own.
 package hxc;
 
 @:coreType @:notNull @:runtimeValue abstract I64 from Int {

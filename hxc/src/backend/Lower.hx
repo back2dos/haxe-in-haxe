@@ -9,11 +9,11 @@ import core.TFunctions;
 
 using core.TFunctions;
 
-// EXPERIMENTAL (docs/WASM-BACKEND.md): lowers the filtered typed AST (the data
-// HXB serializes) of everything reachable from `main` to the IR.
+// Lowers the filtered typed AST (the data HXB serializes) of everything
+// reachable from `main` to the IR (docs/WASM-BACKEND.md).
 //
-// Representation (see Ir.hx): Int/Bool/Float unboxed; everything else is a
-// pointer. Generics are erased: a type parameter is Dynamic (RAny), and values
+// Representation (see Ir.hx): Int/Bool/Float and haxe.Int64 unboxed;
+// everything else is a pointer. Generics are erased: a type parameter is Dynamic (RAny), and values
 // are converted (boxed, unboxed, wrapped in adapter closures) where a declared
 // type and a use-site type differ: calls, returns, field and enum-argument
 // access (FnLower.coerce).
@@ -517,8 +517,8 @@ class Lower {
 	var initialized = new Map<TClass, Bool>();
 	var initOf = new Map<FuncInfo, TClass>();
 
-	// static variable initializers and __init__ of a class, run at startup in
-	// the order classes are first used
+	// static variable initializers and __init__ of a class, run at startup
+	// (in the order of com.types, see `program`)
 	function initClass(c:TClass) {
 		if (initialized.exists(c)) return;
 		initialized.set(c, true);

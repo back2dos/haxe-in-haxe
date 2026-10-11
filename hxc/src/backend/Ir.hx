@@ -1,9 +1,8 @@
 package backend;
 
-// EXPERIMENTAL (docs/WASM-BACKEND.md): the typed IR between the typed AST and
-// the C emitter. Statements are structured (no gotos); expressions are pure
-// except as the right-hand side of SSet/SExpr, so evaluation order and GC
-// points are explicit.
+// The typed IR between the typed AST and the C emitter. Statements are
+// structured (no gotos); expressions are pure except as the right-hand side
+// of SSet/SExpr, so evaluation order and GC points are explicit.
 
 enum Ty {
 	TI32;

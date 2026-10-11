@@ -1,4 +1,4 @@
-// EXPERIMENTAL runtime for hxc/: field names, structural access,
+// The hxc runtime: field names, structural access,
 // Dynamic operations, type tests, reflection intrinsics (hxc.Native).
 #include "rt_gc.h"
 #include <stdio.h>

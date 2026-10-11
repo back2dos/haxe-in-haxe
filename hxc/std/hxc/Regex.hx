@@ -1,12 +1,12 @@
 package hxc;
 
-// hxc target (hxc/): the regular expression engine behind EReg, in Haxe
-// (no PCRE in the runtime). A backtracking matcher over UTF-16 code units
-// with the PCRE subset Haxe code commonly uses: classes and escapes
-// (\d \w \s \b ... and POSIX classes, Unicode-aware as PCRE2_UCP, which Eval
-// and HashLink use; tables in hxc.RegexUnicode), groups ((...), (?:...), (?<name>...), lookahead (?= (?!),
-// alternation, greedy and lazy quantifiers (* + ? {n,m}), backreferences,
-// anchors and the flags i, m, s (g is EReg's own).
+// The regular expression engine behind EReg, in Haxe (no PCRE in the
+// runtime). A backtracking matcher over UTF-16 code units with the PCRE
+// subset Haxe code commonly uses: classes and escapes (\d \w \s \b ... and
+// POSIX classes, Unicode-aware as PCRE2_UCP, which Eval and HashLink use;
+// tables in hxc.RegexUnicode), groups ((...), (?:...), (?<name>...),
+// lookahead (?= (?!), alternation, greedy and lazy quantifiers (* + ? {n,m}),
+// backreferences, anchors and the flags i, m, s (g is EReg's own).
 enum RNode {
 	RChar(c:Int);
 	RAny; // . (any but newline unless dotall)
