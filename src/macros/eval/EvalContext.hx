@@ -11,9 +11,7 @@ import macros.eval.EvalHash;
 
 using macros.eval.EvalValue.EvalValueTools;
 
-// port: the debugger (breakpoints, socket, debug scopes) is not ported: its state
-// is kept so that the shared code paths read it, and `supportDebugger` stays
-// false. Per-thread `eval` state is a host thread-local (`sys.thread.Tls`).
+// port: per-thread `eval` state is a host thread-local (`sys.thread.Tls`).
 @:structInit class VarInfo {
 	public var viName:String;
 	public var viPos:Pos;
@@ -34,11 +32,12 @@ using macros.eval.EvalValue.EvalValueTools;
 	// The locals declared in the current scope. Maps variable IDs to local slots.
 	public var locals:Map<Int, Int>;
 	// The name of local variables. Maps local slots to variable names. Only filled in debug mode.
-	public var localInfos:Map<Int, VarInfo>;
+	public var localInfos:OcamlHashtbl<Int, VarInfo>;
 	// The IDs of local variables. Maps variable names to variable IDs.
-	public var localIds:Map<String, Int>;
+	public var localIds:OcamlHashtbl<String, Int>;
 
-	public inline function new(pos:Pos, localOffset:Int, locals:Map<Int, Int>, localInfos:Map<Int, VarInfo>, localIds:Map<String, Int>) {
+	public inline function new(pos:Pos, localOffset:Int, locals:Map<Int, Int>, localInfos:OcamlHashtbl<Int, VarInfo>,
+			localIds:OcamlHashtbl<String, Int>) {
 		this.pos = pos;
 		this.localOffset = localOffset;
 		this.locals = locals;
@@ -68,13 +67,13 @@ enum EnvKind {
 	// The environment kind.
 	public var kind:EnvKind;
 	// The name of capture variables. Maps local slots to variable names. Only filled in debug mode.
-	public var captureInfos:Map<Int, VarInfo>;
+	public var captureInfos:OcamlHashtbl<Int, VarInfo>;
 	// The number of local variables.
 	public var numLocals:Int;
 	// The number of capture variables.
 	public var numCaptures:Int;
 
-	public inline function new(isStatic:Bool, pfile:Int, pfileUnique:Int, kind:EnvKind, captureInfos:Map<Int, VarInfo>, numLocals:Int,
+	public inline function new(isStatic:Bool, pfile:Int, pfileUnique:Int, kind:EnvKind, captureInfos:OcamlHashtbl<Int, VarInfo>, numLocals:Int,
 			numCaptures:Int) {
 		this.isStatic = isStatic;
 		this.pfile = pfile;
@@ -166,6 +165,8 @@ class Eval {
 	public var caughtException:Value = VNull;
 	// The value which was last returned.
 	public var lastReturn:Null<Value> = null;
+	// The debug channel used to synchronize with the debugger.
+	public final debugChannel:EventChannel<Bool> = new EventChannel();
 	// port: thread-local storage (sys.thread.Tls), keyed by tls id
 	public final evalStorage:Map<Int, Value> = new Map();
 
@@ -213,6 +214,16 @@ class Breakpoint {
 	}
 }
 
+class FunctionBreakpoint {
+	public final fbpid:Int;
+	public var fbpstate:BreakpointState;
+
+	public function new(fbpid:Int, fbpstate:BreakpointState) {
+		this.fbpid = fbpid;
+		this.fbpstate = fbpstate;
+	}
+}
+
 class Builtins {
 	public var instanceBuiltins:GlobalsIntMap<Array<{name:Int, value:Value}>>;
 	public var staticBuiltins:GlobalsIntMap<Array<{name:Int, value:Value}>>;
@@ -254,17 +265,142 @@ enum ExceptionMode {
 	CatchNone;
 }
 
-// port: the debugger itself is not ported.
+@:structInit class DebugScopeInfo {
+	public var dsExpr:String;
+	public var dsReturn:Null<Value>;
+
+	public inline function new(dsExpr:String, dsReturn:Null<Value>) {
+		this.dsExpr = dsExpr;
+		this.dsReturn = dsReturn;
+	}
+}
+
+enum ContextReference {
+	StackFrame(env:Env);
+	Scope(scope:Scope, env:Env);
+	CaptureScope(infos:OcamlHashtbl<Int, VarInfo>, env:Env);
+	DebugScope(info:DebugScopeInfo, env:Env);
+	Value(value:Value, env:Env);
+	Toplevel;
+	NoSuchReference;
+}
+
+class EvalDebugContext {
+	final lut:Array<ContextReference> = {
+		var d = [];
+		d.push(Toplevel);
+		d;
+	}
+
+	final mutex = new sys.thread.Mutex();
+
+	public function new() {}
+
+	function add(reference:ContextReference):Int {
+		mutex.acquire();
+		lut.push(reference);
+		var i = lut.length - 1;
+		mutex.release();
+		return i;
+	}
+
+	public function addStackFrame(env:Env):Int return add(StackFrame(env));
+
+	public function addScope(scope:Scope, env:Env):Int return add(Scope(scope, env));
+
+	public function addCaptureScope(h:OcamlHashtbl<Int, VarInfo>, env:Env):Int return add(CaptureScope(h, env));
+
+	public function addValue(v:Value, env:Env):Int return add(Value(v, env));
+
+	public function addDebugScope(scope:DebugScopeInfo, env:Env):Int return add(DebugScope(scope, env));
+
+	public function get(id:Int):ContextReference {
+		return if (id >= 0 && id < lut.length) lut[id] else NoSuchReference;
+	}
+}
+
+class DebugConnection {
+	public final bpStop:Debug->Void;
+	public final excStop:Debug->Value->Pos->Void;
+	public final sendThreadEvent:Int->String->Void;
+
+	public function new(bpStop, excStop, sendThreadEvent) {
+		this.bpStop = bpStop;
+		this.excStop = excStop;
+		this.sendThreadEvent = sendThreadEvent;
+	}
+}
+
+class DebugSocket {
+	public final socket:core.Socket;
+	public final connection:DebugConnection;
+
+	public function new(socket, connection) {
+		this.socket = socket;
+		this.connection = connection;
+	}
+}
 
 /** Per-context debug information **/
 class Debug {
 	// The registered breakpoints
-	public final breakpoints:Map<Int, Map<Int, Breakpoint>> = new Map();
+	public final breakpoints:OcamlHashtbl<Int, OcamlHashtbl<Int, Breakpoint>>;
+	// The registered function breakpoints
+	// port: keyed by `(type, field)`
+	public final functionBreakpoints:OcamlHashtbl<{type:Int, field:Int}, FunctionBreakpoint>;
 	// Whether or not debugging is supported. Has various effects on the amount of
 	// data being retained at run-time.
-	public var supportDebugger:Bool = false;
+	public var supportDebugger:Bool;
+	// The debugger socket
+	public var debugSocket:Null<DebugSocket>;
 	// The current exception mode
-	public var exceptionMode:ExceptionMode = CatchUncaught;
+	public var exceptionMode:ExceptionMode;
+	// The debug context which manages scopes and variables.
+	public var debugContext:EvalDebugContext;
+
+	public function new(breakpoints, functionBreakpoints, supportDebugger, debugSocket, exceptionMode, debugContext) {
+		this.breakpoints = breakpoints;
+		this.functionBreakpoints = functionBreakpoints;
+		this.supportDebugger = supportDebugger;
+		this.debugSocket = debugSocket;
+		this.exceptionMode = exceptionMode;
+		this.debugContext = debugContext;
+	}
+}
+
+// port: OCaml's `unit Event.channel` as the debugger uses it: `receive` (Event.sync
+// (Event.receive c)) waits for a value, `poll` (Event.poll (Event.send c v))
+// hands one over only to a thread already waiting in `receive`. The waiting
+// thread gives up the Eval lock (EvalLock) while it waits.
+class EventChannel<T> {
+	final mutex = new sys.thread.Mutex();
+	final waiters:Array<EventWaiter<T>> = [];
+
+	public function new() {}
+
+	public function receive():T {
+		var w = new EventWaiter<T>();
+		mutex.acquire();
+		waiters.push(w);
+		mutex.release();
+		EvalLock.blocking(() -> w.lock.wait());
+		return w.value;
+	}
+
+	public function poll(v:T):Bool {
+		mutex.acquire();
+		var w = waiters.shift();
+		mutex.release();
+		if (w == null) return false;
+		w.value = v;
+		w.lock.release();
+		return true;
+	}
+}
+
+private class EventWaiter<T> {
+	public final lock = new sys.thread.Lock();
+	public var value:Null<T> = null;
 
 	public function new() {}
 }
@@ -295,7 +431,7 @@ class Context {
 	// eval
 	public var nextThreadId:Int = 0;
 	public final toplevel:Value;
-	public final evals:Map<Int, Eval> = new Map();
+	public final evals:OcamlHashtbl<Int, Eval> = new OcamlHashtbl(OcamlHashtbl.hashInt, (a, b) -> a == b, 1);
 	public final maxStackDepth:Int;
 	public final maxPrintDepth:Int;
 	public final printIndentation:Null<String>;
@@ -325,6 +461,8 @@ class GlobalState {
 	public static var getCtxRef:Void->Context = () -> throw "GlobalState.get_ctx_ref called before initialization";
 	public static var initialized = false;
 	public static var sid = -1;
+	public static var debug:Null<Debug> = null;
+	public static var debuggerInitialized = false;
 	public static var stdlib:Null<Builtins> = null;
 	public static final macroLib:Map<String, Value> = new Map();
 }
@@ -481,7 +619,7 @@ class EvalContext {
 	public static final noExpr = "";
 	public static final noDebug = new EnvDebug(noTimer, [], 0, noExpr, Globals.nullPos);
 
-	public static function createEnvInfo(isStatic:Bool, pfile:String, pfileKey:String, kind:EnvKind, captureInfos:Map<Int, VarInfo>,
+	public static function createEnvInfo(isStatic:Bool, pfile:String, pfileKey:String, kind:EnvKind, captureInfos:OcamlHashtbl<Int, VarInfo>,
 			numLocals:Int, numCaptures:Int):EnvInfo {
 		return {
 			isStatic: isStatic,
@@ -514,7 +652,16 @@ class EvalContext {
 		var env = new Env(info, debug, locals, captures, GlobalsIntMap.empty(), info.kind == EKEntrypoint ? null : eval.env, stackDepth,
 			eval);
 		eval.env = env;
-		// port: function breakpoints need the debugger socket, which is not ported
+		switch [ctx.debug.debugSocket, env.envInfo.kind] {
+			case [socket, EKMethod(keyType, keyField)] if (socket != null):
+				try {
+					var bp = ctx.debug.functionBreakpoints.find({type: keyType, field: keyField});
+					if (bp.fbpstate != BPEnabled) throw NotFound.raise();
+					socket.connection.bpStop(ctx.debug);
+					eval.debugState = DbgWaiting;
+				} catch (_:NotFound) {}
+			case _:
+		}
 		return env;
 	}
 

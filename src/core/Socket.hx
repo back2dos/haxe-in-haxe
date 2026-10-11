@@ -75,7 +75,7 @@ class Socket {
 	}
 
 	function getSocket():SysSocket {
-		if (socket == null) throw "no socket"; // TODO: reconnect?
+		if (socket == null) throw new core.ds.Failure("no socket"); // TODO: reconnect?
 		return socket;
 	}
 }

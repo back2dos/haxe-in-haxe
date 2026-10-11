@@ -462,7 +462,10 @@ class EvalPrototype {
 				ready(mt);
 				ctx.typeCache = ctx.typeCache.add(key, mt);
 				if (ctx.debug.supportDebugger) {
-					throw EvalMain.debuggerNotSupported();
+					var fileKey = EvalHash.hash(core.Path.UniqueKey.lazyPath(inf.mtModule.mExtra.mFile));
+					if (!(ctx.debug.breakpoints.mem(fileKey))) {
+						ctx.debug.breakpoints.add(fileKey, EvalDebugMisc.newIntHashtbl());
+					}
 				}
 				true;
 			}

@@ -13,9 +13,6 @@ import macros.eval.EvalContext;
 //   head). `IntHashtbl.length scope.locals` counts every `add`, including
 //   repeated keys; `Scope.locals` is a `Map`, so the add count of each scope is
 //   kept in the parallel array `scopeSizes`.
-// - The debugger is not ported (`supportDebugger` stays false); the debug-only
-//   bookkeeping (`captureInfos`, `localIds`, `localInfos`) is still translated
-//   because it is plain data.
 enum Varacc {
 	Local(i:Int);
 	Env(i:Int);
@@ -45,7 +42,7 @@ class JitContext {
 	// Whether or not this function has a return that's not at the end of control flow.
 	public var hasNonfinalReturn:Bool;
 	// The name of capture variables. Maps local slots to variable names. Only filled in debug mode.
-	public var captureInfos:Map<Int, VarInfo>;
+	public var captureInfos:OcamlHashtbl<Int, VarInfo>;
 	// Variables which are accessed but not declared in this scope.
 	// port: list order: newest first
 	public var capturesOutsideScope:Array<TVar>;
@@ -59,7 +56,7 @@ class JitContext {
 		this.maxNumLocals = 0;
 		this.numClosures = 0;
 		this.hasNonfinalReturn = false;
-		this.captureInfos = new Map();
+		this.captureInfos = new OcamlHashtbl(OcamlHashtbl.hashInt, (a, b) -> a == b, 0);
 		this.capturesOutsideScope = [];
 	}
 }
@@ -92,7 +89,8 @@ class EvalJitContext {
 
 	/** Pushes a new scope onto context [jit]. **/
 	public static function pushScope(jit:JitContext, pos:Pos):Void {
-		var scope = new Scope(pos, jit.numLocals, new Map(), new Map(), new Map());
+		var scope = new Scope(pos, jit.numLocals, new Map(), new OcamlHashtbl(OcamlHashtbl.hashInt, (a, b) -> a == b, 0),
+			new OcamlHashtbl(core.ds.OcamlHash.hashString, (a, b) -> a == b, 0));
 		jit.scopes.push(scope);
 		jit.scopeSizes.push(0);
 	}
@@ -120,7 +118,7 @@ class EvalJitContext {
 		var i = jit.captures.length();
 		jit.captures.add(v.vId, new CaptureSlot(i, declared));
 		if (jit.ctx.debug.supportDebugger) {
-			jit.captureInfos.set(i, varInfoOfVar(v));
+			jit.captureInfos.replace(i, varInfoOfVar(v));
 		}
 		return i;
 	}
@@ -136,8 +134,8 @@ class EvalJitContext {
 		increaseNumLocals(jit);
 		var slot = scope.localOffset + i;
 		if (jit.ctx.debug.supportDebugger) {
-			scope.localIds.set(v.vName, v.vId);
-			scope.localInfos.set(i, varInfoOfVar(v));
+			scope.localIds.replace(v.vName, v.vId);
+			scope.localInfos.replace(i, varInfoOfVar(v));
 		}
 		return slot;
 	}
@@ -175,8 +173,8 @@ class EvalJitContext {
 		jit.scopeSizes[top] = i + 1;
 		increaseNumLocals(jit);
 		if (jit.ctx.debug.supportDebugger) {
-			scope.localIds.set("this", 0);
-			scope.localInfos.set(0, new VarInfo("this", Globals.nullPos, false));
+			scope.localIds.replace("this", 0);
+			scope.localInfos.replace(0, new VarInfo("this", Globals.nullPos, false));
 		}
 		return Varacc.Local(i);
 	}

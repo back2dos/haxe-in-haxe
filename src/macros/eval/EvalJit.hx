@@ -23,10 +23,6 @@ using macros.eval.EvalValue.EvalValueTools;
 //   over a `JitContext` are `jitTfunctionRec`/`jitExprRec`; the context-level
 //   entry points keep the names `jitTfunction`/`jitExpr`. `jitExpr` returns
 //   `{jit, f}` for upstream's `(jit, f)` pair.
-// - The debugger is not ported: there is no debug socket, so the
-//   `EvalDebug.debug_loop` wrapping at the end of `jit_expr` is omitted (it only
-//   runs when a debug socket is connected). Branches testing
-//   `ctx.debug.supportDebugger` are translated but never taken.
 // - `ctx.overrides` is keyed by `"<dot path>.<field>"`.
 class EvalJit {
 	// Helper
@@ -599,9 +595,28 @@ class EvalJit {
 			}
 		}
 		var f = loop(e);
-		// port: upstream wraps [f] in `EvalDebug.debug_loop` when a debug socket is
-		// connected. The debugger is not supported by haxe-in-haxe.
-		return f;
+		switch ctx.debug.debugSocket {
+			case null:
+				return f;
+			case socket:
+				function wrap() {
+					return EvalDebug.debugLoop(jit, socket.connection, e, f);
+				}
+				switch e.eexpr {
+					case TCall(_) | TNew(_) | TVar({vKind: VUser(_)}, _) | TIf(_) | TWhile(_) | TSwitch(_) | TTry(_) | TReturn(_) | TBreak |
+						TContinue | TThrow(_) | TCast(_, _ != null => true):
+						return wrap();
+					case TUnop(Increment | Decrement, _, e1) | TBinop(OpAssign | OpAssignOp(_), e1, _):
+						switch (Texpr.skip(e1)).eexpr {
+							case TLocal({vKind: VGenerated | VInlined | VInlinedConstructorVariable(_) | VExtractorVariable}):
+								return f;
+							case _:
+								return wrap();
+						}
+					case _:
+						return f;
+				}
+		}
 	}
 
 	// port: groups the block's emitters into `emit_seq8`/`emit_seq4`/`emit_seq2` until one remains.
