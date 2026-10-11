@@ -136,7 +136,7 @@ class ClassPaths {
 
 	public function findFile(file:String):ResolvedFile {
 		var result = findFileNoRaise(file);
-		if (result == null) throw "Not_found";
+		if (result == null) throw core.ds.NotFound.raise();
 		return result.resolvedFile;
 	}
 

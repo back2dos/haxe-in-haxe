@@ -434,7 +434,7 @@ class ServerCache {
 	public static function handleCacheBoundObjects(com:CommonContext, cbol:Array<CacheBoundObject>):Void {
 		for (cbo in cbol) switch cbo {
 			case Resource(name, data):
-				com.resources.set(name, data);
+				com.resources.replace(name, data);
 			case IncludeFile(file, position):
 				com.includeFiles = [({file: file, position: position} : context.Common.IncludeFile)].concat(com.includeFiles);
 			case Message(cm):
