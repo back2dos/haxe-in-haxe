@@ -89,7 +89,7 @@ in `test/TESTING.md`.
 
 Status 2026-10-09: `evalSsl.ml` and `evalLuv.ml` are translated
 (`src/macros/eval/EvalSsl.hx`, `EvalLuv.hx`) over the hxc runtime's mbedtls
-and libuv natives (`backend/rt/rt_ssl.c`, `rt_uv.c`), including `eval.luv`
+and libuv natives (`hxc/rt/rt_ssl.c`, `rt_uv.c`), including `eval.luv`
 `Thread`, `ThreadPool`, `Once`, `Mutex`, `RwLock`, `Semaphore`, `Condition`
 and `Barrier` on host threads. Eval's `sys.io.Process` follows
 `libs/extc/process.ml` (`EvalProcess.hx`). `EvalLock.hx` serializes Eval
@@ -102,7 +102,7 @@ host threads run in parallel). The upstream test suite's threads step passes
 **The pending counterpart batch was completed in `2fcd217`.** This inventory records file coverage,
 not compilation or behavioral correctness. No builds or tests were run for the translation-first
 batches. The bootstrap entry point still uses its existing loader; the new
-compiler pipeline is included separately by `compile-all.hxml`.
+compiler pipeline is included separately by `test/compile-all.hxml`.
 
 - 126 new draft/support Haxe files across the translation-first batches.
 - 124 upstream ML files have new draft counterparts.
@@ -145,9 +145,9 @@ Shared HXB-path helpers were extracted from otherwise deferred areas:
   required by `TyperEntry`; the existing bootstrap loader remains separate.
 
 At the time, display, server, macro-runtime, native-library and target
-dispatch bodies were kept under `deferred/`, outside the build class path.
+dispatch bodies were kept under `archive/deferred/`, outside the build class path.
 Display, server and the macro runtime have since been translated in `src/`
-(see the history above); `deferred/` now only holds old drafts, and the
+(see the history above); `archive/deferred/` now only holds old drafts, and the
 remaining unsupported services (other targets, SWF/JVM libraries) are
 rejected explicitly at their call sites. In-scope typing and filtering paths remain in
 the all-module build. Compilation does not establish runtime correctness,

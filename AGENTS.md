@@ -88,6 +88,24 @@ coverage in `TRANSLATION.md`.
 - Never commit `bin/`, `test/generated/`, `test/reference/`, or local Haxelib
   state.
 
+## Comments
+
+- Comments from the upstream OCaml source stay in the port at the matching
+  place, with upstream's wording (`(** *)` becomes `/** */`).
+- Every other comment in `src/` starts with `// port:` (continuation lines
+  `// ...`): port-specific code, deviations, host-runtime adaptations,
+  OCaml-semantics emulation. Keep them true; remove them with the code they
+  describe.
+- `python3 tools/comment-only-diff.py [REV]` checks that changes to `.hx`
+  files touch only comments and whitespace.
+
+## Layout
+
+`src/` is the port, `hxc/` the C target (lowering in `hxc/src`, runtime in
+`hxc/rt`, target std in `hxc/std`), `runtime/` the host std overrides for
+building the port with HashLink or Node, `test/` and `bench/` the harnesses,
+`docs/` design notes, `archive/` reference code outside every build.
+
 ## Working conventions
 
 - Treat generated HXB files as diagnostics, not source artifacts.

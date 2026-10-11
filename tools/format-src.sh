@@ -1,6 +1,6 @@
 #!/bin/sh
 # Formats the port's Haxe sources with haxe-formatter built by hxc (the C
-# backend, backend/haxelib), using ./hxformat.json.
+# backend, hxc/haxelib), using ./hxformat.json.
 #
 #   sh tools/format-src.sh                 format src/ in place
 #   sh tools/format-src.sh --check         list the files that would change (exit 1 if any)
@@ -12,14 +12,14 @@
 # built once into bin/formatter/hxformat:
 #   - haxe-formatter and its dependencies at the pinned revisions below, in
 #     test/generated/formatter (a local haxelib repository, .haxelib/);
-#   - the hxc haxelib package (bin/haxelib/hxc, backend/haxelib/build.sh; with
+#   - the hxc haxelib package (bin/haxelib/hxc, hxc/haxelib/build.sh; with
 #     NATIVE_CC=clang when cosmocc is not on PATH);
 #   - `haxe/haxe ... -lib hxc --custom-target hxc=bin/formatter/hxformat`
 #     (HXB is version-coupled: the pinned compiler haxe/haxe types the program).
-# Needs git, curl, haxelib, node (backend/haxelib/build.sh) and clang (HXC_CC
+# Needs git, curl, haxelib, node (hxc/haxelib/build.sh) and clang (HXC_CC
 # overrides the C compiler).
 #
-# Not formatted: backend/src (hand-written) and everything outside src/ unless
+# Not formatted: hxc/src (hand-written) and everything outside src/ unless
 # named. EXCLUDE (an extended regular expression on the path, default below)
 # leaves files untouched; hxformat.json "excludes" works too.
 set -eu
@@ -72,9 +72,9 @@ build() {
 	)
 	if [ ! -f "$ROOT/bin/haxelib/hxc/bin/hxc.com" ]; then
 		if command -v cosmocc > /dev/null; then
-			sh backend/haxelib/build.sh
+			sh hxc/haxelib/build.sh
 		else
-			NATIVE_CC=${NATIVE_CC:-clang} sh backend/haxelib/build.sh
+			NATIVE_CC=${NATIVE_CC:-clang} sh hxc/haxelib/build.sh
 		fi
 	fi
 	(

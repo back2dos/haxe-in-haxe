@@ -301,9 +301,9 @@ Remaining failures (host limits of the HashLink build, not typing):
 ### The C build of the port (hxc)
 
 ```sh
-RT_NO= RT_LIBS="-lmbedtls -lmbedx509 -lmbedcrypto -luv" sh backend/build.sh port     # tcc
-CC="gcc -O2" BIN=hih_o2 RT_NO= RT_LIBS="-lmbedtls -lmbedx509 -lmbedcrypto -luv" sh backend/build.sh port
-HAXE_IN_HAXE_PORT=$PWD/bin/backend/hih/hih python3 test/upstream.py
+RT_NO= RT_LIBS="-lmbedtls -lmbedx509 -lmbedcrypto -luv" sh hxc/build.sh port     # tcc
+CC="gcc -O2" BIN=hih_o2 RT_NO= RT_LIBS="-lmbedtls -lmbedx509 -lmbedcrypto -luv" sh hxc/build.sh port
+HAXE_IN_HAXE_PORT=$PWD/bin/hxc/hih/hih python3 test/upstream.py
 ```
 
 | Step | Reference | HashLink build | hxc build (tcc and gcc -O2) |
@@ -356,7 +356,7 @@ since (tcc twice, gcc -O2) nor when run alone.
 ## C build of the port (hxc): OS threads and parallel mode — 2026-10-09, late
 
 gcc, clang and cosmocc builds now run Haxe threads on OS threads with a
-stop-the-world collector (backend/README.md, "OS threads (1:1)"); tcc keeps
+stop-the-world collector (hxc/README.md, "OS threads (1:1)"); tcc keeps
 the green threads below. The port runs its parallel passes (filters,
 analyzer, DCE marking, HXB writing) when `-D disable-parallelism` is not
 given. `test/conformance.py --parallel N` checks parallel-mode archives: each
@@ -365,11 +365,11 @@ variable IDs (the reference reads the archive with `--hxb-lib` and writes it
 again sequentially) it must equal the sequential reference archive.
 
 ```sh
-CC="clang -O2" BIN=hih_clang RT_NO= RT_LIBS="-lmbedtls -lmbedx509 -lmbedcrypto -luv" sh backend/build.sh port
-HAXE_REFERENCE=haxe/haxe HAXE_IN_HAXE_PORT=$PWD/bin/backend/hih/hih_clang python3 test/conformance.py -j 3 --parallel 3
-HAXE_REFERENCE=haxe/haxe HAXE_IN_HAXE_PORT=$PWD/bin/backend/hih/hih_clang python3 test/conformance.py -j 2 --parallel 3 --cases test/conformance-macro-cases.txt
+CC="clang -O2" BIN=hih_clang RT_NO= RT_LIBS="-lmbedtls -lmbedx509 -lmbedcrypto -luv" sh hxc/build.sh port
+HAXE_REFERENCE=haxe/haxe HAXE_IN_HAXE_PORT=$PWD/bin/hxc/hih/hih_clang python3 test/conformance.py -j 3 --parallel 3
+HAXE_REFERENCE=haxe/haxe HAXE_IN_HAXE_PORT=$PWD/bin/hxc/hih/hih_clang python3 test/conformance.py -j 2 --parallel 3 --cases test/conformance-macro-cases.txt
 # the self-compile as a case: "direct self <abs path of a src snapshot> haxe.Main" in a case file
-HAXE_REFERENCE=haxe/haxe HAXE_IN_HAXE_PORT=$PWD/bin/backend/hih/hih_clang python3 test/conformance.py -j 1 --parallel 4 --parallel-reference --cases self-case.txt
+HAXE_REFERENCE=haxe/haxe HAXE_IN_HAXE_PORT=$PWD/bin/hxc/hih/hih_clang python3 test/conformance.py -j 1 --parallel 4 --parallel-reference --cases self-case.txt
 ```
 
 | Check (clang -O2 build with mbedtls/libuv unless noted) | Result |
@@ -380,8 +380,8 @@ HAXE_REFERENCE=haxe/haxe HAXE_IN_HAXE_PORT=$PWD/bin/backend/hih/hih_clang python
 | Conformance `--parallel 3` (837 parallel runs; two rounds, before and after the `Inline.hx` fix) | 279 PASS + 7 expected failures; every run of every case identical to the sequential reference after normalizing (raw-identical: 3/3 runs in 31 cases, 0/3 in 174) |
 | Macro cases `--parallel 3` | 66/66 pass; 54 normalized-identical in 3/3 runs, 12 cannot be normalized because the reference cannot reload its own archive without the sources (macro-built types; runs succeed) |
 | Self-compile `--parallel 4 --parallel-reference` | port 4/4 and reference 4/4 identical after normalizing (434 members), 0 raw-identical for either |
-| `backend/bench/threads` (clang -O2, OS threads; 10 runs, loaded machine) | all |
-| ThreadSanitizer, runtime instrumented (backend/README.md): self-compile ×2, stdlib, hello in parallel mode; `backend/bench/threads` fully instrumented | after the fixes below: 0 reports on the port runs; bench: only races of the test program's own unsynchronized Haxe variables and arrays |
+| `hxc/test/threads` (clang -O2, OS threads; 10 runs, loaded machine) | all |
+| ThreadSanitizer, runtime instrumented (hxc/README.md): self-compile ×2, stdlib, hello in parallel mode; `hxc/test/threads` fully instrumented | after the fixes below: 0 reports on the port runs; bench: only races of the test program's own unsynchronized Haxe variables and arrays |
 
 No run crashed or hung. Found and fixed:
 
@@ -393,7 +393,7 @@ No run crashed or hung. Found and fixed:
   case-set map before filling it (both by review).
 - `rt_nthreads` was read plainly while updated atomically (TSan): relaxed
   atomic loads (`RT_NTHREADS`).
-- `backend/bench/threads` semaphore test: an unguarded counter and a fixed
+- `hxc/test/threads` semaphore test: an unguarded counter and a fixed
   10 ms sleep failed on a loaded machine (1 run in 5) with OS threads.
 - Earlier on this branch: `RenameVars`/`AnalyzerTexpr` shared static
   `EReg`s, which corrupted generated variable names in parallel mode.
@@ -409,21 +409,21 @@ and cosmocc conformance, the wasm build, `test/server.py`, the other
 
 ## C build of the port (hxc): green threads — 2026-10-09
 
-The hxc runtime has M:1 cooperative threads (`backend/rt/rt_thread.c`, see
-`backend/README.md`), and the C build of the port uses the hxc `sys.thread`
-package instead of the single-threaded stand-ins of `bench/js-shims`, so
+The hxc runtime has M:1 cooperative threads (`hxc/rt/rt_thread.c`, see
+`hxc/README.md`), and the C build of the port uses the hxc `sys.thread`
+package instead of the single-threaded stand-ins of `runtime/js`, so
 the compilation server works in it. `test/server.py` takes the port command
 from `HAXE_IN_HAXE_PORT`, as `test/conformance.py` does. The hxc
 `sys.net.Socket.bind` sets SO_REUSEADDR as HashLink's does, so a server
 restarted on its port (`tests/misc/eval/connect_stdin` reruns) can bind.
 
 ```sh
-sh backend/build.sh port                     # bin/backend/hih/hih (tcc)
-HAXE_REFERENCE=haxe/haxe HAXE_IN_HAXE_PORT=bin/backend/hih/hih python3 test/conformance.py -j 3
-HAXE_REFERENCE=haxe/haxe HAXE_IN_HAXE_PORT=bin/backend/hih/hih python3 test/server.py -j 2
-HAXE_REFERENCE=haxe/haxe HAXE_IN_HAXE_PORT=bin/backend/hih/hih python3 test/server.py --hxb-cache -j 2
-HAXE_IN_HAXE_PORT=$PWD/bin/backend/hih/hih python3 test/upstream.py threads connect-stdin
-sh backend/build.sh backend/bench/threads Threads && bin/backend/Threads/prog_c
+sh hxc/build.sh port                     # bin/hxc/hih/hih (tcc)
+HAXE_REFERENCE=haxe/haxe HAXE_IN_HAXE_PORT=bin/hxc/hih/hih python3 test/conformance.py -j 3
+HAXE_REFERENCE=haxe/haxe HAXE_IN_HAXE_PORT=bin/hxc/hih/hih python3 test/server.py -j 2
+HAXE_REFERENCE=haxe/haxe HAXE_IN_HAXE_PORT=bin/hxc/hih/hih python3 test/server.py --hxb-cache -j 2
+HAXE_IN_HAXE_PORT=$PWD/bin/hxc/hih/hih python3 test/upstream.py threads connect-stdin
+sh hxc/build.sh hxc/test/threads Threads && bin/hxc/Threads/prog_c
 ```
 
 | Check (hxc build of the port, tcc unless noted) | Result |
@@ -435,7 +435,7 @@ sh backend/build.sh backend/bench/threads Threads && bin/backend/Threads/prog_c
 | Server, macro cases (both cache modes) | 132/132 |
 | `tests/threads` in the port's Eval (`--interp`; tcc, gcc -O2, cosmocc) | 144/144 with libuv (tcc, cosmocc; see "eval.luv threads") |
 | `tests/misc/eval/connect_stdin` (`--wait`/`--connect` stdin forwarding) | 10/10 |
-| `backend/bench/threads` (Lock, Mutex, Deque, Semaphore, Condition, Tls, messages, sleep, GC, preemption at allocation, contention, exceptions, sockets, processes; tcc, gcc -O2, cosmocc; nursery 4 KB to 4 MB) | all |
+| `hxc/test/threads` (Lock, Mutex, Deque, Semaphore, Condition, Tls, messages, sleep, GC, preemption at allocation, contention, exceptions, sockets, processes; tcc, gcc -O2, cosmocc; nursery 4 KB to 4 MB) | all |
 | Server, cases with `RT_MINOR_KB=64` (a thread switch at every 64 KB of allocation while others are runnable) | 564/564 |
 | Server `misc` and conformance, cosmocc build (`hih.com`) | 10/10, 275 + 7 |
 | Self-compile CPU time, gcc -O2 (`--interp --no-output`, min of 5, two rounds) | 4.05/4.06 s before, 4.03/3.86 s after |
@@ -443,14 +443,14 @@ sh backend/build.sh backend/bench/threads Threads && bin/backend/Threads/prog_c
 ## Cosmopolitan builds with mbedtls and libuv — 2026-10-09
 
 The APE builds link mbedtls 2.28.10 and libuv 1.48.0 built with cosmocc
-(`backend/tools/cosmo-deps.sh`; bench/COSMO.md, backend/README.md).
+(`hxc/tools/cosmo-deps.sh`; docs/COSMO.md, hxc/README.md).
 
 ```sh
-sh backend/tools/cosmo-deps.sh               # bin/cosmo-deps (cosmocc on PATH)
-CC="cosmocc -O2" RT_DEPS=bin/cosmo-deps BIN=hih.com sh backend/build.sh port
-HAXE_REFERENCE=haxe/haxe HAXE_IN_HAXE_PORT="sh bin/backend/hih/hih.com" python3 test/conformance.py -j 3
-sh bin/backend/hih/hih.com -cp backend/bench/natives -main Luv --interp
-sh bin/backend/hih/hih.com -cp backend/bench/natives --run Tls 4433 ca.pem example.com   # openssl s_server on 4433
+sh hxc/tools/cosmo-deps.sh               # bin/cosmo-deps (cosmocc on PATH)
+CC="cosmocc -O2" RT_DEPS=bin/cosmo-deps BIN=hih.com sh hxc/build.sh port
+HAXE_REFERENCE=haxe/haxe HAXE_IN_HAXE_PORT="sh bin/hxc/hih/hih.com" python3 test/conformance.py -j 3
+sh bin/hxc/hih/hih.com -cp hxc/test/natives -main Luv --interp
+sh bin/hxc/hih/hih.com -cp hxc/test/natives --run Tls 4433 ca.pem example.com   # openssl s_server on 4433
 ```
 
 | Check (cosmocc fat APE with mbedtls and libuv, Linux x86-64) | Result |
@@ -458,8 +458,8 @@ sh bin/backend/hih/hih.com -cp backend/bench/natives --run Tls 4433 ca.pem examp
 | Conformance | 275 PASS + 7 expected failures |
 | Conformance, macro cases | 66/66 |
 | `tests/threads` in the port's Eval | 144/144 |
-| `backend/bench/natives/Luv.hx` (`--interp`, macro; also the haxelib `hxc.com`) | all, as the reference |
-| `backend/bench/natives/Tls.hx` (local `openssl s_server`, HTTPS GET of example.com; also `hxc.com`, `-D hxc.static -D hxc.ssl` through the haxelib package, tcc with system mbedtls) | all, as the reference |
+| `hxc/test/natives/Luv.hx` (`--interp`, macro; also the haxelib `hxc.com`) | all, as the reference |
+| `hxc/test/natives/Tls.hx` (local `openssl s_server`, HTTPS GET of example.com; also `hxc.com`, `-D hxc.static -D hxc.ssl` through the haxelib package, tcc with system mbedtls) | all, as the reference |
 
 ## eval.luv threads, thread pool and synchronization — 2026-10-09
 
@@ -468,24 +468,24 @@ sh bin/backend/hih/hih.com -cp backend/bench/natives --run Tls 4433 ca.pem examp
 Eval (`EvalLuv.hx`: `LuvThreadHandle`, `LuvThreadPool`, `LuvSync`); on the hxc
 host these are green threads, `Loop.run` gives way to them while they exist,
 and finished thread pool work reaches the loop through an async handle
-(backend/README.md). On HashLink everything but `ThreadPool` works (no libuv
+(hxc/README.md). On HashLink everything but `ThreadPool` works (no libuv
 loop there).
 
 ```sh
-RT_NO= RT_LIBS="-lmbedtls -lmbedx509 -lmbedcrypto -luv" sh backend/build.sh port
-HAXE_IN_HAXE_PORT=$PWD/bin/backend/hih/hih python3 test/upstream.py threads connect-stdin
-bin/backend/hih/hih -cp backend/bench/natives -main LuvThreads --interp   # = haxe/haxe ... --interp
+RT_NO= RT_LIBS="-lmbedtls -lmbedx509 -lmbedcrypto -luv" sh hxc/build.sh port
+HAXE_IN_HAXE_PORT=$PWD/bin/hxc/hih/hih python3 test/upstream.py threads connect-stdin
+bin/hxc/hih/hih -cp hxc/test/natives -main LuvThreads --interp   # = haxe/haxe ... --interp
 ```
 
 | Check | Result |
 | --- | --- |
 | `tests/threads`, hxc build with libuv (tcc; cosmocc APE with `RT_DEPS`) | 144/144 assertions (reference 144/144) |
 | `tests/threads`, HashLink build | 141/142 (`ThreadPool`: no libuv loop) |
-| `backend/bench/natives/LuvThreads.hx` (Thread create/join/self, NativeThread messages and exit in a luv thread, the primitives and their error results, queueWork/cancel, Async from a thread, `Loop.stop`/`ONCE` with threads, exceptions), hxc tcc with libuv, cosmocc | output identical to the reference (5 runs) |
+| `hxc/test/natives/LuvThreads.hx` (Thread create/join/self, NativeThread messages and exit in a luv thread, the primitives and their error results, queueWork/cancel, Async from a thread, `Loop.stop`/`ONCE` with threads, exceptions), hxc tcc with libuv, cosmocc | output identical to the reference (5 runs) |
 | same without the loop parts: HashLink build, hxc build without libuv | identical to the reference |
 | Conformance, HashLink build / hxc build | 275 PASS + 7 expected failures / same |
 | Conformance, macro cases (HashLink / hxc) | 66/66 / 66/66 |
-| `backend/bench/threads` | all |
+| `hxc/test/threads` | all |
 | Server conformance (hxc build with libuv), all scenarios | 587/587 |
 
 The earlier count of 138/139 was not a different test set: `testNative`
@@ -811,14 +811,14 @@ libraries, display/server services, or a non-HXB target.
 
 The same suite also runs on other builds of the port through
 `HAXE_IN_HAXE_PORT` (see `bench/README.md`). The HashLink, HL/C, JS and JVM
-builds each pass all 282 cases. So does Go (`bench/hx2go/build.sh`, hx2go
+builds each pass all 282 cases. So does Go (`archive/hx2go/build.sh`, hx2go
 with patches), and C++, built with
-`bench/hxcpp-single-thread-mark.patch`; stock hxcpp's parallel GC marking
+`bench/patches/hxcpp-single-thread-mark.patch`; stock hxcpp's parallel GC marking
 crashes it (see `bench/README.md`).
 
 Other lanes, all passing:
 
-- `haxe haxe-in-haxe.hxml` (bootstrap build) and `haxe compile-all.hxml`
+- `haxe haxe-in-haxe.hxml` (bootstrap build) and `haxe test/compile-all.hxml`
 - `haxe test/unit.hxml`
 - `haxe test/upstream-parser-corpus.hxml`: 1,355/1,366 with the translated
   parser (`src/syntax/Grammar.hx`, `src/syntax/Lexer.hx`)
@@ -873,7 +873,7 @@ for the bootstrap entry point (`haxe.LegacyMain`) and its unit tests.
 
 ## C build of the port (hxc): memory work — 2026-10-09
 
-After the object-layout and GC-policy changes (backend/README.md, "Memory";
+After the object-layout and GC-policy changes (hxc/README.md, "Memory";
 bench/README.md), checked on the tcc and gcc -O2 builds (with mbedtls and
 libuv):
 
@@ -893,7 +893,7 @@ observes string identity.
 ## hxc performance work (2026-10-11)
 
 After the changes in bench/README.md ("HaxeBenchmarks"), the port built by
-the native backend tool (`backend/tools/dev-tool.sh`):
+the native backend tool (`hxc/tools/dev-tool.sh`):
 
 | Check | Result |
 | --- | --- |

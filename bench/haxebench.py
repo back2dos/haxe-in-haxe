@@ -6,7 +6,7 @@ on hxc and the fast Haxe targets, with build times.
 
 The runner is cloned into bin/haxebench/runner (its cases; not its lix-based
 driver). Targets:
-  hxc       the hxc dev tool (bin/hxc-dev/tool, see backend/tools/dev-tool.sh):
+  hxc       the hxc dev tool (bin/hxc-dev/tool, see hxc/tools/dev-tool.sh):
             source -> C chunks -> $HXC_BENCH_CC (default clang -O2), objects reused
   hxc-tcc   the same C with tcc (build speed)
   cpp       hxcpp (haxelib), g++ -O2 as configured by hxcpp
@@ -82,11 +82,11 @@ def build(target, case, out):
     steps = []
     if target in ("hxc", "hxc-tcc"):
         c = out / "prog"
-        steps.append(([str(TOOL), str(c)] + args + ["-cp", str(ROOT / "backend/std"), "--custom-target", "hxc"], env))
+        steps.append(([str(TOOL), str(c)] + args + ["-cp", str(ROOT / "bin/hxc/std"), "--custom-target", "hxc"], env))
         cc = os.environ.get("HXC_BENCH_CC", "clang -O2") if target == "hxc" else "tcc"
         ids = "-DHXC_CONST_IDS" if target == "hxc" else ""
-        ccenv = dict(env, CC=cc, CFLAGS=f"-w -fno-strict-aliasing -DHXC_NO_SSL -DHXC_NO_UV {ids}", RT_DIR=str(ROOT / "backend/rt"))
-        steps.append((["sh", str(ROOT / "backend/tools/cc-chunks.sh"), str(c) + "_hxc", str(out / "bin")], ccenv))
+        ccenv = dict(env, CC=cc, CFLAGS=f"-w -fno-strict-aliasing -DHXC_NO_SSL -DHXC_NO_UV {ids}", RT_DIR=str(ROOT / "hxc/rt"))
+        steps.append((["sh", str(ROOT / "hxc/tools/cc-chunks.sh"), str(c) + "_hxc", str(out / "bin")], ccenv))
         run = [str(out / "bin")]
     elif target == "cpp":
         steps.append(([HAXE] + args + ["--cpp", str(out / "cpp"), "-D", "HXCPP_M64"], env))

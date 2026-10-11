@@ -59,13 +59,13 @@ def runners(reference):
         "jvm": ["java", "-Xss512m", "-XX:+UnlockDiagnosticVMOptions", "-XX:-BytecodeVerificationRemote", "-XX:-BytecodeVerificationLocal", "-jar", str(BIN / "hih.jar")],
         "js": ["node", "--stack-size=65500", str(BIN / "hih.js")],
         "go": [str(BIN / "hih-go")],
-        # backend/ (hxc target): sh backend/build.sh port; hih is the tcc build, hih_o2 gcc -O2
-        "hxc": [str(ROOT / "bin/backend/hih/hih")],
-        "hxc-o2": [str(ROOT / "bin/backend/hih/hih_o2")],
-        "hxc-clang": [str(ROOT / "bin/backend/hih/hih_clang")],  # CC="clang -O2" BIN=hih_clang sh backend/build.sh port
-        # bench/COSMO.md: Cosmopolitan builds (cosmocc -O2), fat x86-64 + aarch64 and x86-64 only
-        "hxc-cosmo": ["sh", str(ROOT / "bin/backend/hih/hih.com")],  # APE: started by the shell without binfmt_misc
-        "hxc-cosmo-x86": ["sh", str(ROOT / "bin/backend/hih/hih_x86.com")],
+        # hxc/ (hxc target): sh hxc/build.sh port; hih is the tcc build, hih_o2 gcc -O2
+        "hxc": [str(ROOT / "bin/hxc/hih/hih")],
+        "hxc-o2": [str(ROOT / "bin/hxc/hih/hih_o2")],
+        "hxc-clang": [str(ROOT / "bin/hxc/hih/hih_clang")],  # CC="clang -O2" BIN=hih_clang sh hxc/build.sh port
+        # docs/COSMO.md: Cosmopolitan builds (cosmocc -O2), fat x86-64 + aarch64 and x86-64 only
+        "hxc-cosmo": ["sh", str(ROOT / "bin/hxc/hih/hih.com")],  # APE: started by the shell without binfmt_misc
+        "hxc-cosmo-x86": ["sh", str(ROOT / "bin/hxc/hih/hih_x86.com")],
         # hxc's C compiled by Emscripten (wasm64, wasm exceptions) for Node with
         # direct file system access (sh bench/build.sh wasm); the site's build uses MEMFS.
         # memory64 needs Node 24 (NODE_WASM, e.g. emsdk's node)
