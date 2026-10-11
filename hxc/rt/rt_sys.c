@@ -15,6 +15,13 @@
 #include <termios.h>
 #include <time.h>
 #include <unistd.h>
+#include <string.h>
+#ifdef __COSMOPOLITAN__
+#include <cosmo.h> // IsWindows
+#define WIN_HOST IsWindows()
+#else
+#define WIN_HOST 0
+#endif
 
 extern int rt_argc;
 extern char **rt_argv;
@@ -133,14 +140,128 @@ void *hxc_NativeSys_systemName(void) {
 #endif
 }
 
+// Windows (Cosmopolitan builds, WIN_HOST): there is no /bin/sh, so shell
+// commands run through cmd.exe /c; execvp does not try the .exe extension, so
+// win_argv looks programs up in PATH itself (.exe, .com, then .cmd and .bat
+// through cmd.exe); a program that is not Cosmopolitan's own reports its raw
+// exit code as the wait status
+static int32_t exit_code(int st) {
+	if (WIN_HOST && (st & 0xff) != 0) return st;
+	if (WIFEXITED(st)) return WEXITSTATUS(st);
+	if (WIFSIGNALED(st)) return 128 + WTERMSIG(st);
+	return -1;
+}
+
+static char *win_find(const char *name, const char *ext) {
+	size_t nl = strlen(name), el = strlen(ext);
+	struct stat st;
+	if (strchr(name, '/') || strchr(name, '\\')) {
+		char *f = (char *)malloc(nl + el + 1);
+		memcpy(f, name, nl);
+		memcpy(f + nl, ext, el + 1);
+		if (stat(f, &st) == 0 && S_ISREG(st.st_mode)) return f;
+		free(f);
+		return NULL;
+	}
+	const char *path = getenv("PATH");
+	while (path && *path) {
+		const char *e = strchr(path, ':');
+		size_t dl = e ? (size_t)(e - path) : strlen(path);
+		if (dl > 0) {
+			char *f = (char *)malloc(dl + nl + el + 2);
+			memcpy(f, path, dl);
+			f[dl] = '/';
+			memcpy(f + dl + 1, name, nl);
+			memcpy(f + dl + 1 + nl, ext, el + 1);
+			if (stat(f, &st) == 0 && S_ISREG(st.st_mode)) return f;
+			free(f);
+		}
+		path = e ? e + 1 : NULL;
+	}
+	return NULL;
+}
+
+// argv (malloc'ed, NULL-terminated, *n + 2 entries) for Windows: the program
+// found in PATH, a script through cmd.exe /c; updates *n
+static char **win_argv(char **argv, int32_t *n) {
+	const char *base = argv[0];
+	for (const char *q = argv[0]; *q; q++)
+		if (*q == '/' || *q == '\\') base = q + 1;
+	int ext = strchr(base, '.') != NULL;
+	char *f = NULL;
+	if (!ext) f = win_find(argv[0], ".exe");
+	if (!f && !ext) f = win_find(argv[0], ".com");
+	if (!f) f = win_find(argv[0], "");
+	int script = 0;
+	if (!f && !ext) {
+		f = win_find(argv[0], ".cmd");
+		if (!f) f = win_find(argv[0], ".bat");
+		script = f != NULL;
+	}
+	if (!f) return argv;
+	free(argv[0]);
+	argv[0] = f;
+	if (!script) return argv;
+	char **a = (char **)malloc(sizeof(char *) * (*n + 4));
+	a[0] = strdup("cmd.exe");
+	a[1] = strdup("/c");
+	memcpy(a + 2, argv, sizeof(char *) * (*n + 2));
+	free(argv);
+	*n += 2;
+	return a;
+}
+
+// runs argv (n + 1 malloc'ed strings) with this process's standard streams, frees it
+static int32_t spawn_wait(char **argv, int32_t n) {
+	fflush(stdout);
+	fflush(stderr);
+	pid_t pid = fork();
+	if (pid == 0) {
+		execvp(argv[0], argv);
+		_exit(127);
+	}
+	for (int32_t i = 0; i <= n; i++) free(argv[i]);
+	free(argv);
+	if (pid < 0) return -1;
+	int st;
+	pid_t r;
+	for (;;) {
+		RT_BLOCKING(r = waitpid(pid, &st, 0));
+		if (r < 0 && errno == EINTR) continue;
+		break;
+	}
+	return r < 0 ? -1 : exit_code(st);
+}
+
 int32_t hxc_NativeSys_command(void *cmd) {
 	char *c = hx_str_to_utf8(cmd);
 	fflush(stdout);
+	if (WIN_HOST) {
+		char **argv = (char **)malloc(sizeof(char *) * 4);
+		argv[0] = strdup("cmd.exe");
+		argv[1] = strdup("/c");
+		argv[2] = c;
+		argv[3] = NULL;
+		return spawn_wait(argv, 2);
+	}
 	int r;
 	RT_BLOCKING(r = system(c)); // c is malloc'ed: no heap pointer
 	free(c);
 	if (r == -1) return -1;
 	return WIFEXITED(r) ? WEXITSTATUS(r) : 128 + WTERMSIG(r);
+}
+
+// Windows: runs cmd with args without a shell (cmd.exe does not understand
+// POSIX quoting); elsewhere -2: Sys.command quotes them for /bin/sh
+int32_t hxc_NativeSys_commandArgs(void *cmd, void *args) {
+	if (!WIN_HOST) return -2;
+	int32_t n = ARR_LEN(args);
+	char **argv = (char **)malloc(sizeof(char *) * (n + 2));
+	argv[0] = hx_str_to_utf8(cmd);
+	for (int32_t i = 0; i < n; i++) argv[i + 1] = hx_str_to_utf8(hx_aget_p_slow(args, i));
+	argv[n + 1] = NULL;
+	argv = win_argv(argv, &n);
+	return spawn_wait(argv, n);
 }
 
 void hxc_NativeSys_exit(int32_t code) {
@@ -382,9 +503,10 @@ int32_t hxc_NativeSys_processRun(void *cmd, void *args, void *fds) {
 		argv[0] = hx_str_to_utf8(cmd);
 		for (int32_t i = 0; i < n; i++) argv[i + 1] = hx_str_to_utf8(hx_aget_p_slow(args, i));
 		argv[n + 1] = NULL;
+		if (WIN_HOST) argv = win_argv(argv, &n);
 	} else {
-		argv[0] = strdup("/bin/sh");
-		argv[1] = strdup("-c");
+		argv[0] = strdup(WIN_HOST ? "cmd.exe" : "/bin/sh");
+		argv[1] = strdup(WIN_HOST ? "/c" : "-c");
 		argv[2] = hx_str_to_utf8(cmd);
 		argv[3] = NULL;
 		n = 2;
@@ -446,9 +568,7 @@ int32_t hxc_NativeSys_processWait(int32_t pid, int32_t block) {
 		break;
 	}
 #endif
-	if (WIFEXITED(st)) return WEXITSTATUS(st);
-	if (WIFSIGNALED(st)) return 128 + WTERMSIG(st);
-	return -1;
+	return exit_code(st);
 }
 
 void hxc_NativeSys_processKill(int32_t pid) { kill(pid, SIGKILL); }

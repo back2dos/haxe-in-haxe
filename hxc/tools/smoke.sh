@@ -48,11 +48,13 @@ cat > Extra.hx <<'EOF'
 class Extra {
 	static function main() {
 		sys.io.File.saveContent("extra.txt", "written");
-		Sys.println("file: " + sys.io.File.getContent("extra.txt") + " " + sys.FileSystem.exists("extra.txt") + ", cwd " + Sys.getCwd());
+		Sys.println("file: " + sys.io.File.getContent("extra.txt") + " " + sys.FileSystem.exists("extra.txt") + ", cwd " + haxe.Json.stringify(Sys.getCwd()));
 		Sys.println("system: " + Sys.systemName());
 		var p = new sys.io.Process("node", ["-e", "console.log('from node')"]);
 		Sys.println("process: " + StringTools.trim(p.stdout.readAll().toString()) + ", exit " + p.exitCode());
-		Sys.println("command exit " + Sys.command("node", ["-e", "process.exit(3)"]));
+		Sys.println("process exit " + new sys.io.Process("node", ["-e", "process.exit(3)"]).exitCode());
+		Sys.println("command exit " + Sys.command("node", ["-e", "process.exit(4)"]));
+		Sys.println("shell command exit " + Sys.command("node -e process.exitCode=5"));
 	}
 }
 EOF

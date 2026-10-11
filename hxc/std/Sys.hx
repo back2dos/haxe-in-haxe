@@ -134,6 +134,10 @@ class Sys {
 	**/
 	public static function command(cmd:String, ?args:Array<String>):Int {
 		if (args != null) {
+			// Windows (Cosmopolitan builds): run without a shell; -2 elsewhere
+			var r = NativeSys.commandArgs(cmd, args);
+			if (r != -2)
+				return r;
 			cmd = quote(cmd);
 			for (a in args)
 				cmd += " " + quote(a);

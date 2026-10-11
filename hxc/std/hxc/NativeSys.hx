@@ -14,6 +14,7 @@ extern class NativeSys {
 	static function setCwd(s:String):Bool;
 	static function systemName():String;
 	static function command(cmd:String):Int; // through the shell
+	static function commandArgs(cmd:String, args:Array<String>):Int; // Windows: without a shell; -2 elsewhere
 	static function exit(code:Int):Void;
 	static function time():Float;
 	static function cpuTime():Float;
