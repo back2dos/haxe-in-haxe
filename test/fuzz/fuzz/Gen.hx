@@ -106,6 +106,8 @@ class Gen {
 		if (portable) {
 			feats.set("unicode", false);
 			feats.set("dynamic", false);
+			// operand evaluation order is unspecified: Eval and JS differ on `f() + (++x)`
+			feats.set("sideeffects", false);
 		}
 	}
 
@@ -251,8 +253,10 @@ class Gen {
 			m("public static function at<T>(a:Array<T>, i:Int, d:T):T\n\treturn a.length == 0 ? d : a[ix(i, a.length)];"),
 			m("public static function lim(i:Int):Int\n\treturn i < 0 ? 0 : i > 6 ? 6 : i;"),
 			m("public static function w(i:Int):Int\n\treturn i & 0xFFFFFF;"),
+			m("public static function cap(s:String):String\n\treturn s.length > 1000 ? s.substr(0, 1000) : s;"),
+			m("public static function capa<T>(a:Array<T>):Array<T>\n\treturn a.length > 1000 ? a.slice(0, 1000) : a;"),
 			m("public static function cf(f:Float):Float\n\treturn Math.isNaN(f) ? 0 : f > 1e6 ? 1e6 : f < -1e6 ? -1e6 : f;"),
-			m("public static function fmt(f:Float):String {\n\tif (Math.isNaN(f))\n\t\treturn \"nan\";\n\tif (!Math.isFinite(f))\n\t\treturn f > 0 ? \"inf\" : \"-inf\";\n\tif (Math.abs(f) > 1e9)\n\t\treturn \"big\";\n\treturn Std.string(Math.fround(f * 100) / 100);\n}"),
+			m("public static function fmt(f:Float):String {\n\tif (Math.isNaN(f))\n\t\treturn \"nan\";\n\tif (!Math.isFinite(f))\n\t\treturn f > 0 ? \"inf\" : \"-inf\";\n\tif (Math.abs(f) > 1e9)\n\t\treturn \"big\";\n\treturn Std.string(Math.fround(f * 100.0) / 100.0);\n}"),
 			m("public static function exn(e:Dynamic):String {\n\tif (Std.isOfType(e, Fuel))\n\t\treturn \"fuel\";\n\tif (Std.isOfType(e, String) || Std.isOfType(e, Int) || Std.isOfType(e, Bool))\n\t\treturn Std.string(e);\n\tif (Std.isOfType(e, Err))\n\t\treturn \"Err\" + (e : Err).code;\n\treturn \"other\";\n}"),
 			m("public static function id<T>(x:T):T\n\treturn x;"),
 			m("public static function apply<T, U>(x:T, f:T->U):U\n\treturn f(x);"),
@@ -355,8 +359,8 @@ class Gen {
 			+ '\tpublic inline function new(i:Int)\n\t\tthis = i;\n\n'
 			+ '\tpublic function get():Int\n\t\treturn this;\n\n'
 			+ '\tpublic var twice(get, never):Int;\n\n'
-			+ '\tfunction get_twice():Int\n\t\treturn this * 2;\n\n'
-			+ '\t@:op(A + B) public static function add(a:$t, b:$t):$t\n\t\treturn new $t(a.get() + b.get());\n\n'
+			+ '\tfunction get_twice():Int\n\t\treturn ${portable ? "H.w(this * 2)" : "this * 2"};\n\n'
+			+ '\t@:op(A + B) public static function add(a:$t, b:$t):$t\n\t\treturn new $t(${portable ? "H.w(a.get() + b.get())" : "a.get() + b.get()"});\n\n'
 			+ '\t@:op(A * B) public static function mul(a:$t, b:$t):$t\n\t\treturn new $t(${portable ? "H.w(a.get() * b.get())" : "a.get() * b.get()"});\n\n'
 			+ '\t@:op(-A) public static function neg(a:$t):$t\n\t\treturn new $t(-a.get());\n}';
 		addDecl(a.module, new Node([S(src)]));
@@ -443,6 +447,9 @@ class Gen {
 		for (_ in 0...r.int(4)) {
 			var isStatic = on("statics") && r.chance(25);
 			var t = isStatic ? simpleType() : (r.chance(80) ? simpleType() : valueType(1));
+			// the constructor initializes fields, and constructs only earlier classes
+			if (!constructibleBefore(t, c))
+				t = simpleType();
 			var f = new FieldDef(fresh("f"), t, isStatic, !isStatic && r.chance(20));
 			if (on("props") && !isStatic && !f.isFinal && r.chance(25))
 				f.isProp = true;
@@ -514,6 +521,15 @@ class Gen {
 				members.push(fnDecl(m, false));
 			node.parts = [S(head + " "), B(new Block(members))];
 		});
+	}
+
+	function constructibleBefore(t:Ty, c:ClassDef):Bool {
+		return switch t {
+			case TInst(k, _) if (k.template == null): Lambda.exists(concreteSubs(k), x -> x != c);
+			case TArray(t) | TNull(t) | TMap(_, t): constructibleBefore(t, c);
+			case TInst(_, [t]): constructibleBefore(t, c);
+			default: true;
+		}
 	}
 
 	function fieldDecl(c:ClassDef, f:FieldDef):Node {
@@ -725,6 +741,7 @@ class Gen {
 			case TBool: "false";
 			case TString: "\"\"";
 			case TArray(t): "([] : Array<" + Types.str(t) + ">)";
+			case TInst(c, [p]) if (c.template == "Box"): "new Box<" + Types.str(p) + ">(" + defaultSrc(p) + ")";
 			case TNull(_) | TDyn | TInst(_, _): "null";
 			case TFun(args, ret):
 				var i = 0;
@@ -868,7 +885,7 @@ class Gen {
 
 	/** An expression of type `t` (or a subtype). **/
 	public function expr(t:Ty, ctx:Ctx, d:Int):Node {
-		if (d < -3 && !Types.isBasic(t))
+		if (d < -3 && !Types.isBasic(t) && !t.match(TInst(_, _)))
 			return e(t, [S(defaultSrc(t))]);
 		if (d <= 0 || r.chance(10)) {
 			var vs = vars(t, ctx);
@@ -1832,16 +1849,29 @@ class Gen {
 			var ops = ["+=", "-=", "*="].concat(on("bits") ? ["|=", "&=", "^=", "<<="] : []);
 			var op = r.pick(ops);
 			if (op == "<<=")
-				return new Node([S(target + " <<= ("), N(expr(TInt, ctx, d - 1)), S(" & 7);")]);
+				return portable ? new Node([S(target + " = H.w(" + target + " << ("), N(expr(TInt, ctx, d - 1)), S(" & 7));")]) : new Node([
+					S(target + " <<= ("),
+					N(expr(TInt, ctx, d - 1)),
+					S(" & 7);")
+				]);
 			if (portable)
 				return new Node([S(target + " = H.w(" + target + " " + op.charAt(0) + " "), N(expr(TInt, ctx, d - 1)), S(");")]);
 			return new Node([S(target + " " + op + " "), N(expr(TInt, ctx, d - 1)), S(";")]);
 		}
 		if (t == TInt && r.chance(20))
 			return new Node([S(r.pick([target + "++;", target + "--;", "++" + target + ";"]))]);
+		// strings and arrays assigned in loops could double every iteration (`s += s`): capped
 		if (t == TString && r.chance(30))
-			return new Node([S(target + " += "), N(expr(TString, ctx, d - 1)), S(";")]);
+			return r.chance(50) ? new Node([S(target + " += " + strLit() + ";")]) : new Node([
+				S(target + " = H.cap(" + target + " + "),
+				N(expr(TString, ctx, d - 1)),
+				S(");")
+			]);
 		var v = expr(t, ctx, d - 1);
+		if (t == TString)
+			v = e(t, [S("H.cap("), N(v), S(")")]);
+		else if (t.match(TArray(_)))
+			v = e(t, [S("H.capa("), N(v), S(")")]);
 		if (Printer.node(v, 0) == target)
 			v = e(t, [S("H.id("), N(v), S(")")]);
 		if (portable && t == TInt)
@@ -1943,8 +1973,7 @@ class Gen {
 			ctx.lambda--;
 			var w = portable ? "H.w" : "";
 			var node = new Node([
-				S("function " + name + "(" + n + ":Int):Int {\n"),
-				S("\tH.tick();\n\treturn " + n + " <= 0 ? "),
+				S("function " + name + "(" + n + ":Int):Int {\n\tH.tick();\n\treturn " + n + " <= 0 ? "),
 				N(base),
 				S(" : " + w + "(" + name + "(" + n + " - 1) + "),
 				N(step),

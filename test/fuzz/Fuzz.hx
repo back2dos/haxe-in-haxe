@@ -208,7 +208,7 @@ Options:
 				lock.wait();
 		}
 		report(true);
-		Sys.exit(newFailures > 0 || Lambda.count([for (k in sigs.keys()) k]) > 0 ? 1 : 0);
+		Sys.exit(newFailures > 0 ? 1 : 0);
 	}
 
 	static function parseLane(spec:String, targets:Map<String, TargetSpec>, ref:String, port:String, run:Bool):Lane {
@@ -313,8 +313,13 @@ Options:
 		return r.length > 60 ? r.substr(0, 60) : r;
 	}
 
+	/** Port (or side b) failures: they decide the exit code. **/
 	static function failing(kind:String):Bool
-		return kind != "ok" && kind != "invalid" && kind != "rejected-alike";
+		return kind != "ok" && kind != "invalid" && kind != "rejected-alike" && kind != "reference-failure";
+
+	/** Saved, grouped and reduced: port failures and crashes of the reference itself. **/
+	static function notable(kind:String):Bool
+		return failing(kind) || kind == "reference-failure";
 
 	static function record(lane:Lane, s:Int, p:Program, v:Verdict, work:String) {
 		// an injected error both compilers report alike is a pass
@@ -325,13 +330,13 @@ Options:
 		var sig = signature(lane, v);
 		var seen = 0;
 		var save = false;
-		if (failing(v.kind)) {
+		if (notable(v.kind)) {
 			seen = sigs.exists(sig) ? sigs.get(sig) : 0;
 			sigs.set(sig, seen + 1);
 			save = seen < keep;
-			if (seen == 0)
+			if (seen == 0 && failing(v.kind))
 				newFailures++;
-			if (stopAtFirst)
+			if (stopAtFirst && failing(v.kind))
 				stop = true;
 		} else if (v.kind == "invalid") {
 			// keep a few programs the reference rejects: they point at generator bugs
@@ -339,19 +344,20 @@ Options:
 			save = n <= 5;
 		}
 		mutex.release();
-		if (verbose || failing(v.kind))
+		if (verbose || notable(v.kind))
 			Sys.println("seed " + s + " " + lane.name + ": " + v.kind + (v.detail == "" ? "" : " - " + v.detail));
 		if (!save)
 			return;
-		var dir = outDir + "/" + (v.kind == "invalid" ? "invalid" : "failures/" + slug(sig)) + "/" + s;
+		var dir = outDir + "/" + (v.kind == "invalid" ? "invalid" : (failing(v.kind) ? "failures/" : "reference-failures/") + slug(sig)) + "/" + s;
 		saveCase(dir, lane, s, p, v, work);
-		if (failing(v.kind) && seen == 0 && reduceBudget > 0) {
+		if (notable(v.kind) && seen == 0 && reduceBudget > 0) {
 			var t0 = Sys.time();
 			var reduceWork = work + "-reduce";
+			// the same signature, not just the same kind: the reduced program must keep the same bug
 			var n = Reduce.run(p, cand -> {
 				Runner.writeProgram(cand.files(), reduceWork + "/src");
 				var cv = Runner.check(lane, reduceWork);
-				return cv.kind == v.kind;
+				return cv.kind == v.kind && signature(lane, cv) == sig;
 			}, reduceBudget);
 			// the final program, checked once more for its logs
 			Runner.writeProgram(p.files(), reduceWork + "/src");
@@ -380,7 +386,7 @@ Options:
 		File.saveContent(dir + "/verdict.txt", b.toString());
 		var sh = new StringBuf();
 		sh.add("#!/bin/sh\n# Re-runs both sides of lane " + lane.name + " from this directory.\ncd \"$(dirname \"$0\")\"\n");
-		sh.add("export HAXE_STD_PATH=" + Runner.root + "/haxe/std\n");
+		sh.add("export HAXE_STD_PATH=" + Runner.root + "/haxe/std HAXE_IN_HAXE_STD_PATH=" + Runner.root + "/haxe/std\n");
 		for (side in [lane.a, lane.b]) {
 			sh.add("rm -rf " + side.label + " && mkdir -p " + side.label + "/out && (cd " + side.label + " && " + Runner.commandLine(side, "out") + ")");
 			sh.add("; echo \"" + side.label + ": exit $?\"\n");
@@ -403,7 +409,7 @@ Options:
 			for (k in ks)
 				Sys.println("  " + sigs.get(k) + "x " + k);
 			if (ks.length > 0)
-				Sys.println("failures saved under " + outDir + "/failures");
+				Sys.println("cases saved under " + outDir + "/failures and " + outDir + "/reference-failures");
 		}
 		mutex.release();
 	}

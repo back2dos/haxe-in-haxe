@@ -30,9 +30,68 @@ tink_core, hxcoro); cosmocc build OK.
 | `test/haxelib.py` / `--server` | 7/7, 14/14 | not run |
 | `test/interp.py` | 270 identical, 2 known host differences (last run before the server merge) | not run |
 | ThreadSanitizer (runtime instrumented, parallel self-compile) | n/a | 0 reports after the fixes |
+| `test/fuzz` `diff:hxb` + `diff:interp`, 15% injected errors (3,000 programs) | not run | 0 port failures (1 reference crash) |
+| `test/fuzz` `exec:interp,hxc` (200 portable programs) | n/a | 32 output differences, 1 backend error (open, see the fuzzer section) |
 
 Not covered: `server/*` JSON-RPC methods through a server, the Eval debugger,
 memory statistics, non-HXB targets (see `upstream-hxb-exclusions.md`).
+
+## Differential fuzzer — 2026-10-11
+
+`test/fuzz/` ([README](fuzz/README.md)) generates random, well-typed,
+terminating Haxe programs (classes, interfaces, abstract classes, enums,
+abstracts, generics, closures, pattern matching, exceptions, maps, string and
+array methods, up to four modules; each program enables a random subset of
+the feature groups) and compares two sides per lane. It is written in Haxe and
+built with hxc (`sh test/fuzz/build.sh`, about 10 s); the generator produces the
+same program for a seed on hxc and on Eval. `diff:<target>` lanes compare the
+reference and the port on the same target, so each ported target generator
+can be checked with `--lane diff:<target> [--run]`. `exec:<a>,<b>` lanes
+compare program output across targets with a portable profile. Failures are
+grouped by signature, saved with logs and `repro.sh`, and reduced on the
+program tree.
+
+Measured here with the reference and the clang -O2 hxc build of the port
+(`bin/backend/hih/hih_clang`), 4 workers:
+
+| Lane | Programs | Result |
+| --- | --- | --- |
+| Generator validity (reference `--interp`, default / `--portable` / `--size 7`) | 150 / 100 / 100 | 149 / 100 / 100 accepted; the other one is a reference crash |
+| `diff:hxb` + `diff:interp`, `--mutate 15`, seed 50000 | 3,000 (≈450/min) | 5,109 identical, 890 injected errors rejected alike, 1 reference crash, 0 port failures |
+| `exec:interp,js` (reference only: checks the portable profile), seed 30000 | 1,500 | identical |
+| `exec:interp,hxc`, seed 60000 | 200 (66/min) | 167 identical, 32 output differences, 1 backend error |
+
+Fixed in the port:
+
+- `Math.floor`/`ceil`/`round` of NaN in Eval returned 0; the pinned OCaml
+  converts NaN (and `mod_float` of an infinity) to min_int on amd64
+  (`EvalStdLibB.StdMath.toInt`). Found by `diff:interp`
+  (`Math.floor(Std.parseFloat("abc"))`).
+- Error excerpts printed non-ASCII source lines as mojibake: the lines are
+  read one char per byte, like OCaml strings, so that byte columns slice them,
+  but were also printed that way (`MessageReporting.byteString`). Found by
+  `--mutate`.
+
+Open:
+
+- hxc (`exec:interp,hxc`, reduced cases):
+  - `Array<Bool>` elements print as `1`/`0` in `join` and `Std.string`
+    (`[true, false].join(",")` gives `1,0`): most of the differences;
+  - `Std.string(c ? false : false)` prints `null`: the boxed Bool of a
+    conditional is lost;
+  - `C.f + g()` where `g` assigns `C.f`: hxc reads the static after the call,
+    Eval and JS before it (Haxe leaves operand order unspecified, but hxc is
+    alone here);
+  - "backend: no implementation of m11": an abstract class that re-declares an
+    interface method as `abstract` and has no concrete subclass;
+  - one difference in the fuel count (control flow), not reduced yet.
+- Reference crash ("Compiler failure", `evalJit.ml` line 145, `die` in
+  `op_assign_op` for an unexpected assignment target), about 1 in 3,000
+  programs with `--interp`. The port reports the same failure; the fuzzer
+  records these as `reference-failure`, which does not fail a run.
+- Reference Eval keeps an `Int` passed for a `Float` argument as an int, so
+  `f * 100` wraps at 32 bits where other targets compute in floating point.
+  The generator's `H.fmt` multiplies by `100.0`.
 
 ## Eval lock: OCaml's runtime lock for Eval threads — 2026-10-09
 

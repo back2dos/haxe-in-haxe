@@ -90,7 +90,15 @@ python3 test/upstream.py [--reference] [step ...]                         # upst
 python3 test/display.py -j 2 [--extended]                                 # display requests vs the reference
 python3 test/server.py -j 2 [--hxb-cache]                                 # compilation server scenarios
 python3 test/haxelib.py [--server]                                        # -L/--library with a local repository
+sh test/fuzz/build.sh && bin/fuzz/fuzz -j 4 --lane diff:hxb --lane diff:interp  # differential fuzzer (hxc build)
 ```
+
+`test/fuzz/` ([README](test/fuzz/README.md)) generates random, well-typed
+Haxe programs and compares the port with the reference on each: `diff:<target>`
+lanes require identical diagnostics and output files for any target (`hxb`,
+`interp`, `js`, `lua`, `php`, ...: the check for target generators as they are
+ported), `exec:<a>,<b>` lanes identical program output across targets (e.g.
+`exec:interp,hxc`). Failures are saved with a repro script and reduced.
 
 Conformance compares normalized ZIP member names and the uncompressed `.hxb`
 payloads, never the container bytes; cases the reference rejects must be

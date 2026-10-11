@@ -53,6 +53,7 @@ and array access), so any difference is a bug in one of the sides.
 | `ok` | identical |
 | `invalid` | the reference (side `a`) rejected the program: a generator bug unless `--mutate` injected an error. The first 5 are saved under `<out>/invalid/` |
 | `rejected-alike` | an injected error (`--mutate`), reported identically by both |
+| `reference-failure` | the reference crashed ("Compiler failure"; the port must fail alike, backtraces aside). Saved and reduced under `<out>/reference-failures/`; does not fail the run |
 | `port-rejects`, `port-accepts` | only one side accepted the program |
 | `port-crash`, `port-timeout` | the port died (signal, exit code ≥ 125) or exceeded `compileTimeout` |
 | `diagnostics-differ`, `log-differs` | both rejected (or accepted) with different compiler output |
@@ -64,10 +65,12 @@ blanked). The first `--keep` cases (default 2) of a signature go to
 `<out>/failures/<signature>/<seed>/`: the sources (`src/`), both sides'
 compiler and run logs, `verdict.txt` (features, the injected error) and
 `repro.sh`. The first case of each new signature is also reduced (below) into
-`reduced/`. The exit code is 1 when there was any failure.
+`reduced/`. The exit code is 1 when there was any port (side `b`) failure.
 
-A program is reproducible from its seed alone: `--seed S -n 1` with the same
-`--size`, `--portable`, `--feature` and `--mutate` options regenerates it.
+A program is reproducible from its seed: `--seed S -n 1` with the same
+`--size`, `--portable`, `--feature` and `--mutate` options regenerates it, as
+long as the generator is unchanged (saved cases keep their sources for that
+reason).
 
 ## Generator
 
@@ -99,8 +102,9 @@ Each program enables a random subset of the feature groups (swarm testing,
 Programs always terminate: calls between user functions form a DAG, lambdas
 only call "tier-0" functions that never call function values, loops are
 bounded, and every function and loop iteration calls `H.tick()`, which throws
-once a global fuel budget is spent. They are deterministic (no clocks,
-randomness or hashing) and print through `H.out`.
+once a global fuel budget is spent. String and array assignments are capped at
+1,000 elements, so values cannot double in every loop iteration. Programs are
+deterministic (no clocks, randomness or hashing) and print through `H.out`.
 
 `--mutate P` injects one error into P% of the programs (a value of the wrong
 type, an unknown identifier or field, an extra argument), which both compilers

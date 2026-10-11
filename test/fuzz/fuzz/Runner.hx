@@ -202,7 +202,9 @@ class Runner {
 		var dir = work + "/" + side.label;
 		rmrf(dir);
 		FileSystem.createDirectory(dir + "/out");
-		var env = "HAXE_STD_PATH=" + shellQuote(root + "/haxe/std") + " ";
+		// as test/conformance.py: both compilers use the checkout's std
+		var std = shellQuote(root + "/haxe/std");
+		var env = "HAXE_STD_PATH=" + std + " HAXE_IN_HAXE_STD_PATH=" + std + " ";
 		var cmd = "cd " + shellQuote(dir) + " && " + env + "timeout " + compileTimeout + " " + commandLine(side, "out")
 			+ " > compile.log 2>&1 < /dev/null; echo $? > compile.code";
 		sh(cmd);
@@ -229,6 +231,24 @@ class Runner {
 		return StringTools.replace(s, root, "<root>");
 	}
 
+	/**
+		Logs of a "Compiler failure" without the backtrace, which only the
+		OCaml reference prints; null when the log reports no compiler failure.
+	**/
+	static function failure(log:String):Null<String> {
+		if (log.indexOf("Compiler failure") < 0)
+			return null;
+		return [for (l in log.split("\n")) if (!~/^\s*\|\s*(File "|Called from |Raised |Re-raised |$)/.match(l)) l].join("\n");
+	}
+
+	/** The first backtrace line of a reference compiler failure. **/
+	static function failureSite(log:String):String {
+		for (l in log.split("\n"))
+			if (~/^\s*\|\s*(File "|Raised )/.match(l))
+				return StringTools.trim(l.substr(l.indexOf("|") + 1));
+		return firstLine(log);
+	}
+
 	static function crashed(code:Int):Bool
 		return code == TIMEOUT || code >= 125 || code < 0;
 
@@ -247,6 +267,9 @@ class Runner {
 		if (a.code == 0 && b.code != 0)
 			return {kind: "port-rejects", detail: firstLine(b.log)};
 		if (a.code != 0) {
+			var fa = failure(a.log), fb = failure(b.log);
+			if (fa != null && fb != null && fa == fb)
+				return {kind: "reference-failure", detail: failureSite(a.log)};
 			if (a.log != b.log)
 				return {kind: "diagnostics-differ", detail: firstDiff(a.log, b.log)};
 			return {kind: "invalid", detail: firstLine(a.log)};
@@ -273,8 +296,11 @@ class Runner {
 	}
 
 	static function compareExec(lane:Lane, a:SideResult, b:SideResult):Verdict {
-		if (a.code != 0)
+		if (a.code != 0) {
+			if (failure(a.log) != null)
+				return {kind: "reference-failure", detail: failureSite(a.log)};
 			return {kind: "invalid", detail: lane.a.label + " exit " + a.code + ": " + firstLine(a.log)};
+		}
 		if (b.code != 0)
 			return {kind: crashed(b.code) ? "compile-crash" : "compile-fails", detail: lane.b.label + " exit " + b.code + ": " + lastLines(b.log)};
 		var ra = lane.a.target.run == null ? 0 : a.runCode;
