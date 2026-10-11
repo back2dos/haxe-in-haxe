@@ -3304,7 +3304,12 @@ class Genswf9 {
 						}
 					}
 					function loop(n:Int, e_else:TExpr):TExpr {
-						var args = (nargs(n - 1, args_rev));
+						// port: List.rev_append args_rev (nargs (n - 1) []).
+						var args = {
+							var front = args_rev.copy();
+							front.reverse();
+							front.concat(nargs(n - 1, []));
+						};
 						// port: right-to-left constructor argument evaluation.
 						var e_then = args_to_expr(args);
 						var e = mk(TIf(check(n), e_then, e_else), t_result, rest.epos);

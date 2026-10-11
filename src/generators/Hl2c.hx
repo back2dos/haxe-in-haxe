@@ -1323,9 +1323,9 @@ class Hl2c {
 				case OGetUI8(r, b, idx):
 					expr('${reg(r)} = *(unsigned char*)(${reg(b)} + ${reg(idx)})');
 				case OGetUI16(r, b, idx):
-					expr('${reg(r)} = *(unsigned short*)(${reg(b)} + ${reg(idx)})');
+					expr('{ unsigned short _v; memcpy(&_v, ${reg(b)} + ${reg(idx)}, sizeof(_v)); ${reg(r)} = _v; }');
 				case OGetMem(r, b, idx):
-					expr('${reg(r)} = *(${ctype(rtype(r))}*)(${reg(b)} + ${reg(idx)})');
+					expr('memcpy(&${reg(r)}, ${reg(b)} + ${reg(idx)}, sizeof(${reg(r)}))');
 				case OGetArray(r, arr, idx):
 					switch rtype(arr) {
 						case HAbstract(_):
@@ -1341,9 +1341,9 @@ class Hl2c {
 				case OSetUI8(b, idx, r):
 					expr('*(unsigned char*)(${reg(b)} + ${reg(idx)}) = (unsigned char)${reg(r)}');
 				case OSetUI16(b, idx, r):
-					expr('*(unsigned short*)(${reg(b)} + ${reg(idx)}) = (unsigned short)${reg(r)}');
+					expr('{ unsigned short _v = (unsigned short)${reg(r)}; memcpy(${reg(b)} + ${reg(idx)}, &_v, sizeof(_v)); }');
 				case OSetMem(b, idx, r):
-					expr('*(${ctype(rtype(r))}*)(${reg(b)} + ${reg(idx)}) = ${reg(r)}');
+					expr('memcpy(${reg(b)} + ${reg(idx)}, &${reg(r)}, sizeof(${reg(r)}))');
 				case OSetArray(arr, idx, v):
 					switch rtype(arr) {
 						case HAbstract(_):

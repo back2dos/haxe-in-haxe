@@ -176,9 +176,9 @@ class CppGenEnum {
 		outputH("\t\tstatic void __boot();\n");
 		outputH("\t\tstatic void __register();\n");
 		outputH("\t\tstatic bool __GetStatic(const ::String &inName, ::Dynamic &outValue, ::hx::PropertyAccess inCallProp);\n");
-		outputH("\t\t::String GetEnumName( ) const { return " + (strq(joinClassPath(classPath, "."))) + "; }\n");
-		outputH("\t\t::String __ToString() const { return " + (strq(justClassName + ".")) + " + _hx_tag; }\n");
-		outputH("\t\tbool _hx_isInstanceOf(int inClassId);\n\n");
+		outputH("\t\t::String GetEnumName() const override { return " + (strq(joinClassPath(classPath, "."))) + "; }\n");
+		outputH("\t\t::String __ToString() const override { return " + (strq(justClassName + ".")) + " + _hx_tag; }\n");
+		outputH("\t\tbool _hx_isInstanceOf(int inClassId) override;\n\n");
 
 		for (constructor in tcppEnum.teConstructors) {
 			outputH('\t\tstatic $remapClassName ${constructor.tefName}');

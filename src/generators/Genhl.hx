@@ -47,7 +47,7 @@ import generators.Hlcode.*;
 
 class Lookup<V> {
 	public var arr:Array<V> = [];
-	// port: ('a, int) PMap.t, with the key rendered as a string
+	// port: ('a, int) Hashtbl.t, with the key rendered as a string
 	public var map:StringMap<Int> = new StringMap();
 
 	public function new() {}
@@ -460,13 +460,20 @@ class Genhl {
 	static function isExcluded(c:TClass):Bool return hasClassFlag(c, CExcluded) && !hasClassFlag(c, CInterface);
 
 	static function getRecCache(ctx:HlContext, t:T, noneCallback:Void->Ttype, notFoundCallback:TRef->Ttype):Ttype {
+		// port: `loop retried l` walks the list from its head (the last element).
+		var retried = false;
 		var i = ctx.recCache.length - 1;
 		while (i >= 0) {
 			var e = ctx.recCache[i];
-			if (core.TUnification.fastEq(e.t, t)) {
-				return if (e.tref.v == null) noneCallback() else e.tref.v;
-			}
 			i--;
+			if (!core.TUnification.fastEq(e.t, t)) continue;
+			/* Note from Simon: This is unlikely to be the "correct" fix. What this really does is ignore a singular `ref None` lookup
+			   and ultimately (once hitting the `| [] -> ` case above) go through the `not_found_callback`, at which point two entries
+			   with the same `t` key exists in `ctx.rec_cache`. This is not a robust solution to a recursive data problem, but at the
+			   moment it is unclear how to reproduce any actual issue from this. */
+			if (e.tref.v != null) return e.tref.v;
+			if (retried) return noneCallback();
+			retried = true;
 		}
 		var tref = new TRef();
 		ctx.recCache.push({t: t, tref: tref});
@@ -635,7 +642,7 @@ class Genhl {
 		var creal = resolveClass(ctx, c, pl, false);
 		function loop(c:TClass):TClassField {
 			var cf = c.clFields.get(f.cfName);
-			if (cf != null) return cf;
+			if (cf != null && !(cf.cfKind.match(Method(MethDynamic)) && hasClassFieldFlag(cf, CfOverride))) return cf;
 			return if (c.clSuper != null) loop(c.clSuper.cls) else Error.abort(sTypePath(creal.clPath) + " is missing field " + f.cfName, p);
 		}
 		return loop(creal).cfType;
@@ -1426,7 +1433,7 @@ class Genhl {
 				j();
 				op(ctx, ONull(out));
 				return out;
-			case [GInt | GFloat, GNull, _, HNull(t)]:
+			case [GInt | GFloat, GNull, _, HNull(t)] if (getGroup(t) != GBool):
 				var tmp = allocTmp(ctx, t);
 				switch getGroup(t) {
 					case GFloat: op(ctx, OToSFloat(tmp, r));
@@ -1999,7 +2006,8 @@ class Genhl {
 				return castTo(ctx, r, et, e.epos);
 			case TReturn(null):
 				beforeReturn(ctx);
-				var r = allocTmp(ctx, HVoid);
+				var r = allocTmp(ctx, ctx.m.mret);
+				if (!ctx.m.mret.match(HVoid)) op(ctx, ONull(r));
 				op(ctx, ORet(r));
 				return allocTmp(ctx, HDyn);
 			case TReturn(e):
@@ -2071,11 +2079,11 @@ class Genhl {
 				var c = evalTo(ctx, vt, classType(ctx, ctx.baseType, [], false));
 				hold(ctx, c);
 				var rv = allocTmp(ctx, toType(ctx, e.etype));
-				var rb = allocTmp(ctx, HBool);
-				op(ctx, OCall2(rb, allocFunPath(ctx, {pack: ["hl"], name: "BaseType"}, "check"), c, r));
-				var jnext = jump(ctx, n -> OJFalse(rb, n));
+				var rd = allocTmp(ctx, HDyn);
+				op(ctx, OCall2(rd, allocFunPath(ctx, {pack: ["hl"], name: "BaseType"}, "downcast"), c, r));
+				var jnext = jump(ctx, n -> OJNull(rd, n));
 				var t = toType(ctx, e.etype);
-				op(ctx, OMov(rv, unsafeCastTo(ctx, r, t, e.epos, false)));
+				op(ctx, OMov(rv, unsafeCastTo(ctx, rd, t, e.epos, false)));
 				var jend = jump(ctx, n -> OJAlways(n));
 				jnext();
 				op(ctx, ONull(rv));
@@ -3031,12 +3039,12 @@ class Genhl {
 						}
 						hold(ctx, rtrap);
 						var r = typeValue(ctx, ct, ec.epos);
+						var rd = allocTmp(ctx, HDyn);
 						free(ctx, rtrap);
-						var rb = allocTmp(ctx, HBool);
-						op(ctx, OCall2(rb, allocFunPath(ctx, {pack: ["hl"], name: "BaseType"}, "check"), r, rtrap));
-						var jnext = jump(ctx, n -> OJFalse(rb, n));
+						op(ctx, OCall2(rd, allocFunPath(ctx, {pack: ["hl"], name: "BaseType"}, "downcast"), r, rtrap));
+						var jnext = jump(ctx, n -> OJNull(rd, n));
 						var vt = toType(ctx, v.vType);
-						op(ctx, OMov(rv, unsafeCastTo(ctx, rtrap, vt, ec.epos, false)));
+						op(ctx, OMov(rv, unsafeCastTo(ctx, rd, vt, ec.epos, false)));
 						addAssign(ctx, v);
 						jnext;
 					}
@@ -3811,7 +3819,7 @@ class Genhl {
 			function hasFinalJump(e:TExpr):Bool {
 				/* prevents a jump outside function bounds error */
 				return switch e.eexpr {
-					case TBlock(el): if (el.length == 0) false else hasFinalJump(el[el.length - 1]);
+					case TBlock(el): if (el.length == 0) true else hasFinalJump(el[el.length - 1]);
 					case TParenthesis(e): hasFinalJump(e);
 					case TReturn(_): false;
 					case _: true;
@@ -3926,7 +3934,7 @@ class Genhl {
 						var args = [
 							for (a in tl) {
 								var v = TFunctions.allocVar(VGenerated, a.name, a.type, nullPos);
-								{variable: v, defaultValue: null};
+								{variable: v, defaultValue: if (a.optional) mk(TConst(TNull), a.type, nullPos) else null};
 							}
 						];
 						{
@@ -3950,12 +3958,15 @@ class Genhl {
 					for (f in c.clOrderedFields) {
 						switch f.cfKind {
 							case Method(MethDynamic):
+								var idx = try getIndex(f.cfName, o) catch (_:NotFound) die("", "genhl.ml");
+								var fid = idx.fid, ft = idx.t;
+								var fr = allocTmp(ctx, ft);
+								op(ctx, OGetThis(fr, fid));
+								var jnext = jump(ctx, n -> OJNotNull(fr, n));
 								var r = allocTmp(ctx, toType(ctx, f.cfType));
-								var fid = try getIndex(f.cfName, o).fid catch (_:NotFound) die("", "genhl.ml");
-								op(ctx, OGetThis(r, fid));
-								op(ctx, OJNotNull(r, 2));
 								op(ctx, OInstanceClosure(r, allocFid(ctx, c, f), 0));
-								op(ctx, OSetThis(fid, r));
+								op(ctx, OSetThis(fid, castTo(ctx, r, ft, f.cfPos)));
+								jnext();
 							case _:
 						}
 					}
@@ -4808,27 +4819,14 @@ class Genhl {
 			ctx.cconstants.arr.copy());
 	}
 
-	// port: OCaml compare on `string * path` keys (PMap order)
-	static function fidKeyCompare(a:{name:String, path:GlobalTypePath}, b:{name:String, path:GlobalTypePath}):Int {
-		var c = strCompare(a.name, b.name);
-		if (c != 0) return c;
-		var i = 0;
-		while (true) {
-			if (i == a.path.pack.length && i == b.path.pack.length) break;
-			if (i == a.path.pack.length) return -1;
-			if (i == b.path.pack.length) return 1;
-			var c = strCompare(a.path.pack[i], b.path.pack[i]);
-			if (c != 0) return c;
-			i++;
-		}
-		return strCompare(a.path.name, b.path.name);
-	}
-
 	static function check(ctx:HlContext):Void {
-		var keys = ctx.cfidsKeys.copy();
-		haxe.ds.ArraySort.sort(keys, fidKeyCompare);
-		for (k in keys)
+		// port: Hashtbl.iter order of the (string * path) keys of cfids.map, replayed
+		// from their insertion order.
+		var tbl = new core.ds.OcamlHashtbl<{name:String, path:GlobalTypePath, id:Int}, Bool>(k -> core.ds.OcamlHash.hash(core.ds.OcamlHash.OcamlValue.OBlock(0, [core.ds.OcamlHash.OcamlValue.OString(k.name), core.ds.OcamlHash.ofPath(k.path.pack, k.path.name)])), (a, b) -> a == b);
+		for (k in ctx.cfidsKeys) tbl.add(k, true);
+		tbl.iter((k, _) -> {
 			if (!ctx.definedFuns.exists(k.id)) throw new Failure("Unresolved method " + sTypePath(k.path) + ":" + k.name + "(@" + k.id + ")");
+		});
 	}
 
 	// port: upstream digests the Marshal image of a (module id, true) Hashtbl; the

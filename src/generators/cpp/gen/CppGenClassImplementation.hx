@@ -216,12 +216,16 @@ class CppGenClassImplementation {
 		}
 	}
 
+	public static function newDefaultClosure(func:TcppClassFunction, obj:String):String {
+		return '${funcToCallableString("::hx::Callable", func)}(new __default_${func.tcfName}($obj))';
+	}
+
 	public static function genDynamicFunctionAllocator(ctx:Context, outputCpp:String->Void, tcppClass:TcppClass):Void {
 		switch tcppClass.tclDynamicFunctions {
 			case []:
 			case functions:
 				function mapper(func:TcppClassFunction):String
-					return '\tif (!_hx_obj->${func.tcfName}.mPtr) { _hx_obj->${func.tcfName} = new __default_${func.tcfName}(_hx_obj); }';
+					return '\tif (!_hx_obj->${func.tcfName}.mPtr) { _hx_obj->${func.tcfName} = ${newDefaultClosure(func, "_hx_obj")}; }';
 				function folder(acc:Array<String>, classDef:TClass):Array<String> {
 					return if (hasDynamicMemberFunctions(classDef)) {
 						var superName = joinClassPathRemap(classDef.clPath, "::") + "_obj";
@@ -533,7 +537,7 @@ class CppGenClassImplementation {
 
 		/* Initialise non-static variables */
 		outputCpp(className + "::" + className + "()\n{\n");
-		for (func in tcppClass.tclDynamicFunctions) outputCpp("\t" + func.tcfName + " = new __default_" + func.tcfName + "(this);\n");
+		for (func in tcppClass.tclDynamicFunctions) outputCpp('\t${func.tcfName} = ${newDefaultClosure(func, "this")};\n');
 		outputCpp("}\n\n");
 
 		if (tcppClass.tclContainer != null && tcppClass.tclContainer.match(Current)) {
@@ -670,10 +674,8 @@ class CppGenClassImplementation {
 			allFields = foldRight(function(v, acc) return printProperty(propPrinter, v, acc), tcppClass.tclProperties, allFields);
 			allFields = foldRight(function(f, acc) return printFunction(funPrinter, f, acc), tcppClass.tclFunctions, allFields);
 
-			if (allFields.length > 0) {
-				dumpQuickFieldTest(allFields);
-				outputCpp("\treturn super::__Field(inName,inCallProp);\n}\n\n");
-			}
+			dumpQuickFieldTest(allFields);
+			outputCpp("\treturn super::__Field(inName,inCallProp);\n}\n\n");
 		}
 
 		if (hasTcppClassFlag(tcppClass, StaticGet)) {

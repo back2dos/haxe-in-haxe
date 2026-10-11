@@ -1851,7 +1851,7 @@ private class ExprGenerator {
 
 		out('HX_BEGIN_LOCAL_FUNC_S$argc(::hx::AutoCallable_obj< $signature >, _hx_Closure_${closure.closeId}$captured)\n');
 
-		outputI('${tcppToString(closure.closeType)} HX_LOCAL_RUN( ${CppGen.cppCallableArgs(closure.closeArgs, "__o_")} )');
+		outputI('${tcppToString(closure.closeType)} HX_LOCAL_RUN( ${CppGen.cppCallableArgs(closure.closeArgs, "__o_")} ) override ');
 
 		function prologue(gcStack:Bool):Void {
 			CppGen.cppGenDefaultValues(ctx, className, funcName, closure.closeArgs, "__o_");

@@ -425,6 +425,19 @@ class Genjvm {
 		}
 	}
 
+	public static function dynamicFieldOwner(c:TClass, cf:TClassField):TClass {
+		return switch c.clSuper {
+			case sup if (sup != null && cf.cfKind.match(Method(MethDynamic)) && hasClassFieldFlag(cf, CfOverride)):
+				var csup = sup.cls;
+				dynamicFieldOwner(csup, switch csup.clFields.get(cf.cfName) {
+					case null: cf;
+					case cf2: cf2;
+				});
+			case _:
+				c;
+		}
+	}
+
 	// port: `let follow = Abstract.follow_with_abstracts` shadows Type.follow from here on.
 	static inline function followA(t:T):T return Abstract.followWithAbstracts(t);
 
@@ -1601,11 +1614,12 @@ class TexprToJvm {
 				var vtobj = vtype(e1.etype);
 				code.arraylength(vtobj);
 			case FInstance(c, tl, cf) if (!Genjvm.isInterfaceVarAccess(c, cf)):
+				var c = Genjvm.dynamicFieldOwner(c, cf);
 				texpr(Genjvm.rvalueAny, e1);
 				jm.getfield(c.clPath, cf.cfName, vtype(cf.cfType));
 				castFn();
 			case FClosure(ct, cf = {cfKind: Method(MethDynamic)}) if (ct != null && !Genjvm.isInterfaceVarAccess(ct.cls, cf)):
-				var c = ct.cls;
+				var c = Genjvm.dynamicFieldOwner(ct.cls, cf);
 				texpr(Genjvm.rvalueAny, e1);
 				jm.getfield(c.clPath, cf.cfName, vtype(cf.cfType));
 				castFn();
@@ -1668,6 +1682,7 @@ class TexprToJvm {
 				jm.cast_(jsigCf);
 				jm.putstatic(c.clPath, cf.cfName, jsigCf);
 			case TField(e1, FInstance(c, tl, cf)) if (!Genjvm.isInterfaceVarAccess(c, cf)):
+				var c = Genjvm.dynamicFieldOwner(c, cf);
 				texpr(Genjvm.rvalueAny, e1);
 				var jsigCf = vtype(cf.cfType);
 				if (ak != AKNone) {
@@ -3258,6 +3273,7 @@ class TclassToJvm {
 		}
 		function ifMethod(f:TClassField->Void, cf:TClassField) {
 			switch cf.cfKind {
+				case Method(MethDynamic):
 				case Method(_):
 					f(cf);
 					for (cf in cf.cfOverloads) f(cf);
@@ -3329,7 +3345,7 @@ class TclassToJvm {
 				load();
 				jmEmptyCtor.callSuperCtor(ConstructInit, jsigEmpty);
 		}
-		if (c.clConstructor == null) {
+		{
 			var handler = new TexprToJvm(gctx, null, jc, jmEmptyCtor, null);
 			for (e in delayedFieldInits) handler.texpr(RVoid, e);
 		}
@@ -3399,7 +3415,6 @@ class TclassToJvm {
 						jm.callSuperCtor(ConstructInit, methodSig([haxeEmptyConstructorSig], null));
 					case SCNone:
 				}
-				for (e in delayedFieldInits) handler.texpr(RVoid, e);
 			case _:
 		}
 		handler.texpr(RReturn, e);
@@ -3455,6 +3470,18 @@ class TclassToJvm {
 		AnnotationHandler.generateAnnotations(jm, cf.cfMeta);
 	}
 
+	function addFieldInit(c:TClass, cf:TClassField, e:TExpr):Void {
+		var tl = extractParamTypes(c.clParams);
+		var ethis = mk(TConst(TThis), TInst(c, tl), nullPos);
+		var efield = mk(TField(ethis, FInstance(c, tl, cf)), cf.cfType, nullPos);
+		var eop = mk(TBinop(OpAssign, efield, e), cf.cfType, nullPos);
+		switch cf.cfKind {
+			/* a dynamic method default goes to <init>, where the most derived class assigns last */
+			case Method(MethDynamic): delayedFieldInits.push(eop);
+			case _: fieldInits.push(eop);
+		}
+	}
+
 	public function generateField(gctx:GenerationContext, jc:JvmClassBuilder, c:TClass, mtype:MethodType, cf:TClassField):Void {
 		var jsig = Genjvm.jsignatureOfType(gctx, cf.cfType);
 		var flags = if (core.Meta.has(MetaTag.Private, cf.cfMeta)) [FdPrivate] else if (core.Meta.has(MetaTag.Protected, cf.cfMeta)) [FdProtected] else [FdPublic];
@@ -3479,19 +3506,7 @@ class TclassToJvm {
 					default_(e);
 				}
 			case e if (mtype != MethodType.MStatic):
-				var tl = extractParamTypes(c.clParams);
-				var ethis = mk(TConst(TThis), TInst(c, tl), nullPos);
-				var efield = mk(TField(ethis, FInstance(c, tl, cf)), cf.cfType, nullPos);
-				var eop = mk(TBinop(OpAssign, efield, e), cf.cfType, nullPos);
-				switch cf.cfKind {
-					case Method(MethDynamic):
-						var enull = TexprBuilder.makeNull(efield.etype, nullPos);
-						var echeck = TexprBuilder.binop(OpEq, efield, enull, gctx.gctx.basic.tbool, nullPos);
-						var eif = mk(TIf(echeck, eop, null), gctx.gctx.basic.tvoid, nullPos);
-						delayedFieldInits.push(eif);
-					case _:
-						fieldInits.push(eop);
-				}
+				addFieldInit(c, cf, e);
 			case e:
 				switch e.eexpr {
 					case TConst(ct):
@@ -3548,7 +3563,10 @@ class TclassToJvm {
 						if (!hasClassFieldFlag(cf, CfExtern) && !(isWeirdAbstractFieldWithoutExpression)) generateMethod(gctx, jc, c, mtype, cf);
 					}
 				case _:
-					if (!hasClassFlag(c, CInterface) && isPhysicalField(cf)) generateField(gctx, jc, c, mtype, cf);
+					/* an overriding dynamic method has no field of its own, only a default value to install */
+					if (!hasClassFlag(c, CInterface) && isPhysicalField(cf)) {
+						if (Genjvm.dynamicFieldOwner(c, cf) == c) generateField(gctx, jc, c, mtype, cf) else if (cf.cfExpr != null) addFieldInit(c, cf, cf.cfExpr);
+					}
 			}
 		}
 		function field(mtype:MethodType, cf:TClassField):Void {
@@ -3610,7 +3628,7 @@ class TclassToJvm {
 		}
 		generateSignature();
 		if (gctx.dynamicLevel > 0 && !core.Meta.has(MetaTag.NativeGen, c.clMeta) && !hasClassFlag(c, CInterface))
-			Genjvm.generateDynamicAccess(gctx, jc, c.clOrderedFields.map(function(cf) return {
+			Genjvm.generateDynamicAccess(gctx, jc, c.clOrderedFields.filter(function(cf) return Genjvm.dynamicFieldOwner(c, cf) == c).map(function(cf) return {
 				name: cf.cfName,
 				jsig: Genjvm.jsignatureOfType(gctx, cf.cfType),
 				kind: cf.cfKind

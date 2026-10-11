@@ -92,6 +92,9 @@ class Genneko {
 		return if (l == 0 || dir.charAt(l - 1) == "/") dir + file else dir + "/" + file;
 	}
 
+	// port: OCaml's Filename.quote (Unix flavour, like the other Filename helpers here).
+	static function filenameQuote(s:String):String return "'" + s.split("'").join("'\\''") + "'";
+
 	static function filenameChopExtension(name:String):String {
 		function isDirSep(i:Int) return name.charAt(i) == "/";
 		function check(i0:Int, i:Int):Int {
@@ -974,10 +977,10 @@ class Genneko {
 			ch.close();
 		}
 		if (useNekoc
-			&& command("nekoc", (if (ctx.version > 1) ["-version", Std.string(ctx.version), nekoFile] else [nekoFile])) != 0)
+			&& command("nekoc", (if (ctx.version > 1) ["-version", Std.string(ctx.version), filenameQuote(nekoFile)] else [filenameQuote(nekoFile)])) != 0)
 			throw new core.ds.Failure("Neko compilation failure");
 		if (source) {
-			if (command("nekoc", ["-p", nekoFile]) != 0) throw new core.ds.Failure("Failed to print neko code");
+			if (command("nekoc", ["-p", filenameQuote(nekoFile)]) != 0) throw new core.ds.Failure("Failed to print neko code");
 			sys.FileSystem.deleteFile(nekoFile);
 			sys.FileSystem.rename((try filenameChopExtension(com.file) catch (_:Dynamic) com.file) + "2.neko", nekoFile);
 		}
