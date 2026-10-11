@@ -84,6 +84,78 @@ class DisplayHandler {
 	}
 }
 
+class HxbReaderApiCom implements compiler.hxb.HxbReaderApi {
+	final typingMode:compiler.hxb.HxbData.TypingMode;
+	final com:CommonContext;
+	final cc:ContextCache;
+
+	public function new(typingMode:compiler.hxb.HxbData.TypingMode, com:CommonContext, cc:ContextCache) {
+		this.typingMode = typingMode;
+		this.com = com;
+		this.cc = cc;
+	}
+
+	public function makeModule(path:GlobalTypePath, file:String):ModuleDef {
+		var mc = cc.getHxbModule(path);
+		/* Creating a new m_extra because if we keep the same reference, display requests */
+		/* can alter it with bad data (for example adding dependencies that are not cached) */
+		var mExtra = mc.mcExtra.clone();
+		mExtra.mDeps = mc.mcExtra.mDeps.copy(); // port: m_deps is a persistent map upstream
+		mExtra.mDisplayDeps = null;
+		return {
+			mId: mc.mcId,
+			mPath: path,
+			mTypes: [],
+			mStatics: null,
+			mExtra: mExtra
+		};
+	}
+
+	public function addModule(m:ModuleDef):Void {
+		com.moduleLut.add(m.mPath, m);
+	}
+
+	public function resolveType(pack:Array<String>, mname:String, tname:String, _:compiler.hxb.HxbData.TypingMode):ModuleType {
+		var path:GlobalTypePath = {pack: pack, name: mname};
+		var m = findModule(path);
+		for (t in m.mTypes) if (tPath(t).name == tname) return t;
+		throw core.ds.NotFound.raise();
+	}
+
+	public function resolveModule(path:GlobalTypePath, _:compiler.hxb.HxbData.TypingMode):ModuleDef {
+		return findModule(path);
+	}
+
+	public function findModule(mPath:GlobalTypePath):ModuleDef {
+		try {
+			return com.moduleLut.find(mPath);
+		} catch (_:core.ds.NotFound) {
+			var m = cc.findModuleOpt(mPath);
+			if (m != null) return m;
+			var mc = cc.getHxbModule(mPath);
+			var reader = new compiler.hxb.HxbReader(mc.mcPath, com.hxbReaderStats,
+				if (Common.defined(com, core.Define.HxbTimes)) com.timerCtx else null);
+			return reader.readChunksUntil(this, mc.mcChunks, if (typingMode == FullTyping) EOM else MTF, typingMode).m;
+		}
+	}
+
+	public function basicTypes():BasicTypes {
+		return com.basic;
+	}
+
+	public function getVarId(i:Int):Int {
+		return i;
+	}
+
+	public function readExpressionEagerly(cf:TClassField):Bool {
+		return false;
+	}
+
+	public function makeLazyType(t:T, f:Void->T):T {
+		return TLazy(Common.makeUnforcedLazy(t, f, "com-api"));
+	}
+}
+
 @:structInit class HandlerContext {
 	public var com:CommonContext;
 	public var jsonrpc:JsonrpcHandler;
@@ -166,27 +238,12 @@ class DisplayJson {
 
 	public static function sendJsonRaise<R>(io:CompilerIoData, json:JsonValue):R return sendStringRaise(io, Json.stringOfJson(json));
 
-	public static function findModule(com:CommonContext, cc:ContextCache, path:GlobalTypePath):ModuleDef {
-		// port: hxb_reader_api_com#find_module
-		try {
-			return com.moduleLut.find(path);
-		} catch (_:core.ds.NotFound) {
-			var m = cc.findModuleOpt(path);
-			if (m != null) return m;
-			// port: throws Not_found when the module is not in the binary cache either.
-			cc.getHxbModule(path);
-			throw new core.ds.Failure("Reading modules from the HXB cache requires HXB input, which is not supported by haxe-in-haxe");
-		}
+	public static function findModule(typingMode:compiler.hxb.HxbData.TypingMode, com:CommonContext, cc:ContextCache,
+			path:GlobalTypePath):ModuleDef {
+		return new HxbReaderApiCom(typingMode, com, cc).findModule(path);
 	}
 
 	public static function apiError<R>(j:JsonValue):R throw new ApiError(j);
-
-	// port: server/configure print settings (ServerMessage.set_by_name); nothing assigns this hook,
-	// so the request fails.
-	public static var serverMessageSetByName:(String,
-		Bool) -> Void = function(name,
-				value)
-			throw new core.ds.Failure("server/configure print settings require the compilation server, which is not part of this build");
 
 	public static final handler:OcamlHashtbl<String, HandlerContext->ApiResponse> = makeHandler();
 
@@ -512,10 +569,10 @@ class DisplayJson {
 					var path = core.Ast.Ast.parsePath(hctx.jsonrpc.getStringParam("path"));
 					var cs = hctx.display.getCs();
 					var cc = cs.getContext(sign);
+					var typingMode:compiler.hxb.HxbData.TypingMode = if (core.Define.defined(hctx.com.defines, core.Define.DisableHxbOptimizations)) FullTyping else AllowPartialTyping;
 					try {
-						var m = findModule(hctx.com, cc, path);
-						// port: TODO Genjson.generate_module (over the server's HXB module cache) is not translated
-						throw new core.ds.Failure("server/module requires the server's HXB module cache, which is not supported by haxe-in-haxe");
+						var m = findModule(typingMode, hctx.com, cc, path);
+						return Result(Genjson.generateModule(cc.getHxb(), findModule.bind(typingMode, hctx.com, cc), m));
 					} catch (_:core.ds.NotFound) {
 						return Error(jstring("No such module"));
 					}
@@ -529,7 +586,7 @@ class DisplayJson {
 					var typeName = hctx.jsonrpc.getStringParam("typeName");
 					var cc = hctx.display.getCs().getContext(sign);
 					try {
-						var m = findModule(hctx.com, cc, path);
+						var m = findModule(FullTyping, hctx.com, cc, path);
 						for (mt in m.mTypes) {
 							switch mt {
 								case TClassDecl(c):
@@ -622,7 +679,7 @@ class DisplayJson {
 						var name = f.name;
 						var value = hctx.jsonrpc.getBool("value", f.value);
 						try {
-							serverMessageSetByName(name, value);
+							compiler.server.ServerMessage.setByName(name, value);
 							return jstring('Printing $name ' + (value ? "enabled" : "disabled"));
 						} catch (_:core.ds.NotFound) {
 							return apiError(jstring("Invalid print parame name: " + name));

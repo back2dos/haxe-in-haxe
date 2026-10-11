@@ -26,9 +26,14 @@ reference (results in `test/TESTING.md`):
   `displayOutput.ml`, `displayProcessing.ml`, `completionItem.ml`,
   `genjson.ml`, `jsonRpc.ml`, `jsonrpc_handler.ml`.
 
-Not ported: the Eval debugger (`evalDebug*.ml`), `jsonRpcSocket.ml`, object
-sizes for `server/memory` (`Memory.memSize`), `server/module` (it needs
-`Genjson.generate_module` over the HXB module cache), the SWF native-library
+Status 2026-10-11: the Eval debugger (`evalDebug*.ml`, `-D
+eval-debugger=host:port`), `jsonRpcSocket.ml`, `server/module`
+(`Genjson.generate_module` and `hxb_reader_api_com` over the HXB module cache)
+and `server/memory` are translated. Object sizes (OCaml's `Objsize`) are what
+the host measures: the hxc build walks its own heap (`hxc_NativeGc_objsize`),
+other hosts report 0 (see `src/context/Memory.hx`).
+
+Not ported: the SWF native-library
 handler (`--swf-lib`) and the HL bytecode interpreter. Every target generator
 is translated (see "Target generator coverage"). `EvalLock.hx` (OCaml's
 runtime lock for Eval threads) has no upstream module.
@@ -232,7 +237,7 @@ conformance, or completion of the pre-existing HXB writer. The subsequent runtim
 | `core/native.ml` | `src/core/Native.hx` | Draft translated |
 | `core/numeric.ml` | `src/core/Numeric.hx` | Existing, unaudited |
 | `core/path.ml` | `src/core/Path.hx` | Existing, unaudited |
-| `core/socket.ml` | `src/core/Socket.hx` | Existing, unaudited |
+| `core/socket.ml` | `src/core/Socket.hx` | Audited with the Eval debugger; reads whole frames where `recv` may return fewer bytes |
 | `core/stringError.ml` | `src/core/StringError.hx` | Existing, unaudited |
 | `core/stringHelper.ml` | `src/core/StringHelper.hx` | Existing, unaudited |
 | `core/tFunctions.ml` | `src/core/TFunctions.hx` | Draft translated |
@@ -359,8 +364,8 @@ conformance, or completion of the pre-existing HXB writer. The subsequent runtim
 | `context/display/displayEmitter.ml` | `src/context/display/DisplayEmitter.hx` | Display services |
 | `context/display/displayException.ml` | `src/context/display/DisplayException.hx` | Display services |
 | `context/display/displayFields.ml` | `src/context/display/DisplayFields.hx` | Display services |
-| `context/display/displayJson.ml` | `src/context/display/DisplayJson.hx` | Display services; `server/module` fails explicitly (needs `Genjson.generate_module` over the HXB module cache); `server/*` methods through a server have no harness yet |
-| `context/display/displayMemory.ml` | `src/context/display/DisplayMemory.hx` | Display services; memory sizes need `Memory.memSize` (no OCaml Obj reflection) |
+| `context/display/displayJson.ml` | `src/context/display/DisplayJson.hx` | Display services, `server/*` methods (`test/server-jsonrpc.py`) |
+| `context/display/displayMemory.ml` | `src/context/display/DisplayMemory.hx` | Translated; sizes as the host measures them (see `Memory.hx`) |
 | `context/display/displayPath.ml` | `src/context/display/DisplayPath.hx` | Display services |
 | `context/display/displayTexpr.ml` | `src/context/display/DisplayTexpr.hx` | Display services |
 | `context/display/displayToplevel.ml` | `src/context/display/DisplayToplevel.hx` | Display services |
@@ -369,10 +374,11 @@ conformance, or completion of the pre-existing HXB writer. The subsequent runtim
 | `context/display/findReferences.ml` | `src/context/display/FindReferences.hx` | Display services |
 | `context/display/statistics.ml` | `src/context/display/Statistics.hx` | Display services |
 | `context/display/syntaxExplorer.ml` | `src/context/display/SyntaxExplorer.hx` | Display services |
-| `context/memory.ml` | `src/context/Memory.hx` | Request types; object sizes are unavailable on the host runtimes |
+| `context/memory.ml` | `src/context/Memory.hx` | Translated; `Objsize` is the host's heap walk (hxc), 0 elsewhere |
 | `core/display/completionItem.ml` | `src/core/display/CompletionItem.hx` | Display services |
 | `core/json/genjson.ml` | `src/core/json/Genjson.hx` | Display serialization |
 | `core/json/jsonRpc.ml` | `src/core/json/JsonRpc.hx` | JSON-RPC protocol |
+| `core/json/jsonRpcSocket.ml` | `src/core/json/JsonRpcSocket.hx` | Eval debugger transport |
 | `core/json/jsonrpc_handler.ml` | `src/core/json/JsonrpcHandler.hx` | JSON-RPC handler |
 | `typing/typerDisplay.ml` | `src/typing/TyperDisplay.hx` | Display services |
 
@@ -428,9 +434,9 @@ fail with "... is not supported by haxe-in-haxe".
 | `macro/eval/evalBytes.ml` | `src/macros/eval/EvalBytesUnicase.hx`; byte access in `EvalStdLibA.hx` | Translated |
 | `macro/eval/evalContext.ml` | `src/macros/eval/EvalContext.hx` | Translated |
 | `macro/eval/evalDataApi.ml` | `src/macros/eval/EvalDataApi.hx` | Translated |
-| `macro/eval/evalDebug.ml` | – | Not ported (Eval debugger; fails explicitly) |
-| `macro/eval/evalDebugMisc.ml` | – | Not ported (Eval debugger) |
-| `macro/eval/evalDebugSocket.ml` | – | Not ported (Eval debugger) |
+| `macro/eval/evalDebug.ml` | `src/macros/eval/EvalDebug.hx` | Translated (`test/eval-debugger.py`) |
+| `macro/eval/evalDebugMisc.ml` | `src/macros/eval/EvalDebugMisc.hx` | Translated |
+| `macro/eval/evalDebugSocket.ml` | `src/macros/eval/EvalDebugSocket.hx` | Translated; `getCompletion` kills the debugger thread as upstream's does |
 | `macro/eval/evalDecode.ml` | `src/macros/eval/EvalDecode.hx` | Translated |
 | `macro/eval/evalEmitter.ml` | `src/macros/eval/EvalEmitter.hx` | Translated |
 | `macro/eval/evalEncode.ml` | `src/macros/eval/EvalEncode.hx` | Translated |
@@ -466,7 +472,6 @@ A scope-review entry is not a blanket exclusion of shared batch-compiler helpers
 | `codegen/jClass.ml` | Other target/library support |
 | `codegen/swfLoader.ml` | Other target/library support |
 | `context/nativeLibraryHandler.ml` | SWF library handler (`SwfLoader`); the HXB and Java (`JavaModern`) branches are translated |
-| `core/json/jsonRpcSocket.ml` | Display/server JSON-RPC transport |
 | `generators/genhxold.ml` | `-xml *.hx` extern output (auxiliary, with genxml) |
 | `lazy.ml` | OCaml build/runtime adapter; no mechanical compiler-module port |
 | `prebuild.ml` | OCaml build/runtime adapter; no mechanical compiler-module port |
@@ -483,9 +488,6 @@ A scope-review entry is not a blanket exclusion of shared batch-compiler helpers
 Every upstream module now has a counterpart or a recorded reason. What
 remains open:
 
-- the Eval debugger, `server/module`, `server/memory` object sizes and
-  `jsonRpcSocket.ml`;
-- a harness for the `server/*` JSON-RPC methods through a running server;
 - an audit of the 33 counterparts that predate the translation snapshot
   ("Existing, unaudited" above): they pass the conformance suites, but were not
   checked line by line against upstream.

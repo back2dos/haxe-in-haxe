@@ -37,6 +37,64 @@ Not covered: `server/*` JSON-RPC methods through a server, the Eval debugger,
 memory statistics, running the output of non-HXB targets (their generated
 output is compared with the fuzzer's `diff:<target>` lanes, below).
 
+## Eval debugger, `server/*` JSON-RPC methods and memory — 2026-10-11
+
+The Eval debugger (`evalDebug*.ml`, `jsonRpcSocket.ml`; `-D
+eval-debugger=host:port`, the protocol of the vshaxe eval debug adapter),
+`server/module` (`Genjson.generate_module` over the HXB module cache) and
+`server/memory*` are translated. Two harnesses compare the reference and the
+hxc build of the port:
+
+```sh
+HAXE_REFERENCE=haxe/haxe HAXE_IN_HAXE_PORT=bin/port/hih python3 test/eval-debugger.py [--keep] [--show reference|port] [scenario ...]
+HAXE_REFERENCE=haxe/haxe HAXE_IN_HAXE_PORT=bin/port/hih python3 test/server-jsonrpc.py [--keep]
+```
+
+`test/eval-debugger.py` plays the debug adapter: it listens, lets each
+compiler connect, drives the same scripted session over
+`test/eval-debugger/` (line, column, conditional and function breakpoints,
+`next`/`stepIn`/`stepOut`/`pause`/`continue`, `stackTrace`, `getThreads`,
+`getScopes`, `getVariables` with children, `evaluate` (expressions, calls,
+`var`, assignment, `new`, parse errors), `setVariable` on locals, array
+elements and fields, exception options and exception stops, bad frame and
+scope ids, unknown methods, a breakpoint inside a macro function), and
+compares every message sent by the compiler (responses, then events) with the
+program's stdout, stderr and exit code. Normalized: the `index<i>`/`offset<i>`
+children of strings (OCaml's code point offset cache, runtime state the port's
+strings do not have), the host's thread number in "Thread N killed on
+uncaught exception", and the response to the request after which the program
+ran to its end (a race with the process exit). Stepping sends no event, so the
+harness waits a second after a step. `getCompletion` is not exercised: the
+upstream handler reads the eval of the socket thread, which has none, so the
+request kills the debugger thread in both compilers (the reference then hangs,
+the green-thread port reports a deadlock and exits).
+
+`test/server-jsonrpc.py` starts a server (`--wait`) per compiler, compiles
+`test/server-jsonrpc/` (with a macro) through `--connect`, and sends 107
+display JSON-RPC requests: `initialize`, `server/readClassPaths`,
+`server/contexts`, and per context `server/modules`, `server/files`,
+`server/module` (6 paths, one missing), `server/type` (7, two missing),
+`server/memory/context`, `server/memory/module`; then `server/typeContexts`,
+`server/memory`, `server/configure` (valid and invalid settings),
+`server/moduleCreated`, `server/invalidate`, a recompilation, the modules again
+(restored from the cache), `typer/compiledTypes` and an unknown method; once
+with the default HXB module cache and once with `-D disable-hxb-cache`.
+Normalized: `timestamp`, and in `server/memory*` every size and cache total,
+the order of the size-sorted lists and `leaks` (object sizes and reachability
+are runtime-specific). The sizes the port reports come from its own heap
+(`hxc_NativeGc_objsize` in hxc/rt/rt.c walks the reachable heap objects,
+headers included; other hosts report 0): they are close to the reference's
+(e.g. a syntax cache of 1.72 MB vs 1.69 MB).
+
+| Check (hxc build, tcc) | Result |
+| --- | --- |
+| `test/eval-debugger.py` (breakpoints, set-variable, exceptions, function-breakpoints, errors, macro) | 6/6 sessions identical |
+| `test/server-jsonrpc.py`, HXB module cache | 107/107 |
+| `test/server-jsonrpc.py`, `-D disable-hxb-cache` | 107/107 |
+| Conformance (`conformance-cases.txt`) | 279 PASS + 7 expected failures |
+| Macro cases | 66/66 |
+| `test/server.py -j 2` | 595/595 |
+
 ## Target generators — 2026-10-11
 
 All nine target generators of `haxe/src/generators/` are translated (see

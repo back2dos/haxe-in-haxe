@@ -1173,3 +1173,100 @@ int32_t hx_apush_slow(void **slot, int32_t vk, uint64_t v) {
 void hxc_NativeGc_finalise(void *fn, void *val) { rt_gc_finalise(fn, val); }
 void hxc_NativeGc_collect(int32_t full) { rt_gc_collect(full); }
 void hxc_NativeGc_runFinalisers(void) { rt_gc_run_finalisers(1); }
+
+// ---- object sizes (the port's server/memory, in place of OCaml's Objsize):
+// the bytes of the heap objects reachable from v, headers included, without
+// entering the objects of the array `exclude`; reaching an object of the array
+// `out` sets the flag hxc_NativeGc_reached returns (and is not entered either).
+// Objects outside the heap (static data) are neither counted nor entered.
+static int objsize_reached;
+
+typedef struct {
+	void **keys;
+	size_t cap, len;
+} ptrset;
+
+static size_t ptrset_slot(ptrset *s, void *p) {
+	size_t h = ((uintptr_t)p >> 3) * 0x9E3779B97F4A7C15ull;
+	size_t i = h & (s->cap - 1);
+	while (s->keys[i] && s->keys[i] != p) i = (i + 1) & (s->cap - 1);
+	return i;
+}
+
+// adds p; returns 0 if it was there already
+static int ptrset_add(ptrset *s, void *p) {
+	if (2 * (s->len + 1) > s->cap) {
+		ptrset n = {(void **)calloc(s->cap * 2, sizeof(void *)), s->cap * 2, 0};
+		for (size_t i = 0; i < s->cap; i++)
+			if (s->keys[i]) {
+				n.keys[ptrset_slot(&n, s->keys[i])] = s->keys[i];
+				n.len++;
+			}
+		free(s->keys);
+		*s = n;
+	}
+	size_t i = ptrset_slot(s, p);
+	if (s->keys[i]) return 0;
+	s->keys[i] = p;
+	s->len++;
+	return 1;
+}
+
+static int ptrset_has(ptrset *s, void *p) { return s->keys[ptrset_slot(s, p)] != NULL; }
+
+static int in_heap(void *p) {
+	return p && (in_young(p) || ((char *)p >= old_start && (char *)p < old_ptr));
+}
+
+static void ptrset_add_array(ptrset *s, void *a) {
+	if (!a || ARR_KIND(a) != AK_PTR || !ARR_DATA(a)) return;
+	for (int32_t i = 0; i < ARR_LEN(a); i++)
+		if (FP(ARR_DATA(a), i)) ptrset_add(s, FP(ARR_DATA(a), i));
+}
+
+double hxc_NativeGc_objsize(void *v, void *exclude, void *out) {
+	ptrset seen = {(void **)calloc(1024, sizeof(void *)), 1024, 0};
+	ptrset ex = {(void **)calloc(64, sizeof(void *)), 64, 0};
+	ptrset outs = {(void **)calloc(64, sizeof(void *)), 64, 0};
+	ptrset_add_array(&ex, exclude);
+	ptrset_add_array(&outs, out);
+	size_t sp = 0, cap = 1024;
+	void **stack = (void **)malloc(cap * sizeof(void *));
+	double bytes = 0;
+	objsize_reached = 0;
+	if (in_heap(v)) stack[sp++] = v;
+	while (sp) {
+		void *o = stack[--sp];
+		if (ptrset_has(&ex, o)) continue;
+		if (ptrset_has(&outs, o)) {
+			objsize_reached = 1;
+			continue;
+		}
+		if (!ptrset_add(&seen, o)) continue;
+		bytes += obj_bytes(o);
+		uint32_t n = NSLOTS(o);
+		const uint64_t *pm = KIND(o) == K_OBJ ? rt_types[TINDEX(o)].ptrmap : NULL;
+		for (uint32_t i = 0; i < n; i++) {
+			if (KIND(o) == K_OBJ) {
+				if (!pm || !((pm[i / 64] >> (i % 64)) & 1)) continue;
+			} else if (KIND(o) != K_PARR)
+				break;
+			void *c = FP(o, i);
+			if (!in_heap(c)) continue;
+			if (sp == cap) stack = (void **)realloc(stack, (cap *= 2) * sizeof(void *));
+			stack[sp++] = c;
+		}
+	}
+	free(stack);
+	free(seen.keys);
+	free(ex.keys);
+	free(outs.keys);
+	return bytes;
+}
+
+int32_t hxc_NativeGc_reached(void) { return objsize_reached; }
+
+// the bytes the heap spaces take (in place of OCaml's Gc heap words)
+double hxc_NativeGc_heapBytes(void) {
+	return (double)(old_end - old_start) + (double)(rt_young_end - rt_young_start);
+}
