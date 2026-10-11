@@ -425,10 +425,11 @@ class Lexer {
 	var source:String;
 	var file:String;
 	var index:Int;
-	// port: identifiers are interned per file (a memory-only deviation),
-	// so the AST holds one string per name instead of one per occurrence. The
-	// identity of identifier strings is never observed (only position file
-	// names are compared physically, core.ds.StrTools.physNeq).
+	// port: on the hosts without string identity (core.ds.StrTools.hasIdentity),
+	// identifiers are interned per file (a memory-only deviation there), so the
+	// AST holds one string per name instead of one per occurrence. Where strings
+	// have an identity, every occurrence is a fresh string as in upstream: Hl2c
+	// observes it (the Marshal sharing of virtual field names in make_sign).
 	var idents:Map<String, String>;
 
 	// port: UTF-16 indices of the surrogate pairs of `source` (null without any): sedlex
@@ -463,6 +464,7 @@ class Lexer {
 	}
 
 	function ident(s:String):String {
+		if (core.ds.StrTools.hasIdentity) return s;
 		var r = idents.get(s);
 		if (r != null) return r;
 		idents.set(s, s);
