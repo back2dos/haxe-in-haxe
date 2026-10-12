@@ -132,9 +132,22 @@ class Scope {
             installed++;
         }
 
-      Exec.shellAll(install, Sys.getCwd(), jobs(), (index, o) -> {
-        logger.progress('[${++cur}/${total}] ${install[index]}');
+      // one status line for the installs in parallel: done, running and which
+      var running = [];
+      function status()
+        logger.progress('[$cur/$total] ' + switch running.length {
+          case 0: '';
+          case n: '$n running: ' + [for (i in running) libName(install[i])].join(', ');
+        });
+
+      Exec.shellAll(install, Sys.getCwd(), jobs(), index -> {
+        running.push(index);
+        status();
+      }, (index, o) -> {
+        running.remove(index);
+        cur++;
         report(install[index], o);
+        status();
       });
 
       for (cmd in i.instructions.postInstall) {
@@ -151,6 +164,16 @@ class Scope {
       else if (total > 0)
         logger.success('Installed $total $libs.');
     });
+  }
+
+  // the library an install command (`lix download <url> into <lib>/...`) installs, for progress
+  static function libName(cmd:String):String {
+    var words = Exec.posixWords(cmd);
+    return switch words?.indexOf('into') {
+      case null | -1: cmd;
+      case i if (i + 1 < words.length): words[i + 1].split('/')[0];
+      default: cmd;
+    }
   }
 
   /**

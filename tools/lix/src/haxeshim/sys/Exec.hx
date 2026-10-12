@@ -208,10 +208,11 @@ class Exec {
 
   /**
     Runs the shell commands `cmds`, at most `jobs` at a time (with the terminal,
-    as `shell` does), on a loop of their own; `done` gets each command's index
-    and outcome as it ends. Returns when all have ended.
+    as `shell` does), on a loop of their own; `started` gets each command's index
+    as it starts, `done` its index and outcome as it ends. Returns when all have
+    ended.
   **/
-  static public function shellAll(cmds:Array<String>, cwd:String, jobs:Int, ?env:Env, done:(index:Int, outcome:Outcome<Int, Error>) -> Void) {
+  static public function shellAll(cmds:Array<String>, cwd:String, jobs:Int, ?env:Env, ?started:(index:Int) -> Void, done:(index:Int, outcome:Outcome<Int, Error>) -> Void) {
     var loop = Loop.create(),
         next = 0,
         running = 0;
@@ -231,6 +232,7 @@ class Exec {
             start();
           });
           running++;
+          if (started != null) started(index);
         }
         catch (e:UvError)
           done(index, Failure(new Error('Failed to invoke `$cmd` because ${spawnError(sh.cmd, e)}')));
