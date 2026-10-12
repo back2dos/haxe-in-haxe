@@ -61,10 +61,20 @@ https://github.com/benmerckx/haxe-in-haxe/actions/runs/38284581526:
    is named after an MD5 of an OCaml `Marshal` with closures (hl2c.ml
    `make_sign`), which contains a code pointer of the reference binary
    itself, so no port can reproduce the name (see "Known differences").
-2. The first run (https://github.com/benmerckx/haxe-in-haxe/actions/runs/38279061784)
-   had a segmentation fault of the Linux arm64 binary compiling
-   `tests/unit/compile-neko.hxml` and `tests/sys/compile-lua.hxml`; neither
-   came back in the second run. Not reproduced yet (no arm64 host here).
+2. Runs before the race fixes below crashed now and then (segmentation
+   faults compiling `tests/unit` or `tests/sys`, x86_64 and arm64: e.g. lua
+   and neko arm64 in https://github.com/benmerckx/haxe-in-haxe/actions/runs/38279061784,
+   js x86_64 and lua arm64 in https://github.com/benmerckx/haxe-in-haxe/actions/runs/38288063131).
+
+Upstream's tests compile without `-D disable-parallelism`, unlike the local
+harnesses, so the release binary runs its parallel passes on OS threads.
+A local stress loop of the failing compiles with the release binary crashed
+about once per 170 compiles; the core dumps showed two writes that upstream
+makes from several domains without a lock (OCaml stays memory safe, hxc's
+maps and arrays do not): DCE's `__define_feature__` into a module's feature
+table, and `s_mono` growing a print context shared by Dump's parallel
+workers. Both now take a lock; 480 + 640 stress compiles ran clean after.
+(ThreadSanitizer builds of the port hang: the GC's signals.)
 
 The first run also found three port bugs, fixed since: project-wide
 diagnostics after `server/setCwd` ("Display file does not exist": the display
