@@ -376,6 +376,11 @@ double hxc_NativeSys_time(void) {
 double hxc_NativeSys_cpuTime(void) { return (double)clock() / CLOCKS_PER_SEC; }
 
 void *hxc_NativeSys_programPath(void) {
+#ifdef __COSMOPOLITAN__
+	// an APE binary may run through the APE loader, which /proc/self/exe names
+	const char *ape = GetProgramExecutableName();
+	if (ape && *ape) return str_of_c(ape);
+#endif
 	char buf[PATH_MAX + 1];
 	ssize_t n = readlink("/proc/self/exe", buf, PATH_MAX);
 	if (n > 0) {

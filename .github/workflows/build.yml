@@ -385,16 +385,18 @@ jobs:
           if [ "$RUNNER_OS" = Windows ]; then L=lix/lix.exe; mv lix/lix.com "$L"; else L=lix/lix.com; chmod +x "$L"; fi
           L="$PWD/$L"
           "$L" --version
-          # the haxe shim: the same binary under that name
+          # the haxe shim: the same binary under that name (lix shims: links next to it)
+          "$L" shims
+          ls -l lix
           if [ "$RUNNER_OS" = Windows ]; then H=lix/haxe.exe; else H=lix/haxe; fi
-          cp "$L" "$H"; H="$PWD/$H"
+          H="$PWD/$H"
           export HAXESHIM_ROOT="$RUNNER_TEMP/lix-root"
           mkdir -p "$RUNNER_TEMP/lix-project/src" && cd "$RUNNER_TEMP/lix-project"
           "$L" scope create
           "$L" download
           "$L" install haxelib:tink_core
           cat haxe_libraries/tink_core.hxml .haxerc
-          echo 'class Main { static function main() trace(tink.core.Outcome.Success(Sys.args())); }' > src/Main.hx
+          echo 'class Main { static function main() trace(tink.core.Outcome.Success(#if sys Sys.args() #else "js" #end)); }' > src/Main.hx
           "$H" -version
           "$H" --run resolve-args -lib tink_core
           "$H" -cp src -lib tink_core --run Main a b

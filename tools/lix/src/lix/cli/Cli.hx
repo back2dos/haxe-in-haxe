@@ -206,6 +206,11 @@ class Cli {
           Sys.println(version);
         }
       ),
+      new Command('shims', '[<dir>]', 'creates haxe, haxelib and neko commands next to\nthis binary (or in <dir>) that run as lix does', args -> switch args {
+        case []: shims(null, force, logger);
+        case [dir]: shims(dir, force, logger);
+        default: throw new Error('too many arguments');
+      }),
       new Command('run-haxelib', 'path ...args', 'invoke a haxelib at a given path following haxelib\'s conventions', function (args)
         switch args {
           case []: throw new Error('no path supplied');
@@ -364,6 +369,37 @@ class Cli {
       }
 
     throw new Error(NotFound, 'Class not found: $cls');
+  }
+
+  // port: not in the npm package, whose four commands npm installs. One binary
+  // is all four, by the name it runs as (Main.hx): links to it make the others,
+  // symbolic links where they are cheap, hard links (or copies) on Windows,
+  // where symbolic links need administrator rights.
+  static function shims(dir:Null<String>, force:Bool, logger:Logger) {
+    var self = Sys.programPath();
+    if (dir == null)
+      dir = self.directory();
+    var ext = if (Os.IS_WINDOWS) '.exe' else '';
+    var paths = [for (cmd in ['haxe', 'haxelib', 'neko']) Path.join([dir, cmd + ext])];
+    paths = [for (p in paths) if (Path.normalize(p) != Path.normalize(self)) p];
+    // every name is checked before any is replaced
+    for (path in paths)
+      if (uv.Uv.Fs.isSymlink(path) || path.exists()) {
+        if (path.isDirectory() && !uv.Uv.Fs.isSymlink(path))
+          throw new Error('$path is a directory');
+        if (!force)
+          throw new Error('$path already exists. Use --force to replace it.');
+      }
+    for (path in paths) {
+      if (uv.Uv.Fs.isSymlink(path) || path.exists())
+        path.deleteFile();
+      if (Os.IS_WINDOWS)
+        try uv.Uv.Fs.link(self, path)
+        catch (e:uv.Uv.UvError) sys.io.File.copy(self, path);
+      else
+        uv.Uv.Fs.symlink(if (dir.normalize() == self.directory().normalize()) self.withoutDirectory() else self, path);
+      logger.success('created $path');
+    }
   }
 
   static function isClassName(s:String) {

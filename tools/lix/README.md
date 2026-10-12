@@ -78,6 +78,11 @@ where it deviates. In general:
   directly (others through cmd.exe). The root is `%APPDATA%\haxe`, as with the
   npm package. CI runs `scope create`, `download`, an install and a compile on
   Windows and macOS.
+- `lix shims [<dir>]` (not in the npm package, where npm installs the four
+  commands) creates `haxe`, `haxelib` and `neko` next to the binary (or in
+  `<dir>`): symbolic links, or on Windows hard links (copies when that fails),
+  as `.exe`. Existing files are replaced only with `--force`, directories never.
+  For `lix.com` downloaded from the website, that is the whole installation.
 - `haxe --run install-libs` (and so `lix download`) names each command that
   failed and why, where upstream reports only how many failed.
 

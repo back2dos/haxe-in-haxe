@@ -69,7 +69,8 @@ run_case() {
 				echo "[exit $?]"
 			) >> "$W/log"
 		done
-		sed "s#$W#<ROOT>#g" "$W/log" > "$W/log.norm"
+		# the port's own command (lix shims) is not in the reference's help
+		sed -e "s#$W#<ROOT>#g" -e '/^ *shims \[<dir>\] : /d' -e '/^ *this binary (or in <dir>) that run as lix does$/d' "$W/log" > "$W/log.norm"
 		snapshot "$W" > "$W/files"
 	done
 	if cmp -s "$OUT/$name/ref/log.norm" "$OUT/$name/port/log.norm" && cmp -s "$OUT/$name/ref/files" "$OUT/$name/port/files"; then

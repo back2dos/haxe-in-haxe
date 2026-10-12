@@ -432,6 +432,7 @@ class Process extends Handle {
 class Fs {
 	// rt_uv.c's FS_* operations
 	static inline var CHMOD = 24;
+	static inline var LINK = 29;
 	static inline var SYMLINK = 30;
 	static inline var READLINK = 31;
 
@@ -445,6 +446,10 @@ class Fs {
 
 	static public function chmod(path:String, mode:Int)
 		UvError.check(sync(CHMOD, path, null, mode), 'chmod $path');
+
+	/** Creates a hard link at `path` to the file `target`. **/
+	static public function link(target:String, path:String)
+		UvError.check(sync(LINK, target, path), 'link $path');
 
 	/** Creates a symbolic link at `path` pointing to `target`. **/
 	static public function symlink(target:String, path:String)
