@@ -80,7 +80,7 @@ where it deviates. In general:
   Windows and macOS.
 - `lix shims [<dir>]` (not in the npm package, where npm installs the four
   commands) creates `haxe`, `haxelib` and `neko` next to the binary (or in
-  `<dir>`): symbolic links, or on Windows hard links (copies when that fails),
+  `<dir>`), and `lix` when the binary has another name (`lix.com`): symbolic links, or on Windows hard links (copies when that fails),
   as `.exe`. Existing files are replaced only with `--force`, directories never.
   For `lix.com` downloaded from the website, that is the whole installation.
 - `lix download` (`haxe --run install-libs`) runs the libraries' install

@@ -388,6 +388,8 @@ jobs:
           # the haxe shim: the same binary under that name (lix shims: links next to it)
           "$L" shims
           ls -l lix
+          # installed as on a user's machine: the commands on PATH (the libraries' install commands call lix)
+          export PATH="$PWD/lix:$PATH"
           if [ "$RUNNER_OS" = Windows ]; then H=lix/haxe.exe; else H=lix/haxe; fi
           H="$PWD/$H"
           export HAXESHIM_ROOT="$RUNNER_TEMP/lix-root"

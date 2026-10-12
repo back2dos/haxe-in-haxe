@@ -380,7 +380,12 @@ class Cli {
     if (dir == null)
       dir = self.directory();
     var ext = if (Os.IS_WINDOWS) '.exe' else '';
-    var paths = [for (cmd in ['haxe', 'haxelib', 'neko']) Path.join([dir, cmd + ext])];
+    // `lix` too, when this binary has another name (lix.com): the libraries' install
+    // commands call lix by that name (on Windows lix.com is found as lix anyway)
+    var cmds = ['haxe', 'haxelib', 'neko'];
+    if (!Os.IS_WINDOWS && self.withoutDirectory() != 'lix')
+      cmds.unshift('lix');
+    var paths = [for (cmd in cmds) Path.join([dir, cmd + ext])];
     paths = [for (p in paths) if (Path.normalize(p) != Path.normalize(self)) p];
     // every name is checked before any is replaced
     for (path in paths)
