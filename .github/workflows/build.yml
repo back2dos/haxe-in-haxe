@@ -396,9 +396,14 @@ jobs:
           "$L" download
           "$L" install haxelib:tink_core
           cat haxe_libraries/tink_core.hxml .haxerc
+          # a fresh clone's case: the libraries reinstalled from haxe_libraries (in parallel)
+          "$L" install haxelib:tink_json
+          rm -rf "$HAXESHIM_ROOT/haxe_libraries"
+          "$L" download
           echo 'class Main { static function main() trace(tink.core.Outcome.Success(#if sys Sys.args() #else "js" #end)); }' > src/Main.hx
           "$H" -version
           "$H" --run resolve-args -lib tink_core
+          "$H" --run resolve-args -lib tink_json
           "$H" -cp src -lib tink_core --run Main a b
           "$H" -cp src -lib tink_core -main Main --js main.js && node main.js
       - name: Smoke test (embedded std)
