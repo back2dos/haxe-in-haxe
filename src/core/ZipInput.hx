@@ -1,3 +1,17 @@
+/***********************************************************************/
+/*                                                                     */
+/*                         The CamlZip library                         */
+/*                                                                     */
+/*            Xavier Leroy, projet Cristal, INRIA Rocquencourt         */
+/*                  adapted to Extc lib by Caue Waneck                 */
+/*                                                                     */
+/*  Copyright 2001 Institut National de Recherche en Informatique et   */
+/*  en Automatique.  All rights reserved.  This file is distributed    */
+/*  under the terms of the GNU Lesser General Public License, with     */
+/*  the special exception on linking described in file LICENSE.        */
+/*                                                                     */
+/***********************************************************************/
+
 package core;
 
 import haxe.io.Bytes;

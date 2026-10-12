@@ -35,6 +35,9 @@ compiler reaches.
 
 - Comments from the upstream source stay at the matching place with upstream's
   wording (`(** *)` becomes `/** */`).
+- A ported file starts with the license header of its upstream module, copied
+  verbatim (`(* *)` becomes `/* */`); files whose upstream module has none,
+  and port-only files, start without one.
 - Every other comment in `src/` starts with `// port:` (continuation lines
   `// ...`): deviations, host adaptations, OCaml-semantics emulation. Keep them
   true and remove them with the code they describe.
