@@ -505,7 +505,7 @@ and `-D hxc.single`.
 - Coverage: the language and std features that the port and the programs
   above need. Weak references are missing; sockets are IPv4 only.
   Coroutines (Haxe 5, hxcoro) compile: a `Coroutine` type is lowered as the
-  function taking the continuation, as on HashLink; lix (`lix/`) runs hxcoro
+  function taking the continuation, as on HashLink; lix (`tools/lix/`) runs hxcoro
   on a libuv loop.
 - Threads: a loop that never allocates and never blocks delays a
   collection (there are no polls at loop back-edges; every loop in the port

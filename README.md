@@ -8,8 +8,8 @@ compiles it to a native binary.
 - `haxe/`: upstream Haxe (submodule, commit `995a7d1fe`), the reference
   compiler the port is tested against.
 - `test/`: test harnesses. `site/`: the website, `site/bench/` the benchmarks.
-- `lix/`: [lix](lix/README.md) (the lix client and haxeshim) ported to build with
-  hxc, a program of its own that uses the target.
+- `tools/lix/`: [lix](tools/lix/README.md) (the lix client and haxeshim) ported to
+  build with hxc, a program of its own that uses the target (`make lix`).
 
 The port should produce the same output as the reference compiler for the
 same arguments. This is tested for HXB output, all targets (JS, Lua, Python,

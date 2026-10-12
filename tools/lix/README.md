@@ -8,17 +8,21 @@ and `neko` at once: it acts as the command it is invoked as (links named so),
 like the four scripts of the lix npm package.
 
 ```sh
-sh hxc/tools/dev-tool.sh        # the native hxc backend tool, once (see hxc/README.md)
-sh lix/build.sh                 # bin/lix/lix, and bin/lix/{haxe,haxelib,neko} links to it
+make lix                        # bin/lix/lix, and bin/lix/{haxe,haxelib,neko} links to it
 export PATH=$PWD/bin/lix:$PATH
 lix scope create && lix install haxe 4.3.6 && lix +lib tink_core
 haxe -lib tink_core --run Main
 ```
 
-`lix/build.sh` needs libuv and mbedtls (Debian/Ubuntu: `libuv1-dev libmbedtls-dev`,
-or `RT_DEPS` with the Cosmopolitan builds of `hxc/tools/cosmo-deps.sh`) and fetches
-hxcoro at a pinned commit into `bin/lix/hxcoro` unless `HXCORO` names a checkout.
-`CC` picks the C compiler (default `clang -O2`). The binary is about 1.4 MB.
+The Makefile's lix targets (`make help`): `lix-c` writes the C with the JS
+backend tool (as `make port-c` does for the port), fetching hxcoro at a pinned
+commit into `bin/hxcoro` unless `HXCORO` names a checkout; `lix` compiles it with
+`LIX_CC` (default `clang -O2`) against the system's libuv and mbedtls
+(Debian/Ubuntu: `libuv1-dev libmbedtls-dev`) or a `make deps` directory
+(`LIX_TLS_UV`); `lix-cosmo` makes `bin/release/cosmo/lix.com`, one Cosmopolitan
+binary for Linux, macOS, Windows and the BSDs (with `make deps TARGET=cosmo`).
+The native binary is about 1.4 MB, `lix.com` about 5 MB. CI builds `lix.com`
+and publishes it on the website, under Tools.
 
 The `haxe` shim adds about 2 ms to a compiler call; the npm package's adds
 about 60 ms (measured with `haxe -version` and `haxe --run resolve-args`).
@@ -62,8 +66,8 @@ where it deviates. In general:
 - Not ported: `haxeshim.exify` (the `.exe` stubs and `CHANGES.txt` the npm
   package installs next to its Windows `.cmd` files), and `lix.api`,
   `lix.server`, `lix.client.sources.npm`, which the client does not use.
-  Windows: the code keeps upstream's Windows branches, but hxc's C needs a POSIX
-  toolchain; a Cosmopolitan build (`CC=cosmocc`) is the way there, untested.
+  Windows: the code keeps upstream's Windows branches and `lix.com` runs there
+  (Cosmopolitan), but only `--version`, `scope` and a haxelib install are tried in CI.
 
 ## Gaps in the Haxe standard library
 
@@ -102,12 +106,13 @@ again.
 
 ## Testing
 
-`sh lix/test/parity.sh` runs 26 cases (help, scopes, installs from haxelib, git
+`sh tools/lix/test/parity.sh` runs 26 cases (help, scopes, installs from haxelib, git
 and URLs with dependencies, aliases, `--flat`, `--force`, errors, `download`,
 `dev`, `use`, `run`, `haxe-versions`, `-lib` resolution and interpolation,
 `haxelib path`/`libpath`, compiling and running with Haxe 4.3.6, scripts,
 `install-libs`) with the npm package and the port and compares their output,
-exit codes, `.haxerc`, `haxe_libraries/` and library cache: all 26 match. The
+exit codes, `.haxerc`, `haxe_libraries/` and library cache: all 26 match, for
+the native build and for `lix.com` (`PORT_BIN=<directory with lix linking to lix.com>`). The
 compiler server modes (`--wait` with `--connect`, `--server-listen stdio`,
 `--server-connect`, switching Haxe versions per request and on `.haxerc`
 changes) give byte-identical responses to the npm package's with a test client.

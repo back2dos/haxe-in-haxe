@@ -30,9 +30,9 @@ and follows its licensing.
                       (Copyright (C) 1995-2024 Jean-loup Gailly and Mark Adler,
                       zlib license); Extc.hx follows haxe/libs/extc: GPL-2.0
 
-- lix/ is a port of lix.client and haxeshim (https://github.com/lix-pm), which are
-  in the public domain (lix/LICENSE, the Unlicense), and is released the same way.
-  Its build includes hxcoro, whose license is its own (see lix/README.md).
+- tools/lix/ is a port of lix.client and haxeshim (https://github.com/lix-pm), which are
+  in the public domain (tools/lix/LICENSE, the Unlicense), and is released the same way.
+  Its build includes hxcoro, whose license is its own (see tools/lix/README.md).
 
 - The haxe/ submodule is upstream Haxe with its own LICENSE: the compiler is
   GPL-2.0-or-later and its standard library (haxe/std) MIT.

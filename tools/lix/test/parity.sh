@@ -1,22 +1,23 @@
 #!/bin/sh
-# Runs the commands of lix/test/parity-cases.txt with the reference lix (the npm
+# Runs the commands of tools/lix/test/parity-cases.sh with the reference lix (the npm
 # package, node) and with the port (bin/lix), each in a root and project of its
 # own, and compares their output, exit codes and the files they leave behind
 # (haxe_libraries/, .haxerc, the library cache), with the roots' paths
 # normalized. Prints a line per case and a summary; the logs are in
 # bin/lix-parity/.
 #
-#   sh lix/test/parity.sh                      (all cases)
-#   sh lix/test/parity.sh install              (cases whose name contains "install")
+#   sh tools/lix/test/parity.sh                (all cases)
+#   sh tools/lix/test/parity.sh install              (cases whose name contains "install")
 #
+# PORT_BIN: the port's directory (default bin/lix; e.g. one with links to lix.com).
 # REF_LIX: the reference's bin directory (default: lix@17.0.3 installed with npm
 # into bin/lix-ref). Network access: the reference uses node's https, run with
 # NODE_USE_ENV_PROXY=1 when HTTPS_PROXY is set.
 set -u
-cd "$(dirname "$0")/../.."
+cd "$(dirname "$0")/../../.."
 ROOT=$PWD
 OUT=$ROOT/bin/lix-parity
-PORT_BIN=$ROOT/bin/lix
+PORT_BIN=${PORT_BIN:-$ROOT/bin/lix}
 if [ -z "${REF_LIX:-}" ]; then
 	REF_LIX=$ROOT/bin/lix-ref/node_modules/.bin
 	if [ ! -x "$REF_LIX/lix" ]; then
@@ -24,7 +25,7 @@ if [ -z "${REF_LIX:-}" ]; then
 		(cd bin/lix-ref && npm install --silent --ignore-scripts lix@17.0.3 > /dev/null) || { echo "npm install lix failed"; exit 1; }
 	fi
 fi
-[ -x "$PORT_BIN/lix" ] || { echo "no $PORT_BIN/lix: sh lix/build.sh"; exit 1; }
+[ -x "$PORT_BIN/lix" ] || { echo "no $PORT_BIN/lix: make lix"; exit 1; }
 rm -rf "$OUT"
 mkdir -p "$OUT"
 FILTER=${1:-}
@@ -92,7 +93,7 @@ prepare_haxe() {
 	mv "$W/root/neko" "$OUT/shared-neko"
 }
 
-. "$ROOT/lix/test/parity-cases.sh"
+. "$ROOT/tools/lix/test/parity-cases.sh"
 
 echo "$pass passed, $fail failed"
 [ $fail = 0 ]
