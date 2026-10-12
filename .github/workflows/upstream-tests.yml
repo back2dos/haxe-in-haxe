@@ -129,6 +129,10 @@ jobs:
 
       - name: Test
         run: |
+          # not upstream's: skip hlc/projects/Issue11689, whose hl2c type name is an
+          # MD5 of an OCaml Marshal with closures (a code pointer of the reference
+          # binary); the port fails it explicitly (test/TESTING.md)
+          if [ "${{ matrix.target }}" = hl ]; then rm -rf misc/hlc/projects/Issue11689; fi
           ulimit -c unlimited
           haxe --run RunCi ${{ matrix.target }} ${{ matrix.runci-args }}
         working-directory: ${{github.workspace}}/haxe/tests
@@ -213,6 +217,10 @@ jobs:
         run: |
           # disable invalid Unicode filenames on APFS
           echo "" > sys/compile-fs.hxml
+          # not upstream's: skip hlc/projects/Issue11689, whose hl2c type name is an
+          # MD5 of an OCaml Marshal with closures (a code pointer of the reference
+          # binary); the port fails it explicitly (test/TESTING.md)
+          if [ "${{ matrix.target }}" = hl ]; then rm -rf misc/hlc/projects/Issue11689; fi
           haxe --run RunCi ${{ matrix.target }} ${{ matrix.runci-args }}
         working-directory: ${{github.workspace}}/haxe/tests
         timeout-minutes: 60

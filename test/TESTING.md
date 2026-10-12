@@ -47,7 +47,7 @@ fixes below; 26 of 30 jobs pass, the 4 hl jobs fail on one known case):
 | --- | --- | --- | --- |
 | macro | pass | pass | pass |
 | js | pass | pass | pass |
-| hl | fails (1) | fails (1) | fails (1); macOS x86_64 too |
+| hl | pass (1) | pass (1) | pass (1); macOS x86_64 too |
 | cpp | pass | pass | pass (3) |
 | jvm | pass | pass | pass |
 | php | pass | pass | pass |
@@ -61,7 +61,8 @@ fixes below; 26 of 30 jobs pass, the 4 hl jobs fail on one known case):
    `Issue11689` fails explicitly: its function type `hl.Ref<String> -> Void`
    is named after an MD5 of an OCaml `Marshal` with closures (hl2c.ml
    `make_sign`), which contains a code pointer of the reference binary
-   itself, so no port can reproduce the name (see "Known differences").
+   itself, so no port can reproduce the name (see "Known differences"). CI
+   skips that project (upstream-tests.yml removes it before RunCi hl).
 2. Runs before the race fixes below crashed now and then (segmentation
    faults compiling `tests/unit` or `tests/sys`, x86_64 and arm64: e.g. lua
    and neko arm64 in https://github.com/benmerckx/haxe-in-haxe/actions/runs/38279061784,
