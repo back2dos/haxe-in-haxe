@@ -2,6 +2,9 @@
 # (x86_64, aarch64) with zig cc, and as a Cosmopolitan APE binary that is also
 # the Windows build; tests each on a native runner and publishes them:
 # a rolling `nightly` pre-release on pushes to main, a release on v* tags.
+# Also builds the website (site/build.sh: the playground's WebAssembly with
+# Emscripten, the pages' JavaScript compiled from Haxe by the Linux build of
+# the port) and deploys it to GitHub Pages on pushes to main.
 #
 # Release assets (https://github.com/<repo>/releases/download/<tag>/<asset>):
 #   haxe-in-haxe-linux-x86_64.tar.gz   haxe-in-haxe-linux-aarch64.tar.gz
@@ -29,6 +32,7 @@ env:
   ZIG_VERSION: 0.17.0
   COSMOCC_VERSION: 4.0.2
   HXNODEJS_COMMIT: f88685a70b2e4f03dbe0a824ce90ea8b56b27753
+  EMSCRIPTEN_VERSION: 6.0.12
 
 jobs:
   # the reference compiler (built from the haxe/ submodule) and the port's C
@@ -104,17 +108,31 @@ jobs:
           ls bin/hxc/hih/prog_hxc | wc -l
           du -sh bin/hxc/hih/prog_hxc
 
+      # the playground's compiler: without the target generators (site/build.sh)
+      - name: Generate the playground's C
+        run: |
+          set -ex
+          PORT_OUT=bin/hxc/hih-web HXFLAGS="-D hih_no_generators" SKIP_TOOL=1 NO_CC=1 sh hxc/build.sh port
+          du -sh bin/hxc/hih-web/prog_hxc
+
       - name: Pack the C and the std
         run: |
           set -ex
-          mkdir -p dist
+          mkdir -p dist dist-web
           tar czf dist/port-c.tar.gz -C bin/hxc/hih prog_hxc
           tar czf dist/std.tar.gz -C haxe std
+          tar czf dist-web/port-c-web.tar.gz -C bin/hxc/hih-web prog_hxc
 
       - uses: actions/upload-artifact@v7
         with:
           name: port-c
           path: dist/
+          retention-days: 7
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: port-c-web
+          path: dist-web/
           retention-days: 7
 
   # zig cc cross builds from Linux, one target per job
@@ -375,3 +393,65 @@ jobs:
               gh release create "$TAG" --prerelease --target "$GITHUB_SHA" --title "Nightly ($SHORT)" --notes "$NOTES" assets/*
             fi
           fi
+
+  # the website: WebAssembly playground (Emscripten) and the pages' JavaScript,
+  # compiled from site/src by the Linux build of the port
+  site:
+    needs: [generate, build]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          name: port-c
+          path: dist
+      - uses: actions/download-artifact@v8
+        with:
+          name: port-c-web
+          path: dist
+      - uses: actions/download-artifact@v8
+        with:
+          name: haxe-in-haxe-linux-x86_64
+          path: dist
+      - name: Cache Emscripten
+        id: cache-emsdk
+        uses: actions/cache@v6
+        with:
+          path: ~/emsdk
+          key: emsdk-${{ env.EMSCRIPTEN_VERSION }}
+      - name: Install Emscripten
+        if: steps.cache-emsdk.outputs.cache-hit != 'true'
+        run: |
+          set -ex
+          git clone -q --depth 1 https://github.com/emscripten-core/emsdk ~/emsdk
+          ~/emsdk/emsdk install "$EMSCRIPTEN_VERSION"
+          ~/emsdk/emsdk activate "$EMSCRIPTEN_VERSION"
+      - name: Build the site
+        run: |
+          set -ex
+          mkdir -p bin/hxc/hih-web haxe
+          tar xzf dist/port-c-web.tar.gz -C bin/hxc/hih-web
+          tar xzf dist/std.tar.gz -C haxe
+          tar xzf dist/haxe-in-haxe-linux-x86_64.tar.gz -C dist
+          . ~/emsdk/emsdk_env.sh
+          SKIP_PORT=1 SITE_HAXE="$PWD/dist/haxe-in-haxe-linux-x86_64/haxe-in-haxe" HAXE_STD_PATH="$PWD/haxe/std" sh site/build.sh
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: bin/site
+
+  pages:
+    needs: site
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    concurrency:
+      group: pages
+      cancel-in-progress: false
+    steps:
+      - id: deploy
+        uses: actions/deploy-pages@v5
