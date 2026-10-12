@@ -29,32 +29,52 @@ also checked on 500–2,750 programs while it was ported, on its target's
 options and on the upstream cases listed below.
 
 Release builds (`.github/workflows/build.yml`, 2026-10-12): `hxc/tools/smoke.sh`
-passes on Linux x86_64/aarch64 and macOS x86_64/aarch64 (zig cc builds) and
-on Linux, macOS and Windows x86_64/arm64 (Cosmopolitan build), including its
+passes on Linux x86_64/aarch64, macOS x86_64/aarch64 and Windows
+x86_64/arm64 (zig cc builds; Windows: native, MinGW-w64 and the UCRT, on
+windows-latest and windows-11-arm) and on Linux, macOS and Windows x86_64
+(Cosmopolitan build), including its
 `sys.ssl` check (system CA certificates, a verified TLS handshake with
 github.com) and `eval.luv` check (timer, TCP echo). Locally after the move to
 the Makefile: `make test` 279 + 7, `make test-fuzz LANE=diff:js N=100` 100/100.
 
 ### Upstream's CI suite (2026-10-12)
 
-Upstream's `linux-test` and `mac-test` jobs, `haxe --run RunCi <target>` with
-the release binaries as `haxe` and haxelib built by the port
+Upstream's `linux-test`, `mac-test` and `windows64-test` jobs, RunCi for each
+target with the release binaries as `haxe` and haxelib built by the port
 (`.github/workflows/upstream-tests.yml`, [README.md](README.md)). Run
-https://github.com/benmerckx/haxe-in-haxe/actions/runs/38308728809 (with all the
-fixes below; 26 of 30 jobs pass, the 4 hl jobs fail on one known case):
+https://github.com/benmerckx/haxe-in-haxe/actions/runs/38318290103: all 40
+jobs pass (with misc hlc `Issue11689` skipped, note 1), and with them every
+job of build.yml (58 in all):
 
-| Target | Linux x86_64 | Linux arm64 | macOS arm64 |
-| --- | --- | --- | --- |
-| macro | pass | pass | pass |
-| js | pass | pass | pass |
-| hl | pass (1) | pass (1) | pass (1); macOS x86_64 too |
-| cpp | pass | pass | pass (3) |
-| jvm | pass | pass | pass |
-| php | pass | pass | pass |
-| python | pass | pass | pass |
-| lua | pass | pass (2) | pass |
-| flash | pass | – (as upstream) | pass |
-| neko | pass | pass (2) | pass |
+| Target | Linux x86_64 | Linux arm64 | macOS arm64 | Windows x86_64 |
+| --- | --- | --- | --- | --- |
+| macro | pass | pass | pass | pass |
+| js | pass | pass | pass | pass |
+| hl | pass (1) | pass (1) | pass (1); macOS x86_64 too | pass (1) |
+| cpp | pass | pass | pass (3) | pass |
+| jvm | pass | pass | pass | pass |
+| php | pass | pass | pass | pass |
+| python | pass | pass | pass | pass |
+| lua | pass | pass (2) | pass | pass |
+| flash | pass | – (as upstream) | pass | pass |
+| neko | pass | pass (2) | pass | pass |
+
+Windows runs the native build (`haxe-in-haxe.exe` as `haxe.exe`, haxelib.exe
+booted by nekotools). Its first run
+(https://github.com/benmerckx/haxe-in-haxe/actions/runs/38316588536) passed 7
+of 10 targets; the 3 others failed on port code that spelled OCaml's
+`Filename` the Unix way on every host: nekoc's file argument quoted with
+single quotes (misc neko `NekocPathWithSpaces`, server `RunCommandArgs` in
+the js job) and import.hx positions joined with `/` (misc eval `Issue1138`,
+`if-display`). `core.OcamlFilename` now picks the Unix or Win32 variant by
+host, and `handle_import_hx` builds its candidates with `Path.path_sep` as
+upstream. Locally with these changes: `make test` 279 + 7, macro cases 66/66,
+`display.py` 679/679, `server.py` 595/595, fuzzer `diff:` lanes (60 programs
+each: js, neko, hl, hlc, cpp, lua, python, php, jvm, hxb, interp, swf) all
+ok. Under Wine, the Windows build's HXB of the port's own sources
+(`-D disable-parallelism`) equals the reference's but for the spelling of
+absolute paths (`Z:\...` against `/...`), and five parallel-mode compiles of
+the same sources ran clean.
 
 1. Everything up to the last step passes (unit on HL/JIT and HL/C, threads,
    sys, event loop, hlcode, misc hl); in misc hlc, 7 of 8 projects pass and
@@ -149,5 +169,12 @@ Compile times of every target on two real projects: `site/bench/targets.py`.
   differ (an abstract and its implementation write the same file name).
 - `--main lower.case`: "Type not found" where the reference reports an
   uppercase-letter error.
-- Not covered: Windows hosts (upstream's `windows64-test` is not mirrored:
-  test/README.md). The generated programs run in the upstream CI suite only.
+- Windows hosts: covered by upstream's `windows64-test` (above) and the smoke
+  tests; the local harnesses run on Linux. The generated programs run in the
+  upstream CI suite only.
+- Windows: without `HAXE_STD_PATH`, the std is looked up at the executable's
+  own path plus `\std` (`get_std_class_paths` concatenates `Extc.executable_path`,
+  the program file, with "std"), which is not a directory, so a `std` next to
+  `haxe-in-haxe.exe` is not found (checked under Wine). How upstream's
+  haxe.exe finds its std without the variable was not established; set
+  `HAXE_STD_PATH` (the release zip's README says so, upstream-tests.yml sets it).
