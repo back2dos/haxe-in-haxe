@@ -40,14 +40,15 @@ the Makefile: `make test` 279 + 7, `make test-fuzz LANE=diff:js N=100` 100/100.
 Upstream's `linux-test` and `mac-test` jobs, `haxe --run RunCi <target>` with
 the release binaries as `haxe` and haxelib built by the port
 (`.github/workflows/upstream-tests.yml`, [README.md](README.md)). Run
-https://github.com/benmerckx/haxe-in-haxe/actions/runs/38284581526:
+https://github.com/benmerckx/haxe-in-haxe/actions/runs/38308728809 (with all the
+fixes below; 26 of 30 jobs pass, the 4 hl jobs fail on one known case):
 
 | Target | Linux x86_64 | Linux arm64 | macOS arm64 |
 | --- | --- | --- | --- |
 | macro | pass | pass | pass |
 | js | pass | pass | pass |
 | hl | fails (1) | fails (1) | fails (1); macOS x86_64 too |
-| cpp | pass | pass | pass |
+| cpp | pass | pass | pass (3) |
 | jvm | pass | pass | pass |
 | php | pass | pass | pass |
 | python | pass | pass | pass |
@@ -65,6 +66,11 @@ https://github.com/benmerckx/haxe-in-haxe/actions/runs/38284581526:
    faults compiling `tests/unit` or `tests/sys`, x86_64 and arm64: e.g. lua
    and neko arm64 in https://github.com/benmerckx/haxe-in-haxe/actions/runs/38279061784,
    js x86_64 and lua arm64 in https://github.com/benmerckx/haxe-in-haxe/actions/runs/38288063131).
+
+3. Two earlier runs had hxcpp's cppia host crash in `-jit` mode on macOS
+   arm64 (exit 138 or 255) after all 11658 unit tests passed without JIT;
+   the cppia script is the one the reference writes (`unit-targets.py`), so
+   this is hxcpp's JIT on Apple Silicon, not the port.
 
 Upstream's tests compile without `-D disable-parallelism`, unlike the local
 harnesses, so the release binary runs its parallel passes on OS threads.
