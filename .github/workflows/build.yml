@@ -377,7 +377,8 @@ jobs:
             windows-*)
               unzip -q dl/haxe-in-haxe-${{ matrix.pkg }}.zip -d t
               echo "bin=$PWD/t/haxe-in-haxe-${{ matrix.pkg }}/haxe-in-haxe.exe" >> "$GITHUB_OUTPUT"
-              echo "std=$PWD/t/haxe-in-haxe-${{ matrix.pkg }}/std" >> "$GITHUB_OUTPUT" ;;
+              # a Windows path (C:/...) for the native program
+              echo "std=$(cygpath -m "$PWD/t/haxe-in-haxe-${{ matrix.pkg }}/std")" >> "$GITHUB_OUTPUT" ;;
             *)
               mkdir -p t && tar xzf dl/haxe-in-haxe-${{ matrix.pkg }}.tar.gz -C t
               echo "bin=$PWD/t/haxe-in-haxe-${{ matrix.pkg }}/haxe-in-haxe" >> "$GITHUB_OUTPUT"

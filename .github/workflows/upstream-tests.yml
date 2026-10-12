@@ -5,14 +5,12 @@
 # release binaries; nothing is rebuilt here. Each job puts the release binary
 # on PATH as `haxe` with HAXE_STD_PATH at the submodule's std, builds haxelib
 # from haxe/extra/haxelib_src with that binary (client.hxml to run.n, then
-# `nekotools boot` as upstream's Makefile does), and runs
-# `haxe --run RunCi <target>` in haxe/tests, straight from the submodule.
-# The steps follow upstream's jobs; the differences are commented.
-#
-# Upstream's windows64-test has no counterpart: the Windows build of the port
-# is the Cosmopolitan binary, whose Eval host sees a POSIX system
-# (Sys.systemName() "Linux", /D/a/... paths), so RunCi and the programs it
-# starts disagree on paths and commands (test/README.md).
+# `nekotools boot` as upstream's Makefiles do), and runs RunCi for its target
+# in haxe/tests (`haxe --run RunCi <target>`; on Windows `haxe RunCi.hxml`
+# with TEST set, as upstream), straight from the submodule. The Windows job
+# runs the native Windows build (haxe-in-haxe.exe as haxe.exe, haxelib.exe
+# booted by nekotools next to it). The steps follow upstream's jobs; the
+# differences are commented.
 name: upstream-tests
 
 on:
@@ -224,3 +222,116 @@ jobs:
           haxe --run RunCi ${{ matrix.target }} ${{ matrix.runci-args }}
         working-directory: ${{github.workspace}}/haxe/tests
         timeout-minutes: 60
+
+  windows64-test:
+    runs-on: windows-2025-vs2026
+    env:
+      PLATFORM: windows64
+      TEST: ${{matrix.target}}
+      HXCPP_COMPILE_CACHE: ${{ github.workspace }}/hxcache
+      ARCH: 64
+      # upstream: the std of the package next to haxe.exe
+      HAXE_STD_PATH: ${{ github.workspace }}\haxe\std
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [macro, js, hl, cpp, jvm, php, python, lua, flash, neko]
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+          persist-credentials: false
+      # upstream: its windows64-build package (haxe.exe, haxelib.exe, std)
+      - uses: actions/download-artifact@v8
+        with:
+          name: haxe-in-haxe-windows-x86_64
+          path: win${{env.ARCH}}Binaries
+
+      - uses: ./haxe/.github/actions/setup-neko
+
+      - uses: actions/setup-node@v7
+        if: matrix.target == 'js'
+        with:
+          node-version: 24
+
+      - name: Setup Haxe
+        shell: pwsh
+        run: |
+          $DOWNLOADDIR="./win$($env:ARCH)Binaries"
+          Expand-Archive $DOWNLOADDIR/*.zip -DestinationPath $DOWNLOADDIR
+          Set-PSDebug -Trace 1
+          $HAXEPATH = (Get-ChildItem $DOWNLOADDIR/haxe-in-haxe-windows-* -Directory).FullName
+          # not upstream's: the port's binary as haxe.exe
+          Copy-Item "$HAXEPATH\haxe-in-haxe.exe" "$HAXEPATH\haxe.exe"
+          echo $HAXEPATH >> $env:GITHUB_PATH
+          echo "HAXEPATH=$HAXEPATH" >> $env:GITHUB_ENV
+          echo "HAXELIB_ROOT=$HAXEPATH\lib" >> $env:GITHUB_ENV
+
+      # upstream's windows64-build job (make -f Makefile.win haxelib), with the port as haxe
+      - name: Build haxelib
+        shell: pwsh
+        working-directory: ${{ github.workspace }}/haxe/extra/haxelib_src
+        run: |
+          Set-PSDebug -Trace 1
+          haxe client.hxml
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          nekotools boot run.n
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          Move-Item run.exe "$env:HAXEPATH\haxelib.exe"
+
+      - name: Print Haxe version
+        shell: pwsh
+        run: haxe -version
+
+      - name: "Make Python 3 be available as python3 in the cmdline"
+        shell: pwsh
+        run: |
+          Set-PSDebug -Trace 1
+          $pypath = python -c "import sys; print(sys.executable)"
+          $py3path = $pypath.replace("python.exe","python3.exe")
+          cmd /c mklink $py3path $pypath
+          python3 -V
+
+      - uses: msys2/setup-msys2@v2
+        if: matrix.target == 'lua'
+        id: msys2
+        with:
+          msystem: UCRT64
+          update: true
+          install: >-
+            mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-openssl
+            mingw-w64-ucrt-x86_64-pcre2
+            mingw-w64-ucrt-x86_64-libuv
+
+      - name: Setup haxelib
+        shell: pwsh
+        run: |
+          mkdir "$env:HAXELIB_ROOT"
+          haxelib setup "$env:HAXELIB_ROOT"
+
+      - name: Add msbuild to PATH (hl/c)
+        uses: microsoft/setup-msbuild@v3
+        if: matrix.target == 'hl'
+        with:
+          msbuild-architecture: x64
+
+      - name: Cache Lua environments
+        uses: ./haxe/.github/actions/cache-lua
+        if: matrix.target == 'lua'
+        with:
+          # the action hashes tests/runci/targets/Lua.hx, which is under haxe/ here
+          key-prefix: lua-env-windows64-${{ hashFiles('haxe/tests/runci/targets/Lua.hx') }}
+
+      - name: Test
+        shell: pwsh
+        run: |
+          # not upstream's: skip hlc/projects/Issue11689, whose hl2c type name is an
+          # MD5 of an OCaml Marshal with closures (a code pointer of the reference
+          # binary); the port fails it explicitly (test/TESTING.md)
+          if ($env:TEST -eq "hl") { Remove-Item -Recurse -Force misc/hlc/projects/Issue11689 }
+          haxe RunCi.hxml
+        working-directory: ${{github.workspace}}/haxe/tests
+        timeout-minutes: 25
+        env:
+          MSYS2_LOCATION: ${{ matrix.target == 'lua' && steps.msys2.outputs.msys2-location || '' }}
