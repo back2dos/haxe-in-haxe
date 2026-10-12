@@ -286,7 +286,7 @@ class RenameVars {
 	public static function willBeReserved(rc:RenameContext,
 			v:TVar):Bool return rc.rcNoShadowing || TypeOps.hasVarFlag(v, VCaptured) && rc.rcHoisting;
 
-	public static function unboundVariable(v:TVar):Dynamic throw "Unbound variable: " + v.vName + "<" + v.vId + ">";
+	public static function unboundVariable(v:TVar):Dynamic throw new core.ds.Failure("Unbound variable: " + v.vName + "<" + v.vId + ">");
 
 	/**
 		Invoked for each `TLocal v` texr_expr
@@ -306,7 +306,7 @@ class RenameVars {
 	public static function useVar(rc:RenameContext, scope:RenameScope, v:TVar):Void {
 		if (!willBeReserved(rc, v)) determineOverlaps(rc, scope, v);
 		else {
-			if (!rc.rcVarOrigins.exists(v.vId)) throw "Not_found";
+			if (!rc.rcVarOrigins.exists(v.vId)) throw core.ds.NotFound.raise();
 			var origin = rc.rcVarOrigins.get(v.vId);
 			function loop(scope:RenameScope):Void {
 				if (scope == origin) return;
@@ -323,7 +323,7 @@ class RenameVars {
 		++scope.loopCount;
 		fn();
 		--scope.loopCount;
-		if (scope.loopCount < 0) throw "Unexpected loop count";
+		if (scope.loopCount < 0) throw new core.ds.Failure("Unexpected loop count");
 		if (scope.loopCount == 0) scope.loopVars.reset();
 	}
 

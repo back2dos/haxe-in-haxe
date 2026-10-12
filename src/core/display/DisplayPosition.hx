@@ -35,7 +35,7 @@ class DisplayPositionContainer {
 		pos = p;
 		lastPos = p;
 		fileKey = null;
-		fileKeys = p.pfile == core.Path.getFullPath("? input") ? [] : [UniqueKey.create(p.pfile)];
+		fileKeys = p.pfile == compiler.DisplayProcessingGlobals.fileInputMarker ? [] : [UniqueKey.create(p.pfile)];
 	}
 
 	public function setFiles(files:Array<String>):Void fileKeys = files;
