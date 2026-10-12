@@ -673,7 +673,9 @@ class Dce {
 				for (f in v) visit(f.expr);
 				visit(p);
 			case TCall({eexpr: TIdent("__define_feature__")}, [{eexpr: TConst(TString(ft))}, inner]):
-				dce.curclass.clModule.mExtra.mFeatures.set(ft, true);
+				// port: under the lock of the writes through addFeatureManager (NowOrLater.runNow)
+				var m = dce.curclass.clModule;
+				dce.addFeatureManager.runNow(function() m.mExtra.mFeatures.set(ft, true));
 				checkFeature(dce, ft);
 				visit(inner);
 			// keep toString method of T when array<T>.join() or array<T>.toString() is called

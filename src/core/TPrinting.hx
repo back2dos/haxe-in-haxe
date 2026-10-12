@@ -35,11 +35,22 @@ class MonomorphPrinting {
 		return s;
 	}
 
+	// port: a print context can be shared by domains (Dump's parallel type dumps); OCaml's
+	// racing `ctx := ...` stays memory safe, an Array growing under a reader does not.
+	static final ctxMutex = new sys.thread.Mutex();
+
 	public static function sMono(print:PrintContext->T->String, ctx:PrintContext, explicit:Bool, m:TMono):String {
 		if (m.tmType != null && !explicit) return print(ctx, m.tmType);
-		for (pair in ctx) if (pair.mono == m) return printMonoName(m, pair.id, "");
-		var id = ctx.length;
-		ctx.unshift({mono: m, id: id});
+		ctxMutex.acquire();
+		var known = -1;
+		for (pair in ctx) if (pair.mono == m) {
+			known = pair.id;
+			break;
+		}
+		var id = known >= 0 ? known : ctx.length;
+		if (known < 0) ctx.unshift({mono: m, id: id});
+		ctxMutex.release();
+		if (known >= 0) return printMonoName(m, known, "");
 		if (m.tmType != null && explicit) return printMonoName(m, id, " := " + print(ctx, m.tmType));
 		var s = sMonoConstraintKind(function(t) return print(ctx, t), monomorphClassifyConstraintsRef(m));
 		return printMonoName(m, id, s == "" ? s : " : " + s);

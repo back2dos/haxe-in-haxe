@@ -26,6 +26,15 @@ class NowOrLater {
 		}
 	}
 
+	// port: runs `callback` now, holding the lock `tryNow` callbacks run under, for a
+	// write upstream makes without it (Dce's `__define_feature__`): OCaml's Hashtbl
+	// survives racing writes from other domains, the hxc runtime's maps do not.
+	public function runNow(callback:Void->Void):Void {
+		now.acquire();
+		callback();
+		now.release();
+	}
+
 	public function handleLater():Void {
 		while (true) {
 			laterMutex.acquire();
