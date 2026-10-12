@@ -21,7 +21,7 @@ commit into `bin/hxcoro` unless `HXCORO` names a checkout; `lix` compiles it wit
 (Debian/Ubuntu: `libuv1-dev libmbedtls-dev`) or a `make deps` directory
 (`LIX_TLS_UV`); `lix-cosmo` makes `bin/release/cosmo/lix.com`, one Cosmopolitan
 binary for Linux, macOS, Windows and the BSDs (with `make deps TARGET=cosmo`).
-The native binary is about 1.4 MB, `lix.com` about 5 MB. CI builds `lix.com`
+The native binary is about 1.6 MB, `lix.com` about 6 MB. CI builds `lix.com`
 and publishes it on the website, under Tools.
 
 The `haxe` shim adds about 2 ms to a compiler call; the npm package's adds
@@ -56,7 +56,9 @@ where it deviates. In general:
 - **HTTP without node.** `shim.Http` speaks HTTP/1.1 over `sys.net.Socket` and
   `sys.ssl.Socket` (mbedtls): redirects, chunked bodies, progress, and proxies
   (`HTTPS_PROXY`/`HTTP_PROXY`/`NO_PROXY`, which node's `https.get` ignored).
-  `SSL_CERT_FILE` adds CA certificates to the system's.
+  Trusted CA certificates: the system's, Mozilla's (as node bundles them; curl's
+  extract, pinned and generated into `shim.CaBundle` by the Makefile, since
+  Windows' preinstalled roots lack common ones) and `SSL_CERT_FILE`.
 - **Archives in memory.** Downloads are buffered and extracted with
   `shim.Archive` (gzip, tar with GNU/pax long names and symlinks, zip from its
   central directory) using std's pure Haxe inflate. File modes from tar archives

@@ -313,9 +313,18 @@ $(HXCORO)/.rev:
 	git -C $(HXCORO) checkout -q FETCH_HEAD
 	echo $(HXCORO_REV) > $@
 
-LIX_ARGS := -cp tools/lix/src -cp $(HXCORO)/src -main lix.cli.Main -D no-deprecation-warnings
+# Mozilla's CA certificates (curl's extract), trusted besides the system's
+# (Windows' preinstalled roots lack common ones), as a generated module
+CACERT := cacert-2026-09-25.pem
+CACERT_SHA256 := a41b5d356aea97a529fe27e0f7316d2f9d946d75927476cf9cf1b90637d00505
+bin/lix/gen/shim/CaBundle.hx: tools/lix/cabundle.py
+	@mkdir -p bin/lix
+	curl -sSfL --retry 3 -o bin/lix/$(CACERT) https://curl.se/ca/$(CACERT)
+	python3 tools/lix/cabundle.py bin/lix/$(CACERT) $(CACERT_SHA256) bin/lix/gen
+
+LIX_ARGS := -cp tools/lix/src -cp bin/lix/gen -cp $(HXCORO)/src -main lix.cli.Main -D no-deprecation-warnings
 lix-c: bin/lix/lix_hxc/files.txt
-bin/lix/lix_hxc/files.txt: $(WBK) $(LIX_SRC) $(STD) $(HXCORO)/.rev
+bin/lix/lix_hxc/files.txt: $(WBK) $(LIX_SRC) $(STD) $(HXCORO)/.rev bin/lix/gen/shim/CaBundle.hx
 	$(call wbk,bin/lix/lix,$(LIX_ARGS))
 
 ifeq ($(LIX_TLS_UV),system)

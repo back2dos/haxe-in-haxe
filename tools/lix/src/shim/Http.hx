@@ -20,7 +20,8 @@ typedef Response = {
 // cannot report progress, tunnel through an HTTPS proxy (CONNECT) or decode
 // chunked responses of unknown length piecewise. Proxies: HTTPS_PROXY /
 // HTTP_PROXY / NO_PROXY (node's https.get ignores them; lix behind a proxy
-// relied on global-agent). Extra CA certificates: SSL_CERT_FILE.
+// relied on global-agent). Trusted: the system's CA certificates, Mozilla's
+// (shim.CaBundle, generated at build time) and SSL_CERT_FILE.
 class Http {
 	static public var USER_AGENT = 'lix';
 
@@ -100,6 +101,8 @@ class Http {
 	static function caChain():Null<sys.ssl.Certificate> {
 		if (ca == null) {
 			ca = sys.ssl.Certificate.loadDefaults();
+			// node's bundled roots (Mozilla's, see the Makefile), as the npm package trusts
+			ca.add(CaBundle.PEM);
 			var extra = Sys.getEnv('SSL_CERT_FILE');
 			if (extra != null && sys.FileSystem.exists(extra))
 				ca.add(sys.io.File.getContent(extra));
