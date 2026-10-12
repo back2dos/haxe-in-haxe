@@ -132,8 +132,9 @@ int32_t hx_str_hash(void *s) {
 	return (int32_t)x;
 }
 
+// StringMap's hash: null is a key like any other (it crashed)
 int32_t hxc_Native_strHash(void *s) {
-	return hx_str_hash(s);
+	return s ? hx_str_hash(s) : 0;
 }
 
 static uint64_t null_storage[3] = {MKHDR(2, K_RAW, T_STRING), 4, 0x006c006c0075006eull};

@@ -378,18 +378,27 @@ jobs:
           path: lix
       - name: lix.com
         if: matrix.pkg == 'com' || startsWith(matrix.pkg, 'windows')
-        # lix on Windows (Cosmopolitan's libuv, cmd.exe for hooks) is untested
+        # lix on Windows (Cosmopolitan's libuv, Windows programs, cmd.exe for hooks) is new
         continue-on-error: ${{ startsWith(matrix.pkg, 'windows') }}
         run: |
           set -ex
           if [ "$RUNNER_OS" = Windows ]; then L=lix/lix.exe; mv lix/lix.com "$L"; else L=lix/lix.com; chmod +x "$L"; fi
           L="$PWD/$L"
           "$L" --version
+          # the haxe shim: the same binary under that name
+          if [ "$RUNNER_OS" = Windows ]; then H=lix/haxe.exe; else H=lix/haxe; fi
+          cp "$L" "$H"; H="$PWD/$H"
           export HAXESHIM_ROOT="$RUNNER_TEMP/lix-root"
-          mkdir -p "$RUNNER_TEMP/lix-project" && cd "$RUNNER_TEMP/lix-project"
+          mkdir -p "$RUNNER_TEMP/lix-project/src" && cd "$RUNNER_TEMP/lix-project"
           "$L" scope create
+          "$L" download
           "$L" install haxelib:tink_core
-          cat haxe_libraries/tink_core.hxml
+          cat haxe_libraries/tink_core.hxml .haxerc
+          echo 'class Main { static function main() trace(tink.core.Outcome.Success(Sys.args())); }' > src/Main.hx
+          "$H" -version
+          "$H" --run resolve-args -lib tink_core
+          "$H" -cp src -lib tink_core --run Main a b
+          "$H" -cp src -lib tink_core -main Main --js main.js && node main.js
       - name: Smoke test (embedded std)
         if: startsWith(matrix.pkg, 'windows')
         run: SMOKE_DIR="$RUNNER_TEMP/smoke-zip" sh hxc/tools/smoke.sh "${{ steps.unpack.outputs.bin }}"

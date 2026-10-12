@@ -183,7 +183,7 @@ class CompilerServer {
 
   function spawn(version:String, extraArgs:Array<String>, ?stdio:Array<StdioSpec>, onExit:Int->Void):Process {
     var installation = scope.getInstallation(version);
-    return Process.spawn(loop, installation.compiler, this.args.concat(extraArgs), {
+    return Exec.spawn(loop, installation.compiler, this.args.concat(extraArgs), {
       cwd: scope.cwd,
       env: Exec.mergeEnv(installation.env),
       stdio: stdio,

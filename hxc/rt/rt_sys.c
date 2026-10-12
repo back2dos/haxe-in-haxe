@@ -141,6 +141,19 @@ void *hxc_NativeSys_systemName(void) {
 #endif
 }
 
+// the system the program runs on, also for Cosmopolitan builds (whose
+// Sys.systemName() is POSIX's, "Linux"): Windows, Mac, BSD or Linux
+void *hxc_NativeSys_hostSystem(void) {
+#ifdef __COSMOPOLITAN__
+	if (IsWindows()) return hx_str_of_ascii("Windows");
+	if (IsXnu()) return hx_str_of_ascii("Mac");
+	if (IsFreebsd() || IsOpenbsd() || IsNetbsd()) return hx_str_of_ascii("BSD");
+	return hx_str_of_ascii("Linux");
+#else
+	return hxc_NativeSys_systemName();
+#endif
+}
+
 // Windows (Cosmopolitan builds, WIN_HOST): there is no /bin/sh, so a shell
 // command runs its program directly when it is a plain command
 // (posix_words), otherwise through cmd.exe /c; execvp does not try the .exe extension, so

@@ -68,8 +68,18 @@ where it deviates. In general:
 - Not ported: `haxeshim.exify` (the `.exe` stubs and `CHANGES.txt` the npm
   package installs next to its Windows `.cmd` files), and `lix.api`,
   `lix.server`, `lix.client.sources.npm`, which the client does not use.
-  Windows: the code keeps upstream's Windows branches and `lix.com` runs there
-  (Cosmopolitan), but only `--version`, `scope` and a haxelib install are tried in CI.
+  Windows: `lix.com` (Cosmopolitan) sees POSIX paths (`/C/dir`) where Windows
+  programs need Windows' (`C:/dir`), finds no `.exe` by itself and has no
+  `/bin/sh`. So lix asks the runtime for the real system (`hxc.NativeSys.hostSystem`;
+  `Sys.systemName()` is "Linux" there, which would also pick Linux builds of
+  Haxe and neko on macOS), converts paths in the arguments and environment of the
+  programs it runs (`Os.hostPath`, `Exec.spawn`), looks them up in PATH as Windows
+  does, runs `lix`/`haxe`/`haxelib`/`neko` as itself, and runs plain hook commands
+  directly (others through cmd.exe). The root is `%APPDATA%\haxe`, as with the
+  npm package. CI runs `scope create`, `download`, an install and a compile on
+  Windows and macOS.
+- `haxe --run install-libs` (and so `lix download`) names each command that
+  failed and why, where upstream reports only how many failed.
 
 ## Gaps in the Haxe standard library
 

@@ -20,7 +20,7 @@ run_case install-missing-lib 'lix scope create' 'lix install haxelib:surely_no_s
 run_case install-git 'lix scope create' 'lix install git:https://github.com/haxetink/tink_chunk#d48423f6ccd6ba9f0d529c7579138b9aabbbc7bd'
 run_case install-zip-url 'lix scope create' 'lix install https://lib.haxe.org/p/hxnodejs/12.2.0/download/'
 run_case download 'lix scope create' 'lix use haxe 4.3.6' 'lix install haxelib:tink_json' 'rm -rf ../root/haxe_libraries' 'lix download' 'ls ../root/haxe_libraries'
-run_case download-url 'lix scope create' 'lix download haxelib:tink_core#2.1.1' 'lix download haxelib:tink_core#2.1.1 into custom/place'
+run_case download-url 'lix scope create' 'lix download haxe' 'lix download nope:x' 'lix download haxelib:tink_core#2.1.1' 'lix download haxelib:tink_core#2.1.1 into custom/place'
 run_case dev 'lix scope create' 'mkdir -p mylib/src' 'echo "{\"name\":\"mylib\",\"version\":\"1.0.0\",\"classPath\":\"src\",\"dependencies\":{\"tink_core\":\"\"}}" > mylib/haxelib.json' 'lix dev mylib mylib' 'lix dev nope nope' 'lix dev mylib'
 run_case haxe-versions 'lix scope create' 'lix haxe-versions' 'lix haxe-versions extra'
 run_case use-haxe 'lix scope create' 'lix use haxe 4.3.6' 'cat .haxerc' 'lix use haxe 9.9.9' 'lix use haxe'
