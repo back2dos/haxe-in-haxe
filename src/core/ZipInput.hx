@@ -191,7 +191,14 @@ class ZipInput {
 				var res = Bytes.alloc(e.uncompressedSize);
 				var z = try new haxe.zip.Uncompress(-15) catch (_:haxe.exceptions.NotImplementedException) null;
 				var written = if (z == null) {
-					// port: host runtimes without zlib (hxc) inflate with the pure Haxe haxe.zip.InflateImpl.
+					#if (target.name == "hxc")
+					// port: the hxc runtime inflates in C (hxc.NativeZip), several times faster
+					// than haxe.zip.InflateImpl.
+					var n = hxc.NativeZip.inflateRaw(data, 0, data.length, res, 0, res.length);
+					if (n < 0) throw new ZipError(filename, e.filename, "decompression error");
+					n;
+					#else
+					// port: host runtimes without zlib inflate with the pure Haxe haxe.zip.InflateImpl.
 					var inflate = new haxe.zip.InflateImpl(new haxe.io.BytesInput(data), false, false);
 					var n = 0;
 					try {
@@ -206,6 +213,7 @@ class ZipInput {
 						throw new ZipError(filename, e.filename, "decompression error");
 					}
 					n;
+					#end
 				} else {
 					var r = try z.execute(data, 0, res, 0) catch (_:Dynamic) {
 						z.close();

@@ -1,5 +1,5 @@
 // The hxc runtime: Array, Math, Date, Bytes, BytesBuffer,
-// FPHelper natives.
+// FPHelper natives; DEFLATE decompression (hxc.NativeZip).
 #include "rt.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -703,4 +703,234 @@ int32_t haxe_io_FPHelper_doubleHigh(double v) {
 	uint64_t u;
 	memcpy(&u, &v, 8);
 	return (int32_t)(u >> 32);
+}
+
+// ---- DEFLATE decompression (hxc.NativeZip): a canonical-Huffman decoder of
+// RFC 1951 streams held whole in memory. Errors (invalid codes, the input
+// running out, the output overflowing) set `err`, which every loop checks.
+
+typedef struct {
+	const unsigned char *in;
+	size_t inlen, inpos;
+	unsigned char *out;
+	size_t outlen, outpos;
+	uint32_t bitbuf;
+	int bitcnt, err;
+} infl_state;
+
+typedef struct {
+	short count[16]; // the number of codes of each length
+	short symbol[288]; // the symbols in code order
+} infl_huff;
+
+static int infl_bits(infl_state *s, int need) {
+	uint32_t val = s->bitbuf;
+	while (s->bitcnt < need) {
+		if (s->inpos == s->inlen) {
+			s->err = 1;
+			return 0;
+		}
+		val |= (uint32_t)s->in[s->inpos++] << s->bitcnt;
+		s->bitcnt += 8;
+	}
+	s->bitbuf = need == 32 ? 0 : val >> need;
+	s->bitcnt -= need;
+	return (int)(val & ((1u << need) - 1));
+}
+
+static int infl_decode(infl_state *s, const infl_huff *h) {
+	int code = 0, first = 0, index = 0;
+	for (int len = 1; len <= 15; len++) {
+		code |= infl_bits(s, 1);
+		if (s->err) return -1;
+		int count = h->count[len];
+		if (code - count < first) return h->symbol[index + (code - first)];
+		index += count;
+		first += count;
+		first <<= 1;
+		code <<= 1;
+	}
+	s->err = 1; // no code of 15 bits or less matches
+	return -1;
+}
+
+// 0 for a complete code, > 0 for an incomplete one, < 0 for an oversubscribed one
+static int infl_construct(infl_huff *h, const short *length, int n) {
+	short offs[16];
+	for (int len = 0; len <= 15; len++) h->count[len] = 0;
+	for (int sym = 0; sym < n; sym++) h->count[length[sym]]++;
+	if (h->count[0] == n) return 0;
+	int left = 1;
+	for (int len = 1; len <= 15; len++) {
+		left <<= 1;
+		left -= h->count[len];
+		if (left < 0) return left;
+	}
+	offs[1] = 0;
+	for (int len = 1; len < 15; len++) offs[len + 1] = (short)(offs[len] + h->count[len]);
+	for (int sym = 0; sym < n; sym++)
+		if (length[sym] != 0) h->symbol[offs[length[sym]]++] = (short)sym;
+	return left;
+}
+
+static const short infl_lbase[29] = {3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 15, 17, 19, 23, 27, 31, 35, 43, 51, 59, 67, 83, 99, 115, 131, 163, 195, 227, 258};
+static const short infl_lext[29] = {0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 4, 4, 4, 4, 5, 5, 5, 5, 0};
+static const short infl_dbase[30] = {1, 2, 3, 4, 5, 7, 9, 13, 17, 25, 33, 49, 65, 97, 129, 193, 257, 385, 513, 769, 1025, 1537, 2049, 3073, 4097, 6145, 8193, 12289, 16385, 24577};
+static const short infl_dext[30] = {0, 0, 0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 8, 8, 9, 9, 10, 10, 11, 11, 12, 12, 13, 13};
+
+static void infl_codes(infl_state *s, const infl_huff *lencode, const infl_huff *distcode) {
+	for (;;) {
+		int symbol = infl_decode(s, lencode);
+		if (s->err) return;
+		if (symbol < 256) {
+			if (s->outpos == s->outlen) {
+				s->err = 1;
+				return;
+			}
+			s->out[s->outpos++] = (unsigned char)symbol;
+		} else if (symbol == 256) {
+			return;
+		} else {
+			symbol -= 257;
+			if (symbol >= 29) {
+				s->err = 1;
+				return;
+			}
+			size_t len = (size_t)(infl_lbase[symbol] + infl_bits(s, infl_lext[symbol]));
+			symbol = infl_decode(s, distcode);
+			if (s->err) return;
+			if (symbol < 0 || symbol >= 30) {
+				s->err = 1;
+				return;
+			}
+			size_t dist = (size_t)(infl_dbase[symbol] + infl_bits(s, infl_dext[symbol]));
+			if (s->err || dist > s->outpos || len > s->outlen - s->outpos) {
+				s->err = 1;
+				return;
+			}
+			unsigned char *p = s->out + s->outpos;
+			const unsigned char *q = p - dist;
+			for (size_t i = 0; i < len; i++) p[i] = q[i]; // overlapping copies repeat the pattern
+			s->outpos += len;
+		}
+	}
+}
+
+static void infl_stored(infl_state *s) {
+	s->bitbuf = 0; // skip to the next byte boundary
+	s->bitcnt = 0;
+	if (s->inlen - s->inpos < 4) {
+		s->err = 1;
+		return;
+	}
+	const unsigned char *p = s->in + s->inpos;
+	size_t len = (size_t)p[0] | ((size_t)p[1] << 8);
+	if (p[2] != (unsigned char)~p[0] || p[3] != (unsigned char)~p[1]) {
+		s->err = 1;
+		return;
+	}
+	s->inpos += 4;
+	if (len > s->inlen - s->inpos || len > s->outlen - s->outpos) {
+		s->err = 1;
+		return;
+	}
+	memcpy(s->out + s->outpos, s->in + s->inpos, len);
+	s->inpos += len;
+	s->outpos += len;
+}
+
+static void infl_fixed(infl_state *s) {
+	infl_huff lencode, distcode;
+	short lengths[288];
+	int sym = 0;
+	for (; sym < 144; sym++) lengths[sym] = 8;
+	for (; sym < 256; sym++) lengths[sym] = 9;
+	for (; sym < 280; sym++) lengths[sym] = 7;
+	for (; sym < 288; sym++) lengths[sym] = 8;
+	infl_construct(&lencode, lengths, 288);
+	for (sym = 0; sym < 30; sym++) lengths[sym] = 5;
+	infl_construct(&distcode, lengths, 30);
+	infl_codes(s, &lencode, &distcode);
+}
+
+static void infl_dynamic(infl_state *s) {
+	static const short order[19] = {16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15};
+	short lengths[320];
+	infl_huff lencode, distcode;
+	int nlen = infl_bits(s, 5) + 257;
+	int ndist = infl_bits(s, 5) + 1;
+	int ncode = infl_bits(s, 4) + 4;
+	if (s->err || nlen > 286 || ndist > 30) {
+		s->err = 1;
+		return;
+	}
+	int index;
+	for (index = 0; index < ncode; index++) lengths[order[index]] = (short)infl_bits(s, 3);
+	for (; index < 19; index++) lengths[order[index]] = 0;
+	if (s->err || infl_construct(&lencode, lengths, 19) != 0) { // the code length code must be complete
+		s->err = 1;
+		return;
+	}
+	index = 0;
+	while (index < nlen + ndist) {
+		int symbol = infl_decode(s, &lencode);
+		if (s->err) return;
+		if (symbol < 16) {
+			lengths[index++] = (short)symbol;
+		} else {
+			short len = 0;
+			if (symbol == 16) {
+				if (index == 0) {
+					s->err = 1;
+					return;
+				}
+				len = lengths[index - 1];
+				symbol = 3 + infl_bits(s, 2);
+			} else if (symbol == 17) {
+				symbol = 3 + infl_bits(s, 3);
+			} else {
+				symbol = 11 + infl_bits(s, 7);
+			}
+			if (s->err || index + symbol > nlen + ndist) {
+				s->err = 1;
+				return;
+			}
+			while (symbol--) lengths[index++] = len;
+		}
+	}
+	if (lengths[256] == 0) { // no end-of-block code
+		s->err = 1;
+		return;
+	}
+	// an incomplete code is only allowed for a single length
+	int left = infl_construct(&lencode, lengths, nlen);
+	if (left < 0 || (left > 0 && nlen - lencode.count[0] != 1)) {
+		s->err = 1;
+		return;
+	}
+	left = infl_construct(&distcode, lengths + nlen, ndist);
+	if (left < 0 || (left > 0 && ndist - distcode.count[0] != 1)) {
+		s->err = 1;
+		return;
+	}
+	infl_codes(s, &lencode, &distcode);
+}
+
+int32_t hxc_NativeZip_inflateRaw(void *src, int32_t srcPos, int32_t srcLen, void *dst, int32_t dstPos, int32_t dstLen) {
+	if (srcPos < 0 || srcLen < 0 || srcPos + srcLen > BYTES_LEN(src) || dstPos < 0 || dstLen < 0 || dstPos + dstLen > BYTES_LEN(dst))
+		hx_throw_str("OutsideBounds");
+	// nothing below allocates: the buffers stay in place
+	infl_state s = {BYTES_DATA(src) + srcPos, (size_t)srcLen, 0, BYTES_DATA(dst) + dstPos, (size_t)dstLen, 0, 0, 0, 0};
+	int last;
+	do {
+		last = infl_bits(&s, 1);
+		int type = infl_bits(&s, 2);
+		if (s.err) return -1;
+		if (type == 0) infl_stored(&s);
+		else if (type == 1) infl_fixed(&s);
+		else if (type == 2) infl_dynamic(&s);
+		else return -1;
+		if (s.err) return -1;
+	} while (!last);
+	return (int32_t)s.outpos;
 }
