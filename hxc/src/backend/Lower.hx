@@ -34,7 +34,18 @@ class Lower {
 		prog.classes.push(root);
 	}
 
-	public static function program(main:TClass, types:Array<core.TType.ModuleType>):Program {
+	// the program's basic types (the coroutine types: Coroutine below)
+	static var basic:core.TType.BasicTypes;
+
+	// follows `t`, a coroutine type as the function taking the continuation
+	public static function followFun(t:T):T
+		return switch TFunctions.followWithCoro(t) {
+			case Coro(s): TFun(context.Common.expandCoroType(basic, s.args, s.ret));
+			case NotCoro(t): t;
+		}
+
+	public static function program(main:TClass, types:Array<core.TType.ModuleType>, basic:core.TType.BasicTypes):Program {
+		Lower.basic = basic;
 		var l = new Lower();
 		var mainField = main.clStatics.get("main");
 		l.prog.main = l.staticFunc(main, mainField);
@@ -188,6 +199,12 @@ class Lower {
 					case "EnumValue" if (isStd): TRef(REnum(null));
 					case "UInt" if (isStd): TI32;
 					case "I64" if (a.aPath.pack.join(".") == "hxc"): TI64;
+					// a coroutine is a function taking the continuation, as on HashLink
+					case "Coroutine" if (a.aPath.pack.join(".") == "haxe.coro"):
+						switch followFun(t) {
+							case t = TFun(_): ty(t);
+							case _: fail("coroutine type");
+						}
 					case _:
 						if (core.Meta.has(CoreType, a.aMeta)) fail("core type " + a.aPath.name);
 						ty(core.Abstract.getUnderlyingType(a, params));
@@ -369,7 +386,7 @@ class Lower {
 			signature(fi, dtf, TRef(RObj(root)));
 		} else if (decl != null && dtf == null) {
 			// interface or abstract declaration without a body: use its type
-			switch TFunctions.follow(decl.cfType) {
+			switch followFun(decl.cfType) {
 				case TFun(s) if (s.args.length == tf.tfArgs.length):
 					var id = 0;
 					fi.args.push(new Local(id++, "this0", TRef(RObj(root))));

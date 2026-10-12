@@ -69,6 +69,7 @@ static void *str_array(char **v, int32_t n) {
 }
 
 void *hxc_NativeSys_args(void) { return str_array(rt_argv + 1, rt_argc > 0 ? rt_argc - 1 : 0); }
+void *hxc_NativeSys_argv0(void) { return rt_argc > 0 ? str_of_c(rt_argv[0]) : NULL; }
 
 void *hxc_NativeSys_getEnv(void *s) {
 	char *n = hx_str_to_utf8(s);

@@ -41,8 +41,24 @@ class StringTools {
 	/**
 		Encode an URL by using the standard format.
 	**/
-	#if (!java && !cpp && !lua && !eval) inline #end public static function urlEncode(s:String):String {
-		#if flash
+	#if (!java && !cpp && !lua && !eval && target.name != "hxc") inline #end public static function urlEncode(s:String):String {
+		#if (target.name == "hxc")
+		// hxc: as Eval (core.StringHelper.urlEncode): UTF-8 bytes, all but [A-Za-z0-9_.-] escaped
+		var b = new StringBuf();
+		var bytes = haxe.io.Bytes.ofString(s);
+		for (i in 0...bytes.length) {
+			var c = bytes.get(i);
+			if ((c >= "A".code && c <= "Z".code) || (c >= "a".code && c <= "z".code) || (c >= "0".code && c <= "9".code) || c == "_".code
+				|| c == "-".code || c == ".".code)
+				b.addChar(c);
+			else {
+				b.addChar("%".code);
+				b.addChar("0123456789ABCDEF".charCodeAt(c >> 4));
+				b.addChar("0123456789ABCDEF".charCodeAt(c & 0xF));
+			}
+		}
+		return b.toString();
+		#elseif flash
 		return untyped __global__["encodeURIComponent"](s);
 		#elseif neko
 		return untyped new String(_urlEncode(s.__s));
@@ -107,8 +123,27 @@ class StringTools {
 	/**
 		Decode an URL using the standard format.
 	**/
-	#if (!java && !cpp && !lua && !eval) inline #end public static function urlDecode(s:String):String {
-		#if flash
+	#if (!java && !cpp && !lua && !eval && target.name != "hxc") inline #end public static function urlDecode(s:String):String {
+		#if (target.name == "hxc")
+		// hxc: '+' is a space, %XX sequences are UTF-8 bytes (others are kept)
+		var out = new haxe.io.BytesBuffer();
+		var bytes = haxe.io.Bytes.ofString(s);
+		function hex(c:Int)
+			return if (c >= "0".code && c <= "9".code) c - "0".code else if (c >= "a".code && c <= "f".code) c - "a".code + 10 else
+				if (c >= "A".code && c <= "F".code) c - "A".code + 10 else -1;
+		var i = 0;
+		while (i < bytes.length) {
+			var c = bytes.get(i);
+			if (c == "%".code && i + 2 < bytes.length && hex(bytes.get(i + 1)) >= 0 && hex(bytes.get(i + 2)) >= 0) {
+				out.addByte((hex(bytes.get(i + 1)) << 4) | hex(bytes.get(i + 2)));
+				i += 3;
+			} else {
+				out.addByte(c == "+".code ? " ".code : c);
+				i++;
+			}
+		}
+		return out.getBytes().toString();
+		#elseif flash
 		return untyped __global__["decodeURIComponent"](s.split("+").join(" "));
 		#elseif neko
 		return untyped new String(_urlDecode(s.__s));
