@@ -45,7 +45,9 @@ make test                          # HXB conformance of bin/hxc/hih/hih_clang
 make test-fuzz LANE=diff:js        # the fuzzer (bin/fuzz/fuzz) on one lane
 ```
 
-See [test/README.md](test/README.md) for the other harnesses.
+See [test/README.md](test/README.md) for the other harnesses. CI also runs
+upstream's own test suite (`RunCi` for every target, Linux and macOS) with
+the release binaries as `haxe`: `.github/workflows/upstream-tests.yml`.
 
 ## hxc for other programs
 

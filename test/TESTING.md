@@ -35,6 +35,48 @@ on Linux, macOS and Windows x86_64/arm64 (Cosmopolitan build), including its
 github.com) and `eval.luv` check (timer, TCP echo). Locally after the move to
 the Makefile: `make test` 279 + 7, `make test-fuzz LANE=diff:js N=100` 100/100.
 
+### Upstream's CI suite (2026-10-12)
+
+Upstream's `linux-test` and `mac-test` jobs, `haxe --run RunCi <target>` with
+the release binaries as `haxe` and haxelib built by the port
+(`.github/workflows/upstream-tests.yml`, [README.md](README.md)). Run
+https://github.com/benmerckx/haxe-in-haxe/actions/runs/38284581526:
+
+| Target | Linux x86_64 | Linux arm64 | macOS arm64 |
+| --- | --- | --- | --- |
+| macro | pass | pass | pass |
+| js | pass | pass | pass |
+| hl | fails (1) | fails (1) | fails (1); macOS x86_64 too |
+| cpp | pass | pass | pass |
+| jvm | pass | pass | pass |
+| php | pass | pass | pass |
+| python | pass | pass | pass |
+| lua | pass | pass (2) | pass |
+| flash | pass | – (as upstream) | pass |
+| neko | pass | pass (2) | pass |
+
+1. Everything up to the last step passes (unit on HL/JIT and HL/C, threads,
+   sys, event loop, hlcode, misc hl); in misc hlc, 7 of 8 projects pass and
+   `Issue11689` fails explicitly: its function type `hl.Ref<String> -> Void`
+   is named after an MD5 of an OCaml `Marshal` with closures (hl2c.ml
+   `make_sign`), which contains a code pointer of the reference binary
+   itself, so no port can reproduce the name (see "Known differences").
+2. The first run (https://github.com/benmerckx/haxe-in-haxe/actions/runs/38279061784)
+   had a segmentation fault of the Linux arm64 binary compiling
+   `tests/unit/compile-neko.hxml` and `tests/sys/compile-lua.hxml`; neither
+   came back in the second run. Not reproduced yet (no arm64 host here).
+
+The first run also found three port bugs, fixed since: project-wide
+diagnostics after `server/setCwd` ("Display file does not exist": the display
+file marker was resolved against the current directory at each use),
+RenameVars raising strings where upstream raises `Failure` (no diagnostics
+response for an unbound variable, server test `Issue11711`), and the ZIP
+reader's pure Haxe inflate, three times slower than the reference's: the
+server's background read of hxjava's jar delayed the following requests past
+the server tests' 3 s setup timeout (`Issue11549` and every test after it on
+macOS). Locally with the fixes: `make test` 279 + 7, `display.py` 679/679,
+`server.py` 595/595, `server-jsonrpc.py` 107/107, `diff:jvm` 60/60.
+
 ### hxc changes for lix (2026-10-12)
 
 The hxc changes made for `tools/lix/` (coroutine types in the lowering; in hxc's
@@ -78,7 +120,10 @@ Compile times of every target on two real projects: `site/bench/targets.py`.
 - HashLink build: a few upstream tests need `Gc.finalise` or a libuv loop,
   which that build does not provide.
 - HL/C: type descriptors that upstream hashes from an OCaml `Marshal` of a
-  closure fail explicitly (the reference crashes on the one known input). The
+  closure fail explicitly: upstream's misc test `hlc/projects/Issue11689`
+  (`hl.Ref<String>` in a function type) is one; the reference names the type
+  after a code pointer of its own binary, so its name differs between
+  reference builds too. The
   hashes depend on which field name strings are physically shared, which the
   port reproduces only on hosts with string identity (hxc, HashLink, JVM).
 - HL/C: the reference writes `hl/hashes.c` in the order its parallel workers
@@ -87,5 +132,5 @@ Compile times of every target on two real projects: `site/bench/targets.py`.
   differ (an abstract and its implementation write the same file name).
 - `--main lower.case`: "Type not found" where the reference reports an
   uppercase-letter error.
-- Not covered: running the generated programs of the target generators (their
-  output is compared instead) and Windows hosts.
+- Not covered: Windows hosts (upstream's `windows64-test` is not mirrored:
+  test/README.md). The generated programs run in the upstream CI suite only.

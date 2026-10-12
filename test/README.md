@@ -27,3 +27,32 @@ build, typically `bin/hxc/hih/hih_clang` (`make port`; `make test` runs
 
 Sequential runs pass `-D disable-parallelism`: the reference itself is not
 deterministic in parallel mode.
+
+## Upstream's CI suite
+
+`.github/workflows/upstream-tests.yml` (called by `build.yml` after the
+release builds) runs upstream's GitHub Actions test jobs with the port as
+`haxe`: `haxe --run RunCi <target>` in `haxe/tests` for macro, js, hl, cpp,
+jvm, php, python, lua, flash and neko, as upstream's `linux-test` (x86_64 and
+arm64) and `mac-test` (arm64, plus hl on x86_64) do, with their per-target
+packages, d8, Lua cache, timeouts and `fail-fast: false`. Each job:
+
+- downloads the release archive of its platform (`haxe-in-haxe-linux-*`,
+  `haxe-in-haxe-macos-*`) and links its binary as `/usr/local/bin/haxe`, with
+  `HAXE_STD_PATH` at the submodule's `haxe/std`;
+- installs neko with upstream's composite action
+  (`./haxe/.github/actions/setup-neko`) and builds haxelib as upstream's
+  Makefile does, but with the port: `haxe client.hxml` in
+  `haxe/extra/haxelib_src` (the port's `run.n` is byte-identical to the
+  reference's), `nekotools boot -c run.n`, then `cc run.c -lneko`;
+- runs RunCi straight from the submodule (checked out recursively), which
+  installs each target's runtime and libraries itself.
+
+Upstream's `windows64-test` is not mirrored: the Windows build is the
+Cosmopolitan binary, whose Eval host reports `Sys.systemName()` "Linux" and
+`/D/a/...` paths, so RunCi passes POSIX paths and `-D Linux` to Windows
+programs (a first run failed at haxelib's version parsing in the macro job).
+
+Locally, the same runs need a haxelib built as above on `PATH` (with
+`HAXELIB_PATH` pointing at a scratch repository, so `~/.haxelib` is left
+alone) and the target's runtime; `test/TESTING.md` has the results.
