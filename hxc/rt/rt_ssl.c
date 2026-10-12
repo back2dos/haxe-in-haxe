@@ -77,7 +77,12 @@ int32_t hxc_NativeSsl_bioErrorSend(void *ssl) NO_I
 #else
 
 #include <errno.h>
+#ifdef _WIN32
+#include "rt_win.h"
+#include <wincrypt.h>
+#else
 #include <sys/socket.h>
+#endif
 #include <time.h>
 #ifdef __TINYC__
 // tcc defines neither __GNUC__ nor __clang__: skip mbedtls/check_config.h,
@@ -372,7 +377,65 @@ static int load_ca_files(mbedtls_x509_crt *chain, const char *const *paths) {
 }
 #endif
 
+#ifdef _WIN32
+// upstream's Windows branch: the system's "Root" store
+static int load_windows_roots(mbedtls_x509_crt *chain) {
+	int r = 1;
+	HCERTSTORE store;
+	if ((store = CertOpenSystemStoreW(0, L"Root"))) {
+		PCCERT_CONTEXT cert = NULL;
+		while ((cert = CertEnumCertificatesInStore(store, cert))) {
+			r = mbedtls_x509_crt_parse_der(chain, (unsigned char *)cert->pbCertEncoded, cert->cbCertEncoded);
+			if (r != 0) return r; // as upstream (which leaves the store open)
+		}
+		CertCloseStore(store, 0);
+	}
+	return r;
+}
+
+// upstream's Windows verify callback (ml_mbedtls_ssl_config_init): a chain
+// mbedtls rejects (other than for its name) is checked by the system, which
+// may know intermediate or root certificates the CA chain lacks
+static int verify_callback(void *param, mbedtls_x509_crt *crt, int depth, uint32_t *flags) {
+	if (*flags == 0 || *flags & MBEDTLS_X509_BADCERT_CN_MISMATCH) return 0;
+	HCERTSTORE store = CertOpenStore(CERT_STORE_PROV_MEMORY, 0, 0, CERT_STORE_DEFER_CLOSE_UNTIL_LAST_FREE_FLAG, NULL);
+	if (store == NULL) return MBEDTLS_ERR_X509_FATAL_ERROR;
+	PCCERT_CONTEXT primary_context = NULL;
+	if (!CertAddEncodedCertificateToStore(store, X509_ASN_ENCODING, crt->raw.p, crt->raw.len, CERT_STORE_ADD_REPLACE_EXISTING, &primary_context)) {
+		CertCloseStore(store, 0);
+		return MBEDTLS_ERR_X509_FATAL_ERROR;
+	}
+	PCCERT_CHAIN_CONTEXT chain_context = NULL;
+	CERT_CHAIN_PARA parameters;
+	memset(&parameters, 0, sizeof parameters);
+	if (!CertGetCertificateChain(NULL, primary_context, NULL, store, &parameters, 0, NULL, &chain_context)) {
+		CertFreeCertificateContext(primary_context);
+		CertCloseStore(store, 0);
+		return MBEDTLS_ERR_X509_FATAL_ERROR;
+	}
+	CERT_CHAIN_POLICY_PARA policy_parameters;
+	CERT_CHAIN_POLICY_STATUS policy_status;
+	memset(&policy_parameters, 0, sizeof policy_parameters);
+	memset(&policy_status, 0, sizeof policy_status);
+	if (!CertVerifyCertificateChainPolicy(CERT_CHAIN_POLICY_SSL, chain_context, &policy_parameters, &policy_status)) {
+		CertFreeCertificateChain(chain_context);
+		CertFreeCertificateContext(primary_context);
+		CertCloseStore(store, 0);
+		return MBEDTLS_ERR_X509_FATAL_ERROR;
+	}
+	if (policy_status.dwError == 0) *flags = 0;
+	else *flags |= MBEDTLS_X509_BADCERT_OTHER;
+	CertFreeCertificateChain(chain_context);
+	CertFreeCertificateContext(primary_context);
+	CertCloseStore(store, 0);
+	return 0;
+}
+#endif
+
 int32_t hxc_NativeSsl_certLoadDefaults(void *certificate) {
+#ifdef _WIN32
+	return load_windows_roots(PTR(certificate));
+#endif
 #if defined(__APPLE__) && !defined(__COSMOPOLITAN__)
 	return load_macos_roots(PTR(certificate));
 #endif
@@ -397,6 +460,9 @@ int32_t hxc_NativeSsl_certLoadDefaults(void *certificate) {
 void *hxc_NativeSsl_configInit(void) {
 	mbedtls_ssl_config *ssl_config = malloc(sizeof(mbedtls_ssl_config));
 	mbedtls_ssl_config_init(ssl_config);
+#ifdef _WIN32
+	mbedtls_ssl_conf_verify(ssl_config, verify_callback, NULL);
+#endif
 	return rt_native_new_refs(ssl_config, free_ssl_config, 2);
 }
 
@@ -540,9 +606,15 @@ int32_t hxc_NativeSsl_sslWrite(void *ssl, void *buf, int32_t pos, int32_t len) {
 static int bio_write_cb(void *ctx, const unsigned char *buf, size_t len) {
 	hx_ssl *s = ctx;
 	ssize_t r;
+#ifdef _WIN32
+	RT_BLOCKING(r = send((SOCKET)s->fd, (const char *)buf, (int)len, 0));
+	if (r < 0) {
+		s->bio_errno = rt_win_sock_errno(WSAGetLastError());
+#else
 	RT_BLOCKING(r = send(s->fd, buf, len, 0));
 	if (r < 0) {
 		s->bio_errno = errno;
+#endif
 		s->bio_send = 1;
 		return MBEDTLS_ERR_NET_SEND_FAILED;
 	}
@@ -553,9 +625,15 @@ static int bio_write_cb(void *ctx, const unsigned char *buf, size_t len) {
 static int bio_read_cb(void *ctx, unsigned char *buf, size_t len) {
 	hx_ssl *s = ctx;
 	ssize_t r;
+#ifdef _WIN32
+	RT_BLOCKING(r = recv((SOCKET)s->fd, (char *)buf, (int)len, 0));
+	if (r < 0) {
+		s->bio_errno = rt_win_sock_errno(WSAGetLastError());
+#else
 	RT_BLOCKING(r = recv(s->fd, buf, len, 0));
 	if (r < 0) {
 		s->bio_errno = errno;
+#endif
 		s->bio_send = 0;
 		return MBEDTLS_ERR_NET_RECV_FAILED;
 	}

@@ -472,10 +472,55 @@ void rt_run_main(void (*body)(void)) { body(); }
 
 #else
 
+#ifdef _WIN32
+#if RT_GREEN
+#error "green threads (tcc, RT_GREEN_THREADS) are not supported on Windows"
+#endif
+// Windows: the subset of pthreads used below over slim reader/writer locks,
+// condition variables and CreateThread; poll is WSAPoll (sockets only); the
+// stacks are reservations (rt_win.h)
+#include "rt_win.h"
+typedef SRWLOCK pthread_mutex_t;
+typedef CONDITION_VARIABLE pthread_cond_t;
+typedef int pthread_condattr_t;
+#define PTHREAD_MUTEX_INITIALIZER SRWLOCK_INIT
+#define PTHREAD_COND_INITIALIZER CONDITION_VARIABLE_INIT
+#define pthread_mutex_init(m, a) InitializeSRWLock(m)
+#define pthread_mutex_destroy(m) ((void)(m))
+#define pthread_mutex_lock(m) AcquireSRWLockExclusive(m)
+#define pthread_mutex_trylock(m) (TryAcquireSRWLockExclusive(m) ? 0 : EBUSY)
+#define pthread_mutex_unlock(m) ReleaseSRWLockExclusive(m)
+#define pthread_condattr_init(a) ((void)(a))
+#define pthread_condattr_setclock(a, c) ((void)(a))
+#define pthread_cond_init(c, a) InitializeConditionVariable(c)
+#define pthread_cond_destroy(c) ((void)(c))
+#define pthread_cond_signal(c) WakeConditionVariable(c)
+#define pthread_cond_broadcast(c) WakeAllConditionVariable(c)
+#define pthread_cond_wait(c, m) (SleepConditionVariableSRW((c), (m), INFINITE, 0) ? 0 : EINVAL)
+// the deadline is on CLOCK_MONOTONIC (deadline_ts)
+static int pthread_cond_timedwait(pthread_cond_t *c, pthread_mutex_t *m, const struct timespec *ts) {
+	struct timespec now;
+	clock_gettime(CLOCK_MONOTONIC, &now);
+	double left = (double)(ts->tv_sec - now.tv_sec) + (double)(ts->tv_nsec - now.tv_nsec) * 1e-9;
+	DWORD ms = left <= 0 ? 0 : left > 4e6 ? 4000000000u : (DWORD)(left * 1000.0 + 0.999);
+	if (SleepConditionVariableSRW(c, m, ms, 0)) return 0;
+	return GetLastError() == ERROR_TIMEOUT ? ETIMEDOUT : EINVAL;
+}
+#define sched_yield() SwitchToThread()
+static int win_poll(struct pollfd *fds, int n, int ms) {
+	int r = WSAPoll(fds, (ULONG)n, ms);
+	if (r < 0) errno = rt_win_sock_errno(WSAGetLastError());
+	return r;
+}
+#define poll(fds, n, ms) win_poll((fds), (n), (ms))
+void rt_win_lock(rt_lock_t *l) { AcquireSRWLockExclusive((SRWLOCK *)l); }
+void rt_win_unlock(rt_lock_t *l) { ReleaseSRWLockExclusive((SRWLOCK *)l); }
+#else
 #include <poll.h>
 #include <sys/mman.h>
 #include <ucontext.h>
 #include <unistd.h>
+#endif
 #ifdef __COSMOPOLITAN__
 #include <cosmo.h> // IsWindows
 #endif
@@ -898,7 +943,9 @@ int rt_wait_fds(void *pollfds, int n, double timeout) {
 
 // ======== OS threads (1:1)
 
+#ifndef _WIN32
 #include <sched.h>
+#endif
 
 enum { TS_RUNNING, TS_SAFE }; // TS_SAFE: in a safe region or stopped at a safepoint
 
@@ -1158,6 +1205,13 @@ static void *thread_start(void *arg) {
 	return NULL;
 }
 
+#ifdef _WIN32
+static DWORD WINAPI win_thread_start(void *arg) {
+	thread_start(arg);
+	return 0;
+}
+#endif
+
 int32_t hxc_NativeThread_spawn(void *job) {
 	rt_thread *t = (rt_thread *)calloc(1, sizeof(rt_thread));
 	if (t) t->sbase = (void **)map_stack(SSTACK_BYTES);
@@ -1187,6 +1241,12 @@ int32_t hxc_NativeThread_spawn(void *job) {
 	rt_mt = 1;
 	int32_t id = t->id;
 	pthread_mutex_unlock(&wl);
+#ifdef _WIN32
+	// the C stack reserved (committed as it grows); the thread is not joined
+	HANDLE th = CreateThread(NULL, CSTACK_BYTES, win_thread_start, t, STACK_SIZE_PARAM_IS_A_RESERVATION, NULL);
+	int r = th == NULL;
+	if (th) CloseHandle(th);
+#else
 	pthread_attr_t attr;
 	pthread_attr_init(&attr);
 	pthread_attr_setstacksize(&attr, CSTACK_BYTES);
@@ -1194,6 +1254,7 @@ int32_t hxc_NativeThread_spawn(void *job) {
 	pthread_t pt;
 	int r = pthread_create(&pt, &attr, thread_start, t);
 	pthread_attr_destroy(&attr);
+#endif
 	if (r != 0) {
 		// never started: take it out again (it is safe, its job a root until now)
 		pthread_mutex_lock(&wl);
@@ -1507,7 +1568,17 @@ int rt_wait_fd(int fd, int write, double timeout) {
 // compiler is built with, lets the main fiber's stack grow to 1 GB, and deep
 // recursion in the port (the typer, Eval-interpreted code, the hxc regular
 // expression engine) needs more than the default 8 MB process stack.
-#if defined(__APPLE__) && defined(__aarch64__)
+#if defined(_WIN32)
+// Windows: main runs on a fiber of the main thread, whose stack is reserved
+// at that size (committed as it grows, with the system's guard page)
+static void *run_main_fiber;
+static void (*run_main_body)(void);
+static void WINAPI run_main_entry(void *arg) {
+	(void)arg;
+	run_main_body();
+	SwitchToFiber(run_main_fiber);
+}
+#elif defined(__APPLE__) && defined(__aarch64__)
 // macOS on arm64 has no working ucontext (getcontext fails): rt_call_on_stack
 // calls fn on the stack below top, then returns on the caller's stack
 void rt_call_on_stack(void *top, void (*fn)(void));
@@ -1536,6 +1607,19 @@ void rt_run_main(void (*body)(void)) {
 	if (IsWindows()) mb = 256; // Windows commits what is mapped
 #endif
 	size_t bytes = (size_t)(e ? atoi(e) : mb) << 20;
+#ifdef _WIN32
+	void *fiber = NULL;
+	if (bytes) {
+		run_main_body = body;
+		run_main_fiber = ConvertThreadToFiber(NULL);
+		if (run_main_fiber) fiber = CreateFiberEx(64 << 10, bytes, FIBER_FLAG_FLOAT_SWITCH, run_main_entry, NULL);
+	}
+	if (!fiber) {
+		body();
+		return;
+	}
+	SwitchToFiber(fiber);
+#else
 	char *stack = bytes ? (char *)map_stack(bytes) : NULL;
 	if (!stack) {
 		body();
@@ -1552,6 +1636,7 @@ void rt_run_main(void (*body)(void)) {
 	run_main_ctx.uc_link = &run_main_ret;
 	makecontext(&run_main_ctx, run_main_entry, 0);
 	swapcontext(&run_main_ret, &run_main_ctx);
+#endif
 #endif
 }
 

@@ -5,8 +5,13 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
+#ifdef _WIN32
+#include "rt_win.h" // mmap and friends over reservations committed on first touch
+#include <shellapi.h>
+#else
 #include <sys/mman.h>
 #include <unistd.h>
+#endif
 #ifdef __COSMOPOLITAN__
 #include <cosmo.h> // IsWindows
 #endif
@@ -803,7 +808,31 @@ static void report(void) {
 static uint64_t small_ints[2 * (SMALL_MAX - SMALL_MIN + 1)];
 static uint64_t bool_boxes[4];
 
+#ifdef _WIN32
+// The arguments as UTF-8, from the UTF-16 command line (OCaml's runtime on
+// Windows does the same; main's argv is in the ANSI code page). The standard
+// streams carry bytes as they are (haxe.ml: set_binary_mode_out; reads of
+// descriptors are Unix.read's ReadFile, without the C runtime's text mode).
+static void win_args(int *argc, char ***argv) {
+	int n;
+	wchar_t **w = CommandLineToArgvW(GetCommandLineW(), &n);
+	if (!w) return;
+	char **a = (char **)malloc(sizeof(char *) * (n + 1));
+	for (int i = 0; i < n; i++) a[i] = rt_win_utf8(w[i]);
+	a[n] = NULL;
+	LocalFree(w);
+	*argc = n;
+	*argv = a;
+}
+#endif
+
 void rt_init(int ng, int argc, char **argv) {
+#ifdef _WIN32
+	win_args(&argc, &argv);
+	_setmode(0, _O_BINARY);
+	_setmode(1, _O_BINARY);
+	_setmode(2, _O_BINARY);
+#endif
 	rt_argc = argc;
 	rt_argv = argv;
 #ifdef __COSMOPOLITAN__

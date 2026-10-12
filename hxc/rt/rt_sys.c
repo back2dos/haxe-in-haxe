@@ -1,5 +1,7 @@
 // The runtime for the C output of hxc/: operating-system
-// primitives behind hxc.NativeSys (hxc/std/hxc/NativeSys.hx). POSIX.
+// primitives behind hxc.NativeSys (hxc/std/hxc/NativeSys.hx). POSIX
+// (Windows: rt_sys_win.c).
+#ifndef _WIN32
 #define _GNU_SOURCE
 #include "rt.h"
 #include <dirent.h>
@@ -582,6 +584,9 @@ void *hxc_NativeSys_fullPath(void *path) {
 	return s;
 }
 
+// Extc.get_real_path is get_full_path outside Windows
+void *hxc_NativeSys_realPath(void *path) { return hxc_NativeSys_fullPath(path); }
+
 void *hxc_NativeSys_stat(void *path) {
 	char *p = hx_str_to_utf8(path);
 	struct stat st;
@@ -677,3 +682,5 @@ int32_t hxc_NativeSys_processWait(int32_t pid, int32_t block) {
 }
 
 void hxc_NativeSys_processKill(int32_t pid) { kill(pid, SIGKILL); }
+
+#endif

@@ -40,7 +40,7 @@ class Build {
 
 	public static function toBinary(out:String, o:Options):Int {
 		var rt = lib + "rt/";
-		var rtFiles = [for (f in ["rt", "rt_dyn", "rt_std", "rt_str", "rt_sys", "rt_net", "rt_ssl", "rt_uv", "rt_thread", "rt_census"]) rt + f + ".c"];
+		var rtFiles = [for (f in ["rt", "rt_dyn", "rt_std", "rt_str", "rt_sys", "rt_net", "rt_ssl", "rt_uv", "rt_thread", "rt_census", "rt_win", "rt_sys_win", "rt_net_win"]) rt + f + ".c"];
 		// chunked output (<out>_hxc/files.txt) unless hxc.com wrote one file (-D hxc.single)
 		var chunks = out + "_hxc/";
 		var single = o.single == true;

@@ -3,6 +3,7 @@
 // Unix functions the Eval natives of eval.vm.NativeSocket and sys.net.Host
 // call upstream (haxe/src/macro/eval/evalStdLib.ml StdSocket, StdHost).
 // -DHXC_NO_NET builds stubs that fail (targets without BSD sockets).
+// Windows: Winsock, rt_net_win.c.
 #define _GNU_SOURCE
 #include "rt.h"
 #include <errno.h>
@@ -37,7 +38,7 @@ void *hxc_NativeNet_gethostname(void) { no_net(); return NULL; }
 void *hxc_NativeNet_resolve(void *name) { no_net(); return NULL; }
 void *hxc_NativeNet_reverse(int32_t ip) { no_net(); return NULL; }
 
-#else
+#elif !defined(_WIN32) // Windows: rt_net_win.c
 
 #include <arpa/inet.h>
 #include <poll.h>

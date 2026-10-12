@@ -60,7 +60,8 @@ class Process {
 	public function exitCode(block:Bool = true):Null<Int> {
 		if (code == null) {
 			var c = NativeSys.processWait(pid, block);
-			if (c >= 0) code = c;
+			// Windows: a blocking wait returns the exit code, which may be negative (32 bits)
+			if (c >= 0 || (block && Sys.systemName() == "Windows")) code = c;
 		}
 		return code;
 	}

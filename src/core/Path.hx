@@ -186,6 +186,13 @@ class Path {
 	public static function getRealPath(path:String):String {
 		// port: Extc.get_real_path fails for a missing file (falling back to `path`);
 		// HashLink's fullPath returns null instead of throwing.
+		#if (target.name == "hxc")
+		// port: Windows' get_real_path (each component as the file system spells it) is a native of the hxc host
+		if (isWindows) {
+			var r = hxc.NativeSys.realPath(path);
+			return r == null ? path : r;
+		}
+		#end
 		var r = try FileSystem.fullPath(path) catch (_:Dynamic) null;
 		return r == null ? path : r;
 	}

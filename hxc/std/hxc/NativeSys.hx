@@ -38,7 +38,8 @@ extern class NativeSys {
 	static function deleteDirectory(path:String):Bool;
 	static function rename(path:String, newPath:String):Bool;
 	static function readDirectory(path:String):Null<Array<String>>;
-	static function fullPath(path:String):Null<String>;
+	static function fullPath(path:String):Null<String>; // realpath; Windows: GetFullPathName (Extc.get_full_path)
+	static function realPath(path:String):Null<String>; // Extc.get_real_path: Windows' spelling of an existing path; fullPath elsewhere
 	static function stat(path:String):Null<Array<Float>>; // gid uid atime mtime ctime dev ino nlink rdev size mode
 	// processes
 	static function processRun(cmd:String, args:Null<Array<String>>, fds:Array<Int>):Int; // pid, fds: stdin, stdout, stderr

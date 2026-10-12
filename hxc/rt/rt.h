@@ -132,9 +132,14 @@ extern const int32_t rt_bound_types[];
 #define RT_TLS
 #else
 #define RT_MT 1
+#ifdef _WIN32
+// Windows: the PE TLS directory (no TLS models)
+#define RT_TLS __thread
+#else
 // local-exec: one %fs-relative access, as cheap as a global (an executable,
 // never a shared library)
 #define RT_TLS __thread __attribute__((tls_model("local-exec")))
+#endif
 #endif
 
 // ---- allocation
@@ -234,8 +239,17 @@ static inline void **rt_push(uint32_t n) {
 // point only, so at -O2 a handler's loads (rt_exn, slots the try body wrote)
 // can be hoisted above the calls that throw. setjmp is returns_twice, which
 // GCC treats conservatively. _setjmp does not save the signal mask.
+#ifdef _WIN32
+// MinGW's setjmp/longjmp without SEH unwinding (as on POSIX: longjmp restores
+// the registers and nothing else): _setjmp(buf, NULL) on x86_64,
+// __mingw_setjmp on aarch64
+#define __USE_MINGW_SETJMP_NON_SEH
+#endif
 #include <setjmp.h>
-#if defined(__EMSCRIPTEN__) || defined(__TINYC__) || defined(__SANITIZE_THREAD__) // TSan intercepts setjmp/longjmp
+#if defined(_WIN32)
+#define RT_SETJMP(b) setjmp(b)
+#define RT_LONGJMP(b) longjmp(b, 1)
+#elif defined(__EMSCRIPTEN__) || defined(__TINYC__) || defined(__SANITIZE_THREAD__) // TSan intercepts setjmp/longjmp
 #define RT_SETJMP(b) setjmp(b)
 #define RT_LONGJMP(b) longjmp(b, 1)
 #else
@@ -308,7 +322,17 @@ void rt_blocking_leave(void);
 
 // Leaf locks of the runtime tables (no allocation, no safepoint while held):
 // pthread mutexes taken only once a second thread was ever started.
-#if RT_MT
+#if RT_MT && defined(_WIN32)
+// Windows: slim reader/writer locks (rt_thread.c; windows.h stays out of
+// generated code)
+extern int rt_mt;
+typedef struct { void *p; } rt_lock_t; // an SRWLOCK
+#define RT_LOCK_INIT {0}
+void rt_win_lock(rt_lock_t *l);
+void rt_win_unlock(rt_lock_t *l);
+#define rt_lock(l) do { if (rt_mt) rt_win_lock(l); } while (0)
+#define rt_unlock(l) do { if (rt_mt) rt_win_unlock(l); } while (0)
+#elif RT_MT
 #include <pthread.h>
 extern int rt_mt; // set (forever) when the second thread is spawned
 typedef pthread_mutex_t rt_lock_t;

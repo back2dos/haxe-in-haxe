@@ -543,7 +543,12 @@ double Std_parseFloat(void *s) {
 
 int32_t Std_random(int32_t max) {
 	if (max <= 0) return 0;
+#ifdef _WIN32
+	// the C runtime's rand() has 15 bits: two make 30
+	return (int32_t)(((uint64_t)((rand() << 15) ^ rand()) * (uint64_t)max) / ((uint64_t)0x3FFFFFFF + 1));
+#else
 	return (int32_t)(((uint64_t)rand() * (uint64_t)max) / ((uint64_t)RAND_MAX + 1));
+#endif
 }
 
 int32_t Std_isOfType(void *v, void *t) {

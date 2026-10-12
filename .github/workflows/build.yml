@@ -1,9 +1,12 @@
-# Builds the port (haxe.Main compiled to C by hxc) for Linux and macOS
-# (x86_64, aarch64) with zig cc, and as a Cosmopolitan APE binary that is also
-# the Windows build, each with mbedtls and libuv linked statically (`make
-# release`, `make cosmo`, the Makefile); tests each on a native runner
-# (hxc/tools/smoke.sh, TLS and libuv included) and publishes them:
-# a rolling `nightly` pre-release on pushes to main, a release on v* tags.
+# Builds the port (haxe.Main compiled to C by hxc) for Linux, macOS and
+# Windows (x86_64, aarch64) with zig cc, and as a Cosmopolitan APE binary,
+# each with mbedtls and libuv linked statically (`make release`, `make cosmo`,
+# the Makefile). The Windows builds are native (MinGW-w64, the UCRT; the
+# runtime's Windows host layer, hxc/rt/rt_win.h): Sys.systemName() is
+# "Windows" and paths, processes and the environment are Windows' own, as with
+# the reference haxe.exe. Tests each on a native runner (hxc/tools/smoke.sh,
+# TLS and libuv included) and publishes them: a rolling `nightly` pre-release
+# on pushes to main, a release on v* tags.
 # Also builds lix (tools/lix) as a Cosmopolitan binary, lix.com (`make
 # lix-cosmo`), and the website (`make site`: the playground's WebAssembly with
 # Emscripten, the pages' JavaScript compiled from Haxe by the Linux build of
@@ -14,7 +17,7 @@
 # Release assets (https://github.com/<repo>/releases/download/<tag>/<asset>):
 #   haxe-in-haxe-linux-x86_64.tar.gz   haxe-in-haxe-linux-aarch64.tar.gz
 #   haxe-in-haxe-macos-x86_64.tar.gz   haxe-in-haxe-macos-aarch64.tar.gz
-#   haxe-in-haxe-windows-x86_64.zip    (the APE binary as haxe-in-haxe.exe)
+#   haxe-in-haxe-windows-x86_64.zip    haxe-in-haxe-windows-aarch64.zip (haxe-in-haxe.exe)
 #   haxe-in-haxe.com                   (the APE binary, std embedded)
 #   haxe-in-haxe-licenses.zip          (the licenses of haxe-in-haxe.com)
 name: build
@@ -165,6 +168,12 @@ jobs:
             target: x86_64-macos
           - name: macos-aarch64
             target: aarch64-macos
+          - name: windows-x86_64
+            target: x86_64-windows-gnu
+            exe: .exe
+          - name: windows-aarch64
+            target: aarch64-windows-gnu
+            exe: .exe
     steps:
       - uses: actions/checkout@v7
       - uses: actions/download-artifact@v8
@@ -185,16 +194,28 @@ jobs:
           mkdir -p dist/c
           tar xzf dist/port-c.tar.gz -C dist/c
           make release TARGET=${{ matrix.target }} PORT_C=dist/c/prog_hxc
-          file bin/release/${{ matrix.target }}/haxe-in-haxe
+          file bin/release/${{ matrix.target }}/haxe-in-haxe${{ matrix.exe }}
       - name: Package
         run: |
           set -ex
           P=haxe-in-haxe-${{ matrix.name }}
           D=bin/deps/${{ matrix.target }}
           mkdir -p "pkg/$P"
-          cp bin/release/${{ matrix.target }}/haxe-in-haxe LICENSE COPYING $D/LICENSE.mbedtls $D/LICENSE.libuv "pkg/$P/"
+          cp bin/release/${{ matrix.target }}/haxe-in-haxe${{ matrix.exe }} LICENSE COPYING $D/LICENSE.mbedtls $D/LICENSE.libuv "pkg/$P/"
           tar xzf dist/std.tar.gz -C "pkg/$P"
-          cat > "pkg/$P/README.txt" <<EOF
+          if [ -n "${{ matrix.exe }}" ]; then
+            cat > "pkg/$P/README.txt" <<EOF
+          haxe-in-haxe: the Haxe compiler ported to Haxe, compiled to C (https://github.com/${{ github.repository }}).
+          Commit ${{ github.sha }}, target ${{ matrix.target }} (built with zig cc, with mbedtls and libuv).
+
+          Use it like haxe.exe, with HAXE_STD_PATH pointing at the std directory next to it:
+            set HAXE_STD_PATH=%CD%\std
+            haxe-in-haxe.exe -main Main --interp
+          EOF
+            (cd pkg && zip -qr -9 "../$P.zip" "$P")
+            ls -l "$P.zip"
+          else
+            cat > "pkg/$P/README.txt" <<EOF
           haxe-in-haxe: the Haxe compiler ported to Haxe, compiled to C (https://github.com/${{ github.repository }}).
           Commit ${{ github.sha }}, target ${{ matrix.target }} (built with zig cc, with mbedtls and libuv).
 
@@ -203,15 +224,18 @@ jobs:
             ./haxe-in-haxe -main Main --interp
           macOS: a browser download is quarantined; xattr -d com.apple.quarantine haxe-in-haxe
           EOF
-          tar czf "$P.tar.gz" -C pkg "$P"
-          ls -l "$P.tar.gz"
+            tar czf "$P.tar.gz" -C pkg "$P"
+            ls -l "$P.tar.gz"
+          fi
       - uses: actions/upload-artifact@v7
         with:
           name: haxe-in-haxe-${{ matrix.name }}
-          path: haxe-in-haxe-${{ matrix.name }}.tar.gz
+          path: haxe-in-haxe-${{ matrix.name }}.${{ matrix.exe && 'zip' || 'tar.gz' }}
           retention-days: 14
 
-  # the Cosmopolitan APE binary (Linux, macOS, Windows, BSDs), with mbedtls and libuv
+  # the Cosmopolitan APE binary (Linux, macOS, Windows, BSDs), with mbedtls and
+  # libuv: haxe-in-haxe.com, not the Windows release (its Eval host sees a POSIX
+  # system on Windows: Sys.systemName() "Linux", /C/... paths)
   cosmo:
     needs: generate
     runs-on: ubuntu-24.04
@@ -268,20 +292,6 @@ jobs:
           mkdir -p pkg/licenses
           cp LICENSE COPYING bin/deps/cosmo/LICENSE.mbedtls bin/deps/cosmo/LICENSE.libuv pkg/licenses/
           (cd pkg/licenses && zip -q -9 ../../out/haxe-in-haxe-licenses.zip *)
-          P=haxe-in-haxe-windows-x86_64
-          mkdir -p "pkg/$P"
-          cp out/haxe-in-haxe.com "pkg/$P/haxe-in-haxe.exe"
-          cp pkg/licenses/* "pkg/$P/"
-          cp -r pkg/std-zip/std "pkg/$P/"
-          cat > "pkg/$P/README.txt" <<EOF
-          haxe-in-haxe: the Haxe compiler ported to Haxe, compiled to C (https://github.com/${{ github.repository }}).
-          Commit ${{ github.sha }}. A Cosmopolitan (https://justine.lol/cosmopolitan/) build with mbedtls and libuv:
-          the same file runs on Linux, macOS and the BSDs as haxe-in-haxe.com.
-
-          The standard library is embedded in the executable; set HAXE_STD_PATH to use the std directory instead.
-            haxe-in-haxe.exe -main Main --interp
-          EOF
-          (cd pkg && zip -qr -9 "../out/$P.zip" "$P")
           ls -l out
       - uses: actions/upload-artifact@v7
         with:
@@ -329,10 +339,12 @@ jobs:
           - os: windows-latest
             pkg: windows-x86_64
           - os: windows-11-arm
-            pkg: windows-x86_64
+            pkg: windows-aarch64
           - os: ubuntu-24.04
             pkg: com
           - os: macos-latest
+            pkg: com
+          - os: windows-latest
             pkg: com
     runs-on: ${{ matrix.os }}
     continue-on-error: ${{ matrix.os == 'windows-11-arm' }}
@@ -348,7 +360,7 @@ jobs:
           node-version: 22
       - uses: actions/download-artifact@v8
         with:
-          name: ${{ (matrix.pkg == 'com' || startsWith(matrix.pkg, 'windows')) && 'haxe-in-haxe-cosmo' || format('haxe-in-haxe-{0}', matrix.pkg) }}
+          name: ${{ matrix.pkg == 'com' && 'haxe-in-haxe-cosmo' || format('haxe-in-haxe-{0}', matrix.pkg) }}
           path: dl
       - name: Unpack
         id: unpack
@@ -356,8 +368,11 @@ jobs:
           set -ex
           case "${{ matrix.pkg }}" in
             com)
-              mkdir -p t && cp dl/haxe-in-haxe.com t/ && chmod +x t/haxe-in-haxe.com
-              echo "bin=$PWD/t/haxe-in-haxe.com" >> "$GITHUB_OUTPUT"
+              # Windows runs it under an .exe name
+              B=haxe-in-haxe.com
+              if [ "$RUNNER_OS" = Windows ]; then B=haxe-in-haxe.exe; fi
+              mkdir -p t && cp dl/haxe-in-haxe.com "t/$B" && chmod +x "t/$B"
+              echo "bin=$PWD/t/$B" >> "$GITHUB_OUTPUT"
               echo "std=" >> "$GITHUB_OUTPUT" ;;
             windows-*)
               unzip -q dl/haxe-in-haxe-${{ matrix.pkg }}.zip -d t
@@ -381,7 +396,7 @@ jobs:
       - name: lix.com
         if: matrix.pkg == 'com' || startsWith(matrix.pkg, 'windows')
         # lix on Windows (Cosmopolitan's libuv, Windows programs, cmd.exe for hooks) is new
-        continue-on-error: ${{ startsWith(matrix.pkg, 'windows') }}
+        continue-on-error: ${{ runner.os == 'Windows' }}
         run: |
           set -ex
           if [ "$RUNNER_OS" = Windows ]; then L=lix/lix.exe; mv lix/lix.com "$L"; else L=lix/lix.com; chmod +x "$L"; fi
@@ -410,9 +425,6 @@ jobs:
           "$H" --run resolve-args -lib tink_json
           "$H" -cp src -lib tink_core --run Main a b
           "$H" -cp src -lib tink_core -main Main --js main.js && node main.js
-      - name: Smoke test (embedded std)
-        if: startsWith(matrix.pkg, 'windows')
-        run: SMOKE_DIR="$RUNNER_TEMP/smoke-zip" sh hxc/tools/smoke.sh "${{ steps.unpack.outputs.bin }}"
       - name: Smoke test (PowerShell, Windows paths)
         if: startsWith(matrix.pkg, 'windows')
         shell: pwsh
@@ -421,9 +433,12 @@ jobs:
           $exe = (Resolve-Path "t/haxe-in-haxe-${{ matrix.pkg }}/haxe-in-haxe.exe").Path
           New-Item -ItemType Directory -Force ps | Out-Null
           Set-Location ps
-          Set-Content Main.hx 'class Main { static function main() { trace("hello from " + #if sys Sys.systemName() #else "js" #end); } }'
-          & $exe -main Main --interp
+          Set-Content Main.hx 'class Main { static function main() { trace("hello from " + #if sys Sys.systemName() + " in " + Sys.getCwd() #else "js" #end); } }'
+          $out = & $exe -main Main --interp
           if ($LASTEXITCODE -ne 0) { exit 1 }
+          $out
+          # the native build's Eval host: Windows, with a drive letter
+          if (-not ($out -match "hello from Windows in [A-Z]:\\")) { exit 1 }
           & $exe -main Main --js out.js
           if ($LASTEXITCODE -ne 0) { exit 1 }
           node out.js
@@ -461,8 +476,8 @@ jobs:
           NOTES="Built from $GITHUB_SHA.
 
           - haxe-in-haxe-<os>-<arch>.tar.gz: Linux and macOS builds (zig cc, with mbedtls and libuv), with std/; set HAXE_STD_PATH to it.
-          - haxe-in-haxe-windows-x86_64.zip: the Cosmopolitan build as haxe-in-haxe.exe, with mbedtls and libuv.
-          - haxe-in-haxe.com: the same Cosmopolitan binary for Linux, macOS, Windows and the BSDs, with the std embedded. Its licenses (LICENSE, COPYING, LICENSE.mbedtls, LICENSE.libuv) are in haxe-in-haxe-licenses.zip; every archive carries its own."
+          - haxe-in-haxe-windows-<arch>.zip: Windows builds (zig cc, MinGW-w64 and the UCRT, with mbedtls and libuv) as haxe-in-haxe.exe, with std/; set HAXE_STD_PATH to it.
+          - haxe-in-haxe.com: a Cosmopolitan binary for Linux, macOS, Windows and the BSDs, with the std embedded. Its licenses (LICENSE, COPYING, LICENSE.mbedtls, LICENSE.libuv) are in haxe-in-haxe-licenses.zip; every archive carries its own."
           if [ "$GITHUB_REF_TYPE" = tag ]; then
             TAG=$GITHUB_REF_NAME
             gh release create "$TAG" --verify-tag --title "haxe-in-haxe $TAG" --notes "$NOTES" assets/*

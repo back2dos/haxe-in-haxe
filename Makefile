@@ -5,7 +5,7 @@
 #   make reference            haxe/haxe, the reference compiler (OCaml 5, opam)
 #   make dev                  bin/port/hih: the port, built in seconds (tcc)
 #   make port                 bin/hxc/hih/hih_clang: the port with clang -O2
-#   make release              bin/release/<TARGET>/haxe-in-haxe: zig cc, mbedtls, libuv
+#   make release              bin/release/<TARGET>/haxe-in-haxe[.exe]: zig cc, mbedtls, libuv
 #   make test                 HXB conformance of bin/hxc/hih/hih_clang
 #
 # Outputs go to bin/ (ignored by Git). Generated C is written in chunks and
@@ -44,7 +44,8 @@ PORT_C ?= bin/hxc/hih/prog_hxc
 # the playground's C (`make wasm`), likewise
 WEB_C ?= bin/hxc/hih-web/prog_hxc
 # `make release`/`make deps`: a zig target (x86_64-linux-gnu.2.28,
-# aarch64-linux-gnu.2.28, x86_64-macos, aarch64-macos), or cosmo for `make deps`
+# aarch64-linux-gnu.2.28, x86_64-macos, aarch64-macos, x86_64-windows-gnu,
+# aarch64-windows-gnu), or cosmo for `make deps`
 TARGET ?= x86_64-linux-gnu.2.28
 ZIG ?= zig
 # the cosmocc directory (default: cosmocc on PATH)
@@ -81,7 +82,8 @@ RT_SRC := $(wildcard hxc/rt/*.c hxc/rt/*.h)
 FUZZ_SRC := $(wildcard test/fuzz/*.hx)
 
 # the runtime files of the release, site and fuzz builds
-RT_FILES := rt rt_dyn rt_std rt_str rt_sys rt_net rt_ssl rt_uv rt_thread rt_census
+# (rt_win, rt_sys_win, rt_net_win: the Windows host layer, empty elsewhere)
+RT_FILES := rt rt_dyn rt_std rt_str rt_sys rt_net rt_ssl rt_uv rt_thread rt_census rt_win rt_sys_win rt_net_win
 # slots are read as int32/double/pointer through casts (FI/FD/FP): no strict aliasing
 CFLAGS_BASE := -w -fno-strict-aliasing
 NO_TLS_UV := -DHXC_NO_SSL -DHXC_NO_UV
@@ -95,7 +97,7 @@ HXC_ARGS := -cp bin/hxc/std --custom-target hxc
 STD := bin/hxc/std/.stamp
 WBK := bin/hxc/wbk.js
 NATIVE_TOOL := bin/hxc-dev/tool
-RELEASE_BIN := bin/release/$(TARGET)/haxe-in-haxe
+RELEASE_BIN := bin/release/$(TARGET)/haxe-in-haxe$(if $(findstring windows,$(TARGET)),.exe)
 
 # $(call wbk,<out>,<args>): C by the JS tool into <out>_hxc/; files.txt marks the run
 # (hxnodejs's stdout flush fails on pipes, hence the log file)
@@ -131,7 +133,7 @@ help:
 ## port             PORT_BIN (bin/hxc/hih/hih_clang): PORT_C by PORT_CC (TLS_UV: stub, system or a deps dir)
 ## web-c            WEB_C: the playground's C (-D hih_no_generators)
 ## deps             bin/deps/TARGET: mbedtls and libuv for TARGET (a zig target or cosmo; hxc/tools/deps.sh)
-## release          bin/release/TARGET/haxe-in-haxe: PORT_C by zig cc for TARGET, with mbedtls and libuv
+## release          bin/release/TARGET/haxe-in-haxe[.exe]: PORT_C by zig cc for TARGET, with mbedtls and libuv
 ## cosmo            bin/release/cosmo/haxe-in-haxe.com: the Cosmopolitan APE binary, with mbedtls and libuv
 ## wasm             bin/site/hih.{js,wasm,data}: the playground's compiler (Emscripten, emcc on PATH)
 ## site             bin/site: the website (wasm, pages, their scripts compiled by SITE_HAXE; LIX_COM under tools/)
@@ -234,6 +236,17 @@ release: $(RELEASE_BIN)
 bin/release/%/haxe-in-haxe: $(PORT_C)/files.txt bin/deps/%/VERSIONS $(RT_SRC)
 	@mkdir -p $(dir $@)
 	$(call cc,$(ZIG) cc -target $* -O2,$(ZIG_FLAGS),-Lbin/deps/$*/lib $(DEPS_LIBS) -lm -lpthread -ldl,$(PORT_C),$@,LDFLAGS="$(CFLAGS_BASE) -s" RT_FILES="$(RT_FILES)")
+	ls -l $@
+
+# Windows (x86_64-windows-gnu, aarch64-windows-gnu: MinGW-w64 and the UCRT):
+# the runtime's Windows host layer (hxc/rt/rt_win.h), the system libraries
+# of libuv, mbedtls and the runtime; stripped, without the PDB zig writes
+WIN_LIBS := -lws2_32 -liphlpapi -luserenv -lpsapi -ldbghelp -lole32 -lshell32 -luser32 -ladvapi32 -lcrypt32 -lbcrypt
+WIN_LDFLAGS := $(CFLAGS_BASE) -s
+bin/release/%/haxe-in-haxe.exe: $(PORT_C)/files.txt bin/deps/%/VERSIONS $(RT_SRC)
+	@mkdir -p $(dir $@)
+	$(call cc,$(ZIG) cc -target $* -O2,$(ZIG_FLAGS),-Lbin/deps/$*/lib $(DEPS_LIBS) $(WIN_LIBS),$(PORT_C),$@,LDFLAGS="$(WIN_LDFLAGS)" RT_FILES="$(RT_FILES)")
+	rm -f $(@:.exe=.pdb)
 	ls -l $@
 
 # cosmocc: `-L<dir>` in one argument (cosmocc maps it to <dir>/.aarch64 for the aarch64 half)

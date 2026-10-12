@@ -5,6 +5,16 @@
 #include <stdlib.h>
 #include <math.h>
 #include <time.h>
+#ifdef _WIN32
+// the C runtime's reentrant forms; its rand() has 15 bits: two make 30
+#define localtime_r(t, r) (localtime_s((r), (t)) == 0 ? (r) : NULL)
+#define gmtime_r(t, r) (gmtime_s((r), (t)) == 0 ? (r) : NULL)
+#define RT_RAND() ((rand() << 15) ^ rand())
+#define RT_RAND_MAX 0x3FFFFFFF
+#else
+#define RT_RAND() rand()
+#define RT_RAND_MAX RAND_MAX
+#endif
 
 void hx_arr_to_ptr(void **slot);
 void *hx_str_alloc(int32_t len);
@@ -374,7 +384,7 @@ void *Array_map(void *a, void *f) {
 // ---- Math
 
 // (NaN ... isFinite: static inline in rt.h)
-double Math_random(void) { return (double)rand() / ((double)RAND_MAX + 1); }
+double Math_random(void) { return (double)RT_RAND() / ((double)RT_RAND_MAX + 1); }
 
 // ---- Date: T_NATIVE object, slot 0 = milliseconds since the epoch (double)
 

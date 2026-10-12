@@ -164,11 +164,15 @@ void *hxc_NativeUv_getPasswd(void) { no_uv(); return NULL; }
 
 #include <errno.h>
 #include <signal.h>
+#ifdef _WIN32
+#include "rt_win.h"
+#else
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <netdb.h>
 #include <fcntl.h>
 #include <unistd.h>
+#endif
 #include <uv.h>
 
 int32_t hxc_NativeUv_available(void) { return 1; }
@@ -281,6 +285,32 @@ int32_t hxc_NativeUv_translateSysError(int32_t e) { return uv_translate_sys_erro
 // constants: group, index -> C value (luv's to_c tables)
 int32_t hxc_NativeUv_constant(int32_t group, int32_t index) {
 	switch (group) {
+#ifdef _WIN32
+	// Windows: libuv's own flags and modes (luv's to_c reads them from uv.h)
+	case 0: { // File.Open_flag
+		static const int t[] = {UV_FS_O_RDONLY, UV_FS_O_WRONLY, UV_FS_O_RDWR, UV_FS_O_CREAT, UV_FS_O_EXCL, UV_FS_O_EXLOCK, UV_FS_O_NOCTTY,
+			UV_FS_O_NOFOLLOW, UV_FS_O_TEMPORARY, UV_FS_O_TRUNC, UV_FS_O_APPEND, UV_FS_O_DIRECT, UV_FS_O_DSYNC, UV_FS_O_FILEMAP,
+			UV_FS_O_NOATIME, UV_FS_O_NONBLOCK, UV_FS_O_RANDOM, UV_FS_O_SEQUENTIAL, UV_FS_O_SHORT_LIVED, UV_FS_O_SYMLINK, UV_FS_O_SYNC};
+		return index >= 0 && index < (int)(sizeof t / sizeof t[0]) ? t[index] : 0;
+	}
+	case 1: { // File.Mode: the C runtime's bits, 0 for those Windows lacks
+		static const int t[] = {0700, _S_IREAD, _S_IWRITE, _S_IEXEC, 0070, 0040, 0020, 0010, 0007, 0004, 0002,
+			0001, 0, 0, 0, _S_IFMT, _S_IFREG, _S_IFDIR, 0, _S_IFCHR, 0, _S_IFIFO};
+		return index >= 0 && index < (int)(sizeof t / sizeof t[0]) ? t[index] : 0;
+	}
+	case 2: { // File.Access_flag: F_OK R_OK W_OK X_OK
+		static const int t[] = {0, 4, 2, 1};
+		return t[index & 3];
+	}
+	case 3: // address family: unspec, inet, inet6
+		return index == 0 ? AF_UNSPEC : index == 1 ? AF_INET : AF_INET6;
+	case 4: // socket type: stream, dgram, raw
+		return index == 0 ? SOCK_STREAM : index == 1 ? SOCK_DGRAM : SOCK_RAW;
+	case 5: { // signals: SIGABRT SIGFPE SIGHUP SIGILL SIGINT SIGKILL SIGSEGV SIGTERM SIGWINCH SIGPROF (uv.h numbers the missing ones)
+		static const int t[] = {SIGABRT, SIGFPE, SIGHUP, SIGILL, SIGINT, SIGKILL, SIGSEGV, SIGTERM, SIGWINCH, 27};
+		return t[index];
+	}
+#else
 	case 0: { // File.Open_flag
 		static const int t[] = {O_RDONLY, O_WRONLY, O_RDWR, O_CREAT, O_EXCL, 0 /* EXLOCK */, O_NOCTTY, O_NOFOLLOW, 0 /* TEMPORARY */,
 			O_TRUNC, O_APPEND,
@@ -315,6 +345,7 @@ int32_t hxc_NativeUv_constant(int32_t group, int32_t index) {
 		static const int t[] = {SIGABRT, SIGFPE, SIGHUP, SIGILL, SIGINT, SIGKILL, SIGSEGV, SIGTERM, SIGWINCH, SIGPROF};
 		return t[index];
 	}
+#endif
 	case 6: { // getaddrinfo flags: PASSIVE CANONNAME NUMERICHOST NUMERICSERV V4MAPPED ALL ADDRCONFIG
 		static const int t[] = {AI_PASSIVE, AI_CANONNAME, AI_NUMERICHOST, AI_NUMERICSERV, AI_V4MAPPED, AI_ALL, AI_ADDRCONFIG};
 		return t[index];
@@ -435,9 +466,14 @@ static void plain_on_spawn(void) {
 
 // whether watchers wait to be added to the backend (libuv's private
 // watcher_queue, a struct uv__queue or void *[2]: empty when it points to itself)
+// (Windows: completion ports, no such queue and no backend descriptor)
 static int watchers_queued(uv_loop_t *loop) {
+#ifdef _WIN32
+	return 0;
+#else
 	void **q = (void **)&loop->watcher_queue;
 	return q[0] != (void *)q;
+#endif
 }
 
 // waits, letting the other threads run, until the loop has work

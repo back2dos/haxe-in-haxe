@@ -138,9 +138,17 @@ class Sys {
 			var r = NativeSys.commandArgs(cmd, args);
 			if (r != -2)
 				return r;
-			cmd = quote(cmd);
-			for (a in args)
-				cmd += " " + quote(a);
+			if (systemName() == "Windows") {
+				// native Windows builds: quoted for cmd.exe, as the std of the other sys targets does
+				cmd = [
+					for (a in [StringTools.replace(cmd, "/", "\\")].concat(args))
+						haxe.SysTools.quoteWinArg(a, true)
+				].join(" ");
+			} else {
+				cmd = quote(cmd);
+				for (a in args)
+					cmd += " " + quote(a);
+			}
 		}
 		return NativeSys.command(cmd);
 	}

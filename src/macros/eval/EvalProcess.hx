@@ -27,10 +27,20 @@ class EvalProcess {
 	public static function run(cmd:String, args:Null<Array<String>>):EvalProcess {
 		// port: with args = None upstream runs /bin/sh -c (cmd.exe on Windows), which always exists
 		if (args != null && Sys.systemName() != "Windows" && !commandExists(cmd)) {
-			var msg = "create_process(" + cmd + "): No such file or directory\n";
-			return new EvalProcess(null, new BytesInput(Bytes.ofString(msg)), 127);
+			return failed(cmd);
+		}
+		// port: on Windows the host's process creation fails as Unix.create_process does
+		// ... (CreateProcess with the program SearchPath found); the error is taken to be
+		// ... ENOENT, the failure of a program that is not found
+		if (args != null && Sys.systemName() == "Windows") {
+			return try new EvalProcess(new sys.io.Process(cmd, args), null, null) catch (_:Dynamic) failed(cmd);
 		}
 		return new EvalProcess(new sys.io.Process(cmd, args), null, null);
+	}
+
+	static function failed(cmd:String):EvalProcess {
+		var msg = "create_process(" + cmd + "): No such file or directory\n";
+		return new EvalProcess(null, new BytesInput(Bytes.ofString(msg)), 127);
 	}
 
 	// port: the execvp/posix_spawnp lookup: a path with a slash is used as is, otherwise PATH is searched.
