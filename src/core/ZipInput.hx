@@ -224,7 +224,9 @@ class ZipInput {
 				}
 				if (written != e.uncompressedSize) throw new ZipError(filename, e.filename,
 					"wrong size for deflated entry (not enough data)");
-				if (haxe.crypto.Crc32.make(res) != e.crc) throw new ZipError(filename, e.filename, "CRC mismatch");
+				// port: hxc computes the CRC in C (hxc.NativeZip)
+				var crc = #if (target.name == "hxc") hxc.NativeZip.crc32(res, 0, res.length) #else haxe.crypto.Crc32.make(res) #end;
+				if (crc != e.crc) throw new ZipError(filename, e.filename, "CRC mismatch");
 				return res;
 		}
 	}

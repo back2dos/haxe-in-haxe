@@ -85,21 +85,22 @@ class JReaderHoldovers {
 		return s.substr(pos, len);
 	}
 
-	static function at(s:String, i:Int):String {
+	// port: s.[i], a char code (comparing codes allocates no one-character strings)
+	static function at(s:String, i:Int):Int {
 		if (i < 0 || i >= s.length) throw new core.ds.InvalidArgument("index out of bounds");
-		return s.charAt(i);
+		return StringTools.fastCodeAt(s, i);
 	}
 
 	public static function parseTypeParameterPart(s:String):{a:JTypeArgument, l:Int} {
 		return switch at(s, 0) {
-			case "*": {a: JTAny, l: 1};
+			case "*".code: {a: JTAny, l: 1};
 			case c:
 				var wildcard, i;
 				switch c {
-					case "+":
+					case "+".code:
 						wildcard = WExtends;
 						i = 1;
-					case "-":
+					case "-".code:
 						wildcard = WSuper;
 						i = 1;
 					case _:
@@ -115,34 +116,34 @@ class JReaderHoldovers {
 		var len = s.length;
 		if (len == 0) throw new SigExit();
 		return switch at(s, 0) {
-			case "B": {s: JByte, l: 1};
-			case "C": {s: JChar, l: 1};
-			case "D": {s: JDouble, l: 1};
-			case "F": {s: JFloat, l: 1};
-			case "I": {s: JInt, l: 1};
-			case "J": {s: JLong, l: 1};
-			case "S": {s: JShort, l: 1};
-			case "Z": {s: JBool, l: 1};
-			case "L":
+			case "B".code: {s: JByte, l: 1};
+			case "C".code: {s: JChar, l: 1};
+			case "D".code: {s: JDouble, l: 1};
+			case "F".code: {s: JFloat, l: 1};
+			case "I".code: {s: JInt, l: 1};
+			case "J".code: {s: JLong, l: 1};
+			case "S".code: {s: JShort, l: 1};
+			case "Z".code: {s: JBool, l: 1};
+			case "L".code:
 				var origS = s;
 				function loop(start:Int, i:Int, acc:Array<String>):{pack:Array<String>, name:String, params:Array<JTypeArgument>, end:Int} {
 					while (true) {
 						switch at(s, i) {
-							case "/":
+							case "/".code:
 								acc.unshift(sub(s, start, i - start));
 								i = i + 1;
 								start = i;
-							case ";" | ".":
+							case ";".code | ".".code:
 								var pack = acc.copy();
 								pack.reverse();
 								return {pack: pack, name: sub(s, start, i - start), params: [], end: i};
-							case "<":
+							case "<".code:
 								var name = sub(s, start, i - start);
 								function loopParams(i:Int, acc:Array<JTypeArgument>):{params:Array<JTypeArgument>, end:Int} {
 									while (true) {
 										var s = sub(s, i, len - i);
 										switch at(s, 0) {
-											case ">":
+											case ">".code:
 												var l = acc.copy();
 												l.reverse();
 												return {params: l, end: i + 1};
@@ -168,32 +169,32 @@ class JReaderHoldovers {
 				var end2 = 0;
 				while (true) {
 					switch at(s, end) {
-						case ".":
+						case ".".code:
 							var r = loop(end + 1, end + 1, []);
 							if (r.pack.length > 0) throw new Failure("Inner types must not define packages. For '" + origS + "'.");
 							inners.push({name: r.name, params: r.params});
 							end = r.end;
-						case ";":
+						case ";".code:
 							end2 = end + 1;
 							break;
 						case c:
-							throw new Failure("End of complex type signature expected after type parameter. Got '" + c + "' for '" + origS + "'.");
+							throw new Failure("End of complex type signature expected after type parameter. Got '" + std.String.fromCharCode(c) + "' for '" + origS + "'.");
 					}
 				}
 				switch inners {
 					case []: {s: JObject({pack: pack, name: name}, params), l: end2};
 					case _: {s: JObjectInner(pack, [{name: name, params: params}].concat(inners)), l: end2};
 				}
-			case "[":
+			case "[".code:
 				var p = 1;
-				while (p < s.length && at(s, p) >= "0" && at(s, p) <= "9") p++;
+				while (p < s.length && at(s, p) >= "0".code && at(s, p) <= "9".code) p++;
 				var size = if (p > 1) core.ds.OcamlInt.ofString(sub(s, 1, p - 1)) else null;
 				var r = parseSignaturePart(sub(s, p, s.length - p));
 				{s: JArray(r.s, size), l: r.l + p};
-			case "(":
+			case "(".code:
 				var p = 1;
 				var args = [];
-				while (p < s.length && at(s, p) != ")") {
+				while (p < s.length && at(s, p) != ")".code) {
 					var r = parseSignaturePart(sub(s, p, s.length - p));
 					args.push(r.s);
 					p = p + r.l;
@@ -202,7 +203,7 @@ class JReaderHoldovers {
 				if (p >= s.length) throw new SigExit();
 				var ret, l;
 				switch at(s, p) {
-					case "V":
+					case "V".code:
 						ret = null;
 						l = 1;
 					case _:
@@ -211,7 +212,7 @@ class JReaderHoldovers {
 						l = r.l;
 				}
 				{s: JMethod(args, ret), l: p + l};
-			case "T":
+			case "T".code:
 				var idx = s.indexOf(";");
 				if (idx < 0) throw new SigExit();
 				var s1 = s.substr(0, idx);
@@ -241,10 +242,10 @@ class JReaderHoldovers {
 
 	public static function parseFormalTypeParams(s:String):{types:JTypes, idx:Int} {
 		return switch at(s, 0) {
-			case "<":
+			case "<".code:
 				function readId(i:Int):Int {
 					while (true) switch at(s, i) {
-						case ":" | ">": return i;
+						case ":".code | ">".code: return i;
 						case _: i = i + 1;
 					}
 				}
@@ -256,12 +257,12 @@ class JReaderHoldovers {
 					var id = sub(s, idx + 1, idi - idx - 1);
 					/* next must be a : */
 					switch at(s, idi) {
-						case ":":
-						case c: throw new Failure("Invalid formal type signature character: " + c + " ; from " + s);
+						case ":".code:
+						case c: throw new Failure("Invalid formal type signature character: " + std.String.fromCharCode(c) + " ; from " + s);
 					}
 					var ext, l;
 					switch at(s, idi + 1) {
-						case ":" | ">":
+						case ":".code | ">".code:
 							ext = null;
 							l = idi + 1;
 						case _:
@@ -273,7 +274,7 @@ class JReaderHoldovers {
 					var idx2 = l;
 					while (true) {
 						switch at(s, idx2) {
-							case ":":
+							case ":".code:
 								var r = parseSignaturePart(sub(s, idx2 + 1, len - idx2 - 1));
 								idx2 = idx2 + r.l + 1;
 								ifaces.unshift(r.s);
@@ -282,7 +283,7 @@ class JReaderHoldovers {
 						}
 					}
 					acc.unshift({name: id, ext: ext, impls: ifaces});
-					if (at(s, idx2) == ">") {
+					if (at(s, idx2) == ">".code) {
 						var l = acc.copy();
 						l.reverse();
 						return {types: l, idx: idx2 + 1};
@@ -300,7 +301,7 @@ class JReaderHoldovers {
 		var acc = [];
 		while (true) {
 			if (idx > len) throw new SigExit() else if (idx == len) return {throws: acc, idx: idx} else switch at(s, idx) {
-				case "^":
+				case "^".code:
 					var r = parseSignaturePart(sub(s, idx + 1, len - idx - 1));
 					idx = idx + r.l + 1;
 					acc.unshift(r.s);
