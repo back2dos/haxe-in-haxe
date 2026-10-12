@@ -807,7 +807,7 @@ void rt_init(int ng, int argc, char **argv) {
 	rt_argc = argc;
 	rt_argv = argv;
 #ifdef __COSMOPOLITAN__
-	// an APE build may carry the Haxe standard library in its own zip (site/build.sh)
+	// an APE build may carry the Haxe standard library in its own zip (.github/workflows/build.yml)
 	if (!getenv("HAXE_STD_PATH") && access("/zip/std/StdTypes.hx", R_OK) == 0) setenv("HAXE_STD_PATH", "/zip/std/", 1);
 #endif
 	const char *m = getenv("RT_MINOR_KB");

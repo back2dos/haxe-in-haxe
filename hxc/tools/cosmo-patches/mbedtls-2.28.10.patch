@@ -1,4 +1,4 @@
-mbedtls 2.28.10 for Cosmopolitan Libc (cosmocc), applied by hxc/tools/cosmo-deps.sh.
+mbedtls 2.28.10 for Cosmopolitan Libc (cosmocc), applied by hxc/tools/deps.sh.
 
 - entropy_poll.c: the platform entropy source is getrandom(), which
   Cosmopolitan provides on every host OS (Windows included), instead of

@@ -1,4 +1,4 @@
-libuv 1.48.0 for Cosmopolitan Libc (cosmocc), applied by hxc/tools/cosmo-deps.sh.
+libuv 1.48.0 for Cosmopolitan Libc (cosmocc), applied by hxc/tools/deps.sh.
 
 One Cosmopolitan binary runs on Linux, macOS, Windows and the BSDs, so libuv
 is built as a generic unix port: the poll(2) backend (posix-poll.c, uv/posix.h
@@ -600,7 +600,7 @@ random bytes).
 --- /dev/null
 +++ b/src/unix/cosmo.c
 @@ -0,0 +1,192 @@
-+/* Cosmopolitan Libc platform glue for libuv (haxe-in-haxe, hxc/tools/cosmo-deps.sh).
++/* Cosmopolitan Libc platform glue for libuv (haxe-in-haxe, hxc/tools/deps.sh).
 + *
 + * One Cosmopolitan binary runs on Linux, macOS, Windows and the BSDs, so
 + * libuv is built with its generic unix backend: poll(2) for I/O

@@ -283,8 +283,44 @@ double hxc_NativeSsl_certNotBefore(void *chain) { return (double)time_to_time_t(
 // hx_cert_load_defaults: 0 when the system store was loaded; otherwise
 // sys.ssl.Mbedtls.loadDefaultCertificates reads the CA files of
 // Sys.systemName(). Upstream's Windows (system "Root" store) and macOS
-// (Security framework) branches are compile-time; native POSIX builds have
-// neither (1, as upstream on Linux and the BSDs).
+// (Security framework) branches are compile-time; other native POSIX builds
+// have neither (1, as upstream on Linux and the BSDs).
+#if defined(__APPLE__) && !defined(__COSMOPOLITAN__)
+// upstream's macOS branch (SecTrustCopyAnchorCertificates), with the Security
+// and CoreFoundation functions looked up at run time: builds without the
+// macOS SDK's frameworks (zig cc) link nothing more
+#include <dlfcn.h>
+typedef const void *cf_ref;
+typedef long cf_index;
+static int load_macos_roots(mbedtls_x509_crt *chain) {
+	int r = 1;
+	void *sec = dlopen("/System/Library/Frameworks/Security.framework/Security", RTLD_LAZY);
+	void *cf = dlopen("/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation", RTLD_LAZY);
+	if (!sec || !cf) return r;
+	int32_t (*copy_anchors)(cf_ref *) = (int32_t(*)(cf_ref *))dlsym(sec, "SecTrustCopyAnchorCertificates");
+	cf_ref (*copy_data)(cf_ref) = (cf_ref(*)(cf_ref))dlsym(sec, "SecCertificateCopyData");
+	cf_index (*array_count)(cf_ref) = (cf_index(*)(cf_ref))dlsym(cf, "CFArrayGetCount");
+	cf_ref (*array_get)(cf_ref, cf_index) = (cf_ref(*)(cf_ref, cf_index))dlsym(cf, "CFArrayGetValueAtIndex");
+	const unsigned char *(*data_ptr)(cf_ref) = (const unsigned char *(*)(cf_ref))dlsym(cf, "CFDataGetBytePtr");
+	cf_index (*data_len)(cf_ref) = (cf_index(*)(cf_ref))dlsym(cf, "CFDataGetLength");
+	void (*release)(cf_ref) = (void (*)(cf_ref))dlsym(cf, "CFRelease");
+	if (!copy_anchors || !copy_data || !array_count || !array_get || !data_ptr || !data_len || !release) return r;
+	cf_ref certs;
+	if (copy_anchors(&certs) == 0 /* errSecSuccess */) {
+		cf_index count = array_count(certs);
+		for (cf_index i = 0; i < count; i++) {
+			cf_ref data = copy_data(array_get(certs, i));
+			if (data) {
+				r = mbedtls_x509_crt_parse_der(chain, data_ptr(data), data_len(data));
+				release(data);
+				if (r != 0) return r; // as upstream (which keeps the array)
+			}
+		}
+		release(certs);
+	}
+	return r;
+}
+#endif
 #ifdef __COSMOPOLITAN__
 // One Cosmopolitan binary runs on every OS, so the branches are taken at run
 // time. Sys.systemName() says "Linux" on every OS there (rt_sys.c), so the
@@ -337,6 +373,9 @@ static int load_ca_files(mbedtls_x509_crt *chain, const char *const *paths) {
 #endif
 
 int32_t hxc_NativeSsl_certLoadDefaults(void *certificate) {
+#if defined(__APPLE__) && !defined(__COSMOPOLITAN__)
+	return load_macos_roots(PTR(certificate));
+#endif
 #ifdef __COSMOPOLITAN__
 	mbedtls_x509_crt *chain = PTR(certificate);
 #if defined(__x86_64__)
