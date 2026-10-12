@@ -89,6 +89,11 @@ where it deviates. In general:
   by one afterwards. For tink_web's 14 libraries: 3.6 s instead of 19.2 s.
   The limit is a fixed count, as in other package managers' network
   concurrency (yarn 8, pnpm 16), rather than the number of cores.
+- `lix install` downloads a library's dependencies, and theirs, ahead of
+  installing them (`Libraries.prefetch`): resolution, download and unpacking run
+  on `LIX_JOBS` threads, and the installation that follows, one by one as
+  upstream's, finds the archives ready. Its output and files are the same as
+  without (`LIX_JOBS=1`). tink_web from an empty cache: 6.8 s instead of 18.6 s.
 - `haxe --run install-libs` (and so `lix download`) names each command that
   failed and why, where upstream reports only how many failed.
 

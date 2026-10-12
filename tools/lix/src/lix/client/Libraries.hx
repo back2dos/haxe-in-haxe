@@ -26,10 +26,10 @@ class Libraries {
   public function downloadUrl(url:Url, ?options)
     return downloadArchive(urlToJob(url), options);
 
-  public function downloadArchive(a:ArchiveJob, ?options:{ ?into:String }):DownloadedArchive {
-    var cacheFile = null,
-        into = options?.into;
-
+  // where an archive goes (relative to the library cache), the file caching that
+  // for computed destinations, and whether it is there already
+  function target(a:ArchiveJob, into:Null<String>) {
+    var cacheFile = null;
     if (into == null)
       switch a.dest {
         case Fixed(path):
@@ -39,32 +39,137 @@ class Libraries {
           if (cacheFile.exists())
             into = cacheFile.getContent();
       }
+    return { into: into, cacheFile: cacheFile, exists: into != null && '${scope.libCache}/$into'.exists() };
+  }
 
-    var exists = into != null && '${scope.libCache}/$into'.exists();
+  // downloads and unpacks `a` into the library cache
+  function fetch(a:ArchiveJob, into:Null<String>, cacheFile:Null<String>, logger:Logger):DownloadedArchive {
+    // port: and a random number, as prefetches run in parallel within this process
+    final dest = '${scope.haxeshimRoot}/downloads/download@${Math.floor(Date.now().getTime())}_${uv.Uv.Loop.pid()}_${Std.random(0x3FFFFFFF)}';
+    var dir = switch a.kind {
+      case null: Download.archive(a.url.toString(), 0, dest, logger);
+      case Zip: Download.zip(a.url.toString(), 0, dest, logger);
+      case Tar: Download.tar(a.url.toString(), 0, dest, logger);
+      case Custom(load):
+        load({ dest: dest, logger: logger, source: a.normalized, scope: scope });
+    }
+    var arch = DownloadedArchive.fresh(dir, scope.libCache, into, a);
+    if (cacheFile != null)
+      Fs.save(cacheFile, arch.relRoot);
+    return arch;
+  }
+
+  public function downloadArchive(a:ArchiveJob, ?options:{ ?into:String }):DownloadedArchive {
+    var t = target(a, options?.into);
     return
-      if (exists && !force) {
-        logger.success('already downloaded: ${a.normalized}');
-        DownloadedArchive.existent(into, scope.libCache, a);
+      if (t.exists && !force) {
+        switch prefetched[a.normalized.toString()] {
+          case null:
+            logger.success('already downloaded: ${a.normalized}');
+            DownloadedArchive.existent(t.into, scope.libCache, a);
+          case p:
+            // downloaded by `prefetch` just now: reported as the download it was
+            prefetched.remove(a.normalized.toString());
+            logger.info('downloading ${a.normalized}');
+            logger.success('-> Done!');
+            p.archive;
+        }
       }
       else {
-        logger.info('${if (exists) "forcedly redownloading" else "downloading"} ${a.normalized}');
-        final dest = '${scope.haxeshimRoot}/downloads/download@${Math.floor(Date.now().getTime())}_${uv.Uv.Loop.pid()}';
-        var dir = switch a.kind {
-          case null: Download.archive(a.url.toString(), 0, dest, logger);
-          case Zip: Download.zip(a.url.toString(), 0, dest, logger);
-          case Tar: Download.tar(a.url.toString(), 0, dest, logger);
-          case Custom(load):
-            load({ dest: dest, logger: logger, source: a.normalized, scope: scope });
-        }
-        var arch = DownloadedArchive.fresh(dir, scope.libCache, into, a);
-        if (cacheFile != null)
-          Fs.save(cacheFile, arch.relRoot);
-        arch;
+        logger.info('${if (t.exists) "forcedly redownloading" else "downloading"} ${a.normalized}');
+        fetch(a, t.into, t.cacheFile, logger);
       }
   }
 
   public function installUrl(url:Url, ?as:LibVersion, ?options)
-    installArchive(urlToJob(url), as, options);
+    installArchive(switch prefetched[url.toString()] {
+      case null: urlToJob(url);
+      case p: p.job;
+    }, as, options);
+
+  /**
+    The archives `prefetch` downloaded, by URL (of the dependency) and by
+    normalized URL (of the job), until `downloadArchive` reports them.
+  **/
+  final prefetched = new Map<String, { job:ArchiveJob, archive:DownloadedArchive }>();
+
+  /**
+    Resolves and downloads the archives of `urls`, and transitively those of
+    their dependencies, in parallel, `Scope.jobs()` at a time, ahead of their
+    sequential installation, which then finds them (`downloadArchive`,
+    `installUrl`). Libraries the scope has already are left out. What fails is
+    left to that installation, which reports it.
+  **/
+  // port: upstream installs dependencies one by one (Future.inSequence)
+  function prefetch(urls:Array<Url>) {
+    var jobs = Scope.jobs();
+    if (urls.length == 0 || jobs < 2 || force)
+      return;
+    shim.Http.prepare();
+    var mutex = new sys.thread.Mutex(),
+        done = new sys.thread.Lock(),
+        queue:Array<String> = [],
+        seen = new Map<String, Bool>(),
+        claimed = new Map<String, Bool>(),// targets being downloaded: one download each
+        active = 0,
+        silent = Logger.get(true);
+    // with the mutex held
+    function enqueue(url:String)
+      if (!seen.exists(url) && !prefetched.exists(url)) {
+        seen[url] = true;
+        queue.push(url);
+      }
+    for (u in urls) enqueue(u.toString());
+    if (queue.length < 2)
+      return;
+    function work() {
+      while (true) {
+        mutex.acquire();
+        if (queue.length == 0) {
+          var finished = active == 0;
+          mutex.release();
+          if (finished) break;
+          Sys.sleep(.01);// another worker may still queue dependencies
+          continue;
+        }
+        var url = queue.shift();
+        active++;
+        mutex.release();
+        var archive = null,
+            job = null;
+        try {
+          job = urlToJob(Url.parse(url));
+          var t = target(job, null);
+          mutex.acquire();
+          var key = if (t.into == null) job.normalized.toString() else t.into;
+          var mine = !t.exists && !claimed.exists(key);
+          claimed[key] = true;
+          mutex.release();
+          if (mine)
+            archive = fetch(job, t.into, t.cacheFile, silent);
+        }
+        catch (e:Dynamic) {}
+        mutex.acquire();
+        if (archive != null) {
+          prefetched[url] = { job: job, archive: archive };
+          prefetched[job.normalized.toString()] = { job: job, archive: archive };
+          for (d in archive.infos.dependencies)
+            switch [d.value, archive.infos.haxeshimDependencies[d.name]] {
+              case [FromUrl(u), null] if (!'${scope.scopeLibDir}/${d.name}.hxml'.exists()):
+                enqueue(u.toString());
+              default:
+            }
+        }
+        active--;
+        mutex.release();
+      }
+      done.release();
+    }
+    for (_ in 0...jobs)
+      sys.thread.Thread.create(work);
+    for (_ in 0...jobs)
+      done.wait();
+  }
 
   function installFromLibHxml(lib:String, srcPath:String):Array<String> {
     var hxml = scope.libHxml(lib);
@@ -247,6 +352,10 @@ class Libraries {
 
     function installDependencies()
       if (!options.flat) {
+        prefetch([for (d in infos.dependencies) switch [d.value, infos.haxeshimDependencies[d.name]] {
+          case [FromUrl(url), null] if (!('${scope.scopeLibDir}/${d.name}.hxml'.exists() && options.alreadyInstalled[d.name])): url;
+          default: continue;
+        }]);
         final errors = [];
         for (d in infos.dependencies) {
           var lib = d.name,

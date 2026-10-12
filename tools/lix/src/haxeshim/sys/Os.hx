@@ -23,28 +23,30 @@ class Os {
       if (IS_WINDOWS) path.replace('/', '\\');
       else path;
 
-  static final POSIX_DRIVE = ~/^\/([A-Za-z])(\/|$)/;
-  static final WINDOWS_DRIVE = ~/^([A-Za-z]):([\\\/]|$)/;
 
   /**
     `path` as the Windows programs lix runs see it: `/C/dir` is `C:/dir` (on a
     Cosmopolitan binary on Windows; elsewhere unchanged).
   **/
-  static public function hostPath(path:String):String
+  static public function hostPath(path:String):String {
+    final POSIX_DRIVE = ~/^\/([A-Za-z])(\/|$)/;// per call: threads (Libraries.prefetch)
     return
       if (IS_POSIX_ON_WINDOWS && path != null && POSIX_DRIVE.match(path))
         POSIX_DRIVE.matched(1).toUpperCase() + ':/' + POSIX_DRIVE.matchedRight();
       else path;
+  }
 
   /**
     A path from Windows (an environment variable) as lix's own: `C:\dir` is `/C/dir`
     (on a Cosmopolitan binary on Windows; elsewhere unchanged).
   **/
-  static public function fromHostPath(path:String):String
+  static public function fromHostPath(path:String):String {
+    final WINDOWS_DRIVE = ~/^([A-Za-z]):([\\\/]|$)/;
     return
       if (IS_POSIX_ON_WINDOWS && path != null && WINDOWS_DRIVE.match(path))
         '/' + WINDOWS_DRIVE.matched(1).toUpperCase() + '/' + WINDOWS_DRIVE.matchedRight().replace('\\', '/');
       else path;
+  }
 
   static public var platform(get, null):Platform;
     static function get_platform() {

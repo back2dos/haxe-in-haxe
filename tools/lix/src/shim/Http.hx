@@ -98,6 +98,10 @@ class Http {
 
 	static var ca:Null<sys.ssl.Certificate>;
 
+	/** Loads the CA certificates now, before requests run on several threads. **/
+	static public function prepare()
+		caChain();
+
 	static function caChain():Null<sys.ssl.Certificate> {
 		if (ca == null) {
 			ca = sys.ssl.Certificate.loadDefaults();
