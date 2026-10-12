@@ -20,7 +20,8 @@ or `RT_DEPS` with the Cosmopolitan builds of `hxc/tools/cosmo-deps.sh`) and fetc
 hxcoro at a pinned commit into `bin/lix/hxcoro` unless `HXCORO` names a checkout.
 `CC` picks the C compiler (default `clang -O2`). The binary is about 1.4 MB.
 
-Startup is a few milliseconds where Node.js took about 100 ms per `haxe` call.
+The `haxe` shim adds about 2 ms to a compiler call; the npm package's adds
+about 60 ms (measured with `haxe -version` and `haxe --run resolve-args`).
 
 ## Layout
 
