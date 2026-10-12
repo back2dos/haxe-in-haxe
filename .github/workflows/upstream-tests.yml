@@ -8,6 +8,11 @@
 # `nekotools boot` as upstream's Makefile does), and runs
 # `haxe --run RunCi <target>` in haxe/tests, straight from the submodule.
 # The steps follow upstream's jobs; the differences are commented.
+#
+# Upstream's windows64-test has no counterpart: the Windows build of the port
+# is the Cosmopolitan binary, whose Eval host sees a POSIX system
+# (Sys.systemName() "Linux", /D/a/... paths), so RunCi and the programs it
+# starts disagree on paths and commands (test/README.md).
 name: upstream-tests
 
 on:
@@ -61,6 +66,10 @@ jobs:
 
       - name: Setup Haxe
         run: |
+          # upstream's haxe links mbedtls dynamically; the port's links it statically,
+          # but HashLink's build (runci's hl target) needs the headers
+          sudo apt install -qqy libmbedtls-dev
+
           set -ex
           tar -xf linuxBinaries/*.tar.gz -C linuxBinaries --strip-components=1
           sudo mkdir -p /usr/local/bin/
@@ -189,110 +198,3 @@ jobs:
           haxe --run RunCi ${{ matrix.target }} ${{ matrix.runci-args }}
         working-directory: ${{github.workspace}}/haxe/tests
         timeout-minutes: 60
-
-  windows64-test:
-    runs-on: windows-2025-vs2026
-    env:
-      PLATFORM: windows64
-      TEST: ${{matrix.target}}
-      HXCPP_COMPILE_CACHE: ${{ github.workspace }}/hxcache
-      ARCH: 64
-    strategy:
-      fail-fast: false
-      matrix:
-        target: [macro, js, hl, cpp, jvm, php, python, lua, flash, neko]
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          submodules: recursive
-          persist-credentials: false
-      # the Cosmopolitan build, as haxe-in-haxe.exe with std/ next to it
-      - uses: actions/download-artifact@v8
-        with:
-          name: haxe-in-haxe-cosmo
-          path: win${{env.ARCH}}Binaries
-
-      - uses: ./haxe/.github/actions/setup-neko
-
-      - uses: actions/setup-node@v7
-        if: matrix.target == 'js'
-        with:
-          node-version: 24
-
-      - name: Setup Haxe
-        shell: pwsh
-        run: |
-          $DOWNLOADDIR="./win$($env:ARCH)Binaries"
-          Expand-Archive $DOWNLOADDIR/haxe-in-haxe-windows-x86_64.zip -DestinationPath $DOWNLOADDIR
-          Set-PSDebug -Trace 1
-          $HAXEPATH = (Get-Item $DOWNLOADDIR/haxe-in-haxe-windows-x86_64).FullName
-          Copy-Item "$HAXEPATH/haxe-in-haxe.exe" "$HAXEPATH/haxe.exe"
-          echo $HAXEPATH >> $env:GITHUB_PATH
-          echo "HAXELIB_ROOT=$HAXEPATH\lib" >> $env:GITHUB_ENV
-          # upstream's haxe finds the std next to haxe.exe; the port's reads HAXE_STD_PATH
-          # (or the std embedded in the binary): the submodule's, as on Linux and macOS
-          echo "HAXE_STD_PATH=$((Get-Item haxe/std).FullName)" >> $env:GITHUB_ENV
-          echo "HAXEPATH=$HAXEPATH" >> $env:GITHUB_ENV
-
-      # upstream's windows64-build job (make haxelib_win), with the port as haxe
-      - name: Build haxelib
-        shell: pwsh
-        working-directory: ${{ github.workspace }}/haxe/extra/haxelib_src
-        run: |
-          Set-PSDebug -Trace 1
-          haxe client.hxml
-          if ($LASTEXITCODE -ne 0) { exit 1 }
-          nekotools boot run.n
-          if ($LASTEXITCODE -ne 0) { exit 1 }
-          Move-Item run.exe "$env:HAXEPATH/haxelib.exe"
-
-      - name: Print Haxe version
-        shell: pwsh
-        run: haxe -version
-
-      - name: "Make Python 3 be available as python3 in the cmdline"
-        shell: pwsh
-        run: |
-          Set-PSDebug -Trace 1
-          $pypath = python -c "import sys; print(sys.executable)"
-          $py3path = $pypath.replace("python.exe","python3.exe")
-          cmd /c mklink $py3path $pypath
-          python3 -V
-
-      - uses: msys2/setup-msys2@v2
-        if: matrix.target == 'lua'
-        id: msys2
-        with:
-          msystem: UCRT64
-          update: true
-          install: >-
-            mingw-w64-ucrt-x86_64-gcc
-            mingw-w64-ucrt-x86_64-openssl
-            mingw-w64-ucrt-x86_64-pcre2
-            mingw-w64-ucrt-x86_64-libuv
-
-      - name: Setup haxelib
-        shell: pwsh
-        run: |
-          mkdir "$env:HAXELIB_ROOT"
-          haxelib setup "$env:HAXELIB_ROOT"
-
-      - name: Add msbuild to PATH (hl/c)
-        uses: microsoft/setup-msbuild@v3
-        if: matrix.target == 'hl'
-        with:
-          msbuild-architecture: x64
-
-      - name: Cache Lua environments
-        uses: ./haxe/.github/actions/cache-lua
-        if: matrix.target == 'lua'
-        with:
-          key-prefix: lua-env-windows64-${{ hashFiles('haxe/tests/runci/targets/Lua.hx') }}
-
-      - name: Test
-        shell: pwsh
-        run: haxe RunCi.hxml
-        working-directory: ${{github.workspace}}/haxe/tests
-        timeout-minutes: 25
-        env:
-          MSYS2_LOCATION: ${{ matrix.target == 'lua' && steps.msys2.outputs.msys2-location || '' }}
