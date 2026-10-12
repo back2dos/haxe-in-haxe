@@ -8,6 +8,8 @@
 # lix-cosmo`), and the website (`make site`: the playground's WebAssembly with
 # Emscripten, the pages' JavaScript compiled from Haxe by the Linux build of
 # the port, lix.com under tools/) and deploys it to GitHub Pages on pushes to main.
+# Runs upstream Haxe's CI test suite with the release binaries as haxe
+# (upstream-tests.yml).
 #
 # Release assets (https://github.com/<repo>/releases/download/<tag>/<asset>):
 #   haxe-in-haxe-linux-x86_64.tar.gz   haxe-in-haxe-linux-aarch64.tar.gz
@@ -428,6 +430,12 @@ jobs:
           & $exe -cp . -main Main --hxb out.hxb
           if ($LASTEXITCODE -ne 0) { exit 1 }
           Get-Item out.hxb
+
+  # upstream Haxe's CI test suite (RunCi for every target) with the release
+  # binaries as haxe (upstream-tests.yml); not required by the release
+  upstream-tests:
+    needs: [build, cosmo]
+    uses: ./.github/workflows/upstream-tests.yml
 
   # nightly on main, a release on v* tags
   release:

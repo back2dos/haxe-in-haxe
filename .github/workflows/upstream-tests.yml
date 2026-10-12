@@ -1,0 +1,298 @@
+# Upstream Haxe's CI test suite (haxe/.github/workflows/main.yml: the jobs
+# linux-test, mac-test and windows64-test) with the port as `haxe`.
+#
+# Called by build.yml once its `build` and `cosmo` jobs have uploaded the
+# release binaries; nothing is rebuilt here. Each job puts the release binary
+# on PATH as `haxe` with HAXE_STD_PATH at the submodule's std, builds haxelib
+# from haxe/extra/haxelib_src with that binary (client.hxml to run.n, then
+# `nekotools boot` as upstream's Makefile does), and runs
+# `haxe --run RunCi <target>` in haxe/tests, straight from the submodule.
+# The steps follow upstream's jobs; the differences are commented.
+name: upstream-tests
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  linux-test:
+    runs-on: ubuntu-22.04${{ matrix.arch == 'arm64' && '-arm' || '' }}
+    env:
+      PLATFORM: linux${{ matrix.arch == 'arm64' && '-arm' || '' }}64
+      HXCPP_COMPILE_CACHE: ${{ github.workspace }}/hxcache
+      # upstream: /usr/local/share/haxe/std (a link to the package's std)
+      HAXE_STD_PATH: ${{ github.workspace }}/haxe/std
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [macro, js, hl, cpp, jvm, php, python, lua, flash, neko]
+        arch: [x86, arm64]
+        include:
+          - target: hl
+            arch: x86
+            APT_PACKAGES: cmake ninja-build libturbojpeg-dev
+          - target: hl
+            arch: arm64
+            APT_PACKAGES: cmake ninja-build libturbojpeg-dev
+            runci-args: --skip-hl-jit
+          - target: cpp
+            arch: x86
+            APT_PACKAGES: gcc-multilib g++-multilib
+          - target: lua
+            APT_PACKAGES: ncurses-dev
+          - target: flash
+            APT_PACKAGES: libglib2.0-0 libgtk2.0-0 libfreetype6 xvfb
+        exclude:
+          - target: flash
+            arch: arm64
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+          persist-credentials: false
+      - uses: actions/download-artifact@v8
+        with:
+          name: haxe-in-haxe-linux-${{ matrix.arch == 'arm64' && 'aarch64' || 'x86_64' }}
+          path: linuxBinaries
+
+      - uses: ./haxe/.github/actions/setup-neko
+
+      - name: Setup Haxe
+        run: |
+          set -ex
+          tar -xf linuxBinaries/*.tar.gz -C linuxBinaries --strip-components=1
+          sudo mkdir -p /usr/local/bin/
+          sudo ln -s `pwd`/linuxBinaries/haxe-in-haxe /usr/local/bin/haxe
+
+      # upstream's linux-build job (make haxelib), with the port as haxe
+      - name: Build haxelib
+        working-directory: ${{ github.workspace }}/haxe/extra/haxelib_src
+        run: |
+          set -ex
+          haxe client.hxml
+          nekotools boot -c run.n
+          cc run.c -o haxelib -I/usr/local/include -L"$NEKOPATH" -lneko -Wl,-rpath,"$NEKOPATH"
+          sudo ln -s `pwd`/haxelib /usr/local/bin/haxelib
+
+      - name: Print Haxe version
+        run: haxe -version
+
+      - name: Setup haxelib
+        run: |
+          set -ex
+          mkdir ~/haxelib
+          haxelib setup ~/haxelib
+
+      - name: Install apt packages
+        if: matrix.APT_PACKAGES
+        run: |
+          set -ex
+          sudo apt update -qqy
+          sudo apt install -qqy ${{matrix.APT_PACKAGES}}
+
+      - name: Flash setup
+        if: matrix.target == 'flash'
+        run: export DISPLAY=:99.0
+
+      - name: Cache Lua environments
+        uses: ./haxe/.github/actions/cache-lua
+        if: matrix.target == 'lua'
+        with:
+          # the action hashes tests/runci/targets/Lua.hx, which is under haxe/ here
+          key-prefix: lua-env-linux-${{ matrix.arch }}-${{ hashFiles('haxe/tests/runci/targets/Lua.hx') }}
+
+      - name: Download d8 (Android build-tools)
+        if: matrix.target == 'jvm'
+        run: |
+          set -ex
+          curl -fsSLo /tmp/build-tools.zip https://dl.google.com/android/repository/build-tools_r34-linux.zip
+          mkdir -p "$HOME/d8"
+          unzip -q /tmp/build-tools.zip -d "$HOME/d8"
+          d8=$(find "$HOME/d8" -name d8 -type f -executable | head -n1)
+          test -x "$d8"
+          echo "D8=$d8" >> "$GITHUB_ENV"
+
+      - name: Test
+        run: haxe --run RunCi ${{ matrix.target }} ${{ matrix.runci-args }}
+        working-directory: ${{github.workspace}}/haxe/tests
+        timeout-minutes: 25
+
+  mac-test:
+    env:
+      PLATFORM: mac-universal
+      HXCPP_COMPILE_CACHE: ${{ github.workspace }}/hxcache
+      HAXE_STD_PATH: ${{ github.workspace }}/haxe/std
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [macro, js, hl, cpp, jvm, php, python, lua, flash, neko]
+        arch: [arm64]
+        include:
+        - target: hl
+          arch: arm64
+          runci-args: --skip-hl-jit
+        - target: hl
+          arch: x86_64
+          runner: macos-15-intel
+
+    runs-on: ${{ matrix.runner || 'macos-latest' }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+          persist-credentials: false
+      # upstream tests a universal binary; the port has one build per architecture
+      - uses: actions/download-artifact@v8
+        with:
+          name: haxe-in-haxe-macos-${{ matrix.arch == 'arm64' && 'aarch64' || 'x86_64' }}
+          path: macBinaries
+
+      - uses: ./haxe/.github/actions/setup-neko
+
+      - name: Setup Haxe
+        run: |
+          set -ex
+          tar -xf macBinaries/*.tar.gz -C macBinaries --strip-components=1
+          sudo mkdir -p /usr/local/bin/
+          sudo ln -s `pwd`/macBinaries/haxe-in-haxe /usr/local/bin/haxe
+
+      - name: Build haxelib
+        working-directory: ${{ github.workspace }}/haxe/extra/haxelib_src
+        run: |
+          set -ex
+          haxe client.hxml
+          nekotools boot -c run.n
+          cc run.c -o haxelib -I/usr/local/include -L"$NEKOPATH" -lneko -Wl,-rpath,"$NEKOPATH"
+          sudo ln -s `pwd`/haxelib /usr/local/bin/haxelib
+
+      - name: Print Haxe version
+        run: haxe -version
+
+      - name: Setup haxelib
+        run: |
+          set -ex
+          mkdir ~/haxelib
+          haxelib setup ~/haxelib
+
+      - name: Cache Lua environments
+        uses: ./haxe/.github/actions/cache-lua
+        if: matrix.target == 'lua'
+        with:
+          key-prefix: lua-env-mac-${{ matrix.arch }}-${{ hashFiles('haxe/tests/runci/targets/Lua.hx') }}
+
+      - name: Test
+        run: |
+          # disable invalid Unicode filenames on APFS
+          echo "" > sys/compile-fs.hxml
+          haxe --run RunCi ${{ matrix.target }} ${{ matrix.runci-args }}
+        working-directory: ${{github.workspace}}/haxe/tests
+        timeout-minutes: 60
+
+  windows64-test:
+    runs-on: windows-2025-vs2026
+    env:
+      PLATFORM: windows64
+      TEST: ${{matrix.target}}
+      HXCPP_COMPILE_CACHE: ${{ github.workspace }}/hxcache
+      ARCH: 64
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [macro, js, hl, cpp, jvm, php, python, lua, flash, neko]
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+          persist-credentials: false
+      # the Cosmopolitan build, as haxe-in-haxe.exe with std/ next to it
+      - uses: actions/download-artifact@v8
+        with:
+          name: haxe-in-haxe-cosmo
+          path: win${{env.ARCH}}Binaries
+
+      - uses: ./haxe/.github/actions/setup-neko
+
+      - uses: actions/setup-node@v7
+        if: matrix.target == 'js'
+        with:
+          node-version: 24
+
+      - name: Setup Haxe
+        shell: pwsh
+        run: |
+          $DOWNLOADDIR="./win$($env:ARCH)Binaries"
+          Expand-Archive $DOWNLOADDIR/haxe-in-haxe-windows-x86_64.zip -DestinationPath $DOWNLOADDIR
+          Set-PSDebug -Trace 1
+          $HAXEPATH = (Get-Item $DOWNLOADDIR/haxe-in-haxe-windows-x86_64).FullName
+          Copy-Item "$HAXEPATH/haxe-in-haxe.exe" "$HAXEPATH/haxe.exe"
+          echo $HAXEPATH >> $env:GITHUB_PATH
+          echo "HAXELIB_ROOT=$HAXEPATH\lib" >> $env:GITHUB_ENV
+          # upstream's haxe finds the std next to haxe.exe; the port's reads HAXE_STD_PATH
+          # (or the std embedded in the binary): the submodule's, as on Linux and macOS
+          echo "HAXE_STD_PATH=$((Get-Item haxe/std).FullName)" >> $env:GITHUB_ENV
+          echo "HAXEPATH=$HAXEPATH" >> $env:GITHUB_ENV
+
+      # upstream's windows64-build job (make haxelib_win), with the port as haxe
+      - name: Build haxelib
+        shell: pwsh
+        working-directory: ${{ github.workspace }}/haxe/extra/haxelib_src
+        run: |
+          Set-PSDebug -Trace 1
+          haxe client.hxml
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          nekotools boot run.n
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          Move-Item run.exe "$env:HAXEPATH/haxelib.exe"
+
+      - name: Print Haxe version
+        shell: pwsh
+        run: haxe -version
+
+      - name: "Make Python 3 be available as python3 in the cmdline"
+        shell: pwsh
+        run: |
+          Set-PSDebug -Trace 1
+          $pypath = python -c "import sys; print(sys.executable)"
+          $py3path = $pypath.replace("python.exe","python3.exe")
+          cmd /c mklink $py3path $pypath
+          python3 -V
+
+      - uses: msys2/setup-msys2@v2
+        if: matrix.target == 'lua'
+        id: msys2
+        with:
+          msystem: UCRT64
+          update: true
+          install: >-
+            mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-openssl
+            mingw-w64-ucrt-x86_64-pcre2
+            mingw-w64-ucrt-x86_64-libuv
+
+      - name: Setup haxelib
+        shell: pwsh
+        run: |
+          mkdir "$env:HAXELIB_ROOT"
+          haxelib setup "$env:HAXELIB_ROOT"
+
+      - name: Add msbuild to PATH (hl/c)
+        uses: microsoft/setup-msbuild@v3
+        if: matrix.target == 'hl'
+        with:
+          msbuild-architecture: x64
+
+      - name: Cache Lua environments
+        uses: ./haxe/.github/actions/cache-lua
+        if: matrix.target == 'lua'
+        with:
+          key-prefix: lua-env-windows64-${{ hashFiles('haxe/tests/runci/targets/Lua.hx') }}
+
+      - name: Test
+        shell: pwsh
+        run: haxe RunCi.hxml
+        working-directory: ${{github.workspace}}/haxe/tests
+        timeout-minutes: 25
+        env:
+          MSYS2_LOCATION: ${{ matrix.target == 'lua' && steps.msys2.outputs.msys2-location || '' }}
