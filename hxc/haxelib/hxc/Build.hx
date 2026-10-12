@@ -52,7 +52,7 @@ class Build {
 		var isCosmo = o.isStatic || StringTools.endsWith(compiler.split(" ")[0], "cosmocc");
 		if ((o.ssl || o.uv) && isCosmo) {
 			// cosmocc can't link the system's libraries: the package carries mbedtls and
-			// libuv built with cosmocc (fat static libraries, hxc/tools/cosmo-deps.sh).
+			// libuv built with cosmocc (fat static libraries, hxc/tools/deps.sh cosmo).
 			// `-L<dir>` in one argument: cosmocc maps it to <dir>/.aarch64 for the aarch64 half
 			var deps = lib + "cosmo/";
 			if (!FileSystem.exists(deps + "lib/libuv.a")) throw 'hxc: $deps is missing: this hxc package has no mbedtls/libuv for -D hxc.static';

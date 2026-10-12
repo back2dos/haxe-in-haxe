@@ -8,7 +8,7 @@ generated JS, Lua, PHP, ... to be byte-identical to the reference's output for
 the same program.
 
 ```sh
-sh test/fuzz/build.sh                         # bin/fuzz/fuzz (hxc, clang -O2; ~10 s)
+make fuzz                                     # bin/fuzz/fuzz (hxc, clang -O2; ~10 s)
 bin/fuzz/fuzz -j 4 -n 500                     # diff:hxb on 500 programs
 bin/fuzz/fuzz --lane diff:js --run -j 4       # port JS output (and its run output) vs the reference
 bin/fuzz/fuzz --lane diff:interp --lane diff:hxb --time 600 -j 4
@@ -17,7 +17,7 @@ bin/fuzz/fuzz --help
 ```
 
 It needs the reference (`haxe/haxe`, or `HAXE_REFERENCE`) and a build of the
-port (`bin/hxc/hih/hih_clang` from `hxc/build.sh port`, or
+port (`bin/hxc/hih/hih_clang` from `make port`, or
 `HAXE_IN_HAXE_PORT`/`--port`). The generator also runs on Eval
 (`haxe -cp test/fuzz --run Fuzz --emit DIR -n 10`); a seed produces the same
 program on every host.

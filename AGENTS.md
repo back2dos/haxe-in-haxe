@@ -9,7 +9,7 @@ like the reference compiler built from the `haxe/` submodule. `hxc/` is the C
 backend that compiles the port (and other programs) to native code. `haxe/` is
 the canonical reference: never edit its files or commit inside it; moving the
 pinned revision is a deliberate change that also ports every upstream commit
-in between and rebuilds the reference (`make -C haxe haxe`).
+in between and rebuilds the reference (`make reference`).
 
 `haxe/libs/` holds OCaml implementation dependencies. Reproduce the behavior
 they provide (`src/libs/` has the Neko bytecode compiler, swflib, zlib deflate,
@@ -52,7 +52,7 @@ compiler reaches.
   (`test/README.md`): HXB conformance and macro cases for anything in typing
   or filters, the fuzzer's `diff:<target>` lanes for generators, display and
   server for those services, and the full matrix for broad changes.
-- Fast loop: `sh hxc/tools/port-dev.sh` rebuilds `bin/port/hih` in seconds
-  (`CC=tcc`), then `bin/fuzz/fuzz --port $PWD/bin/port/hih --lane diff:<target>`.
+- Fast loop: `make dev` rebuilds `bin/port/hih` in seconds (tcc), then
+  `make fuzz` and `bin/fuzz/fuzz --port $PWD/bin/port/hih --lane diff:<target>`.
 - Record results in `test/TESTING.md`. Never commit `bin/`, `test/generated/`,
   `test/reference/` or local haxelib state.

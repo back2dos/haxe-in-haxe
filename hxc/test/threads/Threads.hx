@@ -1,5 +1,5 @@
 // Checks the hxc sys.thread package (OS or green threads, hxc/rt/rt_thread.c):
-//   sh hxc/build.sh hxc/test/threads Threads && bin/hxc/Threads/prog_c
+//   make program CP=hxc/test/threads MAIN=Threads && bin/hxc/Threads/prog_c
 // Prints "ok <name>" per check and "done" at the end; exits 1 on a failure.
 import sys.thread.Condition;
 import sys.thread.Deque;

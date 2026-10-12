@@ -31,7 +31,7 @@ request is the first compilation of a server (HXB written to and exported
 from the cache, no restoring).
 
 HAXE_IN_HAXE_PORT replaces the HashLink build with another prebuilt port
-command (as in conformance.py), e.g. bin/hxc/hih/hih (hxc/build.sh port).
+command (as in conformance.py), e.g. bin/hxc/hih/hih_clang (make port).
 
 Usage: HAXE_REFERENCE=haxe/haxe python3 test/server.py [-j N] [--rounds N] [--hxb-cache] [--fresh]
            [--scenario cases|edit|misc|server-connect|all] [--cases FILE] [name-substring ...]

@@ -28,6 +28,13 @@ hxb, interp, js, lua, python, neko, hl, hlc, cpp, jvm and swf 150/150; php
 also checked on 500–2,750 programs while it was ported, on its target's
 options and on the upstream cases listed below.
 
+Release builds (`.github/workflows/build.yml`, 2026-10-12): `hxc/tools/smoke.sh`
+passes on Linux x86_64/aarch64 and macOS x86_64/aarch64 (zig cc builds) and
+on Linux, macOS and Windows x86_64/arm64 (Cosmopolitan build), including its
+`sys.ssl` check (system CA certificates, a verified TLS handshake with
+github.com) and `eval.luv` check (timer, TCP echo). Locally after the move to
+the Makefile: `make test` 279 + 7, `make test-fuzz LANE=diff:js N=100` 100/100.
+
 ### hxc changes for lix (2026-10-12)
 
 The hxc changes made for `lix/` (coroutine types in the lowering; in hxc's

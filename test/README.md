@@ -4,7 +4,8 @@ Every harness compares the port with the reference compiler built from
 `haxe/` (`HAXE_REFERENCE`, an absolute path). By default they build and run
 the HashLink build of the port (`test/generated/conformance/haxe-in-haxe.hl`,
 written by `conformance.py`); `HAXE_IN_HAXE_PORT=<command>` runs another
-build, typically `bin/hxc/hih/hih_clang`. Generated files go to
+build, typically `bin/hxc/hih/hih_clang` (`make port`; `make test` runs
+`conformance.py` with it, `make test-fuzz` the fuzzer). Generated files go to
 `test/generated/` (ignored by Git). Current results: [TESTING.md](TESTING.md).
 
 | Harness | What it compares |

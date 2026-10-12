@@ -1,6 +1,6 @@
 #!/bin/sh
 # The hxc target of the fuzzer: compiles a program to C with the hxc tool
-# (bin/hxc/wbk.js, the port plus hxc/, built by hxc/build.sh) and
+# (bin/hxc/wbk.js, the port plus hxc/, built by `make tool`) and
 # the C to <out>/prog with HXC_CC (default tcc).
 #   sh test/fuzz/hxc.sh <out dir> <haxe arguments ...>
 set -eu
@@ -18,7 +18,7 @@ if [ ! -f "$RT/done" ]; then
 	done
 	touch "$RT/done"
 fi
-# the hxc target's std, as hxc/build.sh makes it
+# the hxc target's std, as the Makefile makes it
 [ -d "$ROOT/bin/hxc/std" ] || (cd "$ROOT" && python3 hxc/tools/mkstd.py)
 # hxnodejs's stdout flush fails on pipes, hence the file
 HXC_SINGLE=1 HAXE_STD_PATH=${HAXE_STD_PATH:-$ROOT/haxe/std} node --stack-size=65500 "$ROOT/bin/hxc/wbk.js" "$OUT/prog" "$@" \

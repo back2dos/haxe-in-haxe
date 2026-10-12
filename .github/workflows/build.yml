@@ -1,8 +1,10 @@
 # Builds the port (haxe.Main compiled to C by hxc) for Linux and macOS
 # (x86_64, aarch64) with zig cc, and as a Cosmopolitan APE binary that is also
-# the Windows build; tests each on a native runner and publishes them:
+# the Windows build, each with mbedtls and libuv linked statically (`make
+# release`, `make cosmo`, the Makefile); tests each on a native runner
+# (hxc/tools/smoke.sh, TLS and libuv included) and publishes them:
 # a rolling `nightly` pre-release on pushes to main, a release on v* tags.
-# Also builds the website (site/build.sh: the playground's WebAssembly with
+# Also builds the website (`make site`: the playground's WebAssembly with
 # Emscripten, the pages' JavaScript compiled from Haxe by the Linux build of
 # the port) and deploys it to GitHub Pages on pushes to main.
 #
@@ -100,20 +102,14 @@ jobs:
           git -C "$RUNNER_TEMP/hxnodejs" fetch -q --depth 1 https://github.com/HaxeFoundation/hxnodejs "$HXNODEJS_COMMIT"
           git -C "$RUNNER_TEMP/hxnodejs" checkout -q FETCH_HEAD
 
+      # the port's C, and the playground's (without the target generators)
       - name: Generate the port's C
         run: |
           set -ex
           haxe/haxe --version
-          TOOL_LIBS="$RUNNER_TEMP/hxnodejs/extraParams.hxml -cp $RUNNER_TEMP/hxnodejs/src" NO_CC=1 sh hxc/build.sh port
+          make port-c web-c TOOL_LIBS="$RUNNER_TEMP/hxnodejs/extraParams.hxml -cp $RUNNER_TEMP/hxnodejs/src"
           ls bin/hxc/hih/prog_hxc | wc -l
-          du -sh bin/hxc/hih/prog_hxc
-
-      # the playground's compiler: without the target generators (site/build.sh)
-      - name: Generate the playground's C
-        run: |
-          set -ex
-          PORT_OUT=bin/hxc/hih-web HXFLAGS="-D hih_no_generators" SKIP_TOOL=1 NO_CC=1 sh hxc/build.sh port
-          du -sh bin/hxc/hih-web/prog_hxc
+          du -sh bin/hxc/hih/prog_hxc bin/hxc/hih-web/prog_hxc
 
       - name: Pack the C and the std
         run: |
@@ -135,7 +131,8 @@ jobs:
           path: dist-web/
           retention-days: 7
 
-  # zig cc cross builds from Linux, one target per job
+  # zig cc cross builds from Linux, one target per job, with mbedtls and libuv
+  # built for the target (hxc/tools/deps.sh, cached)
   build:
     needs: generate
     runs-on: ubuntu-24.04
@@ -160,23 +157,29 @@ jobs:
       - uses: mlugg/setup-zig@v2
         with:
           version: ${{ env.ZIG_VERSION }}
+      - name: Cache mbedtls and libuv
+        uses: actions/cache@v6
+        with:
+          path: bin/deps/${{ matrix.target }}
+          key: deps-${{ matrix.target }}-zig-${{ env.ZIG_VERSION }}-${{ hashFiles('hxc/tools/deps.sh') }}
       - name: Compile
         run: |
           set -ex
-          mkdir -p bin/hxc/hih
-          tar xzf dist/port-c.tar.gz -C bin/hxc/hih
-          sh hxc/tools/zig-build.sh ${{ matrix.target }} bin/zig/haxe-in-haxe
-          file bin/zig/haxe-in-haxe
+          mkdir -p dist/c
+          tar xzf dist/port-c.tar.gz -C dist/c
+          make release TARGET=${{ matrix.target }} PORT_C=dist/c/prog_hxc
+          file bin/release/${{ matrix.target }}/haxe-in-haxe
       - name: Package
         run: |
           set -ex
           P=haxe-in-haxe-${{ matrix.name }}
+          D=bin/deps/${{ matrix.target }}
           mkdir -p "pkg/$P"
-          cp bin/zig/haxe-in-haxe LICENSE COPYING "pkg/$P/"
+          cp bin/release/${{ matrix.target }}/haxe-in-haxe LICENSE COPYING $D/LICENSE.mbedtls $D/LICENSE.libuv "pkg/$P/"
           tar xzf dist/std.tar.gz -C "pkg/$P"
           cat > "pkg/$P/README.txt" <<EOF
           haxe-in-haxe: the Haxe compiler ported to Haxe, compiled to C (https://github.com/${{ github.repository }}).
-          Commit ${{ github.sha }}, target ${{ matrix.target }} (built with zig cc, without TLS and libuv).
+          Commit ${{ github.sha }}, target ${{ matrix.target }} (built with zig cc, with mbedtls and libuv).
 
           Use it like haxe, with HAXE_STD_PATH pointing at the std directory next to it:
             export HAXE_STD_PATH=\$PWD/std
@@ -224,31 +227,25 @@ jobs:
       - name: Cache mbedtls and libuv
         uses: actions/cache@v6
         with:
-          path: bin/cosmo-deps
-          key: cosmo-deps-${{ env.COSMOCC_VERSION }}-${{ hashFiles('hxc/tools/cosmo-deps.sh', 'hxc/tools/cosmo-patches/*') }}
+          path: bin/deps/cosmo
+          key: deps-cosmo-${{ env.COSMOCC_VERSION }}-${{ hashFiles('hxc/tools/deps.sh', 'hxc/tools/cosmo-patches/*') }}
       - name: Compile
         run: |
           set -ex
           cosmocc --version
-          sh hxc/tools/cosmo-deps.sh bin/cosmo-deps
-          mkdir -p bin/hxc/hih
-          tar xzf dist/port-c.tar.gz -C bin/hxc/hih
-          D=bin/cosmo-deps
-          mkdir -p bin/cosmo
-          RT="rt rt_dyn rt_std rt_str rt_sys rt_net rt_ssl rt_uv rt_thread rt_census"
-          CC="cosmocc -O2" CFLAGS="-w -fno-strict-aliasing -DHXC_CONST_IDS -I$D/include" \
-            LIBS="-lm -L$D/lib -lmbedtls -lmbedx509 -lmbedcrypto -luv" RT_FILES="$RT" \
-            sh hxc/tools/cc-chunks.sh bin/hxc/hih/prog_hxc bin/cosmo/hih.com
+          mkdir -p dist/c
+          tar xzf dist/port-c.tar.gz -C dist/c
+          make cosmo PORT_C=dist/c/prog_hxc
       - name: Package
         run: |
           set -ex
           mkdir -p pkg/std-zip out
           tar xzf dist/std.tar.gz -C pkg/std-zip
           # the std in the binary's own zip (rt.c reads /zip/std when HAXE_STD_PATH is unset)
-          cp bin/cosmo/hih.com out/haxe-in-haxe.com
+          cp bin/release/cosmo/haxe-in-haxe.com out/haxe-in-haxe.com
           (cd pkg/std-zip && zip -qr -9 ../../out/haxe-in-haxe.com std)
           mkdir -p pkg/licenses
-          cp LICENSE COPYING bin/cosmo-deps/LICENSE.mbedtls bin/cosmo-deps/LICENSE.libuv pkg/licenses/
+          cp LICENSE COPYING bin/deps/cosmo/LICENSE.mbedtls bin/deps/cosmo/LICENSE.libuv pkg/licenses/
           (cd pkg/licenses && zip -q -9 ../../out/haxe-in-haxe-licenses.zip *)
           P=haxe-in-haxe-windows-x86_64
           mkdir -p "pkg/$P"
@@ -376,7 +373,7 @@ jobs:
           SHORT=$(echo "$GITHUB_SHA" | cut -c1-9)
           NOTES="Built from $GITHUB_SHA.
 
-          - haxe-in-haxe-<os>-<arch>.tar.gz: Linux and macOS builds (zig cc, without TLS and libuv), with std/; set HAXE_STD_PATH to it.
+          - haxe-in-haxe-<os>-<arch>.tar.gz: Linux and macOS builds (zig cc, with mbedtls and libuv), with std/; set HAXE_STD_PATH to it.
           - haxe-in-haxe-windows-x86_64.zip: the Cosmopolitan build as haxe-in-haxe.exe, with mbedtls and libuv.
           - haxe-in-haxe.com: the same Cosmopolitan binary for Linux, macOS, Windows and the BSDs, with the std embedded. Its licenses (LICENSE, COPYING, LICENSE.mbedtls, LICENSE.libuv) are in haxe-in-haxe-licenses.zip; every archive carries its own."
           if [ "$GITHUB_REF_TYPE" = tag ]; then
@@ -394,8 +391,8 @@ jobs:
             fi
           fi
 
-  # the website: WebAssembly playground (Emscripten) and the pages' JavaScript,
-  # compiled from site/src by the Linux build of the port
+  # the website (`make site`): WebAssembly playground (Emscripten) and the
+  # pages' JavaScript, compiled from site/src by the Linux build of the port
   site:
     needs: [generate, build]
     runs-on: ubuntu-24.04
@@ -429,12 +426,13 @@ jobs:
       - name: Build the site
         run: |
           set -ex
-          mkdir -p bin/hxc/hih-web haxe
-          tar xzf dist/port-c-web.tar.gz -C bin/hxc/hih-web
+          mkdir -p dist/web haxe
+          tar xzf dist/port-c-web.tar.gz -C dist/web
           tar xzf dist/std.tar.gz -C haxe
           tar xzf dist/haxe-in-haxe-linux-x86_64.tar.gz -C dist
           . ~/emsdk/emsdk_env.sh
-          SKIP_PORT=1 SITE_HAXE="$PWD/dist/haxe-in-haxe-linux-x86_64/haxe-in-haxe" HAXE_STD_PATH="$PWD/haxe/std" sh site/build.sh
+          make site WEB_C=dist/web/prog_hxc SITE_HAXE="$PWD/dist/haxe-in-haxe-linux-x86_64/haxe-in-haxe"
+          ls -l bin/site
       - uses: actions/upload-pages-artifact@v5
         with:
           path: bin/site

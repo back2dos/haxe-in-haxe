@@ -20,24 +20,29 @@ the compilation server. Results: [test/TESTING.md](test/TESTING.md).
 
 ```sh
 git submodule update --init --recursive
-make -C haxe haxe                  # reference compiler (OCaml 5, opam; needs pcre2)
-
-sh hxc/build.sh port               # bin/hxc/hih/hih (tcc)
-CC="clang -O2" BIN=hih_clang sh hxc/build.sh port
+make reference                     # haxe/haxe, the reference compiler (OCaml 5, opam; needs pcre2)
+make port                          # bin/hxc/hih/hih_clang (clang -O2)
+make dev                           # bin/port/hih: rebuilt in seconds after an edit (tcc)
+make release TARGET=aarch64-macos  # bin/release/<target>/haxe-in-haxe (zig cc, with mbedtls and libuv)
+make cosmo                         # bin/release/cosmo/haxe-in-haxe.com (Cosmopolitan)
+make site                          # bin/site, the website (Emscripten)
 ```
+
+The [Makefile](Makefile) is the entry point for every build: `make help`
+lists the targets and variables. It needs node with the hxnodejs haxelib,
+tcc and clang; zig, cosmocc or Emscripten for the release and site builds.
 
 Use it like `haxe`, with `HAXE_STD_PATH` pointing to `haxe/std`:
 
 ```sh
-HAXE_STD_PATH=haxe/std bin/hxc/hih/hih -cp src --main Main --interp
+HAXE_STD_PATH=haxe/std bin/hxc/hih/hih_clang -cp src --main Main --interp
 ```
 
 ## Test
 
 ```sh
-export HAXE_REFERENCE=$PWD/haxe/haxe HAXE_IN_HAXE_PORT=$PWD/bin/hxc/hih/hih_clang
-python3 test/conformance.py -j 8
-sh test/fuzz/build.sh && bin/fuzz/fuzz -j 4 --lane diff:js
+make test                          # HXB conformance of bin/hxc/hih/hih_clang
+make test-fuzz LANE=diff:js        # the fuzzer (bin/fuzz/fuzz) on one lane
 ```
 
 See [test/README.md](test/README.md) for the other harnesses.

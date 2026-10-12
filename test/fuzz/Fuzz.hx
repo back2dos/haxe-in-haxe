@@ -12,7 +12,7 @@ import sys.thread.Lock;
 	Differential fuzzer: generates random, well-typed Haxe programs and checks
 	that the port compiles them exactly like the pinned reference compiler.
 
-	Build with hxc: `sh test/fuzz/build.sh`, run `bin/fuzz/fuzz --help`.
+	Build with hxc: `make fuzz`, run `bin/fuzz/fuzz --help`.
 	See test/fuzz/README.md.
 **/
 class Fuzz {
