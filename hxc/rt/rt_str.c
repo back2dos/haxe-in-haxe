@@ -471,6 +471,8 @@ void StringBuf_addSub(void *b, void *s, int32_t pos, void *lenp) {
 	sb_add_str(b, sub);
 }
 
+void StringBuf_clear(void *b) { FI(b, 0) = 0; }
+
 int32_t StringBuf_get_length(void *b) {
 	return FI(b, 0);
 }

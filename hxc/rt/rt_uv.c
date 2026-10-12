@@ -94,6 +94,8 @@ int32_t hxc_NativeUv_streamIsWritable(int32_t id) { return no_uv(); }
 int32_t hxc_NativeUv_streamSetBlocking(int32_t id, int32_t b) { return no_uv(); }
 int32_t hxc_NativeUv_pipeBind(int32_t id, void *name) { return no_uv(); }
 void hxc_NativeUv_pipeConnect(int32_t id, void *name, int32_t rid) { no_uv(); }
+int32_t hxc_NativeUv_pipeOpen(int32_t id, int32_t fd) { return no_uv(); }
+int32_t hxc_NativeUv_guessHandle(int32_t fd) { return no_uv(); }
 void *hxc_NativeUv_pipeName(int32_t id, int32_t peer) { no_uv(); return NULL; }
 void hxc_NativeUv_pipePendingInstances(int32_t id, int32_t n) { no_uv(); }
 int32_t hxc_NativeUv_pipePendingType(int32_t id) { return no_uv(); }
@@ -895,6 +897,9 @@ void hxc_NativeUv_pipeConnect(int32_t id, void *name, int32_t rid) {
 	free(n);
 }
 
+// not in luv's Eval API: a pipe over an open descriptor (e.g. the process's stdin)
+int32_t hxc_NativeUv_pipeOpen(int32_t id, int32_t fd) { return uv_pipe_open(&H(id)->u.pipe, fd); }
+
 // getsockname/getpeername: Bytes, null on failure (lastError)
 void *hxc_NativeUv_pipeName(int32_t id, int32_t peer) {
 	char buf[4096];
@@ -1667,6 +1672,18 @@ void *hxc_NativeUv_getPasswd(void) {
 	RT_UNROOT(1);
 	uv_os_free_passwd(&p);
 	return arr;
+}
+
+// not in luv's Eval API: what a descriptor is (0 unknown, 1 tty, 2 pipe, 3 tcp, 4 udp, 5 file)
+int32_t hxc_NativeUv_guessHandle(int32_t fd) {
+	switch (uv_guess_handle(fd)) {
+	case UV_TTY: return 1;
+	case UV_NAMED_PIPE: return 2;
+	case UV_TCP: return 3;
+	case UV_UDP: return 4;
+	case UV_FILE: return 5;
+	default: return 0;
+	}
 }
 
 #endif

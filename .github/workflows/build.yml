@@ -4,9 +4,10 @@
 # release`, `make cosmo`, the Makefile); tests each on a native runner
 # (hxc/tools/smoke.sh, TLS and libuv included) and publishes them:
 # a rolling `nightly` pre-release on pushes to main, a release on v* tags.
-# Also builds the website (`make site`: the playground's WebAssembly with
+# Also builds lix (tools/lix) as a Cosmopolitan binary, lix.com (`make
+# lix-cosmo`), and the website (`make site`: the playground's WebAssembly with
 # Emscripten, the pages' JavaScript compiled from Haxe by the Linux build of
-# the port) and deploys it to GitHub Pages on pushes to main.
+# the port, lix.com under tools/) and deploys it to GitHub Pages on pushes to main.
 #
 # Release assets (https://github.com/<repo>/releases/download/<tag>/<asset>):
 #   haxe-in-haxe-linux-x86_64.tar.gz   haxe-in-haxe-linux-aarch64.tar.gz
@@ -111,13 +112,21 @@ jobs:
           ls bin/hxc/hih/prog_hxc | wc -l
           du -sh bin/hxc/hih/prog_hxc bin/hxc/hih-web/prog_hxc
 
+      # lix's C (tools/lix, with hxcoro fetched at its pinned commit)
+      - name: Generate lix's C
+        run: |
+          set -ex
+          make lix-c TOOL_LIBS="$RUNNER_TEMP/hxnodejs/extraParams.hxml -cp $RUNNER_TEMP/hxnodejs/src"
+          ls bin/lix/lix_hxc | wc -l
+
       - name: Pack the C and the std
         run: |
           set -ex
-          mkdir -p dist dist-web
+          mkdir -p dist dist-web dist-lix
           tar czf dist/port-c.tar.gz -C bin/hxc/hih prog_hxc
           tar czf dist/std.tar.gz -C haxe std
           tar czf dist-web/port-c-web.tar.gz -C bin/hxc/hih-web prog_hxc
+          tar czf dist-lix/lix-c.tar.gz -C bin/lix lix_hxc
 
       - uses: actions/upload-artifact@v7
         with:
@@ -129,6 +138,12 @@ jobs:
         with:
           name: port-c-web
           path: dist-web/
+          retention-days: 7
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: lix-c
+          path: dist-lix/
           retention-days: 7
 
   # zig cc cross builds from Linux, one target per job, with mbedtls and libuv
@@ -204,6 +219,10 @@ jobs:
         with:
           name: port-c
           path: dist
+      - uses: actions/download-artifact@v8
+        with:
+          name: lix-c
+          path: dist
       - name: Cache cosmocc
         id: cache-cosmocc
         uses: actions/cache@v6
@@ -267,6 +286,29 @@ jobs:
           name: haxe-in-haxe-cosmo
           path: out/
           retention-days: 14
+      - name: lix.com
+        run: |
+          set -ex
+          mkdir -p dist/lix
+          tar xzf dist/lix-c.tar.gz -C dist/lix
+          make lix-cosmo LIX_C=dist/lix/lix_hxc
+          mkdir -p lix-out
+          cp bin/release/cosmo/lix.com lix-out/
+          # one binary for four commands: lix, and haxe through a link
+          lix-out/lix.com --version
+          ln -s lix.com lix-out/haxe
+          export HAXESHIM_ROOT="$RUNNER_TEMP/lix-root"
+          mkdir -p "$RUNNER_TEMP/lix-project" && cd "$RUNNER_TEMP/lix-project"
+          "$GITHUB_WORKSPACE/lix-out/lix.com" scope create
+          "$GITHUB_WORKSPACE/lix-out/lix.com" install haxelib:tink_core
+          "$GITHUB_WORKSPACE/lix-out/lix.com" install haxe 4.3.7
+          "$GITHUB_WORKSPACE/lix-out/haxe" --run resolve-args -lib tink_core
+          "$GITHUB_WORKSPACE/lix-out/haxe" -version
+      - uses: actions/upload-artifact@v7
+        with:
+          name: lix-cosmo
+          path: lix-out/lix.com
+          retention-days: 14
 
   test:
     needs: [build, cosmo]
@@ -329,6 +371,25 @@ jobs:
         run: |
           if [ -n "${{ steps.unpack.outputs.std }}" ]; then export HAXE_STD_PATH="${{ steps.unpack.outputs.std }}"; fi
           SMOKE_DIR="$RUNNER_TEMP/smoke" sh hxc/tools/smoke.sh "${{ steps.unpack.outputs.bin }}"
+      - uses: actions/download-artifact@v8
+        if: matrix.pkg == 'com' || startsWith(matrix.pkg, 'windows')
+        with:
+          name: lix-cosmo
+          path: lix
+      - name: lix.com
+        if: matrix.pkg == 'com' || startsWith(matrix.pkg, 'windows')
+        # lix on Windows (Cosmopolitan's libuv, cmd.exe for hooks) is untested
+        continue-on-error: ${{ startsWith(matrix.pkg, 'windows') }}
+        run: |
+          set -ex
+          if [ "$RUNNER_OS" = Windows ]; then L=lix/lix.exe; mv lix/lix.com "$L"; else L=lix/lix.com; chmod +x "$L"; fi
+          L="$PWD/$L"
+          "$L" --version
+          export HAXESHIM_ROOT="$RUNNER_TEMP/lix-root"
+          mkdir -p "$RUNNER_TEMP/lix-project" && cd "$RUNNER_TEMP/lix-project"
+          "$L" scope create
+          "$L" install haxelib:tink_core
+          cat haxe_libraries/tink_core.hxml
       - name: Smoke test (embedded std)
         if: startsWith(matrix.pkg, 'windows')
         run: SMOKE_DIR="$RUNNER_TEMP/smoke-zip" sh hxc/tools/smoke.sh "${{ steps.unpack.outputs.bin }}"
@@ -394,7 +455,7 @@ jobs:
   # the website (`make site`): WebAssembly playground (Emscripten) and the
   # pages' JavaScript, compiled from site/src by the Linux build of the port
   site:
-    needs: [generate, build]
+    needs: [generate, build, cosmo]
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
@@ -410,6 +471,10 @@ jobs:
         with:
           name: haxe-in-haxe-linux-x86_64
           path: dist
+      - uses: actions/download-artifact@v8
+        with:
+          name: lix-cosmo
+          path: dist/lix
       - name: Cache Emscripten
         id: cache-emsdk
         uses: actions/cache@v6
@@ -431,7 +496,7 @@ jobs:
           tar xzf dist/std.tar.gz -C haxe
           tar xzf dist/haxe-in-haxe-linux-x86_64.tar.gz -C dist
           . ~/emsdk/emsdk_env.sh
-          make site WEB_C=dist/web/prog_hxc SITE_HAXE="$PWD/dist/haxe-in-haxe-linux-x86_64/haxe-in-haxe"
+          make site WEB_C=dist/web/prog_hxc SITE_HAXE="$PWD/dist/haxe-in-haxe-linux-x86_64/haxe-in-haxe" LIX_COM=dist/lix/lix.com
           ls -l bin/site
       - uses: actions/upload-pages-artifact@v5
         with:

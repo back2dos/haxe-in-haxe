@@ -48,7 +48,7 @@ class Main {
 							mainClass = c;
 						case _:
 					}
-				var prog = Lower.program(mainClass, com.types);
+				var prog = Lower.program(mainClass, com.types, com.basic);
 				if (Lower.survey) return;
 				var single = Sys.getEnv("HXC_SINGLE");
 				if (single != null && single != "" && single != "0") sys.io.File.saveContent(out + ".c", EmitC.emit(prog));

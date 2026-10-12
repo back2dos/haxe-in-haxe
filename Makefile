@@ -52,6 +52,8 @@ COSMOCC ?=
 export ZIG COSMOCC
 # the site's scripts are compiled by SITE_HAXE (the port works too)
 SITE_HAXE ?= $(HAXE)
+# `make site`: lix.com to publish under tools/ (none: the page links a missing file)
+LIX_COM ?=
 # `make program`: a program of class path CP with main class MAIN, to bin/hxc/<MAIN>/prog_c
 CP ?= hxc/test
 MAIN ?= Bench
@@ -60,10 +62,18 @@ LANE ?= diff:hxb
 N ?= 200
 # `make smoke`: the binary to check
 SMOKE_BIN ?= $(RELEASE_BIN)
+# lix (tools/lix): hxcoro's checkout (fetched at HXCORO_REV unless it exists),
+# its C (another directory, e.g. generated in CI, is used as it is), the C
+# compiler of `make lix` and its mbedtls/libuv (system or a `make deps` directory)
+HXCORO ?= bin/hxcoro
+LIX_C ?= bin/lix/lix_hxc
+LIX_CC ?= clang -O2
+LIX_TLS_UV ?= system
 
 # --- Sources ---
 
 PORT_SRC := $(shell find src -name '*.hx')
+LIX_SRC := $(shell find tools/lix/src -name '*.hx')
 TOOL_SRC := $(shell find hxc/src hxc/js -name '*.hx')
 JS_SRC := $(shell find hxc/js -name '*.hx')
 HXC_STD_SRC := $(shell find hxc/std -name '*.hx')
@@ -107,7 +117,7 @@ cc = CC="$(1)" CFLAGS="$(2)" LIBS="$(3)" $(6) sh hxc/tools/cc-chunks.sh $(4) $(5
 
 .DEFAULT_GOAL := help
 .PHONY: help reference tool dev-tool dev port-c port web-c release deps cosmo \
-	wasm site fuzz program haxelib test test-fuzz smoke clean distclean
+	wasm site fuzz program haxelib lix-c lix lix-cosmo test test-fuzz smoke clean distclean
 
 help:
 	@sed -n '/^# --- Targets/,$$p' $(MAKEFILE_LIST) | sed -n 's/^## \{0,1\}//p'
@@ -124,10 +134,13 @@ help:
 ## release          bin/release/TARGET/haxe-in-haxe: PORT_C by zig cc for TARGET, with mbedtls and libuv
 ## cosmo            bin/release/cosmo/haxe-in-haxe.com: the Cosmopolitan APE binary, with mbedtls and libuv
 ## wasm             bin/site/hih.{js,wasm,data}: the playground's compiler (Emscripten, emcc on PATH)
-## site             bin/site: the website (wasm, pages, their scripts compiled by SITE_HAXE)
+## site             bin/site: the website (wasm, pages, their scripts compiled by SITE_HAXE; LIX_COM under tools/)
 ## fuzz             bin/fuzz/fuzz: the differential fuzzer (FUZZ_CC)
 ## program          bin/hxc/MAIN/prog_c: class path CP, main class MAIN, by the JS tool and PROG_CC
 ## haxelib          bin/haxelib/hxc.zip: the hxc haxelib package (hxc/haxelib/build.sh)
+## lix-c            LIX_C: the C of lix (tools/lix, with hxcoro fetched into HXCORO) by the JS tool
+## lix              bin/lix/lix (+ haxe, haxelib, neko links): LIX_C by LIX_CC with LIX_TLS_UV
+## lix-cosmo        bin/release/cosmo/lix.com: lix as a Cosmopolitan APE binary
 ## test             HXB conformance of PORT_BIN against the reference (test/conformance.py)
 ## test-fuzz        the fuzzer on PORT_BIN: LANE (default diff:hxb), N programs
 ## smoke            hxc/tools/smoke.sh on SMOKE_BIN (default: the release binary of TARGET)
@@ -136,7 +149,7 @@ help:
 ##
 ## Variables: HAXE, HAXE_STD_PATH, JOBS, NODE, TOOL_LIBS, DEV_CC, TOOL_CC, PORT_CC,
 ## FUZZ_CC, PROG_CC, HXFLAGS, TLS_UV, PORT_BIN, PORT_C, WEB_C, TARGET, ZIG, COSMOCC, SITE_HAXE,
-## CP, MAIN, LANE, N, SMOKE_BIN (defaults and meaning: the top of the Makefile).
+## LIX_COM, CP, MAIN, LANE, N, SMOKE_BIN, HXCORO, LIX_C, LIX_CC, LIX_TLS_UV (defaults and meaning: the top of the Makefile).
 
 reference:
 	$(MAKE) -C haxe -j$(JOBS) haxe
@@ -264,11 +277,13 @@ site: wasm
 	cp site/bench/results.json bin/site/bench.json
 	cp site/bench/targets-results.json bin/site/targets.json
 	rm -rf bin/site/examples && cp -r site/examples bin/site/examples
-	printf '{\n\t"date": "%s",\n\t"commit": "%s",\n\t"wasmSize": "%s",\n\t"wasmGz": "%s",\n\t"dataGz": "%s"\n}\n' \
+	if [ -n "$(LIX_COM)" ]; then mkdir -p bin/site/tools && cp $(LIX_COM) bin/site/tools/lix.com; fi
+	printf '{\n\t"date": "%s",\n\t"commit": "%s",\n\t"wasmSize": "%s",\n\t"wasmGz": "%s",\n\t"dataGz": "%s",\n\t"lixSize": "%s"\n}\n' \
 		"$$(date -u +%Y-%m-%d)" "$$(git rev-parse --short HEAD)" \
 		"$$(stat -c %s bin/site/hih.wasm | $(mb))" \
 		"$$(gzip -9c bin/site/hih.wasm | wc -c | $(mb))" \
-		"$$(gzip -9c bin/site/hih.data | wc -c | $(mb))" > bin/site/build-info.json
+		"$$(gzip -9c bin/site/hih.data | wc -c | $(mb))" \
+		"$$(if [ -f bin/site/tools/lix.com ]; then stat -c %s bin/site/tools/lix.com | $(mb); else echo -; fi)" > bin/site/build-info.json
 	cat bin/site/build-info.json
 
 # --- Other programs ---
@@ -289,6 +304,39 @@ program: $(WBK) $(STD)
 haxelib:
 	sh hxc/haxelib/build.sh
 
+# --- lix (tools/lix/README.md) ---
+
+HXCORO_REV := 4b1a4d49542c578dc184297b75d125093ca444d2
+$(HXCORO)/.rev:
+	rm -rf $(HXCORO) && git init -q $(HXCORO)
+	git -C $(HXCORO) fetch -q --depth 1 https://github.com/HaxeFoundation/hxcoro.git $(HXCORO_REV)
+	git -C $(HXCORO) checkout -q FETCH_HEAD
+	echo $(HXCORO_REV) > $@
+
+LIX_ARGS := -cp tools/lix/src -cp $(HXCORO)/src -main lix.cli.Main -D no-deprecation-warnings
+lix-c: bin/lix/lix_hxc/files.txt
+bin/lix/lix_hxc/files.txt: $(WBK) $(LIX_SRC) $(STD) $(HXCORO)/.rev
+	$(call wbk,bin/lix/lix,$(LIX_ARGS))
+
+ifeq ($(LIX_TLS_UV),system)
+LIX_INC :=
+LIX_LIBS := -lm $(DEPS_LIBS)
+else
+LIX_INC := -I$(LIX_TLS_UV)/include
+LIX_LIBS := -lm -L$(LIX_TLS_UV)/lib $(DEPS_LIBS) -lpthread -ldl
+endif
+lix: bin/lix/lix
+bin/lix/lix: $(LIX_C)/files.txt $(RT_SRC)
+	$(call cc,$(LIX_CC),$(CFLAGS_BASE) -DHXC_CONST_IDS $(LIX_INC),$(LIX_LIBS),$(LIX_C),$@)
+	for cmd in haxe haxelib neko; do ln -sf lix bin/lix/$$cmd; done
+	ls -l $@
+
+lix-cosmo: bin/release/cosmo/lix.com
+bin/release/cosmo/lix.com: $(LIX_C)/files.txt bin/deps/cosmo/VERSIONS $(RT_SRC)
+	@mkdir -p $(dir $@)
+	$(call cc,cosmocc -O2,$(CFLAGS_BASE) -DHXC_CONST_IDS -Ibin/deps/cosmo/include,-lm -Lbin/deps/cosmo/lib $(DEPS_LIBS),$(LIX_C),$@,$(COSMO_PATH) RT_FILES="$(RT_FILES)")
+	ls -l $@
+
 # --- Tests (test/README.md has the other harnesses) ---
 
 test: $(PORT_BIN)
@@ -299,7 +347,7 @@ test-fuzz: bin/fuzz/fuzz $(PORT_BIN)
 	HAXE_REFERENCE=$(CURDIR)/haxe/haxe bin/fuzz/fuzz -j $(JOBS) -n $(N) --port $(abspath $(PORT_BIN)) --lane $(LANE)
 
 clean:
-	rm -rf bin/hxc bin/port bin/release bin/site bin/site-build bin/fuzz bin/haxelib
+	rm -rf bin/hxc bin/port bin/release bin/site bin/site-build bin/fuzz bin/haxelib bin/lix
 
 distclean:
 	rm -rf bin

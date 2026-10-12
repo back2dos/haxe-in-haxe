@@ -404,6 +404,25 @@ void *Date_now(void) {
 }
 
 void *Date_fromTime(double t) { return date_of(t); }
+
+// HxOverrides.strDate: "hh:mm:ss" (UTC time of day), "YYYY-MM-DD", "YYYY-MM-DD hh:mm:ss" (local)
+void *Date_fromString(void *s) {
+	char *c = hx_str_to_utf8(s);
+	size_t n = strlen(c);
+	int y, mo, d, h, mi, se;
+	void *r = NULL;
+	if (n == 8 && sscanf(c, "%d:%d:%d", &h, &mi, &se) == 3) r = date_of(((double)h * 3600 + mi * 60 + se) * 1000.0);
+	else if (n == 10 && sscanf(c, "%d-%d-%d", &y, &mo, &d) == 3) r = Date_new(y, mo - 1, d, 0, 0, 0);
+	else if (n == 19 && sscanf(c, "%d-%d-%d %d:%d:%d", &y, &mo, &d, &h, &mi, &se) == 6) r = Date_new(y, mo - 1, d, h, mi, se);
+	if (!r) {
+		char msg[96];
+		snprintf(msg, sizeof msg, "Invalid date format : %.60s", c);
+		free(c);
+		hx_throw_str(msg);
+	}
+	free(c);
+	return r;
+}
 double Date_getTime(void *d) { return FD(d, 0); }
 
 static struct tm local_of(void *d) {

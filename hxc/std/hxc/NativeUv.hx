@@ -91,6 +91,7 @@ extern class NativeUv {
 	static function streamSetBlocking(handle:Int, b:Bool):Int;
 	// pipes, ttys
 	static function pipeBind(handle:Int, name:Bytes):Int;
+	static function pipeOpen(handle:Int, fd:Int):Int; // uv_pipe_open (not in luv's Eval API)
 	static function pipeConnect(handle:Int, name:Bytes, req:Int):Void;
 	static function pipeName(handle:Int, peer:Bool):Null<Bytes>;
 	static function pipePendingInstances(handle:Int, n:Int):Void;
@@ -164,4 +165,6 @@ extern class NativeUv {
 	static function getPid():Int;
 	static function getPPid():Int;
 	static function getPasswd():Null<Array<Dynamic>>;
+	// uv_guess_handle (not in luv's Eval API): 0 unknown, 1 tty, 2 pipe, 3 tcp, 4 udp, 5 file
+	static function guessHandle(fd:Int):Int;
 }

@@ -4,12 +4,13 @@ package haxe;
 
 class Exception {
 	public var message(get, never):String;
-	public var stack(get, never):CallStack;
+	public var stack(get, set):CallStack;
 	public var previous(get, never):Null<Exception>;
 	public var native(get, never):Any;
 
 	@:noCompletion var __exceptionMessage:String;
 	@:noCompletion var __previousException:Null<Exception>;
+	@:noCompletion var __exceptionStack:Null<CallStack>;
 	@:noCompletion var __nativeException:Any;
 
 	// hxc: caught/thrown are called by the backend for each catch and throw of a
@@ -49,6 +50,10 @@ class Exception {
 	final function get_native():Any
 		return __nativeException;
 
+	// hxc: no native stack: empty unless set (hxcoro copies stacks between exceptions)
 	function get_stack():CallStack
-		return [];
+		return __exceptionStack != null ? __exceptionStack : [];
+
+	function set_stack(stack:CallStack):CallStack
+		return __exceptionStack = stack;
 }

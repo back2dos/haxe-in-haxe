@@ -967,7 +967,7 @@ class FnLower {
 			var f = l.method(impl.cls, impl.field);
 			return l.getProgram().sig([for (a in f.args) a.ty], f.ret);
 		}
-		return switch TFunctions.follow((decl != null ? decl : cf).cfType) {
+		return switch Lower.followFun((decl != null ? decl : cf).cfType) {
 			case TFun(s): l.getProgram().sig([TRef(RObj(l.rootClass()))].concat([for (a in s.args) ty(a.type)]), ty(s.ret));
 			case _: fail("method type");
 		}

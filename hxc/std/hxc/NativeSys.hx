@@ -6,6 +6,7 @@ extern class NativeSys {
 	static function print(s:String):Void;
 	static function printErr(s:String):Void;
 	static function args():Array<String>;
+	static function argv0():Null<String>; // the program name as invoked (argv[0])
 	static function getEnv(s:String):Null<String>;
 	static function putEnv(s:String, v:Null<String>):Void;
 	static function environ():Array<String>; // "name=value"

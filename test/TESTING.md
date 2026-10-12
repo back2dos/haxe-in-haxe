@@ -35,6 +35,20 @@ on Linux, macOS and Windows x86_64/arm64 (Cosmopolitan build), including its
 github.com) and `eval.luv` check (timer, TCP echo). Locally after the move to
 the Makefile: `make test` 279 + 7, `make test-fuzz LANE=diff:js N=100` 100/100.
 
+### hxc changes for lix (2026-10-12)
+
+The hxc changes made for `tools/lix/` (coroutine types in the lowering; in hxc's
+std and runtime `haxe.Exception.stack` setter, `StringBuf.clear`,
+`StringTools.urlEncode`/`urlDecode`, `Date.fromString`, and three new natives)
+were checked without the reference compiler (not built in that environment), so
+the matrix above was not rerun. Instead, the port built by the changed hxc
+(clang -O1) and the `nightly` release (`ecd7581`, whose `src/` differs from
+this commit only in comments) wrote identical HXB with `-D disable-parallelism`
+for the port's self-compile (JS: 614 modules, hxc: 515), the backend tool
+(JS) and lix with hxcoro (hxc: 215). Without that define both binaries vary
+between runs on the same input. `hxc/test` regress, threads and exc pass. lix's
+own results are in `tools/lix/README.md`.
+
 ## Target generators
 
 Every target also compiles upstream's unit suite identically (`unit-targets.py`, above).
