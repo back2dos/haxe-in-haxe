@@ -123,10 +123,28 @@ jobs:
           test -x "$d8"
           echo "D8=$d8" >> "$GITHUB_ENV"
 
+      # not upstream's: core dumps of crashing programs, for the step after Test
+      - name: Core dumps
+        run: sudo sysctl -w kernel.core_pattern="$RUNNER_TEMP/core.%e.%p"
+
       - name: Test
-        run: haxe --run RunCi ${{ matrix.target }} ${{ matrix.runci-args }}
+        run: |
+          ulimit -c unlimited
+          haxe --run RunCi ${{ matrix.target }} ${{ matrix.runci-args }}
         working-directory: ${{github.workspace}}/haxe/tests
         timeout-minutes: 25
+
+      # not upstream's: where the port crashed (the binary is stripped; the
+      # offsets in its mapping symbolize with an unstripped build of the same C)
+      - name: Backtraces of core dumps
+        if: failure()
+        run: |
+          ls "$RUNNER_TEMP"/core.haxe.* 2>/dev/null || exit 0
+          sudo apt-get install -qqy gdb > /dev/null
+          for c in "$RUNNER_TEMP"/core.haxe.*; do
+            echo "== $c"
+            gdb -batch -ex "info proc mappings" -ex "thread apply all bt 40" -ex "info registers" "$(readlink -f /usr/local/bin/haxe)" "$c" 2>&1 | grep -v "^\[New LWP" | head -400
+          done
 
   mac-test:
     env:
