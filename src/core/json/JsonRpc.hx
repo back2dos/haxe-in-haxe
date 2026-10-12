@@ -21,7 +21,9 @@ class JsonRpcError extends haxe.Exception {
 	public final kind:JsonRpcErrorKind;
 
 	public function new(kind:JsonRpcErrorKind) {
-		super("JsonRpc_error");
+		// port: the message is Printexc.to_string of the exception, as the compiler's
+		// catch-all reports it
+		super("JsonRpc.JsonRpc_error(_)");
 		this.kind = kind;
 	}
 }
