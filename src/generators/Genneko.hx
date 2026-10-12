@@ -19,6 +19,8 @@
 
 package generators;
 
+import core.OcamlFilename;
+
 import haxe.io.Bytes;
 import core.Globals;
 import core.Globals.*;
@@ -103,37 +105,6 @@ class Genneko {
 		return b.toString();
 	}
 
-	// port: OCaml Filename (Unix) helpers.
-	static function filenameIsRelative(f:String):Bool return f.length < 1 || f.charAt(0) != "/";
-
-	static function filenameConcat(dir:String, file:String):String {
-		var l = dir.length;
-		return if (l == 0 || dir.charAt(l - 1) == "/") dir + file else dir + "/" + file;
-	}
-
-	// port: OCaml's Filename.quote (Unix flavour, like the other Filename helpers here).
-	static function filenameQuote(s:String):String return "'" + s.split("'").join("'\\''") + "'";
-
-	static function filenameChopExtension(name:String):String {
-		function isDirSep(i:Int) return name.charAt(i) == "/";
-		function check(i0:Int, i:Int):Int {
-			while (true) {
-				if (i < 0 || isDirSep(i)) return 0;
-				if (name.charAt(i) == ".") i-- else return name.length - i0;
-			}
-		}
-		function searchDot(i:Int):Int {
-			while (true) {
-				if (i < 0 || isDirSep(i)) return 0;
-				if (name.charAt(i) == ".") return check(i, i - 1);
-				i--;
-			}
-		}
-		var l = searchDot(name.length - 1);
-		if (l == 0) throw new core.ds.InvalidArgument("Filename.chop_extension");
-		return name.substr(0, name.length - l);
-	}
-
 	static function pos(ctx:Context, p:Pos):NPos {
 		if (ctx.macros) return {
 			psource: bs(p.pfile),
@@ -147,7 +118,7 @@ class Genneko {
 				if (found != null) found else {
 					var path = (switch Gctx.defined(ctx.com, Define.AbsolutePath) {
 						case true:
-							if (filenameIsRelative(p.pfile)) filenameConcat(Sys.getCwd(), p.pfile) else p.pfile;
+							if (OcamlFilename.isRelative(p.pfile)) OcamlFilename.concat(OcamlFilename.sysGetcwd(), p.pfile) else p.pfile;
 						case false:
 							try {
 								/* lookup relative path */
@@ -987,7 +958,7 @@ class Genneko {
 			}
 		}
 		function command(cmd:String, args:Array<String>):Int return try com.runCommandArgs(cmd, args) catch (_:Dynamic) -1;
-		var nekoFile = (try filenameChopExtension(com.file) catch (_:Dynamic) com.file) + ".neko";
+		var nekoFile = (try OcamlFilename.chopExtension(com.file) catch (_:Dynamic) com.file) + ".neko";
 		if (source || useNekoc) {
 			var ch = sys.io.File.write(nekoFile, true);
 			var out = new haxe.io.BytesOutput();
@@ -996,12 +967,12 @@ class Genneko {
 			ch.close();
 		}
 		if (useNekoc
-			&& command("nekoc", (if (ctx.version > 1) ["-version", Std.string(ctx.version), filenameQuote(nekoFile)] else [filenameQuote(nekoFile)])) != 0)
+			&& command("nekoc", (if (ctx.version > 1) ["-version", Std.string(ctx.version), OcamlFilename.quote(nekoFile)] else [OcamlFilename.quote(nekoFile)])) != 0)
 			throw new core.ds.Failure("Neko compilation failure");
 		if (source) {
-			if (command("nekoc", ["-p", filenameQuote(nekoFile)]) != 0) throw new core.ds.Failure("Failed to print neko code");
+			if (command("nekoc", ["-p", OcamlFilename.quote(nekoFile)]) != 0) throw new core.ds.Failure("Failed to print neko code");
 			sys.FileSystem.deleteFile(nekoFile);
-			sys.FileSystem.rename((try filenameChopExtension(com.file) catch (_:Dynamic) com.file) + "2.neko", nekoFile);
+			sys.FileSystem.rename((try OcamlFilename.chopExtension(com.file) catch (_:Dynamic) com.file) + "2.neko", nekoFile);
 		}
 	}
 }

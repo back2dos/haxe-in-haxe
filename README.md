@@ -24,6 +24,7 @@ make reference                     # haxe/haxe, the reference compiler (OCaml 5,
 make port                          # bin/hxc/hih/hih_clang (clang -O2)
 make dev                           # bin/port/hih: rebuilt in seconds after an edit (tcc)
 make release TARGET=aarch64-macos  # bin/release/<target>/haxe-in-haxe (zig cc, with mbedtls and libuv)
+make release TARGET=x86_64-windows-gnu  # bin/release/<target>/haxe-in-haxe.exe (native Windows)
 make cosmo                         # bin/release/cosmo/haxe-in-haxe.com (Cosmopolitan)
 make site                          # bin/site, the website (Emscripten)
 ```
@@ -47,7 +48,8 @@ make test-fuzz LANE=diff:js        # the fuzzer (bin/fuzz/fuzz) on one lane
 
 See [test/README.md](test/README.md) for the other harnesses. CI also runs
 upstream's own test suite (`RunCi` for every target, Linux and macOS) with
-the release binaries as `haxe`: `.github/workflows/upstream-tests.yml`.
+the release binaries as `haxe`, Linux, macOS and Windows:
+`.github/workflows/upstream-tests.yml`.
 
 ## hxc for other programs
 

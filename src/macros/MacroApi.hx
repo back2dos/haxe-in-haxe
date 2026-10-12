@@ -2390,7 +2390,7 @@ class MacroApiImpl {
 						var dfile = displayPos.get().pfile;
 						return dfile == p.pfile || {
 							var com = ccom();
-							(!haxe.io.Path.isAbsolute(p.pfile) || !haxe.io.Path.isAbsolute(dfile)) && (com.partScope.fileKeys.get(dfile) == com.partScope.fileKeys.get(p.pfile));
+							(core.OcamlFilename.isRelative(p.pfile) || core.OcamlFilename.isRelative(dfile)) && (com.partScope.fileKeys.get(dfile) == com.partScope.fileKeys.get(p.pfile));
 						};
 					}
 					vbool(displayPos.enclosedIn(p) && sameFile());

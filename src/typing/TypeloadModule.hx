@@ -723,11 +723,25 @@ class TypeloadModule {
 	}
 
 	public static function handleImportHx(com:CommonContext, g:TyperGlobals, m:ModuleDef, decls:Array<TypeDecl>, p:Pos):Array<TypeDecl> {
-		var directory = haxe.io.Path.directory(core.Path.UniqueKey.lazyPath(m.mExtra.mFile)),
-			candidates = [];
-		for (i in 0...m.mPath.pack.length + 1) {
-			candidates.push(haxe.io.Path.join([directory, "import.hx"]));
-			directory = haxe.io.Path.directory(directory);
+		var pathSplit = core.Path.getPathParts(core.Path.UniqueKey.lazyPath(m.mExtra.mFile));
+		pathSplit.reverse();
+		if (pathSplit.length > 0) pathSplit.shift();
+		function join(l:Array<String>):String {
+			var parts = ["import.hx"].concat(l);
+			parts.reverse();
+			return parts.join(core.Path.pathSep);
+		}
+		var candidates = [];
+		var path = pathSplit, pack = m.mPath.pack;
+		while (true) {
+			if (pack.length == 0) {
+				candidates.push(join(path));
+				break;
+			}
+			if (path.length == 0) break;
+			candidates.push(join(path));
+			path = path.slice(1);
+			pack = pack.slice(1);
 		}
 		for (file in candidates) {
 			var imported:Array<TypeDecl>;

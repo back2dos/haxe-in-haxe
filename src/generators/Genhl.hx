@@ -415,12 +415,7 @@ class Genhl {
 	static function makeDebug(ctx:HlContext, arr:Array<Pos>):Array<DebugInfo> {
 		function getRelativePath(p:Pos):String {
 			return if (Gctx.defined(ctx.com, Define.AbsolutePath)) {
-				if (!haxe.io.Path.isAbsolute(p.pfile)) {
-					// port: Filename.concat (Sys.getcwd()) p.pfile
-					var cwd = Sys.getCwd();
-					while (cwd.length > 1 && (StringTools.endsWith(cwd, "/") || StringTools.endsWith(cwd, "\\"))) cwd = cwd.substr(0, cwd.length - 1);
-					if (StringTools.endsWith(cwd, "/")) cwd + p.pfile else cwd + "/" + p.pfile;
-				} else p.pfile;
+				if (core.OcamlFilename.isRelative(p.pfile)) core.OcamlFilename.concat(core.OcamlFilename.sysGetcwd(), p.pfile) else p.pfile;
 			} else ctx.com.classPaths.relativePath(p.pfile);
 		}
 		var pos:DebugInfo = {file: 0, line: 0, pos: Globals.nullPos};

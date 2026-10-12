@@ -139,17 +139,8 @@ class JsSourcemap {
 		}
 	}
 
-	// port: Filename.basename (Unix semantics: only '/' separates).
-	public static function basename(f:String):String {
-		var i = f.length;
-		while (i > 1 && StringTools.fastCodeAt(f, i - 1) == "/".code) i--;
-		var g = f.substr(0, i);
-		var j = g.lastIndexOf("/");
-		return if (j < 0) g else if (g == "/") "/" else g.substr(j + 1);
-	}
-	
 	public static function writeMappings(com:Gctx, smap:Sourcemap, sourcePathPrefix:String):Void {
-		var basefile = basename(com.file);
+		var basefile = core.OcamlFilename.basename(com.file);
 		var channel = sys.io.File.write(com.file + ".map", true);
 		var sources = smap.sources;
 		function toUrl(file:String):String return core.Path.getFullPath(file).split("\\").join("/");

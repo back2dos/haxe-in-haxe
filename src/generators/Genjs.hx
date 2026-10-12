@@ -2196,7 +2196,7 @@ class Genjs {
 						try sys.FileSystem.deleteFile(com.file + ".map") catch (_:Dynamic) {}
 					case smap:
 						JsSourcemap.writeMappings(ctx.com, smap, "file:///");
-						var basefile = JsSourcemap.basename(com.file);
+						var basefile = core.OcamlFilename.basename(com.file);
 						print(ctx, "\n//# sourceMappingURL=" + core.StringHelper.urlEncodeString(basefile) + ".map");
 				}
 				flush(ctx);

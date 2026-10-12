@@ -75,27 +75,13 @@ class DirectoryClassPath implements IClassPath {
 
 	public function getUncachedDirListing(file:String):Null<DirectoryListing> {
 		var fullPath = classPath + file;
-		var directory = ocamlDirname(fullPath);
+		var directory = core.OcamlFilename.dirname(fullPath);
 		if (directoryCache.exists(directory)) return null;
 		var listing:Null<Array<String>>;
 		try listing = sys.FileSystem.readDirectory(directory)
 		catch (_:Dynamic) listing = null;
 		directoryCache.set(directory, listing);
 		return listing == null ? null : {directory: directory, files: listing};
-	}
-
-	// port: OCaml Filename.dirname (Unix): "Main.hx" is ".", unlike haxe.io.Path.directory.
-	public static function ocamlDirname(name:String):String {
-		inline function isSep(n:Int):Bool return name.charCodeAt(n) == "/".code;
-		if (name == "") return ".";
-		var n = name.length - 1;
-		while (n >= 0 && isSep(n)) n--;
-		if (n < 0) return name.substr(0, 1);
-		while (n >= 0 && !isSep(n)) n--;
-		if (n < 0) return ".";
-		while (n >= 0 && isSep(n)) n--;
-		if (n < 0) return name.substr(0, 1);
-		return name.substr(0, n + 1);
 	}
 
 	public function dump():Void {

@@ -182,7 +182,7 @@ class ClassPaths {
 			specific in current context (see `file_resolution_specificity` type)
 		*/
 		var found:Null<FileLookup> = null;
-		var searchDirectory = core.ClassPath.DirectoryClassPath.ocamlDirname(search);
+		var searchDirectory = core.OcamlFilename.dirname(search);
 		for (ownName in listing) {
 			var relative = searchDirectory == "." ? ownName : searchDirectory + "/" + ownName;
 			/* `representation` is how the file is referenced to. E.g. when it's deduced from a module path. */

@@ -253,14 +253,14 @@ class CppGen {
 	public static function getMetaStringFullFilename(meta:Metadata, key:core.MetaList.StrictMeta):String {
 		for (m in meta) if (Meta.metaEq(key, m.meta)) {
 			var pos = m.pos;
-			return if (filenameIsRelative(pos.pfile)) core.Path.normalizePath(filenameConcat(getcwd(), pos.pfile)) else pos.pfile;
+			return if (core.OcamlFilename.isRelative(pos.pfile)) core.Path.normalizePath(core.OcamlFilename.concat(core.OcamlFilename.sysGetcwd(), pos.pfile)) else pos.pfile;
 		}
 		return "";
 	}
 
 	public static function getMetaStringFullDirname(meta:Metadata, key:core.MetaList.StrictMeta):String {
 		var name = getMetaStringFullFilename(meta, key);
-		return try core.Path.normalizePath(filenameDirname(name)) catch (_:core.ds.InvalidArgument) "";
+		return try core.Path.normalizePath(core.OcamlFilename.dirname(name)) catch (_:core.ds.InvalidArgument) "";
 	}
 
 	public static function getCode(meta:Metadata, key:core.MetaList.StrictMeta):String {

@@ -32,26 +32,32 @@ deterministic in parallel mode.
 
 `.github/workflows/upstream-tests.yml` (called by `build.yml` after the
 release builds) runs upstream's GitHub Actions test jobs with the port as
-`haxe`: `haxe --run RunCi <target>` in `haxe/tests` for macro, js, hl, cpp,
-jvm, php, python, lua, flash and neko, as upstream's `linux-test` (x86_64 and
-arm64) and `mac-test` (arm64, plus hl on x86_64) do, with their per-target
-packages, d8, Lua cache, timeouts and `fail-fast: false`. Each job:
+`haxe`: RunCi in `haxe/tests` for macro, js, hl, cpp, jvm, php, python, lua,
+flash and neko, as upstream's `linux-test` (x86_64 and arm64), `mac-test`
+(arm64, plus hl on x86_64) and `windows64-test` (x86_64) do, with their
+per-target packages, d8, Lua cache, MSYS2, msbuild, timeouts and
+`fail-fast: false`. Each job:
 
 - downloads the release archive of its platform (`haxe-in-haxe-linux-*`,
-  `haxe-in-haxe-macos-*`) and links its binary as `/usr/local/bin/haxe`, with
-  `HAXE_STD_PATH` at the submodule's `haxe/std`;
+  `haxe-in-haxe-macos-*`, `haxe-in-haxe-windows-x86_64`) and puts its binary
+  on `PATH` as `haxe` (`haxe.exe` on Windows), with `HAXE_STD_PATH` at the
+  submodule's `haxe/std`;
 - installs neko with upstream's composite action
   (`./haxe/.github/actions/setup-neko`) and builds haxelib as upstream's
-  Makefile does, but with the port: `haxe client.hxml` in
+  Makefiles do, but with the port: `haxe client.hxml` in
   `haxe/extra/haxelib_src` (the port's `run.n` is byte-identical to the
-  reference's), `nekotools boot -c run.n`, then `cc run.c -lneko`;
+  reference's), then `nekotools boot -c run.n` and `cc run.c -lneko`
+  (Windows: `nekotools boot run.n`, as `haxelib.exe`);
 - runs RunCi straight from the submodule (checked out recursively), which
-  installs each target's runtime and libraries itself.
+  installs each target's runtime and libraries itself: `haxe --run RunCi
+  <target>`, on Windows `haxe RunCi.hxml` with `TEST` set, as upstream.
 
-Upstream's `windows64-test` is not mirrored: the Windows build is the
-Cosmopolitan binary, whose Eval host reports `Sys.systemName()` "Linux" and
-`/D/a/...` paths, so RunCi passes POSIX paths and `-D Linux` to Windows
-programs (a first run failed at haxelib's version parsing in the macro job).
+The Windows build is native (zig cc with MinGW-w64 and the UCRT, the
+runtime's Windows host layer `hxc/rt/rt_win.h`): its Eval host reports
+`Sys.systemName()` "Windows" and uses Windows paths, processes and
+environment as the reference `haxe.exe` does. (The Cosmopolitan binary,
+`haxe-in-haxe.com`, sees a POSIX system on Windows, `/D/a/...` paths and
+"Linux", so RunCi cannot run on it there.)
 
 Locally, the same runs need a haxelib built as above on `PATH` (with
 `HAXELIB_PATH` pointing at a scratch repository, so `~/.haxelib` is left

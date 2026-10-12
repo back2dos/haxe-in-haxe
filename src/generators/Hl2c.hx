@@ -1873,25 +1873,6 @@ class Hl2c {
 		line("");
 	}
 
-	// port: OCaml Filename.dirname / basename (Unix)
-	static function dirname(f:String):String {
-		var i = f.length;
-		while (i > 1 && f.charAt(i - 1) == "/") i--;
-		var p = f.substr(0, i).lastIndexOf("/");
-		if (p < 0) return ".";
-		var j = p;
-		while (j > 0 && f.charAt(j - 1) == "/") j--;
-		return if (j == 0) "/" else f.substr(0, j);
-	}
-
-	static function basename(f:String):String {
-		var i = f.length;
-		while (i > 1 && f.charAt(i - 1) == "/") i--;
-		var s = f.substr(0, i);
-		var p = s.lastIndexOf("/");
-		return if (p < 0) s else s.substr(p + 1);
-	}
-
 	public static function writeC(com:Gctx, file:String, code:Code, gnames:Array<String>, numDomains:Int):Void {
 		var gt = gatherTypes(code);
 		var allTypes = gt.all, htypes = gt.types;
@@ -1901,7 +1882,7 @@ class Hl2c {
 		var gctx = new GlobalContext();
 		gctx.version = com.version.version;
 		gctx.hlcode = code;
-		gctx.dir = switch dirname(file) {
+		gctx.dir = switch core.OcamlFilename.dirname(file) {
 			case "": ".";
 			case dir: dir.split("\\").join("/");
 		}
@@ -2267,7 +2248,7 @@ class Hl2c {
 		{
 			var modules = modules.copy();
 			for (m in modules) {
-				var path = dirname(m.mName);
+				var path = core.OcamlFilename.dirname(m.mName);
 				if (!sys.FileSystem.exists(gctx.dir + "/" + path)) core.Path.mkdirRecursive(gctx.dir, nsplit(path, "/"));
 				/* add cfiles in deterministic order */
 				if (m.mFunctions.length != 0) saveCfile(gctx, m.mName + ".c");
@@ -2356,7 +2337,7 @@ class Hl2c {
 		}
 
 		{
-			var ctx = openFile(gctx, basename(file));
+			var ctx = openFile(gctx, core.OcamlFilename.basename(file));
 			function line(s:String) linec(ctx, s);
 			function expr(s:String) exprc(ctx, s);
 			define(ctx, "#define HLC_BOOT");

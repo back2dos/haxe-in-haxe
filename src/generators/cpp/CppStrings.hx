@@ -153,8 +153,8 @@ class CppStrings {
 		// port: `String.sub path 0 2` raises Invalid_argument for shorter strings.
 		if (Bytes.ofString(path).length < 2) return path;
 		if (path.substr(0, 2) == "./") {
-			var base = if (CppStrings.filenameIsRelative(pos.pfile)) CppStrings.filenameConcat(CppStrings.getcwd(), pos.pfile) else pos.pfile;
-			return core.Path.normalizePath(CppStrings.filenameConcat(CppStrings.filenameDirname(base), path.substr(2)));
+			var base = if (core.OcamlFilename.isRelative(pos.pfile)) core.OcamlFilename.concat(core.OcamlFilename.sysGetcwd(), pos.pfile) else pos.pfile;
+			return core.Path.normalizePath(core.OcamlFilename.concat(core.OcamlFilename.dirname(base), path.substr(2)));
 		} else return path;
 	}
 
@@ -174,36 +174,5 @@ class CppStrings {
 			result.push(extractPath(meta.pos, meta.exprs[0]));
 		}
 		return result;
-	}
-
-	// port: OCaml's Sys.getcwd has no trailing separator.
-	public static function getcwd():String {
-		var cwd = Sys.getCwd();
-		if (cwd.length > 1 && cwd.charAt(cwd.length - 1) == "/") cwd = cwd.substr(0, cwd.length - 1);
-		return cwd;
-	}
-
-	// port: Filename.is_relative (Unix).
-	public static function filenameIsRelative(n:String):Bool return n.length == 0 || n.charAt(0) != "/";
-
-	// port: Filename.concat (Unix).
-	public static function filenameConcat(dirname:String, filename:String):String {
-		var l = dirname.length;
-		return if (l == 0 || dirname.charAt(l - 1) == "/") dirname + filename else dirname + "/" + filename;
-	}
-
-	// port: Filename.dirname (Unix generic_dirname).
-	public static function filenameDirname(name:String):String {
-		var trailingSep:Int->String = null, base:Int->String = null, intermediateSep:Int->String = null;
-		trailingSep = function(n:Int):String {
-			return if (n < 0) "/" else if (name.charAt(n) == "/") trailingSep(n - 1) else base(n);
-		}
-		base = function(n:Int):String {
-			return if (n < 0) "." else if (name.charAt(n) == "/") intermediateSep(n) else base(n - 1);
-		}
-		intermediateSep = function(n:Int):String {
-			return if (n < 0) "/" else if (name.charAt(n) == "/") intermediateSep(n - 1) else name.substr(0, n + 1);
-		}
-		return if (name == "") "." else trailingSep(name.length - 1);
 	}
 }

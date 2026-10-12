@@ -1219,18 +1219,13 @@ class PhpGenerator {
 		}
 		if (Genphp7.pathEq(builder.getTypePath(), Genphp7.bootTypePath)) {
 			boot = {builder: builder, filename: filename};
-			var sourceDir = core.ClassPath.DirectoryClassPath.ocamlDirname(builder.getSourceFile());
-			polyfillsSourcePath = filenameConcat(sourceDir, Genphp7.polyfillsFile);
-			var destDir = core.ClassPath.DirectoryClassPath.ocamlDirname(filename);
-			polyfillsDestPath = filenameConcat(destDir, Genphp7.polyfillsFile);
+			var sourceDir = core.OcamlFilename.dirname(builder.getSourceFile());
+			polyfillsSourcePath = core.OcamlFilename.concat(sourceDir, Genphp7.polyfillsFile);
+			var destDir = core.OcamlFilename.dirname(filename);
+			polyfillsDestPath = core.OcamlFilename.concat(destDir, Genphp7.polyfillsFile);
 		} else if (builder.hasMagicInit()) {
 			initTypes.unshift(Genphp7.getFullTypeName({pack: namespace, name: name}));
 		}
-	}
-
-	// port: OCaml Filename.concat (Unix)
-	static function filenameConcat(dirname:String, filename:String):String {
-		return if (dirname.length == 0 || dirname.charAt(dirname.length - 1) == "/") dirname + filename else dirname + "/" + filename;
 	}
 
 	/**
@@ -1270,7 +1265,7 @@ class PhpGenerator {
 			case null:
 			case {uses: uses, code: entryPoint}:
 				var filename = Gctx.definedValueSafe(ctx.pgcCommon, Define.PhpFront, "index.php");
-				var frontDirs = Genphp7.splitFilePath(core.ClassPath.DirectoryClassPath.ocamlDirname(filename));
+				var frontDirs = Genphp7.splitFilePath(core.OcamlFilename.dirname(filename));
 				if (frontDirs.length > 0) Genphp7.createDirRecursive([rootDir].concat(frontDirs));
 				var libPath = [for (s in frontDirs) if (s != ".") "../"].join("") + getLibPath().join("/");
 				var channel = new StringBuf();
