@@ -28,6 +28,20 @@ hxb, interp, js, lua, python, neko, hl, hlc, cpp, jvm and swf 150/150; php
 also checked on 500–2,750 programs while it was ported, on its target's
 options and on the upstream cases listed below.
 
+### hxc changes for lix (2026-10-12)
+
+The hxc changes made for `lix/` (coroutine types in the lowering; in hxc's
+std and runtime `haxe.Exception.stack` setter, `StringBuf.clear`,
+`StringTools.urlEncode`/`urlDecode`, `Date.fromString`, and three new natives)
+were checked without the reference compiler (not built in that environment), so
+the matrix above was not rerun. Instead, the port built by the changed hxc
+(clang -O1) and the `nightly` release (`ecd7581`, whose `src/` differs from
+this commit only in comments) wrote identical HXB with `-D disable-parallelism`
+for the port's self-compile (JS: 614 modules, hxc: 515), the backend tool
+(JS) and lix with hxcoro (hxc: 215). Without that define both binaries vary
+between runs on the same input. `hxc/test` regress, threads and exc pass. lix's
+own results are in `lix/README.md`.
+
 ## Target generators
 
 Every target also compiles upstream's unit suite identically (`unit-targets.py`, above).
