@@ -111,23 +111,36 @@ class Scope {
             logger.error('${m.lib} has no install instruction for missing classpath ${m.cp}\n');
       }
 
-      var total = i.instructions.install.length + i.instructions.postInstall.length,
+      // port: upstream runs the commands one by one. The installs (downloads)
+      // run in parallel here, JOBS at a time, each distinct command once; the
+      // post-install hooks (often builds) still follow one by one.
+      var install = [];
+      for (cmd in i.instructions.install)
+        if (!install.contains(cmd)) install.push(cmd);
+
+      var total = install.length + i.instructions.postInstall.length,
           cur = 0,
           installed = 0;
 
-      for (cmds in [i.instructions.install, i.instructions.postInstall])
-        for (cmd in cmds) {
-          logger.progress('[${++cur}/${total}] $cmd');
-
-          switch Exec.shell(cmd, Sys.getCwd()) {
-            case Failure(e):
-              code = e.code;
-              // port: upstream only counts the failures; say which and why
-              logger.error('[$cur/$total] ${e.message} (exit code ${e.code})');
-            default:
-              installed++;
-          }
+      function report(cmd:String, o:Outcome<Int, Error>)
+        switch o {
+          case Failure(e):
+            code = e.code;
+            // port: upstream only counts the failures; say which and why
+            logger.error('[$cur/$total] ${e.message} (exit code ${e.code})');
+          default:
+            installed++;
         }
+
+      Exec.shellAll(install, Sys.getCwd(), jobs(), (index, o) -> {
+        logger.progress('[${++cur}/${total}] ${install[index]}');
+        report(install[index], o);
+      });
+
+      for (cmd in i.instructions.postInstall) {
+        logger.progress('[${++cur}/${total}] $cmd');
+        report(cmd, Exec.shell(cmd, Sys.getCwd()));
+      }
 
       var libs =
         if (total == 1) 'library'
@@ -139,6 +152,17 @@ class Scope {
         logger.success('Installed $total $libs.');
     });
   }
+
+  /**
+    How many library installs run at a time: `LIX_JOBS`, default 8 (like yarn's
+    network concurrency; 1 installs one by one, as upstream does).
+  **/
+  static public function jobs():Int
+    return switch Std.parseInt(Sys.getEnv('LIX_JOBS') ?? '') {
+      case null: 8;
+      case v if (v < 1): 1;
+      case v: v;
+    }
 
   function new(haxeshimRoot, isGlobal, scopeDir, cwd) {
 

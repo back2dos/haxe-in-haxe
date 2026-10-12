@@ -83,6 +83,12 @@ where it deviates. In general:
   `<dir>`): symbolic links, or on Windows hard links (copies when that fails),
   as `.exe`. Existing files are replaced only with `--force`, directories never.
   For `lix.com` downloaded from the website, that is the whole installation.
+- `lix download` (`haxe --run install-libs`) runs the libraries' install
+  commands in parallel, 8 at a time (`LIX_JOBS`; 1 runs them one by one as
+  upstream does), each distinct command once; post-install hooks still run one
+  by one afterwards. For tink_web's 14 libraries: 3.6 s instead of 19.2 s.
+  The limit is a fixed count, as in other package managers' network
+  concurrency (yarn 8, pnpm 16), rather than the number of cores.
 - `haxe --run install-libs` (and so `lix download`) names each command that
   failed and why, where upstream reports only how many failed.
 

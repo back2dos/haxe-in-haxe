@@ -206,6 +206,41 @@ class Exec {
         Failure(new Error('Failed to invoke `$cmd` because ${spawnError(sh.cmd, e)}'));
   }
 
+  /**
+    Runs the shell commands `cmds`, at most `jobs` at a time (with the terminal,
+    as `shell` does), on a loop of their own; `done` gets each command's index
+    and outcome as it ends. Returns when all have ended.
+  **/
+  static public function shellAll(cmds:Array<String>, cwd:String, jobs:Int, ?env:Env, done:(index:Int, outcome:Outcome<Int, Error>) -> Void) {
+    var loop = Loop.create(),
+        next = 0,
+        running = 0;
+    var vars = mergeEnv(env);
+    function start() {
+      while (running < jobs && next < cmds.length) {
+        var index = next++,
+            cmd = cmds[index],
+            sh = shellArgs(cmd);
+        try {
+          var proc:Process = null;
+          proc = spawn(loop, sh.cmd, sh.args, { cwd: cwd, env: vars }, (status, signal) -> {
+            running--;
+            proc.close();
+            var code = if (signal != 0) 128 + signal else status;
+            done(index, if (code == 0) Success(0) else Failure(new Error(code, 'Failed to invoke `$cmd` because Error: Command failed: $cmd')));
+            start();
+          });
+          running++;
+        }
+        catch (e:UvError)
+          done(index, Failure(new Error('Failed to invoke `$cmd` because ${spawnError(sh.cmd, e)}')));
+      }
+    }
+    start();
+    loop.run();
+    loop.close();
+  }
+
   static public function sync(cmd:String, cwd:String, args:Array<String>, ?env:Env):Outcome<Int, Error>
     return
       try Success(run(cmd, args, cwd, env))
