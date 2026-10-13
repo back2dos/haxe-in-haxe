@@ -29,7 +29,7 @@ class Driver {
 		this.out = out;
 		prep = new Prep(prog);
 		abi = Abi.get(o.target);
-		if (abi.name != "linux-x86_64") throw "hxmc: only linux-x86_64 so far";
+		if (abi.os != "linux") throw "hxmc: only Linux targets so far";
 		dumpSet = o.dump == null ? null : [for (n in o.dump.split(",")) n => true];
 	}
 
@@ -43,7 +43,7 @@ class Driver {
 	// ---- compiling
 
 	// one function into `obj` (with its emitter); false: unsupported (hybrid builds)
-	function compileFunc(fn:FuncInfo, obj:Obj, emit:hxmc.x64.Emit):Bool {
+	function compileFunc(fn:FuncInfo, obj:Obj, emit:Target.Emitter):Bool {
 		var name = prep.funcSym(fn);
 		try {
 			var s0 = haxe.Timer.stamp();
@@ -53,7 +53,7 @@ class Driver {
 			if (dumpSet != null && dumpSet.exists(name)) Sys.println(mf.dump());
 			var layout = Layout.order(mf);
 			var s1 = haxe.Timer.stamp();
-			var isel = new hxmc.x64.Isel();
+			var isel = Target.selector(abi);
 			var lf = isel.select(mf, layout);
 			var s2 = haxe.Timer.stamp();
 			var ra = new Regalloc(lf, isel);
@@ -84,8 +84,8 @@ class Driver {
 	}
 
 	// a synthetic function (DataGen) into obj
-	function compileMir(mf:MFunc, emit:hxmc.x64.Emit) {
-		var isel = new hxmc.x64.Isel();
+	function compileMir(mf:MFunc, emit:Target.Emitter) {
+		var isel = Target.selector(abi);
 		var lf = isel.select(mf, Layout.order(mf));
 		var ra = new Regalloc(lf, isel);
 		ra.run();
@@ -177,7 +177,7 @@ class Driver {
 				continue;
 			}
 			var obj = new Obj();
-			var emit = new hxmc.x64.Emit(obj);
+			var emit = Target.emitter(abi, obj);
 			for (f in byModule.get(m))
 				compileFunc(f, obj, emit);
 			var s2 = haxe.Timer.stamp();
@@ -192,7 +192,7 @@ class Driver {
 		var t2 = haxe.Timer.stamp();
 		stats(t0, t1, t2);
 		var data = new Obj();
-		var demit = new hxmc.x64.Emit(data);
+		var demit = Target.emitter(abi, data);
 		new DataGen(prep, abi, data, mf -> compileMir(mf, demit)).run();
 		var t3 = haxe.Timer.stamp();
 		var rtPath = o.rtObj != null ? o.rtObj : Options.toolDir() + "rt/" + abi.name + "/rt.o";
@@ -213,7 +213,7 @@ class Driver {
 	function hybrid(t0:Float, t1:Float) {
 		var p = prep.p;
 		var obj = new Obj();
-		var emit = new hxmc.x64.Emit(obj);
+		var emit = Target.emitter(abi, obj);
 		for (fn in p.funcs) {
 			var name = prep.funcSym(fn);
 			if (o.skip.exists(name) || (o.only != null && !o.only.exists(name))) continue;
@@ -225,7 +225,7 @@ class Driver {
 		for (f in p.funcs)
 			if (!native.exists(f)) prep.cBody(f);
 		new DataGen(prep, abi, obj, mf -> compileMir(mf, emit)).run();
-		sys.io.File.saveBytes(out + ".o", ElfWriter.write(obj, false));
+		sys.io.File.saveBytes(out + ".o", ElfWriter.write(obj, abi.arm));
 		sys.io.File.saveContent(out + ".c", CWriter.write(prep, f -> native.exists(f), false));
 		var rt = o.rtDir;
 		if (rt == null) throw "hxmc: HXMC_RT (the runtime objects) is not set";

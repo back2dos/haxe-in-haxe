@@ -1,8 +1,9 @@
 package hxmc;
 
 // Target instructions over registers, before and after register allocation
-// (Regalloc). Registers: 0-31 physical (the target numbers them; 16-31 are
-// the floating-point/vector ones), 32 and up virtual. Each target's
+// (Regalloc). Registers: 0-63 physical (the target numbers them: general
+// registers from 0, floating-point/vector ones from LFunc.fprBase), 64 and
+// up virtual. Each target's
 // instruction selection produces an LFunc and tells the allocator what an
 // instruction defines, uses and clobbers (Target).
 class LIns {
@@ -59,15 +60,19 @@ class LFunc {
 	public var name:String;
 	public var blocks:Array<LBlock> = []; // in layout order
 	public var nregs:Int; // registers 0..nregs-1 (physical and virtual)
-	public var isFloat:Array<Bool> = []; // per virtual register (index - 32)
+	public static inline var NPHYS = 64;
+
+	public var isFloat:Array<Bool> = []; // per virtual register (index - NPHYS)
+	public var fprBase:Int; // the first floating-point physical register
 	public var slots:Array<{size:Int, align:Int}> = []; // frame slots (MIR slots, then spills)
 	public var outArgs = 0; // bytes of outgoing stack arguments
 	public var hasCalls = false;
 	public var hints = new Map<Int, Int>(); // vreg -> preferred register (physical or virtual)
 
-	public function new(name) {
+	public function new(name, fprBase:Int) {
 		this.name = name;
-		nregs = 32;
+		this.fprBase = fprBase;
+		nregs = NPHYS;
 	}
 
 	public function newReg(float:Bool):Int {
@@ -76,7 +81,7 @@ class LFunc {
 	}
 
 	public inline function floatReg(r:Int):Bool
-		return r < 32 ? r >= 16 : isFloat[r - 32];
+		return r < NPHYS ? r >= fprBase : isFloat[r - NPHYS];
 
 	public function slot(size:Int, align:Int):Int {
 		slots.push({size: size, align: align});

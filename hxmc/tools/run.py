@@ -93,16 +93,19 @@ def run_case(name, cps, main, args):
         code, o, e = sh([d / "c.bin"], cwd=d)
         expected.write_bytes((f"exit {code}\n" + o).encode())
     env = dict(ENV, HXMC_STATS="1")
+    tgt = ["-D", "hxmc.target=" + args.target] if args.target else []
     if args.hybrid:
         env.update(HXMC_HYBRID="1", HXMC_RT=str(ROOT / "bin/hxmc/rt-dev"), HXMC_RT_INCLUDE=str(ROOT / "hxc/rt"))
-    code, o, e = sh([HXMC, d / "m", "--hxb-lib", hxb, "-main", main, "--custom-target", "hxc", "-D", "disable-parallelism"], env=env)
+    exe = d / ("m-" + args.target if args.target else "m")
+    code, o, e = sh([HXMC, exe, "--hxb-lib", hxb, "-main", main, "--custom-target", "hxc", "-D", "disable-parallelism"] + tgt, env=env)
     m = re.search(r"(\d+)/(\d+) functions native", o)
     stats = (int(m.group(1)), int(m.group(2))) if m else None
     (d / "hxmc.log").write_text(o + e)
     if code != 0:
         return name, "hxmc-fail", (o + e)[-2000:], stats
     try:
-        code, o, e = sh([d / "m"], cwd=d, timeout=60)
+        runner = {"linux-arm64": ["qemu-aarch64-static"], "windows-x86_64": ["wine64"]}.get(args.target, [])
+        code, o, e = sh(runner + [exe], cwd=d, timeout=120)
     except subprocess.TimeoutExpired:
         return name, "timeout", "", stats
     got = f"exit {code}\n" + o
@@ -117,6 +120,7 @@ def main():
     ap.add_argument("-j", type=int, default=os.cpu_count() or 4)
     ap.add_argument("-v", action="store_true", help="print the details of failures")
     ap.add_argument("--hybrid", action="store_true", help="development builds (C for what hxmc does not compile, the system's linker)")
+    ap.add_argument("--target", help="hxmc.target (run with qemu-aarch64-static / wine64 as needed)")
     ap.add_argument("--fuzz", help="also every program of this directory (written by bin/fuzz/fuzz --emit)")
     ap.add_argument("cases", nargs="*")
     a = ap.parse_args()

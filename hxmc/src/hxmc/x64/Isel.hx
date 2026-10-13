@@ -48,7 +48,7 @@ enum abstract XOp(Int) to Int from Int {
 }
 
 // Mir -> LIR for x86-64 (System V calling convention).
-class Isel implements hxmc.Regalloc.RegTarget {
+class Isel implements hxmc.Target.Selector {
 	public var gprs(default, null):Array<Int>;
 	public var fprs(default, null):Array<Int>;
 
@@ -221,7 +221,7 @@ class Isel implements hxmc.Regalloc.RegTarget {
 		i.s1 = s;
 		i.size = size;
 		f.hints.set(d, s);
-		if (s >= 32) f.hints.set(s, d);
+		if (s >= LFunc.NPHYS) f.hints.set(s, d);
 	}
 
 	// the absolute symbol of a symbolic constant (its immediate is the addend)
@@ -246,7 +246,7 @@ class Isel implements hxmc.Regalloc.RegTarget {
 
 	public function select(mf:MFunc, layout:Array<MBlock>):LFunc {
 		m = mf;
-		f = new LFunc(mf.name);
+		f = new LFunc(mf.name, 16);
 		for (s in mf.slots)
 			f.slot(s.size, s.align);
 		vreg = [for (_ in mf.vals) -1];
@@ -302,7 +302,7 @@ class Isel implements hxmc.Regalloc.RegTarget {
 
 	function materialize(i:MIns, r:Int) {
 		// into a physical register: after the pending instruction (it may be a call)
-		if (r < 32) flush();
+		if (r < LFunc.NPHYS) flush();
 		switch i.op {
 			case Const:
 				var x = new LIns(MOVI);

@@ -34,6 +34,8 @@ class ElfWriter {
 			case RA64GotLo12: 312;
 			case RA64TlsLeHi12: 549;
 			case RA64TlsLeLo12Nc: 551;
+			case RA64MovwG0Nc: 264;
+			case RA64MovwG1Nc: 266;
 			case _: throw "hxmc: relocation " + k + " on aarch64";
 		}
 	}

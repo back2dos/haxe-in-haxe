@@ -364,7 +364,7 @@ bin/release/cosmo/lix.com: $(LIX_C)/files.txt bin/deps/cosmo/VERSIONS $(RT_SRC)
 # --- hxmc: the machine-code target (hxmc/README.md) ---
 
 HXMC_SRC := $(shell find hxmc/src -name '*.hx')
-HXMC_ARGS := -cp src -cp hxc/src -cp hxc/js -cp hxmc/src -main hxmc.Main -D disable-parallelism
+HXMC_ARGS := -cp src -cp hxc/src -cp hxc/js -cp hxmc/src -main hxmc.Main -D disable-parallelism -D hih_no_generators
 hxmc-dev: bin/hxmc/hxmc
 bin/hxmc/hxmc: $(NATIVE_TOOL) $(HXMC_SRC) $(TOOL_SRC) $(STD) $(RT_SRC)
 	$(call native,bin/hxmc/hxmc,$(HXMC_ARGS))

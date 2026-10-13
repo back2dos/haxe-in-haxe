@@ -37,6 +37,9 @@ enum abstract RelKind(Int) to Int {
 	var RA64TlsLeLo12Nc; // add xd, xd, #:tprel_lo12_nc:S
 	var RA64GotPage21;
 	var RA64GotLo12;
+	var RA64MovwG0Nc; // movz/movk: bits 0-15 of S + A
+	var RA64MovwG1Nc; // bits 16-31
+	var RA64Prel32;
 }
 
 class Section {

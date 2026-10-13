@@ -24,6 +24,7 @@ interface RegTarget {
 // lives in a frame slot: every use loads it into a fresh short-lived
 // register and every definition stores it, and the allocation runs again.
 class Regalloc {
+	static inline var NPHYS = LFunc.NPHYS;
 	var f:LFunc;
 	var t:RegTarget;
 	public var assigned:Array<Int>; // register -> physical register
@@ -70,9 +71,9 @@ class Regalloc {
 		// across (found by walking back from each use to the definitions)
 		start = [for (_ in 0...n) 0x7fffffff];
 		end = [for (_ in 0...n) -1];
-		fixedFrom = [for (_ in 0...32) []];
-		fixedTo = [for (_ in 0...32) []];
-		var openFixed = [for (_ in 0...32) -1];
+		fixedFrom = [for (_ in 0...NPHYS) []];
+		fixedTo = [for (_ in 0...NPHYS) []];
+		var openFixed = [for (_ in 0...NPHYS) -1];
 		var nb = f.blocks.length;
 		for (bi in 0...nb)
 			f.blocks[bi].id = bi;
@@ -84,7 +85,7 @@ class Regalloc {
 		var defsIn:Array<Array<Int>> = [];
 		for (bi in 0...nb) {
 			var b = f.blocks[bi];
-			for (k in 0...32)
+			for (k in 0...NPHYS)
 				openFixed[k] = -1;
 			var p = b.from;
 			var dl = [];
@@ -93,7 +94,7 @@ class Regalloc {
 				uses.resize(0);
 				t.defsUses(i, defs, uses);
 				for (r in uses) {
-					if (r >= 32) {
+					if (r >= NPHYS) {
 						if (end[r] < p) end[r] = p;
 						if (start[r] > p) start[r] = p;
 						if (defStamp[r] != bi) {
@@ -110,7 +111,7 @@ class Regalloc {
 					}
 				}
 				for (r in defs) {
-					if (r >= 32) {
+					if (r >= NPHYS) {
 						if (start[r] > p + 1) start[r] = p + 1;
 						if (end[r] < p + 1) end[r] = p + 1;
 						if (defStamp[r] != bi) {
@@ -139,7 +140,7 @@ class Regalloc {
 		var liveInSeen = [for (_ in 0...nb) -1];
 		var liveOutSeen = [for (_ in 0...nb) -1];
 		var work:Array<Int> = [];
-		for (r in 32...n) {
+		for (r in NPHYS...n) {
 			var e = exposedHead[r];
 			if (e < 0) continue;
 			var d = defHead[r];
@@ -167,14 +168,14 @@ class Regalloc {
 				}
 			}
 		}
-		for (r in 0...32)
+		for (r in 0...NPHYS)
 			sortFixed(r);
 		// linear scan
-		var order = [for (r in 32...n) if (end[r] >= 0) r];
+		var order = [for (r in NPHYS...n) if (end[r] >= 0) r];
 		order.sort((a, b) -> start[a] != start[b] ? start[a] - start[b] : a - b);
-		assigned = [for (r in 0...n) r < 32 ? r : -1];
+		assigned = [for (r in 0...n) r < NPHYS ? r : -1];
 		var active:Array<Int> = [];
-		var busy = [for (_ in 0...32) 0];
+		var busy = [for (_ in 0...NPHYS) 0];
 		var busyStamp = 0;
 		var spilled = [];
 		var spillSet = new Map<Int, Bool>();
@@ -192,7 +193,7 @@ class Regalloc {
 			var choice = -1;
 			var h = f.hints.get(r);
 			if (h != null) {
-				var hr = h < 32 ? h : assigned[h];
+				var hr = h < NPHYS ? h : assigned[h];
 				if (hr >= 0 && busy[hr] != busyStamp && regs.indexOf(hr) >= 0 && !fixedOverlap(hr, start[r], end[r])) choice = hr;
 			}
 			if (choice < 0)
@@ -317,12 +318,12 @@ class Regalloc {
 	}
 
 	public static function rename(i:LIns, m:Int->Int) {
-		if (i.d >= 32) i.d = m(i.d);
-		if (i.s1 >= 32) i.s1 = m(i.s1);
-		if (i.s2 >= 32) i.s2 = m(i.s2);
-		if (i.s3 >= 32) i.s3 = m(i.s3);
-		if (i.base >= 32) i.base = m(i.base);
-		if (i.index >= 32) i.index = m(i.index);
+		if (i.d >= NPHYS) i.d = m(i.d);
+		if (i.s1 >= NPHYS) i.s1 = m(i.s1);
+		if (i.s2 >= NPHYS) i.s2 = m(i.s2);
+		if (i.s3 >= NPHYS) i.s3 = m(i.s3);
+		if (i.base >= NPHYS) i.base = m(i.base);
+		if (i.index >= NPHYS) i.index = m(i.index);
 	}
 
 	function rewrite() {
@@ -334,7 +335,7 @@ class Regalloc {
 					a;
 				});
 				for (r in [i.d, i.s1, i.s2, i.s3, i.base, i.index])
-					if (r >= 0 && r < 32) usedRegs.set(r, true);
+					if (r >= 0 && r < NPHYS) usedRegs.set(r, true);
 			}
 	}
 }

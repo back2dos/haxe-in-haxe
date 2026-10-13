@@ -69,6 +69,8 @@ class ElfReader {
 			case 312: RA64GotLo12;
 			case 549: RA64TlsLeHi12;
 			case 551: RA64TlsLeLo12Nc;
+			case 264: RA64MovwG0Nc;
+			case 266: RA64MovwG1Nc;
 			case _: throw "hxmc: aarch64 relocation type " + t + " in the runtime object";
 		}
 	}

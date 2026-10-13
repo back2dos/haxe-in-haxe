@@ -25,6 +25,8 @@ done
 wait
 # the C library: zig builds it on first use; a static link of a stub tells where
 printf 'int main(void){return 0;}\n' > "$out/obj/stub.c"
+# (twice: the first run may build the C library and name temporary paths)
+$ZIG cc -target $triple -static -O2 "$out/obj/stub.c" -o "$out/obj/stub"
 line=$($ZIG cc -target $triple -static -O2 -v "$out/obj/stub.c" -o "$out/obj/stub" 2>&1 | grep 'ld.lld' | head -1)
 crt1=$(echo "$line" | tr ' ' '\n' | grep '/crt1.o$')
 libs=$(echo "$line" | tr ' ' '\n' | grep -E '/lib(c|zigc|compiler_rt)\.a$' | tr '\n' ' ')

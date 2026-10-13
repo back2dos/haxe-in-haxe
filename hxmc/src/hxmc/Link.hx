@@ -10,10 +10,11 @@ import hxmc.Obj;
 // relocation, the symbols a C toolchain's linker defines (__init_array_*,
 // ...).
 class Link {
-	static inline var PAGE = 0x1000;
 	static inline var BASE = 0x400000;
 
 	var objs:Array<Obj>;
+	// the segment alignment: 4K on x86-64, 64K on aarch64 (the largest page size kernels use)
+	var PAGE:Int;
 	var arm:Bool;
 	var globals = new Map<String, Symbol>();
 	var addr = new Map<Section, Int>(); // section -> address
@@ -25,6 +26,7 @@ class Link {
 	public function new(objs:Array<Obj>, arm:Bool) {
 		this.objs = objs;
 		this.arm = arm;
+		PAGE = arm ? 0x10000 : 0x1000;
 	}
 
 	// ---- symbols
@@ -47,8 +49,40 @@ class Link {
 
 	// ---- layout
 
+	// a slot per symbol reached through the global offset table (aarch64
+	// GOT relocations of the C library): its address, filled by a relocation
+	var got:Null<Section>;
+	var gotSlot = new Map<Symbol, Int>();
+
+	function makeGot() {
+		for (o in objs)
+			for (s in o.sections)
+				for (r in s.relocs)
+					if (r.kind == RA64GotPage21 || r.kind == RA64GotLo12 || r.kind == RGotPcRel32) {
+						var t = target(r.sym);
+						var key = t != null ? t : r.sym;
+						if (!gotSlot.exists(key)) {
+							if (got == null) got = new Section(".got", Data, 8);
+							gotSlot.set(key, got.buf.len);
+							got.relocs.push(new Reloc(got.buf.len, RAbs64, key, 0));
+							got.buf.u64(0, 0);
+						}
+					}
+		if (got != null) {
+			var o = new Obj();
+			o.sections.push(got);
+			objs.push(o);
+		}
+	}
+
+	function gotAddr(s:Symbol):Int {
+		var t = target(s);
+		return addr.get(got) + gotSlot.get(t != null ? t : s);
+	}
+
 	public function link(entry:String):Bytes {
 		resolve();
+		makeGot();
 		// linker-defined symbols, defined below once the layout is known
 		var defined = new Map<String, Int>();
 		var all:Array<Section> = [];
@@ -189,6 +223,15 @@ class Link {
 		return (a - tlsStart) - align(tlsSize, tlsAlign);
 	}
 
+	static function imm12(buf:Buf, at:Int, v:Int)
+		buf.set32(at, (buf.get32(at) & ~(0xfff << 10)) | ((v & 0xfff) << 10));
+
+	static function adrp(buf:Buf, at:Int, target:Int, p:Int) {
+		var imm = ((target & ~0xfff) - (p & ~0xfff)) >> 12;
+		var w = buf.get32(at) & ~((3 << 29) | (0x7ffff << 5));
+		buf.set32(at, w | ((imm & 3) << 29) | (((imm >> 2) & 0x7ffff) << 5));
+	}
+
 	function apply(s:Section) {
 		var base = addr.get(s);
 		var buf = s.buf;
@@ -206,6 +249,38 @@ class Link {
 					buf.set32(r.offset, S + A - P);
 				case RTpOff32:
 					buf.set32(r.offset, tpoff(S) + A);
+				case RGotPcRel32:
+					buf.set32(r.offset, gotAddr(r.sym) + A - P);
+				case RA64AdrPage21:
+					adrp(buf, r.offset, S + A, P);
+				case RA64GotPage21:
+					adrp(buf, r.offset, gotAddr(r.sym), P);
+				case RA64AddLo12:
+					imm12(buf, r.offset, (S + A) & 0xfff);
+				case RA64Ldst8Lo12:
+					imm12(buf, r.offset, (S + A) & 0xfff);
+				case RA64Ldst16Lo12:
+					imm12(buf, r.offset, ((S + A) & 0xfff) >> 1);
+				case RA64Ldst32Lo12:
+					imm12(buf, r.offset, ((S + A) & 0xfff) >> 2);
+				case RA64Ldst64Lo12:
+					imm12(buf, r.offset, ((S + A) & 0xfff) >> 3);
+				case RA64Ldst128Lo12:
+					imm12(buf, r.offset, ((S + A) & 0xfff) >> 4);
+				case RA64GotLo12:
+					imm12(buf, r.offset, (gotAddr(r.sym) & 0xfff) >> 3);
+				case RA64Call26 | RA64Jump26:
+					var d = S + A - P;
+					if (d >= (1 << 27) || d < -(1 << 27)) throw "hxmc: link: branch out of range to " + r.sym.name;
+					buf.set32(r.offset, (buf.get32(r.offset) & 0xfc000000) | ((d >> 2) & 0x3ffffff));
+				case RA64TlsLeHi12:
+					imm12(buf, r.offset, ((tpoff(S) + A) >> 12) & 0xfff);
+				case RA64TlsLeLo12Nc:
+					imm12(buf, r.offset, (tpoff(S) + A) & 0xfff);
+				case RA64MovwG0Nc:
+					buf.set32(r.offset, (buf.get32(r.offset) & ~(0xffff << 5)) | (((S + A) & 0xffff) << 5));
+				case RA64MovwG1Nc:
+					buf.set32(r.offset, (buf.get32(r.offset) & ~(0xffff << 5)) | ((((S + A) >>> 16) & 0xffff) << 5));
 				case _:
 					throw "hxmc: link: relocation " + r.kind + " not supported yet";
 			}

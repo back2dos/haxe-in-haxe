@@ -7,7 +7,7 @@ import hxmc.x64.Isel.XOp;
 
 // Allocated LIR -> x86-64 machine code in a text section: frame layout,
 // prologue and epilogues, jump tables, the constant pool.
-class Emit {
+class Emit implements hxmc.Target.Emitter {
 	var obj:Obj;
 	var text:Section;
 	var rodata:Section;
