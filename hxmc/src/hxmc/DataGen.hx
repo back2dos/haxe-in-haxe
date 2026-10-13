@@ -97,6 +97,7 @@ class DataGen {
 	// ---- everything
 
 	public function run() {
+		ids();
 		strings();
 		fieldNames();
 		signatures();
@@ -105,6 +106,26 @@ class DataGen {
 		dispatch();
 		mainBody();
 	}
+
+	// the program-wide numbers as absolute symbols (Prep.tySym...)
+	function ids() {
+		for (n in e.idOrder)
+			obj.defineAbs(n, e.ids.get(n));
+		for (g in 0...p.globals.length)
+			if (Ir.isRef(p.globals[g].ty)) obj.defineAbs(prep.globalOffSym(g), 8 * g);
+		for (c in p.classes)
+			obj.defineAbs(prep.spanSym(c), c.lastDescendant - c.id);
+		// the type objects: slots of rt_type_objs (bss, see types())
+		bss.bssSize = (bss.bssSize + 15) & ~15;
+		typeObjs = bss.bssSize;
+		var n = e.types.length;
+		obj.define("rt_type_objs", bss, typeObjs, 8 * 2 * n, true);
+		for (t in 0...n)
+			obj.define(prep.typeObjSym(t), bss, typeObjs + 8 * (2 * t + 1), 8, true);
+		bss.bssSize += 8 * 2 * n;
+	}
+
+	var typeObjs = 0;
 
 	function strings() {
 		for (s in e.strOrder) {
@@ -315,7 +336,6 @@ class DataGen {
 			if (data.buf.len - at != Abi.TYPE_SIZE) throw "hxmc: rt_type layout";
 		}
 		int32Global("rt_ntypes", types.length);
-		bssGlobal("rt_type_objs", 8 * 2 * types.length, 16);
 	}
 
 	function dispatch() {

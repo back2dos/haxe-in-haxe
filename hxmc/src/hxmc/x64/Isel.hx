@@ -224,11 +224,22 @@ class Isel implements hxmc.Regalloc.RegTarget {
 		if (s >= 32) f.hints.set(s, d);
 	}
 
-	// a 32-bit constant usable as an immediate (sign-extended for 64-bit operations)
+	// the absolute symbol of a symbolic constant (its immediate is the addend)
+	function isymOf(v:Int):Null<String> {
+		var i = m.vals[v];
+		return i.op == Const ? i.sym : null;
+	}
+
+	// a constant without a symbol
+	function plainImm(v:Int):Null<Int>
+		return isymOf(v) == null ? immOf(v) : null;
+
+	// a 32-bit constant usable as an immediate (sign-extended for 64-bit
+	// operations), possibly symbolic (isymOf)
 	function immOf(v:Int):Null<Int> {
 		var i = m.vals[v];
 		if (i.op != Const) return null;
-		if (i.ty == I32) return i.imm;
+		if (i.ty == I32 || i.sym != null) return i.imm;
 		if (i.imm2 == (i.imm < 0 ? -1 : 0)) return i.imm;
 		return null;
 	}
@@ -299,6 +310,7 @@ class Isel implements hxmc.Regalloc.RegTarget {
 				x.flag = true; // no xor: flags may be live
 				x.d = r;
 				x.imm = i.imm;
+				x.isym = i.sym;
 				x.imm2 = i.ty == I32 ? 0 : i.imm2;
 				x.size = sz(i.ty);
 			case SymAddr:
@@ -408,7 +420,7 @@ class Isel implements hxmc.Regalloc.RegTarget {
 		}
 		var imm = immOf(b);
 		if (imm != null) {
-			if (imm == 0 && (c == CEq || c == CNe)) {
+			if (imm == 0 && isymOf(b) == null && (c == CEq || c == CNe)) {
 				var x = emit(TEST);
 				x.s1 = use(a);
 				x.s2 = x.s1;
@@ -417,6 +429,7 @@ class Isel implements hxmc.Regalloc.RegTarget {
 				var x = emit(CMPI);
 				x.s1 = use(a);
 				x.imm = imm;
+				x.isym = isymOf(b);
 				x.size = sz(t);
 			}
 			return intCond(c);
@@ -426,6 +439,7 @@ class Isel implements hxmc.Regalloc.RegTarget {
 			var x = emit(CMPI);
 			x.s1 = use(b);
 			x.imm = ia;
+			x.isym = isymOf(a);
 			x.size = sz(t);
 			return intCond(swapCond(c));
 		}
@@ -544,7 +558,7 @@ class Isel implements hxmc.Regalloc.RegTarget {
 				var d = reg(i.id);
 				var size = sz(i.ty);
 				var imm = immOf(i.b);
-				if (i.op == Add && imm != null && !folded[i.a]) {
+				if (i.op == Add && imm != null && isymOf(i.b) == null && !folded[i.a]) {
 					var x = emit(LEA);
 					x.d = d;
 					x.base = use(i.a);
@@ -572,6 +586,7 @@ class Isel implements hxmc.Regalloc.RegTarget {
 					x.d = d;
 					x.cond = o;
 					x.imm = imm;
+					x.isym = isymOf(c);
 					x.size = size;
 				} else {
 					var x = emit(ALU);
@@ -583,7 +598,7 @@ class Isel implements hxmc.Regalloc.RegTarget {
 			case Mul:
 				var d = reg(i.id);
 				var size = sz(i.ty);
-				var imm = immOf(i.b);
+				var imm = plainImm(i.b);
 				if (imm != null) {
 					var x = emit(IMULI);
 					x.d = d;
@@ -601,7 +616,7 @@ class Isel implements hxmc.Regalloc.RegTarget {
 				var d = reg(i.id);
 				var size = sz(i.ty);
 				var o = i.op == Shl ? Asm.SHL : i.op == Sar ? Asm.SAR : Asm.SHR;
-				var imm = immOf(i.b);
+				var imm = plainImm(i.b);
 				mov(d, use(i.a), size);
 				if (imm != null) {
 					var x = emit(SHIFTI);
@@ -729,7 +744,10 @@ class Isel implements hxmc.Regalloc.RegTarget {
 				var imm = immOf(i.c);
 				var x = emit(imm != null && !isF(i.c) ? STOREI : STORE);
 				x.size = i.size;
-				if (imm != null && !isF(i.c)) x.imm = imm else x.s1 = use(i.c);
+				if (imm != null && !isF(i.c)) {
+					x.imm = imm;
+					x.isym = isymOf(i.c);
+				} else x.s1 = use(i.c);
 				memOf(x, i.a, i.b, i.imm2, i.imm);
 			case Call:
 				call(i);
@@ -880,7 +898,10 @@ class Isel implements hxmc.Regalloc.RegTarget {
 			x.base = -4; // outgoing argument area
 			x.disp = 8 * stack;
 			x.size = 8;
-			if (imm != null && t != F64) x.imm = imm else x.s1 = use(a);
+			if (imm != null && t != F64) {
+				x.imm = imm;
+				x.isym = isymOf(a);
+			} else x.s1 = use(a);
 			stack++;
 		}
 		if (8 * stack > f.outArgs) f.outArgs = 8 * stack;

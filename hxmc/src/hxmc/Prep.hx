@@ -45,6 +45,33 @@ class Prep {
 	public inline function id(name:String):Int
 		return e.ids.get(name);
 
+	// Program-wide numbers are referenced by name in machine code (absolute
+	// symbols DataGen defines, as hxc's ids.h names them), so a module's code
+	// does not change when another module adds a type, field or global:
+	// the symbol of a type index (null for the runtime's fixed ones)
+	public function tySym(tindex:Int):Null<String>
+		return tindex < Abi.T_FIRST ? null : e.typeNames[tindex];
+
+	public function fidSym(name:String):String {
+		e.fid(name);
+		return e.fidNames.get(name);
+	}
+
+	public function sigSym(s:SigInfo):String
+		return e.sigNames[s.id];
+
+	// 8 * the rt_globals index of a reference global
+	public function globalOffSym(g:Int):String
+		return "GIOFF_" + e.globalNames[g].substr(3);
+
+	// the type object (Class<T>/Enum<T> value) of a type
+	public function typeObjSym(tindex:Int):String
+		return "TYOBJ_" + (tindex < Abi.T_FIRST ? Std.string(tindex) : e.typeNames[tindex].substr(3));
+
+	// a class's last descendant minus its type index (instance tests)
+	public function spanSym(c:ClassInfo):String
+		return "TYSPAN_" + e.typeNames[c.tindex].substr(3);
+
 	// the value of a type index as EmitC writes it
 	public inline function fid(name:String):Int
 		return e.fid(name);

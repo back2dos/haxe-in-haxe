@@ -127,6 +127,15 @@ class Obj {
 		return s;
 	}
 
+	// a symbol with an absolute value (program-wide numbers: Prep.tySym...)
+	public function defineAbs(name:String, value:Int):Symbol {
+		var s = sym(name);
+		if (s.section != null || s.abs) throw 'hxmc: symbol $name defined twice';
+		s.abs = true;
+		s.offset = value;
+		return s;
+	}
+
 	public inline function exists(name:String):Bool
 		return byName.exists(name);
 }

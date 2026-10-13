@@ -54,8 +54,8 @@ class ElfWriter {
 		for (i in 0...secs.length)
 			secs[i].index = i + 1;
 		// symbols: null, one per section (local), locals, then globals
-		var locals = [for (s in o.symbols) if (!s.global && s.section != null) s];
-		var globals = [for (s in o.symbols) if (s.global || s.section == null) s];
+		var locals = [for (s in o.symbols) if (!s.global && (s.section != null || s.abs)) s];
+		var globals = [for (s in o.symbols) if (s.global || s.section == null && !s.abs) s];
 		var symtab = new Buf();
 		symtab.zeros(24);
 		var nsym = 1;
@@ -72,9 +72,9 @@ class ElfWriter {
 			s.index = nsym++;
 			symtab.u32(name(strtab, s.name));
 			var type = s.tls ? 6 : s.section == null ? 0 : s.func ? 2 : 1;
-			symtab.u8(((s.global || s.section == null) ? 1 : 0) << 4 | type);
+			symtab.u8(((s.global || s.section == null && !s.abs) ? (s.weak ? 2 : 1) : 0) << 4 | type);
 			symtab.u8(0);
-			symtab.u16(s.section == null ? 0 : s.section.index);
+			symtab.u16(s.abs ? 0xfff1 : s.section == null ? 0 : s.section.index);
 			symtab.i64(s.offset);
 			symtab.i64(s.size);
 		}

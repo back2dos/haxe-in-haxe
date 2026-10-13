@@ -85,6 +85,28 @@ class MirBuild {
 		return add(i);
 	}
 
+	// a program-wide number (Prep.tySym...): an absolute symbol + addend, or a plain constant
+	function idConst(sym:Null<String>, value:Int, addend = 0, t:MTy = I32):Int {
+		if (sym == null) return t == I32 ? iconst(value + addend) : lconst32(value + addend);
+		var i = mk(Const, t);
+		i.sym = sym;
+		i.imm = addend;
+		return add(i);
+	}
+
+	inline function tyConst(tindex:Int, addend = 0):Int
+		return idConst(p.tySym(tindex), tindex, addend);
+
+	inline function fidConst(name:String):Int
+		return idConst(p.fidSym(name), 0);
+
+	inline function sigConst(s:SigInfo):Int
+		return idConst(p.sigSym(s), 0);
+
+	// the address of rt_globals[g]
+	function globalAddr(g:Int):Int
+		return op2(Add, I64, load(I64, 8, symAddr("rt_globals"), 0), idConst(p.globalOffSym(g), 0, 0, I64));
+
 	function lconst(lo:Int, hi:Int):Int {
 		var i = mk(Const, I64);
 		i.imm = lo;
@@ -555,8 +577,7 @@ class MirBuild {
 				var x = ex(v);
 				var t = p.p.globals[g].ty;
 				if (Ir.isRef(t)) {
-					var gl = load(I64, 8, symAddr("rt_globals"), 0);
-					store(8, gl, 8 * g, x);
+					store(8, globalAddr(g), 0, x);
 				} else store(t == TI32 || t == TBool ? 4 : 8, symAddr(p.scalarGlobalSym(g)), 0, x);
 			case SAnonSet(name, t, obj, v):
 				anonSet(name, t, obj, v);
@@ -811,7 +832,8 @@ class MirBuild {
 		seal(slow);
 		cur = fast;
 		tlsStore("rt_young_ptr", op2(Add, I64, ptr, lconst32(bytes)));
-		store(8, ptr, 0, lconst(hdrLo(n, kind), tidx));
+		store(4, ptr, 0, iconst(hdrLo(n, kind)));
+		store(4, ptr, 4, tyConst(tidx));
 		var o = op2(Add, I64, ptr, lconst32(8));
 		if (zero) {
 			if (n <= 16) {
@@ -825,7 +847,8 @@ class MirBuild {
 		cur = slow;
 		var list = coldList;
 		var sp = spillOpen(list, 0);
-		var r = call("rt_alloc_slow", [lconst(hdrLo(n, kind), tidx), iconst(bytes)], I64);
+		var hdr = op2(Or, I64, lconst(hdrLo(n, kind), 0), op2(Shl, I64, op1(ZExt, I64, tyConst(tidx)), iconst(32)));
+		var r = call("rt_alloc_slow", [hdr, iconst(bytes)], I64);
 		spillClose(list, sp);
 		writeVar(res, cur, r);
 		jmp(join);
@@ -1027,7 +1050,7 @@ class MirBuild {
 		return symAddr(icSym, Abi.IC_SIZE * k);
 	}
 
-	// rt_ic: the site's cache entry for the object's type
+	// rt_ic: the site's cache entry for the object's type (fid: a value)
 	function ic(o:Int, fid:Int):Int {
 		var c = icache();
 		var res = newVar(I64);
@@ -1037,7 +1060,7 @@ class MirBuild {
 		br(cmp(CNe, load(I32, 4, c, 0), tindex(o)), miss, join);
 		seal(miss);
 		cur = miss;
-		writeVar(res, cur, call("rt_icache_miss", [o, iconst(fid), c], I64));
+		writeVar(res, cur, call("rt_icache_miss", [o, fid, c], I64));
 		jmp(join);
 		seal(join);
 		cur = join;
@@ -1095,14 +1118,14 @@ class MirBuild {
 
 	function anonGet(name:String, t:Ty, obj:Ex, hint:Null<ShapeInfo>):Int {
 		var o = ex(obj);
-		var fid = p.fid(name);
+		var fid = fidConst(name);
 		var mt = mty(t);
 		var res = newVar(mt);
 		var join = newBlock();
 		if (hint != null && hint.tindex >= 0) {
 			var direct = newBlock(), other = newBlock();
 			other.cold = false;
-			br(cmp(CEq, tindex(o), iconst(hint.tindex)), direct, other);
+			br(cmp(CEq, tindex(o), tyConst(hint.tindex)), direct, other);
 			seal(direct);
 			seal(other);
 			cur = direct;
@@ -1125,7 +1148,7 @@ class MirBuild {
 		writeVar(res, cur, slotLoadDyn(o, op2(Sub, I32, slot, iconst(1)), t));
 		jmp(join);
 		cur = miss;
-		writeVar(res, cur, unboxTo(t, call("hx_anon_get_slow", [o, iconst(fid)], I64)));
+		writeVar(res, cur, unboxTo(t, call("hx_anon_get_slow", [o, fid], I64)));
 		jmp(join);
 		seal(join);
 		cur = join;
@@ -1134,7 +1157,7 @@ class MirBuild {
 
 	function anonSet(name:String, t:Ty, obj:Ex, v:Ex) {
 		var o = ex(obj);
-		var fid = p.fid(name);
+		var fid = fidConst(name);
 		var c = ic(o, fid);
 		var hit = newBlock(), miss = newBlock(), chk = newBlock(), join = newBlock();
 		miss.cold = true;
@@ -1157,7 +1180,7 @@ class MirBuild {
 		cur = miss;
 		// C: the value is boxed, then the object expression evaluated again
 		var b = boxFrom(t, ex(v));
-		call("hx_anon_set_slow", [ex(obj), iconst(fid), b], Void);
+		call("hx_anon_set_slow", [ex(obj), fidConst(name), b], Void);
 		jmp(join);
 		seal(join);
 		cur = join;
@@ -1173,7 +1196,7 @@ class MirBuild {
 			case ENull(_): lconst(0, 0);
 			case ELocal(l): readLocal(l);
 			case EGlobal(g, t):
-				if (Ir.isRef(t)) load(I64, 8, load(I64, 8, symAddr("rt_globals"), 0), 8 * g) else {
+				if (Ir.isRef(t)) load(I64, 8, globalAddr(g), 0) else {
 					var mt = mty(t);
 					load(mt, mt == I32 ? 4 : 8, symAddr(p.scalarGlobalSym(g)), 0);
 				}
@@ -1185,14 +1208,14 @@ class MirBuild {
 			case EField(c, idx, obj): slotLoad(ex(obj), c.locs[idx], c.fields[idx].ty);
 			case EAnonGet(name, t, obj, hint): anonGet(name, t, obj, hint);
 			case ECast(_, x): ex(x);
-			case EInstOf(c, x): instOf(ex(x), c.tindex, c.tindex + c.lastDescendant - c.id);
+			case EInstOf(c, x): instOf(ex(x), c);
 			case EEnumTag(x, en):
 				var base:Null<Int> = en == null || en.ctors.length == 0 ? null : en.ctors[0].tindex - en.ctors[0].tag;
 				if (base != null)
 					for (c in en.ctors)
 						if (c.tindex - c.tag != base) base = null;
 				var o = ex(x);
-				if (base != null) op2(Sub, I32, tindex(o), iconst(base)) else {
+				if (base != null) op2(Sub, I32, tindex(o), tyConst(en.ctors[0].tindex, -en.ctors[0].tag)) else {
 					var ti = op1(ZExt, I64, tindex(o));
 					load(I32, 4, symAddr("rt_types"), Abi.TYPE_TAG, false, op2(Mul, I64, ti, lconst32(Abi.TYPE_SIZE)), 1);
 				}
@@ -1202,7 +1225,7 @@ class MirBuild {
 			case EArrGetU(elem, a, i): arrGet(elem, a, i, false);
 			case EBoxGet(t, bx): slotLoad(ex(bx), 0, t);
 			case ECapture(l, idx, clos): slotLoad(ex(clos), at(idx + 1, l.captures[idx].ty), l.captures[idx].ty);
-			case EType(t): symAddr("rt_type_objs", 8 * (2 * typeIndex(t) + 1));
+			case EType(t): symAddr(p.typeObjSym(typeIndex(t)));
 			case ECall(g, args):
 				var xs = [for (a in args) ex(a)];
 				var c = mk(Call, mty(g.ret));
@@ -1288,7 +1311,7 @@ class MirBuild {
 		};
 
 	// hx_inst(o, lo, hi): o && KIND(o) == K_OBJ && lo <= TINDEX(o) <= hi
-	function instOf(o:Int, lo:Int, hi:Int):Int {
+	function instOf(o:Int, c:ClassInfo):Int {
 		var r = newVar(I32);
 		writeVar(r, cur, iconst(0));
 		var nn = newBlock(), join = newBlock();
@@ -1302,7 +1325,7 @@ class MirBuild {
 		cur = k2;
 		var t = tindex(o);
 		// lo <= t <= hi as one unsigned comparison
-		writeVar(r, cur, cmp(CULe, op2(Sub, I32, t, iconst(lo)), iconst(hi - lo)));
+		writeVar(r, cur, cmp(CULe, op2(Sub, I32, t, tyConst(c.tindex)), idConst(p.spanSym(c), 0)));
 		jmp(join);
 		seal(join);
 		cur = join;
@@ -1497,7 +1520,7 @@ class MirBuild {
 					case EStr(n): n;
 					case _: null;
 				};
-				var xs = [for (i in 0...args.length) i == 1 ? iconst(p.fid(n)) : ex(args[i])];
+				var xs = [for (i in 0...args.length) i == 1 ? fidConst(n) : ex(args[i])];
 				return call(name + "_fid", xs, mty(ret));
 			case _:
 		}
@@ -1623,8 +1646,7 @@ class MirBuild {
 	function callAnon(name:String, s:SigInfo, obj:Ex, args:Array<Ex>):Int {
 		var o = ex(obj);
 		var xs = [for (a in args) ex(a)];
-		var fid = p.fid(name);
-		var sid = s.id;
+		var fid = fidConst(name);
 		var rt = mty(s.ret);
 		var argTys = [for (t in s.args) mty(t)];
 		var res = rt == Void ? -1 : newVar(rt);
@@ -1636,7 +1658,7 @@ class MirBuild {
 		br(cmp(CEq, slot, iconst(0)), m1, notMeth);
 		seal(m1);
 		cur = m1;
-		br(cmp(CEq, load(I32, 4, c, Abi.IC_SIG), iconst(sid)), meth, notMeth);
+		br(cmp(CEq, load(I32, 4, c, Abi.IC_SIG), sigConst(s)), meth, notMeth);
 		seal(meth);
 		seal(notMeth);
 		cur = meth;
@@ -1654,7 +1676,7 @@ class MirBuild {
 		seal(c2);
 		cur = c2;
 		var k = load(I64, 8, o, 0, false, op1(SExt, I64, op2(Sub, I32, slot, iconst(1))), 8);
-		br(isSig(k, sid), clos, slow);
+		br(isSig(k, s), clos, slow);
 		seal(clos);
 		seal(slow);
 		cur = clos;
@@ -1673,7 +1695,7 @@ class MirBuild {
 				case TI32 | TBool: op1(ZExt, I64, xs[i]);
 				case _: xs[i];
 			});
-		var u = call("hx_anon_call_slow", [o, iconst(fid), iconst(sid), av], I64);
+		var u = call("hx_anon_call_slow", [o, fid, sigConst(s), av], I64);
 		if (res >= 0) writeVar(res, cur, switch s.ret {
 			case TF64: op1(BitsToF, F64, u);
 			case TI32 | TBool: op1(Trunc, I32, u);
@@ -1686,7 +1708,7 @@ class MirBuild {
 	}
 
 	// hx_is_sig(c, sig): a closure (TK_CLOSURE or TK_BOUND) of that signature
-	function isSig(k:Int, sid:Int):Int {
+	function isSig(k:Int, s:SigInfo):Int {
 		var r = newVar(I32);
 		writeVar(r, cur, iconst(0));
 		var nn = newBlock(), c2 = newBlock(), join = newBlock();
@@ -1700,7 +1722,7 @@ class MirBuild {
 		br(cmp(CULe, op2(Sub, I32, tk, iconst(6)), iconst(1)), c2, join);
 		seal(c2);
 		cur = c2;
-		writeVar(r, cur, cmp(CEq, load(I32, 4, te, 12), iconst(sid)));
+		writeVar(r, cur, cmp(CEq, load(I32, 4, te, 12), sigConst(s)));
 		jmp(join);
 		seal(join);
 		cur = join;

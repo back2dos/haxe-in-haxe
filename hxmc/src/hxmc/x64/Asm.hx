@@ -99,6 +99,8 @@ class Asm {
 
 	public var b:Buf;
 	public var sec:Null<Section>;
+	// the next 32-bit immediate is this symbol's value + the immediate (an absolute relocation)
+	public var isym:Null<Symbol>;
 	var ripPlaceholder = false;
 	var labels:Array<Int> = []; // label -> position (-1: not bound)
 	var fixups:Array<Fixup> = [];
@@ -221,7 +223,15 @@ class Asm {
 	}
 
 	inline function imm(size:Int, v:Int) {
-		if (size == 1) b.u8(v) else if (size == 2) b.u16(v) else b.u32(v);
+		if (size == 1) b.u8(v) else if (size == 2) b.u16(v) else imm32(v);
+	}
+
+	function imm32(v:Int) {
+		if (isym != null) {
+			reloc(RAbs32S, isym, v);
+			isym = null;
+			b.u32(0);
+		} else b.u32(v);
 	}
 
 	// ---- integer instructions
@@ -237,22 +247,23 @@ class Asm {
 		op(size == 2 ? 0x66 : 0, size == 8, size == 1 ? o * 8 + 2 : o * 8 + 3, 1, dst, 0, m, size == 1 ? 3 : 0);
 
 	public function aluRI(o:Int, size:Int, dst:Int, v:Int) {
-		if (dst == RAX && (size == 1 || v < -128 || v > 127)) {
+		var short = isym == null && v >= -128 && v <= 127;
+		if (dst == RAX && (size == 1 || !short)) {
 			// the accumulator forms (04, 05, 0c, 0d, ...): one byte shorter
 			if (size == 8) b.u8(0x48);
 			b.u8(o * 8 + (size == 1 ? 4 : 5));
-			if (size == 1) b.u8(v) else b.u32(v);
+			if (size == 1) b.u8(v) else imm32(v);
 			return;
 		}
 		if (size == 1) {
 			op(0, false, 0x80, 1, o, dst, null, 3);
 			b.u8(v);
-		} else if (v >= -128 && v <= 127) {
+		} else if (short) {
 			op(0, size == 8, 0x83, 1, o, dst, null);
 			b.u8(v);
 		} else {
 			op(0, size == 8, 0x81, 1, o, dst, null);
-			b.u32(v);
+			imm32(v);
 		}
 	}
 
@@ -260,7 +271,7 @@ class Asm {
 		if (size == 1) {
 			op(0, false, 0x80, 1, o, 0, m, 0, 1);
 			b.u8(v);
-		} else if (v >= -128 && v <= 127) {
+		} else if (isym == null && v >= -128 && v <= 127) {
 			op(size == 2 ? 0x66 : 0, size == 8, 0x83, 1, o, 0, m, 0, 1);
 			b.u8(v);
 		} else {
@@ -325,7 +336,7 @@ class Asm {
 				b.u16(v);
 			case _:
 				op(0, size == 8, 0xc7, 1, 0, 0, m, 0, 4);
-				b.u32(v);
+				imm32(v);
 		}
 	}
 
@@ -359,7 +370,7 @@ class Asm {
 	public function movImm32(dst:Int, v:Int) {
 		if ((dst & 8) != 0) b.u8(0x41);
 		b.u8(0xb8 + (dst & 7));
-		b.u32(v);
+		imm32(v);
 	}
 
 	public function movRI(size:Int, dst:Int, v:Int) {

@@ -119,7 +119,7 @@ cc = CC="$(1)" CFLAGS="$(2)" LIBS="$(3)" $(6) sh hxc/tools/cc-chunks.sh $(4) $(5
 
 .DEFAULT_GOAL := help
 .PHONY: help reference tool dev-tool dev port-c port web-c release deps cosmo \
-	wasm site fuzz program haxelib hxmc-dev hxmc-rt lix-c lix lix-cosmo test test-fuzz smoke clean distclean
+	wasm site fuzz program haxelib hxmc-dev hxmc-rt hxmc-fast lix-c lix lix-cosmo test test-fuzz smoke clean distclean
 
 help:
 	@sed -n '/^# --- Targets/,$$p' $(MAKEFILE_LIST) | sed -n 's/^## \{0,1\}//p'
@@ -369,6 +369,13 @@ hxmc-dev: bin/hxmc/hxmc
 bin/hxmc/hxmc: $(NATIVE_TOOL) $(HXMC_SRC) $(TOOL_SRC) $(STD) $(RT_SRC)
 	$(call native,bin/hxmc/hxmc,$(HXMC_ARGS))
 	$(call cc,$(DEV_CC),$(CFLAGS_BASE) $(NO_TLS_UV),-lm,bin/hxmc/hxmc_hxc,$@)
+
+# the tool with clang -O2 (rebuild and compile-speed numbers): its C is the dev build's
+hxmc-fast: bin/hxmc-fast/hxmc
+bin/hxmc-fast/hxmc: bin/hxmc/hxmc
+	@mkdir -p $(dir $@)
+	$(call cc,clang -O2,$(CFLAGS_BASE) $(NO_TLS_UV),-lm,bin/hxmc/hxmc_hxc,$@)
+	ln -sfn ../hxmc/rt bin/hxmc-fast/rt
 
 HXMC_RT_FILES := rt rt_dyn rt_std rt_str rt_sys rt_net rt_ssl rt_uv rt_thread rt_census
 hxmc-rt: $(foreach f,$(HXMC_RT_FILES),bin/hxmc/rt-dev/$(f).o)

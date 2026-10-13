@@ -20,6 +20,7 @@ class LIns {
 	public var slot:Int = -1; // frame slot (base == FRAME)
 	public var sym:Null<String>;
 	public var imm:Int = 0;
+	public var isym:Null<String>; // the immediate is this absolute symbol + imm
 	public var imm2:Int = 0;
 	public var cond:Int = 0;
 	public var target:Null<LBlock>;

@@ -4,102 +4,227 @@ import backend.Ir;
 import hxmc.Mir;
 import hxmc.MirBuild.Unsupported;
 
-// One run of the tool: lowers every function to machine code and writes
-// the output (development builds: an object, the C of the rest, linked by
-// the system's compiler).
+// One run of the tool. Functions are compiled per Haxe module (the unit of
+// the object cache): each module becomes an object of its own, cached in
+// <out>.hxmc/ under a key hashing its Fingerprint (with the tool and the
+// target), so a rebuild after an edit compiles only the modules whose code
+// can change. The program's data (DataGen) is regenerated every time, and
+// everything is linked with the runtime object (Link). Development (hybrid)
+// builds instead write the C of what is not compiled natively and link with
+// the system's compiler, without the cache.
 class Driver {
+	var prep:Prep;
+	var abi:Abi;
+	var o:Options;
+	var out:String;
+	var native = new Map<FuncInfo, Bool>();
+	var reasons = new Map<String, Int>();
+	var examples = new Map<String, String>();
+	var dumpSet:Null<Map<String, Bool>>;
+	var tm = [0.0, 0.0, 0.0, 0.0];
+	var slow:Array<{name:String, t:Float}> = [];
+
+	function new(prog:Program, out:String, o:Options) {
+		this.o = o;
+		this.out = out;
+		prep = new Prep(prog);
+		abi = Abi.get(o.target);
+		if (abi.name != "linux-x86_64") throw "hxmc: only linux-x86_64 so far";
+		dumpSet = o.dump == null ? null : [for (n in o.dump.split(",")) n => true];
+	}
+
 	public static function run(prog:Program, out:String, o:Options) {
 		var t0 = haxe.Timer.stamp();
-		var prep = new Prep(prog);
-		var abi = Abi.get(o.target);
-		if (abi.name != "linux-x86_64") throw "hxmc: only linux-x86_64 so far";
+		var d = new Driver(prog, out, o);
 		var t1 = haxe.Timer.stamp();
-		var obj = new Obj();
-		var emit = new hxmc.x64.Emit(obj);
-		var bss = obj.section(".bss", Bss, 16);
-		var native = new Map<FuncInfo, Bool>();
-		var reasons = new Map<String, Int>();
-		var examples = new Map<String, String>();
-		var count = 0;
-		var dumpSet = o.dump == null ? null : [for (n in o.dump.split(",")) n => true];
-		var tm = [0.0, 0.0, 0.0, 0.0, 0.0];
-		var slow:Array<{name:String, t:Float}> = [];
-		for (fn in prog.funcs) {
-			var name = prep.funcSym(fn);
-			if (o.skip.exists(name) || (o.only != null && !o.only.exists(name))) continue;
-			count++;
-			var mf:MFunc = null;
-			try {
-				var s0 = haxe.Timer.stamp();
-				var mb = new MirBuild(prep, abi, fn);
-				mb.icSym = name + "__ic";
-				mf = mb.build();
-				var layout = Layout.order(mf);
-				var s1 = haxe.Timer.stamp();
-				var isel = new hxmc.x64.Isel();
-				var lf = isel.select(mf, layout);
-				var s2 = haxe.Timer.stamp();
-				var ra = new Regalloc(lf, isel);
-				ra.run();
-				var s3 = haxe.Timer.stamp();
-				if (dumpSet != null && dumpSet.exists(name)) Sys.println(mf.dump());
-				emit.func(lf, ra.usedRegs, true);
-				var s4 = haxe.Timer.stamp();
-				tm[0] += s1 - s0;
-				tm[1] += s2 - s1;
-				tm[2] += s3 - s2;
-				tm[3] += s4 - s3;
-				if (o.stats && s4 - s0 > 0.05) slow.push({name: name + " (" + mf.vals.length + " values, " + mf.blocks.length + " blocks)", t: s4 - s0});
-				if (mb.icaches > 0) {
-					bss.bssSize = (bss.bssSize + 15) & ~15;
-					obj.define(mb.icSym, bss, bss.bssSize, Abi.IC_SIZE * mb.icaches, false);
-					bss.bssSize += Abi.IC_SIZE * mb.icaches;
-				}
-				native.set(fn, true);
-			} catch (e:Unsupported) {
-				var k = e.msg;
-				reasons.set(k, (reasons.exists(k) ? reasons.get(k) : 0) + 1);
-				if (!examples.exists(k)) examples.set(k, name);
-				if (!o.hybrid) throw 'hxmc: $name: ${e.msg}';
-			}
-		}
-		var t2 = haxe.Timer.stamp();
-		var n = Lambda.count(native);
-		if (o.stats) {
-			Sys.println('hxmc: ${n}/${prog.funcs.length} functions native (${Math.round(1000 * n / prog.funcs.length) / 10}%)');
-			var ks = [for (k in reasons.keys()) k];
-			ks.sort((a, b) -> reasons.get(b) - reasons.get(a));
-			for (k in ks)
-				Sys.println('  ${reasons.get(k)}\t$k\t(${examples.get(k)})');
-			Sys.println('hxmc: prepare ${ms(t1 - t0)}, codegen ${ms(t2 - t1)} (mir ${ms(tm[0])}, isel ${ms(tm[1])}, regalloc ${ms(tm[2])}, emit ${ms(tm[3])})');
-			slow.sort((a, b) -> a.t < b.t ? 1 : -1);
-			for (x in slow.slice(0, 10))
-				Sys.println('  ${ms(x.t)}\t${x.name}');
-		}
-		var compileMir = (mf:MFunc) -> {
+		if (o.hybrid) d.hybrid(t0, t1) else d.build(t0, t1);
+	}
+
+	// ---- compiling
+
+	// one function into `obj` (with its emitter); false: unsupported (hybrid builds)
+	function compileFunc(fn:FuncInfo, obj:Obj, emit:hxmc.x64.Emit):Bool {
+		var name = prep.funcSym(fn);
+		try {
+			var s0 = haxe.Timer.stamp();
+			var mb = new MirBuild(prep, abi, fn);
+			mb.icSym = name + "__ic";
+			var mf = mb.build();
+			if (dumpSet != null && dumpSet.exists(name)) Sys.println(mf.dump());
+			var layout = Layout.order(mf);
+			var s1 = haxe.Timer.stamp();
 			var isel = new hxmc.x64.Isel();
-			var lf = isel.select(mf, Layout.order(mf));
+			var lf = isel.select(mf, layout);
+			var s2 = haxe.Timer.stamp();
 			var ra = new Regalloc(lf, isel);
 			ra.run();
+			var s3 = haxe.Timer.stamp();
 			emit.func(lf, ra.usedRegs, true);
-		};
-		if (!o.hybrid) {
-			new DataGen(prep, abi, obj, compileMir).run();
-			var t3 = haxe.Timer.stamp();
-			var rtPath = o.rtObj != null ? o.rtObj : Options.toolDir() + "rt/" + abi.name + "/rt.o";
-			if (!sys.FileSystem.exists(rtPath)) throw "hxmc: the runtime object " + rtPath + " is missing (hxmc/tools/mkrt.sh)";
-			var rt = ElfReader.read(sys.io.File.getBytes(rtPath));
-			var t4 = haxe.Timer.stamp();
-			var exe = new Link([obj, rt], abi.arm).link("_start");
-			sys.io.File.saveBytes(out, exe);
-			Sys.command("chmod", ["755", out]);
-			if (o.stats) Sys.println('hxmc: data ${ms(t3 - t2)}, runtime read ${ms(t4 - t3)}, link ${ms(haxe.Timer.stamp() - t4)}');
-			return;
+			var s4 = haxe.Timer.stamp();
+			tm[0] += s1 - s0;
+			tm[1] += s2 - s1;
+			tm[2] += s3 - s2;
+			tm[3] += s4 - s3;
+			if (o.stats && s4 - s0 > 0.05) slow.push({name: name + " (" + mf.vals.length + " values, " + mf.blocks.length + " blocks)", t: s4 - s0});
+			if (mb.icaches > 0) {
+				var bss = obj.section(".bss", Bss, 16);
+				bss.bssSize = (bss.bssSize + 15) & ~15;
+				obj.define(mb.icSym, bss, bss.bssSize, Abi.IC_SIZE * mb.icaches, false);
+				bss.bssSize += Abi.IC_SIZE * mb.icaches;
+			}
+			native.set(fn, true);
+			return true;
+		} catch (e:Unsupported) {
+			var k = e.msg;
+			reasons.set(k, (reasons.exists(k) ? reasons.get(k) : 0) + 1);
+			if (!examples.exists(k)) examples.set(k, name);
+			if (!o.hybrid) throw 'hxmc: $name: ${e.msg}';
+			return false;
 		}
+	}
+
+	// a synthetic function (DataGen) into obj
+	function compileMir(mf:MFunc, emit:hxmc.x64.Emit) {
+		var isel = new hxmc.x64.Isel();
+		var lf = isel.select(mf, Layout.order(mf));
+		var ra = new Regalloc(lf, isel);
+		ra.run();
+		emit.func(lf, ra.usedRegs, true);
+	}
+
+	function stats(t0:Float, t1:Float, t2:Float) {
+		if (!o.stats) return;
+		var n = Lambda.count(native);
+		var total = prep.p.funcs.length;
+		Sys.println('hxmc: ${n}/${total} functions native (${Math.round(1000 * n / total) / 10}%)');
+		var ks = [for (k in reasons.keys()) k];
+		ks.sort((a, b) -> reasons.get(b) - reasons.get(a));
+		for (k in ks)
+			Sys.println('  ${reasons.get(k)}\t$k\t(${examples.get(k)})');
+		Sys.println('hxmc: prepare ${ms(t1 - t0)}, codegen ${ms(t2 - t1)} (mir ${ms(tm[0])}, isel ${ms(tm[1])}, regalloc ${ms(tm[2])}, emit ${ms(tm[3])})');
+		slow.sort((a, b) -> a.t < b.t ? 1 : -1);
+		for (x in slow.slice(0, 5))
+			Sys.println('  ${ms(x.t)}\t${x.name}');
+	}
+
+	// ---- the shipped path: per-module objects, cache, own linker
+
+	static function moduleFile(m:String):String {
+		var r = new StringBuf();
+		for (i in 0...m.length) {
+			var c = m.charCodeAt(i);
+			r.addChar((c >= "a".code && c <= "z".code) || (c >= "A".code && c <= "Z".code) || (c >= "0".code && c <= "9".code) || c == ".".code || c == "_".code ? c : "_".code);
+		}
+		return r.toString() + ".o";
+	}
+
+	// what every key includes: the tool binary (its size and date) and the target
+	function toolKey():String {
+		var p = Sys.programPath();
+		var st = try sys.FileSystem.stat(p) catch (_:Dynamic) null;
+		return "hxmc|" + abi.name + "|" + (st == null ? "?" : st.size + "@" + st.mtime.getTime()) + "|";
+	}
+
+	function build(t0:Float, t1:Float) {
+		var p = prep.p;
+		// modules in the order of their first function
+		var order:Array<String> = [];
+		var byModule = new Map<String, Array<FuncInfo>>();
+		for (f in p.funcs) {
+			var m = f.module == null ? "_" : f.module;
+			var fs = byModule.get(m);
+			if (fs == null) {
+				byModule.set(m, fs = []);
+				order.push(m);
+			}
+			fs.push(f);
+		}
+		var dir = out + ".hxmc";
+		if (!sys.FileSystem.exists(dir)) sys.FileSystem.createDirectory(dir);
+		var index = new Map<String, String>();
+		var indexPath = dir + "/index";
+		if (sys.FileSystem.exists(indexPath))
+			for (l in sys.io.File.getContent(indexPath).split("\n")) {
+				var sp = l.indexOf(" ");
+				if (sp > 0) index.set(l.substr(0, sp), l.substr(sp + 1));
+			}
+		var tk = toolKey();
+		var fp = new Fingerprint(prep);
+		var objs:Array<Obj> = [];
+		var newIndex = new StringBuf();
+		var hits = 0, misses = 0;
+		var tKey = 0.0, tRead = 0.0, tWrite = 0.0;
+		var keep = new Map<String, Bool>();
+		for (m in order) {
+			var s0 = haxe.Timer.stamp();
+			var text = new StringBuf();
+			text.add(tk);
+			for (f in byModule.get(m))
+				fp.func(f, text);
+			var key = Fingerprint.hash(text.toString());
+			var file = moduleFile(m);
+			keep.set(file, true);
+			newIndex.add(file + " " + key + "\n");
+			var path = dir + "/" + file;
+			var s1 = haxe.Timer.stamp();
+			tKey += s1 - s0;
+			if (index.get(file) == key && sys.FileSystem.exists(path)) {
+				objs.push(ElfReader.read(sys.io.File.getBytes(path)));
+				for (f in byModule.get(m))
+					native.set(f, true);
+				hits++;
+				tRead += haxe.Timer.stamp() - s1;
+				continue;
+			}
+			var obj = new Obj();
+			var emit = new hxmc.x64.Emit(obj);
+			for (f in byModule.get(m))
+				compileFunc(f, obj, emit);
+			var s2 = haxe.Timer.stamp();
+			sys.io.File.saveBytes(path, ElfWriter.write(obj, abi.arm));
+			tWrite += haxe.Timer.stamp() - s2;
+			objs.push(obj);
+			misses++;
+		}
+		sys.io.File.saveContent(indexPath, newIndex.toString());
+		for (f in sys.FileSystem.readDirectory(dir))
+			if (StringTools.endsWith(f, ".o") && !keep.exists(f)) sys.FileSystem.deleteFile(dir + "/" + f);
+		var t2 = haxe.Timer.stamp();
+		stats(t0, t1, t2);
+		var data = new Obj();
+		var demit = new hxmc.x64.Emit(data);
+		new DataGen(prep, abi, data, mf -> compileMir(mf, demit)).run();
+		var t3 = haxe.Timer.stamp();
+		var rtPath = o.rtObj != null ? o.rtObj : Options.toolDir() + "rt/" + abi.name + "/rt.o";
+		if (!sys.FileSystem.exists(rtPath)) throw "hxmc: the runtime object " + rtPath + " is missing (hxmc/tools/mkrt.sh)";
+		var rt = ElfReader.read(sys.io.File.getBytes(rtPath));
+		var t4 = haxe.Timer.stamp();
+		var exe = new Link([data].concat(objs).concat([rt]), abi.arm).link("_start");
+		sys.io.File.saveBytes(out, exe);
+		Sys.command("chmod", ["755", out]);
+		if (o.stats) {
+			Sys.println('hxmc: modules ${order.length}: ${hits} cached, ${misses} compiled (keys ${ms(tKey)}, reading ${ms(tRead)}, writing ${ms(tWrite)})');
+			Sys.println('hxmc: data ${ms(t3 - t2)}, runtime read ${ms(t4 - t3)}, link ${ms(haxe.Timer.stamp() - t4)}');
+		}
+	}
+
+	// ---- development builds
+
+	function hybrid(t0:Float, t1:Float) {
+		var p = prep.p;
+		var obj = new Obj();
+		var emit = new hxmc.x64.Emit(obj);
+		for (fn in p.funcs) {
+			var name = prep.funcSym(fn);
+			if (o.skip.exists(name) || (o.only != null && !o.only.exists(name))) continue;
+			compileFunc(fn, obj, emit);
+		}
+		var t2 = haxe.Timer.stamp();
+		stats(t0, t1, t2);
 		// the C of the other functions (it may add string literals), then the data
-		for (f in prog.funcs)
+		for (f in p.funcs)
 			if (!native.exists(f)) prep.cBody(f);
-		new DataGen(prep, abi, obj, compileMir).run();
+		new DataGen(prep, abi, obj, mf -> compileMir(mf, emit)).run();
 		sys.io.File.saveBytes(out + ".o", ElfWriter.write(obj, false));
 		sys.io.File.saveContent(out + ".c", CWriter.write(prep, f -> native.exists(f), false));
 		var rt = o.rtDir;
