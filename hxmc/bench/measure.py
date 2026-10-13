@@ -151,7 +151,9 @@ def build(cdir, variant, rtobjs, case):
 def size_kb(exe):
     """The executable's size without symbols (a stripped copy)."""
     tmp = Path(str(exe) + ".stripped")
-    subprocess.run(["strip", "-o", str(tmp), str(exe)], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    r = subprocess.run(["strip", "-o", str(tmp), str(exe)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    if r.returncode != 0:  # hxmc's executables: no section headers (no symbols) unless -debug
+        return (Path(exe).stat().st_size + 1023) // 1024
     kb = (tmp.stat().st_size + 1023) // 1024
     tmp.unlink()
     return kb
