@@ -793,7 +793,13 @@ class Isel implements hxmc.Target.Selector {
 				x.s1 = use(i.a);
 				x.flag = true; // movsxd
 				x.size = 8;
-			case ZExt | Trunc:
+			case ZExt:
+				var x = emit(MOV);
+				x.d = reg(i.id);
+				x.s1 = use(i.a);
+				x.size = 4;
+				x.imm2 = 1; // zero-extends even into the same register
+			case Trunc:
 				mov(reg(i.id), use(i.a), 4);
 			case I2F:
 				var x = emit(CVTI2F);

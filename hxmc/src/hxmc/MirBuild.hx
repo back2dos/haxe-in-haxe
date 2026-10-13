@@ -73,6 +73,12 @@ class MirBuild {
 	}
 
 	function op1(op:Op, ty:MTy, a:Int):Int {
+		// a constant widened: a constant
+		var x = f.vals[a];
+		if (x.op == Const && x.sym == null && x.ty == I32) {
+			if (op == SExt) return lconst32(x.imm);
+			if (op == ZExt) return lconst(x.imm, 0);
+		}
 		var i = mk(op, ty);
 		i.a = a;
 		return add(i);
@@ -104,7 +110,7 @@ class MirBuild {
 
 	// the address of rt_globals[g]
 	function globalAddr(g:Int):Int
-		return op2(Add, I64, load(I64, 8, symAddr("rt_globals"), 0), idConst(p.globalOffSym(g), 0, 0, I64));
+		return op2(Add, I64, loadM(Opt.MConst, I64, 8, symAddr("rt_globals"), 0), idConst(p.globalOffSym(g), 0, 0, I64));
 
 	function lconst(lo:Int, hi:Int):Int {
 		var i = mk(Const, I64);
@@ -142,8 +148,20 @@ class MirBuild {
 		add(i);
 	}
 
+	// a constant index: part of the displacement
+	inline function constIndex(index:Int):Bool {
+		if (index < 0) return false;
+		var x = f.vals[index];
+		return x.op == Const && x.sym == null && x.ty == I64 && x.imm2 == (x.imm < 0 ? -1 : 0) && x.imm >= -0x1000000 && x.imm < 0x1000000;
+	}
+
 	function load(ty:MTy, size:Int, base:Int, disp:Int, signed = false, index = -1, scale = 1):Int {
+		if (constIndex(index)) {
+			disp += f.vals[index].imm * scale;
+			index = -1;
+		}
 		var i = mk(Load, ty);
+		i.mem = memCls;
 		i.a = base;
 		i.b = index;
 		i.imm = disp;
@@ -153,8 +171,29 @@ class MirBuild {
 		return add(i);
 	}
 
+	// the memory class of the loads and stores made (Opt.MOther...)
+	var memCls = 0;
+
+	function loadM(cls:Int, ty:MTy, size:Int, base:Int, disp:Int, signed = false, index = -1, scale = 1):Int {
+		memCls = cls;
+		var r = load(ty, size, base, disp, signed, index, scale);
+		memCls = 0;
+		return r;
+	}
+
+	function storeM(cls:Int, size:Int, base:Int, disp:Int, v:Int, index = -1, scale = 1) {
+		memCls = cls;
+		store(size, base, disp, v, index, scale);
+		memCls = 0;
+	}
+
 	function store(size:Int, base:Int, disp:Int, v:Int, index = -1, scale = 1) {
+		if (constIndex(index)) {
+			disp += f.vals[index].imm * scale;
+			index = -1;
+		}
 		var i = mk(Store, Void);
+		i.mem = memCls;
 		i.a = base;
 		i.b = index;
 		i.c = v;
@@ -348,7 +387,7 @@ class MirBuild {
 
 	function readLocal(l:Local):Int {
 		var s = refSlot.get(l);
-		if (s != null) return load(I64, 8, fr, 8 * s);
+		if (s != null) return loadM(Opt.MFrame, I64, 8, fr, 8 * s);
 		var m = memSlot.get(l);
 		if (m != null) {
 			var t = mty(l.ty);
@@ -361,7 +400,7 @@ class MirBuild {
 	function writeLocal(l:Local, v:Int) {
 		var s = refSlot.get(l);
 		if (s != null) {
-			store(8, fr, 8 * s, v);
+			storeM(Opt.MFrame, 8, fr, 8 * s, v);
 			return;
 		}
 		var m = memSlot.get(l);
@@ -607,8 +646,8 @@ class MirBuild {
 				var x = ex(v);
 				var t = p.p.globals[g].ty;
 				if (Ir.isRef(t)) {
-					store(8, globalAddr(g), 0, x);
-				} else store(t == TI32 || t == TBool ? 4 : 8, symAddr(p.scalarGlobalSym(g)), 0, x);
+					storeM(Opt.MGlobal, 8, globalAddr(g), 0, x);
+				} else storeM(Opt.MGlobal, t == TI32 || t == TBool ? 4 : 8, symAddr(p.scalarGlobalSym(g)), 0, x);
 			case SAnonSet(name, t, obj, v):
 				anonSet(name, t, obj, v);
 			case SArrSet(elem, a, i, v):
@@ -793,30 +832,30 @@ class MirBuild {
 
 	function slotLoad(o:Int, loc:Int, t:Ty):Int
 		return switch t {
-			case TRef(_): load(I64, 8, o, 8 * loc);
-			case TF64: load(F64, 8, o, 8 * loc);
-			case TI64: load(I64, 8, o, 8 * loc);
+			case TRef(_): loadM(Opt.MField, I64, 8, o, 8 * loc);
+			case TF64: loadM(Opt.MField, F64, 8, o, 8 * loc);
+			case TI64: loadM(Opt.MField, I64, 8, o, 8 * loc);
 			case TVoid: iconst(0);
-			case _: load(I32, 4, o, 4 * loc);
+			case _: loadM(Opt.MField, I32, 4, o, 4 * loc);
 		};
 
 	// a store into a heap object; references go through the write barrier
 	function storeSlot(o:Int, loc:Int, t:Ty, v:Int, isNull:Bool) {
 		switch t {
 			case TRef(_):
-				if (isNull) store(8, o, 8 * loc, v) else setPtr(o, op2(Add, I64, o, lconst32(8 * loc)), v);
-			case TF64 | TI64: store(8, o, 8 * loc, v);
+				if (isNull) storeM(Opt.MField, 8, o, 8 * loc, v) else setPtr(o, op2(Add, I64, o, lconst32(8 * loc)), v, Opt.MField);
+			case TF64 | TI64: storeM(Opt.MField, 8, o, 8 * loc, v);
 			case TVoid:
-			case _: store(4, o, 4 * loc, v);
+			case _: storeM(Opt.MField, 4, o, 4 * loc, v);
 		}
 	}
 
 	// rt_set_ptr(obj, slot, val)
-	function setPtr(obj:Int, slot:Int, val:Int) {
-		var prev = load(I64, 8, slot, 0);
-		store(8, slot, 0, val);
-		var ys = load(I64, 8, symAddr("rt_young_start"), 0);
-		var ye = load(I64, 8, symAddr("rt_young_end"), 0);
+	function setPtr(obj:Int, slot:Int, val:Int, cls = 0) {
+		var prev = loadM(cls, I64, 8, slot, 0);
+		storeM(cls, 8, slot, 0, val);
+		var ys = loadM(Opt.MCallOnly, I64, 8, symAddr("rt_young_start"), 0);
+		var ye = loadM(Opt.MCallOnly, I64, 8, symAddr("rt_young_end"), 0);
 		var size = op2(Sub, I64, ye, ys);
 		var done = newBlock();
 		var b2 = newBlock(), b3 = newBlock(), b4 = newBlock();
@@ -840,7 +879,7 @@ class MirBuild {
 	}
 
 	function tindex(o:Int):Int
-		return load(I32, 2, o, Abi.HDR_TINDEX);
+		return loadM(Opt.MConst, I32, 2, o, Abi.HDR_TINDEX);
 
 	// ---- allocation
 
@@ -862,14 +901,14 @@ class MirBuild {
 		seal(slow);
 		cur = fast;
 		tlsStore("rt_young_ptr", op2(Add, I64, ptr, lconst32(bytes)));
-		store(4, ptr, 0, iconst(hdrLo(n, kind)));
-		store(4, ptr, 4, tyConst(tidx));
+		storeM(Opt.MInit, 4, ptr, 0, iconst(hdrLo(n, kind)));
+		storeM(Opt.MInit, 4, ptr, 4, tyConst(tidx));
 		var o = op2(Add, I64, ptr, lconst32(8));
 		if (zero) {
 			if (n <= 16) {
 				var z = lconst(0, 0);
 				for (k in 0...n)
-					store(8, o, 8 * k, z);
+					storeM(Opt.MInit, 8, o, 8 * k, z);
 			} else call("memset", [o, iconst(0), lconst32(8 * n)], I64);
 		}
 		writeVar(res, cur, o);
@@ -965,18 +1004,20 @@ class MirBuild {
 		var k = arrKind(elem);
 		var fast = newBlock(), slow = newBlock(), join = newBlock(), chk = newBlock();
 		slow.cold = true;
-		br(cmp(CEq, load(I32, 4, av, 4), iconst(k)), chk, slow);
+		var kind = loadM(Opt.MHdr, I32, 4, av, 4);
+		var len = loadM(Opt.MHdr, I32, 4, av, 0);
+		var d = loadM(Opt.MHdr, I64, 8, av, 8);
+		br(cmp(CEq, kind, iconst(k)), chk, slow);
 		seal(chk);
 		cur = chk;
-		br(cmp(CULt, iv, load(I32, 4, av, 0)), fast, slow);
+		br(cmp(CULt, iv, len), fast, slow);
 		seal(fast);
 		seal(slow);
 		cur = fast;
-		var d = load(I64, 8, av, 8);
 		var ix = op1(SExt, I64, iv);
 		if (k == Abi.AK_PTR) {
-			setPtr(d, op2(Add, I64, d, op2(Shl, I64, ix, iconst(3))), vv);
-		} else store(elemSize(elem), d, 0, vv, ix, elemSize(elem));
+			setPtr(d, op2(Add, I64, d, op2(Shl, I64, ix, iconst(3))), vv, Opt.MElem);
+		} else storeM(Opt.MElem, elemSize(elem), d, 0, vv, ix, elemSize(elem));
 		jmp(join);
 		cur = slow;
 		if (k == Abi.AK_PTR) {
@@ -1003,23 +1044,23 @@ class MirBuild {
 		var k = arrKind(elem);
 		var fast = newBlock(), slow = newBlock(), join = newBlock(), c1 = newBlock(), c2 = newBlock();
 		slow.cold = true;
-		br(cmp(CEq, load(I32, 4, av, 4), iconst(k)), c1, slow);
+		br(cmp(CEq, loadM(Opt.MHdr, I32, 4, av, 4), iconst(k)), c1, slow);
 		seal(c1);
 		cur = c1;
-		var d = load(I64, 8, av, 8);
+		var d = loadM(Opt.MHdr, I64, 8, av, 8);
 		br(cmp(CNe, d, lconst(0, 0)), c2, slow);
 		seal(c2);
 		cur = c2;
-		var len = load(I32, 4, av, 0);
-		var cap = op2(And, I32, load(I32, 4, d, -8), iconst(0x0FFFFFFF));
+		var len = loadM(Opt.MHdr, I32, 4, av, 0);
+		var cap = op2(And, I32, loadM(Opt.MHdr, I32, 4, d, -8), iconst(0x0FFFFFFF));
 		if (k == Abi.AK_I32) cap = op2(Shl, I32, cap, iconst(1));
 		br(cmp(CULt, len, cap), fast, slow);
 		seal(fast);
 		seal(slow);
 		cur = fast;
 		var ix = op1(SExt, I64, len);
-		if (k == Abi.AK_PTR) setPtr(d, op2(Add, I64, d, op2(Shl, I64, ix, iconst(3))), vv) else store(elemSize(elem), d, 0, vv, ix, elemSize(elem));
-		store(4, av, 0, op2(Add, I32, len, iconst(1)));
+		if (k == Abi.AK_PTR) setPtr(d, op2(Add, I64, d, op2(Shl, I64, ix, iconst(3))), vv, Opt.MElem) else storeM(Opt.MElem, elemSize(elem), d, 0, vv, ix, elemSize(elem));
+		storeM(Opt.MHdr, 4, av, 0, op2(Add, I32, len, iconst(1)));
 		jmp(join);
 		cur = slow;
 		if (k == Abi.AK_PTR) {
@@ -1046,18 +1087,22 @@ class MirBuild {
 		var res = newVar(t);
 		var fast = newBlock(), slow = newBlock(), join = newBlock();
 		slow.cold = true;
+		// the header is read before the checks (every array has one): later
+		// accesses the first dominates reuse it (Opt)
+		var kind = loadM(Opt.MHdr, I32, 4, av, 4);
+		var len = checked ? loadM(Opt.MHdr, I32, 4, av, 0) : -1;
+		var d = loadM(Opt.MHdr, I64, 8, av, 8);
 		if (checked) {
 			var chk = newBlock();
-			br(cmp(CEq, load(I32, 4, av, 4), iconst(k)), chk, slow);
+			br(cmp(CEq, kind, iconst(k)), chk, slow);
 			seal(chk);
 			cur = chk;
-			br(cmp(CULt, iv, load(I32, 4, av, 0)), fast, slow);
-		} else br(cmp(CEq, load(I32, 4, av, 4), iconst(k)), fast, slow);
+			br(cmp(CULt, iv, len), fast, slow);
+		} else br(cmp(CEq, kind, iconst(k)), fast, slow);
 		seal(fast);
 		seal(slow);
 		cur = fast;
-		var d = load(I64, 8, av, 8);
-		writeVar(res, cur, load(t, elemSize(elem), d, 0, false, op1(SExt, I64, iv), elemSize(elem)));
+		writeVar(res, cur, loadM(Opt.MElem, t, elemSize(elem), d, 0, false, op1(SExt, I64, iv), elemSize(elem)));
 		jmp(join);
 		cur = slow;
 		var name = switch k {
@@ -1140,9 +1185,9 @@ class MirBuild {
 	function slotLoadDyn(o:Int, loc:Int, t:Ty):Int {
 		var ix = op1(SExt, I64, loc);
 		return switch t {
-			case TRef(_) | TI64: load(I64, 8, o, 0, false, ix, 8);
-			case TF64: load(F64, 8, o, 0, false, ix, 8);
-			case _: load(I32, 4, o, 0, false, ix, 4);
+			case TRef(_) | TI64: loadM(Opt.MField, I64, 8, o, 0, false, ix, 8);
+			case TF64: loadM(Opt.MField, F64, 8, o, 0, false, ix, 8);
+			case _: loadM(Opt.MField, I32, 4, o, 0, false, ix, 4);
 		}
 	}
 
@@ -1202,9 +1247,9 @@ class MirBuild {
 		var x = ex(v);
 		var loc = op1(SExt, I64, op2(Sub, I32, slot, iconst(1)));
 		switch t {
-			case TRef(_): setPtr(o, op2(Add, I64, o, op2(Shl, I64, loc, iconst(3))), x);
-			case TF64 | TI64: store(8, o, 0, x, loc, 8);
-			case _: store(4, o, 0, x, loc, 4);
+			case TRef(_): setPtr(o, op2(Add, I64, o, op2(Shl, I64, loc, iconst(3))), x, Opt.MField);
+			case TF64 | TI64: storeM(Opt.MField, 8, o, 0, x, loc, 8);
+			case _: storeM(Opt.MField, 4, o, 0, x, loc, 4);
 		}
 		jmp(join);
 		cur = miss;
@@ -1226,9 +1271,9 @@ class MirBuild {
 			case ENull(_): lconst(0, 0);
 			case ELocal(l): readLocal(l);
 			case EGlobal(g, t):
-				if (Ir.isRef(t)) load(I64, 8, globalAddr(g), 0) else {
+				if (Ir.isRef(t)) loadM(Opt.MGlobal, I64, 8, globalAddr(g), 0) else {
 					var mt = mty(t);
-					load(mt, mt == I32 ? 4 : 8, symAddr(p.scalarGlobalSym(g)), 0);
+					loadM(Opt.MGlobal, mt, mt == I32 ? 4 : 8, symAddr(p.scalarGlobalSym(g)), 0);
 				}
 			case EBin(op, x, y): bin(op, x, y);
 			case ENot(x): cmp(CEq, ex(x), iconst(0));
@@ -1247,10 +1292,10 @@ class MirBuild {
 				var o = ex(x);
 				if (base != null) op2(Sub, I32, tindex(o), tyConst(en.ctors[0].tindex, -en.ctors[0].tag)) else {
 					var ti = op1(ZExt, I64, tindex(o));
-					load(I32, 4, symAddr("rt_types"), Abi.TYPE_TAG, false, op2(Mul, I64, ti, lconst32(Abi.TYPE_SIZE)), 1);
+					loadM(Opt.MConst, I32, 4, symAddr("rt_types"), Abi.TYPE_TAG, false, op2(Mul, I64, ti, lconst32(Abi.TYPE_SIZE)), 1);
 				}
 			case EEnumParam(c, idx, x): slotLoad(ex(x), at(idx, c.params[idx]), c.params[idx]);
-			case EArrLen(a): load(I32, 4, ex(a), 0);
+			case EArrLen(a): loadM(Opt.MHdr, I32, 4, ex(a), 0);
 			case EArrGet(elem, a, i): arrGet(elem, a, i, true);
 			case EArrGetU(elem, a, i): arrGet(elem, a, i, false);
 			case EBoxGet(t, bx): slotLoad(ex(bx), 0, t);
@@ -1281,16 +1326,16 @@ class MirBuild {
 			case ENewEnum(c, args):
 				var n = c.params.length == 0 ? 1 : c.params.length;
 				var o = alloc(n, c.tindex, Abi.K_OBJ, false);
-				if (c.params.length == 0) store(8, o, 0, lconst(0, 0));
+				if (c.params.length == 0) storeM(Opt.MInit, 8, o, 0, lconst(0, 0));
 				for (i in 0...args.length) {
-					if (c.params[i].match(TI32 | TBool)) store(8, o, 8 * i, lconst(0, 0));
+					if (c.params[i].match(TI32 | TBool)) storeM(Opt.MInit, 8, o, 8 * i, lconst(0, 0));
 					storeInit(o, at(i, c.params[i]), c.params[i], ex(args[i]));
 				}
 				o;
 			case ENewArr(elem, vs): newArr(elem, vs);
 			case ENewClos(l, caps):
 				var o = alloc(l.captures.length + 1, l.tindex, Abi.K_OBJ, false);
-				store(8, o, 0, symAddr(p.funcSym(l.fn)));
+				storeM(Opt.MInit, 8, o, 0, symAddr(p.funcSym(l.fn)));
 				for (i in 0...caps.length)
 					storeInit(o, at(i + 1, l.captures[i].ty), l.captures[i].ty, ex(caps[i]));
 				o;
@@ -1301,7 +1346,7 @@ class MirBuild {
 					case _: Abi.T_REFBOX_P;
 				};
 				var o = alloc(1, tt, Abi.K_OBJ, false);
-				store(8, o, 0, lconst(0, 0));
+				storeM(Opt.MInit, 8, o, 0, lconst(0, 0));
 				storeInit(o, 0, t, ex(v));
 				o;
 			case ENewAnon(sh, vals):
@@ -1315,9 +1360,9 @@ class MirBuild {
 	// a store into a new (young) object: no barrier (C writes these slots plainly)
 	function storeInit(o:Int, loc:Int, t:Ty, v:Int) {
 		switch t {
-			case TRef(_) | TF64 | TI64: store(8, o, 8 * loc, v);
+			case TRef(_) | TF64 | TI64: storeM(Opt.MInit, 8, o, 8 * loc, v);
 			case TVoid:
-			case _: store(4, o, 4 * loc, v);
+			case _: storeM(Opt.MInit, 4, o, 4 * loc, v);
 		}
 	}
 
@@ -1367,17 +1412,17 @@ class MirBuild {
 		var o:Int;
 		if (vs.length == 0) {
 			o = alloc(2, Abi.T_ARRAY, Abi.K_OBJ, true);
-			store(4, o, 4, iconst(k));
+			storeM(Opt.MInit, 4, o, 4, iconst(k));
 			return o;
 		}
 		o = call("hx_arr_new_n", [iconst(k), iconst(vs.length)], I64);
 		for (i in 0...vs.length) {
-			var d = load(I64, 8, o, 8);
+			var d = loadM(Opt.MHdr, I64, 8, o, 8);
 			var v = ex(vs[i]);
 			switch elem {
-				case TF64 | TI64: store(8, d, 8 * i, v);
-				case TI32 | TBool: store(4, d, 4 * i, v);
-				case _: setPtr(d, op2(Add, I64, d, lconst32(8 * i)), v);
+				case TF64 | TI64: storeM(Opt.MElem, 8, d, 8 * i, v);
+				case TI32 | TBool: storeM(Opt.MElem, 4, d, 4 * i, v);
+				case _: setPtr(d, op2(Add, I64, d, lconst32(8 * i)), v, Opt.MElem);
 			}
 		}
 		return o;
@@ -1558,7 +1603,7 @@ class MirBuild {
 		inline function f1(fn:String):Int
 			return call(fn, [xs[0]], F64);
 		return switch name {
-			case "String_length": load(I32, 4, xs[0], 0);
+			case "String_length": loadM(Opt.MConst, I32, 4, xs[0], 0);
 			case "String_charCodeAt_i":
 				var r = newVar(I32);
 				writeVar(r, cur, iconst(0));

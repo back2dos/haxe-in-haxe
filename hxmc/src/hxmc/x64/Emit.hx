@@ -157,7 +157,7 @@ class Emit implements hxmc.Target.Emitter {
 			case MOV:
 				if (isX(i.d) && isX(i.s1)) a.movsdRR(i.d, i.s1) else if (isX(i.d)) a.movqXR(i.d, i.s1) else if (isX(i.s1)) a.movqRX(i.d, i.s1) else if (i.flag)
 					a.movsxdR(i.d, i.s1)
-				else if (i.d != i.s1 || i.size == 4) a.movRR(i.size == 4 ? 4 : 8, i.d, i.s1);
+				else if (i.d != i.s1 || i.size == 4 && i.imm2 == 1) a.movRR(i.size == 4 ? 4 : 8, i.d, i.s1);
 			case MOVI:
 				if (i.isym != null) a.movImm32(i.d, i.imm) else if (i.flag && i.imm == 0 && (i.size == 4 || i.imm2 == 0)) a.movImm32(i.d, 0) else if (i.size == 4) a.movRI(4, i.d, i.imm) else a.movRI64(i.d, i.imm, i.imm2);
 			case MOVF:

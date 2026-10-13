@@ -85,6 +85,8 @@ class Link {
 		return addr.get(got) + gotSlot.get(t != null ? t : s);
 	}
 
+	public var symbols = true; // write a symbol table of the code (profilers, debuggers)
+
 	public function link(entry:String):Bytes {
 		resolve();
 		makeGot();
@@ -183,14 +185,15 @@ class Link {
 		h.u32(1);
 		h.i64(symAddr(entrySym(entry)));
 		h.i64(64); // phoff
-		h.i64(0); // shoff
+		var shoff = symbols ? symbolTable(out, all, textStart, textEnd) : 0;
+		h.i64(shoff); // shoff
 		h.u32(0);
 		h.u16(64);
 		h.u16(56);
 		h.u16(nph);
 		h.u16(64);
-		h.u16(0);
-		h.u16(0);
+		h.u16(symbols ? 5 : 0);
+		h.u16(symbols ? 4 : 0);
 		// program headers
 		function ph(type:Int, flags:Int, off:Int, vaddr:Int, filesz:Int, memsz:Int, al:Int) {
 			h.u32(type);
@@ -209,6 +212,70 @@ class Link {
 		ph(0x6474e551, 6, 0, 0, 0, 0, 16);
 		out.b.blit(0, h.b, 0, h.len);
 		return out.toBytes();
+	}
+
+	// appends .symtab (the symbols of code), .strtab, .shstrtab and the
+	// section headers (null, .text, .symtab, .strtab, .shstrtab) to the
+	// image; returns the offset of the headers. Nothing loads them.
+	function symbolTable(out:Buf, all:Array<Section>, textStart:Int, textEnd:Int):Int {
+		var strtab = new Buf(1 << 16);
+		strtab.u8(0);
+		var symtab = new Buf(1 << 16);
+		symtab.zeros(24);
+		var locals = new Buf(1 << 16), globals = new Buf(1 << 16);
+		var nlocal = 1, nglobal = 0;
+		for (o in objs)
+			for (s in o.symbols) {
+				var sec = s.section;
+				if (sec == null || sec.kind != Text || s.abs || s.name.length == 0 || StringTools.startsWith(s.name, ".L")) continue;
+				var b = s.global ? globals : locals;
+				if (s.global) nglobal++ else nlocal++;
+				b.u32(strtab.len);
+				strtab.str(s.name);
+				strtab.u8(0);
+				b.u8((s.global ? 0x10 : 0) | 2); // STT_FUNC
+				b.u8(0);
+				b.u16(1); // .text
+				b.i64(addr.get(sec) + s.offset);
+				b.i64(s.size);
+			}
+		symtab.buf(locals);
+		symtab.buf(globals);
+		var shstr = new Buf(64);
+		shstr.u8(0);
+		var names = [];
+		for (n in [".text", ".symtab", ".strtab", ".shstrtab"]) {
+			names.push(shstr.len);
+			shstr.str(n);
+			shstr.u8(0);
+		}
+		out.align(8);
+		var symOff = out.len;
+		out.buf(symtab);
+		var strOff = out.len;
+		out.buf(strtab);
+		var shstrOff = out.len;
+		out.buf(shstr);
+		out.align(8);
+		var shoff = out.len;
+		function sh(name:Int, type:Int, flags:Int, a:Int, off:Int, size:Int, link:Int, info:Int, al:Int, entsize:Int) {
+			out.u32(name);
+			out.u32(type);
+			out.i64(flags);
+			out.i64(a);
+			out.i64(off);
+			out.i64(size);
+			out.u32(link);
+			out.u32(info);
+			out.i64(al);
+			out.i64(entsize);
+		}
+		sh(0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+		sh(names[0], 1, 6, textStart, textStart - BASE, textEnd - textStart, 0, 0, 16, 0);
+		sh(names[1], 2, 0, 0, symOff, symtab.len, 3, nlocal, 8, 24);
+		sh(names[2], 3, 0, 0, strOff, strtab.len, 0, 0, 1, 0);
+		sh(names[3], 3, 0, 0, shstrOff, shstr.len, 0, 0, 1, 0);
+		return shoff;
 	}
 
 	function entrySym(name:String):Symbol {

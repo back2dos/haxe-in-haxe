@@ -12,6 +12,8 @@ changes between the variants:
   O2    clang -O2 (what hxmc must match)
   hxmc  the case compiled by hxmc (bin/hxmc/hxmc, development build linked
         with bin/hxmc/rt-dev: the runtime by clang -O2 with OS threads)
+  hxmcs the shipped path: hxmc's own linker, a static executable with the
+        runtime object of hxmc/tools/mkrt.sh (musl, zig cc -O2)
   O1ni  clang -O1 -fno-inline-functions: no inlining of Haxe functions
         (the runtime helpers marked inline still are)
 
@@ -101,10 +103,10 @@ def generate(case):
     return out / "prog_hxc", runcwd, runargs, time.perf_counter() - t
 
 
-HXMC = ROOT / "bin/hxmc/hxmc"
+HXMC = Path(os.environ.get("HXMC_TOOL", ROOT / "bin/hxmc/hxmc"))
 
 
-def build_hxmc(cdir, case):
+def build_hxmc(cdir, case, static=False):
     """The same program through HXB (written by the reference) and hxmc."""
     d = cdir.parent
     hxb = d / "prog.hxb.zip"
@@ -114,8 +116,12 @@ def build_hxmc(cdir, case):
     main = args[args.index("-main") + 1]
     t = time.perf_counter()
     env = dict(case_env(), HXMC_HYBRID="1", HXMC_RT=str(ROOT / "bin/hxmc/rt-dev"), HXMC_RT_INCLUDE=str(RT))
-    run([str(HXMC), str(d / "bin-hxmc"), "--hxb-lib", str(hxb), "-main", main, "--custom-target", "hxc", "-D", "disable-parallelism"], cwd=ROOT, env=env)
-    return d / "bin-hxmc", time.perf_counter() - t
+    exe = d / "bin-hxmc"
+    if static:
+        env = case_env()
+        exe = d / "bin-hxmcs"
+    run([str(HXMC), str(exe), "--hxb-lib", str(hxb), "-main", main, "--custom-target", "hxc", "-D", "disable-parallelism"], cwd=ROOT, env=env)
+    return exe, time.perf_counter() - t
 
 
 def case_args(case):
@@ -128,6 +134,8 @@ def case_args(case):
 def build(cdir, variant, rtobjs, case):
     if variant == "hxmc":
         return build_hxmc(cdir, case)
+    if variant == "hxmcs":
+        return build_hxmc(cdir, case, True)
     cc = VARIANTS[variant]
     od = cdir / f"obj-{variant}"
     od.mkdir(exist_ok=True)
@@ -138,6 +146,15 @@ def build(cdir, variant, rtobjs, case):
     exe = cdir.parent / f"bin-{variant}"
     run(["clang", "-o", str(exe)] + [str(o) for o in objs] + [str(o) for o in rtobjs] + ["-lm"])
     return exe, ct
+
+
+def size_kb(exe):
+    """The executable's size without symbols (a stripped copy)."""
+    tmp = Path(str(exe) + ".stripped")
+    subprocess.run(["strip", "-o", str(tmp), str(exe)], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    kb = (tmp.stat().st_size + 1023) // 1024
+    tmp.unlink()
+    return kb
 
 
 def timed(cmd, cwd, n):
@@ -173,8 +190,9 @@ def main():
             try:
                 exe, ct = build(cdir, v, rtobjs, case)
                 rt = timed([str(exe)] + runargs, runcwd, a.n)
-                row[v] = {"compile": round(ct, 2), "run": round(rt, 3)}
-                print(f"{case:16} {v:4} C compile {ct:6.2f}s  run {rt:7.3f}s", flush=True)
+                kb = size_kb(exe)
+                row[v] = {"compile": round(ct, 2), "run": round(rt, 3), "kb": kb}
+                print(f"{case:16} {v:5} compile {ct:6.2f}s  run {rt:7.3f}s  size {kb:7} KB", flush=True)
             except Exception as e:
                 row[v] = {"error": str(e)[-300:]}
                 print(f"{case:16} {v:4} FAILED: {str(e).strip().splitlines()[-1]}", flush=True)

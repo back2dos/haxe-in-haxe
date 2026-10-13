@@ -95,6 +95,7 @@ class Driver {
 			var mb = new MirBuild(prep, abi, fn);
 			mb.icSym = name + "__ic";
 			var mf = mb.build();
+			if (o.opt) new Opt(mf).run();
 			if (dumpSet != null && dumpSet.exists(name)) Sys.println(mf.dump());
 			var layout = Layout.order(mf);
 			var s1 = haxe.Timer.stamp();
@@ -278,7 +279,11 @@ class Driver {
 		var rt = ElfReader.read(sys.io.File.getBytes(rtPath));
 		var t4 = haxe.Timer.stamp();
 		var all = [data].concat(objs).concat([rt]);
-		var exe = abi.os == "windows" ? new LinkPE(all, abi.arm).link("mainCRTStartup") : new Link(all, abi).link("_start");
+		var exe = abi.os == "windows" ? new LinkPE(all, abi.arm).link("mainCRTStartup") : {
+			var l = new Link(all, abi);
+			l.symbols = !o.strip;
+			l.link("_start");
+		};
 		if (abi.os == "windows" && !StringTools.endsWith(out, ".exe")) out += ".exe";
 		sys.io.File.saveBytes(out, exe);
 		Sys.command("chmod", ["755", out]);

@@ -58,7 +58,44 @@ class Scratch {
 	public var count:Array<Int> = [];
 	public var order:Array<Int> = [];
 	public var assigned:Array<Int> = [];
-	public var holder:Array<Int> = [];
+	public var occHead:Array<Int> = [];
+	public var occNext:Array<Int> = [];
+	public var occBlock:Array<Int> = [];
+	public var occFirst:Array<Int> = [];
+	public var occLast:Array<Int> = [];
+	public var occAt:Array<Int> = [];
+	public var listed:Array<Int> = [];
+	public var bl:Array<Int> = [];
+	public var segAt:Array<Int> = [];
+	public var segN:Array<Int> = [];
+	public var segFrom:Array<Int> = [];
+	public var segTo:Array<Int> = [];
+	public var len:Array<Int> = [];
+	public var fixLo:Array<Int> = [];
+	public var fixHi:Array<Int> = [];
+	public var ptB:Array<Int> = [];
+	public var ptR:Array<Int> = [];
+	public var ptLo:Array<Int> = [];
+	public var ptHi:Array<Int> = [];
+	public var ptAt:Array<Int> = [];
+	public var ptVal:Array<Int> = [];
+	public var ptFill:Array<Int> = [];
+	public var ptBlocks:Array<Int> = [];
+	public var pB:Array<Int> = [];
+	public var pR:Array<Int> = [];
+	public var pA:Array<Int> = [];
+	public var pZ:Array<Int> = [];
+	public var bucket:Array<Int> = [];
+	public var sorted:Array<Int> = [];
+	public var oFrom:Array<Array<Int>> = [for (_ in 0...LFunc.NPHYS) []];
+	public var oTo:Array<Array<Int>> = [for (_ in 0...LFunc.NPHYS) []];
+	public var oOwn:Array<Array<Int>> = [for (_ in 0...LFunc.NPHYS) []];
+	public var mFrom:Array<Int> = [];
+	public var mTo:Array<Int> = [];
+	public var mOwn:Array<Int> = [];
+	public var seen:Array<Int> = [];
+	public var conflicts:Array<Int> = [];
+	public var weight:Array<Float> = [];
 	// per physical register: whether a call leaves its result there; 1 for
 	// the allocatable float registers, 2 for the integer ones
 	public var isResult:Array<Bool> = [for (_ in 0...LFunc.NPHYS) false];
@@ -82,8 +119,10 @@ class Scratch {
 	}
 }
 
-// Linear-scan register allocation (Poletto and Sarkar) with one live range
-// per virtual register, on the block layout order. Physical registers
+// Linear-scan register allocation (Poletto and Sarkar) on the block layout
+// order, one register per virtual register for its whole life, with
+// lifetime holes (Wimmer and Mössenböck's interval ranges, without
+// splitting): values whose ranges do not overlap share a register. Physical registers
 // named by instructions (call arguments and results, fixed operands, call
 // clobbers) are fixed ranges no interval may overlap, so a value live across
 // a call ends up in a callee-saved register or in memory. A spilled register
@@ -107,6 +146,18 @@ class Regalloc {
 	public var insns = 0; // instructions they went through
 
 	public function run() {
+		// loop depths from the layout (reverse postorder, slow paths last): a
+		// branch back to an earlier block closes a loop over the blocks between
+		var nb = f.blocks.length;
+		for (bi in 0...nb)
+			f.blocks[bi].id = bi;
+		for (b in f.blocks)
+			b.loopDepth = 0;
+		for (b in f.blocks)
+			for (pr in b.preds)
+				if (pr.id >= b.id && !pr.cold)
+					for (k in b.id...pr.id + 1)
+						f.blocks[k].loopDepth++;
 		for (round in 0...8) {
 			rounds++;
 			for (b in f.blocks)
@@ -124,8 +175,15 @@ class Regalloc {
 
 	// ---- one round
 
-	var start:Array<Int>;
-	var end:Array<Int>;
+	var start:Array<Int>; // per virtual register: its first position (0x7fffffff: none)
+	var end:Array<Int>; // its last position (-1: none)
+	// its live ranges, with lifetime holes between them (e.g. where it is
+	// not live in the slow paths laid out after the code): from segAt[r],
+	// segN[r] of them, in position order
+	var segAt:Array<Int>;
+	var segN:Array<Int>;
+	var segFrom:Array<Int>;
+	var segTo:Array<Int>;
 	var fixedFrom:Array<Array<Int>>; // per physical register: sorted ranges
 	var fixedTo:Array<Array<Int>>;
 	var s:Scratch;
@@ -134,8 +192,6 @@ class Regalloc {
 		var n = f.nregs;
 		var s = this.s;
 		coldCalls.resize(0);
-		coldSaved.resize(0);
-		coldSavedAt.resize(0);
 		var defs = s.defs, uses = s.uses;
 		var isResult = s.isResult;
 		// positions
@@ -146,9 +202,6 @@ class Regalloc {
 			b.to = pos;
 			pos += 2;
 		}
-		// intervals: per virtual register its first and last position, from
-		// its definitions and uses, extended over the blocks it is live
-		// across (found by walking back from each use to the definitions)
 		start = Scratch.fill(s.start, n, 0x7fffffff);
 		end = Scratch.fill(s.end, n, -1);
 		fixedFrom = s.fixedFrom;
@@ -159,6 +212,8 @@ class Regalloc {
 		}
 		var openFixed = s.openFixed;
 		var nb = f.blocks.length;
+		// per slow-path block: the physical registers with fixed ranges in it
+		var fixLo = Scratch.fill(s.fixLo, nb, 0), fixHi = Scratch.fill(s.fixHi, nb, 0);
 		for (bi in 0...nb)
 			f.blocks[bi].id = bi;
 		// per register: the blocks with a use not preceded by a definition in the block (upward-exposed)
@@ -173,12 +228,28 @@ class Regalloc {
 		var defBlock = s.defBlock, defNext = s.defNext;
 		defBlock.resize(0);
 		defNext.resize(0);
+		// per register and block it appears in: the first and last position
+		// (a list through occNext, the latest block first)
+		var occHead = Scratch.fill(s.occHead, n, -1);
+		var occNext = s.occNext, occBlock = s.occBlock, occFirst = s.occFirst, occLast = s.occLast;
+		occNext.resize(0);
+		occBlock.resize(0);
+		occFirst.resize(0);
+		occLast.resize(0);
+		// spill costs: the uses and definitions, 8x per loop level
+		var weight = s.weight;
+		weight.resize(n);
+		for (r in 0...n)
+			weight[r] = 0;
 		for (bi in 0...nb) {
 			var b = f.blocks[bi];
 			for (k in 0...NPHYS)
 				openFixed[k] = -1;
 			var p = b.from;
 			var cold = b.cold;
+			var w:Float = cold ? 0.125 : 1.0;
+			for (_ in 0...(b.loopDepth < 6 ? b.loopDepth : 6))
+				w *= 8;
 			for (i in b.ins) {
 				defs.n = 0;
 				uses.n = 0;
@@ -191,8 +262,15 @@ class Regalloc {
 				for (k in 0...uses.n) {
 					var r = ua[k];
 					if (r >= NPHYS) {
-						if (end[r] < p) end[r] = p;
-						if (start[r] > p) start[r] = p;
+						weight[r] += w;
+						var h = occHead[r];
+						if (h >= 0 && occBlock[h] == bi) occLast[h] = p else {
+							occBlock.push(bi);
+							occFirst.push(p);
+							occLast.push(p);
+							occNext.push(h);
+							occHead[r] = occBlock.length - 1;
+						}
 						if (defStamp[r] != bi) {
 							// the first exposed use in this block: record once
 							var h = exposedHead[r];
@@ -205,14 +283,24 @@ class Regalloc {
 					} else if (r >= 0) {
 						var from = openFixed[r] >= 0 ? openFixed[r] : b.from;
 						addFixed(r, from, p);
+						if (cold) {
+							if (r < 32) fixLo[bi] |= 1 << r else fixHi[bi] |= 1 << (r - 32);
+						}
 					}
 				}
 				var da = defs.a;
 				for (k in 0...defs.n) {
 					var r = da[k];
 					if (r >= NPHYS) {
-						if (start[r] > p + 1) start[r] = p + 1;
-						if (end[r] < p + 1) end[r] = p + 1;
+						weight[r] += w;
+						var h = occHead[r];
+						if (h >= 0 && occBlock[h] == bi) occLast[h] = p + 1 else {
+							occBlock.push(bi);
+							occFirst.push(p + 1);
+							occLast.push(p + 1);
+							occNext.push(h);
+							occHead[r] = occBlock.length - 1;
+						}
 						if (defStamp[r] != bi) {
 							defStamp[r] = bi;
 							defBlock.push(bi);
@@ -223,55 +311,174 @@ class Regalloc {
 						if (coldCall && !isResult[r]) continue;
 						openFixed[r] = p + 1;
 						addFixed(r, p + 1, p + 1);
+						if (cold) {
+							if (r < 32) fixLo[bi] |= 1 << r else fixHi[bi] |= 1 << (r - 32);
+						}
 					}
 				}
 				p += 2;
 			}
 		}
+		// live ranges: per register, the blocks it is live into, found by
+		// walking back from each exposed use to the definitions; then a range
+		// per block it is live in or appears in, adjacent ones merged
 		var defines = Scratch.fill(s.defines, nb, -1); // stamped by register
 		var liveInSeen = Scratch.fill(s.liveInSeen, nb, -1);
 		var liveOutSeen = Scratch.fill(s.liveOutSeen, nb, -1);
-		// a stack of blocks (pop of an Array<Int> would box its result)
+		var listed = Scratch.fill(s.listed, nb, -1);
+		var occAt = s.occAt;
+		occAt.resize(nb);
 		var work = s.work;
 		var wn = 0;
+		var bl = s.bl;
+		segAt = Scratch.fill(s.segAt, n, 0);
+		segN = Scratch.fill(s.segN, n, 0);
+		segFrom = s.segFrom;
+		segTo = s.segTo;
+		segFrom.resize(0);
+		segTo.resize(0);
+		var len = Scratch.fill(s.len, n, 0);
+		var ptB = s.ptB, ptR = s.ptR;
+		ptB.resize(0);
+		ptR.resize(0);
+		var ptLo = Scratch.fill(s.ptLo, n, 0), ptHi = Scratch.fill(s.ptHi, n, 0);
+		var pB = s.pB, pR = s.pR, pA = s.pA, pZ = s.pZ;
+		pB.resize(0);
+		pR.resize(0);
+		pA.resize(0);
+		pZ.resize(0);
 		var blocks = f.blocks;
 		for (r in NPHYS...n) {
+			var k = occHead[r];
+			if (k < 0) continue;
+			var bn = 0;
+			while (k >= 0) {
+				var bi = occBlock[k];
+				occAt[bi] = k;
+				listed[bi] = r;
+				if (bn == bl.length) bl.push(bi) else bl[bn] = bi;
+				bn++;
+				k = occNext[k];
+			}
 			var e = exposedHead[r];
-			if (e < 0) continue;
-			var d = defHead[r];
-			while (d >= 0) {
-				defines[defBlock[d]] = r;
-				d = defNext[d];
-			}
-			while (e >= 0) {
-				var x = exposedBlock[e];
-				if (wn == work.length) work.push(x) else work[wn] = x;
-				wn++;
-				e = exposedNext[e];
-			}
-			var st = start[r], en = end[r];
-			while (wn > 0) {
-				var bi = work[--wn];
-				if (liveInSeen[bi] == r) continue;
-				liveInSeen[bi] = r;
-				var b = blocks[bi];
-				if (st > b.from) st = b.from;
-				for (pr in b.preds) {
-					var pi = pr.id;
-					if (liveOutSeen[pi] != r) {
-						liveOutSeen[pi] = r;
-						if (en < pr.to) en = pr.to;
-						if (st > pr.to) st = pr.to;
+			if (e >= 0) {
+				var d = defHead[r];
+				while (d >= 0) {
+					defines[defBlock[d]] = r;
+					d = defNext[d];
+				}
+				while (e >= 0) {
+					var x = exposedBlock[e];
+					if (wn == work.length) work.push(x) else work[wn] = x;
+					wn++;
+					e = exposedNext[e];
+				}
+				while (wn > 0) {
+					var bi = work[--wn];
+					if (liveInSeen[bi] == r) continue;
+					liveInSeen[bi] = r;
+					if (listed[bi] != r) {
+						listed[bi] = r;
+						occAt[bi] = -1;
+						if (bn == bl.length) bl.push(bi) else bl[bn] = bi;
+						bn++;
 					}
-					if (defines[pi] != r) {
-						if (wn == work.length) work.push(pi) else work[wn] = pi;
-						wn++;
+					for (pr in blocks[bi].preds) {
+						var pi = pr.id;
+						if (liveOutSeen[pi] != r) {
+							liveOutSeen[pi] = r;
+							if (listed[pi] != r) {
+								listed[pi] = r;
+								occAt[pi] = -1;
+								if (bn == bl.length) bl.push(pi) else bl[bn] = pi;
+								bn++;
+							}
+						}
+						if (defines[pi] != r) {
+							if (wn == work.length) work.push(pi) else work[wn] = pi;
+							wn++;
+						}
 					}
 				}
 			}
-			start[r] = st;
-			end[r] = en;
+			// its range in each of those blocks (put in order below)
+			var room = 0;
+			for (x in 0...bn) {
+				var bi = bl[x];
+				var b = blocks[bi];
+				var o = occAt[bi];
+				if (o < 0 && b.cold) {
+					// live through a slow path without appearing in it: no range
+					// there (slow paths are laid out last: the ranges would cover
+					// everything between); the register must only stay unused
+					// in that block (ptLo/ptHi, coldBusy)
+					ptB.push(bi);
+					ptR.push(r);
+					ptLo[r] |= fixLo[bi];
+					ptHi[r] |= fixHi[bi];
+					continue;
+				}
+				room++;
+				pB.push(bi);
+				pR.push(r);
+				pA.push(liveInSeen[bi] == r || o < 0 ? b.from : occFirst[o]);
+				pZ.push(liveOutSeen[bi] == r || o < 0 ? b.to : occLast[o]);
+			}
+			segN[r] = room; // room for this many, for now
 		}
+		// the ranges in block order (a counting sort), appended per register
+		// in that order, adjacent ones merged
+		var np = pB.length;
+		var bucket = Scratch.fill(s.bucket, nb + 1, 0);
+		for (k in 0...np)
+			bucket[pB[k] + 1]++;
+		for (k in 0...nb)
+			bucket[k + 1] += bucket[k];
+		var sorted = Scratch.fill(s.sorted, np, 0);
+		for (k in 0...np)
+			sorted[bucket[pB[k]]++] = k;
+		// the values passing through each slow-path block (ptVal[ptAt[b]...ptAt[b + 1]])
+		var ptAt = Scratch.fill(s.ptAt, nb + 1, 0);
+		for (bi in ptB)
+			ptAt[bi + 1]++;
+		for (k in 0...nb)
+			ptAt[k + 1] += ptAt[k];
+		var ptVal = Scratch.fill(s.ptVal, ptB.length, 0);
+		var ptFill = Scratch.fill(s.ptFill, nb, 0);
+		for (k in 0...nb)
+			ptFill[k] = ptAt[k];
+		for (k in 0...ptB.length)
+			ptVal[ptFill[ptB[k]]++] = ptR[k];
+		var ptBlocks = s.ptBlocks;
+		ptBlocks.resize(0);
+		for (bi in 0...nb)
+			if (ptAt[bi + 1] > ptAt[bi]) ptBlocks.push(bi);
+		var room = 0;
+		for (r in NPHYS...n) {
+			segAt[r] = room;
+			room += segN[r];
+			segN[r] = 0;
+		}
+		Scratch.fill(segFrom, room, 0);
+		Scratch.fill(segTo, room, 0);
+		for (k in sorted) {
+			var r = pR[k], a = pA[k], z = pZ[k];
+			var m = segAt[r] + segN[r];
+			if (segN[r] > 0 && segTo[m - 1] + 2 >= a) {
+				len[r] += z - segTo[m - 1];
+				segTo[m - 1] = z;
+			} else {
+				segFrom[m] = a;
+				segTo[m] = z;
+				segN[r]++;
+				len[r] += z - a + 1;
+			}
+		}
+		for (r in NPHYS...n)
+			if (segN[r] > 0) {
+				start[r] = segFrom[segAt[r]];
+				end[r] = segTo[segAt[r] + segN[r] - 1];
+			}
 		for (r in 0...NPHYS)
 			sortFixed(r);
 		// linear scan: intervals by start (a counting sort on positions; ties by register)
@@ -290,76 +497,280 @@ class Regalloc {
 		assigned = Scratch.fill(s.assigned, n, -1);
 		for (r in 0...NPHYS)
 			assigned[r] = r;
-		// per physical register: the interval holding it (free once that ends)
-		var holder = Scratch.fill(s.holder, NPHYS, -1);
+		// per physical register: the ranges of the intervals given it (disjoint,
+		// in position order, with their owners)
+		for (c in 0...NPHYS) {
+			s.oFrom[c].resize(0);
+			s.oTo[c].resize(0);
+			s.oOwn[c].resize(0);
+		}
 		var isFpr = s.isFpr;
 		var spilled = [];
-		// the slow-path calls, in position order: when the scan passes one,
-		// the registers held across it are recorded (coldSaves)
-		var ci = 0, nc = coldCalls.length;
+		var seen = Scratch.fill(s.seen, n, -1); // conflicts found (stamped by query)
+		var conflicts = s.conflicts;
 		for (r in order) {
-			var rs = start[r], re = end[r];
-			while (ci < nc && coldCalls[ci] < rs) {
-				snapshot(coldCalls[ci], holder);
-				ci++;
-			}
 			var float = f.floatReg(r);
 			var regs = float ? t.fprs : t.gprs;
 			var choice = -1;
+			// registers r cannot take: fixed in the slow paths it passes
+			// through, held by values passing through the slow paths it is in
+			coldBusy(r, -1, null);
+			var mlo = ptLo[r] | busyLo, mhi = ptHi[r] | busyHi;
+			inline function masked(c:Int):Bool
+				return (c < 32 ? mlo >> c : mhi >> (c - 32)) & 1 != 0;
 			var h = f.hint(r);
 			if (h >= 0) {
 				var hr = h < NPHYS ? h : assigned[h];
-				if (hr >= 0 && isFpr[hr] == (float ? 1 : 2) && (holder[hr] < 0 || end[holder[hr]] < rs) && !fixedOverlap(hr, rs, re)) choice = hr;
+				if (hr >= 0 && isFpr[hr] == (float ? 1 : 2) && !masked(hr) && free(hr, r)) choice = hr;
 			}
 			if (choice < 0)
-				for (c in regs) {
-					var o = holder[c];
-					if ((o < 0 || end[o] < rs) && !fixedOverlap(c, rs, re)) {
+				for (c in regs)
+					if (!masked(c) && free(c, r)) {
 						choice = c;
 						break;
 					}
-				}
 			if (choice < 0) {
-				// spill the live interval that ends last, if it ends after this one
-				var victim = -1;
+				// the register whose overlapping intervals cost least to spill
+				// (weight per position covered), if less than this one
+				var best = -1;
+				var bestCost = r >= noSpillFrom ? 1e300 : weight[r] / len[r];
 				for (c in regs) {
-					var a = holder[c];
-					if (a >= 0 && end[a] >= rs && a < noSpillFrom && (victim < 0 || end[a] > end[victim]) && !fixedOverlap(c, rs, re))
-						victim = a;
+					if (masked(c) || fixedOverlapSegs(c, r)) continue;
+					var cost = 0.0;
+					var ok = true;
+					conflicting(c, r, seen, conflicts);
+					for (a in conflicts) {
+						if (a >= noSpillFrom) {
+							ok = false;
+							break;
+						}
+						cost += weight[a] / len[a];
+					}
+					if (ok && cost < bestCost) {
+						best = c;
+						bestCost = cost;
+					}
 				}
-				if (victim >= 0 && (end[victim] > re || r >= noSpillFrom)) {
-					choice = assigned[victim];
-					assigned[victim] = -1;
-					spilled.push(victim);
-				} else {
+				var evictPassing = false;
+				if (best < 0 && r >= noSpillFrom) {
+					// spill code in a slow path: a register held by values
+					// passing through it is taken from them
+					for (c in regs) {
+						if ((c < 32 ? ptLo[r] >> c : ptHi[r] >> (c - 32)) & 1 != 0 || fixedOverlapSegs(c, r)) continue;
+						var ok = true;
+						conflicting(c, r, seen, conflicts);
+						coldBusy(r, c, conflicts);
+						for (a in conflicts)
+							if (a >= noSpillFrom) ok = false;
+						if (ok) {
+							best = c;
+							evictPassing = true;
+							break;
+						}
+					}
+				}
+				if (best < 0) {
 					if (r >= noSpillFrom) throw "hxmc: out of registers in " + f.name;
 					spilled.push(r);
 					continue;
 				}
+				conflicting(best, r, seen, conflicts);
+				if (evictPassing) coldBusy(r, best, conflicts);
+				for (a in conflicts) {
+					assigned[a] = -1;
+					spilled.push(a);
+					seen[a] = -2; // evicted: its ranges leave the register
+				}
+				var of = s.oFrom[best], ot = s.oTo[best], oo = s.oOwn[best];
+				var k = 0;
+				for (x in 0...of.length)
+					if (seen[oo[x]] != -2) {
+						of[k] = of[x];
+						ot[k] = ot[x];
+						oo[k] = oo[x];
+						k++;
+					}
+				of.resize(k);
+				ot.resize(k);
+				oo.resize(k);
+				choice = best;
 			}
 			assigned[r] = choice;
-			holder[choice] = r;
-		}
-		while (ci < nc) {
-			snapshot(coldCalls[ci], holder);
-			ci++;
+			occupy(choice, r);
 		}
 		return spilled;
 	}
 
-	var coldCalls:Array<Int> = []; // positions of the calls in cold blocks (the last round's)
-	// per slow-path call (in order): the physical registers held by values
-	// live across it, from coldSavedAt[k] to coldSavedAt[k + 1]
-	var coldSaved:Array<Int> = [];
-	var coldSavedAt:Array<Int> = [];
+	var busyLo = 0;
+	var busyHi = 0;
 
-	function snapshot(p:Int, holder:Array<Int>) {
-		coldSavedAt.push(coldSaved.length);
-		for (c in 0...NPHYS) {
-			var h = holder[c];
-			if (h >= 0 && start[h] < p && end[h] > p + 1) coldSaved.push(c);
+	// the registers held by values passing through the slow-path blocks r
+	// has ranges in (busyLo/busyHi); with want >= 0, the values holding
+	// register want there, added to out
+	function coldBusy(r:Int, want:Int, out:Array<Int>) {
+		busyLo = 0;
+		busyHi = 0;
+		var pbs = s.ptBlocks;
+		var npb = pbs.length;
+		if (npb == 0) return;
+		var blocks = f.blocks;
+		if (end[r] < blocks[pbs[0]].from) return;
+		var ptAt = s.ptAt, ptVal = s.ptVal;
+		var j = segAt[r];
+		for (k in j...j + segN[r]) {
+			var x = segFrom[k], y = segTo[k];
+			// the first of those blocks ending at or after x
+			var lo = 0, hi = npb;
+			while (lo < hi) {
+				var mid = (lo + hi) >> 1;
+				if (blocks[pbs[mid]].to < x) lo = mid + 1 else hi = mid;
+			}
+			while (lo < npb && blocks[pbs[lo]].from <= y) {
+				var bi = pbs[lo];
+				for (q in ptAt[bi]...ptAt[bi + 1]) {
+					var v = ptVal[q];
+					var a = assigned[v];
+					if (a < 0 || v == r) continue;
+					if (a < 32) busyLo |= 1 << a else busyHi |= 1 << (a - 32);
+					if (a == want && out.indexOf(v) < 0) out.push(v);
+				}
+				lo++;
+			}
 		}
 	}
+
+	// the first range of physical register c ending at or after x
+	inline function firstEnding(ot:Array<Int>, x:Int):Int {
+		var lo = 0, hi = ot.length;
+		while (lo < hi) {
+			var mid = (lo + hi) >> 1;
+			if (ot[mid] < x) lo = mid + 1 else hi = mid;
+		}
+		return lo;
+	}
+
+	// whether physical register c can take interval r: no fixed range and no
+	// range of an interval given it overlaps r's
+	function free(c:Int, r:Int):Bool {
+		if (fixedOverlapSegs(c, r)) return false;
+		var of = s.oFrom[c], ot = s.oTo[c];
+		var no = of.length;
+		if (no == 0) return true;
+		var j = segAt[r];
+		// common: everything there ends before r starts
+		if (ot[no - 1] < segFrom[j]) return true;
+		for (k in j...j + segN[r]) {
+			var x = segFrom[k], y = segTo[k];
+			var i = firstEnding(ot, x);
+			if (i < no && of[i] <= y) return false;
+		}
+		return true;
+	}
+
+	// the intervals given physical register c that overlap r, into out
+	var stamp = 0;
+
+	function conflicting(c:Int, r:Int, seen:Array<Int>, out:Array<Int>) {
+		out.resize(0);
+		var st = ++stamp;
+		var of = s.oFrom[c], ot = s.oTo[c], oo = s.oOwn[c];
+		var no = of.length;
+		var j = segAt[r];
+		for (k in j...j + segN[r]) {
+			var x = segFrom[k], y = segTo[k];
+			var i = firstEnding(ot, x);
+			while (i < no && of[i] <= y) {
+				var a = oo[i];
+				if (seen[a] != st) {
+					seen[a] = st;
+					out.push(a);
+				}
+				i++;
+			}
+		}
+	}
+
+	// gives r's ranges to physical register c (merged into its ordered list)
+	function occupy(c:Int, r:Int) {
+		var of = s.oFrom[c], ot = s.oTo[c], oo = s.oOwn[c];
+		var j = segAt[r], je = j + segN[r];
+		var no = of.length;
+		if (no == 0 || of[no - 1] < segFrom[j]) {
+			for (k in j...je) {
+				of.push(segFrom[k]);
+				ot.push(segTo[k]);
+				oo.push(r);
+			}
+			return;
+		}
+		// the ranges after r's first one move up: merged with r's from there
+		var lo = 0, hi = no, x0 = segFrom[j];
+		while (lo < hi) {
+			var mid = (lo + hi) >> 1;
+			if (of[mid] < x0) lo = mid + 1 else hi = mid;
+		}
+		var i0 = lo;
+		var nt = no - i0;
+		var mf = s.mFrom, mt = s.mTo, mo = s.mOwn;
+		if (mf.length < nt) {
+			mf.resize(nt);
+			mt.resize(nt);
+			mo.resize(nt);
+		}
+		for (q in 0...nt) {
+			mf[q] = of[i0 + q];
+			mt[q] = ot[i0 + q];
+			mo[q] = oo[i0 + q];
+		}
+		for (_ in j...je) {
+			of.push(0);
+			ot.push(0);
+			oo.push(0);
+		}
+		var w = i0, i = 0, k = j;
+		while (i < nt || k < je) {
+			if (k >= je || i < nt && mf[i] < segFrom[k]) {
+				of[w] = mf[i];
+				ot[w] = mt[i];
+				oo[w] = mo[i];
+				i++;
+			} else {
+				of[w] = segFrom[k];
+				ot[w] = segTo[k];
+				oo[w] = r;
+				k++;
+			}
+			w++;
+		}
+	}
+
+	// whether intervals a and r overlap (r starts after a: a's ranges that
+	// end before r starts are skipped by a binary search)
+	function overlaps(a:Int, r:Int):Bool {
+		var i = segAt[a], ie = i + segN[a], j = segAt[r], je = j + segN[r];
+		var rs = segFrom[j];
+		if (ie - i > 4) {
+			var hi = ie;
+			while (i < hi) {
+				var mid = (i + hi) >> 1;
+				if (segTo[mid] < rs) i = mid + 1 else hi = mid;
+			}
+		}
+		while (i < ie && j < je) {
+			if (segTo[i] < segFrom[j]) i++ else if (segTo[j] < segFrom[i]) j++ else return true;
+		}
+		return false;
+	}
+
+	function fixedOverlapSegs(c:Int, r:Int):Bool {
+		if (fixedFrom[c].length == 0) return false;
+		var j = segAt[r];
+		for (k in j...j + segN[r])
+			if (fixedOverlap(c, segFrom[k], segTo[k])) return true;
+		return false;
+	}
+
+	var coldCalls:Array<Int> = []; // positions of the calls in cold blocks (the last round's)
 
 	// Saves the caller-saved registers live across each slow-path call into
 	// frame slots before it and reloads them after it (allocate let values
@@ -367,7 +778,37 @@ class Regalloc {
 	function coldSaves() {
 		var nc = coldCalls.length;
 		if (nc == 0) return;
-		coldSavedAt.push(coldSaved.length);
+		// per call: the registers held by values live across it (a range
+		// starting before and ending after it), bucketed by call
+		var pairCall:Array<Int> = [], pairReg:Array<Int> = [];
+		for (r in NPHYS...f.nregs) {
+			var a = assigned[r];
+			if (a < 0 || end[r] < 0) continue;
+			for (k in segAt[r]...segAt[r] + segN[r]) {
+				var x = segFrom[k], y = segTo[k];
+				if (y - x < 3) continue;
+				// the first call after x
+				var lo = 0, hi = nc;
+				while (lo < hi) {
+					var mid = (lo + hi) >> 1;
+					if (coldCalls[mid] <= x) lo = mid + 1 else hi = mid;
+				}
+				while (lo < nc && coldCalls[lo] + 1 < y) {
+					pairCall.push(lo);
+					pairReg.push(a);
+					lo++;
+				}
+			}
+		}
+		var at = [for (_ in 0...nc + 1) 0];
+		for (c in pairCall)
+			at[c + 1]++;
+		for (k in 0...nc)
+			at[k + 1] += at[k];
+		var saved = [for (_ in 0...pairCall.length) 0];
+		var fill = at.copy();
+		for (k in 0...pairCall.length)
+			saved[fill[pairCall[k]]++] = pairReg[k];
 		var slotOf = [for (_ in 0...NPHYS) -1];
 		var defs = s.defs, uses = s.uses;
 		var clobbered = [for (_ in 0...NPHYS) -1]; // stamped by call
@@ -386,8 +827,17 @@ class Regalloc {
 						if (d >= 0 && d < NPHYS && !s.isResult[d]) clobbered[d] = ci;
 					}
 					var after = [];
-					for (k in coldSavedAt[ci]...coldSavedAt[ci + 1]) {
-						var a = coldSaved[k];
+					var ptAt = s.ptAt, ptVal = s.ptVal;
+					for (q in ptAt[b.id]...ptAt[b.id + 1]) {
+						var a = assigned[ptVal[q]];
+						if (a < 0 || clobbered[a] != ci) continue;
+						clobbered[a] = -1; // saved once
+						if (slotOf[a] < 0) slotOf[a] = f.slot(8, 8);
+						out.push(t.spillStore(slotOf[a], a, a >= f.fprBase));
+						after.push(t.spillLoad(a, slotOf[a], a >= f.fprBase));
+					}
+					for (k in at[ci]...at[ci + 1]) {
+						var a = saved[k];
 						if (clobbered[a] != ci) continue;
 						if (slotOf[a] < 0) slotOf[a] = f.slot(8, 8);
 						out.push(t.spillStore(slotOf[a], a, a >= f.fprBase));
