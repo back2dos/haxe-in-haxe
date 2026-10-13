@@ -25,6 +25,28 @@ class Main {
 			MkRt.main(args);
 			return;
 		}
+		// resident: the port's compilation server (`hxmc --server --wait <port>`;
+		// builds come with `--connect <port>` and name their output with
+		// -D hxmc.out=<path>)
+		if (args[0] == "--server") {
+			args.shift();
+			if (Sys.getEnv("RT_OLD_MB") == null && Sys.getEnv("HXMC_GC_DEFAULTS") != "0") {
+				Sys.putEnv("RT_OLD_MB", "4096");
+				if (Sys.getEnv("RT_MINOR_KB") == null) Sys.putEnv("RT_MINOR_KB", "32768");
+				Sys.exit(Sys.command(Sys.programPath(), ["--server"].concat(args)));
+			}
+			compiler.Compiler.generateHook = function(com) {
+				try {
+					start = haxe.Timer.stamp();
+					var o = core.Define.rawDefined(com.defines, "hxmc.out") ? core.Define.rawDefinedValue(com.defines, "hxmc.out") : null;
+					if (o == null) throw "-D hxmc.out=<path> names the output of a server build";
+					generate(com, o);
+				} catch (e:Dynamic) {
+					Sys.stderr().writeString("hxmc: " + Std.string(e) + "\n" + haxe.CallStack.toString(haxe.CallStack.exceptionStack()) + "\n");
+				}
+			}
+			Sys.exit(haxe.Main.run(args));
+		}
 		var out = args.shift();
 		var failed = null;
 		var hybrid = Sys.getEnv("HXMC_HYBRID") == "1" || args.indexOf("hxmc.hybrid") >= 0;
@@ -46,19 +68,7 @@ class Main {
 		}
 		compiler.Compiler.generateHook = function(com) {
 			try {
-				var path = com.main.mainPath;
-				var mainClass = null;
-				for (t in com.types)
-					switch t {
-						case TClassDecl(c) if (c.clPath.name == path.name && c.clPath.pack.join(".") == path.pack.join(".")):
-							mainClass = c;
-						case _:
-					}
-				var opts = Options.read(com);
-				var t0 = haxe.Timer.stamp();
-				var prog = backend.Lower.program(mainClass, com.types, com.basic);
-				if (opts.stats) Sys.println('hxmc: lowering ${Std.int((haxe.Timer.stamp() - t0) * 1000)} ms (since start ${Std.int((t0 - start) * 1000)} ms)');
-				Driver.run(prog, out, opts);
+				generate(com, out);
 			} catch (e:Dynamic) {
 				failed = Std.string(e) + "\n" + haxe.CallStack.toString(haxe.CallStack.exceptionStack());
 			}
@@ -70,5 +80,21 @@ class Main {
 		}
 		if (code == 0) UpToDate.record(key, out);
 		Sys.exit(code);
+	}
+
+	static function generate(com:context.Common.CommonContext, out:String) {
+		var path = com.main.mainPath;
+		var mainClass = null;
+		for (t in com.types)
+			switch t {
+				case TClassDecl(c) if (c.clPath.name == path.name && c.clPath.pack.join(".") == path.pack.join(".")):
+					mainClass = c;
+				case _:
+			}
+		var opts = Options.read(com);
+		var t0 = haxe.Timer.stamp();
+		var prog = backend.Lower.program(mainClass, com.types, com.basic);
+		if (opts.stats) Sys.println('hxmc: lowering ${Std.int((haxe.Timer.stamp() - t0) * 1000)} ms (since start ${Std.int((t0 - start) * 1000)} ms)');
+		Driver.run(prog, out, opts);
 	}
 }
