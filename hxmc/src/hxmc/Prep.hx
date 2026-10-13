@@ -2,6 +2,7 @@ package hxmc;
 
 import backend.EmitC;
 import backend.Ir;
+import backend.EmitC.Refs;
 
 // The program-wide facts hxmc shares with hxc's C emitter, computed by
 // EmitC.prepare exactly as for C: no-GC functions, cold sites, type indices
@@ -17,7 +18,28 @@ class Prep {
 		this.p = p;
 		e = new EmitC(p);
 		e.single = false;
-		e.prepare();
+		// EmitC.prepare without writing the C of every function
+		for (f in p.funcs)
+			e.byCName.set(e.cname(f), f);
+		e.findNoGc();
+		e.markCold();
+		e.assignTypes();
+		e.collectNames();
+		e.assignNames();
+	}
+
+	// the C of a function (development builds: the functions not compiled natively)
+	public function cBody(f:FuncInfo):{text:String, refs:Refs} {
+		var r = e.bodies.get(f);
+		if (r != null) return r;
+		var saved = e.b;
+		e.b = new StringBuf();
+		e.refs = new Refs();
+		e.func(f);
+		r = {text: e.b.toString(), refs: e.refs};
+		e.bodies.set(f, r);
+		e.b = saved;
+		return r;
 	}
 
 	public inline function id(name:String):Int

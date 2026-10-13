@@ -40,14 +40,31 @@ def newest(paths):
     return t
 
 
-def case_list(names):
+# programs of the repository used as cases: name -> (class path, main class)
+SUITE = {
+    "hxc-bench": ("hxc/test", "Bench"),
+    "hxc-exc": ("hxc/test/exc", "Exc"),
+    "hxc-regress": ("hxc/test/regress", "Regress"),
+}
+
+
+def case_list(names, fuzz):
     cases = []
-    for n in names or sorted(p.stem for p in CASES.glob("*.hx")):
-        if ":" in n:
+    if not names:
+        names = sorted(p.stem for p in CASES.glob("*.hx")) + sorted(SUITE)
+    for n in names:
+        if n in SUITE:
+            cp, main = SUITE[n]
+            cases.append((n, [ROOT / cp], main))
+        elif ":" in n:
             d, main = n.split(":")
-            cases.append((main, [Path(d).resolve()], main))
+            cases.append((Path(d).name + "-" + main, [Path(d).resolve()], main))
         else:
             cases.append((n, [CASES], n))
+    if fuzz:
+        for d in sorted(Path(fuzz).iterdir()):
+            if (d / "Main.hx").exists():
+                cases.append(("fuzz-" + d.name, [d.resolve()], "Main"))
     return cases
 
 
@@ -58,7 +75,7 @@ def run_case(name, cps, main, args):
     src_t = newest([cp / (main.replace(".", "/") + ".hx") for cp in cps if (cp / (main.replace(".", "/") + ".hx")).exists()] or cps)
     t0 = time.perf_counter()
     if not hxb.exists() or hxb.stat().st_mtime < src_t:
-        cmd = [HAXE, "-cp", ROOT / "bin/hxc/std"] + sum([["-cp", c] for c in cps], []) + ["-main", main, "--custom-target", f"hxc={d}/x",
+        cmd = [HAXE] + sum([["-cp", c] for c in cps], []) + ["-cp", ROOT / "bin/hxc/std", "-main", main, "--custom-target", f"hxc={d}/x",
                "--hxb", hxb, "-D", "disable-parallelism", "--no-output"]
         code, o, e = sh(cmd)
         if code != 0:
@@ -74,7 +91,7 @@ def run_case(name, cps, main, args):
         if code != 0:
             return name, "hxc-cc-fail", (o + e)[-1500:], None
         code, o, e = sh([d / "c.bin"], cwd=d)
-        expected.write_text(f"exit {code}\n" + o)
+        expected.write_bytes((f"exit {code}\n" + o).encode())
     env = dict(ENV, HXMC_HYBRID="1", HXMC_RT=str(ROOT / "bin/hxmc/rt-dev"), HXMC_STATS="1", HXMC_RT_INCLUDE=str(ROOT / "hxc/rt"))
     code, o, e = sh([HXMC, d / "m", "--hxb-lib", hxb, "-main", main, "--custom-target", "hxc", "-D", "disable-parallelism"], env=env)
     m = re.search(r"(\d+)/(\d+) functions native", o)
@@ -87,8 +104,8 @@ def run_case(name, cps, main, args):
     except subprocess.TimeoutExpired:
         return name, "timeout", "", stats
     got = f"exit {code}\n" + o
-    if got != expected.read_text():
-        (d / "got.txt").write_text(got + e)
+    if got.encode() != expected.read_bytes():
+        (d / "got.txt").write_bytes((got + e).encode())
         return name, "differs", f"diff {expected} {d / 'got.txt'}\n" + e[-800:], stats
     return name, "ok", f"{time.perf_counter() - t0:.1f}s", stats
 
@@ -97,9 +114,10 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("-j", type=int, default=os.cpu_count() or 4)
     ap.add_argument("-v", action="store_true", help="print the details of failures")
+    ap.add_argument("--fuzz", help="also every program of this directory (written by bin/fuzz/fuzz --emit)")
     ap.add_argument("cases", nargs="*")
     a = ap.parse_args()
-    cases = case_list(a.cases)
+    cases = case_list(a.cases, a.fuzz)
     t = time.perf_counter()
     nat = tot = 0
     bad = 0

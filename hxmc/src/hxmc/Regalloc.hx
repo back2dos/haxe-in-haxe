@@ -65,60 +65,29 @@ class Regalloc {
 			b.to = pos;
 			pos += 2;
 		}
-		// liveness of virtual registers
-		var useB = [], defB = [];
-		for (b in f.blocks) {
-			var u = new Bits(n), d = new Bits(n);
-			for (i in b.ins) {
-				defs.resize(0);
-				uses.resize(0);
-				t.defsUses(i, defs, uses);
-				for (r in uses)
-					if (r >= 32 && !d.get(r)) u.set(r);
-				for (r in defs)
-					if (r >= 32) d.set(r);
-			}
-			useB.push(u);
-			defB.push(d);
-			b.liveIn = new Bits(n);
-			b.liveOut = new Bits(n);
-		}
-		var changed = true;
-		while (changed) {
-			changed = false;
-			var k = f.blocks.length;
-			while (k-- > 0) {
-				var b = f.blocks[k];
-				for (s in b.succs)
-					b.liveOut.union(s.liveIn);
-				// in = use | (out & ~def)
-				var inn = b.liveIn;
-				var o = b.liveOut.w, u = useB[k].w, d = defB[k].w;
-				for (j in 0...inn.w.length) {
-					var v = u[j] | (o[j] & ~d[j]);
-					if (v != inn.w[j]) {
-						inn.w[j] = v;
-						changed = true;
-					}
-				}
-			}
-		}
-		// intervals and fixed ranges
+		// intervals: per virtual register its first and last position, from
+		// its definitions and uses, extended over the blocks it is live
+		// across (found by walking back from each use to the definitions)
 		start = [for (_ in 0...n) 0x7fffffff];
 		end = [for (_ in 0...n) -1];
 		fixedFrom = [for (_ in 0...32) []];
 		fixedTo = [for (_ in 0...32) []];
 		var openFixed = [for (_ in 0...32) -1];
-		var calls:Array<Int> = [];
-		for (bi in 0...f.blocks.length) {
+		var nb = f.blocks.length;
+		for (bi in 0...nb)
+			f.blocks[bi].id = bi;
+		// per register: the blocks with a use not preceded by a definition in the block (upward-exposed)
+		var exposedHead = [for (_ in 0...n) -1];
+		var exposedBlock:Array<Int> = [], exposedNext:Array<Int> = [];
+		// per block and register: defined in the block (stamped by block)
+		var defStamp = [for (_ in 0...n) -1];
+		var defsIn:Array<Array<Int>> = [];
+		for (bi in 0...nb) {
 			var b = f.blocks[bi];
-			for (r in 32...n) {
-				if (b.liveIn.get(r) && start[r] > b.from) start[r] = b.from;
-				if (b.liveOut.get(r) && end[r] < b.to) end[r] = b.to;
-			}
 			for (k in 0...32)
 				openFixed[k] = -1;
 			var p = b.from;
+			var dl = [];
 			for (i in b.ins) {
 				defs.resize(0);
 				uses.resize(0);
@@ -127,6 +96,14 @@ class Regalloc {
 					if (r >= 32) {
 						if (end[r] < p) end[r] = p;
 						if (start[r] > p) start[r] = p;
+						if (defStamp[r] != bi) {
+							// the first exposed use in this block: record once
+							if (exposedHead[r] < 0 || exposedBlock[exposedHead[r]] != bi) {
+								exposedBlock.push(bi);
+								exposedNext.push(exposedHead[r]);
+								exposedHead[r] = exposedBlock.length - 1;
+							}
+						}
 					} else if (r >= 0) {
 						var from = openFixed[r] >= 0 ? openFixed[r] : b.from;
 						addFixed(r, from, p);
@@ -136,12 +113,58 @@ class Regalloc {
 					if (r >= 32) {
 						if (start[r] > p + 1) start[r] = p + 1;
 						if (end[r] < p + 1) end[r] = p + 1;
+						if (defStamp[r] != bi) {
+							defStamp[r] = bi;
+							dl.push(r);
+						}
 					} else if (r >= 0) {
 						openFixed[r] = p + 1;
 						addFixed(r, p + 1, p + 1);
 					}
 				}
 				p += 2;
+			}
+			defsIn.push(dl);
+		}
+		// which blocks define each register
+		var defHead = [for (_ in 0...n) -1];
+		var defBlock:Array<Int> = [], defNext:Array<Int> = [];
+		for (bi in 0...nb)
+			for (r in defsIn[bi]) {
+				defBlock.push(bi);
+				defNext.push(defHead[r]);
+				defHead[r] = defBlock.length - 1;
+			}
+		var defines = [for (_ in 0...nb) -1]; // stamped by register
+		var liveInSeen = [for (_ in 0...nb) -1];
+		var liveOutSeen = [for (_ in 0...nb) -1];
+		var work:Array<Int> = [];
+		for (r in 32...n) {
+			var e = exposedHead[r];
+			if (e < 0) continue;
+			var d = defHead[r];
+			while (d >= 0) {
+				defines[defBlock[d]] = r;
+				d = defNext[d];
+			}
+			while (e >= 0) {
+				work.push(exposedBlock[e]);
+				e = exposedNext[e];
+			}
+			while (work.length > 0) {
+				var bi = work.pop();
+				if (liveInSeen[bi] == r) continue;
+				liveInSeen[bi] = r;
+				var b = f.blocks[bi];
+				if (start[r] > b.from) start[r] = b.from;
+				for (pr in b.preds) {
+					if (liveOutSeen[pr.id] != r) {
+						liveOutSeen[pr.id] = r;
+						if (end[r] < pr.to) end[r] = pr.to;
+						if (start[r] > pr.to) start[r] = pr.to;
+					}
+					if (defines[pr.id] != r) work.push(pr.id);
+				}
 			}
 		}
 		for (r in 0...32)
@@ -151,6 +174,8 @@ class Regalloc {
 		order.sort((a, b) -> start[a] != start[b] ? start[a] - start[b] : a - b);
 		assigned = [for (r in 0...n) r < 32 ? r : -1];
 		var active:Array<Int> = [];
+		var busy = [for (_ in 0...32) 0];
+		var busyStamp = 0;
 		var spilled = [];
 		var spillSet = new Map<Int, Bool>();
 		for (r in order) {
@@ -161,18 +186,18 @@ class Regalloc {
 			}
 			var float = f.floatReg(r);
 			var regs = float ? t.fprs : t.gprs;
-			var busy = new Map<Int, Bool>();
+			busyStamp++;
 			for (a in active)
-				busy.set(assigned[a], true);
+				busy[assigned[a]] = busyStamp;
 			var choice = -1;
 			var h = f.hints.get(r);
 			if (h != null) {
 				var hr = h < 32 ? h : assigned[h];
-				if (hr >= 0 && !busy.exists(hr) && regs.indexOf(hr) >= 0 && !fixedOverlap(hr, start[r], end[r])) choice = hr;
+				if (hr >= 0 && busy[hr] != busyStamp && regs.indexOf(hr) >= 0 && !fixedOverlap(hr, start[r], end[r])) choice = hr;
 			}
 			if (choice < 0)
 				for (c in regs)
-					if (!busy.exists(c) && !fixedOverlap(c, start[r], end[r])) {
+					if (busy[c] != busyStamp && !fixedOverlap(c, start[r], end[r])) {
 						choice = c;
 						break;
 					}

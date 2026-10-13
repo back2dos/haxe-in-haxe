@@ -679,9 +679,12 @@ class Asm {
 		var map = (p:Int) -> p < start ? p : p - removed(p);
 		for (i in 0...labels.length)
 			if (labels[i] >= 0) labels[i] = map(labels[i]);
-		if (sec != null)
-			for (r in sec.relocs)
-				if (r.offset >= start) r.offset = map(r.offset);
+		if (sec != null) {
+			// the relocations of this function are the last ones
+			var k = sec.relocs.length;
+			while (k-- > 0 && sec.relocs[k].offset >= start)
+				sec.relocs[k].offset = map(sec.relocs[k].offset);
+		}
 		for (r in labelRefs)
 			r.at = map(r.at);
 		fixups = [];

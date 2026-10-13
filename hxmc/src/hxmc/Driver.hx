@@ -22,22 +22,34 @@ class Driver {
 		var examples = new Map<String, String>();
 		var count = 0;
 		var dumpSet = o.dump == null ? null : [for (n in o.dump.split(",")) n => true];
+		var tm = [0.0, 0.0, 0.0, 0.0, 0.0];
+		var slow:Array<{name:String, t:Float}> = [];
 		for (fn in prog.funcs) {
 			var name = prep.funcSym(fn);
 			if (o.skip.exists(name) || (o.only != null && !o.only.exists(name))) continue;
 			count++;
 			var mf:MFunc = null;
 			try {
+				var s0 = haxe.Timer.stamp();
 				var mb = new MirBuild(prep, abi, fn);
 				mb.icSym = name + "__ic";
 				mf = mb.build();
 				var layout = Layout.order(mf);
+				var s1 = haxe.Timer.stamp();
 				var isel = new hxmc.x64.Isel();
 				var lf = isel.select(mf, layout);
+				var s2 = haxe.Timer.stamp();
 				var ra = new Regalloc(lf, isel);
 				ra.run();
+				var s3 = haxe.Timer.stamp();
 				if (dumpSet != null && dumpSet.exists(name)) Sys.println(mf.dump());
 				emit.func(lf, ra.usedRegs, true);
+				var s4 = haxe.Timer.stamp();
+				tm[0] += s1 - s0;
+				tm[1] += s2 - s1;
+				tm[2] += s3 - s2;
+				tm[3] += s4 - s3;
+				if (o.stats && s4 - s0 > 0.05) slow.push({name: name + " (" + mf.vals.length + " values, " + mf.blocks.length + " blocks)", t: s4 - s0});
 				if (mb.icaches > 0) {
 					bss.bssSize = (bss.bssSize + 15) & ~15;
 					obj.define(mb.icSym, bss, bss.bssSize, Abi.IC_SIZE * mb.icaches, false);
@@ -59,11 +71,14 @@ class Driver {
 			ks.sort((a, b) -> reasons.get(b) - reasons.get(a));
 			for (k in ks)
 				Sys.println('  ${reasons.get(k)}\t$k\t(${examples.get(k)})');
-			Sys.println('hxmc: prepare ${ms(t1 - t0)}, codegen ${ms(t2 - t1)}');
+			Sys.println('hxmc: prepare ${ms(t1 - t0)}, codegen ${ms(t2 - t1)} (mir ${ms(tm[0])}, isel ${ms(tm[1])}, regalloc ${ms(tm[2])}, emit ${ms(tm[3])})');
+			slow.sort((a, b) -> a.t < b.t ? 1 : -1);
+			for (x in slow.slice(0, 10))
+				Sys.println('  ${ms(x.t)}\t${x.name}');
 		}
 		if (!o.hybrid) throw "hxmc: only development (hybrid) builds so far: -D hxmc.hybrid";
 		sys.io.File.saveBytes(out + ".o", ElfWriter.write(obj, false));
-		sys.io.File.saveContent(out + ".c", CWriter.write(prep.e, f -> native.exists(f), true));
+		sys.io.File.saveContent(out + ".c", CWriter.write(prep, f -> native.exists(f), true));
 		var rt = o.rtDir;
 		if (rt == null) throw "hxmc: HXMC_RT (the runtime objects) is not set";
 		var objs = [for (f in sys.FileSystem.readDirectory(rt)) if (StringTools.endsWith(f, ".o")) rt + "/" + f];
