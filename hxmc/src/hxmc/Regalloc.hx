@@ -18,6 +18,8 @@ interface RegTarget {
 	// calls: the registers that hold their results (the other registers a
 	// call defines are clobbered)
 	function isCall(i:LIns):Bool;
+	// the jumps that end a block
+	function isBranch(i:LIns):Bool;
 	var callResults(default, null):Array<Int>;
 }
 
@@ -517,7 +519,7 @@ class Regalloc {
 			// registers r cannot take: fixed in the slow paths it passes
 			// through, held by values passing through the slow paths it is in
 			coldBusy(r, -1, null);
-			var mlo = ptLo[r] | busyLo, mhi = ptHi[r] | busyHi;
+			var mlo = busyLo, mhi = busyHi;
 			inline function masked(c:Int):Bool
 				return (c < 32 ? mlo >> c : mhi >> (c - 32)) & 1 != 0;
 			var h = f.hint(r);
@@ -814,43 +816,80 @@ class Regalloc {
 		var slotOf = [for (_ in 0...NPHYS) -1];
 		var defs = s.defs, uses = s.uses;
 		var clobbered = [for (_ in 0...NPHYS) -1]; // stamped by call
+		var ptAt = s.ptAt, ptVal = s.ptVal;
 		var ci = 0;
 		for (b in f.blocks) {
-			if (!b.cold || ci >= nc || coldCalls[ci] >= b.to) continue;
-			var out = [];
+			if (!b.cold) continue;
+			var c0 = ci;
+			while (ci < nc && coldCalls[ci] < b.to)
+				ci++;
+			var pt0 = ptAt[b.id], pt1 = ptAt[b.id + 1];
+			if (ci == c0 && pt0 == pt1) continue;
+			// what the block writes of the registers of values passing through
+			// it: its fixed registers and what its calls clobber; those values
+			// are saved at its start and restored before its branch
+			var clo = s.fixLo[b.id], chi = s.fixHi[b.id];
 			var p = b.from;
-			for (i in b.ins) {
-				if (ci < nc && coldCalls[ci] == p) {
+			var k = c0;
+			for (ins in b.ins) {
+				if (k < ci && coldCalls[k] == p) {
 					defs.n = 0;
 					uses.n = 0;
-					t.defsUses(i, defs, uses);
-					for (k in 0...defs.n) {
-						var d = defs.a[k];
-						if (d >= 0 && d < NPHYS && !s.isResult[d]) clobbered[d] = ci;
+					t.defsUses(ins, defs, uses);
+					for (q in 0...defs.n) {
+						var d = defs.a[q];
+						if (d >= 0 && d < NPHYS && !s.isResult[d]) {
+							if (d < 32) clo |= 1 << d else chi |= 1 << (d - 32);
+						}
+					}
+					k++;
+				}
+				p += 2;
+			}
+			var whole = [];
+			for (q in pt0...pt1) {
+				var a = assigned[ptVal[q]];
+				if (a < 0 || (a < 32 ? clo >> a : chi >> (a - 32)) & 1 == 0 || whole.indexOf(a) >= 0) continue;
+				whole.push(a);
+			}
+			var out = [];
+			for (a in whole) {
+				if (slotOf[a] < 0) slotOf[a] = f.slot(8, 8);
+				out.push(t.spillStore(slotOf[a], a, a >= f.fprBase));
+			}
+			// around each call: the values with ranges across it
+			p = b.from;
+			k = c0;
+			for (ins in b.ins) {
+				if (k < ci && coldCalls[k] == p) {
+					defs.n = 0;
+					uses.n = 0;
+					t.defsUses(ins, defs, uses);
+					for (q in 0...defs.n) {
+						var d = defs.a[q];
+						if (d >= 0 && d < NPHYS && !s.isResult[d]) clobbered[d] = k;
 					}
 					var after = [];
-					var ptAt = s.ptAt, ptVal = s.ptVal;
-					for (q in ptAt[b.id]...ptAt[b.id + 1]) {
-						var a = assigned[ptVal[q]];
-						if (a < 0 || clobbered[a] != ci) continue;
-						clobbered[a] = -1; // saved once
+					for (q in at[k]...at[k + 1]) {
+						var a = saved[q];
+						if (clobbered[a] != k || whole.indexOf(a) >= 0) continue;
 						if (slotOf[a] < 0) slotOf[a] = f.slot(8, 8);
 						out.push(t.spillStore(slotOf[a], a, a >= f.fprBase));
 						after.push(t.spillLoad(a, slotOf[a], a >= f.fprBase));
 					}
-					for (k in at[ci]...at[ci + 1]) {
-						var a = saved[k];
-						if (clobbered[a] != ci) continue;
-						if (slotOf[a] < 0) slotOf[a] = f.slot(8, 8);
-						out.push(t.spillStore(slotOf[a], a, a >= f.fprBase));
-						after.push(t.spillLoad(a, slotOf[a], a >= f.fprBase));
-					}
-					out.push(i);
+					out.push(ins);
 					for (x in after)
 						out.push(x);
-					ci++;
-				} else out.push(i);
+					k++;
+				} else out.push(ins);
 				p += 2;
+			}
+			if (whole.length > 0) {
+				var e = out.length;
+				while (e > 0 && t.isBranch(out[e - 1]))
+					e--;
+				var restores = [for (a in whole) t.spillLoad(a, slotOf[a], a >= f.fprBase)];
+				out = out.slice(0, e).concat(restores).concat(out.slice(e));
 			}
 			b.ins = out;
 		}

@@ -192,6 +192,9 @@ class Isel implements hxmc.Target.Selector {
 	public function isCall(i:LIns):Bool
 		return i.op == CALL;
 
+	public function isBranch(i:LIns):Bool
+		return i.op == JMP || i.op == JCC || i.op == JTABLE || i.op == UD2;
+
 	public function spillLoad(r:Int, slot:Int, float:Bool):LIns {
 		var i = new LIns(LOAD);
 		i.d = r;
