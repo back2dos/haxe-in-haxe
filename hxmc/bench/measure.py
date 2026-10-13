@@ -10,6 +10,8 @@ changes between the variants:
   tcc   the generated C by tcc (no optimization at all: a naive code generator)
   O1    clang -O1
   O2    clang -O2 (what hxmc must match)
+  hxmc  the case compiled by hxmc (bin/hxmc/hxmc, development build linked
+        with bin/hxmc/rt-dev: the runtime by clang -O2 with OS threads)
   O1ni  clang -O1 -fno-inline-functions: no inlining of Haxe functions
         (the runtime helpers marked inline still are)
 
@@ -99,7 +101,33 @@ def generate(case):
     return out / "prog_hxc", runcwd, runargs, time.perf_counter() - t
 
 
-def build(cdir, variant, rtobjs):
+HXMC = ROOT / "bin/hxmc/hxmc"
+
+
+def build_hxmc(cdir, case):
+    """The same program through HXB (written by the reference) and hxmc."""
+    d = cdir.parent
+    hxb = d / "prog.hxb.zip"
+    args, cwd = case_args(case)
+    run([str(ROOT / "haxe/haxe")] + args + ["-cp", str(ROOT / "bin/hxc/std"), "--custom-target", f"hxc={d}/x", "--hxb", str(hxb), "--no-output"],
+        cwd=cwd, env=case_env())
+    main = args[args.index("-main") + 1]
+    t = time.perf_counter()
+    env = dict(case_env(), HXMC_HYBRID="1", HXMC_RT=str(ROOT / "bin/hxmc/rt-dev"), HXMC_RT_INCLUDE=str(RT))
+    run([str(HXMC), str(d / "bin-hxmc"), "--hxb-lib", str(hxb), "-main", main, "--custom-target", "hxc", "-D", "disable-parallelism"], cwd=ROOT, env=env)
+    return d / "bin-hxmc", time.perf_counter() - t
+
+
+def case_args(case):
+    if case == "port":
+        return ["-cp", "src", "-main", "haxe.Main", "-cp", "hxc/js", "-D", "disable-parallelism"], ROOT
+    d, main, cps, defs = CASES[case]
+    return ["-cp", "."] + sum([["-cp", c] for c in cps], []) + ["-main", main] + sum([["-D", x] for x in defs], []), HB / "runner/cases" / d
+
+
+def build(cdir, variant, rtobjs, case):
+    if variant == "hxmc":
+        return build_hxmc(cdir, case)
     cc = VARIANTS[variant]
     od = cdir / f"obj-{variant}"
     od.mkdir(exist_ok=True)
@@ -129,7 +157,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("-n", type=int, default=3)
     ap.add_argument("-c", default=",".join(CASES))
-    ap.add_argument("-v", default=",".join(VARIANTS))
+    ap.add_argument("-v", default=",".join(list(VARIANTS) + ["hxmc"]))
     ap.add_argument("--json")
     a = ap.parse_args()
     rtobjs = runtime_objs()
@@ -143,7 +171,7 @@ def main():
         row = dict(results.get(case, {}), gen=round(gt, 2))
         for v in a.v.split(","):
             try:
-                exe, ct = build(cdir, v, rtobjs)
+                exe, ct = build(cdir, v, rtobjs, case)
                 rt = timed([str(exe)] + runargs, runcwd, a.n)
                 row[v] = {"compile": round(ct, 2), "run": round(rt, 3)}
                 print(f"{case:16} {v:4} C compile {ct:6.2f}s  run {rt:7.3f}s", flush=True)

@@ -6,6 +6,7 @@ class Options {
 	public var hybrid = false;
 	public var cc = "clang -O0";
 	public var rtDir:Null<String> = null;
+	public var rtObj:Null<String> = null; // the runtime object (default: <tool dir>/rt/<target>/rt.o)
 	public var stats = false;
 	public var only:Null<Map<String, Bool>> = null;
 	public var skip = new Map<String, Bool>();
@@ -13,6 +14,13 @@ class Options {
 	public var dump:Null<String> = null; // function names whose machine code is printed (HXMC_DUMP)
 
 	public function new() {}
+
+	// the directory of the hxmc binary (with a trailing slash)
+	public static function toolDir():String {
+		var p = Sys.programPath();
+		var d = haxe.io.Path.directory(p);
+		return d == "" ? "./" : haxe.io.Path.addTrailingSlash(d);
+	}
 
 	static function names(s:Null<String>):Null<Map<String, Bool>> {
 		if (s == null || s == "") return null;
@@ -32,6 +40,7 @@ class Options {
 		o.hybrid = def("hxmc.hybrid") != null || env("HXMC_HYBRID") == "1";
 		if (env("HXMC_CC") != null) o.cc = env("HXMC_CC");
 		o.rtDir = env("HXMC_RT");
+		o.rtObj = env("HXMC_RT_OBJ");
 		o.stats = env("HXMC_STATS") == "1";
 		o.verbose = def("hxmc.verbose") != null || env("HXMC_VERBOSE") == "1";
 		o.only = names(env("HXMC_ONLY"));

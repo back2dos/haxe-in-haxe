@@ -331,6 +331,31 @@ class MirBuild {
 
 	// ---- entry
 
+	// a function made up by hxmc (closure trampolines, main): `body` uses the
+	// instruction helpers (@:access) and must end every path with a return
+	public static function synthetic(p:Prep, abi:Abi, name:String, params:Array<MTy>, ret:MTy, body:(MirBuild, Array<Int>) -> Void):MFunc {
+		var mb = new MirBuild(p, abi, null);
+		var f = mb.f = new MFunc(name);
+		f.params = params;
+		f.ret = ret;
+		var entry = mb.newBlock();
+		f.entry = entry;
+		mb.seal(entry);
+		mb.cur = entry;
+		var ps = [];
+		for (i in 0...params.length) {
+			var pi = mb.mk(Param, params[i]);
+			pi.imm = i;
+			ps.push(mb.add(pi));
+		}
+		body(mb, ps);
+		for (b in f.blocks)
+			if (!b.sealed) mb.seal(b);
+		mb.prune();
+		mb.removeTrivialPhis();
+		return f;
+	}
+
 	public function build():MFunc {
 		f = new MFunc(p.funcSym(fn));
 		for (a in fn.args)

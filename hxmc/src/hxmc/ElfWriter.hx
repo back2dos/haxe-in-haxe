@@ -13,6 +13,7 @@ class ElfWriter {
 			case RCall32: 4;
 			case RGotPcRel32: 9;
 			case RAbs32: 10;
+			case RAbs32S: 11;
 			case RTpOff32: 23;
 			case _: throw "hxmc: relocation " + k + " on x86-64";
 		}
@@ -101,6 +102,12 @@ class ElfWriter {
 				case Tbss:
 					flags |= 1 | 0x400;
 					type = 8;
+				case InitArray:
+					flags |= 1;
+					type = 14;
+				case FiniArray:
+					flags |= 1;
+					type = 15;
 			}
 			out.align(s.align < 1 ? 1 : s.align);
 			var off = out.len;

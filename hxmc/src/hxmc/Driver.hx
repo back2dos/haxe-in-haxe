@@ -76,9 +76,32 @@ class Driver {
 			for (x in slow.slice(0, 10))
 				Sys.println('  ${ms(x.t)}\t${x.name}');
 		}
-		if (!o.hybrid) throw "hxmc: only development (hybrid) builds so far: -D hxmc.hybrid";
+		var compileMir = (mf:MFunc) -> {
+			var isel = new hxmc.x64.Isel();
+			var lf = isel.select(mf, Layout.order(mf));
+			var ra = new Regalloc(lf, isel);
+			ra.run();
+			emit.func(lf, ra.usedRegs, true);
+		};
+		if (!o.hybrid) {
+			new DataGen(prep, abi, obj, compileMir).run();
+			var t3 = haxe.Timer.stamp();
+			var rtPath = o.rtObj != null ? o.rtObj : Options.toolDir() + "rt/" + abi.name + "/rt.o";
+			if (!sys.FileSystem.exists(rtPath)) throw "hxmc: the runtime object " + rtPath + " is missing (hxmc/tools/mkrt.sh)";
+			var rt = ElfReader.read(sys.io.File.getBytes(rtPath));
+			var t4 = haxe.Timer.stamp();
+			var exe = new Link([obj, rt], abi.arm).link("_start");
+			sys.io.File.saveBytes(out, exe);
+			Sys.command("chmod", ["755", out]);
+			if (o.stats) Sys.println('hxmc: data ${ms(t3 - t2)}, runtime read ${ms(t4 - t3)}, link ${ms(haxe.Timer.stamp() - t4)}');
+			return;
+		}
+		// the C of the other functions (it may add string literals), then the data
+		for (f in prog.funcs)
+			if (!native.exists(f)) prep.cBody(f);
+		new DataGen(prep, abi, obj, compileMir).run();
 		sys.io.File.saveBytes(out + ".o", ElfWriter.write(obj, false));
-		sys.io.File.saveContent(out + ".c", CWriter.write(prep, f -> native.exists(f), true));
+		sys.io.File.saveContent(out + ".c", CWriter.write(prep, f -> native.exists(f), false));
 		var rt = o.rtDir;
 		if (rt == null) throw "hxmc: HXMC_RT (the runtime objects) is not set";
 		var objs = [for (f in sys.FileSystem.readDirectory(rt)) if (StringTools.endsWith(f, ".o")) rt + "/" + f];

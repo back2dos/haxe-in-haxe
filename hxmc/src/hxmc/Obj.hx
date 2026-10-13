@@ -10,12 +10,15 @@ enum abstract SecKind(Int) {
 	var Bss;
 	var Tdata;
 	var Tbss;
+	var InitArray;
+	var FiniArray;
 }
 
 // relocation kinds (each writer maps them to its format's types)
 enum abstract RelKind(Int) to Int {
 	var RAbs64; // S + A, 64 bits
 	var RAbs32; // S + A, 32 bits (zero-extended)
+	var RAbs32S; // S + A, 32 bits (sign-extended)
 	var RPc32; // S + A - P, 32 bits
 	var RCall32; // a call or jump: S + A - P (ELF PLT32)
 	var RTpOff32; // x86-64 local-exec TLS: S - TP + A, signed 32 bits (fs:disp32)
@@ -63,6 +66,8 @@ class Symbol {
 	public var global = true;
 	public var func = false;
 	public var tls = false;
+	public var weak = false;
+	public var abs = false; // an absolute value (offset), no section
 	public var index = -1; // writers
 
 	public function new(name) {
