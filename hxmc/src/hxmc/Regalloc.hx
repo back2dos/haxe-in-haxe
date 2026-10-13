@@ -96,6 +96,8 @@ class Scratch {
 	public var seen:Array<Int> = [];
 	public var conflicts:Array<Int> = [];
 	public var weight:Array<Float> = [];
+	// (not the allocator's: the Mir of the callees a module's functions inline, per worker)
+	public var templates = new haxe.ds.ObjectMap<backend.Ir.FuncInfo, Null<hxmc.Inline.Template>>();
 	// per physical register: whether a call leaves its result there; 1 for
 	// the allocatable float registers, 2 for the integer ones
 	public var isResult:Array<Bool> = [for (_ in 0...LFunc.NPHYS) false];

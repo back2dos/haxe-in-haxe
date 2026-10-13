@@ -95,6 +95,25 @@ class Driver {
 			var mb = new MirBuild(prep, abi, fn);
 			mb.icSym = name + "__ic";
 			var mf = mb.build();
+			if (o.opt) {
+				// to a depth (Fingerprint keys callers with their callees' callees)
+				var todo = mb.inlineSites;
+				for (_ in 0...Inline.DEPTH) {
+					if (todo.length == 0) break;
+					var sites = [];
+					for (s in todo) {
+						var t = ras.templates.get(s.fn);
+						if (!ras.templates.exists(s.fn)) {
+							var cb = new MirBuild(prep, abi, s.fn);
+							cb.icSym = prep.funcSym(s.fn) + "__ic";
+							t = try Inline.template(cb, cb.build()) catch (_:Unsupported) null;
+							ras.templates.set(s.fn, t);
+						}
+						if (t != null && s.fn != fn) sites.push({call: s.call, callee: t});
+					}
+					todo = Inline.run(mf, sites);
+				}
+			}
 			if (o.opt) new Opt(mf).run();
 			if (dumpSet != null && dumpSet.exists(name)) Sys.println(mf.dump());
 			var layout = Layout.order(mf);
@@ -179,7 +198,17 @@ class Driver {
 		return "hxmc|" + abi.name + "|" + (st == null ? "?" : st.size + "@" + st.mtime.getTime()) + "|";
 	}
 
+	// the functions that may be inlined (before the keys: they are part of them)
+	function inlineCandidates() {
+		if (!o.opt) return;
+		var m = new Map<FuncInfo, Bool>();
+		for (f in prep.p.funcs)
+			if (Inline.candidate(f)) m.set(f, true);
+		MirBuild.inlineCands = m;
+	}
+
 	function build(t0:Float, t1:Float) {
+		inlineCandidates();
 		var p = prep.p;
 		// modules in the order of their first function
 		var order:Array<String> = [];

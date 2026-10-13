@@ -15,6 +15,7 @@ import backend.Ir;
 class Fingerprint {
 	var b:StringBuf;
 	var prep:Prep;
+	var depth = 0;
 	// the literals without a symbol yet, with the one they get (literal,
 	// symbol, ...): Driver registers them once the threads are done
 	public var newStrings:Array<String> = [];
@@ -294,6 +295,13 @@ class Fingerprint {
 					ty(a.ty);
 				ty(f.ret);
 				args(xs);
+				// a callee that may be inlined: its body too (Inline)
+				if (depth < Inline.DEPTH && MirBuild.inlineCands != null && MirBuild.inlineCands.exists(f)) {
+					depth++;
+					b.add("I");
+					func(f, b);
+					depth--;
+				}
 			case ECallDispatch(sel, sig, xs):
 				b.add("cd");
 				b.add(prep.selectorSym(sel));

@@ -40,9 +40,17 @@ class Opt {
 	}
 
 	public function run() {
+		simplifyCfg();
 		var order = rpo();
 		if (order.length == 0) return;
 		repl = [for (i in 0...f.vals.length) i];
+		// copies are their operand
+		for (bb in f.blocks)
+			for (i in bb.ins)
+				if (i.op == Copy && !i.dead) {
+					repl[i.id] = i.a;
+					i.dead = true;
+				}
 		ver = [for (_ in 0...f.vals.length) 0];
 		// (not across setjmp: what a second return finds is in memory)
 		var twice = false;
@@ -56,6 +64,158 @@ class Opt {
 		}
 		rewrite();
 		dce();
+	}
+
+	// ---- control flow
+
+	// Jump threading of the blocks that only test a phi of booleans (what
+	// `a && b` and `a || b` become): [phi x, (const 0), c = cmp eq|ne x 0,
+	// br c], nothing of it used elsewhere. A predecessor whose value is a
+	// constant, or known from its own branch on the edge, jumps straight to
+	// the target; one that jumps here unconditionally branches on its value.
+	// Then a block that jumps to a block with no other predecessor absorbs it.
+	function simplifyCfg() {
+		var uses = [for (_ in f.vals) 0];
+		for (b in f.blocks)
+			for (i in b.ins) {
+				if (i.a >= 0) uses[i.a]++;
+				if (i.b >= 0) uses[i.b]++;
+				if (i.c >= 0) uses[i.c]++;
+				if (i.args != null)
+					for (x in i.args)
+						uses[x]++;
+			}
+		var vals = f.vals;
+		for (b in f.blocks.copy()) {
+			if (b == f.entry || b.handler) continue;
+			var ins = b.ins;
+			var n = ins.length;
+			if (n < 3 || n > 4) continue;
+			var phi = ins[0], c = ins[n - 2], br = ins[n - 1];
+			if (phi.op != Phi || br.op != Br || c.op != Cmp || br.a != c.id || uses[c.id] != 1 || uses[phi.id] != 1) continue;
+			if (c.imm != CEq && c.imm != CNe || c.a != phi.id) continue;
+			var z = vals[c.b];
+			if (z.op != Const || z.sym != null || z.imm != 0 || z.imm2 != 0) continue;
+			if (n == 4 && (ins[1] != z || uses[z.id] != 1)) continue;
+			// targets when x is zero / not zero
+			var onZero = c.imm == CEq ? br.targets[0] : br.targets[1];
+			var onSet = c.imm == CEq ? br.targets[1] : br.targets[0];
+			if (onZero == b || onSet == b || onZero == onSet || hasPhi(onZero) || hasPhi(onSet)) continue;
+			var k = 0;
+			while (k < b.preds.length) {
+				var p = b.preds[k];
+				var v = phi.args[k];
+				var t = p.term();
+				var known = -1; // 0: zero, 1: set
+				var x = vals[v];
+				if (x.op == Const && x.sym == null) known = x.imm == 0 && x.imm2 == 0 ? 0 : 1;
+				else if (t != null && t.op == Br && t.a == v && t.targets[0] != t.targets[1]) known = t.targets[1] == b ? 0 : 1;
+				if (known >= 0) {
+					retarget(p, b, known == 0 ? onZero : onSet);
+				} else if (t != null && t.op == Jmp && p.succs.length == 1) {
+					// branch on the value here
+					t.op = Br;
+					t.a = v;
+					t.targets = [onSet, onZero];
+					p.succs = [onSet, onZero];
+					onSet.preds.push(p);
+					onZero.preds.push(p);
+					uses[v]++;
+				} else {
+					k++;
+					continue;
+				}
+				// drop the edge into b
+				b.preds.splice(k, 1);
+				phi.args.splice(k, 1);
+			}
+		}
+		pruneBlocks();
+		// merge a block into its only predecessor that jumps to it
+		var changed = true;
+		while (changed) {
+			changed = false;
+			for (b in f.blocks) {
+				var t = b.term();
+				if (t == null || t.op != Jmp) continue;
+				var s = t.targets[0];
+				if (s == b || s == f.entry || s.preds.length != 1 || s.handler || s.cold != b.cold) continue;
+				// phis of a single predecessor are their operand
+				var rest = [];
+				for (i in s.ins)
+					if (i.op == Phi) {
+						i.op = Copy;
+						i.a = i.args[0];
+						i.args = null;
+						i.block = b;
+						rest.push(i);
+					} else {
+						i.block = b;
+						rest.push(i);
+					}
+				b.ins.pop();
+				for (i in rest)
+					b.ins.push(i);
+				b.succs = s.succs;
+				for (x in s.succs)
+					for (q in 0...x.preds.length)
+						if (x.preds[q] == s) x.preds[q] = b;
+				s.ins = [];
+				s.preds = [];
+				s.succs = [];
+				f.blocks.remove(s);
+				changed = true;
+				break;
+			}
+		}
+	}
+
+	static inline function hasPhi(b:MBlock):Bool
+		return b.ins.length > 0 && b.ins[0].op == Phi;
+
+	// p's edge to `from` goes to `to` (no phis there) instead
+	function retarget(p:MBlock, from:MBlock, to:MBlock) {
+		var t = p.term();
+		for (q in 0...t.targets.length)
+			if (t.targets[q] == from) t.targets[q] = to;
+		for (q in 0...p.succs.length)
+			if (p.succs[q] == from) p.succs[q] = to;
+		to.preds.push(p);
+		// a branch with both edges to one block is a jump
+		if (t.op == Br && t.targets[0] == t.targets[1]) {
+			t.op = Jmp;
+			t.a = -1;
+			t.targets = [to];
+			p.succs = [to];
+			to.preds.remove(p);
+		}
+	}
+
+	function pruneBlocks() {
+		var reach = new Map<Int, Bool>();
+		var stack = [f.entry];
+		reach.set(f.entry.id, true);
+		while (stack.length > 0) {
+			var b = stack.pop();
+			for (s in b.succs)
+				if (!reach.exists(s.id)) {
+					reach.set(s.id, true);
+					stack.push(s);
+				}
+		}
+		for (b in f.blocks) {
+			if (reach.exists(b.id)) continue;
+			for (s in b.succs) {
+				var k = s.preds.indexOf(b);
+				while (k >= 0) {
+					s.preds.splice(k, 1);
+					for (i in s.ins)
+						if (i.op == Phi) i.args.splice(k, 1);
+					k = s.preds.indexOf(b);
+				}
+			}
+		}
+		f.blocks = [for (b in f.blocks) if (reach.exists(b.id)) b];
 	}
 
 	function rpo():Array<MBlock> {

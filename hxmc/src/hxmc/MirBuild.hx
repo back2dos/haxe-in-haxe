@@ -34,6 +34,15 @@ class MirBuild {
 	var loops:Array<{cont:MBlock, brk:MBlock, tries:Int}> = [];
 	var tries:Array<Int> = []; // frame slots of the enclosing handlers
 	var coldList:Null<Array<Local>> = null;
+	// the functions that may be inlined (Inline.candidate; set once, read by the threads)
+	public static var inlineCands:Null<Map<FuncInfo, Bool>>;
+	// the calls of this function to them
+	public var inlineSites:Array<{call:MIns, fn:FuncInfo}> = [];
+	public var frameSlots(get, never):Int;
+
+	inline function get_frameSlots()
+		return nslots;
+
 	public var icaches = 0; // inline caches of this function (bss: <name>__ic, IC_SIZE each)
 	public var icSym:String;
 
@@ -78,6 +87,7 @@ class MirBuild {
 		if (x.op == Const && x.sym == null && x.ty == I32) {
 			if (op == SExt) return lconst32(x.imm);
 			if (op == ZExt) return lconst(x.imm, 0);
+			if (op == I2F) return fconst(x.imm);
 		}
 		var i = mk(op, ty);
 		i.a = a;
@@ -1307,7 +1317,9 @@ class MirBuild {
 				c.sym = p.funcSym(g);
 				c.args = xs;
 				c.argTys = [for (a in g.args) mty(a.ty) == Void ? I32 : mty(a.ty)];
-				add(c);
+				var id = add(c);
+				if (inlineCands != null && inlineCands.exists(g) && g != fn) inlineSites.push({call: c, fn: g});
+				id;
 			case ECallDispatch(sel, sig, args):
 				var xs = [for (a in args) ex(a)];
 				var o = xs[0];
