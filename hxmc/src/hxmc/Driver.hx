@@ -52,11 +52,43 @@ class Driver {
 	// one function into `obj` (with its emitter); false: unsupported (hybrid builds)
 	// guards what workers share: the queue and the statistics
 	var lock = new sys.thread.Mutex();
+
+	// runs work(0...n) on up to `jobs` threads (the first failure is rethrown)
+	function parallel(n:Int, jobs:Int, work:Int->Void) {
+		var next = 0;
+		var failure:Null<String> = null;
+		function run() {
+			while (true) {
+				lock.acquire();
+				var k = next++;
+				lock.release();
+				if (k >= n || failure != null) return;
+				try work(k) catch (e:Dynamic) {
+					lock.acquire();
+					if (failure == null) failure = Std.string(e);
+					lock.release();
+					return;
+				}
+			}
+		}
+		if (jobs > n) jobs = n;
+		if (jobs <= 1) run() else {
+			var done = new sys.thread.Lock();
+			for (_ in 0...jobs)
+				sys.thread.Thread.create(() -> {
+					run();
+					done.release();
+				});
+			for (_ in 0...jobs)
+				done.wait();
+		}
+		if (failure != null) throw failure;
+	}
 	var raRounds = 0;
 	var raInsns = 0;
 	var raFuncs = 0;
 
-	function compileFunc(fn:FuncInfo, obj:Obj, emit:Target.Emitter):Bool {
+	function compileFunc(fn:FuncInfo, obj:Obj, emit:Target.Emitter, ras:Regalloc.Scratch):Bool {
 		var name = prep.funcSym(fn);
 		try {
 			var s0 = haxe.Timer.stamp();
@@ -69,7 +101,7 @@ class Driver {
 			var isel = Target.selector(abi);
 			var lf = isel.select(mf, layout);
 			var s2 = haxe.Timer.stamp();
-			var ra = new Regalloc(lf, isel);
+			var ra = new Regalloc(lf, isel, ras);
 			ra.run();
 			var s3 = haxe.Timer.stamp();
 			emit.func(lf, ra.usedRegs, true);
@@ -170,42 +202,51 @@ class Driver {
 				if (sp > 0) index.set(l.substr(0, sp), l.substr(sp + 1));
 			}
 		var tk = toolKey();
-		var fp = new Fingerprint(prep);
-		var objs:Array<Obj> = [];
-		var newIndex = new StringBuf();
 		var hits = 0, misses = 0;
-		var tKey = 0.0, tRead = 0.0, tWrite = 0.0;
+		var tWrite = 0.0;
 		var keep = new Map<String, Bool>();
-		// keys first (this also registers every string literal), then the
-		// modules to compile, in parallel: they share only read-only state
-		var todo:Array<Int> = [];
-		var paths = [];
-		for (mi in 0...order.length) {
-			var m = order[mi];
-			var s0 = haxe.Timer.stamp();
+		var jobs = o.jobs > 0 ? o.jobs : core.ds.TaskPool.recommendedDomainCount();
+		// the modules' keys, and the cached objects that match, in parallel
+		// (the threads only read the program); then, in module order, the
+		// string literals they found are registered and the index written
+		var nm = order.length;
+		var paths = [for (m in order) dir + "/" + moduleFile(m)];
+		var keys = [for (_ in 0...nm) ""];
+		var lits:Array<Array<String>> = [for (_ in 0...nm) null];
+		var objs:Array<Obj> = [for (_ in 0...nm) null];
+		var s0 = haxe.Timer.stamp();
+		parallel(nm, jobs, mi -> {
+			var fp = new Fingerprint(prep);
 			var text = new StringBuf();
 			text.add(tk);
-			for (f in byModule.get(m))
+			for (f in byModule.get(order[mi]))
 				fp.func(f, text);
 			var key = Fingerprint.hash(text.toString());
-			var file = moduleFile(m);
+			keys[mi] = key;
+			lits[mi] = fp.newStrings;
+			if (index.get(moduleFile(order[mi])) == key && sys.FileSystem.exists(paths[mi])) objs[mi] = ElfReader.read(sys.io.File.getBytes(paths[mi]));
+		});
+		var tKey = haxe.Timer.stamp() - s0;
+		var newIndex = new StringBuf();
+		var todo:Array<Int> = [];
+		for (mi in 0...nm) {
+			var l = lits[mi];
+			var k = 0;
+			while (k < l.length) {
+				prep.addStr(l[k], l[k + 1]);
+				k += 2;
+			}
+			var file = moduleFile(order[mi]);
 			keep.set(file, true);
-			newIndex.add(file + " " + key + "\n");
-			var path = dir + "/" + file;
-			paths.push(path);
-			var s1 = haxe.Timer.stamp();
-			tKey += s1 - s0;
-			objs.push(null);
-			if (index.get(file) == key && sys.FileSystem.exists(path)) {
-				objs[mi] = ElfReader.read(sys.io.File.getBytes(path));
-				for (f in byModule.get(m))
+			newIndex.add(file + " " + keys[mi] + "\n");
+			if (objs[mi] != null) {
+				for (f in byModule.get(order[mi]))
 					native.set(f, true);
 				hits++;
-				tRead += haxe.Timer.stamp() - s1;
-				continue;
+			} else {
+				todo.push(mi);
+				misses++;
 			}
-			todo.push(mi);
-			misses++;
 		}
 		// largest modules first, so the last ones to finish are small
 		var weight = [for (m in order) 0];
@@ -213,43 +254,16 @@ class Driver {
 			for (f in byModule.get(order[mi]))
 				weight[mi] += f.body.length + f.locals.length;
 		todo.sort((a, b) -> weight[b] - weight[a]);
-		var next = 0;
-		var failure:Null<String> = null;
-		function work() {
-			while (true) {
-				lock.acquire();
-				var k = next++;
-				lock.release();
-				if (k >= todo.length || failure != null) return;
-				var mi = todo[k];
-				try {
-					var obj = new Obj();
-					var emit = Target.emitter(abi, obj);
-					for (f in byModule.get(order[mi]))
-						compileFunc(f, obj, emit);
-					sys.io.File.saveBytes(paths[mi], ElfWriter.write(obj, abi.arm));
-					objs[mi] = obj;
-				} catch (e:Dynamic) {
-					lock.acquire();
-					if (failure == null) failure = Std.string(e);
-					lock.release();
-					return;
-				}
-			}
-		}
-		var jobs = o.jobs > 0 ? o.jobs : core.ds.TaskPool.recommendedDomainCount();
-		if (jobs > todo.length) jobs = todo.length;
-		if (jobs <= 1) work() else {
-			var done = new sys.thread.Lock();
-			for (_ in 0...jobs)
-				sys.thread.Thread.create(() -> {
-					work();
-					done.release();
-				});
-			for (_ in 0...jobs)
-				done.wait();
-		}
-		if (failure != null) throw failure;
+		parallel(todo.length, jobs, k -> {
+			var mi = todo[k];
+			var obj = new Obj();
+			var emit = Target.emitter(abi, obj);
+			var ras = new Regalloc.Scratch(Target.selector(abi));
+			for (f in byModule.get(order[mi]))
+				compileFunc(f, obj, emit, ras);
+			sys.io.File.saveBytes(paths[mi], ElfWriter.write(obj, abi.arm));
+			objs[mi] = obj;
+		});
 		sys.io.File.saveContent(indexPath, newIndex.toString());
 		for (f in sys.FileSystem.readDirectory(dir))
 			if (StringTools.endsWith(f, ".o") && !keep.exists(f)) sys.FileSystem.deleteFile(dir + "/" + f);
@@ -269,7 +283,7 @@ class Driver {
 		sys.io.File.saveBytes(out, exe);
 		Sys.command("chmod", ["755", out]);
 		if (o.stats) {
-			Sys.println('hxmc: modules ${order.length}: ${hits} cached, ${misses} compiled (keys ${ms(tKey)}, reading ${ms(tRead)}, writing ${ms(tWrite)})');
+			Sys.println('hxmc: modules ${order.length}: ${hits} cached, ${misses} compiled (keys and reading ${ms(tKey)})');
 			Sys.println('hxmc: data ${ms(t3 - t2)}, runtime read ${ms(t4 - t3)}, link ${ms(haxe.Timer.stamp() - t4)}');
 		}
 	}
@@ -280,10 +294,11 @@ class Driver {
 		var p = prep.p;
 		var obj = new Obj();
 		var emit = Target.emitter(abi, obj);
+		var ras = new Regalloc.Scratch(Target.selector(abi));
 		for (fn in p.funcs) {
 			var name = prep.funcSym(fn);
 			if (o.skip.exists(name) || (o.only != null && !o.only.exists(name))) continue;
-			compileFunc(fn, obj, emit);
+			compileFunc(fn, obj, emit, ras);
 		}
 		var t2 = haxe.Timer.stamp();
 		stats(t0, t1, t2);

@@ -34,6 +34,54 @@ class RegList {
 	}
 }
 
+// The allocator's working storage, kept from one function to the next (one
+// per thread): the arrays keep their capacity, so a round allocates little.
+class Scratch {
+	public var defs = new RegList();
+	public var uses = new RegList();
+	public var start:Array<Int> = [];
+	public var end:Array<Int> = [];
+	public var fixedFrom:Array<Array<Int>> = [for (_ in 0...LFunc.NPHYS) []];
+	public var fixedTo:Array<Array<Int>> = [for (_ in 0...LFunc.NPHYS) []];
+	public var openFixed:Array<Int> = Arrays.filled(LFunc.NPHYS, -1);
+	public var exposedHead:Array<Int> = [];
+	public var exposedBlock:Array<Int> = [];
+	public var exposedNext:Array<Int> = [];
+	public var defStamp:Array<Int> = [];
+	public var defHead:Array<Int> = [];
+	public var defBlock:Array<Int> = [];
+	public var defNext:Array<Int> = [];
+	public var defines:Array<Int> = [];
+	public var liveInSeen:Array<Int> = [];
+	public var liveOutSeen:Array<Int> = [];
+	public var work:Array<Int> = [];
+	public var count:Array<Int> = [];
+	public var order:Array<Int> = [];
+	public var assigned:Array<Int> = [];
+	public var holder:Array<Int> = [];
+	// per physical register: whether a call leaves its result there; 1 for
+	// the allocatable float registers, 2 for the integer ones
+	public var isResult:Array<Bool> = [for (_ in 0...LFunc.NPHYS) false];
+	public var isFpr:Array<Int> = Arrays.filled(LFunc.NPHYS, 0);
+
+	public function new(t:RegTarget) {
+		for (r in t.callResults)
+			isResult[r] = true;
+		for (c in t.fprs)
+			isFpr[c] = 1;
+		for (c in t.gprs)
+			isFpr[c] = 2;
+	}
+
+	// a resized to n copies of v
+	public static function fill(a:Array<Int>, n:Int, v:Int):Array<Int> {
+		a.resize(n);
+		for (i in 0...n)
+			a[i] = v;
+		return a;
+	}
+}
+
 // Linear-scan register allocation (Poletto and Sarkar) with one live range
 // per virtual register, on the block layout order. Physical registers
 // named by instructions (call arguments and results, fixed operands, call
@@ -49,9 +97,10 @@ class Regalloc {
 	public var usedRegs = [for (_ in 0...LFunc.NPHYS) false]; // physical registers used
 	var noSpillFrom = 0x7fffffff; // registers made by spill code are numbered from here
 
-	public function new(f:LFunc, t:RegTarget) {
+	public function new(f:LFunc, t:RegTarget, ?s:Scratch) {
 		this.f = f;
 		this.t = t;
+		this.s = s != null ? s : new Scratch(t);
 	}
 
 	public var rounds = 0; // allocation rounds run (statistics)
@@ -79,11 +128,16 @@ class Regalloc {
 	var end:Array<Int>;
 	var fixedFrom:Array<Array<Int>>; // per physical register: sorted ranges
 	var fixedTo:Array<Array<Int>>;
+	var s:Scratch;
 
 	function allocate():Array<Int> {
 		var n = f.nregs;
-		coldCalls = [];
-		var defs = new RegList(), uses = new RegList();
+		var s = this.s;
+		coldCalls.resize(0);
+		coldSaved.resize(0);
+		coldSavedAt.resize(0);
+		var defs = s.defs, uses = s.uses;
+		var isResult = s.isResult;
 		// positions
 		var pos = 0;
 		for (b in f.blocks) {
@@ -95,44 +149,56 @@ class Regalloc {
 		// intervals: per virtual register its first and last position, from
 		// its definitions and uses, extended over the blocks it is live
 		// across (found by walking back from each use to the definitions)
-		start = hxmc.Lir.Arrays.filled(n, 0x7fffffff);
-		end = hxmc.Lir.Arrays.filled(n, -1);
-		fixedFrom = [for (_ in 0...NPHYS) []];
-		fixedTo = [for (_ in 0...NPHYS) []];
-		var openFixed = hxmc.Lir.Arrays.filled(NPHYS, -1);
+		start = Scratch.fill(s.start, n, 0x7fffffff);
+		end = Scratch.fill(s.end, n, -1);
+		fixedFrom = s.fixedFrom;
+		fixedTo = s.fixedTo;
+		for (k in 0...NPHYS) {
+			fixedFrom[k].resize(0);
+			fixedTo[k].resize(0);
+		}
+		var openFixed = s.openFixed;
 		var nb = f.blocks.length;
 		for (bi in 0...nb)
 			f.blocks[bi].id = bi;
 		// per register: the blocks with a use not preceded by a definition in the block (upward-exposed)
-		var exposedHead = hxmc.Lir.Arrays.filled(n, -1);
-		var exposedBlock:Array<Int> = [], exposedNext:Array<Int> = [];
-		// per block and register: defined in the block (stamped by block)
-		var defStamp = hxmc.Lir.Arrays.filled(n, -1);
-		var defsIn:Array<Array<Int>> = [];
+		var exposedHead = Scratch.fill(s.exposedHead, n, -1);
+		var exposedBlock = s.exposedBlock, exposedNext = s.exposedNext;
+		exposedBlock.resize(0);
+		exposedNext.resize(0);
+		// per block and register: defined in the block (stamped by block),
+		// and per register the blocks defining it (a list through defNext)
+		var defStamp = Scratch.fill(s.defStamp, n, -1);
+		var defHead = Scratch.fill(s.defHead, n, -1);
+		var defBlock = s.defBlock, defNext = s.defNext;
+		defBlock.resize(0);
+		defNext.resize(0);
 		for (bi in 0...nb) {
 			var b = f.blocks[bi];
 			for (k in 0...NPHYS)
 				openFixed[k] = -1;
 			var p = b.from;
-			var dl = [];
+			var cold = b.cold;
 			for (i in b.ins) {
 				defs.n = 0;
 				uses.n = 0;
 				t.defsUses(i, defs, uses);
 				// a call on a slow path clobbers only its result registers here:
 				// what lives across it is saved and restored around it (coldSaves)
-				var coldCall = b.cold && t.isCall(i);
+				var coldCall = cold && t.isCall(i);
 				if (coldCall) coldCalls.push(p);
+				var ua = uses.a;
 				for (k in 0...uses.n) {
-					var r = uses.a[k];
+					var r = ua[k];
 					if (r >= NPHYS) {
 						if (end[r] < p) end[r] = p;
 						if (start[r] > p) start[r] = p;
 						if (defStamp[r] != bi) {
 							// the first exposed use in this block: record once
-							if (exposedHead[r] < 0 || exposedBlock[exposedHead[r]] != bi) {
+							var h = exposedHead[r];
+							if (h < 0 || exposedBlock[h] != bi) {
 								exposedBlock.push(bi);
-								exposedNext.push(exposedHead[r]);
+								exposedNext.push(h);
 								exposedHead[r] = exposedBlock.length - 1;
 							}
 						}
@@ -141,38 +207,34 @@ class Regalloc {
 						addFixed(r, from, p);
 					}
 				}
+				var da = defs.a;
 				for (k in 0...defs.n) {
-					var r = defs.a[k];
+					var r = da[k];
 					if (r >= NPHYS) {
 						if (start[r] > p + 1) start[r] = p + 1;
 						if (end[r] < p + 1) end[r] = p + 1;
 						if (defStamp[r] != bi) {
 							defStamp[r] = bi;
-							dl.push(r);
+							defBlock.push(bi);
+							defNext.push(defHead[r]);
+							defHead[r] = defBlock.length - 1;
 						}
 					} else if (r >= 0) {
-						if (coldCall && t.callResults.indexOf(r) < 0) continue;
+						if (coldCall && !isResult[r]) continue;
 						openFixed[r] = p + 1;
 						addFixed(r, p + 1, p + 1);
 					}
 				}
 				p += 2;
 			}
-			defsIn.push(dl);
 		}
-		// which blocks define each register
-		var defHead = hxmc.Lir.Arrays.filled(n, -1);
-		var defBlock:Array<Int> = [], defNext:Array<Int> = [];
-		for (bi in 0...nb)
-			for (r in defsIn[bi]) {
-				defBlock.push(bi);
-				defNext.push(defHead[r]);
-				defHead[r] = defBlock.length - 1;
-			}
-		var defines = hxmc.Lir.Arrays.filled(nb, -1); // stamped by register
-		var liveInSeen = hxmc.Lir.Arrays.filled(nb, -1);
-		var liveOutSeen = hxmc.Lir.Arrays.filled(nb, -1);
-		var work:Array<Int> = [];
+		var defines = Scratch.fill(s.defines, nb, -1); // stamped by register
+		var liveInSeen = Scratch.fill(s.liveInSeen, nb, -1);
+		var liveOutSeen = Scratch.fill(s.liveOutSeen, nb, -1);
+		// a stack of blocks (pop of an Array<Int> would box its result)
+		var work = s.work;
+		var wn = 0;
+		var blocks = f.blocks;
 		for (r in NPHYS...n) {
 			var e = exposedHead[r];
 			if (e < 0) continue;
@@ -182,29 +244,38 @@ class Regalloc {
 				d = defNext[d];
 			}
 			while (e >= 0) {
-				work.push(exposedBlock[e]);
+				var x = exposedBlock[e];
+				if (wn == work.length) work.push(x) else work[wn] = x;
+				wn++;
 				e = exposedNext[e];
 			}
-			while (work.length > 0) {
-				var bi = work.pop();
+			var st = start[r], en = end[r];
+			while (wn > 0) {
+				var bi = work[--wn];
 				if (liveInSeen[bi] == r) continue;
 				liveInSeen[bi] = r;
-				var b = f.blocks[bi];
-				if (start[r] > b.from) start[r] = b.from;
+				var b = blocks[bi];
+				if (st > b.from) st = b.from;
 				for (pr in b.preds) {
-					if (liveOutSeen[pr.id] != r) {
-						liveOutSeen[pr.id] = r;
-						if (end[r] < pr.to) end[r] = pr.to;
-						if (start[r] > pr.to) start[r] = pr.to;
+					var pi = pr.id;
+					if (liveOutSeen[pi] != r) {
+						liveOutSeen[pi] = r;
+						if (en < pr.to) en = pr.to;
+						if (st > pr.to) st = pr.to;
 					}
-					if (defines[pr.id] != r) work.push(pr.id);
+					if (defines[pi] != r) {
+						if (wn == work.length) work.push(pi) else work[wn] = pi;
+						wn++;
+					}
 				}
 			}
+			start[r] = st;
+			end[r] = en;
 		}
 		for (r in 0...NPHYS)
 			sortFixed(r);
 		// linear scan: intervals by start (a counting sort on positions; ties by register)
-		var count = hxmc.Lir.Arrays.filled(pos + 2, 0);
+		var count = Scratch.fill(s.count, pos + 2, 0);
 		var live = 0;
 		for (r in NPHYS...n)
 			if (end[r] >= 0) {
@@ -213,34 +284,37 @@ class Regalloc {
 			}
 		for (p in 1...pos + 2)
 			count[p] += count[p - 1];
-		var order = hxmc.Lir.Arrays.filled(live, 0);
+		var order = Scratch.fill(s.order, live, 0);
 		for (r in NPHYS...n)
 			if (end[r] >= 0) order[count[start[r]]++] = r;
-		assigned = hxmc.Lir.Arrays.filled(n, -1);
+		assigned = Scratch.fill(s.assigned, n, -1);
 		for (r in 0...NPHYS)
 			assigned[r] = r;
 		// per physical register: the interval holding it (free once that ends)
-		var holder = hxmc.Lir.Arrays.filled(NPHYS, -1);
-		var isFpr = hxmc.Lir.Arrays.filled(NPHYS, 0);
-		for (c in t.fprs)
-			isFpr[c] = 1;
-		for (c in t.gprs)
-			isFpr[c] = 2;
+		var holder = Scratch.fill(s.holder, NPHYS, -1);
+		var isFpr = s.isFpr;
 		var spilled = [];
+		// the slow-path calls, in position order: when the scan passes one,
+		// the registers held across it are recorded (coldSaves)
+		var ci = 0, nc = coldCalls.length;
 		for (r in order) {
-			var s = start[r], e = end[r];
+			var rs = start[r], re = end[r];
+			while (ci < nc && coldCalls[ci] < rs) {
+				snapshot(coldCalls[ci], holder);
+				ci++;
+			}
 			var float = f.floatReg(r);
 			var regs = float ? t.fprs : t.gprs;
 			var choice = -1;
 			var h = f.hint(r);
 			if (h >= 0) {
 				var hr = h < NPHYS ? h : assigned[h];
-				if (hr >= 0 && isFpr[hr] == (float ? 1 : 2) && (holder[hr] < 0 || end[holder[hr]] < s) && !fixedOverlap(hr, s, e)) choice = hr;
+				if (hr >= 0 && isFpr[hr] == (float ? 1 : 2) && (holder[hr] < 0 || end[holder[hr]] < rs) && !fixedOverlap(hr, rs, re)) choice = hr;
 			}
 			if (choice < 0)
 				for (c in regs) {
 					var o = holder[c];
-					if ((o < 0 || end[o] < s) && !fixedOverlap(c, s, e)) {
+					if ((o < 0 || end[o] < rs) && !fixedOverlap(c, rs, re)) {
 						choice = c;
 						break;
 					}
@@ -250,10 +324,10 @@ class Regalloc {
 				var victim = -1;
 				for (c in regs) {
 					var a = holder[c];
-					if (a >= 0 && end[a] >= s && a < noSpillFrom && (victim < 0 || end[a] > end[victim]) && !fixedOverlap(c, s, e))
+					if (a >= 0 && end[a] >= rs && a < noSpillFrom && (victim < 0 || end[a] > end[victim]) && !fixedOverlap(c, rs, re))
 						victim = a;
 				}
-				if (victim >= 0 && (end[victim] > e || r >= noSpillFrom)) {
+				if (victim >= 0 && (end[victim] > re || r >= noSpillFrom)) {
 					choice = assigned[victim];
 					assigned[victim] = -1;
 					spilled.push(victim);
@@ -266,58 +340,55 @@ class Regalloc {
 			assigned[r] = choice;
 			holder[choice] = r;
 		}
+		while (ci < nc) {
+			snapshot(coldCalls[ci], holder);
+			ci++;
+		}
 		return spilled;
 	}
 
 	var coldCalls:Array<Int> = []; // positions of the calls in cold blocks (the last round's)
+	// per slow-path call (in order): the physical registers held by values
+	// live across it, from coldSavedAt[k] to coldSavedAt[k + 1]
+	var coldSaved:Array<Int> = [];
+	var coldSavedAt:Array<Int> = [];
+
+	function snapshot(p:Int, holder:Array<Int>) {
+		coldSavedAt.push(coldSaved.length);
+		for (c in 0...NPHYS) {
+			var h = holder[c];
+			if (h >= 0 && start[h] < p && end[h] > p + 1) coldSaved.push(c);
+		}
+	}
 
 	// Saves the caller-saved registers live across each slow-path call into
 	// frame slots before it and reloads them after it (allocate let values
 	// stay in such registers across those calls).
 	function coldSaves() {
-		if (coldCalls.length == 0) return;
-		// coldCalls is sorted (positions in order); per call, the physical
-		// registers of the values live across it
-		var saves:Array<Array<Int>> = [for (_ in coldCalls) null];
-		for (r in NPHYS...f.nregs) {
-			var a = assigned[r];
-			if (a < 0 || end[r] < 0 || t.callResults.indexOf(a) >= 0) continue;
-			// the first call after start[r]
-			var lo = 0, hi = coldCalls.length;
-			while (lo < hi) {
-				var mid = (lo + hi) >> 1;
-				if (coldCalls[mid] <= start[r]) lo = mid + 1 else hi = mid;
-			}
-			while (lo < coldCalls.length && coldCalls[lo] + 1 < end[r]) {
-				var l = saves[lo];
-				if (l == null) saves[lo] = l = [];
-				if (l.indexOf(a) < 0) l.push(a);
-				lo++;
-			}
-		}
-		var index = new Map<Int, Int>();
-		for (k in 0...coldCalls.length)
-			index.set(coldCalls[k], k);
+		var nc = coldCalls.length;
+		if (nc == 0) return;
+		coldSavedAt.push(coldSaved.length);
 		var slotOf = [for (_ in 0...NPHYS) -1];
-		var defs = new RegList(), uses = new RegList();
+		var defs = s.defs, uses = s.uses;
+		var clobbered = [for (_ in 0...NPHYS) -1]; // stamped by call
+		var ci = 0;
 		for (b in f.blocks) {
-			if (!b.cold) continue;
+			if (!b.cold || ci >= nc || coldCalls[ci] >= b.to) continue;
 			var out = [];
 			var p = b.from;
 			for (i in b.ins) {
-				var k = index.get(p);
-				var save = k == null ? null : saves[k];
-				if (save != null) {
-					// only what the call clobbers
+				if (ci < nc && coldCalls[ci] == p) {
 					defs.n = 0;
 					uses.n = 0;
 					t.defsUses(i, defs, uses);
+					for (k in 0...defs.n) {
+						var d = defs.a[k];
+						if (d >= 0 && d < NPHYS && !s.isResult[d]) clobbered[d] = ci;
+					}
 					var after = [];
-					for (a in save) {
-						var clobbered = false;
-						for (j in 0...defs.n)
-							if (defs.a[j] == a) clobbered = true;
-						if (!clobbered) continue;
+					for (k in coldSavedAt[ci]...coldSavedAt[ci + 1]) {
+						var a = coldSaved[k];
+						if (clobbered[a] != ci) continue;
 						if (slotOf[a] < 0) slotOf[a] = f.slot(8, 8);
 						out.push(t.spillStore(slotOf[a], a, a >= f.fprBase));
 						after.push(t.spillLoad(a, slotOf[a], a >= f.fprBase));
@@ -325,6 +396,7 @@ class Regalloc {
 					out.push(i);
 					for (x in after)
 						out.push(x);
+					ci++;
 				} else out.push(i);
 				p += 2;
 			}

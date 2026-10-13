@@ -76,6 +76,23 @@ class Prep {
 	public inline function fid(name:String):Int
 		return e.fid(name);
 
+	// a string literal's symbol if it has one (read-only: threads may call it)
+	public function strSymIfKnown(s:String):Null<String>
+		return e.strNames.get(s);
+
+	// the symbol EmitC.str gives a literal (pure: threads may call it)
+	public static function strName(s:String):String
+		return "S_" + haxe.crypto.Md5.encode([for (i in 0...s.length) StringTools.hex(s.charCodeAt(i))].join(",")).substr(0, 16);
+
+	// registers a literal named by strName, as EmitC.str does
+	public function addStr(s:String, n:String) {
+		if (e.strNames.exists(s)) return;
+		if (e.strByName.exists(n)) throw "string literal hash collision: " + n;
+		e.strByName.set(n, s);
+		e.strNames.set(s, n);
+		e.strOrder.push(s);
+	}
+
 	public function strSym(s:String):String {
 		var n = e.strNames.get(s);
 		if (n == null) {

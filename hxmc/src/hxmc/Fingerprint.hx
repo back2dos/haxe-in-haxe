@@ -15,6 +15,9 @@ import backend.Ir;
 class Fingerprint {
 	var b:StringBuf;
 	var prep:Prep;
+	// the literals without a symbol yet, with the one they get (literal,
+	// symbol, ...): Driver registers them once the threads are done
+	public var newStrings:Array<String> = [];
 
 	public function new(prep:Prep) {
 		this.prep = prep;
@@ -184,8 +187,11 @@ class Fingerprint {
 				b.add(",");
 				b.add(bytes.getInt32(4));
 			case EStr(s):
-				// (registers the literal: DataGen defines every one, cached modules included)
-				prep.strSym(s);
+				// (collects the literal: DataGen defines every one, cached modules included)
+				if (prep.strSymIfKnown(s) == null) {
+					newStrings.push(s);
+					newStrings.push(Prep.strName(s));
+				}
 				b.add("s");
 				str(s);
 			case ENull(_):
