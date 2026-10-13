@@ -128,6 +128,18 @@ for the port's self-compile (JS: 614 modules, hxc: 515), the backend tool
 between runs on the same input. `hxc/test` regress, threads and exc pass. lix's
 own results are in `tools/lix/README.md`.
 
+### hxc: unchecked `Vector` access through HXB (2026-10-13)
+
+The lowering's `Vector` test (`FnLower.isVectorData`) now looks through
+`TLazy` and bound monomorphs: the HXB reader (as upstream's) reads typedef
+instances as lazy types, so through `--hxb-lib` (the haxelib flow) `Vector`
+reads were bounds-checked. With the reference writing the HXB, the source and
+HXB paths now generate identical C for a `Vector` loop, bcrypt, sha256 and
+sha512 (HaxeBenchmarks), and `hxc/test` regress, threads and exc (all pass on
+both paths). The C of the port and of the backend tool is unchanged, so the
+port's lanes are unaffected. HXB path, clang -O2, best of 5: bcrypt 2.31 s ->
+2.04 s, sha512 22.1 ms -> 18.8 ms, sha256 unchanged (no `Vector`).
+
 ## Target generators
 
 Every target also compiles upstream's unit suite identically (`unit-targets.py`, above).

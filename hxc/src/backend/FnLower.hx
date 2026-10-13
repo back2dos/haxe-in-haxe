@@ -271,8 +271,12 @@ class FnLower {
 	}
 
 	// haxe.ds.Vector's data (an Array on hxc), as Vector.get inlines it
+	// the typedef itself, not what it follows to: lazy types (HXB reads typedef
+	// instances as TLazy) and bound monomorphs are looked through
 	static function isVectorData(t:T):Bool
 		return switch t {
+			case TLazy(f): isVectorData(TFunctions.lazyType(f));
+			case TMono(r) if (r.tmType != null): isVectorData(r.tmType);
 			case TType(td, _): td.tPath.name == "VectorData" && StringTools.startsWith(td.tPath.pack.join("."), "haxe.ds"); // haxe.ds._Vector.VectorData
 			case TAbstract(a, _): a.aPath.name == "Vector" && a.aPath.pack.join(".") == "haxe.ds";
 			case _: false;
