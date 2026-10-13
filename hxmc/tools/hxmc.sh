@@ -1,13 +1,22 @@
 #!/bin/sh
-# Runs the hxmc tool on a case of the test corpus (its cached archive in
-# bin/hxmc-t/<case>/, written by hxmc/tools/run.py), development build:
-#   sh hxmc/tools/hxmc.sh <case> [main class]
-# with HXMC_DUMP=<function>, HXMC_ONLY=..., HXMC_SKIP=... as needed.
+# Runs the hxmc tool on an archive (stats on):
+#   sh hxmc/tools/hxmc.sh <case> [main class] [hxmc arguments...]
+#       a case of the test corpus (bin/hxmc-t/<case>/, written by hxmc/tools/run.py), output m
+#   sh hxmc/tools/hxmc.sh <archive.zip> <main class> [hxmc arguments...]
+#       any archive, output next to it (p)
+# HXMC_TOOL picks the tool (default bin/hxmc/hxmc), HXMC_WRAP a wrapper
+# (valgrind, gdb); HXMC_HYBRID=1 for development builds; HXMC_DUMP, HXMC_ONLY, ...
 set -eu
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 case=$1
-main=${2:-$1}
-d=$ROOT/bin/hxmc-t/$case
-export HAXE_STD_PATH=$ROOT/haxe/std HXMC_HYBRID=1 HXMC_RT=$ROOT/bin/hxmc/rt-dev HXMC_STATS=1 HXMC_RT_INCLUDE=$ROOT/hxc/rt
+shift
+main=${1:-$case}
+[ $# -gt 0 ] && shift
+case $case in
+*.zip) hxb=$case; out=$(dirname "$case")/p ;;
+*) hxb=$ROOT/bin/hxmc-t/$case/prog.hxb.zip; out=$ROOT/bin/hxmc-t/$case/m ;;
+esac
+export HAXE_STD_PATH=$ROOT/haxe/std HXMC_STATS=1
+if [ "${HXMC_HYBRID:-0}" = 1 ]; then export HXMC_RT=$ROOT/bin/hxmc/rt-dev HXMC_RT_INCLUDE=$ROOT/hxc/rt; fi
 ulimit -s unlimited 2>/dev/null || true
-"$ROOT/bin/hxmc/hxmc" "$d/m" --hxb-lib "$d/prog.hxb.zip" -main "$main" --custom-target hxc -D disable-parallelism
+${HXMC_WRAP:-} "${HXMC_TOOL:-$ROOT/bin/hxmc/hxmc}" "$out" --hxb-lib "$hxb" -main "$main" --custom-target hxc -D disable-parallelism "$@"

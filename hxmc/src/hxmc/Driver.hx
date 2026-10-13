@@ -29,7 +29,7 @@ class Driver {
 		this.out = out;
 		prep = new Prep(prog);
 		abi = Abi.get(o.target);
-		if (abi.os != "linux") throw "hxmc: only Linux targets so far";
+		if (abi.os == "macos" || abi.os == "windows" && abi.arm) throw "hxmc: target " + abi.name + " is not supported yet";
 		dumpSet = o.dump == null ? null : [for (n in o.dump.split(",")) n => true];
 	}
 
@@ -43,6 +43,9 @@ class Driver {
 	// ---- compiling
 
 	// one function into `obj` (with its emitter); false: unsupported (hybrid builds)
+	// guards what workers share: the queue and the statistics
+	var lock = new sys.thread.Mutex();
+
 	function compileFunc(fn:FuncInfo, obj:Obj, emit:Target.Emitter):Bool {
 		var name = prep.funcSym(fn);
 		try {
@@ -61,23 +64,27 @@ class Driver {
 			var s3 = haxe.Timer.stamp();
 			emit.func(lf, ra.usedRegs, true);
 			var s4 = haxe.Timer.stamp();
+			lock.acquire();
 			tm[0] += s1 - s0;
 			tm[1] += s2 - s1;
 			tm[2] += s3 - s2;
 			tm[3] += s4 - s3;
 			if (o.stats && s4 - s0 > 0.05) slow.push({name: name + " (" + mf.vals.length + " values, " + mf.blocks.length + " blocks)", t: s4 - s0});
+			native.set(fn, true);
+			lock.release();
 			if (mb.icaches > 0) {
 				var bss = obj.section(".bss", Bss, 16);
 				bss.bssSize = (bss.bssSize + 15) & ~15;
 				obj.define(mb.icSym, bss, bss.bssSize, Abi.IC_SIZE * mb.icaches, false);
 				bss.bssSize += Abi.IC_SIZE * mb.icaches;
 			}
-			native.set(fn, true);
 			return true;
 		} catch (e:Unsupported) {
 			var k = e.msg;
+			lock.acquire();
 			reasons.set(k, (reasons.exists(k) ? reasons.get(k) : 0) + 1);
 			if (!examples.exists(k)) examples.set(k, name);
+			lock.release();
 			if (!o.hybrid) throw 'hxmc: $name: ${e.msg}';
 			return false;
 		}
@@ -101,7 +108,7 @@ class Driver {
 		ks.sort((a, b) -> reasons.get(b) - reasons.get(a));
 		for (k in ks)
 			Sys.println('  ${reasons.get(k)}\t$k\t(${examples.get(k)})');
-		Sys.println('hxmc: prepare ${ms(t1 - t0)}, codegen ${ms(t2 - t1)} (mir ${ms(tm[0])}, isel ${ms(tm[1])}, regalloc ${ms(tm[2])}, emit ${ms(tm[3])})');
+		Sys.println('hxmc: prepare ${ms(t1 - t0)}, codegen ${ms(t2 - t1)} (cpu: mir ${ms(tm[0])}, isel ${ms(tm[1])}, regalloc ${ms(tm[2])}, emit ${ms(tm[3])})');
 		slow.sort((a, b) -> a.t < b.t ? 1 : -1);
 		for (x in slow.slice(0, 5))
 			Sys.println('  ${ms(x.t)}\t${x.name}');
@@ -155,7 +162,12 @@ class Driver {
 		var hits = 0, misses = 0;
 		var tKey = 0.0, tRead = 0.0, tWrite = 0.0;
 		var keep = new Map<String, Bool>();
-		for (m in order) {
+		// keys first (this also registers every string literal), then the
+		// modules to compile, in parallel: they share only read-only state
+		var todo:Array<Int> = [];
+		var paths = [];
+		for (mi in 0...order.length) {
+			var m = order[mi];
 			var s0 = haxe.Timer.stamp();
 			var text = new StringBuf();
 			text.add(tk);
@@ -166,26 +178,64 @@ class Driver {
 			keep.set(file, true);
 			newIndex.add(file + " " + key + "\n");
 			var path = dir + "/" + file;
+			paths.push(path);
 			var s1 = haxe.Timer.stamp();
 			tKey += s1 - s0;
+			objs.push(null);
 			if (index.get(file) == key && sys.FileSystem.exists(path)) {
-				objs.push(ElfReader.read(sys.io.File.getBytes(path)));
+				objs[mi] = ElfReader.read(sys.io.File.getBytes(path));
 				for (f in byModule.get(m))
 					native.set(f, true);
 				hits++;
 				tRead += haxe.Timer.stamp() - s1;
 				continue;
 			}
-			var obj = new Obj();
-			var emit = Target.emitter(abi, obj);
-			for (f in byModule.get(m))
-				compileFunc(f, obj, emit);
-			var s2 = haxe.Timer.stamp();
-			sys.io.File.saveBytes(path, ElfWriter.write(obj, abi.arm));
-			tWrite += haxe.Timer.stamp() - s2;
-			objs.push(obj);
+			todo.push(mi);
 			misses++;
 		}
+		// largest modules first, so the last ones to finish are small
+		var weight = [for (m in order) 0];
+		for (mi in todo)
+			for (f in byModule.get(order[mi]))
+				weight[mi] += f.body.length + f.locals.length;
+		todo.sort((a, b) -> weight[b] - weight[a]);
+		var next = 0;
+		var failure:Null<String> = null;
+		function work() {
+			while (true) {
+				lock.acquire();
+				var k = next++;
+				lock.release();
+				if (k >= todo.length || failure != null) return;
+				var mi = todo[k];
+				try {
+					var obj = new Obj();
+					var emit = Target.emitter(abi, obj);
+					for (f in byModule.get(order[mi]))
+						compileFunc(f, obj, emit);
+					sys.io.File.saveBytes(paths[mi], ElfWriter.write(obj, abi.arm));
+					objs[mi] = obj;
+				} catch (e:Dynamic) {
+					lock.acquire();
+					if (failure == null) failure = Std.string(e);
+					lock.release();
+					return;
+				}
+			}
+		}
+		var jobs = o.jobs > 0 ? o.jobs : core.ds.TaskPool.recommendedDomainCount();
+		if (jobs > todo.length) jobs = todo.length;
+		if (jobs <= 1) work() else {
+			var done = new sys.thread.Lock();
+			for (_ in 0...jobs)
+				sys.thread.Thread.create(() -> {
+					work();
+					done.release();
+				});
+			for (_ in 0...jobs)
+				done.wait();
+		}
+		if (failure != null) throw failure;
 		sys.io.File.saveContent(indexPath, newIndex.toString());
 		for (f in sys.FileSystem.readDirectory(dir))
 			if (StringTools.endsWith(f, ".o") && !keep.exists(f)) sys.FileSystem.deleteFile(dir + "/" + f);
@@ -199,7 +249,9 @@ class Driver {
 		if (!sys.FileSystem.exists(rtPath)) throw "hxmc: the runtime object " + rtPath + " is missing (hxmc/tools/mkrt.sh)";
 		var rt = ElfReader.read(sys.io.File.getBytes(rtPath));
 		var t4 = haxe.Timer.stamp();
-		var exe = new Link([data].concat(objs).concat([rt]), abi.arm).link("_start");
+		var all = [data].concat(objs).concat([rt]);
+		var exe = abi.os == "windows" ? new LinkPE(all, abi.arm).link("mainCRTStartup") : new Link(all, abi.arm).link("_start");
+		if (abi.os == "windows" && !StringTools.endsWith(out, ".exe")) out += ".exe";
 		sys.io.File.saveBytes(out, exe);
 		Sys.command("chmod", ["755", out]);
 		if (o.stats) {

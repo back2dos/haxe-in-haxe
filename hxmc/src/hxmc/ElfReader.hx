@@ -50,6 +50,8 @@ class ElfReader {
 			case 10: RAbs32;
 			case 11: RAbs32S;
 			case 23: RTpOff32;
+			case 250: RSecRel32;
+			case 251: RImgRel32;
 			case _: throw "hxmc: x86-64 relocation type " + t + " in the runtime object";
 		}
 		return switch t {

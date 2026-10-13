@@ -77,7 +77,7 @@ class Isel implements hxmc.Target.Selector {
 
 	// ---- RegTarget
 
-	public function defsUses(i:LIns, defs:Array<Int>, uses:Array<Int>) {
+	public function defsUses(i:LIns, defs:hxmc.Regalloc.RegList, uses:hxmc.Regalloc.RegList) {
 		inline function u(r:Int)
 			if (r >= 0 && r != ZR) uses.push(r);
 		inline function mem() {
@@ -200,8 +200,8 @@ class Isel implements hxmc.Target.Selector {
 		i.d = d;
 		i.s1 = s;
 		i.size = size;
-		f.hints.set(d, s);
-		if (s >= LFunc.NPHYS) f.hints.set(s, d);
+		if (d >= LFunc.NPHYS) f.setHint(d, s);
+		if (s >= LFunc.NPHYS) f.setHint(s, d);
 	}
 
 	function isymOf(v:Int):Null<String> {
@@ -226,8 +226,8 @@ class Isel implements hxmc.Target.Selector {
 		f = new LFunc(mf.name, 32);
 		for (s in mf.slots)
 			f.slot(s.size, s.align);
-		vreg = [for (_ in mf.vals) -1];
-		useCount = [for (_ in mf.vals) 0];
+		vreg = hxmc.Lir.Arrays.filled(mf.vals.length, -1);
+		useCount = hxmc.Lir.Arrays.filled(mf.vals.length, 0);
 		folded = [for (_ in mf.vals) false];
 		for (b in mf.blocks)
 			for (i in b.ins) {
@@ -460,7 +460,7 @@ class Isel implements hxmc.Target.Selector {
 		if (useCount[i.id] != 1) return false;
 		var t = b.term();
 		if (t == null || t.op != Br || t.a != i.id) return false;
-		if (b.ins.indexOf(i) != b.ins.length - 2) return false;
+		if (b.ins.length < 2 || b.ins[b.ins.length - 2] != i) return false;
 		folded[i.id] = true;
 		return true;
 	}

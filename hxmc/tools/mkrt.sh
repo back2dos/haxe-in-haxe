@@ -12,17 +12,43 @@ ZIG=${ZIG:-zig}
 case $target in
 linux-x86_64) triple=x86_64-linux-musl ;;
 linux-arm64) triple=aarch64-linux-musl ;;
+windows-x86_64) triple=x86_64-windows-gnu ;;
 *) echo "mkrt: unknown target $target" >&2; exit 1 ;;
 esac
 out=$ROOT/bin/hxmc/rt/$target
 mkdir -p "$out/obj"
 CFLAGS="-O2 -g0 -w -fno-strict-aliasing -fno-pie -fno-pic -DHXC_NO_SSL -DHXC_NO_UV -DRT_CALL_ON_STACK -I $ROOT/hxc/rt"
+files="rt rt_dyn rt_std rt_str rt_sys rt_net rt_ssl rt_uv rt_thread rt_census"
+case $target in
+windows-*)
+	CFLAGS="-O2 -g0 -w -fno-strict-aliasing -DHXC_NO_SSL -DHXC_NO_UV -I $ROOT/hxc/rt"
+	files="$files rt_win rt_sys_win rt_net_win" ;;
+esac
 objs=
-for f in rt rt_dyn rt_std rt_str rt_sys rt_net rt_ssl rt_uv rt_thread rt_census; do
+for f in $files; do
 	$ZIG cc -target $triple $CFLAGS -c "$ROOT/hxc/rt/$f.c" -o "$out/obj/$f.o" &
 	objs="$objs $out/obj/$f.o"
 done
 wait
+# what generated code calls in the C library besides the runtime (MirBuild)
+libm="memset memcpy fmod floor ceil sin cos tan asin acos atan atan2 exp log pow sqrt"
+case $target in
+windows-*)
+	# the runtime's own COFF objects, the C runtime's startup object and the
+	# archives zig links (the MinGW-w64 libraries, compiler-rt, the import
+	# libraries of the UCRT and the Windows DLLs the runtime uses), selected
+	# and resolved by hxmc itself (hxmc --mkrt)
+	printf 'int main(void){return 0;}\n' > "$out/obj/stub.c"
+	WINLIBS="-lws2_32 -liphlpapi -luserenv -lpsapi -ldbghelp -lole32 -lshell32 -luser32 -ladvapi32 -lcrypt32 -lbcrypt"
+	$ZIG cc -target $triple -O2 "$out/obj/stub.c" -o "$out/obj/stub.exe" $WINLIBS
+	line=$($ZIG cc -target $triple -O2 -v "$out/obj/stub.c" -o "$out/obj/stub.exe" $WINLIBS 2>&1 | grep 'lld-link' | head -1)
+	inputs=$(echo "$line" | tr ' ' '\n' | grep -E '^/.*\.(obj|lib)$' | grep -v '/stub.obj$' | tr '\n' ' ')
+	undef="-u mainCRTStartup -u _setjmp -u _tls_index -u _tls_used -x main"
+	for f in $libm; do undef="$undef -u $f"; done
+	"${HXMC:-$ROOT/bin/hxmc/hxmc}" --mkrt "$out/rt.o" $objs $inputs $undef
+	ls -l "$out/rt.o"
+	exit 0 ;;
+esac
 # the C library: zig builds it on first use; a static link of a stub tells where
 printf 'int main(void){return 0;}\n' > "$out/obj/stub.c"
 # (twice: the first run may build the C library and name temporary paths)
@@ -30,7 +56,7 @@ $ZIG cc -target $triple -static -O2 "$out/obj/stub.c" -o "$out/obj/stub"
 line=$($ZIG cc -target $triple -static -O2 -v "$out/obj/stub.c" -o "$out/obj/stub" 2>&1 | grep 'ld.lld' | head -1)
 crt1=$(echo "$line" | tr ' ' '\n' | grep '/crt1.o$')
 libs=$(echo "$line" | tr ' ' '\n' | grep -E '/lib(c|zigc|compiler_rt)\.a$' | tr '\n' ' ')
-# what generated code calls in the C library besides the runtime (MirBuild)
-undef="-u _setjmp -u memset -u memcpy -u fmod -u floor -u ceil -u sin -u cos -u tan -u asin -u acos -u atan -u atan2 -u exp -u log -u pow -u sqrt"
+undef="-u _setjmp"
+for f in $libm; do undef="$undef -u $f"; done
 ld.lld -r --strip-debug -o "$out/rt.o" $undef "$crt1" $objs --start-group $libs --end-group
 ls -l "$out/rt.o"

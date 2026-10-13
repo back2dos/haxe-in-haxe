@@ -40,6 +40,9 @@ enum abstract RelKind(Int) to Int {
 	var RA64MovwG0Nc; // movz/movk: bits 0-15 of S + A
 	var RA64MovwG1Nc; // bits 16-31
 	var RA64Prel32;
+	// COFF
+	var RSecRel32; // the offset of S + A in its output section (TLS variables in .tls)
+	var RImgRel32; // S + A - the image base (an RVA)
 }
 
 class Section {

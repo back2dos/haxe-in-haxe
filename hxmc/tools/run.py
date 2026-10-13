@@ -20,7 +20,7 @@ HAXE = os.environ.get("HAXE", str(ROOT / "haxe/haxe"))
 TOOL = ROOT / "bin/hxc-dev/tool"
 HXMC = ROOT / "bin/hxmc/hxmc"
 CASES = ROOT / "hxmc/test/cases"
-ENV = dict(os.environ, HAXE_STD_PATH=str(ROOT / "haxe/std"))
+ENV = dict(os.environ, HAXE_STD_PATH=str(ROOT / "haxe/std"), WINEDEBUG="-all")
 
 
 def unlimited():
@@ -97,6 +97,8 @@ def run_case(name, cps, main, args):
     if args.hybrid:
         env.update(HXMC_HYBRID="1", HXMC_RT=str(ROOT / "bin/hxmc/rt-dev"), HXMC_RT_INCLUDE=str(ROOT / "hxc/rt"))
     exe = d / ("m-" + args.target if args.target else "m")
+    if args.target and args.target.startswith("windows"):
+        exe = d / ("m-" + args.target + ".exe")
     code, o, e = sh([HXMC, exe, "--hxb-lib", hxb, "-main", main, "--custom-target", "hxc", "-D", "disable-parallelism"] + tgt, env=env)
     m = re.search(r"(\d+)/(\d+) functions native", o)
     stats = (int(m.group(1)), int(m.group(2))) if m else None
@@ -104,7 +106,7 @@ def run_case(name, cps, main, args):
     if code != 0:
         return name, "hxmc-fail", (o + e)[-2000:], stats
     try:
-        runner = {"linux-arm64": ["qemu-aarch64-static"], "windows-x86_64": ["wine64"]}.get(args.target, [])
+        runner = {"linux-arm64": ["qemu-aarch64-static"], "windows-x86_64": ["/usr/lib/wine/wine64"]}.get(args.target, [])
         code, o, e = sh(runner + [exe], cwd=d, timeout=120)
     except subprocess.TimeoutExpired:
         return name, "timeout", "", stats

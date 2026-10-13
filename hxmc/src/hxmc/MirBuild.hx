@@ -1,7 +1,6 @@
 package hxmc;
 
 import backend.Ir;
-import backend.EmitC.Roots;
 import hxmc.Mir;
 
 // hxc's IR (backend.Ir: structured statements in A-normal form) of one
@@ -28,7 +27,7 @@ class MirBuild {
 	var nslots = 0;
 	var fr = -1; // the frame's shadow-stack slots (value)
 	var memSlot = new Map<Local, Int>(); // try functions: frame slot of a scalar local
-	var defs:Array<Map<Int, Int>> = [];
+	var defs:Array<BlockDefs> = [];
 	var incomplete:Array<Map<Int, MIns>> = [];
 	var varTy = new Map<Int, MTy>();
 	var nextVar = 0;
@@ -195,7 +194,7 @@ class MirBuild {
 
 	function newBlock():MBlock {
 		var b = f.newBlock();
-		defs.push(new Map());
+		defs.push(new BlockDefs());
 		incomplete.push(new Map());
 		return b;
 	}
@@ -390,10 +389,11 @@ class MirBuild {
 		}
 		nextVar = maxId;
 		roots = Roots.analyze(fn);
-		for (l => s in @:privateAccess roots.slots) {
-			refSlot.set(l, s);
-			if (s >= nslots) nslots = s + 1;
+		for (l in fn.args.concat(fn.locals)) {
+			var s = roots.slots[l.id];
+			if (s >= 0) refSlot.set(l, s);
 		}
+		nslots = roots.nslots;
 		var entry = newBlock();
 		f.entry = entry;
 		seal(entry);
@@ -412,8 +412,9 @@ class MirBuild {
 					store(8, fr, 8 * k, z);
 			} else {
 				var zero = new Map<Int, Bool>();
-				for (l in Roots.maybeUnset(fn))
-					if (refSlot.exists(l)) zero.set(refSlot.get(l), true);
+				var unset = Roots.maybeUnset(fn);
+				for (l in fn.locals)
+					if (unset.get(l.id) && refSlot.exists(l)) zero.set(refSlot.get(l), true);
 				if (zero.keys().hasNext()) {
 					var z = lconst(0, 0);
 					var ks = [for (k in zero.keys()) k];
@@ -557,7 +558,7 @@ class MirBuild {
 	function stmt(s:Stmt) {
 		switch s {
 			case SCold(id, x):
-				var list = @:privateAccess roots.spills.get(id);
+				var list = roots.spills.get(id);
 				coldList = list == null ? [] : [for (l in list) if (!refSlot.exists(l)) l];
 				coldStmt(x);
 				coldList = null;
@@ -1727,6 +1728,33 @@ class MirBuild {
 		seal(join);
 		cur = join;
 		return readVar(r, cur);
+	}
+}
+
+// the values of SSA variables at the end of a block (Braun et al.'s
+// currentDef for one block): few entries, a linear list
+class BlockDefs {
+	var keys:Array<Int> = [];
+	var vals:Array<Int> = [];
+
+	public function new() {}
+
+	public function get(v:Int):Null<Int> {
+		var k = keys.length;
+		while (k-- > 0)
+			if (keys[k] == v) return vals[k];
+		return null;
+	}
+
+	public function set(v:Int, val:Int) {
+		var k = keys.length;
+		while (k-- > 0)
+			if (keys[k] == v) {
+				vals[k] = val;
+				return;
+			}
+		keys.push(v);
+		vals.push(val);
 	}
 }
 

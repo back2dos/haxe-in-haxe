@@ -1,12 +1,13 @@
 package hxmc;
 
 import hxmc.Lir;
+import hxmc.Lir.Arrays;
 
 // What the register allocator needs to know about a target.
 interface RegTarget {
 	// the registers an instruction reads and writes, including fixed
 	// physical ones and the registers a call clobbers (as definitions)
-	function defsUses(i:LIns, defs:Array<Int>, uses:Array<Int>):Void;
+	function defsUses(i:LIns, defs:RegList, uses:RegList):Void;
 	// a register to register copy: d <- s1
 	function isMove(i:LIns):Bool;
 	// allocatable registers in order of preference (caller-saved first)
@@ -14,6 +15,19 @@ interface RegTarget {
 	var fprs(default, null):Array<Int>;
 	function spillLoad(r:Int, slot:Int, float:Bool):LIns;
 	function spillStore(slot:Int, r:Int, float:Bool):LIns;
+}
+
+// a list of registers that keeps its storage (defsUses fills one per instruction)
+class RegList {
+	public var a:Array<Int> = Arrays.filled(64, 0);
+	public var n = 0;
+
+	public function new() {}
+
+	public inline function push(r:Int) {
+		if (n == a.length) a.push(r) else a[n] = r;
+		n++;
+	}
 }
 
 // Linear-scan register allocation (Poletto and Sarkar) with one live range
@@ -28,8 +42,8 @@ class Regalloc {
 	var f:LFunc;
 	var t:RegTarget;
 	public var assigned:Array<Int>; // register -> physical register
-	public var usedRegs = new Map<Int, Bool>(); // physical registers used
-	var noSpill = new Map<Int, Bool>(); // registers made by spill code
+	public var usedRegs = [for (_ in 0...LFunc.NPHYS) false]; // physical registers used
+	var noSpillFrom = 0x7fffffff; // registers made by spill code are numbered from here
 
 	public function new(f:LFunc, t:RegTarget) {
 		this.f = f;
@@ -57,7 +71,7 @@ class Regalloc {
 
 	function allocate():Array<Int> {
 		var n = f.nregs;
-		var defs = [], uses = [];
+		var defs = new RegList(), uses = new RegList();
 		// positions
 		var pos = 0;
 		for (b in f.blocks) {
@@ -69,19 +83,19 @@ class Regalloc {
 		// intervals: per virtual register its first and last position, from
 		// its definitions and uses, extended over the blocks it is live
 		// across (found by walking back from each use to the definitions)
-		start = [for (_ in 0...n) 0x7fffffff];
-		end = [for (_ in 0...n) -1];
+		start = hxmc.Lir.Arrays.filled(n, 0x7fffffff);
+		end = hxmc.Lir.Arrays.filled(n, -1);
 		fixedFrom = [for (_ in 0...NPHYS) []];
 		fixedTo = [for (_ in 0...NPHYS) []];
-		var openFixed = [for (_ in 0...NPHYS) -1];
+		var openFixed = hxmc.Lir.Arrays.filled(NPHYS, -1);
 		var nb = f.blocks.length;
 		for (bi in 0...nb)
 			f.blocks[bi].id = bi;
 		// per register: the blocks with a use not preceded by a definition in the block (upward-exposed)
-		var exposedHead = [for (_ in 0...n) -1];
+		var exposedHead = hxmc.Lir.Arrays.filled(n, -1);
 		var exposedBlock:Array<Int> = [], exposedNext:Array<Int> = [];
 		// per block and register: defined in the block (stamped by block)
-		var defStamp = [for (_ in 0...n) -1];
+		var defStamp = hxmc.Lir.Arrays.filled(n, -1);
 		var defsIn:Array<Array<Int>> = [];
 		for (bi in 0...nb) {
 			var b = f.blocks[bi];
@@ -90,10 +104,11 @@ class Regalloc {
 			var p = b.from;
 			var dl = [];
 			for (i in b.ins) {
-				defs.resize(0);
-				uses.resize(0);
+				defs.n = 0;
+				uses.n = 0;
 				t.defsUses(i, defs, uses);
-				for (r in uses) {
+				for (k in 0...uses.n) {
+					var r = uses.a[k];
 					if (r >= NPHYS) {
 						if (end[r] < p) end[r] = p;
 						if (start[r] > p) start[r] = p;
@@ -110,7 +125,8 @@ class Regalloc {
 						addFixed(r, from, p);
 					}
 				}
-				for (r in defs) {
+				for (k in 0...defs.n) {
+					var r = defs.a[k];
 					if (r >= NPHYS) {
 						if (start[r] > p + 1) start[r] = p + 1;
 						if (end[r] < p + 1) end[r] = p + 1;
@@ -128,7 +144,7 @@ class Regalloc {
 			defsIn.push(dl);
 		}
 		// which blocks define each register
-		var defHead = [for (_ in 0...n) -1];
+		var defHead = hxmc.Lir.Arrays.filled(n, -1);
 		var defBlock:Array<Int> = [], defNext:Array<Int> = [];
 		for (bi in 0...nb)
 			for (r in defsIn[bi]) {
@@ -136,9 +152,9 @@ class Regalloc {
 				defNext.push(defHead[r]);
 				defHead[r] = defBlock.length - 1;
 			}
-		var defines = [for (_ in 0...nb) -1]; // stamped by register
-		var liveInSeen = [for (_ in 0...nb) -1];
-		var liveOutSeen = [for (_ in 0...nb) -1];
+		var defines = hxmc.Lir.Arrays.filled(nb, -1); // stamped by register
+		var liveInSeen = hxmc.Lir.Arrays.filled(nb, -1);
+		var liveOutSeen = hxmc.Lir.Arrays.filled(nb, -1);
 		var work:Array<Int> = [];
 		for (r in NPHYS...n) {
 			var e = exposedHead[r];
@@ -170,12 +186,24 @@ class Regalloc {
 		}
 		for (r in 0...NPHYS)
 			sortFixed(r);
-		// linear scan
-		var order = [for (r in NPHYS...n) if (end[r] >= 0) r];
-		order.sort((a, b) -> start[a] != start[b] ? start[a] - start[b] : a - b);
-		assigned = [for (r in 0...n) r < NPHYS ? r : -1];
+		// linear scan: intervals by start (a counting sort on positions; ties by register)
+		var count = hxmc.Lir.Arrays.filled(pos + 2, 0);
+		var live = 0;
+		for (r in NPHYS...n)
+			if (end[r] >= 0) {
+				count[start[r] + 1]++;
+				live++;
+			}
+		for (p in 1...pos + 2)
+			count[p] += count[p - 1];
+		var order = hxmc.Lir.Arrays.filled(live, 0);
+		for (r in NPHYS...n)
+			if (end[r] >= 0) order[count[start[r]]++] = r;
+		assigned = hxmc.Lir.Arrays.filled(n, -1);
+		for (r in 0...NPHYS)
+			assigned[r] = r;
 		var active:Array<Int> = [];
-		var busy = [for (_ in 0...NPHYS) 0];
+		var busy = hxmc.Lir.Arrays.filled(NPHYS, 0);
 		var busyStamp = 0;
 		var spilled = [];
 		var spillSet = new Map<Int, Bool>();
@@ -191,8 +219,8 @@ class Regalloc {
 			for (a in active)
 				busy[assigned[a]] = busyStamp;
 			var choice = -1;
-			var h = f.hints.get(r);
-			if (h != null) {
+			var h = f.hint(r);
+			if (h >= 0) {
 				var hr = h < NPHYS ? h : assigned[h];
 				if (hr >= 0 && busy[hr] != busyStamp && regs.indexOf(hr) >= 0 && !fixedOverlap(hr, start[r], end[r])) choice = hr;
 			}
@@ -206,17 +234,17 @@ class Regalloc {
 				// spill the active interval that ends last, if it ends after this one
 				var victim = -1;
 				for (a in active)
-					if (f.floatReg(a) == float && !noSpill.exists(a) && !fixedOverlap(assigned[a], start[r], end[r])
+					if (f.floatReg(a) == float && a < noSpillFrom && !fixedOverlap(assigned[a], start[r], end[r])
 						&& (victim < 0 || end[a] > end[victim]))
 						victim = a;
-				if (victim >= 0 && (end[victim] > end[r] || noSpill.exists(r))) {
+				if (victim >= 0 && (end[victim] > end[r] || r >= noSpillFrom)) {
 					choice = assigned[victim];
 					assigned[victim] = -1;
 					active.remove(victim);
 					spilled.push(victim);
 					spillSet.set(victim, true);
 				} else {
-					if (noSpill.exists(r)) throw "hxmc: out of registers in " + f.name;
+					if (r >= noSpillFrom) throw "hxmc: out of registers in " + f.name;
 					spilled.push(r);
 					spillSet.set(r, true);
 					continue;
@@ -239,12 +267,9 @@ class Regalloc {
 		tr.push(to);
 	}
 
+	// the ranges are recorded in position order (blocks in layout order,
+	// instructions in order): no sorting needed
 	function sortFixed(r:Int) {
-		var fr = fixedFrom[r], tr = fixedTo[r];
-		var idx = [for (i in 0...fr.length) i];
-		idx.sort((a, b) -> fr[a] - fr[b]);
-		fixedFrom[r] = [for (i in idx) fr[i]];
-		fixedTo[r] = [for (i in idx) tr[i]];
 		// a running maximum of the ends, so a binary search finds overlaps
 		var m = -1;
 		var ft = fixedTo[r];
@@ -276,45 +301,64 @@ class Regalloc {
 	// ---- spill code
 
 	function insertSpills(spilled:Array<Int>) {
-		var slotOf = new Map<Int, Int>();
+		var slotOf = hxmc.Lir.Arrays.filled(f.nregs, -1);
 		for (r in spilled)
-			slotOf.set(r, f.slot(8, 8));
-		var defs = [], uses = [];
+			slotOf[r] = f.slot(8, 8);
+		var defs = new RegList(), uses = new RegList();
+		// per instruction: spilled register -> its temporary (stamped by instruction)
+		var tmp = hxmc.Lir.Arrays.filled(f.nregs, -1);
+		var tmpStamp = hxmc.Lir.Arrays.filled(f.nregs, -1);
+		var stamp = 0;
+		var nOld = f.nregs;
+		if (noSpillFrom > nOld) noSpillFrom = nOld;
 		for (b in f.blocks) {
 			var out = [];
+			var any = false;
 			for (i in b.ins) {
-				defs.resize(0);
-				uses.resize(0);
+				defs.n = 0;
+				uses.n = 0;
 				t.defsUses(i, defs, uses);
-				var map = new Map<Int, Int>();
-				for (r in uses)
-					if (slotOf.exists(r) && !map.exists(r)) {
+				stamp++;
+				var mapped = false;
+				for (k in 0...uses.n) {
+					var r = uses.a[k];
+					if (r < nOld && slotOf[r] >= 0 && tmpStamp[r] != stamp) {
 						var nr = f.newReg(f.floatReg(r));
-						noSpill.set(nr, true);
-						map.set(r, nr);
-						out.push(t.spillLoad(nr, slotOf.get(r), f.floatReg(r)));
+						tmp[r] = nr;
+						tmpStamp[r] = stamp;
+						mapped = true;
+						out.push(t.spillLoad(nr, slotOf[r], f.floatReg(r)));
 					}
-				var stores = [];
-				for (r in defs)
-					if (slotOf.exists(r)) {
-						var nr = map.get(r);
-						if (nr == null) {
-							nr = f.newReg(f.floatReg(r));
-							noSpill.set(nr, true);
-							map.set(r, nr);
+				}
+				var stores = null;
+				for (k in 0...defs.n) {
+					var r = defs.a[k];
+					if (r < nOld && slotOf[r] >= 0) {
+						if (tmpStamp[r] != stamp) {
+							var nr = f.newReg(f.floatReg(r));
+								tmp[r] = nr;
+							tmpStamp[r] = stamp;
+							mapped = true;
 						}
-						stores.push(t.spillStore(slotOf.get(r), nr, f.floatReg(r)));
+						if (stores == null) stores = [];
+						stores.push(t.spillStore(slotOf[r], tmp[r], f.floatReg(r)));
 					}
-				if (map.keys().hasNext()) rename(i, r -> map.exists(r) ? map.get(r) : r);
+				}
+				if (mapped) {
+					var st = stamp;
+					rename(i, r -> r < nOld && tmpStamp[r] == st ? tmp[r] : r);
+					any = true;
+				}
 				out.push(i);
-				for (s in stores)
-					out.push(s);
+				if (stores != null)
+					for (s in stores)
+						out.push(s);
 			}
-			b.ins = out;
+			if (any || out.length != b.ins.length) b.ins = out;
 		}
 		// the hints of spilled registers no longer apply
 		for (r in spilled)
-			f.hints.remove(r);
+			f.setHint(r, -1);
 	}
 
 	public static function rename(i:LIns, m:Int->Int) {
@@ -335,7 +379,7 @@ class Regalloc {
 					a;
 				});
 				for (r in [i.d, i.s1, i.s2, i.s3, i.base, i.index])
-					if (r >= 0 && r < NPHYS) usedRegs.set(r, true);
+					if (r >= 0 && r < NPHYS) usedRegs[r] = true;
 			}
 	}
 }

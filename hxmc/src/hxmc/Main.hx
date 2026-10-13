@@ -16,10 +16,24 @@ package hxmc;
 //   HXMC_ONLY=<name,...>            compile only these functions natively (bisecting)
 //   HXMC_SKIP=<name,...>            never compile these natively
 class Main {
+	static var start = haxe.Timer.stamp();
+
 	static function main() {
 		var args = Sys.args();
+		if (args[0] == "--mkrt") {
+			args.shift();
+			MkRt.main(args);
+			return;
+		}
 		var out = args.shift();
 		var failed = null;
+		var hybrid = Sys.getEnv("HXMC_HYBRID") == "1" || args.indexOf("hxmc.hybrid") >= 0;
+		var key = hybrid ? null : UpToDate.key(args, out);
+		if (UpToDate.check(key, out)) {
+			if (Sys.getEnv("HXMC_STATS") == "1") Sys.println("hxmc: up to date (" + Std.int((haxe.Timer.stamp() - start) * 1000) + " ms)");
+			Sys.exit(0);
+		}
+		if (key != null) UpToDate.forget(out);
 		compiler.Compiler.generateHook = function(com) {
 			try {
 				var path = com.main.mainPath;
@@ -31,7 +45,10 @@ class Main {
 						case _:
 					}
 				var opts = Options.read(com);
-				Driver.run(backend.Lower.program(mainClass, com.types, com.basic), out, opts);
+				var t0 = haxe.Timer.stamp();
+				var prog = backend.Lower.program(mainClass, com.types, com.basic);
+				if (opts.stats) Sys.println('hxmc: lowering ${Std.int((haxe.Timer.stamp() - t0) * 1000)} ms (since start ${Std.int((t0 - start) * 1000)} ms)');
+				Driver.run(prog, out, opts);
 			} catch (e:Dynamic) {
 				failed = Std.string(e) + "\n" + haxe.CallStack.toString(haxe.CallStack.exceptionStack());
 			}
@@ -41,6 +58,7 @@ class Main {
 			Sys.stderr().writeString("hxmc: " + failed + "\n");
 			Sys.exit(1);
 		}
+		if (code == 0) UpToDate.record(key, out);
 		Sys.exit(code);
 	}
 }

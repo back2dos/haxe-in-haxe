@@ -11,6 +11,7 @@ class Options {
 	public var only:Null<Map<String, Bool>> = null;
 	public var skip = new Map<String, Bool>();
 	public var verbose = false;
+	public var jobs = 0; // parallel module compilations (HXMC_JOBS, -D hxmc.jobs; 0: the cores)
 	public var dump:Null<String> = null; // function names whose machine code is printed (HXMC_DUMP)
 
 	public function new() {}
@@ -47,6 +48,9 @@ class Options {
 		var s = names(env("HXMC_SKIP"));
 		if (s != null) o.skip = s;
 		o.dump = env("HXMC_DUMP");
+		var j = def("hxmc.jobs");
+		if (j == null) j = env("HXMC_JOBS");
+		if (j != null) o.jobs = Std.parseInt(j);
 		return o;
 	}
 }

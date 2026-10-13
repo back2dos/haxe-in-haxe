@@ -15,6 +15,8 @@ class ElfWriter {
 			case RAbs32: 10;
 			case RAbs32S: 11;
 			case RTpOff32: 23;
+			case RSecRel32: 250; // (hxmc's runtime container only)
+			case RImgRel32: 251;
 			case _: throw "hxmc: relocation " + k + " on x86-64";
 		}
 		return switch k {

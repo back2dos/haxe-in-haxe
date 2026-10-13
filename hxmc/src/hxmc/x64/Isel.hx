@@ -42,6 +42,7 @@ enum abstract XOp(Int) to Int from Int {
 	var JCC; // cond -> target
 	var JTABLE; // d: table address (clobbered), s1: index, s2: scratch; table
 	var LEATABLE; // d <- address of the jump table of the next JTABLE (table)
+	var GSLOAD; // d <- gs:[imm] (Windows)
 	var TLSLOAD; // d <- fs:[sym]
 	var TLSSTORE; // fs:[sym] <- s1
 	var UD2;
@@ -58,9 +59,18 @@ class Isel implements hxmc.Target.Selector {
 	static inline var RSP = 4;
 	static inline var XMM0 = 16;
 
+	// System V; Win64 (win): arguments by position in rcx, rdx, r8, r9 / xmm0-3
+	// with 32 bytes of shadow space, rsi, rdi and xmm6-15 callee-saved
 	public static var ARG_GPRS = [7, 6, 2, 1, 8, 9];
 	public static var CALLER_SAVED = [0, 1, 2, 6, 7, 8, 9, 10, 11, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31];
 	public static var CALLEE_SAVED = [3, 5, 12, 13, 14, 15];
+	public static var WIN_ARG_GPRS = [1, 2, 8, 9];
+	public static var WIN_CALLER_SAVED = [0, 1, 2, 8, 9, 10, 11, 16, 17, 18, 19, 20, 21];
+	public static var WIN_CALLEE_SAVED = [3, 5, 6, 7, 12, 13, 14, 15, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31];
+
+	public var win:Bool;
+	var callerSaved:Array<Int>;
+	var tlsBase = -1;
 
 	var m:MFunc;
 	var f:LFunc;
@@ -70,14 +80,40 @@ class Isel implements hxmc.Target.Selector {
 	var cur:LBlock;
 	var folded:Array<Bool>; // Mir values computed inside their user (no code of their own)
 
-	public function new() {
-		gprs = [1, 2, 6, 7, 8, 9, 10, 11, 0, 3, 12, 13, 14, 15, 5];
+	public function new(win = false) {
+		this.win = win;
+		if (win) {
+			gprs = [1, 2, 8, 9, 10, 11, 0, 3, 6, 7, 12, 13, 14, 15, 5];
+			callerSaved = WIN_CALLER_SAVED;
+		} else {
+			gprs = [1, 2, 6, 7, 8, 9, 10, 11, 0, 3, 12, 13, 14, 15, 5];
+			callerSaved = CALLER_SAVED;
+		}
 		fprs = [for (i in 16...32) i];
+	}
+
+	// where argument k of a function with these parameter types is: a
+	// register (>= 0), or -1 - (its 8-byte slot among the stack arguments,
+	// counted from the first one; Win64 counts the shadow space)
+	function argLoc(params:Array<MTy>, k:Int):Int {
+		if (win) {
+			if (k < 4) return params[k] == F64 ? XMM0 + k : WIN_ARG_GPRS[k];
+			return -1 - k;
+		}
+		var gi = 0, fi = 0, si = 0;
+		for (j in 0...k)
+			if (params[j] == F64) {
+				if (fi < 8) fi++ else si++;
+			} else {
+				if (gi < 6) gi++ else si++;
+			}
+		if (params[k] == F64) return fi < 8 ? XMM0 + fi : -1 - si;
+		return gi < 6 ? ARG_GPRS[gi] : -1 - si;
 	}
 
 	// ---- RegTarget
 
-	public function defsUses(i:LIns, defs:Array<Int>, uses:Array<Int>) {
+	public function defsUses(i:LIns, defs:hxmc.Regalloc.RegList, uses:hxmc.Regalloc.RegList) {
 		inline function mem() {
 			if (i.base >= 0) uses.push(i.base);
 			if (i.index >= 0) uses.push(i.index);
@@ -86,7 +122,7 @@ class Isel implements hxmc.Target.Selector {
 			case MOV | CVTI2F | CVTF2I | MOVQXR | MOVQRX | FSQRT:
 				defs.push(i.d);
 				uses.push(i.s1);
-			case MOVI | MOVF | SETCC | TLSLOAD | LEATABLE:
+			case MOVI | MOVF | SETCC | TLSLOAD | LEATABLE | GSLOAD:
 				defs.push(i.d);
 			case LEA | LOAD:
 				defs.push(i.d);
@@ -128,7 +164,7 @@ class Isel implements hxmc.Target.Selector {
 				if (i.s1 >= 0) uses.push(i.s1);
 				for (u in i.uses)
 					uses.push(u);
-				for (r in CALLER_SAVED)
+				for (r in callerSaved)
 					defs.push(r);
 			case RET:
 				if (i.uses != null) for (u in i.uses)
@@ -220,8 +256,8 @@ class Isel implements hxmc.Target.Selector {
 		i.d = d;
 		i.s1 = s;
 		i.size = size;
-		f.hints.set(d, s);
-		if (s >= LFunc.NPHYS) f.hints.set(s, d);
+		if (d >= LFunc.NPHYS) f.setHint(d, s);
+		if (s >= LFunc.NPHYS) f.setHint(s, d);
 	}
 
 	// the absolute symbol of a symbolic constant (its immediate is the addend)
@@ -249,8 +285,8 @@ class Isel implements hxmc.Target.Selector {
 		f = new LFunc(mf.name, 16);
 		for (s in mf.slots)
 			f.slot(s.size, s.align);
-		vreg = [for (_ in mf.vals) -1];
-		useCount = [for (_ in mf.vals) 0];
+		vreg = hxmc.Lir.Arrays.filled(mf.vals.length, -1);
+		useCount = hxmc.Lir.Arrays.filled(mf.vals.length, 0);
 		folded = [for (_ in mf.vals) false];
 		for (b in mf.blocks)
 			for (i in b.ins) {
@@ -275,6 +311,34 @@ class Isel implements hxmc.Target.Selector {
 			l.loopDepth = b.loopDepth;
 			lb[b.id] = l;
 			f.blocks.push(l);
+		}
+		// Windows: the thread's TLS block once per function,
+		// ThreadLocalStoragePointer[_tls_index] (gs:[0x58] is the pointer array)
+		tlsBase = -1;
+		if (win) {
+			var uses = false;
+			for (b in mf.blocks)
+				for (i in b.ins)
+					if (i.op == TlsLoad || i.op == TlsStore) uses = true;
+			if (uses) {
+				cur = lb[layout[0].id];
+				var idx = f.newReg(false), arr = f.newReg(false);
+				tlsBase = f.newReg(false);
+				var x = emit(LOAD);
+				x.d = idx;
+				x.sym = "_tls_index";
+				x.size = 4;
+				var g = emit(GSLOAD);
+				g.d = arr;
+				g.imm = 0x58;
+				var l = emit(LOAD);
+				l.d = tlsBase;
+				l.base = arr;
+				l.index = idx;
+				l.scale = 8;
+				l.size = 8;
+				flush();
+			}
 		}
 		for (bi in 0...layout.length) {
 			var b = layout[bi];
@@ -519,23 +583,13 @@ class Isel implements hxmc.Target.Selector {
 		switch i.op {
 			case Phi:
 			case Param:
-				var k = i.imm;
-				var ni = 0, nf = 0, ns = 0;
-				for (j in 0...k)
-					if (m.params[j] == F64) nf++ else ni++;
-				var gi = 0, fi = 0, si = 0;
-				for (j in 0...k)
-					if (m.params[j] == F64) {
-						if (fi < 8) fi++ else si++;
-					} else {
-						if (gi < 6) gi++ else si++;
-					}
+				var loc = argLoc(m.params, i.imm);
 				var d = reg(i.id);
-				if (i.ty == F64 && fi < 8) mov(d, XMM0 + fi) else if (i.ty != F64 && gi < 6) mov(d, ARG_GPRS[gi]) else {
+				if (loc >= 0) mov(d, loc) else {
 					var x = emit(LOAD);
 					x.d = d;
 					x.base = -3; // incoming stack arguments
-					x.disp = 8 * si;
+					x.disp = 8 * (-1 - loc);
 					x.size = 8;
 				}
 			case Const | SymAddr | StackAddr:
@@ -544,6 +598,19 @@ class Isel implements hxmc.Target.Selector {
 				var x = emit(MOVF);
 				x.d = reg(i.id);
 				x.f = i.f;
+			case TlsLoad if (win):
+				var x = emit(LOAD);
+				x.d = reg(i.id);
+				x.base = tlsBase;
+				x.secrel = i.sym;
+				x.size = 8;
+			case TlsStore if (win):
+				var v = use(i.a);
+				var x = emit(STORE);
+				x.s1 = v;
+				x.base = tlsBase;
+				x.secrel = i.sym;
+				x.size = 8;
 			case TlsLoad:
 				var x = emit(TLSLOAD);
 				x.d = reg(i.id);
@@ -807,8 +874,7 @@ class Isel implements hxmc.Target.Selector {
 		var t = b.term();
 		if (t == null || t.op != Br || t.a != i.id) return false;
 		// nothing between them that changes flags: the comparison must be the instruction before the branch
-		var k = b.ins.indexOf(i);
-		if (k != b.ins.length - 2) return false;
+		if (b.ins.length < 2 || b.ins[b.ins.length - 2] != i) return false;
 		folded[i.id] = true;
 		return true;
 	}
@@ -873,37 +939,32 @@ class Isel implements hxmc.Target.Selector {
 
 	function call(i:MIns) {
 		f.hasCalls = true;
-		var gi = 0, fi = 0, stack = 0;
+		var stack = 0;
 		var uses = [];
 		var moves:Array<{d:Int, s:Int, size:Int}> = [];
 		for (k in 0...i.args.length) {
 			var a = i.args[k];
 			var t = i.argTys[k];
-			if (t == F64) {
-				if (fi < 8) {
-					moves.push({d: XMM0 + fi, s: a, size: 8});
-					uses.push(XMM0 + fi);
-					fi++;
-					continue;
-				}
-			} else if (gi < 6) {
-				moves.push({d: ARG_GPRS[gi], s: a, size: sz(t)});
-				uses.push(ARG_GPRS[gi]);
-				gi++;
+			var loc = argLoc(i.argTys, k);
+			if (loc >= 0) {
+				moves.push({d: loc, s: a, size: t == F64 ? 8 : sz(t)});
+				uses.push(loc);
 				continue;
 			}
 			// stack argument
+			stack = -loc;
 			var imm = immOf(a);
 			var x = emit(imm != null && t != F64 ? STOREI : STORE);
 			x.base = -4; // outgoing argument area
-			x.disp = 8 * stack;
+			x.disp = 8 * (-1 - loc);
 			x.size = 8;
 			if (imm != null && t != F64) {
 				x.imm = imm;
 				x.isym = isymOf(a);
 			} else x.s1 = use(a);
-			stack++;
 		}
+		// Win64: the callee's shadow space
+		if (win && stack < 4) stack = 4;
 		if (8 * stack > f.outArgs) f.outArgs = 8 * stack;
 		var target = i.sym == null ? use(i.a) : -1;
 		for (mv in moves)

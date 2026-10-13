@@ -20,6 +20,7 @@ class LIns {
 	public var disp:Int = 0;
 	public var slot:Int = -1; // frame slot (base == FRAME)
 	public var sym:Null<String>;
+	public var secrel:Null<String>; // [base + the offset of this TLS variable in .tls] (Windows)
 	public var imm:Int = 0;
 	public var isym:Null<String>; // the immediate is this absolute symbol + imm
 	public var imm2:Int = 0;
@@ -67,7 +68,17 @@ class LFunc {
 	public var slots:Array<{size:Int, align:Int}> = []; // frame slots (MIR slots, then spills)
 	public var outArgs = 0; // bytes of outgoing stack arguments
 	public var hasCalls = false;
-	public var hints = new Map<Int, Int>(); // vreg -> preferred register (physical or virtual)
+	var hints:Array<Int> = []; // vreg - NPHYS -> preferred register (physical or virtual), -1
+
+	public inline function hint(r:Int):Int
+		return r - NPHYS < hints.length ? hints[r - NPHYS] : -1;
+
+	public function setHint(r:Int, h:Int) {
+		var k = r - NPHYS;
+		while (hints.length <= k)
+			hints.push(-1);
+		hints[k] = h;
+	}
 
 	public function new(name, fprBase:Int) {
 		this.name = name;
@@ -89,12 +100,23 @@ class LFunc {
 	}
 }
 
+class Arrays {
+	// an Int array of n copies of v (sized once, not grown element by element)
+	public static function filled(n:Int, v:Int):Array<Int> {
+		var a = new Array<Int>();
+		a.resize(n);
+		for (i in 0...n)
+			a[i] = v;
+		return a;
+	}
+}
+
 // a fixed-size bit set
 class Bits {
 	public var w:Array<Int>;
 
 	public function new(n:Int) {
-		w = [for (_ in 0...((n + 31) >> 5)) 0];
+		w = Arrays.filled((n + 31) >> 5, 0);
 	}
 
 	public inline function get(i:Int):Bool

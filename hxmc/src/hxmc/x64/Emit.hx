@@ -15,8 +15,11 @@ class Emit implements hxmc.Target.Emitter {
 	var pool = new Map<String, Symbol>();
 	var npool = 0;
 
-	public function new(obj:Obj) {
+	var win:Bool;
+
+	public function new(obj:Obj, win = false) {
 		this.obj = obj;
+		this.win = win;
 		text = obj.section(".text", Text, 16);
 		rodata = obj.section(".rodata", RoData, 16);
 		a = new Asm(text);
@@ -47,8 +50,10 @@ class Emit implements hxmc.Target.Emitter {
 	var slotOff:Array<Int>;
 	var frameSize = 0;
 	var saved:Array<Int>;
+	var savedX:Array<Int>; // Win64: xmm6-15 used, saved in the frame (all 128 bits)
+	var savedXOff:Array<Int>;
 
-	public function func(f:LFunc, usedRegs:Map<Int, Bool>, global:Bool):Symbol {
+	public function func(f:LFunc, usedRegs:Array<Bool>, global:Bool):Symbol {
 		text.buf.align(16, 0xcc);
 		var start = text.buf.len;
 		a.reset();
@@ -61,16 +66,34 @@ class Emit implements hxmc.Target.Emitter {
 			slotOff.push(off);
 			off += s.size;
 		}
-		saved = [for (r in Isel.CALLEE_SAVED) if (usedRegs.exists(r)) r];
+		saved = [for (r in (win ? Isel.WIN_CALLEE_SAVED : Isel.CALLEE_SAVED)) if (r < 16 && usedRegs[r]) r];
+		savedX = [for (r in (win ? Isel.WIN_CALLEE_SAVED : [])) if (r >= 16 && usedRegs[r]) r];
+		savedXOff = [];
+		for (_ in savedX) {
+			off = (off + 15) & ~15;
+			savedXOff.push(off);
+			off += 16;
+		}
 		var x = off;
 		while ((8 + 8 * saved.length + x) % 16 != 0)
 			x += 8;
 		// leaf functions without slots keep rsp as it is
-		if (!f.hasCalls && f.slots.length == 0 && f.outArgs == 0) x = 0;
+		if (!f.hasCalls && f.slots.length == 0 && f.outArgs == 0 && savedX.length == 0) x = 0;
 		frameSize = x;
 		for (r in saved)
 			a.push(r);
-		if (frameSize > 0) a.aluRI(Asm.SUB, 8, Asm.RSP, frameSize);
+		if (win && frameSize >= 4096) {
+			// Windows commits the stack one guard page at a time: touch each page
+			var left = frameSize;
+			while (left >= 4096) {
+				a.aluRI(Asm.SUB, 8, Asm.RSP, 4096);
+				a.aluMI(Asm.OR, 8, new Mem(Asm.RSP, 0), 0);
+				left -= 4096;
+			}
+			if (left > 0) a.aluRI(Asm.SUB, 8, Asm.RSP, left);
+		} else if (frameSize > 0) a.aluRI(Asm.SUB, 8, Asm.RSP, frameSize);
+		for (k in 0...savedX.length)
+			a.movupsMR(new Mem(Asm.RSP, savedXOff[k]), savedX[k]);
 		for (b in f.blocks)
 			b.label = a.newLabel();
 		var tables:Array<{label:Int, entries:Array<LBlock>}> = [];
@@ -96,6 +119,12 @@ class Emit implements hxmc.Target.Emitter {
 	}
 
 	function mem(i:LIns):Mem {
+		if (i.secrel != null) {
+			var m = new Mem(i.base, i.disp);
+			m.dispSym = obj.sym(i.secrel);
+			m.dispKind = RSecRel32;
+			return m;
+		}
 		if (i.sym != null) return Mem.rip(obj.sym(i.sym), i.disp);
 		if (i.base == LIns.FRAME) return new Mem(Asm.RSP, slotOff[i.slot] + i.disp);
 		if (i.base == -3) return new Mem(Asm.RSP, frameSize + 8 * saved.length + 8 + i.disp);
@@ -113,6 +142,8 @@ class Emit implements hxmc.Target.Emitter {
 		return r >= 16;
 
 	function epilogue() {
+		for (k in 0...savedX.length)
+			a.movupsRM(savedX[k], new Mem(Asm.RSP, savedXOff[k]));
 		if (frameSize > 0) a.aluRI(Asm.ADD, 8, Asm.RSP, frameSize);
 		var k = saved.length;
 		while (k-- > 0)
@@ -211,6 +242,10 @@ class Emit implements hxmc.Target.Emitter {
 				a.movsxd(i.s2, new Mem(i.d, 0, i.s1, 4));
 				a.aluRR(Asm.ADD, 8, i.d, i.s2);
 				a.jmpR(i.d);
+			case GSLOAD:
+				var m = new Mem(-1, i.imm);
+				m.gs = true;
+				a.load(8, i.d, m);
 			case TLSLOAD:
 				a.load(8, i.d, Mem.tlsVar(tlsSym(i.sym)));
 			case TLSSTORE:

@@ -10,13 +10,13 @@ interface Selector extends Regalloc.RegTarget {
 }
 
 interface Emitter {
-	function func(f:LFunc, usedRegs:Map<Int, Bool>, global:Bool):Obj.Symbol;
+	function func(f:LFunc, usedRegs:Array<Bool>, global:Bool):Obj.Symbol;
 }
 
 class Target {
 	public static function selector(abi:Abi):Selector
-		return abi.arm ? new hxmc.a64.Isel(abi.os == "macos") : new hxmc.x64.Isel();
+		return abi.arm ? new hxmc.a64.Isel(abi.os == "macos") : new hxmc.x64.Isel(abi.os == "windows");
 
 	public static function emitter(abi:Abi, obj:Obj):Emitter
-		return abi.arm ? new hxmc.a64.Emit(obj) : new hxmc.x64.Emit(obj);
+		return abi.arm ? new hxmc.a64.Emit(obj) : new hxmc.x64.Emit(obj, abi.os == "windows");
 }

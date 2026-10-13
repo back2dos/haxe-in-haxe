@@ -14,6 +14,9 @@ class Mem {
 	public var disp:Int;
 	public var sym:Null<Symbol>; // RIP-relative symbol (disp is the addend)
 	public var tls:Bool = false; // fs:[sym@tpoff + disp] (local-exec TLS)
+	public var gs:Bool = false; // gs:[disp32] (Windows: the thread environment block)
+	public var dispSym:Null<Symbol>; // [base + disp32] with the displacement relocated (dispKind)
+	public var dispKind:RelKind = RSecRel32;
 
 	public function new(base:Int, disp:Int = 0, index:Int = -1, scale:Int = 1) {
 		this.base = base;
@@ -160,6 +163,7 @@ class Asm {
 	// /digit), r/m operand (a register when m == null)
 	function op(prefix:Int, w:Bool, opcode:Int, nbytes:Int, reg:Int, rm:Int, m:Null<Mem>, byteRegs = 0, immBytes = 0) {
 		if (m != null && m.tls) b.u8(0x64); // fs:
+		if (m != null && m.gs) b.u8(0x65); // gs:
 		if (prefix != 0) b.u8(prefix);
 		var rex = (w ? 8 : 0) | ((reg & 8) != 0 ? 4 : 0);
 		if (m == null) {
@@ -195,6 +199,23 @@ class Asm {
 			}
 			// the displacement is relative to the end of the instruction
 			reloc(RPc32, m.sym, m.disp - 4 - immBytes);
+			b.u32(0);
+			return;
+		}
+		if (m.gs) {
+			b.u8((r << 3) | 4);
+			b.u8(0x25);
+			b.u32(m.disp);
+			return;
+		}
+		if (m.dispSym != null) {
+			// [base (+ index) + disp32] with a relocated displacement
+			var base = m.base & 7;
+			if (m.index >= 0 || base == 4) {
+				b.u8((2 << 6) | (r << 3) | 4);
+				b.u8((scaleBits(m.scale) << 6) | ((m.index >= 0 ? m.index : 4) & 7) << 3 | base);
+			} else b.u8((2 << 6) | (r << 3) | base);
+			reloc(m.dispKind, m.dispSym, m.disp);
 			b.u32(0);
 			return;
 		}
@@ -555,6 +576,13 @@ class Asm {
 
 	function sse(prefix:Int, w:Bool, opcode:Int, reg:Int, rm:Int, m:Null<Mem>)
 		op(prefix, w, opcode, 2, reg & 15, rm & 15, m);
+
+	// movups m128, xmm / xmm, m128 (saving callee-saved xmm registers whole)
+	public function movupsMR(m:Mem, src:Int)
+		sse(0, false, 0x0f11, src, 0, m);
+
+	public function movupsRM(dst:Int, m:Mem)
+		sse(0, false, 0x0f10, dst, 0, m);
 
 	public function movsdRR(dst:Int, src:Int) {
 		if (dst != src) sse(0x66, false, 0x0f28, dst, src, null); // movapd

@@ -31,7 +31,7 @@ class Emit implements hxmc.Target.Emitter {
 	var saved:Array<Int>;
 	var saveOff:Array<Int>;
 
-	public function func(f:LFunc, usedRegs:Map<Int, Bool>, global:Bool):Symbol {
+	public function func(f:LFunc, usedRegs:Array<Bool>, global:Bool):Symbol {
 		text.buf.align(16, 0);
 		var start = text.buf.len;
 		a.reset();
@@ -43,7 +43,7 @@ class Emit implements hxmc.Target.Emitter {
 			slotOff.push(off);
 			off += s.size;
 		}
-		saved = [for (r in Isel.CALLEE_SAVED) if (usedRegs.exists(r)) r];
+		saved = [for (r in Isel.CALLEE_SAVED) if (usedRegs[r]) r];
 		saveOff = [];
 		for (r in saved) {
 			saveOff.push(off);
