@@ -914,13 +914,7 @@ class MirBuild {
 		storeM(Opt.MInit, 4, ptr, 0, iconst(hdrLo(n, kind)));
 		storeM(Opt.MInit, 4, ptr, 4, tyConst(tidx));
 		var o = op2(Add, I64, ptr, lconst32(8));
-		if (zero) {
-			if (n <= 16) {
-				var z = lconst(0, 0);
-				for (k in 0...n)
-					storeM(Opt.MInit, 8, o, 8 * k, z);
-			} else call("memset", [o, iconst(0), lconst32(8 * n)], I64);
-		}
+		if (zero && n > 16) call("memset", [o, iconst(0), lconst32(8 * n)], I64);
 		writeVar(res, cur, o);
 		jmp(join);
 		cur = slow;
@@ -933,7 +927,15 @@ class MirBuild {
 		jmp(join);
 		seal(join);
 		cur = join;
-		return readVar(res, cur);
+		var obj = readVar(res, cur);
+		// zeroed after the join (no collection between): with the stores that
+		// initialize the object in the same block, Opt drops the overwritten ones
+		if (zero && n <= 16) {
+			var z = lconst(0, 0);
+			for (k in 0...n)
+				storeM(Opt.MInit, 8, obj, 8 * k, z);
+		}
+		return obj;
 	}
 
 	// stores the cold site's references in a pushed area (null: none)

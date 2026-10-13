@@ -61,6 +61,7 @@ class Opt {
 			versions(order);
 			canonicalize();
 			gvn(order);
+			forwardStores();
 		}
 		rewrite();
 		dce();
@@ -216,6 +217,110 @@ class Opt {
 			}
 		}
 		f.blocks = [for (b in f.blocks) if (reach.exists(b.id)) b];
+	}
+
+	// ---- stores
+
+	// Within each block: a load of an object field just stored gets the
+	// stored value; a store overwritten before anything could read it
+	// (typically the zeroing of a new object's slots, then its
+	// initialization) is dropped. A call ends what is known (it may read, or
+	// collect: the zeroing is what a collection would see).
+	// an address as base + constant (a slot address o + 8k is o, 8k)
+	function baseOf(a:Int):Int {
+		var x = f.vals[res(a)];
+		if (x.op == Add && x.ty == I64) {
+			var c = f.vals[res(x.b)];
+			if (c.op == Const && c.sym == null && c.imm2 == (c.imm < 0 ? -1 : 0)) return cres(x.a);
+		}
+		return cres(a);
+	}
+
+	function dispOf(a:Int):Int {
+		var x = f.vals[res(a)];
+		if (x.op == Add && x.ty == I64) {
+			var c = f.vals[res(x.b)];
+			if (c.op == Const && c.sym == null && c.imm2 == (c.imm < 0 ? -1 : 0)) return c.imm;
+		}
+		return 0;
+	}
+
+	function forwardStores() {
+		var vals = f.vals;
+		for (b in f.blocks) {
+			// the last store per (base, disp, size) of fields and new objects
+			var keyBase:Array<Int> = [], keyDisp:Array<Int> = [], keySize:Array<Int> = [];
+			var keyStore:Array<MIns> = [], keySeen:Array<Bool> = [];
+			inline function clear() {
+				keyBase.resize(0);
+				keyDisp.resize(0);
+				keySize.resize(0);
+				keyStore.resize(0);
+				keySeen.resize(0);
+			}
+			for (i in b.ins) {
+				if (i.dead) continue;
+				switch i.op {
+					case Store if ((i.mem == MInit || i.mem == MField) && i.b < 0):
+						var base = baseOf(i.a), d = i.imm + dispOf(i.a), sz = i.size;
+						var k = 0;
+						var replaced = false;
+						while (k < keyBase.length) {
+							if (keyDisp[k] == d && keyBase[k] == base) {
+								// the previous store at this address, unread: dead
+								if (!keySeen[k] && keySize[k] == sz) keyStore[k].dead = true;
+								keyStore[k] = i;
+								keySize[k] = sz;
+								keySeen[k] = false;
+								replaced = true;
+								k++;
+							} else if (i.mem == MField && (keyDisp[k] == d || keyDisp[k] - d < 8 && d - keyDisp[k] < 8)) {
+								// another object may be this one: forget that slot
+								keyBase.splice(k, 1);
+								keyDisp.splice(k, 1);
+								keySize.splice(k, 1);
+								keyStore.splice(k, 1);
+								keySeen.splice(k, 1);
+							} else k++;
+						}
+						if (!replaced) {
+							keyBase.push(base);
+							keyDisp.push(d);
+							keySize.push(sz);
+							keyStore.push(i);
+							keySeen.push(false);
+						}
+					case Store:
+						// arrays, globals, frames: other memory (a field store through
+						// an index, or unknown memory, ends everything)
+						if (i.mem == MOther || i.mem == MField || i.mem == MInit) clear();
+					case Load:
+						var base = baseOf(i.a);
+						var ld = i.imm + dispOf(i.a);
+						var hit = false;
+						for (k in 0...keyBase.length)
+							if (keyBase[k] == base) {
+								if (i.b < 0 && keyDisp[k] == ld && keySize[k] == i.size && (i.mem == MField || i.mem == MInit)) {
+									var v = keyStore[k].c;
+									if (!hit && vals[res(v)].ty == i.ty) {
+										repl[i.id] = res(v);
+										i.dead = true;
+										hit = true;
+									} else keySeen[k] = true;
+								} else if (i.b >= 0 || keyDisp[k] - ld < 8 && ld - keyDisp[k] < 8) keySeen[k] = true;
+							}
+						if (i.mem == MOther)
+							for (k in 0...keySeen.length)
+								keySeen[k] = true;
+					case Call:
+						if (i.returnsTwice || i.sym == null || !readOnly.exists(i.sym)) clear() else
+							for (k in 0...keySeen.length)
+								keySeen[k] = true;
+					case TlsLoad | TlsStore:
+					case _:
+				}
+			}
+		}
 	}
 
 	function rpo():Array<MBlock> {
