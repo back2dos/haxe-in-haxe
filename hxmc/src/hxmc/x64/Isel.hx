@@ -183,6 +183,11 @@ class Isel implements hxmc.Target.Selector {
 	public function isMove(i:LIns):Bool
 		return i.op == MOV;
 
+	public var callResults(default, null):Array<Int> = [0, 16];
+
+	public function isCall(i:LIns):Bool
+		return i.op == CALL;
+
 	public function spillLoad(r:Int, slot:Int, float:Bool):LIns {
 		var i = new LIns(LOAD);
 		i.d = r;

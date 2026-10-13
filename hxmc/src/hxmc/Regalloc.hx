@@ -15,6 +15,10 @@ interface RegTarget {
 	var fprs(default, null):Array<Int>;
 	function spillLoad(r:Int, slot:Int, float:Bool):LIns;
 	function spillStore(slot:Int, r:Int, float:Bool):LIns;
+	// calls: the registers that hold their results (the other registers a
+	// call defines are clobbered)
+	function isCall(i:LIns):Bool;
+	var callResults(default, null):Array<Int>;
 }
 
 // a list of registers that keeps its storage (defsUses fills one per instruction)
@@ -54,6 +58,7 @@ class Regalloc {
 		for (round in 0...8) {
 			var spilled = allocate();
 			if (spilled.length == 0) {
+				coldSaves();
 				rewrite();
 				return;
 			}
@@ -71,6 +76,7 @@ class Regalloc {
 
 	function allocate():Array<Int> {
 		var n = f.nregs;
+		coldCalls = [];
 		var defs = new RegList(), uses = new RegList();
 		// positions
 		var pos = 0;
@@ -107,6 +113,10 @@ class Regalloc {
 				defs.n = 0;
 				uses.n = 0;
 				t.defsUses(i, defs, uses);
+				// a call on a slow path clobbers only its result registers here:
+				// what lives across it is saved and restored around it (coldSaves)
+				var coldCall = b.cold && t.isCall(i);
+				if (coldCall) coldCalls.push(p);
 				for (k in 0...uses.n) {
 					var r = uses.a[k];
 					if (r >= NPHYS) {
@@ -135,6 +145,7 @@ class Regalloc {
 							dl.push(r);
 						}
 					} else if (r >= 0) {
+						if (coldCall && t.callResults.indexOf(r) < 0) continue;
 						openFixed[r] = p + 1;
 						addFixed(r, p + 1, p + 1);
 					}
@@ -254,6 +265,69 @@ class Regalloc {
 			active.push(r);
 		}
 		return spilled;
+	}
+
+	var coldCalls:Array<Int> = []; // positions of the calls in cold blocks (the last round's)
+
+	// Saves the caller-saved registers live across each slow-path call into
+	// frame slots before it and reloads them after it (allocate let values
+	// stay in such registers across those calls).
+	function coldSaves() {
+		if (coldCalls.length == 0) return;
+		// coldCalls is sorted (positions in order); per call, the physical
+		// registers of the values live across it
+		var saves:Array<Array<Int>> = [for (_ in coldCalls) null];
+		for (r in NPHYS...f.nregs) {
+			var a = assigned[r];
+			if (a < 0 || end[r] < 0 || t.callResults.indexOf(a) >= 0) continue;
+			// the first call after start[r]
+			var lo = 0, hi = coldCalls.length;
+			while (lo < hi) {
+				var mid = (lo + hi) >> 1;
+				if (coldCalls[mid] <= start[r]) lo = mid + 1 else hi = mid;
+			}
+			while (lo < coldCalls.length && coldCalls[lo] + 1 < end[r]) {
+				var l = saves[lo];
+				if (l == null) saves[lo] = l = [];
+				if (l.indexOf(a) < 0) l.push(a);
+				lo++;
+			}
+		}
+		var index = new Map<Int, Int>();
+		for (k in 0...coldCalls.length)
+			index.set(coldCalls[k], k);
+		var slotOf = [for (_ in 0...NPHYS) -1];
+		var defs = new RegList(), uses = new RegList();
+		for (b in f.blocks) {
+			if (!b.cold) continue;
+			var out = [];
+			var p = b.from;
+			for (i in b.ins) {
+				var k = index.get(p);
+				var save = k == null ? null : saves[k];
+				if (save != null) {
+					// only what the call clobbers
+					defs.n = 0;
+					uses.n = 0;
+					t.defsUses(i, defs, uses);
+					var after = [];
+					for (a in save) {
+						var clobbered = false;
+						for (j in 0...defs.n)
+							if (defs.a[j] == a) clobbered = true;
+						if (!clobbered) continue;
+						if (slotOf[a] < 0) slotOf[a] = f.slot(8, 8);
+						out.push(t.spillStore(slotOf[a], a, a >= f.fprBase));
+						after.push(t.spillLoad(a, slotOf[a], a >= f.fprBase));
+					}
+					out.push(i);
+					for (x in after)
+						out.push(x);
+				} else out.push(i);
+				p += 2;
+			}
+			b.ins = out;
+		}
 	}
 
 	function addFixed(r:Int, from:Int, to:Int) {
