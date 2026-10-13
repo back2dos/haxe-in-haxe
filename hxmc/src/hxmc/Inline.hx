@@ -16,7 +16,17 @@ import hxmc.Mir;
 // callee's), few instructions on its fast path.
 class Inline {
 	public static inline var MAX_IR = 40; // IR nodes of a candidate
-	public static inline var MAX_MIR = 48; // instructions outside slow paths
+	// instructions outside slow paths: of a callee inlined anywhere, and at a
+	// call in a loop (size against speed; HXMC_INLINE=<flat>,<loop>)
+	public static var MAX_FLAT = limit(0, 16);
+	public static var MAX_LOOP = limit(1, 48);
+
+	static function limit(k:Int, def:Int):Int {
+		var e = Sys.getEnv("HXMC_INLINE");
+		if (e == null) return def;
+		var p = e.split(",");
+		return k < p.length ? Std.parseInt(p[k]) : def;
+	}
 	public static inline var DEPTH = 2; // levels of inlining (Fingerprint keys callers to that depth)
 
 	// whether f may be inlined (the IR test)
@@ -48,7 +58,7 @@ class Inline {
 					if (i.op == Call && i.returnsTwice) return null;
 					n++;
 				}
-		return n <= MAX_MIR ? {mf: mf, sites: mb.inlineSites} : null;
+		return n <= MAX_LOOP ? {mf: mf, sites: mb.inlineSites, size: n} : null;
 	}
 
 	// drops the blocks no longer reachable (after a callee that never returns)
@@ -75,6 +85,45 @@ class Inline {
 			}
 		}
 		f.blocks = [for (b in f.blocks) if (reach.exists(b.id)) b];
+	}
+
+	// the blocks of f in loops (a back edge in reverse postorder closes a
+	// loop over the blocks between)
+	public static function loopBlocks(f:MFunc):Map<MBlock, Bool> {
+		var order = [];
+		var seen = new Map<Int, Bool>();
+		var stack = [f.entry], idx = [0];
+		seen.set(f.entry.id, true);
+		var post = [];
+		while (stack.length > 0) {
+			var top = stack.length - 1;
+			var b = stack[top];
+			if (idx[top] < b.succs.length) {
+				var s = b.succs[idx[top]++];
+				if (!seen.exists(s.id)) {
+					seen.set(s.id, true);
+					stack.push(s);
+					idx.push(0);
+				}
+			} else {
+				stack.pop();
+				idx.pop();
+				post.push(b);
+			}
+		}
+		post.reverse();
+		var pos = new Map<MBlock, Int>();
+		for (k in 0...post.length)
+			pos.set(post[k], k);
+		var inLoop = new Map<MBlock, Bool>();
+		for (k in 0...post.length)
+			for (p in post[k].preds) {
+				var pk = pos.get(p);
+				if (pk != null && pk >= k)
+					for (q in k...pk + 1)
+						inLoop.set(post[q], true);
+			}
+		return inLoop;
 	}
 
 	// replaces each call (in f) by a copy of its callee's template
@@ -225,4 +274,4 @@ class Inline {
 	}
 }
 
-typedef Template = {mf:MFunc, sites:Array<{call:MIns, fn:FuncInfo}>};
+typedef Template = {mf:MFunc, sites:Array<{call:MIns, fn:FuncInfo}>, size:Int};

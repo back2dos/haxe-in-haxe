@@ -59,9 +59,44 @@ class Link {
 	var got:Null<Section>;
 	var gotSlot = new Map<Symbol, Int>();
 
+	// ---- dead code: the sections of `collect` (the runtime object) that
+	// nothing reaches from the entry, the other objects and the
+	// initializers are left out (the runtime is compiled with a section per
+	// function and per datum)
+	public var collect:Null<Obj>;
+	var live:Null<Map<Section, Bool>>;
+
+	function gc(entry:String) {
+		if (collect == null) return;
+		live = new Map();
+		var work:Array<Section> = [];
+		function mark(s:Section) {
+			if (s != null && !live.exists(s)) {
+				live.set(s, true);
+				work.push(s);
+			}
+		}
+		for (o in objs)
+			for (s in o.sections)
+				if (o != collect || s.kind == InitArray || s.kind == FiniArray) mark(s);
+		var e = globals.get(entry);
+		if (e != null) mark(e.section);
+		while (work.length > 0) {
+			var s = work.pop();
+			for (r in s.relocs) {
+				var t = target(r.sym);
+				if (t != null && t.section != null) mark(t.section);
+			}
+		}
+	}
+
+	inline function isLive(s:Section):Bool
+		return live == null || live.exists(s);
+
 	function makeGot() {
 		for (o in objs)
 			for (s in o.sections)
+				if (isLive(s))
 				for (r in s.relocs)
 					if (r.kind == RA64GotPage21 || r.kind == RA64GotLo12 || r.kind == RGotPcRel32) {
 						var t = target(r.sym);
@@ -74,6 +109,7 @@ class Link {
 						}
 					}
 		if (got != null) {
+			if (live != null) live.set(got, true);
 			var o = new Obj();
 			o.sections.push(got);
 			objs.push(o);
@@ -89,13 +125,14 @@ class Link {
 
 	public function link(entry:String):Bytes {
 		resolve();
+		gc(entry);
 		makeGot();
 		// linker-defined symbols, defined below once the layout is known
 		var defined = new Map<String, Int>();
 		var all:Array<Section> = [];
 		for (o in objs)
 			for (s in o.sections)
-				all.push(s);
+				if (isLive(s)) all.push(s);
 		var ro = [for (s in all) if (s.kind == RoData) s];
 		var text = [for (s in all) if (s.kind == Text) s];
 		var tdata = [for (s in all) if (s.kind == Tdata) s];
@@ -227,7 +264,7 @@ class Link {
 		for (o in objs)
 			for (s in o.symbols) {
 				var sec = s.section;
-				if (sec == null || sec.kind != Text || s.abs || s.name.length == 0 || StringTools.startsWith(s.name, ".L")) continue;
+				if (sec == null || sec.kind != Text || !addr.exists(sec) || s.abs || s.name.length == 0 || StringTools.startsWith(s.name, ".L")) continue;
 				var b = s.global ? globals : locals;
 				if (s.global) nglobal++ else nlocal++;
 				b.u32(strtab.len);

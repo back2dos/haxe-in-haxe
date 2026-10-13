@@ -101,6 +101,7 @@ class Driver {
 				for (_ in 0...Inline.DEPTH) {
 					if (todo.length == 0) break;
 					var sites = [];
+					var inLoop = Inline.loopBlocks(mf);
 					for (s in todo) {
 						var t = ras.templates.get(s.fn);
 						if (!ras.templates.exists(s.fn)) {
@@ -109,7 +110,8 @@ class Driver {
 							t = try Inline.template(cb, cb.build()) catch (_:Unsupported) null;
 							ras.templates.set(s.fn, t);
 						}
-						if (t != null && s.fn != fn) sites.push({call: s.call, callee: t});
+						if (t != null && s.fn != fn && t.size <= (inLoop.exists(s.call.block) ? Inline.MAX_LOOP : Inline.MAX_FLAT))
+							sites.push({call: s.call, callee: t});
 					}
 					todo = Inline.run(mf, sites);
 				}
@@ -311,6 +313,7 @@ class Driver {
 		var exe = abi.os == "windows" ? new LinkPE(all, abi.arm).link("mainCRTStartup") : {
 			var l = new Link(all, abi);
 			l.symbols = !o.strip;
+			if (Sys.getEnv("HXMC_NOGC") != "1") l.collect = rt;
 			l.link("_start");
 		};
 		if (abi.os == "windows" && !StringTools.endsWith(out, ".exe")) out += ".exe";

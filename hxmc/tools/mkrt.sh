@@ -17,7 +17,7 @@ windows-x86_64) triple=x86_64-windows-gnu ;;
 esac
 out=$ROOT/bin/hxmc/rt/$target
 mkdir -p "$out/obj"
-CFLAGS="-O2 -g0 -w -fno-strict-aliasing -fno-pie -fno-pic -DHXC_NO_SSL -DHXC_NO_UV -DRT_CALL_ON_STACK -I $ROOT/hxc/rt"
+CFLAGS="-O2 -g0 -w -fno-strict-aliasing -fno-pie -fno-pic -ffunction-sections -fdata-sections -DHXC_NO_SSL -DHXC_NO_UV -DRT_CALL_ON_STACK -I $ROOT/hxc/rt"
 files="rt rt_dyn rt_std rt_str rt_sys rt_net rt_ssl rt_uv rt_thread rt_census"
 case $target in
 windows-*)
