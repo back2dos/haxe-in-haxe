@@ -1,0 +1,43 @@
+package hxmc;
+
+// What a run of the tool does (Main lists the defines and variables).
+class Options {
+	public var target = "linux-x86_64";
+	public var hybrid = false;
+	public var cc = "clang -O0";
+	public var rtDir:Null<String> = null;
+	public var stats = false;
+	public var only:Null<Map<String, Bool>> = null;
+	public var skip = new Map<String, Bool>();
+	public var verbose = false;
+	public var dump:Null<String> = null; // function names whose machine code is printed (HXMC_DUMP)
+
+	public function new() {}
+
+	static function names(s:Null<String>):Null<Map<String, Bool>> {
+		if (s == null || s == "") return null;
+		var m = new Map();
+		for (n in s.split(","))
+			if (n != "") m.set(n, true);
+		return m;
+	}
+
+	public static function read(com:context.Common.CommonContext):Options {
+		var o = new Options();
+		inline function def(k:String):Null<String>
+			return core.Define.rawDefined(com.defines, k) ? core.Define.rawDefinedValue(com.defines, k) : null;
+		var env = Sys.getEnv;
+		var t = def("hxmc.target");
+		if (t != null && t != "1") o.target = t;
+		o.hybrid = def("hxmc.hybrid") != null || env("HXMC_HYBRID") == "1";
+		if (env("HXMC_CC") != null) o.cc = env("HXMC_CC");
+		o.rtDir = env("HXMC_RT");
+		o.stats = env("HXMC_STATS") == "1";
+		o.verbose = def("hxmc.verbose") != null || env("HXMC_VERBOSE") == "1";
+		o.only = names(env("HXMC_ONLY"));
+		var s = names(env("HXMC_SKIP"));
+		if (s != null) o.skip = s;
+		o.dump = env("HXMC_DUMP");
+		return o;
+	}
+}
