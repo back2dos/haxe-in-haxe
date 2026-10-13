@@ -2,6 +2,7 @@ package hxmc;
 
 import backend.Ir;
 import hxmc.Mir;
+import hxmc.Abi;
 import hxmc.MirBuild.Unsupported;
 
 // One run of the tool. Functions are compiled per Haxe module (the unit of
@@ -29,6 +30,12 @@ class Driver {
 		this.out = out;
 		prep = new Prep(prog);
 		abi = Abi.get(o.target);
+		if (o.segAlign > 0) abi.segAlign = o.segAlign;
+		if (o.pic) abi.reloc = Pic;
+		if (o.shared) {
+			abi.reloc = Pic;
+			abi.output = SharedLibrary;
+		}
 		if (abi.os == "macos" || abi.os == "windows" && abi.arm) throw "hxmc: target " + abi.name + " is not supported yet";
 		dumpSet = o.dump == null ? null : [for (n in o.dump.split(",")) n => true];
 	}
@@ -45,6 +52,9 @@ class Driver {
 	// one function into `obj` (with its emitter); false: unsupported (hybrid builds)
 	// guards what workers share: the queue and the statistics
 	var lock = new sys.thread.Mutex();
+	var raRounds = 0;
+	var raInsns = 0;
+	var raFuncs = 0;
 
 	function compileFunc(fn:FuncInfo, obj:Obj, emit:Target.Emitter):Bool {
 		var name = prep.funcSym(fn);
@@ -69,6 +79,9 @@ class Driver {
 			tm[1] += s2 - s1;
 			tm[2] += s3 - s2;
 			tm[3] += s4 - s3;
+			raRounds += ra.rounds;
+			raInsns += ra.insns;
+			raFuncs++;
 			if (o.stats && s4 - s0 > 0.05) slow.push({name: name + " (" + mf.vals.length + " values, " + mf.blocks.length + " blocks)", t: s4 - s0});
 			native.set(fn, true);
 			lock.release();
@@ -109,6 +122,7 @@ class Driver {
 		for (k in ks)
 			Sys.println('  ${reasons.get(k)}\t$k\t(${examples.get(k)})');
 		Sys.println('hxmc: prepare ${ms(t1 - t0)}, codegen ${ms(t2 - t1)} (cpu: mir ${ms(tm[0])}, isel ${ms(tm[1])}, regalloc ${ms(tm[2])}, emit ${ms(tm[3])})');
+		Sys.println('hxmc: regalloc: $raFuncs functions, $raRounds rounds, $raInsns instructions');
 		slow.sort((a, b) -> a.t < b.t ? 1 : -1);
 		for (x in slow.slice(0, 5))
 			Sys.println('  ${ms(x.t)}\t${x.name}');
@@ -250,7 +264,7 @@ class Driver {
 		var rt = ElfReader.read(sys.io.File.getBytes(rtPath));
 		var t4 = haxe.Timer.stamp();
 		var all = [data].concat(objs).concat([rt]);
-		var exe = abi.os == "windows" ? new LinkPE(all, abi.arm).link("mainCRTStartup") : new Link(all, abi.arm).link("_start");
+		var exe = abi.os == "windows" ? new LinkPE(all, abi.arm).link("mainCRTStartup") : new Link(all, abi).link("_start");
 		if (abi.os == "windows" && !StringTools.endsWith(out, ".exe")) out += ".exe";
 		sys.io.File.saveBytes(out, exe);
 		Sys.command("chmod", ["755", out]);

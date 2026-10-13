@@ -39,6 +39,23 @@ class Abi {
 	public var handlerAlign:Int;
 	public var setjmp:String; // the C library's setjmp without the signal mask
 	public var symPrefix:String; // "_" on macOS
+	// how the output is linked and loaded: a static executable at a fixed
+	// address, or position-independent code (PIE, shared libraries such as an
+	// Android app's lib*.so). The code generators address code and data
+	// pc-relatively either way (lea rip+x, adrp/add) and program-wide numbers
+	// are absolute symbols, not addresses, so only the linker depends on it.
+	public var reloc:RelocModel = Static;
+	public var output:OutputKind = Executable;
+	// how thread-local variables are reached (instruction selection)
+	public var tls:TlsModel;
+	// the alignment of loadable segments (Link): the largest page size the
+	// target's kernels use (Android 15+ needs 16K)
+	public var segAlign:Int;
+	// the C library the runtime objects were built against (musl, glibc,
+	// bionic, ucrt, libsystem) and, for Apple, the platform (macos, ios,
+	// ios-simulator: the Mach-O build version)
+	public var libc:String;
+	public var platform:String;
 
 	function new(name, arm, os, size, prev, sp, align, setjmp, prefix) {
 		this.name = name;
@@ -50,6 +67,21 @@ class Abi {
 		handlerAlign = align;
 		this.setjmp = setjmp;
 		symPrefix = prefix;
+		switch os {
+			case "linux":
+				tls = LocalExec;
+				segAlign = arm ? 0x10000 : 0x1000;
+				libc = "musl";
+			case "macos":
+				tls = MachoTlv;
+				segAlign = arm ? 0x4000 : 0x1000;
+				libc = "libsystem";
+			case _:
+				tls = WinTlsIndex;
+				segAlign = 0x1000;
+				libc = "ucrt";
+		}
+		platform = os;
 	}
 
 	public static function get(target:String):Abi
@@ -62,4 +94,22 @@ class Abi {
 			case "windows-arm64": new Abi(target, true, "windows", 208, 192, 200, 8, "__mingw_setjmp", "");
 			case _: throw "hxmc: unknown target " + target + " (linux-x86_64, linux-arm64, macos-arm64, macos-x86_64, windows-x86_64, windows-arm64)";
 		}
+}
+
+enum abstract RelocModel(String) to String {
+	var Static = "static";
+	var Pic = "pic";
+}
+
+enum abstract OutputKind(String) to String {
+	var Executable = "executable";
+	var SharedLibrary = "shared";
+}
+
+enum abstract TlsModel(String) to String {
+	var LocalExec = "local-exec"; // static executables: thread pointer + link-time offset
+	var InitialExec = "initial-exec"; // shared libraries loaded at startup: offset from the GOT
+	var Desc = "desc"; // shared libraries loaded later (TLSDESC)
+	var MachoTlv = "tlv"; // Mach-O thread-local variable descriptors
+	var WinTlsIndex = "win"; // ThreadLocalStoragePointer[_tls_index] + section offset
 }

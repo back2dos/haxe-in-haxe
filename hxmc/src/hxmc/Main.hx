@@ -34,6 +34,16 @@ class Main {
 			Sys.exit(0);
 		}
 		if (key != null) UpToDate.forget(out);
+		// a whole-program build keeps most of what it makes (the typed program,
+		// then every module's code until the link): a large nursery and a large
+		// first old-space limit spare it most collections (half the GC time of
+		// a cold build of the port). The runtime reads them at startup, so the
+		// tool runs itself again with them set.
+		if (Sys.getEnv("RT_OLD_MB") == null && Sys.getEnv("HXMC_GC_DEFAULTS") != "0") {
+			Sys.putEnv("RT_OLD_MB", "2048");
+			if (Sys.getEnv("RT_MINOR_KB") == null) Sys.putEnv("RT_MINOR_KB", "32768");
+			Sys.exit(Sys.command(Sys.programPath(), [out].concat(args)));
+		}
 		compiler.Compiler.generateHook = function(com) {
 			try {
 				var path = com.main.mainPath;

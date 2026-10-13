@@ -1,6 +1,7 @@
 package hxmc.x64;
 
 import hxmc.Mir;
+import hxmc.Abi;
 import hxmc.Lir;
 import hxmc.x64.Asm;
 
@@ -80,8 +81,11 @@ class Isel implements hxmc.Target.Selector {
 	var cur:LBlock;
 	var folded:Array<Bool>; // Mir values computed inside their user (no code of their own)
 
-	public function new(win = false) {
-		this.win = win;
+	var abi:Abi;
+
+	public function new(abi:Abi) {
+		this.abi = abi;
+		win = abi.os == "windows";
 		if (win) {
 			gprs = [1, 2, 8, 9, 10, 11, 0, 3, 6, 7, 12, 13, 14, 15, 5];
 			callerSaved = WIN_CALLER_SAVED;
@@ -616,6 +620,8 @@ class Isel implements hxmc.Target.Selector {
 				x.base = tlsBase;
 				x.secrel = i.sym;
 				x.size = 8;
+			case TlsLoad | TlsStore if (abi.tls != LocalExec):
+				throw new hxmc.MirBuild.Unsupported("thread-local variables: TLS model " + abi.tls);
 			case TlsLoad:
 				var x = emit(TLSLOAD);
 				x.d = reg(i.id);
@@ -744,6 +750,7 @@ class Isel implements hxmc.Target.Selector {
 				x.cond = i.op == FNeg ? 0x57 : 0x54;
 				x.imm = i.op == FNeg ? 0 : 1;
 			case Cmp:
+				if (useCount[i.id] == 0) return; // unused (MirBuild.cmp folded it)
 				// fused into the branch that follows
 				if (fusable(i, b)) return;
 				var d = reg(i.id);

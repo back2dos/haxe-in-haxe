@@ -1,6 +1,7 @@
 package hxmc.a64;
 
 import hxmc.Mir;
+import hxmc.Abi;
 import hxmc.Lir;
 
 // AArch64 LIR operations (LIns.op)
@@ -69,8 +70,11 @@ class Isel implements hxmc.Target.Selector {
 	var cur:LBlock;
 	var folded:Array<Bool>;
 
-	public function new(apple:Bool) {
-		this.apple = apple;
+	var abi:Abi;
+
+	public function new(abi:Abi) {
+		this.abi = abi;
+		apple = abi.os == "macos";
 		gprs = [9, 10, 11, 12, 13, 14, 15, 0, 1, 2, 3, 4, 5, 6, 7, 8, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28];
 		fprs = [32, 33, 34, 35, 36, 37, 38, 39, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 40, 41, 42, 43, 44, 45, 46, 47];
 	}
@@ -503,6 +507,8 @@ class Isel implements hxmc.Target.Selector {
 				var x = emit(MOVF);
 				x.d = reg(i.id);
 				x.f = i.f;
+			case TlsLoad | TlsStore if (abi.tls != LocalExec):
+				throw new hxmc.MirBuild.Unsupported("thread-local variables: TLS model " + abi.tls);
 			case TlsLoad:
 				var x = emit(TLSLOAD);
 				x.d = reg(i.id);
@@ -609,6 +615,7 @@ class Isel implements hxmc.Target.Selector {
 				x.s1 = use(i.a);
 				x.cond = i.op == FAbs ? 1 : i.op == FNeg ? 2 : 3;
 			case Cmp:
+				if (useCount[i.id] == 0) return; // unused (MirBuild.cmp folded it)
 				if (fusable(i, b)) return;
 				var cc = compare(i.imm, i.a, i.b);
 				var x = emit(CSET);

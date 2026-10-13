@@ -54,8 +54,14 @@ class Regalloc {
 		this.t = t;
 	}
 
+	public var rounds = 0; // allocation rounds run (statistics)
+	public var insns = 0; // instructions they went through
+
 	public function run() {
 		for (round in 0...8) {
+			rounds++;
+			for (b in f.blocks)
+				insns += b.ins.length;
 			var spilled = allocate();
 			if (spilled.length == 0) {
 				coldSaves();
@@ -213,56 +219,52 @@ class Regalloc {
 		assigned = hxmc.Lir.Arrays.filled(n, -1);
 		for (r in 0...NPHYS)
 			assigned[r] = r;
-		var active:Array<Int> = [];
-		var busy = hxmc.Lir.Arrays.filled(NPHYS, 0);
-		var busyStamp = 0;
+		// per physical register: the interval holding it (free once that ends)
+		var holder = hxmc.Lir.Arrays.filled(NPHYS, -1);
+		var isFpr = hxmc.Lir.Arrays.filled(NPHYS, 0);
+		for (c in t.fprs)
+			isFpr[c] = 1;
+		for (c in t.gprs)
+			isFpr[c] = 2;
 		var spilled = [];
-		var spillSet = new Map<Int, Bool>();
 		for (r in order) {
-			// expire
-			var k = 0;
-			while (k < active.length) {
-				if (end[active[k]] < start[r]) active.splice(k, 1) else k++;
-			}
+			var s = start[r], e = end[r];
 			var float = f.floatReg(r);
 			var regs = float ? t.fprs : t.gprs;
-			busyStamp++;
-			for (a in active)
-				busy[assigned[a]] = busyStamp;
 			var choice = -1;
 			var h = f.hint(r);
 			if (h >= 0) {
 				var hr = h < NPHYS ? h : assigned[h];
-				if (hr >= 0 && busy[hr] != busyStamp && regs.indexOf(hr) >= 0 && !fixedOverlap(hr, start[r], end[r])) choice = hr;
+				if (hr >= 0 && isFpr[hr] == (float ? 1 : 2) && (holder[hr] < 0 || end[holder[hr]] < s) && !fixedOverlap(hr, s, e)) choice = hr;
 			}
 			if (choice < 0)
-				for (c in regs)
-					if (busy[c] != busyStamp && !fixedOverlap(c, start[r], end[r])) {
+				for (c in regs) {
+					var o = holder[c];
+					if ((o < 0 || end[o] < s) && !fixedOverlap(c, s, e)) {
 						choice = c;
 						break;
 					}
+				}
 			if (choice < 0) {
-				// spill the active interval that ends last, if it ends after this one
+				// spill the live interval that ends last, if it ends after this one
 				var victim = -1;
-				for (a in active)
-					if (f.floatReg(a) == float && a < noSpillFrom && !fixedOverlap(assigned[a], start[r], end[r])
-						&& (victim < 0 || end[a] > end[victim]))
+				for (c in regs) {
+					var a = holder[c];
+					if (a >= 0 && end[a] >= s && a < noSpillFrom && (victim < 0 || end[a] > end[victim]) && !fixedOverlap(c, s, e))
 						victim = a;
-				if (victim >= 0 && (end[victim] > end[r] || r >= noSpillFrom)) {
+				}
+				if (victim >= 0 && (end[victim] > e || r >= noSpillFrom)) {
 					choice = assigned[victim];
 					assigned[victim] = -1;
-					active.remove(victim);
 					spilled.push(victim);
-					spillSet.set(victim, true);
 				} else {
 					if (r >= noSpillFrom) throw "hxmc: out of registers in " + f.name;
 					spilled.push(r);
-					spillSet.set(r, true);
 					continue;
 				}
 			}
 			assigned[r] = choice;
-			active.push(r);
+			holder[choice] = r;
 		}
 		return spilled;
 	}

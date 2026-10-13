@@ -11,6 +11,9 @@ class Options {
 	public var only:Null<Map<String, Bool>> = null;
 	public var skip = new Map<String, Bool>();
 	public var verbose = false;
+	public var segAlign = 0; // -D hxmc.seg-align: the alignment of loadable segments (0: the target's)
+	public var pic = false; // -D hxmc.pic: position-independent executable
+	public var shared = false; // -D hxmc.shared: a shared library
 	public var jobs = 0; // parallel module compilations (HXMC_JOBS, -D hxmc.jobs; 0: the cores)
 	public var dump:Null<String> = null; // function names whose machine code is printed (HXMC_DUMP)
 
@@ -48,6 +51,10 @@ class Options {
 		var s = names(env("HXMC_SKIP"));
 		if (s != null) o.skip = s;
 		o.dump = env("HXMC_DUMP");
+		var sa = def("hxmc.seg-align");
+		if (sa != null) o.segAlign = Std.parseInt(sa);
+		o.pic = def("hxmc.pic") != null;
+		o.shared = def("hxmc.shared") != null;
 		var j = def("hxmc.jobs");
 		if (j == null) j = env("HXMC_JOBS");
 		if (j != null) o.jobs = Std.parseInt(j);

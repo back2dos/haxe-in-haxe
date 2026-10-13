@@ -371,10 +371,11 @@ bin/hxmc/hxmc: $(NATIVE_TOOL) $(HXMC_SRC) $(TOOL_SRC) $(STD) $(RT_SRC)
 	$(call cc,$(DEV_CC),$(CFLAGS_BASE) $(NO_TLS_UV),-lm,bin/hxmc/hxmc_hxc,$@)
 
 # the tool with clang -O2 (rebuild and compile-speed numbers): its C is the dev build's
+HXMC_FAST_CC ?= clang -O2
 hxmc-fast: bin/hxmc-fast/hxmc
 bin/hxmc-fast/hxmc: bin/hxmc/hxmc
 	@mkdir -p $(dir $@)
-	$(call cc,clang -O2,$(CFLAGS_BASE) $(NO_TLS_UV),-lm,bin/hxmc/hxmc_hxc,$@)
+	$(call cc,$(HXMC_FAST_CC),$(CFLAGS_BASE) $(NO_TLS_UV),-lm,bin/hxmc/hxmc_hxc,$@)
 	ln -sfn ../hxmc/rt bin/hxmc-fast/rt
 
 HXMC_RT_FILES := rt rt_dyn rt_std rt_str rt_sys rt_net rt_ssl rt_uv rt_thread rt_census

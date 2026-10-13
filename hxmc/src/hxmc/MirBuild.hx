@@ -165,11 +165,40 @@ class MirBuild {
 	}
 
 	function cmp(c:Cond, a:Int, b:Int):Int {
+		// (x op y) == 0 is the inverse comparison, (x op y) != 0 the same one
+		// (the inner comparison is left unused: instruction selection drops it)
+		var x = f.vals[a], z = f.vals[b];
+		if ((c == CEq || c == CNe) && x.op == Cmp && z.op == Const && z.imm == 0) {
+			var inner:Cond = x.imm;
+			if (c == CNe) return cmp(inner, x.a, x.b);
+			var inv = invert(inner);
+			if (inv >= 0) return cmp(inv, x.a, x.b);
+		}
 		var i = mk(Cmp, I32);
 		i.imm = c;
 		i.a = a;
 		i.b = b;
 		return add(i);
+	}
+
+	// the comparison true exactly when c is false, or -1 (ordered double
+	// comparisons are false with NaN either way)
+	static function invert(c:Cond):Int {
+		return switch c {
+			case CEq: CNe;
+			case CNe: CEq;
+			case CLt: CGe;
+			case CGe: CLt;
+			case CLe: CGt;
+			case CGt: CLe;
+			case CULt: CUGe;
+			case CUGe: CULt;
+			case CULe: CUGt;
+			case CUGt: CULe;
+			case FEq: FNe;
+			case FNe: FEq;
+			case _: -1;
+		}
 	}
 
 	function tyOfVal(v:Int):MTy

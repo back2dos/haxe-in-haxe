@@ -2,6 +2,7 @@ package hxmc;
 
 import haxe.io.Bytes;
 import hxmc.Obj;
+import hxmc.Abi;
 
 // hxmc's static linker for Linux: objects (the program's, the runtime
 // object of tools/mkrt.sh with the C library) -> a static ELF executable
@@ -23,10 +24,14 @@ class Link {
 	var tlsSize = 0;
 	var tlsAlign = 1;
 
-	public function new(objs:Array<Obj>, arm:Bool) {
+	public function new(objs:Array<Obj>, abi:Abi) {
 		this.objs = objs;
-		this.arm = arm;
-		PAGE = arm ? 0x10000 : 0x1000;
+		this.arm = abi.arm;
+		PAGE = abi.segAlign;
+		// port: position-independent output (PIE, shared libraries: dynamic
+		// relocations, GOT/PLT, DT_NEEDED, a TLS model other than local-exec)
+		// is not written yet
+		if (abi.reloc != Static || abi.output != Executable) throw "hxmc: " + abi.reloc + " " + abi.output + " output is not supported yet";
 	}
 
 	// ---- symbols
