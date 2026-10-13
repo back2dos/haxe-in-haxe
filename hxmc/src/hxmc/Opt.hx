@@ -26,7 +26,13 @@ class Opt {
 	public static inline var MConst = 7; // never written (type tables, string lengths, object type indices)
 	public static inline var MInit = 8; // stores initializing a fresh object (no load can see it before)
 	static inline var MTls = 9; // thread-local variables (TlsLoad)
-	static inline var NCLS = 10;
+	// object fields by displacement (8 buckets): a field store at one
+	// offset leaves loads at other offsets alone (objects do not overlap; a
+	// type-correct program reads a field at its own offset); MField's own
+	// version is that of fields at dynamic offsets (anonymous objects)
+	static inline var MFieldAt = 10;
+	static inline var NCLS = 18;
+	static inline var FIELD_BITS = ((1 << 8) - 1) << MFieldAt;
 
 	// runtime functions that write no memory the code reads and do not collect
 	static var readOnly = ["hx_aget_i_slow" => true, "hx_aget_f_slow" => true, "hx_aget_l_slow" => true, "rt_write_barrier" => true];
@@ -365,13 +371,19 @@ class Opt {
 			case _: false;
 		};
 
+	// the version class of a field access at a constant offset
+	inline function fieldClass(i:MIns):Int
+		return MFieldAt + (((i.imm + dispOf(i.a)) >> 3) & 7);
+
 	// the classes an instruction writes, as a bit set (0: none)
-	static function killMask(i:MIns):Int {
+	function killMask(i:MIns):Int {
 		return switch i.op {
 			case Store:
 				switch i.mem {
 					case MInit: 0;
 					case MOther: ((1 << NCLS) - 1) & ~(1 << MConst) & ~(1 << MCallOnly) & ~(1 << MTls);
+					case MField if (i.b < 0): (1 << fieldClass(i)) | (1 << MField) | (1 << MOther);
+					case MField: FIELD_BITS | (1 << MField) | (1 << MOther);
 					case c: (1 << c) | (1 << MOther);
 				}
 			case TlsStore: 1 << MTls;
@@ -426,7 +438,7 @@ class Opt {
 			}
 			for (i in b.ins) {
 				if (i.dead) continue;
-				if (i.op == Load) ver[i.id] = v[i.mem] else if (i.op == TlsLoad) ver[i.id] = v[MTls];
+				if (i.op == Load) ver[i.id] = v[i.mem == MField && i.b < 0 ? fieldClass(i) : i.mem] else if (i.op == TlsLoad) ver[i.id] = v[MTls];
 				var m = killMask(i);
 				if (m != 0)
 					for (c in 0...NCLS)
