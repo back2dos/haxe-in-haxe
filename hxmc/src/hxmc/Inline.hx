@@ -1,6 +1,6 @@
 package hxmc;
 
-import backend.Ir;
+import hxmc.ir.Ir;
 import hxmc.Mir;
 
 // Inlining of small functions into their callers, on Mir (after MirBuild,
@@ -8,7 +8,7 @@ import hxmc.Mir;
 // parameters replaced by the arguments, its returns by jumps to the rest of
 // the caller's block (a phi joins the results).
 //
-// Candidates are decided on hxc's IR (`candidate`: no try, a small body),
+// Candidates are decided on hxmc's IR (hxmc.ir) (`candidate`: no try, a small body),
 // so that Fingerprint can put a candidate's body into the key of every
 // module calling it; the final decision is on the callee's Mir: no
 // shadow-stack frame (its references never live across a GC point, so the
@@ -35,11 +35,11 @@ class Inline {
 		var n = 0;
 		function ex(e:Ex) {
 			if (++n > MAX_IR) return;
-			backend.EmitC.iterEx(ex, e);
+			hxmc.ir.Facts.iterEx(ex, e);
 		}
 		function st(s:Stmt) {
 			if (++n > MAX_IR) return;
-			backend.EmitC.iterStmt(st, ex, s);
+			hxmc.ir.Facts.iterStmt(st, ex, s);
 		}
 		for (s in f.body) {
 			st(s);

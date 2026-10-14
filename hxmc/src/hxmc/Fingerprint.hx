@@ -1,6 +1,6 @@
 package hxmc;
 
-import backend.Ir;
+import hxmc.ir.Ir;
 
 // What a function's machine code depends on, as text (hashed per module by
 // Driver to key the object cache): its IR, and of everything else in the
@@ -8,10 +8,9 @@ import backend.Ir;
 // signatures and no-GC flags of callees, layouts of the objects it creates,
 // the names of what it refers to. Program-wide numbers (type indices,
 // field ids, signatures, global indices) are not in it: native code
-// refers to them by name (absolute symbols resolved when linking), as hxc's
-// chunked C does, so adding a type, a field or a global elsewhere leaves
+// refers to them by name (absolute symbols resolved when linking), so adding a type, a field or a global elsewhere leaves
 // this module's code and key unchanged.
-@:access(backend.EmitC)
+@:access(hxmc.ir.Facts)
 class Fingerprint {
 	var b:StringBuf;
 	var prep:Prep;

@@ -1,7 +1,7 @@
 package hxmc;
 
-import backend.Ir;
-import backend.Lower;
+import hxmc.ir.Ir;
+import hxmc.ir.Lower;
 import core.TType;
 
 // Function bodies lowered once, reused by the next builds of the resident
@@ -144,7 +144,7 @@ class CachedProgram extends Program {
 	}
 }
 
-@:access(backend.Lower)
+@:access(hxmc.ir.Lower)
 class CachedLower extends Lower {
 	var cache:LowerCache;
 	var reuse:Bool;
@@ -239,7 +239,7 @@ class CachedLower extends Lower {
 				if (e.tests == null) e.tests = new haxe.ds.ObjectMap();
 				e.tests.set(c, c.test(ELocal(MARK)));
 			});
-		// the program's copy (EmitC's preparation rewrites statement lists)
+		// the program's copy (Facts' preparation rewrites statement lists)
 		ident = true;
 		tests = e.tests;
 		fi.body = stmts(e.body);
@@ -377,7 +377,7 @@ class CachedLower extends Lower {
 		return r;
 	}
 
-	override public function newLambda(sig:SigInfo, captures:Array<Local>, body:backend.FnLower->Void, name:String, module:String):LambdaInfo {
+	override public function newLambda(sig:SigInfo, captures:Array<Local>, body:hxmc.ir.FnLower->Void, name:String, module:String):LambdaInfo {
 		depth++;
 		var r = super.newLambda(sig, captures, body, name, module);
 		depth--;

@@ -1,20 +1,19 @@
 package hxmc;
 
-import backend.EmitC;
-import backend.Ir;
+import hxmc.ir.Facts;
+import hxmc.ir.Ir;
 import hxmc.Mir;
 import hxmc.Obj;
 
-// The program's data as EmitC writes it in C (data(), emitTypes(),
-// strDef(), mainBody()), as sections of an Obj: the type table rt_types
+// The program's data, as sections of an Obj: the type table rt_types
 // and its field/method/static/pointer-map arrays, dispatch rows, field
 // names, string literals, scalar globals, the per-signature trampolines
 // (DYN<s>, BT<s>) and main.
-@:access(backend.EmitC)
+@:access(hxmc.ir.Facts)
 @:access(hxmc.MirBuild)
 class DataGen {
 	var prep:Prep;
-	var e:EmitC;
+	var e:Facts;
 	var p:Program;
 	var obj:Obj;
 	var data:Section;
@@ -208,7 +207,7 @@ class DataGen {
 	}
 
 	function types() {
-		var types:Array<backend.EmitC.TypeEntry> = e.types;
+		var types:Array<hxmc.ir.Facts.TypeEntry> = e.types;
 		var staticsOf = new Map<Int, Array<{name:String, clos:Null<LambdaInfo>, global:Int}>>();
 		for (c in p.classes)
 			if (c.statics != null && c.statics.length > 0) staticsOf.set(c.tindex, c.statics);

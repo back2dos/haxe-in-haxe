@@ -1,21 +1,19 @@
 package hxmc;
 
-import backend.Ir;
+import hxmc.ir.Ir;
 import hxmc.Mir;
 
-// hxc's IR (backend.Ir: structured statements in A-normal form) of one
-// function to Mir, mirroring what EmitC writes in C statement by statement
-// (the runtime's inline helpers of rt.h and EmitC.PRELUDE are expanded
-// here), so the native code and the C agree on every detail:
+// hxmc's IR (hxmc.ir.Ir: structured statements in A-normal form) of one
+// function to Mir (the runtime's inline helpers of rt.h are expanded here,
+// so the native code and the runtime agree on every detail):
 // - reference locals that Roots puts in shadow-stack slots live in memory
-//   (fr[k]); in functions with a try block every local lives in memory (C:
-//   volatile), so values survive the second return of setjmp; the other
+//   (fr[k]); in functions with a try block the locals a handler can see
+//   live in memory, so values survive the second return of setjmp; the other
 //   locals become SSA values (Braun et al., "Simple and Efficient
 //   Construction of Static Single Assignment Form", on the structured input);
 // - cold sites (SCold) root the references live across them only on the
 //   slow path of the allocation or array store.
-// Constructs not handled yet throw Unsupported: in development builds the
-// function is then compiled as C (CWriter).
+// Constructs not handled throw Unsupported (the build fails).
 class MirBuild {
 	var p:Prep;
 	var abi:Abi;
@@ -344,7 +342,7 @@ class MirBuild {
 	}
 
 	// blocks made while set are slow paths (the inline-cache path behind a
-	// shape hint: C marks it unlikely)
+	// shape hint: unlikely)
 	var coldNew = false;
 
 	function newBlock():MBlock {
@@ -498,7 +496,7 @@ class MirBuild {
 					return;
 				case _:
 			}
-			backend.EmitC.iterStmt(st, ex, s);
+			hxmc.ir.Facts.iterStmt(st, ex, s);
 		}
 		for (s in fn.body)
 			st(s);
@@ -508,7 +506,7 @@ class MirBuild {
 	// try functions: the scalar locals kept in memory: assigned inside a try
 	// body and referenced outside it, where a second return of setjmp (the
 	// handler, what follows the try, the next iteration around it) finds
-	// their latest value (C makes every local volatile). A local all of whose
+	// their latest value. A local all of whose
 	// references are inside the try body that assigns it is dead there (a
 	// local declared in the body is assigned before it is read).
 	public static function memLocals(fn:FuncInfo):Map<Int, Bool> {
@@ -537,7 +535,7 @@ class MirBuild {
 				case ELocal(l): ref(l.id);
 				case _:
 			}
-			backend.EmitC.iterEx(ex, e);
+			hxmc.ir.Facts.iterEx(ex, e);
 		}
 		function st(s:Stmt) {
 			switch s {
@@ -561,7 +559,7 @@ class MirBuild {
 					return;
 				case _:
 			}
-			backend.EmitC.iterStmt(st, ex, s);
+			hxmc.ir.Facts.iterStmt(st, ex, s);
 		}
 		for (a in fn.args)
 			assign(a.id);
@@ -1618,7 +1616,7 @@ class MirBuild {
 		}
 	}
 
-	// a store into a new (young) object: no barrier (C writes these slots plainly)
+	// a store into a new (young) object: no barrier
 	function storeInit(o:Int, loc:Int, t:Ty, v:Int) {
 		switch t {
 			case TRef(_) | TF64 | TI64: storeM(Opt.MInit, 8, o, 8 * loc, v);

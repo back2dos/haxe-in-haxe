@@ -1,6 +1,6 @@
 package hxmc;
 
-// The machine-independent IR hxmc compiles hxc's IR to (MirBuild): a control
+// The machine-independent IR hxmc compiles its IR (hxmc.ir) to (MirBuild): a control
 // flow graph of basic blocks in SSA form over three value types. Values are
 // instructions, numbered by `id` in their function (MFunc.vals). Pointers
 // are I64. Calls follow the C ABI of the target (lowered by the target's

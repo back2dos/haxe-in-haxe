@@ -1,15 +1,15 @@
 package hxmc;
 
-import backend.Ir;
+import hxmc.ir.Ir;
 import hxmc.Lir.Bits;
 
-// Which reference locals live in shadow-stack slots, as EmitC.Roots decides
-// for C (the same backward liveness over the structured statements: a
+// Which reference locals live in shadow-stack slots (a backward liveness
+// over the structured statements, as hxc's EmitC.Roots for C: a
 // reference live across a GC point is rooted; at a cold site the references
 // live across its slow path are spilled there instead), with bit sets over
 // local ids instead of maps, and without sharing slots between locals (a
 // slot per rooted local). Also which locals may be read before they are set
-// (EmitC.Roots.maybeUnset: their slots start as null).
+// (their slots start as null).
 class Roots {
 	var n:Int;
 	var refs:Bits; // locals of reference type
@@ -67,7 +67,7 @@ class Roots {
 	function uses(e:Ex, acc:Bits) {
 		switch e {
 			case ELocal(l): acc.set(l.id);
-			case _: backend.EmitC.iterEx(x -> uses(x, acc), e);
+			case _: hxmc.ir.Facts.iterEx(x -> uses(x, acc), e);
 		}
 	}
 
@@ -80,10 +80,10 @@ class Roots {
 	}
 
 	static function gcPoint(e:Ex):Int
-		return backend.EmitC.Roots.gcPoint(e);
+		return hxmc.ir.Facts.GcPoints.gcPoint(e);
 
 	static function nestedGc(e:Ex):Bool
-		return backend.EmitC.Roots.nestedGc(e);
+		return hxmc.ir.Facts.GcPoints.nestedGc(e);
 
 	function expr(e:Ex, after:Bits, def:Null<Local>):Bits {
 		var rest = copy(after);
@@ -244,7 +244,7 @@ class Roots {
 				case ELocal(l):
 					if (!set.get(l.id)) bad.set(l.id);
 				case _:
-					backend.EmitC.iterEx(x -> reads(x, set), e);
+					hxmc.ir.Facts.iterEx(x -> reads(x, set), e);
 			}
 		}
 		function inter(a:Bits, b:Bits):Bits {

@@ -1,6 +1,6 @@
 package hxmc;
 
-import backend.Ir;
+import hxmc.ir.Ir;
 import hxmc.Mir;
 import hxmc.Abi;
 import hxmc.MirBuild.Unsupported;
@@ -10,17 +10,12 @@ import hxmc.MirBuild.Unsupported;
 // <out>.hxmc/ under a key hashing its Fingerprint (with the tool and the
 // target), so a rebuild after an edit compiles only the modules whose code
 // can change. The program's data (DataGen) is regenerated every time, and
-// everything is linked with the runtime object (Link). Development (hybrid)
-// builds instead write the C of what is not compiled natively and link with
-// the system's compiler, without the cache.
+// everything is linked with the runtime object (Link).
 class Driver {
 	var prep:Prep;
 	var abi:Abi;
 	var o:Options;
 	var out:String;
-	var native = new Map<FuncInfo, Bool>();
-	var reasons = new Map<String, Int>();
-	var examples = new Map<String, String>();
 	var dumpSet:Null<Map<String, Bool>>;
 	var tm = [0.0, 0.0, 0.0, 0.0];
 	var slow:Array<{name:String, t:Float}> = [];
@@ -43,12 +38,11 @@ class Driver {
 		var t0 = haxe.Timer.stamp();
 		var d = new Driver(prog, out, o);
 		var t1 = haxe.Timer.stamp();
-		if (o.hybrid) d.hybrid(t0, t1) else d.build(t0, t1);
+		d.build(t0, t1);
 	}
 
 	// ---- compiling
 
-	// one function into `obj` (with its emitter); false: unsupported (hybrid builds)
 	// guards what workers share: the queue and the statistics
 	var lock = new sys.thread.Mutex();
 
@@ -106,7 +100,8 @@ class Driver {
 		return t;
 	}
 
-	function compileFunc(fn:FuncInfo, obj:Obj, emit:Target.Emitter, ras:Regalloc.Scratch):Bool {
+	// one function into `obj` (with its emitter)
+	function compileFunc(fn:FuncInfo, obj:Obj, emit:Target.Emitter, ras:Regalloc.Scratch) {
 		var name = prep.funcSym(fn);
 		try {
 			var s0 = haxe.Timer.stamp();
@@ -151,7 +146,6 @@ class Driver {
 			raInsns += ra.insns;
 			raFuncs++;
 			if (o.stats && s4 - s0 > 0.05) slow.push({name: name + " (" + mf.vals.length + " values, " + mf.blocks.length + " blocks)", t: s4 - s0});
-			native.set(fn, true);
 			lock.release();
 			if (mb.icaches > 0) {
 				var bss = obj.section(".bss", Bss, 16);
@@ -159,15 +153,8 @@ class Driver {
 				obj.define(mb.icSym, bss, bss.bssSize, Abi.IC_SIZE * mb.icaches, false);
 				bss.bssSize += Abi.IC_SIZE * mb.icaches;
 			}
-			return true;
 		} catch (e:Unsupported) {
-			var k = e.msg;
-			lock.acquire();
-			reasons.set(k, (reasons.exists(k) ? reasons.get(k) : 0) + 1);
-			if (!examples.exists(k)) examples.set(k, name);
-			lock.release();
-			if (!o.hybrid) throw 'hxmc: $name: ${e.msg}';
-			return false;
+			throw 'hxmc: $name: ${e.msg}';
 		}
 	}
 
@@ -182,13 +169,7 @@ class Driver {
 
 	function stats(t0:Float, t1:Float, t2:Float) {
 		if (!o.stats) return;
-		var n = Lambda.count(native);
-		var total = prep.p.funcs.length;
-		Sys.println('hxmc: ${n}/${total} functions native (${Math.round(1000 * n / total) / 10}%)');
-		var ks = [for (k in reasons.keys()) k];
-		ks.sort((a, b) -> reasons.get(b) - reasons.get(a));
-		for (k in ks)
-			Sys.println('  ${reasons.get(k)}\t$k\t(${examples.get(k)})');
+		Sys.println('hxmc: ${prep.p.funcs.length} functions');
 		Sys.println('hxmc: prepare ${ms(t1 - t0)}, codegen ${ms(t2 - t1)} (cpu: mir ${ms(tm[0])}, isel ${ms(tm[1])}, regalloc ${ms(tm[2])}, emit ${ms(tm[3])})');
 		Sys.println('hxmc: regalloc: $raFuncs functions, $raRounds rounds, $raInsns instructions');
 		slow.sort((a, b) -> a.t < b.t ? 1 : -1);
@@ -196,7 +177,7 @@ class Driver {
 			Sys.println('  ${ms(x.t)}\t${x.name}');
 	}
 
-	// ---- the shipped path: per-module objects, cache, own linker
+	// ---- per-module objects, cache, own linker
 
 	static function moduleFile(m:String):String {
 		var r = new StringBuf();
@@ -293,8 +274,6 @@ class Driver {
 			keep.set(file, true);
 			newIndex.add(file + " " + keys[mi] + "\n");
 			if (objs[mi] != null) {
-				for (f in byModule.get(order[mi]))
-					native.set(f, true);
 				hits++;
 			} else {
 				todo.push(mi);
@@ -360,43 +339,6 @@ class Driver {
 			Sys.println('hxmc: modules ${order.length}: ${hits} cached, ${misses} compiled (keys and reading ${ms(tKey)})');
 			Sys.println('hxmc: data ${ms(t3 - t2)}, runtime read ${ms(t4 - t3)}, link ${ms(haxe.Timer.stamp() - t4)}');
 		}
-	}
-
-	// ---- development builds
-
-	function hybrid(t0:Float, t1:Float) {
-		var p = prep.p;
-		var obj = new Obj();
-		var emit = Target.emitter(abi, obj);
-		var ras = new Regalloc.Scratch(Target.selector(abi));
-		for (fn in p.funcs) {
-			var name = prep.funcSym(fn);
-			if (o.skip.exists(name) || (o.only != null && !o.only.exists(name))) continue;
-			compileFunc(fn, obj, emit, ras);
-		}
-		var t2 = haxe.Timer.stamp();
-		stats(t0, t1, t2);
-		// the C of the other functions (it may add string literals), then the data
-		for (f in p.funcs)
-			if (!native.exists(f)) prep.cBody(f);
-		var dg = new DataGen(prep, abi, obj, mf -> compileMir(mf, emit));
-		dg.run();
-		dg.allocStubs([], emit);
-		sys.io.File.saveBytes(out + ".o", ElfWriter.write(obj, abi.arm));
-		sys.io.File.saveContent(out + ".c", CWriter.write(prep, f -> native.exists(f), false));
-		var rt = o.rtDir;
-		if (rt == null) throw "hxmc: HXMC_RT (the runtime objects) is not set";
-		var objs = [for (f in sys.FileSystem.readDirectory(rt)) if (StringTools.endsWith(f, ".o")) rt + "/" + f];
-		objs.sort((a, b) -> a < b ? -1 : 1);
-		var cc = o.cc.split(" ");
-		var hxrt = Sys.getEnv("HXMC_RT_INCLUDE");
-		var args = cc.slice(1).concat(["-w", "-fno-strict-aliasing", "-DHXC_NO_SSL", "-DHXC_NO_UV", "-I", hxrt == null ? "hxc/rt" : hxrt, "-no-pie", out + ".c", out + ".o"])
-			.concat(objs)
-			.concat(["-lm", "-lpthread", "-o", out]);
-		if (o.verbose) Sys.println(cc[0] + " " + args.join(" "));
-		var code = Sys.command(cc[0], args);
-		if (code != 0) throw "hxmc: the C compiler failed";
-		if (o.stats) Sys.println('hxmc: link ${ms(haxe.Timer.stamp() - t2)}');
 	}
 
 	static function ms(s:Float):String

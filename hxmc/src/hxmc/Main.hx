@@ -2,19 +2,13 @@ package hxmc;
 
 // The hxmc tool (hxmc/README.md): runs the port's compiler pipeline on the
 // program (from an HXB archive with --hxb-lib, or from source), lowers the
-// filtered program to hxc's IR (backend.Lower) and compiles it to machine
+// filtered program to hxmc's IR (hxmc.ir.Lower) and compiles it to machine
 // code:
-//   hxmc <out> <haxe arguments...> --custom-target hxc
+//   hxmc <out> <haxe arguments...> -cp bin/hxmc/std --custom-target hxmc
 // Options (defines, or the environment for development):
-//   -D hxmc.target=linux-x86_64     the target (only this one so far)
-//   -D hxmc.hybrid / HXMC_HYBRID=1  development mode: the functions hxmc cannot
-//                                   compile yet are written as C (<out>.c) and
-//                                   everything is linked by the system's cc
-//   HXMC_CC                         that C compiler (default clang -O0)
-//   HXMC_RT                         the runtime objects for hybrid builds (a directory)
-//   HXMC_STATS=1                    print the share of natively compiled functions
-//   HXMC_ONLY=<name,...>            compile only these functions natively (bisecting)
-//   HXMC_SKIP=<name,...>            never compile these natively
+//   -D hxmc.target=linux-x86_64     the target (Target.hx, Abi.hx: six of them)
+//   HXMC_RT_OBJ                     the runtime object (default: <tool dir>/rt/<target>/rt.o)
+//   HXMC_STATS=1                    print what the build did and how long it took
 class Main {
 	static var start = haxe.Timer.stamp();
 	static var lowerCache = new LowerCache();
@@ -56,8 +50,7 @@ class Main {
 		}
 		var out = args.shift();
 		var failed = null;
-		var hybrid = Sys.getEnv("HXMC_HYBRID") == "1" || args.indexOf("hxmc.hybrid") >= 0;
-		var key = hybrid ? null : UpToDate.key(args, out);
+		var key = UpToDate.key(args, out);
 		if (UpToDate.check(key, out)) {
 			if (Sys.getEnv("HXMC_STATS") == "1") Sys.println("hxmc: up to date (" + Std.int((haxe.Timer.stamp() - start) * 1000) + " ms)");
 			Sys.exit(0);
@@ -102,7 +95,7 @@ class Main {
 		var t0 = haxe.Timer.stamp();
 		// resident: bodies of the fields the server kept are reused (LowerCache)
 		var useCache = Driver.resident && Sys.getEnv("HXMC_LOWER_CACHE") != "0";
-		var prog = useCache ? lowerCache.lower(mainClass, com.types, com.basic) : backend.Lower.program(mainClass, com.types, com.basic);
+		var prog = useCache ? lowerCache.lower(mainClass, com.types, com.basic) : hxmc.ir.Lower.program(mainClass, com.types, com.basic);
 		if (opts.stats) {
 			Sys.println('hxmc: lowering ${Std.int((haxe.Timer.stamp() - t0) * 1000)} ms (since start ${Std.int((t0 - start) * 1000)} ms)');
 			if (useCache)
@@ -112,7 +105,7 @@ class Main {
 		Driver.run(prog, out, opts);
 		// HXMC_LOWER_CHECK=1: the same program lowered from scratch must give the same executable
 		if (useCache && Sys.getEnv("HXMC_LOWER_CHECK") == "1") {
-			var fresh = backend.Lower.program(mainClass, com.types, com.basic);
+			var fresh = hxmc.ir.Lower.program(mainClass, com.types, com.basic);
 			Driver.run(fresh, out + ".check", opts);
 			var same = sys.io.File.getBytes(out).compare(sys.io.File.getBytes(out + ".check")) == 0;
 			Sys.println("hxmc: lowering check: " + (same ? "same executable" : "DIFFERENT executable"));

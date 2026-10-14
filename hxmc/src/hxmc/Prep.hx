@@ -1,52 +1,26 @@
 package hxmc;
 
-import backend.EmitC;
-import backend.Ir;
-import backend.EmitC.Refs;
+import hxmc.ir.Facts;
+import hxmc.ir.Ir;
 
-// The program-wide facts hxmc shares with hxc's C emitter, computed by
-// EmitC.prepare exactly as for C: no-GC functions, cold sites, type indices
-// and object layouts, field ids, the names and values of ids, string literal
-// names, and the C text of every function (hybrid builds use it for what
-// hxmc does not compile). Native code and C agree on every number this way.
-@:access(backend.EmitC)
+// The program-wide facts the code generator, the data and the runtime agree
+// on (hxmc.ir.Facts): no-GC functions, cold sites, type indices and object
+// layouts, field ids, the names and values of ids, string literal names.
+@:access(hxmc.ir.Facts)
 class Prep {
-	public var e:EmitC;
+	public var e:Facts;
 	public var p:Program;
 
 	public function new(p:Program) {
 		this.p = p;
-		e = new EmitC(p);
-		e.single = false;
-		// EmitC.prepare without writing the C of every function
-		for (f in p.funcs)
-			e.byCName.set(e.cname(f), f);
-		e.findNoGc();
-		e.markCold();
-		e.assignTypes();
-		e.collectNames();
-		e.assignNames();
-	}
-
-	// the C of a function (development builds: the functions not compiled natively)
-	public function cBody(f:FuncInfo):{text:String, refs:Refs} {
-		var r = e.bodies.get(f);
-		if (r != null) return r;
-		var saved = e.b;
-		e.b = new StringBuf();
-		e.refs = new Refs();
-		e.func(f);
-		r = {text: e.b.toString(), refs: e.refs};
-		e.bodies.set(f, r);
-		e.b = saved;
-		return r;
+		e = new Facts(p);
 	}
 
 	public inline function id(name:String):Int
 		return e.ids.get(name);
 
 	// Program-wide numbers are referenced by name in machine code (absolute
-	// symbols DataGen defines, as hxc's ids.h names them), so a module's code
+	// symbols DataGen defines), so a module's code
 	// does not change when another module adds a type, field or global:
 	// the symbol of a type index (null for the runtime's fixed ones)
 	public function tySym(tindex:Int):Null<String>
@@ -72,7 +46,7 @@ class Prep {
 	public function spanSym(c:ClassInfo):String
 		return "TYSPAN_" + e.typeNames[c.tindex].substr(3);
 
-	// the value of a type index as EmitC writes it
+	// a field id
 	public inline function fid(name:String):Int
 		return e.fid(name);
 
@@ -80,11 +54,11 @@ class Prep {
 	public function strSymIfKnown(s:String):Null<String>
 		return e.strNames.get(s);
 
-	// the symbol EmitC.str gives a literal (pure: threads may call it)
+	// the symbol Facts.str gives a literal (pure: threads may call it)
 	public static function strName(s:String):String
 		return "S_" + haxe.crypto.Md5.encode([for (i in 0...s.length) StringTools.hex(s.charCodeAt(i))].join(",")).substr(0, 16);
 
-	// registers a literal named by strName, as EmitC.str does
+	// registers a literal named by strName, as Facts.str does
 	public function addStr(s:String, n:String) {
 		if (e.strNames.exists(s)) return;
 		if (e.strByName.exists(n)) throw "string literal hash collision: " + n;
@@ -94,13 +68,7 @@ class Prep {
 	}
 
 	public function strSym(s:String):String {
-		var n = e.strNames.get(s);
-		if (n == null) {
-			e.refs = new Refs();
-			e.str(s);
-			n = e.strNames.get(s);
-		}
-		return n;
+		return e.str(s);
 	}
 
 	public function funcSym(f:FuncInfo):String
@@ -118,7 +86,4 @@ class Prep {
 
 	public function sigId(s:SigInfo):Int
 		return s.id;
-
-	public function roots(f:FuncInfo):backend.EmitC.Roots
-		return backend.EmitC.Roots.analyze(f);
 }
