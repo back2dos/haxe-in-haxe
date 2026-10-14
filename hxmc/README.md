@@ -419,6 +419,9 @@ What this says:
 
 ## Status
 
+Future directions (compact strings, WebAssembly, Android, iOS, C interop,
+graphics, runtime code generation, ...) are in [PLANS.md](PLANS.md).
+
 Done:
 
 - x86-64 Linux: 100% native (corpus: 7 programs and 60 fuzzer programs,
