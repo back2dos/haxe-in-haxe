@@ -259,6 +259,8 @@ class FnLower {
 	// C functions declared @:hxmc.c (hxmc.unsafe.LibC): called with the C ABI,
 	// never GC points (filled while lowering)
 	public static var C_EXTERNS = new Map<String, Bool>();
+	// the variadic ones: their first variadic argument (@:hxmc.varargs)
+	public static var C_VARIADIC = new Map<String, Int>();
 	// the intrinsics of hxmc.unsafe (MirBuild.intrinsic): no GC point but the
 	// allocations; these are pure (they read no memory)
 	public static var PURE_INTRINSICS = [
@@ -1313,6 +1315,13 @@ class FnLower {
 					var n = Lower.metaArg(core.Meta.getOpt(Native, cf.cfMeta));
 					name = n != null ? n : cf.cfName;
 					if (leaf) C_EXTERNS.set(name, true);
+					// @:hxmc.varargs(k): a variadic C function, its arguments from k on variadic
+					var va = core.Meta.getOpt(Custom(":hxmc.varargs"), cf.cfMeta);
+					if (va != null && va.exprs.length == 1)
+						switch va.exprs[0].expr {
+							case EConst(Int(k, _)): C_VARIADIC.set(name, Std.parseInt(k));
+							case _:
+						}
 				}
 				var intrinsic = intrinsicStatic(name, cargs, e);
 				if (intrinsic != null) return intrinsic;

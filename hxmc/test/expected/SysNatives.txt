@@ -1,0 +1,15 @@
+exit 0
+true true
+[hello,world,more,]
+300000 true
+1004 585f666d
+300000 true true
+[b.bin,c.txt] false
+true
+v=1 true null
+0 true true
+true
+[out,got line,] [err,] 3
+5 0
+false
+missing file: an exception

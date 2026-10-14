@@ -960,6 +960,18 @@ class Isel implements hxmc.Target.Selector {
 		for (k in 0...i.args.length) {
 			var a = i.args[k];
 			var t = i.argTys[k];
+			// Apple: variadic arguments on the stack, 8 bytes each
+			var onStack = apple && i.variadic >= 0 && k >= i.variadic;
+			if (onStack) {
+				stack = (stack + 7) & ~7;
+				var x = emit(STORE);
+				x.base = -4;
+				x.disp = stack;
+				x.size = 8;
+				x.s1 = use(a);
+				stack += 8;
+				continue;
+			}
 			if (t == F64) {
 				if (fi < 8) {
 					moves.push({d: D0 + fi, s: a});

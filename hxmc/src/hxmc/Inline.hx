@@ -221,6 +221,7 @@ class Inline {
 					x.mem = i.mem;
 					x.noReturn = i.noReturn;
 					x.returnsTwice = i.returnsTwice;
+					x.variadic = i.variadic;
 					x.argTys = i.argTys;
 					x.cases = i.cases;
 					if (i.args != null) x.args = [for (v in i.args) m(v)];

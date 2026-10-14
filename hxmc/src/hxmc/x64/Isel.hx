@@ -1232,6 +1232,18 @@ class Isel implements hxmc.Target.Selector {
 		var target = i.sym == null ? use(i.a) : -1;
 		for (mv in moves)
 			if (folded[mv.s]) materialize(m.vals[mv.s], mv.d) else mov(mv.d, reg(mv.s), 8);
+		if (i.variadic >= 0 && !win) {
+			// System V: al bounds the vector registers a variadic call passes
+			var nv = 0;
+			for (u in uses)
+				if (u >= XMM0) nv++;
+			var r = emit(MOVI);
+			r.flag = true;
+			r.d = RAX;
+			r.imm = nv;
+			r.size = 4;
+			uses.push(RAX);
+		}
 		var x = emit(CALL);
 		x.sym = i.sym;
 		x.s1 = target;

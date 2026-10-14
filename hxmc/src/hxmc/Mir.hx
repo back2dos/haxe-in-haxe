@@ -104,6 +104,7 @@ class MIns {
 	public var block:MBlock;
 	public var noReturn = false; // Call
 	public var returnsTwice = false; // Call (setjmp)
+	public var variadic = -1; // Call: the first variadic argument of a C function (-1: none)
 	public var argTys:Null<Array<MTy>>; // Call: the C types of the arguments (I32 stays 32-bit in the ABI)
 	public var dead = false;
 	public var mem = 0; // Load/Store: the memory class (Opt.MOther...)

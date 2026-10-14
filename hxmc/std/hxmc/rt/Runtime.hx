@@ -10,5 +10,6 @@ import hxmc.rt.Arr;
 import hxmc.rt.Bytes;
 import hxmc.rt.Date;
 import hxmc.rt.Zip;
+import hxmc.rt.Sys;
 
 class Runtime {}

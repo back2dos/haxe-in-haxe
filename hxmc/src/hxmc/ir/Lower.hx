@@ -122,6 +122,8 @@ class Lower {
 		for (t in types)
 			switch t {
 				case TClassDecl(c) if (c.clPath.pack.length > 0 && c.clPath.pack[0] == "hxmc" && !c.hasClassFlag(CExtern)):
+					// @:hxmc.posix: the implementations of Linux and macOS (Windows keeps its C)
+					if (targetOs == 2 && hasMeta(":hxmc.posix", c.clMeta)) continue;
 					for (cf in c.clOrderedStatics) {
 						if (cf.cfMeta.length == 0) continue;
 						var n = metaString(":hxmc.export", cf.cfMeta);

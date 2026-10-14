@@ -1925,7 +1925,11 @@ class MirBuild {
 			case "Math_isNaN": cmp(FNe, xs[0], xs[0]);
 			case "Math_isFinite": cmp(FEq, op2(FSub, F64, xs[0], xs[0]), fconst(0));
 			case "StringBuf_addChar": stringBufAddChar(xs[0], xs[1]);
-			case _: call(name, xs, mty(ret));
+			case _:
+				var r = call(name, xs, mty(ret));
+				var va = hxmc.ir.FnLower.C_VARIADIC.get(name);
+				if (va != null) f.vals[r].variadic = va;
+				r;
 		}
 	}
 
