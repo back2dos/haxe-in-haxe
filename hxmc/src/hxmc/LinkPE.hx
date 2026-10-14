@@ -159,7 +159,9 @@ class LinkPE {
 		];
 		for (o in objs)
 			for (s in o.sections) {
-				var g = switch s.kind {
+				// (.CRT$X?A ... .CRT$X?Z: arrays of pointers, read-only or not,
+				// kept together in .data in name order)
+				var g = StringTools.startsWith(s.name, ".CRT$") ? 3 : switch s.kind {
 					case Text: 0;
 					case RoData: StringTools.startsWith(s.name, ".pdata") ? 2 : 1;
 					case Data | InitArray | FiniArray: 3;

@@ -134,7 +134,7 @@ class CoffReader {
 				return {kind: kind, addend: sext((w >> 5) & 0x3fff, 14) << 2};
 			case RA64AdrPage21:
 				buf.set32(va, w & ~((3 << 29) | (0x7ffff << 5)));
-				return {kind: kind, addend: sext(((w >> 29) & 3) | (((w >> 5) & 0x7ffff) << 2), 21)};
+				return {kind: kind, addend: ((w >> 29) & 3) | (((w >> 5) & 0x7ffff) << 2)}; // (an unsigned byte offset, as lld reads it)
 			case RA64AddLo12 | RA64SecRelLo12A:
 				buf.set32(va, w & ~(0xfff << 10));
 				return {kind: kind, addend: (w >> 10) & 0xfff};

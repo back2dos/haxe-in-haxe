@@ -23,3 +23,22 @@ void hxmc_barrier_slow(void *obj, void **slot, void *val, void *prev) {
 extern __thread char hxmc_tls_start;
 void *hxmc_tls_base(void) { return &hxmc_tls_start; }
 #endif
+
+#ifdef _WIN32
+// Windows: a crash names its exception and the address in the image (the
+// image has no unwind information for generated code, so neither a
+// debugger's stack trace nor an unhandled-exception filter can be relied on)
+#include <windows.h>
+#include <stdio.h>
+static LONG CALLBACK hxmc_crash(EXCEPTION_POINTERS *e) {
+	DWORD c = e->ExceptionRecord->ExceptionCode;
+	if (c == EXCEPTION_ACCESS_VIOLATION || c == EXCEPTION_ILLEGAL_INSTRUCTION || c == EXCEPTION_PRIV_INSTRUCTION || c == EXCEPTION_STACK_OVERFLOW ||
+		c == EXCEPTION_INT_DIVIDE_BY_ZERO || c == EXCEPTION_DATATYPE_MISALIGNMENT || c == EXCEPTION_IN_PAGE_ERROR) {
+		char *a = (char *)e->ExceptionRecord->ExceptionAddress, *base = (char *)GetModuleHandleA(NULL);
+		fprintf(stderr, "hxmc: exception 0x%08lx at %p (image + 0x%llx)\n", (unsigned long)c, (void *)a, (unsigned long long)(a - base));
+		fflush(stderr);
+	}
+	return EXCEPTION_CONTINUE_SEARCH;
+}
+__attribute__((constructor)) static void hxmc_crash_init(void) { AddVectoredExceptionHandler(0, hxmc_crash); }
+#endif
