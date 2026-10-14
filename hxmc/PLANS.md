@@ -68,6 +68,25 @@ Done (README, "Runtime in Haxe"):
 
 ## Language and runtime
 
+### A compiler check for raw addresses across GC points
+
+Found during the runtime cleanup: inline std code that takes a raw heap
+address (`Mem.addr`) was expanded into code that can collect. Lowering
+may compute the address before an allocation among the same expression's
+operands; the collector then moves the object and the code writes through
+a stale address (about 13% of ThreadNatives runs failed after the first
+haxe.atomic collapse). Fixed by moving the address work into
+`@:hxmc.noGc` helpers, and the rule is in the README ("Runtime in
+Haxe"), but it is only a convention.
+
+Make the compiler enforce it: track values derived from `Mem.addr`
+(and pointer arithmetic on them) in the SSA IR and reject any that is
+live across a GC point outside a `@:hxmc.noGc` function, naming the
+expression, the way Facts already names a no-GC function's culprit.
+Alternatively, lower `Mem.addr` as late as possible (after the
+allocation it is mixed with), but a check catches the class of bug
+rather than one instance.
+
 ### Compact strings (Latin-1 / UTF-16)
 
 Strings are UTF-16 (32-bit length, 16-bit code units), as on hxc and
