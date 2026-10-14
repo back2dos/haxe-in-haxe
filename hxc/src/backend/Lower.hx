@@ -25,6 +25,7 @@ class Lower {
 	var ctors = new Map<TClass, FuncInfo>();
 	var pending:Array<() -> Void> = [];
 	var tclasses:Array<TClass> = [];
+	var subclasses = new Map<TClass, Array<TClass>>(); // per class: its subclasses in tclasses, in that order
 	var root:ClassInfo;
 	var usedSelectors = new Map<String, Int>();
 	public var defaults = new Map<FuncInfo, Array<Null<TExpr>>>();
@@ -259,6 +260,13 @@ class Lower {
 		ci = new ClassInfo(core.Globals.sTypePath(c.clPath), nativeName(c), sup);
 		classes.set(c, ci);
 		tclasses.push(c);
+		var k = c.clSuper;
+		while (k != null) {
+			var subs = subclasses.get(k.cls);
+			if (subs == null) subclasses.set(k.cls, subs = []);
+			subs.push(c);
+			k = k.cls.clSuper;
+		}
 		ci.ifaces = sup.ifaces.copy();
 		for (i in c.clImplements)
 			addIface(ci, i.cls);
@@ -579,20 +587,13 @@ class Lower {
 		if (c.hasClassFlag(CInterface)) return true;
 		var f = c.clFields.get(name);
 		if (f != null && f.hasClassFieldFlag(CfFinal)) return false;
-		for (d in tclasses)
-			if (d != c && isSubclass(d, c) && d.clFields.exists(name) && d.clFields.get(name).cfExpr != null) return true;
+		var subs = subclasses.get(c);
+		if (subs != null)
+			for (d in subs)
+				if (d.clFields.exists(name) && d.clFields.get(name).cfExpr != null) return true;
 		// a subclass loaded later may still override: dispatch if any descendant is known to the typer
 		for (d in c.clDescendants)
 			if (d.clFields.exists(name) && d.clFields.get(name).cfExpr != null) return true;
-		return false;
-	}
-
-	static function isSubclass(d:TClass, c:TClass):Bool {
-		var k = d;
-		while (k != null) {
-			if (k == c) return true;
-			k = k.clSuper != null ? k.clSuper.cls : null;
-		}
 		return false;
 	}
 

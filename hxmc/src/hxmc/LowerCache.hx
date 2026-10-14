@@ -253,6 +253,7 @@ class CachedLower extends Lower {
 		if (gmap == null) gmaps.set(old.gen, gmap = new Map());
 		smap = smaps.get(old.gen);
 		if (smap == null) smaps.set(old.gen, smap = new Map());
+		stamp++;
 		bindFunc(old.fi, fi);
 		for (c in old.log)
 			call(c);
@@ -646,12 +647,30 @@ class CachedLower extends Lower {
 		return n;
 	}
 
+	// (the function's locals by id, before the map: ids are distinct in a function)
+	var lOld:Array<Local> = [];
+	var lNew:Array<Local> = [];
+	var lStamp:Array<Int> = [];
+	var stamp = 0;
+
 	function local(o:Local):Local {
 		if (ident || o == MARK) return o;
+		var id = o.id;
+		if (id >= 0 && id < lOld.length && lStamp[id] == stamp && lOld[id] == o) return lNew[id];
 		var n:Local = map.get(o);
 		if (n == null) {
 			n = new Local(o.id, o.name, mapTy(o.ty));
 			map.set(o, n);
+		}
+		if (id >= 0 && id < 1 << 16) {
+			if (id >= lOld.length) {
+				lOld.resize(id + 1);
+				lNew.resize(id + 1);
+				lStamp.resize(id + 1);
+			}
+			lOld[id] = o;
+			lNew[id] = n;
+			lStamp[id] = stamp;
 		}
 		return n;
 	}
