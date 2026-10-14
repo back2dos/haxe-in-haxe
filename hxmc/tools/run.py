@@ -9,9 +9,12 @@ reference compiler (cached, rewritten when a source is newer); the oracle is
 the same archive compiled by hxc (bin/hxc-dev/tool, tcc), run once and its
 output cached; then hxmc (bin/hxmc/hxmc) compiles the archive (development
 build: native code + the C of the rest) and the output must be identical.
-Prints per case the share of functions compiled natively.
+Prints per case the share of functions compiled natively. With --stage the
+executables are only built and copied with their expected outputs (cross
+targets run on their own machines: hxmc/tools/check.py, the CI workflow
+.github/workflows/hxmc.yml).
 """
-import argparse, concurrent.futures, os, re, subprocess, sys, time, resource
+import argparse, concurrent.futures, os, re, shutil, subprocess, sys, time, resource
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -105,6 +108,13 @@ def run_case(name, cps, main, args):
     (d / "hxmc.log").write_text(o + e)
     if code != 0:
         return name, "hxmc-fail", (o + e)[-2000:], stats
+    if args.stage:
+        # cross builds: the executable and the expected output, run elsewhere (check.py)
+        sd = Path(args.stage) / name
+        sd.mkdir(parents=True, exist_ok=True)
+        shutil.copy(exe, sd / ("m.exe" if exe.suffix == ".exe" else "m"))
+        shutil.copy(expected, sd / "expected.txt")
+        return name, "ok", "staged", stats
     try:
         runner = {"linux-arm64": ["qemu-aarch64-static"], "windows-x86_64": ["/usr/lib/wine/wine64"]}.get(args.target, [])
         # a small nursery: frequent collections, so a missing or stale root shows
@@ -125,6 +135,7 @@ def main():
     ap.add_argument("--hybrid", action="store_true", help="development builds (C for what hxmc does not compile, the system's linker)")
     ap.add_argument("--target", help="hxmc.target (run with qemu-aarch64-static / wine64 as needed)")
     ap.add_argument("--fuzz", help="also every program of this directory (written by bin/fuzz/fuzz --emit)")
+    ap.add_argument("--stage", help="do not run: copy each executable and its expected output to <dir>/<case>/ (hxmc/tools/check.py runs them)")
     ap.add_argument("cases", nargs="*")
     a = ap.parse_args()
     cases = case_list(a.cases, a.fuzz)
@@ -138,7 +149,8 @@ def main():
                 nat += stats[0]
                 tot += stats[1]
             print(f"{name:24} {status:12} {s:18} {detail if status == 'ok' or not a.v else ''}")
-            if status != "ok":
+            if status != "ok" and not (a.stage and status in ("hxb-fail", "hxc-fail", "hxc-cc-fail")):
+                # (staging: a program without an oracle is left out)
                 bad += 1
                 if a.v:
                     print("    " + detail.replace("\n", "\n    "))

@@ -1,0 +1,234 @@
+# hxmc (hxmc/README.md, "CI"): builds the hxmc tool on Linux, cross-builds
+# the test corpus (hxmc/test/cases, hxc's test programs, fuzzer programs) and
+# the port for every hxmc target there, and runs them on a machine of each
+# target: outputs compared with hxc's (written on Linux, hxmc/tools/check.py),
+# and the port built by hxmc compiles its own source to the same HXB as the
+# reference compiler (hxmc/tools/selfcheck.py). Only on the hxmc branch.
+name: hxmc
+
+on:
+  push:
+    branches: [hxmc]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hxmc-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  OCAML_VERSION: 5.3.0
+  ZIG_VERSION: 0.17.0
+  HXNODEJS_COMMIT: f88685a70b2e4f03dbe0a824ce90ea8b56b27753
+  # the directory the port's self-compile runs in, on Linux (the reference)
+  # and on macOS: the archive names files by absolute path
+  SELF_ROOT: /Users/runner/hih
+  # the targets built (the run job's matrix lists the same)
+  TARGETS: linux-x86_64 linux-arm64 windows-x86_64
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    env:
+      OPAMYES: 1
+      PLATFORM: linux64
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: true
+
+      - name: Reference compiler revision
+        id: ref
+        run: echo "rev=$(git -C haxe rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      # the same key as build.yml's (caches of main are visible here)
+      - name: Cache the reference compiler
+        id: cache-haxe
+        uses: actions/cache@v6
+        with:
+          path: haxe/haxe
+          key: haxe-${{ runner.os }}-${{ runner.arch }}-${{ env.OCAML_VERSION }}-${{ steps.ref.outputs.rev }}
+
+      - name: System packages
+        run: |
+          sudo apt-get update -qqy
+          sudo apt-get install -qqy tcc
+          if [ "${{ steps.cache-haxe.outputs.cache-hit }}" != true ]; then sudo apt-get install -qqy opam libpcre2-dev zlib1g-dev libmbedtls-dev ninja-build; fi
+
+      - name: Cache opam
+        if: steps.cache-haxe.outputs.cache-hit != 'true'
+        id: cache-opam
+        uses: actions/cache@v6
+        with:
+          path: ~/.opam/
+          key: opam-${{ runner.os }}-${{ runner.arch }}-${{ env.OCAML_VERSION }}-${{ hashFiles('haxe/haxe.opam') }}
+
+      - name: Neko (for the opam package conf-neko)
+        if: steps.cache-haxe.outputs.cache-hit != 'true' && steps.cache-opam.outputs.cache-hit != 'true'
+        uses: ./haxe/.github/actions/setup-neko
+
+      - name: OCaml libraries
+        if: steps.cache-haxe.outputs.cache-hit != 'true' && steps.cache-opam.outputs.cache-hit != 'true'
+        run: |
+          set -ex
+          opam init -c "$OCAML_VERSION" --disable-sandboxing
+          opam pin add haxe ./haxe --no-action
+          opam install haxe --deps-only --assume-depexts
+
+      - name: Build the reference compiler
+        if: steps.cache-haxe.outputs.cache-hit != 'true'
+        run: |
+          set -ex
+          eval $(opam env)
+          make -C haxe -s -j"$(nproc)" haxe
+
+      # the native backend tool (port + hxc), which compiles hxmc: keyed by its sources
+      - name: Cache the native tool
+        id: cache-tool
+        uses: actions/cache@v6
+        with:
+          path: |
+            bin/hxc-dev/tool
+            bin/fuzz/fuzz
+          key: hxmc-tool-${{ hashFiles('src/**', 'hxc/src/**', 'hxc/js/**', 'hxc/rt/**', 'hxc/std/**', 'hxc/tools/mkstd.py', 'test/fuzz/**') }}
+
+      - uses: actions/setup-node@v7
+        if: steps.cache-tool.outputs.cache-hit != 'true'
+        with:
+          node-version: 22
+
+      - name: Native tool and fuzzer
+        if: steps.cache-tool.outputs.cache-hit != 'true'
+        run: |
+          set -ex
+          git init -q "$RUNNER_TEMP/hxnodejs"
+          git -C "$RUNNER_TEMP/hxnodejs" fetch -q --depth 1 https://github.com/HaxeFoundation/hxnodejs "$HXNODEJS_COMMIT"
+          git -C "$RUNNER_TEMP/hxnodejs" checkout -q FETCH_HEAD
+          make bin/hxc-dev/tool bin/fuzz/fuzz TOOL_LIBS="$RUNNER_TEMP/hxnodejs/extraParams.hxml -cp $RUNNER_TEMP/hxnodejs/src"
+
+      - name: Restored tool is up to date
+        if: steps.cache-tool.outputs.cache-hit == 'true'
+        run: |
+          make bin/hxc/std/.stamp
+          touch bin/hxc-dev/tool bin/fuzz/fuzz
+
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: ${{ env.ZIG_VERSION }}
+
+      - name: hxmc and the runtime objects
+        run: |
+          set -ex
+          make hxmc-dev
+          for t in $TARGETS; do
+            sh hxmc/tools/mkrt.sh $t
+          done
+
+      - name: Cross-build the corpus
+        run: |
+          set -ex
+          bin/fuzz/fuzz --emit bin/hxmc-fuzz -n 60 --seed 1000
+          for t in $TARGETS; do
+            python3 hxmc/tools/run.py -v --target $t --fuzz bin/hxmc-fuzz --stage dist/$t/corpus
+          done
+
+      - name: Cross-build the port
+        run: |
+          set -ex
+          export HAXE_STD_PATH=$PWD/haxe/std
+          mkdir -p bin/hxmc-t/port
+          haxe/haxe -cp src -cp hxc/js -cp bin/hxc/std -main haxe.Main --custom-target hxc=x --hxb bin/hxmc-t/port/prog.hxb.zip -D disable-parallelism --no-output
+          for t in $TARGETS; do
+            exe=haxe; case $t in windows-*) exe=haxe.exe ;; esac
+            mkdir -p dist/$t/port
+            HXMC_STATS=1 bin/hxmc/hxmc dist/$t/port/$exe --hxb-lib bin/hxmc-t/port/prog.hxb.zip -main haxe.Main --custom-target hxc -D disable-parallelism -D hxmc.target=$t | tail -3
+            ls -l dist/$t/port/$exe
+            rm -rf dist/$t/port/$exe.hxmc dist/$t/port/haxe.hxmc
+          done
+
+      # the reference's self-compile, in the directory the macOS runners use
+      - name: Reference self-compile
+        run: |
+          set -ex
+          sudo mkdir -p "$SELF_ROOT" && sudo chown "$USER" "$SELF_ROOT"
+          cp -r src "$SELF_ROOT/src"
+          cp -r haxe/std "$SELF_ROOT/std"
+          (cd "$SELF_ROOT" && HAXE_STD_PATH="$SELF_ROOT/std" "$GITHUB_WORKSPACE/haxe/haxe" -cp src -main haxe.Main -D disable-parallelism --interp --no-output --hxb self-ref.hxb)
+          mkdir -p dist/self
+          cp "$SELF_ROOT/self-ref.hxb" dist/self/
+          tar czf dist/self/std.tar.gz -C haxe std
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: hxmc-self
+          path: dist/self/
+          retention-days: 3
+
+      - name: Pack per target
+        run: |
+          for t in $TARGETS; do
+            tar czf dist/$t.tar.gz -C dist/$t .
+          done
+
+      - uses: actions/upload-artifact@v7
+        with: {name: hxmc-linux-x86_64, path: dist/linux-x86_64.tar.gz, retention-days: 3, if-no-files-found: ignore}
+      - uses: actions/upload-artifact@v7
+        with: {name: hxmc-linux-arm64, path: dist/linux-arm64.tar.gz, retention-days: 3, if-no-files-found: ignore}
+      - uses: actions/upload-artifact@v7
+        with: {name: hxmc-windows-x86_64, path: dist/windows-x86_64.tar.gz, retention-days: 3, if-no-files-found: ignore}
+      - uses: actions/upload-artifact@v7
+        with: {name: hxmc-windows-arm64, path: dist/windows-arm64.tar.gz, retention-days: 3, if-no-files-found: ignore}
+      - uses: actions/upload-artifact@v7
+        with: {name: hxmc-macos-x86_64, path: dist/macos-x86_64.tar.gz, retention-days: 3, if-no-files-found: ignore}
+      - uses: actions/upload-artifact@v7
+        with: {name: hxmc-macos-arm64, path: dist/macos-arm64.tar.gz, retention-days: 3, if-no-files-found: ignore}
+
+  run:
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {target: linux-x86_64, os: ubuntu-24.04}
+          - {target: linux-arm64, os: ubuntu-24.04-arm}
+          - {target: windows-x86_64, os: windows-2025}
+          # - {target: windows-arm64, os: windows-11-arm}
+          # - {target: macos-x86_64, os: macos-15-intel}
+          # - {target: macos-arm64, os: macos-15}
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          sparse-checkout: |
+            src
+            hxmc/tools
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@v8
+        with: {name: 'hxmc-${{ matrix.target }}', path: dl}
+      - uses: actions/download-artifact@v8
+        with: {name: hxmc-self, path: dl}
+      - name: Unpack
+        run: |
+          set -ex
+          mkdir -p t std-x
+          tar xzf dl/${{ matrix.target }}.tar.gz -C t
+          tar xzf dl/std.tar.gz -C std-x
+          ls t t/port
+      - name: Corpus
+        run: python hxmc/tools/check.py t/corpus --summary "$GITHUB_STEP_SUMMARY"
+      - name: Port self-compile
+        if: always()
+        run: |
+          set -ex
+          root="$SELF_ROOT"
+          exe=t/port/haxe
+          if [ "$RUNNER_OS" = Linux ]; then sudo mkdir -p "$root" && sudo chown "$USER" "$root"; fi
+          if [ "$RUNNER_OS" = Windows ]; then root="$(cygpath -w "$RUNNER_TEMP")\\hih"; exe=t/port/haxe.exe; fi
+          python hxmc/tools/selfcheck.py --port "$exe" --src src --std std-x/std --ref dl/self-ref.hxb --ref-root "$SELF_ROOT" --root "$root" --summary "$GITHUB_STEP_SUMMARY"
