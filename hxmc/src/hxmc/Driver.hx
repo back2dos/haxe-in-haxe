@@ -98,6 +98,7 @@ class Driver {
 			if (o.opt) {
 				// to a depth (Fingerprint keys callers with their callees' callees)
 				var todo = mb.inlineSites;
+				var ic = {sym: mb.icSym, count: mb.icaches};
 				for (_ in 0...Inline.DEPTH) {
 					if (todo.length == 0) break;
 					var sites = [];
@@ -113,8 +114,9 @@ class Driver {
 						if (t != null && s.fn != fn && t.size <= (inLoop.exists(s.call.block) ? Inline.MAX_LOOP : Inline.MAX_FLAT))
 							sites.push({call: s.call, callee: t});
 					}
-					todo = Inline.run(mf, sites);
+					todo = Inline.run(mf, sites, ic);
 				}
+				mb.icaches = ic.count;
 			}
 			if (o.opt) new Opt(mf).run();
 			if (dumpSet != null && dumpSet.exists(name)) Sys.println(mf.dump());

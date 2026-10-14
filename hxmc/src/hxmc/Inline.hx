@@ -50,15 +50,16 @@ class Inline {
 
 	// the callee's Mir when it can be inlined (built once per caller module)
 	public static function template(mb:MirBuild, mf:MFunc):Null<Template> {
-		if (mb.frameSlots > 0 || mb.icaches > 0) return null;
+		// (a callee with a shadow-stack frame keeps it: its copy pushes and pops it)
 		var n = 0;
 		for (b in mf.blocks)
 			if (!b.cold)
 				for (i in b.ins) {
 					if (i.op == Call && i.returnsTwice) return null;
-					n++;
+					// (constants and addresses fold into their users)
+					if (i.op != Const && i.op != ConstF && i.op != SymAddr && i.op != StackAddr && i.op != Param) n++;
 				}
-		return n <= MAX_LOOP ? {mf: mf, sites: mb.inlineSites, size: n} : null;
+		return n <= MAX_LOOP ? {mf: mf, sites: mb.inlineSites, size: n, icSym: mb.icSym, icaches: mb.icaches} : null;
 	}
 
 	// drops the blocks no longer reachable (after a callee that never returns)
@@ -128,7 +129,7 @@ class Inline {
 
 	// replaces each call (in f) by a copy of its callee's template
 	// (returns the calls to candidates in the copies: inlined in turn, to a depth)
-	public static function run(f:MFunc, sites:Array<{call:MIns, callee:Template}>):Array<{call:MIns, fn:FuncInfo}> {
+	public static function run(f:MFunc, sites:Array<{call:MIns, callee:Template}>, ic:IcAlloc):Array<{call:MIns, fn:FuncInfo}> {
 		var more = [];
 		if (sites.length == 0) return more;
 		var nextBlock = 0;
@@ -168,6 +169,8 @@ class Inline {
 				f.blocks.push(nb);
 			}
 			var slotBase = f.slots.length;
+			var icBase = ic.count;
+			ic.count += site.callee.icaches;
 			for (s in g.slots)
 				f.slots.push(s);
 			// values first (operands may refer forward: phis)
@@ -209,6 +212,10 @@ class Inline {
 					if (i.args != null) x.args = [for (v in i.args) m(v)];
 					if (i.targets != null) x.targets = [for (t in i.targets) bmap.get(t.id)];
 					if (i.op == StackAddr) x.imm = i.imm + slotBase;
+					if (i.op == SymAddr && i.sym == site.callee.icSym) {
+						x.sym = ic.sym;
+						x.imm = i.imm + Abi.IC_SIZE * icBase;
+					}
 					x.block = nb;
 					if (i.op == Ret) {
 						// a jump to the rest of the caller's block
@@ -274,4 +281,7 @@ class Inline {
 	}
 }
 
-typedef Template = {mf:MFunc, sites:Array<{call:MIns, fn:FuncInfo}>, size:Int};
+typedef Template = {mf:MFunc, sites:Array<{call:MIns, fn:FuncInfo}>, size:Int, icSym:String, icaches:Int};
+
+// the caller's inline caches: copies of a callee's get their own entries
+typedef IcAlloc = {sym:String, count:Int};

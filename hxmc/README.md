@@ -173,6 +173,29 @@ collections), modules compile in parallel, keys and cached reads are
 parallel, and an unchanged build is skipped from the archive's ZIP
 directory.
 
+## Stack maps: what the shadow stack costs (2026-10-14)
+
+Upper bound, measured before building stack maps: each case built normally
+and with `HXMC_NOSHADOW=1` (no shadow-stack frames: references stay in SSA
+values; correct only while nothing collects), both run with a 6-10 GB
+nursery so that nothing collects (`RT_STATS` shows 0 collections).
+Instructions executed (callgrind; wall time is dominated by page faults
+of the huge nursery in this setup):
+
+| case | with frames | without | saved |
+| --- | --- | --- | --- |
+| mandelbrot_anon | 13.39 G | 10.56 G | 21% |
+| binarytrees | 6.18 G | 5.51 G | 11% |
+| formatter_noio | 42.16 G | 38.21 G | 9% |
+| json | 4.39 G | 4.23 G | 4% |
+| alloc | 9.42 G | 9.42 G | 0% |
+| nbody | 10.19 G | 10.19 G | 0% |
+
+Stack maps keep part of this (references live across calls still go to
+frame slots, but no frame push/pop, no stores of unchanged references, no
+reloads after calls that do not collect): worth building, after the
+current performance work.
+
 ## Step 0: how much optimization is needed (2026-10-13)
 
 `hxmc/bench/measure.py`: each case lowered to C once by hxc; the runtime

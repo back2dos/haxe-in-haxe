@@ -342,8 +342,13 @@ class MirBuild {
 		return add(i);
 	}
 
+	// blocks made while set are slow paths (the inline-cache path behind a
+	// shape hint: C marks it unlikely)
+	var coldNew = false;
+
 	function newBlock():MBlock {
 		var b = f.newBlock();
+		if (coldNew) b.cold = true;
 		defs.push(new BlockDefs());
 		incomplete.push(new Map());
 		return b;
@@ -1295,7 +1300,7 @@ class MirBuild {
 		var join = newBlock();
 		if (hint != null && hint.tindex >= 0) {
 			var direct = newBlock(), other = newBlock();
-			other.cold = false;
+			other.cold = true;
 			br(cmp(CEq, tindex(o), tyConst(hint.tindex)), direct, other);
 			seal(direct);
 			seal(other);
@@ -1304,6 +1309,7 @@ class MirBuild {
 			writeVar(res, cur, slotLoad(o, hint.locs[i], t));
 			jmp(join);
 			cur = other;
+			coldNew = true;
 		}
 		var c = ic(o, fid);
 		var hit = newBlock(), miss = newBlock(), chk = newBlock();
@@ -1321,6 +1327,7 @@ class MirBuild {
 		cur = miss;
 		writeVar(res, cur, unboxTo(t, call("hx_anon_get_slow", [o, fid], I64)));
 		jmp(join);
+		coldNew = false;
 		seal(join);
 		cur = join;
 		return readVar(res, cur);
