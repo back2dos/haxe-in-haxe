@@ -9,6 +9,12 @@ import compiler.CompilationCache;
 import context.Common;
 import context.Memory;
 import haxe.ds.IntMap;
+// port: the host natives of hxc (hxc/std) or of hxmc (hxmc/std, the machine-code target)
+#if (target.name == "hxmc")
+import hxmc.NativeGc;
+#elseif (target.name == "hxc")
+import hxc.NativeGc;
+#end
 
 // port: the sizes are those Memory.Objsize measures on the host (see Memory.hx).
 class DisplayMemory {
@@ -211,8 +217,8 @@ class DisplayMemory {
 		var verbose = com.verbose;
 		var print = Sys.println;
 		// port: Gc.full_major (); Gc.compact (): a collection of the host
-		#if (target.name == "hxc")
-		hxc.NativeGc.collect(true);
+		#if (target.name == "hxc" || target.name == "hxmc")
+		NativeGc.collect(true);
 		#end
 		// port: Gc.stat (): the host reports its heap size, not the free part
 		var heap = Std.int(Objsize.heapBytes());

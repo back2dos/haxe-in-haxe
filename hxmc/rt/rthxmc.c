@@ -1,7 +1,7 @@
 // Runtime helpers of hxmc's generated code, linked into the runtime objects
-// (hxmc/tools/mkrt.sh; bin/hxmc/rt-dev for hybrid builds): the slow paths
-// that C writes inline, called from one instruction sequence each so that
-// every allocation or reference store site has a short slow path.
+// (hxmc/tools/mkrt.sh): the slow paths of allocation and reference stores,
+// called from one instruction sequence each so that every allocation or
+// reference store site has a short slow path.
 #include "rt.h"
 
 // rt_alloc_slow with the header assembled here (the type index is a

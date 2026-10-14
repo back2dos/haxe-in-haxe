@@ -1,5 +1,12 @@
 package core.ds;
 
+// port: the host natives of hxc (hxc/std) or of hxmc (hxmc/std, the machine-code target)
+#if (target.name == "hxmc")
+import hxmc.Native;
+#elseif (target.name == "hxc")
+import hxc.Native;
+#end
+
 class StrTools {
 	// port: string equality for non-null strings; on HashLink `==` calls
 	// String.__compare, so lengths are compared first.
@@ -20,15 +27,15 @@ class StrTools {
 		return a == null || b == null ? a != b : @:privateAccess ((a.bytes : hl.Bytes) != (b.bytes : hl.Bytes));
 		#elseif jvm
 		return !jvm.Jvm.referenceEquals(a, b);
-		#elseif (target.name == "hxc")
-		return !hxc.Native.refEq(a, b);
+		#elseif (target.name == "hxc" || target.name == "hxmc")
+		return !Native.refEq(a, b);
 		#else
 		return a != b;
 		#end
 	}
 
 	// port: whether physNeq/physEq observe string identity on this host.
-	public static inline final hasIdentity:Bool = #if (hl || jvm || (target.name == "hxc")) true #else false #end;
+	public static inline final hasIdentity:Bool = #if (hl || jvm || target.name == "hxc" || target.name == "hxmc") true #else false #end;
 
 	// port: OCaml's physical equality `==` on strings (see physNeq).
 	public static inline function physEq(a:Null<String>, b:Null<String>):Bool return !physNeq(a, b);

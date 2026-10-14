@@ -15,7 +15,10 @@ import macros.eval.EvalExceptions;
 import macros.eval.EvalMisc;
 import macros.eval.EvalField;
 import macros.eval.EvalIntegers;
-#if (target.name == "hxc")
+// port: the host natives of hxc (hxc/std) or of hxmc (hxmc/std, the machine-code target)
+#if (target.name == "hxmc")
+import hxmc.NativeUv as Uv;
+#elseif (target.name == "hxc")
 import hxc.NativeUv as Uv;
 #end
 
@@ -72,7 +75,7 @@ class EvalLuv {
 
 	// port: whether eval.luv works on this host.
 	public static function available():Bool {
-		#if (target.name == "hxc")
+		#if (target.name == "hxc" || target.name == "hxmc")
 		return Uv.available();
 		#else
 		return false;
@@ -3368,7 +3371,7 @@ class LuvOnce extends LuvSync {
 	}
 }
 
-#if !(target.name == "hxc") // port: hosts without libuv: `EvalLuv.available()` is false and no field reaches these.
+#if !(target.name == "hxc" || target.name == "hxmc") // port: hosts without libuv: `EvalLuv.available()` is false and no field reaches these.
 private class Uv {
 	static function no():Dynamic return throw new Failure("libuv is not available on this host");
 

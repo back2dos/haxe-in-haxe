@@ -80,6 +80,12 @@ import macros.eval.EvalStdLibB.StdNativeString;
 import macros.eval.EvalStdLibB.StdLibBHelpers;
 
 using macros.eval.EvalValue.EvalValueTools;
+// port: the host natives of hxc (hxc/std) or of hxmc (hxmc/std, the machine-code target)
+#if (target.name == "hxmc")
+import hxmc.NativeNet;
+#elseif (target.name == "hxc")
+import hxc.NativeNet;
+#end
 
 // port: haxe/src/macro/eval/evalStdLib.ml: the shared helpers (lines 1-44) and the
 // registration of the standard library natives (`init_fields` .. the end).
@@ -260,9 +266,9 @@ class EvalStdLib {
 			case _: die();
 		});
 		add(EvalHash.key_eval_vm_NativeSocket, _ -> {
-			#if (target.name == "hxc" || hl)
+			#if (target.name == "hxc" || target.name == "hxmc" || hl)
 			// port: catch_unix_error Unix.socket PF_INET SOCK_STREAM 0
-			var fd = macros.eval.EvalStdLibB.StdSocket.check(#if hl macros.eval.EvalHostNet #else hxc.NativeNet #end.socket(), "socket");
+			var fd = macros.eval.EvalStdLibB.StdSocket.check(#if hl macros.eval.EvalHostNet #else NativeNet #end.socket(), "socket");
 			EvalEncode.encodeInstance(EvalHash.key_eval_vm_NativeSocket, ISocket(fd));
 			#else
 			notSupported("Sockets (eval.vm.NativeSocket)");

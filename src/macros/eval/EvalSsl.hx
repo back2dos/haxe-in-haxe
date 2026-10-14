@@ -8,6 +8,14 @@ import macros.eval.EvalDecode;
 import macros.eval.EvalExceptions;
 
 using macros.eval.EvalValue.EvalValueTools;
+// port: the host natives of hxc (hxc/std) or of hxmc (hxmc/std, the machine-code target)
+#if (target.name == "hxmc")
+import hxmc.NativeNet;
+import hxmc.NativeSsl;
+#elseif (target.name == "hxc")
+import hxc.NativeNet;
+import hxc.NativeSsl;
+#end
 
 // port: upstream calls the OCaml mbedtls bindings (haxe/libs/mbedtls). On the hxc
 // host (hxc/) they are `hxc.NativeSsl` (hxc/rt/rt_ssl.c); on other
@@ -76,29 +84,29 @@ class EvalSsl {
 	}
 
 	public static function initConstructors(add:(Int, Array<Value>->Value) -> Void):Void {
-		#if (target.name == "hxc")
+		#if (target.name == "hxc" || target.name == "hxmc")
 		add(EvalHash.key_mbedtls_Config, _ -> {
-			var cfg = hxc.NativeSsl.configInit();
+			var cfg = NativeSsl.configInit();
 			EvalEncode.encodeInstance(EvalHash.key_mbedtls_Config, IMbedtlsConfig(cfg));
 		});
 		add(EvalHash.key_mbedtls_CtrDrbg, _ -> {
-			var ctr = hxc.NativeSsl.ctrDrbgInit();
+			var ctr = NativeSsl.ctrDrbgInit();
 			EvalEncode.encodeInstance(EvalHash.key_mbedtls_CtrDrbg, IMbedtlsCtrDrbg(ctr));
 		});
 		add(EvalHash.key_mbedtls_Entropy, _ -> {
-			var entropy = hxc.NativeSsl.entropyInit();
+			var entropy = NativeSsl.entropyInit();
 			EvalEncode.encodeInstance(EvalHash.key_mbedtls_Entropy, IMbedtlsEntropy(entropy));
 		});
 		add(EvalHash.key_mbedtls_PkContext, _ -> {
-			var pk = hxc.NativeSsl.pkInit();
+			var pk = NativeSsl.pkInit();
 			EvalEncode.encodeInstance(EvalHash.key_mbedtls_PkContext, IMbedtlsPkContext(pk));
 		});
 		add(EvalHash.key_mbedtls_Ssl, _ -> {
-			var ssl = hxc.NativeSsl.sslInit();
+			var ssl = NativeSsl.sslInit();
 			EvalEncode.encodeInstance(EvalHash.key_mbedtls_Ssl, IMbedtlsSsl(ssl));
 		});
 		add(EvalHash.key_mbedtls_X509Crt, _ -> {
-			var cert = hxc.NativeSsl.x509CrtInit();
+			var cert = NativeSsl.x509CrtInit();
 			EvalEncode.encodeInstance(EvalHash.key_mbedtls_X509Crt, IMbedtlsX509Crt(cert));
 		});
 		#else
@@ -115,19 +123,19 @@ class EvalSsl {
 		#end
 	}
 
-	#if (target.name == "hxc")
+	#if (target.name == "hxc" || target.name == "hxmc")
 	// port: the `Unix_error` of a failed BIO send/recv (see the module comment).
 	static function checkBio(ssl:Dynamic, r:Int):Int {
-		var err = hxc.NativeSsl.bioError(ssl);
+		var err = NativeSsl.bioError(ssl);
 		if (err != 0)
-			EvalContext.excString(hxc.NativeNet.strerror(err) + "(" + (hxc.NativeSsl.bioErrorSend(ssl) ? "send" : "recv") + ", )");
+			EvalContext.excString(NativeNet.strerror(err) + "(" + (NativeSsl.bioErrorSend(ssl) ? "send" : "recv") + ", )");
 		return r;
 	}
 	#end
 
 	public static function initFields(initFields:(GlobalTypePathArg, Array<{name:String, value:Value}>,
 		Array<{name:String, value:Value}>) -> Void):Void {
-		#if (target.name == "hxc")
+		#if (target.name == "hxc" || target.name == "hxmc")
 		function nativeCert(self:Value):Dynamic {
 			return asX509Crt(EvalField.field(self, EvalHash.hash("native")));
 		}
@@ -136,7 +144,7 @@ class EvalSsl {
 				name: "get_altNames",
 				value: EvalEncode.vifun0(self -> {
 					var x509Crt = nativeCert(self);
-					var a = hxc.NativeSsl.certAltNames(x509Crt);
+					var a = NativeSsl.certAltNames(x509Crt);
 					VArray(EvalArray.create(a.map(EvalEncode.encodeString)));
 				})
 			},
@@ -144,7 +152,7 @@ class EvalSsl {
 				name: "get_notAfter",
 				value: EvalEncode.vifun0(self -> {
 					var x509Crt = nativeCert(self);
-					var f = hxc.NativeSsl.certNotAfter(x509Crt);
+					var f = NativeSsl.certNotAfter(x509Crt);
 					EvalEncode.encodeInstance(EvalHash.key_Date, IDate(f));
 				})
 			},
@@ -152,7 +160,7 @@ class EvalSsl {
 				name: "get_notBefore",
 				value: EvalEncode.vifun0(self -> {
 					var x509Crt = nativeCert(self);
-					var f = hxc.NativeSsl.certNotBefore(x509Crt);
+					var f = NativeSsl.certNotBefore(x509Crt);
 					EvalEncode.encodeInstance(EvalHash.key_Date, IDate(f));
 				})
 			},
@@ -160,7 +168,7 @@ class EvalSsl {
 				name: "issuer",
 				value: EvalEncode.vifun1((self, field) -> {
 					var x509Crt = nativeCert(self);
-					switch hxc.NativeSsl.certIssuer(x509Crt, EvalDecode.decodeString(field)) {
+					switch NativeSsl.certIssuer(x509Crt, EvalDecode.decodeString(field)) {
 						case null: VNull;
 						case s: EvalEncode.encodeString(s);
 					}
@@ -170,7 +178,7 @@ class EvalSsl {
 				name: "subject",
 				value: EvalEncode.vifun1((self, field) -> {
 					var x509Crt = nativeCert(self);
-					switch hxc.NativeSsl.certSubject(x509Crt, EvalDecode.decodeString(field)) {
+					switch NativeSsl.certSubject(x509Crt, EvalDecode.decodeString(field)) {
 						case null: VNull;
 						case s: EvalEncode.encodeString(s);
 					}
@@ -181,7 +189,7 @@ class EvalSsl {
 			{
 				name: "loadDefaults",
 				value: EvalEncode.vfun1(self -> {
-					VInt32(hxc.NativeSsl.certLoadDefaults(asX509Crt(self)));
+					VInt32(NativeSsl.certLoadDefaults(asX509Crt(self)));
 				})
 			},
 			{
@@ -189,7 +197,7 @@ class EvalSsl {
 				value: EvalEncode.vfun2((self, socket) -> {
 					var ctx = asSsl(self);
 					var socket:Int = asSocket(socket);
-					hxc.NativeSsl.sslSetBio(ctx, socket);
+					NativeSsl.sslSetBio(ctx, socket);
 					VNull;
 				})
 			},
@@ -198,7 +206,7 @@ class EvalSsl {
 			{
 				name: "next",
 				value: EvalEncode.vifun0(self -> {
-					switch hxc.NativeSsl.x509Next(asX509Crt(self)) {
+					switch NativeSsl.x509Next(asX509Crt(self)) {
 						case null: VNull;
 						case cert: EvalEncode.encodeInstance(EvalHash.key_mbedtls_X509Crt, IMbedtlsX509Crt(cert));
 					}
@@ -208,21 +216,21 @@ class EvalSsl {
 				name: "parse",
 				value: EvalEncode.vifun1((self, bytes) -> {
 					var crt = asX509Crt(self);
-					VInt32(hxc.NativeSsl.x509CrtParse(crt, EvalDecode.decodeBytes(bytes)));
+					VInt32(NativeSsl.x509CrtParse(crt, EvalDecode.decodeBytes(bytes)));
 				})
 			},
 			{
 				name: "parse_file",
 				value: EvalEncode.vifun1((self, path) -> {
 					var crt = asX509Crt(self);
-					VInt32(hxc.NativeSsl.x509CrtParseFile(crt, EvalDecode.decodeString(path)));
+					VInt32(NativeSsl.x509CrtParseFile(crt, EvalDecode.decodeString(path)));
 				})
 			},
 			{
 				name: "parse_path",
 				value: EvalEncode.vifun1((self, path) -> {
 					var crt = asX509Crt(self);
-					VInt32(hxc.NativeSsl.x509CrtParsePath(crt, EvalDecode.decodeString(path)));
+					VInt32(NativeSsl.x509CrtParsePath(crt, EvalDecode.decodeString(path)));
 				})
 			},
 		]);
@@ -231,7 +239,7 @@ class EvalSsl {
 				name: "authmode",
 				value: EvalEncode.vifun1((self, authmode) -> {
 					var conf = asConfig(self);
-					hxc.NativeSsl.confAuthmode(conf, EvalDecode.decodeInt(authmode));
+					NativeSsl.confAuthmode(conf, EvalDecode.decodeInt(authmode));
 					VNull;
 				})
 			},
@@ -239,7 +247,7 @@ class EvalSsl {
 				name: "ca_chain",
 				value: EvalEncode.vifun1((self, caChain) -> {
 					var conf = asConfig(self);
-					hxc.NativeSsl.confCaChain(conf, asX509Crt(caChain));
+					NativeSsl.confCaChain(conf, asX509Crt(caChain));
 					VNull;
 				})
 			},
@@ -250,14 +258,14 @@ class EvalSsl {
 					var endpoint = EvalDecode.decodeInt(endpoint);
 					var transport = EvalDecode.decodeInt(transport);
 					var preset = EvalDecode.decodeInt(preset);
-					VInt32(hxc.NativeSsl.configDefaults(conf, endpoint, transport, preset));
+					VInt32(NativeSsl.configDefaults(conf, endpoint, transport, preset));
 				})
 			},
 			{
 				name: "rng",
 				value: EvalEncode.vifun1((self, pRng) -> {
 					var conf = asConfig(self);
-					hxc.NativeSsl.confRng(conf, asCtrDrbg(pRng));
+					NativeSsl.confRng(conf, asCtrDrbg(pRng));
 					VNull;
 				})
 			},
@@ -269,7 +277,7 @@ class EvalSsl {
 					var ctr = asCtrDrbg(self);
 					var output = EvalDecode.decodeBytes(output);
 					var outputLen = EvalDecode.decodeInt(outputLen);
-					VInt32(hxc.NativeSsl.ctrDrbgRandom(ctr, output, outputLen));
+					VInt32(NativeSsl.ctrDrbgRandom(ctr, output, outputLen));
 				})
 			},
 			{
@@ -277,14 +285,14 @@ class EvalSsl {
 				value: EvalEncode.vifun2((self, entropy, custom) -> {
 					// port: the custom string is ignored by the bindings (mbedtls_stubs.c)
 					var ctr = asCtrDrbg(self);
-					VInt32(hxc.NativeSsl.ctrDrbgSeed(ctr, asEntropy(entropy)));
+					VInt32(NativeSsl.ctrDrbgSeed(ctr, asEntropy(entropy)));
 				})
 			},
 		]);
 		initFields({pack: ["mbedtls"], name: "Error"}, [
 			{
 				name: "strerror",
-				value: EvalEncode.vfun1(code -> EvalEncode.encodeString(hxc.NativeSsl.strerror(EvalDecode.decodeInt(code))))
+				value: EvalEncode.vfun1(code -> EvalEncode.encodeString(NativeSsl.strerror(EvalDecode.decodeInt(code))))
 			},
 		], []);
 		function decodePassword(password:Value):Null<String> {
@@ -300,7 +308,7 @@ class EvalSsl {
 					var pk = asPkContext(self);
 					var key = EvalDecode.decodeBytes(key);
 					var password = decodePassword(password);
-					VInt32(hxc.NativeSsl.pkParseKey(pk, key, password, asCtrDrbg(rng)));
+					VInt32(NativeSsl.pkParseKey(pk, key, password, asCtrDrbg(rng)));
 				})
 			},
 			{
@@ -309,21 +317,21 @@ class EvalSsl {
 					var pk = asPkContext(self);
 					var path = EvalDecode.decodeString(path);
 					var password = decodePassword(password);
-					VInt32(hxc.NativeSsl.pkParseKeyfile(pk, path, password, asCtrDrbg(rng)));
+					VInt32(NativeSsl.pkParseKeyfile(pk, path, password, asCtrDrbg(rng)));
 				})
 			},
 			{
 				name: "parse_public_key",
 				value: EvalEncode.vifun1((self, key) -> {
 					var pk = asPkContext(self);
-					VInt32(hxc.NativeSsl.pkParsePublicKey(pk, EvalDecode.decodeBytes(key)));
+					VInt32(NativeSsl.pkParsePublicKey(pk, EvalDecode.decodeBytes(key)));
 				})
 			},
 			{
 				name: "parse_public_keyfile",
 				value: EvalEncode.vifun1((self, path) -> {
 					var pk = asPkContext(self);
-					VInt32(hxc.NativeSsl.pkParsePublicKeyfile(pk, EvalDecode.decodeString(path)));
+					VInt32(NativeSsl.pkParsePublicKeyfile(pk, EvalDecode.decodeString(path)));
 				})
 			},
 		]);
@@ -331,7 +339,7 @@ class EvalSsl {
 			{
 				name: "get_peer_cert",
 				value: EvalEncode.vifun0(self -> {
-					switch hxc.NativeSsl.sslGetPeerCert(asSsl(self)) {
+					switch NativeSsl.sslGetPeerCert(asSsl(self)) {
 						case null: VNull;
 						case cert: EvalEncode.encodeInstance(EvalHash.key_mbedtls_X509Crt, IMbedtlsX509Crt(cert));
 					}
@@ -341,7 +349,7 @@ class EvalSsl {
 				name: "handshake",
 				value: EvalEncode.vifun0(self -> {
 					var ssl = asSsl(self);
-					VInt32(checkBio(ssl, hxc.NativeSsl.sslHandshake(ssl)));
+					VInt32(checkBio(ssl, NativeSsl.sslHandshake(ssl)));
 				})
 			},
 			{
@@ -351,21 +359,21 @@ class EvalSsl {
 					var buf = EvalDecode.decodeBytes(buf);
 					var pos = EvalDecode.decodeInt(pos);
 					var len = EvalDecode.decodeInt(len);
-					VInt32(checkBio(ssl, hxc.NativeSsl.sslRead(ssl, buf, pos, len)));
+					VInt32(checkBio(ssl, NativeSsl.sslRead(ssl, buf, pos, len)));
 				})
 			},
 			{
 				name: "set_hostname",
 				value: EvalEncode.vifun1((self, hostname) -> {
 					var ssl = asSsl(self);
-					VInt32(hxc.NativeSsl.sslSetHostname(ssl, EvalDecode.decodeString(hostname)));
+					VInt32(NativeSsl.sslSetHostname(ssl, EvalDecode.decodeString(hostname)));
 				})
 			},
 			{
 				name: "setup",
 				value: EvalEncode.vifun1((self, conf) -> {
 					var ssl = asSsl(self);
-					VInt32(hxc.NativeSsl.sslSetup(ssl, asConfig(conf)));
+					VInt32(NativeSsl.sslSetup(ssl, asConfig(conf)));
 				})
 			},
 			{
@@ -375,7 +383,7 @@ class EvalSsl {
 					var buf = EvalDecode.decodeBytes(buf);
 					var pos = EvalDecode.decodeInt(pos);
 					var len = EvalDecode.decodeInt(len);
-					VInt32(checkBio(ssl, hxc.NativeSsl.sslWrite(ssl, buf, pos, len)));
+					VInt32(checkBio(ssl, NativeSsl.sslWrite(ssl, buf, pos, len)));
 				})
 			},
 		]);

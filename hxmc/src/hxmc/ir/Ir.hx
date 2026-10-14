@@ -10,7 +10,7 @@ enum Ty {
 	TI32;
 	TBool; // an i32 at run time; kept apart so boxing and Std.string know it
 	TF64;
-	TI64; // haxe.Int64 (hxc.I64): an int64_t, boxed in Dynamic
+	TI64; // haxe.Int64 (hxmc.I64): an int64_t, boxed in Dynamic
 	TVoid;
 	TRef(r:RefTy);
 }

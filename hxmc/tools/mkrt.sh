@@ -1,6 +1,6 @@
 #!/bin/sh
 # Builds the runtime object of an hxmc target (hxmc/README.md, "Runtime"):
-# hxc/rt compiled by zig cc -O2 for the target, partially linked (ld -r) with
+# hxmc/rt compiled by zig cc -O2 for the target, partially linked (ld -r) with
 # the parts of the C library it and generated code use, into one relocatable
 # object bin/hxmc/rt/<target>/rt.o, which hxmc's linker then links with the
 # program (and lays out once, see Link.hx).
@@ -20,24 +20,24 @@ macos-arm64) triple=aarch64-macos ;;
 esac
 out=$ROOT/bin/hxmc/rt/$target
 mkdir -p "$out/obj"
-CFLAGS="-O2 -g0 -w -fno-strict-aliasing -fno-pie -fno-pic -ffunction-sections -fdata-sections -DHXC_NO_SSL -DHXC_NO_UV -DRT_CALL_ON_STACK -I $ROOT/hxc/rt"
+CFLAGS="-O2 -g0 -w -fno-strict-aliasing -fno-pie -fno-pic -ffunction-sections -fdata-sections -DHXMC_NO_SSL -DHXMC_NO_UV -DRT_CALL_ON_STACK -I $ROOT/hxmc/rt"
 files="rt rt_dyn rt_std rt_str rt_sys rt_net rt_ssl rt_uv rt_thread rt_census"
 case $target in
 windows-*)
-	CFLAGS="-O2 -g0 -w -fno-strict-aliasing -DHXC_NO_SSL -DHXC_NO_UV -I $ROOT/hxc/rt"
+	CFLAGS="-O2 -g0 -w -fno-strict-aliasing -DHXMC_NO_SSL -DHXMC_NO_UV -I $ROOT/hxmc/rt"
 	files="$files rt_win rt_sys_win rt_net_win" ;;
 macos-*)
 	# position-independent (macOS executables are), against libSystem;
 	# arm64 macOS calls main on its own stack without ucontext already
-	CFLAGS="-O2 -g0 -w -fno-strict-aliasing -mmacosx-version-min=$([ $target = macos-arm64 ] && echo 11.0 || echo 10.15) -DHXC_NO_SSL -DHXC_NO_UV -I $ROOT/hxc/rt" ;;
+	CFLAGS="-O2 -g0 -w -fno-strict-aliasing -mmacosx-version-min=$([ $target = macos-arm64 ] && echo 11.0 || echo 10.15) -DHXMC_NO_SSL -DHXMC_NO_UV -I $ROOT/hxmc/rt" ;;
 esac
 objs=
 for f in $files; do
-	$ZIG cc -target $triple $CFLAGS -c "$ROOT/hxc/rt/$f.c" -o "$out/obj/$f.o" &
+	$ZIG cc -target $triple $CFLAGS -c "$ROOT/hxmc/rt/$f.c" -o "$out/obj/$f.o" &
 	objs="$objs $out/obj/$f.o"
 done
 # the slow paths of generated code (rthxmc.c)
-$ZIG cc -target $triple $CFLAGS -c "$ROOT/hxmc/tools/rthxmc.c" -o "$out/obj/rthxmc.o" &
+$ZIG cc -target $triple $CFLAGS -c "$ROOT/hxmc/rt/rthxmc.c" -o "$out/obj/rthxmc.o" &
 objs="$objs $out/obj/rthxmc.o"
 wait
 # what generated code calls in the C library besides the runtime (MirBuild)
@@ -76,7 +76,7 @@ libs=$(echo "$line" | tr ' ' '\n' | grep -E '/lib(c|zigc|compiler_rt)\.a$' | tr 
 undef="-u _setjmp"
 for f in $libm; do undef="$undef -u $f"; done
 # word-at-a-time memcmp and bcmp in place of musl's byte loops (rtlibc.c)
-$ZIG cc -target $triple -O2 -g0 -ffreestanding -fno-builtin -ffunction-sections -c "$ROOT/hxmc/tools/rtlibc.c" -o "$out/obj/rtlibc.o"
+$ZIG cc -target $triple -O2 -g0 -ffreestanding -fno-builtin -ffunction-sections -c "$ROOT/hxmc/rt/rtlibc.c" -o "$out/obj/rtlibc.o"
 objs="$objs $out/obj/rtlibc.o"
 ld.lld -r --strip-debug -o "$out/rt.o" $undef "$crt1" $objs --start-group $libs --end-group
 ls -l "$out/rt.o"

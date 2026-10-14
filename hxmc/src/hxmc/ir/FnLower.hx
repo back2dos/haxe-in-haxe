@@ -235,7 +235,7 @@ class FnLower {
 	// runtime functions that neither allocate nor call back into Haxe code
 	public static var PURE = [
 		"hx_str_eq" => true, "hx_str_cmp" => true, "hx_dyn_eq" => true, "hx_dyn_cmp" => true, "hx_is" => true, "String_length" => true,
-		"String_charCodeAt_i" => true, "hx_str_hash" => true, "hxc_Native_strHash" => true, "hxc_Native_objHash" => true, "hxc_Native_refEq" => true,
+		"String_charCodeAt_i" => true, "hx_str_hash" => true, "hxmc_Native_strHash" => true, "hxmc_Native_objHash" => true, "hxmc_Native_refEq" => true,
 		"hx_unbox_int" => true, "hx_unbox_float" => true, "hx_unbox_bool" => true
 	];
 	// the Math natives: pure, static inline in rt.h
@@ -1041,7 +1041,7 @@ class FnLower {
 		};
 		var sa = scalar(ta), sb = scalar(tb);
 		if ((sa == TI64 || sb == TI64) && sa != TF64 && sb != TF64) {
-			// Int64 (hxc.I64 operators): the shift count stays an Int
+			// Int64 (hxmc.I64 operators): the shift count stays an Int
 			var shift = op == OpShl || op == OpShr || op == OpUShr;
 			var la = coerce(xa, ta, TI64), lb = shift ? coerce(xb, tb, TI32) : coerce(xb, tb, TI64);
 			var r = EBin(switch op {

@@ -5,7 +5,7 @@
 #   sh hxmc/tools/hxmc.sh <archive.zip> <main class> [hxmc arguments...]
 #       any archive, output next to it (p)
 # HXMC_TOOL picks the tool (default bin/hxmc/hxmc), HXMC_WRAP a wrapper
-# (valgrind, gdb); HXMC_HYBRID=1 for development builds; HXMC_DUMP, HXMC_ONLY, ...
+# (valgrind, gdb); HXMC_DUMP=<function> prints its Mir, ...
 set -eu
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 case=$1
@@ -17,6 +17,5 @@ case $case in
 *) hxb=$ROOT/bin/hxmc-t/$case/prog.hxb.zip; out=$ROOT/bin/hxmc-t/$case/m ;;
 esac
 export HAXE_STD_PATH=$ROOT/haxe/std HXMC_STATS=1
-if [ "${HXMC_HYBRID:-0}" = 1 ]; then export HXMC_RT=$ROOT/bin/hxmc/rt-dev HXMC_RT_INCLUDE=$ROOT/hxc/rt; fi
 ulimit -s unlimited 2>/dev/null || true
-${HXMC_WRAP:-} "${HXMC_TOOL:-$ROOT/bin/hxmc/hxmc}" "$out" --hxb-lib "$hxb" -main "$main" --custom-target hxc -D disable-parallelism "$@"
+${HXMC_WRAP:-} "${HXMC_TOOL:-$ROOT/bin/hxmc/hxmc}" "$out" --hxb-lib "$hxb" -main "$main" --custom-target hxmc -D disable-parallelism "$@"

@@ -211,7 +211,7 @@ class Lower {
 					case "Class" | "Enum" if (isStd): TRef(RType);
 					case "EnumValue" if (isStd): TRef(REnum(null));
 					case "UInt" if (isStd): TI32;
-					case "I64" if (a.aPath.pack.join(".") == "hxc"): TI64;
+					case "I64" if (a.aPath.pack.join(".") == "hxmc"): TI64;
 					// a coroutine is a function taking the continuation, as on HashLink
 					case "Coroutine" if (a.aPath.pack.join(".") == "haxe.coro"):
 						switch followFun(t) {
