@@ -58,5 +58,8 @@ crt1=$(echo "$line" | tr ' ' '\n' | grep '/crt1.o$')
 libs=$(echo "$line" | tr ' ' '\n' | grep -E '/lib(c|zigc|compiler_rt)\.a$' | tr '\n' ' ')
 undef="-u _setjmp"
 for f in $libm; do undef="$undef -u $f"; done
+# word-at-a-time memcmp and bcmp in place of musl's byte loops (rtlibc.c)
+$ZIG cc -target $triple -O2 -g0 -ffreestanding -fno-builtin -ffunction-sections -c "$ROOT/hxmc/tools/rtlibc.c" -o "$out/obj/rtlibc.o"
+objs="$objs $out/obj/rtlibc.o"
 ld.lld -r --strip-debug -o "$out/rt.o" $undef "$crt1" $objs --start-group $libs --end-group
 ls -l "$out/rt.o"
