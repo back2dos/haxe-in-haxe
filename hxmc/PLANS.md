@@ -275,15 +275,49 @@ only). No JIT on iOS.
 
 ### WebAssembly
 
-A separate structured code generator from hxmc's IR (hxc's structured
-form is kept long enough for this; no register allocation, locals
-instead), a module writer far simpler than the ELF/PE/Mach-O linkers.
-Linear memory with the shadow-stack GC (WebAssembly cannot scan its own
-stack), or WasmGC (`WASM-BACKEND.md` has a prototype). Exceptions through
-WebAssembly exception handling, threads via SharedArrayBuffer (COOP/COEP)
-or green threads, WASI or JavaScript imports for the system. With the
-runtime in Haxe, the runtime compiles along with the program (no
-Emscripten build); intrinsics map almost one to one (`i64.load`, atomics).
+In progress: a linear-memory target with the shadow-stack collector
+(WebAssembly cannot scan its own stack), a structured code generator from
+hxmc's IR (no register allocation, locals instead) and a module writer far
+simpler than the ELF/PE/Mach-O linkers. Aimed at a module produced from
+Haxe only: the runtime in Haxe including a single-threaded collector, a
+musl-derived libm subset, an allocator over `memory.grow`; exceptions
+through WebAssembly exception handling; WASI or JavaScript imports for the
+system; threads later via SharedArrayBuffer (COOP/COEP). Intrinsics map
+almost one to one (`i64.load`, atomics).
+
+#### WasmGC: a later, browser-focused second path
+
+Not the first WebAssembly target, but worth revisiting. An earlier
+prototype compiled the same IR to both (`docs/WASM-BACKEND.md`, removed in
+ecb1af2; last version at 4a2c28c), Bench under Node 22:
+
+| | Linear memory (C via Emscripten) | WasmGC |
+| --- | --- | --- |
+| Run time | 0.39 s | 0.36–0.40 s |
+| Module size | 32.2 KB (runtime, malloc, printf) | 2.1 KB (no runtime) |
+| Code per function | 1.7–3.2× larger | smaller |
+| Peak memory | 146 MB | 86 MB |
+| Wasmtime (Cranelift) | | 2.0 s (deferred reference counting) |
+
+For WasmGC: much smaller modules (the engine's collector, `struct.new`
+allocation, no shadow stack or barriers), direct JavaScript interop
+(objects passed by reference), memory returned to the system. Against it:
+
+- A different runtime, not only a different back end: hxmc's runtime in
+  Haxe works on raw memory (`Mem.addr`, loads and stores, layouts), which
+  WasmGC objects do not have. Strings, Dynamic access, maps, `Bytes` and
+  reflection would need separate WasmGC implementations (the prototype
+  never covered Dynamic, anonymous structures or strings).
+- Browser-centric: non-browser engines lag (Wasmtime's collector 5× slower
+  above); linear memory runs well everywhere, WASI included.
+- No threads until shared-everything threads land (WasmGC objects cannot
+  be shared between threads).
+- Weaker finalizers and weak references.
+
+Revisit when a concrete browser use makes module size or JavaScript
+interop matter (the website playground, browser games). The structuring
+pass and the module writer of the linear-memory target carry over; the
+object model and the runtime would be new.
 
 ### APE (Cosmopolitan) executables
 
