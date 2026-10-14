@@ -37,10 +37,12 @@ class Roots {
 			if (Ir.isRef(l.ty)) r.refs.set(l.id);
 		}
 		r.rooted = new Bits(n);
-		if (f.hasTry) {
-			for (l in all)
-				if (Ir.isRef(l.ty)) r.rooted.set(l.id);
-		} else r.seq(f.body, new Bits(n));
+		r.seq(f.body, new Bits(n));
+		// try functions: a reference assigned inside a try body lives in its
+		// slot, so that a second return of setjmp finds its latest value
+		if (f.hasTry)
+			for (id in MirBuild.assignedInTry(f).keys())
+				if (r.refs.get(id)) r.rooted.set(id);
 		r.slots = hxmc.Lir.Arrays.filled(n, -1);
 		for (l in all)
 			if (r.rooted.get(l.id)) r.slots[l.id] = r.nslots++;
@@ -110,6 +112,12 @@ class Roots {
 			case _:
 				throw "cold statement";
 		}
+		// inside a try body the references a slow path reloads are assigned
+		// there: they live in their slots (see analyze)
+		if (extras.length > 0) {
+			for (k in 0...n)
+				if (live.get(k) && refs.get(k)) rooted.set(k);
+		}
 		var list = spills.get(id);
 		if (list == null) spills.set(id, list = []);
 		for (k in 0...n)
@@ -118,7 +126,16 @@ class Roots {
 		return live;
 	}
 
+	// per enclosing try body: what its handlers need (live wherever it may throw)
+	var extras:Array<Bits> = [];
+
 	function stmt(s:Stmt, out:Bits):Bits {
+		var r = stmt0(s, out);
+		if (extras.length > 0) r = union(r, extras[extras.length - 1]);
+		return r;
+	}
+
+	function stmt0(s:Stmt, out:Bits):Bits {
 		return switch s {
 			case SCold(id, x): cold(id, x, out);
 			case SSet(l, e): expr(e, out, l);
@@ -189,7 +206,23 @@ class Roots {
 				var u = new Bits(n);
 				uses(e, u);
 				u;
-			case STry(_, _): throw "try in a function without hasTry";
+			case STry(body, catches):
+				// a handler may run after any point of the body (or the code after
+				// the try, when no catch matches)
+				var h = copy(out);
+				for (c in catches) {
+					// the catch variable is set before the tests, which may collect
+					// (haxe.Exception.caught), and read after them
+					if (refs.get(c.l.id)) rooted.set(c.l.id);
+					var u = seq(c.body, out);
+					u.clear(c.l.id);
+					h = union(h, u);
+				}
+				if (extras.length > 0) h = union(h, extras[extras.length - 1]);
+				extras.push(h);
+				var b = seq(body, union(out, h));
+				extras.pop();
+				union(b, h);
 		}
 	}
 

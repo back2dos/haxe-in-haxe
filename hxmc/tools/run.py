@@ -107,7 +107,8 @@ def run_case(name, cps, main, args):
         return name, "hxmc-fail", (o + e)[-2000:], stats
     try:
         runner = {"linux-arm64": ["qemu-aarch64-static"], "windows-x86_64": ["/usr/lib/wine/wine64"]}.get(args.target, [])
-        code, o, e = sh(runner + [exe], cwd=d, timeout=120)
+        # a small nursery: frequent collections, so a missing or stale root shows
+        code, o, e = sh(runner + [exe], cwd=d, timeout=120, env=dict(ENV, RT_MINOR_KB=os.environ.get("RT_MINOR_KB", "64")))
     except subprocess.TimeoutExpired:
         return name, "timeout", "", stats
     got = f"exit {code}\n" + o

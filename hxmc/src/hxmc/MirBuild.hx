@@ -472,7 +472,7 @@ class MirBuild {
 
 	// ---- locals
 
-	static function assignedInTry(fn:FuncInfo):Map<Int, Bool> {
+	public static function assignedInTry(fn:FuncInfo):Map<Int, Bool> {
 		var out = new Map<Int, Bool>();
 		var depth = 0;
 		function ex(e:Ex) {}
