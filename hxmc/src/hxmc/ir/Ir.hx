@@ -34,7 +34,7 @@ class ClassInfo {
 	public var id:Int; // preorder number: subclasses are in [id, lastDescendant]
 	public var lastDescendant:Int;
 	public var name:String; // Haxe dot path
-	public var cname:String; // C identifier prefix
+	public var ident:String; // the prefix of its symbols
 	public var sup:Null<ClassInfo>;
 	public var fields:Array<{name:String, ty:Ty}> = []; // including inherited (the class is the header's type index)
 	public var locs:Array<Int>; // per field: its slot, or for Int/Bool its 4-byte index (packed two per slot; Facts.layout)
@@ -47,9 +47,9 @@ class ClassInfo {
 	// statics reachable through the class value (Dynamic access, Reflect): set once the class is used as a value
 	public var statics:Null<Array<{name:String, clos:Null<LambdaInfo>, global:Int}>> = null;
 
-	public function new(name, cname, sup) {
+	public function new(name, ident, sup) {
 		this.name = name;
-		this.cname = cname;
+		this.ident = ident;
 		this.sup = sup;
 	}
 
@@ -72,13 +72,13 @@ class ClassInfo {
 
 class EnumInfo {
 	public var name:String;
-	public var cname:String;
+	public var ident:String;
 	public var ctors:Array<CtorInfo> = [];
 	public var tindex:Int = -1; // the enum's own descriptor (Enum<T> values)
 
-	public function new(name, cname) {
+	public function new(name, ident) {
 		this.name = name;
-		this.cname = cname;
+		this.ident = ident;
 	}
 }
 

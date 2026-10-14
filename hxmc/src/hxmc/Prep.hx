@@ -25,13 +25,13 @@ class Prep {
 	// implementation's when exported, not the entry C calls)
 	public inline function hostSym(n:String):String {
 		var f = exports.get(n);
-		return f == null ? n : e.cname(f);
+		return f == null ? n : e.symbol(f);
 	}
 
 	// whether sym is one of the program's functions (stack maps: a call of
 	// anything else is a call of C)
 	public inline function isHaxe(sym:String):Bool
-		return e.byCName.exists(sym);
+		return e.bySymbol.exists(sym);
 
 	public inline function id(name:String):Int
 		return e.ids.get(name);
@@ -89,7 +89,7 @@ class Prep {
 	}
 
 	public function funcSym(f:FuncInfo):String
-		return e.cname(f);
+		return e.symbol(f);
 
 	public function selectorSym(sel:Int):String
 		return e.selNames[sel];

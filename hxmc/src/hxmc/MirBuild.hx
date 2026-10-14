@@ -335,7 +335,7 @@ class MirBuild {
 	// callee neither collects nor enters (or leaves) a safe region
 	function walkFree(sym:String):Bool {
 		if (p == null) return false;
-		var g = p.e.byCName.get(sym);
+		var g = p.e.bySymbol.get(sym);
 		if (g != null) return g.noGc && !g.blocks;
 		if (sym == "rt_blocking_enter" || sym == "rt_blocking_leave") return false;
 		return hxmc.ir.FnLower.noGcHost(sym) || StackMaps.quiet(sym);

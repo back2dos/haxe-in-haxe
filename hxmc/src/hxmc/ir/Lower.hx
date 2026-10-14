@@ -72,9 +72,9 @@ class Lower {
 		return l.prog;
 	}
 
-	// ---- survey mode (HXC_SURVEY=file): record unsupported constructs, keep going
+	// ---- survey mode (HXMC_SURVEY=file): record unsupported constructs, keep going
 
-	public static var survey = Sys.getEnv("HXC_SURVEY") != null;
+	public static var survey = Sys.getEnv("HXMC_SURVEY") != null;
 	public var errors = new Map<String, {count:Int, example:String}>();
 	public var natives = new Map<String, Int>(); // runtime functions called, with counts
 
@@ -95,7 +95,7 @@ class Lower {
 		for (k in ns)
 			out.add('${natives.get(k)}\t$k\n');
 		out.add('\n${prog.funcs.length} functions, ${prog.classes.length} classes, ${prog.enums.length} enums, ${prog.shapes.length} shapes, ${prog.lambdas.length} lambdas\n');
-		sys.io.File.saveContent(Sys.getEnv("HXC_SURVEY"), out.toString());
+		sys.io.File.saveContent(Sys.getEnv("HXMC_SURVEY"), out.toString());
 	}
 
 	public function guarded(fi:FuncInfo, f:() -> Void):() -> Void {
@@ -297,11 +297,11 @@ class Lower {
 		return name;
 	}
 
-	public static function cname(pack:Array<String>, name:String):String
+	public static function ident(pack:Array<String>, name:String):String
 		return pack.concat([name]).join("_");
 
 	public static function nativeName(c:TClass):String
-		return cname(c.clPath.pack, c.clPath.name);
+		return ident(c.clPath.pack, c.clPath.name);
 
 	public static function moduleOf(c:TClass):String
 		return core.Globals.sTypePath(c.clModule.mPath);
@@ -503,7 +503,7 @@ class Lower {
 	public function enumInfo(e:TEnum):EnumInfo {
 		var ei = enums.get(e);
 		if (ei != null) return ei;
-		ei = new EnumInfo(core.Globals.sTypePath(e.ePath), cname(e.ePath.pack, e.ePath.name));
+		ei = new EnumInfo(core.Globals.sTypePath(e.ePath), ident(e.ePath.pack, e.ePath.name));
 		enums.set(e, ei);
 		prog.enums.push(ei);
 		for (name in e.eNames) {
@@ -520,7 +520,7 @@ class Lower {
 					ci.paramNames = [for (a in s.args) a.name];
 				case _:
 					ci.global = prog.globals.length;
-					prog.globals.push({ty: TRef(RCtor(ci)), init: ci, name: ei.cname + "_" + ci.name});
+					prog.globals.push({ty: TRef(RCtor(ci)), init: ci, name: ei.ident + "_" + ci.name});
 			}
 		}
 		return ei;
@@ -705,7 +705,7 @@ class Lower {
 	public function ctorClosure(ci:CtorInfo, sig:SigInfo):LambdaInfo {
 		var li = ctorClosures.get(ci);
 		if (li != null) return li;
-		li = newLambda(sig, [], fl -> fl.forwardCtor(ci), ci.en.cname + "_" + ci.name + "__cclos", "_closures");
+		li = newLambda(sig, [], fl -> fl.forwardCtor(ci), ci.en.ident + "_" + ci.name + "__cclos", "_closures");
 		ctorClosures.set(ci, li);
 		return li;
 	}

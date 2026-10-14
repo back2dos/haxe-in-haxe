@@ -660,7 +660,7 @@ class FnLower {
 			case TInst(c, _):
 				if (c.hasClassFlag(CExtern) || c.clKind.match(KTypeParameter(_))) TRBuiltin(Lower.nativeName(c)) else TRClass(l.classInfo(c));
 			case TEnum(e, _): TREnum(l.enumInfo(e));
-			case TAbstract(a, _): TRBuiltin(Lower.cname(a.aPath.pack, a.aPath.name));
+			case TAbstract(a, _): TRBuiltin(Lower.ident(a.aPath.pack, a.aPath.name));
 			case _: null;
 		}
 	}
@@ -670,7 +670,7 @@ class FnLower {
 			case TClassDecl(c):
 				if (c.hasClassFlag(CExtern)) TRBuiltin(Lower.nativeName(c)) else TRClass(l.classInfo(c));
 			case TEnumDecl(e): TREnum(l.enumInfo(e));
-			case TAbstractDecl(a): TRBuiltin(Lower.cname(a.aPath.pack, a.aPath.name));
+			case TAbstractDecl(a): TRBuiltin(Lower.ident(a.aPath.pack, a.aPath.name));
 			case TTypeDecl(d): typeRefOfType(d.tType);
 		}
 	}

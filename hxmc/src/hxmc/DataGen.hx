@@ -108,7 +108,7 @@ class DataGen {
 	}
 
 	// the entries C calls the exported runtime functions by (their C names,
-	// Facts.cname): a call of the Haxe function between saving and
+	// Facts.symbol): a call of the Haxe function between saving and
 	// restoring the stack maps' record (StackMaps.entry); dropped with it
 	// by the linker when nothing calls it
 	function exportEntries() {
@@ -119,7 +119,7 @@ class DataGen {
 			var params = [for (a in f.args) MirBuild.mty(a.ty)];
 			var ret = MirBuild.mty(f.ret);
 			var mf = MirBuild.synthetic(prep, abi, n, params, ret, (b, ps) -> {
-				var r = b.call(e.cname(f), ps, ret);
+				var r = b.call(e.symbol(f), ps, ret);
 				b.ret(ret == Void ? -1 : r);
 			});
 			StackMaps.entry(mf);
@@ -249,7 +249,7 @@ class DataGen {
 						data.buf.u32("c".code);
 						data.buf.u32(x.clos.tindex);
 						data.buf.u32(0);
-						ptr(data, e.cname(x.clos.fn));
+						ptr(data, e.symbol(x.clos.fn));
 					} else {
 						var gt = p.globals[x.global].ty;
 						if (Ir.isRef(gt)) {
@@ -364,7 +364,7 @@ class DataGen {
 			begin(data, e.selNames[s], 8, true);
 			for (c in p.classes) {
 				var m = c.findMethod(p.selectors[s].name);
-				if (m != null && m.dispatchSel == s) ptr(data, e.cname(m)) else data.buf.u64(0, 0);
+				if (m != null && m.dispatchSel == s) ptr(data, e.symbol(m)) else data.buf.u64(0, 0);
 			}
 		}
 	}
@@ -447,8 +447,8 @@ class DataGen {
 				}
 			}
 			for (f in p.inits)
-				b.call(e.cname(f), [], Void);
-			b.call(e.cname(p.main), [], Void);
+				b.call(e.symbol(f), [], Void);
+			b.call(e.symbol(p.main), [], Void);
 			b.ret(-1);
 		}));
 		entry(MirBuild.synthetic(prep, abi, "main", [I32, I64], I32, (b, ps) -> {

@@ -3,8 +3,8 @@ package hxmc.ir;
 import hxmc.ir.Ir;
 
 // The program-wide preparation hxmc's code generator and data share
-// (hxmc.Prep): the part of hxc's C emitter (EmitC) that does not write C,
-// copied when hxmc separated from hxc (hxmc/README.md, "Origin"). It names
+// (hxmc.Prep), from the part of hxc's C emitter that did not write C
+// (hxmc/README.md, "Origin"). It names
 // functions (F_<name>), string literals (S_<hash>) and program-wide numbers
 // (TY_*, FID_*, SIG_*, GI_*, DSP_*: absolute symbols in hxmc's objects), lays
 // out objects, assigns type indices and field ids, finds the functions that
@@ -19,9 +19,9 @@ class Facts {
 	public var strByName = new Map<String, String>();
 	public var fids = new Map<String, Int>();
 	public var fieldNames:Array<String> = [];
-	var cnames = new Map<FuncInfo, String>();
-	var usedCNames = new Map<String, Bool>();
-	public var byCName = new Map<String, FuncInfo>();
+	var symbols = new Map<FuncInfo, String>();
+	var usedSymbols = new Map<String, Bool>();
+	public var bySymbol = new Map<String, FuncInfo>();
 	public var types:Array<TypeEntry> = [];
 	public var boundTypes = new Map<Int, Int>(); // sig -> type index of its bound-method closures
 
@@ -42,7 +42,7 @@ class Facts {
 	public function new(p:Program) {
 		this.p = p;
 		for (f in p.funcs)
-			byCName.set(cname(f), f);
+			bySymbol.set(symbol(f), f);
 		findNoGc();
 		markCold();
 		assignTypes();
@@ -61,27 +61,27 @@ class Facts {
 		return r.toString();
 	}
 
-	public function cname(f:FuncInfo):String {
-		var n = cnames.get(f);
+	public function symbol(f:FuncInfo):String {
+		var n = symbols.get(f);
 		if (n != null) return n;
 		if (f.cSymbol != null) {
 			// @:hxmc.export: the runtime's C code calls it by its C name, which
 			// is the entry that DataGen.exportEntries wraps around it (stack
 			// maps: StackMaps.entry); the program's code calls it directly
-			if (usedCNames.exists(f.cSymbol)) throw "hxmc: two functions export " + f.cSymbol;
-			usedCNames.set(f.cSymbol, true);
+			if (usedSymbols.exists(f.cSymbol)) throw "hxmc: two functions export " + f.cSymbol;
+			usedSymbols.set(f.cSymbol, true);
 			n = f.cSymbol + "$hx";
-			usedCNames.set(n, true);
-			cnames.set(f, n);
+			usedSymbols.set(n, true);
+			symbols.set(f, n);
 			return n;
 		}
 		var base = "F_" + ident(f.name);
 		n = base;
 		var i = 1;
-		while (usedCNames.exists(n))
+		while (usedSymbols.exists(n))
 			n = base + "_" + i++;
-		usedCNames.set(n, true);
-		cnames.set(f, n);
+		usedSymbols.set(n, true);
+		symbols.set(f, n);
 		return n;
 	}
 
@@ -255,7 +255,7 @@ class Facts {
 			var slots:Array<Null<Ty>> = [TI32];
 			for (c in l.captures)
 				slots.push(c.ty);
-			var t = entry("<closure>", "TK_CLOSURE", slots, "clos." + cname(l.fn));
+			var t = entry("<closure>", "TK_CLOSURE", slots, "clos." + symbol(l.fn));
 			t.sup = l.sig.id;
 			l.tindex = addType(t);
 		}
@@ -269,7 +269,7 @@ class Facts {
 					if (!seen.exists(name)) {
 						seen.set(name, true);
 						var sig = p.sig([for (i in 1...m.args.length) m.args[i].ty], m.ret);
-						ms.push({name: name, fn: cname(m), sig: sig.id});
+						ms.push({name: name, fn: symbol(m), sig: sig.id});
 					}
 				k = k.sup;
 			}
@@ -414,8 +414,7 @@ class Facts {
 	// Functions that never reach a GC point: no allocation, no impure native,
 	// no throw, and direct calls only to such functions (the largest such set:
 	// candidates are dropped until none calls a dropped one, so recursion
-	// stays in). A call to one keeps the caller's references in registers, and
-	// one needs no frame. They also never stop at a safepoint (rt_thread.c),
+	// stays in). A call to one keeps the caller's references in registers. They also never stop at a safepoint (rt_thread.c),
 	// so another thread's collection cannot move objects under them.
 	function findNoGc() {
 		var cand = new Map<FuncInfo, Bool>();
@@ -573,8 +572,7 @@ typedef TypeEntry = {
 	ctors:Array<Int>
 };
 
-// GC points (the part of hxc's EmitC.Roots that hxmc's own shadow-stack
-// analysis, hxmc.Roots, builds on)
+// GC points (hxmc.Roots's analysis of root slots builds on them)
 class GcPoints {
 	// GC point of an expression; 2: operands are read after an allocation
 	public static function gcPoint(e:Ex):Int

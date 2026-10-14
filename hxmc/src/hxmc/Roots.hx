@@ -4,7 +4,7 @@ import hxmc.ir.Ir;
 import hxmc.Lir.Bits;
 
 // Which reference locals live in root slots (a backward liveness over the
-// structured statements, as hxc's EmitC.Roots for C: a reference live
+// structured statements, from hxc's analysis for C: a reference live
 // across a GC point is rooted; at a cold site the references live across
 // its slow path are spilled there instead), with bit sets over local ids
 // instead of maps. Rooted locals that never live at the same time share a
