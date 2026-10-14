@@ -639,11 +639,11 @@ class Isel implements hxmc.Target.Selector {
 				var d = reg(i.id);
 				var size = sz(i.ty);
 				var imm = immOf(i.b);
-				if (i.op == Add && imm != null && isymOf(i.b) == null && !folded[i.a]) {
+				if ((i.op == Add || i.op == Sub && imm != null && imm != -2147483648) && imm != null && isymOf(i.b) == null && !folded[i.a]) {
 					var x = emit(LEA);
 					x.d = d;
 					x.base = use(i.a);
-					x.disp = imm;
+					x.disp = i.op == Add ? imm : -imm;
 					x.size = size;
 					return;
 				}

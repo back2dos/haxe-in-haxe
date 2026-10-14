@@ -101,6 +101,19 @@ class Emit implements hxmc.Target.Emitter {
 			var b = f.blocks[bi];
 			a.bind(b.label);
 			var next = bi + 1 < f.blocks.length ? f.blocks[bi + 1] : null;
+			// a zero constant may be xor where no flags are live (none are
+			// live at block ends: branches consume them in their block)
+			var live = false;
+			var k = b.ins.length;
+			while (k-- > 0) {
+				var i = b.ins[k];
+				switch i.op {
+					case JCC | SETCC | CMOV: live = true;
+					case CMP | CMPI | TEST | UCOMI | ALU | ALUI | NEG | CALL: live = false;
+					case MOVI if (i.flag && !live && i.isym == null): i.flag = false;
+					case _:
+				}
+			}
 			for (i in b.ins)
 				ins(i, next, tables);
 		}

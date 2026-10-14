@@ -82,6 +82,25 @@ class Opt {
 	// the target; one that jumps here unconditionally branches on its value.
 	// Then a block that jumps to a block with no other predecessor absorbs it.
 	function simplifyCfg() {
+		// branches on constants are jumps
+		for (b in f.blocks) {
+			var t = b.term();
+			if (t == null || t.op != Br) continue;
+			var c = f.vals[t.a];
+			if (c.op != Const || c.sym != null || t.targets[0] == t.targets[1]) continue;
+			var keep = c.imm != 0 || c.imm2 != 0 ? t.targets[0] : t.targets[1];
+			var drop = keep == t.targets[0] ? t.targets[1] : t.targets[0];
+			var k = drop.preds.indexOf(b);
+			if (k >= 0) {
+				drop.preds.splice(k, 1);
+				for (i in drop.ins)
+					if (i.op == Phi) i.args.splice(k, 1);
+			}
+			t.op = Jmp;
+			t.a = -1;
+			t.targets = [keep];
+			b.succs = [keep];
+		}
 		var uses = [for (_ in f.vals) 0];
 		for (b in f.blocks)
 			for (i in b.ins) {
@@ -97,16 +116,26 @@ class Opt {
 			if (b == f.entry || b.handler) continue;
 			var ins = b.ins;
 			var n = ins.length;
-			if (n < 3 || n > 4) continue;
-			var phi = ins[0], c = ins[n - 2], br = ins[n - 1];
-			if (phi.op != Phi || br.op != Br || c.op != Cmp || br.a != c.id || uses[c.id] != 1 || uses[phi.id] != 1) continue;
-			if (c.imm != CEq && c.imm != CNe || c.a != phi.id) continue;
-			var z = vals[c.b];
-			if (z.op != Const || z.sym != null || z.imm != 0 || z.imm2 != 0) continue;
-			if (n == 4 && (ins[1] != z || uses[z.id] != 1)) continue;
-			// targets when x is zero / not zero
-			var onZero = c.imm == CEq ? br.targets[0] : br.targets[1];
-			var onSet = c.imm == CEq ? br.targets[1] : br.targets[0];
+			if (n < 2 || n > 4) continue;
+			var phi = ins[0], br = ins[n - 1];
+			if (phi.op != Phi || br.op != Br || uses[phi.id] != 1) continue;
+			var onZero:MBlock, onSet:MBlock;
+			if (n == 2) {
+				// [phi x, br x]
+				if (br.a != phi.id) continue;
+				onZero = br.targets[1];
+				onSet = br.targets[0];
+			} else {
+				var c = ins[n - 2];
+				if (c.op != Cmp || br.a != c.id || uses[c.id] != 1) continue;
+				if (c.imm != CEq && c.imm != CNe || c.a != phi.id) continue;
+				var z = vals[c.b];
+				if (z.op != Const || z.sym != null || z.imm != 0 || z.imm2 != 0) continue;
+				if (n == 4 && (ins[1] != z || uses[z.id] != 1)) continue;
+				// targets when x is zero / not zero
+				onZero = c.imm == CEq ? br.targets[0] : br.targets[1];
+				onSet = c.imm == CEq ? br.targets[1] : br.targets[0];
+			}
 			if (onZero == b || onSet == b || onZero == onSet || hasPhi(onZero) || hasPhi(onSet)) continue;
 			var k = 0;
 			while (k < b.preds.length) {
