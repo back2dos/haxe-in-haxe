@@ -465,7 +465,11 @@ class FnLower {
 				}
 			case TIf(c, a, b):
 				var cx = cond(c);
-				out.push(SIf(cx, block(() -> stmt(a)), b != null ? block(() -> stmt(b)) : []));
+				// (a test of the target: only the branch it takes)
+				var k = Lower.targetConst(cx);
+				if (k != null) {
+					if (k != 0) stmt(a) else if (b != null) stmt(b);
+				} else out.push(SIf(cx, block(() -> stmt(a)), b != null ? block(() -> stmt(b)) : []));
 			case TWhile(c, body, NormalWhile):
 				out.push(SLoop(block(() -> {
 					var cx = cond(c);
@@ -805,7 +809,11 @@ class FnLower {
 				var t = tyOf(e);
 				var cx = cond(c);
 				var lo = newLocal("r", t);
-				out.push(SIf(cx, branch(a, lo), branch(b, lo)));
+				var k = Lower.targetConst(cx);
+				if (k != null) {
+					for (s in branch(k != 0 ? a : b, lo))
+						out.push(s);
+				} else out.push(SIf(cx, branch(a, lo), branch(b, lo)));
 				ELocal(lo);
 			case TSwitch(sw):
 				var t = tyOf(e);

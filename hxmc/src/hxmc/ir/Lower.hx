@@ -152,6 +152,38 @@ class Lower {
 	public static var targetArm = -1;
 	public static var targetCode = -1;
 
+	// a condition on the target (Mem.os, Mem.arm, Mem.target compared with
+	// constants) as a constant (EInt), when it is one: FnLower lowers only
+	// the branch it takes (the other target's functions are not reached)
+	public static function targetConst(e:Ex):Null<Int> {
+		function v(e:Ex):Null<Int>
+			return switch e {
+				case EInt(n): n;
+				case ECallHost("hxmc_unsafe_Mem_os", [], _) if (targetOs >= 0): targetOs;
+				case ECallHost("hxmc_unsafe_Mem_arm", [], _) if (targetArm >= 0): targetArm;
+				case ECallHost("hxmc_unsafe_Mem_target", [], _) if (targetCode >= 0): targetCode;
+				case ENot(a):
+					var x = v(a);
+					x == null ? null : x == 0 ? 1 : 0;
+				case EBin(op, a, b):
+					var x = v(a), y = v(b);
+					if (x == null || y == null) null else switch op {
+						case Eq: x == y ? 1 : 0;
+						case Ne: x != y ? 1 : 0;
+						case Lt: x < y ? 1 : 0;
+						case Le: x <= y ? 1 : 0;
+						case Gt: x > y ? 1 : 0;
+						case Ge: x >= y ? 1 : 0;
+						case _: null;
+					}
+				case _: null;
+			};
+		return switch e {
+			case EInt(_): null; // (a literal: left as it is)
+			case _: v(e);
+		}
+	}
+
 	// replaces the calls of runtime functions implemented in Haxe in fi's
 	// body, and folds the target's constants: `if (Mem.os() == 2) a else b`
 	// keeps one branch (its symbols stay out of the other targets' links)
