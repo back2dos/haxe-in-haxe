@@ -1,0 +1,9 @@
+package hxmc.rt;
+
+// The runtime's Haxe modules (hxmc/README.md, "Runtime in Haxe"), loaded
+// into every program through Std (hxmc/std/Std.hx). Their classes are
+// @:keep (DCE keeps them typed); hxmc compiles only the functions a program
+// calls, and the @:hxmc.export ones the runtime's C code calls.
+import hxmc.rt.Str;
+
+class Runtime {}
