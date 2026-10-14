@@ -107,6 +107,7 @@ class Emit implements hxmc.Target.Emitter {
 		for (k in 0...savedX.length)
 			a.movupsMR(new Mem(Asm.RSP, savedXOff[k]), savedX[k]);
 		if (sizeStats) stat("prologue", text.buf.len - start);
+		epiLabel = -1;
 		for (b in f.blocks)
 			b.label = a.newLabel();
 		var tables:Array<{label:Int, entries:Array<LBlock>}> = [];
@@ -206,6 +207,7 @@ class Emit implements hxmc.Target.Emitter {
 		return r >= 16;
 
 	var epilogueBytes = 0;
+	var epiLabel = -1; // the shared epilogue (this function's first)
 
 	function epilogue() {
 		var at = text.buf.len;
@@ -303,7 +305,15 @@ class Emit implements hxmc.Target.Emitter {
 			case CALL:
 				if (i.sym != null) a.callSym(obj.sym(i.sym)) else a.callR(i.s1);
 			case RET:
-				epilogue();
+				// the first return's epilogue is shared: later ones jump to it
+				// when it is longer than the jump
+				if (epiLabel >= 0) a.jmp(epiLabel) else {
+					var at = text.buf.len;
+					var l = a.newLabel();
+					a.bind(l);
+					epilogue();
+					if (text.buf.len - at > 5) epiLabel = l;
+				}
 			case JMP:
 				if (i.target != next) a.jmp(i.target.label);
 			case JCC:
