@@ -50,6 +50,15 @@ enum abstract XOp(Int) to Int from Int {
 	var TLSLOAD; // d <- fs:[sym]
 	var TLSSTORE; // fs:[sym] <- s1
 	var UD2;
+	// (hxmc.unsafe: MirBuild.intrinsic)
+	var XCHG; // d <-> [mem] (size)
+	var XADD; // lock xadd [mem], d: d <- old, [mem] += d (size)
+	var CMPXCHG; // lock cmpxchg [mem], s1: rax expected, then the old value (size)
+	var MFENCE;
+	var CVTSS2SD; // d (xmm) <- s1 (xmm, a float32)
+	var CVTSD2SS; // d (xmm, a float32) <- s1 (xmm)
+	var MOVDXR; // d (xmm) <- s1 (32 bits)
+	var MOVDRX; // d (32 bits) <- s1 (xmm)
 }
 
 // Mir -> LIR for x86-64 (System V calling convention).
@@ -133,9 +142,19 @@ class Isel implements hxmc.Target.Selector {
 			if (i.index >= 0) uses.push(i.index);
 		}
 		switch (i.op : XOp) {
-			case MOV | CVTI2F | CVTF2I | MOVQXR | MOVQRX | FSQRT:
+			case MOV | CVTI2F | CVTF2I | MOVQXR | MOVQRX | FSQRT | CVTSS2SD | CVTSD2SS | MOVDXR | MOVDRX:
 				defs.push(i.d);
 				uses.push(i.s1);
+			case XCHG | XADD:
+				defs.push(i.d);
+				uses.push(i.d);
+				mem();
+			case CMPXCHG:
+				defs.push(RAX);
+				uses.push(RAX);
+				uses.push(i.s1);
+				mem();
+			case MFENCE:
 			case MOVI | MOVF | SETCC | TLSLOAD | LEATABLE | GSLOAD:
 				defs.push(i.d);
 			case LEA | LOAD:
@@ -990,6 +1009,8 @@ class Isel implements hxmc.Target.Selector {
 				} else x.s1 = use(i.c);
 				memOf(x, i.a, i.b, i.imm2, i.imm);
 				x.mem = i.mem;
+			case Call if (i.sym != null && StringTools.startsWith(i.sym, hxmc.MirBuild.SPECIAL)):
+				special(i);
 			case Call:
 				call(i);
 			case Jmp:
@@ -1111,6 +1132,63 @@ class Isel implements hxmc.Target.Selector {
 			jcc(E, targets[k]);
 		}
 		jmp(def);
+	}
+
+	// the inline expansions of MirBuild.special: atomics (sequentially
+	// consistent: loads are plain moves, stores xchg) and float32 conversions
+	function special(i:MIns) {
+		var name = i.sym.substr(hxmc.MirBuild.SPECIAL.length);
+		inline function at(x:LIns, size:Int) {
+			memOf(x, i.args[0], -1, 1, 0);
+			x.size = size;
+		}
+		switch name {
+			case "atomic_load4" | "atomic_load8":
+				var x = emit(LOAD);
+				x.d = reg(i.id);
+				at(x, name == "atomic_load4" ? 4 : 8);
+			case "atomic_store4" | "atomic_store8":
+				var t = f.newReg(false);
+				mov(t, use(i.args[1]), 8);
+				var x = emit(XCHG);
+				x.d = t;
+				at(x, name == "atomic_store4" ? 4 : 8);
+			case "atomic_add4" | "atomic_add8" | "atomic_xchg4" | "atomic_xchg8":
+				var size = StringTools.endsWith(name, "4") ? 4 : 8;
+				var d = reg(i.id);
+				mov(d, use(i.args[1]), 8);
+				var x = emit(StringTools.startsWith(name, "atomic_add") ? XADD : XCHG);
+				x.d = d;
+				at(x, size);
+			case "atomic_cas4" | "atomic_cas8":
+				var size = name == "atomic_cas4" ? 4 : 8;
+				var nv = use(i.args[2]);
+				mov(RAX, use(i.args[1]), 8);
+				var x = emit(CMPXCHG);
+				x.s1 = nv;
+				at(x, size);
+				mov(reg(i.id), RAX, size);
+			case "fence":
+				emit(MFENCE);
+			case "f32_to_f64":
+				var t = f.newReg(true);
+				var x = emit(MOVDXR);
+				x.d = t;
+				x.s1 = use(i.args[0]);
+				var c = emit(CVTSS2SD);
+				c.d = reg(i.id);
+				c.s1 = t;
+			case "f64_to_f32":
+				var t = f.newReg(true);
+				var c = emit(CVTSD2SS);
+				c.d = t;
+				c.s1 = use(i.args[0]);
+				var x = emit(MOVDRX);
+				x.d = reg(i.id);
+				x.s1 = t;
+			case _:
+				throw new hxmc.MirBuild.Unsupported("unknown special " + i.sym);
+		}
 	}
 
 	function macTlsBase() {

@@ -20,7 +20,7 @@ class Emit implements hxmc.Target.Emitter {
 	public function new(obj:Obj, win = false) {
 		this.obj = obj;
 		this.win = win;
-		text = obj.section(".text", Text, 16);
+		text = obj.section(".text", Text, FALIGN);
 		rodata = obj.section(".rodata", RoData, 16);
 		a = new Asm(text);
 	}
@@ -65,8 +65,16 @@ class Emit implements hxmc.Target.Emitter {
 	var savedX:Array<Int>; // Win64: xmm6-15 used, saved in the frame (all 128 bits)
 	var savedXOff:Array<Int>;
 
+	// (measurement: how much run time depends on code layout alone, the
+	// noise of A/B comparisons: HXMC_FALIGN aligns functions, HXMC_FSHIFT
+	// pads before each one)
+	static var FALIGN = Sys.getEnv("HXMC_FALIGN") != null ? Std.parseInt(Sys.getEnv("HXMC_FALIGN")) : 16;
+	static var FSHIFT = Sys.getEnv("HXMC_FSHIFT") != null ? Std.parseInt(Sys.getEnv("HXMC_FSHIFT")) : 0;
+
 	public function func(f:LFunc, usedRegs:Array<Bool>, global:Bool):Symbol {
-		text.buf.align(16, 0xcc);
+		text.buf.align(FALIGN, 0xcc);
+		for (_ in 0...FSHIFT)
+			text.buf.u8(0xcc);
 		var start = text.buf.len;
 		a.reset();
 		// frame: outgoing arguments, then the slots
@@ -336,6 +344,22 @@ class Emit implements hxmc.Target.Emitter {
 				a.store(8, Mem.tlsVar(tlsSym(i.sym)), i.s1);
 			case UD2:
 				a.ud2();
+			case XCHG:
+				a.xchgMR(i.size, mem(i), i.d);
+			case XADD:
+				a.lockXaddMR(i.size, mem(i), i.d);
+			case CMPXCHG:
+				a.lockCmpxchgMR(i.size, mem(i), i.s1);
+			case MFENCE:
+				a.mfence();
+			case CVTSS2SD:
+				a.cvtss2sd(i.d, i.s1);
+			case CVTSD2SS:
+				a.cvtsd2ss(i.d, i.s1);
+			case MOVDXR:
+				a.movdXR(i.d, i.s1);
+			case MOVDRX:
+				a.movdRX(i.d, i.s1);
 		}
 	}
 }

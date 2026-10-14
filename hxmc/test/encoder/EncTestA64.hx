@@ -123,6 +123,24 @@ class EncTestA64 {
 				emit('fmov d$d, x$n', a -> a.fmovFromGpr(32 + d, n));
 			}
 		emit('fcmp d3, #0.0', a -> a.fcmpZero(35));
+		// float32 and atomics
+		for (d in [0, 8, 31])
+			for (n in [1, 16]) {
+				emit('fmov s$d, w$n', a -> a.fmovSFromW(32 + d, n));
+				emit('fmov w$n, s$d', a -> a.fmovWFromS(n, 32 + d));
+				emit('fcvt d$d, s$n', a -> a.fcvtSToD(32 + d, 32 + n));
+				emit('fcvt s$d, d$n', a -> a.fcvtDToS(32 + d, 32 + n));
+			}
+		for (x in [false, true])
+			for (t in [0, 7, 30])
+				for (n in [1, 16]) {
+					emit('ldar ${r(t, x)}, [${r(n, true)}]', a -> a.ldar(x, t, n));
+					emit('stlr ${r(t, x)}, [${r(n, true)}]', a -> a.stlr(x, t, n));
+					emit('ldaxr ${r(t, x)}, [${r(n, true)}]', a -> a.ldaxr(x, t, n));
+					emit('stlxr w17, ${r(t, x)}, [${r(n, true)}]', a -> a.stlxr(x, 17, t, n));
+				}
+		emit('dmb ish', a -> a.dmbIsh());
+		emit('clrex', a -> a.clrex());
 		Sys.print(out.toString());
 	}
 }

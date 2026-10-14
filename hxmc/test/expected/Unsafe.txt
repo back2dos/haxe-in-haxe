@@ -1,0 +1,16 @@
+exit 0
+-2 254 -3 65533 2147483647
+true 1.5 0.25
+ptr ok
+offsets ok
+indexed ok
+ptr arith ok
+5 8 8 10 10 2
+atomic64 ok
+cas64 ok
+strings 21 45238 FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF
+hello true
+zeroed
+os ok
+stack ok
+112

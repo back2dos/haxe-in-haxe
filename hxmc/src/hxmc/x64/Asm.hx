@@ -633,6 +633,37 @@ class Asm {
 	public function movqRX(dst:Int, src:Int)
 		op(0x66, true, 0x0f7e, 2, src & 15, dst, null);
 
+	// movd xmm, r32 / movd r32, xmm (float32 bits)
+	public function movdXR(dst:Int, src:Int)
+		op(0x66, false, 0x0f6e, 2, dst & 15, src, null);
+
+	public function movdRX(dst:Int, src:Int)
+		op(0x66, false, 0x0f7e, 2, src & 15, dst, null);
+
+	// cvtss2sd xmm, xmm / cvtsd2ss xmm, xmm
+	public function cvtss2sd(dst:Int, src:Int)
+		sse(0xf3, false, 0x0f5a, dst, src, null);
+
+	public function cvtsd2ss(dst:Int, src:Int)
+		sse(0xf2, false, 0x0f5a, dst, src, null);
+
+	// ---- atomics (hxmc.unsafe.Atomic): xchg m, r (locked by itself);
+	// lock xadd m, r; lock cmpxchg m, r (rax: expected, then the old value); mfence
+	public function xchgMR(size:Int, m:Mem, r:Int)
+		op(0, size == 8, 0x87, 1, r, 0, m);
+
+	public function lockXaddMR(size:Int, m:Mem, r:Int)
+		op(0xf0, size == 8, 0x0fc1, 2, r, 0, m);
+
+	public function lockCmpxchgMR(size:Int, m:Mem, r:Int)
+		op(0xf0, size == 8, 0x0fb1, 2, r, 0, m);
+
+	public function mfence() {
+		b.u8(0x0f);
+		b.u8(0xae);
+		b.u8(0xf0);
+	}
+
 	// roundsd xmm, xmm, mode (SSE4.1): 1 floor, 2 ceil, 3 truncate
 	public function roundsd(dst:Int, src:Int, mode:Int) {
 		op(0x66, false, 0x0f3a0b, 3, dst & 15, src & 15, null);

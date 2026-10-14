@@ -44,6 +44,16 @@ enum abstract AOp(Int) to Int from Int {
 	var TLSSTORE; // thread-local sym <- s1 (s2: as TLSLOAD)
 	var TEBLOAD; // d <- [x18 + imm] (Windows: the thread environment block)
 	var BRK;
+	// (hxmc.unsafe: MirBuild.intrinsic)
+	var LDAR; // d <- [s1], acquire (size)
+	var STLR; // [s1] <- s2, release (size)
+	var ATOMIC; // d <- old [s1]; cond 0: [s1] += s2, 1: [s1] = s2, 2: [s1] = s2 if old == s3 (ldaxr/stlxr loop over x16/x17)
+	var KEEP; // no code: s1, s2, s3 live to here (ATOMIC's operands outlive its result)
+	var DMB;
+	var FMOVSW; // d (fpr, single) <- s1 (32 bits)
+	var FMOVWS; // d (32 bits) <- s1 (fpr, single)
+	var FCVTSD; // d (double) <- s1 (single)
+	var FCVTDS; // d (single) <- s1 (double)
 }
 
 // Mir -> LIR for AArch64 (AAPCS64). x16/x17 are the emitter's scratch
@@ -94,9 +104,22 @@ class Isel implements hxmc.Target.Selector {
 			if (i.index >= 0) u(i.index);
 		}
 		switch (i.op : AOp) {
-			case MOV | NEG | MVN | SXTW | FOP1 | SCVTF | FCVTZS | FMOVTOG | FMOVFROMG | SHIFTI | ALUI:
+			case MOV | NEG | MVN | SXTW | FOP1 | SCVTF | FCVTZS | FMOVTOG | FMOVFROMG | SHIFTI | ALUI | FMOVSW | FMOVWS | FCVTSD | FCVTDS | LDAR:
 				defs.push(i.d);
 				u(i.s1);
+			case STLR:
+				u(i.s1);
+				u(i.s2);
+			case ATOMIC:
+				defs.push(i.d);
+				u(i.s1);
+				u(i.s2);
+				u(i.s3);
+			case KEEP:
+				u(i.s1);
+				u(i.s2);
+				u(i.s3);
+			case DMB:
 			case MOVI | MOVF | CSET | TLSLOAD | TEBLOAD:
 				defs.push(i.d);
 				u(i.s2);
@@ -746,6 +769,8 @@ class Isel implements hxmc.Target.Selector {
 				x.size = i.size;
 				x.s1 = useZ(i.c);
 				memOf(x, i.a, i.b, i.imm2, i.imm, i.size);
+			case Call if (i.sym != null && StringTools.startsWith(i.sym, hxmc.MirBuild.SPECIAL)):
+				special(i);
 			case Call:
 				call(i);
 			case Jmp:
@@ -873,6 +898,58 @@ class Isel implements hxmc.Target.Selector {
 			bcond(Asm.EQ, targets[k]);
 		}
 		jmp(def);
+	}
+
+	// the inline expansions of MirBuild.special: atomics (sequentially
+	// consistent: ldar, stlr, ldaxr/stlxr loops) and float32 conversions
+	function special(i:MIns) {
+		var name = i.sym.substr(hxmc.MirBuild.SPECIAL.length);
+		var x8 = StringTools.endsWith(name, "8");
+		switch name {
+			case "atomic_load4" | "atomic_load8":
+				var x = emit(LDAR);
+				x.d = reg(i.id);
+				x.s1 = use(i.args[0]);
+				x.size = x8 ? 8 : 4;
+			case "atomic_store4" | "atomic_store8":
+				var x = emit(STLR);
+				x.s1 = use(i.args[0]);
+				x.s2 = use(i.args[1]);
+				x.size = x8 ? 8 : 4;
+			case "atomic_add4" | "atomic_add8" | "atomic_xchg4" | "atomic_xchg8" | "atomic_cas4" | "atomic_cas8":
+				var cas = StringTools.startsWith(name, "atomic_cas");
+				var x = emit(ATOMIC);
+				x.d = reg(i.id);
+				x.s1 = use(i.args[0]);
+				x.s2 = use(i.args[cas ? 2 : 1]);
+				if (cas) x.s3 = use(i.args[1]);
+				x.cond = cas ? 2 : StringTools.startsWith(name, "atomic_add") ? 0 : 1;
+				x.size = x8 ? 8 : 4;
+				var k = emit(KEEP);
+				k.s1 = x.s1;
+				k.s2 = x.s2;
+				k.s3 = x.s3;
+			case "fence":
+				emit(DMB);
+			case "f32_to_f64":
+				var t = f.newReg(true);
+				var x = emit(FMOVSW);
+				x.d = t;
+				x.s1 = use(i.args[0]);
+				var c = emit(FCVTSD);
+				c.d = reg(i.id);
+				c.s1 = t;
+			case "f64_to_f32":
+				var t = f.newReg(true);
+				var c = emit(FCVTDS);
+				c.d = t;
+				c.s1 = use(i.args[0]);
+				var x = emit(FMOVWS);
+				x.d = reg(i.id);
+				x.s1 = t;
+			case _:
+				throw new hxmc.MirBuild.Unsupported("unknown special " + i.sym);
+		}
 	}
 
 	function call(i:MIns) {

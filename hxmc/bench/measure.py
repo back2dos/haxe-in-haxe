@@ -6,21 +6,24 @@
 Every case is typed once by the reference compiler into an HXB archive
 (`-cp bin/hxmc/std --custom-target hxmc`), compiled by the tool (HXMC_TOOL,
 default bin/hxmc/hxmc: a cold build, its object cache removed first) to a
-static executable with the runtime object of hxmc/tools/mkrt.sh, and run
+static executable with the runtime object of hxmc/tools/mkrt.sh (the one
+next to the tool), and run
 RUNS times (the best time is kept). Sizes are of the executable as written
 (no symbol table unless -debug). Cases: the HaxeBenchmarks cases of
 site/bench/haxebench.py (its checkout, $HAXEBENCH, default bin/haxebench), and
 `port`: the port compiling its own source to HXB (site/bench/run.py's "self"
-workload).
+workload). HXMC_STD (default bin/hxmc/std) and HXMC_BENCH_OUT (default
+bin/hxmc-bench) let a saved earlier tool, its std and runtime object be
+measured beside the current ones.
 """
 import argparse, json, os, resource, shutil, subprocess, sys, time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 HB = Path(os.environ.get("HAXEBENCH", ROOT / "bin/haxebench"))
-OUT = ROOT / "bin/hxmc-bench"
+OUT = Path(os.environ.get("HXMC_BENCH_OUT", ROOT / "bin/hxmc-bench"))
 HXMC = Path(os.environ.get("HXMC_TOOL", ROOT / "bin/hxmc/hxmc"))
-STD = ["-cp", str(ROOT / "bin/hxmc/std")]
+STD = ["-cp", os.environ.get("HXMC_STD", str(ROOT / "bin/hxmc/std"))]
 
 FORMATTER_CPS = ["formatter/src", "tokentree/src", "haxeparser/src", "hxparse/src", "json2object/src", "hxargs", "hxjsonast/src"]
 CASES = {

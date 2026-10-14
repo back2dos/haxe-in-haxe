@@ -1858,6 +1858,7 @@ class MirBuild {
 				return call(name + "_fid", xs, mty(ret));
 			case _:
 		}
+		if (hxmc.ir.FnLower.isIntrinsic(name)) return intrinsic(name, args);
 		var xs = [for (a in args) ex(a)];
 		inline function f1(fn:String):Int
 			return call(fn, [xs[0]], F64);
@@ -1926,6 +1927,186 @@ class MirBuild {
 			case "StringBuf_addChar": stringBufAddChar(xs[0], xs[1]);
 			case _: call(name, xs, mty(ret));
 		}
+	}
+
+	// ---- the intrinsics of hxmc.unsafe (Mem, Atomic: the runtime's Haxe code)
+
+	static function literal(e:Ex, what:String):String
+		return switch e {
+			case EStr(s): s;
+			case _: throw new Unsupported(what + ": the name must be a string literal");
+		}
+
+	static function intLiteral(e:Ex, what:String):Int
+		return switch e {
+			case EInt(v): v;
+			case _: throw new Unsupported(what + ": the size must be a constant");
+		}
+
+	// the Abi constants the runtime's Haxe code may name (Mem.abi)
+	static function abiConst(n:String):Int
+		return switch n {
+			case "TYPE_SIZE": Abi.TYPE_SIZE;
+			case "TYPE_TAG": Abi.TYPE_TAG;
+			case "IC_SIZE": Abi.IC_SIZE;
+			case "IC_SLOT": Abi.IC_SLOT;
+			case "IC_KIND": Abi.IC_KIND;
+			case "IC_FN": Abi.IC_FN;
+			case "IC_SIG": Abi.IC_SIG;
+			case "HDR_TINDEX": Abi.HDR_TINDEX;
+			case "T_FIRST": Abi.T_FIRST;
+			case _: throw new Unsupported("Mem.abi: unknown constant " + n);
+		}
+
+	// an offset operand: a constant displacement, or an index (scale 1)
+	function memAt(off:Ex):{disp:Int, index:Int} {
+		return switch off {
+			case EInt(v): {disp: v, index: -1};
+			case _: {disp: 0, index: op1(SExt, I64, ex(off))};
+		}
+	}
+
+	// p + off + i * scale: (base, disp, index)
+	function memAtIndexed(p:Int, off:Ex, i:Ex):{base:Int, disp:Int, index:Int} {
+		var base = p, disp = 0;
+		switch off {
+			case EInt(v): disp = v;
+			case _: base = op2(Add, I64, p, op1(SExt, I64, ex(off)));
+		}
+		return {base: base, disp: disp, index: op1(SExt, I64, ex(i))};
+	}
+
+	// an inline expansion the instruction selection does (Call to hxmc$...)
+	function special(name:String, args:Array<Int>, ret:MTy):Int
+		return call(SPECIAL + name, args, ret);
+
+	// instruction selection expands calls of these symbols inline
+	public static inline var SPECIAL = "hxmc$";
+
+	function intrinsic(name:String, args:Array<Ex>):Int {
+		var short = name.substr(name.lastIndexOf("_") + 1);
+		var atomic = StringTools.startsWith(name, "hxmc_unsafe_Atomic_");
+		if (atomic) {
+			var xs = [for (a in args) ex(a)];
+			return switch short {
+				case "load32": special("atomic_load4", [xs[0]], I32);
+				case "load64": special("atomic_load8", [xs[0]], I64);
+				case "store32": special("atomic_store4", [xs[0], xs[1]], Void);
+				case "store64": special("atomic_store8", [xs[0], xs[1]], Void);
+				case "add32": special("atomic_add4", [xs[0], xs[1]], I32);
+				case "add64": special("atomic_add8", [xs[0], xs[1]], I64);
+				case "exchange32": special("atomic_xchg4", [xs[0], xs[1]], I32);
+				case "exchange64": special("atomic_xchg8", [xs[0], xs[1]], I64);
+				case "cas32": special("atomic_cas4", [xs[0], xs[1], xs[2]], I32);
+				case "cas64": special("atomic_cas8", [xs[0], xs[1], xs[2]], I64);
+				case "fence": special("fence", [], Void);
+				case _: throw new Unsupported("unknown intrinsic " + name);
+			}
+		}
+		inline function ld(ty:MTy, size:Int, signed:Bool):Int {
+			var p = ex(args[0]);
+			var m = memAt(args[1]);
+			return load(ty, size, p, m.disp, signed, m.index, 1);
+		}
+		inline function st(size:Int, v:Int, p:Int, m:{disp:Int, index:Int}):Int {
+			store(size, p, m.disp, v, m.index, 1);
+			return iconst(0);
+		}
+		inline function ldAt(ty:MTy, size:Int):Int {
+			var m = memAtIndexed(ex(args[0]), args[1], args[2]);
+			return load(ty, size, m.base, m.disp, false, m.index, size);
+		}
+		inline function stAt(size:Int):Int {
+			var m = memAtIndexed(ex(args[0]), args[1], args[2]);
+			store(size, m.base, m.disp, ex(args[3]), m.index, size);
+			return iconst(0);
+		}
+		return switch short {
+			case "addr" | "obj": ex(args[0]);
+			case "sym": symAddr(literal(args[0], "Mem.sym"));
+			case "tlsGet": tlsLoad(literal(args[0], "Mem.tlsGet"));
+			case "tlsSet":
+				tlsStore(literal(args[0], "Mem.tlsSet"), ex(args[1]));
+				iconst(0);
+			case "abi": iconst(abiConst(literal(args[0], "Mem.abi")));
+			case "os": iconst(abi.os == "linux" ? 0 : abi.os == "macos" ? 1 : 2);
+			case "arm": iconst(abi.arm ? 1 : 0);
+			case "stack": stackAddr(f.slot(intLiteral(args[0], "Mem.stack"), 16));
+			case "ult": cmp(CULt, ex(args[0]), ex(args[1]));
+			case "getI8": ld(I32, 1, true);
+			case "getU8": ld(I32, 1, false);
+			case "getI16": ld(I32, 2, true);
+			case "getU16": ld(I32, 2, false);
+			case "getI32": ld(I32, 4, false);
+			case "getI64" | "getPtr" | "getRef": ld(I64, 8, false);
+			case "getF64": ld(F64, 8, false);
+			case "getF32": special("f32_to_f64", [ld(I32, 4, false)], F64);
+			case "setI8" | "setI16" | "setI32" | "setI64" | "setPtr" | "setRef" | "setF64":
+				var p = ex(args[0]);
+				var m = memAt(args[1]);
+				var v = ex(args[2]);
+				st(switch short {
+					case "setI8": 1;
+					case "setI16": 2;
+					case "setI32": 4;
+					case _: 8;
+				}, v, p, m);
+			case "setF32":
+				var p = ex(args[0]);
+				var m = memAt(args[1]);
+				var v = special("f64_to_f32", [ex(args[2])], I32);
+				st(4, v, p, m);
+			case "setRefBarrier":
+				var o = ex(args[0]);
+				var off = switch args[1] {
+					case EInt(v): lconst32(v);
+					case x: op1(SExt, I64, ex(x));
+				};
+				var v = ex(args[2]);
+				setPtr(o, op2(Add, I64, o, off), v);
+				iconst(0);
+			case "getU8At": ldAt(I32, 1);
+			case "getU16At": ldAt(I32, 2);
+			case "getI32At": ldAt(I32, 4);
+			case "getI64At" | "getRefAt": ldAt(I64, 8);
+			case "getF64At": ldAt(F64, 8);
+			case "setU8At": stAt(1);
+			case "setU16At": stAt(2);
+			case "setI32At": stAt(4);
+			case "setI64At" | "setF64At": stAt(8);
+			case "alloc" | "allocRaw": allocDyn(ex(args[0]), ex(args[1]), ex(args[2]), short == "alloc");
+			case _: throw new Unsupported("unknown intrinsic " + name);
+		}
+	}
+
+	// Mem.alloc: an object of a run-time size (n slots), type index and kind;
+	// zeroed when asked (the slow path's objects always are)
+	function allocDyn(n:Int, tidx:Int, kind:Int, zero:Bool):Int {
+		var n64 = op1(ZExt, I64, n);
+		var bytes = op2(Shl, I64, op2(Add, I64, n64, lconst(1, 0)), lconst(3, 0));
+		var ptr = tlsLoad("rt_young_ptr");
+		var lim = tlsLoad("rt_young_limit");
+		var res = newVar(I64);
+		var fast = newBlock(), slow = newBlock(), join = newBlock();
+		slow.cold = true;
+		br(cmp(CGe, op2(Sub, I64, lim, ptr), bytes), fast, slow);
+		seal(fast);
+		seal(slow);
+		cur = fast;
+		tlsStore("rt_young_ptr", op2(Add, I64, ptr, bytes));
+		var lo = op2(Or, I32, n, op2(Shl, I32, kind, iconst(28)));
+		storeM(Opt.MInit, 4, ptr, 0, lo);
+		storeM(Opt.MInit, 4, ptr, 4, tidx);
+		var o = op2(Add, I64, ptr, lconst32(8));
+		if (zero) call("memset", [o, iconst(0), op2(Shl, I64, n64, lconst(3, 0))], I64);
+		writeVar(res, cur, o);
+		jmp(join);
+		cur = slow;
+		writeVar(res, cur, call("hxmc_alloc_slow", [op2(Or, I32, n, op2(Shl, I32, kind, iconst(28))), tidx, op1(Trunc, I32, bytes)], I64));
+		jmp(join);
+		seal(join);
+		cur = join;
+		return readVar(res, cur);
 	}
 
 	function strEq(a:Int, b:Int):Int {

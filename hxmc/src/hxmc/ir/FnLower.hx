@@ -254,7 +254,25 @@ class FnLower {
 	public static var NOGC = ["Math_random" => true];
 
 	public static function isPure(n:String):Bool
-		return PURE.exists(n) || MATH.exists(n);
+		return PURE.exists(n) || MATH.exists(n) || PURE_INTRINSICS.exists(n);
+
+	// C functions declared @:hxmc.c (hxmc.unsafe.LibC): called with the C ABI,
+	// never GC points (filled while lowering)
+	public static var C_EXTERNS = new Map<String, Bool>();
+	// the intrinsics of hxmc.unsafe (MirBuild.intrinsic): no GC point but the
+	// allocations; these are pure (they read no memory)
+	public static var PURE_INTRINSICS = [
+		for (n in ["addr", "obj", "sym", "abi", "os", "arm", "ult", "stack"])
+			"hxmc_unsafe_Mem_" + n => true
+	];
+
+	public static inline function isIntrinsic(n:String):Bool
+		return StringTools.startsWith(n, "hxmc_unsafe_Mem_") || StringTools.startsWith(n, "hxmc_unsafe_Atomic_");
+
+	// a runtime function call that is not a GC point
+	public static function noGcHost(n:String):Bool
+		return isPure(n) || NOGC.exists(n) || C_EXTERNS.exists(n)
+			|| (isIntrinsic(n) && n != "hxmc_unsafe_Mem_alloc" && n != "hxmc_unsafe_Mem_allocRaw");
 
 	// the layout an object literal of the structural type t gets, when the
 	// field `name` has the representation rt there
@@ -1287,6 +1305,15 @@ class FnLower {
 					case _: fail("extern static " + cf.cfName + " is not a function", e);
 				};
 				var name = Lower.nativeName(c) + "_" + cf.cfName;
+				var leaf = Lower.hasMeta(":hxmc.c", c.clMeta);
+				if (leaf || Lower.hasMeta(":hxmc.rt", c.clMeta)) {
+					// a C function by its own symbol: @:hxmc.c (hxmc.unsafe.LibC)
+					// never reaches a GC point; @:hxmc.rt (the runtime's C
+					// functions, hxmc.rt.C) may collect
+					var n = Lower.metaArg(core.Meta.getOpt(Native, cf.cfMeta));
+					name = n != null ? n : cf.cfName;
+					if (leaf) C_EXTERNS.set(name, true);
+				}
 				var intrinsic = intrinsicStatic(name, cargs, e);
 				if (intrinsic != null) return intrinsic;
 				var t = ty(s.ret);

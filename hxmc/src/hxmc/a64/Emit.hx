@@ -292,6 +292,44 @@ class Emit implements hxmc.Target.Emitter {
 				a.ldst(true, 8, false, true, i.d, 18, i.imm);
 			case BRK:
 				a.brk();
+			case LDAR:
+				a.ldar(x, i.d, i.s1);
+			case STLR:
+				a.stlr(x, i.s2, i.s1);
+			case ATOMIC:
+				var again = a.newLabel();
+				a.bind(again);
+				a.ldaxr(x, i.d, i.s1);
+				switch i.cond {
+					case 0:
+						a.addSubR(0, x, X16, i.d, i.s2);
+						a.stlxr(x, X17, X16, i.s1);
+						a.cbz(false, X17, again, true);
+					case 1:
+						a.stlxr(x, X17, i.s2, i.s1);
+						a.cbz(false, X17, again, true);
+					case _:
+						var differ = a.newLabel(), done = a.newLabel();
+						a.cmpR(x, i.d, i.s3);
+						a.bcond(Asm.NE, differ);
+						a.stlxr(x, X17, i.s2, i.s1);
+						a.cbz(false, X17, again, true);
+						a.bLabel(done);
+						a.bind(differ);
+						a.clrex();
+						a.bind(done);
+				}
+			case KEEP:
+			case DMB:
+				a.dmbIsh();
+			case FMOVSW:
+				a.fmovSFromW(i.d, i.s1);
+			case FMOVWS:
+				a.fmovWFromS(i.d, i.s1);
+			case FCVTSD:
+				a.fcvtSToD(i.d, i.s1);
+			case FCVTDS:
+				a.fcvtDToS(i.d, i.s1);
 		}
 	}
 

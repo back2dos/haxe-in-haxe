@@ -132,6 +132,10 @@ class EncTest {
 				emit('movq ${r(d + 16, 8)}, ${r(s, 8)}', a -> a.movqXR(d + 16, s));
 				emit('movq ${r(d, 8)}, ${r(s + 16, 8)}', a -> a.movqRX(d, s + 16));
 				emit('roundsd ${r(d + 16, 8)}, ${r(s + 16, 8)}, 1', a -> a.roundsd(d + 16, s + 16, 1));
+				emit('movd ${r(d + 16, 8)}, ${r(s, 4)}', a -> a.movdXR(d + 16, s));
+				emit('movd ${r(d, 4)}, ${r(s + 16, 8)}', a -> a.movdRX(d, s + 16));
+				emit('cvtss2sd ${r(d + 16, 8)}, ${r(s + 16, 8)}', a -> a.cvtss2sd(d + 16, s + 16));
+				emit('cvtsd2ss ${r(d + 16, 8)}, ${r(s + 16, 8)}', a -> a.cvtsd2ss(d + 16, s + 16));
 			}
 			for (size in sizes) {
 				emit('neg ${r(d, size)}', a -> a.neg(size, d));
@@ -156,6 +160,15 @@ class EncTest {
 		emit('cqo', a -> a.signExtendAx(8));
 		emit('ret', a -> a.ret());
 		emit('ud2', a -> a.ud2());
+		// atomics
+		for (m in mems())
+			for (s in [0, 3, 9, 15])
+				for (size in sizes) {
+					emit('xchg ${ptr(size)}${memText(m)}, ${r(s, size)}', a -> a.xchgMR(size, m, s));
+					emit('lock xadd ${ptr(size)}${memText(m)}, ${r(s, size)}', a -> a.lockXaddMR(size, m, s));
+					emit('lock cmpxchg ${ptr(size)}${memText(m)}, ${r(s, size)}', a -> a.lockCmpxchgMR(size, m, s));
+				}
+		emit('mfence', a -> a.mfence());
 		Sys.print(out.toString());
 	}
 }

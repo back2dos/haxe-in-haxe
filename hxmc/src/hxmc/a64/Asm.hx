@@ -450,4 +450,41 @@ class Asm {
 
 	public function fmovFromGpr(d:Int, n:Int)
 		w(0x9E670000 | (n << 5) | (d & 31));
+
+	// float32: fmov s, w / fmov w, s; fcvt d, s / fcvt s, d
+	public function fmovSFromW(d:Int, n:Int)
+		w(0x1E270000 | (n << 5) | (d & 31));
+
+	public function fmovWFromS(d:Int, n:Int)
+		w(0x1E260000 | ((n & 31) << 5) | d);
+
+	public function fcvtSToD(d:Int, n:Int)
+		w(0x1E22C000 | ((n & 31) << 5) | (d & 31));
+
+	public function fcvtDToS(d:Int, n:Int)
+		w(0x1E624000 | ((n & 31) << 5) | (d & 31));
+
+	// ---- atomics (hxmc.unsafe.Atomic): load-acquire, store-release and the
+	// exclusive pair (no LSE: every ARMv8.0 machine has these)
+	static inline function szBits(x:Bool):Int
+		return x ? 0xC0000000 : 0x80000000;
+
+	public function ldar(x:Bool, t:Int, n:Int)
+		w(szBits(x) | 0x08DFFC00 | (n << 5) | t);
+
+	public function stlr(x:Bool, t:Int, n:Int)
+		w(szBits(x) | 0x089FFC00 | (n << 5) | t);
+
+	public function ldaxr(x:Bool, t:Int, n:Int)
+		w(szBits(x) | 0x085FFC00 | (n << 5) | t);
+
+	// stlxr ws, t, [n]: ws 0 when the store succeeded
+	public function stlxr(x:Bool, s:Int, t:Int, n:Int)
+		w(szBits(x) | 0x0800FC00 | (s << 16) | (n << 5) | t);
+
+	public function dmbIsh()
+		w(0xD5033BBF);
+
+	public function clrex()
+		w(0xD5033F5F);
 }

@@ -52,6 +52,7 @@ class Lower {
 		if (l == null) l = new Lower();
 		var mainField = main.clStatics.get("main");
 		l.prog.main = l.staticFunc(main, mainField);
+		l.findHosts(types);
 		l.drain();
 		l.finish();
 		// static initializers run in the order of com.types, which
@@ -98,11 +99,121 @@ class Lower {
 	}
 
 	public function guarded(fi:FuncInfo, f:() -> Void):() -> Void {
-		return () -> try f() catch (e:LowerError) {
-			if (!survey) throw e.toString();
-			record(e, fi.name);
-			fi.body = [SThrow(ENull(TRef(RAny)))];
+		return () -> {
+			try f() catch (e:LowerError) {
+				if (!survey) throw e.toString();
+				record(e, fi.name);
+				fi.body = [SThrow(ENull(TRef(RAny)))];
+			}
+			if (hostImpls.iterator().hasNext()) bindHosts(fi);
 		}
+	}
+
+	// ---- the runtime in Haxe (hxmc/README.md, "Runtime in Haxe")
+
+	// runtime functions implemented in Haxe: @:hxmc.export("name") (also
+	// called by the runtime's C code: always compiled, under that symbol) and
+	// @:hxmc.host("name") (compiled when called) on static functions of the
+	// hxmc package's classes; generated code's calls of `name` (ECallHost)
+	// become calls of them (bindHosts)
+	var hostImpls = new Map<String, {c:TClass, cf:TClassField}>();
+
+	function findHosts(types:Array<core.TType.ModuleType>) {
+		for (t in types)
+			switch t {
+				case TClassDecl(c) if (c.clPath.pack.length > 0 && c.clPath.pack[0] == "hxmc" && !c.hasClassFlag(CExtern)):
+					for (cf in c.clOrderedStatics) {
+						if (cf.cfMeta.length == 0) continue;
+						var n = metaString(":hxmc.export", cf.cfMeta);
+						var exported = n != null;
+						if (n == null) n = metaString(":hxmc.host", cf.cfMeta);
+						if (n == null) continue;
+						if (hostImpls.exists(n)) fail("two Haxe implementations of the runtime's " + n);
+						hostImpls.set(n, {c: c, cf: cf});
+						if (exported) staticFunc(c, cf);
+					}
+				case _:
+			}
+	}
+
+	// the Haxe implementation of runtime function `name`, lowered on first use
+	public function hostImpl(name:String):Null<FuncInfo> {
+		var h = hostImpls.get(name);
+		return h == null ? null : staticFunc(h.c, h.cf);
+	}
+
+	// replaces the calls of runtime functions implemented in Haxe in fi's body
+	function bindHosts(fi:FuncInfo) {
+		function ex(e:Ex):Ex {
+			return switch e {
+				case EInt(_) | EF64(_) | EStr(_) | ENull(_) | ELocal(_) | EGlobal(_, _) | EType(_) | ENewObj(_): e;
+				case EBin(op, a, b): EBin(op, ex(a), ex(b));
+				case ENot(a): ENot(ex(a));
+				case EConv(c, a): EConv(c, ex(a));
+				case EBox(t, a): EBox(t, ex(a));
+				case EUnbox(t, a): EUnbox(t, ex(a));
+				case EField(c, i, a): EField(c, i, ex(a));
+				case EAnonGet(n, t, a, h): EAnonGet(n, t, ex(a), h);
+				case ECast(t, a): ECast(t, ex(a));
+				case EInstOf(c, a): EInstOf(c, ex(a));
+				case EEnumTag(a, en): EEnumTag(ex(a), en);
+				case EEnumParam(c, i, a): EEnumParam(c, i, ex(a));
+				case EArrLen(a): EArrLen(ex(a));
+				case EArrGet(t, a, i): EArrGet(t, ex(a), ex(i));
+				case EArrGetU(t, a, i): EArrGetU(t, ex(a), ex(i));
+				case EBoxGet(t, a): EBoxGet(t, ex(a));
+				case ECapture(l, i, a): ECapture(l, i, ex(a));
+				case ECall(f, args): ECall(f, [for (a in args) ex(a)]);
+				case ECallDispatch(sel, s, args): ECallDispatch(sel, s, [for (a in args) ex(a)]);
+				case ECallClos(s, c, args): ECallClos(s, ex(c), [for (a in args) ex(a)]);
+				case ECallAnon(n, s, o, args): ECallAnon(n, s, ex(o), [for (a in args) ex(a)]);
+				case ECallHost(n, args, ret):
+					var xs = [for (a in args) ex(a)];
+					var impl = hostImpls.exists(n) && fi.cSymbol != n ? hostImpl(n) : null;
+					if (impl == null) ECallHost(n, xs, ret) else {
+						if (impl.args.length != xs.length || Ir.repr(impl.ret) != Ir.repr(ret))
+							fail('the Haxe implementation ${impl.name} of the runtime\'s $n does not have its signature');
+						// a pure runtime function may be nested in an expression:
+						// its implementation must not reach a GC point
+						if (hxmc.ir.FnLower.noGcHost(n) && !impl.declNoGc) fail('${impl.name} implements the runtime\'s $n, which is not a GC point: it must be @:hxmc.noGc');
+						ECall(impl, xs);
+					}
+				case ENewEnum(c, args): ENewEnum(c, [for (a in args) ex(a)]);
+				case ENewArr(t, args): ENewArr(t, [for (a in args) ex(a)]);
+				case ENewClos(l, args): ENewClos(l, [for (a in args) ex(a)]);
+				case ENewBox(t, a): ENewBox(t, ex(a));
+				case ENewAnon(s, args): ENewAnon(s, [for (a in args) ex(a)]);
+			}
+		}
+		var sts:Array<Stmt>->Array<Stmt> = null;
+		function st(s:Stmt):Stmt {
+			return switch s {
+				case SSet(l, e): SSet(l, ex(e));
+				case SExpr(e): SExpr(ex(e));
+				case SSetField(c, i, o, v): SSetField(c, i, ex(o), ex(v));
+				case SAnonSet(n, t, o, v): SAnonSet(n, t, ex(o), ex(v));
+				case SArrSet(t, a, i, v): SArrSet(t, a, ex(i), ex(v));
+				case SArrPush(t, a, v): SArrPush(t, a, ex(v));
+				case SBoxSet(t, b, v): SBoxSet(t, ex(b), ex(v));
+				case SSetGlobal(g, v): SSetGlobal(g, ex(v));
+				case SIf(c, a, b): SIf(ex(c), sts(a), sts(b));
+				case SLoop(body): SLoop(sts(body));
+				case SBreak | SContinue: s;
+				case SSwitch(e, cases, def): SSwitch(ex(e), [for (c in cases) {values: c.values, body: sts(c.body)}], sts(def));
+				case SReturn(e): SReturn(e == null ? null : ex(e));
+				case SThrow(e): SThrow(ex(e));
+				case STry(body, catches):
+					STry(sts(body), [
+						for (c in catches) {
+							var test = c.test;
+							{test: test == null ? null : x -> ex(test(x)), l: c.l, body: sts(c.body)};
+						}
+					]);
+				case SCold(id, x): SCold(id, st(x));
+			}
+		}
+		sts = ss -> [for (s in ss) st(s)];
+		fi.body = sts(fi.body);
 	}
 
 	// Lowers the body of `fi` (`run`). The hook for a subclass that caches
@@ -135,6 +246,22 @@ class Lower {
 	// the name of the next closure created in `owner`: stable while other functions change
 	public static function lambdaName(owner:FuncInfo):String
 		return owner.name + "__lambda" + owner.nlambdas++;
+
+	// hxmc's own metadata (@:hxmc.c, @:hxmc.noGc, @:hxmc.export, @:hxmc.host)
+	public static function hasMeta(name:String, ml:core.Ast.Metadata):Bool
+		return core.Meta.has(Custom(name), ml);
+
+	// the string literal argument of hxmc's metadata `name`, or null
+	public static function metaString(name:String, ml:core.Ast.Metadata):Null<String>
+		return metaArg(core.Meta.getOpt(Custom(name), ml));
+
+	public static function metaArg(m:Null<core.Ast.MetadataEntry>):Null<String> {
+		if (m == null || m.exprs.length != 1) return null;
+		return switch m.exprs[0].expr {
+			case EConst(core.Ast.Constant.String(s, _)): s;
+			case _: null;
+		}
+	}
 
 	public static function isCore(c:TClass, name:String):Bool
 		return c.clPath.pack.length == 0 && c.clPath.name == name;
@@ -365,11 +492,20 @@ class Lower {
 		var tf = funcOf(cf);
 		if (tf == null) fail("static " + cf.cfName + " is not a function");
 		fi = new FuncInfo(nativeName(c) + "_" + cf.cfName, moduleOf(c));
+		fieldAttrs(fi, cf);
 		funcs.set(cf, fi);
 		prog.funcs.push(fi);
 		signature(fi, tf, null);
 		pending.push(guarded(fi, () -> lowerBody(fi, cf, () -> new FnLower(this, fi, null, null).run(tf))));
 		return fi;
+	}
+
+	// hxmc's attributes of a function: @:hxmc.noGc (checked by Facts.findNoGc),
+	// @:hxmc.export (its symbol)
+	static function fieldAttrs(fi:FuncInfo, cf:TClassField) {
+		if (cf.cfMeta.length == 0) return;
+		fi.declNoGc = hasMeta(":hxmc.noGc", cf.cfMeta);
+		fi.cSymbol = metaString(":hxmc.export", cf.cfMeta);
 	}
 
 	// The declaration a method overrides or implements: its signature is the one
@@ -395,6 +531,7 @@ class Lower {
 		if (tf == null) fail("method " + cf.cfName + " is not a function");
 		var ci = classInfo(c);
 		fi = new FuncInfo(nativeName(c) + "_" + cf.cfName, moduleOf(c));
+		fieldAttrs(fi, cf);
 		fi.selfClass = ci;
 		funcs.set(cf, fi);
 		ci.methods.set(cf.cfName, fi);

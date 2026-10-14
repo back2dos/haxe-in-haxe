@@ -64,6 +64,13 @@ class Facts {
 	public function cname(f:FuncInfo):String {
 		var n = cnames.get(f);
 		if (n != null) return n;
+		if (f.cSymbol != null) {
+			// @:hxmc.export: the runtime's C code calls it by this name
+			if (usedCNames.exists(f.cSymbol)) throw "hxmc: two functions export " + f.cSymbol;
+			usedCNames.set(f.cSymbol, true);
+			cnames.set(f, f.cSymbol);
+			return f.cSymbol;
+		}
 		var base = "F_" + ident(f.name);
 		n = base;
 		var i = 1;
@@ -437,6 +444,42 @@ class Facts {
 		}
 		for (f in p.funcs)
 			f.noGc = cand.exists(f);
+		// @:hxmc.noGc: a promise the runtime's Haxe code relies on (raw
+		// addresses kept across calls), checked
+		for (f in p.funcs)
+			if (f.declNoGc && !f.noGc) throw '${f.name} is declared @:hxmc.noGc but reaches a GC point: ${noGcCulprit(f, cand)}';
+	}
+
+	// what keeps `f` from being a no-GC function (the first offending
+	// statement or expression), for the error of findNoGc
+	function noGcCulprit(f:FuncInfo, cand:Map<FuncInfo, Bool>):String {
+		if (f.hasTry) return "it has a try block";
+		var why:Null<String> = null;
+		function exWhy(e:Ex) {
+			if (why != null) return;
+			switch e {
+				case ECall(g, _) if (!cand.exists(g)): why = "it calls " + g.name + (g.declNoGc ? "" : " (not a no-GC function)");
+				case ECall(_):
+				case ECallHost(n, _, _) if (GcPoints.gcPoint(e) > 0): why = "it calls the runtime's " + n;
+				case _ if (GcPoints.gcPoint(e) > 0): why = "it allocates or calls dynamically (" + e.getName() + ")";
+				case _:
+			}
+			Facts.iterEx(exWhy, e);
+		}
+		function stWhy(s:Stmt) {
+			if (why != null) return;
+			switch s {
+				case SArrSet(_) | SArrPush(_): why = "it stores into an array (the slow path grows it)";
+				case SAnonSet(_): why = "it sets a structural field (the slow path may allocate)";
+				case SThrow(_): why = "it throws";
+				case STry(_): why = "it has a try block";
+				case _:
+			}
+			Facts.iterStmt(stWhy, exWhy, s);
+		}
+		for (s in f.body)
+			stWhy(s);
+		return why != null ? why : "a callee reaches one";
 	}
 
 	// Wraps the statements whose only GC point is an allocation or an array
@@ -497,7 +540,7 @@ class GcPoints {
 		return switch e {
 			case ECall(f, _) if (f.noGc): 0;
 			case ECall(_) | ECallDispatch(_) | ECallClos(_) | ECallAnon(_) | EBox(_) | EAnonGet(_) | EArrGet(TRef(RAny), _, _) | EArrGetU(TRef(RAny), _, _): 1;
-			case ECallHost(n, _, _): FnLower.isPure(n) || FnLower.NOGC.exists(n) ? 0 : 1;
+			case ECallHost(n, _, _): FnLower.noGcHost(n) ? 0 : 1;
 			case ENewObj(_) | ENewEnum(_) | ENewArr(_) | ENewClos(_) | ENewBox(_) | ENewAnon(_): 2;
 			case _: 0;
 		}

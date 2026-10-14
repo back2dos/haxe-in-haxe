@@ -2,7 +2,7 @@
 # The port built by hxmc compiles its own source to HXB; the archive must be
 # identical to the reference compiler's (member by member).
 #   sh hxmc/tools/portcheck.sh [hxmc arguments...]
-# Writes (once, then when src/ is newer) bin/hxmc-t/port/prog.hxb.zip (the
+# Writes (once, then when src/ or the std is newer) bin/hxmc-t/port/prog.hxb.zip (the
 # port's archive, by the reference: haxe -cp src -cp bin/hxmc/std -main
 # haxe.Main --custom-target hxmc=x --hxb <it> -D disable-parallelism
 # --no-output) and bin/hxmc-t/self-ref.hxb (the reference's own self-compile
@@ -14,7 +14,7 @@ cd "$ROOT"
 export HAXE_STD_PATH=$ROOT/haxe/std
 T=${HXMC_TOOL:-bin/hxmc/hxmc}
 mkdir -p bin/hxmc-t/port
-new=$(find src -name '*.hx' -newer bin/hxmc-t/port/prog.hxb.zip 2>/dev/null | head -1)
+new=$(find src bin/hxmc/std/.stamp -name '*.hx' -newer bin/hxmc-t/port/prog.hxb.zip -o -name .stamp -newer bin/hxmc-t/port/prog.hxb.zip 2>/dev/null | head -1)
 if [ ! -f bin/hxmc-t/port/prog.hxb.zip ] || [ -n "$new" ]; then
 	haxe/haxe -cp src -cp bin/hxmc/std -main haxe.Main --custom-target hxmc=bin/hxmc-t/port/x --hxb bin/hxmc-t/port/prog.hxb.zip -D disable-parallelism --no-output || exit 1
 fi

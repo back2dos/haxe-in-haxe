@@ -175,6 +175,8 @@ class FuncInfo {
 	public var dispatchSel:Int = -1;
 	public var hasTry:Bool = false;
 	public var noGc:Bool = false; // never reaches a GC point (Facts.findNoGc): calls to it are not GC points
+	public var declNoGc:Bool = false; // declared @:hxmc.noGc: Facts.findNoGc fails the build unless noGc
+	public var cSymbol:Null<String>; // @:hxmc.export: the symbol (the runtime's C code calls it)
 	// the Haxe module the function comes from (dot path): hxmc compiles the
 	// functions of a module into one object
 	public var module:String;
