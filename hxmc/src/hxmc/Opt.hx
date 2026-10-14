@@ -169,14 +169,14 @@ class Opt {
 		}
 		pruneBlocks();
 		// merge a block into its only predecessor that jumps to it
-		var changed = true;
-		while (changed) {
-			changed = false;
-			for (b in f.blocks) {
+		var gone = new Map<Int, Bool>();
+		for (b in f.blocks) {
+			if (gone.exists(b.id)) continue;
+			while (true) {
 				var t = b.term();
-				if (t == null || t.op != Jmp) continue;
+				if (t == null || t.op != Jmp) break;
 				var s = t.targets[0];
-				if (s == b || s == f.entry || s.preds.length != 1 || s.handler || s.cold != b.cold) continue;
+				if (s == b || s == f.entry || s.preds.length != 1 || s.handler || s.cold != b.cold) break;
 				// phis of a single predecessor are their operand
 				var rest = [];
 				for (i in s.ins)
@@ -200,11 +200,10 @@ class Opt {
 				s.ins = [];
 				s.preds = [];
 				s.succs = [];
-				f.blocks.remove(s);
-				changed = true;
-				break;
+				gone.set(s.id, true);
 			}
 		}
+		f.blocks = [for (b in f.blocks) if (!gone.exists(b.id)) b];
 	}
 
 	static inline function hasPhi(b:MBlock):Bool
@@ -486,19 +485,33 @@ class Opt {
 
 	function canonicalize() {
 		canon = [for (i in 0...f.vals.length) i];
-		var first = new Map<String, Int>();
+		// by a hash of the value, then compared exactly
+		var first = new Map<Int, Array<Int>>();
+		var vals = f.vals;
 		for (b in f.blocks)
 			for (i in b.ins) {
 				if (i.dead) continue;
-				var k = switch i.op {
-					case Const: "c" + (i.ty : Int) + ":" + i.imm + ":" + i.imm2 + ":" + i.sym;
-					case SymAddr: "s" + i.sym + ":" + i.imm;
-					case StackAddr: "a" + i.imm;
-					case _: null;
+				var h = switch i.op {
+					case Const: ((i.ty : Int) * 31 + i.imm) * 31 + i.imm2;
+					case SymAddr: 7 * 31 + i.imm;
+					case StackAddr: 11 * 31 + i.imm;
+					case _: continue;
 				};
-				if (k == null) continue;
-				var j = first.get(k);
-				if (j == null) first.set(k, i.id) else canon[i.id] = j;
+				if (i.sym != null) h = h * 31 + i.sym.length;
+				var l = first.get(h);
+				if (l == null) {
+					first.set(h, [i.id]);
+					continue;
+				}
+				var hit = -1;
+				for (j in l) {
+					var y = vals[j];
+					if (y.op == i.op && y.ty == i.ty && y.imm == i.imm && y.imm2 == i.imm2 && y.sym == i.sym) {
+						hit = j;
+						break;
+					}
+				}
+				if (hit >= 0) canon[i.id] = hit else l.push(i.id);
 			}
 	}
 
@@ -651,8 +664,9 @@ class Opt {
 			var i = work.pop();
 			if (i.dead) continue;
 			i.dead = true;
-			for (x in [i.a, i.b, i.c])
-				if (x >= 0 && --uses[x] == 0 && removable(f.vals[x])) work.push(f.vals[x]);
+			if (i.a >= 0 && --uses[i.a] == 0 && removable(f.vals[i.a])) work.push(f.vals[i.a]);
+			if (i.b >= 0 && --uses[i.b] == 0 && removable(f.vals[i.b])) work.push(f.vals[i.b]);
+			if (i.c >= 0 && --uses[i.c] == 0 && removable(f.vals[i.c])) work.push(f.vals[i.c]);
 			if (i.args != null)
 				for (x in i.args)
 					if (--uses[x] == 0 && removable(f.vals[x])) work.push(f.vals[x]);
