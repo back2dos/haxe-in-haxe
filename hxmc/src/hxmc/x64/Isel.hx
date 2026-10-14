@@ -332,9 +332,17 @@ class Isel implements hxmc.Target.Selector {
 			var ins = b.ins;
 			for (k in 0...ins.length) {
 				var c = ins[k];
-				if (c.op != Cmp || mf.vals[c.a].ty == F64) continue;
-				var bImm = immOf(c.b) != null, aImm = immOf(c.a) != null;
-				var cands = bImm ? (isymOf(c.b) == null ? [c.a] : []) : aImm ? [] : [c.b, c.a];
+				var cands:Array<Int>;
+				if (c.op == Cmp && mf.vals[c.a].ty != F64) {
+					var bImm = immOf(c.b) != null, aImm = immOf(c.a) != null;
+					cands = bImm ? (isymOf(c.b) == null ? [c.a] : []) : aImm ? [] : [c.b, c.a];
+				} else if ((c.op == Add || c.op == Sub || c.op == And || c.op == Or || c.op == Xor) && c.ty != F64) {
+					// the second operand (either, when commutative); not with an
+					// immediate operand (those take ALUI or LEA)
+					if (immOf(c.a) != null || immOf(c.b) != null) continue;
+					cands = c.op == Sub ? [c.b] : [c.b, c.a];
+					if (c.a == c.b) continue;
+				} else continue;
 				for (x in cands) {
 					var l = mf.vals[x];
 					if (l.op != Load || l.block != b || useCount[x] != 1 || l.ty == F64) continue;
@@ -729,6 +737,25 @@ class Isel implements hxmc.Target.Selector {
 					case Or: Asm.OR;
 					case _: Asm.XOR;
 				};
+				// a load used only here: a memory operand (the other operand is the destination)
+				if (memFold(i.b) || i.op != Sub && memFold(i.a)) {
+					var l = memFold(i.b) ? i.b : i.a;
+					var other = l == i.b ? i.a : i.b;
+					var lv = m.vals[l];
+					mov(d, use(other), size);
+					var x = emit(ALUM);
+					x.d = d;
+					memOf(x, lv.a, lv.b, lv.imm2, lv.imm);
+					x.cond = switch i.op {
+						case Add: Asm.ADD;
+						case Sub: Asm.SUB;
+						case And: Asm.AND;
+						case Or: Asm.OR;
+						case _: Asm.XOR;
+					};
+					x.size = size;
+					return;
+				}
 				// commutative: the operand that dies here as the destination
 				var a = i.a, c = i.b;
 				if (imm == null && i.op != Sub && immOf(a) != null) {
