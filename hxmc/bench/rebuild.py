@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Rebuild times of hxmc (hxmc/README.md, "Rebuilds").
 
-    python3 hxmc/bench/rebuild.py [-c small,port] [--tool bin/hxmc/hxmc]
+    python3 hxmc/bench/rebuild.py [-c small,port] [--tool bin/hxmc/hxmc] [--server]
 
 For each program: a cold build (empty object cache), a rebuild without
 change, and a rebuild after a one-function edit of one module (a second HXB
@@ -9,6 +9,10 @@ archive, written by the reference compiler from a copy of the sources with
 that edit). Only hxmc's own time is measured (from the archive to the
 executable); writing the archive is your Haxe's job. Prints the tool's
 breakdown (modules compiled and cached, codegen, link).
+
+--server: the same three builds from source through the resident tool
+(`hxmc --server`, the port's compilation server: `haxe --connect`), the
+edit made in a copy of the sources; the time is the client's.
 """
 import argparse, os, re, shutil, subprocess, sys, time, resource
 from pathlib import Path
@@ -72,11 +76,49 @@ def build(tool, hxb, main, out):
     return t, f"{m.group(3)}/{m.group(1)} modules compiled, codegen {c.group(1)} ms, link {l.group(1)} ms" if m else log[-300:]
 
 
+def server(tool, name, port=6127):
+    dirs, cps, main, f, anchor, text = PROGRAMS[name]
+    src = OUT / name / "srv-src"
+    shutil.rmtree(src, ignore_errors=True)
+    for s in dirs:
+        shutil.copytree(ROOT / s, src / s)
+    out = OUT / name / "srv-exe"
+    shutil.rmtree(str(out) + ".hxmc", ignore_errors=True)
+    srv = subprocess.Popen([tool, "--server", "--wait", str(port)], cwd=ROOT, env=ENV, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, preexec_fn=unlimited)
+    time.sleep(1)
+    args = sum([["-cp", src / c] for c in cps], []) + ["-cp", ROOT / "bin/hxc/std", "-main", main, "--custom-target", "hxc",
+        "-D", "disable-parallelism", "-D", "disable-hxb-cache", "-D", f"hxmc.out={out}", "--no-output"]
+    p = src / f
+    orig = p.read_text()
+    i = orig.index(anchor)
+    if text is None:
+        j = orig.index("{", i) + 1
+        edited = orig[:j] + "\n\t\tif (Sys.getEnv(\"HXMC_NEVER_SET\") == \"x\") trace(\"edited\");" + orig[j:]
+    else:
+        j = i + len(anchor)
+        edited = orig[:j] + text + orig[j:]
+    try:
+        for label, content in [("cold", None), ("no change", None), ("one module edited", edited), ("edited back", orig)]:
+            if content is not None:
+                p.write_text(content)
+            t = time.perf_counter()
+            sh([ROOT / "haxe/haxe", "--connect", str(port)] + args)
+            t = time.perf_counter() - t
+            print(f"{name:6} server {label:18} {t:6.2f} s", flush=True)
+    finally:
+        srv.kill()
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("-c", default="small,port")
     ap.add_argument("--tool", default=str(ROOT / "bin/hxmc/hxmc"))
+    ap.add_argument("--server", action="store_true")
     a = ap.parse_args()
+    if a.server:
+        for name in a.c.split(","):
+            server(a.tool, name)
+        return
     for name in a.c.split(","):
         dirs, cps, main, f, anchor, text = PROGRAMS[name]
         hxa = archive(name, "a", dirs, cps, main, None)
