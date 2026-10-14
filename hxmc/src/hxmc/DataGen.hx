@@ -384,6 +384,16 @@ class DataGen {
 			b.call(e.symbol(p.main), [], Void);
 			b.ret(-1);
 		}));
+		// WebAssembly (WASI): _start; the runtime reads the arguments itself and exits
+		if (abi.wasm) {
+			compile(MirBuild.synthetic(prep, abi, "_start", [], Void, (b, ps) -> {
+				b.call("rt_init", [b.iconst(p.globals.length), b.iconst(0), b.lconst(0, 0)], Void);
+				b.call("hx_main_body", [], Void);
+				b.call("rt_main_done", [], Void);
+				b.ret(-1);
+			}));
+			return;
+		}
 		compile(MirBuild.synthetic(prep, abi, "main", [I32, I64], I32, (b, ps) -> {
 			b.call("rt_init", [b.iconst(p.globals.length), ps[0], ps[1]], Void);
 			b.call("rt_run_main", [b.symAddr("hx_main_body")], Void);

@@ -82,7 +82,7 @@ class Unsafe {
 		var z = Mem.alloc(3, 7, K_RAW);
 		Sys.println(Mem.getI64(Mem.addr(z), 0) == 0 && Mem.getI64(Mem.addr(z), 16) == 0 ? "zeroed" : "not zeroed");
 		// the target, as the code generator knows it
-		Sys.println(Mem.os() >= 0 && Mem.os() <= 2 ? "os ok" : "os bad");
+		Sys.println(Mem.os() >= 0 && Mem.os() <= 3 ? "os ok" : "os bad");
 		// a frame area
 		var st = Mem.stack(16);
 		Mem.setI64(st, 8, 99);

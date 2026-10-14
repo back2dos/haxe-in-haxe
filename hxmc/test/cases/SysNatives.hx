@@ -44,7 +44,8 @@ class SysNatives {
 		Sys.sleep(0.01);
 		Sys.println(Sys.time() - t0 >= 0.005 && Sys.cpuTime() >= 0);
 		// processes (a shell is needed: not on Windows)
-		if (Sys.systemName() != "Windows") {
+		// (no processes on WASI either)
+		if (Sys.systemName() != "Windows" && Sys.systemName() != "Wasi") {
 			var p = new sys.io.Process("sh", ["-c", "echo out; echo err 1>&2; read x; echo got $x; exit 3"]);
 			p.stdin.writeString("line\n");
 			p.stdin.close();

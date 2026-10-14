@@ -93,7 +93,13 @@ class Main {
 			}
 		var opts = Options.read(com);
 		var abi = Abi.get(opts.target);
-		hxmc.ir.Lower.targetOs = abi.os == "linux" ? 0 : abi.os == "macos" ? 1 : 2;
+		hxmc.ir.Lower.targetOs = abi.osCode();
+		// WebAssembly's runtime is typed with the program only for that target
+		if (abi.wasm && !Lambda.exists(com.types, t -> switch t {
+			case TClassDecl(c): c.clPath.pack.join(".") == "hxmc.rt.wasm" && c.clPath.name == "Gc";
+			case _: false;
+		}))
+			throw "hxmc: a program for " + abi.name + " must be typed for it: -D hxmc.target=" + abi.name + " (also when writing its HXB)";
 		hxmc.ir.Lower.targetArm = abi.arm ? 1 : 0;
 		hxmc.ir.Lower.targetCode = MirBuild.targetCode(abi);
 		var t0 = haxe.Timer.stamp();

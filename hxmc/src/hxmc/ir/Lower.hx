@@ -122,6 +122,8 @@ class Lower {
 		for (t in types)
 			switch t {
 				case TClassDecl(c) if (c.clPath.pack.length > 0 && c.clPath.pack[0] == "hxmc" && !c.hasClassFlag(CExtern)):
+					// @:hxmc.wasm: the runtime of WebAssembly only (what C provides elsewhere)
+					if (hasMeta(":hxmc.wasm", c.clMeta) && targetOs != 3) continue;
 					for (cf in c.clOrderedStatics) {
 						if (cf.cfMeta.length == 0) continue;
 						var n = metaString(":hxmc.export", cf.cfMeta);

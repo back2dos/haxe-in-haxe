@@ -32,7 +32,8 @@ class Abi {
 
 	public var name:String; // linux-x86_64, ...
 	public var arm:Bool;
-	public var os:String; // linux, macos, windows
+	public var os:String; // linux, macos, windows, wasi
+	public var wasm = false; // WebAssembly (wasm.WasmGen, wasm.LinkWasm): no machine code, no C runtime object
 	public var handlerSize:Int;
 	public var handlerPrev:Int;
 	public var handlerSp:Int;
@@ -72,6 +73,11 @@ class Abi {
 				tls = LocalExec;
 				segAlign = arm ? 0x10000 : 0x1000;
 				libc = "musl";
+			case "wasi":
+				tls = LocalExec; // (thread-locals are globals: one thread)
+				segAlign = 0x10000;
+				libc = "none";
+				wasm = true;
 			case "macos":
 				tls = MachoTlv;
 				segAlign = arm ? 0x4000 : 0x1000;
@@ -84,6 +90,10 @@ class Abi {
 		platform = os;
 	}
 
+	// Mem.os(): 0 Linux, 1 macOS, 2 Windows, 3 WASI
+	public function osCode():Int
+		return os == "linux" ? 0 : os == "macos" ? 1 : os == "windows" ? 2 : 3;
+
 	public static function get(target:String):Abi
 		return switch target {
 			case "linux-x86_64": new Abi(target, false, "linux", 216, 200, 208, 8, "_setjmp", "");
@@ -92,7 +102,9 @@ class Abi {
 			case "macos-x86_64": new Abi(target, false, "macos", 168, 152, 160, 8, "_setjmp", "_");
 			case "windows-x86_64": new Abi(target, false, "windows", 272, 256, 264, 16, "_setjmp", "");
 			case "windows-arm64": new Abi(target, true, "windows", 208, 192, 200, 8, "__mingw_setjmp", "");
-			case _: throw "hxmc: unknown target " + target + " (linux-x86_64, linux-arm64, macos-arm64, macos-x86_64, windows-x86_64, windows-arm64)";
+			// (rt_handler: no jmp_buf, the try's pad checks the handler: wasm.WasmGen)
+			case "wasm32-wasi": new Abi(target, false, "wasi", 24, 8, 16, 8, "_setjmp", "");
+			case _: throw "hxmc: unknown target " + target + " (linux-x86_64, linux-arm64, macos-arm64, macos-x86_64, windows-x86_64, windows-arm64, wasm32-wasi)";
 		}
 }
 

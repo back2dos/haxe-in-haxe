@@ -127,6 +127,23 @@ class Driver {
 			}
 			if (o.opt) new Opt(mf).run();
 			if (dumpSet != null && dumpSet.exists(name)) Sys.println(mf.dump());
+			if (abi.wasm) {
+				// WebAssembly: structured code from the Mir, no instruction selection or registers
+				var s1 = haxe.Timer.stamp();
+				new hxmc.wasm.WasmGen(obj).func(mf);
+				lock.acquire();
+				tm[0] += s1 - s0;
+				tm[3] += haxe.Timer.stamp() - s1;
+				raFuncs++;
+				lock.release();
+				if (mb.icaches > 0) {
+					var bss = obj.section(".bss", Bss, 16);
+					bss.bssSize = (bss.bssSize + 15) & ~15;
+					obj.define(mb.icSym, bss, bss.bssSize, Abi.IC_SIZE * mb.icaches, false);
+					bss.bssSize += Abi.IC_SIZE * mb.icaches;
+				}
+				return;
+			}
 			var layout = Layout.order(mf);
 			var s1 = haxe.Timer.stamp();
 			var isel = Target.selector(abi);
@@ -164,7 +181,11 @@ class Driver {
 	}
 
 	// a synthetic function (DataGen) into obj
-	function compileMir(mf:MFunc, emit:Target.Emitter) {
+	function compileMir(mf:MFunc, emit:Target.Emitter, obj:Obj) {
+		if (abi.wasm) {
+			new hxmc.wasm.WasmGen(obj).func(mf);
+			return;
+		}
 		var isel = Target.selector(abi);
 		var lf = isel.select(mf, Layout.order(mf));
 		var ra = new Regalloc(lf, isel);
@@ -263,7 +284,7 @@ class Driver {
 			lits[mi] = fp.newStrings;
 			var mem = resident ? memObjs.get(paths[mi]) : null;
 			if (mem != null && mem.key == key) objs[mi] = mem.obj;
-			else if (index.get(moduleFile(order[mi])) == key && sys.FileSystem.exists(paths[mi])) objs[mi] = ElfReader.read(sys.io.File.getBytes(paths[mi]));
+			else if (!abi.wasm && index.get(moduleFile(order[mi])) == key && sys.FileSystem.exists(paths[mi])) objs[mi] = ElfReader.read(sys.io.File.getBytes(paths[mi]));
 		});
 		var tKey = haxe.Timer.stamp() - s0;
 		var newIndex = new StringBuf();
@@ -298,7 +319,8 @@ class Driver {
 			var ras = new Regalloc.Scratch(Target.selector(abi));
 			for (f in byModule.get(order[mi]))
 				compileFunc(f, obj, emit, ras);
-			sys.io.File.saveBytes(paths[mi], ElfWriter.write(obj, abi.arm));
+			// (WebAssembly objects are not cached: ElfWriter has no relocations for them)
+			if (!abi.wasm) sys.io.File.saveBytes(paths[mi], ElfWriter.write(obj, abi.arm));
 			objs[mi] = obj;
 		});
 		sys.io.File.saveContent(indexPath, newIndex.toString());
@@ -312,10 +334,19 @@ class Driver {
 		stats(t0, t1, t2);
 		var data = new Obj();
 		var demit = Target.emitter(abi, data);
-		var dg = new DataGen(prep, abi, data, mf -> compileMir(mf, demit));
+		var dg = new DataGen(prep, abi, data, mf -> compileMir(mf, demit, data));
 		dg.run();
 		dg.allocStubs(objs, demit);
 		var t3 = haxe.Timer.stamp();
+		if (abi.wasm) {
+			var stack = Sys.getEnv("HXMC_WASM_STACK_KB");
+			var lw = new hxmc.wasm.LinkWasm([data].concat(objs), stack != null ? Std.parseInt(stack) << 10 : 1 << 20);
+			lw.nameSection = !o.strip;
+			var wasm = lw.link();
+			sys.io.File.saveBytes(out, wasm);
+			if (o.stats) Sys.println('hxmc: data ${ms(t3 - t2)}, link ${ms(haxe.Timer.stamp() - t3)}');
+			return;
+		}
 		var rtPath = o.rtObj != null ? o.rtObj : Options.toolDir() + "rt/" + abi.name + "/rt.o";
 		if (!sys.FileSystem.exists(rtPath)) throw "hxmc: the runtime object " + rtPath + " is missing (hxmc/tools/mkrt.sh)";
 		var rt = ElfReader.read(sys.io.File.getBytes(rtPath));

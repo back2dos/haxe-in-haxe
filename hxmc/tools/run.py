@@ -15,7 +15,8 @@ The golden files were written by hxc (the C target) when hxmc separated from
 it, and are frozen: a new case gets its golden file with --bless (written
 from hxmc's own output, to be checked by hand before committing). --target
 cross-builds for another hxmc target (linux-arm64 runs under
-qemu-aarch64-static, windows-x86_64 under wine64); --stage only builds and
+qemu-aarch64-static, windows-x86_64 under wine64, wasm32-wasi under node or
+wasmtime: HXMC_WASM_RUNNER=wasmtime); --stage only builds and
 copies each executable with its golden file to DIR/<case>/ (hxmc/tools/check.py
 runs them on the target's machine, the CI workflow .github/workflows/hxmc.yml).
 """
@@ -78,12 +79,14 @@ def case_list(names):
 def run_case(name, cps, main, args):
     d = OUT / name
     d.mkdir(parents=True, exist_ok=True)
-    hxb = d / "prog.hxb.zip"
+    # (WebAssembly: the program is typed for it, with its runtime)
+    wasm = bool(args.target and args.target.startswith("wasm"))
+    hxb = d / ("prog-" + args.target + ".hxb.zip" if wasm else "prog.hxb.zip")
     src_t = newest(cps)
     t0 = time.perf_counter()
     if not hxb.exists() or hxb.stat().st_mtime < max(src_t, (STD / ".stamp").stat().st_mtime):
         cmd = [HAXE] + sum([["-cp", c] for c in cps], []) + ["-cp", STD, "-main", main, "--custom-target", f"hxmc={d}/x",
-               "--hxb", hxb, "-D", "disable-parallelism", "--no-output"]
+               "--hxb", hxb, "-D", "disable-parallelism", "--no-output"] + (["-D", "hxmc.target=" + args.target] if wasm else [])
         code, o, e = sh(cmd)
         if code != 0:
             return name, "hxb-fail", (o + e)[-1500:]
@@ -95,6 +98,8 @@ def run_case(name, cps, main, args):
     exe = d / ("m-" + args.target if args.target else "m")
     if args.target and args.target.startswith("windows"):
         exe = d / ("m-" + args.target + ".exe")
+    if args.target and args.target.startswith("wasm"):
+        exe = d / ("m-" + args.target + ".wasm")
     code, o, e = sh([HXMC, exe, "--hxb-lib", hxb, "-main", main, "--custom-target", "hxmc", "-D", "disable-parallelism"] + tgt, env=env)
     (d / "hxmc.log").write_text(o + e)
     if code != 0:
@@ -105,11 +110,13 @@ def run_case(name, cps, main, args):
         # cross builds: the executable and the expected output, run elsewhere (check.py)
         sd = Path(args.stage) / name
         sd.mkdir(parents=True, exist_ok=True)
-        shutil.copy(exe, sd / ("m.exe" if exe.suffix == ".exe" else "m"))
+        shutil.copy(exe, sd / ("m" + exe.suffix))
         shutil.copy(expected, sd / "expected.txt")
         return name, "ok", "staged " + nf
     try:
         runner = {"linux-arm64": ["qemu-aarch64-static"], "windows-x86_64": ["/usr/lib/wine/wine64"]}.get(args.target, [])
+        if args.target and args.target.startswith("wasm"):
+            runner = wasm_runner()
         # a small nursery: frequent collections, so a missing or stale root shows
         code, o, e = sh(runner + [exe], cwd=d, timeout=120, env=dict(ENV, RT_MINOR_KB=os.environ.get("RT_MINOR_KB", "64")))
     except subprocess.TimeoutExpired:
@@ -122,6 +129,19 @@ def run_case(name, cps, main, args):
         (d / "got.txt").write_bytes((got + e).encode())
         return name, "differs", f"diff {expected} {d / 'got.txt'}\n" + e[-800:]
     return name, "ok", f"{time.perf_counter() - t0:.1f}s {nf}"
+
+
+# node 22: exception handling with exnref is behind a flag; its WASI's fd_write
+# is a fast API call that can start a collection of V8's heap with a large
+# WebAssembly memory, which crashes: no fast API calls
+NODE_FLAGS = ["--experimental-wasm-exnref", "--no-turbo-fast-api-calls", "--no-warnings"]
+
+
+def wasm_runner():
+    """wasm32-wasi: node (hxmc/tools/wasi.mjs) or, with HXMC_WASM_RUNNER=wasmtime, wasmtime"""
+    if os.environ.get("HXMC_WASM_RUNNER") == "wasmtime":
+        return ["wasmtime", "run", "-W", "exceptions=y", "--dir", ".", "--dir", "/", "--env", "RT_MINOR_KB"]
+    return ["node"] + NODE_FLAGS + [str(ROOT / "hxmc/tools/wasi.mjs")]
 
 
 def main():

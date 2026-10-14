@@ -51,6 +51,12 @@ enum abstract RelKind(Int) to Int {
 	// COFF
 	var RSecRel32; // the offset of S + A in its output section (TLS variables in .tls)
 	var RImgRel32; // S + A - the image base (an RVA)
+	// WebAssembly (wasm.LinkWasm rewrites each as a minimal LEB128)
+	var RWasmFunc; // a function index (5-byte padded LEB)
+	var RWasmType; // a type index; the symbol names the signature ($t:<params>><result>)
+	var RWasmGlobal; // a global index (a thread-local variable or the stack pointer)
+	var RWasmAddr; // i64.const operand: S + A (a data address, a function's table index or an absolute value), 10 bytes
+	var RWasmAddr32; // i32.const operand: S + A (a link-time number), 5 bytes
 }
 
 class Section {

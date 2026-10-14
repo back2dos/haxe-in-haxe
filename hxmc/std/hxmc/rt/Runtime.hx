@@ -9,5 +9,18 @@ import hxmc.rt.Dyn;
 import hxmc.rt.Arr;
 import hxmc.rt.Bytes;
 import hxmc.rt.Date;
+// WebAssembly's runtime (@:hxmc.wasm: what C provides on the native
+// targets), typed for a program built for it only
+#if (hxmc.target == "wasm32-wasi")
+import hxmc.rt.wasm.Heap;
+import hxmc.rt.wasm.Gc;
+import hxmc.rt.wasm.Boxes;
+import hxmc.rt.wasm.Names;
+import hxmc.rt.wasm.Wasi;
+import hxmc.rt.wasm.FloatText;
+import hxmc.rt.wasm.Libc;
+import hxmc.rt.wasm.LibM;
+import hxmc.rt.wasm.Threads;
+#end
 
 class Runtime {}
