@@ -21,6 +21,7 @@ class MkRt {
 	public var imports = new Map<String, {dll:String, name:String, code:Bool}>();
 	var weakDefaults = new Map<Symbol, Symbol>();
 	var undefinedQueue:Array<String> = [];
+	public var arm = false; // the objects are arm64 COFF
 
 	public function new() {}
 
@@ -40,12 +41,13 @@ class MkRt {
 			m.undefinedQueue.push(r);
 		m.select();
 		var o = m.merge();
-		sys.io.File.saveBytes(out, ElfWriter.write(o, false));
+		sys.io.File.saveBytes(out, ElfWriter.write(o, m.arm));
 		Sys.println('mkrt: ${m.included.length} objects, ${Lambda.count(m.imports)} imports, ${o.sections.length} sections');
 	}
 
 	function add(r:{obj:Obj, reader:CoffReader}) {
 		var o = r.obj;
+		if (r.reader.isArm) arm = true;
 		// COMDAT sections already defined by an included object are dropped
 		var drop = new Map<Section, Bool>();
 		for (s => c in r.reader.comdat)

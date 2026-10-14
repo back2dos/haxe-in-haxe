@@ -20,8 +20,13 @@ class Emit implements hxmc.Target.Emitter {
 	var a:Asm;
 	var tlsLocalExec:Bool;
 
-	public function new(obj:Obj) {
+	// Windows commits the stack one guard page at a time: frames of a page or
+	// more touch each page as they grow
+	var probe:Bool;
+
+	public function new(obj:Obj, probe = false) {
 		this.obj = obj;
+		this.probe = probe;
 		text = obj.section(".text", Text, 16);
 		a = new Asm(text);
 	}
@@ -81,6 +86,21 @@ class Emit implements hxmc.Target.Emitter {
 
 	function subSp(n:Int) {
 		if (n == 0) return;
+		if (probe && n >= 4096) {
+			// sub sp, sp, #4096; str xzr, [sp] per page, then the rest
+			var left = n;
+			while (left >= 4096) {
+				a.addSubI(2, true, SP, SP, 1, true);
+				a.ldst(false, 8, false, true, ZR, SP, 0);
+				left -= 4096;
+			}
+			if (left > 0) subSp0(left);
+			return;
+		}
+		subSp0(n);
+	}
+
+	function subSp0(n:Int) {
 		if (n >= 4096) a.addSubI(2, true, SP, SP, n >> 12, true);
 		if (n & 0xfff != 0) a.addSubI(2, true, SP, SP, n & 0xfff);
 	}
@@ -249,12 +269,27 @@ class Emit implements hxmc.Target.Emitter {
 				a.ldstR(true, 4, true, true, X17, X16, i.s1, true);
 				a.addSubR(0, true, X16, X16, X17);
 				a.br(X16);
+			case TLSLOAD if (i.s2 >= 0):
+				// [base + offset]: add x16, base, #hi12, lsl 12; ldr d, [x16, #lo12]
+				var s = tlsSym(i.sym);
+				a.reloc(RA64SecRelHi12, s, 0);
+				a.addSubI(0, true, X16, i.s2, 0, true);
+				a.reloc(RA64SecRelLo12L, s, 0);
+				a.ldst(true, 8, false, true, i.d, X16, 0);
+			case TLSSTORE if (i.s2 >= 0):
+				var s = tlsSym(i.sym);
+				a.reloc(RA64SecRelHi12, s, 0);
+				a.addSubI(0, true, X16, i.s2, 0, true);
+				a.reloc(RA64SecRelLo12L, s, 0);
+				a.ldst(false, 8, false, true, i.s1, X16, 0);
 			case TLSLOAD:
 				a.tlsAddr(X16, tlsSym(i.sym));
 				a.ldst(true, 8, false, true, i.d, X16, 0);
 			case TLSSTORE:
 				a.tlsAddr(X16, tlsSym(i.sym));
 				a.ldst(false, 8, false, true, i.s1, X16, 0);
+			case TEBLOAD:
+				a.ldst(true, 8, false, true, i.d, 18, i.imm);
 			case BRK:
 				a.brk();
 		}

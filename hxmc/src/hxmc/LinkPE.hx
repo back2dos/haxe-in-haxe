@@ -88,10 +88,18 @@ class LinkPE {
 		for (k in keys)
 			if (!StringTools.startsWith(k, "__imp_")) {
 				thunkOf.set(k, thunks.buf.len);
-				thunks.buf.u8(0xff);
-				thunks.buf.u8(0x25);
-				thunks.buf.u32(0);
-				thunks.buf.u16(0x9090);
+				if (arm) {
+					// adrp x16, slot; ldr x16, [x16, :lo12:slot]; br x16
+					thunks.buf.u32(0x90000010);
+					thunks.buf.u32(0xF9400210);
+					thunks.buf.u32(0xD61F0200);
+					thunks.buf.u32(0xD503201F);
+				} else {
+					thunks.buf.u8(0xff);
+					thunks.buf.u8(0x25);
+					thunks.buf.u32(0);
+					thunks.buf.u16(0x9090);
+				}
 			}
 		var lists = new Section(".rdata$hxmc_ctors", RoData, 8);
 		// __CTOR_LIST__ / __DTOR_LIST__ (MinGW): -1, then nothing, then 0
@@ -112,6 +120,7 @@ class LinkPE {
 			{name: ".tls", chars: 0xC0000040, secs: []},
 			{name: ".idata", chars: 0xC0000040, secs: []},
 			{name: ".bss", chars: 0xC0000080, secs: []},
+			{name: ".reloc", chars: 0x42000040, secs: []},
 		];
 		for (o in objs)
 			for (s in o.sections) {
@@ -156,6 +165,8 @@ class LinkPE {
 			rva = align(pos, SECT);
 		}
 		var imageSize = rva;
+		var relocatable = arm;
+		var baseRelocs:Array<{rva:Int, type:Int}> = [];
 		var defined = new Map<String, Int>();
 		defined.set("__CTOR_LIST__", addr.get(lists));
 		defined.set("__DTOR_LIST__", addr.get(lists) + 16);
@@ -175,8 +186,19 @@ class LinkPE {
 			if (t.abs) return t.offset;
 			return addr.get(t.section) + t.offset;
 		};
-		// the thunks: jmp [rip + IAT slot]
+		function isAbs(sym:Symbol):Bool {
+			var t = target(sym);
+			// (linker-defined: addresses, but for the zero of an undefined weak symbol)
+			return t != null ? t.abs : symAddr(sym) == 0;
+		}
+		// the thunks: jmp [rip + IAT slot] (arm64: adrp, ldr, br)
 		for (k => off in thunkOf) {
+			if (arm) {
+				var p = addr.get(thunks) + off;
+				A64Reloc.adrp(thunks.buf, off, iatAddr(k), p);
+				A64Reloc.imm12(thunks.buf, off + 4, (iatAddr(k) & 0xfff) >> 3);
+				continue;
+			}
 			var p = addr.get(thunks) + off + 6;
 			thunks.buf.set32(off + 2, iatAddr(k) - p);
 		}
@@ -194,8 +216,10 @@ class LinkPE {
 						case RAbs64:
 							var v = S + A;
 							s.buf.set64(r.offset, v, v < 0 ? -1 : 0);
+							if (relocatable && !isAbs(r.sym)) baseRelocs.push({rva: P - BASE, type: 10});
 						case RAbs32 | RAbs32S:
 							s.buf.set32(r.offset, S + A);
+							if (relocatable && !isAbs(r.sym)) baseRelocs.push({rva: P - BASE, type: 3});
 						case RPc32 | RCall32:
 							s.buf.set32(r.offset, S + A - P);
 						case RImgRel32:
@@ -204,11 +228,36 @@ class LinkPE {
 							var t = target(r.sym);
 							var sec = t != null && t.section != null ? outOf.get(t.section) : -1;
 							s.buf.set32(r.offset, S + A - BASE - (sec >= 0 ? starts[sec] : 0));
+						case RA64SecRelHi12 | RA64SecRelLo12A | RA64SecRelLo12L:
+							var t = target(r.sym);
+							var sec = t != null && t.section != null ? outOf.get(t.section) : -1;
+							A64Reloc.apply(s.buf, r.offset, r.kind, S + A - BASE - (sec >= 0 ? starts[sec] : 0), P, r.sym.name);
 						case _:
-							throw "hxmc: link: relocation " + r.kind + " on Windows";
+							if (!arm || !A64Reloc.apply(s.buf, r.offset, r.kind, S + A, P, r.sym.name))
+								throw "hxmc: link: relocation " + r.kind + " on Windows";
 					}
 				}
 			}
+		// base relocations (arm64 images must be relocatable): a block per page
+		var relocBuf = new Buf(4096);
+		if (relocatable && baseRelocs.length > 0) {
+			baseRelocs.sort((a, b) -> a.rva - b.rva);
+			var k = 0;
+			while (k < baseRelocs.length) {
+				var page = baseRelocs[k].rva & ~0xfff;
+				var at = relocBuf.len;
+				relocBuf.u32(page);
+				relocBuf.u32(0);
+				while (k < baseRelocs.length && (baseRelocs[k].rva & ~0xfff) == page) {
+					relocBuf.u16((baseRelocs[k].type << 12) | (baseRelocs[k].rva & 0xfff));
+					k++;
+				}
+				if ((relocBuf.len & 3) != 0) relocBuf.u16(0);
+				relocBuf.set32(at + 4, relocBuf.len - at);
+			}
+			sizes[7] = relocBuf.len;
+			imageSize = starts[7] + align(relocBuf.len, SECT);
+		}
 		// the file
 		var out = new Buf(1 << 20);
 		out.zeros(headers);
@@ -225,7 +274,7 @@ class LinkPE {
 			rawPos.push(at);
 			out.zeros(align(sizes[gi], FILE));
 			rawSize.push(align(sizes[gi], FILE));
-			if (g.name == ".idata") out.b.blit(at, idata.b, 0, idata.len) else
+			if (g.name == ".idata") out.b.blit(at, idata.b, 0, idata.len) else if (g.name == ".reloc") out.b.blit(at, relocBuf.b, 0, relocBuf.len) else
 				for (s in g.secs)
 					if (s.kind != Bss && s.kind != Tbss) out.b.blit(at + addr.get(s) - BASE - starts[gi], s.buf.b, 0, s.buf.len);
 		}
@@ -242,7 +291,7 @@ class LinkPE {
 		h.u32(0);
 		h.u32(0);
 		h.u16(240);
-		h.u16(0x0023); // RELOCS_STRIPPED | EXECUTABLE_IMAGE | LARGE_ADDRESS_AWARE
+		h.u16(relocatable ? 0x0022 : 0x0023); // (RELOCS_STRIPPED |) EXECUTABLE_IMAGE | LARGE_ADDRESS_AWARE
 		h.u16(0x20b); // PE32+
 		h.u8(14);
 		h.u8(0);
@@ -267,7 +316,9 @@ class LinkPE {
 		h.u32(headers);
 		h.u32(0); // checksum
 		h.u16(3); // console
-		h.u16(0x8100); // NX_COMPAT | TERMINAL_SERVER_AWARE (no DYNAMIC_BASE: a fixed image)
+		// NX_COMPAT | TERMINAL_SERVER_AWARE (x86-64: no DYNAMIC_BASE, a fixed
+		// image; arm64: DYNAMIC_BASE, with base relocations, below 4 GB)
+		h.u16(relocatable ? 0x8140 : 0x8100);
 		h.u64(0x1000000, 0); // stack reserve
 		h.u64(0x1000, 0);
 		h.u64(0x100000, 0); // heap
@@ -281,6 +332,7 @@ class LinkPE {
 			dirs[12] = [starts[5] + idataLayout.iatStart, idataLayout.iatSize];
 		}
 		if (sizes[2] > 0) dirs[3] = [starts[2], sizes[2]];
+		if (sizes[7] > 0) dirs[5] = [starts[7], sizes[7]];
 		var tlsUsed = globals.get("_tls_used");
 		if (tlsUsed != null) dirs[9] = [symAddr(tlsUsed) - BASE, 40];
 		for (d in dirs) {

@@ -13,6 +13,7 @@ case $target in
 linux-x86_64) triple=x86_64-linux-musl ;;
 linux-arm64) triple=aarch64-linux-musl ;;
 windows-x86_64) triple=x86_64-windows-gnu ;;
+windows-arm64) triple=aarch64-windows-gnu ;;
 *) echo "mkrt: unknown target $target" >&2; exit 1 ;;
 esac
 out=$ROOT/bin/hxmc/rt/$target
@@ -46,7 +47,8 @@ windows-*)
 	$ZIG cc -target $triple -O2 "$out/obj/stub.c" -o "$out/obj/stub.exe" $WINLIBS
 	line=$($ZIG cc -target $triple -O2 -v "$out/obj/stub.c" -o "$out/obj/stub.exe" $WINLIBS 2>&1 | grep 'lld-link' | head -1)
 	inputs=$(echo "$line" | tr ' ' '\n' | grep -E '^/.*\.(obj|lib)$' | grep -v '/stub.obj$' | tr '\n' ' ')
-	undef="-u mainCRTStartup -u _setjmp -u _tls_index -u _tls_used -x main"
+	sj=_setjmp; [ $target = windows-arm64 ] && sj=__mingw_setjmp
+	undef="-u mainCRTStartup -u $sj -u _tls_index -u _tls_used -x main"
 	for f in $libm; do undef="$undef -u $f"; done
 	"${HXMC:-$ROOT/bin/hxmc/hxmc}" --mkrt "$out/rt.o" $objs $inputs $undef
 	ls -l "$out/rt.o"

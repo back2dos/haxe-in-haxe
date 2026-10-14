@@ -36,7 +36,6 @@ class Driver {
 			abi.reloc = Pic;
 			abi.output = SharedLibrary;
 		}
-		if (abi.os == "macos" || abi.os == "windows" && abi.arm) throw "hxmc: target " + abi.name + " is not supported yet";
 		dumpSet = o.dump == null ? null : [for (n in o.dump.split(",")) n => true];
 	}
 

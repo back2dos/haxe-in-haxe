@@ -11,6 +11,10 @@ class CoffReader {
 	var b:Bytes;
 	var base:Int;
 	var arm:Bool;
+	public var isArm(get, never):Bool;
+
+	inline function get_isArm()
+		return arm;
 
 	// COMDAT sections (by section): the name of their COMDAT symbol, the
 	// selection, the associated section for selection 5
@@ -85,7 +89,72 @@ class CoffReader {
 			case 0xb: {kind: RSecRel32, extra: 0};
 			case _: throw "hxmc: COFF relocation type " + t;
 		}
-		throw "hxmc: COFF on arm64 is not supported yet";
+		return switch t {
+			case 0x1: {kind: RAbs32, extra: 0};
+			case 0x2: {kind: RImgRel32, extra: 0};
+			case 0x3: {kind: RA64Call26, extra: 0};
+			case 0x4: {kind: RA64AdrPage21, extra: 0};
+			case 0x6: {kind: RA64AddLo12, extra: 0};
+			case 0x7: {kind: RA64Ldst64Lo12, extra: 0}; // (the size from the instruction)
+			case 0x8: {kind: RSecRel32, extra: 0};
+			case 0x9: {kind: RA64SecRelLo12A, extra: 0};
+			case 0xa: {kind: RA64SecRelHi12, extra: 0};
+			case 0xb: {kind: RA64SecRelLo12L, extra: 0};
+			case 0xe: {kind: RAbs64, extra: 0};
+			case 0xf: {kind: RA64Cond19, extra: 0};
+			case 0x10: {kind: RA64Tst14, extra: 0};
+			case 0x11: {kind: RPc32, extra: -4};
+			case _: throw "hxmc: COFF arm64 relocation type " + t;
+		}
+	}
+
+	static inline function sext(v:Int, bits:Int):Int
+		return (v << (32 - bits)) >> (32 - bits);
+
+	// arm64: the addend a relocated instruction or datum holds (COFF keeps it
+	// in the field), the field cleared; the kind refined by the instruction
+	function armAddend(s:Section, va:Int, kind:RelKind):{kind:RelKind, addend:Int} {
+		var buf = s.buf;
+		var w = buf.get32(va);
+		switch kind {
+			case RAbs32 | RImgRel32 | RSecRel32 | RPc32:
+				buf.set32(va, 0);
+				return {kind: kind, addend: w};
+			case RAbs64:
+				buf.set64(va, 0, 0);
+				return {kind: kind, addend: w};
+			case RA64Call26:
+				buf.set32(va, w & 0xfc000000);
+				return {kind: (w & 0x80000000) != 0 ? RA64Call26 : RA64Jump26, addend: sext(w & 0x3ffffff, 26) << 2};
+			case RA64Cond19:
+				buf.set32(va, w & ~(0x7ffff << 5));
+				return {kind: kind, addend: sext((w >> 5) & 0x7ffff, 19) << 2};
+			case RA64Tst14:
+				buf.set32(va, w & ~(0x3fff << 5));
+				return {kind: kind, addend: sext((w >> 5) & 0x3fff, 14) << 2};
+			case RA64AdrPage21:
+				buf.set32(va, w & ~((3 << 29) | (0x7ffff << 5)));
+				return {kind: kind, addend: sext(((w >> 29) & 3) | (((w >> 5) & 0x7ffff) << 2), 21)};
+			case RA64AddLo12 | RA64SecRelLo12A:
+				buf.set32(va, w & ~(0xfff << 10));
+				return {kind: kind, addend: (w >> 10) & 0xfff};
+			case RA64SecRelHi12:
+				buf.set32(va, w & ~(0xfff << 10));
+				return {kind: kind, addend: ((w >> 10) & 0xfff) << 12};
+			case RA64Ldst64Lo12 | RA64SecRelLo12L:
+				buf.set32(va, w & ~(0xfff << 10));
+				var sc = A64Reloc.ldstScale(w);
+				var k = kind == RA64SecRelLo12L ? kind : switch sc {
+					case 0: RA64Ldst8Lo12;
+					case 1: RA64Ldst16Lo12;
+					case 2: RA64Ldst32Lo12;
+					case 3: RA64Ldst64Lo12;
+					case _: RA64Ldst128Lo12;
+				};
+				return {kind: k, addend: ((w >> 10) & 0xfff) << sc};
+			case _:
+				throw "hxmc: COFF arm64 relocation " + kind;
+		}
 	}
 
 	function run():Obj {
@@ -233,6 +302,11 @@ class CoffReader {
 				var t = u16(at + 8);
 				var rk = relocKind(t);
 				if (sym == null) throw "hxmc: COFF relocation against a dropped symbol in " + s.name;
+				if (arm) {
+					var x = armAddend(s, va, rk.kind);
+					s.relocs.push(new Reloc(va, x.kind, sym, x.addend));
+					continue;
+				}
 				var field = rk.kind == RAbs64 ? s.buf.get32(va) : s.buf.get32(va);
 				if (rk.kind == RAbs64) s.buf.set64(va, 0, 0) else s.buf.set32(va, 0);
 				s.relocs.push(new Reloc(va, rk.kind, sym, field + rk.extra));

@@ -40,8 +40,9 @@ enum abstract AOp(Int) to Int from Int {
 	var BCOND; // cond -> target
 	var CBZ; // s1 == 0 -> target (flag: cbnz); size
 	var JTABLE; // s1: index (in range), table
-	var TLSLOAD; // d <- thread-local sym
-	var TLSSTORE; // thread-local sym <- s1
+	var TLSLOAD; // d <- thread-local sym (s2 >= 0: at its offset from the TLS base s2)
+	var TLSSTORE; // thread-local sym <- s1 (s2: as TLSLOAD)
+	var TEBLOAD; // d <- [x18 + imm] (Windows: the thread environment block)
 	var BRK;
 }
 
@@ -71,6 +72,10 @@ class Isel implements hxmc.Target.Selector {
 	var folded:Array<Bool>;
 
 	var abi:Abi;
+	// the base register of thread-local variables when they are reached from
+	// one (Windows: the module's TLS block; Apple: the image's TLV template),
+	// computed once per function
+	var tlsBase = -1;
 
 	public function new(abi:Abi) {
 		this.abi = abi;
@@ -92,8 +97,9 @@ class Isel implements hxmc.Target.Selector {
 			case MOV | NEG | MVN | SXTW | FOP1 | SCVTF | FCVTZS | FMOVTOG | FMOVFROMG | SHIFTI | ALUI:
 				defs.push(i.d);
 				u(i.s1);
-			case MOVI | MOVF | CSET | TLSLOAD:
+			case MOVI | MOVF | CSET | TLSLOAD | TEBLOAD:
 				defs.push(i.d);
+				u(i.s2);
 			case LEA | LOAD:
 				defs.push(i.d);
 				mem();
@@ -114,6 +120,7 @@ class Isel implements hxmc.Target.Selector {
 				u(i.s2);
 			case CMPI | CBZ | JTABLE | TLSSTORE:
 				u(i.s1);
+				u(i.s2);
 			case CALL:
 				if (i.s1 >= 0) uses.push(i.s1);
 				for (x in i.uses)
@@ -263,12 +270,45 @@ class Isel implements hxmc.Target.Selector {
 			lb[b.id] = l;
 			f.blocks.push(l);
 		}
+		tlsBase = -1;
+		var usesTls = false;
+		if (abi.tls != LocalExec)
+			for (b in mf.blocks)
+				for (i in b.ins)
+					if (i.op == TlsLoad || i.op == TlsStore) usesTls = true;
+		if (usesTls && abi.tls == WinTlsIndex) {
+			// ThreadLocalStoragePointer[_tls_index] (x18 + 0x58 is the pointer array)
+			cur = lb[layout[0].id];
+			var idx = f.newReg(false), arr = f.newReg(false);
+			tlsBase = f.newReg(false);
+			var x = emit(LOAD);
+			x.d = idx;
+			x.sym = "_tls_index";
+			x.size = 4;
+			var g = emit(TEBLOAD);
+			g.d = arr;
+			g.imm = 0x58;
+			var l = emit(LOAD);
+			l.d = tlsBase;
+			l.base = arr;
+			l.index = idx;
+			l.scale = 8;
+			l.size = 8;
+			flush();
+		}
 		for (bi in 0...layout.length) {
 			var b = layout[bi];
 			cur = lb[b.id];
 			var next = bi + 1 < layout.length ? layout[bi + 1] : null;
-			for (i in b.ins)
+			var pendingBase = bi == 0 && usesTls && abi.tls == MachoTlv;
+			for (i in b.ins) {
+				if (pendingBase && i.op != Param) {
+					pendingBase = false;
+					macTlsBase();
+				}
 				ins(i, b, next);
+			}
+			if (pendingBase) macTlsBase();
 			flush();
 		}
 		for (l in f.blocks) {
@@ -284,6 +324,18 @@ class Isel implements hxmc.Target.Selector {
 			for (s in l.succs)
 				s.preds.push(l);
 		return f;
+	}
+
+	// Apple: the address of the image's thread-local template for this
+	// thread (hxmc_tls_base in the runtime, through a TLV descriptor), once
+	// the parameters are out of their registers
+	function macTlsBase() {
+		f.hasCalls = true;
+		tlsBase = f.newReg(false);
+		var x = emit(CALL);
+		x.sym = "hxmc_tls_base";
+		x.uses = [];
+		mov(tlsBase, 0, 8);
 	}
 
 	function materialize(i:MIns, r:Int) {
@@ -510,16 +562,19 @@ class Isel implements hxmc.Target.Selector {
 				var x = emit(MOVF);
 				x.d = reg(i.id);
 				x.f = i.f;
-			case TlsLoad | TlsStore if (abi.tls != LocalExec):
+			case TlsLoad | TlsStore if (abi.tls != LocalExec && tlsBase < 0):
 				throw new hxmc.MirBuild.Unsupported("thread-local variables: TLS model " + abi.tls);
 			case TlsLoad:
 				var x = emit(TLSLOAD);
 				x.d = reg(i.id);
 				x.sym = i.sym;
+				x.s2 = tlsBase;
 			case TlsStore:
+				var v = use(i.a);
 				var x = emit(TLSSTORE);
-				x.s1 = use(i.a);
+				x.s1 = v;
 				x.sym = i.sym;
+				x.s2 = tlsBase;
 			case Copy:
 				mov(reg(i.id), use(i.a));
 			case Add | Sub | And | Or | Xor:

@@ -40,6 +40,14 @@ enum abstract RelKind(Int) to Int {
 	var RA64MovwG0Nc; // movz/movk: bits 0-15 of S + A
 	var RA64MovwG1Nc; // bits 16-31
 	var RA64Prel32;
+	var RA64Cond19; // b.cond, cbz, cbnz: (S + A - P) >> 2 in bits 5-23
+	var RA64Tst14; // tbz, tbnz: (S + A - P) >> 2 in bits 5-18
+	// arm64 thread-local variables at an offset from a base register (Windows:
+	// the module's TLS block; Apple: the image's TLV template): the offset of
+	// S + A in the TLS area, in pieces
+	var RA64SecRelHi12; // add xd, xn, #off >> 12, lsl 12
+	var RA64SecRelLo12A; // add xd, xn, #off & 0xfff
+	var RA64SecRelLo12L; // ldr/str [xn, #off & 0xfff] (scaled by the access size)
 	// COFF
 	var RSecRel32; // the offset of S + A in its output section (TLS variables in .tls)
 	var RImgRel32; // S + A - the image base (an RVA)

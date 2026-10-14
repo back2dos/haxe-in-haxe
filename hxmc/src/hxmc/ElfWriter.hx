@@ -38,6 +38,14 @@ class ElfWriter {
 			case RA64TlsLeLo12Nc: 551;
 			case RA64MovwG0Nc: 264;
 			case RA64MovwG1Nc: 266;
+			case RA64Cond19: 280;
+			case RA64Tst14: 279;
+			case RA64SecRelHi12: 0x1001; // (hxmc's containers only)
+			case RA64SecRelLo12A: 0x1002;
+			case RA64SecRelLo12L: 0x1003;
+			case RSecRel32: 0x1004;
+			case RImgRel32: 0x1005;
+			case RAbs32S: 0x1006;
 			case _: throw "hxmc: relocation " + k + " on aarch64";
 		}
 	}
