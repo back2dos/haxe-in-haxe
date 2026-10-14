@@ -66,6 +66,32 @@ def normalize(b, root):
     return bytes(out)
 
 
+def strings(b):
+    """the strings of an archive member's string pool"""
+    i = 4
+    while i < len(b):
+        kind = b[i:i + 3]
+        (n,) = struct.unpack_from("<i", b, i + 3)
+        data = b[i + 7:i + 7 + n]
+        i += 7 + n
+        if kind == b"STR":
+            cnt, j = uleb(data, 0)
+            out = []
+            for _ in range(cnt):
+                l, j = uleb(data, j)
+                out.append(data[j:j + l])
+                j += l
+            return out
+    return []
+
+
+def explain(a, b):
+    """the first strings that differ between two normalized members"""
+    sa, sb = strings(a), strings(b)
+    d = [(x, y) for x, y in zip(sa, sb) if x != y][:3]
+    return f"{len(sa)}/{len(sb)} strings" + "".join(f"\n    {x!r} / {y!r}" for x, y in d)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("a")
@@ -80,6 +106,8 @@ def main():
     print(f"{len(na)} modules, {'names equal' if na == nb else 'NAMES DIFFER'}, {len(diff)} differ" + (" (roots normalized)" if ra else ""))
     for n in diff[:10]:
         print("  differs: " + n)
+    if diff:
+        print("  first: " + explain(normalize(a.read(diff[0]), ra), normalize(b.read(diff[0]), rb)))
     for n in sorted(set(na) ^ set(nb))[:10]:
         print("  only in " + ("a" if n in na else "b") + ": " + n)
     sys.exit(0 if na == nb and not diff else 1)

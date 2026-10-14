@@ -149,7 +149,7 @@ jobs:
       - name: Windows arm64 diagnostics
         run: |
           set -ex
-          for v in default fixed nopdata bssdata fixed,nopdata,bssdata; do
+          for v in default lowbase fixed nopdata bssdata lowbase,fixed,nopdata,bssdata; do
             mkdir -p dist/windows-arm64/diag/$v
             HXMC_PE_DIAG=$v bin/hxmc/hxmc dist/windows-arm64/diag/$v/m.exe --hxb-lib bin/hxmc-t/Hello/prog.hxb.zip -main Hello --custom-target hxc -D disable-parallelism -D hxmc.target=windows-arm64
             rm -rf dist/windows-arm64/diag/$v/m.exe.hxmc

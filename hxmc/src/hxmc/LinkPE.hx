@@ -10,7 +10,12 @@ import hxmc.Obj;
 // the TLS directory of the C runtime (_tls_used) and the exception
 // directory (.pdata).
 class LinkPE {
-	static inline var BASE = 0x400000;
+	// the image base: x86-64 a fixed 0x400000 (addresses are kept absolute);
+	// arm64 0x140000000, relocatable (addresses are kept as RVAs, BASE 0, and
+	// the base is added where a 64-bit absolute address is written)
+	var BASE = 0x400000;
+	var imgLo = 0;
+	var imgHi = 0;
 	static inline var SECT = 0x1000;
 	static inline var FILE = 0x200;
 
@@ -24,6 +29,11 @@ class LinkPE {
 	public function new(objs:Array<Obj>, arm:Bool) {
 		this.objs = objs;
 		this.arm = arm;
+		if (arm && !diag("lowbase")) {
+			BASE = 0;
+			imgLo = 0x40000000;
+			imgHi = 1;
+		}
 	}
 
 	function readImports() {
@@ -225,7 +235,7 @@ class LinkPE {
 		function isAbs(sym:Symbol):Bool {
 			var t = target(sym);
 			// (linker-defined: addresses, but for the zero of an undefined weak symbol)
-			return t != null ? t.abs : symAddr(sym) == 0;
+			return t != null ? t.abs : sym.name != "__ImageBase" && symAddr(sym) == 0;
 		}
 		// the thunks: jmp [rip + IAT slot] (arm64: adrp, ldr, br)
 		for (k => off in thunkOf) {
@@ -251,11 +261,16 @@ class LinkPE {
 					switch r.kind {
 						case RAbs64:
 							var v = S + A;
-							s.buf.set64(r.offset, v, v < 0 ? -1 : 0);
-							if (relocatable && !isAbs(r.sym)) baseRelocs.push({rva: P - BASE, type: 10});
+							if (isAbs(r.sym)) s.buf.set64(r.offset, v, v < 0 ? -1 : 0) else {
+								s.buf.set64(r.offset, v + imgLo, imgHi);
+								if (relocatable) baseRelocs.push({rva: P - BASE, type: 10});
+							}
 						case RAbs32 | RAbs32S:
 							s.buf.set32(r.offset, S + A);
-							if (relocatable && !isAbs(r.sym)) baseRelocs.push({rva: P - BASE, type: 3});
+							if (!isAbs(r.sym)) {
+								if (imgHi != 0) throw "hxmc: link: a 32-bit absolute address of " + r.sym.name + " (an image above 4 GB)";
+								if (relocatable) baseRelocs.push({rva: P - BASE, type: 3});
+							}
 						case RPc32 | RCall32:
 							s.buf.set32(r.offset, S + A - P);
 						case RImgRel32:
@@ -338,7 +353,7 @@ class LinkPE {
 		if (e == null) throw "hxmc: link: no entry point " + entry;
 		h.u32(symAddr(e) - BASE);
 		h.u32(starts[0]); // BaseOfCode
-		h.u64(BASE, 0); // ImageBase
+		h.u64(BASE + imgLo, imgHi); // ImageBase
 		h.u32(SECT);
 		h.u32(FILE);
 		h.u16(6);
@@ -353,8 +368,8 @@ class LinkPE {
 		h.u32(0); // checksum
 		h.u16(3); // console
 		// NX_COMPAT | TERMINAL_SERVER_AWARE (x86-64: no DYNAMIC_BASE, a fixed
-		// image; arm64: DYNAMIC_BASE, with base relocations, below 4 GB)
-		h.u16(relocatable ? 0x8140 : 0x8100);
+		// image; arm64: DYNAMIC_BASE, with base relocations)
+		h.u16(relocatable ? (imgHi != 0 ? 0x8160 : 0x8140) : 0x8100); // (| HIGH_ENTROPY_VA above 4 GB)
 		h.u64(0x1000000, 0); // stack reserve
 		h.u64(0x1000, 0);
 		h.u64(0x100000, 0); // heap

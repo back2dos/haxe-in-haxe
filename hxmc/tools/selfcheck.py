@@ -59,6 +59,8 @@ def main():
         line += " (byte-identical)" if same_root and ok else " (roots normalized)" if not same_root else ""
         for n in diff[:10]:
             line += "\n  differs: " + n
+        if diff:
+            line += "\n  first: " + hxbcmp.explain(hxbcmp.normalize(za.read(diff[0]), ra), hxbcmp.normalize(zb.read(diff[0]), rb))
     print(line)
     if a.summary:
         with open(a.summary, "a") as f:
