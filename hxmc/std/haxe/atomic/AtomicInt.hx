@@ -1,17 +1,54 @@
-// hxmc: haxe/std/hl/_std/haxe/atomic/AtomicInt.hx over an atomic cell of
-// rt_thread.c (hxmc.NativeAtomic), with the docs of
-// haxe/std/haxe/atomic/AtomicInt.hx
+// hxmc: haxe/std/hl/_std/haxe/atomic/AtomicInt.hx over a cell (a T_NATIVE
+// K_RAW object, the low 4 bytes of slot 0) and the Atomic intrinsics
+// (sequentially consistent), with the docs of haxe/std/haxe/atomic/AtomicInt.hx
 
 package haxe.atomic;
 
-import hxmc.NativeAtomic;
+import hxmc.unsafe.Atomic;
+import hxmc.unsafe.Mem;
 
 /**
 	Atomic integer.
 **/
 abstract AtomicInt(Dynamic) {
+	static function cell(v:Int):Dynamic {
+		var a = Mem.allocRaw(1, 16, 2); // T_NATIVE, K_RAW
+		Mem.setI32(Mem.addr(a), 0, v);
+		return a;
+	}
+
+	// (the cell's address is taken in functions that never reach a GC point:
+	// inlined into the program, it could be taken before an allocation that
+	// moves the cell)
+	@:hxmc.noGc static function add32(a:Dynamic, v:Int):Int
+		return Atomic.add32(Mem.addr(a), v);
+
+	@:hxmc.noGc static function cas32(a:Dynamic, e:Int, r:Int):Int
+		return Atomic.cas32(Mem.addr(a), e, r);
+
+	@:hxmc.noGc static function exchange32(a:Dynamic, v:Int):Int
+		return Atomic.exchange32(Mem.addr(a), v);
+
+	@:hxmc.noGc static function load32(a:Dynamic):Int
+		return Atomic.load32(Mem.addr(a));
+
+	@:hxmc.noGc static function store32(a:Dynamic, v:Int)
+		Atomic.store32(Mem.addr(a), v);
+
+	// a compare-exchange loop (op 0 and, 1 or, 2 xor): the previous value
+	@:hxmc.noGc static function bitwise(a:Dynamic, v:Int, op:Int):Int {
+		var p = Mem.addr(a);
+		var o = Atomic.load32(p);
+		while (true) {
+			var n = op == 0 ? o & v : op == 1 ? o | v : o ^ v;
+			var seen = Atomic.cas32(p, o, n);
+			if (seen == o) return o;
+			o = seen;
+		}
+	}
+
 	public inline function new(value:Int):Void {
-		this = NativeAtomic.intNew(value);
+		this = cell(value);
 	}
 
 	/**
@@ -19,7 +56,7 @@ abstract AtomicInt(Dynamic) {
 		Returns the original value of `a`.
 	**/
 	public inline function add(b:Int):Int {
-		return NativeAtomic.intAdd(this, b);
+		return add32(this, b);
 	}
 
 	/**
@@ -27,7 +64,7 @@ abstract AtomicInt(Dynamic) {
 		Returns the original value of `a`.
 	**/
 	public inline function sub(b:Int):Int {
-		return NativeAtomic.intSub(this, b);
+		return add32(this, -b);
 	}
 
 	/**
@@ -35,7 +72,7 @@ abstract AtomicInt(Dynamic) {
 		Returns the original value of `a`.
 	**/
 	public inline function and(b:Int):Int {
-		return NativeAtomic.intAnd(this, b);
+		return bitwise(this, b, 0);
 	}
 
 	/**
@@ -43,7 +80,7 @@ abstract AtomicInt(Dynamic) {
 		Returns the original value of `a`.
 	**/
 	public inline function or(b:Int):Int {
-		return NativeAtomic.intOr(this, b);
+		return bitwise(this, b, 1);
 	}
 
 	/**
@@ -51,7 +88,7 @@ abstract AtomicInt(Dynamic) {
 		Returns the original value of `a`.
 	**/
 	public inline function xor(b:Int):Int {
-		return NativeAtomic.intXor(this, b);
+		return bitwise(this, b, 2);
 	}
 
 	/**
@@ -59,7 +96,7 @@ abstract AtomicInt(Dynamic) {
 		Returns the original value of `a`.
 	**/
 	public inline function compareExchange(expected:Int, replacement:Int):Int {
-		return NativeAtomic.intCompareExchange(this, expected, replacement);
+		return cas32(this, expected, replacement);
 	}
 
 	/**
@@ -67,14 +104,14 @@ abstract AtomicInt(Dynamic) {
 		Returns the original value of `a`.
 	**/
 	public inline function exchange(value:Int):Int {
-		return NativeAtomic.intExchange(this, value);
+		return exchange32(this, value);
 	}
 
 	/**
 		Atomically fetches the value of `a`.
 	**/
 	public inline function load():Int {
-		return NativeAtomic.intLoad(this);
+		return load32(this);
 	}
 
 	/**
@@ -82,6 +119,7 @@ abstract AtomicInt(Dynamic) {
 		Returns the value that has been stored.
 	**/
 	public inline function store(value:Int):Int {
-		return NativeAtomic.intStore(this, value);
+		store32(this, value);
+		return value;
 	}
 }

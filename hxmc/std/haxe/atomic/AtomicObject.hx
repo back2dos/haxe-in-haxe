@@ -1,17 +1,55 @@
-// hxmc: haxe/std/hl/_std/haxe/atomic/AtomicObject.hx over an atomic cell of
-// rt_thread.c (hxmc.NativeAtomic), with the docs of
+// hxmc: haxe/std/hl/_std/haxe/atomic/AtomicObject.hx over a cell (a one-slot
+// K_PARR object the collector scans) and the Atomic intrinsics (sequentially
+// consistent; a reference stored into an old cell is remembered afterwards
+// when it is young: rt_barrier_range of the slot), with the docs of
 // haxe/std/haxe/atomic/AtomicObject.hx
 
 package haxe.atomic;
 
-import hxmc.NativeAtomic;
+import hxmc.rt.C.Leaf;
+import hxmc.unsafe.Atomic;
+import hxmc.unsafe.Mem;
+import hxmc.unsafe.Ptr;
 
 /**
 	Atomic object. Use with care, this does not magically make it thread-safe to mutate objects.
 **/
 abstract AtomicObject<T:{}>(Dynamic) {
+	static function cell(v:Dynamic):Dynamic {
+		var a = Mem.alloc(1, 6, 1); // T_ADATA_P, K_PARR
+		Mem.setRef(Mem.addr(a), 0, v); // (a is young)
+		return a;
+	}
+
+	// (the cell's address is taken in functions that never reach a GC point:
+	// inlined into the program, it could be taken before an allocation that
+	// moves the cell)
+	@:hxmc.noGc static function get(a:Dynamic):Dynamic
+		return Mem.obj(Ptr.ofI64(Atomic.load64(Mem.addr(a))));
+
+	@:hxmc.noGc static function put(a:Dynamic, v:Dynamic) {
+		var p = Mem.addr(a);
+		Atomic.store64(p, Mem.addr(v).toI64());
+		Leaf.rt_barrier_range(a, p, 1);
+	}
+
+	@:hxmc.noGc static function swap(a:Dynamic, v:Dynamic):Dynamic {
+		var p = Mem.addr(a);
+		var o = Atomic.exchange64(p, Mem.addr(v).toI64());
+		Leaf.rt_barrier_range(a, p, 1);
+		return Mem.obj(Ptr.ofI64(o));
+	}
+
+	@:hxmc.noGc static function cas(a:Dynamic, e:Dynamic, r:Dynamic):Dynamic {
+		var p = Mem.addr(a);
+		var ei = Mem.addr(e).toI64();
+		var o = Atomic.cas64(p, ei, Mem.addr(r).toI64());
+		if (Ptr.ofI64(o) == Ptr.ofI64(ei)) Leaf.rt_barrier_range(a, p, 1);
+		return Mem.obj(Ptr.ofI64(o));
+	}
+
 	public inline function new(value:T):Void {
-		this = NativeAtomic.objNew(value);
+		this = cell(value);
 	}
 
 	/**
@@ -22,7 +60,7 @@ abstract AtomicObject<T:{}>(Dynamic) {
 		While this is expected for most objects, this might give unexpected behaviour for strings.
 	**/
 	public inline function compareExchange(expected:T, replacement:T):T {
-		return NativeAtomic.objCompareExchange(this, expected, replacement);
+		return cas(this, expected, replacement);
 	}
 
 	/**
@@ -30,14 +68,14 @@ abstract AtomicObject<T:{}>(Dynamic) {
 		Returns the original value of `a`.
 	**/
 	public inline function exchange(value:T):T {
-		return NativeAtomic.objExchange(this, value);
+		return swap(this, value);
 	}
 
 	/**
 		Atomically fetches the value of `a`.
 	**/
 	public inline function load():T {
-		return NativeAtomic.objLoad(this);
+		return get(this);
 	}
 
 	/**
@@ -45,6 +83,7 @@ abstract AtomicObject<T:{}>(Dynamic) {
 		Returns the value that has been stored.
 	**/
 	public inline function store(value:T):T {
-		return NativeAtomic.objStore(this, value);
+		put(this, value);
+		return value;
 	}
 }
