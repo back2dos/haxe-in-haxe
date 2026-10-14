@@ -80,9 +80,11 @@ Kept open on purpose (where):
   (`Executable`/`SharedLibrary`), `-D hxmc.pic`, `-D hxmc.shared`; the code
   generators already address code and data pc-relatively (`lea rip+x`,
   `adrp/add`) and program-wide numbers are absolute symbols, not
-  addresses, so only the linker depends on the model (it refuses PIC
-  output explicitly until it writes GOT/PLT, dynamic relocations and
-  `DT_NEEDED`/`LC_LOAD_DYLIB`).
+  addresses, so only the linker depends on the model. The Mach-O and
+  arm64 PE executables are already position-independent (rebases or base
+  relocations of absolute pointers, imports through slots); the ELF linker
+  refuses PIC output explicitly until it writes GOT/PLT, dynamic
+  relocations and `DT_NEEDED`, and no linker writes shared libraries yet.
 - TLS model: `Abi.tls` (`LocalExec`, `WinTlsIndex`, `MachoTlv` implemented;
   `InitialExec`, `Desc` (TLSDESC) not yet); instruction selection fails
   explicitly on a model it does not implement.
