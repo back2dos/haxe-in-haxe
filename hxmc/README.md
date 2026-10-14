@@ -18,6 +18,8 @@ compiles natively for the six desktop targets: x86-64 and arm64 Linux
 written directly) and x86-64 and arm64 macOS (Mach-O against libSystem,
 ad-hoc signed); the port built by hxmc compiles itself to byte-identical
 HXB (see "Targets" for how each is checked), and hxmc builds itself.
+WebAssembly (`wasm32-wasi`) is a seventh target, with its whole runtime in
+Haxe; the port compiles itself there too (see "WebAssembly").
 Run time is near clang -O2 on hxc's C, executables are about 10% larger
 than clang -O2's dynamic ones (static, runtime included). Deeper
 incremental rebuilds, the haxelib, APE builds and C interop are deferred
@@ -177,7 +179,8 @@ small internal API (`std/hxmc/unsafe`, not a user API):
   `PosixNet`/`WinNet`) by `Mem.os()`, `hxmc.Native` (reflection) calls
   `hxmc.rt.Dyn`, `hxmc.NativeZip` is the implementation, haxe.atomic's
   cells are written over `Atomic`. `hxmc.NativeGc`, `NativeSsl`,
-  `NativeThread` and `NativeUv` remain externs of C functions.
+  `NativeThread` and `NativeUv` remain externs of C functions (bound to
+  Haxe implementations on WebAssembly, see "WebAssembly").
 
 The modules with bound natives load with every program through
 `std/Std.hx` (`import hxmc.rt.Runtime`; those classes are `@:keep`). A
@@ -190,7 +193,7 @@ context shares the program's class paths.
 
 | Haxe (`std/hxmc/rt`) | from | what stays in C, and why |
 | --- | --- | --- |
-| `Str.hx`: strings, UTF-8, comparison, hashing, concatenation, Int formatting, String/StringBuf/Std natives | `rt_str.c` | `hx_format_float` (in `rt_dyn.c`): shortest round-trip doubles through printf/strtod (a Haxe Ryu could replace it) |
+| `Str.hx`: strings, UTF-8, comparison, hashing, concatenation, Int formatting, String/StringBuf/Std natives | `rt_str.c` | `hx_format_float` (in `rt_dyn.c`): shortest round-trip doubles through printf/strtod (WebAssembly's `wasm/FloatText.hx` writes and reads the same text in Haxe; the native targets keep the C library's) |
 | `Dyn.hx`, `Types.hx`: structural and Dynamic access, inline-cache lookups, Dynamic operators, type tests, Std.string, reflection (`hxmc.Native`) | `rt_dyn.c` | the field-name table (interning under a lock, names outside the heap) and the per-thread inline-cache entries (until threads move) |
 | `Arr.hx`, `Bytes.hx`, `Date.hx`, `hxmc/NativeZip.hx`: Array, haxe.io.Bytes, Date and Math.random natives, inflate and CRC-32 | `rt_std.c` | nothing |
 | `PosixSys.hx`, `PosixNet.hx`: Sys, FileSystem, File, Process, sockets and host resolution over POSIX | `rt_sys.c`, `rt_net.c` | nothing (blocking waits go through the scheduler's `rt_wait_fd`/`rt_blocking_enter`) |
@@ -341,6 +344,7 @@ involved when a program is built.
 | windows-arm64 | PE32+ at 0x140000000, base relocations | as x86-64, arm64 COFF | x18+0x58, [_tls_index] | CI (windows-11-arm) |
 | macos-x86_64 | Mach-O, PIE (LinkMachO) | Mach-O objects merged (MkRt.macho), libSystem bound | TLV template | CI (macos-15-intel) |
 | macos-arm64 | Mach-O, PIE, 16K pages, ad-hoc signed | as x86-64, arm64 | TLV template | CI (macos-15) |
+| wasm32-wasi | WebAssembly module, WASI preview 1 (LinkWasm) | none: the runtime is Haxe | globals (one thread) | corpus under node 22 and wasmtime here and on CI |
 
 - Windows: imports are written from the import libraries' members (DLL and
   name, `.hxmc.imports`), code imports through thunks; the C library's
@@ -364,6 +368,112 @@ involved when a program is built.
   arm64 requires. Apple arm64 packs stack arguments by size (Isel). The
   runtime object is not garbage-collected by section (Mach-O objects have
   one `__text`; the whole runtime is linked).
+
+### WebAssembly
+
+`-D hxmc.target=wasm32-wasi` writes one WebAssembly module (32-bit memory,
+WASI preview 1 imports, exception handling), built from Haxe alone: no C
+compiler, no C runtime, no object reader or third-party linker. The program
+must be typed for the target too (the HXB written with the same define:
+`std/hxmc/rt/Runtime.hx` types the WebAssembly runtime only then, so native
+programs' HXB is unchanged). Run it with
+`wasmtime run -W exceptions=y --dir . m.wasm` or
+`node --experimental-wasm-exnref --no-turbo-fast-api-calls tools/wasi.mjs m.wasm`
+(node 22: exnref is behind a flag, and its WASI `fd_write` as a fast API
+call can start a V8 collection that crashes with a large module memory).
+
+- Code (`src/hxmc/wasm/WasmGen.hx`): from Mir after Opt and inlining, in
+  place of instruction selection and register allocation. Control flow is
+  structured over the dominator tree as in Ramsey's "Beyond Relooper"
+  (merge nodes get a `block`, loop headers a `loop`, every branch a `br` to
+  an enclosing label); SSA values become locals, colored in dominator order
+  (not in functions with try blocks), and a value used once in its own block
+  is folded onto the value stack (pure values always, loads when nothing is
+  written in between); phi copies are parallel copies through the value
+  stack on each edge. Pointers stay i64 in Mir and are wrapped to i32 at
+  each memory access. Frame slots (`Mem.stack`, spills of references) live
+  in a stack in linear memory (1 MB, `HXMC_WASM_STACK_KB`). `try` uses
+  exception handling: setjmp returns 0, the try body (the dominator subtree
+  of its first block) is wrapped in `try_table (catch_all)`, whose pad
+  checks that the runtime's current handler is this one and otherwise
+  rethrows; `rt_throw` throws the one tag.
+- Relocations: function and type indices, globals and data addresses are
+  written as padded LEBs (`Obj` kinds RWasmFunc, RWasmType, RWasmGlobal,
+  RWasmAddr, RWasmAddr32) and re-encoded minimally at link time.
+- Link (`src/hxmc/wasm/LinkWasm.hx`): what `_start` reaches, data from
+  4 KB, then the runtime's cells and the frame stack, then `__heap_base`;
+  a table of the functions whose address is taken (index 0 is null); each
+  thread-local variable a global; memcpy/memmove/memset as `memory.copy`/
+  `memory.fill`, the f64 rounding functions, fmin/fmax/copysign, memory.size
+  and memory.grow written by the linker. `-debug` or `HXMC_SYMBOLS=1` adds
+  a name section (stack traces in wasmtime). No object cache: modules are
+  linked from the objects of the run.
+- Runtime (`std/hxmc/rt/wasm`, classes marked `@:hxmc.wasm`, bound only
+  for this target; the rest of the runtime in Haxe is shared): `Heap`
+  (regions over `memory.grow`, malloc/free/realloc with power-of-two size
+  classes), `Gc` (rt.c's collector single-threaded: the same object layout,
+  write barrier, remembered set, nursery growth and copying old space,
+  shadow-stack roots; `@:hxmc.collects` marks its entry points so that
+  callers keep no frame slot in a register across them; `RT_STATS`,
+  `RT_MINOR_KB`, `RT_OLD_MB` as natively, and `RT_VERIFY=1` checks the old
+  space around each collection and that the barrier missed no young
+  reference), `Boxes` (boxes, array growth and stores), `Names` (field
+  names and the inline-cache miss of rt_dyn.c), `FloatText` (strtod and
+  `hx_format_float` on big integers: the same text as the C library's
+  printf/strtod; 900k random doubles, short decimals and scaled values
+  compared with the native output, identical), `LibM` (musl's sin, cos,
+  tan, asin, acos, atan, atan2, exp, log, pow, fmod; its MIT notice in the
+  file), `Libc` (rand, gmtime/localtime, mktime, clock_gettime), `Wasi`
+  and `hxmc.rt.WasiSys` (NativeSys over WASI: arguments, environment, files
+  and directories through the preopened directories, clocks),
+  `Threads` (one thread), `NoSslUv` and `hxmc.rt.WasiNet` (failing stubs).
+- Not available (each fails with an exception, or a socket error): threads
+  (`Thread.create` throws; mutexes, locks and semaphores work for the one
+  thread, waits nothing can end throw), sockets and host resolution (WASI
+  preview 1 has none), processes (`Sys.command`, `sys.io.Process`), sys.ssl
+  and eval.luv. Local time is UTC (no time zone database), finalisers are
+  registered but never run, `Gc.objsize` throws. The corpus
+  excludes ThreadNatives and NetNatives on this target (`run.py`).
+  wasmtime refuses symbolic links to absolute paths inside a preopened
+  directory (node follows them).
+- The port builds as a module (`-D hxmc.target=wasm32-wasi` on its HXB as
+  well; 17100 functions, 19.4 MB, 4.2 MB gzipped, built in 11 s) and
+  compiles its own source to the reference's HXB, byte-identical, under
+  node and wasmtime (also with 256 and 16 KB nurseries under node; CI runs
+  it through `selfcheck.py --runner`). It takes 15.3-16.3 s under either
+  engine against 8.4 s for the native x86-64 port. The site/ playground's
+  Emscripten build of hxc's C (wasm64, clang -O2) took 9.0 s under node 24
+  for the same workload (site/bench/results.json, 2026-10-09; native hxc
+  with clang 5.2 s then) with a ~2 MB gzipped module: hxmc's module is
+  about twice as large and 1.7-1.9x slower against native, as for the
+  benchmarks below.
+
+Benchmarks (`hxmc/bench/measure.py -n 3 --target wasm32-wasi --runner
+node|wasmtime`, best of 3, the same VM and session as the x86-64 column;
+node 22.22 with the flags above, wasmtime 38.0.1; run times include each
+engine's compilation of the module):
+
+| case | x64 run | node run | wasmtime run | x64 size | wasm size | wasm build |
+| --- | --- | --- | --- | --- | --- | --- |
+| alloc | 1.42 | 1.71 | 1.71 | 97 | 85 | 0.14 |
+| bcrypt | 2.88 | 3.16 | 3.94 | 340 | 325 | 0.15 |
+| binarytrees | 0.70 | 1.08 | 1.01 | 96 | 80 | 0.14 |
+| json | 0.43 | 0.71 | 0.66 | 170 | 163 | 0.17 |
+| mandelbrot | 0.56 | 0.79 | 0.96 | 101 | 86 | 0.16 |
+| mandelbrot_anon | 0.95 | 2.03 | 1.54 | 113 | 90 | 0.13 |
+| nbody | 0.70 | 1.04 | 0.84 | 101 | 84 | 0.13 |
+| sha256 | 0.16 | 0.30 | 0.30 | 310 | 293 | 0.14 |
+| sha512 | 0.024 | 0.139 | 0.095 | 323 | 303 | 0.18 |
+| formatter_noio | 5.65 | 7.75 | 7.73 | 1364 | 1345 | 0.52 |
+| port (self-compile) | 8.4 | 15.3 | 15.6 | 19603 | 19891 | 10.6 |
+
+Modules are a little smaller than the executables (no C runtime; the
+Haxe runtime is compiled with the program and only what is reached is
+kept); a hello world is about 37 KB. Run time is 1.2-2.1x x86-64's
+(sha512's 0.1 s is mostly the engines' start-up), similar under both
+engines. Builds take about as long as native ones for small programs;
+the port takes 10.6 s against 7.7 s (WasmGen's code generation: 21 s of
+CPU over the 4 jobs, not yet profiled).
 
 ### CI
 

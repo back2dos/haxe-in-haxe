@@ -275,15 +275,33 @@ only). No JIT on iOS.
 
 ### WebAssembly
 
-In progress: a linear-memory target with the shadow-stack collector
-(WebAssembly cannot scan its own stack), a structured code generator from
-hxmc's IR (no register allocation, locals instead) and a module writer far
-simpler than the ELF/PE/Mach-O linkers. Aimed at a module produced from
-Haxe only: the runtime in Haxe including a single-threaded collector, a
-musl-derived libm subset, an allocator over `memory.grow`; exceptions
-through WebAssembly exception handling; WASI or JavaScript imports for the
-system; threads later via SharedArrayBuffer (COOP/COEP). Intrinsics map
-almost one to one (`i64.load`, atomics).
+Done (2026-10-14, README "WebAssembly"): `wasm32-wasi`, a linear-memory
+module written from Mir (Ramsey-style structuring, SSA values as locals,
+exception handling for `try`), linked by hxmc, with the whole runtime in
+Haxe: the collector of rt.c single-threaded, malloc over `memory.grow`,
+field names and inline caches, strtod and float formatting identical to
+the C library's, musl's libm. The corpus passes under node 22 and wasmtime
+(threads and sockets excluded), and the port as a module compiles itself
+to the reference's HXB under both (15-16 s, native 8.4 s). Left:
+
+- Threads: wasm threads (shared memory, atomics, `memory.atomic.wait`)
+  under wasi-threads or a browser's workers; the collector's
+  stop-the-world handshake would come back (rt_thread.c's other half, in
+  Haxe this time). Until then `Thread.create` throws.
+- A browser: JavaScript glue instead of WASI (console, fetch for files, a
+  virtual file system for the playground), then WebGPU and input for
+  graphics (see "Graphics"); exceptions without the exnref flag once
+  browsers and node ship it by default.
+- Sockets and processes need WASI preview 2 (or JavaScript imports).
+- Speed: Mir's pointers are i64 wrapped at every access (an i32 pointer
+  type would save the wraps and shrink code); locals are not coalesced in
+  functions with `try`; no tail calls; the port's module builds in 10.6 s
+  against 7.7 s natively. Run time is 1.2-2.1x native x64's (README
+  "WebAssembly").
+- The playground: the port's module (19.4 MB, 4.2 MB gzipped) could
+  replace the site/ playground's Emscripten build of hxc's C (~2 MB
+  gzipped, 9.0 s self-compile under node 24 against hxmc's 15-16 s) once
+  it is smaller and faster, with the browser glue above.
 
 #### WasmGC: a later, browser-focused second path
 

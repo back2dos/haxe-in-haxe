@@ -21,6 +21,7 @@ import hxmc.rt.wasm.FloatText;
 import hxmc.rt.wasm.Libc;
 import hxmc.rt.wasm.LibM;
 import hxmc.rt.wasm.Threads;
+import hxmc.rt.wasm.NoSslUv;
 #end
 
 class Runtime {}

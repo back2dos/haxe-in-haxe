@@ -5,6 +5,10 @@ with the reference compiler's, written on Linux (hxmc/tools/hxbcmp.py).
 
     python3 hxmc/tools/selfcheck.py --port <exe> --src <src dir> --std <std dir>
         --ref <self-ref.hxb> --ref-root <dir> --root <dir> [--summary <file>]
+        [--runner <command>]
+
+A WebAssembly port runs under --runner (node with hxmc/tools/wasi.mjs, or
+wasmtime with the root reachable and HAXE_STD_PATH and PWD passed).
 
 The source and std are copied to <root>/src and <root>/std and the port runs
 in <root> (HAXE_STD_PATH=std), as the reference did in <ref-root>. With
@@ -13,7 +17,7 @@ own file is an absolute path, so with the same root the archives must be
 byte-identical, and with another one (Windows: D:\\...) identical once each
 root is replaced by the same placeholder.
 """
-import argparse, os, shutil, stat, subprocess, sys, time
+import argparse, os, shlex, shutil, stat, subprocess, sys, time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -29,6 +33,7 @@ def main():
     ap.add_argument("--ref-root", required=True)
     ap.add_argument("--root", required=True)
     ap.add_argument("--summary")
+    ap.add_argument("--runner", default="", help="the command that runs the port (WebAssembly)")
     a = ap.parse_args()
     root = Path(a.root)
     port = Path(a.port).resolve()
@@ -39,9 +44,10 @@ def main():
             shutil.rmtree(root / name)
         shutil.copytree(src, root / name)
     out = root / "self.hxb"
-    env = dict(os.environ, HAXE_STD_PATH="std")
+    # (PWD: a WebAssembly port resolves relative paths against it)
+    env = dict(os.environ, HAXE_STD_PATH="std", PWD=str(root.resolve()))
     t = time.perf_counter()
-    r = subprocess.run([str(port), "-cp", "src", "-main", "haxe.Main", "-D", "disable-parallelism", "--interp", "--no-output", "--hxb", str(out)],
+    r = subprocess.run(shlex.split(a.runner) + [str(port), "-cp", "src", "-main", "haxe.Main", "-D", "disable-parallelism", "--interp", "--no-output", "--hxb", str(out)],
                        cwd=root, env=env, capture_output=True)
     dt = time.perf_counter() - t
     sys.stdout.write(r.stdout.decode(errors="replace"))
@@ -65,7 +71,7 @@ def main():
     print(line)
     if a.summary:
         with open(a.summary, "a") as f:
-            f.write(f"### port self-compile: {'ok' if ok else 'FAILED'}\n\n```\n{line}\n```\n\n")
+            f.write(f"### port self-compile{' (' + a.runner.split()[0] + ')' if a.runner else ''}: {'ok' if ok else 'FAILED'}\n\n```\n{line}\n```\n\n")
     sys.exit(0 if ok else 1)
 
 

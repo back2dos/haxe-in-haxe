@@ -501,11 +501,11 @@ class Gc {
 
 	// ---- hxmc.NativeGc
 
-	@:hxmc.export("hxmc_NativeGc_collect") @:hxmc.collects static function gcCollect(full:Int):Void
-		collect(full != 0, 0);
+	@:hxmc.export("hxmc_NativeGc_collect") @:hxmc.collects static function gcCollect(full:Bool):Void
+		collect(full, 0);
 
 	// (finalisers never run: WebAssembly programs have no resources to free behind values)
-	@:hxmc.export("hxmc_NativeGc_finalise") @:hxmc.noGc static function gcFinalise(fn:Ptr, v:Ptr):Void {}
+	@:hxmc.export("hxmc_NativeGc_finalise") @:hxmc.noGc static function gcFinalise(fn:Dynamic->Void, v:Dynamic):Void {}
 
 	@:hxmc.export("hxmc_NativeGc_runFinalisers") @:hxmc.noGc static function gcRunFinalisers():Void {}
 
@@ -514,10 +514,13 @@ class Gc {
 		return b + minorSize;
 	}
 
-	@:hxmc.export("hxmc_NativeGc_reached") @:hxmc.noGc static function gcReached():Int
-		return 0;
+	@:hxmc.export("hxmc_NativeGc_reached") @:hxmc.noGc static function gcReached():Bool
+		return false;
 
 	// (no object sizes: 0)
-	@:hxmc.export("hxmc_NativeGc_objsize") @:hxmc.noGc static function gcObjsize(v:Ptr, exclude:Ptr, out:Ptr):Float
+	// (no census of the heap on WebAssembly)
+	@:hxmc.export("hxmc_NativeGc_objsize") static function gcObjsize(v:Dynamic, exclude:Array<Dynamic>, out:Array<Dynamic>):Float {
+		hxmc.rt.C.Rt.rt_throw("Gc.objsize is not supported on WebAssembly");
 		return 0;
+	}
 }

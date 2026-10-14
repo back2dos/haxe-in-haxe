@@ -256,7 +256,26 @@ alloc 3.269 G and mandelbrot 4.86 G unchanged, json 3.754 -> 3.759 G,
 nbody 9.94 -> 9.91 G (9.91), sha256 2.61 -> 2.57 G (2.58), port 49.46 ->
 48.64 G (49.10); sizes: small programs 12 KB smaller (alloc 109 -> 97
 KB), formatter_noio 1368 -> 1364 KB, port 19615 -> 19603 KB; port build
-8.0 -> 7.7 s, run times within the noise.
+8.0 -> 7.7 s, run times within the noise. CI run 38624036062 passed (all
+six targets: corpus and the port's self-compile).
+
+### hxmc: WebAssembly target, runtime in Haxe (2026-10-14, branch hxmc)
+
+`-D hxmc.target=wasm32-wasi` (hxmc/README.md, "WebAssembly"). Locally:
+the corpus 70/70 (ThreadNatives and NetNatives excluded) under node 22.22
+and wasmtime 38.0.1 with 16, 64 and 256 KB nurseries, under wasmtime also
+with 4, 8, 12, 20, 24, 40, 48, 96, 128, 192, 384, 512, 1024 and 4096 KB,
+and under node with `RT_VERIFY=1` (heap and remembered-set checks around
+every collection) at 64 and 256 KB, and at 16 KB but Bench (verification
+makes it exceed the timeout); 900k doubles formatted and read back
+identically to the native output; every benchmark case (alloc keeps
+~500 MB live) with outputs as natively. The port built as a module
+compiles its own source to an HXB byte-identical to the native port's
+(514 modules) under node (also with 256 and 16 KB nurseries) and
+wasmtime, and `selfcheck.py --runner` passes under both. Native gates
+after the change: corpus 72/72 on linux-x86_64, the port check
+byte-identical, fixpoint. CI run 38635613350 passed with the new wasm job
+(corpus under node and wasmtime).
 
 ## Target generators
 

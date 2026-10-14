@@ -5,8 +5,8 @@
 # files (hxmc/test/expected, hxmc/tools/check.py),
 # and the port built by hxmc compiles its own source to the same HXB as the
 # reference compiler (hxmc/tools/selfcheck.py). The corpus is also built as
-# WebAssembly modules (wasm32-wasi) and run under node and wasmtime (the wasm
-# job). Only on the hxmc branch.
+# WebAssembly modules (wasm32-wasi) and run under node and wasmtime, and the
+# port as a module self-compiles under both (the wasm job). Only on the hxmc branch.
 name: hxmc
 
 on:
@@ -126,6 +126,15 @@ jobs:
         run: |
           set -ex
           python3 hxmc/tools/run.py -v --target wasm32-wasi --stage dist/wasm32-wasi/corpus
+
+      - name: Build the port as WebAssembly
+        run: |
+          set -ex
+          export HAXE_STD_PATH=$PWD/haxe/std
+          mkdir -p bin/hxmc-t/wport dist/wasm32-wasi/port
+          haxe/haxe -cp src -cp bin/hxmc/std -main haxe.Main --custom-target hxmc=x --hxb bin/hxmc-t/wport/prog.hxb.zip -D disable-parallelism -D hxmc.target=wasm32-wasi --no-output
+          HXMC_STATS=1 bin/hxmc/hxmc dist/wasm32-wasi/port/haxe.wasm --hxb-lib bin/hxmc-t/wport/prog.hxb.zip -main haxe.Main --custom-target hxmc -D disable-parallelism -D hxmc.target=wasm32-wasi | tail -3
+          ls -l dist/wasm32-wasi/port/haxe.wasm
           tar czf dist/wasm32-wasi.tar.gz -C dist/wasm32-wasi .
 
       - name: Cross-build the port
@@ -234,7 +243,8 @@ jobs:
           MSYS_NO_PATHCONV=1 python hxmc/tools/selfcheck.py --port "$exe" --src std-x/src --std std-x/std --ref dl/self-ref.hxb --ref-root "$SELF_ROOT" --root "$root" --summary "$GITHUB_STEP_SUMMARY"
 
   # the WebAssembly corpus (hxmc/README.md, "WebAssembly") under node 22 and
-  # wasmtime, with the default 64 KB nursery and a 16 KB one
+  # wasmtime, with the default 64 KB nursery and a 16 KB one, and the port as
+  # a module compiling itself under both
   wasm:
     needs: build
     runs-on: ubuntu-24.04
@@ -254,8 +264,16 @@ jobs:
           echo "$RUNNER_TEMP/wasmtime-v$WASMTIME_VERSION-x86_64-linux" >> "$GITHUB_PATH"
       - uses: actions/download-artifact@v8
         with: {name: hxmc-wasm32-wasi, path: dl}
+      - uses: actions/download-artifact@v8
+        with: {name: hxmc-self, path: dl}
       - name: Unpack
-        run: mkdir -p t && tar xzf dl/wasm32-wasi.tar.gz -C t
+        run: |
+          set -ex
+          mkdir -p t std-x
+          tar xzf dl/wasm32-wasi.tar.gz -C t
+          tar xzf dl/std.tar.gz -C std-x
+          tar xzf dl/src.tar.gz -C std-x
+          sudo mkdir -p "$SELF_ROOT" && sudo chown "$USER" "$SELF_ROOT"
       # (node 22: exception handling with exnref is behind a flag; no fast
       # API calls: hxmc/tools/run.py)
       - name: Corpus under node
@@ -267,3 +285,10 @@ jobs:
       - name: Corpus under wasmtime, 16 KB nursery
         if: always()
         run: RT_MINOR_KB=16 python3 hxmc/tools/check.py t/corpus --runner "wasmtime run -W exceptions=y --dir . --dir / --env RT_MINOR_KB" --summary "$GITHUB_STEP_SUMMARY"
+      # the port as a module compiles its own source to the reference's HXB
+      - name: Port self-compile under node
+        if: always()
+        run: python3 hxmc/tools/selfcheck.py --runner "node --experimental-wasm-exnref --no-turbo-fast-api-calls --no-warnings --stack-size=8000 $PWD/hxmc/tools/wasi.mjs" --port t/port/haxe.wasm --src std-x/src --std std-x/std --ref dl/self-ref.hxb --ref-root "$SELF_ROOT" --root "$SELF_ROOT" --summary "$GITHUB_STEP_SUMMARY"
+      - name: Port self-compile under wasmtime
+        if: always()
+        run: python3 hxmc/tools/selfcheck.py --runner "wasmtime run -W exceptions=y -W max-wasm-stack=67108864 --dir / --env HAXE_STD_PATH --env PWD" --port t/port/haxe.wasm --src std-x/src --std std-x/std --ref dl/self-ref.hxb --ref-root "$SELF_ROOT" --root "$SELF_ROOT" --summary "$GITHUB_STEP_SUMMARY"
