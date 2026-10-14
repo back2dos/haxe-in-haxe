@@ -504,6 +504,74 @@ class MirBuild {
 		return out;
 	}
 
+	// try functions: the scalar locals kept in memory: assigned inside a try
+	// body and referenced outside it, where a second return of setjmp (the
+	// handler, what follows the try, the next iteration around it) finds
+	// their latest value (C makes every local volatile). A local all of whose
+	// references are inside the try body that assigns it is dead there (a
+	// local declared in the body is assigned before it is read).
+	public static function memLocals(fn:FuncInfo):Map<Int, Bool> {
+		var path:Array<Int> = []; // the try bodies around, outermost first
+		var nextTry = 0;
+		var common = new Map<Int, Array<Int>>(); // per local: the try bodies around all its references
+		var deepest = new Map<Int, Int>(); // per local: the most try bodies around one of its assignments
+		function ref(id:Int) {
+			var c = common.get(id);
+			if (c == null) {
+				common.set(id, path.copy());
+				return;
+			}
+			var k = 0;
+			while (k < c.length && k < path.length && c[k] == path[k])
+				k++;
+			if (k < c.length) c.resize(k);
+		}
+		function assign(id:Int) {
+			ref(id);
+			var d = deepest.get(id);
+			if (d == null || path.length > d) deepest.set(id, path.length);
+		}
+		function ex(e:Ex) {
+			switch e {
+				case ELocal(l): ref(l.id);
+				case _:
+			}
+			backend.EmitC.iterEx(ex, e);
+		}
+		function st(s:Stmt) {
+			switch s {
+				case SSet(l, e):
+					ex(e);
+					assign(l.id);
+					return;
+				case SArrSet(_, a, _, _) | SArrPush(_, a, _):
+					ref(a.id);
+				case STry(body, catches):
+					path.push(nextTry++);
+					for (x in body)
+						st(x);
+					path.pop();
+					for (c in catches) {
+						assign(c.l.id);
+						if (c.test != null) ex(c.test(ELocal(c.l)));
+						for (x in c.body)
+							st(x);
+					}
+					return;
+				case _:
+			}
+			backend.EmitC.iterStmt(st, ex, s);
+		}
+		for (a in fn.args)
+			assign(a.id);
+		for (s in fn.body)
+			st(s);
+		var out = new Map<Int, Bool>();
+		for (id => d in deepest)
+			if (d > common.get(id).length) out.set(id, true);
+		return out;
+	}
+
 	function readLocal(l:Local):Int {
 		var s = refSlot.get(l);
 		if (s != null) return loadM(Opt.MFrame, I64, 8, fr, 8 * s);
@@ -617,15 +685,13 @@ class MirBuild {
 				}
 			}
 		}
-		// try functions: a scalar local assigned inside a try body lives in
-		// memory, so that what a second return of setjmp finds is its latest
-		// value (C makes every local volatile); the others are SSA values,
-		// which are immutable (in a slot or a callee-saved register across
-		// setjmp, both as they were at the call)
+		// try functions: the scalars memLocals finds live in memory; the
+		// others are SSA values, which are immutable (in a slot or a
+		// callee-saved register across setjmp, both as they were at the call)
 		if (fn.hasTry) {
-			var inTry = assignedInTry(fn);
+			var inMem = Sys.getEnv("HXMC_TRYMEM") == "all" ? assignedInTry(fn) : memLocals(fn);
 			for (l in fn.args.concat(fn.locals))
-				if (!refSlot.exists(l) && inTry.exists(l.id)) memSlot.set(l, f.slot(8, 8));
+				if (!refSlot.exists(l) && inMem.exists(l.id)) memSlot.set(l, f.slot(8, 8));
 		}
 		for (i in 0...fn.args.length)
 			writeLocal(fn.args[i], params[i]);

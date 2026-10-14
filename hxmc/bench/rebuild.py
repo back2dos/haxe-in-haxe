@@ -84,7 +84,9 @@ def server(tool, name, port=6127):
         shutil.copytree(ROOT / s, src / s)
     out = OUT / name / "srv-exe"
     shutil.rmtree(str(out) + ".hxmc", ignore_errors=True)
-    srv = subprocess.Popen([tool, "--server", "--wait", str(port)], cwd=ROOT, env=ENV, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, preexec_fn=unlimited)
+    # (the GC settings given: the tool would run itself again with them, as a child)
+    env = dict(ENV, RT_OLD_MB=ENV.get("RT_OLD_MB", "4096"), RT_MINOR_KB=ENV.get("RT_MINOR_KB", "32768"))
+    srv = subprocess.Popen([tool, "--server", "--wait", str(port)], cwd=ROOT, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, preexec_fn=unlimited)
     time.sleep(1)
     args = sum([["-cp", src / c] for c in cps], []) + ["-cp", ROOT / "bin/hxc/std", "-main", main, "--custom-target", "hxc",
         "-D", "disable-parallelism", "-D", "disable-hxb-cache", "-D", f"hxmc.out={out}", "--no-output"]
