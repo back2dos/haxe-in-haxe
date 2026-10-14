@@ -214,6 +214,12 @@ class Emit implements hxmc.Target.Emitter {
 				a.aluRR(Asm.CMP, i.size, i.s1, i.s2);
 			case CMPI:
 				a.aluRI(Asm.CMP, i.size, i.s1, i.imm);
+			case CMPM:
+				a.aluRM(Asm.CMP, i.size, i.s1, mem(i));
+			case CMPMI:
+				a.aluMI(Asm.CMP, i.size, mem(i), i.imm);
+			case ALUM:
+				a.aluRM(i.cond, i.size, i.d, mem(i));
 			case TEST:
 				a.testRR(i.size, i.s1, i.s2);
 			case UCOMI:

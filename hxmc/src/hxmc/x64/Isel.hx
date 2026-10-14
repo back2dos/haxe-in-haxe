@@ -26,6 +26,9 @@ enum abstract XOp(Int) to Int from Int {
 	var IDIV; // rax, rdx <- rdx:rax / s1
 	var CMP; // flags <- s1 - s2
 	var CMPI; // flags <- s1 - imm
+	var CMPM; // flags <- s1 - [mem] (size)
+	var CMPMI; // flags <- [mem] - imm (size)
+	var ALUM; // d <- d (cond) [mem] (size)
 	var TEST; // flags <- s1 & s2
 	var UCOMI; // flags <- s1 <=> s2 (doubles)
 	var SETCC; // d <- cond ? 1 : 0 (32 bits)
@@ -81,6 +84,12 @@ class Isel implements hxmc.Target.Selector {
 	var cur:LBlock;
 	var folded:Array<Bool>; // Mir values computed inside their user (no code of their own)
 	var flagsOf = new Map<Int, Int>(); // comparisons whose flags the branch after them reads
+	var memFolds = new Map<Int, Bool>(); // loads that are memory operands of their user
+
+	// whether load v is a memory operand of its user (marks it folded)
+	function memFold(v:Int):Bool {
+		return memFolds.exists(v);
+	}
 
 	var abi:Abi;
 
@@ -165,6 +174,15 @@ class Isel implements hxmc.Target.Selector {
 				uses.push(i.s2);
 			case CMPI:
 				uses.push(i.s1);
+			case CMPM:
+				uses.push(i.s1);
+				mem();
+			case CMPMI:
+				mem();
+			case ALUM:
+				defs.push(i.d);
+				uses.push(i.d);
+				mem();
 			case CALL:
 				if (i.s1 >= 0) uses.push(i.s1);
 				for (u in i.uses)
@@ -308,6 +326,37 @@ class Isel implements hxmc.Target.Selector {
 				if (i.args != null) for (x in i.args)
 					useCount[x]++;
 			}
+		// loads used once by an integer comparison later in their block, with
+		// no store or call between: memory operands of the comparison
+		for (b in mf.blocks) {
+			var ins = b.ins;
+			for (k in 0...ins.length) {
+				var c = ins[k];
+				if (c.op != Cmp || mf.vals[c.a].ty == F64) continue;
+				var bImm = immOf(c.b) != null, aImm = immOf(c.a) != null;
+				var cands = bImm ? (isymOf(c.b) == null ? [c.a] : []) : aImm ? [] : [c.b, c.a];
+				for (x in cands) {
+					var l = mf.vals[x];
+					if (l.op != Load || l.block != b || useCount[x] != 1 || l.ty == F64) continue;
+					if (l.size != (l.ty == I32 ? 4 : 8)) continue;
+					var j = k;
+					var ok = false;
+					while (j-- > 0) {
+						var y = ins[j];
+						if (y == l) {
+							ok = true;
+							break;
+						}
+						if (y.op == Store || y.op == Call || y.op == TlsStore) break;
+					}
+					if (ok) {
+						memFolds[x] = true;
+						folded[x] = true;
+						break;
+					}
+				}
+			}
+		}
 		// constants and symbol addresses used once by a foldable user are not computed on their own
 		for (b in mf.blocks)
 			for (i in b.ins)
@@ -496,6 +545,31 @@ class Isel implements hxmc.Target.Selector {
 			}
 		}
 		var imm = immOf(b);
+		// a load used only here: a memory operand
+		if (imm != null && isymOf(b) == null && memFold(a)) {
+			var l = m.vals[a];
+			var x = emit(CMPMI);
+			memOf(x, l.a, l.b, l.imm2, l.imm);
+			x.imm = imm;
+			x.size = sz(t);
+			return intCond(c);
+		}
+		if (imm == null && immOf(a) == null && memFold(b)) {
+			var l = m.vals[b];
+			var x = emit(CMPM);
+			x.s1 = use(a);
+			memOf(x, l.a, l.b, l.imm2, l.imm);
+			x.size = sz(t);
+			return intCond(c);
+		}
+		if (imm == null && immOf(a) == null && memFold(a)) {
+			var l = m.vals[a];
+			var x = emit(CMPM);
+			x.s1 = use(b);
+			memOf(x, l.a, l.b, l.imm2, l.imm);
+			x.size = sz(t);
+			return intCond(swapCond(c));
+		}
 		if (imm != null) {
 			if (imm == 0 && isymOf(b) == null && (c == CEq || c == CNe)) {
 				var x = emit(TEST);
@@ -839,6 +913,7 @@ class Isel implements hxmc.Target.Selector {
 				x.d = reg(i.id);
 				x.s1 = use(i.a);
 			case Load:
+				if (folded[i.id]) return; // a memory operand of its user
 				var x = emit(LOAD);
 				x.d = reg(i.id);
 				x.size = i.size;
