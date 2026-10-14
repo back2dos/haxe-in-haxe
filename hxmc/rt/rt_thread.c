@@ -11,8 +11,7 @@
 // safepoint (an allocation slow path, rt_safepoint) or in a safe region (a
 // blocking native between rt_blocking_enter and rt_blocking_leave, which
 // holds no heap pointer outside its root and shadow-stack slots); it then
-// scans every thread's roots (rt_threads_scan: their frames through the
-// stack maps, rt_frames.c, and their shadow stacks) and remembered set
+// scans every thread's roots (rt_threads_scan: their shadow stacks) and remembered set
 // (rt_mutators_foreach) and resumes them. The world lock `wl` guards the
 // thread list and the collection handshake.
 //
@@ -341,7 +340,6 @@ void rt_threads_scan(void *(*fwd)(void *)) {
 		void **sp = *t->mut.sp_ref;
 		for (void **s = *t->mut.base_ref; s < sp; s++)
 			if (*s) *s = fwd(*s);
-		rt_frames_scan(*t->mut.last_fp_ref, *t->mut.last_pc_ref, fwd);
 		if (*t->mut.exn_ref) *t->mut.exn_ref = fwd(*t->mut.exn_ref);
 	}
 }

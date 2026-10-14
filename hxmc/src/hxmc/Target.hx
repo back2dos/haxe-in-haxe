@@ -14,11 +14,9 @@ interface Emitter {
 	// where the next functions go: their own section (`name`, Link's dead
 	// code removal may drop it), or the object's .text (null)
 	function useSection(name:Null<String>):Void;
-	// a stub that records its caller for the stack maps (frame pointer and
-	// return address in rt_last_fp/rt_last_pc), sets the first integer
-	// arguments to constants (a value, or a symbol's), and jumps to
-	// `target`: false when the target cannot write one (StackMaps)
-	function recordingStub(name:String, target:String, consts:Array<{v:Int, sym:Null<String>}>):Bool;
+	// an allocation stub (DataGen.allocStubs) written directly: false when
+	// the target has no such writer (the stub is then a compiled function)
+	function allocStub(name:String, lo:Int, tySym:Null<String>, tyVal:Int, bytes:Int):Bool;
 }
 
 class Target {
@@ -26,5 +24,5 @@ class Target {
 		return abi.arm ? new hxmc.a64.Isel(abi) : new hxmc.x64.Isel(abi);
 
 	public static function emitter(abi:Abi, obj:Obj):Emitter
-		return abi.arm ? new hxmc.a64.Emit(obj, abi.os == "windows", abi.os == "macos") : new hxmc.x64.Emit(obj, abi.os == "windows", abi.os == "macos");
+		return abi.arm ? new hxmc.a64.Emit(obj, abi.os == "windows") : new hxmc.x64.Emit(obj, abi.os == "windows");
 }

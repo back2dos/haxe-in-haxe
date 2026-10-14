@@ -65,15 +65,11 @@ class Facts {
 		var n = symbols.get(f);
 		if (n != null) return n;
 		if (f.cSymbol != null) {
-			// @:hxmc.export: the runtime's C code calls it by its C name, which
-			// is the entry that DataGen.exportEntries wraps around it (stack
-			// maps: StackMaps.entry); the program's code calls it directly
+			// @:hxmc.export: the runtime's C code calls it by this name
 			if (usedSymbols.exists(f.cSymbol)) throw "hxmc: two functions export " + f.cSymbol;
 			usedSymbols.set(f.cSymbol, true);
-			n = f.cSymbol + "$hx";
-			usedSymbols.set(n, true);
-			symbols.set(f, n);
-			return n;
+			symbols.set(f, f.cSymbol);
+			return f.cSymbol;
 		}
 		var base = "F_" + ident(f.name);
 		n = base;

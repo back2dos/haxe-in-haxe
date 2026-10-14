@@ -9,13 +9,19 @@ what it is, why it matters and what it needs. Current state is in
 The next performance steps after the runtime moves to Haxe; both are in
 the code generator and help every target.
 
-### Stack maps instead of the shadow stack (done)
+### Stack maps instead of the shadow stack (tried, reverted)
 
-Landed (README, "Stack maps"): root slots in frames, frame records, a
-descriptor table per code region, frameless thunks recording the last
-frame before C calls, entries for C's calls into Haxe. Measured against
-the shadow stack: up to 5.6% fewer instructions (mandelbrot_anon), +0.8%
-on the port, 196 KB less code in the port. Left:
+Tried at e91b276 (stage 5a), reverted to the shadow stack (README,
+"Stack maps: tried and reverted"): root slots in machine frames, frame
+records, a descriptor table per code region, frameless thunks recording
+the last frame before C calls, entries for C's calls into Haxe. Measured
+against the shadow stack: up to 5.6% fewer instructions
+(mandelbrot_anon), binarytrees -1.6%, formatter -1.4%, but nbody +0.3%,
+sha256 +1.3% and the port +0.8% (its walks cost 0.9 G instructions
+against 0.7 G for the shadow stack's scan), 196 KB less code in the port
+and 8-12 KB more in small programs. WebAssembly needs the shadow stack
+anyway; one root mechanism is simpler. Conditions for trying again (the
+follow-ups that would make it pay):
 
 - Per-call-site liveness (descriptors per return address instead of per
   function): no zeroing of root slots, references in registers across
@@ -28,7 +34,8 @@ on the port, 196 KB less code in the port. Left:
   (frames without references are visited too); frames not resumed since
   the last minor collection hold no young references (a watermark).
 
-The collector itself stays C (README, "Runtime in Haxe").
+The collector itself stays C on the native targets (README, "Runtime in
+Haxe").
 
 ### Escape analysis
 
@@ -322,8 +329,7 @@ program-wide numbers stay symbolic, so these remain possible:
   compiler instead of interpreting it in Eval, calling the compiler's
   functions directly.
 - **Hot reload / live patching**: replace changed modules in a running
-  process (needs runtime registration of new types, dispatch rows and,
-  with stack maps, frame descriptors).
+  process (needs runtime registration of new types and dispatch rows).
 - **A JIT library** for interpreters written in Haxe (ship only the code
   generator half). Compile speed (~0.5 ms per function single-threaded)
   suits compiling hot functions, not baseline JIT tiers.

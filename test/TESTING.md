@@ -238,6 +238,26 @@ smaller (alloc 753 -> 677 KB); builds best of 5 alloc 0.12 -> 0.12 s,
 json 0.13 -> 0.12 s, binarytrees 0.12 -> 0.11 s, formatter_noio 0.44 ->
 0.43 s, port 6.29 -> 5.98 s. CI: run 38602563236 green on all six targets.
 
+### hxmc: back to the shadow stack (2026-10-14, branch hxmc)
+
+Stack maps (stage 5a) reverted: generated code roots its references on
+the shadow stack again on all six targets (hxmc/README.md, "Stack maps:
+tried and reverted"), keeping slot sharing, `keepsFrame`, inline constant
+`Mem.alloc` and the later cleanup. Locally: the corpus 72/72 on
+linux-x86_64, linux-arm64 (qemu) and windows-x86_64 (wine), each also
+with 16 and 256 KB nurseries (64 KB is the default); ThreadNatives 300
+runs with a 16 KB nursery and 100 with 64 KB; the hxmc-built port's
+self-compile gives the reference's HXB (514 modules, byte-identical, also
+with a 256 KB nursery); the tool is a fixpoint after a bootstrap.
+Against the cleanup milestone (stack maps), callgrind: mandelbrot_anon
+11.62 -> 12.31 G (stage 4: 12.31), binarytrees 6.25 -> 6.38 G (6.35),
+formatter_noio 40.12 -> 40.76 G (40.68), bcrypt 26.85 -> 26.92 G (26.92),
+alloc 3.269 G and mandelbrot 4.86 G unchanged, json 3.754 -> 3.759 G,
+nbody 9.94 -> 9.91 G (9.91), sha256 2.61 -> 2.57 G (2.58), port 49.46 ->
+48.64 G (49.10); sizes: small programs 12 KB smaller (alloc 109 -> 97
+KB), formatter_noio 1368 -> 1364 KB, port 19615 -> 19603 KB; port build
+8.0 -> 7.7 s, run times within the noise.
+
 ## Target generators
 
 Every target also compiles upstream's unit suite identically (`unit-targets.py`, above).

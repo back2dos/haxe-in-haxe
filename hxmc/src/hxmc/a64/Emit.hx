@@ -24,12 +24,9 @@ class Emit implements hxmc.Target.Emitter {
 	// more touch each page as they grow
 	var probe:Bool;
 
-	var mac:Bool;
-
-	public function new(obj:Obj, probe = false, mac = false) {
+	public function new(obj:Obj, probe = false) {
 		this.obj = obj;
 		this.probe = probe;
-		this.mac = mac;
 		text = obj.section(".text", Text, 16);
 		a = new Asm(text);
 	}
@@ -38,6 +35,9 @@ class Emit implements hxmc.Target.Emitter {
 	var frameSize = 0;
 	var saved:Array<Int>;
 	var saveOff:Array<Int>;
+
+	public function allocStub(name:String, lo:Int, tySym:Null<String>, tyVal:Int, bytes:Int):Bool
+		return false;
 
 	public function useSection(name:Null<String>) {
 		text = obj.section(name != null ? name : ".text", Text, 16);
@@ -49,11 +49,14 @@ class Emit implements hxmc.Target.Emitter {
 		text.buf.align(16, 0);
 		var start = text.buf.len;
 		a.reset();
-		// outgoing arguments, the root slots (together: one range for the
-		// stack maps), the other slots, the saved registers
-		var lay = hxmc.StackMaps.layout(f, f.outArgs);
-		slotOff = lay.slotOff;
-		var off = lay.end;
+		var off = f.outArgs;
+		slotOff = [];
+		for (s in f.slots) {
+			var al = s.align < 8 ? 8 : s.align;
+			off = (off + al - 1) & ~(al - 1);
+			slotOff.push(off);
+			off += s.size;
+		}
 		saved = [for (r in Isel.CALLEE_SAVED) if (usedRegs[r]) r];
 		saveOff = [];
 		for (r in saved) {
@@ -67,20 +70,6 @@ class Emit implements hxmc.Target.Emitter {
 		subSp(frameSize);
 		for (k in 0...saved.length)
 			ldst(false, 8, false, saved[k], SP, saveOff[k]);
-		// root slots a GC point may see unassigned start null
-		for (z in lay.zeros) {
-			var k = 0;
-			while (k < z.bytes) {
-				var o = z.off + k;
-				if (k + 16 <= z.bytes && o <= 504) {
-					a.pair(false, ZR, ZR, SP, o, 0); // stp xzr, xzr, [sp, #o]
-					k += 16;
-				} else {
-					ldst(false, 8, false, ZR, SP, o);
-					k += 8;
-				}
-			}
-		}
 		for (b in f.blocks)
 			b.label = a.newLabel();
 		var tables:Array<{label:Int, entries:Array<LBlock>}> = [];
@@ -98,10 +87,7 @@ class Emit implements hxmc.Target.Emitter {
 				text.buf.u32(a.labelPos(e.label) - at);
 		}
 		a.finish();
-		var sym = obj.define(f.name, text, start, text.buf.len - start, global);
-		// the descriptor (every function has a frame record; the frame is below it)
-		if (f.needsRecord) hxmc.StackMaps.describe(obj, f, lay, text.buf.len - start, -frameSize);
-		return sym;
+		return obj.define(f.name, text, start, text.buf.len - start, global);
 	}
 
 	function subSp(n:Int) {
@@ -351,42 +337,6 @@ class Emit implements hxmc.Target.Emitter {
 			case FCVTDS:
 				a.fcvtDToS(i.d, i.s1);
 		}
-	}
-
-	// StackMaps' recording stub, without a frame: x29 is still the caller's
-	// frame pointer, x30 the return address into it (x16, x17: scratch;
-	// Apple reaches thread-locals through a call: no; probe: Windows)
-	public function recordingStub(name:String, target:String, consts:Array<{v:Int, sym:Null<String>}>):Bool {
-		if (mac) return false;
-		text.buf.align(16, 0);
-		var start = text.buf.len;
-		var fp = tlsSym(StackMaps.LAST_FP), pc = tlsSym(StackMaps.LAST_PC);
-		if (probe) {
-			// ThreadLocalStoragePointer[_tls_index] (x18 + 0x58 is the pointer array)
-			a.ldst(true, 8, false, true, X16, 18, 0x58);
-			var ti = obj.sym("_tls_index");
-			a.adrp(X17, ti, 0);
-			a.ldstSymLo(true, 4, false, false, X17, X17, ti, 0);
-			a.ldstR(true, 8, false, true, X16, X16, X17, true);
-			for (k in 0...2) {
-				var s = k == 0 ? fp : pc;
-				a.reloc(RA64SecRelHi12, s, 0);
-				a.addSubI(0, true, X17, X16, 0, true);
-				a.reloc(RA64SecRelLo12L, s, 0);
-				a.ldst(false, 8, false, true, k == 0 ? Asm.FP : Asm.LR, X17, 0);
-			}
-		} else {
-			a.tlsAddr(X16, fp);
-			a.ldst(false, 8, false, true, Asm.FP, X16, 0);
-			a.tlsAddr(X16, pc);
-			a.ldst(false, 8, false, true, Asm.LR, X16, 0);
-		}
-		for (k in 0...consts.length)
-			if (consts[k].sym != null) a.movSym(false, k, obj.sym(consts[k].sym), 0) else a.movI(false, k, consts[k].v, 0);
-		a.bSym(obj.sym(target));
-		a.finish();
-		obj.define(name, text, start, text.buf.len - start, true);
-		return true;
 	}
 
 	function tlsSym(name:String):Symbol {

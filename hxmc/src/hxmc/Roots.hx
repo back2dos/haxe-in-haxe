@@ -3,14 +3,14 @@ package hxmc;
 import hxmc.ir.Ir;
 import hxmc.Lir.Bits;
 
-// Which reference locals live in root slots (a backward liveness over the
-// structured statements, from hxc's analysis for C: a reference live
-// across a GC point is rooted; at a cold site the references live across
-// its slow path are spilled there instead), with bit sets over local ids
-// instead of maps. Rooted locals that never live at the same time share a
-// slot (assign: interference at definitions, greedy coloring), except in
+// Which reference locals live in shadow-stack slots (a backward liveness
+// over the structured statements, from hxc's analysis for C: a reference
+// live across a GC point is rooted; at a cold site the references live
+// across its slow path are spilled there instead), with bit sets over local
+// ids instead of maps. Rooted locals that never live at the same time share
+// a slot (assign: interference at definitions, greedy coloring), except in
 // functions with a try block and locals that may be read before they are
-// set (their slots start as null).
+// set (their slots start as null). Also which locals those are.
 class Roots {
 	var n:Int;
 	var refs:Bits; // locals of reference type
@@ -327,78 +327,6 @@ class Roots {
 		for (k in 0...a.w.length)
 			if (a.w[k] != b.w[k]) return false;
 		return true;
-	}
-
-	// ---- stack maps: the rooted locals a GC point may find unassigned
-	// (their slots must start null; the others are written before any GC
-	// point the function reaches). Functions with a try block: all.
-
-	public static function needZero(f:FuncInfo, rooted:Bits):Bits {
-		var n = rooted.w.length * 32;
-		var need = new Bits(n);
-		if (f.hasTry) {
-			need.union(rooted);
-			return need;
-		}
-		inline function gc(e:Ex):Bool
-			return gcPoint(e) > 0 || nestedGc(e);
-		function atGc(set:Bits) {
-			for (k in 0...need.w.length)
-				need.w[k] |= rooted.w[k] & ~set.w[k];
-		}
-		function inter(a:Bits, b:Bits):Bits {
-			var r = a.copy();
-			for (k in 0...r.w.length)
-				r.w[k] &= b.w[k];
-			return r;
-		}
-		var step:(Stmt, Bits) -> Bits = null;
-		function seq(ss:Array<Stmt>, set:Bits):Bits {
-			for (st in ss)
-				set = step(st, set);
-			return set;
-		}
-		step = function(st:Stmt, set:Bits):Bits {
-			switch st {
-				case SSet(l, e):
-					if (gc(e)) atGc(set);
-					var r = set.copy();
-					r.set(l.id);
-					return r;
-				case SExpr(e) | SThrow(e) | SSetGlobal(_, e):
-					if (gc(e)) atGc(set);
-				case SReturn(e):
-					if (e != null && gc(e)) atGc(set);
-				case SSetField(_, _, o, v) | SBoxSet(_, o, v):
-					if (gc(o) || gc(v)) atGc(set);
-				case SAnonSet(_) | SArrSet(_) | SArrPush(_):
-					atGc(set);
-				case SIf(c, x, y):
-					if (gc(c)) atGc(set);
-					return inter(seq(x, set.copy()), seq(y, set.copy()));
-				case SLoop(body):
-					seq(body, set.copy());
-				case SSwitch(e, cases, def):
-					if (gc(e)) atGc(set);
-					var r = seq(def, set.copy());
-					for (c in cases)
-						r = inter(r, seq(c.body, set.copy()));
-					return r;
-				case SCold(_, x):
-					// the slow path collects before the statement's assignment
-					atGc(set);
-					return step(x, set);
-				case SBreak | SContinue:
-				case STry(_, _):
-					throw "try in a function without hasTry";
-			}
-			return set;
-		};
-		var entry = new Bits(n);
-		for (a in f.args)
-			entry.set(a.id);
-		seq(f.body, entry);
-		return need;
 	}
 
 	// ---- locals that may be read before any assignment (the arguments are set)
