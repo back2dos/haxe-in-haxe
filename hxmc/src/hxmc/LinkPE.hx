@@ -433,6 +433,9 @@ class LinkPE {
 		var n = 0;
 		for (d in dlls)
 			n += byDll.get(d).length + 1;
+		// (the lookup and address tables hold 8-byte entries: aligned, which
+		// the arm64 loader requires)
+		b.align(8);
 		var ilt = b.len;
 		b.zeros(8 * n);
 		var iatStart = b.len;
