@@ -10,6 +10,8 @@ import hxmc.unsafe.Ptr;
 	static function rt_throw(v:Dynamic):Void; // (does not return)
 	// a field name as a String (an immortal copy outside the heap, made once: rt_dyn.c)
 	static function hx_fid_str(fid:Int):String;
+	// rt.c: an array of this element kind with `len` elements (zero)
+	static function hx_arr_new_n(kind:Int, len:Int):Dynamic;
 }
 
 @:hxmc.c extern class Leaf {

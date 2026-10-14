@@ -105,7 +105,7 @@ class Lower {
 				record(e, fi.name);
 				fi.body = [SThrow(ENull(TRef(RAny)))];
 			}
-			if (hostImpls.iterator().hasNext()) bindHosts(fi);
+			bindHosts(fi);
 		}
 	}
 
@@ -142,10 +142,35 @@ class Lower {
 		return h == null ? null : staticFunc(h.c, h.cf);
 	}
 
-	// replaces the calls of runtime functions implemented in Haxe in fi's body
+	// the target (Mem.os, Mem.arm: constants here, so that the code of the
+	// other targets is dropped with the branch it is in; -1: unknown)
+	public static var targetOs = -1;
+	public static var targetArm = -1;
+
+	// replaces the calls of runtime functions implemented in Haxe in fi's
+	// body, and folds the target's constants: `if (Mem.os() == 2) a else b`
+	// keeps one branch (its symbols stay out of the other targets' links)
 	function bindHosts(fi:FuncInfo) {
-		function ex(e:Ex):Ex {
+		function fold(e:Ex):Ex {
 			return switch e {
+				case EBin(op, EInt(a), EInt(b)):
+					switch op {
+						case Eq: EInt(a == b ? 1 : 0);
+						case Ne: EInt(a != b ? 1 : 0);
+						case Lt: EInt(a < b ? 1 : 0);
+						case Le: EInt(a <= b ? 1 : 0);
+						case Gt: EInt(a > b ? 1 : 0);
+						case Ge: EInt(a >= b ? 1 : 0);
+						case _: e;
+					}
+				case ENot(EInt(a)): EInt(a == 0 ? 1 : 0);
+				case _: e;
+			}
+		}
+		function ex(e:Ex):Ex {
+			return fold(switch e {
+				case ECallHost("hxmc_unsafe_Mem_os", [], _) if (targetOs >= 0): EInt(targetOs);
+				case ECallHost("hxmc_unsafe_Mem_arm", [], _) if (targetArm >= 0): EInt(targetArm);
 				case EInt(_) | EF64(_) | EStr(_) | ENull(_) | ELocal(_) | EGlobal(_, _) | EType(_) | ENewObj(_): e;
 				case EBin(op, a, b): EBin(op, ex(a), ex(b));
 				case ENot(a): ENot(ex(a));
@@ -183,7 +208,7 @@ class Lower {
 				case ENewClos(l, args): ENewClos(l, [for (a in args) ex(a)]);
 				case ENewBox(t, a): ENewBox(t, ex(a));
 				case ENewAnon(s, args): ENewAnon(s, [for (a in args) ex(a)]);
-			}
+			});
 		}
 		var sts:Array<Stmt>->Array<Stmt> = null;
 		function st(s:Stmt):Stmt {
@@ -196,7 +221,11 @@ class Lower {
 				case SArrPush(t, a, v): SArrPush(t, a, ex(v));
 				case SBoxSet(t, b, v): SBoxSet(t, ex(b), ex(v));
 				case SSetGlobal(g, v): SSetGlobal(g, ex(v));
-				case SIf(c, a, b): SIf(ex(c), sts(a), sts(b));
+				case SIf(c, a, b):
+					switch ex(c) {
+						case EInt(v): SIf(EInt(1), v != 0 ? sts(a) : sts(b), []);
+						case x: SIf(x, sts(a), sts(b));
+					}
 				case SLoop(body): SLoop(sts(body));
 				case SBreak | SContinue: s;
 				case SSwitch(e, cases, def): SSwitch(ex(e), [for (c in cases) {values: c.values, body: sts(c.body)}], sts(def));

@@ -6,5 +6,9 @@ package hxmc.rt;
 // calls, and the @:hxmc.export ones the runtime's C code calls.
 import hxmc.rt.Str;
 import hxmc.rt.Dyn;
+import hxmc.rt.Arr;
+import hxmc.rt.Bytes;
+import hxmc.rt.Date;
+import hxmc.rt.Zip;
 
 class Runtime {}

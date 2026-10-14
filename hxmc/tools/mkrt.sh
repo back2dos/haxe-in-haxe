@@ -21,7 +21,7 @@ esac
 out=$ROOT/bin/hxmc/rt/$target
 mkdir -p "$out/obj"
 CFLAGS="-O2 -g0 -w -fno-strict-aliasing -fno-pie -fno-pic -ffunction-sections -fdata-sections -DHXMC_NO_SSL -DHXMC_NO_UV -DRT_CALL_ON_STACK -I $ROOT/hxmc/rt"
-files="rt rt_dyn rt_std rt_str rt_sys rt_net rt_ssl rt_uv rt_thread rt_census"
+files="rt rt_dyn rt_str rt_sys rt_net rt_ssl rt_uv rt_thread rt_census"
 case $target in
 windows-*)
 	CFLAGS="-O2 -g0 -w -fno-strict-aliasing -DHXMC_NO_SSL -DHXMC_NO_UV -I $ROOT/hxmc/rt"
@@ -43,7 +43,11 @@ wait
 # what generated code calls in the C library besides the runtime (MirBuild),
 # and what the runtime's Haxe code calls (hxmc/std/hxmc/unsafe/LibC.hx)
 libm="memset memcpy fmod floor ceil sin cos tan asin acos atan atan2 exp log pow sqrt"
-libm="$libm memmove memcmp strlen strcmp malloc free strtod rand"
+libm="$libm memmove memcmp strlen strcmp malloc free strtod rand clock_gettime mktime"
+case $target in
+windows-*) libm="$libm _mktime64 _localtime64_s _gmtime64_s" ;;
+*) libm="$libm localtime_r gmtime_r" ;;
+esac
 case $target in
 macos-*)
 	# the runtime's Mach-O objects merged into one (hxmc --mkrt-macho); the

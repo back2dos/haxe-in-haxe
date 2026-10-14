@@ -19,4 +19,13 @@ import hxmc.I64;
 	static function free(p:Ptr):Void;
 	static function strtod(s:Ptr, end:Ptr):Float;
 	static function rand():Int;
+	// time: struct tm and timespec pointers (hxmc.rt.Date), time_t 64-bit
+	static function mktime(tm:Ptr):I64;
+	static function localtime_r(t:Ptr, tm:Ptr):Ptr;
+	static function gmtime_r(t:Ptr, tm:Ptr):Ptr;
+	static function clock_gettime(clock:Int, ts:Ptr):Int;
+	// (Windows, the UCRT)
+	static function _mktime64(tm:Ptr):I64;
+	static function _localtime64_s(tm:Ptr, t:Ptr):Int;
+	static function _gmtime64_s(tm:Ptr, t:Ptr):Int;
 }
