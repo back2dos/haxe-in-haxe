@@ -44,9 +44,11 @@ class Lower {
 			case NotCoro(t): t;
 		}
 
-	public static function program(main:TClass, types:Array<core.TType.ModuleType>, basic:core.TType.BasicTypes):Program {
+	// `l`: a subclass to lower with (hxmc's resident compiler passes one that
+	// reuses function bodies across builds, see `lowerBody`); hxc never does
+	public static function program(main:TClass, types:Array<core.TType.ModuleType>, basic:core.TType.BasicTypes, ?l:Lower):Program {
 		Lower.basic = basic;
-		var l = new Lower();
+		if (l == null) l = new Lower();
 		var mainField = main.clStatics.get("main");
 		l.prog.main = l.staticFunc(main, mainField);
 		l.drain();
@@ -101,6 +103,16 @@ class Lower {
 			fi.body = [SThrow(ENull(TRef(RAny)))];
 		}
 	}
+
+	// Lowers the body of `fi` (`run`). The hook for a subclass that caches
+	// bodies (hxmc/src/hxmc/LowerCache.hx): `key` is the field the body comes
+	// from (null: a closure or a static initializer); the cache keeps a body
+	// while the field object and its expression stay the same (the
+	// compilation server retypes a changed module and the modules depending
+	// on it, which makes new ones) and replays the calls the body made into
+	// this class. hxc never overrides it.
+	function lowerBody(fi:FuncInfo, key:Null<TClassField>, run:() -> Void):Void
+		run();
 
 	public function fail(msg:String):Dynamic
 		throw new LowerError(msg, "");
@@ -348,7 +360,7 @@ class Lower {
 		funcs.set(cf, fi);
 		prog.funcs.push(fi);
 		signature(fi, tf, null);
-		pending.push(guarded(fi, () -> new FnLower(this, fi, null, null).run(tf)));
+		pending.push(guarded(fi, () -> lowerBody(fi, cf, () -> new FnLower(this, fi, null, null).run(tf))));
 		return fi;
 	}
 
@@ -399,7 +411,7 @@ class Lower {
 				case _: signature(fi, tf, TRef(RObj(root)));
 			}
 		} else signature(fi, tf, TRef(RObj(root)));
-		pending.push(guarded(fi, () -> new FnLower(this, fi, ci, null).run(tf)));
+		pending.push(guarded(fi, () -> lowerBody(fi, cf, () -> new FnLower(this, fi, ci, null).run(tf))));
 		return fi;
 	}
 
@@ -420,7 +432,7 @@ class Lower {
 		var tf = funcOf(c.clConstructor);
 		signature(fi, tf, TRef(RObj(ci)));
 		fi.ret = TVoid;
-		pending.push(guarded(fi, () -> new FnLower(this, fi, ci, null).run(tf, true)));
+		pending.push(guarded(fi, () -> lowerBody(fi, c.clConstructor, () -> new FnLower(this, fi, ci, null).run(tf, true))));
 		return fi;
 	}
 
@@ -437,7 +449,7 @@ class Lower {
 		fi.ret = sig.ret;
 		prog.lambdas.push(li);
 		prog.funcs.push(fi);
-		pending.push(guarded(fi, () -> body(new FnLower(this, fi, null, li))));
+		pending.push(guarded(fi, () -> lowerBody(fi, null, () -> body(new FnLower(this, fi, null, li)))));
 		return li;
 	}
 
@@ -543,7 +555,7 @@ class Lower {
 		prog.funcs.push(fi);
 		prog.inits.push(fi);
 		initOf.set(fi, c);
-		pending.push(guarded(fi, () -> new FnLower(this, fi, null, null).runInit(c)));
+		pending.push(guarded(fi, () -> lowerBody(fi, null, () -> new FnLower(this, fi, null, null).runInit(c))));
 	}
 
 	public function rootClass():ClassInfo

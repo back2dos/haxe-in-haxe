@@ -74,6 +74,13 @@ its parallel passes unless *its* invocation passes that define.
   differ (calls, returns, field and enum-argument access). Function bodies
   are lowered to A-normal form: calls and allocations only as the value of
   an assignment, so evaluation order and GC points are explicit.
+  Each body is lowered through `Lower.lowerBody`, a hook hxc leaves as is:
+  hxmc's resident compiler (`hxmc --server`) overrides it to reuse the
+  bodies of fields the compilation server kept since the last build
+  (`hxmc/src/hxmc/LowerCache.hx`; the server retypes a changed module and
+  the modules depending on it, which invalidates their bodies), replaying
+  the calls each body made into `Lower`. `Lower.program` takes the
+  subclass to lower with; hxc never passes one.
 - **Objects**: classes and anonymous structures are a header word plus
   8-byte slots; Int/Bool fields are packed two per slot (`EmitC.layout`).
   Virtual calls go through a dispatch table indexed by the header's type

@@ -17,6 +17,7 @@ package hxmc;
 //   HXMC_SKIP=<name,...>            never compile these natively
 class Main {
 	static var start = haxe.Timer.stamp();
+	static var lowerCache = new LowerCache();
 
 	static function main() {
 		var args = Sys.args();
@@ -94,8 +95,22 @@ class Main {
 			}
 		var opts = Options.read(com);
 		var t0 = haxe.Timer.stamp();
-		var prog = backend.Lower.program(mainClass, com.types, com.basic);
-		if (opts.stats) Sys.println('hxmc: lowering ${Std.int((haxe.Timer.stamp() - t0) * 1000)} ms (since start ${Std.int((t0 - start) * 1000)} ms)');
+		// resident: bodies of the fields the server kept are reused (LowerCache)
+		var useCache = Driver.resident && Sys.getEnv("HXMC_LOWER_CACHE") != "0";
+		var prog = useCache ? lowerCache.lower(mainClass, com.types, com.basic) : backend.Lower.program(mainClass, com.types, com.basic);
+		if (opts.stats) {
+			Sys.println('hxmc: lowering ${Std.int((haxe.Timer.stamp() - t0) * 1000)} ms (since start ${Std.int((t0 - start) * 1000)} ms)');
+			if (useCache)
+				Sys.println('hxmc: bodies ${lowerCache.hits} reused, ${lowerCache.misses} lowered' + (lowerCache.why != null ? ' (lowered again: ${lowerCache.why})' : ''));
+		}
+		if (Sys.getEnv("HXMC_LOWER_ONLY") == "1") return; // (profiling the lowering)
 		Driver.run(prog, out, opts);
+		// HXMC_LOWER_CHECK=1: the same program lowered from scratch must give the same executable
+		if (useCache && Sys.getEnv("HXMC_LOWER_CHECK") == "1") {
+			var fresh = backend.Lower.program(mainClass, com.types, com.basic);
+			Driver.run(fresh, out + ".check", opts);
+			var same = sys.io.File.getBytes(out).compare(sys.io.File.getBytes(out + ".check")) == 0;
+			Sys.println("hxmc: lowering check: " + (same ? "same executable" : "DIFFERENT executable"));
+		}
 	}
 }
