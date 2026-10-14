@@ -180,11 +180,18 @@ class Opt {
 					nOut++;
 				}
 			if (nOut != 1 || outside.mark != inOrder) continue;
-			// what the loop may write
+			// what the loop may write; a loop with calls is left alone (what
+			// would leave it is cheap to compute again, and would stay live
+			// across the calls: a callee-saved register or a reload)
 			var kills = 0;
+			var calls = false;
 			for (b in members)
 				for (i in b.ins)
-					if (!i.dead) kills |= killMask(i);
+					if (!i.dead) {
+						kills |= killMask(i);
+						if (i.op == Call && !b.cold) calls = true;
+					}
+			if (calls) continue;
 			// the movable instructions, in reverse postorder of their blocks
 			members.sort((x, y) -> x.tmp - y.tmp);
 			var hoist:Array<MIns> = [];
