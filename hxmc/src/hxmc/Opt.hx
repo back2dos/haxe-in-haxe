@@ -14,6 +14,10 @@ import hxmc.Mir;
 //    does a join where the predecessors disagree, or a loop header whose
 //    loop writes it.
 //  - dead code: pure operations and loads nothing uses.
+//  - branches decided by a dominating branch on the same comparison.
+//  - loop-invariant code motion: pure operations, and loads that cannot
+//    fault of memory the loop does not write, move to a block before the
+//    loop.
 class Opt {
 	// memory classes (MIns.mem)
 	public static inline var MOther = 0; // anything: written by any store or call
@@ -72,6 +76,306 @@ class Opt {
 		}
 		rewrite();
 		dce();
+		if (condProp()) {
+			pruneBlocks();
+			mergeBlocks();
+			dce();
+		}
+		if (licmOn)
+			for (_ in 0...3)
+				if (!licm()) break;
+	}
+
+	static var licmOn = Sys.getEnv("HXMC_LICM") != "0";
+
+	// ---- loop-invariant code motion
+
+	// A load that cannot fault wherever it moves: of a global variable (the
+	// globals table, or a scalar global's own symbol), of immutable memory
+	// at a symbol, of a thread-local variable.
+	static inline function safeLoad(i:MIns, vals:Array<MIns>):Bool
+		return i.op == TlsLoad || i.op == Load && (i.mem == MGlobal || i.mem == MConst && i.b < 0 && vals[i.a].op == SymAddr);
+
+	// One round, over the loops that hold no loop moved from in this round
+	// (the caller repeats: what left an inner loop may then leave its outer
+	// one). A loop needs a single predecessor from outside (its edge is
+	// split when that block has other successors); what moves keeps its
+	// order at the end of that block. Returns whether anything moved.
+	function licm():Bool {
+		var order = rpo();
+		var n = order.length;
+		if (n < 2) return false;
+		var dom = dominators(order);
+		var idom = dom.idom;
+		var inOrder = order[0].mark; // (set by dominators: tmp is the reverse postorder index)
+		var vals = f.vals;
+		var body:Array<Bool> = [];
+		var inv:Array<Bool> = [];
+		var moved = false;
+		var nextBlock = 0;
+		for (b in f.blocks)
+			if (b.id >= nextBlock) nextBlock = b.id + 1;
+		var k = n;
+		while (k-- > 1) { // inner loops first: their headers come later
+			var h = order[k];
+			if (h.handler) continue;
+			var latches = [];
+			for (p in h.preds)
+				if (p.mark == inOrder && p.tmp >= k) {
+					var x = p.tmp;
+					while (x > k)
+						x = idom[x];
+					if (x == k) latches.push(p);
+				}
+			if (latches.length == 0) continue;
+			// the loop: the blocks reaching a latch without passing the header
+			body.resize(0);
+			body.resize(n);
+			body[k] = true;
+			var members = [h];
+			var stack = [];
+			var ok = true;
+			for (l in latches)
+				if (!body[l.tmp]) {
+					body[l.tmp] = true;
+					members.push(l);
+					stack.push(l);
+				}
+			while (stack.length > 0 && ok) {
+				var b = stack.pop();
+				for (p in b.preds) {
+					if (p.mark != inOrder) {
+						ok = false; // a block made this round (a loop inside already moved from)
+						break;
+					}
+					if (!body[p.tmp]) {
+						body[p.tmp] = true;
+						members.push(p);
+						stack.push(p);
+					}
+				}
+			}
+			if (!ok) continue;
+			// the single way in
+			var outside:Null<MBlock> = null, nOut = 0;
+			for (p in h.preds)
+				if (p.mark != inOrder || !body[p.tmp]) {
+					outside = p;
+					nOut++;
+				}
+			if (nOut != 1 || outside.mark != inOrder) continue;
+			// what the loop may write
+			var kills = 0;
+			for (b in members)
+				for (i in b.ins)
+					if (!i.dead) kills |= killMask(i);
+			// the movable instructions, in reverse postorder of their blocks
+			members.sort((x, y) -> x.tmp - y.tmp);
+			var hoist:Array<MIns> = [];
+			if (inv.length < vals.length) inv.resize(vals.length);
+			inline function invariant(v:Int):Bool
+				return v < 0 || inv[v] || {
+					var d = vals[v].block;
+					d == null || d.mark != inOrder || !body[d.tmp];
+				};
+			for (b in members)
+				for (i in b.ins) {
+					if (i.dead) continue;
+					var can = switch i.op {
+						case Const | ConstF | SymAddr | StackAddr: true;
+						case Cmp: false; // (fused with its branch)
+						case Load | TlsLoad:
+							safeLoad(i, vals) && kills & (1 << (i.op == TlsLoad ? MTls : i.mem)) == 0;
+						case op: pure(op);
+					};
+					if (!can || !invariant(i.a) || !invariant(i.b) || !invariant(i.c)) continue;
+					inv[i.id] = true;
+					hoist.push(i);
+				}
+			// (inv: what leaves this loop)
+			for (i in hoist)
+				inv[i.id] = false;
+			// only constants: nothing worth a block
+			var worth = false;
+			for (i in hoist)
+				if (i.op != Const && i.op != ConstF && i.op != SymAddr && i.op != StackAddr) worth = true;
+			if (!worth) continue;
+			// the block before the loop
+			var pre = outside;
+			if (outside.succs.length != 1) {
+				var t = outside.term();
+				var count = 0;
+				for (x in t.targets)
+					if (x == h) count++;
+				if (count != 1 || t.op == Switch) continue;
+				pre = new MBlock(nextBlock++);
+				pre.cold = h.cold && outside.cold;
+				pre.sealed = pre.filled = true;
+				var j = new MIns(Jmp, Void);
+				j.id = vals.length;
+				vals.push(j);
+				j.block = pre;
+				j.targets = [h];
+				pre.ins = [j];
+				pre.preds = [outside];
+				pre.succs = [h];
+				for (q in 0...t.targets.length)
+					if (t.targets[q] == h) t.targets[q] = pre;
+				for (q in 0...outside.succs.length)
+					if (outside.succs[q] == h) outside.succs[q] = pre;
+				for (q in 0...h.preds.length)
+					if (h.preds[q] == outside) h.preds[q] = pre;
+				f.blocks.push(pre);
+			}
+			// move
+			var term = pre.ins.pop();
+			for (i in hoist) {
+				i.block.ins.remove(i);
+				i.block = pre;
+				pre.ins.push(i);
+			}
+			pre.ins.push(term);
+			moved = true;
+		}
+		return moved;
+	}
+
+	// ---- conditions known from dominating branches
+
+	// A branch on a comparison already decided on the way (a block reached
+	// only through one edge of a branch on the same comparison, or on its
+	// negation, dominates it) is a jump: the repeated tests of an array's
+	// element kind, of a value against null. Returns whether a branch changed.
+	function condProp():Bool {
+		var order = rpo();
+		var n = order.length;
+		if (n < 3) return false;
+		var dom = dominators(order);
+		var childHead = dom.childHead, childNext = dom.childNext;
+		var vals = f.vals;
+		// the facts in force: comparison (cond, a, b) is `val`
+		var fc:Array<Int> = [], fa:Array<Int> = [], fb:Array<Int> = [], fv:Array<Bool> = [];
+		var changed = false;
+		var stack = [0], state = [0], depth:Array<Int> = [];
+		while (stack.length > 0) {
+			var top = stack.length - 1;
+			var bk = stack[top];
+			var b = order[bk];
+			if (state[top] == 0) {
+				state[top] = 1;
+				depth.push(fc.length);
+				if (b.preds.length == 1) {
+					var p = b.preds[0];
+					var t = p.term();
+					if (t != null && t.op == Br && t.targets[0] != t.targets[1]) {
+						var c = vals[t.a];
+						if (c.op == Cmp && !c.dead) {
+							fc.push(c.imm);
+							fa.push(c.a);
+							fb.push(c.b);
+							fv.push(b == t.targets[0]);
+						}
+					}
+				}
+				var t = b.term();
+				if (t != null && t.op == Br && t.targets[0] != t.targets[1] && fc.length > 0) {
+					var c = vals[t.a];
+					if (c.op == Cmp) {
+						var known = 0; // 1 true, 2 false
+						var k = fc.length;
+						while (k-- > 0 && known == 0) {
+							var same = fa[k] == c.a && fb[k] == c.b;
+							var swapped = fa[k] == c.b && fb[k] == c.a;
+							if (same && fc[k] == c.imm) known = fv[k] ? 1 : 2;
+							else if ((same || swapped) && isEqNe(fc[k]) && isEqNe(c.imm)) {
+								// x == y against y != x, x != y, ...
+								known = (fv[k] == (fc[k] == c.imm)) ? 1 : 2;
+							}
+						}
+						if (known != 0) {
+							var keep = known == 1 ? t.targets[0] : t.targets[1];
+							var drop = known == 1 ? t.targets[1] : t.targets[0];
+							var q = drop.preds.indexOf(b);
+							if (q >= 0) {
+								drop.preds.splice(q, 1);
+								for (i in drop.ins)
+									if (i.op == Phi) i.args.splice(q, 1);
+							}
+							t.op = Jmp;
+							t.a = -1;
+							t.targets = [keep];
+							b.succs = [keep];
+							changed = true;
+						}
+					}
+				}
+				var ch = childHead[bk];
+				while (ch >= 0) {
+					stack.push(ch);
+					state.push(0);
+					ch = childNext[ch];
+				}
+			} else {
+				stack.pop();
+				state.pop();
+				var m = depth.pop();
+				fc.resize(m);
+				fa.resize(m);
+				fb.resize(m);
+				fv.resize(m);
+			}
+		}
+		return changed;
+	}
+
+	static inline function isEqNe(c:Int):Bool
+		return c == (CEq : Int) || c == (CNe : Int);
+
+	// immediate dominators (Cooper, Harvey and Kennedy) as reverse postorder
+	// indices, and the dominator tree's children lists
+	function dominators(order:Array<MBlock>):{idom:Array<Int>, childHead:Array<Int>, childNext:Array<Int>} {
+		var n = order.length;
+		var inOrder = f.newMark();
+		for (k in 0...n) {
+			order[k].mark = inOrder;
+			order[k].tmp = k;
+		}
+		var idom = [for (_ in 0...n) -1];
+		idom[0] = 0;
+		var preds = [for (b in order) [for (p in b.preds) if (p.mark == inOrder) p.tmp]];
+		var changed = true;
+		while (changed) {
+			changed = false;
+			for (k in 1...n) {
+				var d = -1;
+				for (p in preds[k]) {
+					if (idom[p] < 0) continue;
+					if (d < 0) d = p else {
+						var x = p, y = d;
+						while (x != y) {
+							while (x > y)
+								x = idom[x];
+							while (y > x)
+								y = idom[y];
+						}
+						d = x;
+					}
+				}
+				if (d >= 0 && idom[k] != d) {
+					idom[k] = d;
+					changed = true;
+				}
+			}
+		}
+		var childHead = [for (_ in 0...n) -1], childNext = [for (_ in 0...n) -1];
+		var k = n - 1;
+		while (k >= 1) {
+			var d = idom[k];
+			childNext[k] = childHead[d];
+			childHead[d] = k;
+			k--;
+		}
+		return {idom: idom, childHead: childHead, childNext: childNext};
 	}
 
 	// ---- control flow
@@ -168,7 +472,11 @@ class Opt {
 			}
 		}
 		pruneBlocks();
-		// merge a block into its only predecessor that jumps to it
+		mergeBlocks();
+	}
+
+	// a block that jumps to a block with no other predecessor absorbs it
+	function mergeBlocks() {
 		var gone = f.newMark();
 		for (b in f.blocks) {
 			if (b.mark == gone) continue;
