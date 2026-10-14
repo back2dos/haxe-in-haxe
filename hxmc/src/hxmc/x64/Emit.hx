@@ -49,6 +49,18 @@ class Emit implements hxmc.Target.Emitter {
 
 	var slotOff:Array<Int>;
 	var frameSize = 0;
+
+	// HXMC_SIZE_STATS=1: bytes of code by instruction kind, hot and cold
+	// blocks, frame slots and other memory, prologue and epilogues (all functions, all threads)
+	public static var sizeStats = Sys.getEnv("HXMC_SIZE_STATS") == "1";
+	static var statLock = new sys.thread.Mutex();
+	public static var statBytes = new Map<String, Int>();
+
+	static function stat(k:String, n:Int) {
+		statLock.acquire();
+		statBytes.set(k, (statBytes.exists(k) ? statBytes.get(k) : 0) + n);
+		statLock.release();
+	}
 	var saved:Array<Int>;
 	var savedX:Array<Int>; // Win64: xmm6-15 used, saved in the frame (all 128 bits)
 	var savedXOff:Array<Int>;
@@ -94,6 +106,7 @@ class Emit implements hxmc.Target.Emitter {
 		} else if (frameSize > 0) a.aluRI(Asm.SUB, 8, Asm.RSP, frameSize);
 		for (k in 0...savedX.length)
 			a.movupsMR(new Mem(Asm.RSP, savedXOff[k]), savedX[k]);
+		if (sizeStats) stat("prologue", text.buf.len - start);
 		for (b in f.blocks)
 			b.label = a.newLabel();
 		var tables:Array<{label:Int, entries:Array<LBlock>}> = [];
@@ -114,10 +127,30 @@ class Emit implements hxmc.Target.Emitter {
 					case _:
 				}
 			}
-			for (i in b.ins)
-				ins(i, next, tables);
+			if (sizeStats) {
+				for (i in b.ins) {
+					var at = text.buf.len;
+					var ep = epilogueBytes;
+					ins(i, next, tables);
+					var nb = text.buf.len - at;
+					var kind = Std.string(i.op);
+					if ((i.op : XOp) == LOAD || (i.op : XOp) == STORE || (i.op : XOp) == STOREI)
+						kind += (i.base == LIns.FRAME ? "-frame" : i.base < 0 ? "-sym" : "-mem") + i.mem;
+					if ((i.op : XOp) == STOREI) kind += i.imm == 0 && i.isym == null ? "z" : "c";
+					stat((b.cold ? "cold " : "hot ") + kind, nb - (epilogueBytes - ep));
+					stat(b.cold ? "cold" : "hot", nb);
+				}
+			} else
+				for (i in b.ins)
+					ins(i, next, tables);
 		}
+		var tf = text.buf.len;
 		a.finish(start);
+		if (sizeStats) {
+			stat("epilogue", epilogueBytes);
+			stat("finish (branch relaxation)", text.buf.len - tf);
+			epilogueBytes = 0;
+		}
 		// jump tables: 32-bit offsets from the table
 		for (t in tables) {
 			text.buf.align(4, 0);
@@ -160,7 +193,10 @@ class Emit implements hxmc.Target.Emitter {
 	static inline function isX(r:Int):Bool
 		return r >= 16;
 
+	var epilogueBytes = 0;
+
 	function epilogue() {
+		var at = text.buf.len;
 		for (k in 0...savedX.length)
 			a.movupsRM(savedX[k], new Mem(Asm.RSP, savedXOff[k]));
 		if (frameSize > 0) a.aluRI(Asm.ADD, 8, Asm.RSP, frameSize);
@@ -168,6 +204,7 @@ class Emit implements hxmc.Target.Emitter {
 		while (k-- > 0)
 			a.pop(saved[k]);
 		a.ret();
+		epilogueBytes += text.buf.len - at;
 	}
 
 	function ins(i:LIns, next:Null<LBlock>, tables:Array<{label:Int, entries:Array<LBlock>}>) {

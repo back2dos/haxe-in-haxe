@@ -21,6 +21,7 @@ class LIns {
 	public var slot:Int = -1; // frame slot (base == FRAME)
 	public var sym:Null<String>;
 	public var secrel:Null<String>; // [base + the offset of this TLS variable in .tls] (Windows)
+	public var mem = -1; // LOAD/STORE: the Mir memory class (statistics)
 	public var dsym:Null<String>; // [base + disp + this absolute symbol] (x86-64: a global's offset)
 	public var imm:Int = 0;
 	public var isym:Null<String>; // the immediate is this absolute symbol + imm

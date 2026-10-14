@@ -964,6 +964,7 @@ class Isel implements hxmc.Target.Selector {
 				x.size = i.size;
 				x.flag = i.signed;
 				memOf(x, i.a, i.b, i.imm2, i.imm);
+				x.mem = i.mem;
 			case Store:
 				var imm = immOf(i.c);
 				var x = emit(imm != null && !isF(i.c) ? STOREI : STORE);
@@ -973,6 +974,7 @@ class Isel implements hxmc.Target.Selector {
 					x.isym = isymOf(i.c);
 				} else x.s1 = use(i.c);
 				memOf(x, i.a, i.b, i.imm2, i.imm);
+				x.mem = i.mem;
 			case Call:
 				call(i);
 			case Jmp:

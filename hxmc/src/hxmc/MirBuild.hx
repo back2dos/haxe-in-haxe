@@ -44,6 +44,7 @@ class MirBuild {
 		return nslots;
 
 	static var noShadow = Sys.getEnv("HXMC_NOSHADOW") == "1";
+	static var frameSpills = Sys.getEnv("HXMC_FRAMESPILL") != "0"; // (measurement: 0 pushes on every slow path)
 
 	public var icaches = 0; // inline caches of this function (bss: <name>__ic, IC_SIZE each)
 	public var icSym:String;
@@ -655,6 +656,20 @@ class MirBuild {
 			refSlot = new Map();
 			nslots = 0;
 		}
+		// a function with a frame keeps the references its slow paths spill
+		// in slots of its own after its locals' (no push and pop on the slow
+		// paths); one without one pushes them there
+		if (nslots > 0 && !noShadow && frameSpills) {
+			var most = 1; // (an array store's value: one more)
+			for (list in roots.spills) {
+				var n = 1;
+				for (l in list)
+					if (!refSlot.exists(l)) n++;
+				if (n > most) most = n;
+			}
+			spillBase = nslots;
+			nslots += most;
+		}
 		var entry = newBlock();
 		f.entry = entry;
 		seal(entry);
@@ -1131,9 +1146,17 @@ class MirBuild {
 		return obj;
 	}
 
+	var spillBase = -1; // the frame's spill slots (none: pushed on the slow path)
+
 	// stores the cold site's references in a pushed area (null: none)
 	function spillOpen(list:Null<Array<Local>>, extra:Int):Int {
 		if (list == null || list.length + extra == 0) return -1;
+		if (spillBase >= 0) {
+			var at = op2(Add, I64, fr, lconst32(8 * spillBase));
+			for (k in 0...list.length)
+				storeM(Opt.MFrame, 8, at, 8 * k, readLocal(list[k]));
+			return at;
+		}
 		var sp = tlsLoad("rt_sp");
 		var top = op2(Add, I64, sp, lconst32(8 * (list.length + extra)));
 		tlsStore("rt_sp", top);
@@ -1146,8 +1169,8 @@ class MirBuild {
 	function spillClose(list:Null<Array<Local>>, sp:Int) {
 		if (sp < 0) return;
 		for (k in 0...list.length)
-			writeLocal(list[k], load(I64, 8, sp, 8 * k));
-		tlsStore("rt_sp", sp);
+			writeLocal(list[k], spillBase >= 0 ? loadM(Opt.MFrame, I64, 8, sp, 8 * k) : load(I64, 8, sp, 8 * k));
+		if (spillBase < 0) tlsStore("rt_sp", sp);
 	}
 
 	// ---- cold statements
