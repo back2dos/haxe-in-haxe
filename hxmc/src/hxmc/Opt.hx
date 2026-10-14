@@ -35,7 +35,23 @@ class Opt {
 	// type-correct program reads a field at its own offset); MField's own
 	// version is that of fields at dynamic offsets (anonymous objects)
 	static inline var MFieldAt = 10;
-	static inline var NCLS = 18;
+	// the runtime's thread-locals the code uses most, apart (distinct
+	// variables: a store to one leaves loads of the others alone)
+	static inline var MTlsSp = 18; // rt_sp
+	static inline var MTlsHw = 19; // rt_sp_hw
+	static inline var MTlsYp = 20; // rt_young_ptr
+	static inline var MTlsYl = 21; // rt_young_limit
+	static inline var NCLS = 22;
+	static inline var TLS_BITS = (1 << MTls) | (1 << MTlsSp) | (1 << MTlsHw) | (1 << MTlsYp) | (1 << MTlsYl);
+
+	static function tlsClass(sym:String):Int
+		return switch sym {
+			case "rt_sp": MTlsSp;
+			case "rt_sp_hw": MTlsHw;
+			case "rt_young_ptr": MTlsYp;
+			case "rt_young_limit": MTlsYl;
+			case _: MTls;
+		};
 	static inline var FIELD_BITS = ((1 << 8) - 1) << MFieldAt;
 
 	// runtime functions that write no memory the code reads and do not collect
@@ -185,7 +201,7 @@ class Opt {
 						case Const | ConstF | SymAddr | StackAddr: true;
 						case Cmp: false; // (fused with its branch)
 						case Load | TlsLoad:
-							safeLoad(i, vals) && kills & (1 << (i.op == TlsLoad ? MTls : i.mem)) == 0;
+							safeLoad(i, vals) && kills & (1 << (i.op == TlsLoad ? tlsClass(i.sym) : i.mem)) == 0;
 						case op: pure(op);
 					};
 					if (!can || !invariant(i.a) || !invariant(i.b) || !invariant(i.c)) continue;
@@ -596,6 +612,7 @@ class Opt {
 			// the last store per (base, disp, size) of fields and new objects
 			var keyBase:Array<Int> = [], keyDisp:Array<Int> = [], keySize:Array<Int> = [];
 			var keyStore:Array<MIns> = [], keySeen:Array<Bool> = [];
+			var tlsVal = new Map<String, Int>(); // the value last stored to a thread-local here
 			inline function clear() {
 				keyBase.resize(0);
 				keyDisp.resize(0);
@@ -658,10 +675,20 @@ class Opt {
 							for (k in 0...keySeen.length)
 								keySeen[k] = true;
 					case Call:
-						if (i.returnsTwice || i.sym == null || !readOnly.exists(i.sym)) clear() else
+						if (i.returnsTwice || i.sym == null || !readOnly.exists(i.sym)) {
+							clear();
+							tlsVal.clear();
+						} else
 							for (k in 0...keySeen.length)
 								keySeen[k] = true;
-					case TlsLoad | TlsStore:
+					case TlsStore:
+						tlsVal.set(i.sym, res(i.a));
+					case TlsLoad:
+						var v = tlsVal.get(i.sym);
+						if (v != null) {
+							repl[i.id] = v;
+							i.dead = true;
+						}
 					case _:
 				}
 			}
@@ -720,12 +747,12 @@ class Opt {
 			case Store:
 				switch i.mem {
 					case MInit: 0;
-					case MOther: ((1 << NCLS) - 1) & ~(1 << MConst) & ~(1 << MCallOnly) & ~(1 << MTls);
+					case MOther: ((1 << NCLS) - 1) & ~(1 << MConst) & ~(1 << MCallOnly) & ~TLS_BITS;
 					case MField if (i.b < 0): (1 << fieldClass(i)) | (1 << MField) | (1 << MOther);
 					case MField: FIELD_BITS | (1 << MField) | (1 << MOther);
 					case c: (1 << c) | (1 << MOther);
 				}
-			case TlsStore: 1 << MTls;
+			case TlsStore: 1 << tlsClass(i.sym);
 			case Call if (i.returnsTwice || i.sym == null || !readOnly.exists(i.sym)): ((1 << NCLS) - 1) & ~(1 << MConst);
 			case _: 0;
 		};
@@ -779,7 +806,7 @@ class Opt {
 			}
 			for (i in b.ins) {
 				if (i.dead) continue;
-				if (i.op == Load) ver[i.id] = v[i.mem == MField && i.b < 0 ? fieldClass(i) : i.mem] else if (i.op == TlsLoad) ver[i.id] = v[MTls];
+				if (i.op == Load) ver[i.id] = v[i.mem == MField && i.b < 0 ? fieldClass(i) : i.mem] else if (i.op == TlsLoad) ver[i.id] = v[tlsClass(i.sym)];
 				var m = killMask(i);
 				if (m != 0)
 					for (c in 0...NCLS)
