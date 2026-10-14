@@ -27,18 +27,30 @@ void *hxmc_tls_base(void) { return &hxmc_tls_start; }
 #ifdef _WIN32
 // Windows: a crash names its exception and the address in the image (the
 // image has no unwind information for generated code, so neither a
-// debugger's stack trace nor an unhandled-exception filter can be relied on)
+// debugger's stack trace nor an unhandled-exception filter can be relied
+// on). Installed by a TLS callback, before the C runtime starts; written
+// without the C library.
 #include <windows.h>
-#include <stdio.h>
+static void hxmc_hex(char *p, unsigned long long v, int n) {
+	for (int i = n - 1; i >= 0; i--, v >>= 4) p[i] = "0123456789abcdef"[v & 15];
+}
 static LONG CALLBACK hxmc_crash(EXCEPTION_POINTERS *e) {
 	DWORD c = e->ExceptionRecord->ExceptionCode;
 	if (c == EXCEPTION_ACCESS_VIOLATION || c == EXCEPTION_ILLEGAL_INSTRUCTION || c == EXCEPTION_PRIV_INSTRUCTION || c == EXCEPTION_STACK_OVERFLOW ||
-		c == EXCEPTION_INT_DIVIDE_BY_ZERO || c == EXCEPTION_DATATYPE_MISALIGNMENT || c == EXCEPTION_IN_PAGE_ERROR) {
+		c == EXCEPTION_INT_DIVIDE_BY_ZERO || c == EXCEPTION_DATATYPE_MISALIGNMENT || c == EXCEPTION_IN_PAGE_ERROR || c == 0xC00000AA) {
 		char *a = (char *)e->ExceptionRecord->ExceptionAddress, *base = (char *)GetModuleHandleA(NULL);
-		fprintf(stderr, "hxmc: exception 0x%08lx at %p (image + 0x%llx)\n", (unsigned long)c, (void *)a, (unsigned long long)(a - base));
-		fflush(stderr);
+		char msg[] = "hxmc: exception 0x00000000 at image + 0x0000000000000000\n";
+		hxmc_hex(msg + 18, c, 8);
+		hxmc_hex(msg + 40, (unsigned long long)(a - base), 16);
+		DWORD n;
+		WriteFile(GetStdHandle(STD_ERROR_HANDLE), msg, sizeof msg - 1, &n, NULL);
 	}
 	return EXCEPTION_CONTINUE_SEARCH;
 }
-__attribute__((constructor)) static void hxmc_crash_init(void) { AddVectoredExceptionHandler(0, hxmc_crash); }
+static void NTAPI hxmc_crash_init(PVOID h, DWORD reason, PVOID r) {
+	(void)h;
+	(void)r;
+	if (reason == DLL_PROCESS_ATTACH) AddVectoredExceptionHandler(0, hxmc_crash);
+}
+__attribute__((section(".CRT$XLB"), used)) PIMAGE_TLS_CALLBACK hxmc_crash_tls = hxmc_crash_init;
 #endif

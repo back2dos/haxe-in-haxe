@@ -7,10 +7,11 @@ with the reference compiler's, written on Linux (hxmc/tools/hxbcmp.py).
         --ref <self-ref.hxb> --ref-root <dir> --root <dir> [--summary <file>]
 
 The source and std are copied to <root>/src and <root>/std and the port runs
-in <root> (HAXE_STD_PATH=<root>/std), as the reference did in <ref-root>:
-the archive names the modules' files by absolute path, so with the same root
-the archives must be byte-identical, and with another one (Windows: D:\\...)
-identical once each root is replaced by the same placeholder.
+in <root> (HAXE_STD_PATH=std), as the reference did in <ref-root>. With
+relative class paths, positions name files relatively; only each module's
+own file is an absolute path, so with the same root the archives must be
+byte-identical, and with another one (Windows: D:\\...) identical once each
+root is replaced by the same placeholder.
 """
 import argparse, os, shutil, stat, subprocess, sys, time
 from pathlib import Path
@@ -38,7 +39,7 @@ def main():
             shutil.rmtree(root / name)
         shutil.copytree(src, root / name)
     out = root / "self.hxb"
-    env = dict(os.environ, HAXE_STD_PATH=str(root / "std"))
+    env = dict(os.environ, HAXE_STD_PATH="std")
     t = time.perf_counter()
     r = subprocess.run([str(port), "-cp", "src", "-main", "haxe.Main", "-D", "disable-parallelism", "--interp", "--no-output", "--hxb", str(out)],
                        cwd=root, env=env, capture_output=True)

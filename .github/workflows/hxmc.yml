@@ -178,7 +178,7 @@ jobs:
           sudo mkdir -p "$SELF_ROOT" && sudo chown "$USER" "$SELF_ROOT"
           cp -r src "$SELF_ROOT/src"
           cp -r haxe/std "$SELF_ROOT/std"
-          (cd "$SELF_ROOT" && HAXE_STD_PATH="$SELF_ROOT/std" "$GITHUB_WORKSPACE/haxe/haxe" -cp src -main haxe.Main -D disable-parallelism --interp --no-output --hxb self-ref.hxb)
+          (cd "$SELF_ROOT" && HAXE_STD_PATH=std "$GITHUB_WORKSPACE/haxe/haxe" -cp src -main haxe.Main -D disable-parallelism --interp --no-output --hxb self-ref.hxb)
           mkdir -p dist/self
           cp "$SELF_ROOT/self-ref.hxb" dist/self/
           tar czf dist/self/std.tar.gz -C haxe std
