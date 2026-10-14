@@ -680,13 +680,22 @@ class MirBuild {
 		var sp = tlsLoad("rt_sp");
 		var top = op2(Add, I64, sp, lconst32(8 * n));
 		tlsStore("rt_sp", top);
-		var hw = tlsLoad("rt_sp_hw");
-		var s = mk(Select, I64);
-		s.a = cmp(CUGt, top, hw);
-		s.b = top;
-		s.c = hw;
-		tlsStore("rt_sp_hw", add(s));
+		raiseHw(top);
 		return sp;
+	}
+
+	// rt_sp_hw = max(rt_sp_hw, top): rarely raised (after a collection), on a slow path
+	function raiseHw(top:Int) {
+		var hw = tlsLoad("rt_sp_hw");
+		var up = newBlock(), done = newBlock();
+		up.cold = true;
+		br(cmp(CUGt, top, hw), up, done);
+		seal(up);
+		cur = up;
+		tlsStore("rt_sp_hw", top);
+		jmp(done);
+		seal(done);
+		cur = done;
 	}
 
 	function popFrame() {
@@ -1051,12 +1060,7 @@ class MirBuild {
 		var sp = tlsLoad("rt_sp");
 		var top = op2(Add, I64, sp, lconst32(8 * (list.length + extra)));
 		tlsStore("rt_sp", top);
-		var hw = tlsLoad("rt_sp_hw");
-		var s = mk(Select, I64);
-		s.a = cmp(CUGt, top, hw);
-		s.b = top;
-		s.c = hw;
-		tlsStore("rt_sp_hw", add(s));
+		raiseHw(top);
 		for (k in 0...list.length)
 			store(8, sp, 8 * k, readLocal(list[k]));
 		return sp;

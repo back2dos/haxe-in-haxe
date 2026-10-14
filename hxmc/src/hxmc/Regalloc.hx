@@ -162,7 +162,7 @@ class Regalloc {
 				if (pr.id >= b.id && !pr.cold)
 					for (k in b.id...pr.id + 1)
 						f.blocks[k].loopDepth++;
-		for (round in 0...8) {
+		for (round in 0...64) {
 			rounds++;
 			for (b in f.blocks)
 				insns += b.ins.length;
