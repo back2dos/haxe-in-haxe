@@ -25,7 +25,7 @@ files="rt rt_dyn rt_str rt_ssl rt_uv rt_thread rt_census"
 case $target in
 windows-*)
 	CFLAGS="-O2 -g0 -w -fno-strict-aliasing -DHXMC_NO_SSL -DHXMC_NO_UV -I $ROOT/hxmc/rt"
-	files="$files rt_win rt_sys_win rt_net_win" ;;
+	files="$files rt_win rt_net_win" ;;
 macos-*)
 	# position-independent (macOS executables are), against libSystem;
 	# arm64 macOS calls main on its own stack without ucontext already
@@ -45,7 +45,15 @@ wait
 libm="memset memcpy fmod floor ceil sin cos tan asin acos atan atan2 exp log pow sqrt"
 libm="$libm memmove memcmp strlen strcmp malloc free strtod rand clock_gettime mktime"
 case $target in
-windows-*) libm="$libm _mktime64 _localtime64_s _gmtime64_s" ;;
+windows-*)
+	libm="$libm _mktime64 _localtime64_s _gmtime64_s"
+	# hxmc/std/hxmc/unsafe/Win32.hx (the UCRT's part; kernel32's are imports)
+	libm="$libm _write _read _close _wopen _lseeki64 _telli64 _fstat64 _wstat64 _wgetenv _wputenv_s _wgetcwd _wchdir"
+	libm="$libm _wsystem _wmkdir _wunlink _wrmdir _getch _getche _errno _open_osfhandle _get_osfhandle fflush exit realloc"
+	libm="$libm GetEnvironmentStringsW FreeEnvironmentStringsW Sleep GetSystemTimePreciseAsFileTime GetProcessTimes"
+	libm="$libm GetCurrentProcess GetModuleFileNameW GetStdHandle GetFileType GetFileAttributesW SetFileAttributesW MoveFileExW"
+	libm="$libm RemoveDirectoryW FindFirstFileW FindNextFileW FindClose GetLastError GetFullPathNameW DuplicateHandle CloseHandle"
+	libm="$libm SearchPathW CreateFileW CreatePipe CreateProcessW WaitForSingleObject GetExitCodeProcess TerminateProcess" ;;
 *)
 	libm="$libm localtime_r gmtime_r"
 	# hxmc/std/hxmc/unsafe/Posix.hx

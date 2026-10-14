@@ -324,8 +324,15 @@ class Isel implements hxmc.Target.Selector {
 			cur = lb[b.id];
 			var next = bi + 1 < layout.length ? layout[bi + 1] : null;
 			var pendingBase = bi == 0 && usesTls && abi.tls == MachoTlv;
-			for (i in b.ins) {
-				if (pendingBase && i.op != Param) {
+			// after the last parameter (the call clobbers their registers;
+			// constants such as MirBuild.zeroAt's may come before them)
+			var lastParam = -1;
+			if (pendingBase)
+				for (k in 0...b.ins.length)
+					if (b.ins[k].op == Param) lastParam = k;
+			for (k in 0...b.ins.length) {
+				var i = b.ins[k];
+				if (pendingBase && k > lastParam) {
 					pendingBase = false;
 					macTlsBase();
 				}
