@@ -379,7 +379,10 @@ bin/hxmc-fast/hxmc: bin/hxmc/hxmc
 	ln -sfn ../hxmc/rt bin/hxmc-fast/rt
 
 HXMC_RT_FILES := rt rt_dyn rt_std rt_str rt_sys rt_net rt_ssl rt_uv rt_thread rt_census
-hxmc-rt: $(foreach f,$(HXMC_RT_FILES),bin/hxmc/rt-dev/$(f).o)
+hxmc-rt: $(foreach f,$(HXMC_RT_FILES),bin/hxmc/rt-dev/$(f).o) bin/hxmc/rt-dev/rthxmc.o
+bin/hxmc/rt-dev/rthxmc.o: hxmc/tools/rthxmc.c hxc/rt/rt.h
+	@mkdir -p $(dir $@)
+	clang -O2 $(CFLAGS_BASE) $(NO_TLS_UV) -I hxc/rt -c $< -o $@
 bin/hxmc/rt-dev/%.o: hxc/rt/%.c hxc/rt/rt.h hxc/rt/rt_gc.h
 	@mkdir -p $(dir $@)
 	clang -O2 $(CFLAGS_BASE) $(NO_TLS_UV) -c $< -o $@

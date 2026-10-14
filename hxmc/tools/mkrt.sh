@@ -29,6 +29,9 @@ for f in $files; do
 	$ZIG cc -target $triple $CFLAGS -c "$ROOT/hxc/rt/$f.c" -o "$out/obj/$f.o" &
 	objs="$objs $out/obj/$f.o"
 done
+# the slow paths of generated code (rthxmc.c)
+$ZIG cc -target $triple $CFLAGS -c "$ROOT/hxmc/tools/rthxmc.c" -o "$out/obj/rthxmc.o" &
+objs="$objs $out/obj/rthxmc.o"
 wait
 # what generated code calls in the C library besides the runtime (MirBuild)
 libm="memset memcpy fmod floor ceil sin cos tan asin acos atan atan2 exp log pow sqrt"

@@ -983,21 +983,13 @@ class MirBuild {
 		var ye = loadM(Opt.MCallOnly, I64, 8, symAddr("rt_young_end"), 0);
 		var size = op2(Sub, I64, ye, ys);
 		var done = newBlock();
-		var b2 = newBlock(), b3 = newBlock(), b4 = newBlock();
+		var b2 = newBlock();
 		b2.cold = true;
-		b3.cold = true;
-		b4.cold = true;
-		// the object is not young
+		// the object is not young: the rest in the runtime (rthxmc.c)
 		br(cmp(CULt, op2(Sub, I64, obj, ys), size), done, b2);
 		seal(b2);
 		cur = b2;
-		br(cmp(CULt, op2(Sub, I64, val, ys), size), b3, done);
-		seal(b3);
-		cur = b3;
-		br(cmp(CULt, op2(Sub, I64, prev, ys), size), done, b4);
-		seal(b4);
-		cur = b4;
-		call("rt_write_barrier", [obj, slot, val], Void);
+		call("hxmc_barrier_slow", [obj, slot, val, prev], Void);
 		jmp(done);
 		seal(done);
 		cur = done;
@@ -1035,8 +1027,8 @@ class MirBuild {
 		cur = slow;
 		var list = coldList;
 		var sp = spillOpen(list, 0);
-		var hdr = op2(Or, I64, lconst(hdrLo(n, kind), 0), op2(Shl, I64, op1(ZExt, I64, tyConst(tidx)), iconst(32)));
-		var r = call("rt_alloc_slow", [hdr, iconst(bytes)], I64);
+		// (the header is assembled in the runtime, rthxmc.c)
+		var r = call("hxmc_alloc_slow", [iconst(hdrLo(n, kind)), tyConst(tidx), iconst(bytes)], I64);
 		spillClose(list, sp);
 		writeVar(res, cur, r);
 		jmp(join);

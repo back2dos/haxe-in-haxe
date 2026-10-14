@@ -35,7 +35,9 @@ class Opt {
 	static inline var FIELD_BITS = ((1 << 8) - 1) << MFieldAt;
 
 	// runtime functions that write no memory the code reads and do not collect
-	static var readOnly = ["hx_aget_i_slow" => true, "hx_aget_f_slow" => true, "hx_aget_l_slow" => true, "rt_write_barrier" => true];
+	static var readOnly = [
+		"hx_aget_i_slow" => true, "hx_aget_f_slow" => true, "hx_aget_l_slow" => true, "rt_write_barrier" => true, "hxmc_barrier_slow" => true
+	];
 
 	var f:MFunc;
 	var repl:Array<Int>;
