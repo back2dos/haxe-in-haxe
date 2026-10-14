@@ -8,16 +8,15 @@ import hxmc.unsafe.Mem;
 import hxmc.unsafe.Posix;
 import hxmc.unsafe.Ptr;
 
-// BSD sockets behind hxmc.NativeNet on Linux and macOS (formerly rt_net.c;
-// Windows keeps Winsock in rt_net_win.c), standing for the OCaml Unix
+// BSD sockets of hxmc.NativeNet on Linux and macOS (formerly rt_net.c;
+// Windows: WinNet), standing for the OCaml Unix
 // functions of Eval's socket and host natives. The constants and the
 // sockaddr_in layout differ between Linux and macOS (below; macOS x86-64
 // names select select$1050, as its headers do). With several threads, a
 // call on a blocking socket does not block the process: it is made without
 // blocking and the thread waits for the descriptor in the scheduler
 // (rt_wait_fd, rt_wait_fds).
-@:keep @:hxmc.posix
-class Net {
+class PosixNet {
 	static inline function mac():Bool
 		return Mem.os() == 1;
 
@@ -76,7 +75,7 @@ class Net {
 	static inline function lastErrno():Int
 		return Mem.tlsGet("rt_net_errno").toI64().toInt();
 
-	@:hxmc.host("hxmc_NativeNet_errno") @:hxmc.noGc static function getErrno():Int
+	@:hxmc.noGc public static function getErrno():Int
 		return lastErrno();
 
 	// with other threads, a blocking socket's calls wait in the scheduler
@@ -106,7 +105,7 @@ class Net {
 		return false;
 	}
 
-	@:hxmc.host("hxmc_NativeNet_strerror") static function strerror(err:Int):String {
+	public static function strerror(err:Int):String {
 		var s = Posix.strerror(err);
 		return Str.ofUtf8(s, LibC.strlen(s).toInt());
 	}
@@ -115,7 +114,7 @@ class Net {
 	// port's entry point does not, so the first socket does it
 	static var sigpipeIgnored:Bool;
 
-	@:hxmc.host("hxmc_NativeNet_socket") @:hxmc.noGc static function socket():Int {
+	@:hxmc.noGc public static function socket():Int {
 		if (!sigpipeIgnored) {
 			Posix.signal(13, Ptr.ofI64(1)); // SIGPIPE, SIG_IGN
 			sigpipeIgnored = true;
@@ -123,12 +122,12 @@ class Net {
 		return ret(Posix.socket(2, 1, 0)); // PF_INET, SOCK_STREAM
 	}
 
-	@:hxmc.host("hxmc_NativeNet_close") @:hxmc.noGc static function close(fd:Int):Int {
+	@:hxmc.noGc public static function close(fd:Int):Int {
 		Leaf.rt_fd_closed(fd);
 		return ret(Posix.close(fd));
 	}
 
-	@:hxmc.host("hxmc_NativeNet_accept") static function accept(fd:Int):Int {
+	public static function accept(fd:Int):Int {
 		if (cooperative(fd) && !waitSock(fd, false)) return ret(-1);
 		var a = Mem.stack(128), n = Mem.stack(8);
 		Mem.setI32(n, 0, 128);
@@ -151,13 +150,13 @@ class Net {
 		Mem.setI8(a, 7, ip);
 	}
 
-	@:hxmc.host("hxmc_NativeNet_bind") @:hxmc.noGc static function bind(fd:Int, ip:Int, port:Int):Int {
+	@:hxmc.noGc public static function bind(fd:Int, ip:Int, port:Int):Int {
 		var a = Mem.stack(16);
 		inetAddr(a, ip, port);
 		return ret(Posix.bind(fd, a, 16));
 	}
 
-	@:hxmc.host("hxmc_NativeNet_connect") static function connect(fd:Int, ip:Int, port:Int):Int {
+	public static function connect(fd:Int, ip:Int, port:Int):Int {
 		if (cooperative(fd)) { // a non-blocking connect, then wait until it completes
 			var flags = Posix.fcntl(fd, F_GETFL, 0);
 			Posix.fcntl(fd, F_SETFL, flags | O_NONBLOCK());
@@ -187,10 +186,10 @@ class Net {
 		return Posix.connect(fd, a, 16);
 	}
 
-	@:hxmc.host("hxmc_NativeNet_listen") @:hxmc.noGc static function listen(fd:Int, n:Int):Int
+	@:hxmc.noGc public static function listen(fd:Int, n:Int):Int
 		return ret(Posix.listen(fd, n));
 
-	@:hxmc.host("hxmc_NativeNet_sockName") static function sockName(fd:Int, peer:Bool):Array<Int> {
+	public static function sockName(fd:Int, peer:Bool):Array<Int> {
 		var s = Mem.stack(128), n = Mem.stack(8);
 		Mem.setI32(n, 0, 128);
 		var r = peer ? Posix.getpeername(fd, s, n) : Posix.getsockname(fd, s, n);
@@ -205,7 +204,7 @@ class Net {
 	}
 
 	// OCaml's Unix.recv/send check the range (Invalid_argument "Unix.recv")
-	@:hxmc.host("hxmc_NativeNet_recv") static function recv(fd:Int, b:Dynamic, pos:Int, len:Int):Int {
+	public static function recv(fd:Int, b:Dynamic, pos:Int, len:Int):Int {
 		if (pos < 0 || len < 0 || pos > Bytes.len(b) - len) Rt.rt_throw("Unix.recv");
 		if (cooperative(fd)) {
 			var r = 0;
@@ -221,7 +220,7 @@ class Net {
 		return ret(Posix.recv(fd, Bytes.bytes(b).add(pos), len, 0).toInt());
 	}
 
-	@:hxmc.host("hxmc_NativeNet_send") static function send(fd:Int, b:Dynamic, pos:Int, len:Int):Int {
+	public static function send(fd:Int, b:Dynamic, pos:Int, len:Int):Int {
 		if (pos < 0 || len < 0 || pos > Bytes.len(b) - len) Rt.rt_throw("Unix.send");
 		if (cooperative(fd)) { // may send part of the buffer, as a signal-interrupted send does
 			var r = 0;
@@ -260,7 +259,7 @@ class Net {
 	}
 
 	// Unix.select (otherlib/unix/select_unix.c): a negative timeout waits forever
-	@:hxmc.host("hxmc_NativeNet_select") static function select(r:Array<Int>, w:Array<Int>, o:Array<Int>, timeout:Float):Int {
+	public static function select(r:Array<Int>, w:Array<Int>, o:Array<Int>, timeout:Float):Int {
 		var rs = Mem.stack(128), ws = Mem.stack(128), os = Mem.stack(128), maxfd = Mem.stack(8);
 		Mem.setI32(maxfd, 0, -1);
 		if (!toFdset(r, rs, maxfd) || !toFdset(w, ws, maxfd) || !toFdset(o, os, maxfd)) {
@@ -323,18 +322,18 @@ class Net {
 		return ret(Posix.setsockopt(fd, level, opt, v, 4));
 	}
 
-	@:hxmc.host("hxmc_NativeNet_setNoDelay") @:hxmc.noGc static function setNoDelay(fd:Int, b:Bool):Int
+	@:hxmc.noGc public static function setNoDelay(fd:Int, b:Bool):Int
 		return setBool(fd, 6, 1, b); // IPPROTO_TCP, TCP_NODELAY
 
-	@:hxmc.host("hxmc_NativeNet_setBroadcast") @:hxmc.noGc static function setBroadcast(fd:Int, b:Bool):Int
+	@:hxmc.noGc public static function setBroadcast(fd:Int, b:Bool):Int
 		return setBool(fd, SOL_SOCKET(), SO_BROADCAST(), b);
 
-	@:hxmc.host("hxmc_NativeNet_setReuseAddr") @:hxmc.noGc static function setReuseAddr(fd:Int, b:Bool):Int
+	@:hxmc.noGc public static function setReuseAddr(fd:Int, b:Bool):Int
 		return setBool(fd, SOL_SOCKET(), SO_REUSEADDR(), b);
 
 	// Unix.setsockopt_float SO_RCVTIMEO, then SO_SNDTIMEO (struct timeval:
 	// 64-bit seconds, then microseconds: a long on Linux, an int on macOS)
-	@:hxmc.host("hxmc_NativeNet_setTimeout") @:hxmc.noGc static function setTimeout(fd:Int, t:Float):Int {
+	@:hxmc.noGc public static function setTimeout(fd:Int, t:Float):Int {
 		var tv = Mem.stack(16);
 		LibC.memset(tv, 0, 16);
 		var s:I64 = cast t;
@@ -344,21 +343,21 @@ class Net {
 		return ret(Posix.setsockopt(fd, SOL_SOCKET(), SO_SNDTIMEO(), tv, 16));
 	}
 
-	@:hxmc.host("hxmc_NativeNet_shutdown") @:hxmc.noGc static function shutdown(fd:Int, mode:Int):Int
+	@:hxmc.noGc public static function shutdown(fd:Int, mode:Int):Int
 		return ret(Posix.shutdown(fd, mode == 0 ? 0 : mode == 1 ? 1 : 2));
 
 	// for sys.net.Socket.setBlocking (hxmc std; the Eval socket natives are blocking)
-	@:hxmc.host("hxmc_NativeNet_setBlocking") @:hxmc.noGc static function setBlocking(fd:Int, b:Bool):Int {
+	@:hxmc.noGc public static function setBlocking(fd:Int, b:Bool):Int {
 		var flags = Posix.fcntl(fd, F_GETFL, 0);
 		if (flags < 0) return ret(-1);
 		return ret(Posix.fcntl(fd, F_SETFL, b ? flags & ~O_NONBLOCK() : flags | O_NONBLOCK()));
 	}
 
 	// whether the last failure was EAGAIN/EWOULDBLOCK (a non-blocking socket not ready)
-	@:hxmc.host("hxmc_NativeNet_blocked") @:hxmc.noGc static function blocked():Bool
+	@:hxmc.noGc public static function blocked():Bool
 		return lastErrno() == EAGAIN();
 
-	@:hxmc.host("hxmc_NativeNet_gethostname") static function gethostname():String {
+	public static function gethostname():String {
 		var buf = Mem.stack(4096);
 		if (Posix.gethostname(buf, 4095) < 0) {
 			ret(-1);
@@ -380,7 +379,7 @@ class Net {
 	@:hxmc.noGc static function unlockResolver()
 		Atomic.store32(Mem.sym("rt_spin"), 0);
 
-	@:hxmc.host("hxmc_NativeNet_resolve") static function resolve(name:String):Array<Int> {
+	public static function resolve(name:String):Array<Int> {
 		var n = Str.toUtf8(name);
 		var ip = lookup(n);
 		LibC.free(n);
@@ -409,7 +408,7 @@ class Net {
 		return r;
 	}
 
-	@:hxmc.host("hxmc_NativeNet_reverse") static function reverse(ip:Int):String {
+	public static function reverse(ip:Int):String {
 		var name = reverseLookup(ip);
 		Mem.tlsSet("rt_net_errno", Ptr.nil());
 		if (name.isNull()) return null;

@@ -8,8 +8,8 @@ import hxmc.unsafe.Mem;
 import hxmc.unsafe.Ptr;
 import hxmc.unsafe.Win32;
 
-// The operating-system primitives behind hxmc.NativeSys on Windows
-// (formerly rt_sys_win.c; @:hxmc.windows binds them only there). They behave
+// The operating-system primitives of hxmc.NativeSys on Windows (formerly
+// rt_sys_win.c; NativeSys calls them only there). They behave
 // as the OCaml runtime and Unix library do on Windows, which the reference
 // compiler is built with: paths, environment variables and command lines
 // are UTF-16 (the W functions: Haxe's own units, NUL-terminated copies);
@@ -19,7 +19,6 @@ import hxmc.unsafe.Win32;
 // Unix.create_process finds it (SearchPath with .exe) and its command line
 // quotes the arguments as Unix.make_cmdline does; exit codes are the
 // processes' own.
-@:keep @:hxmc.windows
 class WinSys {
 	static inline function threads():Int
 		return Mem.getI32(Mem.sym("rt_nthreads"), 0);
@@ -69,10 +68,10 @@ class WinSys {
 		LibC.free(u);
 	}
 
-	@:hxmc.host("hxmc_NativeSys_print") static function print(s:String):Void
+	public static function print(s:String):Void
 		printTo(1, s);
 
-	@:hxmc.host("hxmc_NativeSys_printErr") static function printErr(s:String):Void
+	public static function printErr(s:String):Void
 		printTo(2, s);
 
 	static inline function argc():Int
@@ -81,17 +80,17 @@ class WinSys {
 	static inline function argv():Ptr
 		return Mem.getPtr(Mem.sym("rt_argv"), 0);
 
-	@:hxmc.host("hxmc_NativeSys_args") static function args():Array<String> {
+	public static function args():Array<String> {
 		var a:Array<String> = [];
 		for (i in 1...argc())
 			a.push(ofC(Mem.getPtr(argv(), 8 * i)));
 		return a;
 	}
 
-	@:hxmc.host("hxmc_NativeSys_argv0") static function argv0():String
+	public static function argv0():String
 		return argc() > 0 ? ofC(Mem.getPtr(argv(), 0)) : null;
 
-	@:hxmc.host("hxmc_NativeSys_getEnv") static function getEnv(s:String):String {
+	public static function getEnv(s:String):String {
 		var n = wide(s);
 		var v = Win32._wgetenv(n);
 		var r = v.isNull() ? null : ofWide(v);
@@ -101,7 +100,7 @@ class WinSys {
 
 	// _wputenv_s updates the C runtime's table and the process environment
 	// (which child processes inherit); an empty value removes the variable
-	@:hxmc.host("hxmc_NativeSys_putEnv") static function putEnv(s:String, v:String):Void {
+	public static function putEnv(s:String, v:String):Void {
 		var n = wide(s);
 		var w = Str.isNull(v) ? wide("") : wide(v);
 		Win32._wputenv_s(n, w);
@@ -110,7 +109,7 @@ class WinSys {
 	}
 
 	// the process environment ("=C:=C:\..." entries included: Sys.environment skips them)
-	@:hxmc.host("hxmc_NativeSys_environ") static function environ():Array<String> {
+	public static function environ():Array<String> {
 		var block = Win32.GetEnvironmentStringsW();
 		var a:Array<String> = [];
 		if (block.isNull()) return a;
@@ -130,7 +129,7 @@ class WinSys {
 		return a;
 	}
 
-	@:hxmc.host("hxmc_NativeSys_sleep") static function sleep(seconds:Float):Void {
+	public static function sleep(seconds:Float):Void {
 		if (threads() > 1) {
 			Rt.rt_sleep(seconds);
 			return;
@@ -140,7 +139,7 @@ class WinSys {
 	}
 
 	// _wgetcwd has no trailing separator but at a drive's root ("C:\")
-	@:hxmc.host("hxmc_NativeSys_getCwd") static function getCwd():String {
+	public static function getCwd():String {
 		var w = Win32._wgetcwd(Ptr.nil(), 0);
 		if (w.isNull()) Rt.rt_throw("getCwd failed");
 		var s = ofWide(w);
@@ -150,22 +149,22 @@ class WinSys {
 		return s;
 	}
 
-	@:hxmc.host("hxmc_NativeSys_setCwd") static function setCwd(s:String):Bool {
+	public static function setCwd(s:String):Bool {
 		var w = wide(s);
 		var r = Win32._wchdir(w);
 		LibC.free(w);
 		return r == 0;
 	}
 
-	@:hxmc.host("hxmc_NativeSys_systemName") static function systemName():String
+	public static function systemName():String
 		return "Windows";
 
-	@:hxmc.host("hxmc_NativeSys_hostSystem") static function hostSystem():String
+	public static function hostSystem():String
 		return "Windows";
 
 	// Sys.command: the C runtime's _wsystem (%COMSPEC% /c cmd), whose result
 	// is the exit code (OCaml's caml_sys_system_command on Windows)
-	@:hxmc.host("hxmc_NativeSys_command") static function command(cmd:String):Int {
+	public static function command(cmd:String):Int {
 		var w = wide(cmd);
 		Leaf.rt_blocking_enter();
 		var r = Win32._wsystem(w); // w is malloc'ed: no heap address
@@ -175,10 +174,10 @@ class WinSys {
 	}
 
 	// Sys.command quotes its arguments for cmd.exe on Windows (the hxmc std's Sys)
-	@:hxmc.host("hxmc_NativeSys_commandArgs") static function commandArgs(cmd:String, args:Array<String>):Int
+	public static function commandArgs(cmd:String, args:Array<String>):Int
 		return -2;
 
-	@:hxmc.host("hxmc_NativeSys_exit") static function exit(code:Int):Void {
+	public static function exit(code:Int):Void {
 		Win32.fflush(Ptr.nil());
 		Win32.exit(code);
 	}
@@ -188,7 +187,7 @@ class WinSys {
 		return Mem.getI64(p, 0);
 
 	// seconds since the epoch: FILETIME counts 100 ns from 1601
-	@:hxmc.host("hxmc_NativeSys_time") @:hxmc.noGc static function time():Float {
+	@:hxmc.noGc public static function time():Float {
 		var ft = Mem.stack(8);
 		Win32.GetSystemTimePreciseAsFileTime(ft);
 		var t:Float = cast(filetime(ft) - ((116444736 : I64) * (1000000000 : I64)));
@@ -196,14 +195,14 @@ class WinSys {
 	}
 
 	// user and kernel time of the process (clock() is wall-clock time on Windows)
-	@:hxmc.host("hxmc_NativeSys_cpuTime") @:hxmc.noGc static function cpuTime():Float {
+	@:hxmc.noGc public static function cpuTime():Float {
 		var t = Mem.stack(32);
 		if (Win32.GetProcessTimes(Win32.GetCurrentProcess(), t, t.add(8), t.add(16), t.add(24)) == 0) return 0;
 		var s:Float = cast(filetime(t.add(16)) + filetime(t.add(24)));
 		return s / 1e7;
 	}
 
-	@:hxmc.host("hxmc_NativeSys_programPath") static function programPath():String {
+	public static function programPath():String {
 		var buf = LibC.malloc(65536);
 		var n = Win32.GetModuleFileNameW(Ptr.nil(), buf, 32768);
 		var s = n == 0 || n >= 32768 ? (argc() > 0 ? ofC(Mem.getPtr(argv(), 0)) : "") : ofWide(buf);
@@ -213,7 +212,7 @@ class WinSys {
 
 	// extc's sys_getch: the console without line buffering, or a byte of a
 	// redirected standard input
-	@:hxmc.host("hxmc_NativeSys_getChar") static function getChar(echo:Bool):Int {
+	public static function getChar(echo:Bool):Int {
 		var h = Win32.GetStdHandle(-10); // STD_INPUT_HANDLE
 		var ft = !(h.toI64() == -1) ? Win32.GetFileType(h) : 2; // FILE_TYPE_CHAR
 		if (ft == 2) {
@@ -235,7 +234,7 @@ class WinSys {
 	// (_O_WRONLY 1, _O_RDWR 2, _O_APPEND 8, _O_CREAT 0x100, _O_TRUNC 0x200,
 	// _O_BINARY 0x8000, _O_NOINHERIT 0x80; _S_IREAD | _S_IWRITE 0x180)
 
-	@:hxmc.host("hxmc_NativeSys_fileOpen") static function fileOpen(path:String, mode:Int):Int {
+	public static function fileOpen(path:String, mode:Int):Int {
 		var flags = switch mode {
 			case 0: 0;
 			case 1: 1 | 0x100 | 0x200;
@@ -254,7 +253,7 @@ class WinSys {
 
 	// Reads and writes of pipes and consoles block: with other threads they go
 	// through a malloc'ed buffer in a safe region (a collection may move the Bytes)
-	@:hxmc.host("hxmc_NativeSys_fileRead") static function fileRead(fd:Int, b:Dynamic, pos:Int, len:Int):Int {
+	public static function fileRead(fd:Int, b:Dynamic, pos:Int, len:Int):Int {
 		if (pos < 0 || len < 0 || pos + len > Bytes.len(b)) outside();
 		if (threads() > 1) {
 			var tmp = LibC.malloc(len > 0 ? len : 1);
@@ -268,7 +267,7 @@ class WinSys {
 		return Win32._read(fd, Bytes.bytes(b).add(pos), len);
 	}
 
-	@:hxmc.host("hxmc_NativeSys_fileWrite") static function fileWrite(fd:Int, b:Dynamic, pos:Int, len:Int):Int {
+	public static function fileWrite(fd:Int, b:Dynamic, pos:Int, len:Int):Int {
 		if (pos < 0 || len < 0 || pos + len > Bytes.len(b)) outside();
 		if (threads() > 1) {
 			var tmp = LibC.malloc(len > 0 ? len : 1);
@@ -282,16 +281,16 @@ class WinSys {
 		return Win32._write(fd, Bytes.bytes(b).add(pos), len);
 	}
 
-	@:hxmc.host("hxmc_NativeSys_fileClose") static function fileClose(fd:Int):Void {
+	public static function fileClose(fd:Int):Void {
 		Leaf.rt_fd_closed(fd);
 		Win32._close(fd);
 	}
 
-	@:hxmc.host("hxmc_NativeSys_fileSeek") static function fileSeek(fd:Int, p:Int, whence:Int):Void {
+	public static function fileSeek(fd:Int, p:Int, whence:Int):Void {
 		if (Win32._lseeki64(fd, p, whence < 0 || whence > 2 ? 0 : whence) < 0) Rt.rt_throw("seek failed");
 	}
 
-	@:hxmc.host("hxmc_NativeSys_fileTell") @:hxmc.noGc static function fileTell(fd:Int):Int
+	@:hxmc.noGc public static function fileTell(fd:Int):Int
 		return Win32._telli64(fd).toInt();
 
 	// struct _stat64 (UCRT): st_dev u32 0, st_ino u16 4, st_mode u16 6,
@@ -300,7 +299,7 @@ class WinSys {
 	static inline function stMode(st:Ptr):Int
 		return Mem.getU16(st, 6);
 
-	@:hxmc.host("hxmc_NativeSys_fileContent") static function fileContent(path:String):Dynamic {
+	public static function fileContent(path:String):Dynamic {
 		var p = wide(path);
 		var fd = Win32._wopen(p, 0x8000 | 0x80, 0);
 		LibC.free(p);
@@ -330,7 +329,7 @@ class WinSys {
 		return b;
 	}
 
-	@:hxmc.host("hxmc_NativeSys_fileSave") static function fileSave(path:String, b:Dynamic, append:Bool):Bool {
+	public static function fileSave(path:String, b:Dynamic, append:Bool):Bool {
 		var p = wide(path);
 		var fd = Win32._wopen(p, 1 | 0x100 | 0x8000 | 0x80 | (append ? 8 : 0x200), 0x180);
 		LibC.free(p);
@@ -356,7 +355,7 @@ class WinSys {
 	@:hxmc.noGc static function pathStat(p:Ptr, st:Ptr):Int
 		return Win32._wstat64(p, st);
 
-	@:hxmc.host("hxmc_NativeSys_exists") static function exists(path:String):Bool {
+	public static function exists(path:String):Bool {
 		var p = wide(path);
 		var st = Mem.stack(64);
 		var r = pathStat(p, st) == 0;
@@ -364,7 +363,7 @@ class WinSys {
 		return r;
 	}
 
-	@:hxmc.host("hxmc_NativeSys_isDirectory") static function isDirectory(path:String):Bool {
+	public static function isDirectory(path:String):Bool {
 		var p = wide(path);
 		var st = Mem.stack(64);
 		var r = pathStat(p, st) == 0 && (stMode(st) & 0xF000) == 0x4000;
@@ -372,7 +371,7 @@ class WinSys {
 		return r;
 	}
 
-	@:hxmc.host("hxmc_NativeSys_createDirectory") static function createDirectory(path:String):Bool {
+	public static function createDirectory(path:String):Bool {
 		var p = wide(path);
 		var r = Win32._wmkdir(p) == 0;
 		LibC.free(p);
@@ -380,7 +379,7 @@ class WinSys {
 	}
 
 	// caml_win32_unlink: a read-only file is made writable, then removed
-	@:hxmc.host("hxmc_NativeSys_deleteFile") static function deleteFile(path:String):Bool {
+	public static function deleteFile(path:String):Bool {
 		var p = wide(path);
 		var r = deleteW(p);
 		LibC.free(p);
@@ -399,7 +398,7 @@ class WinSys {
 		return r;
 	}
 
-	@:hxmc.host("hxmc_NativeSys_deleteDirectory") static function deleteDirectory(path:String):Bool {
+	public static function deleteDirectory(path:String):Bool {
 		var p = wide(path);
 		var r = Win32._wrmdir(p) == 0;
 		LibC.free(p);
@@ -408,7 +407,7 @@ class WinSys {
 
 	// caml_win32_rename: MoveFileEx replacing the target, a directory over an
 	// empty directory, never a directory over a file
-	@:hxmc.host("hxmc_NativeSys_rename") static function rename(path:String, newPath:String):Bool {
+	public static function rename(path:String, newPath:String):Bool {
 		var a = wide(path), b = wide(newPath);
 		var ok = renameW(a, b);
 		LibC.free(a);
@@ -437,7 +436,7 @@ class WinSys {
 	static inline var FIND_NAME = 44;
 
 	// Sys.readdir (caml_read_directory: FindFirstFile over dir\*)
-	@:hxmc.host("hxmc_NativeSys_readDirectory") static function readDirectory(path:String):Array<String> {
+	public static function readDirectory(path:String):Array<String> {
 		var n = Str.len(path);
 		var last = n > 0 ? Str.unit(path, n - 1) : 0;
 		var pat = n > 0 && last != "/".code && last != "\\".code && last != ":".code ? Str.concat(path, "\\*") : Str.concat(path, "*");
@@ -462,7 +461,7 @@ class WinSys {
 	}
 
 	// Extc.get_full_path: GetFullPathName (the file need not exist)
-	@:hxmc.host("hxmc_NativeSys_fullPath") static function fullPath(path:String):String {
+	public static function fullPath(path:String):String {
 		var p = wide(path);
 		var n = Win32.GetFullPathNameW(p, 0, Ptr.nil(), Ptr.nil());
 		if (n == 0) {
@@ -479,7 +478,7 @@ class WinSys {
 
 	// Extc.get_real_path: the full path with the drive letter upper-cased and
 	// each existing component as the file system spells it
-	@:hxmc.host("hxmc_NativeSys_realPath") static function realPath(path:String):String {
+	public static function realPath(path:String):String {
 		var p = wide(path);
 		var out = realPathW(p);
 		LibC.free(p);
@@ -537,7 +536,7 @@ class WinSys {
 
 	// Unix.stat as Windows' C runtime fills it (uid, gid, ino: 0)
 	// gid uid atime mtime ctime dev ino nlink rdev size mode
-	@:hxmc.host("hxmc_NativeSys_stat") static function stat(path:String):Array<Float> {
+	public static function stat(path:String):Array<Float> {
 		var p = wide(path);
 		var st = Mem.stack(64);
 		var r = pathStat(p, st);
@@ -634,7 +633,7 @@ class WinSys {
 		return c;
 	}
 
-	@:hxmc.host("hxmc_NativeSys_processRun") static function processRun(cmd:String, args:Array<String>, fds:Array<Int>):Int {
+	public static function processRun(cmd:String, args:Array<String>, fds:Array<Int>):Int {
 		var line:String;
 		var exe:Ptr;
 		var ext = wide(".exe");
@@ -770,7 +769,7 @@ class WinSys {
 
 	// the exit code (Windows exit codes are 32 bits: a negative Int for codes
 	// such as 0xC0000005), or -1 while the process runs
-	@:hxmc.host("hxmc_NativeSys_processWait") static function processWait(pid:Int, block:Bool):Int {
+	public static function processWait(pid:Int, block:Bool):Int {
 		var h = procHandle(pid);
 		if (h.isNull()) return -1;
 		Leaf.rt_blocking_enter();
@@ -799,7 +798,7 @@ class WinSys {
 	}
 
 	// Unix.kill pid Sys.sigkill: TerminateProcess with exit code 0
-	@:hxmc.host("hxmc_NativeSys_processKill") @:hxmc.noGc static function processKill(pid:Int):Void {
+	@:hxmc.noGc public static function processKill(pid:Int):Void {
 		var h = procHandle(pid);
 		if (!h.isNull()) {
 			Win32.TerminateProcess(h, 0);

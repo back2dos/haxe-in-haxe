@@ -7,15 +7,13 @@ import hxmc.unsafe.Mem;
 import hxmc.unsafe.Posix;
 import hxmc.unsafe.Ptr;
 
-// The operating-system primitives behind hxmc.NativeSys on Linux and macOS
-// (formerly rt_sys.c; Windows keeps rt_sys_win.c: @:hxmc.posix binds these
-// only on the other targets). Over the C library (hxmc.unsafe.Posix): its
+// The operating-system primitives of hxmc.NativeSys on Linux and macOS
+// (formerly rt_sys.c; NativeSys calls them only there). Over the C library (hxmc.unsafe.Posix): its
 // constants and structure offsets per target below. Paths and arguments are
 // passed as malloc'ed UTF-8 copies (no heap address crosses a call that
 // may block). With several threads, reads and waits go through the
 // runtime's scheduler (rt_wait_fd, safe regions: rt_thread.c).
-@:keep @:hxmc.posix
-class Sys {
+class PosixSys {
 	static inline function mac():Bool
 		return Mem.os() == 1;
 
@@ -56,10 +54,10 @@ class Sys {
 		LibC.free(u);
 	}
 
-	@:hxmc.host("hxmc_NativeSys_print") static function print(s:String):Void
+	public static function print(s:String):Void
 		printTo(1, s);
 
-	@:hxmc.host("hxmc_NativeSys_printErr") static function printErr(s:String):Void
+	public static function printErr(s:String):Void
 		printTo(2, s);
 
 	// an Array<String> of n C strings
@@ -76,20 +74,20 @@ class Sys {
 	static inline function argv():Ptr
 		return Mem.getPtr(Mem.sym("rt_argv"), 0);
 
-	@:hxmc.host("hxmc_NativeSys_args") static function args():Array<String>
+	public static function args():Array<String>
 		return strArray(argv().add(8), argc() > 0 ? argc() - 1 : 0);
 
-	@:hxmc.host("hxmc_NativeSys_argv0") static function argv0():String
+	public static function argv0():String
 		return argc() > 0 ? ofC(Mem.getPtr(argv(), 0)) : null;
 
-	@:hxmc.host("hxmc_NativeSys_getEnv") static function getEnv(s:String):String {
+	public static function getEnv(s:String):String {
 		var n = cstr(s);
 		var v = Posix.getenv(n);
 		LibC.free(n);
 		return v.isNull() ? null : ofC(v);
 	}
 
-	@:hxmc.host("hxmc_NativeSys_putEnv") static function putEnv(s:String, v:String):Void {
+	public static function putEnv(s:String, v:String):Void {
 		var n = cstr(s);
 		if (!Str.isNull(v)) {
 			var u = cstr(v);
@@ -99,7 +97,7 @@ class Sys {
 		LibC.free(n);
 	}
 
-	@:hxmc.host("hxmc_NativeSys_environ") static function environ():Array<String> {
+	public static function environ():Array<String> {
 		var env = mac() ? Mem.getPtr(Posix._NSGetEnviron(), 0) : Mem.getPtr(Mem.sym("environ"), 0);
 		var n = 0;
 		while (!Mem.getPtr(env, 8 * n).isNull())
@@ -108,7 +106,7 @@ class Sys {
 	}
 
 	// with other threads, sleeping lets them run (rt_sleep)
-	@:hxmc.host("hxmc_NativeSys_sleep") static function sleep(seconds:Float):Void {
+	public static function sleep(seconds:Float):Void {
 		if (threads() > 1) {
 			Rt.rt_sleep(seconds); // 0: give way to the other runnable threads
 			return;
@@ -122,7 +120,7 @@ class Sys {
 		while (Posix.nanosleep(t, t) != 0 && errno() == EINTR) {}
 	}
 
-	@:hxmc.host("hxmc_NativeSys_getCwd") static function getCwd():String {
+	public static function getCwd():String {
 		var buf = Mem.stack(4104);
 		if (Posix.getcwd(buf, 4096).isNull()) Rt.rt_throw("getCwd failed");
 		var n = LibC.strlen(buf).toInt();
@@ -133,17 +131,17 @@ class Sys {
 		return ofC(buf);
 	}
 
-	@:hxmc.host("hxmc_NativeSys_setCwd") static function setCwd(s:String):Bool {
+	public static function setCwd(s:String):Bool {
 		var n = cstr(s);
 		var r = Posix.chdir(n);
 		LibC.free(n);
 		return r == 0;
 	}
 
-	@:hxmc.host("hxmc_NativeSys_systemName") static function systemName():String
+	public static function systemName():String
 		return mac() ? "Mac" : "Linux";
 
-	@:hxmc.host("hxmc_NativeSys_hostSystem") static function hostSystem():String
+	public static function hostSystem():String
 		return systemName();
 
 	// the wait status: exited, killed by a signal, else -1
@@ -154,7 +152,7 @@ class Sys {
 		return -1;
 	}
 
-	@:hxmc.host("hxmc_NativeSys_command") static function command(cmd:String):Int {
+	public static function command(cmd:String):Int {
 		var c = cstr(cmd);
 		Posix.fflush(Ptr.nil());
 		Leaf.rt_blocking_enter();
@@ -167,15 +165,15 @@ class Sys {
 
 	// Windows runs cmd with args without a shell; here -2: Sys.command quotes
 	// them for /bin/sh
-	@:hxmc.host("hxmc_NativeSys_commandArgs") static function commandArgs(cmd:String, args:Array<String>):Int
+	public static function commandArgs(cmd:String, args:Array<String>):Int
 		return -2;
 
-	@:hxmc.host("hxmc_NativeSys_exit") static function exit(code:Int):Void {
+	public static function exit(code:Int):Void {
 		Posix.fflush(Ptr.nil());
 		Posix.exit(code);
 	}
 
-	@:hxmc.host("hxmc_NativeSys_time") @:hxmc.noGc static function time():Float {
+	@:hxmc.noGc public static function time():Float {
 		var tv = Mem.stack(16);
 		Posix.gettimeofday(tv, Ptr.nil());
 		var s:Float = cast Mem.getI64(tv, 0);
@@ -183,12 +181,12 @@ class Sys {
 	}
 
 	// clock() / CLOCKS_PER_SEC (1000000 on Linux and macOS)
-	@:hxmc.host("hxmc_NativeSys_cpuTime") @:hxmc.noGc static function cpuTime():Float {
+	@:hxmc.noGc public static function cpuTime():Float {
 		var c:Float = cast Posix.clock();
 		return c / 1e6;
 	}
 
-	@:hxmc.host("hxmc_NativeSys_programPath") static function programPath():String {
+	public static function programPath():String {
 		var buf = Mem.stack(4104);
 		var n = Posix.readlink(procSelfExe(), buf, 4096).toInt();
 		if (n > 0) {
@@ -221,7 +219,7 @@ class Sys {
 
 	// struct termios: c_lflag at 12 (4 bytes) on Linux, at 24 (8) on macOS;
 	// ICANON 2 / 0x100, ECHO 8 on both; TCSANOW 0
-	@:hxmc.host("hxmc_NativeSys_getChar") static function getChar(echo:Bool):Int {
+	public static function getChar(echo:Bool):Int {
 		var old = Mem.stack(128), raw = Mem.stack(128);
 		var tty = Posix.isatty(0) != 0 && Posix.tcgetattr(0, old) == 0;
 		if (tty) {
@@ -254,7 +252,7 @@ class Sys {
 	static inline function oCloexec():Int
 		return mac() ? 0x1000000 : 0x80000;
 
-	@:hxmc.host("hxmc_NativeSys_fileOpen") static function fileOpen(path:String, mode:Int):Int {
+	public static function fileOpen(path:String, mode:Int):Int {
 		var flags = switch mode {
 			case 0: 0; // O_RDONLY
 			case 1: 1 | oCreat() | oTrunc(); // O_WRONLY
@@ -271,7 +269,7 @@ class Sys {
 	static inline function outside()
 		Rt.rt_throw("OutsideBounds");
 
-	@:hxmc.host("hxmc_NativeSys_fileRead") static function fileRead(fd:Int, b:Dynamic, pos:Int, len:Int):Int {
+	public static function fileRead(fd:Int, b:Dynamic, pos:Int, len:Int):Int {
 		if (pos < 0 || len < 0 || pos + len > Bytes.len(b)) outside();
 		if (threads() > 1 && Rt.rt_wait_fd(fd, 0, -1) < 0) return -1; // closed while waiting
 		while (true) {
@@ -282,7 +280,7 @@ class Sys {
 		}
 	}
 
-	@:hxmc.host("hxmc_NativeSys_fileWrite") static function fileWrite(fd:Int, b:Dynamic, pos:Int, len:Int):Int {
+	public static function fileWrite(fd:Int, b:Dynamic, pos:Int, len:Int):Int {
 		if (pos < 0 || len < 0 || pos + len > Bytes.len(b)) outside();
 		if (threads() > 1 && Rt.rt_wait_fd(fd, 1, -1) < 0) return -1;
 		while (true) {
@@ -292,16 +290,16 @@ class Sys {
 		}
 	}
 
-	@:hxmc.host("hxmc_NativeSys_fileClose") static function fileClose(fd:Int):Void {
+	public static function fileClose(fd:Int):Void {
 		Leaf.rt_fd_closed(fd);
 		Posix.close(fd);
 	}
 
-	@:hxmc.host("hxmc_NativeSys_fileSeek") static function fileSeek(fd:Int, p:Int, whence:Int):Void {
+	public static function fileSeek(fd:Int, p:Int, whence:Int):Void {
 		if (Posix.lseek(fd, p, whence < 0 || whence > 2 ? 0 : whence) < 0) Rt.rt_throw("seek failed");
 	}
 
-	@:hxmc.host("hxmc_NativeSys_fileTell") @:hxmc.noGc static function fileTell(fd:Int):Int
+	@:hxmc.noGc public static function fileTell(fd:Int):Int
 		return Posix.lseek(fd, 0, 1).toInt();
 
 	// struct stat: st_mode, st_size (and the rest for stat()) per target
@@ -326,7 +324,7 @@ class Sys {
 	static inline function isDir(mode:Int):Bool
 		return (mode & 0xF000) == 0x4000;
 
-	@:hxmc.host("hxmc_NativeSys_fileContent") static function fileContent(path:String):Dynamic {
+	public static function fileContent(path:String):Dynamic {
 		var p = cstr(path);
 		var fd = Posix.open(p, oCloexec(), 0);
 		LibC.free(p);
@@ -358,7 +356,7 @@ class Sys {
 		return b;
 	}
 
-	@:hxmc.host("hxmc_NativeSys_fileSave") static function fileSave(path:String, b:Dynamic, append:Bool):Bool {
+	public static function fileSave(path:String, b:Dynamic, append:Bool):Bool {
 		var p = cstr(path);
 		var fd = Posix.open(p, 1 | oCreat() | oCloexec() | (append ? oAppend() : oTrunc()), 438);
 		LibC.free(p);
@@ -381,7 +379,7 @@ class Sys {
 		return Posix.close(fd) == 0 && ok;
 	}
 
-	@:hxmc.host("hxmc_NativeSys_exists") static function exists(path:String):Bool {
+	public static function exists(path:String):Bool {
 		var p = cstr(path);
 		var st = Mem.stack(256);
 		var r = doStat(p, st) == 0;
@@ -389,7 +387,7 @@ class Sys {
 		return r;
 	}
 
-	@:hxmc.host("hxmc_NativeSys_isDirectory") static function isDirectory(path:String):Bool {
+	public static function isDirectory(path:String):Bool {
 		var p = cstr(path);
 		var st = Mem.stack(256);
 		var r = doStat(p, st) == 0 && isDir(stMode(st));
@@ -397,28 +395,28 @@ class Sys {
 		return r;
 	}
 
-	@:hxmc.host("hxmc_NativeSys_createDirectory") static function createDirectory(path:String):Bool {
+	public static function createDirectory(path:String):Bool {
 		var p = cstr(path);
 		var r = Posix.mkdir(p, 511) == 0; // 0777
 		LibC.free(p);
 		return r;
 	}
 
-	@:hxmc.host("hxmc_NativeSys_deleteFile") static function deleteFile(path:String):Bool {
+	public static function deleteFile(path:String):Bool {
 		var p = cstr(path);
 		var r = Posix.unlink(p) == 0;
 		LibC.free(p);
 		return r;
 	}
 
-	@:hxmc.host("hxmc_NativeSys_deleteDirectory") static function deleteDirectory(path:String):Bool {
+	public static function deleteDirectory(path:String):Bool {
 		var p = cstr(path);
 		var r = Posix.rmdir(p) == 0;
 		LibC.free(p);
 		return r;
 	}
 
-	@:hxmc.host("hxmc_NativeSys_rename") static function rename(path:String, newPath:String):Bool {
+	public static function rename(path:String, newPath:String):Bool {
 		var a = cstr(path), b = cstr(newPath);
 		var r = Posix.rename(a, b) == 0;
 		LibC.free(a);
@@ -427,7 +425,7 @@ class Sys {
 	}
 
 	// struct dirent: d_name at 19 (Linux), 21 (macOS, 64-bit inodes)
-	@:hxmc.host("hxmc_NativeSys_readDirectory") static function readDirectory(path:String):Array<String> {
+	public static function readDirectory(path:String):Array<String> {
 		var p = cstr(path);
 		var d = inode64() ? Posix.opendirInode64(p) : Posix.opendir(p);
 		LibC.free(p);
@@ -445,7 +443,7 @@ class Sys {
 		return names;
 	}
 
-	@:hxmc.host("hxmc_NativeSys_fullPath") static function fullPath(path:String):String {
+	public static function fullPath(path:String):String {
 		var p = cstr(path);
 		var buf = Mem.stack(4104);
 		var r = mac() ? Posix.realpathExtsn(p, buf) : Posix.realpath(p, buf);
@@ -454,11 +452,11 @@ class Sys {
 	}
 
 	// Extc.get_real_path is get_full_path outside Windows
-	@:hxmc.host("hxmc_NativeSys_realPath") static function realPath(path:String):String
+	public static function realPath(path:String):String
 		return fullPath(path);
 
 	// gid uid atime mtime ctime dev ino nlink rdev size mode
-	@:hxmc.host("hxmc_NativeSys_stat") static function stat(path:String):Array<Float> {
+	public static function stat(path:String):Array<Float> {
 		var p = cstr(path);
 		var st = Mem.stack(256);
 		var r = doStat(p, st);
@@ -486,7 +484,7 @@ class Sys {
 
 	// ---- processes
 
-	@:hxmc.host("hxmc_NativeSys_processRun") static function processRun(cmd:String, args:Array<String>, fds:Array<Int>):Int {
+	public static function processRun(cmd:String, args:Array<String>, fds:Array<Int>):Int {
 		// argv in malloc'ed C strings before forking
 		var n = Str.isNull(args) ? 0 : args.length;
 		var argv = LibC.malloc(8 * (n + 4));
@@ -547,7 +545,7 @@ class Sys {
 	}
 
 	// OS threads: waits in a safe region; WNOHANG 1
-	@:hxmc.host("hxmc_NativeSys_processWait") static function processWait(pid:Int, block:Bool):Int {
+	public static function processWait(pid:Int, block:Bool):Int {
 		var st = Mem.stack(8);
 		while (true) {
 			Leaf.rt_blocking_enter();
@@ -560,6 +558,6 @@ class Sys {
 		return exitCode(Mem.getI32(st, 0));
 	}
 
-	@:hxmc.host("hxmc_NativeSys_processKill") @:hxmc.noGc static function processKill(pid:Int):Void
+	@:hxmc.noGc public static function processKill(pid:Int):Void
 		Posix.kill(pid, 9);
 }

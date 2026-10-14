@@ -3,7 +3,7 @@ package hxmc.unsafe;
 import hxmc.I64;
 
 // POSIX functions of the C library (musl on Linux, libSystem on macOS) the
-// runtime's Haxe code calls (hxmc.rt.Sys, hxmc.rt.Net), with the C ABI as
+// runtime's Haxe code calls (hxmc.rt.PosixSys, hxmc.rt.PosixNet), with the C ABI as
 // LibC's. Structures are read at their offsets per target (the callers);
 // macOS x86-64 names the 64-bit-inode stat and directory functions with a
 // suffix (stat$INODE64), as its headers do. Variadic functions
@@ -58,7 +58,7 @@ import hxmc.I64;
 	static function _NSGetEnviron():Ptr;
 	static function realloc(p:Ptr, n:I64):Ptr;
 	@:native("realpath$DARWIN_EXTSN") static function realpathExtsn(path:Ptr, buf:Ptr):Ptr;
-	// sockets (hxmc.rt.Net)
+	// sockets (hxmc.rt.PosixNet)
 	static function socket(domain:Int, type:Int, protocol:Int):Int;
 	static function bind(fd:Int, addr:Ptr, len:Int):Int;
 	static function connect(fd:Int, addr:Ptr, len:Int):Int;

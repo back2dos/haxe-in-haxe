@@ -9,7 +9,7 @@ import hxmc.unsafe.Ptr;
 import hxmc.unsafe.Win32;
 import hxmc.unsafe.Winsock;
 
-// Winsock behind hxmc.NativeNet on Windows (formerly rt_net_win.c), as Net
+// Winsock of hxmc.NativeNet on Windows (formerly rt_net_win.c), as PosixNet
 // does with BSD sockets elsewhere, standing for OCaml's Unix library on
 // Windows. A socket is its SOCKET handle as an Int. Errors are Winsock's,
 // mapped to the errno values OCaml's Unix library reports for them
@@ -18,7 +18,6 @@ import hxmc.unsafe.Winsock;
 // to ask whether a socket blocks, so the sockets the program made
 // non-blocking (setBlocking) are remembered here (a malloc'ed table under
 // a spin lock, rt_spin[3]).
-@:keep @:hxmc.windows
 class WinNet {
 	static inline function threads():Int
 		return Mem.getI32(Mem.sym("rt_nthreads"), 0);
@@ -54,10 +53,10 @@ class WinNet {
 	static inline function sock(fd:Int):I64
 		return fd;
 
-	@:hxmc.host("hxmc_NativeNet_errno") @:hxmc.noGc static function getErrno():Int
+	@:hxmc.noGc public static function getErrno():Int
 		return lastErrno();
 
-	@:hxmc.host("hxmc_NativeNet_strerror") static function strerror(err:Int):String {
+	public static function strerror(err:Int):String {
 		var s = Winsock.strerror(err);
 		return Str.ofUtf8(s, LibC.strlen(s).toInt());
 	}
@@ -130,7 +129,7 @@ class WinNet {
 		return false;
 	}
 
-	@:hxmc.host("hxmc_NativeNet_socket") @:hxmc.noGc static function socket():Int {
+	@:hxmc.noGc public static function socket():Int {
 		Winsock.rt_win_sockets_init();
 		var s = Winsock.socket(2, 1, 0); // AF_INET, SOCK_STREAM
 		if (s == -1) return fail(); // INVALID_SOCKET
@@ -138,13 +137,13 @@ class WinNet {
 		return s.toInt();
 	}
 
-	@:hxmc.host("hxmc_NativeNet_close") @:hxmc.noGc static function close(fd:Int):Int {
+	@:hxmc.noGc public static function close(fd:Int):Int {
 		Leaf.rt_fd_closed(fd);
 		setNonblocking(sock(fd), false);
 		return ret(Winsock.closesocket(sock(fd)));
 	}
 
-	@:hxmc.host("hxmc_NativeNet_accept") static function accept(fd:Int):Int {
+	public static function accept(fd:Int):Int {
 		var s = sock(fd);
 		if (cooperative(s) && !waitSock(s, false)) return -1;
 		var a = Mem.stack(128), n = Mem.stack(8);
@@ -167,13 +166,13 @@ class WinNet {
 		Mem.setI8(a, 7, ip);
 	}
 
-	@:hxmc.host("hxmc_NativeNet_bind") @:hxmc.noGc static function bind(fd:Int, ip:Int, port:Int):Int {
+	@:hxmc.noGc public static function bind(fd:Int, ip:Int, port:Int):Int {
 		var a = Mem.stack(16);
 		inetAddr(a, ip, port);
 		return ret(Winsock.bind(sock(fd), a, 16));
 	}
 
-	@:hxmc.host("hxmc_NativeNet_connect") static function connect(fd:Int, ip:Int, port:Int):Int {
+	public static function connect(fd:Int, ip:Int, port:Int):Int {
 		var s = sock(fd);
 		if (cooperative(s)) { // a non-blocking connect, then wait until it completes
 			var arg = Mem.stack(8);
@@ -205,10 +204,10 @@ class WinNet {
 		return Winsock.connect(s, a, 16);
 	}
 
-	@:hxmc.host("hxmc_NativeNet_listen") @:hxmc.noGc static function listen(fd:Int, n:Int):Int
+	@:hxmc.noGc public static function listen(fd:Int, n:Int):Int
 		return ret(Winsock.listen(sock(fd), n));
 
-	@:hxmc.host("hxmc_NativeNet_sockName") static function sockName(fd:Int, peer:Bool):Array<Int> {
+	public static function sockName(fd:Int, peer:Bool):Array<Int> {
 		var s = Mem.stack(128), n = Mem.stack(8);
 		Mem.setI32(n, 0, 128);
 		var r = peer ? Winsock.getpeername(sock(fd), s, n) : Winsock.getsockname(sock(fd), s, n);
@@ -222,14 +221,14 @@ class WinNet {
 	}
 
 	// OCaml's Unix.recv/send check the range (Invalid_argument "Unix.recv")
-	@:hxmc.host("hxmc_NativeNet_recv") static function recv(fd:Int, b:Dynamic, pos:Int, len:Int):Int {
+	public static function recv(fd:Int, b:Dynamic, pos:Int, len:Int):Int {
 		if (pos < 0 || len < 0 || pos > Bytes.len(b) - len) Rt.rt_throw("Unix.recv");
 		var s = sock(fd);
 		if (cooperative(s) && !waitSock(s, false)) return -1;
 		return ret(Winsock.recv(s, Bytes.bytes(b).add(pos), len, 0));
 	}
 
-	@:hxmc.host("hxmc_NativeNet_send") static function send(fd:Int, b:Dynamic, pos:Int, len:Int):Int {
+	public static function send(fd:Int, b:Dynamic, pos:Int, len:Int):Int {
 		if (pos < 0 || len < 0 || pos > Bytes.len(b) - len) Rt.rt_throw("Unix.send");
 		var s = sock(fd);
 		if (cooperative(s) && !waitSock(s, true)) return -1;
@@ -268,7 +267,7 @@ class WinNet {
 
 	// Unix.select: a negative timeout waits forever; Winsock's select fails
 	// without sockets, then the timeout is slept as select would
-	@:hxmc.host("hxmc_NativeNet_select") static function select(r:Array<Int>, w:Array<Int>, o:Array<Int>, timeout:Float):Int {
+	public static function select(r:Array<Int>, w:Array<Int>, o:Array<Int>, timeout:Float):Int {
 		var nr = Str.isNull(r) ? 0 : r.length, nw = Str.isNull(w) ? 0 : w.length, no = Str.isNull(o) ? 0 : o.length;
 		if (nr > FD_SETSIZE || nw > FD_SETSIZE || no > FD_SETSIZE) {
 			setLast(EINVAL);
@@ -326,17 +325,17 @@ class WinNet {
 		return ret(Winsock.setsockopt(sock(fd), level, opt, v, 4));
 	}
 
-	@:hxmc.host("hxmc_NativeNet_setNoDelay") @:hxmc.noGc static function setNoDelay(fd:Int, b:Bool):Int
+	@:hxmc.noGc public static function setNoDelay(fd:Int, b:Bool):Int
 		return setBool(fd, 6, 1, b); // IPPROTO_TCP, TCP_NODELAY
 
-	@:hxmc.host("hxmc_NativeNet_setBroadcast") @:hxmc.noGc static function setBroadcast(fd:Int, b:Bool):Int
+	@:hxmc.noGc public static function setBroadcast(fd:Int, b:Bool):Int
 		return setBool(fd, SOL_SOCKET, SO_BROADCAST, b);
 
-	@:hxmc.host("hxmc_NativeNet_setReuseAddr") @:hxmc.noGc static function setReuseAddr(fd:Int, b:Bool):Int
+	@:hxmc.noGc public static function setReuseAddr(fd:Int, b:Bool):Int
 		return setBool(fd, SOL_SOCKET, SO_REUSEADDR, b);
 
 	// Unix.setsockopt_float SO_RCVTIMEO, then SO_SNDTIMEO (milliseconds)
-	@:hxmc.host("hxmc_NativeNet_setTimeout") @:hxmc.noGc static function setTimeout(fd:Int, t:Float):Int {
+	@:hxmc.noGc public static function setTimeout(fd:Int, t:Float):Int {
 		var ms = Mem.stack(8);
 		var v:I64 = cast(t * 1000.0);
 		Mem.setI32(ms, 0, v.toInt());
@@ -344,10 +343,10 @@ class WinNet {
 		return ret(Winsock.setsockopt(sock(fd), SOL_SOCKET, SO_SNDTIMEO, ms, 4));
 	}
 
-	@:hxmc.host("hxmc_NativeNet_shutdown") @:hxmc.noGc static function shutdown(fd:Int, mode:Int):Int
+	@:hxmc.noGc public static function shutdown(fd:Int, mode:Int):Int
 		return ret(Winsock.shutdown(sock(fd), mode == 0 ? 0 : mode == 1 ? 1 : 2));
 
-	@:hxmc.host("hxmc_NativeNet_setBlocking") @:hxmc.noGc static function setBlocking(fd:Int, b:Bool):Int {
+	@:hxmc.noGc public static function setBlocking(fd:Int, b:Bool):Int {
 		var nb = Mem.stack(8);
 		Mem.setI32(nb, 0, b ? 0 : 1);
 		if (Winsock.ioctlsocket(sock(fd), FIONBIO, nb) != 0) return fail();
@@ -355,10 +354,10 @@ class WinNet {
 		return 0;
 	}
 
-	@:hxmc.host("hxmc_NativeNet_blocked") @:hxmc.noGc static function blocked():Bool
+	@:hxmc.noGc public static function blocked():Bool
 		return lastErrno() == EAGAIN || lastErrno() == EWOULDBLOCK;
 
-	@:hxmc.host("hxmc_NativeNet_gethostname") static function gethostname():String {
+	public static function gethostname():String {
 		Winsock.rt_win_sockets_init();
 		var buf = Mem.stack(4096);
 		if (Winsock.gethostname(buf, 4095) != 0) {
@@ -379,7 +378,7 @@ class WinNet {
 	@:hxmc.noGc static function unlockResolver()
 		Atomic.store32(Mem.sym("rt_spin").add(16), 0);
 
-	@:hxmc.host("hxmc_NativeNet_resolve") static function resolve(name:String):Array<Int> {
+	public static function resolve(name:String):Array<Int> {
 		Winsock.rt_win_sockets_init();
 		var n = Str.toUtf8(name);
 		var ip = lookup(n);
@@ -408,7 +407,7 @@ class WinNet {
 		return r;
 	}
 
-	@:hxmc.host("hxmc_NativeNet_reverse") static function reverse(ip:Int):String {
+	public static function reverse(ip:Int):String {
 		Winsock.rt_win_sockets_init();
 		var name = reverseLookup(ip);
 		setLast(0);
