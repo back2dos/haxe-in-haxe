@@ -35,6 +35,34 @@ objects must stay visible to the GC when they hold references (as roots,
 via the shadow stack or stack maps), and must never be stored where a
 heap object or another thread can see them.
 
+### Cleanup after the runtime move
+
+Once the runtime is in Haxe and stack maps have landed, simplify what the
+C-runtime era left behind:
+
+- **One source per runtime area.** Today each area has an extern class
+  with untyped `Dynamic` signatures (`hxmc.NativeAtomic`, `NativeSys`,
+  `NativeNet`, `NativeZip`, ...) and a separate Haxe implementation
+  exported under C symbol names (`hxmc.rt.Atomics` with
+  `@:hxmc.host("hxmc_NativeAtomic_...")` and `@:keep`). Collapse each pair
+  into one typed implementation used directly by the std (e.g.
+  `haxe.atomic.AtomicInt` written over the `Atomic` intrinsics). Gains:
+  calls inline instead of crossing an extern boundary; dead-code
+  elimination drops unused runtime parts (no `@:keep`); the exported
+  functions no longer get lowered and compiled for every program (the
+  ~50 ms per build the move added). Keep `@:hxmc.host` exports only for
+  functions the remaining C code calls.
+- **Leftovers from hxc and other environments:** Emscripten, Cosmopolitan
+  and tcc/green-thread code in `rt/`; the remaining small C files
+  (`rt_str.c`, `rt_dyn.c`) folded into Haxe or the shims; names and
+  structure inherited from hxc's EmitC in `hxmc.ir.Facts`; the census as a
+  debug-only build.
+- **Std layout:** the std overrides merged with the Eval originals by
+  `mkstd.py`; see what can become plain sources once the extern layer is
+  gone.
+- **Tools and tests:** scripts and benchmarks that only mattered while
+  hxc was the oracle or the build host.
+
 ## Language and runtime
 
 ### Compact strings (Latin-1 / UTF-16)
