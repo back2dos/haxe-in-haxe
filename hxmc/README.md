@@ -49,7 +49,7 @@ HXB --(port: --hxb-lib)--> typed AST --(ir.Lower)--> hxmc IR --(Prep: ir.Facts)
 | `src/hxmc/Link.hx`, `LinkPE.hx`, `LinkMachO.hx`, `A64Reloc.hx`, `MkRt.hx` | the linkers (static ELF; PE with import tables written directly, TLS directory, .pdata, base relocations on arm64; Mach-O with dyld's rebase/bind opcodes, stubs, TLV descriptors and an ad-hoc code signature) and the runtime-object builder (COFF member selection, COMDAT, imports; Mach-O objects merged) |
 | `src/hxmc/Target.hx`, `Abi.hx` | per-target facts and the code-generator factory |
 | `rt/` | the runtime's C part (GC, exceptions, threads, system, sockets, the std natives not yet in Haxe; `rt.h`), the slow paths of generated code (`rthxmc.c`) and word-at-a-time `memcmp`/`bcmp` for musl (`rtlibc.c`) |
-| `std/` | the target's std: overrides of upstream modules, the runtime's Haxe part (`hxmc.rt`: strings, Dynamic, reflection; see "Runtime in Haxe"), its intrinsics (`hxmc.unsafe`) and the externs of its C part (`hxmc.Native*`), merged into `bin/hxmc/std` by `tools/mkstd.py` |
+| `std/` | the target's std: overrides of upstream modules, the runtime's Haxe part (`hxmc.rt`, `hxmc.Native*`; see "Runtime in Haxe"), its intrinsics (`hxmc.unsafe`) and the externs of its C part, merged into `bin/hxmc/std` by `tools/mkstd.py` |
 | `Makefile`, `tools/bootstrap/` | the build of the tool (by itself) and its bootstrap |
 | `test/` | the corpus: programs (`cases/`), frozen fuzzer programs (`fuzz-1000.tar.gz`), golden outputs (`expected/`), encoder tests (`encoder/`) |
 
@@ -115,8 +115,8 @@ Kept open on purpose (where):
 
 ## Runtime in Haxe
 
-The runtime is moving from C (`rt/`) into Haxe compiled by hxmc itself
-(`std/hxmc/rt`), Go-style: runtime operations become ordinary functions of
+Most of the runtime is Haxe compiled by hxmc itself (`std/hxmc/rt`, and
+the std's own classes over it), Go-style: runtime operations become ordinary functions of
 the program, inlined into user code where they are small and dropped when
 unused, in one language. What needs the machine directly is written with a
 small internal API (`std/hxmc/unsafe`, not a user API):
@@ -130,9 +130,10 @@ small internal API (`std/hxmc/unsafe`, not a user API):
   `alloc`/`allocRaw` (an object of a run-time size, type index and kind),
   `sym` (the address of a symbol of the program or runtime), `tlsGet`/
   `tlsSet` (the runtime's thread-locals), `abi` (Abi's layout constants),
-  `os`/`arm`/`target` (the target, constants: Lower folds a single
-  comparison of one and the `if` it decides, so platform code is written
-  `if (Mem.target() == 2)`, never `a && b`), `stack` (a frame area), `ult`,
+  `os`/`arm`/`target` (the target, constants: FnLower lowers only the
+  branch an `if` or `?:` on a comparison of one with a constant takes, so
+  the other target's functions are never reached; written
+  `if (Mem.os() == 2)`, never `a && b`), `stack` (a frame area), `ult`,
   `callRef1`/`callRef2` (calls through code pointers). MirBuild expands them
   inline; none but the allocations and calls is a GC point.
 - `Atomic`: sequentially consistent loads, stores, add, exchange and
@@ -152,34 +153,57 @@ small internal API (`std/hxmc/unsafe`, not a user API):
   at load time on macOS).
 - `@:hxmc.noGc` on a function: it must not reach a GC point (it may keep
   raw addresses across its calls); Facts checks it and names the culprit.
+  Raw addresses of heap objects belong in such functions only: inline
+  code of the std that takes one (`Mem.addr`) is expanded into the
+  program, whose lowering may compute the address before an allocation
+  among the same expression's operands, which moves the object (the
+  haxe.atomic cells call no-GC helpers).
 - `@:hxmc.export("sym")` / `@:hxmc.host("sym")` on a static function of an
-  `hxmc` package class: it implements runtime function `sym`. Generated
-  code's calls of `sym` (FnLower's `ECallHost`) become direct calls of it
-  (Lower.bindHosts: not GC points when it is `@:hxmc.noGc`, inlinable);
-  an exported one is also called by the C part, so it is always compiled,
-  under that symbol. Each runtime function gets its own section, which
-  the ELF linker drops when nothing reaches it, and is inlined only in
-  loops (HXMC_INLINE's third value). A class marked `@:hxmc.posix` binds
-  only off Windows, `@:hxmc.windows` only on Windows.
+  `hxmc` package class: it implements runtime function `sym` for the
+  natives the code generator knows by name (String, StringBuf, Std,
+  Array, haxe.io.Bytes, Date, Math.random, the Dynamic operations: core
+  types with runtime layouts). Generated code's calls of `sym` (FnLower's
+  `ECallHost`) become direct calls of it (Lower.bindHosts: not GC points
+  when it is `@:hxmc.noGc`, inlinable); an exported one is also called by
+  the C part, through an entry under that symbol (stack maps), so it is
+  always compiled. Each runtime function gets its own section, which the
+  ELF linker drops when nothing reaches it, and is inlined only in loops
+  (HXMC_INLINE's third value).
+- The other runtime areas are plain typed Haxe the std calls directly
+  (no extern, no binding, dropped by Haxe's dead-code elimination when
+  unused): `hxmc.NativeSys` and `hxmc.NativeNet` choose the POSIX or the
+  Windows implementation (`hxmc.rt.PosixSys`/`WinSys`,
+  `PosixNet`/`WinNet`) by `Mem.os()`, `hxmc.Native` (reflection) calls
+  `hxmc.rt.Dyn`, `hxmc.NativeZip` is the implementation, haxe.atomic's
+  cells are written over `Atomic`. `hxmc.NativeGc`, `NativeSsl`,
+  `NativeThread` and `NativeUv` remain externs of C functions.
 
-The modules load with every program through `std/Std.hx` (`import
-hxmc.rt.Runtime`; their classes are `@:keep`). A change that needs new
-intrinsics and uses them at once needs a tool that knows them: bootstrap
-(or build once against the previous std and runtime object first).
+The modules with bound natives load with every program through
+`std/Std.hx` (`import hxmc.rt.Runtime`; those classes are `@:keep`). A
+change that needs new intrinsics and uses them at once needs a tool that
+knows them: bootstrap (or build once against the previous std and runtime
+object first). `tools/mkstd.py` still merges each override of an upstream
+module with the original for Eval (`#if eval`): a custom target gets no
+`_std` directory of its own in the reference compiler, and the macro
+context shares the program's class paths.
 
 | Haxe (`std/hxmc/rt`) | from | what stays in C, and why |
 | --- | --- | --- |
-| `Str.hx`: strings, UTF-8, comparison, hashing, concatenation, Int formatting, String/StringBuf/Std natives | `rt_str.c` | `hx_format_float`: shortest round-trip doubles through printf/strtod (a Haxe Ryu could replace it) |
+| `Str.hx`: strings, UTF-8, comparison, hashing, concatenation, Int formatting, String/StringBuf/Std natives | `rt_str.c` | `hx_format_float` (in `rt_dyn.c`): shortest round-trip doubles through printf/strtod (a Haxe Ryu could replace it) |
 | `Dyn.hx`, `Types.hx`: structural and Dynamic access, inline-cache lookups, Dynamic operators, type tests, Std.string, reflection (`hxmc.Native`) | `rt_dyn.c` | the field-name table (interning under a lock, names outside the heap) and the per-thread inline-cache entries (until threads move) |
-| `Arr.hx`, `Bytes.hx`, `Date.hx`, `Zip.hx`: Array, haxe.io.Bytes, Date and Math.random natives, inflate and CRC-32 | `rt_std.c` | nothing |
-| `Sys.hx`, `Net.hx` (`@:hxmc.posix`): Sys, FileSystem, File, Process, sockets and host resolution over POSIX | `rt_sys.c`, `rt_net.c` | nothing (blocking waits go through the scheduler's `rt_wait_fd`/`rt_blocking_enter`) |
-| `Atomics.hx`: the haxe.atomic cells (`hxmc.NativeAtomic`) over `Atomic` | `rt_thread.c` | the rest of `rt_thread.c`: see below |
-| `WinSys.hx`, `WinNet.hx` (`@:hxmc.windows`): the same over the UCRT, kernel32 and Winsock (wide strings are Haxe's UTF-16 units) | `rt_sys_win.c`, `rt_net_win.c` | `rt_win.c`: the Winsock error mapping and WSAStartup, shared with TLS and the scheduler |
+| `Arr.hx`, `Bytes.hx`, `Date.hx`, `hxmc/NativeZip.hx`: Array, haxe.io.Bytes, Date and Math.random natives, inflate and CRC-32 | `rt_std.c` | nothing |
+| `PosixSys.hx`, `PosixNet.hx`: Sys, FileSystem, File, Process, sockets and host resolution over POSIX | `rt_sys.c`, `rt_net.c` | nothing (blocking waits go through the scheduler's `rt_wait_fd`/`rt_blocking_enter`) |
+| `haxe/atomic/AtomicInt.hx`, `AtomicObject.hx`: the haxe.atomic cells over `Atomic` | `rt_thread.c` | the rest of `rt_thread.c`: see below |
+| `WinSys.hx`, `WinNet.hx`: the same over the UCRT, kernel32 and Winsock (wide strings are Haxe's UTF-16 units) | `rt_sys_win.c`, `rt_net_win.c` | `rt_win.c`: the Winsock error mapping and WSAStartup, shared with TLS and the scheduler |
 
-Still C (6.4k lines with the libc glue, from 11.7k): the collector and
-allocator (`rt.c`) and the walk of the stack maps (`rt_frames.c`), the libuv binding for eval.luv (`rt_uv.c`), TLS over
-the platform's library (`rt_ssl.c`), the debug census (`rt_census.c`),
-`hx_format_float`, and threads (`rt_thread.c`): thread start and exit,
+Still C (5.6k lines with the libc glue, from 11.7k; OS threads only, the
+Emscripten, Cosmopolitan, tcc and green-thread variants inherited from hxc
+are gone): the collector and allocator (`rt.c`) and the walk of the stack
+maps (`rt_frames.c`), the libuv binding for eval.luv (`rt_uv.c`), TLS over
+the platform's library (`rt_ssl.c`), the field names, inline-cache tables
+and `hx_format_float` (`rt_dyn.c`), the heap census of a debug build
+(`rt_census.c`: `HXMC_RT_CENSUS=1 hxmc/tools/mkrt.sh`, then `RT_CENSUS=1`),
+and threads (`rt_thread.c`): thread start and exit,
 the stop-the-world handshake with the collector (safepoints, safe regions,
 root scanning of every thread), park/unpark, the main stack switch
 (assembly shims, Windows fibers), and the mutex, condition and semaphore
@@ -194,6 +218,12 @@ code pointers, its copying and scanning loops would at best match clang
 `rt_thread.c`; nothing in speed or size would improve (allocation's fast
 path is already inline code, and the roots are found through the stack
 maps either way).
+
+Collapsing the extern and bound-implementation pairs into typed areas
+(after stage 5a) left the generated code's instructions unchanged and
+took 8 to 12 KB off every executable (port 19623 -> 19615 KB), 75 KB off
+a small program's HXB (alloc 753 -> 677 KB) and up to 5% off builds
+(port 6.29 -> 5.98 s, best of 5).
 
 ## Building
 

@@ -45,33 +45,26 @@ objects must stay visible to the GC when they hold references (as roots,
 via the shadow stack or stack maps), and must never be stored where a
 heap object or another thread can see them.
 
-### Cleanup after the runtime move
+### Cleanup after the runtime move (done)
 
-Once the runtime is in Haxe and stack maps have landed, simplify what the
-C-runtime era left behind:
+Done (README, "Runtime in Haxe"):
 
-- **One source per runtime area.** Today each area has an extern class
-  with untyped `Dynamic` signatures (`hxmc.NativeAtomic`, `NativeSys`,
-  `NativeNet`, `NativeZip`, ...) and a separate Haxe implementation
-  exported under C symbol names (`hxmc.rt.Atomics` with
-  `@:hxmc.host("hxmc_NativeAtomic_...")` and `@:keep`). Collapse each pair
-  into one typed implementation used directly by the std (e.g.
-  `haxe.atomic.AtomicInt` written over the `Atomic` intrinsics). Gains:
-  calls inline instead of crossing an extern boundary; dead-code
-  elimination drops unused runtime parts (no `@:keep`); the exported
-  functions no longer get lowered and compiled for every program (the
-  ~50 ms per build the move added). Keep `@:hxmc.host` exports only for
-  functions the remaining C code calls.
-- **Leftovers from hxc and other environments:** Emscripten, Cosmopolitan
-  and tcc/green-thread code in `rt/`; the remaining small C files
-  (`rt_str.c`, `rt_dyn.c`) folded into Haxe or the shims; names and
-  structure inherited from hxc's EmitC in `hxmc.ir.Facts`; the census as a
-  debug-only build.
-- **Std layout:** the std overrides merged with the Eval originals by
-  `mkstd.py`; see what can become plain sources once the extern layer is
-  gone.
-- **Tools and tests:** scripts and benchmarks that only mattered while
-  hxc was the oracle or the build host.
+- One source per runtime area: the haxe.atomic cells are written over
+  the `Atomic` intrinsics, `hxmc.NativeZip` is the implementation,
+  `hxmc.NativeSys`/`NativeNet` dispatch by `Mem.os()` to typed POSIX and
+  Windows classes, `hxmc.Native` (reflection) calls `hxmc.rt.Dyn`. No
+  `@:keep`, no bindings: Haxe's dead-code elimination drops what a
+  program does not use (75 KB less HXB and 8 to 12 KB less code for a
+  small program, builds up to 5% faster). Bindings stay for the natives the code
+  generator calls by name (String, Array, Bytes, Std, Date, Dynamic
+  operations) and the exports C calls.
+- Leftovers: the Emscripten, Cosmopolitan, tcc and green-thread variants
+  are gone from `rt/`, `rt_str.c` is folded into `rt_dyn.c`, Facts' names
+  no longer follow hxc's C emitter, the census is a debug build of the
+  runtime object.
+- Kept: `mkstd.py` (a custom target gets no `_std` directory in the
+  reference compiler, so the overrides still merge with the Eval
+  originals); the tools and benchmarks, all still in use.
 
 ## Language and runtime
 

@@ -217,7 +217,26 @@ fixpoint. Against the runtime-in-Haxe milestone: instructions
 mandelbrot_anon -5.6%, binarytrees -1.6%, formatter_noio -1.4%, bcrypt
 -0.2%, alloc and json 0%, nbody +0.3%, sha256 +1.3%, port +0.8%; run times
 within the code-layout noise; port 19819 -> 19623 KB, small programs
-+0-8 KB (page rounding); building from HXB unchanged. CI: CI_RUN.
++0-8 KB (page rounding); building from HXB unchanged. CI: run 38586019919 green on all six targets.
+
+### hxmc: cleanup after the runtime move (2026-10-14, branch hxmc)
+
+One typed source per runtime area (haxe.atomic over the intrinsics,
+NativeZip, NativeSys/NativeNet dispatching to the POSIX and Windows
+classes, Native over hxmc.rt.Dyn), the hxc-era variants gone from `rt/`,
+`rt_str.c` folded into `rt_dyn.c`, the census a debug build. Locally: the
+corpus 72/72 on linux-x86_64, linux-arm64 (qemu) and windows-x86_64
+(wine), cross builds for macos-x86_64, macos-arm64 and windows-arm64; the
+corpus under 16, 64 and 256 KB nurseries (216/216 on x86-64, 144/144
+under qemu and wine with 16 and 256 KB); ThreadNatives 300 runs; the
+hxmc-built port's self-compile gives the reference's HXB (514 modules,
+byte-identical, also with a 256 KB nursery); the tool is a fixpoint.
+Against stage 5a: instructions unchanged (alloc, json, binarytrees,
+nbody, sha256, formatter_noio within 5000 instructions); executables 8 to
+12 KB smaller (port 19623 -> 19615 KB); HXB of small programs 75 KB
+smaller (alloc 753 -> 677 KB); builds best of 5 alloc 0.12 -> 0.12 s,
+json 0.13 -> 0.12 s, binarytrees 0.12 -> 0.11 s, formatter_noio 0.44 ->
+0.43 s, port 6.29 -> 5.98 s. CI: CI_RUN.
 
 ## Target generators
 
