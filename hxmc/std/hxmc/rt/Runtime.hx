@@ -9,7 +9,6 @@ import hxmc.rt.Dyn;
 import hxmc.rt.Arr;
 import hxmc.rt.Bytes;
 import hxmc.rt.Date;
-import hxmc.rt.Zip;
 import hxmc.rt.Sys;
 import hxmc.rt.Net;
 import hxmc.rt.WinSys;

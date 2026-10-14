@@ -10,7 +10,7 @@ import hxmc.unsafe.Ptr;
 // haxe.io.Bytes, BytesBuffer and FPHelper natives (formerly in rt_std.c).
 // Bytes: K_RAW, int32 length, the bytes from offset 8. BytesBuffer
 // (T_BYTESBUFFER): slot 0 the length, slot 1 a Bytes (its capacity).
-@:keep @:allow(hxmc.rt)
+@:keep @:allow(hxmc)
 class Bytes {
 	static inline var T_BYTESBUFFER = 9;
 
