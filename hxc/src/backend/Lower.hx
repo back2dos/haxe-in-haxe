@@ -25,7 +25,6 @@ class Lower {
 	var ctors = new Map<TClass, FuncInfo>();
 	var pending:Array<() -> Void> = [];
 	var tclasses:Array<TClass> = [];
-	var subclasses = new Map<TClass, Array<TClass>>(); // per class: its subclasses in tclasses, in that order
 	var root:ClassInfo;
 	var usedSelectors = new Map<String, Int>();
 	public var defaults = new Map<FuncInfo, Array<Null<TExpr>>>();
@@ -45,11 +44,9 @@ class Lower {
 			case NotCoro(t): t;
 		}
 
-	// `l`: a subclass to lower with (hxmc's resident compiler passes one that
-	// reuses function bodies across builds, see `lowerBody`); hxc never does
-	public static function program(main:TClass, types:Array<core.TType.ModuleType>, basic:core.TType.BasicTypes, ?l:Lower):Program {
+	public static function program(main:TClass, types:Array<core.TType.ModuleType>, basic:core.TType.BasicTypes):Program {
 		Lower.basic = basic;
-		if (l == null) l = new Lower();
+		var l = new Lower();
 		var mainField = main.clStatics.get("main");
 		l.prog.main = l.staticFunc(main, mainField);
 		l.drain();
@@ -104,16 +101,6 @@ class Lower {
 			fi.body = [SThrow(ENull(TRef(RAny)))];
 		}
 	}
-
-	// Lowers the body of `fi` (`run`). The hook for a subclass that caches
-	// bodies (hxmc/src/hxmc/LowerCache.hx): `key` is the field the body comes
-	// from (null: a closure or a static initializer); the cache keeps a body
-	// while the field object and its expression stay the same (the
-	// compilation server retypes a changed module and the modules depending
-	// on it, which makes new ones) and replays the calls the body made into
-	// this class. hxc never overrides it.
-	function lowerBody(fi:FuncInfo, key:Null<TClassField>, run:() -> Void):Void
-		run();
 
 	public function fail(msg:String):Dynamic
 		throw new LowerError(msg, "");
@@ -260,13 +247,6 @@ class Lower {
 		ci = new ClassInfo(core.Globals.sTypePath(c.clPath), nativeName(c), sup);
 		classes.set(c, ci);
 		tclasses.push(c);
-		var k = c.clSuper;
-		while (k != null) {
-			var subs = subclasses.get(k.cls);
-			if (subs == null) subclasses.set(k.cls, subs = []);
-			subs.push(c);
-			k = k.cls.clSuper;
-		}
 		ci.ifaces = sup.ifaces.copy();
 		for (i in c.clImplements)
 			addIface(ci, i.cls);
@@ -368,7 +348,7 @@ class Lower {
 		funcs.set(cf, fi);
 		prog.funcs.push(fi);
 		signature(fi, tf, null);
-		pending.push(guarded(fi, () -> lowerBody(fi, cf, () -> new FnLower(this, fi, null, null).run(tf))));
+		pending.push(guarded(fi, () -> new FnLower(this, fi, null, null).run(tf)));
 		return fi;
 	}
 
@@ -419,7 +399,7 @@ class Lower {
 				case _: signature(fi, tf, TRef(RObj(root)));
 			}
 		} else signature(fi, tf, TRef(RObj(root)));
-		pending.push(guarded(fi, () -> lowerBody(fi, cf, () -> new FnLower(this, fi, ci, null).run(tf))));
+		pending.push(guarded(fi, () -> new FnLower(this, fi, ci, null).run(tf)));
 		return fi;
 	}
 
@@ -440,7 +420,7 @@ class Lower {
 		var tf = funcOf(c.clConstructor);
 		signature(fi, tf, TRef(RObj(ci)));
 		fi.ret = TVoid;
-		pending.push(guarded(fi, () -> lowerBody(fi, c.clConstructor, () -> new FnLower(this, fi, ci, null).run(tf, true))));
+		pending.push(guarded(fi, () -> new FnLower(this, fi, ci, null).run(tf, true)));
 		return fi;
 	}
 
@@ -457,7 +437,7 @@ class Lower {
 		fi.ret = sig.ret;
 		prog.lambdas.push(li);
 		prog.funcs.push(fi);
-		pending.push(guarded(fi, () -> lowerBody(fi, null, () -> body(new FnLower(this, fi, null, li)))));
+		pending.push(guarded(fi, () -> body(new FnLower(this, fi, null, li))));
 		return li;
 	}
 
@@ -563,7 +543,7 @@ class Lower {
 		prog.funcs.push(fi);
 		prog.inits.push(fi);
 		initOf.set(fi, c);
-		pending.push(guarded(fi, () -> lowerBody(fi, null, () -> new FnLower(this, fi, null, null).runInit(c))));
+		pending.push(guarded(fi, () -> new FnLower(this, fi, null, null).runInit(c)));
 	}
 
 	public function rootClass():ClassInfo
@@ -587,13 +567,20 @@ class Lower {
 		if (c.hasClassFlag(CInterface)) return true;
 		var f = c.clFields.get(name);
 		if (f != null && f.hasClassFieldFlag(CfFinal)) return false;
-		var subs = subclasses.get(c);
-		if (subs != null)
-			for (d in subs)
-				if (d.clFields.exists(name) && d.clFields.get(name).cfExpr != null) return true;
+		for (d in tclasses)
+			if (d != c && isSubclass(d, c) && d.clFields.exists(name) && d.clFields.get(name).cfExpr != null) return true;
 		// a subclass loaded later may still override: dispatch if any descendant is known to the typer
 		for (d in c.clDescendants)
 			if (d.clFields.exists(name) && d.clFields.get(name).cfExpr != null) return true;
+		return false;
+	}
+
+	static function isSubclass(d:TClass, c:TClass):Bool {
+		var k = d;
+		while (k != null) {
+			if (k == c) return true;
+			k = k.clSuper != null ? k.clSuper.cls : null;
+		}
 		return false;
 	}
 

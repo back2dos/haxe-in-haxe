@@ -1,7 +1,8 @@
-# hxmc (hxmc/README.md, "CI"): builds the hxmc tool on Linux, cross-builds
-# the test corpus (hxmc/test/cases, hxc's test programs, fuzzer programs) and
-# the port for every hxmc target there, and runs them on a machine of each
-# target: outputs compared with hxc's (written on Linux, hxmc/tools/check.py),
+# hxmc (hxmc/README.md, "CI"): bootstraps the hxmc tool on Linux from the
+# reference compiler, cross-builds the test corpus (hxmc/test: its programs
+# and frozen fuzzer programs) and the port for every hxmc target there, and
+# runs them on a machine of each target: outputs compared with the golden
+# files (hxmc/test/expected, hxmc/tools/check.py),
 # and the port built by hxmc compiles its own source to the same HXB as the
 # reference compiler (hxmc/tools/selfcheck.py). Only on the hxmc branch.
 name: hxmc
@@ -54,8 +55,8 @@ jobs:
       - name: System packages
         run: |
           sudo apt-get update -qqy
-          # (the reference links mbedtls and pcre2 dynamically)
-          sudo apt-get install -qqy tcc lld libpcre2-dev zlib1g-dev libmbedtls-dev
+          # (the reference links mbedtls and pcre2 dynamically; ld.lld: hxmc/tools/mkrt.sh)
+          sudo apt-get install -qqy lld libpcre2-dev zlib1g-dev libmbedtls-dev
           if [ "${{ steps.cache-haxe.outputs.cache-hit }}" != true ]; then sudo apt-get install -qqy opam ninja-build; fi
 
       - name: Cache opam
@@ -85,64 +86,37 @@ jobs:
           eval $(opam env)
           make -C haxe -s -j"$(nproc)" haxe
 
-      # the native backend tool (port + hxc), which compiles hxmc: keyed by its sources
-      # (restored and saved apart: saved as soon as it is built, whatever fails later)
-      - name: Cache the native tool
-        id: cache-tool
-        uses: actions/cache/restore@v6
-        with:
-          path: |
-            bin/hxc-dev/tool
-            bin/fuzz/fuzz
-          key: hxmc-tool-${{ hashFiles('src/**', 'hxc/src/**', 'hxc/js/**', 'hxc/rt/**', 'hxc/std/**', 'hxc/tools/mkstd.py', 'test/fuzz/**') }}
-
       - uses: actions/setup-node@v7
-        if: steps.cache-tool.outputs.cache-hit != 'true'
         with:
           node-version: 22
-
-      - name: Native tool and fuzzer
-        if: steps.cache-tool.outputs.cache-hit != 'true'
-        run: |
-          set -ex
-          git init -q "$RUNNER_TEMP/hxnodejs"
-          git -C "$RUNNER_TEMP/hxnodejs" fetch -q --depth 1 https://github.com/HaxeFoundation/hxnodejs "$HXNODEJS_COMMIT"
-          git -C "$RUNNER_TEMP/hxnodejs" checkout -q FETCH_HEAD
-          make bin/hxc-dev/tool bin/fuzz/fuzz TOOL_LIBS="$RUNNER_TEMP/hxnodejs/extraParams.hxml -cp $RUNNER_TEMP/hxnodejs/src"
-
-      - name: Save the native tool
-        if: steps.cache-tool.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v6
-        with:
-          path: |
-            bin/hxc-dev/tool
-            bin/fuzz/fuzz
-          key: ${{ steps.cache-tool.outputs.cache-primary-key }}
-
-      - name: Restored tool is up to date
-        if: steps.cache-tool.outputs.cache-hit == 'true'
-        run: |
-          make bin/hxc/std/.stamp
-          touch bin/hxc-dev/tool bin/fuzz/fuzz
 
       - uses: mlugg/setup-zig@v2
         with:
           version: ${{ env.ZIG_VERSION }}
 
-      - name: hxmc and the runtime objects
+      # the tool from scratch (hxmc/Makefile, "bootstrap"): the reference
+      # compiler writes the tool's JavaScript and HXB, node compiles the HXB
+      # to the first native tool, which builds the tool from source
+      - name: Bootstrap hxmc
         run: |
           set -ex
-          make hxmc-dev
-          for t in $TARGETS; do
-            sh hxmc/tools/mkrt.sh $t
-          done
+          git init -q "$RUNNER_TEMP/hxnodejs"
+          git -C "$RUNNER_TEMP/hxnodejs" fetch -q --depth 1 https://github.com/HaxeFoundation/hxnodejs "$HXNODEJS_COMMIT"
+          git -C "$RUNNER_TEMP/hxnodejs" checkout -q FETCH_HEAD
+          make -f hxmc/Makefile bootstrap TOOL_LIBS="$RUNNER_TEMP/hxnodejs/extraParams.hxml -cp $RUNNER_TEMP/hxnodejs/src"
+          tail -4 bin/hxmc/boot/hxmc1.log
+
+      - name: The tool rebuilt by itself does not change
+        run: make -f hxmc/Makefile fixpoint
+
+      - name: Runtime objects
+        run: make -f hxmc/Makefile rt RT_TARGETS="$TARGETS"
 
       - name: Cross-build the corpus
         run: |
           set -ex
-          bin/fuzz/fuzz --emit bin/hxmc-fuzz -n 60 --seed 1000
           for t in $TARGETS; do
-            python3 hxmc/tools/run.py -v --target $t --fuzz bin/hxmc-fuzz --stage dist/$t/corpus
+            python3 hxmc/tools/run.py -v --target $t --stage dist/$t/corpus
           done
 
       - name: Cross-build the port
@@ -150,11 +124,11 @@ jobs:
           set -ex
           export HAXE_STD_PATH=$PWD/haxe/std
           mkdir -p bin/hxmc-t/port
-          haxe/haxe -cp src -cp hxc/js -cp bin/hxc/std -main haxe.Main --custom-target hxc=x --hxb bin/hxmc-t/port/prog.hxb.zip -D disable-parallelism --no-output
+          haxe/haxe -cp src -cp bin/hxmc/std -main haxe.Main --custom-target hxmc=x --hxb bin/hxmc-t/port/prog.hxb.zip -D disable-parallelism --no-output
           for t in $TARGETS; do
             exe=haxe; case $t in windows-*) exe=haxe.exe ;; esac
             mkdir -p dist/$t/port
-            HXMC_STATS=1 bin/hxmc/hxmc dist/$t/port/$exe --hxb-lib bin/hxmc-t/port/prog.hxb.zip -main haxe.Main --custom-target hxc -D disable-parallelism -D hxmc.target=$t | tail -3
+            HXMC_STATS=1 bin/hxmc/hxmc dist/$t/port/$exe --hxb-lib bin/hxmc-t/port/prog.hxb.zip -main haxe.Main --custom-target hxmc -D disable-parallelism -D hxmc.target=$t | tail -3
             ls -l dist/$t/port/$exe
             rm -rf dist/$t/port/$exe.hxmc dist/$t/port/haxe.hxmc
           done

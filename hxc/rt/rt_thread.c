@@ -1578,38 +1578,10 @@ static void WINAPI run_main_entry(void *arg) {
 	run_main_body();
 	SwitchToFiber(run_main_fiber);
 }
-#elif defined(__APPLE__) && defined(__aarch64__) || defined(RT_CALL_ON_STACK)
-// macOS on arm64 has no working ucontext (getcontext fails), nor has musl
-// (hxmc's static Linux builds define RT_CALL_ON_STACK): rt_call_on_stack
+#elif defined(__APPLE__) && defined(__aarch64__)
+// macOS on arm64 has no working ucontext (getcontext fails): rt_call_on_stack
 // calls fn on the stack below top, then returns on the caller's stack
 void rt_call_on_stack(void *top, void (*fn)(void));
-#if !defined(__APPLE__) && defined(__x86_64__)
-__asm__(".text\n"
-	".p2align 4\n"
-	".hidden rt_call_on_stack\n"
-	".globl rt_call_on_stack\n"
-	"rt_call_on_stack:\n"
-	"	push %rbp\n"
-	"	mov %rsp, %rbp\n"
-	"	mov %rdi, %rsp\n"
-	"	call *%rsi\n"
-	"	mov %rbp, %rsp\n"
-	"	pop %rbp\n"
-	"	ret\n");
-#elif !defined(__APPLE__) && defined(__aarch64__)
-__asm__(".text\n"
-	".p2align 2\n"
-	".hidden rt_call_on_stack\n"
-	".globl rt_call_on_stack\n"
-	"rt_call_on_stack:\n"
-	"	stp x29, x30, [sp, #-16]!\n"
-	"	mov x29, sp\n"
-	"	mov sp, x0\n"
-	"	blr x1\n"
-	"	mov sp, x29\n"
-	"	ldp x29, x30, [sp], #16\n"
-	"	ret\n");
-#else
 __asm__(".text\n"
 	".p2align 2\n"
 	".private_extern _rt_call_on_stack\n"
@@ -1622,7 +1594,6 @@ __asm__(".text\n"
 	"	mov sp, x29\n"
 	"	ldp x29, x30, [sp], #16\n"
 	"	ret\n");
-#endif
 #else
 static ucontext_t run_main_ret, run_main_ctx;
 static void (*run_main_body)(void);
@@ -1655,7 +1626,7 @@ void rt_run_main(void (*body)(void)) {
 		return;
 	}
 	mprotect(stack, (size_t)sysconf(_SC_PAGESIZE), PROT_NONE);
-#if defined(__APPLE__) && defined(__aarch64__) || defined(RT_CALL_ON_STACK)
+#if defined(__APPLE__) && defined(__aarch64__)
 	rt_call_on_stack(stack + bytes, body);
 #else
 	run_main_body = body;
