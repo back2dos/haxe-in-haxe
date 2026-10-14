@@ -1,30 +1,32 @@
 # hxmc: Haxe to machine code
 
 hxmc is a custom target that turns a typed Haxe program (the HXB archive
-your Haxe writes) into a native executable with its own code generator and
-linker: no C compiler, assembler or system linker at build time. It shares
-its front half with [hxc](../hxc/README.md): the HXB reader, the lowering to
-hxc's IR (`backend.Lower`/`FnLower`, `backend.Ir`) and EmitC's
-program-wide preparation (layouts, type indices, field ids, no-GC
-functions, cold sites, shadow-stack roots), so native code follows the same
-conventions as hxc's C and runs on the same runtime (`hxc/rt`), which is
-compiled ahead of time per target into one relocatable object
-(`tools/mkrt.sh`).
+your Haxe writes, or source through the port's front end) into a native
+executable with its own code generator and linker: no C compiler,
+assembler or system linker at build time. It is self-contained in this
+directory: its IR and lowering (`src/hxmc/ir`), its runtime (`rt/`,
+compiled ahead of time per target into one relocatable object,
+`tools/mkrt.sh`), its std (`std/`, target `--custom-target hxmc`) and its
+build, which hxmc does itself (`Makefile`; the first tool comes from the
+reference compiler, see "Bootstrap"). It started as a code generator for
+hxc's IR and was separated from hxc (see "Origin"); nothing here uses
+`hxc/`.
 
 Status: development. Every function of the port and of the test corpus
 compiles natively for the six desktop targets: x86-64 and arm64 Linux
 (static ELF, own linker, musl), x86-64 and arm64 Windows (PE, imports
 written directly) and x86-64 and arm64 macOS (Mach-O against libSystem,
 ad-hoc signed); the port built by hxmc compiles itself to byte-identical
-HXB (see "Targets" for how each is checked). Run time is near clang -O2 on
-hxc's C, executables are about 10% larger than clang -O2's dynamic ones
-(static, runtime included). Stack maps, deeper incremental rebuilds, the
-haxelib, APE builds and C interop are deferred (see "Status").
+HXB (see "Targets" for how each is checked), and hxmc builds itself.
+Run time is near clang -O2 on hxc's C, executables are about 10% larger
+than clang -O2's dynamic ones (static, runtime included). Stack maps,
+deeper incremental rebuilds, the haxelib, APE builds and C interop are
+deferred (see "Status").
 
 ## Design
 
 ```
-HXB --(port: --hxb-lib)--> typed AST --(backend.Lower)--> hxc IR --(Prep: EmitC's preparation)
+HXB --(port: --hxb-lib)--> typed AST --(ir.Lower)--> hxmc IR --(Prep: ir.Facts)
     --(MirBuild)--> Mir (SSA) --(Opt)--> --(x64|a64/Isel)--> LIR --(Regalloc)--> --(Emit, Asm)--> Obj (per module, cached)
     --(DataGen: tables, strings)--> Obj
     --(Link: ELF | LinkPE: PE | LinkMachO: Mach-O, with the runtime object)--> executable
@@ -33,10 +35,12 @@ HXB --(port: --hxb-lib)--> typed AST --(backend.Lower)--> hxc IR --(Prep: EmitC'
 | File | |
 | --- | --- |
 | `src/hxmc/Main.hx`, `Options.hx`, `Driver.hx` | the tool: runs the port's compiler with a generate hook, then compiles every module (in parallel, cached) and links; `--server` keeps the port's compilation server resident (objects kept in memory) |
-| `src/hxmc/LowerCache.hx` | resident builds: lowered function bodies reused while the server keeps their fields, through hxc's opt-in `Lower.lowerBody` hook (calls into the lowering replayed, objects rebound) |
+| `src/hxmc/ir/Ir.hx`, `Lower.hx`, `FnLower.hx` | the IR (structured statements in A-normal form, explicit GC points) and the lowering of the filtered typed AST to it: Int/Bool/Float/Int64 unboxed, generics erased, values converted where declared and use-site types differ |
+| `src/hxmc/ir/Facts.hx` | the program-wide preparation: function and literal names, object layouts, type indices, field ids, the absolute symbols of program-wide numbers, no-GC functions, cold sites (`SCold`), GC points |
+| `src/hxmc/LowerCache.hx` | resident builds: lowered function bodies reused while the server keeps their fields, through the `Lower.lowerBody` hook (calls into the lowering replayed, objects rebound) |
 | `src/hxmc/UpToDate.hx`, `Fingerprint.hx` | rebuilds: the whole build is skipped when archive (its ZIP directory), arguments and tool are unchanged; otherwise each module's object is reused when its fingerprint (its IR plus what its code reads of the rest of the program) is unchanged |
-| `src/hxmc/Prep.hx` | EmitC's preparation (without writing C): the numbers native code and the runtime agree on, as symbols |
-| `src/hxmc/Mir.hx`, `MirBuild.hx` | the machine-independent SSA IR and its construction from hxc's IR (Braun et al. on the structured statements); expands the runtime's inline helpers (allocation, write barrier, array access, inline caches) as EmitC's C does; tags loads and stores with a memory class |
+| `src/hxmc/Prep.hx` | the facts (`ir.Facts`) the code, the data and the runtime agree on, as symbols |
+| `src/hxmc/Mir.hx`, `MirBuild.hx` | the machine-independent SSA IR and its construction from hxmc's IR (Braun et al. on the structured statements); expands the runtime's inline helpers (allocation, write barrier, array access, inline caches); tags loads and stores with a memory class |
 | `src/hxmc/Opt.hx`, `Inline.hx` | machine-independent optimizations: inlining of small functions, global value numbering over the dominator tree (loads by memory class and version), store forwarding, loop-invariant code motion, branches decided by dominating branches, dead code |
 | `src/hxmc/Lir.hx`, `Regalloc.hx` | target instructions over virtual registers; linear-scan allocation with lifetime holes, spill weights by loop depth, fixed ranges for physical registers, caller-saved registers kept across slow-path calls (saved around them) |
 | `src/hxmc/x64/`, `src/hxmc/a64/` | x86-64 and AArch64: instruction selection (System V, Win64, AAPCS64), encoders (checked against llvm-mc), emission (frames, jump tables, constant pools) |
@@ -44,12 +48,15 @@ HXB --(port: --hxb-lib)--> typed AST --(backend.Lower)--> hxc IR --(Prep: EmitC'
 | `src/hxmc/DataGen.hx` | the program's data: type tables, dispatch rows, strings, globals, and the absolute symbols of program-wide numbers |
 | `src/hxmc/Link.hx`, `LinkPE.hx`, `LinkMachO.hx`, `A64Reloc.hx`, `MkRt.hx` | the linkers (static ELF; PE with import tables written directly, TLS directory, .pdata, base relocations on arm64; Mach-O with dyld's rebase/bind opcodes, stubs, TLV descriptors and an ad-hoc code signature) and the runtime-object builder (COFF member selection, COMDAT, imports; Mach-O objects merged) |
 | `src/hxmc/Target.hx`, `Abi.hx` | per-target facts and the code-generator factory |
-| `src/hxmc/CWriter.hx` | development builds: the C of what hxmc does not generate (none left) |
+| `rt/` | the runtime (GC, exceptions, strings, Dynamic, reflection, threads, system, sockets; `rt.h`), the slow paths of generated code (`rthxmc.c`) and word-at-a-time `memcmp`/`bcmp` for musl (`rtlibc.c`) |
+| `std/` | the target's std: overrides of upstream modules and the runtime's externs (`hxmc.Native*`), merged into `bin/hxmc/std` by `tools/mkstd.py` |
+| `Makefile`, `tools/bootstrap/` | the build of the tool (by itself) and its bootstrap |
+| `test/` | the corpus: programs (`cases/`), frozen fuzzer programs (`fuzz-1000.tar.gz`), golden outputs (`expected/`), encoder tests (`encoder/`) |
 
-Conventions shared with hxc:
+Conventions (inherited from hxc, whose C used the same runtime):
 
 - GC roots: reference locals live across a GC point are shadow-stack slots
-  (`fr[k]`, `EmitC.Roots`); cold sites (`SCold`) store the live references
+  (`fr[k]`, `Roots`); cold sites (`SCold`) store the live references
   on the shadow stack only on the slow path (in spare slots of the
   function's frame when it has one). No stack maps (deferred).
 - Exceptions: `try` is the runtime's `rt_handler` with the C library's
@@ -63,7 +70,8 @@ Conventions shared with hxc:
   offset in the image's TLV template from the thread's copy of it
   (`hxmc_tls_base` in the runtime, through a descriptor of offset 0 the
   linker defines); the base is computed once per function.
-- Symbols are the C names everywhere; Mach-O's leading underscore is
+- Symbols are the C names everywhere (generated functions `F_<name>`,
+  the runtime's externs `hxmc_<Class>_<name>`); Mach-O's leading underscore is
   dropped when the runtime's objects are read and added back for libSystem.
 - Program-wide numbers (type indices, field ids, signatures, global
   offsets, type spans) are absolute symbols (`TY_`, `FID_`, `SIG_`,
@@ -94,7 +102,7 @@ Kept open on purpose (where):
   `Abi.platform` (macos, ios, ios-simulator: the Mach-O build version).
 - Mir and `Opt` know nothing about x86-64 or arm64 (memory classes, value
   numbering); target facts go through `Abi`/`Target`. A wasm target would
-  be a separate structured code generator from hxc's IR (which keeps the
+  be a separate structured code generator from hxmc's IR (which keeps the
   structured control flow) or Mir, with linear memory and the shadow stack.
 - Native macros / hot reload: a module compiles to an in-memory `Obj`
   (code, data, relocations) independent of file writing and linking, which
@@ -104,51 +112,111 @@ Kept open on purpose (where):
   compaction belong in the linker, not in code generation. Stack-map frame
   descriptors, when they land, are to be registrable per code region.
 
-## Iteration loop
+## Building
+
+Run from the repository root (GNU make; zig and ld.lld build the runtime
+objects; the reference compiler `haxe/haxe`, `make reference`):
 
 ```sh
-make hxmc-dev                     # bin/hxmc/hxmc: the tool by the native hxc tool and tcc (seconds)
-make hxmc-fast                    # bin/hxmc-fast/hxmc: the same C by clang -O2 (the speed users get)
-sh hxmc/tools/mkrt.sh linux-x86_64   # bin/hxmc/rt/<target>/rt.o: the runtime object (zig cc -O2), once per target (any of the six)
-python3 hxmc/tools/run.py --fuzz bin/hxmc-fuzz   # corpus + fuzz programs: hxc vs hxmc output (byte comparison), % native
-python3 hxmc/tools/run.py --target linux-arm64 --fuzz bin/hxmc-fuzz     # under qemu-aarch64-static
-python3 hxmc/tools/run.py --target windows-x86_64 --fuzz bin/hxmc-fuzz  # under wine64
-python3 hxmc/tools/run.py --target macos-arm64 --fuzz bin/hxmc-fuzz --stage <dir>  # cross: build only (any target)
+make -f hxmc/Makefile             # bin/hxmc/hxmc: the tool, built by the previous tool from source (about 10 s)
+make -f hxmc/Makefile fixpoint    # the tool rebuilt by itself twice: byte-identical
+make -f hxmc/Makefile rt          # bin/hxmc/rt/<target>/rt.o for the six targets (the host's is built with the tool)
+make -f hxmc/Makefile test        # the corpus against its golden files (RUN_ARGS="--target linux-arm64" ...)
+make -f hxmc/Makefile portcheck   # the port built by hxmc self-compiles to the reference's HXB
+python3 hxmc/tools/run.py --target windows-x86_64   # the corpus under wine64 (linux-arm64: qemu-aarch64-static)
+python3 hxmc/tools/run.py --target macos-arm64 --stage <dir>   # cross: build only (any target)
 python3 hxmc/tools/check.py <dir>  # on the target's machine: run the staged programs, compare outputs
 python3 hxmc/tools/enctest.py --arch x64|a64   # encoders against llvm-mc
 sh hxmc/tools/hxmc.sh <case>      # rerun hxmc on a corpus case (HXMC_DUMP=<function> prints its Mir)
-python3 hxmc/bench/measure.py -v tcc,O2,hxmcs   # run time and size against hxc's C (tcc, clang -O2)
-python3 hxmc/bench/rebuild.py --tool bin/hxmc-fast/hxmc   # cold / no-change / one-module-edit build times (--server: through the resident tool)
-SMALL=1 sh hxmc/tools/portcheck.sh  # the port built by hxmc self-compiles to the reference's HXB (also with a 256 KB nursery)
+python3 hxmc/bench/measure.py     # run time, size and build time of the benchmark cases
+python3 hxmc/bench/rebuild.py     # cold / no-change / one-module-edit build times (--server: through the resident tool)
+SMALL=1 sh hxmc/tools/portcheck.sh  # the port check, also with a 256 KB nursery
 ```
 
-- Test cases are `test/cases/*.hx`, the hxc test programs listed in
-  `run.py`, and fuzzer programs (`bin/fuzz/fuzz --emit bin/hxmc-fuzz -n 60`).
-  Each case's HXB is written once by the reference compiler and cached; the
-  oracle is the same archive compiled by hxc (tcc). A corpus run takes 4 s.
-- The port check: the port built by hxmc compiles its own source to HXB,
-  compared member by member with the reference's (also with
-  `RT_MINOR_KB=256`, which makes missing or stale roots crash quickly).
+- The tool is the port (`src/`) with hxmc (`hxmc/src`) as its generate
+  hook, typed against hxmc's std (`-D hih_no_generators`: without the
+  port's other target generators). `make -f hxmc/Makefile` rebuilds it with
+  the previous tool from source (`bin/hxmc/hxmc.new`, then moved over the
+  running binary); a change to code generation reaches the tool's own code
+  on the next rebuild, which `fixpoint` checks.
+- Programs: `bin/hxmc/hxmc <out> <haxe arguments> -cp bin/hxmc/std
+  --custom-target hxmc` (from source) or `bin/hxmc/hxmc <out> --hxb-lib
+  <archive> -main <Main> --custom-target hxmc` (an archive written with
+  `-cp bin/hxmc/std --custom-target hxmc=<dir> --hxb <archive>`), with
+  `-D hxmc.target=<target>` to cross-build. The tool finds the runtime
+  object next to itself (`bin/hxmc/rt/<target>/rt.o`; `HXMC_RT_OBJ`
+  overrides).
 - `HXMC_OPT=0` turns off Mir optimizations (`HXMC_LICM=0` only LICM,
   `HXMC_INLINE=<flat>,<loop>` the inlining limits); `HXMC_SYMBOLS=1` (or
   `-debug`) writes a symbol table (profilers: `valgrind --tool=callgrind`);
   `HXMC_SIZE_STATS=1` prints the bytes of code by instruction kind, memory
   class, hot and cold blocks; `HXMC_LOWER_CHECK=1` (server) compares the
   executable built from cached bodies with one from a fresh lowering.
-- Hybrid development builds (`HXMC_HYBRID=1`) write C for what hxmc does not
-  compile and link with the system's compiler; `HXMC_ONLY`/`HXMC_SKIP`
-  select the functions compiled natively (bisecting).
 - Windows: `HXMC_MAP=<file>` writes the address of every symbol (PE files
   get no symbol table); a crash prints its exception and image offset
   (`rthxmc.c`, installed by a TLS callback; `HXMC_TRACE=1` also says the
   image started); `HXMC_PE_DIAG=<variant,...>` writes loader-bisecting
   variants (`lowbase`, `fixed`, `nopdata`, `bssdata`, `notls`, `ret42`).
 
+### Bootstrap
+
+The first tool comes from the reference compiler; nothing else is needed
+but node (and hxnodejs) for one run:
+
+```sh
+make -f hxmc/Makefile bootstrap   # about 2 minutes
+```
+
+1. The reference compiler writes the tool as JavaScript
+   (`bin/hxmc/boot/hxmc.js`: the port runs on node, with the
+   single-threaded `sys.thread` and `sys.net` stand-ins of
+   `tools/bootstrap/js`) and the tool's HXB archive
+   (`bin/hxmc/boot/hxmc.hxb.zip`, typed against hxmc's std).
+2. node runs the JavaScript tool on that archive (one thread, about a
+   minute): `bin/hxmc/boot/hxmc1`, the first native tool.
+3. `hxmc1` builds `bin/hxmc/hxmc` from source; from then on the tool
+   rebuilds itself. (`hxmc1` itself differs from what native tools build,
+   e.g. through JavaScript's integer arithmetic and map order in
+   heuristics; the tool it builds is the fixpoint: `make -f hxmc/Makefile
+   fixpoint` rebuilds it twice and compares.)
+
+A previously built tool works as well (copy it to `bin/hxmc/hxmc`), as
+long as it compiles the current sources correctly; after a change of the
+runtime's interface or of the IR's conventions, bootstrap again. CI
+(below) bootstraps on every run.
+
+### Tests and their oracle
+
+The corpus is the programs of `test/cases` (`<Name>.hx` with class
+`<Name>`: small programs written for hxmc, and Bench, Exc and Regress,
+copied from hxc's test programs) and 60 fuzzer programs (seed 1000 of
+`bin/fuzz/fuzz --emit -n 60`, `test/fuzz-1000.tar.gz`, extracted to
+`bin/hxmc-fuzz`). Each case's HXB is written once by the reference
+compiler and cached; its output (`exit <code>` and stdout, run with a 64 KB
+nursery so that a missing or stale root shows) must equal its golden file,
+`test/expected/<case>.txt`. A corpus run takes 6 s.
+
+The golden files are frozen: they are the outputs of the same programs
+compiled by hxc (C by tcc) when hxmc was separated from it, the oracle
+until then, which every target matched. The reference compiler's
+`--interp` is not an oracle here: target-dependent behavior differs
+(`Std.string` of a Bool in Dynamic context, array printing, ...; 39 of the
+67 programs). A new case gets its golden file with `run.py --bless <case>`
+(written from hxmc's output: check it by hand before committing); a
+program whose output should change has its golden file edited, with the
+reason in the commit. The fuzzer programs are frozen as sources, not
+regenerated, so a change of the fuzzer does not change the corpus.
+
+The port check: the port built by hxmc compiles its own source to HXB,
+compared member by member with the reference's (also with
+`RT_MINOR_KB=256`).
+
 ## Targets
 
 Every target is cross-built on Linux: the tool, the runtime object of the
-target (`hxmc/tools/mkrt.sh <target>`, zig cc) and the programs; no C
-compiler, assembler, linker or SDK is involved when a program is built.
+target (`hxmc/tools/mkrt.sh <target>`: `rt/` by zig cc, `-DHXMC_NO_SSL
+-DHXMC_NO_UV`) and the programs; no C compiler, assembler, linker or SDK is
+involved when a program is built.
 
 | target | output | runtime object | thread-locals | checked |
 | --- | --- | --- | --- | --- |
@@ -185,11 +253,11 @@ compiler, assembler, linker or SDK is involved when a program is built.
 ### CI
 
 `.github/workflows/hxmc.yml` runs on pushes to the hxmc branch: one Linux
-job builds the reference compiler (cached with build.yml's key), the
-native tool (cached by its sources), hxmc and the six runtime objects,
-writes the corpus' HXB and hxc's outputs (`run.py --stage`, 7 programs and
-60 fuzzer programs of seed 1000), cross-builds the corpus and the port for
-every target, and the reference's self-compile of the port in
+job builds the reference compiler (cached with build.yml's key),
+bootstraps the tool from it (`make -f hxmc/Makefile bootstrap`, node),
+checks the fixpoint, builds the six runtime objects, cross-builds the
+corpus (`run.py --stage`, with the golden files) and the port for every
+target, and runs the reference's self-compile of the port in
 `/Users/runner/hih`. A job per target then runs the corpus on a machine of
 that target (`check.py`: ubuntu-24.04, ubuntu-24.04-arm, windows-2025,
 windows-11-arm, macos-15-intel, macos-15) and the port's self-compile
@@ -199,14 +267,41 @@ identical once the root is replaced (`hxbcmp.py --roots`; the sources come
 from Linux, as a Windows checkout has CRLF line ends). Failures land in
 the job summary. Logs: `gh api repos/<owner>/<repo>/actions/jobs/<id>/logs`.
 
+## Origin
+
+hxmc began as a second back end of hxc (the C target, `hxc/` on main):
+it read hxc's IR, used hxc's program-wide preparation and runtime, typed
+programs against hxc's std, was built by hxc's tool, and its tests
+compared with hxc's output. On 2026-10-14 it was separated (main at
+1620799, branch hxmc at 7c74113):
+
+| hxmc | from |
+| --- | --- |
+| `src/hxmc/ir/Ir.hx`, `Lower.hx`, `FnLower.hx` | `hxc/src/backend/` (package `backend`), with hxmc's `Lower.lowerBody` hook and the per-class subclass lists of `needsDispatch` that were branch-local edits of hxc's Lower |
+| `src/hxmc/ir/Facts.hx` | the preparation part of `hxc/src/backend/EmitC.hx` (names, layouts, type indices, field ids, no-GC functions, cold sites, `Roots.gcPoint`/`nestedGc`); none of its C writing |
+| `rt/` | `hxc/rt`, with `RT_CALL_ON_STACK` (main's stack switch without ucontext, for musl) and `rthxmc.c`/`rtlibc.c` (from `hxmc/tools`); externs renamed `hxc_Native*` -> `hxmc_Native*`, `HXC_NO_*` -> `HXMC_NO_*` |
+| `std/`, `tools/mkstd.py` | `hxc/std` and `hxc/tools/mkstd.py`; package `hxc` -> `hxmc`, `target.name == "hxc"` -> `"hxmc"` |
+| `tools/bootstrap/js` | `hxc/js` (the stand-ins of hxc's JavaScript tool) |
+| `test/cases/Bench.hx`, `Exc.hx`, `Regress.hx` | `hxc/test`, `hxc/test/exc`, `hxc/test/regress` |
+| `test/expected/` | hxc's outputs of the corpus (the oracle until then), frozen |
+
+The development mode that wrote C for the functions hxmc did not compile
+yet (hybrid builds, `HXMC_HYBRID`) was removed with it: every function
+compiles natively. The port's sources know the target by name where they
+use host natives (`#if (target.name == "hxc" || target.name == "hxmc")`
+and the externs of either std, a branch-local change of `src/`). Fixes to
+hxc's lowering or runtime on main no longer reach hxmc by themselves: they
+are ported here by hand.
+
 ## Numbers (2026-10-14, one 4-core VM)
 
-Run time (s, best of 3, `hxmc/bench/measure.py -n 3 -v tcc,O2,hxmcs`) and
-size (KB): hxc's C compiled by tcc and by clang -O2 against the same
-runtime (clang -O2), dynamically linked with glibc, stripped; hxmc's
-static executables (musl, runtime included, no symbol table). Build:
-hxmc's cold build of the archive (bin/hxmc-fast, 4 jobs). Bold: hxmc at
-least as fast as clang -O2. The VM is noisy (±3-5% between runs).
+Run time (s, best of 3) and size (KB): hxc's C compiled by tcc and by
+clang -O2 against the same runtime (clang -O2), dynamically linked with
+glibc, stripped (measured with hxc before the separation; `measure.py` no
+longer builds C); hxmc's static executables (musl, runtime included, no
+symbol table; `hxmc/bench/measure.py -n 3`, after the separation, with the
+self-built tool). Build: hxmc's cold build of the archive (4 jobs). Bold:
+hxmc at least as fast as clang -O2. The VM is noisy (±3-5% between runs).
 
 | case | run tcc | run O2 | run hxmc | size O2 | size hxmc | hxmc build |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -223,21 +318,27 @@ least as fast as clang -O2. The VM is noisy (±3-5% between runs).
 | port (self-compile) | 16.57 | 8.52 | **8.28** | 18100 | 19854 | 6.3 |
 
 tcc sizes: 158-430 KB for the small cases, 2097 KB formatter, 35134 KB
-port. Across runs hxmc is within about ±10% of clang -O2 everywhere but
+port. The separation from hxc changed no executable: every case, the port
+included, is byte-identical to what the hxc-built tool wrote before it
+(re-measured the same day: run times within noise, e.g. port 7.9-8.6 s;
+cold build of the port 7.9 s by the self-built tool, 8.5 s by the earlier
+tool's clang -O2 build, in the same session). Across runs hxmc is within about ±10% of clang -O2 everywhere but
 bcrypt (15-20% behind).
 
-Rebuilds (`hxmc/bench/rebuild.py`, bin/hxmc-fast):
+Rebuilds (`hxmc/bench/rebuild.py`; before the separation with the clang
+-O2 build of the tool, the port also after it with the self-built tool,
+in a busier session):
 
 | program | cold | no change | one module edited |
 | --- | --- | --- | --- |
-| small (hxc/test/regress) | 0.09 s | 0.01 s | 0.08 s |
-| port (404 modules) | 5.5 s | 0.01 s | 2.7 s |
+| small (test/cases/Regress) | 0.09 s | 0.01 s | 0.08 s |
+| port (404 modules) | 5.5 s (7.1 s) | 0.01 s (0.00 s) | 2.7 s (3.1 s) |
 | port through the server (`--server`, from source) | 12.0 s | 1.95 s | 2.25 s |
 
-For comparison hxc + tcc builds the port in ~11 s. The one-edit floor is
+For comparison hxc + tcc built the port in ~11 s. The one-edit floor is
 the front half: loading and typing (or the server's checks, filters and
 DCE, ~0.5 s), lowering (0.6-0.8 s; the server replays cached bodies,
-`LowerCache`), EmitC's preparation (0.15 s), module keys (0.2 s), data and
+`LowerCache`), the preparation (`ir.Facts`, 0.15 s), module keys (0.2 s), data and
 link (0.25 s). Not pursued further.
 
 What closed the gaps (this round):
@@ -288,7 +389,8 @@ case: the shadow stack's frame traffic and thread-local push/pop are about
 
 ## Step 0: how much optimization is needed (2026-10-13)
 
-`hxmc/bench/measure.py`: each case lowered to C once by hxc; the runtime
+Measured with hxc, before hxmc was separated from it (`hxmc/bench/measure.py`
+then also built C): each case lowered to C once by hxc; the runtime
 compiled once with clang -O2 (green threads, so tcc's code links with it);
 only the generated C changes. Seconds, best of 3, one 4-core VM.
 
@@ -319,9 +421,10 @@ What this says:
 
 Done:
 
-- x86-64 Linux: 100% native (corpus: 67 programs plus 90 fuzzer programs,
-  18014 functions; port: 16456), static executables from hxmc's own linker
-  with the musl runtime object; outputs identical to hxc's; the port
+- x86-64 Linux: 100% native (corpus: 7 programs and 60 fuzzer programs,
+  6550 functions; port: 16456), static executables from hxmc's own linker
+  with the musl runtime object; outputs identical to the golden files
+  (hxc's outputs when hxmc was separated from it); the port
   self-compiles to byte-identical HXB (514 modules), also with a 256 KB
   nursery (`hxmc/tools/portcheck.sh`).
 - arm64 Linux: corpus passes under qemu and on arm64 hardware (CI); the
@@ -343,7 +446,10 @@ Done:
 - Rebuilds: per-module object cache keyed by fingerprints, whole-build
   skip, parallel code generation; resident mode (`hxmc --server`, the
   port's compilation server) with cached objects and cached lowered bodies
-  (`LowerCache`, through hxc's opt-in `Lower.lowerBody` hook).
+  (`LowerCache`, through the `Lower.lowerBody` hook).
+- Self-contained and self-hosting: own IR, lowering, runtime and std
+  (nothing from `hxc/`); the tool builds itself (a fixpoint after one
+  rebuild), bootstrapped from the reference compiler through node.
 
 Deferred:
 
@@ -351,7 +457,7 @@ Deferred:
   5-10% run time on allocation-heavy code and about 3 MB of the port's
   code (the largest size item left); design in "Stack maps" above.
 - Incremental rebuilds beyond what is there: the one-edit floor (2.7 s, 2.25 s
-  through the server) is the front half (typing, lowering, EmitC's
+  through the server) is the front half (typing, lowering, the
   preparation, keys, data, link), not code generation.
 - Program-level dead code, data-table compaction and runtime member
   selection beyond section GC (size).
@@ -364,4 +470,4 @@ Deferred:
   area is small would trim that.
 - C interop design (calling C libraries from generated code beyond the
   runtime's own functions); mbedtls/libuv in the runtime objects (built
-  with `HXC_NO_SSL`/`HXC_NO_UV`).
+  with `HXMC_NO_SSL`/`HXMC_NO_UV`).

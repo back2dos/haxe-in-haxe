@@ -152,6 +152,22 @@ the reference's HXB (514 modules): byte-identical on Linux and macOS,
 identical with the root normalized on Windows (absolute Windows paths).
 hxc and the port are unchanged; nothing in the port's lanes is affected.
 
+### hxmc separated from hxc (2026-10-14, branch hxmc)
+
+hxmc has its own IR and lowering (copied from hxc's backend), runtime, std
+(`--custom-target hxmc`), golden files (hxc's outputs, frozen) and build:
+it builds itself, bootstrapped from the reference compiler through node
+(`hxmc/README.md`, "Origin", "Bootstrap"). Locally: the corpus (67
+programs) matches its golden files on linux-x86_64, linux-arm64 (qemu) and
+windows-x86_64 (wine); the hxmc-built port's self-compile gives the
+reference's HXB (514 modules) byte-identical on x86-64 (also with a 256 KB
+nursery) and arm64 (qemu), identical with roots normalized under wine; the
+tool rebuilt by itself is a fixpoint; every benchmark executable (the port
+included) is byte-identical to the one the hxc-built tool wrote before.
+The port's sources accept `target.name == "hxmc"` beside "hxc" where they
+use host natives (imports of either target's externs); for the hxc, Eval,
+HashLink and JavaScript builds the typed program is unchanged.
+
 ## Target generators
 
 Every target also compiles upstream's unit suite identically (`unit-targets.py`, above).
