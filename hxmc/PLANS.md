@@ -4,6 +4,37 @@ Ideas and directions discussed for hxmc, not scheduled. Each entry says
 what it is, why it matters and what it needs. Current state is in
 [README.md](README.md); this file is what could come after.
 
+## Medium term
+
+The next performance steps after the runtime moves to Haxe; both are in
+the code generator and help every target.
+
+### Stack maps instead of the shadow stack
+
+Measured: up to 21% fewer instructions (mandelbrot_anon), 11% binarytrees,
+9% formatter; estimated real gain 5–10% on call- and allocation-heavy
+code. The shadow stack is also the largest remaining size item, about
+3 MB of the port's code. Design (OCaml-style): references live across
+collecting calls in frame slots, descriptors keyed by return address and
+registrable per code region, frame-pointer walk, Haxe→C transitions
+recorded so the walk skips C frames, C runtime keeps a shadow stack for
+its own roots. hxc and a WebAssembly target keep the shadow stack.
+
+### Escape analysis
+
+Allocate objects that never escape their function on the stack, or
+replace them by their fields in registers (scalar replacement): temporary
+iterators, small structs and anonymous objects, closures called in place,
+boxed values. Go relies on this to keep short-lived objects off its heap.
+It removes allocation, write barriers and GC pressure at once, and is
+likely the largest remaining gain for allocation-heavy code (alloc,
+binarytrees, closure-heavy code, the port's own temporaries), more than
+any tuning of the collector. hxmc's SSA IR and inliner make it practical:
+inlining first exposes most non-escaping allocations. Stack-allocated
+objects must stay visible to the GC when they hold references (as roots,
+via the shadow stack or stack maps), and must never be stored where a
+heap object or another thread can see them.
+
 ## Language and runtime
 
 ### Compact strings (Latin-1 / UTF-16)
@@ -60,16 +91,22 @@ With the runtime in Haxe, static Linux executables could call the kernel
 directly (as Go does) and drop musl. Windows and macOS keep going
 through their system libraries (kernel32/ntdll, libSystem).
 
-### Stack maps instead of the shadow stack
+### The collector, longer term
 
-Measured: up to 21% fewer instructions (mandelbrot_anon), 11% binarytrees,
-9% formatter; estimated real gain 5–10% on call- and allocation-heavy
-code. The shadow stack is also the largest remaining size item, about
-3 MB of the port's code. Design (OCaml-style): references live across
-collecting calls in frame slots, descriptors keyed by return address and
-registrable per code region, frame-pointer walk, Haxe→C transitions
-recorded so the walk skips C frames, C runtime keeps a shadow stack for
-its own roots. hxc and a WebAssembly target keep the shadow stack.
+Compared with Go (concurrent non-moving mark-sweep), Swift (reference
+counting) and V (Boehm's conservative collector), our precise generational
+copying collector is the best fit for Haxe's allocation patterns. Its weak
+points and the ideas that address them:
+
+- Major pauses grow with the live heap (a hitch for games and graphics
+  with large heaps): incremental or concurrent marking of the old
+  generation, as Go does.
+- Peak memory: the copying old generation needs a to-space during a major
+  collection. A mark-region (Immix-style) or mark-compact old generation
+  removes it, and lets objects be pinned in place, which simplifies C
+  interop.
+- A memory limit (like Go's `GOMEMLIMIT`): collect harder as the process
+  approaches a configured cap.
 
 ### sys.ssl and libuv
 
