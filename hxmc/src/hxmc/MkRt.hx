@@ -45,6 +45,23 @@ class MkRt {
 		Sys.println('mkrt: ${m.included.length} objects, ${Lambda.count(m.imports)} imports, ${o.sections.length} sections');
 	}
 
+	// `hxmc --mkrt-macho <out> <objects...>`: the runtime object of a macOS
+	// target: the runtime's Mach-O objects merged (MachOReader) into one Obj
+	// in hxmc's ELF container. Nothing else is linked in: what stays
+	// undefined comes from libSystem at load time (LinkMachO binds it).
+	public static function macho(args:Array<String>) {
+		var out = args.shift();
+		var m = new MkRt();
+		for (a in args) {
+			var r = MachOReader.read(sys.io.File.getBytes(a));
+			if (r.arm) m.arm = true;
+			m.included.push(r.obj);
+		}
+		var o = m.merge();
+		sys.io.File.saveBytes(out, ElfWriter.write(o, m.arm));
+		Sys.println('mkrt: ${m.included.length} objects, ${o.sections.length} sections');
+	}
+
 	function add(r:{obj:Obj, reader:CoffReader}) {
 		var o = r.obj;
 		if (r.reader.isArm) arm = true;

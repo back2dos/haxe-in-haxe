@@ -337,7 +337,11 @@ class Driver {
 		var rt = ElfReader.read(sys.io.File.getBytes(rtPath));
 		var t4 = haxe.Timer.stamp();
 		var all = [data].concat(objs).concat([rt]);
-		var exe = abi.os == "windows" ? new LinkPE(all, abi.arm).link("mainCRTStartup") : {
+		var exe = abi.os == "windows" ? new LinkPE(all, abi.arm).link("mainCRTStartup") : abi.os == "macos" ? {
+			var l = new LinkMachO(all, abi);
+			l.symbols = !o.strip;
+			l.link("main");
+		} : {
 			var l = new Link(all, abi);
 			l.symbols = !o.strip;
 			if (Sys.getEnv("HXMC_NOGC") != "1") l.collect = rt;

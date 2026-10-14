@@ -21,6 +21,11 @@ class Main {
 
 	static function main() {
 		var args = Sys.args();
+		if (args[0] == "--mkrt-macho") {
+			args.shift();
+			MkRt.macho(args);
+			return;
+		}
 		if (args[0] == "--mkrt") {
 			args.shift();
 			MkRt.main(args);

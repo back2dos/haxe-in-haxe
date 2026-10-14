@@ -14,6 +14,8 @@ linux-x86_64) triple=x86_64-linux-musl ;;
 linux-arm64) triple=aarch64-linux-musl ;;
 windows-x86_64) triple=x86_64-windows-gnu ;;
 windows-arm64) triple=aarch64-windows-gnu ;;
+macos-x86_64) triple=x86_64-macos ;;
+macos-arm64) triple=aarch64-macos ;;
 *) echo "mkrt: unknown target $target" >&2; exit 1 ;;
 esac
 out=$ROOT/bin/hxmc/rt/$target
@@ -24,6 +26,10 @@ case $target in
 windows-*)
 	CFLAGS="-O2 -g0 -w -fno-strict-aliasing -DHXC_NO_SSL -DHXC_NO_UV -I $ROOT/hxc/rt"
 	files="$files rt_win rt_sys_win rt_net_win" ;;
+macos-*)
+	# position-independent (macOS executables are), against libSystem;
+	# arm64 macOS calls main on its own stack without ucontext already
+	CFLAGS="-O2 -g0 -w -fno-strict-aliasing -mmacosx-version-min=$([ $target = macos-arm64 ] && echo 11.0 || echo 10.15) -DHXC_NO_SSL -DHXC_NO_UV -I $ROOT/hxc/rt" ;;
 esac
 objs=
 for f in $files; do
@@ -37,6 +43,12 @@ wait
 # what generated code calls in the C library besides the runtime (MirBuild)
 libm="memset memcpy fmod floor ceil sin cos tan asin acos atan atan2 exp log pow sqrt"
 case $target in
+macos-*)
+	# the runtime's Mach-O objects merged into one (hxmc --mkrt-macho); the
+	# C library is libSystem, bound at load time
+	"${HXMC:-$ROOT/bin/hxmc/hxmc}" --mkrt-macho "$out/rt.o" $objs
+	ls -l "$out/rt.o"
+	exit 0 ;;
 windows-*)
 	# the runtime's own COFF objects, the C runtime's startup object and the
 	# archives zig links (the MinGW-w64 libraries, compiler-rt, the import

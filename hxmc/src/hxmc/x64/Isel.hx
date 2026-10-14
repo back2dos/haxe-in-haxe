@@ -422,12 +422,27 @@ class Isel implements hxmc.Target.Selector {
 				flush();
 			}
 		}
+		// Apple: the image's thread-local template for this thread
+		// (hxmc_tls_base in the runtime), once the parameters are out of
+		// their registers
+		var macTls = false;
+		if (abi.tls == MachoTlv)
+			for (b in mf.blocks)
+				for (i in b.ins)
+					if (i.op == TlsLoad || i.op == TlsStore) macTls = true;
 		for (bi in 0...layout.length) {
 			var b = layout[bi];
 			cur = lb[b.id];
 			var next = bi + 1 < layout.length ? layout[bi + 1] : null;
-			for (i in b.ins)
+			var pendingBase = bi == 0 && macTls;
+			for (i in b.ins) {
+				if (pendingBase && i.op != Param) {
+					pendingBase = false;
+					macTlsBase();
+				}
 				ins(i, b, next);
+			}
+			if (pendingBase) macTlsBase();
 			flush();
 		}
 		// successor edges (for liveness), including the critical-edge blocks added on the way
@@ -711,13 +726,13 @@ class Isel implements hxmc.Target.Selector {
 				var x = emit(MOVF);
 				x.d = reg(i.id);
 				x.f = i.f;
-			case TlsLoad if (win):
+			case TlsLoad if (tlsBase >= 0):
 				var x = emit(LOAD);
 				x.d = reg(i.id);
 				x.base = tlsBase;
 				x.secrel = i.sym;
 				x.size = 8;
-			case TlsStore if (win):
+			case TlsStore if (tlsBase >= 0):
 				var v = use(i.a);
 				var x = emit(STORE);
 				x.s1 = v;
@@ -1096,6 +1111,15 @@ class Isel implements hxmc.Target.Selector {
 			jcc(E, targets[k]);
 		}
 		jmp(def);
+	}
+
+	function macTlsBase() {
+		f.hasCalls = true;
+		tlsBase = f.newReg(false);
+		var x = emit(CALL);
+		x.sym = "hxmc_tls_base";
+		x.uses = [];
+		mov(tlsBase, RAX, 8);
 	}
 
 	function call(i:MIns) {

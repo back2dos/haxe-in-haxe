@@ -15,3 +15,11 @@ void hxmc_barrier_slow(void *obj, void **slot, void *val, void *prev) {
 	if ((char *)val >= rt_young_start && (char *)val < rt_young_end)
 		if ((char *)prev < rt_young_start || (char *)prev >= rt_young_end) rt_write_barrier(obj, slot, val);
 }
+
+#ifdef __APPLE__
+// the address of this thread's copy of the image's thread-local template:
+// hxmc's code reaches the runtime's thread-local variables at their offsets
+// from it (LinkMachO defines hxmc_tls_start, a descriptor of offset 0)
+extern __thread char hxmc_tls_start;
+void *hxmc_tls_base(void) { return &hxmc_tls_start; }
+#endif

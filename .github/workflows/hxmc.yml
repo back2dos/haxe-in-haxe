@@ -26,7 +26,7 @@ env:
   # and on macOS: the archive names files by absolute path
   SELF_ROOT: /Users/runner/hih
   # the targets built (the run job's matrix lists the same)
-  TARGETS: linux-x86_64 linux-arm64 windows-x86_64 windows-arm64
+  TARGETS: linux-x86_64 linux-arm64 windows-x86_64 windows-arm64 macos-x86_64 macos-arm64
 
 jobs:
   build:
@@ -196,8 +196,8 @@ jobs:
           - {target: linux-arm64, os: ubuntu-24.04-arm}
           - {target: windows-x86_64, os: windows-2025}
           - {target: windows-arm64, os: windows-11-arm}
-          # - {target: macos-x86_64, os: macos-15-intel}
-          # - {target: macos-arm64, os: macos-15}
+          - {target: macos-x86_64, os: macos-15-intel}
+          - {target: macos-arm64, os: macos-15}
     runs-on: ${{ matrix.os }}
     defaults:
       run:

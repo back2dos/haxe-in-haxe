@@ -543,20 +543,27 @@ class Isel implements hxmc.Target.Selector {
 			case Phi | Const | SymAddr | StackAddr:
 			case Param:
 				var k = i.imm;
-				var gi = 0, fi = 0, si = 0;
+				// (stack arguments: 8-byte slots; Apple packs them by size)
+				var gi = 0, fi = 0, so = 0;
+				inline function slotSize(t:MTy)
+					return apple && t == I32 ? 4 : 8;
 				for (j in 0...k)
 					if (m.params[j] == F64) {
-						if (fi < 8) fi++ else si++;
+						if (fi < 8) fi++ else so += 8;
 					} else {
-						if (gi < 8) gi++ else si++;
+						if (gi < 8) gi++ else {
+							var sz = slotSize(m.params[j]);
+							so = ((so + sz - 1) & ~(sz - 1)) + sz;
+						}
 					}
 				var d = reg(i.id);
 				if (i.ty == F64 && fi < 8) mov(d, D0 + fi) else if (i.ty != F64 && gi < 8) mov(d, ARG_GPRS[gi]) else {
+					var sz = i.ty == F64 ? 8 : slotSize(m.params[k]);
 					var x = emit(LOAD);
 					x.d = d;
 					x.base = -3;
-					x.disp = 8 * si;
-					x.size = 8;
+					x.disp = (so + sz - 1) & ~(sz - 1);
+					x.size = sz;
 				}
 			case ConstF:
 				var x = emit(MOVF);
@@ -890,15 +897,17 @@ class Isel implements hxmc.Target.Selector {
 				continue;
 			}
 			// stack argument (Apple packs them by size; 8-byte slots elsewhere)
+			var size = apple && t == I32 ? 4 : 8;
+			stack = (stack + size - 1) & ~(size - 1);
 			var x = emit(STORE);
 			x.base = -4;
-			x.disp = 8 * stack;
-			x.size = 8;
+			x.disp = stack;
+			x.size = size;
 			x.s1 = use(a);
-			stack++;
+			stack += size;
 		}
-		if (apple && stack > 0) throw new hxmc.MirBuild.Unsupported("stack arguments on Apple arm64");
-		if (8 * stack > f.outArgs) f.outArgs = 8 * stack;
+		stack = (stack + 7) & ~7;
+		if (stack > f.outArgs) f.outArgs = stack;
 		var target = i.sym == null ? use(i.a) : -1;
 		for (mv in moves)
 			if (folded[mv.s]) materialize(m.vals[mv.s], mv.d) else mov(mv.d, reg(mv.s), 8);
