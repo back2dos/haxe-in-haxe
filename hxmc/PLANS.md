@@ -143,6 +143,36 @@ mbedtls and libuv per target and link them only when referenced.
 
 ## Build times and size
 
+### Precompiled std as cached HXB
+
+Most of a small program's build is the front half typing the std from
+source on every build. Hello world (one 4-core VM): 0.375 s from source,
+about 330 ms of it parsing and typing; 0.13–0.15 s when everything comes
+from an HXB archive (76 ms to read it, codegen 47 ms). Go 1.24 on the same
+machine: 4.8–5.7 s cold, 0.18–0.23 s rebuilding after an edit (warm build
+cache). With only the std precompiled and the program typed from source,
+expect about 0.15–0.2 s.
+
+Plan, Go-style (built lazily and cached rather than shipped):
+
+- On first use, hxmc writes the std modules a program needs as HXB into a
+  cache directory; later builds load them with `--hxb-lib` (upstream
+  Haxe's mechanism for precompiled libraries) and type only the program.
+- Cache key: the target (the std has per-OS code), the defines the std's
+  conditionals read (`-debug`, user `-D` flags), and the hxmc version.
+  hxmc writes the archive with its own built-in compiler, so the HXB
+  version always matches.
+- HXB modules load on demand: a large cached std does not slow small
+  programs.
+- Modules the user's class path overrides (shadowed std types) must come
+  from source, never the cache.
+- Gate: the same executable, byte for byte, from the cached path and the
+  source path (the Vector bug showed the two paths can differ subtly).
+- Simpler than the compilation server for most of the gain; the server
+  remains the route for large programs' one-edit rebuilds.
+
+### Other items
+
 - One-edit rebuilds below 1 s: needs incremental program preparation,
   module keys, data tables and linking, and incremental DCE in the port
   (today 2.0 s through the resident server, 2.7 s without).
