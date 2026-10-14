@@ -181,7 +181,10 @@ jobs:
           (cd "$SELF_ROOT" && HAXE_STD_PATH=std "$GITHUB_WORKSPACE/haxe/haxe" -cp src -main haxe.Main -D disable-parallelism --interp --no-output --hxb self-ref.hxb)
           mkdir -p dist/self
           cp "$SELF_ROOT/self-ref.hxb" dist/self/
+          # the sources as compiled here (a Windows checkout would have CRLF
+          # line ends, and other positions)
           tar czf dist/self/std.tar.gz -C haxe std
+          tar czf dist/self/src.tar.gz src
 
       - uses: actions/upload-artifact@v7
         with:
@@ -227,9 +230,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          sparse-checkout: |
-            src
-            hxmc/tools
+          sparse-checkout: hxmc/tools
       - uses: actions/setup-python@v6
         with:
           python-version: '3.12'
@@ -243,6 +244,7 @@ jobs:
           mkdir -p t std-x
           tar xzf dl/${{ matrix.target }}.tar.gz -C t
           tar xzf dl/std.tar.gz -C std-x
+          tar xzf dl/src.tar.gz -C std-x
           ls t t/port
       - name: Diagnostics
         if: always() && hashFiles('t/diag/**') != ''
@@ -265,4 +267,4 @@ jobs:
           if [ "$RUNNER_OS" = Linux ]; then sudo mkdir -p "$root" && sudo chown "$USER" "$root"; fi
           if [ "$RUNNER_OS" = Windows ]; then root="$(cygpath -w "$RUNNER_TEMP")\\hih"; exe=t/port/haxe.exe; fi
           # (MSYS would rewrite the reference's root, a POSIX path)
-          MSYS_NO_PATHCONV=1 python hxmc/tools/selfcheck.py --port "$exe" --src src --std std-x/std --ref dl/self-ref.hxb --ref-root "$SELF_ROOT" --root "$root" --summary "$GITHUB_STEP_SUMMARY"
+          MSYS_NO_PATHCONV=1 python hxmc/tools/selfcheck.py --port "$exe" --src std-x/src --std std-x/std --ref dl/self-ref.hxb --ref-root "$SELF_ROOT" --root "$root" --summary "$GITHUB_STEP_SUMMARY"
