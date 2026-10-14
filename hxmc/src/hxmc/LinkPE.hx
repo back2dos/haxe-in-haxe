@@ -56,6 +56,18 @@ class LinkPE {
 	static inline function align(v:Int, a:Int):Int
 		return a <= 1 ? v : (v + a - 1) & ~(a - 1);
 
+	// HXMC_PE_DIAG=<flag,...>: variants of the output for bisecting a loader's
+	// refusal (development)
+	static var diags:Null<Array<String>>;
+
+	static function diag(f:String):Bool {
+		if (diags == null) {
+			var e = Sys.getEnv("HXMC_PE_DIAG");
+			diags = e == null ? [] : e.split(",");
+		}
+		return diags.indexOf(f) >= 0;
+	}
+
 	public function link(entry:String):Bytes {
 		readImports();
 		resolve();
@@ -101,15 +113,28 @@ class LinkPE {
 					thunks.buf.u16(0x9090);
 				}
 			}
-		var lists = new Section(".rdata$hxmc_ctors", RoData, 8);
-		// __CTOR_LIST__ / __DTOR_LIST__ (MinGW): -1, then nothing, then 0
-		lists.buf.u64(-1, -1);
-		lists.buf.u64(0, 0);
-		lists.buf.u64(-1, -1);
-		lists.buf.u64(0, 0);
+		// __CTOR_LIST__ / __DTOR_LIST__ (MinGW's __do_global_ctors): -1, the
+		// objects' .ctors/.dtors sections (constructors of the C library, e.g.
+		// winpthreads' initialization), 0; kept together by their names in .data
 		var extra = new Obj();
 		extra.sections.push(thunks);
-		extra.sections.push(lists);
+		var listHead = new Map<String, Section>();
+		for (l in ["ctor", "dtor"]) {
+			var head = new Section(".data$hxmc_" + l + "0", Data, 8);
+			head.buf.u64(-1, -1);
+			var tail = new Section(".data$hxmc_" + l + "2", Data, 8);
+			tail.buf.u64(0, 0);
+			extra.sections.push(head);
+			extra.sections.push(tail);
+			listHead.set(l, head);
+		}
+		for (o in objs)
+			for (sec in o.sections)
+				for (l in ["ctor", "dtor"])
+					if (sec.name == "." + l + "s" || StringTools.startsWith(sec.name, "." + l + "s.")) {
+						sec.name = ".data$hxmc_" + l + "1" + sec.name;
+						sec.kind = Data;
+					}
 		objs.push(extra);
 		// output sections
 		var groups:Array<{name:String, chars:Int, secs:Array<Section>}> = [
@@ -129,7 +154,7 @@ class LinkPE {
 					case RoData: StringTools.startsWith(s.name, ".pdata") ? 2 : 1;
 					case Data | InitArray | FiniArray: 3;
 					case Tdata | Tbss: 4;
-					case Bss: 6;
+					case Bss: diag("bssdata") ? 3 : 6;
 				};
 				groups[g].secs.push(s);
 			}
@@ -165,11 +190,11 @@ class LinkPE {
 			rva = align(pos, SECT);
 		}
 		var imageSize = rva;
-		var relocatable = arm;
+		var relocatable = arm && !diag("fixed");
 		var baseRelocs:Array<{rva:Int, type:Int}> = [];
 		var defined = new Map<String, Int>();
-		defined.set("__CTOR_LIST__", addr.get(lists));
-		defined.set("__DTOR_LIST__", addr.get(lists) + 16);
+		defined.set("__CTOR_LIST__", addr.get(listHead.get("ctor")));
+		defined.set("__DTOR_LIST__", addr.get(listHead.get("dtor")));
 		defined.set("__ImageBase", BASE);
 		defined.set("WinMain", 0);
 		var iatAddr = (k:String) -> BASE + idataLayout.iat.get(slotKey.get(k));
@@ -186,6 +211,17 @@ class LinkPE {
 			if (t.abs) return t.offset;
 			return addr.get(t.section) + t.offset;
 		};
+		// HXMC_MAP=<file>: the address of every code symbol (debugging; no
+		// symbol table is written in PE files)
+		var mapFile = Sys.getEnv("HXMC_MAP");
+		if (mapFile != null) {
+			var m = new StringBuf();
+			for (o in objs)
+				for (s in o.symbols)
+					if (s.section != null && s.section.kind == Text && addr.exists(s.section))
+						m.add(StringTools.hex(addr.get(s.section) + s.offset, 8) + " " + s.name + "\n");
+			sys.io.File.saveContent(mapFile, m.toString());
+		}
 		function isAbs(sym:Symbol):Bool {
 			var t = target(sym);
 			// (linker-defined: addresses, but for the zero of an undefined weak symbol)
@@ -331,7 +367,7 @@ class LinkPE {
 			dirs[1] = [starts[5] + idataLayout.dir, 20 * (dlls.length + 1)];
 			dirs[12] = [starts[5] + idataLayout.iatStart, idataLayout.iatSize];
 		}
-		if (sizes[2] > 0) dirs[3] = [starts[2], sizes[2]];
+		if (sizes[2] > 0 && !diag("nopdata")) dirs[3] = [starts[2], sizes[2]];
 		if (sizes[7] > 0) dirs[5] = [starts[7], sizes[7]];
 		var tlsUsed = globals.get("_tls_used");
 		if (tlsUsed != null) dirs[9] = [symAddr(tlsUsed) - BASE, 40];
