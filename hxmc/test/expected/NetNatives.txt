@@ -1,0 +1,13 @@
+exit 0
+true
+127.0.0.1 true
+ping
+pong and more
+0
+1 x
+blocked: Blocked
+timeout: an exception
+eof
+true
+true
+refused

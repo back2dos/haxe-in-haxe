@@ -21,7 +21,7 @@ class Sys {
 
 	// macOS x86-64: the 64-bit-inode variants of stat and readdir (as its headers name them)
 	static inline function inode64():Bool
-		return Mem.os() == 1 && !Mem.arm();
+		return Mem.target() == 2;
 
 	static inline function threads():Int
 		return Mem.getI32(Mem.sym("rt_nthreads"), 0);
@@ -196,7 +196,7 @@ class Sys {
 			return ofC(buf);
 		}
 		if (argc() > 0) {
-			var r = Posix.realpath(Mem.getPtr(argv(), 0), buf);
+			var r = mac() ? Posix.realpathExtsn(Mem.getPtr(argv(), 0), buf) : Posix.realpath(Mem.getPtr(argv(), 0), buf);
 			return ofC(r.isNull() ? Mem.getPtr(argv(), 0) : buf);
 		}
 		return "";
@@ -448,7 +448,7 @@ class Sys {
 	@:hxmc.host("hxmc_NativeSys_fullPath") static function fullPath(path:String):String {
 		var p = cstr(path);
 		var buf = Mem.stack(4104);
-		var r = Posix.realpath(p, buf);
+		var r = mac() ? Posix.realpathExtsn(p, buf) : Posix.realpath(p, buf);
 		LibC.free(p);
 		return r.isNull() ? null : ofC(buf);
 	}

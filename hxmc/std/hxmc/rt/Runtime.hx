@@ -11,5 +11,6 @@ import hxmc.rt.Bytes;
 import hxmc.rt.Date;
 import hxmc.rt.Zip;
 import hxmc.rt.Sys;
+import hxmc.rt.Net;
 
 class Runtime {}

@@ -1947,6 +1947,10 @@ class MirBuild {
 			case _: throw new Unsupported(what + ": the size must be a constant");
 		}
 
+	// Mem.target: 0 linux-x86_64, 1 linux-arm64, 2 macos-x86_64, 3 macos-arm64, 4 windows-x86_64, 5 windows-arm64
+	public static function targetCode(abi:Abi):Int
+		return (abi.os == "linux" ? 0 : abi.os == "macos" ? 2 : 4) + (abi.arm ? 1 : 0);
+
 	// the Abi constants the runtime's Haxe code may name (Mem.abi)
 	static function abiConst(n:String):Int
 		return switch n {
@@ -2035,6 +2039,7 @@ class MirBuild {
 			case "abi": iconst(abiConst(literal(args[0], "Mem.abi")));
 			case "os": iconst(abi.os == "linux" ? 0 : abi.os == "macos" ? 1 : 2);
 			case "arm": iconst(abi.arm ? 1 : 0);
+			case "target": iconst(targetCode(abi));
 			case "stack": stackAddr(f.slot(intLiteral(args[0], "Mem.stack"), 16));
 			case "ult": cmp(CULt, ex(args[0]), ex(args[1]));
 			case "getI8": ld(I32, 1, true);

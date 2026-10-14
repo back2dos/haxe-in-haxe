@@ -148,6 +148,7 @@ class Lower {
 	// other targets is dropped with the branch it is in; -1: unknown)
 	public static var targetOs = -1;
 	public static var targetArm = -1;
+	public static var targetCode = -1;
 
 	// replaces the calls of runtime functions implemented in Haxe in fi's
 	// body, and folds the target's constants: `if (Mem.os() == 2) a else b`
@@ -173,6 +174,7 @@ class Lower {
 			return fold(switch e {
 				case ECallHost("hxmc_unsafe_Mem_os", [], _) if (targetOs >= 0): EInt(targetOs);
 				case ECallHost("hxmc_unsafe_Mem_arm", [], _) if (targetArm >= 0): EInt(targetArm);
+				case ECallHost("hxmc_unsafe_Mem_target", [], _) if (targetCode >= 0): EInt(targetCode);
 				case EInt(_) | EF64(_) | EStr(_) | ENull(_) | ELocal(_) | EGlobal(_, _) | EType(_) | ENewObj(_): e;
 				case EBin(op, a, b): EBin(op, ex(a), ex(b));
 				case ENot(a): ENot(ex(a));

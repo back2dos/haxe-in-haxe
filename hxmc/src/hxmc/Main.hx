@@ -95,6 +95,7 @@ class Main {
 		var abi = Abi.get(opts.target);
 		hxmc.ir.Lower.targetOs = abi.os == "linux" ? 0 : abi.os == "macos" ? 1 : 2;
 		hxmc.ir.Lower.targetArm = abi.arm ? 1 : 0;
+		hxmc.ir.Lower.targetCode = MirBuild.targetCode(abi);
 		var t0 = haxe.Timer.stamp();
 		// resident: bodies of the fields the server kept are reused (LowerCache)
 		var useCache = Driver.resident && Sys.getEnv("HXMC_LOWER_CACHE") != "0";

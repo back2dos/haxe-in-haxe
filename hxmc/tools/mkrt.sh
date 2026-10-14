@@ -21,7 +21,7 @@ esac
 out=$ROOT/bin/hxmc/rt/$target
 mkdir -p "$out/obj"
 CFLAGS="-O2 -g0 -w -fno-strict-aliasing -fno-pie -fno-pic -ffunction-sections -fdata-sections -DHXMC_NO_SSL -DHXMC_NO_UV -DRT_CALL_ON_STACK -I $ROOT/hxmc/rt"
-files="rt rt_dyn rt_str rt_net rt_ssl rt_uv rt_thread rt_census"
+files="rt rt_dyn rt_str rt_ssl rt_uv rt_thread rt_census"
 case $target in
 windows-*)
 	CFLAGS="-O2 -g0 -w -fno-strict-aliasing -DHXMC_NO_SSL -DHXMC_NO_UV -I $ROOT/hxmc/rt"
@@ -52,6 +52,8 @@ windows-*) libm="$libm _mktime64 _localtime64_s _gmtime64_s" ;;
 	libm="$libm write read open close lseek fcntl pipe dup2 isatty tcgetattr tcsetattr getenv setenv unsetenv getcwd chdir"
 	libm="$libm nanosleep gettimeofday clock readlink realpath system fork execvp _exit exit fflush waitpid kill mkdir"
 	libm="$libm unlink rmdir rename stat fstat opendir readdir closedir realloc environ"
+	libm="$libm socket bind connect accept listen getsockname getpeername getsockopt setsockopt recv send select"
+	libm="$libm shutdown signal strerror gethostname gethostbyname gethostbyaddr strdup sched_yield"
 	case $target in linux-*) libm="$libm __errno_location" ;; esac ;;
 esac
 case $target in

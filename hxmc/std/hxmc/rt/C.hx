@@ -17,6 +17,8 @@ import hxmc.unsafe.Ptr;
 	// (<= 0: gives way)
 	static function rt_wait_fd(fd:Int, write:Int, timeout:Float):Int;
 	static function rt_sleep(seconds:Float):Void;
+	// rt_thread.c: waits for any of n struct pollfd (revents set), letting other threads run
+	static function rt_wait_fds(pollfds:Ptr, n:Int, timeout:Float):Int;
 }
 
 @:hxmc.c extern class Leaf {

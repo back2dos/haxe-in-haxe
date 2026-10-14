@@ -15,6 +15,10 @@ void rt_icache_fill(void *o, int32_t fid, rt_icache *c);
 uint64_t rt_fid_cache[4096];
 // Dyn.objHash's seed (per thread)
 RT_TLS void *rt_hash_seed;
+// Net's last socket errno (per thread, as errno)
+RT_TLS void *rt_net_errno;
+// spin locks of the runtime's Haxe code (Net's resolver: 0)
+uint32_t rt_spin[16];
 
 // ---- field names: the generated table is sorted; names seen only at run time are appended
 
