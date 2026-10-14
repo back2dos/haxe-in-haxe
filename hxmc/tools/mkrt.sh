@@ -58,7 +58,7 @@ windows-*)
 	WINLIBS="-lws2_32 -liphlpapi -luserenv -lpsapi -ldbghelp -lole32 -lshell32 -luser32 -ladvapi32 -lcrypt32 -lbcrypt"
 	$ZIG cc -target $triple -O2 "$out/obj/stub.c" -o "$out/obj/stub.exe" $WINLIBS
 	line=$($ZIG cc -target $triple -O2 -v "$out/obj/stub.c" -o "$out/obj/stub.exe" $WINLIBS 2>&1 | grep 'lld-link' | head -1)
-	inputs=$(echo "$line" | tr ' ' '\n' | grep -E '^/.*\.(obj|lib)$' | grep -v '/stub.obj$' | tr '\n' ' ')
+	inputs=$(echo "$line" | tr ' ' '\n' | grep -E '\.(obj|lib)$' | grep -v '^-' | grep -v '/stub.obj$' | tr '\n' ' ')
 	sj=_setjmp; [ $target = windows-arm64 ] && sj=__mingw_setjmp
 	undef="-u mainCRTStartup -u $sj -u _tls_index -u _tls_used -x main"
 	for f in $libm; do undef="$undef -u $f"; done

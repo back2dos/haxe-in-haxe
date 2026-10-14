@@ -40,6 +40,9 @@ class MkRt {
 		for (r in roots)
 			m.undefinedQueue.push(r);
 		m.select();
+		var weak = [for (w in m.weakDefaults.keys()) w.name => true];
+		for (r in roots)
+			if (!m.defined.exists(r) && !m.imports.exists(r) && !weak.exists(r)) throw "mkrt: " + r + " is defined nowhere (are the C library's archives among the inputs?)";
 		var o = m.merge();
 		sys.io.File.saveBytes(out, ElfWriter.write(o, m.arm));
 		Sys.println('mkrt: ${m.included.length} objects, ${Lambda.count(m.imports)} imports, ${o.sections.length} sections');
