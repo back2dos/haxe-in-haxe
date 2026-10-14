@@ -58,12 +58,11 @@ class Opt {
 					i.dead = true;
 				}
 		ver = [for (_ in 0...f.vals.length) 0];
-		// (not across setjmp: what a second return finds is in memory)
-		var twice = false;
-		for (b in order)
-			for (i in b.ins)
-				if (i.op == Call && i.returnsTwice) twice = true;
-		if (!twice) {
+		// (functions with a try: a handler block, reached by setjmp's second
+		// return, starts with new memory versions, so no load from before
+		// is reused there; values computed before setjmp are immutable and
+		// live across it in memory or callee-saved registers)
+		{
 			versions(order);
 			canonicalize();
 			gvn(order);

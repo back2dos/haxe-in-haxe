@@ -80,6 +80,7 @@ class Isel implements hxmc.Target.Selector {
 	var lb:Array<LBlock>; // Mir block id -> LBlock
 	var cur:LBlock;
 	var folded:Array<Bool>; // Mir values computed inside their user (no code of their own)
+	var flagsOf = new Map<Int, Int>(); // comparisons whose flags the branch after them reads
 
 	var abi:Abi;
 
@@ -777,7 +778,13 @@ class Isel implements hxmc.Target.Selector {
 					x.s1 = t;
 					x.cond = cc == -1 ? Asm.AND : Asm.OR;
 					x.size = 4;
-				} else setcc(d, cc);
+				} else {
+					setcc(d, cc);
+					// used elsewhere too, and branched on right after: the branch
+					// reads the flags (setcc leaves them)
+					var t = b.term();
+					if (t != null && t.op == Br && t.a == i.id && b.ins.length >= 2 && b.ins[b.ins.length - 2] == i) flagsOf.set(i.id, cc);
+				}
 			case Select:
 				var d = reg(i.id);
 				var cond = m.vals[i.a];
@@ -857,6 +864,8 @@ class Isel implements hxmc.Target.Selector {
 				var cc:Int;
 				if (folded[cond.id] && cond.op == Cmp) {
 					cc = compare(cond.imm, cond.a, cond.b);
+				} else if (flagsOf.exists(cond.id) && b.ins.length >= 2 && b.ins[b.ins.length - 2] == cond) {
+					cc = flagsOf.get(cond.id);
 				} else {
 					var x = emit(TEST);
 					x.s1 = use(i.a);
