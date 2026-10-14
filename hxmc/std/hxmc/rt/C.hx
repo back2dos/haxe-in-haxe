@@ -22,7 +22,7 @@ import hxmc.unsafe.Ptr;
 }
 
 @:hxmc.c extern class Leaf {
-	// shortest round-trip formatting of a double, as JavaScript does (rt_str.c: printf and strtod)
+	// shortest round-trip formatting of a double, as JavaScript does (rt_dyn.c: printf and strtod)
 	static function hx_format_float(v:Float, out:Ptr):Void;
 	// the field-name table (rt_dyn.c): a name's id (interned), the id of a
 	// name if it has one (else -1), an id's name (UTF-8)

@@ -1,5 +1,5 @@
 // hxmc: haxe/std/eval/_std/StringBuf.hx (an extern), a growable UTF-16 buffer in
-// the runtime (rt_str.c)
+// the runtime (hxmc.rt.Str)
 
 extern class StringBuf {
 	var length(get, never):Int;
