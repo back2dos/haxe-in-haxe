@@ -1,0 +1,37 @@
+exit 0
+start
+o65 AB
+dyn 0 0
+caught other
+o170 0
+o173 [-9,278]
+dyn hello world hello world
+caught Err 0
+o83 Box
+dyn hello world hello world
+caught Err 0
+o83 Box
+o159 [E1A,E1A,E1A,E1A,E1A,E1A]
+o95 bb54
+dyn 0 0
+o46 truetrue
+o47 truetrue
+caught Err0
+caught other
+caught boom
+o65 AB
+dyn 0 0
+o46 truetrue
+o47 truetrue
+caught Err0
+caught other
+caught boom
+o183 { x6 : hello world }
+dyn hello world hello world
+caught Err -716917521
+o83 Box
+o187 [6,144,133]
+o196 E0A
+o201 A-B-C
+o205 { x6 : 0 }
+fuel 19986

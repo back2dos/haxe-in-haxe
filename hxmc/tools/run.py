@@ -1,28 +1,36 @@
 #!/usr/bin/env python3
-"""The hxmc iteration loop (hxmc/README.md): differential tests against hxc.
+"""The hxmc test corpus (hxmc/README.md, "Tests"): every program compiled by
+hxmc, run, and its output compared with its golden file.
 
-    python3 hxmc/tools/run.py [-j N] [-k] [--native-only] [case ...]
+    python3 hxmc/tools/run.py [-j N] [-v] [--target T] [--stage DIR] [--bless] [case ...]
 
-Every case is a program (hxmc/test/cases/<Name>.hx with class <Name>, or a
-directory given as <dir>:<Main>). Its HXB archive is written once by the
-reference compiler (cached, rewritten when a source is newer); the oracle is
-the same archive compiled by hxc (bin/hxc-dev/tool, tcc), run once and its
-output cached; then hxmc (bin/hxmc/hxmc) compiles the archive (development
-build: native code + the C of the rest) and the output must be identical.
-Prints per case the share of functions compiled natively. With --stage the
-executables are only built and copied with their expected outputs (cross
-targets run on their own machines: hxmc/tools/check.py, the CI workflow
-.github/workflows/hxmc.yml).
+The cases are the programs of hxmc/test/cases (<Name>.hx with class <Name>)
+and the fuzzer programs frozen in hxmc/test/fuzz-1000.tar.gz (extracted to
+bin/hxmc-fuzz, cases fuzz-<seed>). Each case's HXB archive is written once
+by the reference compiler (`-cp bin/hxmc/std --custom-target hxmc`; cached,
+rewritten when a source is newer); hxmc (bin/hxmc/hxmc) compiles it and the
+output ("exit <code>" and stdout) must equal hxmc/test/expected/<case>.txt.
+
+The golden files were written by hxc (the C target) when hxmc separated from
+it, and are frozen: a new case gets its golden file with --bless (written
+from hxmc's own output, to be checked by hand before committing). --target
+cross-builds for another hxmc target (linux-arm64 runs under
+qemu-aarch64-static, windows-x86_64 under wine64); --stage only builds and
+copies each executable with its golden file to DIR/<case>/ (hxmc/tools/check.py
+runs them on the target's machine, the CI workflow .github/workflows/hxmc.yml).
 """
-import argparse, concurrent.futures, os, re, shutil, subprocess, sys, time, resource
+import argparse, concurrent.futures, os, re, shutil, subprocess, sys, tarfile, time, resource
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 OUT = ROOT / "bin/hxmc-t"
 HAXE = os.environ.get("HAXE", str(ROOT / "haxe/haxe"))
-TOOL = ROOT / "bin/hxc-dev/tool"
-HXMC = ROOT / "bin/hxmc/hxmc"
+HXMC = Path(os.environ.get("HXMC_TOOL", str(ROOT / "bin/hxmc/hxmc")))
+STD = ROOT / "bin/hxmc/std"
 CASES = ROOT / "hxmc/test/cases"
+EXPECTED = ROOT / "hxmc/test/expected"
+FUZZ_TAR = ROOT / "hxmc/test/fuzz-1000.tar.gz"
+FUZZ = ROOT / "bin/hxmc-fuzz"
 ENV = dict(os.environ, HAXE_STD_PATH=str(ROOT / "haxe/std"), WINEDEBUG="-all")
 
 
@@ -43,31 +51,27 @@ def newest(paths):
     return t
 
 
-# programs of the repository used as cases: name -> (class path, main class)
-SUITE = {
-    "hxc-bench": ("hxc/test", "Bench"),
-    "hxc-exc": ("hxc/test/exc", "Exc"),
-    "hxc-regress": ("hxc/test/regress", "Regress"),
-}
+def fuzz_programs():
+    stamp = FUZZ / ".stamp"
+    if not stamp.exists() or stamp.stat().st_mtime < FUZZ_TAR.stat().st_mtime:
+        if FUZZ.exists():
+            shutil.rmtree(FUZZ)
+        FUZZ.mkdir(parents=True)
+        with tarfile.open(FUZZ_TAR) as t:
+            t.extractall(FUZZ, filter="data")
+        stamp.touch()
+    return sorted(d for d in FUZZ.iterdir() if (d / "Main.hx").exists())
 
 
-def case_list(names, fuzz):
-    cases = []
-    if not names:
-        names = sorted(p.stem for p in CASES.glob("*.hx")) + sorted(SUITE)
-    for n in names:
-        if n in SUITE:
-            cp, main = SUITE[n]
-            cases.append((n, [ROOT / cp], main))
-        elif ":" in n:
-            d, main = n.split(":")
-            cases.append((Path(d).name + "-" + main, [Path(d).resolve()], main))
-        else:
-            cases.append((n, [CASES], n))
-    if fuzz:
-        for d in sorted(Path(fuzz).iterdir()):
-            if (d / "Main.hx").exists():
-                cases.append(("fuzz-" + d.name, [d.resolve()], "Main"))
+def case_list(names):
+    cases = [(p.stem, [CASES], p.stem) for p in sorted(CASES.glob("*.hx"))]
+    cases += [("fuzz-" + d.name, [d], "Main") for d in fuzz_programs()]
+    if names:
+        known = {c[0]: c for c in cases}
+        bad = [n for n in names if n not in known]
+        if bad:
+            sys.exit("run.py: unknown case(s): " + ", ".join(bad))
+        cases = [known[n] for n in names]
     return cases
 
 
@@ -75,87 +79,73 @@ def run_case(name, cps, main, args):
     d = OUT / name
     d.mkdir(parents=True, exist_ok=True)
     hxb = d / "prog.hxb.zip"
-    src_t = newest([cp / (main.replace(".", "/") + ".hx") for cp in cps if (cp / (main.replace(".", "/") + ".hx")).exists()] or cps)
+    src_t = newest(cps)
     t0 = time.perf_counter()
-    if not hxb.exists() or hxb.stat().st_mtime < src_t:
-        cmd = [HAXE] + sum([["-cp", c] for c in cps], []) + ["-cp", ROOT / "bin/hxc/std", "-main", main, "--custom-target", f"hxc={d}/x",
+    if not hxb.exists() or hxb.stat().st_mtime < max(src_t, (STD / ".stamp").stat().st_mtime):
+        cmd = [HAXE] + sum([["-cp", c] for c in cps], []) + ["-cp", STD, "-main", main, "--custom-target", f"hxmc={d}/x",
                "--hxb", hxb, "-D", "disable-parallelism", "--no-output"]
         code, o, e = sh(cmd)
         if code != 0:
-            return name, "hxb-fail", (o + e)[-1500:], None
-    # the oracle: hxc + tcc
-    expected = d / "expected.txt"
-    if not expected.exists() or expected.stat().st_mtime < hxb.stat().st_mtime:
-        code, o, e = sh([TOOL, d / "c", "--hxb-lib", hxb, "-main", main, "--custom-target", "hxc", "-D", "disable-parallelism"])
-        if code != 0:
-            return name, "hxc-fail", (o + e)[-1500:], None
-        code, o, e = sh(["sh", ROOT / "hxc/tools/cc-chunks.sh", d / "c_hxc", d / "c.bin"],
-                        env=dict(ENV, CC="tcc", CFLAGS="-w -fno-strict-aliasing -DHXC_NO_SSL -DHXC_NO_UV", RT_DIR=str(ROOT / "hxc/rt")))
-        if code != 0:
-            return name, "hxc-cc-fail", (o + e)[-1500:], None
-        code, o, e = sh([d / "c.bin"], cwd=d)
-        expected.write_bytes((f"exit {code}\n" + o).encode())
+            return name, "hxb-fail", (o + e)[-1500:]
+    expected = EXPECTED / (name + ".txt")
+    if not expected.exists() and not args.bless:
+        return name, "no-golden", f"{expected} is missing (--bless writes it from hxmc's output)"
     env = dict(ENV, HXMC_STATS="1")
     tgt = ["-D", "hxmc.target=" + args.target] if args.target else []
-    if args.hybrid:
-        env.update(HXMC_HYBRID="1", HXMC_RT=str(ROOT / "bin/hxmc/rt-dev"), HXMC_RT_INCLUDE=str(ROOT / "hxc/rt"))
     exe = d / ("m-" + args.target if args.target else "m")
     if args.target and args.target.startswith("windows"):
         exe = d / ("m-" + args.target + ".exe")
-    code, o, e = sh([HXMC, exe, "--hxb-lib", hxb, "-main", main, "--custom-target", "hxc", "-D", "disable-parallelism"] + tgt, env=env)
-    m = re.search(r"(\d+)/(\d+) functions native", o)
-    stats = (int(m.group(1)), int(m.group(2))) if m else None
+    code, o, e = sh([HXMC, exe, "--hxb-lib", hxb, "-main", main, "--custom-target", "hxmc", "-D", "disable-parallelism"] + tgt, env=env)
     (d / "hxmc.log").write_text(o + e)
     if code != 0:
-        return name, "hxmc-fail", (o + e)[-2000:], stats
+        return name, "hxmc-fail", (o + e)[-2000:]
+    m = re.search(r"hxmc: (\d+) functions", o)
+    nf = m.group(1) + " functions" if m else ""
     if args.stage:
         # cross builds: the executable and the expected output, run elsewhere (check.py)
         sd = Path(args.stage) / name
         sd.mkdir(parents=True, exist_ok=True)
         shutil.copy(exe, sd / ("m.exe" if exe.suffix == ".exe" else "m"))
         shutil.copy(expected, sd / "expected.txt")
-        return name, "ok", "staged", stats
+        return name, "ok", "staged " + nf
     try:
         runner = {"linux-arm64": ["qemu-aarch64-static"], "windows-x86_64": ["/usr/lib/wine/wine64"]}.get(args.target, [])
         # a small nursery: frequent collections, so a missing or stale root shows
         code, o, e = sh(runner + [exe], cwd=d, timeout=120, env=dict(ENV, RT_MINOR_KB=os.environ.get("RT_MINOR_KB", "64")))
     except subprocess.TimeoutExpired:
-        return name, "timeout", "", stats
+        return name, "timeout", ""
     got = f"exit {code}\n" + o
+    if args.bless and not expected.exists():
+        expected.write_bytes(got.encode())
+        return name, "blessed", f"wrote {expected} (check it)"
     if got.encode() != expected.read_bytes():
         (d / "got.txt").write_bytes((got + e).encode())
-        return name, "differs", f"diff {expected} {d / 'got.txt'}\n" + e[-800:], stats
-    return name, "ok", f"{time.perf_counter() - t0:.1f}s", stats
+        return name, "differs", f"diff {expected} {d / 'got.txt'}\n" + e[-800:]
+    return name, "ok", f"{time.perf_counter() - t0:.1f}s {nf}"
 
 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("-j", type=int, default=os.cpu_count() or 4)
     ap.add_argument("-v", action="store_true", help="print the details of failures")
-    ap.add_argument("--hybrid", action="store_true", help="development builds (C for what hxmc does not compile, the system's linker)")
     ap.add_argument("--target", help="hxmc.target (run with qemu-aarch64-static / wine64 as needed)")
-    ap.add_argument("--fuzz", help="also every program of this directory (written by bin/fuzz/fuzz --emit)")
-    ap.add_argument("--stage", help="do not run: copy each executable and its expected output to <dir>/<case>/ (hxmc/tools/check.py runs them)")
+    ap.add_argument("--stage", help="do not run: copy each executable and its golden file to <dir>/<case>/ (hxmc/tools/check.py runs them)")
+    ap.add_argument("--bless", action="store_true", help="write the golden file of a case that has none from hxmc's output")
     ap.add_argument("cases", nargs="*")
     a = ap.parse_args()
-    cases = case_list(a.cases, a.fuzz)
+    if not (STD / ".stamp").exists():
+        sys.exit("run.py: bin/hxmc/std is missing (python3 hxmc/tools/mkstd.py, or make -f hxmc/Makefile)")
+    cases = case_list(a.cases)
     t = time.perf_counter()
-    nat = tot = 0
     bad = 0
     with concurrent.futures.ThreadPoolExecutor(a.j) as ex:
-        for name, status, detail, stats in ex.map(lambda c: run_case(*c, a), cases):
-            s = f"{stats[0]}/{stats[1]} native" if stats else ""
-            if stats:
-                nat += stats[0]
-                tot += stats[1]
-            print(f"{name:24} {status:12} {s:18} {detail if status == 'ok' or not a.v else ''}")
-            if status != "ok" and not (a.stage and status in ("hxb-fail", "hxc-fail", "hxc-cc-fail")):
-                # (staging: a program without an oracle is left out)
+        for name, status, detail in ex.map(lambda c: run_case(*c, a), cases):
+            print(f"{name:24} {status:12} {detail if status in ('ok', 'blessed') or not a.v else ''}", flush=True)
+            if status not in ("ok", "blessed"):
                 bad += 1
                 if a.v:
                     print("    " + detail.replace("\n", "\n    "))
-    pct = f"{100 * nat / tot:.1f}%" if tot else "-"
-    print(f"{len(cases) - bad}/{len(cases)} ok, {nat}/{tot} functions native ({pct}), {time.perf_counter() - t:.1f}s")
+    print(f"{len(cases) - bad}/{len(cases)} ok, {time.perf_counter() - t:.1f}s")
     sys.exit(1 if bad else 0)
 
 

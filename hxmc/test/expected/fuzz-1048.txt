@@ -1,0 +1,26 @@
+exit 0
+start
+o334 55563
+o335 0.30000000000000004
+o338 a
+o338 a
+o338 a
+o338 a
+o257 \
+o262 true
+o88 45962
+o146 false
+o146 false
+o146 false
+o113 E1C(0,178)
+o114 E5B(true,159)
+o358 true
+o364 false
+o365 E0B
+o366 1
+o374 E5A
+o374 E5A
+o374 E5A
+o374 E5A
+o377 240
+fuel 19962

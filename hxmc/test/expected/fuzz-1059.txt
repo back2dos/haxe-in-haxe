@@ -1,0 +1,56 @@
+exit 0
+start
+o65 { x1 : false, x2 : 2147483647 }
+o72 55
+o43 { x4 : 100.75, x5 : 27, x6 : 0.30000000000000004 }
+o32 294
+dyn true true
+o32 294
+dyn true true
+o46 13484
+o53 -1
+o54 false
+o43 { x4 : 100.75, x5 : 27, x6 : 0.30000000000000004 }
+o32 294
+dyn true true
+o32 294
+dyn true true
+o46 13484
+o32 294
+dyn true true
+o55 0
+lf130 16
+o147 1
+o152 { x1 : true, x2 : 50397 }
+o153 127
+o155 127
+o94 -0.25
+o103 zz
+o53 -1
+o54 false
+o43 { x4 : 100.75, x5 : 27, x6 : 0.30000000000000004 }
+o32 294
+dyn true true
+o32 294
+dyn true true
+o46 13484
+o32 294
+dyn true true
+o55 0
+o53 -1
+o54 false
+o43 { x4 : 100.75, x5 : 27, x6 : 0.30000000000000004 }
+o32 294
+dyn true true
+o32 294
+dyn true true
+o46 13484
+o32 294
+dyn true true
+o55 0
+o174 日本語
+o177 true
+o180 { x1 : true, x2 : 290 }
+o181 Box
+o182 38951
+fuel 19968

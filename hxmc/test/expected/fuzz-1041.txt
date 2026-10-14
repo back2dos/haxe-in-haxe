@@ -1,0 +1,112 @@
+exit 0
+start
+o281 false
+o83 C12
+o83 C12
+o66 65535
+caught String boom
+o93 true
+o177 3700
+o83 C12
+o83 C12
+o66 65535
+caught String boom
+o93 true
+o288 53
+lf289 289
+o83 C12
+o83 C12
+o66 65535
+caught String boom
+o93 true
+o177 3700
+o83 C12
+o83 C12
+o66 65535
+caught String boom
+o93 true
+o115 201
+o120 199
+o177 3700
+o121 0
+o122 131070
+o83 C12
+o83 C12
+o66 65535
+caught String boom
+o93 true
+o125 true
+caught other
+o177 3700
+o177 3700
+o177 3700
+o177 3700
+o303 0
+o304 true
+o177 3700
+o177 3700
+o177 3700
+o177 3700
+o303 1
+o304 true
+o83 C12
+o83 C12
+o66 65535
+caught String boom
+o93 true
+o177 3700
+o279 -1
+lf162 411
+o66 65535
+o316 4
+o244 false
+o121 0
+o122 131070
+o83 C12
+o83 C12
+o66 65535
+caught String boom
+o93 true
+o125 true
+caught other
+o244 false
+o121 0
+o122 131070
+o83 C12
+o83 C12
+o66 65535
+caught String boom
+o93 true
+o125 true
+caught other
+o244 false
+o121 0
+o122 131070
+o83 C12
+o83 C12
+o66 65535
+caught String boom
+o93 true
+o125 true
+caught other
+o244 false
+o121 0
+o122 131070
+o83 C12
+o83 C12
+o66 65535
+caught String boom
+o93 true
+o125 true
+caught other
+o244 false
+o121 0
+o122 131070
+o83 C12
+o83 C12
+o66 65535
+caught String boom
+o93 true
+o125 true
+caught other
+fuel 19838

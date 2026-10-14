@@ -1,0 +1,35 @@
+exit 0
+start
+o160 0
+o163 0
+o282 207
+o283 true
+o270 -a
+o117 C6
+o94 zz
+o94 zz
+o94 zz
+o106 1
+o94 zz
+o75 3908
+o82 a
+o94 zz
+o94 zz
+o122 65535
+o75 3908
+o82 a
+o94 zz
+o94 zz
+o292 false
+o270 -a
+caught falseA-B-C
+o146 C36
+o147 161
+caught Err0
+o195 Box
+o130 -36
+o131 true
+dyn 6
+o321 C14
+o323 hello world
+fuel 19978

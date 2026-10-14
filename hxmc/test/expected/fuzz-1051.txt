@@ -1,0 +1,14 @@
+exit 0
+start
+o70 false
+o30 -2147483647
+o70 false
+o106 2147483647
+o108 E0A
+o58 0
+o65 zzzz
+o123 0
+o58 0
+o65 zzzzzzzz
+o123 1
+fuel 19990

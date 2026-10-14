@@ -1,0 +1,31 @@
+exit 0
+start
+o434 E1A
+o104 125
+o105 60337
+o110 125
+caught other
+caught Int 37
+o177 37
+lf183 18
+o104 125
+o105 60337
+o110 125
+caught other
+lf186 9
+o200 1
+caught Int 37
+o177 37
+lf183 18
+o104 125
+o105 60337
+o110 125
+caught other
+lf186 9
+o446 173
+lf452 4
+o454 C37
+lf455 495
+o460 false
+o466 [4]
+fuel 19965

@@ -1,0 +1,32 @@
+exit 0
+start
+caught other
+o114 2
+o100 129
+o101 a
+o112 Box
+o272 abc
+o114 2
+o162 9
+caught String **a
+o168 **a
+caught boom
+o127 8
+o129 q
+o114 2
+o198 Box
+o114 2
+o266 { x15 : 29, x16 : x,y,z, x17 : 3 }
+o114 2
+caught Err 2
+o291 191
+caught Err10
+caught 42true31451
+o114 2
+o114 2
+dyn -1 -1
+o334 false
+o114 2
+o345 C29
+o346 E10B(E10C(955016805))
+fuel 19981

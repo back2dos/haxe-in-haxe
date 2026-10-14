@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Runs the executables staged by `run.py --stage <dir>` on the machine of their
 target (the CI workflow .github/workflows/hxmc.yml: macOS, Windows arm64) and
-compares each output with the expected one (hxc's, written on Linux).
+compares each output with its golden file (hxmc/test/expected, staged on Linux).
 
     python3 hxmc/tools/check.py <dir> [--summary <file>]
 

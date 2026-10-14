@@ -1,0 +1,13 @@
+exit 0
+start
+dyn A-B-C A-B-C
+o162 [x,y,z]
+o164 true
+o165 1
+o169 Box
+o171 -1
+o35 99
+caught other
+o43 0.30000000000000004
+o45 155
+fuel 19987

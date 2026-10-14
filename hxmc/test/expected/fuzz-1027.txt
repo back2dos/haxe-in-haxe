@@ -1,0 +1,35 @@
+exit 0
+start
+o157 123456
+o159 198
+o159 198
+o159 198
+o163 1
+o165 a
+o170 123456.789
+o47 1
+caught Err 1552841298
+o68 true
+o173 62
+o73 95
+o74 false
+dyn false false
+o117 0
+caught Err 266
+o138 117
+o69 0
+o47 1
+caught Err 1552841298
+o68 true
+o174 269
+o176 { x6 : false, x7 : true, x8 : 236 }
+o184 -1
+o187 181
+o193 0.5
+o193 0.5
+o198 []
+o69 0
+o47 1
+caught Err 1552841298
+o68 true
+fuel 19965

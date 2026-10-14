@@ -1,0 +1,63 @@
+exit 0
+start
+o124 268
+o125 210
+dyn 899678340 899678340
+o124 268
+o124 268
+o124 268
+o124 268
+o124 268
+lf132 1050
+o66 0
+o70 false
+o71 false
+o66 3
+o70 false
+o71 false
+o70 false
+o71 false
+o70 false
+o71 false
+o70 false
+o71 false
+o75 0
+o76 0
+lf80 208
+o135 220
+o138 1e-7
+o89 null
+o66 0
+o70 false
+o71 false
+o66 3
+o70 false
+o71 false
+o70 false
+o71 false
+o70 false
+o71 false
+o70 false
+o71 false
+o75 0
+o76 0
+lf80 208
+dyn 55650 55650
+caught Err 221
+caught Int 23
+o66 0
+o70 false
+o71 false
+o66 3
+o70 false
+o71 false
+o70 false
+o71 false
+o70 false
+o71 false
+o70 false
+o71 false
+o75 0
+o76 0
+lf80 208
+fuel 19921

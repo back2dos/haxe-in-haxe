@@ -1,0 +1,156 @@
+exit 0
+start
+o286 1547997820
+o238 151
+o286 1547997820
+o290 257
+o113 E5A
+o115 C36
+o117 -1
+o115 C36
+o117 -1
+o115 C36
+o117 -1
+o119 0
+o126 -9
+o238 151
+o381 true
+o238 151
+o381 true
+o238 151
+o381 true
+o382 -1
+o383 1533407838
+o304 C45
+o305 false
+o187 C36
+o191 { x7 : 7, x8 : false, x9 : 26 }
+o304 C45
+o305 false
+o187 C36
+o191 { x7 : 7, x8 : false, x9 : 26 }
+o304 C45
+o305 false
+o187 C36
+o191 { x7 : 7, x8 : false, x9 : 26 }
+o330 378
+o335 1
+o340 false
+o340 false
+o340 false
+o304 C45
+o305 false
+o187 C36
+o191 { x7 : 7, x8 : false, x9 : 26 }
+o352 1
+o352 1
+o238 151
+o369 E2B(E2A)
+o370 78
+o352 1
+o352 1
+o238 151
+o369 E2B(E2A)
+o370 113
+o344 E2A
+o238 151
+dyn 0 0
+o312 { x7 : 1, x8 : false, x9 : -1 }
+o314 false
+o312 { x7 : 1, x8 : false, x9 : -1 }
+o314 false
+dyn 1 1
+o312 { x7 : 1, x8 : false, x9 : -1 }
+o314 false
+o312 { x7 : 1, x8 : false, x9 : -1 }
+o314 false
+dyn 2 2
+o312 { x7 : 1, x8 : false, x9 : -1 }
+o314 false
+o312 { x7 : 1, x8 : false, x9 : -1 }
+o314 false
+o304 C45
+o305 false
+o187 C36
+o191 { x7 : 7, x8 : false, x9 : 26 }
+o304 C45
+o305 false
+o187 C36
+o191 { x7 : 7, x8 : false, x9 : 26 }
+o304 C45
+o305 false
+o187 C36
+o191 { x7 : 7, x8 : false, x9 : 26 }
+o461 -1174611671
+o467 { x7 : 44, x8 : true, x9 : 65535 }
+o470 0
+o470 0
+o472 E2A
+o479 0
+o483 []
+o304 C45
+o305 false
+o187 C36
+o191 { x7 : 7, x8 : false, x9 : 26 }
+o395 C30
+o396 $
+o397 0
+o395 C30
+o396 $
+o397 1
+o395 C30
+o396 $
+o397 2
+o395 C30
+o396 $
+o397 3
+o395 C30
+o396 $
+o397 4
+o395 C30
+o396 $
+o397 5
+o399 { x7 : 63, x8 : false, x9 : 63 }
+o399 { x7 : 378, x8 : false, x9 : 378 }
+o399 { x7 : -636031041, x8 : false, x9 : -636031041 }
+dyn -2056403078 -2056403078
+o494 true
+o495 -68
+o238 151
+o381 true
+o238 151
+o381 true
+o238 151
+o381 true
+o382 14227
+o383 1533407838
+o304 C45
+o305 false
+o187 C36
+o191 { x7 : 7, x8 : false, x9 : 26 }
+o344 E2A
+o214 C45
+o304 C45
+o305 false
+o187 C36
+o191 { x7 : 7, x8 : false, x9 : 26 }
+o238 151
+o381 true
+o238 151
+o381 true
+o238 151
+o381 true
+o382 274
+o383 1533407838
+o304 C45
+o305 false
+o187 C36
+o191 { x7 : 7, x8 : false, x9 : 26 }
+o344 E2A
+o214 C45
+o304 C45
+o305 false
+o187 C36
+o191 { x7 : 7, x8 : false, x9 : 26 }
+o505 23
+fuel 19309

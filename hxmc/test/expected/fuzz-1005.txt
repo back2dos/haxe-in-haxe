@@ -1,0 +1,14 @@
+exit 0
+start
+o192 E0A
+o196 E0B
+caught Err 0
+o120 true
+dyn 128
+o205 275
+o213 E0B
+o214 
+o215 q
+o216 -162
+o217 1
+fuel 19996

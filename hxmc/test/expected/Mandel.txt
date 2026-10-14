@@ -1,0 +1,4 @@
+exit 0
+Mandel.hx:31: 51994
+Mandel.hx:36: 5500
+Mandel.hx:41: 5585

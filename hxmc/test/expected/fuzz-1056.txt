@@ -1,0 +1,96 @@
+exit 0
+start
+caught Err 0
+dyn 2
+o72 Box
+o74 []
+o105 false
+o116 E1B
+o117 E0A
+o151 76
+caught Err 0
+dyn 2
+o72 Box
+o74 []
+o105 false
+o240 65535
+caught Err 0
+dyn 2
+o72 Box
+o74 []
+o94 false
+o95 -1
+lf96 -1641216493
+caught Err 0
+dyn 2
+o72 Box
+o74 []
+o105 false
+o102 0
+o245 C6
+lf127 7
+dyn -552984762
+o249 true
+lf127 7
+dyn -552984762
+o249 true
+lf127 7
+dyn -552984762
+o249 true
+o151 76
+caught Err 0
+dyn 2
+o72 Box
+o74 []
+o105 false
+o151 76
+caught Err 0
+dyn 2
+o72 Box
+o74 []
+o105 false
+o151 76
+caught Err 0
+dyn 2
+o72 Box
+o74 []
+o105 false
+o151 76
+caught Err 0
+dyn 2
+o72 Box
+o74 []
+o105 false
+o151 76
+caught Err 0
+dyn 2
+o72 Box
+o74 []
+o105 false
+o151 76
+caught Err 0
+dyn 2
+o72 Box
+o74 []
+o105 false
+o221 Box
+o227 C6
+o258 C21
+caught Err 0
+dyn 2
+o72 Box
+o74 []
+o105 false
+lf183 -2
+caught Err 0
+dyn 2
+o72 Box
+o74 []
+caught Err 0
+dyn 2
+o72 Box
+o74 []
+o92 2
+o264 0
+o268 235
+fuel 19904

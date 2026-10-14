@@ -1,0 +1,108 @@
+exit 0
+start
+o222 p.q.C39
+o227 { x8 : -15 }
+o97 E0A
+o178 -154
+o180 E5B(日本語)
+o144 p.q.C49
+o150 p.q.C49
+o159 42
+o76 x-1xfalsexfalse
+o77 43
+o97 E0A
+o68 { x8 : 2143224 }
+o76 x-1xfalsexfalse
+o77 43
+o108 0
+o76 x-1xfalsexfalse
+o77 43
+o108 1
+o76 x-1xfalsexfalse
+o77 43
+o108 2
+o110 false
+o129 C20
+o118 E1A
+o228 294
+o229 p.C10
+o144 p.q.C49
+o230 7
+lf198 1
+o68 { x8 : 2067 }
+o68 { x8 : 2067 }
+o68 { x8 : 2067 }
+o150 p.q.C49
+o159 42
+o76 x-1xfalsexfalse
+o77 43
+o97 E0A
+o68 { x8 : 2143224 }
+o76 x-1xfalsexfalse
+o77 43
+o108 0
+o76 x-1xfalsexfalse
+o77 43
+o108 1
+o76 x-1xfalsexfalse
+o77 43
+o108 2
+o110 false
+o129 C20
+o118 E1A
+o150 p.q.C49
+o159 42
+o76 x-1xfalsexfalse
+o77 43
+o97 E0A
+o68 { x8 : 2143224 }
+o76 x-1xfalsexfalse
+o77 43
+o108 0
+o76 x-1xfalsexfalse
+o77 43
+o108 1
+o76 x-1xfalsexfalse
+o77 43
+o108 2
+o110 false
+o129 C20
+o118 E1A
+o150 p.q.C49
+o159 42
+o76 x-1xfalsexfalse
+o77 43
+o97 E0A
+o68 { x8 : 2143224 }
+o76 x-1xfalsexfalse
+o77 43
+o108 0
+o76 x-1xfalsexfalse
+o77 43
+o108 1
+o76 x-1xfalsexfalse
+o77 43
+o108 2
+o110 false
+o129 C20
+o118 E1A
+o150 p.q.C49
+o159 42
+o76 x-1xfalsexfalse
+o77 43
+o97 E0A
+o68 { x8 : 2143224 }
+o76 x-1xfalsexfalse
+o77 43
+o108 0
+o76 x-1xfalsexfalse
+o77 43
+o108 1
+o76 x-1xfalsexfalse
+o77 43
+o108 2
+o110 false
+o129 C20
+o118 E1A
+o238 false
+fuel 19888

@@ -1,0 +1,117 @@
+exit 0
+start
+o178 100.75
+o180 233
+o89 4
+o89 4
+o89 4
+o89 4
+o89 4
+o89 4
+o92 165
+o181 1000
+o180 233
+o89 4
+o89 4
+o89 4
+o89 4
+o89 4
+o89 4
+o92 165
+o181 1000
+o89 4
+o89 4
+o89 4
+o89 4
+o89 4
+o89 4
+o87 x168 = truexfalse
+o87 x168 = truexfalse
+o140 4
+o142 { x10 : 1, x11 : false, x12 : true }
+o89 4
+o89 4
+o89 4
+o89 4
+o89 4
+o89 4
+o87 x168 = truexfalse
+o87 x168 = truexfalse
+o140 4
+o142 { x10 : 1, x11 : false, x12 : true }
+o70 16
+o71 false
+o89 4
+o89 4
+o89 4
+o89 4
+o89 4
+o89 4
+o87 x168 = truexfalse
+o87 x168 = truexfalse
+o87 x19 = truexfalse
+o89 4
+o89 4
+o89 4
+o89 4
+o89 4
+o89 4
+o87 x168 = truexfalse
+o87 x168 = truexfalse
+o140 4
+o142 { x10 : 1, x11 : false, x12 : true }
+o215 2147483647
+dyn 141 141
+o89 4
+o89 4
+o89 4
+o89 4
+o89 4
+o89 4
+o87 x168 = truexfalse
+o87 x168 = truexfalse
+o130 0
+o133 C42
+o133 C42
+o208 1
+o209 E4B
+dyn 234 234
+o185 268435456
+o248 208
+o248 208
+o248 208
+o248 208
+o252 164
+o258 1
+o89 4
+o89 4
+o89 4
+o89 4
+o89 4
+o89 4
+o87 x168 = truexfalse
+o87 x168 = truexfalse
+o140 4
+o142 { x10 : 1, x11 : false, x12 : true }
+o70 16
+o71 false
+o89 4
+o89 4
+o89 4
+o89 4
+o89 4
+o89 4
+o87 x168 = truexfalse
+o87 x168 = truexfalse
+o87 x19 = truexfalse
+o89 4
+o89 4
+o89 4
+o89 4
+o89 4
+o89 4
+o87 x168 = truexfalse
+o87 x168 = truexfalse
+o140 4
+o142 { x10 : 1, x11 : false, x12 : true }
+fuel 19881

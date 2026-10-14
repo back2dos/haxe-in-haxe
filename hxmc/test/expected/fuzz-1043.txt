@@ -1,0 +1,11 @@
+exit 0
+start
+o44 false
+caught other
+o60 true
+o96 1
+o44 false
+caught other
+o60 true
+o70 false
+fuel 19990

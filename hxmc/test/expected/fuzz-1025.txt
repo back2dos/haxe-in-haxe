@@ -1,0 +1,7 @@
+exit 0
+start
+o209 true
+o213 E0A
+o214 { x2 : 44111, x3 : false }
+o215 9575
+fuel 19998
