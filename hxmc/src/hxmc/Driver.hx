@@ -118,7 +118,7 @@ class Driver {
 					var inLoop = Inline.loopBlocks(mf);
 					for (s in todo) {
 						var t = template(s.fn);
-						if (t != null && s.fn != fn && t.size <= (s.call.block.mark == inLoop ? Inline.MAX_LOOP : Inline.MAX_FLAT))
+						if (t != null && s.fn != fn && t.size <= (s.call.block.mark == inLoop ? Inline.MAX_LOOP : StringTools.startsWith(s.fn.module, "hxmc.rt.") ? Inline.MAX_FLAT_RT : Inline.MAX_FLAT))
 							sites.push({call: s.call, callee: t});
 					}
 					todo = Inline.run(mf, sites, ic);
@@ -135,7 +135,12 @@ class Driver {
 			var ra = new Regalloc(lf, isel, ras);
 			ra.run();
 			var s3 = haxe.Timer.stamp();
+			// the runtime's Haxe functions: a section each, dropped by the linker
+			// when nothing reaches them (the exported ones are always compiled)
+			var rtFunc = StringTools.startsWith(fn.module, "hxmc.rt.");
+			if (rtFunc) emit.useSection(Link.GC_PREFIX + name);
 			emit.func(lf, ra.usedRegs, true);
+			if (rtFunc) emit.useSection(null);
 			var s4 = haxe.Timer.stamp();
 			lock.acquire();
 			tm[0] += s1 - s0;

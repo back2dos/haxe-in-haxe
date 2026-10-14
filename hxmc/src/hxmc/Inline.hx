@@ -16,10 +16,14 @@ import hxmc.Mir;
 // callee's), few instructions on its fast path.
 class Inline {
 	public static inline var MAX_IR = 40; // IR nodes of a candidate
-	// instructions outside slow paths: of a callee inlined anywhere, and at a
-	// call in a loop (size against speed; HXMC_INLINE=<flat>,<loop>)
+	// instructions outside slow paths: of a callee inlined anywhere, at a
+	// call in a loop, and of the runtime's Haxe functions (hxmc.rt) outside
+	// loops: none (inlining hx_str_or_null at every concatenation costs 1% of
+	// the port's size for no measurable speed) (size against speed;
+	// HXMC_INLINE=<flat>,<loop>,<runtime flat>)
 	public static var MAX_FLAT = limit(0, 16);
 	public static var MAX_LOOP = limit(1, 48);
+	public static var MAX_FLAT_RT = limit(2, 0);
 
 	static function limit(k:Int, def:Int):Int {
 		var e = Sys.getEnv("HXMC_INLINE");

@@ -71,6 +71,12 @@ class Emit implements hxmc.Target.Emitter {
 	static var FALIGN = Sys.getEnv("HXMC_FALIGN") != null ? Std.parseInt(Sys.getEnv("HXMC_FALIGN")) : 16;
 	static var FSHIFT = Sys.getEnv("HXMC_FSHIFT") != null ? Std.parseInt(Sys.getEnv("HXMC_FSHIFT")) : 0;
 
+	public function useSection(name:Null<String>) {
+		text = obj.section(name != null ? name : ".text", Text, FALIGN);
+		a.sec = text;
+		a.b = text.buf;
+	}
+
 	public function func(f:LFunc, usedRegs:Array<Bool>, global:Bool):Symbol {
 		text.buf.align(FALIGN, 0xcc);
 		for (_ in 0...FSHIFT)

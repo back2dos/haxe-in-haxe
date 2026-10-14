@@ -64,6 +64,8 @@ class Link {
 	// initializers are left out (the runtime is compiled with a section per
 	// function and per datum)
 	public var collect:Null<Obj>;
+	// sections of any object kept only when reached (the runtime's Haxe functions)
+	public static inline var GC_PREFIX = ".text.gc.";
 	var live:Null<Map<Section, Bool>>;
 
 	function gc(entry:String) {
@@ -78,7 +80,7 @@ class Link {
 		}
 		for (o in objs)
 			for (s in o.sections)
-				if (o != collect || s.kind == InitArray || s.kind == FiniArray) mark(s);
+				if ((o != collect && !StringTools.startsWith(s.name, GC_PREFIX)) || s.kind == InitArray || s.kind == FiniArray) mark(s);
 		var e = globals.get(entry);
 		if (e != null) mark(e.section);
 		while (work.length > 0) {

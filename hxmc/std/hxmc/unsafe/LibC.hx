@@ -14,6 +14,7 @@ import hxmc.I64;
 	static function memset(dst:Ptr, c:Int, n:I64):Ptr;
 	static function memcmp(a:Ptr, b:Ptr, n:I64):Int;
 	static function strlen(s:Ptr):I64;
+	static function strcmp(a:Ptr, b:Ptr):Int;
 	static function malloc(n:I64):Ptr;
 	static function free(p:Ptr):Void;
 	static function strtod(s:Ptr, end:Ptr):Float;

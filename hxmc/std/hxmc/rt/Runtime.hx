@@ -5,5 +5,6 @@ package hxmc.rt;
 // @:keep (DCE keeps them typed); hxmc compiles only the functions a program
 // calls, and the @:hxmc.export ones the runtime's C code calls.
 import hxmc.rt.Str;
+import hxmc.rt.Dyn;
 
 class Runtime {}

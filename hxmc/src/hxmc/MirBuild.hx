@@ -2075,6 +2075,9 @@ class MirBuild {
 			case "setI32At": stAt(4);
 			case "setI64At" | "setF64At": stAt(8);
 			case "alloc" | "allocRaw": allocDyn(ex(args[0]), ex(args[1]), ex(args[2]), short == "alloc");
+			case "callRef1" | "callRef2":
+				var xs = [for (a in args) ex(a)];
+				callInd(xs[0], xs.slice(1), I64);
 			case _: throw new Unsupported("unknown intrinsic " + name);
 		}
 	}

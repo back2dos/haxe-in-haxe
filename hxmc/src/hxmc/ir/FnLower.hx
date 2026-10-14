@@ -272,7 +272,7 @@ class FnLower {
 	// a runtime function call that is not a GC point
 	public static function noGcHost(n:String):Bool
 		return isPure(n) || NOGC.exists(n) || C_EXTERNS.exists(n)
-			|| (isIntrinsic(n) && n != "hxmc_unsafe_Mem_alloc" && n != "hxmc_unsafe_Mem_allocRaw");
+			|| (isIntrinsic(n) && n != "hxmc_unsafe_Mem_alloc" && n != "hxmc_unsafe_Mem_allocRaw" && !StringTools.startsWith(n, "hxmc_unsafe_Mem_call"));
 
 	// the layout an object literal of the structural type t gets, when the
 	// field `name` has the representation rt there

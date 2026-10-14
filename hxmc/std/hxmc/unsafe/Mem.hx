@@ -26,6 +26,10 @@ extern class Mem {
 	static function stack(bytes:Int):Ptr;
 	// unsigned comparison
 	static function ult(a:I64, b:I64):Bool;
+	// calls code at fn with the C ABI (GC points: the callee may collect):
+	// fn(a) and fn(a, b) returning a reference
+	static function callRef1(fn:Ptr, a:Dynamic):Dynamic;
+	static function callRef2(fn:Ptr, a:Dynamic, b:Ptr):Dynamic;
 
 	// loads at p + off (8/16-bit and f32 loads widen; getI32 of 4 bytes)
 	static function getI8(p:Ptr, off:Int):Int;

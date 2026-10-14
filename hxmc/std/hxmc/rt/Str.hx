@@ -17,7 +17,7 @@ import hxmc.unsafe.Ptr;
 // symbol); @:hxmc.host ones only replace generated code's calls. Written
 // with the intrinsics only: an operation of the language that the runtime
 // implements here (string concatenation, Std.string...) would call itself.
-@:keep
+@:keep @:allow(hxmc.rt)
 class Str {
 	public static inline var T_STRING = 1;
 	public static inline var T_ADATA_RAW = 7;
@@ -475,7 +475,7 @@ class Str {
 	}
 
 	@:hxmc.export("StringBuf_add") static function sbAdd(b:Dynamic, x:Dynamic):Void
-		sbAddStr(b, Rt.hx_std_string(x));
+		sbAddStr(b, Dyn.stdString(x));
 
 	@:hxmc.export("StringBuf_addChar_slow") static function sbAddCharSlow(b:Dynamic, c:Int):Void {
 		reserve(b, 2);
