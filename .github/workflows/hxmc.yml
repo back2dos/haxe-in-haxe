@@ -55,7 +55,7 @@ jobs:
         run: |
           sudo apt-get update -qqy
           # (the reference links mbedtls and pcre2 dynamically)
-          sudo apt-get install -qqy tcc libpcre2-dev zlib1g-dev libmbedtls-dev
+          sudo apt-get install -qqy tcc lld libpcre2-dev zlib1g-dev libmbedtls-dev
           if [ "${{ steps.cache-haxe.outputs.cache-hit }}" != true ]; then sudo apt-get install -qqy opam ninja-build; fi
 
       - name: Cache opam
@@ -86,9 +86,10 @@ jobs:
           make -C haxe -s -j"$(nproc)" haxe
 
       # the native backend tool (port + hxc), which compiles hxmc: keyed by its sources
+      # (restored and saved apart: saved as soon as it is built, whatever fails later)
       - name: Cache the native tool
         id: cache-tool
-        uses: actions/cache@v6
+        uses: actions/cache/restore@v6
         with:
           path: |
             bin/hxc-dev/tool
@@ -108,6 +109,15 @@ jobs:
           git -C "$RUNNER_TEMP/hxnodejs" fetch -q --depth 1 https://github.com/HaxeFoundation/hxnodejs "$HXNODEJS_COMMIT"
           git -C "$RUNNER_TEMP/hxnodejs" checkout -q FETCH_HEAD
           make bin/hxc-dev/tool bin/fuzz/fuzz TOOL_LIBS="$RUNNER_TEMP/hxnodejs/extraParams.hxml -cp $RUNNER_TEMP/hxnodejs/src"
+
+      - name: Save the native tool
+        if: steps.cache-tool.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: |
+            bin/hxc-dev/tool
+            bin/fuzz/fuzz
+          key: ${{ steps.cache-tool.outputs.cache-primary-key }}
 
       - name: Restored tool is up to date
         if: steps.cache-tool.outputs.cache-hit == 'true'
