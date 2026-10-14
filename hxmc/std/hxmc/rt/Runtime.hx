@@ -13,5 +13,6 @@ import hxmc.rt.Zip;
 import hxmc.rt.Sys;
 import hxmc.rt.Net;
 import hxmc.rt.WinSys;
+import hxmc.rt.WinNet;
 
 class Runtime {}

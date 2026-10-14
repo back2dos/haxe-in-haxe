@@ -129,7 +129,9 @@ small internal API (`std/hxmc/unsafe`, not a user API):
   `alloc`/`allocRaw` (an object of a run-time size, type index and kind),
   `sym` (the address of a symbol of the program or runtime), `tlsGet`/
   `tlsSet` (the runtime's thread-locals), `abi` (Abi's layout constants),
-  `os`/`arm` (the target, constants), `stack` (a frame area), `ult`,
+  `os`/`arm`/`target` (the target, constants: Lower folds a single
+  comparison of one and the `if` it decides, so platform code is written
+  `if (Mem.target() == 2)`, never `a && b`), `stack` (a frame area), `ult`,
   `callRef1`/`callRef2` (calls through code pointers). MirBuild expands them
   inline; none but the allocations and calls is a GC point.
 - `Atomic`: sequentially consistent loads, stores, add, exchange and
@@ -140,7 +142,13 @@ small internal API (`std/hxmc/unsafe`, not a user API):
 - C interop: `@:hxmc.c` extern classes are C functions called by symbol
   with the target's C ABI (`LibC`: scalars and pointers; Int is a C int,
   I64 and Ptr 64-bit, Float a double; never GC points); `@:hxmc.rt` ones
-  are the runtime's C functions, which may collect.
+  are the runtime's C functions, which may collect. `@:hxmc.varargs(k)`
+  marks a variadic C function with k fixed parameters (x86-64 System V
+  sets `al`; Apple arm64 passes the rest on the stack). `Posix`, `Win32`
+  and `Winsock` declare the system's functions the runtime calls;
+  `hxmc/tools/mkrt.sh` names them so the runtime object provides them
+  (musl's members on Linux, import records on Windows; libSystem binds
+  at load time on macOS).
 - `@:hxmc.noGc` on a function: it must not reach a GC point (it may keep
   raw addresses across its calls); Facts checks it and names the culprit.
 - `@:hxmc.export("sym")` / `@:hxmc.host("sym")` on a static function of an
@@ -150,7 +158,8 @@ small internal API (`std/hxmc/unsafe`, not a user API):
   an exported one is also called by the C part, so it is always compiled,
   under that symbol. Each runtime function gets its own section, which
   the ELF linker drops when nothing reaches it, and is inlined only in
-  loops (HXMC_INLINE's third value).
+  loops (HXMC_INLINE's third value). A class marked `@:hxmc.posix` binds
+  only off Windows, `@:hxmc.windows` only on Windows.
 
 The modules load with every program through `std/Std.hx` (`import
 hxmc.rt.Runtime`; their classes are `@:keep`). A change that needs new
@@ -161,6 +170,16 @@ intrinsics and uses them at once needs a tool that knows them: bootstrap
 | --- | --- | --- |
 | `Str.hx`: strings, UTF-8, comparison, hashing, concatenation, Int formatting, String/StringBuf/Std natives | `rt_str.c` | `hx_format_float`: shortest round-trip doubles through printf/strtod (a Haxe Ryu could replace it) |
 | `Dyn.hx`, `Types.hx`: structural and Dynamic access, inline-cache lookups, Dynamic operators, type tests, Std.string, reflection (`hxmc.Native`) | `rt_dyn.c` | the field-name table (interning under a lock, names outside the heap) and the per-thread inline-cache entries (until threads move) |
+| `Arr.hx`, `Bytes.hx`, `Date.hx`, `Zip.hx`: Array, haxe.io.Bytes, Date and Math.random natives, inflate and CRC-32 | `rt_std.c` | nothing |
+| `Sys.hx`, `Net.hx` (`@:hxmc.posix`): Sys, FileSystem, File, Process, sockets and host resolution over POSIX | `rt_sys.c`, `rt_net.c` | nothing (blocking waits go through the scheduler's `rt_wait_fd`/`rt_blocking_enter`) |
+| `WinSys.hx`, `WinNet.hx` (`@:hxmc.windows`): the same over the UCRT, kernel32 and Winsock (wide strings are Haxe's UTF-16 units) | `rt_sys_win.c`, `rt_net_win.c` | `rt_win.c`: the Winsock error mapping and WSAStartup, shared with TLS and the scheduler |
+
+Still C (6.4k lines with the libc glue, from 11.7k): the collector and
+allocator (`rt.c`), threads, the scheduler and its stack switching
+(`rt_thread.c`, assembly shims), the libuv binding for eval.luv
+(`rt_uv.c`), TLS
+over the platform's library (`rt_ssl.c`), the debug census
+(`rt_census.c`), `hx_format_float`.
 
 ## Building
 

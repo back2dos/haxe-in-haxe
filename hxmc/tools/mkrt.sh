@@ -25,7 +25,7 @@ files="rt rt_dyn rt_str rt_ssl rt_uv rt_thread rt_census"
 case $target in
 windows-*)
 	CFLAGS="-O2 -g0 -w -fno-strict-aliasing -DHXMC_NO_SSL -DHXMC_NO_UV -I $ROOT/hxmc/rt"
-	files="$files rt_win rt_net_win" ;;
+	files="$files rt_win" ;;
 macos-*)
 	# position-independent (macOS executables are), against libSystem;
 	# arm64 macOS calls main on its own stack without ucontext already
@@ -53,7 +53,11 @@ windows-*)
 	libm="$libm GetEnvironmentStringsW FreeEnvironmentStringsW Sleep GetSystemTimePreciseAsFileTime GetProcessTimes"
 	libm="$libm GetCurrentProcess GetModuleFileNameW GetStdHandle GetFileType GetFileAttributesW SetFileAttributesW MoveFileExW"
 	libm="$libm RemoveDirectoryW FindFirstFileW FindNextFileW FindClose GetLastError GetFullPathNameW DuplicateHandle CloseHandle"
-	libm="$libm SearchPathW CreateFileW CreatePipe CreateProcessW WaitForSingleObject GetExitCodeProcess TerminateProcess" ;;
+	libm="$libm SearchPathW CreateFileW CreatePipe CreateProcessW WaitForSingleObject GetExitCodeProcess TerminateProcess"
+	# hxmc/std/hxmc/unsafe/Winsock.hx
+	libm="$libm socket closesocket accept bind connect listen getsockname getpeername getsockopt setsockopt recv send"
+	libm="$libm select shutdown ioctlsocket gethostname gethostbyname gethostbyaddr WSAGetLastError SetHandleInformation"
+	libm="$libm strerror _strdup rt_win_sock_errno rt_win_sockets_init" ;;
 *)
 	libm="$libm localtime_r gmtime_r"
 	# hxmc/std/hxmc/unsafe/Posix.hx
