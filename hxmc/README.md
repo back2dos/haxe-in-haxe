@@ -172,14 +172,23 @@ intrinsics and uses them at once needs a tool that knows them: bootstrap
 | `Dyn.hx`, `Types.hx`: structural and Dynamic access, inline-cache lookups, Dynamic operators, type tests, Std.string, reflection (`hxmc.Native`) | `rt_dyn.c` | the field-name table (interning under a lock, names outside the heap) and the per-thread inline-cache entries (until threads move) |
 | `Arr.hx`, `Bytes.hx`, `Date.hx`, `Zip.hx`: Array, haxe.io.Bytes, Date and Math.random natives, inflate and CRC-32 | `rt_std.c` | nothing |
 | `Sys.hx`, `Net.hx` (`@:hxmc.posix`): Sys, FileSystem, File, Process, sockets and host resolution over POSIX | `rt_sys.c`, `rt_net.c` | nothing (blocking waits go through the scheduler's `rt_wait_fd`/`rt_blocking_enter`) |
+| `Atomics.hx`: the haxe.atomic cells (`hxmc.NativeAtomic`) over `Atomic` | `rt_thread.c` | the rest of `rt_thread.c`: see below |
 | `WinSys.hx`, `WinNet.hx` (`@:hxmc.windows`): the same over the UCRT, kernel32 and Winsock (wide strings are Haxe's UTF-16 units) | `rt_sys_win.c`, `rt_net_win.c` | `rt_win.c`: the Winsock error mapping and WSAStartup, shared with TLS and the scheduler |
 
-Still C (6.4k lines with the libc glue, from 11.7k): the collector and
-allocator (`rt.c`), threads, the scheduler and its stack switching
-(`rt_thread.c`, assembly shims), the libuv binding for eval.luv
-(`rt_uv.c`), TLS
-over the platform's library (`rt_ssl.c`), the debug census
-(`rt_census.c`), `hx_format_float`.
+Still C (6.3k lines with the libc glue, from 11.7k): the collector and
+allocator (`rt.c`), the libuv binding for eval.luv (`rt_uv.c`), TLS over
+the platform's library (`rt_ssl.c`), the debug census (`rt_census.c`),
+`hx_format_float`, and threads (`rt_thread.c`): thread start and exit,
+the stop-the-world handshake with the collector (safepoints, safe regions,
+root scanning of every thread), park/unpark, the main stack switch
+(assembly shims, Windows fibers), and the mutex, condition and semaphore
+natives. Those are pthread and SRW-lock objects (sizes and layouts differ
+per C library), finalized by the collector, and the code is the
+collector's other half; moving it means moving `rt.c` with it. The
+collector itself stays C for now: it runs while no Haxe code may (the
+world is stopped, objects are being moved), so it would need a no-GC
+Haxe subset with function pointers and static non-heap tables, for no
+gain in speed (allocation's fast path is already inline code).
 
 ## Building
 

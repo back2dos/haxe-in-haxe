@@ -14,5 +14,6 @@ import hxmc.rt.Sys;
 import hxmc.rt.Net;
 import hxmc.rt.WinSys;
 import hxmc.rt.WinNet;
+import hxmc.rt.Atomics;
 
 class Runtime {}

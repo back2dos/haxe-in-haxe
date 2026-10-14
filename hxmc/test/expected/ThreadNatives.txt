@@ -1,0 +1,19 @@
+exit 0
+ThreadNatives.hx:38: 5, 5, 8, 8, -2
+ThreadNatives.hx:39: -2, 240, 240, 255, 255, 0
+ThreadNatives.hx:40: 0, 42, 42, 42, 7, -1, -1
+ThreadNatives.hx:42: 2147483647, -2147483648, -2147483648, 2147483647
+ThreadNatives.hx:44: false, false, true, true, false
+ThreadNatives.hx:50: 2, box2
+ThreadNatives.hx:52: box2
+ThreadNatives.hx:54: 2, 2
+ThreadNatives.hx:55: 2, 4
+ThreadNatives.hx:57: box4, box5
+ThreadNatives.hx:59: box5
+ThreadNatives.hx:61: true, true, true, 6
+ThreadNatives.hx:93: 80000, 15, 80000, box80000, 80000
+ThreadNatives.hx:102: true, child
+ThreadNatives.hx:106: main
+ThreadNatives.hx:120: condition, true
+ThreadNatives.hx:130: [0,1,4,9,16], false, null
+ThreadNatives.hx:131: false

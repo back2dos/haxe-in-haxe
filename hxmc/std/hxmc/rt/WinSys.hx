@@ -215,7 +215,7 @@ class WinSys {
 	// redirected standard input
 	@:hxmc.host("hxmc_NativeSys_getChar") static function getChar(echo:Bool):Int {
 		var h = Win32.GetStdHandle(-10); // STD_INPUT_HANDLE
-		var ft = h.toI64() != -1 ? Win32.GetFileType(h) : 2; // FILE_TYPE_CHAR
+		var ft = !(h.toI64() == -1) ? Win32.GetFileType(h) : 2; // FILE_TYPE_CHAR
 		if (ft == 2) {
 			Leaf.rt_blocking_enter();
 			var c = echo ? Win32._getche() : Win32._getch();
@@ -515,7 +515,7 @@ class WinSys {
 				i++;
 			put(i, 0);
 			var h = Win32.FindFirstFileW(out, data);
-			if (h.toI64() != -1) {
+			if (!(h.toI64() == -1)) {
 				var name = data.add(FIND_NAME);
 				var klen = wlen(name);
 				if (klen != i - last && len + klen < cap) { // a ~ (short name) was expanded

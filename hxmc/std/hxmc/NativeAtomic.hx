@@ -1,8 +1,7 @@
 package hxmc;
 
-// Atomic cells (rt_thread.c) behind haxe.atomic: real atomics (sequentially
-// consistent) with OS threads; plain operations with green threads, which
-// never switch inside them. An Int cell is a raw object, an object cell a
+// Atomic cells (hxmc/std/hxmc/rt/Atomics.hx) behind haxe.atomic,
+// sequentially consistent. An Int cell is a raw object, an object cell a
 // one-slot reference array (stores go through the GC write barrier).
 extern class NativeAtomic {
 	static function intNew(v:Int):Dynamic;

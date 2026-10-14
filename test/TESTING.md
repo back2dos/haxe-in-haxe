@@ -171,6 +171,36 @@ CI (run 38539555994, which bootstraps the tool from the reference compiler
 on every run): build, fixpoint and all six target jobs green (corpus 67/67
 and the port's self-compile on each target's machine).
 
+### hxmc: the runtime moved into Haxe (2026-10-14, branch hxmc)
+
+Strings, Dynamic access and reflection, the std natives, the system and
+socket natives (POSIX and Windows) and the atomic cells moved from C
+(`hxmc/rt`, 11.7k lines; 4.8k of them gone) into Haxe that hxmc compiles
+with every program (`hxmc/std/hxmc/rt`, `hxmc/std/hxmc/unsafe`; README,
+"Runtime in Haxe"). New corpus cases (Unsafe, StdNatives, SysNatives,
+NetNatives, ThreadNatives) whose golden files are the C runtime's outputs
+(built with the tool, std and runtime object from before the move): 72/72
+on linux-x86_64, linux-arm64 (qemu) and windows-x86_64 (wine), cross builds
+for macos-x86_64, macos-arm64 and windows-arm64; ThreadNatives also 300
+runs with 16/64/256 KB nurseries on x86-64, 45 under qemu, 15 under wine.
+The hxmc-built port's self-compile gives the reference's HXB (514
+modules, byte-identical, also with a 256 KB nursery); the tool is a
+fixpoint. CI: run 38555934736 (through the Windows system natives) green
+on all six targets; later runs in the hxmc workflow.
+
+Run times, best of 5, baseline (C runtime) / now, s: alloc 1.549 / 1.481,
+bcrypt 2.577 / 2.601, binarytrees 0.750 / 0.737, json 0.461 / 0.413,
+mandelbrot 0.498 / 0.494, mandelbrot_anon 0.925 / 1.012, nbody 0.702 /
+0.576, sha256 0.155 / 0.149, sha512 0.024 / 0.025, formatter_noio 5.357 /
+5.445, port 8.609 / 8.504 (one VM; code-layout noise alone moves a case
+by 5-7%: mandelbrot_anon and nbody run the same instructions, callgrind).
+Callgrind: the port's self-compile 50.50 G -> 49.10 G instructions
+(-2.8%). Sizes, KB: small programs 112-117 (118-119), json 194 (180: the
+reflection code), formatter_noio 1388 (1382), port 19819 (19854). Build
+(cold, from HXB): +50 ms per program (alloc 0.07 -> 0.12 s: the larger std
+HXB to read and the runtime's exported functions lowered and compiled
+every time), port 5.84 -> 6.00 s.
+
 ## Target generators
 
 Every target also compiles upstream's unit suite identically (`unit-targets.py`, above).
