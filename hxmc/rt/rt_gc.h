@@ -5,9 +5,7 @@
 
 // A mutator is a thread as the collector sees it: where its thread-local
 // runtime state lives (the refs point at the owning thread's TLS variables,
-// valid while it is registered) and its remembered set. With green threads or
-// none, there is one mutator, over the globals (the green scheduler swaps
-// them).
+// valid while it is registered) and its remembered set.
 typedef struct rt_mutator {
 	void ***sp_ref, ***hw_ref, ***base_ref;
 	void **last_fp_ref, **last_pc_ref; // stack maps (rt_frames.c)
@@ -31,7 +29,6 @@ void rt_threads_init(void); // rt_thread.c, from rt_init: the main thread's reco
 // or stopped at a safepoint. Only valid between rt_world_stop and
 // rt_world_resume.
 void rt_mutators_foreach(void (*f)(rt_mutator *m, void *arg), void *arg);
-#if RT_MT
 // Stops every other thread at a safepoint or in a safe region. Returns 0 if
 // another thread was collecting meanwhile (the caller waited for it as at a
 // safepoint, and should retry its allocation instead of collecting).
@@ -42,11 +39,6 @@ void rt_safepoint_slow(void);
 static inline void rt_safepoint(void) {
 	if (__builtin_expect(__atomic_load_n(&rt_gc_requested, __ATOMIC_RELAXED), 0)) rt_safepoint_slow();
 }
-#else
-#define rt_world_stop() 1
-#define rt_world_resume() ((void)0)
-#define rt_safepoint() ((void)0)
-#endif
 
 // rt.c: native handles (T_NATIVE objects whose C resource is freed by the
 // collector once the object is unreachable: mutexes, conditions, ...)

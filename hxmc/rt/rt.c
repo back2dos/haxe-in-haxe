@@ -1,6 +1,6 @@
 // The runtime of hxmc's programs; see rt.h.
 // GC, startup, exceptions, boxes, arrays.
-#define _GNU_SOURCE // madvise (cosmocc)
+#define _GNU_SOURCE
 #include "rt_gc.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -12,20 +12,7 @@
 #include <sys/mman.h>
 #include <unistd.h>
 #endif
-#ifdef __COSMOPOLITAN__
-#include <cosmo.h> // IsWindows
-#endif
 
-#ifdef __TINYC__ // tcc, for fast development builds: no bit-scan builtin
-static inline int __builtin_ctzll(uint64_t m) {
-	int i = 0;
-	while (!(m & 1)) {
-		m >>= 1;
-		i++;
-	}
-	return i;
-}
-#endif
 
 // Threads (rt_thread.c): each thread allocates in its own chunk of the
 // nursery (TLAB: rt_young_ptr/rt_young_limit, taken from young_next) and
@@ -39,7 +26,7 @@ RT_TLS char *rt_young_ptr, *rt_young_limit;
 static char *old_start, *old_ptr, *old_end;
 RT_TLS void **rt_sp;
 RT_TLS void **rt_sp_hw;
-RT_TLS void **rt_stack_base; // the running thread's shadow stack (green threads swap it)
+RT_TLS void **rt_stack_base; // the running thread's shadow stack
 void **rt_globals;
 static int nglobals;
 RT_TLS rt_handler *rt_hcur;
@@ -48,8 +35,11 @@ RT_TLS rt_mutator *rt_mut;
 static size_t tlab_size; // with several threads (RT_TLAB_KB; default a 16th of the nursery)
 static size_t minor_size;
 static int stats;
+#ifdef RT_CENSUS_BUILD
+// (a debug build of the runtime object: HXMC_RT_CENSUS=1 hxmc/tools/mkrt.sh)
 static int census; // RT_CENSUS: 1 at exit, 2 also after each major collection
 static void census_now(const char *when);
+#endif
 static int release_pages;
 static void populate(char *upto);
 static unsigned long minors, majors;
@@ -341,13 +331,10 @@ static void minor_(void) {
 }
 
 // ---- major collection: copy everything live into a fresh to-space.
-// Natively the old space alternates between two large reserved regions;
-// old_end is a soft limit, set after each major collection to three times the
-// live size. Under Emscripten memory is real, so each major collection
-// mallocs a to-space sized from what may survive and frees the from-space.
+// The old space alternates between two large reserved regions; old_end is a
+// soft limit, set after each major collection to three times the live size.
 
-#ifndef __EMSCRIPTEN__
-// 16 GB each; Windows commits what is mapped (Cosmopolitan builds), so there
+// 16 GB each; on Windows
 // they are 2 GB by default (RT_REGION_MB), and a reservation that fails is
 // retried at half the size down to 512 MB
 static size_t region_bytes = 16ull << 30;
@@ -382,10 +369,6 @@ static void populate(char *upto) {
 #else
 #define POPULATE_AHEAD(bytes)
 #endif
-#else
-static void populate(char *upto) { (void)upto; }
-#define POPULATE_AHEAD(bytes)
-#endif
 static char *from_start, *from_end;
 
 static void *major_forward(void *p) {
@@ -409,16 +392,6 @@ static void major_(size_t need) {
 	majors++;
 	from_start = old_start;
 	from_end = old_ptr;
-#ifdef __EMSCRIPTEN__
-	// everything in the old and young spaces may survive
-	size_t cap = 2 * ((size_t)(old_ptr - old_start) + (size_t)(young_next - rt_young_start)) + 4 * minor_size + need;
-	if (cap < (32u << 20)) cap = 32u << 20;
-	old_start = old_ptr = (char *)malloc(cap);
-	if (!old_start) {
-		fputs("out of memory\n", stderr);
-		exit(2);
-	}
-#else
 	// pages faulted in ahead of the from-space's end are not needed now
 	if (release_pages && populated[cur_region] > from_end) {
 		char *lo = (char *)(((uintptr_t)from_end + 4095) & ~(uintptr_t)4095);
@@ -428,7 +401,6 @@ static void major_(size_t need) {
 	cur_region ^= 1;
 	old_start = old_ptr = regions[cur_region];
 	populate(old_start + 1);
-#endif
 	char *scan = old_ptr;
 	if (!gc_bfs) {
 		gc_fwd = major_forward;
@@ -474,10 +446,6 @@ static void major_(size_t need) {
 		}
 	}
 	sweep_natives(from_start, from_end);
-#ifdef __EMSCRIPTEN__
-	free(from_start);
-	old_end = old_start + cap;
-#else
 	// the from-space goes back to the kernel (RT_RELEASE=0 keeps it resident,
 	// so the next major collection copies into faulted-in pages: a little
 	// less system time for as much more memory as the old space held)
@@ -491,9 +459,10 @@ static void major_(size_t need) {
 	if (limit < (64u << 20)) limit = 64u << 20;
 	if (limit > REGION) limit = REGION;
 	old_end = old_start + limit;
-#endif
 	if (stats) fprintf(stderr, "gc: major %lu: %zu MB live of %zu MB, limit %zu MB\n", majors, (size_t)(old_ptr - old_start) >> 20, (size_t)(from_end - from_start) >> 20, (size_t)(old_end - old_start) >> 20);
+#ifdef RT_CENSUS_BUILD
 	if (census == 2) census_now("major collection");
+#endif
 }
 
 // the nursery is empty again: every thread takes a new TLAB at its next allocation
@@ -508,12 +477,8 @@ static int minor_fixed; // RT_MINOR_KB sets the nursery size
 #define MINOR_MAX ((size_t)32 << 20)
 
 // The nursery: a reserved range (pages committed as touched) that it grows
-// and shrinks in, so resizing allocates nothing. Under Emscripten, malloc'ed
-// at its size, and it does not grow.
+// and shrinks in, so resizing allocates nothing.
 static char *nursery_alloc(size_t bytes) {
-#ifdef __EMSCRIPTEN__
-	return (char *)malloc(bytes);
-#else
 	size_t reserve = bytes > MINOR_MAX ? bytes : MINOR_MAX;
 	char *p = mmap(NULL, reserve + (2u << 20), PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
 	if (p == MAP_FAILED) {
@@ -525,7 +490,6 @@ static char *nursery_alloc(size_t bytes) {
 	if (huge_pages) madvise(p, reserve, MADV_HUGEPAGE);
 #endif
 	return p;
-#endif
 }
 
 // After a minor collection where much of the nursery survived (objects that
@@ -535,17 +499,11 @@ static char *nursery_alloc(size_t bytes) {
 // (they are copied once per collection); when they grow with it (everything
 // lives long), the growth is undone and not tried again.
 static size_t grown_from, survived_before_growth;
-#ifdef __EMSCRIPTEN__
-#define GROWTH_UNSUPPORTED 1
-#else
 #define GROWTH_UNSUPPORTED 0
-#endif
 static int growth_off;
 
 static void resize_nursery(size_t size) {
-#ifndef __EMSCRIPTEN__
 	if (size < minor_size) madvise(rt_young_start + size, minor_size - size, MADV_DONTNEED);
-#endif
 	minor_size = size;
 	rt_young_end = rt_young_start + minor_size;
 	if (!getenv("RT_TLAB_KB")) tlab_size = minor_size / 16;
@@ -599,7 +557,6 @@ static void collect(int full, size_t need) {
 static int tlab_refill(uint32_t bytes) {
 	size_t want = RT_NTHREADS() > 1 ? tlab_size : (size_t)-1;
 	if (want < bytes) want = bytes;
-#if RT_MT
 	char *p = __atomic_load_n(&young_next, __ATOMIC_RELAXED);
 	for (;;) {
 		size_t avail = (size_t)(rt_young_end - p);
@@ -611,36 +568,16 @@ static int tlab_refill(uint32_t bytes) {
 			return 1;
 		}
 	}
-#else
-	char *p = young_next;
-	size_t avail = (size_t)(rt_young_end - p);
-	if (avail < bytes) return 0;
-	size_t take = want < avail ? want : avail;
-	young_next = p + take;
-	rt_young_ptr = p;
-	rt_young_limit = p + take;
-	return 1;
-#endif
 }
 
 void *rt_alloc_slow(uint64_t header, uint32_t bytes) {
-#if RT_GREEN
-	// a green thread that only computes gives way at each minor collection
-	// (before allocating: the caller's live references are rooted here)
-	if (RT_NTHREADS() > 1) rt_preempt();
-#endif
 	// a safepoint: the caller's live references are rooted here
 	rt_safepoint();
 	// likewise for finaliser calls queued by an earlier major collection
-#if RT_MT
 	if (__atomic_load_n(&final_qlen, __ATOMIC_RELAXED) && !finals_running) run_finalisers(0);
-#else
-	if (final_qhead < final_qlen && !finals_running) run_finalisers(0);
-#endif
 	char *p;
 	if (bytes > minor_size / 4) {
 		// large objects go straight to the old space
-#if RT_MT
 		p = __atomic_load_n(&old_ptr, __ATOMIC_RELAXED);
 		for (;;) {
 			if ((size_t)(old_end - p) < bytes) {
@@ -650,11 +587,6 @@ void *rt_alloc_slow(uint64_t header, uint32_t bytes) {
 			}
 			if (__atomic_compare_exchange_n(&old_ptr, &p, p + bytes, 1, __ATOMIC_RELAXED, __ATOMIC_RELAXED)) break;
 		}
-#else
-		if ((size_t)(old_end - old_ptr) < bytes) collect(1, bytes);
-		p = old_ptr;
-		old_ptr += bytes;
-#endif
 	} else {
 		if (rt_young_limit - rt_young_ptr < (intptr_t)bytes) // else another thread collected meanwhile
 			while (!tlab_refill(bytes)) collect(0, 0);
@@ -767,6 +699,7 @@ void rt_barrier_range(void *obj, void **from, int32_t n) {
 		if (in_young(from[i])) rt_write_barrier(obj, &from[i], from[i]);
 }
 
+#ifdef RT_CENSUS_BUILD
 static void census_now(const char *when) {
 	rt_census_info gi;
 	memset(&gi, 0, sizeof gi);
@@ -774,10 +707,8 @@ static void census_now(const char *when) {
 	gi.young = minor_size;
 	gi.old_used = old_ptr - old_start;
 	gi.old_limit = old_end - old_start;
-#ifndef __EMSCRIPTEN__
 	for (int i = 0; i < 2; i++)
 		gi.populated[i] = populated[cur_region ^ i] > regions[cur_region ^ i] ? (size_t)(populated[cur_region ^ i] - regions[cur_region ^ i]) : 0;
-#endif
 	gi.remembered = (rt_mut->rem_cap + rt_mut->robjs_cap) * sizeof(void *); // the calling thread's
 	gi.gcstack = gc_cap * sizeof(gc_frame);
 	gi.shadow = (char *)rt_sp - (char *)rt_stack_base;
@@ -786,6 +717,20 @@ static void census_now(const char *when) {
 	gi.nglobals = nglobals;
 	rt_census(old_start, old_ptr, &gi);
 }
+#endif
+
+// RSS from /proc (Linux); 0 elsewhere
+void rt_proc_rss(long *rss, long *hwm) {
+	*rss = *hwm = 0;
+	FILE *f = fopen("/proc/self/status", "r");
+	if (!f) return;
+	char line[256];
+	while (fgets(line, sizeof line, f)) {
+		if (!strncmp(line, "VmRSS:", 6)) *rss = atol(line + 6);
+		if (!strncmp(line, "VmHWM:", 6)) *hwm = atol(line + 6);
+	}
+	fclose(f);
+}
 
 static void report(void) {
 	if (stats) {
@@ -793,6 +738,7 @@ static void report(void) {
 		rt_proc_rss(&rss, &hwm);
 		fprintf(stderr, "gc: RSS %ld MB, peak %ld MB; old %zu MB used of %zu MB limit\n", rss >> 10, hwm >> 10, (size_t)(old_ptr - old_start) >> 20, (size_t)(old_end - old_start) >> 20);
 	}
+#ifdef RT_CENSUS_BUILD
 	if (census) {
 		int c = census;
 		census = 0;
@@ -800,6 +746,7 @@ static void report(void) {
 		census_now("exit");
 		census = c;
 	}
+#endif
 	if (stats) fprintf(stderr, "gc: %lu minor (%.2fs), %lu major (%.2fs), old %zu MB used\n", minors, minor_secs, majors, major_secs, (size_t)(old_ptr - old_start) >> 20);
 }
 
@@ -836,24 +783,20 @@ void rt_init(int ng, int argc, char **argv) {
 #endif
 	rt_argc = argc;
 	rt_argv = argv;
-#ifdef __COSMOPOLITAN__
-	// an APE build may carry the Haxe standard library in its own zip (.github/workflows/build.yml)
-	if (!getenv("HAXE_STD_PATH") && access("/zip/std/StdTypes.hx", R_OK) == 0) setenv("HAXE_STD_PATH", "/zip/std/", 1);
-#endif
 	const char *m = getenv("RT_MINOR_KB");
 	minor_size = (m ? (size_t)atoi(m) : 4096) << 10;
 	minor_fixed = m != NULL;
 	stats = getenv("RT_STATS") != NULL;
-#ifndef __EMSCRIPTEN__
 	const char *ah = getenv("RT_AHEAD_MB");
 	if (ah) populate_ahead = (size_t)atoi(ah) << 20;
-#endif
+#ifdef RT_CENSUS_BUILD
 	const char *cs = getenv("RT_CENSUS");
 	census = cs ? atoi(cs) : 0;
+#endif
 	const char *rp = getenv("RT_RELEASE");
 	release_pages = rp ? atoi(rp) : 1;
 	gc_bfs = getenv("RT_BFS") != NULL;
-#if defined(MADV_HUGEPAGE) && !defined(__EMSCRIPTEN__)
+#ifdef MADV_HUGEPAGE
 	// transparent huge pages for the heap: the old space grows by hundreds of
 	// MB and is copied into fresh pages, so 4 KB page faults add up
 	const char *hp = getenv("RT_HUGE");
@@ -865,16 +808,8 @@ void rt_init(int ng, int argc, char **argv) {
 	const char *tk = getenv("RT_TLAB_KB");
 	tlab_size = tk ? (size_t)atoi(tk) << 10 : minor_size / 16;
 	if (tlab_size < 4096) tlab_size = 4096;
-#ifdef __EMSCRIPTEN__
-	old_start = old_ptr = (char *)malloc(32u << 20);
-	old_end = old_start + (32u << 20);
-	size_t stack_slots = 4u << 20;
-#else
 	const char *rm = getenv("RT_REGION_MB");
 	if (rm) region_bytes = (size_t)atoi(rm) << 20;
-#ifdef __COSMOPOLITAN__
-	else if (IsWindows()) region_bytes = (size_t)2 << 30;
-#endif
 	for (int i = 0; i < 2; i++) {
 		regions[i] = mmap(NULL, REGION, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
 		if (regions[i] == MAP_FAILED && region_bytes > ((size_t)512 << 20)) {
@@ -896,17 +831,10 @@ void rt_init(int ng, int argc, char **argv) {
 	old_end = old_start + ((size_t)(om ? atoi(om) : 256) << 20); // fewer major collections early on
 	if (old_end > old_start + REGION) old_end = old_start + REGION;
 	size_t stack_slots = 16u << 20;
-#endif
-#ifdef __EMSCRIPTEN__
-	rt_stack_base = rt_sp = (void **)calloc(stack_slots, sizeof(void *));
-#else
 	// reserved, committed as touched, with a guard page above it: as deep as
 	// the main C stack (rt_run_main)
 	(void)stack_slots;
 	size_t sbytes = (size_t)1 << 30, page = (size_t)sysconf(_SC_PAGESIZE);
-#ifdef __COSMOPOLITAN__
-	if (IsWindows()) sbytes = (size_t)256 << 20; // committed when mapped
-#endif
 	char *sstack = mmap(NULL, sbytes + page, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
 	if (sstack == MAP_FAILED) {
 		fputs("cannot reserve the shadow stack\n", stderr);
@@ -914,7 +842,6 @@ void rt_init(int ng, int argc, char **argv) {
 	}
 	mprotect(sstack + sbytes, page, PROT_NONE);
 	rt_stack_base = rt_sp = (void **)sstack;
-#endif
 	rt_sp_hw = rt_sp;
 	rt_threads_init();
 	nglobals = ng;
@@ -950,7 +877,6 @@ void rt_mutator_bind(rt_mutator *m) {
 
 // ---- exceptions
 
-#if !(defined(__cplusplus) && defined(__EMSCRIPTEN__))
 __attribute__((noreturn)) void rt_throw(void *v) {
 	rt_exn = v;
 	if (!rt_hcur) {
@@ -960,7 +886,6 @@ __attribute__((noreturn)) void rt_throw(void *v) {
 	}
 	RT_LONGJMP(rt_hcur->buf);
 }
-#endif
 
 __attribute__((noreturn)) void hx_throw_str(const char *msg) {
 	rt_throw(hx_str_of_ascii(msg));
@@ -1074,10 +999,10 @@ void *hx_arr_new_n(int32_t kind, int32_t len) {
 }
 
 // room for `need` elements
-// With green threads (rt_thread.c), another thread can run at the allocation
-// (rt_alloc_slow -> rt_preempt) and change the array: its length, capacity or
-// kind are read again after allocating, and the growth is retried if another
-// thread replaced the data meanwhile.
+// Another thread can change the array while this one allocates (it may stop
+// for a collection): its length, capacity or kind are read again after
+// allocating, and the growth is retried if another thread replaced the data
+// meanwhile.
 void hx_arr_grow(void **slot, int32_t need) {
 	void *a = *slot;
 	uint32_t cap = ARR_CAP(a);

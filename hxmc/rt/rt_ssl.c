@@ -84,11 +84,6 @@ int32_t hxmc_NativeSsl_bioErrorSend(void *ssl) NO_I
 #include <sys/socket.h>
 #endif
 #include <time.h>
-#ifdef __TINYC__
-// tcc defines neither __GNUC__ nor __clang__: skip mbedtls/check_config.h,
-// which rejects the system config's MBEDTLS_DEPRECATED_WARNING
-#define MBEDTLS_CHECK_CONFIG_H
-#endif
 #include "mbedtls/ctr_drbg.h"
 #include "mbedtls/entropy.h"
 #include "mbedtls/error.h"
@@ -290,7 +285,7 @@ double hxmc_NativeSsl_certNotBefore(void *chain) { return (double)time_to_time_t
 // Sys.systemName(). Upstream's Windows (system "Root" store) and macOS
 // (Security framework) branches are compile-time; other native POSIX builds
 // have neither (1, as upstream on Linux and the BSDs).
-#if defined(__APPLE__) && !defined(__COSMOPOLITAN__)
+#ifdef __APPLE__
 // upstream's macOS branch (SecTrustCopyAnchorCertificates), with the Security
 // and CoreFoundation functions looked up at run time: builds without the
 // macOS SDK's frameworks (zig cc) link nothing more
@@ -324,56 +319,6 @@ static int load_macos_roots(mbedtls_x509_crt *chain) {
 		release(certs);
 	}
 	return r;
-}
-#endif
-#ifdef __COSMOPOLITAN__
-// One Cosmopolitan binary runs on every OS, so the branches are taken at run
-// time. Sys.systemName() says "Linux" on every OS there (rt_sys.c), so the
-// macOS and BSD CA files are read here.
-#include <cosmo.h>
-#include <unistd.h>
-#if defined(__x86_64__)
-#include <libc/nt/dll.h>
-// upstream's Windows branch, through crypt32.dll (Cosmopolitan has no import
-// library for it; GetProcAddress functions use the Microsoft x64 ABI)
-typedef struct {
-	uint32_t dwCertEncodingType;
-	unsigned char *pbCertEncoded;
-	uint32_t cbCertEncoded;
-	void *pCertInfo;
-	void *hCertStore;
-} nt_cert_context;
-typedef void *(__attribute__((__ms_abi__)) * nt_open_store)(intptr_t, const char *);
-typedef const nt_cert_context *(__attribute__((__ms_abi__)) * nt_enum_certs)(void *, const nt_cert_context *);
-typedef int32_t(__attribute__((__ms_abi__)) * nt_close_store)(void *, uint32_t);
-
-static int load_windows_roots(mbedtls_x509_crt *chain) {
-	int r = 1;
-	int64_t lib = LoadLibraryA("crypt32.dll");
-	if (!lib) return r;
-	nt_open_store open_store = (nt_open_store)GetProcAddress(lib, "CertOpenSystemStoreA");
-	nt_enum_certs enum_certs = (nt_enum_certs)GetProcAddress(lib, "CertEnumCertificatesInStore");
-	nt_close_store close_store = (nt_close_store)GetProcAddress(lib, "CertCloseStore");
-	void *store;
-	if (open_store && enum_certs && close_store && (store = open_store(0, "Root"))) {
-		const nt_cert_context *cert = NULL;
-		while ((cert = enum_certs(store, cert))) {
-			r = mbedtls_x509_crt_parse_der(chain, cert->pbCertEncoded, cert->cbCertEncoded);
-			if (r != 0) return r; // as upstream (which leaves the store open)
-		}
-		close_store(store, 0);
-	}
-	return r;
-}
-#endif
-
-// the first of these files that holds certificates
-static int load_ca_files(mbedtls_x509_crt *chain, const char *const *paths) {
-	for (; *paths; paths++) {
-		if (access(*paths, R_OK) != 0) continue;
-		if (mbedtls_x509_crt_parse_file(chain, *paths) >= 0 && chain->version != 0) return 0;
-	}
-	return 1;
 }
 #endif
 
@@ -436,21 +381,8 @@ int32_t hxmc_NativeSsl_certLoadDefaults(void *certificate) {
 #ifdef _WIN32
 	return load_windows_roots(PTR(certificate));
 #endif
-#if defined(__APPLE__) && !defined(__COSMOPOLITAN__)
+#ifdef __APPLE__
 	return load_macos_roots(PTR(certificate));
-#endif
-#ifdef __COSMOPOLITAN__
-	mbedtls_x509_crt *chain = PTR(certificate);
-#if defined(__x86_64__)
-	if (IsWindows()) return load_windows_roots(chain);
-#endif
-	// macOS: the system roots as a PEM bundle (not the keychain's user additions)
-	static const char *const mac[] = {"/etc/ssl/cert.pem", NULL};
-	if (IsXnu()) return load_ca_files(chain, mac);
-	// the "BSD" list of sys.ssl.Mbedtls
-	static const char *const bsd[] = {"/usr/local/share/certs/ca-root-nss.crt", "/etc/ssl/cert.pem",
-		"/etc/openssl/certs/ca-certificates.crt", NULL};
-	if (IsBsd()) return load_ca_files(chain, bsd);
 #endif
 	return 1;
 }
@@ -574,7 +506,6 @@ int32_t hxmc_NativeSsl_sslHandshake(void *ssl) {
 int32_t hxmc_NativeSsl_sslRead(void *ssl, void *buf, int32_t pos, int32_t len) {
 	hx_ssl *s = PTR(ssl);
 	s->bio_errno = 0;
-#if RT_MT
 	unsigned char *tmp = (unsigned char *)malloc(len > 0 ? (size_t)len : 1);
 	RT_ROOT(buf);
 	int r = mbedtls_ssl_read(&s->ssl, tmp, (size_t)len);
@@ -583,23 +514,16 @@ int32_t hxmc_NativeSsl_sslRead(void *ssl, void *buf, int32_t pos, int32_t len) {
 	if (r > 0) memcpy(BYTES_DATA(buf) + pos, tmp, (size_t)r);
 	free(tmp);
 	return r;
-#else
-	return mbedtls_ssl_read(&s->ssl, BYTES_DATA(buf) + pos, (size_t)len);
-#endif
 }
 
 int32_t hxmc_NativeSsl_sslWrite(void *ssl, void *buf, int32_t pos, int32_t len) {
 	hx_ssl *s = PTR(ssl);
 	s->bio_errno = 0;
-#if RT_MT
 	unsigned char *tmp = (unsigned char *)malloc(len > 0 ? (size_t)len : 1);
 	if (len > 0) memcpy(tmp, BYTES_DATA(buf) + pos, (size_t)len);
 	int r = mbedtls_ssl_write(&s->ssl, tmp, (size_t)len);
 	free(tmp);
 	return r;
-#else
-	return mbedtls_ssl_write(&s->ssl, BYTES_DATA(buf) + pos, (size_t)len);
-#endif
 }
 
 // Unix.send socket bytes 0 (Bytes.length bytes) []

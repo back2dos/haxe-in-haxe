@@ -198,21 +198,13 @@ static int32_t obj_add(void *p) {
 	}
 	if (!obj_chunks[id / OBJ_CHUNK]) obj_chunks[id / OBJ_CHUNK] = calloc(OBJ_CHUNK, sizeof(void *));
 	OBJ(id) = p;
-#if RT_MT
 	__atomic_store_n(&nobjs, id + 1, __ATOMIC_RELEASE);
-#else
-	nobjs = id + 1;
-#endif
 	rt_unlock(&objs_lock);
 	return id;
 }
 
 static void *obj_get(int32_t id) {
-#if RT_MT
 	int32_t n = __atomic_load_n(&nobjs, __ATOMIC_ACQUIRE);
-#else
-	int32_t n = nobjs;
-#endif
 	if (id <= 0 || id >= n || !OBJ(id)) hx_throw_str("eval.luv: invalid or closed handle");
 	return OBJ(id);
 }
@@ -443,13 +435,13 @@ int32_t hxmc_NativeUv_loopInit(void) {
 	return obj_add(l);
 }
 
-// Loop.run and threads (rt_thread.c): uv_run blocks outside a safe region
-// (OS threads) or blocks the whole process (green threads), so while other
+// Loop.run and threads (rt_thread.c): uv_run blocks outside a safe region,
+// so while other
 // threads exist (eval.luv thread pool work, threads that signal an Async,
 // ...) the loop is run without blocking in libuv: one UV_RUN_NOWAIT
 // iteration at a time, waiting in between for the loop's backend descriptor
-// (or its next timer) with rt_wait_fd (a safe region with OS threads, the
-// scheduler with green threads), so the other threads run meanwhile. UV_RUN_ONCE ends after an iteration that reported an event.
+// (or its next timer) with rt_wait_fd (a safe region), so the other threads
+// run meanwhile. UV_RUN_ONCE ends after an iteration that reported an event.
 // libuv registers new watchers with the backend only at its next poll, so
 // while some are queued the next iteration follows without waiting. With one
 // thread uv_run is called as is; a thread spawned by a callback meanwhile

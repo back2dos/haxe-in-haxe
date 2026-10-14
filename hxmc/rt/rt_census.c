@@ -1,4 +1,5 @@
-// The runtime of hxmc's programs; see rt.h.
+// The runtime of hxmc's programs; see rt.h. In the runtime object's debug
+// build only (HXMC_RT_CENSUS=1 hxmc/tools/mkrt.sh).
 // RT_CENSUS=1: a heap census at exit (after a major collection, so only live
 // objects are counted); RT_CENSUS=2 also after every major collection.
 // Reports live bytes and object counts per type, what the same data would
@@ -8,7 +9,7 @@
 #include "rt.h"
 #include <stdio.h>
 #include <stdlib.h>
-#if defined(__GLIBC__) && !defined(__COSMOPOLITAN__)
+#ifdef __GLIBC__
 #include <malloc.h>
 #endif
 
@@ -79,19 +80,6 @@ static uint64_t deep(void *o) {
 			if (ty->fields[i].kind == 'p') b += deep(FP(o, ty->fields[i].slot));
 	}
 	return b;
-}
-
-// RSS from /proc (Linux); 0 elsewhere
-void rt_proc_rss(long *rss, long *hwm) {
-	*rss = *hwm = 0;
-	FILE *f = fopen("/proc/self/status", "r");
-	if (!f) return;
-	char line[256];
-	while (fgets(line, sizeof line, f)) {
-		if (!strncmp(line, "VmRSS:", 6)) *rss = atol(line + 6);
-		if (!strncmp(line, "VmHWM:", 6)) *hwm = atol(line + 6);
-	}
-	fclose(f);
 }
 
 static int cmp_attr(const void *a, const void *b) {
@@ -263,7 +251,7 @@ void rt_census(char *start, char *end, const rt_census_info *gi) {
 	fprintf(out, "census (%s): %llu objects, %.1f MB live; OCaml representation estimate %.1f MB\n", gi->when, (unsigned long long)objs, total / 1048576.0, ocaml / 1048576.0);
 	fprintf(out, "  heap: young %.1f MB, old %.1f MB used of %.1f MB limit, old reserve populated %.1f + %.1f MB (to/from), %lu minor, %lu major\n", gi->young / 1048576.0, gi->old_used / 1048576.0, gi->old_limit / 1048576.0, gi->populated[0] / 1048576.0, gi->populated[1] / 1048576.0, gi->minors, gi->majors);
 	fprintf(out, "  other: remembered set %.1f MB, gc stack %.1f MB, shadow stack used %.1f MB, globals %d\n", gi->remembered / 1048576.0, gi->gcstack / 1048576.0, gi->shadow / 1048576.0, gi->nglobals);
-#if defined(__GLIBC__) && !defined(__COSMOPOLITAN__) && (__GLIBC__ > 2 || (__GLIBC__ == 2 && __GLIBC_MINOR__ >= 33))
+#if defined(__GLIBC__) && (__GLIBC__ > 2 || (__GLIBC__ == 2 && __GLIBC_MINOR__ >= 33))
 	struct mallinfo2 mi = mallinfo2();
 	fprintf(out, "  malloc: %.1f MB in use (arena %.1f MB, mmap %.1f MB)\n", (mi.uordblks + mi.hblkhd) / 1048576.0, mi.arena / 1048576.0, mi.hblkhd / 1048576.0);
 #endif

@@ -164,7 +164,6 @@ void *hx_fid_str(int32_t f) {
 
 // ---- inline caches
 
-#if RT_MT
 // Misses on entries filled for another type, with several threads: per
 // thread, a table of immutable entries by (type, field id). A generated
 // access may read its entry after evaluating arguments that miss again, so
@@ -209,21 +208,17 @@ static rt_icache *ic_local_get(void *o, int32_t fid) {
 	tb->n++;
 	return e;
 }
-#endif
 
 void rt_dyn_thread_exit(void) {
-#if RT_MT
 	ic_table *tb = &ic_local;
 	for (uint32_t i = 0; i < tb->cap; i++)
 		if (tb->keys[i]) free(tb->vals[i]);
 	free(tb->keys);
 	free(tb->vals);
 	memset(tb, 0, sizeof *tb);
-#endif
 }
 
 rt_icache *rt_icache_miss(void *o, int32_t fid, rt_icache *c) {
-#if RT_MT
 	if (rt_mt) {
 		uint32_t z = 0;
 		if (__atomic_compare_exchange_n(&c->t, &z, RT_IC_BUSY, 0, __ATOMIC_ACQUIRE, __ATOMIC_RELAXED)) {
@@ -233,7 +228,6 @@ rt_icache *rt_icache_miss(void *o, int32_t fid, rt_icache *c) {
 		}
 		return ic_local_get(o, fid);
 	}
-#endif
 	rt_icache_fill(o, fid, c);
 	c->t = TINDEX(o);
 	return c;

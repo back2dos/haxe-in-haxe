@@ -21,7 +21,7 @@ esac
 out=$ROOT/bin/hxmc/rt/$target
 mkdir -p "$out/obj"
 CFLAGS="-O2 -g0 -w -fno-strict-aliasing -fno-pie -fno-pic -ffunction-sections -fdata-sections -DHXMC_NO_SSL -DHXMC_NO_UV -DRT_CALL_ON_STACK -I $ROOT/hxmc/rt"
-files="rt rt_dyn rt_str rt_ssl rt_uv rt_thread rt_census rt_frames"
+files="rt rt_dyn rt_str rt_ssl rt_uv rt_thread rt_frames"
 case $target in
 windows-*)
 	CFLAGS="-O2 -g0 -w -fno-strict-aliasing -DHXMC_NO_SSL -DHXMC_NO_UV -I $ROOT/hxmc/rt"
@@ -31,6 +31,11 @@ macos-*)
 	# arm64 macOS calls main on its own stack without ucontext already
 	CFLAGS="-O2 -g0 -w -fno-strict-aliasing -mmacosx-version-min=$([ $target = macos-arm64 ] && echo 11.0 || echo 10.15) -DHXMC_NO_SSL -DHXMC_NO_UV -I $ROOT/hxmc/rt" ;;
 esac
+# HXMC_RT_CENSUS=1: a debug build with the heap census (RT_CENSUS, rt_census.c)
+if [ "${HXMC_RT_CENSUS:-}" = 1 ]; then
+	CFLAGS="$CFLAGS -DRT_CENSUS_BUILD"
+	files="$files rt_census"
+fi
 objs=
 for f in $files; do
 	$ZIG cc -target $triple $CFLAGS -c "$ROOT/hxmc/rt/$f.c" -o "$out/obj/$f.o" &

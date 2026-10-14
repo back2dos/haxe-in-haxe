@@ -2,42 +2,27 @@
 // hxmc.NativeThread (hxmc/std/hxmc/NativeThread.hx), the base of the hxmc
 // sys.thread package (hxmc/std/sys/thread) and of haxe.atomic.
 //
-// Three implementations (rt.h RT_MT / RT_GREEN):
-//
-// - 1:1 (gcc, clang, cosmocc builds): every Haxe thread is an OS thread
-//   (pthreads) and threads run in parallel. The per-thread runtime state
-//   (shadow stack, allocation buffer, exception handlers, current exception)
-//   is thread-local (rt.h RT_TLS). The collector stops the world: a thread
-//   that needs a collection sets rt_gc_requested and waits until every other
-//   thread is stopped at a safepoint (an allocation slow path, rt_safepoint)
-//   or in a safe region (a blocking native between rt_blocking_enter and
-//   rt_blocking_leave, which holds no heap pointer outside its shadow
-//   stack); it then scans every thread's roots (rt_threads_scan) and
-//   remembered set (rt_mutators_foreach) and resumes them. The world lock
-//   `wl` guards the thread list and the collection handshake.
-//
-// - Green (tcc builds, -DRT_GREEN_THREADS; tcc has no thread-local storage):
-//   M:1 cooperative threads. Every Haxe thread runs on the one OS thread, and
-//   a thread only gives way at a blocking point (park, sleep, yield, waiting
-//   for a file descriptor) or at a minor collection. Each thread has its own
-//   C stack (ucontext), shadow stack and exception handler chain; a switch
-//   saves the globals rt_sp, rt_stack_base, rt_hcur and rt_exn into the
-//   thread record and loads the next thread's. When no thread can run, the
-//   scheduler waits in poll() over the descriptors threads wait for, up to
-//   the nearest timer deadline; if no thread can ever be woken again, the
-//   program reports the deadlock and exits.
-//
-// - None (__EMSCRIPTEN__, the wasm playground): spawn throws, and waiting
-//   forever throws instead of blocking.
+// Every Haxe thread is an OS thread (pthreads; Windows: its threads with
+// SRW locks and condition variables) and threads run in parallel. The
+// per-thread runtime state (stack-map record, shadow stack, allocation
+// buffer, exception handlers, current exception) is thread-local (rt.h
+// RT_TLS). The collector stops the world: a thread that needs a collection
+// sets rt_gc_requested and waits until every other thread is stopped at a
+// safepoint (an allocation slow path, rt_safepoint) or in a safe region (a
+// blocking native between rt_blocking_enter and rt_blocking_leave, which
+// holds no heap pointer outside its root and shadow-stack slots); it then
+// scans every thread's roots (rt_threads_scan: their frames through the
+// stack maps, rt_frames.c, and their shadow stacks) and remembered set
+// (rt_mutators_foreach) and resumes them. The world lock `wl` guards the
+// thread list and the collection handshake.
 //
 // The synchronization primitives (re-entrant mutex, condition variable,
-// counting semaphore, thread-local values) are natives with the same
-// interface in the three: pthread mutexes and conditions in 1:1, queues of
-// parked threads otherwise. Their handles are T_NATIVE objects freed by the
-// collector (rt_native_new).
+// counting semaphore, thread-local values) are pthread mutexes and
+// conditions; their handles are T_NATIVE objects freed by the collector
+// (rt_native_new).
 #define _GNU_SOURCE
 #ifdef __APPLE__
-// macOS: the ucontext routines (rt_run_main, green threads) need _XOPEN_SOURCE,
+// macOS: the ucontext routines (rt_run_main) need _XOPEN_SOURCE,
 // and _DARWIN_C_SOURCE keeps the rest (MAP_ANONYMOUS, ...) visible
 #define _XOPEN_SOURCE 700
 #define _DARWIN_C_SOURCE
@@ -69,232 +54,13 @@ int32_t hxmc_NativeThread_park(double timeout);
 void hxmc_NativeThread_unpark(int32_t id);
 int32_t hxmc_NativeThread_current(void);
 
-#if !RT_MT
-
-// ---- synchronization over park/unpark (green threads, or none): only one
-// thread runs at a time and these functions do not allocate between looking
-// at a primitive and parking, so they need no atomics; a park can return
-// early (see hxmc_NativeThread_unpark), so waits look at their state again.
-
-typedef struct {
-	int32_t *ids; // FIFO of waiting thread ids
-	int n, cap;
-} waitq;
-
-static void wq_push(waitq *q, int32_t id) {
-	if (q->n == q->cap) {
-		q->cap = q->cap ? q->cap * 2 : 4;
-		q->ids = (int32_t *)realloc(q->ids, q->cap * sizeof(int32_t));
-	}
-	q->ids[q->n++] = id;
-}
-
-static int32_t wq_shift(waitq *q) {
-	int32_t id = q->ids[0];
-	memmove(q->ids, q->ids + 1, (q->n - 1) * sizeof(int32_t));
-	q->n--;
-	return id;
-}
-
-static int wq_remove(waitq *q, int32_t id) {
-	for (int i = 0; i < q->n; i++)
-		if (q->ids[i] == id) {
-			memmove(q->ids + i, q->ids + i + 1, (q->n - i - 1) * sizeof(int32_t));
-			q->n--;
-			return 1;
-		}
-	return 0;
-}
-
-static int wq_has(waitq *q, int32_t id) {
-	for (int i = 0; i < q->n; i++)
-		if (q->ids[i] == id) return 1;
-	return 0;
-}
-
-typedef struct {
-	int32_t owner; // thread id, 0: free
-	int depth;
-	waitq w;
-} hx_mutex;
-
-typedef struct {
-	waitq w;
-} hx_cond;
-
-typedef struct {
-	int32_t count;
-	waitq w;
-} hx_sem;
-
-static void free_mutex(void *p) {
-	free(((hx_mutex *)p)->w.ids);
-	free(p);
-}
-
-static void free_cond(void *p) {
-	free(((hx_cond *)p)->w.ids);
-	free(p);
-}
-
-static void free_sem(void *p) {
-	free(((hx_sem *)p)->w.ids);
-	free(p);
-}
-
-void *hxmc_NativeThread_mutexNew(void) { return rt_native_new(calloc(1, sizeof(hx_mutex)), free_mutex); }
-
-static void mutex_take(hx_mutex *m, int depth) {
-	int32_t me = hxmc_NativeThread_current();
-	if (m->owner == 0) {
-		m->owner = me;
-		m->depth = depth;
-		return;
-	}
-	wq_push(&m->w, me);
-	while (m->owner != me) hxmc_NativeThread_park(-1); // a release hands it over
-	m->depth = depth;
-}
-
-void hxmc_NativeThread_mutexAcquire(void *mo) {
-	hx_mutex *m = (hx_mutex *)FP(mo, 0);
-	if (m->owner == hxmc_NativeThread_current()) {
-		m->depth++;
-		return;
-	}
-	RT_ROOT(mo); // the handle stays alive while this thread waits
-	mutex_take(m, 1);
-	RT_UNROOT(1);
-}
-
-int32_t hxmc_NativeThread_mutexTryAcquire(void *mo) {
-	hx_mutex *m = (hx_mutex *)FP(mo, 0);
-	int32_t me = hxmc_NativeThread_current();
-	if (m->owner == 0) {
-		m->owner = me;
-		m->depth = 1;
-		return 1;
-	}
-	if (m->owner == me) {
-		m->depth++;
-		return 1;
-	}
-	return 0;
-}
-
-static void mutex_give(hx_mutex *m) {
-	if (m->w.n > 0) {
-		m->owner = wq_shift(&m->w);
-		hxmc_NativeThread_unpark(m->owner);
-	} else
-		m->owner = 0;
-}
-
-void hxmc_NativeThread_mutexRelease(void *mo) {
-	hx_mutex *m = (hx_mutex *)FP(mo, 0);
-	if (m->owner != hxmc_NativeThread_current()) return;
-	if (--m->depth > 0) return;
-	mutex_give(m);
-}
-
-void *hxmc_NativeThread_condNew(void) { return rt_native_new(calloc(1, sizeof(hx_cond)), free_cond); }
-
-// waits for a signal (1) or until timeout seconds pass (0; < 0: no timeout);
-// the calling thread holds mutex m, which is released meanwhile (fully) and
-// taken back at the same depth
-int32_t hxmc_NativeThread_condWait(void *co, void *mo, double timeout) {
-	hx_cond *c = (hx_cond *)FP(co, 0);
-	hx_mutex *m = (hx_mutex *)FP(mo, 0);
-	int32_t me = hxmc_NativeThread_current();
-	if (m->owner != me) hx_throw_str("Condition.wait: the mutex is not held");
-	RT_ROOT(co);
-	RT_ROOT(mo);
-	int depth = m->depth;
-	wq_push(&c->w, me);
-	mutex_give(m);
-	double deadline = timeout < 0 ? -1 : now_secs() + timeout;
-	int signaled;
-	for (;;) {
-		if (!wq_has(&c->w, me)) {
-			signaled = 1;
-			break;
-		}
-		double left = deadline < 0 ? -1 : deadline - now_secs();
-		if (deadline >= 0 && left <= 0) {
-			signaled = !wq_remove(&c->w, me);
-			break;
-		}
-		hxmc_NativeThread_park(left);
-	}
-	mutex_take(m, depth);
-	RT_UNROOT(2);
-	return signaled;
-}
-
-void hxmc_NativeThread_condSignal(void *co) {
-	hx_cond *c = (hx_cond *)FP(co, 0);
-	if (c->w.n > 0) hxmc_NativeThread_unpark(wq_shift(&c->w));
-}
-
-void hxmc_NativeThread_condBroadcast(void *co) {
-	hx_cond *c = (hx_cond *)FP(co, 0);
-	while (c->w.n > 0) hxmc_NativeThread_unpark(wq_shift(&c->w));
-}
-
-void *hxmc_NativeThread_semNew(int32_t value) {
-	hx_sem *s = (hx_sem *)calloc(1, sizeof(hx_sem));
-	s->count = value;
-	return rt_native_new(s, free_sem);
-}
-
-// takes a unit (1), or times out (0) after timeout seconds (0: just try; < 0:
-// no timeout). A release with waiters hands its unit to the longest waiting.
-int32_t hxmc_NativeThread_semAcquire(void *so, double timeout) {
-	hx_sem *s = (hx_sem *)FP(so, 0);
-	if (s->count > 0) {
-		s->count--;
-		return 1;
-	}
-	if (timeout == 0) return 0;
-	RT_ROOT(so);
-	int32_t me = hxmc_NativeThread_current();
-	double deadline = timeout < 0 ? -1 : now_secs() + timeout;
-	wq_push(&s->w, me);
-	int r;
-	for (;;) {
-		if (!wq_has(&s->w, me)) {
-			r = 1;
-			break;
-		}
-		double left = deadline < 0 ? -1 : deadline - now_secs();
-		if (deadline >= 0 && left <= 0) {
-			r = !wq_remove(&s->w, me);
-			break;
-		}
-		hxmc_NativeThread_park(left);
-	}
-	RT_UNROOT(1);
-	return r;
-}
-
-void hxmc_NativeThread_semRelease(void *so) {
-	hx_sem *s = (hx_sem *)FP(so, 0);
-	if (s->w.n > 0) hxmc_NativeThread_unpark(wq_shift(&s->w));
-	else s->count++;
-}
-
-#endif // !RT_MT
 
 // ---- thread-local values (sys.thread.Tls): per thread, a K_PARR object
 // indexed by Tls id (a root of the thread record)
 static int32_t tls_next;
 
 int32_t hxmc_NativeThread_tlsNew(void) {
-#if RT_MT
 	return __atomic_fetch_add(&tls_next, 1, __ATOMIC_RELAXED);
-#else
-	return tls_next++;
-#endif
 }
 
 static void *tls_get(void **tls, int32_t id) {
@@ -324,41 +90,8 @@ static void tls_set(void **tls, int32_t id, void *v) {
 
 // (the haxe.atomic cells, hxmc.NativeAtomic: hxmc/std/hxmc/rt/Atomics.hx)
 
-#ifdef __EMSCRIPTEN__
-
-static rt_mutator main_mut;
-static void *main_tls;
-void rt_threads_init(void) { rt_mutator_bind(&main_mut); }
-void rt_mutators_foreach(void (*f)(rt_mutator *, void *), void *arg) { f(&main_mut, arg); }
-void rt_threads_scan(void *(*fwd)(void *)) {
-	if (main_tls) main_tls = fwd(main_tls);
-}
-void *hxmc_NativeThread_tlsGet(int32_t id) { return tls_get(&main_tls, id); }
-void hxmc_NativeThread_tlsSet(int32_t id, void *v) { tls_set(&main_tls, id, v); }
-int rt_wait_fd(int fd, int write, double timeout) { return 1; }
-int rt_wait_fds(void *pollfds, int n, double timeout) { return 1; }
-void rt_sleep(double seconds) { sleep_secs(seconds); }
-void rt_preempt(void) {}
-void rt_fd_closed(int fd) { (void)fd; }
-int32_t hxmc_NativeThread_spawn(void *job) { hx_throw_str("threads are not supported in this build of haxe-in-haxe"); }
-int32_t hxmc_NativeThread_current(void) { return 1; }
-int32_t hxmc_NativeThread_count(void) { return 1; }
-int32_t hxmc_NativeThread_park(double timeout) {
-	if (timeout < 0) hx_throw_str("this wait would block forever (threads are not supported in this build)");
-	sleep_secs(timeout);
-	return 0;
-}
-void hxmc_NativeThread_unpark(int32_t id) { (void)id; }
-void hxmc_NativeThread_yield(void) {}
-int32_t hxmc_NativeThread_parallel(void) { return 0; }
-void rt_run_main(void (*body)(void)) { body(); }
-
-#else
 
 #ifdef _WIN32
-#if RT_GREEN
-#error "green threads (tcc, RT_GREEN_THREADS) are not supported on Windows"
-#endif
 // Windows: the subset of pthreads used below over slim reader/writer locks,
 // condition variables and CreateThread; poll is WSAPoll (sockets only); the
 // stacks are reservations (rt_win.h)
@@ -404,9 +137,6 @@ void rt_win_unlock(rt_lock_t *l) { ReleaseSRWLockExclusive((SRWLOCK *)l); }
 #include <ucontext.h>
 #include <unistd.h>
 #endif
-#ifdef __COSMOPOLITAN__
-#include <cosmo.h> // IsWindows
-#endif
 
 #define CSTACK_BYTES ((size_t)64 << 20) // reserved, committed as touched
 #define SSTACK_BYTES ((size_t)64 << 20) // shadow stack (the main thread's is 1 GB, rt.c)
@@ -416,413 +146,6 @@ static void *map_stack(size_t bytes) {
 	return p == MAP_FAILED ? NULL : p;
 }
 
-#if RT_GREEN
-
-// ======== green threads (M:1)
-
-enum { TS_RUNNING, TS_RUNNABLE, TS_PARKED, TS_DONE };
-
-typedef struct rt_thread {
-	int32_t id;
-	int state;
-	int woken; // result of a park: 1 unparked or descriptor ready, 0 timeout
-	int unparkable; // parked in hxmc_NativeThread_park (not sleeping or waiting for a descriptor)
-	int permit; // unparked while not parked: the next park returns at once
-	ucontext_t ctx;
-	char *cstack; // NULL for the main thread (its stack is rt_run_main's)
-	void **sbase, **sp, **hw; // shadow stack (saved while not running; hw: rt_sp_hw)
-	rt_handler *hcur;
-	void *exn;
-	void *job; // the entry closure until the thread starts (a GC root)
-	void *tls; // Tls values (a GC root)
-	double deadline; // parked: wake at this time (now_secs), < 0: no deadline
-	struct pollfd *fds; // parked on descriptors (on the thread's C stack)
-	int nfds;
-	struct rt_thread *next; // run queue
-	struct rt_thread *all_next, *all_prev; // live threads
-} rt_thread;
-
-static rt_thread main_thread;
-static rt_thread *cur; // NULL until the first thread operation
-static rt_thread *runq_head, *runq_tail;
-static rt_thread *all_threads;
-static rt_thread **by_id;
-static int32_t by_id_cap, next_id = 2;
-static rt_thread *zombies; // finished threads whose stacks are freed after switching away
-static size_t page_size;
-static rt_mutator main_mut; // the one mutator: green threads swap the globals it points at
-
-void rt_threads_init(void) { rt_mutator_bind(&main_mut); }
-void rt_mutators_foreach(void (*f)(rt_mutator *, void *), void *arg) { f(&main_mut, arg); }
-int32_t hxmc_NativeThread_parallel(void) { return 0; }
-
-// per descriptor: incremented by rt_fd_closed, so a thread woken after its
-// descriptor was closed (and the number maybe reused) does not touch it
-static uint32_t *fd_gens;
-static int fd_gens_cap;
-
-static uint32_t fd_gen(int fd) { return fd >= 0 && fd < fd_gens_cap ? fd_gens[fd] : 0; }
-
-static void ensure_init(void) {
-	if (cur) return;
-	page_size = (size_t)sysconf(_SC_PAGESIZE);
-	main_thread.id = 1;
-	main_thread.state = TS_RUNNING;
-	main_thread.deadline = -1;
-	all_threads = &main_thread;
-	by_id_cap = 64;
-	by_id = (rt_thread **)calloc(by_id_cap, sizeof(rt_thread *));
-	by_id[1] = &main_thread;
-	cur = &main_thread;
-}
-
-static void enqueue(rt_thread *t) {
-	t->state = TS_RUNNABLE;
-	t->next = NULL;
-	if (runq_tail) runq_tail->next = t;
-	else runq_head = t;
-	runq_tail = t;
-}
-
-static void wake(rt_thread *t, int woken) {
-	t->woken = woken;
-	enqueue(t);
-}
-
-void rt_fd_closed(int fd) {
-	if (fd < 0 || cur == NULL) return; // no thread was ever created: nobody waits
-	if (fd >= fd_gens_cap) {
-		int n = fd_gens_cap ? fd_gens_cap : 256;
-		while (n <= fd) n *= 2;
-		fd_gens = (uint32_t *)realloc(fd_gens, n * sizeof(uint32_t));
-		memset(fd_gens + fd_gens_cap, 0, (n - fd_gens_cap) * sizeof(uint32_t));
-		fd_gens_cap = n;
-	}
-	fd_gens[fd]++;
-	// threads parked on it wake now (their poll would watch whatever reuses the number)
-	for (rt_thread *t = all_threads; t; t = t->all_next)
-		if (t->state == TS_PARKED)
-			for (int i = 0; i < t->nfds; i++)
-				if (t->fds[i].fd == fd) {
-					t->fds[i].revents = POLLNVAL;
-					wake(t, 1);
-					break;
-				}
-}
-
-void rt_threads_scan(void *(*fwd)(void *)) {
-	if (!cur) {
-		if (main_thread.tls) main_thread.tls = fwd(main_thread.tls);
-		return;
-	}
-	for (rt_thread *t = all_threads; t; t = t->all_next) {
-		if (t->job) t->job = fwd(t->job);
-		if (t->tls) t->tls = fwd(t->tls);
-		if (t == cur) continue; // its stack and rt_exn are the globals rt.c scans
-		for (void **s = t->sbase; s < t->sp; s++)
-			if (*s) *s = fwd(*s);
-		rt_zero_above(t->sp, &t->hw);
-		if (t->exn) t->exn = fwd(t->exn);
-	}
-}
-
-static rt_thread *cur_or_main(void) { return cur ? cur : &main_thread; }
-void *hxmc_NativeThread_tlsGet(int32_t id) { return tls_get(&cur_or_main()->tls, id); }
-void hxmc_NativeThread_tlsSet(int32_t id, void *v) {
-	rt_thread *t = cur_or_main(); // the running thread: it cannot end while this runs
-	tls_set(&t->tls, id, v);
-}
-
-static void reap(void) {
-	rt_thread **p = &zombies;
-	while (*p) {
-		rt_thread *z = *p;
-		if (z == cur) {
-			p = &z->next;
-			continue;
-		}
-		*p = z->next;
-		munmap(z->cstack, CSTACK_BYTES);
-		munmap(z->sbase, SSTACK_BYTES);
-		free(z);
-	}
-}
-
-// Waits for the descriptors and timers of parked threads, waking those whose
-// event came. block: wait until at least one thread wakes (else just look).
-// Returns 0 when no parked thread can ever be woken by an event.
-static struct pollfd *poll_buf;
-static int poll_cap;
-
-static int wait_events(int block) {
-	int nf = 0, any = 0;
-	double nearest = -1;
-	for (rt_thread *t = all_threads; t; t = t->all_next) {
-		if (t->state != TS_PARKED) continue;
-		if (t->nfds) {
-			any = 1;
-			nf += t->nfds;
-		}
-		if (t->deadline >= 0) {
-			any = 1;
-			if (nearest < 0 || t->deadline < nearest) nearest = t->deadline;
-		}
-	}
-	if (!any) return 0;
-	double now = nearest >= 0 ? now_secs() : 0;
-	if (nf > 0) {
-		if (nf > poll_cap) {
-			poll_cap = nf * 2;
-			poll_buf = (struct pollfd *)realloc(poll_buf, poll_cap * sizeof(struct pollfd));
-		}
-		int k = 0;
-		for (rt_thread *t = all_threads; t; t = t->all_next)
-			if (t->state == TS_PARKED)
-				for (int i = 0; i < t->nfds; i++) {
-					poll_buf[k] = t->fds[i];
-					poll_buf[k++].revents = 0;
-				}
-		int ms = 0;
-		if (block) {
-			if (nearest < 0) ms = -1;
-			else if (nearest > now) {
-				double d = (nearest - now) * 1000.0 + 0.999;
-				ms = d > 2e9 ? 2000000000 : (int)d;
-			}
-		}
-		int r = poll(poll_buf, nf, ms);
-		if (r < 0) r = 0; // EINTR: look again
-		if (nearest >= 0) now = now_secs();
-		k = 0;
-		for (rt_thread *t = all_threads; t; t = t->all_next) {
-			if (t->state != TS_PARKED || !t->nfds) continue;
-			int ready = 0;
-			for (int i = 0; i < t->nfds; i++, k++) {
-				t->fds[i].revents = poll_buf[k].revents;
-				if (poll_buf[k].revents) ready = 1;
-			}
-			if (ready) wake(t, 1);
-		}
-	} else if (block && nearest > now) {
-		sleep_secs(nearest - now);
-		now = now_secs();
-	}
-	if (nearest >= 0)
-		for (rt_thread *t = all_threads; t; t = t->all_next)
-			if (t->state == TS_PARKED && t->deadline >= 0 && now >= t->deadline) wake(t, 0);
-	return 1;
-}
-
-// The running thread has given way (it is parked, runnable again or done):
-// run the next runnable thread. Returns when the calling thread is resumed.
-static void schedule(void) {
-	rt_thread *prev = cur;
-	wait_events(0);
-	while (!runq_head) {
-		if (!wait_events(1)) {
-			fflush(stdout);
-			fputs("fatal: deadlock, every thread is blocked forever\n", stderr);
-			exit(1);
-		}
-	}
-	rt_thread *next = runq_head;
-	runq_head = next->next;
-	if (!runq_head) runq_tail = NULL;
-	next->state = TS_RUNNING;
-	if (next == prev) return;
-	prev->sp = rt_sp;
-	prev->hw = rt_sp_hw;
-	prev->sbase = rt_stack_base;
-	prev->hcur = rt_hcur;
-	prev->exn = rt_exn;
-	rt_sp = next->sp;
-	rt_sp_hw = next->hw;
-	rt_stack_base = next->sbase;
-	rt_hcur = next->hcur;
-	rt_exn = next->exn;
-	cur = next;
-	swapcontext(&prev->ctx, &next->ctx);
-	reap();
-}
-
-static void thread_exit(void) {
-	rt_thread *t = cur;
-	t->state = TS_DONE;
-	if (t->all_prev) t->all_prev->all_next = t->all_next;
-	else all_threads = t->all_next;
-	if (t->all_next) t->all_next->all_prev = t->all_prev;
-	by_id[t->id] = NULL;
-	rt_nthreads--;
-	t->tls = NULL;
-	t->next = zombies;
-	zombies = t;
-	schedule();
-	abort(); // not reached: a finished thread is never resumed
-}
-
-static void thread_main(void) {
-	reap();
-	rt_thread *t = cur;
-	void **job = rt_push(1);
-	*job = t->job;
-	t->job = NULL;
-	RT_TRY(h)
-		hx_dyn_call(*job, NULL);
-	RT_CATCH(h)
-		// the hxmc sys.thread.Thread catches everything: only a raw spawn gets here
-		void *e = rt_exn;
-		rt_exn = 0;
-		char *s = hx_str_to_utf8(hx_std_string(e));
-		fflush(stdout);
-		fprintf(stderr, "Uncaught exception in thread %d: %s\n", (int)t->id, s);
-		free(s);
-	RT_END_TRY(h)
-	thread_exit();
-}
-
-int32_t hxmc_NativeThread_spawn(void *job) {
-	ensure_init();
-	rt_thread *t = (rt_thread *)calloc(1, sizeof(rt_thread));
-	if (t) {
-		t->cstack = (char *)map_stack(CSTACK_BYTES);
-		t->sbase = (void **)map_stack(SSTACK_BYTES);
-	}
-	if (!t || !t->cstack || !t->sbase) {
-		if (t && t->cstack) munmap(t->cstack, CSTACK_BYTES);
-		if (t && t->sbase) munmap(t->sbase, SSTACK_BYTES);
-		free(t);
-		hx_throw_str("cannot allocate the stacks of a new thread");
-	}
-	mprotect(t->cstack, page_size, PROT_NONE); // guard page: overflow faults
-	t->sp = t->hw = t->sbase;
-	t->deadline = -1;
-	t->job = job;
-	getcontext(&t->ctx);
-	t->ctx.uc_stack.ss_sp = t->cstack;
-	t->ctx.uc_stack.ss_size = CSTACK_BYTES;
-	t->ctx.uc_link = NULL;
-	makecontext(&t->ctx, thread_main, 0);
-	t->id = next_id++;
-	if (t->id >= by_id_cap) {
-		int32_t n = by_id_cap * 2;
-		while (n <= t->id) n *= 2;
-		by_id = (rt_thread **)realloc(by_id, n * sizeof(rt_thread *));
-		memset(by_id + by_id_cap, 0, (n - by_id_cap) * sizeof(rt_thread *));
-		by_id_cap = n;
-	}
-	by_id[t->id] = t;
-	t->all_next = all_threads;
-	all_threads->all_prev = t;
-	all_threads = t;
-	rt_nthreads++;
-	enqueue(t);
-	if (rt_spawn_hook) rt_spawn_hook();
-	return t->id;
-}
-
-int32_t hxmc_NativeThread_current(void) { return cur ? cur->id : 1; }
-
-int32_t hxmc_NativeThread_count(void) { return rt_nthreads; }
-
-// blocks until unparked (1) or timeout seconds pass (0); timeout < 0: no timeout
-int32_t hxmc_NativeThread_park(double timeout) {
-	ensure_init();
-	rt_thread *t = cur;
-	if (t->permit) {
-		t->permit = 0;
-		return 1;
-	}
-	t->deadline = timeout < 0 ? -1 : now_secs() + timeout;
-	t->woken = 0;
-	t->unparkable = 1;
-	t->state = TS_PARKED;
-	schedule();
-	t->unparkable = 0;
-	t->deadline = -1;
-	return t->woken;
-}
-
-// wakes thread id if it is parked in hxmc_NativeThread_park; else its next park
-// returns at once (a thread can be switched out at an allocation between
-// queueing itself and parking). A park may thus return early: the waits check
-// their state again after each park.
-void hxmc_NativeThread_unpark(int32_t id) {
-	if (!cur || id <= 0 || id >= by_id_cap) return;
-	rt_thread *t = by_id[id];
-	if (!t) return;
-	if (t->state == TS_PARKED && t->unparkable) wake(t, 1);
-	else t->permit = 1;
-}
-
-void hxmc_NativeThread_yield(void) {
-	if (rt_nthreads <= 1) return;
-	enqueue(cur);
-	schedule();
-}
-
-// called by rt_alloc_slow (each minor collection) while several threads
-// exist: a thread that computes without blocking (e.g. spinning on an atomic)
-// does not starve the others
-void rt_preempt(void) {
-	if (!cur) return;
-	wait_events(0);
-	if (!runq_head) return;
-	enqueue(cur);
-	schedule();
-}
-
-void rt_sleep(double seconds) {
-	if (rt_nthreads <= 1) {
-		sleep_secs(seconds);
-		return;
-	}
-	if (seconds <= 0) {
-		hxmc_NativeThread_yield();
-		return;
-	}
-	rt_thread *t = cur;
-	t->deadline = now_secs() + seconds;
-	t->state = TS_PARKED;
-	schedule();
-	t->deadline = -1;
-}
-
-int rt_wait_fds(void *pollfds, int n, double timeout) {
-	struct pollfd *fds = (struct pollfd *)pollfds;
-	for (int i = 0; i < n; i++) fds[i].revents = 0;
-	int r = poll(fds, n, 0);
-	if (r != 0 || timeout == 0 || rt_nthreads <= 1 || cur == NULL) {
-		if (r == 0 && timeout != 0) { // the only thread: just block
-			int ms = timeout < 0 ? -1 : (int)(timeout * 1000.0 + 0.999);
-			r = poll(fds, n, ms);
-		}
-		return r != 0; // a poll failure: let the caller's own call report it
-	}
-	rt_thread *t = cur;
-	uint32_t gens_buf[8];
-	uint32_t *gens = n <= 8 ? gens_buf : (uint32_t *)malloc(n * sizeof(uint32_t));
-	for (int i = 0; i < n; i++) gens[i] = fd_gen(fds[i].fd);
-	t->fds = fds;
-	t->nfds = n;
-	t->deadline = timeout < 0 ? -1 : now_secs() + timeout;
-	t->woken = 0;
-	t->state = TS_PARKED;
-	schedule();
-	t->fds = NULL;
-	t->nfds = 0;
-	t->deadline = -1;
-	int closed = 0;
-	for (int i = 0; i < n; i++)
-		if (fd_gen(fds[i].fd) != gens[i]) closed = 1;
-	if (gens != gens_buf) free(gens);
-	if (closed) {
-		errno = EBADF;
-		return -1;
-	}
-	return t->woken;
-}
-
-#else // RT_MT
 
 // ======== OS threads (1:1)
 
@@ -1235,7 +558,7 @@ void rt_sleep(double seconds) {
 
 // per descriptor (below FD_GENS): incremented by rt_fd_closed; a thread
 // waiting for a descriptor looks at it every POLL_SLICE seconds, so a close
-// by another thread makes its wait fail (EBADF), as with green threads
+// by another thread makes its wait fail (EBADF)
 #define FD_GENS 4096
 #define POLL_SLICE 0.1
 static uint32_t fd_gens[FD_GENS];
@@ -1437,7 +760,6 @@ void hxmc_NativeThread_semRelease(void *so) {
 	RT_UNROOT(1);
 }
 
-#endif // RT_MT
 
 int rt_wait_fd(int fd, int write, double timeout) {
 	struct pollfd p;
@@ -1516,9 +838,6 @@ static void run_main_entry(void) { run_main_body(); }
 void rt_run_main(void (*body)(void)) {
 	const char *e = getenv("RT_STACK_MB");
 	int mb = 1024;
-#ifdef __COSMOPOLITAN__
-	if (IsWindows()) mb = 256; // Windows commits what is mapped
-#endif
 	size_t bytes = (size_t)(e ? atoi(e) : mb) << 20;
 #ifdef _WIN32
 	void *fiber = NULL;
@@ -1553,4 +872,3 @@ void rt_run_main(void (*body)(void)) {
 #endif
 }
 
-#endif
