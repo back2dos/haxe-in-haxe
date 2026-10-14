@@ -721,6 +721,12 @@ class MirBuild {
 			popFrame();
 			if (f.ret == Void) ret(-1) else ret(f.ret == F64 ? fconst(0) : f.ret == I64 ? lconst(0, 0) : iconst(0));
 		}
+		if (retBlock != null) {
+			seal(retBlock);
+			cur = retBlock;
+			popFrame();
+			ret(f.ret == Void ? -1 : readVar(retVar, cur));
+		}
 		for (b in f.blocks)
 			if (!b.sealed) seal(b);
 		prune();
@@ -783,6 +789,25 @@ class MirBuild {
 		jmp(done);
 		seal(done);
 		cur = done;
+	}
+
+	// a function with a frame returns through one block (one pop of the
+	// frame, one epilogue)
+	var retBlock:Null<MBlock> = null;
+	var retVar = -1;
+
+	function retFrom(v:Int) {
+		if (nslots == 0) {
+			ret(v);
+			return;
+		}
+		if (retBlock == null) {
+			retBlock = newBlock();
+			retBlock.cold = false;
+			if (f.ret != Void) retVar = newVar(f.ret);
+		}
+		if (v >= 0) writeVar(retVar, cur, v);
+		jmp(retBlock);
 	}
 
 	function popFrame() {
@@ -966,13 +991,11 @@ class MirBuild {
 				if (join.preds.length == 0) add(mk(Unreachable, Void));
 			case SReturn(null):
 				unwindTo(0);
-				popFrame();
-				ret(-1);
+				retFrom(-1);
 			case SReturn(e):
 				var v = ex(e);
 				unwindTo(0);
-				popFrame();
-				ret(v);
+				retFrom(v);
 			case SThrow(e):
 				var v = ex(e);
 				call("rt_throw", [v], Void, true);
