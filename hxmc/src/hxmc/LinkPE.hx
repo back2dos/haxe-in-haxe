@@ -138,7 +138,7 @@ class LinkPE {
 			retEntry.buf.u32(42);
 			retEntry.buf.u8(0xc3);
 		}
-		extra.sections.push(retEntry);
+		if (diag("ret42")) extra.sections.push(retEntry);
 		var listHead = new Map<String, Section>();
 		for (l in ["ctor", "dtor"]) {
 			var head = new Section(".data$hxmc_" + l + "0", Data, 8);

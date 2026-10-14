@@ -12,12 +12,14 @@ compiled ahead of time per target into one relocatable object
 (`tools/mkrt.sh`).
 
 Status: development. Every function of the port and of the test corpus
-compiles natively on x86-64 Linux (static ELF, own linker, musl), arm64
-Linux and x86-64 Windows (PE); the port built by hxmc compiles itself to
-byte-identical HXB. Run time is near clang -O2 on hxc's C, executables
-are about 10% larger than clang -O2's dynamic ones (static, runtime
-included). Stack maps, deeper incremental rebuilds, macOS, Windows arm64,
-the haxelib, APE builds and C interop are deferred (see "Status").
+compiles natively for the six desktop targets: x86-64 and arm64 Linux
+(static ELF, own linker, musl), x86-64 and arm64 Windows (PE, imports
+written directly) and x86-64 and arm64 macOS (Mach-O against libSystem,
+ad-hoc signed); the port built by hxmc compiles itself to byte-identical
+HXB (see "Targets" for how each is checked). Run time is near clang -O2 on
+hxc's C, executables are about 10% larger than clang -O2's dynamic ones
+(static, runtime included). Stack maps, deeper incremental rebuilds, the
+haxelib, APE builds and C interop are deferred (see "Status").
 
 ## Design
 
@@ -25,7 +27,7 @@ the haxelib, APE builds and C interop are deferred (see "Status").
 HXB --(port: --hxb-lib)--> typed AST --(backend.Lower)--> hxc IR --(Prep: EmitC's preparation)
     --(MirBuild)--> Mir (SSA) --(Opt)--> --(x64|a64/Isel)--> LIR --(Regalloc)--> --(Emit, Asm)--> Obj (per module, cached)
     --(DataGen: tables, strings)--> Obj
-    --(Link: ELF | LinkPE: PE, with the runtime object)--> executable
+    --(Link: ELF | LinkPE: PE | LinkMachO: Mach-O, with the runtime object)--> executable
 ```
 
 | File | |
@@ -38,9 +40,9 @@ HXB --(port: --hxb-lib)--> typed AST --(backend.Lower)--> hxc IR --(Prep: EmitC'
 | `src/hxmc/Opt.hx`, `Inline.hx` | machine-independent optimizations: inlining of small functions, global value numbering over the dominator tree (loads by memory class and version), store forwarding, loop-invariant code motion, branches decided by dominating branches, dead code |
 | `src/hxmc/Lir.hx`, `Regalloc.hx` | target instructions over virtual registers; linear-scan allocation with lifetime holes, spill weights by loop depth, fixed ranges for physical registers, caller-saved registers kept across slow-path calls (saved around them) |
 | `src/hxmc/x64/`, `src/hxmc/a64/` | x86-64 and AArch64: instruction selection (System V, Win64, AAPCS64), encoders (checked against llvm-mc), emission (frames, jump tables, constant pools) |
-| `src/hxmc/Obj.hx`, `ElfWriter.hx`, `ElfReader.hx`, `CoffReader.hx` | relocatable objects in memory, ELF/COFF input and output |
+| `src/hxmc/Obj.hx`, `ElfWriter.hx`, `ElfReader.hx`, `CoffReader.hx`, `MachOReader.hx` | relocatable objects in memory, ELF output, ELF/COFF/Mach-O input |
 | `src/hxmc/DataGen.hx` | the program's data: type tables, dispatch rows, strings, globals, and the absolute symbols of program-wide numbers |
-| `src/hxmc/Link.hx`, `LinkPE.hx`, `MkRt.hx` | the linkers (static ELF; PE with import tables written directly, TLS directory, .pdata) and the runtime-object builder (COFF member selection, COMDAT, imports) |
+| `src/hxmc/Link.hx`, `LinkPE.hx`, `LinkMachO.hx`, `A64Reloc.hx`, `MkRt.hx` | the linkers (static ELF; PE with import tables written directly, TLS directory, .pdata, base relocations on arm64; Mach-O with dyld's rebase/bind opcodes, stubs, TLV descriptors and an ad-hoc code signature) and the runtime-object builder (COFF member selection, COMDAT, imports; Mach-O objects merged) |
 | `src/hxmc/Target.hx`, `Abi.hx` | per-target facts and the code-generator factory |
 | `src/hxmc/CWriter.hx` | development builds: the C of what hxmc does not generate (none left) |
 
@@ -56,7 +58,13 @@ Conventions shared with hxc:
   so a handler sees its latest value after the second return of setjmp.
 - Calls follow the C ABI of the target; generated functions use it too.
 - Thread-local runtime state (`rt_sp`, `rt_young_ptr`, ...) is reached with
-  the local-exec TLS model on Linux, `_tls_index` + section offsets on Windows.
+  the local-exec TLS model on Linux, `_tls_index` + section offsets on
+  Windows (gs:[0x58] on x86-64, x18 + 0x58 on arm64), and on macOS at its
+  offset in the image's TLV template from the thread's copy of it
+  (`hxmc_tls_base` in the runtime, through a descriptor of offset 0 the
+  linker defines); the base is computed once per function.
+- Symbols are the C names everywhere; Mach-O's leading underscore is
+  dropped when the runtime's objects are read and added back for libSystem.
 - Program-wide numbers (type indices, field ids, signatures, global
   offsets, type spans) are absolute symbols (`TY_`, `FID_`, `SIG_`,
   `GIOFF_`, `TYSPAN_`) defined by DataGen and resolved by the linker, so a
@@ -75,9 +83,9 @@ Kept open on purpose (where):
   addresses, so only the linker depends on the model (it refuses PIC
   output explicitly until it writes GOT/PLT, dynamic relocations and
   `DT_NEEDED`/`LC_LOAD_DYLIB`).
-- TLS model: `Abi.tls` (`LocalExec` now; `InitialExec`, `Desc` (TLSDESC),
-  `MachoTlv`, `WinTlsIndex`); instruction selection fails explicitly on a
-  model it does not implement.
+- TLS model: `Abi.tls` (`LocalExec`, `WinTlsIndex`, `MachoTlv` implemented;
+  `InitialExec`, `Desc` (TLSDESC) not yet); instruction selection fails
+  explicitly on a model it does not implement.
 - Segment alignment: `Abi.segAlign` (4K x86-64, 64K arm64 Linux, 16K Apple
   arm64), `-D hxmc.seg-align=16384` (Android 15+).
 - Platform variants: `Abi.libc` (musl, glibc, bionic, ucrt, libsystem) and
@@ -99,10 +107,12 @@ Kept open on purpose (where):
 ```sh
 make hxmc-dev                     # bin/hxmc/hxmc: the tool by the native hxc tool and tcc (seconds)
 make hxmc-fast                    # bin/hxmc-fast/hxmc: the same C by clang -O2 (the speed users get)
-sh hxmc/tools/mkrt.sh linux-x86_64   # bin/hxmc/rt/<target>/rt.o: the runtime object (zig cc -O2, musl), once per target
+sh hxmc/tools/mkrt.sh linux-x86_64   # bin/hxmc/rt/<target>/rt.o: the runtime object (zig cc -O2), once per target (any of the six)
 python3 hxmc/tools/run.py --fuzz bin/hxmc-fuzz   # corpus + fuzz programs: hxc vs hxmc output (byte comparison), % native
 python3 hxmc/tools/run.py --target linux-arm64 --fuzz bin/hxmc-fuzz     # under qemu-aarch64-static
 python3 hxmc/tools/run.py --target windows-x86_64 --fuzz bin/hxmc-fuzz  # under wine64
+python3 hxmc/tools/run.py --target macos-arm64 --fuzz bin/hxmc-fuzz --stage <dir>  # cross: build only (any target)
+python3 hxmc/tools/check.py <dir>  # on the target's machine: run the staged programs, compare outputs
 python3 hxmc/tools/enctest.py --arch x64|a64   # encoders against llvm-mc
 sh hxmc/tools/hxmc.sh <case>      # rerun hxmc on a corpus case (HXMC_DUMP=<function> prints its Mir)
 python3 hxmc/bench/measure.py -v tcc,O2,hxmcs   # run time and size against hxc's C (tcc, clang -O2)
@@ -126,6 +136,66 @@ SMALL=1 sh hxmc/tools/portcheck.sh  # the port built by hxmc self-compiles to th
 - Hybrid development builds (`HXMC_HYBRID=1`) write C for what hxmc does not
   compile and link with the system's compiler; `HXMC_ONLY`/`HXMC_SKIP`
   select the functions compiled natively (bisecting).
+- Windows: `HXMC_MAP=<file>` writes the address of every symbol (PE files
+  get no symbol table); a crash prints its exception and image offset
+  (`rthxmc.c`, installed by a TLS callback; `HXMC_TRACE=1` also says the
+  image started); `HXMC_PE_DIAG=<variant,...>` writes loader-bisecting
+  variants (`lowbase`, `fixed`, `nopdata`, `bssdata`, `notls`, `ret42`).
+
+## Targets
+
+Every target is cross-built on Linux: the tool, the runtime object of the
+target (`hxmc/tools/mkrt.sh <target>`, zig cc) and the programs; no C
+compiler, assembler, linker or SDK is involved when a program is built.
+
+| target | output | runtime object | thread-locals | checked |
+| --- | --- | --- | --- | --- |
+| linux-x86_64 | static ELF (Link) | musl, partially linked (ld.lld -r) | local-exec | corpus and port here and on CI |
+| linux-arm64 | static ELF, 64K segments | musl | local-exec | corpus and port under qemu and on CI |
+| windows-x86_64 | PE32+ at 0x400000 (LinkPE) | UCRT/MinGW-w64 COFF members (MkRt) | gs:[0x58][_tls_index] | corpus and port under wine and on CI |
+| windows-arm64 | PE32+ at 0x140000000, base relocations | as x86-64, arm64 COFF | x18+0x58, [_tls_index] | CI (windows-11-arm) |
+| macos-x86_64 | Mach-O, PIE (LinkMachO) | Mach-O objects merged (MkRt.macho), libSystem bound | TLV template | CI (macos-15-intel) |
+| macos-arm64 | Mach-O, PIE, 16K pages, ad-hoc signed | as x86-64, arm64 | TLV template | CI (macos-15) |
+
+- Windows: imports are written from the import libraries' members (DLL and
+  name, `.hxmc.imports`), code imports through thunks; the C library's
+  constructors (`.ctors`, winpthreads') run from `__CTOR_LIST__`, the TLS
+  directory is MinGW's `_tls_used`. arm64 images must be relocatable and
+  load only above 4 GB (a lower preferred base is refused with "not a valid
+  Win32 application"), and the loader needs the import address table
+  8-byte aligned (else STATUS_INSTRUCTION_MISALIGNMENT). setjmp/longjmp are
+  MinGW's non-unwinding ones (`_setjmp(buf, NULL)`, `__mingw_setjmp`), so
+  generated code needs no unwind information (none is written: .pdata
+  covers the runtime only). Frames of a page or more probe each page.
+- macOS: classic dyld information (rebase and bind opcodes; chained fixups
+  are not needed for the minimum versions written, 11.0 arm64 / 10.15
+  x86-64), non-lazy binding of everything libSystem provides (the runtime's
+  undefined symbols and the C functions generated code calls; Mach-O names
+  are the C names with `_`), an export trie with `__mh_execute_header`,
+  LC_MAIN at the generated `main`, LC_UUID (a digest of the file),
+  `MH_HAS_TLV_DESCRIPTORS` (dyld sets up `__thread_vars` only with it), and
+  an ad-hoc, linker-signed code signature (CodeDirectory of SHA-256 hashes
+  of 4K pages, the executable segment flagged as the main binary), which
+  arm64 requires. Apple arm64 packs stack arguments by size (Isel). The
+  runtime object is not garbage-collected by section (Mach-O objects have
+  one `__text`; the whole runtime is linked).
+
+### CI
+
+`.github/workflows/hxmc.yml` runs on pushes to the hxmc branch: one Linux
+job builds the reference compiler (cached with build.yml's key), the
+native tool (cached by its sources), hxmc and the six runtime objects,
+writes the corpus' HXB and hxc's outputs (`run.py --stage`, 7 programs and
+60 fuzzer programs of seed 1000), cross-builds the corpus and the port for
+every target, and the reference's self-compile of the port in
+`/Users/runner/hih`. A job per target then runs the corpus on a machine of
+that target (`check.py`: ubuntu-24.04, ubuntu-24.04-arm, windows-2025,
+windows-11-arm, macos-15-intel, macos-15) and the port's self-compile
+(`selfcheck.py`): on macOS and Linux in the same directory, so the
+archives must be byte-identical; on Windows, whose absolute paths differ,
+identical once the root is replaced (`hxbcmp.py --roots`; the sources come
+from Linux, as a Windows checkout has CRLF line ends). Failures land in
+the job summary. Logs: `gh api repos/<owner>/<repo>/actions/jobs/<id>/logs`.
 
 ## Numbers (2026-10-14, one 4-core VM)
 
@@ -252,10 +322,16 @@ Done:
   with the musl runtime object; outputs identical to hxc's; the port
   self-compiles to byte-identical HXB (514 modules), also with a 256 KB
   nursery (`hxmc/tools/portcheck.sh`).
-- arm64 Linux: corpus passes under qemu; the arm64 port self-compiles to
-  identical HXB.
+- arm64 Linux: corpus passes under qemu and on arm64 hardware (CI); the
+  arm64 port self-compiles to identical HXB.
 - x86-64 Windows (PE, imports from kernel32/ws2_32/UCRT written directly):
-  corpus passes under wine.
+  corpus passes under wine and on Windows (CI); the port self-compiles to
+  the reference's HXB (roots normalized: Windows paths).
+- arm64 Windows (PE32+ for AArch64, base relocations): corpus passes and
+  the port self-compiles on windows-11-arm (CI).
+- x86-64 and arm64 macOS (Mach-O from hxmc's own linker, libSystem, ad-hoc
+  code signature): corpus passes and the port self-compiles to
+  byte-identical HXB on macos-15-intel and macos-15 (CI).
 - Optimizations: inlining, value numbering, store forwarding, LICM,
   dominating-branch folding, load folding, lifetime holes, scalars in try
   functions kept in memory only when a handler or what follows can see
@@ -277,8 +353,13 @@ Deferred:
   preparation, keys, data, link), not code generation.
 - Program-level dead code, data-table compaction and runtime member
   selection beyond section GC (size).
-- macOS (Mach-O + ad-hoc signature), Windows arm64, haxelib packaging, APE
-  (cosmopolitan) builds.
+- Haxelib packaging, APE (cosmopolitan) builds; iOS/Android (the hooks
+  above), chained fixups and a section-split runtime on macOS, unwind
+  information for generated code on Windows.
+- Thread-locals on macOS and Windows arm64 cost a call (macOS:
+  `hxmc_tls_base`, through the TLV thunk) or three loads per function using
+  them; an inline TLV thunk call and the 12-bit offset form when the TLS
+  area is small would trim that.
 - C interop design (calling C libraries from generated code beyond the
   runtime's own functions); mbedtls/libuv in the runtime objects (built
   with `HXC_NO_SSL`/`HXC_NO_UV`).

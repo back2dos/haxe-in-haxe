@@ -145,18 +145,6 @@ jobs:
             python3 hxmc/tools/run.py -v --target $t --fuzz bin/hxmc-fuzz --stage dist/$t/corpus
           done
 
-      # (temporary) variants of a small program for bisecting the arm64 loader
-      - name: Windows arm64 diagnostics
-        run: |
-          set -ex
-          for v in default ret42 notls ret42,notls nopdata,notls; do
-            mkdir -p dist/windows-arm64/diag/$v
-            HXMC_PE_DIAG=$v bin/hxmc/hxmc dist/windows-arm64/diag/$v/m.exe --hxb-lib bin/hxmc-t/Hello/prog.hxb.zip -main Hello --custom-target hxc -D disable-parallelism -D hxmc.target=windows-arm64
-            rm -rf dist/windows-arm64/diag/$v/m.exe.hxmc
-          done
-          mkdir -p dist/windows-arm64/diag/zigstub
-          cp bin/hxmc/rt/windows-arm64/obj/stub.exe dist/windows-arm64/diag/zigstub/m.exe
-
       - name: Cross-build the port
         run: |
           set -ex
@@ -246,15 +234,6 @@ jobs:
           tar xzf dl/std.tar.gz -C std-x
           tar xzf dl/src.tar.gz -C std-x
           ls t t/port
-      - name: Diagnostics
-        if: always() && hashFiles('t/diag/**') != ''
-        run: |
-          for d in t/diag/*/; do
-            HXMC_TRACE=1 python -c "import subprocess,sys
-          try:
-              r = subprocess.run([sys.argv[1]], capture_output=True, timeout=60); print(sys.argv[1], 'exit', r.returncode, r.stdout[:200], r.stderr[:300])
-          except Exception as e: print(sys.argv[1], 'FAILED', e)" "$(cygpath -w "$PWD/$d")m.exe" || true
-          done
       - name: Corpus
         if: always()
         run: python hxmc/tools/check.py t/corpus --summary "$GITHUB_STEP_SUMMARY"

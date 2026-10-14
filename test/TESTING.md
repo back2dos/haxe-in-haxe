@@ -140,6 +140,18 @@ both paths). The C of the port and of the backend tool is unchanged, so the
 port's lanes are unaffected. HXB path, clang -O2, best of 5: bcrypt 2.31 s ->
 2.04 s, sha512 22.1 ms -> 18.8 ms, sha256 unchanged (no `Vector`).
 
+### hxmc: macOS and Windows arm64 targets (2026-10-14, branch hxmc)
+
+hxmc (the machine-code target, `hxmc/README.md`) now covers six targets.
+The CI workflow `.github/workflows/hxmc.yml` (run 38529235230) cross-builds
+the corpus (7 programs, 60 fuzzer programs of seed 1000) and the port on
+Linux and runs them on each target's machine: 67/67 outputs identical to
+hxc's on linux-x86_64, linux-arm64, windows-x86_64, windows-arm64,
+macos-x86_64 and macos-arm64, and the hxmc-built port's self-compile gives
+the reference's HXB (514 modules): byte-identical on Linux and macOS,
+identical with the root normalized on Windows (absolute Windows paths).
+hxc and the port are unchanged; nothing in the port's lanes is affected.
+
 ## Target generators
 
 Every target also compiles upstream's unit suite identically (`unit-targets.py`, above).
