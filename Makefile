@@ -119,7 +119,7 @@ cc = CC="$(1)" CFLAGS="$(2)" LIBS="$(3)" $(6) sh hxc/tools/cc-chunks.sh $(4) $(5
 
 .DEFAULT_GOAL := help
 .PHONY: help reference tool dev-tool dev port-c port web-c release deps cosmo \
-	wasm site fuzz program haxelib hxmc-dev hxmc-rt hxmc-fast lix-c lix lix-cosmo test test-fuzz smoke clean distclean
+	wasm site fuzz program haxelib lix-c lix lix-cosmo test test-fuzz smoke clean distclean
 
 help:
 	@sed -n '/^# --- Targets/,$$p' $(MAKEFILE_LIST) | sed -n 's/^## \{0,1\}//p'
@@ -143,8 +143,6 @@ help:
 ## lix-c            LIX_C: the C of lix (tools/lix, with hxcoro fetched into HXCORO) by the JS tool
 ## lix              bin/lix/lix (+ haxe, haxelib, neko links): LIX_C by LIX_CC with LIX_TLS_UV
 ## lix-cosmo        bin/release/cosmo/lix.com: lix as a Cosmopolitan APE binary
-## hxmc-dev         bin/hxmc/hxmc: the hxmc tool (hxmc/README.md) by the native tool and DEV_CC (seconds)
-## hxmc-rt          bin/hxmc/rt-dev: the runtime objects of hxmc development builds (clang -O2)
 ## test             HXB conformance of PORT_BIN against the reference (test/conformance.py)
 ## test-fuzz        the fuzzer on PORT_BIN: LANE (default diff:hxb), N programs
 ## smoke            hxc/tools/smoke.sh on SMOKE_BIN (default: the release binary of TARGET)
@@ -360,32 +358,6 @@ bin/release/cosmo/lix.com: $(LIX_C)/files.txt bin/deps/cosmo/VERSIONS $(RT_SRC)
 	@mkdir -p $(dir $@)
 	$(call cc,cosmocc -O2,$(CFLAGS_BASE) -DHXC_CONST_IDS -Ibin/deps/cosmo/include,-lm -Lbin/deps/cosmo/lib $(DEPS_LIBS),$(LIX_C),$@,$(COSMO_PATH) RT_FILES="$(RT_FILES)")
 	ls -l $@
-
-# --- hxmc: the machine-code target (hxmc/README.md) ---
-
-HXMC_SRC := $(shell find hxmc/src -name '*.hx')
-HXMC_ARGS := -cp src -cp hxc/src -cp hxc/js -cp hxmc/src -main hxmc.Main -D disable-parallelism -D hih_no_generators
-hxmc-dev: bin/hxmc/hxmc
-bin/hxmc/hxmc: $(NATIVE_TOOL) $(HXMC_SRC) $(TOOL_SRC) $(STD) $(RT_SRC)
-	$(call native,bin/hxmc/hxmc,$(HXMC_ARGS))
-	$(call cc,$(DEV_CC),$(CFLAGS_BASE) $(NO_TLS_UV),-lm,bin/hxmc/hxmc_hxc,$@)
-
-# the tool with clang -O2 (rebuild and compile-speed numbers): its C is the dev build's
-HXMC_FAST_CC ?= clang -O2
-hxmc-fast: bin/hxmc-fast/hxmc
-bin/hxmc-fast/hxmc: bin/hxmc/hxmc
-	@mkdir -p $(dir $@)
-	$(call cc,$(HXMC_FAST_CC),$(CFLAGS_BASE) $(NO_TLS_UV),-lm,bin/hxmc/hxmc_hxc,$@)
-	ln -sfn ../hxmc/rt bin/hxmc-fast/rt
-
-HXMC_RT_FILES := rt rt_dyn rt_std rt_str rt_sys rt_net rt_ssl rt_uv rt_thread rt_census
-hxmc-rt: $(foreach f,$(HXMC_RT_FILES),bin/hxmc/rt-dev/$(f).o) bin/hxmc/rt-dev/rthxmc.o
-bin/hxmc/rt-dev/rthxmc.o: hxmc/tools/rthxmc.c hxc/rt/rt.h
-	@mkdir -p $(dir $@)
-	clang -O2 $(CFLAGS_BASE) $(NO_TLS_UV) -I hxc/rt -c $< -o $@
-bin/hxmc/rt-dev/%.o: hxc/rt/%.c hxc/rt/rt.h hxc/rt/rt_gc.h
-	@mkdir -p $(dir $@)
-	clang -O2 $(CFLAGS_BASE) $(NO_TLS_UV) -c $< -o $@
 
 # --- Tests (test/README.md has the other harnesses) ---
 

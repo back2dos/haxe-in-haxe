@@ -23,8 +23,8 @@ ENV = dict(os.environ, HAXE_STD_PATH=str(ROOT / "haxe/std"), HXMC_STATS="1")
 
 # program: (source dirs to copy, class paths relative to the copy, main, file to edit, anchor, inserted text)
 PROGRAMS = {
-    "small": (["hxc/test/regress"], ["hxc/test/regress"], "Regress", "hxc/test/regress/Regress.hx", "static function main() {", "\n\t\ttrace(\"edited\");"),
-    "port": (["src", "hxc/js"], ["src", "hxc/js"], "haxe.Main", "src/typing/Operators.hx", "function makeBinop(", None),
+    "small": (["hxmc/test/cases"], ["hxmc/test/cases"], "Regress", "hxmc/test/cases/Regress.hx", "static function main() {", "\n\t\ttrace(\"edited\");"),
+    "port": (["src"], ["src"], "haxe.Main", "src/typing/Operators.hx", "function makeBinop(", None),
 }
 
 
@@ -60,15 +60,15 @@ def archive(name, variant, dirs, cps, main, edit):
             j = i + len(anchor)
             t = t[:j] + text + t[j:]
         p.write_text(t)
-    args = sum([["-cp", src / c] for c in cps], []) + ["-cp", ROOT / "bin/hxc/std", "-main", main]
-    sh([ROOT / "haxe/haxe"] + args + ["--custom-target", f"hxc={d}/x", "--hxb", hxb, "-D", "disable-parallelism", "--no-output"])
+    args = sum([["-cp", src / c] for c in cps], []) + ["-cp", ROOT / "bin/hxmc/std", "-main", main]
+    sh([ROOT / "haxe/haxe"] + args + ["--custom-target", f"hxmc={d}/x", "--hxb", hxb, "-D", "disable-parallelism", "--no-output"])
     shutil.rmtree(src)
     return hxb
 
 
 def build(tool, hxb, main, out):
     t = time.perf_counter()
-    log = sh([tool, out, "--hxb-lib", hxb, "-main", main, "--custom-target", "hxc", "-D", "disable-parallelism"])
+    log = sh([tool, out, "--hxb-lib", hxb, "-main", main, "--custom-target", "hxmc", "-D", "disable-parallelism"])
     t = time.perf_counter() - t
     m = re.search(r"modules (\d+): (\d+) cached, (\d+) compiled", log)
     c = re.search(r"codegen (\d+) ms", log)
@@ -88,7 +88,7 @@ def server(tool, name, port=6127):
     env = dict(ENV, RT_OLD_MB=ENV.get("RT_OLD_MB", "4096"), RT_MINOR_KB=ENV.get("RT_MINOR_KB", "32768"))
     srv = subprocess.Popen([tool, "--server", "--wait", str(port)], cwd=ROOT, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, preexec_fn=unlimited)
     time.sleep(1)
-    args = sum([["-cp", src / c] for c in cps], []) + ["-cp", ROOT / "bin/hxc/std", "-main", main, "--custom-target", "hxc",
+    args = sum([["-cp", src / c] for c in cps], []) + ["-cp", ROOT / "bin/hxmc/std", "-main", main, "--custom-target", "hxmc",
         "-D", "disable-parallelism", "-D", "disable-hxb-cache", "-D", f"hxmc.out={out}", "--no-output"]
     p = src / f
     orig = p.read_text()
