@@ -236,7 +236,7 @@ nbody, sha256, formatter_noio within 5000 instructions); executables 8 to
 12 KB smaller (port 19623 -> 19615 KB); HXB of small programs 75 KB
 smaller (alloc 753 -> 677 KB); builds best of 5 alloc 0.12 -> 0.12 s,
 json 0.13 -> 0.12 s, binarytrees 0.12 -> 0.11 s, formatter_noio 0.44 ->
-0.43 s, port 6.29 -> 5.98 s. CI: CI_RUN.
+0.43 s, port 6.29 -> 5.98 s. CI: run 38602563236 green on all six targets.
 
 ## Target generators
 
