@@ -43,6 +43,8 @@ class MirBuild {
 	inline function get_frameSlots()
 		return nslots;
 
+	static var noShadow = Sys.getEnv("HXMC_NOSHADOW") == "1";
+
 	public var icaches = 0; // inline caches of this function (bss: <name>__ic, IC_SIZE each)
 	public var icSym:String;
 
@@ -75,9 +77,79 @@ class MirBuild {
 		return new MIns(op, ty);
 
 	function op2(op:Op, ty:MTy, a:Int, b:Int):Int {
+		// (x >>> n) | (x << (w - n)): a rotation
+		if (op == Or && (ty == I32 || ty == I64)) {
+			var r = rotation(a, b, ty);
+			if (r < 0) r = rotation(b, a, ty);
+			if (r >= 0) return r;
+			// haxe.crypto's 16-bit split addition (safeAdd, addme): an addition
+			if (ty == I32) {
+				r = splitAdd(a, b);
+				if (r < 0) r = splitAdd(b, a);
+				if (r >= 0) return r;
+			}
+		}
 		var i = mk(op, ty);
 		i.a = a;
 		i.b = b;
+		return add(i);
+	}
+
+	inline function isConst(v:Int, k:Int):Bool {
+		var c = f.vals[v];
+		return c.op == Const && c.sym == null && c.imm == k;
+	}
+
+	// a = (msw << 16), b = (lsw & 0xFFFF), lsw = (x & 0xFFFF) + (y & 0xFFFF),
+	// msw = (x >> 16) + (y >> 16) + (lsw >> 16): x + y
+	function splitAdd(a:Int, b:Int):Int {
+		var sh = f.vals[a], lo = f.vals[b];
+		if (sh.op != Shl || !isConst(sh.b, 16) || lo.op != And || lo.ty != I32) return -1;
+		var lsw = -1;
+		if (isConst(lo.b, 0xFFFF)) lsw = lo.a else if (isConst(lo.a, 0xFFFF)) lsw = lo.b else return -1;
+		var l = f.vals[lsw];
+		if (l.op != Add) return -1;
+		// the operands of lsw: x & 0xFFFF, y & 0xFFFF
+		function masked(v:Int):Int {
+			var m = f.vals[v];
+			if (m.op != And) return -1;
+			return isConst(m.b, 0xFFFF) ? m.a : isConst(m.a, 0xFFFF) ? m.b : -1;
+		}
+		var x = masked(l.a), y = masked(l.b);
+		if (x < 0 || y < 0) return -1;
+		// msw: the sum, in any order, of x >> 16, y >> 16 and lsw >> 16
+		var terms = [];
+		function collect(v:Int, depth:Int) {
+			var t = f.vals[v];
+			if (t.op == Add && depth < 2) {
+				collect(t.a, depth + 1);
+				collect(t.b, depth + 1);
+			} else terms.push(v);
+		}
+		collect(sh.a, 0);
+		if (terms.length != 3) return -1;
+		var want = [x, y, lsw];
+		for (t in terms) {
+			var s = f.vals[t];
+			if (s.op != Sar || !isConst(s.b, 16)) return -1;
+			var k = want.indexOf(s.a);
+			if (k < 0) return -1;
+			want.splice(k, 1);
+		}
+		return op2(Add, I32, x, y);
+	}
+
+	function rotation(a:Int, b:Int, ty:MTy):Int {
+		var x = f.vals[a], y = f.vals[b];
+		if (x.op != Shr || y.op != Shl || x.a != y.a || x.ty != ty || y.ty != ty) return -1;
+		var n = f.vals[x.b], m = f.vals[y.b];
+		if (n.op != Const || m.op != Const || n.sym != null || m.sym != null) return -1;
+		var w = ty == I32 ? 32 : 64;
+		var k = n.imm & (w - 1);
+		if (k == 0 || (m.imm & (w - 1)) != w - k) return -1;
+		var i = mk(Rotr, ty);
+		i.a = x.a;
+		i.b = iconst(k);
 		return add(i);
 	}
 
@@ -472,6 +544,12 @@ class MirBuild {
 			if (s >= 0) refSlot.set(l, s);
 		}
 		nslots = roots.nslots;
+		// measurement only (HXMC_NOSHADOW=1): no shadow-stack frames, references in
+		// SSA values; correct only while nothing collects (the cost of the frames)
+		if (noShadow && !fn.hasTry) {
+			refSlot = new Map();
+			nslots = 0;
+		}
 		var entry = newBlock();
 		f.entry = entry;
 		seal(entry);
@@ -1004,6 +1082,12 @@ class MirBuild {
 	function arrSlot(a:Local, sp:Int, list:Null<Array<Local>>):Int {
 		var s = refSlot.get(a);
 		if (s != null) return op2(Add, I64, fr, lconst32(8 * s));
+		if (noShadow && (sp < 0 || list == null || list.indexOf(a) < 0)) {
+			// (measurement: a frame slot holding the array; nothing collects)
+			var addr = stackAddr(f.slot(8, 8));
+			store(8, addr, 0, readLocal(a));
+			return addr;
+		}
 		if (sp < 0 || list == null || list.indexOf(a) < 0) throw new Unsupported("array local neither rooted nor spilled");
 		return op2(Add, I64, sp, lconst32(8 * list.indexOf(a)));
 	}

@@ -366,7 +366,7 @@ class Opt {
 
 	static inline function pure(op:Op):Bool
 		return switch op {
-			case Add | Sub | Mul | And | Or | Xor | Shl | Sar | Shr | Neg | Not | FAdd | FSub | FMul | FDiv | FNeg | FSqrt | FAbs | Cmp | SExt | ZExt | Trunc | I2F | F2I | BitsToF | FToBits | Select:
+			case Add | Sub | Mul | And | Or | Xor | Shl | Sar | Shr | Rotr | Neg | Not | FAdd | FSub | FMul | FDiv | FNeg | FSqrt | FAbs | Cmp | SExt | ZExt | Trunc | I2F | F2I | BitsToF | FToBits | Select:
 				true;
 			case _: false;
 		};

@@ -194,6 +194,7 @@ class Emit implements hxmc.Target.Emitter {
 				if (i.imm == 0) a.movR(x, i.d, i.s1) else switch i.cond {
 					case 2: a.lslI(x, i.d, i.s1, i.imm);
 					case 3: a.lsrI(x, i.d, i.s1, i.imm);
+					case 5: a.rorI(x, i.d, i.s1, i.imm);
 					case _: a.asrI(x, i.d, i.s1, i.imm);
 				}
 			case NEG:

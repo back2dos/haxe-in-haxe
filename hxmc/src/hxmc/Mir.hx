@@ -61,6 +61,8 @@ enum abstract Op(Int) to Int {
 	var Switch; // a; cases (values) -> targets[i], targets[last]: default
 	var Ret; // a (-1: none)
 	var Unreachable; // after a call that does not return
+	// values (late additions)
+	var Rotr; // a rotated right by the constant b (I32/I64)
 }
 
 enum abstract Cond(Int) to Int from Int {
@@ -200,6 +202,6 @@ class MFunc {
 		return [
 			"param", "const", "constf", "symaddr", "tlsload", "tlsstore", "stackaddr", "copy", "phi", "add", "sub", "mul", "and", "or", "xor", "shl", "sar",
 			"shr", "neg", "not", "div", "rem", "fadd", "fsub", "fmul", "fdiv", "fneg", "fsqrt", "fabs", "cmp", "sext", "zext", "trunc", "i2f", "f2i", "bitstof",
-			"ftobits", "select", "load", "store", "call", "jmp", "br", "switch", "ret", "unreachable"
+			"ftobits", "select", "load", "store", "call", "jmp", "br", "switch", "ret", "unreachable", "rotr"
 		][(o : Int)];
 }

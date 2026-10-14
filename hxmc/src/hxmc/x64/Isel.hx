@@ -712,6 +712,15 @@ class Isel implements hxmc.Target.Selector {
 					x.cond = o;
 					x.size = size;
 				}
+			case Rotr:
+				var d = reg(i.id);
+				var size = sz(i.ty);
+				mov(d, use(i.a), size);
+				var x = emit(SHIFTI);
+				x.d = d;
+				x.cond = Asm.ROR;
+				x.imm = m.vals[i.b].imm & (size == 8 ? 63 : 31);
+				x.size = size;
 			case Neg | Not:
 				var d = reg(i.id);
 				var size = sz(i.ty);

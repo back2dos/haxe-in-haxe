@@ -96,6 +96,7 @@ class Asm {
 	public static inline var XOR = 6;
 	public static inline var CMP = 7;
 	// shifts (/digit of 0xc1/0xd3)
+	public static inline var ROR = 1;
 	public static inline var SHL = 4;
 	public static inline var SHR = 5;
 	public static inline var SAR = 7;

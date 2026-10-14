@@ -249,6 +249,10 @@ class Asm {
 		bfm(false, x, d, n, (size - sh) % size, size - 1 - sh);
 	}
 
+	// ror (immediate): extr d, n, n, #sh
+	public function rorI(x:Bool, d:Int, n:Int, sh:Int)
+		w((x ? 0x93C00000 : 0x13800000) | (n << 16) | (sh << 10) | (n << 5) | d);
+
 	public function lsrI(x:Bool, d:Int, n:Int, sh:Int)
 		bfm(false, x, d, n, sh, x ? 63 : 31);
 
