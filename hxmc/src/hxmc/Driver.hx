@@ -124,7 +124,7 @@ class Driver {
 					var inLoop = Inline.loopBlocks(mf);
 					for (s in todo) {
 						var t = template(s.fn);
-						if (t != null && s.fn != fn && t.size <= (inLoop.exists(s.call.block) ? Inline.MAX_LOOP : Inline.MAX_FLAT))
+						if (t != null && s.fn != fn && t.size <= (s.call.block.mark == inLoop ? Inline.MAX_LOOP : Inline.MAX_FLAT))
 							sites.push({call: s.call, callee: t});
 					}
 					todo = Inline.run(mf, sites, ic);
@@ -224,6 +224,11 @@ class Driver {
 		MirBuild.inlineCands = m;
 	}
 
+	// resident (the compilation server): the objects of the last builds, by
+	// file, with their keys (a build reuses them without reading the cache)
+	public static var resident = false;
+	static var memObjs = new Map<String, {key:String, obj:Obj}>();
+
 	function build(t0:Float, t1:Float) {
 		inlineCandidates();
 		var p = prep.p;
@@ -271,7 +276,9 @@ class Driver {
 			var key = Fingerprint.hash(text.toString());
 			keys[mi] = key;
 			lits[mi] = fp.newStrings;
-			if (index.get(moduleFile(order[mi])) == key && sys.FileSystem.exists(paths[mi])) objs[mi] = ElfReader.read(sys.io.File.getBytes(paths[mi]));
+			var mem = resident ? memObjs.get(paths[mi]) : null;
+			if (mem != null && mem.key == key) objs[mi] = mem.obj;
+			else if (index.get(moduleFile(order[mi])) == key && sys.FileSystem.exists(paths[mi])) objs[mi] = ElfReader.read(sys.io.File.getBytes(paths[mi]));
 		});
 		var tKey = haxe.Timer.stamp() - s0;
 		var newIndex = new StringBuf();
@@ -312,6 +319,10 @@ class Driver {
 			objs[mi] = obj;
 		});
 		sys.io.File.saveContent(indexPath, newIndex.toString());
+		// (LinkPE drops sections from the objects it links: not kept)
+		if (resident && abi.os != "windows")
+			for (mi in 0...nm)
+				memObjs.set(paths[mi], {key: keys[mi], obj: objs[mi]});
 		for (f in sys.FileSystem.readDirectory(dir))
 			if (StringTools.endsWith(f, ".o") && !keep.exists(f)) sys.FileSystem.deleteFile(dir + "/" + f);
 		var t2 = haxe.Timer.stamp();
@@ -383,22 +394,28 @@ class Driver {
 // paths) at the end.
 class Layout {
 	public static function order(f:MFunc):Array<MBlock> {
-		var seen = new Map<Int, Bool>();
+		var seen = f.newMark();
 		var post = [];
-		// iterative DFS: successors pushed in reverse so the first is visited first
-		var stack:Array<{b:MBlock, k:Int}> = [{b: f.entry, k: 0}];
-		seen.set(f.entry.id, true);
+		// iterative DFS: the first successor is visited first
+		var stack:Array<MBlock> = [f.entry];
+		var idx:Array<Int> = [0];
+		f.entry.mark = seen;
 		while (stack.length > 0) {
-			var top = stack[stack.length - 1];
-			if (top.k < top.b.succs.length) {
-				var s = top.b.succs[top.k++];
-				if (!seen.exists(s.id)) {
-					seen.set(s.id, true);
-					stack.push({b: s, k: 0});
+			var top = stack.length - 1;
+			var b = stack[top];
+			var k = idx[top];
+			if (k < b.succs.length) {
+				idx[top] = k + 1;
+				var s = b.succs[k];
+				if (s.mark != seen) {
+					s.mark = seen;
+					stack.push(s);
+					idx.push(0);
 				}
 			} else {
-				post.push(top.b);
+				post.push(b);
 				stack.pop();
+				idx.pop();
 			}
 		}
 		post.reverse();

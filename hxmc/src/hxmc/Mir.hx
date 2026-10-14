@@ -128,6 +128,8 @@ class MBlock {
 	public var cold = false; // a slow path: laid out at the end of the function
 	public var order = -1; // position in the layout
 	public var handler = false; // reached by a second return of setjmp
+	public var mark = 0; // a pass's visit mark (MFunc.newMark)
+	public var tmp = 0; // a pass's number for the block (valid where marked)
 
 	public function new(id)
 		this.id = id;
@@ -144,9 +146,32 @@ class MFunc {
 	public var vals:Array<MIns> = [];
 	public var slots:Array<{size:Int, align:Int}> = []; // frame slots (StackAddr)
 	public var entry:MBlock;
+	var marks = 0;
 
 	public function new(name)
 		this.name = name;
+
+	// a fresh mark: the blocks a pass sets MBlock.mark to it are visited
+	public inline function newMark():Int
+		return ++marks;
+
+	// arrays of n numbers (sized once)
+	public static function ints(n:Int, v:Int):Array<Int> {
+		var a:Array<Int> = [];
+		a.resize(n);
+		if (v != 0)
+			for (i in 0...n)
+				a[i] = v;
+		return a;
+	}
+
+	public static function iota(n:Int):Array<Int> {
+		var a:Array<Int> = [];
+		a.resize(n);
+		for (i in 0...n)
+			a[i] = i;
+		return a;
+	}
 
 	public function newBlock():MBlock {
 		var b = new MBlock(blocks.length);

@@ -35,6 +35,7 @@ class Main {
 				if (Sys.getEnv("RT_MINOR_KB") == null) Sys.putEnv("RT_MINOR_KB", "32768");
 				Sys.exit(Sys.command(Sys.programPath(), ["--server"].concat(args)));
 			}
+			Driver.resident = true;
 			compiler.Compiler.generateHook = function(com) {
 				try {
 					start = haxe.Timer.stamp();

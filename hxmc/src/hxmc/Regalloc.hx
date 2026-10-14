@@ -588,9 +588,11 @@ class Regalloc {
 					spilled.push(a);
 					seen[a] = -2; // evicted: its ranges leave the register
 				}
+				// (the ranges ending before r starts are never asked about
+				// again: those of the evicted intervals stay, unseen)
 				var of = s.oFrom[best], ot = s.oTo[best], oo = s.oOwn[best];
-				var k = 0;
-				for (x in 0...of.length)
+				var k = firstEnding(ot, segFrom[segAt[r]]);
+				for (x in k...of.length)
 					if (seen[oo[x]] != -2) {
 						of[k] = of[x];
 						ot[k] = ot[x];

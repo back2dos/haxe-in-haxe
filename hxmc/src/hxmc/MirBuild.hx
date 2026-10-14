@@ -28,7 +28,7 @@ class MirBuild {
 	var fr = -1; // the frame's shadow-stack slots (value)
 	var memSlot = new Map<Local, Int>(); // try functions: frame slot of a scalar local
 	var defs:Array<BlockDefs> = [];
-	var incomplete:Array<Map<Int, MIns>> = [];
+	var incomplete:Array<Null<Map<Int, MIns>>> = []; // (made when a block gets one)
 	var varTy = new Map<Int, MTy>();
 	var nextVar = 0;
 	var loops:Array<{cont:MBlock, brk:MBlock, tries:Int}> = [];
@@ -350,7 +350,7 @@ class MirBuild {
 		var b = f.newBlock();
 		if (coldNew) b.cold = true;
 		defs.push(new BlockDefs());
-		incomplete.push(new Map());
+		incomplete.push(null);
 		return b;
 	}
 
@@ -430,7 +430,9 @@ class MirBuild {
 		var val:Int;
 		if (!b.sealed) {
 			var phi = newPhi(b, t);
-			incomplete[b.id].set(v, phi);
+			var inc = incomplete[b.id];
+			if (inc == null) incomplete[b.id] = inc = new Map();
+			inc.set(v, phi);
 			val = phi.id;
 		} else if (b.preds.length == 0) {
 			// never assigned (C: the local starts as 0)
@@ -464,10 +466,12 @@ class MirBuild {
 	function seal(b:MBlock) {
 		if (b.sealed) return;
 		b.sealed = true;
-		for (v => phi in incomplete[b.id])
+		var inc = incomplete[b.id];
+		if (inc == null) return;
+		for (v => phi in inc)
 			for (pr in b.preds)
 				phi.args.push(readVar(v, pr));
-		incomplete[b.id] = new Map();
+		incomplete[b.id] = null;
 	}
 
 	// ---- locals
@@ -645,19 +649,21 @@ class MirBuild {
 
 	// drops the blocks not reachable from the entry (and their phi operands)
 	function prune() {
-		var reach = new Map<Int, Bool>();
+		var reach = f.newMark();
 		var stack = [f.entry];
-		reach.set(f.entry.id, true);
+		f.entry.mark = reach;
 		while (stack.length > 0) {
 			var b = stack.pop();
 			for (s in b.succs)
-				if (!reach.exists(s.id)) {
-					reach.set(s.id, true);
+				if (s.mark != reach) {
+					s.mark = reach;
 					stack.push(s);
 				}
 		}
+		var all = true;
 		for (b in f.blocks) {
-			if (reach.exists(b.id)) continue;
+			if (b.mark == reach) continue;
+			all = false;
 			for (s in b.succs) {
 				var k = s.preds.indexOf(b);
 				if (k < 0) continue;
@@ -666,7 +672,7 @@ class MirBuild {
 					if (i.op == Phi) i.args.splice(k, 1);
 			}
 		}
-		f.blocks = [for (b in f.blocks) if (reach.exists(b.id)) b];
+		if (!all) f.blocks = [for (b in f.blocks) if (b.mark == reach) b];
 	}
 
 	function ret(v:Int) {
@@ -704,10 +710,11 @@ class MirBuild {
 
 	// replaces phis whose operands are one value (or the phi itself), until none is left
 	function removeTrivialPhis() {
-		var repl = new Map<Int, Int>();
-		function find(v:Int):Int {
-			while (repl.exists(v))
-				v = repl.get(v);
+		var repl:Null<Array<Int>> = null; // phi -> its value (-1: none)
+		inline function find(v:Int):Int {
+			if (repl != null)
+				while (v < repl.length && repl[v] >= 0)
+					v = repl[v];
 			return v;
 		}
 		var changed = true;
@@ -728,16 +735,20 @@ class MirBuild {
 						same = x;
 					}
 					if (trivial && same >= 0) {
-						repl.set(i.id, same);
+						if (repl == null) repl = MFunc.ints(f.vals.length, -1);
+						repl[i.id] = same;
 						i.dead = true;
 						changed = true;
 					}
 				}
 		}
-		if (!repl.keys().hasNext()) return;
+		if (repl == null) return;
 		for (b in f.blocks) {
-			b.ins = [for (i in b.ins) if (!i.dead) i];
-			for (i in b.ins) {
+			var ins = b.ins, k = 0;
+			for (i in ins)
+				if (!i.dead) ins[k++] = i;
+			if (k < ins.length) ins.resize(k);
+			for (i in ins) {
 				if (i.a >= 0) i.a = find(i.a);
 				if (i.b >= 0) i.b = find(i.b);
 				if (i.c >= 0) i.c = find(i.c);

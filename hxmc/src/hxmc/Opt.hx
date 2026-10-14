@@ -51,7 +51,7 @@ class Opt {
 		simplifyCfg();
 		var order = rpo();
 		if (order.length == 0) return;
-		repl = [for (i in 0...f.vals.length) i];
+		repl = MFunc.iota(f.vals.length);
 		// copies are their operand
 		for (bb in f.blocks)
 			for (i in bb.ins)
@@ -59,7 +59,7 @@ class Opt {
 					repl[i.id] = i.a;
 					i.dead = true;
 				}
-		ver = [for (_ in 0...f.vals.length) 0];
+		ver = MFunc.ints(f.vals.length, 0);
 		// (functions with a try: a handler block, reached by setjmp's second
 		// return, starts with new memory versions, so no load from before
 		// is reused there; values computed before setjmp are immutable and
@@ -102,7 +102,7 @@ class Opt {
 			t.targets = [keep];
 			b.succs = [keep];
 		}
-		var uses = [for (_ in f.vals) 0];
+		var uses = MFunc.ints(f.vals.length, 0);
 		for (b in f.blocks)
 			for (i in b.ins) {
 				if (i.a >= 0) uses[i.a]++;
@@ -169,9 +169,9 @@ class Opt {
 		}
 		pruneBlocks();
 		// merge a block into its only predecessor that jumps to it
-		var gone = new Map<Int, Bool>();
+		var gone = f.newMark();
 		for (b in f.blocks) {
-			if (gone.exists(b.id)) continue;
+			if (b.mark == gone) continue;
 			while (true) {
 				var t = b.term();
 				if (t == null || t.op != Jmp) break;
@@ -200,10 +200,10 @@ class Opt {
 				s.ins = [];
 				s.preds = [];
 				s.succs = [];
-				gone.set(s.id, true);
+				s.mark = gone;
 			}
 		}
-		f.blocks = [for (b in f.blocks) if (!gone.exists(b.id)) b];
+		f.blocks = [for (b in f.blocks) if (b.mark != gone) b];
 	}
 
 	static inline function hasPhi(b:MBlock):Bool
@@ -228,19 +228,21 @@ class Opt {
 	}
 
 	function pruneBlocks() {
-		var reach = new Map<Int, Bool>();
+		var reach = f.newMark();
 		var stack = [f.entry];
-		reach.set(f.entry.id, true);
+		f.entry.mark = reach;
 		while (stack.length > 0) {
 			var b = stack.pop();
 			for (s in b.succs)
-				if (!reach.exists(s.id)) {
-					reach.set(s.id, true);
+				if (s.mark != reach) {
+					s.mark = reach;
 					stack.push(s);
 				}
 		}
+		var all = true;
 		for (b in f.blocks) {
-			if (reach.exists(b.id)) continue;
+			if (b.mark == reach) continue;
+			all = false;
 			for (s in b.succs) {
 				var k = s.preds.indexOf(b);
 				while (k >= 0) {
@@ -251,7 +253,7 @@ class Opt {
 				}
 			}
 		}
-		f.blocks = [for (b in f.blocks) if (reach.exists(b.id)) b];
+		if (!all) f.blocks = [for (b in f.blocks) if (b.mark == reach) b];
 	}
 
 	// ---- stores
@@ -359,11 +361,11 @@ class Opt {
 	}
 
 	function rpo():Array<MBlock> {
-		var seen = new Map<Int, Bool>();
+		var seen = f.newMark();
 		var post = [];
 		var stack:Array<MBlock> = [f.entry];
 		var idx:Array<Int> = [0];
-		seen.set(f.entry.id, true);
+		f.entry.mark = seen;
 		while (stack.length > 0) {
 			var top = stack.length - 1;
 			var b = stack[top];
@@ -371,8 +373,8 @@ class Opt {
 			if (k < b.succs.length) {
 				idx[top] = k + 1;
 				var s = b.succs[k];
-				if (!seen.exists(s.id)) {
-					seen.set(s.id, true);
+				if (s.mark != seen) {
+					s.mark = seen;
 					stack.push(s);
 					idx.push(0);
 				}
@@ -428,9 +430,11 @@ class Opt {
 	// through its instructions; recorded per load
 	function versions(order:Array<MBlock>) {
 		var n = order.length;
-		var pos = new Map<Int, Int>();
-		for (k in 0...n)
-			pos.set(order[k].id, k);
+		var inOrder = f.newMark();
+		for (k in 0...n) {
+			order[k].mark = inOrder;
+			order[k].tmp = k;
+		}
 		// per block: the classes it writes
 		var kill = [for (b in order) {
 			var m = 0;
@@ -445,8 +449,8 @@ class Opt {
 			var latch = -1;
 			var mixed = 0; // classes the forward predecessors disagree on
 			for (p in b.preds) {
-				var pk = pos.get(p.id);
-				if (pk == null) continue;
+				if (p.mark != inOrder) continue;
+				var pk = p.tmp;
 				if (pk >= k) {
 					if (pk > latch) latch = pk;
 					continue;
@@ -484,7 +488,7 @@ class Opt {
 		return x < 0 ? x : canon[res(x)];
 
 	function canonicalize() {
-		canon = [for (i in 0...f.vals.length) i];
+		canon = MFunc.iota(f.vals.length);
 		// by a hash of the value, then compared exactly
 		var first = new Map<Int, Array<Int>>();
 		var vals = f.vals;
@@ -532,13 +536,15 @@ class Opt {
 	// scoped table (entries made in a subtree are undone after it)
 	function gvn(order:Array<MBlock>) {
 		var n = order.length;
-		var pos = new Map<Int, Int>();
-		for (k in 0...n)
-			pos.set(order[k].id, k);
+		var inOrder = f.newMark();
+		for (k in 0...n) {
+			order[k].mark = inOrder;
+			order[k].tmp = k;
+		}
 		// immediate dominators (Cooper, Harvey and Kennedy), as rpo indices
 		var idom = [for (_ in 0...n) -1];
 		idom[0] = 0;
-		var preds = [for (b in order) [for (p in b.preds) if (pos.exists(p.id)) pos.get(p.id)]];
+		var preds = [for (b in order) [for (p in b.preds) if (p.mark == inOrder) p.tmp]];
 		var changed = true;
 		while (changed) {
 			changed = false;
@@ -572,8 +578,15 @@ class Opt {
 			childHead[d] = k;
 			k--;
 		}
-		var table = new Map<Int, Array<Int>>();
-		var log:Array<Int> = []; // hashes added, in order
+		// the table: chains of value ids per bucket (the newest first)
+		var nv = f.vals.length;
+		var size = 64;
+		while (size < nv * 2)
+			size <<= 1;
+		var mask = size - 1;
+		var head = MFunc.ints(size, -1);
+		var chain = MFunc.ints(nv, -1);
+		var log:Array<Int> = []; // value ids added, in order
 		var vals = f.vals;
 		// iterative preorder: a block is entered, its children walked, then left
 		var stack = [0], mark = [0];
@@ -590,25 +603,25 @@ class Opt {
 					// (comparisons are recomputed: they fuse with their branch)
 					if (!(pure(op) || op == Load || op == TlsLoad) || op == Cmp) continue;
 					var h = hash(i);
-					var l = table.get(h);
+					h = (h ^ (h >>> 15)) * 0x2c1b3c6d;
+					var bk = (h ^ (h >>> 12)) & mask;
 					var hit = -1;
-					if (l != null) {
-						var q = l.length;
-						while (q-- > 0)
-							if (same(i, vals[l[q]])) {
-								hit = l[q];
-								break;
-							}
-					} else {
-						l = [];
-						table.set(h, l);
+					var q = head[bk];
+					while (q >= 0) {
+						if (same(i, vals[q])) {
+							hit = q;
+							break;
+						}
+						q = chain[q];
 					}
 					if (hit >= 0) {
 						repl[i.id] = hit;
 						i.dead = true;
 					} else {
-						l.push(i.id);
-						log.push(h);
+						chain[i.id] = head[bk];
+						head[bk] = i.id;
+						log.push(i.id);
+						log.push(bk);
 					}
 				}
 				var c = childHead[bk];
@@ -623,8 +636,9 @@ class Opt {
 				mark.pop();
 				var m = marks.pop();
 				while (log.length > m) {
-					var h = log.pop();
-					table.get(h).pop();
+					var bk = log.pop();
+					var id = log.pop();
+					head[bk] = chain[id];
 				}
 			}
 		}
@@ -645,7 +659,7 @@ class Opt {
 
 	// removes pure operations and loads without uses (to a fixed point)
 	function dce() {
-		var uses = [for (_ in f.vals) 0];
+		var uses = MFunc.ints(f.vals.length, 0);
 		for (b in f.blocks)
 			for (i in b.ins)
 				if (!i.dead) {
@@ -671,8 +685,12 @@ class Opt {
 				for (x in i.args)
 					if (--uses[x] == 0 && removable(f.vals[x])) work.push(f.vals[x]);
 		}
-		for (b in f.blocks)
-			b.ins = [for (i in b.ins) if (!i.dead) i];
+		for (b in f.blocks) {
+			var ins = b.ins, k = 0;
+			for (i in ins)
+				if (!i.dead) ins[k++] = i;
+			if (k < ins.length) ins.resize(k);
+		}
 	}
 
 	static inline function removable(i:MIns):Bool

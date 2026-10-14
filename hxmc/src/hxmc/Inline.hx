@@ -64,19 +64,21 @@ class Inline {
 
 	// drops the blocks no longer reachable (after a callee that never returns)
 	static function prune(f:MFunc) {
-		var reach = new Map<Int, Bool>();
+		var reach = f.newMark();
 		var stack = [f.entry];
-		reach.set(f.entry.id, true);
+		f.entry.mark = reach;
 		while (stack.length > 0) {
 			var b = stack.pop();
 			for (s in b.succs)
-				if (!reach.exists(s.id)) {
-					reach.set(s.id, true);
+				if (s.mark != reach) {
+					s.mark = reach;
 					stack.push(s);
 				}
 		}
+		var all = true;
 		for (b in f.blocks) {
-			if (reach.exists(b.id)) continue;
+			if (b.mark == reach) continue;
+			all = false;
 			for (s in b.succs) {
 				var k = s.preds.indexOf(b);
 				if (k < 0) continue;
@@ -85,24 +87,23 @@ class Inline {
 					if (i.op == Phi) i.args.splice(k, 1);
 			}
 		}
-		f.blocks = [for (b in f.blocks) if (reach.exists(b.id)) b];
+		if (!all) f.blocks = [for (b in f.blocks) if (b.mark == reach) b];
 	}
 
 	// the blocks of f in loops (a back edge in reverse postorder closes a
-	// loop over the blocks between)
-	public static function loopBlocks(f:MFunc):Map<MBlock, Bool> {
-		var order = [];
-		var seen = new Map<Int, Bool>();
+	// loop over the blocks between): marked with the mark returned
+	public static function loopBlocks(f:MFunc):Int {
+		var seen = f.newMark();
 		var stack = [f.entry], idx = [0];
-		seen.set(f.entry.id, true);
+		f.entry.mark = seen;
 		var post = [];
 		while (stack.length > 0) {
 			var top = stack.length - 1;
 			var b = stack[top];
 			if (idx[top] < b.succs.length) {
 				var s = b.succs[idx[top]++];
-				if (!seen.exists(s.id)) {
-					seen.set(s.id, true);
+				if (s.mark != seen) {
+					s.mark = seen;
 					stack.push(s);
 					idx.push(0);
 				}
@@ -113,18 +114,22 @@ class Inline {
 			}
 		}
 		post.reverse();
-		var pos = new Map<MBlock, Int>();
-		for (k in 0...post.length)
-			pos.set(post[k], k);
-		var inLoop = new Map<MBlock, Bool>();
-		for (k in 0...post.length)
+		var n = post.length;
+		for (k in 0...n)
+			post[k].tmp = k;
+		var inLoop = MFunc.ints(n, 0);
+		for (k in 0...n)
 			for (p in post[k].preds) {
-				var pk = pos.get(p);
-				if (pk != null && pk >= k)
+				if (p.mark != seen) continue;
+				var pk = p.tmp;
+				if (pk >= k)
 					for (q in k...pk + 1)
-						inLoop.set(post[q], true);
+						inLoop[q] = 1;
 			}
-		return inLoop;
+		var m = f.newMark();
+		for (k in 0...n)
+			if (inLoop[k] != 0) post[k].mark = m;
+		return m;
 	}
 
 	// replaces each call (in f) by a copy of its callee's template
@@ -135,7 +140,7 @@ class Inline {
 		var nextBlock = 0;
 		for (b in f.blocks)
 			if (b.id >= nextBlock) nextBlock = b.id + 1;
-		var repl = new Map<Int, Int>(); // call value -> result value
+		var replFrom:Array<Int> = [], replTo:Array<Int> = []; // call value -> result value
 		for (site in sites) {
 			var c = site.call, g = site.callee.mf;
 			var b = c.block;
@@ -159,13 +164,18 @@ class Inline {
 			}
 			b.succs = [];
 			// the copy
-			var vmap = new Map<Int, Int>();
-			var bmap = new Map<Int, MBlock>();
+			// (the template is shared by the threads: maps by its numbers, no marks)
+			var vmap = MFunc.ints(g.vals.length, -1);
+			var gmax = 0;
+			for (gb in g.blocks)
+				if (gb.id > gmax) gmax = gb.id;
+			var bmap:Array<MBlock> = [];
+			bmap.resize(gmax + 1);
 			for (gb in g.blocks) {
 				var nb = new MBlock(nextBlock++);
 				nb.cold = gb.cold || b.cold;
 				nb.sealed = nb.filled = true;
-				bmap.set(gb.id, nb);
+				bmap[gb.id] = nb;
 				f.blocks.push(nb);
 			}
 			var slotBase = f.slots.length;
@@ -177,24 +187,24 @@ class Inline {
 			for (gb in g.blocks)
 				for (i in gb.ins) {
 					if (i.op == Param) {
-						vmap.set(i.id, c.args[i.imm]);
+						vmap[i.id] = c.args[i.imm];
 						continue;
 					}
 					var x = new MIns(i.op, i.ty);
 					x.id = f.vals.length;
 					f.vals.push(x);
-					vmap.set(i.id, x.id);
+					vmap[i.id] = x.id;
 				}
 			var rets:Array<{block:MBlock, v:Int}> = [];
 			for (gb in g.blocks) {
-				var nb = bmap.get(gb.id);
-				nb.preds = [for (p in gb.preds) bmap.get(p.id)];
-				nb.succs = [for (s in gb.succs) bmap.get(s.id)];
+				var nb = bmap[gb.id];
+				nb.preds = [for (p in gb.preds) bmap[p.id]];
+				nb.succs = [for (s in gb.succs) bmap[s.id]];
 				for (i in gb.ins) {
 					if (i.op == Param) continue;
-					var x = f.vals[vmap.get(i.id)];
+					var x = f.vals[vmap[i.id]];
 					inline function m(v:Int):Int
-						return v < 0 ? v : vmap.get(v);
+						return v < 0 ? v : vmap[v];
 					x.a = m(i.a);
 					x.b = m(i.b);
 					x.c = m(i.c);
@@ -210,7 +220,7 @@ class Inline {
 					x.argTys = i.argTys;
 					x.cases = i.cases;
 					if (i.args != null) x.args = [for (v in i.args) m(v)];
-					if (i.targets != null) x.targets = [for (t in i.targets) bmap.get(t.id)];
+					if (i.targets != null) x.targets = [for (t in i.targets) bmap[t.id]];
 					if (i.op == StackAddr) x.imm = i.imm + slotBase;
 					if (i.op == SymAddr && i.sym == site.callee.icSym) {
 						x.sym = ic.sym;
@@ -234,7 +244,7 @@ class Inline {
 			j.id = f.vals.length;
 			f.vals.push(j);
 			j.block = b;
-			var entry = bmap.get(g.entry.id);
+			var entry = bmap[g.entry.id];
 			j.targets = [entry];
 			b.ins.push(j);
 			b.succs = [entry];
@@ -242,30 +252,35 @@ class Inline {
 			tail.preds = [for (r in rets) r.block];
 			// the result
 			if (c.ty != Void) {
-				if (rets.length == 1) repl.set(c.id, rets[0].v) else if (rets.length > 1) {
+				if (rets.length == 1) {
+					replFrom.push(c.id);
+					replTo.push(rets[0].v);
+				} else if (rets.length > 1) {
 					var phi = new MIns(Phi, c.ty);
 					phi.id = f.vals.length;
 					f.vals.push(phi);
 					phi.block = tail;
 					phi.args = [for (r in rets) r.v];
 					tail.ins.unshift(phi);
-					repl.set(c.id, phi.id);
+					replFrom.push(c.id);
+					replTo.push(phi.id);
 				}
 			}
 			c.dead = true;
 			for (s in site.callee.sites)
-				if (vmap.exists(s.call.id)) more.push({call: f.vals[vmap.get(s.call.id)], fn: s.fn});
+				if (s.call.id < vmap.length && vmap[s.call.id] >= 0) more.push({call: f.vals[vmap[s.call.id]], fn: s.fn});
 			// a later site in the same block now lives in the tail
 		}
 		prune(f);
 		// uses of the calls' results
+		if (replFrom.length == 0) return [for (m in more) if (!m.call.dead && m.call.block != null) m];
+		var repl = MFunc.ints(f.vals.length, -1);
+		for (q in 0...replFrom.length)
+			repl[replFrom[q]] = replTo[q];
 		inline function r(v:Int):Int {
 			if (v < 0) return v;
-			var x = repl.get(v);
-			while (x != null) {
-				v = x;
-				x = repl.get(v);
-			}
+			while (repl[v] >= 0)
+				v = repl[v];
 			return v;
 		}
 		for (b in f.blocks)
