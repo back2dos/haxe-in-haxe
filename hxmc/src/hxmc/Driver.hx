@@ -88,6 +88,25 @@ class Driver {
 	var raInsns = 0;
 	var raFuncs = 0;
 
+	// the Mir of the callees inlined, built once (shared by the threads: read only once made)
+	var templates = new haxe.ds.ObjectMap<FuncInfo, {t:Null<Inline.Template>}>();
+	var tlock = new sys.thread.Mutex();
+
+	function template(fn:FuncInfo):Null<Inline.Template> {
+		tlock.acquire();
+		var e = templates.get(fn);
+		tlock.release();
+		if (e != null) return e.t;
+		var cb = new MirBuild(prep, abi, fn);
+		cb.icSym = prep.funcSym(fn) + "__ic";
+		var t = try Inline.template(cb, cb.build()) catch (_:Unsupported) null;
+		tlock.acquire();
+		var e2 = templates.get(fn);
+		if (e2 == null) templates.set(fn, {t: t}) else t = e2.t;
+		tlock.release();
+		return t;
+	}
+
 	function compileFunc(fn:FuncInfo, obj:Obj, emit:Target.Emitter, ras:Regalloc.Scratch):Bool {
 		var name = prep.funcSym(fn);
 		try {
@@ -104,13 +123,7 @@ class Driver {
 					var sites = [];
 					var inLoop = Inline.loopBlocks(mf);
 					for (s in todo) {
-						var t = ras.templates.get(s.fn);
-						if (!ras.templates.exists(s.fn)) {
-							var cb = new MirBuild(prep, abi, s.fn);
-							cb.icSym = prep.funcSym(s.fn) + "__ic";
-							t = try Inline.template(cb, cb.build()) catch (_:Unsupported) null;
-							ras.templates.set(s.fn, t);
-						}
+						var t = template(s.fn);
 						if (t != null && s.fn != fn && t.size <= (inLoop.exists(s.call.block) ? Inline.MAX_LOOP : Inline.MAX_FLAT))
 							sites.push({call: s.call, callee: t});
 					}

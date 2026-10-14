@@ -92,14 +92,16 @@ class Scratch {
 	public var oFrom:Array<Array<Int>> = [for (_ in 0...LFunc.NPHYS) []];
 	public var oTo:Array<Array<Int>> = [for (_ in 0...LFunc.NPHYS) []];
 	public var oOwn:Array<Array<Int>> = [for (_ in 0...LFunc.NPHYS) []];
+	public var oPend:Array<Array<Int>> = [for (_ in 0...LFunc.NPHYS) []];
+	public var pendSeg:Array<Int> = [];
+	public var pendOwn:Array<Int> = [];
+	public var pendIdx:Array<Int> = [];
 	public var mFrom:Array<Int> = [];
 	public var mTo:Array<Int> = [];
 	public var mOwn:Array<Int> = [];
 	public var seen:Array<Int> = [];
 	public var conflicts:Array<Int> = [];
 	public var weight:Array<Float> = [];
-	// (not the allocator's: the Mir of the callees a module's functions inline, per worker)
-	public var templates = new haxe.ds.ObjectMap<backend.Ir.FuncInfo, Null<hxmc.Inline.Template>>();
 	// per physical register: whether a call leaves its result there; 1 for
 	// the allocatable float registers, 2 for the integer ones
 	public var isResult:Array<Bool> = [for (_ in 0...LFunc.NPHYS) false];
@@ -507,6 +509,7 @@ class Regalloc {
 			s.oFrom[c].resize(0);
 			s.oTo[c].resize(0);
 			s.oOwn[c].resize(0);
+			s.oPend[c].resize(0);
 		}
 		var isFpr = s.isFpr;
 		var spilled = [];
@@ -597,6 +600,11 @@ class Regalloc {
 				of.resize(k);
 				ot.resize(k);
 				oo.resize(k);
+				var pd = s.oPend[best];
+				k = 0;
+				for (x in 0...pd.length)
+					if (seen[pd[x]] != -2) pd[k++] = pd[x];
+				pd.resize(k);
 				choice = best;
 			}
 			assigned[r] = choice;
@@ -657,10 +665,16 @@ class Regalloc {
 	// range of an interval given it overlaps r's
 	function free(c:Int, r:Int):Bool {
 		if (fixedOverlapSegs(c, r)) return false;
+		var j = segAt[r];
+		var pd = s.oPend[c];
+		if (pd.length > 0) {
+			var rs = segFrom[j];
+			for (a in pd)
+				if (end[a] >= rs && overlaps(a, r)) return false;
+		}
 		var of = s.oFrom[c], ot = s.oTo[c];
 		var no = of.length;
 		if (no == 0) return true;
-		var j = segAt[r];
 		// common: everything there ends before r starts
 		if (ot[no - 1] < segFrom[j]) return true;
 		for (k in j...j + segN[r]) {
@@ -680,6 +694,12 @@ class Regalloc {
 		var of = s.oFrom[c], ot = s.oTo[c], oo = s.oOwn[c];
 		var no = of.length;
 		var j = segAt[r];
+		var rs = segFrom[j];
+		for (a in s.oPend[c])
+			if (end[a] >= rs && seen[a] != st && overlaps(a, r)) {
+				seen[a] = st;
+				out.push(a);
+			}
 		for (k in j...j + segN[r]) {
 			var x = segFrom[k], y = segTo[k];
 			var i = firstEnding(ot, x);
@@ -694,12 +714,20 @@ class Regalloc {
 		}
 	}
 
-	// gives r's ranges to physical register c (merged into its ordered list)
+	// gives r's ranges to physical register c: appended to its ordered list
+	// when they all come after it, else kept pending (whole intervals, merged
+	// in batches: intervals come by start, a merge moves every range after
+	// the merged ones, and one per interval made allocation quadratic with
+	// intervals with holes)
+	static inline var PEND = 16;
+
 	function occupy(c:Int, r:Int) {
 		var of = s.oFrom[c], ot = s.oTo[c], oo = s.oOwn[c];
 		var j = segAt[r], je = j + segN[r];
 		var no = of.length;
-		if (no == 0 || of[no - 1] < segFrom[j]) {
+		var pd = s.oPend[c];
+		var x0 = segFrom[j];
+		if (pd.length == 0 && (no == 0 || of[no - 1] < x0)) {
 			for (k in j...je) {
 				of.push(segFrom[k]);
 				ot.push(segTo[k]);
@@ -707,8 +735,32 @@ class Regalloc {
 			}
 			return;
 		}
-		// the ranges after r's first one move up: merged with r's from there
-		var lo = 0, hi = no, x0 = segFrom[j];
+		// pending intervals that ended before r starts are never asked about
+		// again (later queries start later): dropped
+		var k = 0;
+		for (a in pd)
+			if (end[a] >= x0) pd[k++] = a;
+		pd.resize(k);
+		pd.push(r);
+		if (pd.length < PEND) return;
+		// the pending ranges, by start
+		var ps = s.pendSeg, po = s.pendOwn, idx = s.pendIdx;
+		ps.resize(0);
+		po.resize(0);
+		idx.resize(0);
+		for (a in pd)
+			for (q in segAt[a]...segAt[a] + segN[a]) {
+				idx.push(ps.length);
+				ps.push(q);
+				po.push(a);
+			}
+		pd.resize(0);
+		var sf = segFrom;
+		idx.sort((p, q) -> sf[ps[p]] - sf[ps[q]]);
+		var np = idx.length;
+		// the listed ranges from the first pending one on move up: merged
+		var lo = 0, hi = no;
+		x0 = sf[ps[idx[0]]];
 		while (lo < hi) {
 			var mid = (lo + hi) >> 1;
 			if (of[mid] < x0) lo = mid + 1 else hi = mid;
@@ -726,22 +778,23 @@ class Regalloc {
 			mt[q] = ot[i0 + q];
 			mo[q] = oo[i0 + q];
 		}
-		for (_ in j...je) {
+		for (_ in 0...np) {
 			of.push(0);
 			ot.push(0);
 			oo.push(0);
 		}
-		var w = i0, i = 0, k = j;
-		while (i < nt || k < je) {
-			if (k >= je || i < nt && mf[i] < segFrom[k]) {
+		var w = i0, i = 0, k = 0;
+		while (i < nt || k < np) {
+			if (k >= np || i < nt && mf[i] < sf[ps[idx[k]]]) {
 				of[w] = mf[i];
 				ot[w] = mt[i];
 				oo[w] = mo[i];
 				i++;
 			} else {
-				of[w] = segFrom[k];
-				ot[w] = segTo[k];
-				oo[w] = r;
+				var p = idx[k];
+				of[w] = sf[ps[p]];
+				ot[w] = segTo[ps[p]];
+				oo[w] = po[p];
 				k++;
 			}
 			w++;
