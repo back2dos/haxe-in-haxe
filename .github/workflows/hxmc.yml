@@ -4,7 +4,9 @@
 # runs them on a machine of each target: outputs compared with the golden
 # files (hxmc/test/expected, hxmc/tools/check.py),
 # and the port built by hxmc compiles its own source to the same HXB as the
-# reference compiler (hxmc/tools/selfcheck.py). Only on the hxmc branch.
+# reference compiler (hxmc/tools/selfcheck.py). The corpus is also built as
+# WebAssembly modules (wasm32-wasi) and run under node and wasmtime (the wasm
+# job). Only on the hxmc branch.
 name: hxmc
 
 on:
@@ -119,6 +121,13 @@ jobs:
             python3 hxmc/tools/run.py -v --target $t --stage dist/$t/corpus
           done
 
+      # (WebAssembly needs no runtime object: its runtime is Haxe)
+      - name: Build the corpus as WebAssembly
+        run: |
+          set -ex
+          python3 hxmc/tools/run.py -v --target wasm32-wasi --stage dist/wasm32-wasi/corpus
+          tar czf dist/wasm32-wasi.tar.gz -C dist/wasm32-wasi .
+
       - name: Cross-build the port
         run: |
           set -ex
@@ -172,6 +181,8 @@ jobs:
         with: {name: hxmc-macos-x86_64, path: dist/macos-x86_64.tar.gz, retention-days: 3, if-no-files-found: ignore}
       - uses: actions/upload-artifact@v7
         with: {name: hxmc-macos-arm64, path: dist/macos-arm64.tar.gz, retention-days: 3, if-no-files-found: ignore}
+      - uses: actions/upload-artifact@v7
+        with: {name: hxmc-wasm32-wasi, path: dist/wasm32-wasi.tar.gz, retention-days: 3}
 
   run:
     needs: build
@@ -221,3 +232,38 @@ jobs:
           if [ "$RUNNER_OS" = Windows ]; then root="$(cygpath -w "$RUNNER_TEMP")\\hih"; exe=t/port/haxe.exe; fi
           # (MSYS would rewrite the reference's root, a POSIX path)
           MSYS_NO_PATHCONV=1 python hxmc/tools/selfcheck.py --port "$exe" --src std-x/src --std std-x/std --ref dl/self-ref.hxb --ref-root "$SELF_ROOT" --root "$root" --summary "$GITHUB_STEP_SUMMARY"
+
+  # the WebAssembly corpus (hxmc/README.md, "WebAssembly") under node 22 and
+  # wasmtime, with the default 64 KB nursery and a 16 KB one
+  wasm:
+    needs: build
+    runs-on: ubuntu-24.04
+    env:
+      WASMTIME_VERSION: 38.0.1
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          sparse-checkout: hxmc/tools
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - name: wasmtime
+        run: |
+          set -ex
+          curl -sSfL "https://github.com/bytecodealliance/wasmtime/releases/download/v$WASMTIME_VERSION/wasmtime-v$WASMTIME_VERSION-x86_64-linux.tar.xz" | tar xJ -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/wasmtime-v$WASMTIME_VERSION-x86_64-linux" >> "$GITHUB_PATH"
+      - uses: actions/download-artifact@v8
+        with: {name: hxmc-wasm32-wasi, path: dl}
+      - name: Unpack
+        run: mkdir -p t && tar xzf dl/wasm32-wasi.tar.gz -C t
+      # (node 22: exception handling with exnref is behind a flag; no fast
+      # API calls: hxmc/tools/run.py)
+      - name: Corpus under node
+        if: always()
+        run: python3 hxmc/tools/check.py t/corpus --runner "node --experimental-wasm-exnref --no-turbo-fast-api-calls --no-warnings $PWD/hxmc/tools/wasi.mjs" --summary "$GITHUB_STEP_SUMMARY"
+      - name: Corpus under wasmtime
+        if: always()
+        run: python3 hxmc/tools/check.py t/corpus --runner "wasmtime run -W exceptions=y --dir . --dir / --env RT_MINOR_KB" --summary "$GITHUB_STEP_SUMMARY"
+      - name: Corpus under wasmtime, 16 KB nursery
+        if: always()
+        run: RT_MINOR_KB=16 python3 hxmc/tools/check.py t/corpus --runner "wasmtime run -W exceptions=y --dir . --dir / --env RT_MINOR_KB" --summary "$GITHUB_STEP_SUMMARY"

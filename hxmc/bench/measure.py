@@ -14,7 +14,9 @@ site/bench/haxebench.py (its checkout, $HAXEBENCH, default bin/haxebench), and
 `port`: the port compiling its own source to HXB (site/bench/run.py's "self"
 workload). HXMC_STD (default bin/hxmc/std) and HXMC_BENCH_OUT (default
 bin/hxmc-bench) let a saved earlier tool, its std and runtime object be
-measured beside the current ones.
+measured beside the current ones. --target wasm32-wasi builds WebAssembly
+modules (typed for it) and runs them with --runner node (default) or
+wasmtime.
 """
 import argparse, json, os, resource, shutil, subprocess, sys, time
 from pathlib import Path
@@ -68,17 +70,21 @@ def case_args(case, out):
     return ["-cp", "."] + sum([["-cp", c] for c in cps], []) + ["-main", main] + sum([["-D", x] for x in defs], []), cwd, [], runcwd
 
 
+TARGET = None
+
+
 def build(case):
     out = OUT / case
     out.mkdir(parents=True, exist_ok=True)
     args, cwd, runargs, runcwd = case_args(case, out)
+    tgt = ["-D", "hxmc.target=" + TARGET] if TARGET else []
     hxb = out / "prog.hxb.zip"
-    run([ROOT / "haxe/haxe"] + args + STD + ["--custom-target", f"hxmc={out}/x", "--hxb", hxb, "--no-output"], cwd=cwd)
+    run([ROOT / "haxe/haxe"] + args + STD + ["--custom-target", f"hxmc={out}/x", "--hxb", hxb, "--no-output"] + tgt, cwd=cwd)
     main = args[args.index("-main") + 1]
-    exe = out / "bin-hxmc"
+    exe = out / ("bin-hxmc.wasm" if TARGET and TARGET.startswith("wasm") else "bin-hxmc")
     shutil.rmtree(str(exe) + ".hxmc", ignore_errors=True)
     t = time.perf_counter()
-    run([HXMC, exe, "--hxb-lib", hxb, "-main", main, "--custom-target", "hxmc", "-D", "disable-parallelism"], cwd=ROOT)
+    run([HXMC, exe, "--hxb-lib", hxb, "-main", main, "--custom-target", "hxmc", "-D", "disable-parallelism"] + tgt, cwd=ROOT)
     return exe, time.perf_counter() - t, runargs, runcwd
 
 
@@ -100,12 +106,21 @@ def main():
     ap.add_argument("-n", type=int, default=3)
     ap.add_argument("-c", default=",".join(CASES))
     ap.add_argument("--json")
+    ap.add_argument("--target", help="hxmc.target (wasm32-wasi: run with --runner)")
+    ap.add_argument("--runner", default="node", help="node or wasmtime (wasm32-wasi)")
     a = ap.parse_args()
+    global TARGET
+    TARGET = a.target
+    wasm = bool(TARGET and TARGET.startswith("wasm"))
     results = json.load(open(a.json)) if a.json and os.path.exists(a.json) else {}
     for case in a.c.split(","):
         try:
             exe, ct, runargs, runcwd = build(case)
-            rt = timed([str(exe)] + runargs, runcwd, a.n)
+            pre = []
+            if wasm:
+                pre = ["wasmtime", "run", "-W", "exceptions=y", "-W", "max-wasm-stack=67108864", "--dir", "/", "--env", "PWD=" + str(runcwd)] if a.runner == "wasmtime" else \
+                    ["node", "--experimental-wasm-exnref", "--no-turbo-fast-api-calls", "--stack-size=65500", "--no-warnings", str(ROOT / "hxmc/tools/wasi.mjs")]
+            rt = timed(pre + [str(exe)] + runargs, runcwd, a.n)
             kb = (exe.stat().st_size + 1023) // 1024
             results[case] = {"build": round(ct, 2), "run": round(rt, 3), "kb": kb}
             print(f"{case:16} build {ct:6.2f}s  run {rt:7.3f}s  size {kb:7} KB", flush=True)

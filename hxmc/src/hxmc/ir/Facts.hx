@@ -415,7 +415,7 @@ class Facts {
 	function findNoGc() {
 		var cand = new Map<FuncInfo, Bool>();
 		for (f in p.funcs)
-			if (!f.hasTry) cand.set(f, true);
+			if (!f.hasTry && !f.collects) cand.set(f, true);
 		function exOk(e:Ex):Bool {
 			var ok = switch e {
 				case ECall(g, _): cand.exists(g);

@@ -210,7 +210,7 @@ class Wasi {
 		Heap.free(u);
 	}
 
-	@:hxmc.noGc static function writeInt(fd:Int, v:Int) {
+	@:hxmc.noGc public static function writeInt(fd:Int, v:Int) {
 		var b = Mem.stack(16);
 		var k = 16;
 		if (v == 0) {

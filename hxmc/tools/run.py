@@ -76,11 +76,17 @@ def case_list(names):
     return cases
 
 
+# the cases a WebAssembly module cannot run (hxmc/README.md, "WebAssembly")
+WASM_EXCLUDED = {"ThreadNatives": "no threads on wasm32-wasi", "NetNatives": "no sockets on wasm32-wasi"}
+
+
 def run_case(name, cps, main, args):
     d = OUT / name
     d.mkdir(parents=True, exist_ok=True)
     # (WebAssembly: the program is typed for it, with its runtime)
     wasm = bool(args.target and args.target.startswith("wasm"))
+    if wasm and name in WASM_EXCLUDED:
+        return name, "excluded", WASM_EXCLUDED[name]
     hxb = d / ("prog-" + args.target + ".hxb.zip" if wasm else "prog.hxb.zip")
     src_t = newest(cps)
     t0 = time.perf_counter()
@@ -157,15 +163,17 @@ def main():
         sys.exit("run.py: bin/hxmc/std is missing (python3 hxmc/tools/mkstd.py, or make -f hxmc/Makefile)")
     cases = case_list(a.cases)
     t = time.perf_counter()
-    bad = 0
+    bad = excluded = 0
     with concurrent.futures.ThreadPoolExecutor(a.j) as ex:
         for name, status, detail in ex.map(lambda c: run_case(*c, a), cases):
-            print(f"{name:24} {status:12} {detail if status in ('ok', 'blessed') or not a.v else ''}", flush=True)
-            if status not in ("ok", "blessed"):
+            print(f"{name:24} {status:12} {detail if status in ('ok', 'blessed', 'excluded') or not a.v else ''}", flush=True)
+            if status == "excluded":
+                excluded += 1
+            elif status not in ("ok", "blessed"):
                 bad += 1
                 if a.v:
                     print("    " + detail.replace("\n", "\n    "))
-    print(f"{len(cases) - bad}/{len(cases)} ok, {time.perf_counter() - t:.1f}s")
+    print(f"{len(cases) - bad - excluded}/{len(cases) - excluded} ok" + (f" ({excluded} excluded)" if excluded else "") + f", {time.perf_counter() - t:.1f}s")
     sys.exit(1 if bad else 0)
 
 

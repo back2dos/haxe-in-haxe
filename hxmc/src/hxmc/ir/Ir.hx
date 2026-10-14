@@ -180,6 +180,9 @@ class FuncInfo {
 	public var blocks:Bool = false;
 	public var blocksHere:Bool = false;
 	public var declNoGc:Bool = false; // declared @:hxmc.noGc: Facts.findNoGc fails the build unless noGc
+	// declared @:hxmc.collects: it runs the collector (the entries of a
+	// collector written in Haxe, whose code is otherwise no-GC): never noGc
+	public var collects:Bool = false;
 	public var cSymbol:Null<String>; // @:hxmc.export: the symbol (the runtime's C code calls it)
 	// the Haxe module the function comes from (dot path): hxmc compiles the
 	// functions of a module into one object

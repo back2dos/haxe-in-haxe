@@ -38,13 +38,19 @@ class Heap {
 		Wasm.memset(freeTab, 0, bytes);
 	}
 
-	// memory up to p (grows it)
-	@:hxmc.noGc static function ensure(p:Ptr) {
-		if (!memEnd.ult(p)) return;
-		var need = p.diff(memEnd).toInt();
-		var pages = (need + PAGE - 1) >>> 16;
-		if (Wasm.wasm_memory_grow(pages) < 0) outOfMemory();
+	// memory up to p (grows it): false when it cannot grow so far
+	@:hxmc.noGc static function tryEnsure(p:Ptr):Bool {
+		if (!memEnd.ult(p)) return true;
+		var need = p.diff(memEnd);
+		if (need > ((1 : I64) << 32)) return false;
+		var pages = ((need + (PAGE - 1)) >>> 16).toInt();
+		if (Wasm.wasm_memory_grow(pages) < 0) return false;
 		memEnd = memEnd.add(pages * PAGE);
+		return true;
+	}
+
+	@:hxmc.noGc static function ensure(p:Ptr) {
+		if (!tryEnsure(p)) outOfMemory();
 	}
 
 	@:hxmc.noGc public static function outOfMemory() {
@@ -54,6 +60,13 @@ class Heap {
 
 	// a region of `bytes` (16-aligned, not zeroed when reused)
 	@:hxmc.noGc public static function region(bytes:Int):Ptr {
+		var p = tryRegion(bytes);
+		if (p.isNull()) outOfMemory();
+		return p;
+	}
+
+	// the same, or null when memory cannot grow so far
+	@:hxmc.noGc public static function tryRegion(bytes:Int):Ptr {
 		init();
 		bytes = (bytes + 15) & ~15;
 		for (i in 0...nfree) {
@@ -68,8 +81,8 @@ class Heap {
 			}
 		}
 		var p = top;
+		if (!tryEnsure(top.add(bytes))) return Ptr.nil();
 		top = top.add(bytes);
-		ensure(top);
 		return p;
 	}
 
@@ -134,7 +147,7 @@ class Heap {
 		return c;
 	}
 
-	// the block's header (8 bytes before it): its class, or for a region
+	// the block's header (8 bytes before it): twice its class (even), or for a region
 	// (larger than the largest class) its size + 1
 	@:hxmc.export("malloc") @:hxmc.noGc public static function malloc(n:I64):Ptr {
 		init();
@@ -159,7 +172,7 @@ class Heap {
 		}
 		var blk = arena;
 		arena = arena.add(bs);
-		Mem.setI64(blk, 0, c);
+		Mem.setI64(blk, 0, 2 * c);
 		return blk.add(8);
 	}
 
@@ -170,14 +183,14 @@ class Heap {
 			release(p.add(-16), hdr - 1);
 			return;
 		}
-		var h = classHead(hdr);
+		var h = classHead(hdr >> 1);
 		Mem.setPtr(p, 0, Mem.getPtr(h, 0));
 		Mem.setPtr(h, 0, p);
 	}
 
 	@:hxmc.noGc static function usable(p:Ptr):Int {
 		var hdr = Mem.getI64(p, -8).toInt();
-		return (hdr & 1) != 0 ? hdr - 1 - 16 : (1 << hdr) - 8;
+		return (hdr & 1) != 0 ? hdr - 1 - 16 : (1 << (hdr >> 1)) - 8;
 	}
 
 	@:hxmc.export("realloc") @:hxmc.noGc public static function realloc(p:Ptr, n:I64):Ptr {

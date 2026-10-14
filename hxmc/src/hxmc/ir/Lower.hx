@@ -566,10 +566,11 @@ class Lower {
 	}
 
 	// hxmc's attributes of a function: @:hxmc.noGc (checked by Facts.findNoGc),
-	// @:hxmc.export (its symbol)
+	// @:hxmc.collects (it runs the collector), @:hxmc.export (its symbol)
 	static function fieldAttrs(fi:FuncInfo, cf:TClassField) {
 		if (cf.cfMeta.length == 0) return;
 		fi.declNoGc = hasMeta(":hxmc.noGc", cf.cfMeta);
+		fi.collects = hasMeta(":hxmc.collects", cf.cfMeta);
 		fi.cSymbol = metaString(":hxmc.export", cf.cfMeta);
 	}
 

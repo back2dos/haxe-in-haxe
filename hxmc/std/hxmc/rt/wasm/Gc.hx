@@ -88,6 +88,7 @@ class Gc {
 		if (minorSize < 4096) minorSize = 4096;
 		if (minorSize > MINOR_MAX) minorSize = MINOR_MAX;
 		stats = Wasi.envInt("RT_STATS", -1) >= 0;
+		verifying = Wasi.envInt("RT_VERIFY", -1) >= 0;
 		nurseryBase = Heap.regionZero(MINOR_MAX);
 		youngStart = nurseryBase;
 		setYoungEnd(youngStart.add(minorSize));
@@ -132,10 +133,10 @@ class Gc {
 
 	// ---- allocation
 
-	@:hxmc.export("hxmc_alloc_slow") @:hxmc.noGc static function allocSlowParts(lo:Int, tindex:Int, bytes:Int):Ptr
+	@:hxmc.export("hxmc_alloc_slow") @:hxmc.collects static function allocSlowParts(lo:Int, tindex:Int, bytes:Int):Ptr
 		return allocSlow(((tindex : I64) << 32) | ((lo : I64) & ((((1 : I64) << 32) - 1))), bytes);
 
-	@:hxmc.export("rt_alloc_slow") @:hxmc.noGc static function allocSlow(header:I64, bytes:Int):Ptr {
+	@:hxmc.export("rt_alloc_slow") @:hxmc.collects static function allocSlow(header:I64, bytes:Int):Ptr {
 		var p:Ptr;
 		if (bytes > minorSize >> 2) {
 			// large objects go straight to the old space
@@ -341,10 +342,18 @@ class Gc {
 		fromStart = oldStart;
 		fromEnd = oldPtr;
 		var fromRegion = oldRegion, fromSize = oldRegionSize;
-		// the to-space: room for everything, and for the limit after it
-		var size = 3 * (live + used) + 4 * minorSize + need;
-		if (size < MIN_OLD) size = MIN_OLD;
-		oldRegion = Heap.region(size);
+		// the to-space: room for everything and for growth after it (twice
+		// what may be live: a wasm32 memory has 4 GB), else for everything
+		var want = clampSize(2.0 * (live + used) + 4.0 * minorSize + need);
+		var least = clampSize(1.0 * live + used + need + 65536);
+		if (want < MIN_OLD) want = MIN_OLD;
+		var size = want;
+		oldRegion = Heap.tryRegion(size);
+		if (oldRegion.isNull()) {
+			size = least;
+			oldRegion = Heap.tryRegion(size);
+			if (oldRegion.isNull()) Heap.outOfMemory();
+		}
 		oldRegionSize = size;
 		oldStart = oldRegion;
 		oldPtr = oldStart;
@@ -356,12 +365,16 @@ class Gc {
 		major = false;
 		Heap.release(fromRegion, fromSize);
 		var nowLive = oldPtr.diff(oldStart).toInt();
-		var limit = 3 * nowLive + 4 * minorSize + need;
+		var limit = clampSize(2.0 * nowLive + 4.0 * minorSize + need);
 		if (limit < MIN_OLD) limit = MIN_OLD;
 		if (limit > oldRegionSize) limit = oldRegionSize;
 		oldEnd = oldStart.add(limit);
 		if (stats) Wasi.statLine("gc: major ", majors, nowLive >> 20, limit >> 20);
 	}
+
+	// a size in bytes as an Int, at most a little under 2 GB
+	@:hxmc.noGc static function clampSize(v:Float):Int
+		return v > 2147418112.0 ? 2147418112 : Std.int(v);
 
 	@:hxmc.noGc static function adaptNursery(survived:Int) {
 		if (grownFrom > 0) {
@@ -383,6 +396,8 @@ class Gc {
 	}
 
 	@:hxmc.noGc static function collect(full:Bool, need:Int) {
+		if (verifying) verify(false);
+		if (verifying) checkRemembered();
 		if (full) majorGc(need) else {
 			var before = oldPtr;
 			var m0 = majors;
@@ -391,15 +406,102 @@ class Gc {
 		}
 		Mem.tlsSet("rt_young_ptr", youngStart);
 		Mem.tlsSet("rt_young_limit", youngEnd);
+		if (verifying) verify(true);
 		// the slots the frames left above the stack top (rt_sp_hw)
 		var sp = Mem.tlsGet("rt_sp"), hw = Mem.tlsGet("rt_sp_hw");
 		if (sp.ult(hw)) Wasm.memset(sp, 0, hw.diff(sp));
 		Mem.tlsSet("rt_sp_hw", sp);
 	}
 
+	// RT_VERIFY=1: before and after each collection, the old space is checked
+	// object by object (sane headers; after it, references to nothing young)
+	static var verifying:Bool;
+
+	@:hxmc.noGc static function verify(after:Bool) {
+		var nt = Mem.getI32(Mem.sym("rt_ntypes"), 0);
+		var p = oldStart;
+		var count = 0;
+		while (p.ult(oldPtr)) {
+			var o = p.add(8);
+			var n = nslotsOf(o), k = kindOf(o), t = tindexOf(o);
+			if (k > 2 || t >= nt || oldPtr.diff(o) < ((8 * n) : I64)) bad("gc: verify: bad header (minor, offset, used) ", minors, o.diff(oldStart).toInt(), oldPtr.diff(oldStart).toInt());
+			var pm = k == K_OBJ ? Mem.getPtr(Mem.sym("rt_types"), 112 * t + 24) : Ptr.nil();
+			if (k == K_PARR || !pm.isNull())
+				for (i in 0...n) {
+					if (k == K_OBJ && ((Mem.getI32(pm, 4 * (i >> 5)) >>> (i & 31)) & 1) == 0) continue;
+					var v = Mem.getPtr(o, 8 * i);
+					if (v.isNull()) continue;
+					if (after && inYoung(v)) bad("gc: verify: young reference after a collection (object, slot, type) ", count, i, t);
+					if (!v.ult(oldStart) && v.ult(oldPtr) && kindOf(v) > 2) bad("gc: verify: reference to a bad header (object, slot, type) ", count, i, t);
+				}
+			p = p.add(8 * (n + 1));
+			count++;
+		}
+	}
+
+	// RT_VERIFY=1, before each collection: every young reference in the old
+	// space is in a remembered slot or object (the write barrier missed none)
+	@:hxmc.noGc static function checkRemembered() {
+		var cap = 1;
+		while (cap < 2 * (remLen + robjsLen) + 16)
+			cap <<= 1;
+		var tab = Heap.calloc(cap, 8);
+		inline function add(p:Ptr) {
+			var h = (p.toI64() >> 3).toInt() & (cap - 1);
+			while (!Mem.getPtr(tab, 8 * h).isNull() && Mem.getPtr(tab, 8 * h) != p)
+				h = (h + 1) & (cap - 1);
+			Mem.setPtr(tab, 8 * h, p);
+		}
+		inline function has(p:Ptr):Bool {
+			var h = (p.toI64() >> 3).toInt() & (cap - 1);
+			var r = false;
+			while (!Mem.getPtr(tab, 8 * h).isNull()) {
+				if (Mem.getPtr(tab, 8 * h) == p) {
+					r = true;
+					break;
+				}
+				h = (h + 1) & (cap - 1);
+			}
+			return r;
+		}
+		for (i in 0...remLen)
+			add(Mem.getPtr(rem, 8 * i));
+		for (i in 0...robjsLen)
+			add(Mem.getPtr(robjs, 8 * i));
+		var p = oldStart;
+		var count = 0;
+		while (p.ult(oldPtr)) {
+			var o = p.add(8);
+			var n = nslotsOf(o), k = kindOf(o), t = tindexOf(o);
+			var pm = k == K_OBJ ? Mem.getPtr(Mem.sym("rt_types"), 112 * t + 24) : Ptr.nil();
+			if (k == K_PARR || !pm.isNull()) {
+				if (!has(o))
+					for (i in 0...n) {
+						if (k == K_OBJ && ((Mem.getI32(pm, 4 * (i >> 5)) >>> (i & 31)) & 1) == 0) continue;
+						var v = Mem.getPtr(o, 8 * i);
+						if (!v.isNull() && inYoung(v) && !has(o.add(8 * i))) bad("gc: verify: unremembered young reference (object, slot, type) ", count, i, t);
+					}
+			}
+			p = p.add(8 * (n + 1));
+			count++;
+		}
+		Heap.free(tab);
+	}
+
+	@:hxmc.noGc static function bad(lit:String, a:Int, b:Int, c:Int) {
+		Wasi.writeLit(2, lit);
+		Wasi.writeInt(2, a);
+		Wasi.writeLit(2, " ");
+		Wasi.writeInt(2, b);
+		Wasi.writeLit(2, " ");
+		Wasi.writeInt(2, c);
+		Wasi.writeLit(2, "\n");
+		WasiApi.proc_exit(99);
+	}
+
 	// ---- hxmc.NativeGc
 
-	@:hxmc.export("hxmc_NativeGc_collect") @:hxmc.noGc static function gcCollect(full:Int):Void
+	@:hxmc.export("hxmc_NativeGc_collect") @:hxmc.collects static function gcCollect(full:Int):Void
 		collect(full != 0, 0);
 
 	// (finalisers never run: WebAssembly programs have no resources to free behind values)

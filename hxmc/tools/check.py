@@ -3,13 +3,16 @@
 target (the CI workflow .github/workflows/hxmc.yml: macOS, Windows arm64) and
 compares each output with its golden file (hxmc/test/expected, staged on Linux).
 
-    python3 hxmc/tools/check.py <dir> [--summary <file>]
+    python3 hxmc/tools/check.py <dir> [--summary <file>] [--runner <command>]
+
+WebAssembly modules (m.wasm) run under --runner, e.g. "wasmtime run -W
+exceptions=y --dir . --env RT_MINOR_KB" or node with hxmc/tools/wasi.mjs.
 
 Exits non-zero when a case differs; prints one line per case and, with
 --summary (e.g. $GITHUB_STEP_SUMMARY), the failures with the start of their
 diff in Markdown.
 """
-import argparse, difflib, os, stat, subprocess, sys, time
+import argparse, difflib, os, shlex, stat, subprocess, sys, time
 from pathlib import Path
 
 
@@ -18,17 +21,18 @@ def main():
     ap.add_argument("dir")
     ap.add_argument("--summary")
     ap.add_argument("--timeout", type=int, default=300)
+    ap.add_argument("--runner", default="", help="the command that runs each executable (WebAssembly)")
     a = ap.parse_args()
     env = dict(os.environ, RT_MINOR_KB=os.environ.get("RT_MINOR_KB", "64"))
     cases = sorted(d for d in Path(a.dir).iterdir() if (d / "expected.txt").exists())
     bad = []
     t0 = time.perf_counter()
     for d in cases:
-        exe = d / "m.exe" if (d / "m.exe").exists() else d / "m"
+        exe = next((d / n for n in ("m.exe", "m.wasm") if (d / n).exists()), d / "m")
         exe.chmod(exe.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
         t = time.perf_counter()
         try:
-            r = subprocess.run([str(exe.resolve())], cwd=d, env=env, capture_output=True, timeout=a.timeout)
+            r = subprocess.run(shlex.split(a.runner) + [str(exe.resolve())], cwd=d, env=env, capture_output=True, timeout=a.timeout)
             got = f"exit {r.returncode}\n".encode() + r.stdout
             err = r.stderr
         except subprocess.TimeoutExpired:
