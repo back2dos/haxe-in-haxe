@@ -472,6 +472,34 @@ class MirBuild {
 
 	// ---- locals
 
+	static function assignedInTry(fn:FuncInfo):Map<Int, Bool> {
+		var out = new Map<Int, Bool>();
+		var depth = 0;
+		function ex(e:Ex) {}
+		function st(s:Stmt) {
+			switch s {
+				case SSet(l, _) if (depth > 0):
+					out.set(l.id, true);
+				case STry(body, catches):
+					depth++;
+					for (x in body)
+						st(x);
+					depth--;
+					for (c in catches) {
+						if (depth > 0) out.set(c.l.id, true);
+						for (x in c.body)
+							st(x);
+					}
+					return;
+				case _:
+			}
+			backend.EmitC.iterStmt(st, ex, s);
+		}
+		for (s in fn.body)
+			st(s);
+		return out;
+	}
+
 	function readLocal(l:Local):Int {
 		var s = refSlot.get(l);
 		if (s != null) return loadM(Opt.MFrame, I64, 8, fr, 8 * s);
@@ -585,12 +613,16 @@ class MirBuild {
 				}
 			}
 		}
-		if (fn.hasTry)
+		// try functions: a scalar local assigned inside a try body lives in
+		// memory, so that what a second return of setjmp finds is its latest
+		// value (C makes every local volatile); the others are SSA values,
+		// which are immutable (in a slot or a callee-saved register across
+		// setjmp, both as they were at the call)
+		if (fn.hasTry) {
+			var inTry = assignedInTry(fn);
 			for (l in fn.args.concat(fn.locals))
-				if (!refSlot.exists(l)) {
-					var t = mty(l.ty);
-					memSlot.set(l, f.slot(8, 8));
-				}
+				if (!refSlot.exists(l) && inTry.exists(l.id)) memSlot.set(l, f.slot(8, 8));
+		}
 		for (i in 0...fn.args.length)
 			writeLocal(fn.args[i], params[i]);
 		if (fn.hasTry)
