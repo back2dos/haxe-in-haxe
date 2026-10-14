@@ -128,6 +128,17 @@ class LinkPE {
 		// winpthreads' initialization), 0; kept together by their names in .data
 		var extra = new Obj();
 		extra.sections.push(thunks);
+		// (diagnostics: an entry point that returns 42 at once)
+		var retEntry = new Section(".text$hxmc_ret42", Text, 16);
+		if (arm) {
+			retEntry.buf.u32(0x52800540); // mov w0, #42
+			retEntry.buf.u32(0xD65F03C0); // ret
+		} else {
+			retEntry.buf.u8(0xb8); // mov eax, 42
+			retEntry.buf.u32(42);
+			retEntry.buf.u8(0xc3);
+		}
+		extra.sections.push(retEntry);
 		var listHead = new Map<String, Section>();
 		for (l in ["ctor", "dtor"]) {
 			var head = new Section(".data$hxmc_" + l + "0", Data, 8);
@@ -223,14 +234,14 @@ class LinkPE {
 			if (t.abs) return t.offset;
 			return addr.get(t.section) + t.offset;
 		};
-		// HXMC_MAP=<file>: the address of every code symbol (debugging; no
+		// HXMC_MAP=<file>: the address of every symbol (debugging; no
 		// symbol table is written in PE files)
 		var mapFile = Sys.getEnv("HXMC_MAP");
 		if (mapFile != null) {
 			var m = new StringBuf();
 			for (o in objs)
 				for (s in o.symbols)
-					if (s.section != null && s.section.kind == Text && addr.exists(s.section))
+					if (s.section != null && addr.exists(s.section))
 						m.add(StringTools.hex(addr.get(s.section) + s.offset, 8) + " " + s.name + "\n");
 			sys.io.File.saveContent(mapFile, m.toString());
 		}
@@ -353,7 +364,7 @@ class LinkPE {
 		h.u32(sizes[6]); // SizeOfUninitializedData
 		var e = globals.get(entry);
 		if (e == null) throw "hxmc: link: no entry point " + entry;
-		h.u32(symAddr(e) - BASE);
+		h.u32(diag("ret42") ? addr.get(retEntry) - BASE : symAddr(e) - BASE);
 		h.u32(starts[0]); // BaseOfCode
 		h.u64(BASE + imgLo, imgHi); // ImageBase
 		h.u32(SECT);
@@ -387,7 +398,7 @@ class LinkPE {
 		if (sizes[2] > 0 && !diag("nopdata")) dirs[3] = [starts[2], sizes[2]];
 		if (sizes[7] > 0) dirs[5] = [starts[7], sizes[7]];
 		var tlsUsed = globals.get("_tls_used");
-		if (tlsUsed != null) dirs[9] = [symAddr(tlsUsed) - BASE, 40];
+		if (tlsUsed != null && !diag("notls")) dirs[9] = [symAddr(tlsUsed) - BASE, 40];
 		for (d in dirs) {
 			h.u32(d[0]);
 			h.u32(d[1]);

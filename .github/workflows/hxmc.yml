@@ -149,7 +149,7 @@ jobs:
       - name: Windows arm64 diagnostics
         run: |
           set -ex
-          for v in default lowbase fixed nopdata bssdata lowbase,fixed,nopdata,bssdata; do
+          for v in default ret42 notls ret42,notls nopdata,notls; do
             mkdir -p dist/windows-arm64/diag/$v
             HXMC_PE_DIAG=$v bin/hxmc/hxmc dist/windows-arm64/diag/$v/m.exe --hxb-lib bin/hxmc-t/Hello/prog.hxb.zip -main Hello --custom-target hxc -D disable-parallelism -D hxmc.target=windows-arm64
             rm -rf dist/windows-arm64/diag/$v/m.exe.hxmc
@@ -248,7 +248,7 @@ jobs:
         if: always() && hashFiles('t/diag/**') != ''
         run: |
           for d in t/diag/*/; do
-            python -c "import subprocess,sys
+            HXMC_TRACE=1 python -c "import subprocess,sys
           try:
               r = subprocess.run([sys.argv[1]], capture_output=True, timeout=60); print(sys.argv[1], 'exit', r.returncode, r.stdout[:200], r.stderr[:300])
           except Exception as e: print(sys.argv[1], 'FAILED', e)" "$(cygpath -w "$PWD/$d")m.exe" || true
@@ -264,4 +264,5 @@ jobs:
           exe=t/port/haxe
           if [ "$RUNNER_OS" = Linux ]; then sudo mkdir -p "$root" && sudo chown "$USER" "$root"; fi
           if [ "$RUNNER_OS" = Windows ]; then root="$(cygpath -w "$RUNNER_TEMP")\\hih"; exe=t/port/haxe.exe; fi
-          python hxmc/tools/selfcheck.py --port "$exe" --src src --std std-x/std --ref dl/self-ref.hxb --ref-root "$SELF_ROOT" --root "$root" --summary "$GITHUB_STEP_SUMMARY"
+          # (MSYS would rewrite the reference's root, a POSIX path)
+          MSYS_NO_PATHCONV=1 python hxmc/tools/selfcheck.py --port "$exe" --src src --std std-x/std --ref dl/self-ref.hxb --ref-root "$SELF_ROOT" --root "$root" --summary "$GITHUB_STEP_SUMMARY"

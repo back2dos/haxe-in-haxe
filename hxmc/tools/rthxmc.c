@@ -50,7 +50,13 @@ static LONG CALLBACK hxmc_crash(EXCEPTION_POINTERS *e) {
 static void NTAPI hxmc_crash_init(PVOID h, DWORD reason, PVOID r) {
 	(void)h;
 	(void)r;
-	if (reason == DLL_PROCESS_ATTACH) AddVectoredExceptionHandler(0, hxmc_crash);
+	if (reason != DLL_PROCESS_ATTACH) return;
+	AddVectoredExceptionHandler(0, hxmc_crash);
+	char v[4];
+	if (GetEnvironmentVariableA("HXMC_TRACE", v, sizeof v) > 0) {
+		DWORD n;
+		WriteFile(GetStdHandle(STD_ERROR_HANDLE), "hxmc: started\n", 14, &n, NULL);
+	}
 }
 __attribute__((section(".CRT$XLB"), used)) PIMAGE_TLS_CALLBACK hxmc_crash_tls = hxmc_crash_init;
 #endif
