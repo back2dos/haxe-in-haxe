@@ -201,6 +201,24 @@ reflection code), formatter_noio 1388 (1382), port 19819 (19854). Build
 HXB to read and the runtime's exported functions lowered and compiled
 every time), port 5.84 -> 6.00 s.
 
+### hxmc: stack maps instead of the shadow stack (2026-10-14, branch hxmc)
+
+hxmc's frames keep their references in root slots found through frame
+descriptors and frame-pointer chains (hxmc/README.md, "Stack maps"); the
+C runtime keeps its shadow stack. Locally: the corpus (72 programs) 72/72
+on linux-x86_64, linux-arm64 (qemu) and windows-x86_64 (wine), cross
+builds for macos-x86_64, macos-arm64 and windows-arm64; the corpus under
+16, 64 and 256 KB nurseries (216/216 on x86-64, 144/144 under qemu and
+wine with 16 and 256 KB), also with every frame described and the walk
+checked (`HXMC_FRAMES=all`, `RT_FRAMES_STRICT=1`); ThreadNatives 300 runs
+(strict); the hxmc-built port's self-compile gives the reference's HXB
+(514 modules, byte-identical, also with a 256 KB nursery); the tool is a
+fixpoint. Against the runtime-in-Haxe milestone: instructions
+mandelbrot_anon -5.6%, binarytrees -1.6%, formatter_noio -1.4%, bcrypt
+-0.2%, alloc and json 0%, nbody +0.3%, sha256 +1.3%, port +0.8%; run times
+within the code-layout noise; port 19819 -> 19623 KB, small programs
++0-8 KB (page rounding); building from HXB unchanged. CI: CI_RUN.
+
 ## Target generators
 
 Every target also compiles upstream's unit suite identically (`unit-targets.py`, above).

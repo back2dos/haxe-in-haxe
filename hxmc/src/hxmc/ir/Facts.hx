@@ -65,11 +65,15 @@ class Facts {
 		var n = cnames.get(f);
 		if (n != null) return n;
 		if (f.cSymbol != null) {
-			// @:hxmc.export: the runtime's C code calls it by this name
+			// @:hxmc.export: the runtime's C code calls it by its C name, which
+			// is the entry that DataGen.exportEntries wraps around it (stack
+			// maps: StackMaps.entry); the program's code calls it directly
 			if (usedCNames.exists(f.cSymbol)) throw "hxmc: two functions export " + f.cSymbol;
 			usedCNames.set(f.cSymbol, true);
-			cnames.set(f, f.cSymbol);
-			return f.cSymbol;
+			n = f.cSymbol + "$hx";
+			usedCNames.set(n, true);
+			cnames.set(f, n);
+			return n;
 		}
 		var base = "F_" + ident(f.name);
 		n = base;
@@ -444,6 +448,43 @@ class Facts {
 		}
 		for (f in p.funcs)
 			f.noGc = cand.exists(f);
+		// the functions that enter a safe region, or call one that does (one
+		// walk of the bodies: the direct ones and the callers, then the
+		// callers' closure)
+		var callers = new Map<FuncInfo, Array<FuncInfo>>();
+		var work:Array<FuncInfo> = [];
+		for (f in p.funcs) {
+			var here = false;
+			function ex(e:Ex) {
+				switch e {
+					case ECallHost("rt_blocking_enter", _, _): here = true;
+					case ECall(g, _):
+						var cs = callers.get(g);
+						if (cs == null) callers.set(g, cs = []);
+						if (cs.length == 0 || cs[cs.length - 1] != f) cs.push(f);
+					case _:
+				}
+				Facts.iterEx(ex, e);
+			}
+			function st(s:Stmt)
+				Facts.iterStmt(st, ex, s);
+			for (s in f.body)
+				st(s);
+			if (here) {
+				f.blocksHere = f.blocks = true;
+				work.push(f);
+			}
+		}
+		while (work.length > 0) {
+			var g = work.pop();
+			var cs = callers.get(g);
+			if (cs != null)
+				for (c in cs)
+					if (!c.blocks) {
+						c.blocks = true;
+						work.push(c);
+					}
+		}
 		// @:hxmc.noGc: a promise the runtime's Haxe code relies on (raw
 		// addresses kept across calls), checked
 		for (f in p.funcs)

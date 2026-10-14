@@ -9,16 +9,26 @@ what it is, why it matters and what it needs. Current state is in
 The next performance steps after the runtime moves to Haxe; both are in
 the code generator and help every target.
 
-### Stack maps instead of the shadow stack
+### Stack maps instead of the shadow stack (done)
 
-Measured: up to 21% fewer instructions (mandelbrot_anon), 11% binarytrees,
-9% formatter; estimated real gain 5–10% on call- and allocation-heavy
-code. The shadow stack is also the largest remaining size item, about
-3 MB of the port's code. Design (OCaml-style): references live across
-collecting calls in frame slots, descriptors keyed by return address and
-registrable per code region, frame-pointer walk, Haxe→C transitions
-recorded so the walk skips C frames, C runtime keeps a shadow stack for
-its own roots. hxc and a WebAssembly target keep the shadow stack.
+Landed (README, "Stack maps"): root slots in frames, frame records, a
+descriptor table per code region, frameless thunks recording the last
+frame before C calls, entries for C's calls into Haxe. Measured against
+the shadow stack: up to 5.6% fewer instructions (mandelbrot_anon), +0.8%
+on the port, 196 KB less code in the port. Left:
+
+- Per-call-site liveness (descriptors per return address instead of per
+  function): no zeroing of root slots, references in registers across
+  calls that only maybe collect; larger tables.
+- Frame records only where needed: a function that collects only on a
+  slow path (an array access's) pays its record on every call (nbody,
+  sha256); its descriptor could give its frame size instead, so the walk
+  passes it without a record.
+- A cheaper walk: the port's walks cost more than the shadow stack's scan
+  (frames without references are visited too); frames not resumed since
+  the last minor collection hold no young references (a watermark).
+
+The collector itself stays C (README, "Runtime in Haxe").
 
 ### Escape analysis
 

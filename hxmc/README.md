@@ -19,9 +19,9 @@ written directly) and x86-64 and arm64 macOS (Mach-O against libSystem,
 ad-hoc signed); the port built by hxmc compiles itself to byte-identical
 HXB (see "Targets" for how each is checked), and hxmc builds itself.
 Run time is near clang -O2 on hxc's C, executables are about 10% larger
-than clang -O2's dynamic ones (static, runtime included). Stack maps,
-deeper incremental rebuilds, the haxelib, APE builds and C interop are
-deferred (see "Status").
+than clang -O2's dynamic ones (static, runtime included). Deeper
+incremental rebuilds, the haxelib, APE builds and C interop are deferred
+(see "Status").
 
 ## Design
 
@@ -55,10 +55,11 @@ HXB --(port: --hxb-lib)--> typed AST --(ir.Lower)--> hxmc IR --(Prep: ir.Facts)
 
 Conventions (inherited from hxc, whose C used the same runtime):
 
-- GC roots: reference locals live across a GC point are shadow-stack slots
-  (`fr[k]`, `Roots`); cold sites (`SCold`) store the live references
-  on the shadow stack only on the slow path (in spare slots of the
-  function's frame when it has one). No stack maps (deferred).
+- GC roots: reference locals live across a GC point are root slots of
+  the function's frame (`fr[k]`, `Roots`), which the collector finds
+  through stack maps (see "Stack maps"); cold sites (`SCold`) store the
+  live references in spare root slots only on the slow path. The C part
+  of the runtime keeps its references on a shadow stack (`RT_ROOT`).
 - Exceptions: `try` is the runtime's `rt_handler` with the C library's
   `_setjmp` (jmp_buf layout per target); in functions with a `try` a
   scalar assigned in a try body and referenced outside it lives in memory,
@@ -175,8 +176,8 @@ intrinsics and uses them at once needs a tool that knows them: bootstrap
 | `Atomics.hx`: the haxe.atomic cells (`hxmc.NativeAtomic`) over `Atomic` | `rt_thread.c` | the rest of `rt_thread.c`: see below |
 | `WinSys.hx`, `WinNet.hx` (`@:hxmc.windows`): the same over the UCRT, kernel32 and Winsock (wide strings are Haxe's UTF-16 units) | `rt_sys_win.c`, `rt_net_win.c` | `rt_win.c`: the Winsock error mapping and WSAStartup, shared with TLS and the scheduler |
 
-Still C (6.3k lines with the libc glue, from 11.7k): the collector and
-allocator (`rt.c`), the libuv binding for eval.luv (`rt_uv.c`), TLS over
+Still C (6.4k lines with the libc glue, from 11.7k): the collector and
+allocator (`rt.c`) and the walk of the stack maps (`rt_frames.c`), the libuv binding for eval.luv (`rt_uv.c`), TLS over
 the platform's library (`rt_ssl.c`), the debug census (`rt_census.c`),
 `hx_format_float`, and threads (`rt_thread.c`): thread start and exit,
 the stop-the-world handshake with the collector (safepoints, safe regions,
@@ -185,10 +186,14 @@ root scanning of every thread), park/unpark, the main stack switch
 natives. Those are pthread and SRW-lock objects (sizes and layouts differ
 per C library), finalized by the collector, and the code is the
 collector's other half; moving it means moving `rt.c` with it. The
-collector itself stays C for now: it runs while no Haxe code may (the
-world is stopped, objects are being moved), so it would need a no-GC
-Haxe subset with function pointers and static non-heap tables, for no
-gain in speed (allocation's fast path is already inline code).
+collector itself stays C (decided after the stack maps, stage 5b): it
+runs while no Haxe code may (the world is stopped, objects are being
+moved), so it would need no-GC Haxe over raw memory with calls through
+code pointers, its copying and scanning loops would at best match clang
+-O2's, and it would have to move with the stop-the-world handshake of
+`rt_thread.c`; nothing in speed or size would improve (allocation's fast
+path is already inline code, and the roots are found through the stack
+maps either way).
 
 ## Building
 
@@ -434,23 +439,90 @@ What closed the gaps (this round):
 - Size: section garbage collection of the runtime object, no symbol table
   unless asked, slow paths that spill into their function's frame instead
   of pushing one, one stub per allocation (header and size) instead of
-  three immediates per site, one return block per function with a frame,
-  shared epilogues, x + constant folded into memory operands. The port went
-  from 23.5 MB to 19.9 MB (clang -O2: 18.1 MB). `HXMC_SIZE_STATS=1` prints
-  where the bytes are: the shadow stack (frame slot loads and stores,
-  thread-local push and pop) is the largest remaining item, about 3 MB.
+  three immediates per site, shared epilogues, x + constant folded into
+  memory operands. The port went from 23.5 MB to 19.9 MB (clang -O2:
+  18.1 MB). `HXMC_SIZE_STATS=1` prints where the bytes are (root slots,
+  frame records and descriptors included).
 - Compile time: no quadratic passes (batched occupancy merges in the
   allocator, marks and arrays instead of int maps): single-thread code
   generation of the port 9.1 s -> ~7 s after inlining and Opt landed.
 
-## Stack maps: what the shadow stack costs (2026-10-14)
+## Stack maps (2026-10-14)
 
-Upper bound, measured before building stack maps: each case built normally
-and with `HXMC_NOSHADOW=1` (no shadow-stack frames: references stay in SSA
-values; correct only while nothing collects), both run with a 6-10 GB
-nursery so that nothing collects (`RT_STATS` shows 0 collections).
-Instructions executed (callgrind; wall time is dominated by page faults
-of the huge nursery in this setup):
+The collector finds the references of hxmc's frames through stack maps
+(`src/hxmc/StackMaps.hx`, `rt/rt_frames.c`); before, generated code pushed
+them on a shadow stack (thread-local pointer, push and pop per frame, a
+high-water mark).
+
+- Root slots: the references a function keeps across GC points live in
+  slots of its frame (`MFunc.rootSlots`), null or valid whenever it calls:
+  locals that never live at the same time share a slot (`Roots.assign`),
+  and only the slots a GC point may see unassigned, or that are read
+  unassigned, start null (`Roots.needZero`; x86-64 pushes them as zeros,
+  arm64 stores pairs of xzr). Never callee-saved registers. A call during
+  which nothing collects keeps the slots' values in registers (`Opt`:
+  `MIns.keepsFrame`).
+- Frame records: a function with a call during which a collection may
+  walk the stack has one (x86-64: `push rbp; mov rbp, rsp`, frame slots
+  then addressed from rbp; arm64 always had x29/x30), on all six targets;
+  the other x86-64 functions may allocate rbp.
+- Descriptors (12 bytes: the function by a pc-relative offset, its length,
+  the slots' place below the frame pointer and their number) for the
+  functions with root slots and the entries, in a `.hxmc.frames` section
+  per object; the driver concatenates them into one table between
+  `hxmc_frames_start` and `hxmc_frames_end` (the ELF linker keeps those of
+  the functions it keeps); the runtime sorts them at the first collection
+  and can register more regions (`rt_frames_register`, for code made at
+  run time).
+- Transitions: a call of a C function that may collect or wait in a safe
+  region goes through a thunk (one per function and signature,
+  `hxmc_tr$...`), as the allocation stubs: without a frame, it stores the
+  caller's frame pointer and return address in `rt_last_fp`/`rt_last_pc`,
+  where the walk starts, and jumps to the function (macOS, whose
+  thread-locals need a call: a compiled thunk with a frame that records
+  itself); only `rt_blocking_enter` records its caller at the call (the
+  safe region outlasts the call). The walk looks addresses up one byte
+  back, through a cache. Functions C calls are entries (`main`, the program's body, an
+  entry per exported runtime function under its C name, `DataGen`): they
+  save the record in their frame and restore it, and the walk continues
+  from the saved record past the C frames. Exceptions need no restoring
+  (C handlers restore the record with the shadow stack).
+- Checks: `HXMC_FRAMES=all` describes every frame with a record and
+  `RT_FRAMES_STRICT=1` then fails a walk that reaches an undescribed one
+  (the corpus under 16 and 64 KB nurseries, ThreadNatives 300 runs).
+
+Results against the runtime-in-Haxe milestone (stage 4), instructions
+(callgrind) and sizes:
+
+| case | instructions | size KB |
+| --- | --- | --- |
+| mandelbrot_anon | 12.31 G -> 11.62 G (-5.6%) | 129 -> 137 |
+| binarytrees | 6.35 G -> 6.25 G (-1.6%) | 112 -> 116 |
+| formatter_noio | 40.68 G -> 40.12 G (-1.4%) | 1388 -> 1380 |
+| bcrypt | 26.92 G -> 26.85 G (-0.2%) | 356 -> 360 |
+| alloc | 3.269 G -> 3.269 G (0%) | 117 -> 117 |
+| json | 3.753 G -> 3.754 G (0%) | 194 -> 190 |
+| nbody | 9.91 G -> 9.94 G (+0.3%) | 117 -> 125 |
+| sha256 | 2.58 G -> 2.61 G (+1.3%) | 330 -> 330 |
+| port (self-compile) | 49.10 G -> 49.47 G (+0.8%) | 19819 -> 19623 |
+
+Run times stay within the code-layout noise (5-7% on this VM); the small
+programs' extra KB are page rounding (text +2 KB). The port's walks cost
+0.9 G instructions against 0.7 G for the shadow stack's scan (a walk
+visits the frames without references too). nbody and sha256 pay the frame
+record of functions that only collect on a slow path (an array access's).
+Building from HXB: unchanged (port 6.2 s).
+
+The size gain expected from the measurement below came only in part (port
+-196 KB): most of the shadow stack's code was the traffic of references
+kept across calls, which stays (stores to and loads from root slots); what
+went (the thread-local push, pop and high-water check per frame) is partly
+paid back by frame records, zeroing and the descriptors.
+
+The measurement made before (each case built normally and with
+`HXMC_NOSHADOW=1`, no frames: references in SSA values, correct only while
+nothing collects, run with a nursery large enough that nothing collects;
+instructions, callgrind):
 
 | case | with frames | without | saved |
 | --- | --- | --- | --- |
@@ -460,12 +532,6 @@ of the huge nursery in this setup):
 | json | 4.39 G | 4.23 G | 4% |
 | alloc | 9.42 G | 9.42 G | 0% |
 | nbody | 10.19 G | 10.19 G | 0% |
-
-Stack maps keep part of this (references live across calls still go to
-frame slots, but no frame push/pop, no stores of unchanged references, no
-reloads after calls that do not collect): deferred. Code size adds to the
-case: the shadow stack's frame traffic and thread-local push/pop are about
-3 MB of the port's 18 MB of code (`HXMC_SIZE_STATS=1`).
 
 ## Step 0: how much optimization is needed (2026-10-13)
 
@@ -536,9 +602,6 @@ Done:
 
 Deferred:
 
-- Stack maps (frame descriptors instead of the shadow stack): measured at
-  5-10% run time on allocation-heavy code and about 3 MB of the port's
-  code (the largest size item left); design in "Stack maps" above.
 - Incremental rebuilds beyond what is there: the one-edit floor (2.7 s, 2.25 s
   through the server) is the front half (typing, lowering, the
   preparation, keys, data, link), not code generation.
