@@ -167,6 +167,9 @@ included) is byte-identical to the one the hxc-built tool wrote before.
 The port's sources accept `target.name == "hxmc"` beside "hxc" where they
 use host natives (imports of either target's externs); for the hxc, Eval,
 HashLink and JavaScript builds the typed program is unchanged.
+CI (run 38539555994, which bootstraps the tool from the reference compiler
+on every run): build, fixpoint and all six target jobs green (corpus 67/67
+and the port's self-compile on each target's machine).
 
 ## Target generators
 
