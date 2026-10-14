@@ -329,7 +329,9 @@ class Driver {
 		stats(t0, t1, t2);
 		var data = new Obj();
 		var demit = Target.emitter(abi, data);
-		new DataGen(prep, abi, data, mf -> compileMir(mf, demit)).run();
+		var dg = new DataGen(prep, abi, data, mf -> compileMir(mf, demit));
+		dg.run();
+		dg.allocStubs(objs, demit);
 		var t3 = haxe.Timer.stamp();
 		var rtPath = o.rtObj != null ? o.rtObj : Options.toolDir() + "rt/" + abi.name + "/rt.o";
 		if (!sys.FileSystem.exists(rtPath)) throw "hxmc: the runtime object " + rtPath + " is missing (hxmc/tools/mkrt.sh)";
@@ -374,7 +376,9 @@ class Driver {
 		// the C of the other functions (it may add string literals), then the data
 		for (f in p.funcs)
 			if (!native.exists(f)) prep.cBody(f);
-		new DataGen(prep, abi, obj, mf -> compileMir(mf, emit)).run();
+		var dg = new DataGen(prep, abi, obj, mf -> compileMir(mf, emit));
+		dg.run();
+		dg.allocStubs([], emit);
 		sys.io.File.saveBytes(out + ".o", ElfWriter.write(obj, abi.arm));
 		sys.io.File.saveContent(out + ".c", CWriter.write(prep, f -> native.exists(f), false));
 		var rt = o.rtDir;

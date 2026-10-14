@@ -348,6 +348,29 @@ class DataGen {
 		}
 	}
 
+	// the allocation stubs the program's code calls (MirBuild.ALLOC_STUB):
+	// each passes its header words and size to hxmc_alloc_slow, so an
+	// allocation site's slow path is one call (after run: hx_main_body allocates)
+	public function allocStubs(objs:Array<Obj>, emit:Target.Emitter) {
+		var names = new Map<String, Bool>();
+		for (o in objs.concat([obj]))
+			for (s in o.symbols)
+				if (s.section == null && !s.abs && StringTools.startsWith(s.name, MirBuild.ALLOC_STUB)) names.set(s.name, true);
+		var list = [for (n in names.keys()) n];
+		list.sort((a, b) -> a < b ? -1 : a > b ? 1 : 0);
+		for (n in list) {
+			var parts = n.substr(MirBuild.ALLOC_STUB.length).split("$");
+			var lo = Std.parseInt(parts[0]), bytes = Std.parseInt(parts[2]);
+			var ty = parts[1];
+			var sym = StringTools.startsWith(ty, "#") ? null : ty;
+			if (emit.allocStub(n, lo, sym, sym == null ? Std.parseInt(ty.substr(1)) : 0, bytes)) continue;
+			compile(MirBuild.synthetic(prep, abi, n, [], I64, (b, _) -> {
+				var t = StringTools.startsWith(ty, "#") ? b.iconst(Std.parseInt(ty.substr(1))) : b.idConst(ty, 0);
+				b.ret(b.call("hxmc_alloc_slow", [b.iconst(lo), t, b.iconst(bytes)], I64));
+			}));
+		}
+	}
+
 	function mainBody() {
 		compile(MirBuild.synthetic(prep, abi, "hx_main_body", [], Void, (b, _) -> {
 			for (i in 0...p.globals.length) {

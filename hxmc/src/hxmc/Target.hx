@@ -11,6 +11,9 @@ interface Selector extends Regalloc.RegTarget {
 
 interface Emitter {
 	function func(f:LFunc, usedRegs:Array<Bool>, global:Bool):Obj.Symbol;
+	// an allocation stub (DataGen.allocStubs) written directly: false when
+	// the target has no such writer (the stub is then a compiled function)
+	function allocStub(name:String, lo:Int, tySym:Null<String>, tyVal:Int, bytes:Int):Bool;
 }
 
 class Target {

@@ -1128,8 +1128,10 @@ class MirBuild {
 		cur = slow;
 		var list = coldList;
 		var sp = spillOpen(list, 0);
-		// (the header is assembled in the runtime, rthxmc.c)
-		var r = call("hxmc_alloc_slow", [iconst(hdrLo(n, kind)), tyConst(tidx), iconst(bytes)], I64);
+		// (the header is assembled in the runtime, rthxmc.c; a stub per
+		// header and size passes it, DataGen.allocStubs: one call here)
+		var ts = p.tySym(tidx);
+		var r = call(ALLOC_STUB + hdrLo(n, kind) + "$" + (ts != null ? ts : "#" + tidx) + "$" + bytes, [], I64);
 		spillClose(list, sp);
 		writeVar(res, cur, r);
 		jmp(join);
@@ -1147,6 +1149,9 @@ class MirBuild {
 	}
 
 	var spillBase = -1; // the frame's spill slots (none: pushed on the slow path)
+
+	// the allocation slow path's stubs: hxmc_new$<header low word>$<type symbol or #index>$<bytes>
+	public static inline var ALLOC_STUB = "hxmc_new$";
 
 	// stores the cold site's references in a pushed area (null: none)
 	function spillOpen(list:Null<Array<Local>>, extra:Int):Int {

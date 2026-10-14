@@ -31,6 +31,9 @@ class Emit implements hxmc.Target.Emitter {
 	var saved:Array<Int>;
 	var saveOff:Array<Int>;
 
+	public function allocStub(name:String, lo:Int, tySym:Null<String>, tyVal:Int, bytes:Int):Bool
+		return false;
+
 	public function func(f:LFunc, usedRegs:Array<Bool>, global:Bool):Symbol {
 		text.buf.align(16, 0);
 		var start = text.buf.len;

@@ -164,6 +164,18 @@ class Emit implements hxmc.Target.Emitter {
 		return sym;
 	}
 
+	// the arguments of hxmc_alloc_slow, then a jump to it (no frame: 20 bytes)
+	public function allocStub(name:String, lo:Int, tySym:Null<String>, tyVal:Int, bytes:Int):Bool {
+		var start = text.buf.len;
+		a.movImm32(win ? 1 : 7, lo); // rcx / rdi
+		if (tySym != null) a.isym = obj.sym(tySym);
+		a.movImm32(win ? 2 : 6, tySym != null ? 0 : tyVal); // rdx / rsi
+		a.movImm32(win ? 8 : 2, bytes); // r8 / rdx
+		a.jmpSym(obj.sym("hxmc_alloc_slow"));
+		obj.define(name, text, start, text.buf.len - start, true);
+		return true;
+	}
+
 	function mem(i:LIns):Mem {
 		if (i.secrel != null) {
 			var m = new Mem(i.base, i.disp);
