@@ -235,7 +235,7 @@ class FnLower {
 	// runtime functions that neither allocate nor call back into Haxe code
 	public static var PURE = [
 		"hx_str_eq" => true, "hx_str_cmp" => true, "hx_dyn_eq" => true, "hx_dyn_cmp" => true, "hx_is" => true, "String_length" => true,
-		"String_charCodeAt_i" => true, "hx_str_hash" => true, "hxmc_Native_strHash" => true, "hxmc_Native_objHash" => true, "hxmc_Native_refEq" => true,
+		"String_charCodeAt_i" => true, "hx_str_hash" => true,
 		"hx_unbox_int" => true, "hx_unbox_float" => true, "hx_unbox_bool" => true
 	];
 	// the Math natives: pure, static inline in rt.h

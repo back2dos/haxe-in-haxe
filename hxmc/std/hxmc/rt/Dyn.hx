@@ -535,7 +535,7 @@ class Dyn {
 		return t == T_BOXI64 || t == T_BOXINT;
 	}
 
-	@:hxmc.host("hxmc_Native_isInt64") @:hxmc.noGc static function isInt64(v:Dynamic):Bool
+	@:hxmc.noGc public static function isInt64(v:Dynamic):Bool
 		return !Str.isNull(v) && tindex(v) == T_BOXI64;
 
 	@:hxmc.export("hx_dyn_eq") @:hxmc.noGc static function dynEq(a:Dynamic, b:Dynamic):Bool {
@@ -593,7 +593,7 @@ class Dyn {
 		return Str.isNull(a) ? -1 : 1;
 	}
 
-	@:hxmc.host("hxmc_Native_compare") @:hxmc.noGc static function compare(a:Dynamic, b:Dynamic):Int
+	@:hxmc.noGc public static function compare(a:Dynamic, b:Dynamic):Int
 		return dynCmp(a, b);
 
 	// a op b on Dynamic values (FnLower.opCode: 0 + 1 - 2 * 3 / 4 % 5 & 6 | 7 ^ 8 << 9 >> 10 >>>)
@@ -792,7 +792,7 @@ class Dyn {
 	// identity hash in the header's top 16 bits, set once (a CAS: another
 	// thread may set it at the same time; the collector only runs with every
 	// thread stopped). The seed is thread-local (rt_hash_seed).
-	@:hxmc.host("hxmc_Native_objHash") @:hxmc.noGc static function objHash(o:Dynamic):Int {
+	@:hxmc.noGc public static function objHash(o:Dynamic):Int {
 		if (Str.isNull(o)) return 0;
 		var hp = Mem.addr(o).add(-8);
 		var h = Mem.getU16(hp, 6);
@@ -815,12 +815,12 @@ class Dyn {
 		return h * (0x9E3779B1 : Int);
 	}
 
-	@:hxmc.host("hxmc_Native_refEq") @:hxmc.noGc static function refEq(a:Dynamic, b:Dynamic):Bool
+	@:hxmc.noGc public static function refEq(a:Dynamic, b:Dynamic):Bool
 		return Mem.addr(a) == Mem.addr(b);
 
 	// 0 null, 1 Int, 2 Float, 3 Bool, 4 anonymous object, 5 function, 6 class
 	// instance, 7 enum value, 8 String, 9 Array, 10 a type object, 11 other
-	@:hxmc.host("hxmc_Native_typeKind") @:hxmc.noGc static function typeKind(v:Dynamic):Int {
+	@:hxmc.noGc public static function typeKind(v:Dynamic):Int {
 		if (Str.isNull(v)) return 0;
 		var t = tindex(v);
 		switch t {
@@ -848,7 +848,7 @@ class Dyn {
 		}
 	}
 
-	@:hxmc.host("hxmc_Native_getClass") @:hxmc.noGc static function getClass(v:Dynamic):Dynamic {
+	@:hxmc.noGc public static function getClass(v:Dynamic):Dynamic {
 		if (Str.isNull(v)) return null;
 		var t = tindex(v);
 		if (t == T_STRING || t == T_ARRAY) return typeObj(t);
@@ -856,23 +856,23 @@ class Dyn {
 		return null;
 	}
 
-	@:hxmc.host("hxmc_Native_getEnum") @:hxmc.noGc static function getEnum(v:Dynamic):Dynamic {
+	@:hxmc.noGc public static function getEnum(v:Dynamic):Dynamic {
 		if (Str.isNull(v)) return null;
 		var t = tindex(v);
 		if (t >= T_FIRST && tk(ty(t)) == TK_CTOR) return typeObj(sup(ty(t)));
 		return null;
 	}
 
-	@:hxmc.host("hxmc_Native_superClass") @:hxmc.noGc static function superClass(c:Dynamic):Dynamic {
+	@:hxmc.noGc public static function superClass(c:Dynamic):Dynamic {
 		var t = ty(described(c));
 		var s = sup(t);
 		return s >= 0 && tk(t) == TK_CLASS ? typeObj(s) : null;
 	}
 
-	@:hxmc.host("hxmc_Native_typeName") static function typeName(t:Dynamic):String
+	public static function typeName(t:Dynamic):String
 		return Str.ofAscii(name(ty(described(t))));
 
-	@:hxmc.host("hxmc_Native_resolveType") static function resolveType(n:String):Dynamic {
+	public static function resolveType(n:String):Dynamic {
 		var c = Str.toUtf8(n);
 		var r:Dynamic = null;
 		var nt = Mem.getI32(Mem.sym("rt_ntypes"), 0);
@@ -888,13 +888,13 @@ class Dyn {
 		return r;
 	}
 
-	@:hxmc.host("hxmc_Native_createEmpty") static function createEmpty(c:Dynamic):Dynamic {
+	public static function createEmpty(c:Dynamic):Dynamic {
 		var t = described(c);
 		var n = slotCount(ty(t));
 		return Mem.alloc(n > 0 ? n : 1, t, K_OBJ);
 	}
 
-	@:hxmc.host("hxmc_Native_enumCtorNames") static function enumCtorNames(e:Dynamic):Array<String> {
+	public static function enumCtorNames(e:Dynamic):Array<String> {
 		var t = described(e);
 		var ty = ty(t);
 		if (tk(ty) != TK_ENUM) return null;
@@ -910,7 +910,7 @@ class Dyn {
 		return k == "i".code || k == "b".code ? fSlot(f) >> 1 : fSlot(f);
 	}
 
-	@:hxmc.host("hxmc_Native_enumCreate") static function enumCreate(e:Dynamic, index:Int, params:Array<Dynamic>):Dynamic {
+	public static function enumCreate(e:Dynamic, index:Int, params:Array<Dynamic>):Dynamic {
 		var t = described(e);
 		if (tk(ty(t)) != TK_ENUM || index < 0 || index >= tag(ty(t))) Rt.rt_throw("Invalid enum constructor");
 		var ct = ctor(ty(t), index);
@@ -925,13 +925,13 @@ class Dyn {
 		return o;
 	}
 
-	@:hxmc.host("hxmc_Native_enumIndex") @:hxmc.noGc static function enumIndex(v:Dynamic):Int
+	@:hxmc.noGc public static function enumIndex(v:Dynamic):Int
 		return tag(ty(tindex(v)));
 
-	@:hxmc.host("hxmc_Native_enumCtorName") static function enumCtorName(v:Dynamic):String
+	public static function enumCtorName(v:Dynamic):String
 		return Str.ofAscii(name(ty(tindex(v))));
 
-	@:hxmc.host("hxmc_Native_enumParams") static function enumParams(v:Dynamic):Array<Dynamic> {
+	public static function enumParams(v:Dynamic):Array<Dynamic> {
 		var t = tindex(v);
 		var a:Array<Dynamic> = [];
 		a.resize(slotCount(ty(t)));
@@ -943,7 +943,7 @@ class Dyn {
 		return a;
 	}
 
-	@:hxmc.host("hxmc_Native_enumEq") static function enumEq(a:Dynamic, b:Dynamic):Bool {
+	public static function enumEq(a:Dynamic, b:Dynamic):Bool {
 		if (Mem.addr(a) == Mem.addr(b)) return true;
 		if (Str.isNull(a) || Str.isNull(b) || tindex(a) != tindex(b)) return false;
 		var ty = ty(tindex(a));
@@ -980,10 +980,10 @@ class Dyn {
 		return a;
 	}
 
-	@:hxmc.host("hxmc_Native_instanceFields") static function instanceFields(c:Dynamic):Array<String>
+	public static function instanceFields(c:Dynamic):Array<String>
 		return namesArray(described(c), true);
 
-	@:hxmc.host("hxmc_Native_fields") static function fields(o:Dynamic):Array<String> {
+	public static function fields(o:Dynamic):Array<String> {
 		if (Str.isNull(o) || tindex(o) < T_FIRST) return [];
 		var t = tindex(o);
 		var a = namesArray(t, false);
@@ -999,24 +999,24 @@ class Dyn {
 		return a;
 	}
 
-	@:hxmc.host("hxmc_Native_hasField") static function hasField(o:Dynamic, name:String):Bool {
+	public static function hasField(o:Dynamic, name:String):Bool {
 		if (Str.isNull(o) || tindex(o) < T_FIRST) return false;
 		var f = fid(name);
 		if (!findField(ty(tindex(o)), f).isNull()) return true;
 		return overflowFind(o, f) >= 0;
 	}
 
-	@:hxmc.host("hxmc_Native_getField") static function getField(o:Dynamic, name:String):Dynamic {
+	public static function getField(o:Dynamic, name:String):Dynamic {
 		if (Str.isNull(o)) return null;
 		var t = tindex(o);
 		if (t < T_FIRST && t != T_STRING && t != T_ARRAY) return null;
 		return dynGet(o, name);
 	}
 
-	@:hxmc.host("hxmc_Native_setField") static function setField(o:Dynamic, name:String, v:Dynamic):Void
+	public static function setField(o:Dynamic, name:String, v:Dynamic):Void
 		dynSet(o, name, v);
 
-	@:hxmc.host("hxmc_Native_deleteField") static function deleteField(o:Dynamic, name:String):Bool {
+	public static function deleteField(o:Dynamic, name:String):Bool {
 		if (Str.isNull(o) || tk(ty(tindex(o))) != TK_ANON || Str.isNull(Mem.getRef(Mem.addr(o), 0))) return false;
 		var i = overflowFind(o, fid(name));
 		if (i < 0) return false;
@@ -1026,10 +1026,10 @@ class Dyn {
 		return true;
 	}
 
-	@:hxmc.host("hxmc_Native_callMethod") static function callMethod(f:Dynamic, args:Array<Dynamic>):Dynamic
+	public static function callMethod(f:Dynamic, args:Array<Dynamic>):Dynamic
 		return dynCall(f, args);
 
-	@:hxmc.host("hxmc_Native_compareMethods") @:hxmc.noGc static function compareMethods(a:Dynamic, b:Dynamic):Bool {
+	@:hxmc.noGc public static function compareMethods(a:Dynamic, b:Dynamic):Bool {
 		if (Mem.addr(a) == Mem.addr(b)) return true;
 		if (Str.isNull(a) || Str.isNull(b) || tindex(a) != tindex(b)) return false;
 		if (tk(ty(tindex(a))) == TK_BOUND) {
@@ -1039,7 +1039,7 @@ class Dyn {
 		return false;
 	}
 
-	@:hxmc.host("hxmc_Native_copyObject") static function copyObject(o:Dynamic):Dynamic {
+	public static function copyObject(o:Dynamic):Dynamic {
 		if (Str.isNull(o) || tindex(o) < T_FIRST) return o;
 		var n = nslots(o);
 		var c = Mem.alloc(n, tindex(o), kind(o));

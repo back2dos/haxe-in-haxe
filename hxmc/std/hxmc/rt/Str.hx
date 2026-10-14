@@ -207,7 +207,7 @@ class Str {
 	}
 
 	// StringMap's hash: null is a key like any other
-	@:hxmc.host("hxmc_Native_strHash") @:hxmc.noGc static function strHash(s:String):Int
+	@:hxmc.noGc public static function strHash(s:String):Int
 		return isNull(s) ? 0 : hash(s);
 
 	// ---- concatenation and conversions
