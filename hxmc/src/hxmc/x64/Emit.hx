@@ -138,6 +138,12 @@ class Emit implements hxmc.Target.Emitter {
 			m.dispKind = RSecRel32;
 			return m;
 		}
+		if (i.dsym != null) {
+			var m = new Mem(i.base, i.disp, i.index, i.scale);
+			m.dispSym = obj.sym(i.dsym);
+			m.dispKind = RAbs32S;
+			return m;
+		}
 		if (i.sym != null) return Mem.rip(obj.sym(i.sym), i.disp);
 		if (i.base == LIns.FRAME) return new Mem(Asm.RSP, slotOff[i.slot] + i.disp);
 		if (i.base == -3) return new Mem(Asm.RSP, frameSize + 8 * saved.length + 8 + i.disp);

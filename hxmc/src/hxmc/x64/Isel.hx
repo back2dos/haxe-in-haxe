@@ -319,12 +319,15 @@ class Isel implements hxmc.Target.Selector {
 		vreg = hxmc.Lir.Arrays.filled(mf.vals.length, -1);
 		useCount = hxmc.Lir.Arrays.filled(mf.vals.length, 0);
 		folded = [for (_ in mf.vals) false];
+		var addrUses = hxmc.Lir.Arrays.filled(mf.vals.length, 0); // uses as the base of a load or store
 		for (b in mf.blocks)
 			for (i in b.ins) {
-				for (x in [i.a, i.b, i.c])
-					if (x >= 0) useCount[x]++;
+				if (i.a >= 0) useCount[i.a]++;
+				if (i.b >= 0) useCount[i.b]++;
+				if (i.c >= 0) useCount[i.c]++;
 				if (i.args != null) for (x in i.args)
 					useCount[x]++;
+				if ((i.op == Load || i.op == Store) && i.imm > -0x40000000 && i.imm < 0x40000000) addrUses[i.a]++;
 			}
 		// loads used once by an integer comparison later in their block, with
 		// no store or call between: memory operands of the comparison
@@ -365,6 +368,15 @@ class Isel implements hxmc.Target.Selector {
 				}
 			}
 		}
+		// x + constant used only as the address of loads and stores: their
+		// displacement (a symbolic constant, a global's offset, relocated)
+		for (b in mf.blocks)
+			for (i in b.ins) {
+				if (i.op != Add || i.ty != I64 || addrUses[i.id] == 0 || addrUses[i.id] != useCount[i.id]) continue;
+				var c = immOf(i.b);
+				if (c == null || c <= -0x40000000 || c >= 0x40000000 || folded[i.a] && mf.vals[i.a].op == Const) continue;
+				folded[i.id] = true;
+			}
 		// constants and symbol addresses used once by a foldable user are not computed on their own
 		for (b in mf.blocks)
 			for (i in b.ins)
@@ -470,7 +482,13 @@ class Isel implements hxmc.Target.Selector {
 		var bi = m.vals[base];
 		x.disp = disp;
 		x.scale = scale;
-		if (folded[base] && bi.op == SymAddr && index < 0) {
+		if (folded[base] && bi.op == Add) {
+			var c = m.vals[bi.b];
+			x.disp += c.imm;
+			x.dsym = c.sym;
+			x.base = use(bi.a);
+			if (index >= 0) x.index = use(index);
+		} else if (folded[base] && bi.op == SymAddr && index < 0) {
 			x.sym = bi.sym;
 			x.disp += bi.imm;
 		} else if (folded[base] && bi.op == StackAddr) {
