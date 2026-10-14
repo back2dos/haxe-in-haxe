@@ -14,8 +14,10 @@ compiled ahead of time per target into one relocatable object
 Status: development. Every function of the port and of the test corpus
 compiles natively on x86-64 Linux (static ELF, own linker, musl), arm64
 Linux and x86-64 Windows (PE); the port built by hxmc compiles itself to
-byte-identical HXB. macOS, Windows arm64 and the haxelib are on hold (see
-"Status").
+byte-identical HXB. Run time is near clang -O2 on hxc's C, executables
+are about 10% larger than clang -O2's dynamic ones (static, runtime
+included). Stack maps, deeper incremental rebuilds, macOS, Windows arm64,
+the haxelib, APE builds and C interop are deferred (see "Status").
 
 ## Design
 
@@ -28,11 +30,12 @@ HXB --(port: --hxb-lib)--> typed AST --(backend.Lower)--> hxc IR --(Prep: EmitC'
 
 | File | |
 | --- | --- |
-| `src/hxmc/Main.hx`, `Options.hx`, `Driver.hx` | the tool: runs the port's compiler with a generate hook, then compiles every module (in parallel, cached) and links |
+| `src/hxmc/Main.hx`, `Options.hx`, `Driver.hx` | the tool: runs the port's compiler with a generate hook, then compiles every module (in parallel, cached) and links; `--server` keeps the port's compilation server resident (objects kept in memory) |
+| `src/hxmc/LowerCache.hx` | resident builds: lowered function bodies reused while the server keeps their fields, through hxc's opt-in `Lower.lowerBody` hook (calls into the lowering replayed, objects rebound) |
 | `src/hxmc/UpToDate.hx`, `Fingerprint.hx` | rebuilds: the whole build is skipped when archive (its ZIP directory), arguments and tool are unchanged; otherwise each module's object is reused when its fingerprint (its IR plus what its code reads of the rest of the program) is unchanged |
 | `src/hxmc/Prep.hx` | EmitC's preparation (without writing C): the numbers native code and the runtime agree on, as symbols |
 | `src/hxmc/Mir.hx`, `MirBuild.hx` | the machine-independent SSA IR and its construction from hxc's IR (Braun et al. on the structured statements); expands the runtime's inline helpers (allocation, write barrier, array access, inline caches) as EmitC's C does; tags loads and stores with a memory class |
-| `src/hxmc/Opt.hx` | machine-independent optimizations: global value numbering over the dominator tree (loads by memory class and version), dead code |
+| `src/hxmc/Opt.hx`, `Inline.hx` | machine-independent optimizations: inlining of small functions, global value numbering over the dominator tree (loads by memory class and version), store forwarding, loop-invariant code motion, branches decided by dominating branches, dead code |
 | `src/hxmc/Lir.hx`, `Regalloc.hx` | target instructions over virtual registers; linear-scan allocation with lifetime holes, spill weights by loop depth, fixed ranges for physical registers, caller-saved registers kept across slow-path calls (saved around them) |
 | `src/hxmc/x64/`, `src/hxmc/a64/` | x86-64 and AArch64: instruction selection (System V, Win64, AAPCS64), encoders (checked against llvm-mc), emission (frames, jump tables, constant pools) |
 | `src/hxmc/Obj.hx`, `ElfWriter.hx`, `ElfReader.hx`, `CoffReader.hx` | relocatable objects in memory, ELF/COFF input and output |
@@ -45,10 +48,12 @@ Conventions shared with hxc:
 
 - GC roots: reference locals live across a GC point are shadow-stack slots
   (`fr[k]`, `EmitC.Roots`); cold sites (`SCold`) store the live references
-  on the shadow stack only on the slow path. No stack maps (yet: queued).
+  on the shadow stack only on the slow path (in spare slots of the
+  function's frame when it has one). No stack maps (deferred).
 - Exceptions: `try` is the runtime's `rt_handler` with the C library's
-  `_setjmp` (jmp_buf layout per target); in functions with a `try` every
-  local lives in memory, so its value survives the second return of setjmp.
+  `_setjmp` (jmp_buf layout per target); in functions with a `try` a
+  scalar assigned in a try body and referenced outside it lives in memory,
+  so a handler sees its latest value after the second return of setjmp.
 - Calls follow the C ABI of the target; generated functions use it too.
 - Thread-local runtime state (`rt_sp`, `rt_young_ptr`, ...) is reached with
   the local-exec TLS model on Linux, `_tls_index` + section offsets on Windows.
@@ -101,7 +106,8 @@ python3 hxmc/tools/run.py --target windows-x86_64 --fuzz bin/hxmc-fuzz  # under 
 python3 hxmc/tools/enctest.py --arch x64|a64   # encoders against llvm-mc
 sh hxmc/tools/hxmc.sh <case>      # rerun hxmc on a corpus case (HXMC_DUMP=<function> prints its Mir)
 python3 hxmc/bench/measure.py -v tcc,O2,hxmcs   # run time and size against hxc's C (tcc, clang -O2)
-python3 hxmc/bench/rebuild.py --tool bin/hxmc-fast/hxmc   # cold / no-change / one-module-edit build times
+python3 hxmc/bench/rebuild.py --tool bin/hxmc-fast/hxmc   # cold / no-change / one-module-edit build times (--server: through the resident tool)
+SMALL=1 sh hxmc/tools/portcheck.sh  # the port built by hxmc self-compiles to the reference's HXB (also with a 256 KB nursery)
 ```
 
 - Test cases are `test/cases/*.hx`, the hxc test programs listed in
@@ -111,67 +117,78 @@ python3 hxmc/bench/rebuild.py --tool bin/hxmc-fast/hxmc   # cold / no-change / o
 - The port check: the port built by hxmc compiles its own source to HXB,
   compared member by member with the reference's (also with
   `RT_MINOR_KB=256`, which makes missing or stale roots crash quickly).
-- `HXMC_OPT=0` turns off Mir optimizations; `HXMC_SYMBOLS=1` (or `-debug`)
-  writes a symbol table (profilers: `valgrind --tool=callgrind`).
+- `HXMC_OPT=0` turns off Mir optimizations (`HXMC_LICM=0` only LICM,
+  `HXMC_INLINE=<flat>,<loop>` the inlining limits); `HXMC_SYMBOLS=1` (or
+  `-debug`) writes a symbol table (profilers: `valgrind --tool=callgrind`);
+  `HXMC_SIZE_STATS=1` prints the bytes of code by instruction kind, memory
+  class, hot and cold blocks; `HXMC_LOWER_CHECK=1` (server) compares the
+  executable built from cached bodies with one from a fresh lowering.
 - Hybrid development builds (`HXMC_HYBRID=1`) write C for what hxmc does not
   compile and link with the system's compiler; `HXMC_ONLY`/`HXMC_SKIP`
   select the functions compiled natively (bisecting).
 
-## Numbers (2026-10-13, one 4-core VM)
+## Numbers (2026-10-14, one 4-core VM)
 
-Run time (s, best of 3) and size (KB) per case; hxc's C by tcc and by
-clang -O2 against the same runtime (clang -O2), dynamically linked with
-glibc and stripped; hxmc's static executables (musl, runtime included, no
-symbol table). Build: hxmc's cold build of the archive (bin/hxmc-fast).
+Run time (s, best of 3, `hxmc/bench/measure.py -n 3 -v tcc,O2,hxmcs`) and
+size (KB): hxc's C compiled by tcc and by clang -O2 against the same
+runtime (clang -O2), dynamically linked with glibc, stripped; hxmc's
+static executables (musl, runtime included, no symbol table). Build:
+hxmc's cold build of the archive (bin/hxmc-fast, 4 jobs). Bold: hxmc at
+least as fast as clang -O2. The VM is noisy (±3-5% between runs).
 
-| case | run tcc | run O2 | run hxmc | size tcc | size O2 | size hxmc | hxmc build |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| alloc | 1.43 | 1.36 | 1.76 | 158 | 156 | 431 | 0.08 |
-| bcrypt | 7.74 | 2.05 | 2.54 | 430 | 391 | 674 | 0.12 |
-| binarytrees | 1.67 | 0.67 | **0.63** | 157 | 156 | 430 | 0.08 |
-| json | 0.68 | 0.45 | **0.42** | 220 | 193 | 472 | 0.09 |
-| mandelbrot | 2.73 | 0.43 | 0.78 | 163 | 156 | 431 | 0.09 |
-| mandelbrot_anon | 4.45 | 1.21 | **1.05** | 171 | 164 | 435 | 0.07 |
-| nbody | 2.23 | 0.68 | 0.68 | 167 | 160 | 435 | 0.08 |
-| sha256 | 0.53 | 0.19 | 0.22 | 376 | 366 | 648 | 0.09 |
-| sha512 | 0.078 | 0.019 | 0.029 | 396 | 374 | 653 | 0.11 |
-| formatter_noio | 9.68 | 4.59 | 5.41 | 2097 | 1366 | 1734 | 0.22 |
-| port (self-compile) | 16.2 | 7.02 | 8.85 | 35134 | 18100 | 22642 | 4.9 |
+| case | run tcc | run O2 | run hxmc | size O2 | size hxmc | hxmc build |
+| --- | --- | --- | --- | --- | --- | --- |
+| alloc | 1.51 | 1.37 | 1.56 | 156 | 119 | 0.09 |
+| bcrypt | 8.06 | 2.17 | 2.56 | 391 | 358 | 0.12 |
+| binarytrees | 1.74 | 0.61 | 0.67 | 156 | 118 | 0.09 |
+| json | 0.69 | 0.42 | 0.47 | 193 | 180 | 0.10 |
+| mandelbrot | 2.94 | 0.46 | 0.50 | 156 | 119 | 0.09 |
+| mandelbrot_anon | 4.71 | 1.26 | **0.98** | 164 | 135 | 0.11 |
+| nbody | 1.92 | 0.74 | **0.64** | 160 | 118 | 0.09 |
+| sha256 | 0.57 | 0.19 | **0.16** | 366 | 332 | 0.11 |
+| sha512 | 0.082 | 0.022 | 0.024 | 374 | 345 | 0.11 |
+| formatter_noio | 10.75 | 5.29 | 5.84 | 1366 | 1382 | 0.53 |
+| port (self-compile) | 16.57 | 8.52 | **8.28** | 18100 | 19854 | 6.3 |
 
-Notes:
+tcc sizes: 158-430 KB for the small cases, 2097 KB formatter, 35134 KB
+port. Across runs hxmc is within about ±10% of clang -O2 everywhere but
+bcrypt (15-20% behind).
 
-- The C was generated from source; through HXB (what hxc's haxelib and
-  hxmc read) `haxe.ds.Vector` reads lose their `VectorData` typedef and
-  become bounds-checked (`EArrGet` instead of `EArrGetU`), which costs
-  bcrypt and sha a compare and branch per access. (A port/HXB question, not
-  hxmc's.)
-- alloc is slower with the static musl runtime than with glibc (1.35 s in a
-  hybrid build against glibc): the runtime's libc functions.
-- Sizes: hxmc's include the whole runtime (static) and no dead-code
-  elimination yet; O2's are dynamic. Size work is next to performance.
-
-Rebuild times (`hxmc/bench/rebuild.py`, bin/hxmc-fast, 4 jobs):
+Rebuilds (`hxmc/bench/rebuild.py`, bin/hxmc-fast):
 
 | program | cold | no change | one module edited |
 | --- | --- | --- | --- |
-| small (hxc/test/regress) | 0.10 s | 0.01 s | 0.10 s |
-| port (404 modules) | 4.85 s | 0.01 s | 2.6 s |
+| small (hxc/test/regress) | 0.09 s | 0.01 s | 0.08 s |
+| port (404 modules) | 5.5 s | 0.01 s | 2.7 s |
+| port through the server (`--server`, from source) | 12.0 s | 1.95 s | 2.25 s |
 
-For comparison hxc + tcc builds the port in ~11 s (10 s C generation + 1 s
-tcc). The one-edit floor is the front half, not code generation: the port
-loading the archive and typing it (1.1 s), lowering (0.7 s), EmitC's
-preparation (0.13 s), module keys and cached-object reads (0.25 s,
-parallel), data and link (0.2 s). Getting it under 1 s needs a resident
-process (the port's compilation server keeping modules) or incremental
-lowering: not done yet.
+For comparison hxc + tcc builds the port in ~11 s. The one-edit floor is
+the front half: loading and typing (or the server's checks, filters and
+DCE, ~0.5 s), lowering (0.6-0.8 s; the server replays cached bodies,
+`LowerCache`), EmitC's preparation (0.15 s), module keys (0.2 s), data and
+link (0.25 s). Not pursued further.
 
-Compile-speed work so far: code generation went from 1.3 ms to ~0.4 ms per
-function single-threaded (sparse liveness, no quadratic passes, scratch
-arrays reused across functions, GC settings: the tool re-executes itself
-with a 32 MB nursery and a 2 GB first old-space limit, which saves most
-collections), modules compile in parallel, keys and cached reads are
-parallel, and an unchanged build is skipped from the archive's ZIP
-directory.
+What closed the gaps (this round):
+
+- Run time: inlining of small functions (to depth 2, templates shared by
+  the threads), Mir optimizations (value numbering by memory class and
+  version, store forwarding, loop-invariant code motion of pure operations
+  and loads that cannot fault, branches decided by dominating branches),
+  load folding into compares and ALU operations, rotations and haxe.crypto's
+  16-bit split additions recognised, lifetime holes in the register
+  allocator, a word-at-a-time memcmp/bcmp and a small-size memset in the
+  runtime object (musl's are byte loops).
+- Size: section garbage collection of the runtime object, no symbol table
+  unless asked, slow paths that spill into their function's frame instead
+  of pushing one, one stub per allocation (header and size) instead of
+  three immediates per site, one return block per function with a frame,
+  shared epilogues, x + constant folded into memory operands. The port went
+  from 23.5 MB to 19.9 MB (clang -O2: 18.1 MB). `HXMC_SIZE_STATS=1` prints
+  where the bytes are: the shadow stack (frame slot loads and stores,
+  thread-local push and pop) is the largest remaining item, about 3 MB.
+- Compile time: no quadratic passes (batched occupancy merges in the
+  allocator, marks and arrays instead of int maps): single-thread code
+  generation of the port 9.1 s -> ~7 s after inlining and Opt landed.
 
 ## Stack maps: what the shadow stack costs (2026-10-14)
 
@@ -193,8 +210,9 @@ of the huge nursery in this setup):
 
 Stack maps keep part of this (references live across calls still go to
 frame slots, but no frame push/pop, no stores of unchanged references, no
-reloads after calls that do not collect): worth building, after the
-current performance work.
+reloads after calls that do not collect): deferred. Code size adds to the
+case: the shadow stack's frame traffic and thread-local push/pop are about
+3 MB of the port's 18 MB of code (`HXMC_SIZE_STATS=1`).
 
 ## Step 0: how much optimization is needed (2026-10-13)
 
@@ -227,17 +245,40 @@ What this says:
 
 ## Status
 
-- x86-64 Linux: 100% native (corpus: 64 programs, 7103 functions; port:
-  16456), static executables from hxmc's own linker with the musl runtime
-  object; outputs identical to hxc's; the port self-compiles to
-  byte-identical HXB (514 modules), also with a 256 KB nursery.
+Done:
+
+- x86-64 Linux: 100% native (corpus: 67 programs plus 90 fuzzer programs,
+  18014 functions; port: 16456), static executables from hxmc's own linker
+  with the musl runtime object; outputs identical to hxc's; the port
+  self-compiles to byte-identical HXB (514 modules), also with a 256 KB
+  nursery (`hxmc/tools/portcheck.sh`).
 - arm64 Linux: corpus passes under qemu; the arm64 port self-compiles to
   identical HXB.
 - x86-64 Windows (PE, imports from kernel32/ws2_32/UCRT written directly):
   corpus passes under wine.
-- Not yet: mbedtls/libuv in the runtime objects (built with
-  `HXC_NO_SSL`/`HXC_NO_UV`), macOS (Mach-O + ad-hoc signature), Windows
-  arm64, the haxelib (on hold).
-- Next: inlining of small functions, loop-invariant code motion, then
-  stack maps (measured first); link-time dead-code elimination and runtime
-  member selection (size); the one-edit rebuild floor.
+- Optimizations: inlining, value numbering, store forwarding, LICM,
+  dominating-branch folding, load folding, lifetime holes, scalars in try
+  functions kept in memory only when a handler or what follows can see
+  them; run time near clang -O2 on hxc's C (table above).
+- Size: runtime section GC, allocation stubs, frame spills, merged
+  returns; the port is 10% larger than clang -O2's.
+- Rebuilds: per-module object cache keyed by fingerprints, whole-build
+  skip, parallel code generation; resident mode (`hxmc --server`, the
+  port's compilation server) with cached objects and cached lowered bodies
+  (`LowerCache`, through hxc's opt-in `Lower.lowerBody` hook).
+
+Deferred:
+
+- Stack maps (frame descriptors instead of the shadow stack): measured at
+  5-10% run time on allocation-heavy code and about 3 MB of the port's
+  code (the largest size item left); design in "Stack maps" above.
+- Incremental rebuilds beyond what is there: the one-edit floor (2.7 s, 2.25 s
+  through the server) is the front half (typing, lowering, EmitC's
+  preparation, keys, data, link), not code generation.
+- Program-level dead code, data-table compaction and runtime member
+  selection beyond section GC (size).
+- macOS (Mach-O + ad-hoc signature), Windows arm64, haxelib packaging, APE
+  (cosmopolitan) builds.
+- C interop design (calling C libraries from generated code beyond the
+  runtime's own functions); mbedtls/libuv in the runtime objects (built
+  with `HXC_NO_SSL`/`HXC_NO_UV`).
