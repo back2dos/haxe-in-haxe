@@ -48,8 +48,8 @@ HXB --(port: --hxb-lib)--> typed AST --(ir.Lower)--> hxmc IR --(Prep: ir.Facts)
 | `src/hxmc/DataGen.hx` | the program's data: type tables, dispatch rows, strings, globals, and the absolute symbols of program-wide numbers |
 | `src/hxmc/Link.hx`, `LinkPE.hx`, `LinkMachO.hx`, `A64Reloc.hx`, `MkRt.hx` | the linkers (static ELF; PE with import tables written directly, TLS directory, .pdata, base relocations on arm64; Mach-O with dyld's rebase/bind opcodes, stubs, TLV descriptors and an ad-hoc code signature) and the runtime-object builder (COFF member selection, COMDAT, imports; Mach-O objects merged) |
 | `src/hxmc/Target.hx`, `Abi.hx` | per-target facts and the code-generator factory |
-| `rt/` | the runtime (GC, exceptions, strings, Dynamic, reflection, threads, system, sockets; `rt.h`), the slow paths of generated code (`rthxmc.c`) and word-at-a-time `memcmp`/`bcmp` for musl (`rtlibc.c`) |
-| `std/` | the target's std: overrides of upstream modules and the runtime's externs (`hxmc.Native*`), merged into `bin/hxmc/std` by `tools/mkstd.py` |
+| `rt/` | the runtime's C part (GC, exceptions, threads, system, sockets, the std natives not yet in Haxe; `rt.h`), the slow paths of generated code (`rthxmc.c`) and word-at-a-time `memcmp`/`bcmp` for musl (`rtlibc.c`) |
+| `std/` | the target's std: overrides of upstream modules, the runtime's Haxe part (`hxmc.rt`: strings, Dynamic, reflection; see "Runtime in Haxe"), its intrinsics (`hxmc.unsafe`) and the externs of its C part (`hxmc.Native*`), merged into `bin/hxmc/std` by `tools/mkstd.py` |
 | `Makefile`, `tools/bootstrap/` | the build of the tool (by itself) and its bootstrap |
 | `test/` | the corpus: programs (`cases/`), frozen fuzzer programs (`fuzz-1000.tar.gz`), golden outputs (`expected/`), encoder tests (`encoder/`) |
 
@@ -112,6 +112,56 @@ Kept open on purpose (where):
   compaction belong in the linker, not in code generation. Stack-map frame
   descriptors, when they land, are to be registrable per code region.
 
+## Runtime in Haxe
+
+The runtime is moving from C (`rt/`) into Haxe compiled by hxmc itself
+(`std/hxmc/rt`), Go-style: runtime operations become ordinary functions of
+the program, inlined into user code where they are small and dropped when
+unused, in one language. What needs the machine directly is written with a
+small internal API (`std/hxmc/unsafe`, not a user API):
+
+- `Ptr`: a raw address (an `hxmc.I64` the collector neither traces nor
+  moves). `Mem.addr(o)`/`Mem.obj(p)` convert a reference and the address
+  of its payload; an address taken from a heap object is valid only until
+  the next GC point.
+- `Mem`: loads and stores of every width at `p + off` (and indexed, `p +
+  off + i * size`), `setRefBarrier` (a store through the write barrier),
+  `alloc`/`allocRaw` (an object of a run-time size, type index and kind),
+  `sym` (the address of a symbol of the program or runtime), `tlsGet`/
+  `tlsSet` (the runtime's thread-locals), `abi` (Abi's layout constants),
+  `os`/`arm` (the target, constants), `stack` (a frame area), `ult`,
+  `callRef1`/`callRef2` (calls through code pointers). MirBuild expands them
+  inline; none but the allocations and calls is a GC point.
+- `Atomic`: sequentially consistent loads, stores, add, exchange and
+  compare-exchange of 32 and 64 bits and a fence (x86-64: `mov`, `xchg`,
+  `lock xadd`, `lock cmpxchg`, `mfence`; arm64: `ldar`, `stlr`,
+  `ldaxr`/`stlxr` loops, `dmb ish`: ARMv8.0, no LSE), expanded by
+  instruction selection.
+- C interop: `@:hxmc.c` extern classes are C functions called by symbol
+  with the target's C ABI (`LibC`: scalars and pointers; Int is a C int,
+  I64 and Ptr 64-bit, Float a double; never GC points); `@:hxmc.rt` ones
+  are the runtime's C functions, which may collect.
+- `@:hxmc.noGc` on a function: it must not reach a GC point (it may keep
+  raw addresses across its calls); Facts checks it and names the culprit.
+- `@:hxmc.export("sym")` / `@:hxmc.host("sym")` on a static function of an
+  `hxmc` package class: it implements runtime function `sym`. Generated
+  code's calls of `sym` (FnLower's `ECallHost`) become direct calls of it
+  (Lower.bindHosts: not GC points when it is `@:hxmc.noGc`, inlinable);
+  an exported one is also called by the C part, so it is always compiled,
+  under that symbol. Each runtime function gets its own section, which
+  the ELF linker drops when nothing reaches it, and is inlined only in
+  loops (HXMC_INLINE's third value).
+
+The modules load with every program through `std/Std.hx` (`import
+hxmc.rt.Runtime`; their classes are `@:keep`). A change that needs new
+intrinsics and uses them at once needs a tool that knows them: bootstrap
+(or build once against the previous std and runtime object first).
+
+| Haxe (`std/hxmc/rt`) | from | what stays in C, and why |
+| --- | --- | --- |
+| `Str.hx`: strings, UTF-8, comparison, hashing, concatenation, Int formatting, String/StringBuf/Std natives | `rt_str.c` | `hx_format_float`: shortest round-trip doubles through printf/strtod (a Haxe Ryu could replace it) |
+| `Dyn.hx`, `Types.hx`: structural and Dynamic access, inline-cache lookups, Dynamic operators, type tests, Std.string, reflection (`hxmc.Native`) | `rt_dyn.c` | the field-name table (interning under a lock, names outside the heap) and the per-thread inline-cache entries (until threads move) |
+
 ## Building
 
 Run from the repository root (GNU make; zig and ld.lld build the runtime
@@ -147,7 +197,9 @@ SMALL=1 sh hxmc/tools/portcheck.sh  # the port check, also with a 256 KB nursery
   object next to itself (`bin/hxmc/rt/<target>/rt.o`; `HXMC_RT_OBJ`
   overrides).
 - `HXMC_OPT=0` turns off Mir optimizations (`HXMC_LICM=0` only LICM,
-  `HXMC_INLINE=<flat>,<loop>` the inlining limits); `HXMC_SYMBOLS=1` (or
+  `HXMC_INLINE=<flat>,<loop>,<runtime flat>` the inlining limits;
+  `HXMC_FALIGN`/`HXMC_FSHIFT` vary function alignment and padding to see
+  how much a timing depends on code layout); `HXMC_SYMBOLS=1` (or
   `-debug`) writes a symbol table (profilers: `valgrind --tool=callgrind`);
   `HXMC_SIZE_STATS=1` prints the bytes of code by instruction kind, memory
   class, hot and cold blocks; `HXMC_LOWER_CHECK=1` (server) compares the

@@ -43,7 +43,7 @@ wait
 # what generated code calls in the C library besides the runtime (MirBuild),
 # and what the runtime's Haxe code calls (hxmc/std/hxmc/unsafe/LibC.hx)
 libm="memset memcpy fmod floor ceil sin cos tan asin acos atan atan2 exp log pow sqrt"
-libm="$libm memmove memcmp strlen malloc free strtod rand"
+libm="$libm memmove memcmp strlen strcmp malloc free strtod rand"
 case $target in
 macos-*)
 	# the runtime's Mach-O objects merged into one (hxmc --mkrt-macho); the
