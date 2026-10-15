@@ -1,8 +1,8 @@
 // The npm packages from one build (`make npm`, CI):
 //   node hxmc/bootstrap/pack.mjs <version> <natives dir> <out dir>
 // <natives dir>/<target>/haxe[.exe] are the native compilers (hxmc.HaxeMain,
-// cross-built by the tool). Writes <out dir>/hxmc-<version>.tgz (the main
-// package, package.json at the repository root, its optionalDependencies on
+// cross-built by the tool). Writes <out dir>/hxmc-cli-<version>.tgz (the main
+// package @hxmc/cli, package.json at the repository root, its optionalDependencies on
 // the platform packages at the same version) and one hxmc-<os>-<cpu>-<version>.tgz
 // per platform package (@hxmc/<os>-<cpu>: the native compiler and the licenses,
 // with npm's os and cpu fields).

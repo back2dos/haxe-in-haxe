@@ -1,5 +1,5 @@
 {
-  "name": "hxmc",
+  "name": "@hxmc/cli",
   "version": "0.1.0",
   "description": "The Haxe compiler ported to Haxe, with hxmc built in: native executables for Linux, macOS and Windows (x86-64, ARM64) and WebAssembly",
   "license": "GPL-2.0-or-later",

@@ -224,7 +224,7 @@ jobs:
           esac
           make npm NPM_VERSION=$v
           echo "$v" > bin/npm/VERSION
-          echo "NPM_SIZE=$(wc -c < bin/npm/hxmc-$v.tgz)" >> "$GITHUB_ENV"
+          echo "NPM_SIZE=$(wc -c < bin/npm/hxmc-cli-$v.tgz)" >> "$GITHUB_ENV"
           # what WebAssembly programs see of the file system (the npm job on Windows)
           bin/hxmc/hxmc bin/npm/probe.wasm -cp hxmc/test -main WasiProbe -cp bin/hxmc/std --custom-target hxmc -D hxmc.target=wasm32-wasi
       - uses: actions/upload-artifact@v7
@@ -624,7 +624,7 @@ jobs:
           v=$(cat dl/VERSION)
           mkdir -p "$RUNNER_TEMP/app/src" && cd "$RUNNER_TEMP/app"
           npm init -y > /dev/null
-          npm install --no-audit --no-fund "$GITHUB_WORKSPACE/dl/hxmc-$v.tgz" "$GITHUB_WORKSPACE/dl/hxmc-${{ matrix.plat }}-$v.tgz"
+          npm install --no-audit --no-fund "$GITHUB_WORKSPACE/dl/hxmc-cli-$v.tgz" "$GITHUB_WORKSPACE/dl/hxmc-${{ matrix.plat }}-$v.tgz"
           printf 'class Main { static function main() { Sys.println("hello from " + Sys.systemName()); } }\n' > src/Main.hx
           printf 'class Js { static function main() { trace("hello from js"); } }\n' > src/Js.hx
           printf -- '-cp src\n-main Main\n--custom-target hxmc=bin/app\n' > build.hxml
@@ -641,7 +641,7 @@ jobs:
           npx haxe -cp src -main Main --interp | tee out.txt
           grep -q "hello from" out.txt
           time npx haxe build.hxml
-          if [ "$RUNNER_OS" = Windows ]; then ./bin/app.exe; ls -l node_modules/hxmc/dist/haxe.exe; else ./bin/app; fi
+          if [ "$RUNNER_OS" = Windows ]; then ./bin/app.exe; ls -l node_modules/@hxmc/cli/dist/haxe.exe; else ./bin/app; fi
           npx haxe -cp src -main Js --js main.js && node main.js
       - name: With --ignore-scripts, the first call installs the native compiler
         if: runner.os != 'Windows'
@@ -650,7 +650,7 @@ jobs:
           v=$(cat dl/VERSION)
           mkdir -p "$RUNNER_TEMP/noscripts" && cd "$RUNNER_TEMP/noscripts"
           npm init -y > /dev/null
-          npm install --ignore-scripts --no-audit --no-fund "$GITHUB_WORKSPACE/dl/hxmc-$v.tgz" "$GITHUB_WORKSPACE/dl/hxmc-${{ matrix.plat }}-$v.tgz"
+          npm install --ignore-scripts --no-audit --no-fund "$GITHUB_WORKSPACE/dl/hxmc-cli-$v.tgz" "$GITHUB_WORKSPACE/dl/hxmc-${{ matrix.plat }}-$v.tgz"
           head -c 2 node_modules/.bin/haxe | grep -q '#!'
           npx haxe --version
           head -c 4 node_modules/.bin/haxe | od -An -tx1 | tee magic.txt; ! grep -q "23 21" magic.txt
@@ -665,7 +665,7 @@ jobs:
           export PATH="$RUNNER_TEMP/lix:$PATH"
           lix shims
           lix scope create
-          lix use haxe ./node_modules/hxmc/dist
+          lix use haxe ./node_modules/@hxmc/cli/dist
           cat .haxerc
           haxe --version
           printf -- '-cp src\n-main Main\n--custom-target hxmc=bin/applix\n' > lix.hxml
@@ -682,7 +682,7 @@ jobs:
           v=$(cat dl/VERSION)
           mkdir -p "$RUNNER_TEMP/fallback/src" && cd "$RUNNER_TEMP/fallback"
           npm init -y > /dev/null
-          npm install --no-audit --no-fund "$GITHUB_WORKSPACE/dl/hxmc-$v.tgz"
+          npm install --no-audit --no-fund "$GITHUB_WORKSPACE/dl/hxmc-cli-$v.tgz"
           cp "$RUNNER_TEMP/app/src/Main.hx" src/
           s=$(date +%s)
           npx haxe --version > version.out 2> version.err || { cat version.out version.err "$HXMC_CACHE"/*/*/build.log; exit 1; }
@@ -735,7 +735,7 @@ jobs:
           for p in linux-x64 linux-arm64 darwin-x64 darwin-arm64 win32-x64 win32-arm64; do
             publish "@hxmc/$p" "./dl/hxmc-$p-$v.tgz"
           done
-          publish hxmc "./dl/hxmc-$v.tgz"
+          publish @hxmc/cli "./dl/hxmc-cli-$v.tgz"
 
   # nightly on main, a release on v* tags
   release:

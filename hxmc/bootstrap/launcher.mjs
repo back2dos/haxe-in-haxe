@@ -57,7 +57,7 @@ const LIX_PLATFORM = {
 	'windows-x86_64': 'win64', 'windows-arm64': 'win64',
 };
 
-// dist/: an installation lix can use (`lix use haxe ./node_modules/hxmc/dist`):
+// dist/: an installation lix can use (`lix use haxe ./node_modules/@hxmc/cli/dist`):
 // dist/haxe (this launcher, then the native compiler), dist/std (upstream's
 // std: a symbolic link, a junction on Windows, else a copy), dist/platform.txt
 export function setupDist() {

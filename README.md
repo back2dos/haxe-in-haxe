@@ -29,7 +29,7 @@ the same `--interp` runs, display requests and compilation-server answers.
 ## Using hxmc
 
 ```sh
-npm i -D hxmc             # node 22 or later; then `npx haxe`, or haxe on PATH through node_modules/.bin
+npm i -D @hxmc/cli            # node 22 or later; then `npx haxe`, or haxe on PATH through node_modules/.bin
 ```
 
 The package's `haxe` is the port's command line with hxmc built in: every
@@ -76,7 +76,7 @@ it) starts the compiler directly; with install scripts disabled
 (`--ignore-scripts`, pnpm's default) the first call through node does the
 same. On Windows npm's `haxe.cmd` always starts node (about 40-60 ms per call),
 which runs the native compiler; point editors and lix at
-`node_modules/hxmc/dist/haxe.exe` to bypass it. Nothing but the compiler's own
+`node_modules/@hxmc/cli/dist/haxe.exe` to bypass it. Nothing but the compiler's own
 output goes to stdout or stderr (editors run `haxe --wait stdio`, whose answers
 are on stderr, and parse `haxe --version`); a notice of a first build goes to
 an interactive terminal only, and a failed build prints one line and exits
@@ -87,18 +87,18 @@ language server. `HXMC_INSTALL=0` keeps the launcher in place.
 `hxmc-rebuild` builds the native compiler from the package's (possibly
 edited) `haxe/` and `hxmc/` sources with the packaged WebAssembly compiler,
 into the cache, which `haxe` then prefers: edit the compiler in
-`node_modules/hxmc` and rebuild. (On Windows the WebAssembly path runs on
+`node_modules/@hxmc/cli` and rebuild. (On Windows the WebAssembly path runs on
 node's WASI, whose gaps the launcher fills: `fd_readdir`, drive roots, Windows
 paths in arguments; checked in CI on Windows too.)
 
 Editors and lix: vshaxe with `"haxe.executable": "auto"` (the default) runs
 the workspace's `node_modules/.bin/haxe` when there is one (as for the lix
 npm package; expected from vshaxe's documentation of `auto`, not verified in
-an editor here); on Windows set it to `node_modules/hxmc/dist/haxe.exe`.
+an editor here); on Windows set it to `node_modules/@hxmc/cli/dist/haxe.exe`.
 `dist/` is an installation lix accepts as a path version (`dist/haxe`,
 `dist/std`, `dist/platform.txt`, written on install or first use): `lix use
-haxe ./node_modules/hxmc/dist`, or `.haxerc` with
-`{"version": "./node_modules/hxmc/dist", "resolveLibs": "scoped"}`; lix's
+haxe ./node_modules/@hxmc/cli/dist`, or `.haxerc` with
+`{"version": "./node_modules/@hxmc/cli/dist", "resolveLibs": "scoped"}`; lix's
 `haxe` shim then runs hxmc (checked with this repository's lix on Linux and
 macOS in CI). With the lix npm package in the same project both packages
 declare a `haxe` bin: npm reports nothing and `node_modules/.bin/haxe` is
