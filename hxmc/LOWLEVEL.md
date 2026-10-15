@@ -282,6 +282,102 @@ function onFrame() {
   lifetime checks, bounds checks that release builds may drop.
 - hxmc-only, by design.
 
+### Value enums (Zig's tagged unions)
+
+Haxe enum values are immutable, so copying one cannot be observed except
+through identity (`==` on enum values with arguments compares references)
+and `null`. An enum can therefore opt into a value representation:
+
+```haxe
+@:hxmc.value enum Shape {
+  Circle(r:Float32);
+  Rect(w:Float32, h:Float32);
+}
+
+@:hxmc.noGc function area(s:Shape):Float32
+  return switch s {                       // ordinary Haxe pattern matching
+    case Circle(r): 3.14159 * r * r;
+    case Rect(w, h): w * h;
+  }
+```
+
+hxmc stores it as a tag plus room for the largest payload: inline in
+structs and slices, in registers or copied, never allocated. The typer sees
+a normal enum, so `switch`, exhaustiveness and constructors work
+unchanged. Restrictions:
+
+- no identity comparison (`==` rejected, or structural like
+  `Type.enumEq`);
+- never `null` (`Null<Shape>` boxes, which no-GC code rejects);
+- no direct self-recursion (infinite size): recursive payloads go through
+  `Ptr<T>` or stay ordinary GC enums, as in Zig;
+- conversion to `Dynamic` or an interface copies into a heap box (a GC
+  allocation);
+- payload types must be value types (scalars, structs, `Ptr`, other value
+  enums).
+
+| Zig | Haxe on hxmc |
+| --- | --- |
+| `enum` / `enum(u8)` | enum abstracts (`enum abstract Mode(UInt8)`), available today |
+| `union(enum)` | `@:hxmc.value` enums |
+| `extern union` / untagged unions (C) | `@:hxmc.union` structs with overlapping fields, for C interop |
+
+### Other Zig constructs and how they map
+
+| Zig | Haxe on hxmc | Fit |
+| --- | --- | --- |
+| `comptime` generics (`fn ArrayList(comptime T: type) type`) | `@:generic` specialization (done by the typer) | good |
+| `comptime` computation, `inline for` | macros (run in Eval, different semantics), inlining and constant folding | partial |
+| `defer` / `errdefer` | a macro rewriting `@:defer expr` into cleanup on every exit (try/catch and rethrow: Haxe has no `finally`); `Arena.scoped` works the same way | good with a macro |
+| error unions, `try`, `catch` | exceptions; no-GC code throws preallocated or static error values; `Result`-style enums with macro sugar where errors as values are wanted | acceptable |
+| arbitrary-width and packed integers (`u3`, packed structs with bit fields) | abstracts over `Int` with masking | clumsy |
+| overflow as an error, wrapping `+%`, saturating `+|` | Haxe's `Int` wraps; checked and saturating arithmetic as functions or abstracts | acceptable |
+| `*const T`, `*T` vs `[*]T`, sentinel slices `[:0]u8` | distinct abstracts (`ConstPtr<T>`, `Ptr<T>`, `Slice<T>`, `CString`) | acceptable |
+| no hidden allocations | Haxe allocates implicitly (closures, string concatenation, array literals, boxing): `@:hxmc.noGc` must be a compiler check | needs the check |
+| `@Vector` (SIMD) | hxmc intrinsics | needs work |
+| `anytype` | `@:generic` or macros | good |
+
+The real gaps are value enums, `defer` (a macro), const pointers
+(abstracts) and the hidden-allocation check (the compiler).
+
+## Go's equivalents
+
+Go is GC-only and has no allocator-passing convention, but it has close
+equivalents of the GC-interop pieces, mostly for cgo and its own runtime:
+
+| This design | Go |
+| --- | --- |
+| `Handle` | `runtime/cgo.Handle` (`cgo.NewHandle(v)`, `h.Value()`, `h.Delete()`) |
+| `pin` | `runtime.Pinner` (Go 1.21+), plus cgo's rule that C may not keep Go pointers |
+| `@:hxmc.noGc` as a checked rule | `//go:nowritebarrierrec`, `//go:nosplit`, `//go:systemstack` and a not-in-heap marker type, enforced by the compiler but only inside the runtime |
+| arenas | the experimental `arena` package (`GOEXPERIMENT=arenas`, Go 1.20), on hold indefinitely: use after free and API composition proved hard to make safe in a GC language |
+| implicit stack allocation | escape analysis |
+
+Go validates the GC-interop half; its stalled arena experiment is why
+segment lifetime checks and the `Debug` allocator are part of this design.
+
+## Effort (estimated)
+
+Calibrated on hxmc so far: the compiler is about 21k lines of Haxe (Mir
+construction about 2.3k, the WebAssembly back end 2.3k, each linker
+400–700, the optimizer about 1k), the runtime in Haxe about 10k; the
+WebAssembly target with its all-Haxe runtime took one agent about 2.5
+hours, macOS and Windows arm64 about 2.7 hours, the runtime move about 8.
+
+| Step | Compiler | Std / runtime | Agent time |
+| --- | --- | --- | --- |
+| 1. C interop basics: types, direct calls on six ABIs and WebAssembly imports, static and dynamic linking | 1.5–2.5k | 0.3k | half a day to a day (new: dynamic ELF output; PE and Mach-O imports generalized) |
+| 2. Native memory: arenas, segments, `pin`, `Handle`, callbacks, thread attach | 0.6–0.9k | 1–1.5k | about a day (`pin` in a copying collector needs a non-moving space, in the C and the Haxe collectors) |
+| 3. C declaration parser, header generator | | 1.5–2k (macro code) | half a day |
+| 4. Manual memory: `Allocator`, `Slice`, containers; struct values | 2–3k | 1.5–2.5k | 1.5–2 days (struct values touch lowering, Mir, all three back ends and the linkers' data) |
+| 5. `@:hxmc.noGc` complete, raw-address check | 0.5–1k | | half a day |
+| 6. Value enums, `defer` macro, structs by value across C calls, optional tcc | 2–3k | 0.3k | 1–2 days |
+| 7. Runtime and collector rewritten in this style | | rewrite | open-ended, optional |
+
+Total roughly 12–18k lines, comparable to hxmc's code generator: about 2
+agent-days for steps 1–2 (usable C interop with safe memory), 1–2 weeks
+for steps 1–6. Struct values and `pin` are where it could slip.
+
 ## Order
 
 1. C interop: `Ptr`, `CString`, `@:hxmc.struct`, `@:hxmc.opaque`, direct
