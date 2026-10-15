@@ -146,7 +146,7 @@ class Gc {
 		robjsRecent = Heap.calloc(256, 8);
 		gcCap = 4096;
 		gcStack = Heap.malloc(16 * gcCap);
-		Boxes.init();
+		hxmc.rt.Boxes.init();
 		// the type objects (rt_type_objs: two words each, DataGen)
 		var nt = Mem.getI32(Mem.sym("rt_ntypes"), 0);
 		var to = Mem.sym("rt_type_objs");

@@ -1,33 +1,37 @@
-package hxmc.rt.wasm;
+package hxmc.rt;
 
 import hxmc.I64;
 import hxmc.rt.Types.*;
+import hxmc.unsafe.LibC;
 import hxmc.unsafe.Mem;
 import hxmc.unsafe.Ptr;
 
-// rt.c's boxes, array element access and growth, and Int conversion for
-// WebAssembly (README.md, "WebAssembly"), in Haxe: references kept
-// across allocations are ordinary locals here (the compiler roots them),
-// raw addresses are taken again after each allocation.
-@:hxmc.wasm @:keep
+// Boxes, array element access and growth, and Int conversion (once rt.c's
+// and WebAssembly's wasm/Boxes.hx): references kept across allocations are
+// ordinary locals here (the compiler roots them), raw addresses are taken
+// again after each allocation. Small Int boxes and the two Bool boxes are
+// static (outside the heap: the collector leaves them alone).
+@:keep
 class Boxes {
 	static inline var SMALL_MIN = -128;
 	static inline var SMALL_MAX = 1023;
 	static inline var T_ADATA_RAW = 7;
 	static inline var T_ADATA_P = 6;
-	static var smallInts:Ptr; // static boxes (outside the heap)
-	static var boolBoxes:Ptr;
+	@:hxmc.bss(18432) static var smallInts:Ptr; // 16 bytes each (SMALL_MAX - SMALL_MIN + 1)
+	@:hxmc.bss(32) static var boolBoxes:Ptr;
 
-	@:hxmc.noGc public static function init() {
+	static inline function mkhdr(nslots:Int, kind:Int, tindex:Int):I64
+		return ((tindex : I64) << 32) | ((((kind << 28) | nslots) : I64) & 0xFFFFFFFF);
+
+	// at startup (rt_init; WebAssembly's Gc.init)
+	@:hxmc.export("hx_boxes_init") @:hxmc.noGc public static function init() {
 		var n = SMALL_MAX - SMALL_MIN + 1;
-		smallInts = Heap.calloc(2 * n, 8);
 		for (i in 0...n) {
-			Mem.setI64(smallInts, 16 * i, Gc.mkhdr(1, K_OBJ, T_BOXINT));
+			Mem.setI64(smallInts, 16 * i, mkhdr(1, K_OBJ, T_BOXINT));
 			Mem.setI32(smallInts, 16 * i + 8, i + SMALL_MIN);
 		}
-		boolBoxes = Heap.calloc(4, 8);
 		for (i in 0...2) {
-			Mem.setI64(boolBoxes, 16 * i, Gc.mkhdr(1, K_OBJ, T_BOXBOOL));
+			Mem.setI64(boolBoxes, 16 * i, mkhdr(1, K_OBJ, T_BOXBOOL));
 			Mem.setI32(boolBoxes, 16 * i + 8, i);
 		}
 	}
@@ -70,7 +74,7 @@ class Boxes {
 	@:hxmc.export("hx_f2i_slow") @:hxmc.noGc static function f2iSlow(f:Float):Int {
 		if (f != f) return 0;
 		if (f >= 2147483648.0 || f <= -2147483649.0) {
-			var l:I64 = cast LibM.fmod(f, 4294967296.0);
+			var l:I64 = cast M.fmod(f, 4294967296.0);
 			return l.toInt();
 		}
 		return cast f;
@@ -164,13 +168,20 @@ class Boxes {
 		if (ncap < 2) ncap = 2;
 		if (ncap < need) ncap = need;
 		var kind = arrKind(a);
+		var d0 = arrData(a);
 		var nd = dataAlloc(kind, ncap);
+		// (another thread may have changed the array at the allocation: a
+		// replaced data or kind retries)
 		a = Mem.getRef(slot, 0);
+		if (arrData(a) != d0 || arrKind(a) != kind) {
+			arrGrow(slot, need);
+			return;
+		}
 		var len = arrLen(a);
 		var d = arrData(a);
 		if (!d.isNull()) {
 			var es = kind == AK_I32 ? 4 : 8;
-			Wasm.memcpy(Mem.addr(nd), d, es * len);
+			LibC.memcpy(Mem.addr(nd), d, es * len);
 			if (kind == AK_PTR && !inYoungObj(nd)) Gc_barrierRange(nd, len);
 		}
 		Mem.setRefBarrier(a, 8, nd);
@@ -310,4 +321,8 @@ class Boxes {
 		storeConv(slot, n, vk, v);
 		return n;
 	}
+}
+
+@:hxmc.c @:hxmc.fast private extern class M {
+	static function fmod(x:Float, y:Float):Float;
 }

@@ -395,6 +395,7 @@ static inline int32_t String_length(void *s) { return STR_LEN(s); }
 static inline int32_t String_charCodeAt_i(void *s, int32_t i) { return (uint32_t)i < (uint32_t)STR_LEN(s) ? STR_CHARS(s)[i] : 0; }
 
 // ---- boxes and Dynamic
+void hx_boxes_init(void); // hxmc.rt.Boxes (Haxe), as the boxes and array slow paths below
 void *hx_box_int(int32_t v);
 void *hx_box_float(double v);
 void *hx_box_i64(int64_t v);
