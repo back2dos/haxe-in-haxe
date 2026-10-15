@@ -485,16 +485,19 @@ jobs:
           export HAXESHIM_ROOT="$RUNNER_TEMP/lix-root"
           mkdir -p "$RUNNER_TEMP/lix-project/src" && cd "$RUNNER_TEMP/lix-project"
           "$L" scope create
+          # downloads from GitHub's and haxe.org's servers stall now and then on the
+          # runners (no data for 30 s, or a TCP timeout): tried again, as a person would
+          retry() { for n in 1 2 3; do "$@" && return 0; echo "retry: $* failed (try $n)"; sleep 10; done; return 1; }
           # Haxe and neko have no Windows ARM64 builds, and lix (as upstream's)
           # maps no platform there ("Unsupported platform: unknown"): no downloads
           if [ "${{ matrix.target }}" = windows-arm64 ]; then exit 0; fi
-          "$L" download
-          "$L" install haxelib:tink_core
+          retry "$L" download
+          retry "$L" install haxelib:tink_core
           cat haxe_libraries/tink_core.hxml .haxerc
           # a fresh clone's case: the libraries reinstalled from haxe_libraries
-          "$L" install haxelib:tink_json
+          retry "$L" install haxelib:tink_json
           rm -rf "$HAXESHIM_ROOT/haxe_libraries"
-          "$L" download
+          retry "$L" download
           echo 'class Main { static function main() trace(tink.core.Outcome.Success(#if sys Sys.args() #else "js" #end)); }' > src/Main.hx
           # Haxe 4.3.7 has no Linux ARM64 build: lix (as the npm package)
           # downloads the x86-64 one there, which does not run
