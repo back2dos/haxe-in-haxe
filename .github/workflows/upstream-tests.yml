@@ -1,16 +1,17 @@
-# Upstream Haxe's CI test suite (haxe/.github/workflows/main.yml: the jobs
-# linux-test, mac-test and windows64-test) with the port as `haxe`.
+# Upstream Haxe's compiler-side CI suite (haxe/upstream/.github/workflows/
+# main.yml: the macro job of linux-test, mac-test and windows64-test: the unit
+# tests in the macro context and their HXB round trip, null safety, the misc
+# projects, sys on Eval, threads, the third-party projects) with the port as
+# `haxe`. The target suites are not run here: their outputs are compared with
+# the reference's instead (build.yml, conformance: haxe/test/UpstreamTargets.hx).
 #
-# Called by build.yml once its `build` job has uploaded the release binaries
-# (the port built by hxmc); nothing is rebuilt here. Each job puts the release binary
-# on PATH as `haxe` with HAXE_STD_PATH at the submodule's std, builds haxelib
-# from haxe/extra/haxelib_src with that binary (client.hxml to run.n, then
-# `nekotools boot` as upstream's Makefiles do), and runs RunCi for its target
-# in haxe/tests (`haxe --run RunCi <target>`; on Windows `haxe RunCi.hxml`
-# with TEST set, as upstream), straight from the submodule. The Windows job
-# runs the native Windows build (haxe-in-haxe.exe as haxe.exe, haxelib.exe
-# booted by nekotools next to it). The steps follow upstream's jobs; the
-# differences are commented.
+# Called by build.yml once its `build` job has uploaded the release binaries;
+# nothing is rebuilt here. Each job puts the release binary on PATH as `haxe`
+# with HAXE_STD_PATH at the submodule's std, builds haxelib from
+# haxe/upstream/extra/haxelib_src with that binary (client.hxml to run.n, then
+# `nekotools boot` as upstream's Makefiles do), and runs RunCi in
+# haxe/upstream/tests (`haxe --run RunCi macro`; on Windows `haxe RunCi.hxml`
+# with TEST set, as upstream), straight from the submodule.
 name: upstream-tests
 
 on:
@@ -24,32 +25,11 @@ jobs:
     runs-on: ubuntu-22.04${{ matrix.arch == 'arm64' && '-arm' || '' }}
     env:
       PLATFORM: linux${{ matrix.arch == 'arm64' && '-arm' || '' }}64
-      HXCPP_COMPILE_CACHE: ${{ github.workspace }}/hxcache
-      # upstream: /usr/local/share/haxe/std (a link to the package's std)
-      HAXE_STD_PATH: ${{ github.workspace }}/haxe/std
+      HAXE_STD_PATH: ${{ github.workspace }}/haxe/upstream/std
     strategy:
       fail-fast: false
       matrix:
-        target: [macro, js, hl, cpp, jvm, php, python, lua, flash, neko]
         arch: [x86, arm64]
-        include:
-          - target: hl
-            arch: x86
-            APT_PACKAGES: cmake ninja-build libturbojpeg-dev
-          - target: hl
-            arch: arm64
-            APT_PACKAGES: cmake ninja-build libturbojpeg-dev
-            runci-args: --skip-hl-jit
-          - target: cpp
-            arch: x86
-            APT_PACKAGES: gcc-multilib g++-multilib
-          - target: lua
-            APT_PACKAGES: ncurses-dev
-          - target: flash
-            APT_PACKAGES: libglib2.0-0 libgtk2.0-0 libfreetype6 xvfb
-        exclude:
-          - target: flash
-            arch: arm64
     steps:
       - uses: actions/checkout@v7
         with:
@@ -57,221 +37,111 @@ jobs:
           persist-credentials: false
       - uses: actions/download-artifact@v8
         with:
-          name: haxe-in-haxe-linux-${{ matrix.arch == 'arm64' && 'aarch64' || 'x86_64' }}
+          name: hxmc-haxe-linux-${{ matrix.arch == 'arm64' && 'aarch64' || 'x86_64' }}
           path: linuxBinaries
-
-      - uses: ./haxe/.github/actions/setup-neko
-
+      - uses: ./haxe/upstream/.github/actions/setup-neko
       - name: Setup Haxe
         run: |
-          # upstream's haxe links mbedtls dynamically; the port's links it statically,
-          # but HashLink's build (runci's hl target) needs the headers
-          sudo apt install -qqy libmbedtls-dev
-
           set -ex
           tar -xf linuxBinaries/*.tar.gz -C linuxBinaries --strip-components=1
           sudo mkdir -p /usr/local/bin/
-          sudo ln -s `pwd`/linuxBinaries/haxe-in-haxe /usr/local/bin/haxe
-
+          sudo ln -s `pwd`/linuxBinaries/haxe /usr/local/bin/haxe
       # upstream's linux-build job (make haxelib), with the port as haxe
       - name: Build haxelib
-        working-directory: ${{ github.workspace }}/haxe/extra/haxelib_src
+        working-directory: ${{ github.workspace }}/haxe/upstream/extra/haxelib_src
         run: |
           set -ex
           haxe client.hxml
           nekotools boot -c run.n
           cc run.c -o haxelib -I/usr/local/include -L"$NEKOPATH" -lneko -Wl,-rpath,"$NEKOPATH"
           sudo ln -s `pwd`/haxelib /usr/local/bin/haxelib
-
       - name: Print Haxe version
         run: haxe -version
-
       - name: Setup haxelib
         run: |
           set -ex
           mkdir ~/haxelib
           haxelib setup ~/haxelib
-
-      - name: Install apt packages
-        if: matrix.APT_PACKAGES
-        run: |
-          set -ex
-          sudo apt update -qqy
-          sudo apt install -qqy ${{matrix.APT_PACKAGES}}
-
-      - name: Flash setup
-        if: matrix.target == 'flash'
-        run: export DISPLAY=:99.0
-
-      - name: Cache Lua environments
-        uses: ./haxe/.github/actions/cache-lua
-        if: matrix.target == 'lua'
-        with:
-          # the action hashes tests/runci/targets/Lua.hx, which is under haxe/ here
-          key-prefix: lua-env-linux-${{ matrix.arch }}-${{ hashFiles('haxe/tests/runci/targets/Lua.hx') }}
-
-      - name: Download d8 (Android build-tools)
-        if: matrix.target == 'jvm'
-        run: |
-          set -ex
-          curl -fsSLo /tmp/build-tools.zip https://dl.google.com/android/repository/build-tools_r34-linux.zip
-          mkdir -p "$HOME/d8"
-          unzip -q /tmp/build-tools.zip -d "$HOME/d8"
-          d8=$(find "$HOME/d8" -name d8 -type f -executable | head -n1)
-          test -x "$d8"
-          echo "D8=$d8" >> "$GITHUB_ENV"
-
-      # not upstream's: core dumps of crashing programs, for the step after Test
-      - name: Core dumps
-        run: sudo sysctl -w kernel.core_pattern="$RUNNER_TEMP/core.%e.%p"
-
       - name: Test
-        run: |
-          # not upstream's: skip hlc/projects/Issue11689, whose hl2c type name is an
-          # MD5 of an OCaml Marshal with closures (a code pointer of the reference
-          # binary); the port fails it explicitly (test/TESTING.md)
-          if [ "${{ matrix.target }}" = hl ]; then rm -rf misc/hlc/projects/Issue11689; fi
-          ulimit -c unlimited
-          haxe --run RunCi ${{ matrix.target }} ${{ matrix.runci-args }}
-        working-directory: ${{github.workspace}}/haxe/tests
+        run: haxe --run RunCi macro
+        working-directory: ${{github.workspace}}/haxe/upstream/tests
         timeout-minutes: 25
 
-      # not upstream's: where the port crashed (the binary has no symbol table;
-      # the offsets in its mapping symbolize with a build of the same commit
-      # with HXMC_SYMBOLS=1)
-      - name: Backtraces of core dumps
-        if: failure()
-        run: |
-          ls "$RUNNER_TEMP"/core.haxe.* 2>/dev/null || exit 0
-          sudo apt-get install -qqy gdb > /dev/null
-          for c in "$RUNNER_TEMP"/core.haxe.*; do
-            echo "== $c"
-            gdb -batch -ex "info proc mappings" -ex "thread apply all bt 40" -ex "info registers" "$(readlink -f /usr/local/bin/haxe)" "$c" 2>&1 | grep -v "^\[New LWP" | head -400
-          done
-
   mac-test:
+    runs-on: macos-latest
     env:
       PLATFORM: mac-universal
-      HXCPP_COMPILE_CACHE: ${{ github.workspace }}/hxcache
-      HAXE_STD_PATH: ${{ github.workspace }}/haxe/std
-    strategy:
-      fail-fast: false
-      matrix:
-        target: [macro, js, hl, cpp, jvm, php, python, lua, flash, neko]
-        arch: [arm64]
-        include:
-        - target: hl
-          arch: arm64
-          runci-args: --skip-hl-jit
-        - target: hl
-          arch: x86_64
-          runner: macos-15-intel
-
-    runs-on: ${{ matrix.runner || 'macos-latest' }}
+      HAXE_STD_PATH: ${{ github.workspace }}/haxe/upstream/std
     steps:
       - uses: actions/checkout@v7
         with:
           submodules: recursive
           persist-credentials: false
-      # upstream tests a universal binary; the port has one build per architecture
       - uses: actions/download-artifact@v8
         with:
-          name: haxe-in-haxe-macos-${{ matrix.arch == 'arm64' && 'aarch64' || 'x86_64' }}
+          name: hxmc-haxe-macos-aarch64
           path: macBinaries
-
-      - uses: ./haxe/.github/actions/setup-neko
-
+      - uses: ./haxe/upstream/.github/actions/setup-neko
       - name: Setup Haxe
         run: |
           set -ex
           tar -xf macBinaries/*.tar.gz -C macBinaries --strip-components=1
           sudo mkdir -p /usr/local/bin/
-          sudo ln -s `pwd`/macBinaries/haxe-in-haxe /usr/local/bin/haxe
-
+          sudo ln -s `pwd`/macBinaries/haxe /usr/local/bin/haxe
       - name: Build haxelib
-        working-directory: ${{ github.workspace }}/haxe/extra/haxelib_src
+        working-directory: ${{ github.workspace }}/haxe/upstream/extra/haxelib_src
         run: |
           set -ex
           haxe client.hxml
           nekotools boot -c run.n
           cc run.c -o haxelib -I/usr/local/include -L"$NEKOPATH" -lneko -Wl,-rpath,"$NEKOPATH"
           sudo ln -s `pwd`/haxelib /usr/local/bin/haxelib
-
       - name: Print Haxe version
         run: haxe -version
-
       - name: Setup haxelib
         run: |
           set -ex
           mkdir ~/haxelib
           haxelib setup ~/haxelib
-
-      - name: Cache Lua environments
-        uses: ./haxe/.github/actions/cache-lua
-        if: matrix.target == 'lua'
-        with:
-          key-prefix: lua-env-mac-${{ matrix.arch }}-${{ hashFiles('haxe/tests/runci/targets/Lua.hx') }}
-
       - name: Test
         run: |
-          # disable invalid Unicode filenames on APFS
+          # disable invalid Unicode filenames on APFS (as upstream)
           echo "" > sys/compile-fs.hxml
-          # not upstream's: skip hlc/projects/Issue11689, whose hl2c type name is an
-          # MD5 of an OCaml Marshal with closures (a code pointer of the reference
-          # binary); the port fails it explicitly (test/TESTING.md)
-          if [ "${{ matrix.target }}" = hl ]; then rm -rf misc/hlc/projects/Issue11689; fi
-          haxe --run RunCi ${{ matrix.target }} ${{ matrix.runci-args }}
-        working-directory: ${{github.workspace}}/haxe/tests
+          haxe --run RunCi macro
+          git checkout sys/compile-fs.hxml
+        working-directory: ${{github.workspace}}/haxe/upstream/tests
         timeout-minutes: 60
 
   windows64-test:
     runs-on: windows-2025-vs2026
     env:
       PLATFORM: windows64
-      TEST: ${{matrix.target}}
-      HXCPP_COMPILE_CACHE: ${{ github.workspace }}/hxcache
+      TEST: macro
       ARCH: 64
-      # upstream: the std of the package next to haxe.exe
-      HAXE_STD_PATH: ${{ github.workspace }}\haxe\std
-    strategy:
-      fail-fast: false
-      matrix:
-        target: [macro, js, hl, cpp, jvm, php, python, lua, flash, neko]
+      HAXE_STD_PATH: ${{ github.workspace }}\haxe\upstream\std
     steps:
       - uses: actions/checkout@v7
         with:
           submodules: recursive
           persist-credentials: false
-      # upstream: its windows64-build package (haxe.exe, haxelib.exe, std)
       - uses: actions/download-artifact@v8
         with:
-          name: haxe-in-haxe-windows-x86_64
-          path: win${{env.ARCH}}Binaries
-
-      - uses: ./haxe/.github/actions/setup-neko
-
-      - uses: actions/setup-node@v7
-        if: matrix.target == 'js'
-        with:
-          node-version: 24
-
+          name: hxmc-haxe-windows-x86_64
+          path: win64Binaries
+      - uses: ./haxe/upstream/.github/actions/setup-neko
       - name: Setup Haxe
         shell: pwsh
         run: |
-          $DOWNLOADDIR="./win$($env:ARCH)Binaries"
-          Expand-Archive $DOWNLOADDIR/*.zip -DestinationPath $DOWNLOADDIR
+          Expand-Archive win64Binaries/*.zip -DestinationPath win64Binaries
           Set-PSDebug -Trace 1
-          $HAXEPATH = (Get-ChildItem $DOWNLOADDIR/haxe-in-haxe-windows-* -Directory).FullName
-          # not upstream's: the port's binary as haxe.exe
-          Copy-Item "$HAXEPATH\haxe-in-haxe.exe" "$HAXEPATH\haxe.exe"
+          $HAXEPATH = (Get-ChildItem win64Binaries/hxmc-haxe-windows-* -Directory).FullName
           echo $HAXEPATH >> $env:GITHUB_PATH
           echo "HAXEPATH=$HAXEPATH" >> $env:GITHUB_ENV
           echo "HAXELIB_ROOT=$HAXEPATH\lib" >> $env:GITHUB_ENV
-
       # upstream's windows64-build job (make -f Makefile.win haxelib), with the port as haxe
       - name: Build haxelib
         shell: pwsh
-        working-directory: ${{ github.workspace }}/haxe/extra/haxelib_src
+        working-directory: ${{ github.workspace }}/haxe/upstream/extra/haxelib_src
         run: |
           Set-PSDebug -Trace 1
           haxe client.hxml
@@ -279,60 +149,16 @@ jobs:
           nekotools boot run.n
           if ($LASTEXITCODE -ne 0) { exit 1 }
           Move-Item run.exe "$env:HAXEPATH\haxelib.exe"
-
       - name: Print Haxe version
         shell: pwsh
         run: haxe -version
-
-      - name: "Make Python 3 be available as python3 in the cmdline"
-        shell: pwsh
-        run: |
-          Set-PSDebug -Trace 1
-          $pypath = python -c "import sys; print(sys.executable)"
-          $py3path = $pypath.replace("python.exe","python3.exe")
-          cmd /c mklink $py3path $pypath
-          python3 -V
-
-      - uses: msys2/setup-msys2@v2
-        if: matrix.target == 'lua'
-        id: msys2
-        with:
-          msystem: UCRT64
-          update: true
-          install: >-
-            mingw-w64-ucrt-x86_64-gcc
-            mingw-w64-ucrt-x86_64-openssl
-            mingw-w64-ucrt-x86_64-pcre2
-            mingw-w64-ucrt-x86_64-libuv
-
       - name: Setup haxelib
         shell: pwsh
         run: |
           mkdir "$env:HAXELIB_ROOT"
           haxelib setup "$env:HAXELIB_ROOT"
-
-      - name: Add msbuild to PATH (hl/c)
-        uses: microsoft/setup-msbuild@v3
-        if: matrix.target == 'hl'
-        with:
-          msbuild-architecture: x64
-
-      - name: Cache Lua environments
-        uses: ./haxe/.github/actions/cache-lua
-        if: matrix.target == 'lua'
-        with:
-          # the action hashes tests/runci/targets/Lua.hx, which is under haxe/ here
-          key-prefix: lua-env-windows64-${{ hashFiles('haxe/tests/runci/targets/Lua.hx') }}
-
       - name: Test
         shell: pwsh
-        run: |
-          # not upstream's: skip hlc/projects/Issue11689, whose hl2c type name is an
-          # MD5 of an OCaml Marshal with closures (a code pointer of the reference
-          # binary); the port fails it explicitly (test/TESTING.md)
-          if ($env:TEST -eq "hl") { Remove-Item -Recurse -Force misc/hlc/projects/Issue11689 }
-          haxe RunCi.hxml
-        working-directory: ${{github.workspace}}/haxe/tests
+        run: haxe RunCi.hxml
+        working-directory: ${{github.workspace}}/haxe/upstream/tests
         timeout-minutes: 25
-        env:
-          MSYS2_LOCATION: ${{ matrix.target == 'lua' && steps.msys2.outputs.msys2-location || '' }}

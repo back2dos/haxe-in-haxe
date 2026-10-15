@@ -1,9 +1,0 @@
-# HXB conformance of the third-party projects of upstream CI (Macro.hx party()),
-# compiled with the arguments of their test steps in test/upstream.py.
-# The projects are cloned (pinned) and their haxelib repos set up by
-#   python3 test/upstream.py --reference party
-# and then compared with
-#   HAXE_REFERENCE=haxe/haxe python3 test/conformance.py --cases test/conformance-party-cases.txt [--hxb-lib]
-
-hxml party-tink_core test/generated/upstream/party/tink_core tests.hxml -w -WDeprecated --interp --macro "addMetadata('@:exclude','Futures','testDelay')"
-hxml party-hxcoro test/generated/upstream/party/hxcoro/tests build-eval.hxml
