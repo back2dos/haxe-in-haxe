@@ -263,10 +263,14 @@ class Bench {
 			env["HAXESHIM_ROOT"] = '$scope/lix-root';
 			env["HAXESHIM_SCOPE"] = scope;
 			env["PATH"] = FileSystem.fullPath("bin/lix") + ":" + Sys.getEnv("PATH");
+			// (the haxelib shim downloads neko on its first call and says so on stdout:
+			// not in the compiler's -lib resolution)
+			exec(["haxelib", "path", "hxnodejs"], {env: env, merge: true});
 			if (targets.contains("cpp")) {
 				// hxcpp's build tool (hxcpp.n, which `haxelib run hxcpp` runs), compiled by the port
 				var p = exec(["haxelib", "path", "hxcpp"], {env: env, merge: true});
-				hxcppDir = [for (l in p.out.split("\n")) if (l.trim() != "" && !l.startsWith("-")) haxe.io.Path.removeTrailingSlashes(l.trim())][0];
+				// (the class path: the line naming a directory; lix may first report a neko download)
+				hxcppDir = [for (l in p.out.split("\n")) if (l.trim() != "" && !l.startsWith("-") && FileSystem.exists(l.trim())) haxe.io.Path.removeTrailingSlashes(l.trim())][0];
 				if (hxcppDir == null || !FileSystem.exists('$hxcppDir/run.n')) fail("hxcpp not found: " + p.out);
 				if (!FileSystem.exists('$hxcppDir/hxcpp.n')) {
 					var r = exec([port, "compile.hxml"], {cwd: '$hxcppDir/tools/hxcpp', merge: true});
