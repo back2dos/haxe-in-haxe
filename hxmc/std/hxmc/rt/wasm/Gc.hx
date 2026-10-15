@@ -9,10 +9,14 @@ import hxmc.unsafe.Ptr;
 // generational copying collector with one thread, in Haxe over linear
 // memory (hxmc/README.md, "WebAssembly"). Same objects, nursery, promotion
 // and depth-first copying as rt.c (whose comments explain them); the
-// differences: regions come from Heap (memory grows, it is never given
-// back: freed semispaces are reused), no thread handshake (one thread,
-// thread-locals are globals), no native handles (no C resources), and
-// finalisers are registered but never run. Every function here is
+// differences: memory comes from Heap (it grows, it is never given back),
+// the old space is a list of chunks rather than a contiguous semispace (a
+// major collection copies into chunks taken as it goes, then the from-space's
+// chunks are kept for reuse: no to-space sized for the worst case, no
+// semispaces that outgrow the holes their predecessors left, which a 4 GB
+// memory cannot afford), no thread handshake (one thread, thread-locals are
+// globals), no native handles (no C resources), and finalisers are
+// registered but never run. Every function here is
 // @:hxmc.noGc: it runs while objects move, with raw addresses.
 @:hxmc.wasm @:keep
 class Gc {
@@ -20,6 +24,10 @@ class Gc {
 	static inline var MINOR_MAX = 32 << 20;
 	static inline var MIN_OLD = 16 << 20;
 	static inline var SHADOW = 64 << 20;
+	static inline var CHUNK = 1 << 20;
+	static inline var LARGE = 128 << 10; // larger objects get a region of their own
+	static inline var GRAN_SHIFT = 16; // chunks and regions start at multiples of 64 KB
+	static inline var GRAN = 1 << GRAN_SHIFT;
 
 	static var nurseryBase:Ptr; // MINOR_MAX reserved
 	static var youngStart:Ptr;
@@ -28,13 +36,27 @@ class Gc {
 	static var zchunk:Int; // RT_ZCHUNK_KB
 	static var minorSize:Int;
 	static var minorFixed:Bool;
-	static var oldRegion:Ptr; // the current semispace (a Heap region)
-	static var oldRegionSize:Int;
-	static var oldStart:Ptr;
-	static var oldPtr:Ptr;
-	static var oldEnd:Ptr;
-	static var fromStart:Ptr;
-	static var fromEnd:Ptr;
+	// the old space: chunks of CHUNK bytes and the regions of large objects,
+	// listed as (start, used end, size)
+	static var chunks:Ptr;
+	static var nchunks:Int;
+	static var chunksCap:Int;
+	static var fromChunks:Ptr; // a major collection's from-space: the list before it
+	static var nfrom:Int;
+	static var fromCap:Int;
+	static var cur:Int; // the chunk allocated in (-1: none)
+	static var oldPtr:Ptr; // its allocation pointer
+	static var oldEnd:Ptr; // its end
+	static var oldBytes:I64; // the size of the old space's chunks and regions
+	static var oldLimit:I64; // a major collection rather than growing past it
+	static var pool:Ptr; // free chunks, linked through their first word
+	static var poolBytes:I64;
+	// a byte per 64 KB of memory: 1 in the old space (the from-space during a
+	// major collection), 2 in its to-space, 0 elsewhere
+	static var gran:Ptr;
+	static var newState:Int; // what chunks taken now are
+	static var copies:Int; // objects copied (a collection's forwarding copied one just now)
+	static var copiedBytes:I64;
 	static var stackBase:Ptr; // the shadow stack
 	static var nglobals:Int;
 	static var major:Bool; // which forwarding (minor or major) runs
@@ -77,7 +99,10 @@ class Gc {
 		return !p.ult(youngStart) && p.ult(youngEnd);
 
 	static inline function inFrom(p:Ptr):Bool
-		return !p.ult(fromStart) && p.ult(fromEnd);
+		return Mem.getU8(gran, (p.toI64() >>> GRAN_SHIFT).toInt()) == 1;
+
+	static inline function isOld(p:Ptr):Bool
+		return Mem.getU8(gran, (p.toI64() >>> GRAN_SHIFT).toInt()) != 0;
 
 	// ---- startup
 
@@ -101,11 +126,14 @@ class Gc {
 		Mem.setPtr(Mem.sym("rt_young_start"), 0, youngStart);
 		emptyChunk();
 		var om = Wasi.envInt("RT_OLD_MB", 32);
-		oldRegionSize = om << 20;
-		oldRegion = Heap.region(oldRegionSize);
-		oldStart = oldRegion;
-		oldPtr = oldStart;
-		oldEnd = oldStart.add(oldRegionSize);
+		oldLimit = (om : I64) << 20;
+		gran = Heap.regionZero(1 << (32 - GRAN_SHIFT));
+		chunksCap = 256;
+		chunks = Heap.malloc(24 * chunksCap);
+		fromCap = 256;
+		fromChunks = Heap.malloc(24 * fromCap);
+		cur = -1;
+		newState = 1;
 		stackBase = Heap.regionZero(SHADOW);
 		Mem.tlsSet("rt_sp", stackBase);
 		Mem.tlsSet("rt_sp_hw", stackBase);
@@ -180,9 +208,13 @@ class Gc {
 		if (bytes > minorSize >> 2 && youngEnd.diff(Mem.tlsGet("rt_young_ptr")) < (bytes : I64)) {
 			// large objects go straight to the old space (unless the free nursery
 			// has room: they may die young)
-			if (oldEnd.diff(oldPtr) < (bytes : I64)) collect(true, bytes);
-			p = oldPtr;
-			oldPtr = oldPtr.add(bytes);
+			if (oldBytes + bytes > oldLimit) collect(true, bytes);
+			p = oldAlloc(bytes);
+			if (p.isNull()) {
+				collect(true, bytes);
+				p = oldAlloc(bytes);
+				if (p.isNull()) Heap.outOfMemory();
+			}
 		} else {
 			if (Mem.tlsGet("rt_young_rlimit").diff(Mem.tlsGet("rt_young_ptr")) < (bytes : I64) && !nextChunk(bytes)) {
 				collect(false, 0);
@@ -198,6 +230,65 @@ class Gc {
 		Mem.setI64(p, 0, header);
 		Wasm.memset(p.add(8), 0, bytes - 8);
 		return p.add(8);
+	}
+
+	// ---- the old space
+
+	// `bytes` in the old space (null: memory cannot grow so far)
+	@:hxmc.noGc static function oldAlloc(bytes:Int):Ptr {
+		var p = oldPtr;
+		if (oldEnd.diff(p) >= (bytes : I64)) {
+			oldPtr = p.add(bytes);
+			return p;
+		}
+		return oldAllocSlow(bytes);
+	}
+
+	@:hxmc.noGc static function oldAllocSlow(bytes:Int):Ptr {
+		if (bytes > LARGE) {
+			var size = (bytes + (GRAN - 1)) & ~(GRAN - 1);
+			var r = Heap.tryRegionAligned(size, GRAN);
+			if (!r.isNull()) addChunk(r, r.add(bytes), size);
+			return r;
+		}
+		var c = pool;
+		if (!c.isNull()) {
+			pool = Mem.getPtr(c, 0);
+			poolBytes -= CHUNK;
+		} else {
+			c = Heap.tryRegionAligned(CHUNK, GRAN);
+			if (c.isNull()) return c;
+		}
+		syncCur();
+		cur = nchunks;
+		addChunk(c, c, CHUNK);
+		oldPtr = c.add(bytes);
+		oldEnd = c.add(CHUNK);
+		return c;
+	}
+
+	@:hxmc.noGc static function addChunk(start:Ptr, end:Ptr, size:Int) {
+		if (nchunks == chunksCap) {
+			chunksCap *= 2;
+			chunks = Heap.realloc(chunks, 24 * chunksCap);
+		}
+		Mem.setPtr(chunks, 24 * nchunks, start);
+		Mem.setPtr(chunks, 24 * nchunks + 8, end);
+		Mem.setI64(chunks, 24 * nchunks + 16, size);
+		nchunks++;
+		oldBytes += size;
+		mark(start, size, newState);
+	}
+
+	@:hxmc.noGc static function mark(start:Ptr, size:Int, state:Int) {
+		var g = (start.toI64() >>> GRAN_SHIFT).toInt();
+		for (i in 0...(size >> GRAN_SHIFT))
+			Mem.setI8(gran, g + i, state);
+	}
+
+	// the current chunk's used end into the list
+	@:hxmc.noGc static function syncCur() {
+		if (cur >= 0) Mem.setPtr(chunks, 24 * cur + 8, oldPtr);
 	}
 
 	// ---- the write barrier
@@ -262,8 +353,11 @@ class Gc {
 		if (!inYoung(p) && !(major && inFrom(p))) return p;
 		if (kindOf(p) == K_FWD) return Mem.getPtr(p, 0);
 		var bytes = objBytes(p);
-		var n = copyTo(oldPtr, p);
-		oldPtr = oldPtr.add(bytes);
+		var d = oldAlloc(bytes);
+		if (d.isNull()) Heap.outOfMemory();
+		var n = copyTo(d, p);
+		copies++;
+		copiedBytes += bytes;
 		forwardTo(p, n);
 		return n;
 	}
@@ -300,11 +394,11 @@ class Gc {
 					i++;
 					continue;
 				}
-				var before = oldPtr;
+				var before = copies;
 				var nv = fwd(v);
 				Mem.setPtr(o, 8 * i, nv);
 				i++;
-				if (oldPtr != before) {
+				if (copies != before) {
 					// copied just now: its subtree next
 					Mem.setI64(f, 8, i);
 					push(nv);
@@ -317,9 +411,9 @@ class Gc {
 	}
 
 	@:hxmc.noGc static function fwdRoot(p:Ptr):Ptr {
-		var before = oldPtr;
+		var before = copies;
 		var n = fwd(p);
-		if (oldPtr != before) {
+		if (copies != before) {
 			push(n);
 			drain();
 		}
@@ -361,8 +455,9 @@ class Gc {
 	}
 
 	@:hxmc.noGc static function minorGc() {
-		var used = Mem.tlsGet("rt_young_ptr").diff(youngStart).toInt();
-		if (oldEnd.diff(oldPtr) < ((used + 64) : I64)) {
+		var used = Mem.tlsGet("rt_young_ptr").diff(youngStart);
+		// (what survives fills chunks to within LARGE of their end: an eighth more)
+		if (oldBytes + used + (used >> 3) + CHUNK > oldLimit) {
 			majorGc(0);
 			return;
 		}
@@ -380,44 +475,56 @@ class Gc {
 
 	@:hxmc.noGc static function majorGc(need:Int) {
 		majors++;
-		var used = Mem.tlsGet("rt_young_ptr").diff(youngStart).toInt();
-		var live = oldPtr.diff(oldStart).toInt();
-		fromStart = oldStart;
-		fromEnd = oldPtr;
-		var fromRegion = oldRegion, fromSize = oldRegionSize;
-		// the to-space: room for everything and for growth after it (twice
-		// what may be live: a wasm32 memory has 4 GB), else for everything
-		var want = clampSize(2.0 * (live + used) + 4.0 * minorSize + need);
-		var least = clampSize(1.0 * live + used + need + 65536);
-		if (want < MIN_OLD) want = MIN_OLD;
-		var size = want;
-		oldRegion = Heap.tryRegion(size);
-		if (oldRegion.isNull()) {
-			size = least;
-			oldRegion = Heap.tryRegion(size);
-			if (oldRegion.isNull()) Heap.outOfMemory();
-		}
-		oldRegionSize = size;
-		oldStart = oldRegion;
-		oldPtr = oldStart;
+		// the old space's chunks become the from-space; the to-space's are taken
+		// as objects are copied (from the free chunks first)
+		syncCur();
+		var t = fromChunks;
+		fromChunks = chunks;
+		chunks = t;
+		var tc = fromCap;
+		fromCap = chunksCap;
+		chunksCap = tc;
+		nfrom = nchunks;
+		nchunks = 0;
+		cur = -1;
+		oldPtr = Ptr.nil();
+		oldEnd = Ptr.nil();
+		oldBytes = 0;
+		newState = 2;
 		major = true;
 		scanRoots();
 		remLen = 0;
 		robjsLen = 0;
 		Wasm.memset(robjsRecent, 0, 8 * 256);
 		major = false;
-		Heap.release(fromRegion, fromSize);
-		var nowLive = oldPtr.diff(oldStart).toInt();
-		var limit = clampSize(2.0 * nowLive + 4.0 * minorSize + need);
-		if (limit < MIN_OLD) limit = MIN_OLD;
-		if (limit > oldRegionSize) limit = oldRegionSize;
-		oldEnd = oldStart.add(limit);
-		if (stats) Wasi.statLine("gc: major ", majors, nowLive >> 20, limit >> 20);
+		newState = 1;
+		for (i in 0...nfrom) {
+			var start = Mem.getPtr(fromChunks, 24 * i);
+			var size = Mem.getI64(fromChunks, 24 * i + 16).toInt();
+			mark(start, size, 0);
+			if (size == CHUNK) {
+				Mem.setPtr(start, 0, pool);
+				pool = start;
+				poolBytes += CHUNK;
+			} else
+				Heap.release(start, size);
+		}
+		for (i in 0...nchunks)
+			mark(Mem.getPtr(chunks, 24 * i), Mem.getI64(chunks, 24 * i + 16).toInt(), 1);
+		// the next limit: twice what is live and room for the nursery, but at
+		// most half of what the rest of a wasm32 memory (4 GB) leaves: the next
+		// collection's from-space and to-space must both fit
+		var live = oldBytes;
+		var limit = live * 2 + (minorSize : I64) * 4 + need;
+		if (limit < (MIN_OLD : I64)) limit = MIN_OLD;
+		var other = Heap.memoryBytes() - oldBytes - poolBytes;
+		var cap = (((1 : I64) << 32) - (64 << 20) - other) >> 1;
+		if (limit > cap) limit = cap;
+		var least = live + need + (minorSize : I64) + 2 * CHUNK;
+		if (limit < least) limit = least;
+		oldLimit = limit;
+		if (stats) Wasi.statLine("gc: major ", majors, (live >> 20).toInt(), (limit >> 20).toInt(), (Heap.memoryBytes() >> 20).toInt());
 	}
-
-	// a size in bytes as an Int, at most a little under 2 GB
-	@:hxmc.noGc static function clampSize(v:Float):Int
-		return v > 2147418112.0 ? 2147418112 : Std.int(v);
 
 	@:hxmc.noGc static function adaptNursery(survived:Int) {
 		if (grownFrom > 0) {
@@ -444,10 +551,10 @@ class Gc {
 		if (verifying) verify(false);
 		if (verifying) checkRemembered();
 		if (full) majorGc(need) else {
-			var before = oldPtr;
+			var before = copiedBytes;
 			var m0 = majors;
 			minorGc();
-			if (!minorFixed && majors == m0) adaptNursery(oldPtr.diff(before).toInt());
+			if (!minorFixed && majors == m0) adaptNursery((copiedBytes - before).toInt());
 		}
 		emptyChunk();
 		if (verifying) Wasm.memset(youngStart, POISON, minorSize);
@@ -468,24 +575,28 @@ class Gc {
 	static inline var POISON = 0xA5;
 
 	@:hxmc.noGc static function verify(after:Bool) {
+		syncCur();
 		var nt = Mem.getI32(Mem.sym("rt_ntypes"), 0);
-		var p = oldStart;
 		var count = 0;
-		while (p.ult(oldPtr)) {
-			var o = p.add(8);
-			var n = nslotsOf(o), k = kindOf(o), t = tindexOf(o);
-			if (k > 2 || t >= nt || oldPtr.diff(o) < ((8 * n) : I64)) bad("gc: verify: bad header (minor, offset, used) ", minors, o.diff(oldStart).toInt(), oldPtr.diff(oldStart).toInt());
-			var pm = k == K_OBJ ? Mem.getPtr(Mem.sym("rt_types"), 112 * t + 24) : Ptr.nil();
-			if (k == K_PARR || !pm.isNull())
-				for (i in 0...n) {
-					if (k == K_OBJ && ((Mem.getI32(pm, 4 * (i >> 5)) >>> (i & 31)) & 1) == 0) continue;
-					var v = Mem.getPtr(o, 8 * i);
-					if (v.isNull()) continue;
-					if (after && inYoung(v)) bad("gc: verify: young reference after a collection (object, slot, type) ", count, i, t);
-					if (!v.ult(oldStart) && v.ult(oldPtr) && kindOf(v) > 2) bad("gc: verify: reference to a bad header (object, slot, type) ", count, i, t);
-				}
-			p = p.add(8 * (n + 1));
-			count++;
+		for (c in 0...nchunks) {
+			var p = Mem.getPtr(chunks, 24 * c);
+			var end = Mem.getPtr(chunks, 24 * c + 8);
+			while (p.ult(end)) {
+				var o = p.add(8);
+				var n = nslotsOf(o), k = kindOf(o), t = tindexOf(o);
+				if (k > 2 || t >= nt || end.diff(o) < ((8 * n) : I64)) bad("gc: verify: bad header (minor, chunk, offset) ", minors, c, o.diff(Mem.getPtr(chunks, 24 * c)).toInt());
+				var pm = k == K_OBJ ? Mem.getPtr(Mem.sym("rt_types"), 112 * t + 24) : Ptr.nil();
+				if (k == K_PARR || !pm.isNull())
+					for (i in 0...n) {
+						if (k == K_OBJ && ((Mem.getI32(pm, 4 * (i >> 5)) >>> (i & 31)) & 1) == 0) continue;
+						var v = Mem.getPtr(o, 8 * i);
+						if (v.isNull()) continue;
+						if (after && inYoung(v)) bad("gc: verify: young reference after a collection (object, slot, type) ", count, i, t);
+						if (isOld(v) && kindOf(v) > 2) bad("gc: verify: reference to a bad header (object, slot, type) ", count, i, t);
+					}
+				p = p.add(8 * (n + 1));
+				count++;
+			}
 		}
 	}
 
@@ -518,22 +629,26 @@ class Gc {
 			add(Mem.getPtr(rem, 8 * i));
 		for (i in 0...robjsLen)
 			add(Mem.getPtr(robjs, 8 * i));
-		var p = oldStart;
+		syncCur();
 		var count = 0;
-		while (p.ult(oldPtr)) {
-			var o = p.add(8);
-			var n = nslotsOf(o), k = kindOf(o), t = tindexOf(o);
-			var pm = k == K_OBJ ? Mem.getPtr(Mem.sym("rt_types"), 112 * t + 24) : Ptr.nil();
-			if (k == K_PARR || !pm.isNull()) {
-				if (!has(o))
-					for (i in 0...n) {
-						if (k == K_OBJ && ((Mem.getI32(pm, 4 * (i >> 5)) >>> (i & 31)) & 1) == 0) continue;
-						var v = Mem.getPtr(o, 8 * i);
-						if (!v.isNull() && inYoung(v) && !has(o.add(8 * i))) bad("gc: verify: unremembered young reference (object, slot, type) ", count, i, t);
-					}
+		for (c in 0...nchunks) {
+			var p = Mem.getPtr(chunks, 24 * c);
+			var end = Mem.getPtr(chunks, 24 * c + 8);
+			while (p.ult(end)) {
+				var o = p.add(8);
+				var n = nslotsOf(o), k = kindOf(o), t = tindexOf(o);
+				var pm = k == K_OBJ ? Mem.getPtr(Mem.sym("rt_types"), 112 * t + 24) : Ptr.nil();
+				if (k == K_PARR || !pm.isNull()) {
+					if (!has(o))
+						for (i in 0...n) {
+							if (k == K_OBJ && ((Mem.getI32(pm, 4 * (i >> 5)) >>> (i & 31)) & 1) == 0) continue;
+							var v = Mem.getPtr(o, 8 * i);
+							if (!v.isNull() && inYoung(v) && !has(o.add(8 * i))) bad("gc: verify: unremembered young reference (object, slot, type) ", count, i, t);
+						}
+				}
+				p = p.add(8 * (n + 1));
+				count++;
 			}
-			p = p.add(8 * (n + 1));
-			count++;
 		}
 		Heap.free(tab);
 	}
@@ -546,7 +661,7 @@ class Gc {
 		Wasi.writeLit(2, " ");
 		Wasi.writeInt(2, c);
 		Wasi.writeLit(2, "\n");
-		WasiApi.proc_exit(99);
+		Wasi.exit(99);
 	}
 
 	// ---- hxmc.NativeGc
@@ -560,7 +675,7 @@ class Gc {
 	@:hxmc.export("hxmc_NativeGc_runFinalisers") @:hxmc.noGc static function gcRunFinalisers():Void {}
 
 	@:hxmc.export("hxmc_NativeGc_heapBytes") @:hxmc.noGc static function gcHeapBytes():Float {
-		var b:Float = cast oldEnd.diff(oldStart);
+		var b:Float = cast oldLimit;
 		return b + minorSize;
 	}
 

@@ -68,7 +68,7 @@ class FloatText {
 
 	@:hxmc.noGc static function overflow() {
 		Wasi.writeLit(2, "hxmc: FloatText: number too large\n");
-		WasiApi.proc_exit(70);
+		Wasi.exit(70);
 	}
 
 	// b *= 10^k

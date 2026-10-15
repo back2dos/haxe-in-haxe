@@ -521,7 +521,12 @@ call can start a V8 collection that crashes with a large module memory).
   (regions over `memory.grow`, malloc/free/realloc with power-of-two size
   classes), `Gc` (rt.c's collector single-threaded: the same object layout,
   write barrier, remembered set, nursery growth and copying old space,
-  shadow-stack roots; `@:hxmc.collects` marks its entry points so that
+  shadow-stack roots; the old space is a list of 1 MB chunks, larger
+  objects in regions of their own, a byte per 64 KB of memory telling the
+  from-space during a major collection: the to-space takes chunks as it
+  copies, from the from-spaces' chunks kept before new memory, and the
+  old-space limit is at most half of what the rest of the 4 GB leaves;
+  contiguous semispaces did not fit there, below); `@:hxmc.collects` marks its entry points so that
   callers keep no frame slot in a register across them; `RT_STATS`,
   `RT_MINOR_KB`, `RT_OLD_MB` as natively, and `RT_VERIFY=1` checks the old
   space around each collection and that the barrier missed no young
@@ -545,6 +550,19 @@ call can start a V8 collection that crashes with a large module memory).
   excludes ThreadNatives and NetNatives on this target (`run.py`).
   wasmtime refuses symbolic links to absolute paths inside a preopened
   directory (node follows them).
+- Memory (2026-10-15): with contiguous semispaces, each to-space a region
+  of twice the from-space's contents, every to-space larger than the hole
+  its predecessors left went above them, and merged free regions past 2 GB
+  overflowed a 32-bit size (lost, the top not lowered): the tool as a
+  module compiling the port with its generators to a native executable
+  (17,948 functions, about 540 MB live at the end) ran out of the 4 GB
+  after codegen. With chunks it peaks at 1.75 GB of linear memory (1.9 GB
+  resident under node) and takes 34 s; the port without generators went
+  from 3.0 GB to 1.6 GB (2.6 GB to 1.8 GB resident) in the same time
+  (31.4 s, 31.6 s before). Out of memory (and the other fatal
+  errors of the runtime) exit through `Wasi.exit`: proc_exit's host
+  exception used to be taken for a Haxe exception by the pads of the
+  frames below, which ran on and ran out again.
 - The tool builds as a module too (its arguments with `-D
   hxmc.target=wasm32-wasi`; under WASI it neither runs itself again with
   GC settings nor marks its output executable: no processes) and writes

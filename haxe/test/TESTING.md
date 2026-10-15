@@ -349,6 +349,39 @@ on x64, arm64 and wine at 64, 16 and 256 KB with and without `RT_VERIFY=1`,
 wasm 72/72 under node and wasmtime, ThreadNatives x300/x100, the port's
 self-compile natively and as a module byte-identical, cross-host, fixpoint).
 
+### hxmc: the WebAssembly old space in chunks (2026-10-15, branch hxmc-wasm-mem)
+
+The tool as a wasm32-wasi module ran out of its 4 GB compiling the port with
+its generators to a native executable (npm's `hxmc.HaxeMain`, 17,909
+functions; on hxmc: the module tool on `-cp src -cp hxmc/src -main
+hxmc.Main` for linux-x86_64), right after codegen, printing "out of memory"
+seven times. The live data was about 540 MB (the native build peaks at
+2 GB resident). Causes, all in the wasm runtime: each major collection took
+a to-space region of twice the from-space's contents, so every to-space
+larger than the hole its predecessors left went above them (3.1 GB of memory
+at 315 MB live); merged free regions past 2 GB overflowed `Heap.release`'s
+32-bit size (2.2 GB lost, the top not lowered); and `Heap.outOfMemory`
+called proc_exit with the runtime's current handler set, so the pads of the
+frames below took the host exception for a Haxe exception and ran on (the
+repeated lines). Now the old space is a list of 1 MB chunks (larger objects
+in 64 KB-aligned regions of their own, a byte per 64 KB of memory marking the
+from-space), the to-space takes chunks as it copies (the freed ones first),
+the old-space limit is at most half of what the rest of the 4 GB leaves, free
+region sizes are 64-bit, and fatal errors exit through `Wasi.exit`.
+
+Peak linear memory (resident under node), cold, `HXMC_JOBS=1`: the
+generators build 1.76 GB (1.9 GB), 36.5 s with npm's module, 33.8 s with
+hxmc's (it ran out after about 31 s before); the port without generators
+1.61 GB (1.77 GB) against 3.04 GB (2.58 GB), 31.4 s against 31.6 s. The
+executable is byte-identical to the native tool's, and runs. Native tools
+and programs are unchanged (the native tool byte-identical). Locally:
+`make quick`, `make check` (and `PORT=1`), `make crosshost` 99/99; `make
+full` 35/36, the one failure the wasmtime self-compile only because this
+worktree's `haxe/` is a symbolic link (wasmtime then finds no std); run with
+the real std path it is byte-identical to the reference's HXB for the same
+path. Bench under node: same time; wasm corpus also at 16 KB with
+`RT_VERIFY=1` 71/72, Bench timing out as it did before.
+
 ## Target generators
 
 Every target also compiles upstream's unit suite identically (`unit-targets.py`, above).

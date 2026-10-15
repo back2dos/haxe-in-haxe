@@ -8,7 +8,8 @@ import hxmc.unsafe.Ptr;
 // library and mmap provide on the native targets. Regions (the nursery, the
 // old space's semispaces, the shadow stack, malloc's arenas) come from the
 // top of memory, which grows (memory.grow) and never shrinks; freed regions
-// are kept in a list and reused first. malloc/free: size classes of powers
+// are kept in a list and reused first (sizes are 64-bit: merged free regions
+// may exceed 2 GB of the 4 GB). malloc/free: size classes of powers
 // of two (16 bytes to 1 MB) with free lists, carved from 1 MB arenas;
 // larger blocks are regions. One thread: no locks.
 @:hxmc.wasm @:keep
@@ -53,10 +54,16 @@ class Heap {
 		if (!tryEnsure(p)) outOfMemory();
 	}
 
+	// (Wasi.exit: with no current handler, the pads of the frames below do not
+	// take proc_exit's host exception for a Haxe exception and run on)
 	@:hxmc.noGc public static function outOfMemory() {
 		Wasi.writeLit(2, "out of memory\n");
-		WasiApi.proc_exit(2);
+		Wasi.exit(2);
 	}
+
+	// the size of linear memory in bytes
+	@:hxmc.noGc public static function memoryBytes():I64
+		return memEnd.toI64();
 
 	// a region of `bytes` (16-aligned, not zeroed when reused)
 	@:hxmc.noGc public static function region(bytes:Int):Ptr {
@@ -70,10 +77,10 @@ class Heap {
 		init();
 		bytes = (bytes + 15) & ~15;
 		for (i in 0...nfree) {
-			var size = Mem.getI64(freeTab, 16 * i + 8).toInt();
-			if (size >= bytes) {
+			var size = Mem.getI64(freeTab, 16 * i + 8);
+			if (size >= (bytes : I64)) {
 				var p = Mem.getPtr(freeTab, 16 * i);
-				if (size == bytes) removeFree(i) else {
+				if (size == (bytes : I64)) removeFree(i) else {
 					Mem.setPtr(freeTab, 16 * i, p.add(bytes));
 					Mem.setI64(freeTab, 16 * i + 8, size - bytes);
 				}
@@ -84,6 +91,40 @@ class Heap {
 		if (!tryEnsure(top.add(bytes))) return Ptr.nil();
 		top = top.add(bytes);
 		return p;
+	}
+
+	// a region of `bytes` starting at a multiple of `align` (a power of two),
+	// or null when memory cannot grow so far; what alignment skips stays free
+	@:hxmc.noGc public static function tryRegionAligned(bytes:Int, align:Int):Ptr {
+		init();
+		bytes = (bytes + 15) & ~15;
+		var mask:I64 = align - 1;
+		for (i in 0...nfree) {
+			var q = Mem.getPtr(freeTab, 16 * i);
+			var size = Mem.getI64(freeTab, 16 * i + 8);
+			var a = new Ptr((q.toI64() + mask) & ~mask);
+			var skip = a.diff(q);
+			if (skip + bytes <= size) {
+				var rest = size - skip - bytes;
+				if (skip > 0) Mem.setI64(freeTab, 16 * i + 8, skip) else removeFree(i);
+				if (rest > 0) addFree(a.add(bytes), rest);
+				return a;
+			}
+		}
+		var a = new Ptr((top.toI64() + mask) & ~mask);
+		if (!tryEnsure(a.add(bytes))) return Ptr.nil();
+		var gap = a.diff(top);
+		var q = top;
+		top = a.add(bytes);
+		if (gap > 0) addFree(q, gap);
+		return a;
+	}
+
+	@:hxmc.noGc static function addFree(p:Ptr, bytes:I64) {
+		if (nfree == MAX_FREE) return; // (lost: the table is full)
+		Mem.setPtr(freeTab, 16 * nfree, p);
+		Mem.setI64(freeTab, 16 * nfree + 8, bytes);
+		nfree++;
 	}
 
 	// a region of `bytes`, zeroed
@@ -102,22 +143,22 @@ class Heap {
 	}
 
 	// returns a region; neighbours merge, and one at the top lowers it
-	@:hxmc.noGc public static function release(p:Ptr, bytes:Int) {
-		bytes = (bytes + 15) & ~15;
+	@:hxmc.noGc public static function release(p:Ptr, size:Int) {
+		var bytes:I64 = (size + 15) & ~15;
 		var merged = true;
 		while (merged) {
 			merged = false;
 			for (i in 0...nfree) {
 				var q = Mem.getPtr(freeTab, 16 * i);
-				var qs = Mem.getI64(freeTab, 16 * i + 8).toInt();
-				if (q.add(qs) == p) {
+				var qs = Mem.getI64(freeTab, 16 * i + 8);
+				if (q.addL(qs) == p) {
 					p = q;
 					bytes += qs;
 					removeFree(i);
 					merged = true;
 					break;
 				}
-				if (p.add(bytes) == q) {
+				if (p.addL(bytes) == q) {
 					bytes += qs;
 					removeFree(i);
 					merged = true;
@@ -125,14 +166,11 @@ class Heap {
 				}
 			}
 		}
-		if (p.add(bytes) == top) {
+		if (p.addL(bytes) == top) {
 			top = p;
 			return;
 		}
-		if (nfree == MAX_FREE) return; // (lost: the table is full)
-		Mem.setPtr(freeTab, 16 * nfree, p);
-		Mem.setI64(freeTab, 16 * nfree + 8, bytes);
-		nfree++;
+		addFree(p, bytes);
 	}
 
 	// ---- malloc
