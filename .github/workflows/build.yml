@@ -254,6 +254,8 @@ jobs:
           for t in $TARGETS wasm32-wasi; do
             bin/hxmc/hxmc -cp hxmc/test -cp haxe/test --run Corpus -v --target $t --stage dist/corpus/$t
           done
+          # and with legacy exception handling (-D hxmc.wasm-eh=legacy)
+          bin/hxmc/hxmc -cp hxmc/test -cp haxe/test --run Corpus -v --target wasm32-wasi --wasm-eh legacy --stage dist/corpus/wasm32-wasi-legacy
 
       # hxmc's output does not depend on the host: the tool as a WebAssembly
       # module (under node) builds the corpus for every target, and the tool
@@ -266,7 +268,8 @@ jobs:
           set -ex
           mkdir -p dist/wasm
           HXMC_STATS=1 bin/hxmc/hxmc dist/wasm/haxe.wasm -cp haxe/src -main haxe.Main -D disable-parallelism -cp bin/hxmc/std --custom-target hxmc -D hxmc.target=wasm32-wasi | tail -3
-          ls -l dist/wasm/haxe.wasm
+          HXMC_STATS=1 bin/hxmc/hxmc dist/wasm/haxe-legacy.wasm -cp haxe/src -main haxe.Main -D disable-parallelism -cp bin/hxmc/std --custom-target hxmc -D hxmc.target=wasm32-wasi -D hxmc.wasm-eh=legacy | tail -3
+          ls -l dist/wasm/haxe.wasm dist/wasm/haxe-legacy.wasm
 
       # the reference's self-compile, in the directory the macOS runners use
       - name: Reference self-compile
@@ -303,8 +306,8 @@ jobs:
 
       - name: Pack the corpus
         run: |
-          for t in $TARGETS wasm32-wasi; do tar czf dist/corpus-$t.tar.gz -C dist/corpus/$t .; done
-          tar czf dist/corpus-wasm32-wasi-port.tar.gz -C dist/wasm haxe.wasm
+          for t in $TARGETS wasm32-wasi wasm32-wasi-legacy; do tar czf dist/corpus-$t.tar.gz -C dist/corpus/$t .; done
+          tar czf dist/corpus-wasm32-wasi-port.tar.gz -C dist/wasm haxe.wasm haxe-legacy.wasm
       - uses: actions/upload-artifact@v7
         with: {name: hxmc-self, path: dist/self/, retention-days: 3}
       - uses: actions/upload-artifact@v7
@@ -558,8 +561,9 @@ jobs:
       - name: Unpack
         run: |
           set -ex
-          mkdir -p corpus port std-x
+          mkdir -p corpus corpus-legacy port std-x
           tar xzf dl/corpus-wasm32-wasi.tar.gz -C corpus
+          tar xzf dl/corpus-wasm32-wasi-legacy.tar.gz -C corpus-legacy
           tar xzf dl/corpus-wasm32-wasi-port.tar.gz -C port
           tar xzf dl/std.tar.gz -C std-x
           tar xzf dl/src.tar.gz -C std-x
@@ -574,6 +578,11 @@ jobs:
       - name: Corpus under node, RT_VERIFY=1
         if: always()
         run: RT_VERIFY=1 $H -cp hxmc/test -cp haxe/test --run Check corpus --runner "$NODE_WASI" --summary "$GITHUB_STEP_SUMMARY"
+      # built with -D hxmc.wasm-eh=legacy (try/catch_all/rethrow, for engines
+      # without exnref), under node without exnref
+      - name: Corpus under node, legacy exception handling
+        if: always()
+        run: $H -cp hxmc/test -cp haxe/test --run Check corpus-legacy --runner "env HXMC_WASM_EXNREF=0 $NODE_WASI" --summary "$GITHUB_STEP_SUMMARY"
       - name: Corpus under wasmtime
         if: always()
         run: $H -cp hxmc/test -cp haxe/test --run Check corpus --runner "wasmtime run -W exceptions=y --dir . --dir / --env RT_MINOR_KB" --summary "$GITHUB_STEP_SUMMARY"
@@ -583,11 +592,16 @@ jobs:
       - name: Port self-compile under node
         if: always()
         run: $H -cp hxmc/test -cp haxe/test --run Selfcheck --runner "$NODE_WASI" --port port/haxe.wasm --src std-x/src --std std-x/std --ref dl/self-ref.hxb --ref-root "$SELF_ROOT" --root "$SELF_ROOT" --summary "$GITHUB_STEP_SUMMARY"
+      - name: Port self-compile under node, legacy exception handling
+        if: always()
+        run: $H -cp hxmc/test -cp haxe/test --run Selfcheck --runner "env HXMC_WASM_EXNREF=0 $NODE_WASI" --port port/haxe-legacy.wasm --src std-x/src --std std-x/std --ref dl/self-ref.hxb --ref-root "$SELF_ROOT" --root "$SELF_ROOT" --summary "$GITHUB_STEP_SUMMARY"
       - name: Port self-compile under wasmtime
         if: always()
         run: $H -cp hxmc/test -cp haxe/test --run Selfcheck --runner "wasmtime run -W exceptions=y -W max-wasm-stack=67108864 --dir / --env HAXE_STD_PATH --env PWD" --port port/haxe.wasm --src std-x/src --std std-x/std --ref dl/self-ref.hxb --ref-root "$SELF_ROOT" --root "$SELF_ROOT" --summary "$GITHUB_STEP_SUMMARY"
       # the playground's worker (hxmc/web/src/Worker.hx, WasiHost.hx) in the
-      # browsers' engines: --interp, HXB, diagnostics and completion
+      # browsers' engines: --interp, HXB, diagnostics and completion, with both
+      # modules (exnref, legacy exception handling); the page's choice of
+      # module, also in a Chromium without exnref
       - name: Playground in Chromium, Firefox and WebKit
         if: always()
         run: |

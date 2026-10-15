@@ -4,7 +4,8 @@ import hxmc.Buf;
 
 // WebAssembly's encodings: LEB128 numbers, value types, the opcodes the
 // code generator writes (WebAssembly 3.0: bulk memory, non-trapping
-// conversions, exception handling with try_table).
+// conversions, exception handling with try_table; or, with
+// -D hxmc.wasm-eh=legacy, the legacy try/catch_all/rethrow instructions).
 class Enc {
 	public static inline var I32 = 0x7F;
 	public static inline var I64 = 0x7E;
@@ -83,7 +84,9 @@ enum abstract Op(Int) to Int {
 	var Loop = 0x03;
 	var If = 0x04;
 	var Else = 0x05;
+	var Try = 0x06; // legacy exception handling
 	var Throw = 0x08;
+	var Rethrow = 0x09; // legacy
 	var ThrowRef = 0x0A;
 	var End = 0x0B;
 	var Br = 0x0C;
@@ -92,6 +95,7 @@ enum abstract Op(Int) to Int {
 	var Return = 0x0F;
 	var Call = 0x10;
 	var CallIndirect = 0x11;
+	var CatchAll = 0x19; // legacy
 	var Drop = 0x1A;
 	var Select = 0x1B;
 	var TryTable = 0x1F;

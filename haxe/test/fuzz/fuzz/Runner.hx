@@ -281,7 +281,7 @@ class Runner {
 				return {kind: "diagnostics-differ", detail: firstDiff(a.log, b.log)};
 			return {kind: "invalid", detail: firstLine(a.log)};
 		}
-		if (a.log != b.log)
+		if (!sameOutput(a.log, b.log))
 			return {kind: lane.a.target.output == "none" ? "output-differs" : "log-differs", detail: firstDiff(a.log, b.log)};
 		var d = compareOutputs(lane.a.target.output, a.dir + "/out", b.dir + "/out");
 		if (d != null)
@@ -289,7 +289,7 @@ class Runner {
 		if (lane.run && lane.a.target.run != null) {
 			if (a.runCode != b.runCode)
 				return {kind: "run-differs", detail: "exit " + a.runCode + " vs " + b.runCode};
-			if (a.runLog != b.runLog)
+			if (!sameOutput(a.runLog, b.runLog))
 				return {kind: "run-differs", detail: firstDiff(a.runLog, b.runLog)};
 		}
 		return {kind: "ok", detail: ""};
@@ -316,7 +316,7 @@ class Runner {
 		var ob = programOutput(lane.b, b);
 		if (ra != 0 && crashed(ra))
 			return {kind: "invalid", detail: lane.a.label + " run exit " + ra};
-		if (oa != ob)
+		if (!sameOutput(oa, ob))
 			return {kind: crashed(rb) ? "run-crash" : "run-differs", detail: firstDiff(oa, ob)};
 		if (ra != rb)
 			return {kind: "run-differs", detail: "exit " + ra + " vs " + rb};
@@ -334,6 +334,54 @@ class Runner {
 		var ls = [for (l in s.split("\n")) if (StringTools.trim(l) != "") l];
 		var r = ls.slice(ls.length > 3 ? ls.length - 3 : 0).join(" | ");
 		return r.length > 300 ? r.substr(0, 300) : r;
+	}
+
+	static final FLOAT = ~/-?[0-9]+\.[0-9]+(e[+-]?[0-9]+)?/i;
+
+	/**
+		Program outputs compared, where printed floats may differ in the last
+		place: the C libraries' math functions (glibc in the reference, musl
+		or hxmc's own in the port) round some results an ulp apart
+		(hxmc/PLANS.md, "Math"). Everything else must be identical.
+	**/
+	public static function sameOutput(a:String, b:String):Bool {
+		if (a == b)
+			return true;
+		var la = a.split("\n"), lb = b.split("\n");
+		if (la.length != lb.length)
+			return false;
+		for (i in 0...la.length)
+			if (la[i] != lb[i] && !sameLine(la[i], lb[i]))
+				return false;
+		return true;
+	}
+
+	static function sameLine(x:String, y:String):Bool {
+		while (true) {
+			var mx = FLOAT.match(x), my = FLOAT.match(y);
+			if (mx != my)
+				return false;
+			if (!mx)
+				return x == y;
+			FLOAT.match(x);
+			var fx = FLOAT.matched(0), lx = FLOAT.matchedLeft(), rx = FLOAT.matchedRight();
+			FLOAT.match(y);
+			var fy = FLOAT.matched(0), ly = FLOAT.matchedLeft(), ry = FLOAT.matchedRight();
+			if (lx != ly || !(fx == fy || ulps(Std.parseFloat(fx), Std.parseFloat(fy)) <= 1))
+				return false;
+			x = rx;
+			y = ry;
+		}
+	}
+
+	/** The distance in units in the last place between two finite floats of the same sign (large otherwise). **/
+	static function ulps(a:Float, b:Float):Float {
+		if (Math.isNaN(a) || Math.isNaN(b) || !Math.isFinite(a) || !Math.isFinite(b) || (a < 0) != (b < 0))
+			return Math.POSITIVE_INFINITY;
+		var d = haxe.io.FPHelper.doubleToI64(a) - haxe.io.FPHelper.doubleToI64(b);
+		if (d < 0)
+			d = -d;
+		return d > 1 ? 2 : haxe.Int64.toInt(d);
 	}
 
 	static function firstDiff(a:String, b:String):String {

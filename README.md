@@ -50,6 +50,7 @@ hxmc=<out>` writes an executable. A `build.hxml`:
 | `-debug`, `-D hxmc.symbols` | a symbol table (profilers), wasm: a name section |
 | `-D hxmc.shared`, `-D hxmc.pic` | a shared library, a position-independent executable (hooks: refused explicitly where not implemented yet) |
 | `-D hxmc.jobs=<n>` | parallel module compilations (default: the cores) |
+| `-D hxmc.wasm-eh=legacy` | wasm: the legacy exception-handling instructions (`try`/`catch_all`/`rethrow`: Chrome 95+, Firefox 100+, Safari 15.2+) instead of `exnref` (Chrome 137+, Firefox 131+, Safari 18.4+) |
 | `HXMC_STATS=1` | what the build did and how long it took |
 
 Packages: `hxmc` holds the compiler's sources (`haxe/src`, `hxmc/`), the std,
@@ -157,7 +158,7 @@ cached by CI). Nothing builds OCaml.
 | `make hxmc` | the tool after an edit of hxmc or the port: about 11 s (8 s of it typing the port; unchanged modules come from `bin/hxmc/hxmc.hxmc/`) |
 | `make port` | the port after an edit: about 13 s (an edit of a central module such as the typer recompiles every module: 26 s) |
 | `make quick` | after every edit of hxmc: the x64 corpus, again with `RT_VERIFY=1`, the wasm corpus under node (about 15 s; `CASES="Int64Gc Bench"` restricts it) |
-| `make check` | before a commit: quick, arm64 (qemu), x64 Windows (wine), a 16 KB nursery, ThreadNatives x30, crosshost on three cases (`PORT=1`: the port's self-compile) |
+| `make check` | before a commit: quick, arm64 (qemu), x64 Windows (wine), a 16 KB nursery, the wasm corpus with legacy exception handling, ThreadNatives x30, crosshost on three cases (`PORT=1`: the port's self-compile) |
 | `make full` | before a push: every nursery and `RT_VERIFY`, wasmtime, the port's self-compile natively and as a module, crosshost on everything, the fixpoint |
 | `make test` | HXB conformance of the port against the reference (seconds per 100 cases) |
 | `make portcheck` | the port built by hxmc self-compiles to the reference's HXB |
@@ -206,9 +207,11 @@ site, the corpus for every target, crosshost, the reference, memory and
 times), `conformance` (the harnesses above and the fuzzer's diff lanes),
 `test` (on each of the six machines: the release binary's smoke test with a
 TLS handshake and libuv, lix, the corpus, the self-compile), `wasm` (the
-corpus and the self-compile under node and wasmtime, the playground in three
-browser engines), `npm` (the packages in a fresh project on Linux, macOS and
-Windows: native at once through the platform package, `--ignore-scripts`,
+corpus and the self-compile under node and wasmtime, both also with legacy
+exception handling under node, the playground in three browser engines with
+both modules and its fallback to the legacy one in a Chromium without
+exnref), `npm` (the packages in a fresh project on Linux, macOS and Windows:
+native at once through the platform package, `--ignore-scripts`,
 lix with `dist/`, the WebAssembly fallback and `hxmc-rebuild`),
 `upstream-tests`, and `publish-npm` (the six platform packages, then `hxmc`,
 with provenance: on `v*` tags as `latest`, from main as a nightly prerelease
@@ -272,7 +275,7 @@ typed AST --(ir.Lower)--> hxmc IR --(Prep: ir.Facts)--> --(MirBuild)--> Mir (SSA
 | `Mir.hx`, `MirBuild.hx`, `Opt.hx`, `Inline.hx` | the SSA IR, its construction, inlining, value numbering, store forwarding, LICM, dead code |
 | `Lir.hx`, `Regalloc.hx`, `x64/`, `a64/` | instruction selection, linear-scan allocation, encoders (checked against llvm-mc: `EncCheck`), emission |
 | `Obj.hx`, `ElfWriter.hx`, `*Reader.hx`, `Link*.hx`, `MkRt.hx`, `DataGen.hx` | objects, the linkers (static ELF; PE with imports written directly; Mach-O with an ad-hoc signature), the runtime-object builder, the program's data |
-| `wasm/` | wasm32-wasi: structured code from Mir, the linker, exception handling with `exnref` |
+| `wasm/` | wasm32-wasi: structured code from Mir, the linker, exception handling with `exnref` (or the legacy instructions) |
 | `Target.hx`, `Abi.hx` | per-target facts |
 | `MkStd.hx` | hxmc's std merged with the Eval originals (the macro context shares the program's class paths) |
 
@@ -299,7 +302,9 @@ against the previous runtime first, or bootstrap again.
 Targets: Linux (static ELF with musl's members), Windows (PE over the UCRT,
 imports written from the import libraries), macOS (Mach-O against
 libSystem, ad-hoc signed), each on x86-64 and ARM64, and wasm32-wasi (the
-whole runtime in Haxe; exception handling with `exnref`; run with
+whole runtime in Haxe; exception handling with `exnref`, or with
+`-D hxmc.wasm-eh=legacy` the legacy `try`/`catch_all`/`rethrow`, which node 22
+runs without flags and wasmtime not at all; run with
 `node hxmc/bootstrap/wasi.mjs m.wasm` or `wasmtime run -W exceptions=y --dir . m.wasm`;
 no threads, sockets or processes). mbedtls 2.28 and libuv 1.48
 (`hxmc/c/deps.sh`) become `ssl.o` and `uv.o`, linked only into programs that

@@ -15,6 +15,9 @@ class Options {
 	public var dump:Null<String> = null; // function names whose machine code is printed (HXMC_DUMP)
 	// -D hxmc.link=<path>[,<path>...]: objects and archives linked with the program (LinkInputs)
 	public var links:Array<String> = [];
+	// -D hxmc.wasm-eh=legacy: wasm32-wasi with the legacy exception-handling instructions
+	// (try/catch_all/rethrow) for engines without exnref (default: exnref)
+	public var wasmLegacyEh = false;
 
 	public function new() {}
 
@@ -52,6 +55,12 @@ class Options {
 		o.strip = !(def("debug") != null || def("hxmc.symbols") != null || env("HXMC_SYMBOLS") == "1");
 		o.shared = def("hxmc.shared") != null;
 		o.opt = env("HXMC_OPT") != "0";
+		var eh = def("hxmc.wasm_eh"); // (-D turns the dash into an underscore)
+		if (eh != null) switch eh {
+			case "legacy": o.wasmLegacyEh = true;
+			case "exnref":
+			case _: throw "hxmc: -D hxmc.wasm-eh=" + eh + ": exnref or legacy";
+		}
 		var j = def("hxmc.jobs");
 		if (j == null) j = env("HXMC_JOBS");
 		if (j != null) o.jobs = Std.parseInt(j);

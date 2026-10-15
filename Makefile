@@ -109,7 +109,8 @@ help:
 ##             and the tool itself byte-identical to the native tool (hxmc/test/Crosshost.hx)
 ## port        PORT_BIN (bin/port/haxe): the port for the host, built by hxmc (alias: dev)
 ## release     bin/release/TARGET/haxe[.exe]: the port cross-built by hxmc, with mbedtls and libuv
-## wasm        bin/wasm/hih.wasm: the playground's compiler (wasm32-wasi, -D hih_no_generators)
+## wasm        bin/wasm/hih.wasm: the playground's compiler (wasm32-wasi, -D hih_no_generators),
+##             and bin/wasm/hih-legacy.wasm, the same with -D hxmc.wasm-eh=legacy (browsers without exnref)
 ## npm         bin/npm/*.tgz: the npm package hxmc (package.json; hxmc/bootstrap) and its six
 ##             platform packages @hxmc/<os>-<cpu> (NPM_VERSION)
 ## site        bin/site: the website (hxmc/web; LIX_DIR's lix binaries under tools/)
@@ -132,8 +133,8 @@ help:
 ## quick       after every edit (under a minute): the tool, then the x64 corpus, again with
 ##             RT_VERIFY=1, and the wasm corpus under node (CASES restricts the corpus)
 ## check       before a local commit (a few minutes): quick + arm64 (qemu), wine, a 16 KB
-##             nursery, ThreadNatives x30, crosshost on three cases; PORT=1 adds the native
-##             port's self-compile
+##             nursery, the wasm corpus with legacy exception handling, ThreadNatives x30,
+##             crosshost on three cases; PORT=1 adds the native port's self-compile
 ## full        before a push: every nursery, RT_VERIFY, wasmtime, ThreadNatives x300, the
 ##             port's self-compile natively and as a module, crosshost, the fixpoint
 ## clean       remove the build outputs (keeps the tool, the runtime objects and the reference)
@@ -228,10 +229,14 @@ bin/release/%/haxe.exe: $(TOOL) $(PORT_SRC) $(STD) $(HOST_RT)
 	$(call hxmc,$@,$(PORT_ARGS) -D hxmc.target=$*)
 
 # the playground's compiler: a wasm32-wasi module (its runtime is Haxe, no
-# runtime object), without the target generators
-wasm: bin/wasm/hih.wasm
+# runtime object), without the target generators; with exnref, and with the
+# legacy exception-handling instructions for browsers without exnref (the
+# playground fetches one of the two)
+wasm: bin/wasm/hih.wasm bin/wasm/hih-legacy.wasm
 bin/wasm/hih.wasm: $(TOOL) $(PORT_SRC) $(STD)
 	$(call hxmc,$@,$(PORT_ARGS) -D hih_no_generators -D hxmc.target=wasm32-wasi)
+bin/wasm/hih-legacy.wasm: $(TOOL) $(PORT_SRC) $(STD)
+	$(call hxmc,$@,$(PORT_ARGS) -D hih_no_generators -D hxmc.target=wasm32-wasi -D hxmc.wasm-eh=legacy)
 
 # --- The npm package (package.json at the root) ---
 
@@ -267,19 +272,23 @@ npm: $(NPM_GEN) $(NPM_NATIVES)
 # subset the playground's compiler reads (hxmc/web/MkBundle.hx), the measured
 # results (hxmc/web/data) and the build facts
 mb = awk '{printf "%.1f MB", $$1 / 1048576}'
+# the site's build in the addresses of the files its pages fetch (Version.hx)
+SITE_VERSION ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo dev)
 site: wasm $(PORT_BIN) $(WEB_SRC)
 	mkdir -p bin/site
-	cp bin/wasm/hih.wasm hxmc/web/index.html hxmc/web/story.html hxmc/web/style.css bin/site/
-	$(PORT_BIN) hxmc/web/build.hxml
+	cp bin/wasm/hih.wasm bin/wasm/hih-legacy.wasm hxmc/web/index.html hxmc/web/story.html hxmc/web/style.css bin/site/
+	$(PORT_BIN) -D site_version=$(SITE_VERSION) hxmc/web/build.hxml
+	sed -i -e 's/\(src\|href\)="\(playground\.js\|tables\.js\|style\.css\)"/\1="\2?v=$(SITE_VERSION)"/g' bin/site/index.html bin/site/story.html
 	$(RUN) -cp hxmc/web --run MkBundle $(HAXE_STD_PATH) bin/site/std.bundle
 	cp hxmc/web/data/*.json bin/site/
 	rm -rf bin/site/examples && cp -r hxmc/web/examples bin/site/examples
 	rm -rf bin/site/tools
 	if [ -n "$(LIX_DIR)" ]; then mkdir -p bin/site/tools && cp $(LIX_DIR)/lix-* bin/site/tools/; fi
-	printf '{\n\t"date": "%s",\n\t"commit": "%s",\n\t"wasmSize": "%s",\n\t"wasmGz": "%s",\n\t"dataGz": "%s",\n\t"lixSize": "%s"\n}\n' \
+	printf '{\n\t"date": "%s",\n\t"commit": "%s",\n\t"wasmSize": "%s",\n\t"wasmGz": "%s",\n\t"wasmLegacyGz": "%s",\n\t"dataGz": "%s",\n\t"lixSize": "%s"\n}\n' \
 		"$$(date -u +%Y-%m-%d)" "$$(git rev-parse --short HEAD)" \
 		"$$(wc -c < bin/site/hih.wasm | $(mb))" \
 		"$$(gzip -9c bin/site/hih.wasm | wc -c | $(mb))" \
+		"$$(gzip -9c bin/site/hih-legacy.wasm | wc -c | $(mb))" \
 		"$$(gzip -9c bin/site/std.bundle | wc -c | $(mb))" \
 		"$$(if [ -f bin/site/tools/lix-linux-x86_64 ]; then wc -c < bin/site/tools/lix-linux-x86_64 | $(mb); else echo -; fi)" > bin/site/build-info.json
 	cat bin/site/build-info.json

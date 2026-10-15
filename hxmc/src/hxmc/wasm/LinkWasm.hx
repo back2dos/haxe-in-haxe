@@ -40,6 +40,7 @@ class LinkWasm {
 	var cells = new Map<String, Int>(); // runtime variables the linker defines (8 bytes, zero)
 	var heapBase = 0;
 	public var nameSection = false;
+	public var legacyEh = false; // legacy exception handling (WasmGen): no exnref global
 	var stackTop = 0;
 
 	// WASI preview 1 (the functions the runtime imports): signatures
@@ -236,7 +237,7 @@ class LinkWasm {
 				for (r in codeRelocs.get(f.sym))
 					if (r.kind == RWasmGlobal) global(r.sym.name);
 			} else if (f.builtin)
-				for (g in Builtins.globals(f.name))
+				for (g in Builtins.globals(f.name, legacyEh))
 					global(g);
 		}
 		// types
@@ -582,8 +583,8 @@ class Builtins {
 	public static function calls(n:String):Array<String>
 		return n == "rt_throw" ? ["hx_uncaught"] : [];
 
-	public static function globals(n:String):Array<String>
-		return n == "rt_throw" ? ["rt_exn", WasmGen.HANDLER, WasmGen.EXNREF] : [];
+	public static function globals(n:String, legacyEh:Bool):Array<String>
+		return n == "rt_throw" ? (legacyEh ? ["rt_exn", WasmGen.HANDLER] : ["rt_exn", WasmGen.HANDLER, WasmGen.EXNREF]) : [];
 
 	public static function sig(n:String):String
 		return SIGS.get(n);
@@ -657,6 +658,13 @@ class Builtins {
 				o(Op.Call);
 				Enc.uleb(b, l.funcIndexOf("hx_uncaught"));
 				o(Op.End);
+				if (l.legacyEh) {
+					// (legacy exception handling: a new exception each time)
+					o(Op.Throw);
+					b.u8(0);
+					o(Op.End);
+					return b;
+				}
 				// an exception a pad caught before, thrown again (throw_ref):
 				// the Haxe exception is rt_exn, the wasm one only carries it,
 				// and engines that make an object with a stack trace for each

@@ -37,6 +37,9 @@ private enum Ctx {
 //   is this try's, the pad restores the stack pointer and branches to the
 //   handler block (the second return of setjmp); else it throws on (the
 //   exception belongs to an outer handler).
+//   With -D hxmc.wasm-eh=legacy (engines without exnref) the try body is
+//   a legacy `try` whose `catch_all` is the pad, and an exception that is
+//   not this try's is thrown on with `rethrow`.
 // - 32-bit values: pointers are I64 in Mir and wasm32 addresses are 32-bit;
 //   an I64 value whose every use reads only its low 32 bits (addresses,
 //   truncations, narrow stores, and additions, multiplications and bitwise
@@ -55,6 +58,7 @@ class WasmGen {
 	public static var coalesceOn = Sys.getEnv("HXMC_WASM_COALESCE") != "0";
 
 	var obj:Obj;
+	var legacyEh:Bool; // legacy exception handling (try/catch_all/rethrow) instead of try_table and exnref
 	var f:MFunc;
 	var vals:Array<MIns>;
 	var b:Buf; // the body
@@ -90,8 +94,9 @@ class WasmGen {
 	var setEnd = -1;
 	var setLocal = -1;
 
-	public function new(obj:Obj) {
+	public function new(obj:Obj, legacyEh = false) {
 		this.obj = obj;
+		this.legacyEh = legacyEh;
 	}
 
 	public static function tyCode(t:MTy):Int
@@ -714,7 +719,11 @@ class WasmGen {
 
 	function doTree(x:MBlock) {
 		var tryHere = tryAddr[x.id] >= 0;
-		if (tryHere) {
+		if (tryHere && legacyEh) {
+			op(Op.Try);
+			b.u8(Enc.VOID);
+			ctx.push(CPlain);
+		} else if (tryHere) {
 			op(Op.Block);
 			b.u8(Enc.EXNREF);
 			ctx.push(CPlain);
@@ -737,7 +746,31 @@ class WasmGen {
 			op(Op.Unreachable);
 		} else
 			nodeWithin(x, ys, 0);
-		if (tryHere) {
+		if (tryHere && legacyEh) {
+			// the pad is the catch_all (in the try's label, which rethrow
+			// names); the body never falls through to it (as with try_table)
+			op(Op.CatchAll);
+			if (fp >= 0) {
+				op(Op.LocalGet);
+				Enc.uleb(b, fp);
+				global(Op.GlobalSet, SP);
+			}
+			global(Op.GlobalGet, HANDLER);
+			value(tryAddr[x.id]);
+			op(Op.I64Ne);
+			op(Op.If);
+			b.u8(Enc.VOID);
+			op(Op.Rethrow);
+			b.u8(1); // the try, around the if
+			op(Op.End);
+			var hb = tryHandler[x.id];
+			var from = hb.preds[0];
+			moves(from, hb);
+			br(CBlock(hb.id));
+			op(Op.End);
+			ctx.pop();
+			op(Op.Unreachable);
+		} else if (tryHere) {
 			op(Op.End);
 			ctx.pop();
 			op(Op.Unreachable);
