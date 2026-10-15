@@ -5,6 +5,7 @@
 #   make -f hxmc/Makefile bootstrap    the first tool, from the reference compiler (and node)
 #   make -f hxmc/Makefile fixpoint     the tool rebuilt twice must not change
 #   make -f hxmc/Makefile test         the corpus against its golden files
+#   make -f hxmc/Makefile quick|check|full   tiered checks (hxmc/tools/tiers.py)
 #   make -f hxmc/Makefile help         the targets and variables below
 #
 # Outputs go to bin/ (ignored by Git). Nothing here uses hxc.
@@ -26,6 +27,10 @@ RT_TARGETS ?= linux-x86_64 linux-arm64 windows-x86_64 windows-arm64 macos-x86_64
 HOST ?= linux-x86_64
 # `test`: extra arguments of hxmc/tools/run.py (e.g. RUN_ARGS="--target linux-arm64")
 RUN_ARGS ?=
+# `quick`, `check`, `full`: the corpus cases to restrict the corpus lanes to
+# (CASES="Int64Gc Bench"); PORT=1 adds the port's self-compile to `check`
+CASES ?=
+PORT ?=
 
 # --- Sources ---
 
@@ -44,7 +49,7 @@ TOOL_CP := -cp src -cp hxmc/src -main hxmc.Main -D disable-parallelism -D hih_no
 TOOL_ARGS := $(TOOL_CP) --custom-target hxmc
 
 .DEFAULT_GOAL := tool
-.PHONY: help std rt tool bootstrap fixpoint test portcheck clean
+.PHONY: help std rt tool bootstrap fixpoint test portcheck quick check full clean
 
 help:
 	@sed -n '/^# --- Targets/,$$p' $(MAKEFILE_LIST) | sed -n 's/^## \{0,1\}//p'
@@ -61,9 +66,15 @@ help:
 ##            a and b must be byte-identical
 ## test       hxmc/tools/run.py: the corpus against hxmc/test/expected (RUN_ARGS)
 ## portcheck  hxmc/tools/portcheck.sh: the port built by hxmc self-compiles to the reference's HXB
+## quick      after every edit (under a minute): the tool, then the x64 corpus, again with
+##            RT_VERIFY=1, and the wasm corpus under node (CASES restricts the corpus)
+## check      before a local commit (a few minutes): quick + arm64 (qemu), wine, a 16 KB
+##            nursery, ThreadNatives x30; PORT=1 adds the native port's self-compile
+## full       before a push: every nursery, RT_VERIFY, wasmtime, ThreadNatives x300, the
+##            port's self-compile natively and as a module, the fixpoint
 ## clean      remove bin/hxmc*
 ##
-## Variables: HAXE, HAXE_STD_PATH, NODE, TOOL_LIBS, ZIG, RT_TARGETS, HOST, RUN_ARGS
+## Variables: HAXE, HAXE_STD_PATH, NODE, TOOL_LIBS, ZIG, RT_TARGETS, HOST, RUN_ARGS, CASES, PORT
 
 std: $(STD)
 $(STD): hxmc/tools/mkstd.py $(STD_SRC)
@@ -126,6 +137,15 @@ test: $(TOOL) $(STD) $(HOST_RT)
 
 portcheck: $(TOOL) $(STD) $(HOST_RT)
 	sh hxmc/tools/portcheck.sh
+
+quick: $(TOOL) $(STD) $(HOST_RT)
+	python3 hxmc/tools/tiers.py quick $(CASES)
+
+check: $(TOOL) $(STD) $(HOST_RT)
+	python3 hxmc/tools/tiers.py check $(if $(PORT),--port) $(CASES)
+
+full: $(TOOL) $(STD) $(HOST_RT)
+	python3 hxmc/tools/tiers.py full $(CASES)
 
 clean:
 	rm -rf bin/hxmc bin/hxmc-t bin/hxmc-fuzz

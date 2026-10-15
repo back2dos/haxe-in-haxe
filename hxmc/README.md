@@ -276,6 +276,36 @@ SMALL=1 sh hxmc/tools/portcheck.sh  # the port check, also with a 256 KB nursery
   image started); `HXMC_PE_DIAG=<variant,...>` writes loader-bisecting
   variants (`lowbase`, `fixed`, `nopdata`, `bssdata`, `notls`, `ret42`).
 
+### Iteration loop
+
+Three tiers of checks (`hxmc/tools/tiers.py`; each Makefile target first
+rebuilds the tool if a source changed, about 12 s), one line per lane with
+its time:
+
+```sh
+make -f hxmc/Makefile quick                 # after every edit: 9 s (25 s with the tool rebuilt)
+make -f hxmc/Makefile quick CASES="Int64Gc Bench"   # only the cases of the area being changed
+make -f hxmc/Makefile check PORT=1          # before a local commit: about a minute (PORT=1: +32 s)
+make -f hxmc/Makefile full                  # before a push: about 5 minutes
+```
+
+- `quick`: the x64 corpus (64 KB nursery), again with `RT_VERIFY=1`, and
+  the wasm corpus under node; run.py uses every core (`-j`).
+- `check`: quick, plus the corpus under qemu (arm64) and wine (x64
+  Windows), x64 with a 16 KB nursery and ThreadNatives 30 times; `PORT=1`
+  adds the native port's self-compile (when code generation or the runtime
+  changed).
+- `full`: what a push needs: the corpus on x64, arm64 and wine at 64, 16
+  and 256 KB, each also with `RT_VERIFY=1`; wasm under node and wasmtime at
+  16, 64 and 256 KB, under node with `RT_VERIFY=1` at 64 and 256 KB;
+  ThreadNatives 300 runs at 16 KB and 100 at 64 KB; the port's self-compile
+  natively (64 KB, 256 KB, 256 KB with `RT_VERIFY=1`) and as a module
+  (node, node with 256 KB, wasmtime), byte-identical to the reference; the
+  fixpoint. CI then covers macOS and the Windows and Linux machines.
+
+(Times of 2026-10-15 on the 4-core VM. wasmtime needs the haxe/std it
+reads to be a real directory, not a symbolic link to an absolute path.)
+
 ### Bootstrap
 
 The first tool comes from the reference compiler; nothing else is needed
