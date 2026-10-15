@@ -1,8 +1,8 @@
 # Upstream Haxe's CI test suite (haxe/.github/workflows/main.yml: the jobs
 # linux-test, mac-test and windows64-test) with the port as `haxe`.
 #
-# Called by build.yml once its `build` and `cosmo` jobs have uploaded the
-# release binaries; nothing is rebuilt here. Each job puts the release binary
+# Called by build.yml once its `build` job has uploaded the release binaries
+# (the port built by hxmc); nothing is rebuilt here. Each job puts the release binary
 # on PATH as `haxe` with HAXE_STD_PATH at the submodule's std, builds haxelib
 # from haxe/extra/haxelib_src with that binary (client.hxml to run.n, then
 # `nekotools boot` as upstream's Makefiles do), and runs RunCi for its target
@@ -136,8 +136,9 @@ jobs:
         working-directory: ${{github.workspace}}/haxe/tests
         timeout-minutes: 25
 
-      # not upstream's: where the port crashed (the binary is stripped; the
-      # offsets in its mapping symbolize with an unstripped build of the same C)
+      # not upstream's: where the port crashed (the binary has no symbol table;
+      # the offsets in its mapping symbolize with a build of the same commit
+      # with HXMC_SYMBOLS=1)
       - name: Backtraces of core dumps
         if: failure()
         run: |

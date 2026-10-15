@@ -1,30 +1,36 @@
-# Builds the port (haxe.Main compiled to C by hxc) for Linux, macOS and
-# Windows (x86_64, aarch64) with zig cc, and as a Cosmopolitan APE binary,
-# each with mbedtls and libuv linked statically (`make release`, `make cosmo`,
-# the Makefile). The Windows builds are native (MinGW-w64, the UCRT; the
-# runtime's Windows host layer, hxc/rt/rt_win.h): Sys.systemName() is
-# "Windows" and paths, processes and the environment are Windows' own, as with
-# the reference haxe.exe. Tests each on a native runner (hxc/tools/smoke.sh,
-# TLS and libuv included) and publishes them: a rolling `nightly` pre-release
-# on pushes to main, a release on v* tags.
-# Also builds lix (tools/lix) as a Cosmopolitan binary, lix.com (`make
-# lix-cosmo`), and the website (`make site`: the playground's WebAssembly with
-# Emscripten, the pages' JavaScript compiled from Haxe by the Linux build of
-# the port, lix.com under tools/) and deploys it to GitHub Pages on pushes to main.
-# Runs upstream Haxe's CI test suite with the release binaries as haxe
-# (upstream-tests.yml).
+# Builds everything with hxmc (hxmc/README.md) on Linux and tests it on a
+# machine of each target:
 #
-# Release assets (https://github.com/<repo>/releases/download/<tag>/<asset>):
+# - build: the reference compiler (cached), hxmc bootstrapped from it (the
+#   reference writes the tool as JavaScript, node compiles the tool's HXB,
+#   the tool rebuilds itself; the fixpoint is checked), the runtime objects of
+#   the six targets with mbedtls and libuv (hxmc/tools/deps.sh, cached), then
+#   with hxmc: the port's release binaries for the six targets (`make
+#   release`), lix for the six targets (`make lix-release`), the playground's
+#   WebAssembly and the website (`make site`), hxmc's test corpus for every
+#   target and as WebAssembly, and the port as a WebAssembly module.
+# - test: on each target's machine, the release binary's smoke test
+#   (tools/smoke.sh: --interp, HXB, JS, a TLS handshake with the system's CA
+#   certificates, libuv), lix (lix shims, a scope, an install, the haxe shim),
+#   hxmc's corpus against its golden files and the port's self-compile to the
+#   reference's HXB.
+# - wasm: the corpus and the port's self-compile under node and wasmtime, and
+#   the playground in Chromium, Firefox and WebKit (site/tools/browser-test.mjs).
+# - upstream-tests: upstream Haxe's CI suite with the release binaries as haxe
+#   (upstream-tests.yml).
+# - release: a rolling `nightly` pre-release on pushes to main, a release on
+#   v* tags; pages: the website on pushes to main.
+#
+# Release assets (https://github.com/<repo>/releases/download/<tag>/<asset>),
+# each with the std, LICENSE, COPYING, LICENSE.mbedtls and LICENSE.libuv:
 #   haxe-in-haxe-linux-x86_64.tar.gz   haxe-in-haxe-linux-aarch64.tar.gz
 #   haxe-in-haxe-macos-x86_64.tar.gz   haxe-in-haxe-macos-aarch64.tar.gz
 #   haxe-in-haxe-windows-x86_64.zip    haxe-in-haxe-windows-aarch64.zip (haxe-in-haxe.exe)
-#   haxe-in-haxe.com                   (the APE binary, std embedded)
-#   haxe-in-haxe-licenses.zip          (the licenses of haxe-in-haxe.com)
 name: build
 
 on:
   push:
-    branches: [main, ci-zig]
+    branches: [main, hxmc]
     tags: ['v*']
   workflow_dispatch:
 
@@ -38,13 +44,15 @@ concurrency:
 env:
   OCAML_VERSION: 5.3.0
   ZIG_VERSION: 0.17.0
-  COSMOCC_VERSION: 4.0.2
   HXNODEJS_COMMIT: f88685a70b2e4f03dbe0a824ce90ea8b56b27753
-  EMSCRIPTEN_VERSION: 6.0.12
+  WASMTIME_VERSION: 38.0.1
+  # the directory the port's self-compile runs in, on Linux (the reference)
+  # and on macOS: the archive names files by absolute path
+  SELF_ROOT: /Users/runner/hih
+  TARGETS: linux-x86_64 linux-arm64 windows-x86_64 windows-arm64 macos-x86_64 macos-arm64
 
 jobs:
-  # the reference compiler (built from the haxe/ submodule) and the port's C
-  generate:
+  build:
     runs-on: ubuntu-24.04
     env:
       OPAMYES: 1
@@ -68,7 +76,9 @@ jobs:
       - name: System packages
         run: |
           sudo apt-get update -qqy
-          sudo apt-get install -qqy opam libpcre2-dev zlib1g-dev libmbedtls-dev ninja-build
+          # (the reference links mbedtls and pcre2 dynamically; ld.lld: hxmc/tools/mkrt.sh)
+          sudo apt-get install -qqy lld libpcre2-dev zlib1g-dev libmbedtls-dev
+          if [ "${{ steps.cache-haxe.outputs.cache-hit }}" != true ]; then sudo apt-get install -qqy opam ninja-build; fi
 
       - name: Cache opam
         if: steps.cache-haxe.outputs.cache-hit != 'true'
@@ -89,7 +99,6 @@ jobs:
           opam init -c "$OCAML_VERSION" --disable-sandboxing
           opam pin add haxe ./haxe --no-action
           opam install haxe --deps-only --assume-depexts
-          opam list
 
       - name: Build the reference compiler
         if: steps.cache-haxe.outputs.cache-hit != 'true'
@@ -102,332 +111,224 @@ jobs:
         with:
           node-version: 22
 
-      - name: hxnodejs
-        run: |
-          git init -q "$RUNNER_TEMP/hxnodejs"
-          git -C "$RUNNER_TEMP/hxnodejs" fetch -q --depth 1 https://github.com/HaxeFoundation/hxnodejs "$HXNODEJS_COMMIT"
-          git -C "$RUNNER_TEMP/hxnodejs" checkout -q FETCH_HEAD
-
-      # the port's C, and the playground's (without the target generators)
-      - name: Generate the port's C
-        run: |
-          set -ex
-          haxe/haxe --version
-          make port-c web-c TOOL_LIBS="$RUNNER_TEMP/hxnodejs/extraParams.hxml -cp $RUNNER_TEMP/hxnodejs/src"
-          ls bin/hxc/hih/prog_hxc | wc -l
-          du -sh bin/hxc/hih/prog_hxc bin/hxc/hih-web/prog_hxc
-
-      # lix's C (tools/lix, with hxcoro fetched at its pinned commit)
-      - name: Generate lix's C
-        run: |
-          set -ex
-          make lix-c TOOL_LIBS="$RUNNER_TEMP/hxnodejs/extraParams.hxml -cp $RUNNER_TEMP/hxnodejs/src"
-          ls bin/lix/lix_hxc | wc -l
-
-      - name: Pack the C and the std
-        run: |
-          set -ex
-          mkdir -p dist dist-web dist-lix
-          tar czf dist/port-c.tar.gz -C bin/hxc/hih prog_hxc
-          tar czf dist/std.tar.gz -C haxe std
-          tar czf dist-web/port-c-web.tar.gz -C bin/hxc/hih-web prog_hxc
-          tar czf dist-lix/lix-c.tar.gz -C bin/lix lix_hxc
-
-      - uses: actions/upload-artifact@v7
-        with:
-          name: port-c
-          path: dist/
-          retention-days: 7
-
-      - uses: actions/upload-artifact@v7
-        with:
-          name: port-c-web
-          path: dist-web/
-          retention-days: 7
-
-      - uses: actions/upload-artifact@v7
-        with:
-          name: lix-c
-          path: dist-lix/
-          retention-days: 7
-
-  # zig cc cross builds from Linux, one target per job, with mbedtls and libuv
-  # built for the target (hxc/tools/deps.sh, cached)
-  build:
-    needs: generate
-    runs-on: ubuntu-24.04
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - name: linux-x86_64
-            target: x86_64-linux-gnu.2.28
-          - name: linux-aarch64
-            target: aarch64-linux-gnu.2.28
-          - name: macos-x86_64
-            target: x86_64-macos
-          - name: macos-aarch64
-            target: aarch64-macos
-          - name: windows-x86_64
-            target: x86_64-windows-gnu
-            exe: .exe
-          - name: windows-aarch64
-            target: aarch64-windows-gnu
-            exe: .exe
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/download-artifact@v8
-        with:
-          name: port-c
-          path: dist
       - uses: mlugg/setup-zig@v2
         with:
           version: ${{ env.ZIG_VERSION }}
+
       - name: Cache mbedtls and libuv
         uses: actions/cache@v6
         with:
-          path: bin/deps/${{ matrix.target }}
-          key: deps-${{ matrix.target }}-zig-${{ env.ZIG_VERSION }}-${{ hashFiles('hxc/tools/deps.sh') }}
-      - name: Compile
-        run: |
-          set -ex
-          mkdir -p dist/c
-          tar xzf dist/port-c.tar.gz -C dist/c
-          make release TARGET=${{ matrix.target }} PORT_C=dist/c/prog_hxc
-          file bin/release/${{ matrix.target }}/haxe-in-haxe${{ matrix.exe }}
-      - name: Package
-        run: |
-          set -ex
-          P=haxe-in-haxe-${{ matrix.name }}
-          D=bin/deps/${{ matrix.target }}
-          mkdir -p "pkg/$P"
-          cp bin/release/${{ matrix.target }}/haxe-in-haxe${{ matrix.exe }} LICENSE COPYING $D/LICENSE.mbedtls $D/LICENSE.libuv "pkg/$P/"
-          tar xzf dist/std.tar.gz -C "pkg/$P"
-          if [ -n "${{ matrix.exe }}" ]; then
-            cat > "pkg/$P/README.txt" <<EOF
-          haxe-in-haxe: the Haxe compiler ported to Haxe, compiled to C (https://github.com/${{ github.repository }}).
-          Commit ${{ github.sha }}, target ${{ matrix.target }} (built with zig cc, with mbedtls and libuv).
+          path: bin/hxmc/deps
+          key: hxmc-deps-zig-${{ env.ZIG_VERSION }}-${{ hashFiles('hxmc/tools/deps.sh') }}
 
-          Use it like haxe.exe, with HAXE_STD_PATH pointing at the std directory next to it:
-            set HAXE_STD_PATH=%CD%\std
-            haxe-in-haxe.exe -main Main --interp
-          EOF
-            (cd pkg && zip -qr -9 "../$P.zip" "$P")
-            ls -l "$P.zip"
-          else
-            cat > "pkg/$P/README.txt" <<EOF
-          haxe-in-haxe: the Haxe compiler ported to Haxe, compiled to C (https://github.com/${{ github.repository }}).
-          Commit ${{ github.sha }}, target ${{ matrix.target }} (built with zig cc, with mbedtls and libuv).
+      # the tool from scratch (hxmc/README.md, "Bootstrap"): the reference
+      # compiler writes the tool's JavaScript and HXB, node compiles the HXB
+      # to the first native tool, which builds the tool from source
+      - name: Bootstrap hxmc
+        run: |
+          set -ex
+          git init -q "$RUNNER_TEMP/hxnodejs"
+          git -C "$RUNNER_TEMP/hxnodejs" fetch -q --depth 1 https://github.com/HaxeFoundation/hxnodejs "$HXNODEJS_COMMIT"
+          git -C "$RUNNER_TEMP/hxnodejs" checkout -q FETCH_HEAD
+          make bootstrap TOOL_LIBS="$RUNNER_TEMP/hxnodejs/extraParams.hxml -cp $RUNNER_TEMP/hxnodejs/src"
+          tail -4 bin/hxmc/boot/hxmc1.log
 
-          Use it like haxe, with HAXE_STD_PATH pointing at the std directory next to it:
-            export HAXE_STD_PATH=\$PWD/std
-            ./haxe-in-haxe -main Main --interp
-          macOS: a browser download is quarantined; xattr -d com.apple.quarantine haxe-in-haxe
-          EOF
-            tar czf "$P.tar.gz" -C pkg "$P"
-            ls -l "$P.tar.gz"
-          fi
-      - uses: actions/upload-artifact@v7
-        with:
-          name: haxe-in-haxe-${{ matrix.name }}
-          path: haxe-in-haxe-${{ matrix.name }}.${{ matrix.exe && 'zip' || 'tar.gz' }}
-          retention-days: 14
+      - name: The tool rebuilt by itself does not change
+        run: make fixpoint
 
-  # the Cosmopolitan APE binary (Linux, macOS, Windows, BSDs), with mbedtls and
-  # libuv: haxe-in-haxe.com, not the Windows release (its Eval host sees a POSIX
-  # system on Windows: Sys.systemName() "Linux", /C/... paths)
-  cosmo:
-    needs: generate
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/download-artifact@v8
-        with:
-          name: port-c
-          path: dist
-      - uses: actions/download-artifact@v8
-        with:
-          name: lix-c
-          path: dist
-      - name: Cache cosmocc
-        id: cache-cosmocc
-        uses: actions/cache@v6
-        with:
-          path: ~/cosmocc
-          key: cosmocc-${{ env.COSMOCC_VERSION }}
-      - name: Install cosmocc
-        if: steps.cache-cosmocc.outputs.cache-hit != 'true'
+      - name: Runtime objects (with mbedtls and libuv)
+        run: make rt RT_TARGETS="$TARGETS"
+
+      - name: The port's release binaries
         run: |
           set -ex
-          curl -sSfL --retry 3 -o "$RUNNER_TEMP/cosmocc.zip" "https://github.com/jart/cosmopolitan/releases/download/$COSMOCC_VERSION/cosmocc-$COSMOCC_VERSION.zip"
-          mkdir -p ~/cosmocc
-          unzip -q "$RUNNER_TEMP/cosmocc.zip" -d ~/cosmocc
-      - name: APE loader
-        run: |
-          # run APE tools directly (not through binfmt_misc handlers such as WINE's)
-          sudo cp ~/cosmocc/bin/ape-x86_64.elf /usr/bin/ape
-          sudo sh -c "echo ':APE:M::MZqFpD::/usr/bin/ape:' > /proc/sys/fs/binfmt_misc/register" || true
-          sudo sh -c "echo ':APE-jart:M::jartsr::/usr/bin/ape:' > /proc/sys/fs/binfmt_misc/register" || true
-          echo "$HOME/cosmocc/bin" >> "$GITHUB_PATH"
-      - name: Cache mbedtls and libuv
-        uses: actions/cache@v6
-        with:
-          path: bin/deps/cosmo
-          key: deps-cosmo-${{ env.COSMOCC_VERSION }}-${{ hashFiles('hxc/tools/deps.sh', 'hxc/tools/cosmo-patches/*') }}
-      - name: Compile
-        run: |
-          set -ex
-          cosmocc --version
-          mkdir -p dist/c
-          tar xzf dist/port-c.tar.gz -C dist/c
-          make cosmo PORT_C=dist/c/prog_hxc
-      - name: Package
-        run: |
-          set -ex
-          mkdir -p pkg/std-zip out
-          tar xzf dist/std.tar.gz -C pkg/std-zip
-          # the std in the binary's own zip (rt.c reads /zip/std when HAXE_STD_PATH is unset)
-          cp bin/release/cosmo/haxe-in-haxe.com out/haxe-in-haxe.com
-          (cd pkg/std-zip && zip -qr -9 ../../out/haxe-in-haxe.com std)
-          mkdir -p pkg/licenses
-          cp LICENSE COPYING bin/deps/cosmo/LICENSE.mbedtls bin/deps/cosmo/LICENSE.libuv pkg/licenses/
-          (cd pkg/licenses && zip -q -9 ../../out/haxe-in-haxe-licenses.zip *)
-          ls -l out
-      - uses: actions/upload-artifact@v7
-        with:
-          name: haxe-in-haxe-cosmo
-          path: out/
-          retention-days: 14
-      - name: lix.com
+          for t in $TARGETS; do make release TARGET=$t; done
+          ls -l bin/release/*
+
+      - name: lix
         run: |
           set -ex
           mkdir -p dist/lix
-          tar xzf dist/lix-c.tar.gz -C dist/lix
-          make lix-cosmo LIX_C=dist/lix/lix_hxc
-          mkdir -p lix-out
-          cp bin/release/cosmo/lix.com lix-out/
-          # one binary for four commands: lix, and haxe through a link
-          lix-out/lix.com --version
-          ln -s lix.com lix-out/haxe
-          export HAXESHIM_ROOT="$RUNNER_TEMP/lix-root"
-          mkdir -p "$RUNNER_TEMP/lix-project" && cd "$RUNNER_TEMP/lix-project"
-          "$GITHUB_WORKSPACE/lix-out/lix.com" scope create
-          "$GITHUB_WORKSPACE/lix-out/lix.com" install haxelib:tink_core
-          "$GITHUB_WORKSPACE/lix-out/lix.com" install haxe 4.3.7
-          "$GITHUB_WORKSPACE/lix-out/haxe" --run resolve-args -lib tink_core
-          "$GITHUB_WORKSPACE/lix-out/haxe" -version
-      - uses: actions/upload-artifact@v7
-        with:
-          name: lix-cosmo
-          path: lix-out/lix.com
-          retention-days: 14
+          for t in $TARGETS; do
+            make lix-release TARGET=$t
+            case $t in windows-*) cp bin/release/$t/lix.exe dist/lix/lix-$t.exe ;; *) cp bin/release/$t/lix dist/lix/lix-$t ;; esac
+          done
+          ls -l dist/lix
 
+      - name: Package the release binaries
+        run: |
+          set -ex
+          for t in $TARGETS; do
+            os=${t%-*}
+            case $t in *-arm64) arch=aarch64 ;; *) arch=x86_64 ;; esac
+            P=haxe-in-haxe-$os-$arch
+            exe=; [ $os = windows ] && exe=.exe
+            mkdir -p "pkg/$P"
+            cp bin/release/$t/haxe-in-haxe$exe LICENSE COPYING bin/hxmc/deps/$t/LICENSE.mbedtls bin/hxmc/deps/$t/LICENSE.libuv "pkg/$P/"
+            cp -r haxe/std "pkg/$P/std"
+            if [ $os = windows ]; then
+              printf '%s\r\n' \
+                "haxe-in-haxe: the Haxe compiler ported to Haxe, built by hxmc (https://github.com/$GITHUB_REPOSITORY)." \
+                "Commit $GITHUB_SHA, target $t (with mbedtls and libuv)." "" \
+                "Use it like haxe.exe, with HAXE_STD_PATH pointing at the std directory next to it:" \
+                "  set HAXE_STD_PATH=%CD%\\std" \
+                "  haxe-in-haxe.exe -main Main --interp" > "pkg/$P/README.txt"
+              (cd pkg && zip -qr -9 "../dist/$P.zip" "$P")
+            else
+              printf '%s\n' \
+                "haxe-in-haxe: the Haxe compiler ported to Haxe, built by hxmc (https://github.com/$GITHUB_REPOSITORY)." \
+                "Commit $GITHUB_SHA, target $t (with mbedtls and libuv)." "" \
+                "Use it like haxe, with HAXE_STD_PATH pointing at the std directory next to it:" \
+                "  export HAXE_STD_PATH=\$PWD/std" \
+                "  ./haxe-in-haxe -main Main --interp" \
+                "macOS: a browser download is quarantined; xattr -d com.apple.quarantine haxe-in-haxe" > "pkg/$P/README.txt"
+              tar czf "dist/$P.tar.gz" -C pkg "$P"
+            fi
+          done
+          ls -l dist
+
+      - uses: actions/upload-artifact@v7
+        with: {name: haxe-in-haxe-linux-x86_64, path: dist/haxe-in-haxe-linux-x86_64.tar.gz, retention-days: 14}
+      - uses: actions/upload-artifact@v7
+        with: {name: haxe-in-haxe-linux-aarch64, path: dist/haxe-in-haxe-linux-aarch64.tar.gz, retention-days: 14}
+      - uses: actions/upload-artifact@v7
+        with: {name: haxe-in-haxe-macos-x86_64, path: dist/haxe-in-haxe-macos-x86_64.tar.gz, retention-days: 14}
+      - uses: actions/upload-artifact@v7
+        with: {name: haxe-in-haxe-macos-aarch64, path: dist/haxe-in-haxe-macos-aarch64.tar.gz, retention-days: 14}
+      - uses: actions/upload-artifact@v7
+        with: {name: haxe-in-haxe-windows-x86_64, path: dist/haxe-in-haxe-windows-x86_64.zip, retention-days: 14}
+      - uses: actions/upload-artifact@v7
+        with: {name: haxe-in-haxe-windows-aarch64, path: dist/haxe-in-haxe-windows-aarch64.zip, retention-days: 14}
+      - uses: actions/upload-artifact@v7
+        with: {name: lix, path: dist/lix/, retention-days: 14}
+
+      # the website: the playground's WebAssembly, the pages' JavaScript
+      # compiled by the Linux release binary, lix under tools/
+      - name: The website
+        run: |
+          set -ex
+          make site SITE_HAXE="$PWD/bin/release/linux-x86_64/haxe-in-haxe" LIX_DIR=dist/lix
+          ls -l bin/site bin/site/tools
+      - uses: actions/upload-artifact@v7
+        with: {name: site, path: bin/site/, retention-days: 7}
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: bin/site
+
+      - name: Cross-build hxmc's corpus
+        run: |
+          set -ex
+          for t in $TARGETS wasm32-wasi; do
+            python3 hxmc/tools/run.py -v --target $t --stage dist/corpus/$t
+          done
+
+      - name: The port as a WebAssembly module
+        run: |
+          set -ex
+          mkdir -p dist/wasm
+          HXMC_STATS=1 bin/hxmc/hxmc dist/wasm/haxe.wasm -cp src -main haxe.Main -D disable-parallelism -cp bin/hxmc/std --custom-target hxmc -D hxmc.target=wasm32-wasi | tail -3
+          ls -l dist/wasm/haxe.wasm
+
+      # the reference's self-compile, in the directory the macOS runners use
+      - name: Reference self-compile
+        run: |
+          set -ex
+          sudo mkdir -p "$SELF_ROOT" && sudo chown "$USER" "$SELF_ROOT"
+          cp -r src "$SELF_ROOT/src"
+          cp -r haxe/std "$SELF_ROOT/std"
+          (cd "$SELF_ROOT" && HAXE_STD_PATH=std "$GITHUB_WORKSPACE/haxe/haxe" -cp src -main haxe.Main -D disable-parallelism --interp --no-output --hxb self-ref.hxb)
+          mkdir -p dist/self
+          cp "$SELF_ROOT/self-ref.hxb" dist/self/
+          # the sources as compiled here (a Windows checkout would have CRLF
+          # line ends, and other positions)
+          tar czf dist/self/std.tar.gz -C haxe std
+          tar czf dist/self/src.tar.gz src
+
+      - name: Pack the corpus
+        run: |
+          for t in $TARGETS wasm32-wasi; do tar czf dist/corpus-$t.tar.gz -C dist/corpus/$t .; done
+          tar czf dist/corpus-wasm32-wasi-port.tar.gz -C dist/wasm haxe.wasm
+      - uses: actions/upload-artifact@v7
+        with: {name: hxmc-self, path: dist/self/, retention-days: 3}
+      - uses: actions/upload-artifact@v7
+        with: {name: corpus-linux-x86_64, path: dist/corpus-linux-x86_64.tar.gz, retention-days: 3}
+      - uses: actions/upload-artifact@v7
+        with: {name: corpus-linux-arm64, path: dist/corpus-linux-arm64.tar.gz, retention-days: 3}
+      - uses: actions/upload-artifact@v7
+        with: {name: corpus-windows-x86_64, path: dist/corpus-windows-x86_64.tar.gz, retention-days: 3}
+      - uses: actions/upload-artifact@v7
+        with: {name: corpus-windows-arm64, path: dist/corpus-windows-arm64.tar.gz, retention-days: 3}
+      - uses: actions/upload-artifact@v7
+        with: {name: corpus-macos-x86_64, path: dist/corpus-macos-x86_64.tar.gz, retention-days: 3}
+      - uses: actions/upload-artifact@v7
+        with: {name: corpus-macos-arm64, path: dist/corpus-macos-arm64.tar.gz, retention-days: 3}
+      - uses: actions/upload-artifact@v7
+        with: {name: corpus-wasm32-wasi, path: "dist/corpus-wasm32-wasi*.tar.gz", retention-days: 3}
+
+  # on a machine of each target: the release binary, lix, hxmc's corpus and
+  # the port's self-compile
   test:
-    needs: [build, cosmo]
+    needs: build
     strategy:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-24.04
-            pkg: linux-x86_64
-          - os: ubuntu-24.04-arm
-            pkg: linux-aarch64
-          - os: macos-15-intel
-            pkg: macos-x86_64
-          - os: macos-latest
-            pkg: macos-aarch64
-          - os: windows-latest
-            pkg: windows-x86_64
-          - os: windows-11-arm
-            pkg: windows-aarch64
-          - os: ubuntu-24.04
-            pkg: com
-          - os: macos-latest
-            pkg: com
-          - os: windows-latest
-            pkg: com
+          - {target: linux-x86_64, pkg: linux-x86_64, os: ubuntu-24.04}
+          - {target: linux-arm64, pkg: linux-aarch64, os: ubuntu-24.04-arm}
+          - {target: windows-x86_64, pkg: windows-x86_64, os: windows-2025}
+          - {target: windows-arm64, pkg: windows-aarch64, os: windows-11-arm}
+          - {target: macos-x86_64, pkg: macos-x86_64, os: macos-15-intel}
+          - {target: macos-arm64, pkg: macos-aarch64, os: macos-15}
     runs-on: ${{ matrix.os }}
-    continue-on-error: ${{ matrix.os == 'windows-11-arm' }}
     defaults:
       run:
         shell: bash
     steps:
       - uses: actions/checkout@v7
         with:
-          sparse-checkout: hxc/tools
+          sparse-checkout: |
+            hxmc/tools
+            tools
       - uses: actions/setup-node@v7
         with:
           node-version: 22
-      - uses: actions/download-artifact@v8
+      - uses: actions/setup-python@v6
         with:
-          name: ${{ matrix.pkg == 'com' && 'haxe-in-haxe-cosmo' || format('haxe-in-haxe-{0}', matrix.pkg) }}
-          path: dl
+          python-version: '3.12'
+      - uses: actions/download-artifact@v8
+        with: {name: 'haxe-in-haxe-${{ matrix.pkg }}', path: dl}
+      - uses: actions/download-artifact@v8
+        with: {name: 'corpus-${{ matrix.target }}', path: dl}
+      - uses: actions/download-artifact@v8
+        with: {name: hxmc-self, path: dl}
+      - uses: actions/download-artifact@v8
+        with: {name: lix, path: lix}
       - name: Unpack
         id: unpack
         run: |
           set -ex
-          case "${{ matrix.pkg }}" in
-            com)
-              # Windows runs it under an .exe name
-              B=haxe-in-haxe.com
-              if [ "$RUNNER_OS" = Windows ]; then B=haxe-in-haxe.exe; fi
-              mkdir -p t && cp dl/haxe-in-haxe.com "t/$B" && chmod +x "t/$B"
-              echo "bin=$PWD/t/$B" >> "$GITHUB_OUTPUT"
-              echo "std=" >> "$GITHUB_OUTPUT" ;;
+          mkdir -p t corpus std-x
+          case "${{ matrix.target }}" in
             windows-*)
               unzip -q dl/haxe-in-haxe-${{ matrix.pkg }}.zip -d t
               echo "bin=$PWD/t/haxe-in-haxe-${{ matrix.pkg }}/haxe-in-haxe.exe" >> "$GITHUB_OUTPUT"
               # a Windows path (C:/...) for the native program
               echo "std=$(cygpath -m "$PWD/t/haxe-in-haxe-${{ matrix.pkg }}/std")" >> "$GITHUB_OUTPUT" ;;
             *)
-              mkdir -p t && tar xzf dl/haxe-in-haxe-${{ matrix.pkg }}.tar.gz -C t
+              tar xzf dl/haxe-in-haxe-${{ matrix.pkg }}.tar.gz -C t
               echo "bin=$PWD/t/haxe-in-haxe-${{ matrix.pkg }}/haxe-in-haxe" >> "$GITHUB_OUTPUT"
               echo "std=$PWD/t/haxe-in-haxe-${{ matrix.pkg }}/std" >> "$GITHUB_OUTPUT" ;;
           esac
-          ls -l t t/*
+          tar xzf dl/corpus-${{ matrix.target }}.tar.gz -C corpus
+          tar xzf dl/std.tar.gz -C std-x
+          tar xzf dl/src.tar.gz -C std-x
+          ls -l t/*
       - name: Smoke test
         run: |
-          if [ -n "${{ steps.unpack.outputs.std }}" ]; then export HAXE_STD_PATH="${{ steps.unpack.outputs.std }}"; fi
-          SMOKE_DIR="$RUNNER_TEMP/smoke" sh hxc/tools/smoke.sh "${{ steps.unpack.outputs.bin }}"
-      - uses: actions/download-artifact@v8
-        if: matrix.pkg == 'com' || startsWith(matrix.pkg, 'windows')
-        with:
-          name: lix-cosmo
-          path: lix
-      - name: lix.com
-        if: matrix.pkg == 'com' || startsWith(matrix.pkg, 'windows')
-        # lix on Windows (Cosmopolitan's libuv, Windows programs, cmd.exe for hooks) is new
-        continue-on-error: ${{ runner.os == 'Windows' }}
-        run: |
-          set -ex
-          if [ "$RUNNER_OS" = Windows ]; then L=lix/lix.exe; mv lix/lix.com "$L"; else L=lix/lix.com; chmod +x "$L"; fi
-          L="$PWD/$L"
-          "$L" --version
-          # the haxe shim: the same binary under that name (lix shims: links next to it)
-          "$L" shims
-          ls -l lix
-          # installed as on a user's machine: the commands on PATH (the libraries' install commands call lix)
-          export PATH="$PWD/lix:$PATH"
-          if [ "$RUNNER_OS" = Windows ]; then H=lix/haxe.exe; else H=lix/haxe; fi
-          H="$PWD/$H"
-          export HAXESHIM_ROOT="$RUNNER_TEMP/lix-root"
-          mkdir -p "$RUNNER_TEMP/lix-project/src" && cd "$RUNNER_TEMP/lix-project"
-          "$L" scope create
-          "$L" download
-          "$L" install haxelib:tink_core
-          cat haxe_libraries/tink_core.hxml .haxerc
-          # a fresh clone's case: the libraries reinstalled from haxe_libraries (in parallel)
-          "$L" install haxelib:tink_json
-          rm -rf "$HAXESHIM_ROOT/haxe_libraries"
-          "$L" download
-          echo 'class Main { static function main() trace(tink.core.Outcome.Success(#if sys Sys.args() #else "js" #end)); }' > src/Main.hx
-          "$H" -version
-          "$H" --run resolve-args -lib tink_core
-          "$H" --run resolve-args -lib tink_json
-          "$H" -cp src -lib tink_core --run Main a b
-          "$H" -cp src -lib tink_core -main Main --js main.js && node main.js
+          export HAXE_STD_PATH="${{ steps.unpack.outputs.std }}"
+          SMOKE_DIR="$RUNNER_TEMP/smoke" sh tools/smoke.sh "${{ steps.unpack.outputs.bin }}"
       - name: Smoke test (PowerShell, Windows paths)
-        if: startsWith(matrix.pkg, 'windows')
+        if: runner.os == 'Windows'
         shell: pwsh
         run: |
           $env:HAXE_STD_PATH = (Resolve-Path "t/haxe-in-haxe-${{ matrix.pkg }}/std").Path
@@ -446,16 +347,131 @@ jobs:
           & $exe -cp . -main Main --hxb out.hxb
           if ($LASTEXITCODE -ne 0) { exit 1 }
           Get-Item out.hxb
+      - name: lix
+        run: |
+          set -ex
+          # installed as the site says: the platform's binary as lix, then lix shims
+          mkdir -p "$RUNNER_TEMP/lix-bin"
+          if [ "$RUNNER_OS" = Windows ]; then
+            cp lix/lix-${{ matrix.target }}.exe "$RUNNER_TEMP/lix-bin/lix.exe"; L="$RUNNER_TEMP/lix-bin/lix.exe"; H="$RUNNER_TEMP/lix-bin/haxe.exe"
+          else
+            cp lix/lix-${{ matrix.target }} "$RUNNER_TEMP/lix-bin/lix"; chmod +x "$RUNNER_TEMP/lix-bin/lix"; L="$RUNNER_TEMP/lix-bin/lix"; H="$RUNNER_TEMP/lix-bin/haxe"
+          fi
+          "$L" --version
+          "$L" shims
+          ls -l "$RUNNER_TEMP/lix-bin"
+          # the commands on PATH (the libraries' install commands call lix)
+          export PATH="$RUNNER_TEMP/lix-bin:$PATH"
+          export HAXESHIM_ROOT="$RUNNER_TEMP/lix-root"
+          mkdir -p "$RUNNER_TEMP/lix-project/src" && cd "$RUNNER_TEMP/lix-project"
+          "$L" scope create
+          "$L" download
+          "$L" install haxelib:tink_core
+          cat haxe_libraries/tink_core.hxml .haxerc
+          # a fresh clone's case: the libraries reinstalled from haxe_libraries
+          "$L" install haxelib:tink_json
+          rm -rf "$HAXESHIM_ROOT/haxe_libraries"
+          "$L" download
+          echo 'class Main { static function main() trace(tink.core.Outcome.Success(#if sys Sys.args() #else "js" #end)); }' > src/Main.hx
+          "$H" -version
+          "$H" --run resolve-args -lib tink_core
+          "$H" --run resolve-args -lib tink_json
+          "$H" -cp src -lib tink_core --run Main a b
+          "$H" -cp src -lib tink_core -main Main --js main.js && node main.js
+      - name: Corpus
+        if: always()
+        run: python hxmc/tools/check.py corpus --summary "$GITHUB_STEP_SUMMARY"
+      # the free nursery filled with a pattern: allocations that are not
+      # initialized and references a collection missed read it at once
+      - name: Corpus, RT_VERIFY=1
+        if: always()
+        run: RT_VERIFY=1 python hxmc/tools/check.py corpus --summary "$GITHUB_STEP_SUMMARY"
+      - name: Port self-compile
+        if: always()
+        run: |
+          set -ex
+          root="$SELF_ROOT"
+          exe="${{ steps.unpack.outputs.bin }}"
+          if [ "$RUNNER_OS" = Linux ]; then sudo mkdir -p "$root" && sudo chown "$USER" "$root"; fi
+          if [ "$RUNNER_OS" = Windows ]; then root="$(cygpath -w "$RUNNER_TEMP")\\hih"; fi
+          # (MSYS would rewrite the reference's root, a POSIX path)
+          MSYS_NO_PATHCONV=1 python hxmc/tools/selfcheck.py --port "$exe" --src std-x/src --std std-x/std --ref dl/self-ref.hxb --ref-root "$SELF_ROOT" --root "$root" --summary "$GITHUB_STEP_SUMMARY"
+
+  # the WebAssembly corpus (hxmc/README.md, "WebAssembly") under node 22 and
+  # wasmtime, the port as a module compiling itself under both, and the
+  # playground in the three browser engines
+  wasm:
+    needs: build
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          sparse-checkout: |
+            hxmc/tools
+            site/tools
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - name: wasmtime
+        run: |
+          set -ex
+          curl -sSfL "https://github.com/bytecodealliance/wasmtime/releases/download/v$WASMTIME_VERSION/wasmtime-v$WASMTIME_VERSION-x86_64-linux.tar.xz" | tar xJ -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/wasmtime-v$WASMTIME_VERSION-x86_64-linux" >> "$GITHUB_PATH"
+      - uses: actions/download-artifact@v8
+        with: {name: corpus-wasm32-wasi, path: dl}
+      - uses: actions/download-artifact@v8
+        with: {name: hxmc-self, path: dl}
+      - uses: actions/download-artifact@v8
+        with: {name: site, path: site-dist}
+      - name: Unpack
+        run: |
+          set -ex
+          mkdir -p corpus port std-x
+          tar xzf dl/corpus-wasm32-wasi.tar.gz -C corpus
+          tar xzf dl/corpus-wasm32-wasi-port.tar.gz -C port
+          tar xzf dl/std.tar.gz -C std-x
+          tar xzf dl/src.tar.gz -C std-x
+          sudo mkdir -p "$SELF_ROOT" && sudo chown "$USER" "$SELF_ROOT"
+      # (node 22: exception handling with exnref is behind a flag; no fast
+      # API calls: hxmc/tools/run.py)
+      - name: Corpus under node
+        if: always()
+        run: python3 hxmc/tools/check.py corpus --runner "node --experimental-wasm-exnref --no-turbo-fast-api-calls --no-warnings $PWD/hxmc/tools/wasi.mjs" --summary "$GITHUB_STEP_SUMMARY"
+      - name: Corpus under node, RT_VERIFY=1
+        if: always()
+        run: RT_VERIFY=1 python3 hxmc/tools/check.py corpus --runner "node --experimental-wasm-exnref --no-turbo-fast-api-calls --no-warnings $PWD/hxmc/tools/wasi.mjs" --summary "$GITHUB_STEP_SUMMARY"
+      - name: Corpus under wasmtime
+        if: always()
+        run: python3 hxmc/tools/check.py corpus --runner "wasmtime run -W exceptions=y --dir . --dir / --env RT_MINOR_KB" --summary "$GITHUB_STEP_SUMMARY"
+      - name: Corpus under wasmtime, 16 KB nursery
+        if: always()
+        run: RT_MINOR_KB=16 python3 hxmc/tools/check.py corpus --runner "wasmtime run -W exceptions=y --dir . --dir / --env RT_MINOR_KB" --summary "$GITHUB_STEP_SUMMARY"
+      # the port as a module compiles its own source to the reference's HXB
+      - name: Port self-compile under node
+        if: always()
+        run: python3 hxmc/tools/selfcheck.py --runner "node --experimental-wasm-exnref --no-turbo-fast-api-calls --no-warnings --stack-size=8000 $PWD/hxmc/tools/wasi.mjs" --port port/haxe.wasm --src std-x/src --std std-x/std --ref dl/self-ref.hxb --ref-root "$SELF_ROOT" --root "$SELF_ROOT" --summary "$GITHUB_STEP_SUMMARY"
+      - name: Port self-compile under wasmtime
+        if: always()
+        run: python3 hxmc/tools/selfcheck.py --runner "wasmtime run -W exceptions=y -W max-wasm-stack=67108864 --dir / --env HAXE_STD_PATH --env PWD" --port port/haxe.wasm --src std-x/src --std std-x/std --ref dl/self-ref.hxb --ref-root "$SELF_ROOT" --root "$SELF_ROOT" --summary "$GITHUB_STEP_SUMMARY"
+      # the playground's worker (site/src/Worker.hx, WasiHost.hx) in the
+      # browsers' engines: --interp, HXB, diagnostics and completion
+      - name: Playground in Chromium, Firefox and WebKit
+        if: always()
+        run: |
+          set -ex
+          npm install --no-save --silent playwright@1.56.1
+          npx playwright install --with-deps chromium firefox webkit > /dev/null
+          node site/tools/browser-test.mjs site-dist chromium firefox webkit
 
   # upstream Haxe's CI test suite (RunCi for every target) with the release
-  # binaries as haxe (upstream-tests.yml); not required by the release
+  # binaries as haxe (upstream-tests.yml)
   upstream-tests:
-    needs: [build, cosmo]
+    needs: build
     uses: ./.github/workflows/upstream-tests.yml
 
   # nightly on main, a release on v* tags
   release:
-    needs: test
+    needs: [test, wasm]
     if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
     runs-on: ubuntu-24.04
     permissions:
@@ -474,11 +490,12 @@ jobs:
           set -ex
           ls -l assets
           SHORT=$(echo "$GITHUB_SHA" | cut -c1-9)
-          NOTES="Built from $GITHUB_SHA.
+          NOTES="Built from $GITHUB_SHA by hxmc (the port compiled to machine code for each target, cross-built on Linux, with mbedtls and libuv).
 
-          - haxe-in-haxe-<os>-<arch>.tar.gz: Linux and macOS builds (zig cc, with mbedtls and libuv), with std/; set HAXE_STD_PATH to it.
-          - haxe-in-haxe-windows-<arch>.zip: Windows builds (zig cc, MinGW-w64 and the UCRT, with mbedtls and libuv) as haxe-in-haxe.exe, with std/; set HAXE_STD_PATH to it.
-          - haxe-in-haxe.com: a Cosmopolitan binary for Linux, macOS, Windows and the BSDs, with the std embedded. Its licenses (LICENSE, COPYING, LICENSE.mbedtls, LICENSE.libuv) are in haxe-in-haxe-licenses.zip; every archive carries its own."
+          - haxe-in-haxe-<os>-<arch>.tar.gz: Linux and macOS, with std/; set HAXE_STD_PATH to it.
+          - haxe-in-haxe-windows-<arch>.zip: Windows, haxe-in-haxe.exe, with std/; set HAXE_STD_PATH to it.
+
+          Each archive carries the licenses: LICENSE and COPYING (the port), LICENSE.mbedtls and LICENSE.libuv."
           if [ "$GITHUB_REF_TYPE" = tag ]; then
             TAG=$GITHUB_REF_NAME
             gh release create "$TAG" --verify-tag --title "haxe-in-haxe $TAG" --notes "$NOTES" assets/*
@@ -488,64 +505,16 @@ jobs:
               # move the tag, then replace the assets in place (the download URLs stay valid)
               gh api -X PATCH "repos/$GH_REPO/git/refs/tags/$TAG" -f sha="$GITHUB_SHA" -F force=true
               gh release upload "$TAG" assets/* --clobber
+              # assets of earlier builds that are not built any more
+              for a in haxe-in-haxe.com haxe-in-haxe-licenses.zip; do gh release delete-asset "$TAG" "$a" -y || true; done
               gh release edit "$TAG" --prerelease --title "Nightly ($SHORT)" --notes "$NOTES"
             else
               gh release create "$TAG" --prerelease --target "$GITHUB_SHA" --title "Nightly ($SHORT)" --notes "$NOTES" assets/*
             fi
           fi
 
-  # the website (`make site`): WebAssembly playground (Emscripten) and the
-  # pages' JavaScript, compiled from site/src by the Linux build of the port
-  site:
-    needs: [generate, build, cosmo]
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/download-artifact@v8
-        with:
-          name: port-c
-          path: dist
-      - uses: actions/download-artifact@v8
-        with:
-          name: port-c-web
-          path: dist
-      - uses: actions/download-artifact@v8
-        with:
-          name: haxe-in-haxe-linux-x86_64
-          path: dist
-      - uses: actions/download-artifact@v8
-        with:
-          name: lix-cosmo
-          path: dist/lix
-      - name: Cache Emscripten
-        id: cache-emsdk
-        uses: actions/cache@v6
-        with:
-          path: ~/emsdk
-          key: emsdk-${{ env.EMSCRIPTEN_VERSION }}
-      - name: Install Emscripten
-        if: steps.cache-emsdk.outputs.cache-hit != 'true'
-        run: |
-          set -ex
-          git clone -q --depth 1 https://github.com/emscripten-core/emsdk ~/emsdk
-          ~/emsdk/emsdk install "$EMSCRIPTEN_VERSION"
-          ~/emsdk/emsdk activate "$EMSCRIPTEN_VERSION"
-      - name: Build the site
-        run: |
-          set -ex
-          mkdir -p dist/web haxe
-          tar xzf dist/port-c-web.tar.gz -C dist/web
-          tar xzf dist/std.tar.gz -C haxe
-          tar xzf dist/haxe-in-haxe-linux-x86_64.tar.gz -C dist
-          . ~/emsdk/emsdk_env.sh
-          make site WEB_C=dist/web/prog_hxc SITE_HAXE="$PWD/dist/haxe-in-haxe-linux-x86_64/haxe-in-haxe" LIX_COM=dist/lix/lix.com
-          ls -l bin/site
-      - uses: actions/upload-pages-artifact@v5
-        with:
-          path: bin/site
-
   pages:
-    needs: site
+    needs: [build, wasm]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     permissions:
