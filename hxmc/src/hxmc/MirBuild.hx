@@ -2034,6 +2034,15 @@ class MirBuild {
 			case _: throw new Unsupported(what + ": the name must be a string literal");
 		}
 
+	// a C string literal's symbol: its UTF-8 bytes in hexadecimal after
+	// CSTR (DataGen.cstrLiterals defines it in .rodata, once per program)
+	public static inline var CSTR = "hxmc$cstr$";
+
+	static function cstrSym(s:String):String {
+		var b = haxe.io.Bytes.ofString(s);
+		return CSTR + b.toHex();
+	}
+
 	static function intLiteral(e:Ex, what:String):Int
 		return switch e {
 			case EInt(v): v;
@@ -2125,6 +2134,7 @@ class MirBuild {
 		return switch short {
 			case "addr" | "obj": ex(args[0]);
 			case "sym": symAddr(literal(args[0], "Mem.sym"));
+			case "cstr": symAddr(cstrSym(literal(args[0], "Mem.cstr")));
 			case "tlsGet": tlsLoad(literal(args[0], "Mem.tlsGet"));
 			case "tlsSet":
 				tlsStore(literal(args[0], "Mem.tlsSet"), ex(args[1]));

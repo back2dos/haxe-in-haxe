@@ -391,6 +391,25 @@ class DataGen {
 		}
 	}
 
+	// the C string literals the program refers to (Mem.cstr: MirBuild.CSTR),
+	// NUL-terminated in .rodata
+	public function cstrLiterals(objs:Array<Obj>) {
+		var names = new Map<String, Bool>();
+		for (o in objs.concat([obj]))
+			for (s in o.symbols)
+				if (s.section == null && !s.abs && StringTools.startsWith(s.name, MirBuild.CSTR)) names.set(s.name, true);
+		var list = [for (n in names.keys()) n];
+		list.sort((a, b) -> a < b ? -1 : a > b ? 1 : 0);
+		for (n in list) {
+			var b = haxe.io.Bytes.ofHex(n.substr(MirBuild.CSTR.length));
+			var off = rodata.buf.len;
+			for (i in 0...b.length)
+				rodata.buf.u8(b.get(i));
+			rodata.buf.u8(0);
+			obj.define(n, rodata, off, b.length + 1, true);
+		}
+	}
+
 	// the runtime's machine-code stubs the program refers to (MirBuild.STUB_*)
 	public function stubs(objs:Array<Obj>, emit:Target.Emitter) {
 		for (n in [MirBuild.STUB_CALL_ON_STACK, MirBuild.STUB_ZERO]) {

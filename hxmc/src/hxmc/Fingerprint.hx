@@ -329,7 +329,17 @@ class Fingerprint {
 						b.add(a.getIndex());
 					b.add(":" + cs.ret.getIndex());
 				}
-				args(xs);
+				// (the names the intrinsics take are not string objects of the program)
+				switch [n, xs] {
+					case ["hxmc_unsafe_Mem_sym" | "hxmc_unsafe_Mem_cstr" | "hxmc_unsafe_Mem_tlsGet" | "hxmc_unsafe_Mem_tlsSet" | "hxmc_unsafe_Mem_abi", [EStr(s)]]
+						| ["hxmc_unsafe_Mem_tlsSet", [EStr(s), _]]:
+						b.add("(s");
+						str(s);
+						if (xs.length > 1) ex(xs[1]);
+						b.add(")");
+					case _:
+						args(xs);
+				}
 			case ENewObj(c):
 				b.add("no");
 				tyName(c.tindex);

@@ -283,6 +283,9 @@ class Lower {
 					STry(sts(body), [
 						for (c in catches) {
 							var test = c.test;
+							// (bound now: the test is built when the try is, after Facts; the
+							// runtime functions it calls, hx_is, are lowered with the program)
+							if (test != null) ex(test(ELocal(c.l)));
 							{test: test == null ? null : x -> ex(test(x)), l: c.l, body: sts(c.body)};
 						}
 					]);

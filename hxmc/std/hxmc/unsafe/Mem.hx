@@ -14,6 +14,9 @@ extern class Mem {
 	static function obj(p:Ptr):Dynamic;
 	// the address of a symbol of the program or the runtime object (data or code)
 	static function sym(name:String):Ptr;
+	// the address of a C string literal: its UTF-8 bytes and a NUL, read-only,
+	// outside the heap (one copy per program)
+	static function cstr(literal:String):Ptr;
 	// the runtime's pointer-sized thread-local variables (rt_sp, rt_young_ptr, ...)
 	static function tlsGet(name:String):Ptr;
 	static function tlsSet(name:String, v:Ptr):Void;
