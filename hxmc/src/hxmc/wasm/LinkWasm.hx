@@ -332,9 +332,10 @@ class LinkWasm {
 				Enc.uleb(s, funcIndex.get(n));
 			section(m, 9, s);
 		}
+		var segs = dataSegments(dataSecs);
 		// data count
 		s = new Buf(8);
-		Enc.uleb(s, dataSecs.length);
+		Enc.uleb(s, segs.length);
 		section(m, 12, s);
 		// code
 		s = new Buf(1 << 20);
@@ -382,24 +383,14 @@ class LinkWasm {
 		section(m, 10, s);
 		// data
 		s = new Buf(1 << 16);
-		Enc.uleb(s, dataSecs.length);
-		for (sec in dataSecs) {
-			var o = null;
-			for (x in objs)
-				if (x.sections.indexOf(sec) >= 0) o = x;
-			var bytes = sec.buf.toBytes();
-			for (r in sec.relocs) {
-				if (r.kind != RAbs64) throw "hxmc: wasm: relocation kind " + r.kind + " in data";
-				var v = value(o, r.sym) + r.addend;
-				bytes.setInt32(r.offset, v);
-				bytes.setInt32(r.offset + 4, v < 0 ? -1 : 0);
-			}
+		Enc.uleb(s, segs.length);
+		for (g in segs) {
 			s.u8(0);
 			s.u8(Op.I32Const);
-			Enc.sleb(s, addrOf.get(sec));
+			Enc.sleb(s, g.at);
 			s.u8(Op.End);
-			Enc.uleb(s, bytes.length);
-			s.bytes(bytes);
+			Enc.uleb(s, g.len);
+			s.bytes(g.img, g.pos, g.len);
 		}
 		section(m, 11, s);
 		// the function names (a "name" section): HXMC_SYMBOLS=1 or -debug
@@ -486,6 +477,60 @@ class LinkWasm {
 		var i = funcIndex.get(n);
 		if (i == null) throw "hxmc: wasm: no function " + n;
 		return i;
+	}
+
+	// the initialized data as active segments: the sections' image in memory
+	// (relocated), split at runs of ZERO_RUN zero bytes or more (padding, the
+	// upper halves of 8-byte slots): memory starts zeroed. A segment's header
+	// is about 8 bytes, but zeros compress well: on the playground's module 16
+	// gives 855 KB less raw and 23 KB more gzipped than one segment per
+	// section, 64 gives 757 KB less raw and 17 KB more gzipped, 256 203 KB and
+	// 2 KB less
+	static inline var ZERO_RUN = 64;
+
+	function dataSegments(dataSecs:Array<Section>):Array<{img:haxe.io.Bytes, pos:Int, at:Int, len:Int}> {
+		var segs = [];
+		if (dataSecs.length == 0) return segs;
+		var lo = addrOf.get(dataSecs[0]), hi = lo;
+		for (sec in dataSecs) {
+			var a = addrOf.get(sec);
+			if (a < lo) lo = a;
+			if (a + sec.size() > hi) hi = a + sec.size();
+		}
+		var img = haxe.io.Bytes.alloc(hi - lo);
+		img.fill(0, hi - lo, 0);
+		for (sec in dataSecs) {
+			var o = null;
+			for (x in objs)
+				if (x.sections.indexOf(sec) >= 0) o = x;
+			var base = addrOf.get(sec) - lo;
+			var bytes = sec.buf.toBytes();
+			img.blit(base, bytes, 0, bytes.length);
+			for (r in sec.relocs) {
+				if (r.kind != RAbs64) throw "hxmc: wasm: relocation kind " + r.kind + " in data";
+				var v = value(o, r.sym) + r.addend;
+				img.setInt32(base + r.offset, v);
+				img.setInt32(base + r.offset + 4, v < 0 ? -1 : 0);
+			}
+		}
+		var n = hi - lo, k = 0;
+		while (k < n) {
+			while (k < n && img.get(k) == 0)
+				k++;
+			if (k == n) break;
+			var start = k, end = k, zeros = 0;
+			while (k < n) {
+				if (img.get(k) == 0) {
+					if (++zeros >= ZERO_RUN) break;
+				} else {
+					zeros = 0;
+					end = k + 1;
+				}
+				k++;
+			}
+			segs.push({img: img, pos: start, at: lo + start, len: end - start});
+		}
+		return segs;
 	}
 
 	// a relocation's value: a data address, a function's table index or an absolute value
