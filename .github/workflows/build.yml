@@ -376,6 +376,9 @@ jobs:
           export HAXESHIM_ROOT="$RUNNER_TEMP/lix-root"
           mkdir -p "$RUNNER_TEMP/lix-project/src" && cd "$RUNNER_TEMP/lix-project"
           "$L" scope create
+          # Haxe and neko have no Windows ARM64 builds, and lix (as upstream's)
+          # maps no platform there ("Unsupported platform: unknown"): no downloads
+          if [ "${{ matrix.target }}" = windows-arm64 ]; then exit 0; fi
           "$L" download
           "$L" install haxelib:tink_core
           cat haxe_libraries/tink_core.hxml .haxerc
