@@ -104,16 +104,31 @@ class Server {
 			return chin.read(len).toString();
 		}
 
-		function write(s:String):Void bout.add(s);
+		// port: OCaml's threads run one at a time (the runtime lock), so the
+		// pipe threads of CompilerIo (stdout and stderr) never append to the
+		// buffer at once; the host's threads run in parallel: a lock
+		var lock = new sys.thread.Mutex();
+		function write(s:String):Void {
+			lock.acquire();
+			bout.add(s);
+			lock.release();
+		}
 
 		function close() {
 			Sys.stdout().flush();
-			var data = Bytes.ofString(bout.toString());
-			chout.bigEndian = false;
-			chout.writeInt32(data.length);
-			chout.writeFullBytes(data, 0, data.length);
-			chout.flush();
-			bout = new StringBuf();
+			lock.acquire();
+			try {
+				var data = Bytes.ofString(bout.toString());
+				chout.bigEndian = false;
+				chout.writeInt32(data.length);
+				chout.writeFullBytes(data, 0, data.length);
+				chout.flush();
+				bout = new StringBuf();
+			} catch (e:Dynamic) {
+				lock.release();
+				throw e;
+			}
+			lock.release();
 		}
 
 		return function() {
