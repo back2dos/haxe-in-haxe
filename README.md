@@ -88,8 +88,8 @@ language server. `HXMC_INSTALL=0` keeps the launcher in place.
 edited) `haxe/` and `hxmc/` sources with the packaged WebAssembly compiler,
 into the cache, which `haxe` then prefers: edit the compiler in
 `node_modules/hxmc` and rebuild. (On Windows the WebAssembly path runs on
-node's WASI, whose gaps the launcher fills, `fd_readdir` among them; it works
-under wine and is checked in CI without blocking.)
+node's WASI, whose gaps the launcher fills: `fd_readdir`, drive roots, Windows
+paths in arguments; checked in CI on Windows too.)
 
 Editors and lix: vshaxe with `"haxe.executable": "auto"` (the default) runs
 the workspace's `node_modules/.bin/haxe` when there is one (as for the lix

@@ -672,9 +672,8 @@ jobs:
           haxe lix.hxml
           ./bin/applix
       # the WebAssembly fallback: without the platform package the first call
-      # builds the native compiler (Windows: node's WASI, not blocking)
+      # builds the native compiler
       - name: WebAssembly fallback
-        continue-on-error: ${{ runner.os == 'Windows' }}
         env:
           HXMC_PLATFORM_PACKAGE: '0'
           HXMC_CACHE: ${{ github.workspace }}/hxmc-cache-wasm
