@@ -534,6 +534,14 @@ static void zero_mutator_stack(rt_mutator *m, void *arg) {
 	rt_zero_above(*m->sp_ref, m->hw_ref);
 }
 
+// RT_VERIFY=1: the free nursery is filled with a byte pattern at startup and
+// after every collection, so that an allocation that is not initialized reads
+// the pattern from its first use (not zeros before the first collection and
+// dead objects after it), and so does a reference a collection did not see
+// (a missing root: the object it pointed to has moved)
+static int poison;
+#define POISON 0xA5
+
 // a collection, with every other thread stopped (unless another thread
 // collected meanwhile: the caller then retries its allocation)
 static void collect(int full, size_t need) {
@@ -546,6 +554,7 @@ static void collect(int full, size_t need) {
 		if (!minor_fixed && majors == m0) adapt_nursery((size_t)(old_ptr - before));
 	}
 	young_next = rt_young_start;
+	if (poison) memset(rt_young_start, POISON, minor_size);
 	rt_mutators_foreach(reset_tlab, NULL);
 	rt_zero_above(rt_sp, &rt_sp_hw);
 	rt_mutators_foreach(zero_mutator_stack, NULL);
@@ -804,6 +813,8 @@ void rt_init(int ng, int argc, char **argv) {
 	rt_young_start = nursery_alloc(minor_size);
 	rt_young_end = rt_young_start + minor_size;
 	young_next = rt_young_start; // rt_young_ptr = rt_young_limit = NULL: the first allocation takes a TLAB
+	poison = getenv("RT_VERIFY") != NULL;
+	if (poison) memset(rt_young_start, POISON, minor_size);
 	const char *tk = getenv("RT_TLAB_KB");
 	tlab_size = tk ? (size_t)atoi(tk) << 10 : minor_size / 16;
 	if (tlab_size < 4096) tlab_size = 4096;

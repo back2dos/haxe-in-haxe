@@ -92,6 +92,7 @@ class Gc {
 		nurseryBase = Heap.regionZero(MINOR_MAX);
 		youngStart = nurseryBase;
 		setYoungEnd(youngStart.add(minorSize));
+		if (verifying) Wasm.memset(youngStart, POISON, minorSize);
 		Mem.setPtr(Mem.sym("rt_young_start"), 0, youngStart);
 		Mem.tlsSet("rt_young_ptr", youngStart);
 		Mem.tlsSet("rt_young_limit", youngEnd);
@@ -406,6 +407,7 @@ class Gc {
 		}
 		Mem.tlsSet("rt_young_ptr", youngStart);
 		Mem.tlsSet("rt_young_limit", youngEnd);
+		if (verifying) Wasm.memset(youngStart, POISON, minorSize);
 		if (verifying) verify(true);
 		// the slots the frames left above the stack top (rt_sp_hw)
 		var sp = Mem.tlsGet("rt_sp"), hw = Mem.tlsGet("rt_sp_hw");
@@ -414,8 +416,13 @@ class Gc {
 	}
 
 	// RT_VERIFY=1: before and after each collection, the old space is checked
-	// object by object (sane headers; after it, references to nothing young)
+	// object by object (sane headers; after it, references to nothing young);
+	// the free nursery is filled with a byte pattern at startup and after each
+	// collection (as rt.c does), so that an allocation that is not initialized
+	// reads the pattern from its first use, and so does a reference the
+	// collection did not see (a missing root)
 	static var verifying:Bool;
+	static inline var POISON = 0xA5;
 
 	@:hxmc.noGc static function verify(after:Bool) {
 		var nt = Mem.getI32(Mem.sym("rt_ntypes"), 0);

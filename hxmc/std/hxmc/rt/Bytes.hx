@@ -23,7 +23,18 @@ class Bytes {
 	static inline function outside()
 		Rt.rt_throw("OutsideBounds");
 
+	// zeroed, as hxc's rt_alloc and the other targets leave them (the API
+	// leaves the contents unspecified, but programs read them: the crypto
+	// library's Sha512 pads its blocks with Bytes.alloc's zeros); a nursery
+	// reused after a minor collection holds the bytes of dead objects
 	@:hxmc.export("haxe_io_Bytes_alloc") static function alloc(n:Int):Dynamic {
+		var b = Mem.alloc((n + 15) >> 3, T_BYTES, K_RAW);
+		Mem.setI32(Mem.addr(b), 0, n);
+		return b;
+	}
+
+	// for callers that write all n bytes before anything reads them
+	static function allocUninit(n:Int):Dynamic {
 		var b = Mem.allocRaw((n + 15) >> 3, T_BYTES, K_RAW);
 		Mem.setI32(Mem.addr(b), 0, n);
 		return b;
@@ -48,7 +59,7 @@ class Bytes {
 
 	@:hxmc.host("haxe_io_Bytes_sub") static function sub(b:Dynamic, pos:Int, n:Int):Dynamic {
 		if (pos < 0 || n < 0 || pos + n > len(b)) outside();
-		var r = alloc(n);
+		var r = allocUninit(n);
 		LibC.memcpy(bytes(r), bytes(b).add(pos), n);
 		return r;
 	}
@@ -111,7 +122,7 @@ class Bytes {
 		var cap = 3 * Str.len(s) + 1;
 		var buf = cap <= 512 ? small : LibC.malloc(cap);
 		var n = Str.utf8Into(s, buf);
-		var b = alloc(n);
+		var b = allocUninit(n);
 		LibC.memcpy(bytes(b), buf, n);
 		if (buf != small) LibC.free(buf);
 		return b;
@@ -133,7 +144,7 @@ class Bytes {
 
 	@:hxmc.host("haxe_io_Bytes_ofHex") static function ofHex(s:String):Dynamic {
 		var n = Str.len(s) >> 1;
-		var b = alloc(n);
+		var b = allocUninit(n);
 		var c = Str.chars(s), p = bytes(b);
 		for (i in 0...n) {
 			var v = 0;

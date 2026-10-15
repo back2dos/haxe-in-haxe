@@ -325,6 +325,18 @@ program whose output should change has its golden file edited, with the
 reason in the commit. The fuzzer programs are frozen as sources, not
 regenerated, so a change of the fuzzer does not change the corpus.
 
+`RT_VERIFY=1` (every target; CI runs the corpus with it) fills the free
+nursery with a byte pattern at startup and after every collection: an
+allocation that is not initialized reads the pattern from its first use
+instead of zeros before the first collection and the bytes of dead
+objects after it, and a reference a collection did not see (a missing
+root) reads it instead of the moved object's old copy. Its heap checks
+(WebAssembly) cannot see the first kind: `Bytes.alloc` once returned
+uninitialized bytes, which the crypto library's Sha512 reads as its zero
+padding, so HaxeBenchmarks' sha512 gave wrong digests once the nursery had
+been reused (correct with a nursery too large to collect); `Int64Gc`
+covers it.
+
 The port check: the port built by hxmc compiles its own source to HXB,
 compared member by member with the reference's (also with
 `RT_MINOR_KB=256`).
@@ -417,7 +429,8 @@ call can start a V8 collection that crashes with a large module memory).
   callers keep no frame slot in a register across them; `RT_STATS`,
   `RT_MINOR_KB`, `RT_OLD_MB` as natively, and `RT_VERIFY=1` checks the old
   space around each collection and that the barrier missed no young
-  reference), `Boxes` (boxes, array growth and stores), `Names` (field
+  reference, and fills the free nursery with a pattern as natively, see
+  "Tests and their oracle"), `Boxes` (boxes, array growth and stores), `Names` (field
   names and the inline-cache miss of rt_dyn.c), `FloatText` (strtod and
   `hx_format_float` on big integers: the same text as the C library's
   printf/strtod; 900k random doubles, short decimals and scaled values

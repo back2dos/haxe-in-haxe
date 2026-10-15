@@ -277,6 +277,26 @@ after the change: corpus 72/72 on linux-x86_64, the port check
 byte-identical, fixpoint. CI run 38635613350 passed with the new wasm job
 (corpus under node and wasmtime).
 
+### hxmc: Bytes.alloc zeroed, RT_VERIFY fills the nursery (2026-10-15, branch hxmc)
+
+HaxeBenchmarks' sha512 gave wrong digests on hxmc (native and wasm): the
+crypto library's Sha512 pads its last block with what `Bytes.alloc`
+returns, which hxmc allocated without zeroing (hxc's rt_alloc zeroed it),
+so after a minor collection the block held the bytes of dead objects.
+`Bytes.alloc` is zeroed now; `RT_VERIFY=1` fills the free nursery with a
+pattern on every target. New corpus case Int64Gc (SHA-512 with the NIST
+digests, Bytes.alloc after nursery reuse, Int64 in arrays, Vectors,
+fields, Null, Dynamic, closures, maps and structures across
+collections; golden file equal to the reference's `--interp` output; it
+fails without the fix). Locally: the corpus 73/73 on linux-x86_64,
+linux-arm64 (qemu) and windows-x86_64 (wine), also with 16 and 256 KB
+nurseries and with `RT_VERIFY=1`; wasm 71/71 under node and wasmtime
+with 16, 64 and 256 KB, under node with `RT_VERIFY=1` at 64 and 256 KB
+(16 KB: Bench exceeds the timeout, as before); ThreadNatives 300 runs;
+the port's self-compile byte-identical natively (also 256 KB, and 256 KB
+with `RT_VERIFY=1`) and as a module under node (default, 256 and 16 KB)
+and wasmtime; fixpoint.
+
 ## Target generators
 
 Every target also compiles upstream's unit suite identically (`unit-targets.py`, above).

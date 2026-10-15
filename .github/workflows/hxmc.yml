@@ -231,6 +231,11 @@ jobs:
       - name: Corpus
         if: always()
         run: python hxmc/tools/check.py t/corpus --summary "$GITHUB_STEP_SUMMARY"
+      # the free nursery filled with a pattern: allocations that are not
+      # initialized and references a collection missed read it at once
+      - name: Corpus, RT_VERIFY=1
+        if: always()
+        run: RT_VERIFY=1 python hxmc/tools/check.py t/corpus --summary "$GITHUB_STEP_SUMMARY"
       - name: Port self-compile
         if: always()
         run: |
@@ -279,6 +284,9 @@ jobs:
       - name: Corpus under node
         if: always()
         run: python3 hxmc/tools/check.py t/corpus --runner "node --experimental-wasm-exnref --no-turbo-fast-api-calls --no-warnings $PWD/hxmc/tools/wasi.mjs" --summary "$GITHUB_STEP_SUMMARY"
+      - name: Corpus under node, RT_VERIFY=1
+        if: always()
+        run: RT_VERIFY=1 python3 hxmc/tools/check.py t/corpus --runner "node --experimental-wasm-exnref --no-turbo-fast-api-calls --no-warnings $PWD/hxmc/tools/wasi.mjs" --summary "$GITHUB_STEP_SUMMARY"
       - name: Corpus under wasmtime
         if: always()
         run: python3 hxmc/tools/check.py t/corpus --runner "wasmtime run -W exceptions=y --dir . --dir / --env RT_MINOR_KB" --summary "$GITHUB_STEP_SUMMARY"
