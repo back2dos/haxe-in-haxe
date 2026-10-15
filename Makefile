@@ -45,7 +45,7 @@ LIX_DIR ?=
 # --- Sources ---
 
 PORT_SRC := $(shell find haxe/src -name '*.hx')
-HXMC_SRC := $(wildcard hxmc/*.hx hxmc/*/*.hx)
+HXMC_SRC := $(shell find hxmc/src -name '*.hx')
 STD_SRC := $(shell find hxmc/std -type f)
 RT_SRC := $(wildcard hxmc/c/*)
 LIX_SRC := $(shell find tools/lix/src -name '*.hx')
@@ -65,16 +65,16 @@ SCRIPT := ulimit -s unlimited 2>/dev/null || true; $(TOOL) -cp hxmc/test -cp hax
 # the hxmc target: bin/hxmc/std (hxmc/std merged with the Eval originals for
 # macros), given last
 HXMC_ARGS := -cp bin/hxmc/std --custom-target hxmc
-# the tool is the port (haxe/src) with hxmc (hxmc/, class path: the root) as
+# the tool is the port (haxe/src) with hxmc (hxmc/src) as
 # its generate hook, typed against hxmc's std, without the port's other
 # target generators
-TOOL_CP := -cp haxe/src -cp . -main hxmc.Main -D disable-parallelism -D hih_no_generators -cp bin/hxmc/std
+TOOL_CP := -cp haxe/src -cp hxmc/src -main hxmc.Main -D disable-parallelism -D hih_no_generators -cp bin/hxmc/std
 TOOL_ARGS := $(TOOL_CP) --custom-target hxmc
 # the port (typed with -D disable-parallelism; the binary runs its parallel
 # passes unless its own invocation passes that define)
 PORT_ARGS := -cp haxe/src -main haxe.Main -D disable-parallelism $(HXFLAGS) $(HXMC_ARGS)
 # `haxe` with hxmc built in (the npm package's compiler: every generator)
-PKG_ARGS := -cp haxe/src -cp . -main hxmc.HaxeMain -D disable-parallelism $(HXMC_ARGS)
+PKG_ARGS := -cp haxe/src -cp hxmc/src -main hxmc.HaxeMain -D disable-parallelism $(HXMC_ARGS)
 EXE = $(if $(findstring windows,$(1)),.exe)
 RELEASE_BIN := bin/release/$(TARGET)/haxe$(call EXE,$(TARGET))
 LIX_BIN := bin/release/$(TARGET)/lix$(call EXE,$(TARGET))
@@ -101,7 +101,7 @@ help:
 ## fixpoint    bin/hxmc/hxmc builds bin/hxmc/fix/a, which builds bin/hxmc/fix/b: byte-identical
 ## stage0      hxmc/bootstrap/stage0.wasm.br: the tool as a wasm32-wasi module, brotli (commit it
 ##             when the sources need a newer one)
-## std         bin/hxmc/std: hxmc/std merged with the Eval originals (hxmc/MkStd.hx)
+## std         bin/hxmc/std: hxmc/std merged with the Eval originals (hxmc/src/hxmc/MkStd.hx)
 ## rt          the runtime objects (bin/hxmc/rt/<target>/{rt,ssl,uv}.o): the release
 ##             rt-<hash of hxmc/c> (hxmc/bootstrap/rt.mjs), else rt-build
 ## rt-build    the runtime objects with zig: mbedtls and libuv (hxmc/c/deps.sh), hxmc/c/mkrt.sh
@@ -142,8 +142,8 @@ help:
 ## LIX_DIR (defaults and meaning: the top of the Makefile).
 
 std: $(STD)
-$(STD): hxmc/MkStd.hx $(STD_SRC)
-	$(RUN) -cp . --run hxmc.MkStd
+$(STD): hxmc/src/hxmc/MkStd.hx $(STD_SRC)
+	$(RUN) -cp hxmc/src --run hxmc.MkStd
 
 # --- hxmc: the runtime objects and the tool ---
 
@@ -239,8 +239,8 @@ NPM_GEN := hxmc/bootstrap/haxe.wasm hxmc/bootstrap/hxmc-std/.stamp hxmc/bootstra
 hxmc/bootstrap/haxe.wasm: $(TOOL) $(PORT_SRC) $(HXMC_SRC) $(STD)
 	$(call hxmc,bin/npm/haxe.wasm,$(PKG_ARGS) -D hxmc.target=wasm32-wasi)
 	cp bin/npm/haxe.wasm $@
-hxmc/bootstrap/hxmc-std/.stamp: hxmc/MkStd.hx $(STD_SRC)
-	$(RUN) -cp . --run hxmc.MkStd hxmc/std haxe/upstream/std hxmc/bootstrap/hxmc-std
+hxmc/bootstrap/hxmc-std/.stamp: hxmc/src/hxmc/MkStd.hx $(STD_SRC)
+	$(RUN) -cp hxmc/src --run hxmc.MkStd hxmc/std haxe/upstream/std hxmc/bootstrap/hxmc-std
 hxmc/bootstrap/rt/HASH: $(HOST_RT)
 	rm -rf hxmc/bootstrap/rt
 	for t in $(TARGETS); do mkdir -p hxmc/bootstrap/rt/$$t && cp bin/hxmc/rt/$$t/rt.o bin/hxmc/rt/$$t/ssl.o bin/hxmc/rt/$$t/uv.o hxmc/bootstrap/rt/$$t/ || exit 1; done

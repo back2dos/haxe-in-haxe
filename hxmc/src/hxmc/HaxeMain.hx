@@ -9,7 +9,7 @@ import haxe.io.Path;
 //                                    for lix, with dist/std), or
 //                                    haxe.wasm, its WebAssembly build, run by it
 //   haxe/upstream/std                the std (HAXE_STD_PATH unless set)
-//   hxmc/bootstrap/hxmc-std          hxmc's std (hxmc/std merged by hxmc/MkStd.hx),
+//   hxmc/bootstrap/hxmc-std          hxmc's std (hxmc/std merged by MkStd.hx),
 //                                    added last when the arguments (or the hxml
 //                                    files they name) select --custom-target hxmc
 //   hxmc/bootstrap/rt/<target>       the runtime objects (rt.o, ssl.o, uv.o)

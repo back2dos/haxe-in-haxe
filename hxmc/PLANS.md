@@ -237,6 +237,17 @@ Plan, Go- and Rust-style (built lazily and cached rather than shipped):
 - Simpler than the compilation server for most of the gain; the server
   remains the route for large programs' one-edit rebuilds.
 
+### Central object cache and quieter builds
+
+Today every executable gets `<out>.hxmc/` next to it (per-module objects
+keyed by code, tool and target, plus `build.key` for the up-to-date check;
+`Driver.hx`, `UpToDate.hx`), and the Makefile's build rule writes
+`<out>.log` (shown only on failure). Plan: one cache directory instead,
+by default a project-level `.hxmc-cache/` (in the npm setup the user cache
+directory), overridable with `-D hxmc.cache=<dir>`, keyed so different
+outputs and targets can share it, with size-bounded cleanup; logs only on
+request. Keeps users' output directories and `bin/` clean.
+
 ### Other items
 
 - One-edit rebuilds below 1 s: needs incremental program preparation,

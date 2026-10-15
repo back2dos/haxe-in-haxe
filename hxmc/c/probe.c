@@ -1,5 +1,5 @@
 // The runtime's struct layouts and jmp_buf size on a target, which hxmc's
-// code generators and data writer hard-code (hxmc/Abi.hx):
+// code generators and data writer hard-code (hxmc/src/hxmc/Abi.hx):
 //   zig cc -target <triple> -I hxmc/c -S -o - hxmc/c/probe.c | grep -A1 probe_
 // (each value is the initializer of a probe_<name> constant)
 #include "rt.h"

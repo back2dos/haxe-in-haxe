@@ -282,7 +282,7 @@ class Lower {
 	}
 
 	// Lowers the body of `fi` (`run`). The hook for a subclass that caches
-	// bodies (hxmc/LowerCache.hx): `key` is the field the body comes
+	// bodies (hxmc/src/hxmc/LowerCache.hx): `key` is the field the body comes
 	// from (null: a closure or a static initializer); the cache keeps a body
 	// while the field object and its expression stay the same (the
 	// compilation server retypes a changed module and the modules depending

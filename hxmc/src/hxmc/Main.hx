@@ -6,7 +6,7 @@ package hxmc;
 // code:
 //   hxmc <out> <haxe arguments...> -cp bin/hxmc/std --custom-target hxmc
 // With a first argument that starts with `-` it is the compiler's command
-// line (HaxeMain), e.g. for scripts: `hxmc -cp . --run hxmc.MkStd`.
+// line (HaxeMain), e.g. for scripts: `hxmc -cp hxmc/src --run hxmc.MkStd`.
 // Options (defines, or the environment for development):
 //   -D hxmc.target=linux-x86_64     the target (Target.hx, Abi.hx: six of them)
 //   HXMC_RT_OBJ                     the runtime object (default: <tool dir>/rt/<target>/rt.o)

@@ -4,8 +4,7 @@ hxmc licenses
 This repository is a port of the Haxe compiler (https://github.com/HaxeFoundation/haxe)
 and follows its licensing.
 
-- The compiler port (haxe/src), the hxmc tool (hxmc/*.hx and its packages,
-  hxmc/bootstrap), the tests (haxe/test, hxmc/test) and the website (hxmc/web)
+- The compiler port (haxe/src), the hxmc tool (hxmc/src, hxmc/bootstrap), the tests (haxe/test, hxmc/test) and the website (hxmc/web)
   are licensed under the GNU General Public License, version 2 or (at your
   option) any later version (SPDX: GPL-2.0-or-later). The full text is in COPYING.
   Copyright (C) 2005-2025 Haxe Foundation (the upstream compiler this is

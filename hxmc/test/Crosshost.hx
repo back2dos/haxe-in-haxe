@@ -17,7 +17,7 @@ using StringTools;
 class Crosshost {
 	static final OUT = "bin/hxmc-t/xhost";
 	static final TARGETS = ["linux-x86_64", "linux-arm64", "windows-x86_64", "windows-arm64", "macos-x86_64", "macos-arm64", "wasm32-wasi"];
-	public static final TOOL_ARGS = ["-cp", "haxe/src", "-cp", ".", "-main", "hxmc.Main", "-D", "disable-parallelism", "-D", "hih_no_generators"];
+	public static final TOOL_ARGS = ["-cp", "haxe/src", "-cp", "hxmc/src", "-main", "hxmc.Main", "-D", "disable-parallelism", "-D", "hih_no_generators"];
 
 	static function main() {
 		var a = parseArgs(Sys.args(), ["--targets", "--wasm", "-j"]);

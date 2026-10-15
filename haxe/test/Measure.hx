@@ -43,7 +43,7 @@ class Measure {
 			}
 		}
 		var tool = FileSystem.fullPath("bin/hxmc/hxmc");
-		var toolArgs = ["-cp", "haxe/src", "-cp", ".", "-main", "hxmc.Main", "-D", "disable-parallelism", "-D", "hih_no_generators", "-cp", "bin/hxmc/std", "--custom-target", "hxmc"];
+		var toolArgs = ["-cp", "haxe/src", "-cp", "hxmc/src", "-main", "hxmc.Main", "-D", "disable-parallelism", "-D", "hih_no_generators", "-cp", "bin/hxmc/std", "--custom-target", "hxmc"];
 		if (only.contains("native-build")) {
 			rmrf("bin/test/measure/port.hxmc");
 			var r = measure("native build (the port, cold)", "ours", [tool, "bin/test/measure/port", "-cp", "haxe/src", "-main", "haxe.Main", "-D", "disable-parallelism",
@@ -60,7 +60,7 @@ class Measure {
 		}
 		if (only.contains("npm-wasm") && FileSystem.exists("hxmc/bootstrap/haxe.wasm")) {
 			rmrf("bin/test/measure/native.hxmc");
-			var r = measure("npm wasm builds the compiler (node)", "ours", node.concat([FileSystem.fullPath("hxmc/bootstrap/haxe.wasm"), "-cp", "haxe/src", "-cp", ".",
+			var r = measure("npm wasm builds the compiler (node)", "ours", node.concat([FileSystem.fullPath("hxmc/bootstrap/haxe.wasm"), "-cp", "haxe/src", "-cp", "hxmc/src",
 				"-main", "hxmc.HaxeMain", "-D", "disable-parallelism", "-cp", "bin/hxmc/std", "--custom-target", "hxmc=bin/test/measure/native"]), ["HXMC_HOST" => host]);
 			if (r.peakMb > WASM_WARN_MB) warnings.push('npm wasm: peak ${r.peakMb} MB above $WASM_WARN_MB MB');
 			rmrf("bin/test/measure/native.hxmc");

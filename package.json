@@ -11,11 +11,7 @@
   "files": [
     "haxe/src/",
     "haxe/upstream/std/",
-    "hxmc/*.hx",
-    "hxmc/a64/",
-    "hxmc/ir/",
-    "hxmc/wasm/",
-    "hxmc/x64/",
+    "hxmc/src/",
     "hxmc/std/",
     "hxmc/bootstrap/*.mjs",
     "hxmc/bootstrap/haxe",

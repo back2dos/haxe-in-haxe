@@ -39,9 +39,9 @@ let code = 1;
 try {
 	const env = toolEnv({ HXMC_HOST: host });
 	if (rebuild) {
-		// hxmc's std as programs see it (hxmc/MkStd.hx, on Eval)
+		// hxmc's std as programs see it (hxmc/src/hxmc/MkStd.hx, on Eval)
 		console.log('hxmc: merging hxmc/std into hxmc/bootstrap/hxmc-std');
-		code = runWasm(wasmPath, ['-cp', pkgDir, '--run', 'hxmc.MkStd', path.join(pkgDir, 'hxmc', 'std'),
+		code = runWasm(wasmPath, ['-cp', path.join(pkgDir, 'hxmc', 'src'), '--run', 'hxmc.MkStd', path.join(pkgDir, 'hxmc', 'std'),
 			path.join(pkgDir, 'haxe', 'upstream', 'std'), path.join(bootDir, 'hxmc-std')], env);
 		if (code !== 0) throw new Error(`hxmc.MkStd failed (exit ${code})`);
 	}
@@ -52,7 +52,7 @@ try {
 	const t0 = Date.now();
 	console.log(`hxmc: building the native compiler for ${host} (${new Date().toISOString()})`);
 	code = runWasm(wasmPath, [
-		'-cp', path.join(pkgDir, 'haxe', 'src'), '-cp', pkgDir, '-main', 'hxmc.HaxeMain',
+		'-cp', path.join(pkgDir, 'haxe', 'src'), '-cp', path.join(pkgDir, 'hxmc', 'src'), '-main', 'hxmc.HaxeMain',
 		'-D', 'disable-parallelism', '-D', `hxmc.target=${host}`, '--custom-target', `hxmc=${out}`,
 	], env);
 	const built = fs.existsSync(out) ? out : fs.existsSync(`${out}.exe`) ? `${out}.exe` : null;
