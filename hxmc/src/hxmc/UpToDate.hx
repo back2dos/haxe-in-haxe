@@ -20,7 +20,7 @@ class UpToDate {
 		for (a in args)
 			if (StringTools.startsWith(a, "hxmc.target=")) target = a.substr(12);
 		var rt = Sys.getEnv("HXMC_RT_OBJ");
-		if (rt == null) rt = Options.toolDir() + "rt/" + target + "/rt.o";
+		if (rt == null) rt = Options.rtDir() + target + "/rt.o";
 		// (and the objects of sys.ssl and libuv next to it)
 		for (p in [rt, haxe.io.Path.directory(rt) + "/ssl.o", haxe.io.Path.directory(rt) + "/uv.o"]) {
 			var rs = try sys.FileSystem.stat(p) catch (_:Dynamic) null;

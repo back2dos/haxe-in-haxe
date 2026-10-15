@@ -1,0 +1,25 @@
+{
+  "name": "haxe-in-haxe",
+  "version": "0.0.0-dev",
+  "description": "The Haxe compiler ported to Haxe, with hxmc (native executables and WebAssembly); runs as WebAssembly until its native build for this machine is ready",
+  "license": "GPL-2.0-or-later",
+  "type": "module",
+  "bin": {
+    "haxe": "bin/haxe"
+  },
+  "files": [
+    "bin/haxe",
+    "lib/*.mjs",
+    "lib/haxe.wasm",
+    "lib/haxe/"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "os": ["linux", "darwin", "win32"],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/benmerckx/haxe-in-haxe.git",
+    "directory": "packages/haxe"
+  }
+}

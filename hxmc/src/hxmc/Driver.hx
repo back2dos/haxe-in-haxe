@@ -347,7 +347,7 @@ class Driver {
 			if (o.stats) Sys.println('hxmc: data ${ms(t3 - t2)}, link ${ms(haxe.Timer.stamp() - t3)}');
 			return;
 		}
-		var rtPath = o.rtObj != null ? o.rtObj : Options.toolDir() + "rt/" + abi.name + "/rt.o";
+		var rtPath = o.rtObj != null ? o.rtObj : Options.rtDir() + abi.name + "/rt.o";
 		if (!sys.FileSystem.exists(rtPath)) throw "hxmc: the runtime object " + rtPath + " is missing (hxmc/tools/mkrt.sh)";
 		var rt = ElfReader.read(sys.io.File.getBytes(rtPath));
 		var t4 = haxe.Timer.stamp();
@@ -382,8 +382,15 @@ class Driver {
 		if (abi.os == "windows" && !StringTools.endsWith(out, ".exe")) out += ".exe";
 		sys.io.File.saveBytes(out, exe);
 		// under WASI (the tool as a WebAssembly module) there are no processes:
-		// whoever runs the module marks the output executable
-		if (Sys.systemName() != "Wasi") Sys.command("chmod", ["755", out]);
+		// whoever runs the module marks the output executable (HXMC_EXE_LIST
+		// names a file the output's path is added to, one per line)
+		if (Sys.systemName() != "Wasi")
+			Sys.command("chmod", ["755", out]);
+		else if (Sys.getEnv("HXMC_EXE_LIST") != null) {
+			var f = sys.io.File.append(Sys.getEnv("HXMC_EXE_LIST"));
+			f.writeString(sys.FileSystem.absolutePath(out) + "\n");
+			f.close();
+		}
 		if (hxmc.x64.Emit.sizeStats) {
 			var ks = [for (k in hxmc.x64.Emit.statBytes.keys()) k];
 			ks.sort((x, y) -> hxmc.x64.Emit.statBytes.get(y) - hxmc.x64.Emit.statBytes.get(x));

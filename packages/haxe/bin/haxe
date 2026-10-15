@@ -1,0 +1,5 @@
+#!/usr/bin/env node
+// `haxe`: the native build for this machine when it is ready (lib/native.mjs),
+// otherwise the WebAssembly build while the native one is made in the background
+import { main } from '../lib/launcher.mjs';
+main(process.argv.slice(2));

@@ -23,6 +23,12 @@ class Options {
 		return d == "" ? "./" : haxe.io.Path.addTrailingSlash(d);
 	}
 
+	// the directory of the runtime objects (<dir><target>/rt.o; default: <tool dir>rt/)
+	public static var rtDirOverride:Null<String> = null;
+
+	public static function rtDir():String
+		return rtDirOverride != null ? rtDirOverride : toolDir() + "rt/";
+
 	public static function read(com:context.Common.CommonContext):Options {
 		var o = new Options();
 		inline function def(k:String):Null<String>
