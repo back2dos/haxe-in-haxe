@@ -63,11 +63,14 @@ const PATH_VARS = ['HAXE_STD_PATH', 'HXMC_STD', 'HXMC_RT_DIR', 'HXMC_RT_OBJ', 'H
 export function runWasm(module, args, env = process.env) {
 	const e = { ...env, PWD: wasiPath(process.cwd()) };
 	for (const k of PATH_VARS) if (e[k]) e[k] = e[k].split(path.delimiter).map(wasiPath).join(':');
+	const pre = preopens();
+	// (HXMC_WASI_DEBUG=1: what the module is given)
+	if (env.HXMC_WASI_DEBUG) console.error(JSON.stringify({ preopens: pre, PWD: e.PWD, HAXE_STD_PATH: e.HAXE_STD_PATH }));
 	const wasi = new WASI({
 		version: 'preview1',
 		args: [wasiPath(path.resolve(module)), ...args],
 		env: e,
-		preopens: preopens(),
+		preopens: pre,
 		returnOnExit: true,
 	});
 	let bytes = fs.readFileSync(module);

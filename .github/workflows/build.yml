@@ -215,8 +215,10 @@ jobs:
           set -ex
           make npm
           echo "NPM_SIZE=$(wc -c < bin/npm/hxmc-0.0.0-dev.tgz)" >> "$GITHUB_ENV"
+          # what WebAssembly programs see of the file system (the npm job on Windows)
+          bin/hxmc/hxmc bin/npm/probe.wasm -cp hxmc/test -main WasiProbe -cp bin/hxmc/std --custom-target hxmc -D hxmc.target=wasm32-wasi
       - uses: actions/upload-artifact@v7
-        with: {name: npm, path: bin/npm/*.tgz, retention-days: 7}
+        with: {name: npm, path: "bin/npm/*.tgz\nbin/npm/probe.wasm", retention-days: 7}
 
       # the website: the playground's WebAssembly, the pages' JavaScript, lix under tools/
       - name: The website
@@ -605,6 +607,12 @@ jobs:
           printf 'class Main { static function main() { Sys.println("hello from " + Sys.systemName()); } }\n' > src/Main.hx
           printf 'class Js { static function main() { trace("hello from js"); } }\n' > src/Js.hx
           printf -- '-cp src\n-main Main\n--custom-target hxmc=bin/app\n' > build.hxml
+      - name: The file system under node's WASI
+        if: runner.os == 'Windows'
+        continue-on-error: true
+        run: |
+          cd "$RUNNER_TEMP/app"
+          MSYS_NO_PATHCONV=1 HXMC_WASI_DEBUG=1 node node_modules/hxmc/hxmc/bootstrap/wasi.mjs "$GITHUB_WORKSPACE/dl/probe.wasm" /d /d/a /d/a/_temp /d/a/_temp/app /d/a/_temp/app/node_modules/hxmc/haxe/upstream/std src . /c/Windows
       - name: First use (WebAssembly)
         run: |
           set -ex
