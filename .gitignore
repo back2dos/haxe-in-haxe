@@ -7,3 +7,7 @@
 /hxmc/bootstrap/haxe.wasm
 /hxmc/bootstrap/hxmc-std/
 /hxmc/bootstrap/rt/
+# written on first use of the npm package (lix installation)
+/dist/std
+/dist/platform.txt
+/dist/haxe.exe

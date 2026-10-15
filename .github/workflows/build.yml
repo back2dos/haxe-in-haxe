@@ -598,6 +598,8 @@ jobs:
           node-version: 22
       - uses: actions/download-artifact@v8
         with: {name: npm, path: dl}
+      - uses: actions/download-artifact@v8
+        with: {name: lix, path: dl/lix}
       - name: Install into a fresh project
         run: |
           set -ex
@@ -612,30 +614,21 @@ jobs:
         continue-on-error: true
         run: |
           cd "$RUNNER_TEMP/app"
-          MSYS_NO_PATHCONV=1 HXMC_WASI_DEBUG=1 node node_modules/hxmc/hxmc/bootstrap/wasi.mjs "$GITHUB_WORKSPACE/dl/probe.wasm" /d /d/a /d/a/_temp /d/a/_temp/app /d/a/_temp/app/node_modules/hxmc/haxe/upstream/std src . /c/Windows
-      - name: First use (WebAssembly)
+          MSYS_NO_PATHCONV=1 HXMC_WASI_DEBUG=1 HXMC_WASI_READDIR=1 node node_modules/hxmc/hxmc/bootstrap/wasi.mjs "$GITHUB_WORKSPACE/dl/probe.wasm" /d/a /d/a/_temp/app/node_modules/hxmc/haxe/upstream/std src .
+      # first use: the WebAssembly compiler builds the native one in the
+      # foreground (nothing on stdout or stderr but the compiler's own output)
+      - name: First use
         run: |
           set -ex
           cd "$RUNNER_TEMP/app"
           export HXMC_CACHE="$RUNNER_TEMP/hxmc-cache"
           s=$(date +%s)
-          npx haxe -cp src -main Main --interp | tee out.txt
-          grep -q "hello from Wasi" out.txt
-          echo "first --interp: $(( $(date +%s) - s )) s"
-          npx haxe build.hxml
-          ls -l bin
-          if [ "$RUNNER_OS" = Windows ]; then ./bin/app.exe; else ./bin/app; fi
-      - name: Wait for the native compiler
-        run: |
-          set -e
-          export HXMC_CACHE="$RUNNER_TEMP/hxmc-cache"
-          exe=haxe; [ "$RUNNER_OS" = Windows ] && exe=haxe.exe
-          for i in $(seq 1 120); do
-            if ls "$HXMC_CACHE"/*/*/"$exe" > /dev/null 2>&1; then break; fi
-            sleep 5
-          done
+          npx haxe --version > version.out 2> version.err
+          echo "first use: $(( $(date +%s) - s )) s"
+          cat version.out
+          test ! -s version.err
           cat "$HXMC_CACHE"/*/*/build.log
-          ls -l "$HXMC_CACHE"/*/*/"$exe"
+          ls -l "$HXMC_CACHE"/*/*/ node_modules/hxmc/dist
       - name: Native
         run: |
           set -ex
@@ -644,10 +637,27 @@ jobs:
           npx haxe -cp src -main Main --interp | tee out.txt
           grep -q "hello from" out.txt
           ! grep -q "hello from Wasi" out.txt
-          rm -rf bin
           time npx haxe build.hxml
           if [ "$RUNNER_OS" = Windows ]; then ./bin/app.exe; else ./bin/app; fi
           npx haxe -cp src -main Js --js main.js && node main.js
+      # lix with the package's installation (dist/) as its Haxe
+      - name: lix
+        if: runner.os != 'Windows'
+        run: |
+          set -ex
+          cd "$RUNNER_TEMP/app"
+          export HXMC_CACHE="$RUNNER_TEMP/hxmc-cache" HAXESHIM_ROOT="$RUNNER_TEMP/lix-root"
+          case "$RUNNER_OS" in Linux) t=linux-x86_64 ;; macOS) t=macos-arm64 ;; esac
+          mkdir -p "$RUNNER_TEMP/lix" && cp "$GITHUB_WORKSPACE/dl/lix/lix-$t" "$RUNNER_TEMP/lix/lix" && chmod +x "$RUNNER_TEMP/lix/lix"
+          export PATH="$RUNNER_TEMP/lix:$PATH"
+          lix shims
+          lix scope create
+          lix use haxe ./node_modules/hxmc/dist
+          cat .haxerc
+          haxe --version
+          printf -- '-cp src\n-main Main\n--custom-target hxmc=bin/applix\n' > lix.hxml
+          haxe lix.hxml
+          ./bin/applix
       - name: hxmc-rebuild
         run: |
           set -ex

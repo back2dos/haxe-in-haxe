@@ -1,7 +1,7 @@
 // Builds the native compiler for this machine with the WebAssembly one, from
 // the package's sources (haxe/src, hxmc/), into the cache directory
 // (launcher.mjs): <cache>/haxe[.exe], renamed into place when complete.
-//   node build.mjs              (the launcher, on first use)
+//   node build.mjs              (the launcher, on first use; its output goes to <cache>/build.log)
 //   node build.mjs --rebuild    (hxmc-rebuild: hxmc/std merged again first,
 //                                in the foreground, replacing a native build)
 // One build at a time: <cache>/build.lock holds the builder's process id.
@@ -20,14 +20,20 @@ if (!host) {
 const dir = cacheDir();
 fs.mkdirSync(dir, { recursive: true });
 const lock = path.join(dir, 'build.lock');
-try {
-	fs.writeFileSync(lock, String(process.pid), { flag: 'wx' });
-} catch {
-	if (lockHeld(lock)) {
-		console.error('hxmc: another build is running');
-		process.exit(rebuild ? 1 : 0);
+// another build: wait for it (then done, unless rebuilding)
+while (true) {
+	try {
+		fs.writeFileSync(lock, String(process.pid), { flag: 'wx' });
+		break;
+	} catch {
+		if (!lockHeld(lock)) {
+			fs.writeFileSync(lock, String(process.pid)); // a stale lock
+			break;
+		}
+		console.log('hxmc: waiting for another build');
+		while (lockHeld(lock)) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 500);
+		if (!rebuild && fs.existsSync(path.join(dir, exeName))) process.exit(0);
 	}
-	fs.writeFileSync(lock, String(process.pid)); // a stale lock
 }
 let code = 1;
 try {

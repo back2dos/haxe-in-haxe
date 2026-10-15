@@ -54,19 +54,41 @@ hxmc=<out>` writes an executable. A `build.hxml`:
 
 The package is the same on every platform: the compiler as a WebAssembly
 module, its sources (`haxe/src`, `hxmc/`), the std and the runtime objects of
-the six targets. On first use `haxe` runs the WebAssembly compiler under
-node's WASI and builds the native compiler for this machine in the background
-from the package's sources (about 40 s), into a cache shared by every project
+the six targets; no install script, nothing downloaded. After installing, run
+`npx haxe --version` once in a terminal: on first use the WebAssembly compiler
+(under node's WASI) builds the native compiler for this machine from the
+package's sources, in the foreground (about 40 s, a notice on an interactive
+terminal only), into a cache shared by every project
 (`~/.cache/hxmc/<version>/<target>/`; macOS `~/Library/Caches`, Windows
-`%LOCALAPPDATA%`; `HXMC_CACHE` overrides; the log is `build.log` there). Then
-`haxe` is the native compiler: on Linux and macOS it replaces
-`hxmc/bootstrap/haxe` itself, so npm's link starts it without node; on Windows
-npm's `haxe.cmd` starts node, which runs it. `HXMC_NATIVE=wait` builds the
-native compiler in the foreground first, `HXMC_NATIVE=0` stays on WebAssembly,
-`HXMC_INSTALL=0` keeps the launcher, `HXMC_QUIET=1` drops the notice.
+`%LOCALAPPDATA%`; `HXMC_CACHE` overrides; the log is `build.log` there).
+Concurrent first calls wait for the same build. From then on `haxe` is the
+native compiler: on Linux and macOS it replaces `hxmc/bootstrap/haxe` and
+`dist/haxe` themselves (so npm's link and lix start it without node); on
+Windows npm's `haxe.cmd` starts node, which runs it, and it is copied to
+`dist/haxe.exe`. Nothing but the compiler's own output goes to stdout or stderr
+(editors run `haxe --wait stdio`, whose answers are on stderr, and parse
+`haxe --version`); a failed build prints one line and exits non-zero. If an
+editor started before the first build finished, restart its language server.
+`HXMC_NATIVE=0` runs the WebAssembly compiler instead (machines without a
+native target always do), `HXMC_INSTALL=0` keeps the launcher in place.
 `hxmc-rebuild` builds the native compiler again from the package's (possibly
 edited) `haxe/` and `hxmc/` sources with the packaged WebAssembly compiler and
 installs it the same way: edit the compiler in `node_modules/hxmc` and rebuild.
+
+Editors and lix: vshaxe with `"haxe.executable": "auto"` (the default) runs
+the workspace's `node_modules/.bin/haxe` when there is one (as for the lix
+npm package), so the package's `haxe` serves the editor (expected from
+vshaxe's documentation of `auto`; not verified in an editor here). `dist/`
+is an installation lix accepts as a path version (`dist/haxe`, `dist/std`,
+`dist/platform.txt`, written on first use): `lix use haxe
+./node_modules/hxmc/dist`, or `.haxerc` with
+`{"version": "./node_modules/hxmc/dist", "resolveLibs": "scoped"}`; lix's
+`haxe` shim then runs hxmc (checked with this repository's lix on Linux and
+macOS in CI). On Windows, run `npx haxe --version` first (lix needs
+`dist/haxe.exe`). With the lix npm package in the same project both packages
+declare a `haxe` bin: npm reports nothing and `node_modules/.bin/haxe` is
+whichever it linked last (both orders occur), so use lix's shim with the
+`dist/` version there.
 
 Fast rebuilds: executables keep a `<out>.hxmc/` directory of compiled modules
 (only changed modules are compiled again), and the compilation server keeps

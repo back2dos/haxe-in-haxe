@@ -23,6 +23,7 @@
     "hxmc/bootstrap/haxe.wasm",
     "hxmc/bootstrap/hxmc-std/",
     "hxmc/bootstrap/rt/",
+    "dist/haxe",
     "COPYING",
     "LICENSE"
   ],

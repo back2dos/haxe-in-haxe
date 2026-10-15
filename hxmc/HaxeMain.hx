@@ -5,7 +5,8 @@ import haxe.io.Path;
 // `haxe` with hxmc built in (the npm package): the port's command line, where
 // `--custom-target hxmc=<out>` compiles the program to an executable for the
 // host (-D hxmc.target=<target> names another). In the package:
-//   hxmc/bootstrap/haxe[.exe]        this binary (in place of the launcher), or
+//   hxmc/bootstrap/haxe[.exe]        this binary (in place of the launcher; also dist/haxe
+//                                    for lix, with dist/std), or
 //                                    haxe.wasm, its WebAssembly build, run by it
 //   haxe/upstream/std                the std (HAXE_STD_PATH unless set)
 //   hxmc/bootstrap/hxmc-std          hxmc's std (hxmc/std merged by hxmc/MkStd.hx),
@@ -23,7 +24,10 @@ class HaxeMain {
 		var failed = null;
 		// (through links to the binary, as npm's node_modules/.bin/haxe)
 		var exe = try sys.FileSystem.fullPath(Sys.programPath()) catch (_:Dynamic) Sys.programPath();
+		// (hxmc/bootstrap/haxe, or dist/haxe: the installation lix uses)
 		var boot = Path.directory(exe);
+		if (!sys.FileSystem.exists(boot + "/launcher.mjs") && sys.FileSystem.exists(boot + "/../hxmc/bootstrap/launcher.mjs"))
+			boot = Path.directory(boot) + "/hxmc/bootstrap";
 		if (sys.FileSystem.exists(boot + "/launcher.mjs")) {
 			var pkg = Path.directory(Path.directory(boot));
 			if (Sys.getEnv("HXMC_RT_DIR") == null)

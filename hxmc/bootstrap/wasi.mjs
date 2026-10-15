@@ -62,6 +62,8 @@ const PATH_VARS = ['HAXE_STD_PATH', 'HXMC_STD', 'HXMC_RT_DIR', 'HXMC_RT_OBJ', 'H
 
 export function runWasm(module, args, env = process.env) {
 	const e = { ...env, PWD: wasiPath(process.cwd()) };
+	// (one thread: the port sizes its task pool by NUMBER_OF_PROCESSORS, set on Windows)
+	delete e.NUMBER_OF_PROCESSORS;
 	for (const k of PATH_VARS) if (e[k]) e[k] = e[k].split(path.delimiter).map(wasiPath).join(':');
 	const pre = preopens();
 	// (HXMC_WASI_DEBUG=1: what the module is given)
