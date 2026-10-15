@@ -250,25 +250,69 @@ Plan, Go- and Rust-style (built lazily and cached rather than shipped):
   `#if` conditions actually read (recorded while parsing), and the
   interface hashes of the units it depends on (signatures, types, inline
   bodies, constants; not function bodies, as Go and Rust do).
-- Hard parts:
-  - Macros from outside that change a unit's types (`--macro
-    addGlobalMetadata`, `@:build` through init macros, `Compiler.keep`):
-    track the modules foreign macros touch and type those from source, or
-    key the unit on the set of init macros.
-  - Class-path shadowing (a user module replacing a library's or the std's)
-    invalidates the shadowed module and its dependents within the unit
-    (a per-module dependency graph); shadowed modules come from source,
-    never the cache.
-  - Macro dependencies (`registerModuleDependency`, `getDefines`, the
-    environment), recorded as the compilation server already does.
-  - DCE is whole-program: units are cached before DCE, hxmc compiles every
-    function of a unit once and its linker drops what is unreachable.
+- Hard parts, and how to solve them. The rule throughout: record what a
+  unit's typing actually depended on, key on that, and type from source
+  whenever something cannot be captured (a miss costs time, never
+  correctness).
+  - Macros from outside that change a unit's types. Init macros run before
+    typing and their effects are data: `addGlobalMetadata` is a list of
+    (path filter, metadata), `Compiler.define` changes the defines. The key
+    takes the entries whose filter matches a module of the unit and the
+    defines the unit reads, so a `--macro` touching only user code leaves
+    the std's key alone. `Compiler.keep`, `nullSafety` and the like act
+    after typing (DCE, checks) and stay out of the key. Build macros that
+    run while a unit is typed (`@:build` on a library class, a library
+    macro reading other types): record which macro modules executed (their
+    sources and dependencies, hashed) and which types they looked at
+    (`Context.getType` ...: module dependencies, as the compilation server
+    records them), keyed by those modules' interface hashes. `@:autoBuild`
+    runs on the subclass, in the user's unit. `onAfterTyping`/`onGenerate`
+    run on the loaded program every build (the cache holds the state
+    before them, as upstream's `--hxb-lib` does). `onTypeNotFound` firing
+    during a unit, or anything else not captured, marks it volatile: typed
+    from source.
+  - Class-path shadowing. Every cached module records the lookups its
+    typing made: the file each name resolved to, and the misses (names
+    searched across packages, `import pkg.*`). Before a cached module is
+    used its lookups are checked against the current class path (mostly
+    directory listings, as the server checks modification times); a
+    shadowed module comes from source and invalidates its dependents
+    through the per-module dependency graph (HXB has it), with early
+    cutoff as in Rust: a shadowing module with the same interface hash
+    leaves its dependents valid. hxmc's own std overriding upstream files
+    is then just part of the std unit's resolution.
+  - Macro dependencies (files read through `Context`, defines, environment
+    variables): recorded as the server does. Nondeterministic macros
+    (time, network) are trusted as by the server, with an opt-out per
+    library (`-D hxmc.no-cache=<lib>`).
+  - DCE is whole-program: make the source path take the cached path's
+    route, so the two are identical by construction. Every unit compiles
+    all its functions once, before DCE, one section per function; DCE moves
+    to link time (reachability over symbols with Haxe's rules: `@:keep`,
+    implemented interfaces, overrides of reachable fields, reflection
+    roots), and the reflection tables (`Reflect.fields`,
+    `Type.getInstanceFields`) are generated at link time from the live set.
+    Builds from source go through per-unit objects and link-time DCE too.
+    Whole-program "features" (code that depends on whether something is
+    used anywhere) must not be decided while a unit compiles: they become
+    link-time switches (symbols the linker resolves, data flags).
   - Program-wide numbering is already symbolic and resolved at link time.
-  - `@:generic` instances with user types belong to the user's unit.
-- Order: the std first; then `-lib` units, with interface hashing and the
-  tracking of defines; the user's code stays incremental per module (the
-  server, the object cache). It also shortens the first run of the npm
-  bootstrap (see "npm" under Packaging).
+  - `@:generic` instances belong to the unit that instantiates them, named
+    by their type arguments and emitted as mergeable (COMDAT-like) symbols:
+    the linker keeps one when several units instantiate the same. Library
+    inline functions inlined into user code are covered by the interface
+    hash (inline bodies are part of it).
+  - Typing order: some Haxe behaviour depends on it (monomorph resolution,
+    anonymous type numbering, build macro order, static initialization),
+    and loading from a cache changes it. Covered by the HXB conformance
+    suite (typed ASTs survive the round trip) and the gate below.
+- Order: link-time DCE and the shared pipeline first (needed anyway,
+  testable alone); then the std as one unit with the lookup recording;
+  then `-lib` units, with interface hashing, early cutoff and the tracking
+  of defines; then the capture of init macros' effects. The user's code
+  stays incremental per module (the server, the object cache). It also
+  shortens the first run of the npm bootstrap (see "npm" under
+  Packaging).
 - Gate: the same executable, byte for byte, from the cached path and the
   source path (the Vector bug showed the two paths can differ subtly).
 - Simpler than the compilation server for most of the gain; the server
