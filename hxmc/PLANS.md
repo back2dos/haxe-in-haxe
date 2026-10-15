@@ -167,8 +167,31 @@ points and the ideas that address them:
 
 ### sys.ssl and libuv
 
-The runtime objects are built with `HXMC_NO_SSL`/`HXMC_NO_UV`; precompile
-mbedtls and libuv per target and link them only when referenced.
+The runtime objects are built with `HXMC_NO_SSL`/`HXMC_NO_UV` (stubs that
+throw). Plan:
+
+- Precompile mbedtls and libuv per target with zig at our build time (the
+  release builds of the port already do, `deps.sh`), kept as separate
+  objects next to the runtime object; hxmc's linker (ELF, COFF and Mach-O
+  readers, unreferenced sections dropped) pulls them in only when a program
+  references them (`sys.ssl`, `eval.luv` and libuv-backed APIs), so a hello
+  world stays small.
+- The compiler itself (the hxmc tool, and the port built by hxmc) links
+  both, as the current release binaries do: macros can use `sys.ssl` and
+  `eval.luv`.
+- Licenses: mbedtls Apache-2.0, libuv MIT; their notices ship with
+  hxmc and with distributions that include the objects.
+- WebAssembly: WASI preview 1 has no sockets; both stay failing stubs
+  (in a browser, TLS would come from JavaScript's `fetch`).
+- Alternatives: the system's TLS on Windows (SChannel) and macOS
+  (Security.framework) instead of mbedtls (smaller, OS-managed
+  certificates; Linux has no system TLS a static executable can use, so
+  mbedtls stays there); libuv replaced by an event loop in Haxe over
+  epoll/kqueue/IOCP (large, and `eval.luv`'s API is libuv-shaped: only if
+  libuv's size or build becomes a problem). Not mbedtls in Haxe: TLS needs
+  constant-time, audited cryptography.
+- The same mechanism (per-target prebuilt objects linked by hxmc) is how
+  user C libraries would ship (see "C interop").
 
 ## Build times and size
 
@@ -424,3 +447,38 @@ bootstrap).
 - The `hxmc` haxelib (`-lib hxmc`, `--custom-target hxmc=out`,
   `-D hxmc.target=<os>-<arch>`), like hxc's.
 - Release builds of the hxmc tool for the six desktop targets.
+
+### npm: a WebAssembly package that bootstraps itself natively
+
+One platform-independent npm package containing the compiler (the port
+with hxmc) as a WebAssembly module, a small JavaScript launcher, the std
+and the per-target runtime objects (runtime, mbedtls, libuv; a few MB
+uncompressed for the six targets).
+
+- First use on one of hxmc's six targets: the launcher runs the
+  WebAssembly compiler under node's WASI to build the native compiler for
+  the host, caches it per version and platform (e.g.
+  `~/.cache/haxe/<version>/<os>-<arch>/`, with a lock and an atomic rename
+  for concurrent first runs); later calls run the native binary directly.
+  The first command can run in WebAssembly (about 1.7–2× native time)
+  while the native build happens in the background.
+- Other platforms keep running the WebAssembly build.
+- Verifiable: builds are deterministic (the port self-compiles to
+  identical HXB, the tool rebuilds itself identically), so the binary built
+  on the user's machine can be checked against the hash published with the
+  package — stronger than trusting a downloaded binary.
+- Compared with esbuild's model (one optional-dependency package per
+  platform): one artifact to publish, no install scripts (often disabled)
+  and no downloads (works offline and air-gapped).
+- Costs and constraints: a one-time native build per version and machine
+  (estimated 15–25 s under WebAssembly; less with the precompiled std);
+  node 22 needs flags for WebAssembly exception handling and a workaround
+  flag for large memories (the launcher passes them; or hxmc emits the
+  legacy exception-handling encoding); the WebAssembly fallback has no
+  processes or sockets (compilation server, `sys.io.Process` in macros,
+  haxelib's git/HTTP work only natively); a freshly written unsigned `.exe`
+  may draw antivirus scans on Windows (no download mark, though); macOS
+  binaries carry hxmc's ad-hoc signature and no quarantine flag.
+- Needs: the launcher, the runtime objects packaged per target, mbedtls
+  and libuv linked into the native compiler (see "sys.ssl and libuv"),
+  ideally the precompiled std for a faster first run.
