@@ -111,49 +111,23 @@ class Scope {
             logger.error('${m.lib} has no install instruction for missing classpath ${m.cp}\n');
       }
 
-      // port: upstream runs the commands one by one. The installs (downloads)
-      // run in parallel here, JOBS at a time, each distinct command once; the
-      // post-install hooks (often builds) still follow one by one.
-      var install = [];
-      for (cmd in i.instructions.install)
-        if (!install.contains(cmd)) install.push(cmd);
-
-      var total = install.length + i.instructions.postInstall.length,
+      var total = i.instructions.install.length + i.instructions.postInstall.length,
           cur = 0,
           installed = 0;
 
-      function report(cmd:String, o:Outcome<Int, Error>)
-        switch o {
-          case Failure(e):
-            code = e.code;
-            // port: upstream only counts the failures; say which and why
-            logger.error('[$cur/$total] ${e.message} (exit code ${e.code})');
-          default:
-            installed++;
+      for (cmds in [i.instructions.install, i.instructions.postInstall])
+        for (cmd in cmds) {
+          logger.progress('[${++cur}/${total}] $cmd');
+
+          switch Exec.shell(cmd, Sys.getCwd()) {
+            case Failure(e):
+              code = e.code;
+              // port: upstream only counts the failures; say which and why
+              logger.error('[$cur/$total] ${e.message} (exit code ${e.code})');
+            default:
+              installed++;
+          }
         }
-
-      // one status line for the installs in parallel: done, running and which
-      var running = [];
-      function status()
-        logger.progress('[$cur/$total] ' + switch running.length {
-          case 0: '';
-          case n: '$n running: ' + [for (i in running) libName(install[i])].join(', ');
-        });
-
-      Exec.shellAll(install, Sys.getCwd(), jobs(), index -> {
-        running.push(index);
-        status();
-      }, (index, o) -> {
-        running.remove(index);
-        cur++;
-        report(install[index], o);
-        status();
-      });
-
-      for (cmd in i.instructions.postInstall) {
-        logger.progress('[${++cur}/${total}] $cmd');
-        report(cmd, Exec.shell(cmd, Sys.getCwd()));
-      }
 
       var libs =
         if (total == 1) 'library'
@@ -165,27 +139,6 @@ class Scope {
         logger.success('Installed $total $libs.');
     });
   }
-
-  // the library an install command (`lix download <url> into <lib>/...`) installs, for progress
-  static function libName(cmd:String):String {
-    var words = Exec.posixWords(cmd);
-    return switch words?.indexOf('into') {
-      case null | -1: cmd;
-      case i if (i + 1 < words.length): words[i + 1].split('/')[0];
-      default: cmd;
-    }
-  }
-
-  /**
-    How many library installs run at a time: `LIX_JOBS`, default 8 (like yarn's
-    network concurrency; 1 installs one by one, as upstream does).
-  **/
-  static public function jobs():Int
-    return switch Std.parseInt(Sys.getEnv('LIX_JOBS') ?? '') {
-      case null: 8;
-      case v if (v < 1): 1;
-      case v: v;
-    }
 
   function new(haxeshimRoot, isGlobal, scopeDir, cwd) {
 

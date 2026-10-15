@@ -17,10 +17,10 @@ class SemVer {
 		this.previewNum = previewNum;
 	}
 
+	static var FORMAT = ~/^\s*([0-9]+)\.([0-9]+)\.([0-9]+)(-(alpha|beta|rc)(\.([0-9]+))?)?\s*$/;
+
 	/** The version, or null when `s` is not one. **/
-	static public function parse(s:String):Null<SemVer> {
-		// per call: an EReg's match state is not shared between threads (Libraries.prefetch)
-		var FORMAT = ~/^\s*([0-9]+)\.([0-9]+)\.([0-9]+)(-(alpha|beta|rc)(\.([0-9]+))?)?\s*$/;
+	static public function parse(s:String):Null<SemVer>
 		return
 			if (s == null || !FORMAT.match(s)) null;
 			else new SemVer(
@@ -30,7 +30,6 @@ class SemVer {
 				FORMAT.matched(5),
 				FORMAT.matched(7) == null ? -1 : Std.parseInt(FORMAT.matched(7))
 			);
-	}
 
 	static function idx(p:Null<String>)
 		return switch p {

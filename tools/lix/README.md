@@ -83,17 +83,6 @@ where it deviates. In general:
   `<dir>`), and `lix` when the binary has another name (`lix.com`): symbolic links, or on Windows hard links (copies when that fails),
   as `.exe`. Existing files are replaced only with `--force`, directories never.
   For `lix.com` downloaded from the website, that is the whole installation.
-- `lix download` (`haxe --run install-libs`) runs the libraries' install
-  commands in parallel, 8 at a time (`LIX_JOBS`; 1 runs them one by one as
-  upstream does), each distinct command once; post-install hooks still run one
-  by one afterwards. For tink_web's 14 libraries: 3.6 s instead of 19.2 s.
-  The limit is a fixed count, as in other package managers' network
-  concurrency (yarn 8, pnpm 16), rather than the number of cores.
-- `lix install` downloads a library's dependencies, and theirs, ahead of
-  installing them (`Libraries.prefetch`): resolution, download and unpacking run
-  on `LIX_JOBS` threads, and the installation that follows, one by one as
-  upstream's, finds the archives ready. Its output and files are the same as
-  without (`LIX_JOBS=1`). tink_web from an empty cache: 6.8 s instead of 18.6 s.
 - `haxe --run install-libs` (and so `lix download`) names each command that
   failed and why, where upstream reports only how many failed.
 
