@@ -8,7 +8,9 @@ with its result and time, a summary at the end, exit 1 if any lane failed.
          wasm corpus under node (64 KB): after every edit (well under a
          minute once the tool is built)
   check  quick + linux-arm64 (qemu) and windows-x86_64 (wine) corpus, x64
-         with a 16 KB nursery, ThreadNatives x30; --port adds the native
+         with a 16 KB nursery, ThreadNatives x30, the tool as a WebAssembly
+         module building three cases for x64, arm64 and wasm32-wasi
+         byte-identical to the native tool (crosshost.py); --port adds the native
          port's self-compile (when code generation or the runtime
          changed): before local commits
   full   every lane: x64, arm64 and wine at 64, 16 and 256 KB, each with
@@ -16,7 +18,9 @@ with its result and time, a summary at the end, exit 1 if any lane failed.
          under node with RT_VERIFY=1 at 64 and 256 KB; ThreadNatives x300
          (16 KB) and x100 (64 KB); the port's self-compile natively (64 KB,
          256 KB, 256 KB with RT_VERIFY=1) and as a module (node, node with
-         256 KB, wasmtime); the fixpoint: before pushing
+         256 KB, wasmtime); the tool as a module building every case for
+         every target and the tool itself byte-identical to the native tool;
+         the fixpoint: before pushing
 
 Cases named restrict the corpus lanes to them (the area being changed); the
 port, ThreadNatives and fixpoint lanes ignore them. Each corpus lane is
@@ -117,6 +121,15 @@ def wasm_port_build():
     return r.returncode == 0, f"{(d / 'haxe.wasm').stat().st_size} bytes" if r.returncode == 0 else r.stderr[-300:]
 
 
+def crosshost(args):
+    def fn():
+        r = subprocess.run([sys.executable, str(ROOT / "hxmc/tools/crosshost.py")] + args, cwd=ROOT, env=ENV, capture_output=True, text=True)
+        lines = r.stdout.strip().splitlines()
+        bad = [" ".join(l.split()[:2]) for l in lines[:-1] if len(l.split()) > 2 and l.split()[2] == "FAIL"]
+        return r.returncode == 0, (lines[-1] if lines else r.stderr[-300:]) + ("" if not bad else "  " + ", ".join(bad[:8]))
+    return fn
+
+
 def fixpoint():
     r = subprocess.run(["make", "--no-print-directory", "fixpoint"], cwd=ROOT, env=ENV, capture_output=True, text=True)
     said = [l for l in r.stdout.splitlines() if l.startswith("fixpoint:")]
@@ -139,6 +152,7 @@ def main():
         lane("arm64 (qemu)", corpus("linux-arm64", cases=cases))
         lane("windows (wine)", corpus("windows-x86_64", cases=cases))
         lane("ThreadNatives x30", threads(30, 16))
+        lane("cross-host", crosshost(["--targets", "linux-x86_64,linux-arm64,wasm32-wasi"] + (cases or ["Unsafe", "SwitchIndex", "Regress"])))
         if port:
             lane("port self-compile", port_native)
     if tier == "full":
@@ -161,6 +175,7 @@ def main():
         lane("wasm port node 256K", self_compile(NODE + [wp], {"RT_MINOR_KB": "256"}))
         lane("wasm port wasmtime", self_compile(["wasmtime", "run", "-W", "exceptions=y", "-W", "max-wasm-stack=67108864", "--dir", "/",
                                                  "--env", "HAXE_STD_PATH", "--env", f"PWD={ROOT}", wp]))
+        lane("cross-host", crosshost(["--tool"] + list(cases)))
         lane("fixpoint", fixpoint)
     bad = [n for n, ok, _ in results if not ok]
     print(f"{tier}: {len(results) - len(bad)}/{len(results)} lanes ok, {time.perf_counter() - t0:.0f}s" + ("" if not bad else "; FAILED: " + ", ".join(bad)))

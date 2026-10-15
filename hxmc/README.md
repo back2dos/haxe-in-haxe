@@ -241,6 +241,7 @@ reference`):
 ```sh
 make hxmc                         # bin/hxmc/hxmc: the tool, built by the previous tool from source (about 10 s)
 make fixpoint                     # the tool rebuilt by itself twice: byte-identical
+make crosshost                    # the tool as a wasm module builds the corpus (every target) and the tool byte-identical
 make rt                           # bin/hxmc/rt/<target>/{rt,ssl,uv}.o for the six targets (the host's rt.o is built without the tool)
 make hxmc-test                    # the corpus against its golden files (RUN_ARGS="--target linux-arm64" ...)
 make portcheck                    # the port built by hxmc self-compiles to the reference's HXB
@@ -298,15 +299,17 @@ make full                        # before a push: about 5 minutes
 - `quick`: the x64 corpus (64 KB nursery), again with `RT_VERIFY=1`, and
   the wasm corpus under node; run.py uses every core (`-j`).
 - `check`: quick, plus the corpus under qemu (arm64) and wine (x64
-  Windows), x64 with a 16 KB nursery and ThreadNatives 30 times; `PORT=1`
-  adds the native port's self-compile (when code generation or the runtime
-  changed).
+  Windows), x64 with a 16 KB nursery, ThreadNatives 30 times and the
+  cross-host check on Unsafe, SwitchIndex and Regress for x64, arm64 and
+  wasm32-wasi (below); `PORT=1` adds the native port's self-compile (when
+  code generation or the runtime changed).
 - `full`: what a push needs: the corpus on x64, arm64 and wine at 64, 16
   and 256 KB, each also with `RT_VERIFY=1`; wasm under node and wasmtime at
   16, 64 and 256 KB, under node with `RT_VERIFY=1` at 64 and 256 KB;
   ThreadNatives 300 runs at 16 KB and 100 at 64 KB; the port's self-compile
   natively (64 KB, 256 KB, 256 KB with `RT_VERIFY=1`) and as a module
   (node, node with 256 KB, wasmtime), byte-identical to the reference; the
+  cross-host check on every case for every target and on the tool; the
   fixpoint. CI then covers macOS and the Windows and Linux machines.
 
 (Times of 2026-10-15 on the 4-core VM. wasmtime needs the haxe/std it
@@ -542,6 +545,15 @@ call can start a V8 collection that crashes with a large module memory).
   excludes ThreadNatives and NetNatives on this target (`run.py`).
   wasmtime refuses symbolic links to absolute paths inside a preopened
   directory (node follows them).
+- The tool builds as a module too (its arguments with `-D
+  hxmc.target=wasm32-wasi`; under WASI it neither runs itself again with
+  GC settings nor marks its output executable: no processes) and writes
+  the same bytes as the native tool, for every target, its own build
+  included (`make crosshost`, `hxmc/tools/crosshost.py`: in `check` on
+  three cases, in `full` and CI's build job on all; about 2 minutes on 4
+  cores). A difference means a back end compiled the tool's own code
+  differently, or the two tools came from different sources (the native
+  tool before a code-generation change is rebuilt: `make hxmc` twice).
 - The port builds as a module (`-D hxmc.target=wasm32-wasi` on its HXB as
   well; 17100 functions, 16.3 MB, 3.1 MB gzipped, built in 7.2 s; 19.4 MB
   and 4.2 MB before the size work below) and compiles its own source to the

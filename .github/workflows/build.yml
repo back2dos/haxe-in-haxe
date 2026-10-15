@@ -8,7 +8,9 @@
 #   with hxmc: the port's release binaries for the six targets (`make
 #   release`), lix for the six targets (`make lix-release`), the playground's
 #   WebAssembly and the website (`make site`), hxmc's test corpus for every
-#   target and as WebAssembly, and the port as a WebAssembly module.
+#   target and as WebAssembly, the same programs and the tool built by the
+#   tool as a WebAssembly module (byte-identical: hxmc/tools/crosshost.py),
+#   and the port as a WebAssembly module.
 # - test: on each target's machine, the release binary's smoke test
 #   (tools/smoke.sh: --interp, HXB, JS, a TLS handshake with the system's CA
 #   certificates, libuv), lix (lix shims, a scope, an install, the haxe shim),
@@ -221,6 +223,12 @@ jobs:
           for t in $TARGETS wasm32-wasi; do
             python3 hxmc/tools/run.py -v --target $t --stage dist/corpus/$t
           done
+
+      # hxmc's output does not depend on the host: the tool as a WebAssembly
+      # module (under node) builds the corpus for every target, and the tool
+      # itself, byte-identical to the native tool
+      - name: hxmc as a WebAssembly module, byte-identical output
+        run: python3 hxmc/tools/crosshost.py --tool
 
       - name: The port as a WebAssembly module
         run: |

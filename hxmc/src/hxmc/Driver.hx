@@ -381,7 +381,9 @@ class Driver {
 		};
 		if (abi.os == "windows" && !StringTools.endsWith(out, ".exe")) out += ".exe";
 		sys.io.File.saveBytes(out, exe);
-		Sys.command("chmod", ["755", out]);
+		// under WASI (the tool as a WebAssembly module) there are no processes:
+		// whoever runs the module marks the output executable
+		if (Sys.systemName() != "Wasi") Sys.command("chmod", ["755", out]);
 		if (hxmc.x64.Emit.sizeStats) {
 			var ks = [for (k in hxmc.x64.Emit.statBytes.keys()) k];
 			ks.sort((x, y) -> hxmc.x64.Emit.statBytes.get(y) - hxmc.x64.Emit.statBytes.get(x));

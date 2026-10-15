@@ -91,7 +91,7 @@ ulimit -s unlimited 2>/dev/null || true; $(TOOL) $(1) $(2) > $(1).log 2>&1 || { 
 endef
 
 .DEFAULT_GOAL := help
-.PHONY: help reference std deps rt hxmc tool bootstrap fixpoint port dev release wasm site fuzz \
+.PHONY: help reference std deps rt hxmc tool bootstrap fixpoint crosshost port dev release wasm site fuzz \
 	lix lix-release test test-fuzz smoke hxmc-test portcheck quick check full clean distclean
 
 help:
@@ -106,6 +106,8 @@ help:
 ## bootstrap   the tool from scratch: the reference compiler writes the tool's JavaScript
 ##             and its HXB, node compiles the HXB to bin/hxmc/boot/hxmc1, which builds bin/hxmc/hxmc
 ## fixpoint    bin/hxmc/hxmc builds bin/hxmc/fix/a, which builds bin/hxmc/fix/b: byte-identical
+## crosshost   the tool as a WebAssembly module (under node) builds the corpus for every target
+##             and the tool itself byte-identical to the native tool (hxmc/tools/crosshost.py)
 ## port        PORT_BIN (bin/port/haxe): the port for the host, built by hxmc (alias: dev)
 ## release     bin/release/TARGET/haxe-in-haxe[.exe]: the port cross-built by hxmc, with mbedtls and libuv
 ## wasm        bin/wasm/hih.wasm: the playground's compiler (wasm32-wasi, -D hih_no_generators)
@@ -122,9 +124,10 @@ help:
 ## quick       after every edit (under a minute): the tool, then the x64 corpus, again with
 ##             RT_VERIFY=1, and the wasm corpus under node (CASES restricts the corpus)
 ## check       before a local commit (a few minutes): quick + arm64 (qemu), wine, a 16 KB
-##             nursery, ThreadNatives x30; PORT=1 adds the native port's self-compile
+##             nursery, ThreadNatives x30, crosshost on three cases; PORT=1 adds the native
+##             port's self-compile
 ## full        before a push: every nursery, RT_VERIFY, wasmtime, ThreadNatives x300, the
-##             port's self-compile natively and as a module, the fixpoint
+##             port's self-compile natively and as a module, crosshost, the fixpoint
 ## clean       remove the build outputs (keeps the tool, bin/hxmc/deps and the reference)
 ## distclean   also remove bin/ entirely
 ##
@@ -204,6 +207,9 @@ fixpoint: $(TOOL)
 	HXMC_RT_OBJ=$(CURDIR)/$(HOST_RT) bin/hxmc/fix/a bin/hxmc/fix/b $(TOOL_ARGS) > bin/hxmc/fix/b.log 2>&1 || { cat bin/hxmc/fix/b.log; exit 1; }
 	cmp bin/hxmc/fix/a bin/hxmc/fix/b && echo "fixpoint: the tool rebuilt by itself is byte-identical"
 	rm -rf bin/hxmc/fix
+
+crosshost: $(TOOL) $(STD) $(HOST_RT)
+	python3 hxmc/tools/crosshost.py --tool $(CASES)
 
 # --- The port ---
 

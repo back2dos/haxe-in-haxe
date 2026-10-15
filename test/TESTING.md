@@ -334,6 +334,21 @@ ThreadNatives 300 runs; the port's self-compile byte-identical natively
 to the reference's HXB under node at every step; fixpoint. CI run
 38702914292 green (six targets, wasm).
 
+### hxmc: output independent of the host (2026-10-15, branch hxmc)
+
+The tool built as a wasm32-wasi module (run under node) and the native tool
+write byte-identical programs: the 14 corpus cases for all seven targets and
+the tool itself, 99/99 (`hxmc/tools/crosshost.py --tool`, 2.5 minutes on 4
+cores; in `make check` on three cases, in `make full` and CI's build job on
+all). A difference seen earlier (every x86-64 case, a `mov %ecx,%ecx`
+before a jump-table index) was source skew, not a miscompilation: the
+native tool came from a tree with 2f529d7's zero-extension change, the
+module from one without it; a native tool built from the module's sources
+wrote the module's bytes. Locally: `make full` 36/36 lanes (the corpus 74/74
+on x64, arm64 and wine at 64, 16 and 256 KB with and without `RT_VERIFY=1`,
+wasm 72/72 under node and wasmtime, ThreadNatives x300/x100, the port's
+self-compile natively and as a module byte-identical, cross-host, fixpoint).
+
 ## Target generators
 
 Every target also compiles upstream's unit suite identically (`unit-targets.py`, above).

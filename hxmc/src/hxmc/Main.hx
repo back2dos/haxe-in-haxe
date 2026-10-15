@@ -30,7 +30,7 @@ class Main {
 		// -D hxmc.out=<path>)
 		if (args[0] == "--server") {
 			args.shift();
-			if (Sys.getEnv("RT_OLD_MB") == null && Sys.getEnv("HXMC_GC_DEFAULTS") != "0") {
+			if (Sys.getEnv("RT_OLD_MB") == null && Sys.getEnv("HXMC_GC_DEFAULTS") != "0" && Sys.systemName() != "Wasi") {
 				Sys.putEnv("RT_OLD_MB", "4096");
 				if (Sys.getEnv("RT_MINOR_KB") == null) Sys.putEnv("RT_MINOR_KB", "32768");
 				Sys.exit(Sys.command(Sys.programPath(), ["--server"].concat(args)));
@@ -60,8 +60,8 @@ class Main {
 		// then every module's code until the link): a large nursery and a large
 		// first old-space limit spare it most collections (half the GC time of
 		// a cold build of the port). The runtime reads them at startup, so the
-		// tool runs itself again with them set.
-		if (Sys.getEnv("RT_OLD_MB") == null && Sys.getEnv("HXMC_GC_DEFAULTS") != "0") {
+		// tool runs itself again with them set (not under WASI: no processes).
+		if (Sys.getEnv("RT_OLD_MB") == null && Sys.getEnv("HXMC_GC_DEFAULTS") != "0" && Sys.systemName() != "Wasi") {
 			Sys.putEnv("RT_OLD_MB", "2048");
 			if (Sys.getEnv("RT_MINOR_KB") == null) Sys.putEnv("RT_MINOR_KB", "32768");
 			Sys.exit(Sys.command(Sys.programPath(), [out].concat(args)));
