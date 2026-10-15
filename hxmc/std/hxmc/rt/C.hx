@@ -22,6 +22,8 @@ import hxmc.unsafe.Ptr;
 	// rt.c: a T_NATIVE object holding the C resource p (slot 0) and nrefs reference
 	// slots; the collector calls free(p) (a no-GC @:hxmc.callback) once it is unreachable
 	static function rt_native_new_refs(p:Ptr, free:Ptr, nrefs:Int):Dynamic;
+	// rt.c: the allocation slow path (the header word, the size in bytes)
+	static function rt_alloc_slow(header:I64, bytes:Int):Ptr;
 }
 
 @:hxmc.c @:hxmc.fast extern class Leaf {
@@ -34,6 +36,8 @@ import hxmc.unsafe.Ptr;
 	static function hx_fid_name(fid:Int):Ptr;
 	// rt.c: remembers the references [from, from + n) of an old object
 	static function rt_barrier_range(obj:Dynamic, from:Ptr, n:Int):Void;
+	// rt.c: remembers slot of the old object obj, which now holds the young v
+	static function rt_write_barrier(obj:Ptr, slot:Ptr, v:Ptr):Void;
 	// rt_thread.c: the running thread's id
 	static function hxmc_NativeThread_current():Int;
 	// rt_thread.c: a safe region (a blocking call holding no heap address:

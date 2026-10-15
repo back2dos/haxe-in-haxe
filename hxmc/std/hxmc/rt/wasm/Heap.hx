@@ -268,19 +268,8 @@ class Heap {
 		}
 	}
 
-	@:hxmc.export("memcmp") @:hxmc.noGc public static function memcmp(a:Ptr, b:Ptr, n:I64):Int {
-		var k = n.toInt();
-		var i = 0;
-		// 8 bytes at a time while equal
-		while (i + 8 <= k && Mem.getI64(a, i) == Mem.getI64(b, i))
-			i += 8;
-		while (i < k) {
-			var x = Mem.getU8(a, i), y = Mem.getU8(b, i);
-			if (x != y) return x - y;
-			i++;
-		}
-		return 0;
-	}
+	@:hxmc.export("memcmp") @:hxmc.noGc public static function memcmp(a:Ptr, b:Ptr, n:I64):Int
+		return hxmc.rt.MemOps.compare(a, b, n);
 
 	@:hxmc.export("strdup") @:hxmc.noGc public static function strdup(s:Ptr):Ptr {
 		var n = strlen(s);

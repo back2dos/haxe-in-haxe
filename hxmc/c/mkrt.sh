@@ -33,7 +33,7 @@ files="rt rt_dyn rt_thread"
 case $target in
 windows-*)
 	CFLAGS="-O2 -g0 -w -fno-strict-aliasing -I $ROOT/hxmc/c"
-	files="$files rt_win" ;;
+	;;
 macos-*)
 	# position-independent (macOS executables are), against libSystem;
 	# arm64 macOS calls main on its own stack without ucontext already
@@ -49,9 +49,6 @@ for f in $files; do
 	$ZIG cc -target $triple $CFLAGS -c "$ROOT/hxmc/c/$f.c" -o "$out/obj/$f.o" &
 	objs="$objs $out/obj/$f.o"
 done
-# the slow paths of generated code (rthxmc.c)
-$ZIG cc -target $triple $CFLAGS -c "$ROOT/hxmc/c/rthxmc.c" -o "$out/obj/rthxmc.o" &
-objs="$objs $out/obj/rthxmc.o"
 # mbedtls and libuv themselves, when deps.sh built them
 if [ -f "$deps/VERSIONS" ]; then
 	sslar="$deps/lib/libmbedtls.a $deps/lib/libmbedx509.a $deps/lib/libmbedcrypto.a"
@@ -125,6 +122,8 @@ windows-*)
 	[ -n "$uvar" ] && "${HXMC:-$ROOT/bin/hxmc/hxmc}" --mkrt "$out/uv.o" $uvar $sysar $uvroots -U "$out/obj/uv.undef"
 	sj=_setjmp; [ $target = windows-arm64 ] && sj=__mingw_setjmp
 	undef="-u mainCRTStartup -u $sj -u _tls_index -u _tls_used -x main"
+	# the runtime's functions in Haxe (@:hxmc.export) that its C calls: defined by the program
+	for f in $(grep -ho '@:hxmc.export("[A-Za-z0-9_]*")' "$ROOT"/hxmc/std/hxmc/rt/*.hx | sed 's/.*("//; s/")//' | sort -u); do undef="$undef -x $f"; done
 	for f in $libm $(cat "$out/obj/ssl.undef" "$out/obj/uv.undef" | grep -v '^hx\|^rt_\|^haxe_') ; do undef="$undef -u $f"; done
 	for f in $(cat "$out/obj/ssl.undef" "$out/obj/uv.undef" | grep '^hx\|^haxe_'); do undef="$undef -x $f"; done
 	"${HXMC:-$ROOT/bin/hxmc/hxmc}" --mkrt "$out/rt.o" $objs $inputs $undef
@@ -143,8 +142,5 @@ libs=$(echo "$line" | tr ' ' '\n' | grep -E '/lib(c|zigc|compiler_rt)\.a$' | tr 
 [ -n "$uvar" ] && ld.lld -r --strip-debug -o "$out/uv.o" $uvroots --start-group $uvar --end-group
 undef="-u _setjmp"
 for f in $libm $(nm -u $(ls "$out/ssl.o" "$out/uv.o" 2>/dev/null) | awk '{print $2}' | grep -v '^hx\|^haxe_' | sort -u); do undef="$undef -u $f"; done
-# word-at-a-time memcmp and bcmp in place of musl's byte loops (rtlibc.c)
-$ZIG cc -target $triple -O2 -g0 -ffreestanding -fno-builtin -ffunction-sections -c "$ROOT/hxmc/c/rtlibc.c" -o "$out/obj/rtlibc.o"
-objs="$objs $out/obj/rtlibc.o"
 ld.lld -r --strip-debug -o "$out/rt.o" $undef "$crt1" $objs --start-group $libs --end-group
 ls -l "$out/rt.o" "$out/ssl.o" "$out/uv.o"

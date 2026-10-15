@@ -2,7 +2,7 @@
 // Windows builds (_WIN32: zig cc -target x86_64-windows-gnu, MinGW-w64 with
 // the UCRT). Included by the runtime's .c files only (never by generated
 // code: windows.h defines macros such as min, IN or ERROR), in place of the
-// POSIX headers they use elsewhere. rt_win.c implements it.
+// POSIX headers they use elsewhere. hxmc/std/hxmc/rt/WinRt.hx implements it.
 //
 // Memory: the collector reserves large ranges (16 GB heap regions, 1 GB
 // shadow stack) and relies on the kernel committing pages as they are
@@ -77,18 +77,11 @@ static inline void *rt_win_mmap(size_t bytes) {
 static inline struct tm *localtime_r(const time_t *t, struct tm *r) { return localtime_s(r, t) == 0 ? r : NULL; }
 static inline struct tm *gmtime_r(const time_t *t, struct tm *r) { return gmtime_s(r, t) == 0 ? r : NULL; }
 
-// ---- text: malloc'ed conversions (invalid sequences become U+FFFD)
-wchar_t *rt_win_wide(const char *utf8);
+// ---- the layer in Haxe (hxmc/std/hxmc/rt/WinRt.hx): a malloc'ed UTF-8
+// copy of a wide string; a Winsock error as the errno its Unix library
+// reports; WSAStartup once; the crash handler (rt_init)
 char *rt_win_utf8(const wchar_t *w);
-
-// ---- errors: a Win32 error code as the errno OCaml's runtime maps it to
-// (caml_win32_maperr), and a Winsock error as the errno its Unix library
-// reports (unixsupport_win32.c)
-int rt_win_errno(DWORD err);
 int rt_win_sock_errno(int wsa);
-void rt_win_sockets_init(void); // WSAStartup, once
-
-// ---- descriptors: CRT file descriptors (files, pipes, the standard
-// streams), which the hxmc std uses as on POSIX
-HANDLE rt_win_fd_handle(int fd);
+void rt_win_sockets_init(void);
+void rt_win_init(void);
 #endif

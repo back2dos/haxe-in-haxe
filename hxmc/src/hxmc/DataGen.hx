@@ -76,11 +76,22 @@ class DataGen {
 	}
 
 	// a @:hxmc.threadLocal static: 8 zero bytes per thread
+	// (Mach-O: the symbol names a descriptor in __thread_vars, as C's do,
+	// whose third word refers to the storage in __thread_bss)
 	function tbssGlobal(name:String) {
-		var s = obj.section(".tbss", Tbss, 8);
+		var macho = abi.os == "macos";
+		var s = obj.section(macho ? "__DATA,__thread_bss" : ".tbss", Tbss, 8);
 		s.bssSize = (s.bssSize + 7) & ~7;
-		obj.define(name, s, s.bssSize, 8, true);
+		var storage = obj.define(macho ? name + "$tlv$init" : name, s, s.bssSize, 8, !macho);
 		s.bssSize += 8;
+		if (macho) {
+			var d = obj.section("__DATA,__thread_vars", Data, 8);
+			var at = d.buf.len;
+			d.buf.zeros(24);
+			d.relocs.push(new Reloc(at, RAbs64, obj.sym("_tlv_bootstrap"), 0));
+			d.relocs.push(new Reloc(at + 16, RAbs64, storage, 0));
+			obj.define(name, d, at, 24, true);
+		}
 	}
 
 	function bssGlobal(name:String, size:Int, align:Int, global = true) {

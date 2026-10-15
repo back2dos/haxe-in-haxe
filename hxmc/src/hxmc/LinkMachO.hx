@@ -106,13 +106,36 @@ class LinkMachO {
 			tlv0.relocs.push(new Reloc(16, RAbs64, start, 0));
 			extra.sections.push(tlv0);
 			extra.define("hxmc_tls_start", tlv0, 0, 24);
+			// hxmc_tls_base: the address of this thread's copy of the template,
+			// what the descriptor's thunk returns (it takes the descriptor in
+			// rdi / x0): a tail call of it
+			var base = new Section("__TEXT,__text", Text, 16);
+			if (arm) {
+				base.buf.u32(0x90000000); // adrp x0, hxmc_tls_start
+				base.relocs.push(new Reloc(0, RA64AdrPage21, extra.sym("hxmc_tls_start"), 0));
+				base.buf.u32(0x91000000); // add x0, x0, :lo12:hxmc_tls_start
+				base.relocs.push(new Reloc(4, RA64AddLo12, extra.sym("hxmc_tls_start"), 0));
+				base.buf.u32(0xF9400010); // ldr x16, [x0]
+				base.buf.u32(0xD61F0200); // br x16
+			} else {
+				for (b in [0x48, 0x8D, 0x3D, 0, 0, 0, 0]) // lea rdi, [rip + hxmc_tls_start]
+					base.buf.u8(b);
+				base.relocs.push(new Reloc(3, RPc32, extra.sym("hxmc_tls_start"), -4));
+				base.buf.u8(0xFF); // jmp qword [rdi]
+				base.buf.u8(0x27);
+			}
+			extra.sections.push(base);
+			extra.define("hxmc_tls_base", base, 0, base.buf.len);
 		}
 		var stubs = new Section("__TEXT,__stubs", Text, 16);
 		var got = new Section("__DATA,__got", Data, 8);
 		extra.sections.push(stubs);
 		extra.sections.push(got);
 		objs.push(extra);
-		if (tls.length > 0) globals.set("hxmc_tls_start", extra.sym("hxmc_tls_start"));
+		if (tls.length > 0) {
+			globals.set("hxmc_tls_start", extra.sym("hxmc_tls_start"));
+			globals.set("hxmc_tls_base", extra.sym("hxmc_tls_base"));
+		}
 		// slots (by target: a defined symbol, or an import's name) and stubs
 		var gotSlot = new Map<String, Int>(); // key -> offset in got
 		var gotKey = new Map<Int, Symbol>(); // offset -> the symbol it holds

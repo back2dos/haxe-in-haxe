@@ -173,7 +173,7 @@ class Str {
 	// ---- comparison, hashing
 
 	@:hxmc.export("hx_str_eq_slow") @:hxmc.noGc static function eqSlow(a:String, b:String):Bool
-		return LibC.memcmp(chars(a), chars(b), (2 * len(a) : I64)) == 0;
+		return MemOps.compare(chars(a), chars(b), (2 * len(a) : I64)) == 0;
 
 	@:hxmc.export("hx_str_cmp") @:hxmc.noGc static function cmp(a:String, b:String):Int {
 		if (Mem.addr(a) == Mem.addr(b)) return 0;
@@ -316,7 +316,7 @@ class Str {
 
 	// sub at s[i] (m >= 1 units, in range)
 	@:hxmc.noGc static inline function matchAt(c:Ptr, d:Ptr, i:Int, m:Int):Bool
-		return Mem.getU16At(c, 0, i) == Mem.getU16(d, 0) && (m == 1 || LibC.memcmp(c.add(2 * i + 2), d.add(2), (2 * (m - 1) : I64)) == 0);
+		return Mem.getU16At(c, 0, i) == Mem.getU16(d, 0) && (m == 1 || MemOps.compare(c.add(2 * i + 2), d.add(2), (2 * (m - 1) : I64)) == 0);
 
 	@:hxmc.export("String_indexOf") @:hxmc.noGc static function indexOf(s:String, sub:String, start:Null<Int>):Int {
 		var n = len(s), m = len(sub);
@@ -419,7 +419,7 @@ class Str {
 				var c = chars(s), d = chars(delim);
 				var i = start;
 				while (i + m <= n) {
-					if (LibC.memcmp(c.add(2 * i), d, (2 * m : I64)) == 0) {
+					if (MemOps.compare(c.add(2 * i), d, (2 * m : I64)) == 0) {
 						at = i;
 						break;
 					}

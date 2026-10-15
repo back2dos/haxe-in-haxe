@@ -26,6 +26,8 @@ import hxmc.rt.wasm.NoSslUv;
 // the native targets' runtime over C libraries (@:hxmc.native)
 import hxmc.rt.Ssl;
 import hxmc.rt.Uv;
+import hxmc.rt.GcPaths;
+import hxmc.rt.WinRt;
 #end
 
 class Runtime {}

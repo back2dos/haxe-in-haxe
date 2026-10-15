@@ -64,18 +64,13 @@ class Bytes {
 		return r;
 	}
 
-	// the difference of the first differing bytes (memcmp's magnitude is the
-	// C library's: musl's is this difference, the UCRT's -1 or 1), else of
-	// the lengths
+	// the difference of the first differing bytes (MemOps.compare), else of the lengths
 	@:hxmc.host("haxe_io_Bytes_compare") @:hxmc.noGc static function compare(a:Dynamic, b:Dynamic):Int {
 		var na = len(a), nb = len(b);
 		var n = na < nb ? na : nb;
 		var pa = bytes(a), pb = bytes(b);
-		if (LibC.memcmp(pa, pb, n) != 0)
-			for (i in 0...n) {
-				var x = Mem.getU8At(pa, 0, i), y = Mem.getU8At(pb, 0, i);
-				if (x != y) return x - y;
-			}
+		var c = MemOps.compare(pa, pb, n);
+		if (c != 0) return c;
 		return na - nb;
 	}
 

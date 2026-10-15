@@ -829,6 +829,7 @@ static void win_args(int *argc, char ***argv) {
 
 void rt_init(int ng, int argc, char **argv) {
 #ifdef _WIN32
+	rt_win_init();
 	win_args(&argc, &argv);
 	_setmode(0, _O_BINARY);
 	_setmode(1, _O_BINARY);
