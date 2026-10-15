@@ -154,7 +154,7 @@ Today native targets use musl's libm (C, through zig) and WebAssembly a
 Haxe port of it. musl differs from glibc by an ulp on some inputs
 (`Math.sin(-2.5)`: -0.598472144103956438 against glibc's ...549), so the
 port's `--interp` and macros can print a last digit different from the
-reference on Linux; the fuzzer's diff:interp lane finds it now and then.
+reference on Linux (the fuzzer accepts printed floats an ulp apart).
 
 The goal: the Haxe libm of the `libm` branch (98d9d82, and 374bb61 with
 the `Mem.mulhi`/`umulhi`/`f64Bits`/`bitsF64` intrinsics and `Mem.fma`)
@@ -181,9 +181,9 @@ time and size.
   behind a define.
 - The compiler's Eval natives use the same library: the port then differs
   from the reference (glibc) only where glibc is an ulp off, about 1 input
-  in 1,000 for trig; the fuzzer's diff:interp lane tolerates that last
-  digit for those functions rather than a second, glibc-exact copy being
-  kept for the compiler.
+  in 1,000 for trig; the fuzzer already tolerates printed floats an ulp
+  apart (`Runner.sameOutput`), rather than a second, glibc-exact copy
+  being kept for the compiler.
 
 ### The collector, longer term
 
