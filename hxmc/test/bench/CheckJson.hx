@@ -39,10 +39,17 @@ class CheckJson {
 			text = Json.stringify(schema);
 			schema = Json.parse(text);
 		}
-		Sys.println("schema length " + text.length + ", digest " + d0 + " = " + digest(schema));
+		Sys.println("schema length " + text.length + ", digest " + int(d0) + " = " + int(digest(schema)));
 		text = Json.stringify(listOfSchema);
 		var back:Array<Any> = Json.parse(text);
-		Sys.println("list length " + text.length + ", " + back.length + " items, digest " + digest(back));
-		Sys.println(Json.stringify([1, 2.5, -3e-7, 1e21, 0.1, true, null, "\"\\/\né\u{1F600}"]));
+		Sys.println("list length " + text.length + ", " + back.length + " items, digest " + int(digest(back)));
+		// (as UTF-8 bytes: a JVM prints non-ASCII characters in the locale's charset;
+		// no large or small floats: each target prints those its own way)
+		Sys.println(haxe.io.Bytes.ofString(Json.stringify([1, 2.5, -0.375, 123456789, 0.1, true, null, "\"\\/\né\u{1F600}"])).toHex());
+	}
+
+	/** the digest without the target's float formatting (a JVM prints 3.0E10) */
+	static function int(d:Float):String {
+		return haxe.Int64.toStr(haxe.Int64.fromFloat(Math.ffloor(d)));
 	}
 }

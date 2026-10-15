@@ -155,7 +155,7 @@ class BenchCharts {
 			parts.push('measured ${d.date.substring(0, 10)} at commit ${d.short}');
 			final v = d.versions;
 			if (v != null) {
-				final tools = [for (k in ["node", "java", "gcc", "hashlink", "hxcpp", "hxnodejs", "hxjava"]) if (v[k] != null) k + " " + v[k]];
+				final tools = [for (k in ["node", "java", "gcc", "hashlink", "hxcpp", "hxnodejs", "hxjava"]) if (v[k] != null) (StringTools.startsWith(v[k].toLowerCase(), k) ? "" : k + " ") + v[k]];
 				parts.push(tools.join(", "));
 			}
 			facts.textContent = parts.join("; ") + ".";

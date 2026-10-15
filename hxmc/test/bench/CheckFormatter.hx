@@ -6,7 +6,9 @@ import sys.FileSystem;
 import sys.io.File;
 import tokentree.TokenTreeBuilder.TokenTreeEntryPoint;
 
-// BMFormatterNoIOCode's formatting, once, files in sorted order, the outputs hashed
+// BMFormatterNoIOCode's formatting, once, files in sorted order, the outputs
+// hashed as UTF-8 bytes (the std's Sha256.encode pads by the string's length
+// in characters, which differs on the JVM's own implementation for non-ASCII text)
 class CheckFormatter {
 	static function main() {
 		var files = [];
@@ -42,6 +44,6 @@ class CheckFormatter {
 				}
 			}
 		}
-		Sys.println('${files.length} files, $ok formatted, $failed failed, $chars chars, sha256 ${Sha256.encode(all.toString())}');
+		Sys.println('${files.length} files, $ok formatted, $failed failed, $chars chars, sha256 ${Sha256.make(haxe.io.Bytes.ofString(all.toString())).toHex()}');
 	}
 }

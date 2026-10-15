@@ -31,7 +31,8 @@ using StringTools;
 // Measurement: each case is built for every target (cold; build time is the
 // wall time of every step, hxcpp's runtime objects shared through its compile
 // cache), then run RUNS times, the targets interleaved round by round (drift
-// of a shared machine spreads over all of them). Per run: wall time, CPU time
+// of a shared machine spreads over all of them; a target whose first run takes
+// over 10 s runs 3 times only). Per run: wall time, CPU time
 // and peak RSS (/usr/bin/time). Reported: the median and the spread of the
 // runs. Size: the artifact (native executables of C compilers stripped), and
 // gzip -9 of it. Unless --no-check, each case's check program (hxmc/test/bench:
@@ -68,6 +69,9 @@ class Bench {
 	];
 	public static final TARGETS = ["hxmc", "hxmc-wasm", "cpp", "jvm", "js", "hlc", "hl"];
 	static final DIR = "bin/bench";
+	// a target whose first run takes longer than SLOW_SECONDS runs SLOW_RUNS times only
+	static final SLOW_SECONDS = 10.0;
+	static final SLOW_RUNS = 3;
 
 	static var cases:Array<Case>;
 	static var tool:String;
@@ -124,7 +128,7 @@ class Bench {
 			machine: machine(),
 			versions: versions(),
 			runs: runs,
-			method: 'median of $runs runs per target, interleaved; wall time of the whole process (start-up, JIT and module compilation included); peak RSS from getrusage; builds cold',
+			method: 'median of $runs runs per target, interleaved ($SLOW_RUNS when a run takes over $SLOW_SECONDS s); wall time of the whole process (start-up, JIT and module compilation included); peak RSS from getrusage; builds cold',
 			targets: targets,
 			cases: [],
 			results: {},
@@ -161,6 +165,8 @@ class Bench {
 			for (round in 0...runs)
 				for (t in targets) {
 					if (!built.exists(t) || row[t].error != null) continue;
+					// (a slow target: SLOW_RUNS runs are enough)
+					if (round >= SLOW_RUNS && samples.exists(t) && samples[t][0].wall > SLOW_SECONDS) continue;
 					var s = runOnce(built[t], c, '$bench/out/${c.name}/$t', 600);
 					if (s.error != null) {
 						Reflect.setField(row[t], "error", "run: " + s.error);
