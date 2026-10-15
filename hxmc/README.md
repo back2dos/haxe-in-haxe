@@ -422,11 +422,17 @@ call can start a V8 collection that crashes with a large module memory).
   structured over the dominator tree as in Ramsey's "Beyond Relooper"
   (merge nodes get a `block`, loop headers a `loop`, every branch a `br` to
   an enclosing label); SSA values become locals, colored in dominator order
-  (not in functions with try blocks), and a value used once in its own block
-  is folded onto the value stack (pure values always, loads when nothing is
-  written in between); phi copies are parallel copies through the value
-  stack on each edge. Pointers stay i64 in Mir and are wrapped to i32 at
-  each memory access. Frame slots (`Mem.stack`, spills of references) live
+  (in a try body, what its handler reads stays live throughout: the pad may
+  branch there from anywhere), a value used once in its own block is folded
+  onto the value stack (pure values always, loads when nothing is written in
+  between), and `local.set x; local.get x` is written `local.tee x`; phi
+  copies are parallel copies through the value stack on each edge. Pointers
+  stay i64 in Mir; an i64 value whose every use reads only its low 32 bits
+  (addresses, truncations, narrow stores, and arithmetic producing such
+  values) is computed as an i32 (a pointer loaded with `i32.load`), the
+  others are wrapped at each access. Inlining is turned down for this target
+  (`HXMC_INLINE` defaults 4,16,0 instead of 16,48,0: the engines inline
+  again). Frame slots (`Mem.stack`, spills of references) live
   in a stack in linear memory (1 MB, `HXMC_WASM_STACK_KB`). `try` uses
   exception handling: setjmp returns 0, the try body (the dominator subtree
   of its first block) is wrapped in `try_table (catch_all)`, whose pad
@@ -438,7 +444,8 @@ call can start a V8 collection that crashes with a large module memory).
 - Link (`src/hxmc/wasm/LinkWasm.hx`): what `_start` reaches, data from
   4 KB, then the runtime's cells and the frame stack, then `__heap_base`;
   a table of the functions whose address is taken (index 0 is null); each
-  thread-local variable a global; memcpy/memmove/memset as `memory.copy`/
+  thread-local variable a global; data as active segments split at runs of
+  64 zero bytes; allocation stubs written directly; memcpy/memmove/memset as `memory.copy`/
   `memory.fill`, the f64 rounding functions, fmin/fmax/copysign, memory.size
   and memory.grow written by the linker. `-debug` or `HXMC_SYMBOLS=1` adds
   a name section (stack traces in wasmtime). No object cache: modules are
@@ -473,16 +480,15 @@ call can start a V8 collection that crashes with a large module memory).
   wasmtime refuses symbolic links to absolute paths inside a preopened
   directory (node follows them).
 - The port builds as a module (`-D hxmc.target=wasm32-wasi` on its HXB as
-  well; 17100 functions, 19.4 MB, 4.2 MB gzipped, built in 11 s) and
-  compiles its own source to the reference's HXB, byte-identical, under
-  node and wasmtime (also with 256 and 16 KB nurseries under node; CI runs
-  it through `selfcheck.py --runner`). It takes 15.3-16.3 s under either
-  engine against 8.4 s for the native x86-64 port. The site/ playground's
-  Emscripten build of hxc's C (wasm64, clang -O2) took 9.0 s under node 24
-  for the same workload (site/bench/results.json, 2026-10-09; native hxc
-  with clang 5.2 s then) with a ~2 MB gzipped module: hxmc's module is
-  about twice as large and 1.7-1.9x slower against native, as for the
-  benchmarks below.
+  well; 17100 functions, 16.3 MB, 3.1 MB gzipped, built in 7.2 s; 19.4 MB
+  and 4.2 MB before the size work below) and compiles its own source to the
+  reference's HXB, byte-identical, under node and wasmtime (also with 256
+  and 16 KB nurseries under node; CI runs it through `selfcheck.py
+  --runner`). It takes 17.5 s under node and 18.6 s under wasmtime against
+  9.6 s for the native x86-64 port in the same session (1.8-1.9x). The
+  site/ playground's Emscripten build of hxc's C (wasm64, clang -O2) took
+  9.0 s under node 24 for the same workload (site/bench/results.json,
+  2026-10-09; native hxc with clang 5.2 s then: 1.7x).
 - The playground's configuration (2026-10-15, at 7738d9c; measured, no
   code generation changed): the port with `-D hih_no_generators
   -D disable-parallelism` (the Makefile's `web-c` arguments; hxc's
@@ -537,6 +543,30 @@ call can start a V8 collection that crashes with a large module memory).
   and 2.46 MB gzipped, still 10% above Emscripten's module gzipped: its
   code compresses better (1.96 MB against 2.86 MB for similar raw sizes;
   clang's inlining leaves fewer, larger functions).
+- The size work (2026-10-15; the same build, `gzip -9`; self-compile under
+  node 22, best of 3 in one session; Emscripten's module 11,528,418 /
+  2,245,715 by the same gzip):
+
+  | step | raw | gzipped | self-compile |
+  | --- | ---: | ---: | ---: |
+  | start (allocation zeroed in bulk: no zero stores) | 13,299,571 | 3,068,382 | 19.5 s |
+  | inlining limits 4, 16 for wasm | 12,471,526 | 2,799,093 | 19.4 s |
+  | `local.tee`, try functions coalesced, 32-bit values | 11,624,220 | 2,099,315 | 16.6 s |
+  | data split at zero runs, stubs written directly | 10,817,311 | 2,114,859 | 16.4 s |
+
+  Separately: `local.tee` took 378 KB raw and 107 KB gzipped, coalescing
+  the locals of try functions 277 KB and 602 KB (their distinct local
+  indices were what compressed badly), 32-bit values 193 KB raw but 9 KB
+  more gzipped (`i32.wrap_i64` compresses well; 485k wraps remain, nearly
+  all of parameters and locals that are also used in full: passed to
+  calls, compared, stored), the data segments 757 KB raw and 17 KB more
+  gzipped, the stubs 50 KB raw (direct calls from the 29,683 sites would
+  cost more than the 8,274 stubs). Folding a call into its user when
+  nothing comes between (`call; local.tee; return`) saved 30 KB raw but
+  cost 16 KB gzipped and was left out. The module is now 6% smaller than
+  Emscripten's raw and 6% smaller gzipped, its self-compile under node
+  1.8x the native port's (Emscripten's: 1.7x native hxc's, on another
+  day). Not done: the browser glue (see hxmc/PLANS.md).
 
 Benchmarks (`hxmc/bench/measure.py -n 3 --target wasm32-wasi --runner
 node|wasmtime`, best of 3, the same VM and session as the x86-64 column;
@@ -545,25 +575,29 @@ engine's compilation of the module):
 
 | case | x64 run | node run | wasmtime run | x64 size | wasm size | wasm build |
 | --- | --- | --- | --- | --- | --- | --- |
-| alloc | 1.42 | 1.71 | 1.71 | 97 | 85 | 0.14 |
-| bcrypt | 2.88 | 3.16 | 3.94 | 340 | 325 | 0.15 |
-| binarytrees | 0.70 | 1.08 | 1.01 | 96 | 80 | 0.14 |
-| json | 0.43 | 0.71 | 0.66 | 170 | 163 | 0.17 |
-| mandelbrot | 0.56 | 0.79 | 0.96 | 101 | 86 | 0.16 |
-| mandelbrot_anon | 0.95 | 2.03 | 1.54 | 113 | 90 | 0.13 |
-| nbody | 0.70 | 1.04 | 0.84 | 101 | 84 | 0.13 |
-| sha256 | 0.16 | 0.30 | 0.30 | 310 | 293 | 0.14 |
-| sha512 | 0.024 | 0.139 | 0.095 | 323 | 303 | 0.18 |
-| formatter_noio | 5.65 | 7.75 | 7.73 | 1364 | 1345 | 0.52 |
-| port (self-compile) | 8.4 | 15.3 | 15.6 | 19603 | 19891 | 10.6 |
+| alloc | 1.61 | 2.46 | 2.69 | 97 | 80 | 0.38 |
+| bcrypt | 3.02 | 3.66 | 4.66 | 340 | 317 | 0.25 |
+| binarytrees | 0.74 | 1.20 | 1.03 | 96 | 75 | 0.21 |
+| json | 0.48 | 0.79 | 0.83 | 170 | 149 | 0.17 |
+| mandelbrot | 0.77 | 1.26 | 1.24 | 101 | 80 | 0.24 |
+| mandelbrot_anon | 1.25 | 2.59 | 1.88 | 113 | 84 | 0.17 |
+| nbody | 0.88 | 1.04 | 0.98 | 101 | 79 | 0.21 |
+| sha256 | 0.186 | 0.35 | 0.32 | 314 | 287 | 0.17 |
+| sha512 | 0.026 | 0.145 | 0.093 | 323 | 295 | 0.19 |
+| formatter_noio | 6.28 | 8.96 | 8.84 | 1344 | 1122 | 0.62 |
+| port (self-compile) | 9.58 | 17.5 | 18.6 | 19303 | 15902 | 7.15 |
 
-Modules are a little smaller than the executables (no C runtime; the
-Haxe runtime is compiled with the program and only what is reached is
-kept); a hello world is about 37 KB. Run time is 1.2-2.1x x86-64's
-(sha512's 0.1 s is mostly the engines' start-up), similar under both
-engines. Builds take about as long as native ones for small programs;
-the port takes 10.6 s against 7.7 s (WasmGen's code generation: 21 s of
-CPU over the 4 jobs, not yet profiled).
+(2026-10-15, after the size work above, in a session where the VM ran
+about 10-35% slower than on 2026-10-14, x86-64 included: the ratios are
+what to compare. alloc's wasm times vary most: its 500 MB of live data
+grows the engines' memory, 1.8-4.8 s between runs.) Modules are smaller
+than the executables (no C runtime; the Haxe runtime is compiled with the
+program and only what is reached is kept; lower inlining limits); a hello
+world is about 37 KB. Run time is 1.2-2.1x x86-64's (sha512's 0.1 s is
+mostly the engines' start-up), similar under both engines; the size work
+changed no benchmark's run time beyond the noise (A/B runs of
+mandelbrot_anon, json and binarytrees under node). Builds take about as
+long as native ones for small programs; the port's 7.2 s against 6.9 s.
 
 ### CI
 

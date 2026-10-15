@@ -314,6 +314,25 @@ natively (also 256 KB, and 256 KB with `RT_VERIFY=1`) and as a module
 under node (default and 256 KB) and wasmtime; fixpoint. Times and sizes:
 hxmc/README.md, "Tests and their oracle".
 
+### hxmc: WebAssembly size work (2026-10-15, branch hxmc)
+
+Inlining limits 4, 16 for wasm; `local.tee`; locals coalesced in try
+functions (the handler's live values kept live through the try body);
+i64 values read only in their low 32 bits computed as i32; data
+segments split at zero runs; allocation stubs written directly;
+liveness over the values that get locals. The playground's build
+(`-D hih_no_generators`) 13.30 -> 10.82 MB, 3.07 -> 2.11 MB gzipped
+(Emscripten's 11.53 / 2.25 MB); the port's module 20.03 -> 16.28 MB,
+built in 7.1 s (15.8 s before, same session). Locally: the corpus 73/73
+on linux-x86_64, linux-arm64 (qemu) and windows-x86_64 (wine) with 64, 16
+and 256 KB nurseries and `RT_VERIFY=1` at each (native code unchanged:
+executables byte-identical); wasm 71/71 under node and wasmtime at 16,
+64 and 256 KB, under node with `RT_VERIFY=1` at 64 and 256 KB;
+ThreadNatives 300 runs; the port's self-compile byte-identical natively
+(also 256 KB, and 256 KB with `RT_VERIFY=1`) and as a module under node
+(default and 256 KB) and wasmtime; the playground's build self-compiles
+to the reference's HXB under node at every step; fixpoint.
+
 ## Target generators
 
 Every target also compiles upstream's unit suite identically (`unit-targets.py`, above).

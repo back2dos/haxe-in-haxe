@@ -293,28 +293,25 @@ to the reference's HXB under both (15-16 s, native 8.4 s). Left:
   graphics (see "Graphics"); exceptions without the exnref flag once
   browsers and node ship it by default.
 - Sockets and processes need WASI preview 2 (or JavaScript imports).
-- Speed: Mir's pointers are i64 wrapped at every access (an i32 pointer
-  type would save the wraps and shrink code); locals are not coalesced in
-  functions with `try`; no tail calls; the port's module builds in 10.6 s
-  against 7.7 s natively. Run time is 1.2-2.1x native x64's (README
-  "WebAssembly").
-- The playground: the port's module could replace the site/ playground's
-  Emscripten build of hxc's C (9.0 s self-compile under node 24 against
-  hxmc's 15-16 s) once it is smaller and faster, with the browser glue
-  above. Measured in the playground's configuration (`-D
-  hih_no_generators`, 2026-10-15, README "WebAssembly"): 13.5 MB, 3.09 MB
-  gzipped, against Emscripten's 11.5 MB and 2.25 MB. Estimated savings,
-  raw / gzipped: the i32 pointer type 715 KB / 57 KB (the wraps compress
-  well; it matters more for speed), local coalescing in functions with a
-  `try` (30% of the code) ~300 KB / 157 KB, size-aware inlining up to
-  915 KB / 292 KB (no inlining at all; the port's run time under node is
-  the same without it, so for the playground inlining could simply be
-  turned down); together ~11.6 MB / 2.58 MB. Further: `local.tee` for
-  `local.set x; local.get x` (415 KB / 124 KB), data segments split at
-  zero runs (~750 KB raw), allocation stubs as direct slow-path calls
-  (174 KB raw); with them ~10.5 MB / 2.46 MB. Emscripten's code still
-  compresses better (1.96 MB gzipped against 2.86 MB for similar raw
-  sizes).
+- Speed: no tail calls; 485k `i32.wrap_i64` remain in the playground's
+  module, of i64 values (parameters, locals) also used in full: a second,
+  i32 local for those with many address uses, or an i32 pointer type in
+  Mir, would remove most (about 480 KB raw, little gzipped). The
+  port's self-compile is 1.8x native x64's (README "WebAssembly").
+- The playground (size: done, 2026-10-15, README "WebAssembly"): in the
+  playground's configuration (`-D hih_no_generators`) the module is now
+  10.82 MB, 2.11 MB gzipped, against the deployed Emscripten module's
+  11.53 MB and 2.25 MB (6% smaller both ways; it was 13.5 MB and 3.09 MB):
+  inlining limits 4, 16 for wasm, `local.tee`, the locals of try functions
+  coalesced, 32-bit values computed as i32, data segments split at zero
+  runs, allocation stubs written directly. Its self-compile under node
+  takes 16-18 s here, 1.8x the native port (Emscripten's: 9.0 s, 1.7x
+  native hxc, measured on another day under node 24). Left before it can
+  replace the Emscripten build: the browser glue above (JavaScript in
+  place of WASI: console, a virtual file system with the std and the
+  examples, exceptions without the exnref flag), then the site's switch.
+  Further size, if wanted: folding a call into its user (30 KB raw, but
+  16 KB more gzipped), fewer wraps (above).
 
 #### WasmGC: a later, browser-focused second path
 
