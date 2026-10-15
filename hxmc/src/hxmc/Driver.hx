@@ -118,7 +118,7 @@ class Driver {
 					var inLoop = Inline.loopBlocks(mf);
 					for (s in todo) {
 						var t = template(s.fn);
-						if (t != null && s.fn != fn && t.size <= (s.call.block.mark == inLoop ? Inline.MAX_LOOP : StringTools.startsWith(s.fn.module, "hxmc.rt.") ? Inline.MAX_FLAT_RT : Inline.MAX_FLAT))
+						if (t != null && s.fn != fn && t.size <= Inline.maxSize(abi.wasm, s.call.block.mark == inLoop, StringTools.startsWith(s.fn.module, "hxmc.rt.")))
 							sites.push({call: s.call, callee: t});
 					}
 					todo = Inline.run(mf, sites, ic);

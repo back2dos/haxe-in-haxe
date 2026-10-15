@@ -19,10 +19,20 @@ class Inline {
 	// call in a loop, and of the runtime's Haxe functions (hxmc.rt) outside
 	// loops: none (inlining hx_str_or_null at every concatenation costs 1% of
 	// the port's size for no measurable speed) (size against speed;
-	// HXMC_INLINE=<flat>,<loop>,<runtime flat>)
+	// HXMC_INLINE=<flat>,<loop>,<runtime flat>, for every target)
 	public static var MAX_FLAT = limit(0, 16);
 	public static var MAX_LOOP = limit(1, 48);
 	public static var MAX_FLAT_RT = limit(2, 0);
+	// WebAssembly (wasm32-wasi): an engine inlines again, and modules are
+	// downloaded: 4 and 16 take 6% off the playground's module (828 KB raw,
+	// 269 KB gzipped) with its self-compile under node and the benchmarks'
+	// run times unchanged (4, 8 makes mandelbrot 60% slower)
+	public static var WASM_FLAT = limit(0, 4);
+	public static var WASM_LOOP = limit(1, 16);
+
+	// the limits of a call site (in a loop, of a runtime function, else)
+	public static function maxSize(wasm:Bool, inLoop:Bool, rt:Bool):Int
+		return inLoop ? (wasm ? WASM_LOOP : MAX_LOOP) : rt ? MAX_FLAT_RT : wasm ? WASM_FLAT : MAX_FLAT;
 
 	static function limit(k:Int, def:Int):Int {
 		var e = Sys.getEnv("HXMC_INLINE");
