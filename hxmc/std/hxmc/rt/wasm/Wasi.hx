@@ -62,6 +62,9 @@ class Wasi {
 				var name = Heap.malloc(n + 1);
 				WasiApi.fd_prestat_dir_name(fd, a32(name), n);
 				Mem.setI8(name, n, 0);
+				// (node's WASI on Windows reports the names with backslashes)
+				for (k in 0...n)
+					if (Mem.getU8(name, k) == "\\".code) Mem.setI8(name, k, "/".code);
 				// (a trailing slash is dropped, but not from "/")
 				if (n > 1 && Mem.getU8(name, n - 1) == "/".code) Mem.setI8(name, n - 1, 0);
 				Mem.setI32(pre, 16 * npre, fd);

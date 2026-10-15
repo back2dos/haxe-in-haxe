@@ -77,8 +77,64 @@ export function runWasm(module, args, env = process.env) {
 	if (module.endsWith('.br')) bytes = zlib.brotliDecompressSync(bytes);
 	else if (module.endsWith('.gz')) bytes = zlib.gunzipSync(bytes);
 	const mod = new WebAssembly.Module(bytes);
-	const inst = new WebAssembly.Instance(mod, wasi.getImportObject());
+	const imports = wasi.getImportObject();
+	let memory = null;
+	if (process.platform === 'win32' || env.HXMC_WASI_READDIR) readdirShim(imports.wasi_snapshot_preview1, pre, () => memory);
+	const inst = new WebAssembly.Instance(mod, imports);
+	memory = inst.exports.memory;
 	return wasi.start(inst) ?? 0;
+}
+
+// node's WASI (uvwasi) has no fd_readdir on Windows (no seekdir/telldir
+// there): directories opened through path_open are tracked here and listed
+// with node's fs, as WASI preview 1 lays out its dirents (d_next u64, d_ino
+// u64, d_namlen u32, d_type u8, padding to 24 bytes, then the name; the cookie
+// is the index of the next entry)
+function readdirShim(w, pre, mem) {
+	const dirs = new Map();
+	let fd = 3;
+	for (const real of Object.values(pre)) dirs.set(fd++, real);
+	const pathOpen = w.path_open, fdClose = w.fd_close;
+	w.path_open = (dirfd, lookup, p, plen, oflags, base, inh, fdflags, out) => {
+		const r = pathOpen(dirfd, lookup, p, plen, oflags, base, inh, fdflags, out);
+		if (r === 0 && dirs.has(dirfd)) {
+			const m = mem();
+			const rel = Buffer.from(m.buffer, p, plen).toString('utf8');
+			dirs.set(new DataView(m.buffer).getUint32(out, true), path.join(dirs.get(dirfd), rel));
+		}
+		return r;
+	};
+	w.fd_close = f => {
+		dirs.delete(f);
+		return fdClose(f);
+	};
+	w.fd_readdir = (f, buf, len, cookie, used) => {
+		const dir = dirs.get(f);
+		const m = mem();
+		const view = new DataView(m.buffer);
+		if (dir === undefined) return 8; // EBADF
+		let entries;
+		try {
+			entries = [['.', 3], ['..', 3], ...fs.readdirSync(dir, { withFileTypes: true }).map(e => [e.name, e.isDirectory() ? 3 : e.isSymbolicLink() ? 7 : e.isFile() ? 4 : 0])];
+		} catch {
+			return 54; // ENOTDIR
+		}
+		let at = 0;
+		for (let i = Number(cookie); i < entries.length; i++) {
+			const name = Buffer.from(entries[i][0], 'utf8');
+			const ent = Buffer.alloc(24 + name.length);
+			ent.writeBigUInt64LE(BigInt(i + 1), 0);
+			ent.writeUInt32LE(name.length, 16);
+			ent[20] = entries[i][1];
+			name.copy(ent, 24);
+			const n = Math.min(ent.length, len - at);
+			Buffer.from(m.buffer, buf + at, n).set(ent.subarray(0, n));
+			at += n;
+			if (at >= len) break;
+		}
+		view.setUint32(used, at, true);
+		return 0;
+	};
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
