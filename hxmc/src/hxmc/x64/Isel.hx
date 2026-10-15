@@ -1105,6 +1105,10 @@ class Isel implements hxmc.Target.Selector {
 			x.d = idx;
 			x.s1 = v;
 			x.size = 4;
+			// zero-extends even into the same register: the table is indexed
+			// with all 64 bits, and an Int's upper half may be anything (an
+			// addition done by lea)
+			x.imm2 = 1;
 			if (lo != 0) {
 				var a = emit(ALUI);
 				a.d = idx;
