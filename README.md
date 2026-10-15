@@ -176,13 +176,28 @@ haxe/test --run <Name> --help`-style options at the top of each file):
 | `Display` | `--display` JSON-RPC requests from upstream's removed display suite | 679/679 |
 | `Server` | the compilation server: cases twice, edits and invalidation (with the verbose logs), stdin, `--cmd`, errors, `--server-connect` | 595/595 |
 | `ServerJsonRpc` | the `server/*` methods, both cache modes | 107/107 |
-| `UpstreamTargets` | upstream's unit suite compiled for js, lua, python, php, neko, hl, hl/c, cpp, cppia, cppia host, jvm, flash by both, every output file (jars by member) | 12/12 identical |
+| `UpstreamTargets` | upstream's unit suite compiled for js, lua, python, php, neko, hl, hl/c, cpp, cppia, cppia host, jvm, flash by both, every output file (jars by member, hl/c after `HlcNames`) | 12/12 identical |
 | `Interp` | `--interp` runs of the case lists | 275/276 (`eval-eventLoop-compile` depends on thread timing) |
 | `Haxelib` | `-L` through lix's haxelib shim, batch and server | 14/14 |
 | `EvalDebugger` | scripted Eval debugger sessions (`-D eval-debugger`): breakpoints, stepping, scopes, evaluation, assignment, exception and function breakpoints, a macro | 6/6 |
 | `fuzz/` | random programs per target (`diff:<target>`) or by program output (`exec:<a>,<b>`), with reduction (`make test-fuzz LANE=diff:js`) | |
+| `Targets` | the website's target table (`hxmc/web/data/targets.json`): haxe-formatter and the port itself compiled for every target by both, CPU, wall and peak RSS, outputs compared (hl/c after `HlcNames`); `-p self -t hlc --merge --json hxmc/web/data/targets.json` replaces those rows only | 18/18 identical (the rows the reference compiles) |
 | `Measure` | peak RSS, wall and CPU time: the self-compile (ours and the reference), the native build, the WebAssembly builds | self-compile 879 MB vs the reference's 1414 MB |
 | `unit.hxml` | unit tests of port modules, in-process | pass |
+
+hl/c's digest names (`HlcNames.hx`): hl2c names function, virtual and context
+types `t$fun_`/`t$vrt_`/`t$ctx_` after the MD5 of the type's description
+marshalled with closures. When the description reaches an object or virtual
+prototype, it holds a PMap's comparison closure, which the reference writes
+as a code pointer into its own machine code (an offset and the MD5 of its
+code area); the port writes a fixed placeholder there
+(`haxe/src/generators/Hl2c.hx`, `OcamlExtern`), so those names differ by
+design (two in the port's self-compile, none in upstream's unit suite).
+Wherever hl/c output is compared (`UpstreamTargets`, the fuzzer's
+`diff:hlc`, `Targets`), the digest names found on one side only are renamed
+on both sides in order of first appearance, with the context headers named
+after them; every other byte must match, so the outputs still have to use
+their names in the same places.
 
 Sequential runs pass `-D disable-parallelism`: the reference itself is not
 deterministic in parallel mode. Upstream's compiler-side suite (RunCi `macro`:
@@ -239,6 +254,14 @@ branches), the nightly release and the website.
   evaluation of arguments with side effects, float printing (`core.Numeric`,
   `core.ds.OcamlPrintf`), 31/63-bit integers. Never derive output order from
   Haxe `Map` iteration.
+- Output that depends on the reference binary itself is the one exception
+  to byte identity: hl/c's digest names of the types whose description
+  holds a closure (Marshal writes code pointers and the digest of the
+  reference's machine code). The port writes a documented placeholder
+  instead of constants of one reference build, and the harnesses normalize
+  only those names (the digest names found on one side only: README.md,
+  "Testing"; `haxe/test/HlcNames.hx`); a new case of the kind extends
+  both, never a general tolerance.
 - Never stub out behavior with a silent success: what the port cannot
   support fails explicitly with a `// port:` note.
 - Comments from upstream stay at the matching place with upstream's wording

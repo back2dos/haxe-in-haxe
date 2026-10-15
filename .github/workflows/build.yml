@@ -374,8 +374,8 @@ jobs:
             debugger) $S EvalDebugger --summary "$GITHUB_STEP_SUMMARY" ;;
             # the generators' diff lanes (the targets that need no library)
             fuzz)
-              for lane in diff:hxb diff:interp diff:js diff:lua diff:python diff:php diff:neko diff:hl diff:swf; do
-                bin/port/haxe -cp haxe/test/fuzz --run Fuzz -j 4 -n 100 --port $PWD/bin/port/haxe --lane $lane
+              for lane in diff:hxb diff:interp diff:js diff:lua diff:python diff:php diff:neko diff:hl diff:hlc diff:swf; do
+                bin/port/haxe -cp haxe/test/fuzz -cp haxe/test --run Fuzz -j 4 -n 100 --port $PWD/bin/port/haxe --lane $lane
               done ;;
           esac
 

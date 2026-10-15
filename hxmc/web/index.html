@@ -120,7 +120,7 @@ lix download                    # after a clone: the scope's Haxe and missing li
 
 	<section id="targets">
 		<h2>Target generators</h2>
-		<p>Compile time of the port built by hxmc (x86-64) against the reference for each target, on two projects. CPU time, best of 3; every output file identical. C++ and HL/C stop at the generated sources.</p>
+		<p>Compile time of the port built by hxmc (x86-64) against the reference for each target, on two projects. CPU time, best of 3; every output file identical (HL/C: once the few type names that digest the reference binary's own machine code are renamed on both sides). C++ and HL/C stop at the generated sources.</p>
 		<div id="targets-results"><p class="note">Loading results…</p></div>
 		<p class="note">Reproduce: <code>site/bench/targets.py</code>.</p>
 		<p class="note" id="targets-machine"></p>

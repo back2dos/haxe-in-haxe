@@ -141,15 +141,28 @@ class VDescField {
 
 // port: OCaml 5 `Marshal.to_bytes v [Marshal.Closures]` (runtime/extern.c), for the
 // values make_sign digests. Physical sharing is reproduced through identity
-// tokens; a closure (reached through the PMaps of an object or virtual prototype)
-// cannot be reproduced and fails explicitly.
+// tokens, separately for strings and for blocks.
+//
+// The prototype records of HObj/HStruct/HVirtual hold PMaps, and a PMap holds its
+// comparison closure (extlib's `PMap.empty`: `{ cmp = compare; map = Empty }`, one
+// static closure shared by every map). OCaml writes a closure's code pointers as
+// their offset in the reference compiler's code fragment followed by that
+// fragment's MD5 (extern_code_pointer), i.e. bytes of the reference binary's own
+// machine code. The port writes the closure in the same format (CODE_CODEPOINTER,
+// the closure info of a 2-ary closure) with offset 0 and an all-zero digest, so
+// the `t$fun_`/`t$vrt_`/`t$ctx_` names of the descriptions that reach a prototype
+// intentionally differ from the reference's (the conformance harnesses normalize
+// them: README.md, "Testing"). Everything else of the value is written as OCaml
+// does: the records in their field order, the PMaps' AVL trees (rebuilt from the
+// keys' first-insertion order, as extlib's PMap.add builds them), sharing and cycles.
 private class OcamlExtern {
 	final out = new haxe.io.BytesBuffer();
 	var objCounter = 0;
 	var size32 = 0;
 	var size64 = 0;
-	final ids:Array<Dynamic> = [];
-	final poss:Array<Int> = [];
+	final strIds = new IdTable();
+	final strsByValue = new StringMap<Array<{s:String, pos:Int}>>();
+	final blockIds = new IdTable();
 	final listTokens:Array<{arr:Array<Ttype>, tokens:Array<{}>}> = [];
 
 	public function new() {}
@@ -175,20 +188,25 @@ private class OcamlExtern {
 		byte(v);
 	}
 
-	function lookup(id:Dynamic):Int {
+	function lookupStr(id:Dynamic):Int {
 		if (id == null) return -1;
 		if (Std.isOfType(id, String)) {
-			for (i in 0...ids.length) if (Std.isOfType(ids[i], String) && core.ds.StrTools.physEq(ids[i], id)) return poss[i];
+			var b = strsByValue.get(id);
+			if (b != null) for (e in b) if (core.ds.StrTools.physEq(e.s, id)) return e.pos;
 			return -1;
 		}
-		for (i in 0...ids.length) if (ids[i] == id) return poss[i];
-		return -1;
+		return strIds.get(id);
 	}
 
-	function record(id:Dynamic) {
+	function recordStr(id:Dynamic) {
 		if (id != null) {
-			ids.push(id);
-			poss.push(objCounter);
+			if (Std.isOfType(id, String)) {
+				var b = strsByValue.get(id);
+				if (b == null) strsByValue.set(id, b = []);
+				b.push({s: id, pos: objCounter});
+			} else {
+				strIds.set(id, objCounter);
+			}
 		}
 		objCounter++;
 	}
@@ -203,8 +221,16 @@ private class OcamlExtern {
 			code16(0x01, n) else code32(0x02, n);
 	}
 
+	function intOpt(n:Null<Int>) {
+		if (n == null) int(0) else block(0, 1, null, () -> int(n));
+	}
+
+	function intArray(a:Array<Int>) {
+		block(0, a.length, a, () -> for (n in a) int(n));
+	}
+
 	public function str(s:String, id:Dynamic) {
-		var p = lookup(id);
+		var p = lookupStr(id);
 		if (p >= 0) return shared(p);
 		var b = haxe.io.Bytes.ofString(s);
 		var len = b.length;
@@ -212,17 +238,18 @@ private class OcamlExtern {
 		out.add(b);
 		size32 += 1 + Std.int((len + 4) / 4);
 		size64 += 1 + Std.int((len + 8) / 8);
-		record(id);
+		recordStr(id);
 	}
 
 	public function block(tag:Int, sz:Int, id:Dynamic, fields:Void->Void) {
 		if (sz == 0) return header(0, tag);
-		var p = lookup(id);
+		var p = id == null ? -1 : blockIds.get(id);
 		if (p >= 0) return shared(p);
 		header(sz, tag);
 		size32 += 1 + sz;
 		size64 += 1 + sz;
-		record(id);
+		if (id != null) blockIds.set(id, objCounter);
+		objCounter++;
 		fields();
 	}
 
@@ -273,10 +300,13 @@ private class OcamlExtern {
 						block(0, f.args.length, f.args, () -> for (a in f.args) ttype(a));
 					}));
 				}));
-			case HObj(_) | HStruct(_) | HVirtual(_):
-				// port: the prototype records hold PMaps, whose comparison closure Marshal
-				// writes as a code pointer of the reference compiler's binary.
-				throw new Failure("haxe-in-haxe: hl2c type name of " + tstr(t) + " depends on OCaml Marshal of a closure");
+			case HObj(p) | HStruct(p):
+				block(tag, 1, t, () -> classProto(p));
+			case HVirtual(vp):
+				block(tag, 1, t, () -> block(0, 2, vp, () -> {
+					hfields(vp.vfields);
+					strPMap(vp.vindex, int);
+				}));
 			case _:
 				core.Globals.die("", "hl2c.ml");
 		}
@@ -284,6 +314,99 @@ private class OcamlExtern {
 
 	static final emptyEname = {};
 	static final emptyEfield = {};
+
+	// port: hlcode.ml's class_proto record, in its field order.
+	function classProto(p:ClassProto) {
+		block(0, 12, p, () -> {
+			str(p.pname, p); // port: the token of DNamed (p.pname, p)
+			int(p.pid);
+			intOpt(p.pclassglobal);
+			if (p.psuper == null) int(0) else block(0, 1, null, () -> classProto(p.psuper));
+			intArray(p.pvirtuals);
+			block(0, p.pproto.length, p.pproto, () -> for (f in p.pproto) block(0, 4, f, () -> {
+				str(f.fname, if (core.ds.StrTools.hasIdentity) f.fname else f);
+				int(f.fid);
+				int(f.fmethod);
+				intOpt(f.fvirtual);
+			}));
+			int(p.pnfields);
+			hfields(p.pfields);
+			strPMap(p.pindex, v -> block(0, 2, v, () -> {
+				int(v.fid);
+				ttype(v.t);
+			}));
+			strPMap(p.pfunctions, int);
+			var keys = [for (k in p.pinterfaces.keys) p.pinterfaces.keyOf(k)];
+			pmap(keys, Hlcode.tCompare, p.pinterfaces, k -> ttype(k), k -> int(p.pinterfaces.get(k)));
+			function bindings(i:Int) {
+				if (i == p.pbindings.length) return int(0);
+				block(0, 2, null, () -> {
+					var b = p.pbindings[i];
+					block(0, 2, b, () -> {
+						int(b.fid);
+						int(b.fidx);
+					});
+					bindings(i + 1);
+				});
+			}
+			bindings(0);
+		});
+	}
+
+	// port: `(string * string index * ttype) array`
+	function hfields(arr:Array<HField>) {
+		block(0, arr.length, arr, () -> for (f in arr) block(0, 3, f, () -> {
+			str(f.name, if (core.ds.StrTools.hasIdentity) f.name else f);
+			int(f.nid);
+			ttype(f.t);
+		}));
+	}
+
+	function strPMap<V>(m:StrPMap<V>, value:V->Void) {
+		pmap(m.keys, Hlcode.strCompare, m, k -> str(k, if (core.ds.StrTools.hasIdentity) k else null), k -> value(m.get(k)));
+	}
+
+	// port: extlib's `('k, 'v) PMap.t` record `{ cmp; map }`, the tree built by
+	// PMap.add from PMap.empty with the keys in their first-insertion order.
+	function pmap<K>(keys:Array<K>, cmp:K->K->Int, token:{}, key:K->Void, value:K->Void) {
+		var tree:Null<PMapNode<K>> = null;
+		for (k in keys) tree = PMapNode.add(cmp, k, tree);
+		block(0, 2, token, () -> {
+			compareClosure();
+			function node(n:Null<PMapNode<K>>) {
+				if (n == null) return int(0); // Empty
+				block(0, 5, n, () -> {
+					node(n.l);
+					key(n.k);
+					value(n.k);
+					node(n.r);
+					int(n.h);
+				});
+			}
+			node(tree);
+		});
+	}
+
+	static final compareToken = {};
+
+	// port: the closure of `compare` (arity 2: caml_curry2, the closure info, the
+	// direct entry point; no environment) as extern.c writes it, with the code
+	// pointers' offset 0 and digest all zeros in place of the reference binary's
+	// (see the comment of this class).
+	function compareClosure() {
+		block(247, 3, compareToken, () -> {
+			codePointer();
+			// Long_val (Make_closinfo (2, 3)): arity 2 in the top byte, the environment at 3
+			byte(0x03);
+			for (b in [0x01, 0, 0, 0, 0, 0, 0, 0x03]) byte(b);
+			codePointer();
+		});
+	}
+
+	function codePointer() {
+		code32(0x10, 0);
+		for (_ in 0...16) byte(0);
+	}
 
 	public function desc(d:TypeDesc) {
 		switch d {
@@ -331,6 +454,83 @@ private class OcamlExtern {
 		b.add(data);
 		return b.getBytes();
 	}
+}
+
+// port: extlib's PMap tree (`Node (l, k, v, r, h)`, Empty is null), built by
+// `add` with `bal` as in extlib/pMap.ml; the values are looked up when written.
+private class PMapNode<K> {
+	public final l:Null<PMapNode<K>>;
+	public final k:K;
+	public final r:Null<PMapNode<K>>;
+	public final h:Int;
+
+	function new(l:Null<PMapNode<K>>, k:K, r:Null<PMapNode<K>>, h:Int) {
+		this.l = l;
+		this.k = k;
+		this.r = r;
+		this.h = h;
+	}
+
+	static inline function height<K>(n:Null<PMapNode<K>>):Int return n == null ? 0 : n.h;
+
+	static function make<K>(l:Null<PMapNode<K>>, k:K, r:Null<PMapNode<K>>):PMapNode<K> {
+		var hl = height(l), hr = height(r);
+		return new PMapNode(l, k, r, (hl > hr ? hl : hr) + 1);
+	}
+
+	static function bal<K>(l:Null<PMapNode<K>>, k:K, r:Null<PMapNode<K>>):PMapNode<K> {
+		var hl = height(l);
+		var hr = height(r);
+		if (hl > hr + 2) {
+			if (height(l.l) >= height(l.r)) return make(l.l, l.k, make(l.r, k, r));
+			var lr = l.r;
+			return make(make(l.l, l.k, lr.l), lr.k, make(lr.r, k, r));
+		} else if (hr > hl + 2) {
+			if (height(r.r) >= height(r.l)) return make(make(l, k, r.l), r.k, r.r);
+			var rl = r.l;
+			return make(make(l, k, rl.l), rl.k, make(rl.r, r.k, r.r));
+		}
+		return new PMapNode(l, k, r, (hl > hr ? hl : hr) + 1);
+	}
+
+	public static function add<K>(cmp:K->K->Int, x:K, n:Null<PMapNode<K>>):PMapNode<K> {
+		if (n == null) return new PMapNode(null, x, null, 1);
+		var c = cmp(x, n.k);
+		if (c == 0) return new PMapNode(n.l, x, n.r, n.h);
+		if (c < 0) return bal(add(cmp, x, n.l), n.k, n.r);
+		return bal(n.l, n.k, add(cmp, x, n.r));
+	}
+}
+
+// port: physical identity of the marshalled values' tokens.
+private class IdTable {
+	#if (target.name == "hxmc")
+	final m = new haxe.ds.ObjectMap<{}, Int>();
+
+	public function new() {}
+
+	public function get(id:Dynamic):Int {
+		var p = m.get(id);
+		return p == null ? -1 : p;
+	}
+
+	public function set(id:Dynamic, pos:Int) m.set(id, pos);
+	#else
+	final ids:Array<Dynamic> = [];
+	final poss:Array<Int> = [];
+
+	public function new() {}
+
+	public function get(id:Dynamic):Int {
+		for (i in 0...ids.length) if (ids[i] == id) return poss[i];
+		return -1;
+	}
+
+	public function set(id:Dynamic, pos:Int) {
+		ids.push(id);
+		poss.push(pos);
+	}
+	#end
 }
 
 class Hl2c {
