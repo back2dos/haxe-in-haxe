@@ -295,7 +295,7 @@ with 16, 64 and 256 KB, under node with `RT_VERIFY=1` at 64 and 256 KB
 (16 KB: Bench exceeds the timeout, as before); ThreadNatives 300 runs;
 the port's self-compile byte-identical natively (also 256 KB, and 256 KB
 with `RT_VERIFY=1`) and as a module under node (default, 256 and 16 KB)
-and wasmtime; fixpoint.
+and wasmtime; fixpoint. CI run 38683618299 green (six targets, wasm, the new RT_VERIFY steps).
 
 ## Target generators
 
