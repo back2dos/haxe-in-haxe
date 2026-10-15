@@ -141,6 +141,7 @@ haxe/test --run <Name> --help`-style options at the top of each file):
 | `UpstreamTargets` | upstream's unit suite compiled for js, lua, python, php, neko, hl, hl/c, cpp, cppia, cppia host, jvm, flash by both, every output file (jars by member) | 12/12 identical |
 | `Interp` | `--interp` runs of the case lists | 275/276 (`eval-eventLoop-compile` depends on thread timing) |
 | `Haxelib` | `-L` through lix's haxelib shim, batch and server | 14/14 |
+| `EvalDebugger` | scripted Eval debugger sessions (`-D eval-debugger`): breakpoints, stepping, scopes, evaluation, assignment, exception and function breakpoints, a macro | 6/6 |
 | `fuzz/` | random programs per target (`diff:<target>`) or by program output (`exec:<a>,<b>`), with reduction (`make test-fuzz LANE=diff:js`) | |
 | `Measure` | peak RSS, wall and CPU time: the self-compile (ours and the reference), the native build, the WebAssembly builds | self-compile 879 MB vs the reference's 1414 MB |
 | `unit.hxml` | unit tests of port modules, in-process | pass |

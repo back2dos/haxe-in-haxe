@@ -311,7 +311,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        suite: [hxb, macro, display, server, jsonrpc, targets, fuzz]
+        suite: [hxb, macro, display, server, jsonrpc, targets, haxelib, debugger, fuzz]
     steps:
       - uses: actions/checkout@v7
         with:
@@ -355,6 +355,8 @@ jobs:
             server) $S Server -j 4 --summary "$GITHUB_STEP_SUMMARY" ;;
             jsonrpc) $S ServerJsonRpc --summary "$GITHUB_STEP_SUMMARY" ;;
             targets) $S UpstreamTargets -j 4 --summary "$GITHUB_STEP_SUMMARY" ;;
+            haxelib) $S Haxelib --server --summary "$GITHUB_STEP_SUMMARY" ;;
+            debugger) $S EvalDebugger --summary "$GITHUB_STEP_SUMMARY" ;;
             # the generators' diff lanes (the targets that need no library)
             fuzz)
               for lane in diff:hxb diff:interp diff:js diff:lua diff:python diff:php diff:neko diff:hl diff:swf; do

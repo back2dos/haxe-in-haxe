@@ -89,7 +89,7 @@ endef
 .DEFAULT_GOAL := help
 .PHONY: help std deps rt rt-build hxmc tool bootstrap fixpoint stage0 crosshost port dev release wasm npm site fuzz \
 	lix lix-release reference test test-fuzz test-display test-server test-jsonrpc test-unit-targets test-interp \
-	test-haxelib smoke hxmc-test portcheck measure quick check full clean distclean
+	test-haxelib test-eval-debugger smoke hxmc-test portcheck measure quick check full clean distclean
 
 help:
 	@sed -n '/^# --- Targets/,$$p' $(MAKEFILE_LIST) | sed -n 's/^## \{0,1\}//p'
@@ -119,9 +119,9 @@ help:
 ## test        HXB conformance of PORT_BIN against the reference (haxe/test/Conformance.hx;
 ##             CASES_FILE=haxe/test/conformance-macro-cases.txt for the macro cases)
 ## test-fuzz   the fuzzer on PORT_BIN: LANE (default diff:hxb), N programs
-## test-display, test-server, test-jsonrpc, test-interp, test-haxelib
+## test-display, test-server, test-jsonrpc, test-interp, test-haxelib, test-eval-debugger
 ##             the display requests, the compilation server, its JSON-RPC methods, --interp
-##             runs, -lib: PORT_BIN against the reference (haxe/test/*.hx)
+##             runs, -lib, the Eval debugger: PORT_BIN against the reference (haxe/test/*.hx)
 ## test-unit-targets   upstream's unit suite compiled for each target by both, compared
 ## smoke       hxmc/test/smoke.sh on PORT_BIN: --interp, HXB, JS, sys.ssl, eval.luv
 ## hxmc-test   hxmc's corpus against its golden files (hxmc/test/Corpus.hx)
@@ -341,6 +341,8 @@ test-interp: $(PORT_BIN) $(REFERENCE)
 	$(TEST_ENV) $(SCRIPT) Interp -j $(JOBS)
 test-haxelib: $(PORT_BIN) $(REFERENCE)
 	$(TEST_ENV) $(SCRIPT) Haxelib
+test-eval-debugger: $(PORT_BIN) $(REFERENCE)
+	$(TEST_ENV) $(SCRIPT) EvalDebugger
 test-unit-targets: $(PORT_BIN) $(REFERENCE) bin/lix/lix
 	$(TEST_ENV) $(SCRIPT) UpstreamTargets -j $(JOBS)
 

@@ -55,7 +55,7 @@ class Server {
 
 	// whether a child process still runs (Eval has no non-blocking exitCode():
 	// /proc, where an exited child is a zombie until it is waited for)
-	static function alive(p:sys.io.Process):Bool {
+	public static function alive(p:sys.io.Process):Bool {
 		var stat = '/proc/${p.getPid()}/stat';
 		if (!FileSystem.exists(stat)) return exec(["kill", "-0", Std.string(p.getPid())]).code == 0;
 		var t = readText(stat);
