@@ -312,7 +312,7 @@ wasm 71/71 under node and wasmtime at 16, 64 and 256 KB, under node with
 KB), 100 with `RT_VERIFY=1`; the port's self-compile byte-identical
 natively (also 256 KB, and 256 KB with `RT_VERIFY=1`) and as a module
 under node (default and 256 KB) and wasmtime; fixpoint. Times and sizes:
-hxmc/README.md, "Tests and their oracle".
+hxmc/README.md, "Tests and their oracle". CI run 38697123413 green (six targets, wasm).
 
 ### hxmc: WebAssembly size work (2026-10-15, branch hxmc)
 
@@ -331,7 +331,8 @@ executables byte-identical); wasm 71/71 under node and wasmtime at 16,
 ThreadNatives 300 runs; the port's self-compile byte-identical natively
 (also 256 KB, and 256 KB with `RT_VERIFY=1`) and as a module under node
 (default and 256 KB) and wasmtime; the playground's build self-compiles
-to the reference's HXB under node at every step; fixpoint.
+to the reference's HXB under node at every step; fixpoint. CI run
+38702914292 green (six targets, wasm).
 
 ## Target generators
 
