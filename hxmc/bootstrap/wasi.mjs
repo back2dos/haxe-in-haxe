@@ -70,7 +70,8 @@ export function runWasm(module, args, env = process.env) {
 	if (env.HXMC_WASI_DEBUG) console.error(JSON.stringify({ preopens: pre, PWD: e.PWD, HAXE_STD_PATH: e.HAXE_STD_PATH }));
 	const wasi = new WASI({
 		version: 'preview1',
-		args: [wasiPath(path.resolve(module)), ...args],
+		// (arguments that are Windows paths, as the module spells them)
+		args: [wasiPath(path.resolve(module)), ...args.map(a => /^[A-Za-z]:[\\/]/.test(a) ? wasiPath(a) : a)],
 		env: e,
 		preopens: pre,
 		returnOnExit: true,

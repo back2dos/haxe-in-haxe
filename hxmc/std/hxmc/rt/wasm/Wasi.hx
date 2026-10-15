@@ -370,6 +370,23 @@ class Wasi {
 		return Mem.getI32(pre, 16 * best);
 	}
 
+	// whether p (a C string) names a directory above a preopened one (/c above
+	// node's /c/Users on Windows): those directories exist for the program
+	@:hxmc.noGc public static function preopenAncestor(p:Ptr):Bool {
+		var a = absolute(p);
+		var alen = Heap.strlen(a).toInt();
+		var found = false;
+		if (Mem.getU8(a, 0) == "/".code)
+			for (i in 0...npre) {
+				var name = Mem.getPtr(pre, 16 * i + 8);
+				var len = Heap.strlen(name).toInt();
+				if (alen == 1 && len > 1 && Mem.getU8(name, 0) == "/".code) found = true;
+				else if (len > alen && Heap.memcmp(name, a, alen) == 0 && Mem.getU8(name, alen) == "/".code) found = true;
+			}
+		Heap.free(a);
+		return found;
+	}
+
 	@:hxmc.noGc public static function getCwd():Ptr
 		return cwd;
 

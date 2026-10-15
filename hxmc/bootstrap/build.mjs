@@ -9,7 +9,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
 import { bootDir, cacheDir, exeName, hostTarget, install, lockHeld, pkgDir, toolEnv, wasmPath } from './launcher.mjs';
-import { runWasm } from './wasi.mjs';
+import { runWasm, wasiPath } from './wasi.mjs';
 
 const rebuild = process.argv.includes('--rebuild');
 const host = hostTarget();
@@ -53,7 +53,7 @@ try {
 	console.log(`hxmc: building the native compiler for ${host} (${new Date().toISOString()})`);
 	code = runWasm(wasmPath, [
 		'-cp', path.join(pkgDir, 'haxe', 'src'), '-cp', path.join(pkgDir, 'hxmc', 'src'), '-main', 'hxmc.HaxeMain',
-		'-D', 'disable-parallelism', '-D', `hxmc.target=${host}`, '--custom-target', `hxmc=${out}`,
+		'-D', 'disable-parallelism', '-D', `hxmc.target=${host}`, '--custom-target', `hxmc=${wasiPath(out)}`,
 	], env);
 	const built = fs.existsSync(out) ? out : fs.existsSync(`${out}.exe`) ? `${out}.exe` : null;
 	if (code === 0 && built) {

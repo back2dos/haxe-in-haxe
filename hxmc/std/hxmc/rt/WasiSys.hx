@@ -329,8 +329,10 @@ class WasiSys {
 		var p = cstr(path);
 		var st = Mem.stack(64);
 		var r = pathOp(p, 0, st);
+		// (a directory above the preopened ones: a directory)
+		var t = r == 0 ? Mem.getU8(st, 16) : Wasi.preopenAncestor(p) ? 3 : -1;
 		Heap.free(p);
-		return r == 0 ? Mem.getU8(st, 16) : -1;
+		return t;
 	}
 
 	public static function exists(path:String):Bool

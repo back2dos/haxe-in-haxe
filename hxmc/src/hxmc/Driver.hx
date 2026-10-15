@@ -384,7 +384,8 @@ class Driver {
 		// under WASI (the tool as a WebAssembly module) there are no processes:
 		// whoever runs the module marks the output executable (HXMC_EXE_LIST
 		// names a file the output's path is added to, one per line)
-		if (Sys.systemName() != "Wasi")
+		// (Windows hosts need no mode)
+		if (Sys.systemName() == "Windows") {} else if (Sys.systemName() != "Wasi")
 			Sys.command("chmod", ["755", out]);
 		else if (Sys.getEnv("HXMC_EXE_LIST") != null) {
 			var f = sys.io.File.append(Sys.getEnv("HXMC_EXE_LIST"));
