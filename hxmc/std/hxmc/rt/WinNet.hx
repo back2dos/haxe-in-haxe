@@ -225,14 +225,27 @@ class WinNet {
 		if (pos < 0 || len < 0 || pos > Bytes.len(b) - len) Rt.rt_throw("Unix.recv");
 		var s = sock(fd);
 		if (cooperative(s) && !waitSock(s, false)) return -1;
-		return ret(Winsock.recv(s, Bytes.bytes(b).add(pos), len, 0));
+		return ret(recvHeap(s, b, pos, len));
 	}
 
 	public static function send(fd:Int, b:Dynamic, pos:Int, len:Int):Int {
 		if (pos < 0 || len < 0 || pos > Bytes.len(b) - len) Rt.rt_throw("Unix.send");
 		var s = sock(fd);
 		if (cooperative(s) && !waitSock(s, true)) return -1;
-		return ret(Winsock.send(s, Bytes.bytes(b).add(pos), len, 0));
+		return ret(sendHeap(s, b, pos, len));
+	}
+
+	// (the buffer's pages committed first: WinSys.touch)
+	@:hxmc.noGc static function recvHeap(s:I64, b:Dynamic, pos:Int, len:Int):Int {
+		var p = Bytes.bytes(b).add(pos);
+		WinSys.touch(p, len);
+		return Winsock.recv(s, p, len, 0);
+	}
+
+	@:hxmc.noGc static function sendHeap(s:I64, b:Dynamic, pos:Int, len:Int):Int {
+		var p = Bytes.bytes(b).add(pos);
+		WinSys.touch(p, len);
+		return Winsock.send(s, p, len, 0);
 	}
 
 	// Winsock's fd_set: u32 fd_count, then the SOCKETs (FD_SETSIZE 64)

@@ -251,6 +251,33 @@ class WinSys {
 	static inline function outside()
 		Rt.rt_throw("OutsideBounds");
 
+	// The heap's reservations are committed page by page on first touch, by an
+	// exception handler (rt_win.c), which a fault inside the kernel never
+	// reaches: ReadFile, WriteFile or recv on an untouched page of a Bytes fails
+	// (ERROR_NOACCESS) where user code would have committed it. So the pages of
+	// a buffer the system reads or writes are touched first (a byte of each
+	// page read and written back).
+	@:hxmc.noGc public static function touch(p:Ptr, n:Int) {
+		var off = 0;
+		while (off < n) {
+			Mem.setI8(p, off, Mem.getU8(p, off));
+			off += 4096;
+		}
+		if (n > 0) Mem.setI8(p, n - 1, Mem.getU8(p, n - 1));
+	}
+
+	@:hxmc.noGc static function readHeap(fd:Int, b:Dynamic, pos:Int, len:Int):Int {
+		var p = Bytes.bytes(b).add(pos);
+		touch(p, len);
+		return Win32._read(fd, p, len);
+	}
+
+	@:hxmc.noGc static function writeHeap(fd:Int, b:Dynamic, pos:Int, len:Int):Int {
+		var p = Bytes.bytes(b).add(pos);
+		touch(p, len);
+		return Win32._write(fd, p, len);
+	}
+
 	// Reads and writes of pipes and consoles block: with other threads they go
 	// through a malloc'ed buffer in a safe region (a collection may move the Bytes)
 	public static function fileRead(fd:Int, b:Dynamic, pos:Int, len:Int):Int {
@@ -264,7 +291,7 @@ class WinSys {
 			LibC.free(tmp);
 			return r;
 		}
-		return Win32._read(fd, Bytes.bytes(b).add(pos), len);
+		return readHeap(fd, b, pos, len);
 	}
 
 	public static function fileWrite(fd:Int, b:Dynamic, pos:Int, len:Int):Int {
@@ -278,7 +305,7 @@ class WinSys {
 			LibC.free(tmp);
 			return r;
 		}
-		return Win32._write(fd, Bytes.bytes(b).add(pos), len);
+		return writeHeap(fd, b, pos, len);
 	}
 
 	public static function fileClose(fd:Int):Void {
@@ -338,6 +365,7 @@ class WinSys {
 	}
 
 	@:hxmc.noGc static function saveAll(fd:Int, d:Ptr, n:Int):Bool {
+		touch(d, n);
 		var ok = true;
 		while (n > 0) {
 			var w = Win32._write(fd, d, n);

@@ -71,6 +71,13 @@ class LinkMachO {
 		return StringTools.endsWith(s.name, "__thread_vars");
 
 	public function link(entry:String):Bytes {
+		// __dso_handle (as ld64 defines it): the image's Mach-O header, the
+		// start of __TEXT; libuv and mbedtls refer to it (atexit handlers).
+		// Its section is not laid out: it is placed at 0 below.
+		var header = new Section("__TEXT,__mach_header", RoData, 1);
+		var dso = new Obj();
+		dso.define("__dso_handle", header, 0, 0);
+		objs.push(dso);
 		resolve();
 		// imports: what stays undefined (by name), and whether each is weak
 		var importWeak = new Map<String, Bool>();
@@ -182,6 +189,7 @@ class LinkMachO {
 				}
 			}
 		text.push(stubs);
+		addr.set(header, 0);
 		var pos = HEADER_RESERVE;
 		function place(list:Array<Section>):{start:Int, end:Int} {
 			if (list.length > 0) pos = align(pos, list[0].align);
