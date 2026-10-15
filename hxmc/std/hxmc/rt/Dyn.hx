@@ -21,7 +21,7 @@ class Dyn {
 	// entries outside the heap (Names.fidCache), each checked against
 	// the name it claims (a racing writer leaves an old or a new entry, both
 	// checked), in front of the C table
-	@:hxmc.export("hx_fid") @:hxmc.noGc static function fid(name:String):Int {
+	@:hxmc.host("hx_fid") @:hxmc.noGc static function fid(name:String):Int {
 		var h = Str.hash(name);
 		var e = Names.fidCache.add(8 * (h & 4095));
 		var v = Atomic.load64(e);
@@ -76,10 +76,10 @@ class Dyn {
 		return Ptr.nil();
 	}
 
-	// rt_icache (rt.h): uint32 t, int32 slot (> 0: field slot + 1; 0: a
+	// rt_icache (Names.hx): uint32 t, int32 slot (> 0: field slot + 1; 0: a
 	// method; -1: none), char kind, void *fn, int32 sig. The C side
 	// (rt_icache_miss) publishes it.
-	@:hxmc.export("rt_icache_fill") @:hxmc.noGc static function icacheFill(o:Dynamic, fid:Int, c:Ptr):Void {
+	@:hxmc.host("rt_icache_fill") @:hxmc.noGc static function icacheFill(o:Dynamic, fid:Int, c:Ptr):Void {
 		var ty = ty(tindex(o));
 		Mem.setPtr(c, 16, Ptr.nil());
 		Mem.setI32(c, 24, -1);
@@ -415,7 +415,7 @@ class Dyn {
 	@:hxmc.export("hx_dyn_set") static function dynSet(o:Dynamic, name:String, v:Dynamic):Void
 		anonSetSlow(o, fid(name), v);
 
-	@:hxmc.export("hx_dyn_call") static function dynCall(f:Dynamic, args:Array<Dynamic>):Dynamic {
+	@:hxmc.host("hx_dyn_call") static function dynCall(f:Dynamic, args:Array<Dynamic>):Dynamic {
 		if (Str.isNull(args)) return callBoxed(f, [], 0);
 		// a copy: the callee may change the array
 		var a = args.copy();
@@ -492,13 +492,13 @@ class Dyn {
 	}
 
 	// by field id (a literal name: no interning at run time)
-	@:hxmc.export("hx_dyn_get_fid") static function dynGetFid(o:Dynamic, fid:Int):Dynamic
+	@:hxmc.host("hx_dyn_get_fid") static function dynGetFid(o:Dynamic, fid:Int):Dynamic
 		return anonGetSlow(o, fid);
 
-	@:hxmc.export("hx_dyn_set_fid") static function dynSetFid(o:Dynamic, fid:Int, v:Dynamic):Void
+	@:hxmc.host("hx_dyn_set_fid") static function dynSetFid(o:Dynamic, fid:Int, v:Dynamic):Void
 		anonSetSlow(o, fid, v);
 
-	@:hxmc.export("hx_dyn_call_field_fid") static function dynCallFieldFid(o:Dynamic, fid:Int, args:Array<Dynamic>):Dynamic {
+	@:hxmc.host("hx_dyn_call_field_fid") static function dynCallFieldFid(o:Dynamic, fid:Int, args:Array<Dynamic>):Dynamic {
 		var t = Str.isNull(o) ? 0 : tindex(o);
 		if (t == T_ARRAY || t == T_STRING) {
 			var a = Str.isNull(args) ? [] : args.copy();
@@ -509,12 +509,12 @@ class Dyn {
 		return dynCall(f, args);
 	}
 
-	@:hxmc.export("hx_dyn_aget") static function dynAget(a:Dynamic, i:Int):Dynamic {
+	@:hxmc.host("hx_dyn_aget") static function dynAget(a:Dynamic, i:Int):Dynamic {
 		if (Str.isNull(a) || tindex(a) != T_ARRAY) return null;
 		return (a : Array<Dynamic>)[i];
 	}
 
-	@:hxmc.export("hx_dyn_aset") static function dynAset(a:Dynamic, i:Int, v:Dynamic):Void {
+	@:hxmc.host("hx_dyn_aset") static function dynAset(a:Dynamic, i:Int, v:Dynamic):Void {
 		if (Str.isNull(a) || tindex(a) != T_ARRAY) Rt.rt_throw("Invalid array access");
 		var arr:Array<Dynamic> = a;
 		arr[i] = v;
@@ -537,7 +537,7 @@ class Dyn {
 	@:hxmc.noGc public static function isInt64(v:Dynamic):Bool
 		return !Str.isNull(v) && tindex(v) == T_BOXI64;
 
-	@:hxmc.export("hx_dyn_eq") @:hxmc.noGc static function dynEq(a:Dynamic, b:Dynamic):Bool {
+	@:hxmc.host("hx_dyn_eq") @:hxmc.noGc static function dynEq(a:Dynamic, b:Dynamic):Bool {
 		if (Mem.addr(a) == Mem.addr(b)) return true;
 		if (Str.isNull(a) || Str.isNull(b)) return false;
 		var ta = tindex(a), tb = tindex(b);
@@ -549,7 +549,7 @@ class Dyn {
 		return false;
 	}
 
-	// the unboxings of rt.c (no GC point)
+	// the unboxings (no GC point)
 	@:hxmc.noGc static function unboxI64(v:Dynamic):I64 {
 		var p = Mem.addr(v);
 		return switch tindex(v) {
@@ -578,7 +578,7 @@ class Dyn {
 		}
 	}
 
-	@:hxmc.export("hx_dyn_cmp") @:hxmc.noGc static function dynCmp(a:Dynamic, b:Dynamic):Int {
+	@:hxmc.host("hx_dyn_cmp") @:hxmc.noGc static function dynCmp(a:Dynamic, b:Dynamic):Int {
 		if (!Str.isNull(a) && !Str.isNull(b) && (tindex(a) == T_BOXI64 || tindex(b) == T_BOXI64) && isI64(a) && isI64(b)) {
 			var x = unboxI64(a), y = unboxI64(b);
 			return x < y ? -1 : x > y ? 1 : 0;
@@ -596,7 +596,7 @@ class Dyn {
 		return dynCmp(a, b);
 
 	// a op b on Dynamic values (FnLower.opCode: 0 + 1 - 2 * 3 / 4 % 5 & 6 | 7 ^ 8 << 9 >> 10 >>>)
-	@:hxmc.export("hx_dyn_op") static function dynOp(op:Int, a:Dynamic, b:Dynamic):Dynamic {
+	@:hxmc.host("hx_dyn_op") static function dynOp(op:Int, a:Dynamic, b:Dynamic):Dynamic {
 		if (op == 0 && ((!Str.isNull(a) && tindex(a) == T_STRING) || (!Str.isNull(b) && tindex(b) == T_STRING)))
 			return Str.concat(stdString(a), stdString(b));
 		var ints = !Str.isNull(a) && !Str.isNull(b) && tindex(a) != T_BOXFLOAT && tindex(b) != T_BOXFLOAT;
@@ -646,7 +646,7 @@ class Dyn {
 		return false;
 	}
 
-	@:hxmc.export("hx_is") @:hxmc.noGc static function is(v:Dynamic, type:Dynamic):Bool {
+	@:hxmc.host("hx_is") @:hxmc.noGc static function is(v:Dynamic, type:Dynamic):Bool {
 		if (Str.isNull(v) || Str.isNull(type)) return false;
 		var c = described(type);
 		var t = tindex(v);
@@ -673,7 +673,7 @@ class Dyn {
 		return false;
 	}
 
-	@:hxmc.export("hx_cast") static function cast_(v:Dynamic, type:Dynamic):Dynamic {
+	@:hxmc.host("hx_cast") static function cast_(v:Dynamic, type:Dynamic):Dynamic {
 		if (Str.isNull(v) || is(v, type)) return v;
 		Rt.rt_throw("Class cast error");
 		return null;
@@ -692,7 +692,7 @@ class Dyn {
 
 	static var fidToString = 0; // fid of "toString" + 1 (0: not looked up yet; -1 + 1: not a field name)
 
-	@:hxmc.export("hx_std_string") static function stdString(v:Dynamic):String {
+	@:hxmc.host("hx_std_string") static function stdString(v:Dynamic):String {
 		if (Str.isNull(v)) return "null";
 		var t = tindex(v);
 		var p = Mem.addr(v);

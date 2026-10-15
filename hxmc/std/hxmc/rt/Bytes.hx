@@ -27,7 +27,7 @@ class Bytes {
 	// leaves the contents unspecified, but programs read them: the crypto
 	// library's Sha512 pads its blocks with Bytes.alloc's zeros); a nursery
 	// reused after a minor collection holds the bytes of dead objects
-	@:hxmc.export("haxe_io_Bytes_alloc") static function alloc(n:Int):Dynamic {
+	@:hxmc.host("haxe_io_Bytes_alloc") static function alloc(n:Int):Dynamic {
 		var b = Mem.alloc((n + 15) >> 3, T_BYTES, K_RAW);
 		Mem.setI32(Mem.addr(b), 0, n);
 		return b;

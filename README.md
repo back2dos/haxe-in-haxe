@@ -19,7 +19,7 @@ the same `--interp` runs, display requests and compilation-server answers.
 | `haxe/test/` | the port's tests: conformance against the reference (HXB, display, server, JSON-RPC, `--interp`, `-L`, upstream's target suites), the fuzzer (`fuzz/`), unit tests of port modules (`unit/`, `unit.hxml`), peak memory and times (`Measure.hx`) |
 | `hxmc/src/hxmc/` | hxmc's sources (package `hxmc`, class path `hxmc/src`): the IR and lowering (`ir/`), the code generators (`x64/`, `a64/`, `wasm/`), the linkers, the driver, `Main.hx` (the tool) and `HaxeMain.hx` (`haxe` with hxmc built in) |
 | `hxmc/std/` | hxmc's std: overrides of upstream modules and the runtime's Haxe part (`hxmc.rt`), merged with the Eval originals by `hxmc/src/hxmc/MkStd.hx` |
-| `hxmc/c/` | the runtime's C part (collector, threads, TLS over mbedtls, libuv), `deps.sh` (mbedtls and libuv) and `mkrt.sh` (the runtime objects), `zig-version` |
+| `hxmc/c/` | no C of ours: `deps.sh` (mbedtls and libuv), `mkrt.sh` (the runtime objects: the C library's members, mbedtls, libuv), `Layouts.hx` (system and libuv struct layouts per target, checked against the C headers), `probe.c` (build-time layout probe), `zig-version` |
 | `hxmc/test/` | hxmc's corpus (`cases/`, golden outputs `expected/`, frozen fuzzer programs `fuzz-1000.zip`), the encoder tests (`encoder/`), the scripts that run them (`Corpus`, `Check`, `Crosshost`, `Selfcheck`, `Tiers`, `EncCheck`), the release smoke test (`smoke.sh`) |
 | `hxmc/web/` | the website and its playground (the port as a WebAssembly module in the browser) |
 | `hxmc/bootstrap/` | the committed stage0 (`stage0.wasm.br`), node's WASI runner (`wasi.mjs`), the runtime objects by hash (`rt.mjs`), the npm package's launcher (`haxe`, `hxmc-rebuild`, `launcher.mjs`, `build.mjs`) |
@@ -139,7 +139,7 @@ all three (about a minute). Scripts run on the tool's Eval (`bin/hxmc/hxmc
 compiler's command line), or on the stage0's before there is a tool.
 
 Runtime objects: `rt.o`, `ssl.o` and `uv.o` for the six targets are built by
-zig from `hxmc/c` (the C runtime, mbedtls, libuv), which a source-only
+zig from `hxmc/c` (the C library's members, mbedtls, libuv), which a source-only
 bootstrap cannot do. They are keyed by a hash of `hxmc/c` (sources, pinned
 versions, flags, the zig version) and published as the GitHub release
 `rt-<hash>` (`node hxmc/bootstrap/rt.mjs hash|fetch|pack`); `make rt` downloads
@@ -293,14 +293,17 @@ dates, inflate, the POSIX and Windows system layers), written with a small
 internal API (`hxmc.unsafe`: `Ptr`, `Mem` loads, stores, allocation and
 symbols, `Atomic`; `@:hxmc.c` and `@:hxmc.rt` externs of C functions,
 `@:hxmc.noGc` functions, `@:hxmc.export`/`@:hxmc.host` implementations of
-runtime functions). What stays C (`hxmc/c`): the collector and allocator,
-threads and the stop-the-world handshake, TLS over mbedtls, libuv, the field
-names and inline-cache tables, float formatting. The modules of hxmc's own
-package of the std (the runtime, `hxmc.unsafe`, the natives) are typed once
-per tool and configuration and cached as an HXB archive
-(`hxmc/src/hxmc/TypesCache.hx`: `<tool dir>/cache/`, or `HXMC_CACHE`;
-`HXMC_TYPES_CACHE=0` turns it off): a build loads them instead of typing
-them, and its executable is the same (`make fixpoint` checks it). A change of the runtime's
+runtime functions, `@:hxmc.callback` functions C calls,
+`@:hxmc.threadLocal` statics). The collector, threads and the stop-the-world
+handshake, startup and `rt_throw` are Haxe too (`Gc.hx`, `Threads.hx`,
+`Start.hx`; the heap census with `-D hxmc.census`): no C of hxmc's own is
+linked, only the C library, mbedtls and libuv ([hxmc/LOWLEVEL.md](hxmc/LOWLEVEL.md),
+"The runtime without C of our own"). The modules of hxmc's own package
+of the std (the runtime, `hxmc.unsafe`, the natives) are typed once per
+tool and configuration and cached as an HXB archive (`hxmc/src/hxmc/TypesCache.hx`:
+`<tool dir>/cache/`, or `HXMC_CACHE`; `HXMC_TYPES_CACHE=0` turns it off): a
+build loads them instead of typing them, and its executable is the same
+(`make fixpoint` checks it). A change of the runtime's
 interface or of the IR's conventions needs a tool that knows it: build once
 against the previous runtime first, or bootstrap again.
 

@@ -8,8 +8,8 @@ import hxmc.unsafe.Ptr;
 
 // The runtime's strings (formerly rt_str.c): UTF-16 strings, number
 // formatting, the String, StringBuf and Std natives. A string is a K_RAW
-// object: int32 length, int32 hash (0: not computed yet), the UTF-16 units
-// (rt.h). StringBuf keeps the runtime's layout (T_STRINGBUF: slot 0 the
+// object: int32 length, int32 hash (0: not computed yet), the UTF-16 units.
+// StringBuf keeps the runtime's layout (T_STRINGBUF: slot 0 the
 // length, slot 1 a K_RAW block of units), which generated code's inline
 // addChar reads too (MirBuild.stringBufAddChar).
 //
@@ -57,12 +57,12 @@ class Str {
 		return r;
 	}
 
-	@:hxmc.export("hx_str_alloc") static function alloc(n:Int):String
+	@:hxmc.host("hx_str_alloc") static function alloc(n:Int):String
 		return make(n);
 
 	// ---- C strings
 
-	@:hxmc.export("hx_str_of_ascii") static function ofAscii(c:Ptr):String {
+	@:hxmc.host("hx_str_of_ascii") static function ofAscii(c:Ptr):String {
 		var n = LibC.strlen(c).toInt();
 		var s = make(n);
 		var d = chars(s);
@@ -80,7 +80,7 @@ class Str {
 		return s;
 	}
 
-	@:hxmc.export("hx_str_of_utf8") public static function ofUtf8(c:Ptr, n:Int):String {
+	@:hxmc.host("hx_str_of_utf8") public static function ofUtf8(c:Ptr, n:Int):String {
 		// UTF-16 units first
 		var units = 0, i = 0;
 		while (i < n) {
@@ -121,7 +121,7 @@ class Str {
 	}
 
 	// UTF-8 bytes of s into buf (3 * length + 1 bytes), NUL-terminated; the byte count
-	@:hxmc.export("hx_str_utf8_into") @:hxmc.noGc public static function utf8Into(s:String, buf:Ptr):Int {
+	@:hxmc.host("hx_str_utf8_into") @:hxmc.noGc public static function utf8Into(s:String, buf:Ptr):Int {
 		var c = chars(s);
 		var n = len(s), j = 0, i = 0;
 		while (i < n) {
@@ -158,7 +158,7 @@ class Str {
 	}
 
 	// a malloc'ed UTF-8 copy ("null" for null)
-	@:hxmc.export("hx_str_to_utf8") @:hxmc.noGc static function toUtf8(s:String):Ptr {
+	@:hxmc.host("hx_str_to_utf8") @:hxmc.noGc static function toUtf8(s:String):Ptr {
 		if (isNull(s)) {
 			var p = LibC.malloc(5);
 			Mem.setI32(p, 0, 0x6c6c756e); // "null"
@@ -175,7 +175,7 @@ class Str {
 	@:hxmc.export("hx_str_eq_slow") @:hxmc.noGc static function eqSlow(a:String, b:String):Bool
 		return MemOps.compare(chars(a), chars(b), (2 * len(a) : I64)) == 0;
 
-	@:hxmc.export("hx_str_cmp") @:hxmc.noGc static function cmp(a:String, b:String):Int {
+	@:hxmc.host("hx_str_cmp") @:hxmc.noGc static function cmp(a:String, b:String):Int {
 		if (Mem.addr(a) == Mem.addr(b)) return 0;
 		if (isNull(a)) return -1;
 		if (isNull(b)) return 1;
@@ -212,10 +212,10 @@ class Str {
 
 	// ---- concatenation and conversions
 
-	@:hxmc.export("hx_str_or_null") @:hxmc.noGc static function orNull(s:String):String
+	@:hxmc.host("hx_str_or_null") @:hxmc.noGc static function orNull(s:String):String
 		return isNull(s) ? "null" : s;
 
-	@:hxmc.export("hx_str_concat") static function concat(a:String, b:String):String {
+	@:hxmc.host("hx_str_concat") static function concat(a:String, b:String):String {
 		if (isNull(a)) a = "null";
 		if (isNull(b)) b = "null";
 		var na = len(a), nb = len(b);
@@ -228,7 +228,7 @@ class Str {
 		return s;
 	}
 
-	@:hxmc.export("hx_str_of_int") static function ofInt(v:Int):String {
+	@:hxmc.host("hx_str_of_int") static function ofInt(v:Int):String {
 		// |v| <= 2^31 as an I64; u / 10 as (u * 0xCCCCCCCD) >>> 35
 		var m10 = ((0xCCCC : I64) << 16) | (0xCCCD : I64);
 		var neg = v < 0;
@@ -253,7 +253,7 @@ class Str {
 		return s;
 	}
 
-	@:hxmc.export("hx_str_of_i64") static function ofI64(v:I64):String {
+	@:hxmc.host("hx_str_of_i64") static function ofI64(v:I64):String {
 		// digits of the negative value (no overflow at the minimum)
 		var neg = v < 0;
 		var m = neg ? v : -v;
@@ -276,18 +276,18 @@ class Str {
 		return s;
 	}
 
-	@:hxmc.export("hx_str_of_float") static function ofFloat(v:Float):String {
+	@:hxmc.host("hx_str_of_float") static function ofFloat(v:Float):String {
 		var buf = Mem.stack(48);
 		FloatText.format(v, buf);
 		return ofBytes(buf, LibC.strlen(buf).toInt());
 	}
 
-	@:hxmc.export("hx_str_of_bool") @:hxmc.noGc static function ofBool(v:Bool):String
+	@:hxmc.host("hx_str_of_bool") @:hxmc.noGc static function ofBool(v:Bool):String
 		return v ? "true" : "false";
 
 	// ---- String
 
-	@:hxmc.export("String_charAt") static function charAt(s:String, i:Int):String {
+	@:hxmc.host("String_charAt") static function charAt(s:String, i:Int):String {
 		if (Mem.ult(i, len(s))) {
 			var r = make(1);
 			Mem.setI16(Mem.addr(r), 8, unit(s, i));
@@ -296,7 +296,7 @@ class Str {
 		return "";
 	}
 
-	@:hxmc.export("String_charCodeAt") static function charCodeAt(s:String, i:Int):Null<Int> {
+	@:hxmc.host("String_charCodeAt") static function charCodeAt(s:String, i:Int):Null<Int> {
 		if (!Mem.ult(i, len(s))) return null;
 		return unit(s, i);
 	}
@@ -318,7 +318,7 @@ class Str {
 	@:hxmc.noGc static inline function matchAt(c:Ptr, d:Ptr, i:Int, m:Int):Bool
 		return Mem.getU16At(c, 0, i) == Mem.getU16(d, 0) && (m == 1 || MemOps.compare(c.add(2 * i + 2), d.add(2), (2 * (m - 1) : I64)) == 0);
 
-	@:hxmc.export("String_indexOf") @:hxmc.noGc static function indexOf(s:String, sub:String, start:Null<Int>):Int {
+	@:hxmc.host("String_indexOf") @:hxmc.noGc static function indexOf(s:String, sub:String, start:Null<Int>):Int {
 		var n = len(s), m = len(sub);
 		var from:Int = start == null ? 0 : start;
 		if (from < 0) from = 0;
@@ -332,7 +332,7 @@ class Str {
 		return -1;
 	}
 
-	@:hxmc.export("String_lastIndexOf") @:hxmc.noGc static function lastIndexOf(s:String, sub:String, start:Null<Int>):Int {
+	@:hxmc.host("String_lastIndexOf") @:hxmc.noGc static function lastIndexOf(s:String, sub:String, start:Null<Int>):Int {
 		var n = len(s), m = len(sub);
 		var from:Int = start == null ? n : start;
 		if (from > n - m) from = n - m;
@@ -346,7 +346,7 @@ class Str {
 		return -1;
 	}
 
-	@:hxmc.export("String_substr") static function substr(s:String, pos:Int, lenp:Null<Int>):String {
+	@:hxmc.host("String_substr") static function substr(s:String, pos:Int, lenp:Null<Int>):String {
 		var n = len(s);
 		var l:Int = lenp == null ? n : lenp;
 		if (pos < 0) {
@@ -363,7 +363,7 @@ class Str {
 		return range(s, pos, l);
 	}
 
-	@:hxmc.export("String_substring") static function substring(s:String, start:Int, endp:Null<Int>):String {
+	@:hxmc.host("String_substring") static function substring(s:String, start:Int, endp:Null<Int>):String {
 		var n = len(s);
 		var end:Int = endp == null ? n : endp;
 		if (start < 0) start = 0;
@@ -379,7 +379,7 @@ class Str {
 		return range(s, start, end - start);
 	}
 
-	@:hxmc.export("String_toLowerCase") static function toLowerCase(s:String):String {
+	@:hxmc.host("String_toLowerCase") static function toLowerCase(s:String):String {
 		var n = len(s);
 		var r = make(n);
 		var c = chars(s), d = chars(r);
@@ -390,7 +390,7 @@ class Str {
 		return r;
 	}
 
-	@:hxmc.export("String_toUpperCase") static function toUpperCase(s:String):String {
+	@:hxmc.host("String_toUpperCase") static function toUpperCase(s:String):String {
 		var n = len(s);
 		var r = make(n);
 		var c = chars(s), d = chars(r);
@@ -404,7 +404,7 @@ class Str {
 	@:hxmc.host("String_toString") @:hxmc.noGc static function toString(s:String):String
 		return s;
 
-	@:hxmc.export("String_split") static function split(s:String, delim:String):Array<String> {
+	@:hxmc.host("String_split") static function split(s:String, delim:String):Array<String> {
 		var arr:Array<String> = [];
 		var m = len(delim);
 		var start = 0;
@@ -446,7 +446,7 @@ class Str {
 	static inline function capacity(d:Dynamic):Int
 		return (Mem.getI32(Mem.addr(d), -8) & 0x0FFFFFFF) << 2;
 
-	@:hxmc.export("StringBuf_new") static function sbNew():Dynamic {
+	@:hxmc.host("StringBuf_new") static function sbNew():Dynamic {
 		var b = Mem.alloc(2, T_STRINGBUF, K_OBJ);
 		var d = Mem.allocRaw(8, T_ADATA_RAW, K_RAW);
 		Mem.setRefBarrier(b, 8, d);
@@ -474,7 +474,7 @@ class Str {
 		Mem.setI32(Mem.addr(b), 0, at + n);
 	}
 
-	@:hxmc.export("StringBuf_add") static function sbAdd(b:Dynamic, x:Dynamic):Void
+	@:hxmc.host("StringBuf_add") static function sbAdd(b:Dynamic, x:Dynamic):Void
 		sbAddStr(b, Dyn.stdString(x));
 
 	@:hxmc.export("StringBuf_addChar_slow") static function sbAddCharSlow(b:Dynamic, c:Int):Void {
@@ -501,7 +501,7 @@ class Str {
 	@:hxmc.host("StringBuf_get_length") @:hxmc.noGc static function sbGetLength(b:Dynamic):Int
 		return sbLen(b);
 
-	@:hxmc.export("StringBuf_toString") static function sbToString(b:Dynamic):String {
+	@:hxmc.host("StringBuf_toString") static function sbToString(b:Dynamic):String {
 		var n = sbLen(b);
 		var s = make(n);
 		copyUnits(chars(s), Mem.addr(sbData(b)), n);

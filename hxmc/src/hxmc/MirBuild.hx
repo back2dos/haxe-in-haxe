@@ -5,7 +5,7 @@ import hxmc.Mir;
 import hxmc.ir.CInterop.CTy;
 
 // hxmc's IR (hxmc.ir.Ir: structured statements in A-normal form) of one
-// function to Mir (the runtime's inline helpers of rt.h are expanded here,
+// function to Mir (the runtime's inline helpers are expanded here,
 // so the native code and the runtime agree on every detail):
 // - reference locals that Roots puts in shadow-stack slots live in memory
 //   (fr[k]); in functions with a try block the locals a handler can see
@@ -1163,7 +1163,7 @@ class MirBuild {
 	// zero: the slots must read as zeros (Mem.alloc), else every slot is
 	// written before it is read (Mem.allocRaw). The runtime zeroes the nursery
 	// in bulk, so neither stores zeros; they compare different limits, which
-	// differ with RT_VERIFY=1 (rt.c: zeroing allocations then take the slow
+	// differ with RT_VERIFY=1 (Gc.hx: zeroing allocations then take the slow
 	// path). At a cold site the live references are stored on the shadow
 	// stack around the slow call only
 	function alloc(n:Int, tidx:Int, kind:Int, zero:Bool):Int {
@@ -2267,7 +2267,7 @@ class MirBuild {
 		return readVar(r, cur);
 	}
 
-	// StringBuf_addChar (rt.h): the common case inline
+	// StringBuf_addChar (Str.hx): the common case inline
 	function stringBufAddChar(b:Int, c:Int):Int {
 		var len = load(I32, 4, b, 0);
 		var d = load(I64, 8, b, 8);

@@ -230,7 +230,7 @@ class Facts {
 			et.tag = e.ctors.length;
 			e.tindex = addType(et);
 			for (c in e.ctors) {
-				// no tag slot: the constructor is the type index (rt.h)
+				// no tag slot: the constructor is the type index (Gc.hx)
 				var slots:Array<Null<Ty>> = [for (pt in c.params) pt];
 				var t = entry(c.name, "TK_CTOR", slots, e.name + "." + c.name);
 				t.sup = e.tindex;
@@ -411,7 +411,7 @@ class Facts {
 	// Functions that never reach a GC point: no allocation, no impure native,
 	// no throw, and direct calls only to such functions (the largest such set:
 	// candidates are dropped until none calls a dropped one, so recursion
-	// stays in). A call to one keeps the caller's references in registers. They also never stop at a safepoint (rt_thread.c),
+	// stays in). A call to one keeps the caller's references in registers. They also never stop at a safepoint (Threads.hx),
 	// so another thread's collection cannot move objects under them.
 	function findNoGc() {
 		var cand = new Map<FuncInfo, Bool>();

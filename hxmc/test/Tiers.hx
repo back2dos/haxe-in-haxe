@@ -19,7 +19,8 @@ using StringTools;
 //   full   x64, arm64 and wine at 64, 16 and 256 KB, each with RT_VERIFY=1 too;
 //          wasm under node and wasmtime at 16, 64 and 256 KB, under node with
 //          RT_VERIFY=1 at 64 and 256 KB and with legacy exception handling at
-//          16 and 64 KB; ThreadNatives x300 (16 KB) and x100 (64 KB); the
+//          16 and 64 KB; ThreadNatives x300 (16 KB) and x100 (64 KB); the heap
+//          census of a debug build; the
 //          port's self-compile natively (64 KB, 256 KB, 256 KB with
 //          RT_VERIFY=1) and as a module (node, node with 256 KB, wasmtime, node
 //          with legacy exception handling); the tool as a module building
@@ -110,6 +111,19 @@ class Tiers {
 		{ok: r.code == 0, detail: lastLine(r.out) + (bad.length == 0 ? "" : "  " + bad.slice(0, 8).join(", "))};
 	}
 
+	// the heap census of a debug build (-D hxmc.census, RT_CENSUS=2: at every
+	// major collection and at exit) on a case that collects
+	static function census() {
+		var out = "bin/hxmc-t/census/m";
+		mkdirs("bin/hxmc-t/census");
+		var b = exec(["bin/hxmc/hxmc", out, "-cp", "hxmc/test/cases", "-main", "Bench", "-D", "hxmc.census", "-D", "disable-parallelism", "-cp", "bin/hxmc/std",
+			"--custom-target", "hxmc"], {merge: true});
+		if (b.code != 0) return {ok: false, detail: tail(b.out, 300)};
+		var r = exec([FileSystem.fullPath(out)], {cwd: "hxmc/test/cases", env: ["RT_CENSUS" => "2", "RT_MINOR_KB" => "256"]});
+		var n = [for (l in r.err.split("\n")) if (l.startsWith("census (")) l].length;
+		return {ok: r.code == 0 && n > 0, detail: r.code == 0 ? n + " censuses" : tail(r.err, 300)};
+	}
+
 	static function fixpoint() {
 		var r = exec(["make", "--no-print-directory", "fixpoint"], {merge: true});
 		var said = [for (l in r.out.split("\n")) if (l.startsWith("fixpoint:")) l];
@@ -150,6 +164,7 @@ class Tiers {
 			for (kb in ["16", "64"]) lane('wasm node legacy EH ${kb}K', corpus("wasm32-wasi", ["RT_MINOR_KB" => kb], cases, LEGACY));
 			lane("ThreadNatives x300 16K", threads(300, 16));
 			lane("ThreadNatives x100 64K", threads(100, 64));
+			lane("census", census);
 			lane("port self-compile", portNative);
 			lane("port 256K RT_VERIFY", selfCompile(["bin/hxmc-t/port/s"], ["RT_MINOR_KB" => "256", "RT_VERIFY" => "1"]));
 			lane("wasm port build", wasmPortBuild());

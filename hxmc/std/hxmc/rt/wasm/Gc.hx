@@ -5,10 +5,10 @@ import hxmc.rt.Types.*;
 import hxmc.unsafe.Mem;
 import hxmc.unsafe.Ptr;
 
-// The collector and allocator of WebAssembly programs: hxmc/c/rt.c's
+// The collector and allocator of WebAssembly programs: the native Gc.hx's
 // generational copying collector with one thread, in Haxe over linear
 // memory (README.md, "WebAssembly"). Same objects, nursery, promotion
-// and depth-first copying as rt.c (whose comments explain them); the
+// and depth-first copying as the native Gc.hx (whose comments explain them); the
 // differences: memory comes from Heap (it grows, it is never given back),
 // the old space is a list of chunks rather than a contiguous semispace (a
 // major collection copies into chunks taken as it goes, then the from-space's
@@ -75,7 +75,7 @@ class Gc {
 	static var gcStack:Ptr;
 	static var gcTop:Int;
 	static var gcCap:Int;
-	// nursery growth (rt.c's adapt_nursery)
+	// nursery growth (the native Gc.adaptNursery)
 	static var grownFrom:Int;
 	static var survivedBefore:Int;
 	static var growthOff:Bool;
@@ -165,7 +165,7 @@ class Gc {
 	}
 
 	// ---- allocation
-	// As in rt.c: allocations bump rt_young_ptr through a chunk of the nursery
+	// As in the native Gc.hx: allocations bump rt_young_ptr through a chunk of the nursery
 	// zeroed when it is taken (32 KB, RT_ZCHUNK_KB: in cache right before its
 	// allocations), so no allocation zeroes its own slots. Those whose every
 	// slot is written before it is read (Mem.allocRaw) compare the chunk's end
@@ -568,7 +568,7 @@ class Gc {
 	// RT_VERIFY=1: before and after each collection, the old space is checked
 	// object by object (sane headers; after it, references to nothing young);
 	// the free nursery is filled with a byte pattern at startup and after each
-	// collection (as rt.c does), so that an allocation that is not initialized
+	// collection (as the native Gc.hx does), so that an allocation that is not initialized
 	// reads the pattern from its first use, and so does a reference the
 	// collection did not see (a missing root)
 	static var verifying:Bool;

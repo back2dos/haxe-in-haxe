@@ -12,7 +12,7 @@ import hxmc.unsafe.Ptr;
 // constants and structure offsets per target below. Paths and arguments are
 // passed as malloc'ed UTF-8 copies (no heap address crosses a call that
 // may block). With several threads, reads and waits go through the
-// runtime's scheduler (rt_wait_fd, safe regions: rt_thread.c).
+// runtime's scheduler (rt_wait_fd, safe regions: Threads.hx).
 class PosixSys {
 	static inline function mac():Bool
 		return Mem.os() == 1;

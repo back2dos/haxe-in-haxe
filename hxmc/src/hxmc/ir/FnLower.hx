@@ -240,13 +240,13 @@ class FnLower {
 		"String_charCodeAt_i" => true, "hx_str_hash" => true,
 		"hx_unbox_int" => true, "hx_unbox_float" => true, "hx_unbox_bool" => true
 	];
-	// the Math natives: pure, static inline in rt.h
+	// the Math natives: pure, expanded inline by MirBuild
 	public static var MATH = [
 		for (n in ["NaN", "POSITIVE_INFINITY", "NEGATIVE_INFINITY", "PI", "abs", "acos", "asin", "atan", "atan2", "cos", "sin", "tan", "exp", "log", "sqrt", "pow",
 			"floor", "ceil", "round", "ffloor", "fceil", "fround", "max", "min", "isNaN", "isFinite"])
 			"Math_" + n => true
 	];
-	// static inline in rt.h: no prototype is emitted for them
+	// expanded inline by MirBuild: no function is emitted for them
 	public static var RT_INLINE = {
 		var m = MATH.copy();
 		m.set("StringBuf_addChar", true);

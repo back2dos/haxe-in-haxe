@@ -5,8 +5,7 @@ import hxmc.rt.Layouts as L;
 import hxmc.unsafe.*;
 
 // The Windows host layer of the runtime (once hxmc/c/rt_win.c and the
-// crash handler of rthxmc.c), called by the runtime's remaining C code by
-// these symbols (rt_win.h) and by its Haxe code.
+// crash handler of rthxmc.c), called by the runtime's Haxe code.
 //
 // Memory: the collector reserves large ranges (heap regions, the shadow
 // stack) and relies on pages being committed as they are touched
@@ -16,7 +15,7 @@ import hxmc.unsafe.*;
 // chunks), and rt_win_decommit gives them back. A guard is a part of a range
 // that is never committed. The handler and everything it calls are no-GC
 // functions: they run on any thread, at any instruction.
-@:hxmc.os("windows") @:keep
+@:hxmc.os("windows") @:keep @:allow(hxmc.rt)
 class WinRt {
 	static inline var MAX_RANGES = 256;
 	// a range: start, end ([start, end), 0 when free), guard start, guard end
@@ -41,7 +40,7 @@ class WinRt {
 	static var pageSize:Int;
 	static var socketsReady:Bool;
 
-	@:hxmc.export("rt_win_page_size") @:hxmc.noGc static function rtPageSize():I64 {
+	@:hxmc.host("rt_win_page_size") @:hxmc.noGc static function rtPageSize():I64 {
 		if (pageSize == 0) {
 			var si = Mem.stack(64); // SYSTEM_INFO: dwPageSize at 4
 			K.GetSystemInfo(si);
@@ -98,7 +97,7 @@ class WinRt {
 		return ok ? EXCEPTION_CONTINUE_EXECUTION : EXCEPTION_CONTINUE_SEARCH;
 	}
 
-	@:hxmc.export("rt_win_reserve") @:hxmc.noGc static function reserve(bytes:I64):Ptr {
+	@:hxmc.host("rt_win_reserve") @:hxmc.noGc static function reserve(bytes:I64):Ptr {
 		var p = K.VirtualAlloc(Ptr.nil(), bytes, MEM_RESERVE, PAGE_READWRITE);
 		if (p.isNull()) return p;
 		if (table.isNull()) {
@@ -126,7 +125,7 @@ class WinRt {
 		return p;
 	}
 
-	@:hxmc.export("rt_win_release") @:hxmc.noGc static function release(p:Ptr, bytes:I64):Void {
+	@:hxmc.host("rt_win_release") @:hxmc.noGc static function release(p:Ptr, bytes:I64):Void {
 		K.AcquireSRWLockExclusive(lockOf());
 		var r = findRange(p);
 		if (!r.isNull()) {
@@ -137,7 +136,7 @@ class WinRt {
 		K.VirtualFree(p, 0, MEM_RELEASE);
 	}
 
-	@:hxmc.export("rt_win_guard") @:hxmc.noGc static function guard(p:Ptr, bytes:I64):Void {
+	@:hxmc.host("rt_win_guard") @:hxmc.noGc static function guard(p:Ptr, bytes:I64):Void {
 		K.AcquireSRWLockExclusive(lockOf());
 		var r = findRange(p);
 		if (!r.isNull()) {
@@ -148,12 +147,12 @@ class WinRt {
 		K.VirtualFree(p, bytes, MEM_DECOMMIT);
 	}
 
-	@:hxmc.export("rt_win_decommit") @:hxmc.noGc static function decommit(p:Ptr, bytes:I64):Void {
+	@:hxmc.host("rt_win_decommit") @:hxmc.noGc static function decommit(p:Ptr, bytes:I64):Void {
 		if (bytes != (0 : I64)) K.VirtualFree(p, bytes, MEM_DECOMMIT);
 	}
 
 	// a malloc'ed UTF-8 copy of a wide string (invalid sequences become U+FFFD)
-	@:hxmc.export("rt_win_utf8") @:hxmc.noGc static function utf8(w:Ptr):Ptr {
+	@:hxmc.host("rt_win_utf8") @:hxmc.noGc static function utf8(w:Ptr):Ptr {
 		var n = K.WideCharToMultiByte(CP_UTF8, 0, w, -1, Ptr.nil(), 0, Ptr.nil(), Ptr.nil());
 		var s = LibC.malloc((n > 0 ? n : 1 : I64));
 		if (n <= 0 || K.WideCharToMultiByte(CP_UTF8, 0, w, -1, s, n, Ptr.nil(), Ptr.nil()) == 0) Mem.setI8(s, 0, 0);
@@ -161,7 +160,7 @@ class WinRt {
 	}
 
 	// a Winsock error as the errno OCaml's Unix library reports (unixsupport_win32.c)
-	@:hxmc.export("rt_win_sock_errno") @:hxmc.noGc static function sockErrno(wsa:Int):Int
+	@:hxmc.host("rt_win_sock_errno") @:hxmc.noGc static function sockErrno(wsa:Int):Int
 		return L.wsaErrno(wsa);
 
 	// a Win32 error as the errno OCaml's runtime maps it to (caml_win32_maperr)
@@ -169,7 +168,7 @@ class WinRt {
 		return L.winErrno(err);
 
 	// WSAStartup, once (two threads racing call it twice: it counts)
-	@:hxmc.export("rt_win_sockets_init") @:hxmc.noGc static function socketsInit():Void {
+	@:hxmc.host("rt_win_sockets_init") @:hxmc.noGc static function socketsInit():Void {
 		if (socketsReady) return;
 		var d = Mem.stack(512); // WSADATA
 		Ws.WSAStartup(0x0202, d);
@@ -181,7 +180,7 @@ class WinRt {
 	// neither a debugger's stack trace nor an unhandled-exception filter can
 	// be relied on); HXMC_TRACE reports the start
 
-	@:hxmc.export("rt_win_init") @:hxmc.noGc static function init():Void {
+	@:hxmc.host("rt_win_init") @:hxmc.noGc static function init():Void {
 		K.AddVectoredExceptionHandler(0, Callback.addr(crash));
 		var v = Mem.stack(16);
 		var name = Mem.stack(16);

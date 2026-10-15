@@ -34,8 +34,8 @@ follow-ups that would make it pay):
   (frames without references are visited too); frames not resumed since
   the last minor collection hold no young references (a watermark).
 
-The collector itself stays C on the native targets (README, "Runtime in
-Haxe").
+The collector is Haxe on the native targets too (`hxmc/std/hxmc/rt/Gc.hx`;
+LOWLEVEL.md, "The runtime without C of our own").
 
 ### Escape analysis
 
@@ -114,33 +114,20 @@ fits, with a flag in the header (as JDK 9's compact strings and V8 do).
   1.6 MB of which Latin-1 storage would save (under 1% of the heap).
   I/O-heavy programs gain more than the compiler does.
 
-### The runtime in Haxe (in progress)
+### The runtime in Haxe (done)
 
-Moving `hxmc/c/` from C to Haxe compiled by hxmc, Go-style: strings, Dynamic
-access and maps, std natives, OS wrappers, thread coordination, finally
-the GC. Built on internal intrinsics (raw loads/stores, pointer
-arithmetic, atomics, fences), compiler-checked no-GC functions and C-ABI
-externs. What stays native: startup, stack switching, the thread
-trampoline, exception unwinding (setjmp/longjmp or hxmc's own), the
-Windows exception handler; libc/libm or the system libraries; mbedtls
-and libuv.
-
-Shims that cannot be intrinsics are written per architecture through
-hxmc's own encoders, as "naked" functions:
-
-```haxe
-@:hxmc.naked static function switchStack(newSp:Ptr, fn:Ptr):Void {
-  #if hxmc_x64
-  X64.mov(R11, RSP); X64.mov(RSP, RDI); X64.push(R11); X64.call(RSI); X64.pop(RSP); X64.ret();
-  #elseif hxmc_a64
-  ...
-  #end
-}
-```
-
-Keep these to a handful: instruction sets, calling conventions and
-memory models differ per architecture; everything else goes through the
-machine-independent IR and intrinsics.
+Done (2026-10-15): `hxmc/c/` holds no C of ours. Strings, Dynamic
+access and maps, std natives, OS wrappers, the collector, threads and the
+stop-the-world handshake, startup and `rt_throw` are Haxe compiled with the
+program (`hxmc/std/hxmc/rt`), over internal intrinsics (raw loads and
+stores, pointer arithmetic, atomics, `Mem.callOnStack` for the main
+thread's big stack, `Mem.zero`), compiler-checked no-GC functions, C-ABI
+externs and callbacks (thread entries, `atexit`, Windows fibers). What
+stays native: the C library (musl's members, the UCRT and MinGW-w64,
+libSystem), mbedtls and libuv. Details: LOWLEVEL.md, "The runtime without
+C of our own". The collector runs as fast as the C one did (the
+benchmarks, the port's self-compile); the runtime's typed modules are
+cached (TypesCache), so builds are faster than with the C runtime.
 
 ### Direct system calls on Linux
 
@@ -403,8 +390,8 @@ to the reference's HXB under both (15-16 s, native 8.4 s). Left:
 
 - Threads: wasm threads (shared memory, atomics, `memory.atomic.wait`)
   under wasi-threads or a browser's workers; the collector's
-  stop-the-world handshake would come back (rt_thread.c's other half, in
-  Haxe this time). Until then `Thread.create` throws.
+  stop-the-world handshake of the native targets (`Threads.hx`) would
+  come back. Until then `Thread.create` throws.
 - A browser: done for the playground (2026-10-15, README "WebAssembly":
   WASI's imports from JavaScript, `hxmc/web/src/WasiHost.hx`; exnref exception
   handling, on by default in current Chrome, Firefox and Safari). Left:

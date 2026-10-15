@@ -3,7 +3,7 @@ package hxmc.rt;
 // The runtime's Haxe modules (README.md, "Runtime in Haxe"), loaded
 // into every program through Std (hxmc/std/Std.hx). Their classes are
 // @:keep (DCE keeps them typed); hxmc compiles only the functions a program
-// calls, and the @:hxmc.export ones the runtime's C code calls.
+// calls, and the @:hxmc.export ones (generated code calls them by symbol).
 import hxmc.rt.Str;
 import hxmc.rt.Dyn;
 import hxmc.rt.Arr;
@@ -24,11 +24,18 @@ import hxmc.rt.wasm.LibM;
 import hxmc.rt.wasm.Threads;
 import hxmc.rt.wasm.NoSslUv;
 #else
-// the native targets' runtime over C libraries (@:hxmc.native; mbedtls's
-// and libuv's, hxmc.rt.Ssl and hxmc.rt.Uv, typed with hxmc.NativeSsl and
-// hxmc.NativeUv: for the programs that use them)
+// the native targets' runtime over the C library (@:hxmc.native): the
+// collector, the threads, the start; the threads' API (ThreadApi), mbedtls's
+// and libuv's glue (Ssl, Uv) are typed with hxmc.NativeThread, NativeSsl and
+// NativeUv, for the programs that use them
+import hxmc.rt.Gc;
 import hxmc.rt.GcPaths;
+import hxmc.rt.Threads;
+import hxmc.rt.Start;
 import hxmc.rt.WinRt;
+#if hxmc.census
+import hxmc.rt.Census;
+#end
 #end
 
 class Runtime {}

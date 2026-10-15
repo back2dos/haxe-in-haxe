@@ -1,12 +1,16 @@
 #!/bin/sh
-# Builds the runtime object of an hxmc target (README.md, "hxmc"):
-# hxmc/c compiled by zig cc -O2 for the target, partially linked (ld -r) with
-# the parts of the C library it and generated code use, into one relocatable
-# object bin/hxmc/rt/<target>/rt.o, which hxmc's linker then links with the
-# program (and lays out once, see Link.hx). Next to it, ssl.o and uv.o:
-# mbedtls and libuv (which hxmc/std/hxmc/rt/Ssl.hx and Uv.hx call), linked
-# only into programs that refer to them, from the libraries hxmc/c/deps.sh
-# built into bin/hxmc/deps/<target> (DEPS); without them, neither.
+# Builds the runtime objects of an hxmc target (README.md, "hxmc"): the
+# runtime is Haxe (hxmc/std/hxmc/rt); rt.o is the parts of the C library
+# that generated code and the runtime's Haxe code call (musl's members and
+# its startup object on Linux, the C runtime's startup objects, MinGW-w64's
+# members and the UCRT's imports on Windows; nothing on macOS, whose C
+# library is libSystem, bound at load time), partially linked (ld -r) into
+# one relocatable object bin/hxmc/rt/<target>/rt.o, which hxmc's linker then
+# links with the program (and lays out once, see Link.hx). Next to it, ssl.o
+# and uv.o: mbedtls and libuv (which hxmc/std/hxmc/rt/Ssl.hx and Uv.hx call),
+# linked only into programs that refer to them, from the libraries
+# hxmc/c/deps.sh built into bin/hxmc/deps/<target> (DEPS); without them,
+# neither.
 # zig must be the version of hxmc/c/zig-version (the objects are published
 # by a hash of hxmc/c: hxmc/bootstrap/rt.mjs).
 #   sh hxmc/c/mkrt.sh linux-x86_64
@@ -28,27 +32,6 @@ esac
 out=$ROOT/bin/hxmc/rt/$target
 deps=${DEPS:-$ROOT/bin/hxmc/deps/$target}
 mkdir -p "$out/obj"
-CFLAGS="-O2 -g0 -w -fno-strict-aliasing -fno-pie -fno-pic -ffunction-sections -fdata-sections -DRT_CALL_ON_STACK -I $ROOT/hxmc/c"
-files="rt rt_thread"
-case $target in
-windows-*)
-	CFLAGS="-O2 -g0 -w -fno-strict-aliasing -I $ROOT/hxmc/c"
-	;;
-macos-*)
-	# position-independent (macOS executables are), against libSystem;
-	# arm64 macOS calls main on its own stack without ucontext already
-	CFLAGS="-O2 -g0 -w -fno-strict-aliasing -mmacosx-version-min=$([ $target = macos-arm64 ] && echo 11.0 || echo 10.15) -I $ROOT/hxmc/c" ;;
-esac
-# HXMC_RT_CENSUS=1: a debug build with the heap census (RT_CENSUS, rt_census.c)
-if [ "${HXMC_RT_CENSUS:-}" = 1 ]; then
-	CFLAGS="$CFLAGS -DRT_CENSUS_BUILD"
-	files="$files rt_census"
-fi
-objs=
-for f in $files; do
-	$ZIG cc -target $triple $CFLAGS -c "$ROOT/hxmc/c/$f.c" -o "$out/obj/$f.o" &
-	objs="$objs $out/obj/$f.o"
-done
 # mbedtls and libuv themselves, when deps.sh built them
 if [ -f "$deps/VERSIONS" ]; then
 	sslar="$deps/lib/libmbedtls.a $deps/lib/libmbedx509.a $deps/lib/libmbedcrypto.a"
@@ -59,16 +42,17 @@ else
 	sslar=
 	uvar=
 fi
-wait
 rm -f "$out/ssl.o" "$out/uv.o" "$out/obj/ssl.undef" "$out/obj/uv.undef"
 # the functions the runtime's Haxe code declares (its externs of mbedtls and
 # libuv, hxmc/std/hxmc/rt/Ssl.hx and Uv.hx) are the roots of ssl.o and uv.o
 sslroots=; for f in $(grep -o 'static function mbedtls_[a-z0-9_]*' "$ROOT/hxmc/std/hxmc/rt/Ssl.hx" | sed 's/static function //' | sort -u) mbedtls_entropy_func mbedtls_ctr_drbg_random; do sslroots="$sslroots -u $f"; done
 uvroots=; for f in $(grep -o 'static function uv_[a-z0-9_]*' "$ROOT/hxmc/std/hxmc/rt/Uv.hx" | sed 's/static function //' | sort -u); do uvroots="$uvroots -u $f"; done
-# what generated code calls in the C library besides the runtime (MirBuild),
-# and what the runtime's Haxe code calls (hxmc/std/hxmc/unsafe/LibC.hx)
+# what generated code calls in the C library (MirBuild), and what the
+# runtime's Haxe code calls (hxmc/std/hxmc/unsafe/LibC.hx; the collector and
+# the threads: hxmc/std/hxmc/rt/Os.hx, Threads.hx, Start.hx)
 libm="memset memcpy fmod floor ceil sin cos tan asin acos atan atan2 exp log pow sqrt"
 libm="$libm memmove memcmp strlen strcmp malloc free strtod rand clock_gettime mktime"
+libm="$libm getenv exit fflush atexit nanosleep"
 case $target in
 windows-*)
 	libm="$libm _mktime64 _localtime64_s _gmtime64_s"
@@ -82,7 +66,8 @@ windows-*)
 	# hxmc/std/hxmc/unsafe/Winsock.hx
 	libm="$libm socket closesocket accept bind connect listen getsockname getpeername getsockopt setsockopt recv send"
 	libm="$libm select shutdown ioctlsocket gethostname gethostbyname gethostbyaddr WSAGetLastError SetHandleInformation"
-	libm="$libm strerror _strdup" ;;
+	libm="$libm strerror _strdup _setmode"
+	case $target in windows-arm64) libm="$libm __mingw_longjmp" ;; *) libm="$libm longjmp" ;; esac ;;
 *)
 	libm="$libm localtime_r gmtime_r"
 	# hxmc/std/hxmc/unsafe/Posix.hx
@@ -91,13 +76,18 @@ windows-*)
 	libm="$libm unlink rmdir rename stat fstat opendir readdir closedir realloc environ"
 	libm="$libm socket bind connect accept listen getsockname getpeername getsockopt setsockopt recv send select"
 	libm="$libm shutdown signal strerror gethostname gethostbyname gethostbyaddr strdup sched_yield"
+	# hxmc/std/hxmc/rt/Os.hx, Start.hx
+	libm="$libm sysconf mmap munmap mprotect madvise poll _longjmp"
+	libm="$libm pthread_mutex_init pthread_mutex_destroy pthread_mutex_lock pthread_mutex_trylock pthread_mutex_unlock"
+	libm="$libm pthread_condattr_init pthread_condattr_setclock pthread_cond_init pthread_cond_destroy pthread_cond_wait"
+	libm="$libm pthread_cond_timedwait pthread_cond_signal pthread_cond_broadcast pthread_attr_init pthread_attr_destroy"
+	libm="$libm pthread_attr_setstacksize pthread_attr_setdetachstate pthread_create"
 	case $target in linux-*) libm="$libm __errno_location" ;; esac ;;
 esac
 case $target in
 macos-*)
-	# the runtime's Mach-O objects merged into one (hxmc --mkrt-macho); the
-	# C library is libSystem, bound at load time
-	"${HXMC:-$ROOT/bin/hxmc/hxmc}" --mkrt-macho "$out/rt.o" $objs
+	# nothing of the C library (libSystem, bound at load time): an empty object
+	"${HXMC:-$ROOT/bin/hxmc/hxmc}" --mkrt-macho "$out/rt.o" $([ $target = macos-arm64 ] && echo --arm64)
 	[ -n "$sslar" ] && "${HXMC:-$ROOT/bin/hxmc/hxmc}" --mkrt-macho "$out/ssl.o" $sslar $sslroots
 	[ -n "$uvar" ] && "${HXMC:-$ROOT/bin/hxmc/hxmc}" --mkrt-macho "$out/uv.o" $uvar $uvroots
 	ls -l "$out/rt.o" "$out/ssl.o" "$out/uv.o"
@@ -122,11 +112,9 @@ windows-*)
 	[ -n "$uvar" ] && "${HXMC:-$ROOT/bin/hxmc/hxmc}" --mkrt "$out/uv.o" $uvar $sysar $uvroots -U "$out/obj/uv.undef"
 	sj=_setjmp; [ $target = windows-arm64 ] && sj=__mingw_setjmp
 	undef="-u mainCRTStartup -u $sj -u _tls_index -u _tls_used -x main"
-	# the runtime's functions in Haxe (@:hxmc.export) that its C calls: defined by the program
-	for f in $(grep -ho '@:hxmc.export("[A-Za-z0-9_]*")' "$ROOT"/hxmc/std/hxmc/rt/*.hx | sed 's/.*("//; s/")//' | sort -u); do undef="$undef -x $f"; done
 	for f in $libm $(cat "$out/obj/ssl.undef" "$out/obj/uv.undef" | grep -v '^hx\|^rt_\|^haxe_') ; do undef="$undef -u $f"; done
 	for f in $(cat "$out/obj/ssl.undef" "$out/obj/uv.undef" | grep '^hx\|^haxe_'); do undef="$undef -x $f"; done
-	"${HXMC:-$ROOT/bin/hxmc/hxmc}" --mkrt "$out/rt.o" $objs $inputs $undef
+	"${HXMC:-$ROOT/bin/hxmc/hxmc}" --mkrt "$out/rt.o" $inputs $undef
 	ls -l "$out/rt.o" "$out/ssl.o" "$out/uv.o"
 	exit 0 ;;
 esac
@@ -142,5 +130,5 @@ libs=$(echo "$line" | tr ' ' '\n' | grep -E '/lib(c|zigc|compiler_rt)\.a$' | tr 
 [ -n "$uvar" ] && ld.lld -r --strip-debug -o "$out/uv.o" $uvroots --start-group $uvar --end-group
 undef="-u _setjmp"
 for f in $libm $(nm -u $(ls "$out/ssl.o" "$out/uv.o" 2>/dev/null) | awk '{print $2}' | grep -v '^hx\|^haxe_' | sort -u); do undef="$undef -u $f"; done
-ld.lld -r --strip-debug -o "$out/rt.o" $undef "$crt1" $objs --start-group $libs --end-group
+ld.lld -r --strip-debug -o "$out/rt.o" $undef "$crt1" --start-group $libs --end-group
 ls -l "$out/rt.o" "$out/ssl.o" "$out/uv.o"

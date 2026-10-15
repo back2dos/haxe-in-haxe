@@ -1,11 +1,14 @@
 package hxmc;
 
-// Threads (rt_thread.c), the base of the hxmc sys.thread package and of
-// haxe.atomic. Native gcc/clang/cosmocc builds run threads on OS threads in
-// parallel (1:1); tcc builds run them as green threads on one OS thread (M:1,
-// switching where a thread blocks or allocates); the wasm build has none. The
-// primitives below behave the same in all of them. Threads are ids; the main
-// thread is 1.
+// the implementation, typed only for the programs that use threads
+#if !(hxmc.target == "wasm32-wasi")
+import hxmc.rt.ThreadApi;
+#end
+
+// Threads (hxmc.rt.ThreadApi over hxmc.rt.Threads), the base of the hxmc
+// sys.thread package and of haxe.atomic. Native programs run threads on OS
+// threads in parallel (1:1); WebAssembly has none (hxmc.rt.wasm.Threads).
+// Threads are ids; the main thread is 1.
 extern class NativeThread {
 	static function spawn(job:() -> Void):Int; // a new thread running job
 	static function current():Int;

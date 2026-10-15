@@ -510,8 +510,85 @@ class FloatText {
 		return nd;
 	}
 
+	// printf's %.<decimals>f of v into out (at most 330 + decimals bytes, no
+	// NUL): its length. The exact value rounded to nearest, ties to even, as the
+	// C library rounds (the runtime's reports: RT_STATS, the census).
+	@:hxmc.noGc public static function fixed(v:Float, decimals:Int, out:Ptr):Int {
+		var o = 0;
+		inline function put(c:Int) {
+			Mem.setI8(out, o, c);
+			o++;
+		}
+		if (v != v) {
+			if (bits(v) < 0) put("-".code);
+			put("n".code);
+			put("a".code);
+			put("n".code);
+			return o;
+		}
+		if (bits(v) < 0) {
+			put("-".code);
+			v = -v;
+		}
+		if (v == inf()) {
+			put("i".code);
+			put("n".code);
+			put("f".code);
+			return o;
+		}
+		// the exact digits d1 d2 ... with d1 at 10^e10; those kept: down to 10^-decimals
+		var dig = Mem.stack(1200);
+		var nd = 0, e10 = 0;
+		if (v != 0) {
+			var ep = Mem.stack(8);
+			nd = exactDigits(v, dig, ep);
+			e10 = Mem.getI32(ep, 0);
+		}
+		// kept digits: positions e10 down to -decimals (index i is 10^(e10 - i))
+		var keep = e10 + decimals + 1;
+		// round at `keep` (ties to even on the exact value)
+		inline function digit(i:Int):Int
+			return i >= 0 && i < nd ? Mem.getU8(dig, i) : 0;
+		var up = false;
+		if (keep < nd) {
+			var first = keep >= 0 ? digit(keep) : 0;
+			if (keep < 0) up = false else if (first > 5) up = true else if (first == 5) {
+				var rest = false;
+				for (i in keep + 1...nd)
+					if (digit(i) != 0) rest = true;
+				up = rest || (keep > 0 && digit(keep - 1) % 2 == 1);
+			}
+		}
+		// the kept digits as a number string: integer part from 10^max(e10, 0)
+		var top = e10 > 0 ? e10 : 0;
+		var n = top + decimals + 1; // digits from 10^top down to 10^-decimals
+		var d = Mem.stack(1400);
+		for (k in 0...n) {
+			var i = e10 - (top - k); // index of 10^(top - k)
+			Mem.setI8(d, k, i < keep ? digit(i) : 0);
+		}
+		if (up) {
+			var k = n - 1;
+			while (k >= 0) {
+				var x = Mem.getU8(d, k) + 1;
+				if (x < 10) {
+					Mem.setI8(d, k, x);
+					break;
+				}
+				Mem.setI8(d, k, 0);
+				k--;
+			}
+			if (k < 0) put("1".code);
+		}
+		for (k in 0...n) {
+			if (k == top + 1) put(".".code);
+			put(48 + Mem.getU8(d, k));
+		}
+		return o;
+	}
+
 	// shortest representation that reads back as the same double, formatted like JavaScript
-	@:hxmc.export("hx_format_float") @:hxmc.noGc static function format(v:Float, out:Ptr):Void {
+	@:hxmc.host("hx_format_float") @:hxmc.noGc static function format(v:Float, out:Ptr):Void {
 		var o = 0;
 		inline function put(c:Int) {
 			Mem.setI8(out, o, c);

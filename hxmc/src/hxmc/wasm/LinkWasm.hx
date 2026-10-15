@@ -54,7 +54,7 @@ class LinkWasm {
 		"random_get" => "ii>i", "sched_yield" => ">i", "poll_oneoff" => "iiii>i",
 	];
 
-	// runtime variables the C runtime defines on the native targets (DataGen's code refers to them)
+	// runtime variables the runtime's Haxe code exports on the native targets (DataGen's code refers to them)
 	// (name => bytes, zeroed)
 	static var CELLS:Map<String, Int> = [
 		"rt_globals" => 8, "rt_young_start" => 8, "rt_young_end" => 8, "rt_argc" => 8, "rt_argv" => 8, "rt_nthreads" => 8,
@@ -568,7 +568,7 @@ class LinkWasm {
 }
 
 // Functions the linker writes: WebAssembly instructions for what the C
-// library and the C runtime provide on the native targets.
+// library provides on the native targets.
 class Builtins {
 	static var SIGS:Map<String, String> = [
 		"memcpy" => "lll>l", "memmove" => "lll>l", "memset" => "lil>l", "floor" => "d>d", "ceil" => "d>d", "trunc" => "d>d",

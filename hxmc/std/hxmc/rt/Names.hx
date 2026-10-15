@@ -16,7 +16,7 @@ import hxmc.unsafe.Ptr;
 // Field names as Strings are immortal copies outside the heap, laid out like
 // the string literals (the collector leaves both alone).
 //
-// Inline caches with several threads (rt.h rt_ic): a filled entry is never
+// Inline caches with several threads (rt_ic): a filled entry is never
 // rewritten (a reader could see half of it); a miss on an entry filled for
 // another type looks the field up into a per-thread table of immutable
 // entries by (type, field id). Before the second thread starts, entries are
@@ -151,7 +151,7 @@ class Names {
 		return f;
 	}
 
-	@:hxmc.export("hx_fid_c") @:hxmc.noGc static function fidC(name:Ptr):Int {
+	@:hxmc.host("hx_fid_c") @:hxmc.noGc static function fidC(name:Ptr):Int {
 		var f = findStatic(name);
 		if (f >= 0) return f;
 		lock();
@@ -160,7 +160,7 @@ class Names {
 		return f;
 	}
 
-	@:hxmc.export("hx_fid_slow") @:hxmc.noGc static function fidSlow(name:String):Int {
+	@:hxmc.host("hx_fid_slow") @:hxmc.noGc static function fidSlow(name:String):Int {
 		var u = Str.toUtf8(name);
 		var f = intern(u);
 		LibC.free(u);
@@ -168,14 +168,14 @@ class Names {
 	}
 
 	// the id of a name if it has one (no interning): -1 otherwise
-	@:hxmc.export("hx_fid_find") @:hxmc.noGc static function fidFind(name:String):Int {
+	@:hxmc.host("hx_fid_find") @:hxmc.noGc static function fidFind(name:String):Int {
 		var u = Str.toUtf8(name);
 		var f = fidC(u);
 		LibC.free(u);
 		return f;
 	}
 
-	@:hxmc.export("hx_fid_name") @:hxmc.noGc static function fidName(f:Int):Ptr
+	@:hxmc.host("hx_fid_name") @:hxmc.noGc static function fidName(f:Int):Ptr
 		return f < nstatic() ? staticName(f) : extraName(f - nstatic());
 
 	@:hxmc.noGc static function strOf(f:Int):Ptr {
@@ -186,7 +186,7 @@ class Names {
 	}
 
 	// a field name as a String, made once
-	@:hxmc.export("hx_fid_str") static function fidStr(f:Int):String {
+	@:hxmc.host("hx_fid_str") static function fidStr(f:Int):String {
 		var r = strOf(f);
 		if (!r.isNull()) return Mem.obj(r);
 		var n = fidName(f);
@@ -260,8 +260,8 @@ class Names {
 		return e;
 	}
 
-	// a thread's end (rt_thread.c): its entries go
-	@:hxmc.export("rt_dyn_thread_exit") @:hxmc.noGc static function threadExit():Void {
+	// a thread's end (Threads.exit): its entries go
+	@:hxmc.host("rt_dyn_thread_exit") @:hxmc.noGc static function threadExit():Void {
 		for (i in 0...icCap)
 			if (!(Mem.getI64(icKeys, 8 * i) == 0)) LibC.free(Mem.getPtr(icVals, 8 * i));
 		LibC.free(icKeys);

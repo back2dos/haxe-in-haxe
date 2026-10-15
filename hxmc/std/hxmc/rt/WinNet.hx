@@ -13,7 +13,7 @@ import hxmc.unsafe.Winsock;
 // does with BSD sockets elsewhere, standing for OCaml's Unix library on
 // Windows. A socket is its SOCKET handle as an Int. Errors are Winsock's,
 // mapped to the errno values OCaml's Unix library reports for them
-// (rt_win_sock_errno, rt_win.c); strerror is the C runtime's message for
+// (WinRt.sockErrno); strerror is the C runtime's message for
 // those. Sockets are not inherited by child processes. Winsock has no way
 // to ask whether a socket blocks, so the sockets the program made
 // non-blocking (setBlocking) are remembered here (a malloc'ed table under

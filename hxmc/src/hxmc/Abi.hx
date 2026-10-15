@@ -14,7 +14,7 @@ class Abi {
 	public static inline var IC_KIND = 8;
 	public static inline var IC_FN = 16;
 	public static inline var IC_SIG = 24;
-	// object header (rt.h): the type index is bits 32..47, i.e. the 16-bit
+	// object header (Gc.hx): the type index is bits 32..47, i.e. the 16-bit
 	// word at payload - 4; the kind bits 28..31 of the word at payload - 8
 	public static inline var HDR_TINDEX = -4;
 	public static inline var T_FIRST = 32;

@@ -2,17 +2,17 @@ package hxmc.rt;
 
 import hxmc.I64;
 import hxmc.rt.Layouts as L;
+import hxmc.rt.C;
 import hxmc.unsafe.*;
 
-// The system layer of the native runtime's collector and threads (once the
-// C of rt.c and rt_thread.c): reserved memory committed as it is touched,
-// mutexes and condition variables (pthreads; Windows: SRW locks and
-// condition variables), detached threads, the main program's large stack
-// (a pthread whose stack is a reservation; Windows: a fiber), time, the
-// environment, errno, poll. Every function is no-GC: the collector calls
-// them while objects move, and threads call them where they hold no heap
-// pointer. The C structures are opaque memory of the target's sizes
-// (Layouts, read from the headers).
+// The system layer of the native runtime's collector and threads (Gc,
+// Threads): reserved memory committed as it is touched (Windows: WinRt's
+// reservations), mutexes and condition variables in memory the caller
+// provides (pthreads; Windows: SRW locks and condition variables), detached
+// threads, time, the environment, errno, poll, the runtime's own reports.
+// Every function is no-GC: the collector calls them while objects move, and
+// threads call them where they hold no heap address. The C structures are
+// opaque memory of the target's sizes (Layouts, read from the headers).
 @:hxmc.native
 class Os {
 	static inline function windows():Bool
@@ -23,24 +23,21 @@ class Os {
 
 	// ---- the environment
 
-	@:hxmc.noGc public static function getenv(name:String):Ptr {
-		var buf = Mem.stack(64);
-		for (i in 0...name.length)
-			Mem.setI8(buf, i, StringTools.fastCodeAt(name, i));
-		Mem.setI8(buf, name.length, 0);
-		return C.getenv(buf);
-	}
+	// getenv of a name (a string literal: a C string in the program's data; null: unset)
+	public static inline function getenv(name:String):Ptr
+		return C.getenv(Mem.cstr(name));
 
-	@:hxmc.noGc public static function has(name:String):Bool
+	public static inline function has(name:String):Bool
 		return !getenv(name).isNull();
 
-	// the decimal value of an environment variable (atoi), or def when unset
-	@:hxmc.noGc public static function envInt(name:String, def:Int):Int {
-		var p = getenv(name);
-		if (p.isNull()) return def;
+	// atoi of p: leading blanks, a sign, the digits
+	@:hxmc.noGc public static function atoi(p:Ptr):Int {
 		var i = 0, neg = false, v = 0;
-		while (Mem.getU8(p, i) == " ".code)
+		while (true) {
+			var c = Mem.getU8(p, i);
+			if (c != " ".code && (c < 9 || c > 13)) break;
 			i++;
+		}
 		if (Mem.getU8(p, i) == "-".code) {
 			neg = true;
 			i++;
@@ -53,6 +50,15 @@ class Os {
 			i++;
 		}
 		return neg ? -v : v;
+	}
+
+	// atoi of an environment variable (a string literal), or def when it is unset
+	public static inline function envInt(name:String, def:Int):Int
+		return envIntC(Mem.cstr(name), def);
+
+	@:hxmc.noGc static function envIntC(name:Ptr, def:Int):Int {
+		var p = C.getenv(name);
+		return p.isNull() ? def : atoi(p);
 	}
 
 	// ---- errno (kept across the runtime's own calls around blocking natives)
@@ -68,6 +74,7 @@ class Os {
 
 	// ---- time
 
+	// seconds on the monotonic clock
 	@:hxmc.noGc public static function now():Float {
 		var ts = Mem.stack(16);
 		C.clock_gettime(L.CLOCK_MONOTONIC, ts);
@@ -76,78 +83,76 @@ class Os {
 		return s + ns * 1e-9;
 	}
 
+	// (nanosleep, again after a signal; Windows: MinGW-w64's)
 	@:hxmc.noGc public static function sleep(seconds:Float) {
 		if (seconds <= 0) return;
-		if (windows()) {
-			var ms = seconds * 1000.0 + 0.999;
-			K.Sleep(ms > 4e9 ? -2 : (cast ms : Int));
-			return;
-		}
 		var t = Mem.stack(32);
 		var whole = Math.ffloor(seconds);
-		Mem.setI64(t, 0, haxe.Int64.fromFloat(whole));
-		Mem.setI64(t, 8, haxe.Int64.fromFloat((seconds - whole) * 1e9));
+		Mem.setI64(t, 0, (cast whole : I64));
+		Mem.setI64(t, 8, (cast ((seconds - whole) * 1e9) : I64));
 		while (C.nanosleep(t, t) != 0 && errno() == L.EINTR) {}
 	}
 
 	@:hxmc.noGc public static function yield()
 		if (windows()) K.SwitchToThread() else C.sched_yield();
 
-	// ---- memory: reservations committed as touched
+	// ---- memory: reservations committed as touched (MAP_NORESERVE; Windows:
+	// WinRt commits the pages of its reservations on first touch)
 
 	static var pageBytes:Int;
 
 	@:hxmc.noGc public static function pageSize():Int {
-		if (pageBytes == 0) pageBytes = windows() ? WinRtCalls.rt_win_page_size().toInt() : C.sysconf(L.SC_PAGESIZE).toInt();
+		if (pageBytes == 0) pageBytes = windows() ? WinRt.rtPageSize().toInt() : C.sysconf(L.SC_PAGESIZE).toInt();
 		return pageBytes;
 	}
 
 	// null on failure
 	@:hxmc.noGc public static function reserve(bytes:I64):Ptr {
-		if (windows()) return WinRtCalls.rt_win_reserve(bytes);
+		if (windows()) return WinRt.reserve(bytes);
 		var p = C.mmap(Ptr.nil(), bytes, L.PROT_READ | L.PROT_WRITE, L.MAP_PRIVATE | L.MAP_ANONYMOUS | L.MAP_NORESERVE, -1, 0);
 		return p.toI64() == -1 ? Ptr.nil() : p;
 	}
 
 	@:hxmc.noGc public static function release(p:Ptr, bytes:I64)
-		if (windows()) WinRtCalls.rt_win_release(p, bytes) else C.munmap(p, bytes);
+		if (windows()) WinRt.release(p, bytes) else C.munmap(p, bytes);
 
 	// never committed: an access faults
 	@:hxmc.noGc public static function guard(p:Ptr, bytes:I64)
-		if (windows()) WinRtCalls.rt_win_guard(p, bytes) else C.mprotect(p, bytes, L.PROT_NONE);
+		if (windows()) WinRt.guard(p, bytes) else C.mprotect(p, bytes, L.PROT_NONE);
 
 	// the pages go back to the system (zeros when touched again); false: not done
 	@:hxmc.noGc public static function decommit(p:Ptr, bytes:I64):Bool {
 		if (windows()) {
-			WinRtCalls.rt_win_decommit(p, bytes);
+			WinRt.decommit(p, bytes);
 			return true;
 		}
 		return C.madvise(p, bytes, L.MADV_DONTNEED) == 0;
 	}
 
-	// transparent huge pages (Linux, RT_HUGE)
+	// transparent huge pages (Linux only: RT_HUGE)
 	@:hxmc.noGc public static function hugePages(p:Ptr, bytes:I64)
-		if (L.MADV_HUGEPAGE != 0) C.madvise(p, bytes, L.MADV_HUGEPAGE);
+		if (Mem.os() == 0) C.madvise(p, bytes, L.MADV_HUGEPAGE);
 
-	// ---- mutexes and conditions (malloc'ed: they never move)
+	// ---- mutexes and conditions, in memory that never moves (malloc'ed or
+	// static): MUTEX_BYTES and COND_BYTES each
 
-	static var condAttr:Ptr; // conditions wait on CLOCK_MONOTONIC (CLOCK_REALTIME on macOS)
+	public static var MUTEX_BYTES(get, never):Int;
 
-	@:hxmc.noGc public static function mutexNew():Ptr {
-		if (windows()) {
-			var m = LibC.malloc(8);
-			Mem.setI64(m, 0, 0); // SRWLOCK_INIT
-			return m;
-		}
-		var m = LibC.malloc((L.PTHREAD_MUTEX_SIZE : I64));
-		C.pthread_mutex_init(m, Ptr.nil());
-		return m;
-	}
+	static inline function get_MUTEX_BYTES():Int
+		return windows() ? 8 : L.PTHREAD_MUTEX_SIZE;
 
-	@:hxmc.noGc public static function mutexFree(m:Ptr) {
+	public static var COND_BYTES(get, never):Int;
+
+	static inline function get_COND_BYTES():Int
+		return windows() ? 8 : L.PTHREAD_COND_SIZE;
+
+	static var monoAttr:Ptr; // conditions waiting on CLOCK_MONOTONIC (CLOCK_REALTIME on macOS)
+
+	@:hxmc.noGc public static function mutexInit(m:Ptr)
+		if (windows()) Mem.setI64(m, 0, 0) else C.pthread_mutex_init(m, Ptr.nil()); // SRWLOCK_INIT
+
+	@:hxmc.noGc public static function mutexDestroy(m:Ptr)
 		if (!windows()) C.pthread_mutex_destroy(m);
-		LibC.free(m);
-	}
 
 	@:hxmc.noGc public static inline function lock(m:Ptr)
 		if (windows()) K.AcquireSRWLockExclusive(m) else C.pthread_mutex_lock(m);
@@ -158,45 +163,43 @@ class Os {
 	@:hxmc.noGc public static inline function unlock(m:Ptr)
 		if (windows()) K.ReleaseSRWLockExclusive(m) else C.pthread_mutex_unlock(m);
 
-	@:hxmc.noGc public static function condNew():Ptr {
+	// a condition variable; monotonic: timed waits measure CLOCK_MONOTONIC
+	// (the default clock otherwise, as PTHREAD_COND_INITIALIZER)
+	@:hxmc.noGc public static function condInit(c:Ptr, monotonic:Bool) {
 		if (windows()) {
-			var c = LibC.malloc(8);
 			Mem.setI64(c, 0, 0); // CONDITION_VARIABLE_INIT
-			return c;
+			return;
 		}
-		if (condAttr.isNull()) {
-			var a = LibC.malloc((L.PTHREAD_CONDATTR_SIZE + 16 : I64));
+		if (!monotonic) {
+			C.pthread_cond_init(c, Ptr.nil());
+			return;
+		}
+		if (monoAttr.isNull()) {
+			var a = LibC.malloc((L.PTHREAD_CONDATTR_SIZE : I64));
 			C.pthread_condattr_init(a);
 			if (!mac()) C.pthread_condattr_setclock(a, L.CLOCK_MONOTONIC);
-			condAttr = a;
+			monoAttr = a;
 		}
-		var c = LibC.malloc((L.PTHREAD_COND_SIZE : I64));
-		C.pthread_cond_init(c, condAttr);
-		return c;
+		C.pthread_cond_init(c, monoAttr);
 	}
 
-	@:hxmc.noGc public static function condFree(c:Ptr) {
+	@:hxmc.noGc public static function condDestroy(c:Ptr)
 		if (!windows()) C.pthread_cond_destroy(c);
-		LibC.free(c);
-	}
 
 	@:hxmc.noGc public static function condWait(c:Ptr, m:Ptr)
 		if (windows()) K.SleepConditionVariableSRW(c, m, -1, 0) else C.pthread_cond_wait(c, m);
 
-	// a deadline `timeout` seconds from now, for condTimedWait (16 bytes at d)
+	// a deadline `timeout` seconds from now for condTimedWait, in 16 bytes at
+	// d: a timespec on the condition's clock (CLOCK_MONOTONIC; macOS has no
+	// pthread_condattr_setclock: CLOCK_REALTIME)
 	@:hxmc.noGc public static function deadline(d:Ptr, timeout:Float) {
-		if (windows()) {
-			Mem.setF64(d, 0, now() + timeout);
-			return;
-		}
-		// macOS: no pthread_condattr_setclock, conditions wait on the real-time clock
 		C.clock_gettime(mac() ? L.CLOCK_REALTIME : L.CLOCK_MONOTONIC, d);
 		var s:Float = cast Mem.getI64(d, 0);
 		var ns:Float = cast Mem.getI64(d, 8);
 		var t = s + ns * 1e-9 + timeout;
 		var whole = Math.ffloor(t);
-		var sec = haxe.Int64.fromFloat(whole);
-		var nsec = haxe.Int64.fromFloat((t - whole) * 1e9);
+		var sec:I64 = cast whole;
+		var nsec:I64 = cast ((t - whole) * 1e9);
 		if (nsec >= 1000000000) {
 			sec = sec + 1;
 			nsec = nsec - 1000000000;
@@ -205,10 +208,14 @@ class Os {
 		Mem.setI64(d, 8, nsec);
 	}
 
-	// false: timed out
+	// false: timed out (Windows: the milliseconds left until the deadline)
 	@:hxmc.noGc public static function condTimedWait(c:Ptr, m:Ptr, d:Ptr):Bool {
 		if (windows()) {
-			var left = Mem.getF64(d, 0) - now();
+			var now = Mem.stack(16);
+			C.clock_gettime(L.CLOCK_MONOTONIC, now);
+			var left:Float = cast (Mem.getI64(d, 0) - Mem.getI64(now, 0));
+			var nl:Float = cast (Mem.getI64(d, 8) - Mem.getI64(now, 8));
+			left += nl * 1e-9;
 			var ms = left <= 0 ? 0 : left > 4e6 ? -294967296 : (cast (left * 1000.0 + 0.999) : Int);
 			if (K.SleepConditionVariableSRW(c, m, ms, 0) != 0) return true;
 			return K.GetLastError() != 1460; // ERROR_TIMEOUT
@@ -224,8 +231,9 @@ class Os {
 
 	// ---- threads
 
-	// a detached thread running entry(arg) (a no-GC @:hxmc.callback taking and
-	// returning a pointer) on a C stack of stackBytes (reserved); false: failed
+	// a detached thread running entry(arg) (a @:hxmc.callback taking and
+	// returning a pointer) on a C stack of stackBytes (reserved, committed as
+	// it grows); false: not started
 	@:hxmc.noGc public static function spawn(entry:Ptr, arg:Ptr, stackBytes:I64):Bool {
 		if (windows()) {
 			// STACK_SIZE_PARAM_IS_A_RESERVATION; not joined
@@ -244,48 +252,12 @@ class Os {
 		return r == 0;
 	}
 
-	// runs entry(arg) on a stack of `bytes` (reserved, committed as touched,
-	// with a guard page) and waits for it: a joined pthread whose stack is a
-	// reservation; Windows: a fiber of the calling thread. False: no such
-	// stack (the caller runs it as it is).
-	@:hxmc.noGc public static function runOnStack(entry:Ptr, fiberEntry:Ptr, arg:Ptr, bytes:I64):Bool {
-		if (windows()) {
-			var main = K.ConvertThreadToFiber(Ptr.nil());
-			if (main.isNull()) return false;
-			Mem.setPtr(arg, 0, main); // (the fiber switches back to it)
-			// FIBER_FLAG_FLOAT_SWITCH
-			var f = K.CreateFiberEx(64 << 10, bytes, 1, fiberEntry, arg);
-			if (f.isNull()) return false;
-			K.SwitchToFiber(f);
-			return true;
-		}
-		var stack = reserve(bytes);
-		if (stack.isNull()) return false;
-		guard(stack, pageSize());
-		var attr = Mem.stack(128);
-		C.pthread_attr_init(attr);
-		C.pthread_attr_setstack(attr, stack, bytes);
-		var t:Ptr<Ptr> = Mem.stack(16);
-		var r = C.pthread_create(t, attr, entry, arg);
-		C.pthread_attr_destroy(attr);
-		if (r != 0) {
-			release(stack, bytes);
-			return false;
-		}
-		C.pthread_join(t.value, Ptr.nil());
-		return true;
-	}
-
-	// a fiber's end (Windows): back to the thread's own fiber
-	@:hxmc.noGc public static function fiberReturn(to:Ptr)
-		K.SwitchToFiber(to);
-
 	// ---- descriptors: poll (Windows: WSAPoll, sockets only)
 
 	@:hxmc.noGc public static function poll(fds:Ptr, n:Int, ms:Int):Int {
 		if (windows()) {
 			var r = W.WSAPoll(fds, n, ms);
-			if (r < 0) setErrno(WinRtCalls.rt_win_sock_errno(W.WSAGetLastError()));
+			if (r < 0) setErrno(WinRt.sockErrno(W.WSAGetLastError()));
 			return r;
 		}
 		return C.poll(fds, (n : I64), ms);
@@ -296,39 +268,91 @@ class Os {
 	@:hxmc.noGc public static function exit(code:Int)
 		C.exit(code);
 
-	// a message on stderr (ASCII, the runtime's own reports)
-	@:hxmc.noGc public static function say(msg:String) {
-		var buf = Mem.stack(256);
-		var n = msg.length < 256 ? msg.length : 256;
-		for (i in 0...n)
-			Mem.setI8(buf, i, StringTools.fastCodeAt(msg, i));
-		write(buf, n);
-	}
+	// ---- the runtime's own reports on stderr (bytes as they are, after
+	// whatever the C library's stdout buffers)
 
 	@:hxmc.noGc public static function write(p:Ptr, n:Int) {
 		C.fflush(Ptr.nil());
 		if (windows()) C._write(2, p, n) else C.write(2, p, (n : I64));
 	}
+}
 
-	// decimal digits of v (at most 20) into buf at off; the next offset
-	@:hxmc.noGc public static function digits(buf:Ptr, off:Int, v:I64):Int {
-		if (v < 0) {
-			Mem.setI8(buf, off++, "-".code);
-			v = -v;
+// a line of the runtime's reports, written into a frame area of
+// Report.BYTES (no-GC: the collector reports while objects move), then to
+// stderr: the length at 0, the text from 8
+abstract Report(Ptr) {
+	public static inline var BYTES = 8 + 512;
+	static inline var CAP = 512;
+
+	public inline function new(p:Ptr) {
+		this = p;
+		Mem.setI32(p, 0, 0);
+	}
+
+	@:hxmc.noGc public function ch(c:Int) {
+		var n = Mem.getI32(this, 0);
+		if (n < CAP) Mem.setI8(this, 8 + n, c);
+		Mem.setI32(this, 0, n + 1);
+	}
+
+	// a string literal (a C string in the program's data)
+	public inline function str(s:String)
+		cstr(Mem.cstr(s), 0, -1);
+
+	// a C string, at least `width` wide (padded on the right, %-Ns), at most `max` (%.Ns)
+	@:hxmc.noGc public function cstr(p:Ptr, width:Int, max:Int) {
+		var k = 0;
+		while (!p.isNull() && Mem.getU8(p, k) != 0 && (max < 0 || k < max)) {
+			ch(Mem.getU8(p, k));
+			k++;
 		}
+		while (k < width) {
+			ch(" ".code);
+			k++;
+		}
+	}
+
+	// v in decimal, right-aligned in `width` (%Nld)
+	@:hxmc.noGc public function int(v:I64, width:Int) {
 		var tmp = Mem.stack(32);
-		var n = 0;
+		var k = 0, neg = v < 0;
+		if (neg) v = -v;
 		do {
-			Mem.setI8(tmp, n++, 48 + (v % 10).toInt());
+			Mem.setI8(tmp, k++, 48 + (v % 10).toInt());
 			v = v / 10;
-		} while (v != 0);
-		while (n > 0)
-			Mem.setI8(buf, off++, Mem.getU8(tmp, --n));
-		return off;
+		} while (!(v == 0));
+		if (neg) Mem.setI8(tmp, k++, "-".code);
+		var w = k;
+		while (w < width) {
+			ch(" ".code);
+			w++;
+		}
+		while (k > 0)
+			ch(Mem.getU8(tmp, --k));
+	}
+
+	// v with `decimals` digits after the point, right-aligned in `width`: printf's %N.Df
+	@:hxmc.noGc public function fixed(v:Float, decimals:Int, width:Int) {
+		var tmp = Mem.stack(400);
+		var k = FloatText.fixed(v, decimals, tmp);
+		var w = k;
+		while (w < width) {
+			ch(" ".code);
+			w++;
+		}
+		for (i in 0...k)
+			ch(Mem.getU8(tmp, i));
+	}
+
+	// the line so far, to stderr
+	@:hxmc.noGc public function flush() {
+		var n = Mem.getI32(this, 0);
+		Os.write(this.add(8), n < CAP ? n : CAP);
+		Mem.setI32(this, 0, 0);
 	}
 }
 
-// the C library (libc; Windows: the UCRT and MinGW-w64's pthread_time)
+// the C library (libc; Windows: the UCRT and MinGW-w64's clock_gettime)
 @:hxmc.c @:hxmc.fast private extern class C {
 	static function getenv(name:Ptr):Ptr;
 	static function __errno_location():Ptr;
@@ -358,10 +382,8 @@ class Os {
 	static function pthread_attr_init(a:Ptr):Int;
 	static function pthread_attr_destroy(a:Ptr):Int;
 	static function pthread_attr_setstacksize(a:Ptr, size:I64):Int;
-	static function pthread_attr_setstack(a:Ptr, stack:Ptr, size:I64):Int;
 	static function pthread_attr_setdetachstate(a:Ptr, state:Int):Int;
 	static function pthread_create(t:Ptr, attr:Ptr, entry:Ptr, arg:Ptr):Int;
-	static function pthread_join(t:Ptr, ret:Ptr):Int;
 	static function poll(fds:Ptr, n:I64, ms:Int):Int;
 	static function exit(code:Int):Void;
 	static function fflush(f:Ptr):Int;
@@ -371,7 +393,6 @@ class Os {
 
 // Windows (kernel32)
 @:hxmc.c @:hxmc.fast @:hxmc.lib("kernel32") private extern class K {
-	static function Sleep(ms:Int):Void;
 	static function SwitchToThread():Int;
 	static function AcquireSRWLockExclusive(l:Ptr):Void;
 	static function TryAcquireSRWLockExclusive(l:Ptr):Int;
@@ -382,22 +403,9 @@ class Os {
 	static function GetLastError():Int;
 	static function CreateThread(sa:Ptr, stack:I64, entry:Ptr, arg:Ptr, flags:Int, id:Ptr):Ptr;
 	static function CloseHandle(h:Ptr):Int;
-	static function ConvertThreadToFiber(p:Ptr):Ptr;
-	static function CreateFiberEx(commit:I64, reserve:I64, flags:Int, entry:Ptr, arg:Ptr):Ptr;
-	static function SwitchToFiber(f:Ptr):Void;
 }
 
 @:hxmc.c @:hxmc.fast @:hxmc.lib("ws2_32") private extern class W {
 	static function WSAPoll(fds:Ptr, n:Int, ms:Int):Int;
 	static function WSAGetLastError():Int;
-}
-
-// hxmc.rt.WinRt's exports (Windows)
-@:hxmc.c @:hxmc.fast private extern class WinRtCalls {
-	static function rt_win_page_size():I64;
-	static function rt_win_reserve(bytes:I64):Ptr;
-	static function rt_win_release(p:Ptr, bytes:I64):Void;
-	static function rt_win_guard(p:Ptr, bytes:I64):Void;
-	static function rt_win_decommit(p:Ptr, bytes:I64):Void;
-	static function rt_win_sock_errno(wsa:Int):Int;
 }

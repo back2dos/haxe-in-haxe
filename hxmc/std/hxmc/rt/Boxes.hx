@@ -24,7 +24,7 @@ class Boxes {
 		return ((tindex : I64) << 32) | ((((kind << 28) | nslots) : I64) & 0xFFFFFFFF);
 
 	// at startup (rt_init; WebAssembly's Gc.init)
-	@:hxmc.export("hx_boxes_init") @:hxmc.noGc public static function init() {
+	@:hxmc.host("hx_boxes_init") @:hxmc.noGc public static function init() {
 		var n = SMALL_MAX - SMALL_MIN + 1;
 		for (i in 0...n) {
 			Mem.setI64(smallInts, 16 * i, mkhdr(1, K_OBJ, T_BOXINT));
@@ -126,7 +126,7 @@ class Boxes {
 		}
 	}
 
-	// ---- arrays (rt.h: slot 0 the length and the element kind, slot 1 the data)
+	// ---- arrays (slot 0 the length and the element kind, slot 1 the data)
 
 	static inline function arrLen(a:Dynamic):Int
 		return Mem.getI32(Mem.addr(a), 0);
@@ -160,7 +160,7 @@ class Boxes {
 		return a;
 	}
 
-	@:hxmc.export("hx_arr_grow") static function arrGrow(slot:Ptr, need:Int):Void {
+	@:hxmc.host("hx_arr_grow") static function arrGrow(slot:Ptr, need:Int):Void {
 		var a:Dynamic = Mem.getRef(slot, 0);
 		var cap = arrCap(a);
 		if (need <= cap) return;
@@ -195,7 +195,7 @@ class Boxes {
 	@:hxmc.noGc static function Gc_barrierRange(o:Dynamic, n:Int)
 		hxmc.rt.C.Leaf.rt_barrier_range(o, Mem.addr(o), n);
 
-	@:hxmc.export("hx_arr_to_ptr") static function arrToPtr(slot:Ptr):Void {
+	@:hxmc.host("hx_arr_to_ptr") static function arrToPtr(slot:Ptr):Void {
 		var a:Dynamic = Mem.getRef(slot, 0);
 		if (arrKind(a) == AK_PTR) return;
 		var len = arrLen(a);

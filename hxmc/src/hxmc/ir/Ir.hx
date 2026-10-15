@@ -19,7 +19,7 @@ enum RefTy {
 	RObj(c:ClassInfo); // class instance (interfaces use the root object type)
 	REnum(e:Null<EnumInfo>); // enum value; null: any enum (EnumValue)
 	RCtor(c:CtorInfo); // a specific enum constructor (after a tag test)
-	RArr(elem:Ty); // the runtime array also records its element kind (§ arrays in rt.h)
+	RArr(elem:Ty); // the runtime array also records its element kind (Boxes.hx, arrays)
 	RClos(s:SigInfo);
 	RBox(t:Ty); // captured mutable local
 	RNull(t:Ty); // Null<Int>, Null<Float>, Null<Bool>: a Dynamic box or null
@@ -86,7 +86,7 @@ class CtorInfo {
 	public var en:EnumInfo;
 	public var name:String;
 	public var tag:Int;
-	public var params:Array<Ty>; // from slot 0: the tag is the header's type index (rt.h)
+	public var params:Array<Ty>; // from slot 0: the tag is the header's type index (Gc.hx)
 	public var paramNames:Array<String> = [];
 	public var global:Int = -1; // singleton for constructors without arguments
 	public var tindex:Int = -1;

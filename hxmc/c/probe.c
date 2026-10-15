@@ -1,9 +1,24 @@
-// The runtime's struct layouts and jmp_buf size on a target, which hxmc's
-// code generators and data writer hard-code (hxmc/src/hxmc/Abi.hx):
-//   zig cc -target <triple> -I hxmc/c -S -o - hxmc/c/probe.c | grep -A1 probe_
-// (each value is the initializer of a probe_<name> constant)
-#include "rt.h"
+// The layouts hxmc's code generators and data writer hard-code
+// (hxmc/src/hxmc/Abi.hx; the runtime's Haxe code reads the same tables:
+// hxmc/std/hxmc/rt/Types.hx), written as C structures to check them per
+// target, with the C library's jmp_buf (the handler of a try):
+//   zig cc -target <triple> -S -o probe.s hxmc/c/probe.c; grep -A1 probe_ probe.s
+// (each value is the initializer of a probe_<name> constant). Development
+// time only: not linked into anything.
+#include <setjmp.h>
 #include <stddef.h>
+#include <stdint.h>
+typedef struct { int32_t fid, slot; char kind; } rt_field;
+typedef struct { int32_t fid; void *fn; int32_t sig; } rt_method;
+typedef struct { int32_t fid; char kind; int32_t idx; void *ptr; } rt_static;
+typedef struct {
+	const char *name; uint8_t tk; int32_t super; uint32_t nslots; const uint64_t *ptrmap;
+	uint32_t nfields; const rt_field *fields; uint32_t nmethods; const rt_method *methods;
+	uint32_t nifaces; const int32_t *ifaces; int32_t tag; const int32_t *ctors;
+	uint32_t nstatics; const rt_static *statics;
+} rt_type;
+typedef struct { uint32_t t; int32_t slot; char kind; void *fn; int32_t sig; } rt_icache;
+typedef struct rt_handler { jmp_buf buf; struct rt_handler *prev; void **sp; } rt_handler;
 #define P(name, v) const long probe_##name = (long)(v);
 P(rt_type_size, sizeof(rt_type))
 P(rt_type_tag, offsetof(rt_type, tag))
