@@ -302,6 +302,15 @@ class LinkWasm {
 		s = new Buf(256);
 		Enc.uleb(s, globals.length);
 		for (g in globals) {
+			if (g == WasmGen.EXNREF) {
+				// (mut exnref) (ref.null exn)
+				s.u8(Enc.EXNREF);
+				s.u8(1);
+				s.u8(Op.RefNull);
+				s.u8(Enc.EXNREF);
+				s.u8(Op.End);
+				continue;
+			}
 			s.u8(Enc.I64);
 			s.u8(1);
 			s.u8(Op.I64Const);
@@ -570,7 +579,7 @@ class Builtins {
 		return n == "rt_throw" ? ["hx_uncaught"] : [];
 
 	public static function globals(n:String):Array<String>
-		return n == "rt_throw" ? ["rt_exn", WasmGen.HANDLER] : [];
+		return n == "rt_throw" ? ["rt_exn", WasmGen.HANDLER, WasmGen.EXNREF] : [];
 
 	public static function sig(n:String):String
 		return SIGS.get(n);
@@ -643,6 +652,20 @@ class Builtins {
 				lget(0);
 				o(Op.Call);
 				Enc.uleb(b, l.funcIndexOf("hx_uncaught"));
+				o(Op.End);
+				// an exception a pad caught before, thrown again (throw_ref):
+				// the Haxe exception is rt_exn, the wasm one only carries it,
+				// and engines that make an object with a stack trace for each
+				// `throw` (SpiderMonkey: about 20 us) do nothing of the kind
+				o(Op.GlobalGet);
+				Enc.uleb(b, l.globalOf(WasmGen.EXNREF));
+				o(Op.RefIsNull);
+				o(Op.I32Eqz);
+				o(Op.If);
+				b.u8(Enc.VOID);
+				o(Op.GlobalGet);
+				Enc.uleb(b, l.globalOf(WasmGen.EXNREF));
+				o(Op.ThrowRef);
 				o(Op.End);
 				o(Op.Throw);
 				b.u8(0);

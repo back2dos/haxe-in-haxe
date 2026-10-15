@@ -11,6 +11,7 @@ class Enc {
 	public static inline var F32 = 0x7D;
 	public static inline var F64 = 0x7C;
 	public static inline var VOID = 0x40; // the empty block type
+	public static inline var EXNREF = 0x69; // exnref: a caught exception (value type and heap type)
 
 	public static function uleb(b:Buf, v:Int) {
 		do {
@@ -129,6 +130,8 @@ enum abstract Op(Int) to Int {
 	var F32Const = 0x43;
 	var F64Const = 0x44;
 	var I32Eqz = 0x45;
+	var RefNull = 0xD0;
+	var RefIsNull = 0xD1;
 	var I32Eq = 0x46;
 	var I32Ne = 0x47;
 	var I32LtS = 0x48;

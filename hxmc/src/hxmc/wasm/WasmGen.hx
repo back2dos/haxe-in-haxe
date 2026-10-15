@@ -50,6 +50,8 @@ class WasmGen {
 	public static inline var SECTION = ".wasm";
 	public static inline var SP = "__stack_pointer";
 	public static inline var HANDLER = "rt_hcur";
+	// the last exception a pad caught (an exnref global; LinkWasm)
+	public static inline var EXNREF = "rt_exnref";
 	public static var coalesceOn = Sys.getEnv("HXMC_WASM_COALESCE") != "0";
 
 	var obj:Obj;
@@ -699,13 +701,13 @@ class WasmGen {
 		var tryHere = tryAddr[x.id] >= 0;
 		if (tryHere) {
 			op(Op.Block);
-			b.u8(Enc.VOID);
+			b.u8(Enc.EXNREF);
 			ctx.push(CPlain);
 			op(Op.TryTable);
 			b.u8(Enc.VOID);
 			b.u8(1); // one catch clause
-			b.u8(2); // catch_all
-			b.u8(0); // to the block around it
+			b.u8(3); // catch_all_ref
+			b.u8(0); // to the block around it, with the exception
 			ctx.push(CPlain);
 		}
 		var ys = [for (c in kids[x.id]) if (isMerge[c.id]) c];
@@ -726,7 +728,10 @@ class WasmGen {
 			op(Op.Unreachable);
 			op(Op.End);
 			ctx.pop();
-			// the pad: this try's exception, else an outer one's
+			// the pad: the exception is kept (rt_throw and the pads throw it
+			// again with throw_ref: no new exception object per throw); this
+			// try's exception, else an outer one's
+			global(Op.GlobalSet, EXNREF);
 			if (fp >= 0) {
 				op(Op.LocalGet);
 				Enc.uleb(b, fp);
@@ -737,8 +742,8 @@ class WasmGen {
 			op(Op.I64Ne);
 			op(Op.If);
 			b.u8(Enc.VOID);
-			op(Op.Throw);
-			Enc.uleb(b, 0);
+			global(Op.GlobalGet, EXNREF);
+			op(Op.ThrowRef);
 			op(Op.End);
 			var hb = tryHandler[x.id];
 			var from = hb.preds[0];

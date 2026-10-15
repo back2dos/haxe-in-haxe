@@ -115,7 +115,6 @@ class Libc {
 	}
 
 	@:hxmc.export("exit") @:hxmc.noGc static function exit(code:Int):Void {
-		Wasi.flush();
-		WasiApi.proc_exit(code);
+		Wasi.exit(code);
 	}
 }

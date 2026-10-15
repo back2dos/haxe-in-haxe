@@ -163,6 +163,16 @@ class Wasi {
 		}
 	}
 
+	// the end of the program. The host's proc_exit throws (node's WASI, the
+	// site's browser glue) and its exception crosses the try blocks of the
+	// frames below: with no current handler, none of their pads takes it for
+	// a Haxe exception (WasmGen: a pad handles its own handler only)
+	@:hxmc.noGc public static function exit(code:Int):Void {
+		flush();
+		Mem.tlsSet("rt_hcur", Ptr.nil());
+		WasiApi.proc_exit(code);
+	}
+
 	@:hxmc.noGc public static function flush() {
 		if (outLen > 0) {
 			var n = outLen;

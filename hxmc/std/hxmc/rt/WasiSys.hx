@@ -136,8 +136,7 @@ class WasiSys {
 		return unsupported("Sys.command");
 
 	@:hxmc.noGc public static function exit(code:Int):Void {
-		Wasi.flush();
-		WasiApi.proc_exit(code);
+		Wasi.exit(code);
 	}
 
 	@:hxmc.noGc public static function time():Float {
