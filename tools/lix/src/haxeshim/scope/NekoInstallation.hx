@@ -17,7 +17,7 @@ class NekoInstallation {
 
     this.executable = '$path/neko${Os.EXECUTABLE_EXTENSION}';
 
-    var varName = switch Os.SYSTEM {
+    var varName = switch Sys.systemName() {
       case 'Windows': 'PATH';
       case 'Mac': 'DYLD_LIBRARY_PATH';
       default: 'LD_LIBRARY_PATH';      

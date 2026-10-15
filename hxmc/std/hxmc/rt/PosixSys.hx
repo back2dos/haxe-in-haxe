@@ -188,6 +188,17 @@ class PosixSys {
 
 	public static function programPath():String {
 		var buf = Mem.stack(4104);
+		if (mac()) {
+			// the executable's path as dyld loaded it (argv[0] may be a bare
+			// name found on PATH), then without links
+			var path = Mem.stack(4104);
+			var size = Mem.stack(8);
+			Mem.setI32(size, 0, 4096);
+			if (Posix._NSGetExecutablePath(path, size) == 0) {
+				var r = Posix.realpathExtsn(path, buf);
+				return ofC(r.isNull() ? path : buf);
+			}
+		}
 		var n = Posix.readlink(procSelfExe(), buf, 4096).toInt();
 		if (n > 0) {
 			Mem.setI8(buf, n, 0);

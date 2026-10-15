@@ -54,7 +54,7 @@ class Exec {
       loop.run();
       loop.close();
     }
-    var proc = try spawn(loop, cmd, args, { cwd: cwd, env: mergeEnv(env), stdio: if (p == null) null else p.stdio }, (status, signal) ->
+    var proc = try Process.spawn(loop, cmd, args, { cwd: cwd, env: mergeEnv(env), stdio: if (p == null) null else p.stdio }, (status, signal) ->
       code = if (signal != 0) 128 + signal else status
     ) catch (e:UvError) {
       if (p != null) p.close();
@@ -69,131 +69,14 @@ class Exec {
   }
 
   static public function async(cmd:String, cwd:String, args:Array<String>, ?env:Env, ?onExit:Int->Void):Process
-    return spawn(Loop.get(), cmd, args, { cwd: cwd, env: mergeEnv(env) }, (status, signal) ->
+    return Process.spawn(Loop.get(), cmd, args, { cwd: cwd, env: mergeEnv(env) }, (status, signal) ->
       if (onExit != null) onExit(if (signal != 0) 128 + signal else status)
     );
 
-  // the commands of the lix npm package: on a Cosmopolitan binary on Windows
-  // they run as this binary itself (it has no other name to be found by)
-  static final SELF = ['lix', 'haxe', 'haxelib', 'neko'];
-
-  /**
-    Spawns `cmd` like `uv.Process.spawn`. On a Cosmopolitan binary on Windows,
-    the program is looked up as Windows would (`.exe`, `.com`, then `.cmd` and
-    `.bat` through cmd.exe), and paths in the arguments and environment become
-    Windows' (`Os.hostPath`).
-  **/
-  static public function spawn(loop:Loop, cmd:String, args:Array<String>, options:SpawnOptions, onExit:(code:Int, signal:Int) -> Void):Process {
-    if (Os.IS_POSIX_ON_WINDOWS) {
-      var name = haxe.io.Path.withoutDirectory(cmd).toLowerCase();
-      if (cmd.indexOf('/') == -1 && cmd.indexOf('\\') == -1 && SELF.contains(name)) {
-        args = ['--run-as', name].concat(args);
-        cmd = Sys.programPath();
-      }
-      else {
-        var found = findProgram(cmd);
-        if (found == null)
-          throw new UvError(-2, 'spawn $cmd');// UV_ENOENT (Cosmopolitan's errno values are POSIX')
-        args = found.prefix.concat([for (a in args) Os.hostPath(a)]);
-        cmd = found.path;
-        if (options.env != null)
-          options = {
-            cwd: options.cwd,
-            stdio: options.stdio,
-            // lists such as PATH keep their form: Cosmopolitan converts them
-            env: [for (k => v in options.env) k => if (v.indexOf(':') == -1) Os.hostPath(v) else v],
-          };
-      }
-    }
-    return Process.spawn(loop, cmd, args, options, onExit);
-  }
-
-  // a program in PATH (or at a path) as Windows finds it: its path, and the
-  // arguments that come first (cmd.exe /c for scripts); null when there is none
-  static function findProgram(cmd:String):Null<{ path:String, prefix:Array<String> }> {
-    function file(p:String)
-      return sys.FileSystem.exists(p) && !sys.FileSystem.isDirectory(p);
-    var candidates =
-      if (cmd.indexOf('/') != -1 || cmd.indexOf('\\') != -1) [Os.fromHostPath(cmd)]
-      else [for (dir in (Sys.getEnv('PATH') ?? '').split(':')) if (dir != '') '$dir/$cmd'];
-    var hasExt = haxe.io.Path.extension(cmd) != '';
-    for (ext in if (hasExt) [''] else ['.exe', '.com', '', '.cmd', '.bat'])
-      for (c in candidates)
-        if (file(c + ext))
-          return
-            if (ext == '.cmd' || ext == '.bat' || c.endsWith('.cmd') || c.endsWith('.bat'))
-              { path: comspec(), prefix: ['/d', '/c', Os.hostPath(c + ext)] };
-            else
-              { path: c + ext, prefix: [] };
-    return null;
-  }
-
-  static function comspec()
-    return Os.fromHostPath(Sys.getEnv('ComSpec') ?? 'C:\\Windows\\System32\\cmd.exe');
-
   static function shellArgs(cmd:String)
     return
-      if (Os.IS_POSIX_ON_WINDOWS)
-        // port: no /bin/sh; a plain command runs directly (as hxc's Sys.command
-        // does there), anything else through cmd.exe
-        switch posixWords(cmd) {
-          case null: { cmd: comspec(), args: ['/d', '/s', '/c', cmd] };
-          case words: { cmd: words[0], args: words.slice(1) };
-        }
-      else if (Os.IS_WINDOWS) { cmd: Sys.getEnv('ComSpec') ?? 'cmd.exe', args: ['/d', '/s', '/c', '"$cmd"'] }
+      if (Os.IS_WINDOWS) { cmd: Sys.getEnv('ComSpec') ?? 'cmd.exe', args: ['/d', '/s', '/c', '"$cmd"'] }
       else { cmd: '/bin/sh', args: ['-c', cmd] };
-
-  /**
-    The words of a POSIX shell command, or null when it is more than a plain
-    command (hxc/rt/rt_sys.c's posix_words): unquoted `| & ; < > ( ) $ \` * ? [`,
-    a leading `#` or `~`, or `=` in the first word.
-  **/
-  static public function posixWords(c:String):Null<Array<String>> {
-    var words = [],
-        i = 0,
-        n = c.length;
-    inline function space(ch:String)
-      return ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r';
-    while (true) {
-      while (i < n && space(c.charAt(i))) i++;
-      if (i >= n) break;
-      var w = new StringBuf(),
-          start = true;
-      while (i < n && !space(c.charAt(i))) {
-        var ch = c.charAt(i);
-        if (ch == "'") {
-          var e = c.indexOf("'", i + 1);
-          if (e == -1) return null;
-          w.add(c.substring(i + 1, e));
-          i = e + 1;
-        }
-        else if (ch == '"') {
-          i++;
-          while (i < n && c.charAt(i) != '"') {
-            var d = c.charAt(i);
-            if (d == '$' || d == '`') return null;
-            if (d == '\\' && i + 1 < n && '"\\$`'.indexOf(c.charAt(i + 1)) != -1) i++;
-            w.add(c.charAt(i++));
-          }
-          if (i >= n) return null;
-          i++;
-        }
-        else if (ch == '\\') {
-          if (i + 1 >= n) return null;
-          w.add(c.charAt(i + 1));
-          i += 2;
-        }
-        else {
-          if ('|&;<>()$`*?['.indexOf(ch) != -1 || (start && (ch == '#' || ch == '~')) || (words.length == 0 && ch == '=')) return null;
-          w.add(ch);
-          i++;
-        }
-        start = false;
-      }
-      words.push(w.toString());
-    }
-    return if (words.length == 0) null else words;
-  }
 
   static public function shell(cmd:String, cwd:String, ?env:Env):Outcome<Int, Error> {
     var sh = shellArgs(cmd);

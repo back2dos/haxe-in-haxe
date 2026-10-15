@@ -112,22 +112,22 @@ class Http {
 
 	// TLS over the connected plain socket `plain` (taken over)
 	// port: std has no way to start TLS on an established connection (as for a
-	// proxy tunnel), hence the use of hxc's sys.ssl.Socket internals
+	// proxy tunnel), hence the use of hxmc's sys.ssl.Socket internals
 	static function startTls(plain:sys.net.Socket, hostname:String):sys.net.Socket {
-		#if (target.name == "hxc")
+		#if (target.name == "hxmc")
 		var s = new sys.ssl.Socket();
 		@:privateAccess {
-			hxc.NativeNet.close(s.fd);
+			hxmc.NativeNet.close(s.fd);
 			s.fd = plain.fd;
 			plain.fd = -1;
 			s.setCA(caChain());
 			s.conf = s.buildConfig(false);
-			s.ssl = hxc.NativeSsl.sslInit();
-			hxc.NativeSsl.sslSetup(s.ssl, s.conf);
-			hxc.NativeSsl.sslSetBio(s.ssl, s.fd);
+			s.ssl = hxmc.NativeSsl.sslInit();
+			hxmc.NativeSsl.sslSetup(s.ssl, s.conf);
+			hxmc.NativeSsl.sslSetBio(s.ssl, s.fd);
 			s.handshakeDone = false;
 			s.hostname = hostname;
-			hxc.NativeSsl.sslSetHostname(s.ssl, hostname);
+			hxmc.NativeSsl.sslSetHostname(s.ssl, hostname);
 		}
 		s.handshake();
 		return s;

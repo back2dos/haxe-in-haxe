@@ -23,7 +23,7 @@ class Main {
   }
 
   static function invokedAs():String {
-    var path = #if (target.name == "hxc") hxc.NativeSys.argv0() #else null #end;
+    var path = #if (target.name == "hxmc") hxmc.NativeSys.argv0() #else null #end;
     if (path == null) return 'lix';
     var name = haxe.io.Path.withoutDirectory(path.split('\\').join('/'));
     var ext = name.lastIndexOf('.');

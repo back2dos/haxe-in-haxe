@@ -22,7 +22,7 @@ typedef ArchiveEntry = {
 // port: what the tar and yauzl npm packages do for lix.client.Download:
 // reading .tar.gz and .zip archives (in memory), with std's pure Haxe inflate
 // (haxe.zip.InflateImpl; haxe.zip.Uncompress, which std's zip Reader.unzip
-// uses, is not implemented on hxc)
+// uses, is not implemented on hxmc)
 class Archive {
 	static function inflateRaw(data:Bytes, pos:Int, len:Int):Bytes {
 		var input = new BytesInput(data, pos, len);

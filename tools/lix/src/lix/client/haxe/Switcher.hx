@@ -175,7 +175,7 @@ class Switcher {
 
   function linkToOfficial(version)
     return
-      'https://haxe.org/website-content/downloads/$version/downloads/haxe-$version-' + switch Os.SYSTEM {
+      'https://haxe.org/website-content/downloads/$version/downloads/haxe-$version-' + switch Sys.systemName() {
         case 'Windows':
           'win${if (version < "5") '' else '64'}.zip';
         case 'Mac': 'osx.tar.gz';

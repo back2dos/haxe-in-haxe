@@ -154,7 +154,7 @@ class Scope {
     this.haxelibRepo = '$haxeshimRoot/haxelib';
     this.libCache = switch [Sys.getEnv('HAXESHIM_LIBCACHE'), Sys.getEnv(LIBCACHE)] {
       case [null, null]: '$haxeshimRoot/haxe_libraries';
-      case [null, v] | [v, _]: Os.fromHostPath(v);
+      case [null, v] | [v, _]: v;
     }
   }
 
@@ -322,7 +322,7 @@ class Scope {
         case null | []: throw new Error('no @run directive found for library $lib');
         case [cmd]:
           return Exec.shell.bind([interpolate(cmd)].concat(
-            args.map(if (Os.IS_WINDOWS && !Os.IS_POSIX_ON_WINDOWS) haxe.SysTools.quoteWinArg.bind(_, true) else haxe.SysTools.quoteUnixArg)
+            args.map(if (Os.IS_WINDOWS) haxe.SysTools.quoteWinArg.bind(_, true) else haxe.SysTools.quoteUnixArg)
           ).join(' '), Sys.getCwd(), runEnv.mergeInto(haxeInstallation.env));
         default: throw new Error('more than one @run directive for library $lib');
       }
@@ -570,11 +570,10 @@ class Scope {
     return ret;
   }
 
-  // port: these variables are paths, maybe set by Windows programs (Os.fromHostPath)
   static function env(s:String):Null<String>
     return switch Sys.getEnv(s) {
       case null | '': null;
-      case v: Os.fromHostPath(v);
+      case v: v;
     }
 
   static public inline var LIBCACHE = 'HAXE_LIBCACHE';
@@ -594,10 +593,10 @@ class Scope {
   static public var DEFAULT_ROOT(default, null):String =
     env('HAXE_ROOT') ??
       env('HAXESHIM_ROOT') ??
-        Os.fromHostPath(Sys.getEnv(
+        Sys.getEnv(
           if (Os.IS_WINDOWS) 'APPDATA'
           else 'HOME'
-        )) + '/haxe';//relying on env variables is always rather brave, but let's try this for now
+        ) + '/haxe';//relying on env variables is always rather brave, but let's try this for now
 
 }
 
