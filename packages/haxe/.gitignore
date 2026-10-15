@@ -1,4 +1,0 @@
-# assembled by build.sh
-/lib/haxe.wasm
-/lib/haxe/
-*.tgz

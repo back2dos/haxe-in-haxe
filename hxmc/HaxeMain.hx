@@ -8,10 +8,11 @@ import haxe.io.Path;
 //   hxmc/bootstrap/haxe[.exe]        this binary (in place of the launcher), or
 //                                    haxe.wasm, its WebAssembly build, run by it
 //   haxe/upstream/std                the std (HAXE_STD_PATH unless set)
-//   hxmc/bootstrap/std/hxmc/Init.hx  `--custom-target hxmc` calls hxmc.Init.init():
-//                                    it adds hxmc/bootstrap/hxmc-std, hxmc's std
+//   hxmc/bootstrap/hxmc-std          hxmc's std (hxmc/std merged by hxmc/MkStd.hx),
+//                                    added last when the arguments (or the hxml
+//                                    files they name) select --custom-target hxmc
 //   hxmc/bootstrap/rt/<target>       the runtime objects (rt.o, ssl.o, uv.o)
-// Elsewhere (the launcher runs it from its cache) HAXE_STD_PATH and
+// Elsewhere (the launcher runs it from its cache) HAXE_STD_PATH, HXMC_STD and
 // HXMC_RT_DIR name them. The WebAssembly build learns the host from HXMC_HOST.
 class HaxeMain {
 	static function main() {
@@ -30,11 +31,21 @@ class HaxeMain {
 			// the port looks for the std next to the binary as upstream does
 			// (<bin>/lib/haxe/std, ...): this layout's through HAXE_STD_PATH
 			if (Sys.getEnv("HAXE_STD_PATH") == null)
-				Sys.putEnv("HAXE_STD_PATH", pkg + "/haxe/upstream/std" + (Sys.systemName() == "Windows" ? ";" : ":") + boot + "/std");
+				Sys.putEnv("HAXE_STD_PATH", pkg + "/haxe/upstream/std");
+			if (Sys.getEnv("HXMC_STD") == null)
+				Sys.putEnv("HXMC_STD", boot + "/hxmc-std");
 		}
+		// hxmc's std, given last (a custom target gets no std of its own)
+		var hxmcStd = Sys.getEnv("HXMC_STD");
+		if (hxmcStd != null && selectsHxmc(args, 0)) args = args.concat(["-cp", hxmcStd]);
 		var host = hostTarget();
 		// (the port calls the hook with --no-output too: e.g. writing HXB only)
 		var noOutput = args.contains("--no-output");
+		// a compilation server keeps what it can between builds (as `hxmc
+		// --server`): the lowered bodies of the fields it kept (LowerCache) and
+		// the compiled modules in memory
+		for (a in ["--wait", "--server-listen", "--server-connect"])
+			if (args.contains(a)) Driver.resident = true;
 		compiler.Compiler.generateHook = function(com) {
 			if (noOutput) return;
 			switch com.platform {
@@ -57,6 +68,29 @@ class HaxeMain {
 			return 1;
 		}
 		return code;
+	}
+
+	// whether the arguments, or the hxml files they name, contain --custom-target hxmc
+	static function selectsHxmc(args:Array<String>, depth:Int):Bool {
+		for (i in 0...args.length) {
+			var a = args[i];
+			if ((a == "--custom-target" || a == "-custom-target") && i + 1 < args.length && (args[i + 1] == "hxmc" || StringTools.startsWith(args[i + 1], "hxmc=")))
+				return true;
+			if (StringTools.endsWith(a, ".hxml") && depth < 8 && sys.FileSystem.exists(a)) {
+				var words = [];
+				for (line in sys.io.File.getContent(a).split("\n")) {
+					line = StringTools.trim(line);
+					if (line == "" || StringTools.startsWith(line, "#")) continue;
+					var sp = line.indexOf(" ");
+					if (sp < 0) words.push(line) else {
+						words.push(line.substr(0, sp));
+						words.push(StringTools.trim(line.substr(sp + 1)));
+					}
+				}
+				if (selectsHxmc(words, depth + 1)) return true;
+			}
+		}
+		return false;
 	}
 
 	// the target this binary runs on

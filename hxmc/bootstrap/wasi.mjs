@@ -39,7 +39,7 @@ export function wasiPath(p) {
 }
 
 // variables that hold paths (HAXE_STD_PATH may hold several, by the host's delimiter)
-const PATH_VARS = ['HAXE_STD_PATH', 'HXMC_RT_DIR', 'HXMC_RT_OBJ', 'HXMC_EXE_LIST'];
+const PATH_VARS = ['HAXE_STD_PATH', 'HXMC_STD', 'HXMC_RT_DIR', 'HXMC_RT_OBJ', 'HXMC_EXE_LIST'];
 
 export function runWasm(module, args, env = process.env) {
 	const e = { ...env, PWD: wasiPath(process.cwd()) };
