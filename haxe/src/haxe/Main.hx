@@ -185,8 +185,8 @@ class Main {
 		// HAXE_STD_PATH the host may have rewritten for --run.
 		var std = Sys.getEnv("HAXE_IN_HAXE_STD_PATH");
 		if (std != null && std != "" && Sys.getEnv("HAXE_STD_PATH") != std) Sys.putEnv("HAXE_STD_PATH", std);
-		else if (Sys.getEnv("HAXE_STD_PATH") == null && sys.FileSystem.exists("haxe/std")) Sys.putEnv("HAXE_STD_PATH",
-			sys.FileSystem.fullPath("haxe/std"));
+		else if (Sys.getEnv("HAXE_STD_PATH") == null && sys.FileSystem.exists("haxe/upstream/std")) Sys.putEnv("HAXE_STD_PATH",
+			sys.FileSystem.fullPath("haxe/upstream/std"));
 		try {
 			return runMain(args);
 		} catch (e:BadArg) {

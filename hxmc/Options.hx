@@ -23,11 +23,15 @@ class Options {
 		return d == "" ? "./" : haxe.io.Path.addTrailingSlash(d);
 	}
 
-	// the directory of the runtime objects (<dir><target>/rt.o; default: <tool dir>rt/)
+	// the directory of the runtime objects (<dir><target>/rt.o; HXMC_RT_DIR,
+	// else <tool dir>rt/)
 	public static var rtDirOverride:Null<String> = null;
 
-	public static function rtDir():String
-		return rtDirOverride != null ? rtDirOverride : toolDir() + "rt/";
+	public static function rtDir():String {
+		if (rtDirOverride != null) return rtDirOverride;
+		var env = Sys.getEnv("HXMC_RT_DIR");
+		return env != null && env != "" ? haxe.io.Path.addTrailingSlash(env) : toolDir() + "rt/";
+	}
 
 	public static function read(com:context.Common.CommonContext):Options {
 		var o = new Options();

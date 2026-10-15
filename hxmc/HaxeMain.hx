@@ -1,30 +1,42 @@
 package hxmc;
 
-// `haxe` with hxmc built in (packages/haxe): the port's command line, where
-// `--custom-target hxmc=<out>` compiles the program to an executable.
-// The installation is laid out as
-//   <prefix>/bin/haxe[.exe]           this binary (or haxe.wasm, its WebAssembly build)
-//   <prefix>/lib/haxe/std             the std (HAXE_STD_PATH unless set), with hxmc/Init.hx
-//   <prefix>/lib/haxe/hxmc-std        hxmc's std (bin/hxmc/std), added by hxmc.Init
-//   <prefix>/lib/haxe/rt/<target>     the runtime objects (rt.o, ssl.o, uv.o)
-// The executable is for the host unless -D hxmc.target names another target;
-// the WebAssembly build learns the host from HXMC_HOST.
+import haxe.io.Path;
+
+// `haxe` with hxmc built in (the npm package): the port's command line, where
+// `--custom-target hxmc=<out>` compiles the program to an executable for the
+// host (-D hxmc.target=<target> names another). In the package:
+//   hxmc/bootstrap/haxe[.exe]        this binary (in place of the launcher), or
+//                                    haxe.wasm, its WebAssembly build, run by it
+//   haxe/upstream/std                the std (HAXE_STD_PATH unless set)
+//   hxmc/bootstrap/std/hxmc/Init.hx  `--custom-target hxmc` calls hxmc.Init.init():
+//                                    it adds hxmc/bootstrap/hxmc-std, hxmc's std
+//   hxmc/bootstrap/rt/<target>       the runtime objects (rt.o, ssl.o, uv.o)
+// Elsewhere (the launcher runs it from its cache) HAXE_STD_PATH and
+// HXMC_RT_DIR name them. The WebAssembly build learns the host from HXMC_HOST.
 class HaxeMain {
 	static function main() {
+		Sys.exit(run(Sys.args()));
+	}
+
+	public static function run(args:Array<String>):Int {
 		var failed = null;
 		// (through links to the binary, as npm's node_modules/.bin/haxe)
 		var exe = try sys.FileSystem.fullPath(Sys.programPath()) catch (_:Dynamic) Sys.programPath();
-		var lib = haxe.io.Path.directory(haxe.io.Path.directory(exe)) + "/lib/haxe/";
-		if (Sys.getEnv("HXMC_RT_DIR") != null)
-			Options.rtDirOverride = haxe.io.Path.addTrailingSlash(Sys.getEnv("HXMC_RT_DIR"));
-		else if (sys.FileSystem.exists(lib + "rt"))
-			Options.rtDirOverride = lib + "rt/";
-		// the port looks for the std next to the binary as upstream does
-		// (<bin>/lib/haxe/std, ...): this layout's std through HAXE_STD_PATH
-		if (Sys.getEnv("HAXE_STD_PATH") == null && sys.FileSystem.exists(lib + "std"))
-			Sys.putEnv("HAXE_STD_PATH", sys.FileSystem.fullPath(lib + "std"));
+		var boot = Path.directory(exe);
+		if (sys.FileSystem.exists(boot + "/launcher.mjs")) {
+			var pkg = Path.directory(Path.directory(boot));
+			if (Sys.getEnv("HXMC_RT_DIR") == null)
+				Options.rtDirOverride = boot + "/rt/";
+			// the port looks for the std next to the binary as upstream does
+			// (<bin>/lib/haxe/std, ...): this layout's through HAXE_STD_PATH
+			if (Sys.getEnv("HAXE_STD_PATH") == null)
+				Sys.putEnv("HAXE_STD_PATH", pkg + "/haxe/upstream/std" + (Sys.systemName() == "Windows" ? ";" : ":") + boot + "/std");
+		}
 		var host = hostTarget();
+		// (the port calls the hook with --no-output too: e.g. writing HXB only)
+		var noOutput = args.contains("--no-output");
 		compiler.Compiler.generateHook = function(com) {
+			if (noOutput) return;
 			switch com.platform {
 				case CustomTarget("hxmc"):
 				case _: return;
@@ -39,12 +51,12 @@ class HaxeMain {
 				failed = Std.string(e);
 			}
 		}
-		var code = haxe.Main.run(Sys.args());
+		var code = haxe.Main.run(args);
 		if (failed != null) {
 			Sys.stderr().writeString("hxmc: " + failed + "\n");
-			Sys.exit(1);
+			return 1;
 		}
-		Sys.exit(code);
+		return code;
 	}
 
 	// the target this binary runs on

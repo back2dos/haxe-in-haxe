@@ -1,11 +1,16 @@
 // Runs a WebAssembly module hxmc built for wasm32-wasi under node's WASI, in
-// this process. The module sees the arguments, the environment and the whole
-// file system (preopened as "/"; drive letters on Windows), and resolves
-// relative paths against $PWD.
+// this process: imported by the launcher, or as a command
+//   node hxmc/bootstrap/wasi.mjs <module.wasm[.br]> [args...]
+// The module sees the arguments, the environment and the whole file system
+// (preopened as "/"; drive letters as /c, /d, ... on Windows), and resolves
+// relative paths against $PWD. A module ending in .br (brotli) or .gz is
+// decompressed first (the committed stage0 is hxmc/bootstrap/stage0.wasm.br).
 import fs from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
 import v8 from 'node:v8';
+import zlib from 'node:zlib';
+import { fileURLToPath } from 'node:url';
 // (node's WASI warns that it is experimental)
 const emitWarning = process.emitWarning;
 process.emitWarning = (w, ...rest) => {
@@ -27,15 +32,18 @@ function preopens() {
 	return r;
 }
 
-function wasiPath(p) {
+export function wasiPath(p) {
 	if (process.platform !== 'win32') return p;
 	const m = /^([A-Za-z]):[\\/](.*)$/.exec(p);
 	return m ? `/${m[1].toLowerCase()}/${m[2].replace(/\\/g, '/')}` : p.replace(/\\/g, '/');
 }
 
-export function runWasm(module, args, env) {
+// variables that hold paths (HAXE_STD_PATH may hold several, by the host's delimiter)
+const PATH_VARS = ['HAXE_STD_PATH', 'HXMC_RT_DIR', 'HXMC_RT_OBJ', 'HXMC_EXE_LIST'];
+
+export function runWasm(module, args, env = process.env) {
 	const e = { ...env, PWD: wasiPath(process.cwd()) };
-	for (const k of ['HAXE_STD_PATH', 'HXMC_RT_DIR', 'HXMC_EXE_LIST']) if (e[k]) e[k] = wasiPath(e[k]);
+	for (const k of PATH_VARS) if (e[k]) e[k] = e[k].split(path.delimiter).map(wasiPath).join(':');
 	const wasi = new WASI({
 		version: 'preview1',
 		args: [wasiPath(path.resolve(module)), ...args],
@@ -43,7 +51,18 @@ export function runWasm(module, args, env) {
 		preopens: preopens(),
 		returnOnExit: true,
 	});
-	const mod = new WebAssembly.Module(fs.readFileSync(module));
+	let bytes = fs.readFileSync(module);
+	if (module.endsWith('.br')) bytes = zlib.brotliDecompressSync(bytes);
+	else if (module.endsWith('.gz')) bytes = zlib.gunzipSync(bytes);
+	const mod = new WebAssembly.Module(bytes);
 	const inst = new WebAssembly.Instance(mod, wasi.getImportObject());
 	return wasi.start(inst) ?? 0;
+}
+
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+	if (process.argv.length < 3) {
+		console.error('usage: node wasi.mjs <module.wasm[.br]> [args...]');
+		process.exit(2);
+	}
+	process.exitCode = runWasm(process.argv[2], process.argv.slice(3));
 }

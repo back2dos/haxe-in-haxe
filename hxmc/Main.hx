@@ -1,10 +1,12 @@
 package hxmc;
 
-// The hxmc tool (hxmc/README.md): runs the port's compiler pipeline on the
+// The hxmc tool (README.md, "hxmc"): runs the port's compiler pipeline on the
 // program (from an HXB archive with --hxb-lib, or from source), lowers the
 // filtered program to hxmc's IR (hxmc.ir.Lower) and compiles it to machine
 // code:
 //   hxmc <out> <haxe arguments...> -cp bin/hxmc/std --custom-target hxmc
+// With a first argument that starts with `-` it is the compiler's command
+// line (HaxeMain), e.g. for scripts: `hxmc -cp . --run hxmc.MkStd`.
 // Options (defines, or the environment for development):
 //   -D hxmc.target=linux-x86_64     the target (Target.hx, Abi.hx: six of them)
 //   HXMC_RT_OBJ                     the runtime object (default: <tool dir>/rt/<target>/rt.o)
@@ -48,6 +50,8 @@ class Main {
 			}
 			Sys.exit(haxe.Main.run(args));
 		}
+		if (args.length == 0 || StringTools.startsWith(args[0], "-"))
+			Sys.exit(HaxeMain.run(args));
 		var out = args.shift();
 		var failed = null;
 		var key = UpToDate.key(args, out);
