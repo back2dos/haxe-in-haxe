@@ -4,7 +4,7 @@ import haxe.io.Bytes;
 import hxmc.I64;
 import hxmc.NativeThread;
 import hxmc.rt.C;
-import hxmc.rt.Layouts as L;
+import hxmc.rt.UvLayouts as L;
 import hxmc.unsafe.*;
 
 // libuv behind hxmc.NativeUv (the Eval natives of eval.luv.*,
@@ -24,7 +24,7 @@ import hxmc.unsafe.*;
 // port releases them, handles when their close completes.
 //
 // The C layouts and constants of libuv and of the C library differ per
-// target (error codes, flags, struct fields): Layouts, generated from the
+// target (error codes, flags, struct fields): UvLayouts, generated from the
 // headers by hxmc/c/Layouts.hx.
 @:hxmc.native @:keep
 class Uv {

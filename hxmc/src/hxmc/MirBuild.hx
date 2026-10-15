@@ -345,8 +345,12 @@ class MirBuild {
 
 	// C functions that neither collect nor wait in a safe region, besides
 	// the runtime functions FnLower.noGcHost names
+	// the runtime's machine-code stubs (Target.Emitter.stub)
+	public static inline var STUB_CALL_ON_STACK = "hxmc_call_on_stack";
+	public static inline var STUB_ZERO = "hxmc_zero";
+
 	static var QUIET = [
-		"memset" => true, "memcpy" => true, "memmove" => true, "floor" => true, "pow" => true, "fmod" => true, "atan2" => true,
+		"hxmc_zero" => true, "memset" => true, "memcpy" => true, "memmove" => true, "floor" => true, "pow" => true, "fmod" => true, "atan2" => true,
 		"hxmc_barrier_slow" => true, "setjmp" => true, "_setjmp" => true, "__mingw_setjmp" => true, "hxmc_tls_base" => true,
 	];
 
@@ -2183,6 +2187,20 @@ class MirBuild {
 			case "callRef1" | "callRef2":
 				var xs = [for (a in args) ex(a)];
 				callInd(xs[0], xs.slice(1), I64);
+			case "call0":
+				callInd(ex(args[0]), [], Void);
+				iconst(0);
+			// (the runtime's stubs, written by each target's emitter: DataGen.stubs)
+			case "callOnStack":
+				if (abi.wasm) throw new Unsupported("Mem.callOnStack: WebAssembly has no stack to switch");
+				var xs = [for (a in args) ex(a)];
+				call(STUB_CALL_ON_STACK, xs, Void);
+				iconst(0);
+			case "zero":
+				if (abi.wasm) throw new Unsupported("Mem.zero: not on WebAssembly (Wasm.memset)");
+				var xs = [for (a in args) ex(a)];
+				call(STUB_ZERO, xs, Void);
+				iconst(0);
 			case _: throw new Unsupported("unknown intrinsic " + name);
 		}
 	}

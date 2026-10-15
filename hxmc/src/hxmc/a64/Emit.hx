@@ -39,6 +39,31 @@ class Emit implements hxmc.Target.Emitter {
 	public function allocStub(name:String, lo:Int, tySym:Null<String>, tyVal:Int, bytes:Int):Bool
 		return false;
 
+	// the runtime's stubs (MirBuild.STUB_*), in the C convention
+	public function stub(name:String) {
+		text.buf.align(4, 0);
+		var start = text.buf.len;
+		switch name {
+			case hxmc.MirBuild.STUB_CALL_ON_STACK:
+				// fn() (x1) with the stack pointer at top (x0)
+				a.pair(false, Asm.FP, Asm.LR, SP, -16, 1);
+				a.movSp(Asm.FP, SP);
+				a.movSp(SP, 0);
+				a.blr(1);
+				a.movSp(SP, Asm.FP);
+				a.pair(true, Asm.FP, Asm.LR, SP, 16, 2);
+				a.ret();
+			case hxmc.MirBuild.STUB_ZERO:
+				// memset(p, 0, bytes)
+				a.movR(true, 2, 1);
+				a.movz(false, 1, 0, 0);
+				a.bSym(obj.sym("memset"));
+			case _:
+				throw "hxmc: unknown runtime stub " + name;
+		}
+		obj.define(name, text, start, text.buf.len - start, true);
+	}
+
 	public function useSection(name:Null<String>) {
 		text = obj.section(name != null ? name : ".text", Text, 16);
 		a.sec = text;

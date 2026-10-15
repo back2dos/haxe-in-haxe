@@ -17,6 +17,10 @@ class WasmEmitter implements hxmc.Target.Emitter {
 
 	public function useSection(name:Null<String>) {}
 
+	// (MirBuild rejects the intrinsics that need them on WebAssembly)
+	public function stub(name:String)
+		throw "hxmc: wasm: no runtime stub " + name;
+
 	// () -> i64: hxmc_alloc_slow(lo, type index, bytes), with no locals (laid
 	// out as WasmGen's functions: the signature, the body's size as a padded LEB)
 	public function allocStub(name:String, lo:Int, tySym:Null<String>, tyVal:Int, bytes:Int):Bool {

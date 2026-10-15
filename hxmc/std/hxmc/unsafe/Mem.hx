@@ -35,6 +35,17 @@ extern class Mem {
 	// fn(a) and fn(a, b) returning a reference
 	static function callRef1(fn:Ptr, a:Dynamic):Dynamic;
 	static function callRef2(fn:Ptr, a:Dynamic, b:Ptr):Dynamic;
+	// fn() (no arguments, no result)
+	static function call0(fn:Ptr):Void;
+	// fn() on another stack: the stack pointer is `top` (16-byte aligned,
+	// the end of a reserved range) for the call, the caller's again after it
+	// (a few instructions per target, the stub hxmc_call_on_stack; not on
+	// WebAssembly)
+	static function callOnStack(top:Ptr, fn:Ptr):Void;
+	// `bytes` zero bytes at p (x86-64: rep stosb, which writes whole cache
+	// lines without reading them first; elsewhere the C library's memset;
+	// not on WebAssembly). Not a GC point.
+	static function zero(p:Ptr, bytes:I64):Void;
 
 	// loads at p + off (8/16-bit and f32 loads widen; getI32 of 4 bytes)
 	static function getI8(p:Ptr, off:Int):Int;

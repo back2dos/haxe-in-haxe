@@ -618,8 +618,9 @@ class Facts {
 			if (!f.hasTry) mark(f.body);
 	}
 
+	// (@:hxmc.export("symbol") on a scalar static: that symbol)
 	public function scalarGlobal(g:Int):String
-		return "G_" + globalNames[g].substr(3);
+		return p.globals[g].exp != null ? p.globals[g].exp : "G_" + globalNames[g].substr(3);
 }
 
 typedef TypeEntry = {

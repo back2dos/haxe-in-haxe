@@ -391,6 +391,17 @@ class DataGen {
 		}
 	}
 
+	// the runtime's machine-code stubs the program refers to (MirBuild.STUB_*)
+	public function stubs(objs:Array<Obj>, emit:Target.Emitter) {
+		for (n in [MirBuild.STUB_CALL_ON_STACK, MirBuild.STUB_ZERO]) {
+			var used = false;
+			for (o in objs.concat([obj]))
+				for (s in o.symbols)
+					if (s.section == null && !s.abs && s.name == n) used = true;
+			if (used) emit.stub(n);
+		}
+	}
+
 	function mainBody() {
 		compile(MirBuild.synthetic(prep, abi, "hx_main_body", [], Void, (b, _) -> {
 			for (i in 0...p.globals.length) {

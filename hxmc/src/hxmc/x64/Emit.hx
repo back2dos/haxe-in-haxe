@@ -191,6 +191,39 @@ class Emit implements hxmc.Target.Emitter {
 		return true;
 	}
 
+	// the runtime's stubs (MirBuild.STUB_*), in the C convention
+	public function stub(name:String) {
+		var start = text.buf.len;
+		var arg0 = win ? Asm.RCX : Asm.RDI, arg1 = win ? Asm.RDX : Asm.RSI;
+		switch name {
+			case hxmc.MirBuild.STUB_CALL_ON_STACK:
+				// fn() with the stack pointer at top (Windows: its home area below)
+				a.push(Asm.RBP);
+				a.movRR(8, Asm.RBP, Asm.RSP);
+				a.movRR(8, Asm.RSP, arg0);
+				if (win) a.aluRI(Asm.SUB, 8, Asm.RSP, 32);
+				a.callR(arg1);
+				a.movRR(8, Asm.RSP, Asm.RBP);
+				a.pop(Asm.RBP);
+				a.ret();
+			case hxmc.MirBuild.STUB_ZERO:
+				// rep stosb: rdi = p, rcx = bytes, al = 0 (rdi is callee-saved on Windows)
+				if (win) {
+					a.push(Asm.RDI);
+					a.movRR(8, Asm.RDI, Asm.RCX);
+				}
+				a.movRR(8, Asm.RCX, arg1);
+				a.movImm32(Asm.RAX, 0);
+				text.buf.u8(0xF3);
+				text.buf.u8(0xAA);
+				if (win) a.pop(Asm.RDI);
+				a.ret();
+			case _:
+				throw "hxmc: unknown runtime stub " + name;
+		}
+		obj.define(name, text, start, text.buf.len - start, true);
+	}
+
 	function mem(i:LIns):Mem {
 		if (i.secrel != null) {
 			var m = new Mem(i.base, i.disp);

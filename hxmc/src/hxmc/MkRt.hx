@@ -101,12 +101,14 @@ class MkRt {
 		return r;
 	}
 
-	// `hxmc --mkrt-macho <out> <objects and archives...>`: the runtime object
-	// of a macOS target: the runtime's Mach-O objects merged (MachOReader)
+	// `hxmc --mkrt-macho <out> [--arm64] <objects and archives...>`: a
+	// runtime object of a macOS target: Mach-O objects merged (MachOReader)
 	// into one Obj in hxmc's ELF container, with the members of the archives
 	// (GNU format: mbedtls and libuv for ssl.o and uv.o) the objects need, as
 	// a linker picks them. Nothing else is linked in: what stays undefined
-	// comes from libSystem at load time (LinkMachO binds it).
+	// comes from libSystem at load time (LinkMachO binds it). Without inputs
+	// (rt.o: the runtime is Haxe), an empty object; --arm64 names its
+	// architecture then.
 	public static function macho(args:Array<String>) {
 		var out = args.shift();
 		var m = new MkRt();
@@ -125,6 +127,10 @@ class MkRt {
 			// (-u symbol: a root, taken from the archives)
 			if (a == "-u") {
 				m.undefinedQueue.push(args[i++]);
+				continue;
+			}
+			if (a == "--arm64") {
+				m.arm = true;
 				continue;
 			}
 			var b = sys.io.File.getBytes(a);

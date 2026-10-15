@@ -131,6 +131,11 @@ class Lower {
 					if (os != null && targetOs >= 0 && ["linux", "macos", "windows", "wasm"].indexOf(os) != targetOs) continue;
 					for (cf in c.clOrderedStatics) {
 						if (cf.cfMeta.length == 0) continue;
+						// (an exported variable: data read by its symbol, always there)
+						if (!cf.cfKind.match(Method(_))) {
+							if (hasMeta(":hxmc.export", cf.cfMeta)) staticVar(c, cf);
+							continue;
+						}
 						var n = metaString(":hxmc.export", cf.cfMeta);
 						var exported = n != null;
 						if (n == null) n = metaString(":hxmc.host", cf.cfMeta);
@@ -235,7 +240,9 @@ class Lower {
 				case ECallAnon(n, s, o, args): ECallAnon(n, s, ex(o), [for (a in args) ex(a)]);
 				case ECallHost(n, args, ret):
 					var xs = [for (a in args) ex(a)];
-					var impl = hostImpls.exists(n) && fi.cSymbol != n ? hostImpl(n) : null;
+					// (the safe region's markers stay calls by symbol: Facts tells
+					// the functions that enter one by them)
+					var impl = hostImpls.exists(n) && fi.cSymbol != n && n != "rt_blocking_enter" && n != "rt_blocking_leave" ? hostImpl(n) : null;
 					if (impl == null) ECallHost(n, xs, ret) else {
 						if (impl.args.length != xs.length || Ir.repr(impl.ret) != Ir.repr(ret))
 							fail('the Haxe implementation ${impl.name} of the runtime\'s $n does not have its signature');
@@ -835,7 +842,11 @@ class Lower {
 			staticVars.set(cf, g);
 			return g;
 		}
-		prog.globals.push(tls == null ? {ty: t, init: null, name: name} : {ty: t, init: null, name: name, tls: tls});
+		// @:hxmc.export("symbol"): a scalar static under that symbol (data that
+		// generated code and the runtime's code read by name: rt_young_start, ...)
+		var exp = metaString(":hxmc.export", cf.cfMeta);
+		if (exp != null && (tls != null || !Ir.isScalar(t))) throw new LowerError('@:hxmc.export on the static variable ' + cf.cfName + ': only scalars and Ptr, not thread-local', CInterop.posOf(cf.cfPos));
+		prog.globals.push(tls != null ? {ty: t, init: null, name: name, tls: tls} : exp != null ? {ty: t, init: null, name: name, exp: exp} : {ty: t, init: null, name: name});
 		staticVars.set(cf, g);
 		initClass(c);
 		return g;

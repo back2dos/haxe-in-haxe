@@ -17,6 +17,9 @@ interface Emitter {
 	// an allocation stub (DataGen.allocStubs) written directly: false when
 	// the target has no such writer (the stub is then a compiled function)
 	function allocStub(name:String, lo:Int, tySym:Null<String>, tyVal:Int, bytes:Int):Bool;
+	// one of the runtime's machine-code stubs (MirBuild.STUB_*: a stack
+	// switch, zeroing), written directly
+	function stub(name:String):Void;
 }
 
 class Target {

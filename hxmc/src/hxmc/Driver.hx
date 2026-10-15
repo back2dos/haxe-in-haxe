@@ -337,6 +337,7 @@ class Driver {
 		var dg = new DataGen(prep, abi, data, mf -> compileMir(mf, demit, data));
 		dg.run();
 		dg.allocStubs(objs, demit);
+		dg.stubs(objs, demit);
 		var t3 = haxe.Timer.stamp();
 		if (abi.wasm) {
 			var stack = Sys.getEnv("HXMC_WASM_STACK_KB");
