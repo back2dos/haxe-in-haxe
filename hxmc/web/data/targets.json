@@ -1,13 +1,13 @@
 {
  "meta": {
-  "date": "2026-10-15T10:31:15",
-  "commit": "143ce04",
+  "date": "2026-10-15T21:35:11",
+  "commit": "39b78c4",
   "cpu": "Intel(R) Xeon(R) Processor @ 2.10GHz",
   "cores": 4,
   "runs": 3,
   "port": "bin/port/haxe",
   "reference": "5.0.0-preview.1",
-  "platform": "Linux-6.18.44-fc-v114-x86_64-with-glibc2.39"
+  "platform": "Linux-6.18.44-fc-v114-x86_64"
  },
  "results": [
   {
@@ -356,17 +356,22 @@
    "project": "self",
    "target": "hlc",
    "reference": {
-    "cpu": 15.824904,
-    "wall": 16.11016318700058,
-    "rss_mb": 1759.5078125,
+    "cpu": 14.06,
+    "wall": 14.270903,
+    "rss_mb": 1864.628906,
     "status": "ok",
-    "members": 3026,
-    "bytes": 68779038
+    "members": 3032,
+    "bytes": 68885620
    },
    "port": {
-    "status": "exit 1: [ERROR] (unknown position) |  |    | Error: haxe-in-haxe: hl2c type name of macros.eval.VenumValue depends on OCaml Marshal of a closure"
+    "cpu": 18.4,
+    "wall": 18.706318,
+    "rss_mb": 1362.628906,
+    "status": "ok",
+    "members": 3032,
+    "bytes": 68885620
    },
-   "identical": false
+   "identical": true
   },
   {
    "project": "self",

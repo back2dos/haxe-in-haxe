@@ -148,3 +148,44 @@ footer { border-top: 1px solid var(--line); margin-top: 64px; padding: 20px 16px
 .storylink { margin: -8px 0 20px; font-size: 16px; }
 .storylink a { font-weight: 600; }
 .story-hero .wrap, .story-foot { max-width: 752px; }
+
+/* Programs: the latest benchmark run and its history (BenchCharts.hx). Series
+   colors in a fixed order, stepped for each mode. */
+:root {
+	--s1: #2a78d6; --s2: #eb6834; --s3: #1baf7a; --s4: #eda100; --s5: #e87ba4; --s6: #008300; --s7: #6250d6;
+}
+@media (prefers-color-scheme: dark) {
+	:root {
+		--s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500; --s5: #d55181; --s6: #008300; --s7: #9085e9;
+	}
+}
+.swatch { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; vertical-align: baseline; }
+table.matrix th.num { white-space: nowrap; }
+table.matrix td.best { font-weight: 700; }
+table.matrix .warnmark { color: var(--todo); }
+.chartbar { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 8px 16px; margin: 12px 0 4px; }
+.chartbar .tabs { margin: 0; }
+.legend { display: flex; flex-wrap: wrap; gap: 6px; }
+.legend .series { font-size: 13px; padding: 3px 10px; }
+.legend .series[aria-pressed="false"] { opacity: 0.45; text-decoration: line-through; }
+.charts { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px; margin-top: 8px; }
+.chart { margin: 0; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px 4px; min-width: 0; }
+.chart figcaption { font-size: 14px; font-weight: 600; margin-bottom: 2px; }
+.plot { position: relative; }
+.plot svg { display: block; width: 100%; height: auto; overflow: visible; touch-action: pan-y; }
+.plot .grid { stroke: var(--line); stroke-width: 1; }
+.plot .unit { stroke: var(--muted); stroke-width: 1; stroke-dasharray: 3 3; }
+.plot .tick { fill: var(--muted); font-size: 10px; font-variant-numeric: tabular-nums; }
+.plot .imported { fill: var(--code); }
+.plot .series path { fill: none; stroke: var(--c); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.plot .series circle { fill: var(--c); stroke: var(--panel); stroke-width: 1; }
+.plot .cross { stroke: var(--muted); stroke-width: 1; }
+.plot .hit { fill: transparent; }
+.plot .tip {
+	position: absolute; top: 4px; z-index: 2; pointer-events: none; min-width: 170px;
+	background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px;
+	font-size: 12px; line-height: 1.5; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+}
+.plot .tip code { font-size: 11px; }
+.plot .tip div { display: flex; align-items: center; white-space: nowrap; }
+.plot .tip .v { margin-left: auto; padding-left: 12px; font-variant-numeric: tabular-nums; font-weight: 600; }

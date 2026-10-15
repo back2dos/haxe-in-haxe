@@ -6,6 +6,9 @@
 // Then the page itself (index.html, Monaco blocked: its plain editor): the
 // module it picks (hih.wasm; hih-legacy.wasm with ?eh=legacy, and in a
 // Chromium whose V8 runs without exnref) and a Run of its first example.
+// With a benchmark history in the site (bench/, `make site BENCH_DATA=...`):
+// the Programs table and one chart per case, in light and dark mode, with a
+// hover tooltip (screenshots into $SCREENSHOTS when set).
 //   node hxmc/web/tools/browser-test.mjs bin/site [chromium firefox webkit]
 // (Playwright from npm, with its browsers: npx playwright install)
 import { createServer } from 'node:http';
@@ -104,6 +107,49 @@ async function pageTest(browser, query, expect) {
 	return ok;
 }
 
+// the Programs benchmarks: the latest run's table, the history's charts and a tooltip
+async function benchTest(browser, name) {
+	let ok = true;
+	const latest = existsSync(path.join(dir, 'bench/latest.json'));
+	for (const colorScheme of ['light', 'dark']) {
+		const page = await browser.newPage({ colorScheme, viewport: { width: 1100, height: 900 } });
+		const errors = [];
+		page.on('pageerror', (e) => errors.push(e.message));
+		await page.route(/^https:\/\/cdn\.jsdelivr\.net\//, (r) => r.abort());
+		await page.goto(`http://localhost:${port}/index.html`);
+		let facts = '';
+		try {
+			// (the table: the latest run, which a history of imported points only lacks)
+			if (latest) await page.waitForSelector('#programs-results table', { timeout: 30000 });
+			await page.waitForSelector('#programs-history svg', { timeout: 30000 });
+			const svg = page.locator('#programs-history .plot svg').first();
+			await svg.scrollIntoViewIfNeeded();
+			const box = await svg.boundingBox();
+			await svg.hover({ position: { x: box.width * 0.95, y: box.height / 2 } });
+			await page.waitForSelector('#programs-history .tip:not([hidden])', { timeout: 5000 });
+			facts = await page.evaluate(() => ({
+				rows: document.querySelectorAll('#programs-results tbody tr').length,
+				cols: document.querySelectorAll('#programs-results thead th').length,
+				charts: document.querySelectorAll('#programs-history svg').length,
+				lines: document.querySelectorAll('#programs-history svg .series path').length,
+				tip: document.querySelector('#programs-history .tip').textContent.slice(0, 60),
+				series: getComputedStyle(document.documentElement).getPropertyValue('--s1').trim(),
+			}));
+			if ((latest && facts.rows < 1) || facts.charts < 1 || facts.lines < 1) ok = false;
+			if (process.env.SCREENSHOTS) {
+				await page.locator('#benchmarks').screenshot({ path: path.join(process.env.SCREENSHOTS, `bench-${name}-${colorScheme}.png`) });
+			}
+		} catch (e) {
+			ok = false;
+			facts = e.message.split('\n')[0];
+		}
+		if (errors.length) ok = false;
+		console.log(`  benchmarks (${colorScheme}) ${ok ? 'ok' : 'FAILED'}: ${JSON.stringify(facts)}${errors.length ? '; errors: ' + errors.join('; ') : ''}`);
+		await page.close();
+	}
+	return ok;
+}
+
 let failed = 0;
 const launches = names.map((name) => ({ name, label: name, opts: {} }));
 // (a Chromium without exnref: the page falls back to the legacy module by itself)
@@ -136,6 +182,7 @@ for (const { name, label, opts, noExnref } of launches) {
 			for (const l of log) console.log('    ' + l);
 			if (!log.some((l) => l.startsWith('run 0')) || !log.some((l) => l.startsWith('hxb 0'))) failed++;
 		}
+		if (existsSync(path.join(dir, 'bench/history.json')) && !(await benchTest(browser, name))) failed++;
 		if (existsSync(path.join(dir, 'index.html'))) {
 			if (!(await pageTest(browser, '', 'hih.wasm'))) failed++;
 			if (modules.includes('hih-legacy.wasm') && !(await pageTest(browser, '?eh=legacy', 'hih-legacy.wasm'))) failed++;

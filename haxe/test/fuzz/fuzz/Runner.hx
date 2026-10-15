@@ -426,7 +426,7 @@ class Runner {
 		return switch kind {
 			case "none": null;
 			case "file": compareFiles(a + "/" + path, b + "/" + path, path);
-			case "dir": compareMaps(listDir(a + "/" + path), listDir(b + "/" + path), _ -> true);
+			case "dir": compareDirs(listDir(a + "/" + path), listDir(b + "/" + path));
 			case "zip": compareMaps(readZip(a + "/" + path), readZip(b + "/" + path), _ -> true);
 			case "hxb": compareMaps(readZip(a + "/" + path), readZip(b + "/" + path), n -> StringTools.endsWith(n, ".hxb"));
 			default: "unknown output kind " + kind;
@@ -466,6 +466,17 @@ class Runner {
 			detail += ": " + clip(a) + " <> " + clip(c) + " [" + region(a, c) + "]";
 		}
 		return detail;
+	}
+
+	// hl/c: the digest names that depend on the reference's machine code are
+	// renamed on both sides first (haxe/test/HlcNames.hx)
+	static function compareDirs(a:Map<String, Bytes>, b:Map<String, Bytes>):Null<String> {
+		if (HlcNames.isHlc([for (k in a.keys()) k])) {
+			var n = HlcNames.normalize(a, b);
+			a = n.a;
+			b = n.b;
+		}
+		return compareMaps(a, b, _ -> true);
 	}
 
 	static function compareMaps(a:Map<String, Bytes>, b:Map<String, Bytes>, compared:String->Bool):Null<String> {

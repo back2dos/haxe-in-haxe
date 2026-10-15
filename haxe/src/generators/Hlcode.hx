@@ -63,6 +63,34 @@ typedef HField = {
 	var t:Ttype;
 }
 
+// port: the `(string, 'v) PMap.t` fields of the prototypes (pindex, pfunctions,
+// vindex): looked up through a StringMap; `keys` holds the keys in first-insertion
+// order (a re-added key keeps its place and takes the new key string, as PMap.add
+// does), from which Hl2c's Marshal rebuilds the PMap's AVL tree.
+class StrPMap<V> {
+	final m:StringMap<V> = new StringMap();
+	final pos:StringMap<Int> = new StringMap();
+
+	public final keys:Array<String> = [];
+
+	public function new() {}
+
+	public inline function get(k:String):Null<V> return m.get(k);
+
+	public inline function exists(k:String):Bool return m.exists(k);
+
+	public function set(k:String, v:V):Void {
+		var i = pos.get(k);
+		if (i == null) {
+			pos.set(k, keys.length);
+			keys.push(k);
+		} else {
+			keys[i] = k;
+		}
+		m.set(k, v);
+	}
+}
+
 class ClassProto {
 	public var pname:String;
 	public var pid:Int;
@@ -72,9 +100,8 @@ class ClassProto {
 	public var pproto:Array<FieldProto>;
 	public var pnfields:Int;
 	public var pfields:Array<HField>;
-	// port: (string, int * ttype) PMap.t; only looked up, never iterated.
-	public var pindex:StringMap<{fid:Int, t:Ttype}>;
-	public var pfunctions:StringMap<Int>;
+	public var pindex:StrPMap<{fid:Int, t:Ttype}>;
+	public var pfunctions:StrPMap<Int>;
 	public var pinterfaces:TtypeMap<Int>;
 	public var pbindings:Array<{fid:Int, fidx:Int}>; // port: (int * int) list, head first
 
@@ -87,8 +114,8 @@ class ClassProto {
 		pproto = [];
 		pnfields = 0;
 		pfields = [];
-		pindex = new StringMap();
-		pfunctions = new StringMap();
+		pindex = new StrPMap();
+		pfunctions = new StrPMap();
 		pinterfaces = new TtypeMap();
 		pbindings = [];
 	}
@@ -124,11 +151,11 @@ class FieldProto {
 
 class VirtualProto {
 	public var vfields:Array<HField>;
-	public var vindex:StringMap<Int>;
+	public var vindex:StrPMap<Int>;
 
 	public function new() {
 		vfields = [];
-		vindex = new StringMap();
+		vindex = new StrPMap();
 	}
 }
 
@@ -1301,6 +1328,12 @@ class TtypeMap<V> {
 	}
 
 	public function exists(t:Ttype):Bool return find(t) != null;
+
+	// port: the key a binding holds (PMap.add stores the key of the latest add).
+	public function keyOf(t:Ttype):Null<Ttype> {
+		var e = find(t);
+		return e == null ? null : e.k;
+	}
 
 	public function set(t:Ttype, v:V):Void {
 		var e = find(t);

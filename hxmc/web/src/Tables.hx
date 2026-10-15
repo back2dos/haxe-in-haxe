@@ -6,9 +6,9 @@ import js.Browser.window;
 import js.html.Element;
 import js.html.TableCellElement;
 
-// The Benchmarks and Target generators sections: tables of bench.json,
-// programs.json and targets.json (measured results, hxmc/web/data), copied
-// by `make site` (Makefile).
+// The Benchmarks and Target generators sections: tables of bench.json and
+// targets.json (measured results, hxmc/web/data), copied by `make site`
+// (Makefile); the Programs part from the benchmark history (BenchCharts).
 typedef BenchRun = {
 	workload:String,
 	runner:String,
@@ -35,25 +35,6 @@ typedef BenchData = {
 		?cpu:String,
 		?cores:Int,
 		?memory_gb:Float,
-		?date:String,
-		?commit:String,
-		?versions:DynamicAccess<String>,
-	},
-}
-
-typedef ProgramRun = {
-	?build:Float,
-	?run:Float,
-	?size:Float,
-	?gzip:Float,
-	?error:String,
-}
-
-typedef ProgramData = {
-	results:DynamicAccess<ProgramRun>,
-	?meta:{
-		?cpu:String,
-		?cores:Int,
 		?date:String,
 		?commit:String,
 		?versions:DynamicAccess<String>,
@@ -94,11 +75,6 @@ class Tables {
 		["hxmc-wasm-node", "hxmc, wasm (Node)"],
 		["hxmc-wasm-wasmtime", "hxmc, wasm (wasmtime)"],
 	];
-	static final PROGRAMS = [
-		["alloc", "allocation"], ["bcrypt", "bcrypt"], ["binarytrees", "binary trees"], ["json", "JSON"], ["mandelbrot", "Mandelbrot"],
-		["mandelbrot_anon", "Mandelbrot, anonymous objects"], ["nbody", "n-body"], ["sha256", "SHA-256"], ["sha512", "SHA-512"],
-		["formatter_noio", "haxe-formatter"],
-	];
 	static final WORKLOADS = [
 		["self", "The port's own source: 52k lines in 382 modules, with std macros run by the Eval interpreter."],
 		["stdlib", "32 standard library modules (JSON, XML, zip, crypto, data structures) as roots."],
@@ -115,7 +91,7 @@ class Tables {
 
 	static function main() {
 		load("bench.json", "bench-results", renderBench);
-		load("programs.json", "programs-results", renderPrograms);
+		BenchCharts.load();
 		load("targets.json", "targets-results", renderTargets);
 	}
 
@@ -280,39 +256,6 @@ class Tables {
 		if (b["native"] != null) line.push('the x86-64 executable in ${secs(b["native"].wall)} (${size(b["native"].size)}, ${size(b["native"].gzip)} gzipped)');
 		if (b["wasm"] != null) line.push('the WebAssembly module in ${secs(b["wasm"].wall)} (${size(b["wasm"].size)}, ${size(b["wasm"].gzip)} gzipped)');
 		builds.textContent = "hxmc builds the port from source, cold: " + line.join("; ") + ".";
-	}
-
-	// ---- programs.json
-
-	static function renderPrograms(root:Element, data:ProgramData) {
-		final t = el("table", "bench");
-		t.innerHTML = "<thead><tr><th>Program</th><th class=\"num\">x86-64</th><th class=\"num\">wasm, Node</th><th class=\"num\">wasm, wasmtime</th><th class=\"num wall\">Size x86-64 / wasm</th><th class=\"num wall\">Build x86-64 / wasm</th></tr></thead>";
-		final body = el("tbody");
-		final cell = (r:Null<ProgramRun>) -> el("td", "num", r == null ? "–" : r.error != null ? "failed" : secs(r.run));
-		for (p in PROGRAMS) {
-			final n = data.results[p[0] + "/hxmc"], wn = data.results[p[0] + "/hxmc-wasm-node"], ww = data.results[p[0] + "/hxmc-wasm-wasmtime"];
-			if (n == null && wn == null) continue;
-			final tr = el("tr");
-			tr.append(el("td", "runner", p[1]));
-			tr.append(cell(n));
-			tr.append(cell(wn));
-			tr.append(cell(ww));
-			tr.append(el("td", "num wall", (n != null && n.size != null ? size(n.size) : "–") + " / " + (wn != null && wn.size != null ? size(wn.size) : "–")));
-			tr.append(el("td", "num wall", (n != null && n.build != null ? secs(n.build) : "–") + " / " + (wn != null && wn.build != null ? secs(wn.build) : "–")));
-			body.append(tr);
-		}
-		t.append(body);
-		root.textContent = "";
-		final scroll = el("div", "scroll");
-		scroll.append(t);
-		root.append(scroll);
-		final m = data.meta;
-		if (m == null) return;
-		final parts = [];
-		if (m.cpu != null) parts.push('${m.cpu}, ${m.cores} cores');
-		if (m.date != null) parts.push('measured ${m.date.substring(0, 10)}');
-		if (m.commit != null) parts.push('commit ${m.commit}');
-		root.append(el("p", "note", parts.join("; ") + "."));
 	}
 
 	// ---- targets.json
