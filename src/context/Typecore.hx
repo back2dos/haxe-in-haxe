@@ -747,20 +747,21 @@ class Typecore {
 
 	// port: `where` is polymorphic and unused upstream (debug information only).
 	public static function flushPass<W>(g:TyperGlobals, p:TyperPass, where:W):Void {
+		// port: upstream's tail calls of flush_pass start the loop again from
+		// g.delayed_min_index (a loop here: a host without tail calls, such as
+		// WebAssembly, would nest a frame per task)
 		var index = g.delayedMinIndex;
 		while (index <= passIndex(p)) {
 			var tasks = g.delayed[index];
 			if (tasks.tasks.length != 0) {
 				var f = tasks.tasks.pop();
 				f();
-				flushPass(g, p, where);
-				return;
+				index = g.delayedMinIndex;
 			} else if (tasks.tasksLate.length != 0) {
 				tasks.tasks = tasks.tasksLate.copy();
 				tasks.tasks.reverse();
 				tasks.tasksLate = [];
-				flushPass(g, p, where);
-				return;
+				index = g.delayedMinIndex;
 			} else {
 				// Done with this pass (for now), update min index to next one
 				index++;

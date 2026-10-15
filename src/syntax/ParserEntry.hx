@@ -264,56 +264,66 @@ class ParserEntry {
 		var skipTokensLoop:Pos->Bool->ParserToken->ParserToken = null;
 		var skipTokens:Pos->Bool->ParserToken = null;
 		nextToken = function() return processToken(lexerToken(code));
-		processToken = function(tk:ParserToken):ParserToken return switch tk.token {
-			case Comment(s):
-				// if encloses_resume (pos tk) then syntax_completion SCComment (pos tk);
-				var len = s.length;
-				if (len > 0 && s.charAt(0) == "*") ctx.lastDoc = {
-					doc: s.substr(1, len - (len > 1 && s.charAt(len - 1) == "*" ? 2 : 1)),
-					position: tk.pos.pmin
-				};
-				nextToken();
-			case CommentLine(_):
-				if (ctx.config.inDisplayFile) {
-					var p = tk.pos;
-					// Completion at the / should not pick up the comment (issue #9133)
-					if (Parser.isCompletion(ctx)) p = {pfile: p.pfile, pmin: p.pmin + 1, pmax: p.pmax};
-					// The > 0 check is to deal with the special case of line comments at the beginning of the file (issue #10322)
-					if (DisplayPosition.displayPosition.enclosedIn(p) && p.pmin > 0) Parser.syntaxCompletion(SCComment, null, tk.pos);
+		// port: upstream's tail calls of next_token and process_token (one per
+		// comment and per conditional) go round a loop: a host without tail
+		// calls, such as WebAssembly, would nest frames per token
+		processToken = function(tk:ParserToken):ParserToken {
+			while (true) {
+				switch tk.token {
+					case Comment(s):
+						// if encloses_resume (pos tk) then syntax_completion SCComment (pos tk);
+						var len = s.length;
+						if (len > 0 && s.charAt(0) == "*") ctx.lastDoc = {
+							doc: s.substr(1, len - (len > 1 && s.charAt(len - 1) == "*" ? 2 : 1)),
+							position: tk.pos.pmin
+						};
+						tk = lexerToken(code);
+					case CommentLine(_):
+						if (ctx.config.inDisplayFile) {
+							var p = tk.pos;
+							// Completion at the / should not pick up the comment (issue #9133)
+							if (Parser.isCompletion(ctx)) p = {pfile: p.pfile, pmin: p.pmin + 1, pmax: p.pmax};
+							// The > 0 check is to deal with the special case of line comments at the beginning of the file (issue #10322)
+							if (DisplayPosition.displayPosition.enclosedIn(p) && p.pmin > 0) Parser.syntaxCompletion(SCComment, null, tk.pos);
+						}
+						tk = lexerToken(code);
+					case Sharp("end"):
+						conds.condEnd(tk.pos);
+						tk = lexerToken(code);
+					case Sharp("elseif"):
+						var cond = Grammar.parseMacroCond(ctx, sraw);
+						conds.condElseif(cond.expr, tk.pos);
+						dbc.openDeadBlock(cond.expr.pos);
+						tk = skipTokens(tk.pos, false);
+					case Sharp("else"):
+						conds.condElse(tk.pos);
+						dbc.openDeadBlock(tk.pos);
+						tk = skipTokens(tk.pos, false);
+					case Sharp("if"):
+						tk = enterMacro(true, tk.pos);
+					case Sharp("error"):
+						var token:ParserToken = lexerToken(code);
+						return switch token.token {
+							case Const(String(s, _)): Parser.error(Custom(s), token.pos);
+							case _: Parser.error(Unimplemented, tk.pos);
+						}
+					case Sharp("line"):
+						var token = nextToken();
+						var line:Int = switch token.token {
+							case Const(Int(s, _)):
+								var parsed = Std.parseInt(s);
+								if (parsed == null) Parser.error(Custom("Could not parse ridiculous line number " + s), token.pos);
+								parsed;
+							case t: Parser.error(Unexpected(t), token.pos);
+						};
+						lctx.file.lline = line - 1;
+						tk = lexerToken(code);
+					case Sharp(s):
+						return sharpError(s, tk.pos);
+					case _:
+						return tk;
 				}
-				nextToken();
-			case Sharp("end"):
-				conds.condEnd(tk.pos);
-				nextToken();
-			case Sharp("elseif"):
-				var cond = Grammar.parseMacroCond(ctx, sraw);
-				conds.condElseif(cond.expr, tk.pos);
-				dbc.openDeadBlock(cond.expr.pos);
-				processToken(skipTokens(tk.pos, false));
-			case Sharp("else"):
-				conds.condElse(tk.pos);
-				dbc.openDeadBlock(tk.pos);
-				processToken(skipTokens(tk.pos, false));
-			case Sharp("if"): processToken(enterMacro(true, tk.pos));
-			case Sharp("error"):
-				var token:ParserToken = lexerToken(code);
-				switch token.token {
-					case Const(String(s, _)): Parser.error(Custom(s), token.pos);
-					case _: Parser.error(Unimplemented, tk.pos);
-				}
-			case Sharp("line"):
-				var token = nextToken();
-				var line:Int = switch token.token {
-					case Const(Int(s, _)):
-						var parsed = Std.parseInt(s);
-						if (parsed == null) Parser.error(Custom("Could not parse ridiculous line number " + s), token.pos);
-						parsed;
-					case t: Parser.error(Unexpected(t), token.pos);
-				};
-				lctx.file.lline = line - 1;
-				nextToken();
-			case Sharp(s): sharpError(s, tk.pos);
-			case _: tk;
+			}
 		};
 		enterMacro = function(isIf:Bool, p:Pos):ParserToken {
 			var condition = Grammar.parseMacroCond(ctx, sraw);
@@ -324,38 +334,48 @@ class ParserEntry {
 			dbc.openDeadBlock(condition.expr.pos);
 			return skipTokensLoop(p, true, tk);
 		};
-		skipTokensLoop = function(p:Pos, test:Bool, tk:ParserToken):ParserToken return switch tk.token {
-			case Sharp("end"):
-				conds.condEnd(tk.pos);
-				dbc.closeDeadBlock(tk.pos);
-				lexerToken(code);
-			case Sharp("elseif") if (!test):
-				dbc.closeDeadBlock(tk.pos);
-				var condition = Grammar.parseMacroCond(ctx, sraw);
-				conds.condElseif(condition.expr, tk.pos);
-				dbc.openDeadBlock(condition.expr.pos);
-				skipTokens(p, test);
-			case Sharp("else") if (!test):
-				conds.condElse(tk.pos);
-				dbc.closeDeadBlock(tk.pos);
-				dbc.openDeadBlock(tk.pos);
-				skipTokens(p, test);
-			case Sharp("else"):
-				conds.condElse(tk.pos);
-				dbc.closeDeadBlock(tk.pos);
-				lexerToken(code);
-			case Sharp("elseif"):
-				dbc.closeDeadBlock(tk.pos);
-				enterMacro(false, tk.pos);
-			case Sharp("if"):
-				var condition = Grammar.parseMacroCond(ctx, sraw);
-				conds.condIf(condition.expr);
-				dbc.openDeadBlock(condition.expr.pos);
-				skipTokensLoop(p, test, skipTokens(p, false));
-			case Sharp("error"), Sharp("line"): skipTokens(p, test);
-			case Sharp(s): sharpError(s, tk.pos);
-			case Eof: preprocessorError(UnclosedConditional, p, tk);
-			case _: skipTokens(p, test);
+		// port: the tail calls of skip_tokens (one per skipped token) and
+		// skip_tokens_loop go round a loop, as in processToken
+		skipTokensLoop = function(p:Pos, test:Bool, tk:ParserToken):ParserToken {
+			while (true) {
+				switch tk.token {
+					case Sharp("end"):
+						conds.condEnd(tk.pos);
+						dbc.closeDeadBlock(tk.pos);
+						return lexerToken(code);
+					case Sharp("elseif") if (!test):
+						dbc.closeDeadBlock(tk.pos);
+						var condition = Grammar.parseMacroCond(ctx, sraw);
+						conds.condElseif(condition.expr, tk.pos);
+						dbc.openDeadBlock(condition.expr.pos);
+						tk = lexerToken(code);
+					case Sharp("else") if (!test):
+						conds.condElse(tk.pos);
+						dbc.closeDeadBlock(tk.pos);
+						dbc.openDeadBlock(tk.pos);
+						tk = lexerToken(code);
+					case Sharp("else"):
+						conds.condElse(tk.pos);
+						dbc.closeDeadBlock(tk.pos);
+						return lexerToken(code);
+					case Sharp("elseif"):
+						dbc.closeDeadBlock(tk.pos);
+						return enterMacro(false, tk.pos);
+					case Sharp("if"):
+						var condition = Grammar.parseMacroCond(ctx, sraw);
+						conds.condIf(condition.expr);
+						dbc.openDeadBlock(condition.expr.pos);
+						tk = skipTokens(p, false);
+					case Sharp("error"), Sharp("line"):
+						tk = lexerToken(code);
+					case Sharp(s):
+						return sharpError(s, tk.pos);
+					case Eof:
+						return preprocessorError(UnclosedConditional, p, tk);
+					case _:
+						tk = lexerToken(code);
+				}
+			}
 		};
 		skipTokens = function(p, test) return skipTokensLoop(p, test, lexerToken(code));
 		var stream = new Stream<syntax.Lexer.LexedToken>(function(_) {
