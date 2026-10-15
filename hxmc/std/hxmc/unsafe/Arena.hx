@@ -112,6 +112,14 @@ abstract Arena(Ptr) {
 		return p;
 	}
 
+	// a copy of b followed by a NUL (C strings in Bytes)
+	public function copyBytesZ(b:haxe.io.Bytes):CString {
+		var n = b.length;
+		var p:Ptr<UInt8> = alloc(n + 1, 1);
+		LibC.memcpy(p, Mem.addr(b).add(8), (n : I64));
+		return p;
+	}
+
 	// a copy of bytes [pos, pos + len) of b
 	public function copyBytes(b:haxe.io.Bytes, pos:Int = 0, len:Int = -1):Ptr<UInt8> {
 		if (len < 0) len = b.length - pos;

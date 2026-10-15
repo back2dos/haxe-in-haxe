@@ -268,7 +268,6 @@ void rt_sleep(double seconds); // <= 0: yield
 void rt_preempt(void); // lets other runnable threads (and due timers/descriptors) run
 void rt_fd_closed(int fd); // before close(fd): waiters on fd fail instead of polling a reused number
 void rt_run_main(void (*body)(void)); // runs the program's main on a large stack
-extern void (*rt_spawn_hook)(void); // called after a thread is spawned (rt_uv.c: a running uv loop gives way)
 // Blocking natives: between rt_blocking_enter and rt_blocking_leave the
 // thread is in a safe region, where a collection may run (and move objects)
 // without it: it must hold no heap pointer other than in its root slots or

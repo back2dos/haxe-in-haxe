@@ -97,7 +97,7 @@ class WinNet {
 		if (on) {
 			if (nNonblocking == capNonblocking) {
 				capNonblocking = capNonblocking > 0 ? capNonblocking * 2 : 16;
-				nonblocking = Win32.realloc(nonblocking, 8 * capNonblocking);
+				nonblocking = LibC.realloc(nonblocking, 8 * capNonblocking);
 			}
 			Mem.setI64At(nonblocking, 0, nNonblocking++, s);
 		}

@@ -338,7 +338,7 @@ class WinSys {
 		while (true) {
 			if (n == cap) {
 				cap *= 2;
-				buf = Win32.realloc(buf, cap);
+				buf = LibC.realloc(buf, cap);
 			}
 			var r = Win32._read(fd, buf.add(n), cap - n);
 			if (r < 0) {
@@ -759,7 +759,7 @@ class WinSys {
 		lock(1);
 		if (nprocs == procsCap) {
 			procsCap = procsCap > 0 ? procsCap * 2 : 16;
-			procs = Win32.realloc(procs, 16 * procsCap);
+			procs = LibC.realloc(procs, 16 * procsCap);
 		}
 		Mem.setI64(procs, 16 * nprocs, pid);
 		Mem.setPtr(procs, 16 * nprocs + 8, Mem.getPtr(pi, 0));

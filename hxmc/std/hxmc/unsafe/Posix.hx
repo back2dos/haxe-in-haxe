@@ -57,7 +57,6 @@ import hxmc.I64;
 	static function __error():Ptr;
 	static function _NSGetEnviron():Ptr;
 	static function _NSGetExecutablePath(buf:Ptr, size:Ptr):Int;
-	static function realloc(p:Ptr, n:I64):Ptr;
 	@:native("realpath$DARWIN_EXTSN") static function realpathExtsn(path:Ptr, buf:Ptr):Ptr;
 	// sockets (hxmc.rt.PosixNet)
 	static function socket(domain:Int, type:Int, protocol:Int):Int;

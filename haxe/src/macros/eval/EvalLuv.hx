@@ -23,7 +23,7 @@ import hxmc.NativeUv as Uv;
 using macros.eval.EvalValue.EvalValueTools;
 
 // port: upstream calls the OCaml luv library (libuv bindings). On the hxmc host
-// (hxmc/) libuv is reached through `hxmc.NativeUv` (hxmc/c/rt_uv.c),
+// (hxmc/) libuv is reached through `hxmc.NativeUv` (hxmc/std/hxmc/rt/Uv.hx),
 // and this module also carries the parts of luv that are OCaml code
 // (callback bookkeeping, result conversion, `Buffer`, the request life cycle
 // of `File`), following luv's sources. On other hosts, and in hxmc builds
@@ -80,7 +80,7 @@ class EvalLuv {
 		#end
 	}
 
-	// port: handle kinds and host events (rt_uv.c)
+	// port: handle kinds and host events (hxmc.rt.Uv)
 	static inline final HK_IDLE = 0;
 	static inline final HK_PREPARE = 1;
 	static inline final HK_CHECK = 2;

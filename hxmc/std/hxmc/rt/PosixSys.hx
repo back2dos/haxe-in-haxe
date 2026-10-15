@@ -348,7 +348,7 @@ class PosixSys {
 		while (true) {
 			if (n == cap) {
 				cap *= 2;
-				buf = Posix.realloc(buf, cap);
+				buf = LibC.realloc(buf, cap);
 			}
 			var r = Posix.read(fd, buf.add(n), cap - n).toInt();
 			if (r < 0 && errno() == EINTR) continue;

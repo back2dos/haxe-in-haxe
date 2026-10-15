@@ -25,6 +25,7 @@ import hxmc.rt.wasm.NoSslUv;
 #else
 // the native targets' runtime over C libraries (@:hxmc.native)
 import hxmc.rt.Ssl;
+import hxmc.rt.Uv;
 #end
 
 class Runtime {}

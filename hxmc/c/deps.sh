@@ -29,7 +29,7 @@ case $OUT in /*) ;; *) OUT=$ROOT/$OUT ;; esac
 MBEDTLS_VERSION=2.28.10
 MBEDTLS_URL=https://github.com/Mbed-TLS/mbedtls.git
 MBEDTLS_COMMIT=2fc8413bfcb51354c8e679141b17b3f1a5942561
-# libuv 1.48: the version rt_uv.c was checked with (Ubuntu 24.04)
+# libuv 1.48: the version hxmc/std/hxmc/rt/Uv.hx was checked with (Layouts.hx reads its layouts) (Ubuntu 24.04)
 LIBUV_VERSION=1.48.0
 LIBUV_URL=https://github.com/libuv/libuv.git
 LIBUV_COMMIT=e9f29cb984231524e3931aa0ae2c5dae1a32884e

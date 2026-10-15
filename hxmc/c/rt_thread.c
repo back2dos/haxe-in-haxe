@@ -33,7 +33,6 @@
 #include <time.h>
 
 int32_t rt_nthreads = 1;
-void (*rt_spawn_hook)(void);
 
 static double now_secs(void) {
 	struct timespec t;
@@ -474,7 +473,6 @@ int32_t hxmc_NativeThread_spawn(void *job) {
 		free(t);
 		hx_throw_str("cannot start a new thread");
 	}
-	if (rt_spawn_hook) rt_spawn_hook();
 	return id;
 }
 

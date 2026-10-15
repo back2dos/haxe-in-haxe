@@ -167,6 +167,7 @@ rt-build: deps
 	sh hxmc/c/mkrt.sh linux-x86_64
 	$(MAKE) $(TOOL)
 	for t in $(filter-out linux-x86_64,$(TARGETS)); do HXMC=$(CURDIR)/$(TOOL) sh hxmc/c/mkrt.sh $$t || exit 1; done
+	$(TOOL) -cp hxmc/c --run Layouts --check
 	$(NODE) hxmc/bootstrap/rt.mjs hash > bin/hxmc/rt/HASH
 
 # The tool compiles its own source with the previous tool (written next to it,

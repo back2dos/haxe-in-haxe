@@ -2,7 +2,7 @@ package hxmc;
 
 import haxe.io.Bytes;
 
-// libuv (rt_uv.c) behind the Eval natives of eval.luv.*
+// libuv (hxmc.rt.Uv) behind the Eval natives of eval.luv.*
 // (src/macros/eval/EvalLuv.hx), standing for the OCaml luv library.
 //
 // Loops, handles, requests, directories and synchronization objects are
@@ -10,7 +10,7 @@ import haxe.io.Bytes;
 // failure unless noted; functions returning an object give null on failure
 // with the code in `lastError()`. 64-bit results are read with i64Hi/i64Lo.
 // Callbacks only run inside `loopRun`, through its dispatcher:
-// dispatcher(id, event, int, value), events as in rt_uv.c (EV_*).
+// dispatcher(id, event, int, value), events as in hxmc.rt.Uv (EV_*).
 // Socket addresses are Bytes of `sockaddrSize()` bytes (sockaddr_storage).
 extern class NativeUv {
 	static function available():Bool;

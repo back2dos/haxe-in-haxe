@@ -394,7 +394,7 @@ class Driver {
 				rts.push(x);
 			}
 		}
-		var still = links.length > 0 || hxmc.ir.CInterop.USER.keys().hasNext() ? undefinedNames().undef : [];
+		var still = links.length > 0 || hxmc.ir.CInterop.USER.keys().hasNext() || hxmc.ir.CInterop.LIBS.keys().hasNext() ? undefinedNames().undef : [];
 		var dylibs = new Map<String, String>();
 		for (n in still) {
 			var lib = hxmc.ir.CInterop.LIBS.get(n);

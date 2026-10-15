@@ -5,7 +5,7 @@ import hxmc.rt.C;
 
 // hxmc.NativeSsl and hxmc.NativeUv for WebAssembly (README.md,
 // "WebAssembly"): neither mbedtls nor libuv is there, so every call throws,
-// as rt_uv.c built with HXMC_NO_UV does
+// as native builds without libuv would
 // (NativeUv.available is false; constants and the version read while
 // EvalLuv's field lists are built are 0 and ""), one per extern function.
 @:hxmc.wasm @:keep

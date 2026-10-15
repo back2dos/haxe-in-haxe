@@ -17,6 +17,7 @@ import hxmc.I64;
 	static function strcmp(a:Ptr, b:Ptr):Int;
 	static function malloc(n:I64):Ptr;
 	static function free(p:Ptr):Void;
+	static function realloc(p:Ptr, n:I64):Ptr;
 	static function strtod(s:Ptr, end:Ptr):Float;
 	static function rand():Int;
 	// time: struct tm and timespec pointers (hxmc.rt.Date), time_t 64-bit

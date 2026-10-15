@@ -32,7 +32,6 @@ import hxmc.I64;
 	static function _get_osfhandle(fd:Int):Ptr;
 	static function fflush(f:Ptr):Int;
 	static function exit(code:Int):Void;
-	static function realloc(p:Ptr, n:I64):Ptr;
 	// kernel32
 	static function GetEnvironmentStringsW():Ptr;
 	static function FreeEnvironmentStringsW(p:Ptr):Int;
