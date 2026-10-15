@@ -293,7 +293,7 @@ jobs:
             echo "| | |"
             echo "| --- | ---: |"
             echo "| clean bootstrap from the stage0 (stage0 under node, the tool from source, the fixpoint) | ${BOOTSTRAP_SECONDS} s |"
-            echo "| npm package hxmc | $(( NPM_SIZE / 1024 )) KB (platform packages: $(ls -l bin/npm/hxmc-*-*.tgz | awk '{s+=$5} END {printf "%d KB in all", s/1024}')) |"
+            echo "| npm package @hxmc/cli | $(( NPM_SIZE / 1024 )) KB (platform packages: $(ls -l bin/npm/hxmc-*-*.tgz | grep -v hxmc-cli- | awk '{s+=$5} END {printf "%d KB in all", s/1024}')) |"
             echo ""
           } >> "$GITHUB_STEP_SUMMARY"
           bin/hxmc/hxmc -cp haxe/test -cp hxmc/test --run Measure --port bin/release/linux-x86_64/haxe
@@ -773,7 +773,7 @@ jobs:
       - name: Publish
         run: |
           set -ex
-          cp npm/hxmc-$(cat npm/VERSION).tgz assets/
+          cp npm/hxmc-cli-$(cat npm/VERSION).tgz assets/
           ls -l assets
           SHORT=$(echo "$GITHUB_SHA" | cut -c1-9)
           NOTES="Built from $GITHUB_SHA by hxmc (the port compiled to machine code for each target, cross-built on Linux, with mbedtls and libuv).
