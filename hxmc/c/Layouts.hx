@@ -40,7 +40,27 @@ class Layouts {
 #include <unistd.h>
 #endif
 #include <stddef.h>
+#include <errno.h>
 #include <uv.h>
+#include <time.h>
+#ifdef _WIN32
+#include <pthread_time.h>
+#define RT_POSIX(x) 0
+#define RT_WIN(x) (x)
+#else
+#include <pthread.h>
+#include <poll.h>
+#include <sys/mman.h>
+#include <time.h>
+#define RT_POSIX(x) (x)
+#define RT_WIN(x) 0
+#endif
+#ifndef MADV_POPULATE_WRITE
+#define MADV_POPULATE_WRITE 0
+#endif
+#ifndef MADV_HUGEPAGE
+#define MADV_HUGEPAGE 0
+#endif
 #define O(t, f) ((int)offsetof(t, f))
 #define S(t) ((int)sizeof(t))
 #ifndef O_DIRECT
@@ -158,6 +178,34 @@ class Layouts {
 		["UV_EINVAL", "UV_EINVAL"],
 		["UV_ENOBUFS", "UV_ENOBUFS"],
 		["UV_UNKNOWN", "UV_UNKNOWN"],
+		// the threads and the collector (hxmc.rt.Os): POSIX (0 on Windows)
+		["PTHREAD_MUTEX_SIZE", "RT_POSIX(S(pthread_mutex_t))"],
+		["PTHREAD_COND_SIZE", "RT_POSIX(S(pthread_cond_t))"],
+		["PTHREAD_CONDATTR_SIZE", "RT_POSIX(S(pthread_condattr_t))"],
+		["PTHREAD_ATTR_SIZE", "RT_POSIX(S(pthread_attr_t))"],
+		["PTHREAD_CREATE_DETACHED", "RT_POSIX(PTHREAD_CREATE_DETACHED)"],
+		["CLOCK_MONOTONIC", "CLOCK_MONOTONIC"],
+		["CLOCK_REALTIME", "CLOCK_REALTIME"],
+		["ETIMEDOUT", "ETIMEDOUT"],
+		["EBUSY", "EBUSY"],
+		["EINTR", "EINTR"],
+		["EBADF", "EBADF"],
+		["MAP_PRIVATE", "RT_POSIX(MAP_PRIVATE)"],
+		["MAP_ANONYMOUS", "RT_POSIX(MAP_ANON)"],
+		["MAP_NORESERVE", "RT_POSIX(MAP_NORESERVE)"],
+		["PROT_NONE", "RT_POSIX(PROT_NONE)"],
+		["PROT_READ", "RT_POSIX(PROT_READ)"],
+		["PROT_WRITE", "RT_POSIX(PROT_WRITE)"],
+		["MADV_DONTNEED", "RT_POSIX(MADV_DONTNEED)"],
+		["MADV_POPULATE_WRITE", "RT_POSIX(MADV_POPULATE_WRITE)"],
+		["MADV_HUGEPAGE", "RT_POSIX(MADV_HUGEPAGE)"],
+		["SC_PAGESIZE", "RT_POSIX(_SC_PAGESIZE)"],
+		// struct pollfd (Windows: WSAPOLLFD, a SOCKET first)
+		["POLLFD_SIZE", "S(struct pollfd)"],
+		["POLLFD_EVENTS", "O(struct pollfd, events)"],
+		["POLLFD_REVENTS", "O(struct pollfd, revents)"],
+		["POLLIN", "POLLIN"],
+		["POLLOUT", "POLLOUT"],
 	];
 
 	// luv's Error.t, in evalLuv.ml's encode_uv_error order (24: ECHARSET, none)

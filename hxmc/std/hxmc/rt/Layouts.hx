@@ -206,6 +206,112 @@ class Layouts {
 		return Mem.target() == 0 ? -105 : Mem.target() == 1 ? -105 : Mem.target() == 2 ? -55 : Mem.target() == 3 ? -55 : Mem.target() == 4 ? -4060 : -4060;
 
 	public static inline var UV_UNKNOWN = -4094;
+	public static var PTHREAD_MUTEX_SIZE(get, never):Int;
+
+	static inline function get_PTHREAD_MUTEX_SIZE():Int
+		return Mem.target() == 0 ? 40 : Mem.target() == 1 ? 40 : Mem.target() == 2 ? 64 : Mem.target() == 3 ? 64 : Mem.target() == 4 ? 0 : 0;
+
+	public static var PTHREAD_COND_SIZE(get, never):Int;
+
+	static inline function get_PTHREAD_COND_SIZE():Int
+		return Mem.target() == 0 ? 48 : Mem.target() == 1 ? 48 : Mem.target() == 2 ? 48 : Mem.target() == 3 ? 48 : Mem.target() == 4 ? 0 : 0;
+
+	public static var PTHREAD_CONDATTR_SIZE(get, never):Int;
+
+	static inline function get_PTHREAD_CONDATTR_SIZE():Int
+		return Mem.target() == 0 ? 4 : Mem.target() == 1 ? 4 : Mem.target() == 2 ? 16 : Mem.target() == 3 ? 16 : Mem.target() == 4 ? 0 : 0;
+
+	public static var PTHREAD_ATTR_SIZE(get, never):Int;
+
+	static inline function get_PTHREAD_ATTR_SIZE():Int
+		return Mem.target() == 0 ? 56 : Mem.target() == 1 ? 56 : Mem.target() == 2 ? 64 : Mem.target() == 3 ? 64 : Mem.target() == 4 ? 0 : 0;
+
+	public static var PTHREAD_CREATE_DETACHED(get, never):Int;
+
+	static inline function get_PTHREAD_CREATE_DETACHED():Int
+		return Mem.target() == 0 ? 1 : Mem.target() == 1 ? 1 : Mem.target() == 2 ? 2 : Mem.target() == 3 ? 2 : Mem.target() == 4 ? 0 : 0;
+
+	public static var CLOCK_MONOTONIC(get, never):Int;
+
+	static inline function get_CLOCK_MONOTONIC():Int
+		return Mem.target() == 0 ? 1 : Mem.target() == 1 ? 1 : Mem.target() == 2 ? 6 : Mem.target() == 3 ? 6 : Mem.target() == 4 ? 1 : 1;
+
+	public static inline var CLOCK_REALTIME = 0;
+	public static var ETIMEDOUT(get, never):Int;
+
+	static inline function get_ETIMEDOUT():Int
+		return Mem.target() == 0 ? 110 : Mem.target() == 1 ? 110 : Mem.target() == 2 ? 60 : Mem.target() == 3 ? 60 : Mem.target() == 4 ? 138 : 138;
+
+	public static inline var EBUSY = 16;
+	public static inline var EINTR = 4;
+	public static inline var EBADF = 9;
+	public static var MAP_PRIVATE(get, never):Int;
+
+	static inline function get_MAP_PRIVATE():Int
+		return Mem.target() == 0 ? 2 : Mem.target() == 1 ? 2 : Mem.target() == 2 ? 2 : Mem.target() == 3 ? 2 : Mem.target() == 4 ? 0 : 0;
+
+	public static var MAP_ANONYMOUS(get, never):Int;
+
+	static inline function get_MAP_ANONYMOUS():Int
+		return Mem.target() == 0 ? 32 : Mem.target() == 1 ? 32 : Mem.target() == 2 ? 4096 : Mem.target() == 3 ? 4096 : Mem.target() == 4 ? 0 : 0;
+
+	public static var MAP_NORESERVE(get, never):Int;
+
+	static inline function get_MAP_NORESERVE():Int
+		return Mem.target() == 0 ? 16384 : Mem.target() == 1 ? 16384 : Mem.target() == 2 ? 64 : Mem.target() == 3 ? 64 : Mem.target() == 4 ? 0 : 0;
+
+	public static inline var PROT_NONE = 0;
+	public static var PROT_READ(get, never):Int;
+
+	static inline function get_PROT_READ():Int
+		return Mem.target() == 0 ? 1 : Mem.target() == 1 ? 1 : Mem.target() == 2 ? 1 : Mem.target() == 3 ? 1 : Mem.target() == 4 ? 0 : 0;
+
+	public static var PROT_WRITE(get, never):Int;
+
+	static inline function get_PROT_WRITE():Int
+		return Mem.target() == 0 ? 2 : Mem.target() == 1 ? 2 : Mem.target() == 2 ? 2 : Mem.target() == 3 ? 2 : Mem.target() == 4 ? 0 : 0;
+
+	public static var MADV_DONTNEED(get, never):Int;
+
+	static inline function get_MADV_DONTNEED():Int
+		return Mem.target() == 0 ? 4 : Mem.target() == 1 ? 4 : Mem.target() == 2 ? 4 : Mem.target() == 3 ? 4 : Mem.target() == 4 ? 0 : 0;
+
+	public static inline var MADV_POPULATE_WRITE = 0;
+	public static var MADV_HUGEPAGE(get, never):Int;
+
+	static inline function get_MADV_HUGEPAGE():Int
+		return Mem.target() == 0 ? 14 : Mem.target() == 1 ? 14 : Mem.target() == 2 ? 0 : Mem.target() == 3 ? 0 : Mem.target() == 4 ? 0 : 0;
+
+	public static var SC_PAGESIZE(get, never):Int;
+
+	static inline function get_SC_PAGESIZE():Int
+		return Mem.target() == 0 ? 30 : Mem.target() == 1 ? 30 : Mem.target() == 2 ? 29 : Mem.target() == 3 ? 29 : Mem.target() == 4 ? 0 : 0;
+
+	public static var POLLFD_SIZE(get, never):Int;
+
+	static inline function get_POLLFD_SIZE():Int
+		return Mem.target() == 0 ? 8 : Mem.target() == 1 ? 8 : Mem.target() == 2 ? 8 : Mem.target() == 3 ? 8 : Mem.target() == 4 ? 16 : 16;
+
+	public static var POLLFD_EVENTS(get, never):Int;
+
+	static inline function get_POLLFD_EVENTS():Int
+		return Mem.target() == 0 ? 4 : Mem.target() == 1 ? 4 : Mem.target() == 2 ? 4 : Mem.target() == 3 ? 4 : Mem.target() == 4 ? 8 : 8;
+
+	public static var POLLFD_REVENTS(get, never):Int;
+
+	static inline function get_POLLFD_REVENTS():Int
+		return Mem.target() == 0 ? 6 : Mem.target() == 1 ? 6 : Mem.target() == 2 ? 6 : Mem.target() == 3 ? 6 : Mem.target() == 4 ? 10 : 10;
+
+	public static var POLLIN(get, never):Int;
+
+	static inline function get_POLLIN():Int
+		return Mem.target() == 0 ? 1 : Mem.target() == 1 ? 1 : Mem.target() == 2 ? 1 : Mem.target() == 3 ? 1 : Mem.target() == 4 ? 768 : 768;
+
+	public static var POLLOUT(get, never):Int;
+
+	static inline function get_POLLOUT():Int
+		return Mem.target() == 0 ? 4 : Mem.target() == 1 ? 4 : Mem.target() == 2 ? 4 : Mem.target() == 3 ? 4 : Mem.target() == 4 ? 16 : 16;
+
 
 	// luv's Error.t (evalLuv.ml's encode_uv_error order) -> libuv's code
 	static var uvErrorValues:Array<Int>;
