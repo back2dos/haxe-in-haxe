@@ -821,6 +821,20 @@ class Lower {
 			tls = metaString(":hxmc.threadLocal", cf.cfMeta);
 			if (tls == null) tls = "hxmc_tl_" + name;
 		}
+		// @:hxmc.bss(bytes[, "symbol"]): a Ptr whose value is the address of a
+		// zeroed block of that size outside the heap (C's static arrays)
+		var bss = core.Meta.getOpt(Custom(":hxmc.bss"), cf.cfMeta);
+		if (bss != null) {
+			var where = CInterop.posOf(cf.cfPos);
+			var args = bss.exprs;
+			var bytes:Null<Int> = args.length > 0 ? switch args[0].expr { case EConst(core.Ast.Constant.Int(v, _)): Std.parseInt(v); case _: null; } : null;
+			var sym:Null<String> = args.length > 1 ? switch args[1].expr { case EConst(core.Ast.Constant.String(v, _)): v; case _: null; } : "hxmc_bss_" + name;
+			if (bytes == null || bytes <= 0 || sym == null) throw new LowerError('@:hxmc.bss ' + cf.cfName + ': give the size in bytes (an integer literal) and optionally the symbol (a string literal)', where);
+			if (t != TI64 || cf.cfExpr != null) throw new LowerError('@:hxmc.bss ' + cf.cfName + ': a Ptr without initializer (its value is the block\'s address)', where);
+			prog.globals.push({ty: t, init: null, name: name, bss: bytes, sym: sym});
+			staticVars.set(cf, g);
+			return g;
+		}
 		prog.globals.push(tls == null ? {ty: t, init: null, name: name} : {ty: t, init: null, name: name, tls: tls});
 		staticVars.set(cf, g);
 		initClass(c);

@@ -66,14 +66,16 @@ class PosixNet {
 	@:hxmc.noGc static function setErrno(e:Int)
 		Mem.setI32(mac() ? Posix.__error() : Posix.__errno_location(), 0, e);
 
-	// the last failure's errno, per thread (rt_net_errno, rt_dyn.c)
+	// the last failure's errno, per thread
+	@:hxmc.threadLocal static var netErrno:Int;
+
 	@:hxmc.noGc static function ret(r:Int):Int {
-		if (r < 0) Mem.tlsSet("rt_net_errno", Ptr.ofI64(errno()));
+		if (r < 0) netErrno = errno();
 		return r;
 	}
 
 	static inline function lastErrno():Int
-		return Mem.tlsGet("rt_net_errno").toI64().toInt();
+		return netErrno;
 
 	@:hxmc.noGc public static function getErrno():Int
 		return lastErrno();
@@ -263,7 +265,7 @@ class PosixNet {
 		var rs = Mem.stack(128), ws = Mem.stack(128), os = Mem.stack(128), maxfd = Mem.stack(8);
 		Mem.setI32(maxfd, 0, -1);
 		if (!toFdset(r, rs, maxfd) || !toFdset(w, ws, maxfd) || !toFdset(o, os, maxfd)) {
-			Mem.tlsSet("rt_net_errno", Ptr.ofI64(EINVAL));
+			netErrno = EINVAL;
 			return -1;
 		}
 		if (threads() > 1 && timeout != 0) {
@@ -288,7 +290,7 @@ class PosixNet {
 			LibC.free(p);
 			Mem.setI32(maxfd, 0, -1);
 			if (!toFdset(r, rs, maxfd) || !toFdset(w, ws, maxfd) || !toFdset(o, os, maxfd)) {
-				Mem.tlsSet("rt_net_errno", Ptr.ofI64(EBADF));
+				netErrno = EBADF;
 				return -1;
 			}
 			timeout = 0;
@@ -368,22 +370,22 @@ class PosixNet {
 	}
 
 	// gethostbyname/gethostbyaddr return static data: one thread at a time
-	// (a spin lock: rt_spin[0], rt_dyn.c), in a safe region (they may block
+	// (a spin lock: Names.spin[0]), in a safe region (they may block
 	// on the network), results copied out under the lock
 	@:hxmc.noGc static function lockResolver() {
-		var l = Mem.sym("rt_spin");
+		var l = Names.spin;
 		while (Atomic.cas32(l, 0, 1) != 0)
 			Posix.sched_yield();
 	}
 
 	@:hxmc.noGc static function unlockResolver()
-		Atomic.store32(Mem.sym("rt_spin"), 0);
+		Atomic.store32(Names.spin, 0);
 
 	public static function resolve(name:String):Array<Int> {
 		var n = Str.toUtf8(name);
 		var ip = lookup(n);
 		LibC.free(n);
-		Mem.tlsSet("rt_net_errno", Ptr.nil());
+		netErrno = 0;
 		if ((ip >>> 32).toInt() == 0) return null;
 		return [ip.toInt()];
 	}
@@ -410,7 +412,7 @@ class PosixNet {
 
 	public static function reverse(ip:Int):String {
 		var name = reverseLookup(ip);
-		Mem.tlsSet("rt_net_errno", Ptr.nil());
+		netErrno = 0;
 		if (name.isNull()) return null;
 		var s = Str.ofUtf8(name, LibC.strlen(name).toInt());
 		LibC.free(name);

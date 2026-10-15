@@ -337,7 +337,8 @@ class Program {
 	public var lambdas:Array<LambdaInfo> = [];
 	public var selectors:Array<{name:String, sig:SigInfo}> = [];
 	// (tls: a @:hxmc.threadLocal static, its symbol: one per thread, outside rt_globals)
-	public var globals:Array<{ty:Ty, init:Null<CtorInfo>, name:String, ?tls:String}> = [];
+	// (bss: a @:hxmc.bss static, its block's size and symbol: the value is the block's address)
+	public var globals:Array<{ty:Ty, init:Null<CtorInfo>, name:String, ?tls:String, ?bss:Int, ?sym:String}> = [];
 	public var inits:Array<FuncInfo> = []; // static initializers, run before main
 	public var main:FuncInfo;
 

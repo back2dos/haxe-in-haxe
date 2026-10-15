@@ -915,6 +915,8 @@ class MirBuild {
 				var o = ex(bx);
 				var x = ex(v);
 				storeSlot(o, 0, t, x, isNullConst(v));
+			case SSetGlobal(g, _) if (p.p.globals[g].bss != null):
+				throw new Unsupported("a @:hxmc.bss static is constant (" + p.p.globals[g].name + ")");
 			case SSetGlobal(g, v) if (tlsGlobal(g) != null):
 				var x = ex(v);
 				var t = p.p.globals[g].ty;
@@ -1564,6 +1566,8 @@ class MirBuild {
 			case EStr(s): symAddr(p.strSym(s), 8);
 			case ENull(_): lconst(0, 0);
 			case ELocal(l): readLocal(l);
+			case EGlobal(g, _) if (p.p.globals[g].bss != null):
+				symAddr(p.p.globals[g].sym);
 			case EGlobal(g, t) if (tlsGlobal(g) != null):
 				var v = tlsLoad(tlsGlobal(g));
 				t == TF64 ? op1(BitsToF, F64, v) : t == TI64 ? v : op1(Trunc, I32, v);

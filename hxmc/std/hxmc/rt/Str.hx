@@ -278,7 +278,7 @@ class Str {
 
 	@:hxmc.export("hx_str_of_float") static function ofFloat(v:Float):String {
 		var buf = Mem.stack(48);
-		Leaf.hx_format_float(v, buf);
+		FloatText.format(v, buf);
 		return ofBytes(buf, LibC.strlen(buf).toInt());
 	}
 

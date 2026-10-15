@@ -16,6 +16,10 @@ class Libc {
 		return ((1 : I64) << 32) - 1;
 
 	// musl: seed = 6364136223846793005 * seed + 1, the top 31 bits
+	// correctly rounded (hxmc.rt.FloatText)
+	@:hxmc.export("strtod") @:hxmc.noGc static function strtod(s:Ptr, end:Ptr):Float
+		return hxmc.rt.FloatText.parse(s, end);
+
 	@:hxmc.export("rand") @:hxmc.noGc static function rand():Int {
 		var a:I64 = ((0x5851F42D : I64) << 32) | (0x4C957F2D : I64);
 		seed = a * seed + 1;

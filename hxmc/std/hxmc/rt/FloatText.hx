@@ -1,14 +1,16 @@
-package hxmc.rt.wasm;
+package hxmc.rt;
 
 import hxmc.I64;
+import hxmc.unsafe.LibC;
 import hxmc.unsafe.Mem;
 import hxmc.unsafe.Ptr;
 
-// Doubles to text and back for WebAssembly, exactly as the native targets'
-// C library does (README.md, "WebAssembly"): strtod rounds correctly
+// Doubles to text and back (once WebAssembly's only; hx_format_float was
+// rt_dyn.c's), exactly as the native targets' C library does: parse
+// (WebAssembly's strtod, wasm/Libc.hx) rounds correctly
 // (to nearest, ties to even; also hexadecimal, inf and nan), and
 // hx_format_float writes the shortest decimal that reads back as the same
-// double, chosen as rt_dyn.c chooses it (the correctly rounded
+// double, chosen as rt_dyn.c chose it (the correctly rounded
 // prec-significant-digit decimals of printf's %.*e for prec = 1, 2, ...,
 // the first that strtod reads back), formatted like JavaScript. Exact
 // arithmetic on big integers (32-bit limbs in a frame area, at most 8192
@@ -16,7 +18,7 @@ import hxmc.unsafe.Ptr;
 // exponents are exact in double arithmetic (Clinger), and a candidate
 // decimal is compared with the halfway points around the double instead of
 // being read back.
-@:hxmc.wasm @:keep
+@:keep @:allow(hxmc.rt)
 class FloatText {
 	static inline var LIMBS = 256;
 	static inline var BIG = 8 + 4 * LIMBS;
@@ -48,7 +50,7 @@ class FloatText {
 	}
 
 	@:hxmc.noGc static function bcopy(d:Ptr, s:Ptr)
-		Wasm.memcpy(d, s, 8 + 4 * blen(s));
+		LibC.memcpy(d, s, 8 + 4 * blen(s));
 
 	// b = b * m + add (m, add < 2^32)
 	@:hxmc.noGc static function bmulAdd(b:Ptr, m:I64, add:I64) {
@@ -67,8 +69,22 @@ class FloatText {
 	}
 
 	@:hxmc.noGc static function overflow() {
-		Wasi.writeLit(2, "hxmc: FloatText: number too large\n");
-		Wasi.exit(70);
+		var msg = "hxmc: FloatText: number too large\n";
+		if (Mem.os() == 3) {
+			hxmc.rt.wasm.Wasi.writeLit(2, msg);
+			hxmc.rt.wasm.Wasi.exit(70);
+		} else {
+			var p = Mem.stack(64);
+			for (i in 0...msg.length)
+				Mem.setI8(p, i, StringTools.fastCodeAt(msg, i));
+			if (Mem.os() == 2) {
+				hxmc.unsafe.Win32._write(2, p, msg.length);
+				hxmc.unsafe.Win32.exit(70);
+			} else {
+				hxmc.unsafe.Posix.write(2, p, msg.length);
+				hxmc.unsafe.Posix._exit(70);
+			}
+		}
 	}
 
 	// b *= 10^k
@@ -227,7 +243,7 @@ class FloatText {
 		return r;
 	}
 
-	@:hxmc.export("strtod") @:hxmc.noGc static function strtod(s:Ptr, end:Ptr):Float {
+	@:hxmc.noGc public static function parse(s:Ptr, end:Ptr):Float {
 		var p = 0;
 		while (Mem.getU8(s, p) == 32 || (Mem.getU8(s, p) >= 9 && Mem.getU8(s, p) <= 13))
 			p++;

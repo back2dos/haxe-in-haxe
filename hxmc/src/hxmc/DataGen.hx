@@ -80,7 +80,9 @@ class DataGen {
 	// whose third word refers to the storage in __thread_bss)
 	function tbssGlobal(name:String) {
 		var macho = abi.os == "macos";
-		var s = obj.section(macho ? "__DATA,__thread_bss" : ".tbss", Tbss, 8);
+		// (PE: inside the C runtime's TLS template, which runs from _tls_start
+		// in .tls to _tls_end in .tls$ZZZ: sections sort by name)
+		var s = obj.section(macho ? "__DATA,__thread_bss" : abi.os == "windows" ? ".tls$HXMC" : ".tbss", Tbss, 8);
 		s.bssSize = (s.bssSize + 7) & ~7;
 		var storage = obj.define(macho ? name + "$tlv$init" : name, s, s.bssSize, 8, !macho);
 		s.bssSize += 8;
@@ -221,7 +223,7 @@ class DataGen {
 	function globals() {
 		for (i in 0...p.globals.length) {
 			var t = p.globals[i].ty;
-			if (p.globals[i].tls != null && !abi.wasm) tbssGlobal(p.globals[i].tls) else if (!Ir.isRef(t)) bssGlobal(e.scalarGlobal(i), t == TI32 || t == TBool ? 4 : 8, 8);
+			if (p.globals[i].bss != null) bssGlobal(p.globals[i].sym, p.globals[i].bss, 64) else if (p.globals[i].tls != null && !abi.wasm) tbssGlobal(p.globals[i].tls) else if (!Ir.isRef(t)) bssGlobal(e.scalarGlobal(i), t == TI32 || t == TBool ? 4 : 8, 8);
 		}
 	}
 

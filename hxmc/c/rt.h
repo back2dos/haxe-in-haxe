@@ -424,7 +424,7 @@ extern uint64_t rt_type_objs[];
 // structural access (anonymous structures, interfaces): inline cache per site
 typedef struct {
 	uint32_t t; // type index the entry is for (0: empty)
-	int32_t slot; // >0: field slot + 1 ... see icache_fill (rt_dyn.c); 0: method; -1: not a physical field
+	int32_t slot; // >0: field slot + 1 ... see Dyn.icacheFill; 0: method; -1: not a physical field
 	char kind;
 	void *fn; // method implementation
 	int32_t sig; // method's bound signature

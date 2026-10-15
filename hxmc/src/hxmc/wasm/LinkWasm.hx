@@ -57,7 +57,6 @@ class LinkWasm {
 	// (name => bytes, zeroed)
 	static var CELLS:Map<String, Int> = [
 		"rt_globals" => 8, "rt_young_start" => 8, "rt_young_end" => 8, "rt_argc" => 8, "rt_argv" => 8, "rt_nthreads" => 8,
-		"rt_fid_cache" => 8 * 4096, "rt_spin" => 64,
 	];
 
 	public function new(objs:Array<Obj>, stackSize = 1 << 20) {

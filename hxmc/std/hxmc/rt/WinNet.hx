@@ -17,7 +17,7 @@ import hxmc.unsafe.Winsock;
 // those. Sockets are not inherited by child processes. Winsock has no way
 // to ask whether a socket blocks, so the sockets the program made
 // non-blocking (setBlocking) are remembered here (a malloc'ed table under
-// a spin lock, rt_spin[3]).
+// a spin lock, Names.spin[3]).
 class WinNet {
 	static inline function threads():Int
 		return Mem.getI32(Mem.sym("rt_nthreads"), 0);
@@ -36,11 +36,14 @@ class WinNet {
 	static inline var EBADF = 9;
 	static inline var EINVAL = 22;
 
+	// the last failure's errno, per thread
+	@:hxmc.threadLocal static var netErrno:Int;
+
 	static inline function setLast(e:Int)
-		Mem.tlsSet("rt_net_errno", Ptr.ofI64(e));
+		netErrno = e;
 
 	static inline function lastErrno():Int
-		return Mem.tlsGet("rt_net_errno").toI64().toInt();
+		return netErrno;
 
 	@:hxmc.noGc static function fail():Int {
 		setLast(Winsock.rt_win_sock_errno(Winsock.WSAGetLastError()));
@@ -68,13 +71,13 @@ class WinNet {
 	static var capNonblocking:Int;
 
 	@:hxmc.noGc static function lock() {
-		var l = Mem.sym("rt_spin").add(12);
+		var l = Names.spin.add(12);
 		while (Atomic.cas32(l, 0, 1) != 0)
 			Win32.Sleep(0);
 	}
 
 	@:hxmc.noGc static function unlock()
-		Atomic.store32(Mem.sym("rt_spin").add(12), 0);
+		Atomic.store32(Names.spin.add(12), 0);
 
 	@:hxmc.noGc static function isNonblocking(s:I64):Bool {
 		var r = false;
@@ -381,15 +384,15 @@ class WinNet {
 		return Str.ofUtf8(buf, LibC.strlen(buf).toInt());
 	}
 
-	// one lookup at a time (rt_spin[4]), in a safe region (it may block on the network)
+	// one lookup at a time (Names.spin[4]), in a safe region (it may block on the network)
 	@:hxmc.noGc static function lockResolver() {
-		var l = Mem.sym("rt_spin").add(16);
+		var l = Names.spin.add(16);
 		while (Atomic.cas32(l, 0, 1) != 0)
 			Win32.Sleep(0);
 	}
 
 	@:hxmc.noGc static function unlockResolver()
-		Atomic.store32(Mem.sym("rt_spin").add(16), 0);
+		Atomic.store32(Names.spin.add(16), 0);
 
 	public static function resolve(name:String):Array<Int> {
 		Winsock.rt_win_sockets_init();

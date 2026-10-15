@@ -29,7 +29,7 @@ out=$ROOT/bin/hxmc/rt/$target
 deps=${DEPS:-$ROOT/bin/hxmc/deps/$target}
 mkdir -p "$out/obj"
 CFLAGS="-O2 -g0 -w -fno-strict-aliasing -fno-pie -fno-pic -ffunction-sections -fdata-sections -DRT_CALL_ON_STACK -I $ROOT/hxmc/c"
-files="rt rt_dyn rt_thread"
+files="rt rt_thread"
 case $target in
 windows-*)
 	CFLAGS="-O2 -g0 -w -fno-strict-aliasing -I $ROOT/hxmc/c"
@@ -82,7 +82,7 @@ windows-*)
 	# hxmc/std/hxmc/unsafe/Winsock.hx
 	libm="$libm socket closesocket accept bind connect listen getsockname getpeername getsockopt setsockopt recv send"
 	libm="$libm select shutdown ioctlsocket gethostname gethostbyname gethostbyaddr WSAGetLastError SetHandleInformation"
-	libm="$libm strerror _strdup rt_win_sock_errno rt_win_sockets_init" ;;
+	libm="$libm strerror _strdup" ;;
 *)
 	libm="$libm localtime_r gmtime_r"
 	# hxmc/std/hxmc/unsafe/Posix.hx

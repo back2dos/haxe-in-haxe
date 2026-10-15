@@ -43,5 +43,5 @@ static inline void rt_safepoint(void) {
 // collector once the object is unreachable: mutexes, conditions, ...)
 void *rt_native_new(void *p, void (*free_fn)(void *));
 void *rt_native_new_refs(void *p, void (*free_fn)(void *), uint32_t nrefs);
-// rt_dyn.c: per-thread caches, freed when a thread ends
+// hxmc.rt.Names: per-thread caches, freed when a thread ends
 void rt_dyn_thread_exit(void);

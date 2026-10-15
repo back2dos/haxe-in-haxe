@@ -12,32 +12,31 @@ import hxmc.unsafe.Ptr;
 // Dynamic access, the inline caches' lookups, Dynamic equality, comparison
 // and arithmetic, type tests, Std.string of any value, and the reflection
 // intrinsics behind Type and Reflect (hxmc.Native). The table of field
-// names stays C (rt_dyn.c: interning under a lock, names outside the heap);
-// fid() puts a lock-free cache in front of it.
+// names is Names; fid() puts a lock-free cache in front of it.
 @:keep @:allow(hxmc.rt)
 class Dyn {
 	// ---- field names
 
 	// fid of a name (interned): a direct-mapped cache of (hash, fid + 1)
-	// entries outside the heap (rt_fid_cache, rt_dyn.c), each checked against
+	// entries outside the heap (Names.fidCache), each checked against
 	// the name it claims (a racing writer leaves an old or a new entry, both
 	// checked), in front of the C table
 	@:hxmc.export("hx_fid") @:hxmc.noGc static function fid(name:String):Int {
 		var h = Str.hash(name);
-		var e = Mem.sym("rt_fid_cache").add(8 * (h & 4095));
+		var e = Names.fidCache.add(8 * (h & 4095));
 		var v = Atomic.load64(e);
 		if ((v >>> 32).toInt() == h) {
 			var f = v.toInt() - 1;
-			if (f >= 0 && nameIs(Leaf.hx_fid_name(f), name)) return f;
+			if (f >= 0 && nameIs(Names.fidName(f), name)) return f;
 		}
-		var f = Leaf.hx_fid_slow(name);
+		var f = Names.fidSlow(name);
 		Atomic.store64(e, ((h : I64) << 32) | ((f + 1 : I64) & (((1 : I64) << 32) - 1)));
 		return f;
 	}
 
 	// the fid of a name if it has one (not interned): -1 otherwise
 	@:hxmc.noGc static function fidFind(name:String):Int
-		return Leaf.hx_fid_find(name);
+		return Names.fidFind(name);
 
 	// whether the C string at p (UTF-8) is the string s (ASCII names only:
 	// any other unit answers false, and the caller asks the C table)
@@ -396,7 +395,7 @@ class Dyn {
 				case _:
 			}
 		}
-		var r:Dynamic = Str.isNull(o) ? NOT_BUILTIN : callBuiltin(o, Rt.hx_fid_str(fid), boxed, n);
+		var r:Dynamic = Str.isNull(o) ? NOT_BUILTIN : callBuiltin(o, Names.fidStr(fid), boxed, n);
 		if (isNotBuiltin(r)) r = callBoxed(anonGetSlow(o, fid), boxed, n);
 		return fromBoxed(r, rk);
 	}
@@ -503,7 +502,7 @@ class Dyn {
 		var t = Str.isNull(o) ? 0 : tindex(o);
 		if (t == T_ARRAY || t == T_STRING) {
 			var a = Str.isNull(args) ? [] : args.copy();
-			var r = callBuiltin(o, Rt.hx_fid_str(fid), a, a.length);
+			var r = callBuiltin(o, Names.fidStr(fid), a, a.length);
 			if (!isNotBuiltin(r)) return r;
 		}
 		var f = anonGetSlow(o, fid);
@@ -778,7 +777,7 @@ class Dyn {
 		for (i in 0...n) {
 			b.add(i == 0 ? " " : ", ");
 			var f = field(ty, i);
-			b.add(Rt.hx_fid_str(fFid(f)));
+			b.add(Names.fidStr(fFid(f)));
 			b.add(" : ");
 			f = field(ty, i);
 			b.add(stdString(boxSlot(o, fSlot(f), fKind(f))));
@@ -791,16 +790,18 @@ class Dyn {
 
 	// identity hash in the header's top 16 bits, set once (a CAS: another
 	// thread may set it at the same time; the collector only runs with every
-	// thread stopped). The seed is thread-local (rt_hash_seed).
+	// thread stopped). The seed is thread-local.
+	@:hxmc.threadLocal static var hashSeed:Int;
+
 	@:hxmc.noGc public static function objHash(o:Dynamic):Int {
 		if (Str.isNull(o)) return 0;
 		var hp = Mem.addr(o).add(-8);
 		var h = Mem.getU16(hp, 6);
 		if (h == 0) {
-			var seed = Mem.tlsGet("rt_hash_seed").toI64().toInt();
+			var seed = hashSeed;
 			if (seed == 0) seed = 0x9E37 + 0x10000 * (Leaf.hxmc_NativeThread_current() - 1); // the main thread's sequence is the single-threaded one
 			seed = seed * 1103515245 + 12345;
-			Mem.tlsSet("rt_hash_seed", Ptr.ofI64(seed));
+			hashSeed = seed;
 			h = (seed >>> 16) & 0xFFFF;
 			if (h == 0) h = 1;
 			var old = Atomic.load64(hp);
@@ -973,10 +974,10 @@ class Dyn {
 	static function namesArray(t:Int, withMethods:Bool):Array<String> {
 		var a:Array<String> = [];
 		for (i in 0...nfields(ty(t)))
-			a.push(Rt.hx_fid_str(fFid(field(ty(t), i))));
+			a.push(Names.fidStr(fFid(field(ty(t), i))));
 		if (withMethods)
 			for (i in 0...nmethods(ty(t)))
-				a.push(Rt.hx_fid_str(mFid(method(ty(t), i))));
+				a.push(Names.fidStr(mFid(method(ty(t), i))));
 		return a;
 	}
 
@@ -992,7 +993,7 @@ class Dyn {
 			while (i + 1 < nslots(Mem.getRef(Mem.addr(o), 0))) {
 				var ov = Mem.getRef(Mem.addr(o), 0);
 				var k:Int = Mem.getRefAt(Mem.addr(ov), 0, i);
-				a.push(Rt.hx_fid_str(k));
+				a.push(Names.fidStr(k));
 				i += 2;
 			}
 		}
