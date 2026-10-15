@@ -623,7 +623,7 @@ jobs:
           cd "$RUNNER_TEMP/app"
           export HXMC_CACHE="$RUNNER_TEMP/hxmc-cache"
           s=$(date +%s)
-          npx haxe --version > version.out 2> version.err
+          npx haxe --version > version.out 2> version.err || { cat version.out version.err "$HXMC_CACHE"/*/*/build.log; exit 1; }
           echo "first use: $(( $(date +%s) - s )) s"
           cat version.out
           test ! -s version.err
