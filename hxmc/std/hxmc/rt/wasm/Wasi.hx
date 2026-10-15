@@ -70,10 +70,11 @@ class Wasi {
 			}
 			fd++;
 		}
-		// the working directory: $PWD when "/" is preopened
+		// the working directory: $PWD when a preopened directory covers it ("/",
+		// or node's /c, /d, ... on Windows)
 		var pwd = getenvC("PWD");
 		cwd = Ptr.nil();
-		if (!pwd.isNull() && Mem.getU8(pwd, 0) == "/".code && findPre("/") >= 0) cwd = Heap.strdup(pwd);
+		if (!pwd.isNull() && Mem.getU8(pwd, 0) == "/".code && resolve(pwd, t) >= 0) cwd = Heap.strdup(pwd);
 		dot = Heap.malloc(2);
 		Mem.setI8(dot, 0, ".".code);
 		Mem.setI8(dot, 1, 0);

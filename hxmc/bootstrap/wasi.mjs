@@ -2,7 +2,7 @@
 // this process: imported by the launcher, or as a command
 //   node hxmc/bootstrap/wasi.mjs <module.wasm[.br]> [args...]
 // The module sees the arguments, the environment and the whole file system
-// (preopened as "/"; drive letters as /c, /d, ... on Windows), and resolves
+// (preopened as "/"; on Windows /c/<dir>, /d/<dir>, ... for C:\<dir>, ...), and resolves
 // relative paths against $PWD. A module ending in .br (brotli) or .gz is
 // decompressed first (the committed stage0 is hxmc/bootstrap/stage0.wasm.br).
 import fs from 'node:fs';
@@ -25,10 +25,29 @@ const { WASI } = await import('node:wasi');
 v8.setFlagsFromString('--experimental-wasm-exnref');
 v8.setFlagsFromString('--no-turbo-fast-api-calls');
 
+// Windows: the top-level directories of every drive as /<drive>/<name> (node's
+// WASI does not resolve paths under a preopened drive root), at most 60 (the
+// runtime's limit is 64), the drive of the working directory first
 function preopens() {
 	if (process.platform !== 'win32') return { '/': '/' };
 	const r = {};
-	for (const d of 'CDEFGHIJKLMNOPQRSTUVWXYZ') if (fs.existsSync(`${d}:\\`)) r[`/${d.toLowerCase()}`] = `${d}:\\`;
+	let n = 0;
+	const first = process.cwd().charAt(0).toUpperCase();
+	const drives = [first, ...'CDEFGHIJKLMNOPQRSTUVWXYZ'.split('').filter(d => d !== first)];
+	for (const d of drives) {
+		let entries;
+		try {
+			entries = fs.readdirSync(`${d}:\\`, { withFileTypes: true });
+		} catch {
+			continue;
+		}
+		for (const e of entries) {
+			if (n >= 60) return r;
+			if (!e.isDirectory() || e.name.startsWith('$')) continue;
+			r[`/${d.toLowerCase()}/${e.name}`] = `${d}:\\${e.name}`;
+			n++;
+		}
+	}
 	return r;
 }
 

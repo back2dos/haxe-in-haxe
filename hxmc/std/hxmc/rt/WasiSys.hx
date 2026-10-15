@@ -11,8 +11,8 @@ import hxmc.unsafe.Ptr;
 
 // The operating-system primitives of hxmc.NativeSys on WebAssembly (WASI
 // preview 1; NativeSys calls them only there): files and directories
-// through the preopened directories (paths resolve against $PWD when "/" is
-// preopened, else against "."), arguments, environment, clocks, standard
+// through the preopened directories (paths resolve against $PWD when a
+// preopened directory covers it, else against "."), arguments, environment, clocks, standard
 // streams. No processes (Sys.command, sys.io.Process throw).
 class WasiSys {
 	static inline var EINTR = 27;

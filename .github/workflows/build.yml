@@ -501,6 +501,7 @@ jobs:
           exe="${{ steps.unpack.outputs.bin }}"
           if [ "$RUNNER_OS" = Linux ]; then sudo mkdir -p "$root" && sudo chown "$USER" "$root"; fi
           if [ "$RUNNER_OS" = Windows ]; then root="$(cygpath -w "$RUNNER_TEMP")\\hih"; fi
+          if [ "$RUNNER_OS" = Windows ]; then exe="$(cygpath -m "$exe")"; fi
           export HAXE_STD_PATH="${{ steps.unpack.outputs.std }}"
           # (MSYS would rewrite the reference's root, a POSIX path)
           MSYS_NO_PATHCONV=1 "$exe" -cp hxmc/test -cp haxe/test --run Selfcheck --port "$exe" --src std-x/src --std std-x/std --ref dl/self-ref.hxb --ref-root "$SELF_ROOT" --root "$root" --summary "$GITHUB_STEP_SUMMARY"
@@ -600,6 +601,7 @@ jobs:
           npm init -y > /dev/null
           npm install --no-audit --no-fund "$GITHUB_WORKSPACE"/dl/hxmc-*.tgz
           printf 'class Main { static function main() { Sys.println("hello from " + Sys.systemName()); } }\n' > src/Main.hx
+          printf 'class Js { static function main() { trace("hello from js"); } }\n' > src/Js.hx
           printf -- '-cp src\n-main Main\n--custom-target hxmc=bin/app\n' > build.hxml
       - name: First use (WebAssembly)
         run: |
@@ -635,7 +637,7 @@ jobs:
           rm -rf bin
           time npx haxe build.hxml
           if [ "$RUNNER_OS" = Windows ]; then ./bin/app.exe; else ./bin/app; fi
-          npx haxe -cp src -main Main --js main.js && node main.js
+          npx haxe -cp src -main Js --js main.js && node main.js
       - name: hxmc-rebuild
         run: |
           set -ex
