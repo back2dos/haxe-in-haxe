@@ -207,17 +207,16 @@ class Harness {
 	// files
 
 	public static function rmrf(path:String) {
+		if (!windows) {
+			exec(["rm", "-rf", path]);
+			return;
+		}
 		if (!FileSystem.exists(path)) return;
-		if (FileSystem.isDirectory(path) && !isLink(path)) {
+		if (FileSystem.isDirectory(path)) {
 			for (n in FileSystem.readDirectory(path)) rmrf(path + "/" + n);
 			FileSystem.deleteDirectory(path);
 		} else
 			FileSystem.deleteFile(path);
-	}
-
-	static function isLink(path:String):Bool {
-		if (windows) return false;
-		return try FileSystem.fullPath(path) != FileSystem.fullPath(Path.directory(path)) + "/" + Path.withoutDirectory(path) catch (_:Dynamic) false;
 	}
 
 	public static function mkdirs(path:String) FileSystem.createDirectory(path);

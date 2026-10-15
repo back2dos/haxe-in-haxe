@@ -15,7 +15,7 @@ import hxmc.NativeSsl;
 #end
 
 // port: upstream calls the OCaml mbedtls bindings (haxe/libs/mbedtls). On the hxmc
-// host (hxmc/) they are `hxmc.NativeSsl` (hxmc/rt/rt_ssl.c); on other
+// host (hxmc/) they are `hxmc.NativeSsl` (hxmc/c/rt_ssl.c); on other
 // hosts the constructors and natives fail with "mbedtls (...) is not supported
 // by haxe-in-haxe".
 //

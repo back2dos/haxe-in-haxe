@@ -1,4 +1,4 @@
-// hxmc: haxe/std/sys/thread/Lock.hx: a counting semaphore starting at 0
+// hxmc: haxe/upstream/std/sys/thread/Lock.hx: a counting semaphore starting at 0
 // (rt_thread.c), each release lets exactly one wait through
 
 package sys.thread;

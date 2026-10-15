@@ -1,4 +1,4 @@
-// hxmc: haxe/std/sys/io/FileOutput.hx, a file descriptor written through
+// hxmc: haxe/upstream/std/sys/io/FileOutput.hx, a file descriptor written through
 // hxmc.NativeSys
 
 package sys.io;

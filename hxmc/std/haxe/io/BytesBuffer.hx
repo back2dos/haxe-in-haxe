@@ -1,4 +1,4 @@
-// hxmc: haxe/std/eval/_std/haxe/io/BytesBuffer.hx (an extern), a growable byte
+// hxmc: haxe/upstream/std/eval/_std/haxe/io/BytesBuffer.hx (an extern), a growable byte
 // buffer in the runtime (rt_std.c)
 
 package haxe.io;

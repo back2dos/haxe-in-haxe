@@ -1,4 +1,4 @@
-// hxmc: haxe/std/sys/io/FileInput.hx, a file descriptor read through
+// hxmc: haxe/upstream/std/sys/io/FileInput.hx, a file descriptor read through
 // hxmc.NativeSys
 
 package sys.io;

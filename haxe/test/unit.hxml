@@ -1,5 +1,7 @@
--cp src
--cp test
+# Unit tests of port modules, in-process on Eval (from the repository root):
+#   bin/hxmc/hxmc --cwd . haxe/test/unit.hxml   (a first argument with `-`: the compiler)
+-cp haxe/src
+-cp haxe/test
 -main unit.UnitMain
 # The translated compiler runs in-process; its recursion exceeds Eval's default call depth (1000).
 -D eval-call-stack-depth=100000

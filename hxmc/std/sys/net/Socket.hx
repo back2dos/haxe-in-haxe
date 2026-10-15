@@ -1,4 +1,4 @@
-// hxmc: haxe/std/eval/_std/sys/net/Socket.hx: TCP sockets over hxmc.NativeNet
+// hxmc: haxe/upstream/std/eval/_std/sys/net/Socket.hx: TCP sockets over hxmc.NativeNet
 // (rt_net.c, file descriptors). Non-blocking sockets throw
 // haxe.io.Error.Blocked when not ready.
 

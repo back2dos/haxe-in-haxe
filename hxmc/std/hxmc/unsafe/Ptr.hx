@@ -2,7 +2,7 @@ package hxmc.unsafe;
 
 import hxmc.I64;
 
-// A raw machine address (hxmc/README.md, "Runtime in Haxe"): an int64_t the
+// A raw machine address (README.md, "Runtime in Haxe"): an int64_t the
 // collector neither traces nor moves. The address of a heap object
 // (Mem.addr) is valid only until the next GC point: code that keeps one
 // across calls is in a function declared @:hxmc.noGc, which the compiler

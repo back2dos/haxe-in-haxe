@@ -1,45 +1,44 @@
-haxe-in-haxe licenses
-=====================
+hxmc licenses
+=============
 
 This repository is a port of the Haxe compiler (https://github.com/HaxeFoundation/haxe)
 and follows its licensing.
 
-- The compiler port (src/), the hxmc tool (hxmc/src, hxmc/tools, hxmc/test,
-  hxmc/bench), the tests (test/) and the website (site/) are licensed under the
-  GNU General Public License, version 2 or (at your option) any later version
-  (SPDX: GPL-2.0-or-later). The full text is in COPYING.
+- The compiler port (haxe/src), the hxmc tool (hxmc/*.hx and its packages,
+  hxmc/bootstrap), the tests (haxe/test, hxmc/test) and the website (hxmc/web)
+  are licensed under the GNU General Public License, version 2 or (at your
+  option) any later version (SPDX: GPL-2.0-or-later). The full text is in COPYING.
   Copyright (C) 2005-2025 Haxe Foundation (the upstream compiler this is
   translated from), (c) 2026 the haxe-in-haxe contributors.
 
 - Code that ends up in programs built with hxmc is licensed under the MIT License,
   so those programs are not bound by the GPL:
-    hxmc/rt/   the runtime's C part                   (hxmc/rt/LICENSE)
+    hxmc/c/    the runtime's C part                   (hxmc/c/LICENSE)
     hxmc/std/  the hxmc target's standard library and the runtime's
                Haxe part                              (hxmc/std/LICENSE)
-  and the standard library overrides used to build the port with other
-  targets: hxmc/tools/bootstrap/js/ and test/hl/.
 
-- src/libs/ reproduces OCaml libraries that upstream Haxe depends on, under
+- haxe/src/libs/ reproduces OCaml libraries that upstream Haxe depends on, under
   their own licenses:
-    src/libs/neko/    from haxe/libs/neko (Neko compiler): GPL-2.0-or-later
-    src/libs/swflib/  from haxe/libs/swflib: GPL-2.0
-    src/libs/extlib/  from haxe/libs/extlib-leftovers (ExtLib): LGPL-2.1 with
-                      the OCaml linking exception
-    src/libs/ziplib/  from haxe/libs/ziplib: LGPL-2.1 with the OCaml linking
-                      exception
-    src/libs/extc/    Zlib.hx is a translation of zlib 1.3.1's deflate
-                      (Copyright (C) 1995-2024 Jean-loup Gailly and Mark Adler,
-                      zlib license); Extc.hx follows haxe/libs/extc: GPL-2.0
+    haxe/src/libs/neko/    from haxe/upstream/libs/neko (Neko compiler): GPL-2.0-or-later
+    haxe/src/libs/swflib/  from haxe/upstream/libs/swflib: GPL-2.0
+    haxe/src/libs/extlib/  from haxe/upstream/libs/extlib-leftovers (ExtLib): LGPL-2.1
+                           with the OCaml linking exception
+    haxe/src/libs/ziplib/  from haxe/upstream/libs/ziplib: LGPL-2.1 with the OCaml
+                           linking exception
+    haxe/src/libs/extc/    Zlib.hx is a translation of zlib 1.3.1's deflate
+                           (Copyright (C) 1995-2024 Jean-loup Gailly and Mark Adler,
+                           zlib license); Extc.hx follows haxe/upstream/libs/extc: GPL-2.0
 
 - tools/lix/ is a port of lix.client and haxeshim (https://github.com/lix-pm), which are
   in the public domain (tools/lix/LICENSE, the Unlicense), and is released the same way.
-  Its build includes hxcoro, whose license is its own (see tools/lix/README.md).
+  Its build includes hxcoro (https://github.com/HaxeFoundation/hxcoro), under its own
+  license.
 
-- The haxe/ submodule is upstream Haxe with its own LICENSE: the compiler is
-  GPL-2.0-or-later and its standard library (haxe/std) MIT.
+- The haxe/upstream submodule is upstream Haxe with its own LICENSE: the compiler is
+  GPL-2.0-or-later and its standard library (haxe/upstream/std) MIT.
 
-- site/examples/: some examples are from try.haxe.org (MIT,
-  site/examples/LICENSE-try-haxe.txt).
+- hxmc/web/examples/: some examples are from try.haxe.org (MIT,
+  hxmc/web/examples/LICENSE-try-haxe.txt).
 
 - Programs built by hxmc that use sys.ssl or libuv (the port's release binaries
   and lix among them) link mbedtls (Apache-2.0) and libuv (MIT); their licenses

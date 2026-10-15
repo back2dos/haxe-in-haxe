@@ -10,7 +10,7 @@ import core.TFunctions;
 using core.TFunctions;
 
 // Lowers the filtered typed AST (the data HXB serializes) of everything
-// reachable from `main` to the IR (hxmc/README.md).
+// reachable from `main` to the IR (README.md).
 //
 // Representation (see Ir.hx): Int/Bool/Float and haxe.Int64 unboxed;
 // everything else is a pointer. Generics are erased: a type parameter is Dynamic (RAny), and values
@@ -109,7 +109,7 @@ class Lower {
 		}
 	}
 
-	// ---- the runtime in Haxe (hxmc/README.md, "Runtime in Haxe")
+	// ---- the runtime in Haxe (README.md, "Runtime in Haxe")
 
 	// runtime functions implemented in Haxe: @:hxmc.export("name") (also
 	// called by the runtime's C code: always compiled, under that symbol) and
@@ -282,7 +282,7 @@ class Lower {
 	}
 
 	// Lowers the body of `fi` (`run`). The hook for a subclass that caches
-	// bodies (hxmc/src/hxmc/LowerCache.hx): `key` is the field the body comes
+	// bodies (hxmc/LowerCache.hx): `key` is the field the body comes
 	// from (null: a closure or a static initializer); the cache keeps a body
 	// while the field object and its expression stay the same (the
 	// compilation server retypes a changed module and the modules depending

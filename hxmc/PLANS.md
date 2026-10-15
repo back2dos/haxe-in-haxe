@@ -2,7 +2,7 @@
 
 Ideas and directions discussed for hxmc, not scheduled. Each entry says
 what it is, why it matters and what it needs. Current state is in
-[README.md](README.md); this file is what could come after.
+[README.md](../README.md); this file is what could come after.
 
 ## Medium term
 
@@ -66,10 +66,10 @@ Done (README, "Runtime in Haxe"):
   generator calls by name (String, Array, Bytes, Std, Date, Dynamic
   operations) and the exports C calls.
 - Leftovers: the Emscripten, Cosmopolitan, tcc and green-thread variants
-  are gone from `rt/`, `rt_str.c` is folded into `rt_dyn.c`, Facts' names
+  are gone from `hxmc/c/`, `rt_str.c` is folded into `rt_dyn.c`, Facts' names
   no longer follow hxc's C emitter, the census is a debug build of the
   runtime object.
-- Kept: `mkstd.py` (a custom target gets no `_std` directory in the
+- Kept: `MkStd.hx` (a custom target gets no `_std` directory in the
   reference compiler, so the overrides still merge with the Eval
   originals); the tools and benchmarks, all still in use.
 
@@ -116,7 +116,7 @@ fits, with a flag in the header (as JDK 9's compact strings and V8 do).
 
 ### The runtime in Haxe (in progress)
 
-Moving `rt/` from C to Haxe compiled by hxmc, Go-style: strings, Dynamic
+Moving `hxmc/c/` from C to Haxe compiled by hxmc, Go-style: strings, Dynamic
 access and maps, std natives, OS wrappers, thread coordination, finally
 the GC. Built on internal intrinsics (raw loads/stores, pointer
 arithmetic, atomics, fences), compiler-checked no-GC functions and C-ABI
@@ -168,7 +168,7 @@ points and the ideas that address them:
 ### sys.ssl and libuv (done)
 
 Done (2026-10-15, README "sys.ssl and libuv"): mbedtls and libuv built per
-target with zig at our build time (`hxmc/tools/deps.sh`), turned into
+target with zig at our build time (`hxmc/c/deps.sh`), turned into
 `ssl.o` and `uv.o` next to the runtime object and linked only into programs
 that refer to them; the port and lix link both; WebAssembly keeps the
 failing stubs. Left:
@@ -314,7 +314,7 @@ to the reference's HXB under both (15-16 s, native 8.4 s). Left:
   stop-the-world handshake would come back (rt_thread.c's other half, in
   Haxe this time). Until then `Thread.create` throws.
 - A browser: done for the playground (2026-10-15, README "WebAssembly":
-  WASI's imports from JavaScript, `site/src/WasiHost.hx`; exnref exception
+  WASI's imports from JavaScript, `hxmc/web/src/WasiHost.hx`; exnref exception
   handling, on by default in current Chrome, Firefox and Safari). Left:
   WebGPU and input for graphics (see "Graphics"); Firefox's throws walk the
   whole stack (0.17 us per frame each), which a lighter use of exceptions
@@ -440,6 +440,10 @@ bootstrap).
 - Release builds of the hxmc tool for the six desktop targets.
 
 ### npm: a WebAssembly package that bootstraps itself natively
+
+Done (2026-10-15, README "Using hxmc"): the package `hxmc` at the
+repository root (`make npm`), with `hxmc-rebuild`; left: checking the
+native build against a published hash. The plan as it was:
 
 One platform-independent npm package containing the compiler (the port
 with hxmc) as a WebAssembly module, a small JavaScript launcher, the std

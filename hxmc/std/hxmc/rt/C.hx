@@ -3,9 +3,9 @@ package hxmc.rt;
 import hxmc.I64;
 import hxmc.unsafe.Ptr;
 
-// The runtime's remaining C functions (hxmc/rt) that its Haxe code calls,
+// The runtime's remaining C functions (hxmc/c) that its Haxe code calls,
 // by their symbols. Rt's may collect (GC points, as generated code's calls
-// of the runtime); Leaf's never do (hxmc/README.md, "Runtime in Haxe").
+// of the runtime); Leaf's never do (README.md, "Runtime in Haxe").
 @:hxmc.rt extern class Rt {
 	static function rt_throw(v:Dynamic):Void; // (does not return)
 	// a field name as a String (an immortal copy outside the heap, made once: rt_dyn.c)

@@ -1,4 +1,4 @@
-// hxmc: haxe/std/Reflect.hx over runtime type information (hxmc.Native)
+// hxmc: haxe/upstream/std/Reflect.hx over runtime type information (hxmc.Native)
 
 import hxmc.Native;
 

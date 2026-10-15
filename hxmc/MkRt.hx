@@ -8,7 +8,7 @@ import hxmc.CoffReader;
 // [-U file]` (-x: defined by the program, not looked for in the archives; -i:
 // an archive only the imports of which are taken; -U: the names left
 // undefined are written to file): the runtime object of a
-// COFF target (Windows), built once on our machine (hxmc/tools/mkrt.sh):
+// COFF target (Windows), built once on our machine (hxmc/c/mkrt.sh):
 // the runtime's objects and the members of the C library's archives they
 // need (as a linker would pick them), COMDAT duplicates dropped, weak
 // externals resolved, and the symbols import libraries define recorded as

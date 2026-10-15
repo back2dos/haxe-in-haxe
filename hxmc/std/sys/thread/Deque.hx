@@ -1,4 +1,4 @@
-// hxmc: haxe/std/sys/thread/Deque.hx: an array guarded by a mutex, with a
+// hxmc: haxe/upstream/std/sys/thread/Deque.hx: an array guarded by a mutex, with a
 // condition for blocking pops (rt_thread.c)
 
 package sys.thread;

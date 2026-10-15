@@ -1,8 +1,8 @@
-// hxmc: haxe/std/hl/_std/haxe/atomic/AtomicObject.hx over a cell (a one-slot
+// hxmc: haxe/upstream/std/hl/_std/haxe/atomic/AtomicObject.hx over a cell (a one-slot
 // K_PARR object the collector scans) and the Atomic intrinsics (sequentially
 // consistent; a reference stored into an old cell is remembered afterwards
 // when it is young: rt_barrier_range of the slot), with the docs of
-// haxe/std/haxe/atomic/AtomicObject.hx
+// haxe/upstream/std/haxe/atomic/AtomicObject.hx
 
 package haxe.atomic;
 

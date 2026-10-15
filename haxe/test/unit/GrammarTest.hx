@@ -166,7 +166,7 @@ class GrammarTest {
 				&& switch value.data[0].cffKind {case FFun({fExpr:{expr:EMeta(entry, _)}}): Type.enumEq(entry.meta, core.MetaList.StrictMeta.Inline); case _: false;};
 			case _: false;
 		});
-		var callStack = parse(sys.io.File.getContent("haxe/std/haxe/CallStack.hx"), core.Define.emptyDefines(), "haxe/std/haxe/CallStack.hx");
+		var callStack = parse(sys.io.File.getContent("haxe/upstream/std/haxe/CallStack.hx"), core.Define.emptyDefines(), "haxe/upstream/std/haxe/CallStack.hx");
 		assert(callStack.declarations.length == 2);
 	}
 

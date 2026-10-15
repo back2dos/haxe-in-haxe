@@ -66,7 +66,13 @@ class Conformance {
 		var parallelN = opts.int("--parallel", 0);
 		var results = [];
 		var counts = new Map<String, Int>();
-		parallel(cases, opts.int("-j", cpus()), c -> parallelN > 0 ? runCaseParallel(c, parallelN) : runCase(c, compilerHxb), (c, r) -> {
+		parallel(cases, opts.int("-j", cpus()), c -> {
+			// (-D dump-dependencies and the like write dump/ next to the case: not into the submodule)
+			var dump = c.cwd + "/dump", had = FileSystem.exists(dump);
+			var r = parallelN > 0 ? runCaseParallel(c, parallelN) : runCase(c, compilerHxb);
+			if (!had) rmrf(dump);
+			r;
+		}, (c, r) -> {
 			results.push(r);
 			counts[r.status] = (counts[r.status] ?? 0) + 1;
 			Sys.println(pad(r.status, 17) + " " + pad(r.name, 40) + " " + fixed(r.seconds).lpad(" ", 6) + "s  " + r.detail);

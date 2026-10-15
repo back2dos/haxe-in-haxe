@@ -2,7 +2,7 @@ package hxmc.ir;
 
 // The typed IR between the typed AST and hxmc's code generator (MirBuild):
 // hxc's IR, copied with its lowering (Lower, FnLower) when hxmc separated
-// from hxc (hxmc/README.md, "Origin"). Statements are
+// from hxc (README.md, "Origin"). Statements are
 // structured (no gotos); expressions are pure except as the right-hand side
 // of SSet/SExpr, so evaluation order and GC points are explicit.
 
@@ -226,7 +226,7 @@ enum Ex {
 	ECallDispatch(sel:Int, sig:SigInfo, args:Array<Ex>); // virtual and interface calls
 	ECallClos(s:SigInfo, clos:Ex, args:Array<Ex>);
 	ECallAnon(name:String, s:SigInfo, obj:Ex, args:Array<Ex>); // obj.name(args) through a structural type: a method or a closure field
-	ECallHost(name:String, args:Array<Ex>, ret:Ty); // runtime function (hxmc/rt)
+	ECallHost(name:String, args:Array<Ex>, ret:Ty); // runtime function (hxmc/c)
 	ENewObj(c:ClassInfo); // zeroed instance; the constructor is called separately
 	ENewEnum(c:CtorInfo, args:Array<Ex>);
 	ENewArr(elem:Ty, values:Array<Ex>);

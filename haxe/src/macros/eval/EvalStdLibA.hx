@@ -47,7 +47,7 @@ import hxmc.NativeNet;
 // `EvalStdLib`, the rest of the file is in `EvalStdLibB` and `EvalStdLib`.
 //
 // Deliberate deviations (the OCaml libraries are replaced by host APIs):
-// - "Byte offsets" are native string indices (see PORTING.md). Bytes <-> string
+// - "Byte offsets" are native string indices. Bytes <-> string
 //   conversions decode/encode UTF-8 on the host; invalid UTF-8 cannot be held
 //   in a native string.
 // - EReg uses the host `EReg` instead of PCRE2 (see `StdEReg`). HashLink's
@@ -1852,7 +1852,7 @@ class StdGc {
 	});
 
 	#if (target.name == "hxmc")
-	// port: the hxmc host GC has OCaml's finalisers (hxmc/rt/rt.c)
+	// port: the hxmc host GC has OCaml's finalisers (hxmc/c/rt.c)
 	public static final finalise = EvalEncode.vfun2((f, v) -> {
 		NativeGc.finalise((v:Value) -> {
 			EvalMisc.callValue(f, [v]);

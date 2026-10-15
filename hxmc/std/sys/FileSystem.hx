@@ -1,4 +1,4 @@
-// hxmc: haxe/std/sys/FileSystem.hx over hxmc.NativeSys
+// hxmc: haxe/upstream/std/sys/FileSystem.hx over hxmc.NativeSys
 
 package sys;
 

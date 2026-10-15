@@ -1,4 +1,4 @@
-// hxmc: haxe/std/hl/_std/haxe/Exception.hx without native stack traces
+// hxmc: haxe/upstream/std/hl/_std/haxe/Exception.hx without native stack traces
 
 package haxe;
 

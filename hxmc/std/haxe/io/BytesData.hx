@@ -1,4 +1,4 @@
-// hxmc: haxe/std/eval/_std/haxe/io/BytesData.hx: Bytes is its own data;
+// hxmc: haxe/upstream/std/eval/_std/haxe/io/BytesData.hx: Bytes is its own data;
 // indexing reads and writes bytes
 
 package haxe.io;

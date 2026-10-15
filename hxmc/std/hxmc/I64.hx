@@ -20,7 +20,7 @@
  * DEALINGS IN THE SOFTWARE.
  */
 
-// The int64_t of the C backend, after haxe/std/hl/I64.hx (Lower.ty maps it
+// The int64_t of the C backend, after haxe/upstream/std/hl/I64.hx (Lower.ty maps it
 // to TI64); the operators are the backend's own.
 package hxmc;
 

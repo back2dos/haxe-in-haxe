@@ -1,4 +1,4 @@
-// hxmc: haxe/std/haxe/ds/ObjectMap.hx as a compact insertion-ordered hash table (as
+// hxmc: haxe/upstream/std/haxe/ds/ObjectMap.hx as a compact insertion-ordered hash table (as
 // in Python and JS): entries are appended to parallel arrays, an
 // open-addressing index (0 empty, -1 removed, else entry + 1) finds them.
 // Iteration follows insertion order. IntMap, StringMap and ObjectMap are the

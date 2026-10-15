@@ -1,4 +1,4 @@
-// hxmc: haxe/std/sys/thread/Semaphore.hx, a counting semaphore (rt_thread.c)
+// hxmc: haxe/upstream/std/sys/thread/Semaphore.hx, a counting semaphore (rt_thread.c)
 
 package sys.thread;
 

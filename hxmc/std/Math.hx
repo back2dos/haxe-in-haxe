@@ -20,7 +20,7 @@
  * DEALINGS IN THE SOFTWARE.
  */
 
-// hxmc: haxe/std/Math.hx, hxmc taking the Float floor/ceil/round branch
+// hxmc: haxe/upstream/std/Math.hx, hxmc taking the Float floor/ceil/round branch
 
 /**
 	This class defines mathematical functions and constants.

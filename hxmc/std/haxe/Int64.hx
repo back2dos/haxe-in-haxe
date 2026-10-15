@@ -20,7 +20,7 @@
  * DEALINGS IN THE SOFTWARE.
  */
 
-// hxmc: haxe/std/hl/_std/haxe/Int64.hx (its native branch) over hxmc.I64 (an
+// hxmc: haxe/upstream/std/hl/_std/haxe/Int64.hx (its native branch) over hxmc.I64 (an
 // int64_t in the generated C) instead of hl.I64; isInt64 is a runtime native
 package haxe;
 

@@ -28,9 +28,9 @@ class TypeloadModuleTest {
 	}
 
 	public static function main():Void {
-		var args = ["-cp", "test", "--dce", "no"];
+		var args = ["-cp", "haxe/test", "--dce", "no"];
 		for (name in accepted) args.push("unit.moduleload." + name);
-		args = args.concat(["haxe.ds.BalancedTree", "haxe.CallStack", "--hxb", "test/generated/unit-moduleload.hxb"]);
+		args = args.concat(["haxe.ds.BalancedTree", "haxe.CallStack", "--hxb", "bin/test/unit-moduleload.hxb"]);
 		var result = compile(args);
 		if (result.code != 0 || result.com == null) throw 'Typing the moduleload fixtures failed with exit code ${result.code}';
 		var com = result.com;
@@ -44,7 +44,7 @@ class TypeloadModuleTest {
 		// Fixtures the reference compiler rejects are rejected as well.
 		Sys.println("TypeloadModuleTest: the next three compiler errors are expected");
 		for (name in ["Example", "Resolver", "BuildMetadata"]) {
-			var rejected = compile(["-cp", "test", "unit.moduleload." + name, "--hxb", "test/generated/unit-rejected.hxb"]);
+			var rejected = compile(["-cp", "haxe/test", "unit.moduleload." + name, "--hxb", "bin/test/unit-rejected.hxb"]);
 			if (rejected.code == 0) throw 'unit.moduleload.$name must be rejected';
 		}
 

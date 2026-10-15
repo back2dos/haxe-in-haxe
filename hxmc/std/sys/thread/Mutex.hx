@@ -1,4 +1,4 @@
-// hxmc: haxe/std/sys/thread/Mutex.hx: a re-entrant mutex (rt_thread.c: a
+// hxmc: haxe/upstream/std/sys/thread/Mutex.hx: a re-entrant mutex (rt_thread.c: a
 // pthread mutex with OS threads, a queue of parked threads with green
 // threads). A thread blocked on it is in a safe region, so a collection never
 // waits for it.

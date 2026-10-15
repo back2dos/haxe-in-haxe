@@ -1,4 +1,4 @@
-// hxmc: haxe/std/sys/thread/Condition.hx: a condition variable and its own
+// hxmc: haxe/upstream/std/sys/thread/Condition.hx: a condition variable and its own
 // re-entrant mutex (rt_thread.c); as with pthread conditions, wait may return
 // spuriously
 

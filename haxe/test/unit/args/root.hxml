@@ -1,2 +1,2 @@
 -cp test
-test/unit/args/nested.hxml
+haxe/test/unit/args/nested.hxml

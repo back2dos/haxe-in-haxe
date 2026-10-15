@@ -1,4 +1,4 @@
-// hxmc: haxe/std/hl/_std/EReg.hx over hxmc.Regex (a Haxe engine in place of the
+// hxmc: haxe/upstream/std/hl/_std/EReg.hx over hxmc.Regex (a Haxe engine in place of the
 // regexp_* natives)
 
 @:coreApi final class EReg {

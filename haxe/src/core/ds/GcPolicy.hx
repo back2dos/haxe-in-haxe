@@ -13,7 +13,7 @@ class GcPolicy {
 	static var allocatedAtMajor = 0.;
 	static var heapAtMajor = 0.;
 	#if hlc
-	// port: HL/C links the patched libhl (site/bench/patches/libhl-allocator.patch), whose
+	// port: HL/C links a patched libhl (its allocator's accounting), whose
 	// currentMemory after a collection is the live data rather than page memory.
 	// Fragmentation keeps page memory well above the live data, and growing the
 	// threshold with it made the heap size jump between runs on small changes.

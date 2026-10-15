@@ -3,7 +3,7 @@ package uv;
 import haxe.io.Bytes;
 import hxmc.NativeUv as N;
 
-// A small callback API over libuv (hxmc.NativeUv, hxmc/rt/rt_uv.c) for
+// A small callback API over libuv (hxmc.NativeUv, hxmc/c/rt_uv.c) for
 // single-threaded programs: handles and requests are integer ids, and their
 // events reach the callbacks registered on their loop while the loop runs.
 

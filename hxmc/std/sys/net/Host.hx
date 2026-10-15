@@ -1,4 +1,4 @@
-// hxmc: haxe/std/eval/_std/sys/net/Host.hx: IPv4 host names through
+// hxmc: haxe/upstream/std/eval/_std/sys/net/Host.hx: IPv4 host names through
 // hxmc.NativeNet, as the Eval natives do; `ip` is the host-order IPv4
 
 package sys.net;

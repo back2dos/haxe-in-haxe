@@ -5,7 +5,7 @@ import hxmc.rt.Types.*;
 import hxmc.unsafe.Mem;
 import hxmc.unsafe.Ptr;
 
-// rt_dyn.c for WebAssembly (hxmc/README.md, "WebAssembly"): the table of
+// rt_dyn.c for WebAssembly (README.md, "WebAssembly"): the table of
 // field names (the generated table is sorted; names seen only at run time
 // are appended, in malloc'ed memory, with a hash table), field names as
 // immortal strings, the inline-cache miss (one thread: the entry is

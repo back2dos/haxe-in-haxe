@@ -2,7 +2,7 @@ package hxmc.unsafe;
 
 import hxmc.I64;
 
-// Raw memory intrinsics for the runtime's Haxe code (hxmc/README.md,
+// Raw memory intrinsics for the runtime's Haxe code (README.md,
 // "Runtime in Haxe"), expanded inline by the code generator (MirBuild):
 // none is a function call and none but the allocations is a GC point.
 // Offsets are bytes; an object's address is its payload (the header word is

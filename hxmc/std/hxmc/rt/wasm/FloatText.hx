@@ -5,7 +5,7 @@ import hxmc.unsafe.Mem;
 import hxmc.unsafe.Ptr;
 
 // Doubles to text and back for WebAssembly, exactly as the native targets'
-// C library does (hxmc/README.md, "WebAssembly"): strtod rounds correctly
+// C library does (README.md, "WebAssembly"): strtod rounds correctly
 // (to nearest, ties to even; also hexadecimal, inf and nan), and
 // hx_format_float writes the shortest decimal that reads back as the same
 // double, chosen as rt_dyn.c chooses it (the correctly rounded

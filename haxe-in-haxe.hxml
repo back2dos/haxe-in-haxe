@@ -1,4 +1,4 @@
--cp src
+-cp haxe/src
 -main haxe.Main
 # Select the host runtime while producing HXB; do not execute Main during build.
 --interp

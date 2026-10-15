@@ -1,4 +1,4 @@
-// hxmc: haxe/std/sys/io/Process.hx over hxmc.NativeSys
+// hxmc: haxe/upstream/std/sys/io/Process.hx over hxmc.NativeSys
 
 package sys.io;
 

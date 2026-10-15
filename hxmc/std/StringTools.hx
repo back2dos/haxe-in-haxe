@@ -20,7 +20,7 @@
  * DEALINGS IN THE SOFTWARE.
  */
 
-// hxmc: haxe/std/StringTools.hx, hxmc taking isEof's cpp/hl branch
+// hxmc: haxe/upstream/std/StringTools.hx, hxmc taking isEof's cpp/hl branch
 
 import haxe.iterators.StringIterator;
 import haxe.iterators.StringKeyValueIterator;

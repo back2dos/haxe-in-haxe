@@ -21,7 +21,7 @@ class HxbWriterTest {
 		if (bytes.length != expected.length) throw 'Unexpected HXB chunk length: ${bytes.length}';
 		for (i in 0...expected.length) if (bytes.get(i) != expected[i]) throw 'Unexpected byte at $i: ${bytes.get(i)}';
 
-		var result = TypeloadModuleTest.compile(["-cp", "test", "unit.moduleload.Inheritance", "unit.moduleload.Documentation", "--hxb", "test/generated/unit-hxbwriter.hxb"]);
+		var result = TypeloadModuleTest.compile(["-cp", "haxe/test", "unit.moduleload.Inheritance", "unit.moduleload.Documentation", "--hxb", "bin/test/unit-hxbwriter.hxb"]);
 		if (result.code != 0 || result.com == null) throw 'Typing the HXB writer fixtures failed with exit code ${result.code}';
 		function find(name:String):core.TType.ModuleDef {
 			for (m in result.com.modules) if (m.mPath.pack.join(".") == "unit.moduleload" && m.mPath.name == name) return m;

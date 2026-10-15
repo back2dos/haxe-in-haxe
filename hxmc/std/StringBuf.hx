@@ -1,4 +1,4 @@
-// hxmc: haxe/std/eval/_std/StringBuf.hx (an extern), a growable UTF-16 buffer in
+// hxmc: haxe/upstream/std/eval/_std/StringBuf.hx (an extern), a growable UTF-16 buffer in
 // the runtime (hxmc.rt.Str)
 
 extern class StringBuf {

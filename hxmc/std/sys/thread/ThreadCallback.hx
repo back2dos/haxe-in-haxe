@@ -22,7 +22,7 @@
 
 package sys.thread;
 
-// hxmc: haxe/std/sys/thread/ThreadCallback.hx without the target.threaded check
+// hxmc: haxe/upstream/std/sys/thread/ThreadCallback.hx without the target.threaded check
 
 import haxe.Exception;
 

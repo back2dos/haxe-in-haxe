@@ -1,6 +1,6 @@
-// hxmc: haxe/std/hl/_std/haxe/atomic/AtomicInt.hx over a cell (a T_NATIVE
+// hxmc: haxe/upstream/std/hl/_std/haxe/atomic/AtomicInt.hx over a cell (a T_NATIVE
 // K_RAW object, the low 4 bytes of slot 0) and the Atomic intrinsics
-// (sequentially consistent), with the docs of haxe/std/haxe/atomic/AtomicInt.hx
+// (sequentially consistent), with the docs of haxe/upstream/std/haxe/atomic/AtomicInt.hx
 
 package haxe.atomic;
 

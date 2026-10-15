@@ -1,4 +1,4 @@
-// hxmc: haxe/std/eval/_std/haxe/NativeStackTrace.hx without native stack traces
+// hxmc: haxe/upstream/std/eval/_std/haxe/NativeStackTrace.hx without native stack traces
 
 package haxe;
 

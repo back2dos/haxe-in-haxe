@@ -1,4 +1,4 @@
-// hxmc: haxe/std/Sys.hx over hxmc.NativeSys
+// hxmc: haxe/upstream/std/Sys.hx over hxmc.NativeSys
 
 import hxmc.NativeSys;
 

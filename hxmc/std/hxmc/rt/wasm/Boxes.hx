@@ -6,7 +6,7 @@ import hxmc.unsafe.Mem;
 import hxmc.unsafe.Ptr;
 
 // rt.c's boxes, array element access and growth, and Int conversion for
-// WebAssembly (hxmc/README.md, "WebAssembly"), in Haxe: references kept
+// WebAssembly (README.md, "WebAssembly"), in Haxe: references kept
 // across allocations are ordinary locals here (the compiler roots them),
 // raw addresses are taken again after each allocation.
 @:hxmc.wasm @:keep

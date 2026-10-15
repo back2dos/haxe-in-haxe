@@ -22,7 +22,7 @@
 
 package sys.thread;
 
-// hxmc: haxe/std/sys/thread/Thread.hx over the runtime's threads (ThreadImpl:
+// hxmc: haxe/upstream/std/sys/thread/Thread.hx over the runtime's threads (ThreadImpl:
 // rt_thread.c), without the target.threaded check and `events`. The process
 // exits when the main thread's main() returns, as on hl and cpp.
 

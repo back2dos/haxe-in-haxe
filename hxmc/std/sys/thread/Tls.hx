@@ -1,4 +1,4 @@
-// hxmc: haxe/std/sys/thread/Tls.hx: per-thread values (rt_thread.c keeps them
+// hxmc: haxe/upstream/std/sys/thread/Tls.hx: per-thread values (rt_thread.c keeps them
 // with each thread; they go when the thread ends)
 
 package sys.thread;

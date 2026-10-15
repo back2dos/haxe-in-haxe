@@ -19,8 +19,8 @@
  * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
  * DEALINGS IN THE SOFTWARE.
  */
-// hxmc: haxe/std/Std.hx; the import loads the runtime's Haxe part
-// (hxmc.rt, hxmc/README.md "Runtime in Haxe") into every program: Std is
+// hxmc: haxe/upstream/std/Std.hx; the import loads the runtime's Haxe part
+// (hxmc.rt, README.md "Runtime in Haxe") into every program: Std is
 // loaded by every compilation.
 import hxmc.rt.Runtime;
 

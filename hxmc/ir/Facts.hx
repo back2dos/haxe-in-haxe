@@ -4,12 +4,12 @@ import hxmc.ir.Ir;
 
 // The program-wide preparation hxmc's code generator and data share
 // (hxmc.Prep), from the part of hxc's C emitter that did not write C
-// (hxmc/README.md, "Origin"). It names
+// (README.md, "Origin"). It names
 // functions (F_<name>), string literals (S_<hash>) and program-wide numbers
 // (TY_*, FID_*, SIG_*, GI_*, DSP_*: absolute symbols in hxmc's objects), lays
 // out objects, assigns type indices and field ids, finds the functions that
 // never reach a GC point and marks the statements whose only GC point is a
-// slow path (SCold). The runtime (hxmc/rt) agrees on every number this way.
+// slow path (SCold). The runtime (hxmc/c) agrees on every number this way.
 class Facts {
 	public static inline var T_FIRST = 32;
 

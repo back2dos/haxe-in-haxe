@@ -5,9 +5,9 @@ import hxmc.rt.Types.*;
 import hxmc.unsafe.Mem;
 import hxmc.unsafe.Ptr;
 
-// The collector and allocator of WebAssembly programs: hxmc/rt/rt.c's
+// The collector and allocator of WebAssembly programs: hxmc/c/rt.c's
 // generational copying collector with one thread, in Haxe over linear
-// memory (hxmc/README.md, "WebAssembly"). Same objects, nursery, promotion
+// memory (README.md, "WebAssembly"). Same objects, nursery, promotion
 // and depth-first copying as rt.c (whose comments explain them); the
 // differences: memory comes from Heap (it grows, it is never given back),
 // the old space is a list of chunks rather than a contiguous semispace (a
