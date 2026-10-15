@@ -118,6 +118,12 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: 22
+      # (zig: the C companions of corpus cases, Corpus.nativeInputs)
+      - id: zig
+        run: echo "version=$(cat hxmc/c/zig-version)" >> "$GITHUB_OUTPUT"
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: ${{ steps.zig.outputs.version }}
       - uses: actions/download-artifact@v8
         with: {name: rt, path: bin/hxmc/rt}
       - name: System packages

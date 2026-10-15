@@ -48,6 +48,9 @@ class CInterop {
 	public static var USER = new Map<String, Bool>();
 	// @:hxmc.link: objects and archives the program names (absolute paths)
 	public static var LINKS:Array<String> = [];
+	// the prefix of the keys of @:hxmc.indirect externs (calls through a function
+	// pointer, their first argument): not a symbol
+	public static inline var INDIRECT = "@indirect:";
 
 	public static function isStruct(c:TClass):Bool
 		return Lower.hasMeta(":hxmc.struct", c.clMeta);
@@ -250,6 +253,10 @@ class CInterop {
 		} else {
 			if (FnLower.C_EXTERNS.exists(sym)) throw new LowerError('C function $sym is declared both @:hxmc.fast and not', where);
 			BLOCKING.set(sym, true);
+		}
+		if (StringTools.startsWith(sym, INDIRECT)) {
+			if (args.length == 0 || args[0] != CPtr) throw new LowerError('@:hxmc.indirect : the first parameter is the function\'s address (a Ptr)', where);
+			return sig;
 		}
 		var lib = metaStr(":hxmc.lib", c, cf);
 		if (lib != null) LIBS.set(sym, lib);

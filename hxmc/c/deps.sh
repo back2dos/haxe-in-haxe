@@ -24,7 +24,7 @@ T=${1:?usage: deps.sh <target> <out dir>}
 OUT=${2:?usage: deps.sh <target> <out dir>}
 case $OUT in /*) ;; *) OUT=$ROOT/$OUT ;; esac
 
-# mbedtls 2.28 (LTS): the API hxmc/c/rt_ssl.c is written against, as
+# mbedtls 2.28 (LTS): the API hxmc/std/hxmc/rt/Ssl.hx is written against (its struct layouts too), as
 # upstream Haxe's bindings (haxe/libs/mbedtls) and the system 2.28 packages
 MBEDTLS_VERSION=2.28.10
 MBEDTLS_URL=https://github.com/Mbed-TLS/mbedtls.git

@@ -1,5 +1,5 @@
 // hxmc: haxe/upstream/std/eval/_std/sys/ssl/Mbedtls.hx (the shared mbedtls state of
-// sys.ssl) over hxmc.NativeSsl (rt_ssl.c) instead of the mbedtls.* classes
+// sys.ssl) over hxmc.NativeSsl (hxmc.rt.Ssl) instead of the mbedtls.* classes
 
 package sys.ssl;
 

@@ -119,7 +119,14 @@ class MkRt {
 			for (sym in r.obj.symbols)
 				if (sym.global && sym.section == null && !sym.abs) m.undefinedQueue.push(sym.name);
 		}
-		for (a in args) {
+		var i = 0;
+		while (i < args.length) {
+			var a = args[i++];
+			// (-u symbol: a root, taken from the archives)
+			if (a == "-u") {
+				m.undefinedQueue.push(args[i++]);
+				continue;
+			}
 			var b = sys.io.File.getBytes(a);
 			if (b.getString(0, 8) == "!<arch>\n") m.archives.push(new Archive(b, a)) else addMacho(b);
 		}

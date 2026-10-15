@@ -19,6 +19,9 @@ import hxmc.unsafe.Ptr;
 	static function rt_sleep(seconds:Float):Void;
 	// rt_thread.c: waits for any of n struct pollfd (revents set), letting other threads run
 	static function rt_wait_fds(pollfds:Ptr, n:Int, timeout:Float):Int;
+	// rt.c: a T_NATIVE object holding the C resource p (slot 0) and nrefs reference
+	// slots; the collector calls free(p) (a no-GC @:hxmc.callback) once it is unreachable
+	static function rt_native_new_refs(p:Ptr, free:Ptr, nrefs:Int):Dynamic;
 }
 
 @:hxmc.c @:hxmc.fast extern class Leaf {

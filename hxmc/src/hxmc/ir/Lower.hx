@@ -124,6 +124,8 @@ class Lower {
 				case TClassDecl(c) if (c.clPath.pack.length > 0 && c.clPath.pack[0] == "hxmc" && !c.hasClassFlag(CExtern)):
 					// @:hxmc.wasm: the runtime of WebAssembly only (what C provides elsewhere)
 					if (hasMeta(":hxmc.wasm", c.clMeta) && targetOs != 3) continue;
+					// @:hxmc.native: the runtime of the native targets only (over C libraries)
+					if (hasMeta(":hxmc.native", c.clMeta) && targetOs == 3) continue;
 					for (cf in c.clOrderedStatics) {
 						if (cf.cfMeta.length == 0) continue;
 						var n = metaString(":hxmc.export", cf.cfMeta);
@@ -563,8 +565,59 @@ class Lower {
 		funcs.set(cf, fi);
 		prog.funcs.push(fi);
 		signature(fi, tf, null);
+		if (hasMeta(":hxmc.callback", cf.cfMeta)) callback(fi, cf);
 		pending.push(guarded(fi, () -> lowerBody(fi, cf, () -> new FnLower(this, fi, null, null).run(tf))));
 		return fi;
+	}
+
+	// @:hxmc.callback: a static function C calls through its address
+	// (hxmc.unsafe.Callback.addr) in the C convention (hxmc's own). Its
+	// symbol is fixed (the address C keeps names it). A @:hxmc.noGc callback
+	// is the function itself: it may run on any thread, in any state. Any
+	// other is reached through a wrapper that leaves the safe region the
+	// calling thread is in (a call of C that is not @:hxmc.fast, the only
+	// kind that may call back) and enters it again on return.
+	public var callbackSyms = new Map<TClassField, String>();
+
+	function callback(fi:FuncInfo, cf:TClassField) {
+		var where = CInterop.posOf(cf.cfPos);
+		for (a in fi.args.concat([new Local(-1, "result", fi.ret)])) {
+			if (a.id == -1 && a.ty == TVoid) continue;
+			var t = a.id == -1 ? funcOf(cf).tfType : funcOf(cf).tfArgs[a.id].variable.vType;
+			switch CInterop.ctype(t) {
+				case CI32 | CI64 | CF64 | CPtr:
+				case ct:
+					throw new LowerError('@:hxmc.callback ${cf.cfName}: ${a.id == -1 ? "the result" : "parameter " + a.name} has the type ${CInterop.name(ct)}, which a callback cannot take yet (Int, Int64, Float, Ptr)', where);
+			}
+		}
+		var sym = "hxmc_cb_" + fi.name;
+		callbackSyms.set(cf, sym);
+		if (fi.declNoGc || targetOs == 3) {
+			// (WebAssembly: one thread, no safe region)
+			if (fi.cSymbol != null) throw new LowerError('@:hxmc.callback ${cf.cfName} is also @:hxmc.export', where);
+			fi.cSymbol = sym;
+			return;
+		}
+		var w = new FuncInfo(fi.name + "__callback", fi.module);
+		w.cSymbol = sym;
+		w.display = fi.display;
+		w.pos = fi.pos;
+		w.args = [for (a in fi.args) new Local(a.id, a.name, a.ty)];
+		w.ret = fi.ret;
+		var call = ECall(fi, [for (a in w.args) (ELocal(a) : Ex)]);
+		w.body.push(SExpr(ECallHost("rt_blocking_leave", [], TVoid)));
+		if (fi.ret == TVoid) {
+			w.body.push(SExpr(call));
+			w.body.push(SExpr(ECallHost("rt_blocking_enter", [], TVoid)));
+			w.body.push(SReturn(null));
+		} else {
+			var r = new Local(w.args.length, "r", fi.ret);
+			w.locals.push(r);
+			w.body.push(SSet(r, call));
+			w.body.push(SExpr(ECallHost("rt_blocking_enter", [], TVoid)));
+			w.body.push(SReturn(ELocal(r)));
+		}
+		prog.funcs.push(w);
 	}
 
 	// hxmc's attributes of a function: @:hxmc.noGc (checked by Facts.findNoGc),

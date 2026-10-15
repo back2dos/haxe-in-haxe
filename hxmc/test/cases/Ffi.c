@@ -35,3 +35,11 @@ double t_sum_vad(int32_t n, ...) { va_list ap; va_start(ap, n); double s = 0; fo
 int32_t t_sizeof_rect(void) { return (int32_t)sizeof(Rect); }
 int32_t t_offset_next(void) { return (int32_t)offsetof(Rect, next); }
 int32_t t_sub(int32_t a, int32_t b) { return a - b; }
+// callbacks: C calls Haxe through a function pointer
+typedef int32_t (*cb_i)(int32_t);
+int32_t t_apply(cb_i f, int32_t v) { return f(v) + 1; }
+typedef double (*cb_d)(void *, double);
+double t_apply_d(cb_d f, void *ctx, double v) { return f(ctx, v) * 2; }
+// a C function's address, for a call through a pointer (@:hxmc.indirect)
+void *t_fnptr(void) { return (void *)t_add; }
+int32_t t_apply_fast(cb_i f, int32_t v) { return f(v) + 1; }

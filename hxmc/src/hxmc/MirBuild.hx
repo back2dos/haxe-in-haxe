@@ -1973,10 +1973,14 @@ class MirBuild {
 	// thread: no safe region.
 	function cCall(name:String, sig:hxmc.ir.CInterop.CSig, xs:Array<Int>, ret:Ty):Int {
 		var va = hxmc.ir.FnLower.C_VARIADIC.get(name);
+		// (@:hxmc.indirect: the function's address comes first)
+		var indirect = StringTools.startsWith(name, hxmc.ir.CInterop.INDIRECT);
+		var first = indirect ? 1 : 0;
 		var args = [], sizes = [];
-		for (k in 0...xs.length) {
+		for (k in first...xs.length) {
 			var v = xs[k];
 			var ct = sig.args[k];
+			var k = k - first;
 			// (variadic arguments: C's promotions make a float a double)
 			if (ct == CF32 && (va == null || k < va)) {
 				if (!abi.wasm) v = special("f32bits_to_freg", [special("f64_to_f32", [v], I32)], F64);
@@ -1987,7 +1991,7 @@ class MirBuild {
 		}
 		var blocking = hxmc.ir.CInterop.BLOCKING.exists(name) && !abi.wasm;
 		if (blocking) call("rt_blocking_enter", [], Void);
-		var r = call(name, args, mty(ret));
+		var r = indirect ? callInd(xs[0], args, mty(ret)) : call(name, args, mty(ret));
 		var ci = f.vals[r];
 		ci.cSizes = sizes;
 		if (va != null) ci.variadic = va;

@@ -1,4 +1,4 @@
-// hxmc: haxe/upstream/std/eval/_std/sys/ssl/Socket.hx over hxmc.NativeSsl (rt_ssl.c),
+// hxmc: haxe/upstream/std/eval/_std/sys/ssl/Socket.hx over hxmc.NativeSsl (hxmc.rt.Ssl),
 // whose BIO sends and receives on the descriptor of the sys.net.Socket.
 // hxmc: mbedtls's WANT_READ/WANT_WRITE results (non-blocking sockets) throw
 // haxe.io.Error.Blocked (Eval tests for -1, which mbedtls never returns), and

@@ -1340,6 +1340,8 @@ class FnLower {
 				if (ci != null) return ci;
 				// a C function by its own symbol (@:hxmc.c, CInterop): a GC point
 				// in a safe region, or none (@:hxmc.fast: hxmc.unsafe.LibC)
+				// @:hxmc.indirect: the first argument is the C function's address
+				if (Lower.hasMeta(":hxmc.indirect", cf.cfMeta)) return cCall(CInterop.INDIRECT + Lower.nativeName(c) + "_" + cf.cfName, c, cf, s, cargs, e);
 				var sym = CInterop.cSymbol(c, cf);
 				if (sym != null) return cCall(sym, c, cf, s, cargs, e);
 				var name = Lower.nativeName(c) + "_" + cf.cfName;
@@ -1585,6 +1587,15 @@ class FnLower {
 					case _: cfail("Ptr." + n + " is not an accessor", e);
 				}
 			case _:
+		}
+		if (c.clPath.name == "Callback" && c.clPath.pack.join(".") == "hxmc.unsafe" && cf.cfName == "addr") {
+			switch strip(cargs[0]).eexpr {
+				case TField(_, FStatic(fc, fcf)) if (Lower.hasMeta(":hxmc.callback", fcf.cfMeta)):
+					l.staticFunc(fc, fcf);
+					return ECallHost("hxmc_unsafe_Mem_sym", [EStr(l.callbackSyms.get(fcf))], TI64);
+				case _:
+					cfail("Callback.addr: the argument must name a static function declared @:hxmc.callback", e);
+			}
 		}
 		if (c.clPath.name == "Struct" && c.clPath.pack.join(".") == "hxmc.unsafe") {
 			var sc = switch strip(cargs[0]).eexpr {

@@ -38,12 +38,19 @@ import hxmc.unsafe.*;
 	static function t_offset_next():Int;
 	@:hxmc.varargs(1) static function t_sum_va(n:Int, a:Int, b:Int, c:Int):Int;
 	@:hxmc.varargs(1) static function t_sum_vad(n:Int, a:Float, b:Float, c:Float):Float;
+	static function t_fnptr():Ptr;
+	@:hxmc.indirect static function callAdd(f:Ptr, a:Int, b:Int):Int;
+	// a no-GC callback may be called from a fast call
+	@:native("t_apply_fast") static function applyFast(f:Ptr, v:Int):Int;
 }
 
 // calls in a safe region (not @:hxmc.fast): a collection may run meanwhile
 extern class Slow {
 	@:hxmc.c("t_strlen") static function strlen(s:CString):UInt64;
 	@:hxmc.c("t_sub") static function sub(a:Int, b:Int):Int;
+	// (the callbacks that allocate: from calls in a safe region)
+	@:hxmc.c("t_apply") static function apply(f:Ptr, v:Int):Int;
+	@:hxmc.c("t_apply_d") static function applyD(f:Ptr, ctx:Ptr, v:Float):Float;
 }
 
 @:hxmc.lib("ffidyn") extern class Dyn {
@@ -53,6 +60,21 @@ extern class Slow {
 }
 
 class Ffi {
+	@:hxmc.callback @:hxmc.noGc static function twice(v:Int):Int
+		return 2 * v;
+
+	static var made:Array<String> = [];
+
+	// (allocates: a collection may run during it, with a 64 KB nursery)
+	@:hxmc.callback static function makeStrings(n:Int):Int {
+		for (i in 0...n)
+			made.push("x" + i);
+		return made.length;
+	}
+
+	@:hxmc.callback static function scaled(ctx:Ptr, v:Float):Float
+		return (ctx : Ptr<Float>).value * v + made.length;
+
 	static function main() {
 		trace(Fast.add(2, 40));
 		trace(Fast.t_neg8(-128), Fast.t_neg8(5));
@@ -104,5 +126,13 @@ class Ffi {
 		var n = Arena.scopedValue(a -> Slow.strlen(a.cstring("twelve bytes")).toInt());
 		trace(n);
 		trace(Dyn.twice(21), Dyn.hyp2(3, 4), Dyn.name().toString());
+		trace(Fast.callAdd(Fast.t_fnptr(), 30, 12), Fast.applyFast(Callback.addr(twice), 20), Slow.apply(Callback.addr(twice), 4));
+		var keep = "kept across";
+		trace(Slow.apply(Callback.addr(makeStrings), 5000), made[4999], keep);
+		Arena.scoped(a -> {
+			var k:Ptr<Float> = a.alloc(8);
+			k.value = 1.5;
+			trace(Slow.applyD(Callback.addr(scaled), k, 4));
+		});
 	}
 }

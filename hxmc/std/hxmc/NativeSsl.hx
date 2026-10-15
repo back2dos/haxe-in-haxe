@@ -1,6 +1,6 @@
 package hxmc;
 
-// mbedtls (rt_ssl.c) behind the Eval natives of mbedtls.* and sys.ssl.*
+// mbedtls (hxmc.rt.Ssl) behind the Eval natives of mbedtls.* and sys.ssl.*
 // (src/macros/eval/EvalSsl.hx), mirroring the OCaml bindings
 // haxe/libs/mbedtls/mbedtls.ml. Contexts are opaque runtime handles.
 extern class NativeSsl {

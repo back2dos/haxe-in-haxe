@@ -4,7 +4,7 @@
 # the parts of the C library it and generated code use, into one relocatable
 # object bin/hxmc/rt/<target>/rt.o, which hxmc's linker then links with the
 # program (and lays out once, see Link.hx). Next to it, ssl.o and uv.o:
-# sys.ssl (rt_ssl.c with mbedtls) and libuv (rt_uv.c with libuv), linked only
+# sys.ssl (mbedtls, which hxmc/std/hxmc/rt/Ssl.hx calls) and libuv (rt_uv.c with libuv), linked only
 # into programs that refer to them, from the libraries hxmc/c/deps.sh
 # built into bin/hxmc/deps/<target> (DEPS); without them, stubs that throw.
 # zig must be the version of hxmc/c/zig-version (the objects are published
@@ -52,22 +52,31 @@ done
 # the slow paths of generated code (rthxmc.c)
 $ZIG cc -target $triple $CFLAGS -c "$ROOT/hxmc/c/rthxmc.c" -o "$out/obj/rthxmc.o" &
 objs="$objs $out/obj/rthxmc.o"
-# rt_ssl.c and rt_uv.c: with mbedtls and libuv when deps.sh built them, else stubs
+# sys.ssl: mbedtls itself (hxmc/std/hxmc/rt/Ssl.hx calls it); rt_uv.c: with
+# libuv when deps.sh built them, else stubs
 if [ -f "$deps/VERSIONS" ]; then
-	$ZIG cc -target $triple $CFLAGS -I "$deps/include" -c "$ROOT/hxmc/c/rt_ssl.c" -o "$out/obj/rt_ssl.o" &
 	$ZIG cc -target $triple $CFLAGS -I "$deps/include" -c "$ROOT/hxmc/c/rt_uv.c" -o "$out/obj/rt_uv.o" &
 	sslar="$deps/lib/libmbedtls.a $deps/lib/libmbedx509.a $deps/lib/libmbedcrypto.a"
 	uvar="$deps/lib/libuv.a"
 	cp "$deps/LICENSE.mbedtls" "$deps/LICENSE.libuv" "$out/.."/
 else
-	echo "mkrt: no $deps/VERSIONS (hxmc/c/deps.sh): sys.ssl and libuv are stubs that throw" >&2
-	$ZIG cc -target $triple $CFLAGS -DHXMC_NO_SSL -c "$ROOT/hxmc/c/rt_ssl.c" -o "$out/obj/rt_ssl.o" &
+	echo "mkrt: no $deps/VERSIONS (hxmc/c/deps.sh): no ssl.o, and libuv is stubs that throw" >&2
 	$ZIG cc -target $triple $CFLAGS -DHXMC_NO_UV -c "$ROOT/hxmc/c/rt_uv.c" -o "$out/obj/rt_uv.o" &
 	sslar=
 	uvar=
 fi
 wait
 rm -f "$out/ssl.o" "$out/uv.o" "$out/obj/ssl.undef" "$out/obj/uv.undef"
+# the mbedtls functions the runtime calls (hxmc/std/hxmc/rt/Ssl.hx): what ssl.o holds
+sslsyms="mbedtls_strerror mbedtls_ctr_drbg_init mbedtls_ctr_drbg_free mbedtls_ctr_drbg_random mbedtls_ctr_drbg_seed"
+sslsyms="$sslsyms mbedtls_entropy_init mbedtls_entropy_free mbedtls_entropy_func mbedtls_x509_crt_init mbedtls_x509_crt_free"
+sslsyms="$sslsyms mbedtls_x509_crt_parse mbedtls_x509_crt_parse_der mbedtls_x509_crt_parse_file mbedtls_x509_crt_parse_path"
+sslsyms="$sslsyms mbedtls_oid_get_attr_short_name mbedtls_ssl_config_init mbedtls_ssl_config_free mbedtls_ssl_conf_verify"
+sslsyms="$sslsyms mbedtls_ssl_conf_authmode mbedtls_ssl_conf_ca_chain mbedtls_ssl_config_defaults mbedtls_ssl_conf_rng"
+sslsyms="$sslsyms mbedtls_pk_init mbedtls_pk_free mbedtls_pk_parse_key mbedtls_pk_parse_keyfile mbedtls_pk_parse_public_key"
+sslsyms="$sslsyms mbedtls_pk_parse_public_keyfile mbedtls_ssl_init mbedtls_ssl_free mbedtls_ssl_get_peer_cert mbedtls_ssl_set_bio"
+sslsyms="$sslsyms mbedtls_ssl_set_hostname mbedtls_ssl_setup mbedtls_ssl_handshake mbedtls_ssl_read mbedtls_ssl_write"
+sslroots=; for f in $sslsyms; do sslroots="$sslroots -u $f"; done
 # what generated code calls in the C library besides the runtime (MirBuild),
 # and what the runtime's Haxe code calls (hxmc/std/hxmc/unsafe/LibC.hx)
 libm="memset memcpy fmod floor ceil sin cos tan asin acos atan atan2 exp log pow sqrt"
@@ -101,7 +110,7 @@ macos-*)
 	# the runtime's Mach-O objects merged into one (hxmc --mkrt-macho); the
 	# C library is libSystem, bound at load time
 	"${HXMC:-$ROOT/bin/hxmc/hxmc}" --mkrt-macho "$out/rt.o" $objs
-	"${HXMC:-$ROOT/bin/hxmc/hxmc}" --mkrt-macho "$out/ssl.o" "$out/obj/rt_ssl.o" $sslar
+	[ -n "$sslar" ] && "${HXMC:-$ROOT/bin/hxmc/hxmc}" --mkrt-macho "$out/ssl.o" $sslar $sslroots
 	"${HXMC:-$ROOT/bin/hxmc/hxmc}" --mkrt-macho "$out/uv.o" "$out/obj/rt_uv.o" $uvar
 	ls -l "$out/rt.o" "$out/ssl.o" "$out/uv.o"
 	exit 0 ;;
@@ -119,7 +128,8 @@ windows-*)
 	# only; the rest of the C library they need comes with rt.o
 	sysar=
 	for a in $inputs; do case $a in *.lib|*.a) sysar="$sysar -i $a" ;; esac; done
-	"${HXMC:-$ROOT/bin/hxmc/hxmc}" --mkrt "$out/ssl.o" "$out/obj/rt_ssl.o" $sslar $sysar -U "$out/obj/ssl.undef"
+	touch "$out/obj/ssl.undef"
+	[ -n "$sslar" ] && "${HXMC:-$ROOT/bin/hxmc/hxmc}" --mkrt "$out/ssl.o" $sslar $sysar $sslroots -U "$out/obj/ssl.undef"
 	"${HXMC:-$ROOT/bin/hxmc/hxmc}" --mkrt "$out/uv.o" "$out/obj/rt_uv.o" $uvar $sysar -U "$out/obj/uv.undef"
 	sj=_setjmp; [ $target = windows-arm64 ] && sj=__mingw_setjmp
 	undef="-u mainCRTStartup -u $sj -u _tls_index -u _tls_used -x main"
@@ -137,10 +147,10 @@ line=$($ZIG cc -target $triple -static -O2 -v "$out/obj/stub.c" -o "$out/obj/stu
 crt1=$(echo "$line" | tr ' ' '\n' | grep '/crt1.o$')
 libs=$(echo "$line" | tr ' ' '\n' | grep -E '/lib(c|zigc|compiler_rt)\.a$' | tr '\n' ' ')
 # ssl.o, uv.o: their objects and libraries; the C library they need comes with rt.o
-ld.lld -r --strip-debug -o "$out/ssl.o" "$out/obj/rt_ssl.o" --start-group $sslar --end-group
+[ -n "$sslar" ] && ld.lld -r --strip-debug -o "$out/ssl.o" $sslroots --start-group $sslar --end-group
 ld.lld -r --strip-debug -o "$out/uv.o" "$out/obj/rt_uv.o" $uvar
 undef="-u _setjmp"
-for f in $libm $(nm -u "$out/ssl.o" "$out/uv.o" | awk '{print $2}' | grep -v '^hx\|^haxe_' | sort -u); do undef="$undef -u $f"; done
+for f in $libm $(nm -u $(ls "$out/ssl.o" "$out/uv.o" 2>/dev/null) | awk '{print $2}' | grep -v '^hx\|^haxe_' | sort -u); do undef="$undef -u $f"; done
 # word-at-a-time memcmp and bcmp in place of musl's byte loops (rtlibc.c)
 $ZIG cc -target $triple -O2 -g0 -ffreestanding -fno-builtin -ffunction-sections -c "$ROOT/hxmc/c/rtlibc.c" -o "$out/obj/rtlibc.o"
 objs="$objs $out/obj/rtlibc.o"

@@ -1,24 +1,27 @@
 exit 0
-Ffi.hx:57: 42
-Ffi.hx:58: -128, -5
-Ffi.hx:59: 0, 8
-Ffi.hx:60: 24464, 1
-Ffi.hx:62: 4294967301
-Ffi.hx:63: 0.15000000596046448
-Ffi.hx:64: 956.9375
-Ffi.hx:65: true, false
-Ffi.hx:66: 650
-Ffi.hx:67: 128
-Ffi.hx:68: 196455
-Ffi.hx:69: 60, 0.875
-Ffi.hx:70: true, true, 32, 8
-Ffi.hx:72: héllo, 6, 6, -1
-Ffi.hx:77: 1000
-Ffi.hx:80: 6, 12, 3, 200, -5, 1.5, true
-Ffi.hx:83: 44, 115.75
-Ffi.hx:87: 20, 10
-Ffi.hx:89: 13, héllo wörld, 13
-Ffi.hx:92: 20000, héllo wörld, 10
-Ffi.hx:102: out of the scope: -7
-Ffi.hx:105: 12
-Ffi.hx:106: 42, 25, ffidyn
+Ffi.hx:79: 42
+Ffi.hx:80: -128, -5
+Ffi.hx:81: 0, 8
+Ffi.hx:82: 24464, 1
+Ffi.hx:84: 4294967301
+Ffi.hx:85: 0.15000000596046448
+Ffi.hx:86: 956.9375
+Ffi.hx:87: true, false
+Ffi.hx:88: 650
+Ffi.hx:89: 128
+Ffi.hx:90: 196455
+Ffi.hx:91: 60, 0.875
+Ffi.hx:92: true, true, 32, 8
+Ffi.hx:94: héllo, 6, 6, -1
+Ffi.hx:99: 1000
+Ffi.hx:102: 6, 12, 3, 200, -5, 1.5, true
+Ffi.hx:105: 44, 115.75
+Ffi.hx:109: 20, 10
+Ffi.hx:111: 13, héllo wörld, 13
+Ffi.hx:114: 20000, héllo wörld, 10
+Ffi.hx:124: out of the scope: -7
+Ffi.hx:127: 12
+Ffi.hx:128: 42, 25, ffidyn
+Ffi.hx:129: 42, 41, 9
+Ffi.hx:131: 5001, x4999, kept across
+Ffi.hx:135: 10012
