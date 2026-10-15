@@ -530,9 +530,16 @@ class WasmGen {
 	// type that no value live at its definition holds; a local is free again
 	// after its value's last use
 	function coalesce() {
-		var n = vals.length;
 		local = [for (_ in vals) -1];
 		var want = [for (i in vals) needsLocal(i)];
+		// the values that get locals, numbered densely for the bit sets
+		var wid = MFunc.ints(vals.length, -1), ids = [];
+		for (v in 0...vals.length)
+			if (want[v]) {
+				wid[v] = ids.length;
+				ids.push(v);
+			}
+		var n = ids.length;
 		// liveness of the values that get locals (phi operands: live out of the predecessor)
 		var liveIn = [for (_ in 0...nblk) new Bits(n)];
 		var liveOut = [for (_ in 0...nblk) new Bits(n)];
@@ -544,17 +551,17 @@ class WasmGen {
 			for (i in x.ins) {
 				if (i.dead) continue;
 				if (i.op == Phi) {
-					if (want[i.id]) kl.set(i.id);
+					if (want[i.id]) kl.set(wid[i.id]);
 					for (pi in 0...x.preds.length) {
 						var p = x.preds[pi];
 						if (rpoNum[p.id] < 0) continue;
 						var v = i.args[pi];
-						if (want[v]) phiUse[p.id].set(v);
+						if (want[v]) phiUse[p.id].set(wid[v]);
 					}
 					continue;
 				}
-				useTree(i, v -> if (want[v] && !kl.get(v)) g.set(v));
-				if (want[i.id]) kl.set(i.id);
+				useTree(i, v -> if (want[v] && !kl.get(wid[v])) g.set(wid[v]));
+				if (want[i.id]) kl.set(wid[i.id]);
 			}
 		}
 		var changed = true;
@@ -577,6 +584,7 @@ class WasmGen {
 				}
 			}
 		}
+		gen = kill = phiUse = null;
 		// a try body may branch to its handler (through its pad) anywhere: what
 		// the handler block reads (its live-in values, its phis' operands from
 		// the setjmp's block, the handler's address) is live in all of the body
@@ -588,8 +596,8 @@ class WasmGen {
 				var h = new Bits(n);
 				h.union(liveIn[hb.id]);
 				for (i in hb.ins)
-					if (!i.dead && i.op == Phi && want[i.args[0]]) h.set(i.args[0]);
-				if (want[tryAddr[x.id]]) h.set(tryAddr[x.id]);
+					if (!i.dead && i.op == Phi && want[i.args[0]]) h.set(wid[i.args[0]]);
+				if (want[tryAddr[x.id]]) h.set(wid[tryAddr[x.id]]);
 				var stack = [x];
 				while (stack.length > 0) {
 					var y = stack.pop();
@@ -624,7 +632,7 @@ class WasmGen {
 				var m = inn.w[wi];
 				while (m != 0) {
 					var bit = m & -m;
-					var v = (wi << 5) + bitIndex(bit);
+					var v = ids[(wi << 5) + bitIndex(bit)];
 					m &= m - 1;
 					if (local[v] >= 0) taken.set(local[v], true);
 				}
@@ -639,11 +647,11 @@ class WasmGen {
 				var i = l[k];
 				if (i.op != Phi && (folded[i.id] || remat(i))) continue;
 				if (i.op != Phi)
-					useTree(i, v -> if (want[v] && last.get(v) == k && !out.get(v) && local[v] >= 0) taken.remove(local[v]));
+					useTree(i, v -> if (want[v] && last.get(v) == k && !out.get(wid[v]) && local[v] >= 0) taken.remove(local[v]));
 				if (want[i.id]) {
 					local[i.id] = take(tyCode(ety(i.id)));
 					// a value never used afterwards frees its local at once
-					if (!out.get(i.id) && !last.exists(i.id) && i.op != Phi) taken.remove(local[i.id]);
+					if (!out.get(wid[i.id]) && !last.exists(i.id) && i.op != Phi) taken.remove(local[i.id]);
 				}
 			}
 			for (c in kids[x.id])
