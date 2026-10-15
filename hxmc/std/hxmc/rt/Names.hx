@@ -230,9 +230,9 @@ class Names {
 			LibC.memset(nk, 0, 8 * ncap);
 			for (i in 0...icCap) {
 				var k = Mem.getI64(icKeys, 8 * i);
-				if (k != 0) {
+				if (!(k == 0)) {
 					var j = slotOf(k, ncap);
-					while (Mem.getI64(nk, 8 * j) != 0)
+					while (!(Mem.getI64(nk, 8 * j) == 0))
 						j = (j + 1) & (ncap - 1);
 					Mem.setI64(nk, 8 * j, k);
 					Mem.setPtr(nv, 8 * j, Mem.getPtr(icVals, 8 * i));
@@ -263,7 +263,7 @@ class Names {
 	// a thread's end (rt_thread.c): its entries go
 	@:hxmc.export("rt_dyn_thread_exit") @:hxmc.noGc static function threadExit():Void {
 		for (i in 0...icCap)
-			if (Mem.getI64(icKeys, 8 * i) != 0) LibC.free(Mem.getPtr(icVals, 8 * i));
+			if (!(Mem.getI64(icKeys, 8 * i) == 0)) LibC.free(Mem.getPtr(icVals, 8 * i));
 		LibC.free(icKeys);
 		LibC.free(icVals);
 		icKeys = Ptr.nil();

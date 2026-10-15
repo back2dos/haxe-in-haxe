@@ -1,5 +1,10 @@
 package hxmc;
 
+// the implementation, typed only for the programs that use this API
+#if !(hxmc.target == "wasm32-wasi")
+import hxmc.rt.Ssl;
+#end
+
 // mbedtls (hxmc.rt.Ssl) behind the Eval natives of mbedtls.* and sys.ssl.*
 // (src/macros/eval/EvalSsl.hx), mirroring the OCaml bindings
 // haxe/libs/mbedtls/mbedtls.ml. Contexts are opaque runtime handles.

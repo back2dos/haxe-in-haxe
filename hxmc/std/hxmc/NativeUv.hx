@@ -1,5 +1,10 @@
 package hxmc;
 
+// the implementation, typed only for the programs that use this API
+#if !(hxmc.target == "wasm32-wasi")
+import hxmc.rt.Uv;
+#end
+
 import haxe.io.Bytes;
 
 // libuv (hxmc.rt.Uv) behind the Eval natives of eval.luv.*

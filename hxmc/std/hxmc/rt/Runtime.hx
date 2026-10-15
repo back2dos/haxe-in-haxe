@@ -24,9 +24,9 @@ import hxmc.rt.wasm.LibM;
 import hxmc.rt.wasm.Threads;
 import hxmc.rt.wasm.NoSslUv;
 #else
-// the native targets' runtime over C libraries (@:hxmc.native)
-import hxmc.rt.Ssl;
-import hxmc.rt.Uv;
+// the native targets' runtime over C libraries (@:hxmc.native; mbedtls's
+// and libuv's, hxmc.rt.Ssl and hxmc.rt.Uv, typed with hxmc.NativeSsl and
+// hxmc.NativeUv: for the programs that use them)
 import hxmc.rt.GcPaths;
 import hxmc.rt.WinRt;
 #end

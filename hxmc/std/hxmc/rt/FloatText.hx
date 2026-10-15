@@ -70,21 +70,22 @@ class FloatText {
 
 	@:hxmc.noGc static function overflow() {
 		var msg = "hxmc: FloatText: number too large\n";
-		if (Mem.os() == 3) {
-			hxmc.rt.wasm.Wasi.writeLit(2, msg);
-			hxmc.rt.wasm.Wasi.exit(70);
+		// (the WebAssembly runtime is typed for a program built for it only)
+		#if (hxmc.target == "wasm32-wasi")
+		hxmc.rt.wasm.Wasi.writeLit(2, msg);
+		hxmc.rt.wasm.Wasi.exit(70);
+		#else
+		var p = Mem.stack(64);
+		for (i in 0...msg.length)
+			Mem.setI8(p, i, StringTools.fastCodeAt(msg, i));
+		if (Mem.os() == 2) {
+			hxmc.unsafe.Win32._write(2, p, msg.length);
+			hxmc.unsafe.Win32.exit(70);
 		} else {
-			var p = Mem.stack(64);
-			for (i in 0...msg.length)
-				Mem.setI8(p, i, StringTools.fastCodeAt(msg, i));
-			if (Mem.os() == 2) {
-				hxmc.unsafe.Win32._write(2, p, msg.length);
-				hxmc.unsafe.Win32.exit(70);
-			} else {
-				hxmc.unsafe.Posix.write(2, p, msg.length);
-				hxmc.unsafe.Posix._exit(70);
-			}
+			hxmc.unsafe.Posix.write(2, p, msg.length);
+			hxmc.unsafe.Posix._exit(70);
 		}
+		#end
 	}
 
 	// b *= 10^k
