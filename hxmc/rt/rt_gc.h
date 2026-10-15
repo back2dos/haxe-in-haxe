@@ -9,7 +9,7 @@
 typedef struct rt_mutator {
 	void ***sp_ref, ***hw_ref, ***base_ref;
 	void **exn_ref;
-	char **yptr_ref, **ylim_ref;
+	char **yptr_ref, **ylim_ref, **yrlim_ref;
 	void ***rem; // remembered set: slots of old objects that may hold young pointers
 	size_t rem_len, rem_cap;
 	void **robjs; // remembered objects: old objects scanned whole (rt_barrier_range of long ranges)

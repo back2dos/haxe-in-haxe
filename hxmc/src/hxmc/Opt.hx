@@ -40,7 +40,7 @@ class Opt {
 	static inline var MTlsSp = 18; // rt_sp
 	static inline var MTlsHw = 19; // rt_sp_hw
 	static inline var MTlsYp = 20; // rt_young_ptr
-	static inline var MTlsYl = 21; // rt_young_limit
+	static inline var MTlsYl = 21; // rt_young_limit, rt_young_rlimit
 	static inline var NCLS = 22;
 	static inline var TLS_BITS = (1 << MTls) | (1 << MTlsSp) | (1 << MTlsHw) | (1 << MTlsYp) | (1 << MTlsYl);
 
@@ -49,7 +49,7 @@ class Opt {
 			case "rt_sp": MTlsSp;
 			case "rt_sp_hw": MTlsHw;
 			case "rt_young_ptr": MTlsYp;
-			case "rt_young_limit": MTlsYl;
+			case "rt_young_limit" | "rt_young_rlimit": MTlsYl;
 			case _: MTls;
 		};
 	static inline var FIELD_BITS = ((1 << 8) - 1) << MFieldAt;

@@ -1144,12 +1144,16 @@ class MirBuild {
 		return nslots | (kind << 28);
 
 	// an object of n slots: inline bump allocation; the slow path collects.
-	// zero: clear the slots (rt_alloc); at a cold site the live references
-	// are stored on the shadow stack around the slow call only
+	// zero: the slots must read as zeros (Mem.alloc), else every slot is
+	// written before it is read (Mem.allocRaw). The runtime zeroes the nursery
+	// in bulk, so neither stores zeros; they compare different limits, which
+	// differ with RT_VERIFY=1 (rt.c: zeroing allocations then take the slow
+	// path). At a cold site the live references are stored on the shadow
+	// stack around the slow call only
 	function alloc(n:Int, tidx:Int, kind:Int, zero:Bool):Int {
 		var bytes = 8 * (n + 1);
 		var ptr = tlsLoad("rt_young_ptr");
-		var lim = tlsLoad("rt_young_limit");
+		var lim = tlsLoad(zero ? "rt_young_limit" : "rt_young_rlimit");
 		var res = newVar(I64);
 		var fast = newBlock(), slow = newBlock(), join = newBlock();
 		slow.cold = true;
@@ -1161,7 +1165,6 @@ class MirBuild {
 		storeM(Opt.MInit, 4, ptr, 0, iconst(hdrLo(n, kind)));
 		storeM(Opt.MInit, 4, ptr, 4, tyConst(tidx));
 		var o = op2(Add, I64, ptr, lconst32(8));
-		if (zero && n > 16) call("memset", [o, iconst(0), lconst32(8 * n)], I64);
 		writeVar(res, cur, o);
 		jmp(join);
 		cur = slow;
@@ -1176,15 +1179,7 @@ class MirBuild {
 		jmp(join);
 		seal(join);
 		cur = join;
-		var obj = readVar(res, cur);
-		// zeroed after the join (no collection between): with the stores that
-		// initialize the object in the same block, Opt drops the overwritten ones
-		if (zero && n <= 16) {
-			var z = lconst(0, 0);
-			for (k in 0...n)
-				storeM(Opt.MInit, 8, obj, 8 * k, z);
-		}
-		return obj;
+		return readVar(res, cur);
 	}
 
 	var spillBase = -1; // the frame's spill slots (none: pushed on the slow path)
@@ -2132,12 +2127,12 @@ class MirBuild {
 	}
 
 	// Mem.alloc: an object of a run-time size (n slots), type index and kind;
-	// zeroed when asked (the slow path's objects always are)
+	// zero as for alloc
 	function allocDyn(n:Int, tidx:Int, kind:Int, zero:Bool):Int {
 		var n64 = op1(ZExt, I64, n);
 		var bytes = op2(Shl, I64, op2(Add, I64, n64, lconst(1, 0)), lconst(3, 0));
 		var ptr = tlsLoad("rt_young_ptr");
-		var lim = tlsLoad("rt_young_limit");
+		var lim = tlsLoad(zero ? "rt_young_limit" : "rt_young_rlimit");
 		var res = newVar(I64);
 		var fast = newBlock(), slow = newBlock(), join = newBlock();
 		slow.cold = true;
@@ -2149,9 +2144,7 @@ class MirBuild {
 		var lo = op2(Or, I32, n, op2(Shl, I32, kind, iconst(28)));
 		storeM(Opt.MInit, 4, ptr, 0, lo);
 		storeM(Opt.MInit, 4, ptr, 4, tidx);
-		var o = op2(Add, I64, ptr, lconst32(8));
-		if (zero) call("memset", [o, iconst(0), op2(Shl, I64, n64, lconst(3, 0))], I64);
-		writeVar(res, cur, o);
+		writeVar(res, cur, op2(Add, I64, ptr, lconst32(8)));
 		jmp(join);
 		cur = slow;
 		writeVar(res, cur, call("hxmc_alloc_slow", [op2(Or, I32, n, op2(Shl, I32, kind, iconst(28))), tidx, op1(Trunc, I32, bytes)], I64));

@@ -325,12 +325,35 @@ program whose output should change has its golden file edited, with the
 reason in the commit. The fuzzer programs are frozen as sources, not
 regenerated, so a change of the fuzzer does not change the corpus.
 
+Allocation zeroes in bulk (2026-10-15): the runtime zeroes each chunk of
+the nursery it hands out (32 KB, `RT_ZCHUNK_KB`; a thread's TLAB with
+several threads; `rep stosb` on x86-64, `memory.fill` on WebAssembly),
+so every nursery object starts zeroed and no allocation stores zeros
+(`Mem.alloc`, constructors' unset fields, `Bytes.alloc`). Allocations
+that write every slot before reading it (`Mem.allocRaw`) compare the
+chunk's end `rt_young_rlimit`, the others `rt_young_limit`; the two are
+equal but under `RT_VERIFY=1`. Large objects (over a quarter of the
+nursery) still go to the old space, which is zeroed per object.
+Against per-allocation zeroing (best of 12 alternating runs, the same
+session): alloc 1.607 -> 1.576 s (1.583 s without zeroing Bytes.alloc at
+all), binarytrees 0.822 -> 0.747 s, json 0.457 -> 0.488 s (its strings
+are written whole: the bulk pass is pure overhead), formatter_noio and
+the port within the noise (port 8.94-10.1 s both); executables 1.5%
+smaller (port 19603 -> 19303 KB, the tool 15436 -> 15183 KB), WebAssembly
+modules 1.8% (the playground build 13.54 -> 13.30 MB); wasm run times
+unchanged under node. The zeroing is not free, only moved: it now costs
+a pass over everything allocated (in the L1 cache), instead of the
+stores Opt could not drop, so it wins where objects are left partly
+unset and loses a little where they are written whole.
+
 `RT_VERIFY=1` (every target; CI runs the corpus with it) fills the free
-nursery with a byte pattern at startup and after every collection: an
-allocation that is not initialized reads the pattern from its first use
-instead of zeros before the first collection and the bytes of dead
-objects after it, and a reference a collection did not see (a missing
-root) reads it instead of the moved object's old copy. Its heap checks
+nursery with a byte pattern at startup and after every collection instead
+of zeroing it: an allocation that is not initialized reads the pattern
+from its first use, and a reference a collection did not see (a missing
+root) reads it instead of the moved object's old copy. `rt_young_limit` is
+then null, so every allocation that relies on zeros takes the slow path,
+which zeroes it explicitly, while `Mem.allocRaw` objects keep the pattern
+(a `Bytes.alloc` that did not zero fails Int64Gc under `RT_VERIFY=1`). Its heap checks
 (WebAssembly) cannot see the first kind: `Bytes.alloc` once returned
 uninitialized bytes, which the crypto library's Sha512 reads as its zero
 padding, so HaxeBenchmarks' sha512 gave wrong digests once the nursery had

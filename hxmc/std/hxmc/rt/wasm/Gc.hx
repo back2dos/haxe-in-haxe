@@ -24,6 +24,8 @@ class Gc {
 	static var nurseryBase:Ptr; // MINOR_MAX reserved
 	static var youngStart:Ptr;
 	static var youngEnd:Ptr;
+	static var youngDirty:Ptr; // the nursery above this holds zeros (never used yet)
+	static var zchunk:Int; // RT_ZCHUNK_KB
 	static var minorSize:Int;
 	static var minorFixed:Bool;
 	static var oldRegion:Ptr; // the current semispace (a Heap region)
@@ -93,9 +95,11 @@ class Gc {
 		youngStart = nurseryBase;
 		setYoungEnd(youngStart.add(minorSize));
 		if (verifying) Wasm.memset(youngStart, POISON, minorSize);
+		youngDirty = youngStart;
+		zchunk = Wasi.envInt("RT_ZCHUNK_KB", 32) << 10;
+		if (zchunk < 4096) zchunk = 4096;
 		Mem.setPtr(Mem.sym("rt_young_start"), 0, youngStart);
-		Mem.tlsSet("rt_young_ptr", youngStart);
-		Mem.tlsSet("rt_young_limit", youngEnd);
+		emptyChunk();
 		var om = Wasi.envInt("RT_OLD_MB", 32);
 		oldRegionSize = om << 20;
 		oldRegion = Heap.region(oldRegionSize);
@@ -133,25 +137,63 @@ class Gc {
 	}
 
 	// ---- allocation
+	// As in rt.c: allocations bump rt_young_ptr through a chunk of the nursery
+	// zeroed when it is taken (32 KB, RT_ZCHUNK_KB: in cache right before its
+	// allocations), so no allocation zeroes its own slots. Those whose every
+	// slot is written before it is read (Mem.allocRaw) compare the chunk's end
+	// rt_young_rlimit; those that rely on the zeros compare rt_young_limit,
+	// the same but with RT_VERIFY=1: the free nursery then holds a pattern
+	// instead of zeros, the chunk is the whole free nursery, and
+	// rt_young_limit is null, so those take the slow path, which zeroes them.
+
+	@:hxmc.noGc static function emptyChunk() {
+		Mem.tlsSet("rt_young_ptr", youngStart);
+		Mem.tlsSet("rt_young_rlimit", youngStart);
+		Mem.tlsSet("rt_young_limit", youngStart);
+	}
+
+	// the next chunk, from the allocation pointer, with room for bytes (false: none)
+	@:hxmc.noGc static function nextChunk(bytes:Int):Bool {
+		var p = Mem.tlsGet("rt_young_ptr");
+		var avail = youngEnd.diff(p);
+		if (avail < (bytes : I64)) return false;
+		var take:I64 = verifying ? avail : (bytes > zchunk ? bytes : zchunk);
+		if (take > avail) take = avail;
+		var e = p.add(take.toInt());
+		if (!verifying) {
+			// (up to the old chunk's end the nursery is zeroed already)
+			var z = Mem.tlsGet("rt_young_rlimit");
+			if (z.ult(p)) z = p;
+			var ze = e.ult(youngDirty) ? e : youngDirty;
+			if (z.ult(ze)) Wasm.memset(z, 0, ze.diff(z).toInt());
+		}
+		Mem.tlsSet("rt_young_rlimit", e);
+		Mem.tlsSet("rt_young_limit", verifying ? Ptr.nil() : e);
+		return true;
+	}
 
 	@:hxmc.export("hxmc_alloc_slow") @:hxmc.collects static function allocSlowParts(lo:Int, tindex:Int, bytes:Int):Ptr
 		return allocSlow(((tindex : I64) << 32) | ((lo : I64) & ((((1 : I64) << 32) - 1))), bytes);
 
 	@:hxmc.export("rt_alloc_slow") @:hxmc.collects static function allocSlow(header:I64, bytes:Int):Ptr {
 		var p:Ptr;
-		if (bytes > minorSize >> 2) {
-			// large objects go straight to the old space
+		if (bytes > minorSize >> 2 && youngEnd.diff(Mem.tlsGet("rt_young_ptr")) < (bytes : I64)) {
+			// large objects go straight to the old space (unless the free nursery
+			// has room: they may die young)
 			if (oldEnd.diff(oldPtr) < (bytes : I64)) collect(true, bytes);
 			p = oldPtr;
 			oldPtr = oldPtr.add(bytes);
 		} else {
-			var yp = Mem.tlsGet("rt_young_ptr");
-			if (Mem.tlsGet("rt_young_limit").diff(yp) < (bytes : I64)) {
+			if (Mem.tlsGet("rt_young_rlimit").diff(Mem.tlsGet("rt_young_ptr")) < (bytes : I64) && !nextChunk(bytes)) {
 				collect(false, 0);
-				yp = Mem.tlsGet("rt_young_ptr");
+				nextChunk(bytes);
 			}
-			p = yp;
-			Mem.tlsSet("rt_young_ptr", yp.add(bytes));
+			p = Mem.tlsGet("rt_young_ptr");
+			Mem.tlsSet("rt_young_ptr", p.add(bytes));
+			Mem.setI64(p, 0, header);
+			// (zeroed with its chunk, but for the pattern of RT_VERIFY)
+			if (verifying) Wasm.memset(p.add(8), 0, bytes - 8);
+			return p.add(8);
 		}
 		Mem.setI64(p, 0, header);
 		Wasm.memset(p.add(8), 0, bytes - 8);
@@ -397,6 +439,8 @@ class Gc {
 	}
 
 	@:hxmc.noGc static function collect(full:Bool, need:Int) {
+		var hi = Mem.tlsGet("rt_young_rlimit");
+		if (youngDirty.ult(hi)) youngDirty = hi;
 		if (verifying) verify(false);
 		if (verifying) checkRemembered();
 		if (full) majorGc(need) else {
@@ -405,8 +449,7 @@ class Gc {
 			minorGc();
 			if (!minorFixed && majors == m0) adaptNursery(oldPtr.diff(before).toInt());
 		}
-		Mem.tlsSet("rt_young_ptr", youngStart);
-		Mem.tlsSet("rt_young_limit", youngEnd);
+		emptyChunk();
 		if (verifying) Wasm.memset(youngStart, POISON, minorSize);
 		if (verifying) verify(true);
 		// the slots the frames left above the stack top (rt_sp_hw)

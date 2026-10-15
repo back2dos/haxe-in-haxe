@@ -186,7 +186,7 @@ static RT_TLS rt_thread *self;
 // dead_mut's remembered set has no TLAB or stack: its refs point here
 static void **dead_sp, **dead_hw, **dead_base;
 static void *dead_exn;
-static char *dead_yptr, *dead_ylim;
+static char *dead_yptr, *dead_ylim, *dead_yrlim;
 
 static pthread_condattr_t mono_attr; // conditions waiting on CLOCK_MONOTONIC (CLOCK_REALTIME on macOS)
 
@@ -227,6 +227,7 @@ void rt_threads_init(void) {
 	dead_mut.exn_ref = &dead_exn;
 	dead_mut.yptr_ref = &dead_yptr;
 	dead_mut.ylim_ref = &dead_ylim;
+	dead_mut.yrlim_ref = &dead_yrlim;
 	rt_mutator_bind(&main_thread.mut);
 	all_threads = &main_thread;
 	by_id_cap = 64;
@@ -384,7 +385,7 @@ static void *thread_start(void *arg) {
 	rt_thread *t = (rt_thread *)arg;
 	self = t;
 	rt_sp = rt_stack_base = rt_sp_hw = t->sbase;
-	rt_young_ptr = rt_young_limit = NULL;
+	rt_young_ptr = rt_young_limit = rt_young_rlimit = NULL;
 	rt_hcur = NULL;
 	rt_exn = NULL;
 	pthread_mutex_lock(&wl); // no collection runs: bind the mutator (the thread is safe until it leaves)

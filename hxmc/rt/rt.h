@@ -127,9 +127,11 @@ extern const int32_t rt_bound_types[];
 // ---- allocation
 // The nursery is [rt_young_start, rt_young_end) (fixed between collections);
 // each thread bumps through its own chunk of it [rt_young_ptr, rt_young_limit)
-// (a TLAB; with one thread, the whole free nursery).
+// (a TLAB), which is zeroed when taken: allocations that rely on zeros
+// compare rt_young_limit, the others rt_young_rlimit (the same, but with
+// RT_VERIFY=1, whose pattern replaces the zeros, rt_young_limit is NULL: see rt.c).
 extern char *rt_young_start, *rt_young_end;
-extern RT_TLS char *rt_young_ptr, *rt_young_limit;
+extern RT_TLS char *rt_young_ptr, *rt_young_limit, *rt_young_rlimit;
 extern RT_TLS void **rt_sp; // shadow stack top
 // The highest rt_sp since the last collection. Each collection zeroes the
 // slots in [rt_sp, rt_sp_hw), so a slot above rt_sp holds 0 or a reference
@@ -158,7 +160,6 @@ static inline void *rt_alloc(uint32_t nslots, uint32_t tindex, uint32_t kind) {
 	if (__builtin_expect(rt_young_limit - p >= (intptr_t)bytes, 1)) {
 		rt_young_ptr = p + bytes;
 		*(uint64_t *)p = MKHDR(nslots, kind, tindex);
-		memset(p + 8, 0, bytes - 8);
 		return p + 8;
 	}
 	return rt_alloc_slow(MKHDR(nslots, kind, tindex), bytes);
@@ -169,10 +170,9 @@ static inline void *rt_alloc(uint32_t nslots, uint32_t tindex, uint32_t kind) {
 static inline void *rt_alloc_try(uint32_t nslots, uint32_t tindex, uint32_t kind, int zero) {
 	uint32_t bytes = 8 * (nslots + 1);
 	char *p = rt_young_ptr;
-	if (__builtin_expect(rt_young_limit - p >= (intptr_t)bytes, 1)) {
+	if (__builtin_expect((zero ? rt_young_limit : rt_young_rlimit) - p >= (intptr_t)bytes, 1)) {
 		rt_young_ptr = p + bytes;
 		*(uint64_t *)p = MKHDR(nslots, kind, tindex);
-		if (zero) memset(p + 8, 0, bytes - 8);
 		return p + 8;
 	}
 	return NULL;
@@ -182,7 +182,7 @@ static inline void *rt_alloc_try(uint32_t nslots, uint32_t tindex, uint32_t kind
 static inline void *rt_alloc_init(uint32_t nslots, uint32_t tindex, uint32_t kind) {
 	uint32_t bytes = 8 * (nslots + 1);
 	char *p = rt_young_ptr;
-	if (__builtin_expect(rt_young_limit - p >= (intptr_t)bytes, 1)) {
+	if (__builtin_expect(rt_young_rlimit - p >= (intptr_t)bytes, 1)) {
 		rt_young_ptr = p + bytes;
 		*(uint64_t *)p = MKHDR(nslots, kind, tindex);
 		return p + 8;

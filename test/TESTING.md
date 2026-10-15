@@ -297,6 +297,23 @@ the port's self-compile byte-identical natively (also 256 KB, and 256 KB
 with `RT_VERIFY=1`) and as a module under node (default, 256 and 16 KB)
 and wasmtime; fixpoint. CI run 38683618299 green (six targets, wasm, the new RT_VERIFY steps).
 
+### hxmc: allocation zeroed in bulk (2026-10-15, branch hxmc)
+
+The runtime zeroes each nursery chunk it hands out (32 KB; rt.c and the
+wasm Gc) and generated code stores no zeros; zeroing allocations compare
+`rt_young_limit`, `Mem.allocRaw` ones `rt_young_rlimit`, which differ
+under `RT_VERIFY=1` (the pattern stays, zeroing allocations take the
+slow path and zero there; a Bytes.alloc made non-zeroing passes normally
+and fails Int64Gc under `RT_VERIFY=1`, native and wasm). Locally: the
+corpus 73/73 on linux-x86_64, linux-arm64 (qemu) and windows-x86_64
+(wine) with 64, 16 and 256 KB nurseries and with `RT_VERIFY=1` at each;
+wasm 71/71 under node and wasmtime at 16, 64 and 256 KB, under node with
+`RT_VERIFY=1` at 64 and 256 KB; ThreadNatives 300 runs (16 KB), 100 (64
+KB), 100 with `RT_VERIFY=1`; the port's self-compile byte-identical
+natively (also 256 KB, and 256 KB with `RT_VERIFY=1`) and as a module
+under node (default and 256 KB) and wasmtime; fixpoint. Times and sizes:
+hxmc/README.md, "Tests and their oracle".
+
 ## Target generators
 
 Every target also compiles upstream's unit suite identically (`unit-targets.py`, above).

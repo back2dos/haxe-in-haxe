@@ -19,10 +19,21 @@
 // records old-to-young stores in its own remembered set (rt_mutator); a
 // collection stops every other thread at a safepoint (an allocation slow
 // path) or in a safe region (a blocking native), see rt_world_stop. With one
-// thread a TLAB is the whole free nursery, as before threads.
+// thread a TLAB is a chunk of 32 KB (RT_ZCHUNK_KB).
+//
+// Allocation zeroes in bulk: a TLAB is zeroed when it is taken (in the L1
+// cache, right before the allocations that use it), so every object allocated in the
+// nursery starts zeroed and no allocation zeroes its own slots. Two limits:
+// rt_young_rlimit is the TLAB's end, compared by allocations whose every slot
+// is written before it is read (Mem.allocRaw); rt_young_limit, compared by
+// those that rely on the zeros, is the same but with RT_VERIFY=1, where the
+// free nursery holds a byte pattern instead of zeros and it is NULL: those
+// allocations then take the slow path, which zeroes them, while the others
+// still read the pattern if they read before writing.
 char *rt_young_start, *rt_young_end;
 static char *young_next; // free part of the nursery: TLABs are taken from here
-RT_TLS char *rt_young_ptr, *rt_young_limit;
+static char *young_dirty; // the nursery above this holds zeros (never used since fresh or released)
+RT_TLS char *rt_young_ptr, *rt_young_limit, *rt_young_rlimit;
 static char *old_start, *old_ptr, *old_end;
 RT_TLS void **rt_sp;
 RT_TLS void **rt_sp_hw;
@@ -469,6 +480,7 @@ static void reset_tlab(rt_mutator *m, void *arg) {
 	(void)arg;
 	*m->yptr_ref = NULL;
 	*m->ylim_ref = NULL;
+	*m->yrlim_ref = NULL;
 }
 
 static int huge_pages; // RT_HUGE
@@ -502,7 +514,12 @@ static size_t grown_from, survived_before_growth;
 static int growth_off;
 
 static void resize_nursery(size_t size) {
-	if (size < minor_size) madvise(rt_young_start + size, minor_size - size, MADV_DONTNEED);
+	if (size < minor_size && madvise(rt_young_start + size, minor_size - size, MADV_DONTNEED) == 0) {
+		// zeros again above (pages are released whole: the partial page below
+		// the next 64 KB boundary stays dirty)
+		char *z = rt_young_start + ((size + 0xFFFF) & ~(size_t)0xFFFF);
+		if (z < young_dirty) young_dirty = z;
+	}
 	minor_size = size;
 	rt_young_end = rt_young_start + minor_size;
 	if (!getenv("RT_TLAB_KB")) tlab_size = minor_size / 16;
@@ -546,6 +563,7 @@ static int poison;
 // collected meanwhile: the caller then retries its allocation)
 static void collect(int full, size_t need) {
 	if (!rt_world_stop()) return;
+	if (young_next > young_dirty) young_dirty = young_next;
 	if (full) major(need);
 	else {
 		char *before = old_ptr;
@@ -561,21 +579,44 @@ static void collect(int full, size_t need) {
 	rt_world_resume();
 }
 
-// a TLAB with room for `bytes`: with one thread the whole free nursery
+// a TLAB with room for `bytes`, zeroed (but under RT_VERIFY: the pattern;
+// the whole free nursery then with one thread). The rest of the thread's
+// TLAB starts it when that was the last one taken (with one thread, always:
+// the free nursery stays contiguous). young_dirty changes only while the
+// world is stopped.
+static size_t zchunk; // RT_ZCHUNK_KB
+// x86-64: rep stosb (fast strings: whole cache lines written without being
+// read first), measured faster here than the runtime's memset's rep stosq
+static inline void zero_bytes(char *d, size_t n) {
+#ifdef __x86_64__
+	__asm__ volatile("rep stosb" : "+D"(d), "+c"(n) : "a"(0) : "memory");
+#else
+	memset(d, 0, n);
+#endif
+}
 static int tlab_refill(uint32_t bytes) {
-	size_t want = RT_NTHREADS() > 1 ? tlab_size : (size_t)-1;
+	size_t want = RT_NTHREADS() > 1 ? tlab_size : poison ? (size_t)-1 : zchunk;
 	if (want < bytes) want = bytes;
 	char *p = __atomic_load_n(&young_next, __ATOMIC_RELAXED);
 	for (;;) {
-		size_t avail = (size_t)(rt_young_end - p);
+		char *s = rt_young_ptr && p == rt_young_rlimit ? rt_young_ptr : p;
+		size_t avail = (size_t)(rt_young_end - s);
 		if (avail < bytes) return 0;
-		size_t take = want < avail ? want : avail;
-		if (__atomic_compare_exchange_n(&young_next, &p, p + take, 1, __ATOMIC_RELAXED, __ATOMIC_RELAXED)) {
-			rt_young_ptr = p;
-			rt_young_limit = p + take;
+		char *e = s + (want < avail ? want : avail);
+		if (__atomic_compare_exchange_n(&young_next, &p, e, 1, __ATOMIC_RELAXED, __ATOMIC_RELAXED)) {
+			// (below p: the rest of the thread's TLAB, zeroed already)
+			if (!poison && p < young_dirty) zero_bytes(p, (size_t)((e < young_dirty ? e : young_dirty) - p));
+			rt_young_ptr = s;
+			rt_young_rlimit = e;
+			rt_young_limit = poison ? NULL : e;
 			return 1;
 		}
 	}
+}
+
+// room for `bytes` in the thread's TLAB, refilled if needed (0: the nursery is full)
+static inline int young_room(uint32_t bytes) {
+	return rt_young_rlimit - rt_young_ptr >= (intptr_t)bytes || tlab_refill(bytes);
 }
 
 void *rt_alloc_slow(uint64_t header, uint32_t bytes) {
@@ -584,8 +625,9 @@ void *rt_alloc_slow(uint64_t header, uint32_t bytes) {
 	// likewise for finaliser calls queued by an earlier major collection
 	if (__atomic_load_n(&final_qlen, __ATOMIC_RELAXED) && !finals_running) run_finalisers(0);
 	char *p;
-	if (bytes > minor_size / 4) {
-		// large objects go straight to the old space
+	// large objects go straight to the old space (with one thread, unless the
+	// free nursery has room: they may die young)
+	if (bytes > minor_size / 4 && !(RT_NTHREADS() == 1 && young_room(bytes))) {
 		p = __atomic_load_n(&old_ptr, __ATOMIC_RELAXED);
 		for (;;) {
 			if ((size_t)(old_end - p) < bytes) {
@@ -596,10 +638,13 @@ void *rt_alloc_slow(uint64_t header, uint32_t bytes) {
 			if (__atomic_compare_exchange_n(&old_ptr, &p, p + bytes, 1, __ATOMIC_RELAXED, __ATOMIC_RELAXED)) break;
 		}
 	} else {
-		if (rt_young_limit - rt_young_ptr < (intptr_t)bytes) // else another thread collected meanwhile
-			while (!tlab_refill(bytes)) collect(0, 0);
+		while (!young_room(bytes)) collect(0, 0); // (room already: another thread collected meanwhile)
 		p = rt_young_ptr;
 		rt_young_ptr += bytes;
+		*(uint64_t *)p = header;
+		// (zeroed with its TLAB, but for the pattern of RT_VERIFY)
+		if (poison) memset(p + 8, 0, bytes - 8);
+		return p + 8;
 	}
 	*(uint64_t *)p = header;
 	memset(p + 8, 0, bytes - 8);
@@ -813,8 +858,12 @@ void rt_init(int ng, int argc, char **argv) {
 	rt_young_start = nursery_alloc(minor_size);
 	rt_young_end = rt_young_start + minor_size;
 	young_next = rt_young_start; // rt_young_ptr = rt_young_limit = NULL: the first allocation takes a TLAB
+	young_dirty = rt_young_start; // fresh pages
 	poison = getenv("RT_VERIFY") != NULL;
 	if (poison) memset(rt_young_start, POISON, minor_size);
+	const char *zk = getenv("RT_ZCHUNK_KB");
+	zchunk = (zk ? (size_t)atoi(zk) : 32) << 10;
+	if (zchunk < 4096) zchunk = 4096;
 	const char *tk = getenv("RT_TLAB_KB");
 	tlab_size = tk ? (size_t)atoi(tk) << 10 : minor_size / 16;
 	if (tlab_size < 4096) tlab_size = 4096;
@@ -880,6 +929,7 @@ void rt_mutator_bind(rt_mutator *m) {
 	m->exn_ref = &rt_exn;
 	m->yptr_ref = &rt_young_ptr;
 	m->ylim_ref = &rt_young_limit;
+	m->yrlim_ref = &rt_young_rlimit;
 	rt_mut = m;
 }
 
