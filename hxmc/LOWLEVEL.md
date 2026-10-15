@@ -378,6 +378,46 @@ Total roughly 12–18k lines, comparable to hxmc's code generator: about 2
 agent-days for steps 1–2 (usable C interop with safe memory), 1–2 weeks
 for steps 1–6. Struct values and `pin` are where it could slip.
 
+## First milestone: the basics
+
+C interop basics and a checked way to rewrite hot paths of hxmc's own std,
+without most of the design above.
+
+Included:
+
+1. Types: `Ptr<T>`, the scalar types (`Int8`..`UInt64`, `Float32`),
+   `CString`, `@:hxmc.struct` with C layout accessed through pointers only,
+   `@:hxmc.opaque`.
+2. Externs with direct calls for scalars and pointers on the six ABIs;
+   static linking of prebuilt objects; user DLLs (PE) and dylibs (Mach-O)
+   by generalizing the runtime's existing system imports.
+3. `@:hxmc.noGc` complete, plus the raw-address check (PLANS.md): the tool
+   for rewriting std hot paths, already the runtime's style (`Mem`
+   intrinsics in non-collecting functions), made a checked rule.
+4. Minimal temporary memory: `Arena.scoped(a -> ...)`, a malloc-backed
+   bump allocator returning raw `Ptr`s, for strings and buffers passed to
+   C.
+5. Fast C calls instead of `pin` for now: a call marked `@:hxmc.fast`
+   stays in the GC-unsafe state instead of entering the safe region (as
+   .NET's `SuppressGCTransition`), so no collection can run and no object
+   can move during it. GC objects' memory can be passed directly
+   (`Mem.addr(bytes)` to `memcpy`, `qsort`, hashing, codecs). The call must
+   be short, must not block and must not call back. Calls that block copy
+   their data through a scoped arena instead.
+
+Deferred: `Segment` checks, `Arena.auto`/`Arena.global`, the `Allocator`
+family, `Debug`, containers, struct values, specialized generics, value
+enums; `pin`, `Handle`, callbacks and thread attach (until a library calls
+back); the C declaration parser and header generator (externs written by
+hand at first); structs by value across C calls; tcc; dynamic ELF output
+on Linux (static libraries first); `defer`; the rest of the Zig mapping;
+step 7.
+
+Estimate: about 2–3.5k lines (types and extern lowering 1–1.5k compiler
+lines, fast calls small, the `noGc` check 0.5–1k, the scoped arena a few
+hundred lines of Haxe), roughly one agent-day. Each deferred piece can be
+added later without redesigning these.
+
 ## Order
 
 1. C interop: `Ptr`, `CString`, `@:hxmc.struct`, `@:hxmc.opaque`, direct
