@@ -148,6 +148,34 @@ With the runtime in Haxe, static Linux executables could call the kernel
 directly (as Go does) and drop musl. Windows and macOS keep going
 through their system libraries (kernel32/ntdll, libSystem).
 
+### Math: glibc's results in the compiler, libm in Haxe
+
+Today native targets use musl's libm (C, through zig) and WebAssembly a
+Haxe port of it. musl differs from glibc by an ulp on some inputs
+(`Math.sin(-2.5)`: -0.598472144103956438 against glibc's ...549), so the
+port's `--interp` and macros can print a last digit different from the
+reference on Linux; the fuzzer's diff:interp lane finds it now and then.
+
+- The compiler's own math (Eval's natives): a Haxe port of glibc's dbl-64
+  sin/cos/tan/asin/acos/atan/atan2 (the variant the reference binary runs
+  on Linux x86-64), with Arm's Optimized Routines for exp/log/pow (glibc's
+  own code, MIT). Compiler-only: glibc is LGPL, compatible with the
+  compiler's GPL, never linked into user programs. Matches the reference
+  bit for bit.
+- User programs: libm in Haxe on every target (one implementation, the
+  same results on every OS), musl's algorithms by default, CORE-MATH's
+  correctly rounded functions behind `-D hxmc.math=correct`.
+- Tried on the `libm` branch (98d9d82, and the unpushed 374bb61 with
+  `Mem.mulhi`/`umulhi`/`f64Bits`/`bitsF64` intrinsics and `Mem.fma`):
+  results exact against glibc and CORE-MATH, but not merged. CORE-MATH's
+  trig is slower than musl even in C (cos 17 ns, tan 24 ns against 6.5 and
+  10.5), hxmc's code ran 1.3–2.5× gcc's on the same algorithms, and the
+  ~166 KB of table literals were typed on every build: hello world 0.34 s
+  to 0.5 s, a Math-heavy program 118 KB to 292 KB. Requirements before
+  it lands: no slower at run time, compile time or size than main — the
+  modules loaded only when called, the tables as raw data, one copy of
+  each fast path.
+
 ### The collector, longer term
 
 Compared with Go (concurrent non-moving mark-sweep), Swift (reference
