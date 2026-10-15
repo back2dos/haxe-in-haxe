@@ -175,13 +175,15 @@ time and size.
   118 KB to 292 KB).
 - To get there: `mulhi` and 128-bit intermediates kept in registers (begun
   in 374bb61); the math modules loaded only when called; the tables as raw
-  data instead of literals; one copy of each fast path; musl's faster
-  algorithms where CORE-MATH's cost too much, with correctly rounded
-  functions behind `-D hxmc.math=correct`.
-- Later, for exact conformance in the compiler: a port of glibc's dbl-64
-  trig used only by the Eval natives (LGPL, compatible with the compiler's
-  GPL, never linked into user programs), so `--interp` and macros match
-  the reference bit for bit.
+  data instead of literals; one copy of each fast path. One math
+  implementation only: where a CORE-MATH function costs too much, that
+  function switches to a faster algorithm (musl's), no second variant
+  behind a define.
+- The compiler's Eval natives use the same library: the port then differs
+  from the reference (glibc) only where glibc is an ulp off, about 1 input
+  in 1,000 for trig; the fuzzer's diff:interp lane tolerates that last
+  digit for those functions rather than a second, glibc-exact copy being
+  kept for the compiler.
 
 ### The collector, longer term
 
