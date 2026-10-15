@@ -7,10 +7,12 @@ assembler or system linker at build time. It is self-contained in this
 directory: its IR and lowering (`src/hxmc/ir`), its runtime (`rt/`,
 compiled ahead of time per target into one relocatable object,
 `tools/mkrt.sh`), its std (`std/`, target `--custom-target hxmc`) and its
-build, which hxmc does itself (`Makefile`; the first tool comes from the
-reference compiler, see "Bootstrap"). It started as a code generator for
-hxc's IR and was separated from hxc (see "Origin"); nothing here uses
-`hxc/`.
+build, which hxmc does itself (the repository's `Makefile`; the first tool
+comes from the reference compiler, see "Bootstrap"). It started as a code
+generator for the IR of hxc, the C backend this repository had until
+2026-10-15, and was separated from it (see "Origin"). hxmc builds the port's
+release binaries for the six desktop targets, the website's WebAssembly and
+lix.
 
 Status: development. Every function of the port and of the test corpus
 compiles natively for the six desktop targets: x86-64 and arm64 Linux
@@ -20,10 +22,12 @@ ad-hoc signed); the port built by hxmc compiles itself to byte-identical
 HXB (see "Targets" for how each is checked), and hxmc builds itself.
 WebAssembly (`wasm32-wasi`) is a seventh target, with its whole runtime in
 Haxe; the port compiles itself there too (see "WebAssembly").
-Run time is near clang -O2 on hxc's C, executables are about 10% larger
-than clang -O2's dynamic ones (static, runtime included). Deeper
-incremental rebuilds, the haxelib, APE builds and C interop are deferred
-(see "Status").
+Run time is near clang -O2 on hxc's C (when it was measured), executables
+are about 10% larger than clang -O2's dynamic ones (static, runtime
+included). Programs that use `sys.ssl` or libuv (`eval.luv`, the port's
+macros) link mbedtls and libuv (see "sys.ssl and libuv"). Deeper incremental
+rebuilds, the haxelib and C interop are deferred; APE (Cosmopolitan) builds
+are dropped (see "Status").
 
 ## Design
 
@@ -50,9 +54,9 @@ HXB --(port: --hxb-lib)--> typed AST --(ir.Lower)--> hxmc IR --(Prep: ir.Facts)
 | `src/hxmc/DataGen.hx` | the program's data: type tables, dispatch rows, strings, globals, and the absolute symbols of program-wide numbers |
 | `src/hxmc/Link.hx`, `LinkPE.hx`, `LinkMachO.hx`, `A64Reloc.hx`, `MkRt.hx` | the linkers (static ELF; PE with import tables written directly, TLS directory, .pdata, base relocations on arm64; Mach-O with dyld's rebase/bind opcodes, stubs, TLV descriptors and an ad-hoc code signature) and the runtime-object builder (COFF member selection, COMDAT, imports; Mach-O objects merged) |
 | `src/hxmc/Target.hx`, `Abi.hx` | per-target facts and the code-generator factory |
-| `rt/` | the runtime's C part (GC, exceptions, threads, system, sockets, the std natives not yet in Haxe; `rt.h`), the slow paths of generated code (`rthxmc.c`) and word-at-a-time `memcmp`/`bcmp` for musl (`rtlibc.c`) |
+| `rt/` | the runtime's C part (GC, exceptions, threads, TLS over mbedtls `rt_ssl.c`, libuv `rt_uv.c`, the std natives not yet in Haxe; `rt.h`), the slow paths of generated code (`rthxmc.c`) and word-at-a-time `memcmp`/`bcmp` for musl (`rtlibc.c`) |
 | `std/` | the target's std: overrides of upstream modules, the runtime's Haxe part (`hxmc.rt`, `hxmc.Native*`; see "Runtime in Haxe"), its intrinsics (`hxmc.unsafe`) and the externs of its C part, merged into `bin/hxmc/std` by `tools/mkstd.py` |
-| `Makefile`, `tools/bootstrap/` | the build of the tool (by itself) and its bootstrap |
+| `tools/bootstrap/`, `tools/mkrt.sh`, `tools/deps.sh` | the bootstrap of the tool (the repository's `Makefile` builds it, by itself), the runtime objects, mbedtls and libuv per target |
 | `test/` | the corpus: programs (`cases/`), frozen fuzzer programs (`fuzz-1000.tar.gz`), golden outputs (`expected/`), encoder tests (`encoder/`) |
 
 Conventions (inherited from hxc, whose C used the same runtime):
@@ -231,14 +235,16 @@ a small program's HXB (alloc 753 -> 677 KB) and up to 5% off builds
 ## Building
 
 Run from the repository root (GNU make; zig and ld.lld build the runtime
-objects; the reference compiler `haxe/haxe`, `make reference`):
+objects, mbedtls and libuv; the reference compiler `haxe/haxe`, `make
+reference`):
 
 ```sh
-make -f hxmc/Makefile             # bin/hxmc/hxmc: the tool, built by the previous tool from source (about 10 s)
-make -f hxmc/Makefile fixpoint    # the tool rebuilt by itself twice: byte-identical
-make -f hxmc/Makefile rt          # bin/hxmc/rt/<target>/rt.o for the six targets (the host's is built with the tool)
-make -f hxmc/Makefile test        # the corpus against its golden files (RUN_ARGS="--target linux-arm64" ...)
-make -f hxmc/Makefile portcheck   # the port built by hxmc self-compiles to the reference's HXB
+make hxmc                         # bin/hxmc/hxmc: the tool, built by the previous tool from source (about 10 s)
+make fixpoint                     # the tool rebuilt by itself twice: byte-identical
+make rt                           # bin/hxmc/rt/<target>/{rt,ssl,uv}.o for the six targets (the host's rt.o is built without the tool)
+make hxmc-test                    # the corpus against its golden files (RUN_ARGS="--target linux-arm64" ...)
+make portcheck                    # the port built by hxmc self-compiles to the reference's HXB
+make port                         # bin/port/haxe, the port (make release TARGET=<target>: cross)
 python3 hxmc/tools/run.py --target windows-x86_64   # the corpus under wine64 (linux-arm64: qemu-aarch64-static)
 python3 hxmc/tools/run.py --target macos-arm64 --stage <dir>   # cross: build only (any target)
 python3 hxmc/tools/check.py <dir>  # on the target's machine: run the staged programs, compare outputs
@@ -251,7 +257,7 @@ SMALL=1 sh hxmc/tools/portcheck.sh  # the port check, also with a 256 KB nursery
 
 - The tool is the port (`src/`) with hxmc (`hxmc/src`) as its generate
   hook, typed against hxmc's std (`-D hih_no_generators`: without the
-  port's other target generators). `make -f hxmc/Makefile` rebuilds it with
+  port's other target generators). `make hxmc` rebuilds it with
   the previous tool from source (`bin/hxmc/hxmc.new`, then moved over the
   running binary); a change to code generation reaches the tool's own code
   on the next rebuild, which `fixpoint` checks.
@@ -261,7 +267,7 @@ SMALL=1 sh hxmc/tools/portcheck.sh  # the port check, also with a 256 KB nursery
   `-cp bin/hxmc/std --custom-target hxmc=<dir> --hxb <archive>`), with
   `-D hxmc.target=<target>` to cross-build. The tool finds the runtime
   object next to itself (`bin/hxmc/rt/<target>/rt.o`; `HXMC_RT_OBJ`
-  overrides).
+  overrides), and `ssl.o` and `uv.o` next to that.
 - `HXMC_OPT=0` turns off Mir optimizations (`HXMC_LICM=0` only LICM,
   `HXMC_INLINE=<flat>,<loop>,<runtime flat>` the inlining limits;
   `HXMC_FALIGN`/`HXMC_FSHIFT` vary function alignment and padding to see
@@ -283,10 +289,10 @@ rebuilds the tool if a source changed, about 12 s), one line per lane with
 its time:
 
 ```sh
-make -f hxmc/Makefile quick                 # after every edit: 9 s (25 s with the tool rebuilt)
-make -f hxmc/Makefile quick CASES="Int64Gc Bench"   # only the cases of the area being changed
-make -f hxmc/Makefile check PORT=1          # before a local commit: about a minute (PORT=1: +32 s)
-make -f hxmc/Makefile full                  # before a push: about 5 minutes
+make quick                       # after every edit: 9 s (25 s with the tool rebuilt)
+make quick CASES="Int64Gc Bench" # only the cases of the area being changed
+make check PORT=1                # before a local commit: about a minute (PORT=1: +32 s)
+make full                        # before a push: about 5 minutes
 ```
 
 - `quick`: the x64 corpus (64 KB nursery), again with `RT_VERIFY=1`, and
@@ -312,7 +318,7 @@ The first tool comes from the reference compiler; nothing else is needed
 but node (and hxnodejs) for one run:
 
 ```sh
-make -f hxmc/Makefile bootstrap   # about 2 minutes
+make bootstrap                    # about 2 minutes
 ```
 
 1. The reference compiler writes the tool as JavaScript
@@ -325,8 +331,8 @@ make -f hxmc/Makefile bootstrap   # about 2 minutes
 3. `hxmc1` builds `bin/hxmc/hxmc` from source; from then on the tool
    rebuilds itself. (`hxmc1` itself differs from what native tools build,
    e.g. through JavaScript's integer arithmetic and map order in
-   heuristics; the tool it builds is the fixpoint: `make -f hxmc/Makefile
-   fixpoint` rebuilds it twice and compares.)
+   heuristics; the tool it builds is the fixpoint: `make fixpoint` rebuilds it
+   twice and compares.)
 
 A previously built tool works as well (copy it to `bin/hxmc/hxmc`), as
 long as it compiles the current sources correctly; after a change of the
@@ -394,12 +400,32 @@ The port check: the port built by hxmc compiles its own source to HXB,
 compared member by member with the reference's (also with
 `RT_MINOR_KB=256`).
 
+## sys.ssl and libuv
+
+mbedtls 2.28 and libuv 1.48 are built per target by `hxmc/tools/deps.sh`
+(zig cc with the runtime object's flags; pinned commits; into
+`bin/hxmc/deps/<target>`, `make deps`). `mkrt.sh` compiles `rt_ssl.c` and
+`rt_uv.c` against them into two objects next to `rt.o`: `ssl.o` and `uv.o`
+(Linux: `ld.lld -r` with the libraries' archives; Windows: `hxmc --mkrt`
+with the system's import libraries for imports only, `-i`; macOS: `hxmc
+--mkrt-macho`, which takes the archives' members the objects need). What
+they need of the C library is added to `rt.o`'s roots, so the C library's
+members are in `rt.o` alone. The driver links `ssl.o` and `uv.o` only into
+programs that refer to what they define (`sys.ssl`, `eval.luv`): a hello
+world is unchanged; the port and lix link both. Without the libraries
+(`deps.sh` not run), `mkrt.sh` builds the two objects as stubs that throw.
+The system's CA certificates: the Windows "Root" store (crypt32), the macOS
+keychain's anchors (Security and CoreFoundation through dlopen), the CA
+files of `sys.ssl.Mbedtls` elsewhere. WebAssembly keeps failing stubs (WASI
+preview 1 has no sockets). The licenses (Apache-2.0, MIT) ship with the
+release archives (`LICENSE.mbedtls`, `LICENSE.libuv`).
+
 ## Targets
 
-Every target is cross-built on Linux: the tool, the runtime object of the
-target (`hxmc/tools/mkrt.sh <target>`: `rt/` by zig cc, `-DHXMC_NO_SSL
--DHXMC_NO_UV`) and the programs; no C compiler, assembler, linker or SDK is
-involved when a program is built.
+Every target is cross-built on Linux: the tool, the runtime objects of the
+target (`hxmc/tools/mkrt.sh <target>`: `rt/` by zig cc; `ssl.o` and `uv.o`,
+see "sys.ssl and libuv") and the programs; no C compiler, assembler, linker
+or SDK is involved when a program is built.
 
 | target | output | runtime object | thread-locals | checked |
 | --- | --- | --- | --- | --- |
@@ -465,9 +491,16 @@ call can start a V8 collection that crashes with a large module memory).
   again). Frame slots (`Mem.stack`, spills of references) live
   in a stack in linear memory (1 MB, `HXMC_WASM_STACK_KB`). `try` uses
   exception handling: setjmp returns 0, the try body (the dominator subtree
-  of its first block) is wrapped in `try_table (catch_all)`, whose pad
-  checks that the runtime's current handler is this one and otherwise
-  rethrows; `rt_throw` throws the one tag.
+  of its first block) is wrapped in `try_table (catch_all_ref)`, whose pad
+  keeps the exception (an `exnref` global), checks that the runtime's
+  current handler is this one and otherwise throws it on with `throw_ref`;
+  `rt_throw` throws the kept exception again with `throw_ref` (the Haxe
+  exception is `rt_exn`; the wasm one only carries it), or the one tag the
+  first time. Firefox's engine walks the whole stack on every throw (about
+  0.17 us per frame), so throws are cheap only where the stack is shallow;
+  `throw_ref` saves the exception object, not the walk. `Wasi.exit` clears
+  the current handler before `proc_exit`, whose host exception crosses the
+  try blocks of the frames below it.
 - Relocations: function and type indices, globals and data addresses are
   written as padded LEBs (`Obj` kinds RWasmFunc, RWasmType, RWasmGlobal,
   RWasmAddr, RWasmAddr32) and re-encoded minimally at link time.
@@ -596,7 +629,22 @@ call can start a V8 collection that crashes with a large module memory).
   cost 16 KB gzipped and was left out. The module is now 6% smaller than
   Emscripten's raw and 6% smaller gzipped, its self-compile under node
   1.8x the native port's (Emscripten's: 1.7x native hxc's, on another
-  day). Not done: the browser glue (see hxmc/PLANS.md).
+  day).
+- The playground (2026-10-15): the website's compiler is this module
+  (`make wasm`). In the browser its WASI imports come from JavaScript
+  (`site/src/WasiHost.hx`: the arguments and environment, stdout and stderr
+  to the page, the clocks, crypto's random bytes, a file system in memory
+  with the std subset of `std.bundle`), in a worker per request. Exceptions
+  are WebAssembly exception handling with `exnref` (the encoding above),
+  which current browsers support by default: Chrome 137, Firefox 131 and
+  Safari 18.4 onward. `site/tools/browser-test.mjs` runs it in Chromium
+  141, Firefox 142 and WebKit 26 (Playwright; CI's wasm job): a hello world
+  with `--interp` in 0.3 s in Chromium (the Emscripten build: 0.36 s), 1.3 s
+  in WebKit (the Emscripten build's wasm64 did not load there) and 5 s in
+  Firefox (the Emscripten build: 21 s; Firefox's throws walk the stack,
+  above). The port's flushPass and the parser's token loops became loops
+  (upstream's tail calls; 2500 nested frames of flushPass overflowed the
+  stack of Chromium's workers).
 
 Benchmarks (`hxmc/bench/measure.py -n 3 --target wasm32-wasi --runner
 node|wasmtime`, best of 3, the same VM and session as the x86-64 column;
@@ -631,16 +679,17 @@ long as native ones for small programs; the port's 7.2 s against 6.9 s.
 
 ### CI
 
-`.github/workflows/hxmc.yml` runs on pushes to the hxmc branch: one Linux
-job builds the reference compiler (cached with build.yml's key),
-bootstraps the tool from it (`make -f hxmc/Makefile bootstrap`, node),
-checks the fixpoint, builds the six runtime objects, cross-builds the
-corpus (`run.py --stage`, with the golden files) and the port for every
-target, and runs the reference's self-compile of the port in
-`/Users/runner/hih`. A job per target then runs the corpus on a machine of
-that target (`check.py`: ubuntu-24.04, ubuntu-24.04-arm, windows-2025,
-windows-11-arm, macos-15-intel, macos-15) and the port's self-compile
-(`selfcheck.py`): on macOS and Linux in the same directory, so the
+`.github/workflows/build.yml` runs on pushes to main and hxmc: one Linux
+job builds the reference compiler (cached), bootstraps the tool from it
+(`make bootstrap`, node), checks the fixpoint, builds the six targets'
+runtime objects with mbedtls and libuv (cached), cross-builds the port's
+release binaries, lix, the website, the corpus (`run.py --stage`, with the
+golden files) for every target, and runs the reference's self-compile of
+the port in `/Users/runner/hih`. A job per target then runs, on a machine of
+that target (ubuntu-24.04, ubuntu-24.04-arm, windows-2025, windows-11-arm,
+macos-15-intel, macos-15), the release binary's smoke test (with a TLS
+handshake and libuv), lix, the corpus (`check.py`) and the port's
+self-compile (`selfcheck.py`): on macOS and Linux in the same directory, so the
 archives must be byte-identical; on Windows, whose absolute paths differ,
 identical once the root is replaced (`hxbcmp.py --roots`; the sources come
 from Linux, as a Windows checkout has CRLF line ends). Failures land in
@@ -850,7 +899,7 @@ Deferred:
   preparation, keys, data, link), not code generation.
 - Program-level dead code, data-table compaction and runtime member
   selection beyond section GC (size).
-- Haxelib packaging, APE (cosmopolitan) builds; iOS/Android (the hooks
+- Haxelib packaging; iOS/Android (the hooks
   above), chained fixups and a section-split runtime on macOS, unwind
   information for generated code on Windows.
 - Thread-locals on macOS and Windows arm64 cost a call (macOS:
@@ -858,5 +907,7 @@ Deferred:
   them; an inline TLV thunk call and the 12-bit offset form when the TLS
   area is small would trim that.
 - C interop design (calling C libraries from generated code beyond the
-  runtime's own functions); mbedtls/libuv in the runtime objects (built
-  with `HXMC_NO_SSL`/`HXMC_NO_UV`).
+  runtime's own functions; LOWLEVEL.md).
+
+Dropped (2026-10-15): APE (Cosmopolitan) executables; the six native
+targets and WebAssembly cover what the Cosmopolitan build of hxc did.

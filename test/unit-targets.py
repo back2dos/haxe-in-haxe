@@ -34,8 +34,8 @@ as is.
 
 HAXE_REFERENCE: the reference compiler built from the pinned haxe/ submodule
 (its directory supplies std/ and tests/unit, so a worktree without the
-submodule works). HAXE_IN_HAXE_PORT: the port command (default bin/port/hih,
-from `make dev`). Libraries come from a haxelib repository of the
+submodule works). HAXE_IN_HAXE_PORT: the port command (default bin/port/haxe,
+from `make port`). Libraries come from a haxelib repository of the
 harness (test/generated/unit-targets/haxelib, as HAXELIB_PATH): utest, cloned
 as test/upstream.py does (`haxelib git utest` upstream; the clone goes through
 the proxy), and hxcpp and hxjava registered from the default repository, since
@@ -236,7 +236,7 @@ def main():
     if not (haxe_dir / "tests/unit").is_dir():
         haxe_dir = ROOT / "haxe"
     std = haxe_dir / "std"
-    port = os.environ.get("HAXE_IN_HAXE_PORT") or str(ROOT / "bin/port/hih")
+    port = os.environ.get("HAXE_IN_HAXE_PORT") or str(ROOT / "bin/port/haxe")
     port_cmd = [str(ROOT / a) if (ROOT / a).is_file() else a for a in shlex.split(port)]
     if not os.access(port_cmd[0], os.X_OK) and not shutil.which(port_cmd[0]):
         raise SystemExit(f"port not found: {port} (make dev, or set HAXE_IN_HAXE_PORT)")

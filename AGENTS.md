@@ -1,12 +1,14 @@
 # Contributor guide
 
-This file is for people and coding agents changing the port.
+This file is for people and coding agents changing the port and hxmc.
 
 ## Scope
 
 `src/` is a port of the Haxe compiler in `haxe/src/` that must behave exactly
-like the reference compiler built from the `haxe/` submodule. `hxc/` is the C
-backend that compiles the port (and other programs) to native code. `haxe/` is
+like the reference compiler built from the `haxe/` submodule. `hxmc/` is the
+Haxe target that compiles the port (and other programs) to machine code and
+WebAssembly: the release binaries, the playground and lix are built by it, and
+it builds itself (hxmc/README.md). `haxe/` is
 the canonical reference: never edit its files or commit inside it; moving the
 pinned revision is a deliberate change that also ports every upstream commit
 in between and rebuilds the reference (`make reference`).
@@ -52,7 +54,27 @@ compiler reaches.
   (`test/README.md`): HXB conformance and macro cases for anything in typing
   or filters, the fuzzer's `diff:<target>` lanes for generators, display and
   server for those services, and the full matrix for broad changes.
-- Fast loop: `make dev` rebuilds `bin/port/hih` in seconds (tcc), then
-  `make fuzz` and `bin/fuzz/fuzz --port $PWD/bin/port/hih --lane diff:<target>`.
+- Fast loop: `make port` rebuilds `bin/port/haxe` with hxmc (seconds after an
+  edit: only the changed modules are compiled again), then `make fuzz` and
+  `bin/fuzz/fuzz --port $PWD/bin/port/haxe --lane diff:<target>`.
 - Record results in `test/TESTING.md`. Never commit `bin/`, `test/generated/`,
   `test/reference/` or local haxelib state.
+
+## hxmc
+
+- `hxmc/` is self-contained: its IR, code generators, linkers, runtime
+  (`rt/`, C; `std/hxmc/rt`, Haxe) and std. The port's sources name the target
+  only where they use host natives (`#if (target.name == "hxmc")`).
+- Iterate with the tiers (hxmc/README.md, "Iteration loop"): `make quick`
+  (`CASES=...` for the area being changed) after every edit, `make check`
+  (`PORT=1` when code generation or the runtime changed) before a local
+  commit, `make full` before a push; CI covers the other machines.
+- The corpus's golden files (`hxmc/test/expected`) are frozen: a new case
+  gets one with `run.py --bless` (checked by hand); a changed output is an
+  edit of its golden file with the reason in the commit.
+- A change of the runtime's interface or of the IR's conventions needs a tool
+  that knows it: `make bootstrap` (or one build against the previous runtime
+  first). `make fixpoint` checks that the tool rebuilt by itself is
+  byte-identical.
+- mbedtls and libuv are built per target by `hxmc/tools/deps.sh` and linked
+  only into programs that use them (`ssl.o`, `uv.o` next to `rt.o`).

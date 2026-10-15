@@ -21,7 +21,7 @@ transcripts.
 socket thread, which has none, so the request kills the debugger thread (the
 reference then hangs; the port's green-thread runtime reports a deadlock).
 
-Usage: HAXE_REFERENCE=haxe/haxe HAXE_IN_HAXE_PORT=bin/port/hih python3 test/eval-debugger.py
+Usage: HAXE_REFERENCE=haxe/haxe HAXE_IN_HAXE_PORT=bin/port/haxe python3 test/eval-debugger.py
            [--keep] [--show reference|port] [scenario ...]
 """
 import argparse, json, os, pathlib, re, select, socket, struct, subprocess, sys, time
@@ -341,7 +341,7 @@ def main():
     ap.add_argument("names", nargs="*")
     a = ap.parse_args()
     ref = os.environ.get("HAXE_REFERENCE", str(ROOT / "haxe/haxe"))
-    port = os.environ.get("HAXE_IN_HAXE_PORT", str(ROOT / "bin/port/hih"))
+    port = os.environ.get("HAXE_IN_HAXE_PORT", str(ROOT / "bin/port/haxe"))
     names = [n for n in SCENARIOS if not a.names or n in a.names]
     if a.show:
         global VERBOSE

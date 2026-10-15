@@ -165,24 +165,14 @@ points and the ideas that address them:
 - A memory limit (like Go's `GOMEMLIMIT`): collect harder as the process
   approaches a configured cap.
 
-### sys.ssl and libuv
+### sys.ssl and libuv (done)
 
-The runtime objects are built with `HXMC_NO_SSL`/`HXMC_NO_UV` (stubs that
-throw). Plan:
+Done (2026-10-15, README "sys.ssl and libuv"): mbedtls and libuv built per
+target with zig at our build time (`hxmc/tools/deps.sh`), turned into
+`ssl.o` and `uv.o` next to the runtime object and linked only into programs
+that refer to them; the port and lix link both; WebAssembly keeps the
+failing stubs. Left:
 
-- Precompile mbedtls and libuv per target with zig at our build time (the
-  release builds of the port already do, `deps.sh`), kept as separate
-  objects next to the runtime object; hxmc's linker (ELF, COFF and Mach-O
-  readers, unreferenced sections dropped) pulls them in only when a program
-  references them (`sys.ssl`, `eval.luv` and libuv-backed APIs), so a hello
-  world stays small.
-- The compiler itself (the hxmc tool, and the port built by hxmc) links
-  both, as the current release binaries do: macros can use `sys.ssl` and
-  `eval.luv`.
-- Licenses: mbedtls Apache-2.0, libuv MIT; their notices ship with
-  hxmc and with distributions that include the objects.
-- WebAssembly: WASI preview 1 has no sockets; both stay failing stubs
-  (in a browser, TLS would come from JavaScript's `fetch`).
 - Alternatives: the system's TLS on Windows (SChannel) and macOS
   (Security.framework) instead of mbedtls (smaller, OS-managed
   certificates; Linux has no system TLS a static executable can use, so
@@ -190,12 +180,14 @@ throw). Plan:
   epoll/kqueue/IOCP (large, and `eval.luv`'s API is libuv-shaped: only if
   libuv's size or build becomes a problem). Not mbedtls in Haxe: TLS needs
   constant-time, audited cryptography.
+- Section-level selection on macOS (the Mach-O runtime objects are linked
+  whole: `ssl.o` is 0.8-0.9 MB).
 - The same mechanism (per-target prebuilt objects linked by hxmc) is how
   user C libraries would ship (see "C interop").
 
 ## Build times and size
 
-### Precompiled std as cached HXB
+### Cached units per library
 
 Most of a small program's build is the front half typing the std from
 source on every build. Hello world (one 4-core VM): 0.375 s from source,
@@ -205,19 +197,41 @@ machine: 4.8–5.7 s cold, 0.18–0.23 s rebuilding after an edit (warm build
 cache). With only the std precompiled and the program typed from source,
 expect about 0.15–0.2 s.
 
-Plan, Go-style (built lazily and cached rather than shipped):
+Plan, Go- and Rust-style (built lazily and cached rather than shipped):
 
-- On first use, hxmc writes the std modules a program needs as HXB into a
-  cache directory; later builds load them with `--hxb-lib` (upstream
-  Haxe's mechanism for precompiled libraries) and type only the program.
-- Cache key: the target (the std has per-OS code), the defines the std's
-  conditionals read (`-debug`, user `-D` flags), and the hxmc version.
-  hxmc writes the archive with its own built-in compiler, so the HXB
-  version always matches.
-- HXB modules load on demand: a large cached std does not slow small
-  programs.
-- Modules the user's class path overrides (shadowed std types) must come
-  from source, never the cache.
+- Units: the std, each `-lib`, and the user's code last. Each is stored per
+  hxmc version and target (`~/.cache/hxmc/<version>/<target>/<lib>-<key>/`):
+  its typed modules as HXB (the front half, loaded with `--hxb-lib`,
+  upstream Haxe's mechanism for precompiled libraries; HXB modules load on
+  demand, so a large cached std does not slow small programs), hxmc's IR
+  and inline templates for inlining across units, and the compiled objects
+  per module (the back half: the existing per-module object cache). hxmc
+  writes the archives with its own built-in compiler, so the HXB version
+  always matches.
+- Key: the library's sources (a content hash; version plus hash for git and
+  dev libraries), the hxmc version, the target, only the defines the unit's
+  `#if` conditions actually read (recorded while parsing), and the
+  interface hashes of the units it depends on (signatures, types, inline
+  bodies, constants; not function bodies, as Go and Rust do).
+- Hard parts:
+  - Macros from outside that change a unit's types (`--macro
+    addGlobalMetadata`, `@:build` through init macros, `Compiler.keep`):
+    track the modules foreign macros touch and type those from source, or
+    key the unit on the set of init macros.
+  - Class-path shadowing (a user module replacing a library's or the std's)
+    invalidates the shadowed module and its dependents within the unit
+    (a per-module dependency graph); shadowed modules come from source,
+    never the cache.
+  - Macro dependencies (`registerModuleDependency`, `getDefines`, the
+    environment), recorded as the compilation server already does.
+  - DCE is whole-program: units are cached before DCE, hxmc compiles every
+    function of a unit once and its linker drops what is unreachable.
+  - Program-wide numbering is already symbolic and resolved at link time.
+  - `@:generic` instances with user types belong to the user's unit.
+- Order: the std first; then `-lib` units, with interface hashing and the
+  tracking of defines; the user's code stays incremental per module (the
+  server, the object cache). It also shortens the first run of the npm
+  bootstrap (see "npm" under Packaging).
 - Gate: the same executable, byte for byte, from the cached path and the
   source path (the Vector bug showed the two paths can differ subtly).
 - Simpler than the compilation server for most of the gain; the server
@@ -299,30 +313,23 @@ to the reference's HXB under both (15-16 s, native 8.4 s). Left:
   under wasi-threads or a browser's workers; the collector's
   stop-the-world handshake would come back (rt_thread.c's other half, in
   Haxe this time). Until then `Thread.create` throws.
-- A browser: JavaScript glue instead of WASI (console, fetch for files, a
-  virtual file system for the playground), then WebGPU and input for
-  graphics (see "Graphics"); exceptions without the exnref flag once
-  browsers and node ship it by default.
+- A browser: done for the playground (2026-10-15, README "WebAssembly":
+  WASI's imports from JavaScript, `site/src/WasiHost.hx`; exnref exception
+  handling, on by default in current Chrome, Firefox and Safari). Left:
+  WebGPU and input for graphics (see "Graphics"); Firefox's throws walk the
+  whole stack (0.17 us per frame each), which a lighter use of exceptions
+  in the port's hot paths, or setjmp-free try blocks, would avoid.
 - Sockets and processes need WASI preview 2 (or JavaScript imports).
 - Speed: no tail calls; 485k `i32.wrap_i64` remain in the playground's
   module, of i64 values (parameters, locals) also used in full: a second,
   i32 local for those with many address uses, or an i32 pointer type in
   Mir, would remove most (about 480 KB raw, little gzipped). The
   port's self-compile is 1.8x native x64's (README "WebAssembly").
-- The playground (size: done, 2026-10-15, README "WebAssembly"): in the
-  playground's configuration (`-D hih_no_generators`) the module is now
-  10.82 MB, 2.11 MB gzipped, against the deployed Emscripten module's
-  11.53 MB and 2.25 MB (6% smaller both ways; it was 13.5 MB and 3.09 MB):
-  inlining limits 4, 16 for wasm, `local.tee`, the locals of try functions
-  coalesced, 32-bit values computed as i32, data segments split at zero
-  runs, allocation stubs written directly. Its self-compile under node
-  takes 16-18 s here, 1.8x the native port (Emscripten's: 9.0 s, 1.7x
-  native hxc, measured on another day under node 24). Left before it can
-  replace the Emscripten build: the browser glue above (JavaScript in
-  place of WASI: console, a virtual file system with the std and the
-  examples, exceptions without the exnref flag), then the site's switch.
-  Further size, if wanted: folding a call into its user (30 KB raw, but
-  16 KB more gzipped), fewer wraps (above).
+- The playground: done (2026-10-15). The site's compiler is the port built
+  by hxmc (10.8 MB, 2.1 MB gzipped, against the Emscripten module's 11.5 MB
+  and 2.25 MB), with the browser glue above. Further size, if wanted:
+  folding a call into its user (30 KB raw, but 16 KB more gzipped), fewer
+  wraps (above).
 
 #### WasmGC: a later, browser-focused second path
 
@@ -358,14 +365,11 @@ interop matter (the website playground, browser games). The structuring
 pass and the module writer of the linear-memory target carry over; the
 object model and the runtime would be new.
 
-### APE (Cosmopolitan) executables
+### APE (Cosmopolitan) executables (dropped)
 
-One file for Linux, macOS, Windows and the BSDs, x86-64 and arm64: link
-against the runtime built with cosmocc, System V convention everywhere,
-Cosmopolitan's TLS conventions (verify against its source), and the APE
-polyglot layout (MZ/PE, shell script, ELF, Mach-O, zip;
-`ape/specification.md`) written by hxmc's linker; the zip part can carry
-assets (`/zip/`). On hold.
+Dropped (2026-10-15): one file for every system was the Cosmopolitan build
+of hxc's C; hxmc builds the six desktop targets natively instead, and the
+release binaries and lix ship per platform.
 
 ### Shared-library and position-independent output
 
@@ -415,8 +419,7 @@ program-wide numbers stay symbolic, so these remain possible:
 Executables made of a small native bootstrap (runtime, code generator,
 loader) and the program as a portable archive, compiled at first launch
 (then cached per CPU and version), lazily per function (self-patching
-stubs), or tiered. One program archive for every platform (with an APE
-bootstrap, one file for all of them), code tuned for the actual CPU,
+stubs), or tiered. One program archive for every platform, code tuned for the actual CPU,
 plugins and mods, small updates. Costs: first-launch latency, runtime
 code generation limits above, a larger footprint than one AOT executable
 for small programs.
@@ -433,7 +436,7 @@ bootstrap).
 ## Packaging
 
 - The `hxmc` haxelib (`-lib hxmc`, `--custom-target hxmc=out`,
-  `-D hxmc.target=<os>-<arch>`), like hxc's.
+  `-D hxmc.target=<os>-<arch>`), as hxc had one.
 - Release builds of the hxmc tool for the six desktop targets.
 
 ### npm: a WebAssembly package that bootstraps itself natively
@@ -459,7 +462,7 @@ uncompressed for the six targets).
   platform): one artifact to publish, no install scripts (often disabled)
   and no downloads (works offline and air-gapped).
 - Costs and constraints: a one-time native build per version and machine
-  (estimated 15–25 s under WebAssembly; less with the precompiled std);
+  (estimated 15–25 s under WebAssembly; less with the cached std unit);
   node 22 needs flags for WebAssembly exception handling and a workaround
   flag for large memories (the launcher passes them; or hxmc emits the
   legacy exception-handling encoding); the WebAssembly fallback has no
@@ -469,4 +472,4 @@ uncompressed for the six targets).
   binaries carry hxmc's ad-hoc signature and no quarantine flag.
 - Needs: the launcher, the runtime objects packaged per target, mbedtls
   and libuv linked into the native compiler (see "sys.ssl and libuv"),
-  ideally the precompiled std for a faster first run.
+  ideally the cached std unit (see "Cached units per library") for a faster first run.

@@ -21,7 +21,7 @@ normalizing what is legitimately runtime-specific:
   (sorted by name instead) and `leaks` (which objects reach the memory markers
   depends on the runtime's object graph).
 
-Usage: HAXE_REFERENCE=haxe/haxe HAXE_IN_HAXE_PORT=bin/port/hih python3 test/server-jsonrpc.py [--keep]
+Usage: HAXE_REFERENCE=haxe/haxe HAXE_IN_HAXE_PORT=bin/port/haxe python3 test/server-jsonrpc.py [--keep]
 """
 import argparse, json, os, pathlib, re, subprocess, sys
 
@@ -151,7 +151,7 @@ def main():
     ap.add_argument("--keep", action="store_true", help="write both transcripts to test/generated/server-jsonrpc")
     a = ap.parse_args()
     ref = os.environ.get("HAXE_REFERENCE", str(ROOT / "haxe/haxe"))
-    port = os.environ.get("HAXE_IN_HAXE_PORT", str(ROOT / "bin/port/hih"))
+    port = os.environ.get("HAXE_IN_HAXE_PORT", str(ROOT / "bin/port/haxe"))
     env = dict(os.environ)
     OUT.mkdir(parents=True, exist_ok=True)
     ok = True

@@ -1,9 +1,9 @@
-# lix for hxc
+# lix for hxmc
 
 A port of [lix](https://github.com/lix-pm/lix.client) (the lix client, 17.0.3,
 commit `c866a77`) and [haxeshim](https://github.com/lix-pm/haxeshim) (commit
 `6ffddf8`) from Haxe on Node.js to Haxe without dependencies besides hxcoro,
-compiled by hxc to one native binary. The binary is `lix`, `haxe`, `haxelib`
+compiled by hxmc to one native binary per platform. The binary is `lix`, `haxe`, `haxelib`
 and `neko` at once: it acts as the command it is invoked as (links named so),
 like the four scripts of the lix npm package.
 
@@ -14,15 +14,15 @@ lix scope create && lix install haxe 4.3.6 && lix +lib tink_core
 haxe -lib tink_core --run Main
 ```
 
-The Makefile's lix targets (`make help`): `lix-c` writes the C with the JS
-backend tool (as `make port-c` does for the port), fetching hxcoro at a pinned
-commit into `bin/hxcoro` unless `HXCORO` names a checkout; `lix` compiles it with
-`LIX_CC` (default `clang -O2`) against the system's libuv and mbedtls
-(Debian/Ubuntu: `libuv1-dev libmbedtls-dev`) or a `make deps` directory
-(`LIX_TLS_UV`); `lix-cosmo` makes `bin/release/cosmo/lix.com`, one Cosmopolitan
-binary for Linux, macOS, Windows and the BSDs (with `make deps TARGET=cosmo`).
-The native binary is about 1.6 MB, `lix.com` about 6 MB. CI builds `lix.com`
-and publishes it on the website, under Tools.
+The Makefile's lix targets (`make help`): `lix` builds `bin/lix/lix` for the
+host with hxmc (with mbedtls and libuv, which hxmc links into programs that
+use them), fetching hxcoro at a pinned commit into `bin/hxcoro` unless
+`HXCORO` names a checkout; `lix-release TARGET=<target>` cross-builds
+`bin/release/<target>/lix[.exe]` for one of the six targets (Linux, macOS and
+Windows on x86-64 and ARM64). The binary is about 2 MB. CI builds all six,
+tests each on its system (`lix shims`, `scope create`, `download`, installs,
+compiles with the `haxe` shim) and publishes them on the website, under Tools,
+as `lix-<target>[.exe]`.
 
 The `haxe` shim adds about 2 ms to a compiler call; the npm package's adds
 about 60 ms (measured with `haxe -version` and `haxe --run resolve-args`).
@@ -34,7 +34,7 @@ about 60 ms (measured with `haxe -version` and `haxe --run resolve-args`).
 | `src/haxeshim/` | haxeshim: scopes (`.haxerc`), argument and `-lib` resolution, the `haxe`/`haxelib`/`neko` shims, the compiler server proxy (`CompilerServer.hx`). |
 | `src/lix/` | the lix client: `lix.cli` (commands; `Main.hx` picks the command by the program's name), `lix.client` (downloads, archives, Haxe versions, the haxelib/GitHub/GitLab/git/web sources). |
 | `src/shim/` | what the npm package got from other libraries, as small classes: `Error`/`Outcome` (tink_core), `Url` (tink_url), `SemVer` (tink_semver), `Ansi` (ansi), `Http` (node's http/https), `Archive` (tar, yauzl). |
-| `src/uv/` | libuv for single-threaded programs over `hxc.NativeUv`: loops, timers, signals, file watchers, TCP, pipes, processes (`Uv.hx`); hxcoro on a libuv loop (`Coro.hx`); a buffered stream reader for coroutines (`Reader.hx`). |
+| `src/uv/` | libuv for single-threaded programs over `hxmc.NativeUv`: loops, timers, signals, file watchers, TCP, pipes, processes (`Uv.hx`); hxcoro on a libuv loop (`Coro.hx`); a buffered stream reader for coroutines (`Reader.hx`). |
 | `test/parity.sh` | runs `parity-cases.sh` with the npm package and with the port and compares them. |
 
 ## How it differs from the npm package
@@ -68,49 +68,37 @@ where it deviates. In general:
 - Not ported: `haxeshim.exify` (the `.exe` stubs and `CHANGES.txt` the npm
   package installs next to its Windows `.cmd` files), and `lix.api`,
   `lix.server`, `lix.client.sources.npm`, which the client does not use.
-  Windows: `lix.com` (Cosmopolitan) sees POSIX paths (`/C/dir`) where Windows
-  programs need Windows' (`C:/dir`), finds no `.exe` by itself and has no
-  `/bin/sh`. So lix asks the runtime for the real system (`hxc.NativeSys.hostSystem`;
-  `Sys.systemName()` is "Linux" there, which would also pick Linux builds of
-  Haxe and neko on macOS), converts paths in the arguments and environment of the
-  programs it runs (`Os.hostPath`, `Exec.spawn`), looks them up in PATH as Windows
-  does, runs `lix`/`haxe`/`haxelib`/`neko` as itself, and runs plain hook commands
-  directly (others through cmd.exe). The root is `%APPDATA%\haxe`, as with the
-  npm package. CI runs `scope create`, `download`, an install and a compile on
-  Windows and macOS.
+  Windows: the code keeps upstream's Windows branches (hooks through cmd.exe,
+  the root in `%APPDATA%\haxe`, as with the npm package), and the Windows
+  builds are native executables.
 - `lix shims [<dir>]` (not in the npm package, where npm installs the four
   commands) creates `haxe`, `haxelib` and `neko` next to the binary (or in
-  `<dir>`), and `lix` when the binary has another name (`lix.com`): symbolic links, or on Windows hard links (copies when that fails),
-  as `.exe`. Existing files are replaced only with `--force`, directories never.
-  For `lix.com` downloaded from the website, that is the whole installation.
+  `<dir>`), and `lix` when the binary has another name (as downloaded,
+  `lix-linux-x86_64`): symbolic links, or on Windows hard links (copies when
+  that fails), as `.exe`. Existing files are replaced only with `--force`,
+  directories never. For a binary downloaded from the website, that is the
+  whole installation.
 - `haxe --run install-libs` (and so `lix download`) names each command that
   failed and why, where upstream reports only how many failed.
 
 ## Gaps in the Haxe standard library
 
-What std (or hxc's std) lacked, and what the port does instead:
+What std lacked, and what the port does instead:
 
 | Missing | Used instead |
 | --- | --- |
-| argv[0] (`Sys.args()` leaves it out), needed for one multi-command binary | `hxc.NativeSys.argv0` (added) |
+| argv[0] (`Sys.args()` leaves it out), needed for one multi-command binary | `hxmc.NativeSys.argv0` |
 | starting processes with a working directory, an environment, an inherited terminal | libuv's `uv_spawn` |
-| `isatty`, `chmod`, symbolic links | libuv (`uv_guess_handle`, added as `hxc.NativeUv.guessHandle`; `uv_fs_chmod`, `uv_fs_symlink`) |
-| reading from a non-blocking stdin, sockets and child pipes concurrently | libuv streams (`uv_pipe_open` added as `hxc.NativeUv.pipeOpen`) |
-| TLS on an established connection (an HTTPS proxy tunnel) | hxc's `sys.ssl.Socket` internals (`shim.Http.startTls`) |
+| `isatty`, `chmod`, symbolic links | libuv (`uv_guess_handle`, `hxmc.NativeUv.guessHandle`; `uv_fs_chmod`, `uv_fs_symlink`) |
+| reading from a non-blocking stdin, sockets and child pipes concurrently | libuv streams (`uv_pipe_open`, `hxmc.NativeUv.pipeOpen`) |
+| TLS on an established connection (an HTTPS proxy tunnel) | hxmc's `sys.ssl.Socket` internals (`shim.Http.startTls`) |
 | an HTTP client with proxies, progress, streaming | `shim.Http` (std's `sys.Http` has none of these) |
-| inflate on hxc (`haxe.zip.Uncompress` and with it `haxe.zip.Reader.unzip`) | `haxe.zip.InflateImpl`, pure Haxe: Haxe 4.3.6's archive (10 MB, 39 MB unpacked) inflates in 0.44 s (clang -O2), gzip takes 0.19 s |
+| inflate (`haxe.zip.Uncompress` and with it `haxe.zip.Reader.unzip`, on targets without it) | `haxe.zip.InflateImpl`, pure Haxe |
 | tar | `shim.Archive.untar` (about 100 lines; the `format` haxelib has one) |
 | URL, semver parsing | `shim.Url`, `shim.SemVer` |
 
-Better vendored: **zlib's inflate** in the hxc runtime (behind
-`haxe.zip.Uncompress`, as the port already has deflate in `src/libs/extc`),
-and a way to **start TLS on a connected socket** in `sys.ssl.Socket`. Both are
-target work rather than lix work.
-
-hxc's std itself had gaps that this port ran into and that are fixed in hxc/:
-`StringTools.urlEncode`/`urlDecode` returned null, `StringBuf.clear` and
-`Date.fromString` were missing, `haxe.Exception.stack` was read-only, and the
-backend did not lower coroutine types (hxcoro did not compile).
+Better in the std: a way to **start TLS on a connected socket** in
+`sys.ssl.Socket`. That is target work rather than lix work.
 
 ## hxcoro
 
@@ -128,12 +116,13 @@ and URLs with dependencies, aliases, `--flat`, `--force`, errors, `download`,
 `dev`, `use`, `run`, `haxe-versions`, `-lib` resolution and interpolation,
 `haxelib path`/`libpath`, compiling and running with Haxe 4.3.6, scripts,
 `install-libs`) with the npm package and the port and compares their output,
-exit codes, `.haxerc`, `haxe_libraries/` and library cache: all 26 match, for
-the native build and for `lix.com` (`PORT_BIN=<directory with lix linking to lix.com>`). The
+exit codes, `.haxerc`, `haxe_libraries/` and library cache: all 26 match
+(`PORT_BIN=<directory>` tests another build). The
 compiler server modes (`--wait` with `--connect`, `--server-listen stdio`,
 `--server-connect`, switching Haxe versions per request and on `.haxerc`
 changes) give byte-identical responses to the npm package's with a test client.
 
-Not covered: GitHub and GitLab archive downloads (blocked by the test
-environment's network policy; their URLs and hxml lines are built as upstream),
-Windows and macOS.
+Not covered by the parity test: GitHub and GitLab archive downloads (blocked
+by the test environment's network policy; their URLs and hxml lines are built
+as upstream), Windows and macOS (CI's lix step covers installs and compiles
+there).
