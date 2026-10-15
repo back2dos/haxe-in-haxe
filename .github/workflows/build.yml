@@ -44,7 +44,7 @@ concurrency:
 env:
   OCAML_VERSION: 5.3.0
   ZIG_VERSION: 0.17.0
-  HXNODEJS_COMMIT: f88685a70b2e4f03dbe0a824ce90ea8b56b27753
+  HXNODEJS_COMMIT: 8aff897563076d607e6a4d0d6287adb7724c6273
   WASMTIME_VERSION: 38.0.1
   # the directory the port's self-compile runs in, on Linux (the reference)
   # and on macOS: the archive names files by absolute path
