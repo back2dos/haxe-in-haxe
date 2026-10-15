@@ -75,6 +75,14 @@ class DataGen {
 		rodata.buf.u32(v);
 	}
 
+	// a @:hxmc.threadLocal static: 8 zero bytes per thread
+	function tbssGlobal(name:String) {
+		var s = obj.section(".tbss", Tbss, 8);
+		s.bssSize = (s.bssSize + 7) & ~7;
+		obj.define(name, s, s.bssSize, 8, true);
+		s.bssSize += 8;
+	}
+
 	function bssGlobal(name:String, size:Int, align:Int, global = true) {
 		bss.bssSize = (bss.bssSize + align - 1) & ~(align - 1);
 		obj.define(name, bss, bss.bssSize, size, global);
@@ -202,7 +210,7 @@ class DataGen {
 	function globals() {
 		for (i in 0...p.globals.length) {
 			var t = p.globals[i].ty;
-			if (!Ir.isRef(t)) bssGlobal(e.scalarGlobal(i), t == TI32 || t == TBool ? 4 : 8, 8);
+			if (p.globals[i].tls != null && !abi.wasm) tbssGlobal(p.globals[i].tls) else if (!Ir.isRef(t)) bssGlobal(e.scalarGlobal(i), t == TI32 || t == TBool ? 4 : 8, 8);
 		}
 	}
 

@@ -217,6 +217,11 @@ class MirBuild {
 		return add(i);
 	}
 
+	// the symbol of a @:hxmc.threadLocal static (8 bytes per thread), or null
+	// (WebAssembly: one thread, an ordinary global)
+	function tlsGlobal(g:Int):Null<String>
+		return abi.wasm ? null : p.p.globals[g].tls;
+
 	function tlsLoad(s:String):Int {
 		var i = mk(TlsLoad, I64);
 		i.sym = s;
@@ -910,6 +915,10 @@ class MirBuild {
 				var o = ex(bx);
 				var x = ex(v);
 				storeSlot(o, 0, t, x, isNullConst(v));
+			case SSetGlobal(g, v) if (tlsGlobal(g) != null):
+				var x = ex(v);
+				var t = p.p.globals[g].ty;
+				tlsStore(tlsGlobal(g), t == TF64 ? op1(FToBits, I64, x) : t == TI64 ? x : op1(SExt, I64, x));
 			case SSetGlobal(g, v):
 				var x = ex(v);
 				var t = p.p.globals[g].ty;
@@ -1555,6 +1564,9 @@ class MirBuild {
 			case EStr(s): symAddr(p.strSym(s), 8);
 			case ENull(_): lconst(0, 0);
 			case ELocal(l): readLocal(l);
+			case EGlobal(g, t) if (tlsGlobal(g) != null):
+				var v = tlsLoad(tlsGlobal(g));
+				t == TF64 ? op1(BitsToF, F64, v) : t == TI64 ? v : op1(Trunc, I32, v);
 			case EGlobal(g, t):
 				if (Ir.isRef(t)) loadM(Opt.MGlobal, I64, 8, globalAddr(g), 0) else {
 					var mt = mty(t);

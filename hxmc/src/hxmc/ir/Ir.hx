@@ -336,7 +336,8 @@ class Program {
 	public var sigs:Array<SigInfo> = [];
 	public var lambdas:Array<LambdaInfo> = [];
 	public var selectors:Array<{name:String, sig:SigInfo}> = [];
-	public var globals:Array<{ty:Ty, init:Null<CtorInfo>, name:String}> = [];
+	// (tls: a @:hxmc.threadLocal static, its symbol: one per thread, outside rt_globals)
+	public var globals:Array<{ty:Ty, init:Null<CtorInfo>, name:String, ?tls:String}> = [];
 	public var inits:Array<FuncInfo> = []; // static initializers, run before main
 	public var main:FuncInfo;
 

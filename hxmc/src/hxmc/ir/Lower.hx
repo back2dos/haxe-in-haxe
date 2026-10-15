@@ -807,7 +807,18 @@ class Lower {
 		if (g != null) return g;
 		var t = ty(cf.cfType); // first: it may register globals itself (enum constructors)
 		g = prog.globals.length;
-		prog.globals.push({ty: t, init: null, name: nativeName(c) + "_" + cf.cfName});
+		var name = nativeName(c) + "_" + cf.cfName;
+		// @:hxmc.threadLocal("symbol"): a scalar or Ptr per thread (zero in a new
+		// thread: no initializer), in the thread-local storage of each format
+		var tls:Null<String> = null;
+		if (hasMeta(":hxmc.threadLocal", cf.cfMeta)) {
+			var where = CInterop.posOf(cf.cfPos);
+			if (!Ir.isScalar(t)) throw new LowerError('@:hxmc.threadLocal ' + cf.cfName + ': only scalars and Ptr (a reference would need the collector to scan every thread\'s copy)', where);
+			if (cf.cfExpr != null) throw new LowerError('@:hxmc.threadLocal ' + cf.cfName + ' has no initializer: every thread\'s copy starts at zero', where);
+			tls = metaString(":hxmc.threadLocal", cf.cfMeta);
+			if (tls == null) tls = "hxmc_tl_" + name;
+		}
+		prog.globals.push(tls == null ? {ty: t, init: null, name: name} : {ty: t, init: null, name: name, tls: tls});
 		staticVars.set(cf, g);
 		initClass(c);
 		return g;

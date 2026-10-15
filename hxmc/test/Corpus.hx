@@ -28,7 +28,7 @@ class Corpus {
 	static final FUZZ_ZIP = "hxmc/test/fuzz-1000.zip";
 	static final FUZZ = "bin/hxmc-fuzz";
 	// the cases a WebAssembly module cannot run
-	static final WASM_EXCLUDED = ["ThreadNatives" => "no threads on wasm32-wasi", "NetNatives" => "no sockets on wasm32-wasi"];
+	static final WASM_EXCLUDED = ["ThreadNatives" => "no threads on wasm32-wasi", "ThreadLocal" => "no threads on wasm32-wasi", "NetNatives" => "no sockets on wasm32-wasi"];
 
 	static var tool:String;
 	static var target:Null<String>;
