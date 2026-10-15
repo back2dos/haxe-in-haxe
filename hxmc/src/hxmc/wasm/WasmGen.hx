@@ -22,7 +22,8 @@ private enum Ctx {
 //   header wraps its code in a loop, other children are inlined at their
 //   one predecessor's branch (Haxe's control flow is reducible);
 // - values: SSA values become locals, colored in dominator order so that
-//   values not live at the same time share one (`coalesce`); a value used
+//   values not live at the same time share one (`coalesce`; in a try body,
+//   what its handler reads stays live throughout); a value used
 //   once in its own block is computed where it is used (on the value
 //   stack) when that changes no order of side effects; constants and
 //   frame addresses are recomputed at each use;
@@ -35,8 +36,13 @@ private enum Ctx {
 //   catch-all lands on a pad: if the runtime's current handler (rt_hcur)
 //   is this try's, the pad restores the stack pointer and branches to the
 //   handler block (the second return of setjmp); else it throws on (the
-//   exception belongs to an outer handler). Pointers are I64 everywhere
-//   and wrap to 32-bit addresses at each access (wasm32).
+//   exception belongs to an outer handler).
+// - 32-bit values: pointers are I64 in Mir and wasm32 addresses are 32-bit;
+//   an I64 value whose every use reads only its low 32 bits (addresses,
+//   truncations, narrow stores, and additions, multiplications and bitwise
+//   operations whose results are such values themselves) is computed as an
+//   i32 (`narrowing`: a pointer loaded from memory with i32.load, offsets
+//   added in i32) instead of being wrapped at each access.
 // The body goes into the object's ".wasm" section under the function's
 // symbol, prefixed with its signature; the indices of functions, types,
 // globals and addresses are relocations LinkWasm resolves.
@@ -67,6 +73,7 @@ class WasmGen {
 	// values
 	var uses:Array<Int>;
 	var folded:Array<Bool>;
+	var narrow:Array<Bool>; // I64 values computed as i32 (`narrowing`)
 	var local:Array<Int>;
 	var localTys:Array<Int> = []; // the types of the locals after the parameters
 	var nparams:Int;
@@ -75,6 +82,11 @@ class WasmGen {
 	var slotOff:Array<Int> = [];
 	var scratch = new Map<Int, Int>(); // wasm type -> a scratch local (atomics)
 	var ctx:Array<Ctx> = [];
+	// the last local.set written (its opcode's offset, the body's length after
+	// it, its local): a local.get of that local right after it makes it a local.tee
+	var setAt = -1;
+	var setEnd = -1;
+	var setLocal = -1;
 
 	public function new(obj:Obj) {
 		this.obj = obj;
@@ -115,8 +127,9 @@ class WasmGen {
 		nparams = f.params.length;
 		cfg();
 		analyze();
+		narrowing();
 		frame();
-		if (coalesceOn && !hasHandlers) coalesce() else plainLocals();
+		if (coalesceOn) coalesce() else plainLocals();
 		// the prologue: the frame below the stack pointer
 		if (fp >= 0) {
 			global(Op.GlobalGet, SP);
@@ -165,6 +178,26 @@ class WasmGen {
 
 	inline function op(o:Op)
 		b.u8(o);
+
+	function localSet(l:Int) {
+		setAt = b.len;
+		op(Op.LocalSet);
+		Enc.uleb(b, l);
+		setEnd = b.len;
+		setLocal = l;
+	}
+
+	// (local.set x; local.get x is local.tee x: nothing can come between, as
+	// any instruction, label or end writes bytes)
+	function localGet(l:Int) {
+		if (b.len == setEnd && l == setLocal) {
+			b.set8(setAt, cast Op.LocalTee);
+			setEnd = -1;
+			return;
+		}
+		op(Op.LocalGet);
+		Enc.uleb(b, l);
+	}
 
 	function cfg() {
 		// (ids may exceed the number of blocks: passes drop blocks)
@@ -382,6 +415,89 @@ class WasmGen {
 		}
 	}
 
+	// the type a value is computed in
+	inline function ety(v:Int):MTy
+		return narrow[v] ? I32 : vals[v].ty;
+
+	// which I64 values only ever have their low 32 bits read (their uses'
+	// demands, to a fixpoint: an arithmetic use passes its own on)
+	function narrowing() {
+		var n = vals.length;
+		narrow = [for (i in vals) i.ty == I64 && !i.dead && narrowDef(i)];
+		var changed = true;
+		while (changed) {
+			changed = false;
+			for (x in rpo)
+				for (u in x.ins) {
+					if (u.dead) continue;
+					demands(u, (v, low) -> {
+						if (!low && narrow[v]) {
+							narrow[v] = false;
+							changed = true;
+						}
+					});
+				}
+			// a try's handler address: compared in full by its pad
+			for (k in 0...nblk)
+				if (tryAddr[k] >= 0 && narrow[tryAddr[k]]) {
+					narrow[tryAddr[k]] = false;
+					changed = true;
+				}
+		}
+	}
+
+	// whether an I64 definition can be computed as an i32 (calls and
+	// thread-locals wrap once where they are computed)
+	static function narrowDef(i:MIns):Bool
+		return switch i.op {
+			case Load | Const | SymAddr | TlsLoad | Add | Sub | Mul | And | Or | Xor | Neg | Not | Copy | Phi | Select: true;
+			case SExt | ZExt: true;
+			case Shl: false; // (with a constant amount below 32: see demands)
+			case Call: !i.returnsTwice;
+			case _: false;
+		};
+
+	// each operand of u with whether u reads only its low 32 bits
+	function demands(u:MIns, fn:(Int, Bool) -> Void) {
+		var nu = narrow[u.id];
+		switch u.op {
+			case Load:
+				fn(u.a, true);
+				if (u.b >= 0) fn(u.b, true);
+			case Store:
+				fn(u.a, true);
+				if (u.b >= 0) fn(u.b, true);
+				fn(u.c, u.size <= 4);
+			case Trunc:
+				fn(u.a, true);
+			case Add | Sub | Mul | And | Or | Xor:
+				fn(u.a, nu);
+				fn(u.b, nu);
+			case Neg | Not | Copy:
+				fn(u.a, nu);
+			case Phi:
+				for (v in u.args)
+					fn(v, nu);
+			case Select:
+				fn(u.a, false);
+				fn(u.b, nu);
+				fn(u.c, nu);
+			case Switch:
+				fn(u.a, true);
+			case Ret:
+				if (u.a >= 0) fn(u.a, f.ret == I32);
+			case Call:
+				if (!u.returnsTwice) {
+					if (u.sym == null) fn(u.a, true);
+					var tys = argTys(u);
+					for (k in 0...u.args.length)
+						fn(u.args[k], tys[k] == I32);
+				}
+			case _:
+				operands(u, v -> fn(v, false));
+		}
+	}
+
 	function frame() {
 		if (f.slots.length == 0) return;
 		var off = 0;
@@ -407,7 +523,7 @@ class WasmGen {
 		local = [for (_ in vals) -1];
 		for (x in rpo)
 			for (i in x.ins)
-				if (needsLocal(i)) local[i.id] = newLocal(tyCode(i.ty));
+				if (needsLocal(i)) local[i.id] = newLocal(tyCode(ety(i.id)));
 	}
 
 	// SSA coloring: in dominator-tree preorder, a value takes a local of its
@@ -461,6 +577,28 @@ class WasmGen {
 				}
 			}
 		}
+		// a try body may branch to its handler (through its pad) anywhere: what
+		// the handler block reads (its live-in values, its phis' operands from
+		// the setjmp's block, the handler's address) is live in all of the body
+		// (the dominator subtree of its first block)
+		if (hasHandlers)
+			for (x in rpo) {
+				if (tryAddr[x.id] < 0) continue;
+				var hb = tryHandler[x.id];
+				var h = new Bits(n);
+				h.union(liveIn[hb.id]);
+				for (i in hb.ins)
+					if (!i.dead && i.op == Phi && want[i.args[0]]) h.set(i.args[0]);
+				if (want[tryAddr[x.id]]) h.set(tryAddr[x.id]);
+				var stack = [x];
+				while (stack.length > 0) {
+					var y = stack.pop();
+					liveIn[y.id].union(h);
+					liveOut[y.id].union(h);
+					for (c in kids[y.id])
+						stack.push(c);
+				}
+			}
 		// colors: per wasm type, the locals of that type and whether each is taken
 		var pools = new Map<Int, Array<Int>>();
 		var taken = new Map<Int, Bool>();
@@ -503,7 +641,7 @@ class WasmGen {
 				if (i.op != Phi)
 					useTree(i, v -> if (want[v] && last.get(v) == k && !out.get(v) && local[v] >= 0) taken.remove(local[v]));
 				if (want[i.id]) {
-					local[i.id] = take(tyCode(i.ty));
+					local[i.id] = take(tyCode(ety(i.id)));
 					// a value never used afterwards frees its local at once
 					if (!out.get(i.id) && !last.exists(i.id) && i.op != Phi) taken.remove(local[i.id]);
 				}
@@ -646,12 +784,10 @@ class WasmGen {
 	function moves(src:MBlock, dst:MBlock) {
 		var ps = edgePhis(src, dst);
 		for (p in ps)
-			valueAs(p.v, p.phi.ty);
+			valueAs(p.v, ety(p.phi.id));
 		var k = ps.length;
-		while (k-- > 0) {
-			op(Op.LocalSet);
-			Enc.uleb(b, local[ps[k].phi.id]);
-		}
+		while (k-- > 0)
+			localSet(local[ps[k].phi.id]);
 	}
 
 	// the block's instructions and its terminator
@@ -666,10 +802,9 @@ class WasmGen {
 			if (i.ty != Void && uses[i.id] == 0 && (pure(i) || i.op == Load || i.op == TlsLoad)) continue;
 			ins(i);
 			if (i.ty != Void) {
-				if (local[i.id] >= 0) {
-					op(Op.LocalSet);
-					Enc.uleb(b, local[i.id]);
-				} else
+				if (local[i.id] >= 0)
+					localSet(local[i.id]);
+				else
 					op(Op.Drop);
 			}
 		}
@@ -774,11 +909,9 @@ class WasmGen {
 			// comparisons (the value in a scratch local)
 			var s = scratchLocal(Enc.I32);
 			valueAs(t.a, I32);
-			op(Op.LocalSet);
-			Enc.uleb(b, s);
+			localSet(s);
 			for (ci in 0...cases.length) {
-				op(Op.LocalGet);
-				Enc.uleb(b, s);
+				localGet(s);
 				op(Op.I32Const);
 				Enc.sleb(b, cases[ci]);
 				op(Op.I32Eq);
@@ -821,8 +954,7 @@ class WasmGen {
 			return;
 		}
 		if (local[v] >= 0) {
-			op(Op.LocalGet);
-			Enc.uleb(b, local[v]);
+			localGet(local[v]);
 			return;
 		}
 		if (!folded[v] && !remat(i)) throw new Unsupported("wasm: value v" + v + " (" + MFunc.opName(i.op) + ") has no local");
@@ -832,7 +964,7 @@ class WasmGen {
 	// v != 0 as an i32
 	function cond(v:Int) {
 		value(v);
-		if (vals[v].ty == I64) {
+		if (ety(v) == I64) {
 			op(Op.I64Eqz);
 			op(Op.I32Eqz);
 		}
@@ -840,8 +972,17 @@ class WasmGen {
 
 	// v converted to t
 	function valueAs(v:Int, t:MTy) {
+		var i = vals[v];
+		// (a constant or address recomputed at a use that reads 32 bits: an i32 there)
+		if (t == I32 && i.ty == I64 && !narrow[v] && (i.op == Const || i.op == SymAddr)) {
+			narrow[v] = true;
+			ins(i);
+			narrow[v] = false;
+			return;
+		}
 		value(v);
-		conv(vals[v].ty, t);
+		if (narrow[v] && t == I64) throw new Unsupported("wasm: a 32-bit value v" + v + " read as I64");
+		conv(ety(v), t);
 	}
 
 	function conv(from:MTy, to:MTy) {
@@ -887,7 +1028,7 @@ class WasmGen {
 	}
 
 	function ins(i:MIns) {
-		var t = i.ty;
+		var t = ety(i.id);
 		switch i.op {
 			case Param:
 				op(Op.LocalGet);
@@ -909,6 +1050,12 @@ class WasmGen {
 				var bits = haxe.io.FPHelper.doubleToI64(i.f);
 				b.u32(bits.low);
 				b.u32(bits.high);
+			case SymAddr if (t == I32):
+				op(Op.I32Const);
+				relocs.push({off: b.len, kind: RWasmAddr32, sym: i.sym, addend: i.imm});
+				for (_ in 0...4)
+					b.u8(0x80);
+				b.u8(0);
 			case SymAddr:
 				op(Op.I64Const);
 				relocs.push({off: b.len, kind: RWasmAddr, sym: i.sym, addend: i.imm});
@@ -978,15 +1125,16 @@ class WasmGen {
 				valueAs(i.a, ct);
 				valueAs(i.b, ct);
 				op(cmpOp(i.imm, ct));
+			case SExt | ZExt if (t == I32):
+				valueAs(i.a, I32);
 			case SExt:
 				value(i.a);
-				if (vals[i.a].ty == I32) op(Op.I64ExtendI32S);
+				if (ety(i.a) == I32) op(Op.I64ExtendI32S);
 			case ZExt:
 				value(i.a);
-				if (vals[i.a].ty == I32) op(Op.I64ExtendI32U);
+				if (ety(i.a) == I32) op(Op.I64ExtendI32U);
 			case Trunc:
-				value(i.a);
-				if (vals[i.a].ty == I64) op(Op.I32WrapI64);
+				valueAs(i.a, I32);
 			case I2F:
 				value(i.a);
 				op(vals[i.a].ty == I64 ? Op.F64ConvertI64S : Op.F64ConvertI32S);
@@ -1024,7 +1172,7 @@ class WasmGen {
 				} else if (sz == 8) {
 					valueAs(i.c, I64);
 					op(Op.I64Store);
-				} else if (vt == I64) {
+				} else if (vt == I64 && !narrow[i.c]) {
 					value(i.c);
 					op(sz == 4 ? Op.I64Store32 : sz == 2 ? Op.I64Store16 : Op.I64Store8);
 				} else {
@@ -1034,6 +1182,7 @@ class WasmGen {
 				memarg(log2(sz), off);
 			case Call:
 				call(i);
+				if (t == I32 && i.ty == I64) op(Op.I32WrapI64);
 			case _:
 				throw new Unsupported("wasm: " + MFunc.opName(i.op));
 		}
