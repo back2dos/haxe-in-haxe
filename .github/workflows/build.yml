@@ -725,10 +725,17 @@ jobs:
           v=$(cat dl/VERSION)
           tag=latest
           case "$GITHUB_REF" in refs/heads/main) tag=next ;; esac
+          # a tarball's path starts with ./ (npm reads dl/x.tgz as a GitHub
+          # user/repo); versions already published are skipped, so a run that
+          # stopped halfway can be run again
+          publish() {
+            if npm view "$1@$v" version >/dev/null 2>&1; then echo "$1@$v is published already"; return; fi
+            npm publish --access public --provenance --tag $tag "$2"
+          }
           for p in linux-x64 linux-arm64 darwin-x64 darwin-arm64 win32-x64 win32-arm64; do
-            npm publish --access public --provenance --tag $tag "dl/hxmc-$p-$v.tgz"
+            publish "@hxmc/$p" "./dl/hxmc-$p-$v.tgz"
           done
-          npm publish --access public --provenance --tag $tag "dl/hxmc-$v.tgz"
+          publish hxmc "./dl/hxmc-$v.tgz"
 
   # nightly on main, a release on v* tags
   release:
