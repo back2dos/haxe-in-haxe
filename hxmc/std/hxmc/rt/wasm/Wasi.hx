@@ -235,14 +235,16 @@ class Wasi {
 		write(fd, b.add(k), 16 - k);
 	}
 
-	// "gc: major <n>: <a> MB live, limit <b> MB" (RT_STATS)
-	@:hxmc.noGc public static function statLine(lit:String, n:Int, a:Int, b:Int) {
+	// "gc: major <n>: <a> MB live, limit <b> MB, memory <m> MB" (RT_STATS)
+	@:hxmc.noGc public static function statLine(lit:String, n:Int, a:Int, b:Int, m:Int) {
 		writeLit(2, lit);
 		writeInt(2, n);
 		writeLit(2, ": ");
 		writeInt(2, a);
 		writeLit(2, " MB live, limit ");
 		writeInt(2, b);
+		writeLit(2, " MB, memory ");
+		writeInt(2, m);
 		writeLit(2, " MB\n");
 	}
 
