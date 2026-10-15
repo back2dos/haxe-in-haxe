@@ -87,7 +87,7 @@ class Tiers {
 		var out = "bin/hxmc-t/self-tier.hxb";
 		if (FileSystem.exists(out)) FileSystem.deleteFile(out);
 		var r = exec(cmd.concat(["-cp", "haxe/src", "-main", "haxe.Main", "-D", "disable-parallelism", "--interp", "--no-output", "--hxb", out]), {env: env, merge: true});
-		if (r.code != 0) return {ok: false, detail: Corpus.tail(r.out, 300)};
+		if (r.code != 0) return {ok: false, detail: tail(r.out, 300)};
 		var same = digest(out) == digest("bin/hxmc-t/self-ref.hxb");
 		{ok: same, detail: same ? "identical to the reference" : "DIFFERS from the reference"};
 	}
@@ -95,7 +95,7 @@ class Tiers {
 	static function wasmPortBuild() {
 		var r = exec(["bin/hxmc/hxmc", "bin/hxmc-t/wport/haxe.wasm", "-cp", "haxe/src", "-main", "haxe.Main", "-D", "disable-parallelism", "-cp", "bin/hxmc/std",
 			"--custom-target", "hxmc", "-D", "hxmc.target=wasm32-wasi"], {merge: true});
-		return {ok: r.code == 0, detail: r.code == 0 ? FileSystem.stat("bin/hxmc-t/wport/haxe.wasm").size + " bytes" : Corpus.tail(r.out, 300)};
+		return {ok: r.code == 0, detail: r.code == 0 ? FileSystem.stat("bin/hxmc-t/wport/haxe.wasm").size + " bytes" : tail(r.out, 300)};
 	}
 
 	static function crosshost(args:Array<String>) return () -> {
@@ -107,7 +107,7 @@ class Tiers {
 	static function fixpoint() {
 		var r = exec(["make", "--no-print-directory", "fixpoint"], {merge: true});
 		var said = [for (l in r.out.split("\n")) if (l.startsWith("fixpoint:")) l];
-		return {ok: r.code == 0, detail: said.length > 0 ? said[0] : Corpus.tail(r.out, 300)};
+		return {ok: r.code == 0, detail: said.length > 0 ? said[0] : tail(r.out, 300)};
 	}
 
 	static function main() {

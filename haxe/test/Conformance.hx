@@ -81,8 +81,9 @@ class Conformance {
 		Sys.exit(counts.exists("FAIL") ? 1 : 0);
 	}
 
-	static function parseCases(file:String):Array<Case> {
-		var cases:Array<Case> = [];
+	public static function parseCases(file:String):Array<ConfCase> {
+		if (root == null) root = Harness.root;
+		var cases:Array<ConfCase> = [];
 		for (line in File.getContent(file).split("\n")) {
 			line = line.trim();
 			if (line == "" || line.startsWith("#")) continue;
@@ -134,7 +135,7 @@ class Conformance {
 		return {target: target, roots: roots};
 	}
 
-	static function prepare(c:Case):{out:String, c:Case, ?fail:Result} {
+	static function prepare(c:ConfCase):{out:String, c:ConfCase, ?fail:ConfResult} {
 		var out = FileSystem.fullPath(GENERATED) + "/" + c.name;
 		rmrf(out);
 		mkdirs(out);
@@ -148,7 +149,7 @@ class Conformance {
 		return {out: out, c: c};
 	}
 
-	static function runCase(c0:Case, compilerHxb:String):Result {
+	static function runCase(c0:ConfCase, compilerHxb:String):ConfResult {
 		var p = prepare(c0);
 		if (p.fail != null) return p.fail;
 		var out = p.out, c = p.c, cwd = c.cwd;
@@ -160,7 +161,7 @@ class Conformance {
 			return c.hxml ? ["--hxb", hxb, "-D", "disable-parallelism", "--no-output"].concat(c.args) : COMMON.concat(c.args).concat(["--hxb", hxb]);
 		var rr = run([reference].concat(invocation(refHxb)), cwd, out + "/reference.log");
 		var pr = run(port.concat(invocation(portHxb)), cwd, out + "/port.log");
-		var result:Result = {name: c.name, seconds: rr.seconds + pr.seconds, status: "", detail: ""};
+		var result:ConfResult = {name: c.name, seconds: rr.seconds + pr.seconds, status: "", detail: ""};
 		inline function done(status:String, detail:String) {
 			result.status = status;
 			result.detail = detail;
@@ -219,7 +220,7 @@ class Conformance {
 		return done("PASS", '$members members identical' + note);
 	}
 
-	static function runCaseParallel(c0:Case, n:Int):Result {
+	static function runCaseParallel(c0:ConfCase, n:Int):ConfResult {
 		var p = prepare(c0);
 		if (p.fail != null) return p.fail;
 		var out = p.out, c = p.c, cwd = c.cwd;
@@ -230,7 +231,7 @@ class Conformance {
 		var refHxb = out + "/reference.hxb";
 		var rr = run([reference].concat(invocation(refHxb, false)), cwd, out + "/reference.log");
 		var seconds = rr.seconds;
-		function finish(status:String, detail:String):Result return {name: c.name, seconds: seconds, status: status, detail: detail};
+		function finish(status:String, detail:String):ConfResult return {name: c.name, seconds: seconds, status: status, detail: detail};
 		if (rr.code != 0) {
 			for (i in 0...n) {
 				var pr = run(port.concat(invocation(out + '/parallel-$i.hxb', true)), cwd, out + '/parallel-$i.log');
@@ -319,5 +320,5 @@ class Conformance {
 	}
 }
 
-typedef Case = {kind:String, name:String, cwd:String, args:Array<String>, hxml:Bool, ?lib:Array<String>, ?volatile:Array<String>}
-typedef Result = {name:String, seconds:Float, status:String, detail:String}
+typedef ConfCase = {kind:String, name:String, cwd:String, args:Array<String>, hxml:Bool, ?lib:Array<String>, ?volatile:Array<String>}
+typedef ConfResult = {name:String, seconds:Float, status:String, detail:String}

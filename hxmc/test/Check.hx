@@ -32,9 +32,9 @@ class Check {
 			if (!ok) {
 				File.saveContent('$d/got.txt', got + r.err);
 				var diff = lineDiff(exp, got, 30);
-				bad.push({name: c, diff: diff, err: Corpus.tail(r.err, 1500)});
+				bad.push({name: c, diff: diff, err: tail(r.err, 1500)});
 				Sys.println("    " + diff.join("\n    "));
-				if (r.err != "") Sys.println("    stderr: " + Corpus.tail(r.err, 1500).replace("\n", "\n    "));
+				if (r.err != "") Sys.println("    stderr: " + tail(r.err, 1500).replace("\n", "\n    "));
 			}
 		}
 		Sys.println('${cases.length - bad.length}/${cases.length} ok, ${fixed(now() - t0)}s');
@@ -43,19 +43,5 @@ class Check {
 		for (b in bad.slice(0, 20)) s.add('<details><summary>${b.name}</summary>\n\n```\n${b.diff.join("\n")}\n${b.err}\n```\n</details>\n\n');
 		summary(a.get("--summary"), s.toString());
 		Sys.exit(bad.length > 0 || cases.length == 0 ? 1 : 0);
-	}
-
-	// the lines that differ (a short listing, not a minimal diff)
-	public static function lineDiff(a:String, b:String, max:Int):Array<String> {
-		var la = a.split("\n"), lb = b.split("\n"), out = [];
-		var n = la.length > lb.length ? la.length : lb.length;
-		for (i in 0...n) {
-			var x = la[i], y = lb[i];
-			if (x == y) continue;
-			if (x != null) out.push('-${i + 1}: $x');
-			if (y != null) out.push('+${i + 1}: $y');
-			if (out.length >= max) break;
-		}
-		return out;
 	}
 }

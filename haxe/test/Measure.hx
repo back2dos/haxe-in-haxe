@@ -21,7 +21,7 @@ class Measure {
 	static final NATIVE_BUDGET_MB = 3072;
 	static final WASM_WARN_MB = 4096;
 
-	static var rows:Array<Row> = [];
+	static var rows:Array<MeasureRow> = [];
 
 	static function main() {
 		var a = parseArgs(Sys.args(), ["--only", "--port", "--reference", "--summary"]);
@@ -76,13 +76,13 @@ class Measure {
 		Sys.exit(failures.length > 0 ? 1 : 0);
 	}
 
-	static function measure(what:String, who:String, cmd:Array<String>, ?env:Map<String, Null<String>>):Row {
+	static function measure(what:String, who:String, cmd:Array<String>, ?env:Map<String, Null<String>>):MeasureRow {
 		var log = FileSystem.fullPath("bin/test/measure") + "/" + rows.length + ".log";
 		var mac = Sys.systemName() == "Mac";
 		var time = FileSystem.exists("/usr/bin/time") ? (mac ? ["/usr/bin/time", "-l"] : ["/usr/bin/time", "-f", "MEASURE %M %e %U %S"]) : [];
 		var r = exec(time.concat(cmd), {env: env, log: log});
 		var text = readText(log);
-		var row:Row = {what: what, who: who, ok: r.code == 0, peakMb: 0, wall: r.seconds, cpu: 0, detail: r.code == 0 ? "" : Corpus.tail(text, 400)};
+		var row:MeasureRow = {what: what, who: who, ok: r.code == 0, peakMb: 0, wall: r.seconds, cpu: 0, detail: r.code == 0 ? "" : tail(text, 400)};
 		if (mac) {
 			var rss = ~/([0-9]+)\s+maximum resident set size/;
 			if (rss.match(text)) row.peakMb = Math.round(Std.parseFloat(rss.matched(1)) / 1048576);
@@ -101,4 +101,4 @@ class Measure {
 	}
 }
 
-typedef Row = {what:String, who:String, ok:Bool, peakMb:Int, wall:Float, cpu:Float, detail:String}
+typedef MeasureRow = {what:String, who:String, ok:Bool, peakMb:Int, wall:Float, cpu:Float, detail:String}

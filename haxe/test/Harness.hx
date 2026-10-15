@@ -376,6 +376,22 @@ class Harness {
 		return null;
 	}
 
+	public static function tail(s:String, n:Int):String return s.length <= n ? s : s.substr(s.length - n);
+
+	/** The lines that differ (a short listing, not a minimal diff). **/
+	public static function lineDiff(a:String, b:String, max:Int):Array<String> {
+		var la = a.split("\n"), lb = b.split("\n"), out = [];
+		var n = la.length > lb.length ? la.length : lb.length;
+		for (i in 0...n) {
+			var x = la[i], y = lb[i];
+			if (x == y) continue;
+			if (x != null) out.push('-${i + 1}: $x');
+			if (y != null) out.push('+${i + 1}: $y');
+			if (out.length >= max) break;
+		}
+		return out;
+	}
+
 	public static function pad(s:String, n:Int):String return s.length >= n ? s : s.rpad(" ", n);
 
 	public static function fixed(v:Float, digits = 1):String {

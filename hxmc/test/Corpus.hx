@@ -76,8 +76,8 @@ class Corpus {
 		return r;
 	}
 
-	static function caseList(names:Array<String>):Array<Case> {
-		var cases:Array<Case> = [];
+	static function caseList(names:Array<String>):Array<CorpusCase> {
+		var cases:Array<CorpusCase> = [];
 		var files = [for (f in FileSystem.readDirectory(CASES)) if (f.endsWith(".hx")) f.substr(0, f.length - 3)];
 		files.sort(compare);
 		for (f in files) cases.push({name: f, cps: [CASES], main: f});
@@ -89,7 +89,7 @@ class Corpus {
 		return [for (n in names) known[n]];
 	}
 
-	static function runCase(c:Case):Result {
+	static function runCase(c:CorpusCase):CorpusResult {
 		var d = OUT + "/" + c.name;
 		mkdirs(d);
 		var wasm = target != null && target.startsWith("wasm");
@@ -154,8 +154,7 @@ class Corpus {
 		return ["node", "--no-warnings", FileSystem.fullPath("hxmc/bootstrap/wasi.mjs")];
 	}
 
-	public static function tail(s:String, n:Int):String return s.length <= n ? s : s.substr(s.length - n);
 }
 
-typedef Case = {name:String, cps:Array<String>, main:String}
-typedef Result = {name:String, status:String, detail:String}
+typedef CorpusCase = {name:String, cps:Array<String>, main:String}
+typedef CorpusResult = {name:String, status:String, detail:String}

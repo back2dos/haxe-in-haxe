@@ -65,7 +65,7 @@ class Crosshost {
 		var r = exec(tool.concat([out]).concat(args).concat(["-cp", "bin/hxmc/std", "--custom-target", "hxmc", "-D", 'hxmc.target=$target']), {env: env, merge: true});
 		rmrf(out + ".hxmc");
 		if (!FileSystem.exists(out) && FileSystem.exists(out + ".exe")) out += ".exe";
-		if (r.code != 0 || !FileSystem.exists(out)) return {out: out, err: 'exit ${r.code}: ' + Corpus.tail(r.out.trim(), 300)};
+		if (r.code != 0 || !FileSystem.exists(out)) return {out: out, err: 'exit ${r.code}: ' + tail(r.out.trim(), 300)};
 		return {out: out, err: null};
 	}
 

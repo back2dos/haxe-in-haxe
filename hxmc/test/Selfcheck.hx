@@ -80,7 +80,7 @@ class Selfcheck {
 			if (run[1] == "256v") env["RT_VERIFY"] = "1";
 			var r = exec(["bin/hxmc-t/port/s", "-cp", "haxe/src", "-main", "haxe.Main", "-D", "disable-parallelism", "--interp", "--no-output", "--hxb", out], {env: env, merge: true});
 			if (r.code != 0) {
-				Sys.println('${run[0]} FAILED:\n' + Corpus.tail(r.out, 2000));
+				Sys.println('${run[0]} FAILED:\n' + tail(r.out, 2000));
 				ok = false;
 				continue;
 			}
