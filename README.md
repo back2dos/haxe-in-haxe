@@ -20,7 +20,7 @@ the same `--interp` runs, display requests and compilation-server answers.
 | `hxmc/src/hxmc/` | hxmc's sources (package `hxmc`, class path `hxmc/src`): the IR and lowering (`ir/`), the code generators (`x64/`, `a64/`, `wasm/`), the linkers, the driver, `Main.hx` (the tool) and `HaxeMain.hx` (`haxe` with hxmc built in) |
 | `hxmc/std/` | hxmc's std: overrides of upstream modules and the runtime's Haxe part (`hxmc.rt`), merged with the Eval originals by `hxmc/src/hxmc/MkStd.hx` |
 | `hxmc/c/` | the runtime's C part (collector, threads, TLS over mbedtls, libuv), `deps.sh` (mbedtls and libuv) and `mkrt.sh` (the runtime objects), `zig-version` |
-| `hxmc/test/` | hxmc's corpus (`cases/`, golden outputs `expected/`, frozen fuzzer programs `fuzz-1000.zip`), the encoder tests (`encoder/`), the scripts that run them (`Corpus`, `Check`, `Crosshost`, `Selfcheck`, `Tiers`, `EncCheck`), the release smoke test (`smoke.sh`) |
+| `hxmc/test/` | hxmc's corpus (`cases/`, golden outputs `expected/`, frozen fuzzer programs `fuzz-1000.zip`), the encoder tests (`encoder/`), the scripts that run them (`Corpus`, `Check`, `Crosshost`, `Selfcheck`, `Tiers`, `EncCheck`), the release smoke test (`smoke.sh`), the benchmarks (`Bench`, with the cases' check programs in `bench/`) |
 | `hxmc/web/` | the website and its playground (the port as a WebAssembly module in the browser) |
 | `hxmc/bootstrap/` | the committed stage0 (`stage0.wasm.br`), node's WASI runner (`wasi.mjs`), the runtime objects by hash (`rt.mjs`), the npm package's launcher (`haxe`, `hxmc-rebuild`, `launcher.mjs`, `build.mjs`) |
 | `tools/lix/` | lix (the lix client and haxeshim) ported to build with hxmc |
@@ -217,6 +217,22 @@ lix with `dist/`, the WebAssembly fallback and `hxmc-rebuild`),
 with provenance: on `v*` tags as `latest`, from main as a nightly prerelease
 `<version>-nightly.<date>.<commit>` tagged `next`; never from other
 branches), the nightly release and the website.
+
+Benchmarks (`make bench`, `hxmc/test/Bench.hx`): the
+[HaxeBenchmarks](https://github.com/HaxeBenchmarks/benchmark-runner) cases
+built by hxmc (x86-64, and wasm under node) and by the port for C++ (hxcpp),
+the JVM, JS on node, HL/C and the HashLink JIT (HashLink, hxcpp, hxnodejs and
+hxjava pinned in the script; the runner, libraries and HashLink go to
+`bin/bench`): the median wall time of N interleaved runs, CPU time, peak RSS,
+sizes and build times, with each case's check program compared across the
+targets. `.github/workflows/bench.yml` runs it nightly on main (skipped when
+the commit is measured already) and on demand, apart from `build.yml`; from
+main it appends `results/<date>-<commit>.json` to the `bench-data` branch and
+regenerates `history.json` and `latest.json` there (`Bench --history`),
+which the website build copies (`make site BENCH_DATA=<checkout>`) for its
+table and charts. The first points on `bench-data` are earlier measurements
+imported from this repository's history (`"source": "imported"`: a
+development VM, best of the runs).
 
 ## Porting rules
 

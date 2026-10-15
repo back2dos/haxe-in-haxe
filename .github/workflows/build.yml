@@ -28,7 +28,8 @@
 # - upstream-tests: upstream's compiler-side suite (RunCi macro) with the
 #   release binaries as haxe (upstream-tests.yml).
 # - release: a rolling `nightly` pre-release on pushes to main, a release on
-#   v* tags; pages: the website on pushes to main.
+#   v* tags; pages: the website on pushes to main (with the benchmark history
+#   of the bench-data branch, which bench.yml writes).
 name: build
 
 on:
@@ -231,10 +232,13 @@ jobs:
         with: {name: npm, path: "bin/npm/*.tgz\nbin/npm/probe.wasm\nbin/npm/VERSION", retention-days: 7}
 
       # the website: the playground's WebAssembly, the pages' JavaScript, lix under tools/
+      # (the Programs benchmarks: the history on the bench-data branch, bench.yml)
       - name: The website
         run: |
           set -ex
-          make site LIX_DIR=dist/lix
+          mkdir -p bin/bench-data
+          if git fetch --depth 1 origin bench-data; then git archive FETCH_HEAD | tar -x -C bin/bench-data; fi
+          make site LIX_DIR=dist/lix BENCH_DATA=bin/bench-data
           ls -l bin/site bin/site/tools
       - uses: actions/upload-artifact@v7
         with: {name: site, path: bin/site/, retention-days: 7}

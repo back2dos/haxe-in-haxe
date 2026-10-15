@@ -41,6 +41,11 @@ CASES ?=
 PORT ?=
 # `make site`: a directory of lix binaries to publish under tools/ (lix-<target>[.exe])
 LIX_DIR ?=
+# `make site`: a checkout of the bench-data branch (its history.json and
+# latest.json become bin/site/bench/, the Programs benchmarks)
+BENCH_DATA ?=
+# `make bench`: the arguments of hxmc/test/Bench.hx (e.g. "-n 3 -c nbody -t hxmc,js")
+BENCH_ARGS ?=
 
 # --- Sources ---
 
@@ -88,7 +93,7 @@ endef
 
 .DEFAULT_GOAL := help
 .PHONY: help std deps rt rt-build hxmc tool bootstrap fixpoint stage0 crosshost port dev release wasm npm site fuzz \
-	lix lix-release reference test test-fuzz test-display test-server test-jsonrpc test-unit-targets test-interp \
+	lix lix-release reference bench test test-fuzz test-display test-server test-jsonrpc test-unit-targets test-interp \
 	test-haxelib test-eval-debugger smoke hxmc-test portcheck measure quick check full clean distclean
 
 help:
@@ -113,7 +118,8 @@ help:
 ##             and bin/wasm/hih-legacy.wasm, the same with -D hxmc.wasm-eh=legacy (browsers without exnref)
 ## npm         bin/npm/*.tgz: the npm package hxmc (package.json; hxmc/bootstrap) and its six
 ##             platform packages @hxmc/<os>-<cpu> (NPM_VERSION)
-## site        bin/site: the website (hxmc/web; LIX_DIR's lix binaries under tools/)
+## site        bin/site: the website (hxmc/web; LIX_DIR's lix binaries under tools/, BENCH_DATA's
+##             benchmark history under bench/)
 ## fuzz        bin/fuzz/fuzz: the differential fuzzer, built by hxmc
 ## lix         bin/lix/lix (+ haxe, haxelib, neko links): lix (tools/lix) for the host
 ## lix-release bin/release/TARGET/lix[.exe]: lix cross-built for TARGET
@@ -128,6 +134,8 @@ help:
 ## smoke       hxmc/test/smoke.sh on PORT_BIN: --interp, HXB, JS, sys.ssl, eval.luv
 ## hxmc-test   hxmc's corpus against its golden files (hxmc/test/Corpus.hx)
 ## portcheck   the port built by hxmc self-compiles to the reference's HXB (hxmc/test/Selfcheck.hx)
+## bench       the HaxeBenchmarks cases on hxmc (native, wasm under node), C++, JVM, JS, HL/C and
+##             HL, built by hxmc and the port: times, peak RSS, sizes (hxmc/test/Bench.hx; BENCH_ARGS)
 ## measure     peak memory and time of the self-compile (ours, the reference) and of the
 ##             tool's builds (haxe/test/Measure.hx)
 ## quick       after every edit (under a minute): the tool, then the x64 corpus, again with
@@ -141,7 +149,7 @@ help:
 ## distclean   also remove bin/ entirely
 ##
 ## Variables: JOBS, NODE, ZIG, HOST, TARGET, HXFLAGS, PORT_BIN, REFERENCE, LANE, N, CASES, PORT,
-## LIX_DIR (defaults and meaning: the top of the Makefile).
+## LIX_DIR, BENCH_DATA, BENCH_ARGS (defaults and meaning: the top of the Makefile).
 
 std: $(STD)
 $(STD): hxmc/src/hxmc/MkStd.hx $(STD_SRC)
@@ -283,6 +291,8 @@ site: wasm $(PORT_BIN) $(WEB_SRC)
 	rm -rf bin/site/examples && cp -r hxmc/web/examples bin/site/examples
 	rm -rf bin/site/tools
 	if [ -n "$(LIX_DIR)" ]; then mkdir -p bin/site/tools && cp $(LIX_DIR)/lix-* bin/site/tools/; fi
+	rm -rf bin/site/bench
+	if [ -n "$(BENCH_DATA)" ] && [ -f "$(BENCH_DATA)/history.json" ]; then mkdir -p bin/site/bench && cp $(BENCH_DATA)/history.json bin/site/bench/ && { cp $(BENCH_DATA)/latest.json bin/site/bench/ 2>/dev/null || true; }; fi
 	printf '{\n\t"date": "%s",\n\t"commit": "%s",\n\t"wasmSize": "%s",\n\t"wasmGz": "%s",\n\t"wasmLegacyGz": "%s",\n\t"dataGz": "%s",\n\t"lixSize": "%s"\n}\n' \
 		"$$(date -u +%Y-%m-%d)" "$$(git rev-parse --short HEAD)" \
 		"$$(wc -c < bin/site/hih.wasm | $(mb))" \
@@ -375,6 +385,9 @@ hxmc-test: $(TOOL) $(STD) $(HOST_RT)
 
 portcheck: $(TOOL) $(STD) $(HOST_RT) $(REFERENCE)
 	$(SCRIPT) Selfcheck --local --small
+
+bench: $(TOOL) $(STD) $(HOST_RT) $(PORT_BIN) bin/lix/lix
+	$(SCRIPT) Bench $(BENCH_ARGS)
 
 measure: $(TOOL) $(STD) $(HOST_RT) $(REFERENCE)
 	$(SCRIPT) Measure
