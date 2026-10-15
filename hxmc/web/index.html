@@ -28,7 +28,7 @@
 <main class="wrap">
 	<section id="playground">
 		<h2>Playground</h2>
-		<p><em>Run</em> type-checks and runs the program with <code>--interp</code>. <em>Compile to HXB</em> writes an HXB archive. It runs locally as WebAssembly with exception handling (<code>exnref</code>), which current Chrome, Edge, Firefox and Safari support.</p>
+		<p><em>Run</em> type-checks and runs the program with <code>--interp</code>. <em>Compile to HXB</em> writes an HXB archive. It runs locally as WebAssembly with exception handling: with <code>exnref</code> where the browser has it, else with the legacy instructions (Chrome and Edge 95+, Firefox 100+, Safari 15.2+).</p>
 		<div class="toolbar">
 			<label>Example
 				<select id="example"></select>

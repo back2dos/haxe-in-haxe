@@ -37,7 +37,7 @@ class Playground {
 	static var hxbButton:ButtonElement;
 	static var exampleSelect:SelectElement;
 
-	// The compiler is a 10 MB WebAssembly module with 64-bit memory. It is compiled
+	// The compiler is a 10 MB wasm32-wasi module (MODULE). It is compiled
 	// once, only when the playground comes into view (or Run is pressed), and the
 	// compiled module is shared with the workers. Phones and low-memory devices
 	// skip the background type-checker (diagnostics, completion), the second
@@ -46,10 +46,25 @@ class Playground {
 		final memory:Null<Float> = (cast window.navigator).deviceMemory;
 		(memory != null && memory <= 4) || window.matchMedia("(pointer: coarse)").matches;
 	};
-	static final MEMORY64 = {
-		// a module with one memory64 memory (limits flag 4)
-		try js.lib.WebAssembly.validate(new js.lib.Uint8Array([0, 97, 115, 109, 1, 0, 0, 0, 5, 3, 1, 4, 0])) catch (_:Dynamic) false;
+	// hih.wasm uses exception handling with exnref (Chrome and Edge 137+,
+	// Firefox 131+, Safari 18.4+); hih-legacy.wasm, the same compiler built with
+	// -D hxmc.wasm-eh=legacy, the legacy instructions (Chrome and Edge 95+,
+	// Firefox 100+, Safari 15.2+). Each is detected with a tiny module (a
+	// function with an exnref local and a try_table; one with try and
+	// catch_all) and only the module chosen is downloaded; ?eh=legacy or
+	// ?eh=exnref in the page's address forces one (tests).
+	static final EXNREF = validates([0, 97, 115, 109, 1, 0, 0, 0, 1, 4, 1, 0x60, 0, 0, 3, 2, 1, 0, 10, 10, 1, 8, 1, 1, 0x69, 0x1F, 0x40, 0, 0x0B, 0x0B]);
+	static final LEGACY_EH = validates([0, 97, 115, 109, 1, 0, 0, 0, 1, 4, 1, 0x60, 0, 0, 3, 2, 1, 0, 10, 8, 1, 6, 0, 0x06, 0x40, 0x19, 0x0B, 0x0B]);
+	static final MODULE:Null<String> = {
+		switch new js.html.URLSearchParams(window.location.search).get("eh") {
+			case "legacy": LEGACY_EH ? "hih-legacy.wasm" : null;
+			case "exnref": EXNREF ? "hih.wasm" : null;
+			case _: EXNREF ? "hih.wasm" : LEGACY_EH ? "hih-legacy.wasm" : null;
+		}
 	};
+
+	static function validates(bytes:Array<Int>):Bool
+		return try js.lib.WebAssembly.validate(new js.lib.Uint8Array(bytes)) catch (_:Dynamic) false;
 
 	static function main() {
 		out = document.getElementById("out");
@@ -92,8 +107,8 @@ class Playground {
 		};
 		document.head.append(loader);
 
-		if (!MEMORY64) {
-			setBusy(true, "This browser cannot run the compiler: it needs WebAssembly with 64-bit memory (Chrome or Edge 133+, Firefox 134+).");
+		if (MODULE == null) {
+			setBusy(true, "This browser cannot run the compiler: it needs WebAssembly exception handling (Chrome or Edge 95+, Firefox 100+, Safari 15.2+).");
 		} else {
 			setBusy(true, "The compiler loads when the playground is in view…");
 			final playground = document.getElementById("playground");
@@ -222,7 +237,7 @@ class Playground {
 	static var zipUrl:Null<String>;
 
 	static function startWorker(onReply:Reply->Void):js.html.Worker {
-		if (compiledModule == null) compiledModule = js.lib.WebAssembly.compileStreaming(cast window.fetch("hih.wasm"));
+		if (compiledModule == null) compiledModule = js.lib.WebAssembly.compileStreaming(cast window.fetch(MODULE));
 		final w = new js.html.Worker("worker.js");
 		w.onmessage = (e) -> onReply(e.data);
 		compiledModule.then((m) -> w.postMessage(({type: "module", module: m} : Request)),
@@ -356,7 +371,7 @@ class Playground {
 
 	static function request(r:Request):Promise<Null<Reply>> {
 		// the type-checker starts once the compiler has loaded, and not on small devices
-		if (LOW_MEMORY || !MEMORY64 || !runnerReady) return Promise.resolve(null);
+		if (LOW_MEMORY || MODULE == null || !runnerReady) return Promise.resolve(null);
 		if (lsp == null) startLsp();
 		final kind = r.type == "display" ? r.request.method : r.type;
 		return new Promise((resolve, _) -> {

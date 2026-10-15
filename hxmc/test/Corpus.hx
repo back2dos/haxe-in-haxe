@@ -6,7 +6,7 @@ using StringTools;
 
 // The hxmc test corpus (README.md, "Testing"): every program compiled by
 // hxmc, run, and its output compared with its golden file.
-//   bin/hxmc/hxmc -cp hxmc/test -cp haxe/test --run Corpus [-j N] [-v] [--target T] [--stage DIR] [--bless] [case ...]
+//   bin/hxmc/hxmc -cp hxmc/test -cp haxe/test --run Corpus [-j N] [-v] [--target T] [--wasm-eh legacy] [--stage DIR] [--bless] [case ...]
 // The cases are the programs of hxmc/test/cases (<Name>.hx with class <Name>)
 // and the fuzzer programs frozen in hxmc/test/fuzz-1000.zip (extracted to
 // bin/hxmc-fuzz, cases fuzz-<seed>). Each case's HXB archive is written once
@@ -17,8 +17,9 @@ using StringTools;
 // hxmc's own output, to be checked by hand). --target cross-builds for another
 // target (linux-arm64 runs under qemu-aarch64-static, windows-x86_64 under
 // wine64, wasm32-wasi under node or, with HXMC_WASM_RUNNER=wasmtime,
-// wasmtime); --stage only builds and copies each executable with its golden
-// file to DIR/<case>/ (Check runs them on the target's machine).
+// wasmtime; --wasm-eh legacy: built with -D hxmc.wasm-eh=legacy, run under
+// node without exnref); --stage only builds and copies each executable with
+// its golden file to DIR/<case>/ (Check runs them on the target's machine).
 class Corpus {
 	static final OUT = "bin/hxmc-t";
 	static final STD = "bin/hxmc/std";
@@ -32,13 +33,15 @@ class Corpus {
 	static var tool:String;
 	static var target:Null<String>;
 	static var stage:Null<String>;
+	static var wasmEh:Null<String>; // --wasm-eh legacy: -D hxmc.wasm-eh=legacy
 	static var bless = false;
 
 	static function main() {
-		var a = parseArgs(Sys.args(), ["-j", "--target", "--stage"]);
+		var a = parseArgs(Sys.args(), ["-j", "--target", "--stage", "--wasm-eh"]);
 		tool = FileSystem.fullPath(Sys.getEnv("HXMC_TOOL") ?? "bin/hxmc/hxmc");
 		target = a.get("--target");
 		stage = a.get("--stage");
+		wasmEh = a.get("--wasm-eh");
 		bless = a.has("--bless");
 		var verbose = a.has("-v");
 		if (!FileSystem.exists(STD + "/.stamp")) fail("Corpus: bin/hxmc/std is missing (make std)");
@@ -111,9 +114,10 @@ class Corpus {
 			return {name: c.name, status: "no-golden", detail: '$expected is missing (--bless writes it from hxmc\'s output)'};
 		var exe = d + "/" + (target != null ? "m-" + target : "m");
 		if (target != null && target.startsWith("windows")) exe += ".exe";
-		if (wasm) exe += ".wasm";
+		if (wasm) exe += (wasmEh != null ? "-" + wasmEh : "") + ".wasm";
 		var cmd = [tool, exe, "--hxb-lib", hxb, "-main", c.main, "--custom-target", "hxmc", "-D", "disable-parallelism"];
 		if (target != null) cmd = cmd.concat(["-D", "hxmc.target=" + target]);
+		if (wasm && wasmEh != null) cmd = cmd.concat(["-D", "hxmc.wasm-eh=" + wasmEh]);
 		var r = exec(cmd, {env: ["HXMC_STATS" => "1"]});
 		File.saveContent(d + "/hxmc.log", r.out + r.err);
 		if (r.code != 0) return {name: c.name, status: "hxmc-fail", detail: tail(r.out + r.err, 2000)};
@@ -134,7 +138,9 @@ class Corpus {
 			case _: [];
 		}
 		// a small nursery: frequent collections, so a missing or stale root shows
-		var r = exec(runner.concat([FileSystem.fullPath(exe)]), {cwd: d, timeout: 120, env: ["RT_MINOR_KB" => Sys.getEnv("RT_MINOR_KB") ?? "64", "WINEDEBUG" => "-all"]});
+		var r = exec(runner.concat([FileSystem.fullPath(exe)]), {cwd: d, timeout: 120, env: ["RT_MINOR_KB" => Sys.getEnv("RT_MINOR_KB") ?? "64", "WINEDEBUG" => "-all",
+			// (legacy exception handling: node without exnref, hxmc/bootstrap/wasi.mjs)
+			"HXMC_WASM_EXNREF" => wasmEh == "legacy" ? "0" : Sys.getEnv("HXMC_WASM_EXNREF")]});
 		if (r.timedOut) return {name: c.name, status: "timeout", detail: ""};
 		var got = 'exit ${r.code}\n' + r.out;
 		if (bless && !FileSystem.exists(expected)) {

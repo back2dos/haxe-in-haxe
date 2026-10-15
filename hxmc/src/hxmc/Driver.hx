@@ -130,7 +130,7 @@ class Driver {
 			if (abi.wasm) {
 				// WebAssembly: structured code from the Mir, no instruction selection or registers
 				var s1 = haxe.Timer.stamp();
-				new hxmc.wasm.WasmGen(obj).func(mf);
+				new hxmc.wasm.WasmGen(obj, o.wasmLegacyEh).func(mf);
 				lock.acquire();
 				tm[0] += s1 - s0;
 				tm[3] += haxe.Timer.stamp() - s1;
@@ -183,7 +183,7 @@ class Driver {
 	// a synthetic function (DataGen) into obj
 	function compileMir(mf:MFunc, emit:Target.Emitter, obj:Obj) {
 		if (abi.wasm) {
-			new hxmc.wasm.WasmGen(obj).func(mf);
+			new hxmc.wasm.WasmGen(obj, o.wasmLegacyEh).func(mf);
 			return;
 		}
 		var isel = Target.selector(abi);
@@ -218,7 +218,7 @@ class Driver {
 	function toolKey():String {
 		var p = Sys.programPath();
 		var st = try sys.FileSystem.stat(p) catch (_:Dynamic) null;
-		return "hxmc|" + abi.name + "|" + (st == null ? "?" : st.size + "@" + st.mtime.getTime()) + "|";
+		return "hxmc|" + abi.name + (o.wasmLegacyEh ? "+legacy-eh" : "") + "|" +(st == null ? "?" : st.size + "@" + st.mtime.getTime()) + "|";
 	}
 
 	// the functions that may be inlined (before the keys: they are part of them)
@@ -342,6 +342,7 @@ class Driver {
 			var stack = Sys.getEnv("HXMC_WASM_STACK_KB");
 			var lw = new hxmc.wasm.LinkWasm([data].concat(objs), stack != null ? Std.parseInt(stack) << 10 : 1 << 20);
 			lw.nameSection = !o.strip;
+			lw.legacyEh = o.wasmLegacyEh;
 			var wasm = lw.link();
 			sys.io.File.saveBytes(out, wasm);
 			if (o.stats) Sys.println('hxmc: data ${ms(t3 - t2)}, link ${ms(haxe.Timer.stamp() - t3)}');

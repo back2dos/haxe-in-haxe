@@ -9,6 +9,7 @@ package hxmc;
 // line (HaxeMain), e.g. for scripts: `hxmc -cp hxmc/src --run hxmc.MkStd`.
 // Options (defines, or the environment for development):
 //   -D hxmc.target=linux-x86_64     the target (Target.hx, Abi.hx: six of them)
+//   -D hxmc.wasm-eh=legacy          wasm32-wasi: legacy exception handling (default: exnref)
 //   HXMC_RT_OBJ                     the runtime object (default: <tool dir>/rt/<target>/rt.o)
 //   HXMC_STATS=1                    print what the build did and how long it took
 class Main {

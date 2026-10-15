@@ -11,16 +11,19 @@ using StringTools;
 //   quick  the x64 corpus (64 KB nursery), again with RT_VERIFY=1, and the wasm
 //          corpus under node: after every edit
 //   check  quick + linux-arm64 (qemu) and windows-x86_64 (wine), x64 with a
-//          16 KB nursery, ThreadNatives x30, the tool as a module building three
-//          cases for x64, arm64 and wasm32-wasi byte-identical to the native
-//          tool; --port adds the native port's self-compile: before commits
+//          16 KB nursery, the wasm corpus with legacy exception handling
+//          (-D hxmc.wasm-eh=legacy) under node, ThreadNatives x30, the tool as
+//          a module building three cases for x64, arm64 and wasm32-wasi
+//          byte-identical to the native tool; --port adds the native port's
+//          self-compile: before commits
 //   full   x64, arm64 and wine at 64, 16 and 256 KB, each with RT_VERIFY=1 too;
 //          wasm under node and wasmtime at 16, 64 and 256 KB, under node with
-//          RT_VERIFY=1 at 64 and 256 KB; ThreadNatives x300 (16 KB) and x100
-//          (64 KB); the port's self-compile natively (64 KB, 256 KB, 256 KB with
-//          RT_VERIFY=1) and as a module (node, node with 256 KB, wasmtime); the
-//          tool as a module building every case for every target and itself;
-//          the fixpoint: before pushing
+//          RT_VERIFY=1 at 64 and 256 KB and with legacy exception handling at
+//          16 and 64 KB; ThreadNatives x300 (16 KB) and x100 (64 KB); the
+//          port's self-compile natively (64 KB, 256 KB, 256 KB with
+//          RT_VERIFY=1) and as a module (node, node with 256 KB, wasmtime, node
+//          with legacy exception handling); the tool as a module building
+//          every case for every target and itself; the fixpoint: before pushing
 // Cases named restrict the corpus lanes to them; the port, ThreadNatives and
 // fixpoint lanes ignore them. Lanes run one after another (they share the
 // cases' output directories); the reference (bin/reference/haxe) is needed
@@ -28,6 +31,7 @@ using StringTools;
 class Tiers {
 	static var results:Array<{name:String, ok:Bool}> = [];
 	static final SCRIPT = ["bin/hxmc/hxmc", "-cp", "hxmc/test", "-cp", "haxe/test", "--run"];
+	static final LEGACY = ["--wasm-eh", "legacy"];
 
 	static function lane(name:String, f:Void->{ok:Bool, detail:String}) {
 		var t = now();
@@ -41,8 +45,9 @@ class Tiers {
 		return lines.length == 0 ? "" : lines[lines.length - 1];
 	}
 
-	static function corpus(?target:String, ?env:Map<String, Null<String>>, cases:Array<String>) return () -> {
+	static function corpus(?target:String, ?env:Map<String, Null<String>>, cases:Array<String>, ?extra:Array<String>) return () -> {
 		var cmd = SCRIPT.concat(["Corpus"]);
+		if (extra != null) cmd = cmd.concat(extra);
 		if (target != null) cmd = cmd.concat(["--target", target]);
 		var r = exec(cmd.concat(cases), {env: env, merge: true});
 		var bad = [];
@@ -92,10 +97,11 @@ class Tiers {
 		{ok: same, detail: same ? "identical to the reference" : "DIFFERS from the reference"};
 	}
 
-	static function wasmPortBuild() {
-		var r = exec(["bin/hxmc/hxmc", "bin/hxmc-t/wport/haxe.wasm", "-cp", "haxe/src", "-main", "haxe.Main", "-D", "disable-parallelism", "-cp", "bin/hxmc/std",
-			"--custom-target", "hxmc", "-D", "hxmc.target=wasm32-wasi"], {merge: true});
-		return {ok: r.code == 0, detail: r.code == 0 ? FileSystem.stat("bin/hxmc-t/wport/haxe.wasm").size + " bytes" : tail(r.out, 300)};
+	static function wasmPortBuild(legacy = false) return () -> {
+		var out = legacy ? "bin/hxmc-t/wport/haxe-legacy.wasm" : "bin/hxmc-t/wport/haxe.wasm";
+		var r = exec(["bin/hxmc/hxmc", out, "-cp", "haxe/src", "-main", "haxe.Main", "-D", "disable-parallelism", "-cp", "bin/hxmc/std",
+			"--custom-target", "hxmc", "-D", "hxmc.target=wasm32-wasi"].concat(legacy ? ["-D", "hxmc.wasm-eh=legacy"] : []), {merge: true});
+		{ok: r.code == 0, detail: r.code == 0 ? FileSystem.stat(out).size + " bytes" : tail(r.out, 300)};
 	}
 
 	static function crosshost(args:Array<String>) return () -> {
@@ -125,6 +131,7 @@ class Tiers {
 			lane("x64 16K", corpus(null, ["RT_MINOR_KB" => "16"], cases));
 			lane("arm64 (qemu)", corpus("linux-arm64", null, cases));
 			lane("windows (wine)", corpus("windows-x86_64", null, cases));
+			lane("wasm node legacy EH", corpus("wasm32-wasi", null, cases, LEGACY));
 			lane("ThreadNatives x30", threads(30, 16));
 			lane("cross-host", crosshost(["--targets", "linux-x86_64,linux-arm64,wasm32-wasi"].concat(cases.length > 0 ? cases : ["Unsafe", "SwitchIndex", "Regress"])));
 			if (port) lane("port self-compile", portNative);
@@ -140,17 +147,20 @@ class Tiers {
 				lane('wasm wasmtime ${kb}K', corpus("wasm32-wasi", ["RT_MINOR_KB" => kb, "HXMC_WASM_RUNNER" => "wasmtime"], cases));
 			}
 			for (kb in ["64", "256"]) lane('wasm node ${kb}K RT_VERIFY', corpus("wasm32-wasi", ["RT_MINOR_KB" => kb, "RT_VERIFY" => "1"], cases));
+			for (kb in ["16", "64"]) lane('wasm node legacy EH ${kb}K', corpus("wasm32-wasi", ["RT_MINOR_KB" => kb], cases, LEGACY));
 			lane("ThreadNatives x300 16K", threads(300, 16));
 			lane("ThreadNatives x100 64K", threads(100, 64));
 			lane("port self-compile", portNative);
 			lane("port 256K RT_VERIFY", selfCompile(["bin/hxmc-t/port/s"], ["RT_MINOR_KB" => "256", "RT_VERIFY" => "1"]));
-			lane("wasm port build", wasmPortBuild);
+			lane("wasm port build", wasmPortBuild());
 			var wp = FileSystem.fullPath("bin/hxmc-t/wport") + "/haxe.wasm";
 			var node = ["node", "--no-warnings", "--stack-size=8000", FileSystem.fullPath("hxmc/bootstrap/wasi.mjs"), wp];
 			lane("wasm port node", selfCompile(node));
 			lane("wasm port node 256K", selfCompile(node, ["RT_MINOR_KB" => "256"]));
 			lane("wasm port wasmtime", selfCompile(["wasmtime", "run", "-W", "exceptions=y", "-W", "max-wasm-stack=67108864", "--dir", "/", "--env", "HAXE_STD_PATH",
 				"--env", "PWD=" + root, wp]));
+			lane("wasm port build legacy EH", wasmPortBuild(true));
+			lane("wasm port node legacy EH", selfCompile(["node", "--no-warnings", "--stack-size=8000", FileSystem.fullPath("hxmc/bootstrap/wasi.mjs"), FileSystem.fullPath("bin/hxmc-t/wport") + "/haxe-legacy.wasm"], ["HXMC_WASM_EXNREF" => "0"]));
 			lane("cross-host", crosshost(["--tool"].concat(cases)));
 			lane("fixpoint", fixpoint);
 		}

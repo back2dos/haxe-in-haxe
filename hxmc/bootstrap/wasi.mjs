@@ -19,10 +19,11 @@ process.emitWarning = (w, ...rest) => {
 };
 const { WASI } = await import('node:wasi');
 
-// node 22: exception handling with exnref is behind a flag, and WASI's
-// fd_write as a fast API call can collect V8's heap and crash when the
-// module's memory is large
-v8.setFlagsFromString('--experimental-wasm-exnref');
+// node 22: exception handling with exnref is behind a flag (not needed by a
+// module built with -D hxmc.wasm-eh=legacy; HXMC_WASM_EXNREF=0 leaves it
+// off), and WASI's fd_write as a fast API call can collect V8's heap and
+// crash when the module's memory is large
+if (process.env.HXMC_WASM_EXNREF !== '0') v8.setFlagsFromString('--experimental-wasm-exnref');
 v8.setFlagsFromString('--no-turbo-fast-api-calls');
 
 // Windows: the top-level directories of every drive as /<drive>/<name> (node's

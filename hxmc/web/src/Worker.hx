@@ -7,11 +7,12 @@ import js.lib.Promise;
 import js.lib.Uint8Array;
 import js.lib.WebAssembly;
 
-// Runs the compiler: hih.wasm, the port built by hxmc as a wasm32-wasi module
-// (`make wasm`), with WasiHost as its system and the std of std.bundle
-// (`make site`, site/tools/mkbundle.py) in its file system. Each request gets
-// a fresh instance, so the program's static state starts clean; the compiled
-// module (from the page) and the std are reused between instances.
+// Runs the compiler: hih.wasm (or hih-legacy.wasm: Playground.MODULE), the
+// port built by hxmc as a wasm32-wasi module (`make wasm`), with WasiHost as
+// its system and the std of std.bundle (`make site`, site/tools/mkbundle.py)
+// in its file system. Each request gets a fresh instance, so the program's
+// static state starts clean; the compiled module (from the page) and the std
+// are reused between instances.
 
 class Worker {
 	static final scope:DedicatedWorkerGlobalScope = Syntax.code("self");
