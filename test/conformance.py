@@ -33,7 +33,7 @@ HashLink output exactly (Eval-HXB host execution parity).
 
 --parallel N runs the port N times per case without -D disable-parallelism
 (the parallel filters, analyzer, DCE and HXB writer of a threaded build,
-e.g. the 1:1 hxc build) instead of the comparisons above. Every run must
+e.g. bin/port/haxe, the hxmc build) instead of the comparisons above. Every run must
 succeed, the reference must load every archive, and each archive must match
 the sequential reference archive after normalizing variable IDs: the
 reference loads both through --hxb-lib (fresh IDs, allocated in reading

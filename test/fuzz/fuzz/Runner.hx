@@ -12,7 +12,7 @@ typedef TargetSpec = {
 	output:String,
 	/** Shell command running the compiled program, or null. For `none` outputs the compiler log is the run output. **/
 	run:Null<String>,
-	/** Replaces the compiler of the side running this target (e.g. the hxc tool). **/
+	/** Replaces the compiler of the side running this target (e.g. the hxmc tool). **/
 	?compiler:String,
 }
 
@@ -136,13 +136,13 @@ class Runner {
 			output: "file:main.swf",
 			run: null
 		});
-		// the program compiled to C by hxc (the port with hxc/), built with tcc
+		// the program compiled to a native executable by hxmc (bin/hxmc/hxmc)
 		add({
-			name: "hxc",
+			name: "hxmc",
 			args: [],
 			output: "none",
 			run: "{out}/prog",
-			compiler: "sh " + root + "/test/fuzz/hxc.sh {out}"
+			compiler: "sh " + root + "/test/fuzz/hxmc.sh {out}"
 		});
 		return m;
 	}

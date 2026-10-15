@@ -160,7 +160,7 @@ def main():
     ap.add_argument("cases", nargs="*")
     a = ap.parse_args()
     if not (STD / ".stamp").exists():
-        sys.exit("run.py: bin/hxmc/std is missing (python3 hxmc/tools/mkstd.py, or make -f hxmc/Makefile)")
+        sys.exit("run.py: bin/hxmc/std is missing (python3 hxmc/tools/mkstd.py, or make std)")
     cases = case_list(a.cases)
     t = time.perf_counter()
     bad = excluded = 0

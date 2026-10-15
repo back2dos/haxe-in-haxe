@@ -1,321 +1,257 @@
-# haxe-in-haxe: builds the reference compiler, the hxc backend tool, the port
-# (for development, testing and release) and the website. GNU make.
+# haxe-in-haxe: builds the reference compiler, hxmc (the machine-code target,
+# hxmc/README.md), the port with hxmc for the host and as release binaries for
+# six targets, the website's WebAssembly, lix and the fuzzer. GNU make, from
+# the repository root.
 #
 #   make help                 the targets and variables below
 #   make reference            haxe/haxe, the reference compiler (OCaml 5, opam)
-#   make dev                  bin/port/hih: the port, built in seconds (tcc)
-#   make port                 bin/hxc/hih/hih_clang: the port with clang -O2
-#   make release              bin/release/<TARGET>/haxe-in-haxe[.exe]: zig cc, mbedtls, libuv
-#   make test                 HXB conformance of bin/hxc/hih/hih_clang
+#   make bootstrap            bin/hxmc/hxmc, the first hxmc tool (from the reference and node)
+#   make port                 bin/port/haxe: the port built by hxmc (seconds after an edit)
+#   make test                 HXB conformance of bin/port/haxe
+#   make quick|check|full     hxmc's tiered checks (hxmc/tools/tiers.py)
+#   make release TARGET=macos-arm64   bin/release/<TARGET>/haxe-in-haxe[.exe]
 #
-# Outputs go to bin/ (ignored by Git). Generated C is written in chunks and
-# compiled in parallel by hxc/tools/cc-chunks.sh, which recompiles only the
-# chunks whose C changed; the generators rewrite only the files whose content
-# changed, so an edit costs a few compilations (hxc/README.md, "Chunked output").
+# Outputs go to bin/ (ignored by Git). hxmc keeps an object per module next to
+# each output (<out>.hxmc/) and recompiles only the modules that changed.
 
-# --- Variables (override on the command line: make port PORT_CC="gcc -O2") ---
+# --- Variables (override on the command line: make release TARGET=windows-arm64) ---
 
-# the reference compiler: compiles the JS backend tool and the site's scripts
+# the reference compiler: writes the bootstrap's JavaScript and the HXB of test programs
 HAXE ?= haxe/haxe
 # the upstream std, for every compiler run below
 export HAXE_STD_PATH ?= $(CURDIR)/haxe/std
-# parallel C compilations (cc-chunks.sh, deps.sh)
-export JOBS ?= $(shell nproc 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)
+JOBS ?= $(shell nproc 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)
+# the bootstrap runs the tool as JavaScript: node and hxnodejs (without
+# haxelib, e.g. in CI: TOOL_LIBS="<clone>/extraParams.hxml -cp <clone>/src")
 NODE ?= node
-# how the JS tool finds hxnodejs (without haxelib, e.g. in CI:
-# TOOL_LIBS="<clone>/extraParams.hxml -cp <clone>/src")
 TOOL_LIBS ?= -lib hxnodejs
-# C compilers: the dev port, the native backend tool, the clang port, the fuzzer, `make program`
-DEV_CC ?= tcc
-TOOL_CC ?= clang -O2
-PORT_CC ?= clang -O2
-FUZZ_CC ?= clang -O2
-PROG_CC ?= tcc
-# extra arguments for the port's C (e.g. HXFLAGS="-D retain")
-HXFLAGS ?=
-# mbedtls and libuv in `make port`: stub (their natives throw), system
-# (-lmbedtls ... -luv: Ubuntu's libmbedtls-dev libuv1-dev) or a `make deps` directory
-TLS_UV ?= stub
-# `make port`'s binary (used by `make test`, `make test-fuzz`)
-PORT_BIN ?= bin/hxc/hih/hih_clang
-# the port's C compiled by `make port`, `release` and `cosmo`; another
-# directory (C generated elsewhere, e.g. in CI) is used as it is
-PORT_C ?= bin/hxc/hih/prog_hxc
-# the playground's C (`make wasm`), likewise
-WEB_C ?= bin/hxc/hih-web/prog_hxc
-# `make release`/`make deps`: a zig target (x86_64-linux-gnu.2.28,
-# aarch64-linux-gnu.2.28, x86_64-macos, aarch64-macos, x86_64-windows-gnu,
-# aarch64-windows-gnu), or cosmo for `make deps`
-TARGET ?= x86_64-linux-gnu.2.28
 ZIG ?= zig
-# the cosmocc directory (default: cosmocc on PATH)
-COSMOCC ?=
-export ZIG COSMOCC
-# the site's scripts are compiled by SITE_HAXE (the port works too)
-SITE_HAXE ?= $(HAXE)
-# `make site`: lix.com to publish under tools/ (none: the page links a missing file)
-LIX_COM ?=
-# `make program`: a program of class path CP with main class MAIN, to bin/hxc/<MAIN>/prog_c
-CP ?= hxc/test
-MAIN ?= Bench
+export ZIG
+# the machine the tool runs on (Linux; its own runtime object)
+HOST ?= linux-$(if $(filter aarch64 arm64,$(shell uname -m)),arm64,x86_64)
+# `make release`, `make lix-release`: one of the six targets
+TARGET ?= $(HOST)
+# the targets whose runtime objects `make rt` builds
+RT_TARGETS ?= linux-x86_64 linux-arm64 windows-x86_64 windows-arm64 macos-x86_64 macos-arm64
+# extra arguments of the port's build (e.g. HXFLAGS="-D retain")
+HXFLAGS ?=
+# the port tested by `make test`, `make test-fuzz`
+PORT_BIN ?= bin/port/haxe
+# `make smoke`: the binary to check
+SMOKE_BIN ?= $(PORT_BIN)
 # `make test-fuzz`: the lane and the number of programs
 LANE ?= diff:hxb
 N ?= 200
-# `make smoke`: the binary to check
-SMOKE_BIN ?= $(RELEASE_BIN)
-# lix (tools/lix): hxcoro's checkout (fetched at HXCORO_REV unless it exists),
-# its C (another directory, e.g. generated in CI, is used as it is), the C
-# compiler of `make lix` and its mbedtls/libuv (system or a `make deps` directory)
+# `make hxmc-test`: extra arguments of hxmc/tools/run.py (e.g. RUN_ARGS="--target linux-arm64")
+RUN_ARGS ?=
+# `quick`, `check`, `full`: the corpus cases to restrict the corpus lanes to
+# (CASES="Int64Gc Bench"); PORT=1 adds the port's self-compile to `check`
+CASES ?=
+PORT ?=
+# the site's scripts are compiled by SITE_HAXE (the port works too)
+SITE_HAXE ?= $(HAXE)
+# `make site`: a directory of lix binaries to publish under tools/ (lix-<target>[.exe])
+LIX_DIR ?=
+# lix (tools/lix): hxcoro's checkout (fetched at HXCORO_REV unless it exists)
 HXCORO ?= bin/hxcoro
-LIX_C ?= bin/lix/lix_hxc
-LIX_CC ?= clang -O2
-LIX_TLS_UV ?= system
 
 # --- Sources ---
 
 PORT_SRC := $(shell find src -name '*.hx')
+HXMC_SRC := $(shell find hxmc/src -name '*.hx')
+STD_SRC := $(shell find hxmc/std -type f)
+RT_SRC := $(wildcard hxmc/rt/*.c hxmc/rt/*.h)
+BOOT_SRC := $(shell find hxmc/tools/bootstrap/js -name '*.hx')
 LIX_SRC := $(shell find tools/lix/src -name '*.hx')
-TOOL_SRC := $(shell find hxc/src hxc/js -name '*.hx')
-JS_SRC := $(shell find hxc/js -name '*.hx')
-HXC_STD_SRC := $(shell find hxc/std -name '*.hx')
-RT_SRC := $(wildcard hxc/rt/*.c hxc/rt/*.h)
-FUZZ_SRC := $(wildcard test/fuzz/*.hx)
+FUZZ_SRC := $(wildcard test/fuzz/*.hx test/fuzz/fuzz/*.hx)
+SITE_SRC := $(wildcard site/src/*.hx site/*.html site/*.css site/js/*)
 
-# the runtime files of the release, site and fuzz builds
-# (rt_win, rt_sys_win, rt_net_win: the Windows host layer, empty elsewhere)
-RT_FILES := rt rt_dyn rt_std rt_str rt_sys rt_net rt_ssl rt_uv rt_thread rt_census rt_win rt_sys_win rt_net_win
-# slots are read as int32/double/pointer through casts (FI/FD/FP): no strict aliasing
-CFLAGS_BASE := -w -fno-strict-aliasing
-NO_TLS_UV := -DHXC_NO_SSL -DHXC_NO_UV
-DEPS_LIBS := -lmbedtls -lmbedx509 -lmbedcrypto -luv
-# the port's arguments (it is typed with -D disable-parallelism; the binary runs
-# its parallel passes unless its own invocation passes that define)
-PORT_ARGS := -cp src -main haxe.Main -cp hxc/js -D disable-parallelism
-# the hxc target: bin/hxc/std (hxc/std merged with the Eval originals for
-# macros, given last: the last class path wins over earlier ones, e.g. hxc/js)
-HXC_ARGS := -cp bin/hxc/std --custom-target hxc
-STD := bin/hxc/std/.stamp
-WBK := bin/hxc/wbk.js
-NATIVE_TOOL := bin/hxc-dev/tool
-RELEASE_BIN := bin/release/$(TARGET)/haxe-in-haxe$(if $(findstring windows,$(TARGET)),.exe)
+STD := bin/hxmc/std/.stamp
+HOST_RT := bin/hxmc/rt/$(HOST)/rt.o
+TOOL := bin/hxmc/hxmc
+# the hxmc target: bin/hxmc/std (hxmc/std merged with the Eval originals for
+# macros), given last
+HXMC_ARGS := -cp bin/hxmc/std --custom-target hxmc
+# the tool is the port (src) with hxmc (hxmc/src) as its generate hook, typed
+# against hxmc's std, without the port's other target generators
+TOOL_CP := -cp src -cp hxmc/src -main hxmc.Main -D disable-parallelism -D hih_no_generators -cp bin/hxmc/std
+TOOL_ARGS := $(TOOL_CP) --custom-target hxmc
+# the port (typed with -D disable-parallelism; the binary runs its parallel
+# passes unless its own invocation passes that define)
+PORT_ARGS := -cp src -main haxe.Main -D disable-parallelism $(HXFLAGS) $(HXMC_ARGS)
+EXE = $(if $(findstring windows,$(1)),.exe)
+RELEASE_BIN := bin/release/$(TARGET)/haxe-in-haxe$(call EXE,$(TARGET))
+LIX_BIN := bin/release/$(TARGET)/lix$(call EXE,$(TARGET))
 
-# $(call wbk,<out>,<args>): C by the JS tool into <out>_hxc/; files.txt marks the run
-# (hxnodejs's stdout flush fails on pipes, hence the log file)
-define wbk
+# $(call hxmc,<out>,<args>): a build by the tool, its log next to the output
+define hxmc
 @mkdir -p $(dir $(1))
-$(NODE) --stack-size=65500 $(WBK) $(1) $(2) $(HXC_ARGS) > $(1).log 2>&1 || { cat $(1).log; exit 1; }
-touch $(1)_hxc/files.txt
+ulimit -s unlimited 2>/dev/null || true; $(TOOL) $(1) $(2) > $(1).log 2>&1 || { cat $(1).log; exit 1; }
+@ls -l $(1)
 endef
-
-# $(call native,<out>,<args>): the same with the native tool (bin/hxc-dev/tool)
-define native
-@mkdir -p $(dir $(1))
-ulimit -s unlimited 2>/dev/null || true; $(NATIVE_TOOL) $(1) $(2) $(HXC_ARGS) > $(1).log 2>&1 || { cat $(1).log; exit 1; }
-touch $(1)_hxc/files.txt
-endef
-
-# $(call cc,<compiler>,<cflags>,<libs>,<chunk dir>,<binary>[,<more env>])
-cc = CC="$(1)" CFLAGS="$(2)" LIBS="$(3)" $(6) sh hxc/tools/cc-chunks.sh $(4) $(5)
 
 .DEFAULT_GOAL := help
-.PHONY: help reference tool dev-tool dev port-c port web-c release deps cosmo \
-	wasm site fuzz program haxelib lix-c lix lix-cosmo test test-fuzz smoke clean distclean
+.PHONY: help reference std deps rt hxmc tool bootstrap fixpoint port dev release wasm site fuzz \
+	lix lix-release test test-fuzz smoke hxmc-test portcheck quick check full clean distclean
 
 help:
 	@sed -n '/^# --- Targets/,$$p' $(MAKEFILE_LIST) | sed -n 's/^## \{0,1\}//p'
 
 # --- Targets ---
-## reference        haxe/haxe, the reference compiler (make -C haxe haxe; needs OCaml 5, opam, pcre2)
-## tool             bin/hxc/wbk.js: the backend tool (port + hxc/src) for Node, built by HAXE
-## dev-tool         bin/hxc-dev/tool: the backend tool compiled by itself (TOOL_CC); writes C in ~10 s
-## dev              bin/port/hih: the port's C by the native tool, compiled by DEV_CC (tcc: seconds)
-## port-c           PORT_C: the port's C by the JS tool (what CI generates once for every release)
-## port             PORT_BIN (bin/hxc/hih/hih_clang): PORT_C by PORT_CC (TLS_UV: stub, system or a deps dir)
-## web-c            WEB_C: the playground's C (-D hih_no_generators)
-## deps             bin/deps/TARGET: mbedtls and libuv for TARGET (a zig target or cosmo; hxc/tools/deps.sh)
-## release          bin/release/TARGET/haxe-in-haxe[.exe]: PORT_C by zig cc for TARGET, with mbedtls and libuv
-## cosmo            bin/release/cosmo/haxe-in-haxe.com: the Cosmopolitan APE binary, with mbedtls and libuv
-## wasm             bin/site/hih.{js,wasm,data}: the playground's compiler (Emscripten, emcc on PATH)
-## site             bin/site: the website (wasm, pages, their scripts compiled by SITE_HAXE; LIX_COM under tools/)
-## fuzz             bin/fuzz/fuzz: the differential fuzzer (FUZZ_CC)
-## program          bin/hxc/MAIN/prog_c: class path CP, main class MAIN, by the JS tool and PROG_CC
-## haxelib          bin/haxelib/hxc.zip: the hxc haxelib package (hxc/haxelib/build.sh)
-## lix-c            LIX_C: the C of lix (tools/lix, with hxcoro fetched into HXCORO) by the JS tool
-## lix              bin/lix/lix (+ haxe, haxelib, neko links): LIX_C by LIX_CC with LIX_TLS_UV
-## lix-cosmo        bin/release/cosmo/lix.com: lix as a Cosmopolitan APE binary
-## test             HXB conformance of PORT_BIN against the reference (test/conformance.py)
-## test-fuzz        the fuzzer on PORT_BIN: LANE (default diff:hxb), N programs
-## smoke            hxc/tools/smoke.sh on SMOKE_BIN (default: the release binary of TARGET)
-## clean            remove the build outputs (keeps bin/deps, bin/hxc-dev and the reference)
-## distclean        also remove bin/ entirely
+## reference   haxe/haxe, the reference compiler (make -C haxe haxe; needs OCaml 5, opam, pcre2)
+## std         bin/hxmc/std: hxmc/std merged with the Eval originals (hxmc/tools/mkstd.py)
+## deps        bin/hxmc/deps/TARGET: mbedtls and libuv for TARGET (hxmc/tools/deps.sh, zig cc)
+## rt          the runtime objects of RT_TARGETS (bin/hxmc/rt/<target>/rt.o, ssl.o, uv.o; zig cc)
+## hxmc        bin/hxmc/hxmc: the tool, built by the previous tool from source (alias: tool)
+## bootstrap   the tool from scratch: the reference compiler writes the tool's JavaScript
+##             and its HXB, node compiles the HXB to bin/hxmc/boot/hxmc1, which builds bin/hxmc/hxmc
+## fixpoint    bin/hxmc/hxmc builds bin/hxmc/fix/a, which builds bin/hxmc/fix/b: byte-identical
+## port        PORT_BIN (bin/port/haxe): the port for the host, built by hxmc (alias: dev)
+## release     bin/release/TARGET/haxe-in-haxe[.exe]: the port cross-built by hxmc, with mbedtls and libuv
+## wasm        bin/wasm/hih.wasm: the playground's compiler (wasm32-wasi, -D hih_no_generators)
+## site        bin/site: the website (wasm, the std bundle, pages, their scripts compiled by
+##             SITE_HAXE; LIX_DIR's lix binaries under tools/)
+## fuzz        bin/fuzz/fuzz: the differential fuzzer, built by hxmc
+## lix         bin/lix/lix (+ haxe, haxelib, neko links): lix (tools/lix) for the host
+## lix-release bin/release/TARGET/lix[.exe]: lix cross-built for TARGET
+## test        HXB conformance of PORT_BIN against the reference (test/conformance.py)
+## test-fuzz   the fuzzer on PORT_BIN: LANE (default diff:hxb), N programs
+## smoke       tools/smoke.sh on SMOKE_BIN (default PORT_BIN): --interp, HXB, JS, sys.ssl, eval.luv
+## hxmc-test   hxmc's corpus against its golden files (hxmc/tools/run.py, RUN_ARGS)
+## portcheck   the port built by hxmc self-compiles to the reference's HXB (hxmc/tools/portcheck.sh)
+## quick       after every edit (under a minute): the tool, then the x64 corpus, again with
+##             RT_VERIFY=1, and the wasm corpus under node (CASES restricts the corpus)
+## check       before a local commit (a few minutes): quick + arm64 (qemu), wine, a 16 KB
+##             nursery, ThreadNatives x30; PORT=1 adds the native port's self-compile
+## full        before a push: every nursery, RT_VERIFY, wasmtime, ThreadNatives x300, the
+##             port's self-compile natively and as a module, the fixpoint
+## clean       remove the build outputs (keeps the tool, bin/hxmc/deps and the reference)
+## distclean   also remove bin/ entirely
 ##
-## Variables: HAXE, HAXE_STD_PATH, JOBS, NODE, TOOL_LIBS, DEV_CC, TOOL_CC, PORT_CC,
-## FUZZ_CC, PROG_CC, HXFLAGS, TLS_UV, PORT_BIN, PORT_C, WEB_C, TARGET, ZIG, COSMOCC, SITE_HAXE,
-## LIX_COM, CP, MAIN, LANE, N, SMOKE_BIN, HXCORO, LIX_C, LIX_CC, LIX_TLS_UV (defaults and meaning: the top of the Makefile).
+## Variables: HAXE, HAXE_STD_PATH, JOBS, NODE, TOOL_LIBS, ZIG, HOST, TARGET, RT_TARGETS, HXFLAGS,
+## PORT_BIN, SMOKE_BIN, LANE, N, RUN_ARGS, CASES, PORT, SITE_HAXE, LIX_DIR, HXCORO
+## (defaults and meaning: the top of the Makefile).
 
 reference:
 	$(MAKE) -C haxe -j$(JOBS) haxe
 
-# bin/hxc/std: the hxc target's std
-$(STD): hxc/tools/mkstd.py $(HXC_STD_SRC)
-	python3 hxc/tools/mkstd.py
+std: $(STD)
+$(STD): hxmc/tools/mkstd.py $(STD_SRC)
+	python3 hxmc/tools/mkstd.py
+
+# --- hxmc: the tool and its runtime objects ---
+
+# mbedtls and libuv per target (rebuilt only when their versions or flags
+# change), for the runtime's ssl.o and uv.o
+deps: bin/hxmc/deps/$(TARGET)/VERSIONS
+.PRECIOUS: bin/hxmc/deps/%/VERSIONS
+bin/hxmc/deps/%/VERSIONS: hxmc/tools/deps.sh
+	sh hxmc/tools/deps.sh $* bin/hxmc/deps/$*
 	touch $@
 
-# --- The backend tool ---
+# the host's runtime object needs no hxmc (Linux: zig cc and ld.lld); the
+# Windows and macOS ones are assembled by the tool (hxmc --mkrt)
+$(HOST_RT): hxmc/tools/mkrt.sh $(RT_SRC) bin/hxmc/deps/$(HOST)/VERSIONS
+	sh hxmc/tools/mkrt.sh $(HOST)
+.PRECIOUS: bin/hxmc/rt/%/rt.o
+bin/hxmc/rt/%/rt.o: $(TOOL) hxmc/tools/mkrt.sh $(RT_SRC) bin/hxmc/deps/%/VERSIONS
+	sh hxmc/tools/mkrt.sh $*
 
-tool: $(WBK)
-$(WBK): $(PORT_SRC) $(TOOL_SRC)
-	@mkdir -p $(dir $@)
-	$(HAXE) -cp src -cp hxc/src -main backend.Main $(TOOL_LIBS) -cp hxc/js --js $@ -w -WDeprecated
+rt: $(foreach t,$(RT_TARGETS),bin/hxmc/rt/$(t)/rt.o)
 
-# The native tool regenerates its own C with the previous tool (the JS tool
-# makes the first one); a change to the lowering takes effect in what the new
-# tool compiles, so the tool itself picks it up on the next rebuild (make -B
-# dev-tool). It does not depend on src/: the port it carries only types the
-# sources it compiles. The running tool is replaced: the new binary is written
-# next to it, then moved.
-TOOL_GEN_ARGS := -cp src -cp hxc/src -cp hxc/js -main backend.Main -D disable-parallelism
-dev-tool: $(NATIVE_TOOL)
-$(NATIVE_TOOL): $(TOOL_SRC) $(RT_SRC) $(STD)
-	@mkdir -p $(dir $@)
-	if [ -x $@ ]; then \
-		ulimit -s unlimited 2>/dev/null || true; $@ bin/hxc-dev/tool $(TOOL_GEN_ARGS) $(HXC_ARGS) > bin/hxc-dev/gen.log 2>&1 || { cat bin/hxc-dev/gen.log; exit 1; }; \
-	else \
-		$(MAKE) $(WBK) && $(NODE) --stack-size=65500 $(WBK) bin/hxc-dev/tool $(TOOL_GEN_ARGS) $(HXC_ARGS) > bin/hxc-dev/gen.log 2>&1 || { cat bin/hxc-dev/gen.log; exit 1; }; \
-	fi
-	$(call cc,$(TOOL_CC),$(CFLAGS_BASE) $(NO_TLS_UV) -DHXC_CONST_IDS,-lm,bin/hxc-dev/tool_hxc,$@.new)
+# The tool compiles its own source with the previous tool (written next to it,
+# then moved: the running binary is replaced). A change to code generation
+# reaches the tool's own code on the next rebuild (`fixpoint` checks that a
+# rebuild changes nothing).
+hxmc tool: $(TOOL)
+$(TOOL): $(PORT_SRC) $(HXMC_SRC) $(STD) $(HOST_RT)
+	@if [ ! -x $@ ]; then $(MAKE) bin/hxmc/boot/hxmc1; fi
+	@T=$@; [ -x $$T ] || T=bin/hxmc/boot/hxmc1; \
+	echo "$$T $@.new $(TOOL_ARGS)"; \
+	ulimit -s unlimited 2>/dev/null || true; \
+	HXMC_RT_OBJ=$(CURDIR)/$(HOST_RT) $$T $@.new $(TOOL_ARGS) > bin/hxmc/tool.log 2>&1 || { cat bin/hxmc/tool.log; exit 1; }
 	mv $@.new $@
+	rm -rf $@.new.hxmc
+	ls -l $@
+
+bootstrap:
+	rm -f $(TOOL) bin/hxmc/boot/hxmc1
+	$(MAKE) $(TOOL)
+
+# the bootstrap: the tool as JavaScript (the port runs on node; the
+# sys.thread and sys.net stand-ins of hxmc/tools/bootstrap/js, given last)
+bin/hxmc/boot/hxmc.js: $(PORT_SRC) $(HXMC_SRC) $(BOOT_SRC)
+	@mkdir -p $(dir $@)
+	$(HAXE) -cp src -cp hxmc/src -main hxmc.Main $(TOOL_LIBS) -cp hxmc/tools/bootstrap/js -D hih_no_generators --js $@ -w -WDeprecated
+
+bin/hxmc/boot/hxmc.hxb.zip: $(PORT_SRC) $(HXMC_SRC) $(STD)
+	@mkdir -p $(dir $@)
+	$(HAXE) $(TOOL_CP) --custom-target hxmc=bin/hxmc/boot/x --hxb $@ --no-output -w -WUnusedPattern
+
+# one thread, no restart with GC settings (HXMC_GC_DEFAULTS=0: the tool
+# would run itself again); hxnodejs' stdout flush fails on pipes: a log file
+bin/hxmc/boot/hxmc1: bin/hxmc/boot/hxmc.js bin/hxmc/boot/hxmc.hxb.zip $(HOST_RT)
+	ulimit -s unlimited 2>/dev/null || true; \
+	HXMC_GC_DEFAULTS=0 HXMC_JOBS=1 HXMC_STATS=1 HXMC_RT_OBJ=$(CURDIR)/$(HOST_RT) \
+	$(NODE) --stack-size=65500 --max-old-space-size=8192 bin/hxmc/boot/hxmc.js $@ \
+		--hxb-lib bin/hxmc/boot/hxmc.hxb.zip -main hxmc.Main --custom-target hxmc -D disable-parallelism > $@.log 2>&1 || { cat $@.log; exit 1; }
+	ls -l $@
+
+fixpoint: $(TOOL)
+	@mkdir -p bin/hxmc/fix
+	ulimit -s unlimited 2>/dev/null || true; \
+	HXMC_RT_OBJ=$(CURDIR)/$(HOST_RT) $(TOOL) bin/hxmc/fix/a $(TOOL_ARGS) > bin/hxmc/fix/a.log 2>&1 || { cat bin/hxmc/fix/a.log; exit 1; }; \
+	HXMC_RT_OBJ=$(CURDIR)/$(HOST_RT) bin/hxmc/fix/a bin/hxmc/fix/b $(TOOL_ARGS) > bin/hxmc/fix/b.log 2>&1 || { cat bin/hxmc/fix/b.log; exit 1; }
+	cmp bin/hxmc/fix/a bin/hxmc/fix/b && echo "fixpoint: the tool rebuilt by itself is byte-identical"
+	rm -rf bin/hxmc/fix
 
 # --- The port ---
 
-# dev: the ids are const globals (no HXC_CONST_IDS), so a new name does not
-# recompile every chunk
-dev: bin/port/hih
-bin/port/hih: $(NATIVE_TOOL) $(PORT_SRC) $(JS_SRC) $(STD) $(RT_SRC)
-	$(call native,bin/port/hih,$(PORT_ARGS) $(HXFLAGS))
-	$(call cc,$(DEV_CC),$(CFLAGS_BASE) $(NO_TLS_UV),-lm,bin/port/hih_hxc,$@)
+port dev: $(PORT_BIN)
+$(PORT_BIN): $(TOOL) $(PORT_SRC) $(STD) $(HOST_RT)
+	$(call hxmc,$@,$(PORT_ARGS))
 
-port-c: bin/hxc/hih/prog_hxc/files.txt
-bin/hxc/hih/prog_hxc/files.txt: $(WBK) $(PORT_SRC) $(JS_SRC) $(STD)
-	$(call wbk,bin/hxc/hih/prog,$(PORT_ARGS) $(HXFLAGS))
-
-web-c: bin/hxc/hih-web/prog_hxc/files.txt
-bin/hxc/hih-web/prog_hxc/files.txt: $(WBK) $(PORT_SRC) $(JS_SRC) $(STD)
-	$(call wbk,bin/hxc/hih-web/prog,$(PORT_ARGS) -D hih_no_generators $(HXFLAGS))
-
-# HXC_CONST_IDS: the ids fold into the code as #defines (ids.h); every chunk
-# then depends on ids.h (hxc/README.md)
-ifeq ($(TLS_UV),stub)
-PORT_TLS_UV := $(NO_TLS_UV)
-PORT_LIBS := -lm
-else ifeq ($(TLS_UV),system)
-PORT_TLS_UV :=
-PORT_LIBS := -lm $(DEPS_LIBS)
-else
-PORT_TLS_UV := -I$(TLS_UV)/include
-PORT_LIBS := -lm -L$(TLS_UV)/lib $(DEPS_LIBS) -lpthread -ldl
-endif
-port: $(PORT_BIN)
-$(PORT_BIN): $(PORT_C)/files.txt $(RT_SRC)
-	$(call cc,$(PORT_CC),$(CFLAGS_BASE) -DHXC_CONST_IDS $(PORT_TLS_UV),$(PORT_LIBS),$(PORT_C),$@)
-
-# --- Release builds ---
-
-# deps: TARGET's mbedtls and libuv (the script rebuilds only when VERSIONS changes)
-deps: bin/deps/$(TARGET)/VERSIONS
-.PRECIOUS: bin/deps/%/VERSIONS
-bin/deps/%/VERSIONS: hxc/tools/deps.sh $(wildcard hxc/tools/cosmo-patches/*)
-	sh hxc/tools/deps.sh $* bin/deps/$*
-	touch $@
-
-# zig cc: glibc 2.28 for Linux (not musl: no ucontext, which rt_run_main uses
-# for its 1 GB stack); macOS needs no SDK (deps.sh, rt_ssl.c load the
-# frameworks they use at run time). Stripped.
-ZIG_FLAGS = $(CFLAGS_BASE) -DHXC_CONST_IDS -Ibin/deps/$(TARGET)/include
+# the release binaries: cross-built from Linux, with mbedtls and libuv (ssl.o, uv.o)
 release: $(RELEASE_BIN)
-bin/release/%/haxe-in-haxe: $(PORT_C)/files.txt bin/deps/%/VERSIONS $(RT_SRC)
-	@mkdir -p $(dir $@)
-	$(call cc,$(ZIG) cc -target $* -O2,$(ZIG_FLAGS),-Lbin/deps/$*/lib $(DEPS_LIBS) -lm -lpthread -ldl,$(PORT_C),$@,LDFLAGS="$(CFLAGS_BASE) -s" RT_FILES="$(RT_FILES)")
-	ls -l $@
+bin/release/%/haxe-in-haxe: $(TOOL) $(PORT_SRC) $(STD) bin/hxmc/rt/%/rt.o
+	$(call hxmc,$@,$(PORT_ARGS) -D hxmc.target=$*)
+bin/release/%/haxe-in-haxe.exe: $(TOOL) $(PORT_SRC) $(STD) bin/hxmc/rt/%/rt.o
+	$(call hxmc,$@,$(PORT_ARGS) -D hxmc.target=$*)
 
-# Windows (x86_64-windows-gnu, aarch64-windows-gnu: MinGW-w64 and the UCRT):
-# the runtime's Windows host layer (hxc/rt/rt_win.h), the system libraries
-# of libuv, mbedtls and the runtime; stripped, without the PDB zig writes
-WIN_LIBS := -lws2_32 -liphlpapi -luserenv -lpsapi -ldbghelp -lole32 -lshell32 -luser32 -ladvapi32 -lcrypt32 -lbcrypt
-WIN_LDFLAGS := $(CFLAGS_BASE) -s
-bin/release/%/haxe-in-haxe.exe: $(PORT_C)/files.txt bin/deps/%/VERSIONS $(RT_SRC)
-	@mkdir -p $(dir $@)
-	$(call cc,$(ZIG) cc -target $* -O2,$(ZIG_FLAGS),-Lbin/deps/$*/lib $(DEPS_LIBS) $(WIN_LIBS),$(PORT_C),$@,LDFLAGS="$(WIN_LDFLAGS)" RT_FILES="$(RT_FILES)")
-	rm -f $(@:.exe=.pdb)
-	ls -l $@
-
-# cosmocc: `-L<dir>` in one argument (cosmocc maps it to <dir>/.aarch64 for the aarch64 half)
-COSMO_PATH = $(if $(COSMOCC),PATH="$(COSMOCC)/bin:$$PATH")
-cosmo: bin/release/cosmo/haxe-in-haxe.com
-bin/release/cosmo/haxe-in-haxe.com: $(PORT_C)/files.txt bin/deps/cosmo/VERSIONS $(RT_SRC)
-	@mkdir -p $(dir $@)
-	$(call cc,cosmocc -O2,$(CFLAGS_BASE) -DHXC_CONST_IDS -Ibin/deps/cosmo/include,-lm -Lbin/deps/cosmo/lib $(DEPS_LIBS),$(PORT_C),$@,$(COSMO_PATH) RT_FILES="$(RT_FILES)")
-	ls -l $@
-
-smoke:
-	SMOKE_STRICT=$(SMOKE_STRICT) sh hxc/tools/smoke.sh $(SMOKE_BIN)
+# the playground's compiler: a wasm32-wasi module (its runtime is Haxe, no
+# runtime object), without the target generators
+wasm: bin/wasm/hih.wasm
+bin/wasm/hih.wasm: $(TOOL) $(PORT_SRC) $(STD)
+	$(call hxmc,$@,$(PORT_ARGS) -D hih_no_generators -D hxmc.target=wasm32-wasi)
 
 # --- The website ---
 
-# The playground's WebAssembly, compiled as C++ so RT_TRY is a native
-# try/catch (wasm exception handling): Emscripten's setjmp lowering multiplies
-# the code of functions with many try blocks past V8's 7.6 MB function size
-# limit. wasm64: the runtime lays objects out in 8-byte slots holding 64-bit
-# pointers. The runtime's sockets, mbedtls and libuv are stubs that throw.
-# The std subset the compiler needs for --interp, macros and HXB is preloaded.
-WASM_FLAGS := -O2 $(CFLAGS_BASE) -fwasm-exceptions -sMEMORY64=1 -I hxc/rt
-WASM_LDFLAGS := $(WASM_FLAGS) -sMODULARIZE=1 -sEXPORT_NAME=createHih -sENVIRONMENT=web,worker,node \
-	-sEXIT_RUNTIME=1 -sALLOW_MEMORY_GROWTH=1 -sINITIAL_MEMORY=64MB -sMAXIMUM_MEMORY=8GB -sSTACK_SIZE=8MB \
-	-sFORCE_FILESYSTEM=1 -sEXPORTED_RUNTIME_METHODS=callMain,FS,ENV \
-	--preload-file bin/site-build/std@/lib/haxe/std
-wasm: bin/site/hih.js
-bin/site/hih.js: $(WEB_C)/files.txt $(RT_SRC)
-	@mkdir -p bin/site
-	rm -rf bin/site-build/std && mkdir -p bin/site-build/std
-	cp $(HAXE_STD_PATH)/*.hx bin/site-build/std/
-	cp -r $(HAXE_STD_PATH)/haxe $(HAXE_STD_PATH)/sys $(HAXE_STD_PATH)/eval bin/site-build/std/
-	$(call cc,em++,-x c++ $(WASM_FLAGS) -DHXC_CONST_IDS -DHXC_NO_NET $(NO_TLS_UV),,$(WEB_C),$@,LDFLAGS="$(WASM_LDFLAGS)" RT_FILES="$(RT_FILES)")
-
-# the pages, their scripts (site/src, site/build.hxml), the benchmark results
+# the pages, their scripts (site/src, site/build.hxml), the std subset the
+# playground's compiler reads (site/tools/mkbundle.py), the benchmark results
 # (site/bench/README.md) and the build facts
 mb = awk '{printf "%.1f MB", $$1 / 1048576}'
-site: wasm
-	cp site/index.html site/story.html site/style.css bin/site/
+site: wasm $(SITE_SRC)
+	mkdir -p bin/site
+	cp bin/wasm/hih.wasm site/index.html site/story.html site/style.css bin/site/
 	$(SITE_HAXE) site/build.hxml
+	python3 site/tools/mkbundle.py $(HAXE_STD_PATH) bin/site/std.bundle
 	cp site/bench/results.json bin/site/bench.json
-	cp site/bench/targets-results.json bin/site/targets.json
 	rm -rf bin/site/examples && cp -r site/examples bin/site/examples
-	if [ -n "$(LIX_COM)" ]; then mkdir -p bin/site/tools && cp $(LIX_COM) bin/site/tools/lix.com; fi
+	rm -rf bin/site/tools
+	if [ -n "$(LIX_DIR)" ]; then mkdir -p bin/site/tools && cp $(LIX_DIR)/lix-* bin/site/tools/; fi
 	printf '{\n\t"date": "%s",\n\t"commit": "%s",\n\t"wasmSize": "%s",\n\t"wasmGz": "%s",\n\t"dataGz": "%s",\n\t"lixSize": "%s"\n}\n' \
 		"$$(date -u +%Y-%m-%d)" "$$(git rev-parse --short HEAD)" \
 		"$$(stat -c %s bin/site/hih.wasm | $(mb))" \
 		"$$(gzip -9c bin/site/hih.wasm | wc -c | $(mb))" \
-		"$$(gzip -9c bin/site/hih.data | wc -c | $(mb))" \
-		"$$(if [ -f bin/site/tools/lix.com ]; then stat -c %s bin/site/tools/lix.com | $(mb); else echo -; fi)" > bin/site/build-info.json
+		"$$(gzip -9c bin/site/std.bundle | wc -c | $(mb))" \
+		"$$(if [ -f bin/site/tools/lix-linux-x86_64 ]; then stat -c %s bin/site/tools/lix-linux-x86_64 | $(mb); else echo -; fi)" > bin/site/build-info.json
 	cat bin/site/build-info.json
 
 # --- Other programs ---
 
-# the fuzzer: clang's OS threads let -j N run workers in parallel (with tcc
-# the green threads serialize them)
 fuzz: bin/fuzz/fuzz
-bin/fuzz/fuzz: $(WBK) $(FUZZ_SRC) $(STD) $(RT_SRC)
-	$(call wbk,bin/hxc/Fuzz/prog,-cp test/fuzz -main Fuzz)
-	@mkdir -p bin/fuzz
-	$(call cc,$(FUZZ_CC),$(CFLAGS_BASE) $(NO_TLS_UV) -DHXC_CONST_IDS,-lm,bin/hxc/Fuzz/prog_hxc,$@)
-
-# any program (e.g. make program CP=hxc/test/threads MAIN=Threads); always regenerated
-program: $(WBK) $(STD)
-	$(call wbk,bin/hxc/$(MAIN)/prog,-cp $(CP) -main $(MAIN) $(HXFLAGS))
-	$(call cc,$(PROG_CC),$(CFLAGS_BASE) $(NO_TLS_UV) $(if $(filter tcc%,$(PROG_CC)),,-DHXC_CONST_IDS),-lm,bin/hxc/$(MAIN)/prog_hxc,bin/hxc/$(MAIN)/prog_c)
-
-haxelib:
-	sh hxc/haxelib/build.sh
+bin/fuzz/fuzz: $(TOOL) $(FUZZ_SRC) $(STD) $(HOST_RT)
+	$(call hxmc,$@,-cp test/fuzz -main Fuzz $(HXMC_ARGS))
 
 # --- lix (tools/lix/README.md) ---
 
@@ -335,29 +271,18 @@ bin/lix/gen/shim/CaBundle.hx: tools/lix/cabundle.py
 	curl -sSfL --retry 3 -o bin/lix/$(CACERT) https://curl.se/ca/$(CACERT)
 	python3 tools/lix/cabundle.py bin/lix/$(CACERT) $(CACERT_SHA256) bin/lix/gen
 
-LIX_ARGS := -cp tools/lix/src -cp bin/lix/gen -cp $(HXCORO)/src -main lix.cli.Main -D no-deprecation-warnings
-lix-c: bin/lix/lix_hxc/files.txt
-bin/lix/lix_hxc/files.txt: $(WBK) $(LIX_SRC) $(STD) $(HXCORO)/.rev bin/lix/gen/shim/CaBundle.hx
-	$(call wbk,bin/lix/lix,$(LIX_ARGS))
-
-ifeq ($(LIX_TLS_UV),system)
-LIX_INC :=
-LIX_LIBS := -lm $(DEPS_LIBS)
-else
-LIX_INC := -I$(LIX_TLS_UV)/include
-LIX_LIBS := -lm -L$(LIX_TLS_UV)/lib $(DEPS_LIBS) -lpthread -ldl
-endif
+LIX_ARGS := -cp tools/lix/src -cp bin/lix/gen -cp $(HXCORO)/src -main lix.cli.Main -D no-deprecation-warnings $(HXMC_ARGS)
+LIX_DEPS := $(TOOL) $(LIX_SRC) $(STD) $(HXCORO)/.rev bin/lix/gen/shim/CaBundle.hx
 lix: bin/lix/lix
-bin/lix/lix: $(LIX_C)/files.txt $(RT_SRC)
-	$(call cc,$(LIX_CC),$(CFLAGS_BASE) -DHXC_CONST_IDS $(LIX_INC),$(LIX_LIBS),$(LIX_C),$@)
+bin/lix/lix: $(LIX_DEPS) $(HOST_RT)
+	$(call hxmc,$@,$(LIX_ARGS))
 	for cmd in haxe haxelib neko; do ln -sf lix bin/lix/$$cmd; done
-	ls -l $@
 
-lix-cosmo: bin/release/cosmo/lix.com
-bin/release/cosmo/lix.com: $(LIX_C)/files.txt bin/deps/cosmo/VERSIONS $(RT_SRC)
-	@mkdir -p $(dir $@)
-	$(call cc,cosmocc -O2,$(CFLAGS_BASE) -DHXC_CONST_IDS -Ibin/deps/cosmo/include,-lm -Lbin/deps/cosmo/lib $(DEPS_LIBS),$(LIX_C),$@,$(COSMO_PATH) RT_FILES="$(RT_FILES)")
-	ls -l $@
+lix-release: $(LIX_BIN)
+bin/release/%/lix: $(LIX_DEPS) bin/hxmc/rt/%/rt.o
+	$(call hxmc,$@,$(LIX_ARGS) -D hxmc.target=$*)
+bin/release/%/lix.exe: $(LIX_DEPS) bin/hxmc/rt/%/rt.o
+	$(call hxmc,$@,$(LIX_ARGS) -D hxmc.target=$*)
 
 # --- Tests (test/README.md has the other harnesses) ---
 
@@ -368,8 +293,26 @@ test: $(PORT_BIN)
 test-fuzz: bin/fuzz/fuzz $(PORT_BIN)
 	HAXE_REFERENCE=$(CURDIR)/haxe/haxe bin/fuzz/fuzz -j $(JOBS) -n $(N) --port $(abspath $(PORT_BIN)) --lane $(LANE)
 
+smoke:
+	SMOKE_STRICT=$(SMOKE_STRICT) sh tools/smoke.sh $(SMOKE_BIN)
+
+hxmc-test: $(TOOL) $(STD) $(HOST_RT)
+	python3 hxmc/tools/run.py -v $(RUN_ARGS)
+
+portcheck: $(TOOL) $(STD) $(HOST_RT)
+	sh hxmc/tools/portcheck.sh
+
+quick: $(TOOL) $(STD) $(HOST_RT)
+	python3 hxmc/tools/tiers.py quick $(CASES)
+
+check: $(TOOL) $(STD) $(HOST_RT)
+	python3 hxmc/tools/tiers.py check $(if $(PORT),--port) $(CASES)
+
+full: $(TOOL) $(STD) $(HOST_RT)
+	python3 hxmc/tools/tiers.py full $(CASES)
+
 clean:
-	rm -rf bin/hxc bin/port bin/release bin/site bin/site-build bin/fuzz bin/haxelib bin/lix
+	rm -rf bin/port bin/release bin/site bin/wasm bin/fuzz bin/lix bin/hxmc/boot bin/hxmc/fix bin/hxmc-t bin/hxmc-fuzz
 
 distclean:
 	rm -rf bin

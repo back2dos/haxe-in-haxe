@@ -4,19 +4,20 @@ haxe-in-haxe licenses
 This repository is a port of the Haxe compiler (https://github.com/HaxeFoundation/haxe)
 and follows its licensing.
 
-- The compiler port (src/), the hxc backend tool (hxc/src, hxc/tools, hxc/test,
-  hxc/haxelib), the tests (test/) and the website (site/) are licensed under the
+- The compiler port (src/), the hxmc tool (hxmc/src, hxmc/tools, hxmc/test,
+  hxmc/bench), the tests (test/) and the website (site/) are licensed under the
   GNU General Public License, version 2 or (at your option) any later version
   (SPDX: GPL-2.0-or-later). The full text is in COPYING.
   Copyright (C) 2005-2025 Haxe Foundation (the upstream compiler this is
   translated from), (c) 2026 the haxe-in-haxe contributors.
 
-- Code that ends up in programs built with hxc is licensed under the MIT License,
+- Code that ends up in programs built with hxmc is licensed under the MIT License,
   so those programs are not bound by the GPL:
-    hxc/rt/   the C runtime                           (hxc/rt/LICENSE)
-    hxc/std/  the hxc target's standard library       (hxc/std/LICENSE)
+    hxmc/rt/   the runtime's C part                   (hxmc/rt/LICENSE)
+    hxmc/std/  the hxmc target's standard library and the runtime's
+               Haxe part                              (hxmc/std/LICENSE)
   and the standard library overrides used to build the port with other
-  targets: hxc/js/ and test/hl/ (their LICENSE files).
+  targets: hxmc/tools/bootstrap/js/ and test/hl/.
 
 - src/libs/ reproduces OCaml libraries that upstream Haxe depends on, under
   their own licenses:
@@ -40,5 +41,6 @@ and follows its licensing.
 - site/examples/: some examples are from try.haxe.org (MIT,
   site/examples/LICENSE-try-haxe.txt).
 
-- Binaries built with TLS and libuv support link mbedtls (Apache-2.0) and libuv
-  (MIT); their licenses ship with those binaries.
+- Programs built by hxmc that use sys.ssl or libuv (the port's release binaries
+  and lix among them) link mbedtls (Apache-2.0) and libuv (MIT); their licenses
+  ship with those binaries (LICENSE.mbedtls, LICENSE.libuv).

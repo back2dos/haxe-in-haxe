@@ -2,22 +2,22 @@
 
 `test/fuzz/` generates random, well-typed, terminating Haxe programs and checks
 that the port behaves exactly like the pinned reference compiler on them. It is
-written in Haxe and built with hxc. Its first job is checking target
+written in Haxe and built with hxmc. Its first job is checking target
 generators as they are ported: a `diff:<target>` lane requires the port's
 generated JS, Lua, PHP, ... to be byte-identical to the reference's output for
 the same program.
 
 ```sh
-make fuzz                                     # bin/fuzz/fuzz (hxc, clang -O2; ~10 s)
+make fuzz                                     # bin/fuzz/fuzz (hxmc; a few seconds)
 bin/fuzz/fuzz -j 4 -n 500                     # diff:hxb on 500 programs
 bin/fuzz/fuzz --lane diff:js --run -j 4       # port JS output (and its run output) vs the reference
 bin/fuzz/fuzz --lane diff:interp --lane diff:hxb --time 600 -j 4
-bin/fuzz/fuzz --lane exec:interp,hxc -j 4     # hxc-compiled programs vs reference --interp
+bin/fuzz/fuzz --lane exec:interp,hxmc -j 4    # hxmc-compiled programs vs reference --interp
 bin/fuzz/fuzz --help
 ```
 
 It needs the reference (`haxe/haxe`, or `HAXE_REFERENCE`) and a build of the
-port (`bin/hxc/hih/hih_clang` from `make port`, or
+port (`bin/port/haxe` from `make port`, or
 `HAXE_IN_HAXE_PORT`/`--port`). The generator also runs on Eval
 (`haxe -cp test/fuzz --run Fuzz --emit DIR -n 10`); a seed produces the same
 program on every host.
@@ -36,9 +36,9 @@ with `-cp ../src -main Main -D disable-parallelism`, so paths embedded in output
 | `exec:<a>,<b>` | `[ref:\|port:]<target>` each (default `ref`) | only what the program prints when run (from its `start` line, after any compiler warnings) and the exit code |
 
 Built-in targets (`--list`): `hxb`, `interp`, `js`, `lua`, `python`, `neko`,
-`hl`, `hlc` and `cpp` (both `-D no-compilation`), `php`, `jvm`, `swf`, and `hxc` (the
-program compiled to C by the hxc tool, `bin/hxc/wbk.js`, and tcc;
-`HXC_CC` picks another C compiler; see `hxc.sh`). Add others with
+`hl`, `hlc` and `cpp` (both `-D no-compilation`), `php`, `jvm`, `swf`, and `hxmc` (the
+program compiled to a native executable by the hxmc tool, `bin/hxmc/hxmc`;
+see `hxmc.sh`). Add others with
 `--target-def 'name|--flag {out}/file|file:file|runner {out}/file'`.
 
 `exec` lanes turn on `--portable`: the programs then avoid behavior the targets

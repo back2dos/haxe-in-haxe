@@ -3,7 +3,7 @@ package fuzz;
 /**
 	Deterministic 32-bit PRNG (xorshift32 seeded through a splitmix-style mixer).
 	Only 32-bit Int operations, so a seed produces the same program on every
-	host the fuzzer is built for (hxc, Eval, HashLink, JS).
+	host the fuzzer is built for (hxmc, Eval, HashLink, JS).
 **/
 class Rng {
 	var s:Int;

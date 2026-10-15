@@ -118,7 +118,7 @@ def wasm_port_build():
 
 
 def fixpoint():
-    r = subprocess.run(["make", "--no-print-directory", "-f", "hxmc/Makefile", "fixpoint"], cwd=ROOT, env=ENV, capture_output=True, text=True)
+    r = subprocess.run(["make", "--no-print-directory", "fixpoint"], cwd=ROOT, env=ENV, capture_output=True, text=True)
     said = [l for l in r.stdout.splitlines() if l.startswith("fixpoint:")]
     return r.returncode == 0, said[-1] if said else (r.stdout + r.stderr)[-300:]
 

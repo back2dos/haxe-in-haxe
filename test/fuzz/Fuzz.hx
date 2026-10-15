@@ -12,7 +12,7 @@ import sys.thread.Lock;
 	Differential fuzzer: generates random, well-typed Haxe programs and checks
 	that the port compiles them exactly like the pinned reference compiler.
 
-	Build with hxc: `make fuzz`, run `bin/fuzz/fuzz --help`.
+	Build with hxmc: `make fuzz`, run `bin/fuzz/fuzz --help`.
 	See test/fuzz/README.md.
 **/
 class Fuzz {
@@ -23,11 +23,11 @@ Lanes (repeatable; default diff:hxb):
                               outputs (and with --run, program output) must be identical
   --lane exec:<a>,<b>         both run the program; program output must be identical
                               (a side is [ref:|port:]<target>; default compiler: ref)
-Targets: hxb interp js lua python neko hl hlc php cpp jvm swf hxc, or --target-def.
+Targets: hxb interp js lua python neko hl hlc php cpp jvm swf hxmc, or --target-def.
 
 Options:
   --ref CMD           reference compiler (default $HAXE_REFERENCE or haxe/haxe)
-  --port CMD          port compiler (default $HAXE_IN_HAXE_PORT or bin/hxc/hih/hih_clang)
+  --port CMD          port compiler (default $HAXE_IN_HAXE_PORT or bin/port/haxe)
   --run               diff lanes also run both outputs and compare program output
   -n, --count N       number of programs (default 100; 0: until --time)
   --time S            stop after S seconds
@@ -89,7 +89,7 @@ Options:
 			ref = root + "/haxe/haxe";
 		var port = Sys.getEnv("HAXE_IN_HAXE_PORT");
 		if (port == null)
-			port = root + "/bin/hxc/hih/hih_clang";
+			port = root + "/bin/port/haxe";
 		var laneSpecs = [];
 		var run = false;
 		var defines = [];
