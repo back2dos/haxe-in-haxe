@@ -418,6 +418,49 @@ lines, fast calls small, the `noGc` check 0.5–1k, the scoped arena a few
 hundred lines of Haxe), roughly one agent-day. Each deferred piece can be
 added later without redesigning these.
 
+## The runtime without C of our own
+
+Goal: hxmc's std and runtime contain no C written for hxmc. Only
+third-party C stays: the C library (musl's members on Linux, the UCRT and
+MinGW-w64's startup objects on Windows, libSystem on macOS), mbedtls and
+libuv, as prebuilt objects linked when referenced. Everything in `hxmc/c`
+that is ours moves to Haxe on top of the features above.
+
+### Inventory of `hxmc/c`
+
+| File (lines) | What it does | What its Haxe replacement needs |
+| --- | --- | --- |
+| `rtlibc.c` (100) | `memcmp`, `bcmp`, `memset` 8 bytes at a time, replacing musl's (Linux) | `@:hxmc.export` no-GC functions that take precedence over the C library's archive members; no shadow-stack frame or thread-local access, so any thread (and musl itself) may call them |
+| `rthxmc.c` (60) | slow paths of allocation and of the write barrier called by generated code; macOS `hxmc_tls_base`; the Windows crash handler, installed by a TLS callback | exports (as Gc.hx does on WebAssembly); the thread-local base as an intrinsic or linker-defined descriptor call; the crash handler as a no-GC callback registered with `AddVectoredExceptionHandler` from startup (no `.CRT$XLB` section needed) |
+| `rt_win.c` (210) | address-space reservations committed on first touch by a vectored exception handler, UTF-8/UTF-16 conversions, Win32 and Winsock error codes as errno, `WSAStartup` | externs of kernel32/ws2_32 (imports exist), a no-GC C-callable function (`@:hxmc.callback`) reading `EXCEPTION_POINTERS` through `Ptr`, `@:hxmc.struct` layouts, an SRW lock as an opaque pointer-sized cell |
+| `rt_dyn.c` (300) | the field-name table (binary search, names interned at run time under a lock), immortal field-name strings, inline-cache misses with per-thread tables (acquire/release publication), `hx_format_float` over printf/strtod | WebAssembly's `Names.hx` and `FloatText.hx` (already Haxe, identical results) on every target, plus a lock (`Atomic` spin or an OS lock) and thread-local statics (`@:hxmc.threadLocal`) for the per-thread tables |
+| `rt.c` (1330) | the collector (nursery with TLABs, copying minor and major collections, remembered sets, finalisers, native handles freed by a C function), startup (`rt_init`: environment, heap reservations, the shadow stack, static boxes and type objects, Windows arguments and binary standard streams), `rt_throw` (longjmp), boxes, array slow paths, `NativeGc` | WebAssembly's `Gc.hx`/`Boxes.hx` generalized: regions from `mmap`/`VirtualAlloc`, the thread handshake, native handles whose free function is a C function pointer (`Mem.sym` or an extern's address) called indirectly, `atexit` with a callback, `longjmp` as an extern that does not return; thread-local statics for `rt_sp`, `rt_young_ptr`, ... (defined by Haxe instead of the C object, in the TLS section of each format) |
+| `rt_thread.c` (870) | OS threads (pthreads, Windows threads), the stop-the-world handshake (safepoints, safe regions), parkers, mutexes/conditions/semaphores as native handles, `rt_wait_fd(s)` over poll, `rt_run_main` (main on a 1 GB stack: an assembly helper on musl and Apple arm64, ucontext on macOS x86-64, a fiber on Windows) | thread entry points callable from C (`@:hxmc.callback` that attaches the new thread: shadow stack, mutator registration, thread-locals), OS structures as opaque memory of a per-target size (`pthread_mutex_t` ...), atomics (exist), a stack-switch intrinsic (`Mem.callOnStack(top, fn)`, emitted by each instruction selection: a few instructions on x86-64 and arm64) |
+| `rt_ssl.c` (590) | mbedtls behind `hxmc.NativeSsl`: contexts as native handles, BIO send/recv callbacks, the verify callback (Windows), root certificates from Security.framework (macOS, through `dlopen`) or the Windows `Root` store (crypt32) | externs of mbedtls (a static library: `ssl.o`), `@:hxmc.callback` for the BIO and verify callbacks (no-GC: they only call `send`/`recv`), struct sizes and the few field offsets of mbedtls 2.28 per target (constants checked against the C headers when the runtime objects are built), calls through C function pointers (`dlsym`) or dylib/DLL imports |
+| `rt_uv.c` (1720) | libuv behind `hxmc.NativeUv`: id tables of loops, handles and requests, about 20 callbacks reporting events to the port's dispatcher closure (from inside `uv_run`, on the same thread, outside a safe region), buffers copied between the heap and C memory, socket addresses, the cooperative loop with other threads | externs of libuv (`uv.o`), `@:hxmc.callback` functions that call GC code (the thread is running Haxe already: `uv_run` is a fast call, so no transition is needed; from a safe region the trampoline leaves it first), handle and request structs as opaque memory of libuv's sizes (`uv_handle_size`, `uv_req_size`: no constants needed), `uv_buf_t` by pointer |
+| `rt_census.c` (300) | the heap census of the debug build (`RT_CENSUS`) | Haxe over the type tables; sorting in Haxe instead of `qsort` with a comparator |
+| `probe.c` (30) | prints `jmp_buf` layouts per target (development) | stays a build-time check (it is not linked); grows the mbedtls struct sizes above |
+
+The features, and the clean way to provide each:
+
+| Feature | Mechanism |
+| --- | --- |
+| C functions called from Haxe | `@:hxmc.c` externs (exist), with `@:hxmc.fast` for calls that stay in the running state |
+| Haxe functions called from C | `@:hxmc.callback` static functions: C ABI (hxmc's own convention already is), their address as a `Ptr` (`Callback.addr(f)`); a no-GC callback is callable from any thread; a GC one leaves the safe region first when the thread is in one, and re-enters it on return |
+| thread attach | the thread entry is a callback that sets up the runtime state (shadow stack, allocation buffer, mutator) in Haxe before calling GC code |
+| thread-local statics | `@:hxmc.threadLocal static var` of scalar or `Ptr` type: Tdata/Tbss symbols written by DataGen (every object format already carries the runtime's), reached as the runtime's thread-locals are (`Mem.tlsGet`) |
+| startup | the C library's entry (crt1 / mainCRTStartup / dyld) calls the generated `main` (exists); `rt_init` becomes Haxe |
+| exceptions | `_setjmp` for `try` (exists); `rt_throw` is Haxe calling `longjmp` (declared not to return) |
+| stack switching | `Mem.callOnStack(top, fn)`: an intrinsic per instruction selection (Windows: fibers through kernel32) |
+| signals / OS exception handlers | no-GC callbacks registered at startup (`AddVectoredExceptionHandler`); POSIX signal handlers likewise if ever needed |
+| atomics, fences | `hxmc.unsafe.Atomic` (exists) |
+| varargs | `@:hxmc.varargs(k)` (exists); the runtime's own reports format in Haxe and write, no `printf` |
+| structs by value | not needed: every call above passes structs by pointer (`uv_buf_t` included) |
+| setjmp-like control flow | only `try` and `rt_throw` (exist) |
+| alignment and sections | not needed once the crash handler is registered at startup |
+| weak symbols | not needed (Mach-O imports keep their weak flag) |
+| foreign struct layouts | `@:hxmc.struct` for structs hxmc defines or that are ABI-stable (`EXCEPTION_RECORD`, `pollfd`, `uv_buf_t`); sizes and offsets of library structs that change across versions (mbedtls) as per-target constants checked when the runtime objects are built |
+
 ## Order
 
 1. C interop: `Ptr`, `CString`, `@:hxmc.struct`, `@:hxmc.opaque`, direct
