@@ -236,6 +236,8 @@ site: wasm $(SITE_SRC)
 	$(SITE_HAXE) site/build.hxml
 	python3 site/tools/mkbundle.py $(HAXE_STD_PATH) bin/site/std.bundle
 	cp site/bench/results.json bin/site/bench.json
+	cp site/bench/haxebench.json bin/site/programs.json
+	cp site/bench/targets-results.json bin/site/targets.json
 	rm -rf bin/site/examples && cp -r site/examples bin/site/examples
 	rm -rf bin/site/tools
 	if [ -n "$(LIX_DIR)" ]; then mkdir -p bin/site/tools && cp $(LIX_DIR)/lix-* bin/site/tools/; fi
