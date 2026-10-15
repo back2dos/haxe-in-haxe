@@ -54,7 +54,7 @@ HXMC_SRC := $(shell find hxmc/src -name '*.hx')
 STD_SRC := $(shell find hxmc/std -type f)
 RT_SRC := $(wildcard hxmc/c/*)
 LIX_SRC := $(shell find tools/lix/src -name '*.hx')
-FUZZ_SRC := $(wildcard haxe/test/fuzz/*.hx haxe/test/fuzz/fuzz/*.hx)
+FUZZ_SRC := $(wildcard haxe/test/fuzz/*.hx haxe/test/fuzz/fuzz/*.hx) haxe/test/HlcNames.hx
 WEB_SRC := $(wildcard hxmc/web/src/*.hx hxmc/web/*.html hxmc/web/*.css hxmc/web/data/*)
 
 TOOL := bin/hxmc/hxmc
@@ -306,7 +306,7 @@ site: wasm $(PORT_BIN) $(WEB_SRC)
 
 fuzz: bin/fuzz/fuzz
 bin/fuzz/fuzz: $(TOOL) $(FUZZ_SRC) $(STD) $(HOST_RT)
-	$(call hxmc,$@,-cp haxe/test/fuzz -main Fuzz $(HXMC_ARGS))
+	$(call hxmc,$@,-cp haxe/test/fuzz -cp haxe/test -main Fuzz $(HXMC_ARGS))
 
 # --- lix (tools/lix) ---
 
