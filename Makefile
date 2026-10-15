@@ -198,11 +198,13 @@ bootstrap:
 	$(MAKE) --no-print-directory $(TOOL)
 	$(MAKE) --no-print-directory fixpoint
 
+# (the second build types everything from source: the cache of the runtime's
+# typed modules, hxmc/src/hxmc/TypesCache.hx, must not change the executable)
 fixpoint: $(TOOL)
 	@mkdir -p bin/hxmc/fix
 	ulimit -s unlimited 2>/dev/null || true; \
 	$(TOOL) bin/hxmc/fix/a $(TOOL_ARGS) > bin/hxmc/fix/a.log 2>&1 || { cat bin/hxmc/fix/a.log; exit 1; }; \
-	bin/hxmc/fix/a bin/hxmc/fix/b $(TOOL_ARGS) > bin/hxmc/fix/b.log 2>&1 || { cat bin/hxmc/fix/b.log; exit 1; }
+	HXMC_TYPES_CACHE=0 bin/hxmc/fix/a bin/hxmc/fix/b $(TOOL_ARGS) > bin/hxmc/fix/b.log 2>&1 || { cat bin/hxmc/fix/b.log; exit 1; }
 	cmp bin/hxmc/fix/a bin/hxmc/fix/b && cmp $(TOOL) bin/hxmc/fix/a && echo "fixpoint: the tool rebuilt by itself is byte-identical"
 	rm -rf bin/hxmc/fix
 

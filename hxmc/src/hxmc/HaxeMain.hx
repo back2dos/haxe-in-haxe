@@ -21,6 +21,7 @@ class HaxeMain {
 	}
 
 	public static function run(args:Array<String>):Int {
+		if (args[0] == "--types-cache") return TypesCache.write(args.slice(1));
 		var failed = null;
 		// (through links to the binary, as npm's node_modules/.bin/haxe)
 		var exe = try sys.FileSystem.fullPath(Sys.programPath()) catch (_:Dynamic) Sys.programPath();
@@ -66,6 +67,7 @@ class HaxeMain {
 				failed = Std.string(e);
 			}
 		}
+		TypesCache.install();
 		var code = haxe.Main.run(args);
 		if (failed != null) {
 			Sys.stderr().writeString("hxmc: " + failed + "\n");

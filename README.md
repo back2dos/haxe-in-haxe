@@ -295,7 +295,12 @@ symbols, `Atomic`; `@:hxmc.c` and `@:hxmc.rt` externs of C functions,
 `@:hxmc.noGc` functions, `@:hxmc.export`/`@:hxmc.host` implementations of
 runtime functions). What stays C (`hxmc/c`): the collector and allocator,
 threads and the stop-the-world handshake, TLS over mbedtls, libuv, the field
-names and inline-cache tables, float formatting. A change of the runtime's
+names and inline-cache tables, float formatting. The modules of hxmc's own
+package of the std (the runtime, `hxmc.unsafe`, the natives) are typed once
+per tool and configuration and cached as an HXB archive
+(`hxmc/src/hxmc/TypesCache.hx`: `<tool dir>/cache/`, or `HXMC_CACHE`;
+`HXMC_TYPES_CACHE=0` turns it off): a build loads them instead of typing
+them, and its executable is the same (`make fixpoint` checks it). A change of the runtime's
 interface or of the IR's conventions needs a tool that knows it: build once
 against the previous runtime first, or bootstrap again.
 

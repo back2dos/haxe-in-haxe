@@ -78,6 +78,7 @@ class Main {
 				failed = Std.string(e) + "\n" + haxe.CallStack.toString(haxe.CallStack.exceptionStack());
 			}
 		}
+		TypesCache.install();
 		var code = haxe.Main.run(args.concat(["--no-output"]));
 		if (failed != null) {
 			Sys.stderr().writeString("hxmc: " + failed + "\n");

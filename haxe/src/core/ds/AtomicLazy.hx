@@ -60,7 +60,14 @@ class AtomicLazy<T> {
 				case Unset(callback):
 					state = Computing;
 					mutex.release();
-					var v = callback();
+					// port: a callback that throws leaves the lazy value unset (upstream
+					// stays Computing, and a later force waits forever)
+					var v = try callback() catch (e:Dynamic) {
+						mutex.acquire();
+						state = Unset(callback);
+						mutex.release();
+						throw e;
+					};
 					mutex.acquire();
 					state = Set(v);
 					value = v;
