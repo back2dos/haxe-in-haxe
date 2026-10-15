@@ -460,6 +460,60 @@ call can start a V8 collection that crashes with a large module memory).
   with clang 5.2 s then) with a ~2 MB gzipped module: hxmc's module is
   about twice as large and 1.7-1.9x slower against native, as for the
   benchmarks below.
+- The playground's configuration (2026-10-15, at 7738d9c; measured, no
+  code generation changed): the port with `-D hih_no_generators
+  -D disable-parallelism` (the Makefile's `web-c` arguments; hxc's
+  `hxc/js` stand-ins are not needed) as a wasm32-wasi module is
+  13,540,832 bytes, 3,092,150 gzipped (`gzip -9`), against 11,528,418 and
+  2,245,711 for the deployed Emscripten module (origin/site-dist, hih.wasm
+  of 2026-10-12: wasm64, clang -O2, C++ exceptions): 1.17x raw, 1.38x
+  gzipped. It works (compiles and runs programs with `--interp`, compiles
+  the port's source to the reference's HXB under node in about 20 s).
+  Where the bytes go (`HXMC_SYMBOLS=1` for the name section, then the code
+  section decoded instruction by instruction; the savings marked
+  "simulated" are the module's bytes with the instructions in question
+  removed or shortened, gzipped again):
+
+  | | hxmc | Emscripten |
+  | --- | ---: | ---: |
+  | code | 11.57 MB (2.86 MB gzipped) | 10.45 MB (1.96 MB) |
+  | data | 1.93 MB (0.21 MB) | 1.05 MB (0.27 MB) |
+  | the rest (types, imports, table, ...) | 0.04 MB | 0.03 MB |
+  | functions | 19,390 (8,274 of them allocation stubs) | 8,252 |
+
+  Code by group: typing 22.5%, macros (the eval interpreter and the
+  macro API) 15.8%, optimization, filters and coro 14.0%, core 12.6%,
+  compiler (arguments, HXB, server) 8.2%, syntax 8.0%, context (common,
+  display) 7.8%, codegen 3.4%, libs (swflib, ...) 2.5%, the runtime 3.4%
+  (allocation stubs 174 KB, `hxmc.rt` 103 KB, entry points 120 KB), std
+  1.5%. By instruction: `local.get` 25.1%, loads 10.7%, `local.set`
+  10.3%, `i64.const` 8.2%, stores 7.7%, `i32.wrap_i64` 6.2% (714,987
+  wraps), `i32.const` 5.6%, calls 4.5%, `br` 3.9%. The 817 functions with
+  a `try` (4% of them) are 3.49 MB of code (30%) and declare 126,313 of
+  the 180,103 locals (not coalesced): 253,540 bytes of two-byte local
+  indices, 52 KB of local declarations. The data is 80% zero bytes, the
+  upper halves of 8-byte slots holding 32-bit values for the most part
+  (zero runs of 64 bytes or more: 816 KB); it gzips to 213 KB.
+
+  What the planned changes would save (estimates, not additive in every
+  detail): the i32 pointer type 715 KB raw (the wraps) but only 57 KB
+  gzipped (simulated: they compress well); local coalescing in functions
+  with a `try` about 300 KB raw (indices and declarations), 157 KB
+  gzipped (simulated: every index in those functions one byte, as with
+  fewer than 128 locals); size-aware inlining, at most what inlining
+  costs: without it (`HXMC_INLINE=0,0,0`) 12,625,651 bytes, 2,799,906
+  gzipped (-915 KB, -292 KB), with `4,16,0` -812 KB and -262 KB, while
+  the port's self-compile under node takes the same time with all three
+  (19.9-20.4 s; inlining buys the playground's workload nothing). The
+  three together: about 11.6 MB raw (Emscripten's size) and 2.58 MB
+  gzipped. Not in the plans yet: `local.set x; local.get x` written as
+  `local.tee x` (188,150 pairs: -415 KB raw, -124 KB gzipped, simulated),
+  data segments split at runs of zeros (about -0.75 MB raw, little
+  gzipped), and the allocation stubs (21 bytes each) as direct calls of
+  `hxmc_alloc_slow` from the cold sites. With these too: about 10.5 MB raw
+  and 2.46 MB gzipped, still 10% above Emscripten's module gzipped: its
+  code compresses better (1.96 MB against 2.86 MB for similar raw sizes;
+  clang's inlining leaves fewer, larger functions).
 
 Benchmarks (`hxmc/bench/measure.py -n 3 --target wasm32-wasi --runner
 node|wasmtime`, best of 3, the same VM and session as the x86-64 column;
