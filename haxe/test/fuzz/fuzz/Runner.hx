@@ -136,13 +136,14 @@ class Runner {
 			output: "file:main.swf",
 			run: null
 		});
-		// the program compiled to a native executable by hxmc (bin/hxmc/hxmc)
+		// the program compiled to a native executable for the host by the hxmc tool
+		// (bin/hxmc/hxmc, with the target's std bin/hxmc/std: `make hxmc std`)
 		add({
 			name: "hxmc",
-			args: [],
+			args: ["-cp", root + "/bin/hxmc/std", "--custom-target", "hxmc"],
 			output: "none",
 			run: "{out}/prog",
-			compiler: "sh " + root + "/test/fuzz/hxmc.sh {out}"
+			compiler: root + "/bin/hxmc/hxmc {out}/prog"
 		});
 		return m;
 	}
@@ -207,8 +208,8 @@ class Runner {
 		var cwd = work + "/cwd";
 		rmrf(cwd);
 		FileSystem.createDirectory(cwd + "/out");
-		// as test/conformance.py: both compilers use the checkout's std
-		var std = shellQuote(root + "/haxe/std");
+		// as haxe/test/Conformance.hx: both compilers use the checkout's std
+		var std = shellQuote(root + "/haxe/upstream/std");
 		var env = "HAXE_STD_PATH=" + std + " HAXE_IN_HAXE_STD_PATH=" + std + " ";
 		var cmd = "cd " + shellQuote(cwd) + " && " + env + "timeout " + compileTimeout + " " + commandLine(side, "out")
 			+ " > compile.log 2>&1 < /dev/null; echo $? > compile.code";

@@ -348,7 +348,7 @@ class Driver {
 			return;
 		}
 		var rtPath = o.rtObj != null ? o.rtObj : Options.rtDir() + abi.name + "/rt.o";
-		if (!sys.FileSystem.exists(rtPath)) throw "hxmc: the runtime object " + rtPath + " is missing (hxmc/tools/mkrt.sh)";
+		if (!sys.FileSystem.exists(rtPath)) throw "hxmc: the runtime object " + rtPath + " is missing (make rt)";
 		var rt = ElfReader.read(sys.io.File.getBytes(rtPath));
 		var t4 = haxe.Timer.stamp();
 		var all = [data].concat(objs).concat([rt]);

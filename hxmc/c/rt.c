@@ -47,7 +47,7 @@ static size_t tlab_size; // with several threads (RT_TLAB_KB; default a 16th of 
 static size_t minor_size;
 static int stats;
 #ifdef RT_CENSUS_BUILD
-// (a debug build of the runtime object: HXMC_RT_CENSUS=1 hxmc/tools/mkrt.sh)
+// (a debug build of the runtime object: HXMC_RT_CENSUS=1 hxmc/c/mkrt.sh)
 static int census; // RT_CENSUS: 1 at exit, 2 also after each major collection
 static void census_now(const char *when);
 #endif

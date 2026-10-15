@@ -1,10 +1,9 @@
 #!/bin/sh
 # Builds mbedtls and libuv as static libraries for an hxmc target, with zig cc
-# and the flags of the target's runtime object (hxmc/tools/mkrt.sh), which
-# turns them into the separate objects ssl.o and uv.o (hxmc/README.md,
-# "sys.ssl and libuv"):
+# and the flags of the target's runtime object (hxmc/c/mkrt.sh), which
+# turns them into the separate objects ssl.o and uv.o (README.md, "hxmc"):
 #
-#   sh hxmc/tools/deps.sh <target> <out dir>     e.g. linux-x86_64 bin/hxmc/deps/linux-x86_64
+#   sh hxmc/c/deps.sh <target> <out dir>     e.g. linux-x86_64 bin/hxmc/deps/linux-x86_64
 #
 # Installs into the out dir:
 #   include/mbedtls, include/psa, include/uv.h, include/uv/
@@ -25,7 +24,7 @@ T=${1:?usage: deps.sh <target> <out dir>}
 OUT=${2:?usage: deps.sh <target> <out dir>}
 case $OUT in /*) ;; *) OUT=$ROOT/$OUT ;; esac
 
-# mbedtls 2.28 (LTS): the API hxmc/rt/rt_ssl.c is written against, as
+# mbedtls 2.28 (LTS): the API hxmc/c/rt_ssl.c is written against, as
 # upstream Haxe's bindings (haxe/libs/mbedtls) and the system 2.28 packages
 MBEDTLS_VERSION=2.28.10
 MBEDTLS_URL=https://github.com/Mbed-TLS/mbedtls.git

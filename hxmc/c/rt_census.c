@@ -1,5 +1,5 @@
 // The runtime of hxmc's programs; see rt.h. In the runtime object's debug
-// build only (HXMC_RT_CENSUS=1 hxmc/tools/mkrt.sh).
+// build only (HXMC_RT_CENSUS=1 hxmc/c/mkrt.sh).
 // RT_CENSUS=1: a heap census at exit (after a major collection, so only live
 // objects are counted); RT_CENSUS=2 also after every major collection.
 // Reports live bytes and object counts per type, what the same data would

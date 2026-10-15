@@ -1,7 +1,9 @@
 /bin/
-/test/generated/
-/test/reference/
 /.haxelib/
-__pycache__/
 /.claude/worktrees/
 *.o
+*.tgz
+# generated for the npm package (make npm)
+/hxmc/bootstrap/haxe.wasm
+/hxmc/bootstrap/hxmc-std/
+/hxmc/bootstrap/rt/

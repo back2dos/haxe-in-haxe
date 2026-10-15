@@ -1,6 +1,6 @@
 # The website's scripts (`make site`): one JavaScript file per page script,
 # into bin/site. Run from the repository root.
--cp site/src
+-cp hxmc/web/src
 -dce full
 -D js-es=6
 --each

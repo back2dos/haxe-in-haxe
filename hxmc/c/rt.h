@@ -1,4 +1,4 @@
-// The runtime of hxmc's programs (hxmc/README.md, "Runtime").
+// The runtime of hxmc's programs (README.md, "hxmc").
 //
 // Values: Int/Bool are int32_t, Float is double, haxe.Int64 is int64_t,
 // everything else a pointer to a heap object or a static object (string

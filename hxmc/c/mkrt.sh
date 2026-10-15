@@ -1,17 +1,21 @@
 #!/bin/sh
-# Builds the runtime object of an hxmc target (hxmc/README.md, "Runtime"):
-# hxmc/rt compiled by zig cc -O2 for the target, partially linked (ld -r) with
+# Builds the runtime object of an hxmc target (README.md, "hxmc"):
+# hxmc/c compiled by zig cc -O2 for the target, partially linked (ld -r) with
 # the parts of the C library it and generated code use, into one relocatable
 # object bin/hxmc/rt/<target>/rt.o, which hxmc's linker then links with the
 # program (and lays out once, see Link.hx). Next to it, ssl.o and uv.o:
 # sys.ssl (rt_ssl.c with mbedtls) and libuv (rt_uv.c with libuv), linked only
-# into programs that refer to them, from the libraries hxmc/tools/deps.sh
+# into programs that refer to them, from the libraries hxmc/c/deps.sh
 # built into bin/hxmc/deps/<target> (DEPS); without them, stubs that throw.
-#   sh hxmc/tools/mkrt.sh linux-x86_64
+# zig must be the version of hxmc/c/zig-version (the objects are published
+# by a hash of hxmc/c: hxmc/bootstrap/rt.mjs).
+#   sh hxmc/c/mkrt.sh linux-x86_64
 set -eu
 target=$1
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 ZIG=${ZIG:-zig}
+want=$(cat "$ROOT/hxmc/c/zig-version")
+[ "$($ZIG version)" = "$want" ] || echo "mkrt: zig $($ZIG version), hxmc/c/zig-version says $want" >&2
 case $target in
 linux-x86_64) triple=x86_64-linux-musl ;;
 linux-arm64) triple=aarch64-linux-musl ;;
@@ -24,16 +28,16 @@ esac
 out=$ROOT/bin/hxmc/rt/$target
 deps=${DEPS:-$ROOT/bin/hxmc/deps/$target}
 mkdir -p "$out/obj"
-CFLAGS="-O2 -g0 -w -fno-strict-aliasing -fno-pie -fno-pic -ffunction-sections -fdata-sections -DRT_CALL_ON_STACK -I $ROOT/hxmc/rt"
+CFLAGS="-O2 -g0 -w -fno-strict-aliasing -fno-pie -fno-pic -ffunction-sections -fdata-sections -DRT_CALL_ON_STACK -I $ROOT/hxmc/c"
 files="rt rt_dyn rt_thread"
 case $target in
 windows-*)
-	CFLAGS="-O2 -g0 -w -fno-strict-aliasing -I $ROOT/hxmc/rt"
+	CFLAGS="-O2 -g0 -w -fno-strict-aliasing -I $ROOT/hxmc/c"
 	files="$files rt_win" ;;
 macos-*)
 	# position-independent (macOS executables are), against libSystem;
 	# arm64 macOS calls main on its own stack without ucontext already
-	CFLAGS="-O2 -g0 -w -fno-strict-aliasing -mmacosx-version-min=$([ $target = macos-arm64 ] && echo 11.0 || echo 10.15) -I $ROOT/hxmc/rt" ;;
+	CFLAGS="-O2 -g0 -w -fno-strict-aliasing -mmacosx-version-min=$([ $target = macos-arm64 ] && echo 11.0 || echo 10.15) -I $ROOT/hxmc/c" ;;
 esac
 # HXMC_RT_CENSUS=1: a debug build with the heap census (RT_CENSUS, rt_census.c)
 if [ "${HXMC_RT_CENSUS:-}" = 1 ]; then
@@ -42,22 +46,23 @@ if [ "${HXMC_RT_CENSUS:-}" = 1 ]; then
 fi
 objs=
 for f in $files; do
-	$ZIG cc -target $triple $CFLAGS -c "$ROOT/hxmc/rt/$f.c" -o "$out/obj/$f.o" &
+	$ZIG cc -target $triple $CFLAGS -c "$ROOT/hxmc/c/$f.c" -o "$out/obj/$f.o" &
 	objs="$objs $out/obj/$f.o"
 done
 # the slow paths of generated code (rthxmc.c)
-$ZIG cc -target $triple $CFLAGS -c "$ROOT/hxmc/rt/rthxmc.c" -o "$out/obj/rthxmc.o" &
+$ZIG cc -target $triple $CFLAGS -c "$ROOT/hxmc/c/rthxmc.c" -o "$out/obj/rthxmc.o" &
 objs="$objs $out/obj/rthxmc.o"
 # rt_ssl.c and rt_uv.c: with mbedtls and libuv when deps.sh built them, else stubs
 if [ -f "$deps/VERSIONS" ]; then
-	$ZIG cc -target $triple $CFLAGS -I "$deps/include" -c "$ROOT/hxmc/rt/rt_ssl.c" -o "$out/obj/rt_ssl.o" &
-	$ZIG cc -target $triple $CFLAGS -I "$deps/include" -c "$ROOT/hxmc/rt/rt_uv.c" -o "$out/obj/rt_uv.o" &
+	$ZIG cc -target $triple $CFLAGS -I "$deps/include" -c "$ROOT/hxmc/c/rt_ssl.c" -o "$out/obj/rt_ssl.o" &
+	$ZIG cc -target $triple $CFLAGS -I "$deps/include" -c "$ROOT/hxmc/c/rt_uv.c" -o "$out/obj/rt_uv.o" &
 	sslar="$deps/lib/libmbedtls.a $deps/lib/libmbedx509.a $deps/lib/libmbedcrypto.a"
 	uvar="$deps/lib/libuv.a"
+	cp "$deps/LICENSE.mbedtls" "$deps/LICENSE.libuv" "$out/.."/
 else
-	echo "mkrt: no $deps/VERSIONS (hxmc/tools/deps.sh): sys.ssl and libuv are stubs that throw" >&2
-	$ZIG cc -target $triple $CFLAGS -DHXMC_NO_SSL -c "$ROOT/hxmc/rt/rt_ssl.c" -o "$out/obj/rt_ssl.o" &
-	$ZIG cc -target $triple $CFLAGS -DHXMC_NO_UV -c "$ROOT/hxmc/rt/rt_uv.c" -o "$out/obj/rt_uv.o" &
+	echo "mkrt: no $deps/VERSIONS (hxmc/c/deps.sh): sys.ssl and libuv are stubs that throw" >&2
+	$ZIG cc -target $triple $CFLAGS -DHXMC_NO_SSL -c "$ROOT/hxmc/c/rt_ssl.c" -o "$out/obj/rt_ssl.o" &
+	$ZIG cc -target $triple $CFLAGS -DHXMC_NO_UV -c "$ROOT/hxmc/c/rt_uv.c" -o "$out/obj/rt_uv.o" &
 	sslar=
 	uvar=
 fi
@@ -137,7 +142,7 @@ ld.lld -r --strip-debug -o "$out/uv.o" "$out/obj/rt_uv.o" $uvar
 undef="-u _setjmp"
 for f in $libm $(nm -u "$out/ssl.o" "$out/uv.o" | awk '{print $2}' | grep -v '^hx\|^haxe_' | sort -u); do undef="$undef -u $f"; done
 # word-at-a-time memcmp and bcmp in place of musl's byte loops (rtlibc.c)
-$ZIG cc -target $triple -O2 -g0 -ffreestanding -fno-builtin -ffunction-sections -c "$ROOT/hxmc/rt/rtlibc.c" -o "$out/obj/rtlibc.o"
+$ZIG cc -target $triple -O2 -g0 -ffreestanding -fno-builtin -ffunction-sections -c "$ROOT/hxmc/c/rtlibc.c" -o "$out/obj/rtlibc.o"
 objs="$objs $out/obj/rtlibc.o"
 ld.lld -r --strip-debug -o "$out/rt.o" $undef "$crt1" $objs --start-group $libs --end-group
 ls -l "$out/rt.o" "$out/ssl.o" "$out/uv.o"

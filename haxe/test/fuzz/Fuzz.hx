@@ -13,7 +13,7 @@ import sys.thread.Lock;
 	that the port compiles them exactly like the pinned reference compiler.
 
 	Build with hxmc: `make fuzz`, run `bin/fuzz/fuzz --help`.
-	See test/fuzz/README.md.
+	See README.md, "Testing" (the fuzzer).
 **/
 class Fuzz {
 	static var USAGE = "Usage: fuzz [options]
@@ -26,7 +26,7 @@ Lanes (repeatable; default diff:hxb):
 Targets: hxb interp js lua python neko hl hlc php cpp jvm swf hxmc, or --target-def.
 
 Options:
-  --ref CMD           reference compiler (default $HAXE_REFERENCE or haxe/haxe)
+  --ref CMD           reference compiler (default $HAXE_REFERENCE or bin/reference/haxe)
   --port CMD          port compiler (default $HAXE_IN_HAXE_PORT or bin/port/haxe)
   --run               diff lanes also run both outputs and compare program output
   -n, --count N       number of programs (default 100; 0: until --time)
@@ -42,7 +42,7 @@ Options:
   --reduce N          reduce each new failure with up to N test runs (default 200; 0: off)
   --keep N            failures saved per signature (default 2)
   -D X                extra define for every compilation
-  --out DIR           work and results directory (default test/generated/fuzz)
+  --out DIR           work and results directory (default bin/test/fuzz)
   --target-def SPEC   custom target name|args|output|run, args separated by spaces,
                       output none, file:P, dir:P, zip:P or hxb:P, run optional ({out} = output dir)
   --emit DIR          only write the programs to DIR/<seed>/ and exit
@@ -86,7 +86,7 @@ Options:
 		Runner.root = root;
 		var ref = Sys.getEnv("HAXE_REFERENCE");
 		if (ref == null)
-			ref = root + "/haxe/haxe";
+			ref = root + "/bin/reference/haxe";
 		var port = Sys.getEnv("HAXE_IN_HAXE_PORT");
 		if (port == null)
 			port = root + "/bin/port/haxe";
@@ -96,7 +96,7 @@ Options:
 		var custom = [];
 		var emit:Null<String> = null;
 		seed = Std.int(Sys.time() * 1000) & 0x3FFFFFFF;
-		outDir = root + "/test/generated/fuzz";
+		outDir = root + "/bin/test/fuzz";
 		var i = 0;
 		function arg():String {
 			if (i + 1 >= args.length) {
@@ -386,7 +386,7 @@ Options:
 		File.saveContent(dir + "/verdict.txt", b.toString());
 		var sh = new StringBuf();
 		sh.add("#!/bin/sh\n# Re-runs both sides of lane " + lane.name + " from this directory.\ncd \"$(dirname \"$0\")\"\n");
-		sh.add("export HAXE_STD_PATH=" + Runner.root + "/haxe/std HAXE_IN_HAXE_STD_PATH=" + Runner.root + "/haxe/std\n");
+		sh.add("export HAXE_STD_PATH=" + Runner.root + "/haxe/upstream/std HAXE_IN_HAXE_STD_PATH=" + Runner.root + "/haxe/upstream/std\n");
 		for (side in [lane.a, lane.b]) {
 			sh.add("rm -rf " + side.label + " && mkdir -p " + side.label + "/out && (cd " + side.label + " && " + Runner.commandLine(side, "out") + ")");
 			sh.add("; echo \"" + side.label + ": exit $?\"\n");

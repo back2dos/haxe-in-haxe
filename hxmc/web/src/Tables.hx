@@ -6,9 +6,9 @@ import js.Browser.window;
 import js.html.Element;
 import js.html.TableCellElement;
 
-// The Benchmarks and Target generators sections: tables of bench.json
-// (site/bench/run.py), programs.json (site/bench/haxebench.py) and
-// targets.json (site/bench/targets.py), copied by `make site` (Makefile).
+// The Benchmarks and Target generators sections: tables of bench.json,
+// programs.json and targets.json (measured results, hxmc/web/data), copied
+// by `make site` (Makefile).
 typedef BenchRun = {
 	workload:String,
 	runner:String,

@@ -1,4 +1,4 @@
-// C library functions for hxmc's static Linux runtime (hxmc/tools/mkrt.sh)
+// C library functions for hxmc's static Linux runtime (hxmc/c/mkrt.sh)
 // where musl's compare one byte at a time and the runtime leans on them
 // (haxe.io.Bytes.compare, string comparison): 8 bytes at a time here.
 // Built freestanding (no builtins), so the loops stay loops.
