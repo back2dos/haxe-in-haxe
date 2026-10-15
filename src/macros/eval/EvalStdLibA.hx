@@ -36,13 +36,10 @@ import macros.eval.EvalField;
 import macros.eval.EvalString;
 
 using macros.eval.EvalValue.EvalValueTools;
-// port: the host natives of hxc (hxc/std) or of hxmc (hxmc/std, the machine-code target)
+// port: the host natives of hxmc (hxmc/std)
 #if (target.name == "hxmc")
 import hxmc.NativeGc;
 import hxmc.NativeNet;
-#elseif (target.name == "hxc")
-import hxc.NativeGc;
-import hxc.NativeNet;
 #end
 
 // port: haxe/src/macro/eval/evalStdLib.ml, lines 45-1484 (StdEvalVector to StdLock,
@@ -1795,7 +1792,7 @@ class StdGc {
 		hl.Gc.major();
 		#elseif cpp
 		cpp.vm.Gc.run(true);
-		#elseif (target.name == "hxc" || target.name == "hxmc")
+		#elseif (target.name == "hxmc")
 		// port: a collection, then the finalisers it found due (rt.c)
 		NativeGc.collect(full);
 		NativeGc.runFinalisers();
@@ -1805,9 +1802,9 @@ class StdGc {
 	static function unsupported(name:String):Dynamic return EvalStdLibA.notSupported("Gc." + name);
 
 	// port: the host has no OCaml GC statistics. The statistics are zero except the heap
-	// size, which the hxc host measures (as `heap_words`, 8-byte words).
+	// size, which the hxmc host measures (as `heap_words`, 8-byte words).
 	static function hostStats():Value {
-		var heapWords = #if (target.name == "hxc" || target.name == "hxmc") Std.int(NativeGc.heapBytes() / 8) #else 0 #end;
+		var heapWords = #if (target.name == "hxmc") Std.int(NativeGc.heapBytes() / 8) #else 0 #end;
 		return EvalEncode.encodeObj([
 			{name: key_minor_words, value: VFloat(0.)},
 			{name: key_promoted_words, value: VFloat(0.)},
@@ -1854,8 +1851,8 @@ class StdGc {
 		]);
 	});
 
-	#if (target.name == "hxc" || target.name == "hxmc")
-	// port: the hxc host GC has OCaml's finalisers (hxc/rt/rt.c)
+	#if (target.name == "hxmc")
+	// port: the hxmc host GC has OCaml's finalisers (hxmc/rt/rt.c)
 	public static final finalise = EvalEncode.vfun2((f, v) -> {
 		NativeGc.finalise((v:Value) -> {
 			EvalMisc.callValue(f, [v]);
@@ -1944,7 +1941,7 @@ class StdHost {
 	}
 
 	public static final localhost = EvalEncode.vfun0(() -> {
-		#if (target.name == "hxc" || target.name == "hxmc")
+		#if (target.name == "hxmc")
 		// port: catch_unix_error Unix.gethostname
 		var name = NativeNet.gethostname();
 		if (name == null) macros.eval.EvalStdLibB.StdSocket.unixError("gethostname");
@@ -1956,7 +1953,7 @@ class StdHost {
 
 	public static final hostReverse = EvalEncode.vfun1(ip -> {
 		var ip = EvalDecode.decodeI32(ip);
-		#if (target.name == "hxc" || target.name == "hxmc")
+		#if (target.name == "hxmc")
 		// port: Unix.gethostbyaddr raises Not_found
 		var name = NativeNet.reverse(ip);
 		if (name == null) EvalContext.excString("Could not reverse host");
@@ -1973,7 +1970,7 @@ class StdHost {
 
 	public static final resolve = EvalEncode.vfun1(name -> {
 		var name = EvalDecode.decodeString(name);
-		#if (target.name == "hxc" || target.name == "hxmc")
+		#if (target.name == "hxmc")
 		// port: Unix.gethostbyname raises Not_found; the address is h_addr_list.(0)
 		var a = NativeNet.resolve(name);
 		if (a == null) EvalContext.excString('Could not resolve host $name');

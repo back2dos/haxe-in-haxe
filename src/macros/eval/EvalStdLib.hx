@@ -80,11 +80,9 @@ import macros.eval.EvalStdLibB.StdNativeString;
 import macros.eval.EvalStdLibB.StdLibBHelpers;
 
 using macros.eval.EvalValue.EvalValueTools;
-// port: the host natives of hxc (hxc/std) or of hxmc (hxmc/std, the machine-code target)
+// port: the host natives of hxmc (hxmc/std)
 #if (target.name == "hxmc")
 import hxmc.NativeNet;
-#elseif (target.name == "hxc")
-import hxc.NativeNet;
 #end
 
 // port: haxe/src/macro/eval/evalStdLib.ml: the shared helpers (lines 1-44) and the
@@ -97,9 +95,9 @@ import hxc.NativeNet;
 //   becomes an Eval string exception carrying the host message.
 // - `hashtbl_keys` follows the host map's key order (OCaml `Hashtbl` order is
 //   not reproduced).
-// - libuv (`EvalLuv`) and mbedtls (`EvalSsl`) work on the hxc host
-//   (hxc/); elsewhere their natives throw "... is not supported by
-//   haxe-in-haxe". Sockets use `hxc.NativeNet` on the hxc host and
+// - libuv (`EvalLuv`) and mbedtls (`EvalSsl`) work on the hxmc host
+//   (hxmc/); elsewhere their natives throw "... is not supported by
+//   haxe-in-haxe". Sockets use `hxmc.NativeNet` on the hxmc host and
 //   `EvalHostNet` on HashLink, and fail likewise on other hosts.
 // - zlib streams are libs.extc.Extc streams (Zlib for deflate, Inflater for inflate).
 // - Field lists are `{name, value}` pairs instead of OCaml tuples.
@@ -266,7 +264,7 @@ class EvalStdLib {
 			case _: die();
 		});
 		add(EvalHash.key_eval_vm_NativeSocket, _ -> {
-			#if (target.name == "hxc" || target.name == "hxmc" || hl)
+			#if (target.name == "hxmc" || hl)
 			// port: catch_unix_error Unix.socket PF_INET SOCK_STREAM 0
 			var fd = macros.eval.EvalStdLibB.StdSocket.check(#if hl macros.eval.EvalHostNet #else NativeNet #end.socket(), "socket");
 			EvalEncode.encodeInstance(EvalHash.key_eval_vm_NativeSocket, ISocket(fd));

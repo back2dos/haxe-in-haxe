@@ -6,13 +6,13 @@ import sys.net.Host;
 import sys.net.Socket;
 
 // port: HashLink host for the Eval socket natives (EvalStdLibB.hx StdSocket): the
-// interface of the hxc target's `hxc.NativeNet` (hxc/std), which
+// interface of the hxmc target's `hxmc.NativeNet` (hxmc/std), which
 // stands for OCaml's Unix module, over the host's sys.net.Socket.
 //
 // Host differences: sockets are numbered handles into a table rather than
 // file descriptors, and the host API reports failures as exceptions whose
 // text replaces `Unix.error_message` (`strerror` returns the last one).
-// Addresses are host-order IPv4 ints, as in `hxc.NativeNet`.
+// Addresses are host-order IPv4 ints, as in `hxmc.NativeNet`.
 class EvalHostNet {
 	static final sockets = new Map<Int, Socket>();
 	static var nextHandle = 3;

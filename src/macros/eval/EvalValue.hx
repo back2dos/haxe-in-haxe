@@ -141,7 +141,7 @@ class RuntimeInt64Hashtbl<V> {
 	public final h:OcamlHashtbl<haxe.Int64, V>;
 
 	public function new(?h:OcamlHashtbl<haxe.Int64, V>) this.h = h == null ? new OcamlHashtbl(_ -> 0,
-		(a:haxe.Int64, b:haxe.Int64) -> a == b, 0) : h; // port: typed: Int64 equality, not physical (hxc boxes Int64)
+		(a:haxe.Int64, b:haxe.Int64) -> a == b, 0) : h; // port: typed: Int64 equality, not physical (hxmc boxes Int64)
 
 	public function add(key:haxe.Int64, v:V):Void h.replace(key, v);
 
@@ -353,7 +353,7 @@ enum VinstanceKind {
 	ILazyType(l:core.TType.TLazy, f:Void->Value);
 	IRef(o:Dynamic);
 	// SSL
-	// port: contexts are host handles (hxc.NativeSsl on the hxc host)
+	// port: contexts are host handles (hxmc.NativeSsl on the hxmc host)
 	IMbedtlsConfig(c:Dynamic);
 	IMbedtlsCtrDrbg(c:Dynamic);
 	IMbedtlsEntropy(c:Dynamic);

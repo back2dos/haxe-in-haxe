@@ -39,7 +39,7 @@ using macros.eval.EvalValue.EvalValueTools;
 //
 // Deviations:
 // - `Luv.Error.set_on_unhandled_exception` sets `EvalLuv.exceptionHandler`
-//   (libuv works on the hxc host only, see `EvalLuv`).
+//   (libuv works on the hxmc host only, see `EvalLuv`).
 // - `valueSignature` returns the MD5 digest as a lowercase hex string
 //   (the port keeps digests hexadecimal; upstream callers apply
 //   `Digest.to_hex` to the raw digest).

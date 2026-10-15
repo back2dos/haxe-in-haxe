@@ -45,7 +45,7 @@ of them exist:
 - **Unsupported natives** throw a clear error ("... is not supported by
   haxe-in-haxe"); never fake a result. The debugger (`evalDebug*.ml`, debug
   socket) is translated (`EvalDebug*.hx`). libuv (`evalLuv.ml`) and mbedtls (`evalSsl.ml`) are
-  ported over the hxc runtime's natives (`hxc.NativeUv`, `hxc.NativeSsl`);
+  ported over the hxmc runtime's natives (`hxmc.NativeUv`, `hxmc.NativeSsl`);
   on other hosts their natives fail the same way (the `eval.luv` threads and
   synchronization primitives work everywhere).
 - Translate argument evaluation order explicitly where OCaml's right-to-left

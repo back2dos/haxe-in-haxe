@@ -44,11 +44,9 @@ import macros.eval.EvalStdLibA.StdCompress;
 import compiler.io.CompilerIo;
 
 using macros.eval.EvalValue.EvalValueTools;
-// port: the host natives of hxc (hxc/std) or of hxmc (hxmc/std, the machine-code target)
+// port: the host natives of hxmc (hxmc/std)
 #if (target.name == "hxmc")
 import hxmc.NativeNet;
-#elseif (target.name == "hxc")
-import hxc.NativeNet;
 #end
 
 // port: haxe/src/macro/eval/evalStdLib.ml, second half (lines 1485-3367: `StdLog` ..
@@ -60,8 +58,8 @@ import hxc.NativeNet;
 //   do not depend on the static initialisation order of the classes.
 // - `Math.random`/`Std.random` use the host generator instead of OCaml's
 //   `Random.State`.
-// - Sockets (`eval.vm.NativeSocket`) use BSD sockets through `hxc.NativeNet`
-//   on the hxc host (hxc/) and `EvalHostNet` on HashLink; on other hosts
+// - Sockets (`eval.vm.NativeSocket`) use BSD sockets through `hxmc.NativeNet`
+//   on the hxmc host (hxmc/) and `EvalHostNet` on HashLink; on other hosts
 //   every native throws a clear error.
 // - Threads are host threads: `exit` of a `Thread`-mode thread behaves as
 //   upstream's `Domain` branch (there is no `Thread.exit`), and `join` waits
@@ -964,14 +962,14 @@ class StdSha1 {
 	});
 }
 
-#if (target.name == "hxc" || target.name == "hxmc")
+#if (target.name == "hxmc")
 private typedef SocketHost = NativeNet;
 #elseif hl
 private typedef SocketHost = macros.eval.EvalHostNet;
 #end
 
-// port: sockets: on the hxc host (hxc/) the natives call BSD sockets through
-// `hxc.NativeNet` (hxc/rt/rt_net.c) where upstream calls OCaml's Unix
+// port: sockets: on the hxmc host (hxmc/) the natives call BSD sockets through
+// `hxmc.NativeNet` (hxmc/std/hxmc/rt/PosixNet.hx, WinNet.hx) where upstream calls OCaml's Unix
 // module; a socket is its file descriptor. On HashLink, EvalHostNet offers
 // the same interface over the host's sys.net.Socket. Other hosts keep
 // upstream's names and argument checks, then fail ("... is not supported by
@@ -984,7 +982,7 @@ class StdSocket {
 		}
 	}
 
-	#if (target.name == "hxc" || target.name == "hxmc" || hl)
+	#if (target.name == "hxmc" || hl)
 	// port: `catch_unix_error`: `Unix_error(err, cmd, args)` becomes "message(cmd, args)".
 	public static function unixError(cmd:String):Dynamic {
 		return EvalContext.excString(SocketHost.strerror(SocketHost.errno()) + "(" + cmd + ", )");
@@ -1016,7 +1014,7 @@ class StdSocket {
 
 	public static final accept = EvalEncode.vifun0(vthis -> {
 		var self = thisValue(vthis);
-		#if (target.name == "hxc" || target.name == "hxmc" || hl)
+		#if (target.name == "hxmc" || hl)
 		var socket = check(EvalLock.blocking(() -> SocketHost.accept(self)), "accept");
 		EvalEncode.encodeInstance(EvalHash.key_eval_vm_NativeSocket, ISocket(socket));
 		#else
@@ -1028,7 +1026,7 @@ class StdSocket {
 		var self = thisValue(vthis);
 		var host = EvalDecode.decodeI32(host);
 		var port = EvalDecode.decodeInt(port);
-		#if (target.name == "hxc" || target.name == "hxmc" || hl)
+		#if (target.name == "hxmc" || hl)
 		check(SocketHost.bind(self, host, port), "bind");
 		VNull;
 		#else
@@ -1037,7 +1035,7 @@ class StdSocket {
 	});
 
 	public static final close = EvalEncode.vifun0(vthis -> {
-		#if (target.name == "hxc" || target.name == "hxmc" || hl)
+		#if (target.name == "hxmc" || hl)
 		check(SocketHost.close(thisValue(vthis)), "close");
 		VNull;
 		#else
@@ -1050,7 +1048,7 @@ class StdSocket {
 		var self = thisValue(vthis);
 		var host = EvalDecode.decodeI32(host);
 		var port = EvalDecode.decodeInt(port);
-		#if (target.name == "hxc" || target.name == "hxmc" || hl)
+		#if (target.name == "hxmc" || hl)
 		check(EvalLock.blocking(() -> SocketHost.connect(self, host, port)), "connect");
 		VNull;
 		#else
@@ -1059,7 +1057,7 @@ class StdSocket {
 	});
 
 	public static final host = EvalEncode.vifun0(vthis -> {
-		#if (target.name == "hxc" || target.name == "hxmc" || hl)
+		#if (target.name == "hxmc" || hl)
 		encodeAddr(SocketHost.sockName(thisValue(vthis), false), "getsockname");
 		#else
 		thisValue(vthis);
@@ -1070,7 +1068,7 @@ class StdSocket {
 	public static final listen = EvalEncode.vifun1((vthis, connections) -> {
 		var self = thisValue(vthis);
 		var connections = EvalDecode.decodeInt(connections);
-		#if (target.name == "hxc" || target.name == "hxmc" || hl)
+		#if (target.name == "hxmc" || hl)
 		check(SocketHost.listen(self, connections), "listen");
 		VNull;
 		#else
@@ -1079,7 +1077,7 @@ class StdSocket {
 	});
 
 	public static final peer = EvalEncode.vifun0(vthis -> {
-		#if (target.name == "hxc" || target.name == "hxmc" || hl)
+		#if (target.name == "hxmc" || hl)
 		encodeAddr(SocketHost.sockName(thisValue(vthis), true), "getpeername");
 		#else
 		thisValue(vthis);
@@ -1092,7 +1090,7 @@ class StdSocket {
 		var buf = EvalDecode.decodeBytes(buf);
 		var pos = EvalDecode.decodeInt(pos);
 		var len = EvalDecode.decodeInt(len);
-		#if (target.name == "hxc" || target.name == "hxmc" || hl)
+		#if (target.name == "hxmc" || hl)
 		VInt32(check(EvalLock.blocking(() -> SocketHost.recv(self, buf, pos, len)), "recv"));
 		#else
 		StdLibBHelpers.socketsNotSupported();
@@ -1100,7 +1098,7 @@ class StdSocket {
 	});
 
 	public static final receiveChar = EvalEncode.vifun0(vthis -> {
-		#if (target.name == "hxc" || target.name == "hxmc" || hl)
+		#if (target.name == "hxmc" || hl)
 		var buf = Bytes.alloc(1);
 		buf.set(0, 0);
 		var self = thisValue(vthis);
@@ -1113,7 +1111,7 @@ class StdSocket {
 	});
 
 	public static final select = EvalEncode.vfun4((read, write, others, timeout) -> {
-		#if (target.name == "hxc" || target.name == "hxmc" || hl)
+		#if (target.name == "hxmc" || hl)
 		var proto = EvalContext.getInstancePrototype(EvalContext.getCtx(), EvalHash.key_sys_net_Socket, Globals.nullPos);
 		var i = EvalContext.getInstanceFieldIndex(proto, EvalHash.key_socket, Globals.nullPos);
 		function pair(v:Value):{fd:Int, v:Value} {
@@ -1172,7 +1170,7 @@ class StdSocket {
 		var buf = EvalDecode.decodeBytes(buf);
 		var pos = EvalDecode.decodeInt(pos);
 		var len = EvalDecode.decodeInt(len);
-		#if (target.name == "hxc" || target.name == "hxmc" || hl)
+		#if (target.name == "hxmc" || hl)
 		VInt32(check(EvalLock.blocking(() -> SocketHost.send(self, buf, pos, len)), "send"));
 		#else
 		StdLibBHelpers.socketsNotSupported();
@@ -1182,7 +1180,7 @@ class StdSocket {
 	public static final sendChar = EvalEncode.vifun1((vthis, char) -> {
 		var self = thisValue(vthis);
 		var char = EvalDecode.decodeInt(char);
-		#if (target.name == "hxc" || target.name == "hxmc" || hl)
+		#if (target.name == "hxmc" || hl)
 		// port: char_of_int
 		if (char < 0 || char > 255) throw new InvalidArgument("char_of_int");
 		var buf = Bytes.alloc(1);
@@ -1197,7 +1195,7 @@ class StdSocket {
 	public static final setFastSend = EvalEncode.vifun1((vthis, b) -> {
 		var self = thisValue(vthis);
 		var b = EvalDecode.decodeBool(b);
-		#if (target.name == "hxc" || target.name == "hxmc" || hl)
+		#if (target.name == "hxmc" || hl)
 		check(SocketHost.setNoDelay(self, b), "setsockopt");
 		VNull;
 		#else
@@ -1208,7 +1206,7 @@ class StdSocket {
 	public static final setBroadcast = EvalEncode.vifun1((vthis, b) -> {
 		var self = thisValue(vthis);
 		var b = EvalDecode.decodeBool(b);
-		#if (target.name == "hxc" || target.name == "hxmc" || hl)
+		#if (target.name == "hxmc" || hl)
 		check(SocketHost.setBroadcast(self, b), "setsockopt");
 		VNull;
 		#else
@@ -1218,7 +1216,7 @@ class StdSocket {
 
 	public static final setTimeout = EvalEncode.vifun1((vthis, timeout) -> {
 		var self = thisValue(vthis);
-		#if (target.name == "hxc" || target.name == "hxmc" || hl)
+		#if (target.name == "hxmc" || hl)
 		var timeout = timeoutValue(timeout);
 		var timeout = timeout * 1000.;
 		check(SocketHost.setTimeout(self, timeout), "setsockopt_float");
@@ -1236,7 +1234,7 @@ class StdSocket {
 				case [_, VTrue]: 1; // port: SHUTDOWN_SEND
 				case _: EvalContext.excString("Nothing to shut down");
 			}
-		#if (target.name == "hxc" || target.name == "hxmc" || hl)
+		#if (target.name == "hxmc" || hl)
 		check(SocketHost.shutdown(self, mode), "shutdown");
 		VNull;
 		#else

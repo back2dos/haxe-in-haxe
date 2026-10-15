@@ -15,21 +15,19 @@ import macros.eval.EvalExceptions;
 import macros.eval.EvalMisc;
 import macros.eval.EvalField;
 import macros.eval.EvalIntegers;
-// port: the host natives of hxc (hxc/std) or of hxmc (hxmc/std, the machine-code target)
+// port: the host natives of hxmc (hxmc/std)
 #if (target.name == "hxmc")
 import hxmc.NativeUv as Uv;
-#elseif (target.name == "hxc")
-import hxc.NativeUv as Uv;
 #end
 
 using macros.eval.EvalValue.EvalValueTools;
 
-// port: upstream calls the OCaml luv library (libuv bindings). On the hxc host
-// (hxc/) libuv is reached through `hxc.NativeUv` (hxc/rt/rt_uv.c),
+// port: upstream calls the OCaml luv library (libuv bindings). On the hxmc host
+// (hxmc/) libuv is reached through `hxmc.NativeUv` (hxmc/rt/rt_uv.c),
 // and this module also carries the parts of luv that are OCaml code
 // (callback bookkeeping, result conversion, `Buffer`, the request life cycle
-// of `File`), following luv's sources. On other hosts, and in hxc builds
-// without libuv (-DHXC_NO_UV), every eval.luv native fails with "libuv
+// of `File`), following luv's sources. On other hosts, and in hxmc builds
+// without libuv (-DHXMC_NO_UV, WebAssembly), every eval.luv native fails with "libuv
 // (eval.luv) is not supported by haxe-in-haxe", except `Thread`, `Once`,
 // `Mutex`, `RwLock`, `Semaphore`, `Condition` and `Barrier`, which need no
 // libuv here (see below).
@@ -75,7 +73,7 @@ class EvalLuv {
 
 	// port: whether eval.luv works on this host.
 	public static function available():Bool {
-		#if (target.name == "hxc" || target.name == "hxmc")
+		#if (target.name == "hxmc")
 		return Uv.available();
 		#else
 		return false;
@@ -3371,7 +3369,7 @@ class LuvOnce extends LuvSync {
 	}
 }
 
-#if !(target.name == "hxc" || target.name == "hxmc") // port: hosts without libuv: `EvalLuv.available()` is false and no field reaches these.
+#if !(target.name == "hxmc") // port: hosts without libuv: `EvalLuv.available()` is false and no field reaches these.
 private class Uv {
 	static function no():Dynamic return throw new Failure("libuv is not available on this host");
 

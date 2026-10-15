@@ -5,11 +5,9 @@ import sys.io.File;
 import sys.io.FileOutput;
 import sys.thread.Mutex;
 import core.ds.Failure;
-// port: the host natives of hxc (hxc/std) or of hxmc (hxmc/std, the machine-code target)
+// port: the host natives of hxmc (hxmc/std)
 #if (target.name == "hxmc")
 import hxmc.NativeSys;
-#elseif (target.name == "hxc")
-import hxc.NativeSys;
 #end
 
 // port: FilePath.t
@@ -192,8 +190,8 @@ class Path {
 	public static function getRealPath(path:String):String {
 		// port: Extc.get_real_path fails for a missing file (falling back to `path`);
 		// HashLink's fullPath returns null instead of throwing.
-		#if (target.name == "hxc" || target.name == "hxmc")
-		// port: Windows' get_real_path (each component as the file system spells it) is a native of the hxc host
+		#if (target.name == "hxmc")
+		// port: Windows' get_real_path (each component as the file system spells it) is a native of the hxmc host
 		if (isWindows) {
 			var r = NativeSys.realPath(path);
 			return r == null ? path : r;

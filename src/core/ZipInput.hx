@@ -15,11 +15,9 @@
 package core;
 
 import haxe.io.Bytes;
-// port: the host natives of hxc (hxc/std) or of hxmc (hxmc/std, the machine-code target)
+// port: the host natives of hxmc (hxmc/std)
 #if (target.name == "hxmc")
 import hxmc.NativeZip;
-#elseif (target.name == "hxc")
-import hxc.NativeZip;
 #end
 
 // port: the reading half of haxe/libs/ziplib/zip.ml (open_in, entries, read_entry,
@@ -197,9 +195,9 @@ class ZipInput {
 				var res = Bytes.alloc(e.uncompressedSize);
 				var z = try new haxe.zip.Uncompress(-15) catch (_:haxe.exceptions.NotImplementedException) null;
 				var written = if (z == null) {
-					#if (target.name == "hxc" || target.name == "hxmc")
-					// port: the hxc runtime inflates in C (hxc.NativeZip), several times faster
-					// than haxe.zip.InflateImpl.
+					#if (target.name == "hxmc")
+					// port: the hxmc runtime inflates natively (hxmc.NativeZip), several times
+					// faster than haxe.zip.InflateImpl.
 					var n = NativeZip.inflateRaw(data, 0, data.length, res, 0, res.length);
 					if (n < 0) throw new ZipError(filename, e.filename, "decompression error");
 					n;
@@ -230,8 +228,8 @@ class ZipInput {
 				}
 				if (written != e.uncompressedSize) throw new ZipError(filename, e.filename,
 					"wrong size for deflated entry (not enough data)");
-				// port: hxc computes the CRC in C (hxc.NativeZip)
-				var crc = #if (target.name == "hxc" || target.name == "hxmc") NativeZip.crc32(res, 0, res.length) #else haxe.crypto.Crc32.make(res) #end;
+				// port: hxmc computes the CRC natively (hxmc.NativeZip)
+				var crc = #if (target.name == "hxmc") NativeZip.crc32(res, 0, res.length) #else haxe.crypto.Crc32.make(res) #end;
 				if (crc != e.crc) throw new ZipError(filename, e.filename, "CRC mismatch");
 				return res;
 		}

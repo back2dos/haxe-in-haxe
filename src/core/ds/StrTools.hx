@@ -1,10 +1,8 @@
 package core.ds;
 
-// port: the host natives of hxc (hxc/std) or of hxmc (hxmc/std, the machine-code target)
+// port: the host natives of hxmc (hxmc/std)
 #if (target.name == "hxmc")
 import hxmc.Native;
-#elseif (target.name == "hxc")
-import hxc.Native;
 #end
 
 class StrTools {
@@ -19,7 +17,7 @@ class StrTools {
 	}
 
 	// port: OCaml's physical inequality `!=` on strings. HashLink compares the
-	// character buffers, the JVM and hxc (hxc/) references; other hosts have no
+	// character buffers, the JVM and hxmc (hxmc/) references; other hosts have no
 	// string identity and fall back to structural inequality (positions are then
 	// encoded more compactly than upstream when a macro rebuilt a file name).
 	public static inline function physNeq(a:Null<String>, b:Null<String>):Bool {
@@ -27,7 +25,7 @@ class StrTools {
 		return a == null || b == null ? a != b : @:privateAccess ((a.bytes : hl.Bytes) != (b.bytes : hl.Bytes));
 		#elseif jvm
 		return !jvm.Jvm.referenceEquals(a, b);
-		#elseif (target.name == "hxc" || target.name == "hxmc")
+		#elseif (target.name == "hxmc")
 		return !Native.refEq(a, b);
 		#else
 		return a != b;
@@ -35,7 +33,7 @@ class StrTools {
 	}
 
 	// port: whether physNeq/physEq observe string identity on this host.
-	public static inline final hasIdentity:Bool = #if (hl || jvm || target.name == "hxc" || target.name == "hxmc") true #else false #end;
+	public static inline final hasIdentity:Bool = #if (hl || jvm || target.name == "hxmc") true #else false #end;
 
 	// port: OCaml's physical equality `==` on strings (see physNeq).
 	public static inline function physEq(a:Null<String>, b:Null<String>):Bool return !physNeq(a, b);

@@ -5,7 +5,7 @@ import sys.thread.Mutex;
 import sys.thread.Lock;
 
 // port: substitute for Domainslib.Task, backed by threads (process-wide workers on
-// HL/C and hxc, see ForJob) rather than work-stealing domains. Worker exceptions
+// HL/C and hxmc, see ForJob) rather than work-stealing domains. Worker exceptions
 // propagate to the caller.
 class TaskPool {
 	public final workers:Int;
@@ -51,7 +51,7 @@ class TaskPool {
 		}
 		var chunk = chunkSize > 0 ? chunkSize : Std.int(Math.max(1, count / (8 * (threads + 1))));
 		var job = new ForJob(first, last, chunk, f);
-		#if (hlc || target.name == "hxc" || target.name == "hxmc")
+		#if (hlc || target.name == "hxmc")
 		ForJob.invite(job, threads);
 		#else
 		// port: HashLink JIT: threads stay scoped to the call. With persistent workers it
@@ -73,7 +73,7 @@ class TaskPool {
 		#end
 		job.work();
 		job.finish();
-		#if !(hlc || target.name == "hxc" || target.name == "hxmc")
+		#if !(hlc || target.name == "hxmc")
 		for (_ in 0...spawned) job.exited.wait();
 		#end
 	}
@@ -84,7 +84,7 @@ class TaskPool {
 // chunks already in flight, so a nested parallelFor never waits on a ticket
 // that a busy worker might not pick up.
 //
-// On HL/C and hxc, workers are process-wide threads started on first use and kept
+// On HL/C and hxmc, workers are process-wide threads started on first use and kept
 // for later calls (Domainslib keeps its domains for the pool's lifetime): starting
 // a HashLink thread registers it with the GC and blocks the caller until it
 // runs, which dominated the analyzer's many small per-class loops.
@@ -104,7 +104,7 @@ private class ForJob {
 	var failed = false;
 	var failure:Dynamic = null;
 
-	#if !(hlc || target.name == "hxc" || target.name == "hxmc")
+	#if !(hlc || target.name == "hxmc")
 	public final exited = new Lock();
 	#end
 

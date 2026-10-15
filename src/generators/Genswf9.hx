@@ -162,7 +162,7 @@ class Genswf9 {
 
 	static function stack_error(p:Pos):Dynamic return Error.abort("Stack error", p);
 
-	// port: built on first use: hxc initialises statics before the monomorph allocator.
+	// port: built on first use: hxmc initialises statics before the monomorph allocator.
 	static var ethis_cache:Null<TExpr> = null;
 
 	static var ethis(get, never):TExpr;

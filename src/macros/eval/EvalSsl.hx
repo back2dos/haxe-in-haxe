@@ -8,17 +8,14 @@ import macros.eval.EvalDecode;
 import macros.eval.EvalExceptions;
 
 using macros.eval.EvalValue.EvalValueTools;
-// port: the host natives of hxc (hxc/std) or of hxmc (hxmc/std, the machine-code target)
+// port: the host natives of hxmc (hxmc/std)
 #if (target.name == "hxmc")
 import hxmc.NativeNet;
 import hxmc.NativeSsl;
-#elseif (target.name == "hxc")
-import hxc.NativeNet;
-import hxc.NativeSsl;
 #end
 
-// port: upstream calls the OCaml mbedtls bindings (haxe/libs/mbedtls). On the hxc
-// host (hxc/) they are `hxc.NativeSsl` (hxc/rt/rt_ssl.c); on other
+// port: upstream calls the OCaml mbedtls bindings (haxe/libs/mbedtls). On the hxmc
+// host (hxmc/) they are `hxmc.NativeSsl` (hxmc/rt/rt_ssl.c); on other
 // hosts the constructors and natives fail with "mbedtls (...) is not supported
 // by haxe-in-haxe".
 //
@@ -84,7 +81,7 @@ class EvalSsl {
 	}
 
 	public static function initConstructors(add:(Int, Array<Value>->Value) -> Void):Void {
-		#if (target.name == "hxc" || target.name == "hxmc")
+		#if (target.name == "hxmc")
 		add(EvalHash.key_mbedtls_Config, _ -> {
 			var cfg = NativeSsl.configInit();
 			EvalEncode.encodeInstance(EvalHash.key_mbedtls_Config, IMbedtlsConfig(cfg));
@@ -123,7 +120,7 @@ class EvalSsl {
 		#end
 	}
 
-	#if (target.name == "hxc" || target.name == "hxmc")
+	#if (target.name == "hxmc")
 	// port: the `Unix_error` of a failed BIO send/recv (see the module comment).
 	static function checkBio(ssl:Dynamic, r:Int):Int {
 		var err = NativeSsl.bioError(ssl);
@@ -135,7 +132,7 @@ class EvalSsl {
 
 	public static function initFields(initFields:(GlobalTypePathArg, Array<{name:String, value:Value}>,
 		Array<{name:String, value:Value}>) -> Void):Void {
-		#if (target.name == "hxc" || target.name == "hxmc")
+		#if (target.name == "hxmc")
 		function nativeCert(self:Value):Dynamic {
 			return asX509Crt(EvalField.field(self, EvalHash.hash("native")));
 		}

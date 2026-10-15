@@ -6,17 +6,15 @@ import core.TType;
 import core.ds.OcamlHash;
 import core.ds.OcamlHashtbl;
 import haxe.ds.IntMap;
-// port: the host natives of hxc (hxc/std) or of hxmc (hxmc/std, the machine-code target)
+// port: the host natives of hxmc (hxmc/std)
 #if (target.name == "hxmc")
 import hxmc.NativeGc;
-#elseif (target.name == "hxc")
-import hxc.NativeGc;
 #end
 
 // port: memory inspection measures OCaml heap objects (Objsize, Obj.repr). The
 // structure is translated; the sizes are what the host runtime can measure
-// (Objsize below): the hxc build walks its own heap (hxc/rt/rt.c
-// `hxc_NativeGc_objsize`: the bytes of the reachable heap objects, headers
+// (Objsize below): the hxmc build walks its own heap (hxmc/rt/rt.c
+// `hxmc_NativeGc_objsize`: the bytes of the reachable heap objects, headers
 // included), other hosts report 0 and never "reach" an object.
 enum MemoryRequest {
 	MCache;
@@ -38,7 +36,7 @@ class ObjsizeInfo {
 // port: the host side of the objsize C stubs
 class Objsize {
 	public static function objsize(v:Dynamic, exclude:Array<Dynamic>, out:Array<Dynamic>):ObjsizeInfo {
-		#if (target.name == "hxc" || target.name == "hxmc")
+		#if (target.name == "hxmc")
 		var bytes = NativeGc.objsize(v, exclude, out);
 		return new ObjsizeInfo(Std.int(Math.min(bytes, 2147483647.)), NativeGc.reached());
 		#else
@@ -50,7 +48,7 @@ class Objsize {
 
 	// port: Gc.quick_stat().heap_words * (Sys.word_size / 8)
 	public static function heapBytes():Float {
-		#if (target.name == "hxc" || target.name == "hxmc")
+		#if (target.name == "hxmc")
 		return NativeGc.heapBytes();
 		#else
 		return 0.;
