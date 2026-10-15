@@ -56,7 +56,8 @@ help:
 
 # --- Targets ---
 ## std        bin/hxmc/std: hxmc/std merged with the Eval originals (hxmc/tools/mkstd.py)
-## rt         the runtime objects of RT_TARGETS (bin/hxmc/rt/<target>/rt.o, zig cc)
+## rt         the runtime objects of RT_TARGETS (bin/hxmc/rt/<target>/rt.o, ssl.o, uv.o;
+##            zig cc; mbedtls and libuv by hxmc/tools/deps.sh in bin/hxmc/deps/<target>)
 ## tool       bin/hxmc/hxmc: the tool, built by the previous tool from source
 ##            (no tool yet: the bootstrap first)
 ## bootstrap  the tool from scratch: the reference compiler writes the tool's
@@ -80,12 +81,19 @@ std: $(STD)
 $(STD): hxmc/tools/mkstd.py $(STD_SRC)
 	python3 hxmc/tools/mkstd.py
 
+# mbedtls and libuv per target (hxmc/tools/deps.sh; rebuilt only when their
+# versions or flags change), for the runtime's ssl.o and uv.o
+.PRECIOUS: bin/hxmc/deps/%/VERSIONS
+bin/hxmc/deps/%/VERSIONS: hxmc/tools/deps.sh
+	sh hxmc/tools/deps.sh $* bin/hxmc/deps/$*
+	touch $@
+
 # the host's runtime object needs no hxmc (Linux: zig cc and ld.lld); the
 # Windows and macOS ones are assembled by the tool (hxmc --mkrt)
-$(HOST_RT): hxmc/tools/mkrt.sh $(RT_SRC)
+$(HOST_RT): hxmc/tools/mkrt.sh $(RT_SRC) bin/hxmc/deps/$(HOST)/VERSIONS
 	sh hxmc/tools/mkrt.sh $(HOST)
 
-rt: $(TOOL) $(HOST_RT)
+rt: $(TOOL) $(HOST_RT) $(foreach t,$(RT_TARGETS),bin/hxmc/deps/$(t)/VERSIONS)
 	for t in $(RT_TARGETS); do sh hxmc/tools/mkrt.sh $$t || exit 1; done
 
 # The tool compiles its own source with the previous tool (written next to it,
@@ -148,4 +156,4 @@ full: $(TOOL) $(STD) $(HOST_RT)
 	python3 hxmc/tools/tiers.py full $(CASES)
 
 clean:
-	rm -rf bin/hxmc bin/hxmc-t bin/hxmc-fuzz
+	rm -rf bin/hxmc/hxmc bin/hxmc/rt bin/hxmc/boot bin/hxmc/fix bin/hxmc/std bin/hxmc-t bin/hxmc-fuzz

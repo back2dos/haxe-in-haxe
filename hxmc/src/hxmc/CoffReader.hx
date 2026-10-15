@@ -354,6 +354,10 @@ class Archive {
 		}
 	}
 
+	// a member's bytes, from the offset of its data (the index's)
+	public function member(at:Int):Bytes
+		return b.sub(at, Std.parseInt(StringTools.trim(b.getString(at - 60 + 48, 10))));
+
 	function be32(at:Int):Int
 		return (b.get(at) << 24) | (b.get(at + 1) << 16) | (b.get(at + 2) << 8) | b.get(at + 3);
 }

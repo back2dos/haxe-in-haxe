@@ -166,6 +166,7 @@ class MachOReader {
 			var reloff = u32(h + 56), nreloc = u32(h + 60);
 			var addend = 0;
 			var hasAddend = false;
+			var minus:Null<Symbol> = null; // a SUBTRACTOR's symbol, for the UNSIGNED after it
 			for (k in 0...nreloc) {
 				var e = reloff + 8 * k;
 				var addr = u32(e);
@@ -182,6 +183,24 @@ class MachOReader {
 				var sym:Symbol = ext == 1 ? syms[symnum] : secSym[symnum];
 				if (sym == null) throw "hxmc: Mach-O relocation against a section left out, in " + s.name;
 				var buf = s.buf;
+				// SUBTRACTOR (arm64 1, x86-64 5) then UNSIGNED: T - M + field, 32
+				// bits (jump tables, offset tables of mbedtls and libuv), with M a
+				// symbol of this section: T + A - P with A = field + (addr - M)
+				if (type == (arm ? 1 : 5)) {
+					if (ext != 1 || sym.section != s || len != 2) throw "hxmc: Mach-O SUBTRACTOR relocation other than within " + s.name;
+					minus = sym;
+					continue;
+				}
+				if (minus != null) {
+					if (type != 0 || len != 2) throw "hxmc: Mach-O SUBTRACTOR followed by relocation type " + type + " in " + s.name;
+					var field = buf.get32(addr);
+					buf.set32(addr, 0);
+					// the field: the addend (an external minuend) or T - M in the object's addresses
+					var fa = ext == 1 ? field : field + secAddr[n] + minus.offset - secAddr[symnum];
+					s.relocs.push(new Reloc(addr, RPc32, sym, fa + addr - minus.offset));
+					minus = null;
+					continue;
+				}
 				var kind:RelKind;
 				var a = 0;
 				if (arm) {

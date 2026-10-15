@@ -59,11 +59,11 @@ class Link {
 	var got:Null<Section>;
 	var gotSlot = new Map<Symbol, Int>();
 
-	// ---- dead code: the sections of `collect` (the runtime object) that
+	// ---- dead code: the sections of `collect` (the runtime objects) that
 	// nothing reaches from the entry, the other objects and the
 	// initializers are left out (the runtime is compiled with a section per
 	// function and per datum)
-	public var collect:Null<Obj>;
+	public var collect:Null<Array<Obj>>;
 	// sections of any object kept only when reached (the runtime's Haxe functions)
 	public static inline var GC_PREFIX = ".text.gc.";
 	var live:Null<Map<Section, Bool>>;
@@ -80,7 +80,7 @@ class Link {
 		}
 		for (o in objs)
 			for (s in o.sections)
-				if ((o != collect && !StringTools.startsWith(s.name, GC_PREFIX)) || s.kind == InitArray || s.kind == FiniArray) mark(s);
+				if ((collect.indexOf(o) < 0 && !StringTools.startsWith(s.name, GC_PREFIX)) || s.kind == InitArray || s.kind == FiniArray) mark(s);
 		var e = globals.get(entry);
 		if (e != null) mark(e.section);
 		while (work.length > 0) {

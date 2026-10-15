@@ -352,6 +352,23 @@ class Driver {
 		var rt = ElfReader.read(sys.io.File.getBytes(rtPath));
 		var t4 = haxe.Timer.stamp();
 		var all = [data].concat(objs).concat([rt]);
+		// sys.ssl and libuv (mbedtls, libuv and their bindings; or stubs that
+		// throw, without them): separate objects next to the runtime object,
+		// linked when the program refers to what they define
+		var rts = [rt];
+		var wanted = new Map<String, Bool>();
+		for (o in [data].concat(objs))
+			for (s in o.symbols)
+				if (s.global && s.section == null && !s.abs) wanted.set(s.name, true);
+		for (name in ["ssl", "uv"]) {
+			var p = haxe.io.Path.directory(rtPath) + "/" + name + ".o";
+			if (!sys.FileSystem.exists(p)) continue;
+			var ext = ElfReader.read(sys.io.File.getBytes(p));
+			if (Lambda.exists(ext.symbols, s -> s.global && (s.section != null || s.abs) && wanted.exists(s.name))) {
+				all.push(ext);
+				rts.push(ext);
+			}
+		}
 		var exe = abi.os == "windows" ? new LinkPE(all, abi.arm).link("mainCRTStartup") : abi.os == "macos" ? {
 			var l = new LinkMachO(all, abi);
 			l.symbols = !o.strip;
@@ -359,7 +376,7 @@ class Driver {
 		} : {
 			var l = new Link(all, abi);
 			l.symbols = !o.strip;
-			if (Sys.getEnv("HXMC_NOGC") != "1") l.collect = rt;
+			if (Sys.getEnv("HXMC_NOGC") != "1") l.collect = rts;
 			l.link("_start");
 		};
 		if (abi.os == "windows" && !StringTools.endsWith(out, ".exe")) out += ".exe";

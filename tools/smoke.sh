@@ -6,7 +6,7 @@
 # handshake verified with them, with SMOKE_TLS_HOST, default github.com; empty
 # skips the handshake) and eval.luv (libuv: a timer and a TCP echo on one loop).
 #
-#   HAXE_STD_PATH=<std> sh hxc/tools/smoke.sh <binary>
+#   HAXE_STD_PATH=<std> sh tools/smoke.sh <binary>
 #
 # SMOKE_NATIVES=0 skips the sys.ssl and eval.luv checks (builds without
 # mbedtls and libuv); SMOKE_STRICT=1 makes the extras at the end fatal.
