@@ -110,6 +110,7 @@ async function pageTest(browser, query, expect) {
 // the Programs benchmarks: the latest run's table, the history's charts and a tooltip
 async function benchTest(browser, name) {
 	let ok = true;
+	const latest = existsSync(path.join(dir, 'bench/latest.json'));
 	for (const colorScheme of ['light', 'dark']) {
 		const page = await browser.newPage({ colorScheme, viewport: { width: 1100, height: 900 } });
 		const errors = [];
@@ -118,7 +119,8 @@ async function benchTest(browser, name) {
 		await page.goto(`http://localhost:${port}/index.html`);
 		let facts = '';
 		try {
-			await page.waitForSelector('#programs-results table', { timeout: 30000 });
+			// (the table: the latest run, which a history of imported points only lacks)
+			if (latest) await page.waitForSelector('#programs-results table', { timeout: 30000 });
 			await page.waitForSelector('#programs-history svg', { timeout: 30000 });
 			const svg = page.locator('#programs-history .plot svg').first();
 			await svg.scrollIntoViewIfNeeded();
@@ -133,7 +135,7 @@ async function benchTest(browser, name) {
 				tip: document.querySelector('#programs-history .tip').textContent.slice(0, 60),
 				series: getComputedStyle(document.documentElement).getPropertyValue('--s1').trim(),
 			}));
-			if (facts.rows < 1 || facts.charts < 1 || facts.lines < 1) ok = false;
+			if ((latest && facts.rows < 1) || facts.charts < 1 || facts.lines < 1) ok = false;
 			if (process.env.SCREENSHOTS) {
 				await page.locator('#benchmarks').screenshot({ path: path.join(process.env.SCREENSHOTS, `bench-${name}-${colorScheme}.png`) });
 			}
