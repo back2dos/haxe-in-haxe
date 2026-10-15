@@ -9,7 +9,7 @@
 //                                                    (exit 2: no such release)
 //   node hxmc/bootstrap/rt.mjs pack <dir> <out dir>  the assets of <dir>, gzipped
 // <dir>/HASH records what <dir> holds. HXMC_RT_REPO names the repository
-// (default benmerckx/haxe-in-haxe).
+// (default benmerckx/hxmc).
 import crypto from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
@@ -67,7 +67,7 @@ async function fetchAll(dir) {
 		console.log(`rt: ${dir} holds rt-${h}`);
 		return 0;
 	}
-	const repo = process.env.HXMC_RT_REPO || 'benmerckx/haxe-in-haxe';
+	const repo = process.env.HXMC_RT_REPO || 'benmerckx/hxmc';
 	const base = `https://github.com/${repo}/releases/download/rt-${h}/`;
 	const got = [];
 	for (const [file, asset] of assets()) {

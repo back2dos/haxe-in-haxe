@@ -21,8 +21,10 @@
 #   TLS handshake and libuv), lix, hxmc's corpus and the port's self-compile.
 # - wasm: the corpus and the port's self-compile under node and wasmtime, the
 #   playground in Chromium, Firefox and WebKit.
-# - npm: the package installed in a fresh project on Linux, macOS and
-#   Windows: WebAssembly first, then the native compiler, then hxmc-rebuild.
+# - npm: the packages (hxmc and its platform packages) installed in a fresh
+#   project on Linux, macOS and Windows: native at once, --ignore-scripts, lix,
+#   the WebAssembly fallback and hxmc-rebuild; publish-npm publishes them on
+#   v* tags and (as nightlies) from main.
 # - upstream-tests: upstream's compiler-side suite (RunCi macro) with the
 #   release binaries as haxe (upstream-tests.yml).
 # - release: a rolling `nightly` pre-release on pushes to main, a release on
@@ -210,15 +212,23 @@ jobs:
       - uses: actions/upload-artifact@v7
         with: {name: lix, path: dist/lix/, retention-days: 14}
 
-      - name: The npm package
+      # the npm packages: hxmc and its six platform packages, at one version:
+      # the tag's (v*), a nightly prerelease on main, package.json's elsewhere
+      - name: The npm packages
         run: |
           set -ex
-          make npm
-          echo "NPM_SIZE=$(wc -c < bin/npm/hxmc-0.0.0-dev.tgz)" >> "$GITHUB_ENV"
+          v=$(node -p "require('./package.json').version")
+          case "$GITHUB_REF" in
+            refs/tags/v*) v=${GITHUB_REF_NAME#v} ;;
+            refs/heads/main) v=$v-nightly.$(date -u +%Y%m%d).$(git rev-parse --short=7 HEAD) ;;
+          esac
+          make npm NPM_VERSION=$v
+          echo "$v" > bin/npm/VERSION
+          echo "NPM_SIZE=$(wc -c < bin/npm/hxmc-$v.tgz)" >> "$GITHUB_ENV"
           # what WebAssembly programs see of the file system (the npm job on Windows)
           bin/hxmc/hxmc bin/npm/probe.wasm -cp hxmc/test -main WasiProbe -cp bin/hxmc/std --custom-target hxmc -D hxmc.target=wasm32-wasi
       - uses: actions/upload-artifact@v7
-        with: {name: npm, path: "bin/npm/*.tgz\nbin/npm/probe.wasm", retention-days: 7}
+        with: {name: npm, path: "bin/npm/*.tgz\nbin/npm/probe.wasm\nbin/npm/VERSION", retention-days: 7}
 
       # the website: the playground's WebAssembly, the pages' JavaScript, lix under tools/
       - name: The website
@@ -280,7 +290,7 @@ jobs:
             echo "| | |"
             echo "| --- | ---: |"
             echo "| clean bootstrap from the stage0 (stage0 under node, the tool from source, the fixpoint) | ${BOOTSTRAP_SECONDS} s |"
-            echo "| npm package | $(( NPM_SIZE / 1024 )) KB |"
+            echo "| npm package hxmc | $(( NPM_SIZE / 1024 )) KB (platform packages: $(ls -l bin/npm/hxmc-*-*.tgz | awk '{s+=$5} END {printf "%d KB in all", s/1024}')) |"
             echo ""
           } >> "$GITHUB_STEP_SUMMARY"
           bin/hxmc/hxmc -cp haxe/test -cp hxmc/test --run Measure --port bin/release/linux-x86_64/haxe
@@ -580,18 +590,26 @@ jobs:
           npx playwright install --with-deps chromium firefox webkit > /dev/null
           node hxmc/web/tools/browser-test.mjs site-dist chromium firefox webkit
 
-  # the npm package in a fresh project: the WebAssembly compiler on first use,
-  # the native one once its background build is done, then hxmc-rebuild
+  # the npm packages in a fresh project: hxmc with its platform package
+  # (native at once, node_modules/.bin/haxe the native compiler on Unix;
+  # with --ignore-scripts after the first call), lix with dist/, and the
+  # WebAssembly fallback (no platform package: the first call builds the native
+  # compiler) with hxmc-rebuild
   npm:
     needs: build
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, macos-15, windows-2025]
+        include:
+          - {os: ubuntu-24.04, plat: linux-x64, lix: linux-x86_64}
+          - {os: macos-15, plat: darwin-arm64, lix: macos-arm64}
+          - {os: windows-2025, plat: win32-x64}
     runs-on: ${{ matrix.os }}
     defaults:
       run:
         shell: bash
+    env:
+      HXMC_CACHE: ${{ github.workspace }}/hxmc-cache
     steps:
       - uses: actions/setup-node@v7
         with:
@@ -600,55 +618,50 @@ jobs:
         with: {name: npm, path: dl}
       - uses: actions/download-artifact@v8
         with: {name: lix, path: dl/lix}
-      - name: Install into a fresh project
+      - name: Install hxmc and its platform package
         run: |
           set -ex
+          v=$(cat dl/VERSION)
           mkdir -p "$RUNNER_TEMP/app/src" && cd "$RUNNER_TEMP/app"
           npm init -y > /dev/null
-          npm install --no-audit --no-fund "$GITHUB_WORKSPACE"/dl/hxmc-*.tgz
+          npm install --no-audit --no-fund "$GITHUB_WORKSPACE/dl/hxmc-$v.tgz" "$GITHUB_WORKSPACE/dl/hxmc-${{ matrix.plat }}-$v.tgz"
           printf 'class Main { static function main() { Sys.println("hello from " + Sys.systemName()); } }\n' > src/Main.hx
           printf 'class Js { static function main() { trace("hello from js"); } }\n' > src/Js.hx
           printf -- '-cp src\n-main Main\n--custom-target hxmc=bin/app\n' > build.hxml
-      - name: The file system under node's WASI
-        if: runner.os == 'Windows'
-        continue-on-error: true
-        run: |
-          cd "$RUNNER_TEMP/app"
-          MSYS_NO_PATHCONV=1 HXMC_WASI_DEBUG=1 HXMC_WASI_READDIR=1 node node_modules/hxmc/hxmc/bootstrap/wasi.mjs "$GITHUB_WORKSPACE/dl/probe.wasm" /d/a /d/a/_temp/app/node_modules/hxmc/haxe/upstream/std src .
-      # first use: the WebAssembly compiler builds the native one in the
-      # foreground (nothing on stdout or stderr but the compiler's own output)
-      - name: First use
+          # Unix: the postinstall put the native compiler where npm's link points
+          if [ "$RUNNER_OS" != Windows ]; then head -c 4 node_modules/.bin/haxe | od -An -tx1 | tee magic.txt; ! grep -q "23 21" magic.txt; fi
+      - name: Native at once
         run: |
           set -ex
           cd "$RUNNER_TEMP/app"
-          export HXMC_CACHE="$RUNNER_TEMP/hxmc-cache"
-          s=$(date +%s)
-          npx haxe --version > version.out 2> version.err || { cat version.out version.err "$HXMC_CACHE"/*/*/build.log; exit 1; }
-          echo "first use: $(( $(date +%s) - s )) s"
+          npx haxe --version > version.out 2> version.err
           cat version.out
           test ! -s version.err
-          cat "$HXMC_CACHE"/*/*/build.log
-          ls -l "$HXMC_CACHE"/*/*/ node_modules/hxmc/dist
-      - name: Native
-        run: |
-          set -ex
-          cd "$RUNNER_TEMP/app"
-          export HXMC_CACHE="$RUNNER_TEMP/hxmc-cache"
+          test ! -e "$HXMC_CACHE"
           npx haxe -cp src -main Main --interp | tee out.txt
           grep -q "hello from" out.txt
-          ! grep -q "hello from Wasi" out.txt
           time npx haxe build.hxml
-          if [ "$RUNNER_OS" = Windows ]; then ./bin/app.exe; else ./bin/app; fi
+          if [ "$RUNNER_OS" = Windows ]; then ./bin/app.exe; ls -l node_modules/hxmc/dist/haxe.exe; else ./bin/app; fi
           npx haxe -cp src -main Js --js main.js && node main.js
+      - name: With --ignore-scripts, the first call installs the native compiler
+        if: runner.os != 'Windows'
+        run: |
+          set -ex
+          v=$(cat dl/VERSION)
+          mkdir -p "$RUNNER_TEMP/noscripts" && cd "$RUNNER_TEMP/noscripts"
+          npm init -y > /dev/null
+          npm install --ignore-scripts --no-audit --no-fund "$GITHUB_WORKSPACE/dl/hxmc-$v.tgz" "$GITHUB_WORKSPACE/dl/hxmc-${{ matrix.plat }}-$v.tgz"
+          head -c 2 node_modules/.bin/haxe | grep -q '#!'
+          npx haxe --version
+          head -c 4 node_modules/.bin/haxe | od -An -tx1 | tee magic.txt; ! grep -q "23 21" magic.txt
       # lix with the package's installation (dist/) as its Haxe
       - name: lix
         if: runner.os != 'Windows'
         run: |
           set -ex
           cd "$RUNNER_TEMP/app"
-          export HXMC_CACHE="$RUNNER_TEMP/hxmc-cache" HAXESHIM_ROOT="$RUNNER_TEMP/lix-root"
-          case "$RUNNER_OS" in Linux) t=linux-x86_64 ;; macOS) t=macos-arm64 ;; esac
-          mkdir -p "$RUNNER_TEMP/lix" && cp "$GITHUB_WORKSPACE/dl/lix/lix-$t" "$RUNNER_TEMP/lix/lix" && chmod +x "$RUNNER_TEMP/lix/lix"
+          export HAXESHIM_ROOT="$RUNNER_TEMP/lix-root"
+          mkdir -p "$RUNNER_TEMP/lix" && cp "$GITHUB_WORKSPACE/dl/lix/lix-${{ matrix.lix }}" "$RUNNER_TEMP/lix/lix" && chmod +x "$RUNNER_TEMP/lix/lix"
           export PATH="$RUNNER_TEMP/lix:$PATH"
           lix shims
           lix scope create
@@ -658,11 +671,27 @@ jobs:
           printf -- '-cp src\n-main Main\n--custom-target hxmc=bin/applix\n' > lix.hxml
           haxe lix.hxml
           ./bin/applix
-      - name: hxmc-rebuild
+      # the WebAssembly fallback: without the platform package the first call
+      # builds the native compiler (Windows: node's WASI, not blocking)
+      - name: WebAssembly fallback
+        continue-on-error: ${{ runner.os == 'Windows' }}
+        env:
+          HXMC_PLATFORM_PACKAGE: '0'
+          HXMC_CACHE: ${{ github.workspace }}/hxmc-cache-wasm
         run: |
           set -ex
-          cd "$RUNNER_TEMP/app"
-          export HXMC_CACHE="$RUNNER_TEMP/hxmc-cache"
+          v=$(cat dl/VERSION)
+          mkdir -p "$RUNNER_TEMP/fallback/src" && cd "$RUNNER_TEMP/fallback"
+          npm init -y > /dev/null
+          npm install --no-audit --no-fund "$GITHUB_WORKSPACE/dl/hxmc-$v.tgz"
+          cp "$RUNNER_TEMP/app/src/Main.hx" src/
+          s=$(date +%s)
+          npx haxe --version > version.out 2> version.err || { cat version.out version.err "$HXMC_CACHE"/*/*/build.log; exit 1; }
+          echo "first use (WebAssembly builds the native compiler): $(( $(date +%s) - s )) s"
+          cat version.out
+          test ! -s version.err
+          npx haxe -cp src -main Main --custom-target hxmc=bin/app
+          if [ "$RUNNER_OS" = Windows ]; then ./bin/app.exe; else ./bin/app; fi
           time npx hxmc-rebuild
           npx haxe -cp src -main Main --interp
 
@@ -671,6 +700,36 @@ jobs:
   upstream-tests:
     needs: build
     uses: ./.github/workflows/upstream-tests.yml
+
+  # npm: the six platform packages, then hxmc (the versions the build job
+  # set): on v* tags (dist-tag latest) and pushes to main (a nightly, dist-tag
+  # next); never from other branches
+  publish-npm:
+    needs: [build, npm, test, wasm, conformance]
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+      - uses: actions/download-artifact@v8
+        with: {name: npm, path: dl}
+      - name: Publish
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          set -ex
+          v=$(cat dl/VERSION)
+          tag=latest
+          case "$GITHUB_REF" in refs/heads/main) tag=next ;; esac
+          for p in linux-x64 linux-arm64 darwin-x64 darwin-arm64 win32-x64 win32-arm64; do
+            npm publish --access public --provenance --tag $tag "dl/hxmc-$p-$v.tgz"
+          done
+          npm publish --access public --provenance --tag $tag "dl/hxmc-$v.tgz"
 
   # nightly on main, a release on v* tags
   release:
@@ -688,11 +747,13 @@ jobs:
           pattern: hxmc-haxe-*
           path: assets
           merge-multiple: true
-      - uses: actions/download-artifact@v8
-        with: {name: npm, path: assets}
+      - name: The npm package
+        uses: actions/download-artifact@v8
+        with: {name: npm, path: npm}
       - name: Publish
         run: |
           set -ex
+          cp npm/hxmc-$(cat npm/VERSION).tgz assets/
           ls -l assets
           SHORT=$(echo "$GITHUB_SHA" | cut -c1-9)
           NOTES="Built from $GITHUB_SHA by hxmc (the port compiled to machine code for each target, cross-built on Linux, with mbedtls and libuv).

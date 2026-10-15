@@ -110,7 +110,8 @@ help:
 ## port        PORT_BIN (bin/port/haxe): the port for the host, built by hxmc (alias: dev)
 ## release     bin/release/TARGET/haxe[.exe]: the port cross-built by hxmc, with mbedtls and libuv
 ## wasm        bin/wasm/hih.wasm: the playground's compiler (wasm32-wasi, -D hih_no_generators)
-## npm         bin/npm/hxmc-<version>.tgz: the npm package (package.json; hxmc/bootstrap)
+## npm         bin/npm/*.tgz: the npm package hxmc (package.json; hxmc/bootstrap) and its six
+##             platform packages @hxmc/<os>-<cpu> (NPM_VERSION)
 ## site        bin/site: the website (hxmc/web; LIX_DIR's lix binaries under tools/)
 ## fuzz        bin/fuzz/fuzz: the differential fuzzer, built by hxmc
 ## lix         bin/lix/lix (+ haxe, haxelib, neko links): lix (tools/lix) for the host
@@ -246,9 +247,17 @@ hxmc/bootstrap/rt/HASH: $(HOST_RT)
 	for t in $(TARGETS); do mkdir -p hxmc/bootstrap/rt/$$t && cp bin/hxmc/rt/$$t/rt.o bin/hxmc/rt/$$t/ssl.o bin/hxmc/rt/$$t/uv.o hxmc/bootstrap/rt/$$t/ || exit 1; done
 	cp bin/hxmc/rt/LICENSE.* hxmc/bootstrap/rt/ 2>/dev/null || true
 	$(NODE) hxmc/bootstrap/rt.mjs hash > $@
-npm: $(NPM_GEN)
-	@mkdir -p bin/npm
-	npm pack --pack-destination bin/npm
+# the native compilers of the platform packages (@hxmc/<os>-<cpu>)
+NPM_NATIVES := $(foreach t,$(TARGETS),bin/npm/native/$(t)/haxe$(call EXE,$(t)))
+bin/npm/native/%/haxe: $(TOOL) $(PORT_SRC) $(HXMC_SRC) $(STD) $(HOST_RT)
+	$(call hxmc,$@,$(PKG_ARGS) -D hxmc.target=$*)
+bin/npm/native/%/haxe.exe: $(TOOL) $(PORT_SRC) $(HXMC_SRC) $(STD) $(HOST_RT)
+	$(call hxmc,$@,$(PKG_ARGS) -D hxmc.target=$*)
+# NPM_VERSION: the version of all seven packages (default package.json's)
+NPM_VERSION ?= $(shell $(NODE) -p "require('./package.json').version")
+npm: $(NPM_GEN) $(NPM_NATIVES)
+	rm -f bin/npm/*.tgz
+	$(NODE) hxmc/bootstrap/pack.mjs $(NPM_VERSION) bin/npm/native bin/npm
 	@ls -l bin/npm/*.tgz
 
 # --- The website (hxmc/web) ---

@@ -1,12 +1,15 @@
 {
   "name": "hxmc",
-  "version": "0.0.0-dev",
-  "description": "The Haxe compiler ported to Haxe, with hxmc built in (native executables and WebAssembly); runs as WebAssembly until its native build for this machine is ready",
+  "version": "0.1.0",
+  "description": "The Haxe compiler ported to Haxe, with hxmc built in: native executables for Linux, macOS and Windows (x86-64, ARM64) and WebAssembly",
   "license": "GPL-2.0-or-later",
   "type": "module",
   "bin": {
     "haxe": "hxmc/bootstrap/haxe",
     "hxmc-rebuild": "hxmc/bootstrap/hxmc-rebuild"
+  },
+  "scripts": {
+    "postinstall": "node hxmc/bootstrap/postinstall.mjs"
   },
   "files": [
     "haxe/src/",
@@ -23,12 +26,24 @@
     "COPYING",
     "LICENSE"
   ],
+  "optionalDependencies": {
+    "@hxmc/linux-x64": "0.1.0",
+    "@hxmc/linux-arm64": "0.1.0",
+    "@hxmc/darwin-x64": "0.1.0",
+    "@hxmc/darwin-arm64": "0.1.0",
+    "@hxmc/win32-x64": "0.1.0",
+    "@hxmc/win32-arm64": "0.1.0"
+  },
   "engines": {
     "node": ">=22"
   },
-  "os": ["linux", "darwin", "win32"],
+  "os": [
+    "linux",
+    "darwin",
+    "win32"
+  ],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/benmerckx/haxe-in-haxe.git"
+    "url": "git+https://github.com/benmerckx/hxmc.git"
   }
 }

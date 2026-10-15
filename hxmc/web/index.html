@@ -20,7 +20,7 @@
 			<a href="#benchmarks">Benchmarks</a>
 			<a href="#targets">Targets</a>
 			<a href="story.html">History</a>
-			<a href="https://github.com/benmerckx/haxe-in-haxe">Source</a>
+			<a href="https://github.com/benmerckx/hxmc">Source</a>
 		</nav>
 	</div>
 </header>
@@ -52,18 +52,18 @@
 		<h2>Download</h2>
 		<p>Builds of the latest commit on <code>main</code>, with the standard library included:</p>
 		<ul class="downloads">
-			<li>Linux: <a href="https://github.com/benmerckx/haxe-in-haxe/releases/download/nightly/haxe-in-haxe-linux-x86_64.tar.gz">x86-64</a>, <a href="https://github.com/benmerckx/haxe-in-haxe/releases/download/nightly/haxe-in-haxe-linux-aarch64.tar.gz">ARM64</a></li>
-			<li>macOS: <a href="https://github.com/benmerckx/haxe-in-haxe/releases/download/nightly/haxe-in-haxe-macos-x86_64.tar.gz">x86-64</a>, <a href="https://github.com/benmerckx/haxe-in-haxe/releases/download/nightly/haxe-in-haxe-macos-aarch64.tar.gz">ARM64</a></li>
-			<li>Windows: <a href="https://github.com/benmerckx/haxe-in-haxe/releases/download/nightly/haxe-in-haxe-windows-x86_64.zip">x86-64</a>, <a href="https://github.com/benmerckx/haxe-in-haxe/releases/download/nightly/haxe-in-haxe-windows-aarch64.zip">ARM64</a></li>
+			<li>Linux: <a href="https://github.com/benmerckx/hxmc/releases/download/nightly/hxmc-haxe-linux-x86_64.tar.gz">x86-64</a>, <a href="https://github.com/benmerckx/hxmc/releases/download/nightly/hxmc-haxe-linux-aarch64.tar.gz">ARM64</a></li>
+			<li>macOS: <a href="https://github.com/benmerckx/hxmc/releases/download/nightly/hxmc-haxe-macos-x86_64.tar.gz">x86-64</a>, <a href="https://github.com/benmerckx/hxmc/releases/download/nightly/hxmc-haxe-macos-aarch64.tar.gz">ARM64</a></li>
+			<li>Windows: <a href="https://github.com/benmerckx/hxmc/releases/download/nightly/hxmc-haxe-windows-x86_64.zip">x86-64</a>, <a href="https://github.com/benmerckx/hxmc/releases/download/nightly/hxmc-haxe-windows-aarch64.zip">ARM64</a></li>
 		</ul>
 <pre class="cmd">haxe-in-haxe -cp src --main Main --interp
 haxe-in-haxe -cp src --main Main --js out.js</pre>
-		<p class="note">It takes the same arguments as <code>haxe</code>. Every build is made by hxmc on Linux (machine code, its own linker, no C compiler for the port's code) and carries mbedtls and libuv, so <code>sys.ssl</code> and <code>eval.luv</code> work in macros and <code>--interp</code>. Set <code>HAXE_STD_PATH</code> to the <code>std</code> directory in the archive. macOS: a download from a browser is quarantined (<code>xattr -d com.apple.quarantine haxe-in-haxe</code>). All files: <a href="https://github.com/benmerckx/haxe-in-haxe/releases/tag/nightly">nightly release</a>.</p>
+		<p class="note">It takes the same arguments as <code>haxe</code>. Every build is made by hxmc on Linux (machine code, its own linker, no C compiler for the port's code) and carries mbedtls and libuv, so <code>sys.ssl</code> and <code>eval.luv</code> work in macros and <code>--interp</code>. Set <code>HAXE_STD_PATH</code> to the <code>std</code> directory in the archive. macOS: a download from a browser is quarantined (<code>xattr -d com.apple.quarantine haxe</code>). All files: <a href="https://github.com/benmerckx/hxmc/releases/tag/nightly">nightly release</a>.</p>
 	</section>
 
 	<section id="hxmc">
 		<h2>hxmc</h2>
-		<p>The port is built by hxmc, a Haxe target written for it: from the typed program it writes x86-64 and ARM64 machine code with its own register allocator and linkers (ELF, PE, Mach-O), or a WebAssembly module, with a precise generational collector and threads; no C compiler, assembler or system linker runs when a program is built, and every target is cross-built from Linux. hxmc builds itself. See <a href="https://github.com/benmerckx/haxe-in-haxe/blob/main/README.md">README.md</a>.</p>
+		<p>The port is built by hxmc, a Haxe target written for it: from the typed program it writes x86-64 and ARM64 machine code with its own register allocator and linkers (ELF, PE, Mach-O), or a WebAssembly module, with a precise generational collector and threads; no C compiler, assembler or system linker runs when a program is built, and every target is cross-built from Linux. hxmc builds itself. See <a href="https://github.com/benmerckx/hxmc/blob/main/README.md">README.md</a>.</p>
 	</section>
 
 	<section id="tools">
@@ -90,7 +90,7 @@ lix +lib tink_core              # haxe_libraries/tink_core.hxml
 haxe -lib tink_core --run Main  # runs Haxe 4.3.7 with tink_core
 lix use haxe 4.3.6              # switch to another downloaded version
 lix download                    # after a clone: the scope's Haxe and missing libraries</pre>
-		<p class="note">The <code>haxe</code> shim adds about 2 ms to a compiler call (Node.js: about 60 ms). The compiler server modes (<code>--wait</code>, <code>--server-listen</code>, <code>--server-connect</code>) run on libuv with hxcoro coroutines. Compared with the npm package on 26 scenarios, output and installed files are identical. Details: <a href="https://github.com/benmerckx/haxe-in-haxe/blob/main/tools/lix/README.md">tools/lix/README.md</a>.</p>
+		<p class="note">The <code>haxe</code> shim adds about 2 ms to a compiler call (Node.js: about 60 ms). The compiler server modes (<code>--wait</code>, <code>--server-listen</code>, <code>--server-connect</code>) run on libuv with hxcoro coroutines. Compared with the npm package on 26 scenarios, output and installed files are identical. Details: <a href="https://github.com/benmerckx/hxmc/blob/main/README.md">README.md</a>.</p>
 	</section>
 
 	<section id="status">
@@ -102,7 +102,7 @@ lix download                    # after a clone: the scope's Haxe and missing li
 			<li><code>--interp</code>, display requests, the compilation server and the Eval debugger;</li>
 			<li>upstream's target-independent CI job (unit, misc, threads, tink_core, hxcoro), which passes with the native build.</li>
 		</ul>
-		<p class="note">Details: <a href="https://github.com/benmerckx/haxe-in-haxe/blob/main/test/TESTING.md">test/TESTING.md</a>.</p>
+		<p class="note">Details: <a href="https://github.com/benmerckx/hxmc/blob/main/README.md">README.md, Testing</a>.</p>
 	</section>
 
 	<section id="benchmarks">

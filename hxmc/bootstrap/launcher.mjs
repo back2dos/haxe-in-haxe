@@ -1,17 +1,20 @@
 // The npm package's `haxe` command (README.md, "Using hxmc"): the native
-// compiler for this machine, from the cache; on first use the WebAssembly
-// compiler (hxmc/bootstrap/haxe.wasm, under node's WASI) builds it in the
-// foreground (build.mjs), once for every concurrent invocation. On Unix the
+// compiler for this machine: one hxmc-rebuild built (in the cache), else the
+// platform package's (@hxmc/<os>-<cpu>), else the WebAssembly compiler
+// (hxmc/bootstrap/haxe.wasm, under node's WASI) builds it in the foreground
+// (build.mjs), once for every concurrent invocation. On Unix the
 // native compiler then replaces hxmc/bootstrap/haxe and dist/haxe, so npm's
 // link and lix run it without node. Machines without a native target run the
 // WebAssembly compiler.
 import { spawnSync } from 'node:child_process';
+import { createRequire } from 'node:module';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 import { runWasm } from './wasi.mjs';
+import { PLATFORMS } from './platforms.mjs';
 
 export const bootDir = path.dirname(fileURLToPath(import.meta.url));
 export const pkgDir = path.dirname(path.dirname(bootDir));
@@ -114,11 +117,27 @@ export function ensureNative() {
 	return native;
 }
 
+// the native compiler of the platform package (@hxmc/<os>-<cpu>, an optional
+// dependency), unless HXMC_PLATFORM_PACKAGE=0
+export function platformBinary() {
+	const p = PLATFORMS[hostTarget()];
+	if (!p || process.env.HXMC_PLATFORM_PACKAGE === '0') return null;
+	try {
+		const bin = path.join(path.dirname(createRequire(import.meta.url).resolve(`${p.pkg}/package.json`)), p.exe);
+		return fs.existsSync(bin) ? bin : null;
+	} catch {
+		return null;
+	}
+}
+
 export function main(args) {
 	const host = hostTarget();
 	if (host && process.env.HXMC_NATIVE !== '0') {
 		setupDist();
-		const native = ensureNative();
+		// one hxmc-rebuild built (or the WebAssembly compiler did, earlier), the
+		// platform package's, else built now
+		const cached = path.join(cacheDir(), exeName);
+		const native = fs.existsSync(cached) ? cached : platformBinary() ?? ensureNative();
 		install(native);
 		const r = spawnSync(native, args, { stdio: 'inherit', env: toolEnv() });
 		if (r.error) throw r.error;
@@ -164,7 +183,11 @@ export function install(native) {
 	if (process.env.HXMC_INSTALL === '0' || fs.existsSync(path.join(pkgDir, '.git'))) return;
 	const targets = process.platform === 'win32' ? [path.join(pkgDir, 'dist', 'haxe.exe')] : [path.join(bootDir, 'haxe'), path.join(pkgDir, 'dist', 'haxe')];
 	for (const target of targets) {
-		if (process.platform === 'win32' && fs.existsSync(target) && fs.statSync(target).size === fs.statSync(native).size) continue;
+		// (already there: the same size, and not older than the native compiler)
+		if (fs.existsSync(target)) {
+			const t = fs.statSync(target), n = fs.statSync(native);
+			if (t.size === n.size && t.mtimeMs >= n.mtimeMs) continue;
+		}
 		const tmp = `${target}.${process.pid}.new`;
 		try {
 			fs.copyFileSync(native, tmp);
