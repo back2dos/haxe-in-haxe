@@ -241,27 +241,15 @@ Plan, Go-style (built lazily and cached rather than shipped):
 
 ## Interop
 
-### C interop (designed, not built)
+### C interop and low-level Haxe (designed, not built)
 
-Swift-inspired, without embedding Clang:
-
-- Externs generated from C headers at development time (libclang offline,
-  or a small C front end with a preprocessor), checked into the library.
-- Calls in the platform's C convention (System V, AAPCS64, Win64, Apple
-  arm64), static libraries via hxmc's linker (ELF, COFF, later Mach-O),
-  dynamic libraries via import tables written directly (no SDK, no
-  import libraries); prebuilt per target in haxelibs.
-- `hxmc.Ptr<T>`, `hxmc.CString`; structs by pointer first, by value later
-  (the System V classification rules, tested against a C compiler).
-- Moving GC: scoped pinning for the duration of a call
-  (`withPointer(buf, p -> c_fn(p))`), pinned buffers for shared data,
-  handles for long-lived references (the `Unmanaged` equivalent).
-- Callbacks: static Haxe functions only (`@convention(c)`-style), state
-  through `void *userData` handles; trampolines leave the runtime's safe
-  region and catch exceptions; threads created by C attach to the
-  runtime first.
-- Inline C and C++ are out of scope (no C compiler); C glue is
-  precompiled per target by library authors.
+The design is in [LOWLEVEL.md](LOWLEVEL.md): a survey of how other
+languages do C interop; typed externs called directly in each platform's C
+convention, declarations from C declaration text or generated from
+headers, an optional embedded tcc at build time; native memory with
+lifetimes after Java's FFM API (arenas, segments, `pin`, `Handle`,
+callbacks); and an opt-in manual-memory dialect after Zig (`Allocator`,
+containers, `@:hxmc.noGc` as a checked boundary). hxmc-only.
 
 ### Using hxmc's built-in compiler
 
