@@ -379,6 +379,9 @@ typedef SpawnOptions = {
 	?env:Map<String, String>,
 	/** stdin, stdout, stderr (default: all inherited). **/
 	?stdio:Array<StdioSpec>,
+	/** Windows: the command line is the arguments as given, unquoted (libuv's
+		UV_PROCESS_WINDOWS_VERBATIM_ARGUMENTS), as for cmd.exe /c. **/
+	?verbatim:Bool,
 }
 
 class Process extends Handle {
@@ -405,7 +408,7 @@ class Process extends Handle {
 					redirect = redirect.concat([fd, 1, (reads ? 1 : 0) | (writes ? 2 : 0), pipe.id]);
 			}
 		var cwd = options.cwd == null ? null : Bytes.ofString(options.cwd);
-		var id = N.processSpawn(loop.id, Bytes.ofString(cmd), argv, env, cwd, 0, 0, 0, redirect, true);
+		var id = N.processSpawn(loop.id, Bytes.ofString(cmd), argv, env, cwd, options.verbatim == true ? 4 : 0, 0, 0, redirect, true);
 		if (id < 0)
 			throw new UvError(id, 'spawn $cmd');
 		var p = new Process(loop, id);

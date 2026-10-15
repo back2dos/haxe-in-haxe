@@ -46,7 +46,7 @@ class Exec {
 
   // runs `cmd` to completion on a loop of its own: the exit code (128 + the
   // signal when killed). `pipes` creates the child's pipes and gets them read.
-  static function run(cmd:String, args:Array<String>, cwd:String, env:Env, ?pipes:Loop->{ stdio:Array<StdioSpec>, start:Void->Void, close:Void->Void }):Int {
+  static function run(cmd:String, args:Array<String>, cwd:String, env:Env, ?pipes:Loop->{ stdio:Array<StdioSpec>, start:Void->Void, close:Void->Void }, verbatim = false):Int {
     var loop = Loop.create(),
         code = -1;
     var p = if (pipes == null) null else pipes(loop);
@@ -54,7 +54,7 @@ class Exec {
       loop.run();
       loop.close();
     }
-    var proc = try Process.spawn(loop, cmd, args, { cwd: cwd, env: mergeEnv(env), stdio: if (p == null) null else p.stdio }, (status, signal) ->
+    var proc = try Process.spawn(loop, cmd, args, { cwd: cwd, env: mergeEnv(env), stdio: if (p == null) null else p.stdio, verbatim: verbatim }, (status, signal) ->
       code = if (signal != 0) 128 + signal else status
     ) catch (e:UvError) {
       if (p != null) p.close();
@@ -81,7 +81,8 @@ class Exec {
   static public function shell(cmd:String, cwd:String, ?env:Env):Outcome<Int, Error> {
     var sh = shellArgs(cmd);
     return
-      try switch run(sh.cmd, sh.args, cwd, env) {
+      // port: node's shell mode passes cmd.exe's arguments verbatim (windowsVerbatimArguments)
+      try switch run(sh.cmd, sh.args, cwd, env, null, Os.IS_WINDOWS) {
         case 0: Success(0);
         case status: Failure(new Error(status, 'Failed to invoke `$cmd` because Error: Command failed: $cmd'));
       }
