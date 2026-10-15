@@ -24,7 +24,13 @@ class Check {
 			var d = '$dir/$c';
 			var exe = FileSystem.exists('$d/m.exe') ? '$d/m.exe' : FileSystem.exists('$d/m.wasm') ? '$d/m.wasm' : '$d/m';
 			if (!windows) exec(["chmod", "+x", exe]);
-			var r = exec(runner.concat([FileSystem.fullPath(exe)]), {cwd: d, timeout: timeout, env: ["RT_MINOR_KB" => Sys.getEnv("RT_MINOR_KB") ?? "64"]});
+			// (host.cjs: the imports of a WebAssembly program, under node only)
+			var host = FileSystem.exists('$d/host.cjs') ? FileSystem.fullPath('$d/host.cjs') : null;
+			if (host != null && runner.join(" ").indexOf("wasmtime") >= 0) {
+				Sys.println(pad(c, 24) + " skipped  (the host of its imports is JavaScript)");
+				continue;
+			}
+			var r = exec(runner.concat([FileSystem.fullPath(exe)]), {cwd: d, timeout: timeout, env: ["RT_MINOR_KB" => Sys.getEnv("RT_MINOR_KB") ?? "64", "HXMC_WASM_IMPORTS" => host]});
 			var got = r.timedOut ? "timeout\n" : 'exit ${r.code}\n' + r.out;
 			var exp = File.getContent('$d/expected.txt');
 			var ok = got == exp;

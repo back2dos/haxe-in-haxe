@@ -369,9 +369,47 @@ class Driver {
 				rts.push(ext);
 			}
 		}
+		// the program's own objects and archives, and its imports from DLLs
+		// and dylibs (LinkInputs)
+		function undefinedNames():{undef:Array<String>, defined:Map<String, Bool>} {
+			var defined = new Map<String, Bool>();
+			for (x in all)
+				for (s in x.symbols)
+					if (s.global && (s.section != null || s.abs)) defined.set(s.name, true);
+			var undef = [], seen = new Map<String, Bool>();
+			for (x in all)
+				for (s in x.symbols)
+					if (s.global && s.section == null && !s.abs && !defined.exists(s.name) && !seen.exists(s.name)) {
+						seen.set(s.name, true);
+						undef.push(s.name);
+					}
+			undef.sort((a, b) -> a < b ? -1 : a > b ? 1 : 0);
+			return {undef: undef, defined: defined};
+		}
+		var links = o.links.concat(hxmc.ir.CInterop.LINKS);
+		if (links.length > 0) {
+			var u = undefinedNames();
+			for (x in LinkInputs.load(links, abi, u.undef, u.defined)) {
+				all.push(x);
+				rts.push(x);
+			}
+		}
+		var still = links.length > 0 || hxmc.ir.CInterop.USER.keys().hasNext() ? undefinedNames().undef : [];
+		var dylibs = new Map<String, String>();
+		for (n in still) {
+			var lib = hxmc.ir.CInterop.LIBS.get(n);
+			if (abi.os == "linux" && (lib != null || hxmc.ir.CInterop.USER.exists(n)))
+				throw 'hxmc: link: the C function $n is defined nowhere: Linux executables are static, so it must come from an object or archive (-D hxmc.link=<file>, or @:hxmc.link)';
+			if (abi.os == "macos" && lib != null) dylibs.set(n, LinkInputs.libFile(lib, abi));
+		}
+		if (abi.os == "windows") {
+			var imp = LinkInputs.peImports(still, abi);
+			if (imp != null) all.push(imp);
+		}
 		var exe = abi.os == "windows" ? new LinkPE(all, abi.arm).link("mainCRTStartup") : abi.os == "macos" ? {
 			var l = new LinkMachO(all, abi);
 			l.symbols = !o.strip;
+			l.dylibs = dylibs;
 			l.link("main");
 		} : {
 			var l = new Link(all, abi);

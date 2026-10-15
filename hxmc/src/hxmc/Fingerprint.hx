@@ -321,6 +321,14 @@ class Fingerprint {
 				b.add("ch");
 				str(n);
 				ty(r);
+				// (a C function: how MirBuild.cCall converts and whether it blocks)
+				var cs = hxmc.ir.CInterop.SIGS.get(n);
+				if (cs != null) {
+					b.add(hxmc.ir.CInterop.BLOCKING.exists(n) ? "B" : "F");
+					for (a in cs.args)
+						b.add(a.getIndex());
+					b.add(":" + cs.ret.getIndex());
+				}
 				args(xs);
 			case ENewObj(c):
 				b.add("no");

@@ -7,7 +7,7 @@ import hxmc.I64;
 // functions, with the C ABI as LibC's (the Win64 and arm64 conventions; no
 // stdcall on 64-bit Windows). Wide strings are UTF-16 (Haxe's own units);
 // structures are read at their 64-bit offsets (the callers).
-@:hxmc.c extern class Win32 {
+@:hxmc.c @:hxmc.fast extern class Win32 {
 	// UCRT
 	static function _write(fd:Int, p:Ptr, n:Int):Int;
 	static function _read(fd:Int, p:Ptr, n:Int):Int;

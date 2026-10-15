@@ -46,7 +46,7 @@ class ElfReader {
 			case 1: RAbs64;
 			case 2: RPc32;
 			case 4: RCall32;
-			case 9: RGotPcRel32;
+			case 9 | 41 | 42: RGotPcRel32; // (GOTPCRELX, REX_GOTPCRELX: relaxable, the same here)
 			case 10: RAbs32;
 			case 11: RAbs32S;
 			case 23: RTpOff32;

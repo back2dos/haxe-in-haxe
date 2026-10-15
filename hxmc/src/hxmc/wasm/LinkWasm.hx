@@ -29,7 +29,7 @@ class LinkWasm {
 	// functions by symbol: their index; imports first
 	var funcIndex = new Map<String, Int>();
 	var funcs:Array<{name:String, sym:Null<Symbol>, sig:String, builtin:Bool}> = [];
-	var imports:Array<{name:String, sig:String}> = [];
+	var imports:Array<{name:String, sig:String, module:String}> = [];
 	var types:Array<String> = [];
 	var typeIndex = new Map<String, Int>();
 	var table:Array<String> = [];
@@ -159,8 +159,13 @@ class LinkWasm {
 		var names = [for (n in undefinedFns.keys()) n];
 		names.sort(cmpStr);
 		for (n in names) {
-			if (WASI.exists(n)) imports.push({name: n, sig: WASI.get(n)});
-			else if (!Builtins.has(n)) missing.push(n);
+			if (WASI.exists(n)) imports.push({name: n, sig: WASI.get(n), module: "wasi_snapshot_preview1"});
+			else if (hxmc.ir.CInterop.USER.exists(n)) {
+				// a C function the program declares (@:hxmc.c): an import of the
+				// module its @:hxmc.lib names, "env" by default
+				var lib = hxmc.ir.CInterop.LIBS.get(n);
+				imports.push({name: n, sig: WasmGen.importSig(n), module: lib != null ? lib : "env"});
+			} else if (!Builtins.has(n)) missing.push(n);
 		}
 		for (n in [for (n in undefinedData.keys()) n])
 			if (!CELLS.exists(n) && n != HEAP_BASE && !undefinedFns.exists(n) && !Builtins.has(n)) missing.push(n);
@@ -180,7 +185,7 @@ class LinkWasm {
 					funcs.push({name: s.name, sym: s, sig: sigAt(s), builtin: false});
 				}
 		for (n in names)
-			if (!WASI.exists(n)) {
+			if (!WASI.exists(n) && !hxmc.ir.CInterop.USER.exists(n)) {
 				funcIndex.set(n, funcs.length);
 				funcs.push({name: n, sym: null, sig: Builtins.sig(n), builtin: true});
 			}
@@ -267,7 +272,7 @@ class LinkWasm {
 		s = new Buf(256);
 		Enc.uleb(s, imports.length);
 		for (im in imports) {
-			Enc.name(s, "wasi_snapshot_preview1");
+			Enc.name(s, im.module);
 			Enc.name(s, im.name);
 			s.u8(0);
 			Enc.uleb(s, typeIndex.get(im.sig));
@@ -442,10 +447,10 @@ class LinkWasm {
 	}
 
 	static function codeChar(c:Int):String
-		return c == Enc.I32 ? "i" : c == Enc.I64 ? "l" : c == Enc.F64 ? "d" : "?";
+		return c == Enc.I32 ? "i" : c == Enc.I64 ? "l" : c == Enc.F64 ? "d" : c == Enc.F32 ? "f" : "?";
 
 	static function charTy(c:String):Int
-		return c == "i" ? Enc.I32 : c == "l" ? Enc.I64 : c == "d" ? Enc.F64 : throw "hxmc: wasm: type " + c;
+		return c == "i" ? Enc.I32 : c == "l" ? Enc.I64 : c == "d" ? Enc.F64 : c == "f" ? Enc.F32 : throw "hxmc: wasm: type " + c;
 
 	public function typeOf(sig:String):Int {
 		var t = typeIndex.get(sig);

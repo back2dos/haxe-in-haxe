@@ -21,6 +21,11 @@ class Roots {
 	// a slot per rooted local)
 	var refIdx:Array<Int>;
 	var inter:Null<Array<Bits>>;
+	// the raw-address check (rawViolations): locals holding addresses of heap
+	// objects, what is found, the GC point being looked at
+	var raws:Null<Bits>;
+	var rawErrors:Array<String> = [];
+	var point = "";
 	var brk:Array<Bits> = [];
 	var cont:Array<Bits> = [];
 
@@ -61,6 +66,104 @@ class Roots {
 	}
 
 	static inline var MAX_SHARED = 4096; // (reference locals; beyond: no sharing)
+
+	// ---- the raw-address check (Facts.checkRawAddresses)
+
+	// where a raw heap address of f is live across a GC point or passed to
+	// one (empty: none): the liveness above, over the locals that hold such
+	// addresses (assigned from Mem.addr or arithmetic on one)
+	public static function rawViolations(f:FuncInfo):Array<String> {
+		var r = new Roots();
+		var all = f.args.concat(f.locals);
+		var n = 0;
+		for (l in all)
+			if (l.id >= n) n = l.id + 1;
+		r.n = n;
+		r.byId = [for (_ in 0...n) null];
+		r.refs = new Bits(n);
+		for (l in all)
+			r.byId[l.id] = l;
+		r.rooted = new Bits(n);
+		r.refIdx = hxmc.Lir.Arrays.filled(n, -1);
+		r.raws = rawLocals(f, n);
+		r.seq(f.body, new Bits(n));
+		return r.rawErrors;
+	}
+
+	// the locals that may hold a raw heap address: the largest fixpoint of
+	// "assigned an expression derived from Mem.addr or from such a local"
+	static function rawLocals(f:FuncInfo, n:Int):Bits {
+		var raw = new Bits(n);
+		var sets:Array<{l:Local, e:Ex}> = [];
+		function st(s:Stmt) {
+			switch s {
+				case SSet(l, e): sets.push({l: l, e: e});
+				case _:
+			}
+			hxmc.ir.Facts.iterStmt(st, _ -> {}, s);
+		}
+		for (s in f.body)
+			st(s);
+		var changed = true;
+		while (changed) {
+			changed = false;
+			for (x in sets)
+				if (!raw.get(x.l.id) && derived(x.e, raw)) {
+					raw.set(x.l.id);
+					changed = true;
+				}
+		}
+		return raw;
+	}
+
+	// whether e is (arithmetic on) the address of a heap object
+	static function derived(e:Ex, raw:Bits):Bool
+		return switch e {
+			case ECallHost("hxmc_unsafe_Mem_addr", _, _): true;
+			case ELocal(l): raw.get(l.id);
+			case EBin(LAdd | LSub | LAnd | LOr | LXor, a, b): derived(a, raw) || derived(b, raw);
+			case ECast(_, a): derived(a, raw);
+			case _: false;
+		}
+
+	// the arguments of a call that is a GC point: none may be a raw address
+	function rawOperands(e:Ex) {
+		var args = switch e {
+			case ECall(_, xs) | ECallDispatch(_, _, xs) | ECallHost(_, xs, _): xs;
+			case ECallClos(_, c, xs) | ECallAnon(_, _, c, xs): [c].concat(xs);
+			case _: [];
+		}
+		for (a in args)
+			if (derivedAny(a)) {
+				var m = "is passed to " + point;
+				if (rawErrors.indexOf(m) < 0) rawErrors.push(m);
+				return;
+			}
+	}
+
+	function derivedAny(e:Ex):Bool {
+		var r = derived(e, raws);
+		if (!r) hxmc.ir.Facts.iterEx(x -> if (!r && derivedAny(x)) r = true, e);
+		return r;
+	}
+
+	static function pointName(e:Ex):String
+		return switch e {
+			case ECall(g, _): "a call of " + hxmc.ir.Facts.displayName(g);
+			case ECallHost(n, _, _): (hxmc.ir.CInterop.BLOCKING.exists(n) ? "a call of the C function " : "a call of the runtime's ") + n;
+			case ECallDispatch(_) | ECallClos(_) | ECallAnon(_): "a dynamic call";
+			case ENewObj(_) | ENewEnum(_) | ENewArr(_) | ENewClos(_) | ENewBox(_) | ENewAnon(_) | EBox(_): "the allocation of " + hxmc.ir.Facts.allocName(e);
+			case _: "a GC point (" + e.getName() + ")";
+		}
+
+	static function stmtPoint(s:Stmt):String
+		return switch s {
+			case SSet(_, e) | SExpr(e): pointName(e);
+			case SArrSet(_) | SArrPush(_): "an array store (its slow path grows the array)";
+			case SAnonSet(_): "a structural field store";
+			case SCold(_, x): stmtPoint(x);
+			case _: "a GC point (" + s.getName() + ")";
+		}
 
 	// local `id` is set where `live` are live (after the definition)
 	function def(id:Int, live:Bits) {
@@ -155,6 +258,14 @@ class Roots {
 		var w = live.w, rw = refs.w, ro = rooted.w;
 		for (k in 0...w.length)
 			ro[k] |= w[k] & rw[k];
+		if (raws != null)
+			for (k in 0...n)
+				if (live.get(k) && raws.get(k)) rawError(k, "is live across " + point);
+	}
+
+	function rawError(k:Int, what:String) {
+		var m = "in " + (byId[k] != null ? byId[k].name : "a temporary") + " " + what;
+		if (rawErrors.indexOf(m) < 0) rawErrors.push(m);
 	}
 
 	function uses(e:Ex, acc:Bits) {
@@ -186,6 +297,10 @@ class Roots {
 		}
 		var g = gcPoint(e);
 		if (nestedGc(e)) g = 2;
+		if (raws != null && g > 0) {
+			point = pointName(e);
+			if (g == 1) rawOperands(e);
+		}
 		if (g == 1) across(rest);
 		uses(e, rest);
 		if (g == 2) across(rest);
@@ -215,6 +330,11 @@ class Roots {
 			for (k in 0...n)
 				if (live.get(k) && refs.get(k)) rooted.set(k);
 		}
+		if (raws != null) {
+			point = "the slow path of " + stmtPoint(s);
+			for (k in 0...n)
+				if (live.get(k) && raws.get(k)) rawError(k, "is live across " + point);
+		}
 		var list = spills.get(id);
 		if (list == null) spills.set(id, list = []);
 		for (k in 0...n)
@@ -233,6 +353,7 @@ class Roots {
 	}
 
 	function stmt0(s:Stmt, out:Bits):Bits {
+		if (raws != null) point = stmtPoint(s);
 		return switch s {
 			case SCold(id, x): cold(id, x, out);
 			case SSet(l, e): expr(e, out, l);

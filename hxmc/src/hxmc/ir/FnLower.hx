@@ -2,6 +2,7 @@ package hxmc.ir;
 
 import hxmc.ir.Ir;
 import hxmc.ir.Lower;
+import hxmc.ir.CInterop;
 import core.Ast.Binop;
 import core.Ast.Unop;
 import core.Ast.UnopFlag;
@@ -21,6 +22,7 @@ class FnLower {
 	var self:Null<ClassInfo>;
 	var lambda:Null<LambdaInfo>;
 	var locals = new Map<Int, Local>();
+	var structAliases = new Map<Int, TClass>(); // locals bound to a C struct class (Struct's argument)
 	public var boxed:Map<Int, Bool>;
 	var thisLocal:Null<Local>;
 	var out:Array<Stmt>;
@@ -439,6 +441,11 @@ class FnLower {
 	}
 
 	function declare(v:TVar):Local {
+		switch CInterop.ctype(v.vType) {
+			case CStruct(c) | COpaque(c):
+				throw new LowerError('local ' + v.vName + ' has the C type ' + c.clPath.name + ' by value: structs are reached through a Ptr only (p.value.field, p[i].field)', CInterop.posOf(v.vPos));
+			case _:
+		}
 		var t = ty(v.vType);
 		var lo = isBoxed(v) ? newLocal(v.vName + "_box", TRef(RBox(t))) : newLocal(v.vName, t);
 		locals.set(v.vId, lo);
@@ -453,6 +460,13 @@ class FnLower {
 			case TParenthesis(e1) | TMeta(_, e1):
 				stmt(e1);
 			case TVar(v, init):
+				// (an inlined Class<T> argument naming a C struct: Struct's constants take it)
+				if (init != null) switch strip(init).eexpr {
+					case TTypeExpr(TClassDecl(sc)) if (CInterop.isNativeClass(sc)):
+						structAliases.set(v.vId, sc);
+						return;
+					case _:
+				}
 				var t = ty(v.vType);
 				if (isBoxed(v)) {
 					var x = init != null ? coerce(value(init), tyOf(init), t) : nullOf(t);
@@ -858,6 +872,7 @@ class FnLower {
 						EArrLen(value(obj));
 					case Var(_) if (Lower.isCore(c, "String") && cf.cfName == "length"):
 						ECallHost("String_length", [value(obj)], TI32);
+					case Var(_) if (CInterop.isStruct(c)): structGet(obj, c, cf, e);
 					case Var(_) if (c.hasClassFlag(CExtern)):
 						var t = ty(cf.cfType);
 						var x = temp(t, ECallHost(l.native(Lower.nativeName(c) + "_get_" + cf.cfName), [value(obj)], t));
@@ -1224,6 +1239,13 @@ class FnLower {
 				var x = compute(() -> ELocal(lo), t, t);
 				out.push(SSet(lo, x));
 				return coerce(ELocal(lo), t, et);
+			case TField(obj, FInstance(c, _, cf)) if (CInterop.isStruct(c)):
+				var f = CInterop.field(c, cf.cfName);
+				var a = ELocal(asLocal(coerce(value(obj), tyOf(obj), TI64), TI64));
+				var t = tyOf(lhs);
+				var x = pure(compute(() -> cLoad(a, f.off, f.ty, lhs), t, t), t);
+				cStore(a, f.off, f.ty, x, t, e);
+				return coerce(x, t, et);
 			case TField(obj, FInstance(c, _, cf)) if (!c.hasClassFlag(CExtern) && !c.hasClassFlag(CInterface)):
 				var ci = l.classInfo(c);
 				var idx = ci.fieldIndex(cf.cfName);
@@ -1314,22 +1336,17 @@ class FnLower {
 					case TFun(s): s;
 					case _: fail("extern static " + cf.cfName + " is not a function", e);
 				};
+				var ci = cInteropCall(c, cf, cargs, e);
+				if (ci != null) return ci;
+				// a C function by its own symbol (@:hxmc.c, CInterop): a GC point
+				// in a safe region, or none (@:hxmc.fast: hxmc.unsafe.LibC)
+				var sym = CInterop.cSymbol(c, cf);
+				if (sym != null) return cCall(sym, c, cf, s, cargs, e);
 				var name = Lower.nativeName(c) + "_" + cf.cfName;
-				var leaf = Lower.hasMeta(":hxmc.c", c.clMeta);
-				if (leaf || Lower.hasMeta(":hxmc.rt", c.clMeta)) {
-					// a C function by its own symbol: @:hxmc.c (hxmc.unsafe.LibC)
-					// never reaches a GC point; @:hxmc.rt (the runtime's C
-					// functions, hxmc.rt.C) may collect
+				if (Lower.hasMeta(":hxmc.rt", c.clMeta)) {
+					// the runtime's C functions (hxmc.rt.C), which may collect
 					var n = Lower.metaArg(core.Meta.getOpt(Native, cf.cfMeta));
 					name = n != null ? n : cf.cfName;
-					if (leaf) C_EXTERNS.set(name, true);
-					// @:hxmc.varargs(k): a variadic C function, its arguments from k on variadic
-					var va = core.Meta.getOpt(Custom(":hxmc.varargs"), cf.cfMeta);
-					if (va != null && va.exprs.length == 1)
-						switch va.exprs[0].expr {
-							case EConst(Int(k, _)): C_VARIADIC.set(name, Std.parseInt(k));
-							case _:
-						}
 				}
 				var intrinsic = intrinsicStatic(name, cargs, e);
 				if (intrinsic != null) return intrinsic;
@@ -1467,6 +1484,154 @@ class FnLower {
 
 	function intrinsicMethod(name:String, xs:Array<Ex>, selfTy:Ty):Null<Ex> {
 		return null;
+	}
+
+	// ---- C interop (hxmc/LOWLEVEL.md, CInterop)
+
+	static inline function where(e:TExpr):String
+		return CInterop.posOf(e.epos);
+
+	function cfail(msg:String, e:TExpr):Dynamic
+		throw new LowerError(msg, where(e));
+
+	// a value of a C struct type cannot exist yet: only its fields through a pointer
+	function noStructValue(t:core.TType.T, what:String, e:TExpr) {
+		switch CInterop.ctype(t) {
+			case CStruct(c) | COpaque(c):
+				cfail('$what has the C type ${c.clPath.name} by value: structs are reached through a Ptr only (p.value.field, p[i].field)', e);
+			case _:
+		}
+	}
+
+	// the load of C type ct at addr + off, with the representation of ty(t)
+	function cLoad(addr:Ex, off:Int, ct:CTy, e:TExpr):Ex {
+		inline function get(n:String, t:Ty):Ex
+			return coerce(temp(t, ECallHost("hxmc_unsafe_Mem_" + n, [addr, EInt(off)], t)), t, tyOf(e));
+		return switch ct {
+			case CI8: get("getI8", TI32);
+			case CU8: get("getU8", TI32);
+			case CBool: coerce(EBin(Ne, temp(TI32, ECallHost("hxmc_unsafe_Mem_getU8", [addr, EInt(off)], TI32)), EInt(0)), TBool, tyOf(e));
+			case CI16: get("getI16", TI32);
+			case CU16: get("getU16", TI32);
+			case CI32: get("getI32", TI32);
+			case CI64 | CPtr: get("getI64", TI64);
+			case CF32: get("getF32", TF64);
+			case CF64: get("getF64", TF64);
+			case CStruct(_): off == 0 ? addr : EBin(LAdd, addr, EConv(I2L, EInt(off))); // (a struct: its address)
+			case _: cfail("no C type to load (" + CInterop.name(ct) + ")", e);
+		}
+	}
+
+	// the store of v (with the representation of from) as C type ct at addr + off
+	function cStore(addr:Ex, off:Int, ct:CTy, v:Ex, from:Ty, e:TExpr) {
+		inline function set(n:String, t:Ty)
+			out.push(SExpr(ECallHost("hxmc_unsafe_Mem_" + n, [addr, EInt(off), coerce(v, from, t)], TVoid)));
+		switch ct {
+			case CI8 | CU8 | CBool: set("setI8", TI32);
+			case CI16 | CU16: set("setI16", TI32);
+			case CI32: set("setI32", TI32);
+			case CI64 | CPtr: set("setI64", TI64);
+			case CF32: set("setF32", TF64);
+			case CF64: set("setF64", TF64);
+			case CStruct(c): cfail('assigning a whole ${c.clPath.name}: struct values are not supported yet (assign its fields)', e);
+			case _: cfail("no C type to store (" + CInterop.name(ct) + ")", e);
+		}
+	}
+
+	// the element type of the Ptr a call of Ptr's typed access works on
+	function ptrElemCt(t:core.TType.T, e:TExpr):CTy {
+		var ct = CInterop.ctype(t);
+		return switch ct {
+			case CNone | CVoid: cfail('Ptr<${core.TPrinting.sTypes([t])}>: no C type to access (scalars, Ptr, CString and @:hxmc.struct classes)', e);
+			case COpaque(c): cfail('Ptr<${c.clPath.name}>: an opaque type has no contents to access', e);
+			case _: ct;
+		}
+	}
+
+	// calls of Ptr's extern accessors (value, [i], offset) and of Struct's layout
+	// constants; null for any other call
+	function cInteropCall(c:TClass, cf:TClassField, cargs:Array<TExpr>, e:TExpr):Null<Ex> {
+		switch c.clKind {
+			case KAbstractImpl(a) if (a.aPath.name == "Ptr" && a.aPath.pack.join(".") == "hxmc.unsafe"):
+				var n = cf.cfName;
+				// (T: the result of value, [i] and their setters; offset returns Ptr<T>)
+				var et = n == "offset" ? CInterop.ptrElem(e.etype) : e.etype;
+				if (et == null) cfail("Ptr." + n + ": unknown element type", e);
+				var ct = ptrElemCt(et, e);
+				var size = CInterop.sizeOf(ct);
+				var xs = operands(cargs);
+				var p = coerce(xs[0], tyOf(cargs[0]), TI64);
+				// p + i * size
+				function at(i:Ex, it:Ty):Ex {
+					var k = coerce(i, it, TI32);
+					return switch k {
+						case EInt(0): p;
+						case EInt(v): EBin(LAdd, p, EBin(LMul, EConv(I2L, EInt(v)), EConv(I2L, EInt(size))));
+						case _: EBin(LAdd, p, EBin(LMul, EConv(I2L, k), EConv(I2L, EInt(size))));
+					}
+				}
+				return switch n {
+					case "get_value": cLoad(ELocal(asLocal(p, TI64)), 0, ct, e);
+					case "get": cLoad(ELocal(asLocal(at(xs[1], tyOf(cargs[1])), TI64)), 0, ct, e);
+					case "set_value":
+						var v = ELocal(asLocal(xs[1], tyOf(cargs[1])));
+						cStore(ELocal(asLocal(p, TI64)), 0, ct, v, tyOf(cargs[1]), e);
+						coerce(v, tyOf(cargs[1]), tyOf(e));
+					case "set":
+						var v = ELocal(asLocal(xs[2], tyOf(cargs[2])));
+						cStore(ELocal(asLocal(at(xs[1], tyOf(cargs[1])), TI64)), 0, ct, v, tyOf(cargs[2]), e);
+						coerce(v, tyOf(cargs[2]), tyOf(e));
+					case "offset": at(xs[1], tyOf(cargs[1]));
+					case _: cfail("Ptr." + n + " is not an accessor", e);
+				}
+			case _:
+		}
+		if (c.clPath.name == "Struct" && c.clPath.pack.join(".") == "hxmc.unsafe") {
+			var sc = switch strip(cargs[0]).eexpr {
+				case TTypeExpr(TClassDecl(sc)) if (CInterop.isStruct(sc)): sc;
+				case TLocal(v) if (structAliases.exists(v.vId) && CInterop.isStruct(structAliases.get(v.vId))): structAliases.get(v.vId);
+				case _: cfail("Struct." + cf.cfName + ": the argument must be a @:hxmc.struct class", e);
+			};
+			var lay = CInterop.layout(sc);
+			return switch cf.cfName {
+				case "sizeOf": EInt(lay.size);
+				case "alignOf": EInt(lay.align);
+				case "offsetOf":
+					var fname = switch strip(cargs[1]).eexpr {
+						case TConst(TString(s)): s;
+						case _: cfail("Struct.offsetOf: the field name must be a string literal", e);
+					};
+					EInt(CInterop.field(sc, fname).off);
+				case n: cfail("Struct." + n + " is unknown", e);
+			}
+		}
+		return null;
+	}
+
+	// a call of a C function declared by an extern (CInterop.declare): the
+	// arguments converted to their C types' representations; MirBuild applies
+	// the ABI (narrow and float32 values) and the safe region
+	function cCall(sym:String, c:TClass, cf:TClassField, s:core.TType.TSignature, cargs:Array<TExpr>, e:TExpr):Ex {
+		var sig = try CInterop.declare(sym, c, cf, s) catch (err:LowerError) {
+			if (err.where == "") err.where = where(e);
+			throw err;
+		};
+		var va = core.Meta.getOpt(Custom(":hxmc.varargs"), cf.cfMeta);
+		if (va != null && va.exprs.length == 1)
+			switch va.exprs[0].expr {
+				case EConst(Int(k, _)): C_VARIADIC.set(sym, Std.parseInt(k));
+				case _:
+			}
+		var t = ty(s.ret);
+		var xs = args(cargs, [for (a in s.args) ty(a.type)], null);
+		return coerceRhs(ECallHost(sym, xs, t), t, tyOf(e));
+	}
+
+	// a field of a @:hxmc.struct object (an address): a load
+	function structGet(obj:TExpr, c:TClass, cf:TClassField, e:TExpr):Ex {
+		var f = CInterop.field(c, cf.cfName);
+		var a = coerce(value(obj), tyOf(obj), TI64);
+		return cLoad(ELocal(asLocal(a, TI64)), f.off, f.ty, e);
 	}
 
 	// ---- closures

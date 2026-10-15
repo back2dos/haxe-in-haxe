@@ -73,6 +73,12 @@ class Crosshost {
 		var d = '$OUT/$target';
 		mkdirs(d);
 		var args = name == "TOOL" ? TOOL_ARGS : ["-cp", "hxmc/test/cases", "-main", name];
+		if (name != "TOOL") {
+			// a case's C companions (Corpus.nativeInputs: built with zig, or skipped)
+			var native = Corpus.nativeInputs({name: name, cps: ["hxmc/test/cases"], main: name}, target, d);
+			if (native.skip != null) return {ok: true, detail: "skipped: " + native.skip};
+			if (native.links.length > 0) args = args.concat(["-D", "hxmc.link=" + native.links.join(",")]);
+		}
 		var n = build(["bin/hxmc/hxmc"], '$d/$name-n', args, target);
 		if (n.err != null) return {ok: false, detail: "native tool: " + n.err};
 		var w = build(nodeWasm(wasm), '$d/$name-w', args, target);

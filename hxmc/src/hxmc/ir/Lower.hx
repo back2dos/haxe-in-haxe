@@ -420,6 +420,7 @@ class Lower {
 					case _:
 						if (isCore(c, "String")) TRef(RStr);
 						else if (isCore(c, "Array")) TRef(RArr(ty(params[0])));
+						else if (CInterop.isNativeClass(c)) TI64; // the address of C memory (CInterop: through a Ptr only)
 						else if (c.hasClassFlag(CInterface)) TRef(RObj(classInfo(c)));
 						else if (c.hasClassFlag(CExtern)) TRef(RNative(nativeName(c)));
 						else TRef(RObj(classInfo(c)));
@@ -440,6 +441,7 @@ class Lower {
 		var ci = classes.get(c);
 		if (ci != null) return ci;
 		if (c.hasClassFlag(CExtern)) fail("extern class " + c.clPath.name + " used as a class");
+		if (CInterop.isNativeClass(c)) fail(c.clPath.name + " is a C type (@:hxmc.struct or @:hxmc.opaque): it has no class value (Struct.sizeOf takes it only as a literal argument)");
 		if (c.hasClassFlag(CInterface)) {
 			// interfaces have no layout: values are any object
 			ci = new ClassInfo(core.Globals.sTypePath(c.clPath), nativeName(c), null);
@@ -557,7 +559,7 @@ class Lower {
 		var tf = funcOf(cf);
 		if (tf == null) fail("static " + cf.cfName + " is not a function");
 		fi = new FuncInfo(nativeName(c) + "_" + cf.cfName, moduleOf(c));
-		fieldAttrs(fi, cf);
+		fieldAttrs(fi, cf, c);
 		funcs.set(cf, fi);
 		prog.funcs.push(fi);
 		signature(fi, tf, null);
@@ -567,9 +569,13 @@ class Lower {
 
 	// hxmc's attributes of a function: @:hxmc.noGc (checked by Facts.findNoGc),
 	// @:hxmc.collects (it runs the collector), @:hxmc.export (its symbol)
-	static function fieldAttrs(fi:FuncInfo, cf:TClassField) {
+	// (@:hxmc.noGc on a class: on each of its functions)
+	static function fieldAttrs(fi:FuncInfo, cf:TClassField, c:TClass) {
+		fi.pos = cf.cfPos;
+		fi.display = core.Globals.sTypePath(c.clPath) + "." + cf.cfName;
+		if (c.clMeta.length > 0 && hasMeta(":hxmc.noGc", c.clMeta)) fi.declNoGc = true;
 		if (cf.cfMeta.length == 0) return;
-		fi.declNoGc = hasMeta(":hxmc.noGc", cf.cfMeta);
+		if (hasMeta(":hxmc.noGc", cf.cfMeta)) fi.declNoGc = true;
 		fi.collects = hasMeta(":hxmc.collects", cf.cfMeta);
 		fi.cSymbol = metaString(":hxmc.export", cf.cfMeta);
 	}
@@ -597,7 +603,7 @@ class Lower {
 		if (tf == null) fail("method " + cf.cfName + " is not a function");
 		var ci = classInfo(c);
 		fi = new FuncInfo(nativeName(c) + "_" + cf.cfName, moduleOf(c));
-		fieldAttrs(fi, cf);
+		fieldAttrs(fi, cf, c);
 		fi.selfClass = ci;
 		funcs.set(cf, fi);
 		ci.methods.set(cf.cfName, fi);

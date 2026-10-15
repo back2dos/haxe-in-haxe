@@ -21,7 +21,7 @@ import hxmc.unsafe.Ptr;
 	static function rt_wait_fds(pollfds:Ptr, n:Int, timeout:Float):Int;
 }
 
-@:hxmc.c extern class Leaf {
+@:hxmc.c @:hxmc.fast extern class Leaf {
 	// shortest round-trip formatting of a double, as JavaScript does (rt_dyn.c: printf and strtod)
 	static function hx_format_float(v:Float, out:Ptr):Void;
 	// the field-name table (rt_dyn.c): a name's id (interned), the id of a

@@ -954,6 +954,16 @@ class Isel implements hxmc.Target.Selector {
 				var x = emit(FMOVWS);
 				x.d = reg(i.id);
 				x.s1 = t;
+			// a float's bits in the low half of a float register (a C call's
+			// float argument, MirBuild.cCall), and back (its float result)
+			case "f32bits_to_freg":
+				var x = emit(FMOVSW);
+				x.d = reg(i.id);
+				x.s1 = use(i.args[0]);
+			case "freg_to_f32bits":
+				var x = emit(FMOVWS);
+				x.d = reg(i.id);
+				x.s1 = use(i.args[0]);
 			case _:
 				throw new hxmc.MirBuild.Unsupported("unknown special " + i.sym);
 		}
@@ -962,6 +972,7 @@ class Isel implements hxmc.Target.Selector {
 	function call(i:MIns) {
 		f.hasCalls = true;
 		var gi = 0, fi = 0, stack = 0;
+		var winVariadic = abi.os == "windows" && i.variadic >= 0;
 		var uses = [];
 		var moves:Array<{d:Int, s:Int}> = [];
 		for (k in 0...i.args.length) {
@@ -979,6 +990,27 @@ class Isel implements hxmc.Target.Selector {
 				stack += 8;
 				continue;
 			}
+			// Windows: a variadic function takes every argument as an integer
+			// (x0-x7, then the stack), floats as their bits
+			if (t == F64 && winVariadic) {
+				var g = f.newReg(false);
+				var fm = emit(FMOVTOG);
+				fm.d = g;
+				fm.s1 = use(a);
+				if (gi < 8) {
+					moves.push({d: ARG_GPRS[gi], s: -1 - g});
+					uses.push(ARG_GPRS[gi]);
+					gi++;
+				} else {
+					var x = emit(STORE);
+					x.base = -4;
+					x.disp = stack;
+					x.size = 8;
+					x.s1 = g;
+					stack += 8;
+				}
+				continue;
+			}
 			if (t == F64) {
 				if (fi < 8) {
 					moves.push({d: D0 + fi, s: a});
@@ -992,21 +1024,31 @@ class Isel implements hxmc.Target.Selector {
 				gi++;
 				continue;
 			}
-			// stack argument (Apple packs them by size; 8-byte slots elsewhere)
-			var size = apple && t == I32 ? 4 : 8;
+			// stack argument (Apple packs them by their C size; 8-byte slots elsewhere)
+			var size = !apple ? 8 : i.cSizes != null ? i.cSizes[k] : t == I32 ? 4 : 8;
 			stack = (stack + size - 1) & ~(size - 1);
+			var src = use(a);
+			if (t == F64 && size == 4) {
+				// (a float: its bits through a general register)
+				var g = f.newReg(false);
+				var fm = emit(FMOVWS);
+				fm.d = g;
+				fm.s1 = src;
+				src = g;
+			}
 			var x = emit(STORE);
 			x.base = -4;
 			x.disp = stack;
 			x.size = size;
-			x.s1 = use(a);
+			x.s1 = src;
 			stack += size;
 		}
 		stack = (stack + 7) & ~7;
 		if (stack > f.outArgs) f.outArgs = stack;
 		var target = i.sym == null ? use(i.a) : -1;
 		for (mv in moves)
-			if (folded[mv.s]) materialize(m.vals[mv.s], mv.d) else mov(mv.d, reg(mv.s), 8);
+			if (mv.s < 0) mov(mv.d, -1 - mv.s, 8) // (a register of this call's own: -1 - its number)
+			else if (folded[mv.s]) materialize(m.vals[mv.s], mv.d) else mov(mv.d, reg(mv.s), 8);
 		var x = emit(CALL);
 		x.sym = i.sym;
 		x.s1 = target;

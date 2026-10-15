@@ -1,0 +1,24 @@
+exit 0
+Ffi.hx:57: 42
+Ffi.hx:58: -128, -5
+Ffi.hx:59: 0, 8
+Ffi.hx:60: 24464, 1
+Ffi.hx:62: 4294967301
+Ffi.hx:63: 0.15000000596046448
+Ffi.hx:64: 956.9375
+Ffi.hx:65: true, false
+Ffi.hx:66: 650
+Ffi.hx:67: 128
+Ffi.hx:68: 196455
+Ffi.hx:69: 60, 0.875
+Ffi.hx:70: true, true, 32, 8
+Ffi.hx:72: héllo, 6, 6, -1
+Ffi.hx:77: 1000
+Ffi.hx:80: 6, 12, 3, 200, -5, 1.5, true
+Ffi.hx:83: 44, 115.75
+Ffi.hx:87: 20, 10
+Ffi.hx:89: 13, héllo wörld, 13
+Ffi.hx:92: 20000, héllo wörld, 10
+Ffi.hx:102: out of the scope: -7
+Ffi.hx:105: 12
+Ffi.hx:106: 42, 25, ffidyn

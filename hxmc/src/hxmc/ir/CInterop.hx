@@ -1,0 +1,301 @@
+package hxmc.ir;
+
+import core.TType;
+import core.TFunctions;
+import hxmc.ir.Lower.LowerError;
+
+using core.TFunctions;
+
+// C interop (hxmc/LOWLEVEL.md, "C interop"): the C type of a Haxe type in
+// extern signatures, struct fields and pointer accesses, the C layout of
+// @:hxmc.struct classes, and what the program's C externs are (filled while
+// lowering, read by MirBuild and the linkers).
+enum CTy {
+	CVoid;
+	CBool; // C's bool: one byte
+	CI8;
+	CU8;
+	CI16;
+	CU16;
+	CI32; // int, int32_t, uint32_t (Haxe's Int and UInt)
+	CI64; // int64_t, uint64_t, size_t
+	CF32;
+	CF64;
+	CPtr; // any pointer (Ptr<T>, CString)
+	CStruct(c:TClass);
+	COpaque(c:TClass);
+	CNone; // no C type (a GC reference, Dynamic, ...)
+}
+
+typedef CField = {name:String, off:Int, ty:CTy, t:T};
+typedef CLayout = {size:Int, align:Int, fields:Array<CField>};
+
+// the C signature of an extern: the argument and result types
+typedef CSig = {args:Array<CTy>, ret:CTy};
+
+class CInterop {
+	// C functions by symbol: their signature (one per symbol: every
+	// declaration must agree), and the ones called in a safe region (the
+	// externs not declared @:hxmc.fast: MirBuild wraps their calls in
+	// rt_blocking_enter/rt_blocking_leave)
+	public static var SIGS = new Map<String, CSig>();
+	public static var BLOCKING = new Map<String, Bool>();
+	// @:hxmc.lib: the library a symbol comes from (a DLL, a dylib, a
+	// WebAssembly import module)
+	public static var LIBS = new Map<String, String>();
+	// the externs of the program's own code (not hxmc's runtime): on
+	// WebAssembly, imports
+	public static var USER = new Map<String, Bool>();
+	// @:hxmc.link: objects and archives the program names (absolute paths)
+	public static var LINKS:Array<String> = [];
+
+	public static function isStruct(c:TClass):Bool
+		return Lower.hasMeta(":hxmc.struct", c.clMeta);
+
+	public static function isOpaque(c:TClass):Bool
+		return Lower.hasMeta(":hxmc.opaque", c.clMeta);
+
+	// a class whose values are addresses of C memory (struct or opaque)
+	public static function isNativeClass(c:TClass):Bool
+		return isStruct(c) || isOpaque(c);
+
+	static function path(a:TAbstract):String
+		return a.aPath.pack.length == 0 ? a.aPath.name : a.aPath.pack.join(".") + "." + a.aPath.name;
+
+	public static function ctype(t:T):CTy {
+		var t = TFunctions.follow(t);
+		return switch t {
+			case TAbstract(a, params):
+				switch path(a) {
+					case "hxmc.unsafe.Int8": CI8;
+					case "hxmc.unsafe.UInt8": CU8;
+					case "hxmc.unsafe.Int16": CI16;
+					case "hxmc.unsafe.UInt16": CU16;
+					case "hxmc.unsafe.Float32": CF32;
+					case "hxmc.unsafe.UInt64" | "hxmc.I64": CI64;
+					case "hxmc.unsafe.Ptr" | "hxmc.unsafe.CString" | "hxmc.unsafe.Arena": CPtr;
+					case "Int" | "UInt": CI32;
+					case "Bool": CBool;
+					case "Float": CF64;
+					case "Void": CVoid;
+					case "Null" | "Any" | "Class" | "Enum" | "EnumValue": CNone;
+					case _:
+						if (core.Meta.has(CoreType, a.aMeta)) CNone else ctype(core.Abstract.getUnderlyingType(a, params));
+				}
+			case TInst(c, _):
+				if (isStruct(c)) CStruct(c) else if (isOpaque(c)) COpaque(c) else CNone;
+			case _: CNone;
+		}
+	}
+
+	// the element type of a Ptr<T> (or CString: UInt8)
+	public static function ptrElem(t:T):Null<T> {
+		return switch TFunctions.follow(t) {
+			case TAbstract(a, [e]) if (path(a) == "hxmc.unsafe.Ptr"): e;
+			case TAbstract(a, params) if (!core.Meta.has(CoreType, a.aMeta)): ptrElem(core.Abstract.getUnderlyingType(a, params));
+			case _: null;
+		}
+	}
+
+	public static function isScalar(c:CTy):Bool
+		return switch c {
+			case CBool | CI8 | CU8 | CI16 | CU16 | CI32 | CI64 | CF32 | CF64 | CPtr: true;
+			case _: false;
+		}
+
+	public static function sizeOf(c:CTy):Int
+		return switch c {
+			case CBool | CI8 | CU8: 1;
+			case CI16 | CU16: 2;
+			case CI32 | CF32: 4;
+			case CI64 | CF64 | CPtr: 8;
+			case CStruct(s): layout(s).size;
+			case _: 0;
+		}
+
+	public static function alignOf(c:CTy):Int
+		return switch c {
+			case CStruct(s): layout(s).align;
+			case _: sizeOf(c);
+		}
+
+	public static function name(c:CTy):String
+		return switch c {
+			case CStruct(s) | COpaque(s): s.clPath.name;
+			case _: c.getName().substr(1).toLowerCase();
+		}
+
+	static var layouts = new Map<TClass, CLayout>();
+	static var inProgress = new Map<TClass, Bool>();
+
+	// the C layout of a @:hxmc.struct class: its variables in order, each at
+	// the next multiple of its alignment; the size a multiple of the largest
+	// alignment (the same on the six 64-bit targets: no type here differs)
+	public static function layout(c:TClass):CLayout {
+		var l = layouts.get(c);
+		if (l != null) return l;
+		var where = c.clPath.name;
+		if (inProgress.exists(c)) throw new LowerError('@:hxmc.struct $where contains itself (use a Ptr)', posOf(c.clPos));
+		if (c.clParams.length > 0) throw new LowerError('@:hxmc.struct $where cannot have type parameters', posOf(c.clPos));
+		if (c.clSuper != null) throw new LowerError('@:hxmc.struct $where cannot extend a class', posOf(c.clPos));
+		inProgress.set(c, true);
+		var off = 0, align = 1;
+		var fields:Array<CField> = [];
+		for (cf in c.clOrderedFields) {
+			switch cf.cfKind {
+				case Var(_):
+				case Method(_): throw new LowerError('@:hxmc.struct $where: ${cf.cfName}: a struct has no methods (yet)', posOf(cf.cfPos));
+			}
+			var ct = ctype(cf.cfType);
+			switch ct {
+				case COpaque(o): throw new LowerError('@:hxmc.struct $where: ${cf.cfName}: an opaque type (${o.clPath.name}) only stands behind a Ptr', posOf(cf.cfPos));
+				case CNone | CVoid: throw new LowerError('@:hxmc.struct $where: ${cf.cfName} has no C type (scalars, Ptr, CString and structs only)', posOf(cf.cfPos));
+				case _:
+			}
+			var a = alignOf(ct);
+			off = (off + a - 1) & ~(a - 1);
+			fields.push({name: cf.cfName, off: off, ty: ct, t: cf.cfType});
+			off += sizeOf(ct);
+			if (a > align) align = a;
+		}
+		inProgress.remove(c);
+		l = {size: (off + align - 1) & ~(align - 1), align: align, fields: fields};
+		layouts.set(c, l);
+		return l;
+	}
+
+	public static function field(c:TClass, name:String):CField {
+		for (f in layout(c).fields)
+			if (f.name == name) return f;
+		throw new LowerError('@:hxmc.struct ${c.clPath.name} has no field $name', posOf(c.clPos));
+	}
+
+	// file:line of a position (for errors)
+	public static function posOf(p:core.Globals.Pos):String {
+		if (p == null || p.pfile == null || p.pfile == "?") return "";
+		return p.pfile + ":" + lineOf(p.pfile, p.pmin);
+	}
+
+	static var lineCache = new Map<String, Array<Int>>();
+
+	public static function lineOf(file:String, pmin:Int):Int {
+		var starts = lineCache.get(file);
+		if (starts == null) {
+			starts = [0];
+			try {
+				var s = sys.io.File.getBytes(file);
+				for (i in 0...s.length)
+					if (s.get(i) == 10) starts.push(i + 1);
+			} catch (_:Dynamic) {}
+			lineCache.set(file, starts);
+		}
+		var lo = 0, hi = starts.length - 1;
+		while (lo < hi) {
+			var mid = (lo + hi + 1) >> 1;
+			if (starts[mid] <= pmin) lo = mid else hi = mid - 1;
+		}
+		return lo + 1;
+	}
+
+	// ---- externs
+
+	// the C symbol of an extern function: @:hxmc.c("symbol") on the field,
+	// or @:hxmc.c on the field or its class (the field's @:native name, or
+	// its own name); null: not a C function
+	public static function cSymbol(c:TClass, cf:TClassField):Null<String> {
+		var m = core.Meta.getOpt(Custom(":hxmc.c"), cf.cfMeta);
+		if (m != null) {
+			var s = Lower.metaArg(m);
+			if (s != null) return s;
+		} else if (!Lower.hasMeta(":hxmc.c", c.clMeta)) return null;
+		var n = Lower.metaArg(core.Meta.getOpt(Native, cf.cfMeta));
+		return n != null ? n : cf.cfName;
+	}
+
+	static function meta(name:String, c:TClass, cf:TClassField):Bool
+		return Lower.hasMeta(name, cf.cfMeta) || Lower.hasMeta(name, c.clMeta);
+
+	static function metaStr(name:String, c:TClass, cf:TClassField):Null<String> {
+		var s = Lower.metaString(name, cf.cfMeta);
+		return s != null ? s : Lower.metaString(name, c.clMeta);
+	}
+
+	// records the extern `sym` (field cf of c, of type s): its C signature,
+	// whether its calls stay in the running state (@:hxmc.fast), its library
+	public static function declare(sym:String, c:TClass, cf:TClassField, s:TSignature):CSig {
+		var where = posOf(cf.cfPos);
+		var fast = meta(":hxmc.fast", c, cf);
+		// a fast call may take and return GC references (nothing moves during
+		// it: the runtime's own C functions); a call in a safe region may not
+		function gc(ct:CTy):CTy
+			return ct == CNone && fast ? CPtr : ct;
+		var args = [];
+		for (i in 0...s.args.length) {
+			var ct = gc(ctype(s.args[i].type));
+			if (!isScalar(ct))
+				throw new LowerError('C function $sym: parameter ${s.args[i].name} has no C type a call can pass (${describe(ct)}; scalars, Ptr and CString only: structs go by Ptr)', where);
+			args.push(ct);
+		}
+		var ret = gc(ctype(s.ret));
+		if (ret != CVoid && !isScalar(ret))
+			throw new LowerError('C function $sym: the result has no C type a call can return (${describe(ret)}; scalars, Ptr, CString or Void)', where);
+		var sig = {args: args, ret: ret};
+		var prev = SIGS.get(sym);
+		if (prev != null) {
+			if (!sameSig(prev, sig)) throw new LowerError('C function $sym is declared twice with different signatures', where);
+		} else SIGS.set(sym, sig);
+		if (fast) {
+			if (BLOCKING.exists(sym)) throw new LowerError('C function $sym is declared both @:hxmc.fast and not', where);
+			FnLower.C_EXTERNS.set(sym, true);
+		} else {
+			if (FnLower.C_EXTERNS.exists(sym)) throw new LowerError('C function $sym is declared both @:hxmc.fast and not', where);
+			BLOCKING.set(sym, true);
+		}
+		var lib = metaStr(":hxmc.lib", c, cf);
+		if (lib != null) LIBS.set(sym, lib);
+		if (c.clPath.pack.length == 0 || c.clPath.pack[0] != "hxmc") USER.set(sym, true);
+		return sig;
+	}
+
+	static function describe(ct:CTy):String
+		return switch ct {
+			case CNone: "a GC reference, which only a @:hxmc.fast call may take";
+			case CVoid: "Void";
+			case CStruct(s): "the struct " + s.clPath.name + " by value";
+			case COpaque(s): "the opaque " + s.clPath.name + " by value";
+			case _: name(ct);
+		}
+
+	// whether two declarations of a symbol lower the same (the conversions
+	// MirBuild.cCall makes: narrow integers, bool, float; the rest is passed as
+	// its value: a 32-bit int and a 64-bit one are told apart by the call's
+	// own operands, so POSIX's int sockets and Winsock's SOCKET may share a name)
+	static function sameSig(a:CSig, b:CSig):Bool {
+		if (a.args.length != b.args.length || abiKey(a.ret) != abiKey(b.ret)) return false;
+		for (i in 0...a.args.length)
+			if (abiKey(a.args[i]) != abiKey(b.args[i])) return false;
+		return true;
+	}
+
+	static function abiKey(t:CTy):String
+		return switch t {
+			case CBool | CI8 | CU8 | CI16 | CU16 | CF32 | CVoid: t.getName();
+			case _: "w";
+		}
+
+	// @:hxmc.link("path") on a class: an object or archive linked with the
+	// program, relative to the file declaring it; ${target} becomes the
+	// target's name (linux-x86_64, ...)
+	public static function links(c:TClass, target:String) {
+		for (m in c.clMeta)
+			if (core.Meta.metaEq(Custom(":hxmc.link"), m.meta) && m.exprs.length == 1)
+				switch m.exprs[0].expr {
+					case EConst(core.Ast.Constant.String(s, _)):
+						var p = StringTools.replace(s, "${target}", target);
+						if (!haxe.io.Path.isAbsolute(p)) p = haxe.io.Path.join([haxe.io.Path.directory(c.clPos.pfile), p]);
+						p = haxe.io.Path.normalize(p);
+						if (LINKS.indexOf(p) < 0) LINKS.push(p);
+					case _:
+				}
+	}
+}

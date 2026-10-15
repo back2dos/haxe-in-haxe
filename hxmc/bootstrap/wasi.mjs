@@ -6,6 +6,7 @@
 // relative paths against $PWD. A module ending in .br (brotli) or .gz is
 // decompressed first (the committed stage0 is hxmc/bootstrap/stage0.wasm.br).
 import fs from 'node:fs';
+import { createRequire } from 'node:module';
 import path from 'node:path';
 import process from 'node:process';
 import v8 from 'node:v8';
@@ -83,6 +84,10 @@ export function runWasm(module, args, env = process.env) {
 	const imports = wasi.getImportObject();
 	let memory = null;
 	if (process.platform === 'win32' || env.HXMC_WASI_READDIR) readdirShim(imports.wasi_snapshot_preview1, pre, () => memory);
+	// HXMC_WASM_IMPORTS=<file.cjs>: the modules of the C functions a program
+	// declares (@:hxmc.lib; "env" by default), from a CommonJS module
+	// exporting (getMemory) => ({module: {name: function}})
+	if (env.HXMC_WASM_IMPORTS) Object.assign(imports, createRequire(import.meta.url)(path.resolve(env.HXMC_WASM_IMPORTS))(() => memory));
 	const inst = new WebAssembly.Instance(mod, imports);
 	memory = inst.exports.memory;
 	return wasi.start(inst) ?? 0;

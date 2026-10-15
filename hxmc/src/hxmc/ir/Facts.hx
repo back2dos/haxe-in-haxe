@@ -45,6 +45,7 @@ class Facts {
 			bySymbol.set(symbol(f), f);
 		findNoGc();
 		markCold();
+		checkRawAddresses();
 		assignTypes();
 		collectNames();
 		assignNames();
@@ -481,23 +482,62 @@ class Facts {
 					}
 		}
 		// @:hxmc.noGc: a promise the runtime's Haxe code relies on (raw
-		// addresses kept across calls), checked
+		// addresses kept across calls), checked: every violation, with the
+		// chain of calls to the first GC point
+		var errors = [];
 		for (f in p.funcs)
-			if (f.declNoGc && !f.noGc) throw '${f.name} is declared @:hxmc.noGc but reaches a GC point: ${noGcCulprit(f, cand)}';
+			if (f.declNoGc && !f.noGc) errors.push(where(f) + '${displayName(f)} is declared @:hxmc.noGc but reaches a GC point: ${noGcCulprit(f, cand, 0, [])}');
+		if (errors.length > 0) {
+			errors.sort((a, b) -> a < b ? -1 : a > b ? 1 : 0);
+			throw errors.join("\n");
+		}
 	}
 
+	// file:line: of a function's declaration (errors)
+	public static function where(f:FuncInfo):String {
+		var s = f.pos != null ? CInterop.posOf(f.pos) : "";
+		return s == "" ? "" : s + ": ";
+	}
+
+	// a function's Haxe name (pack.Class.field) from its symbol, for errors
+	public static function displayName(f:FuncInfo):String
+		return f.display != null ? f.display : f.name;
+
+	public static function allocName(e:Ex):String
+		return switch e {
+			case ENewObj(_): "an object";
+			case ENewEnum(_): "an enum value";
+			case ENewArr(_): "an array";
+			case ENewClos(_): "a closure";
+			case ENewBox(_): "a box (a captured variable)";
+			case ENewAnon(_): "an anonymous object";
+			case EBox(_): "a box (Dynamic or Null<T>)";
+			case _: e.getName();
+		}
+
 	// what keeps `f` from being a no-GC function (the first offending
-	// statement or expression), for the error of findNoGc
-	function noGcCulprit(f:FuncInfo, cand:Map<FuncInfo, Bool>):String {
+	// statement or expression; through calls, the callee's reason), for the
+	// error of findNoGc
+	function noGcCulprit(f:FuncInfo, cand:Map<FuncInfo, Bool>, depth:Int, seen:Array<FuncInfo>):String {
 		if (f.hasTry) return "it has a try block";
+		if (f.collects) return "it runs the collector (@:hxmc.collects)";
 		var why:Null<String> = null;
 		function exWhy(e:Ex) {
 			if (why != null) return;
 			switch e {
-				case ECall(g, _) if (!cand.exists(g)): why = "it calls " + g.name + (g.declNoGc ? "" : " (not a no-GC function)");
+				case ECall(g, _) if (!cand.exists(g)):
+					why = "it calls " + displayName(g);
+					if (depth < 8 && seen.indexOf(g) < 0) {
+						seen.push(g);
+						why += ", which " + StringTools.replace(noGcCulprit(g, cand, depth + 1, seen), "it ", "");
+					}
 				case ECall(_):
+				case ECallHost(n, _, _) if (CInterop.BLOCKING.exists(n)): why = "it calls the C function " + n + " in a safe region (only @:hxmc.fast calls stay outside: declare it so if it is short, never blocks and never calls back)";
 				case ECallHost(n, _, _) if (GcPoints.gcPoint(e) > 0): why = "it calls the runtime's " + n;
-				case _ if (GcPoints.gcPoint(e) > 0): why = "it allocates or calls dynamically (" + e.getName() + ")";
+				case ENewObj(_) | ENewEnum(_) | ENewArr(_) | ENewClos(_) | ENewBox(_) | ENewAnon(_): why = "it allocates " + allocName(e);
+				case EBox(_): why = "it boxes a value (Dynamic or Null<T>)";
+				case ECallDispatch(_) | ECallClos(_) | ECallAnon(_): why = "it calls through a " + (e.match(ECallDispatch(_)) ? "virtual or interface method" : "closure or structural field") + " (the callee is unknown)";
+				case _ if (GcPoints.gcPoint(e) > 0): why = "it reads Dynamic or structural data (" + e.getName() + ", which may box)";
 				case _:
 			}
 			Facts.iterEx(exWhy, e);
@@ -516,6 +556,33 @@ class Facts {
 		for (s in f.body)
 			stWhy(s);
 		return why != null ? why : "a callee reaches one";
+	}
+
+	// The raw-address check (PLANS.md): the address of a heap object
+	// (Mem.addr, and arithmetic on it) is valid until the next GC point, where
+	// the collector may move the object. Outside @:hxmc.noGc functions,
+	// none may be live across a GC point, nor be passed to a call that is one.
+	function checkRawAddresses() {
+		var errors = [];
+		for (f in p.funcs) {
+			if (f.noGc || !usesAddr(f)) continue;
+			for (v in Roots.rawViolations(f))
+				errors.push(where(f) + '${displayName(f)}: a raw heap address (Mem.addr) $v; take the address after the GC point, or move the work into a @:hxmc.noGc function');
+		}
+		if (errors.length > 0) throw errors.join("\n");
+	}
+
+	static function usesAddr(f:FuncInfo):Bool {
+		var r = false;
+		function ex(e:Ex) {
+			if (r) return;
+			if (e.match(ECallHost("hxmc_unsafe_Mem_addr", _, _))) r = true else Facts.iterEx(ex, e);
+		}
+		function st(s:Stmt)
+			if (!r) Facts.iterStmt(st, ex, s);
+		for (s in f.body)
+			st(s);
+		return r;
 	}
 
 	// Wraps the statements whose only GC point is an allocation or an array

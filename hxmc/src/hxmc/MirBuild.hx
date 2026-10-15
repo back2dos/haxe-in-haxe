@@ -2,6 +2,7 @@ package hxmc;
 
 import hxmc.ir.Ir;
 import hxmc.Mir;
+import hxmc.ir.CInterop.CTy;
 
 // hxmc's IR (hxmc.ir.Ir: structured statements in A-normal form) of one
 // function to Mir (the runtime's inline helpers of rt.h are expanded here,
@@ -1954,10 +1955,50 @@ class MirBuild {
 			case "Math_isFinite": cmp(FEq, op2(FSub, F64, xs[0], xs[0]), fconst(0));
 			case "StringBuf_addChar": stringBufAddChar(xs[0], xs[1]);
 			case _:
+				var sig = hxmc.ir.CInterop.SIGS.get(name);
+				if (sig != null) return cCall(name, sig, xs, ret);
 				var r = call(name, xs, mty(ret));
 				var va = hxmc.ir.FnLower.C_VARIADIC.get(name);
 				if (va != null) f.vals[r].variadic = va;
 				r;
+		}
+	}
+
+	// a call of a C function declared by an extern (hxmc.ir.CInterop): float
+	// arguments rounded to single precision travel in the low half of a
+	// float register; narrow results are extended (the callee leaves the
+	// upper bits undefined); a call not declared @:hxmc.fast runs in a safe
+	// region (one GC point: the references live across it are in their
+	// shadow-stack slots before rt_blocking_enter). WebAssembly has one
+	// thread: no safe region.
+	function cCall(name:String, sig:hxmc.ir.CInterop.CSig, xs:Array<Int>, ret:Ty):Int {
+		var va = hxmc.ir.FnLower.C_VARIADIC.get(name);
+		var args = [], sizes = [];
+		for (k in 0...xs.length) {
+			var v = xs[k];
+			var ct = sig.args[k];
+			// (variadic arguments: C's promotions make a float a double)
+			if (ct == CF32 && (va == null || k < va)) {
+				if (!abi.wasm) v = special("f32bits_to_freg", [special("f64_to_f32", [v], I32)], F64);
+				sizes.push(4);
+			} else
+				sizes.push(va != null && k >= va ? 8 : hxmc.ir.CInterop.sizeOf(ct));
+			args.push(v);
+		}
+		var blocking = hxmc.ir.CInterop.BLOCKING.exists(name) && !abi.wasm;
+		if (blocking) call("rt_blocking_enter", [], Void);
+		var r = call(name, args, mty(ret));
+		var ci = f.vals[r];
+		ci.cSizes = sizes;
+		if (va != null) ci.variadic = va;
+		if (blocking) call("rt_blocking_leave", [], Void);
+		return switch sig.ret {
+			case CI8: op2(Sar, I32, op2(Shl, I32, r, iconst(24)), iconst(24));
+			case CI16: op2(Sar, I32, op2(Shl, I32, r, iconst(16)), iconst(16));
+			case CU8 | CBool: op2(And, I32, r, iconst(0xFF));
+			case CU16: op2(And, I32, r, iconst(0xFFFF));
+			case CF32 if (!abi.wasm): special("f32_to_f64", [special("freg_to_f32bits", [r], I32)], F64);
+			case _: r;
 		}
 	}
 

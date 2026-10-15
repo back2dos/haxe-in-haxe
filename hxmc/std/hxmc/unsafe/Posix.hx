@@ -9,7 +9,7 @@ import hxmc.I64;
 // suffix (stat$INODE64), as its headers do. Variadic functions
 // (@:hxmc.varargs) pass their variadic arguments as the platform requires
 // (on the stack on Apple arm64).
-@:hxmc.c extern class Posix {
+@:hxmc.c @:hxmc.fast extern class Posix {
 	static function write(fd:Int, p:Ptr, n:I64):I64;
 	static function read(fd:Int, p:Ptr, n:I64):I64;
 	@:hxmc.varargs(2) static function open(path:Ptr, flags:Int, mode:Int):Int;

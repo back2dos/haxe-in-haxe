@@ -5,7 +5,7 @@ import hxmc.I64;
 // WASI preview 1 (wasi_snapshot_preview1), the system interface of
 // WebAssembly programs: pointers are 32-bit offsets into linear memory
 // (Int here), results are errno codes (0: success).
-@:hxmc.c extern class WasiApi {
+@:hxmc.c @:hxmc.fast extern class WasiApi {
 	static function args_sizes_get(argc:Int, bufSize:Int):Int;
 	static function args_get(argv:Int, buf:Int):Int;
 	static function environ_sizes_get(n:Int, bufSize:Int):Int;

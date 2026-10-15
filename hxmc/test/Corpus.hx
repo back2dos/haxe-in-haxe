@@ -23,6 +23,7 @@ class Corpus {
 	static final OUT = "bin/hxmc-t";
 	static final STD = "bin/hxmc/std";
 	static final CASES = "hxmc/test/cases";
+	static final REJECT = "hxmc/test/reject";
 	static final EXPECTED = "hxmc/test/expected";
 	static final FUZZ_ZIP = "hxmc/test/fuzz-1000.zip";
 	static final FUZZ = "bin/hxmc-fuzz";
@@ -81,6 +82,10 @@ class Corpus {
 		var files = [for (f in FileSystem.readDirectory(CASES)) if (f.endsWith(".hx")) f.substr(0, f.length - 3)];
 		files.sort(compare);
 		for (f in files) cases.push({name: f, cps: [CASES], main: f});
+		// programs the compiler must reject (@:hxmc.noGc, raw addresses, C types): reject-<Name>
+		var rejects = [for (f in FileSystem.readDirectory(REJECT)) if (f.endsWith(".hx")) f.substr(0, f.length - 3)];
+		rejects.sort(compare);
+		for (f in rejects) cases.push({name: "reject-" + f, cps: [REJECT], main: f});
 		for (d in fuzzPrograms()) cases.push({name: "fuzz-" + d, cps: [FUZZ + "/" + d], main: "Main"});
 		if (names.length == 0) return cases;
 		var known = [for (c in cases) c.name => c];
@@ -93,6 +98,9 @@ class Corpus {
 		var d = OUT + "/" + c.name;
 		mkdirs(d);
 		var wasm = target != null && target.startsWith("wasm");
+		if (c.name.startsWith("reject-")) return stage != null ? {name: c.name, status: "excluded", detail: "a compile error"} : rejectCase(c);
+		var native = nativeInputs(c, target != null ? target : hostTarget(), d);
+		if (native.skip != null) return {name: c.name, status: "excluded", detail: native.skip};
 		if (wasm && WASM_EXCLUDED.exists(c.name)) return {name: c.name, status: "excluded", detail: WASM_EXCLUDED[c.name]};
 		var hxb = d + "/" + (wasm ? 'prog-$target.hxb.zip' : "prog.hxb.zip");
 		var t0 = now();
@@ -114,6 +122,7 @@ class Corpus {
 		if (wasm) exe += ".wasm";
 		var cmd = [tool, exe, "--hxb-lib", hxb, "-main", c.main, "--custom-target", "hxmc", "-D", "disable-parallelism"];
 		if (target != null) cmd = cmd.concat(["-D", "hxmc.target=" + target]);
+		if (native.links.length > 0) cmd = cmd.concat(["-D", "hxmc.link=" + native.links.join(",")]);
 		var r = exec(cmd, {env: ["HXMC_STATS" => "1"]});
 		File.saveContent(d + "/hxmc.log", r.out + r.err);
 		if (r.code != 0) return {name: c.name, status: "hxmc-fail", detail: tail(r.out + r.err, 2000)};
@@ -125,6 +134,8 @@ class Corpus {
 			mkdirs(sd);
 			File.copy(exe, sd + "/m" + (exe.endsWith(".exe") ? ".exe" : exe.endsWith(".wasm") ? ".wasm" : ""));
 			File.copy(expected, sd + "/expected.txt");
+			for (f in native.copy)
+				File.copy(f, sd + "/" + haxe.io.Path.withoutDirectory(f));
 			return {name: c.name, status: "ok", detail: "staged " + nf};
 		}
 		var runner = switch target {
@@ -134,7 +145,7 @@ class Corpus {
 			case _: [];
 		}
 		// a small nursery: frequent collections, so a missing or stale root shows
-		var r = exec(runner.concat([FileSystem.fullPath(exe)]), {cwd: d, timeout: 120, env: ["RT_MINOR_KB" => Sys.getEnv("RT_MINOR_KB") ?? "64", "WINEDEBUG" => "-all"]});
+		var r = exec(runner.concat([FileSystem.fullPath(exe)]), {cwd: d, timeout: 120, env: ["RT_MINOR_KB" => Sys.getEnv("RT_MINOR_KB") ?? "64", "WINEDEBUG" => "-all", "HXMC_WASM_IMPORTS" => native.host]});
 		if (r.timedOut) return {name: c.name, status: "timeout", detail: ""};
 		var got = 'exit ${r.code}\n' + r.out;
 		if (bless && !FileSystem.exists(expected)) {
@@ -146,6 +157,115 @@ class Corpus {
 			return {name: c.name, status: "differs", detail: 'diff $expected $d/got.txt\n' + tail(r.err, 800)};
 		}
 		return {name: c.name, status: "ok", detail: '${fixed(now() - t0)}s $nf'};
+	}
+
+	// A case the compiler must reject: every `// expect: <text>` line of its
+	// source names a part of the error.
+	static function rejectCase(c:CorpusCase):CorpusResult {
+		var src = File.getContent(c.cps[0] + "/" + c.main + ".hx");
+		var want = [for (l in src.split("\n")) if (l.trim().startsWith("// expect: ")) l.trim().substr(11)];
+		if (want.length == 0) return {name: c.name, status: "no-golden", detail: "no `// expect: ` line"};
+		var d = OUT + "/" + c.name;
+		mkdirs(d);
+		var cmd = [tool, d + "/m", "-cp", FileSystem.fullPath(c.cps[0]), "-cp", FileSystem.fullPath(STD), "-main", c.main, "--custom-target", "hxmc", "-D", "disable-parallelism"];
+		if (target != null) cmd = cmd.concat(["-D", "hxmc.target=" + target]);
+		var r = exec(cmd);
+		var out = r.out + r.err;
+		if (r.code == 0) return {name: c.name, status: "differs", detail: "compiled, but must be rejected"};
+		for (w in want)
+			if (out.indexOf(w) < 0) return {name: c.name, status: "differs", detail: 'the error lacks "$w":\n' + tail(out, 1500)};
+		return {name: c.name, status: "ok", detail: "rejected"};
+	}
+
+	public static function hostTarget():String {
+		var m = exec(["uname", "-m"]).out.trim();
+		var os = Sys.systemName() == "Mac" ? "macos" : Sys.systemName() == "Windows" ? "windows" : "linux";
+		return os + "-" + (m == "aarch64" || m == "arm64" || m == "ARM64" ? "arm64" : "x86_64");
+	}
+
+	static var zigOk:Null<Bool>;
+
+	static function zig():Null<String> {
+		var z = Sys.getEnv("ZIG") ?? "zig";
+		if (zigOk == null) zigOk = try exec([z, "version"]).code == 0 catch (_:Dynamic) false;
+		return zigOk ? z : null;
+	}
+
+	// The C companions of a case, built for the target with zig (skipped
+	// cleanly without zig): <Name>.c, an object linked statically;
+	// <Name>_dyn.c, the dynamic library <name>dyn (a DLL next to the
+	// executable on Windows, a dylib on macOS; an object linked statically
+	// on Linux, whose executables are static). WebAssembly modules have no
+	// C objects: their C functions are imports.
+	public static function nativeInputs(c:CorpusCase, target:String, d:String):{links:Array<String>, copy:Array<String>, skip:Null<String>, host:Null<String>} {
+		var r = {links: [], copy: [], skip: null, host: null};
+		var src = c.cps[0] + "/" + c.main + ".c";
+		var dyn = c.cps[0] + "/" + c.main + "_dyn.c";
+		// <Name>.cjs: the host of a WebAssembly program's imports (node only:
+		// HXMC_WASM_IMPORTS, hxmc/bootstrap/wasi.mjs), copied as host.cjs
+		var cjs = c.cps[0] + "/" + c.main + ".cjs";
+		if (FileSystem.exists(cjs)) {
+			if (!target.startsWith("wasm")) r.skip = "WebAssembly only (imports from a host)";
+			else if (stage == null && Sys.getEnv("HXMC_WASM_RUNNER") == "wasmtime") r.skip = "needs node (the host is JavaScript)";
+			else {
+				File.copy(cjs, d + "/host.cjs");
+				r.host = FileSystem.fullPath(d + "/host.cjs");
+				r.copy.push(d + "/host.cjs");
+			}
+			return r;
+		}
+		if (!FileSystem.exists(src) && !FileSystem.exists(dyn)) return r;
+		if (target.startsWith("wasm")) {
+			r.skip = "C objects: none in a WebAssembly module (C functions are imports there)";
+			return r;
+		}
+		var z = zig();
+		if (z == null) {
+			r.skip = "needs zig to build " + src;
+			return r;
+		}
+		var triple = switch target {
+			case "linux-x86_64": "x86_64-linux-musl";
+			case "linux-arm64": "aarch64-linux-musl";
+			case "windows-x86_64": "x86_64-windows-gnu";
+			case "windows-arm64": "aarch64-windows-gnu";
+			case "macos-x86_64": "x86_64-macos";
+			case _: "aarch64-macos";
+		}
+		var flags = ["-O2", "-g0", "-fno-stack-protector"].concat(target.startsWith("linux") ? ["-fno-pic", "-fno-pie"] : []);
+		function build(file:String, out:String, extra:Array<String>):Bool {
+			if (FileSystem.exists(out) && mtime(out) >= mtime(file)) return true;
+			var b = exec([z, "cc", "-target", triple].concat(flags).concat(extra).concat([file, "-o", out]));
+			if (b.code != 0) {
+				r.skip = "zig cc failed: " + tail(b.out + b.err, 400);
+				return false;
+			}
+			return true;
+		}
+		if (FileSystem.exists(src)) {
+			var o = FileSystem.fullPath(d) + '/${c.main}-$target.o';
+			if (!build(src, o, ["-c"])) return r;
+			r.links.push(o);
+		}
+		if (FileSystem.exists(dyn)) {
+			var lib = c.main.toLowerCase() + "dyn";
+			if (target.startsWith("linux")) {
+				var o = FileSystem.fullPath(d) + '/${c.main}_dyn-$target.o';
+				if (!build(dyn, o, ["-c"])) return r;
+				r.links.push(o);
+			} else {
+				// (one directory per target: the library keeps its file name)
+				var ld = d + "/" + target;
+				mkdirs(ld);
+				var f = target.startsWith("windows") ? '$ld/$lib.dll' : '$ld/lib$lib.dylib';
+				var extra = target.startsWith("windows") ? ["-shared"] : ["-shared", "-Wl,-install_name,@rpath/lib" + lib + ".dylib"];
+				if (!build(dyn, f, extra)) return r;
+				// next to the executable
+				File.copy(f, d + "/" + haxe.io.Path.withoutDirectory(f));
+				r.copy.push(f);
+			}
+		}
+		return r;
 	}
 
 	// wasm32-wasi: node (hxmc/bootstrap/wasi.mjs) or, with HXMC_WASM_RUNNER=wasmtime, wasmtime

@@ -80,7 +80,7 @@ class Str {
 		return s;
 	}
 
-	@:hxmc.export("hx_str_of_utf8") static function ofUtf8(c:Ptr, n:Int):String {
+	@:hxmc.export("hx_str_of_utf8") public static function ofUtf8(c:Ptr, n:Int):String {
 		// UTF-16 units first
 		var units = 0, i = 0;
 		while (i < n) {
@@ -121,7 +121,7 @@ class Str {
 	}
 
 	// UTF-8 bytes of s into buf (3 * length + 1 bytes), NUL-terminated; the byte count
-	@:hxmc.export("hx_str_utf8_into") @:hxmc.noGc static function utf8Into(s:String, buf:Ptr):Int {
+	@:hxmc.export("hx_str_utf8_into") @:hxmc.noGc public static function utf8Into(s:String, buf:Ptr):Int {
 		var c = chars(s);
 		var n = len(s), j = 0, i = 0;
 		while (i < n) {

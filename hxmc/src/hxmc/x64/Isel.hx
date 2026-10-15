@@ -1197,6 +1197,16 @@ class Isel implements hxmc.Target.Selector {
 				var x = emit(MOVDRX);
 				x.d = reg(i.id);
 				x.s1 = t;
+			// a float's bits in the low half of a float register (a C call's
+			// float argument, MirBuild.cCall), and back (its float result)
+			case "f32bits_to_freg":
+				var x = emit(MOVDXR);
+				x.d = reg(i.id);
+				x.s1 = use(i.args[0]);
+			case "freg_to_f32bits":
+				var x = emit(MOVDRX);
+				x.d = reg(i.id);
+				x.s1 = use(i.args[0]);
 			case _:
 				throw new hxmc.MirBuild.Unsupported("unknown special " + i.sym);
 		}
@@ -1223,6 +1233,16 @@ class Isel implements hxmc.Target.Selector {
 			if (loc >= 0) {
 				moves.push({d: loc, s: a, size: t == F64 ? 8 : sz(t)});
 				uses.push(loc);
+				// Win64: a variadic callee reads a float from the integer register
+				// of its position too
+				if (win && i.variadic >= 0 && t == F64) {
+					var g = f.newReg(false);
+					var x = emit(MOVQRX);
+					x.d = g;
+					x.s1 = use(a);
+					moves.push({d: WIN_ARG_GPRS[k], s: -1 - g, size: 8});
+					uses.push(WIN_ARG_GPRS[k]);
+				}
 				continue;
 			}
 			// stack argument
@@ -1242,7 +1262,8 @@ class Isel implements hxmc.Target.Selector {
 		if (8 * stack > f.outArgs) f.outArgs = 8 * stack;
 		var target = i.sym == null ? use(i.a) : -1;
 		for (mv in moves)
-			if (folded[mv.s]) materialize(m.vals[mv.s], mv.d) else mov(mv.d, reg(mv.s), 8);
+			if (mv.s < 0) mov(mv.d, -1 - mv.s, 8) // (a register of this call's own: -1 - its number)
+			else if (folded[mv.s]) materialize(m.vals[mv.s], mv.d) else mov(mv.d, reg(mv.s), 8);
 		if (i.variadic >= 0 && !win) {
 			// System V: al bounds the vector registers a variadic call passes
 			var nv = 0;

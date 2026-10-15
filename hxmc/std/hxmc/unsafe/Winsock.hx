@@ -4,7 +4,7 @@ import hxmc.I64;
 
 // Winsock (ws2_32) and the few other functions hxmc.rt.WinNet calls, with
 // the C ABI as LibC's. A SOCKET is pointer-sized (I64 here).
-@:hxmc.c extern class Winsock {
+@:hxmc.c @:hxmc.fast extern class Winsock {
 	static function socket(af:Int, type:Int, protocol:Int):I64;
 	static function closesocket(s:I64):Int;
 	static function accept(s:I64, addr:Ptr, len:Ptr):I64;

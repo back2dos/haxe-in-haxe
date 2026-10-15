@@ -64,6 +64,27 @@ class MkRt {
 		Sys.println('mkrt: ${m.included.length} objects, ${Lambda.count(m.imports)} imports, ${o.sections.length} sections');
 	}
 
+	// ---- the program's own COFF objects and archives (LinkInputs)
+
+	public function markDefined(name:String)
+		defined.set(name, true);
+
+	public function addArchive(a:Archive)
+		archives.push(a);
+
+	public function addCoff(r:{obj:Obj, reader:CoffReader})
+		add(r);
+
+	// takes the archive members that define `roots` (or what taken members need)
+	public function selectFor(roots:Array<String>) {
+		for (r in roots)
+			undefinedQueue.push(r);
+		select();
+	}
+
+	public function mergeObj():Obj
+		return merge();
+
 	// the names the included objects refer to that nothing included defines or imports
 	function undefinedNames():Array<String> {
 		var weak = [for (w in weakDefaults.keys()) w.name => true];

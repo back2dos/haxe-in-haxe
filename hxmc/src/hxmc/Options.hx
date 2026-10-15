@@ -13,6 +13,8 @@ class Options {
 	public var opt = true; // MIR optimizations (HXMC_OPT=0: off)
 	public var jobs = 0; // parallel module compilations (HXMC_JOBS, -D hxmc.jobs; 0: the cores)
 	public var dump:Null<String> = null; // function names whose machine code is printed (HXMC_DUMP)
+	// -D hxmc.link=<path>[,<path>...]: objects and archives linked with the program (LinkInputs)
+	public var links:Array<String> = [];
 
 	public function new() {}
 
@@ -53,6 +55,10 @@ class Options {
 		var j = def("hxmc.jobs");
 		if (j == null) j = env("HXMC_JOBS");
 		if (j != null) o.jobs = Std.parseInt(j);
+		var ls = def("hxmc.link");
+		if (ls != null)
+			for (p in ls.split(","))
+				if (StringTools.trim(p) != "") o.links.push(sys.FileSystem.absolutePath(StringTools.trim(p)));
 		return o;
 	}
 }

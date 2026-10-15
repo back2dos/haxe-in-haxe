@@ -180,6 +180,8 @@ class FuncInfo {
 	public var blocks:Bool = false;
 	public var blocksHere:Bool = false;
 	public var declNoGc:Bool = false; // declared @:hxmc.noGc: Facts.findNoGc fails the build unless noGc
+	public var pos:Null<core.Globals.Pos>; // the declaration (errors)
+	public var display:Null<String>; // its Haxe name, pack.Class.field (errors)
 	// declared @:hxmc.collects: it runs the collector (the entries of a
 	// collector written in Haxe, whose code is otherwise no-GC): never noGc
 	public var collects:Bool = false;

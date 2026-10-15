@@ -163,6 +163,6 @@ class Names {
 	}
 }
 
-@:hxmc.c extern class Fill {
+@:hxmc.c @:hxmc.fast extern class Fill {
 	static function rt_icache_fill(o:Dynamic, fid:Int, c:Ptr):Void;
 }

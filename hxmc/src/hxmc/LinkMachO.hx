@@ -36,6 +36,8 @@ class LinkMachO {
 	var addr = new Map<Section, Int>();
 
 	public var symbols = false; // a symbol table of the code (profilers, debuggers)
+	// imports from other dylibs than libSystem (@:hxmc.lib): symbol -> install name
+	public var dylibs = new Map<String, String>();
 
 	public function new(objs:Array<Obj>, abi:Abi) {
 		this.objs = objs;
@@ -344,12 +346,38 @@ class LinkMachO {
 		// bind opcodes (non-lazy: all at load)
 		binds.sort((a, b) -> a.at - b.at);
 		var bindOff = le.len;
+		// the dylibs: libSystem (ordinal 1), then the others in order of use
+		var libs = ["/usr/lib/libSystem.B.dylib"];
+		var ordinal = new Map<String, Int>();
+		for (name in importOrder) {
+			var d = dylibs.get(name);
+			if (d == null) {
+				ordinal.set(name, 1);
+				continue;
+			}
+			var k = libs.indexOf(d);
+			if (k < 0) {
+				k = libs.length;
+				libs.push(d);
+			}
+			ordinal.set(name, k + 1);
+		}
 		if (binds.length > 0) {
+			var curOrd = 1;
 			le.u8(0x11); // BIND_OPCODE_SET_DYLIB_ORDINAL_IMM 1
 			le.u8(0x51); // BIND_OPCODE_SET_TYPE_IMM pointer
 			var cur = "";
 			var curAddend = 0;
 			for (b in binds) {
+				var ord = ordinal.exists(b.name) ? ordinal.get(b.name) : 1;
+				if (ord != curOrd) {
+					if (ord < 16) le.u8(0x10 | ord) // BIND_OPCODE_SET_DYLIB_ORDINAL_IMM
+					else {
+						le.u8(0x20); // BIND_OPCODE_SET_DYLIB_ORDINAL_ULEB
+						uleb(le, ord);
+					}
+					curOrd = ord;
+				}
 				if (b.name != cur) {
 					le.u8(0x40 | (importWeak.get(b.name) ? 1 : 0)); // SET_SYMBOL_TRAILING_FLAGS_IMM
 					le.str("_" + b.name);
@@ -410,7 +438,7 @@ class LinkMachO {
 			strtab.u8(0);
 			le.u8(0x01); // N_UNDF | N_EXT
 			le.u8(0);
-			le.u16((1 << 8) | (importWeak.get(name) ? 0x40 : 0));
+			le.u16((ordinal.get(name) << 8) | (importWeak.get(name) ? 0x40 : 0));
 			le.u64(0, 0);
 			nimports++;
 		}
@@ -571,6 +599,30 @@ class LinkMachO {
 		h.u32(0x05276403); // current version 1319.100.3
 		h.u32(0x00010000); // compatibility 1.0.0
 		fixed(h, lib, ll - 24);
+		// the other dylibs (@:hxmc.lib); @rpath/ names are looked for next to the executable
+		var rpath = false;
+		for (k in 1...libs.length) {
+			var d = libs[k];
+			if (StringTools.startsWith(d, "@rpath/")) rpath = true;
+			ncmds++;
+			var dl = align(24 + d.length + 1, 8);
+			h.u32(0xc);
+			h.u32(dl);
+			h.u32(24);
+			h.u32(2);
+			h.u32(0);
+			h.u32(0);
+			fixed(h, d, dl - 24);
+		}
+		if (rpath) {
+			ncmds++;
+			var r = "@executable_path";
+			var rl = align(12 + r.length + 1, 8);
+			h.u32(0x8000001c); // LC_RPATH
+			h.u32(rl);
+			h.u32(12);
+			fixed(h, r, rl - 12);
+		}
 		// the code signature
 		ncmds++;
 		h.u32(0x1d);

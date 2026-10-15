@@ -26,6 +26,11 @@ class UpToDate {
 			var rs = try sys.FileSystem.stat(p) catch (_:Dynamic) null;
 			tool += rs == null ? "|?" : "|" + rs.size + "@" + rs.mtime.getTime();
 		}
+		// (and the objects and archives -D hxmc.link names; record() adds those of @:hxmc.link)
+		for (a in args)
+			if (StringTools.startsWith(a, "hxmc.link="))
+				for (p in a.substr(10).split(","))
+					tool += "|" + stamp(StringTools.trim(p));
 		return Fingerprint.hash(tool + "\n" + args.join("\x00") + "\n" + dir);
 	}
 
@@ -36,14 +41,31 @@ class UpToDate {
 		if (key == null) return false;
 		var exe = sys.FileSystem.exists(out) ? out : sys.FileSystem.exists(out + ".exe") ? out + ".exe" : null;
 		if (exe == null || !sys.FileSystem.exists(keyFile(out))) return false;
-		return try sys.io.File.getContent(keyFile(out)) == key catch (_:Dynamic) false;
+		var lines = try sys.io.File.getContent(keyFile(out)).split("\n") catch (_:Dynamic) return false;
+		if (lines[0] != key) return false;
+		for (k in 1...lines.length) {
+			var l = lines[k];
+			if (l == "") continue;
+			var tab = l.indexOf("\t");
+			if (tab < 0 || stamp(l.substr(0, tab)) != l.substr(tab + 1)) return false;
+		}
+		return true;
+	}
+
+	static function stamp(p:String):String {
+		var s = try sys.FileSystem.stat(p) catch (_:Dynamic) null;
+		return s == null ? "?" : s.size + "@" + s.mtime.getTime();
 	}
 
 	public static function record(key:Null<String>, out:String) {
 		if (key == null) return;
 		var d = out + ".hxmc";
 		if (!sys.FileSystem.exists(d)) sys.FileSystem.createDirectory(d);
-		sys.io.File.saveContent(keyFile(out), key);
+		var b = new StringBuf();
+		b.add(key);
+		for (p in hxmc.ir.CInterop.LINKS)
+			b.add("\n" + p + "\t" + stamp(p));
+		sys.io.File.saveContent(keyFile(out), b.toString());
 	}
 
 	public static function forget(out:String) {

@@ -1,0 +1,25 @@
+import hxmc.unsafe.*;
+
+// C functions on WebAssembly (hxmc/LOWLEVEL.md): imports of the module
+// @:hxmc.lib names ("env" by default), in wasm32's C convention (pointers
+// as i32, Float32 as f32, Int64 as i64); the host here is WasmImports.cjs
+// (HXMC_WASM_IMPORTS, hxmc/bootstrap/wasi.mjs). WebAssembly only.
+@:hxmc.lib("host") extern class Host {
+	@:hxmc.c("h_mix") static function mix(a:Int, b:Float32, c:Float, d:Int64, e:UInt8):Float32;
+	@:hxmc.c("h_strlen") static function strlen(s:CString):Int;
+	@:hxmc.c("h_buffer") static function buffer():Ptr<Int32>;
+}
+
+extern class Env {
+	@:hxmc.c("e_twice") static function twice(v:Int):Int;
+}
+
+class WasmImports {
+	static function main() {
+		trace(Host.mix(1, 2.5, 0.25, 7, 300));
+		Arena.scoped(a -> trace(Host.strlen(a.cstring("héllo"))));
+		var p = Host.buffer();
+		trace(p[0], p[1], p[2]);
+		trace(Env.twice(21));
+	}
+}
