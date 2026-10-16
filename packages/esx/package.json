@@ -1,0 +1,18 @@
+{
+  "name": "@hxmc/esx",
+  "version": "0.1.0",
+  "description": "JSX-like markup for Haxe on every target, after the ESX proposal: each markup literal compiles to one static template of its static parts (its identity a cache key) and an array of its dynamic values; components are type-checked calls",
+  "license": "MIT",
+  "files": [
+    "src/"
+  ],
+  "haxe": {
+    "name": "hxmc.esx",
+    "classPath": "src"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/benmerckx/hxmc.git",
+    "directory": "packages/esx"
+  }
+}
