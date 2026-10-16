@@ -793,13 +793,17 @@ class Dyn {
 	// thread stopped). The seed is thread-local.
 	@:hxmc.threadLocal static var hashSeed:Int;
 
+	// the running thread's id (hxmc.NativeThread.current, without typing the threads' API)
+	@:hxmc.noGc static inline function threadId():Int
+		return #if (hxmc.target == "wasm32-wasi") hxmc.rt.wasm.Threads.current() #else Threads.current() #end;
+
 	@:hxmc.noGc public static function objHash(o:Dynamic):Int {
 		if (Str.isNull(o)) return 0;
 		var hp = Mem.addr(o).add(-8);
 		var h = Mem.getU16(hp, 6);
 		if (h == 0) {
 			var seed = hashSeed;
-			if (seed == 0) seed = 0x9E37 + 0x10000 * (Leaf.hxmc_NativeThread_current() - 1); // the main thread's sequence is the single-threaded one
+			if (seed == 0) seed = 0x9E37 + 0x10000 * (threadId() - 1); // the main thread's sequence is the single-threaded one
 			seed = seed * 1103515245 + 12345;
 			hashSeed = seed;
 			h = (seed >>> 16) & 0xFFFF;

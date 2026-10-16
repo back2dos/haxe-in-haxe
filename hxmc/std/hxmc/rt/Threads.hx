@@ -404,7 +404,7 @@ class Threads {
 		return id;
 	}
 
-	@:hxmc.host("hxmc_NativeThread_current") @:hxmc.noGc static function current():Int
+	@:hxmc.noGc static function current():Int
 		return self.value.id;
 
 	// the record of thread id, or null (under wl)

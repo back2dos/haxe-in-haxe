@@ -690,7 +690,7 @@ class Gc {
 
 	// a collection, with every other thread stopped (unless another thread
 	// collected meanwhile: the caller then retries its allocation)
-	@:hxmc.noGc static function collect(full:Bool, need:I64) {
+	@:hxmc.noGc static function collectFor(full:Bool, need:I64) {
 		if (!Threads.worldStop()) return;
 		if (youngDirty.ult(youngNext)) youngDirty = youngNext;
 		if (full) majorAndTime(need) else {
@@ -759,7 +759,7 @@ class Gc {
 		// a safepoint: the caller's live references are rooted here
 		Threads.safepoint();
 		// likewise for finaliser calls queued by an earlier major collection
-		if (finalQlen != 0 && finalsRunning == 0) runFinalisers(false);
+		if (finalQlen != 0 && finalsRunning == 0) callFinalisers(false);
 		return allocNow(header, bytes);
 	}
 
@@ -772,7 +772,7 @@ class Gc {
 			p = Ptr.ofI64(Atomic.load64(cell));
 			while (true) {
 				if (oldEnd.diff(p) < bytes) {
-					collect(true, bytes);
+					collectFor(true, bytes);
 					p = Ptr.ofI64(Atomic.load64(cell));
 					continue;
 				}
@@ -782,7 +782,7 @@ class Gc {
 			}
 		} else {
 			while (!youngRoom(bytes))
-				collect(false, 0); // (room already: another thread collected meanwhile)
+				collectFor(false, 0); // (room already: another thread collected meanwhile)
 			p = yptr;
 			yptr = p.add(bytes);
 			Mem.setI64(p, 0, header);
@@ -850,7 +850,7 @@ class Gc {
 
 	// Gc.finalise f v: values outside the heap (static objects, null) are
 	// never collected, so their finalisers never run
-	@:hxmc.host("hxmc_NativeGc_finalise") @:hxmc.noGc static function finalise(fn:Dynamic, val:Dynamic):Void {
+	@:hxmc.noGc public static function finalise(fn:Dynamic, val:Dynamic):Void {
 		var v = Mem.addr(val);
 		if (v.isNull() || !(inYoung(v) || inOld(v))) return;
 		lockLeaf(finalsLock);
@@ -865,16 +865,16 @@ class Gc {
 	}
 
 	// a collection now: minor or major (full), as OCaml's Gc.minor/full_major
-	@:hxmc.host("hxmc_NativeGc_collect") @:hxmc.collects static function gcCollect(full:Bool):Void
-		collect(full, 0);
+	@:hxmc.collects public static function collect(full:Bool):Void
+		collectFor(full, 0);
 
 	// the queued finalisers (an exception escapes, as from OCaml's Gc.full_major)
-	@:hxmc.host("hxmc_NativeGc_runFinalisers") static function gcRunFinalisers():Void
-		runFinalisers(true);
+	public static function runFinalisers():Void
+		callFinalisers(true);
 
 	// calls the queued finalisers (an exception escapes when propagate is
 	// set; otherwise, at an allocation, it is reported)
-	static function runFinalisers(propagate:Bool) {
+	static function callFinalisers(propagate:Bool) {
 		if (finalsRunning != 0) return;
 		finalsRunning = 1;
 		while (true) {
@@ -1092,7 +1092,7 @@ class Gc {
 	// of OCaml's Objsize and Gc heap words)
 
 	// the bytes the heap spaces take
-	@:hxmc.host("hxmc_NativeGc_heapBytes") @:hxmc.noGc static function heapBytes():Float {
+	@:hxmc.noGc public static function heapBytes():Float {
 		var o:Float = cast oldEnd.diff(oldStart);
 		var y:Float = cast youngEnd.diff(youngStart);
 		return o + y;
@@ -1100,7 +1100,7 @@ class Gc {
 
 	static var objsizeReached:Bool;
 
-	@:hxmc.host("hxmc_NativeGc_reached") @:hxmc.noGc static function reached():Bool
+	@:hxmc.noGc public static function reached():Bool
 		return objsizeReached;
 
 	static inline function inHeap(p:Ptr):Bool
@@ -1170,7 +1170,7 @@ class Gc {
 	// without entering the objects of the array `exclude`; reaching an object
 	// of the array `out` sets the flag reached() returns (and is not entered
 	// either). Objects outside the heap (static data) are neither counted nor entered.
-	@:hxmc.host("hxmc_NativeGc_objsize") @:hxmc.noGc static function objsize(v:Dynamic, exclude:Dynamic, out:Dynamic):Float {
+	@:hxmc.noGc public static function objsize(v:Dynamic, exclude:Dynamic, out:Dynamic):Float {
 		var seen = Mem.stack(24), ex = Mem.stack(24), outs = Mem.stack(24);
 		psetNew(seen, 1024);
 		psetNew(ex, 64);

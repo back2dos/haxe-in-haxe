@@ -59,7 +59,11 @@ Done (README, "Runtime in Haxe"):
 - One source per runtime area: the haxe.atomic cells are written over
   the `Atomic` intrinsics, `hxmc.NativeZip` is the implementation,
   `hxmc.NativeSys`/`NativeNet` dispatch by `Mem.os()` to typed POSIX and
-  Windows classes, `hxmc.Native` (reflection) calls `hxmc.rt.Dyn`. No
+  Windows classes, `hxmc.Native` (reflection) is an alias of `hxmc.rt.Dyn`,
+  `hxmc.NativeSsl`, `NativeUv`, `NativeThread` and `NativeGc` are aliases
+  of their implementations (`hxmc.rt.Ssl`, `Uv`, `ThreadApi`, `Gc`; on
+  WebAssembly `hxmc.rt.wasm.NoSsl`, `NoUv`, `Threads`, `Gc`) instead of
+  externs bound to them by symbol. No
   `@:keep`, no bindings: Haxe's dead-code elimination drops what a
   program does not use (75 KB less HXB and 8 to 12 KB less code for a
   small program, builds up to 5% faster). Bindings stay for the natives the code

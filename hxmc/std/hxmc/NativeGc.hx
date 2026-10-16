@@ -1,17 +1,9 @@
 package hxmc;
 
-// The GC's finalisers (hxmc.rt.Gc), for Eval's Gc.finalise. `f` is called with `v`
-// once a major collection finds `v` unreachable (`v` lives on for the call);
-// values outside the heap are never collected. Also the heap measurements of
-// the port's server/memory (context/Memory.hx).
-extern class NativeGc {
-	static function finalise(f:Dynamic->Void, v:Dynamic):Void;
-	static function collect(full:Bool):Void; // a minor (false) or major (true) collection
-	static function runFinalisers():Void; // the queued calls; an exception escapes
-	// the bytes of the heap objects reachable from `v` (headers included),
-	// without entering `exclude` or `out`; `reached()` tells whether an object
-	// of `out` was reachable (OCaml's Objsize, for the port's server/memory)
-	static function objsize(v:Dynamic, exclude:Array<Dynamic>, out:Array<Dynamic>):Float;
-	static function reached():Bool;
-	static function heapBytes():Float; // the heap spaces' size
-}
+// The collector's API (hxmc.rt.Gc, or hxmc.rt.wasm.Gc on WebAssembly): its
+// finalisers, for Eval's Gc.finalise (`f` is called with `v` once a major
+// collection finds `v` unreachable; values outside the heap are never
+// collected; never on WebAssembly), collections, and the heap measurements
+// of the port's server/memory (context/Memory.hx: objsize, reached,
+// heapBytes).
+typedef NativeGc = #if (hxmc.target == "wasm32-wasi") hxmc.rt.wasm.Gc #else hxmc.rt.Gc #end;

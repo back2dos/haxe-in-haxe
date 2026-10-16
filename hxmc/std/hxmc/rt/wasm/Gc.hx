@@ -208,16 +208,16 @@ class Gc {
 		if (bytes > minorSize >> 2 && youngEnd.diff(Mem.tlsGet("rt_young_ptr")) < (bytes : I64)) {
 			// large objects go straight to the old space (unless the free nursery
 			// has room: they may die young)
-			if (oldBytes + bytes > oldLimit) collect(true, bytes);
+			if (oldBytes + bytes > oldLimit) collectFor(true, bytes);
 			p = oldAlloc(bytes);
 			if (p.isNull()) {
-				collect(true, bytes);
+				collectFor(true, bytes);
 				p = oldAlloc(bytes);
 				if (p.isNull()) Heap.outOfMemory();
 			}
 		} else {
 			if (Mem.tlsGet("rt_young_rlimit").diff(Mem.tlsGet("rt_young_ptr")) < (bytes : I64) && !nextChunk(bytes)) {
-				collect(false, 0);
+				collectFor(false, 0);
 				nextChunk(bytes);
 			}
 			p = Mem.tlsGet("rt_young_ptr");
@@ -545,7 +545,7 @@ class Gc {
 		setYoungEnd(youngStart.add(size));
 	}
 
-	@:hxmc.noGc static function collect(full:Bool, need:Int) {
+	@:hxmc.noGc static function collectFor(full:Bool, need:Int) {
 		var hi = Mem.tlsGet("rt_young_rlimit");
 		if (youngDirty.ult(hi)) youngDirty = hi;
 		if (verifying) verify(false);
@@ -666,25 +666,25 @@ class Gc {
 
 	// ---- hxmc.NativeGc
 
-	@:hxmc.export("hxmc_NativeGc_collect") @:hxmc.collects static function gcCollect(full:Bool):Void
-		collect(full, 0);
+	@:hxmc.collects public static function collect(full:Bool):Void
+		collectFor(full, 0);
 
 	// (finalisers never run: WebAssembly programs have no resources to free behind values)
-	@:hxmc.export("hxmc_NativeGc_finalise") @:hxmc.noGc static function gcFinalise(fn:Dynamic->Void, v:Dynamic):Void {}
+	@:hxmc.noGc public static function finalise(fn:Dynamic->Void, v:Dynamic):Void {}
 
-	@:hxmc.export("hxmc_NativeGc_runFinalisers") @:hxmc.noGc static function gcRunFinalisers():Void {}
+	@:hxmc.noGc public static function runFinalisers():Void {}
 
-	@:hxmc.export("hxmc_NativeGc_heapBytes") @:hxmc.noGc static function gcHeapBytes():Float {
+	@:hxmc.noGc public static function heapBytes():Float {
 		var b:Float = cast oldLimit;
 		return b + minorSize;
 	}
 
-	@:hxmc.export("hxmc_NativeGc_reached") @:hxmc.noGc static function gcReached():Bool
+	@:hxmc.noGc public static function reached():Bool
 		return false;
 
 	// (no object sizes: 0)
 	// (no census of the heap on WebAssembly)
-	@:hxmc.export("hxmc_NativeGc_objsize") static function gcObjsize(v:Dynamic, exclude:Array<Dynamic>, out:Array<Dynamic>):Float {
+	public static function objsize(v:Dynamic, exclude:Array<Dynamic>, out:Array<Dynamic>):Float {
 		hxmc.rt.C.Rt.rt_throw("Gc.objsize is not supported on WebAssembly");
 		return 0;
 	}

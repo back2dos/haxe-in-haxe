@@ -40,7 +40,7 @@ class StringMap<T> implements haxe.Constraints.IMap<String, T> {
 	}
 
 	inline function hashOf(k:String):Int {
-		return hxmc.Native.strHash(k);
+		return hxmc.rt.Str.strHash(k);
 	}
 
 	inline function find(k:String, h:Int):Int {

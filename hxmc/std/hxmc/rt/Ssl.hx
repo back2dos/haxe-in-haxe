@@ -27,12 +27,11 @@ import hxmc.unsafe.*;
 // Unix_error escapes through mbedtls. Here the BIO is C send/recv on the
 // socket descriptor; on failure it records errno and returns
 // MBEDTLS_ERR_NET_SEND_FAILED/RECV_FAILED, and the port raises the Unix error
-// after the call (hxmc_NativeSsl_bioError).
+// after the call (bioError, bioErrorSend).
 //
 // The handshake, reads and writes are C calls in a safe region (they block
 // on the socket): mbedtls works on malloc'ed memory only meanwhile, and the
 // BIO callbacks are no-GC functions that call send/recv directly.
-@:hxmc.native @:keep
 class Ssl {
 	// the layouts of mbedtls 2.28 (hxmc/c/deps.sh), the same on the six
 	// targets: context sizes, and the fields of mbedtls_x509_crt read here
@@ -135,7 +134,7 @@ class Ssl {
 	static inline function str(p:Ptr, n:Int):String
 		return Str.ofUtf8(p, n);
 
-	@:hxmc.host("hxmc_NativeSsl_strerror") static function strerror(code:Int):String {
+	public static function strerror(code:Int):String {
 		var buf = Mem.stack(128);
 		M.mbedtls_strerror(code, buf, 128);
 		return str(buf, LibC.strlen(buf).toInt());
@@ -143,25 +142,23 @@ class Ssl {
 
 	// ---- CtrDrbg
 
-	@:hxmc.host("hxmc_NativeSsl_ctrDrbgInit") static function ctrDrbgInit():Dynamic
-	{
+	public static function ctrDrbgInit():Dynamic {
 		var p = alloc(CTR_DRBG_SIZE);
 		M.mbedtls_ctr_drbg_init(p);
 		return Rt.rt_native_new_refs(p, Callback.addr(freeCtrDrbg), 1);
 	}
 
-	@:hxmc.host("hxmc_NativeSsl_ctrDrbgRandom") static function ctrDrbgRandom(ctx:Dynamic, output:Bytes, len:Int):Int
+	public static function ctrDrbgRandom(ctx:Dynamic, output:Bytes, len:Int):Int
 		return M.mbedtls_ctr_drbg_random(ptr(ctx), bytes(output), (len : I64));
 
-	@:hxmc.host("hxmc_NativeSsl_ctrDrbgSeed") static function ctrDrbgSeed(ctx:Dynamic, entropy:Dynamic):Int {
+	public static function ctrDrbgSeed(ctx:Dynamic, entropy:Dynamic):Int {
 		setRef(ctx, CTR_REF_ENTROPY, entropy);
 		return M.mbedtls_ctr_drbg_seed(ptr(ctx), Mem.sym("mbedtls_entropy_func"), ptr(entropy), Ptr.nil(), 0);
 	}
 
 	// ---- Entropy
 
-	@:hxmc.host("hxmc_NativeSsl_entropyInit") static function entropyInit():Dynamic
-	{
+	public static function entropyInit():Dynamic {
 		var p = alloc(ENTROPY_SIZE);
 		M.mbedtls_entropy_init(p);
 		return Rt.rt_native_new_refs(p, Callback.addr(freeEntropy), 0);
@@ -169,30 +166,30 @@ class Ssl {
 
 	// ---- Certificate
 
-	@:hxmc.host("hxmc_NativeSsl_x509CrtInit") static function x509CrtInit():Dynamic
-	{
+	public static function x509CrtInit():Dynamic {
 		var p = alloc(X509_CRT_SIZE);
 		M.mbedtls_x509_crt_init(p);
 		return Rt.rt_native_new_refs(p, Callback.addr(freeX509Crt), 0);
 	}
 
-	@:hxmc.host("hxmc_NativeSsl_x509Next") static function x509Next(chain:Dynamic):Dynamic {
+	// null: none
+	public static function x509Next(chain:Dynamic):Dynamic {
 		var next = Mem.getPtr(ptr(chain), CRT_NEXT);
 		return next.isNull() ? null : borrow(next, chain);
 	}
 
-	@:hxmc.host("hxmc_NativeSsl_x509CrtParse") static function x509CrtParse(chain:Dynamic, b:Bytes):Int
+	public static function x509CrtParse(chain:Dynamic, b:Bytes):Int
 		return Arena.scopedValue(a -> M.mbedtls_x509_crt_parse(ptr(chain), bytesZ(a, b), (b.length + 1 : I64)));
 
-	@:hxmc.host("hxmc_NativeSsl_x509CrtParseFile") static function x509CrtParseFile(chain:Dynamic, path:String):Int
+	public static function x509CrtParseFile(chain:Dynamic, path:String):Int
 		return Arena.scopedValue(a -> M.mbedtls_x509_crt_parse_file(ptr(chain), a.cstring(path)));
 
-	@:hxmc.host("hxmc_NativeSsl_x509CrtParsePath") static function x509CrtParsePath(chain:Dynamic, path:String):Int
+	public static function x509CrtParsePath(chain:Dynamic, path:String):Int
 		return Arena.scopedValue(a -> M.mbedtls_x509_crt_parse_path(ptr(chain), a.cstring(path)));
 
 	// ---- Certificate Haxe API
 
-	@:hxmc.host("hxmc_NativeSsl_certAltNames") static function certAltNames(chain:Dynamic):Array<String> {
+	public static function certAltNames(chain:Dynamic):Array<String> {
 		var r:Array<String> = [];
 		if (Mem.getI32(ptr(chain), CRT_EXT_TYPES) & EXT_SUBJECT_ALT_NAME == 0) return r;
 		var cur:Ptr<Asn1Sequence> = ptr(chain).add(CRT_ALT_NAMES);
@@ -222,10 +219,10 @@ class Ssl {
 		return f.isNull() ? null : str(f.value.val.p, f.value.val.len.toInt());
 	}
 
-	@:hxmc.host("hxmc_NativeSsl_certSubject") static function certSubject(chain:Dynamic, field:String):Null<String>
+	public static function certSubject(chain:Dynamic, field:String):Null<String>
 		return findName(ptr(chain).add(CRT_SUBJECT), field);
 
-	@:hxmc.host("hxmc_NativeSsl_certIssuer") static function certIssuer(chain:Dynamic, field:String):Null<String>
+	public static function certIssuer(chain:Dynamic, field:String):Null<String>
 		return findName(ptr(chain).add(CRT_ISSUER), field);
 
 	// upstream leaves the other fields of `info` (tm_isdst) uninitialized
@@ -242,10 +239,10 @@ class Ssl {
 		return t;
 	}
 
-	@:hxmc.host("hxmc_NativeSsl_certNotAfter") static function certNotAfter(chain:Dynamic):Float
+	public static function certNotAfter(chain:Dynamic):Float
 		return timeToTimeT(ptr(chain).add(CRT_VALID_TO));
 
-	@:hxmc.host("hxmc_NativeSsl_certNotBefore") static function certNotBefore(chain:Dynamic):Float
+	public static function certNotBefore(chain:Dynamic):Float
 		return timeToTimeT(ptr(chain).add(CRT_VALID_FROM));
 
 	// 0 when the system store was loaded; otherwise
@@ -253,7 +250,7 @@ class Ssl {
 	// Sys.systemName(). Upstream's Windows (system "Root" store) and macOS
 	// (Security framework) branches; Linux has neither (1, as upstream on
 	// Linux and the BSDs).
-	@:hxmc.host("hxmc_NativeSsl_certLoadDefaults") static function certLoadDefaults(certificate:Dynamic):Int {
+	public static function certLoadDefaults(certificate:Dynamic):Int {
 		if (os() == 2) return loadWindowsRoots(ptr(certificate));
 		if (os() == 1) return loadMacosRoots(ptr(certificate));
 		return 1;
@@ -360,25 +357,25 @@ class Ssl {
 
 	// ---- Config
 
-	@:hxmc.host("hxmc_NativeSsl_configInit") static function configInit():Dynamic {
+	public static function configInit():Dynamic {
 		var p = alloc(SSL_CONFIG_SIZE);
 		M.mbedtls_ssl_config_init(p);
 		if (os() == 2) M.mbedtls_ssl_conf_verify(p, Callback.addr(verifyCallback), Ptr.nil());
 		return Rt.rt_native_new_refs(p, Callback.addr(freeSslConfig), 2);
 	}
 
-	@:hxmc.host("hxmc_NativeSsl_confAuthmode") static function confAuthmode(conf:Dynamic, authmode:Int):Void
+	public static function confAuthmode(conf:Dynamic, authmode:Int):Void
 		M.mbedtls_ssl_conf_authmode(ptr(conf), authmode);
 
-	@:hxmc.host("hxmc_NativeSsl_confCaChain") static function confCaChain(conf:Dynamic, caChain:Dynamic):Void {
+	public static function confCaChain(conf:Dynamic, caChain:Dynamic):Void {
 		setRef(conf, CONF_REF_CA, caChain);
 		M.mbedtls_ssl_conf_ca_chain(ptr(conf), ptr(caChain), Ptr.nil());
 	}
 
-	@:hxmc.host("hxmc_NativeSsl_configDefaults") static function configDefaults(conf:Dynamic, endpoint:Int, transport:Int, preset:Int):Int
+	public static function configDefaults(conf:Dynamic, endpoint:Int, transport:Int, preset:Int):Int
 		return M.mbedtls_ssl_config_defaults(ptr(conf), endpoint, transport, preset);
 
-	@:hxmc.host("hxmc_NativeSsl_confRng") static function confRng(conf:Dynamic, rng:Dynamic):Void {
+	public static function confRng(conf:Dynamic, rng:Dynamic):Void {
 		setRef(conf, CONF_REF_RNG, rng);
 		M.mbedtls_ssl_conf_rng(ptr(conf), Mem.sym("mbedtls_ctr_drbg_random"), ptr(rng));
 	}
@@ -389,14 +386,13 @@ class Ssl {
 	static inline function camlRawInt(r:Int):Int
 		return r >> 1;
 
-	@:hxmc.host("hxmc_NativeSsl_pkInit") static function pkInit():Dynamic
-	{
+	public static function pkInit():Dynamic {
 		var p = alloc(PK_SIZE);
 		M.mbedtls_pk_init(p);
 		return Rt.rt_native_new_refs(p, Callback.addr(freePk), 0);
 	}
 
-	@:hxmc.host("hxmc_NativeSsl_pkParseKey") static function pkParseKey(ctx:Dynamic, key:Bytes, password:Null<String>, rng:Dynamic):Int {
+	public static function pkParseKey(ctx:Dynamic, key:Bytes, password:Null<String>, rng:Dynamic):Int {
 		return Arena.scopedValue(a -> {
 			var pwd = a.cstring(password);
 			var pwdlen:I64 = pwd.isNull() ? 0 : (pwd.length() : I64);
@@ -404,18 +400,18 @@ class Ssl {
 		});
 	}
 
-	@:hxmc.host("hxmc_NativeSsl_pkParseKeyfile") static function pkParseKeyfile(ctx:Dynamic, path:String, password:Null<String>, rng:Dynamic):Int
+	public static function pkParseKeyfile(ctx:Dynamic, path:String, password:Null<String>, rng:Dynamic):Int
 		return Arena.scopedValue(a -> camlRawInt(M.mbedtls_pk_parse_keyfile(ptr(ctx), a.cstring(path), a.cstring(password))));
 
-	@:hxmc.host("hxmc_NativeSsl_pkParsePublicKey") static function pkParsePublicKey(ctx:Dynamic, key:Bytes):Int
+	public static function pkParsePublicKey(ctx:Dynamic, key:Bytes):Int
 		return Arena.scopedValue(a -> camlRawInt(M.mbedtls_pk_parse_public_key(ptr(ctx), bytesZ(a, key), (key.length + 1 : I64))));
 
-	@:hxmc.host("hxmc_NativeSsl_pkParsePublicKeyfile") static function pkParsePublicKeyfile(ctx:Dynamic, path:String):Int
+	public static function pkParsePublicKeyfile(ctx:Dynamic, path:String):Int
 		return Arena.scopedValue(a -> camlRawInt(M.mbedtls_pk_parse_public_keyfile(ptr(ctx), a.cstring(path))));
 
 	// ---- Ssl: the context and its BIO state (hx_ssl)
 
-	@:hxmc.host("hxmc_NativeSsl_sslInit") static function sslInit():Dynamic {
+	public static function sslInit():Dynamic {
 		var s = LibC.malloc((HX_SSL_SIZE : I64));
 		LibC.memset(s, 0, (HX_SSL_SIZE : I64));
 		M.mbedtls_ssl_init(s);
@@ -423,12 +419,13 @@ class Ssl {
 		return Rt.rt_native_new_refs(s, Callback.addr(freeSsl), 1);
 	}
 
-	@:hxmc.host("hxmc_NativeSsl_sslGetPeerCert") static function sslGetPeerCert(ssl:Dynamic):Dynamic {
+	// null: none
+	public static function sslGetPeerCert(ssl:Dynamic):Dynamic {
 		var crt = M.mbedtls_ssl_get_peer_cert(ptr(ssl));
 		return crt.isNull() ? null : borrow(crt, ssl);
 	}
 
-	@:hxmc.host("hxmc_NativeSsl_sslHandshake") static function sslHandshake(ssl:Dynamic):Int {
+	public static function sslHandshake(ssl:Dynamic):Int {
 		var s = ptr(ssl);
 		Mem.setI32(s, SSL_BIO_ERRNO, 0);
 		return MBlocking.mbedtls_ssl_handshake(s);
@@ -436,7 +433,7 @@ class Ssl {
 
 	// mbedtls reads and writes a malloc'ed copy (the call is in a safe region:
 	// a collection may move `buf` meanwhile)
-	@:hxmc.host("hxmc_NativeSsl_sslRead") static function sslRead(ssl:Dynamic, buf:Bytes, pos:Int, len:Int):Int {
+	public static function sslRead(ssl:Dynamic, buf:Bytes, pos:Int, len:Int):Int {
 		var s = ptr(ssl);
 		Mem.setI32(s, SSL_BIO_ERRNO, 0);
 		var tmp = LibC.malloc((len > 0 ? len : 1 : I64));
@@ -446,7 +443,7 @@ class Ssl {
 		return r;
 	}
 
-	@:hxmc.host("hxmc_NativeSsl_sslWrite") static function sslWrite(ssl:Dynamic, buf:Bytes, pos:Int, len:Int):Int {
+	public static function sslWrite(ssl:Dynamic, buf:Bytes, pos:Int, len:Int):Int {
 		var s = ptr(ssl);
 		Mem.setI32(s, SSL_BIO_ERRNO, 0);
 		var tmp = LibC.malloc((len > 0 ? len : 1 : I64));
@@ -477,24 +474,26 @@ class Ssl {
 		return r < 0 ? bioFailed(s, false) : r.toInt();
 	}
 
-	@:hxmc.host("hxmc_NativeSsl_sslSetBio") static function sslSetBio(ssl:Dynamic, fd:Int):Void {
+	// send/recv on the socket
+	public static function sslSetBio(ssl:Dynamic, fd:Int):Void {
 		var s = ptr(ssl);
 		Mem.setI32(s, SSL_FD, fd);
 		M.mbedtls_ssl_set_bio(s, s, Callback.addr(bioWrite), Callback.addr(bioRead), Ptr.nil());
 	}
 
-	@:hxmc.host("hxmc_NativeSsl_sslSetHostname") static function sslSetHostname(ssl:Dynamic, hostname:String):Int
+	public static function sslSetHostname(ssl:Dynamic, hostname:String):Int
 		return Arena.scopedValue(a -> M.mbedtls_ssl_set_hostname(ptr(ssl), a.cstring(hostname)));
 
-	@:hxmc.host("hxmc_NativeSsl_sslSetup") static function sslSetup(ssl:Dynamic, conf:Dynamic):Int {
+	public static function sslSetup(ssl:Dynamic, conf:Dynamic):Int {
 		setRef(ssl, SSL_REF_CONF, conf);
 		return M.mbedtls_ssl_setup(ptr(ssl), ptr(conf));
 	}
 
-	@:hxmc.host("hxmc_NativeSsl_bioError") static function bioError(ssl:Dynamic):Int
+	// errno of the BIO's failed send/recv during the last handshake/read/write (0: none)
+	public static function bioError(ssl:Dynamic):Int
 		return Mem.getI32(ptr(ssl), SSL_BIO_ERRNO);
 
-	@:hxmc.host("hxmc_NativeSsl_bioErrorSend") static function bioErrorSend(ssl:Dynamic):Bool
+	public static function bioErrorSend(ssl:Dynamic):Bool
 		return Mem.getI32(ptr(ssl), SSL_BIO_SEND) != 0;
 }
 
