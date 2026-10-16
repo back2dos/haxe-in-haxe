@@ -52,6 +52,55 @@ objects must stay visible to the GC when they hold references (as roots,
 via the shadow stack or stack maps), and must never be stored where a
 heap object or another thread can see them.
 
+### Macro-heavy builds: what is left after the cheap fixes
+
+Measured on the native port (Linux x86-64, `--times`, best of several
+runs) after the macro-perf fixes (Eval's object encoding, calls and field
+lookups, haxe.ds.Vector allocation): the `macro` timer is now at or below
+the reference compiler's on every workload; the port's remaining gap is
+in typing and the collector.
+
+| Workload | macro share, port | macro share, reference |
+| --- | --- | --- |
+| tink_json, 12 nested types (JS) | 29% (0.97 of 3.32 s) | 34% (0.89 of 2.65 s) |
+| tink_json, 24 nested types (JS) | 24% (3.27 of 13.4 s) | 24% (2.84 of 12.1 s) |
+| upstream unit suite (JS) | 16% (0.54 of 3.33 s) | 17% (0.54 of 3.19 s) |
+| upstream unit suite (--interp) | 14% (+ interp 32%) | 13% (+ interp 46%) |
+| packages/gfx (GfxTest) | 8% | 7% |
+| macro conformance cases (66, summed) | 39% | 37% |
+
+Ranked by estimated payoff, each needing more than a local fix:
+
+- **Nursery size** (collector policy): a 16 MB nursery instead of 4 MB
+  (`RT_MINOR_KB=16384`) makes tink_json 13% faster, the unit suite's JS
+  build 6%, the port typing itself 16% faster with 22% less peak memory
+  (fewer objects promoted too early), the port's HXB self-compile 8%
+  faster (15% more memory); but the tool (eight compile threads) 30%
+  slower with 35% more memory. Needs a thread-aware policy (TLAB size
+  against nursery size, why larger nurseries hurt the parallel phase).
+  Estimate: 5-15% on macro-heavy builds.
+- **Typing of generated code**: typing is 1.3x the reference on tink_json
+  and the gap grows with the code (40 types: 34.7 s against 20.0 s). One
+  cause is `ctx.e.monomorphs` as an array copied on every spawned
+  monomorph (OCaml conses): a persistent list cut the typing timer by 16%
+  on 24 types, but the total did not move (the collections moved to the
+  macro timer), so it was not kept; the collector is the other half.
+- **Eval call frames**: each call allocates an Env, two slot vectors and
+  the argument array, and stores the frame into the long-lived Eval
+  record twice (two write-barrier slow calls): a quarter of a call's cost.
+  A frame stack reused across calls is a redesign of EvalContext.
+  Estimate: 20-30% on call-heavy macro code.
+- **Eval instance layout**: a field read is four dependent loads
+  (the VInstance box, the instance, the Array header, its data) against
+  three in OCaml; on the Objects benchmark the field read is a quarter of
+  the time, in cache misses. Instance fields as an object with inline
+  slots (or hxmc arrays with inline data) would remove one.
+- Tried and not kept: the write barrier testing the value for youth
+  before its slow call (within noise, 2.6% more code); `encodeObjS`
+  without its intermediate records (no measurable gain).
+- Minor: source lines for messages (a warning's excerpt) are read a byte
+  at a time, each byte a poll and a read system call.
+
 ### Cleanup after the runtime move (done)
 
 Done (README, "Runtime in Haxe"):
@@ -647,7 +696,13 @@ program-wide numbers stay symbolic, so these remain possible:
 
 - **Native macros**: compile macro code with hxmc into the running
   compiler instead of interpreting it in Eval, calling the compiler's
-  functions directly.
+  functions directly. Input for deciding (measured, "Macro-heavy builds"
+  above): the `macro` timer is 8-39% of a macro-heavy build (tink_json
+  24-29%, the upstream unit suite 16%, gfx 8%), and the port's Eval is
+  already at or above the reference's speed (calls 0.9-1.3x, the unit
+  suite under --interp 1.6x faster). Only the interpretation part would
+  go: the AST encoding and decoding and the typing macros call stay, so a
+  gain of perhaps half the macro share, 10-15% of such builds.
 - **Hot reload / live patching**: replace changed modules in a running
   process (needs runtime registration of new types and dispatch rows).
 - **A JIT library** for interpreters written in Haxe (ship only the code
