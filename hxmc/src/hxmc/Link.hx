@@ -9,7 +9,8 @@ import hxmc.Abi;
 // (no dynamic section, no interpreter): symbol resolution, layout in three
 // loadable segments (read-only with the headers, code, data with TLS),
 // relocation, the symbols a C toolchain's linker defines (__init_array_*,
-// ...).
+// ...). LinkDyn extends it for dynamically linked executables (-D
+// hxmc.libc=glibc).
 class Link {
 	static inline var BASE = 0x400000;
 
@@ -45,6 +46,11 @@ class Link {
 				else if (!prev.weak && !s.weak) throw 'hxmc: link: ${s.name} defined twice';
 			}
 	}
+
+	// the key of an undefined symbol (its GOT slot): itself; LinkDyn: the
+	// import of that name, one slot per import
+	function undefKey(s:Symbol):Symbol
+		return s;
 
 	// the definition a reference resolves to (null: undefined)
 	function target(s:Symbol):Null<Symbol> {
@@ -102,7 +108,7 @@ class Link {
 				for (r in s.relocs)
 					if (r.kind == RA64GotPage21 || r.kind == RA64GotLo12 || r.kind == RGotPcRel32) {
 						var t = target(r.sym);
-						var key = t != null ? t : r.sym;
+						var key = t != null ? t : undefKey(r.sym);
 						if (!gotSlot.exists(key)) {
 							if (got == null) got = new Section(".got", Data, 8);
 							gotSlot.set(key, got.buf.len);
@@ -120,7 +126,7 @@ class Link {
 
 	function gotAddr(s:Symbol):Int {
 		var t = target(s);
-		return addr.get(got) + gotSlot.get(t != null ? t : s);
+		return addr.get(got) + gotSlot.get(t != null ? t : undefKey(s));
 	}
 
 	public var symbols = true; // write a symbol table of the code (profilers, debuggers)
@@ -198,7 +204,7 @@ class Link {
 				var d = defined.get(s.name);
 				if (d != null) return d;
 				if (s.weak) return 0;
-				throw 'hxmc: link: undefined symbol ${s.name}';
+				throw 'hxmc: link: undefined symbol ${s.name}' + (StringTools.startsWith(s.name, "dl") ? " (loading shared libraries needs the dynamic glibc mode, -D hxmc.libc=glibc: Linux executables are static with musl)" : "");
 			}
 			if (t.abs) return t.offset;
 			return addr.get(t.section) + t.offset;
@@ -343,10 +349,14 @@ class Link {
 		buf.set32(at, w | ((imm & 3) << 29) | (((imm >> 2) & 0x7ffff) << 5));
 	}
 
+	// LinkDyn: a relocation that becomes a dynamic one (true: done)
+	var dynReloc:Null<(Section, Reloc) -> Bool> = null;
+
 	function apply(s:Section) {
 		var base = addr.get(s);
 		var buf = s.buf;
 		for (r in s.relocs) {
+			if (dynReloc != null && dynReloc(s, r)) continue;
 			var S = symAddr(r.sym);
 			var A = r.addend;
 			var P = base + r.offset;

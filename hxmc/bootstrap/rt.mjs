@@ -1,5 +1,6 @@
-// hxmc's runtime objects (rt.o, ssl.o, uv.o for the six native targets) are
-// built by zig (the C library's members, mbedtls and libuv: hxmc/deps/deps.sh,
+// hxmc's runtime objects (rt.o, ssl.o, uv.o for the six native targets and
+// Linux's dynamic glibc mode) are built by zig (the C library's members,
+// mbedtls and libuv: hxmc/deps/deps.sh,
 // mkrt.sh), which a source-only bootstrap cannot do. They are keyed by a hash
 // of their inputs (every file of hxmc/deps, the zig version it pins) and
 // published as the assets of the GitHub release `rt-<hash>`:
@@ -19,7 +20,8 @@ import zlib from 'node:zlib';
 import { fileURLToPath } from 'node:url';
 
 const root = path.dirname(path.dirname(path.dirname(fileURLToPath(import.meta.url))));
-export const TARGETS = ['linux-x86_64', 'linux-arm64', 'windows-x86_64', 'windows-arm64', 'macos-x86_64', 'macos-arm64'];
+// (the six targets, and Linux in the dynamic glibc mode: -D hxmc.libc=glibc)
+export const TARGETS = ['linux-x86_64', 'linux-arm64', 'windows-x86_64', 'windows-arm64', 'macos-x86_64', 'macos-arm64', 'linux-x86_64-glibc', 'linux-arm64-glibc'];
 const OBJECTS = ['rt.o', 'ssl.o', 'uv.o'];
 const LICENSES = ['LICENSE.mbedtls', 'LICENSE.libuv'];
 

@@ -80,4 +80,13 @@ import hxmc.I64;
 	static function gethostbyaddr(addr:Ptr, len:Int, type:Int):Ptr;
 	static function strdup(s:Ptr):Ptr;
 	static function sched_yield():Int;
+	// loading shared libraries at run time (graphics drivers: libGL,
+	// libvulkan): glibc's libdl.so.2 in the dynamic glibc mode (-D
+	// hxmc.libc=glibc), libSystem's on macOS; none in the static musl mode
+	// (a link error). flags: RTLD_LAZY 1,
+	// RTLD_NOW 2 (RTLD_GLOBAL: 0x100 on Linux, 8 on macOS)
+	static function dlopen(path:Ptr, flags:Int):Ptr;
+	static function dlsym(handle:Ptr, name:Ptr):Ptr;
+	static function dlclose(handle:Ptr):Int;
+	static function dlerror():Ptr;
 }

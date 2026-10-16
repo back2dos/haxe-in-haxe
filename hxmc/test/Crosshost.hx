@@ -11,12 +11,14 @@ using StringTools;
 // The native tool (bin/hxmc/hxmc) builds itself from source as a module
 // (bin/hxmc-t/xhost/hxmc.wasm; --wasm reuses one, e.g. the stage0), then both
 // build each corpus case (all when none is named) for each target (default:
-// all seven) and the outputs are compared byte for byte; --tool also builds
+// all seven, and Linux in the dynamic glibc mode: <target>-glibc) and the outputs are compared byte for byte; --tool also builds
 // the tool itself both ways (for the host). Outputs that agree are deleted;
 // differing ones stay in bin/hxmc-t/xhost/<target>/.
 class Crosshost {
 	static final OUT = "bin/hxmc-t/xhost";
-	static final TARGETS = ["linux-x86_64", "linux-arm64", "windows-x86_64", "windows-arm64", "macos-x86_64", "macos-arm64", "wasm32-wasi"];
+	static final TARGETS = ["linux-x86_64", "linux-arm64", "windows-x86_64", "windows-arm64", "macos-x86_64", "macos-arm64", "wasm32-wasi",
+		// the dynamic glibc mode (-D hxmc.libc=glibc)
+		"linux-x86_64-glibc", "linux-arm64-glibc"];
 	public static final TOOL_ARGS = ["-cp", "haxe/src", "-cp", "hxmc/src", "-main", "hxmc.Main", "-D", "disable-parallelism", "-D", "hih_no_generators"];
 
 	static function main() {
@@ -62,7 +64,9 @@ class Crosshost {
 		var env:Map<String, Null<String>> = [];
 		// the module's own path says nothing about where the runtime objects are
 		if (target != "wasm32-wasi") env["HXMC_RT_OBJ"] = FileSystem.fullPath('bin/hxmc/rt/$target/rt.o');
-		var r = exec(tool.concat([out]).concat(args).concat(["-cp", "bin/hxmc/std", "--custom-target", "hxmc", "-D", 'hxmc.target=$target']), {env: env, merge: true});
+		var glibc = target.endsWith("-glibc");
+		var mode = glibc ? ["-D", "hxmc.target=" + target.substr(0, target.length - 6), "-D", "hxmc.libc=glibc"] : ["-D", 'hxmc.target=$target'];
+		var r = exec(tool.concat([out]).concat(args).concat(["-cp", "bin/hxmc/std", "--custom-target", "hxmc"]).concat(mode), {env: env, merge: true});
 		rmrf(out + ".hxmc");
 		if (!FileSystem.exists(out) && FileSystem.exists(out + ".exe")) out += ".exe";
 		if (r.code != 0 || !FileSystem.exists(out)) return {out: out, err: 'exit ${r.code}: ' + tail(r.out.trim(), 300)};
@@ -75,7 +79,9 @@ class Crosshost {
 		var args = name == "TOOL" ? TOOL_ARGS : ["-cp", "hxmc/test/cases", "-main", name];
 		if (name != "TOOL") {
 			// a case's C companions (Corpus.nativeInputs: built with zig, or skipped)
-			var native = Corpus.nativeInputs({name: name, cps: ["hxmc/test/cases"], main: name}, target, d);
+			var glibc = target.endsWith("-glibc");
+			if (!glibc && Corpus.GLIBC_ONLY.exists(name)) return {ok: true, detail: "skipped: " + Corpus.GLIBC_ONLY[name]};
+			var native = Corpus.nativeInputs({name: name, cps: ["hxmc/test/cases"], main: name}, glibc ? target.substr(0, target.length - 6) : target, d, glibc ? "glibc" : null);
 			if (native.skip != null) return {ok: true, detail: "skipped: " + native.skip};
 			if (native.links.length > 0) args = args.concat(["-D", "hxmc.link=" + native.links.join(",")]);
 		}

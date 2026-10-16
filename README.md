@@ -19,7 +19,7 @@ the same `--interp` runs, display requests and compilation-server answers.
 | `haxe/test/` | the port's tests: conformance against the reference (HXB, display, server, JSON-RPC, `--interp`, `-L`, upstream's target suites), the fuzzer (`fuzz/`), unit tests of port modules (`unit/`, `unit.hxml`), peak memory and times (`Measure.hx`) |
 | `hxmc/src/hxmc/` | hxmc's sources (package `hxmc`, class path `hxmc/src`): the IR and lowering (`ir/`), the code generators (`x64/`, `a64/`, `wasm/`), the linkers, the driver, `Main.hx` (the tool) and `HaxeMain.hx` (`haxe` with hxmc built in) |
 | `hxmc/std/` | hxmc's std: overrides of upstream modules and the runtime's Haxe part (`hxmc.rt`), merged with the Eval originals by `hxmc/src/hxmc/MkStd.hx` |
-| `hxmc/deps/` | no C of ours: `deps.sh` (mbedtls and libuv), `mkrt.sh` (the runtime objects: the C library's members, mbedtls, libuv), `Layouts.hx` (system and libuv struct layouts per target, checked against the C headers), `probe.c` (build-time layout probe), `zig-version` |
+| `hxmc/deps/` | no C of ours: `deps.sh` (mbedtls and libuv), `mkrt.sh` (the runtime objects: the C library's members, or the glibc mode's import table, mbedtls, libuv), `Layouts.hx` (system and libuv struct layouts per target, checked against the C headers), `probe.c` (build-time layout probe), `zig-version` |
 | `hxmc/test/` | hxmc's corpus (`cases/`, golden outputs `expected/`, frozen fuzzer programs `fuzz-1000.zip`), the encoder tests (`encoder/`), the scripts that run them (`Corpus`, `Check`, `Crosshost`, `Selfcheck`, `Tiers`, `EncCheck`), the release smoke test (`smoke.sh`), the benchmarks (`Bench`, with the cases' check programs in `bench/`) |
 | `hxmc/web/` | the website and its playground (the port as a WebAssembly module in the browser) |
 | `hxmc/bootstrap/` | the committed stage0 (`stage0.wasm.br`), node's WASI runner (`wasi.mjs`), the runtime objects by hash (`rt.mjs`), the npm packages: their packer (`pack.mjs`), `@hxmc/cli`'s launcher (`haxe`, `launcher.mjs`, `wasm.mjs`, `postinstall.mjs`), `@hxmc/source`'s `hxmc-rebuild` (`rebuild.mjs`) |
@@ -47,6 +47,7 @@ hxmc=<out>` writes an executable. A `build.hxml`:
 | Option | |
 | --- | --- |
 | `-D hxmc.target=<target>` | `linux-x86_64`, `linux-arm64`, `windows-x86_64`, `windows-arm64`, `macos-x86_64`, `macos-arm64`, `wasm32-wasi` (default: this machine) |
+| `-D hxmc.libc=glibc` | Linux: an executable linked dynamically against the system's glibc (2.17 or later; the default is static with musl), which can import C functions of shared libraries (`@:hxmc.lib("libGL.so.1")`) and load them at run time (`hxmc.unsafe.Posix.dlopen`) |
 | `-debug`, `-D hxmc.symbols` | a symbol table (profilers), wasm: a name section |
 | `-D hxmc.shared`, `-D hxmc.pic` | a shared library, a position-independent executable (hooks: refused explicitly where not implemented yet) |
 | `-D hxmc.jobs=<n>` | parallel module compilations (default: the cores) |
@@ -333,7 +334,7 @@ typed AST --(ir.Lower)--> hxmc IR --(Prep: ir.Facts)--> --(MirBuild)--> Mir (SSA
 | `UpToDate.hx`, `Fingerprint.hx`, `LowerCache.hx` | rebuilds: the whole build skipped when nothing changed, each module's object reused when its fingerprint is unchanged, lowered bodies reused by the server |
 | `Mir.hx`, `MirBuild.hx`, `Opt.hx`, `Inline.hx` | the SSA IR, its construction, inlining, value numbering, store forwarding, LICM, dead code |
 | `Lir.hx`, `Regalloc.hx`, `x64/`, `a64/` | instruction selection, linear-scan allocation, encoders (checked against llvm-mc: `EncCheck`), emission |
-| `Obj.hx`, `ElfWriter.hx`, `*Reader.hx`, `Link*.hx`, `MkRt.hx`, `DataGen.hx` | objects, the linkers (static ELF; PE with imports written directly; Mach-O with an ad-hoc signature), the runtime-object builder, the program's data |
+| `Obj.hx`, `ElfWriter.hx`, `*Reader.hx`, `Link*.hx`, `MkRt.hx`, `DataGen.hx` | objects, the linkers (static ELF, `LinkDyn.hx` dynamic ELF against glibc; PE with imports written directly; Mach-O with an ad-hoc signature), the runtime-object builder, the program's data |
 | `wasm/` | wasm32-wasi: structured code from Mir, the linker, exception handling with `exnref` (or the legacy instructions) |
 | `Target.hx`, `Abi.hx` | per-target facts |
 | `MkStd.hx` | hxmc's std merged with the Eval originals (the macro context shares the program's class paths) |
@@ -372,7 +373,11 @@ those unused for 14 days, and the least recently used beyond 1 GB
 interface or of the IR's conventions needs a tool that knows it: build once
 against the previous runtime first, or bootstrap again.
 
-Targets: Linux (static ELF with musl's members), Windows (PE over the UCRT,
+Targets: Linux (static ELF with musl's members; with `-D hxmc.libc=glibc`, an
+executable dynamically linked against the system's glibc: PT_INTERP, DT_NEEDED,
+imports with the symbol versions of glibc 2.17 bound at load time, a
+generated `_start` calling `__libc_start_main`; runtime objects of their own,
+`<target>-glibc`, the runtime's Haxe code the same), Windows (PE over the UCRT,
 imports written from the import libraries), macOS (Mach-O against
 libSystem, ad-hoc signed), each on x86-64 and ARM64, and wasm32-wasi (the
 whole runtime in Haxe; exception handling with `exnref`, or with

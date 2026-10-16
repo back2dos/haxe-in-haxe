@@ -11,7 +11,8 @@ import hxmc.CoffReader;
 // program (or a member already taken) leaves undefined; and the imports of
 // C functions from DLLs and dylibs (@:hxmc.lib), written into the import
 // tables directly as for the system's libraries. Linux executables are
-// static: a C function there comes from an object or an archive.
+// static by default: a C function there comes from an object or an archive;
+// in the dynamic glibc mode (-D hxmc.libc=glibc) from a shared object too.
 class LinkInputs {
 	// the objects to link, given the names the program and the runtime
 	// objects leave undefined (`wanted`) and those they define (`defined`)
@@ -85,6 +86,9 @@ class LinkInputs {
 		return switch abi.os {
 			case "windows": plain ? lib + ".dll" : lib;
 			case "macos": plain ? "@rpath/lib" + lib + ".dylib" : lib.indexOf("/") < 0 ? "@rpath/" + lib : lib;
+			// (Linux, -D hxmc.libc=glibc: `libname.so` next to the executable, DT_RUNPATH $ORIGIN;
+			// libm.so.6 and the like from the system's search path)
+			case "linux": plain ? "lib" + lib + ".so" : lib;
 			case _: lib;
 		}
 	}

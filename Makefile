@@ -26,6 +26,8 @@ HOST ?= $(if $(filter Darwin,$(shell uname -s)),macos,linux)-$(if $(filter aarch
 # `make release`, `make lix-release`: one of the six targets
 TARGET ?= $(HOST)
 TARGETS := linux-x86_64 linux-arm64 windows-x86_64 windows-arm64 macos-x86_64 macos-arm64
+# the runtime objects: the six targets, and Linux in the dynamic glibc mode (-D hxmc.libc=glibc)
+RT_TARGETS := $(TARGETS) linux-x86_64-glibc linux-arm64-glibc
 # extra arguments of the port's build (e.g. HXFLAGS="-D retain")
 HXFLAGS ?=
 # the port the tests check
@@ -164,7 +166,7 @@ $(HOST_RT): $(RT_SRC)
 	touch bin/hxmc/rt/*/*.o
 
 # mbedtls and libuv per target (rebuilt only when their versions or flags change)
-deps: $(foreach t,$(TARGETS),bin/hxmc/deps/$(t)/VERSIONS)
+deps: $(foreach t,$(RT_TARGETS),bin/hxmc/deps/$(t)/VERSIONS)
 .PRECIOUS: bin/hxmc/deps/%/VERSIONS
 bin/hxmc/deps/%/VERSIONS: hxmc/deps/deps.sh
 	sh hxmc/deps/deps.sh $* bin/hxmc/deps/$*
@@ -175,7 +177,7 @@ bin/hxmc/deps/%/VERSIONS: hxmc/deps/deps.sh
 rt-build: deps
 	sh hxmc/deps/mkrt.sh linux-x86_64
 	$(MAKE) $(TOOL)
-	for t in $(filter-out linux-x86_64,$(TARGETS)); do HXMC=$(CURDIR)/$(TOOL) sh hxmc/deps/mkrt.sh $$t || exit 1; done
+	for t in $(filter-out linux-x86_64,$(RT_TARGETS)); do HXMC=$(CURDIR)/$(TOOL) sh hxmc/deps/mkrt.sh $$t || exit 1; done
 	$(TOOL) -cp hxmc/deps --run Layouts --check
 	$(NODE) hxmc/bootstrap/rt.mjs hash > bin/hxmc/rt/HASH
 
@@ -261,7 +263,7 @@ hxmc/bootstrap/hxmc-std/.stamp: hxmc/src/hxmc/MkStd.hx $(STD_SRC)
 	$(RUN) -cp hxmc/src --run hxmc.MkStd hxmc/std haxe/upstream/std hxmc/bootstrap/hxmc-std
 hxmc/bootstrap/rt/HASH: $(HOST_RT)
 	rm -rf hxmc/bootstrap/rt
-	for t in $(TARGETS); do mkdir -p hxmc/bootstrap/rt/$$t && cp bin/hxmc/rt/$$t/rt.o bin/hxmc/rt/$$t/ssl.o bin/hxmc/rt/$$t/uv.o hxmc/bootstrap/rt/$$t/ || exit 1; done
+	for t in $(RT_TARGETS); do mkdir -p hxmc/bootstrap/rt/$$t && cp bin/hxmc/rt/$$t/rt.o bin/hxmc/rt/$$t/ssl.o bin/hxmc/rt/$$t/uv.o hxmc/bootstrap/rt/$$t/ || exit 1; done
 	cp bin/hxmc/rt/LICENSE.* hxmc/bootstrap/rt/ 2>/dev/null || true
 	$(NODE) hxmc/bootstrap/rt.mjs hash > $@
 # the native compilers of the platform packages (@hxmc/<os>-<cpu>)

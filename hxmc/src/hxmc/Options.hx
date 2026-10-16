@@ -18,6 +18,8 @@ class Options {
 	// -D hxmc.wasm-eh=legacy: wasm32-wasi with the legacy exception-handling instructions
 	// (try/catch_all/rethrow) for engines without exnref (default: exnref)
 	public var wasmLegacyEh = false;
+	// -D hxmc.libc=glibc: Linux, a dynamically linked executable against the system's glibc (Abi.setLibc; default: musl, static)
+	public var libc:Null<String> = null;
 
 	public function new() {}
 
@@ -61,6 +63,7 @@ class Options {
 			case "exnref":
 			case _: throw "hxmc: -D hxmc.wasm-eh=" + eh + ": exnref or legacy";
 		}
+		o.libc = def("hxmc.libc");
 		var j = def("hxmc.jobs");
 		if (j == null) j = env("HXMC_JOBS");
 		if (j != null) o.jobs = Std.parseInt(j);

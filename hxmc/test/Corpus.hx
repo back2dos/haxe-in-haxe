@@ -6,7 +6,7 @@ using StringTools;
 
 // The hxmc test corpus (README.md, "Testing"): every program compiled by
 // hxmc, run, and its output compared with its golden file.
-//   bin/hxmc/hxmc -cp hxmc/test -cp haxe/test --run Corpus [-j N] [-v] [--target T] [--wasm-eh legacy] [--stage DIR] [--bless] [case ...]
+//   bin/hxmc/hxmc -cp hxmc/test -cp haxe/test --run Corpus [-j N] [-v] [--target T] [--wasm-eh legacy] [--libc glibc] [--stage DIR] [--bless] [case ...]
 // The cases are the programs of hxmc/test/cases (<Name>.hx with class <Name>)
 // and the fuzzer programs frozen in hxmc/test/fuzz-1000.zip (extracted to
 // bin/hxmc-fuzz, cases fuzz-<seed>). Each case's HXB archive is written once
@@ -18,7 +18,11 @@ using StringTools;
 // target (linux-arm64 runs under qemu-aarch64-static, windows-x86_64 under
 // wine64, wasm32-wasi under node or, with HXMC_WASM_RUNNER=wasmtime,
 // wasmtime; --wasm-eh legacy: built with -D hxmc.wasm-eh=legacy, run under
-// node without exnref); --stage only builds and copies each executable with
+// node without exnref; --libc glibc: Linux, dynamically linked against the
+// system's glibc, -D hxmc.libc=glibc, arm64 under qemu-aarch64-static -L
+// /usr/aarch64-linux-gnu, the cross C library's root, or QEMU_LD_PREFIX;
+// the cases that must be rejected are of the default mode); --stage only
+// builds and copies each executable with
 // its golden file to DIR/<case>/ (Check runs them on the target's machine).
 class Corpus {
 	static final OUT = "bin/hxmc-t";
@@ -30,19 +34,23 @@ class Corpus {
 	static final FUZZ = "bin/hxmc-fuzz";
 	// the cases a WebAssembly module cannot run
 	static final WASM_EXCLUDED = ["ThreadNatives" => "no threads on wasm32-wasi", "ThreadLocal" => "no threads on wasm32-wasi", "NetNatives" => "no sockets on wasm32-wasi"];
+	// the cases of the dynamic glibc mode only (shared libraries of the system)
+	public static final GLIBC_ONLY = ["SharedLibs" => "shared libraries: the dynamic glibc mode only (--libc glibc)"];
 
 	static var tool:String;
 	static var target:Null<String>;
 	static var stage:Null<String>;
 	static var wasmEh:Null<String>; // --wasm-eh legacy: -D hxmc.wasm-eh=legacy
+	static var libc:Null<String>; // --libc glibc: -D hxmc.libc=glibc
 	static var bless = false;
 
 	static function main() {
-		var a = parseArgs(Sys.args(), ["-j", "--target", "--stage", "--wasm-eh"]);
+		var a = parseArgs(Sys.args(), ["-j", "--target", "--stage", "--wasm-eh", "--libc"]);
 		tool = FileSystem.fullPath(Sys.getEnv("HXMC_TOOL") ?? "bin/hxmc/hxmc");
 		target = a.get("--target");
 		stage = a.get("--stage");
 		wasmEh = a.get("--wasm-eh");
+		libc = a.get("--libc");
 		bless = a.has("--bless");
 		var verbose = a.has("-v");
 		if (!FileSystem.exists(STD + "/.stamp")) fail("Corpus: bin/hxmc/std is missing (make std)");
@@ -101,10 +109,11 @@ class Corpus {
 		var d = OUT + "/" + c.name;
 		mkdirs(d);
 		var wasm = target != null && target.startsWith("wasm");
-		if (c.name.startsWith("reject-")) return stage != null ? {name: c.name, status: "excluded", detail: "a compile error"} : rejectCase(c);
+		if (c.name.startsWith("reject-")) return stage != null || libc != null ? {name: c.name, status: "excluded", detail: "a compile error"} : rejectCase(c);
 		var native = nativeInputs(c, target != null ? target : hostTarget(), d);
 		if (native.skip != null) return {name: c.name, status: "excluded", detail: native.skip};
 		if (wasm && WASM_EXCLUDED.exists(c.name)) return {name: c.name, status: "excluded", detail: WASM_EXCLUDED[c.name]};
+		if (libc != "glibc" && GLIBC_ONLY.exists(c.name)) return {name: c.name, status: "excluded", detail: GLIBC_ONLY[c.name]};
 		var hxb = d + "/" + (wasm ? 'prog-$target.hxb.zip' : "prog.hxb.zip");
 		var t0 = now();
 		// (WebAssembly: the program is typed for it, with its runtime)
@@ -121,10 +130,12 @@ class Corpus {
 		if (!FileSystem.exists(expected) && !bless)
 			return {name: c.name, status: "no-golden", detail: '$expected is missing (--bless writes it from hxmc\'s output)'};
 		var exe = d + "/" + (target != null ? "m-" + target : "m");
+		if (libc != null) exe += "-" + libc;
 		if (target != null && target.startsWith("windows")) exe += ".exe";
 		if (wasm) exe += (wasmEh != null ? "-" + wasmEh : "") + ".wasm";
 		var cmd = [tool, exe, "--hxb-lib", hxb, "-main", c.main, "--custom-target", "hxmc", "-D", "disable-parallelism"];
 		if (target != null) cmd = cmd.concat(["-D", "hxmc.target=" + target]);
+		if (libc != null) cmd = cmd.concat(["-D", "hxmc.libc=" + libc]);
 		if (native.links.length > 0) cmd = cmd.concat(["-D", "hxmc.link=" + native.links.join(",")]);
 		if (wasm && wasmEh != null) cmd = cmd.concat(["-D", "hxmc.wasm-eh=" + wasmEh]);
 		var r = exec(cmd, {env: ["HXMC_STATS" => "1"]});
@@ -143,6 +154,7 @@ class Corpus {
 			return {name: c.name, status: "ok", detail: "staged " + nf};
 		}
 		var runner = switch target {
+			case "linux-arm64" if (libc == "glibc"): ["qemu-aarch64-static", "-L", Sys.getEnv("QEMU_LD_PREFIX") ?? "/usr/aarch64-linux-gnu"];
 			case "linux-arm64": ["qemu-aarch64-static"];
 			case "windows-x86_64": ["/usr/lib/wine/wine64"];
 			case _ if (wasm): wasmRunner();
@@ -174,7 +186,9 @@ class Corpus {
 		var d = OUT + "/" + c.name;
 		mkdirs(d);
 		var cmd = [tool, d + "/m", "-cp", FileSystem.fullPath(c.cps[0]), "-cp", FileSystem.fullPath(STD), "-main", c.main, "--custom-target", "hxmc", "-D", "disable-parallelism"];
-		if (target != null) cmd = cmd.concat(["-D", "hxmc.target=" + target]);
+		// (`// target: <target>`: the target the case is about, whatever the host)
+		var own = [for (l in src.split("\n")) if (l.trim().startsWith("// target: ")) l.trim().substr(11)];
+		if (own.length > 0) cmd = cmd.concat(["-D", "hxmc.target=" + own[0]]) else if (target != null) cmd = cmd.concat(["-D", "hxmc.target=" + target]);
 		var r = exec(cmd);
 		var out = r.out + r.err;
 		if (r.code == 0) return {name: c.name, status: "differs", detail: "compiled, but must be rejected"};
@@ -200,10 +214,11 @@ class Corpus {
 	// The C companions of a case, built for the target with zig (skipped
 	// cleanly without zig): <Name>.c, an object linked statically;
 	// <Name>_dyn.c, the dynamic library <name>dyn (a DLL next to the
-	// executable on Windows, a dylib on macOS; an object linked statically
-	// on Linux, whose executables are static). WebAssembly modules have no
+	// executable on Windows, a dylib on macOS, a shared object next to it in
+	// the dynamic glibc mode; an object linked statically on Linux otherwise,
+	// whose executables are static). WebAssembly modules have no
 	// C objects: their C functions are imports.
-	public static function nativeInputs(c:CorpusCase, target:String, d:String):{links:Array<String>, copy:Array<String>, skip:Null<String>, host:Null<String>} {
+	public static function nativeInputs(c:CorpusCase, target:String, d:String, ?libcMode:String):{links:Array<String>, copy:Array<String>, skip:Null<String>, host:Null<String>} {
 		var r = {links: [], copy: [], skip: null, host: null};
 		var src = c.cps[0] + "/" + c.main + ".c";
 		var dyn = c.cps[0] + "/" + c.main + "_dyn.c";
@@ -230,7 +245,10 @@ class Corpus {
 			r.skip = "needs zig to build " + src;
 			return r;
 		}
+		var glibc = (libcMode ?? libc) == "glibc" && target.startsWith("linux");
 		var triple = switch target {
+			case "linux-x86_64" if (glibc): "x86_64-linux-gnu.2.17";
+			case "linux-arm64" if (glibc): "aarch64-linux-gnu.2.17";
 			case "linux-x86_64": "x86_64-linux-musl";
 			case "linux-arm64": "aarch64-linux-musl";
 			case "windows-x86_64": "x86_64-windows-gnu";
@@ -238,10 +256,10 @@ class Corpus {
 			case "macos-x86_64": "x86_64-macos";
 			case _: "aarch64-macos";
 		}
-		var flags = ["-O2", "-g0", "-fno-stack-protector"].concat(target.startsWith("linux") ? ["-fno-pic", "-fno-pie"] : []);
+		var flags = ["-O2", "-g0", "-fno-stack-protector"].concat(glibc ? ["-fPIE"] : target.startsWith("linux") ? ["-fno-pic", "-fno-pie"] : []);
 		function build(file:String, out:String, extra:Array<String>):Bool {
 			if (FileSystem.exists(out) && mtime(out) >= mtime(file)) return true;
-			var b = exec([z, "cc", "-target", triple].concat(flags).concat(extra).concat([file, "-o", out]));
+			var b = exec([z, "cc", "-target", triple].concat([for (f in flags) if (f != "-fPIE" || extra.indexOf("-shared") < 0) f]).concat(extra).concat([file, "-o", out]));
 			if (b.code != 0) {
 				r.skip = "zig cc failed: " + tail(b.out + b.err, 400);
 				return false;
@@ -249,22 +267,23 @@ class Corpus {
 			return true;
 		}
 		if (FileSystem.exists(src)) {
-			var o = FileSystem.fullPath(d) + '/${c.main}-$target.o';
+			var o = FileSystem.fullPath(d) + '/${c.main}-$target' + (glibc ? "-glibc" : "") + ".o";
 			if (!build(src, o, ["-c"])) return r;
 			r.links.push(o);
 		}
 		if (FileSystem.exists(dyn)) {
 			var lib = c.main.toLowerCase() + "dyn";
-			if (target.startsWith("linux")) {
+			if (target.startsWith("linux") && !glibc) {
 				var o = FileSystem.fullPath(d) + '/${c.main}_dyn-$target.o';
 				if (!build(dyn, o, ["-c"])) return r;
 				r.links.push(o);
 			} else {
 				// (one directory per target: the library keeps its file name)
-				var ld = d + "/" + target;
+				var ld = d + "/" + target + (glibc ? "-glibc" : "");
 				mkdirs(ld);
-				var f = target.startsWith("windows") ? '$ld/$lib.dll' : '$ld/lib$lib.dylib';
-				var extra = target.startsWith("windows") ? ["-shared"] : ["-shared", "-Wl,-install_name,@rpath/lib" + lib + ".dylib"];
+				var f = target.startsWith("windows") ? '$ld/$lib.dll' : glibc ? '$ld/lib$lib.so' : '$ld/lib$lib.dylib';
+				var extra = target.startsWith("windows") || glibc ? ["-shared"] : ["-shared", "-Wl,-install_name,@rpath/lib" + lib + ".dylib"];
+				if (glibc) extra.push("-fPIC");
 				if (!build(dyn, f, extra)) return r;
 				// next to the executable
 				File.copy(f, d + "/" + haxe.io.Path.withoutDirectory(f));

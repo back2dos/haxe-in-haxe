@@ -81,7 +81,7 @@ jobs:
           version: ${{ steps.rt.outputs.zig }}
       - name: System packages
         if: steps.rt.outputs.hit != 'true'
-        run: sudo apt-get install -qqy lld
+        run: sudo apt-get install -qqy lld llvm
       - name: Cache mbedtls and libuv
         if: steps.rt.outputs.hit != 'true'
         uses: actions/cache@v6
@@ -100,7 +100,7 @@ jobs:
           node hxmc/bootstrap/rt.mjs pack bin/hxmc/rt dist/rt
           gh release create "rt-${{ steps.rt.outputs.hash }}" --target "$GITHUB_SHA" --prerelease \
             --title "hxmc runtime objects ${{ steps.rt.outputs.hash }}" \
-            --notes "hxmc's runtime objects (rt.o, ssl.o, uv.o) for the six targets, built by zig ${{ steps.rt.outputs.zig }} from hxmc/deps at $GITHUB_SHA; downloaded by hxmc/bootstrap/rt.mjs." dist/rt/*
+            --notes "hxmc's runtime objects (rt.o, ssl.o, uv.o) for the six targets and the glibc mode of Linux, built by zig ${{ steps.rt.outputs.zig }} from hxmc/deps at $GITHUB_SHA; downloaded by hxmc/bootstrap/rt.mjs." dist/rt/*
       - uses: actions/upload-artifact@v7
         with:
           name: rt
@@ -264,6 +264,11 @@ jobs:
           done
           # and with legacy exception handling (-D hxmc.wasm-eh=legacy)
           bin/hxmc/hxmc -cp hxmc/test -cp haxe/test --run Corpus -v --target wasm32-wasi --wasm-eh legacy --stage dist/corpus/wasm32-wasi-legacy
+          # and Linux in the dynamic glibc mode (-D hxmc.libc=glibc), checked with readelf
+          for t in linux-x86_64 linux-arm64; do
+            bin/hxmc/hxmc -cp hxmc/test -cp haxe/test --run Corpus -v --target $t --libc glibc --stage dist/corpus/$t-glibc
+            bin/hxmc/hxmc -cp hxmc/test -cp haxe/test --run ElfCheck dist/corpus/$t-glibc --summary "$GITHUB_STEP_SUMMARY"
+          done
 
       # hxmc's output does not depend on the host: the tool as a WebAssembly
       # module (under node) builds the corpus for every target, and the tool
@@ -315,7 +320,7 @@ jobs:
 
       - name: Pack the corpus
         run: |
-          for t in $TARGETS wasm32-wasi wasm32-wasi-legacy; do tar czf dist/corpus-$t.tar.gz -C dist/corpus/$t .; done
+          for t in $TARGETS wasm32-wasi wasm32-wasi-legacy linux-x86_64-glibc linux-arm64-glibc; do tar czf dist/corpus-$t.tar.gz -C dist/corpus/$t .; done
           tar czf dist/corpus-wasm32-wasi-port.tar.gz -C dist/wasm haxe.wasm haxe-legacy.wasm
       - uses: actions/upload-artifact@v7
         with: {name: hxmc-self, path: dist/self/, retention-days: 3}
@@ -323,6 +328,10 @@ jobs:
         with: {name: corpus-linux-x86_64, path: dist/corpus-linux-x86_64.tar.gz, retention-days: 3}
       - uses: actions/upload-artifact@v7
         with: {name: corpus-linux-arm64, path: dist/corpus-linux-arm64.tar.gz, retention-days: 3}
+      - uses: actions/upload-artifact@v7
+        with: {name: corpus-linux-x86_64-glibc, path: dist/corpus-linux-x86_64-glibc.tar.gz, retention-days: 3}
+      - uses: actions/upload-artifact@v7
+        with: {name: corpus-linux-arm64-glibc, path: dist/corpus-linux-arm64-glibc.tar.gz, retention-days: 3}
       - uses: actions/upload-artifact@v7
         with: {name: corpus-windows-x86_64, path: dist/corpus-windows-x86_64.tar.gz, retention-days: 3}
       - uses: actions/upload-artifact@v7
@@ -528,6 +537,29 @@ jobs:
         run: |
           export HAXE_STD_PATH="${{ steps.unpack.outputs.std }}"
           RT_VERIFY=1 "${{ steps.unpack.outputs.bin }}" -cp hxmc/test -cp haxe/test --run Check corpus --summary "$GITHUB_STEP_SUMMARY"
+      # Linux: the corpus in the dynamic glibc mode (-D hxmc.libc=glibc) against
+      # the runner's glibc, and against glibc 2.17, the floor its symbol
+      # versions are pinned to (CentOS 7's, in a container; the release
+      # binary that runs the check is static)
+      - uses: actions/download-artifact@v8
+        if: runner.os == 'Linux'
+        with: {name: 'corpus-${{ matrix.target }}-glibc', path: dl}
+      - name: Corpus, glibc mode
+        if: always() && runner.os == 'Linux'
+        run: |
+          set -ex
+          mkdir -p corpus-glibc
+          tar xzf dl/corpus-${{ matrix.target }}-glibc.tar.gz -C corpus-glibc
+          export HAXE_STD_PATH="${{ steps.unpack.outputs.std }}"
+          "${{ steps.unpack.outputs.bin }}" -cp hxmc/test -cp haxe/test --run ElfCheck corpus-glibc
+          "${{ steps.unpack.outputs.bin }}" -cp hxmc/test -cp haxe/test --run Check corpus-glibc --summary "$GITHUB_STEP_SUMMARY"
+          RT_VERIFY=1 "${{ steps.unpack.outputs.bin }}" -cp hxmc/test -cp haxe/test --run Check corpus-glibc --summary "$GITHUB_STEP_SUMMARY"
+      - name: Corpus, glibc mode, glibc 2.17
+        if: always() && runner.os == 'Linux'
+        run: |
+          set -ex
+          docker run --rm --network host -v "$PWD:/w" -w /w -e HAXE_STD_PATH=/w/t/hxmc-haxe-${{ matrix.pkg }}/std centos:7 \
+            sh -c 'ldd --version | head -1 && t/hxmc-haxe-${{ matrix.pkg }}/haxe -cp hxmc/test -cp haxe/test --run Check corpus-glibc'
       - name: Port self-compile
         if: always()
         run: |

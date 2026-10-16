@@ -502,7 +502,14 @@ setjmp/longjmp do not unwind, but debuggers and SEH-based tools would.
 - Prerequisites: C interop (externs, pinned buffers, callbacks from the
   platform's event loop, main-thread handling on macOS) and a dynamic
   glibc output mode on Linux: GPU drivers (Mesa, NVIDIA) are glibc
-  shared libraries a static musl executable cannot load.
+  shared libraries a static musl executable cannot load. Done:
+  `-D hxmc.libc=glibc` links against the system's glibc (`LinkDyn.hx`:
+  PT_INTERP, DT_NEEDED, versioned imports pinned to glibc 2.17, bound
+  eagerly), `@:hxmc.lib("libGL.so.1")` imports from a system library, and
+  `Posix.dlopen`/`dlsym` load drivers at run time (libvulkan's loader).
+  Left: a dynamic musl mode (`/lib/ld-musl-<arch>.so.1`, unversioned:
+  `Abi.setLibc`), choosing the glibc mode by itself when a program imports
+  a shared library, lazy binding (PLT) if startup with many imports needs it.
 - Layer: sokol (`sokol_app`, `sokol_gfx`, `sokol_audio`): small, Metal /
   D3D11 / GL / GLES / WebGPU back ends, precompiled per target into the
   runtime archives and linked only when used; shaders compiled ahead of

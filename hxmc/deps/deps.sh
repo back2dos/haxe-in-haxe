@@ -43,13 +43,22 @@ CFLAGS="-O2 -g0 -w -fno-strict-aliasing"
 case $T in
 	linux-x86_64) TRIPLE=x86_64-linux-musl OS=linux ;;
 	linux-arm64) TRIPLE=aarch64-linux-musl OS=linux ;;
+	# the dynamic glibc mode (-D hxmc.libc=glibc): glibc 2.17, the first with aarch64, as the floor
+	linux-x86_64-glibc) TRIPLE=x86_64-linux-gnu.2.17 OS=linux ;;
+	linux-arm64-glibc) TRIPLE=aarch64-linux-gnu.2.17 OS=linux ;;
 	windows-x86_64) TRIPLE=x86_64-windows-gnu OS=win ;;
 	windows-arm64) TRIPLE=aarch64-windows-gnu OS=win ;;
 	macos-x86_64) TRIPLE=x86_64-macos OS=darwin CFLAGS="$CFLAGS -mmacosx-version-min=10.15" ;;
 	macos-arm64) TRIPLE=aarch64-macos OS=darwin CFLAGS="$CFLAGS -mmacosx-version-min=11.0" ;;
 	*) echo "deps: unknown target $T" >&2; exit 1 ;;
 esac
-[ $OS = linux ] && CFLAGS="$CFLAGS -fno-pie -fno-pic -ffunction-sections -fdata-sections"
+# (glibc: zig compiles position-independent code for dynamically linked
+# targets; -fPIE reaches the C library through the GOT, hxmc's ELF linker
+# binds those slots at load time, and the rest pc-relatively)
+case $T in
+	*-glibc) CFLAGS="$CFLAGS -fPIE -ffunction-sections -fdata-sections" ;;
+	linux-*) CFLAGS="$CFLAGS -fno-pie -fno-pic -ffunction-sections -fdata-sections" ;;
+esac
 CC="$ZIG cc -target $TRIPLE"
 AR="$ZIG ar"
 TOOLCHAIN="zig $("$ZIG" version) -target $TRIPLE"

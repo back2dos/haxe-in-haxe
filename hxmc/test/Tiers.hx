@@ -13,11 +13,15 @@ using StringTools;
 //          (CacheCheck): after every edit
 //   check  quick + linux-arm64 (qemu) and windows-x86_64 (wine), x64 with a
 //          16 KB nursery, the wasm corpus with legacy exception handling
-//          (-D hxmc.wasm-eh=legacy) under node, ThreadNatives x30, the tool as
+//          (-D hxmc.wasm-eh=legacy) under node, the corpus in the dynamic glibc
+//          mode (-D hxmc.libc=glibc) for x64 and arm64 (qemu, with the cross C
+//          library) and its executables checked with readelf (ElfCheck),
+//          ThreadNatives x30, the tool as
 //          a module building three cases for x64, arm64 and wasm32-wasi
 //          byte-identical to the native tool; --port adds the native port's
 //          self-compile: before commits
 //   full   x64, arm64 and wine at 64, 16 and 256 KB, each with RT_VERIFY=1 too;
+//          x64 and arm64 in the glibc mode, also at 16 KB with RT_VERIFY=1;
 //          wasm under node and wasmtime at 16, 64 and 256 KB, under node with
 //          RT_VERIFY=1 at 64 and 256 KB and with legacy exception handling at
 //          16 and 64 KB; ThreadNatives x300 (16 KB) and x100 (64 KB); the heap
@@ -34,6 +38,7 @@ class Tiers {
 	static var results:Array<{name:String, ok:Bool}> = [];
 	static final SCRIPT = ["bin/hxmc/hxmc", "-cp", "hxmc/test", "-cp", "haxe/test", "--run"];
 	static final LEGACY = ["--wasm-eh", "legacy"];
+	static final GLIBC = ["--libc", "glibc"];
 
 	static function lane(name:String, f:Void->{ok:Bool, detail:String}) {
 		var t = now();
@@ -153,9 +158,13 @@ class Tiers {
 			lane("x64 16K", corpus(null, ["RT_MINOR_KB" => "16"], cases));
 			lane("arm64 (qemu)", corpus("linux-arm64", null, cases));
 			lane("windows (wine)", corpus("windows-x86_64", null, cases));
+			lane("x64 glibc", corpus(null, null, cases, GLIBC));
+			// (arm64: the cross C library's root for qemu, libc6-arm64-cross)
+			if (FileSystem.exists(Sys.getEnv("QEMU_LD_PREFIX") ?? "/usr/aarch64-linux-gnu")) lane("arm64 glibc (qemu)", corpus("linux-arm64", null, cases, GLIBC));
+			lane("glibc readelf", script(["ElfCheck", "bin/hxmc-t"]));
 			lane("wasm node legacy EH", corpus("wasm32-wasi", null, cases, LEGACY));
 			lane("ThreadNatives x30", threads(30, 16));
-			lane("cross-host", crosshost(["--targets", "linux-x86_64,linux-arm64,wasm32-wasi"].concat(cases.length > 0 ? cases : ["Unsafe", "SwitchIndex", "Regress"])));
+			lane("cross-host", crosshost(["--targets", "linux-x86_64,linux-arm64,wasm32-wasi,linux-x86_64-glibc"].concat(cases.length > 0 ? cases : ["Unsafe", "SwitchIndex", "Regress"])));
 			if (port) lane("port self-compile", portNative);
 		}
 		if (tier == "full") {
@@ -164,6 +173,11 @@ class Tiers {
 					lane('$t ${kb}K', corpus(t, ["RT_MINOR_KB" => kb], cases));
 					lane('$t ${kb}K RT_VERIFY', corpus(t, ["RT_MINOR_KB" => kb, "RT_VERIFY" => "1"], cases));
 				}
+			for (t in ["linux-x86_64", "linux-arm64"]) {
+				lane('$t glibc', corpus(t, null, cases, GLIBC));
+				lane('$t glibc 16K RT_VERIFY', corpus(t, ["RT_MINOR_KB" => "16", "RT_VERIFY" => "1"], cases, GLIBC));
+			}
+			lane("glibc readelf", script(["ElfCheck", "bin/hxmc-t"]));
 			for (kb in ["16", "64", "256"]) {
 				lane('wasm node ${kb}K', corpus("wasm32-wasi", ["RT_MINOR_KB" => kb], cases));
 				lane('wasm wasmtime ${kb}K', corpus("wasm32-wasi", ["RT_MINOR_KB" => kb, "HXMC_WASM_RUNNER" => "wasmtime"], cases));

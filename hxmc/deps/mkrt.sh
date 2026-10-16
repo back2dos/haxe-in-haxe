@@ -2,8 +2,10 @@
 # Builds the runtime objects of an hxmc target (README.md, "hxmc"): the
 # runtime is Haxe (hxmc/std/hxmc/rt); rt.o is the parts of the C library
 # that generated code and the runtime's Haxe code call (musl's members and
-# its startup object on Linux, the C runtime's startup objects, MinGW-w64's
-# members and the UCRT's imports on Windows; nothing on macOS, whose C
+# its startup object on Linux; glibc's import table and libc_nonshared's
+# members in Linux's dynamic glibc mode, <target>-glibc; the C runtime's
+# startup objects, MinGW-w64's members and the UCRT's imports on Windows;
+# nothing on macOS, whose C
 # library is libSystem, bound at load time), partially linked (ld -r) into
 # one relocatable object bin/hxmc/rt/<target>/rt.o, which hxmc's linker then
 # links with the program (and lays out once, see Link.hx). Next to it, ssl.o
@@ -23,6 +25,8 @@ want=$(cat "$ROOT/hxmc/deps/zig-version")
 case $target in
 linux-x86_64) triple=x86_64-linux-musl ;;
 linux-arm64) triple=aarch64-linux-musl ;;
+linux-x86_64-glibc) triple=x86_64-linux-gnu.2.17 ;;
+linux-arm64-glibc) triple=aarch64-linux-gnu.2.17 ;;
 windows-x86_64) triple=x86_64-windows-gnu ;;
 windows-arm64) triple=aarch64-windows-gnu ;;
 macos-x86_64) triple=x86_64-macos ;;
@@ -86,6 +90,57 @@ windows-*)
 	case $target in linux-*) libc="$libc __errno_location" ;; esac ;;
 esac
 case $target in
+*-glibc)
+	# the dynamic glibc mode (-D hxmc.libc=glibc, Link.hx): no member of the C
+	# library; what the runtime, generated code, ssl.o and uv.o call in it are
+	# imports, bound by ld.so at load time with the versions of glibc 2.17
+	# (the floor: the first glibc on aarch64). rt.o holds what glibc keeps in
+	# libc_nonshared.a (atexit, stat, ... before 2.33), compiler-rt's helpers,
+	# and the import table (.hxmc.imports: library, name, version, kind, size
+	# and aliases per name), read from the libraries zig links against for
+	# the triple (stubs generated from glibc's own version maps, the abilists)
+	libc="$libc _setjmp __libc_start_main __cxa_atexit dlopen dlsym dlclose dlerror"
+	printf 'int main(void){return 0;}\n' > "$out/obj/stub.c"
+	$ZIG cc -target $triple -O2 "$out/obj/stub.c" -o "$out/obj/stub" -lpthread -ldl -lm
+	line=$($ZIG cc -target $triple -O2 -v "$out/obj/stub.c" -o "$out/obj/stub" -lpthread -ldl -lm 2>&1 | grep 'ld.lld' | head -1)
+	libs=$(echo "$line" | tr ' ' '\n' | grep -E '/lib(c_nonshared|compiler_rt)\.a$' | tr '\n' ' ')
+	sos=$(echo "$line" | tr ' ' '\n' | grep -E '/lib(c|m|pthread|dl)\.so\.[0-9]+$' | tr '\n' ' ')
+	[ -n "$sslar" ] && ld.lld -r --strip-debug -o "$out/ssl.o" $sslroots --start-group $sslar --end-group
+	[ -n "$uvar" ] && ld.lld -r --strip-debug -o "$out/uv.o" $uvroots --start-group $uvar --end-group
+	# every default-version definition of the libraries: lib name version kind size
+	for so in $sos; do
+		readelf --dyn-syms -W "$so" | awk -v lib="${so##*/}" '$7 != "UND" && $8 ~ /@@/ && ($4 == "FUNC" || $4 == "OBJECT" || $4 == "IFUNC") {
+			split($8, p, "@@"); print lib "\t" p[1] "\t" p[2] "\t" ($4 == "OBJECT" ? "object" : "func") "\t" $3 }'
+	done > "$out/obj/defs.txt"
+	cut -f2 "$out/obj/defs.txt" | sort -u > "$out/obj/shared.txt"
+	# what the shared libraries lack comes from the archives (libc_nonshared's
+	# atexit and stat64, compiler-rt's __udivti3), nothing else: compiler-rt's
+	# weak memcpy and the like (compiler-rt is one object) become local, so
+	# that glibc's are the ones the program binds to
+	want=$( (echo "$libc" | tr ' ' '\n'; nm -u $(ls "$out/ssl.o" "$out/uv.o" 2>/dev/null) | awk 'NF == 2 {print $2}') | grep -v '^hx\|^haxe_\|^$' | sort -u)
+	undef=
+	for f in $(echo "$want" | comm -23 - "$out/obj/shared.txt"); do undef="$undef -u $f"; done
+	ld.lld -r --strip-debug -o "$out/obj/rt1.o" $undef --start-group $libs --end-group
+	nm --defined-only -g "$out/obj/rt1.o" | awk '{print $3}' | sort -u | comm -12 - "$out/obj/shared.txt" > "$out/obj/shadow.txt"
+	${OBJCOPY:-llvm-objcopy} --localize-symbols="$out/obj/shadow.txt" "$out/obj/rt1.o" "$out/obj/rt0.o"
+	nm --defined-only -g "$out/obj/rt0.o" | awk '{print $3}' | sort -u > "$out/obj/defined.txt"
+	# the names to import (pthread_* from libpthread, dl* from libdl, as
+	# before 2.34; glibc 2.34+ keeps those versions in libc.so.6), and the
+	# aliases of a copied variable (ld.so binds the library's own references
+	# to the executable's copy through them): what the runtime, rt.o, ssl.o
+	# and uv.o name but rt.o does not define (__dso_handle is the linker's)
+	(echo "$want"; nm -u "$out/obj/rt0.o" | awk 'NF == 2 {print $2}') | grep -v '^__dso_handle$\|^$' | sort -u |
+		comm -23 - "$out/obj/defined.txt" > "$out/obj/names.txt"
+	awk -F '\t' 'NR == FNR { if (!($2 in def) || $1 ~ /^libc\.so/) def[$2] = $0; if ($1 ~ /^libpthread/) pt[$2] = $0; if ($1 ~ /^libdl/) dl[$2] = $0; next }
+		{ n = $1; d = (n ~ /^pthread_/ && n in pt) ? pt[n] : (n ~ /^dl/ && n in dl) ? dl[n] : def[n]
+		  if (d == "") { print "mkrt: " n " is in none of the libraries" > "/dev/stderr"; bad = 1; next }
+		  al = n == "environ" ? "__environ,_environ" : ""; print d "\t" al }
+		END { exit bad }' "$out/obj/defs.txt" "$out/obj/names.txt" > "$out/obj/imports.txt"
+	printf '\t.section .hxmc.imports,"a",@progbits\n\t.incbin "%s"\n' "$out/obj/imports.txt" > "$out/obj/imports.s"
+	$ZIG cc -target $triple -c "$out/obj/imports.s" -o "$out/obj/imports.o"
+	ld.lld -r -o "$out/rt.o" "$out/obj/rt0.o" "$out/obj/imports.o"
+	ls -l "$out/rt.o" "$out/ssl.o" "$out/uv.o"
+	exit 0 ;;
 macos-*)
 	# nothing of the C library (libSystem, bound at load time): an empty object
 	"${HXMC:-$ROOT/bin/hxmc/hxmc}" --mkrt-macho "$out/rt.o" $([ $target = macos-arm64 ] && echo --arm64)

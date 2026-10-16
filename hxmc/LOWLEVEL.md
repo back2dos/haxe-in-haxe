@@ -78,9 +78,12 @@ extern class SDL {
   only when referenced.
 - Dynamic libraries: import tables written directly (`DT_NEEDED` on ELF,
   import directory on PE, `LC_LOAD_DYLIB` on Mach-O): no SDK, no import
-  libraries. On Linux this makes the executable dynamic (glibc's loader);
-  static musl executables cannot load glibc libraries (GPU drivers, see
-  PLANS.md "Graphics").
+  libraries. On Linux this needs the dynamic glibc mode (`-D
+  hxmc.libc=glibc`: glibc's loader, `LinkDyn.hx`; `@:hxmc.lib("m")` or
+  `@:hxmc.lib("libm.so.6")`, a plain name being `lib<name>.so` next to the
+  executable); static musl executables cannot load glibc libraries (GPU
+  drivers, see PLANS.md "Graphics"), and an import there is a compile
+  error that names the mode.
 - WebAssembly: C functions become module imports (WASI or JavaScript).
 
 ### What declarations cannot cover: optional embedded tcc
@@ -412,8 +415,7 @@ Deferred: `Segment` checks, `Arena.auto`/`Arena.global`, the `Allocator`
 family, `Debug`, containers, struct values, specialized generics, value
 enums; `pin`, `Handle`, callbacks and thread attach (until a library calls
 back); the C declaration parser and header generator (externs written by
-hand at first); structs by value across C calls; tcc; dynamic ELF output
-on Linux (static libraries first); `defer`; the rest of the Zig mapping;
+hand at first); structs by value across C calls; tcc; `defer`; the rest of the Zig mapping;
 step 7.
 
 Estimate: about 2–3.5k lines (types and extern lowering 1–1.5k compiler

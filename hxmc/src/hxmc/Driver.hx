@@ -25,6 +25,7 @@ class Driver {
 		this.out = out;
 		prep = new Prep(prog);
 		abi = Abi.get(o.target);
+		abi.setLibc(o.libc);
 		if (o.segAlign > 0) abi.segAlign = o.segAlign;
 		if (o.pic) abi.reloc = Pic;
 		if (o.shared) {
@@ -218,7 +219,7 @@ class Driver {
 	function toolKey():String {
 		var p = Sys.programPath();
 		var st = try sys.FileSystem.stat(p) catch (_:Dynamic) null;
-		return "hxmc|" + abi.name + (o.wasmLegacyEh ? "+legacy-eh" : "") + "|" +(st == null ? "?" : st.size + "@" + st.mtime.getTime()) + "|";
+		return "hxmc|" + abi.rtName + (o.wasmLegacyEh ? "+legacy-eh" : "") + "|" +(st == null ? "?" : st.size + "@" + st.mtime.getTime()) + "|";
 	}
 
 	// the functions that may be inlined (before the keys: they are part of them)
@@ -350,7 +351,7 @@ class Driver {
 			if (o.stats) Sys.println('hxmc: data ${ms(t3 - t2)}, link ${ms(haxe.Timer.stamp() - t3)}');
 			return;
 		}
-		var rtPath = o.rtObj != null ? o.rtObj : Options.rtDir() + abi.name + "/rt.o";
+		var rtPath = o.rtObj != null ? o.rtObj : Options.rtDir() + abi.rtName + "/rt.o";
 		if (!sys.FileSystem.exists(rtPath)) throw "hxmc: the runtime object " + rtPath + " is missing (make rt)";
 		var rt = ElfReader.read(sys.io.File.getBytes(rtPath));
 		var t4 = haxe.Timer.stamp();
@@ -399,11 +400,19 @@ class Driver {
 		}
 		var still = links.length > 0 || hxmc.ir.CInterop.USER.keys().hasNext() || hxmc.ir.CInterop.LIBS.keys().hasNext() ? undefinedNames().undef : [];
 		var dylibs = new Map<String, String>();
+		// (a shared object named as such, libm.so.6: never from an object, which
+		// may define the name too, as compiler-rt's weak cos)
+		if (abi.os == "linux" && abi.interp == null)
+			for (n => lib in hxmc.ir.CInterop.LIBS)
+				if (lib.indexOf(".so") >= 0)
+					throw 'hxmc: link: the C function $n of the shared library $lib (@:hxmc.lib): Linux executables are static with musl (the default); shared libraries need the dynamic glibc mode (-D hxmc.libc=glibc)';
 		for (n in still) {
 			var lib = hxmc.ir.CInterop.LIBS.get(n);
-			if (abi.os == "linux" && (lib != null || hxmc.ir.CInterop.USER.exists(n)))
-				throw 'hxmc: link: the C function $n is defined nowhere: Linux executables are static, so it must come from an object or archive (-D hxmc.link=<file>, or @:hxmc.link)';
-			if (abi.os == "macos" && lib != null) dylibs.set(n, LinkInputs.libFile(lib, abi));
+			if (abi.os == "linux" && abi.interp == null && lib != null)
+				throw 'hxmc: link: the C function $n of the shared library $lib (@:hxmc.lib): Linux executables are static with musl (the default); shared libraries need the dynamic glibc mode (-D hxmc.libc=glibc)';
+			if (abi.os == "linux" && abi.interp == null && hxmc.ir.CInterop.USER.exists(n))
+				throw 'hxmc: link: the C function $n is defined nowhere: Linux executables are static, so it must come from an object or archive (-D hxmc.link=<file>, or @:hxmc.link), or from a shared library in the dynamic glibc mode (-D hxmc.libc=glibc, @:hxmc.lib)';
+			if ((abi.os == "macos" || abi.interp != null) && lib != null) dylibs.set(n, LinkInputs.libFile(lib, abi));
 		}
 		if (abi.os == "windows") {
 			var imp = LinkInputs.peImports(still, abi);
@@ -415,7 +424,13 @@ class Driver {
 			l.dylibs = dylibs;
 			l.link("main");
 		} : {
-			var l = new Link(all, abi);
+			var l = if (abi.interp != null) {
+				var d = new LinkDyn(all, abi);
+				d.libs = dylibs;
+				// (a library named without a directory or a version: next to the executable)
+				d.origin = Lambda.exists([for (f in dylibs) f], f -> f.indexOf("/") < 0 && StringTools.endsWith(f, ".so"));
+				d;
+			} else new Link(all, abi);
 			l.symbols = !o.strip;
 			if (Sys.getEnv("HXMC_NOGC") != "1") l.collect = rts;
 			l.link("_start");

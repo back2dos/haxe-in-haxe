@@ -57,6 +57,20 @@ class Abi {
 	// ios-simulator: the Mach-O build version)
 	public var libc:String;
 	public var platform:String;
+	// the directory of the runtime objects (<rt dir>/<rtName>/rt.o): the
+	// target's name, with the C library appended for a mode other than the
+	// default (linux-x86_64-glibc)
+	public var rtName:String;
+	// a dynamically linked executable (Link): the program interpreter
+	// (PT_INTERP, null: a static executable), the shared C library it binds
+	// the runtime's C names from (.hxmc.imports in the runtime object: name ->
+	// library, version) and whether those imports carry symbol versions
+	// (.gnu.version_r). glibc: /lib64/ld-linux-x86-64.so.2 or
+	// /lib/ld-linux-aarch64.so.1, versioned (glibc 2.17 as the floor, the
+	// runtime objects of hxmc/deps/mkrt.sh <target>-glibc). A dynamic musl
+	// mode would be /lib/ld-musl-<arch>.so.1, libc.so, unversioned.
+	public var interp:Null<String> = null;
+	public var versioned = false;
 
 	function new(name, arm, os, size, prev, sp, align, setjmp, prefix) {
 		this.name = name;
@@ -88,6 +102,23 @@ class Abi {
 				libc = "ucrt";
 		}
 		platform = os;
+		rtName = name;
+	}
+
+	// -D hxmc.libc=<libc>: the C library the program links with, where a
+	// target has more than one way (Linux: musl's members linked statically,
+	// the default, or the system's glibc, dynamically)
+	public function setLibc(l:Null<String>) {
+		if (l == null || l == libc) return;
+		switch [os, l] {
+			case ["linux", "glibc"]:
+				libc = l;
+				rtName = name + "-glibc";
+				interp = arm ? "/lib/ld-linux-aarch64.so.1" : "/lib64/ld-linux-x86-64.so.2";
+				versioned = true;
+			case _:
+				throw "hxmc: -D hxmc.libc=" + l + " is not a C library of " + name + " (" + (os == "linux" ? "musl, the default, or glibc" : libc) + ")";
+		}
 	}
 
 	// Mem.os(): 0 Linux, 1 macOS, 2 Windows, 3 WASI

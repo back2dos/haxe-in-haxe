@@ -10,6 +10,7 @@ package hxmc;
 // Options (defines, or the environment for development):
 //   -D hxmc.target=linux-x86_64     the target (Target.hx, Abi.hx: six of them)
 //   -D hxmc.wasm-eh=legacy          wasm32-wasi: legacy exception handling (default: exnref)
+//   -D hxmc.libc=glibc              Linux: dynamically linked against the system's glibc (default: musl, static)
 //   HXMC_RT_OBJ                     the runtime object (default: <tool dir>/rt/<target>/rt.o)
 //   HXMC_STATS=1                    print what the build did and how long it took
 class Main {
@@ -99,6 +100,7 @@ class Main {
 			}
 		var opts = Options.read(com);
 		var abi = Abi.get(opts.target);
+		abi.setLibc(opts.libc);
 		hxmc.ir.Lower.targetOs = abi.osCode();
 		// WebAssembly's runtime is typed with the program only for that target
 		if (abi.wasm && !Lambda.exists(com.types, t -> switch t {

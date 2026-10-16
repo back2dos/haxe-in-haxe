@@ -1,0 +1,8 @@
+exit 0
+SharedLibs.hx:20: 1, 1024, 5
+SharedLibs.hx:22: false
+SharedLibs.hx:24: false, 12
+SharedLibs.hx:27: 3.141593
+SharedLibs.hx:28: true
+SharedLibs.hx:30: true, true
+SharedLibs.hx:31: 0, 0

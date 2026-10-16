@@ -2090,9 +2090,10 @@ class MirBuild {
 			case _: throw new Unsupported(what + ": the size must be a constant");
 		}
 
-	// Mem.target: 0 linux-x86_64, 1 linux-arm64, 2 macos-x86_64, 3 macos-arm64, 4 windows-x86_64, 5 windows-arm64, 6 wasm32-wasi
+	// Mem.target: 0 linux-x86_64, 1 linux-arm64, 2 macos-x86_64, 3 macos-arm64, 4 windows-x86_64, 5 windows-arm64, 6 wasm32-wasi,
+	// 7 linux-x86_64 and 8 linux-arm64 with glibc (-D hxmc.libc=glibc: its struct layouts, hxmc.rt.Layouts)
 	public static function targetCode(abi:Abi):Int
-		return abi.wasm ? 6 : (abi.os == "linux" ? 0 : abi.os == "macos" ? 2 : 4) + (abi.arm ? 1 : 0);
+		return abi.wasm ? 6 : abi.libc == "glibc" ? (abi.arm ? 8 : 7) : (abi.os == "linux" ? 0 : abi.os == "macos" ? 2 : 4) + (abi.arm ? 1 : 0);
 
 	// the Abi constants the runtime's Haxe code may name (Mem.abi)
 	static function abiConst(n:String):Int
