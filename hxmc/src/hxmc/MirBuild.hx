@@ -677,9 +677,10 @@ class MirBuild {
 		roots = Roots.analyze(fn);
 		// the frame's slots: the rooted locals' (shared by locals that never
 		// live at the same time, Roots.assign), those that may be read
-		// unassigned last (zeroed: try functions, all of them, unshared)
+		// unassigned last (zeroed, unshared; in a try function, a handler may
+		// read what its body had not assigned yet when it threw)
 		var all = fn.args.concat(fn.locals);
-		var unset = fn.hasTry ? roots.rooted.copy() : Roots.maybeUnset(fn);
+		var unset = Roots.maybeUnset(fn);
 		var a = roots.assign(all, unset, unset);
 		for (l in all) {
 			var k = a.slotOf.get(l.id);

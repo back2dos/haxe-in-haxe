@@ -8,9 +8,9 @@ import hxmc.Lir.Bits;
 // live across a GC point is rooted; at a cold site the references live
 // across its slow path are spilled there instead), with bit sets over local
 // ids instead of maps. Rooted locals that never live at the same time share
-// a slot (assign: interference at definitions, greedy coloring), except in
-// functions with a try block and locals that may be read before they are
-// set (their slots start as null). Also which locals those are.
+// a slot (assign: interference at definitions, greedy coloring), except
+// locals that may be read before they are set, a handler's reads of what its
+// try body assigns included (their slots start as null). Also which locals those are.
 class Roots {
 	var n:Int;
 	var refs:Bits; // locals of reference type
@@ -49,7 +49,7 @@ class Roots {
 		var nref = 0;
 		for (l in all)
 			if (r.refs.get(l.id)) r.refIdx[l.id] = nref++;
-		if (!f.hasTry && nref <= MAX_SHARED) r.inter = [for (_ in 0...nref) new Bits(nref)];
+		if (nref <= MAX_SHARED) r.inter = [for (_ in 0...nref) new Bits(nref)];
 		var liveIn = r.seq(f.body, new Bits(n));
 		// the arguments are set at the entry, together
 		var atEntry = liveIn.copy();
@@ -428,14 +428,22 @@ class Roots {
 				// a handler may run after any point of the body (or the code after
 				// the try, when no catch matches)
 				var h = copy(out);
+				// every catch variable is set at the handler's entry, before the
+				// tests, which may collect (haxe.Exception.caught), and the first
+				// is read again when none matches: they are defined together,
+				// where what any handler reads is live
+				var ins = new Bits(n);
 				for (c in catches) {
-					// the catch variable is set before the tests, which may collect
-					// (haxe.Exception.caught), and read after them
 					if (refs.get(c.l.id)) rooted.set(c.l.id);
 					var u = seq(c.body, out);
+					ins.union(u);
 					u.clear(c.l.id);
 					h = union(h, u);
 				}
+				for (c in catches)
+					ins.set(c.l.id);
+				for (c in catches)
+					def(c.l.id, ins);
 				if (extras.length > 0) h = union(h, extras[extras.length - 1]);
 				extras.push(h);
 				var b = seq(body, union(out, h));
@@ -512,8 +520,16 @@ class Roots {
 				case SCold(_, x):
 					return step(x, set);
 				case SBreak | SContinue:
-				case STry(_, _):
-					throw "try in a function without hasTry";
+				case STry(body, catches):
+					// a handler may run before any assignment of the body
+					var r = seq(body, set.copy());
+					for (c in catches) {
+						var h = set.copy();
+						h.set(c.l.id);
+						if (c.test != null) reads(c.test(ELocal(c.l)), h);
+						r = inter(r, seq(c.body, h));
+					}
+					return r;
 			}
 			return set;
 		};
