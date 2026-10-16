@@ -168,8 +168,8 @@ table, if-conversion (cmov), splitting live ranges around rare calls.
 musl differs from glibc by an ulp on some inputs (`Math.sin(-2.5)`:
 -0.598472144103956438 against glibc's ...549), so the port's `--interp`
 and macros (Eval's Math is LibM too in the port built by hxmc) can print
-a last digit different from the reference (the fuzzer accepts printed
-floats an ulp apart, `Runner.sameOutput`).
+a last digit different from the reference, widened by later arithmetic
+(the fuzzer accepts printed floats a few ulps apart, `Runner.sameOutput`).
 
 Later, the `libm` branch (98d9d82, 374bb61; parked): exp/log/pow from
 Arm's Optimized Routines (glibc's own code, MIT; bit-identical to glibc),

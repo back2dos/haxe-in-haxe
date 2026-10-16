@@ -45,6 +45,17 @@ on both sides in order of first appearance, with the context headers named
 after them; every other byte must match, so the outputs still have to use
 their names in the same places.
 
+## Printed floats
+
+The port's Math is hxmc's port of musl's libm (`hxmc/std/hxmc/rt/LibM.hx`,
+bit-identical to musl) wherever it runs, Eval included; the reference's is
+glibc's. The two round some results an ulp apart (`Math.sin(-2.5)`), and the
+arithmetic after them can widen that (`100 * Math.sin(-2.5)`: 2 ulps), so the
+fuzzer's output comparison (`Runner.sameOutput`) accepts two printed floats at
+the same place of a line when they are at most `Runner.MAX_ULPS` (4) apart,
+both finite and of the same sign; every other character must match. The kept
+case `interp-108625377` is that example.
+
 ## hxmc's corpus
 
 hxmc's corpus (`hxmc/test`, `Corpus`): the programs of `cases/` and the frozen
