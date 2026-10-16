@@ -103,7 +103,16 @@ class NativeEngine extends macros.MacroEngine.EvalEngine {
 					return super.callPath(ctx, path, f, vl, api);
 				case Failed(_, e):
 					native++;
-					throw e;
+					// as Eval ends a macro call that throws (EvalMain.callPath): what
+					// macro code threw becomes Eval's exception, the compiler's own pass
+					var thrown = Bridge.guestThrown(e);
+					if (thrown == null) throw Bridge.original(e);
+					var old = ctx.curapi;
+					ctx.curapi = api;
+					return switch macros.eval.EvalExceptions.catchExceptions(ctx, () -> throw new RunTimeException(thrown, [], api.pos), api.pos, () -> ctx.curapi = old) {
+						case Some(v): v;
+						case None: null;
+					};
 			}
 		}
 		// verify: Eval's result is the one used
@@ -392,6 +401,8 @@ class NativeEngine extends macros.MacroEngine.EvalEngine {
 					}
 				null;
 			case [VFunction(_, _) | VFieldClosure(_, _), VFunction(_, _) | VFieldClosure(_, _)]: null; // (not comparable)
+			case [VInstance({ikind: IRef(x)}), VInstance({ikind: IRef(y)})]:
+				x == y ? null : no("Ref to another value");
 			case [VInstance({ikind: IPos(p)}), VInstance({ikind: IPos(q)})]:
 				samePos(p, q) ? null : no("position " + sPos(p) + " vs " + sPos(q));
 			case _:

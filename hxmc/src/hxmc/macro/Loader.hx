@@ -55,6 +55,10 @@ class Loader {
 	static var nextSig = 0;
 	static var hint = 0x40000000;
 
+	// whether o is an object of a type of a bundle
+	public static function isBundleObject(o:Dynamic):Bool
+		return host != null && Mem.getU16(Mem.addr(o), -4) >= hostNtypes;
+
 	static function hostSyms():Map<String, {k:String, v:Int}> {
 		if (host != null) return host;
 		var exe = try sys.FileSystem.fullPath(Sys.programPath()) catch (_:Dynamic) Sys.programPath();

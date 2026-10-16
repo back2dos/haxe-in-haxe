@@ -15,13 +15,36 @@ class Unsupported extends haxe.Exception {}
 typedef ApiCall = {name:String, args:Array<Value>, result:Null<Value>, error:Null<Dynamic>};
 
 // verify mode: records the macro API calls of Eval runs (the API's functions
-// wrapped once), into the list of the innermost macro call being recorded
+// wrapped once), into the list of the innermost macro call being recorded.
+// The function values an API call returns (a Ref's get, MetaAccess's add, ...)
+// are wrapped the same way, so their calls are recorded too.
 class Recorder {
 	public static var stack:Array<Array<ApiCall>> = [];
 	static var installed = false;
 
-	// a copy of the arrays, objects and enum values of v (the rest shared)
-	public static function copy(v:Value):Value {
+	// a copy of the arrays, objects, enum values and Refs of v, with its
+	// function values recording their calls (the rest shared)
+	public static function wrap(v:Value, ?label = "function"):Value {
+		return switch v {
+			case VArray(a): VArray(new macros.eval.EvalValue.Varray([for (i in 0...a.alength) wrap(a.avalues[i])], a.alength));
+			case VObject(o): VObject(new macros.eval.EvalValue.Vobject([for (f in o.ofields) wrap(f)], o.oproto));
+			case VEnumValue(e): VEnumValue(new macros.eval.EvalValue.VenumValue(e.eindex, [for (a in e.eargs) wrap(a)], e.epath, e.enpos));
+			// (a Ref's get and toString are pure: called by both runs, their results wrapped)
+			case VInstance(vi = {ikind: IRef(_)}): VInstance(new macros.eval.EvalValue.Vinstance([for (f in vi.ifields) pure(f)], vi.iproto, vi.ikind));
+			case VFunction(_, _) | VFieldClosure(_, _): recording(label, v);
+			case _: v;
+		}
+	}
+
+	static function pure(f:Value):Value {
+		return switch f {
+			case VFunction(_, isStatic): VFunction(vl -> wrap(macros.eval.EvalMisc.callValue(f, vl)), isStatic);
+			case _: f;
+		}
+	}
+
+	// the arguments as they were (the Eval run may change what it passed)
+	static function copy(v:Value):Value {
 		return switch v {
 			case VArray(a): VArray(new macros.eval.EvalValue.Varray([for (i in 0...a.alength) copy(a.avalues[i])], a.alength));
 			case VObject(o): VObject(new macros.eval.EvalValue.Vobject([for (f in o.ofields) copy(f)], o.oproto));
@@ -30,26 +53,35 @@ class Recorder {
 		}
 	}
 
+	// f, recording its calls while a macro call is recorded, replaying them in
+	// the native run
+	static function recording(name:String, f:Value):Value {
+		// (static or not as f: Eval passes `this` to the latter)
+		var isStatic = switch f {
+			case VFunction(_, s): s;
+			case _: false;
+		};
+		return VFunction(vl -> {
+			if (Bridge.replay != null) return Bridge.replayValue(name, vl);
+			var top = stack.length == 0 ? null : stack[stack.length - 1];
+			if (top == null) return macros.eval.EvalMisc.callValue(f, vl);
+			var c:ApiCall = {name: name, args: [for (v in vl) copy(v)], result: null, error: null};
+			top.push(c);
+			var r = try macros.eval.EvalMisc.callValue(f, vl) catch (e:Dynamic) {
+				c.error = e;
+				throw e;
+			}
+			c.result = wrap(r);
+			return wrap(r);
+		}, isStatic);
+	}
+
 	public static function install() {
 		if (installed) return;
 		installed = true;
 		var lib = macros.eval.EvalContext.GlobalState.macroLib;
-		for (name in [for (k in lib.keys()) k]) {
-			var orig = lib.get(name);
-			lib.set(name, VFunction(vl -> {
-				var top = stack.length == 0 ? null : stack[stack.length - 1];
-				if (top == null) return macros.eval.EvalMisc.callValue(orig, vl);
-				var c:ApiCall = {name: name, args: [for (v in vl) copy(v)], result: null, error: null};
-				top.push(c);
-				var r = try macros.eval.EvalMisc.callValue(orig, vl) catch (e:Dynamic) {
-					c.error = e;
-					throw e;
-				}
-				// (as it was: the Eval run may change the arrays and objects it got)
-				c.result = copy(r);
-				return r;
-			}, false));
-		}
+		for (name in [for (k in lib.keys()) k])
+			lib.set(name, recording(name, lib.get(name)));
 	}
 }
 
@@ -112,7 +144,7 @@ class Bridge {
 		var r = try macros.eval.EvalMisc.callValue(f, vl) catch (e:Dynamic) {
 			for (env in envs)
 				macros.eval.EvalContext.popEnvironment(ctx, env);
-			throw e;
+			return rethrow(e);
 		}
 		for (env in envs)
 			macros.eval.EvalContext.popEnvironment(ctx, env);
@@ -127,6 +159,20 @@ class Bridge {
 	public static var replayMismatch:Null<String> = null;
 
 	static function replayCall(name:String, vl:Array<Value>):Dynamic {
+		var c = replayNext(name, vl);
+		if (c.error != null) return rethrow(c.error);
+		return ofValue(c.result);
+	}
+
+	// (a recorded function value's call: Recorder)
+	public static function replayValue(name:String, vl:Array<Value>):Value {
+		var c = replayNext(name, vl);
+		if (c.error != null) throw c.error;
+		return c.result;
+	}
+
+	static function replayNext(name:String, vl:Array<Value>):ApiCall {
+		if (Sys.getEnv("HXMC_MACRO_DEBUG") == "1") Sys.stderr().writeString("hxmc.macros: replay " + replayAt + " " + name + " (" + (replayAt < replay.length ? replay[replayAt].name : "-") + ")\n");
 		var k = replayAt++;
 		if (k >= replay.length) {
 			if (replayMismatch == null) replayMismatch = "API call " + name + " that Eval did not make";
@@ -141,8 +187,43 @@ class Bridge {
 			var d = NativeEngine.diff(i < c.args.length ? c.args[i] : VNull, i < vl.length ? vl[i] : VNull, name + " argument " + i);
 			if (d != null && replayMismatch == null) replayMismatch = d;
 		}
-		if (c.error != null) throw c.error;
-		return ofValue(c.result);
+		return c;
+	}
+
+	// an exception of an API call into macro code: Eval's exceptions as the value
+	// thrown, which macro code can catch (and the same exception again if it does not)
+	static var apiErrors = new haxe.ds.ObjectMap<Dynamic, Dynamic>();
+
+	static function rethrow(e:Dynamic):Dynamic {
+		if (Std.isOfType(e, macros.eval.EvalContext.RunTimeException)) {
+			var v:Dynamic = ofValue((e : macros.eval.EvalContext.RunTimeException).value);
+			if (v != null) apiErrors.set(v, e);
+			throw v;
+		}
+		throw e;
+	}
+
+	// the exception of the compiler that e stands for
+	public static function original(e:Dynamic):Dynamic {
+		var v:Dynamic = e;
+		if (Std.isOfType(v, haxe.ValueException)) v = (v : haxe.ValueException).value;
+		var o = v == null ? null : apiErrors.get(v);
+		return o != null ? o : e;
+	}
+
+	// what macro code threw, as an Eval value (null: an exception of the compiler)
+	public static function guestThrown(e:Dynamic):Null<Value> {
+		var v:Dynamic = e;
+		if (Std.isOfType(v, haxe.ValueException)) v = (v : haxe.ValueException).value;
+		if (v != null && apiErrors.exists(v)) return null; // (the API's exception: rethrown as it is, below)
+		if (v == null) return VNull;
+		switch Type.typeof(v) {
+			case TInt | TFloat | TBool: return toValue(v);
+			case TClass(c) if (c == String): return toValue(v);
+			case _:
+		}
+		if (Loader.isBundleObject(v)) return try toValue(v) catch (_:Unsupported) null;
+		return null;
 	}
 
 	@:hxmc.export("hxmc_macro_pos") static function mkPos(file:String, min:Int, max:Int):Dynamic
@@ -292,10 +373,17 @@ class Bridge {
 				Reflect.setField(o, "s", strF);
 				origin.set(o, v);
 				o;
-			// (an API function value, as Ref's get and toString: called without arguments)
+			// (an API function value, as MetaAccess's: up to four arguments, the
+			// missing ones null, as Eval's functions take them)
 			case VFunction(_, _) | VFieldClosure(_, _):
 				var fv = v;
-				() -> ofValue(macros.eval.EvalMisc.callValue(fv, []));
+				(a:Dynamic, b:Dynamic, c:Dynamic, d:Dynamic) -> {
+					var args:Array<Dynamic> = [a, b, c, d];
+					while (args.length > 0 && args[args.length - 1] == null)
+						args.pop();
+					var r = try macros.eval.EvalMisc.callValue(fv, [for (x in args) toValue(x)]) catch (e:Dynamic) return rethrow(e);
+					return ofValue(r);
+				};
 			// (forced: Eval forces it when macro code reads it)
 			case VLazy(l): ofValue(l.force(), pend, k);
 			case _: v; // opaque: a position, a type, ...

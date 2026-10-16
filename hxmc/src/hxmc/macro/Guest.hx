@@ -340,7 +340,7 @@ class Guest {
 		for (t in com.types)
 			switch t {
 				case TClassDecl(c) if (!runtimeClass(c)):
-					user = !(c.clPath.pack.length >= 2 && c.clPath.pack[0] == "haxe" && c.clPath.pack[1] == "macro");
+					user = !(c.clPath.pack.length >= 2 && c.clPath.pack[0] == "haxe" && c.clPath.pack[1] == "macro") && c.clPath.name != ENTRY;
 					for (cf in c.clOrderedFields.concat(c.clOrderedStatics).concat(c.clConstructor == null ? [] : [c.clConstructor]))
 						if (cf.cfExpr != null) cf.cfExpr = map(cf.cfExpr);
 					if (c.clInit != null && c.clInit.cfExpr != null) c.clInit.cfExpr = map(c.clInit.cfExpr);
