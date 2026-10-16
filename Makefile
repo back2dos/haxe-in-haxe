@@ -96,7 +96,7 @@ endef
 .DEFAULT_GOAL := help
 .PHONY: help std deps rt rt-build hxmc tool bootstrap fixpoint stage0 crosshost port dev release wasm npm site fuzz \
 	lix lix-release reference bench test test-fuzz test-display test-server test-jsonrpc test-unit-targets test-interp \
-	test-haxelib test-eval-debugger test-node-libs smoke hxmc-test gfx-check portcheck measure quick check full clean distclean
+	test-haxelib test-eval-debugger test-node-libs smoke hxmc-test gfx-check gfx-web-check portcheck measure quick check full clean distclean
 
 help:
 	@sed -n '/^# --- Targets/,$$p' $(MAKEFILE_LIST) | sed -n 's/^## \{0,1\}//p'
@@ -139,6 +139,8 @@ help:
 ## test-node-libs  -lib from node_modules with the npm package's compiler for the host (hxmc/test/NodeLibs.hx)
 ## gfx-check   packages/gfx: the triangle example headless and in a window, against a golden
 ##             image (packages/gfx/test/check.sh; Linux: Mesa, Xvfb; macOS: Metal, Cocoa)
+## gfx-web-check  packages/gfx on WebGPU (wasm32-wasi): the same, headless and in a canvas, in
+##             headless Chromium (packages/gfx/test/webgpu.mjs; Playwright with Chromium)
 ## portcheck   the port built by hxmc self-compiles to the reference's HXB (hxmc/test/Selfcheck.hx)
 ## bench       the HaxeBenchmarks cases on hxmc (native, wasm under node), C++, JVM, JS, HL/C and
 ##             HL, built by hxmc and the port: times, peak RSS, sizes (hxmc/test/Bench.hx; BENCH_ARGS)
@@ -404,6 +406,10 @@ gfx-check: $(TOOL) $(STD) $(HOST_RT)
 	$(call hxmc,bin/gfx/GfxTest,$(GFX_CP) -main GfxTest $(HXMC_ARGS) $(GFX_ARGS))
 	$(call hxmc,bin/gfx/Triangle,$(GFX_CP) -main Triangle $(HXMC_ARGS) $(GFX_ARGS))
 	sh packages/gfx/test/check.sh bin/gfx
+
+gfx-web-check: $(TOOL) $(STD)
+	$(call hxmc,bin/gfx/WebTest.wasm,$(GFX_CP) -main WebTest $(HXMC_ARGS) -D hxmc.target=wasm32-wasi)
+	$(NODE) packages/gfx/test/webgpu.mjs bin/gfx/WebTest.wasm bin/gfx
 
 portcheck: $(TOOL) $(STD) $(HOST_RT) $(REFERENCE)
 	$(SCRIPT) Selfcheck --local --small

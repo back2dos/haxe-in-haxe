@@ -260,7 +260,9 @@ class CInterop {
 		}
 		var lib = metaStr(":hxmc.lib", c, cf);
 		if (lib != null) LIBS.set(sym, lib);
-		if (c.clPath.pack.length == 0 || c.clPath.pack[0] != "hxmc") USER.set(sym, true);
+		// (the program's, not the runtime's: outside the package hxmc, or of a
+		// library, as packages/os and packages/gfx declare theirs)
+		if (lib != null || c.clPath.pack.length == 0 || c.clPath.pack[0] != "hxmc") USER.set(sym, true);
 		return sig;
 	}
 

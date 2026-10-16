@@ -21,5 +21,6 @@ class WasmImports {
 		var p = Host.buffer();
 		trace(p[0], p[1], p[2]);
 		trace(Env.twice(21));
+		trace(hxmc.test.WasmLib.h_lib(5));
 	}
 }
