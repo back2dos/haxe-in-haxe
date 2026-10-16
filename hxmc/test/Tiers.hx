@@ -16,7 +16,7 @@ using StringTools;
 //          (-D hxmc.wasm-eh=legacy) under node, the corpus in the dynamic glibc
 //          mode (-D hxmc.libc=glibc) for x64 and arm64 (qemu, with the cross C
 //          library) and its executables checked with readelf (ElfCheck),
-//          ThreadNatives x30, the tool as
+//          ThreadNatives x30 (16 KB, and with the adaptive nursery), the tool as
 //          a module building three cases for x64, arm64 and wasm32-wasi
 //          byte-identical to the native tool; --port adds the native port's
 //          self-compile: before commits
@@ -27,8 +27,9 @@ using StringTools;
 //          16 and 64 KB; ThreadNatives x300 (16 KB) and x100 (64 KB); the heap
 //          census of a debug build; the
 //          port's self-compile natively (64 KB, 256 KB, 256 KB with
-//          RT_VERIFY=1) and as a module (node, node with 256 KB, wasmtime, node
-//          with legacy exception handling); the tool as a module building
+//          RT_VERIFY=1, the adaptive nursery with RT_VERIFY=1) and as a
+//          module (node, node with 256 KB, wasmtime, node with legacy
+//          exception handling); the tool as a module building
 //          every case for every target and itself; the fixpoint: before pushing
 // Cases named restrict the corpus lanes to them; the port, ThreadNatives and
 // fixpoint lanes ignore them. Lanes run one after another (they share the
@@ -71,13 +72,14 @@ class Tiers {
 		{ok: r.code == 0, detail: lastLine(r.out)};
 	}
 
+	// (kb 0: the adaptive nursery, RT_MINOR_KB unset)
 	static function threads(n:Int, kb:Int) return () -> {
 		exec(SCRIPT.concat(["Corpus", "ThreadNatives"]));
 		var d = "bin/hxmc-t/ThreadNatives";
 		var exp = File.getContent("hxmc/test/expected/ThreadNatives.txt");
 		var bad = 0;
 		for (_ in 0...n) {
-			var r = exec([FileSystem.fullPath(d + "/m")], {cwd: d, env: ["RT_MINOR_KB" => Std.string(kb)], timeout: 60});
+			var r = exec([FileSystem.fullPath(d + "/m")], {cwd: d, env: ["RT_MINOR_KB" => kb == 0 ? null : Std.string(kb)], timeout: 60});
 			if (r.timedOut || 'exit ${r.code}\n' + r.out != exp) bad++;
 		}
 		{ok: bad == 0, detail: '${n - bad}/$n runs'};
@@ -164,6 +166,7 @@ class Tiers {
 			lane("glibc readelf", script(["ElfCheck", "bin/hxmc-t"]));
 			lane("wasm node legacy EH", corpus("wasm32-wasi", null, cases, LEGACY));
 			lane("ThreadNatives x30", threads(30, 16));
+			lane("ThreadNatives x30 adaptive", threads(30, 0));
 			lane("cross-host", crosshost(["--targets", "linux-x86_64,linux-arm64,wasm32-wasi,linux-x86_64-glibc"].concat(cases.length > 0 ? cases : ["Unsafe", "SwitchIndex", "Regress"])));
 			if (port) lane("port self-compile", portNative);
 		}
@@ -189,6 +192,7 @@ class Tiers {
 			lane("census", census);
 			lane("port self-compile", portNative);
 			lane("port 256K RT_VERIFY", selfCompile(["bin/hxmc-t/port/s"], ["RT_MINOR_KB" => "256", "RT_VERIFY" => "1"]));
+			lane("port adaptive RT_VERIFY", selfCompile(["bin/hxmc-t/port/s"], ["RT_MINOR_KB" => null, "RT_VERIFY" => "1"]));
 			lane("wasm port build", wasmPortBuild());
 			var wp = FileSystem.fullPath("bin/hxmc-t/wport") + "/haxe.wasm";
 			var node = ["node", "--no-warnings", "--stack-size=8000", FileSystem.fullPath("hxmc/bootstrap/wasi.mjs"), wp];

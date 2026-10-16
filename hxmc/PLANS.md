@@ -69,16 +69,38 @@ in typing and the collector.
 | packages/gfx (GfxTest) | 8% | 7% |
 | macro conformance cases (66, summed) | 39% | 37% |
 
+Done: **nursery size** (docs/hxmc.md, "Runtime in Haxe"; Gc.hx). The
+nursery adapts to what it promotes and to the threads that allocate:
+from 4 MB, doubled after a collection that promoted more than a 16th of
+what was allocated, halved after 8 that promoted less than a 64th,
+between 4 MB per allocating thread and 16 MB plus 8 MB per other one (at
+most 32 MB). Against the fixed 4 MB (with the old one-shot doubling),
+native port on Linux x86-64, 4 cores, medians of 5 interleaved runs:
+
+| Workload | time | peak RSS |
+| --- | --- | --- |
+| port typing itself | -5.9% | -31% |
+| port, HXB self-compile (parallel passes) | -16.7% | -19% |
+| tink_json, 12 types (JS) | -7.2% | 0% |
+| tink_json, 24 types (JS) | -17.0% | -3% |
+| upstream unit suite (JS) | -5.4% | 0% |
+| tool building the port (it fixes 32 MB itself) | 0% (cpu) | -1% |
+| tool building the port, `HXMC_GC_DEFAULTS=0` | -15.5% | -16% |
+| benchmarks (hxmc, 10 cases) | alloc -6%, the others within ±4% (mandelbrot_anon +10%: code layout, the binaries match at a fixed size) | alloc -16%, sha512 +4 MB |
+
+What the earlier measurement took for a loss in the tool was its own
+setting: it runs itself with `RT_MINOR_KB=32768` (kept), so a 16 MB
+nursery there was a smaller one (and 35% more memory: more objects
+promoted, a major collection of the old space past `RT_OLD_MB`). A
+fixed 16 MB nursery hurt programs whose objects die young (cache misses:
+mandelbrot-like code); growing only on promotion keeps them at 4 MB.
+Still open: the port at 32 MB types itself 8% slower than at 16 MB (so the
+single-thread ceiling stays 16 MB) while its parallel HXB phase likes 32
+MB; per-thread nurseries (TLABs sized per thread, not a 16th of the
+shared nursery) were not needed for these workloads.
+
 Ranked by estimated payoff, each needing more than a local fix:
 
-- **Nursery size** (collector policy): a 16 MB nursery instead of 4 MB
-  (`RT_MINOR_KB=16384`) makes tink_json 13% faster, the unit suite's JS
-  build 6%, the port typing itself 16% faster with 22% less peak memory
-  (fewer objects promoted too early), the port's HXB self-compile 8%
-  faster (15% more memory); but the tool (eight compile threads) 30%
-  slower with 35% more memory. Needs a thread-aware policy (TLAB size
-  against nursery size, why larger nurseries hurt the parallel phase).
-  Estimate: 5-15% on macro-heavy builds.
 - **Typing of generated code**: typing is 1.3x the reference on tink_json
   and the gap grows with the code (40 types: 34.7 s against 20.0 s). One
   cause is `ctx.e.monomorphs` as an array copied on every spawned
@@ -545,6 +567,22 @@ kind and segment alignment are already parameters in `Abi`/`Target`.
 
 Generated code has no `.pdata`/`.xdata`; nothing needs it while
 setjmp/longjmp do not unwind, but debuggers and SEH-based tools would.
+
+### Unwind tables on ELF and Mach-O
+
+Frame pointers are done (docs/hxmc.md, "Pipeline": `-D
+hxmc.frame-pointers` on x86-64, always on arm64; `perf record -g` works).
+Not done: `.eh_frame` CFI (or `__unwind_info` on macOS), which `perf
+--call-graph dwarf`, gdb/lldb backtraces without frame-pointer heuristics
+and sampling profilers that do not walk frame pointers need. The prologues
+are regular (push rbp / pushes of the callee-saved registers / sub rsp;
+stp x29, x30 / sub sp / stores), so one CIE and an FDE per function with a
+few instructions each would do; the emitters know every offset. With frame
+pointers on, the FDEs reduce to "CFA = rbp + 16" after the prologue.
+Making frame pointers the default on Linux x86-64 (as Fedora and Ubuntu
+now build): measured 0.8% more code and no difference beyond noise in
+time (self-compile -0.5%, the tool's build of the port -1.1%, the
+benchmarks between -5% and +4% either way, code-layout noise).
 
 ## Graphics
 

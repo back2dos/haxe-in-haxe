@@ -33,6 +33,20 @@ program-wide numbers (type indices, field ids, offsets) are absolute symbols
 resolved by the linker, so a module's code does not change when the numbering
 does.
 
+Frame pointers: arm64 code always keeps the x29/x30 frame record (Apple's
+ABI requires it). On x86-64, `-D hxmc.frame-pointers` (implied by `-debug`;
+`HXMC_FRAME_POINTERS=1` for builds whose command line is fixed, such as the
+tool's and the port's: `HXMC_FRAME_POINTERS=1 HXMC_SYMBOLS=1 make port`)
+starts every function with `push rbp; mov rbp, rsp` and keeps rbp out of
+register allocation, so `perf record -g` (frame-pointer mode) and debuggers
+walk the stack; the chain runs through the runtime's Haxe code and stops in
+the C library. It costs 0.8% more code and no time measurable in the noise
+of the self-compile, the tool's build of the port or the benchmarks; the
+default stays off. `Mem.frame()` returns the caller's record (null without
+records); the corpus case `FrameChain` walks it. No unwind tables
+(`.eh_frame`, `.pdata`) are written: `perf --call-graph dwarf` and
+debuggers' CFI-based unwinding need them (PLANS.md).
+
 ## Runtime in Haxe
 
 Runtime in Haxe: most of the runtime is Haxe compiled with the program
@@ -47,7 +61,18 @@ runtime functions, `@:hxmc.callback` functions C calls,
 handshake, startup and `rt_throw` are Haxe too (`Gc.hx`, `Threads.hx`,
 `Start.hx`; the heap census with `-D hxmc.census`): no C of hxmc's own is
 linked, only the C library, mbedtls and libuv ([hxmc/LOWLEVEL.md](../hxmc/LOWLEVEL.md),
-"The runtime without C of our own"). The modules of hxmc's own package
+"The runtime without C of our own"). The nursery's size adapts (unless
+`RT_MINOR_KB` fixes it; Gc.hx): it starts at 4 MB, doubles after a minor
+collection that promoted more than a 16th of what was allocated since the
+previous one and halves after 8 that promoted less than a 64th, between a
+floor of 4 MB per thread that allocated in the last cycles and a ceiling of
+16 MB plus 8 MB per other such thread, at most 32 MB. Programs whose
+objects die young keep a nursery that stays in the caches; the port typing
+or compiling macro-heavy code grows it to 16 MB, which keeps medium-lived
+objects out of the old space (6-17% faster, up to 31% less peak memory);
+parallel phases get a larger one, so their threads stop for fewer
+collections. `RT_STATS=1` prints the resizes and what was promoted. The
+modules of hxmc's own package
 of the std (the runtime, `hxmc.unsafe`, the natives) are typed once per
 tool and configuration and cached as an HXB archive (`hxmc/src/hxmc/TypesCache.hx`;
 `HXMC_TYPES_CACHE=0` turns it off): a build loads them instead of typing
@@ -78,8 +103,8 @@ no threads, sockets or processes). mbedtls 2.28 and libuv 1.48
 (`hxmc/deps/deps.sh`) become `ssl.o` and `uv.o`, linked only into programs that
 use `sys.ssl` or `eval.luv`. Environment for development: `HXMC_OPT=0`,
 `HXMC_INLINE=<flat>,<loop>,<runtime>`, `HXMC_SYMBOLS=1`, `HXMC_SIZE_STATS=1`,
-`HXMC_DUMP=<function>`, `HXMC_MAP=<file>` (Windows), `RT_MINOR_KB`,
-`RT_OLD_MB`, `RT_STATS`, `RT_VERIFY`.
+`HXMC_DUMP=<function>`, `HXMC_MAP=<file>` (Windows), `HXMC_FRAME_POINTERS`,
+`RT_MINOR_KB` (a fixed nursery), `RT_TLAB_KB`, `RT_OLD_MB`, `RT_STATS`, `RT_VERIFY`.
 
 ## WebAssembly
 
