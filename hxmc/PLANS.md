@@ -820,14 +820,7 @@ The code generator compiles to in-memory objects with relocations, and
 program-wide numbers stay symbolic, so these remain possible:
 
 - **Native macros**: compile macro code with hxmc into the running
-  compiler instead of interpreting it in Eval, calling the compiler's
-  functions directly. Input for deciding (measured, "Macro-heavy builds"
-  above): the `macro` timer is 8-39% of a macro-heavy build (tink_json
-  24-29%, the upstream unit suite 16%, gfx 8%), and the port's Eval is
-  already at or above the reference's speed (calls 0.9-1.3x, the unit
-  suite under --interp 1.6x faster). Only the interpretation part would
-  go: the AST encoding and decoding and the typing macros call stay, so a
-  gain of perhaps half the macro share, 10-15% of such builds.
+  compiler instead of interpreting it in Eval. Prototyped (below): feasible.
 - **Hot reload / live patching**: replace changed modules in a running
   process (needs runtime registration of new types and dispatch rows).
 - **A JIT library** for interpreters written in Haxe (ship only the code
@@ -836,6 +829,84 @@ program-wide numbers stay symbolic, so these remain possible:
 - Platform limits: iOS and consoles forbid generating code at runtime,
   macOS hardened apps need the allow-JIT entitlement, browsers use
   WebAssembly instead.
+
+### Native macros (prototype, 2026-10-16)
+
+`make native-macros` (`MACROS=native`). The macro engine is an interface
+(`haxe/src/macros/MacroEngine.hx`, Eval by default and in the port's own
+builds); `haxe` built with `-D hxmc.jit` (Linux x86-64, static) installs
+`hxmc/src/hxmc/macro/NativeEngine.hx`, selected by `-D hxmc.macros=eval|native|verify`:
+
+- **Guest**: on a class's first macro call, a child of the compiler types
+  the class's module for hxmc in macro mode (`macro` defined,
+  `isMacroContext`, `X.macro.hx`, the std's `Context` with `load(name, n)(args)`
+  calling the compiler, entries per static function) and writes a
+  relocatable object plus the program-wide facts (types, field names,
+  signatures, globals, initializers, dispatch rows).
+- **Loader**: links it into the running compiler with `<exe>.syms` (every
+  symbol of the executable, written by `-D hxmc.jit` builds, which also keep
+  every runtime function and spare `rt_types`, `rt_type_objs` and signature
+  entries). The std's types and statics are the compiler's (layouts
+  checked), the program's are new: spare type entries, run-time field names
+  (the runtime's `Names` has them), new `rt_globals` slots, dispatch rows per
+  bundle. Code and data are mapped below 2 GB (rel32, and dispatch rows are
+  absolute disp32), then the code made executable (`mprotect`).
+- **Bridge**: native objects to and from Eval values, so MacroApi stays the
+  one implementation: anonymous structures, enums (positions as Eval keeps
+  them: construction sites recorded by the guest, constructors without
+  arguments by place), Refs (`GuestRef`), lazy values, API function values,
+  positions and other values opaque; API exceptions catchable by macro code.
+- **verify**: both engines per call, Eval's result used; Eval's API calls
+  (and calls of the function values they return) recorded and replayed to
+  the native run, so no side effect happens twice; results, positions,
+  errors and the API call sequence compared.
+
+Results: the 66 macro cases pass in verify mode: 119 macro calls, 115
+native, 114 identical (positions included), 1 mismatch (Issue8466:
+`Sys.programPath()` is null in Eval's macro std, not in hxmc's), 4 on Eval
+(a module the child fails to type, a class missing from the macro
+context, a class extending an earlier bundle's, values the bridge lacks). Native mode writes
+byte-identical HXB for 65/66. GfxTest: its 40 macro calls compile and run
+natively, the executable is identical in verify mode, 23 calls match; the
+shader macro does not yet (verify: nested macro calls during the Eval run
+advance the native statics too; native mode: output differs, not
+investigated).
+
+Time: compiling a macro class takes about 0.4 s (the child, typing with the
+types cache); the macro cases' native execution is 3 ms against Eval's 11
+ms, compiles 32 s. A compute-bound macro (a sieve) runs 20x faster
+natively (16 ms against 346 ms for 3 calls); an API-bound one (2000
+`makeExpr` calls per call) as fast as Eval: the conversions at the boundary
+cost what interpretation saved. So the gain needs cached compiles and comes
+from macro code that computes, not from macro code that mostly calls the API.
+
+Blockers found and what a production version needs:
+
+- Macro code is typed for Eval (its std's externs): it has to be typed
+  again for hxmc. Do it in process (or from HXB) and cache the objects per
+  macro module on disk, keyed by sources, tool and defines; tier: Eval
+  first, compile the classes that run often.
+- A macro std with Eval's semantics (`Sys.programPath`, integer overflow,
+  negative array indices, ...), else native and Eval results differ.
+- Static state belongs to one engine: a class's functions run all natively
+  or all on Eval, and a fallback after a native run started is unsafe.
+- A new class extending a class of an earlier bundle: instance tests use
+  index spans compiled into code, so new classes need spare index ranges
+  (slack after each class) and earlier dispatch rows patched.
+- Crashes in macro code (a null access is a SIGSEGV in hxmc code) must
+  become errors: a signal handler returning to the macro call, or null
+  checks in macro mode.
+- W^X per platform: macOS `MAP_JIT` with `pthread_jit_write_protect_np`
+  (and the allow-JIT entitlement when hardened), Windows `VirtualAlloc` and
+  `VirtualProtect` plus `FlushInstructionCache`, arm64 instruction cache
+  maintenance and branch ranges (ADRP is ±4 GB, BL ±128 MB: veneers or a
+  mapping near the image), PIE executables (the symbol map relative to the
+  load address).
+- The bridge's maps of positions keep their objects alive (weak maps), and
+  bundles are never unloaded (the compilation server).
+- The bigger win: the compiler's own AST and types as native haxe.macro
+  values (encoding and decoding without Eval values), which an engine that
+  shares the compiler's heap allows.
 
 ### Bootstrap plus bundled program
 

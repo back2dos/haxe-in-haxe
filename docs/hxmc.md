@@ -24,6 +24,7 @@ typed AST --(ir.Lower)--> hxmc IR --(Prep: ir.Facts)--> --(MirBuild)--> Mir (SSA
 | `wasm/` | wasm32-wasi: structured code from Mir, the linker, exception handling with `exnref` (or the legacy instructions) |
 | `Target.hx`, `Abi.hx` | per-target facts |
 | `MkStd.hx` | hxmc's std merged with the Eval originals (the macro context shares the program's class paths) |
+| `macro/` | native macros, a prototype (`haxe` built with `-D hxmc.jit`, Linux x86-64; `-D hxmc.macros=native\|verify`): macro classes compiled by hxmc and linked into the running compiler, behind the macro engine seam `haxe/src/macros/MacroEngine.hx` ([PLANS.md](../hxmc/PLANS.md), "Native macros") |
 
 Conventions: references live across a GC point are shadow-stack slots
 (cold sites spill only on the slow path); `try` is `rt_handler` with the C

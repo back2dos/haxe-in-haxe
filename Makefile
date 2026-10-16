@@ -104,7 +104,7 @@ endef
 .DEFAULT_GOAL := help
 .PHONY: help std deps rt rt-build rt-target rt-layouts hxmc tool bootstrap fixpoint stage0 crosshost port dev release wasm npm site fuzz \
 	lix lix-release lix-dist reference bench test test-fuzz test-display test-server test-jsonrpc test-unit-targets test-interp \
-	test-haxelib test-eval-debugger test-node-libs test-module-cache smoke hxmc-test corpus-stage gfx-programs gfx-check gfx-web-check gfx-shader-check portcheck measure quick check full clean distclean
+	test-haxelib test-eval-debugger test-node-libs test-module-cache smoke hxmc-test corpus-stage gfx-programs gfx-check gfx-web-check gfx-shader-check native-macros portcheck measure quick check full clean distclean
 
 help:
 	@sed -n '/^# --- Targets/,$$p' $(MAKEFILE_LIST) | sed -n 's/^## \{0,1\}//p'
@@ -164,6 +164,9 @@ help:
 ## gfx-shader-check  packages/gfx's shader macro on Eval: shaders run on the CPU, the emitted
 ##             GLSL, WGSL, MSL and HLSL against packages/gfx/test/shader/, the programs it must
 ##             reject (packages/gfx/test/ShaderTest.hx; BLESS=1 rewrites the sources)
+## native-macros  the native macros prototype (hxmc/PLANS.md, "Native macros"): bin/jit/haxe, the
+##             npm compiler built with -D hxmc.jit (Linux x86-64), runs the macro cases with
+##             -D hxmc.macros=verify (MACROS=native: native only, the HXB compared)
 ## portcheck   the port built by hxmc self-compiles to the reference's HXB (hxmc/test/Selfcheck.hx)
 ## bench       the HaxeBenchmarks cases on hxmc (native, wasm under node), C++, JVM, JS, HL/C and
 ##             HL, built by hxmc and the port: times, peak RSS, sizes (hxmc/test/Bench.hx; BENCH_ARGS)
@@ -480,6 +483,14 @@ gfx-web-check: $(TOOL) $(STD)
 
 gfx-shader-check: $(TOOL)
 	ulimit -s unlimited 2>/dev/null || true; $(TOOL) -cp packages/gfx/src -cp packages/gfx/examples -cp packages/gfx/test --run ShaderTest $(TOOL) $(if $(BLESS),--bless)
+
+# (each macro class compiled in a child of bin/jit/haxe; the engine's report in each
+# case's port.log)
+MACROS ?= verify
+native-macros: $(TOOL) $(STD) $(HOST_RT) $(REFERENCE)
+	$(call hxmc,bin/jit/haxe,$(PKG_ARGS) -D hxmc.jit)
+	export HXMC_STD=$(abspath bin/hxmc/std) HXMC_RT_DIR=$(abspath bin/hxmc/rt) HAXE_REFERENCE=$(abspath $(REFERENCE)) HAXE_IN_HAXE_PORT="$(abspath bin/jit/haxe) -D hxmc.macros=$(MACROS)"; $(SCRIPT) Conformance -j $(JOBS) --cases haxe/test/conformance-macro-cases.txt
+	@cat bin/test/conformance/*/port.log | grep -h "^hxmc.macros: [0-9]* macro calls" | awk '{c+=$$2; n+=$$5; m+=substr($$7,2); mm+=$$9; e+=$$11} END {print "native macros: " c " calls, " n " native (" m " matched, " mm " mismatched), " e " on Eval"}'
 
 portcheck: $(TOOL) $(STD) $(HOST_RT) $(REFERENCE)
 	$(SCRIPT) Selfcheck --local --small

@@ -177,6 +177,8 @@ class NativeEngine extends macros.MacroEngine.EvalEngine {
 	}
 
 	public function report() {
+		// (the children's directories)
+		if (Sys.getEnv("HXMC_MACRO_KEEP") != "1" && sys.FileSystem.exists(dir)) try removeDir(dir) catch (_:Dynamic) {}
 		if (calls == 0) return;
 		note('$calls macro calls: $native native (${matched} matched, ${mismatched} mismatched), $fallbacks on Eval; compile ${ms(tCompile)}, native ${ms(tNative)}' + (verify ? ', eval ${ms(tEval)}' : '') + ', ${Bridge.apiCalls} API calls');
 	}
