@@ -2,7 +2,7 @@ package hxmc;
 
 // What a run of the tool does (Main lists the defines and variables).
 class Options {
-	public var target = "linux-x86_64";
+	public var target = host();
 	public var rtObj:Null<String> = null; // the runtime object (default: <tool dir>/rt/<target>/rt.o)
 	public var stats = false;
 	public var verbose = false;
@@ -22,6 +22,22 @@ class Options {
 	public var libc:Null<String> = null;
 
 	public function new() {}
+
+	// the default target: the one the tool runs on (WebAssembly, Eval: linux-x86_64)
+	static function host():String {
+		#if eval
+		return "linux-x86_64";
+		#else
+		return switch hxmc.unsafe.Mem.target() {
+			case 1 | 8: "linux-arm64";
+			case 2: "macos-x86_64";
+			case 3: "macos-arm64";
+			case 4: "windows-x86_64";
+			case 5: "windows-arm64";
+			case _: "linux-x86_64";
+		}
+		#end
+	}
 
 	// the directory of the hxmc binary (with a trailing slash)
 	public static function toolDir():String {

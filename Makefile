@@ -203,7 +203,7 @@ $(TOOL): $(PORT_SRC) $(HXMC_SRC) $(STD) $(HOST_RT)
 # the stage0 module builds the first native tool (one thread, about half a minute)
 bin/hxmc/boot/hxmc1: $(STAGE0) $(STD) $(HOST_RT)
 	@mkdir -p $(dir $@)
-	$(WASI) $(STAGE0) $@ $(TOOL_ARGS) > $@.log 2>&1 || { cat $@.log; exit 1; }
+	$(WASI) $(STAGE0) $@ $(TOOL_ARGS) -D hxmc.target=$(HOST) > $@.log 2>&1 || { cat $@.log; exit 1; }
 	chmod +x $@
 	@ls -l $@
 
