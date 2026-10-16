@@ -96,7 +96,7 @@ endef
 .DEFAULT_GOAL := help
 .PHONY: help std deps rt rt-build hxmc tool bootstrap fixpoint stage0 crosshost port dev release wasm npm site fuzz \
 	lix lix-release reference bench test test-fuzz test-display test-server test-jsonrpc test-unit-targets test-interp \
-	test-haxelib test-eval-debugger test-node-libs smoke hxmc-test portcheck measure quick check full clean distclean
+	test-haxelib test-eval-debugger test-node-libs smoke hxmc-test gfx-check portcheck measure quick check full clean distclean
 
 help:
 	@sed -n '/^# --- Targets/,$$p' $(MAKEFILE_LIST) | sed -n 's/^## \{0,1\}//p'
@@ -137,6 +137,8 @@ help:
 ## smoke       hxmc/test/smoke.sh on PORT_BIN: --interp, HXB, JS, sys.ssl, eval.luv
 ## hxmc-test   hxmc's corpus against its golden files (hxmc/test/Corpus.hx)
 ## test-node-libs  -lib from node_modules with the npm package's compiler for the host (hxmc/test/NodeLibs.hx)
+## gfx-check   packages/gfx: the triangle example headless and in an X11 window under Xvfb,
+##             against a golden image (packages/gfx/test/check.sh; Linux, Mesa, Xvfb)
 ## portcheck   the port built by hxmc self-compiles to the reference's HXB (hxmc/test/Selfcheck.hx)
 ## bench       the HaxeBenchmarks cases on hxmc (native, wasm under node), C++, JVM, JS, HL/C and
 ##             HL, built by hxmc and the port: times, peak RSS, sizes (hxmc/test/Bench.hx; BENCH_ARGS)
@@ -394,6 +396,13 @@ test-node-libs: bin/npm/native/$(HOST)/haxe
 hxmc-test: $(TOOL) $(STD) $(HOST_RT)
 	$(SCRIPT) Corpus -v $(CASES)
 
+# the os and gfx packages' sources (`-lib hxmc.gfx` once the launcher resolves packages/)
+GFX_CP := -cp packages/os/src -cp packages/gfx/src -cp packages/gfx/examples -cp packages/gfx/test
+gfx-check: $(TOOL) $(STD) $(HOST_RT)
+	$(call hxmc,bin/gfx/GfxTest,$(GFX_CP) -main GfxTest $(HXMC_ARGS) -D hxmc.libc=glibc)
+	$(call hxmc,bin/gfx/Triangle,$(GFX_CP) -main Triangle $(HXMC_ARGS) -D hxmc.libc=glibc)
+	sh packages/gfx/test/check.sh bin/gfx
+
 portcheck: $(TOOL) $(STD) $(HOST_RT) $(REFERENCE)
 	$(SCRIPT) Selfcheck --local --small
 
@@ -413,7 +422,7 @@ full: $(TOOL) $(STD) $(HOST_RT)
 	$(SCRIPT) Tiers full $(CASES)
 
 clean:
-	rm -rf bin/port bin/release bin/site bin/wasm bin/fuzz bin/lix bin/npm bin/stage0 bin/test \
+	rm -rf bin/port bin/release bin/site bin/wasm bin/fuzz bin/lix bin/npm bin/stage0 bin/test bin/gfx \
 		bin/hxmc/boot bin/hxmc/fix bin/hxmc-t bin/hxmc-fuzz $(CLI_BOOT)/hxmc-std $(CLI_BOOT)/rt
 
 distclean: clean
