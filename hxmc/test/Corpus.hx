@@ -36,6 +36,8 @@ class Corpus {
 	static final WASM_EXCLUDED = ["ThreadNatives" => "no threads on wasm32-wasi", "ThreadLocal" => "no threads on wasm32-wasi", "NetNatives" => "no sockets on wasm32-wasi"];
 	// the cases of the dynamic glibc mode only (shared libraries of the system)
 	public static final GLIBC_ONLY = ["SharedLibs" => "shared libraries: the dynamic glibc mode only (--libc glibc)"];
+	// the cases of the arm64 targets only
+	public static final ARM64_ONLY = ["FfiStruct" => "structs by value in C calls: arm64 only for now"];
 
 	static var tool:String;
 	static var target:Null<String>;
@@ -110,7 +112,9 @@ class Corpus {
 		mkdirs(d);
 		var wasm = target != null && target.startsWith("wasm");
 		if (c.name.startsWith("reject-")) return stage != null || libc != null ? {name: c.name, status: "excluded", detail: "a compile error"} : rejectCase(c);
-		var native = nativeInputs(c, target != null ? target : hostTarget(), d);
+		var t = target != null ? target : hostTarget();
+		if (!t.endsWith("arm64") && ARM64_ONLY.exists(c.name)) return {name: c.name, status: "excluded", detail: ARM64_ONLY[c.name]};
+		var native = nativeInputs(c, t, d);
 		if (native.skip != null) return {name: c.name, status: "excluded", detail: native.skip};
 		if (wasm && WASM_EXCLUDED.exists(c.name)) return {name: c.name, status: "excluded", detail: WASM_EXCLUDED[c.name]};
 		if (libc != "glibc" && GLIBC_ONLY.exists(c.name)) return {name: c.name, status: "excluded", detail: GLIBC_ONLY[c.name]};

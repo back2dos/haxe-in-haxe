@@ -110,6 +110,15 @@ class MIns {
 	// Call of a C function: the size of each argument in C (1, 2, 4 or 8; float: 4),
 	// for Apple arm64's stack arguments, packed by size (null: 4 for I32, else 8)
 	public var cSizes:Null<Array<Int>>;
+	// Call of a C function taking structs by value (MirBuild.cStructArg): per
+	// argument, the number of registers of the struct whose first part it is
+	// (its parts all go in registers or all on the stack), 0 for the others
+	public var cGroups:Null<Array<Int>>;
+	// Call of a C function returning a struct (MirBuild.cStructRet): the last
+	// argument is the address its value is stored at, not passed (except as
+	// x8 when this is empty); the result's registers in order, 8 an integer
+	// register's word, -8 a double, -4 a float
+	public var cRet:Null<Array<Int>>;
 	public var dead = false;
 	public var mem = 0; // Load/Store: the memory class (Opt.MOther...)
 

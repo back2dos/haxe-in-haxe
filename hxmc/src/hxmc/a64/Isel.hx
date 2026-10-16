@@ -160,7 +160,7 @@ class Isel implements hxmc.Target.Selector {
 	public function isMove(i:LIns):Bool
 		return i.op == MOV;
 
-	public var callResults(default, null):Array<Int> = [0, 32];
+	public var callResults(default, null):Array<Int> = [0, 1, 32, 33, 34, 35];
 
 	public function isCall(i:LIns):Bool
 		return i.op == CALL;
@@ -996,9 +996,26 @@ class Isel implements hxmc.Target.Selector {
 		var winVariadic = abi.os == "windows" && i.variadic >= 0;
 		var uses = [];
 		var moves:Array<{d:Int, s:Int}> = [];
-		for (k in 0...i.args.length) {
+		// (a struct result: its address is the last argument, in x8 when the
+		// callee stores it, MirBuild.cStructRet)
+		var n = i.cRet != null ? i.args.length - 1 : i.args.length;
+		if (i.cRet != null && i.cRet.length == 0) {
+			moves.push({d: 8, s: i.args[n]});
+			uses.push(8);
+		}
+		// the parts of a struct argument left to place on the stack (none in registers)
+		var spill = 0;
+		for (k in 0...n) {
 			var a = i.args[k];
 			var t = i.argTys[k];
+			var parts = i.cGroups != null ? i.cGroups[k] : 1;
+			if (parts > 1 && (t == F64 ? fi : gi) + parts > 8) {
+				if (t == F64) fi = 8 else gi = 8;
+				spill = parts;
+				// (AAPCS64: the struct's memory at an 8-byte boundary; Apple aligns it to its parts)
+				var al = apple ? i.cSizes[k] : 8;
+				stack = (stack + al - 1) & ~(al - 1);
+			}
 			// Apple: variadic arguments on the stack, 8 bytes each
 			var onStack = apple && i.variadic >= 0 && k >= i.variadic;
 			if (onStack) {
@@ -1045,9 +1062,11 @@ class Isel implements hxmc.Target.Selector {
 				gi++;
 				continue;
 			}
-			// stack argument (Apple packs them by their C size; 8-byte slots elsewhere)
-			var size = !apple ? 8 : i.cSizes != null ? i.cSizes[k] : t == I32 ? 4 : 8;
+			// stack argument (Apple packs them by their C size; 8-byte slots
+			// elsewhere, except inside a struct, whose memory they are)
+			var size = !apple && spill == 0 ? 8 : i.cSizes != null ? i.cSizes[k] : t == I32 ? 4 : 8;
 			stack = (stack + size - 1) & ~(size - 1);
+			if (spill > 0) spill--;
 			var src = use(a);
 			if (t == F64 && size == 4) {
 				// (a float: its bits through a general register)
@@ -1075,5 +1094,25 @@ class Isel implements hxmc.Target.Selector {
 		x.s1 = target;
 		x.uses = uses;
 		if (i.ty != Void) mov(reg(i.id), i.ty == F64 ? D0 : 0, 8);
+		if (i.cRet != null && i.cRet.length > 0) {
+			// a struct in x0-x1 or d0-d3 (s0-s3): out of them first, then into its memory
+			var rs = [];
+			for (k in 0...i.cRet.length) {
+				var p = i.cRet[k];
+				var r = f.newReg(p == -8);
+				if (p == -4) {
+					var fm = emit(FMOVWS);
+					fm.d = r;
+					fm.s1 = D0 + k;
+				} else mov(r, p == 8 ? k : D0 + k, 8);
+				rs.push(r);
+			}
+			for (k in 0...i.cRet.length) {
+				var s = emit(STORE);
+				s.size = i.cRet[k] == -4 ? 4 : 8;
+				s.s1 = rs[k];
+				memOf(s, i.args[n], -1, 1, k * s.size, s.size);
+			}
+		}
 	}
 }

@@ -440,10 +440,13 @@ class FnLower {
 		}
 	}
 
-	function declare(v:TVar):Local {
+	// (init: the local's first value; a struct local holds a C function's
+	// struct result, which lives in this frame: MirBuild.cStructRet)
+	function declare(v:TVar, ?init:TExpr):Local {
 		switch CInterop.ctype(v.vType) {
+			case CStruct(c) if (init != null && cStructResult(init)):
 			case CStruct(c) | COpaque(c):
-				throw new LowerError('local ' + v.vName + ' has the C type ' + c.clPath.name + ' by value: structs are reached through a Ptr only (p.value.field, p[i].field)', CInterop.posOf(v.vPos));
+				throw new LowerError('local ' + v.vName + ' has the C type ' + c.clPath.name + ' by value: structs are reached through a Ptr only (p.value.field, p[i].field), or kept in a local as the result of a C function', CInterop.posOf(v.vPos));
 			case _:
 		}
 		var t = ty(v.vType);
@@ -470,11 +473,11 @@ class FnLower {
 				var t = ty(v.vType);
 				if (isBoxed(v)) {
 					var x = init != null ? coerce(value(init), tyOf(init), t) : nullOf(t);
-					var b = declare(v);
+					var b = declare(v, init);
 					out.push(SSet(b, ENewBox(t, x)));
 				} else {
 					var x = init != null ? rhs(init) : null;
-					var lo = declare(v);
+					var lo = declare(v, init);
 					out.push(SSet(lo, x != null ? coerceRhs(x, tyOf(init), t) : nullOf(t)));
 				}
 			case TIf(c, a, b):
@@ -1289,6 +1292,11 @@ class FnLower {
 		var et = tyOf(e);
 		switch strip(lhs).eexpr {
 			case TLocal(v):
+				switch [CInterop.ctype(v.vType), strip(e).eexpr] {
+					case [CStruct(c), TBinop(OpAssign, _, r)] if (cStructResult(r)):
+					case [CStruct(c), _]: cfail('assigning a whole ${c.clPath.name}: a struct local takes the result of a C function only', e);
+					case _:
+				}
 				var lo = local(v, e);
 				var t = ty(v.vType);
 				if (isBoxed(v)) {
@@ -1575,6 +1583,14 @@ class FnLower {
 
 	function cfail(msg:String, e:TExpr):Dynamic
 		throw new LowerError(msg, where(e));
+
+	// a call of a C function returning a struct
+	static function cStructResult(e:TExpr):Bool
+		return switch strip(e).eexpr {
+			case TCall({eexpr: TField(_, FStatic(c, cf))}, _):
+				(CInterop.cSymbol(c, cf) != null || Lower.hasMeta(":hxmc.indirect", cf.cfMeta)) && CInterop.ctype(e.etype).match(CStruct(_));
+			case _: false;
+		}
 
 	// a value of a C struct type cannot exist yet: only its fields through a pointer
 	function noStructValue(t:core.TType.T, what:String, e:TExpr) {
