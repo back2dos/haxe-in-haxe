@@ -16,9 +16,9 @@
 #   rebuilds itself (the fixpoint), and its types cache is checked; then the
 #   port's release binaries and lix for the six targets.
 #   Next to it, each with its own tool from the stage0 (make hxmc):
-#   - corpus: hxmc's corpus for every target, the port as a WebAssembly
-#     module, the reference's self-compile (lix downloads the reference
-#     compiler, the nightly of the pinned upstream commit, cached);
+#   - corpus: hxmc's corpus for every target (in three jobs), the port as a
+#     WebAssembly module, the reference's self-compile (lix downloads the
+#     reference compiler, the nightly of the pinned upstream commit, cached);
 #   - crosshost: the tool as a WebAssembly module building the corpus and
 #     itself byte-identical; peak memory and times (haxe/test/Measure.hx) in
 #     the job summary;
@@ -294,13 +294,22 @@ jobs:
       - uses: actions/upload-artifact@v7
         with: {name: lix, path: bin/lix-dist/, retention-days: 14}
 
-  # hxmc's corpus for every target (run by the test and wasm jobs on the
-  # targets' machines), the port as a WebAssembly module (the wasm job), the
-  # reference's self-compile (the test and wasm jobs compare with it)
+  # hxmc's corpus for every target (make corpus-stage; run by the test and
+  # wasm jobs on the targets' machines), in three groups of about the same
+  # time; with the WebAssembly ones the port as a WebAssembly module (the wasm
+  # job) and the reference's self-compile (the test and wasm jobs compare
+  # with it)
   corpus:
     needs: [changes, rt]
     if: ${{ !cancelled() && needs.changes.result == 'success' && (needs.rt.result == 'success' || needs.rt.result == 'skipped') && needs.changes.outputs.all == 'true' }}
     runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {group: unix, targets: linux-x86_64 linux-arm64 linux-x86_64-glibc linux-arm64-glibc macos-x86_64 macos-arm64}
+          - {group: windows, targets: windows-x86_64 windows-arm64}
+          - {group: wasm, targets: wasm32-wasi wasm32-wasi-legacy}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -322,45 +331,35 @@ jobs:
           set -ex
           make rt && touch bin/hxmc/rt/*/*.o
           make hxmc
-
       - name: Cross-build hxmc's corpus
-        run: |
-          set -ex
-          for t in $TARGETS wasm32-wasi; do
-            bin/hxmc/hxmc -cp hxmc/test -cp haxe/test --run Corpus -v --target $t --stage dist/corpus/$t
-          done
-          # and with legacy exception handling (-D hxmc.wasm-eh=legacy)
-          bin/hxmc/hxmc -cp hxmc/test -cp haxe/test --run Corpus -v --target wasm32-wasi --wasm-eh legacy --stage dist/corpus/wasm32-wasi-legacy
-          # and Linux in the dynamic glibc mode (-D hxmc.libc=glibc), checked with readelf
-          for t in linux-x86_64 linux-arm64; do
-            bin/hxmc/hxmc -cp hxmc/test -cp haxe/test --run Corpus -v --target $t --libc glibc --stage dist/corpus/$t-glibc
-            bin/hxmc/hxmc -cp hxmc/test -cp haxe/test --run ElfCheck dist/corpus/$t-glibc --summary "$GITHUB_STEP_SUMMARY"
-          done
+        run: make corpus-stage CORPUS_TARGETS="${{ matrix.targets }}"
 
       - name: The port as a WebAssembly module
+        if: matrix.group == 'wasm'
         run: |
           set -ex
-          mkdir -p dist/wasm
-          HXMC_STATS=1 bin/hxmc/hxmc dist/wasm/haxe.wasm -cp haxe/src -main haxe.Main -D disable-parallelism -cp bin/hxmc/std --custom-target hxmc -D hxmc.target=wasm32-wasi | tail -3
-          HXMC_STATS=1 bin/hxmc/hxmc dist/wasm/haxe-legacy.wasm -cp haxe/src -main haxe.Main -D disable-parallelism -cp bin/hxmc/std --custom-target hxmc -D hxmc.target=wasm32-wasi -D hxmc.wasm-eh=legacy | tail -3
-          ls -l dist/wasm/haxe.wasm dist/wasm/haxe-legacy.wasm
-
-      - name: lix
-        run: make lix
+          mkdir -p bin/corpus/port
+          HXMC_STATS=1 bin/hxmc/hxmc bin/corpus/port/haxe.wasm -cp haxe/src -main haxe.Main -D disable-parallelism -cp bin/hxmc/std --custom-target hxmc -D hxmc.target=wasm32-wasi | tail -3
+          HXMC_STATS=1 bin/hxmc/hxmc bin/corpus/port/haxe-legacy.wasm -cp haxe/src -main haxe.Main -D disable-parallelism -cp bin/hxmc/std --custom-target hxmc -D hxmc.target=wasm32-wasi -D hxmc.wasm-eh=legacy | tail -3
+          ls -l bin/corpus/port/haxe.wasm bin/corpus/port/haxe-legacy.wasm
       - name: Reference compiler revision
+        if: matrix.group == 'wasm'
         id: ref
         run: echo "rev=$(git rev-parse --short=7 HEAD:haxe/upstream)" >> "$GITHUB_OUTPUT"
       - name: Cache the reference compiler
+        if: matrix.group == 'wasm'
         uses: actions/cache@v6
         with:
           path: bin/reference
           key: reference-nightly-${{ steps.ref.outputs.rev }}
-      - name: The reference compiler (lix downloads the nightly)
-        run: make reference && bin/reference/haxe -version
       # the reference's self-compile, in the directory the macOS runners use
       - name: Reference self-compile
+        if: matrix.group == 'wasm'
         run: |
           set -ex
+          make lix
+          if [ ! -x bin/reference/haxe ]; then make reference; fi
+          bin/reference/haxe -version
           sudo mkdir -p "$SELF_ROOT" && sudo chown "$USER" "$SELF_ROOT"
           cp -r haxe/src "$SELF_ROOT/src"
           cp -r haxe/upstream/std "$SELF_ROOT/std"
@@ -371,31 +370,19 @@ jobs:
           # line ends, and other positions)
           tar czf dist/self/std.tar.gz -C haxe/upstream std
           tar czf dist/self/src.tar.gz -C haxe src
+      - uses: actions/upload-artifact@v7
+        if: matrix.group == 'wasm'
+        with: {name: hxmc-self, path: dist/self/, retention-days: 3}
 
       - name: Pack the corpus
         run: |
-          for t in $TARGETS wasm32-wasi wasm32-wasi-legacy linux-x86_64-glibc linux-arm64-glibc; do tar czf dist/corpus-$t.tar.gz -C dist/corpus/$t .; done
-          tar czf dist/corpus-wasm32-wasi-port.tar.gz -C dist/wasm haxe.wasm haxe-legacy.wasm
+          set -ex
+          mkdir -p dist/corpus
+          for t in ${{ matrix.targets }}; do tar czf dist/corpus/corpus-$t.tar.gz -C bin/corpus/$t .; done
+          if [ -d bin/corpus/port ]; then tar czf dist/corpus/corpus-wasm32-wasi-port.tar.gz -C bin/corpus/port haxe.wasm haxe-legacy.wasm; fi
+          ls -l dist/corpus
       - uses: actions/upload-artifact@v7
-        with: {name: hxmc-self, path: dist/self/, retention-days: 3}
-      - uses: actions/upload-artifact@v7
-        with: {name: corpus-linux-x86_64, path: dist/corpus-linux-x86_64.tar.gz, retention-days: 3}
-      - uses: actions/upload-artifact@v7
-        with: {name: corpus-linux-arm64, path: dist/corpus-linux-arm64.tar.gz, retention-days: 3}
-      - uses: actions/upload-artifact@v7
-        with: {name: corpus-linux-x86_64-glibc, path: dist/corpus-linux-x86_64-glibc.tar.gz, retention-days: 3}
-      - uses: actions/upload-artifact@v7
-        with: {name: corpus-linux-arm64-glibc, path: dist/corpus-linux-arm64-glibc.tar.gz, retention-days: 3}
-      - uses: actions/upload-artifact@v7
-        with: {name: corpus-windows-x86_64, path: dist/corpus-windows-x86_64.tar.gz, retention-days: 3}
-      - uses: actions/upload-artifact@v7
-        with: {name: corpus-windows-arm64, path: dist/corpus-windows-arm64.tar.gz, retention-days: 3}
-      - uses: actions/upload-artifact@v7
-        with: {name: corpus-macos-x86_64, path: dist/corpus-macos-x86_64.tar.gz, retention-days: 3}
-      - uses: actions/upload-artifact@v7
-        with: {name: corpus-macos-arm64, path: dist/corpus-macos-arm64.tar.gz, retention-days: 3}
-      - uses: actions/upload-artifact@v7
-        with: {name: corpus-wasm32-wasi, path: "dist/corpus-wasm32-wasi*.tar.gz", retention-days: 3}
+        with: {name: 'corpus-${{ matrix.group }}', path: dist/corpus/, retention-days: 3}
 
   # hxmc's output does not depend on the host: the tool as a WebAssembly
   # module (under node) builds the corpus for every target, and the tool
@@ -680,12 +667,12 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - {target: linux-x86_64, pkg: linux-x86_64, os: ubuntu-24.04}
-          - {target: linux-arm64, pkg: linux-aarch64, os: ubuntu-24.04-arm}
-          - {target: windows-x86_64, pkg: windows-x86_64, os: windows-2025}
-          - {target: windows-arm64, pkg: windows-aarch64, os: windows-11-arm}
-          - {target: macos-x86_64, pkg: macos-x86_64, os: macos-15-intel}
-          - {target: macos-arm64, pkg: macos-aarch64, os: macos-15}
+          - {target: linux-x86_64, pkg: linux-x86_64, corpus: unix, os: ubuntu-24.04}
+          - {target: linux-arm64, pkg: linux-aarch64, corpus: unix, os: ubuntu-24.04-arm}
+          - {target: windows-x86_64, pkg: windows-x86_64, corpus: windows, os: windows-2025}
+          - {target: windows-arm64, pkg: windows-aarch64, corpus: windows, os: windows-11-arm}
+          - {target: macos-x86_64, pkg: macos-x86_64, corpus: unix, os: macos-15-intel}
+          - {target: macos-arm64, pkg: macos-aarch64, corpus: unix, os: macos-15}
     runs-on: ${{ matrix.os }}
     defaults:
       run:
@@ -702,7 +689,7 @@ jobs:
       - uses: actions/download-artifact@v8
         with: {name: 'hxmc-haxe-${{ matrix.pkg }}', path: dl}
       - uses: actions/download-artifact@v8
-        with: {name: 'corpus-${{ matrix.target }}', path: dl}
+        with: {name: 'corpus-${{ matrix.corpus }}', path: dl}
       - uses: actions/download-artifact@v8
         with: {name: hxmc-self, path: dl}
       - uses: actions/download-artifact@v8
@@ -810,9 +797,6 @@ jobs:
       # the runner's glibc, and against glibc 2.17, the floor its symbol
       # versions are pinned to (CentOS 7's, in a container; the release
       # binary that runs the check is static)
-      - uses: actions/download-artifact@v8
-        if: runner.os == 'Linux'
-        with: {name: 'corpus-${{ matrix.target }}-glibc', path: dl}
       - name: Corpus, glibc mode
         if: always() && runner.os == 'Linux'
         run: |
@@ -864,7 +848,7 @@ jobs:
           curl -sSfL "https://github.com/bytecodealliance/wasmtime/releases/download/v$WASMTIME_VERSION/wasmtime-v$WASMTIME_VERSION-x86_64-linux.tar.xz" | tar xJ -C "$RUNNER_TEMP"
           echo "$RUNNER_TEMP/wasmtime-v$WASMTIME_VERSION-x86_64-linux" >> "$GITHUB_PATH"
       - uses: actions/download-artifact@v8
-        with: {name: corpus-wasm32-wasi, path: dl}
+        with: {name: corpus-wasm, path: dl}
       - uses: actions/download-artifact@v8
         with: {name: hxmc-self, path: dl}
       - uses: actions/download-artifact@v8

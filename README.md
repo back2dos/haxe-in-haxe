@@ -258,7 +258,7 @@ whether the runtime objects' release exists), `rt-build` and `rt` (only when
 it is missing: one job per target, `make rt-target`, then `make rt-layouts`
 and the release), `build` (the bootstrap from the stage0, the fixpoint, the
 release binaries and lix for the six targets) and next to it, each with a
-tool of its own from the stage0: `corpus` (the corpus for every target, the
+tool of its own from the stage0: `corpus` (`make corpus-stage`: the corpus for every target in three jobs, the
 port as a WebAssembly module, the reference's self-compile), `crosshost,
 memory and time` (crosshost, then `make measure`), `npm-pack` (the npm
 packages), `site` and `gfx` (`make gfx-check` on Linux x86-64, and the
