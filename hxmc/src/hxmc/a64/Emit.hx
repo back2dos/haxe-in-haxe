@@ -97,6 +97,7 @@ class Emit implements hxmc.Target.Emitter {
 			ldst(false, 8, false, saved[k], SP, saveOff[k]);
 		for (b in f.blocks)
 			b.label = a.newLabel();
+		f.threadJumps(i -> (i.op : AOp) == B);
 		var tables:Array<{label:Int, entries:Array<LBlock>}> = [];
 		for (bi in 0...f.blocks.length) {
 			var b = f.blocks[bi];

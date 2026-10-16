@@ -49,40 +49,41 @@ sslroots=; for f in $(grep -o 'static function mbedtls_[a-z0-9_]*' "$ROOT/hxmc/s
 uvroots=; for f in $(grep -o 'static function uv_[a-z0-9_]*' "$ROOT/hxmc/std/hxmc/rt/Uv.hx" | sed 's/static function //' | sort -u); do uvroots="$uvroots -u $f"; done
 # what generated code calls in the C library (MirBuild), and what the
 # runtime's Haxe code calls (hxmc/std/hxmc/unsafe/LibC.hx; the collector and
-# the threads: hxmc/std/hxmc/rt/Os.hx, Threads.hx, Start.hx)
-libm="memset memcpy fmod floor ceil sin cos tan asin acos atan atan2 exp log pow sqrt"
-libm="$libm memmove memcmp strlen strcmp malloc free strtod rand clock_gettime mktime"
-libm="$libm getenv exit fflush atexit nanosleep"
+# the threads: hxmc/std/hxmc/rt/Os.hx, Threads.hx, Start.hx); no math: Math
+# is Haxe (hxmc/std/hxmc/rt/LibM.hx) and instructions
+libc="memset memcpy"
+libc="$libc memmove memcmp strlen strcmp malloc free strtod rand clock_gettime mktime"
+libc="$libc getenv exit fflush atexit nanosleep"
 case $target in
 windows-*)
-	libm="$libm _mktime64 _localtime64_s _gmtime64_s"
+	libc="$libc _mktime64 _localtime64_s _gmtime64_s"
 	# hxmc/std/hxmc/unsafe/Win32.hx (the UCRT's part; kernel32's are imports)
-	libm="$libm _write _read _close _wopen _lseeki64 _telli64 _fstat64 _wstat64 _wgetenv _wputenv_s _wgetcwd _wchdir"
-	libm="$libm _wsystem _wmkdir _wunlink _wrmdir _getch _getche _errno _open_osfhandle _get_osfhandle fflush exit realloc"
-	libm="$libm GetEnvironmentStringsW FreeEnvironmentStringsW Sleep GetSystemTimePreciseAsFileTime GetProcessTimes"
-	libm="$libm GetCurrentProcess GetModuleFileNameW GetStdHandle GetFileType GetFileAttributesW SetFileAttributesW MoveFileExW"
-	libm="$libm RemoveDirectoryW FindFirstFileW FindNextFileW FindClose GetLastError GetFullPathNameW DuplicateHandle CloseHandle"
-	libm="$libm SearchPathW CreateFileW CreatePipe CreateProcessW WaitForSingleObject GetExitCodeProcess TerminateProcess"
+	libc="$libc _write _read _close _wopen _lseeki64 _telli64 _fstat64 _wstat64 _wgetenv _wputenv_s _wgetcwd _wchdir"
+	libc="$libc _wsystem _wmkdir _wunlink _wrmdir _getch _getche _errno _open_osfhandle _get_osfhandle fflush exit realloc"
+	libc="$libc GetEnvironmentStringsW FreeEnvironmentStringsW Sleep GetSystemTimePreciseAsFileTime GetProcessTimes"
+	libc="$libc GetCurrentProcess GetModuleFileNameW GetStdHandle GetFileType GetFileAttributesW SetFileAttributesW MoveFileExW"
+	libc="$libc RemoveDirectoryW FindFirstFileW FindNextFileW FindClose GetLastError GetFullPathNameW DuplicateHandle CloseHandle"
+	libc="$libc SearchPathW CreateFileW CreatePipe CreateProcessW WaitForSingleObject GetExitCodeProcess TerminateProcess"
 	# hxmc/std/hxmc/unsafe/Winsock.hx
-	libm="$libm socket closesocket accept bind connect listen getsockname getpeername getsockopt setsockopt recv send"
-	libm="$libm select shutdown ioctlsocket gethostname gethostbyname gethostbyaddr WSAGetLastError SetHandleInformation"
-	libm="$libm strerror _strdup _setmode"
-	case $target in windows-arm64) libm="$libm __mingw_longjmp" ;; *) libm="$libm longjmp" ;; esac ;;
+	libc="$libc socket closesocket accept bind connect listen getsockname getpeername getsockopt setsockopt recv send"
+	libc="$libc select shutdown ioctlsocket gethostname gethostbyname gethostbyaddr WSAGetLastError SetHandleInformation"
+	libc="$libc strerror _strdup _setmode"
+	case $target in windows-arm64) libc="$libc __mingw_longjmp" ;; *) libc="$libc longjmp" ;; esac ;;
 *)
-	libm="$libm localtime_r gmtime_r"
+	libc="$libc localtime_r gmtime_r"
 	# hxmc/std/hxmc/unsafe/Posix.hx
-	libm="$libm write read open close lseek fcntl pipe dup2 isatty tcgetattr tcsetattr getenv setenv unsetenv getcwd chdir"
-	libm="$libm nanosleep gettimeofday clock readlink realpath system fork execvp _exit exit fflush waitpid kill mkdir"
-	libm="$libm unlink rmdir rename stat fstat opendir readdir closedir realloc environ"
-	libm="$libm socket bind connect accept listen getsockname getpeername getsockopt setsockopt recv send select"
-	libm="$libm shutdown signal strerror gethostname gethostbyname gethostbyaddr strdup sched_yield"
+	libc="$libc write read open close lseek fcntl pipe dup2 isatty tcgetattr tcsetattr getenv setenv unsetenv getcwd chdir"
+	libc="$libc nanosleep gettimeofday clock readlink realpath system fork execvp _exit exit fflush waitpid kill mkdir"
+	libc="$libc unlink rmdir rename stat fstat opendir readdir closedir realloc environ"
+	libc="$libc socket bind connect accept listen getsockname getpeername getsockopt setsockopt recv send select"
+	libc="$libc shutdown signal strerror gethostname gethostbyname gethostbyaddr strdup sched_yield"
 	# hxmc/std/hxmc/rt/Os.hx, Start.hx
-	libm="$libm sysconf mmap munmap mprotect madvise poll _longjmp"
-	libm="$libm pthread_mutex_init pthread_mutex_destroy pthread_mutex_lock pthread_mutex_trylock pthread_mutex_unlock"
-	libm="$libm pthread_condattr_init pthread_condattr_setclock pthread_cond_init pthread_cond_destroy pthread_cond_wait"
-	libm="$libm pthread_cond_timedwait pthread_cond_signal pthread_cond_broadcast pthread_attr_init pthread_attr_destroy"
-	libm="$libm pthread_attr_setstacksize pthread_attr_setdetachstate pthread_create"
-	case $target in linux-*) libm="$libm __errno_location" ;; esac ;;
+	libc="$libc sysconf mmap munmap mprotect madvise poll _longjmp"
+	libc="$libc pthread_mutex_init pthread_mutex_destroy pthread_mutex_lock pthread_mutex_trylock pthread_mutex_unlock"
+	libc="$libc pthread_condattr_init pthread_condattr_setclock pthread_cond_init pthread_cond_destroy pthread_cond_wait"
+	libc="$libc pthread_cond_timedwait pthread_cond_signal pthread_cond_broadcast pthread_attr_init pthread_attr_destroy"
+	libc="$libc pthread_attr_setstacksize pthread_attr_setdetachstate pthread_create"
+	case $target in linux-*) libc="$libc __errno_location" ;; esac ;;
 esac
 case $target in
 macos-*)
@@ -112,7 +113,7 @@ windows-*)
 	[ -n "$uvar" ] && "${HXMC:-$ROOT/bin/hxmc/hxmc}" --mkrt "$out/uv.o" $uvar $sysar $uvroots -U "$out/obj/uv.undef"
 	sj=_setjmp; [ $target = windows-arm64 ] && sj=__mingw_setjmp
 	undef="-u mainCRTStartup -u $sj -u _tls_index -u _tls_used -x main"
-	for f in $libm $(cat "$out/obj/ssl.undef" "$out/obj/uv.undef" | grep -v '^hx\|^rt_\|^haxe_') ; do undef="$undef -u $f"; done
+	for f in $libc $(cat "$out/obj/ssl.undef" "$out/obj/uv.undef" | grep -v '^hx\|^rt_\|^haxe_') ; do undef="$undef -u $f"; done
 	for f in $(cat "$out/obj/ssl.undef" "$out/obj/uv.undef" | grep '^hx\|^haxe_'); do undef="$undef -x $f"; done
 	"${HXMC:-$ROOT/bin/hxmc/hxmc}" --mkrt "$out/rt.o" $inputs $undef
 	ls -l "$out/rt.o" "$out/ssl.o" "$out/uv.o"
@@ -129,6 +130,6 @@ libs=$(echo "$line" | tr ' ' '\n' | grep -E '/lib(c|zigc|compiler_rt)\.a$' | tr 
 [ -n "$sslar" ] && ld.lld -r --strip-debug -o "$out/ssl.o" $sslroots --start-group $sslar --end-group
 [ -n "$uvar" ] && ld.lld -r --strip-debug -o "$out/uv.o" $uvroots --start-group $uvar --end-group
 undef="-u _setjmp"
-for f in $libm $(nm -u $(ls "$out/ssl.o" "$out/uv.o" 2>/dev/null) | awk '{print $2}' | grep -v '^hx\|^haxe_' | sort -u); do undef="$undef -u $f"; done
+for f in $libc $(nm -u $(ls "$out/ssl.o" "$out/uv.o" 2>/dev/null) | awk '{print $2}' | grep -v '^hx\|^haxe_' | sort -u); do undef="$undef -u $f"; done
 ld.lld -r --strip-debug -o "$out/rt.o" $undef "$crt1" --start-group $libs --end-group
 ls -l "$out/rt.o" "$out/ssl.o" "$out/uv.o"

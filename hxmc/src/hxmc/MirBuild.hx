@@ -77,6 +77,13 @@ class MirBuild {
 		return new MIns(op, ty);
 
 	function op2(op:Op, ty:MTy, a:Int, b:Int):Int {
+		// a commutative operation's constant on the right (the instruction
+		// selections' immediate forms)
+		if ((op == Add || op == Mul || op == And || op == Or || op == Xor) && f.vals[a].op == Const && f.vals[b].op != Const) {
+			var t = a;
+			a = b;
+			b = t;
+		}
 		// (x >>> n) | (x << (w - n)): a rotation
 		if (op == Or && (ty == I32 || ty == I64)) {
 			var r = rotation(a, b, ty);
@@ -350,7 +357,7 @@ class MirBuild {
 	public static inline var STUB_ZERO = "hxmc_zero";
 
 	static var QUIET = [
-		"hxmc_zero" => true, "memset" => true, "memcpy" => true, "memmove" => true, "floor" => true, "pow" => true, "fmod" => true, "atan2" => true,
+		"hxmc_zero" => true, "memset" => true, "memcpy" => true, "memmove" => true, "floor" => true, "ceil" => true,
 		"hxmc_barrier_slow" => true, "setjmp" => true, "_setjmp" => true, "__mingw_setjmp" => true, "hxmc_tls_base" => true,
 	];
 
@@ -1833,6 +1840,39 @@ class MirBuild {
 		}
 	}
 
+	// floor(x) or ceil(x), as musl computes them (exact, -0.0 kept, a NaN
+	// returned as it is): WebAssembly's instructions (LinkWasm), arm64's
+	// frintm and frintp; on x86-64 (no SSE4.1 assumed) inline: x itself
+	// from 2^52 up and for NaN, else x truncated, one more or less when on
+	// the wrong side of x, with the sign of x (the result is 0 only when x
+	// is in (-1, 1), and then has x's sign)
+	function floor(x:Int, ceil:Bool):Int {
+		if (abi.wasm) return call(ceil ? "ceil" : "floor", [x], F64);
+		if (abi.arm) return special(ceil ? "ceil" : "floor", [x], F64);
+		var r = newVar(F64);
+		writeVar(r, cur, x);
+		var fast = newBlock(), fix = newBlock(), sign = newBlock(), join = newBlock();
+		br(cmp(FLt, op1(FAbs, F64, x), fconst(4503599627370496.0)), fast, join);
+		seal(fast);
+		cur = fast;
+		var t = newVar(F64);
+		var t0 = op1(I2F, F64, op1(F2I, I64, x));
+		writeVar(t, cur, t0);
+		br(cmp(ceil ? FLt : FGt, t0, x), fix, sign);
+		seal(fix);
+		cur = fix;
+		writeVar(t, cur, op2(ceil ? FAdd : FSub, F64, t0, fconst(1)));
+		jmp(sign);
+		seal(sign);
+		cur = sign;
+		var bits = op2(Or, I64, op1(FToBits, I64, readVar(t, cur)), op2(And, I64, op1(FToBits, I64, x), lconst(0, 0x80000000)));
+		writeVar(r, cur, op1(BitsToF, F64, bits));
+		jmp(join);
+		seal(join);
+		cur = join;
+		return readVar(r, cur);
+	}
+
 	// hx_f2i: truncation in range, else hx_f2i_slow (NaN 0, wrapping)
 	function f2i(x:Int):Int {
 		var r = newVar(I32);
@@ -1898,8 +1938,6 @@ class MirBuild {
 		}
 		if (hxmc.ir.FnLower.isIntrinsic(name)) return intrinsic(name, args);
 		var xs = [for (a in args) ex(a)];
-		inline function f1(fn:String):Int
-			return call(fn, [xs[0]], F64);
 		return switch name {
 			case "String_length": loadM(Opt.MConst, I32, 4, xs[0], 0);
 			case "String_charCodeAt_i":
@@ -1921,22 +1959,13 @@ class MirBuild {
 			case "Math_PI": fconst(3.141592653589793);
 			case "Math_abs": op1(FAbs, F64, xs[0]);
 			case "Math_sqrt": op1(FSqrt, F64, xs[0]);
-			case "Math_acos": f1("acos");
-			case "Math_asin": f1("asin");
-			case "Math_atan": f1("atan");
-			case "Math_cos": f1("cos");
-			case "Math_sin": f1("sin");
-			case "Math_tan": f1("tan");
-			case "Math_exp": f1("exp");
-			case "Math_log": f1("log");
-			case "Math_atan2": call("atan2", [xs[0], xs[1]], F64);
-			case "Math_pow": call("pow", [xs[0], xs[1]], F64);
-			case "Math_floor": f2i(f1("floor"));
-			case "Math_ceil": f2i(f1("ceil"));
-			case "Math_round": f2i(call("floor", [op2(FAdd, F64, xs[0], fconst(0.5))], F64));
-			case "Math_ffloor": f1("floor");
-			case "Math_fceil": f1("ceil");
-			case "Math_fround": call("floor", [op2(FAdd, F64, xs[0], fconst(0.5))], F64);
+			// (the others, sin to pow: hxmc.rt.LibM, bound by Lower.bindHosts)
+			case "Math_floor": f2i(floor(xs[0], false));
+			case "Math_ceil": f2i(floor(xs[0], true));
+			case "Math_round": f2i(floor(op2(FAdd, F64, xs[0], fconst(0.5)), false));
+			case "Math_ffloor": floor(xs[0], false);
+			case "Math_fceil": floor(xs[0], true);
+			case "Math_fround": floor(op2(FAdd, F64, xs[0], fconst(0.5)), false);
 			case "Math_max" | "Math_min":
 				var r = newVar(F64);
 				writeVar(r, cur, fconst(Math.NaN));
@@ -2032,6 +2061,29 @@ class MirBuild {
 		return CSTR + b.toHex();
 	}
 
+	// the symbol of Mem.words' data: its bytes in hexadecimal after WORDS
+	// (DataGen.cstrLiterals defines it in .rodata, 8-byte aligned, once per
+	// program): 8-byte little-endian words, `digits` hexadecimal digits each
+	// in the literal, the most significant first
+	public static inline var WORDS = "hxmc$words$";
+
+	static function wordsSym(hex:String, digits:Int):String {
+		if (digits < 1 || digits > 16 || hex.length % digits != 0) throw new Unsupported("Mem.words: " + hex.length + " digits are not words of " + digits);
+		var n = Std.int(hex.length / digits);
+		var b = haxe.io.Bytes.alloc(8 * n);
+		for (k in 0...n) {
+			var v = haxe.Int64.make(0, 0);
+			for (j in 0...digits) {
+				var c = hex.charCodeAt(k * digits + j);
+				var d = c >= "0".code && c <= "9".code ? c - "0".code : c >= "a".code && c <= "f".code ? c - "a".code + 10 : -1;
+				if (d < 0) throw new Unsupported("Mem.words: not a hexadecimal digit: " + String.fromCharCode(c));
+				v = (v << 4) | d;
+			}
+			b.setInt64(8 * k, v);
+		}
+		return WORDS + b.toHex();
+	}
+
 	static function intLiteral(e:Ex, what:String):Int
 		return switch e {
 			case EInt(v): v;
@@ -2066,11 +2118,21 @@ class MirBuild {
 	}
 
 	// p + off + i * scale: (base, disp, index)
-	function memAtIndexed(p:Int, off:Ex, i:Ex):{base:Int, disp:Int, index:Int} {
+	// (an index i + c or i - c: c * scale in the displacement)
+	function memAtIndexed(p:Int, off:Ex, i:Ex, scale:Int):{base:Int, disp:Int, index:Int} {
 		var base = p, disp = 0;
 		switch off {
 			case EInt(v): disp = v;
 			case _: base = op2(Add, I64, p, op1(SExt, I64, ex(off)));
+		}
+		switch i {
+			case EBin(Add, a, EInt(c)) | EBin(Add, EInt(c), a) if (c > -0x100000 && c < 0x100000):
+				disp += c * scale;
+				i = a;
+			case EBin(Sub, a, EInt(c)) if (c > -0x100000 && c < 0x100000):
+				disp -= c * scale;
+				i = a;
+			case _:
 		}
 		return {base: base, disp: disp, index: op1(SExt, I64, ex(i))};
 	}
@@ -2112,11 +2174,11 @@ class MirBuild {
 			return iconst(0);
 		}
 		inline function ldAt(ty:MTy, size:Int):Int {
-			var m = memAtIndexed(ex(args[0]), args[1], args[2]);
+			var m = memAtIndexed(ex(args[0]), args[1], args[2], size);
 			return load(ty, size, m.base, m.disp, false, m.index, size);
 		}
 		inline function stAt(size:Int):Int {
-			var m = memAtIndexed(ex(args[0]), args[1], args[2]);
+			var m = memAtIndexed(ex(args[0]), args[1], args[2], size);
 			store(size, m.base, m.disp, ex(args[3]), m.index, size);
 			return iconst(0);
 		}
@@ -2124,6 +2186,7 @@ class MirBuild {
 			case "addr" | "obj": ex(args[0]);
 			case "sym": symAddr(literal(args[0], "Mem.sym"));
 			case "cstr": symAddr(cstrSym(literal(args[0], "Mem.cstr")));
+			case "words": symAddr(wordsSym(literal(args[0], "Mem.words"), intLiteral(args[1], "Mem.words")));
 			case "tlsGet": tlsLoad(literal(args[0], "Mem.tlsGet"));
 			case "tlsSet":
 				tlsStore(literal(args[0], "Mem.tlsSet"), ex(args[1]));
@@ -2134,6 +2197,8 @@ class MirBuild {
 			case "target": iconst(targetCode(abi));
 			case "stack": stackAddr(f.slot(intLiteral(args[0], "Mem.stack"), 16));
 			case "ult": cmp(CULt, ex(args[0]), ex(args[1]));
+			case "f64Bits": op1(FToBits, I64, ex(args[0]));
+			case "bitsF64": op1(BitsToF, F64, ex(args[0]));
 			case "getI8": ld(I32, 1, true);
 			case "getU8": ld(I32, 1, false);
 			case "getI16": ld(I32, 2, true);

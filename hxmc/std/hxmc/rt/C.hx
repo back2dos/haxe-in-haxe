@@ -33,8 +33,6 @@ import hxmc.unsafe.Ptr;
 	static function rt_barrier_range(obj:Dynamic, from:Ptr, n:Int):Void;
 	// remembers slot of the old object obj, which now holds the young v (Gc)
 	static function rt_write_barrier(obj:Ptr, slot:Ptr, v:Ptr):Void;
-	// the running thread's id (Threads)
-	static function hxmc_NativeThread_current():Int;
 	// a safe region (a blocking call holding no heap address: a collection
 	// may run meanwhile); before close(fd): waiters fail (Threads)
 	static function rt_blocking_enter():Void;

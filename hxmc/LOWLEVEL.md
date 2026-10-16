@@ -441,9 +441,9 @@ objects are built) and `probe.c` (a build-time layout probe, never linked).
 | `rt_win.c` | reservations committed on first touch, UTF-8/UTF-16, Win32 and Winsock errors as errno | `WinRt.hx` (`EXCEPTION_POINTERS` through `Ptr`, error tables in `Layouts.hx`) |
 | `rt_dyn.c` | field-name table, inline caches, float formatting | `Names.hx`, `FloatText.hx` (WebAssembly's, on every target; per-thread tables as `@:hxmc.threadLocal` statics) |
 | `rt.c` | the collector, startup (`rt_init`), `rt_throw`, boxes | `Gc.hx` (nursery with TLABs, copying minor and major collections, remembered sets, finalisers, native handles, `RT_STATS`, `RT_VERIFY`), `Start.hx` (`rt_init`, `rt_run_main`, `rt_throw` calling `longjmp`), `Boxes.hx` |
-| `rt_thread.c` | OS threads, the stop-the-world handshake, safe regions, parkers, mutexes, conditions, semaphores, `rt_wait_fd(s)`, main on a 1 GB stack | `Threads.hx` (mutator records, handshake, safe regions, waits on descriptors), `ThreadApi.hx` (`hxmc.NativeThread`'s natives), `Os.hx` (pthreads or Win32 behind one API) |
+| `rt_thread.c` | OS threads, the stop-the-world handshake, safe regions, parkers, mutexes, conditions, semaphores, `rt_wait_fd(s)`, main on a 1 GB stack | `Threads.hx` (mutator records, handshake, safe regions, waits on descriptors), `ThreadApi.hx` (`hxmc.NativeThread` on the native targets), `Os.hx` (pthreads or Win32 behind one API) |
 | `rt_census.c` | the heap census | `Census.hx`, compiled with `-D hxmc.census` (`RT_CENSUS=1`/`2` at run time) |
-| `rt_ssl.c`, `rt_uv.c` | mbedtls and libuv glue | `Ssl.hx`, `Uv.hx` (typed only for programs that use them) |
+| `rt_ssl.c`, `rt_uv.c` | mbedtls and libuv glue | `Ssl.hx`, `Uv.hx` (`hxmc.NativeSsl`, `hxmc.NativeUv`: typed only for programs that use them) |
 
 ### The mechanisms
 
@@ -459,6 +459,8 @@ objects are built) and `probe.c` (a build-time layout probe, never linked).
 | exceptions | `_setjmp` for `try`; `rt_throw` calls the C library's `longjmp` |
 | the runtime's reports | formatted in Haxe (`Os.Report`, `FloatText.fixed` for `%.Nf`) and written with `write`: no `printf` |
 | C string literals | `Mem.cstr("...")`: a NUL-terminated byte string in read-only data, shared per literal |
+| tables | `Mem.words("<hex>", digits)`: 8-byte words in read-only data, shared per literal (LibM's musl tables) |
+| float bit patterns | `Mem.f64Bits(v)`, `Mem.bitsF64(b)`: register moves |
 | the safe region's markers | `rt_blocking_enter`/`rt_blocking_leave` stay calls by symbol so that Facts tells the functions that enter one (they must be `@:hxmc.collects` and root what they hold: `Gc.pushRoot`) |
 
 Cost, measured against the C runtime (the benchmarks, the port compiling

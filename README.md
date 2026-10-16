@@ -239,11 +239,14 @@ built by hxmc (x86-64, and wasm under node) and by the port for C++ (hxcpp),
 the JVM, JS on node, HL/C and the HashLink JIT (HashLink, hxcpp, hxnodejs and
 hxjava pinned in the script; the runner, libraries and HashLink go to
 `bin/bench`): the median wall time of N interleaved runs, CPU time, peak RSS,
-sizes and build times, with each case's check program compared across the
+sizes and compile times (`haxe_s`: the Haxe compiler, hxmc's whole build for
+its targets; `cc_s`: the C++ or C compiler for C++ and HL/C; `build_s`: their
+sum), with each case's check program compared across the
 targets. `.github/workflows/bench.yml` runs it nightly on main (skipped when
 the commit is measured already) and on demand, apart from `build.yml`; from
 main it appends `results/<date>-<commit>.json` to the `bench-data` branch and
-regenerates `history.json` and `latest.json` there (`Bench --history`),
+regenerates `history.json` (per run, case and target: median, min, max,
+peak RSS and the compile times) and `latest.json` there (`Bench --history`),
 which the website build copies (`make site BENCH_DATA=<checkout>`) for its
 table and charts. The first points on `bench-data` are earlier measurements
 imported from this repository's history (`"source": "imported"`: a
@@ -328,9 +331,10 @@ does.
 
 Runtime in Haxe: most of the runtime is Haxe compiled with the program
 (`hxmc/std/hxmc/rt`: strings, Dynamic access, reflection, arrays, bytes,
-dates, inflate, the POSIX and Windows system layers), written with a small
-internal API (`hxmc.unsafe`: `Ptr`, `Mem` loads, stores, allocation and
-symbols, `Atomic`; `@:hxmc.c` and `@:hxmc.rt` externs of C functions,
+dates, inflate, the POSIX and Windows system layers, and Math: musl's libm
+ported, `LibM.hx`, with the same results on every target), written with a
+small internal API (`hxmc.unsafe`: `Ptr`, `Mem` loads, stores, allocation
+and symbols, `Atomic`; `@:hxmc.c` and `@:hxmc.rt` externs of C functions,
 `@:hxmc.noGc` functions, `@:hxmc.export`/`@:hxmc.host` implementations of
 runtime functions, `@:hxmc.callback` functions C calls,
 `@:hxmc.threadLocal` statics). The collector, threads and the stop-the-world

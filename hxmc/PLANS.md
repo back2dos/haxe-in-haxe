@@ -59,7 +59,11 @@ Done (README, "Runtime in Haxe"):
 - One source per runtime area: the haxe.atomic cells are written over
   the `Atomic` intrinsics, `hxmc.NativeZip` is the implementation,
   `hxmc.NativeSys`/`NativeNet` dispatch by `Mem.os()` to typed POSIX and
-  Windows classes, `hxmc.Native` (reflection) calls `hxmc.rt.Dyn`. No
+  Windows classes, `hxmc.Native` (reflection) is an alias of `hxmc.rt.Dyn`,
+  `hxmc.NativeSsl`, `NativeUv`, `NativeThread` and `NativeGc` are aliases
+  of their implementations (`hxmc.rt.Ssl`, `Uv`, `ThreadApi`, `Gc`; on
+  WebAssembly `hxmc.rt.wasm.NoSsl`, `NoUv`, `Threads`, `Gc`) instead of
+  externs bound to them by symbol. No
   `@:keep`, no bindings: Haxe's dead-code elimination drops what a
   program does not use (75 KB less HXB and 8 to 12 KB less code for a
   small program, builds up to 5% faster). Bindings stay for the natives the code
@@ -135,42 +139,54 @@ With the runtime in Haxe, static Linux executables could call the kernel
 directly (as Go does) and drop musl. Windows and macOS keep going
 through their system libraries (kernel32/ntdll, libSystem).
 
-### Math: the `libm` branch's Haxe libm everywhere (eventually)
+### Math: one implementation, the libm branch's later
 
-Today native targets use musl's libm (C, through zig) and WebAssembly a
-Haxe port of it. musl differs from glibc by an ulp on some inputs
-(`Math.sin(-2.5)`: -0.598472144103956438 against glibc's ...549), so the
-port's `--interp` and macros can print a last digit different from the
-reference on Linux (the fuzzer accepts printed floats an ulp apart).
+Done (2026-10-16): every target computes Math with the same Haxe code,
+`hxmc/std/hxmc/rt/LibM.hx`, musl's algorithms as Linux executables got
+them from zig's C library (musl's pow and atan2; zig's ports of musl in
+its libc and compiler_rt for the others): sin, cos, tan, asin, acos,
+atan, atan2, exp, log, pow and Float's `%` (fmod); sqrt and abs are
+instructions, floor and ceil arm64's frintm/frintp, WebAssembly's
+f64.floor/f64.ceil and inline code on x86-64 (no SSE4.1 assumed), all
+exact. Nothing calls the C library's math any more (mkrt.sh roots none;
+zig's compiler_rt, one object, still brings its unused copies into the
+Linux rt.o). The
+results are bit-identical to musl's C on Linux x86-64 for every function
+(2 million random and edge inputs each, and the corpus's `MathLib`),
+where main used other code: on arm64 musl's pow takes its fma path (5 in
+2 million results an ulp apart), Windows has the UCRT's and macOS
+libSystem's. NaNs keep the processor's sign and payload. Speed against
+musl's C on x86-64 (ns per call, 4096 typical inputs): exp, acos, asin,
+atan2, fmod, floor and ceil faster, log, atan and pow within 5%, sin, cos
+and tan about 1.1-1.3x slower; a trig-heavy loop about 1.1x, nbody and
+mandelbrot unchanged. The codegen work for it is general: Mem.f64Bits and
+bitsF64, Mem.words (tables in read-only data), constant folding, float
+constants as memory operands, jump threading, index constants in
+displacements. Left: sin/cos/tan's switch on the quadrant as a jump
+table, if-conversion (cmov), splitting live ranges around rare calls.
 
-The goal: the Haxe libm of the `libm` branch (98d9d82, and 374bb61 with
-the `Mem.mulhi`/`umulhi`/`f64Bits`/`bitsF64` intrinsics and `Mem.fma`)
-used everywhere — every native target, WebAssembly and the compiler's own
-Eval natives — replacing musl's C, with the same results on every OS.
-Not now: it lands once it is no slower than main at run time, compile
-time and size.
+musl differs from glibc by an ulp on some inputs (`Math.sin(-2.5)`:
+-0.598472144103956438 against glibc's ...549), so the port's `--interp`
+and macros (Eval's Math is LibM too in the port built by hxmc) can print
+a last digit different from the reference (the fuzzer accepts printed
+floats an ulp apart, `Runner.sameOutput`).
 
-- What it is: exp/log/pow from Arm's Optimized Routines (glibc's own code,
-  MIT; bit-identical to glibc), sin/cos/tan/asin/acos/atan/atan2 from
-  CORE-MATH (MIT, correctly rounded: equal to glibc except where glibc is
-  an ulp off, about 1 input in 1,000), fma in hardware where the CPU has
-  it. Tested exact against glibc and CORE-MATH's 9.5 million hard cases.
-- Why not yet: CORE-MATH's trig is slower than musl even in C (cos 17 ns,
-  tan 24 ns against 6.5 and 10.5 on x86-64), hxmc's code ran 1.3–2.5×
-  gcc's on the same algorithms, and the ~166 KB of table literals were
-  typed on every build (hello world 0.34 s to 0.5 s; a Math-heavy program
-  118 KB to 292 KB).
-- To get there: `mulhi` and 128-bit intermediates kept in registers (begun
-  in 374bb61); the math modules loaded only when called; the tables as raw
-  data instead of literals; one copy of each fast path. One math
-  implementation only: where a CORE-MATH function costs too much, that
-  function switches to a faster algorithm (musl's), no second variant
-  behind a define.
-- The compiler's Eval natives use the same library: the port then differs
-  from the reference (glibc) only where glibc is an ulp off, about 1 input
-  in 1,000 for trig; the fuzzer already tolerates printed floats an ulp
-  apart (`Runner.sameOutput`), rather than a second, glibc-exact copy
-  being kept for the compiler.
+Later, the `libm` branch (98d9d82, 374bb61; parked): exp/log/pow from
+Arm's Optimized Routines (glibc's own code, MIT; bit-identical to glibc),
+sin/cos/tan/asin/acos/atan/atan2 from CORE-MATH (MIT, correctly rounded:
+equal to glibc except where glibc is an ulp off, about 1 input in 1,000),
+fma in hardware where the CPU has it, tested exact against glibc and
+CORE-MATH's 9.5 million hard cases. It replaces LibM's functions once
+it is no slower than them at run time, compile time and size:
+
+- CORE-MATH's trig is slower than musl even in C (cos 17 ns, tan 24 ns
+  against 6.5 and 10.5 on x86-64), and its ~166 KB of tables (as
+  `Mem.words` now: read-only data, not literals typed with every build).
+- One math implementation only: where a CORE-MATH function costs too
+  much, that function keeps musl's algorithm, no second variant behind a
+  define.
+- The port then differs from the reference (glibc) only where glibc is
+  an ulp off.
 
 ### The collector, longer term
 

@@ -59,6 +59,7 @@ enum abstract XOp(Int) to Int from Int {
 	var CVTSD2SS; // d (xmm, a float32) <- s1 (xmm)
 	var MOVDXR; // d (xmm) <- s1 (32 bits)
 	var MOVDRX; // d (32 bits) <- s1 (xmm)
+	var FOPK; // d <- d (cond: as FOP) f (constant pool)
 }
 
 // Mir -> LIR for x86-64 (System V calling convention).
@@ -169,7 +170,7 @@ class Isel implements hxmc.Target.Selector {
 				defs.push(i.d);
 				uses.push(i.d);
 				uses.push(i.s1);
-			case ALUI | SHIFTI | NEG | NOT | FMASK:
+			case ALUI | SHIFTI | NEG | NOT | FMASK | FOPK:
 				defs.push(i.d);
 				uses.push(i.d);
 			case IMULI:
@@ -316,6 +317,15 @@ class Isel implements hxmc.Target.Selector {
 		return i.op == Const ? i.sym : null;
 	}
 
+	static function log2(v:Int):Int {
+		var k = 0;
+		while (v > 1) {
+			v >>>= 1;
+			k++;
+		}
+		return k;
+	}
+
 	// a constant without a symbol
 	function plainImm(v:Int):Null<Int>
 		return isymOf(v) == null ? immOf(v) : null;
@@ -399,7 +409,7 @@ class Isel implements hxmc.Target.Selector {
 		// constants and symbol addresses used once by a foldable user are not computed on their own
 		for (b in mf.blocks)
 			for (i in b.ins)
-				if ((i.op == Const && immOf(i.id) != null) || i.op == SymAddr || i.op == StackAddr) folded[i.id] = true;
+				if ((i.op == Const && immOf(i.id) != null) || i.op == SymAddr || i.op == StackAddr || i.op == ConstF) folded[i.id] = true;
 		lb = [];
 		var maxId = 0;
 		for (b in mf.blocks)
@@ -512,6 +522,11 @@ class Isel implements hxmc.Target.Selector {
 				x.d = r;
 				x.base = LIns.FRAME;
 				x.slot = i.imm;
+			case ConstF:
+				var x = new LIns(MOVF);
+				push(x);
+				x.d = r;
+				x.f = i.f;
 			case _:
 				throw "hxmc: cannot materialize " + MFunc.opName(i.op);
 		}
@@ -749,9 +764,12 @@ class Isel implements hxmc.Target.Selector {
 			case Const | SymAddr | StackAddr:
 				if (!folded[i.id]) materialize(i, reg(i.id));
 			case ConstF:
-				var x = emit(MOVF);
-				x.d = reg(i.id);
-				x.f = i.f;
+				// (folded: loaded where used, or a memory operand: FOPK)
+				if (!folded[i.id]) {
+					var x = emit(MOVF);
+					x.d = reg(i.id);
+					x.f = i.f;
+				}
 			case TlsLoad if (tlsBase >= 0):
 				var x = emit(LOAD);
 				x.d = reg(i.id);
@@ -841,7 +859,15 @@ class Isel implements hxmc.Target.Selector {
 				var d = reg(i.id);
 				var size = sz(i.ty);
 				var imm = plainImm(i.b);
-				if (imm != null) {
+				if (imm != null && imm > 1 && imm & (imm - 1) == 0) {
+					// by a power of two: a shift
+					mov(d, use(i.a), size);
+					var x = emit(SHIFTI);
+					x.d = d;
+					x.cond = Asm.SHL;
+					x.imm = log2(imm);
+					x.size = size;
+				} else if (imm != null) {
 					var x = emit(IMULI);
 					x.d = d;
 					x.s1 = use(i.a);
@@ -900,11 +926,20 @@ class Isel implements hxmc.Target.Selector {
 				x.size = size;
 				mov(reg(i.id), i.op == Div ? RAX : RDX, size);
 			case FAdd | FSub | FMul | FDiv:
+				// commutative: a constant as the second operand (a memory
+				// operand), else the operand used only here as the destination
+				var a = i.a, c = i.b;
+				inline function k(v:Int):Bool
+					return m.vals[v].op == ConstF;
+				if ((i.op == FAdd || i.op == FMul) && !k(c) && (k(a) || useCount[c] == 1 && useCount[a] > 1)) {
+					a = i.b;
+					c = i.a;
+				}
 				var d = reg(i.id);
-				mov(d, use(i.a));
-				var x = emit(FOP);
+				mov(d, use(a));
+				var x = emit(k(c) ? FOPK : FOP);
 				x.d = d;
-				x.s1 = use(i.b);
+				if (k(c)) x.f = m.vals[c].f else x.s1 = use(c);
 				x.cond = switch i.op {
 					case FAdd: 0x58;
 					case FMul: 0x59;

@@ -17,6 +17,10 @@ extern class Mem {
 	// the address of a C string literal: its UTF-8 bytes and a NUL, read-only,
 	// outside the heap (one copy per program)
 	static function cstr(literal:String):Ptr;
+	// the address of read-only data (one copy per program, 8-byte aligned):
+	// 8-byte little-endian words, each written as `digits` (a constant)
+	// hexadecimal digits of the literal, the most significant first (tables)
+	static function words(literal:String, digits:Int):Ptr;
 	// the runtime's pointer-sized thread-local variables (rt_sp, rt_young_ptr, ...)
 	static function tlsGet(name:String):Ptr;
 	static function tlsSet(name:String, v:Ptr):Void;
@@ -34,6 +38,9 @@ extern class Mem {
 	static function stack(bytes:Int):Ptr;
 	// unsigned comparison
 	static function ult(a:I64, b:I64):Bool;
+	// the bits of a double, and the double of bits (a register move)
+	static function f64Bits(v:Float):I64;
+	static function bitsF64(b:I64):Float;
 	// calls code at fn with the C ABI (GC points: the callee may collect):
 	// fn(a) and fn(a, b) returning a reference
 	static function callRef1(fn:Ptr, a:Dynamic):Dynamic;

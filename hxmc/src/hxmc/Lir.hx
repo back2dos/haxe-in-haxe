@@ -72,6 +72,21 @@ class LFunc {
 	public var hasCalls = false;
 	var hints:Array<Int> = []; // vreg - NPHYS -> preferred register (physical or virtual), -1
 
+	// jump threading, before emission: a branch to a block that holds only
+	// an unconditional jump (an empty join, once its moves are placed)
+	// branches to that jump's target instead (isJump: the target's jump)
+	public function threadJumps(isJump:LIns->Bool) {
+		function dest(t:LBlock):LBlock {
+			var n = 0;
+			while (t != blocks[0] && t.ins.length == 1 && isJump(t.ins[0]) && t.ins[0].target != t && n++ < 16)
+				t = t.ins[0].target;
+			return t;
+		}
+		for (b in blocks)
+			for (i in b.ins)
+				if (i.target != null) i.target = dest(i.target);
+	}
+
 	public inline function hint(r:Int):Int
 		return r - NPHYS < hints.length ? hints[r - NPHYS] : -1;
 

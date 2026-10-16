@@ -1852,7 +1852,7 @@ class StdGc {
 	});
 
 	#if (target.name == "hxmc")
-	// port: the hxmc host GC has OCaml's finalisers (hxmc/c/rt.c)
+	// port: the hxmc host GC has OCaml's finalisers (hxmc/std/hxmc/rt/Gc.hx)
 	public static final finalise = EvalEncode.vfun2((f, v) -> {
 		NativeGc.finalise((v:Value) -> {
 			EvalMisc.callValue(f, [v]);
