@@ -827,6 +827,48 @@ setjmp/longjmp do not unwind, but debuggers and SEH-based tools would.
 - Engines: a compatibility layer for HashLink's natives (`sdl.hdll`,
   `directx.hdll`, `fmt`) on top of os and gfx would run heaps unchanged.
 
+## Audio
+
+- Output (done, 2026-10-16; `hxmc.os.audio` in `@hxmc/os` 0.3.0): a pull
+  model, `Audio.open({sampleRate, channels, frames}, (buffer:Ptr<Float32>,
+  frames) -> ...)`, `start`, `stop`, `close`, the rate, channels, period
+  and latency the system gave; interleaved floats everywhere. The callback
+  runs on an audio thread of the runtime's (`sys.thread.Thread`), never on
+  the system's own threads, which the runtime does not know (no thread
+  attach: a GC callback may only run on a runtime thread, LOWLEVEL.md):
+  ALSA and WASAPI are written to from that thread (`snd_pcm_writei`
+  blocking, WASAPI's event), and CoreAudio's render callback, on its I/O
+  thread, is `@:hxmc.noGc` and only copies from a ring the audio thread
+  fills (positions as atomics, a libdispatch semaphore signalled with a
+  `@:hxmc.fast` call: a noGc function may call C only that way). The rule
+  for the callback is documentation: no allocation, no locks, no blocking.
+  Back ends, the target's chosen by `Mem.os()` as `Window`'s: ALSA on
+  Linux (`libasound.so.2` through `dlopen`, a build macro, `hxmc.os.Dl`,
+  filling function pointers: a program starts without the library; the
+  glibc mode), CoreAudio's default output unit on macOS (AudioToolbox and
+  CoreAudio imported by path), WASAPI in shared mode on Windows (COM
+  through vtables as D3D11's, `AUTOCONVERTPCM`), WebAudio in the browser:
+  an AudioWorklet node fed chunks posted by the main thread, which calls
+  the module for one each time the worklet has played one (the module's
+  memory is not shared without threads; about 50 ms queued). Tests without
+  speakers (`AudioTest`, `make audio-check`, `make audio-web-check`): a
+  known signal through the real API and compared where it lands: ALSA's
+  file plugin (exact), CoreAudio's generic output unit rendered by
+  `AudioUnitRender` (`"file:PATH"`), Wine's WASAPI through winealsa into an
+  ALSA file (exact: Wine passes floats through), an `OfflineAudioContext`'s
+  rendered buffer in headless Chromium (exact); the callbacks' rate where
+  something paces them (Chromium's fake output, a device, CoreAudio's
+  renderer; ALSA's null and file sinks take samples as fast as they come,
+  and Wine's mixer over them). Sizes of `examples/Tone.hx`: 121 KB on
+  Linux, 187 KB on macOS, 394 KB on Windows, 58 KB of WebAssembly. Left:
+  input (capture), device choice and hot-plug (WASAPI's
+  `AUDCLNT_E_DEVICE_INVALIDATED`, CoreAudio's default device changing),
+  formats other than float, PipeWire or PulseAudio directly, a real-time
+  priority for the audio thread (`pthread_setschedparam`, MMCSS's
+  `AvSetMmThreadCharacteristics`), an AudioWorklet over shared memory
+  once wasm threads exist, a checked `@:hxmc.noGc` callback type for user
+  code (the callback running on the system's thread directly).
+
 ## Code generation at runtime
 
 The code generator compiles to in-memory objects with relocations, and
