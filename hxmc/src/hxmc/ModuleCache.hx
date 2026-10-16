@@ -60,6 +60,7 @@ import core.Json.JsonValue;
 // are trimmed with the types cache's rules (TypesCache.trim).
 class ModuleCache {
 	public static inline var MAGIC = "hxmc-modules 4";
+	static inline var ID_LIMIT = 1 << 30;
 	static final noMonos = {
 		var o = new BytesOutput();
 		o.writeInt32(0);
@@ -184,6 +185,12 @@ class ModuleCache {
 		for (p in s.packs) {
 			if (p.moduleHigh > midHigh) midHigh = p.moduleHigh;
 			if (p.varHigh > varHigh) varHigh = p.varHigh;
+		}
+		// (ids only grow from build to build: far from the 32-bit limit the
+		// store starts again from nothing)
+		if (midHigh > ID_LIMIT || varHigh > ID_LIMIT) {
+			s.packs.clear();
+			midHigh = varHigh = 0;
 		}
 		@:privateAccess {
 			if (core.TFunctions.moduleUid.load() < midHigh) core.TFunctions.moduleUid.store(midHigh);
