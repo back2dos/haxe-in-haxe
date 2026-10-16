@@ -24,8 +24,9 @@
 #   - measure: peak memory and times (haxe/test/Measure.hx) in the job summary;
 #   - npm-pack: the npm packages (with the compiler as a WebAssembly module);
 #   - site: the website; gfx: packages/gfx on Linux (make gfx-check; on
-#     ARM64 the cross-built programs, gfx-arm64; on macOS built from the npm
-#     packages after npm-pack, gfx-macos).
+#     ARM64 the cross-built programs, gfx-arm64; on Windows x86-64 and arm64
+#     the cross-built programs on D3D11's WARP, gfx-windows; on macOS built
+#     from the npm packages after npm-pack, gfx-macos).
 # - conformance: the port against the reference: HXB of the upstream suites
 #   and macro cases, display requests, the compilation server and its
 #   JSON-RPC methods, upstream's target suites compiled by both and compared
@@ -553,7 +554,8 @@ jobs:
   # packages/gfx: the triangle headless and in an X11 window, on Mesa's
   # llvmpipe (no GPU), against the golden image (make gfx-check: the test
   # programs in the glibc mode, packages/gfx/test/check.sh), here on Linux
-  # x86-64; the ARM64 programs cross-built for gfx-arm64
+  # x86-64; the ARM64 and Windows programs cross-built for gfx-arm64 and
+  # gfx-windows
   gfx:
     needs: [changes, rt]
     if: ${{ !cancelled() && needs.changes.result == 'success' && (needs.rt.result == 'success' || needs.rt.result == 'skipped') && (needs.changes.outputs.all == 'true' || needs.changes.outputs.libs == 'true') }}
@@ -584,6 +586,15 @@ jobs:
           tar czf bin/gfx-linux-arm64.tar.gz -C bin/gfx/linux-arm64 GfxTest Triangle
       - uses: actions/upload-artifact@v7
         with: {name: gfx-linux-arm64, path: bin/gfx-linux-arm64.tar.gz, retention-days: 3}
+      - name: The Windows programs
+        run: |
+          set -ex
+          for t in windows-x86_64 windows-arm64; do
+            make gfx-programs GFX_TARGET=$t
+            tar czf bin/gfx-$t.tar.gz -C bin/gfx/$t GfxTest.exe Triangle.exe
+          done
+      - uses: actions/upload-artifact@v7
+        with: {name: gfx-windows, path: "bin/gfx-windows-*.tar.gz", retention-days: 3}
       - uses: actions/upload-artifact@v7
         if: always()
         with: {name: gfx-images-linux-x86_64, path: bin/gfx/linux-x86_64/*.png, retention-days: 7}
@@ -610,6 +621,38 @@ jobs:
       - uses: actions/upload-artifact@v7
         if: always()
         with: {name: gfx-images-linux-arm64, path: gfx/*.png, retention-days: 7}
+
+  # packages/gfx on Windows: the cross-built programs on D3D11's WARP
+  # (HXMC_GFX_SOFTWARE=1, check.sh), offscreen and in a Win32 window
+  gfx-windows:
+    needs: [changes, gfx]
+    if: ${{ !cancelled() && needs.gfx.result == 'success' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {target: windows-x86_64, os: windows-2025}
+          - {target: windows-arm64, os: windows-11-arm}
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          sparse-checkout: |
+            packages/gfx/test
+      - uses: actions/download-artifact@v8
+        with: {name: gfx-windows, path: dl}
+      - name: gfx (D3D11 WARP, Win32)
+        run: |
+          set -ex
+          mkdir -p gfx
+          tar xzf dl/gfx-${{ matrix.target }}.tar.gz -C gfx
+          sh packages/gfx/test/check.sh gfx
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with: {name: 'gfx-images-${{ matrix.target }}', path: gfx/*.png, retention-days: 7}
 
   # packages/gfx on macOS: the triangle and its test built from the npm
   # packages (@hxmc/cli with its platform package, -lib hxmc.gfx from
@@ -1185,8 +1228,8 @@ jobs:
   # (dist-tag latest, next for a prerelease); never from other branches.
   # After every check (the full npm set on all six machines: npm_full).
   publish-npm:
-    needs: [changes, build, corpus, crosshost, measure, npm-pack, site, gfx, gfx-arm64, gfx-macos, conformance, test, wasm, playground, npm]
-    if: ${{ !cancelled() && needs.changes.result == 'success' && needs.build.result == 'success' && needs.corpus.result == 'success' && needs.crosshost.result == 'success' && needs.measure.result == 'success' && needs.npm-pack.result == 'success' && needs.site.result == 'success' && needs.gfx.result == 'success' && needs.gfx-arm64.result == 'success' && needs.gfx-macos.result == 'success' && needs.conformance.result == 'success' && needs.test.result == 'success' && needs.wasm.result == 'success' && needs.playground.result == 'success' && needs.npm.result == 'success' && github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')) }}
+    needs: [changes, build, corpus, crosshost, measure, npm-pack, site, gfx, gfx-arm64, gfx-windows, gfx-macos, conformance, test, wasm, playground, npm]
+    if: ${{ !cancelled() && needs.changes.result == 'success' && needs.build.result == 'success' && needs.corpus.result == 'success' && needs.crosshost.result == 'success' && needs.measure.result == 'success' && needs.npm-pack.result == 'success' && needs.site.result == 'success' && needs.gfx.result == 'success' && needs.gfx-arm64.result == 'success' && needs.gfx-windows.result == 'success' && needs.gfx-macos.result == 'success' && needs.conformance.result == 'success' && needs.test.result == 'success' && needs.wasm.result == 'success' && needs.playground.result == 'success' && needs.npm.result == 'success' && github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')) }}
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -1233,8 +1276,8 @@ jobs:
 
   # nightly on main, a release on v* tags
   release:
-    needs: [changes, build, corpus, crosshost, measure, npm-pack, site, gfx, gfx-arm64, gfx-macos, conformance, test, wasm, playground, npm]
-    if: ${{ !cancelled() && needs.changes.result == 'success' && needs.build.result == 'success' && needs.corpus.result == 'success' && needs.crosshost.result == 'success' && needs.measure.result == 'success' && needs.npm-pack.result == 'success' && needs.site.result == 'success' && needs.gfx.result == 'success' && needs.gfx-arm64.result == 'success' && needs.gfx-macos.result == 'success' && needs.conformance.result == 'success' && needs.test.result == 'success' && needs.wasm.result == 'success' && needs.playground.result == 'success' && needs.npm.result == 'success' && github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')) }}
+    needs: [changes, build, corpus, crosshost, measure, npm-pack, site, gfx, gfx-arm64, gfx-windows, gfx-macos, conformance, test, wasm, playground, npm]
+    if: ${{ !cancelled() && needs.changes.result == 'success' && needs.build.result == 'success' && needs.corpus.result == 'success' && needs.crosshost.result == 'success' && needs.measure.result == 'success' && needs.npm-pack.result == 'success' && needs.site.result == 'success' && needs.gfx.result == 'success' && needs.gfx-arm64.result == 'success' && needs.gfx-windows.result == 'success' && needs.gfx-macos.result == 'success' && needs.conformance.result == 'success' && needs.test.result == 'success' && needs.wasm.result == 'success' && needs.playground.result == 'success' && needs.npm.result == 'success' && github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')) }}
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -1279,8 +1322,8 @@ jobs:
           fi
 
   pages:
-    needs: [changes, build, corpus, crosshost, measure, npm-pack, site, gfx, gfx-arm64, gfx-macos, wasm, playground]
-    if: ${{ !cancelled() && needs.changes.result == 'success' && needs.build.result == 'success' && needs.corpus.result == 'success' && needs.crosshost.result == 'success' && needs.measure.result == 'success' && needs.npm-pack.result == 'success' && needs.site.result == 'success' && needs.gfx.result == 'success' && needs.gfx-arm64.result == 'success' && needs.gfx-macos.result == 'success' && needs.wasm.result == 'success' && needs.playground.result == 'success' && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+    needs: [changes, build, corpus, crosshost, measure, npm-pack, site, gfx, gfx-arm64, gfx-windows, gfx-macos, wasm, playground]
+    if: ${{ !cancelled() && needs.changes.result == 'success' && needs.build.result == 'success' && needs.corpus.result == 'success' && needs.crosshost.result == 'success' && needs.measure.result == 'success' && needs.npm-pack.result == 'success' && needs.site.result == 'success' && needs.gfx.result == 'success' && needs.gfx-arm64.result == 'success' && needs.gfx-windows.result == 'success' && needs.gfx-macos.result == 'success' && needs.wasm.result == 'success' && needs.playground.result == 'success' && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
     runs-on: ubuntu-24.04
     permissions:
       pages: write
