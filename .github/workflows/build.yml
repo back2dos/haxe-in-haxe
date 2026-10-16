@@ -1,50 +1,72 @@
 # Builds everything from source with node and hxmc (README.md, "Building")
-# and tests it on a machine of each target:
+# and tests it on a machine of each target (README.md, "CI"):
 #
-# - rt: the runtime objects of the six targets (hxmc/deps with mbedtls and libuv,
-#   built by zig) are the release rt-<hash of hxmc/deps>
-#   (hxmc/bootstrap/rt.mjs); built here only when that release is missing
-#   (and published from pushes to main and hxmc), passed on as an artifact.
+# - changes: what the run needs (.github/select.sh): everything, except on a
+#   branch whose changes since the last checked commit are only docs (*.md:
+#   nothing more), hxmc/web (site, playground) or source-only packages of
+#   packages/ (build, gfx, npm-pack); main, tags, the nightly schedule and
+#   dispatches always run everything. Also whether the release
+#   rt-<hash of hxmc/deps> exists (hxmc/bootstrap/rt.mjs).
+# - rt-build, rt: only when that release is missing: the runtime objects of
+#   the six targets and Linux's glibc mode (hxmc/deps with mbedtls and libuv,
+#   built by zig), one job per target, then assembled, their layouts checked,
+#   published as the release from pushes to main and hxmc and passed on as an
+#   artifact (the jobs below otherwise download the release: make rt).
 # - build: the committed stage0 module under node builds the tool, which
-#   rebuilds itself (the fixpoint), and its types cache is checked; then with
-#   the tool: the port's release binaries and lix for the six targets, the
-#   npm packages (with the compiler as a WebAssembly module), the website,
-#   hxmc's corpus for every target; the tool as a WebAssembly module building
-#   the corpus and itself byte-identical (crosshost); lix downloads the
-#   reference compiler (the nightly of the pinned upstream commit, cached);
-#   peak memory and times (haxe/test/Measure.hx) go to the job summary.
+#   rebuilds itself (the fixpoint), and its types cache is checked; then the
+#   port's release binaries and lix for the six targets.
+#   Next to it, each with its own tool from the stage0 (make hxmc):
+#   - corpus: hxmc's corpus for every target, the port as a WebAssembly
+#     module, the reference's self-compile (lix downloads the reference
+#     compiler, the nightly of the pinned upstream commit, cached);
+#   - crosshost: the tool as a WebAssembly module building the corpus and
+#     itself byte-identical; peak memory and times (haxe/test/Measure.hx) in
+#     the job summary;
+#   - npm-pack: the npm packages (with the compiler as a WebAssembly module);
+#   - site: the website; gfx: packages/gfx on Linux (make gfx-check).
 # - conformance: the port against the reference: HXB of the upstream suites
 #   and macro cases, display requests, the compilation server and its
 #   JSON-RPC methods, upstream's target suites compiled by both and compared
-#   file by file (haxe/test).
+#   file by file, the Eval debugger and the fuzzer's lanes, the last two in
+#   shards (haxe/test).
 # - test: on each target's machine, the release binary's smoke test (with a
 #   TLS handshake and libuv), lix, hxmc's corpus and the port's self-compile.
-# - wasm: the corpus and the port's self-compile under node and wasmtime, the
-#   playground in Chromium, Firefox and WebKit.
+# - wasm: the corpus and the port's self-compile under node and wasmtime;
+#   playground: the playground in Chromium, Firefox and WebKit.
 # - npm: the nine packages (@hxmc/cli, its six platform packages, @hxmc/wasm,
 #   @hxmc/source) installed in fresh projects on each target's machine: native
-#   at once, -lib from node_modules, --ignore-scripts, lix, the WebAssembly fallback (downloaded,
-#   installed) and hxmc-rebuild; publish-npm publishes them on v* tags and
-#   (as nightlies) from main.
+#   at once, -lib from node_modules, --ignore-scripts; and on linux-x64 (on
+#   all six on main, tags and nightly, before publish-npm) lix, the
+#   WebAssembly fallback (downloaded, installed) and hxmc-rebuild;
+#   publish-npm publishes them on v* tags and (as nightlies) from main.
 # - upstream-tests: upstream's compiler-side suite (RunCi macro) with the
 #   release binaries as haxe (upstream-tests.yml).
 # - release: a rolling `nightly` pre-release on pushes to main, a release on
 #   v* tags; pages: the website on pushes to main (with the benchmark history
 #   of the bench-data branch, which bench.yml writes).
+# Each job names in `needs` only what it uses; publish-npm, release and pages
+# wait for every check. The jobs' `if` test their direct needs (a job skipped
+# by `changes`, or rt-build skipped when the release exists, would otherwise
+# skip everything after it).
 name: build
 
 on:
   push:
     branches: ['**']
     tags: ['v*']
+  # nightly: everything, the npm packages on all six machines (publishes nothing)
+  schedule:
+    - cron: '41 2 * * *'
   workflow_dispatch:
 
 permissions:
   contents: read
 
+# a newer push to a branch cancels its run; main (which publishes), hxmc
+# (which publishes the runtime objects), tags and the nightly run to the end
 concurrency:
-  group: build-${{ github.ref }}
-  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+  group: build-${{ github.event_name == 'schedule' && 'nightly' || github.ref }}
+  cancel-in-progress: ${{ github.event_name != 'schedule' && github.ref != 'refs/heads/main' && github.ref != 'refs/heads/hxmc' && !startsWith(github.ref, 'refs/tags/') }}
 
 env:
   WASMTIME_VERSION: 38.0.1
@@ -54,17 +76,34 @@ env:
   TARGETS: linux-x86_64 linux-arm64 windows-x86_64 windows-arm64 macos-x86_64 macos-arm64
 
 jobs:
-  rt:
+  changes:
     runs-on: ubuntu-24.04
     permissions:
-      contents: write
-    env:
-      GH_TOKEN: ${{ github.token }}
-      GH_REPO: ${{ github.repository }}
+      contents: read
+      actions: read
+    outputs:
+      all: ${{ steps.select.outputs.all }}
+      libs: ${{ steps.select.outputs.libs }}
+      web: ${{ steps.select.outputs.web }}
+      # anything that builds (and needs the runtime objects)
+      build: ${{ steps.select.outputs.all == 'true' || steps.select.outputs.libs == 'true' || steps.select.outputs.web == 'true' }}
+      # the npm job's full set on all six machines
+      npm_full: ${{ github.event_name != 'push' || github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v') }}
+      rt_hit: ${{ steps.rt.outputs.hit }}
     steps:
       - uses: actions/checkout@v7
         with:
-          submodules: true
+          fetch-depth: 0
+          filter: blob:none
+      - name: What changed
+        id: select
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT: ${{ github.event_name }}
+          REF: ${{ github.ref }}
+          BEFORE: ${{ github.event.before }}
+          REPO: ${{ github.repository }}
+        run: sh .github/select.sh
       - uses: actions/setup-node@v7
         with:
           node-version: 22
@@ -73,28 +112,91 @@ jobs:
         run: |
           set -ex
           echo "hash=$(node hxmc/bootstrap/rt.mjs hash)" >> "$GITHUB_OUTPUT"
-          echo "zig=$(cat hxmc/deps/zig-version)" >> "$GITHUB_OUTPUT"
           if node hxmc/bootstrap/rt.mjs fetch bin/hxmc/rt; then echo "hit=true" >> "$GITHUB_OUTPUT"; else echo "hit=false" >> "$GITHUB_OUTPUT"; fi
-      - uses: mlugg/setup-zig@v2
-        if: steps.rt.outputs.hit != 'true'
+
+  # the runtime objects of one target (and linux-x86_64's, which the tool
+  # that assembles the others links), when rt-<hash> is missing
+  rt-build:
+    needs: changes
+    if: needs.changes.outputs.rt_hit != 'true' && needs.changes.outputs.build == 'true'
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [linux-x86_64, linux-arm64, windows-x86_64, windows-arm64, macos-x86_64, macos-arm64, linux-x86_64-glibc, linux-arm64-glibc]
+    steps:
+      - uses: actions/checkout@v7
         with:
-          version: ${{ steps.rt.outputs.zig }}
+          submodules: true
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - id: zig
+        run: echo "version=$(cat hxmc/deps/zig-version)" >> "$GITHUB_OUTPUT"
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: ${{ steps.zig.outputs.version }}
       - name: System packages
-        if: steps.rt.outputs.hit != 'true'
         run: sudo apt-get install -qqy lld llvm
       - name: Cache mbedtls and libuv
-        if: steps.rt.outputs.hit != 'true'
         uses: actions/cache@v6
         with:
           path: bin/hxmc/deps
-          key: hxmc-deps-zig-${{ steps.rt.outputs.zig }}-${{ hashFiles('hxmc/deps/deps.sh') }}
-      # the tool comes from the stage0 module (the Windows and macOS objects are
-      # assembled by it)
+          key: hxmc-deps-zig-${{ steps.zig.outputs.version }}-${{ hashFiles('hxmc/deps/deps.sh') }}-${{ matrix.target }}
       - name: Build the runtime objects with zig
-        if: steps.rt.outputs.hit != 'true'
-        run: make rt-build
+        run: make rt-target RT_TARGET=${{ matrix.target }}
+      - uses: actions/upload-artifact@v7
+        with:
+          name: rt-${{ matrix.target }}
+          path: |
+            bin/hxmc/rt/LICENSE.*
+            bin/hxmc/rt/${{ matrix.target }}/*.o
+            bin/hxmc/deps/${{ matrix.target }}/VERSIONS
+            bin/hxmc/deps/${{ matrix.target }}/include
+          retention-days: 1
+
+  # the eight targets' objects together: the committed layouts checked
+  # against every target's headers, published as rt-<hash> (from main and
+  # hxmc), passed on as the artifact rt
+  rt:
+    needs: [changes, rt-build]
+    if: ${{ !cancelled() && needs.rt-build.result != 'skipped' }}
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - name: Every target built
+        run: test "${{ needs.rt-build.result }}" = success
+      - uses: actions/checkout@v7
+        with:
+          submodules: true
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - id: rt
+        run: |
+          echo "hash=$(node hxmc/bootstrap/rt.mjs hash)" >> "$GITHUB_OUTPUT"
+          echo "zig=$(cat hxmc/deps/zig-version)" >> "$GITHUB_OUTPUT"
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: ${{ steps.rt.outputs.zig }}
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: rt-*
+          path: bin/hxmc
+          merge-multiple: true
+      # the tool comes from the stage0 module (with linux-x86_64's object)
+      - name: Layouts and HASH
+        run: |
+          set -ex
+          touch bin/hxmc/deps/*/VERSIONS bin/hxmc/rt/*/*.o
+          ls -l bin/hxmc/rt/*
+          make rt-layouts
       - name: Publish rt-${{ steps.rt.outputs.hash }}
-        if: steps.rt.outputs.hit != 'true' && github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/hxmc')
+        if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/hxmc')
         run: |
           set -ex
           node hxmc/bootstrap/rt.mjs pack bin/hxmc/rt dist/rt
@@ -110,8 +212,12 @@ jobs:
             bin/hxmc/rt/*/*.o
           retention-days: 7
 
+  # the tool from the committed stage0 (README.md, "Building"): node runs it
+  # to build the first native tool, which builds the tool from source; the
+  # tool rebuilt by itself does not change. Then the release binaries and lix.
   build:
-    needs: rt
+    needs: [changes, rt]
+    if: ${{ !cancelled() && needs.changes.result == 'success' && (needs.rt.result == 'success' || needs.rt.result == 'skipped') && (needs.changes.outputs.all == 'true' || needs.changes.outputs.libs == 'true') }}
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
@@ -120,61 +226,24 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: 22
-      # (zig: the C companions of corpus cases, Corpus.nativeInputs)
-      - id: zig
-        run: echo "version=$(cat hxmc/deps/zig-version)" >> "$GITHUB_OUTPUT"
-      - uses: mlugg/setup-zig@v2
-        with:
-          version: ${{ steps.zig.outputs.version }}
       - uses: actions/download-artifact@v8
+        if: needs.changes.outputs.rt_hit != 'true'
         with: {name: rt, path: bin/hxmc/rt}
-      - name: System packages
-        run: sudo apt-get install -qqy time
-      - name: Runtime objects in place
-        run: touch bin/hxmc/rt/*/*.o && ls -l bin/hxmc/rt/*
-
-      # the tool from the committed stage0 (README.md, "Building"): node runs
-      # it to build the first native tool, which builds the tool from source;
-      # the tool rebuilt by itself does not change
+      - name: Runtime objects
+        run: make rt && touch bin/hxmc/rt/*/*.o && ls -l bin/hxmc/rt/*
       - name: Bootstrap from the stage0
-        run: |
-          set -ex
-          s=$(date +%s)
-          make bootstrap
-          echo "BOOTSTRAP_SECONDS=$(( $(date +%s) - s ))" >> "$GITHUB_ENV"
+        run: make bootstrap
       # the cache of the runtime's typed modules (hxmc/src/hxmc/TypesCache.hx)
       - name: Types cache
         run: bin/hxmc/hxmc -cp hxmc/test -cp haxe/test --run CacheCheck
-
-      - name: lix
-        run: make lix
-
-      - name: Reference compiler revision
-        id: ref
-        run: echo "rev=$(git rev-parse --short=7 HEAD:haxe/upstream)" >> "$GITHUB_OUTPUT"
-      - name: Cache the reference compiler
-        uses: actions/cache@v6
-        with:
-          path: bin/reference
-          key: reference-nightly-${{ steps.ref.outputs.rev }}
-      - name: The reference compiler (lix downloads the nightly)
-        run: make reference && bin/reference/haxe -version
 
       - name: The port's release binaries
         run: |
           set -ex
           for t in $TARGETS; do make release TARGET=$t; done
           ls -l bin/release/*
-
       - name: lix for the six targets
-        run: |
-          set -ex
-          mkdir -p dist/lix
-          for t in $TARGETS; do
-            make lix-release TARGET=$t
-            case $t in windows-*) cp bin/release/$t/lix.exe dist/lix/lix-$t.exe ;; *) cp bin/release/$t/lix dist/lix/lix-$t ;; esac
-          done
-          ls -l dist/lix
+        run: make lix-dist
 
       - name: Package the release binaries
         run: |
@@ -221,44 +290,36 @@ jobs:
       - uses: actions/upload-artifact@v7
         with: {name: hxmc-haxe-windows-aarch64, path: dist/hxmc-haxe-windows-aarch64.zip, retention-days: 14}
       - uses: actions/upload-artifact@v7
-        with: {name: lix, path: dist/lix/, retention-days: 14}
+        with: {name: lix, path: bin/lix-dist/, retention-days: 14}
 
-      # the npm packages (packages/): @hxmc/cli, its six platform packages,
-      # @hxmc/wasm and @hxmc/source, at one version: the tag's (v*), a nightly
-      # prerelease on main, packages/cli/package.json's elsewhere; and in
-      # bin/npm/packages/ the source-only packages at their own versions
-      - name: The npm packages
-        run: |
-          set -ex
-          v=$(node -p "require('./packages/cli/package.json').version")
-          case "$GITHUB_REF" in
-            refs/tags/v*) v=${GITHUB_REF_NAME#v} ;;
-            refs/heads/main) v=$v-nightly.$(date -u +%Y%m%d).$(git rev-parse --short=7 HEAD) ;;
-          esac
-          make npm NPM_VERSION=$v
-          echo "$v" > bin/npm/VERSION
-          # -lib from node_modules (and the npm job's copy of the test)
-          make test-node-libs
-          cp hxmc/test/NodeLibs.hx bin/npm/
-          # what WebAssembly programs see of the file system (the npm job on Windows)
-          bin/hxmc/hxmc bin/npm/probe.wasm -cp hxmc/test -main WasiProbe -cp bin/hxmc/std --custom-target hxmc -D hxmc.target=wasm32-wasi
-      - uses: actions/upload-artifact@v7
-        with: {name: npm, path: "bin/npm/*.tgz\nbin/npm/packages/*.tgz\nbin/npm/NodeLibs.hx\nbin/npm/probe.wasm\nbin/npm/VERSION\nbin/npm/sizes.md", retention-days: 7}
-
-      # the website: the playground's WebAssembly, the pages' JavaScript, lix under tools/
-      # (the Programs benchmarks: the history on the bench-data branch, bench.yml)
-      - name: The website
-        run: |
-          set -ex
-          mkdir -p bin/bench-data
-          if git fetch --depth 1 origin bench-data; then git archive FETCH_HEAD | tar -x -C bin/bench-data; fi
-          make site LIX_DIR=dist/lix BENCH_DATA=bin/bench-data
-          ls -l bin/site bin/site/tools
-      - uses: actions/upload-artifact@v7
-        with: {name: site, path: bin/site/, retention-days: 7}
-      - uses: actions/upload-pages-artifact@v5
+  # hxmc's corpus for every target (run by the test and wasm jobs on the
+  # targets' machines), the port as a WebAssembly module (the wasm job), the
+  # reference's self-compile (the test and wasm jobs compare with it)
+  corpus:
+    needs: [changes, rt]
+    if: ${{ !cancelled() && needs.changes.result == 'success' && (needs.rt.result == 'success' || needs.rt.result == 'skipped') && needs.changes.outputs.all == 'true' }}
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
         with:
-          path: bin/site
+          submodules: true
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      # (zig: the C companions of corpus cases, Corpus.nativeInputs)
+      - id: zig
+        run: echo "version=$(cat hxmc/deps/zig-version)" >> "$GITHUB_OUTPUT"
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: ${{ steps.zig.outputs.version }}
+      - uses: actions/download-artifact@v8
+        if: needs.changes.outputs.rt_hit != 'true'
+        with: {name: rt, path: bin/hxmc/rt}
+      - name: Runtime objects and the tool
+        run: |
+          set -ex
+          make rt && touch bin/hxmc/rt/*/*.o
+          make hxmc
 
       - name: Cross-build hxmc's corpus
         run: |
@@ -274,27 +335,6 @@ jobs:
             bin/hxmc/hxmc -cp hxmc/test -cp haxe/test --run ElfCheck dist/corpus/$t-glibc --summary "$GITHUB_STEP_SUMMARY"
           done
 
-      # packages/gfx: the triangle's test program for Linux (glibc mode), run by
-      # the test job under Mesa's llvmpipe and Xvfb (packages/gfx/test/check.sh)
-      - name: The gfx test programs
-        run: |
-          set -ex
-          for t in linux-x86_64 linux-arm64; do
-            mkdir -p dist/gfx/$t
-            for m in GfxTest Triangle; do
-              bin/hxmc/hxmc dist/gfx/$t/$m -cp packages/os/src -cp packages/gfx/src -cp packages/gfx/examples -cp packages/gfx/test -main $m \
-                -cp bin/hxmc/std --custom-target hxmc -D hxmc.libc=glibc -D hxmc.target=$t | tail -3
-              rm -rf dist/gfx/$t/$m.hxmc
-            done
-            ls -l dist/gfx/$t
-          done
-
-      # hxmc's output does not depend on the host: the tool as a WebAssembly
-      # module (under node) builds the corpus for every target, and the tool
-      # itself, byte-identical to the native tool
-      - name: hxmc as a WebAssembly module, byte-identical output
-        run: make crosshost
-
       - name: The port as a WebAssembly module
         run: |
           set -ex
@@ -303,6 +343,18 @@ jobs:
           HXMC_STATS=1 bin/hxmc/hxmc dist/wasm/haxe-legacy.wasm -cp haxe/src -main haxe.Main -D disable-parallelism -cp bin/hxmc/std --custom-target hxmc -D hxmc.target=wasm32-wasi -D hxmc.wasm-eh=legacy | tail -3
           ls -l dist/wasm/haxe.wasm dist/wasm/haxe-legacy.wasm
 
+      - name: lix
+        run: make lix
+      - name: Reference compiler revision
+        id: ref
+        run: echo "rev=$(git rev-parse --short=7 HEAD:haxe/upstream)" >> "$GITHUB_OUTPUT"
+      - name: Cache the reference compiler
+        uses: actions/cache@v6
+        with:
+          path: bin/reference
+          key: reference-nightly-${{ steps.ref.outputs.rev }}
+      - name: The reference compiler (lix downloads the nightly)
+        run: make reference && bin/reference/haxe -version
       # the reference's self-compile, in the directory the macOS runners use
       - name: Reference self-compile
         run: |
@@ -318,29 +370,9 @@ jobs:
           tar czf dist/self/std.tar.gz -C haxe/upstream std
           tar czf dist/self/src.tar.gz -C haxe src
 
-      # peak memory and time: the self-compile (ours and the reference), the
-      # cold native build of the port, the stage0 and the npm package's
-      # WebAssembly compiler building native compilers
-      - name: Memory and time
-        if: always()
-        run: |
-          set -ex
-          {
-            echo "### Builds"
-            echo ""
-            echo "| | |"
-            echo "| --- | ---: |"
-            echo "| clean bootstrap from the stage0 (stage0 under node, the tool from source, the fixpoint) | ${BOOTSTRAP_SECONDS} s |"
-            echo ""
-            cat bin/npm/sizes.md || true
-            echo ""
-          } >> "$GITHUB_STEP_SUMMARY"
-          bin/hxmc/hxmc -cp haxe/test -cp hxmc/test --run Measure --port bin/release/linux-x86_64/haxe
-
       - name: Pack the corpus
         run: |
           for t in $TARGETS wasm32-wasi wasm32-wasi-legacy linux-x86_64-glibc linux-arm64-glibc; do tar czf dist/corpus-$t.tar.gz -C dist/corpus/$t .; done
-          for t in linux-x86_64 linux-arm64; do tar czf dist/gfx-$t.tar.gz -C dist/gfx/$t .; done
           tar czf dist/corpus-wasm32-wasi-port.tar.gz -C dist/wasm haxe.wasm haxe-legacy.wasm
       - uses: actions/upload-artifact@v7
         with: {name: hxmc-self, path: dist/self/, retention-days: 3}
@@ -353,10 +385,6 @@ jobs:
       - uses: actions/upload-artifact@v7
         with: {name: corpus-linux-arm64-glibc, path: dist/corpus-linux-arm64-glibc.tar.gz, retention-days: 3}
       - uses: actions/upload-artifact@v7
-        with: {name: gfx-linux-x86_64, path: dist/gfx-linux-x86_64.tar.gz, retention-days: 3}
-      - uses: actions/upload-artifact@v7
-        with: {name: gfx-linux-arm64, path: dist/gfx-linux-arm64.tar.gz, retention-days: 3}
-      - uses: actions/upload-artifact@v7
         with: {name: corpus-windows-x86_64, path: dist/corpus-windows-x86_64.tar.gz, retention-days: 3}
       - uses: actions/upload-artifact@v7
         with: {name: corpus-windows-arm64, path: dist/corpus-windows-arm64.tar.gz, retention-days: 3}
@@ -367,14 +395,200 @@ jobs:
       - uses: actions/upload-artifact@v7
         with: {name: corpus-wasm32-wasi, path: "dist/corpus-wasm32-wasi*.tar.gz", retention-days: 3}
 
-  # the port against the reference compiler (README.md, "Testing")
+  # hxmc's output does not depend on the host: the tool as a WebAssembly
+  # module (under node) builds the corpus for every target, and the tool
+  # itself, byte-identical to the native tool. Then peak memory and time: the
+  # self-compile (ours and the reference), the cold native build of the port,
+  # the stage0 and the npm package's WebAssembly compiler building native
+  # compilers.
+  crosshost:
+    name: crosshost, memory and time
+    needs: [changes, rt]
+    if: ${{ !cancelled() && needs.changes.result == 'success' && (needs.rt.result == 'success' || needs.rt.result == 'skipped') && needs.changes.outputs.all == 'true' }}
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: true
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - id: zig
+        run: echo "version=$(cat hxmc/deps/zig-version)" >> "$GITHUB_OUTPUT"
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: ${{ steps.zig.outputs.version }}
+      - uses: actions/download-artifact@v8
+        if: needs.changes.outputs.rt_hit != 'true'
+        with: {name: rt, path: bin/hxmc/rt}
+      - name: System packages
+        run: sudo apt-get install -qqy time
+      - name: Runtime objects
+        run: make rt && touch bin/hxmc/rt/*/*.o
+      - name: Bootstrap from the stage0 (timed)
+        run: |
+          set -ex
+          s=$(date +%s)
+          make bootstrap
+          echo "BOOTSTRAP_SECONDS=$(( $(date +%s) - s ))" >> "$GITHUB_ENV"
+      - name: hxmc as a WebAssembly module, byte-identical output
+        run: make crosshost
+
+      - name: Reference compiler revision
+        id: ref
+        run: echo "rev=$(git rev-parse --short=7 HEAD:haxe/upstream)" >> "$GITHUB_OUTPUT"
+      - name: Cache the reference compiler
+        uses: actions/cache@v6
+        with:
+          path: bin/reference
+          key: reference-nightly-${{ steps.ref.outputs.rev }}
+      - name: Memory and time
+        if: ${{ !cancelled() }}
+        run: |
+          set -ex
+          {
+            echo "### Builds"
+            echo ""
+            echo "| | |"
+            echo "| --- | ---: |"
+            echo "| clean bootstrap from the stage0 (stage0 under node, the tool from source, the fixpoint) | ${BOOTSTRAP_SECONDS} s |"
+            echo ""
+          } >> "$GITHUB_STEP_SUMMARY"
+          make lix
+          if [ ! -x bin/reference/haxe ]; then make reference; fi
+          touch bin/reference/haxe
+          make measure PORT_BIN=bin/release/linux-x86_64/haxe
+
+  # the npm packages (packages/): @hxmc/cli, its six platform packages,
+  # @hxmc/wasm and @hxmc/source, at one version: the tag's (v*), a nightly
+  # prerelease on main, packages/cli/package.json's elsewhere; and in
+  # bin/npm/packages/ the source-only packages at their own versions
+  npm-pack:
+    needs: [changes, rt]
+    if: ${{ !cancelled() && needs.changes.result == 'success' && (needs.rt.result == 'success' || needs.rt.result == 'skipped') && (needs.changes.outputs.all == 'true' || needs.changes.outputs.libs == 'true') }}
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: true
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - uses: actions/download-artifact@v8
+        if: needs.changes.outputs.rt_hit != 'true'
+        with: {name: rt, path: bin/hxmc/rt}
+      - name: Runtime objects and the tool
+        run: |
+          set -ex
+          make rt && touch bin/hxmc/rt/*/*.o
+          make hxmc
+      - name: The npm packages
+        run: |
+          set -ex
+          v=$(node -p "require('./packages/cli/package.json').version")
+          case "$GITHUB_REF" in
+            refs/tags/v*) v=${GITHUB_REF_NAME#v} ;;
+            refs/heads/main) v=$v-nightly.$(date -u +%Y%m%d).$(git rev-parse --short=7 HEAD) ;;
+          esac
+          make npm NPM_VERSION=$v
+          echo "$v" > bin/npm/VERSION
+          # -lib from node_modules (and the npm job's copy of the test)
+          make test-node-libs
+          cp hxmc/test/NodeLibs.hx bin/npm/
+          # what WebAssembly programs see of the file system (the npm job on Windows)
+          bin/hxmc/hxmc bin/npm/probe.wasm -cp hxmc/test -main WasiProbe -cp bin/hxmc/std --custom-target hxmc -D hxmc.target=wasm32-wasi
+          cat bin/npm/sizes.md >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v7
+        with: {name: npm, path: "bin/npm/*.tgz\nbin/npm/packages/*.tgz\nbin/npm/NodeLibs.hx\nbin/npm/probe.wasm\nbin/npm/VERSION\nbin/npm/sizes.md", retention-days: 7}
+
+  # the website: the playground's WebAssembly, the pages' JavaScript, lix under tools/
+  # (the Programs benchmarks: the history on the bench-data branch, bench.yml)
+  site:
+    needs: [changes, rt]
+    if: ${{ !cancelled() && needs.changes.result == 'success' && (needs.rt.result == 'success' || needs.rt.result == 'skipped') && (needs.changes.outputs.all == 'true' || needs.changes.outputs.web == 'true') }}
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: true
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - uses: actions/download-artifact@v8
+        if: needs.changes.outputs.rt_hit != 'true'
+        with: {name: rt, path: bin/hxmc/rt}
+      - name: Runtime objects
+        run: make rt && touch bin/hxmc/rt/*/*.o
+      - name: The website
+        run: |
+          set -ex
+          make lix-dist
+          mkdir -p bin/bench-data
+          if git fetch --depth 1 origin bench-data; then git archive FETCH_HEAD | tar -x -C bin/bench-data; fi
+          make site LIX_DIR=bin/lix-dist BENCH_DATA=bin/bench-data
+          ls -l bin/site bin/site/tools
+      - uses: actions/upload-artifact@v7
+        with: {name: site, path: bin/site/, retention-days: 7}
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: bin/site
+
+  # packages/gfx: the triangle headless and in an X11 window, on Mesa's
+  # llvmpipe (no GPU), against the golden image, on Linux x86-64 and ARM64
+  # (make gfx-check: the test programs in the glibc mode, packages/gfx/test/check.sh)
+  gfx:
+    needs: [changes, rt]
+    if: ${{ !cancelled() && needs.changes.result == 'success' && (needs.rt.result == 'success' || needs.rt.result == 'skipped') && (needs.changes.outputs.all == 'true' || needs.changes.outputs.libs == 'true') }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {target: linux-x86_64, os: ubuntu-24.04}
+          - {target: linux-arm64, os: ubuntu-24.04-arm}
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: true
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - uses: actions/download-artifact@v8
+        if: needs.changes.outputs.rt_hit != 'true'
+        with: {name: rt, path: bin/hxmc/rt}
+      - name: System packages
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -qqy --no-install-recommends libegl1 libegl-mesa0 libgl1-mesa-dri libgles2 xvfb xauth
+      - name: gfx (Mesa llvmpipe, Xvfb)
+        run: |
+          set -ex
+          make rt && touch bin/hxmc/rt/*/*.o
+          make gfx-check
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with: {name: 'gfx-images-${{ matrix.target }}', path: bin/gfx/*.png, retention-days: 7}
+
+  # the port against the reference compiler (README.md, "Testing"); the Eval
+  # debugger in shards (EvalDebugger --shard), the fuzzer's diff lanes (the
+  # targets that need no library) split across three jobs
   conformance:
-    needs: build
+    needs: [changes, build]
+    if: ${{ !cancelled() && needs.build.result == 'success' && needs.changes.outputs.all == 'true' }}
     runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
-        suite: [hxb, macro, display, server, jsonrpc, targets, haxelib, debugger, fuzz]
+        include:
+          - {suite: hxb macro haxelib}
+          - {suite: display server jsonrpc}
+          - {suite: targets}
+          - {suite: debugger, shard: 1/3}
+          - {suite: debugger, shard: 2/3}
+          - {suite: debugger, shard: 3/3}
+          - {suite: fuzz, lanes: 'diff:hxb diff:interp diff:js diff:python'}
+          - {suite: fuzz, lanes: 'diff:lua diff:php diff:hlc'}
+          - {suite: fuzz, lanes: 'diff:neko diff:hl diff:swf'}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -406,31 +620,35 @@ jobs:
           if [ ! -x bin/reference/haxe ]; then make -o bin/lix/lix reference; fi
           bin/reference/haxe -version
           bin/port/haxe -version
-      - name: ${{ matrix.suite }}
+      - name: ${{ matrix.suite }} ${{ matrix.shard }}
         run: |
-          set -ex
+          set -x
           export HAXE_REFERENCE=$PWD/bin/reference/haxe HAXE_IN_HAXE_PORT=$PWD/bin/port/haxe
           S="bin/port/haxe -cp hxmc/test -cp haxe/test --run"
-          case "${{ matrix.suite }}" in
-            hxb) $S Conformance -j 4 --summary "$GITHUB_STEP_SUMMARY" ;;
-            macro) $S Conformance -j 4 --cases haxe/test/conformance-macro-cases.txt --summary "$GITHUB_STEP_SUMMARY" ;;
-            display) $S Display -j 4 --summary "$GITHUB_STEP_SUMMARY" ;;
-            server) $S Server -j 4 --summary "$GITHUB_STEP_SUMMARY" ;;
-            jsonrpc) $S ServerJsonRpc --summary "$GITHUB_STEP_SUMMARY" ;;
-            targets) $S UpstreamTargets -j 4 --summary "$GITHUB_STEP_SUMMARY" ;;
-            haxelib) $S Haxelib --server --summary "$GITHUB_STEP_SUMMARY" ;;
-            debugger) $S EvalDebugger --summary "$GITHUB_STEP_SUMMARY" ;;
-            # the generators' diff lanes (the targets that need no library)
-            fuzz)
-              for lane in diff:hxb diff:interp diff:js diff:lua diff:python diff:php diff:neko diff:hl diff:hlc diff:swf; do
-                bin/port/haxe -cp haxe/test/fuzz -cp haxe/test --run Fuzz -j 4 -n 100 --port $PWD/bin/port/haxe --lane $lane
-              done ;;
-          esac
+          failed=
+          for suite in ${{ matrix.suite }}; do
+            case "$suite" in
+              hxb) $S Conformance -j 4 --summary "$GITHUB_STEP_SUMMARY" ;;
+              macro) $S Conformance -j 4 --cases haxe/test/conformance-macro-cases.txt --summary "$GITHUB_STEP_SUMMARY" ;;
+              display) $S Display -j 4 --summary "$GITHUB_STEP_SUMMARY" ;;
+              server) $S Server -j 4 --summary "$GITHUB_STEP_SUMMARY" ;;
+              jsonrpc) $S ServerJsonRpc --summary "$GITHUB_STEP_SUMMARY" ;;
+              targets) $S UpstreamTargets -j 4 --summary "$GITHUB_STEP_SUMMARY" ;;
+              haxelib) $S Haxelib --server --summary "$GITHUB_STEP_SUMMARY" ;;
+              debugger) $S EvalDebugger --shard ${{ matrix.shard }} --summary "$GITHUB_STEP_SUMMARY" ;;
+              fuzz)
+                for lane in ${{ matrix.lanes }}; do
+                  bin/port/haxe -cp haxe/test/fuzz -cp haxe/test --run Fuzz -j 4 -n 100 --port $PWD/bin/port/haxe --lane $lane || failed="$failed $lane"
+                done ;;
+            esac || failed="$failed $suite"
+          done
+          if [ -n "$failed" ]; then echo "failed:$failed"; exit 1; fi
 
   # on a machine of each target: the release binary, lix, hxmc's corpus and
   # the port's self-compile; the scripts run on the release binary's Eval
   test:
-    needs: build
+    needs: [changes, build, corpus]
+    if: ${{ !cancelled() && needs.build.result == 'success' && needs.corpus.result == 'success' && needs.changes.outputs.all == 'true' }}
     strategy:
       fail-fast: false
       matrix:
@@ -451,7 +669,6 @@ jobs:
           sparse-checkout: |
             hxmc/test
             haxe/test
-            packages/gfx/test
       - uses: actions/setup-node@v7
         with:
           node-version: 22
@@ -585,23 +802,6 @@ jobs:
           set -ex
           docker run --rm --network host -v "$PWD:/w" -w /w -e HAXE_STD_PATH=/w/t/hxmc-haxe-${{ matrix.pkg }}/std centos:7 \
             sh -c 'ldd --version | head -1 && t/hxmc-haxe-${{ matrix.pkg }}/haxe -cp hxmc/test -cp haxe/test --run Check corpus-glibc'
-      # packages/gfx: the triangle headless and in an X11 window, on Mesa's
-      # llvmpipe (no GPU), against the golden image
-      - uses: actions/download-artifact@v8
-        if: runner.os == 'Linux'
-        with: {name: 'gfx-${{ matrix.target }}', path: dl}
-      - name: gfx (Mesa llvmpipe, Xvfb)
-        if: always() && runner.os == 'Linux'
-        run: |
-          set -ex
-          sudo apt-get update -qq
-          sudo apt-get install -qqy --no-install-recommends libegl1 libegl-mesa0 libgl1-mesa-dri libgles2 xvfb xauth
-          mkdir -p gfx
-          tar xzf dl/gfx-${{ matrix.target }}.tar.gz -C gfx
-          sh packages/gfx/test/check.sh gfx
-      - uses: actions/upload-artifact@v7
-        if: always() && runner.os == 'Linux'
-        with: {name: 'gfx-images-${{ matrix.target }}', path: gfx/*.png, retention-days: 7}
       - name: Port self-compile
         if: always()
         run: |
@@ -616,9 +816,10 @@ jobs:
           MSYS_NO_PATHCONV=1 "$exe" -cp hxmc/test -cp haxe/test --run Selfcheck --port "$exe" --src std-x/src --std std-x/std --ref dl/self-ref.hxb --ref-root "$SELF_ROOT" --root "$root" --summary "$GITHUB_STEP_SUMMARY"
 
   # the WebAssembly corpus under node 22 and wasmtime, the port as a module
-  # compiling itself under both, and the playground in the browsers' engines
+  # compiling itself under both
   wasm:
-    needs: build
+    needs: [changes, build, corpus]
+    if: ${{ !cancelled() && needs.build.result == 'success' && needs.corpus.result == 'success' && needs.changes.outputs.all == 'true' }}
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
@@ -627,7 +828,6 @@ jobs:
             hxmc/test
             haxe/test
             hxmc/bootstrap
-            hxmc/web/tools
       - uses: actions/setup-node@v7
         with:
           node-version: 22
@@ -640,8 +840,6 @@ jobs:
         with: {name: corpus-wasm32-wasi, path: dl}
       - uses: actions/download-artifact@v8
         with: {name: hxmc-self, path: dl}
-      - uses: actions/download-artifact@v8
-        with: {name: site, path: site-dist}
       - uses: actions/download-artifact@v8
         with: {name: hxmc-haxe-linux-x86_64, path: dl}
       - name: Unpack
@@ -684,12 +882,26 @@ jobs:
       - name: Port self-compile under wasmtime
         if: always()
         run: $H -cp hxmc/test -cp haxe/test --run Selfcheck --runner "wasmtime run -W exceptions=y -W max-wasm-stack=67108864 --dir / --env HAXE_STD_PATH --env PWD" --port port/haxe.wasm --src std-x/src --std std-x/std --ref dl/self-ref.hxb --ref-root "$SELF_ROOT" --root "$SELF_ROOT" --summary "$GITHUB_STEP_SUMMARY"
-      # the playground's worker (hxmc/web/src/Worker.hx, WasiHost.hx) in the
-      # browsers' engines: --interp, HXB, diagnostics and completion, with both
-      # modules (exnref, legacy exception handling); the page's choice of
-      # module, also in a Chromium without exnref
+
+  # the playground's worker (hxmc/web/src/Worker.hx, WasiHost.hx) in the
+  # browsers' engines: --interp, HXB, diagnostics and completion, with both
+  # modules (exnref, legacy exception handling); the page's choice of
+  # module, also in a Chromium without exnref
+  playground:
+    needs: [changes, site]
+    if: ${{ !cancelled() && needs.site.result == 'success' }}
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          sparse-checkout: |
+            hxmc/web/tools
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - uses: actions/download-artifact@v8
+        with: {name: site, path: site-dist}
       - name: Playground in Chromium, Firefox and WebKit
-        if: always()
         run: |
           set -ex
           npm install --no-save --silent playwright@1.56.1
@@ -700,18 +912,20 @@ jobs:
   # package installed before publish-npm publishes them): @hxmc/cli with its
   # platform package (native at once, node_modules/.bin/haxe the native
   # compiler on Unix; -lib from node_modules; with --ignore-scripts after the
-  # first call), lix with
+  # first call) on all six every run; and the full set on linux-x64 (on all
+  # six on main, tags and nightly: changes.outputs.npm_full): lix with
   # dist/; the WebAssembly fallback (no platform package: @hxmc/wasm downloaded
   # into the cache, here from the local tarball through HXMC_WASM_TARBALL, or
   # installed); @hxmc/source (an edit, hxmc-rebuild, haxe runs the rebuilt
   # compiler, --reset)
   npm:
-    needs: build
+    needs: [changes, npm-pack]
+    if: ${{ !cancelled() && needs.npm-pack.result == 'success' && needs.changes.outputs.all == 'true' }}
     strategy:
       fail-fast: false
       matrix:
         include:
-          - {os: ubuntu-24.04, plat: linux-x64, lix: linux-x86_64}
+          - {os: ubuntu-24.04, plat: linux-x64, lix: linux-x86_64, full: true}
           - {os: ubuntu-24.04-arm, plat: linux-arm64}
           - {os: macos-15, plat: darwin-arm64, lix: macos-arm64}
           - {os: macos-15-intel, plat: darwin-x64}
@@ -723,6 +937,7 @@ jobs:
         shell: bash
     env:
       HXMC_CACHE: ${{ github.workspace }}/hxmc-cache
+      FULL: ${{ matrix.full || needs.changes.outputs.npm_full == 'true' }}
     steps:
       - uses: actions/setup-node@v7
         with:
@@ -730,7 +945,7 @@ jobs:
       - uses: actions/download-artifact@v8
         with: {name: npm, path: dl}
       - uses: actions/download-artifact@v8
-        if: matrix.lix
+        if: matrix.lix && env.FULL == 'true'
         with: {name: lix, path: dl/lix}
       - name: Install @hxmc/cli and its platform package
         run: |
@@ -780,7 +995,7 @@ jobs:
           head -c 4 node_modules/.bin/haxe | od -An -tx1 | tee magic.txt; ! grep -q "23 21" magic.txt
       # lix with the package's installation (dist/) as its Haxe
       - name: lix
-        if: matrix.lix
+        if: matrix.lix && env.FULL == 'true'
         run: |
           set -ex
           cd "$RUNNER_TEMP/app"
@@ -800,6 +1015,7 @@ jobs:
       # against the integrity @hxmc/cli pins (the local tarball here: this
       # version is not on the registry yet)
       - name: WebAssembly fallback, downloaded
+        if: env.FULL == 'true'
         env:
           HXMC_PLATFORM_PACKAGE: '0'
           HXMC_CACHE: ${{ github.workspace }}/hxmc-cache-wasm
@@ -828,6 +1044,7 @@ jobs:
           grep -q "hello from Wasi" out.txt
       # @hxmc/wasm installed (WebContainers, noexec sandboxes): used, nothing downloaded
       - name: WebAssembly fallback, installed
+        if: env.FULL == 'true'
         env:
           HXMC_PLATFORM_PACKAGE: '0'
           HXMC_CACHE: ${{ github.workspace }}/hxmc-cache-wasm2
@@ -853,6 +1070,7 @@ jobs:
       # one, haxe runs it while @hxmc/source is installed, --reset returns to
       # the published one
       - name: hxmc-rebuild
+        if: env.FULL == 'true'
         env:
           HXMC_CACHE: ${{ github.workspace }}/hxmc-cache-source
         run: |
@@ -877,18 +1095,20 @@ jobs:
   # upstream Haxe's compiler-side suite (RunCi macro) with the release
   # binaries as haxe (upstream-tests.yml)
   upstream-tests:
-    needs: build
+    needs: [changes, build]
+    if: ${{ !cancelled() && needs.build.result == 'success' && needs.changes.outputs.all == 'true' }}
     uses: ./.github/workflows/upstream-tests.yml
 
-  # npm: the nine packages at one version (the build job's), installed and
+  # npm: the nine packages at one version (npm-pack's), installed and
   # tested by the npm job: the six platform packages, @hxmc/wasm,
   # @hxmc/source, then @hxmc/cli: on v* tags (dist-tag latest) and pushes to main (a nightly, dist-tag
   # next); then every source-only package (packages/<name> with a version of
   # its own: bin/npm/packages/) at its version when that is not on npm yet
-  # (dist-tag latest, next for a prerelease); never from other branches
+  # (dist-tag latest, next for a prerelease); never from other branches.
+  # After every check (the full npm set on all six machines: npm_full).
   publish-npm:
-    needs: [build, npm, test, wasm, conformance]
-    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
+    needs: [changes, build, corpus, crosshost, npm-pack, site, gfx, conformance, test, wasm, playground, npm]
+    if: ${{ !cancelled() && !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled') && !contains(needs.*.result, 'skipped') && github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')) }}
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -935,8 +1155,8 @@ jobs:
 
   # nightly on main, a release on v* tags
   release:
-    needs: [test, wasm, npm, conformance]
-    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
+    needs: [changes, build, corpus, crosshost, npm-pack, site, gfx, conformance, test, wasm, playground, npm]
+    if: ${{ !cancelled() && !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled') && !contains(needs.*.result, 'skipped') && github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')) }}
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -981,8 +1201,8 @@ jobs:
           fi
 
   pages:
-    needs: [build, wasm]
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [changes, build, corpus, crosshost, npm-pack, site, gfx, wasm, playground]
+    if: ${{ !cancelled() && !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled') && !contains(needs.*.result, 'skipped') && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
     runs-on: ubuntu-24.04
     permissions:
       pages: write

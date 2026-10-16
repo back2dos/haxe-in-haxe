@@ -25,9 +25,11 @@ export ZIG
 HOST ?= $(if $(filter Darwin,$(shell uname -s)),macos,linux)-$(if $(filter aarch64 arm64,$(shell uname -m)),arm64,x86_64)
 # `make release`, `make lix-release`: one of the six targets
 TARGET ?= $(HOST)
+# `make rt-target`: one of RT_TARGETS
 TARGETS := linux-x86_64 linux-arm64 windows-x86_64 windows-arm64 macos-x86_64 macos-arm64
 # the runtime objects: the six targets, and Linux in the dynamic glibc mode (-D hxmc.libc=glibc)
 RT_TARGETS := $(TARGETS) linux-x86_64-glibc linux-arm64-glibc
+RT_TARGET ?= $(HOST)
 # extra arguments of the port's build (e.g. HXFLAGS="-D retain")
 HXFLAGS ?=
 # the port the tests check
@@ -94,8 +96,8 @@ ulimit -s unlimited 2>/dev/null || true; $(TOOL) $(1) $(2) > $(1).log 2>&1 || { 
 endef
 
 .DEFAULT_GOAL := help
-.PHONY: help std deps rt rt-build hxmc tool bootstrap fixpoint stage0 crosshost port dev release wasm npm site fuzz \
-	lix lix-release reference bench test test-fuzz test-display test-server test-jsonrpc test-unit-targets test-interp \
+.PHONY: help std deps rt rt-build rt-target rt-layouts hxmc tool bootstrap fixpoint stage0 crosshost port dev release wasm npm site fuzz \
+	lix lix-release lix-dist reference bench test test-fuzz test-display test-server test-jsonrpc test-unit-targets test-interp \
 	test-haxelib test-eval-debugger test-node-libs smoke hxmc-test gfx-check portcheck measure quick check full clean distclean
 
 help:
@@ -112,6 +114,9 @@ help:
 ## rt          the runtime objects (bin/hxmc/rt/<target>/{rt,ssl,uv}.o): the release
 ##             rt-<hash of hxmc/deps> (hxmc/bootstrap/rt.mjs), else rt-build
 ## rt-build    the runtime objects with zig: mbedtls and libuv (hxmc/deps/deps.sh), hxmc/deps/mkrt.sh
+## rt-target   RT_TARGET's objects alone (and linux-x86_64's, the tool's); rt-layouts then checks
+##             the committed layouts against every target's headers and writes bin/hxmc/rt/HASH
+##             (CI builds the eight targets in parallel)
 ## crosshost   the tool as a WebAssembly module (under node) builds the corpus for every target
 ##             and the tool itself byte-identical to the native tool (hxmc/test/Crosshost.hx)
 ## port        PORT_BIN (bin/port/haxe): the port for the host, built by hxmc (alias: dev)
@@ -126,6 +131,7 @@ help:
 ## fuzz        bin/fuzz/fuzz: the differential fuzzer, built by hxmc
 ## lix         bin/lix/lix (+ haxe, haxelib, neko links): lix (tools/lix) for the host
 ## lix-release bin/release/TARGET/lix[.exe]: lix cross-built for TARGET
+## lix-dist    bin/lix-dist/lix-<target>[.exe]: lix for the six targets (the release, the site's tools/)
 ## reference   REFERENCE (bin/reference/haxe): the nightly of the pinned upstream commit, by lix
 ## test        HXB conformance of PORT_BIN against the reference (haxe/test/Conformance.hx;
 ##             CASES_FILE=haxe/test/conformance-macro-cases.txt for the macro cases)
@@ -182,6 +188,16 @@ rt-build: deps
 	sh hxmc/deps/mkrt.sh linux-x86_64
 	$(MAKE) $(TOOL)
 	for t in $(filter-out linux-x86_64,$(RT_TARGETS)); do HXMC=$(CURDIR)/$(TOOL) sh hxmc/deps/mkrt.sh $$t || exit 1; done
+	$(MAKE) --no-print-directory rt-layouts
+
+# one target's objects (with linux-x86_64's, which the tool that assembles the
+# others links)
+rt-target: bin/hxmc/deps/linux-x86_64/VERSIONS bin/hxmc/deps/$(RT_TARGET)/VERSIONS
+	sh hxmc/deps/mkrt.sh linux-x86_64
+	if [ $(RT_TARGET) != linux-x86_64 ]; then $(MAKE) --no-print-directory $(TOOL) && HXMC=$(CURDIR)/$(TOOL) sh hxmc/deps/mkrt.sh $(RT_TARGET); fi
+
+# the committed layouts are what every target's headers give (bin/hxmc/deps/<target>/include)
+rt-layouts: $(TOOL)
 	$(TOOL) -cp hxmc/deps --run Layouts --check
 	$(NODE) hxmc/bootstrap/rt.mjs hash > bin/hxmc/rt/HASH
 
@@ -350,6 +366,11 @@ bin/release/%/lix: $(LIX_DEPS)
 bin/release/%/lix.exe: $(LIX_DEPS)
 	$(call hxmc,$@,$(LIX_ARGS) -D hxmc.target=$*)
 
+lix-dist: $(foreach t,$(TARGETS),bin/release/$(t)/lix$(call EXE,$(t)))
+	mkdir -p bin/lix-dist
+	for t in $(TARGETS); do e=; case $$t in windows-*) e=.exe ;; esac; cp bin/release/$$t/lix$$e bin/lix-dist/lix-$$t$$e || exit 1; done
+	@ls -l bin/lix-dist
+
 # --- The reference compiler ---
 
 # the official nightly (build.haxe.org) of the pinned upstream commit,
@@ -409,8 +430,9 @@ portcheck: $(TOOL) $(STD) $(HOST_RT) $(REFERENCE)
 bench: $(TOOL) $(STD) $(HOST_RT) $(PORT_BIN) bin/lix/lix
 	$(SCRIPT) Bench $(BENCH_ARGS)
 
-measure: $(TOOL) $(STD) $(HOST_RT) $(REFERENCE)
-	$(SCRIPT) Measure
+# (the self-compile of PORT_BIN; the npm package's WebAssembly compiler)
+measure: $(TOOL) $(STD) $(HOST_RT) $(REFERENCE) $(PORT_BIN) bin/npm/native/wasm32-wasi/haxe.wasm
+	$(SCRIPT) Measure --port $(PORT_BIN)
 
 quick: $(TOOL) $(STD) $(HOST_RT)
 	$(SCRIPT) Tiers quick $(CASES)
@@ -422,7 +444,7 @@ full: $(TOOL) $(STD) $(HOST_RT)
 	$(SCRIPT) Tiers full $(CASES)
 
 clean:
-	rm -rf bin/port bin/release bin/site bin/wasm bin/fuzz bin/lix bin/npm bin/stage0 bin/test bin/gfx \
+	rm -rf bin/port bin/release bin/lix-dist bin/site bin/wasm bin/fuzz bin/lix bin/npm bin/stage0 bin/test bin/gfx \
 		bin/hxmc/boot bin/hxmc/fix bin/hxmc-t bin/hxmc-fuzz $(CLI_BOOT)/hxmc-std $(CLI_BOOT)/rt
 
 distclean: clean
