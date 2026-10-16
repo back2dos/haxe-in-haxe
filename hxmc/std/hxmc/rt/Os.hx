@@ -79,7 +79,7 @@ class Os {
 		var ts = Mem.stack(16);
 		C.clock_gettime(L.CLOCK_MONOTONIC, ts);
 		var s:Float = cast Mem.getI64(ts, 0);
-		var ns:Float = cast Mem.getI64(ts, 8);
+		var ns:Float = Mem.getI32(ts, 8); // (tv_nsec: a long, 32 bits on Windows)
 		return s + ns * 1e-9;
 	}
 
@@ -195,7 +195,7 @@ class Os {
 	@:hxmc.noGc public static function deadline(d:Ptr, timeout:Float) {
 		C.clock_gettime(mac() ? L.CLOCK_REALTIME : L.CLOCK_MONOTONIC, d);
 		var s:Float = cast Mem.getI64(d, 0);
-		var ns:Float = cast Mem.getI64(d, 8);
+		var ns:Float = Mem.getI32(d, 8);
 		var t = s + ns * 1e-9 + timeout;
 		var whole = Math.ffloor(t);
 		var sec:I64 = cast whole;
@@ -214,7 +214,7 @@ class Os {
 			var now = Mem.stack(16);
 			C.clock_gettime(L.CLOCK_MONOTONIC, now);
 			var left:Float = cast (Mem.getI64(d, 0) - Mem.getI64(now, 0));
-			var nl:Float = cast (Mem.getI64(d, 8) - Mem.getI64(now, 8));
+			var nl:Float = Mem.getI32(d, 8) - Mem.getI32(now, 8);
 			left += nl * 1e-9;
 			var ms = left <= 0 ? 0 : left > 4e6 ? -294967296 : (cast (left * 1000.0 + 0.999) : Int);
 			if (K.SleepConditionVariableSRW(c, m, ms, 0) != 0) return true;
