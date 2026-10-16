@@ -597,16 +597,18 @@ jobs:
       - name: The ARM64 programs
         run: |
           set -ex
-          make gfx-programs GFX_TARGET=linux-arm64
-          tar czf bin/gfx-linux-arm64.tar.gz -C bin/gfx/linux-arm64 GfxTest Triangle
+          make gfx-programs ui-programs GFX_TARGET=linux-arm64
+          cp bin/ui/linux-arm64/UiDrawTest bin/ui/linux-arm64/TodoTest bin/gfx/linux-arm64/
+          tar czf bin/gfx-linux-arm64.tar.gz -C bin/gfx/linux-arm64 GfxTest Triangle UiDrawTest TodoTest
       - uses: actions/upload-artifact@v7
         with: {name: gfx-linux-arm64, path: bin/gfx-linux-arm64.tar.gz, retention-days: 3}
       - name: The Windows programs
         run: |
           set -ex
           for t in windows-x86_64 windows-arm64; do
-            make gfx-programs GFX_TARGET=$t
-            tar czf bin/gfx-$t.tar.gz -C bin/gfx/$t GfxTest.exe Triangle.exe
+            make gfx-programs ui-programs GFX_TARGET=$t
+            cp bin/ui/$t/UiDrawTest.exe bin/gfx/$t/
+            tar czf bin/gfx-$t.tar.gz -C bin/gfx/$t GfxTest.exe Triangle.exe UiDrawTest.exe
           done
       - uses: actions/upload-artifact@v7
         with: {name: gfx-windows, path: "bin/gfx-windows-*.tar.gz", retention-days: 3}
@@ -623,16 +625,20 @@ jobs:
         with:
           sparse-checkout: |
             packages/gfx/test
+            packages/ui/test
       - uses: actions/download-artifact@v8
         with: {name: gfx-linux-arm64, path: dl}
       - name: gfx (Mesa llvmpipe, Xvfb)
         run: |
           set -ex
           sudo apt-get update -qq
-          sudo apt-get install -qqy --no-install-recommends libegl1 libegl-mesa0 libgl1-mesa-dri libgles2 xvfb xauth
+          sudo apt-get install -qqy --no-install-recommends libegl1 libegl-mesa0 libgl1-mesa-dri libgles2 xvfb xauth fonts-dejavu-core
           mkdir -p gfx
           tar xzf dl/gfx-linux-arm64.tar.gz -C gfx
           sh packages/gfx/test/check.sh gfx
+          export LIBGL_ALWAYS_SOFTWARE=1
+          env -u DISPLAY gfx/UiDrawTest packages/ui/test/draw.png gfx/draw.png
+          env -u DISPLAY gfx/TodoTest packages/ui/test/todo.png gfx/todo.png
       - uses: actions/upload-artifact@v7
         if: always()
         with: {name: gfx-images-linux-arm64, path: gfx/*.png, retention-days: 7}
@@ -665,6 +671,8 @@ jobs:
           mkdir -p gfx
           tar xzf dl/gfx-${{ matrix.target }}.tar.gz -C gfx
           sh packages/gfx/test/check.sh gfx
+          # (the UI's sample with the system's fonts: no golden image)
+          HXMC_GFX_SOFTWARE=1 gfx/UiDrawTest.exe none gfx/ui-smoke.png --smoke
       - uses: actions/upload-artifact@v7
         if: always()
         with: {name: 'gfx-images-${{ matrix.target }}', path: gfx/*.png, retention-days: 7}
@@ -684,7 +692,11 @@ jobs:
       - uses: actions/download-artifact@v8
         with: {name: npm, path: dl}
       - uses: actions/checkout@v7
-        with: {path: repo, sparse-checkout: packages/gfx}
+        with:
+          path: repo
+          sparse-checkout: |
+            packages/gfx
+            packages/ui
       - name: gfx (Metal, Cocoa)
         run: |
           set -ex
@@ -694,13 +706,17 @@ jobs:
           # (a nightly, <version>-nightly.<date>.<commit>, is a prerelease, which
           # the packages' peer range ">=0.1.0" of @hxmc/cli does not take)
           peer=; case "$v" in *-nightly.*) peer=--legacy-peer-deps ;; esac
-          npm install --no-audit --no-fund $peer "$GITHUB_WORKSPACE/dl/hxmc-cli-$v.tgz" "$GITHUB_WORKSPACE/dl/hxmc-darwin-arm64-$v.tgz" $(find "$GITHUB_WORKSPACE/dl" -name 'hxmc-os-*.tgz' -o -name 'hxmc-gfx-*.tgz')
+          npm install --no-audit --no-fund $peer "$GITHUB_WORKSPACE/dl/hxmc-cli-$v.tgz" "$GITHUB_WORKSPACE/dl/hxmc-darwin-arm64-$v.tgz" $(find "$GITHUB_WORKSPACE/dl" -name 'hxmc-os-*.tgz' -o -name 'hxmc-gfx-*.tgz' -o -name 'hxmc-text-*.tgz' -o -name 'hxmc-esx-*.tgz' -o -name 'hxmc-ui-*.tgz')
           g="$GITHUB_WORKSPACE/repo/packages/gfx"
           npx haxe -lib hxmc.gfx -cp "$g/examples" -cp "$g/test" -main GfxTest --custom-target hxmc=gfx/GfxTest
           npx haxe -lib hxmc.gfx -cp "$g/examples" -main Triangle --custom-target hxmc=gfx/Triangle
           ls -l gfx/GfxTest gfx/Triangle
           otool -L gfx/Triangle
           sh "$g/test/check.sh" gfx
+          # the UI's sample built from the npm packages, with the system's fonts (no golden image)
+          u="$GITHUB_WORKSPACE/repo/packages/ui"
+          npx haxe -lib hxmc.ui -cp "$g/test" -cp "$u/test" -main UiDrawTest --custom-target hxmc=gfx/UiDrawTest
+          gfx/UiDrawTest none gfx/ui-smoke.png --smoke
       - uses: actions/upload-artifact@v7
         if: always()
         with: {name: gfx-images-macos-arm64, path: "${{ runner.temp }}/app/gfx/*.png", retention-days: 7, if-no-files-found: ignore}
