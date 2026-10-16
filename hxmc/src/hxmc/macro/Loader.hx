@@ -161,7 +161,8 @@ class Loader {
 		for (c in classes) {
 			var span = "TYSPAN_" + (c.ty : String).substr(3);
 			if (isNew.exists(c.ty)) {
-				if (c.sup != null && !isNew.exists(c.sup)) throw "class " + c.ty + " extends a class of the compiler";
+				// (the root class of every class, Object, is the compiler's)
+				if (c.sup != null && c.sup != "TY_Object" && !isNew.exists(c.sup)) throw "class " + c.ty + " extends a class of the compiler";
 				num.set(span, c.span);
 			} else {
 				var v = abs(span, shared.get(c.ty));

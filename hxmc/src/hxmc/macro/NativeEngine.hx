@@ -23,7 +23,7 @@ class NativeEngine extends macros.MacroEngine.EvalEngine {
 	public var verify = false;
 	var types:Array<ModuleType> = [];
 	var com:Null<context.Common.CommonContext> = null;
-	var compiled = new Map<String, Null<{bundle:Bundle, entry:Ptr}>>();
+	var compiled = new Map<String, Null<Bundle>>(); // class -> its bundle (null: on Eval)
 	var dir:String;
 	var ncompiled = 0;
 	// -D hxmc.macros=native or verify (else this is Eval: set when the macro context is created)
@@ -51,6 +51,8 @@ class NativeEngine extends macros.MacroEngine.EvalEngine {
 		var m = core.Define.rawDefined(com.defines, "hxmc.macros") ? core.Define.rawDefinedValue(com.defines, "hxmc.macros") : "eval";
 		enabled = m == "native" || m == "verify";
 		verify = m == "verify";
+		// (before any macro code runs: Eval may keep the API functions it looked up)
+		if (verify) Bridge.Recorder.install();
 		return super.create(com, api, isMacro, args);
 	}
 
@@ -82,12 +84,18 @@ class NativeEngine extends macros.MacroEngine.EvalEngine {
 		if (!enabled) return super.callPath(ctx, path, f, vl, api);
 		if (ctx.hadError) return null;
 		calls++;
-		var key = path.join(".") + "." + f;
-		var c = compiled.exists(key) ? compiled.get(key) : compile(key, path, f);
-		if (c == null) {
+		var cls = path.join(".");
+		var key = cls + "." + f;
+		// (a class's macro functions are compiled together: all of them run natively
+		// or none, with one static state)
+		var b = compiled.exists(cls) ? compiled.get(cls) : compile(cls, path);
+		var entry = b == null ? null : b.entries.get("e_" + f);
+		if (entry == null) {
 			fallbacks++;
+			if (b != null) note(key + ": no entry (rest arguments): on Eval");
 			return super.callPath(ctx, path, f, vl, api);
 		}
+		var c = {bundle: b, entry: entry};
 		if (!verify) {
 			var t0 = haxe.Timer.stamp();
 			var r = runNative(ctx, path, f, c, vl, api);
@@ -211,9 +219,9 @@ class NativeEngine extends macros.MacroEngine.EvalEngine {
 
 	// ---- compiling a macro function
 
-	function compile(key:String, path:Array<String>, f:String):Null<{bundle:Bundle, entry:Ptr}> {
+	function compile(key:String, path:Array<String>):Null<Bundle> {
 		var t0 = haxe.Timer.stamp();
-		var r = try compileImpl(key, path, f) catch (e:Dynamic) {
+		var r = try compileImpl(key, path) catch (e:Dynamic) {
 			note(key + ": not compiled: " + Std.string(e).split("\n")[0]);
 			null;
 		}
@@ -222,24 +230,19 @@ class NativeEngine extends macros.MacroEngine.EvalEngine {
 		return r;
 	}
 
-	function compileImpl(key:String, path:Array<String>, f:String):{bundle:Bundle, entry:Ptr} {
+	function compileImpl(key:String, path:Array<String>):Bundle {
 		var c = findClass(path);
 		if (c == null) throw "class not in the macro context";
-		var cf = c.clStatics.get(f);
-		if (cf == null) throw "no static " + f;
-		var args, ret;
-		switch TFunctions.follow(cf.cfType) {
-			case TFun(s):
-				args = s.args;
-				ret = s.ret;
-			case _:
-				throw "not a function";
+		// an entry per static function (but those with rest arguments)
+		var fns = [];
+		for (cf in c.clOrderedStatics) {
+			if (!cf.cfKind.match(Method(_)) || cf.cfExpr == null) continue;
+			var rest = switch TFunctions.follow(cf.cfType) {
+				case TFun(s): Lambda.exists(s.args, a -> TFunctions.follow(a.type).match(TAbstract({aPath: {pack: ["haxe"], name: "Rest"}}, _)));
+				case _: true;
+			};
+			if (!rest) fns.push(cf.cfName);
 		}
-		for (a in args)
-			switch TFunctions.follow(a.type) {
-				case TAbstract({aPath: {pack: ["haxe"], name: "Rest"}}, _): throw "rest arguments";
-				case _:
-			}
 		var n = ncompiled++;
 		var d = dir + "/" + n;
 		if (sys.FileSystem.exists(d)) removeDir(d);
@@ -249,8 +252,8 @@ class NativeEngine extends macros.MacroEngine.EvalEngine {
 		// which an abstract's implementation class has not)
 		var mp = core.Globals.sTypePath(c.clModule.mPath);
 		sys.io.File.saveContent(d + "/" + Guest.ENTRY + ".hx", 'class ${Guest.ENTRY} {\n'
-			+ '\tstatic function main() {\n\t\te(null);\n\t\thxmc.macro.GuestHost.mkPos("", 0, 0);\n\t\thxmc.macro.GuestHost.enumPos(null, "", 0, 0);\n\t\thxmc.macro.GuestHost.api("", []);\n\t\thxmc.macro.GuestHost.callPos("", 0, 0);\n\t\tnew hxmc.macro.GuestHost.GuestRef(null, null).toString();\n' + [for (en in EXPR_ENUMS) '\t\tType.getEnumName(haxe.macro.' + en + ');\n'].join("") + '\t}\n\n'
-			+ '\t@:hxmc.macroCall("' + key + '")\n\tpublic static function e(a:Array<Dynamic>):Dynamic\n\t\treturn null;\n}\n');
+			+ '\tstatic function main() {\n' + [for (f in fns) '\t\te_' + f + '(null);\n'].join("") + '\t\thxmc.macro.GuestHost.mkPos("", 0, 0);\n\t\thxmc.macro.GuestHost.enumPos(null, "", 0, 0);\n\t\thxmc.macro.GuestHost.api("", []);\n\t\thxmc.macro.GuestHost.callPos("", 0, 0);\n\t\tnew hxmc.macro.GuestHost.GuestRef(null, null).toString();\n' + [for (en in EXPR_ENUMS) '\t\tType.getEnumName(haxe.macro.' + en + ');\n'].join("") + '\t}\n\n'
+			+ [for (f in fns) '\t@:hxmc.macroCall("' + key + "." + f + '")\n\tpublic static function e_' + f + '(a:Array<Dynamic>):Dynamic\n\t\treturn null;\n\n'].join("") + '}\n');
 		sys.io.File.saveContent(d + "/hxmc/macro/GuestHost.hx", GUEST_HOST);
 		sys.io.File.saveContent(d + "/haxe/macro/Context.hx", contextSource());
 		// the child: this compiler, typing the entry in macro mode for hxmc (Guest)
@@ -281,11 +284,9 @@ class NativeEngine extends macros.MacroEngine.EvalEngine {
 		if (sys.FileSystem.exists(out + ".error")) throw sys.io.File.getContent(out + ".error");
 		if (code != 0 || !sys.FileSystem.exists(out + ".o")) throw "the child compile failed: " + StringTools.trim(log);
 		var b = Loader.load(out);
-		var e = b.entries.get("e");
-		if (e == null) throw "no entry";
 		if (Sys.getEnv("HXMC_MACRO_KEEP") != "1") removeDir(d);
 		note(key + ": compiled (" + b.codeBytes + " bytes of code)");
-		return {bundle: b, entry: e};
+		return b;
 	}
 
 	static function removeDir(d:String) {

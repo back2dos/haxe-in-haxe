@@ -10,9 +10,16 @@ import hxmc.rt.Gc;
 import hxmc.macro.Loader.Bundle;
 
 // Unsupported at the boundary: the engine falls back to Eval.
-class Unsupported extends haxe.Exception {}
+class Unsupported extends haxe.Exception {
+	public function new(msg:String) {
+		super(msg);
+		if (Sys.getEnv("HXMC_MACRO_DEBUG") == "1") Sys.stderr().writeString("hxmc.macros: unsupported: " + msg + "\n");
+	}
+}
 
-typedef ApiCall = {name:String, args:Array<Value>, result:Null<Value>, error:Null<Dynamic>};
+// (end: the index after the calls made during this one, by callbacks it ran: the
+// native run, replayed, does not run them)
+typedef ApiCall = {name:String, args:Array<Value>, result:Null<Value>, error:Null<Dynamic>, end:Int};
 
 // verify mode: records the macro API calls of Eval runs (the API's functions
 // wrapped once), into the list of the innermost macro call being recorded.
@@ -27,11 +34,27 @@ class Recorder {
 	public static function wrap(v:Value, ?label = "function"):Value {
 		return switch v {
 			case VArray(a): VArray(new macros.eval.EvalValue.Varray([for (i in 0...a.alength) wrap(a.avalues[i])], a.alength));
-			case VObject(o): VObject(new macros.eval.EvalValue.Vobject([for (f in o.ofields) wrap(f)], o.oproto));
+			case VObject(o):
+				// (a function field is recorded under its name)
+				var names = new Map<Int, String>();
+				for (f in macros.eval.EvalContext.objectFields(o))
+					names.set(f.name, macros.eval.EvalHash.revHash(f.name));
+				var fs = o.ofields.copy();
+				switch o.oproto {
+					case OProto(p):
+						for (i in 0...fs.length)
+							fs[i] = wrap(o.ofields[i]);
+						p.pinstanceNames.iter((h, i) -> fs[i] = wrap(o.ofields[i], "function " + names.get(h)));
+					case _:
+						fs = [for (f in o.ofields) wrap(f)];
+				}
+				VObject(new macros.eval.EvalValue.Vobject(fs, o.oproto));
 			case VEnumValue(e): VEnumValue(new macros.eval.EvalValue.VenumValue(e.eindex, [for (a in e.eargs) wrap(a)], e.epath, e.enpos));
 			// (a Ref's get and toString are pure: called by both runs, their results wrapped)
 			case VInstance(vi = {ikind: IRef(_)}): VInstance(new macros.eval.EvalValue.Vinstance([for (f in vi.ifields) pure(f)], vi.iproto, vi.ikind));
 			case VFunction(_, _) | VFieldClosure(_, _): recording(label, v);
+			// (a copy of its value once forced: the runs force and change their own)
+			case VLazy(l): VLazy(core.ds.AtomicLazy.fromFun(() -> wrap(l.force())));
 			case _: v;
 		}
 	}
@@ -65,12 +88,15 @@ class Recorder {
 			if (Bridge.replay != null) return Bridge.replayValue(name, vl);
 			var top = stack.length == 0 ? null : stack[stack.length - 1];
 			if (top == null) return macros.eval.EvalMisc.callValue(f, vl);
-			var c:ApiCall = {name: name, args: [for (v in vl) copy(v)], result: null, error: null};
+			var c:ApiCall = {name: name, args: [for (v in vl) copy(v)], result: null, error: null, end: 0};
 			top.push(c);
+			c.end = top.length;
 			var r = try macros.eval.EvalMisc.callValue(f, vl) catch (e:Dynamic) {
 				c.error = e;
+				c.end = top.length;
 				throw e;
 			}
+			c.end = top.length;
 			c.result = wrap(r);
 			return wrap(r);
 		}, isStatic);
@@ -104,11 +130,10 @@ class Bridge {
 	static var enumPos = new haxe.ds.ObjectMap<Dynamic, Null<Pos>>();
 	public static var apiCalls = 0;
 
+	// (the maps of positions and origins stay: macro code keeps values across calls in
+	// its statics. They keep what they hold alive: a production version needs weak maps)
 	public static function reset() {
 		callFile = null;
-		enumPos = new haxe.ds.ObjectMap();
-		slotPos = new haxe.ds.ObjectMap();
-		origin = new haxe.ds.ObjectMap();
 	}
 
 	// ---- the exports macro code calls
@@ -179,6 +204,7 @@ class Bridge {
 			throw new Unsupported("API call " + name + " that Eval did not make");
 		}
 		var c = replay[k];
+		replayAt = c.end;
 		if (c.name != name) {
 			if (replayMismatch == null) replayMismatch = "API call " + k + ": " + name + " where Eval called " + c.name;
 			throw new Unsupported("API call sequence differs");
