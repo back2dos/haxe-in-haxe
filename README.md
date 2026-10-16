@@ -213,7 +213,7 @@ haxe/test --run <Name> --help`-style options at the top of each file):
 | `Interp` | `--interp` runs of the case lists | 275/276 (`eval-eventLoop-compile` depends on thread timing) |
 | `Haxelib` | `-L` through lix's haxelib shim, batch and server | 14/14 |
 | `EvalDebugger` | scripted Eval debugger sessions (`-D eval-debugger`): breakpoints, stepping, scopes, evaluation, assignment, exception and function breakpoints, a macro | 6/6 |
-| `fuzz/` | random programs per target (`diff:<target>`) or by program output (`exec:<a>,<b>`), with reduction (`make test-fuzz LANE=diff:js`) | |
+| `fuzz/` | random programs per target (`diff:<target>`) or by program output (`exec:<a>,<b>`), with reduction (`make test-fuzz LANE=diff:js`); `--cases haxe/test/fuzz/cases` checks the kept programs (failures fixed since, reduced, one directory each) on the lanes | |
 | `Targets` | the website's target table (`hxmc/web/data/targets.json`): haxe-formatter and the port itself compiled for every target by both, CPU, wall and peak RSS, outputs compared (hl/c after `HlcNames`); `-p self -t hlc --merge --json hxmc/web/data/targets.json` replaces those rows only | 18/18 identical (the rows the reference compiles) |
 | `Measure` | peak RSS, wall and CPU time: the self-compile (ours and the reference), the native build, the WebAssembly builds | self-compile 879 MB vs the reference's 1414 MB |
 | `unit.hxml` | unit tests of port modules, in-process | pass |
@@ -343,8 +343,9 @@ development VM, best of the runs).
 - Preserve function order, branch order, data layout, error messages and
   exception behavior. Prefer a direct translation over a redesign.
 - Reproduce OCaml semantics that reach the output: `Hashtbl` iteration order
-  (`core.ds.OcamlHashtbl`), `PMap` order (sorted keys), right-to-left
-  evaluation of arguments with side effects, float printing (`core.Numeric`,
+  (`core.ds.OcamlHashtbl`), `PMap` order (sorted keys; extlib's `PMap.map`
+  and `mapi` visit the tree in post-order), right-to-left evaluation of
+  arguments with side effects, float printing (`core.Numeric`,
   `core.ds.OcamlPrintf`), 31/63-bit integers. Never derive output order from
   Haxe `Map` iteration.
 - Output that depends on the reference binary itself is the one exception

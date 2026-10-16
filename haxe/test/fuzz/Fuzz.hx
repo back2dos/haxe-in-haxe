@@ -46,6 +46,9 @@ Options:
   --target-def SPEC   custom target name|args|output|run, args separated by spaces,
                       output none, file:P, dir:P, zip:P or hxb:P, run optional ({out} = output dir)
   --emit DIR          only write the programs to DIR/<seed>/ and exit
+  --cases DIR         check the programs kept under DIR/<name>/ (main class Main) on the
+                      lanes instead of generated ones (haxe/test/fuzz/cases: the failures
+                      fixed since, reduced); no reduction
   --stop              stop at the first failure
   --list              list targets and features
   -v                  print every verdict
@@ -74,6 +77,7 @@ Options:
 	static var outDir = "";
 	static var verbose = false;
 	static var stopAtFirst = false;
+	static var cases:Null<Array<{name:String, files:Array<{path:String, text:String}>}>> = null;
 
 	static function main() {
 		var args = Sys.args();
@@ -95,6 +99,7 @@ Options:
 		var defines = [];
 		var custom = [];
 		var emit:Null<String> = null;
+		var casesDir:Null<String> = null;
 		seed = Std.int(Sys.time() * 1000) & 0x3FFFFFFF;
 		outDir = root + "/bin/test/fuzz";
 		var i = 0;
@@ -135,6 +140,7 @@ Options:
 				case "--out": outDir = FileSystem.absolutePath(arg());
 				case "--target-def": custom.push(arg());
 				case "--emit": emit = arg();
+				case "--cases": casesDir = FileSystem.absolutePath(arg());
 				case "--stop": stopAtFirst = true;
 				case "-v": verbose = true;
 				case "--list":
@@ -156,6 +162,11 @@ Options:
 				Sys.println("unknown feature " + f + " (see --list)");
 				Sys.exit(2);
 			}
+		if (casesDir != null) {
+			cases = readCases(casesDir);
+			count = cases.length;
+			reduceBudget = 0;
+		}
 		if (emit != null) {
 			for (k in 0...count) {
 				var p = Gen.generate(seed + k, portable, size, forced, mutate);
@@ -190,7 +201,9 @@ Options:
 			Runner.common = Runner.common.concat(["-D", d]);
 		FileSystem.createDirectory(outDir + "/work");
 		FileSystem.createDirectory(outDir + "/failures");
-		Sys.println("fuzz: seed " + seed + ", " + (count == 0 ? "unbounded" : count + " programs") + (seconds > 0 ? ", " + seconds + " s" : "") + ", " + jobs
+		if (cases != null)
+			Sys.println("fuzz: " + count + " kept programs of " + casesDir + ", " + jobs + " jobs");
+		else Sys.println("fuzz: seed " + seed + ", " + (count == 0 ? "unbounded" : count + " programs") + (seconds > 0 ? ", " + seconds + " s" : "") + ", " + jobs
 			+ " jobs, size " + size + (portable ? ", portable" : ""));
 		for (l in lanes)
 			Sys.println("  lane " + l.name + ": " + Runner.commandLine(l.a, "out") + "  <>  " + Runner.commandLine(l.b, "out"));
@@ -278,11 +291,16 @@ Options:
 			if (k < 0)
 				break;
 			var s = seed + k;
-			var p = Gen.generate(s, portable, size, forced, mutate);
+			var p = if (cases != null) {
+				var kept = new Program(k);
+				kept.kept = cases[k].files;
+				kept;
+			} else Gen.generate(s, portable, size, forced, mutate);
+			var name = cases != null ? cases[k].name : "" + s;
 			Runner.writeProgram(p.files(), work + "/src");
 			for (lane in lanes) {
 				var v = Runner.check(lane, work);
-				record(lane, s, p, v, work);
+				record(lane, name, p, v, work);
 			}
 			mutex.acquire();
 			done++;
@@ -321,7 +339,31 @@ Options:
 	static function notable(kind:String):Bool
 		return failing(kind) || kind == "reference-failure";
 
-	static function record(lane:Lane, s:Int, p:Program, v:Verdict, work:String) {
+	/** The kept programs: one per subdirectory, its .hx files by path, in name order. **/
+	static function readCases(dir:String):Array<{name:String, files:Array<{path:String, text:String}>}> {
+		var names = [for (n in FileSystem.readDirectory(dir)) if (FileSystem.isDirectory(dir + "/" + n)) n];
+		names.sort(Reflect.compare);
+		return [
+			for (n in names) {
+				var files = [];
+				function walk(rel:String) {
+					var entries = FileSystem.readDirectory(dir + "/" + n + rel);
+					entries.sort(Reflect.compare);
+					for (e in entries) {
+						var path = rel + "/" + e;
+						if (FileSystem.isDirectory(dir + "/" + n + path))
+							walk(path);
+						else if (StringTools.endsWith(e, ".hx"))
+							files.push({path: path.substr(1), text: File.getContent(dir + "/" + n + path)});
+					}
+				}
+				walk("");
+				{name: n, files: files};
+			}
+		];
+	}
+
+	static function record(lane:Lane, name:String, p:Program, v:Verdict, work:String) {
 		// an injected error both compilers report alike is a pass
 		if (v.kind == "invalid" && Lambda.exists(p.features, f -> StringTools.startsWith(f, "mutated:")))
 			v = {kind: "rejected-alike", detail: v.detail};
@@ -345,11 +387,11 @@ Options:
 		}
 		mutex.release();
 		if (verbose || notable(v.kind))
-			Sys.println("seed " + s + " " + lane.name + ": " + v.kind + (v.detail == "" ? "" : " - " + v.detail));
+			Sys.println((cases != null ? "case " : "seed ") + name + " " + lane.name + ": " + v.kind + (v.detail == "" ? "" : " - " + v.detail));
 		if (!save)
 			return;
-		var dir = outDir + "/" + (v.kind == "invalid" ? "invalid" : (failing(v.kind) ? "failures/" : "reference-failures/") + slug(sig)) + "/" + s;
-		saveCase(dir, lane, s, p, v, work);
+		var dir = outDir + "/" + (v.kind == "invalid" ? "invalid" : (failing(v.kind) ? "failures/" : "reference-failures/") + slug(sig)) + "/" + name;
+		saveCase(dir, lane, name, p, v, work);
 		if (notable(v.kind) && seen == 0 && reduceBudget > 0) {
 			var t0 = Sys.time();
 			var reduceWork = work + "-reduce";
@@ -362,11 +404,11 @@ Options:
 			// the final program, checked once more for its logs
 			Runner.writeProgram(p.files(), reduceWork + "/src");
 			var rv = Runner.check(lane, reduceWork);
-			saveCase(dir + "/reduced", lane, s, p, rv, reduceWork);
+			saveCase(dir + "/reduced", lane, name, p, rv, reduceWork);
 			var lines = 0;
 			for (f in p.files())
 				lines += f.text.split("\n").length;
-			Sys.println("  reduced seed " + s + " in " + n + " tests, " + Std.int(Sys.time() - t0) + " s: " + lines + " lines, " + dir + "/reduced");
+			Sys.println("  reduced " + name + " in " + n + " tests, " + Std.int(Sys.time() - t0) + " s: " + lines + " lines, " + dir + "/reduced");
 		}
 	}
 
@@ -375,14 +417,14 @@ Options:
 			File.copy(from, to);
 	}
 
-	static function saveCase(dir:String, lane:Lane, s:Int, p:Program, v:Verdict, work:String) {
+	static function saveCase(dir:String, lane:Lane, name:String, p:Program, v:Verdict, work:String) {
 		Runner.writeProgram(p.files(), dir + "/src");
 		for (side in [lane.a, lane.b]) {
 			for (f in ["compile.log", "compile.code", "run.log", "run.code"])
 				copyFile(work + "/" + side.label + "/" + f, dir + "/" + side.label + "-" + f);
 		}
 		var b = new StringBuf();
-		b.add("lane: " + lane.name + "\nseed: " + s + "\nkind: " + v.kind + "\ndetail: " + v.detail + "\nfeatures: " + p.features.join(" ") + "\n");
+		b.add("lane: " + lane.name + (cases != null ? "\ncase: " : "\nseed: ") + name + "\nkind: " + v.kind + "\ndetail: " + v.detail + "\nfeatures: " + p.features.join(" ") + "\n");
 		File.saveContent(dir + "/verdict.txt", b.toString());
 		var sh = new StringBuf();
 		sh.add("#!/bin/sh\n# Re-runs both sides of lane " + lane.name + " from this directory.\ncd \"$(dirname \"$0\")\"\n");

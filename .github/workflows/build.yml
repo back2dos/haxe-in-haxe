@@ -759,6 +759,7 @@ jobs:
               debugger) $S EvalDebugger --shard ${{ matrix.shard }} --summary "$GITHUB_STEP_SUMMARY" ;;
               fuzz)
                 for lane in ${{ matrix.lanes }}; do
+                  bin/port/haxe -cp haxe/test/fuzz -cp haxe/test --run Fuzz -j 4 --cases haxe/test/fuzz/cases --port $PWD/bin/port/haxe --lane $lane || failed="$failed $lane"
                   bin/port/haxe -cp haxe/test/fuzz -cp haxe/test --run Fuzz -j 4 -n 100 --port $PWD/bin/port/haxe --lane $lane || failed="$failed $lane"
                 done ;;
             esac || failed="$failed $suite"

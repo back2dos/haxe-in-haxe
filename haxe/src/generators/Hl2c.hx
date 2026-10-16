@@ -1789,11 +1789,20 @@ class Hl2c {
 					"t$ctx_" + makeSign(d);
 			}
 		}
-		// port: PMap.mapi visits the keys in OCaml compare order
-		var keys = htypes.keys.copy();
-		haxe.ds.ArraySort.sort(keys, tCompare);
+		// port: extlib's PMap.mapi visits the tree in post-order (`let l = loop l in
+		// let r = loop r in Node (l, k, f k v, r, h)`), which make_sign's
+		// first-come short names reflect; the tree is the one gather_types built
+		// by PMap.add, with the keys in their insertion order.
+		var tree:Null<PMapNode<Ttype>> = null;
+		for (t in htypes.keys) tree = PMapNode.add(tCompare, t, tree);
 		var out = new TtypeMap<String>();
-		for (t in keys) out.set(t, descString(makeDesc(t)));
+		function loop(n:Null<PMapNode<Ttype>>) {
+			if (n == null) return;
+			loop(n.l);
+			loop(n.r);
+			out.set(n.k, descString(makeDesc(n.k)));
+		}
+		loop(tree);
 		return out;
 	}
 
