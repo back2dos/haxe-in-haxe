@@ -357,7 +357,11 @@ class Zlib {
 	}
 
 	inline function CLEAR_HASH():Void {
-		for (i in 0...hash_size) head[i] = NIL;
+		// port: zmemzero (NIL is 0): emptied and extended again, the array is
+		// zero-filled in place (Int's default value on the static targets)
+		// instead of 32K bounds-checked stores per stream
+		head.resize(0);
+		head.resize(hash_size);
 	}
 
 	inline function UPDATE_HASH(h:Int, c:Int):Int return ((h << hash_shift) ^ c) & hash_mask;
