@@ -748,12 +748,29 @@ setjmp/longjmp do not unwind, but debuggers and SEH-based tools would.
   running it 15 ms, typing the math types (their swizzles and overloads)
   about 0.08 s; the executable is 1 KB smaller (109 KB). Left: uniforms
   bound at run time (`Encoder.setUniforms` or a per-frame ring, GL's
-  `glUniformBlockBinding` by the block's name), textures and samplers as
-  parameters, variants (compile-time constants per pipeline), integer
+  `glUniformBlockBinding` by the block's name), variants (compile-time constants per pipeline), integer
   vertex formats and flat varyings, `switch`, arrays of constant size,
   matrices other than 4x4, the fragment position's convention (GL's
   `gl_FragCoord` is y-up, the others y-down), one depth range, SPIR-V,
   caching emitted code across compilations (the compilation server).
+- What a UI renderer needs (done, 2026-10-16; for `@hxmc/ui`, UI.md):
+  `Device.writeBuffer` (a write takes effect for the whole frame, as
+  WebGPU's queue writes do; Metal waits for the last frame first),
+  textures (`createTexture`, `writeTexture`: R8 and RGBA8, Linear or
+  Nearest, clamped, one level) bound by slot (`Encoder.setTexture`), a
+  pipeline's `blend` (Replace, Alpha, Premultiplied, Add), and
+  `Encoder.setScissor` (pixels from the top left, the whole target at
+  each pass). In shaders a `Texture2D` is a parameter of the
+  `@:fragment` function, sampled with `texture(t, uv)` at level 0
+  (`textureLod`, `SampleLevel`, `sample(.., level(0))`,
+  `textureSampleLevel`: no uniform control flow needed in WGSL); not a
+  local, a field or another function's argument (`test/reject`). The
+  textures are `tex_<slot>` (GL: the sampler's unit set at link; HLSL
+  `t`/`s` registers; MSL `[[texture]]`/`[[sampler]]`; WGSL bindings
+  16 + 2 * slot and the sampler after, an explicit bind group layout).
+  Checked by `FeatureScene` (GfxTest features, WebTest) against
+  `test/features.png`: exact on llvmpipe, within the tolerance on
+  WebGPU and WebGL2 (SwiftShader); D3D11 (WARP) and Metal in CI.
 - Structs by value in C calls (done for arm64, 2026-10-16): AAPCS64 on
   macOS, Linux and Windows (MirBuild.cStructArg, cStructRet; a64 Isel):
   homogeneous aggregates of up to four floats or doubles in v registers,
