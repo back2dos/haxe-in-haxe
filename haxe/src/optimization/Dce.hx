@@ -223,7 +223,8 @@ class Dce {
 			if (!hasClassFieldFlag(cf, CfUsed)) {
 				addClassFieldFlag(cf, CfUsed);
 				dce.addedFields.push({cls: owner, field: cf, kind: kind});
-				dce.markedFields.value.unshift(cf);
+				// port: appended (upstream conses): only cleared again, one by one, in any order
+				dce.markedFields.value.push(cf);
 				dce.fieldMarkerMutex.release();
 				checkFeature(dce, Globals.sTypePath(c.clPath) + "." + cf.cfName);
 			} else dce.fieldMarkerMutex.release();
