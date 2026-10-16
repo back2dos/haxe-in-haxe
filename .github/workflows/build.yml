@@ -929,9 +929,10 @@ jobs:
   # into the cache, here from the local tarball through HXMC_WASM_TARBALL, or
   # installed); @hxmc/source (an edit, hxmc-rebuild, haxe runs the rebuilt
   # compiler, --reset)
+  # (build: lix)
   npm:
-    needs: [changes, npm-pack]
-    if: ${{ !cancelled() && needs.npm-pack.result == 'success' && needs.changes.outputs.all == 'true' }}
+    needs: [changes, npm-pack, build]
+    if: ${{ !cancelled() && needs.npm-pack.result == 'success' && needs.build.result == 'success' && needs.changes.outputs.all == 'true' }}
     strategy:
       fail-fast: false
       matrix:
