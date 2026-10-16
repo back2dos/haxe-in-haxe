@@ -8,7 +8,7 @@ using StringTools;
 
 // `-lib <name>` (-L, --library, also in hxml files) from node_modules, for the
 // npm package's compiler (hxmc.HaxeMain installs it as compiler.HighLevel's
-// libraryHook; README.md, "Using hxmc"). For each library, in this order:
+// libraryHook; docs/using.md). For each library, in this order:
 // - lix's: a haxe_libraries/<name>.hxml in the working directory or a parent
 //   leaves it to haxelib (lix's haxelib shim reads that file);
 // - an npm package: the nearest node_modules, from the working directory up

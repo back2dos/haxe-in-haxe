@@ -1,7 +1,7 @@
 #!/bin/sh
 # Builds mbedtls and libuv as static libraries for an hxmc target, with zig cc
 # and the flags of the target's runtime object (hxmc/deps/mkrt.sh), which
-# turns them into the separate objects ssl.o and uv.o (README.md, "hxmc"):
+# turns them into the separate objects ssl.o and uv.o (docs/hxmc.md):
 #
 #   sh hxmc/deps/deps.sh <target> <out dir>     e.g. linux-x86_64 bin/hxmc/deps/linux-x86_64
 #

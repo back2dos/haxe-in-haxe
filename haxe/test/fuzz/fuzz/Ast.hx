@@ -67,7 +67,12 @@ class Program {
 		this.seed = seed;
 	}
 
+	/** The sources of a kept program (`--cases`), in place of the modules. **/
+	public var kept:Null<Array<{path:String, text:String}>> = null;
+
 	public function files():Array<{path:String, text:String}> {
+		if (kept != null)
+			return kept;
 		return [for (m in modules) {path: m.path, text: Printer.module(m)}];
 	}
 }

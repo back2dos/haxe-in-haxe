@@ -152,7 +152,7 @@ class VDescField {
 // the closure info of a 2-ary closure) with offset 0 and an all-zero digest, so
 // the `t$fun_`/`t$vrt_`/`t$ctx_` names of the descriptions that reach a prototype
 // intentionally differ from the reference's (the conformance harnesses normalize
-// them: README.md, "Testing"). Everything else of the value is written as OCaml
+// them: docs/testing.md). Everything else of the value is written as OCaml
 // does: the records in their field order, the PMaps' AVL trees (rebuilt from the
 // keys' first-insertion order, as extlib's PMap.add builds them), sharing and cycles.
 private class OcamlExtern {
@@ -1789,11 +1789,20 @@ class Hl2c {
 					"t$ctx_" + makeSign(d);
 			}
 		}
-		// port: PMap.mapi visits the keys in OCaml compare order
-		var keys = htypes.keys.copy();
-		haxe.ds.ArraySort.sort(keys, tCompare);
+		// port: extlib's PMap.mapi visits the tree in post-order (`let l = loop l in
+		// let r = loop r in Node (l, k, f k v, r, h)`), which make_sign's
+		// first-come short names reflect; the tree is the one gather_types built
+		// by PMap.add, with the keys in their insertion order.
+		var tree:Null<PMapNode<Ttype>> = null;
+		for (t in htypes.keys) tree = PMapNode.add(tCompare, t, tree);
 		var out = new TtypeMap<String>();
-		for (t in keys) out.set(t, descString(makeDesc(t)));
+		function loop(n:Null<PMapNode<Ttype>>) {
+			if (n == null) return;
+			loop(n.l);
+			loop(n.r);
+			out.set(n.k, descString(makeDesc(n.k)));
+		}
+		loop(tree);
 		return out;
 	}
 

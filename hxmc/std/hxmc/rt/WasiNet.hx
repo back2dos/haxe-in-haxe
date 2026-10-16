@@ -1,6 +1,6 @@
 package hxmc.rt;
 
-// hxmc.NativeNet for WebAssembly (README.md, "WebAssembly"): WASI
+// hxmc.NativeNet for WebAssembly (docs/hxmc.md, "WebAssembly"): WASI
 // preview 1 has no sockets and no name resolution, so every operation fails
 // with ENOSYS (sys.net.Socket throws "Function not implemented", Host
 // resolution "Unknown host").

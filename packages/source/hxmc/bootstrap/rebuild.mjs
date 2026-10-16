@@ -1,4 +1,4 @@
-// `hxmc-rebuild` (the npm package @hxmc/source, README.md, "Using hxmc"):
+// `hxmc-rebuild` (the npm package @hxmc/source, docs/using.md):
 // builds the compiler again from the package's (possibly edited) haxe/src,
 // hxmc/src and hxmc/std, with @hxmc/cli's std and runtime objects, into the
 // cache (<cache>/npm/<version>/rebuild/<target>/: haxe[.exe] and hxmc-std),

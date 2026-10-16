@@ -5,7 +5,7 @@ import hxmc.rt.Types.*;
 import hxmc.unsafe.Mem;
 import hxmc.unsafe.Ptr;
 
-// The program's end and uncaught exceptions on WebAssembly (README.md,
+// The program's end and uncaught exceptions on WebAssembly (docs/hxmc.md,
 // "WebAssembly"; the field names are hxmc.rt.Names on every target).
 @:hxmc.wasm @:keep
 class Exit {

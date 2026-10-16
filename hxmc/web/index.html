@@ -71,13 +71,13 @@ haxe-in-haxe -cp src --main Main --js out.js</pre>
 		<h2>Graphics</h2>
 		<div class="gfx">
 			<figure>
-				<canvas id="triangle" aria-label="A triangle with a red, a green and a blue corner, drawn with WebGPU"></canvas>
+				<canvas id="triangle" aria-label="A triangle with a red, a green and a blue corner"></canvas>
 				<p id="triangle-state" class="gfx-state" hidden></p>
 			</figure>
 			<div>
-				<p>This triangle is Haxe compiled by hxmc to WebAssembly, drawing through WebGPU. The same program, <a href="https://github.com/benmerckx/hxmc/blob/main/packages/gfx/examples/Triangle.hx">Triangle.hx</a>, opens a window and draws with OpenGL on Linux and with Metal on macOS, to the same pixels.</p>
+				<p>This triangle is Haxe compiled by hxmc to WebAssembly, drawing through <span id="triangle-api">WebGPU, or WebGL2 where WebGPU is missing</span>. The same program, <a href="https://github.com/benmerckx/hxmc/blob/main/packages/gfx/examples/Triangle.hx">Triangle.hx</a>, opens a window and draws with OpenGL on Linux, with Metal on macOS and with Direct3D 11 on Windows, to the same pixels. On WebGL2 it runs the same OpenGL ES code as on Linux, its calls going to the browser instead of the driver.</p>
 				<p>It uses two packages in pure Haxe: <a href="https://github.com/benmerckx/hxmc/tree/main/packages/os">@hxmc/os</a> (windows, input and the app loop) and <a href="https://github.com/benmerckx/hxmc/tree/main/packages/gfx">@hxmc/gfx</a> (a GPU layer shaped like WebGPU, with integer handles and no allocation per frame). They call the system's APIs directly; in the browser, each package's calls go to a small JavaScript module.</p>
-				<p class="note"><span data-info="triangleSize">~64 KB</span> of WebAssembly. Its <code>main</code> returns after the setup; then each <code>requestAnimationFrame</code> calls back into the module for a frame.</p>
+				<p class="note"><span data-info="triangleSize">~85 KB</span> of WebAssembly. Its <code>main</code> returns after the setup; then each <code>requestAnimationFrame</code> calls back into the module for a frame.</p>
 			</div>
 		</div>
 	</section>
@@ -106,7 +106,7 @@ lix +lib tink_core              # haxe_libraries/tink_core.hxml
 haxe -lib tink_core --run Main  # runs Haxe 4.3.7 with tink_core
 lix use haxe 4.3.6              # switch to another downloaded version
 lix download                    # after a clone: the scope's Haxe and missing libraries</pre>
-		<p class="note">The <code>haxe</code> shim adds about 2 ms to a compiler call (Node.js: about 60 ms). The compiler server modes (<code>--wait</code>, <code>--server-listen</code>, <code>--server-connect</code>) run on libuv with hxcoro coroutines. Compared with the npm package on 26 scenarios, output and installed files are identical. Details: <a href="https://github.com/benmerckx/hxmc/blob/main/README.md">README.md</a>.</p>
+		<p class="note">The <code>haxe</code> shim adds about 2 ms to a compiler call (Node.js: about 60 ms). The compiler server modes (<code>--wait</code>, <code>--server-listen</code>, <code>--server-connect</code>) run on libuv with hxcoro coroutines. Compared with the npm package on 26 scenarios, output and installed files are identical. Details: <a href="https://github.com/benmerckx/hxmc/blob/main/docs/using.md">docs/using.md</a>.</p>
 	</section>
 
 	<section id="status">
@@ -118,7 +118,7 @@ lix download                    # after a clone: the scope's Haxe and missing li
 			<li><code>--interp</code>, display requests, the compilation server and the Eval debugger;</li>
 			<li>upstream's target-independent CI job (unit, misc, threads, tink_core, hxcoro), which passes with the native build.</li>
 		</ul>
-		<p class="note">Details: <a href="https://github.com/benmerckx/hxmc/blob/main/README.md">README.md, Testing</a>.</p>
+		<p class="note">Details: <a href="https://github.com/benmerckx/hxmc/blob/main/docs/testing.md">docs/testing.md</a>.</p>
 	</section>
 
 	<section id="benchmarks">

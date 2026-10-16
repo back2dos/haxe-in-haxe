@@ -11,7 +11,7 @@ the code generator and help every target.
 
 ### Stack maps instead of the shadow stack (tried, reverted)
 
-Tried at e91b276 (stage 5a), reverted to the shadow stack (README,
+Tried at e91b276 (stage 5a), reverted to the shadow stack (git history,
 "Stack maps: tried and reverted"): root slots in machine frames, frame
 records, a descriptor table per code region, frameless thunks recording
 the last frame before C calls, entries for C's calls into Haxe. Measured
@@ -103,7 +103,7 @@ Ranked by estimated payoff, each needing more than a local fix:
 
 ### Cleanup after the runtime move (done)
 
-Done (README, "Runtime in Haxe"):
+Done (docs/hxmc.md, "Runtime in Haxe"):
 
 - One source per runtime area: the haxe.atomic cells are written over
   the `Atomic` intrinsics, `hxmc.NativeZip` is the implementation,
@@ -136,7 +136,7 @@ may compute the address before an allocation among the same expression's
 operands; the collector then moves the object and the code writes through
 a stale address (about 13% of ThreadNatives runs failed after the first
 haxe.atomic collapse). Fixed by moving the address work into
-`@:hxmc.noGc` helpers, and the rule is in the README ("Runtime in
+`@:hxmc.noGc` helpers, and the rule is in docs/hxmc.md ("Runtime in
 Haxe"), but it is only a convention.
 
 Make the compiler enforce it: track values derived from `Mem.addr`
@@ -256,7 +256,7 @@ points and the ideas that address them:
 
 ### sys.ssl and libuv (done)
 
-Done (2026-10-15, README "sys.ssl and libuv"): mbedtls and libuv built per
+Done (2026-10-15, docs/hxmc.md, "Targets"): mbedtls and libuv built per
 target with zig at our build time (`hxmc/deps/deps.sh`), turned into
 `ssl.o` and `uv.o` next to the runtime object and linked only into programs
 that refer to them; the port and lix link both; WebAssembly keeps the
@@ -465,7 +465,7 @@ only). No JIT on iOS.
 
 ### WebAssembly
 
-Done (2026-10-14, README "WebAssembly"): `wasm32-wasi`, a linear-memory
+Done (2026-10-14, docs/hxmc.md, "WebAssembly"): `wasm32-wasi`, a linear-memory
 module written from Mir (Ramsey-style structuring, SSA values as locals,
 exception handling for `try`), linked by hxmc, with the whole runtime in
 Haxe: the collector of rt.c single-threaded, malloc over `memory.grow`,
@@ -478,7 +478,7 @@ to the reference's HXB under both (15-16 s, native 8.4 s). Left:
   under wasi-threads or a browser's workers; the collector's
   stop-the-world handshake of the native targets (`Threads.hx`) would
   come back. Until then `Thread.create` throws.
-- A browser: done for the playground (2026-10-15, README "WebAssembly":
+- A browser: done for the playground (2026-10-15, docs/hxmc.md, "WebAssembly":
   WASI's imports from JavaScript, `hxmc/web/src/WasiHost.hx`; exnref exception
   handling, on by default in current Chrome, Firefox and Safari). Left:
   WebGPU and input for graphics (see "Graphics"); Firefox's throws walk the
@@ -489,7 +489,7 @@ to the reference's HXB under both (15-16 s, native 8.4 s). Left:
   module, of i64 values (parameters, locals) also used in full: a second,
   i32 local for those with many address uses, or an i32 pointer type in
   Mir, would remove most (about 480 KB raw, little gzipped). The
-  port's self-compile is 1.8x native x64's (README "WebAssembly").
+  port's self-compile is 1.8x native x64's (docs/hxmc.md, "WebAssembly").
 - The playground: done (2026-10-15). The site's compiler is the port built
   by hxmc (10.8 MB, 2.1 MB gzipped, against the Emscripten module's 11.5 MB
   and 2.25 MB), with the browser glue above. Further size, if wanted:
@@ -583,8 +583,8 @@ setjmp/longjmp do not unwind, but debuggers and SEH-based tools would.
 - Back ends in order: GL 3.3 / GLES 3 on Linux first (glibc mode; EGL and
   libX11 imports; Mesa's llvmpipe and Xvfb run it without a GPU, here and
   on CI), then Metal (done, below), D3D11 (done, below), WebGPU (done,
-  below; WebGL2 only if browsers without WebGPU matter), then Vulkan /
-  D3D12.
+  below) with WebGL2 for browsers without it (done, below: the GL back
+  end), then Vulkan / D3D12.
 - First milestone (done): a GL triangle in an X11 window
   (`packages/gfx/examples/Triangle.hx`), checked against a golden image
   headless (EGL pbuffer on Mesa's surfaceless platform, `glReadPixels`) and
@@ -650,7 +650,7 @@ setjmp/longjmp do not unwind, but debuggers and SEH-based tools would.
   `Triangle.hx` on a canvas, against the same golden image within GfxTest's
   tolerance (SwiftShader in headless Chromium: 422 pixels off by 1,
   `make gfx-web-check`), and on the site (hxmc/web, "Graphics": 64 KB of
-  WebAssembly; a message where `navigator.gpu` is missing). The import
+  WebAssembly; WebGL2 where WebGPU is missing, below). The import
   convention: a package whose externs are imports of a module
   (`@:hxmc.lib("hxmc_gfx")`) ships `imports.mjs`, whose default export maps
   a host to import objects, possibly asynchronously (the adapter and device
@@ -672,6 +672,36 @@ setjmp/longjmp do not unwind, but debuggers and SEH-based tools would.
   sources in its bundle, the worker the packages' imports and a canvas,
   e.g. an OffscreenCanvas), node has no WebGPU (the corpus runner stays
   WASI only).
+- WebGL2 (done, 2026-10-16, wasm32-wasi in the browser): the triangle
+  wherever WebGL2 exists (Firefox on Linux and macOS, older Safari,
+  Chromium without WebGPU), with no second back end: WebGL2 is GLES 3.0,
+  so `GLBackend` runs there unchanged but for the context, the same
+  GLSL ES 3.00 (`ShaderCode.glsl`). `GL`'s build macro (`Loader`)
+  makes each declaration an import of the module `hxmc_gl` when typed
+  for wasm32-wasi (`-D hxmc.target`), an `@:hxmc.indirect` call through
+  an eglGetProcAddress pointer elsewhere (native binaries unchanged in
+  behaviour; the Linux checks stay exact). `packages/gfx/imports.mjs`
+  implements them on a WebGL2 context: object names are handles of
+  browser.mjs's table, strings, buffer data and glReadPixels go through
+  the module's memory (`Ptr<Ptr>` entries 8 bytes, hxmc's Ptr), the
+  `INFO_LOG_LENGTH` WebGL lacks from the log; `hxmc.gfx.gl.WebGL`: the
+  context (`getContext('webgl2', {antialias: false, preserveDrawingBuffer})`
+  on the canvas, or an OffscreenCanvas headless), make-current, swap
+  (pending JavaScript readPixels) and release. Selection (`Impl`):
+  WebGPU when the JavaScript side has a device (`WebGPU.ready`, requested
+  before main), else GL (`Backend.WebGL2`), else Device.create throws;
+  calls dispatch on the object's class, on wasm only (Mem.os() still folds
+  natively). Forced with browser.mjs's option `gfx: 'webgl2'` (the site:
+  `?gfx=webgl2`). `Device.readPixels` works there (synchronous
+  glReadPixels). Tests: `make gfx-web-check` runs WebTest on both in
+  headless Chromium (the same 422 pixels off by 1 on SwiftShader, and
+  Device.readPixels' checksum equal to the harness's); browser-test.mjs
+  checks the site's triangle through WebGL2 in Chromium (`?gfx=webgl2`),
+  WebKit (exact) and Firefox (exact; headless Firefox on Linux has no
+  WebGL, so CI runs its triangle headed under Xvfb on llvmpipe). Cost:
+  the site's triangle.wasm from 66 to 85 KB (both back ends are in it).
+  Left: glGetString (it would return memory), a lost context
+  (`webglcontextlost`).
 - Structs by value in C calls (done for arm64, 2026-10-16): AAPCS64 on
   macOS, Linux and Windows (MirBuild.cStructArg, cStructRet; a64 Isel):
   homogeneous aggregates of up to four floats or doubles in v registers,
@@ -755,12 +785,11 @@ CI job (versions not yet on npm), each with its own version:
 - Done (2026-10-16): `-lib hxmc.gfx` from node_modules (a `"haxe"` field in
   package.json: class path, extra hxml, dependencies), in the compiler
   (`hxmc/src/hxmc/NodeLibs.hx`, through `compiler.HighLevel.libraryHook`):
-  lix's haxe_libraries first, then node_modules, then haxelib (README "Using
-  hxmc").
+  lix's haxe_libraries first, then node_modules, then haxelib (docs/using.md (  hxmc").
 
 ### npm: a WebAssembly package that bootstraps itself natively
 
-Done (2026-10-15, README "Using hxmc"): the package `hxmc` at the
+Done (2026-10-15, docs/using.md): the package `hxmc` at the
 repository root (`make npm`), with `hxmc-rebuild`; left: checking the
 native build against a published hash. Since 2026-10-16 split in nine
 (`packages/`, above): `@hxmc/cli` (launcher, std, runtime objects),

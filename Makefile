@@ -1,6 +1,6 @@
 # hxmc: the Haxe compiler ported to Haxe (haxe/src) and hxmc, its machine-code
 # and WebAssembly target (hxmc/). GNU make, from the repository root; needs
-# node (and git), zig only to build the runtime objects (README.md).
+# node (and git), zig only to build the runtime objects (README.md, docs/development.md).
 #
 #   make help                 the targets and variables below
 #   make hxmc                 bin/hxmc/hxmc, the tool (from the committed stage0 on first use)
@@ -141,7 +141,7 @@ help:
 ## reference   REFERENCE (bin/reference/haxe): the nightly of the pinned upstream commit, by lix
 ## test        HXB conformance of PORT_BIN against the reference (haxe/test/Conformance.hx;
 ##             CASES_FILE=haxe/test/conformance-macro-cases.txt for the macro cases)
-## test-fuzz   the fuzzer on PORT_BIN: LANE (default diff:hxb), N programs
+## test-fuzz   the fuzzer on PORT_BIN: LANE (default diff:hxb), the kept programs, then N programs
 ## test-display, test-server, test-jsonrpc, test-interp, test-haxelib, test-eval-debugger
 ##             the display requests, the compilation server, its JSON-RPC methods, --interp
 ##             runs, -lib, the Eval debugger: PORT_BIN against the reference (haxe/test/*.hx)
@@ -156,8 +156,8 @@ help:
 ## gfx-check   packages/gfx: the triangle example headless and in a window, against a golden
 ##             image (packages/gfx/test/check.sh; Linux: Mesa, Xvfb; macOS: Metal, Cocoa);
 ##             GFX_TARGET=windows-x86_64: D3D11 and Win32 under Wine
-## gfx-web-check  packages/gfx on WebGPU (wasm32-wasi): the same, headless and in a canvas, in
-##             headless Chromium (packages/gfx/test/webgpu.mjs; Playwright with Chromium)
+## gfx-web-check  packages/gfx on WebGPU and WebGL2 (wasm32-wasi): the same, headless and in a
+##             canvas, in headless Chromium (packages/gfx/test/web.mjs; Playwright with Chromium)
 ## portcheck   the port built by hxmc self-compiles to the reference's HXB (hxmc/test/Selfcheck.hx)
 ## bench       the HaxeBenchmarks cases on hxmc (native, wasm under node), C++, JVM, JS, HL/C and
 ##             HL, built by hxmc and the port: times, peak RSS, sizes (hxmc/test/Bench.hx; BENCH_ARGS)
@@ -318,8 +318,9 @@ npm: $(NPM_GEN) $(NPM_NATIVES)
 # subset the playground's compiler reads (hxmc/web/MkBundle.hx), the measured
 # results (hxmc/web/data), the Graphics section's triangle (gfx/: the example
 # built for wasm32-wasi with legacy exception handling, which every browser
-# with WebGPU has, with packages/os's browser.mjs and the packages'
-# imports.mjs; hxmc/web/triangle.mjs) and the build facts
+# with WebGPU has and those with WebGL2 since 2021, with packages/os's
+# browser.mjs and the packages' imports.mjs; hxmc/web/triangle.mjs) and the
+# build facts
 mb = awk '{printf "%.1f MB", $$1 / 1048576}'
 # the site's build in the addresses of the files its pages fetch (Version.hx)
 SITE_VERSION ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo dev)
@@ -407,7 +408,7 @@ $(REFERENCE): bin/lix/lix
 	ln -sf lix/versions/$(UPSTREAM_REV)/haxe $@
 	$@ -version
 
-# --- Tests (README.md, "Testing") ---
+# --- Tests (docs/testing.md) ---
 
 CASES_FILE ?= haxe/test/conformance-cases.txt
 TEST_ENV = HAXE_REFERENCE=$(abspath $(REFERENCE)) HAXE_IN_HAXE_PORT=$(abspath $(PORT_BIN))
@@ -429,6 +430,7 @@ test-unit-targets: $(PORT_BIN) $(REFERENCE) bin/lix/lix
 	$(TEST_ENV) $(SCRIPT) UpstreamTargets -j $(JOBS)
 
 test-fuzz: bin/fuzz/fuzz $(PORT_BIN) $(REFERENCE)
+	HAXE_REFERENCE=$(abspath $(REFERENCE)) bin/fuzz/fuzz -j $(JOBS) --cases haxe/test/fuzz/cases --port $(abspath $(PORT_BIN)) --lane $(LANE)
 	HAXE_REFERENCE=$(abspath $(REFERENCE)) bin/fuzz/fuzz -j $(JOBS) -n $(N) --port $(abspath $(PORT_BIN)) --lane $(LANE)
 
 smoke:
@@ -464,7 +466,7 @@ gfx-check: gfx-programs
 
 gfx-web-check: $(TOOL) $(STD)
 	$(call hxmc,bin/gfx/WebTest.wasm,$(GFX_CP) -main WebTest $(HXMC_ARGS) -D hxmc.target=wasm32-wasi)
-	$(NODE) packages/gfx/test/webgpu.mjs bin/gfx/WebTest.wasm bin/gfx
+	$(NODE) packages/gfx/test/web.mjs bin/gfx/WebTest.wasm bin/gfx
 
 portcheck: $(TOOL) $(STD) $(HOST_RT) $(REFERENCE)
 	$(SCRIPT) Selfcheck --local --small

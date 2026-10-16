@@ -1,7 +1,7 @@
 # Agents
 
 Read README.md first: the layout, how to build and test, and the porting
-rules (README.md, "Porting rules"), which apply to every change of
+rules (docs/porting.md), which apply to every change of
 `haxe/src`. In short:
 
 - `haxe/upstream` is the reference: never edit it or commit inside it.
@@ -11,7 +11,7 @@ rules (README.md, "Porting rules"), which apply to every change of
   success.
 - The reference compiler is the nightly of the pinned commit (`make
   reference`). Before calling a change done, run the lanes it can affect
-  (README.md, "Testing"; `make quick`/`check` for hxmc) and keep the fixpoint
+  (docs/testing.md; `make quick`/`check` for hxmc) and keep the fixpoint
   (`make fixpoint`) and crosshost (`make crosshost`) byte-identical.
 - Tooling is Haxe run with our own compiler (`bin/hxmc/hxmc -cp ... --run`)
   and node; no Python. Never commit `bin/`.

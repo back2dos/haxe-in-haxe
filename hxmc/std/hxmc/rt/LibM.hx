@@ -4,7 +4,7 @@ import hxmc.I64;
 import hxmc.unsafe.Mem;
 import hxmc.unsafe.Ptr;
 
-// Math on every target (README.md, "hxmc"; PLANS.md, "Math"): the functions
+// Math on every target (docs/hxmc.md; PLANS.md, "Math"): the functions
 // no instruction computes exactly, as musl computes them (musl's algorithms,
 // and zig's ports of them in zig's libc and compiler_rt, which Linux
 // executables linked before; see the license notice below), so that results

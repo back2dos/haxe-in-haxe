@@ -1,5 +1,5 @@
-# Builds everything from source with node and hxmc (README.md, "Building")
-# and tests it on a machine of each target (README.md, "CI"):
+# Builds everything from source with node and hxmc (docs/development.md, "Building")
+# and tests it on a machine of each target (docs/testing.md, "CI"):
 #
 # - changes: what the run needs (.github/select.sh): everything, except on a
 #   branch whose changes since the last checked commit are only docs (*.md:
@@ -216,7 +216,7 @@ jobs:
             bin/hxmc/rt/*/*.o
           retention-days: 7
 
-  # the tool from the committed stage0 (README.md, "Building"): node runs it
+  # the tool from the committed stage0 (docs/development.md, "Building"): node runs it
   # to build the first native tool, which builds the tool from source; the
   # tool rebuilt by itself does not change. Then the release binaries and lix.
   build:
@@ -690,7 +690,7 @@ jobs:
         if: always()
         with: {name: gfx-images-macos-arm64, path: "${{ runner.temp }}/app/gfx/*.png", retention-days: 7, if-no-files-found: ignore}
 
-  # the port against the reference compiler (README.md, "Testing"); the Eval
+  # the port against the reference compiler (docs/testing.md); the Eval
   # debugger in shards (EvalDebugger --shard), the fuzzer's diff lanes (the
   # targets that need no library) split across three jobs
   conformance:
@@ -759,6 +759,7 @@ jobs:
               debugger) $S EvalDebugger --shard ${{ matrix.shard }} --summary "$GITHUB_STEP_SUMMARY" ;;
               fuzz)
                 for lane in ${{ matrix.lanes }}; do
+                  bin/port/haxe -cp haxe/test/fuzz -cp haxe/test --run Fuzz -j 4 --cases haxe/test/fuzz/cases --port $PWD/bin/port/haxe --lane $lane || failed="$failed $lane"
                   bin/port/haxe -cp haxe/test/fuzz -cp haxe/test --run Fuzz -j 4 -n 100 --port $PWD/bin/port/haxe --lane $lane || failed="$failed $lane"
                 done ;;
             esac || failed="$failed $suite"
@@ -1005,7 +1006,9 @@ jobs:
   # browsers' engines: --interp, HXB, diagnostics and completion, with both
   # modules (exnref, legacy exception handling); the page's choice of
   # module, also in a Chromium without exnref; the Graphics section's
-  # triangle (WebGPU in Chromium, against packages/gfx/test/triangle.png)
+  # triangle against packages/gfx/test/triangle.png (WebGPU and WebGL2 in
+  # Chromium, WebGL2 in Firefox and WebKit; Firefox's in a headed Firefox
+  # under Xvfb on Mesa's llvmpipe: headless, it has no WebGL)
   playground:
     needs: [changes, site]
     if: ${{ !cancelled() && needs.site.result == 'success' }}
@@ -1026,7 +1029,8 @@ jobs:
           set -ex
           npm install --no-save --silent playwright@1.56.1
           npx playwright install --with-deps chromium firefox webkit > /dev/null
-          node hxmc/web/tools/browser-test.mjs site-dist chromium firefox webkit
+          sudo apt-get install -qqy --no-install-recommends libgl1-mesa-dri libegl-mesa0 xvfb xauth > /dev/null
+          xvfb-run -a -s "-screen 0 1280x1024x24" node hxmc/web/tools/browser-test.mjs site-dist chromium firefox webkit
 
   # the npm packages in fresh projects, on each target's machine (every
   # package installed before publish-npm publishes them): @hxmc/cli with its

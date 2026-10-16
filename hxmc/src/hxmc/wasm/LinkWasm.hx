@@ -6,7 +6,7 @@ import hxmc.wasm.Enc;
 
 // The WebAssembly linker: the program's objects (functions written by
 // WasmGen, data by DataGen) to one module, with nothing else linked in (the
-// runtime is Haxe compiled with the program; README.md,
+// runtime is Haxe compiled with the program; docs/hxmc.md,
 // "WebAssembly"). It keeps the functions and data sections reachable from
 // _start, lays the data out in linear memory (from 4 KB; then the stack of
 // frame slots, then the heap the runtime manages from __heap_base),

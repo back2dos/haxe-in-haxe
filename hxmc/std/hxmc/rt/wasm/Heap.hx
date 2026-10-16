@@ -4,7 +4,7 @@ import hxmc.I64;
 import hxmc.unsafe.Mem;
 import hxmc.unsafe.Ptr;
 
-// Linear memory for WebAssembly (README.md, "WebAssembly"): what the C
+// Linear memory for WebAssembly (docs/hxmc.md, "WebAssembly"): what the C
 // library and mmap provide on the native targets. Regions (the nursery, the
 // old space's semispaces, the shadow stack, malloc's arenas) come from the
 // top of memory, which grows (memory.grow) and never shrinks; freed regions

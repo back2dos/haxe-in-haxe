@@ -3,7 +3,7 @@ package hxmc.rt.wasm;
 import haxe.io.Bytes;
 import hxmc.rt.C;
 
-// hxmc.NativeUv on WebAssembly (README.md, "WebAssembly"): libuv is not
+// hxmc.NativeUv on WebAssembly (docs/hxmc.md, "WebAssembly"): libuv is not
 // there, so every call throws, as native builds without libuv would, except
 // those EvalLuv calls while it builds its field lists (available is false,
 // constants and the version are 0 and ""). Typed only for the programs that
