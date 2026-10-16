@@ -28,6 +28,8 @@ class Guest {
 		compiler.Compiler.beforeTypingHook = function(com, actx) {
 			core.Define.rawDefineValue(com.defines, "macro", "1");
 			com.isMacroContext = true;
+			// (X.macro.hx before X.hx, as in the macro context)
+			com.classPaths.lockContext(com.customExt, "macro", false);
 			if (prev != null) prev(com, actx);
 		};
 		compiler.Compiler.generateHook = function(com) {
@@ -89,7 +91,7 @@ class Guest {
 		dg.stubs([], emit);
 		dg.cstrLiterals([]);
 		sys.io.File.saveBytes(out + ".o", ElfWriter.write(obj, abi.arm));
-		sys.io.File.saveContent(out + ".json", haxe.Json.stringify(facts(prog, e, l, main)));
+		sys.io.File.saveContent(out + ".json", haxe.Json.stringify(facts(com, prog, e, l, main)));
 	}
 
 	static function kindChar(t:Null<Ty>):String
@@ -102,17 +104,54 @@ class Guest {
 		};
 
 	// what the loader needs to number, register and initialize the program's parts
-	static function facts(p:Program, e:hxmc.ir.Facts, l:hxmc.ir.Lower, main:TClass):Dynamic {
+	static function facts(com:context.Common.CommonContext, p:Program, e:hxmc.ir.Facts, l:hxmc.ir.Lower, main:TClass):Dynamic {
 		var tn = e.typeNames;
+		// what may be the compiler's own: the std's types and statics (hxmc's std, with the
+		// runtime, included); the program's are its own even when named as one of the compiler's
+		var roots = [];
+		for (cp in com.classPaths.asList())
+			if (cp.path != "" && (cp.scope == Std || sys.FileSystem.exists(haxe.io.Path.addTrailingSlash(cp.path) + "hxmc/rt/Runtime.hx")))
+				roots.push(cp.path);
+		function isStd(file:String):Bool {
+			for (r in roots)
+				if (StringTools.startsWith(file, r)) return true;
+			return false;
+		}
+		var stdTypes = new Map<String, Bool>();
+		var globalShare = new Map<Int, Bool>();
+		for (t in com.types) {
+			var info = core.TFunctions.tInfos(t);
+			var std = isStd(info.mtPos.pfile);
+			if (std) stdTypes.set(core.Globals.sTypePath(info.mtPath), true);
+			switch t {
+				case TClassDecl(c):
+					for (cf in c.clOrderedStatics) {
+						var g = l.staticVars.get(cf);
+						if (g != null) globalShare.set(g, std);
+					}
+				case _:
+			}
+		}
+		for (en in p.enums)
+			for (c in en.ctors)
+				if (c.global >= 0) globalShare.set(c.global, stdTypes.exists(en.name));
 		inline function tyName(i:Int):Dynamic
 			return i < 0 ? null : i < Abi.T_FIRST ? Std.string(i) : tn[i];
+		var share = new Map<Int, Bool>();
 		var types = [];
 		for (i in Abi.T_FIRST...e.types.length) {
 			var t = e.types[i];
+			share.set(i, switch t.tk {
+				case "TK_ANON" | "TK_BOUND": true;
+				case "TK_CLOSURE": false;
+				case "TK_CTOR": share.get(t.sup) == true;
+				case _: stdTypes.exists(t.name);
+			});
 			var supIsSig = t.tk == "TK_CLOSURE" || t.tk == "TK_BOUND";
 			types.push({
 				sym: tn[i],
 				name: t.name,
+				share: share.get(i),
 				tk: t.tk,
 				sup: supIsSig ? e.sigNames[t.sup] : tyName(t.sup),
 				slots: [for (s in t.slots) kindChar(s)].join(""),
@@ -123,7 +162,17 @@ class Guest {
 				ctors: [for (x in t.ctors) tyName(x)]
 			});
 		}
-		var classes = [for (c in p.classes) if (c.tindex >= Abi.T_FIRST) {ty: tn[c.tindex], sup: c.sup == null || c.sup.tindex < 0 ? null : tn[c.sup.tindex], span: c.lastDescendant - c.id}];
+		// (statics: what Reflect finds on the class value, as DataGen writes them)
+		function statics(c:ClassInfo):Array<Dynamic> {
+			if (c.statics == null) return [];
+			return [
+				for (x in c.statics)
+					if (x.clos != null) {name: x.name, kind: "c", ty: tn[x.clos.tindex], fn: e.symbol(x.clos.fn)}
+					else if (Ir.isRef(p.globals[x.global].ty)) {name: x.name, kind: "p", global: e.globalNames[x.global]}
+					else {name: x.name, kind: kindChar(p.globals[x.global].ty), sym: e.scalarGlobal(x.global)}
+			];
+		}
+		var classes = [for (c in p.classes) if (c.tindex >= Abi.T_FIRST) {ty: tn[c.tindex], sup: c.sup == null || c.sup.tindex < 0 ? null : tn[c.sup.tindex], span: c.lastDescendant - c.id, statics: statics(c)}];
 		var globals = [];
 		for (g in 0...p.globals.length) {
 			var gl = p.globals[g];
@@ -132,6 +181,7 @@ class Guest {
 			globals.push({
 				name: e.globalNames[g],
 				ref: ref,
+				share: globalShare.get(g) == true,
 				sym: ref ? "GIOFF_" + e.globalNames[g].substr(3) : e.scalarGlobal(g),
 				size: gl.ty == TI32 || gl.ty == TBool ? 4 : 8,
 				init: gl.init == null ? null : tn[gl.init.tindex]
@@ -142,7 +192,7 @@ class Guest {
 			var c = l.initOf.get(f);
 			if (c != null && runtimeClass(c)) continue;
 			var ci = c == null ? null : l.classes.get(c);
-			inits.push({fn: e.symbol(f), ty: ci == null || ci.tindex < 0 ? null : tn[ci.tindex]});
+			inits.push({fn: e.symbol(f), ty: ci == null || ci.tindex < 0 ? null : tn[ci.tindex], share: c != null && stdTypes.exists(core.Globals.sTypePath(c.clPath))});
 		}
 		var selectors = [];
 		for (s in 0...p.selectors.length) {
@@ -207,18 +257,30 @@ class Guest {
 						case TInst(_, [t]): t;
 						case _: throw "entry argument";
 					};
-					var args = [
-						for (i in 0...sig.args.length)
-							core.TFunctions.mk(TArray(core.Texpr.Builder.makeLocal(a, p), core.Texpr.Builder.makeInt(b, i, p)), tdyn, p)
-					];
+					inline function arg(i:Int):TExpr
+						return core.TFunctions.mk(TArray(core.Texpr.Builder.makeLocal(a, p), core.Texpr.Builder.makeInt(b, i, p)), tdyn, p);
 					var ef = core.TFunctions.mk(TField(core.Texpr.Builder.makeStaticThis(c, p), FStatic(c, mf)), mf.cfType, p);
-					var call = core.TFunctions.mk(TCall(ef, args), sig.ret, p);
 					var isVoid = switch core.TFunctions.follow(sig.ret) {
 						case TAbstract({aPath: {pack: [], name: "Void"}}, _): true;
 						case _: false;
 					};
-					var ret = core.TFunctions.mk(TReturn(isVoid ? core.TFunctions.mk(TConst(TNull), tdyn, p) : call), b.tvoid, p);
-					tf.tfExpr = core.TFunctions.mk(TBlock(isVoid ? [call, ret] : [ret]), b.tvoid, p);
+					// the call with k arguments, returning its result
+					function callWith(k:Int):TExpr {
+						var call = core.TFunctions.mk(TCall(ef, [for (i in 0...k) arg(i)]), sig.ret, p);
+						var ret = core.TFunctions.mk(TReturn(isVoid ? core.TFunctions.mk(TConst(TNull), tdyn, p) : call), b.tvoid, p);
+						return core.TFunctions.mk(TBlock(isVoid ? [call, ret] : [ret]), b.tvoid, p);
+					}
+					// trailing optional arguments that are null are left out (their
+					// defaults apply, as when Eval calls the function with them null)
+					var required = 0;
+					while (required < sig.args.length && !sig.args[required].optional)
+						required++;
+					var body = callWith(required);
+					for (k in required + 1...sig.args.length + 1) {
+						var given = core.TFunctions.mk(TBinop(OpNotEq, arg(k - 1), core.TFunctions.mk(TConst(TNull), tdyn, p)), b.tbool, p);
+						body = core.TFunctions.mk(TIf(given, callWith(k), body), b.tvoid, p);
+					}
+					tf.tfExpr = core.TFunctions.mk(TBlock([body]), b.tvoid, p);
 				case _:
 			}
 		}
@@ -252,8 +314,14 @@ class Guest {
 				core.Texpr.Builder.makeInt(b, p.pmax, p)
 			])), t, p);
 		}
+		var user = false; // (in the program's code, not the std's)
 		function map(e:TExpr):TExpr {
 			return switch e.eexpr {
+				// a call of the macro API from the program's code: its position first
+				// (Bridge.callPos), which the API gets from Eval's frames
+				case TCall({eexpr: TField(_, FStatic(mc, _))}, _) if (user && ["haxe.macro.Context", "haxe.macro.Compiler"].indexOf(core.Globals.sTypePath(mc.clPath)) >= 0):
+					var inner = core.Texpr.mapExpr(map, e);
+					core.TFunctions.mk(TBlock([call("hxmc_macro_call_pos", [], b.tvoid, e.epos), inner]), e.etype, e.epos);
 				// Context's `load(name, n)(args)` as hxmc_macro_api(name, [args])
 				case TCall({eexpr: TCall({eexpr: TField(_, FStatic(lc, {cfName: "load"}))}, [name, _])}, args) if (core.Globals.sTypePath(lc.clPath) == "haxe.macro.Context"):
 					var p = e.epos;
@@ -272,6 +340,7 @@ class Guest {
 		for (t in com.types)
 			switch t {
 				case TClassDecl(c) if (!runtimeClass(c)):
+					user = !(c.clPath.pack.length >= 2 && c.clPath.pack[0] == "haxe" && c.clPath.pack[1] == "macro");
 					for (cf in c.clOrderedFields.concat(c.clOrderedStatics).concat(c.clConstructor == null ? [] : [c.clConstructor]))
 						if (cf.cfExpr != null) cf.cfExpr = map(cf.cfExpr);
 					if (c.clInit != null && c.clInit.cfExpr != null) c.clInit.cfExpr = map(c.clInit.cfExpr);

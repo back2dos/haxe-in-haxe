@@ -12,6 +12,47 @@ import hxmc.macro.Loader.Bundle;
 // Unsupported at the boundary: the engine falls back to Eval.
 class Unsupported extends haxe.Exception {}
 
+typedef ApiCall = {name:String, args:Array<Value>, result:Null<Value>, error:Null<Dynamic>};
+
+// verify mode: records the macro API calls of Eval runs (the API's functions
+// wrapped once), into the list of the innermost macro call being recorded
+class Recorder {
+	public static var stack:Array<Array<ApiCall>> = [];
+	static var installed = false;
+
+	// a copy of the arrays, objects and enum values of v (the rest shared)
+	public static function copy(v:Value):Value {
+		return switch v {
+			case VArray(a): VArray(new macros.eval.EvalValue.Varray([for (i in 0...a.alength) copy(a.avalues[i])], a.alength));
+			case VObject(o): VObject(new macros.eval.EvalValue.Vobject([for (f in o.ofields) copy(f)], o.oproto));
+			case VEnumValue(e): VEnumValue(new macros.eval.EvalValue.VenumValue(e.eindex, [for (a in e.eargs) copy(a)], e.epath, e.enpos));
+			case _: v;
+		}
+	}
+
+	public static function install() {
+		if (installed) return;
+		installed = true;
+		var lib = macros.eval.EvalContext.GlobalState.macroLib;
+		for (name in [for (k in lib.keys()) k]) {
+			var orig = lib.get(name);
+			lib.set(name, VFunction(vl -> {
+				var top = stack.length == 0 ? null : stack[stack.length - 1];
+				if (top == null) return macros.eval.EvalMisc.callValue(orig, vl);
+				var c:ApiCall = {name: name, args: [for (v in vl) copy(v)], result: null, error: null};
+				top.push(c);
+				var r = try macros.eval.EvalMisc.callValue(orig, vl) catch (e:Dynamic) {
+					c.error = e;
+					throw e;
+				}
+				// (as it was: the Eval run may change the arrays and objects it got)
+				c.result = copy(r);
+				return r;
+			}, false));
+		}
+	}
+}
+
 // Native objects of a bundle to and from Eval values at the boundary of
 // native macros, so MacroApi stays the one implementation of the macro API:
 // arguments and results of macro calls, and of the API calls macro code
@@ -32,18 +73,76 @@ class Bridge {
 	public static var apiCalls = 0;
 
 	public static function reset() {
+		callFile = null;
 		enumPos = new haxe.ds.ObjectMap();
 		slotPos = new haxe.ds.ObjectMap();
+		origin = new haxe.ds.ObjectMap();
 	}
 
 	// ---- the exports macro code calls
+
+	// the position of the last call of a macro API function (Context, Compiler) in
+	// macro code: what Eval's frames give the API (EvalMain.getApiCallPos)
+	static var callFile:Null<String> = null;
+	static var callMin = 0;
+	static var callMax = 0;
+
+	@:hxmc.export("hxmc_macro_call_pos") static function callPos(file:String, min:Int, max:Int):Void {
+		callFile = file;
+		callMin = min;
+		callMax = max;
+	}
 
 	@:hxmc.export("hxmc_macro_api") static function api(name:String, args:Array<Dynamic>):Dynamic {
 		apiCalls++;
 		var f = macros.eval.EvalContext.GlobalState.macroLib.get(name);
 		if (f == null) throw new Unsupported("macro API " + name);
 		var vl = [for (a in args) toValue(a)];
-		return ofValue(macros.eval.EvalMisc.callValue(f, vl));
+		if (replay != null) return replayCall(name, vl);
+		// (the frames of the caller and of the API function, as Eval has them)
+		var ctx = macros.eval.EvalContext.getCtx();
+		var envs = [];
+		if (callFile != null) {
+			var info = macros.eval.EvalContext.createEnvInfo(true, callFile, ctx.fileKeys.get(callFile), macros.eval.EvalContext.EnvKind.EKMethod(0, 0), macros.eval.EvalDebugMisc.newIntHashtbl(), 0, 0);
+			var outer = macros.eval.EvalContext.pushEnvironment(ctx, info);
+			outer.envLeavePmin = callMin;
+			outer.envLeavePmax = callMax;
+			envs = [macros.eval.EvalContext.pushEnvironment(ctx, info), outer];
+		}
+		var r = try macros.eval.EvalMisc.callValue(f, vl) catch (e:Dynamic) {
+			for (env in envs)
+				macros.eval.EvalContext.popEnvironment(ctx, env);
+			throw e;
+		}
+		for (env in envs)
+			macros.eval.EvalContext.popEnvironment(ctx, env);
+		return ofValue(r);
+	}
+
+	// ---- verify mode: the API calls of the Eval run, recorded (Recorder), replayed
+	// to the native run: compared, not made again (no side effect twice)
+
+	public static var replay:Null<Array<ApiCall>> = null;
+	public static var replayAt = 0;
+	public static var replayMismatch:Null<String> = null;
+
+	static function replayCall(name:String, vl:Array<Value>):Dynamic {
+		var k = replayAt++;
+		if (k >= replay.length) {
+			if (replayMismatch == null) replayMismatch = "API call " + name + " that Eval did not make";
+			throw new Unsupported("API call " + name + " that Eval did not make");
+		}
+		var c = replay[k];
+		if (c.name != name) {
+			if (replayMismatch == null) replayMismatch = "API call " + k + ": " + name + " where Eval called " + c.name;
+			throw new Unsupported("API call sequence differs");
+		}
+		for (i in 0...(vl.length > c.args.length ? vl.length : c.args.length)) {
+			var d = NativeEngine.diff(i < c.args.length ? c.args[i] : VNull, i < vl.length ? vl[i] : VNull, name + " argument " + i);
+			if (d != null && replayMismatch == null) replayMismatch = d;
+		}
+		if (c.error != null) throw c.error;
+		return ofValue(c.result);
 	}
 
 	@:hxmc.export("hxmc_macro_pos") static function mkPos(file:String, min:Int, max:Int):Dynamic
@@ -61,6 +160,9 @@ class Bridge {
 			case TEnum(e): e == Value;
 			case _: false;
 		}
+
+	// native objects standing for Eval values (Refs): the value when they come back
+	static var origin = new haxe.ds.ObjectMap<Dynamic, Value>();
 
 	// the positions of the shared values of constructors without arguments, by place (container, slot)
 	static var slotPos = new haxe.ds.ObjectMap<Dynamic, Map<String, Null<Pos>>>();
@@ -80,6 +182,8 @@ class Bridge {
 
 	public static function toValue(v:Dynamic, ?c:Dynamic, ?k:String):Value {
 		if (v == null) return VNull;
+		var o = origin.get(v);
+		if (o != null) return o;
 		switch Type.typeof(v) {
 			case TNull: return VNull;
 			case TInt: return VInt32(v);
@@ -103,6 +207,16 @@ class Bridge {
 					p = enumPos.get(v);
 				} else throw new Unsupported("enum value without a position: " + name + "." + Type.enumConstructor(v));
 				return EvalEncode.encodeEnumValue(EvalHash.hash(name), idx, [for (i in 0...params.length) toValue(params[i], v, "a" + i)], p);
+			case TFunction:
+				// (called back by the compiler, maybe after this macro call)
+				var f:Dynamic = v, bnd = bundle;
+				return VFunction(vl -> {
+					var old = bundle;
+					bundle = bnd;
+					var r = toValue(Reflect.callMethod(null, f, [for (x in vl) ofValue(x)]));
+					bundle = old;
+					return r;
+				}, false);
 			case TObject:
 				var fs = Reflect.fields(v);
 				return EvalEncode.encodeObjS([for (f in fs) {name: f, value: toValue(Reflect.field(v, f), v, "f" + f)}]);
@@ -166,6 +280,22 @@ class Bridge {
 					Reflect.setField(r, names[i], ofValue(fs[i].value, mine, "f" + names[i]));
 				place(r, mine);
 				r;
+			case VInstance({ikind: IRef(_)}):
+				// a Ref: the bundle's GuestRef calling it; the same Ref when it comes back
+				var to = bundle.typeObjs.get("hxmc.macro.GuestRef");
+				if (to == null) throw new Unsupported("no GuestRef");
+				var rv = v;
+				var o = Type.createEmptyInstance(Mem.obj(to));
+				var getF:Void->Dynamic = () -> ofValue(macros.eval.EvalMisc.callValue(macros.eval.EvalField.field(rv, EvalHash.hash("get")), []));
+				var strF:Void->String = () -> macros.eval.EvalDecode.decodeString(macros.eval.EvalMisc.callValue(macros.eval.EvalField.field(rv, EvalHash.hash("toString")), []));
+				Reflect.setField(o, "g", getF);
+				Reflect.setField(o, "s", strF);
+				origin.set(o, v);
+				o;
+			// (an API function value, as Ref's get and toString: called without arguments)
+			case VFunction(_, _) | VFieldClosure(_, _):
+				var fv = v;
+				() -> ofValue(macros.eval.EvalMisc.callValue(fv, []));
 			// (forced: Eval forces it when macro code reads it)
 			case VLazy(l): ofValue(l.force(), pend, k);
 			case _: v; // opaque: a position, a type, ...

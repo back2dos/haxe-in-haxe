@@ -47,6 +47,8 @@ class Loader {
 	static inline var TS = 112; // Abi.TYPE_SIZE
 
 	static var host:Null<Map<String, {k:String, v:Int}>> = null;
+	// what the bundles loaded so far define (their numbers, globals, type objects, functions)
+	static var xb = new Map<String, {k:String, v:Int}>();
 	static var hostNtypes = 0;
 	static var hostNsigs = 0;
 	static var nextType = 0;
@@ -79,8 +81,12 @@ class Loader {
 	static inline function ptr(v:Int):Ptr
 		return Ptr.ofI64((v : I64));
 
-	static inline function addrOf(p:Ptr):Int
-		return p.toI64().toInt();
+	// (an address code reaches with 32 bits: below 2 GB)
+	static function addrOf(p:Ptr):Int {
+		var v = p.toI64();
+		if (v < (0 : I64) || v >= (0x7fffffff : I64)) throw "address beyond 2 GB in a 32-bit relocation";
+		return v.toInt();
+	}
 
 	// a C string outside the heap (never freed)
 	static function cstr(s:String):Ptr {
@@ -106,27 +112,35 @@ class Loader {
 		// ---- program-wide numbers
 		dbg("program-wide numbers");
 		var num = new Map<String, Int>(); // absolute symbols
-		var extra = new Map<String, Ptr>(); // data the loader allocates (scalar globals, type objects, rows)
-		inline function hostAbs(n:String):Null<Int> {
-			var s = h.get(n);
+		var extra = new Map<String, Ptr>(); // data addresses (scalar globals, type objects, rows)
+		// a number of the compiler's (only for what may be the compiler's own:
+		// `share`), else of a bundle loaded before
+		function abs(n:String, share:Bool):Null<Int> {
+			var s = share ? h.get(n) : null;
+			if (s == null) s = xb.get(n);
 			return s != null && s.k == "a" ? s.v : null;
+		}
+		function dataAddr(n:String, share:Bool):Null<Int> {
+			var s = share ? h.get(n) : null;
+			if (s == null) s = xb.get(n);
+			return s != null && s.k == "d" ? s.v : null;
 		}
 		// field ids: the compiler's, or added to the runtime's table
 		var fids = new Map<String, Int>();
 		var fields:Array<Dynamic> = facts.fields;
 		for (f in fields) {
-			var v = hostAbs(f.sym);
-			if (debug && v == null) dbg("new field " + f.name);
+			var v = abs(f.sym, true);
 			if (v == null) v = Dyn.fid(f.name);
 			num.set(f.sym, v);
 			fids.set(f.name, v);
 		}
-		dbg("fids done");
-		// types: the compiler's after a layout check, else the next spare entry (in the guest's order)
+		// types: the compiler's (after a layout check) or a bundle's, else the next spare entry (in the guest's order)
 		var types:Array<Dynamic> = facts.types;
 		var isNew = new Map<String, Bool>();
+		var shared = new Map<String, Bool>();
 		for (t in types) {
-			var v = hostAbs(t.sym);
+			shared.set(t.sym, t.share);
+			var v = abs(t.sym, t.share);
 			if (v != null) {
 				var why = sameLayout(v, t, fids);
 				if (why != null) throw "type " + t.name + " differs from the compiler's: " + why;
@@ -137,7 +151,6 @@ class Loader {
 				isNew.set(t.sym, true);
 			}
 		}
-		dbg("types done");
 		inline function tyNum(n:Dynamic):Int
 			return n == null ? -1 : num.exists(n) ? num.get(n) : Std.parseInt(n);
 		var classes:Array<Dynamic> = facts.classes;
@@ -147,17 +160,16 @@ class Loader {
 				if (c.sup != null && !isNew.exists(c.sup)) throw "class " + c.ty + " extends a class of the compiler";
 				num.set(span, c.span);
 			} else {
-				var v = hostAbs(span);
+				var v = abs(span, shared.get(c.ty));
 				if (v == null) throw "no " + span;
 				num.set(span, v);
 			}
 		}
-		dbg("classes done");
 		// signatures
 		var sigs:Array<Dynamic> = facts.sigs;
 		var newSigs = [];
 		for (s in sigs) {
-			var v = hostAbs(s.sym);
+			var v = abs(s.sym, true);
 			if (v == null) {
 				if (nextSig >= hostNsigs + Jit.SPARE_SIGS) throw "out of spare signature entries";
 				v = nextSig++;
@@ -165,34 +177,40 @@ class Loader {
 			}
 			num.set(s.sym, v);
 		}
-		dbg("sigs done");
-		// globals: the compiler's, or new slots of rt_globals / new scalars
+		// globals: the compiler's (the std's statics, the runtime's) or a bundle's, else new
+		// slots of rt_globals and new scalars
 		var globals:Array<Dynamic> = facts.globals;
 		var nglobals = Gc.nglobals;
 		var newGlobals = [];
 		var gindex = new Map<String, Int>();
+		var newScalars:Array<String> = []; // (in the mapping, after the rows: code reaches them with rel32)
 		for (g in globals) {
 			if (g.ref) {
-				var v = hostAbs(g.sym);
+				var v = abs(g.sym, g.share);
 				var idx = v == null ? nglobals++ : v >> 3;
 				if (v == null) newGlobals.push({idx: idx, init: g.init});
 				num.set(g.sym, 8 * idx);
 				num.set(g.name, idx);
 				gindex.set(g.name, idx);
-			} else if (!h.exists(g.sym)) {
-				extra.set(g.sym, zalloc(g.size));
+			} else {
+				var a = dataAddr(g.sym, g.share);
+				if (a != null) extra.set(g.sym, ptr(a)) else newScalars.push(g.sym);
 			}
 		}
-		dbg("globals done");
-		// type objects of the new types (two words: the header, the type index)
-		for (t in types)
+		// type objects (two words: the header, the type index): the new types' in
+		// the spare part of rt_types_objs, where the runtime finds them
+		for (t in types) {
+			var n = "TYOBJ_" + (t.sym : String).substr(3);
 			if (isNew.exists(t.sym)) {
-				// (in rt_type_objs, where the runtime finds a type's object: its spare part)
 				var o = Mem.sym("rt_type_objs").add(16 * num.get(t.sym));
 				Mem.setI64(o, 0, ((14 : I64) << 32) | ((2 << 28) | 1)); // T_TYPEOBJ, K_RAW, one slot
 				Mem.setI32(o, 8, num.get(t.sym));
-				extra.set("TYOBJ_" + (t.sym : String).substr(3), o.add(8));
+				extra.set(n, o.add(8));
+			} else {
+				var a = dataAddr(n, t.share);
+				if (a != null) extra.set(n, ptr(a));
 			}
+		}
 		// ---- layout: code | read-only data, data, bss, then the dispatch rows
 		dbg("layout: code | read-only data, data, bss, then the dispatch rows");
 		var text = [], rest = [];
@@ -216,6 +234,8 @@ class Loader {
 		var maxT = nextType;
 		var rowBytes = 8 * (maxT - Abi.T_FIRST);
 		pos = rowsAt + rowBytes * selectors.length;
+		var scalarsAt = (pos + 15) & ~15;
+		pos = scalarsAt + 8 * newScalars.length;
 		var size = (pos + 4095) & ~4095;
 		var region = Vm.mmap(ptr(hint), (size : I64), PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
 		var ra = region.toI64();
@@ -224,6 +244,8 @@ class Loader {
 		hint = base + size + 0x10000;
 		for (s in addr.keys())
 			addr.set(s, addr.get(s) + base);
+		for (i in 0...newScalars.length)
+			extra.set(newScalars[i], ptr(base + scalarsAt + 8 * i));
 		for (k in 0...selectors.length)
 			extra.set(selectors[k].sym, ptr(base + rowsAt + rowBytes * k - 8 * Abi.T_FIRST + 8 * Abi.T_FIRST));
 		// ---- symbols
@@ -236,6 +258,7 @@ class Loader {
 			var x = extra.get(s.name);
 			if (x != null) return {v: addrOf(x), tls: false};
 			var hs = h.get(s.name);
+			if (hs == null) hs = xb.get(s.name);
 			if (hs != null) return {v: hs.v, tls: hs.k == "l"};
 			// (a definition in another object of the bundle: one object here)
 			throw "undefined symbol " + s.name;
@@ -279,6 +302,7 @@ class Loader {
 			var d = defs.get(n);
 			if (d != null) return value(d).v;
 			var hs = h.get(n);
+			if (hs == null) hs = xb.get(n);
 			if (hs == null) throw "undefined symbol " + n;
 			return hs.v;
 		}
@@ -357,6 +381,33 @@ class Loader {
 				Mem.setPtr(e, 88, p);
 			}
 		}
+		// the new classes' statics (rt_static: fid, kind, index, address)
+		for (c in classes) {
+			var ss:Array<Dynamic> = c.statics;
+			if (!isNew.exists(c.ty) || ss == null || ss.length == 0) continue;
+			ss = ss.copy();
+			ss.sort((a, b) -> fids.get(a.name) - fids.get(b.name));
+			var p = zalloc(24 * ss.length);
+			for (i in 0...ss.length) {
+				var s = ss[i];
+				var kind:String = s.kind;
+				Mem.setI32(p, 24 * i, fids.get(s.name));
+				Mem.setI32(p, 24 * i + 4, kind.charCodeAt(0));
+				switch kind {
+					case "c":
+						Mem.setI32(p, 24 * i + 8, num.get(s.ty));
+						Mem.setPtr(p, 24 * i + 16, ptr(symAddr(s.fn)));
+					case "p":
+						Mem.setI32(p, 24 * i + 8, gindex.get(s.global));
+					case _:
+						Mem.setI32(p, 24 * i + 8, -1);
+						Mem.setPtr(p, 24 * i + 16, extra.get(s.sym));
+				}
+			}
+			var e = Mem.sym("rt_types").add(num.get(c.ty) * TS);
+			Mem.setI32(e, 96, ss.length);
+			Mem.setPtr(e, 104, p);
+		}
 		// an empty anonymous structure (its fields overflow): the bridge's objects that
 		// match no structure of the bundle
 		if (nextType >= hostNtypes + Jit.SPARE_TYPES) throw "out of spare type entries";
@@ -375,10 +426,6 @@ class Loader {
 			var tk:String = t.tk;
 			if (tk == "TK_CLASS" || tk == "TK_ENUM") {
 				var to = extra.get("TYOBJ_" + (t.sym : String).substr(3));
-				if (to == null) {
-					var hs = h.get("TYOBJ_" + (t.sym : String).substr(3));
-					if (hs != null) to = ptr(hs.v);
-				}
 				if (to != null) b.typeObjs.set(t.name, to);
 			} else if (tk == "TK_ANON") {
 				var fs:Array<Dynamic> = t.fields;
@@ -402,7 +449,16 @@ class Loader {
 		dbg("the static initializers of the new classes, in order");
 		var inits:Array<Dynamic> = facts.inits;
 		for (i in inits)
-			if (i.ty != null && isNew.exists(i.ty)) Mem.call0(ptr(symAddr(i.fn)));
+			// (a class without a type entry: new unless a bundle loaded before, or for
+			// the std the compiler, has its initializer)
+			if (i.ty != null ? isNew.exists(i.ty) : !(xb.exists(i.fn) || (i.share && h.exists(i.fn)))) Mem.call0(ptr(symAddr(i.fn)));
+		// what the next bundles share: the numbers, the globals and type objects, the functions
+		for (n => v in num)
+			xb.set(n, {k: "a", v: v});
+		for (n => p in extra)
+			if (!StringTools.startsWith(n, "DSP_")) xb.set(n, {k: "d", v: addrOf(p)});
+		for (n => s in defs)
+			if (s.section.kind == Text && StringTools.startsWith(n, "F_")) xb.set(n, {k: "t", v: value(s).v});
 		var entries:Array<Dynamic> = facts.entries;
 		for (en in entries)
 			b.entries.set(en.name, ptr(symAddr(en.sym)));

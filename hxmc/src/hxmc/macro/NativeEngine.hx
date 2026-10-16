@@ -90,7 +90,7 @@ class NativeEngine extends macros.MacroEngine.EvalEngine {
 		}
 		if (!verify) {
 			var t0 = haxe.Timer.stamp();
-			var r = runNative(ctx, c, vl, api);
+			var r = runNative(ctx, path, f, c, vl, api);
 			tNative += haxe.Timer.stamp() - t0;
 			switch r {
 				case Ok(v):
@@ -109,11 +109,29 @@ class NativeEngine extends macros.MacroEngine.EvalEngine {
 		// verify: Eval's result is the one used
 		var t0 = haxe.Timer.stamp();
 		var ev:Null<Value> = null, eerr:Null<Dynamic> = null;
+		// (its API calls recorded, then replayed to the native run: Bridge.Recorder)
+		Bridge.Recorder.install();
+		var rec = [];
+		Bridge.Recorder.stack.push(rec);
 		try ev = super.callPath(ctx, path, f, vl, api) catch (e:Dynamic) eerr = e;
+		Bridge.Recorder.stack.pop();
 		tEval += haxe.Timer.stamp() - t0;
 		var t1 = haxe.Timer.stamp();
-		var r = runNative(ctx, c, vl, api);
+		Bridge.replay = rec;
+		Bridge.replayAt = 0;
+		Bridge.replayMismatch = null;
+		var r = runNative(ctx, path, f, c, vl, api);
+		Bridge.replay = null;
 		tNative += haxe.Timer.stamp() - t1;
+		var rm = Bridge.replayMismatch;
+		if (rm == null && eerr == null && r.match(Ok(_)) && Bridge.replayAt < rec.length) rm = "native made " + Bridge.replayAt + " API calls, Eval " + rec.length;
+		if (rm != null) {
+			native++;
+			mismatched++;
+			note(key + ": MISMATCH: " + rm);
+			if (eerr != null) throw eerr;
+			return ev;
+		}
 		switch r {
 			case Failed(msg, e) if (e == null):
 				fallbacks++;
@@ -149,24 +167,35 @@ class NativeEngine extends macros.MacroEngine.EvalEngine {
 	static function ms(s:Float):String
 		return Std.int(s * 1000) + " ms";
 
-	function runNative(ctx:Context, c:{bundle:Bundle, entry:Ptr}, vl:Array<Value>, api:CompilerApi):NativeResult {
+	function runNative(ctx:Context, path:Array<String>, f:String, c:{bundle:Bundle, entry:Ptr}, vl:Array<Value>, api:CompilerApi):NativeResult {
 		var old = ctx.curapi;
 		ctx.curapi = api;
 		EvalContext.select(ctx);
 		Bridge.bundle = c.bundle;
 		Bridge.enumLookup = findEnum;
 		Bridge.reset();
+		// the macro call's frame, as EvalMain.callPath pushes it
+		var p = api.pos;
+		var ph = macros.eval.EvalHash.pathHash(new core.Globals.GlobalTypePath(path.slice(0, path.length - 1), path[path.length - 1]));
+		var info = EvalContext.createEnvInfo(true, p.pfile, ctx.fileKeys.get(p.pfile), EKMacro(ph, macros.eval.EvalHash.hash(f)), macros.eval.EvalDebugMisc.newIntHashtbl(), 0, 0);
+		var env = EvalContext.pushEnvironment(ctx, info);
+		env.envLeavePmin = p.pmin;
+		env.envLeavePmax = p.pmax;
+		function done() {
+			EvalContext.popEnvironment(ctx, env);
+			ctx.curapi = old;
+		}
 		try {
 			var args:Array<Dynamic> = [for (v in vl) Bridge.ofValue(v)];
 			var r:Dynamic = Mem.callRef1(c.entry, args);
 			var v = Bridge.toValue(r);
-			ctx.curapi = old;
+			done();
 			return Ok(v);
 		} catch (e:Bridge.Unsupported) {
-			ctx.curapi = old;
+			done();
 			return Failed(e.message, null);
 		} catch (e:Dynamic) {
-			ctx.curapi = old;
+			done();
 			return Failed(Std.string(e), e);
 		}
 	}
@@ -207,17 +236,17 @@ class NativeEngine extends macros.MacroEngine.EvalEngine {
 		if (sys.FileSystem.exists(d)) removeDir(d);
 		sys.FileSystem.createDirectory(d + "/hxmc/macro");
 		sys.FileSystem.createDirectory(d + "/haxe/macro");
-		// (the module, the class: a class may be a module's secondary type)
+		// (the class's module is a root of the child's compile: no reference by name,
+		// which an abstract's implementation class has not)
 		var mp = core.Globals.sTypePath(c.clModule.mPath);
-		var ref = c.clModule.mPath.name == c.clPath.name ? mp : mp + "." + c.clPath.name;
 		sys.io.File.saveContent(d + "/" + Guest.ENTRY + ".hx", 'class ${Guest.ENTRY} {\n'
-			+ '\tstatic function main() {\n\t\te(null);\n\t\thxmc.macro.GuestHost.mkPos("", 0, 0);\n\t\thxmc.macro.GuestHost.enumPos(null, "", 0, 0);\n\t\thxmc.macro.GuestHost.api("", []);\n\t}\n\n'
-			+ '\t@:hxmc.macroCall("' + key + '")\n\tpublic static function e(a:Array<Dynamic>):Dynamic\n\t\treturn ' + ref + ';\n}\n');
+			+ '\tstatic function main() {\n\t\te(null);\n\t\thxmc.macro.GuestHost.mkPos("", 0, 0);\n\t\thxmc.macro.GuestHost.enumPos(null, "", 0, 0);\n\t\thxmc.macro.GuestHost.api("", []);\n\t\thxmc.macro.GuestHost.callPos("", 0, 0);\n\t\tnew hxmc.macro.GuestHost.GuestRef(null, null).toString();\n' + [for (en in EXPR_ENUMS) '\t\tType.getEnumName(haxe.macro.' + en + ');\n'].join("") + '\t}\n\n'
+			+ '\t@:hxmc.macroCall("' + key + '")\n\tpublic static function e(a:Array<Dynamic>):Dynamic\n\t\treturn null;\n}\n');
 		sys.io.File.saveContent(d + "/hxmc/macro/GuestHost.hx", GUEST_HOST);
 		sys.io.File.saveContent(d + "/haxe/macro/Context.hx", contextSource());
 		// the child: this compiler, typing the entry in macro mode for hxmc (Guest)
 		var cargs = [];
-		var cps = com.classPaths.asList();
+		var cps = com.classPaths.asList().copy();
 		cps.reverse();
 		for (cp in cps)
 			switch cp.scope {
@@ -231,18 +260,17 @@ class NativeEngine extends macros.MacroEngine.EvalEngine {
 				var k = raw[i + 1].split("=")[0];
 				if (!StringTools.startsWith(k, "hxmc.") && k != "dump" && k != "dump-dependencies") cargs = cargs.concat(["-D", raw[i + 1]]);
 			}
+		if (com.customExt != null) cargs = cargs.concat(["--custom-extension", com.customExt]);
 		var out = d + "/bundle";
-		cargs = cargs.concat(["-D", "hxmc.target=linux-x86_64", "-D", "disable-parallelism", "-dce", "no", "-main", Guest.ENTRY, "--custom-target", "hxmc=" + out]);
+		cargs = cargs.concat(["-D", "hxmc.target=linux-x86_64", "-D", "disable-parallelism", "-dce", "no", "-main", Guest.ENTRY, mp, "--custom-target", "hxmc=" + out]);
 		var exe = try sys.FileSystem.fullPath(Sys.programPath()) catch (_:Dynamic) Sys.programPath();
 		Sys.putEnv("HXMC_MACRO_GUEST", out);
-		var p = new sys.io.Process(exe, cargs);
-		var stderr = p.stderr.readAll().toString();
-		var stdout = p.stdout.readAll().toString();
-		var code = p.exitCode();
-		p.close();
+		// (through sh, its output to a file: no pipes in this process)
+		var code = Sys.command("sh", ["-c", "exec \"$0\" \"$@\" > \"" + out + ".log\" 2>&1", exe].concat(cargs));
+		var log = sys.FileSystem.exists(out + ".log") ? sys.io.File.getContent(out + ".log") : "";
 		Sys.putEnv("HXMC_MACRO_GUEST", "");
 		if (sys.FileSystem.exists(out + ".error")) throw sys.io.File.getContent(out + ".error");
-		if (code != 0 || !sys.FileSystem.exists(out + ".o")) throw "the child compile failed: " + StringTools.trim(stderr + stdout);
+		if (code != 0 || !sys.FileSystem.exists(out + ".o")) throw "the child compile failed: " + StringTools.trim(log);
 		var b = Loader.load(out);
 		var e = b.entries.get("e");
 		if (e == null) throw "no entry";
@@ -283,14 +311,31 @@ class NativeEngine extends macros.MacroEngine.EvalEngine {
 		throw "no haxe/macro/Context.hx in the std";
 	}
 
+	// the enums of haxe.macro.Expr and haxe.macro.Type, in every bundle (the bridge makes their values)
+	static var EXPR_ENUMS = [
+		for (e in ["StringLiteralKind", "Constant", "Binop", "Unop", "EFieldKind", "QuoteStatus", "FunctionKind", "ExprDef", "DisplayKind", "ComplexType", "TypeParam", "Access", "FieldType", "TypeDefKind", "AbstractFlag", "ImportMode"]) "Expr." + e
+	].concat([
+		for (e in ["Type", "AnonStatus", "ClassKind", "FieldKind", "VarAccess", "MethodKind", "TConstant", "ModuleType", "FieldAccess", "TypedExprDef"]) "Type." + e
+	]);
+
 	static var GUEST_HOST = "package hxmc.macro;\n\n"
 		+ "// native macros: the compiler running this code (hxmc/src/hxmc/macro/Bridge.hx)\n"
 		+ "@:keep @:hxmc.rt extern class GuestHost {\n"
 		+ "\t@:native(\"hxmc_macro_api\") static function api(name:String, args:Array<Dynamic>):Dynamic;\n"
 		+ "\t@:native(\"hxmc_macro_pos\") static function mkPos(file:String, min:Int, max:Int):Dynamic;\n"
-		+ "\t@:native(\"hxmc_macro_enum_pos\") static function enumPos(v:Dynamic, file:String, min:Int, max:Int):Dynamic;\n\n"
+		+ "\t@:native(\"hxmc_macro_enum_pos\") static function enumPos(v:Dynamic, file:String, min:Int, max:Int):Dynamic;\n"
+		+ "\t@:native(\"hxmc_macro_call_pos\") static function callPos(file:String, min:Int, max:Int):Void;\n\n"
+		+ "\t// (Context's calls `load(name, n)(args)` call api directly: Guest)\n"
 		+ "\tstatic inline function load(f:String):Dynamic\n"
 		+ "\t\treturn Reflect.makeVarArgs(args -> api(f, args));\n"
+		+ "}\n\n"
+		+ "// a Ref of the compiler (Bridge): get and toString call it\n"
+		+ "@:keep class GuestRef {\n"
+		+ "\tvar g:Void->Dynamic;\n"
+		+ "\tvar s:Void->String;\n\n"
+		+ "\tpublic function new(g, s) {\n\t\tthis.g = g;\n\t\tthis.s = s;\n\t}\n\n"
+		+ "\tpublic function get():Dynamic\n\t\treturn g();\n\n"
+		+ "\tpublic function toString():String\n\t\treturn s();\n"
 		+ "}\n";
 
 	// ---- comparing results: null when equal, else where they differ
@@ -346,6 +391,7 @@ class NativeEngine extends macros.MacroEngine.EvalEngine {
 						if (d != null) return d;
 					}
 				null;
+			case [VFunction(_, _) | VFieldClosure(_, _), VFunction(_, _) | VFieldClosure(_, _)]: null; // (not comparable)
 			case [VInstance({ikind: IPos(p)}), VInstance({ikind: IPos(q)})]:
 				samePos(p, q) ? null : no("position " + sPos(p) + " vs " + sPos(q));
 			case _:
