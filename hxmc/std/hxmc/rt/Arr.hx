@@ -196,7 +196,7 @@ class Arr {
 	@:hxmc.host("Array_unshift") static function unshift(a:Dynamic, x:Dynamic):Void
 		insert(a, 0, x);
 
-	@:hxmc.host("Array_resize") static function resize(a:Dynamic, n:Int):Void {
+	@:hxmc.host("Array_resize") @:access(hxmc.rt.Boxes) static function resize(a:Dynamic, n:Int):Void {
 		var m = len(a);
 		if (n < m) {
 			LibC.memset(data(a).add(elemSize(a) * n), 0, (elemSize(a) * (m - n) : I64));
@@ -204,6 +204,24 @@ class Arr {
 			return;
 		}
 		if (n == m) return;
+		// past the capacity (haxe.ds.Vector's constructor: from empty), the data
+		// allocated at the new length, the elements copied once (the new ones
+		// zero, the kind kept), unless another thread changed the array meanwhile
+		var kind = kindOf(a);
+		if (n > Boxes.arrCap(a)) {
+			var d0 = data(a);
+			var nd:Dynamic = Boxes.dataAlloc(kind, n);
+			var k = len(a);
+			if (data(a) == d0 && kindOf(a) == kind && k <= n) {
+				if (k > 0) {
+					LibC.memcpy(Mem.addr(nd), data(a), (elemSize(a) * k : I64));
+					if (kind == AK_PTR && !Boxes.inYoungObj(nd)) Boxes.Gc_barrierRange(nd, k);
+				}
+				Mem.setRefBarrier(a, 8, nd);
+				setLen(a, n);
+				return;
+			}
+		}
 		// a store past the end grows the array (zeros in between, the kind kept)
 		var arr:Array<Dynamic> = a;
 		arr[n - 1] = null;

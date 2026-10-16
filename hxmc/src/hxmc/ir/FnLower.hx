@@ -1322,6 +1322,13 @@ class FnLower {
 				var x = pure(compute(() -> EField(ci, idx, o), t, t), t);
 				out.push(SSetField(ci, idx, o, x));
 				return coerce(x, t, et);
+			case TField(obj, FInstance(c, _, cf)) if (Lower.isCore(c, "Array") && cf.cfName == "length"):
+				// `untyped a.length = n` (haxe.ds.Vector's generic constructor):
+				// Array.resize, not a structural store by name
+				var o = ELocal(asLocal(value(obj), tyOf(obj)));
+				var x = pure(compute(() -> EArrLen(o), TI32, TI32), TI32);
+				out.push(SExpr(ECallHost(l.native("Array_resize"), [o, x], TVoid)));
+				return coerce(x, TI32, et);
 			case TField(obj, FAnon(cf) | FInstance(_, _, cf)):
 				var t = tyOf(lhs);
 				var o = ELocal(asLocal(value(obj), tyOf(obj)));
