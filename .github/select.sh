@@ -5,7 +5,7 @@
 #             hxmc/std, hxmc/deps, hxmc/test, the workflows, the Makefile, ...);
 #             always on main, on tags, nightly (schedule) and on dispatch
 #   libs      a source-only package of packages/ (one with a version of its
-#             own, not cli, wasm, source or platform): build, its checks (gfx),
+#             own, not cli, wasm, source or platform): build, its checks (the gfx jobs),
 #             the npm packing (the sources packages)
 #   web       hxmc/web: the website and the playground in the browsers
 #   (none)    only *.md: nothing beyond this job

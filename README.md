@@ -23,7 +23,7 @@ the same `--interp` runs, display requests and compilation-server answers.
 | `hxmc/test/` | hxmc's corpus (`cases/`, golden outputs `expected/`, frozen fuzzer programs `fuzz-1000.zip`), the encoder tests (`encoder/`), the scripts that run them (`Corpus`, `Check`, `Crosshost`, `Selfcheck`, `Tiers`, `EncCheck`), `-lib` from node_modules (`NodeLibs`), the release smoke test (`smoke.sh`), the benchmarks (`Bench`, with the cases' check programs in `bench/`) |
 | `hxmc/web/` | the website and its playground (the port as a WebAssembly module in the browser) |
 | `hxmc/bootstrap/` | the committed stage0 (`stage0.wasm.br`), node's WASI runner (`wasi.mjs`), the runtime objects by hash (`rt.mjs`) |
-| `packages/` | everything published to npm, one folder per package, packed by `pack.mjs`: `cli` (`@hxmc/cli`, laid out as its tarball: `package.json`, the version of the build's packages; the launcher `hxmc/bootstrap/{haxe,launcher.mjs,wasm.mjs,postinstall.mjs,platforms.mjs}`; `dist/haxe` for lix), `wasm` and `source` (`@hxmc/wasm`, `@hxmc/source` with `hxmc-rebuild`), `platform` (the template of the six `@hxmc/<os>-<cpu>`); `os` and `gfx` (`@hxmc/os`: X11 bindings, windows, events, the app loop; `@hxmc/gfx`: the portable GPU layer, its GL back end over EGL, `examples/Triangle.hx`, the golden-image test `test/`; pure Haxe for the dynamic glibc mode, hxmc/PLANS.md "Graphics"); any other folder whose `package.json` has a version of its own is a source-only package, published as it is |
+| `packages/` | everything published to npm, one folder per package, packed by `pack.mjs`: `cli` (`@hxmc/cli`, laid out as its tarball: `package.json`, the version of the build's packages; the launcher `hxmc/bootstrap/{haxe,launcher.mjs,wasm.mjs,postinstall.mjs,platforms.mjs}`; `dist/haxe` for lix), `wasm` and `source` (`@hxmc/wasm`, `@hxmc/source` with `hxmc-rebuild`), `platform` (the template of the six `@hxmc/<os>-<cpu>`); `os` and `gfx` (`@hxmc/os`: X11 and Objective-C runtime bindings, windows (X11, Cocoa), events, the app loop; `@hxmc/gfx`: the portable GPU layer, its back ends (GL over EGL on Linux, Metal on macOS arm64), `examples/Triangle.hx`, the golden-image test `test/`; pure Haxe: the dynamic glibc mode on Linux, the frameworks and `objc_msgSend` through externs on macOS, hxmc/PLANS.md "Graphics"); any other folder whose `package.json` has a version of its own is a source-only package, published as it is |
 | `tools/lix/` | lix (the lix client and haxeshim) ported to build with hxmc |
 
 ## Using hxmc
@@ -248,9 +248,11 @@ with the reason in the commit. `Crosshost`: the tool as a WebAssembly module
 writes the same bytes as the native tool, for every target, itself included.
 `RT_VERIFY=1` fills the free nursery with a pattern, so uninitialized
 allocations and missed roots show at once. `make gfx-check`: the triangle of
-`packages/gfx` rendered by Mesa's llvmpipe headless (an EGL pbuffer) and in an
-X11 window under Xvfb, compared with `packages/gfx/test/triangle.png` (CI: the
-`gfx` and `gfx-arm64` jobs).
+`packages/gfx` rendered headless and in a window, compared with
+`packages/gfx/test/triangle.png`: on Linux by Mesa's llvmpipe (an EGL pbuffer,
+an X11 window under Xvfb), on macOS by Metal (an offscreen texture, a Cocoa
+window; skipped without a Metal device or outside a GUI session) (CI: the
+`gfx` and `gfx-arm64` jobs on Linux, `gfx-macos` from the npm packages).
 
 CI (`.github/workflows/build.yml`) runs as parallel jobs, each waiting only
 for what it uses: `changes` (what the run needs, `.github/select.sh`, and
@@ -263,34 +265,35 @@ every target in three jobs, the port as a WebAssembly module, the reference's
 self-compile), `crosshost` (`make crosshost`, the targets in two jobs),
 `memory and time` (`make measure`), `npm-pack` (the npm packages), `site` and
 `gfx` (`make gfx-check` on Linux x86-64, and the programs cross-built for
-`gfx-arm64` to check on ARM64). Then `conformance` (the harnesses above; the
-Eval debugger in three shards, `EvalDebugger --shard i/n`, and the fuzzer's
-diff lanes in three jobs), `test` (on each of the six machines: the release
-binary's smoke test with a TLS handshake and libuv, lix, the corpus, the
-self-compile), `wasm` (the corpus and the self-compile under node and
-wasmtime, both also with legacy exception handling under node), `playground`
-(the playground in three browser engines with both modules and its fallback to
-the legacy one in a Chromium without exnref), `npm` (the nine packages in
-fresh projects on each of the six machines: native at once through the
-platform package, `-lib` from node_modules (`hxmc/test/NodeLibs.hx`),
-`--ignore-scripts`; and on linux-x64, or on all six on main, tags and the
-nightly run, lix with `dist/`, the WebAssembly fallback, downloaded (from the
-local tarball: `HXMC_WASM_TARBALL`, a path or URL in place of the registry's)
-and installed (with `-lib` by the WebAssembly compiler), and `hxmc-rebuild`
-with `--reset`), `upstream-tests`, and `publish-npm` (after every check; all
-nine at one version, skipping those published already: the six platform
-packages, `@hxmc/wasm`, `@hxmc/source`, then `@hxmc/cli`, with provenance: on
-`v*` tags as `latest`, from main as a nightly prerelease
-`<version>-nightly.<date>.<commit>` tagged `next`; then the source-only
-packages of `packages/` at their own versions when those are not on npm yet;
-never from other branches), the nightly release and the website.
+`gfx-arm64` to check on ARM64; `gfx-macos`, after `npm-pack`: built from the
+npm packages with `-lib hxmc.gfx`, on Metal and in a Cocoa window). Then
+`conformance` (the harnesses above; the Eval debugger in three shards,
+`EvalDebugger --shard i/n`, and the fuzzer's diff lanes in three jobs), `test`
+(on each of the six machines: the release binary's smoke test with a TLS
+handshake and libuv, lix, the corpus, the self-compile), `wasm` (the corpus
+and the self-compile under node and wasmtime, both also with legacy exception
+handling under node), `playground` (the playground in three browser engines
+with both modules and its fallback to the legacy one in a Chromium without
+exnref), `npm` (the nine packages in fresh projects on each of the six
+machines: native at once through the platform package, `-lib` from
+node_modules (`hxmc/test/NodeLibs.hx`), `--ignore-scripts`; and on linux-x64,
+or on all six on main, tags and the nightly run, lix with `dist/`, the
+WebAssembly fallback, downloaded (from the local tarball: `HXMC_WASM_TARBALL`,
+a path or URL in place of the registry's) and installed (with `-lib` by the
+WebAssembly compiler), and `hxmc-rebuild` with `--reset`), `upstream-tests`,
+and `publish-npm` (after every check; all nine at one version, skipping those
+published already: the six platform packages, `@hxmc/wasm`, `@hxmc/source`,
+then `@hxmc/cli`, with provenance: on `v*` tags as `latest`, from main as a
+nightly prerelease `<version>-nightly.<date>.<commit>` tagged `next`; then the
+source-only packages of `packages/` at their own versions when those are not
+on npm yet; never from other branches), the nightly release and the website.
 
 Main, tags, the nightly schedule (02:41 UTC) and dispatches run everything.
 On other branches a push runs only what its changes need, since the last
 commit whose run succeeded (else since the merge base with main): only
 `*.md`, nothing beyond `changes`; only `hxmc/web`, `site` and `playground`;
 only source-only packages (`packages/os`, `packages/gfx`: a version of their
-own), `build`, `gfx` and `npm-pack`; anything else (`haxe/`, `hxmc/src`,
+own), `build`, `npm-pack` and the `gfx` jobs; anything else (`haxe/`, `hxmc/src`,
 `hxmc/std`, `hxmc/deps`, `hxmc/test`, the workflows, the Makefile, the
 compiler's npm packages), everything. A newer push to a branch cancels its
 run; runs on main, hxmc and tags always finish.

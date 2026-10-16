@@ -2014,11 +2014,18 @@ class MirBuild {
 		// (@:hxmc.indirect: the function's address comes first)
 		var indirect = StringTools.startsWith(name, hxmc.ir.CInterop.INDIRECT);
 		var first = indirect ? 1 : 0;
-		var args = [], sizes = [];
+		var args = [], sizes = [], groups = [], structs = false;
 		for (k in first...xs.length) {
 			var v = xs[k];
 			var ct = sig.args[k];
 			var k = k - first;
+			switch ct {
+				case CStruct(c):
+					cStructArg(name, c, v, args, sizes, groups);
+					structs = true;
+					continue;
+				case _:
+			}
 			// (variadic arguments: C's promotions make a float a double)
 			if (ct == CF32 && (va == null || k < va)) {
 				if (!abi.wasm) v = special("f32bits_to_freg", [special("f64_to_f32", [v], I32)], F64);
@@ -2026,14 +2033,28 @@ class MirBuild {
 			} else
 				sizes.push(va != null && k >= va ? 8 : hxmc.ir.CInterop.sizeOf(ct));
 			args.push(v);
+			groups.push(1);
+		}
+		var sret = switch sig.ret {
+			case CStruct(c): cStructRet(name, c);
+			case _: null;
+		}
+		if (sret != null) {
+			args.push(sret.addr);
+			sizes.push(8);
+			groups.push(1);
 		}
 		var blocking = hxmc.ir.CInterop.BLOCKING.exists(name) && !abi.wasm;
 		if (blocking) call("rt_blocking_enter", [], Void);
-		var r = indirect ? callInd(xs[0], args, mty(ret)) : call(name, args, mty(ret));
+		var rt = sret != null ? Void : mty(ret);
+		var r = indirect ? callInd(xs[0], args, rt) : call(name, args, rt);
 		var ci = f.vals[r];
 		ci.cSizes = sizes;
+		if (structs) ci.cGroups = groups;
+		if (sret != null) ci.cRet = sret.parts;
 		if (va != null) ci.variadic = va;
 		if (blocking) call("rt_blocking_leave", [], Void);
+		if (sret != null) return sret.addr;
 		return switch sig.ret {
 			case CI8: op2(Sar, I32, op2(Shl, I32, r, iconst(24)), iconst(24));
 			case CI16: op2(Sar, I32, op2(Shl, I32, r, iconst(16)), iconst(16));
@@ -2042,6 +2063,90 @@ class MirBuild {
 			case CF32 if (!abi.wasm): special("f32_to_f64", [special("freg_to_f32bits", [r], I32)], F64);
 			case _: r;
 		}
+	}
+
+	// Structs by value in C calls, AAPCS64 (macOS, Linux and Windows on
+	// arm64): a homogeneous aggregate of one to four floats or doubles travels
+	// in float registers, another struct of up to 16 bytes in one or two
+	// integer registers, a larger one as the address of a copy (an argument)
+	// or of the caller's memory (a result, x8). A struct value is its address:
+	// a result lives in a slot of the caller's frame, until the caller returns
+	// or the same call runs again.
+	function cStructCheck(name:String) {
+		if (!abi.arm || abi.wasm) throw new Unsupported('C function ${cName(name)}: structs by value are implemented on arm64 only (pass a Ptr)');
+	}
+
+	static function cName(name:String):String
+		return StringTools.startsWith(name, hxmc.ir.CInterop.INDIRECT) ? name.substr(hxmc.ir.CInterop.INDIRECT.length) : name;
+
+	// 8 or 4: the struct is a homogeneous aggregate of doubles or floats; 0: not one
+	static function hfa(c:core.TType.TClass):Int {
+		var fs = hxmc.ir.CInterop.scalars(c, 0);
+		if (fs.length == 0 || fs.length > 4) return 0;
+		var t = fs[0].ty;
+		if (t != CF64 && t != CF32) return 0;
+		for (x in fs)
+			if (x.ty != t) return 0;
+		return t == CF64 ? 8 : 4;
+	}
+
+	function cStructArg(name:String, c:core.TType.TClass, v:Int, args:Array<Int>, sizes:Array<Int>, groups:Array<Int>) {
+		cStructCheck(name);
+		var l = hxmc.ir.CInterop.layout(c);
+		var h = hfa(c);
+		if (h != 0) {
+			var fs = hxmc.ir.CInterop.scalars(c, 0);
+			for (k in 0...fs.length) {
+				args.push(h == 8 ? load(F64, 8, v, fs[k].off) : special("f32bits_to_freg", [load(I32, 4, v, fs[k].off)], F64));
+				sizes.push(h);
+				groups.push(k == 0 ? fs.length : 0);
+			}
+			return;
+		}
+		if (l.size <= 16) {
+			var n = (l.size + 7) >> 3;
+			for (k in 0...n) {
+				args.push(cWord(v, 8 * k, l.size - 8 * k < 8 ? l.size - 8 * k : 8));
+				sizes.push(8);
+				groups.push(k == 0 ? n : 0);
+			}
+			return;
+		}
+		var copy = stackAddr(f.slot((l.size + 7) & ~7, l.align > 8 ? l.align : 8));
+		var at = 0;
+		while (at < l.size) {
+			var s = l.size - at >= 8 ? 8 : l.size - at >= 4 ? 4 : l.size - at >= 2 ? 2 : 1;
+			store(s, copy, at, load(s == 8 ? I64 : I32, s, v, at));
+			at += s;
+		}
+		args.push(copy);
+		sizes.push(8);
+		groups.push(1);
+	}
+
+	// n bytes (1 to 8) at base + off as the low bytes of a word (not reading past them)
+	function cWord(base:Int, off:Int, n:Int):Int {
+		if (n == 8) return load(I64, 8, base, off);
+		var w = -1, at = 0;
+		for (s in [4, 2, 1])
+			if (n - at >= s) {
+				var p = op1(ZExt, I64, load(I32, s, base, off + at));
+				if (at > 0) p = op2(Shl, I64, p, iconst(8 * at));
+				w = w < 0 ? p : op2(Or, I64, w, p);
+				at += s;
+			}
+		return w;
+	}
+
+	// the memory of a struct result and the registers it comes back in
+	function cStructRet(name:String, c:core.TType.TClass):{addr:Int, parts:Array<Int>} {
+		cStructCheck(name);
+		var l = hxmc.ir.CInterop.layout(c);
+		var h = hfa(c);
+		// (the registers' words are stored whole: the slot is rounded up to them)
+		var addr = stackAddr(f.slot((l.size + 7) & ~7, l.align > 8 ? l.align : 8));
+		var parts = h != 0 ? [for (_ in hxmc.ir.CInterop.scalars(c, 0)) -h] : l.size <= 16 ? [for (_ in 0...(l.size + 7) >> 3) 8] : [];
+		return {addr: addr, parts: parts};
 	}
 
 	// ---- the intrinsics of hxmc.unsafe (Mem, Atomic: the runtime's Haxe code)

@@ -233,6 +233,9 @@ class Inline {
 					x.keepsFrame = i.keepsFrame && !f.blocksHere;
 					x.variadic = i.variadic;
 					x.argTys = i.argTys;
+					x.cSizes = i.cSizes;
+					x.cGroups = i.cGroups;
+					x.cRet = i.cRet;
 					x.cases = i.cases;
 					if (i.args != null) x.args = [for (v in i.args) m(v)];
 					if (i.targets != null) x.targets = [for (t in i.targets) bmap[t.id]];

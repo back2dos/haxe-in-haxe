@@ -32,7 +32,7 @@ RT_TARGETS := $(TARGETS) linux-x86_64-glibc linux-arm64-glibc
 RT_TARGET ?= $(HOST)
 # `make corpus-stage`: the six targets, wasm32-wasi, wasm32-wasi-legacy, linux-x86_64-glibc, linux-arm64-glibc
 CORPUS_TARGETS ?= $(TARGETS) wasm32-wasi wasm32-wasi-legacy linux-x86_64-glibc linux-arm64-glibc
-# `make gfx-programs`: linux-x86_64 or linux-arm64 (CI cross-builds the ARM64 ones)
+# `make gfx-programs`: linux-x86_64, linux-arm64 (CI cross-builds those), or the Mac's own target
 GFX_TARGET ?= $(HOST)
 # extra arguments of the port's build (e.g. HXFLAGS="-D retain")
 HXFLAGS ?=
@@ -152,9 +152,9 @@ help:
 ##             the target's machine (Check; CI's test and wasm jobs): wasm32-wasi-legacy with legacy
 ##             exception handling, linux-*-glibc in the glibc mode (checked with readelf: ElfCheck)
 ## test-node-libs  -lib from node_modules with the npm package's compiler for the host (hxmc/test/NodeLibs.hx)
-## gfx-programs  bin/gfx/GFX_TARGET/{GfxTest,Triangle}: packages/gfx's test programs (Linux, glibc mode)
-## gfx-check   packages/gfx: the triangle example headless and in an X11 window under Xvfb,
-##             against a golden image (packages/gfx/test/check.sh; Linux, Mesa, Xvfb)
+## gfx-programs  bin/gfx/GFX_TARGET/{GfxTest,Triangle}: packages/gfx's test programs (Linux: glibc mode)
+## gfx-check   packages/gfx: the triangle example headless and in a window, against a golden
+##             image (packages/gfx/test/check.sh; Linux: Mesa, Xvfb; macOS: Metal, Cocoa)
 ## portcheck   the port built by hxmc self-compiles to the reference's HXB (hxmc/test/Selfcheck.hx)
 ## bench       the HaxeBenchmarks cases on hxmc (native, wasm under node), C++, JVM, JS, HL/C and
 ##             HL, built by hxmc and the port: times, peak RSS, sizes (hxmc/test/Bench.hx; BENCH_ARGS)
@@ -229,7 +229,7 @@ $(TOOL): $(PORT_SRC) $(HXMC_SRC) $(STD) $(HOST_RT)
 # the stage0 module builds the first native tool (one thread, about half a minute)
 bin/hxmc/boot/hxmc1: $(STAGE0) $(STD) $(HOST_RT)
 	@mkdir -p $(dir $@)
-	$(WASI) $(STAGE0) $@ $(TOOL_ARGS) > $@.log 2>&1 || { cat $@.log; exit 1; }
+	$(WASI) $(STAGE0) $@ $(TOOL_ARGS) -D hxmc.target=$(HOST) > $@.log 2>&1 || { cat $@.log; exit 1; }
 	chmod +x $@
 	@ls -l $@
 
@@ -441,9 +441,11 @@ corpus-stage: $(TOOL) $(STD) $(HOST_RT)
 
 # the os and gfx packages' sources (`-lib hxmc.gfx` once the launcher resolves packages/)
 GFX_CP := -cp packages/os/src -cp packages/gfx/src -cp packages/gfx/examples -cp packages/gfx/test
+# (Linux: the dynamic glibc mode, which loads the GPU drivers)
+GFX_ARGS = $(if $(filter linux-%,$(GFX_TARGET)),-D hxmc.libc=glibc) -D hxmc.target=$(GFX_TARGET)
 gfx-programs: $(TOOL) $(STD) $(HOST_RT)
-	$(call hxmc,bin/gfx/$(GFX_TARGET)/GfxTest,$(GFX_CP) -main GfxTest $(HXMC_ARGS) -D hxmc.libc=glibc -D hxmc.target=$(GFX_TARGET))
-	$(call hxmc,bin/gfx/$(GFX_TARGET)/Triangle,$(GFX_CP) -main Triangle $(HXMC_ARGS) -D hxmc.libc=glibc -D hxmc.target=$(GFX_TARGET))
+	$(call hxmc,bin/gfx/$(GFX_TARGET)/GfxTest,$(GFX_CP) -main GfxTest $(HXMC_ARGS) $(GFX_ARGS))
+	$(call hxmc,bin/gfx/$(GFX_TARGET)/Triangle,$(GFX_CP) -main Triangle $(HXMC_ARGS) $(GFX_ARGS))
 gfx-check: gfx-programs
 	sh packages/gfx/test/check.sh bin/gfx/$(GFX_TARGET)
 

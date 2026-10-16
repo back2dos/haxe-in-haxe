@@ -235,13 +235,13 @@ class CInterop {
 		var args = [];
 		for (i in 0...s.args.length) {
 			var ct = gc(ctype(s.args[i].type));
-			if (!isScalar(ct))
-				throw new LowerError('C function $sym: parameter ${s.args[i].name} has no C type a call can pass (${describe(ct)}; scalars, Ptr and CString only: structs go by Ptr)', where);
+			if (!isScalar(ct) && !ct.match(CStruct(_)))
+				throw new LowerError('C function $sym: parameter ${s.args[i].name} has no C type a call can pass (${describe(ct)}; scalars, Ptr, CString and structs)', where);
 			args.push(ct);
 		}
 		var ret = gc(ctype(s.ret));
-		if (ret != CVoid && !isScalar(ret))
-			throw new LowerError('C function $sym: the result has no C type a call can return (${describe(ret)}; scalars, Ptr, CString or Void)', where);
+		if (ret != CVoid && !isScalar(ret) && !ret.match(CStruct(_)))
+			throw new LowerError('C function $sym: the result has no C type a call can return (${describe(ret)}; scalars, Ptr, CString, a struct or Void)', where);
 		var sig = {args: args, ret: ret};
 		var prev = SIGS.get(sym);
 		if (prev != null) {
@@ -287,8 +287,28 @@ class CInterop {
 	static function abiKey(t:CTy):String
 		return switch t {
 			case CBool | CI8 | CU8 | CI16 | CU16 | CF32 | CVoid: t.getName();
+			case CStruct(_): shape(t);
 			case _: "w";
 		}
+
+	// what decides how a struct travels in a call: its size and its scalars
+	// at their offsets (Fingerprint: a changed struct compiles its calls again)
+	public static function shape(t:CTy):String
+		return switch t {
+			case CStruct(c): 'S${layout(c).size}{' + [for (f in scalars(c, 0)) f.off + ":" + f.ty.getName()].join(",") + "}";
+			case _: t.getName();
+		}
+
+	// the scalar fields of a struct, nested structs flattened, at their offsets
+	public static function scalars(c:TClass, at:Int):Array<{off:Int, ty:CTy}> {
+		var r = [];
+		for (f in layout(c).fields)
+			switch f.ty {
+				case CStruct(s): r = r.concat(scalars(s, at + f.off));
+				case t: r.push({off: at + f.off, ty: t});
+			}
+		return r;
+	}
 
 	// @:hxmc.link("path") on a class: an object or archive linked with the
 	// program, relative to the file declaring it; ${target} becomes the

@@ -326,8 +326,8 @@ class Fingerprint {
 				if (cs != null) {
 					b.add(hxmc.ir.CInterop.BLOCKING.exists(n) ? "B" : "F");
 					for (a in cs.args)
-						b.add(a.getIndex());
-					b.add(":" + cs.ret.getIndex());
+						b.add(hxmc.ir.CInterop.shape(a));
+					b.add(":" + hxmc.ir.CInterop.shape(cs.ret));
 				}
 				// (the names the intrinsics take are not string objects of the program)
 				switch [n, xs] {

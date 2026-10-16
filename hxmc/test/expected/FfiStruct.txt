@@ -1,0 +1,18 @@
+exit 0
+FfiStruct.hx:106: 30
+FfiStruct.hx:108: 0.5, 0.25, 0.125, 1, 5.375
+FfiStruct.hx:110: 1, 2, 4, 6, 13
+FfiStruct.hx:113: 40, 6, 7
+FfiStruct.hx:119: 3, -4, 0.5
+FfiStruct.hx:122: 3.75
+FfiStruct.hx:124: 3, 5, 67
+FfiStruct.hx:133: 6, 5, 4, 3, 2, 1, 1
+FfiStruct.hx:138: 42, 127
+FfiStruct.hx:143: 1073741829, 4
+FfiStruct.hx:149: 250, 2, 1
+FfiStruct.hx:154: -2, 1.5
+FfiStruct.hx:155: 1073741824939
+FfiStruct.hx:156: 1263
+FfiStruct.hx:157: 166.5
+FfiStruct.hx:158: 9
+FfiStruct.hx:163: 3

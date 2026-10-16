@@ -71,8 +71,10 @@ extern class SDL {
 
 - hxmc emits direct calls in the target's C convention: System V, AAPCS64,
   Win64, Apple arm64 (variadic arguments on the stack, x18 reserved),
-  Windows arm64. Structs by pointer first; by value later (System V's
-  classification rules, tested against a C compiler's output).
+  Windows arm64. Structs by pointer, and by value on arm64 (AAPCS64: a
+  struct argument or result is the address of its memory, a result's in
+  the caller's frame; corpus case `FfiStruct`, against zig cc); x86-64
+  later (System V's classification rules, Win64's copies).
 - Static libraries: hxmc's linker reads ELF, COFF and Mach-O objects and
   archives already; per-target prebuilt objects ship in haxelibs, linked
   only when referenced.
