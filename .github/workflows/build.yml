@@ -767,6 +767,27 @@ jobs:
           cd "$RUNNER_TEMP/app"
           if [ "$RUNNER_OS" = Windows ]; then hx="$PWD/node_modules/@hxmc/cli/dist/haxe.exe"; else hx="$PWD/node_modules/.bin/haxe"; fi
           "$hx" -cp "$GITHUB_WORKSPACE/dl" --run NodeLibs --haxe "$hx" --dir "$RUNNER_TEMP/node-libs"
+      # packages/gfx on macOS: the triangle and its test built here from the
+      # packages (-lib hxmc.gfx), then run on Metal and in a Cocoa window
+      # (check.sh: skipped without a Metal device or outside a GUI session)
+      - uses: actions/checkout@v7
+        if: matrix.plat == 'darwin-arm64'
+        with: {path: repo, sparse-checkout: packages/gfx}
+      - name: gfx (Metal, Cocoa)
+        if: matrix.plat == 'darwin-arm64'
+        run: |
+          set -ex
+          cd "$RUNNER_TEMP/app"
+          npm install --no-audit --no-fund $(find "$GITHUB_WORKSPACE/dl" -name 'hxmc-os-*.tgz' -o -name 'hxmc-gfx-*.tgz')
+          g="$GITHUB_WORKSPACE/repo/packages/gfx"
+          npx haxe -lib hxmc.gfx -cp "$g/examples" -cp "$g/test" -main GfxTest --custom-target hxmc=gfx/GfxTest
+          npx haxe -lib hxmc.gfx -cp "$g/examples" -main Triangle --custom-target hxmc=gfx/Triangle
+          ls -l gfx/GfxTest gfx/Triangle
+          otool -L gfx/Triangle
+          sh "$g/test/check.sh" gfx
+      - uses: actions/upload-artifact@v7
+        if: always() && matrix.plat == 'darwin-arm64'
+        with: {name: gfx-images-macos-arm64, path: "${{ runner.temp }}/app/gfx/*.png", retention-days: 7, if-no-files-found: ignore}
       - name: With --ignore-scripts, the first call installs the native compiler
         if: runner.os != 'Windows'
         run: |

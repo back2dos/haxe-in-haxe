@@ -137,8 +137,8 @@ help:
 ## smoke       hxmc/test/smoke.sh on PORT_BIN: --interp, HXB, JS, sys.ssl, eval.luv
 ## hxmc-test   hxmc's corpus against its golden files (hxmc/test/Corpus.hx)
 ## test-node-libs  -lib from node_modules with the npm package's compiler for the host (hxmc/test/NodeLibs.hx)
-## gfx-check   packages/gfx: the triangle example headless and in an X11 window under Xvfb,
-##             against a golden image (packages/gfx/test/check.sh; Linux, Mesa, Xvfb)
+## gfx-check   packages/gfx: the triangle example headless and in a window, against a golden
+##             image (packages/gfx/test/check.sh; Linux: Mesa, Xvfb; macOS: Metal, Cocoa)
 ## portcheck   the port built by hxmc self-compiles to the reference's HXB (hxmc/test/Selfcheck.hx)
 ## bench       the HaxeBenchmarks cases on hxmc (native, wasm under node), C++, JVM, JS, HL/C and
 ##             HL, built by hxmc and the port: times, peak RSS, sizes (hxmc/test/Bench.hx; BENCH_ARGS)
@@ -398,9 +398,11 @@ hxmc-test: $(TOOL) $(STD) $(HOST_RT)
 
 # the os and gfx packages' sources (`-lib hxmc.gfx` once the launcher resolves packages/)
 GFX_CP := -cp packages/os/src -cp packages/gfx/src -cp packages/gfx/examples -cp packages/gfx/test
+# (Linux: the dynamic glibc mode, which loads the GPU drivers)
+GFX_ARGS := $(if $(filter linux-%,$(HOST)),-D hxmc.libc=glibc)
 gfx-check: $(TOOL) $(STD) $(HOST_RT)
-	$(call hxmc,bin/gfx/GfxTest,$(GFX_CP) -main GfxTest $(HXMC_ARGS) -D hxmc.libc=glibc)
-	$(call hxmc,bin/gfx/Triangle,$(GFX_CP) -main Triangle $(HXMC_ARGS) -D hxmc.libc=glibc)
+	$(call hxmc,bin/gfx/GfxTest,$(GFX_CP) -main GfxTest $(HXMC_ARGS) $(GFX_ARGS))
+	$(call hxmc,bin/gfx/Triangle,$(GFX_CP) -main Triangle $(HXMC_ARGS) $(GFX_ARGS))
 	sh packages/gfx/test/check.sh bin/gfx
 
 portcheck: $(TOOL) $(STD) $(HOST_RT) $(REFERENCE)
