@@ -288,12 +288,12 @@ nightly prerelease `<version>-nightly.<date>.<commit>` tagged `next`; then the
 source-only packages of `packages/` at their own versions when those are not
 on npm yet; never from other branches), the nightly release and the website.
 
-Main, tags, the nightly schedule (02:41 UTC) and dispatches run everything.
-On other branches a push runs only what its changes need, since the last
-commit whose run succeeded (else since the merge base with main): only
-`*.md`, nothing beyond `changes`; only `hxmc/web`, `site` and `playground`;
-only source-only packages (`packages/os`, `packages/gfx`: a version of their
-own), `build`, `npm-pack` and the `gfx` jobs; anything else (`haxe/`, `hxmc/src`,
+Main, tags, the nightly schedule (02:41 UTC) and dispatches run everything. On
+other branches a push runs only what its changes need, since the last commit
+whose run succeeded (else since the merge base with main): only `*.md`,
+nothing beyond `changes`; only `hxmc/web`, `site` and `playground`; only
+source-only packages (`packages/os`, `packages/gfx`: a version of their own),
+`build`, `npm-pack` and the `gfx` jobs; anything else (`haxe/`, `hxmc/src`,
 `hxmc/std`, `hxmc/deps`, `hxmc/test`, the workflows, the Makefile, the
 compiler's npm packages), everything. A newer push to a branch cancels its
 run; runs on main, hxmc and tags always finish.
