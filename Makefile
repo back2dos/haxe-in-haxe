@@ -25,6 +25,8 @@ export ZIG
 HOST ?= $(if $(filter Darwin,$(shell uname -s)),macos,linux)-$(if $(filter aarch64 arm64,$(shell uname -m)),arm64,x86_64)
 # `make release`, `make lix-release`: one of the six targets
 TARGET ?= $(HOST)
+# `make gfx-check`: the target of the gfx test programs (windows-x86_64: run under Wine)
+GFX_TARGET ?= $(HOST)
 TARGETS := linux-x86_64 linux-arm64 windows-x86_64 windows-arm64 macos-x86_64 macos-arm64
 # the runtime objects: the six targets, and Linux in the dynamic glibc mode (-D hxmc.libc=glibc)
 RT_TARGETS := $(TARGETS) linux-x86_64-glibc linux-arm64-glibc
@@ -138,7 +140,8 @@ help:
 ## hxmc-test   hxmc's corpus against its golden files (hxmc/test/Corpus.hx)
 ## test-node-libs  -lib from node_modules with the npm package's compiler for the host (hxmc/test/NodeLibs.hx)
 ## gfx-check   packages/gfx: the triangle example headless and in a window, against a golden
-##             image (packages/gfx/test/check.sh; Linux: Mesa, Xvfb; macOS: Metal, Cocoa)
+##             image (packages/gfx/test/check.sh; Linux: Mesa, Xvfb; macOS: Metal, Cocoa);
+##             GFX_TARGET=windows-x86_64: D3D11 and Win32 under Wine
 ## portcheck   the port built by hxmc self-compiles to the reference's HXB (hxmc/test/Selfcheck.hx)
 ## bench       the HaxeBenchmarks cases on hxmc (native, wasm under node), C++, JVM, JS, HL/C and
 ##             HL, built by hxmc and the port: times, peak RSS, sizes (hxmc/test/Bench.hx; BENCH_ARGS)
@@ -154,7 +157,7 @@ help:
 ## clean       remove the build outputs (keeps the tool, the runtime objects and the reference)
 ## distclean   also remove bin/ entirely
 ##
-## Variables: JOBS, NODE, ZIG, HOST, TARGET, HXFLAGS, PORT_BIN, REFERENCE, LANE, N, CASES, PORT,
+## Variables: JOBS, NODE, ZIG, HOST, TARGET, GFX_TARGET, HXFLAGS, PORT_BIN, REFERENCE, LANE, N, CASES, PORT,
 ## LIX_DIR, BENCH_DATA, BENCH_ARGS (defaults and meaning: the top of the Makefile).
 
 std: $(STD)
@@ -399,11 +402,12 @@ hxmc-test: $(TOOL) $(STD) $(HOST_RT)
 # the os and gfx packages' sources (`-lib hxmc.gfx` once the launcher resolves packages/)
 GFX_CP := -cp packages/os/src -cp packages/gfx/src -cp packages/gfx/examples -cp packages/gfx/test
 # (Linux: the dynamic glibc mode, which loads the GPU drivers)
-GFX_ARGS := $(if $(filter linux-%,$(HOST)),-D hxmc.libc=glibc)
+GFX_ARGS := $(if $(filter linux-%,$(GFX_TARGET)),-D hxmc.libc=glibc) -D hxmc.target=$(GFX_TARGET)
+GFX_OUT := bin/gfx/$(GFX_TARGET)
 gfx-check: $(TOOL) $(STD) $(HOST_RT)
-	$(call hxmc,bin/gfx/GfxTest,$(GFX_CP) -main GfxTest $(HXMC_ARGS) $(GFX_ARGS))
-	$(call hxmc,bin/gfx/Triangle,$(GFX_CP) -main Triangle $(HXMC_ARGS) $(GFX_ARGS))
-	sh packages/gfx/test/check.sh bin/gfx
+	$(call hxmc,$(GFX_OUT)/GfxTest$(call EXE,$(GFX_TARGET)),$(GFX_CP) -main GfxTest $(HXMC_ARGS) $(GFX_ARGS))
+	$(call hxmc,$(GFX_OUT)/Triangle$(call EXE,$(GFX_TARGET)),$(GFX_CP) -main Triangle $(HXMC_ARGS) $(GFX_ARGS))
+	sh packages/gfx/test/check.sh $(GFX_OUT)
 
 portcheck: $(TOOL) $(STD) $(HOST_RT) $(REFERENCE)
 	$(SCRIPT) Selfcheck --local --small

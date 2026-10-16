@@ -533,9 +533,9 @@ setjmp/longjmp do not unwind, but debuggers and SEH-based tools would.
   the macro.
 - Back ends in order: GL 3.3 / GLES 3 on Linux first (glibc mode; EGL and
   libX11 imports; Mesa's llvmpipe and Xvfb run it without a GPU, here and
-  on CI), then Metal (done, below), WebGL2 (the same API shape, through
-  JS imports; packages ship an `imports.mjs` the wasm runner loads), D3D11
-  (WARP on Windows CI), then Vulkan / D3D12.
+  on CI), then Metal (done, below), D3D11 (done, below), WebGL2 (the same
+  API shape, through JS imports; packages ship an `imports.mjs` the wasm
+  runner loads), then Vulkan / D3D12.
 - First milestone (done): a GL triangle in an X11 window
   (`packages/gfx/examples/Triangle.hx`), checked against a golden image
   headless (EGL pbuffer on Mesa's surfaceless platform, `glReadPixels`) and
@@ -570,6 +570,33 @@ setjmp/longjmp do not unwind, but debuggers and SEH-based tools would.
   `objc_msgSend_stret` for results over 16 bytes), frames during a live
   resize (AppKit's tracking loop runs inside `sendEvent:`: a timer in
   the event-tracking run loop mode), a menu (Cmd-Q).
+- D3D11 (done, 2026-10-16, Windows x86-64 and arm64): the same
+  `Triangle.hx` in a Win32 window, against the same golden image with the
+  same tolerance, headless (an offscreen texture) and windowed (the back
+  buffer, and the window's pixels from `PrintWindow` with
+  `PW_RENDERFULLCONTENT`, else the screen's DC) on WARP
+  (`HXMC_GFX_SOFTWARE=1`, the CI runners); under Wine 9 (wined3d over
+  llvmpipe, Xvfb: `make gfx-check GFX_TARGET=windows-x86_64`) all three are
+  exact. `hxmc.os.win32`: user32, kernel32 and gdi32 externs (DLL imports,
+  `@:hxmc.lib`); `Win32Window`: one window class whose window procedure is
+  a `@:hxmc.callback` (close, size, keys as X11 KeySyms, the mouse and
+  wheel), the queue drained with `PeekMessageW` each frame of `App.run`, the
+  process per-monitor DPI aware (sizes in pixels, `scale` the DPI / 96);
+  user32 calls run in a safe region, since most call the window procedure.
+  `hxmc.gfx.d3d11`: `D3D11CreateDevice` (hardware, else WARP),
+  `D3DCompile` imported from d3dcompiler_47.dll (HLSL, entry point `main`,
+  inputs at `TEXCOORD<location>`, shader model 5.0, 4.0 below feature level
+  11_0), COM through vtables (`Com`: a build macro turns `@:slot(n)`
+  declarations, the headers' vtable order, into `@:hxmc.indirect` calls
+  through the object's vtable), the factory from the device's adapter
+  (`IDXGIDevice`, `GetParent`) for a flip-model swap chain
+  (`CreateSwapChainForHwnd`, `FLIP_DISCARD`, two RGBA8 buffers,
+  `ResizeBuffers` when the window's size changes), `readPixels` through a
+  staging texture and `Map`. No call needs a struct by value. Left: frames
+  during a live resize or a move (Windows' modal loop inside
+  `DispatchMessageW`: a timer, or rendering from `WM_PAINT`), `WM_DPICHANGED`,
+  a lost device (`DXGI_ERROR_DEVICE_REMOVED` throws), characters
+  (`WM_CHAR`), the debug layer.
 - Structs by value in C calls (done for arm64, 2026-10-16): AAPCS64 on
   macOS, Linux and Windows (MirBuild.cStructArg, cStructRet; a64 Isel):
   homogeneous aggregates of up to four floats or doubles in v registers,
