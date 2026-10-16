@@ -252,7 +252,7 @@ class Loader {
 		for (i in 0...newScalars.length)
 			extra.set(newScalars[i], ptr(base + scalarsAt + 8 * i));
 		for (k in 0...selectors.length)
-			extra.set(selectors[k].sym, ptr(base + rowsAt + rowBytes * k - 8 * Abi.T_FIRST + 8 * Abi.T_FIRST));
+			extra.set(selectors[k].sym, ptr(base + rowsAt + rowBytes * k)); // (indexed by type index - T_FIRST: MirBuild)
 		// ---- symbols
 		dbg("symbols");
 		function value(s:Symbol):{v:Int, tls:Bool} {
