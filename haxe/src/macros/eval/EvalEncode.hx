@@ -146,9 +146,7 @@ class EvalEncode {
 
 	// port: the field list sorted as evalPrototype.ml `get_object_prototype` sorts it (List.sort is stable).
 	public static function sortObjectFields(l:Array<{name:Int, value:Value}>):Array<{name:Int, value:Value}> {
-		var sorted = l.copy();
-		haxe.ds.ArraySort.sort(sorted, (f1, f2) -> if (f1.name == f2.name) 0 else if (f1.name < f2.name) -1 else 1);
-		return sorted;
+		return EvalPrototype.sortObjectFields(l);
 	}
 
 	// port: `ctx.get_object_prototype ctx l`: the prototype and the sorted fields.

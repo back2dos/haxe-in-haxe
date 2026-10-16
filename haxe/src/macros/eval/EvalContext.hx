@@ -424,6 +424,16 @@ private class EventWaiter<T> {
 	public function new() {}
 }
 
+// port: `object_name_cache` (a Hashtbl keyed by the sorted hashed names) as a
+// trie: a node per prefix of names, with the object name of its exact list
+// (-1 until computed; hashes are 30-bit), so a lookup allocates nothing.
+class ObjectNameCache {
+	public var name:Int = -1;
+	public final children:Map<Int, ObjectNameCache> = new Map();
+
+	public function new() {}
+}
+
 class Context {
 	public final ctxId:Int;
 	public final isMacro:Bool;
@@ -445,7 +455,7 @@ class Context {
 	public var constructors:GlobalsIntMap<AtomicLazy<Value>> = GlobalsIntMap.empty();
 	public final fakeProtoCache:Map<Int, Vprototype> = new Map();
 	public final fileKeys:context.Common.FileKeys;
-	public final objectNameCache:Map<String, Int> = new Map(); // port: keyed by the joined hashed names
+	public final objectNameCache:ObjectNameCache = new ObjectNameCache(); // port: a trie on the sorted hashed names
 	public var getObjectPrototype:(ctx:Context, fields:Array<Int>) -> Vprototype;
 	// eval
 	public var nextThreadId:Int = 0;

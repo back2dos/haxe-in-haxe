@@ -34,9 +34,24 @@ class EvalHash {
 		return s;
 	}
 
+	// port: the names hashed before (Hashtbl.hash on each call is C upstream;
+	// here a lookup is cheaper than the UTF-8 copy and the reverse map's update)
+	// port: once two names collide, the reverse map is updated on every call
+	// again, so that it holds the last name hashed, as upstream's.
+	static final hashCache:Map<String, Int> = new Map();
+	static var collided = false;
+
 	public static function hash(f:String):Int {
+		var c = hashCache.get(f);
+		if (c != null) {
+			if (collided) reverseMap.set(c, f);
+			return c;
+		}
 		var i = camlHashString(f);
+		var prev = reverseMap.get(i);
+		if (prev != null && prev != f) collided = true;
 		reverseMap.set(i, f);
+		hashCache.set(f, i);
 		return i;
 	}
 

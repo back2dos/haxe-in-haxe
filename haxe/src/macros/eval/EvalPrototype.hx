@@ -39,7 +39,7 @@ using macros.eval.EvalValue.EvalValueTools;
 //   in any order and returns the prototype. The upstream function, returning
 //   the sorted `(name, value)` list too, is `getObjectPrototypeSorted`; callers
 //   that need the sorted values use it (or `sortObjectFields`).
-// - `object_name_cache` is keyed by the sorted hashed names joined with ",".
+// - `object_name_cache` is a trie on the sorted hashed names (ObjectNameCache).
 // - `ctx.overrides` is keyed by `sTypePath(path) + "." + fieldName`.
 typedef ProtoField = {name:Int, value:AtomicLazy<Value>};
 
@@ -434,50 +434,93 @@ class EvalPrototype {
 		return PrototypeBuilder.finalize(pctx);
 	}
 
-	// port: upstream `List.sort` (stable) on the hashed names.
+	// port: upstream `List.sort` (stable) on the hashed names; short lists
+	// (most) by an insertion sort, stable too: an element moves only past
+	// greater names.
 	public static function sortObjectFields<T>(l:Array<{name:Int, value:T}>):Array<{name:Int, value:T}> {
 		var l = l.copy();
-		haxe.ds.ArraySort.sort(l, (f1, f2) -> {
-			var i1 = f1.name, i2 = f2.name;
-			if (i1 == i2) 0
-			else if (i1 < i2) -1
-			else 1;
-		});
+		if (l.length > 16) {
+			haxe.ds.ArraySort.sort(l, (f1, f2) -> {
+				var i1 = f1.name, i2 = f2.name;
+				if (i1 == i2) 0
+				else if (i1 < i2) -1
+				else 1;
+			});
+			return l;
+		}
+		for (i in 1...l.length) {
+			var f = l[i];
+			var j = i;
+			while (j > 0 && l[j - 1].name > f.name) {
+				l[j] = l[j - 1];
+				j--;
+			}
+			l[j] = f;
+		}
 		return l;
+	}
+
+	// port: the same sort on the names alone.
+	static function sortNames(l:Array<Int>):Array<Int> {
+		var l = l.copy();
+		if (l.length > 16) {
+			haxe.ds.ArraySort.sort(l, (i1, i2) -> if (i1 == i2) 0 else if (i1 < i2) -1 else 1);
+			return l;
+		}
+		for (i in 1...l.length) {
+			var n = l[i];
+			var j = i;
+			while (j > 0 && l[j - 1] > n) {
+				l[j] = l[j - 1];
+				j--;
+			}
+			l[j] = n;
+		}
+		return l;
+	}
+
+	// port: `object_name_cache`: the name of the sorted names `ids`.
+	static function objectName(ctx:Context, ids:Array<Int>):Int {
+		var node = ctx.objectNameCache;
+		for (i in ids) {
+			var next = node.children.get(i);
+			if (next == null) {
+				next = new ObjectNameCache();
+				node.children.set(i, next);
+			}
+			node = next;
+		}
+		if (node.name < 0) {
+			var sfields = ids.map(i -> ":" + EvalHash.revHash(i)).join(",");
+			node.name = EvalHash.hash("eval.object.Object[" + sfields + "]");
+		}
+		return node.name;
+	}
+
+	static function objectPrototypeOfSorted(ctx:Context, ids:Array<Int>):Vprototype {
+		var name = objectName(ctx, ids);
+		return try {
+			ctx.instancePrototypes.find(name);
+		} catch (_:NotFound) {
+			var pctx = PrototypeBuilder.create(ctx, name, null, PObject, null);
+			for (i in ids)
+				PrototypeBuilder.addInstanceField(pctx, i, AtomicLazy.fromVal(VNull));
+			var proto = PrototypeBuilder.finalize(pctx).proto;
+			ctx.instancePrototypes = ctx.instancePrototypes.add(name, proto);
+			proto;
+		}
 	}
 
 	// port: upstream `get_object_prototype`: the prototype and the sorted fields.
 	public static function getObjectPrototypeSorted<T>(ctx:Context,
 			l:Array<{name:Int, value:T}>):{proto:Vprototype, sorted:Array<{name:Int, value:T}>} {
 		var l = sortObjectFields(l);
-		var name = {
-			var ids = l.map(f -> f.name);
-			var cacheKey = ids.join(",");
-			var cached = ctx.objectNameCache.get(cacheKey);
-			if (cached != null) cached
-			else {
-				var sfields = ids.map(i -> ":" + EvalHash.revHash(i)).join(",");
-				var name = EvalHash.hash("eval.object.Object[" + sfields + "]");
-				ctx.objectNameCache.set(cacheKey, name);
-				name;
-			}
-		}
-		var proto = try {
-			ctx.instancePrototypes.find(name);
-		} catch (_:NotFound) {
-			var pctx = PrototypeBuilder.create(ctx, name, null, PObject, null);
-			for (f in l)
-				PrototypeBuilder.addInstanceField(pctx, f.name, AtomicLazy.fromVal(VNull));
-			var proto = PrototypeBuilder.finalize(pctx).proto;
-			ctx.instancePrototypes = ctx.instancePrototypes.add(name, proto);
-			proto;
-		}
-		return {proto: proto, sorted: l};
+		return {proto: objectPrototypeOfSorted(ctx, [for (f in l) f.name]), sorted: l};
 	}
 
 	// port: the function stored in `Context.getObjectPrototype` (see the module comment).
 	public static function getObjectPrototype(ctx:Context, l:Array<Int>):Vprototype {
-		return getObjectPrototypeSorted(ctx, l.map(i -> {name: i, value: (null : Null<Value>)})).proto;
+		return objectPrototypeOfSorted(ctx, sortNames(l));
 	}
 
 	static function addTypesImpl(ctx:Context, types:Array<ModuleType>, ready:ModuleType->Void):Void {
