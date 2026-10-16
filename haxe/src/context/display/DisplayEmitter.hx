@@ -85,7 +85,8 @@ class DisplayEmitter {
 
 	public static function checkDisplayType(ctx:Typer, t:T, ptp:core.Ast.PlacedTypePath):Void {
 		function addTypeHint():Void {
-			ctx.g.typeHints.unshift({display: ctx.m.curmod.mExtra.mDisplay, pos: ptp.posFull, type: t});
+			// port: appended (typeHints is the OCaml list reversed; see Typecore)
+			ctx.g.typeHints.push({display: ctx.m.curmod.mExtra.mDisplay, pos: ptp.posFull, type: t});
 		}
 		function maybeDisplayType():Void {
 			if (ctx.m.isDisplayFile && DisplayPosition.displayPosition.enclosedIn(ptp.posFull)) displayType(ctx, t, ptp.posPath);

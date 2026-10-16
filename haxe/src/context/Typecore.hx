@@ -193,6 +193,8 @@ enum FunctionMode {
 	public var globalUsing:Array<{cls:TClass, pos:Pos}>;
 	// Indicates that Typer.create() finished building this instance
 	public var complete:Bool;
+	// port: in the reverse order of upstream's list (the latest last): consing
+	// onto the front of an array copies it, once per type hint of the program
 	public var typeHints:Array<{display:ModuleDefDisplay, pos:Pos, type:T}>;
 	public var loadOnlyCachedModules:Bool;
 	public var returnPartialType:Bool;

@@ -248,7 +248,12 @@ class DisplayProcessing {
 				case TFun(_) | TAnon(_):
 			}
 		}
-		for (th in tctx.g.typeHints) exploreTypeHint(th.display, th.pos, th.type);
+		// port: typeHints holds the list reversed (see Typecore)
+		var i = tctx.g.typeHints.length;
+		while (i-- > 0) {
+			var th = tctx.g.typeHints[i];
+			exploreTypeHint(th.display, th.pos, th.type);
+		}
 	}
 
 	public static function processGlobalDisplayMode(com:CommonContext, tctx:Typer):Void {
