@@ -277,6 +277,10 @@ class Facts {
 			{name: "hasNext", fn: "hx_arrayiter_hasNext", sig: p.sig([], TBool).id},
 			{name: "next", fn: "hx_arrayiter_next", sig: p.sig([], TRef(RAny)).id}
 		];
+		// Iterable.iterator() on an Array (Lambda and the other Iterable
+		// consumers): a method, so structural calls hit the inline cache
+		// instead of the boxed slow path
+		types[5].methods = [{name: "iterator", fn: "hx_array_iterator", sig: p.sig([], TRef(RAny)).id}];
 		// one bound-method closure type per signature: code, this, method
 		for (s in p.sigs) {
 			var t = entry("<bound>", "TK_BOUND", [TI32, TRef(RAny), TI32], "bound." + s.key);

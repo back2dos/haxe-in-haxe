@@ -358,7 +358,7 @@ class Dyn {
 		return (Mem.getRef(p, 0) : Array<Dynamic>)[i];
 	}
 
-	static function arrayIterator(a:Dynamic):Dynamic {
+	@:hxmc.export("hx_array_iterator") static function arrayIterator(a:Dynamic):Dynamic {
 		var it = Mem.alloc(2, T_ARRAYITER, K_OBJ);
 		Mem.setRef(Mem.addr(it), 0, a); // it is young
 		return it;
