@@ -645,7 +645,12 @@ class EvalEmitter {
 			var v1 = exec(env);
 			env.envLeavePmin = p.pmin;
 			env.envLeavePmax = p.pmax;
-			return EvalMisc.callValue(v1, applyAll(execs, env));
+			// port: `call_value v1 (List.map (apply env) execs)`, a field closure's
+			// receiver put in front while the arguments are evaluated
+			return switch v1 {
+				case VFieldClosure(vt, f): f(applyAllThis(vt, execs, env));
+				case _: EvalMisc.callValue(v1, applyAll(execs, env));
+			}
 		}
 	}
 
