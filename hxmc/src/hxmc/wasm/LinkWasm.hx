@@ -11,7 +11,7 @@ import hxmc.wasm.Enc;
 // _start, lays the data out in linear memory (from 4 KB; then the stack of
 // frame slots, then the heap the runtime manages from __heap_base),
 // numbers the functions (the WASI imports first), puts the functions whose
-// address is taken in the table (index 0: null), makes a global of each
+// address is taken in the table (index 0: null; exported), makes a global of each
 // thread-local variable (one thread), writes a few functions itself
 // (memcpy and friends as bulk-memory instructions, the f64 rounding
 // functions, rt_throw as a throw of the exception tag, memory.size/grow) and
@@ -19,6 +19,7 @@ import hxmc.wasm.Enc;
 class LinkWasm {
 	public static inline var START = "_start";
 	public static inline var HEAP_BASE = "__heap_base";
+	public static inline var TABLE = "__indirect_function_table";
 	public static inline var DATA_BASE = 4096;
 
 	var objs:Array<Obj>;
@@ -323,15 +324,20 @@ class LinkWasm {
 			s.u8(Op.End);
 		}
 		section(m, 6, s);
-		// exports
+		// exports: the memory, _start and the table (the host calls a
+		// @:hxmc.callback through the address it was given, also after _start
+		// returned: LOWLEVEL.md, "WebAssembly")
 		s = new Buf(64);
-		Enc.uleb(s, 2);
+		Enc.uleb(s, 3);
 		Enc.name(s, "memory");
 		s.u8(2);
 		s.u8(0);
 		Enc.name(s, START);
 		s.u8(0);
 		Enc.uleb(s, funcIndex.get(START));
+		Enc.name(s, TABLE);
+		s.u8(1);
+		s.u8(0);
 		section(m, 7, s);
 		// elements: the table from index 1
 		if (table.length > 0) {

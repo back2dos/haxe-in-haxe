@@ -86,7 +86,17 @@ extern class SDL {
   executable); static musl executables cannot load glibc libraries (GPU
   drivers, see PLANS.md "Graphics"), and an import there is a compile
   error that names the mode.
-- WebAssembly: C functions become module imports (WASI or JavaScript).
+- WebAssembly: C functions become module imports (WASI or JavaScript):
+  the module `@:hxmc.lib` names ("env" by default), pointers as i32.
+  The module exports `memory`, `_start` and `__indirect_function_table`;
+  a `@:hxmc.callback`'s address (`Callback.addr`) is its index in that
+  table, so JavaScript calls it with `table.get(addr)(...)`, during an
+  import call or after `_start` returned (a browser's event loop: the
+  runtime keeps its statics and heap between calls; Int and Float
+  parameters are numbers, Int64 and Ptr ones BigInt). An exception a
+  callback does not catch ends the program (proc_exit); what it prints
+  stays buffered until `Sys.stdout().flush()`. Test:
+  `hxmc/test/cases/WasmCallback.hx`.
 
 ### What declarations cannot cover: optional embedded tcc
 

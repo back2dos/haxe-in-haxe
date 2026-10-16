@@ -28,6 +28,9 @@ class FileOutput extends haxe.io.Output {
 		return n;
 	}
 
+	override public function flush():Void
+		NativeSys.fileFlush(fd);
+
 	override public function close():Void
 		NativeSys.fileClose(fd);
 

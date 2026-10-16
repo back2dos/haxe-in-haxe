@@ -1,0 +1,8 @@
+exit 0
+WasmCallback.hx:24: main returns
+WasmCallback.hx:34: tick 0 0.5: 20000 even, 101 kept, kept 3, step 1000
+host: tick 0 returned 0
+WasmCallback.hx:34: tick 1 1.5: 20000 odd 1, 102 kept, kept 3, step 1001
+host: tick 1 returned 10
+WasmCallback.hx:34: tick 2 2.5: 20000 even, 103 kept, kept 3, step 1002
+host: tick 2 returned 20

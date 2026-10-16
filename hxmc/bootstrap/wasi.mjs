@@ -87,9 +87,12 @@ export function runWasm(module, args, env = process.env) {
 	if (process.platform === 'win32' || env.HXMC_WASI_READDIR) readdirShim(imports.wasi_snapshot_preview1, pre, () => memory);
 	// HXMC_WASM_IMPORTS=<file.cjs>: the modules of the C functions a program
 	// declares (@:hxmc.lib; "env" by default), from a CommonJS module
-	// exporting (getMemory) => ({module: {name: function}})
-	if (env.HXMC_WASM_IMPORTS) Object.assign(imports, createRequire(import.meta.url)(path.resolve(env.HXMC_WASM_IMPORTS))(() => memory));
-	const inst = new WebAssembly.Instance(mod, imports);
+	// exporting (getMemory, getExports) => ({module: {name: function}}); the
+	// exports' __indirect_function_table holds the @:hxmc.callback functions
+	// whose addresses the program passes (callable after _start returned)
+	let inst = null;
+	if (env.HXMC_WASM_IMPORTS) Object.assign(imports, createRequire(import.meta.url)(path.resolve(env.HXMC_WASM_IMPORTS))(() => memory, () => inst.exports));
+	inst = new WebAssembly.Instance(mod, imports);
 	memory = inst.exports.memory;
 	return wasi.start(inst) ?? 0;
 }

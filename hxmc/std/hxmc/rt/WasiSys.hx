@@ -256,6 +256,10 @@ class WasiSys {
 		return rw(true, fd, Bytes.bytes(b).add(pos), len);
 	}
 
+	// (Sys.stdout().flush(): what a callback printed, after main returned)
+	@:hxmc.noGc public static function fileFlush(fd:Int):Void
+		if (fd == 1) Wasi.flush();
+
 	@:hxmc.noGc public static function fileClose(fd:Int):Void {
 		if (fd == 1) Wasi.flush();
 		WasiApi.fd_close(fd);

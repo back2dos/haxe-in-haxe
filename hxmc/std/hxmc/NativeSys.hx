@@ -92,6 +92,12 @@ class NativeSys {
 	public static inline function fileWrite(fd:Int, b:haxe.io.Bytes, pos:Int, len:Int):Int
 		return #if (hxmc.target == "wasm32-wasi") WasiSys.fileWrite(fd, b, pos, len) #else Mem.os() == 2 ? WinSys.fileWrite(fd, b, pos, len) : PosixSys.fileWrite(fd, b, pos, len) #end;
 
+	// WebAssembly: the buffered standard output written out (elsewhere writes
+	// are not buffered)
+	public static inline function fileFlush(fd:Int):Void {
+		#if (hxmc.target == "wasm32-wasi") WasiSys.fileFlush(fd); #end
+	}
+
 	public static inline function fileClose(fd:Int):Void {
 		#if (hxmc.target == "wasm32-wasi") WasiSys.fileClose(fd); #else if (Mem.os() == 2) WinSys.fileClose(fd) else PosixSys.fileClose(fd); #end
 	}
