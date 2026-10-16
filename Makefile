@@ -54,6 +54,8 @@ LIX_DIR ?=
 BENCH_DATA ?=
 # `make bench`: the arguments of hxmc/test/Bench.hx (e.g. "-n 3 -c nbody -t hxmc,js")
 BENCH_ARGS ?=
+# `make crosshost`: the arguments of hxmc/test/Crosshost.hx (CI splits the targets: "--targets a,b")
+CROSSHOST_ARGS ?= --tool
 
 # --- Sources ---
 
@@ -169,7 +171,7 @@ help:
 ## distclean   also remove bin/ entirely
 ##
 ## Variables: JOBS, NODE, ZIG, HOST, TARGET, RT_TARGET, GFX_TARGET, HXFLAGS, PORT_BIN, REFERENCE, LANE, N, CASES, PORT,
-## LIX_DIR, BENCH_DATA, BENCH_ARGS (defaults and meaning: the top of the Makefile).
+## LIX_DIR, BENCH_DATA, BENCH_ARGS, CROSSHOST_ARGS, CORPUS_TARGETS (defaults and meaning: the top of the Makefile).
 
 std: $(STD)
 $(STD): hxmc/src/hxmc/MkStd.hx $(STD_SRC)
@@ -253,7 +255,7 @@ stage0: $(TOOL)
 	@ls -l $(STAGE0)
 
 crosshost: $(TOOL) $(STD) $(HOST_RT)
-	$(SCRIPT) Crosshost --tool $(CASES)
+	$(SCRIPT) Crosshost $(CROSSHOST_ARGS) $(CASES)
 
 # --- The port ---
 

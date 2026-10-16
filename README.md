@@ -260,29 +260,30 @@ and the release), `build` (the bootstrap from the stage0, the fixpoint, the
 release binaries and lix for the six targets) and next to it, each with a tool
 of its own from the stage0: `corpus` (`make corpus-stage`: the corpus for
 every target in three jobs, the port as a WebAssembly module, the reference's
-self-compile), `crosshost, memory and time` (crosshost, then `make measure`),
-`npm-pack` (the npm packages), `site` and `gfx` (`make gfx-check` on Linux
-x86-64, and the programs cross-built for `gfx-arm64` to check on ARM64). Then
-`conformance` (the harnesses above; the Eval debugger in three shards,
-`EvalDebugger --shard i/n`, and the fuzzer's diff lanes in three jobs), `test`
-(on each of the six machines: the release binary's smoke test with a TLS
-handshake and libuv, lix, the corpus, the self-compile), `wasm` (the corpus
-and the self-compile under node and wasmtime, both also with legacy exception
-handling under node), `playground` (the playground in three browser engines
-with both modules and its fallback to the legacy one in a Chromium without
-exnref), `npm` (the nine packages in fresh projects on each of the six
-machines: native at once through the platform package, `-lib` from
-node_modules (`hxmc/test/NodeLibs.hx`), `--ignore-scripts`; and on linux-x64,
-or on all six on main, tags and the nightly run, lix with `dist/`, the
-WebAssembly fallback, downloaded (from the local tarball: `HXMC_WASM_TARBALL`,
-a path or URL in place of the registry's) and installed (with `-lib` by the
-WebAssembly compiler), and `hxmc-rebuild` with `--reset`), `upstream-tests`,
-and `publish-npm` (after every check; all nine at one version, skipping those
-published already: the six platform packages, `@hxmc/wasm`, `@hxmc/source`,
-then `@hxmc/cli`, with provenance: on `v*` tags as `latest`, from main as a
-nightly prerelease `<version>-nightly.<date>.<commit>` tagged `next`; then the
-source-only packages of `packages/` at their own versions when those are not
-on npm yet; never from other branches), the nightly release and the website.
+self-compile), `crosshost` (`make crosshost`, the targets in two jobs),
+`memory and time` (`make measure`), `npm-pack` (the npm packages), `site` and
+`gfx` (`make gfx-check` on Linux x86-64, and the programs cross-built for
+`gfx-arm64` to check on ARM64). Then `conformance` (the harnesses above; the
+Eval debugger in three shards, `EvalDebugger --shard i/n`, and the fuzzer's
+diff lanes in three jobs), `test` (on each of the six machines: the release
+binary's smoke test with a TLS handshake and libuv, lix, the corpus, the
+self-compile), `wasm` (the corpus and the self-compile under node and
+wasmtime, both also with legacy exception handling under node), `playground`
+(the playground in three browser engines with both modules and its fallback to
+the legacy one in a Chromium without exnref), `npm` (the nine packages in
+fresh projects on each of the six machines: native at once through the
+platform package, `-lib` from node_modules (`hxmc/test/NodeLibs.hx`),
+`--ignore-scripts`; and on linux-x64, or on all six on main, tags and the
+nightly run, lix with `dist/`, the WebAssembly fallback, downloaded (from the
+local tarball: `HXMC_WASM_TARBALL`, a path or URL in place of the registry's)
+and installed (with `-lib` by the WebAssembly compiler), and `hxmc-rebuild`
+with `--reset`), `upstream-tests`, and `publish-npm` (after every check; all
+nine at one version, skipping those published already: the six platform
+packages, `@hxmc/wasm`, `@hxmc/source`, then `@hxmc/cli`, with provenance: on
+`v*` tags as `latest`, from main as a nightly prerelease
+`<version>-nightly.<date>.<commit>` tagged `next`; then the source-only
+packages of `packages/` at their own versions when those are not on npm yet;
+never from other branches), the nightly release and the website.
 
 Main, tags, the nightly schedule (02:41 UTC) and dispatches run everything.
 On other branches a push runs only what its changes need, since the last
