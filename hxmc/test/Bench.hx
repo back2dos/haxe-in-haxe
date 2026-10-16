@@ -28,9 +28,8 @@ using StringTools;
 // tag (libhl, hl), a lix scope with hxcpp and hxnodejs (bin/lix/lix), hxcpp's
 // build tool compiled by the port.
 //
-// Measurement: each case is built for every target (cold; build time is the
-// wall time of every step, hxcpp's runtime objects shared through its compile
-// cache), then run RUNS times, the targets interleaved round by round (drift
+// Measurement: each case is built for every target (cold: a fresh output
+// directory), then run RUNS times, the targets interleaved round by round (drift
 // of a shared machine spreads over all of them; a target whose first run takes
 // over 10 s runs 3 times only). Per run: wall time, CPU time
 // and peak RSS (/usr/bin/time). Reported: the median and the spread of the
@@ -40,9 +39,21 @@ using StringTools;
 // and run once per target, and the outputs are compared across targets.
 // Failures are recorded, not fatal. The result is one JSON file (--out).
 //
+// Compile time, per case and target (wall time, seconds):
+//   haxe_s   the Haxe compiler's run: for hxmc (both) the tool's whole build
+//            (typing, lowering, machine code or wasm, link; its per-module object
+//            cache empty, the typed runtime cached per tool as always); for the
+//            others the port's (typing and the generator: the jar for jvm, the
+//            script for js, the bytecode for hl, the C or C++ sources for hlc, cpp)
+//   cc_s     cpp and hlc only: the C++ (hxcpp with g++, its runtime objects
+//            compiled once beforehand by a warm-up build and shared through its
+//            compile cache) or C (gcc -O3 against libhl) compilation and link
+//   build_s  their sum
+//
 // --history <dir>: <dir>/results/*.json (one per run, the bench-data branch)
-// into <dir>/history.json (per run and case: median, min, max, peak RSS of
-// each target) and <dir>/latest.json (the newest CI run, else the newest
+// into <dir>/history.json (per run, case and target an array: median, min,
+// max, peak RSS, build_s, haxe_s, cc_s; null where a run lacks one: haxe_s
+// and cc_s are recorded since 2026-10-16) and <dir>/latest.json (the newest CI run, else the newest
 // measured one), which the website reads.
 class Bench {
 	static final RUNNER = {repo: "https://github.com/HaxeBenchmarks/benchmark-runner.git", commit: "d921d5c2a24d465188da9fb91842dbf019251d62"};
@@ -68,6 +79,8 @@ class Bench {
 		{name: "hxjava", repo: "HaxeFoundation/hxjava", commit: "f8c7dc6c56f4bf8f5912b4844a1b55ab094ee0cf"},
 	];
 	public static final TARGETS = ["hxmc", "hxmc-wasm", "cpp", "jvm", "js", "hlc", "hl"];
+	// history.json: the fields of each run's per case and target array
+	static final HISTORY_FIELDS = ["median", "min", "max", "rss_mb", "build_s", "haxe_s", "cc_s"];
 	static final DIR = "bin/bench";
 	// a target whose first run takes longer than SLOW_SECONDS runs SLOW_RUNS times only
 	static final SLOW_SECONDS = 10.0;
@@ -128,7 +141,7 @@ class Bench {
 			machine: machine(),
 			versions: versions(),
 			runs: runs,
-			method: 'median of $runs runs per target, interleaved ($SLOW_RUNS when a run takes over $SLOW_SECONDS s); wall time of the whole process (start-up, JIT and module compilation included); peak RSS from getrusage; builds cold',
+			method: 'median of $runs runs per target, interleaved ($SLOW_RUNS when a run takes over $SLOW_SECONDS s); wall time of the whole process (start-up, JIT and module compilation included); peak RSS from getrusage; builds cold, compile time as haxe_s (the Haxe compiler: hxmc\'s whole build, the port\'s generation for the others) and cc_s (cpp, hlc: the C++ or C compiler), build_s their sum',
 			targets: targets,
 			cases: [],
 			results: {},
@@ -151,6 +164,8 @@ class Bench {
 				try {
 					var b = build(t, c, out, c.main);
 					r["build_s"] = round(b.seconds, 2);
+					r["haxe_s"] = round(b.haxe, 2);
+					if (b.cc != null) r["cc_s"] = round(b.cc, 2);
 					var s = sizes(t, b.artifact);
 					r["size"] = s.size;
 					r["gzip"] = s.gzip;
@@ -187,7 +202,7 @@ class Bench {
 				r["max"] = round(Lambda.fold(wall, Math.max, wall[0]), 3);
 				r["cpu"] = round(median(cpu), 3);
 				r["rss_mb"] = round(median(rss), 1);
-				say('${pad(c.name, 16)} ${pad(t, 10)} ${fixed(r["median"], 3)} s (${fixed(r["min"], 3)}-${fixed(r["max"], 3)}), ${fixed(r["rss_mb"], 0)} MB, build ${fixed(r["build_s"], 2)} s, ${Std.int(r["size"] / 1024)} KB');
+				say('${pad(c.name, 16)} ${pad(t, 10)} ${fixed(r["median"], 3)} s (${fixed(r["min"], 3)}-${fixed(r["max"], 3)}), ${fixed(r["rss_mb"], 0)} MB, build ${fixed(r["build_s"], 2)} s (Haxe ${fixed(r["haxe_s"], 2)} s${r["cc_s"] != null ? ', C/C++ ' + fixed(r["cc_s"], 2) + ' s' : ""}), ${Std.int(r["size"] / 1024)} KB');
 			}
 			if (check) {
 				var outs = new DynamicAccess<String>();
@@ -313,49 +328,54 @@ class Bench {
 		for (p in cps) args = args.concat(["-cp", p]);
 		args = args.concat(["-main", main]);
 		for (d in c.defines) args = args.concat(["-D", d]);
-		var steps:Array<Array<String>> = [];
+		// each step: its command, its directory (default: the case's) and whether it is the C/C++ compilation
+		var steps:Array<{cmd:Array<String>, ?cwd:String, ?cc:Bool}> = [];
 		var art:String, run:Array<String>;
 		switch target {
 			case "hxmc" | "hxmc-wasm":
 				var wasm = target == "hxmc-wasm";
 				art = '$out/${wasm ? "main.wasm" : "main"}';
-				steps.push([tool, art].concat(args).concat(["-cp", root + "/bin/hxmc/std", "--custom-target", "hxmc"]).concat(wasm ? ["-D", "hxmc.target=wasm32-wasi"] : []));
+				steps.push({cmd: [tool, art].concat(args).concat(["-cp", root + "/bin/hxmc/std", "--custom-target", "hxmc"]).concat(wasm ? ["-D", "hxmc.target=wasm32-wasi"] : [])});
 				run = wasm ? ["node", "--stack-size=65500", root + "/hxmc/bootstrap/wasi.mjs", art] : [art];
 			case "cpp":
 				art = '$out/cpp/$main';
-				steps.push([port].concat(args).concat(["--cpp", '$out/cpp']));
+				// the sources, then hxcpp as the compiler would run it (`haxelib run hxcpp Build.xml haxe`,
+				// the defines from the Options.txt it writes), timed apart
+				steps.push({cmd: [port].concat(args).concat(["-D", "no-compilation", "--cpp", '$out/cpp'])});
+				steps.push({cmd: ["haxelib", "run", "hxcpp", "Build.xml", "haxe"], cwd: '$out/cpp', cc: true});
 				run = [art];
 			case "jvm":
 				art = '$out/main.jar';
-				steps.push([port].concat(args).concat(["--jvm", art]));
+				steps.push({cmd: [port].concat(args).concat(["--jvm", art])});
 				run = ["java", "-jar", art];
 			case "js":
 				// .cjs: the repository's package.json makes .js files ES modules
 				art = '$out/main.cjs';
-				steps.push([port].concat(args).concat(["-lib", "hxnodejs", "--js", art]));
+				steps.push({cmd: [port].concat(args).concat(["-lib", "hxnodejs", "--js", art])});
 				run = ["node", art];
 			case "hlc":
 				art = '$out/hlc/main';
-				steps.push([port].concat(args).concat(["-D", "hl-ver=" + HASHLINK.ver, "-D", "no-compilation", "--hl", '$out/hlc/main.c']));
+				steps.push({cmd: [port].concat(args).concat(["-D", "hl-ver=" + HASHLINK.ver, "-D", "no-compilation", "--hl", '$out/hlc/main.c'])});
 				// as HaxeBenchmarks builds HL/C
-				steps.push(["gcc", "-O3", "-std=c11", "-w", "-o", art, '$out/hlc/main.c', "-I", '$hashlink/src', "-I", '$out/hlc', "-L", hashlink, "-lhl", "-lm",
-					'-Wl,-rpath,$hashlink']);
+				steps.push({cmd: ["gcc", "-O3", "-std=c11", "-w", "-o", art, '$out/hlc/main.c', "-I", '$hashlink/src', "-I", '$out/hlc', "-L", hashlink, "-lhl", "-lm",
+					'-Wl,-rpath,$hashlink'], cc: true});
 				run = [art];
 			case "hl":
 				art = '$out/main.hl';
-				steps.push([port].concat(args).concat(["-D", "hl-ver=" + HASHLINK.ver, "--hl", art]));
+				steps.push({cmd: [port].concat(args).concat(["-D", "hl-ver=" + HASHLINK.ver, "--hl", art])});
 				run = ['$hashlink/hl', art];
 			case _:
 				throw 'unknown target $target';
 		}
-		var seconds = 0.0;
+		var seconds = 0.0, haxeSeconds = 0.0, cc:Null<Float> = null;
 		var logFile = '$out/build.log';
 		var text = new StringBuf();
 		for (s in steps) {
 			// the tool and the port recurse deeply: an unlimited stack, as the Makefile runs them
-			var r = exec(["sh", "-c", 'ulimit -s unlimited 2>/dev/null; exec "$$@"', "sh"].concat(s), {cwd: cwd, env: env, merge: true, log: logFile});
+			var r = exec(["sh", "-c", 'ulimit -s unlimited 2>/dev/null; exec "$$@"', "sh"].concat(s.cmd), {cwd: s.cwd ?? cwd, env: env, merge: true, log: logFile});
 			seconds += r.seconds;
-			text.add("$ " + s.join(" ") + "\n" + readText(logFile));
+			if (s.cc == true) cc = (cc ?? 0.0) + r.seconds else haxeSeconds += r.seconds;
+			text.add("$ " + s.cmd.join(" ") + "\n" + readText(logFile));
 			if (r.code != 0) {
 				File.saveContent(logFile, text.toString());
 				throw 'exit ${r.code}: ' + tail(text.toString(), 1500);
@@ -363,7 +383,7 @@ class Bench {
 		}
 		File.saveContent(logFile, text.toString());
 		if (!FileSystem.exists(art)) throw 'no $art: ' + tail(text.toString(), 1500);
-		return {run: run, seconds: seconds, artifact: art};
+		return {run: run, seconds: seconds, haxe: haxeSeconds, cc: cc, artifact: art};
 	}
 
 	/** One run: the cases read ../data/..., so they run in a directory of the case. The usual 8 MB stack. **/
@@ -456,6 +476,16 @@ class Bench {
 			}
 			b.add("\n");
 		}
+		b.add('\nCompile time (seconds: the Haxe compiler, + the C/C++ compiler for cpp and hlc)\n\n| case | ${targets.join(" | ")} |\n| --- |${[for (_ in targets) " ---: |"].join("")}\n');
+		for (c in (doc.cases : Array<String>)) {
+			var row = results[c];
+			b.add('| $c |');
+			for (t in targets) {
+				var r = row[t];
+				b.add(" " + (r == null || r.haxe_s == null ? "-" : fixed(r.haxe_s, 2) + (r.cc_s != null ? " + " + fixed(r.cc_s, 2) : "")) + " |");
+			}
+			b.add("\n");
+		}
 		return b.toString() + "\n";
 	}
 
@@ -494,7 +524,10 @@ class Bench {
 			var results:DynamicAccess<DynamicAccess<Dynamic>> = doc.results;
 			for (c => row in results) {
 				var out = new DynamicAccess<Array<Null<Float>>>();
-				for (t => r in row) if (r.median != null) out[t] = ([r.median, r.min, r.max, r.rss_mb] : Array<Null<Float>>);
+				// (a build without a run keeps its compile time)
+				for (t => r in row)
+					if (r.median != null || r.build_s != null)
+						out[t] = ([r.median, r.min, r.max, r.rss_mb, r.build_s, r.haxe_s, r.cc_s] : Array<Null<Float>>);
 				res[c] = out;
 			}
 			var m = doc.machine;
@@ -513,12 +546,12 @@ class Bench {
 			if (doc.source == "ci") latest = d else if (doc.source != "imported") latestOther = d;
 		}
 		if (latest == null) latest = latestOther;
-		File.saveContent('$dir/history.json', Json.stringify({schema: 1, targets: TARGETS, runs: runs}) + "\n");
+		File.saveContent('$dir/history.json', Json.stringify({schema: 2, fields: HISTORY_FIELDS, targets: TARGETS, runs: runs}) + "\n");
 		if (latest != null) File.copy('$dir/results/${latest.file}', '$dir/latest.json');
 		Sys.println('$dir/history.json: ${runs.length} runs' + (latest != null ? ', latest.json: ${latest.file}' : ""));
 	}
 }
 
 typedef Case = {name:String, dir:String, main:String, cps:Array<String>, defines:Array<String>, check:String};
-typedef Built = {run:Array<String>, seconds:Float, artifact:String};
+typedef Built = {run:Array<String>, seconds:Float, haxe:Float, cc:Null<Float>, artifact:String};
 typedef Sample = {wall:Float, cpu:Float, rssMb:Float, output:String, error:Null<String>};

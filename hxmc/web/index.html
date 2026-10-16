@@ -115,10 +115,14 @@ lix download                    # after a clone: the scope's Haxe and missing li
 		<h3>Programs</h3>
 		<p>The <a href="https://github.com/HaxeBenchmarks/benchmark-runner">HaxeBenchmarks</a> cases on hxmc (an x86-64 executable, and a WebAssembly module under Node) and on the usual fast Haxe targets: C++ (hxcpp), the JVM, JavaScript on Node, HL/C and the HashLink JIT. Every Haxe compilation is ours: hxmc for its targets, the port, whose output for the others is byte-identical to the reference compiler's. Measured nightly on a GitHub Actions runner; each case's check program prints its results, compared across the targets.</p>
 		<div id="programs-results"><p class="note">Loading results…</p></div>
+		<div id="programs-compile"></div>
 		<p class="note" id="programs-machine"></p>
 		<p class="note" id="programs-noise"></p>
-		<h3>Over time</h3>
-		<div id="programs-history"><p class="note">Loading history…</p></div>
+		<!-- the history's charts: hidden for now (BenchCharts.SHOW_HISTORY; ?bench-history shows them) -->
+		<div id="programs-over-time" hidden>
+			<h3>Over time</h3>
+			<div id="programs-history"><p class="note">Loading history…</p></div>
+		</div>
 		<p class="note">Reproduce: <code>make bench</code> (<code>hxmc/test/Bench.hx</code>); the results of every run are on the <a href="https://github.com/benmerckx/hxmc/tree/bench-data">bench-data</a> branch.</p>
 	</section>
 
