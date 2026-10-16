@@ -106,7 +106,7 @@ endef
 .DEFAULT_GOAL := help
 .PHONY: help std deps rt rt-build rt-target rt-layouts hxmc tool bootstrap fixpoint stage0 crosshost port dev release wasm npm site fuzz \
 	lix lix-release lix-dist reference bench test test-fuzz test-display test-server test-jsonrpc test-unit-targets test-interp \
-	test-haxelib test-eval-debugger test-node-libs smoke hxmc-test corpus-stage gfx-programs gfx-check gfx-web-check gfx-shader-check \
+	test-haxelib test-eval-debugger test-node-libs test-module-cache smoke hxmc-test corpus-stage gfx-programs gfx-check gfx-web-check gfx-shader-check \
 	audio-programs audio-check audio-web-check portcheck measure quick check full clean distclean
 
 help:
@@ -151,6 +151,9 @@ help:
 ## test-unit-targets   upstream's unit suite compiled for each target by both, compared
 ## smoke       hxmc/test/smoke.sh on PORT_BIN: --interp, HXB, JS, sys.ssl, eval.luv
 ## hxmc-test   hxmc's corpus against its golden files (hxmc/test/Corpus.hx)
+## test-module-cache  the persistent module cache's gate: the same outputs with and without it,
+##             cold, warm, after edits, for hxmc and JS (hxmc/test/ModuleCacheCheck.hx; with
+##             bin/npm/native/HOST/haxe; PORT=1 adds the port itself)
 ## corpus-stage  bin/corpus/<target>: hxmc's corpus cross-built for each of CORPUS_TARGETS, to run on
 ##             the target's machine (Check; CI's test and wasm jobs): wasm32-wasi-legacy with legacy
 ##             exception handling, linux-*-glibc in the glibc mode (checked with readelf: ElfCheck)
@@ -451,6 +454,9 @@ smoke:
 
 test-node-libs: bin/npm/native/$(HOST)/haxe
 	$(SCRIPT) NodeLibs
+
+test-module-cache: $(TOOL) $(STD) $(HOST_RT) bin/npm/native/$(HOST)/haxe
+	$(SCRIPT) ModuleCacheCheck --haxe bin/npm/native/$(HOST)/haxe $(if $(PORT),--port)
 
 hxmc-test: $(TOOL) $(STD) $(HOST_RT)
 	$(SCRIPT) Corpus -v $(CASES)

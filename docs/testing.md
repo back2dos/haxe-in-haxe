@@ -66,7 +66,11 @@ outputs of hxc, the C target hxmc came from): a new case gets one with
 with the reason in the commit. `Crosshost`: the tool as a WebAssembly module
 writes the same bytes as the native tool, for every target, itself included.
 `RT_VERIFY=1` fills the free nursery with a pattern, so uninitialized
-allocations and missed roots show at once.
+allocations and missed roots show at once. `ModuleCacheCheck` (`make
+test-module-cache`; `PORT=1` adds the port): the persistent module cache
+gives the same outputs, byte for byte, as a build without it, cold, warm,
+after a new date, after an edit of a module and of a std override, after a
+new file shadows a module, for hxmc (the tool and `haxe`) and JS.
 
 ## Graphics
 
@@ -97,7 +101,8 @@ CI (`.github/workflows/build.yml`) runs as parallel jobs, each waiting only
 for what it uses: `changes` (what the run needs, `.github/select.sh`, and
 whether the runtime objects' release exists), `rt-build` and `rt` (only when
 it is missing: one job per target, `make rt-target`, then `make rt-layouts`
-and the release), `build` (the bootstrap from the stage0, the fixpoint, the
+and the release), `build` (the bootstrap from the stage0, the fixpoint, the types and module
+cache checks, the
 release binaries and lix for the six targets) and next to it, each with a tool
 of its own from the stage0: `corpus` (`make corpus-stage`: the corpus for
 every target in three jobs, the port as a WebAssembly module, the reference's
