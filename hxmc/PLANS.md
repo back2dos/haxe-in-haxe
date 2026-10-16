@@ -510,15 +510,42 @@ setjmp/longjmp do not unwind, but debuggers and SEH-based tools would.
   Left: a dynamic musl mode (`/lib/ld-musl-<arch>.so.1`, unversioned:
   `Abi.setLibc`), choosing the glibc mode by itself when a program imports
   a shared library, lazy binding (PLT) if startup with many imports needs it.
-- Layer: sokol (`sokol_app`, `sokol_gfx`, `sokol_audio`): small, Metal /
-  D3D11 / GL / GLES / WebGPU back ends, precompiled per target into the
-  runtime archives and linked only when used; shaders compiled ahead of
-  time with `sokol-shdc` and embedded. SDL3 as the heavier alternative.
-- Bindings generated from the headers; a first milestone is a triangle
-  on all six desktop targets, then Android, iOS and WebAssembly come with
-  those targets.
+- Pure Haxe, no C library: back ends call the system APIs through externs
+  (COM vtables, `objc_msgSend`, `dlopen`), shipped as source packages
+  (Packaging: packages/). API comparison (Kore 3, SDL3 GPU, sokol, WebGPU,
+  bgfx): Kore 3 is the model (zlib; WebGPU-shaped, automatic tracking,
+  small back ends), without its window/device coupling and `.kong` tools.
+- `@hxmc/os` (`hxmc.os`): raw OS bindings (`hxmc.os.win32`, objc + AppKit,
+  X11, Wayland) plus windows, input and the app loop. The loop is callback
+  driven (`App.run(onFrame, onEvent)`), since Cocoa, GTK and the browser
+  own it; a `Surface` can be a window or a child of one (child HWND,
+  NSView + CAMetalLayer, Wayland subsurface, canvas).
+- `@hxmc/gfx` (`hxmc.gfx`): the portable GPU layer, its back ends, the GPU
+  API bindings (`hxmc.gfx.d3d11`, metal, gl, vulkan, webgpu) and the shader
+  macro. WebGPU-shaped with integer handles, immutable pipelines, slot
+  binding and `pushUniforms` into a per-frame ring; automatic sync, two
+  frames in flight, no allocation per frame; main thread only. Bind
+  groups, compute (behind `device.features`) and threading later.
+- Shaders: a small hxsl-like Haxe macro emitting HLSL (`D3DCompile` from
+  the system's d3dcompiler_47.dll), MSL (`newLibraryWithSource`), GLSL ES
+  and WGSL, plus vertex layouts and typed uniform writers; SPIR-V for
+  Vulkan later from a Haxe emitter. One coordinate convention, flipped in
+  the macro.
+- Back ends in order: GL 3.3 / GLES 3 on Linux first (glibc mode; EGL and
+  libX11 imports; Mesa's llvmpipe and Xvfb run it without a GPU, here and
+  on CI), then WebGL2 (the same API shape, through JS imports; packages
+  ship an `imports.mjs` the wasm runner loads), D3D11 (WARP on Windows
+  CI), Metal (developed on a Mac; needs small structs by value: MTLClearColor,
+  CGSize, NSRect returned from `bounds`, `objc_msgSend_stret` on x86-64),
+  then Vulkan / D3D12.
+- First milestone: a GL triangle in an X11 window, checked offscreen
+  (EGL pbuffer, `glReadPixels`) in CI; then the same program on each back
+  end.
+- Later: `@hxmc/ui`, native widgets in an os window (comctl32, AppKit,
+  GTK 4 through the glibc mode, DOM), with a GPU view widget built on a
+  child `Surface`; a UI drawn with the GPU is a separate package on gfx.
 - Engines: a compatibility layer for HashLink's natives (`sdl.hdll`,
-  `directx.hdll`, `fmt`) would run heaps unchanged.
+  `directx.hdll`, `fmt`) on top of os and gfx would run heaps unchanged.
 
 ## Code generation at runtime
 
@@ -561,6 +588,20 @@ bootstrap).
 - The `hxmc` haxelib (`-lib hxmc`, `--custom-target hxmc=out`,
   `-D hxmc.target=<os>-<arch>`), as hxc had one.
 - Release builds of the hxmc tool for the six desktop targets.
+
+### packages/: everything published to npm
+
+npm first, haxelib later. One folder per package, published by the same
+CI job (versions not yet on npm), each with its own version:
+
+- `packages/cli` (`@hxmc/cli`: the root package.json, the launcher from
+  hxmc/bootstrap, `dist/haxe`), `wasm`, `source`, `platform` (the template
+  for the six platform packages); hxmc/bootstrap keeps stage0 and rt.mjs.
+- `packages/os`, `packages/gfx`, later `packages/ui` (Graphics): sources
+  only, a peer dependency on a range of `@hxmc/cli`.
+- The launcher resolves `-lib hxmc.gfx` from node_modules first (a `"haxe"`
+  field in package.json: class path, extra hxml, dependencies), then lix /
+  haxelib.
 
 ### npm: a WebAssembly package that bootstraps itself natively
 
