@@ -846,7 +846,11 @@ setjmp/longjmp do not unwind, but debuggers and SEH-based tools would.
   rendered buffer in headless Chromium (exact); the callbacks' rate where
   something paces them (Chromium's fake output, a device, CoreAudio's
   renderer; ALSA's null and file sinks take samples as fast as they come,
-  and Wine's mixer over them). Sizes of `examples/Tone.hx`: 121 KB on
+  and Wine's mixer over them). CI: ALSA on Linux x86-64 and arm64,
+  WebAudio in Chromium, CoreAudio on the macOS arm64 runner (the file
+  device, and its default output device in real time), WASAPI on the
+  Windows runners up to the missing endpoint (none has one: a clear
+  error, skipped). Sizes of `examples/Tone.hx`: 121 KB on
   Linux, 187 KB on macOS, 394 KB on Windows, 58 KB of WebAssembly. Left:
   input (capture), device choice and hot-plug (WASAPI's
   `AUDCLNT_E_DEVICE_INVALIDATED`, CoreAudio's default device changing),
