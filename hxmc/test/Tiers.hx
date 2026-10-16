@@ -9,7 +9,8 @@ using StringTools;
 // exit 1 if any lane failed.
 //   bin/hxmc/hxmc -cp hxmc/test -cp haxe/test --run Tiers quick|check|full [--port] [case ...]
 //   quick  the x64 corpus (64 KB nursery), again with RT_VERIFY=1, and the wasm
-//          corpus under node: after every edit
+//          corpus under node, the cache of the runtime's typed modules
+//          (CacheCheck): after every edit
 //   check  quick + linux-arm64 (qemu) and windows-x86_64 (wine), x64 with a
 //          16 KB nursery, the wasm corpus with legacy exception handling
 //          (-D hxmc.wasm-eh=legacy) under node, ThreadNatives x30, the tool as
@@ -57,6 +58,12 @@ class Tiers {
 			if (w.length > 1 && !["ok", "excluded"].contains(w[1]) && !l.contains("/")) bad.push(w[0] + " " + w[1]);
 		}
 		{ok: r.code == 0, detail: lastLine(r.out) + (bad.length == 0 ? "" : "  " + bad.slice(0, 8).join(", "))};
+	}
+
+	// a check script: ok when it exits 0
+	static function script(args:Array<String>) return () -> {
+		var r = exec(SCRIPT.concat(args), {merge: true});
+		{ok: r.code == 0, detail: lastLine(r.out)};
 	}
 
 	static function threads(n:Int, kb:Int) return () -> {
@@ -140,6 +147,7 @@ class Tiers {
 			lane("x64", corpus(cases));
 			lane("x64 RT_VERIFY", corpus(null, ["RT_VERIFY" => "1"], cases));
 			lane("wasm node", corpus("wasm32-wasi", null, cases));
+			lane("types cache", script(["CacheCheck"]));
 		}
 		if (tier == "check") {
 			lane("x64 16K", corpus(null, ["RT_MINOR_KB" => "16"], cases));

@@ -332,6 +332,13 @@ directory), overridable with `-D hxmc.cache=<dir>`, keyed so different
 outputs and targets can share it, with size-bounded cleanup; logs only on
 request. Keeps users' output directories and `bin/` clean.
 
+Done for the cache of the runtime's typed modules (`TypesCache.hx`): it
+lives in the user cache directory (`HXMC_CACHE` overrides), one directory
+per tool build, entries written by rename with the `.deps` last, tool
+directories pruned by last use (14 days, 1 GB) at most once a day. The
+per-module object cache (`<out>.hxmc/`) and the logs still live next to the
+outputs; they can reuse that layout and pruning.
+
 ### Other items
 
 - One-edit rebuilds below 1 s: needs incremental program preparation,
