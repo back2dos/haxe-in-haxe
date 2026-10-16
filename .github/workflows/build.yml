@@ -47,9 +47,10 @@
 #   v* tags; pages: the website on pushes to main (with the benchmark history
 #   of the bench-data branch, which bench.yml writes).
 # Each job names in `needs` only what it uses; publish-npm, release and pages
-# wait for every check. The jobs' `if` test their direct needs (a job skipped
-# by `changes`, or rt-build skipped when the release exists, would otherwise
-# skip everything after it).
+# wait for every check. The jobs' `if` test each direct need by name (a job
+# skipped by `changes`, or rt when the release exists, would otherwise skip
+# everything after it; and at job level needs.*.result also holds such a
+# skipped job further up).
 name: build
 
 on:
@@ -1185,7 +1186,7 @@ jobs:
   # After every check (the full npm set on all six machines: npm_full).
   publish-npm:
     needs: [changes, build, corpus, crosshost, measure, npm-pack, site, gfx, gfx-arm64, gfx-macos, conformance, test, wasm, playground, npm]
-    if: ${{ !cancelled() && !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled') && !contains(needs.*.result, 'skipped') && github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')) }}
+    if: ${{ !cancelled() && needs.changes.result == 'success' && needs.build.result == 'success' && needs.corpus.result == 'success' && needs.crosshost.result == 'success' && needs.measure.result == 'success' && needs.npm-pack.result == 'success' && needs.site.result == 'success' && needs.gfx.result == 'success' && needs.gfx-arm64.result == 'success' && needs.gfx-macos.result == 'success' && needs.conformance.result == 'success' && needs.test.result == 'success' && needs.wasm.result == 'success' && needs.playground.result == 'success' && needs.npm.result == 'success' && github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')) }}
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -1233,7 +1234,7 @@ jobs:
   # nightly on main, a release on v* tags
   release:
     needs: [changes, build, corpus, crosshost, measure, npm-pack, site, gfx, gfx-arm64, gfx-macos, conformance, test, wasm, playground, npm]
-    if: ${{ !cancelled() && !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled') && !contains(needs.*.result, 'skipped') && github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')) }}
+    if: ${{ !cancelled() && needs.changes.result == 'success' && needs.build.result == 'success' && needs.corpus.result == 'success' && needs.crosshost.result == 'success' && needs.measure.result == 'success' && needs.npm-pack.result == 'success' && needs.site.result == 'success' && needs.gfx.result == 'success' && needs.gfx-arm64.result == 'success' && needs.gfx-macos.result == 'success' && needs.conformance.result == 'success' && needs.test.result == 'success' && needs.wasm.result == 'success' && needs.playground.result == 'success' && needs.npm.result == 'success' && github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')) }}
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -1279,7 +1280,7 @@ jobs:
 
   pages:
     needs: [changes, build, corpus, crosshost, measure, npm-pack, site, gfx, gfx-arm64, gfx-macos, wasm, playground]
-    if: ${{ !cancelled() && !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled') && !contains(needs.*.result, 'skipped') && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+    if: ${{ !cancelled() && needs.changes.result == 'success' && needs.build.result == 'success' && needs.corpus.result == 'success' && needs.crosshost.result == 'success' && needs.measure.result == 'success' && needs.npm-pack.result == 'success' && needs.site.result == 'success' && needs.gfx.result == 'success' && needs.gfx-arm64.result == 'success' && needs.gfx-macos.result == 'success' && needs.wasm.result == 'success' && needs.playground.result == 'success' && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
     runs-on: ubuntu-24.04
     permissions:
       pages: write
