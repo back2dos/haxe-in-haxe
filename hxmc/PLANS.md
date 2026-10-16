@@ -574,10 +574,10 @@ setjmp/longjmp do not unwind, but debuggers and SEH-based tools would.
   `Triangle.hx` in a Win32 window, against the same golden image with the
   same tolerance, headless (an offscreen texture) and windowed (the back
   buffer, and the window's pixels from `PrintWindow` with
-  `PW_RENDERFULLCONTENT`, else the screen's DC) on WARP
-  (`HXMC_GFX_SOFTWARE=1`, the CI runners); under Wine 9 (wined3d over
-  llvmpipe, Xvfb: `make gfx-check GFX_TARGET=windows-x86_64`) all three are
-  exact. `hxmc.os.win32`: user32, kernel32 and gdi32 externs (DLL imports,
+  `PW_RENDERFULLCONTENT`, else the screen's DC): exact, on WARP
+  (`HXMC_GFX_SOFTWARE=1`; the x86-64 and arm64 CI runners) as under Wine 9
+  (wined3d over llvmpipe, Xvfb: `make gfx-check GFX_TARGET=windows-x86_64`;
+  Wine's PrintWindow paints no swap chain, the screen's DC has it). `hxmc.os.win32`: user32, kernel32 and gdi32 externs (DLL imports,
   `@:hxmc.lib`); `Win32Window`: one window class whose window procedure is
   a `@:hxmc.callback` (close, size, keys as X11 KeySyms, the mouse and
   wheel), the queue drained with `PeekMessageW` each frame of `App.run`, the
