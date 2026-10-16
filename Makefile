@@ -169,7 +169,8 @@ help:
 ##             from packages/ui/test/layout-ref.mjs), text wrapping, events and focus (UiTest.hx);
 ##             signals and markup rendered into nodes (ReactiveTest.hx)
 ## ui-draw-check  packages/ui's GPU renderer (hxmc.ui.draw): the sample UI headless against
-##             packages/ui/test/draw.png (Linux: Mesa, DejaVu Sans; BLESS=1 rewrites it)
+##             packages/ui/test/draw.png, then the todo example (markup, signals, widgets) driven
+##             through its Ui and drawn against todo.png (Linux: Mesa, DejaVu Sans; BLESS=1 rewrites them)
 ## portcheck   the port built by hxmc self-compiles to the reference's HXB (hxmc/test/Selfcheck.hx)
 ## bench       the HaxeBenchmarks cases on hxmc (native, wasm under node), C++, JVM, JS, HL/C and
 ##             HL, built by hxmc and the port: times, peak RSS, sizes (hxmc/test/Bench.hx; BENCH_ARGS)
@@ -493,10 +494,12 @@ ui-check: $(TOOL)
 	ulimit -s unlimited 2>/dev/null || true; $(TOOL) -cp packages/ui/src -cp packages/ui/test --run UiTest
 	ulimit -s unlimited 2>/dev/null || true; $(TOOL) -cp packages/esx/src -cp packages/ui/src -cp packages/ui/test --run ReactiveTest
 
-UI_CP := -cp packages/os/src -cp packages/gfx/src -cp packages/gfx/test -cp packages/text/src -cp packages/ui/src -cp packages/ui/test
+UI_CP := -cp packages/os/src -cp packages/gfx/src -cp packages/gfx/test -cp packages/text/src -cp packages/esx/src -cp packages/ui/src -cp packages/ui/test -cp packages/ui/examples
 ui-draw-check: $(TOOL) $(STD) $(HOST_RT)
 	$(call hxmc,bin/ui/$(GFX_TARGET)/UiDrawTest$(call EXE,$(GFX_TARGET)),$(UI_CP) -main UiDrawTest $(HXMC_ARGS) $(GFX_ARGS))
+	$(call hxmc,bin/ui/$(GFX_TARGET)/TodoTest$(call EXE,$(GFX_TARGET)),$(UI_CP) -main TodoTest $(HXMC_ARGS) $(GFX_ARGS))
 	LIBGL_ALWAYS_SOFTWARE=1 env -u DISPLAY bin/ui/$(GFX_TARGET)/UiDrawTest packages/ui/test/draw.png bin/ui/$(GFX_TARGET)/draw.png $(if $(BLESS),--bless)
+	LIBGL_ALWAYS_SOFTWARE=1 env -u DISPLAY bin/ui/$(GFX_TARGET)/TodoTest packages/ui/test/todo.png bin/ui/$(GFX_TARGET)/todo.png $(if $(BLESS),--bless)
 
 portcheck: $(TOOL) $(STD) $(HOST_RT) $(REFERENCE)
 	$(SCRIPT) Selfcheck --local --small
