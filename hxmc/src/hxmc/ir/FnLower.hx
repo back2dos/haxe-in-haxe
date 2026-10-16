@@ -283,7 +283,11 @@ class FnLower {
 	function anonHint(t:T, name:String, rt:Ty):Null<ShapeInfo> {
 		switch TFunctions.follow(t) {
 			case TAnon(an) if (an.aStatus.match(Closed | Const)):
-				var fs = [for (k => cf in an.aFields) {name: k, ty: ty(cf.cfType)}];
+				// (in the order of the names: a map's order follows its insertions,
+				// which differ for a type read from HXB, and ty numbers the types it meets)
+				var names = [for (k in an.aFields.keys()) k];
+				names.sort(Reflect.compare);
+				var fs = [for (k in names) {name: k, ty: ty(an.aFields.get(k).cfType)}];
 				var sh = l.getProgram().shape(fs);
 				var i = sh.slot(name);
 				return i > 0 && Ir.repr(sh.fields[i - 1].ty) == Ir.repr(rt) ? sh : null;

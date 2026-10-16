@@ -82,7 +82,9 @@ class Main {
 			}
 		}
 		TypesCache.install();
+		ModuleCache.install();
 		var code = haxe.Main.run(args.concat(["--no-output"]));
+		ModuleCache.finish(failed == null ? code : 1);
 		if (failed != null) {
 			Sys.stderr().writeString("hxmc: " + failed + "\n");
 			Sys.exit(1);

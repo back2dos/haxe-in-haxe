@@ -24,6 +24,10 @@ class Options {
 	// functions keep a frame record (push rbp; mov rbp, rsp), so profilers and
 	// debuggers walk the stack by frame pointer (arm64 always has them: Abi)
 	public var framePointers = false;
+	// -D hxmc.jit: a compiler that can load native macros (hxmc/src/hxmc/macro): spare
+	// type and signature table entries, every runtime function kept, the
+	// symbols written next to the executable (<out>.syms); Linux x86-64, static
+	public var jit = false;
 
 	public function new() {}
 
@@ -86,6 +90,8 @@ class Options {
 		o.libc = def("hxmc.libc");
 		var fp = def("hxmc.frame_pointers"), fpEnv = env("HXMC_FRAME_POINTERS");
 		o.framePointers = fpEnv != null && fpEnv != "" ? fpEnv != "0" : fp != null ? fp != "0" : def("debug") != null;
+		o.jit = def("hxmc.jit") != null;
+		if (o.jit && (o.target != "linux-x86_64" || o.libc != null)) throw "hxmc: -D hxmc.jit: linux-x86_64 (static) only";
 		var j = def("hxmc.jobs");
 		if (j == null) j = env("HXMC_JOBS");
 		if (j != null) o.jobs = Std.parseInt(j);

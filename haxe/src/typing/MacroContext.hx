@@ -68,6 +68,8 @@ import macros.eval.EvalContext.RunTimeException;
 // defined in macroApi.ml.
 // `HxbWriterConfigReaderEval`/`HxbWriterConfigWriterEval` are HxbWriterConfig's reader/writer
 // applied to EvalDataApi's readers/writers.
+// port: the macro context's engine calls (create, init, addTypes, callPath, doReuse,
+// setError) go through macros.MacroEngine.engine, Eval unless a host installs another.
 typedef MacroMethod = {args:Array<{name:String, optional:Bool, type:T}>, ret:T, cls:TClass, field:TClassField};
 
 typedef LoadedMacro = {meth:MacroMethod, module:ModuleDef};
@@ -729,7 +731,7 @@ class MacroContext {
 		var p = Globals.nullPos;
 		TypeloadModule.loadModule(mctx, {pack: ["haxe", "macro"], name: "Expr"}, p, MDepFromMacro);
 		TypeloadModule.loadModule(mctx, {pack: ["haxe", "macro"], name: "Type"}, p, MDepFromMacro);
-		macros.eval.EvalMain.init(mint);
+		macros.MacroEngine.engine.init(mint);
 		macroInterpCache = mint;
 	}
 
@@ -814,7 +816,7 @@ class MacroContext {
 					f(scom, t);
 			}
 			try
-				macros.eval.EvalMain.addTypes(mint, types, ready)
+				macros.MacroEngine.engine.addTypes(mint, types, ready)
 			catch (err:TypingError)
 				throw new FatalError(err.error);
 			return null;
@@ -828,18 +830,18 @@ class MacroContext {
 		var mint:macros.eval.EvalContext.Context;
 		var init:Void->Void;
 		if (macroInterpCache == null) {
-			mint = macros.eval.EvalMain.create(com2, api, true, compiler.Args.toRawArgs(com2.parsedArgs));
+			mint = macros.MacroEngine.engine.create(com2, api, true, compiler.Args.toRawArgs(com2.parsedArgs));
 			macros.eval.EvalContext.select(mint);
 			var m = mint;
 			init = function() initMacroInterp(mctx, m);
 		} else {
 			mint = macroInterpCache;
-			macros.eval.EvalMain.doReuse(mint, api, compiler.Args.toRawArgs(com2.parsedArgs));
+			macros.MacroEngine.engine.doReuse(mint, api, compiler.Args.toRawArgs(com2.parsedArgs));
 			init = function() {};
 		}
 		var onError = compiler.io.CompilerMessage.defaultErrorHandler(com2);
 		com2.errorExt = function(err) {
-			macros.eval.EvalMain.setError(macros.eval.EvalContext.getCtx(), true);
+			macros.MacroEngine.engine.setError(macros.eval.EvalContext.getCtx(), true);
 			macroInterpCache = null;
 			onError(err);
 		};
@@ -1031,7 +1033,7 @@ class MacroContext {
 		var timerLevel = Timer.levelFromDefine(com.defines, Define.MacroTimes);
 		var ictx = macros.eval.EvalContext.getCtx();
 		var path = cpath.pack.concat([cpath.name]);
-		var f = function(api:CompilerApi):Null<Value> return macros.eval.EvalMain.callPath(ictx, path, name, args, api);
+		var f = function(api:CompilerApi):Null<Value> return macros.MacroEngine.engine.callPath(ictx, path, name, args, api);
 		var r = macroTimer(com.timerCtx, timerLevel, ["execution", Globals.sTypePath(cpath) + "." + name], null, f, api);
 		if (com.verbose)
 			Common.log(com, "Exiting macro " + Globals.sTypePath(cpath) + "." + name);

@@ -24,6 +24,7 @@ typed AST --(ir.Lower)--> hxmc IR --(Prep: ir.Facts)--> --(MirBuild)--> Mir (SSA
 | `wasm/` | wasm32-wasi: structured code from Mir, the linker, exception handling with `exnref` (or the legacy instructions) |
 | `Target.hx`, `Abi.hx` | per-target facts |
 | `MkStd.hx` | hxmc's std merged with the Eval originals (the macro context shares the program's class paths) |
+| `macro/` | native macros, a prototype (`haxe` built with `-D hxmc.jit`, Linux x86-64; `-D hxmc.macros=native\|verify`): macro classes compiled by hxmc and linked into the running compiler, behind the macro engine seam `haxe/src/macros/MacroEngine.hx` ([PLANS.md](../hxmc/PLANS.md), "Native macros") |
 
 Conventions: references live across a GC point are shadow-stack slots
 (cold sites spill only on the slow path); `try` is `rt_handler` with the C
@@ -85,6 +86,30 @@ those unused for 14 days, and the least recently used beyond 1 GB
 (`hxmc/test/CacheCheck.hx` checks it). A change of the runtime's
 interface or of the IR's conventions needs a tool that knows it: build once
 against the previous runtime first, or bootstrap again.
+
+## Module cache
+
+The compilation server's HXB module cache, made durable
+(`hxmc/src/hxmc/ModuleCache.hx`; opt-in: `HXMC_MODULE_CACHE=1` or
+`-D hxmc.module-cache`, `HXMC_MODULE_CACHE=0` or `-D hxmc.no-module-cache`
+off; through `haxe` and the tool, for every target): a successful build
+writes its typed modules (HXB chunks, dependencies, file and check policy)
+into a store in the user cache directory (`modules/<tool>/`, beside
+`types/`, with the same trim), one pack per server context (the program's,
+its macros'), keyed by the defines (the server's signature), the class
+paths, the working directory and the std. The next build puts them in the
+server's cache, and the server's checks decide which are good, lazily, for
+the modules the build loads; beyond them, a module's file is compared by
+content hash where its date or size changed, its path must still resolve
+to it (shadowing), and the dependencies must be in the store. Not used for
+display requests, the server itself, several compilations, init macros,
+HXB libraries or output; a macro registering `onGenerate`, `onAfterTyping`
+or `onAfterGenerate` while typing makes the build write nothing. The
+output is the same as without the cache (`make test-module-cache`): the
+cache also keeps the modifiers of unbound monomorphs and what the sort of
+the types walks of each module before the filters, which HXB does not keep.
+When it is on, the types cache is not used. Plans: [hxmc/PLANS.md](../hxmc/PLANS.md),
+"Cached modules".
 
 ## Targets
 

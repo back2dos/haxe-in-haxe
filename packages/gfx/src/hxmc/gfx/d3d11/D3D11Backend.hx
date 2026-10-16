@@ -2,6 +2,8 @@ package hxmc.gfx.d3d11;
 
 import hxmc.gfx.*;
 import hxmc.gfx.d3d11.D3D11;
+import hxmc.os.win32.Com;
+import hxmc.os.win32.Com.IUnknown;
 import hxmc.os.Surface;
 import hxmc.unsafe.*;
 
@@ -12,9 +14,16 @@ import hxmc.unsafe.*;
 // or when there is no hardware device. Shaders are HLSL compiled at run
 // time (D3DCompile, entry point main, shader model 5.0, or 4.0 below
 // feature level 11_0), vertex inputs at semantic TEXCOORD<location> (as
-// SPIRV-Cross names them); blending and depth stay the defaults (off, and
-// no depth buffer). readPixels copies the target into a staging texture
-// and maps it.
+// SPIRV-Cross names them); a 32-bit float depth buffer of the target's
+// size; a pipeline's state objects (rasterizer, depth, blend) made with it.
+// A texture at slot n is a shader resource view at tn and its sampler at
+// sn, in both stages.
+// readPixels copies the target into a staging texture
+// and maps it. Uniform blocks: with Direct3D 11.1's constant buffer offsets
+// (VSSetConstantBuffers1; WARP has them), a dynamic ring buffer written
+// without overwriting (discarded at the frame's first block), else a
+// dynamic constant buffer per slot, discarded at each setUniforms
+// (HXMC_GFX_D3D11_NO_OFFSETS=1 forces that).
 class D3D11Backend {
 	public final backend = Backend.D3D11;
 	public var width(default, null) = 0;
@@ -27,6 +36,10 @@ class D3D11Backend {
 	var swapChain = Ptr.nil(); // IDXGISwapChain1 (a window)
 	var target = Ptr.nil(); // ID3D11Texture2D: the back buffer, or the headless target
 	var view = Ptr.nil(); // its ID3D11RenderTargetView
+	var depth = Ptr.nil(); // the depth buffer (ID3D11Texture2D) and its ID3D11DepthStencilView
+	var depthView = Ptr.nil();
+	var upload = Ptr.nil(); // writeBuffer's copy of the data, of uploadSize bytes
+	var uploadSize = 0;
 	var staging = Ptr.nil(); // readPixels' texture, of stagingWidth x stagingHeight
 	var stagingWidth = 0;
 	var stagingHeight = 0;
@@ -36,18 +49,31 @@ class D3D11Backend {
 	final clear:Ptr<Float32>;
 	final viewport:Ptr<D3D11_VIEWPORT>;
 	final mapped:Ptr<D3D11_MAPPED_SUBRESOURCE>;
+	final box:Ptr<D3D11_BOX>;
 	final vbufs:Ptr<Ptr>;
 	final strides:Ptr<Int32>;
 	final offsets:Ptr<Int32>;
+	final cbuf:Ptr<Ptr>; // setUniforms' arguments
+	final cfirst:Ptr<Int32>;
+	final cnum:Ptr<Int32>;
 
 	// tables (handle = index + 1)
 	final buffers:Array<Ptr> = []; // ID3D11Buffer
+	final textures:Array<D3DTexture> = [];
+	final samplers:Array<Ptr> = []; // ID3D11SamplerState
 	final shaders:Array<D3DShader> = [];
 	final pipelines:Array<D3DPipeline> = [];
 
 	// draw state
 	var pipeline:D3DPipeline = null;
 	var dirty = true;
+	// uniform blocks: the ID3D11DeviceContext1 (nil: no constant buffer
+	// offsets), its ring and the next offset into it; else a buffer per slot
+	var context1 = Ptr.nil();
+	var ring = Ptr.nil();
+	var cursor = 0;
+	final slotBuffers:Array<Ptr> = [];
+	final slotSizes:Array<Int> = [];
 
 	static inline var MAX_SLOTS = 8;
 
@@ -57,10 +83,14 @@ class D3D11Backend {
 		clear = LibC.malloc(16);
 		viewport = LibC.malloc(24);
 		mapped = LibC.malloc(16);
+		box = LibC.malloc(24);
 		vbufs = LibC.malloc(8 * MAX_SLOTS);
 		strides = LibC.malloc(4 * MAX_SLOTS);
 		offsets = LibC.malloc(4 * MAX_SLOTS);
 		LibC.memset(vbufs, 0, 8 * MAX_SLOTS);
+		cbuf = LibC.malloc(8);
+		cfirst = LibC.malloc(4);
+		cnum = LibC.malloc(4);
 		var level:Ptr<Int32> = scratch.offset(2).raw();
 		var hr = Sys.getEnv("HXMC_GFX_SOFTWARE") == "1" ? -1 : createDevice(D3D.DRIVER_TYPE_HARDWARE, level);
 		if (hr < 0) hr = createDevice(D3D.DRIVER_TYPE_WARP, level);
@@ -68,6 +98,7 @@ class D3D11Backend {
 		device = scratch.value;
 		context = scratch.offset(1).value;
 		shaderModel = level.value >= D3D.FEATURE_LEVEL_11_0 ? "_5_0" : "_4_0";
+		if (Sys.getEnv("HXMC_GFX_D3D11_NO_OFFSETS") != "1") offsetting();
 		width = surface.width;
 		height = surface.height;
 		if (surface.kind == Win32) createSwapChain() else {
@@ -85,7 +116,20 @@ class D3D11Backend {
 			});
 			target = scratch.value;
 			createView();
+			createDepth();
 		}
+	}
+
+	// the context's 11.1 interface, if constant buffers take offsets there
+	function offsetting() {
+		if (IUnknown.QueryInterface(context, IID.ID3D11DeviceContext1, scratch) < 0) return;
+		var c1 = scratch.value;
+		var ok = Arena.scopedValue(a -> {
+			var o:Ptr<Int32> = a.alloc(56);
+			LibC.memset(o, 0, 56);
+			ID3D11Device.CheckFeatureSupport(device, D3D.FEATURE_D3D11_OPTIONS, o, 56) >= 0 && o[7] != 0 && o[8] != 0;
+		});
+		if (ok) context1 = c1 else Com.release(c1);
 	}
 
 	// the device and its context into scratch[0] and [1]
@@ -130,11 +174,33 @@ class D3D11Backend {
 		check(IDXGISwapChain1.GetBuffer(swapChain, 0, IID.ID3D11Texture2D, scratch), "IDXGISwapChain1::GetBuffer");
 		target = scratch.value;
 		createView();
+		createDepth();
 	}
 
 	function createView() {
 		check(ID3D11Device.CreateRenderTargetView(device, target, Ptr.nil(), scratch), "CreateRenderTargetView");
 		view = scratch.value;
+	}
+
+	// the depth buffer, of the target's size
+	function createDepth() {
+		Com.release(depthView);
+		Com.release(depth);
+		Arena.scoped(a -> {
+			var d = a.make(D3D11_TEXTURE2D_DESC);
+			d.value.Width = width;
+			d.value.Height = height;
+			d.value.MipLevels = 1;
+			d.value.ArraySize = 1;
+			d.value.Format = D3D.FORMAT_D32_FLOAT;
+			d.value.SampleCount = 1;
+			d.value.Usage = D3D.USAGE_DEFAULT;
+			d.value.BindFlags = D3D.BIND_DEPTH_STENCIL;
+			check(ID3D11Device.CreateTexture2D(device, d, Ptr.nil(), scratch), "CreateTexture2D (depth)");
+		});
+		depth = scratch.value;
+		check(ID3D11Device.CreateDepthStencilView(device, depth, Ptr.nil(), scratch), "CreateDepthStencilView");
+		depthView = scratch.value;
 	}
 
 	public function createBuffer(d:BufferDesc):Int {
@@ -160,6 +226,85 @@ class D3D11Backend {
 		check(hr, "CreateBuffer (" + size + " bytes)");
 		buffers.push(scratch.value);
 		return buffers.length;
+	}
+
+	public function writeBuffer(id:Int, offset:Int, data:haxe.io.Bytes, dataOffset:Int, size:Int) {
+		// (a copy first: the Bytes may move during the call)
+		if (uploadSize < size) {
+			LibC.free(upload);
+			upload = LibC.malloc((size : Int64));
+			uploadSize = size;
+		}
+		LibC.memcpy(upload, Mem.addr(data).add(8 + dataOffset), (size : Int64));
+		box.value.left = offset;
+		box.value.right = offset + size;
+		box.value.top = 0;
+		box.value.bottom = 1;
+		box.value.front = 0;
+		box.value.back = 1;
+		ID3D11DeviceContext.UpdateSubresource(context, buffers[id - 1], 0, box, upload, 0, 0);
+	}
+
+	public function createTexture(d:TextureDesc):Int {
+		var hr = Arena.scopedValue(a -> {
+			var t = a.make(D3D11_TEXTURE2D_DESC);
+			t.value.Width = d.width;
+			t.value.Height = d.height;
+			t.value.MipLevels = 1;
+			t.value.ArraySize = 1;
+			t.value.Format = D3D.FORMAT_R8G8B8A8_UNORM;
+			t.value.SampleCount = 1;
+			t.value.Usage = D3D.USAGE_DEFAULT;
+			t.value.BindFlags = D3D.BIND_SHADER_RESOURCE;
+			var init:Ptr<D3D11_SUBRESOURCE_DATA> = Ptr.nil();
+			if (d.data != null) {
+				init = a.make(D3D11_SUBRESOURCE_DATA);
+				init.value.pSysMem = a.copyBytes(d.data, 0, d.width * d.height * 4);
+				init.value.SysMemPitch = d.width * 4;
+			}
+			ID3D11Device.CreateTexture2D(device, t, init, scratch);
+		});
+		check(hr, "CreateTexture2D (" + d.width + "x" + d.height + ")");
+		var tex = scratch.value;
+		hr = ID3D11Device.CreateShaderResourceView(device, tex, Ptr.nil(), scratch);
+		if (hr < 0) Com.release(tex);
+		check(hr, "CreateShaderResourceView");
+		textures.push(new D3DTexture(tex, scratch.value, d.width, d.height));
+		return textures.length;
+	}
+
+	public function writeTexture(id:Int, data:haxe.io.Bytes) {
+		var t = textures[id - 1];
+		if (data.length < t.width * t.height * 4) throw "hxmc.gfx: writeTexture: data has fewer than width * height * 4 bytes";
+		Arena.scoped(a -> ID3D11DeviceContext.UpdateSubresource(context, t.texture, 0, Ptr.nil(), a.copyBytes(data, 0, t.width * t.height * 4), t.width * 4, 0));
+	}
+
+	public function createSampler(d:SamplerDesc):Int {
+		var hr = Arena.scopedValue(a -> {
+			var s = a.make(D3D11_SAMPLER_DESC);
+			s.value.Filter = d.filter == Nearest ? D3D.FILTER_MIN_MAG_MIP_POINT : D3D.FILTER_MIN_MAG_MIP_LINEAR;
+			var w = switch d.wrap {
+				case null | Repeat: D3D.TEXTURE_ADDRESS_WRAP;
+				case Clamp: D3D.TEXTURE_ADDRESS_CLAMP;
+				case Mirror: D3D.TEXTURE_ADDRESS_MIRROR;
+			}
+			s.value.AddressU = w;
+			s.value.AddressV = w;
+			s.value.AddressW = w;
+			s.value.MipLODBias = 0;
+			s.value.MaxAnisotropy = 1;
+			s.value.ComparisonFunc = D3D.COMPARISON_NEVER;
+			s.value.BorderColor0 = 0;
+			s.value.BorderColor1 = 0;
+			s.value.BorderColor2 = 0;
+			s.value.BorderColor3 = 0;
+			s.value.MinLOD = 0;
+			s.value.MaxLOD = 3.402823466e38;
+			ID3D11Device.CreateSamplerState(device, s, scratch);
+		});
+		check(hr, "CreateSamplerState");
+		samplers.push(scratch.value);
+		return samplers.length;
 	}
 
 	public function createShader(d:ShaderDesc):Int {
@@ -234,11 +379,45 @@ class D3D11Backend {
 		});
 		if (hr < 0) Com.release(layout);
 		check(hr, "CreateRasterizerState");
-		pipelines.push(new D3DPipeline(vs.shader, ps.shader, layout, scratch.value, d));
+		var rasterizer = scratch.value;
+		hr = Arena.scopedValue(a -> {
+			var s = a.make(D3D11_DEPTH_STENCIL_DESC);
+			var c:Compare = d.depthCompare == null ? Always : d.depthCompare, write = d.depthWrite == true;
+			// (no test: nothing written either)
+			s.value.DepthEnable = c == Always && !write ? 0 : 1;
+			s.value.DepthWriteMask = write ? 1 : 0;
+			s.value.DepthFunc = D3D.COMPARISON_NEVER + (cast c : Int);
+			s.value.StencilEnable = 0;
+			s.value.StencilReadMask = 0xFF;
+			s.value.StencilWriteMask = 0xFF;
+			s.value.FrontStencilFailOp = s.value.FrontStencilDepthFailOp = s.value.FrontStencilPassOp = D3D.STENCIL_OP_KEEP;
+			s.value.BackStencilFailOp = s.value.BackStencilDepthFailOp = s.value.BackStencilPassOp = D3D.STENCIL_OP_KEEP;
+			s.value.FrontStencilFunc = s.value.BackStencilFunc = D3D.COMPARISON_ALWAYS;
+			ID3D11Device.CreateDepthStencilState(device, s, scratch);
+		});
+		check(hr, "CreateDepthStencilState");
+		var depthState = scratch.value;
+		hr = Arena.scopedValue(a -> {
+			var b:Ptr<D3D11_BLEND_DESC> = a.alloc(264);
+			LibC.memset(b, 0, 264);
+			var blend:Blend = d.blend == null ? Opaque : d.blend;
+			b.value.BlendEnable = blend == Opaque ? 0 : 1;
+			b.value.SrcBlend = blend == Premultiplied ? D3D.BLEND_ONE : D3D.BLEND_SRC_ALPHA;
+			b.value.DestBlend = blend == Additive ? D3D.BLEND_ONE : D3D.BLEND_INV_SRC_ALPHA;
+			b.value.BlendOp = D3D.BLEND_OP_ADD;
+			b.value.SrcBlendAlpha = D3D.BLEND_ONE;
+			b.value.DestBlendAlpha = blend == Additive ? D3D.BLEND_ONE : D3D.BLEND_INV_SRC_ALPHA;
+			b.value.BlendOpAlpha = D3D.BLEND_OP_ADD;
+			b.value.RenderTargetWriteMask = 0xF;
+			ID3D11Device.CreateBlendState(device, b, scratch);
+		});
+		check(hr, "CreateBlendState");
+		pipelines.push(new D3DPipeline(vs.shader, ps.shader, layout, rasterizer, depthState, scratch.value, d));
 		return pipelines.length;
 	}
 
 	public function beginFrame():Bool {
+		cursor = 0;
 		if (swapChain.isNull() || (surface.width == width && surface.height == height)) return true;
 		// the window was resized: the swap chain's buffers follow
 		ID3D11DeviceContext.OMSetRenderTargets(context, 0, Ptr.nil(), Ptr.nil());
@@ -255,7 +434,7 @@ class D3D11Backend {
 	public function beginPass(p:PassDesc) {
 		// (a flip-model swap chain unbinds its buffer at each Present)
 		scratch.value = view;
-		ID3D11DeviceContext.OMSetRenderTargets(context, 1, scratch, Ptr.nil());
+		ID3D11DeviceContext.OMSetRenderTargets(context, 1, scratch, depthView);
 		viewport.value.TopLeftX = 0;
 		viewport.value.TopLeftY = 0;
 		viewport.value.Width = width;
@@ -264,7 +443,7 @@ class D3D11Backend {
 		viewport.value.MaxDepth = 1;
 		ID3D11DeviceContext.RSSetViewports(context, 1, viewport);
 		var c = p.colors[0];
-		if (c.load == Clear) {
+		if (c.load != Load) {
 			var k = c.clear;
 			clear[0] = k == null ? 0 : k.r;
 			clear[1] = k == null ? 0 : k.g;
@@ -272,6 +451,8 @@ class D3D11Backend {
 			clear[3] = k == null ? 1 : k.a;
 			ID3D11DeviceContext.ClearRenderTargetView(context, view, clear);
 		}
+		var d = p.depth;
+		if (d != null && d.load != Load) ID3D11DeviceContext.ClearDepthStencilView(context, depthView, D3D.CLEAR_DEPTH, d.clear == null ? 1 : d.clear, 0);
 		pipeline = null;
 		dirty = true;
 	}
@@ -285,6 +466,8 @@ class D3D11Backend {
 		ID3D11DeviceContext.IASetInputLayout(context, p.layout);
 		ID3D11DeviceContext.IASetPrimitiveTopology(context, p.topology);
 		ID3D11DeviceContext.RSSetState(context, p.rasterizer);
+		ID3D11DeviceContext.OMSetDepthStencilState(context, p.depth, 0);
+		ID3D11DeviceContext.OMSetBlendState(context, p.blend, Ptr.nil(), -1);
 		dirty = true;
 	}
 
@@ -294,17 +477,89 @@ class D3D11Backend {
 		dirty = true;
 	}
 
-	public function draw(vertices:Int, instances:Int, first:Int) {
-		var p = pipeline;
-		if (dirty) {
-			// (the strides are the pipeline's: bound with its buffers at the first draw)
-			for (i in 0...p.strides.length)
-				strides[i] = p.strides[i];
-			if (p.strides.length > 0) ID3D11DeviceContext.IASetVertexBuffers(context, 0, p.strides.length, vbufs, strides, offsets);
-			dirty = false;
+	public function setUniforms(slot:Int, data:haxe.io.Bytes, offset:Int, size:Int) {
+		if (offset < 0 || size < 0 || offset + size > data.length) throw "hxmc.gfx: setUniforms: outside the data";
+		// (constant buffers: whole 256-byte blocks of 16 constants)
+		var n = (size + 255) & ~255;
+		if (!context1.isNull()) {
+			if (cursor + n > Encoder.UNIFORM_RING) throw "hxmc.gfx: setUniforms: more than " + Encoder.UNIFORM_RING + " bytes of uniforms in a frame";
+			if (ring.isNull()) ring = dynamicBuffer(Encoder.UNIFORM_RING);
+			check(ID3D11DeviceContext.Map(context, ring, 0, cursor == 0 ? D3D.MAP_WRITE_DISCARD : D3D.MAP_WRITE_NO_OVERWRITE, 0, mapped), "Map");
+			LibC.memcpy((mapped.value.pData : Ptr<UInt8>).add(cursor), Mem.addr(data).add(8 + offset), (size : Int64));
+			ID3D11DeviceContext.Unmap(context, ring, 0);
+			cbuf.value = ring;
+			cfirst.value = cursor >> 4;
+			cnum.value = n >> 4;
+			ID3D11DeviceContext1.VSSetConstantBuffers1(context1, slot, 1, cbuf, cfirst, cnum);
+			ID3D11DeviceContext1.PSSetConstantBuffers1(context1, slot, 1, cbuf, cfirst, cnum);
+			cursor += n;
+			return;
 		}
+		while (slotBuffers.length <= slot) {
+			slotBuffers.push(Ptr.nil());
+			slotSizes.push(0);
+		}
+		if (slotSizes[slot] < n) {
+			Com.release(slotBuffers[slot]);
+			slotBuffers[slot] = dynamicBuffer(n);
+			slotSizes[slot] = n;
+		}
+		var b = slotBuffers[slot];
+		check(ID3D11DeviceContext.Map(context, b, 0, D3D.MAP_WRITE_DISCARD, 0, mapped), "Map");
+		LibC.memcpy(mapped.value.pData, Mem.addr(data).add(8 + offset), (size : Int64));
+		ID3D11DeviceContext.Unmap(context, b, 0);
+		cbuf.value = b;
+		ID3D11DeviceContext.VSSetConstantBuffers(context, slot, 1, cbuf);
+		ID3D11DeviceContext.PSSetConstantBuffers(context, slot, 1, cbuf);
+	}
+
+	// a constant buffer the CPU writes (Map)
+	function dynamicBuffer(size:Int):Ptr {
+		var hr = Arena.scopedValue(a -> {
+			var desc = a.make(D3D11_BUFFER_DESC);
+			desc.value.ByteWidth = size;
+			desc.value.Usage = D3D.USAGE_DYNAMIC;
+			desc.value.BindFlags = D3D.BIND_CONSTANT_BUFFER;
+			desc.value.CPUAccessFlags = D3D.CPU_ACCESS_WRITE;
+			ID3D11Device.CreateBuffer(device, desc, Ptr.nil(), scratch);
+		});
+		check(hr, "CreateBuffer (uniforms, " + size + " bytes)");
+		return scratch.value;
+	}
+
+	public function draw(vertices:Int, instances:Int, first:Int) {
+		vertexBuffers();
 		if (instances == 1) ID3D11DeviceContext.Draw(context, vertices, first) else
 			ID3D11DeviceContext.DrawInstanced(context, vertices, instances, first, 0);
+	}
+
+	public function setTexture(slot:Int, texture:Int, sampler:Int) {
+		cbuf.value = textures[texture - 1].view;
+		ID3D11DeviceContext.VSSetShaderResources(context, slot, 1, cbuf);
+		ID3D11DeviceContext.PSSetShaderResources(context, slot, 1, cbuf);
+		cbuf.value = samplers[sampler - 1];
+		ID3D11DeviceContext.VSSetSamplers(context, slot, 1, cbuf);
+		ID3D11DeviceContext.PSSetSamplers(context, slot, 1, cbuf);
+	}
+
+	public function setIndexBuffer(id:Int, format:IndexFormat, offset:Int)
+		ID3D11DeviceContext.IASetIndexBuffer(context, buffers[id - 1], format == UInt16 ? D3D.FORMAT_R16_UINT : D3D.FORMAT_R32_UINT, offset);
+
+	public function drawIndexed(count:Int, instances:Int, first:Int, baseVertex:Int) {
+		vertexBuffers();
+		if (instances == 1) ID3D11DeviceContext.DrawIndexed(context, count, first, baseVertex) else
+			ID3D11DeviceContext.DrawIndexedInstanced(context, count, instances, first, baseVertex, 0);
+	}
+
+	// the vertex buffers, after a pipeline or vertex buffer change
+	function vertexBuffers() {
+		if (!dirty) return;
+		// (the strides are the pipeline's: bound with its buffers at the first draw)
+		var p = pipeline;
+		for (i in 0...p.strides.length)
+			strides[i] = p.strides[i];
+		if (p.strides.length > 0) ID3D11DeviceContext.IASetVertexBuffers(context, 0, p.strides.length, vbufs, strides, offsets);
+		dirty = false;
 	}
 
 	public function endPass() {}
@@ -325,6 +580,8 @@ class D3D11Backend {
 		if (dst.length < row * height) throw "hxmc.gfx: readPixels: " + row * height + " bytes needed";
 		if (stagingWidth != width || stagingHeight != height) {
 			Com.release(staging);
+		Com.release(depthView);
+		Com.release(depth);
 			Arena.scoped(a -> {
 				var d = a.make(D3D11_TEXTURE2D_DESC);
 				d.value.Width = width;
@@ -356,6 +613,8 @@ class D3D11Backend {
 		for (p in pipelines) {
 			Com.release(p.layout);
 			Com.release(p.rasterizer);
+			Com.release(p.depth);
+			Com.release(p.blend);
 		}
 		for (s in shaders) {
 			Com.release(s.shader);
@@ -363,6 +622,16 @@ class D3D11Backend {
 		}
 		for (b in buffers)
 			Com.release(b);
+		for (b in slotBuffers)
+			Com.release(b);
+		for (t in textures) {
+			Com.release(t.view);
+			Com.release(t.texture);
+		}
+		for (s in samplers)
+			Com.release(s);
+		Com.release(ring);
+		Com.release(context1);
 		Com.release(staging);
 		Com.release(view);
 		Com.release(target);
@@ -373,9 +642,14 @@ class D3D11Backend {
 		LibC.free(clear);
 		LibC.free(viewport);
 		LibC.free(mapped);
+		LibC.free(box);
+		LibC.free(upload);
 		LibC.free(vbufs);
 		LibC.free(strides);
 		LibC.free(offsets);
+		LibC.free(cbuf);
+		LibC.free(cfirst);
+		LibC.free(cnum);
 	}
 }
 
@@ -391,20 +665,39 @@ private class D3DShader {
 	}
 }
 
+// a texture and its shader resource view
+private class D3DTexture {
+	public final texture:Ptr;
+	public final view:Ptr;
+	public final width:Int;
+	public final height:Int;
+
+	public function new(texture:Ptr, view:Ptr, width:Int, height:Int) {
+		this.texture = texture;
+		this.view = view;
+		this.width = width;
+		this.height = height;
+	}
+}
+
 // the state objects a pipeline sets, and its vertex buffers' strides
 private class D3DPipeline {
 	public final vs:Ptr;
 	public final ps:Ptr;
 	public final layout:Ptr; // ID3D11InputLayout
 	public final rasterizer:Ptr; // ID3D11RasterizerState
+	public final depth:Ptr; // ID3D11DepthStencilState
+	public final blend:Ptr; // ID3D11BlendState
 	public final topology:Int;
 	public final strides:Array<Int> = [];
 
-	public function new(vs:Ptr, ps:Ptr, layout:Ptr, rasterizer:Ptr, d:PipelineDesc) {
+	public function new(vs:Ptr, ps:Ptr, layout:Ptr, rasterizer:Ptr, depth:Ptr, blend:Ptr, d:PipelineDesc) {
 		this.vs = vs;
 		this.ps = ps;
 		this.layout = layout;
 		this.rasterizer = rasterizer;
+		this.depth = depth;
+		this.blend = blend;
 		topology = switch d.topology {
 			case null | Triangles: D3D.TOPOLOGY_TRIANGLELIST;
 			case TriangleStrip: D3D.TOPOLOGY_TRIANGLESTRIP;

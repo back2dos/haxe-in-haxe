@@ -298,113 +298,98 @@ failing stubs. Left:
 
 ## Build times and size
 
-### Cached units per library
+### Cached modules
 
 Most of a small program's build is the front half typing the std from
-source on every build. Hello world (one 4-core VM): 0.375 s from source,
-about 330 ms of it parsing and typing; 0.13–0.15 s when everything comes
-from an HXB archive (76 ms to read it, codegen 47 ms). Go 1.24 on the same
-machine: 4.8–5.7 s cold, 0.18–0.23 s rebuilding after an edit (warm build
-cache). With only the std precompiled and the program typed from source,
-expect about 0.15–0.2 s.
+source every time (hello world: about 330 ms of 0.375 s). The compilation
+server already caches per module, with upstream's rules: per-module
+dependencies, file checks, the invalidation of dependents, and an HXB mode
+that keeps the typed modules as HXB in memory (the Server and
+ServerJsonRpc suites pass in both cache modes). The persistent cache is
+that cache made durable on disk, not a new unit of caching: no library
+boundaries, so the std, haxelib, lix and node_modules libraries and the
+user's code are all modules alike.
 
-Plan, Go- and Rust-style (built lazily and cached rather than shipped):
+- Step 1 (built, opt-in: `HXMC_MODULE_CACHE=1` or `-D hxmc.module-cache`;
+  `hxmc/src/hxmc/ModuleCache.hx`): a successful build writes the modules it
+  ends with as the server keeps them (HXB chunks, dependencies, kind, file,
+  check policy) into a store in the user cache directory (the types cache's
+  location, atomic writes and trim); the next build with the same key puts
+  them in the server's cache before typing, and the server's checks decide.
+- Measured (one 4-core VM shared with other builds; time to the start of
+  lowering, then the whole build with the objects cached, and peak RSS):
 
-- Units: the std, each `-lib`, and the user's code last. Each is stored per
-  hxmc version and target (`~/.cache/hxmc/<version>/<target>/<lib>-<key>/`):
-  its typed modules as HXB (the front half, loaded with `--hxb-lib`,
-  upstream Haxe's mechanism for precompiled libraries; HXB modules load on
-  demand, so a large cached std does not slow small programs), hxmc's IR
-  and inline templates for inlining across units, and the compiled objects
-  per module (the back half: the existing per-module object cache). hxmc
-  writes the archives with its own built-in compiler, so the HXB version
-  always matches.
-- Key: the library's sources (a content hash; version plus hash for git and
-  dev libraries), the hxmc version, the target, only the defines the unit's
-  `#if` conditions actually read (recorded while parsing), and the
-  interface hashes of the units it depends on (signatures, types, inline
-  bodies, constants; not function bodies, as Go and Rust do).
-- Hard parts, and how to solve them. The rule throughout: record what a
-  unit's typing actually depended on, key on that, and type from source
-  whenever something cannot be captured (a miss costs time, never
-  correctness).
-  - Macros from outside that change a unit's types. Init macros run before
-    typing and their effects are data: `addGlobalMetadata` is a list of
-    (path filter, metadata), `Compiler.define` changes the defines. The key
-    takes the entries whose filter matches a module of the unit and the
-    defines the unit reads, so a `--macro` touching only user code leaves
-    the std's key alone. `Compiler.keep`, `nullSafety` and the like act
-    after typing (DCE, checks) and stay out of the key. Build macros that
-    run while a unit is typed (`@:build` on a library class, a library
-    macro reading other types): record which macro modules executed (their
-    sources and dependencies, hashed) and which types they looked at
-    (`Context.getType` ...: module dependencies, as the compilation server
-    records them), keyed by those modules' interface hashes. `@:autoBuild`
-    runs on the subclass, in the user's unit. `onAfterTyping`/`onGenerate`
-    run on the loaded program every build (the cache holds the state
-    before them, as upstream's `--hxb-lib` does). `onTypeNotFound` firing
-    during a unit, or anything else not captured, marks it volatile: typed
-    from source.
-  - Class-path shadowing. Every cached module records the lookups its
-    typing made: the file each name resolved to, and the misses (names
-    searched across packages, `import pkg.*`). Before a cached module is
-    used its lookups are checked against the current class path (mostly
-    directory listings, as the server checks modification times); a
-    shadowed module comes from source and invalidates its dependents
-    through the per-module dependency graph (HXB has it), with early
-    cutoff as in Rust: a shadowing module with the same interface hash
-    leaves its dependents valid. hxmc's own std overriding upstream files
-    is then just part of the std unit's resolution.
-  - Macro dependencies (files read through `Context`, defines, environment
-    variables): recorded as the server does. Nondeterministic macros
-    (time, network) are trusted as by the server, with an opt-out per
-    library (`-D hxmc.no-cache=<lib>`).
-  - DCE is whole-program: make the source path take the cached path's
-    route, so the two are identical by construction. Every unit compiles
-    all its functions once, before DCE, one section per function; DCE moves
-    to link time (reachability over symbols with Haxe's rules: `@:keep`,
-    implemented interfaces, overrides of reachable fields, reflection
-    roots), and the reflection tables (`Reflect.fields`,
-    `Type.getInstanceFields`) are generated at link time from the live set.
-    Builds from source go through per-unit objects and link-time DCE too.
-    Whole-program "features" (code that depends on whether something is
-    used anywhere) must not be decided while a unit compiles: they become
-    link-time switches (symbols the linker resolves, data flags).
-  - Program-wide numbering is already symbolic and resolved at link time.
-  - `@:generic` instances belong to the unit that instantiates them, named
-    by their type arguments and emitted as mergeable (COMDAT-like) symbols:
-    the linker keeps one when several units instantiate the same. Library
-    inline functions inlined into user code are covered by the interface
-    hash (inline bodies are part of it).
-  - Typing order: some Haxe behaviour depends on it (monomorph resolution,
-    anonymous type numbering, build macro order, static initialization),
-    and loading from a cache changes it. Covered by the HXB conformance
-    suite (typed ASTs survive the round trip) and the gate below.
-- Order: link-time DCE and the shared pipeline first (needed anyway,
-  testable alone); then the std as one unit with the lookup recording;
-  then `-lib` units, with interface hashing, early cutoff and the tracking
-  of defines; then the capture of init macros' effects. The user's code
-  stays incremental per module (the server, the object cache). It also
-  shortens the first run of the npm bootstrap (see "npm" under
-  Packaging).
-- Gate: the same executable, byte for byte, from the cached path and the
-  source path (the Vector bug showed the two paths can differ subtly).
-- Simpler than the compilation server for most of the gain; the server
-  remains the route for large programs' one-edit rebuilds.
-- The std as a unit, first step: generalize the types cache (TypesCache,
-  today hxmc's own runtime package only) to the whole std, for every target,
-  built on first use and keyed by the target and the defines the std's
-  `#if` conditions read, in the user cache directory with its pruning; the
-  postinstall of the npm package may warm it for the host's hxmc build
-  (about 0.7 s). Builds with init macros, display requests and shadowed
-  std modules type from source as the types cache does now. Expected:
-  small programs from about 0.21 s toward 0.13–0.15 s.
-- Not shipping the std as HXB in the distribution: there is no single
-  typed std (per target, per define, again for the macro context), the
-  `.hx` sources have to ship anyway (editors, error positions, shadowing),
-  init macros cannot change pre-typed modules, and an edited compiler
-  (`hxmc-rebuild`) invalidates it; built on first use covers every
-  combination without those costs.
+  | | no cache | types cache | module cache cold | module cache warm |
+  | --- | --- | --- | --- | --- |
+  | hello world | 306 ms | 158 ms, 0.21 s, 75 MB | 367 ms | 85 ms, 0.14 s, 70 MB |
+  | haxe-formatter | 848 ms | 704 ms, 0.86 s, 143 MB | 885 ms | 171 ms, 0.35 s, 105 MB |
+  | the port | 6.4 s | 6.2 s, 8.4 s, 1013 MB | 7.6 s | 1.14 s, 3.3 s, 782 MB |
+
+  A cold run pays the HXB encoding (the port: 0.86 s of 7.6 s). The port's
+  warm front half: reading its 28 MB pack 0.1 s, decoding the HXB 0.54 s,
+  DCE 0.26 s, typing what is left and the sort 0.26 s; validation (558
+  modules checked) 15 ms.
+- Storage: one pack per server context (the program's, its macros'), each
+  an index of files (date, size, content hash) and modules, written whole
+  and renamed into place; not a file per module. Later: content-addressed
+  blobs shared across keys, and a trim per pack.
+- Validation: lazy, only for the modules a build loads (the server checks a
+  module when the typer asks for it; HXB decodes on demand). Beyond the
+  server's checks (a hook in `ServerCache.checkModule`): the file's content
+  hash where its date or size differ (a fresh checkout changes every date;
+  a date within 3 s of the parse is not trusted), the file the module's
+  path resolves to now (shadowing as a per-module resolution record:
+  a new file earlier in the class path makes the module dirty, and its
+  dependents through the server's graph), dependencies the store lacks.
+- Key: the server's coarse signature (the defines) plus the class paths,
+  the working directory and the std. Next: the defines each module's
+  conditions read (recorded while parsing), so a define touching user code
+  leaves the std's modules alone; then interface hashes of dependencies for
+  early cutoff (a dependency typed again with the same signatures, types,
+  inline bodies and constants leaves its dependents valid).
+- What HXB does not keep and the gate needs: the modifiers of unbound
+  monomorphs (`Null<Unknown>`; kept beside the chunks and given back to the
+  reader's monomorphs), and what the sort of the types walks of a restored
+  module, whose expressions are the filtered ones (its skeleton per field,
+  kept and played back through a hook in `Finalization.sortTypes`). The
+  upstream server's HXB cache has both differences (its outputs can differ
+  from a build without the server); a third shows only in hxmc: an
+  anonymous structure's fields in its map's order (now by name).
+- Init macros: their effects are data (`addGlobalMetadata` filters,
+  `Compiler.define`, class paths); until they are in the key, builds with
+  `--macro` do not use the cache. Build macros and `Context` dependencies
+  are recorded as the server records them (module dependencies, files
+  registered with `registerModuleDependency`, cache-bound resources and
+  messages replayed); nondeterministic macros are trusted as by the server.
+  A macro registering `onGenerate`, `onAfterTyping` or `onAfterGenerate`
+  while typing makes the build write nothing (a restored module would not
+  register it again).
+- Back half: per-module objects move to the same central store, keyed by
+  the hash of the lowered IR (`Fingerprint`), shared by every output and
+  target ("Central object cache" below). DCE is whole-program: move it to
+  link time (reachability over symbols with Haxe's rules: `@:keep`,
+  implemented interfaces, overrides of reachable fields, reflection roots;
+  reflection tables generated from the live set), so a module's object does
+  not depend on the rest of the program; whole-program "features" become
+  link-time switches. Program-wide numbering is already symbolic.
+  `@:generic` instances belong to the module that instantiates them, as
+  mergeable (COMDAT-like) symbols; inline bodies are covered by the
+  interface hash.
+- Typing order: some Haxe behaviour depends on it (monomorph resolution,
+  anonymous type numbering, build macro order, static initialization), and
+  restoring changes it; covered by the gate.
+- Gate: the same output, byte for byte, with and without the cache, cold,
+  warm, after an edit of one module or of a std override, after a new file
+  shadows a module (`hxmc/test/ModuleCacheCheck.hx`, `make
+  test-module-cache`: hello world, several modules, macros, a
+  `Null<Unknown>`, for hxmc and JS; `--port` adds the port itself).
+- Not shipping the std as HXB in the distribution: there is no single typed
+  std (per target, per define, again for the macro context), the sources
+  have to ship anyway, init macros cannot change pre-typed modules, and an
+  edited compiler (`hxmc-rebuild`) invalidates it.
+- Then: on by default (replacing the types cache), the `npm` postinstall
+  warming the std's modules, builds with init macros, `-lib` HXB archives
+  as one more source of modules.
 
 ### Central object cache and quieter builds
 
@@ -420,9 +405,11 @@ request. Keeps users' output directories and `bin/` clean.
 Done for the cache of the runtime's typed modules (`TypesCache.hx`): it
 lives in the user cache directory (`HXMC_CACHE` overrides), one directory
 per tool build, entries written by rename with the `.deps` last, tool
-directories pruned by last use (14 days, 1 GB) at most once a day. The
-per-module object cache (`<out>.hxmc/`) and the logs still live next to the
-outputs; they can reuse that layout and pruning.
+directories pruned by last use (14 days, 1 GB) at most once a day; the
+module cache ("Cached modules") uses the same location and trim. The
+per-module object cache (`<out>.hxmc/`) and the logs still live next to
+the outputs; the objects move to that store, keyed by the hash of the
+lowered IR.
 
 ### Other items
 
@@ -610,7 +597,7 @@ benchmarks between -5% and +4% either way, code-layout noise).
 - `@hxmc/gfx` (`hxmc.gfx`): the portable GPU layer, its back ends, the GPU
   API bindings (`hxmc.gfx.d3d11`, metal, gl, vulkan, webgpu) and the shader
   macro. WebGPU-shaped with integer handles, immutable pipelines, slot
-  binding and `pushUniforms` into a per-frame ring; automatic sync, two
+  binding and `setUniforms` into a per-frame ring; automatic sync, two
   frames in flight, no allocation per frame; main thread only. Bind
   groups, compute (behind `device.features`) and threading later.
 - Shaders: a Haxe macro emitting HLSL (`D3DCompile` from the system's
@@ -682,11 +669,9 @@ benchmarks between -5% and +4% either way, code-layout noise).
   (`IDXGIDevice`, `GetParent`) for a flip-model swap chain
   (`CreateSwapChainForHwnd`, `FLIP_DISCARD`, two RGBA8 buffers,
   `ResizeBuffers` when the window's size changes), `readPixels` through a
-  staging texture and `Map`. No call needs a struct by value. Left: frames
-  during a live resize or a move (Windows' modal loop inside
-  `DispatchMessageW`: a timer, or rendering from `WM_PAINT`), `WM_DPICHANGED`,
-  a lost device (`DXGI_ERROR_DEVICE_REMOVED` throws), characters
-  (`WM_CHAR`), the debug layer.
+  staging texture and `Map`. No call needs a struct by value. Left: a lost
+  device (`DXGI_ERROR_DEVICE_REMOVED` throws), the debug layer (frames
+  during a live resize, `WM_DPICHANGED` and `WM_CHAR`: below).
 - WebGPU (done, 2026-10-16, wasm32-wasi in the browser): the same
   `Triangle.hx` on a canvas, against the same golden image within GfxTest's
   tolerance (SwiftShader in headless Chromium: 422 pixels off by 1,
@@ -784,14 +769,72 @@ benchmarks between -5% and +4% either way, code-layout noise).
   `gfx-macos` CI job only). Cost (Triangle for Linux): 0.5 s to 0.77 s,
   of which typing the macro's own code in the macro context 0.06-0.1 s,
   running it 15 ms, typing the math types (their swizzles and overloads)
-  about 0.08 s; the executable is 1 KB smaller (109 KB). Left: uniforms
-  bound at run time (`Encoder.setUniforms` or a per-frame ring, GL's
-  `glUniformBlockBinding` by the block's name), textures and samplers as
-  parameters, variants (compile-time constants per pipeline), integer
-  vertex formats and flat varyings, `switch`, arrays of constant size,
-  matrices other than 4x4, the fragment position's convention (GL's
-  `gl_FragCoord` is y-up, the others y-down), one depth range, SPIR-V,
-  caching emitted code across compilations (the compilation server).
+  about 0.08 s; the executable is 1 KB smaller (109 KB). Left
+  (uniforms bound at run time, textures, the conventions: below): variants
+  (compile-time constants per pipeline), integer vertex formats and flat
+  varyings, `switch`, arrays of constant size, matrices other than 4x4,
+  SPIR-V, caching emitted code across compilations (the compilation
+  server).
+- Usable for a real program (done, 2026-10-16): `examples/Cube.hx`, a
+  textured, lit, depth-tested cube turning under a translucent panel, on
+  every back end and on the site (in place of the triangle, which stays the
+  package's simplest example). Uniforms at draw time
+  (`Encoder.setUniforms(slot, bytes)`, the bytes from the shader class's
+  `write<Block>`): a per-frame ring of 256-byte aligned blocks
+  (`UNIFORM_RING`, 256 KB): GL two buffers (frames in flight) bound by
+  range (`glBindBufferRange`), the blocks bound to their slots by name when
+  a pipeline links (`ShaderCode.bindings`: ES 3.00 has no
+  `layout(binding)`); D3D11 a dynamic buffer at constant buffer offsets
+  (`VSSetConstantBuffers1`, Map with no overwrite, discarded at a frame's
+  first block) where 11.1 has them (WARP), else a dynamic buffer per slot
+  discarded at each block (wined3d; `HXMC_GFX_D3D11_NO_OFFSETS=1`); Metal
+  `setVertexBytes`/`setFragmentBytes` (4 KB a block); WebGPU dynamic offsets
+  into one buffer written before each submit (the queue orders it after the
+  previous frames' reads), an explicit bind group layout from the shaders'
+  bindings, a bind group per set of textures, made once. Index buffers
+  (`setIndexBuffer`, `drawIndexed`, UInt16 and UInt32, a base vertex: GL
+  ES 3.0 has none, so the attributes' offsets move); the device's depth
+  buffer (GL the default framebuffer's 24 bits, the others a 32-bit float
+  texture remade with the target's size; `PassDesc.depth`,
+  `PipelineDesc.depthCompare` and `depthWrite`); `PipelineDesc.blend`
+  (Opaque, Alpha, Additive, Premultiplied); `Device.writeBuffer`.
+  Textures: `createTexture` (RGBA8, one level), `writeTexture`,
+  `createSampler` (filter, wrap), `Encoder.setTexture(slot, texture,
+  sampler)`; shaders take `Texture2D` parameters (a slot each, shared with
+  the uniform blocks in order of appearance), read with `sample(t, uv)`
+  (the first level: no derivatives, so WGSL's uniformity rule never
+  applies) and passed on to helpers: GLSL `sampler2D` on unit n by name,
+  WGSL `texture_2d<f32>` at binding n and its sampler at 16 + n, MSL
+  `texture2d` and `sampler`, HLSL `Texture2D` and `SamplerState` at t<n>
+  and s<n>; on the CPU the nearest texel. Conventions (WebGPU's, D3D's,
+  Metal's): clip z from 0 to w, the fragment position from the target's
+  top left, a texture's first row its top; the emitted GLSL maps clip z to
+  GL's range and flips `gl_FragCoord.y` with the target's height (a
+  uniform the GL back end sets with the pipeline; nothing else differs on
+  screen, since NDC is y-up everywhere and readPixels already flips GL's
+  rows); `Mat4`'s CPU transforms (perspective, orthographic, rotations).
+  `@hxmc/os`: `Text` events (XLookupString, `WM_CHAR` with surrogate
+  pairs, Cocoa's `insertText:` through `interpretKeyEvents:` on a
+  content view subclass made at run time, a keydown's key), `Wheel` (dx,
+  dy in notches, in place of buttons 4 and 5), `ScaleChange`
+  (`WM_DPICHANGED` with the suggested size, a new backing scale, a new
+  devicePixelRatio), frames during a drag of a window's edge or title bar on
+  Windows (a timer inside Windows' loop). Tests: GfxTest and WebTest draw
+  both examples against `triangle.png` and `cube.png` with the same rule
+  (exact on llvmpipe and wined3d; WebGPU and WebGL2 on SwiftShader 7766
+  pixels within 2, 6 beyond, of 245 allowed; Firefox and WebKit 169 within
+  1), and check input sent to the window as events (X11, Win32, a posted
+  key down on macOS, typing and the wheel in Chromium); `TexturedShader` and
+  a texture local the compiler rejects in ShaderTest; CI runs
+  `gfx-web-check` in the `gfx` job. Sizes: Cube 194 KB on Linux, 469 KB on
+  Windows, 252 KB on macOS, 192 KB of WebAssembly (legacy exceptions);
+  Triangle on Linux 109 to 134 KB, its WebAssembly 89 to 144 KB (both
+  back ends' new paths are reached through `Impl`). Next: render targets
+  (GL: rendering upside down into them, its front faces swapped, so that
+  sampling them matches), mip maps and more texture formats, bind groups
+  (fewer calls than a slot each), compute; an input method for X11
+  (`XOpenIM`, `Xutf8LookupString`: variadic calls) and Cocoa
+  (`NSTextInputClient`), frames during a live resize on macOS.
 - Structs by value in C calls (done for arm64, 2026-10-16): AAPCS64 on
   macOS, Linux and Windows (MirBuild.cStructArg, cStructRet; a64 Isel):
   homogeneous aggregates of up to four floats or doubles in v registers,
@@ -809,20 +852,59 @@ benchmarks between -5% and +4% either way, code-layout noise).
 - Engines: a compatibility layer for HashLink's natives (`sdl.hdll`,
   `directx.hdll`, `fmt`) on top of os and gfx would run heaps unchanged.
 
+## Audio
+
+- Output (done, 2026-10-16; `hxmc.os.audio` in `@hxmc/os` 0.3.0): a pull
+  model, `Audio.open({sampleRate, channels, frames}, (buffer:Ptr<Float32>,
+  frames) -> ...)`, `start`, `stop`, `close`, the rate, channels, period
+  and latency the system gave; interleaved floats everywhere. The callback
+  runs on an audio thread of the runtime's (`sys.thread.Thread`), never on
+  the system's own threads, which the runtime does not know (no thread
+  attach: a GC callback may only run on a runtime thread, LOWLEVEL.md):
+  ALSA and WASAPI are written to from that thread (`snd_pcm_writei`
+  blocking, WASAPI's event), and CoreAudio's render callback, on its I/O
+  thread, is `@:hxmc.noGc` and only copies from a ring the audio thread
+  fills (positions as atomics, a libdispatch semaphore signalled with a
+  `@:hxmc.fast` call: a noGc function may call C only that way). The rule
+  for the callback is documentation: no allocation, no locks, no blocking.
+  Back ends, the target's chosen by `Mem.os()` as `Window`'s: ALSA on
+  Linux (`libasound.so.2` through `dlopen`, a build macro, `hxmc.os.Dl`,
+  filling function pointers: a program starts without the library; the
+  glibc mode), CoreAudio's default output unit on macOS (AudioToolbox and
+  CoreAudio imported by path), WASAPI in shared mode on Windows (COM
+  through vtables as D3D11's, `AUTOCONVERTPCM`), WebAudio in the browser:
+  an AudioWorklet node fed chunks posted by the main thread, which calls
+  the module for one each time the worklet has played one (the module's
+  memory is not shared without threads; about 50 ms queued). Tests without
+  speakers (`AudioTest`, `make audio-check`, `make audio-web-check`): a
+  known signal through the real API and compared where it lands: ALSA's
+  file plugin (exact), CoreAudio's generic output unit rendered by
+  `AudioUnitRender` (`"file:PATH"`), Wine's WASAPI through winealsa into an
+  ALSA file (exact: Wine passes floats through), an `OfflineAudioContext`'s
+  rendered buffer in headless Chromium (exact); the callbacks' rate where
+  something paces them (Chromium's fake output, a device, CoreAudio's
+  renderer; ALSA's null and file sinks take samples as fast as they come,
+  and Wine's mixer over them). CI: ALSA on Linux x86-64 and arm64,
+  WebAudio in Chromium, CoreAudio on the macOS arm64 runner (the file
+  device, and its default output device in real time), WASAPI on the
+  Windows runners up to the missing endpoint (none has one: a clear
+  error, skipped). Sizes of `examples/Tone.hx`: 121 KB on
+  Linux, 187 KB on macOS, 394 KB on Windows, 58 KB of WebAssembly. Left:
+  input (capture), device choice and hot-plug (WASAPI's
+  `AUDCLNT_E_DEVICE_INVALIDATED`, CoreAudio's default device changing),
+  formats other than float, PipeWire or PulseAudio directly, a real-time
+  priority for the audio thread (`pthread_setschedparam`, MMCSS's
+  `AvSetMmThreadCharacteristics`), an AudioWorklet over shared memory
+  once wasm threads exist, a checked `@:hxmc.noGc` callback type for user
+  code (the callback running on the system's thread directly).
+
 ## Code generation at runtime
 
 The code generator compiles to in-memory objects with relocations, and
 program-wide numbers stay symbolic, so these remain possible:
 
 - **Native macros**: compile macro code with hxmc into the running
-  compiler instead of interpreting it in Eval, calling the compiler's
-  functions directly. Input for deciding (measured, "Macro-heavy builds"
-  above): the `macro` timer is 8-39% of a macro-heavy build (tink_json
-  24-29%, the upstream unit suite 16%, gfx 8%), and the port's Eval is
-  already at or above the reference's speed (calls 0.9-1.3x, the unit
-  suite under --interp 1.6x faster). Only the interpretation part would
-  go: the AST encoding and decoding and the typing macros call stay, so a
-  gain of perhaps half the macro share, 10-15% of such builds.
+  compiler instead of interpreting it in Eval. Prototyped (below): feasible.
 - **Hot reload / live patching**: replace changed modules in a running
   process (needs runtime registration of new types and dispatch rows).
 - **A JIT library** for interpreters written in Haxe (ship only the code
@@ -831,6 +913,84 @@ program-wide numbers stay symbolic, so these remain possible:
 - Platform limits: iOS and consoles forbid generating code at runtime,
   macOS hardened apps need the allow-JIT entitlement, browsers use
   WebAssembly instead.
+
+### Native macros (prototype, 2026-10-16)
+
+`make native-macros` (`MACROS=native`). The macro engine is an interface
+(`haxe/src/macros/MacroEngine.hx`, Eval by default and in the port's own
+builds); `haxe` built with `-D hxmc.jit` (Linux x86-64, static) installs
+`hxmc/src/hxmc/macro/NativeEngine.hx`, selected by `-D hxmc.macros=eval|native|verify`:
+
+- **Guest**: on a class's first macro call, a child of the compiler types
+  the class's module for hxmc in macro mode (`macro` defined,
+  `isMacroContext`, `X.macro.hx`, the std's `Context` with `load(name, n)(args)`
+  calling the compiler, entries per static function) and writes a
+  relocatable object plus the program-wide facts (types, field names,
+  signatures, globals, initializers, dispatch rows).
+- **Loader**: links it into the running compiler with `<exe>.syms` (every
+  symbol of the executable, written by `-D hxmc.jit` builds, which also keep
+  every runtime function and spare `rt_types`, `rt_type_objs` and signature
+  entries). The std's types and statics are the compiler's (layouts
+  checked), the program's are new: spare type entries, run-time field names
+  (the runtime's `Names` has them), new `rt_globals` slots, dispatch rows per
+  bundle. Code and data are mapped below 2 GB (rel32, and dispatch rows are
+  absolute disp32), then the code made executable (`mprotect`).
+- **Bridge**: native objects to and from Eval values, so MacroApi stays the
+  one implementation: anonymous structures, enums (positions as Eval keeps
+  them: construction sites recorded by the guest, constructors without
+  arguments by place), Refs (`GuestRef`), lazy values, API function values,
+  positions and other values opaque; API exceptions catchable by macro code.
+- **verify**: both engines per call, Eval's result used; Eval's API calls
+  (and calls of the function values they return) recorded and replayed to
+  the native run, so no side effect happens twice; results, positions,
+  errors and the API call sequence compared.
+
+Results: the 66 macro cases pass in verify mode: 119 macro calls, 115
+native, 114 identical (positions included), 1 mismatch (Issue8466:
+`Sys.programPath()` is null in Eval's macro std, not in hxmc's), 4 on Eval
+(a module the child fails to type, a class missing from the macro
+context, a class extending an earlier bundle's, values the bridge lacks). Native mode writes
+byte-identical HXB for 65/66. GfxTest: its 40 macro calls compile and run
+natively, the executable is identical in verify mode, 23 calls match; the
+shader macro does not yet (verify: nested macro calls during the Eval run
+advance the native statics too; native mode: output differs, not
+investigated).
+
+Time: compiling a macro class takes about 0.4 s (the child, typing with the
+types cache); the macro cases' native execution is 3 ms against Eval's 11
+ms, compiles 32 s. A compute-bound macro (a sieve) runs 20x faster
+natively (16 ms against 346 ms for 3 calls); an API-bound one (2000
+`makeExpr` calls per call) as fast as Eval: the conversions at the boundary
+cost what interpretation saved. So the gain needs cached compiles and comes
+from macro code that computes, not from macro code that mostly calls the API.
+
+Blockers found and what a production version needs:
+
+- Macro code is typed for Eval (its std's externs): it has to be typed
+  again for hxmc. Do it in process (or from HXB) and cache the objects per
+  macro module on disk, keyed by sources, tool and defines; tier: Eval
+  first, compile the classes that run often.
+- A macro std with Eval's semantics (`Sys.programPath`, integer overflow,
+  negative array indices, ...), else native and Eval results differ.
+- Static state belongs to one engine: a class's functions run all natively
+  or all on Eval, and a fallback after a native run started is unsafe.
+- A new class extending a class of an earlier bundle: instance tests use
+  index spans compiled into code, so new classes need spare index ranges
+  (slack after each class) and earlier dispatch rows patched.
+- Crashes in macro code (a null access is a SIGSEGV in hxmc code) must
+  become errors: a signal handler returning to the macro call, or null
+  checks in macro mode.
+- W^X per platform: macOS `MAP_JIT` with `pthread_jit_write_protect_np`
+  (and the allow-JIT entitlement when hardened), Windows `VirtualAlloc` and
+  `VirtualProtect` plus `FlushInstructionCache`, arm64 instruction cache
+  maintenance and branch ranges (ADRP is ±4 GB, BL ±128 MB: veneers or a
+  mapping near the image), PIE executables (the symbol map relative to the
+  load address).
+- The bridge's maps of positions keep their objects alive (weak maps), and
+  bundles are never unloaded (the compilation server).
+- The bigger win: the compiler's own AST and types as native haxe.macro
+  values (encoding and decoding without Eval values), which an engine that
+  shares the compiler's heap allows.
 
 ### Bootstrap plus bundled program
 
@@ -918,4 +1078,4 @@ uncompressed for the six targets).
   binaries carry hxmc's ad-hoc signature and no quarantine flag.
 - Needs: the launcher, the runtime objects packaged per target, mbedtls
   and libuv linked into the native compiler (see "sys.ssl and libuv"),
-  ideally the cached std unit (see "Cached units per library") for a faster first run.
+  ideally the std's modules from the module cache (see "Cached modules") for a faster first run.
