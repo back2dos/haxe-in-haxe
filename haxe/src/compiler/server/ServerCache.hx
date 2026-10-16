@@ -39,6 +39,14 @@ class Dirty extends haxe.Exception {
 class ServerError extends haxe.Exception {}
 
 class ServerCache {
+	// port: hxmc's persistent module cache (hxmc/src/hxmc/ModuleCache.hx) checks here what a module
+	// ... cached by an earlier process needs beyond the checks below (its file's content, the file its
+	// ... path resolves to, dependencies it did not keep); always null in the compiler itself.
+	public static var checkModuleHook:Null<(com:CommonContext, mPath:GlobalTypePath, mExtra:ModuleDefExtra) -> Null<ModuleSkipReason>> = null;
+	// port: and gives back there, once a reader has read them, what HXB does not keep of a module's
+	// ... monomorphs (their modifiers); always null in the compiler itself.
+	public static var readerCreatedHook:Null<(com:CommonContext, path:GlobalTypePath, reader:HxbReader) -> Void> = null;
+
 	public static function parseFile(sctx:ServerCompilationContext, com:CommonContext, rfile:ResolvedFile, p:Pos):ParseResult<Package> {
 		var cc = CommonCache.getCache(com);
 		var file = rfile.file;
@@ -340,6 +348,10 @@ class ServerCache {
 			}
 			function check():Null<ModuleSkipReason> {
 				try {
+					if (checkModuleHook != null) switch checkModuleHook(com, mPath, mExtra) {
+						case null:
+						case reason: throw new Dirty(reason);
+					}
 					checkModulePath();
 					if (!hasPolicy(NoFileSystemCheck)
 						|| core.Path.fileExtension(core.Path.UniqueKey.lazyPath(mExtra.mFile)) != "hx") checkFile();
@@ -425,7 +437,9 @@ class ServerCache {
 
 	// port: `new HxbReader.hxb_reader path com.hxb_reader_stats (if Common.defined com Define.HxbTimes then Some com.timer_ctx else None)`
 	public static function createHxbReader(com:CommonContext, path:GlobalTypePath):HxbReader {
-		return new HxbReader(path, com.hxbReaderStats, if (Common.defined(com, Define.HxbTimes)) com.timerCtx else null);
+		var reader = new HxbReader(path, com.hxbReaderStats, if (Common.defined(com, Define.HxbTimes)) com.timerCtx else null);
+		if (readerCreatedHook != null) readerCreatedHook(com, path, reader);
+		return reader;
 	}
 
 	public static function handleCacheBoundObjects(com:CommonContext, cbol:Array<CacheBoundObject>):Void {

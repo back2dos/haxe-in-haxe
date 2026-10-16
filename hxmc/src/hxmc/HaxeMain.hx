@@ -70,7 +70,9 @@ class HaxeMain {
 		// -lib from node_modules before lix and haxelib (NodeLibs.hx)
 		compiler.HighLevel.libraryHook = NodeLibs.resolve;
 		TypesCache.install();
+		ModuleCache.install();
 		var code = haxe.Main.run(args);
+		ModuleCache.finish(failed == null ? code : 1);
 		if (failed != null) {
 			Sys.stderr().writeString("hxmc: " + failed + "\n");
 			return 1;
