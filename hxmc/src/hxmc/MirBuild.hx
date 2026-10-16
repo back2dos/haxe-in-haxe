@@ -995,19 +995,7 @@ class MirBuild {
 					}
 				}
 				var db = newBlock();
-				targets.push(db);
-				var sw = mk(Switch, Void);
-				sw.a = v;
-				sw.cases = vals;
-				sw.targets = targets;
-				add(sw);
-				var from = cur;
-				var done = new Map<Int, Bool>();
-				for (t in targets)
-					if (!done.exists(t.id)) {
-						done.set(t.id, true);
-						edge(from, t);
-					}
+				switchTree(v, vals, targets, db);
 				for (x in bodies) {
 					seal(x.b);
 					cur = x.b;
@@ -2290,6 +2278,57 @@ class MirBuild {
 		seal(join);
 		cur = join;
 		return iconst(0);
+	}
+
+	// a Switch on v (vals[i] to targets[i], else def); a sparse one with many
+	// cases (a switch on string hashes) as a binary search down to Switches of
+	// a few cases, which the instruction selectors make compare chains
+	function switchTree(v:Int, vals:Array<Int>, targets:Array<MBlock>, def:MBlock) {
+		var n = vals.length;
+		var lo = 0, hi = 0;
+		for (k in 0...n) {
+			if (k == 0 || vals[k] < lo) lo = vals[k];
+			if (k == 0 || vals[k] > hi) hi = vals[k];
+		}
+		var span:Float = (hi : Float) - lo + 1;
+		if (n <= 8 || span <= 3 * n + 8) {
+			switchLeaf(v, vals, targets, def);
+			return;
+		}
+		var order = [for (k in 0...n) k];
+		order.sort((a, b) -> vals[a] < vals[b] ? -1 : vals[a] > vals[b] ? 1 : 0);
+		var sv = [for (k in order) vals[k]], st = [for (k in order) targets[k]];
+		function tree(a:Int, b:Int) {
+			if (b - a <= 4) {
+				switchLeaf(v, sv.slice(a, b), st.slice(a, b), def);
+				return;
+			}
+			var m = (a + b) >> 1;
+			var l = newBlock(), r = newBlock();
+			br(cmp(CLt, v, iconst(sv[m])), l, r);
+			seal(l);
+			seal(r);
+			cur = l;
+			tree(a, m);
+			cur = r;
+			tree(m, b);
+		}
+		tree(0, n);
+	}
+
+	function switchLeaf(v:Int, vals:Array<Int>, targets:Array<MBlock>, def:MBlock) {
+		var sw = mk(Switch, Void);
+		sw.a = v;
+		sw.cases = vals;
+		sw.targets = targets.concat([def]);
+		add(sw);
+		var from = cur;
+		var done = new Map<Int, Bool>();
+		for (t in sw.targets)
+			if (!done.exists(t.id)) {
+				done.set(t.id, true);
+				edge(from, t);
+			}
 	}
 
 	function callAnon(name:String, s:SigInfo, obj:Ex, args:Array<Ex>):Int {

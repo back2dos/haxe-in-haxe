@@ -581,6 +581,8 @@ class FnLower {
 					body: branch(c.caseExpr, target)
 				});
 			out.push(SSwitch(subj, cases, def));
+		} else if (stringSwitch(sw, st, subj, def, target)) {
+			// (by hash)
 		} else {
 			var s = asLocal(subj, st);
 			var chain = def;
@@ -602,6 +604,64 @@ class FnLower {
 			for (x in chain)
 				out.push(x);
 		}
+	}
+
+	// FNV-1a over the UTF-16 units, as Str.hash computes (and caches) it at run time
+	public static function strHash(s:String):Int {
+		var x = 0x811C9DC5;
+		for (i in 0...s.length)
+			x = (x ^ StringTools.fastCodeAt(s, i)) * 16777619;
+		return x == 0 ? 1 : x;
+	}
+
+	// A switch on a String with many constant patterns: a switch on the
+	// subject's hash (cached in the string) picks the candidates, which are
+	// compared in the order of the cases, and gives the case's index; a switch
+	// on that index runs the bodies. The chain of comparisons the general
+	// lowering makes costs a comparison per pattern (a keyword table: a hundred).
+	function stringSwitch(sw:TSwitch, st:Ty, subj:Ex, def:Array<Stmt>, target:Null<Local>):Bool {
+		if (!st.match(TRef(RStr))) return false;
+		var n = 0;
+		for (c in sw.switchCases)
+			for (p in c.casePatterns)
+				switch strip(p).eexpr {
+					case TConst(TString(_)) if (tyOf(p).match(TRef(RStr))): n++;
+					case _: return false;
+				}
+		if (n < 6) return false;
+		var s = asLocal(subj, st);
+		var k = newLocal("k", TI32);
+		var hashes:Array<Int> = [];
+		var groups = new Map<Int, Array<{p:TExpr, index:Int}>>();
+		for (ci in 0...sw.switchCases.length)
+			for (p in sw.switchCases[ci].casePatterns) {
+				var h = switch strip(p).eexpr {
+					case TConst(TString(v)): strHash(v);
+					case _: throw "unreachable";
+				}
+				var g = groups.get(h);
+				if (g == null) {
+					groups.set(h, g = []);
+					hashes.push(h);
+				}
+				g.push({p: p, index: ci});
+			}
+		var pick = [];
+		for (h in hashes) {
+			var g = groups.get(h);
+			var chain:Array<Stmt> = [];
+			var i = g.length;
+			while (i-- > 0) {
+				var x = g[i];
+				chain = [SIf(equality(ELocal(s), st, value(x.p), tyOf(x.p), true), [SSet(k, EInt(x.index))], chain)];
+			}
+			pick.push({values: [h], body: chain});
+		}
+		out.push(SSet(k, EInt(-1)));
+		out.push(SIf(EBin(RefNe, ELocal(s), ENull(st)), [SSwitch(ECallHost("hx_str_hash", [ELocal(s)], TI32), pick, [])], []));
+		var cases = [for (ci in 0...sw.switchCases.length) {values: [ci], body: branch(sw.switchCases[ci].caseExpr, target)}];
+		out.push(SSwitch(ELocal(k), cases, def));
+		return true;
 	}
 
 	function tryStmt(body:TExpr, catches:Array<{variable:TVar, expr:TExpr}>, target:Null<Local>) {
