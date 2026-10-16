@@ -52,6 +52,9 @@ class Measure {
 			rmrf("bin/test/measure/port.hxmc");
 		}
 		var node = ["node", "--stack-size=65500", FileSystem.fullPath("hxmc/bootstrap/wasi.mjs")];
+		// (the modules look for the runtime objects next to themselves otherwise)
+		if (Sys.getEnv("HXMC_RT_DIR") == null && FileSystem.exists("bin/hxmc/rt"))
+			Sys.putEnv("HXMC_RT_DIR", FileSystem.fullPath("bin/hxmc/rt"));
 		if (only.contains("stage0") && FileSystem.exists("hxmc/bootstrap/stage0.wasm.br")) {
 			rmrf("bin/test/measure/hxmc1.hxmc");
 			var r = measure("stage0 builds the tool (node)", "ours", node.concat([FileSystem.fullPath("hxmc/bootstrap/stage0.wasm.br"), "bin/test/measure/hxmc1"]).concat(toolArgs));
