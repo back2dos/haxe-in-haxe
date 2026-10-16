@@ -802,7 +802,9 @@ class LibM {
 		var hi_ = 0.0, lo_ = 0.0;
 		if (hx > 0x3FD62E42) { // |x| > 0.5 * ln2
 			if (hx > 0x3FF0A2B2) // |x| >= 1.5 * ln2
-				k = Std.int(invln2 * x + (sign != 0 ? -0.5 : 0.5));
+				// (copysign(0.5, x) for musl's half[sign]: no branch on the
+				// sign, which random signs mispredict half the time)
+				k = Std.int(invln2 * x + ofBits(bits(0.5) | (bits(x) & ((1 : I64) << 63))));
 			else
 				k = 1 - sign - sign;
 			var dk:Float = k;
@@ -819,7 +821,9 @@ class LibM {
 		var c = x - xx * (1.66666666666666019037e-01
 			+ xx * (-2.77777777770155933842e-03 + xx * (6.61375632143793436117e-05 + xx * (-1.65339022054652515390e-06 + xx * 4.13813679705723846039e-08))));
 		var y = 1 + (x * c / (2 - c) - lo_ + hi_);
-		return k == 0 ? y : scalbn(y, k);
+		// (scalbn's common case inline: one multiplication by 2^k, exact;
+		// y * 1.0 is y for k == 0)
+		return k >= -1022 && k <= 1023 ? y * ofBits(((0x3ff + k) : I64) << 52) : scalbn(y, k);
 	}
 
 	@:hxmc.host("Math_log") @:hxmc.noGc static function log(x:Float):Float {
