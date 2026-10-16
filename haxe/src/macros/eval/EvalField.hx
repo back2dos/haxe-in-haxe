@@ -31,14 +31,15 @@ class EvalField {
 	public static function protoFieldDirect(proto:Vprototype,
 			name:Int):Value return proto.pfields[EvalContext.getProtoFieldIndexRaise(proto, name)];
 
+	// port: the lookups below test for the name instead of catching Not_found
+	// (an exception per miss: a method looked up on an instance misses its fields)
 	public static function protoFieldRaise(proto:Vprototype, name:Int):Value {
-		try
-			return protoFieldDirect(proto, name)
-		catch (_:NotFound) {
-			return switch proto.pparent {
-				case null: throw NotFound.raise();
-				case proto: protoFieldRaise(proto, name);
-			}
+		var proto = proto;
+		while (true) {
+			var i = proto.pnames.findOpt(name);
+			if (i != null) return proto.pfields[i];
+			proto = proto.pparent;
+			if (proto == null) throw NotFound.raise();
 		}
 	}
 
@@ -48,17 +49,22 @@ class EvalField {
 	public static function objectFieldRaise(o:Vobject, name:Int):Value {
 		return switch o.oproto {
 			case OProto(proto):
-				o.ofields[EvalContext.getInstanceFieldIndexRaise(proto, name)];
+				var i = proto.pinstanceNames.findOpt(name);
+				if (i == null) throw NotFound.raise();
+				o.ofields[i];
 			case ODictionary(l):
 				l.find(name);
 		}
 	}
 
 	public static function objectField(o:Vobject, name:Int):Value {
-		try
-			return objectFieldRaise(o, name)
-		catch (_:NotFound)
-			return VNull;
+		return switch o.oproto {
+			case OProto(proto):
+				var i = proto.pinstanceNames.findOpt(name);
+				i == null ? VNull : o.ofields[i];
+			case ODictionary(_):
+				try objectFieldRaise(o, name) catch (_:NotFound) VNull;
+		}
 	}
 
 	public static function fieldRaise(v:Value, f:Int):Value {
@@ -73,7 +79,8 @@ class EvalField {
 			case VString(s):
 				if (f == EvalHash.key_length) VInt32(s.slength) else protoFieldDirect(EvalContext.getCtx().stringPrototype, f);
 			case VInstance(vi):
-				try instanceField(vi, f) catch (_:NotFound) protoFieldRaise(vi.iproto, f);
+				var i = vi.iproto.pinstanceNames.findOpt(f);
+				if (i != null) vi.ifields[i] else protoFieldRaise(vi.iproto, f);
 			case _: throw NotFound.raise();
 		}
 	}

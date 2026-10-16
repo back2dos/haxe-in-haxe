@@ -144,8 +144,28 @@ class EvalEmitter {
 		#end
 	}
 
-	// port: evaluates [execs] in order (`List.map (apply env) execs`).
+	// port: evaluates [execs] in order (`List.map (apply env) execs`); up to
+	// three arguments as an array literal (one allocation at its size).
 	static inline function applyAll(execs:Array<Emitter>, env:Env):Array<Value> {
+		#if !hl
+		return switch execs.length {
+			case 0: [];
+			case 1: [execs[0](env)];
+			case 2:
+				var v0 = execs[0](env);
+				[v0, execs[1](env)];
+			case 3:
+				var v0 = execs[0](env);
+				var v1 = execs[1](env);
+				[v0, v1, execs[2](env)];
+			case _: applyAllLoop(execs, env);
+		}
+		#else
+		return applyAllLoop(execs, env);
+		#end
+	}
+
+	static function applyAllLoop(execs:Array<Emitter>, env:Env):Array<Value> {
 		var vl = presized(execs.length);
 		for (i in 0...execs.length) vl[i] = execs[i](env);
 		return vl;
@@ -153,10 +173,44 @@ class EvalEmitter {
 
 	// port: `vthis :: List.map (apply env) execs` without an intermediate array.
 	static inline function applyAllThis(vthis:Value, execs:Array<Emitter>, env:Env):Array<Value> {
+		#if !hl
+		return switch execs.length {
+			case 0: [vthis];
+			case 1: [vthis, execs[0](env)];
+			case 2:
+				var v0 = execs[0](env);
+				[vthis, v0, execs[1](env)];
+			case _: applyAllThisLoop(vthis, execs, env);
+		}
+		#else
+		return applyAllThisLoop(vthis, execs, env);
+		#end
+	}
+
+	static function applyAllThisLoop(vthis:Value, execs:Array<Emitter>, env:Env):Array<Value> {
 		var vl = presized(execs.length + 1);
 		vl[0] = vthis;
 		for (i in 0...execs.length) vl[i + 1] = execs[i](env);
 		return vl;
+	}
+
+	// port: the arguments of `call_value_on vthis vf (List.map (apply env) execs)`
+	// with the receiver call_value_on puts in front (`vthis :: vl`, `v1 :: vl`)
+	// already there, so that the call (callOn) copies nothing.
+	static inline function applyAllOn(vthis:Value, vf:Value, execs:Array<Emitter>, env:Env):Array<Value> {
+		return switch vf {
+			case VFunction(_, false): applyAllThis(vthis, execs, env);
+			case VFieldClosure(v1, _): applyAllThis(v1, execs, env);
+			case _: applyAll(execs, env);
+		}
+	}
+
+	// port: `call_value_on` on the arguments of applyAllOn.
+	static inline function callOn(vf:Value, vl:Array<Value>):Value {
+		return switch vf {
+			case VFunction(f, _) | VFieldClosure(_, f): f(vl);
+			case _: EvalContext.excString("Cannot call " + EvalPrinting.valueString(vf));
+		}
 	}
 
 	static function outOfBounds():Dynamic throw new InvalidArgument("index out of bounds");
@@ -466,8 +520,8 @@ class EvalEmitter {
 			checkStackDepth(env);
 			var vthis = env.envLocals[slot];
 			var vf = proto.pfields[i];
-			var vl = applyAll(execs, env);
-			return EvalPrinting.callValueOn(vthis, vf, vl);
+			var vl = applyAllOn(vthis, vf, execs, env);
+			return callOn(vf, vl);
 		}
 	}
 
@@ -508,10 +562,10 @@ class EvalEmitter {
 			var vf = try EvalField.protoFieldRaise(proto,
 				name) catch (_:NotFound)
 				EvalMisc.throwString('Field ${EvalHash.revHash(name)} not found on prototype ${EvalHash.revHash(proto.ppath)}', p);
-			var vl = applyAll(execs, env);
+			var vl = applyAllOn(vthis, vf, execs, env);
 			env.envLeavePmin = p.pmin;
 			env.envLeavePmax = p.pmax;
-			return EvalPrinting.callValueOn(vthis, vf, vl);
+			return callOn(vf, vl);
 		}
 	}
 
@@ -524,7 +578,7 @@ class EvalEmitter {
 			var vf = EvalField.field(vthis, name);
 			env.envLeavePmin = p.pmin;
 			env.envLeavePmax = p.pmax;
-			return EvalPrinting.callValueOn(vthis, vf, applyAll(execs, env));
+			return callOn(vf, applyAllOn(vthis, vf, execs, env));
 		}
 	}
 
@@ -1021,7 +1075,11 @@ class EvalEmitter {
 		return function(env:Env):Value {
 			var v1 = exec1(env);
 			var v2 = exec2(env);
-			return EvalValueTools.vbool(EvalMisc.compare(v1, v2) == CSup);
+			// port: compare on two Int32s, inline
+			return switch [v1, v2] {
+				case [VInt32(i1), VInt32(i2)]: EvalValueTools.vbool(i1 > i2);
+				case _: EvalValueTools.vbool(EvalMisc.compare(v1, v2) == CSup);
+			}
 		}
 	}
 
@@ -1029,10 +1087,14 @@ class EvalEmitter {
 		return function(env:Env):Value {
 			var v1 = exec1(env);
 			var v2 = exec2(env);
-			return EvalValueTools.vbool(switch EvalMisc.compare(v1, v2) {
-				case CSup | CEq: true;
-				case _: false;
-			});
+			// port: compare on two Int32s, inline
+			return switch [v1, v2] {
+				case [VInt32(i1), VInt32(i2)]: EvalValueTools.vbool(i1 >= i2);
+				case _: EvalValueTools.vbool(switch EvalMisc.compare(v1, v2) {
+						case CSup | CEq: true;
+						case _: false;
+					});
+			}
 		}
 	}
 
@@ -1040,7 +1102,11 @@ class EvalEmitter {
 		return function(env:Env):Value {
 			var v1 = exec1(env);
 			var v2 = exec2(env);
-			return EvalValueTools.vbool(EvalMisc.compare(v1, v2) == CInf);
+			// port: compare on two Int32s, inline
+			return switch [v1, v2] {
+				case [VInt32(i1), VInt32(i2)]: EvalValueTools.vbool(i1 < i2);
+				case _: EvalValueTools.vbool(EvalMisc.compare(v1, v2) == CInf);
+			}
 		}
 	}
 
@@ -1048,10 +1114,14 @@ class EvalEmitter {
 		return function(env:Env):Value {
 			var v1 = exec1(env);
 			var v2 = exec2(env);
-			return EvalValueTools.vbool(switch EvalMisc.compare(v1, v2) {
-				case CInf | CEq: true;
-				case _: false;
-			});
+			// port: compare on two Int32s, inline
+			return switch [v1, v2] {
+				case [VInt32(i1), VInt32(i2)]: EvalValueTools.vbool(i1 <= i2);
+				case _: EvalValueTools.vbool(switch EvalMisc.compare(v1, v2) {
+						case CInf | CEq: true;
+						case _: false;
+					});
+			}
 		}
 	}
 
