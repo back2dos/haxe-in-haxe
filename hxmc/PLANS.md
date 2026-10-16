@@ -320,6 +320,20 @@ Plan, Go- and Rust-style (built lazily and cached rather than shipped):
   source path (the Vector bug showed the two paths can differ subtly).
 - Simpler than the compilation server for most of the gain; the server
   remains the route for large programs' one-edit rebuilds.
+- The std as a unit, first step: generalize the types cache (TypesCache,
+  today hxmc's own runtime package only) to the whole std, for every target,
+  built on first use and keyed by the target and the defines the std's
+  `#if` conditions read, in the user cache directory with its pruning; the
+  postinstall of the npm package may warm it for the host's hxmc build
+  (about 0.7 s). Builds with init macros, display requests and shadowed
+  std modules type from source as the types cache does now. Expected:
+  small programs from about 0.21 s toward 0.13–0.15 s.
+- Not shipping the std as HXB in the distribution: there is no single
+  typed std (per target, per define, again for the macro context), the
+  `.hx` sources have to ship anyway (editors, error positions, shadowing),
+  init macros cannot change pre-typed modules, and an edited compiler
+  (`hxmc-rebuild`) invalidates it; built on first use covers every
+  combination without those costs.
 
 ### Central object cache and quieter builds
 
