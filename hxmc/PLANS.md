@@ -572,7 +572,7 @@ setjmp/longjmp do not unwind, but debuggers and SEH-based tools would.
 - `@hxmc/gfx` (`hxmc.gfx`): the portable GPU layer, its back ends, the GPU
   API bindings (`hxmc.gfx.d3d11`, metal, gl, vulkan, webgpu) and the shader
   macro. WebGPU-shaped with integer handles, immutable pipelines, slot
-  binding and `pushUniforms` into a per-frame ring; automatic sync, two
+  binding and `setUniforms` into a per-frame ring; automatic sync, two
   frames in flight, no allocation per frame; main thread only. Bind
   groups, compute (behind `device.features`) and threading later.
 - Shaders: a Haxe macro emitting HLSL (`D3DCompile` from the system's
@@ -644,11 +644,9 @@ setjmp/longjmp do not unwind, but debuggers and SEH-based tools would.
   (`IDXGIDevice`, `GetParent`) for a flip-model swap chain
   (`CreateSwapChainForHwnd`, `FLIP_DISCARD`, two RGBA8 buffers,
   `ResizeBuffers` when the window's size changes), `readPixels` through a
-  staging texture and `Map`. No call needs a struct by value. Left: frames
-  during a live resize or a move (Windows' modal loop inside
-  `DispatchMessageW`: a timer, or rendering from `WM_PAINT`), `WM_DPICHANGED`,
-  a lost device (`DXGI_ERROR_DEVICE_REMOVED` throws), characters
-  (`WM_CHAR`), the debug layer.
+  staging texture and `Map`. No call needs a struct by value. Left: a lost
+  device (`DXGI_ERROR_DEVICE_REMOVED` throws), the debug layer (frames
+  during a live resize, `WM_DPICHANGED` and `WM_CHAR`: below).
 - WebGPU (done, 2026-10-16, wasm32-wasi in the browser): the same
   `Triangle.hx` on a canvas, against the same golden image within GfxTest's
   tolerance (SwiftShader in headless Chromium: 422 pixels off by 1,
@@ -746,14 +744,72 @@ setjmp/longjmp do not unwind, but debuggers and SEH-based tools would.
   `gfx-macos` CI job only). Cost (Triangle for Linux): 0.5 s to 0.77 s,
   of which typing the macro's own code in the macro context 0.06-0.1 s,
   running it 15 ms, typing the math types (their swizzles and overloads)
-  about 0.08 s; the executable is 1 KB smaller (109 KB). Left: uniforms
-  bound at run time (`Encoder.setUniforms` or a per-frame ring, GL's
-  `glUniformBlockBinding` by the block's name), textures and samplers as
-  parameters, variants (compile-time constants per pipeline), integer
-  vertex formats and flat varyings, `switch`, arrays of constant size,
-  matrices other than 4x4, the fragment position's convention (GL's
-  `gl_FragCoord` is y-up, the others y-down), one depth range, SPIR-V,
-  caching emitted code across compilations (the compilation server).
+  about 0.08 s; the executable is 1 KB smaller (109 KB). Left
+  (uniforms bound at run time, textures, the conventions: below): variants
+  (compile-time constants per pipeline), integer vertex formats and flat
+  varyings, `switch`, arrays of constant size, matrices other than 4x4,
+  SPIR-V, caching emitted code across compilations (the compilation
+  server).
+- Usable for a real program (done, 2026-10-16): `examples/Cube.hx`, a
+  textured, lit, depth-tested cube turning under a translucent panel, on
+  every back end and on the site (in place of the triangle, which stays the
+  package's simplest example). Uniforms at draw time
+  (`Encoder.setUniforms(slot, bytes)`, the bytes from the shader class's
+  `write<Block>`): a per-frame ring of 256-byte aligned blocks
+  (`UNIFORM_RING`, 256 KB): GL two buffers (frames in flight) bound by
+  range (`glBindBufferRange`), the blocks bound to their slots by name when
+  a pipeline links (`ShaderCode.bindings`: ES 3.00 has no
+  `layout(binding)`); D3D11 a dynamic buffer at constant buffer offsets
+  (`VSSetConstantBuffers1`, Map with no overwrite, discarded at a frame's
+  first block) where 11.1 has them (WARP), else a dynamic buffer per slot
+  discarded at each block (wined3d; `HXMC_GFX_D3D11_NO_OFFSETS=1`); Metal
+  `setVertexBytes`/`setFragmentBytes` (4 KB a block); WebGPU dynamic offsets
+  into one buffer written before each submit (the queue orders it after the
+  previous frames' reads), an explicit bind group layout from the shaders'
+  bindings, a bind group per set of textures, made once. Index buffers
+  (`setIndexBuffer`, `drawIndexed`, UInt16 and UInt32, a base vertex: GL
+  ES 3.0 has none, so the attributes' offsets move); the device's depth
+  buffer (GL the default framebuffer's 24 bits, the others a 32-bit float
+  texture remade with the target's size; `PassDesc.depth`,
+  `PipelineDesc.depthCompare` and `depthWrite`); `PipelineDesc.blend`
+  (Opaque, Alpha, Additive, Premultiplied); `Device.writeBuffer`.
+  Textures: `createTexture` (RGBA8, one level), `writeTexture`,
+  `createSampler` (filter, wrap), `Encoder.setTexture(slot, texture,
+  sampler)`; shaders take `Texture2D` parameters (a slot each, shared with
+  the uniform blocks in order of appearance), read with `sample(t, uv)`
+  (the first level: no derivatives, so WGSL's uniformity rule never
+  applies) and passed on to helpers: GLSL `sampler2D` on unit n by name,
+  WGSL `texture_2d<f32>` at binding n and its sampler at 16 + n, MSL
+  `texture2d` and `sampler`, HLSL `Texture2D` and `SamplerState` at t<n>
+  and s<n>; on the CPU the nearest texel. Conventions (WebGPU's, D3D's,
+  Metal's): clip z from 0 to w, the fragment position from the target's
+  top left, a texture's first row its top; the emitted GLSL maps clip z to
+  GL's range and flips `gl_FragCoord.y` with the target's height (a
+  uniform the GL back end sets with the pipeline; nothing else differs on
+  screen, since NDC is y-up everywhere and readPixels already flips GL's
+  rows); `Mat4`'s CPU transforms (perspective, orthographic, rotations).
+  `@hxmc/os`: `Text` events (XLookupString, `WM_CHAR` with surrogate
+  pairs, Cocoa's `insertText:` through `interpretKeyEvents:` on a
+  content view subclass made at run time, a keydown's key), `Wheel` (dx,
+  dy in notches, in place of buttons 4 and 5), `ScaleChange`
+  (`WM_DPICHANGED` with the suggested size, a new backing scale, a new
+  devicePixelRatio), frames during a drag of a window's edge or title bar on
+  Windows (a timer inside Windows' loop). Tests: GfxTest and WebTest draw
+  both examples against `triangle.png` and `cube.png` with the same rule
+  (exact on llvmpipe and wined3d; WebGPU and WebGL2 on SwiftShader 7766
+  pixels within 2, 6 beyond, of 245 allowed; Firefox and WebKit 169 within
+  1), and check input sent to the window as events (X11, Win32, a posted
+  key down on macOS, typing and the wheel in Chromium); `TexturedShader` and
+  a texture local the compiler rejects in ShaderTest; CI runs
+  `gfx-web-check` in the `gfx` job. Sizes: Cube 194 KB on Linux, 469 KB on
+  Windows, 252 KB on macOS, 192 KB of WebAssembly (legacy exceptions);
+  Triangle on Linux 109 to 134 KB, its WebAssembly 89 to 144 KB (both
+  back ends' new paths are reached through `Impl`). Next: render targets
+  (GL: rendering upside down into them, its front faces swapped, so that
+  sampling them matches), mip maps and more texture formats, bind groups
+  (fewer calls than a slot each), compute; an input method for X11
+  (`XOpenIM`, `Xutf8LookupString`: variadic calls) and Cocoa
+  (`NSTextInputClient`), frames during a live resize on macOS.
 - Structs by value in C calls (done for arm64, 2026-10-16): AAPCS64 on
   macOS, Linux and Windows (MirBuild.cStructArg, cStructRet; a64 Isel):
   homogeneous aggregates of up to four floats or doubles in v registers,

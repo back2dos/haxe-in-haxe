@@ -73,7 +73,7 @@ textarea {
 .gfx { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 24px; align-items: start; }
 @media (max-width: 760px) { .gfx { grid-template-columns: 1fr; } }
 .gfx figure { position: relative; margin: 0; }
-/* (the triangle's clear colour) */
+/* (the cube's clear colour) */
 .gfx canvas { display: block; width: 100%; aspect-ratio: 4 / 3; background: #1a1a1f; border: 1px solid var(--line); border-radius: 8px; }
 .gfx-state { position: absolute; inset: 0; margin: 0; display: flex; align-items: center; justify-content: center; padding: 24px; text-align: center; color: #ece9e2; font-size: 15px; }
 .gfx-state[hidden] { display: none; }
