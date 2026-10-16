@@ -104,7 +104,7 @@ endef
 .DEFAULT_GOAL := help
 .PHONY: help std deps rt rt-build rt-target rt-layouts hxmc tool bootstrap fixpoint stage0 crosshost port dev release wasm npm site fuzz \
 	lix lix-release lix-dist reference bench test test-fuzz test-display test-server test-jsonrpc test-unit-targets test-interp \
-	test-haxelib test-eval-debugger test-node-libs smoke hxmc-test corpus-stage gfx-programs gfx-check gfx-web-check gfx-shader-check portcheck measure quick check full clean distclean
+	test-haxelib test-eval-debugger test-node-libs smoke hxmc-test corpus-stage gfx-programs gfx-check gfx-web-check gfx-shader-check ui-check portcheck measure quick check full clean distclean
 
 help:
 	@sed -n '/^# --- Targets/,$$p' $(MAKEFILE_LIST) | sed -n 's/^## \{0,1\}//p'
@@ -161,6 +161,8 @@ help:
 ## gfx-shader-check  packages/gfx's shader macro on Eval: shaders run on the CPU, the emitted
 ##             GLSL, WGSL, MSL and HLSL against packages/gfx/test/shader/, the programs it must
 ##             reject (packages/gfx/test/ShaderTest.hx; BLESS=1 rewrites the sources)
+## ui-check    packages/ui on Eval: the layout against Chromium's flexbox (layout-expected.json,
+##             from packages/ui/test/layout-ref.mjs), text wrapping, events and focus (UiTest.hx)
 ## portcheck   the port built by hxmc self-compiles to the reference's HXB (hxmc/test/Selfcheck.hx)
 ## bench       the HaxeBenchmarks cases on hxmc (native, wasm under node), C++, JVM, JS, HL/C and
 ##             HL, built by hxmc and the port: times, peak RSS, sizes (hxmc/test/Bench.hx; BENCH_ARGS)
@@ -473,6 +475,9 @@ gfx-web-check: $(TOOL) $(STD)
 
 gfx-shader-check: $(TOOL)
 	ulimit -s unlimited 2>/dev/null || true; $(TOOL) -cp packages/gfx/src -cp packages/gfx/examples -cp packages/gfx/test --run ShaderTest $(TOOL) $(if $(BLESS),--bless)
+
+ui-check: $(TOOL)
+	ulimit -s unlimited 2>/dev/null || true; $(TOOL) -cp packages/ui/src -cp packages/ui/test --run UiTest
 
 portcheck: $(TOOL) $(STD) $(HOST_RT) $(REFERENCE)
 	$(SCRIPT) Selfcheck --local --small
