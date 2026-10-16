@@ -421,6 +421,8 @@ class Lower {
 					case "EnumValue" if (isStd): TRef(REnum(null));
 					case "UInt" if (isStd): TI32;
 					case "I64" if (a.aPath.pack.join(".") == "hxmc"): TI64;
+					// in macro mode (native macros, hxmc/src/hxmc/macro): the compiler's position, opaque
+					case "Position" if (a.aPath.pack.join(".") == "haxe.macro"): TRef(RAny);
 					// a coroutine is a function taking the continuation, as on HashLink
 					case "Coroutine" if (a.aPath.pack.join(".") == "haxe.coro"):
 						switch followFun(t) {
@@ -428,7 +430,7 @@ class Lower {
 							case _: fail("coroutine type");
 						}
 					case _:
-						if (core.Meta.has(CoreType, a.aMeta)) fail("core type " + a.aPath.name);
+						if (core.Meta.has(CoreType, a.aMeta)) fail("core type " + a.aPath.pack.join(".") + "." + a.aPath.name);
 						ty(core.Abstract.getUnderlyingType(a, params));
 				}
 			case TInst(c, params):

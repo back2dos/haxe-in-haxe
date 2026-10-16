@@ -20,6 +20,10 @@ class Options {
 	public var wasmLegacyEh = false;
 	// -D hxmc.libc=glibc: Linux, a dynamically linked executable against the system's glibc (Abi.setLibc; default: musl, static)
 	public var libc:Null<String> = null;
+	// -D hxmc.jit: a compiler that can load native macros (hxmc/src/hxmc/macro): spare
+	// type and signature table entries, every runtime function kept, the
+	// symbols written next to the executable (<out>.syms); Linux x86-64, static
+	public var jit = false;
 
 	public function new() {}
 
@@ -80,6 +84,8 @@ class Options {
 			case _: throw "hxmc: -D hxmc.wasm-eh=" + eh + ": exnref or legacy";
 		}
 		o.libc = def("hxmc.libc");
+		o.jit = def("hxmc.jit") != null;
+		if (o.jit && (o.target != "linux-x86_64" || o.libc != null)) throw "hxmc: -D hxmc.jit: linux-x86_64 (static) only";
 		var j = def("hxmc.jobs");
 		if (j == null) j = env("HXMC_JOBS");
 		if (j != null) o.jobs = Std.parseInt(j);

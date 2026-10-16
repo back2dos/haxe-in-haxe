@@ -336,6 +336,10 @@ class Driver {
 		var data = new Obj();
 		var demit = Target.emitter(abi, data);
 		var dg = new DataGen(prep, abi, data, mf -> compileMir(mf, demit, data));
+		if (o.jit) {
+			dg.spareTypes = hxmc.macro.Jit.SPARE_TYPES;
+			dg.spareSigs = hxmc.macro.Jit.SPARE_SIGS;
+		}
 		dg.run();
 		dg.allocStubs(objs, demit);
 		dg.stubs(objs, demit);
@@ -432,8 +436,12 @@ class Driver {
 				d;
 			} else new Link(all, abi);
 			l.symbols = !o.strip;
-			if (Sys.getEnv("HXMC_NOGC") != "1") l.collect = rts;
-			l.link("_start");
+			// (-D hxmc.jit: every runtime function stays, for the native macros it loads)
+			if (Sys.getEnv("HXMC_NOGC") != "1" && !o.jit) l.collect = rts;
+			if (o.jit) l.hostSyms = new StringBuf();
+			var exe = l.link("_start");
+			if (o.jit) sys.io.File.saveContent(out + ".syms", l.hostSyms.toString());
+			exe;
 		};
 		if (abi.os == "windows" && !StringTools.endsWith(out, ".exe")) out += ".exe";
 		sys.io.File.saveBytes(out, exe);

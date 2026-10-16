@@ -70,7 +70,17 @@ class HaxeMain {
 		// -lib from node_modules before lix and haxelib (NodeLibs.hx)
 		compiler.HighLevel.libraryHook = NodeLibs.resolve;
 		TypesCache.install();
+		#if hxmc.jit
+		// native macros (hxmc/src/hxmc/macro): a child compiling macro code for
+		// its parent (Guest), or the engine of -D hxmc.macros=native|verify
+		var guest = Sys.getEnv("HXMC_MACRO_GUEST");
+		var engine:Null<hxmc.macro.NativeEngine> = null;
+		if (guest != null && guest != "") hxmc.macro.Guest.install(guest) else macros.MacroEngine.engine = engine = new hxmc.macro.NativeEngine();
 		var code = haxe.Main.run(args);
+		if (engine != null) engine.report();
+		#else
+		var code = haxe.Main.run(args);
+		#end
 		if (failed != null) {
 			Sys.stderr().writeString("hxmc: " + failed + "\n");
 			return 1;
