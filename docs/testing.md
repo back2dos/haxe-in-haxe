@@ -103,7 +103,9 @@ Chromium's on 60 cases, `packages/ui/test/layout-expected.json`, which
 focus; then signals and markup rendered into nodes). Natively: `make
 ui-draw-check` (the sample UI and the todo example, driven through its Ui,
 drawn headless against `draw.png` and `todo.png`; Linux: llvmpipe, DejaVu
-Sans). In the browser: `make ui-web-check` (the todo example for
+Sans; the sample in a window under Xvfb, whose loop must sleep once it has
+nothing to draw; `StressTest`, a list of 1000 rows: the time of each step,
+mounting, layout, frames, a change to one row, a scroll). In the browser: `make ui-web-check` (the todo example for
 wasm32-wasi in headless Chromium on WebGPU and WebGL2, driven by real pointer
 and keyboard events, against `todo.png`). CI runs all five in the `gfx` job.
 

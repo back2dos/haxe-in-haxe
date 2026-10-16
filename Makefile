@@ -501,10 +501,12 @@ UI_CP := -cp packages/os/src -cp packages/gfx/src -cp packages/gfx/test -cp pack
 ui-programs: $(TOOL) $(STD) $(HOST_RT)
 	$(call hxmc,bin/ui/$(GFX_TARGET)/UiDrawTest$(call EXE,$(GFX_TARGET)),$(UI_CP) -main UiDrawTest $(HXMC_ARGS) $(GFX_ARGS))
 	$(call hxmc,bin/ui/$(GFX_TARGET)/TodoTest$(call EXE,$(GFX_TARGET)),$(UI_CP) -main TodoTest $(HXMC_ARGS) $(GFX_ARGS))
+	$(call hxmc,bin/ui/$(GFX_TARGET)/StressTest$(call EXE,$(GFX_TARGET)),$(UI_CP) -main StressTest $(HXMC_ARGS) $(GFX_ARGS))
 ui-draw-check: ui-programs
 	LIBGL_ALWAYS_SOFTWARE=1 env -u DISPLAY bin/ui/$(GFX_TARGET)/UiDrawTest packages/ui/test/draw.png bin/ui/$(GFX_TARGET)/draw.png $(if $(BLESS),--bless)
 	LIBGL_ALWAYS_SOFTWARE=1 xvfb-run -a -s "-screen 0 640x480x24" bin/ui/$(GFX_TARGET)/UiDrawTest packages/ui/test/draw.png bin/ui/$(GFX_TARGET)/window.png --window
 	LIBGL_ALWAYS_SOFTWARE=1 env -u DISPLAY bin/ui/$(GFX_TARGET)/TodoTest packages/ui/test/todo.png bin/ui/$(GFX_TARGET)/todo.png $(if $(BLESS),--bless)
+	LIBGL_ALWAYS_SOFTWARE=1 env -u DISPLAY bin/ui/$(GFX_TARGET)/StressTest
 
 ui-web-check: $(TOOL) $(STD)
 	$(call hxmc,bin/ui/WebTodo.wasm,$(UI_CP) -main WebTodo $(HXMC_ARGS) -D hxmc.target=wasm32-wasi)
