@@ -2129,11 +2129,21 @@ class MirBuild {
 	}
 
 	// p + off + i * scale: (base, disp, index)
-	function memAtIndexed(p:Int, off:Ex, i:Ex):{base:Int, disp:Int, index:Int} {
+	// (an index i + c or i - c: c * scale in the displacement)
+	function memAtIndexed(p:Int, off:Ex, i:Ex, scale:Int):{base:Int, disp:Int, index:Int} {
 		var base = p, disp = 0;
 		switch off {
 			case EInt(v): disp = v;
 			case _: base = op2(Add, I64, p, op1(SExt, I64, ex(off)));
+		}
+		switch i {
+			case EBin(Add, a, EInt(c)) | EBin(Add, EInt(c), a) if (c > -0x100000 && c < 0x100000):
+				disp += c * scale;
+				i = a;
+			case EBin(Sub, a, EInt(c)) if (c > -0x100000 && c < 0x100000):
+				disp -= c * scale;
+				i = a;
+			case _:
 		}
 		return {base: base, disp: disp, index: op1(SExt, I64, ex(i))};
 	}
@@ -2175,11 +2185,11 @@ class MirBuild {
 			return iconst(0);
 		}
 		inline function ldAt(ty:MTy, size:Int):Int {
-			var m = memAtIndexed(ex(args[0]), args[1], args[2]);
+			var m = memAtIndexed(ex(args[0]), args[1], args[2], size);
 			return load(ty, size, m.base, m.disp, false, m.index, size);
 		}
 		inline function stAt(size:Int):Int {
-			var m = memAtIndexed(ex(args[0]), args[1], args[2]);
+			var m = memAtIndexed(ex(args[0]), args[1], args[2], size);
 			store(size, m.base, m.disp, ex(args[3]), m.index, size);
 			return iconst(0);
 		}

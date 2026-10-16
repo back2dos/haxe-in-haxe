@@ -144,17 +144,22 @@ its libc and compiler_rt for the others): sin, cos, tan, asin, acos,
 atan, atan2, exp, log, pow and Float's `%` (fmod); sqrt and abs are
 instructions, floor and ceil arm64's frintm/frintp, WebAssembly's
 f64.floor/f64.ceil and inline code on x86-64 (no SSE4.1 assumed), all
-exact. The runtime objects link no math of the C library any more. The
+exact. Nothing calls the C library's math any more (mkrt.sh roots none;
+zig's compiler_rt, one object, still brings its unused copies into the
+Linux rt.o). The
 results are bit-identical to musl's C on Linux x86-64 for every function
 (2 million random and edge inputs each, and the corpus's `MathLib`),
 where main used other code: on arm64 musl's pow takes its fma path (5 in
 2 million results an ulp apart), Windows has the UCRT's and macOS
 libSystem's. NaNs keep the processor's sign and payload. Speed against
-musl's C on x86-64: within about 10% either way per function (tan, atan
-and pow slower, exp, log, acos, atan2, fmod, floor and ceil faster); the
-codegen work for it (Mem.f64Bits/bitsF64, Mem.words for tables in
-read-only data, constant folding, FP constants as memory operands, jump
-threading) is general.
+musl's C on x86-64 (ns per call, 4096 typical inputs): exp, acos, asin,
+atan2, fmod, floor and ceil faster, log, atan and pow within 5%, sin, cos
+and tan about 1.1-1.3x slower; a trig-heavy loop about 1.1x, nbody and
+mandelbrot unchanged. The codegen work for it is general: Mem.f64Bits and
+bitsF64, Mem.words (tables in read-only data), constant folding, float
+constants as memory operands, jump threading, index constants in
+displacements. Left: sin/cos/tan's switch on the quadrant as a jump
+table, if-conversion (cmov), splitting live ranges around rare calls.
 
 musl differs from glibc by an ulp on some inputs (`Math.sin(-2.5)`:
 -0.598472144103956438 against glibc's ...549), so the port's `--interp`
