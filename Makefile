@@ -116,8 +116,8 @@ help:
 ## release     bin/release/TARGET/haxe[.exe]: the port cross-built by hxmc, with mbedtls and libuv
 ## wasm        bin/wasm/hih.wasm: the playground's compiler (wasm32-wasi, -D hih_no_generators),
 ##             and bin/wasm/hih-legacy.wasm, the same with -D hxmc.wasm-eh=legacy (browsers without exnref)
-## npm         bin/npm/*.tgz: the npm package hxmc (package.json; hxmc/bootstrap) and its six
-##             platform packages @hxmc/<os>-<cpu> (NPM_VERSION)
+## npm         bin/npm/*.tgz: the npm packages @hxmc/cli (package.json; hxmc/bootstrap), its six
+##             platform packages @hxmc/<os>-<cpu>, @hxmc/wasm and @hxmc/source (NPM_VERSION)
 ## site        bin/site: the website (hxmc/web; LIX_DIR's lix binaries under tools/, BENCH_DATA's
 ##             benchmark history under bench/)
 ## fuzz        bin/fuzz/fuzz: the differential fuzzer, built by hxmc
@@ -248,10 +248,11 @@ bin/wasm/hih.wasm: $(TOOL) $(PORT_SRC) $(STD)
 bin/wasm/hih-legacy.wasm: $(TOOL) $(PORT_SRC) $(STD)
 	$(call hxmc,$@,$(PORT_ARGS) -D hih_no_generators -D hxmc.target=wasm32-wasi -D hxmc.wasm-eh=legacy)
 
-# --- The npm package (package.json at the root) ---
+# --- The npm packages (hxmc/bootstrap/pack.mjs; @hxmc/cli: package.json at the root) ---
 
-# what `files` ships besides the sources: the compiler with every generator as
-# a wasm32-wasi module, hxmc's merged std and the runtime objects
+# what they ship besides the sources: the compiler with every generator as
+# a wasm32-wasi module (@hxmc/wasm), hxmc's merged std and the runtime
+# objects (@hxmc/cli)
 NPM_GEN := hxmc/bootstrap/haxe.wasm hxmc/bootstrap/hxmc-std/.stamp hxmc/bootstrap/rt/HASH
 hxmc/bootstrap/haxe.wasm: $(TOOL) $(PORT_SRC) $(HXMC_SRC) $(STD)
 	$(call hxmc,bin/npm/haxe.wasm,$(PKG_ARGS) -D hxmc.target=wasm32-wasi)
@@ -269,7 +270,7 @@ bin/npm/native/%/haxe: $(TOOL) $(PORT_SRC) $(HXMC_SRC) $(STD) $(HOST_RT)
 	$(call hxmc,$@,$(PKG_ARGS) -D hxmc.target=$*)
 bin/npm/native/%/haxe.exe: $(TOOL) $(PORT_SRC) $(HXMC_SRC) $(STD) $(HOST_RT)
 	$(call hxmc,$@,$(PKG_ARGS) -D hxmc.target=$*)
-# NPM_VERSION: the version of all seven packages (default package.json's)
+# NPM_VERSION: the version of all nine packages (default package.json's)
 NPM_VERSION ?= $(shell $(NODE) -p "require('./package.json').version")
 npm: $(NPM_GEN) $(NPM_NATIVES)
 	rm -f bin/npm/*.tgz

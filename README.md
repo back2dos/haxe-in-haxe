@@ -22,9 +22,9 @@ the same `--interp` runs, display requests and compilation-server answers.
 | `hxmc/deps/` | no C of ours: `deps.sh` (mbedtls and libuv), `mkrt.sh` (the runtime objects: the C library's members, mbedtls, libuv), `Layouts.hx` (system and libuv struct layouts per target, checked against the C headers), `probe.c` (build-time layout probe), `zig-version` |
 | `hxmc/test/` | hxmc's corpus (`cases/`, golden outputs `expected/`, frozen fuzzer programs `fuzz-1000.zip`), the encoder tests (`encoder/`), the scripts that run them (`Corpus`, `Check`, `Crosshost`, `Selfcheck`, `Tiers`, `EncCheck`), the release smoke test (`smoke.sh`), the benchmarks (`Bench`, with the cases' check programs in `bench/`) |
 | `hxmc/web/` | the website and its playground (the port as a WebAssembly module in the browser) |
-| `hxmc/bootstrap/` | the committed stage0 (`stage0.wasm.br`), node's WASI runner (`wasi.mjs`), the runtime objects by hash (`rt.mjs`), the npm package's launcher (`haxe`, `hxmc-rebuild`, `launcher.mjs`, `build.mjs`) |
+| `hxmc/bootstrap/` | the committed stage0 (`stage0.wasm.br`), node's WASI runner (`wasi.mjs`), the runtime objects by hash (`rt.mjs`), the npm packages: their packer (`pack.mjs`), `@hxmc/cli`'s launcher (`haxe`, `launcher.mjs`, `wasm.mjs`, `postinstall.mjs`), `@hxmc/source`'s `hxmc-rebuild` (`rebuild.mjs`) |
 | `tools/lix/` | lix (the lix client and haxeshim) ported to build with hxmc |
-| `package.json` | the npm package `hxmc` |
+| `package.json` | the npm package `@hxmc/cli` (the others: `hxmc/bootstrap/pack.mjs`) |
 
 ## Using hxmc
 
@@ -55,44 +55,56 @@ hxmc=<out>` writes an executable. A `build.hxml`:
 | `HXMC_CACHE=<dir>` | the cache directory (default `~/.cache/hxmc`, macOS `~/Library/Caches/hxmc`, Windows `%LOCALAPPDATA%\hxmc\cache`; "hxmc" below) |
 | `HXMC_TYPES_CACHE=0` | no cache of the runtime's typed modules (every build types them) |
 
-Packages: `hxmc` holds the compiler's sources (`haxe/src`, `hxmc/`), the std,
-the runtime objects of the six targets and the compiler as a WebAssembly
-module, the same on every platform; its optional dependencies
-`@hxmc/linux-x64`, `@hxmc/linux-arm64`, `@hxmc/darwin-x64`,
-`@hxmc/darwin-arm64`, `@hxmc/win32-x64` and `@hxmc/win32-arm64` each hold
-the native compiler built by CI for one platform (npm installs the one that
-matches, by their `os` and `cpu` fields). `haxe` runs, in this order: a
-compiler `hxmc-rebuild` built (in the cache), the platform package's, or,
-when there is none (an unsupported machine, an install without optional
-dependencies), it builds the native compiler with the WebAssembly one in the
-foreground on first use (about 40 s; `HXMC_PLATFORM_PACKAGE=0` forces this
-path) into a cache shared by every project (`~/.cache/hxmc/<version>/<target>/`;
-macOS `~/Library/Caches`, Windows `%LOCALAPPDATA%`; `HXMC_CACHE` overrides;
-the log is `build.log` there; concurrent first calls wait for the same build).
-Machines without a native target run the WebAssembly compiler
-(`HXMC_NATIVE=0` too).
+Packages, all published at one version:
+
+| Package | Size (tarball, unpacked) | |
+| --- | --- | --- |
+| `@hxmc/cli` | 5.9 MB, 26 MB | what you install: the `haxe` launcher, the std (upstream's and hxmc's), the runtime objects of the six targets, `dist/` for lix; optional dependencies on the six platform packages |
+| `@hxmc/linux-x64`, `@hxmc/linux-arm64`, `@hxmc/darwin-x64`, `@hxmc/darwin-arm64`, `@hxmc/win32-x64`, `@hxmc/win32-arm64` | 6.1-6.7 MB, 21-25 MB each | the native compiler built by CI for one platform (npm installs the one that matches, by their `os` and `cpu` fields) |
+| `@hxmc/wasm` | 3.2 MB, 17 MB | the compiler as a wasm32-wasi module, with its WASI runner for node: the fallback where no native compiler runs |
+| `@hxmc/source` | 1.9 MB, 7.5 MB | the compiler's sources (`haxe/src`, `hxmc/src`, `hxmc/std`) and `hxmc-rebuild`; a peer dependency on `@hxmc/cli` at the same version |
+
+(Sizes of a nightly; CI's job summary lists each build's.) `haxe` runs, in
+this order: the compiler `hxmc-rebuild` built, while `@hxmc/source` is
+installed; the platform package's native compiler; else, when there is none
+or it cannot start here (an unsupported machine, an install without optional
+dependencies, a noexec file system, StackBlitz's WebContainers;
+`HXMC_PLATFORM_PACKAGE=0` and `HXMC_NATIVE=0` force this path), the compiler
+as a WebAssembly module under node: `@hxmc/wasm` when it is installed (`npm i
+-D @hxmc/cli @hxmc/wasm` where no native compiler can run), else downloaded
+on first use. The download is the `@hxmc/wasm` tarball of the same version
+from the npm registry (`npm_config_registry`, which npm and npx set, else the
+`registry` of an `.npmrc`, else registry.npmjs.org), checked against the
+integrity hash pinned in `@hxmc/cli`'s `package.json` when it was packed,
+and unpacked into the cache (`hxmc/npm/<version>/wasm/`); offline, `haxe`
+prints one line saying so and exits non-zero. The cache is the user's
+(`HXMC_CACHE` above; "hxmc").
 
 Without node: on Linux and macOS a postinstall script (best effort, offline,
-it only writes inside the package) copies the native compiler over
-`hxmc/bootstrap/haxe` and `dist/haxe`, so `node_modules/.bin/haxe` (a link to
-it) starts the compiler directly; with install scripts disabled
-(`--ignore-scripts`, pnpm's default) the first call through node does the
-same. On Windows npm's `haxe.cmd` always starts node (about 40-60 ms per call),
-which runs the native compiler; point editors and lix at
-`node_modules/@hxmc/cli/dist/haxe.exe` to bypass it. Nothing but the compiler's own
-output goes to stdout or stderr (editors run `haxe --wait stdio`, whose answers
-are on stderr, and parse `haxe --version`); a notice of a first build goes to
-an interactive terminal only, and a failed build prints one line and exits
-non-zero. Run `npx haxe --version` once after installing when the fallback
-applies; if an editor started before that build finished, restart its
-language server. `HXMC_INSTALL=0` keeps the launcher in place.
+it only writes inside the package) checks that the native compiler runs and
+copies it over `hxmc/bootstrap/haxe` and `dist/haxe`, so
+`node_modules/.bin/haxe` (a link to it) starts the compiler directly; with
+install scripts disabled (`--ignore-scripts`, pnpm's default) the first call
+through node does the same. On Windows npm's `haxe.cmd` always starts node
+(about 40-60 ms per call), which runs the native compiler; point editors and
+lix at `node_modules/@hxmc/cli/dist/haxe.exe` to bypass it. Nothing but the
+compiler's own output goes to stdout or stderr (editors run `haxe --wait
+stdio`, whose answers are on stderr, and parse `haxe --version`); notices
+(the WebAssembly fallback, its download) go to an interactive terminal only,
+and a failure prints one line and exits non-zero. `HXMC_INSTALL=0` keeps the
+launcher in place.
 
-`hxmc-rebuild` builds the native compiler from the package's (possibly
-edited) `haxe/` and `hxmc/` sources with the packaged WebAssembly compiler,
-into the cache, which `haxe` then prefers: edit the compiler in
-`node_modules/@hxmc/cli` and rebuild. (On Windows the WebAssembly path runs on
-node's WASI, whose gaps the launcher fills: `fd_readdir`, drive roots, Windows
-paths in arguments; checked in CI on Windows too.)
+Changing the compiler: `npm i -D @hxmc/source`, edit its sources in
+`node_modules/@hxmc/source`, and run `npx hxmc-rebuild`: the installed native
+compiler builds the edited one (about 20 s, then only the changed modules
+again) into the cache (`hxmc/npm/<version>/rebuild/<target>/`, with hxmc's
+std merged from its `hxmc/std`), and `haxe` runs it from then on, through the
+launcher, while `@hxmc/source` is installed. Without a native compiler that
+runs, `@hxmc/wasm` builds it (installed or downloaded as above; about a
+minute). `npx hxmc-rebuild --reset` returns to the published compiler. (On
+Windows the WebAssembly path runs on node's WASI, whose gaps the launcher
+fills: `fd_readdir`, drive roots, Windows paths in arguments; checked in CI
+on Windows too.)
 
 Editors and lix: vshaxe with `"haxe.executable": "auto"` (the default) runs
 the workspace's `node_modules/.bin/haxe` when there is one (as for the lix
@@ -122,7 +134,7 @@ make hxmc           # bin/hxmc/hxmc, the tool: on first use node runs the stage0
 make port           # bin/port/haxe: the port with every generator (seconds after an edit)
 make release TARGET=macos-arm64   # bin/release/<target>/haxe[.exe], with mbedtls and libuv
 make lix            # bin/lix/lix
-make npm            # bin/npm/*.tgz: hxmc and its six platform packages
+make npm            # bin/npm/*.tgz: the nine npm packages
 make site           # bin/site
 make help           # everything else
 ```
@@ -219,7 +231,7 @@ writes the same bytes as the native tool, for every target, itself included.
 allocations and missed roots show at once.
 
 CI (`.github/workflows/build.yml`): `rt` (the runtime objects), `build` (the
-bootstrap from the stage0, the fixpoint, releases, lix, the npm package, the
+bootstrap from the stage0, the fixpoint, releases, lix, the npm packages, the
 site, the corpus for every target, crosshost, the reference, memory and
 times), `conformance` (the harnesses above and the fuzzer's diff lanes),
 `test` (on each of the six machines: the release binary's smoke test with a
@@ -227,10 +239,13 @@ TLS handshake and libuv, lix, the corpus, the self-compile), `wasm` (the
 corpus and the self-compile under node and wasmtime, both also with legacy
 exception handling under node, the playground in three browser engines with
 both modules and its fallback to the legacy one in a Chromium without
-exnref), `npm` (the packages in a fresh project on Linux, macOS and Windows:
-native at once through the platform package, `--ignore-scripts`,
-lix with `dist/`, the WebAssembly fallback and `hxmc-rebuild`),
-`upstream-tests`, and `publish-npm` (the six platform packages, then `hxmc`,
+exnref), `npm` (the nine packages in fresh projects on each of the six
+machines: native at once through the platform package, `--ignore-scripts`,
+lix with `dist/`, the WebAssembly fallback, downloaded (from the local
+tarball: `HXMC_WASM_TARBALL`, a path or URL in place of the registry's) and
+installed, and `hxmc-rebuild` with `--reset`), `upstream-tests`, and
+`publish-npm` (all nine at one version, skipping those published already: the
+six platform packages, `@hxmc/wasm`, `@hxmc/source`, then `@hxmc/cli`,
 with provenance: on `v*` tags as `latest`, from main as a nightly prerelease
 `<version>-nightly.<date>.<commit>` tagged `next`; never from other
 branches), the nightly release and the website.

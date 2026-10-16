@@ -9,8 +9,8 @@ using StringTools;
 //   self-compile   the port's self-compile to HXB: ours (PORT_BIN) and the reference
 //   native build   the port built by the tool, cold (no cached objects)
 //   stage0         the stage0 module under node building the native tool
-//   npm wasm       the npm package's compiler (hxmc/bootstrap/haxe.wasm) under node
-//                  building the native compiler, as on first use
+//   npm wasm       @hxmc/wasm's compiler (hxmc/bootstrap/haxe.wasm) under node
+//                  building the native compiler, as hxmc-rebuild does without a native one
 //   bin/hxmc/hxmc -cp haxe/test -cp hxmc/test --run Measure [--only a,b,...] [--port <exe>]
 //       [--reference <exe>] [--summary <file>]
 // A table on stdout and in the job summary. Fails when ours regresses beyond

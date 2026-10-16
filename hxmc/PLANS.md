@@ -559,7 +559,11 @@ bootstrap).
 
 Done (2026-10-15, README "Using hxmc"): the package `hxmc` at the
 repository root (`make npm`), with `hxmc-rebuild`; left: checking the
-native build against a published hash. The plan as it was:
+native build against a published hash. Since 2026-10-16 split in nine
+(`hxmc/bootstrap/pack.mjs`): `@hxmc/cli` (launcher, std, runtime objects),
+the six platform packages, `@hxmc/wasm` (the fallback, installed or
+downloaded and checked against a pinned integrity) and `@hxmc/source`
+(`hxmc-rebuild`, with the native compiler). The plan as it was:
 
 One platform-independent npm package containing the compiler (the port
 with hxmc) as a WebAssembly module, a small JavaScript launcher, the std

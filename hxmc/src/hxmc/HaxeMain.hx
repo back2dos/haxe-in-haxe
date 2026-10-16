@@ -7,7 +7,7 @@ import haxe.io.Path;
 // host (-D hxmc.target=<target> names another). In the package:
 //   hxmc/bootstrap/haxe[.exe]        this binary (in place of the launcher; also dist/haxe
 //                                    for lix, with dist/std), or
-//                                    haxe.wasm, its WebAssembly build, run by it
+//                                    @hxmc/wasm's haxe.wasm, its WebAssembly build, run by it
 //   haxe/upstream/std                the std (HAXE_STD_PATH unless set)
 //   hxmc/bootstrap/hxmc-std          hxmc's std (hxmc/std merged by MkStd.hx),
 //                                    added last when the arguments (or the hxml

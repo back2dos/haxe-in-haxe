@@ -5,21 +5,18 @@
   "license": "GPL-2.0-or-later",
   "type": "module",
   "bin": {
-    "haxe": "hxmc/bootstrap/haxe",
-    "hxmc-rebuild": "hxmc/bootstrap/hxmc-rebuild"
+    "haxe": "hxmc/bootstrap/haxe"
   },
   "scripts": {
     "postinstall": "node hxmc/bootstrap/postinstall.mjs"
   },
   "files": [
-    "haxe/src/",
     "haxe/upstream/std/",
-    "hxmc/src/",
-    "hxmc/std/",
-    "hxmc/bootstrap/*.mjs",
     "hxmc/bootstrap/haxe",
-    "hxmc/bootstrap/hxmc-rebuild",
-    "hxmc/bootstrap/haxe.wasm",
+    "hxmc/bootstrap/launcher.mjs",
+    "hxmc/bootstrap/platforms.mjs",
+    "hxmc/bootstrap/postinstall.mjs",
+    "hxmc/bootstrap/wasm.mjs",
     "hxmc/bootstrap/hxmc-std/",
     "hxmc/bootstrap/rt/",
     "dist/haxe",
