@@ -994,7 +994,7 @@ class Hlcode {
 
 	// port: OCaml structural equality on ttype (`=`, `compare = 0`, PMap/Hashtbl keys).
 	// Pairs already being compared count as equal, where OCaml would not terminate.
-	public static function tEq(a:Ttype, b:Ttype):Bool return new TtypeEq().eq(a, b);
+	public static function tEq(a:Ttype, b:Ttype):Bool return a == b || new TtypeEq().eq(a, b);
 
 	// port: a hash consistent with tEq, for the port's TtypeMap (never reaches output).
 	public static function tHash(t:Ttype):Int return hashRec(t, 4);
@@ -1023,6 +1023,12 @@ class Hlcode {
 			case HEnum(e):
 				mix(strHash(e.ename));
 				mix(e.efields.length);
+				// port: the tuples of Genhl.tupleType (closure contexts) are all
+				// named "": their argument types tell them apart (set at creation)
+				if (e.ename == "") for (f in e.efields) {
+					mix(f.args.length);
+					for (a in f.args) mix(hashRec(a, depth - 1));
+				}
 			case _:
 		}
 		return h;
@@ -1284,7 +1290,12 @@ private class TtypeEq {
 		stack.push(p1);
 		stack.push(p2);
 		var r = if (p1.psuper == null) p2.psuper == null else p2.psuper != null && protoEq(p1.psuper, p2.psuper);
-		if (r && p1.pvirtuals.join(",") != p2.pvirtuals.join(",")) r = false;
+		if (r && p1.pvirtuals.length != p2.pvirtuals.length) r = false;
+		if (r) for (i in 0...p1.pvirtuals.length)
+			if (p1.pvirtuals[i] != p2.pvirtuals[i]) {
+				r = false;
+				break;
+			}
 		if (r && p1.pproto.length != p2.pproto.length) r = false;
 		if (r) for (i in 0...p1.pproto.length) {
 			var a = p1.pproto[i], b = p2.pproto[i];
