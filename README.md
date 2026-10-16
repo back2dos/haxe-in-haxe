@@ -105,6 +105,7 @@ commit (`make reference`).
 | [docs/porting.md](docs/porting.md) | the rules for every change of the port |
 | [docs/hxmc.md](docs/hxmc.md) | hxmc's pipeline, runtime, targets |
 | [hxmc/LOWLEVEL.md](hxmc/LOWLEVEL.md) | C interop and low-level Haxe |
+| [hxmc/UI.md](hxmc/UI.md) | native controls or a drawn UI: the survey and the design of `@hxmc/ui` |
 | [hxmc/PLANS.md](hxmc/PLANS.md) | what comes next |
 
 ## License
