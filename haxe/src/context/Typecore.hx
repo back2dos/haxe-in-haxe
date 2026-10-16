@@ -615,12 +615,20 @@ class Typecore {
 
 	public static function monomorphTransaction(ctx:Typer):Void->Void {
 		var current = ctx.e.monomorphs;
-		var known:Array<{mono:TMono, constraints:Array<TMonoConstraint>}> = [];
-		for (entry in current) if (entry.mono.tmType == null) known.unshift({mono: entry.mono, constraints: entry.mono.tmDownConstraints});
+		// port: `known` is built in the order of `current` and walked backwards
+		// (upstream's fold builds it reversed; unshift would make this quadratic)
+		var knownMonos:Array<TMono> = [];
+		var knownConstraints:Array<Array<TMonoConstraint>> = [];
+		for (entry in current) if (entry.mono.tmType == null) {
+			knownMonos.push(entry.mono);
+			knownConstraints.push(entry.mono.tmDownConstraints);
+		}
 		return function() {
-			for (entry in known) {
-				if (entry.mono.tmType != null) entry.mono.tmType = null;
-				if (entry.constraints != entry.mono.tmDownConstraints) entry.mono.tmDownConstraints = entry.constraints;
+			var i = knownMonos.length;
+			while (i-- > 0) {
+				var mono = knownMonos[i], constraints = knownConstraints[i];
+				if (mono.tmType != null) mono.tmType = null;
+				if (constraints != mono.tmDownConstraints) mono.tmDownConstraints = constraints;
 			}
 			ctx.e.monomorphs = current;
 		};
