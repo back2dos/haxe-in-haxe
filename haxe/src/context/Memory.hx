@@ -13,8 +13,8 @@ import hxmc.NativeGc;
 
 // port: memory inspection measures OCaml heap objects (Objsize, Obj.repr). The
 // structure is translated; the sizes are what the host runtime can measure
-// (Objsize below): the hxmc build walks its own heap (hxmc/c/rt.c
-// `hxmc_NativeGc_objsize`: the bytes of the reachable heap objects, headers
+// (Objsize below): the hxmc build walks its own heap (`hxmc.NativeGc.objsize`,
+// hxmc/std/hxmc/rt/Gc.hx: the bytes of the reachable heap objects, headers
 // included), other hosts report 0 and never "reach" an object.
 enum MemoryRequest {
 	MCache;

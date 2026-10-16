@@ -13,8 +13,11 @@ import hxmc.unsafe.*;
 // itself stays the prebuilt uv.o, linked when a program uses it.
 //
 // Loops, handles, requests and directories are integer ids into a table of
-// C objects. libuv invokes its callbacks from uv_run only: uv_run is a C call
-// in a safe region (other threads collect while it waits), and its callbacks
+// C objects. Functions returning Int give a negative libuv error code on
+// failure unless noted; functions returning an object give null on failure
+// with the code in `lastError()`. 64-bit results are read with i64Hi/i64Lo.
+// libuv invokes its callbacks from uv_run only: uv_run is a C call in a safe
+// region (other threads collect while it waits), and its callbacks
 // (@:hxmc.callback, through the compiler's wrapper that leaves the safe
 // region) report events to the port's dispatcher, kept per thread for the
 // duration of loopRun: dispatch(id, event, int, value). Buffers stay in the
@@ -26,7 +29,6 @@ import hxmc.unsafe.*;
 // The C layouts and constants of libuv and of the C library differ per
 // target (error codes, flags, struct fields): UvLayouts, generated from the
 // headers by hxmc/c/Layouts.hx.
-@:hxmc.native @:keep
 class Uv {
 	// ---- object table (id 0 is unused): chunks that never move, so lookups
 	// need no lock (adding one does)
@@ -51,7 +53,7 @@ class Uv {
 
 	@:hxmc.noGc static function lock(p:Ptr) {
 		while (Atomic.cas32(p, 0, 1) != 0)
-			Leaf.hxmc_NativeThread_current(); // (spins: held for a few instructions)
+			Threads.current(); // (spins: held for a few instructions)
 	}
 
 	@:hxmc.noGc static function unlock(p:Ptr)
@@ -106,16 +108,16 @@ class Uv {
 		return table;
 	}
 
-	@:hxmc.host("hxmc_NativeUv_available") static function available():Bool
+	public static function available():Bool
 		return true;
 
-	@:hxmc.host("hxmc_NativeUv_lastError") static function lastError():Int
+	public static function lastError():Int
 		return lastErr;
 
-	@:hxmc.host("hxmc_NativeUv_i64Hi") static function i64Hi():Int
+	public static function i64Hi():Int
 		return (i64Out >> 32).toInt();
 
-	@:hxmc.host("hxmc_NativeUv_i64Lo") static function i64Lo():Int
+	public static function i64Lo():Int
 		return i64Out.toInt();
 
 	// ---- C data <-> Haxe values
@@ -156,33 +158,33 @@ class Uv {
 	// ---- errors: luv's Error.t, in evalLuv.ml's encode_uv_error order
 
 	// Error.from_c: unknown codes are `UNKNOWN (71)
-	@:hxmc.host("hxmc_NativeUv_errIndex") static function errIndex(code:Int):Int {
+	public static function errIndex(code:Int):Int {
 		for (i in 0...82)
 			if (i != 24 && L.uvError(i) == code) return i;
 		return 71;
 	}
 
-	@:hxmc.host("hxmc_NativeUv_errCode") static function errCode(index:Int):Int
+	public static function errCode(index:Int):Int
 		return index >= 0 && index < 82 ? L.uvError(index) : L.UV_UNKNOWN;
 
 	// Error.strerror / err_name: the _r variants into a 256-byte buffer
-	@:hxmc.host("hxmc_NativeUv_strerror") static function strerror(code:Int):String {
+	public static function strerror(code:Int):String {
 		var buf = Mem.stack(256);
 		U.uv_strerror_r(code, buf, 256);
 		return strOfC(buf);
 	}
 
-	@:hxmc.host("hxmc_NativeUv_errName") static function errName(code:Int):String {
+	public static function errName(code:Int):String {
 		var buf = Mem.stack(256);
 		U.uv_err_name_r(code, buf, 256);
 		return strOfC(buf);
 	}
 
-	@:hxmc.host("hxmc_NativeUv_translateSysError") static function translateSysError(e:Int):Int
+	public static function translateSysError(e:Int):Int
 		return U.uv_translate_sys_error(e);
 
 	// constants: group, index -> C value (luv's to_c tables)
-	@:hxmc.host("hxmc_NativeUv_constant") static function constant(group:Int, index:Int):Int {
+	public static function constant(group:Int, index:Int):Int {
 		return switch group {
 			case 10: // dirent types: UNKNOWN FILE DIR LINK FIFO SOCKET CHAR BLOCK (C value -> index)
 				var r = 0;
@@ -197,10 +199,10 @@ class Uv {
 		}
 	}
 
-	@:hxmc.host("hxmc_NativeUv_versionString") static function versionString():String
+	public static function versionString():String
 		return strOfC(U.uv_version_string());
 
-	@:hxmc.host("hxmc_NativeUv_versionSuffix") static function versionSuffix():String
+	public static function versionSuffix():String
 		return L.UV_VERSION_SUFFIX;
 
 	// ---- dispatching events to the port (during loopRun)
@@ -229,7 +231,7 @@ class Uv {
 	static inline function loop(id:Int):Ptr
 		return Mem.getPtr(objGet(id), 0);
 
-	@:hxmc.host("hxmc_NativeUv_loopDefault") static function loopDefault():Int {
+	public static function loopDefault():Int {
 		if (loopLock.isNull()) {
 			var l = LibC.malloc(8);
 			Mem.setI64(l, 0, 0);
@@ -246,7 +248,7 @@ class Uv {
 		return id;
 	}
 
-	@:hxmc.host("hxmc_NativeUv_loopInit") static function loopInit():Int {
+	public static function loopInit():Int {
 		var lp = LibC.malloc(U.uv_loop_size());
 		var r = U.uv_loop_init(lp);
 		if (r < 0) {
@@ -260,7 +262,7 @@ class Uv {
 
 	// uv_run in a safe region: other threads run and collect while it waits;
 	// its callbacks leave the safe region for their Haxe code
-	@:hxmc.host("hxmc_NativeUv_loopRun") static function loopRun(id:Int, mode:Int, dispatcher:(Int, Int, Int, Dynamic) -> Void):Bool {
+	public static function loopRun(id:Int, mode:Int, dispatcher:(Int, Int, Int, Dynamic) -> Void):Bool {
 		var lp = loop(id);
 		var saved = NativeThread.tlsGet(dispatcherTls);
 		NativeThread.tlsSet(dispatcherTls, dispatcher);
@@ -269,25 +271,27 @@ class Uv {
 		return r != 0;
 	}
 
-	@:hxmc.host("hxmc_NativeUv_loopStop") static function loopStop(id:Int):Void
+	public static function loopStop(id:Int):Void
 		U.uv_stop(loop(id));
 
-	@:hxmc.host("hxmc_NativeUv_loopClose") static function loopClose(id:Int):Int
+	public static function loopClose(id:Int):Int
 		return U.uv_loop_close(loop(id));
 
-	@:hxmc.host("hxmc_NativeUv_loopAlive") static function loopAlive(id:Int):Bool
+	public static function loopAlive(id:Int):Bool
 		return U.uv_loop_alive(loop(id)) != 0;
 
-	@:hxmc.host("hxmc_NativeUv_loopNow") static function loopNow(id:Int):Void
+	// i64
+	public static function loopNow(id:Int):Void
 		i64Out = U.uv_now(loop(id));
 
-	@:hxmc.host("hxmc_NativeUv_loopUpdateTime") static function loopUpdateTime(id:Int):Void
+	public static function loopUpdateTime(id:Int):Void
 		U.uv_update_time(loop(id));
 
-	@:hxmc.host("hxmc_NativeUv_libraryShutdown") static function libraryShutdown():Void
+	public static function libraryShutdown():Void
 		U.uv_library_shutdown();
 
-	@:hxmc.host("hxmc_NativeUv_metricsIdleTime") static function metricsIdleTime(id:Int):Void
+	// i64
+	public static function metricsIdleTime(id:Int):Void
 		i64Out = U.uv_metrics_idle_time(loop(id));
 
 	// ---- handles: hx_h, the id, the kind, the memory of the last allocation
@@ -358,7 +362,7 @@ class Uv {
 
 	// init: returns the handle id, or a negative error. arg: a domain (tcp, udp),
 	// ipc (pipe), fd (tty), udp flags
-	@:hxmc.host("hxmc_NativeUv_handleInit") static function handleInit(kind:Int, loopId:Int, arg:Int, arg2:Int):Int {
+	public static function handleInit(kind:Int, loopId:Int, arg:Int, arg2:Int):Int {
 		var lp = loop(loopId);
 		var h = newHandle(kind);
 		var u = h.add(H_UV);
@@ -395,30 +399,32 @@ class Uv {
 		freeHandle(hx(uh));
 
 	// Handle.close: nothing when already closing
-	@:hxmc.host("hxmc_NativeUv_handleClose") static function handleClose(id:Int):Bool {
+	// false: already closing
+	public static function handleClose(id:Int):Bool {
 		var u = uvh(id);
 		if (U.uv_is_closing(u) != 0) return false;
 		U.uv_close(u, Callback.addr(closeCb));
 		return true;
 	}
 
-	@:hxmc.host("hxmc_NativeUv_handleIsActive") static function handleIsActive(id:Int):Bool
+	public static function handleIsActive(id:Int):Bool
 		return U.uv_is_active(uvh(id)) != 0;
 
-	@:hxmc.host("hxmc_NativeUv_handleIsClosing") static function handleIsClosing(id:Int):Bool
+	public static function handleIsClosing(id:Int):Bool
 		return U.uv_is_closing(uvh(id)) != 0;
 
-	@:hxmc.host("hxmc_NativeUv_handleRef") static function handleRef(id:Int):Void
+	public static function handleRef(id:Int):Void
 		U.uv_ref(uvh(id));
 
-	@:hxmc.host("hxmc_NativeUv_handleUnref") static function handleUnref(id:Int):Void
+	public static function handleUnref(id:Int):Void
 		U.uv_unref(uvh(id));
 
-	@:hxmc.host("hxmc_NativeUv_handleHasRef") static function handleHasRef(id:Int):Bool
+	public static function handleHasRef(id:Int):Bool
 		return U.uv_has_ref(uvh(id)) != 0;
 
 	// send/recv buffer size: size 0 reads it
-	@:hxmc.host("hxmc_NativeUv_bufferSize") static function bufferSize(id:Int, send:Bool, size:Int):Int {
+	// size 0: get
+	public static function bufferSize(id:Int, send:Bool, size:Int):Int {
 		var v:Ptr<Int32> = Mem.stack(16);
 		v.value = size;
 		var r = send ? U.uv_send_buffer_size(uvh(id), v) : U.uv_recv_buffer_size(uvh(id), v);
@@ -436,7 +442,7 @@ class Uv {
 	@:hxmc.callback static function signalCb(w:Ptr, signum:Int):Void
 		dispatch(hid(w), EV_CB, signum, null);
 
-	@:hxmc.host("hxmc_NativeUv_watcherStart") static function watcherStart(id:Int):Int {
+	public static function watcherStart(id:Int):Int {
 		var h = H(id);
 		var u = h.add(H_UV);
 		return switch Mem.getI32(h, H_KIND) {
@@ -446,7 +452,7 @@ class Uv {
 		}
 	}
 
-	@:hxmc.host("hxmc_NativeUv_watcherStop") static function watcherStop(id:Int):Int {
+	public static function watcherStop(id:Int):Int {
 		var h = H(id);
 		var u = h.add(H_UV);
 		return switch Mem.getI32(h, H_KIND) {
@@ -459,36 +465,36 @@ class Uv {
 	static inline function u32(v:Int):I64
 		return (v : I64) & 0xFFFFFFFF;
 
-	@:hxmc.host("hxmc_NativeUv_timerStart") static function timerStart(id:Int, timeout:Int, repeat:Int):Int
+	public static function timerStart(id:Int, timeout:Int, repeat:Int):Int
 		return U.uv_timer_start(uvh(id), Callback.addr(watcherCb), u32(timeout), u32(repeat));
 
-	@:hxmc.host("hxmc_NativeUv_timerStop") static function timerStop(id:Int):Int
+	public static function timerStop(id:Int):Int
 		return U.uv_timer_stop(uvh(id));
 
-	@:hxmc.host("hxmc_NativeUv_timerAgain") static function timerAgain(id:Int):Int
+	public static function timerAgain(id:Int):Int
 		return U.uv_timer_again(uvh(id));
 
-	@:hxmc.host("hxmc_NativeUv_timerSetRepeat") static function timerSetRepeat(id:Int, repeat:Int):Void
+	public static function timerSetRepeat(id:Int, repeat:Int):Void
 		U.uv_timer_set_repeat(uvh(id), u32(repeat));
 
-	@:hxmc.host("hxmc_NativeUv_timerGetRepeat") static function timerGetRepeat(id:Int):Int
+	public static function timerGetRepeat(id:Int):Int
 		return U.uv_timer_get_repeat(uvh(id)).toInt();
 
-	@:hxmc.host("hxmc_NativeUv_timerGetDueIn") static function timerGetDueIn(id:Int):Int
+	public static function timerGetDueIn(id:Int):Int
 		return U.uv_timer_get_due_in(uvh(id)).toInt();
 
-	@:hxmc.host("hxmc_NativeUv_asyncSend") static function asyncSend(id:Int):Int
+	public static function asyncSend(id:Int):Int
 		return U.uv_async_send(uvh(id));
 
-	@:hxmc.host("hxmc_NativeUv_signalStart") static function signalStart(id:Int, signum:Int, oneshot:Bool):Int {
+	public static function signalStart(id:Int, signum:Int, oneshot:Bool):Int {
 		var u = uvh(id);
 		return oneshot ? U.uv_signal_start_oneshot(u, Callback.addr(signalCb), signum) : U.uv_signal_start(u, Callback.addr(signalCb), signum);
 	}
 
-	@:hxmc.host("hxmc_NativeUv_signalStop") static function signalStop(id:Int):Int
+	public static function signalStop(id:Int):Int
 		return U.uv_signal_stop(uvh(id));
 
-	@:hxmc.host("hxmc_NativeUv_signalSignum") static function signalSignum(id:Int):Int
+	public static function signalSignum(id:Int):Int
 		return Mem.getI32(uvh(id), L.SIGNAL_SIGNUM);
 
 	// ---- requests: hx_r, the id, copied data (writes) or data to copy out
@@ -527,7 +533,7 @@ class Uv {
 	@:hxmc.noGc static inline function rid(req:Ptr):Int
 		return Mem.getI32(req, -R_UV + R_ID);
 
-	@:hxmc.host("hxmc_NativeUv_reqNew") static function reqNew():Int {
+	public static function reqNew():Int {
 		var n = reqBytes();
 		var r = LibC.malloc((n : I64));
 		LibC.memset(r, 0, (n : I64));
@@ -548,7 +554,7 @@ class Uv {
 		Mem.setPtr(r, R_AI, Ptr.nil());
 	}
 
-	@:hxmc.host("hxmc_NativeUv_reqFree") static function reqFree(id:Int):Void {
+	public static function reqFree(id:Int):Void {
 		var r = R(id);
 		reqClear(r);
 		objClear(id);
@@ -556,7 +562,7 @@ class Uv {
 		LibC.free(r);
 	}
 
-	@:hxmc.host("hxmc_NativeUv_reqCancel") static function reqCancel(id:Int):Int
+	public static function reqCancel(id:Int):Int
 		return U.uv_cancel(uvr(id));
 
 	@:hxmc.callback static function statusCb(req:Ptr, status:Int):Void
@@ -595,7 +601,7 @@ class Uv {
 	}
 
 	// copies len bytes at offset src of the request's scratch into b[pos]
-	@:hxmc.host("hxmc_NativeUv_reqCopyOut") static function reqCopyOut(id:Int, b:Bytes, pos:Int, src:Int, len:Int):Void {
+	public static function reqCopyOut(id:Int, b:Bytes, pos:Int, src:Int, len:Int):Void {
 		var r = R(id);
 		if (len > 0 && !Mem.ult(Mem.getI64(r, R_SCRATCH_LEN), (src : I64) + len))
 			LibC.memcpy(data(b).add(pos), Mem.getPtr(r, R_SCRATCH).add(src), (len : I64));
@@ -603,10 +609,10 @@ class Uv {
 
 	// ---- socket addresses (Bytes of sizeof(struct sockaddr_storage))
 
-	@:hxmc.host("hxmc_NativeUv_sockaddrSize") static function sockaddrSize():Int
+	public static function sockaddrSize():Int
 		return L.SOCKADDR_STORAGE_SIZE;
 
-	@:hxmc.host("hxmc_NativeUv_sockaddrIp") static function sockaddrIp(host:String, port:Int, v6:Bool, out:Bytes):Int {
+	public static function sockaddrIp(host:String, port:Int, v6:Bool, out:Bytes):Int {
 		return Arena.scopedValue(a -> {
 			var h = a.cstring(host);
 			out.fill(0, L.SOCKADDR_STORAGE_SIZE, 0);
@@ -625,7 +631,8 @@ class Uv {
 		return (Mem.getU8(s, off) << 8) | Mem.getU8(s, off + 1);
 
 	// Sockaddr.port: -1 for None
-	@:hxmc.host("hxmc_NativeUv_sockaddrPort") static function sockaddrPort(sa:Bytes):Int {
+	// -1: none
+	public static function sockaddrPort(sa:Bytes):Int {
 		var s = data(sa);
 		var f = family(s);
 		if (f == L.AF_INET) return port16(s, L.SIN_PORT);
@@ -634,7 +641,7 @@ class Uv {
 	}
 
 	// Sockaddr.to_string: null for None
-	@:hxmc.host("hxmc_NativeUv_sockaddrToString") static function sockaddrToString(sa:Bytes):Null<String> {
+	public static function sockaddrToString(sa:Bytes):Null<String> {
 		var buf = Mem.stack(64);
 		LibC.memset(buf, 0, 64);
 		var tmp = Mem.stack(128);
@@ -646,13 +653,13 @@ class Uv {
 
 	// ---- TCP
 
-	@:hxmc.host("hxmc_NativeUv_tcpNoDelay") static function tcpNoDelay(id:Int, b:Bool):Int
+	public static function tcpNoDelay(id:Int, b:Bool):Int
 		return U.uv_tcp_nodelay(uvh(id), b ? 1 : 0);
 
-	@:hxmc.host("hxmc_NativeUv_tcpKeepAlive") static function tcpKeepAlive(id:Int, enable:Bool, delay:Int):Int
+	public static function tcpKeepAlive(id:Int, enable:Bool, delay:Int):Int
 		return U.uv_tcp_keepalive(uvh(id), enable ? 1 : 0, delay);
 
-	@:hxmc.host("hxmc_NativeUv_tcpSimultaneousAccepts") static function tcpSimultaneousAccepts(id:Int, b:Bool):Int
+	public static function tcpSimultaneousAccepts(id:Int, b:Bool):Int
 		return U.uv_tcp_simultaneous_accepts(uvh(id), b ? 1 : 0);
 
 	// (an address copied out of the heap for the call)
@@ -663,11 +670,11 @@ class Uv {
 		return p;
 	}
 
-	@:hxmc.host("hxmc_NativeUv_tcpBind") static function tcpBind(id:Int, sa:Bytes, ipv6only:Bool):Int
+	public static function tcpBind(id:Int, sa:Bytes, ipv6only:Bool):Int
 		return Arena.scopedValue(a -> U.uv_tcp_bind(uvh(id), sockaddrC(a, sa), ipv6only ? L.UV_TCP_IPV6ONLY : 0));
 
 	// getsockname/getpeername (tcp, udp) into out
-	@:hxmc.host("hxmc_NativeUv_sockName") static function sockName(id:Int, peer:Bool, out:Bytes):Int {
+	public static function sockName(id:Int, peer:Bool, out:Bytes):Int {
 		var h = H(id);
 		var u = h.add(H_UV);
 		var len:Ptr<Int32> = Mem.stack(16);
@@ -680,7 +687,7 @@ class Uv {
 		return r;
 	}
 
-	@:hxmc.host("hxmc_NativeUv_tcpConnect") static function tcpConnect(id:Int, sa:Bytes, req:Int):Int
+	public static function tcpConnect(id:Int, sa:Bytes, req:Int):Int
 		return Arena.scopedValue(a -> U.uv_tcp_connect(uvr(req), uvh(id), sockaddrC(a, sa), Callback.addr(statusCb)));
 
 	// TCP.close_reset: the request id stands for the callback (EV_REQ with status 0)
@@ -692,7 +699,7 @@ class Uv {
 		dispatch(req, EV_REQ, 0, null);
 	}
 
-	@:hxmc.host("hxmc_NativeUv_tcpCloseReset") static function tcpCloseReset(id:Int, req:Int):Int {
+	public static function tcpCloseReset(id:Int, req:Int):Int {
 		var h = H(id);
 		LibC.free(Mem.getPtr(h, H_RBUF));
 		Mem.setI64(h, H_RBUF, req);
@@ -702,7 +709,8 @@ class Uv {
 
 	// ---- streams
 
-	@:hxmc.host("hxmc_NativeUv_allocSize") static function allocSize(n:Int):Void
+	// answer to an allocation event
+	public static function allocSize(n:Int):Void
 		allocSizeV = n;
 
 	@:hxmc.callback static function allocCb(uh:Ptr, suggested:I64, buf:Ptr):Void {
@@ -728,22 +736,22 @@ class Uv {
 	@:hxmc.callback static function connectionCb(s:Ptr, status:Int):Void
 		dispatch(hid(s), EV_CONNECTION, status, null);
 
-	@:hxmc.host("hxmc_NativeUv_streamShutdown") static function streamShutdown(id:Int, req:Int):Int
+	public static function streamShutdown(id:Int, req:Int):Int
 		return U.uv_shutdown(uvr(req), uvh(id), Callback.addr(statusCb));
 
-	@:hxmc.host("hxmc_NativeUv_streamListen") static function streamListen(id:Int, backlog:Int):Int
+	public static function streamListen(id:Int, backlog:Int):Int
 		return U.uv_listen(uvh(id), backlog, Callback.addr(connectionCb));
 
-	@:hxmc.host("hxmc_NativeUv_streamAccept") static function streamAccept(server:Int, client:Int):Int
+	public static function streamAccept(server:Int, client:Int):Int
 		return U.uv_accept(uvh(server), uvh(client));
 
-	@:hxmc.host("hxmc_NativeUv_readStart") static function readStart(id:Int):Int
+	public static function readStart(id:Int):Int
 		return U.uv_read_start(uvh(id), Callback.addr(allocCb), Callback.addr(readCb));
 
-	@:hxmc.host("hxmc_NativeUv_readStop") static function readStop(id:Int):Int
+	public static function readStop(id:Int):Int
 		return U.uv_read_stop(uvh(id));
 
-	@:hxmc.host("hxmc_NativeUv_streamWrite") static function streamWrite(id:Int, req:Int, d:Bytes, sizes:Array<Int>, sendHandle:Int):Int {
+	public static function streamWrite(id:Int, req:Int, d:Bytes, sizes:Array<Int>, sendHandle:Int):Int {
 		var u = uvh(id);
 		var r = R(req);
 		var n = reqBufs(r, d, sizes);
@@ -751,7 +759,7 @@ class Uv {
 		return U.uv_write2(r.add(R_UV), u, Mem.getPtr(r, R_BUFS), n, send, Callback.addr(statusCb));
 	}
 
-	@:hxmc.host("hxmc_NativeUv_streamTryWrite") static function streamTryWrite(id:Int, d:Bytes, sizes:Array<Int>):Int {
+	public static function streamTryWrite(id:Int, d:Bytes, sizes:Array<Int>):Int {
 		var req = reqNew();
 		var r = R(req);
 		var n = reqBufs(r, d, sizes);
@@ -760,32 +768,33 @@ class Uv {
 		return res;
 	}
 
-	@:hxmc.host("hxmc_NativeUv_streamWriteQueueSize") static function streamWriteQueueSize(id:Int):Int
+	public static function streamWriteQueueSize(id:Int):Int
 		return U.uv_stream_get_write_queue_size(uvh(id)).toInt();
 
-	@:hxmc.host("hxmc_NativeUv_streamIsReadable") static function streamIsReadable(id:Int):Bool
+	public static function streamIsReadable(id:Int):Bool
 		return U.uv_is_readable(uvh(id)) != 0;
 
-	@:hxmc.host("hxmc_NativeUv_streamIsWritable") static function streamIsWritable(id:Int):Bool
+	public static function streamIsWritable(id:Int):Bool
 		return U.uv_is_writable(uvh(id)) != 0;
 
-	@:hxmc.host("hxmc_NativeUv_streamSetBlocking") static function streamSetBlocking(id:Int, b:Bool):Int
+	public static function streamSetBlocking(id:Int, b:Bool):Int
 		return U.uv_stream_set_blocking(uvh(id), b ? 1 : 0);
 
 	// ---- pipes, ttys
 
-	@:hxmc.host("hxmc_NativeUv_pipeBind") static function pipeBind(id:Int, name:Bytes):Int
+	public static function pipeBind(id:Int, name:Bytes):Int
 		return Arena.scopedValue(a -> U.uv_pipe_bind(uvh(id), bytesZ(a, name)));
 
-	@:hxmc.host("hxmc_NativeUv_pipeConnect") static function pipeConnect(id:Int, name:Bytes, req:Int):Void
+	public static function pipeConnect(id:Int, name:Bytes, req:Int):Void
 		Arena.scoped(a -> U.uv_pipe_connect(uvr(req), uvh(id), bytesZ(a, name), Callback.addr(statusCb)));
 
 	// not in luv's Eval API: a pipe over an open descriptor (e.g. the process's stdin)
-	@:hxmc.host("hxmc_NativeUv_pipeOpen") static function pipeOpen(id:Int, fd:Int):Int
+	// uv_pipe_open (not in luv's Eval API)
+	public static function pipeOpen(id:Int, fd:Int):Int
 		return U.uv_pipe_open(uvh(id), fd);
 
 	// getsockname/getpeername: Bytes, null on failure (lastError)
-	@:hxmc.host("hxmc_NativeUv_pipeName") static function pipeName(id:Int, peer:Bool):Null<Bytes> {
+	public static function pipeName(id:Int, peer:Bool):Null<Bytes> {
 		return Arena.scopedValue(a -> {
 			var buf = a.alloc(4096, 1);
 			var len:Ptr<UInt64> = a.alloc(8);
@@ -799,28 +808,28 @@ class Uv {
 		});
 	}
 
-	@:hxmc.host("hxmc_NativeUv_pipePendingInstances") static function pipePendingInstances(id:Int, n:Int):Void
+	public static function pipePendingInstances(id:Int, n:Int):Void
 		U.uv_pipe_pending_instances(uvh(id), n);
 
 	// 0 none, 1 tcp, 2 pipe
-	@:hxmc.host("hxmc_NativeUv_pipePendingType") static function pipePendingType(id:Int):Int {
+	public static function pipePendingType(id:Int):Int {
 		var u = uvh(id);
 		if (U.uv_pipe_pending_count(u) <= 0) return 0;
 		var t = U.uv_pipe_pending_type(u);
 		return t == L.UV_TCP ? 1 : t == L.UV_NAMED_PIPE ? 2 : 0;
 	}
 
-	@:hxmc.host("hxmc_NativeUv_pipeChmod") static function pipeChmod(id:Int, mode:Int):Int
+	public static function pipeChmod(id:Int, mode:Int):Int
 		return U.uv_pipe_chmod(uvh(id), mode == 0 ? L.UV_READABLE : mode == 1 ? L.UV_WRITABLE : (L.UV_READABLE | L.UV_WRITABLE));
 
-	@:hxmc.host("hxmc_NativeUv_ttySetMode") static function ttySetMode(id:Int, mode:Int):Int
+	public static function ttySetMode(id:Int, mode:Int):Int
 		return U.uv_tty_set_mode(uvh(id), mode == 0 ? L.UV_TTY_MODE_NORMAL : mode == 1 ? L.UV_TTY_MODE_RAW : L.UV_TTY_MODE_IO);
 
-	@:hxmc.host("hxmc_NativeUv_ttyResetMode") static function ttyResetMode():Int
+	public static function ttyResetMode():Int
 		return U.uv_tty_reset_mode();
 
 	// [width, height], null on failure
-	@:hxmc.host("hxmc_NativeUv_ttyGetWinSize") static function ttyGetWinSize(id:Int):Null<Array<Int>> {
+	public static function ttyGetWinSize(id:Int):Null<Array<Int>> {
 		var wh:Ptr<Int32> = Mem.stack(16);
 		var r = U.uv_tty_get_winsize(uvh(id), wh, wh.offset(1));
 		if (r < 0) {
@@ -830,10 +839,10 @@ class Uv {
 		return [wh[0], wh[1]];
 	}
 
-	@:hxmc.host("hxmc_NativeUv_ttySetVTermState") static function ttySetVTermState(s:Int):Void
+	public static function ttySetVTermState(s:Int):Void
 		U.uv_tty_set_vterm_state(s == 0 ? L.UV_TTY_SUPPORTED : L.UV_TTY_UNSUPPORTED);
 
-	@:hxmc.host("hxmc_NativeUv_ttyGetVTermState") static function ttyGetVTermState():Int {
+	public static function ttyGetVTermState():Int {
 		var s:Ptr<Int32> = Mem.stack(16);
 		var r = U.uv_tty_get_vterm_state(s);
 		return r < 0 ? r : (s.value == L.UV_TTY_SUPPORTED ? 0 : 1);
@@ -841,13 +850,13 @@ class Uv {
 
 	// ---- UDP
 
-	@:hxmc.host("hxmc_NativeUv_udpBind") static function udpBind(id:Int, sa:Bytes, flags:Int):Int
+	public static function udpBind(id:Int, sa:Bytes, flags:Int):Int
 		return Arena.scopedValue(a -> U.uv_udp_bind(uvh(id), sockaddrC(a, sa), flags));
 
-	@:hxmc.host("hxmc_NativeUv_udpConnect") static function udpConnect(id:Int, sa:Null<Bytes>):Int
+	public static function udpConnect(id:Int, sa:Null<Bytes>):Int
 		return Arena.scopedValue(a -> U.uv_udp_connect(uvh(id), sockaddrC(a, sa)));
 
-	@:hxmc.host("hxmc_NativeUv_udpSetMembership") static function udpSetMembership(id:Int, group:String, iface:String, source:Null<String>, join:Bool):Int {
+	public static function udpSetMembership(id:Int, group:String, iface:String, source:Null<String>, join:Bool):Int {
 		return Arena.scopedValue(a -> {
 			var m = join ? L.UV_JOIN_GROUP : L.UV_LEAVE_GROUP;
 			source != null ? U.uv_udp_set_source_membership(uvh(id), a.cstring(group), a.cstring(iface), a.cstring(source), m) : U.uv_udp_set_membership(uvh(id),
@@ -856,7 +865,7 @@ class Uv {
 	}
 
 	// 0 multicast loop, 1 multicast ttl, 2 broadcast, 3 ttl
-	@:hxmc.host("hxmc_NativeUv_udpSetOption") static function udpSetOption(id:Int, opt:Int, v:Int):Int {
+	public static function udpSetOption(id:Int, opt:Int, v:Int):Int {
 		var u = uvh(id);
 		return switch opt {
 			case 0: U.uv_udp_set_multicast_loop(u, v);
@@ -866,10 +875,10 @@ class Uv {
 		}
 	}
 
-	@:hxmc.host("hxmc_NativeUv_udpSetMulticastInterface") static function udpSetMulticastInterface(id:Int, iface:String):Int
+	public static function udpSetMulticastInterface(id:Int, iface:String):Int
 		return Arena.scopedValue(a -> U.uv_udp_set_multicast_interface(uvh(id), a.cstring(iface)));
 
-	@:hxmc.host("hxmc_NativeUv_udpSend") static function udpSend(id:Int, req:Int, d:Bytes, sizes:Array<Int>, sa:Null<Bytes>):Int {
+	public static function udpSend(id:Int, req:Int, d:Bytes, sizes:Array<Int>, sa:Null<Bytes>):Int {
 		return Arena.scopedValue(a -> {
 			var r = R(req);
 			var n = reqBufs(r, d, sizes);
@@ -877,7 +886,7 @@ class Uv {
 		});
 	}
 
-	@:hxmc.host("hxmc_NativeUv_udpTrySend") static function udpTrySend(id:Int, d:Bytes, sizes:Array<Int>, sa:Null<Bytes>):Int {
+	public static function udpTrySend(id:Int, d:Bytes, sizes:Array<Int>, sa:Null<Bytes>):Int {
 		return Arena.scopedValue(a -> {
 			var req = reqNew();
 			var r = R(req);
@@ -901,13 +910,13 @@ class Uv {
 		dispatch(hid(u), EV_UDP_RECV, nread.toInt(), arr);
 	}
 
-	@:hxmc.host("hxmc_NativeUv_udpRecvStart") static function udpRecvStart(id:Int):Int
+	public static function udpRecvStart(id:Int):Int
 		return U.uv_udp_recv_start(uvh(id), Callback.addr(allocCb), Callback.addr(udpRecvCb));
 
-	@:hxmc.host("hxmc_NativeUv_udpRecvStop") static function udpRecvStop(id:Int):Int
+	public static function udpRecvStop(id:Int):Int
 		return U.uv_udp_recv_stop(uvh(id));
 
-	@:hxmc.host("hxmc_NativeUv_udpSendQueue") static function udpSendQueue(id:Int, count:Bool):Int {
+	public static function udpSendQueue(id:Int, count:Bool):Int {
 		var u = uvh(id);
 		return (count ? U.uv_udp_get_send_queue_count(u) : U.uv_udp_get_send_queue_size(u)).toInt();
 	}
@@ -923,7 +932,7 @@ class Uv {
 	// 3 inherit stream), pipe flags (1 readable, 2 writable, 4 overlapped), fd or stream
 	// handle id. flags: 1 setuid, 2 setgid, 4 windows_verbatim_arguments, 8 detached,
 	// 16 windows_hide, 32 windows_hide_console, 64 windows_hide_gui
-	@:hxmc.host("hxmc_NativeUv_processSpawn") static function processSpawn(loopId:Int, cmd:Bytes, args:Array<Bytes>, env:Null<Array<Bytes>>, cwd:Null<Bytes>,
+	public static function processSpawn(loopId:Int, cmd:Bytes, args:Array<Bytes>, env:Null<Array<Bytes>>, cwd:Null<Bytes>,
 			flags:Int, uid:Int, gid:Int, redirect:Array<Int>, onExit:Bool):Int {
 		var lp = loop(loopId);
 		return Arena.scopedValue(a -> {
@@ -1002,13 +1011,13 @@ class Uv {
 		});
 	}
 
-	@:hxmc.host("hxmc_NativeUv_disableStdioInheritance") static function disableStdioInheritance():Void
+	public static function disableStdioInheritance():Void
 		U.uv_disable_stdio_inheritance();
 
-	@:hxmc.host("hxmc_NativeUv_killPid") static function killPid(pid:Int, sig:Int):Int
+	public static function killPid(pid:Int, sig:Int):Int
 		return U.uv_kill(pid, sig);
 
-	@:hxmc.host("hxmc_NativeUv_processPid") static function processPid(id:Int):Int
+	public static function processPid(id:Int):Int
 		return U.uv_process_get_pid(uvh(id));
 
 	// ---- DNS
@@ -1022,7 +1031,7 @@ class Uv {
 		dispatch(rid(req), EV_REQ, status, null);
 
 	// hints: family, socktype, protocol, flags; -1: not given (no hints at all when all are)
-	@:hxmc.host("hxmc_NativeUv_getAddrInfo") static function getAddrInfo(loopId:Int, req:Int, node:Null<String>, service:Null<String>, family:Int,
+	public static function getAddrInfo(loopId:Int, req:Int, node:Null<String>, service:Null<String>, family:Int,
 			socktype:Int, protocol:Int, flags:Int, hasHints:Bool):Int {
 		var lp = loop(loopId);
 		return Arena.scopedValue(a -> {
@@ -1038,7 +1047,7 @@ class Uv {
 	}
 
 	// per entry: family, socktype, protocol, address (Bytes), canonical name (String or null); frees the list
-	@:hxmc.host("hxmc_NativeUv_addrInfoResult") static function addrInfoResult(req:Int):Array<Dynamic> {
+	public static function addrInfoResult(req:Int):Array<Dynamic> {
 		var r = R(req);
 		var n = 0;
 		var ai = Mem.getPtr(r, R_AI);
@@ -1066,13 +1075,13 @@ class Uv {
 		return arr;
 	}
 
-	@:hxmc.host("hxmc_NativeUv_getNameInfo") static function getNameInfo(loopId:Int, req:Int, sa:Bytes, flags:Int):Int {
+	public static function getNameInfo(loopId:Int, req:Int, sa:Bytes, flags:Int):Int {
 		var lp = loop(loopId);
 		return Arena.scopedValue(a -> U.uv_getnameinfo(lp, uvr(req), Callback.addr(gniCb), sockaddrC(a, sa), flags));
 	}
 
 	// [host, service]
-	@:hxmc.host("hxmc_NativeUv_nameInfoResult") static function nameInfoResult(req:Int):Array<String> {
+	public static function nameInfoResult(req:Int):Array<String> {
 		var q = uvr(req);
 		var host = strOfC(q.add(L.GNI_HOST));
 		var service = strOfC(uvr(req).add(L.GNI_SERVICE));
@@ -1129,7 +1138,7 @@ class Uv {
 	// i1..i3: ints (file, flags, mode, uid, gid, dir id, number of entries);
 	// f1, f2: floats (offsets, lengths, times); data/sizes: buffers. Every
 	// call is in a safe region (the synchronous ones block on the disk).
-	@:hxmc.host("hxmc_NativeUv_fs") static function fs(op:Int, loopId:Int, req:Int, p1:Null<Bytes>, p2:Null<Bytes>, i1:Int, i2:Int, i3:Int, f1:Float, f2:Float,
+	public static function fs(op:Int, loopId:Int, req:Int, p1:Null<Bytes>, p2:Null<Bytes>, i1:Int, i2:Int, i3:Int, f1:Float, f2:Float,
 			d:Null<Bytes>, sizes:Null<Array<Int>>):Int {
 		var lp = loopId < 0 ? U.uv_default_loop() : loop(loopId);
 		var cb = loopId < 0 ? Ptr.nil() : Callback.addr(fsCb);
@@ -1190,16 +1199,16 @@ class Uv {
 		});
 	}
 
-	@:hxmc.host("hxmc_NativeUv_fsResult") static function fsResult(req:Int):Int
+	public static function fsResult(req:Int):Int
 		return U.uv_fs_get_result(uvr(req)).toInt();
 
-	@:hxmc.host("hxmc_NativeUv_fsCleanup") static function fsCleanup(req:Int):Void
+	public static function fsCleanup(req:Int):Void
 		U.uv_fs_req_cleanup(uvr(req));
 
-	@:hxmc.host("hxmc_NativeUv_fsPath") static function fsPath(req:Int):Null<Bytes>
+	public static function fsPath(req:Int):Null<Bytes>
 		return bytesOfC(U.uv_fs_get_path(uvr(req)));
 
-	@:hxmc.host("hxmc_NativeUv_fsPtrString") static function fsPtrString(req:Int):Null<Bytes>
+	public static function fsPtrString(req:Int):Null<Bytes>
 		return bytesOfC(U.uv_fs_get_ptr(uvr(req)));
 
 	// 20 int64: dev mode nlink uid gid rdev ino size blksize blocks flags gen, then sec/nsec of atim mtim ctim birthtim
@@ -1213,7 +1222,8 @@ class Uv {
 		}
 	}
 
-	@:hxmc.host("hxmc_NativeUv_fsStat") static function fsStat(req:Int, out:Bytes):Void {
+	// 160 bytes
+	public static function fsStat(req:Int, out:Bytes):Void {
 		var s = U.uv_fs_get_statbuf(uvr(req));
 		var tmp = Mem.stack(160);
 		statInto(tmp, s);
@@ -1221,19 +1231,20 @@ class Uv {
 	}
 
 	// 11 int64: type bsize blocks bfree bavail files ffree f_spare[4]
-	@:hxmc.host("hxmc_NativeUv_fsStatfs") static function fsStatfs(req:Int, out:Bytes):Void {
+	// 88 bytes
+	public static function fsStatfs(req:Int, out:Bytes):Void {
 		var s = U.uv_fs_get_ptr(uvr(req));
 		LibC.memcpy(data(out), s, 88);
 	}
 
-	@:hxmc.host("hxmc_NativeUv_fsDir") static function fsDir(req:Int):Int {
+	public static function fsDir(req:Int):Int {
 		var d = LibC.malloc(8);
 		Mem.setPtr(d, 0, U.uv_fs_get_ptr(uvr(req)));
 		return objAdd(d);
 	}
 
 	// readdir: per entry, type then name (Bytes)
-	@:hxmc.host("hxmc_NativeUv_fsDirents") static function fsDirents(req:Int):Array<Dynamic> {
+	public static function fsDirents(req:Int):Array<Dynamic> {
 		var r = R(req);
 		var n = U.uv_fs_get_result(r.add(R_UV)).toInt();
 		if (n < 0) n = 0;
@@ -1248,7 +1259,7 @@ class Uv {
 	}
 
 	// scandir_next: [type, name] or null at the end
-	@:hxmc.host("hxmc_NativeUv_fsScandirNext") static function fsScandirNext(req:Int):Null<Array<Dynamic>> {
+	public static function fsScandirNext(req:Int):Null<Array<Dynamic>> {
 		var ent = Mem.stack(16);
 		if (U.uv_fs_scandir_next(uvr(req), ent) < 0) return null;
 		var t = constant(10, Mem.getI32(ent, L.DIRENT_TYPE));
@@ -1265,10 +1276,10 @@ class Uv {
 		dispatch(hid(e), EV_FS_EVENT, status, arr);
 	}
 
-	@:hxmc.host("hxmc_NativeUv_fsEventStart") static function fsEventStart(id:Int, path:Bytes, flags:Int):Int
+	public static function fsEventStart(id:Int, path:Bytes, flags:Int):Int
 		return Arena.scopedValue(a -> U.uv_fs_event_start(uvh(id), Callback.addr(fsEventCb), bytesZ(a, path), flags));
 
-	@:hxmc.host("hxmc_NativeUv_fsEventStop") static function fsEventStop(id:Int):Int
+	public static function fsEventStop(id:Int):Int
 		return U.uv_fs_event_stop(uvh(id));
 
 	static function statBytes(s:Ptr):Bytes {
@@ -1288,15 +1299,16 @@ class Uv {
 		dispatch(hid(p), EV_FS_POLL, status, arr);
 	}
 
-	@:hxmc.host("hxmc_NativeUv_fsPollStart") static function fsPollStart(id:Int, path:Bytes, interval:Int):Int
+	public static function fsPollStart(id:Int, path:Bytes, interval:Int):Int
 		return Arena.scopedValue(a -> U.uv_fs_poll_start(uvh(id), Callback.addr(fsPollCb), bytesZ(a, path), interval));
 
-	@:hxmc.host("hxmc_NativeUv_fsPollStop") static function fsPollStop(id:Int):Int
+	public static function fsPollStop(id:Int):Int
 		return U.uv_fs_poll_stop(uvh(id));
 
 	// ---- random
 
-	@:hxmc.host("hxmc_NativeUv_random") static function random(loopId:Int, req:Int, len:Int):Int {
+	// loop -1 runs synchronously; the bytes are copied out with reqCopyOut
+	public static function random(loopId:Int, req:Int, len:Int):Int {
 		var r = R(req);
 		reqClear(r);
 		var n = len > 0 ? len : 0;
@@ -1309,7 +1321,7 @@ class Uv {
 
 	// ---- environment, time, paths, system
 
-	@:hxmc.host("hxmc_NativeUv_getEnv") static function getEnv(name:String):Null<Bytes> {
+	public static function getEnv(name:String):Null<Bytes> {
 		return Arena.scopedValue(a -> {
 			var n = a.cstring(name);
 			var len:Ptr<UInt64> = a.alloc(8);
@@ -1328,11 +1340,12 @@ class Uv {
 		});
 	}
 
-	@:hxmc.host("hxmc_NativeUv_setEnv") static function setEnv(name:String, value:Null<Bytes>):Int
+	// null: unset
+	public static function setEnv(name:String, value:Null<Bytes>):Int
 		return Arena.scopedValue(a -> value != null ? U.uv_os_setenv(a.cstring(name), bytesZ(a, value)) : U.uv_os_unsetenv(a.cstring(name)));
 
 	// name (String), value (Bytes), ...; null on failure
-	@:hxmc.host("hxmc_NativeUv_environ") static function environ():Null<Array<Dynamic>> {
+	public static function environ():Null<Array<Dynamic>> {
 		var items:Ptr<Ptr> = Mem.stack(16);
 		var count:Ptr<Int32> = items.raw().add(8);
 		var r = U.uv_os_environ(items, count);
@@ -1352,7 +1365,8 @@ class Uv {
 	}
 
 	// sec into i64Out, usec returned; negative error
-	@:hxmc.host("hxmc_NativeUv_getTimeOfDay") static function getTimeOfDay():Int {
+	// usec; sec in i64
+	public static function getTimeOfDay():Int {
 		var tv = Mem.stack(16);
 		var r = U.uv_gettimeofday(tv);
 		if (r < 0) return r;
@@ -1360,14 +1374,15 @@ class Uv {
 		return Mem.getI32(tv, 8);
 	}
 
-	@:hxmc.host("hxmc_NativeUv_hrTime") static function hrTime():Void
+	// i64
+	public static function hrTime():Void
 		i64Out = U.uv_hrtime();
 
-	@:hxmc.host("hxmc_NativeUv_sleep") static function sleep(ms:Int):Void
+	public static function sleep(ms:Int):Void
 		UF.uv_sleep(ms);
 
 	// 0 exepath, 1 cwd, 2 homedir, 3 tmpdir: Bytes, null on failure
-	@:hxmc.host("hxmc_NativeUv_path") static function path(which:Int):Null<Bytes> {
+	public static function path(which:Int):Null<Bytes> {
 		return Arena.scopedValue(a -> {
 			var buf = a.alloc(4096, 1);
 			var len:Ptr<UInt64> = a.alloc(8);
@@ -1381,11 +1396,11 @@ class Uv {
 		});
 	}
 
-	@:hxmc.host("hxmc_NativeUv_chdir") static function chdir(dir:Bytes):Int
+	public static function chdir(dir:Bytes):Int
 		return Arena.scopedValue(a -> U.uv_chdir(bytesZ(a, dir)));
 
 	// name, is_internal, physical (Bytes), address, netmask per interface; null on failure
-	@:hxmc.host("hxmc_NativeUv_interfaceAddresses") static function interfaceAddresses():Null<Array<Dynamic>> {
+	public static function interfaceAddresses():Null<Array<Dynamic>> {
 		var out:Ptr<Ptr> = Mem.stack(16);
 		var count:Ptr<Int32> = out.raw().add(8);
 		var r = U.uv_interface_addresses(out, count);
@@ -1409,7 +1424,7 @@ class Uv {
 	}
 
 	// 0 if_indextoname, 1 if_indextoiid, 2 gethostname: String, null on failure
-	@:hxmc.host("hxmc_NativeUv_netName") static function netName(which:Int, index:Int):Null<String> {
+	public static function netName(which:Int, index:Int):Null<String> {
 		return Arena.scopedValue(a -> {
 			var buf = a.alloc(1024, 1);
 			var len:Ptr<UInt64> = a.alloc(8);
@@ -1423,21 +1438,23 @@ class Uv {
 		});
 	}
 
-	@:hxmc.host("hxmc_NativeUv_uptime") static function uptime():Float {
+	// lastError
+	public static function uptime():Float {
 		var t:Ptr<Float> = Mem.stack(16);
 		t.value = 0;
 		lastErr = U.uv_uptime(t);
 		return t.value;
 	}
 
-	@:hxmc.host("hxmc_NativeUv_loadAvg") static function loadAvg():Array<Float> {
+	public static function loadAvg():Array<Float> {
 		var avg:Ptr<Float> = Mem.stack(32);
 		U.uv_loadavg(avg);
 		return [avg[0], avg[1], avg[2]];
 	}
 
 	// 0 free, 1 total, 2 constrained, 3 resident set (lastError): into i64Out
-	@:hxmc.host("hxmc_NativeUv_memory") static function memory(which:Int):Void {
+	// i64 (resident set: lastError)
+	public static function memory(which:Int):Void {
 		if (which == 3) {
 			var rss:Ptr<UInt64> = Mem.stack(16);
 			rss.value = (0 : I64);
@@ -1448,18 +1465,20 @@ class Uv {
 		i64Out = which == 0 ? U.uv_get_free_memory() : which == 1 ? U.uv_get_total_memory() : U.uv_get_constrained_memory();
 	}
 
-	@:hxmc.host("hxmc_NativeUv_getPriority") static function getPriority(pid:Int):Int {
+	// lastError
+	public static function getPriority(pid:Int):Int {
 		var p:Ptr<Int32> = Mem.stack(16);
 		p.value = 0;
 		lastErr = U.uv_os_getpriority(pid, p);
 		return p.value;
 	}
 
-	@:hxmc.host("hxmc_NativeUv_setPriority") static function setPriority(pid:Int, p:Int):Int
+	public static function setPriority(pid:Int, p:Int):Int
 		return U.uv_os_setpriority(pid, p);
 
 	// 18 int64: utime sec usec, stime sec usec, maxrss ixrss idrss isrss minflt majflt nswap inblock oublock msgsnd msgrcv nsignals nvcsw nivcsw
-	@:hxmc.host("hxmc_NativeUv_getRUsage") static function getRUsage(out:Bytes):Int {
+	// 144 bytes
+	public static function getRUsage(out:Bytes):Int {
 		var u = Mem.stack(256);
 		var r = U.uv_getrusage(u);
 		if (r < 0) return r;
@@ -1475,7 +1494,7 @@ class Uv {
 	}
 
 	// per cpu: model (String), speed, then times user nice sys idle irq in a Bytes (5 int64); null on failure
-	@:hxmc.host("hxmc_NativeUv_cpuInfo") static function cpuInfo():Null<Array<Dynamic>> {
+	public static function cpuInfo():Null<Array<Dynamic>> {
 		var out:Ptr<Ptr> = Mem.stack(16);
 		var count:Ptr<Int32> = out.raw().add(8);
 		var r = U.uv_cpu_info(out, count);
@@ -1497,7 +1516,7 @@ class Uv {
 	}
 
 	// [sysname, release, version, machine]; null on failure
-	@:hxmc.host("hxmc_NativeUv_uname") static function uname():Null<Array<String>> {
+	public static function uname():Null<Array<String>> {
 		return Arena.scopedValue(a -> {
 			var u = a.alloc(4 * 256, 1);
 			var r = U.uv_os_uname(u);
@@ -1509,14 +1528,14 @@ class Uv {
 		});
 	}
 
-	@:hxmc.host("hxmc_NativeUv_getPid") static function getPid():Int
+	public static function getPid():Int
 		return U.uv_os_getpid();
 
-	@:hxmc.host("hxmc_NativeUv_getPPid") static function getPPid():Int
+	public static function getPPid():Int
 		return U.uv_os_getppid();
 
 	// [username, uid, gid, shell or null, homedir (Bytes)]; null on failure
-	@:hxmc.host("hxmc_NativeUv_getPasswd") static function getPasswd():Null<Array<Dynamic>> {
+	public static function getPasswd():Null<Array<Dynamic>> {
 		return Arena.scopedValue(a -> {
 			var p = a.alloc(L.PASSWD_SIZE);
 			var r = U.uv_os_get_passwd(p);
@@ -1537,7 +1556,7 @@ class Uv {
 	}
 
 	// not in luv's Eval API: what a descriptor is (0 unknown, 1 tty, 2 pipe, 3 tcp, 4 udp, 5 file)
-	@:hxmc.host("hxmc_NativeUv_guessHandle") static function guessHandle(fd:Int):Int {
+	public static function guessHandle(fd:Int):Int {
 		var t = U.uv_guess_handle(fd);
 		return t == L.UV_TTY ? 1 : t == L.UV_NAMED_PIPE ? 2 : t == L.UV_TCP ? 3 : t == L.UV_UDP ? 4 : t == L.UV_FILE ? 5 : 0;
 	}

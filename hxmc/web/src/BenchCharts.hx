@@ -11,8 +11,10 @@ import js.html.MouseEvent;
 // bench/history.json (every run: per case and target the median, min, max and
 // peak RSS) and bench/latest.json (the newest CI run in full) come from the
 // bench-data branch, copied by `make site BENCH_DATA=<dir>`. The latest run as
-// a table (time, relative to hxmc, peak RSS, size, build time), the history as
-// one line chart per case (inline SVG, one line per target).
+// a table (time, relative to hxmc, peak RSS, size) and below it the compile
+// time of every case and target (the Haxe compiler, and the C/C++ compiler for
+// C++ and HL/C), the history as one line chart per case (inline SVG, one line
+// per target; hidden for now: SHOW_HISTORY).
 typedef HistoryRun = {
 	file:String,
 	date:String,
@@ -26,7 +28,11 @@ typedef HistoryRun = {
 	results:DynamicAccess<DynamicAccess<Array<Null<Float>>>>,
 }
 
+// (schema 2: each run's per case and target array holds `fields`: median, min,
+// max, rss_mb, build_s, haxe_s, cc_s; schema 1 the first four)
 typedef History = {
+	?schema:Int,
+	?fields:Array<String>,
 	targets:Array<String>,
 	runs:Array<HistoryRun>,
 }
@@ -39,6 +45,8 @@ typedef LatestEntry = {
 	?cpu:Float,
 	?rss_mb:Float,
 	?build_s:Float,
+	?haxe_s:Float,
+	?cc_s:Float,
 	?size:Float,
 	?gzip:Float,
 	?check:String,
@@ -70,8 +78,11 @@ class BenchCharts {
 		["formatter_noio", "haxe-formatter"],
 	];
 	static final METRICS = [
-		["time", "Time"], ["rel", "vs. hxmc"], ["rss", "Peak RSS"], ["size", "Size (gzip)"], ["build", "Build"],
+		["time", "Time"], ["rel", "vs. hxmc"], ["rss", "Peak RSS"], ["size", "Size (gzip)"],
 	];
+	// the "Over time" charts (index.html's #programs-over-time): off for now, the
+	// code kept; a page URL with ?bench-history shows them anyway
+	static final SHOW_HISTORY = false;
 
 	static var hidden = new Map<String, Bool>();
 	static var relative = false;
@@ -84,8 +95,11 @@ class BenchCharts {
 		get("bench/latest.json").then((latest:Null<Latest>) -> {
 			if (latest != null) renderLatest(root, latest)
 			else root.innerHTML = "<p class=\"note\">No benchmark results in this build of the site (<code>make site BENCH_DATA=&lt;a checkout of the bench-data branch&gt;</code>).</p>";
+			final wrap = document.getElementById("programs-over-time");
 			final hist = document.getElementById("programs-history");
-			if (hist != null) get("bench/history.json").then((h:Null<History>) -> if (h != null && h.runs.length > 0) renderHistory(hist, h) else hist.textContent = "");
+			final showHistory = SHOW_HISTORY || new js.html.URLSearchParams(window.location.search).has("bench-history");
+			if (wrap != null && showHistory) wrap.hidden = false;
+			if (hist != null && showHistory) get("bench/history.json").then((h:Null<History>) -> if (h != null && h.runs.length > 0) renderHistory(hist, h) else hist.textContent = "");
 		});
 	}
 
@@ -137,7 +151,7 @@ class BenchCharts {
 				case "rel": "Median time relative to hxmc's x86-64 executable (below 1×: faster than hxmc). The last row is the geometric mean over the cases.";
 				case "rss": "Peak resident set size of the process (getrusage), median of the runs: the JVM, Node and the HashLink VM included.";
 				case "size": "The artifact, gzip -9: the static executable (hxmc), the module (wasm), stripped executables (C++, HL/C; dynamically linked to libstdc++ or libhl), the jar, the script, the bytecode.";
-				case _: "Wall time of a cold build: the Haxe compilation (hxmc, or the port for the other targets) and, for C++ and HL/C, the C/C++ compiler (hxcpp's runtime compiled once beforehand).";
+				case _: "";
 			};
 		};
 		for (m in METRICS) {
@@ -147,6 +161,8 @@ class BenchCharts {
 			bar.append(b);
 		}
 		show("time");
+		final compile = document.getElementById("programs-compile");
+		if (compile != null) renderCompile(compile, d, targets, cases);
 		final facts = document.getElementById("programs-machine");
 		if (facts != null) {
 			final parts = [];
@@ -252,6 +268,74 @@ class BenchCharts {
 		}
 		t.append(body);
 		return t;
+	}
+
+	// ---- compile time
+
+	static function renderCompile(root:Element, d:Latest, targets:Array<String>, cases:Array<String>) {
+		root.textContent = "";
+		if (!Lambda.exists(cases, (c) -> Lambda.exists(targets, (x) -> d.results[c][x] != null && d.results[c][x].build_s != null))) return;
+		final split = Lambda.exists(cases, (c) -> Lambda.exists(targets, (x) -> d.results[c][x] != null && d.results[c][x].haxe_s != null));
+		root.append(el("h4", "", "Compile time"));
+		final t = el("table", "bench matrix compile");
+		final head = el("tr");
+		head.append(el("th", "", "Case"));
+		for (x in targets) {
+			final th = el("th", "num");
+			final sw = el("span", "swatch");
+			sw.style.background = color(x);
+			th.append(sw, document.createTextNode(label(x, TARGETS)));
+			head.append(th);
+		}
+		final thead = el("thead");
+		thead.append(head);
+		t.append(thead);
+		final body = el("tbody");
+		final sums = [for (x in targets) x => 0.0], counts = [for (x in targets) x => 0];
+		for (c in cases) {
+			final row = d.results[c];
+			final tr = el("tr");
+			tr.append(el("td", "runner", label(c, CASES)));
+			var best = Math.POSITIVE_INFINITY;
+			for (x in targets) {
+				final r = row[x];
+				if (r != null && r.build_s != null && r.build_s < best) best = r.build_s;
+			}
+			for (x in targets) {
+				final r = row[x];
+				final td = el("td", "num");
+				if (r == null || r.build_s == null) {
+					td.textContent = r != null && r.error != null ? "✗" : "–";
+					if (r != null && r.error != null) {
+						td.className = "num fail";
+						td.title = r.error.substring(0, 400);
+					}
+				} else {
+					td.append(el("span", "total", secs(r.build_s)));
+					sums[x] += r.build_s;
+					counts[x]++;
+					if (r.build_s == best) td.classList.add("best");
+					if (r.cc_s != null && r.haxe_s != null) {
+						td.append(el("span", "parts", fixed(r.haxe_s, 2) + " + " + fixed(r.cc_s, 2)));
+						td.title = 'Haxe ${secs(r.haxe_s)}, ${x == "cpp" ? "C++ (hxcpp, g++)" : "C (gcc)"} ${secs(r.cc_s)}';
+					} else if (r.haxe_s != null) td.title = x == "hxmc" || x == "hxmc-wasm" ? 'hxmc ${secs(r.haxe_s)}: typing, code generation and link' : 'Haxe ${secs(r.haxe_s)}';
+				}
+				tr.append(td);
+			}
+			body.append(tr);
+		}
+		final tr = el("tr", "ref");
+		tr.append(el("td", "runner", "total"));
+		for (x in targets) tr.append(el("td", "num", counts[x] == cases.length ? secs(sums[x]) : "–"));
+		body.append(tr);
+		t.append(body);
+		final scroll = el("div", "scroll");
+		scroll.append(t);
+		root.append(scroll);
+		root.append(el("p", "note",
+			"Wall time of a cold build of each case (a fresh output directory). hxmc: the tool's whole build, from the Haxe sources to the executable or module (typing, code generation, link; its typed runtime cached per tool, as in every build). JVM, JS, HashLink: the port's run (typing and the generator, which writes the jar, the script or the bytecode). C++ and HL/C: the port writing the C++ or C sources "
+			+ (split ? "+ the C/C++ compiler (the second number: hxcpp with g++, its runtime compiled once beforehand; gcc -O3 against libhl), " : "and the C/C++ compiler (hxcpp with g++, its runtime compiled once beforehand; gcc -O3 against libhl), ")
+			+ "the total on top. Bold: the fastest; the last row sums the cases."));
 	}
 
 	// ---- the history

@@ -22,12 +22,9 @@ import hxmc.rt.wasm.Exit;
 import hxmc.rt.wasm.Wasi;
 import hxmc.rt.wasm.Libc;
 import hxmc.rt.wasm.Threads;
-import hxmc.rt.wasm.NoSslUv;
 #else
 // the native targets' runtime over the C library (@:hxmc.native): the
-// collector, the threads, the start; the threads' API (ThreadApi), mbedtls's
-// and libuv's glue (Ssl, Uv) are typed with hxmc.NativeThread, NativeSsl and
-// NativeUv, for the programs that use them
+// collector, the threads, the start
 import hxmc.rt.Gc;
 import hxmc.rt.GcPaths;
 import hxmc.rt.Threads;
@@ -37,5 +34,8 @@ import hxmc.rt.WinRt;
 import hxmc.rt.Census;
 #end
 #end
+// the threads' API (ThreadApi), mbedtls's and libuv's glue (Ssl, Uv; on
+// WebAssembly NoSsl, NoUv) are typed with hxmc.NativeThread, NativeSsl and
+// NativeUv, for the programs that use them
 
 class Runtime {}

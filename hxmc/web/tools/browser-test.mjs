@@ -7,8 +7,10 @@
 // module it picks (hih.wasm; hih-legacy.wasm with ?eh=legacy, and in a
 // Chromium whose V8 runs without exnref) and a Run of its first example.
 // With a benchmark history in the site (bench/, `make site BENCH_DATA=...`):
-// the Programs table and one chart per case, in light and dark mode, with a
-// hover tooltip (screenshots into $SCREENSHOTS when set).
+// the Programs tables (run time, compile time) with the "Over time" charts
+// hidden, and with ?bench-history one chart per case with a hover tooltip, in
+// light and dark mode, and at a phone's width (screenshots into $SCREENSHOTS
+// when set).
 //   node hxmc/web/tools/browser-test.mjs bin/site [chromium firefox webkit]
 // (Playwright from npm, with its browsers: npx playwright install)
 import { createServer } from 'node:http';
@@ -107,44 +109,82 @@ async function pageTest(browser, query, expect) {
 	return ok;
 }
 
-// the Programs benchmarks: the latest run's table, the history's charts and a tooltip
+// the Programs benchmarks: the latest run's table and the compile-time table
+// below it, with the "Over time" charts hidden; then with ?bench-history (the
+// charts' code kept for later) one chart per case with a hover tooltip; at a
+// phone's width, no horizontal scrolling of the page
 async function benchTest(browser, name) {
 	let ok = true;
 	const latest = existsSync(path.join(dir, 'bench/latest.json'));
-	for (const colorScheme of ['light', 'dark']) {
-		const page = await browser.newPage({ colorScheme, viewport: { width: 1100, height: 900 } });
+	const views = [
+		{ colorScheme: 'light', width: 1100, query: '' },
+		{ colorScheme: 'dark', width: 1100, query: '' },
+		{ colorScheme: 'light', width: 1100, query: '?bench-history' },
+		{ colorScheme: 'dark', width: 1100, query: '?bench-history' },
+		{ colorScheme: 'light', width: 375, query: '' },
+	];
+	for (const { colorScheme, width, query } of views) {
+		const view = `${colorScheme}, ${width} px${query ? ', ' + query : ''}`;
+		let pass = true;
+		const page = await browser.newPage({ colorScheme, viewport: { width, height: 900 } });
 		const errors = [];
 		page.on('pageerror', (e) => errors.push(e.message));
 		await page.route(/^https:\/\/cdn\.jsdelivr\.net\//, (r) => r.abort());
-		await page.goto(`http://localhost:${port}/index.html`);
+		await page.goto(`http://localhost:${port}/index.html${query}`);
 		let facts = '';
 		try {
-			// (the table: the latest run, which a history of imported points only lacks)
-			if (latest) await page.waitForSelector('#programs-results table', { timeout: 30000 });
-			await page.waitForSelector('#programs-history svg', { timeout: 30000 });
-			const svg = page.locator('#programs-history .plot svg').first();
-			await svg.scrollIntoViewIfNeeded();
-			const box = await svg.boundingBox();
-			await svg.hover({ position: { x: box.width * 0.95, y: box.height / 2 } });
-			await page.waitForSelector('#programs-history .tip:not([hidden])', { timeout: 5000 });
-			facts = await page.evaluate(() => ({
-				rows: document.querySelectorAll('#programs-results tbody tr').length,
-				cols: document.querySelectorAll('#programs-results thead th').length,
-				charts: document.querySelectorAll('#programs-history svg').length,
-				lines: document.querySelectorAll('#programs-history svg .series path').length,
-				tip: document.querySelector('#programs-history .tip').textContent.slice(0, 60),
-				series: getComputedStyle(document.documentElement).getPropertyValue('--s1').trim(),
-			}));
-			if ((latest && facts.rows < 1) || facts.charts < 1 || facts.lines < 1) ok = false;
+			// (the tables: the latest run, which a history of imported points only lacks)
+			if (latest) {
+				await page.waitForSelector('#programs-results table', { timeout: 30000 });
+				await page.waitForSelector('#programs-compile table', { timeout: 5000 });
+			}
+			if (query) {
+				await page.waitForSelector('#programs-history svg', { timeout: 30000 });
+				const svg = page.locator('#programs-history .plot svg').first();
+				await svg.scrollIntoViewIfNeeded();
+				const box = await svg.boundingBox();
+				await svg.hover({ position: { x: box.width * 0.95, y: box.height / 2 } });
+				await page.waitForSelector('#programs-history .tip:not([hidden])', { timeout: 5000 });
+			} else {
+				// (the history would have been fetched and drawn by now if it were shown)
+				await page.waitForTimeout(500);
+			}
+			facts = await page.evaluate(() => {
+				const q = (s) => document.querySelectorAll(s).length;
+				const visible = (e) => !!e && e.getClientRects().length > 0 && getComputedStyle(e).visibility !== 'hidden';
+				const compileCells = [...document.querySelectorAll('#programs-compile tbody tr:not(.ref) td.num')];
+				return {
+					rows: q('#programs-results tbody tr'),
+					cols: q('#programs-results thead th'),
+					tabs: [...document.querySelectorAll('#programs-results .tabs button')].map((b) => b.textContent).join(','),
+					compileRows: q('#programs-compile tbody tr:not(.ref)'),
+					compileCols: q('#programs-compile thead th'),
+					compileVisible: visible(document.querySelector('#programs-compile table')),
+					compileValues: compileCells.filter((td) => /\d/.test(td.textContent)).length,
+					compileSplit: q('#programs-compile td .parts'),
+					compileNote: (document.querySelector('#programs-compile .note')?.textContent ?? '').slice(0, 40),
+					historyVisible: visible(document.getElementById('programs-over-time')),
+					charts: q('#programs-history svg'),
+					lines: q('#programs-history svg .series path'),
+					tip: document.querySelector('#programs-history .tip')?.textContent.slice(0, 60) ?? '',
+					series: getComputedStyle(document.documentElement).getPropertyValue('--s1').trim(),
+					pageScroll: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+				};
+			});
+			if (latest && (facts.rows < 1 || !facts.compileVisible || facts.compileRows !== facts.rows || facts.compileCols !== facts.cols || facts.compileValues < 1 || !/Compile time/.test(await page.textContent('#programs-compile h4'))))
+				pass = false;
+			if (query ? !facts.historyVisible || facts.charts < 1 || facts.lines < 1 : facts.historyVisible || facts.charts > 0) pass = false;
+			if (facts.pageScroll > 0) pass = false;
 			if (process.env.SCREENSHOTS) {
-				await page.locator('#benchmarks').screenshot({ path: path.join(process.env.SCREENSHOTS, `bench-${name}-${colorScheme}.png`) });
+				await page.locator('#benchmarks').screenshot({ path: path.join(process.env.SCREENSHOTS, `bench-${name}-${colorScheme}-${width}${query ? '-history' : ''}.png`) });
 			}
 		} catch (e) {
-			ok = false;
+			pass = false;
 			facts = e.message.split('\n')[0];
 		}
-		if (errors.length) ok = false;
-		console.log(`  benchmarks (${colorScheme}) ${ok ? 'ok' : 'FAILED'}: ${JSON.stringify(facts)}${errors.length ? '; errors: ' + errors.join('; ') : ''}`);
+		if (errors.length) pass = false;
+		if (!pass) ok = false;
+		console.log(`  benchmarks (${view}) ${pass ? 'ok' : 'FAILED'}: ${JSON.stringify(facts)}${errors.length ? '; errors: ' + errors.join('; ') : ''}`);
 		await page.close();
 	}
 	return ok;
