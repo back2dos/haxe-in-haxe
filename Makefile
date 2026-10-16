@@ -34,6 +34,8 @@ RT_TARGET ?= $(HOST)
 CORPUS_TARGETS ?= $(TARGETS) wasm32-wasi wasm32-wasi-legacy linux-x86_64-glibc linux-arm64-glibc
 # `make gfx-programs`: any of the six targets, or the host's (`make gfx-check GFX_TARGET=windows-x86_64`: under Wine)
 GFX_TARGET ?= $(HOST)
+# `make audio-programs`, `make audio-check`: the same for packages/os's audio
+AUDIO_TARGET ?= $(HOST)
 # extra arguments of the port's build (e.g. HXFLAGS="-D retain")
 HXFLAGS ?=
 # the port the tests check
@@ -104,7 +106,8 @@ endef
 .DEFAULT_GOAL := help
 .PHONY: help std deps rt rt-build rt-target rt-layouts hxmc tool bootstrap fixpoint stage0 crosshost port dev release wasm npm site fuzz \
 	lix lix-release lix-dist reference bench test test-fuzz test-display test-server test-jsonrpc test-unit-targets test-interp \
-	test-haxelib test-eval-debugger test-node-libs test-module-cache smoke hxmc-test corpus-stage gfx-programs gfx-check gfx-web-check gfx-shader-check native-macros portcheck measure quick check full clean distclean
+	test-haxelib test-eval-debugger test-node-libs test-module-cache smoke hxmc-test corpus-stage gfx-programs gfx-check gfx-web-check gfx-shader-check \
+	audio-programs audio-check audio-web-check native-macros portcheck measure quick check full clean distclean
 
 help:
 	@sed -n '/^# --- Targets/,$$p' $(MAKEFILE_LIST) | sed -n 's/^## \{0,1\}//p'
@@ -164,6 +167,13 @@ help:
 ## gfx-shader-check  packages/gfx's shader macro on Eval: shaders run on the CPU, the emitted
 ##             GLSL, WGSL, MSL and HLSL against packages/gfx/test/shader/, the programs it must
 ##             reject (packages/gfx/test/ShaderTest.hx; BLESS=1 rewrites the sources)
+## audio-programs  bin/audio/AUDIO_TARGET/{AudioTest,Tone}[.exe]: packages/os's audio test and example
+## audio-check  packages/os's audio through each back end without speakers (packages/os/test/audio.sh):
+##             ALSA's null and file devices (Linux), CoreAudio's generic output (macOS), WASAPI
+##             (Windows; AUDIO_TARGET=windows-x86_64: under Wine, to an ALSA file); the samples
+##             that reach the API against the signal, the callbacks' count and rate
+## audio-web-check  packages/os's audio on WebAudio (wasm32-wasi) in headless Chromium: realtime
+##             and in an OfflineAudioContext (packages/os/test/web.mjs; Playwright with Chromium)
 ## native-macros  the native macros prototype (hxmc/PLANS.md, "Native macros"): bin/jit/haxe, the
 ##             npm compiler built with -D hxmc.jit (Linux x86-64), runs the macro cases with
 ##             -D hxmc.macros=verify (MACROS=native: native only, the HXB compared)
@@ -182,7 +192,7 @@ help:
 ## clean       remove the build outputs (keeps the tool, the runtime objects and the reference)
 ## distclean   also remove bin/ entirely
 ##
-## Variables: JOBS, NODE, ZIG, HOST, TARGET, RT_TARGET, GFX_TARGET, HXFLAGS, PORT_BIN, REFERENCE, LANE, N, CASES, PORT,
+## Variables: JOBS, NODE, ZIG, HOST, TARGET, RT_TARGET, GFX_TARGET, AUDIO_TARGET, HXFLAGS, PORT_BIN, REFERENCE, LANE, N, CASES, PORT,
 ## LIX_DIR, BENCH_DATA, BENCH_ARGS, CROSSHOST_ARGS, CORPUS_TARGETS (defaults and meaning: the top of the Makefile).
 
 std: $(STD)
@@ -481,6 +491,19 @@ gfx-web-check: $(TOOL) $(STD)
 	$(call hxmc,bin/gfx/WebTest.wasm,$(GFX_CP) -main WebTest $(HXMC_ARGS) -D hxmc.target=wasm32-wasi)
 	$(NODE) packages/gfx/test/web.mjs bin/gfx/WebTest.wasm bin/gfx
 
+# packages/os's audio (Linux: the glibc mode, which loads libasound.so.2)
+OS_CP := -cp packages/os/src -cp packages/os/examples -cp packages/os/test
+AUDIO_ARGS = $(if $(filter linux-%,$(AUDIO_TARGET)),-D hxmc.libc=glibc) -D hxmc.target=$(AUDIO_TARGET)
+audio-programs: $(TOOL) $(STD) $(HOST_RT)
+	$(call hxmc,bin/audio/$(AUDIO_TARGET)/AudioTest$(call EXE,$(AUDIO_TARGET)),$(OS_CP) -main AudioTest $(HXMC_ARGS) $(AUDIO_ARGS))
+	$(call hxmc,bin/audio/$(AUDIO_TARGET)/Tone$(call EXE,$(AUDIO_TARGET)),$(OS_CP) -main Tone $(HXMC_ARGS) $(AUDIO_ARGS))
+audio-check: audio-programs
+	sh packages/os/test/audio.sh bin/audio/$(AUDIO_TARGET)
+
+audio-web-check: $(TOOL) $(STD)
+	$(call hxmc,bin/audio/AudioTest.wasm,$(OS_CP) -main AudioTest $(HXMC_ARGS) -D hxmc.target=wasm32-wasi)
+	$(NODE) packages/os/test/web.mjs bin/audio/AudioTest.wasm
+
 gfx-shader-check: $(TOOL)
 	ulimit -s unlimited 2>/dev/null || true; $(TOOL) -cp packages/gfx/src -cp packages/gfx/examples -cp packages/gfx/test --run ShaderTest $(TOOL) $(if $(BLESS),--bless)
 
@@ -512,7 +535,7 @@ full: $(TOOL) $(STD) $(HOST_RT)
 	$(SCRIPT) Tiers full $(CASES)
 
 clean:
-	rm -rf bin/port bin/release bin/lix-dist bin/site bin/wasm bin/fuzz bin/lix bin/npm bin/stage0 bin/test bin/gfx bin/corpus \
+	rm -rf bin/port bin/release bin/lix-dist bin/site bin/wasm bin/fuzz bin/lix bin/npm bin/stage0 bin/test bin/gfx bin/audio bin/corpus \
 		bin/hxmc/boot bin/hxmc/fix bin/hxmc-t bin/hxmc-fuzz $(CLI_BOOT)/hxmc-std $(CLI_BOOT)/rt
 
 distclean: clean

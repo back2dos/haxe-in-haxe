@@ -26,7 +26,8 @@
 #   - site: the website; gfx: packages/gfx on Linux (make gfx-check; on
 #     ARM64 the cross-built programs, gfx-arm64; on Windows x86-64 and arm64
 #     the cross-built programs on D3D11's WARP, gfx-windows; on macOS built
-#     from the npm packages after npm-pack, gfx-macos).
+#     from the npm packages after npm-pack, gfx-macos), and packages/os's
+#     audio in the same jobs (make audio-check, audio-web-check).
 # - conformance: the port against the reference: HXB of the upstream suites
 #   and macro cases, display requests, the compilation server and its
 #   JSON-RPC methods, upstream's target suites compiled by both and compared
@@ -561,7 +562,9 @@ jobs:
   # programs in the glibc mode, packages/gfx/test/check.sh), here on Linux
   # x86-64, and on WebGPU and WebGL2 in headless Chromium (make
   # gfx-web-check); the ARM64 and Windows programs cross-built for gfx-arm64
-  # and gfx-windows
+  # and gfx-windows. packages/os's audio alongside: ALSA's null and file
+  # devices (make audio-check), WebAudio in headless Chromium (make
+  # audio-web-check), the ARM64 and Windows AudioTest cross-built
   gfx:
     needs: [changes, rt]
     if: ${{ !cancelled() && needs.changes.result == 'success' && (needs.rt.result == 'success' || needs.rt.result == 'skipped') && (needs.changes.outputs.all == 'true' || needs.changes.outputs.libs == 'true') }}
@@ -579,24 +582,30 @@ jobs:
       - name: System packages
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -qqy --no-install-recommends libegl1 libegl-mesa0 libgl1-mesa-dri libgles2 xvfb xauth
+          sudo apt-get install -qqy --no-install-recommends libegl1 libegl-mesa0 libgl1-mesa-dri libgles2 xvfb xauth libasound2t64
       - name: gfx (Mesa llvmpipe, Xvfb)
         run: |
           set -ex
           make rt && touch bin/hxmc/rt/*/*.o
           make gfx-shader-check
           make gfx-check GFX_TARGET=linux-x86_64
+      - name: audio (ALSA's null and file devices)
+        run: make audio-check AUDIO_TARGET=linux-x86_64
       - name: gfx (WebGPU, WebGL2 in Chromium)
         run: |
           set -ex
           npm install --no-save --silent playwright@1.56.1
           npx playwright install --with-deps chromium > /dev/null
           make gfx-web-check
+      - name: audio (WebAudio in Chromium)
+        run: make audio-web-check
       - name: The ARM64 programs
         run: |
           set -ex
           make gfx-programs GFX_TARGET=linux-arm64
-          tar czf bin/gfx-linux-arm64.tar.gz -C bin/gfx/linux-arm64 GfxTest Triangle Cube
+          make audio-programs AUDIO_TARGET=linux-arm64
+          cp bin/audio/linux-arm64/AudioTest bin/gfx/linux-arm64/
+          tar czf bin/gfx-linux-arm64.tar.gz -C bin/gfx/linux-arm64 GfxTest Triangle Cube AudioTest
       - uses: actions/upload-artifact@v7
         with: {name: gfx-linux-arm64, path: bin/gfx-linux-arm64.tar.gz, retention-days: 3}
       - name: The Windows programs
@@ -604,7 +613,9 @@ jobs:
           set -ex
           for t in windows-x86_64 windows-arm64; do
             make gfx-programs GFX_TARGET=$t
-            tar czf bin/gfx-$t.tar.gz -C bin/gfx/$t GfxTest.exe Triangle.exe Cube.exe
+            make audio-programs AUDIO_TARGET=$t
+            cp bin/audio/$t/AudioTest.exe bin/gfx/$t/
+            tar czf bin/gfx-$t.tar.gz -C bin/gfx/$t GfxTest.exe Triangle.exe Cube.exe AudioTest.exe
           done
       - uses: actions/upload-artifact@v7
         with: {name: gfx-windows, path: "bin/gfx-windows-*.tar.gz", retention-days: 3}
@@ -621,22 +632,27 @@ jobs:
         with:
           sparse-checkout: |
             packages/gfx/test
+            packages/os/test
       - uses: actions/download-artifact@v8
         with: {name: gfx-linux-arm64, path: dl}
       - name: gfx (Mesa llvmpipe, Xvfb)
         run: |
           set -ex
           sudo apt-get update -qq
-          sudo apt-get install -qqy --no-install-recommends libegl1 libegl-mesa0 libgl1-mesa-dri libgles2 xvfb xauth
+          sudo apt-get install -qqy --no-install-recommends libegl1 libegl-mesa0 libgl1-mesa-dri libgles2 xvfb xauth libasound2t64
           mkdir -p gfx
           tar xzf dl/gfx-linux-arm64.tar.gz -C gfx
           sh packages/gfx/test/check.sh gfx
+      - name: audio (ALSA's null and file devices)
+        run: sh packages/os/test/audio.sh gfx
       - uses: actions/upload-artifact@v7
         if: always()
         with: {name: gfx-images-linux-arm64, path: gfx/*.png, retention-days: 7}
 
   # packages/gfx on Windows: the cross-built programs on D3D11's WARP
-  # (HXMC_GFX_SOFTWARE=1, check.sh), offscreen and in a Win32 window
+  # (HXMC_GFX_SOFTWARE=1, check.sh), offscreen and in a Win32 window; the
+  # audio test on WASAPI's default endpoint, skipped when the runner has
+  # none (audio.sh)
   gfx-windows:
     needs: [changes, gfx]
     if: ${{ !cancelled() && needs.gfx.result == 'success' }}
@@ -655,6 +671,7 @@ jobs:
         with:
           sparse-checkout: |
             packages/gfx/test
+            packages/os/test
       - uses: actions/download-artifact@v8
         with: {name: gfx-windows, path: dl}
       - name: gfx (D3D11 WARP, Win32)
@@ -663,6 +680,8 @@ jobs:
           mkdir -p gfx
           tar xzf dl/gfx-${{ matrix.target }}.tar.gz -C gfx
           sh packages/gfx/test/check.sh gfx
+      - name: audio (WASAPI)
+        run: sh packages/os/test/audio.sh gfx
       - uses: actions/upload-artifact@v7
         if: always()
         with: {name: 'gfx-images-${{ matrix.target }}', path: gfx/*.png, retention-days: 7}
@@ -670,7 +689,9 @@ jobs:
   # packages/gfx on macOS: the examples and their test built from the npm
   # packages (@hxmc/cli with its platform package, -lib hxmc.gfx from
   # node_modules), then run on Metal and in a Cocoa window (check.sh: skipped
-  # without a Metal device or outside a GUI session)
+  # without a Metal device or outside a GUI session); the audio test from
+  # -lib hxmc.os on CoreAudio's generic output unit, then the default output
+  # (skipped without one: audio.sh)
   gfx-macos:
     needs: [changes, npm-pack]
     if: ${{ !cancelled() && needs.npm-pack.result == 'success' }}
@@ -682,7 +703,11 @@ jobs:
       - uses: actions/download-artifact@v8
         with: {name: npm, path: dl}
       - uses: actions/checkout@v7
-        with: {path: repo, sparse-checkout: packages/gfx}
+        with:
+          path: repo
+          sparse-checkout: |
+            packages/gfx
+            packages/os/test
       - name: gfx (Metal, Cocoa)
         run: |
           set -ex
@@ -700,6 +725,14 @@ jobs:
           ls -l gfx/GfxTest gfx/Triangle gfx/Cube
           otool -L gfx/Triangle
           sh "$g/test/check.sh" gfx
+      - name: audio (CoreAudio)
+        run: |
+          set -ex
+          cd "$RUNNER_TEMP/app"
+          o="$GITHUB_WORKSPACE/repo/packages/os"
+          npx haxe -lib hxmc.os -cp "$o/test" -main AudioTest --custom-target hxmc=audio/AudioTest
+          otool -L audio/AudioTest
+          sh "$o/test/audio.sh" audio
       - uses: actions/upload-artifact@v7
         if: always()
         with: {name: gfx-images-macos-arm64, path: "${{ runner.temp }}/app/gfx/*.png", retention-days: 7, if-no-files-found: ignore}
