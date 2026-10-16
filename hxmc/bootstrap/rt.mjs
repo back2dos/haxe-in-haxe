@@ -1,7 +1,7 @@
 // hxmc's runtime objects (rt.o, ssl.o, uv.o for the six native targets) are
-// built by zig from hxmc/c (the C runtime, mbedtls and libuv: deps.sh,
+// built by zig (the C library's members, mbedtls and libuv: hxmc/deps/deps.sh,
 // mkrt.sh), which a source-only bootstrap cannot do. They are keyed by a hash
-// of their inputs (every file of hxmc/c, the zig version it pins) and
+// of their inputs (every file of hxmc/deps, the zig version it pins) and
 // published as the assets of the GitHub release `rt-<hash>`:
 //   node hxmc/bootstrap/rt.mjs hash                  the hash
 //   node hxmc/bootstrap/rt.mjs fetch <dir>           <dir>/<target>/{rt,ssl,uv}.o and
@@ -35,7 +35,7 @@ function files(dir, rel = '') {
 
 export function hash() {
 	const h = crypto.createHash('sha256');
-	const c = path.join(root, 'hxmc', 'c');
+	const c = path.join(root, 'hxmc', 'deps');
 	for (const f of files(c)) {
 		h.update(`${f}\0`);
 		// (line ends as committed: a Windows checkout may have CRLF)

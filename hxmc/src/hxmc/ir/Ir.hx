@@ -228,7 +228,7 @@ enum Ex {
 	ECallDispatch(sel:Int, sig:SigInfo, args:Array<Ex>); // virtual and interface calls
 	ECallClos(s:SigInfo, clos:Ex, args:Array<Ex>);
 	ECallAnon(name:String, s:SigInfo, obj:Ex, args:Array<Ex>); // obj.name(args) through a structural type: a method or a closure field
-	ECallHost(name:String, args:Array<Ex>, ret:Ty); // runtime function (hxmc/c)
+	ECallHost(name:String, args:Array<Ex>, ret:Ty); // runtime function (hxmc.rt)
 	ENewObj(c:ClassInfo); // zeroed instance; the constructor is called separately
 	ENewEnum(c:CtorInfo, args:Array<Ex>);
 	ENewArr(elem:Ty, values:Array<Ex>);

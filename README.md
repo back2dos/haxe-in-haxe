@@ -19,7 +19,7 @@ the same `--interp` runs, display requests and compilation-server answers.
 | `haxe/test/` | the port's tests: conformance against the reference (HXB, display, server, JSON-RPC, `--interp`, `-L`, upstream's target suites), the fuzzer (`fuzz/`), unit tests of port modules (`unit/`, `unit.hxml`), peak memory and times (`Measure.hx`) |
 | `hxmc/src/hxmc/` | hxmc's sources (package `hxmc`, class path `hxmc/src`): the IR and lowering (`ir/`), the code generators (`x64/`, `a64/`, `wasm/`), the linkers, the driver, `Main.hx` (the tool) and `HaxeMain.hx` (`haxe` with hxmc built in) |
 | `hxmc/std/` | hxmc's std: overrides of upstream modules and the runtime's Haxe part (`hxmc.rt`), merged with the Eval originals by `hxmc/src/hxmc/MkStd.hx` |
-| `hxmc/c/` | no C of ours: `deps.sh` (mbedtls and libuv), `mkrt.sh` (the runtime objects: the C library's members, mbedtls, libuv), `Layouts.hx` (system and libuv struct layouts per target, checked against the C headers), `probe.c` (build-time layout probe), `zig-version` |
+| `hxmc/deps/` | no C of ours: `deps.sh` (mbedtls and libuv), `mkrt.sh` (the runtime objects: the C library's members, mbedtls, libuv), `Layouts.hx` (system and libuv struct layouts per target, checked against the C headers), `probe.c` (build-time layout probe), `zig-version` |
 | `hxmc/test/` | hxmc's corpus (`cases/`, golden outputs `expected/`, frozen fuzzer programs `fuzz-1000.zip`), the encoder tests (`encoder/`), the scripts that run them (`Corpus`, `Check`, `Crosshost`, `Selfcheck`, `Tiers`, `EncCheck`), the release smoke test (`smoke.sh`), the benchmarks (`Bench`, with the cases' check programs in `bench/`) |
 | `hxmc/web/` | the website and its playground (the port as a WebAssembly module in the browser) |
 | `hxmc/bootstrap/` | the committed stage0 (`stage0.wasm.br`), node's WASI runner (`wasi.mjs`), the runtime objects by hash (`rt.mjs`), the npm package's launcher (`haxe`, `hxmc-rebuild`, `launcher.mjs`, `build.mjs`) |
@@ -141,8 +141,8 @@ all three (about a minute). Scripts run on the tool's Eval (`bin/hxmc/hxmc
 compiler's command line), or on the stage0's before there is a tool.
 
 Runtime objects: `rt.o`, `ssl.o` and `uv.o` for the six targets are built by
-zig from `hxmc/c` (the C library's members, mbedtls, libuv), which a source-only
-bootstrap cannot do. They are keyed by a hash of `hxmc/c` (sources, pinned
+zig from `hxmc/deps` (the C library's members, mbedtls, libuv), which a source-only
+bootstrap cannot do. They are keyed by a hash of `hxmc/deps` (scripts, pinned
 versions, flags, the zig version) and published as the GitHub release
 `rt-<hash>` (`node hxmc/bootstrap/rt.mjs hash|fetch|pack`); `make rt` downloads
 them and falls back to `make rt-build` (zig) when the release is missing. CI
@@ -365,7 +365,7 @@ whole runtime in Haxe; exception handling with `exnref`, or with
 runs without flags and wasmtime not at all; run with
 `node hxmc/bootstrap/wasi.mjs m.wasm` or `wasmtime run -W exceptions=y --dir . m.wasm`;
 no threads, sockets or processes). mbedtls 2.28 and libuv 1.48
-(`hxmc/c/deps.sh`) become `ssl.o` and `uv.o`, linked only into programs that
+(`hxmc/deps/deps.sh`) become `ssl.o` and `uv.o`, linked only into programs that
 use `sys.ssl` or `eval.luv`. Environment for development: `HXMC_OPT=0`,
 `HXMC_INLINE=<flat>,<loop>,<runtime>`, `HXMC_SYMBOLS=1`, `HXMC_SIZE_STATS=1`,
 `HXMC_DUMP=<function>`, `HXMC_MAP=<file>` (Windows), `RT_MINOR_KB`,

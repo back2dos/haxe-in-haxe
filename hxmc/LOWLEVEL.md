@@ -427,7 +427,7 @@ Built (2026-10-15): hxmc's std and runtime contain no C written for hxmc.
 Only third-party C is linked: the C library (musl's members on Linux, the
 UCRT and MinGW-w64's startup objects on Windows, libSystem on macOS),
 mbedtls and libuv, as prebuilt objects (`rt.o`, `ssl.o`, `uv.o`; the
-latter two only when referenced). `hxmc/c` keeps the scripts that build
+latter two only when referenced). `hxmc/deps` keeps the scripts that build
 them (`deps.sh`, `mkrt.sh`), `Layouts.hx` (the struct layouts per target,
 written as Haxe constants and checked against the C headers when the
 objects are built) and `probe.c` (a build-time layout probe, never linked).

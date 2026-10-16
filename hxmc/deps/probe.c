@@ -2,7 +2,7 @@
 // (hxmc/src/hxmc/Abi.hx; the runtime's Haxe code reads the same tables:
 // hxmc/std/hxmc/rt/Types.hx), written as C structures to check them per
 // target, with the C library's jmp_buf (the handler of a try):
-//   zig cc -target <triple> -S -o probe.s hxmc/c/probe.c; grep -A1 probe_ probe.s
+//   zig cc -target <triple> -S -o probe.s hxmc/deps/probe.c; grep -A1 probe_ probe.s
 // (each value is the initializer of a probe_<name> constant). Development
 // time only: not linked into anything.
 #include <setjmp.h>

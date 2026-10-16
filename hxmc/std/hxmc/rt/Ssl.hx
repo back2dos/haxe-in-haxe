@@ -33,7 +33,7 @@ import hxmc.unsafe.*;
 // on the socket): mbedtls works on malloc'ed memory only meanwhile, and the
 // BIO callbacks are no-GC functions that call send/recv directly.
 class Ssl {
-	// the layouts of mbedtls 2.28 (hxmc/c/deps.sh), the same on the six
+	// the layouts of mbedtls 2.28 (hxmc/deps/deps.sh), the same on the six
 	// targets: context sizes, and the fields of mbedtls_x509_crt read here
 	static inline var CTR_DRBG_SIZE = 344;
 	static inline var ENTROPY_SIZE = 1032;

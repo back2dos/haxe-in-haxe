@@ -28,7 +28,7 @@ import hxmc.unsafe.*;
 //
 // The C layouts and constants of libuv and of the C library differ per
 // target (error codes, flags, struct fields): UvLayouts, generated from the
-// headers by hxmc/c/Layouts.hx.
+// headers by hxmc/deps/Layouts.hx.
 class Uv {
 	// ---- object table (id 0 is unused): chunks that never move, so lookups
 	// need no lock (adding one does)

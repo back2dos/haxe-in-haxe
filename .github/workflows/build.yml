@@ -1,8 +1,8 @@
 # Builds everything from source with node and hxmc (README.md, "Building")
 # and tests it on a machine of each target:
 #
-# - rt: the runtime objects of the six targets (hxmc/c with mbedtls and libuv,
-#   built by zig) are the release rt-<hash of hxmc/c>
+# - rt: the runtime objects of the six targets (hxmc/deps with mbedtls and libuv,
+#   built by zig) are the release rt-<hash of hxmc/deps>
 #   (hxmc/bootstrap/rt.mjs); built here only when that release is missing
 #   (and published from pushes to main and hxmc), passed on as an artifact.
 # - build: the committed stage0 module under node builds the tool, which
@@ -72,7 +72,7 @@ jobs:
         run: |
           set -ex
           echo "hash=$(node hxmc/bootstrap/rt.mjs hash)" >> "$GITHUB_OUTPUT"
-          echo "zig=$(cat hxmc/c/zig-version)" >> "$GITHUB_OUTPUT"
+          echo "zig=$(cat hxmc/deps/zig-version)" >> "$GITHUB_OUTPUT"
           if node hxmc/bootstrap/rt.mjs fetch bin/hxmc/rt; then echo "hit=true" >> "$GITHUB_OUTPUT"; else echo "hit=false" >> "$GITHUB_OUTPUT"; fi
       - uses: mlugg/setup-zig@v2
         if: steps.rt.outputs.hit != 'true'
@@ -86,7 +86,7 @@ jobs:
         uses: actions/cache@v6
         with:
           path: bin/hxmc/deps
-          key: hxmc-deps-zig-${{ steps.rt.outputs.zig }}-${{ hashFiles('hxmc/c/deps.sh') }}
+          key: hxmc-deps-zig-${{ steps.rt.outputs.zig }}-${{ hashFiles('hxmc/deps/deps.sh') }}
       # the tool comes from the stage0 module (the Windows and macOS objects are
       # assembled by it)
       - name: Build the runtime objects with zig
@@ -99,7 +99,7 @@ jobs:
           node hxmc/bootstrap/rt.mjs pack bin/hxmc/rt dist/rt
           gh release create "rt-${{ steps.rt.outputs.hash }}" --target "$GITHUB_SHA" --prerelease \
             --title "hxmc runtime objects ${{ steps.rt.outputs.hash }}" \
-            --notes "hxmc's runtime objects (rt.o, ssl.o, uv.o) for the six targets, built by zig ${{ steps.rt.outputs.zig }} from hxmc/c at $GITHUB_SHA; downloaded by hxmc/bootstrap/rt.mjs." dist/rt/*
+            --notes "hxmc's runtime objects (rt.o, ssl.o, uv.o) for the six targets, built by zig ${{ steps.rt.outputs.zig }} from hxmc/deps at $GITHUB_SHA; downloaded by hxmc/bootstrap/rt.mjs." dist/rt/*
       - uses: actions/upload-artifact@v7
         with:
           name: rt
@@ -121,7 +121,7 @@ jobs:
           node-version: 22
       # (zig: the C companions of corpus cases, Corpus.nativeInputs)
       - id: zig
-        run: echo "version=$(cat hxmc/c/zig-version)" >> "$GITHUB_OUTPUT"
+        run: echo "version=$(cat hxmc/deps/zig-version)" >> "$GITHUB_OUTPUT"
       - uses: mlugg/setup-zig@v2
         with:
           version: ${{ steps.zig.outputs.version }}

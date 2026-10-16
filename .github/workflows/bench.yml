@@ -81,12 +81,12 @@ jobs:
       - name: System packages
         if: steps.seen.outputs.skip != 'true'
         run: sudo apt-get install -qqy time
-      # the published runtime objects of this hxmc/c, else built with zig
+      # the published runtime objects of this hxmc/deps, else built with zig
       - name: Runtime objects
         if: steps.seen.outputs.skip != 'true'
         id: rt
         run: |
-          echo "zig=$(cat hxmc/c/zig-version)" >> "$GITHUB_OUTPUT"
+          echo "zig=$(cat hxmc/deps/zig-version)" >> "$GITHUB_OUTPUT"
           if node hxmc/bootstrap/rt.mjs fetch bin/hxmc/rt; then echo "hit=true" >> "$GITHUB_OUTPUT"; else echo "hit=false" >> "$GITHUB_OUTPUT"; fi
       - uses: mlugg/setup-zig@v2
         if: steps.seen.outputs.skip != 'true' && steps.rt.outputs.hit != 'true'

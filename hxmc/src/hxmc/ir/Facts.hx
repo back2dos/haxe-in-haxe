@@ -9,7 +9,7 @@ import hxmc.ir.Ir;
 // (TY_*, FID_*, SIG_*, GI_*, DSP_*: absolute symbols in hxmc's objects), lays
 // out objects, assigns type indices and field ids, finds the functions that
 // never reach a GC point and marks the statements whose only GC point is a
-// slow path (SCold). The runtime (hxmc/c) agrees on every number this way.
+// slow path (SCold). The runtime (hxmc.rt) agrees on every number this way.
 class Facts {
 	public static inline var T_FIRST = 32;
 

@@ -1,8 +1,8 @@
 package hxmc;
 
-// Facts about the runtime (hxmc/c) and the target's C library that the
+// Facts about the runtime (hxmc.rt, the runtime objects) and the target's C library that the
 // generated code depends on. The struct layouts are the same on every
-// 64-bit target; the jmp_buf of rt_handler is not (hxmc/c/probe.c
+// 64-bit target; the jmp_buf of rt_handler is not (hxmc/deps/probe.c
 // prints them all).
 class Abi {
 	// rt_type

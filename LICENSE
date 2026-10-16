@@ -12,7 +12,7 @@ and follows its licensing.
 
 - Code that ends up in programs built with hxmc is licensed under the MIT License,
   so those programs are not bound by the GPL:
-    hxmc/c/    the runtime's C part                   (hxmc/c/LICENSE)
+    hxmc/deps/ the scripts that build the runtime objects (hxmc/deps/LICENSE)
     hxmc/std/  the hxmc target's standard library and the runtime's
                Haxe part                              (hxmc/std/LICENSE)
 

@@ -9,17 +9,17 @@
 # links with the program (and lays out once, see Link.hx). Next to it, ssl.o
 # and uv.o: mbedtls and libuv (which hxmc/std/hxmc/rt/Ssl.hx and Uv.hx call),
 # linked only into programs that refer to them, from the libraries
-# hxmc/c/deps.sh built into bin/hxmc/deps/<target> (DEPS); without them,
+# hxmc/deps/deps.sh built into bin/hxmc/deps/<target> (DEPS); without them,
 # neither.
-# zig must be the version of hxmc/c/zig-version (the objects are published
-# by a hash of hxmc/c: hxmc/bootstrap/rt.mjs).
-#   sh hxmc/c/mkrt.sh linux-x86_64
+# zig must be the version of hxmc/deps/zig-version (the objects are published
+# by a hash of hxmc/deps: hxmc/bootstrap/rt.mjs).
+#   sh hxmc/deps/mkrt.sh linux-x86_64
 set -eu
 target=$1
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 ZIG=${ZIG:-zig}
-want=$(cat "$ROOT/hxmc/c/zig-version")
-[ "$($ZIG version)" = "$want" ] || echo "mkrt: zig $($ZIG version), hxmc/c/zig-version says $want" >&2
+want=$(cat "$ROOT/hxmc/deps/zig-version")
+[ "$($ZIG version)" = "$want" ] || echo "mkrt: zig $($ZIG version), hxmc/deps/zig-version says $want" >&2
 case $target in
 linux-x86_64) triple=x86_64-linux-musl ;;
 linux-arm64) triple=aarch64-linux-musl ;;
@@ -38,7 +38,7 @@ if [ -f "$deps/VERSIONS" ]; then
 	uvar="$deps/lib/libuv.a"
 	cp "$deps/LICENSE.mbedtls" "$deps/LICENSE.libuv" "$out/.."/
 else
-	echo "mkrt: no $deps/VERSIONS (hxmc/c/deps.sh): no ssl.o and uv.o" >&2
+	echo "mkrt: no $deps/VERSIONS (hxmc/deps/deps.sh): no ssl.o and uv.o" >&2
 	sslar=
 	uvar=
 fi

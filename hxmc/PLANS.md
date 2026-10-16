@@ -208,7 +208,7 @@ points and the ideas that address them:
 ### sys.ssl and libuv (done)
 
 Done (2026-10-15, README "sys.ssl and libuv"): mbedtls and libuv built per
-target with zig at our build time (`hxmc/c/deps.sh`), turned into
+target with zig at our build time (`hxmc/deps/deps.sh`), turned into
 `ssl.o` and `uv.o` next to the runtime object and linked only into programs
 that refer to them; the port and lix link both; WebAssembly keeps the
 failing stubs. Left:

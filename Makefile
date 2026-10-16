@@ -52,7 +52,7 @@ BENCH_ARGS ?=
 PORT_SRC := $(shell find haxe/src -name '*.hx')
 HXMC_SRC := $(shell find hxmc/src -name '*.hx')
 STD_SRC := $(shell find hxmc/std -type f)
-RT_SRC := $(wildcard hxmc/c/*)
+RT_SRC := $(wildcard hxmc/deps/*)
 LIX_SRC := $(shell find tools/lix/src -name '*.hx')
 FUZZ_SRC := $(wildcard haxe/test/fuzz/*.hx haxe/test/fuzz/fuzz/*.hx) haxe/test/HlcNames.hx
 WEB_SRC := $(wildcard hxmc/web/src/*.hx hxmc/web/*.html hxmc/web/*.css hxmc/web/data/*)
@@ -108,8 +108,8 @@ help:
 ##             when the sources need a newer one)
 ## std         bin/hxmc/std: hxmc/std merged with the Eval originals (hxmc/src/hxmc/MkStd.hx)
 ## rt          the runtime objects (bin/hxmc/rt/<target>/{rt,ssl,uv}.o): the release
-##             rt-<hash of hxmc/c> (hxmc/bootstrap/rt.mjs), else rt-build
-## rt-build    the runtime objects with zig: mbedtls and libuv (hxmc/c/deps.sh), hxmc/c/mkrt.sh
+##             rt-<hash of hxmc/deps> (hxmc/bootstrap/rt.mjs), else rt-build
+## rt-build    the runtime objects with zig: mbedtls and libuv (hxmc/deps/deps.sh), hxmc/deps/mkrt.sh
 ## crosshost   the tool as a WebAssembly module (under node) builds the corpus for every target
 ##             and the tool itself byte-identical to the native tool (hxmc/test/Crosshost.hx)
 ## port        PORT_BIN (bin/port/haxe): the port for the host, built by hxmc (alias: dev)
@@ -157,7 +157,7 @@ $(STD): hxmc/src/hxmc/MkStd.hx $(STD_SRC)
 
 # --- hxmc: the runtime objects and the tool ---
 
-# the published objects of this hxmc/c, else built here
+# the published objects of this hxmc/deps, else built here
 rt: $(HOST_RT)
 $(HOST_RT): $(RT_SRC)
 	$(NODE) hxmc/bootstrap/rt.mjs fetch bin/hxmc/rt || $(MAKE) rt-build
@@ -166,17 +166,17 @@ $(HOST_RT): $(RT_SRC)
 # mbedtls and libuv per target (rebuilt only when their versions or flags change)
 deps: $(foreach t,$(TARGETS),bin/hxmc/deps/$(t)/VERSIONS)
 .PRECIOUS: bin/hxmc/deps/%/VERSIONS
-bin/hxmc/deps/%/VERSIONS: hxmc/c/deps.sh
-	sh hxmc/c/deps.sh $* bin/hxmc/deps/$*
+bin/hxmc/deps/%/VERSIONS: hxmc/deps/deps.sh
+	sh hxmc/deps/deps.sh $* bin/hxmc/deps/$*
 	touch $@
 
 # the host's object needs no tool (Linux: zig cc and ld.lld); the Windows and
 # macOS ones are assembled by the tool (hxmc --mkrt)
 rt-build: deps
-	sh hxmc/c/mkrt.sh linux-x86_64
+	sh hxmc/deps/mkrt.sh linux-x86_64
 	$(MAKE) $(TOOL)
-	for t in $(filter-out linux-x86_64,$(TARGETS)); do HXMC=$(CURDIR)/$(TOOL) sh hxmc/c/mkrt.sh $$t || exit 1; done
-	$(TOOL) -cp hxmc/c --run Layouts --check
+	for t in $(filter-out linux-x86_64,$(TARGETS)); do HXMC=$(CURDIR)/$(TOOL) sh hxmc/deps/mkrt.sh $$t || exit 1; done
+	$(TOOL) -cp hxmc/deps --run Layouts --check
 	$(NODE) hxmc/bootstrap/rt.mjs hash > bin/hxmc/rt/HASH
 
 # The tool compiles its own source with the previous tool (written next to it,
