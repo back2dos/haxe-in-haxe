@@ -459,6 +459,8 @@ objects are built) and `probe.c` (a build-time layout probe, never linked).
 | exceptions | `_setjmp` for `try`; `rt_throw` calls the C library's `longjmp` |
 | the runtime's reports | formatted in Haxe (`Os.Report`, `FloatText.fixed` for `%.Nf`) and written with `write`: no `printf` |
 | C string literals | `Mem.cstr("...")`: a NUL-terminated byte string in read-only data, shared per literal |
+| tables | `Mem.words("<hex>", digits)`: 8-byte words in read-only data, shared per literal (LibM's musl tables) |
+| float bit patterns | `Mem.f64Bits(v)`, `Mem.bitsF64(b)`: register moves |
 | the safe region's markers | `rt_blocking_enter`/`rt_blocking_leave` stay calls by symbol so that Facts tells the functions that enter one (they must be `@:hxmc.collects` and root what they hold: `Gc.pushRoot`) |
 
 Cost, measured against the C runtime (the benchmarks, the port compiling

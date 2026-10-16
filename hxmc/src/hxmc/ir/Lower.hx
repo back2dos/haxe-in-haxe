@@ -218,6 +218,8 @@ class Lower {
 				case ECallHost("hxmc_unsafe_Mem_arm", [], _) if (targetArm >= 0): EInt(targetArm);
 				case ECallHost("hxmc_unsafe_Mem_target", [], _) if (targetCode >= 0): EInt(targetCode);
 				case EInt(_) | EF64(_) | EStr(_) | ENull(_) | ELocal(_) | EGlobal(_, _) | EType(_) | ENewObj(_): e;
+				// (Float's %: hxmc.rt.LibM.fmod, as Math's natives)
+				case EBin(FMod, a, b) if (hostImpls.exists("fmod")): ECall(hostImpl("fmod"), [ex(a), ex(b)]);
 				case EBin(op, a, b): EBin(op, ex(a), ex(b));
 				case ENot(a): ENot(ex(a));
 				case EConv(c, a): EConv(c, ex(a));

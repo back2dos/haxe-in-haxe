@@ -124,6 +124,7 @@ class Emit implements hxmc.Target.Emitter {
 		epiLabel = -1;
 		for (b in f.blocks)
 			b.label = a.newLabel();
+		f.threadJumps(i -> (i.op : XOp) == JMP);
 		var tables:Array<{label:Int, entries:Array<LBlock>}> = [];
 		for (bi in 0...f.blocks.length) {
 			var b = f.blocks[bi];
@@ -335,6 +336,8 @@ class Emit implements hxmc.Target.Emitter {
 				a.cmovRR(i.cond, i.size < 4 ? 4 : i.size, i.d, i.s1);
 			case FOP:
 				a.sdRR(i.cond, i.d, i.s1);
+			case FOPK:
+				a.sdRM(i.cond, i.d, Mem.rip(floatConst(i.f)));
 			case FSQRT:
 				a.sdRR(0x51, i.d, i.s1);
 			case FMASK:

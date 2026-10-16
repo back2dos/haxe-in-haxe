@@ -12,6 +12,7 @@ import hxmc.rt.Date;
 import hxmc.rt.Names;
 import hxmc.rt.FloatText;
 import hxmc.rt.Boxes;
+import hxmc.rt.LibM;
 // WebAssembly's runtime (@:hxmc.wasm: what C provides on the native
 // targets), typed for a program built for it only
 #if (hxmc.target == "wasm32-wasi")
@@ -20,7 +21,6 @@ import hxmc.rt.wasm.Gc;
 import hxmc.rt.wasm.Exit;
 import hxmc.rt.wasm.Wasi;
 import hxmc.rt.wasm.Libc;
-import hxmc.rt.wasm.LibM;
 import hxmc.rt.wasm.Threads;
 import hxmc.rt.wasm.NoSslUv;
 #else

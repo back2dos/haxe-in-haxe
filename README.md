@@ -328,9 +328,10 @@ does.
 
 Runtime in Haxe: most of the runtime is Haxe compiled with the program
 (`hxmc/std/hxmc/rt`: strings, Dynamic access, reflection, arrays, bytes,
-dates, inflate, the POSIX and Windows system layers), written with a small
-internal API (`hxmc.unsafe`: `Ptr`, `Mem` loads, stores, allocation and
-symbols, `Atomic`; `@:hxmc.c` and `@:hxmc.rt` externs of C functions,
+dates, inflate, the POSIX and Windows system layers, and Math: musl's libm
+ported, `LibM.hx`, with the same results on every target), written with a
+small internal API (`hxmc.unsafe`: `Ptr`, `Mem` loads, stores, allocation
+and symbols, `Atomic`; `@:hxmc.c` and `@:hxmc.rt` externs of C functions,
 `@:hxmc.noGc` functions, `@:hxmc.export`/`@:hxmc.host` implementations of
 runtime functions, `@:hxmc.callback` functions C calls,
 `@:hxmc.threadLocal` statics). The collector, threads and the stop-the-world

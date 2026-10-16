@@ -340,9 +340,10 @@ class Runner {
 
 	/**
 		Program outputs compared, where printed floats may differ in the last
-		place: the C libraries' math functions (glibc in the reference, musl
-		or hxmc's own in the port) round some results an ulp apart
-		(hxmc/PLANS.md, "Math"). Everything else must be identical.
+		place: the math functions (glibc's in the reference; in the port
+		hxmc builds, hxmc's port of musl's, hxmc/std/hxmc/rt/LibM.hx) round
+		some results an ulp apart (hxmc/PLANS.md, "Math"). Everything else
+		must be identical.
 	**/
 	public static function sameOutput(a:String, b:String):Bool {
 		if (a == b)

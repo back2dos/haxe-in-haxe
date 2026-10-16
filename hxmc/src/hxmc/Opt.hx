@@ -408,6 +408,9 @@ class Opt {
 	// br c], nothing of it used elsewhere. A predecessor whose value is a
 	// constant, or known from its own branch on the edge, jumps straight to
 	// the target; one that jumps here unconditionally branches on its value.
+	// A target's phis get, for the new edge, their operand of the edge from
+	// the block (defined above it, so available in the predecessor), unless
+	// the predecessor already is the target's (that edge stays).
 	// Then a block that jumps to a block with no other predecessor absorbs it.
 	function simplifyCfg() {
 		// branches on constants are jumps
@@ -464,7 +467,18 @@ class Opt {
 				onZero = c.imm == CEq ? br.targets[0] : br.targets[1];
 				onSet = c.imm == CEq ? br.targets[1] : br.targets[0];
 			}
-			if (onZero == b || onSet == b || onZero == onSet || hasPhi(onZero) || hasPhi(onSet)) continue;
+			if (onZero == b || onSet == b || onZero == onSet) continue;
+			// (the operands of the phis of target s for a new edge, as b's)
+			inline function joins(s:MBlock, p:MBlock):Bool
+				return !hasPhi(s) || s.preds.indexOf(p) < 0;
+			function addArgs(s:MBlock) {
+				var j = s.preds.indexOf(b);
+				for (i in s.ins)
+					if (i.op == Phi) {
+						i.args.push(i.args[j]);
+						uses[i.args[j]]++;
+					}
+			}
 			var k = 0;
 			while (k < b.preds.length) {
 				var p = b.preds[k];
@@ -474,10 +488,14 @@ class Opt {
 				var x = vals[v];
 				if (x.op == Const && x.sym == null) known = x.imm == 0 && x.imm2 == 0 ? 0 : 1;
 				else if (t != null && t.op == Br && t.a == v && t.targets[0] != t.targets[1]) known = t.targets[1] == b ? 0 : 1;
-				if (known >= 0) {
-					retarget(p, b, known == 0 ? onZero : onSet);
-				} else if (t != null && t.op == Jmp && p.succs.length == 1) {
+				var to = known == 0 ? onZero : onSet;
+				if (known >= 0 && joins(to, p)) {
+					addArgs(to);
+					retarget(p, b, to);
+				} else if (known < 0 && t != null && t.op == Jmp && p.succs.length == 1 && joins(onSet, p) && joins(onZero, p)) {
 					// branch on the value here
+					addArgs(onSet);
+					addArgs(onZero);
 					t.op = Br;
 					t.a = v;
 					t.targets = [onSet, onZero];
@@ -946,6 +964,7 @@ class Opt {
 					var op = i.op;
 					// (comparisons are recomputed: they fuse with their branch)
 					if (!(pure(op) || op == Load || op == TlsLoad) || op == Cmp) continue;
+					if (fold(i)) continue;
 					var h = hash(i);
 					h = (h ^ (h >>> 15)) * 0x2c1b3c6d;
 					var bk = (h ^ (h >>> 12)) & mask;
@@ -985,6 +1004,71 @@ class Opt {
 					head[bk] = chain[id];
 				}
 			}
+		}
+	}
+
+	// constant folding: integer arithmetic, extensions and bit casts of
+	// constants without a symbol (the instruction becomes the constant;
+	// shift counts masked as the instructions do; NaNs left alone)
+	function fold(i:MIns):Bool {
+		if (i.a < 0) return false;
+		var x = f.vals[res(i.a)];
+		var y = i.b >= 0 ? f.vals[res(i.b)] : null;
+		inline function plain(v:MIns):Bool
+			return v != null && v.op == Const && v.sym == null;
+		inline function set(lo:Int, hi:Int):Bool {
+			i.op = Const;
+			i.imm = lo;
+			i.imm2 = hi;
+			i.a = i.b = i.c = -1;
+			return true;
+		}
+		switch i.op {
+			case Add | Sub | Mul | And | Or | Xor | Shl | Sar | Shr if (i.ty == I32 && plain(x) && plain(y)):
+				var a = x.imm, b = y.imm;
+				return set(switch i.op {
+					case Add: a + b;
+					case Sub: a - b;
+					case Mul: a * b;
+					case And: a & b;
+					case Or: a | b;
+					case Xor: a ^ b;
+					case Shl: a << (b & 31);
+					case Sar: a >> (b & 31);
+					case _: a >>> (b & 31);
+				}, 0);
+			case Add | Sub | Mul | And | Or | Xor | Shl | Sar | Shr if (i.ty == I64 && plain(x) && plain(y) && x.ty == I64):
+				var a = haxe.Int64.make(x.imm2, x.imm), b = haxe.Int64.make(y.imm2, y.imm), n = y.imm & 63;
+				var r = switch i.op {
+					case Add: a + b;
+					case Sub: a - b;
+					case Mul: a * b;
+					case And: a & b;
+					case Or: a | b;
+					case Xor: a ^ b;
+					case Shl: a << n;
+					case Sar: a >> n;
+					case _: a >>> n;
+				};
+				return set(r.low, r.high);
+			case SExt if (plain(x) && x.ty == I32 && i.ty == I64):
+				return set(x.imm, x.imm < 0 ? -1 : 0);
+			case ZExt if (plain(x) && x.ty == I32 && i.ty == I64):
+				return set(x.imm, 0);
+			case Trunc if (plain(x) && i.ty == I32):
+				return set(x.imm, 0);
+			case FToBits if (x.op == ConstF && x.f == x.f):
+				return set(haxe.io.FPHelper.doubleLow(x.f), haxe.io.FPHelper.doubleHigh(x.f));
+			case BitsToF if (plain(x) && x.ty == I64):
+				var v = haxe.io.FPHelper.i64ToDouble(x.imm, x.imm2);
+				if (v != v) return false;
+				i.op = ConstF;
+				i.f = v;
+				i.imm = i.imm2 = 0;
+				i.a = -1;
+				return true;
+			case _:
+				return false;
 		}
 	}
 

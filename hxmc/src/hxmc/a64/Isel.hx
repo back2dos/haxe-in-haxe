@@ -29,7 +29,7 @@ enum abstract AOp(Int) to Int from Int {
 	var CSET; // d <- cond
 	var CSEL; // d <- cond ? s1 : s2
 	var FOP2; // d <- s1 (cond: 0 fmul, 1 fdiv, 2 fadd, 3 fsub) s2
-	var FOP1; // d <- (cond: 1 fabs, 2 fneg, 3 fsqrt) s1
+	var FOP1; // d <- (cond: 1 fabs, 2 fneg, 3 fsqrt, 4 frintm, 5 frintp) s1
 	var SCVTF; // d (fpr) <- s1 (size)
 	var FCVTZS; // d <- s1 (fpr), truncating (size)
 	var FMOVTOG; // d <- bits of s1 (fpr)
@@ -644,11 +644,27 @@ class Isel implements hxmc.Target.Selector {
 				x.cond = op;
 				x.size = size;
 			case Mul:
-				var x = emit(MUL);
-				x.d = reg(i.id);
-				x.s1 = use(i.a);
-				x.s2 = use(i.b);
-				x.size = sz(i.ty);
+				var imm = immOf(i.b);
+				if (imm != null && imm > 1 && imm & (imm - 1) == 0) {
+					// by a power of two: a shift
+					var k = 0;
+					while (imm > 1) {
+						imm >>>= 1;
+						k++;
+					}
+					var x = emit(SHIFTI);
+					x.d = reg(i.id);
+					x.s1 = use(i.a);
+					x.cond = 2;
+					x.imm = k;
+					x.size = sz(i.ty);
+				} else {
+					var x = emit(MUL);
+					x.d = reg(i.id);
+					x.s1 = use(i.a);
+					x.s2 = use(i.b);
+					x.size = sz(i.ty);
+				}
 			case Div:
 				var x = emit(SDIV);
 				x.d = reg(i.id);
@@ -938,6 +954,11 @@ class Isel implements hxmc.Target.Selector {
 				k.s3 = x.s3;
 			case "fence":
 				emit(DMB);
+			case "floor" | "ceil":
+				var x = emit(FOP1);
+				x.d = reg(i.id);
+				x.s1 = use(i.args[0]);
+				x.cond = name == "floor" ? 4 : 5;
 			case "f32_to_f64":
 				var t = f.newReg(true);
 				var x = emit(FMOVSW);

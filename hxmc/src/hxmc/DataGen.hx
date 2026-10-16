@@ -392,21 +392,24 @@ class DataGen {
 	}
 
 	// the C string literals the program refers to (Mem.cstr: MirBuild.CSTR),
-	// NUL-terminated in .rodata
+	// NUL-terminated in .rodata, and its words (Mem.words: MirBuild.WORDS)
 	public function cstrLiterals(objs:Array<Obj>) {
 		var names = new Map<String, Bool>();
 		for (o in objs.concat([obj]))
 			for (s in o.symbols)
-				if (s.section == null && !s.abs && StringTools.startsWith(s.name, MirBuild.CSTR)) names.set(s.name, true);
+				if (s.section == null && !s.abs && (StringTools.startsWith(s.name, MirBuild.CSTR) || StringTools.startsWith(s.name, MirBuild.WORDS))) names.set(s.name, true);
 		var list = [for (n in names.keys()) n];
 		list.sort((a, b) -> a < b ? -1 : a > b ? 1 : 0);
 		for (n in list) {
-			var b = haxe.io.Bytes.ofHex(n.substr(MirBuild.CSTR.length));
+			// (Mem.words: 8-byte aligned words, no NUL)
+			var words = StringTools.startsWith(n, MirBuild.WORDS);
+			var b = haxe.io.Bytes.ofHex(n.substr(words ? MirBuild.WORDS.length : MirBuild.CSTR.length));
+			if (words) rodata.buf.align(8);
 			var off = rodata.buf.len;
 			for (i in 0...b.length)
 				rodata.buf.u8(b.get(i));
-			rodata.buf.u8(0);
-			obj.define(n, rodata, off, b.length + 1, true);
+			if (!words) rodata.buf.u8(0);
+			obj.define(n, rodata, off, b.length + (words ? 0 : 1), true);
 		}
 	}
 
