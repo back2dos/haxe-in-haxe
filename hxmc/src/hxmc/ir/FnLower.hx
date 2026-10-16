@@ -80,7 +80,7 @@ class FnLower {
 			if (d != null && Ir.isRef(a.ty) && !strip(d).eexpr.match(TConst(TNull)))
 				out.push(SIf(EBin(RefEq, ELocal(a), ENull(a.ty)), block(() -> out.push(SSet(a, coerceRhs(rhs(d), tyOf(d), a.ty)))), []));
 			var x:Ex = ELocal(a);
-			if (Ir.repr(t) != Ir.repr(a.ty) || a.ty.match(TRef(RClos(_))) && t.match(TRef(RClos(_)))) {
+			if (Ir.repr(t) != Ir.repr(a.ty) || closureConversion(a.ty, t)) {
 				var lo = newLocal(v.vName, t);
 				out.push(SSet(lo, coerce(x, a.ty, t)));
 				x = ELocal(lo);
@@ -202,6 +202,25 @@ class FnLower {
 			var r = newLocal("r", from.ret);
 			out.push(SSet(r, call));
 			out.push(SReturn(coerce(ELocal(r), from.ret, fi.ret)));
+		}
+	}
+
+	// closure body calling a Dynamic value (its capture) with the arguments
+	// boxed (hx_dyn_call), its result converted to this signature's
+	public function adaptDynamic() {
+		boxed = new Map();
+		var inner = newLocal("inner", TRef(RAny));
+		out.push(SSet(inner, ECapture(lambda, 0, ELocal(fi.args[0]))));
+		var xs = [for (i in 1...fi.args.length) coerce(ELocal(fi.args[i]), fi.args[i].ty, TRef(RAny))];
+		var arr = temp(TRef(RArr(TRef(RAny))), ENewArr(TRef(RAny), xs));
+		var call = ECallHost(l.native("hx_dyn_call"), [ELocal(inner), arr], TRef(RAny));
+		if (fi.ret == TVoid) {
+			out.push(SExpr(call));
+			out.push(SReturn(null));
+		} else {
+			var r = newLocal("r", TRef(RAny));
+			out.push(SSet(r, call));
+			out.push(SReturn(coerce(ELocal(r), TRef(RAny), fi.ret)));
 		}
 	}
 
@@ -394,6 +413,18 @@ class FnLower {
 				var r = newLocal("adapted", to);
 				out.push(SIf(EBin(RefEq, ELocal(c), ENull(from)), [SSet(r, ENull(to))], [SSet(r, ENewClos(li, [ELocal(c)]))]));
 				return ELocal(r);
+			case [TRef(RAny), TRef(RClos(b))]:
+				// a Dynamic as a function: kept when it is a closure of this
+				// signature, else called through an adapter (its signature may
+				// differ: a () -> Bool's result is not boxed)
+				if (x.match(ENull(_))) return ENull(to);
+				var c = asLocal(x, from);
+				var r = newLocal("closure", to), same = newLocal("same", from);
+				out.push(SIf(EBin(RefEq, ELocal(c), ENull(from)), [SSet(r, ENull(to))], [
+					SSet(same, ECallHost(l.native("hx_clos_of_sig"), [ELocal(c), EStr(b.key)], TRef(RAny))),
+					SIf(EBin(RefEq, ELocal(same), ENull(from)), [SSet(r, ENewClos(l.dynAdapter(b), [ELocal(c)]))], [SSet(r, ECast(to, ELocal(same)))])
+				]));
+				return ELocal(r);
 			case _:
 		}
 		var fr = Ir.repr(from), tr = Ir.repr(to);
@@ -535,8 +566,13 @@ class FnLower {
 	}
 
 	// value of an SSet: calls stay at the top, converted afterwards if needed
+	// a conversion to a closure type that may need an adapter: from another
+	// closure type, or from Dynamic (coerce)
+	static function closureConversion(from:Ty, to:Ty):Bool
+		return to.match(TRef(RClos(_))) && (from.match(TRef(RClos(_))) || from.match(TRef(RAny)));
+
 	function coerceRhs(x:Ex, from:Ty, to:Ty):Ex {
-		if (Ir.repr(from) == Ir.repr(to) && !(from.match(TRef(RClos(_))) && to.match(TRef(RClos(_))))) return x;
+		if (Ir.repr(from) == Ir.repr(to) && !closureConversion(from, to)) return x;
 		if (isImpure(x)) x = temp(from, x);
 		return coerce(x, from, to);
 	}
