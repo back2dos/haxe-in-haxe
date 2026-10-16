@@ -71,13 +71,14 @@ haxe-in-haxe -cp src --main Main --js out.js</pre>
 		<h2>Graphics</h2>
 		<div class="gfx">
 			<figure>
-				<canvas id="triangle" aria-label="A triangle with a red, a green and a blue corner"></canvas>
-				<p id="triangle-state" class="gfx-state" hidden></p>
+				<canvas id="cube" aria-label="A rotating textured cube under a translucent panel"></canvas>
+				<p id="cube-state" class="gfx-state" hidden></p>
 			</figure>
 			<div>
-				<p>This triangle is Haxe compiled by hxmc to WebAssembly, drawing through <span id="triangle-api">WebGPU, or WebGL2 where WebGPU is missing</span>. The same program, <a href="https://github.com/benmerckx/hxmc/blob/main/packages/gfx/examples/Triangle.hx">Triangle.hx</a>, opens a window and draws with OpenGL on Linux, with Metal on macOS and with Direct3D 11 on Windows, to the same pixels. On WebGL2 it runs the same OpenGL ES code as on Linux, its calls going to the browser instead of the driver.</p>
+				<p>This cube is Haxe compiled by hxmc to WebAssembly, drawing through <span id="cube-api">WebGPU, or WebGL2 where WebGPU is missing</span> (drag it to turn it). The same program, <a href="https://github.com/benmerckx/hxmc/blob/main/packages/gfx/examples/Cube.hx">Cube.hx</a>, opens a window and draws with OpenGL on Linux, with Metal on macOS and with Direct3D 11 on Windows, to the same pixels. On WebGL2 it runs the same OpenGL ES code as on Linux, its calls going to the browser instead of the driver.</p>
+				<p>Its shaders are Haxe functions too (<a href="https://github.com/benmerckx/hxmc/blob/main/packages/gfx/examples/CubeShader.hx">CubeShader.hx</a>), turned into each API's shading language when the program is compiled. The texture is made in Haxe as well; the cube is depth-tested, its matrices are a uniform block written each frame, and the panel is blended over it.</p>
 				<p>It uses two packages in pure Haxe: <a href="https://github.com/benmerckx/hxmc/tree/main/packages/os">@hxmc/os</a> (windows, input and the app loop) and <a href="https://github.com/benmerckx/hxmc/tree/main/packages/gfx">@hxmc/gfx</a> (a GPU layer shaped like WebGPU, with integer handles and no allocation per frame). They call the system's APIs directly; in the browser, each package's calls go to a small JavaScript module.</p>
-				<p class="note"><span data-info="triangleSize">~85 KB</span> of WebAssembly. Its <code>main</code> returns after the setup; then each <code>requestAnimationFrame</code> calls back into the module for a frame.</p>
+				<p class="note"><span data-info="cubeSize">~192 KB</span> of WebAssembly. Its <code>main</code> returns after the setup; then each <code>requestAnimationFrame</code> calls back into the module for a frame.</p>
 			</div>
 		</div>
 	</section>
@@ -156,6 +157,6 @@ lix download                    # after a clone: the scope's Haxe and missing li
 </footer>
 <script src="playground.js"></script>
 <script src="tables.js"></script>
-<script type="module" src="triangle.mjs"></script>
+<script type="module" src="cube.mjs"></script>
 </body>
 </html>

@@ -74,21 +74,24 @@ new file shadows a module, for hxmc (the tool and `haxe`) and JS.
 
 ## Graphics
 
-`make gfx-check`: the triangle of
-`packages/gfx` rendered headless and in a window, compared with
-`packages/gfx/test/triangle.png`: on Linux by Mesa's llvmpipe (an EGL pbuffer,
-an X11 window under Xvfb), on macOS by Metal (an offscreen texture, a Cocoa
-window; skipped without a Metal device or outside a GUI session), on Windows
-by D3D11's WARP (an offscreen texture, a Win32 window);
-`GFX_TARGET=windows-x86_64` runs the Windows build under Wine (wined3d over
-llvmpipe, under Xvfb) (CI: the `gfx` and `gfx-arm64` jobs on Linux,
-`gfx-windows` on Windows x86-64 and arm64, `gfx-macos` from the npm
-packages).
+`make gfx-check`: the examples of `packages/gfx`, the triangle and the cube
+(textured, lit, depth-tested, with a uniform block and a blended panel,
+turned by a fixed angle), rendered headless and in a window, compared with
+`packages/gfx/test/triangle.png` and `cube.png` (a pixel matches when no
+channel differs by more than 2, and at most 0.5% may differ by more), and
+in the window the input sent to it (a key's character, the wheel) checked
+as events: on Linux by Mesa's llvmpipe (an EGL pbuffer, an X11 window under
+Xvfb), on macOS by Metal (an offscreen texture, a Cocoa window; skipped
+without a Metal device or outside a GUI session), on Windows by D3D11's
+WARP (an offscreen texture, a Win32 window); `GFX_TARGET=windows-x86_64`
+runs the Windows build under Wine (wined3d over llvmpipe, under Xvfb) (CI:
+the `gfx` and `gfx-arm64` jobs on Linux, `gfx-windows` on Windows x86-64
+and arm64, `gfx-macos` from the npm packages).
 `make gfx-web-check`: the same on WebGPU and on WebGL2 (forced), built for
 wasm32-wasi, headless and in a canvas, in headless Chromium (SwiftShader;
-`packages/gfx/test/web.mjs`); CI checks the site's triangle the same way
-(`hxmc/web/tools/browser-test.mjs`, the `playground` job: WebGPU and
-WebGL2 in Chromium, WebGL2 in Firefox, under Xvfb, and in WebKit).
+`packages/gfx/test/web.mjs`; CI's `gfx` job); CI checks the site's cube the
+same way (`hxmc/web/tools/browser-test.mjs`, the `playground` job: WebGPU
+and WebGL2 in Chromium, WebGL2 in Firefox, under Xvfb, and in WebKit).
 `make gfx-shader-check`: the shader macro on Eval (shaders run on the CPU, the
 emitted sources, the programs it rejects: `packages/gfx/test/ShaderTest.hx`).
 

@@ -155,9 +155,9 @@ help:
 ##             the target's machine (Check; CI's test and wasm jobs): wasm32-wasi-legacy with legacy
 ##             exception handling, linux-*-glibc in the glibc mode (checked with readelf: ElfCheck)
 ## test-node-libs  -lib from node_modules with the npm package's compiler for the host (hxmc/test/NodeLibs.hx)
-## gfx-programs  bin/gfx/GFX_TARGET/{GfxTest,Triangle}[.exe]: packages/gfx's test programs (Linux: glibc mode)
-## gfx-check   packages/gfx: the triangle example headless and in a window, against a golden
-##             image (packages/gfx/test/check.sh; Linux: Mesa, Xvfb; macOS: Metal, Cocoa);
+## gfx-programs  bin/gfx/GFX_TARGET/{GfxTest,Triangle,Cube}[.exe]: packages/gfx's test programs (Linux: glibc mode)
+## gfx-check   packages/gfx: the triangle and cube examples headless and in a window, against
+##             golden images (packages/gfx/test/check.sh; Linux: Mesa, Xvfb; macOS: Metal, Cocoa);
 ##             GFX_TARGET=windows-x86_64: D3D11 and Win32 under Wine
 ## gfx-web-check  packages/gfx on WebGPU and WebGL2 (wasm32-wasi): the same, headless and in a
 ##             canvas, in headless Chromium (packages/gfx/test/web.mjs; Playwright with Chromium)
@@ -322,10 +322,10 @@ npm: $(NPM_GEN) $(NPM_NATIVES)
 
 # the pages, their scripts (hxmc/web/src, compiled by the port), the std
 # subset the playground's compiler reads (hxmc/web/MkBundle.hx), the measured
-# results (hxmc/web/data), the Graphics section's triangle (gfx/: the example
+# results (hxmc/web/data), the Graphics section's cube (gfx/: the example
 # built for wasm32-wasi with legacy exception handling, which every browser
 # with WebGPU has and those with WebGL2 since 2021, with packages/os's
-# browser.mjs and the packages' imports.mjs; hxmc/web/triangle.mjs) and the
+# browser.mjs and the packages' imports.mjs; hxmc/web/cube.mjs) and the
 # build facts
 mb = awk '{printf "%.1f MB", $$1 / 1048576}'
 # the site's build in the addresses of the files its pages fetch (Version.hx)
@@ -334,13 +334,13 @@ site: wasm $(PORT_BIN) $(WEB_SRC)
 	mkdir -p bin/site
 	cp bin/wasm/hih.wasm bin/wasm/hih-legacy.wasm hxmc/web/index.html hxmc/web/story.html hxmc/web/style.css bin/site/
 	$(PORT_BIN) -D site_version=$(SITE_VERSION) hxmc/web/build.hxml
-	$(call hxmc,bin/gfx/triangle.wasm,$(GFX_CP) -main Triangle $(HXMC_ARGS) -D hxmc.target=wasm32-wasi -D hxmc.wasm-eh=legacy)
+	$(call hxmc,bin/gfx/cube.wasm,$(GFX_CP) -main Cube $(HXMC_ARGS) -D hxmc.target=wasm32-wasi -D hxmc.wasm-eh=legacy)
 	mkdir -p bin/site/gfx
-	cp bin/gfx/triangle.wasm packages/os/browser.mjs bin/site/gfx/
+	cp bin/gfx/cube.wasm packages/os/browser.mjs bin/site/gfx/
 	cp packages/os/imports.mjs bin/site/gfx/os.mjs
 	cp packages/gfx/imports.mjs bin/site/gfx/gfx.mjs
-	cp hxmc/web/triangle.mjs bin/site/
-	sed -i -e 's/\(src\|href\)="\(playground\.js\|tables\.js\|triangle\.mjs\|style\.css\)"/\1="\2?v=$(SITE_VERSION)"/g' bin/site/index.html bin/site/story.html
+	cp hxmc/web/cube.mjs bin/site/
+	sed -i -e 's/\(src\|href\)="\(playground\.js\|tables\.js\|cube\.mjs\|style\.css\)"/\1="\2?v=$(SITE_VERSION)"/g' bin/site/index.html bin/site/story.html
 	$(RUN) -cp hxmc/web --run MkBundle $(HAXE_STD_PATH) bin/site/std.bundle
 	cp hxmc/web/data/*.json bin/site/
 	rm -rf bin/site/examples && cp -r hxmc/web/examples bin/site/examples
@@ -348,14 +348,14 @@ site: wasm $(PORT_BIN) $(WEB_SRC)
 	if [ -n "$(LIX_DIR)" ]; then mkdir -p bin/site/tools && cp $(LIX_DIR)/lix-* bin/site/tools/; fi
 	rm -rf bin/site/bench
 	if [ -n "$(BENCH_DATA)" ] && [ -f "$(BENCH_DATA)/history.json" ]; then mkdir -p bin/site/bench && cp $(BENCH_DATA)/history.json bin/site/bench/ && { cp $(BENCH_DATA)/latest.json bin/site/bench/ 2>/dev/null || true; }; fi
-	printf '{\n\t"date": "%s",\n\t"commit": "%s",\n\t"wasmSize": "%s",\n\t"wasmGz": "%s",\n\t"wasmLegacyGz": "%s",\n\t"dataGz": "%s",\n\t"lixSize": "%s",\n\t"triangleSize": "%s"\n}\n' \
+	printf '{\n\t"date": "%s",\n\t"commit": "%s",\n\t"wasmSize": "%s",\n\t"wasmGz": "%s",\n\t"wasmLegacyGz": "%s",\n\t"dataGz": "%s",\n\t"lixSize": "%s",\n\t"cubeSize": "%s"\n}\n' \
 		"$$(date -u +%Y-%m-%d)" "$$(git rev-parse --short HEAD)" \
 		"$$(wc -c < bin/site/hih.wasm | $(mb))" \
 		"$$(gzip -9c bin/site/hih.wasm | wc -c | $(mb))" \
 		"$$(gzip -9c bin/site/hih-legacy.wasm | wc -c | $(mb))" \
 		"$$(gzip -9c bin/site/std.bundle | wc -c | $(mb))" \
 		"$$(if [ -f bin/site/tools/lix-linux-x86_64 ]; then wc -c < bin/site/tools/lix-linux-x86_64 | $(mb); else echo -; fi)" \
-		"$$(wc -c < bin/site/gfx/triangle.wasm | awk '{printf "%d KB", $$1 / 1024}')" > bin/site/build-info.json
+		"$$(wc -c < bin/site/gfx/cube.wasm | awk '{printf "%d KB", $$1 / 1024}')" > bin/site/build-info.json
 	cat bin/site/build-info.json
 
 # --- Other programs ---
@@ -470,6 +470,7 @@ GFX_ARGS = $(if $(filter linux-%,$(GFX_TARGET)),-D hxmc.libc=glibc) -D hxmc.targ
 gfx-programs: $(TOOL) $(STD) $(HOST_RT)
 	$(call hxmc,bin/gfx/$(GFX_TARGET)/GfxTest$(call EXE,$(GFX_TARGET)),$(GFX_CP) -main GfxTest $(HXMC_ARGS) $(GFX_ARGS))
 	$(call hxmc,bin/gfx/$(GFX_TARGET)/Triangle$(call EXE,$(GFX_TARGET)),$(GFX_CP) -main Triangle $(HXMC_ARGS) $(GFX_ARGS))
+	$(call hxmc,bin/gfx/$(GFX_TARGET)/Cube$(call EXE,$(GFX_TARGET)),$(GFX_CP) -main Cube $(HXMC_ARGS) $(GFX_ARGS))
 gfx-check: gfx-programs
 	sh packages/gfx/test/check.sh bin/gfx/$(GFX_TARGET)
 
