@@ -28,6 +28,7 @@ class Driver {
 		abi.setLibc(o.libc);
 		if (o.segAlign > 0) abi.segAlign = o.segAlign;
 		if (o.pic) abi.reloc = Pic;
+		if (o.framePointers && !abi.wasm) abi.framePointers = true;
 		if (o.shared) {
 			abi.reloc = Pic;
 			abi.output = SharedLibrary;
@@ -219,7 +220,7 @@ class Driver {
 	function toolKey():String {
 		var p = Sys.programPath();
 		var st = try sys.FileSystem.stat(p) catch (_:Dynamic) null;
-		return "hxmc|" + abi.rtName + (o.wasmLegacyEh ? "+legacy-eh" : "") + "|" +(st == null ? "?" : st.size + "@" + st.mtime.getTime()) + "|";
+		return "hxmc|" + abi.rtName + (o.wasmLegacyEh ? "+legacy-eh" : "") + (abi.framePointers ? "+fp" : "") + "|" +(st == null ? "?" : st.size + "@" + st.mtime.getTime()) + "|";
 	}
 
 	// the functions that may be inlined (before the keys: they are part of them)

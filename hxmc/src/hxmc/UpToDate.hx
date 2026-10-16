@@ -20,6 +20,9 @@ class UpToDate {
 		for (a in args)
 			if (StringTools.startsWith(a, "hxmc.target=")) target = a.substr(12);
 		var rt = Sys.getEnv("HXMC_RT_OBJ");
+		// (and the environment that changes the code: Options.framePointers)
+		var fp = Sys.getEnv("HXMC_FRAME_POINTERS");
+		if (fp != null) tool += "|fp=" + fp;
 		if (rt == null) rt = Options.rtDir() + target + "/rt.o";
 		// (and the objects of sys.ssl and libuv next to it)
 		for (p in [rt, haxe.io.Path.directory(rt) + "/ssl.o", haxe.io.Path.directory(rt) + "/uv.o"]) {

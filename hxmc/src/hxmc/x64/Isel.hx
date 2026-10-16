@@ -113,6 +113,8 @@ class Isel implements hxmc.Target.Selector {
 			gprs = [1, 2, 6, 7, 8, 9, 10, 11, 0, 3, 12, 13, 14, 15, 5];
 			callerSaved = CALLER_SAVED;
 		}
+		// (rbp holds the frame record's address: Emit)
+		if (abi.framePointers) gprs.remove(5);
 		fprs = [for (i in 16...32) i];
 	}
 

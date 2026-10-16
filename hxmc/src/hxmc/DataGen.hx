@@ -415,7 +415,7 @@ class DataGen {
 
 	// the runtime's machine-code stubs the program refers to (MirBuild.STUB_*)
 	public function stubs(objs:Array<Obj>, emit:Target.Emitter) {
-		for (n in [MirBuild.STUB_CALL_ON_STACK, MirBuild.STUB_ZERO]) {
+		for (n in [MirBuild.STUB_CALL_ON_STACK, MirBuild.STUB_ZERO, MirBuild.STUB_FRAME]) {
 			var used = false;
 			for (o in objs.concat([obj]))
 				for (s in o.symbols)

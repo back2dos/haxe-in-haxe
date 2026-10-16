@@ -58,6 +58,10 @@ class Emit implements hxmc.Target.Emitter {
 				a.movR(true, 2, 1);
 				a.movz(false, 1, 0, 0);
 				a.bSym(obj.sym("memset"));
+			case hxmc.MirBuild.STUB_FRAME:
+				// the caller's x29 (this stub keeps no record of its own)
+				a.movR(true, 0, Asm.FP);
+				a.ret();
 			case _:
 				throw "hxmc: unknown runtime stub " + name;
 		}

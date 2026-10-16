@@ -6,7 +6,10 @@ import hxmc.x64.Asm;
 import hxmc.x64.Isel.XOp;
 
 // Allocated LIR -> x86-64 machine code in a text section: frame layout,
-// prologue and epilogues, jump tables, the constant pool.
+// prologue and epilogues, jump tables, the constant pool. With frame pointers
+// (Abi.framePointers) every function starts with push rbp; mov rbp, rsp
+// (rbp is then not allocated: Isel), so [rbp] links to the caller's record
+// and [rbp + 8] is the return address, leaf functions included.
 class Emit implements hxmc.Target.Emitter {
 	var obj:Obj;
 	var text:Section;
@@ -16,10 +19,12 @@ class Emit implements hxmc.Target.Emitter {
 	var npool = 0;
 
 	var win:Bool;
+	var fp:Bool;
 
-	public function new(obj:Obj, win = false) {
+	public function new(obj:Obj, win = false, fp = false) {
 		this.obj = obj;
 		this.win = win;
+		this.fp = fp;
 		text = obj.section(".text", Text, FALIGN);
 		rodata = obj.section(".rodata", RoData, 16);
 		a = new Asm(text);
@@ -101,11 +106,15 @@ class Emit implements hxmc.Target.Emitter {
 			off += 16;
 		}
 		var x = off;
-		while ((8 + 8 * saved.length + x) % 16 != 0)
+		while ((8 + 8 * pushed() + x) % 16 != 0)
 			x += 8;
 		// leaf functions without slots keep rsp as it is
 		if (!f.hasCalls && f.slots.length == 0 && f.outArgs == 0 && savedX.length == 0) x = 0;
 		frameSize = x;
+		if (fp) {
+			a.push(Asm.RBP);
+			a.movRR(8, Asm.RBP, Asm.RSP);
+		}
 		for (r in saved)
 			a.push(r);
 		if (win && frameSize >= 4096) {
@@ -219,6 +228,10 @@ class Emit implements hxmc.Target.Emitter {
 				text.buf.u8(0xAA);
 				if (win) a.pop(Asm.RDI);
 				a.ret();
+			case hxmc.MirBuild.STUB_FRAME:
+				// the caller's rbp (this stub keeps no record of its own)
+				a.movRR(8, Asm.RAX, Asm.RBP);
+				a.ret();
 			case _:
 				throw "hxmc: unknown runtime stub " + name;
 		}
@@ -240,7 +253,7 @@ class Emit implements hxmc.Target.Emitter {
 		}
 		if (i.sym != null) return Mem.rip(obj.sym(i.sym), i.disp);
 		if (i.base == LIns.FRAME) return new Mem(Asm.RSP, slotOff[i.slot] + i.disp);
-		if (i.base == -3) return new Mem(Asm.RSP, frameSize + 8 * saved.length + 8 + i.disp);
+		if (i.base == -3) return new Mem(Asm.RSP, frameSize + 8 * pushed() + 8 + i.disp);
 		if (i.base == -4) return new Mem(Asm.RSP, i.disp);
 		return new Mem(i.base, i.disp, i.index, i.scale);
 	}
@@ -257,6 +270,10 @@ class Emit implements hxmc.Target.Emitter {
 	var epilogueBytes = 0;
 	var epiLabel = -1; // the shared epilogue (this function's first)
 
+	// the registers the prologue pushes (rbp first with frame pointers)
+	inline function pushed():Int
+		return saved.length + (fp ? 1 : 0);
+
 	function epilogue() {
 		var at = text.buf.len;
 		for (k in 0...savedX.length)
@@ -265,6 +282,7 @@ class Emit implements hxmc.Target.Emitter {
 		var k = saved.length;
 		while (k-- > 0)
 			a.pop(saved[k]);
+		if (fp) a.pop(Asm.RBP);
 		a.ret();
 		epilogueBytes += text.buf.len - at;
 	}

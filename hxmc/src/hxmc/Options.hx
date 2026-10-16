@@ -20,6 +20,10 @@ class Options {
 	public var wasmLegacyEh = false;
 	// -D hxmc.libc=glibc: Linux, a dynamically linked executable against the system's glibc (Abi.setLibc; default: musl, static)
 	public var libc:Null<String> = null;
+	// -D hxmc.frame-pointers (also -debug; HXMC_FRAME_POINTERS=1, =0 off): x86-64
+	// functions keep a frame record (push rbp; mov rbp, rsp), so profilers and
+	// debuggers walk the stack by frame pointer (arm64 always has them: Abi)
+	public var framePointers = false;
 
 	public function new() {}
 
@@ -80,6 +84,8 @@ class Options {
 			case _: throw "hxmc: -D hxmc.wasm-eh=" + eh + ": exnref or legacy";
 		}
 		o.libc = def("hxmc.libc");
+		var fp = def("hxmc.frame_pointers"), fpEnv = env("HXMC_FRAME_POINTERS");
+		o.framePointers = fpEnv != null && fpEnv != "" ? fpEnv != "0" : fp != null ? fp != "0" : def("debug") != null;
 		var j = def("hxmc.jobs");
 		if (j == null) j = env("HXMC_JOBS");
 		if (j != null) o.jobs = Std.parseInt(j);

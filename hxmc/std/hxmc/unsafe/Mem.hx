@@ -57,6 +57,11 @@ extern class Mem {
 	// lines without reading them first; elsewhere the C library's memset;
 	// not on WebAssembly). Not a GC point.
 	static function zero(p:Ptr, bytes:I64):Void;
+	// the calling function's frame record (Abi.framePointers): [frame] is the
+	// caller's record, [frame + 8] the return address; null where functions
+	// keep none (x86-64 without -D hxmc.frame-pointers, WebAssembly). A call
+	// of the stub hxmc_frame. Not a GC point.
+	static function frame():Ptr;
 
 	// loads at p + off (8/16-bit and f32 loads widen; getI32 of 4 bytes)
 	static function getI8(p:Ptr, off:Int):Int;

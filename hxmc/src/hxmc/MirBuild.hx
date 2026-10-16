@@ -355,6 +355,7 @@ class MirBuild {
 	// the runtime's machine-code stubs (Target.Emitter.stub)
 	public static inline var STUB_CALL_ON_STACK = "hxmc_call_on_stack";
 	public static inline var STUB_ZERO = "hxmc_zero";
+	public static inline var STUB_FRAME = "hxmc_frame";
 
 	static var QUIET = [
 		"hxmc_zero" => true, "memset" => true, "memcpy" => true, "memmove" => true, "floor" => true, "ceil" => true,
@@ -2371,6 +2372,8 @@ class MirBuild {
 				var xs = [for (a in args) ex(a)];
 				call(STUB_ZERO, xs, Void);
 				iconst(0);
+			case "frame":
+				abi.framePointers ? call(STUB_FRAME, [], I64) : lconst32(0);
 			case _: throw new Unsupported("unknown intrinsic " + name);
 		}
 	}
