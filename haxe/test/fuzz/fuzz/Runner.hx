@@ -336,13 +336,23 @@ class Runner {
 		return r.length > 300 ? r.substr(0, 300) : r;
 	}
 
+	/**
+		An ulp from the math function, then up to about 2 more from one
+		multiplication or division by a constant (the result's ulp can be
+		half the operand's, relative to the value) and its rounding.
+	**/
+	static inline final MAX_ULPS = 4;
+
 	static final FLOAT = ~/-?[0-9]+\.[0-9]+(e[+-]?[0-9]+)?/i;
 
 	/**
 		Program outputs compared, where printed floats may differ in the last
-		place: the math functions (glibc's in the reference; in the port
+		places: the math functions (glibc's in the reference; in the port
 		hxmc builds, hxmc's port of musl's, hxmc/std/hxmc/rt/LibM.hx) round
-		some results an ulp apart (hxmc/PLANS.md, "Math"). Everything else
+		some results an ulp apart (hxmc/PLANS.md, "Math"), and the arithmetic
+		after them can widen that: `100 * Math.sin(-2.5)` is 2 ulps apart
+		(cases/interp-108625377). Two floats at the same place of a line match
+		when at most `MAX_ULPS` apart (both finite, same sign); everything else
 		must be identical.
 	**/
 	public static function sameOutput(a:String, b:String):Bool {
@@ -368,7 +378,7 @@ class Runner {
 			var fx = FLOAT.matched(0), lx = FLOAT.matchedLeft(), rx = FLOAT.matchedRight();
 			FLOAT.match(y);
 			var fy = FLOAT.matched(0), ly = FLOAT.matchedLeft(), ry = FLOAT.matchedRight();
-			if (lx != ly || !(fx == fy || ulps(Std.parseFloat(fx), Std.parseFloat(fy)) <= 1))
+			if (lx != ly || !(fx == fy || ulps(Std.parseFloat(fx), Std.parseFloat(fy)) <= MAX_ULPS))
 				return false;
 			x = rx;
 			y = ry;
@@ -382,7 +392,7 @@ class Runner {
 		var d = haxe.io.FPHelper.doubleToI64(a) - haxe.io.FPHelper.doubleToI64(b);
 		if (d < 0)
 			d = -d;
-		return d > 1 ? 2 : haxe.Int64.toInt(d);
+		return d > MAX_ULPS ? MAX_ULPS + 1 : haxe.Int64.toInt(d);
 	}
 
 	static function firstDiff(a:String, b:String):String {
