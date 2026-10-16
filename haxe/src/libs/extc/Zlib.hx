@@ -201,6 +201,43 @@ class Zlib {
 		return a;
 	}
 
+	// port: one set of stream buffers (window, prev, head, pending_buf) kept from
+	// deflateEnd for the next deflateInit2 of the same sizes: a JAR deflates each
+	// of its thousands of members with a fresh stream, and allocating and zeroing
+	// some 300 KB per stream dominated the time spent in deflate.
+	static var spareWindow:Null<Bytes> = null;
+	static var sparePrev:Array<Int>;
+	static var spareHead:Array<Int>;
+	static var sparePending:Bytes;
+	static final spareLock = new sys.thread.Mutex();
+
+	function takeBuffers():Bool {
+		spareLock.acquire();
+		var w = spareWindow;
+		var ok = w != null && w.length == w_size * 2 && spareHead.length == hash_size;
+		if (ok) {
+			window = w;
+			prev = sparePrev;
+			head = spareHead;
+			pending_buf = sparePending;
+			spareWindow = null;
+			sparePrev = spareHead = null;
+			sparePending = null;
+		}
+		spareLock.release();
+		return ok;
+	}
+
+	function giveBuffers():Void {
+		if (window == null) return;
+		spareLock.acquire();
+		spareWindow = window;
+		sparePrev = prev;
+		spareHead = head;
+		sparePending = pending_buf;
+		spareLock.release();
+	}
+
 	/* ========================================================================= */
 	// port: deflateInit2_ for method Z_DEFLATED, memLevel 8 and Z_DEFAULT_STRATEGY
 	// (the only arguments extc passes).
@@ -231,17 +268,26 @@ class Zlib {
 		s.hash_mask = s.hash_size - 1;
 		s.hash_shift = Std.int((s.hash_bits + MIN_MATCH - 1) / MIN_MATCH);
 
-		s.window = Bytes.alloc(s.w_size * 2);
-		s.window.fill(0, s.w_size * 2, 0);
-		s.prev = newArray(s.w_size);
-		s.head = newArray(s.hash_size);
+		// port: the buffers of an ended stream of the same sizes are taken again
+		// (see deflateEnd); fresh ones are zeroed. C allocates them with malloc
+		// and leaves window, prev and pending_buf uninitialized: what deflate
+		// reads of them it has written first, and lm_init clears head.
+		var reused = s.takeBuffers();
+		if (!reused) {
+			s.window = Bytes.alloc(s.w_size * 2);
+			s.window.fill(0, s.w_size * 2, 0);
+			s.prev = newArray(s.w_size);
+			s.head = newArray(s.hash_size);
+		}
 
 		s.high_water = 0; /* nothing written to s->window yet */
 
 		s.lit_bufsize = 1 << (memLevel + 6); /* 16K elements by default */
 
-		s.pending_buf = Bytes.alloc(s.lit_bufsize * LIT_BUFS);
-		s.pending_buf.fill(0, s.lit_bufsize * LIT_BUFS, 0);
+		if (!reused) {
+			s.pending_buf = Bytes.alloc(s.lit_bufsize * LIT_BUFS);
+			s.pending_buf.fill(0, s.lit_bufsize * LIT_BUFS, 0);
+		}
 		s.pending_buf_size = s.lit_bufsize * 4;
 
 		s.sym_buf = s.lit_bufsize;
@@ -723,6 +769,7 @@ class Zlib {
 
 	/* ========================================================================= */
 	public function deflateEnd():Int {
+		giveBuffers();
 		window = null;
 		prev = null;
 		head = null;
