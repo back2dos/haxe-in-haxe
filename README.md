@@ -262,6 +262,8 @@ wasm32-wasi, headless and in a canvas, in headless Chromium (SwiftShader;
 `packages/gfx/test/web.mjs`); CI checks the site's triangle the same way
 (`hxmc/web/tools/browser-test.mjs`, the `playground` job: WebGPU and
 WebGL2 in Chromium, WebGL2 in Firefox, under Xvfb, and in WebKit).
+`make gfx-shader-check`: the shader macro on Eval (shaders run on the CPU, the
+emitted sources, the programs it rejects: `packages/gfx/test/ShaderTest.hx`).
 
 CI (`.github/workflows/build.yml`) runs as parallel jobs, each waiting only
 for what it uses: `changes` (what the run needs, `.github/select.sh`, and

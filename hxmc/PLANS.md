@@ -526,11 +526,14 @@ setjmp/longjmp do not unwind, but debuggers and SEH-based tools would.
   binding and `pushUniforms` into a per-frame ring; automatic sync, two
   frames in flight, no allocation per frame; main thread only. Bind
   groups, compute (behind `device.features`) and threading later.
-- Shaders: a small hxsl-like Haxe macro emitting HLSL (`D3DCompile` from
-  the system's d3dcompiler_47.dll), MSL (`newLibraryWithSource`), GLSL ES
-  and WGSL, plus vertex layouts and typed uniform writers; SPIR-V for
-  Vulkan later from a Haxe emitter. One coordinate convention, flipped in
-  the macro.
+- Shaders: a Haxe macro emitting HLSL (`D3DCompile` from the system's
+  d3dcompiler_47.dll), MSL (`newLibraryWithSource`), GLSL ES and WGSL,
+  plus vertex layouts and typed uniform writers (first slice done, below);
+  SPIR-V for Vulkan later from a Haxe emitter. Against Heaps' hxsl: shaders
+  are plain typed functions (inputs are parameters, outputs return values,
+  no globals matched by name), compiled when the program is (no shader
+  linker or compiler in the app), typed uniforms and layouts, the math
+  runs on the CPU too, no engine.
 - Back ends in order: GL 3.3 / GLES 3 on Linux first (glibc mode; EGL and
   libX11 imports; Mesa's llvmpipe and Xvfb run it without a GPU, here and
   on CI), then Metal (done, below), D3D11 (done, below), WebGPU (done,
@@ -653,6 +656,55 @@ setjmp/longjmp do not unwind, but debuggers and SEH-based tools would.
   the site's triangle.wasm from 66 to 85 KB (both back ends are in it).
   Left: glGetString (it would return memory), a lost context
   (`webglcontextlost`).
+- Shader macro (first slice done, 2026-10-16; `hxmc.gfx.shader`): the
+  triangle's shaders are Haxe (`examples/TriangleShader.hx`), exact on GL
+  (llvmpipe), D3D11 (Wine), WebGL2 (Chromium, Firefox, WebKit's canvas)
+  and as before on WebGPU (SwiftShader: the same 422 pixels off by 1).
+  A class implementing `Shaders` (Haxe runs build macros from `@:build`
+  or `@:autoBuild` only, so an interface rather than a `@:shader`
+  metadata) holds static functions on the math types (`Vec2`, `Vec3`,
+  `Vec4`, `Mat4`: inline abstracts over immutable objects, swizzles and
+  operators written out by `VecBuild`) and `@:structInit` classes of them;
+  `ShaderMath` has GLSL's builtins as overloads (`vec4(v.xy, 0, 1)`, `mix`,
+  `normalize`, ...). The same functions run on the CPU. `@:vertex` takes
+  the vertex (its fields: the attributes, Float32, packed in order) and
+  returns the varyings (one `@:position`), `@:fragment` takes them and
+  returns the colour; further parameters are uniform blocks. Generated
+  members: `vertexCode`, `fragmentCode` (`ShaderCode` in the target's
+  languages: GLSL on Linux, GLSL and WGSL on wasm32-wasi, MSL on macOS,
+  HLSL on Windows, all four on other targets; `-D hxmc.gfx.shaders`),
+  `layout`, `uniforms` (std140 offsets, a binding each), `pipeline()` (a
+  `PipelineDesc` with `program`: `Device.createPipeline` compiles it),
+  `vertexBytes(vertices)`, `write<Uniform>(u, bytes, offset)`. How:
+  build time records each shader class's functions as written; an
+  expression macro in the class (`__shaders`) types them again with
+  `Context.withOptions({allowInlining: false})` in the class's own
+  context, so calls to the math types and `ShaderMath` stay calls; `Lower`
+  turns that typed AST into a small structured IR (`Ir.hx`: scalar,
+  vector, matrix and struct values, locals, if, while, for over Int
+  ranges, calls; expression blocks put their statements first), checking
+  the stage interface and rejecting the rest with its position
+  (allocation, arrays, closures, Dynamic, strings, recursion, field
+  assignment, other classes' functions); four emitters print it (`Emit`
+  and `Glsl`, `Wgsl`, `Msl`, `Hlsl`: HLSL's matrices transposed, so the
+  columns' memory order is GLSL's; MSL's uniform structs padded to
+  std140). Tests (`make gfx-shader-check`, `ShaderTest` on Eval, and CI's
+  `gfx` job): shaders run on the CPU, the emitted sources of three shader
+  classes against `test/shader/`, nine programs the compiler must reject
+  (`test/reject/`, `// expect:` lines as hxmc/test/reject); GfxTest and
+  WebTest also compile `LitShader` (uniform blocks, helpers from another
+  module) and `BuiltinShader` (every builtin) on each back end (MSL: the
+  `gfx-macos` CI job only). Cost (Triangle for Linux): 0.5 s to 0.77 s,
+  of which typing the macro's own code in the macro context 0.06-0.1 s,
+  running it 15 ms, typing the math types (their swizzles and overloads)
+  about 0.08 s; the executable is 1 KB smaller (109 KB). Left: uniforms
+  bound at run time (`Encoder.setUniforms` or a per-frame ring, GL's
+  `glUniformBlockBinding` by the block's name), textures and samplers as
+  parameters, variants (compile-time constants per pipeline), integer
+  vertex formats and flat varyings, `switch`, arrays of constant size,
+  matrices other than 4x4, the fragment position's convention (GL's
+  `gl_FragCoord` is y-up, the others y-down), one depth range, SPIR-V,
+  caching emitted code across compilations (the compilation server).
 - Structs by value in C calls (done for arm64, 2026-10-16): AAPCS64 on
   macOS, Linux and Windows (MirBuild.cStructArg, cStructRet; a64 Isel):
   homogeneous aggregates of up to four floats or doubles in v registers,
