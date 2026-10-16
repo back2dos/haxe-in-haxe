@@ -294,6 +294,19 @@ user's code are all modules alike.
   check policy) into a store in the user cache directory (the types cache's
   location, atomic writes and trim); the next build with the same key puts
   them in the server's cache before typing, and the server's checks decide.
+- Measured (one 4-core VM shared with other builds; time to the start of
+  lowering, then the whole build with the objects cached, and peak RSS):
+
+  | | no cache | types cache | module cache cold | module cache warm |
+  | --- | --- | --- | --- | --- |
+  | hello world | 306 ms | 158 ms, 0.21 s, 75 MB | 367 ms | 85 ms, 0.14 s, 70 MB |
+  | haxe-formatter | 848 ms | 704 ms, 0.86 s, 143 MB | 885 ms | 171 ms, 0.35 s, 105 MB |
+  | the port | 6.4 s | 6.2 s, 8.4 s, 1013 MB | 7.6 s | 1.14 s, 3.3 s, 782 MB |
+
+  A cold run pays the HXB encoding (the port: 0.86 s of 7.6 s). The port's
+  warm front half: reading its 28 MB pack 0.1 s, decoding the HXB 0.54 s,
+  DCE 0.26 s, typing what is left and the sort 0.26 s; validation (558
+  modules checked) 15 ms.
 - Storage: one pack per server context (the program's, its macros'), each
   an index of files (date, size, content hash) and modules, written whole
   and renamed into place; not a file per module. Later: content-addressed
