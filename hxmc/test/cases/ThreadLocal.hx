@@ -6,13 +6,18 @@ class ThreadLocal {
 		counter = 5;
 		f = 1.25;
 		var lock = new sys.thread.Lock();
+		// (Array is not thread-safe: the threads push under a mutex)
+		var mutex = new sys.thread.Mutex();
 		var seen = [];
 		for (i in 0...3)
 			sys.thread.Thread.create(() -> {
 				var before = counter;
 				for (k in 0...1000) counter++;
 				f += i;
-				seen.push(before + ":" + counter + ":" + f);
+				var s = before + ":" + counter + ":" + f;
+				mutex.acquire();
+				seen.push(s);
+				mutex.release();
 				lock.release();
 			});
 		for (i in 0...3) lock.wait();
