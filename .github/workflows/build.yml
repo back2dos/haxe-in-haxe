@@ -6,13 +6,13 @@
 #   (hxmc/bootstrap/rt.mjs); built here only when that release is missing
 #   (and published from pushes to main and hxmc), passed on as an artifact.
 # - build: the committed stage0 module under node builds the tool, which
-#   rebuilds itself (the fixpoint); then with the tool: the port's release
-#   binaries and lix for the six targets, the npm package (its WebAssembly
-#   compiler with every generator), the website, hxmc's corpus for every
-#   target; the tool as a WebAssembly module building the corpus and itself
-#   byte-identical (crosshost); lix downloads the reference compiler (the
-#   nightly of the pinned upstream commit, cached); peak memory and times
-#   (haxe/test/Measure.hx) go to the job summary.
+#   rebuilds itself (the fixpoint), and its types cache is checked; then with
+#   the tool: the port's release binaries and lix for the six targets, the
+#   npm package (its WebAssembly compiler with every generator), the website,
+#   hxmc's corpus for every target; the tool as a WebAssembly module building
+#   the corpus and itself byte-identical (crosshost); lix downloads the
+#   reference compiler (the nightly of the pinned upstream commit, cached);
+#   peak memory and times (haxe/test/Measure.hx) go to the job summary.
 # - conformance: the port against the reference: HXB of the upstream suites
 #   and macro cases, display requests, the compilation server and its
 #   JSON-RPC methods, upstream's target suites compiled by both and compared
@@ -141,6 +141,9 @@ jobs:
           s=$(date +%s)
           make bootstrap
           echo "BOOTSTRAP_SECONDS=$(( $(date +%s) - s ))" >> "$GITHUB_ENV"
+      # the cache of the runtime's typed modules (hxmc/src/hxmc/TypesCache.hx)
+      - name: Types cache
+        run: bin/hxmc/hxmc -cp hxmc/test -cp haxe/test --run CacheCheck
 
       - name: lix
         run: make lix

@@ -52,6 +52,8 @@ hxmc=<out>` writes an executable. A `build.hxml`:
 | `-D hxmc.jobs=<n>` | parallel module compilations (default: the cores) |
 | `-D hxmc.wasm-eh=legacy` | wasm: the legacy exception-handling instructions (`try`/`catch_all`/`rethrow`: Chrome 95+, Firefox 100+, Safari 15.2+) instead of `exnref` (Chrome 137+, Firefox 131+, Safari 18.4+) |
 | `HXMC_STATS=1` | what the build did and how long it took |
+| `HXMC_CACHE=<dir>` | the cache directory (default `~/.cache/hxmc`, macOS `~/Library/Caches/hxmc`, Windows `%LOCALAPPDATA%\hxmc\cache`; "hxmc" below) |
+| `HXMC_TYPES_CACHE=0` | no cache of the runtime's typed modules (every build types them) |
 
 Packages: `hxmc` holds the compiler's sources (`haxe/src`, `hxmc/`), the std,
 the runtime objects of the six targets and the compiler as a WebAssembly
@@ -157,7 +159,7 @@ cached by CI). Nothing builds OCaml.
 | --- | --- |
 | `make hxmc` | the tool after an edit of hxmc or the port: about 11 s (8 s of it typing the port; unchanged modules come from `bin/hxmc/hxmc.hxmc/`) |
 | `make port` | the port after an edit: about 13 s (an edit of a central module such as the typer recompiles every module: 26 s) |
-| `make quick` | after every edit of hxmc: the x64 corpus, again with `RT_VERIFY=1`, the wasm corpus under node (about 15 s; `CASES="Int64Gc Bench"` restricts it) |
+| `make quick` | after every edit of hxmc: the x64 corpus, again with `RT_VERIFY=1`, the wasm corpus under node, the types cache (about 20 s; `CASES="Int64Gc Bench"` restricts it) |
 | `make check` | before a commit: quick, arm64 (qemu), x64 Windows (wine), a 16 KB nursery, the wasm corpus with legacy exception handling, ThreadNatives x30, crosshost on three cases (`PORT=1`: the port's self-compile) |
 | `make full` | before a push: every nursery and `RT_VERIFY`, wasmtime, the port's self-compile natively and as a module, crosshost on everything, the fixpoint |
 | `make test` | HXB conformance of the port against the reference (seconds per 100 cases) |
@@ -343,10 +345,15 @@ handshake, startup and `rt_throw` are Haxe too (`Gc.hx`, `Threads.hx`,
 linked, only the C library, mbedtls and libuv ([hxmc/LOWLEVEL.md](hxmc/LOWLEVEL.md),
 "The runtime without C of our own"). The modules of hxmc's own package
 of the std (the runtime, `hxmc.unsafe`, the natives) are typed once per
-tool and configuration and cached as an HXB archive (`hxmc/src/hxmc/TypesCache.hx`:
-`<tool dir>/cache/`, or `HXMC_CACHE`; `HXMC_TYPES_CACHE=0` turns it off): a
-build loads them instead of typing them, and its executable is the same
-(`make fixpoint` checks it). A change of the runtime's
+tool and configuration and cached as an HXB archive (`hxmc/src/hxmc/TypesCache.hx`;
+`HXMC_TYPES_CACHE=0` turns it off): a build loads them instead of typing
+them, and its executable is the same (`make fixpoint` checks it). The cache
+is the user's (`$XDG_CACHE_HOME/hxmc` or `~/.cache/hxmc`, macOS
+`~/Library/Caches/hxmc`, Windows `%LOCALAPPDATA%\hxmc\cache`; `HXMC_CACHE`
+overrides; one that cannot be written is not used), shared by every build
+of the tool, each in its own `types/<tool>/`; once a day a build removes
+those unused for 14 days, and the least recently used beyond 1 GB
+(`hxmc/test/CacheCheck.hx` checks it). A change of the runtime's
 interface or of the IR's conventions needs a tool that knows it: build once
 against the previous runtime first, or bootstrap again.
 
