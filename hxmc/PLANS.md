@@ -534,8 +534,8 @@ setjmp/longjmp do not unwind, but debuggers and SEH-based tools would.
 - Back ends in order: GL 3.3 / GLES 3 on Linux first (glibc mode; EGL and
   libX11 imports; Mesa's llvmpipe and Xvfb run it without a GPU, here and
   on CI), then Metal (done, below), D3D11 (done, below), WebGPU (done,
-  below; WebGL2 only if browsers without WebGPU matter), then Vulkan /
-  D3D12.
+  below) with WebGL2 for browsers without it (done, below: the GL back
+  end), then Vulkan / D3D12.
 - First milestone (done): a GL triangle in an X11 window
   (`packages/gfx/examples/Triangle.hx`), checked against a golden image
   headless (EGL pbuffer on Mesa's surfaceless platform, `glReadPixels`) and
@@ -601,7 +601,7 @@ setjmp/longjmp do not unwind, but debuggers and SEH-based tools would.
   `Triangle.hx` on a canvas, against the same golden image within GfxTest's
   tolerance (SwiftShader in headless Chromium: 422 pixels off by 1,
   `make gfx-web-check`), and on the site (hxmc/web, "Graphics": 64 KB of
-  WebAssembly; a message where `navigator.gpu` is missing). The import
+  WebAssembly; WebGL2 where WebGPU is missing, below). The import
   convention: a package whose externs are imports of a module
   (`@:hxmc.lib("hxmc_gfx")`) ships `imports.mjs`, whose default export maps
   a host to import objects, possibly asynchronously (the adapter and device
@@ -623,6 +623,36 @@ setjmp/longjmp do not unwind, but debuggers and SEH-based tools would.
   sources in its bundle, the worker the packages' imports and a canvas,
   e.g. an OffscreenCanvas), node has no WebGPU (the corpus runner stays
   WASI only).
+- WebGL2 (done, 2026-10-16, wasm32-wasi in the browser): the triangle
+  wherever WebGL2 exists (Firefox on Linux and macOS, older Safari,
+  Chromium without WebGPU), with no second back end: WebGL2 is GLES 3.0,
+  so `GLBackend` runs there unchanged but for the context, the same
+  GLSL ES 3.00 (`ShaderCode.glsl`). `GL`'s build macro (`Loader`)
+  makes each declaration an import of the module `hxmc_gl` when typed
+  for wasm32-wasi (`-D hxmc.target`), an `@:hxmc.indirect` call through
+  an eglGetProcAddress pointer elsewhere (native binaries unchanged in
+  behaviour; the Linux checks stay exact). `packages/gfx/imports.mjs`
+  implements them on a WebGL2 context: object names are handles of
+  browser.mjs's table, strings, buffer data and glReadPixels go through
+  the module's memory (`Ptr<Ptr>` entries 8 bytes, hxmc's Ptr), the
+  `INFO_LOG_LENGTH` WebGL lacks from the log; `hxmc.gfx.gl.WebGL`: the
+  context (`getContext('webgl2', {antialias: false, preserveDrawingBuffer})`
+  on the canvas, or an OffscreenCanvas headless), make-current, swap
+  (pending JavaScript readPixels) and release. Selection (`Impl`):
+  WebGPU when the JavaScript side has a device (`WebGPU.ready`, requested
+  before main), else GL (`Backend.WebGL2`), else Device.create throws;
+  calls dispatch on the object's class, on wasm only (Mem.os() still folds
+  natively). Forced with browser.mjs's option `gfx: 'webgl2'` (the site:
+  `?gfx=webgl2`). `Device.readPixels` works there (synchronous
+  glReadPixels). Tests: `make gfx-web-check` runs WebTest on both in
+  headless Chromium (the same 422 pixels off by 1 on SwiftShader, and
+  Device.readPixels' checksum equal to the harness's); browser-test.mjs
+  checks the site's triangle through WebGL2 in Chromium (`?gfx=webgl2`),
+  WebKit (exact) and Firefox (exact; headless Firefox on Linux has no
+  WebGL, so CI runs its triangle headed under Xvfb on llvmpipe). Cost:
+  the site's triangle.wasm from 66 to 85 KB (both back ends are in it).
+  Left: glGetString (it would return memory), a lost context
+  (`webglcontextlost`).
 - Structs by value in C calls (done for arm64, 2026-10-16): AAPCS64 on
   macOS, Linux and Windows (MirBuild.cStructArg, cStructRet; a64 Isel):
   homogeneous aggregates of up to four floats or doubles in v registers,

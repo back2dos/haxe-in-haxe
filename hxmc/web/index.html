@@ -71,13 +71,13 @@ haxe-in-haxe -cp src --main Main --js out.js</pre>
 		<h2>Graphics</h2>
 		<div class="gfx">
 			<figure>
-				<canvas id="triangle" aria-label="A triangle with a red, a green and a blue corner, drawn with WebGPU"></canvas>
+				<canvas id="triangle" aria-label="A triangle with a red, a green and a blue corner"></canvas>
 				<p id="triangle-state" class="gfx-state" hidden></p>
 			</figure>
 			<div>
-				<p>This triangle is Haxe compiled by hxmc to WebAssembly, drawing through WebGPU. The same program, <a href="https://github.com/benmerckx/hxmc/blob/main/packages/gfx/examples/Triangle.hx">Triangle.hx</a>, opens a window and draws with OpenGL on Linux and with Metal on macOS, to the same pixels.</p>
+				<p>This triangle is Haxe compiled by hxmc to WebAssembly, drawing through <span id="triangle-api">WebGPU, or WebGL2 where WebGPU is missing</span>. The same program, <a href="https://github.com/benmerckx/hxmc/blob/main/packages/gfx/examples/Triangle.hx">Triangle.hx</a>, opens a window and draws with OpenGL on Linux, with Metal on macOS and with Direct3D 11 on Windows, to the same pixels. On WebGL2 it runs the same OpenGL ES code as on Linux, its calls going to the browser instead of the driver.</p>
 				<p>It uses two packages in pure Haxe: <a href="https://github.com/benmerckx/hxmc/tree/main/packages/os">@hxmc/os</a> (windows, input and the app loop) and <a href="https://github.com/benmerckx/hxmc/tree/main/packages/gfx">@hxmc/gfx</a> (a GPU layer shaped like WebGPU, with integer handles and no allocation per frame). They call the system's APIs directly; in the browser, each package's calls go to a small JavaScript module.</p>
-				<p class="note"><span data-info="triangleSize">~64 KB</span> of WebAssembly. Its <code>main</code> returns after the setup; then each <code>requestAnimationFrame</code> calls back into the module for a frame.</p>
+				<p class="note"><span data-info="triangleSize">~85 KB</span> of WebAssembly. Its <code>main</code> returns after the setup; then each <code>requestAnimationFrame</code> calls back into the module for a frame.</p>
 			</div>
 		</div>
 	</section>
