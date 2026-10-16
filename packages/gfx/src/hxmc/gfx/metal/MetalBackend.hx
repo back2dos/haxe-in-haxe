@@ -12,8 +12,12 @@ import hxmc.unsafe.*;
 // buffer in an autorelease pool, a pass a render command encoder. Shaders
 // are MSL compiled at run time (newLibraryWithSource), their entry point
 // main0; vertex buffer slots are buffer indices VERTEX_BUFFERS + slot (the
-// lower ones stay for uniforms). The colour target is BGRA8 (the layer's
-// own format): readPixels swaps it to RGBA.
+// lower ones are the uniform blocks' slots: setUniforms copies a block
+// into the command stream, setVertexBytes and setFragmentBytes, at most
+// 4 KB). The colour target is BGRA8 (the layer's own format): readPixels
+// swaps it to RGBA. The depth buffer is a Depth32Float texture of the target's size,
+// remade when the drawable's size changes. A texture at slot n is [[texture(n)]] and its
+// sampler [[sampler(n)]], in both stages.
 class MetalBackend {
 	public final backend = Backend.Metal;
 	public var width(default, null) = 0;
@@ -26,13 +30,19 @@ class MetalBackend {
 	final target:Ptr; // headless: the colour texture
 	final pass:Ptr; // MTLRenderPassDescriptor, reused
 	final attachment:Ptr; // its colour attachment 0
+	final depthAttachment:Ptr; // and its depth attachment
+	var depth = Ptr.nil(); // the depth texture, of depthWidth x depthHeight
+	var depthWidth = 0;
+	var depthHeight = 0;
 	// native memory: an out-parameter, the structs passed by value
 	final scratch:Ptr<Ptr>;
 	final clear:Ptr<MTLClearColor>;
 	final viewport:Ptr<MTLViewport>;
 	final origin:Ptr<MTLOrigin>;
 	final size:Ptr<MTLSize>;
+	final uniforms:Ptr<UInt8>; // a block on its way to setVertexBytes (MAX_BYTES)
 	var readback = Ptr.nil(); // readPixels' MTLBuffer
+	final region:Ptr<MTLRegion>; // writeTexture's
 	var readbackSize = 0;
 
 	// tables (handle = index + 1)
@@ -40,6 +50,8 @@ class MetalBackend {
 	final shaders:Array<Ptr> = []; // MTLFunction
 	final libraries:Array<Ptr> = [];
 	final pipelines:Array<MtlPipeline> = [];
+	final textures:Array<Ptr> = []; // MTLTexture
+	final samplers:Array<Ptr> = []; // MTLSamplerState
 
 	// the frame
 	var pool = Ptr.nil();
@@ -48,9 +60,14 @@ class MetalBackend {
 	var texture = Ptr.nil();
 	var enc = Ptr.nil();
 	var pipeline:MtlPipeline = null;
+	// drawIndexed's index buffer, type (MTL.IndexType*) and offset
+	var ibuf = Ptr.nil();
+	var itype = 0;
+	var ioffset = 0;
 
 	static inline var VERTEX_BUFFERS = 16;
 	static inline var MAX_SLOTS = 8;
+	static inline var MAX_BYTES = 4096;
 
 	public function new(surface:Surface) {
 		this.surface = surface;
@@ -63,8 +80,11 @@ class MetalBackend {
 		viewport = LibC.malloc(48);
 		origin = LibC.malloc(24);
 		size = LibC.malloc(24);
+		region = LibC.malloc(48);
+		uniforms = LibC.malloc(MAX_BYTES);
 		pass = make("MTLRenderPassDescriptor");
 		attachment = Msg.idInt(Msg.id(pass, ObjC.sel("colorAttachments")), ObjC.sel("objectAtIndexedSubscript:"), 0);
+		depthAttachment = Msg.id(pass, ObjC.sel("depthAttachment"));
 		if (surface.kind == Cocoa) {
 			layer = surface.display;
 			target = Ptr.nil();
@@ -89,6 +109,23 @@ class MetalBackend {
 		Runtime.objc_autoreleasePoolPop(pool);
 	}
 
+	// the depth texture, when the target's size is not its own
+	function sizeDepth() {
+		if (depthWidth == width && depthHeight == height) return;
+		ObjC.release(depth);
+		var d = make("MTLTextureDescriptor");
+		Msg.vInt(d, ObjC.sel("setPixelFormat:"), MTL.PixelFormatDepth32Float);
+		Msg.vInt(d, ObjC.sel("setWidth:"), width);
+		Msg.vInt(d, ObjC.sel("setHeight:"), height);
+		Msg.vInt(d, ObjC.sel("setUsage:"), MTL.TextureUsageRenderTarget);
+		Msg.vInt(d, ObjC.sel("setStorageMode:"), MTL.StorageModePrivate);
+		depth = Msg.idPtr(device, ObjC.sel("newTextureWithDescriptor:"), d);
+		Runtime.objc_release(d);
+		if (depth.isNull()) throw "hxmc.gfx: cannot create a " + width + "x" + height + " depth texture";
+		depthWidth = width;
+		depthHeight = height;
+	}
+
 	// a new instance of a class ([[cls alloc] init]: owned, not autoreleased)
 	static inline function make(cls:String):Ptr
 		return Msg.id(Msg.id(ObjC.cls(cls), ObjC.sel("alloc")), ObjC.sel("init"));
@@ -106,6 +143,61 @@ class MetalBackend {
 		if (data != null) LibC.memcpy(Msg.id(b, ObjC.sel("contents")), Mem.addr(data).add(8), (size : Int64));
 		buffers.push(b);
 		return buffers.length;
+	}
+
+	// (shared memory: what the GPU reads when the frame runs)
+	public function writeBuffer(id:Int, offset:Int, data:haxe.io.Bytes, dataOffset:Int, size:Int) {
+		var b = buffers[id - 1];
+		if (offset + size > Msg.i(b, ObjC.sel("length")).toInt()) throw "hxmc.gfx: writeBuffer: past the buffer's end";
+		var dst:Ptr<UInt8> = Msg.id(b, ObjC.sel("contents"));
+		LibC.memcpy(dst.add(offset), Mem.addr(data).add(8 + dataOffset), (size : Int64));
+	}
+
+	public function createTexture(d:TextureDesc):Int {
+		var desc = make("MTLTextureDescriptor");
+		Msg.vInt(desc, ObjC.sel("setPixelFormat:"), MTL.PixelFormatRGBA8Unorm);
+		Msg.vInt(desc, ObjC.sel("setWidth:"), d.width);
+		Msg.vInt(desc, ObjC.sel("setHeight:"), d.height);
+		Msg.vInt(desc, ObjC.sel("setUsage:"), MTL.TextureUsageShaderRead);
+		var t = Msg.idPtr(device, ObjC.sel("newTextureWithDescriptor:"), desc);
+		Runtime.objc_release(desc);
+		if (t.isNull()) throw "hxmc.gfx: cannot create a " + d.width + "x" + d.height + " texture";
+		textures.push(t);
+		if (d.data != null) writeTexture(textures.length, d.data);
+		return textures.length;
+	}
+
+	public function writeTexture(id:Int, data:haxe.io.Bytes) {
+		var t = textures[id - 1];
+		var w = Msg.i(t, S.width).toInt(), h = Msg.i(t, S.height).toInt();
+		if (data.length < w * h * 4) throw "hxmc.gfx: writeTexture: data has fewer than width * height * 4 bytes";
+		region.value.origin.x = 0;
+		region.value.origin.y = 0;
+		region.value.origin.z = 0;
+		region.value.size.width = w;
+		region.value.size.height = h;
+		region.value.size.depth = 1;
+		// (a copy first: the Bytes may move during a message)
+		Arena.scoped(a -> MtlMsg.vRegionIntPtrInt(t, ObjC.sel("replaceRegion:mipmapLevel:withBytes:bytesPerRow:"), region.value, 0, a.copyBytes(data, 0, w * h * 4), w * 4));
+	}
+
+	public function createSampler(d:SamplerDesc):Int {
+		var desc = make("MTLSamplerDescriptor");
+		var f = d.filter == Nearest ? MTL.SamplerMinMagFilterNearest : MTL.SamplerMinMagFilterLinear;
+		var w = switch d.wrap {
+			case null | Repeat: MTL.SamplerAddressModeRepeat;
+			case Clamp: MTL.SamplerAddressModeClampToEdge;
+			case Mirror: MTL.SamplerAddressModeMirrorRepeat;
+		}
+		Msg.vInt(desc, ObjC.sel("setMinFilter:"), f);
+		Msg.vInt(desc, ObjC.sel("setMagFilter:"), f);
+		Msg.vInt(desc, ObjC.sel("setSAddressMode:"), w);
+		Msg.vInt(desc, ObjC.sel("setTAddressMode:"), w);
+		var s = Msg.idPtr(device, ObjC.sel("newSamplerStateWithDescriptor:"), desc);
+		Runtime.objc_release(desc);
+		if (s.isNull()) throw "hxmc.gfx: cannot create a sampler";
+		samplers.push(s);
+		return samplers.length;
 	}
 
 	public function createShader(d:ShaderDesc):Int {
@@ -138,6 +230,17 @@ class MetalBackend {
 		Msg.vPtr(desc, ObjC.sel("setFragmentFunction:"), shaders[d.fragment.id() - 1]);
 		var color = Msg.idInt(Msg.id(desc, ObjC.sel("colorAttachments")), ObjC.sel("objectAtIndexedSubscript:"), 0);
 		Msg.vInt(color, ObjC.sel("setPixelFormat:"), MTL.PixelFormatBGRA8Unorm);
+		var blend:Blend = d.blend == null ? Opaque : d.blend;
+		if (blend != Opaque) {
+			Msg.vBool(color, ObjC.sel("setBlendingEnabled:"), true);
+			Msg.vInt(color, ObjC.sel("setSourceRGBBlendFactor:"), blend == Premultiplied ? MTL.BlendFactorOne : MTL.BlendFactorSourceAlpha);
+			Msg.vInt(color, ObjC.sel("setDestinationRGBBlendFactor:"), blend == Additive ? MTL.BlendFactorOne : MTL.BlendFactorOneMinusSourceAlpha);
+			Msg.vInt(color, ObjC.sel("setRgbBlendOperation:"), MTL.BlendOperationAdd);
+			Msg.vInt(color, ObjC.sel("setSourceAlphaBlendFactor:"), MTL.BlendFactorOne);
+			Msg.vInt(color, ObjC.sel("setDestinationAlphaBlendFactor:"), blend == Additive ? MTL.BlendFactorOne : MTL.BlendFactorOneMinusSourceAlpha);
+			Msg.vInt(color, ObjC.sel("setAlphaBlendOperation:"), MTL.BlendOperationAdd);
+		}
+		Msg.vInt(desc, ObjC.sel("setDepthAttachmentPixelFormat:"), MTL.PixelFormatDepth32Float);
 		var vd = make("MTLVertexDescriptor");
 		var attributes = Msg.id(vd, ObjC.sel("attributes")), layouts = Msg.id(vd, ObjC.sel("layouts"));
 		for (slot in 0...d.layout.length) {
@@ -164,7 +267,12 @@ class MetalBackend {
 		var error = state.isNull() ? describe(scratch.value) : null;
 		Runtime.objc_autoreleasePoolPop(pool);
 		if (error != null) throw "hxmc.gfx: the pipeline does not link:\n" + error;
-		pipelines.push(new MtlPipeline(state, d));
+		var ds = make("MTLDepthStencilDescriptor");
+		Msg.vInt(ds, ObjC.sel("setDepthCompareFunction:"), d.depthCompare == null ? (cast Compare.Always : Int) : (cast d.depthCompare : Int));
+		Msg.vBool(ds, ObjC.sel("setDepthWriteEnabled:"), d.depthWrite == true);
+		var depthState = Msg.idPtr(device, ObjC.sel("newDepthStencilStateWithDescriptor:"), ds);
+		Runtime.objc_release(ds);
+		pipelines.push(new MtlPipeline(state, depthState, d));
 		return pipelines.length;
 	}
 
@@ -181,6 +289,7 @@ class MetalBackend {
 			width = Msg.i(texture, S.width).toInt();
 			height = Msg.i(texture, S.height).toInt();
 		}
+		sizeDepth();
 		cmd = Msg.id(queue, S.commandBuffer);
 		return true;
 	}
@@ -202,6 +311,11 @@ class MetalBackend {
 			clear.value.alpha = k == null ? 1 : k.a;
 			MtlMsg.vClear(attachment, S.setClearColor, clear.value);
 		}
+		var d = p.depth;
+		Msg.vPtr(depthAttachment, S.setTexture, depth);
+		Msg.vInt(depthAttachment, S.setLoadAction, d == null || d.load == Load ? MTL.LoadActionLoad : MTL.LoadActionClear);
+		Msg.vInt(depthAttachment, S.setStoreAction, MTL.StoreActionStore);
+		Msg.vFloat(depthAttachment, S.setClearDepth, d == null || d.clear == null ? 1 : d.clear);
 		enc = Msg.idPtr(cmd, S.renderCommandEncoderWithDescriptor, pass);
 		viewport.value.originX = 0;
 		viewport.value.originY = 0;
@@ -221,13 +335,42 @@ class MetalBackend {
 		pipeline = p;
 		Msg.vPtr(enc, S.setRenderPipelineState, p.state);
 		Msg.vInt(enc, S.setCullMode, p.cull);
+		Msg.vPtr(enc, S.setDepthStencilState, p.depth);
 	}
 
 	public function setVertexBuffer(slot:Int, id:Int, offset:Int)
 		MtlMsg.vPtrIntInt(enc, S.setVertexBuffer, buffers[id - 1], offset, VERTEX_BUFFERS + slot);
 
+	public function setUniforms(slot:Int, data:haxe.io.Bytes, offset:Int, size:Int) {
+		if (offset < 0 || size < 0 || offset + size > data.length) throw "hxmc.gfx: setUniforms: outside the data";
+		if (size > MAX_BYTES) throw "hxmc.gfx: setUniforms: a block of more than " + MAX_BYTES + " bytes";
+		// (a copy first: the Bytes may move during a message)
+		LibC.memcpy(uniforms, Mem.addr(data).add(8 + offset), (size : Int64));
+		MtlMsg.vPtrIntInt(enc, S.setVertexBytes, uniforms, size, slot);
+		MtlMsg.vPtrIntInt(enc, S.setFragmentBytes, uniforms, size, slot);
+	}
+
 	public function draw(vertices:Int, instances:Int, first:Int)
 		MtlMsg.vIntIntIntInt(enc, S.drawPrimitives, pipeline.topology, first, vertices, instances);
+
+	public function setTexture(slot:Int, texture:Int, sampler:Int) {
+		var t = textures[texture - 1], s = samplers[sampler - 1];
+		MtlMsg.vPtrInt(enc, S.setVertexTexture, t, slot);
+		MtlMsg.vPtrInt(enc, S.setFragmentTexture, t, slot);
+		MtlMsg.vPtrInt(enc, S.setVertexSamplerState, s, slot);
+		MtlMsg.vPtrInt(enc, S.setFragmentSamplerState, s, slot);
+	}
+
+	public function setIndexBuffer(id:Int, format:IndexFormat, offset:Int) {
+		ibuf = buffers[id - 1];
+		itype = format == UInt16 ? MTL.IndexTypeUInt16 : MTL.IndexTypeUInt32;
+		ioffset = offset;
+	}
+
+	public function drawIndexed(count:Int, instances:Int, first:Int, baseVertex:Int) {
+		var at = ioffset + first * (itype == MTL.IndexTypeUInt16 ? 2 : 4);
+		MtlMsg.vIntIntIntPtrIntIntIntInt(enc, S.drawIndexedPrimitives, pipeline.topology, count, itype, ibuf, at, instances, baseVertex, 0);
+	}
 
 	public function endPass() {
 		Msg.v(enc, S.endEncoding);
@@ -279,12 +422,15 @@ class MetalBackend {
 	}
 
 	public function dispose() {
-		for (p in pipelines)
+		for (p in pipelines) {
 			Runtime.objc_release(p.state);
-		for (o in shaders.concat(libraries).concat(buffers))
+			Runtime.objc_release(p.depth);
+		}
+		for (o in shaders.concat(libraries).concat(buffers).concat(textures).concat(samplers))
 			Runtime.objc_release(o);
 		ObjC.release(readback);
 		ObjC.release(target);
+		ObjC.release(depth);
 		Runtime.objc_release(pass);
 		Runtime.objc_release(queue);
 		if (!layer.isNull()) Msg.vPtr(layer, ObjC.sel("setDevice:"), Ptr.nil());
@@ -294,17 +440,21 @@ class MetalBackend {
 		LibC.free(viewport);
 		LibC.free(origin);
 		LibC.free(size);
+		LibC.free(region);
+		LibC.free(uniforms);
 	}
 }
 
 // a render pipeline state and its draw state
 private class MtlPipeline {
 	public final state:Ptr;
+	public final depth:Ptr; // MTLDepthStencilState
 	public final topology:Int;
 	public final cull:Int;
 
-	public function new(state:Ptr, d:PipelineDesc) {
+	public function new(state:Ptr, depth:Ptr, d:PipelineDesc) {
 		this.state = state;
+		this.depth = depth;
 		topology = switch d.topology {
 			case null | Triangles: MTL.PrimitiveTypeTriangle;
 			case TriangleStrip: MTL.PrimitiveTypeTriangleStrip;
@@ -330,12 +480,21 @@ private class S {
 	public static final setLoadAction = ObjC.sel("setLoadAction:");
 	public static final setStoreAction = ObjC.sel("setStoreAction:");
 	public static final setClearColor = ObjC.sel("setClearColor:");
+	public static final setClearDepth = ObjC.sel("setClearDepth:");
+	public static final setDepthStencilState = ObjC.sel("setDepthStencilState:");
+	public static final drawIndexedPrimitives = ObjC.sel("drawIndexedPrimitives:indexCount:indexType:indexBuffer:indexBufferOffset:instanceCount:baseVertex:baseInstance:");
 	public static final renderCommandEncoderWithDescriptor = ObjC.sel("renderCommandEncoderWithDescriptor:");
 	public static final setViewport = ObjC.sel("setViewport:");
 	public static final setFrontFacingWinding = ObjC.sel("setFrontFacingWinding:");
 	public static final setRenderPipelineState = ObjC.sel("setRenderPipelineState:");
 	public static final setCullMode = ObjC.sel("setCullMode:");
 	public static final setVertexBuffer = ObjC.sel("setVertexBuffer:offset:atIndex:");
+	public static final setVertexBytes = ObjC.sel("setVertexBytes:length:atIndex:");
+	public static final setVertexTexture = ObjC.sel("setVertexTexture:atIndex:");
+	public static final setFragmentTexture = ObjC.sel("setFragmentTexture:atIndex:");
+	public static final setVertexSamplerState = ObjC.sel("setVertexSamplerState:atIndex:");
+	public static final setFragmentSamplerState = ObjC.sel("setFragmentSamplerState:atIndex:");
+	public static final setFragmentBytes = ObjC.sel("setFragmentBytes:length:atIndex:");
 	public static final drawPrimitives = ObjC.sel("drawPrimitives:vertexStart:vertexCount:instanceCount:");
 	public static final endEncoding = ObjC.sel("endEncoding");
 	public static final presentDrawable = ObjC.sel("presentDrawable:");

@@ -240,6 +240,10 @@ jobs:
       # the cache of the runtime's typed modules (hxmc/src/hxmc/TypesCache.hx)
       - name: Types cache
         run: bin/hxmc/hxmc -cp hxmc/test -cp haxe/test --run CacheCheck
+      # the persistent module cache: the same outputs with and without it
+      # (hxmc/src/hxmc/ModuleCache.hx, hxmc/test/ModuleCacheCheck.hx)
+      - name: Module cache
+        run: make test-module-cache PORT=1
 
       - name: The port's release binaries
         run: |
@@ -552,11 +556,12 @@ jobs:
           path: bin/site
 
   # packages/gfx: the shader macro's tests (make gfx-shader-check), then
-  # the triangle headless and in an X11 window, on Mesa's
-  # llvmpipe (no GPU), against the golden image (make gfx-check: the test
+  # the triangle and the cube headless and in an X11 window, on Mesa's
+  # llvmpipe (no GPU), against the golden images (make gfx-check: the test
   # programs in the glibc mode, packages/gfx/test/check.sh), here on Linux
-  # x86-64; the ARM64 and Windows programs cross-built for gfx-arm64 and
-  # gfx-windows
+  # x86-64, and on WebGPU and WebGL2 in headless Chromium (make
+  # gfx-web-check); the ARM64 and Windows programs cross-built for gfx-arm64
+  # and gfx-windows
   gfx:
     needs: [changes, rt]
     if: ${{ !cancelled() && needs.changes.result == 'success' && (needs.rt.result == 'success' || needs.rt.result == 'skipped') && (needs.changes.outputs.all == 'true' || needs.changes.outputs.libs == 'true') }}
@@ -581,11 +586,17 @@ jobs:
           make rt && touch bin/hxmc/rt/*/*.o
           make gfx-shader-check
           make gfx-check GFX_TARGET=linux-x86_64
+      - name: gfx (WebGPU, WebGL2 in Chromium)
+        run: |
+          set -ex
+          npm install --no-save --silent playwright@1.56.1
+          npx playwright install --with-deps chromium > /dev/null
+          make gfx-web-check
       - name: The ARM64 programs
         run: |
           set -ex
           make gfx-programs GFX_TARGET=linux-arm64
-          tar czf bin/gfx-linux-arm64.tar.gz -C bin/gfx/linux-arm64 GfxTest Triangle
+          tar czf bin/gfx-linux-arm64.tar.gz -C bin/gfx/linux-arm64 GfxTest Triangle Cube
       - uses: actions/upload-artifact@v7
         with: {name: gfx-linux-arm64, path: bin/gfx-linux-arm64.tar.gz, retention-days: 3}
       - name: The Windows programs
@@ -593,13 +604,13 @@ jobs:
           set -ex
           for t in windows-x86_64 windows-arm64; do
             make gfx-programs GFX_TARGET=$t
-            tar czf bin/gfx-$t.tar.gz -C bin/gfx/$t GfxTest.exe Triangle.exe
+            tar czf bin/gfx-$t.tar.gz -C bin/gfx/$t GfxTest.exe Triangle.exe Cube.exe
           done
       - uses: actions/upload-artifact@v7
         with: {name: gfx-windows, path: "bin/gfx-windows-*.tar.gz", retention-days: 3}
       - uses: actions/upload-artifact@v7
         if: always()
-        with: {name: gfx-images-linux-x86_64, path: bin/gfx/linux-x86_64/*.png, retention-days: 7}
+        with: {name: gfx-images-linux-x86_64, path: "bin/gfx/linux-x86_64/*.png\nbin/gfx/*.png", retention-days: 7}
 
   gfx-arm64:
     needs: [changes, gfx]
@@ -656,7 +667,7 @@ jobs:
         if: always()
         with: {name: 'gfx-images-${{ matrix.target }}', path: gfx/*.png, retention-days: 7}
 
-  # packages/gfx on macOS: the triangle and its test built from the npm
+  # packages/gfx on macOS: the examples and their test built from the npm
   # packages (@hxmc/cli with its platform package, -lib hxmc.gfx from
   # node_modules), then run on Metal and in a Cocoa window (check.sh: skipped
   # without a Metal device or outside a GUI session)
@@ -685,7 +696,8 @@ jobs:
           g="$GITHUB_WORKSPACE/repo/packages/gfx"
           npx haxe -lib hxmc.gfx -cp "$g/examples" -cp "$g/test" -main GfxTest --custom-target hxmc=gfx/GfxTest
           npx haxe -lib hxmc.gfx -cp "$g/examples" -main Triangle --custom-target hxmc=gfx/Triangle
-          ls -l gfx/GfxTest gfx/Triangle
+          npx haxe -lib hxmc.gfx -cp "$g/examples" -main Cube --custom-target hxmc=gfx/Cube
+          ls -l gfx/GfxTest gfx/Triangle gfx/Cube
           otool -L gfx/Triangle
           sh "$g/test/check.sh" gfx
       - uses: actions/upload-artifact@v7
@@ -1008,7 +1020,7 @@ jobs:
   # browsers' engines: --interp, HXB, diagnostics and completion, with both
   # modules (exnref, legacy exception handling); the page's choice of
   # module, also in a Chromium without exnref; the Graphics section's
-  # triangle against packages/gfx/test/triangle.png (WebGPU and WebGL2 in
+  # cube against packages/gfx/test/cube.png (WebGPU and WebGL2 in
   # Chromium, WebGL2 in Firefox and WebKit; Firefox's in a headed Firefox
   # under Xvfb on Mesa's llvmpipe: headless, it has no WebGL)
   playground:

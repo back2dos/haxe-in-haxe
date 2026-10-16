@@ -129,7 +129,13 @@ class Finalization {
 		}
 	}
 
+	// port: hxmc's persistent module cache (hxmc/src/hxmc/ModuleCache.hx) gives here, for the fields of a
+	// ... module it restored (their expressions as the filters left them), what the walk below saw of them
+	// ... when the module was typed (cf null: the class's init); always null in the compiler itself.
+	public static var sortExprHook:Null<(c:TClass, cf:Null<TClassField>, e:TExpr) -> TExpr> = null;
+
 	public static function sortTypes(com:CommonContext, modules:ModuleLut):{types:Array<ModuleType>, modules:Array<ModuleDef>} {
+		inline function sortExpr(c:TClass, cf:Null<TClassField>, e:TExpr):TExpr return sortExprHook == null ? e : sortExprHook(c, cf, e);
 		var types:Array<ModuleType> = [];
 		var states:Map<String, FinalizationState> = [];
 		var statics:Map<String, Bool> = [];
@@ -150,7 +156,7 @@ class Finalization {
 		inline function walkStaticField(p:GlobalTypePath, c:TClass, cf:TClassField):Void {
 			if (cf.cfExpr != null && !statics.exists(staticKey(c, cf.cfName))) {
 				statics.set(staticKey(c, cf.cfName), true);
-				walkExpr(p, cf.cfExpr);
+				walkExpr(p, sortExpr(c, cf, cf.cfExpr));
 			}
 		}
 		walkExpr = function(p, e) {
@@ -170,7 +176,7 @@ class Finalization {
 						var k = staticKey(c, "new");
 						if (statics.exists(k)) return;
 						statics.set(k, true);
-						if (c.clConstructor != null && c.clConstructor.cfExpr != null) walkExpr(p, c.clConstructor.cfExpr);
+						if (c.clConstructor != null && c.clConstructor.cfExpr != null) walkExpr(p, sortExpr(c, c.clConstructor, c.clConstructor.cfExpr));
 						if (c.clSuper != null) walkConstructor(c.clSuper.cls);
 					}
 					walkConstructor(c);
@@ -186,7 +192,7 @@ class Finalization {
 			if (c.clSuper != null) loopClass(p, c.clSuper.cls);
 			for (parent in c.clImplements) loopClass(p, parent.cls);
 			var init = TClassTools.getClInit(c);
-			if (init != null) walkExpr(p, init);
+			if (init != null) walkExpr(p, sortExpr(c, null, init));
 			// port: upstream PMap.iter is key-ordered, not insertion/hash order.
 			var names = [for (name in c.clStatics.keys()) name];
 			names.sort(Reflect.compare);
@@ -195,7 +201,7 @@ class Finalization {
 				if (f.cfExpr != null) switch f.cfExpr.eexpr {
 					case TFunction(_):
 					case _:
-						walkExpr(p, f.cfExpr);
+						walkExpr(p, sortExpr(c, f, f.cfExpr));
 				}
 			}
 		}

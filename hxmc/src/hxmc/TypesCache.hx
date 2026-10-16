@@ -36,7 +36,7 @@ class TypesCache {
 	static inline var ALL = "hxmc.rt.Modules";
 
 	// seconds between two refreshes of a tool directory's last use
-	static inline var USED_REFRESH = 3600.0;
+	public static inline var USED_REFRESH = 3600.0;
 	// seconds between two trims of the cache
 	static inline var TRIM_INTERVAL = 86400.0;
 	// seconds without use after which a tool directory goes
@@ -51,6 +51,13 @@ class TypesCache {
 
 	// <cache>/types/ (null: no place for it)
 	static function typesDir():Null<String> {
+		var d = cacheRoot();
+		return d == null ? null : d + "types/";
+	}
+
+	// the user's cache directory, with a trailing slash (null: no place for
+	// it); also ModuleCache's
+	public static function cacheRoot():Null<String> {
 		inline function env(n:String):Null<String> {
 			var v = Sys.getEnv(n);
 			return v == null || v == "" ? null : v;
@@ -69,13 +76,13 @@ class TypesCache {
 					x != null && Path.isAbsolute(x) ? x + "/hxmc" : home == null ? null : home + "/.cache/hxmc";
 			}
 		}
-		return d == null ? null : Path.addTrailingSlash(d) + "types/";
+		return d == null ? null : Path.addTrailingSlash(d);
 	}
 
-	static function now():Float
+	public static function now():Float
 		return Date.now().getTime() / 1000;
 
-	static function mtime(p:String):Float
+	public static function mtime(p:String):Float
 		return try FileSystem.stat(p).mtime.getTime() / 1000 catch (_:Dynamic) 0.0;
 
 	static function stamp(p:String):String {
@@ -84,7 +91,7 @@ class TypesCache {
 	}
 
 	// (the binary, however it was named)
-	static function toolStamp():String {
+	public static function toolStamp():String {
 		var p = try FileSystem.fullPath(Sys.programPath()) catch (_:Dynamic) Sys.programPath();
 		return Fingerprint.hash("hxmc-types|" + p + "|" + stamp(p)).substr(0, 16);
 	}
@@ -93,7 +100,7 @@ class TypesCache {
 	// that types the modules)
 	static var CONFIG = ["hxmc.target", "hxmc.census"];
 
-	static function define(com:context.Common.CommonContext, name:String):Null<String> {
+	public static function define(com:context.Common.CommonContext, name:String):Null<String> {
 		var u = StringTools.replace(name, "-", "_");
 		if (core.Define.rawDefined(com.defines, u)) return core.Define.rawDefinedValue(com.defines, u);
 		if (core.Define.rawDefined(com.defines, name)) return core.Define.rawDefinedValue(com.defines, name);
@@ -131,7 +138,7 @@ class TypesCache {
 		actx.hxbLibs.unshift(compiler.ParsedArg.ParsedArgTools.createNativeLib(base + ".zip", false, HxbLib));
 	}
 
-	static function touch(p:String):Bool {
+	public static function touch(p:String):Bool {
 		try {
 			var d = Path.directory(p);
 			if (!FileSystem.exists(d)) FileSystem.createDirectory(d);
@@ -144,7 +151,7 @@ class TypesCache {
 
 	// tmp renamed to p, replacing it (where a rename does not replace a file,
 	// as on Windows, p is deleted first)
-	static function replace(tmp:String, p:String):Bool {
+	public static function replace(tmp:String, p:String):Bool {
 		try {
 			FileSystem.rename(tmp, p);
 			return true;
@@ -163,7 +170,7 @@ class TypesCache {
 	// recently used ones beyond MAX_SIZE, at most once every TRIM_INTERVAL
 	// (two builds trimming at once remove the same ones); the
 	// running tool's (mine) stays
-	static function trim(types:String, mine:String) {
+	public static function trim(types:String, mine:String) {
 		var t = now();
 		var last = try Std.parseFloat(File.getContent(types + "trim.txt")) catch (_:Dynamic) Math.NaN;
 		if (last <= t && t - last < TRIM_INTERVAL) return;
@@ -200,7 +207,7 @@ class TypesCache {
 
 	// a name for temporary files (builds may write the same file at the same
 	// time, and rand() is the same sequence in every process)
-	static function nonce():String
+	public static function nonce():String
 		return Fingerprint.hash(Sys.args().join("\x00") + "|" + Sys.time() + "|" + haxe.Timer.stamp() + "|" + Sys.programPath()).substr(0, 16);
 
 	// whether the archive can stand in for typing its modules in this build
