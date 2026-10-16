@@ -316,7 +316,8 @@ npm: $(NPM_GEN) $(NPM_NATIVES)
 # the pages, their scripts (hxmc/web/src, compiled by the port), the std
 # subset the playground's compiler reads (hxmc/web/MkBundle.hx), the measured
 # results (hxmc/web/data), the Graphics section's triangle (gfx/: the example
-# built for wasm32-wasi, with packages/os's browser.mjs and the packages'
+# built for wasm32-wasi with legacy exception handling, which every browser
+# with WebGPU has, with packages/os's browser.mjs and the packages'
 # imports.mjs; hxmc/web/triangle.mjs) and the build facts
 mb = awk '{printf "%.1f MB", $$1 / 1048576}'
 # the site's build in the addresses of the files its pages fetch (Version.hx)
@@ -325,7 +326,7 @@ site: wasm $(PORT_BIN) $(WEB_SRC)
 	mkdir -p bin/site
 	cp bin/wasm/hih.wasm bin/wasm/hih-legacy.wasm hxmc/web/index.html hxmc/web/story.html hxmc/web/style.css bin/site/
 	$(PORT_BIN) -D site_version=$(SITE_VERSION) hxmc/web/build.hxml
-	$(call hxmc,bin/gfx/triangle.wasm,$(GFX_CP) -main Triangle $(HXMC_ARGS) -D hxmc.target=wasm32-wasi)
+	$(call hxmc,bin/gfx/triangle.wasm,$(GFX_CP) -main Triangle $(HXMC_ARGS) -D hxmc.target=wasm32-wasi -D hxmc.wasm-eh=legacy)
 	mkdir -p bin/site/gfx
 	cp bin/gfx/triangle.wasm packages/os/browser.mjs bin/site/gfx/
 	cp packages/os/imports.mjs bin/site/gfx/os.mjs
