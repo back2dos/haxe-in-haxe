@@ -4,7 +4,7 @@ import sys.io.File;
 
 using StringTools;
 
-// HXB conformance of the port (README.md, "Testing"):
+// HXB conformance of the port (docs/testing.md):
 //   <haxe> -cp haxe/test --run Conformance [-j N] [--cases <list>] [--eval] [--hxb-lib]
 //       [--parallel N [--parallel-reference]] [--summary <file>] [name-substring ...]
 // For every case of the list (default haxe/test/conformance-cases.txt):

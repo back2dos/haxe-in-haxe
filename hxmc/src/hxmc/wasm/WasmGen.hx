@@ -15,7 +15,7 @@ private enum Ctx {
 }
 
 // One function's Mir (after hxmc's optimizations) to a WebAssembly function
-// body (README.md, "WebAssembly"):
+// body (docs/hxmc.md, "WebAssembly"):
 // - control flow: the structured form of Ramsey's "Beyond Relooper" (ICFP
 //   2022) over the dominator tree: a node's merge children (two or more
 //   forward predecessors) follow it in blocks it is nested in, a loop

@@ -3,7 +3,7 @@ package hxmc.rt.wasm;
 import hxmc.rt.C;
 
 // hxmc.NativeThread for WebAssembly, which has one thread here
-// (README.md, "WebAssembly"): creating a thread throws; mutexes count
+// (docs/hxmc.md, "WebAssembly"): creating a thread throws; mutexes count
 // (they are reentrant), semaphores count, waits that nothing can end
 // (no timeout, no permit, nobody to signal) throw instead of hanging, and
 // waits with a timeout sleep it out; thread-local values are globals.

@@ -106,7 +106,7 @@ lix +lib tink_core              # haxe_libraries/tink_core.hxml
 haxe -lib tink_core --run Main  # runs Haxe 4.3.7 with tink_core
 lix use haxe 4.3.6              # switch to another downloaded version
 lix download                    # after a clone: the scope's Haxe and missing libraries</pre>
-		<p class="note">The <code>haxe</code> shim adds about 2 ms to a compiler call (Node.js: about 60 ms). The compiler server modes (<code>--wait</code>, <code>--server-listen</code>, <code>--server-connect</code>) run on libuv with hxcoro coroutines. Compared with the npm package on 26 scenarios, output and installed files are identical. Details: <a href="https://github.com/benmerckx/hxmc/blob/main/README.md">README.md</a>.</p>
+		<p class="note">The <code>haxe</code> shim adds about 2 ms to a compiler call (Node.js: about 60 ms). The compiler server modes (<code>--wait</code>, <code>--server-listen</code>, <code>--server-connect</code>) run on libuv with hxcoro coroutines. Compared with the npm package on 26 scenarios, output and installed files are identical. Details: <a href="https://github.com/benmerckx/hxmc/blob/main/docs/using.md">docs/using.md</a>.</p>
 	</section>
 
 	<section id="status">
@@ -118,7 +118,7 @@ lix download                    # after a clone: the scope's Haxe and missing li
 			<li><code>--interp</code>, display requests, the compilation server and the Eval debugger;</li>
 			<li>upstream's target-independent CI job (unit, misc, threads, tink_core, hxcoro), which passes with the native build.</li>
 		</ul>
-		<p class="note">Details: <a href="https://github.com/benmerckx/hxmc/blob/main/README.md">README.md, Testing</a>.</p>
+		<p class="note">Details: <a href="https://github.com/benmerckx/hxmc/blob/main/docs/testing.md">docs/testing.md</a>.</p>
 	</section>
 
 	<section id="benchmarks">

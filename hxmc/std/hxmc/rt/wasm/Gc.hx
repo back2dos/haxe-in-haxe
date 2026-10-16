@@ -7,7 +7,7 @@ import hxmc.unsafe.Ptr;
 
 // The collector and allocator of WebAssembly programs: the native Gc.hx's
 // generational copying collector with one thread, in Haxe over linear
-// memory (README.md, "WebAssembly"). Same objects, nursery, promotion
+// memory (docs/hxmc.md, "WebAssembly"). Same objects, nursery, promotion
 // and depth-first copying as the native Gc.hx (whose comments explain them); the
 // differences: memory comes from Heap (it grows, it is never given back),
 // the old space is a list of chunks rather than a contiguous semispace (a

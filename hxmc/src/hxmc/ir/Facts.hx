@@ -4,7 +4,7 @@ import hxmc.ir.Ir;
 
 // The program-wide preparation hxmc's code generator and data share
 // (hxmc.Prep), from the part of hxc's C emitter that did not write C
-// (README.md, "Origin"). It names
+// (docs/hxmc.md, "Origin"). It names
 // functions (F_<name>), string literals (S_<hash>) and program-wide numbers
 // (TY_*, FID_*, SIG_*, GI_*, DSP_*: absolute symbols in hxmc's objects), lays
 // out objects, assigns type indices and field ids, finds the functions that

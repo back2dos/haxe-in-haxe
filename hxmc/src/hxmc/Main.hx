@@ -1,6 +1,6 @@
 package hxmc;
 
-// The hxmc tool (README.md, "hxmc"): runs the port's compiler pipeline on the
+// The hxmc tool (docs/hxmc.md): runs the port's compiler pipeline on the
 // program (from an HXB archive with --hxb-lib, or from source), lowers the
 // filtered program to hxmc's IR (hxmc.ir.Lower) and compiles it to machine
 // code:

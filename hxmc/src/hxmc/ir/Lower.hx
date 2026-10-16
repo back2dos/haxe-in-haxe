@@ -10,7 +10,7 @@ import core.TFunctions;
 using core.TFunctions;
 
 // Lowers the filtered typed AST (the data HXB serializes) of everything
-// reachable from `main` to the IR (README.md).
+// reachable from `main` to the IR (docs/hxmc.md).
 //
 // Representation (see Ir.hx): Int/Bool/Float and haxe.Int64 unboxed;
 // everything else is a pointer. Generics are erased: a type parameter is Dynamic (RAny), and values
@@ -109,7 +109,7 @@ class Lower {
 		}
 	}
 
-	// ---- the runtime in Haxe (README.md, "Runtime in Haxe")
+	// ---- the runtime in Haxe (docs/hxmc.md, "Runtime in Haxe")
 
 	// runtime functions implemented in Haxe: @:hxmc.export("name") (also
 	// called by the runtime's C code: always compiled, under that symbol) and

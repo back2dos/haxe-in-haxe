@@ -4,7 +4,7 @@ import sys.io.File;
 
 using StringTools;
 
-// The hxmc test corpus (README.md, "Testing"): every program compiled by
+// The hxmc test corpus (docs/testing.md): every program compiled by
 // hxmc, run, and its output compared with its golden file.
 //   bin/hxmc/hxmc -cp hxmc/test -cp haxe/test --run Corpus [-j N] [-v] [--target T] [--wasm-eh legacy] [--libc glibc] [--stage DIR] [--bless] [case ...]
 // The cases are the programs of hxmc/test/cases (<Name>.hx with class <Name>)

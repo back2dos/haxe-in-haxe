@@ -1,5 +1,5 @@
-# Builds everything from source with node and hxmc (README.md, "Building")
-# and tests it on a machine of each target (README.md, "CI"):
+# Builds everything from source with node and hxmc (docs/development.md, "Building")
+# and tests it on a machine of each target (docs/testing.md, "CI"):
 #
 # - changes: what the run needs (.github/select.sh): everything, except on a
 #   branch whose changes since the last checked commit are only docs (*.md:
@@ -216,7 +216,7 @@ jobs:
             bin/hxmc/rt/*/*.o
           retention-days: 7
 
-  # the tool from the committed stage0 (README.md, "Building"): node runs it
+  # the tool from the committed stage0 (docs/development.md, "Building"): node runs it
   # to build the first native tool, which builds the tool from source; the
   # tool rebuilt by itself does not change. Then the release binaries and lix.
   build:
@@ -690,7 +690,7 @@ jobs:
         if: always()
         with: {name: gfx-images-macos-arm64, path: "${{ runner.temp }}/app/gfx/*.png", retention-days: 7, if-no-files-found: ignore}
 
-  # the port against the reference compiler (README.md, "Testing"); the Eval
+  # the port against the reference compiler (docs/testing.md); the Eval
   # debugger in shards (EvalDebugger --shard), the fuzzer's diff lanes (the
   # targets that need no library) split across three jobs
   conformance:

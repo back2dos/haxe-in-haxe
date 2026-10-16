@@ -152,7 +152,7 @@ class VDescField {
 // the closure info of a 2-ary closure) with offset 0 and an all-zero digest, so
 // the `t$fun_`/`t$vrt_`/`t$ctx_` names of the descriptions that reach a prototype
 // intentionally differ from the reference's (the conformance harnesses normalize
-// them: README.md, "Testing"). Everything else of the value is written as OCaml
+// them: docs/testing.md). Everything else of the value is written as OCaml
 // does: the records in their field order, the PMaps' AVL trees (rebuilt from the
 // keys' first-insertion order, as extlib's PMap.add builds them), sharing and cycles.
 private class OcamlExtern {

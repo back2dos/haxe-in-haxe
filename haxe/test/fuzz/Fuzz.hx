@@ -13,7 +13,7 @@ import sys.thread.Lock;
 	that the port compiles them exactly like the pinned reference compiler.
 
 	Build with hxmc: `make fuzz`, run `bin/fuzz/fuzz --help`.
-	See README.md, "Testing" (the fuzzer).
+	See docs/testing.md (the fuzzer).
 **/
 class Fuzz {
 	static var USAGE = "Usage: fuzz [options]

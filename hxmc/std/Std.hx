@@ -20,7 +20,7 @@
  * DEALINGS IN THE SOFTWARE.
  */
 // hxmc: haxe/upstream/std/Std.hx; the import loads the runtime's Haxe part
-// (hxmc.rt, README.md "Runtime in Haxe") into every program: Std is
+// (hxmc.rt, docs/hxmc.md, "Runtime in Haxe") into every program: Std is
 // loaded by every compilation.
 import hxmc.rt.Runtime;
 

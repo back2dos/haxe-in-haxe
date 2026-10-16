@@ -2,7 +2,7 @@ package hxmc.rt.wasm;
 
 import hxmc.rt.C;
 
-// hxmc.NativeSsl on WebAssembly (README.md, "WebAssembly"): mbedtls is not
+// hxmc.NativeSsl on WebAssembly (docs/hxmc.md, "WebAssembly"): mbedtls is not
 // there, so every call throws. Typed only for the programs that use the API.
 class NoSsl {
 	static function noSsl():Void
