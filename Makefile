@@ -141,7 +141,7 @@ help:
 ## reference   REFERENCE (bin/reference/haxe): the nightly of the pinned upstream commit, by lix
 ## test        HXB conformance of PORT_BIN against the reference (haxe/test/Conformance.hx;
 ##             CASES_FILE=haxe/test/conformance-macro-cases.txt for the macro cases)
-## test-fuzz   the fuzzer on PORT_BIN: LANE (default diff:hxb), N programs
+## test-fuzz   the fuzzer on PORT_BIN: LANE (default diff:hxb), the kept programs, then N programs
 ## test-display, test-server, test-jsonrpc, test-interp, test-haxelib, test-eval-debugger
 ##             the display requests, the compilation server, its JSON-RPC methods, --interp
 ##             runs, -lib, the Eval debugger: PORT_BIN against the reference (haxe/test/*.hx)
@@ -429,6 +429,7 @@ test-unit-targets: $(PORT_BIN) $(REFERENCE) bin/lix/lix
 	$(TEST_ENV) $(SCRIPT) UpstreamTargets -j $(JOBS)
 
 test-fuzz: bin/fuzz/fuzz $(PORT_BIN) $(REFERENCE)
+	HAXE_REFERENCE=$(abspath $(REFERENCE)) bin/fuzz/fuzz -j $(JOBS) --cases haxe/test/fuzz/cases --port $(abspath $(PORT_BIN)) --lane $(LANE)
 	HAXE_REFERENCE=$(abspath $(REFERENCE)) bin/fuzz/fuzz -j $(JOBS) -n $(N) --port $(abspath $(PORT_BIN)) --lane $(LANE)
 
 smoke:
