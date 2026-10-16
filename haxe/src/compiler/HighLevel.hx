@@ -10,9 +10,19 @@ import core.ds.ArgumentError;
 import core.ds.NotFound;
 
 class HighLevel {
+	// port: hxmc.HaxeMain resolves libraries from node_modules here before haxelib (hxmc/src/hxmc/NodeLibs.hx: the haxelib path lines of those it finds, the others for haxelib); always null in the compiler itself.
+	public static var libraryHook:Null<(libs:Array<String>, cwd:String) -> {lines:Array<String>, rest:Array<String>}> = null;
+
 	public static function addLibs(timerCtx:core.Timer.TimerContext, libsCwd:{libs:Array<String>, cwd:String}, args:Array<String>,
 			cs:Cache, hasDisplay:Bool):Array<String> {
 		var libs = libsCwd.libs, cwd = libsCwd.cwd;
+		// port: libraryHook's libraries, then haxelib's
+		var hooked:Array<String> = [];
+		if (libraryHook != null) {
+			var r = libraryHook(libs, cwd);
+			hooked = r.lines;
+			libs = r.rest;
+		}
 		var globalRepo = args.indexOf("--haxelib-global") >= 0;
 		function fail(msg:String):Dynamic {
 			throw new ArgumentError(msg);
@@ -45,11 +55,11 @@ class HighLevel {
 			return core.Timer.time(timerCtx, ["haxelib"], function(_) return callHaxelib(), null);
 		}
 		switch libs {
-			case []:
+			case [] if (hooked.length == 0):
 				return [];
 			case _:
 				var key:CompilationCache.HaxelibKey = {libs: libs, cwd: if (globalRepo) null else cwd};
-				var lines = try {
+				var lines = if (libs.length == 0) [] else try {
 					/* if we are compiling, really call haxelib since library path might have changed */
 					if (!hasDisplay) throw NotFound.raise();
 					cs.findHaxelib(key);
@@ -62,6 +72,7 @@ class HighLevel {
 						fail(e.message + " (" + e.arg + ")");
 					}
 				}
+				lines = hooked.concat(lines);
 				var acc:Array<String> = [];
 				// port: List.fold_left over the reversed lines, consing onto acc
 				var rev = lines.copy();

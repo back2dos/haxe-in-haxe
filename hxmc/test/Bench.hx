@@ -349,7 +349,7 @@ class Bench {
 				steps.push({cmd: [port].concat(args).concat(["--jvm", art])});
 				run = ["java", "-jar", art];
 			case "js":
-				// .cjs: the repository's package.json makes .js files ES modules
+				// .cjs: CommonJS whatever package.json a directory above has
 				art = '$out/main.cjs';
 				steps.push({cmd: [port].concat(args).concat(["-lib", "hxnodejs", "--js", art])});
 				run = ["node", art];

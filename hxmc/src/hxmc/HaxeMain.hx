@@ -67,6 +67,8 @@ class HaxeMain {
 				failed = Std.string(e);
 			}
 		}
+		// -lib from node_modules before lix and haxelib (NodeLibs.hx)
+		compiler.HighLevel.libraryHook = NodeLibs.resolve;
 		TypesCache.install();
 		var code = haxe.Main.run(args);
 		if (failed != null) {

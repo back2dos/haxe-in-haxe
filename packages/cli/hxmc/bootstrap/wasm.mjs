@@ -15,7 +15,7 @@ import os from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
 import zlib from 'node:zlib';
-import { notice, npmCache, pkgDir, pkgJson, version } from './launcher.mjs';
+import { notice, npmCache, pkgJson, version } from './launcher.mjs';
 
 const NAME = '@hxmc/wasm';
 
@@ -25,9 +25,6 @@ export async function wasmPackage() {
 		const p = createRequire(import.meta.url).resolve(`${NAME}/package.json`);
 		if (JSON.parse(fs.readFileSync(p, 'utf8')).version === version) return path.dirname(p);
 	} catch {}
-	// (a checkout of the repository: hxmc/bootstrap/haxe.wasm, from make npm)
-	const own = path.join(pkgDir, 'hxmc', 'bootstrap');
-	if (fs.existsSync(path.join(pkgDir, '.git')) && fs.existsSync(path.join(own, 'haxe.wasm'))) return own;
 	const dir = path.join(npmCache(), 'wasm');
 	if (fs.existsSync(path.join(dir, 'haxe.wasm'))) return dir;
 	await download(dir);

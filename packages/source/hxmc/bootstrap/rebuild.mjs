@@ -18,16 +18,13 @@ import process from 'node:process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const srcDir = path.dirname(path.dirname(path.dirname(fileURLToPath(import.meta.url))));
-// @hxmc/cli's launcher (in a checkout of the repository: the one next to this file)
-const own = path.join(srcDir, 'hxmc', 'bootstrap', 'launcher.mjs');
-let launcherPath = own;
-if (!fs.existsSync(own)) {
-	try {
-		launcherPath = path.join(path.dirname(createRequire(import.meta.url).resolve('@hxmc/cli/package.json')), 'hxmc', 'bootstrap', 'launcher.mjs');
-	} catch {
-		console.error('hxmc-rebuild: @hxmc/cli is not installed (npm i -D @hxmc/cli @hxmc/source)');
-		process.exit(1);
-	}
+// @hxmc/cli's launcher
+let launcherPath;
+try {
+	launcherPath = path.join(path.dirname(createRequire(import.meta.url).resolve('@hxmc/cli/package.json')), 'hxmc', 'bootstrap', 'launcher.mjs');
+} catch {
+	console.error('hxmc-rebuild: @hxmc/cli is not installed (npm i -D @hxmc/cli @hxmc/source)');
+	process.exit(1);
 }
 const L = await import(pathToFileURL(launcherPath).href);
 const srcVersion = JSON.parse(fs.readFileSync(path.join(srcDir, 'package.json'), 'utf8')).version;
@@ -111,7 +108,7 @@ try {
 		// (npm's link and dist/haxe run the launcher again, which runs this compiler)
 		L.restoreLaunchers();
 		console.log(`hxmc-rebuild: done in ${((Date.now() - t0) / 1000).toFixed(1)} s: ${exe}`);
-		if (!L.sourcePackage() && launcherPath !== own) console.log('hxmc-rebuild: (haxe runs it while @hxmc/source is installed)');
+		if (!L.sourcePackage()) console.log('hxmc-rebuild: (haxe runs it while @hxmc/source is installed)');
 	} else {
 		console.error(`hxmc-rebuild: the build failed (exit ${code})`);
 		if (code === 0) code = 1;

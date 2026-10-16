@@ -9,7 +9,7 @@ using StringTools;
 //   self-compile   the port's self-compile to HXB: ours (PORT_BIN) and the reference
 //   native build   the port built by the tool, cold (no cached objects)
 //   stage0         the stage0 module under node building the native tool
-//   npm wasm       @hxmc/wasm's compiler (hxmc/bootstrap/haxe.wasm) under node
+//   npm wasm       @hxmc/wasm's compiler (bin/npm/native/wasm32-wasi/haxe.wasm) under node
 //                  building the native compiler, as hxmc-rebuild does without a native one
 //   bin/hxmc/hxmc -cp haxe/test -cp hxmc/test --run Measure [--only a,b,...] [--port <exe>]
 //       [--reference <exe>] [--summary <file>]
@@ -58,9 +58,9 @@ class Measure {
 			if (r.peakMb > WASM_WARN_MB) warnings.push('stage0: peak ${r.peakMb} MB above $WASM_WARN_MB MB');
 			rmrf("bin/test/measure/hxmc1.hxmc");
 		}
-		if (only.contains("npm-wasm") && FileSystem.exists("hxmc/bootstrap/haxe.wasm")) {
+		if (only.contains("npm-wasm") && FileSystem.exists("bin/npm/native/wasm32-wasi/haxe.wasm")) {
 			rmrf("bin/test/measure/native.hxmc");
-			var r = measure("npm wasm builds the compiler (node)", "ours", node.concat([FileSystem.fullPath("hxmc/bootstrap/haxe.wasm"), "-cp", "haxe/src", "-cp", "hxmc/src",
+			var r = measure("npm wasm builds the compiler (node)", "ours", node.concat([FileSystem.fullPath("bin/npm/native/wasm32-wasi/haxe.wasm"), "-cp", "haxe/src", "-cp", "hxmc/src",
 				"-main", "hxmc.HaxeMain", "-D", "disable-parallelism", "-cp", "bin/hxmc/std", "--custom-target", "hxmc=bin/test/measure/native"]), ["HXMC_HOST" => host]);
 			if (r.peakMb > WASM_WARN_MB) warnings.push('npm wasm: peak ${r.peakMb} MB above $WASM_WARN_MB MB');
 			rmrf("bin/test/measure/native.hxmc");

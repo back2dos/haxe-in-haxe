@@ -1,0 +1,22 @@
+{
+  "name": "@hxmc/source",
+  "description": "The sources of @hxmc/cli's compiler (the Haxe compiler ported to Haxe, hxmc) and hxmc-rebuild, which builds it again from them for @hxmc/cli",
+  "type": "module",
+  "bin": {
+    "hxmc-rebuild": "hxmc/bootstrap/hxmc-rebuild"
+  },
+  "files": [
+    "haxe/src/",
+    "hxmc/src/",
+    "hxmc/std/",
+    "hxmc/bootstrap/",
+    "LICENSE",
+    "COPYING"
+  ],
+  "peerDependencies": {
+    "@hxmc/cli": "{version}"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

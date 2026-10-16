@@ -96,7 +96,7 @@ endef
 .DEFAULT_GOAL := help
 .PHONY: help std deps rt rt-build hxmc tool bootstrap fixpoint stage0 crosshost port dev release wasm npm site fuzz \
 	lix lix-release reference bench test test-fuzz test-display test-server test-jsonrpc test-unit-targets test-interp \
-	test-haxelib test-eval-debugger smoke hxmc-test portcheck measure quick check full clean distclean
+	test-haxelib test-eval-debugger test-node-libs smoke hxmc-test portcheck measure quick check full clean distclean
 
 help:
 	@sed -n '/^# --- Targets/,$$p' $(MAKEFILE_LIST) | sed -n 's/^## \{0,1\}//p'
@@ -118,8 +118,9 @@ help:
 ## release     bin/release/TARGET/haxe[.exe]: the port cross-built by hxmc, with mbedtls and libuv
 ## wasm        bin/wasm/hih.wasm: the playground's compiler (wasm32-wasi, -D hih_no_generators),
 ##             and bin/wasm/hih-legacy.wasm, the same with -D hxmc.wasm-eh=legacy (browsers without exnref)
-## npm         bin/npm/*.tgz: the npm packages @hxmc/cli (package.json; hxmc/bootstrap), its six
-##             platform packages @hxmc/<os>-<cpu>, @hxmc/wasm and @hxmc/source (NPM_VERSION)
+## npm         bin/npm/*.tgz: the npm packages of packages/ (packages/pack.mjs): @hxmc/cli, its six
+##             platform packages @hxmc/<os>-<cpu>, @hxmc/wasm and @hxmc/source (NPM_VERSION), and
+##             in bin/npm/packages/ the others with a version of their own (sources only)
 ## site        bin/site: the website (hxmc/web; LIX_DIR's lix binaries under tools/, BENCH_DATA's
 ##             benchmark history under bench/)
 ## fuzz        bin/fuzz/fuzz: the differential fuzzer, built by hxmc
@@ -135,6 +136,7 @@ help:
 ## test-unit-targets   upstream's unit suite compiled for each target by both, compared
 ## smoke       hxmc/test/smoke.sh on PORT_BIN: --interp, HXB, JS, sys.ssl, eval.luv
 ## hxmc-test   hxmc's corpus against its golden files (hxmc/test/Corpus.hx)
+## test-node-libs  -lib from node_modules with the npm package's compiler for the host (hxmc/test/NodeLibs.hx)
 ## portcheck   the port built by hxmc self-compiles to the reference's HXB (hxmc/test/Selfcheck.hx)
 ## bench       the HaxeBenchmarks cases on hxmc (native, wasm under node), C++, JVM, JS, HL/C and
 ##             HL, built by hxmc and the port: times, peak RSS, sizes (hxmc/test/Bench.hx; BENCH_ARGS)
@@ -250,33 +252,33 @@ bin/wasm/hih.wasm: $(TOOL) $(PORT_SRC) $(STD)
 bin/wasm/hih-legacy.wasm: $(TOOL) $(PORT_SRC) $(STD)
 	$(call hxmc,$@,$(PORT_ARGS) -D hih_no_generators -D hxmc.target=wasm32-wasi -D hxmc.wasm-eh=legacy)
 
-# --- The npm packages (hxmc/bootstrap/pack.mjs; @hxmc/cli: package.json at the root) ---
+# --- The npm packages (packages/, packed by packages/pack.mjs) ---
 
-# what they ship besides the sources: the compiler with every generator as
-# a wasm32-wasi module (@hxmc/wasm), hxmc's merged std and the runtime
-# objects (@hxmc/cli)
-NPM_GEN := hxmc/bootstrap/haxe.wasm hxmc/bootstrap/hxmc-std/.stamp hxmc/bootstrap/rt/HASH
-hxmc/bootstrap/haxe.wasm: $(TOOL) $(PORT_SRC) $(HXMC_SRC) $(STD)
-	$(call hxmc,bin/npm/haxe.wasm,$(PKG_ARGS) -D hxmc.target=wasm32-wasi)
-	cp bin/npm/haxe.wasm $@
-hxmc/bootstrap/hxmc-std/.stamp: hxmc/src/hxmc/MkStd.hx $(STD_SRC)
-	$(RUN) -cp hxmc/src --run hxmc.MkStd hxmc/std haxe/upstream/std hxmc/bootstrap/hxmc-std
-hxmc/bootstrap/rt/HASH: $(HOST_RT)
-	rm -rf hxmc/bootstrap/rt
-	for t in $(RT_TARGETS); do mkdir -p hxmc/bootstrap/rt/$$t && cp bin/hxmc/rt/$$t/rt.o bin/hxmc/rt/$$t/ssl.o bin/hxmc/rt/$$t/uv.o hxmc/bootstrap/rt/$$t/ || exit 1; done
-	cp bin/hxmc/rt/LICENSE.* hxmc/bootstrap/rt/ 2>/dev/null || true
+# what @hxmc/cli ships besides its sources (packages/cli): hxmc's merged std
+# and the runtime objects
+CLI_BOOT := packages/cli/hxmc/bootstrap
+NPM_GEN := $(CLI_BOOT)/hxmc-std/.stamp $(CLI_BOOT)/rt/HASH
+$(CLI_BOOT)/hxmc-std/.stamp: hxmc/src/hxmc/MkStd.hx $(STD_SRC)
+	$(RUN) -cp hxmc/src --run hxmc.MkStd hxmc/std haxe/upstream/std $(CLI_BOOT)/hxmc-std
+$(CLI_BOOT)/rt/HASH: $(HOST_RT)
+	rm -rf $(CLI_BOOT)/rt
+	for t in $(RT_TARGETS); do mkdir -p $(CLI_BOOT)/rt/$$t && cp bin/hxmc/rt/$$t/rt.o bin/hxmc/rt/$$t/ssl.o bin/hxmc/rt/$$t/uv.o $(CLI_BOOT)/rt/$$t/ || exit 1; done
+	cp bin/hxmc/rt/LICENSE.* $(CLI_BOOT)/rt/ 2>/dev/null || true
 	$(NODE) hxmc/bootstrap/rt.mjs hash > $@
-# the native compilers of the platform packages (@hxmc/<os>-<cpu>)
-NPM_NATIVES := $(foreach t,$(TARGETS),bin/npm/native/$(t)/haxe$(call EXE,$(t)))
+# the compilers: native for the platform packages (@hxmc/<os>-<cpu>), with
+# every generator as a wasm32-wasi module (@hxmc/wasm)
+NPM_NATIVES := $(foreach t,$(TARGETS),bin/npm/native/$(t)/haxe$(call EXE,$(t))) bin/npm/native/wasm32-wasi/haxe.wasm
+bin/npm/native/wasm32-wasi/haxe.wasm: $(TOOL) $(PORT_SRC) $(HXMC_SRC) $(STD)
+	$(call hxmc,$@,$(PKG_ARGS) -D hxmc.target=wasm32-wasi)
 bin/npm/native/%/haxe: $(TOOL) $(PORT_SRC) $(HXMC_SRC) $(STD) $(HOST_RT)
 	$(call hxmc,$@,$(PKG_ARGS) -D hxmc.target=$*)
 bin/npm/native/%/haxe.exe: $(TOOL) $(PORT_SRC) $(HXMC_SRC) $(STD) $(HOST_RT)
 	$(call hxmc,$@,$(PKG_ARGS) -D hxmc.target=$*)
-# NPM_VERSION: the version of all nine packages (default package.json's)
-NPM_VERSION ?= $(shell $(NODE) -p "require('./package.json').version")
+# NPM_VERSION: the version of all nine packages (default packages/cli/package.json's)
+NPM_VERSION ?= $(shell $(NODE) -p "require('./packages/cli/package.json').version")
 npm: $(NPM_GEN) $(NPM_NATIVES)
 	rm -f bin/npm/*.tgz
-	$(NODE) hxmc/bootstrap/pack.mjs $(NPM_VERSION) bin/npm/native bin/npm
+	$(NODE) packages/pack.mjs $(NPM_VERSION) bin/npm/native bin/npm
 	@ls -l bin/npm/*.tgz
 
 # --- The website (hxmc/web) ---
@@ -386,6 +388,9 @@ test-fuzz: bin/fuzz/fuzz $(PORT_BIN) $(REFERENCE)
 smoke:
 	sh hxmc/test/smoke.sh $(PORT_BIN)
 
+test-node-libs: bin/npm/native/$(HOST)/haxe
+	$(SCRIPT) NodeLibs
+
 hxmc-test: $(TOOL) $(STD) $(HOST_RT)
 	$(SCRIPT) Corpus -v $(CASES)
 
@@ -409,7 +414,7 @@ full: $(TOOL) $(STD) $(HOST_RT)
 
 clean:
 	rm -rf bin/port bin/release bin/site bin/wasm bin/fuzz bin/lix bin/npm bin/stage0 bin/test \
-		bin/hxmc/boot bin/hxmc/fix bin/hxmc-t bin/hxmc-fuzz $(NPM_GEN) hxmc/bootstrap/hxmc-std hxmc/bootstrap/rt
+		bin/hxmc/boot bin/hxmc/fix bin/hxmc-t bin/hxmc-fuzz $(CLI_BOOT)/hxmc-std $(CLI_BOOT)/rt
 
 distclean: clean
 	rm -rf bin

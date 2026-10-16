@@ -1,0 +1,15 @@
+{
+  "name": "{pkg}",
+  "description": "The native compiler of @hxmc/cli for {os} {cpu} (the Haxe compiler ported to Haxe, with hxmc built in)",
+  "os": [
+    "{os}"
+  ],
+  "cpu": [
+    "{cpu}"
+  ],
+  "files": [
+    "{exe}",
+    "LICENSE",
+    "COPYING"
+  ]
+}

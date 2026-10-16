@@ -20,11 +20,11 @@ the same `--interp` runs, display requests and compilation-server answers.
 | `hxmc/src/hxmc/` | hxmc's sources (package `hxmc`, class path `hxmc/src`): the IR and lowering (`ir/`), the code generators (`x64/`, `a64/`, `wasm/`), the linkers, the driver, `Main.hx` (the tool) and `HaxeMain.hx` (`haxe` with hxmc built in) |
 | `hxmc/std/` | hxmc's std: overrides of upstream modules and the runtime's Haxe part (`hxmc.rt`), merged with the Eval originals by `hxmc/src/hxmc/MkStd.hx` |
 | `hxmc/deps/` | no C of ours: `deps.sh` (mbedtls and libuv), `mkrt.sh` (the runtime objects: the C library's members, or the glibc mode's import table, mbedtls, libuv), `Layouts.hx` (system and libuv struct layouts per target, checked against the C headers), `probe.c` (build-time layout probe), `zig-version` |
-| `hxmc/test/` | hxmc's corpus (`cases/`, golden outputs `expected/`, frozen fuzzer programs `fuzz-1000.zip`), the encoder tests (`encoder/`), the scripts that run them (`Corpus`, `Check`, `Crosshost`, `Selfcheck`, `Tiers`, `EncCheck`), the release smoke test (`smoke.sh`), the benchmarks (`Bench`, with the cases' check programs in `bench/`) |
+| `hxmc/test/` | hxmc's corpus (`cases/`, golden outputs `expected/`, frozen fuzzer programs `fuzz-1000.zip`), the encoder tests (`encoder/`), the scripts that run them (`Corpus`, `Check`, `Crosshost`, `Selfcheck`, `Tiers`, `EncCheck`), `-lib` from node_modules (`NodeLibs`), the release smoke test (`smoke.sh`), the benchmarks (`Bench`, with the cases' check programs in `bench/`) |
 | `hxmc/web/` | the website and its playground (the port as a WebAssembly module in the browser) |
-| `hxmc/bootstrap/` | the committed stage0 (`stage0.wasm.br`), node's WASI runner (`wasi.mjs`), the runtime objects by hash (`rt.mjs`), the npm packages: their packer (`pack.mjs`), `@hxmc/cli`'s launcher (`haxe`, `launcher.mjs`, `wasm.mjs`, `postinstall.mjs`), `@hxmc/source`'s `hxmc-rebuild` (`rebuild.mjs`) |
+| `hxmc/bootstrap/` | the committed stage0 (`stage0.wasm.br`), node's WASI runner (`wasi.mjs`), the runtime objects by hash (`rt.mjs`) |
+| `packages/` | everything published to npm, one folder per package, packed by `pack.mjs`: `cli` (`@hxmc/cli`, laid out as its tarball: `package.json`, the version of the build's packages; the launcher `hxmc/bootstrap/{haxe,launcher.mjs,wasm.mjs,postinstall.mjs,platforms.mjs}`; `dist/haxe` for lix), `wasm` and `source` (`@hxmc/wasm`, `@hxmc/source` with `hxmc-rebuild`), `platform` (the template of the six `@hxmc/<os>-<cpu>`); any other folder whose `package.json` has a version of its own is a source-only package, published as it is |
 | `tools/lix/` | lix (the lix client and haxeshim) ported to build with hxmc |
-| `package.json` | the npm package `@hxmc/cli` (the others: `hxmc/bootstrap/pack.mjs`) |
 
 ## Using hxmc
 
@@ -107,13 +107,31 @@ Windows the WebAssembly path runs on node's WASI, whose gaps the launcher
 fills: `fd_readdir`, drive roots, Windows paths in arguments; checked in CI
 on Windows too.)
 
+Libraries from npm: `-lib <name>` (also `-L`, `--library`, and in hxml files)
+finds Haxe libraries in node_modules. A package is one when its package.json
+has a `"haxe"` field, `{"name": "hxmc.gfx", "classPath": "src", "hxml":
+"extraParams.hxml"}` (`hxml` optional); `-lib` takes that name or the
+package's own (`-lib @hxmc/gfx`), and `-lib <name>:<version>` only that
+version. It expands as haxelib's libraries do: the hxml's lines, the class
+path, `-D <name>=<version>`, then its dependencies (the packages of its
+`dependencies` and `peerDependencies` that have a `"haxe"` field), each
+library once. For each name, in this order: lix's `haxe_libraries/<name>.hxml`
+in the working directory or a parent (left to haxelib, which is lix's shim
+there), else the nearest `node_modules` holding it (from the working
+directory up, as node looks), else haxelib, as before. The compiler does this
+itself (`hxmc/src/hxmc/NodeLibs.hx`), so it works without node too
+(`node_modules/.bin/haxe` as the native compiler); lix's own `haxe` shim
+resolves every `-lib` itself before the compiler sees it (from
+`haxe_libraries`, or through `haxelib path`), so through it a library from
+npm needs a `haxe_libraries/<name>.hxml` of its own.
+
 Editors and lix: vshaxe with `"haxe.executable": "auto"` (the default) runs
 the workspace's `node_modules/.bin/haxe` when there is one (as for the lix
 npm package; expected from vshaxe's documentation of `auto`, not verified in
 an editor here); on Windows set it to `node_modules/@hxmc/cli/dist/haxe.exe`.
-`dist/` is an installation lix accepts as a path version (`dist/haxe`,
-`dist/std`, `dist/platform.txt`, written on install or first use): `lix use
-haxe ./node_modules/@hxmc/cli/dist`, or `.haxerc` with
+`dist/` (`packages/cli/dist` in this repository) is an installation lix
+accepts as a path version (`dist/haxe`, `dist/std`, `dist/platform.txt`,
+written on install or first use): `lix use haxe ./node_modules/@hxmc/cli/dist`, or `.haxerc` with
 `{"version": "./node_modules/@hxmc/cli/dist", "resolveLibs": "scoped"}`; lix's
 `haxe` shim then runs hxmc (checked with this repository's lix on Linux and
 macOS in CI). With the lix npm package in the same project both packages
@@ -135,7 +153,7 @@ make hxmc           # bin/hxmc/hxmc, the tool: on first use node runs the stage0
 make port           # bin/port/haxe: the port with every generator (seconds after an edit)
 make release TARGET=macos-arm64   # bin/release/<target>/haxe[.exe], with mbedtls and libuv
 make lix            # bin/lix/lix
-make npm            # bin/npm/*.tgz: the nine npm packages
+make npm            # bin/npm/*.tgz: the npm packages of packages/ (packages/pack.mjs)
 make site           # bin/site
 make help           # everything else
 ```
@@ -241,15 +259,17 @@ corpus and the self-compile under node and wasmtime, both also with legacy
 exception handling under node, the playground in three browser engines with
 both modules and its fallback to the legacy one in a Chromium without
 exnref), `npm` (the nine packages in fresh projects on each of the six
-machines: native at once through the platform package, `--ignore-scripts`,
+machines: native at once through the platform package, `-lib` from
+node_modules (`hxmc/test/NodeLibs.hx`, also by the WebAssembly compiler), `--ignore-scripts`,
 lix with `dist/`, the WebAssembly fallback, downloaded (from the local
 tarball: `HXMC_WASM_TARBALL`, a path or URL in place of the registry's) and
 installed, and `hxmc-rebuild` with `--reset`), `upstream-tests`, and
 `publish-npm` (all nine at one version, skipping those published already: the
 six platform packages, `@hxmc/wasm`, `@hxmc/source`, then `@hxmc/cli`,
 with provenance: on `v*` tags as `latest`, from main as a nightly prerelease
-`<version>-nightly.<date>.<commit>` tagged `next`; never from other
-branches), the nightly release and the website.
+`<version>-nightly.<date>.<commit>` tagged `next`; then the source-only
+packages of `packages/` at their own versions when those are not on npm yet;
+never from other branches), the nightly release and the website.
 
 Benchmarks (`make bench`, `hxmc/test/Bench.hx`): the
 [HaxeBenchmarks](https://github.com/HaxeBenchmarks/benchmark-runner) cases

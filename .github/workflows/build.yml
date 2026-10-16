@@ -23,7 +23,7 @@
 #   playground in Chromium, Firefox and WebKit.
 # - npm: the nine packages (@hxmc/cli, its six platform packages, @hxmc/wasm,
 #   @hxmc/source) installed in fresh projects on each target's machine: native
-#   at once, --ignore-scripts, lix, the WebAssembly fallback (downloaded,
+#   at once, -lib from node_modules, --ignore-scripts, lix, the WebAssembly fallback (downloaded,
 #   installed) and hxmc-rebuild; publish-npm publishes them on v* tags and
 #   (as nightlies) from main.
 # - upstream-tests: upstream's compiler-side suite (RunCi macro) with the
@@ -223,23 +223,27 @@ jobs:
       - uses: actions/upload-artifact@v7
         with: {name: lix, path: dist/lix/, retention-days: 14}
 
-      # the npm packages: @hxmc/cli, its six platform packages, @hxmc/wasm and
-      # @hxmc/source, at one version:
-      # the tag's (v*), a nightly prerelease on main, package.json's elsewhere
+      # the npm packages (packages/): @hxmc/cli, its six platform packages,
+      # @hxmc/wasm and @hxmc/source, at one version: the tag's (v*), a nightly
+      # prerelease on main, packages/cli/package.json's elsewhere; and in
+      # bin/npm/packages/ the source-only packages at their own versions
       - name: The npm packages
         run: |
           set -ex
-          v=$(node -p "require('./package.json').version")
+          v=$(node -p "require('./packages/cli/package.json').version")
           case "$GITHUB_REF" in
             refs/tags/v*) v=${GITHUB_REF_NAME#v} ;;
             refs/heads/main) v=$v-nightly.$(date -u +%Y%m%d).$(git rev-parse --short=7 HEAD) ;;
           esac
           make npm NPM_VERSION=$v
           echo "$v" > bin/npm/VERSION
+          # -lib from node_modules (and the npm job's copy of the test)
+          make test-node-libs
+          cp hxmc/test/NodeLibs.hx bin/npm/
           # what WebAssembly programs see of the file system (the npm job on Windows)
           bin/hxmc/hxmc bin/npm/probe.wasm -cp hxmc/test -main WasiProbe -cp bin/hxmc/std --custom-target hxmc -D hxmc.target=wasm32-wasi
       - uses: actions/upload-artifact@v7
-        with: {name: npm, path: "bin/npm/*.tgz\nbin/npm/probe.wasm\nbin/npm/VERSION\nbin/npm/sizes.md", retention-days: 7}
+        with: {name: npm, path: "bin/npm/*.tgz\nbin/npm/packages/*.tgz\nbin/npm/NodeLibs.hx\nbin/npm/probe.wasm\nbin/npm/VERSION\nbin/npm/sizes.md", retention-days: 7}
 
       # the website: the playground's WebAssembly, the pages' JavaScript, lix under tools/
       # (the Programs benchmarks: the history on the bench-data branch, bench.yml)
@@ -657,7 +661,8 @@ jobs:
   # the npm packages in fresh projects, on each target's machine (every
   # package installed before publish-npm publishes them): @hxmc/cli with its
   # platform package (native at once, node_modules/.bin/haxe the native
-  # compiler on Unix; with --ignore-scripts after the first call), lix with
+  # compiler on Unix; -lib from node_modules; with --ignore-scripts after the
+  # first call), lix with
   # dist/; the WebAssembly fallback (no platform package: @hxmc/wasm downloaded
   # into the cache, here from the local tarball through HXMC_WASM_TARBALL, or
   # installed); @hxmc/source (an edit, hxmc-rebuild, haxe runs the rebuilt
@@ -716,6 +721,14 @@ jobs:
           time npx haxe build.hxml
           if [ "$RUNNER_OS" = Windows ]; then ./bin/app.exe; ls -l node_modules/@hxmc/cli/dist/haxe.exe; else ./bin/app; fi
           npx haxe -cp src -main Js --js main.js && node main.js
+      # -lib from node_modules (hxmc/test/NodeLibs.hx), by the native compiler
+      # run without node (npm's link to it on Unix, dist/haxe.exe on Windows)
+      - name: -lib from node_modules
+        run: |
+          set -ex
+          cd "$RUNNER_TEMP/app"
+          if [ "$RUNNER_OS" = Windows ]; then hx="$PWD/node_modules/@hxmc/cli/dist/haxe.exe"; else hx="$PWD/node_modules/.bin/haxe"; fi
+          "$hx" -cp "$GITHUB_WORKSPACE/dl" --run NodeLibs --haxe "$hx" --dir "$RUNNER_TEMP/node-libs"
       - name: With --ignore-scripts, the first call installs the native compiler
         if: runner.os != 'Windows'
         run: |
@@ -791,6 +804,13 @@ jobs:
           npx haxe -cp src -main Main --interp | tee out.txt
           grep -q "hello from Wasi" out.txt
           test ! -e "$HXMC_CACHE/npm"
+          # -lib from node_modules, by the WebAssembly compiler
+          mkdir -p node_modules/hxdemo/src/demo
+          printf '{"name": "hxdemo", "version": "1.0.0", "haxe": {"name": "hxdemo", "classPath": "src"}}\n' > node_modules/hxdemo/package.json
+          printf 'package demo;\nclass Demo {\n\tpublic static function hi() return "hi from node_modules";\n}\n' > node_modules/hxdemo/src/demo/Demo.hx
+          printf 'class UseDemo {\n\tstatic function main() Sys.println(demo.Demo.hi());\n}\n' > src/UseDemo.hx
+          npx haxe -cp src -lib hxdemo -main UseDemo --interp | tee demo.txt
+          grep -q "hi from node_modules" demo.txt
       # @hxmc/source: hxmc-rebuild builds the edited compiler with the native
       # one, haxe runs it while @hxmc/source is installed, --reset returns to
       # the published one
@@ -825,7 +845,9 @@ jobs:
   # npm: the nine packages at one version (the build job's), installed and
   # tested by the npm job: the six platform packages, @hxmc/wasm,
   # @hxmc/source, then @hxmc/cli: on v* tags (dist-tag latest) and pushes to main (a nightly, dist-tag
-  # next); never from other branches
+  # next); then every source-only package (packages/<name> with a version of
+  # its own: bin/npm/packages/) at its version when that is not on npm yet
+  # (dist-tag latest, next for a prerelease); never from other branches
   publish-npm:
     needs: [build, npm, test, wasm, conformance]
     if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
@@ -862,6 +884,15 @@ jobs:
           done
           for p in linux-x64 linux-arm64 darwin-x64 darwin-arm64 win32-x64 win32-arm64 wasm source cli; do
             publish "@hxmc/$p" "./dl/hxmc-$p-$v.tgz"
+          done
+          # the source-only packages, at their own versions
+          for f in dl/packages/*.tgz; do
+            test -e "$f" || continue
+            meta=$(tar xzf "$f" -O package/package.json | node -p 'const p = JSON.parse(require("fs").readFileSync(0)); p.name + " " + p.version')
+            name=${meta% *} pv=${meta#* }
+            if npm view "$name@$pv" version >/dev/null 2>&1; then echo "$name@$pv is published already"; continue; fi
+            case "$pv" in *-*) ptag=next ;; *) ptag=latest ;; esac
+            npm publish --access public --provenance --tag $ptag "./$f"
           done
 
   # nightly on main, a release on v* tags

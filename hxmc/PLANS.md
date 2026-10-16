@@ -594,21 +594,26 @@ bootstrap).
 npm first, haxelib later. One folder per package, published by the same
 CI job (versions not yet on npm), each with its own version:
 
-- `packages/cli` (`@hxmc/cli`: the root package.json, the launcher from
-  hxmc/bootstrap, `dist/haxe`), `wasm`, `source`, `platform` (the template
-  for the six platform packages); hxmc/bootstrap keeps stage0 and rt.mjs.
+- Done (2026-10-16): `packages/cli` (`@hxmc/cli`, laid out as its tarball:
+  package.json, the launcher in hxmc/bootstrap, `dist/haxe`), `wasm`,
+  `source`, `platform` (the template for the six platform packages), all
+  packed by `packages/pack.mjs` at the build's version; hxmc/bootstrap keeps
+  stage0, wasi.mjs and rt.mjs. Any other `packages/<name>` with a version of
+  its own is packed as it is and published at that version.
 - `packages/os`, `packages/gfx`, later `packages/ui` (Graphics): sources
   only, a peer dependency on a range of `@hxmc/cli`.
-- The launcher resolves `-lib hxmc.gfx` from node_modules first (a `"haxe"`
-  field in package.json: class path, extra hxml, dependencies), then lix /
-  haxelib.
+- Done (2026-10-16): `-lib hxmc.gfx` from node_modules (a `"haxe"` field in
+  package.json: class path, extra hxml, dependencies), in the compiler
+  (`hxmc/src/hxmc/NodeLibs.hx`, through `compiler.HighLevel.libraryHook`):
+  lix's haxe_libraries first, then node_modules, then haxelib (README "Using
+  hxmc").
 
 ### npm: a WebAssembly package that bootstraps itself natively
 
 Done (2026-10-15, README "Using hxmc"): the package `hxmc` at the
 repository root (`make npm`), with `hxmc-rebuild`; left: checking the
 native build against a published hash. Since 2026-10-16 split in nine
-(`hxmc/bootstrap/pack.mjs`): `@hxmc/cli` (launcher, std, runtime objects),
+(`packages/`, above): `@hxmc/cli` (launcher, std, runtime objects),
 the six platform packages, `@hxmc/wasm` (the fallback, installed or
 downloaded and checked against a pinned integrity) and `@hxmc/source`
 (`hxmc-rebuild`, with the native compiler). The plan as it was:

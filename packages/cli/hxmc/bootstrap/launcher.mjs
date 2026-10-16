@@ -21,6 +21,10 @@ export const bootDir = path.dirname(fileURLToPath(import.meta.url));
 export const pkgDir = path.dirname(path.dirname(bootDir));
 export const pkgJson = JSON.parse(fs.readFileSync(path.join(pkgDir, 'package.json'), 'utf8'));
 export const version = pkgJson.version;
+// (the repository's packages/cli, where these files are sources)
+const checkout = fs.existsSync(path.join(pkgDir, '..', '..', 'hxmc', 'bootstrap', 'stage0.wasm.br'));
+// upstream's std: haxe/upstream/std of the package (of the repository in a checkout)
+const stdDir = path.join(pkgDir, ...(checkout ? ['..', '..'] : []), 'haxe', 'upstream', 'std');
 const require = createRequire(import.meta.url);
 
 // hxmc's name of this machine (null: no native build, WebAssembly only)
@@ -54,7 +58,7 @@ export const exeName = process.platform === 'win32' ? 'haxe.exe' : 'haxe';
 // runtime objects (hxmc.HaxeMain finds them itself as hxmc/bootstrap/haxe)
 export function toolEnv(extra = {}) {
 	const env = { ...process.env, ...extra };
-	if (!env.HAXE_STD_PATH) env.HAXE_STD_PATH = path.join(pkgDir, 'haxe', 'upstream', 'std');
+	if (!env.HAXE_STD_PATH) env.HAXE_STD_PATH = stdDir;
 	if (!env.HXMC_STD) env.HXMC_STD = path.join(bootDir, 'hxmc-std');
 	if (!env.HXMC_RT_DIR) env.HXMC_RT_DIR = path.join(bootDir, 'rt');
 	return env;
@@ -75,13 +79,12 @@ export function setupDist() {
 	try {
 		const std = path.join(dist, 'std');
 		if (!fs.existsSync(std)) {
-			const target = path.join(pkgDir, 'haxe', 'upstream', 'std');
 			try {
 				// (relative on Unix: the package can move; a junction needs an absolute target)
-				if (process.platform === 'win32') fs.symlinkSync(target, std, 'junction');
-				else fs.symlinkSync(path.join('..', 'haxe', 'upstream', 'std'), std, 'dir');
+				if (process.platform === 'win32') fs.symlinkSync(stdDir, std, 'junction');
+				else fs.symlinkSync(path.relative(dist, stdDir), std, 'dir');
 			} catch {
-				fs.cpSync(target, std, { recursive: true });
+				fs.cpSync(stdDir, std, { recursive: true });
 			}
 		}
 		const platform = path.join(dist, 'platform.txt');
@@ -188,9 +191,6 @@ export async function wasm(dir, args, host, env = {}) {
 		}
 	}
 }
-
-// (a development checkout of the repository, where these files are sources)
-const checkout = fs.existsSync(path.join(pkgDir, '.git'));
 
 // The native compiler replaces the launcher where npm's link and lix point:
 // on Unix hxmc/bootstrap/haxe and dist/haxe (renames in those directories:
