@@ -632,7 +632,10 @@ jobs:
           v=$(cat dl/VERSION)
           mkdir -p "$RUNNER_TEMP/app" && cd "$RUNNER_TEMP/app"
           npm init -y > /dev/null
-          npm install --no-audit --no-fund "$GITHUB_WORKSPACE/dl/hxmc-cli-$v.tgz" "$GITHUB_WORKSPACE/dl/hxmc-darwin-arm64-$v.tgz" $(find "$GITHUB_WORKSPACE/dl" -name 'hxmc-os-*.tgz' -o -name 'hxmc-gfx-*.tgz')
+          # (a nightly, <version>-nightly.<date>.<commit>, is a prerelease, which
+          # the packages' peer range ">=0.1.0" of @hxmc/cli does not take)
+          peer=; case "$v" in *-nightly.*) peer=--legacy-peer-deps ;; esac
+          npm install --no-audit --no-fund $peer "$GITHUB_WORKSPACE/dl/hxmc-cli-$v.tgz" "$GITHUB_WORKSPACE/dl/hxmc-darwin-arm64-$v.tgz" $(find "$GITHUB_WORKSPACE/dl" -name 'hxmc-os-*.tgz' -o -name 'hxmc-gfx-*.tgz')
           g="$GITHUB_WORKSPACE/repo/packages/gfx"
           npx haxe -lib hxmc.gfx -cp "$g/examples" -cp "$g/test" -main GfxTest --custom-target hxmc=gfx/GfxTest
           npx haxe -lib hxmc.gfx -cp "$g/examples" -main Triangle --custom-target hxmc=gfx/Triangle
