@@ -69,7 +69,7 @@ npm i -D @hxmc/gfx
 | Package | |
 | --- | --- |
 | `@hxmc/os` | windows, input and the app loop: X11, Cocoa, Win32 and the browser canvas |
-| `@hxmc/gfx` | a portable GPU API with back ends for GL/GLES (Linux), Metal (macOS), D3D11 (Windows), WebGPU and WebGL2 (browser); see `packages/gfx/examples/Triangle.hx` |
+| `@hxmc/gfx` | a portable GPU API with back ends for GL/GLES (Linux), Metal (macOS), D3D11 (Windows), WebGPU and WebGL2 (browser), and shaders written in Haxe (compiled to GLSL, WGSL, MSL, HLSL); see `packages/gfx/examples/Triangle.hx` |
 
 ## Building from source
 

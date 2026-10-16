@@ -551,7 +551,8 @@ jobs:
         with:
           path: bin/site
 
-  # packages/gfx: the triangle headless and in an X11 window, on Mesa's
+  # packages/gfx: the shader macro's tests (make gfx-shader-check), then
+  # the triangle headless and in an X11 window, on Mesa's
   # llvmpipe (no GPU), against the golden image (make gfx-check: the test
   # programs in the glibc mode, packages/gfx/test/check.sh), here on Linux
   # x86-64; the ARM64 and Windows programs cross-built for gfx-arm64 and
@@ -578,6 +579,7 @@ jobs:
         run: |
           set -ex
           make rt && touch bin/hxmc/rt/*/*.o
+          make gfx-shader-check
           make gfx-check GFX_TARGET=linux-x86_64
       - name: The ARM64 programs
         run: |
