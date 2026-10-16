@@ -23,6 +23,7 @@ the same `--interp` runs, display requests and compilation-server answers.
 | `hxmc/test/` | hxmc's corpus (`cases/`, golden outputs `expected/`, frozen fuzzer programs `fuzz-1000.zip`), the encoder tests (`encoder/`), the scripts that run them (`Corpus`, `Check`, `Crosshost`, `Selfcheck`, `Tiers`, `EncCheck`), the release smoke test (`smoke.sh`), the benchmarks (`Bench`, with the cases' check programs in `bench/`) |
 | `hxmc/web/` | the website and its playground (the port as a WebAssembly module in the browser) |
 | `hxmc/bootstrap/` | the committed stage0 (`stage0.wasm.br`), node's WASI runner (`wasi.mjs`), the runtime objects by hash (`rt.mjs`), the npm packages: their packer (`pack.mjs`), `@hxmc/cli`'s launcher (`haxe`, `launcher.mjs`, `wasm.mjs`, `postinstall.mjs`), `@hxmc/source`'s `hxmc-rebuild` (`rebuild.mjs`) |
+| `packages/os/`, `packages/gfx/` | `@hxmc/os` (`hxmc.os`: X11 bindings, windows, events, the app loop) and `@hxmc/gfx` (`hxmc.gfx`: the portable GPU layer, its GL back end over EGL, `examples/Triangle.hx`, the golden-image test `test/`), pure Haxe for the dynamic glibc mode (hxmc/PLANS.md, "Graphics") |
 | `tools/lix/` | lix (the lix client and haxeshim) ported to build with hxmc |
 | `package.json` | the npm package `@hxmc/cli` (the others: `hxmc/bootstrap/pack.mjs`) |
 
@@ -229,7 +230,10 @@ outputs of hxc, the C target hxmc came from): a new case gets one with
 with the reason in the commit. `Crosshost`: the tool as a WebAssembly module
 writes the same bytes as the native tool, for every target, itself included.
 `RT_VERIFY=1` fills the free nursery with a pattern, so uninitialized
-allocations and missed roots show at once.
+allocations and missed roots show at once. `make gfx-check`: the triangle of
+`packages/gfx` rendered by Mesa's llvmpipe headless (an EGL pbuffer) and in an
+X11 window under Xvfb, compared with `packages/gfx/test/triangle.png` (CI: the
+Linux test runners).
 
 CI (`.github/workflows/build.yml`): `rt` (the runtime objects), `build` (the
 bootstrap from the stage0, the fixpoint, releases, lix, the npm packages, the

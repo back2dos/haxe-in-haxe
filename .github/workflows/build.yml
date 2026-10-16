@@ -270,6 +270,21 @@ jobs:
             bin/hxmc/hxmc -cp hxmc/test -cp haxe/test --run ElfCheck dist/corpus/$t-glibc --summary "$GITHUB_STEP_SUMMARY"
           done
 
+      # packages/gfx: the triangle's test program for Linux (glibc mode), run by
+      # the test job under Mesa's llvmpipe and Xvfb (packages/gfx/test/check.sh)
+      - name: The gfx test programs
+        run: |
+          set -ex
+          for t in linux-x86_64 linux-arm64; do
+            mkdir -p dist/gfx/$t
+            for m in GfxTest Triangle; do
+              bin/hxmc/hxmc dist/gfx/$t/$m -cp packages/os/src -cp packages/gfx/src -cp packages/gfx/examples -cp packages/gfx/test -main $m \
+                -cp bin/hxmc/std --custom-target hxmc -D hxmc.libc=glibc -D hxmc.target=$t | tail -3
+              rm -rf dist/gfx/$t/$m.hxmc
+            done
+            ls -l dist/gfx/$t
+          done
+
       # hxmc's output does not depend on the host: the tool as a WebAssembly
       # module (under node) builds the corpus for every target, and the tool
       # itself, byte-identical to the native tool
@@ -321,6 +336,7 @@ jobs:
       - name: Pack the corpus
         run: |
           for t in $TARGETS wasm32-wasi wasm32-wasi-legacy linux-x86_64-glibc linux-arm64-glibc; do tar czf dist/corpus-$t.tar.gz -C dist/corpus/$t .; done
+          for t in linux-x86_64 linux-arm64; do tar czf dist/gfx-$t.tar.gz -C dist/gfx/$t .; done
           tar czf dist/corpus-wasm32-wasi-port.tar.gz -C dist/wasm haxe.wasm haxe-legacy.wasm
       - uses: actions/upload-artifact@v7
         with: {name: hxmc-self, path: dist/self/, retention-days: 3}
@@ -332,6 +348,10 @@ jobs:
         with: {name: corpus-linux-x86_64-glibc, path: dist/corpus-linux-x86_64-glibc.tar.gz, retention-days: 3}
       - uses: actions/upload-artifact@v7
         with: {name: corpus-linux-arm64-glibc, path: dist/corpus-linux-arm64-glibc.tar.gz, retention-days: 3}
+      - uses: actions/upload-artifact@v7
+        with: {name: gfx-linux-x86_64, path: dist/gfx-linux-x86_64.tar.gz, retention-days: 3}
+      - uses: actions/upload-artifact@v7
+        with: {name: gfx-linux-arm64, path: dist/gfx-linux-arm64.tar.gz, retention-days: 3}
       - uses: actions/upload-artifact@v7
         with: {name: corpus-windows-x86_64, path: dist/corpus-windows-x86_64.tar.gz, retention-days: 3}
       - uses: actions/upload-artifact@v7
@@ -427,6 +447,7 @@ jobs:
           sparse-checkout: |
             hxmc/test
             haxe/test
+            packages/gfx/test
       - uses: actions/setup-node@v7
         with:
           node-version: 22
@@ -560,6 +581,23 @@ jobs:
           set -ex
           docker run --rm --network host -v "$PWD:/w" -w /w -e HAXE_STD_PATH=/w/t/hxmc-haxe-${{ matrix.pkg }}/std centos:7 \
             sh -c 'ldd --version | head -1 && t/hxmc-haxe-${{ matrix.pkg }}/haxe -cp hxmc/test -cp haxe/test --run Check corpus-glibc'
+      # packages/gfx: the triangle headless and in an X11 window, on Mesa's
+      # llvmpipe (no GPU), against the golden image
+      - uses: actions/download-artifact@v8
+        if: runner.os == 'Linux'
+        with: {name: 'gfx-${{ matrix.target }}', path: dl}
+      - name: gfx (Mesa llvmpipe, Xvfb)
+        if: always() && runner.os == 'Linux'
+        run: |
+          set -ex
+          sudo apt-get update -qq
+          sudo apt-get install -qqy --no-install-recommends libegl1 libegl-mesa0 libgl1-mesa-dri libgles2 xvfb xauth
+          mkdir -p gfx
+          tar xzf dl/gfx-${{ matrix.target }}.tar.gz -C gfx
+          sh packages/gfx/test/check.sh gfx
+      - uses: actions/upload-artifact@v7
+        if: always() && runner.os == 'Linux'
+        with: {name: 'gfx-images-${{ matrix.target }}', path: gfx/*.png, retention-days: 7}
       - name: Port self-compile
         if: always()
         run: |
