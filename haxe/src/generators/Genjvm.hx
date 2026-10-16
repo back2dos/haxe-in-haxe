@@ -3716,9 +3716,19 @@ class JvmPreprocessor {
 		/* `seen` guards against recursive types (e.g. a recursive abstract whose
 			 underlying references itself through several fields): without it the walk
 			 branches exponentially and the compiler hangs. depth is a coarse backstop. */
-		function noteFiInType(seen:Array<T>, depth:Int, t:T):Void {
-			if (depth < 32 && !Lambda.exists(seen, function(t2) return TUnification.fastEq(t, t2))) {
-				var seen = [t].concat(seen);
+		// port: seen as a cons list (SeenTypes), as in OCaml: copying an
+		// array on each step and searching it through Lambda.exists made this walk
+		// the larger part of the JVM preprocessing.
+		function seenExists(t:T, l:Null<SeenTypes>):Bool {
+			while (l != null) {
+				if (TUnification.fastEq(t, l.t)) return true;
+				l = l.next;
+			}
+			return false;
+		}
+		function noteFiInType(seen:Null<SeenTypes>, depth:Int, t:T):Void {
+			if (depth < 32 && !seenExists(t, seen)) {
+				var seen = new SeenTypes(t, seen);
 				switch TFunctions.follow(t) {
 					case TInst(c, tl):
 						if (hasClassFlag(c, CFunctionalInterface)) used.set(Genjvm.pathKey(c.clPath), true);
@@ -3737,13 +3747,13 @@ class JvmPreprocessor {
 			}
 		}
 		function noteFiInExpr(e:TExpr):Void {
-			noteFiInType([], 0, e.etype);
+			noteFiInType(null, 0, e.etype);
 			Texpr.iter(noteFiInExpr, e);
 		}
 		function scanClass(c:TClass):Void {
 			if (!hasClassFlag(c, CExtern)) {
 				function scan(cf:TClassField):Void {
-					noteFiInType([], 0, cf.cfType);
+					noteFiInType(null, 0, cf.cfType);
 					if (cf.cfExpr != null) noteFiInExpr(cf.cfExpr);
 					for (cf in cf.cfOverloads) scan(cf);
 				}
@@ -3816,5 +3826,16 @@ class JvmPreprocessor {
 				gctx.typedefInterfaces.processClass(c);
 			case _:
 		}
+	}
+}
+
+// port: an immutable cons cell of types (the seen list of collectUsedFunctionalInterfaces)
+private class SeenTypes {
+	public final t:T;
+	public final next:Null<SeenTypes>;
+
+	public function new(t:T, next:Null<SeenTypes>) {
+		this.t = t;
+		this.next = next;
 	}
 }
