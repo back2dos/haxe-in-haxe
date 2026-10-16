@@ -276,113 +276,85 @@ failing stubs. Left:
 
 ## Build times and size
 
-### Cached units per library
+### Cached modules
 
 Most of a small program's build is the front half typing the std from
-source on every build. Hello world (one 4-core VM): 0.375 s from source,
-about 330 ms of it parsing and typing; 0.13–0.15 s when everything comes
-from an HXB archive (76 ms to read it, codegen 47 ms). Go 1.24 on the same
-machine: 4.8–5.7 s cold, 0.18–0.23 s rebuilding after an edit (warm build
-cache). With only the std precompiled and the program typed from source,
-expect about 0.15–0.2 s.
+source every time (hello world: about 330 ms of 0.375 s). The compilation
+server already caches per module, with upstream's rules: per-module
+dependencies, file checks, the invalidation of dependents, and an HXB mode
+that keeps the typed modules as HXB in memory (the Server and
+ServerJsonRpc suites pass in both cache modes). The persistent cache is
+that cache made durable on disk, not a new unit of caching: no library
+boundaries, so the std, haxelib, lix and node_modules libraries and the
+user's code are all modules alike.
 
-Plan, Go- and Rust-style (built lazily and cached rather than shipped):
-
-- Units: the std, each `-lib`, and the user's code last. Each is stored per
-  hxmc version and target (`~/.cache/hxmc/<version>/<target>/<lib>-<key>/`):
-  its typed modules as HXB (the front half, loaded with `--hxb-lib`,
-  upstream Haxe's mechanism for precompiled libraries; HXB modules load on
-  demand, so a large cached std does not slow small programs), hxmc's IR
-  and inline templates for inlining across units, and the compiled objects
-  per module (the back half: the existing per-module object cache). hxmc
-  writes the archives with its own built-in compiler, so the HXB version
-  always matches.
-- Key: the library's sources (a content hash; version plus hash for git and
-  dev libraries), the hxmc version, the target, only the defines the unit's
-  `#if` conditions actually read (recorded while parsing), and the
-  interface hashes of the units it depends on (signatures, types, inline
-  bodies, constants; not function bodies, as Go and Rust do).
-- Hard parts, and how to solve them. The rule throughout: record what a
-  unit's typing actually depended on, key on that, and type from source
-  whenever something cannot be captured (a miss costs time, never
-  correctness).
-  - Macros from outside that change a unit's types. Init macros run before
-    typing and their effects are data: `addGlobalMetadata` is a list of
-    (path filter, metadata), `Compiler.define` changes the defines. The key
-    takes the entries whose filter matches a module of the unit and the
-    defines the unit reads, so a `--macro` touching only user code leaves
-    the std's key alone. `Compiler.keep`, `nullSafety` and the like act
-    after typing (DCE, checks) and stay out of the key. Build macros that
-    run while a unit is typed (`@:build` on a library class, a library
-    macro reading other types): record which macro modules executed (their
-    sources and dependencies, hashed) and which types they looked at
-    (`Context.getType` ...: module dependencies, as the compilation server
-    records them), keyed by those modules' interface hashes. `@:autoBuild`
-    runs on the subclass, in the user's unit. `onAfterTyping`/`onGenerate`
-    run on the loaded program every build (the cache holds the state
-    before them, as upstream's `--hxb-lib` does). `onTypeNotFound` firing
-    during a unit, or anything else not captured, marks it volatile: typed
-    from source.
-  - Class-path shadowing. Every cached module records the lookups its
-    typing made: the file each name resolved to, and the misses (names
-    searched across packages, `import pkg.*`). Before a cached module is
-    used its lookups are checked against the current class path (mostly
-    directory listings, as the server checks modification times); a
-    shadowed module comes from source and invalidates its dependents
-    through the per-module dependency graph (HXB has it), with early
-    cutoff as in Rust: a shadowing module with the same interface hash
-    leaves its dependents valid. hxmc's own std overriding upstream files
-    is then just part of the std unit's resolution.
-  - Macro dependencies (files read through `Context`, defines, environment
-    variables): recorded as the server does. Nondeterministic macros
-    (time, network) are trusted as by the server, with an opt-out per
-    library (`-D hxmc.no-cache=<lib>`).
-  - DCE is whole-program: make the source path take the cached path's
-    route, so the two are identical by construction. Every unit compiles
-    all its functions once, before DCE, one section per function; DCE moves
-    to link time (reachability over symbols with Haxe's rules: `@:keep`,
-    implemented interfaces, overrides of reachable fields, reflection
-    roots), and the reflection tables (`Reflect.fields`,
-    `Type.getInstanceFields`) are generated at link time from the live set.
-    Builds from source go through per-unit objects and link-time DCE too.
-    Whole-program "features" (code that depends on whether something is
-    used anywhere) must not be decided while a unit compiles: they become
-    link-time switches (symbols the linker resolves, data flags).
-  - Program-wide numbering is already symbolic and resolved at link time.
-  - `@:generic` instances belong to the unit that instantiates them, named
-    by their type arguments and emitted as mergeable (COMDAT-like) symbols:
-    the linker keeps one when several units instantiate the same. Library
-    inline functions inlined into user code are covered by the interface
-    hash (inline bodies are part of it).
-  - Typing order: some Haxe behaviour depends on it (monomorph resolution,
-    anonymous type numbering, build macro order, static initialization),
-    and loading from a cache changes it. Covered by the HXB conformance
-    suite (typed ASTs survive the round trip) and the gate below.
-- Order: link-time DCE and the shared pipeline first (needed anyway,
-  testable alone); then the std as one unit with the lookup recording;
-  then `-lib` units, with interface hashing, early cutoff and the tracking
-  of defines; then the capture of init macros' effects. The user's code
-  stays incremental per module (the server, the object cache). It also
-  shortens the first run of the npm bootstrap (see "npm" under
-  Packaging).
-- Gate: the same executable, byte for byte, from the cached path and the
-  source path (the Vector bug showed the two paths can differ subtly).
-- Simpler than the compilation server for most of the gain; the server
-  remains the route for large programs' one-edit rebuilds.
-- The std as a unit, first step: generalize the types cache (TypesCache,
-  today hxmc's own runtime package only) to the whole std, for every target,
-  built on first use and keyed by the target and the defines the std's
-  `#if` conditions read, in the user cache directory with its pruning; the
-  postinstall of the npm package may warm it for the host's hxmc build
-  (about 0.7 s). Builds with init macros, display requests and shadowed
-  std modules type from source as the types cache does now. Expected:
-  small programs from about 0.21 s toward 0.13–0.15 s.
-- Not shipping the std as HXB in the distribution: there is no single
-  typed std (per target, per define, again for the macro context), the
-  `.hx` sources have to ship anyway (editors, error positions, shadowing),
-  init macros cannot change pre-typed modules, and an edited compiler
-  (`hxmc-rebuild`) invalidates it; built on first use covers every
-  combination without those costs.
+- Step 1 (built, opt-in: `HXMC_MODULE_CACHE=1` or `-D hxmc.module-cache`;
+  `hxmc/src/hxmc/ModuleCache.hx`): a successful build writes the modules it
+  ends with as the server keeps them (HXB chunks, dependencies, kind, file,
+  check policy) into a store in the user cache directory (the types cache's
+  location, atomic writes and trim); the next build with the same key puts
+  them in the server's cache before typing, and the server's checks decide.
+- Storage: one pack per server context (the program's, its macros'), each
+  an index of files (date, size, content hash) and modules, written whole
+  and renamed into place; not a file per module. Later: content-addressed
+  blobs shared across keys, and a trim per pack.
+- Validation: lazy, only for the modules a build loads (the server checks a
+  module when the typer asks for it; HXB decodes on demand). Beyond the
+  server's checks (a hook in `ServerCache.checkModule`): the file's content
+  hash where its date or size differ (a fresh checkout changes every date;
+  a date within 3 s of the parse is not trusted), the file the module's
+  path resolves to now (shadowing as a per-module resolution record:
+  a new file earlier in the class path makes the module dirty, and its
+  dependents through the server's graph), dependencies the store lacks.
+- Key: the server's coarse signature (the defines) plus the class paths,
+  the working directory and the std. Next: the defines each module's
+  conditions read (recorded while parsing), so a define touching user code
+  leaves the std's modules alone; then interface hashes of dependencies for
+  early cutoff (a dependency typed again with the same signatures, types,
+  inline bodies and constants leaves its dependents valid).
+- What HXB does not keep and the gate needs: the modifiers of unbound
+  monomorphs (`Null<Unknown>`; kept beside the chunks and given back to the
+  reader's monomorphs), and what the sort of the types walks of a restored
+  module, whose expressions are the filtered ones (its skeleton per field,
+  kept and played back through a hook in `Finalization.sortTypes`). The
+  upstream server's HXB cache has both differences (its outputs can differ
+  from a build without the server); a third shows only in hxmc: an
+  anonymous structure's fields in its map's order (now by name).
+- Init macros: their effects are data (`addGlobalMetadata` filters,
+  `Compiler.define`, class paths); until they are in the key, builds with
+  `--macro` do not use the cache. Build macros and `Context` dependencies
+  are recorded as the server records them (module dependencies, files
+  registered with `registerModuleDependency`, cache-bound resources and
+  messages replayed); nondeterministic macros are trusted as by the server.
+  A macro registering `onGenerate`, `onAfterTyping` or `onAfterGenerate`
+  while typing makes the build write nothing (a restored module would not
+  register it again).
+- Back half: per-module objects move to the same central store, keyed by
+  the hash of the lowered IR (`Fingerprint`), shared by every output and
+  target ("Central object cache" below). DCE is whole-program: move it to
+  link time (reachability over symbols with Haxe's rules: `@:keep`,
+  implemented interfaces, overrides of reachable fields, reflection roots;
+  reflection tables generated from the live set), so a module's object does
+  not depend on the rest of the program; whole-program "features" become
+  link-time switches. Program-wide numbering is already symbolic.
+  `@:generic` instances belong to the module that instantiates them, as
+  mergeable (COMDAT-like) symbols; inline bodies are covered by the
+  interface hash.
+- Typing order: some Haxe behaviour depends on it (monomorph resolution,
+  anonymous type numbering, build macro order, static initialization), and
+  restoring changes it; covered by the gate.
+- Gate: the same output, byte for byte, with and without the cache, cold,
+  warm, after an edit of one module or of a std override, after a new file
+  shadows a module (`hxmc/test/ModuleCacheCheck.hx`, `make
+  test-module-cache`: hello world, several modules, macros, a
+  `Null<Unknown>`, for hxmc and JS; `--port` adds the port itself).
+- Not shipping the std as HXB in the distribution: there is no single typed
+  std (per target, per define, again for the macro context), the sources
+  have to ship anyway, init macros cannot change pre-typed modules, and an
+  edited compiler (`hxmc-rebuild`) invalidates it.
+- Then: on by default (replacing the types cache), the `npm` postinstall
+  warming the std's modules, builds with init macros, `-lib` HXB archives
+  as one more source of modules.
 
 ### Central object cache and quieter builds
 
@@ -398,9 +370,11 @@ request. Keeps users' output directories and `bin/` clean.
 Done for the cache of the runtime's typed modules (`TypesCache.hx`): it
 lives in the user cache directory (`HXMC_CACHE` overrides), one directory
 per tool build, entries written by rename with the `.deps` last, tool
-directories pruned by last use (14 days, 1 GB) at most once a day. The
-per-module object cache (`<out>.hxmc/`) and the logs still live next to the
-outputs; they can reuse that layout and pruning.
+directories pruned by last use (14 days, 1 GB) at most once a day; the
+module cache ("Cached modules") uses the same location and trim. The
+per-module object cache (`<out>.hxmc/`) and the logs still live next to
+the outputs; the objects move to that store, keyed by the hash of the
+lowered IR.
 
 ### Other items
 
@@ -880,4 +854,4 @@ uncompressed for the six targets).
   binaries carry hxmc's ad-hoc signature and no quarantine flag.
 - Needs: the launcher, the runtime objects packaged per target, mbedtls
   and libuv linked into the native compiler (see "sys.ssl and libuv"),
-  ideally the cached std unit (see "Cached units per library") for a faster first run.
+  ideally the std's modules from the module cache (see "Cached modules") for a faster first run.

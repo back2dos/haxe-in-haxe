@@ -240,6 +240,10 @@ jobs:
       # the cache of the runtime's typed modules (hxmc/src/hxmc/TypesCache.hx)
       - name: Types cache
         run: bin/hxmc/hxmc -cp hxmc/test -cp haxe/test --run CacheCheck
+      # the persistent module cache: the same outputs with and without it
+      # (hxmc/src/hxmc/ModuleCache.hx, hxmc/test/ModuleCacheCheck.hx)
+      - name: Module cache
+        run: make test-module-cache PORT=1
 
       - name: The port's release binaries
         run: |
