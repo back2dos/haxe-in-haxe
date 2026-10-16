@@ -57,7 +57,7 @@ STD_SRC := $(shell find hxmc/std -type f)
 RT_SRC := $(wildcard hxmc/deps/*)
 LIX_SRC := $(shell find tools/lix/src -name '*.hx')
 FUZZ_SRC := $(wildcard haxe/test/fuzz/*.hx haxe/test/fuzz/fuzz/*.hx) haxe/test/HlcNames.hx
-WEB_SRC := $(wildcard hxmc/web/src/*.hx hxmc/web/*.html hxmc/web/*.css hxmc/web/data/*)
+WEB_SRC := $(wildcard hxmc/web/src/*.hx hxmc/web/*.html hxmc/web/*.css hxmc/web/*.mjs hxmc/web/data/*) $(shell find packages/os packages/gfx/src packages/gfx/examples packages/gfx/imports.mjs -name '*.hx' -o -name '*.mjs')
 
 TOOL := bin/hxmc/hxmc
 STAGE0 := hxmc/bootstrap/stage0.wasm.br
@@ -289,7 +289,9 @@ npm: $(NPM_GEN) $(NPM_NATIVES)
 
 # the pages, their scripts (hxmc/web/src, compiled by the port), the std
 # subset the playground's compiler reads (hxmc/web/MkBundle.hx), the measured
-# results (hxmc/web/data) and the build facts
+# results (hxmc/web/data), the Graphics section's triangle (gfx/: the example
+# built for wasm32-wasi, with packages/os's browser.mjs and the packages'
+# imports.mjs; hxmc/web/triangle.mjs) and the build facts
 mb = awk '{printf "%.1f MB", $$1 / 1048576}'
 # the site's build in the addresses of the files its pages fetch (Version.hx)
 SITE_VERSION ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo dev)
@@ -297,7 +299,13 @@ site: wasm $(PORT_BIN) $(WEB_SRC)
 	mkdir -p bin/site
 	cp bin/wasm/hih.wasm bin/wasm/hih-legacy.wasm hxmc/web/index.html hxmc/web/story.html hxmc/web/style.css bin/site/
 	$(PORT_BIN) -D site_version=$(SITE_VERSION) hxmc/web/build.hxml
-	sed -i -e 's/\(src\|href\)="\(playground\.js\|tables\.js\|style\.css\)"/\1="\2?v=$(SITE_VERSION)"/g' bin/site/index.html bin/site/story.html
+	$(call hxmc,bin/gfx/triangle.wasm,$(GFX_CP) -main Triangle $(HXMC_ARGS) -D hxmc.target=wasm32-wasi)
+	mkdir -p bin/site/gfx
+	cp bin/gfx/triangle.wasm packages/os/browser.mjs bin/site/gfx/
+	cp packages/os/imports.mjs bin/site/gfx/os.mjs
+	cp packages/gfx/imports.mjs bin/site/gfx/gfx.mjs
+	cp hxmc/web/triangle.mjs bin/site/
+	sed -i -e 's/\(src\|href\)="\(playground\.js\|tables\.js\|triangle\.mjs\|style\.css\)"/\1="\2?v=$(SITE_VERSION)"/g' bin/site/index.html bin/site/story.html
 	$(RUN) -cp hxmc/web --run MkBundle $(HAXE_STD_PATH) bin/site/std.bundle
 	cp hxmc/web/data/*.json bin/site/
 	rm -rf bin/site/examples && cp -r hxmc/web/examples bin/site/examples
@@ -305,13 +313,14 @@ site: wasm $(PORT_BIN) $(WEB_SRC)
 	if [ -n "$(LIX_DIR)" ]; then mkdir -p bin/site/tools && cp $(LIX_DIR)/lix-* bin/site/tools/; fi
 	rm -rf bin/site/bench
 	if [ -n "$(BENCH_DATA)" ] && [ -f "$(BENCH_DATA)/history.json" ]; then mkdir -p bin/site/bench && cp $(BENCH_DATA)/history.json bin/site/bench/ && { cp $(BENCH_DATA)/latest.json bin/site/bench/ 2>/dev/null || true; }; fi
-	printf '{\n\t"date": "%s",\n\t"commit": "%s",\n\t"wasmSize": "%s",\n\t"wasmGz": "%s",\n\t"wasmLegacyGz": "%s",\n\t"dataGz": "%s",\n\t"lixSize": "%s"\n}\n' \
+	printf '{\n\t"date": "%s",\n\t"commit": "%s",\n\t"wasmSize": "%s",\n\t"wasmGz": "%s",\n\t"wasmLegacyGz": "%s",\n\t"dataGz": "%s",\n\t"lixSize": "%s",\n\t"triangleSize": "%s"\n}\n' \
 		"$$(date -u +%Y-%m-%d)" "$$(git rev-parse --short HEAD)" \
 		"$$(wc -c < bin/site/hih.wasm | $(mb))" \
 		"$$(gzip -9c bin/site/hih.wasm | wc -c | $(mb))" \
 		"$$(gzip -9c bin/site/hih-legacy.wasm | wc -c | $(mb))" \
 		"$$(gzip -9c bin/site/std.bundle | wc -c | $(mb))" \
-		"$$(if [ -f bin/site/tools/lix-linux-x86_64 ]; then wc -c < bin/site/tools/lix-linux-x86_64 | $(mb); else echo -; fi)" > bin/site/build-info.json
+		"$$(if [ -f bin/site/tools/lix-linux-x86_64 ]; then wc -c < bin/site/tools/lix-linux-x86_64 | $(mb); else echo -; fi)" \
+		"$$(wc -c < bin/site/gfx/triangle.wasm | awk '{printf "%d KB", $$1 / 1024}')" > bin/site/build-info.json
 	cat bin/site/build-info.json
 
 # --- Other programs ---

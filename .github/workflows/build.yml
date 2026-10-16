@@ -628,6 +628,7 @@ jobs:
             haxe/test
             hxmc/bootstrap
             hxmc/web/tools
+            packages/gfx/test
       - uses: actions/setup-node@v7
         with:
           node-version: 22
@@ -687,7 +688,8 @@ jobs:
       # the playground's worker (hxmc/web/src/Worker.hx, WasiHost.hx) in the
       # browsers' engines: --interp, HXB, diagnostics and completion, with both
       # modules (exnref, legacy exception handling); the page's choice of
-      # module, also in a Chromium without exnref
+      # module, also in a Chromium without exnref; the Graphics section's
+      # triangle (WebGPU in Chromium, against packages/gfx/test/triangle.png)
       - name: Playground in Chromium, Firefox and WebKit
         if: always()
         run: |

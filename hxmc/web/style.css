@@ -70,6 +70,14 @@ textarea {
 #members { padding: 0 12px 12px; overflow: auto; max-height: 340px; }
 #members table { font-size: 13px; }
 .note, .muted { color: var(--muted); font-size: 14px; }
+.gfx { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 24px; align-items: start; }
+@media (max-width: 760px) { .gfx { grid-template-columns: 1fr; } }
+.gfx figure { position: relative; margin: 0; }
+/* (the triangle's clear colour) */
+.gfx canvas { display: block; width: 100%; aspect-ratio: 4 / 3; background: #1a1a1f; border: 1px solid var(--line); border-radius: 8px; }
+.gfx-state { position: absolute; inset: 0; margin: 0; display: flex; align-items: center; justify-content: center; padding: 24px; text-align: center; color: #ece9e2; font-size: 15px; }
+.gfx-state[hidden] { display: none; }
+.gfx > div > p:first-child { margin-top: 0; }
 table { border-collapse: collapse; width: 100%; margin: 12px 0; font-size: 15px; }
 th, td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
 th { font-weight: 600; }

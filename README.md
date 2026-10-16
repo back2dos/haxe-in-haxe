@@ -23,7 +23,7 @@ the same `--interp` runs, display requests and compilation-server answers.
 | `hxmc/test/` | hxmc's corpus (`cases/`, golden outputs `expected/`, frozen fuzzer programs `fuzz-1000.zip`), the encoder tests (`encoder/`), the scripts that run them (`Corpus`, `Check`, `Crosshost`, `Selfcheck`, `Tiers`, `EncCheck`), `-lib` from node_modules (`NodeLibs`), the release smoke test (`smoke.sh`), the benchmarks (`Bench`, with the cases' check programs in `bench/`) |
 | `hxmc/web/` | the website and its playground (the port as a WebAssembly module in the browser) |
 | `hxmc/bootstrap/` | the committed stage0 (`stage0.wasm.br`), node's WASI runner (`wasi.mjs`), the runtime objects by hash (`rt.mjs`) |
-| `packages/` | everything published to npm, one folder per package, packed by `pack.mjs`: `cli` (`@hxmc/cli`, laid out as its tarball: `package.json`, the version of the build's packages; the launcher `hxmc/bootstrap/{haxe,launcher.mjs,wasm.mjs,postinstall.mjs,platforms.mjs}`; `dist/haxe` for lix), `wasm` and `source` (`@hxmc/wasm`, `@hxmc/source` with `hxmc-rebuild`), `platform` (the template of the six `@hxmc/<os>-<cpu>`); `os` and `gfx` (`@hxmc/os`: X11 and Objective-C runtime bindings, windows (X11, Cocoa), events, the app loop; `@hxmc/gfx`: the portable GPU layer, its back ends (GL over EGL on Linux, Metal on macOS arm64), `examples/Triangle.hx`, the golden-image test `test/`; pure Haxe: the dynamic glibc mode on Linux, the frameworks and `objc_msgSend` through externs on macOS, hxmc/PLANS.md "Graphics"); any other folder whose `package.json` has a version of its own is a source-only package, published as it is |
+| `packages/` | everything published to npm, one folder per package, packed by `pack.mjs`: `cli` (`@hxmc/cli`, laid out as its tarball: `package.json`, the version of the build's packages; the launcher `hxmc/bootstrap/{haxe,launcher.mjs,wasm.mjs,postinstall.mjs,platforms.mjs}`; `dist/haxe` for lix), `wasm` and `source` (`@hxmc/wasm`, `@hxmc/source` with `hxmc-rebuild`), `platform` (the template of the six `@hxmc/<os>-<cpu>`); `os` and `gfx` (`@hxmc/os`: X11 and Objective-C runtime bindings, windows (X11, Cocoa), events, the app loop; `@hxmc/gfx`: the portable GPU layer, its back ends (GL over EGL on Linux, Metal on macOS arm64, WebGPU in the browser), `examples/Triangle.hx`, the golden-image tests `test/`; pure Haxe: the dynamic glibc mode on Linux, the frameworks and `objc_msgSend` through externs on macOS, in the browser JavaScript imports: each package's `imports.mjs`, run by `packages/os/browser.mjs`; hxmc/PLANS.md "Graphics"); any other folder whose `package.json` has a version of its own is a source-only package, published as it is |
 | `tools/lix/` | lix (the lix client and haxeshim) ported to build with hxmc |
 
 ## Using hxmc
@@ -252,7 +252,10 @@ allocations and missed roots show at once. `make gfx-check`: the triangle of
 `packages/gfx/test/triangle.png`: on Linux by Mesa's llvmpipe (an EGL pbuffer,
 an X11 window under Xvfb), on macOS by Metal (an offscreen texture, a Cocoa
 window; skipped without a Metal device or outside a GUI session) (CI: the
-Linux and macOS arm64 test runners).
+Linux and macOS arm64 test runners). `make gfx-web-check`: the same on
+WebGPU, built for wasm32-wasi, headless and in a canvas, in headless
+Chromium (SwiftShader; `packages/gfx/test/webgpu.mjs`); CI checks the site's
+triangle the same way (`hxmc/web/tools/browser-test.mjs`).
 
 CI (`.github/workflows/build.yml`): `rt` (the runtime objects), `build` (the
 bootstrap from the stage0, the fixpoint, releases, lix, the npm packages, the

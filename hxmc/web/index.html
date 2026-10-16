@@ -15,6 +15,7 @@
 		<nav class="links">
 			<a href="#playground">Playground</a>
 			<a href="#download">Download</a>
+			<a href="#graphics">Graphics</a>
 			<a href="#tools">Tools</a>
 			<a href="#status">Status</a>
 			<a href="#benchmarks">Benchmarks</a>
@@ -64,6 +65,21 @@ haxe-in-haxe -cp src --main Main --js out.js</pre>
 	<section id="hxmc">
 		<h2>hxmc</h2>
 		<p>The port is built by hxmc, a Haxe target written for it: from the typed program it writes x86-64 and ARM64 machine code with its own register allocator and linkers (ELF, PE, Mach-O), or a WebAssembly module, with a precise generational collector and threads; no C compiler, assembler or system linker runs when a program is built, and every target is cross-built from Linux. hxmc builds itself. See <a href="https://github.com/benmerckx/hxmc/blob/main/README.md">README.md</a>.</p>
+	</section>
+
+	<section id="graphics">
+		<h2>Graphics</h2>
+		<div class="gfx">
+			<figure>
+				<canvas id="triangle" aria-label="A triangle with a red, a green and a blue corner, drawn with WebGPU"></canvas>
+				<p id="triangle-state" class="gfx-state" hidden></p>
+			</figure>
+			<div>
+				<p>This triangle is Haxe compiled by hxmc to WebAssembly, drawing through WebGPU. The same program, <a href="https://github.com/benmerckx/hxmc/blob/main/packages/gfx/examples/Triangle.hx">Triangle.hx</a>, opens a window and draws with OpenGL on Linux and with Metal on macOS, to the same pixels.</p>
+				<p>It uses two packages in pure Haxe: <a href="https://github.com/benmerckx/hxmc/tree/main/packages/os">@hxmc/os</a> (windows, input and the app loop) and <a href="https://github.com/benmerckx/hxmc/tree/main/packages/gfx">@hxmc/gfx</a> (a GPU layer shaped like WebGPU, with integer handles and no allocation per frame). They call the system's APIs directly; in the browser, each package's calls go to a small JavaScript module.</p>
+				<p class="note"><span data-info="triangleSize">~64 KB</span> of WebAssembly. Its <code>main</code> returns after the setup; then each <code>requestAnimationFrame</code> calls back into the module for a frame.</p>
+			</div>
+		</div>
 	</section>
 
 	<section id="tools">
@@ -140,5 +156,6 @@ lix download                    # after a clone: the scope's Haxe and missing li
 </footer>
 <script src="playground.js"></script>
 <script src="tables.js"></script>
+<script type="module" src="triangle.mjs"></script>
 </body>
 </html>

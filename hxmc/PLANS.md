@@ -533,9 +533,9 @@ setjmp/longjmp do not unwind, but debuggers and SEH-based tools would.
   the macro.
 - Back ends in order: GL 3.3 / GLES 3 on Linux first (glibc mode; EGL and
   libX11 imports; Mesa's llvmpipe and Xvfb run it without a GPU, here and
-  on CI), then Metal (done, below), WebGL2 (the same API shape, through
-  JS imports; packages ship an `imports.mjs` the wasm runner loads), D3D11
-  (WARP on Windows CI), then Vulkan / D3D12.
+  on CI), then Metal (done, below), WebGPU (done, below; WebGL2 only if
+  browsers without WebGPU matter), D3D11 (WARP on Windows CI), then
+  Vulkan / D3D12.
 - First milestone (done): a GL triangle in an X11 window
   (`packages/gfx/examples/Triangle.hx`), checked against a golden image
   headless (EGL pbuffer on Mesa's surfaceless platform, `glReadPixels`) and
@@ -570,6 +570,32 @@ setjmp/longjmp do not unwind, but debuggers and SEH-based tools would.
   `objc_msgSend_stret` for results over 16 bytes), frames during a live
   resize (AppKit's tracking loop runs inside `sendEvent:`: a timer in
   the event-tracking run loop mode), a menu (Cmd-Q).
+- WebGPU (done, 2026-10-16, wasm32-wasi in the browser): the same
+  `Triangle.hx` on a canvas, against the same golden image within GfxTest's
+  tolerance (SwiftShader in headless Chromium: 422 pixels off by 1,
+  `make gfx-web-check`), and on the site (hxmc/web, "Graphics": 64 KB of
+  WebAssembly; a message where `navigator.gpu` is missing). The import
+  convention: a package whose externs are imports of a module
+  (`@:hxmc.lib("hxmc_gfx")`) ships `imports.mjs`, whose default export maps
+  a host to import objects, possibly asynchronously (the adapter and device
+  are requested before `main`); `packages/os/browser.mjs` merges them, gives
+  WASI preview 1 without a file system and runs `_start`; JavaScript objects
+  live in its handle table, Haxe sees integers. `hxmc.os.web.CanvasWindow`:
+  a `Canvas` surface (`Surface.canvas(id)` for a page's own), the buffer
+  following the displayed size (Resize), keys and the mouse queued and
+  polled per frame; `App.run` returns, and `requestAnimationFrame` runs each
+  turn of the loop through a `@:hxmc.callback` called by its index in the
+  exported function table (hxmc: `__indirect_function_table`, the runtime
+  intact after `_start` returns; corpus case `WasmCallback`), paused while
+  the canvas is out of view. `hxmc.gfx.webgpu`: one import per call with
+  integer arguments, pipelines from the vertex layout, WGSL with entry point
+  `main` (`ShaderCode.wgsl`). `readPixels` cannot wait in a browser: the
+  JavaScript side's `readPixels()` (copyTextureToBuffer, mapAsync) instead.
+  Left: shader compilation errors are only logged (asynchronous in WebGPU),
+  gfx programs in the playground (its compiler would need the packages'
+  sources in its bundle, the worker the packages' imports and a canvas,
+  e.g. an OffscreenCanvas), node has no WebGPU (the corpus runner stays
+  WASI only).
 - Structs by value in C calls (done for arm64, 2026-10-16): AAPCS64 on
   macOS, Linux and Windows (MirBuild.cStructArg, cStructRet; a64 Isel):
   homogeneous aggregates of up to four floats or doubles in v registers,
@@ -641,7 +667,9 @@ CI job (versions not yet on npm), each with its own version:
   stage0, wasi.mjs and rt.mjs. Any other `packages/<name>` with a version of
   its own is packed as it is and published at that version.
 - `packages/os`, `packages/gfx`, later `packages/ui` (Graphics): sources
-  only, a peer dependency on a range of `@hxmc/cli`.
+  only, a peer dependency on a range of `@hxmc/cli`; for WebAssembly in the
+  browser, an `imports.mjs` each (and `@hxmc/os`'s `browser.mjs`, the
+  runner: Graphics, WebGPU).
 - Done (2026-10-16): `-lib hxmc.gfx` from node_modules (a `"haxe"` field in
   package.json: class path, extra hxml, dependencies), in the compiler
   (`hxmc/src/hxmc/NodeLibs.hx`, through `compiler.HighLevel.libraryHook`):

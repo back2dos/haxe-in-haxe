@@ -10,7 +10,11 @@
 // the Programs tables (run time, compile time) with the "Over time" charts
 // hidden, and with ?bench-history one chart per case with a hover tooltip, in
 // light and dark mode, and at a phone's width (screenshots into $SCREENSHOTS
-// when set).
+// when set). The Graphics section's triangle (gfx/, WebGPU): in Chromium with
+// WebGPU on SwiftShader, its canvas resized to 256x192 and a frame read back
+// against packages/gfx/test/triangle.png (packages/gfx/test/compare.mjs);
+// without WebGPU (the other browsers here, and the Chromium without exnref,
+// launched without it) the triangle or the message that WebGPU is missing.
 //   node hxmc/web/tools/browser-test.mjs bin/site [chromium firefox webkit]
 // (Playwright from npm, with its browsers: npx playwright install)
 import { createServer } from 'node:http';
@@ -18,6 +22,7 @@ import { existsSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { createRequire } from 'node:module';
+import { fileURLToPath } from 'node:url';
 
 const require = createRequire(import.meta.url);
 let pw;
@@ -26,8 +31,13 @@ const dir = process.argv[2];
 const names = process.argv.length > 3 ? process.argv.slice(3) : ['chromium', 'firefox', 'webkit'];
 const types = { '.js': 'text/javascript', '.wasm': 'application/wasm', '.html': 'text/html', '.css': 'text/css', '.json': 'application/json' };
 const modules = ['hih.wasm', 'hih-legacy.wasm'].filter((m) => existsSync(path.join(dir, m)));
+// (/gfx-test/: packages/gfx/test, the triangle's golden image and comparison)
+const gfxTest = path.join(path.dirname(fileURLToPath(import.meta.url)), '../../../packages/gfx/test');
+types['.mjs'] = 'text/javascript';
+types['.png'] = 'image/png';
 const server = createServer(async (req, res) => {
-	const p = path.join(dir, decodeURIComponent(new URL(req.url, 'http://x').pathname));
+	const u = decodeURIComponent(new URL(req.url, 'http://x').pathname);
+	const p = u.startsWith('/gfx-test/') ? path.join(gfxTest, u.slice(10)) : path.join(dir, u);
 	try {
 		const b = req.url === '/' ? Buffer.from('<!doctype html><title>test</title>') : await readFile(p);
 		res.writeHead(200, { 'content-type': req.url === '/' ? 'text/html' : types[path.extname(p)] || 'application/octet-stream' });
@@ -190,8 +200,43 @@ async function benchTest(browser, name) {
 	return ok;
 }
 
+// the Graphics section: the triangle (webgpu: required, against the golden
+// image) or the message that WebGPU is missing
+async function triangleTest(browser, webgpu) {
+	const page = await browser.newPage({ viewport: { width: 1100, height: 900 } });
+	const errors = [];
+	page.on('pageerror', (e) => errors.push(e.message));
+	await page.route(/^https:\/\/cdn\.jsdelivr\.net\//, (r) => r.abort());
+	await page.goto(`http://localhost:${port}/index.html`);
+	await page.evaluate(() => document.getElementById('graphics').scrollIntoView());
+	let r;
+	try {
+		await page.waitForFunction(() => document.getElementById('triangle').hxmc || !document.getElementById('triangle-state').hidden, null, { timeout: 60000 });
+		r = await page.evaluate(async () => {
+			const c = document.getElementById('triangle'), state = document.getElementById('triangle-state');
+			if (!state.hidden) return { drawn: false, text: state.textContent };
+			// (a frame at the golden image's size: the buffer follows the displayed size)
+			c.style.boxSizing = 'content-box';
+			c.style.width = '256px';
+			c.style.height = '192px';
+			await new Promise((ok) => requestAnimationFrame(() => requestAnimationFrame(ok)));
+			const [{ decode, compare }, px] = await Promise.all([import('/gfx-test/compare.mjs'), c.hxmc.gfx.readPixels()]);
+			return { drawn: true, ...compare('triangle', px, await decode('/gfx-test/triangle.png')) };
+		});
+	} catch (e) {
+		r = { drawn: false, text: e.message.split('\n')[0] };
+	}
+	if (process.env.SCREENSHOTS) await page.locator('#graphics').screenshot({ path: path.join(process.env.SCREENSHOTS, `graphics-${browser.browserType().name()}${webgpu ? '' : '-no-webgpu'}.png`) });
+	await page.close();
+	const ok = errors.length === 0 && (r.drawn ? r.ok : !webgpu && /WebGPU is not available/.test(r.text));
+	console.log(`  triangle ${ok ? 'ok' : 'FAILED'}: ${r.text}${errors.length ? '; errors: ' + errors.join('; ') : ''}`);
+	return ok;
+}
+
 let failed = 0;
-const launches = names.map((name) => ({ name, label: name, opts: {} }));
+// (Chromium: WebGPU on SwiftShader's Vulkan, as packages/gfx/test/webgpu.mjs)
+const WEBGPU = ['--enable-unsafe-webgpu', '--enable-features=Vulkan', '--use-vulkan=swiftshader', '--use-angle=swiftshader'];
+const launches = names.map((name) => ({ name, label: name, opts: name === 'chromium' ? { args: WEBGPU } : {} }));
 // (a Chromium without exnref: the page falls back to the legacy module by itself)
 if (names.includes('chromium') && modules.includes('hih-legacy.wasm'))
 	launches.push({ name: 'chromium', label: 'chromium without exnref', opts: { args: ['--js-flags=--no-experimental-wasm-exnref'] }, noExnref: true });
@@ -211,6 +256,7 @@ for (const { name, label, opts, noExnref } of launches) {
 			console.log(`  hih.wasm: ${err}`);
 			if (err === 'compiled') failed++;
 			if (!(await pageTest(browser, '', 'hih-legacy.wasm'))) failed++;
+			if (existsSync(path.join(dir, 'gfx/triangle.wasm')) && !(await triangleTest(browser, false))) failed++;
 			continue;
 		}
 		for (const wasm of modules) {
@@ -227,6 +273,7 @@ for (const { name, label, opts, noExnref } of launches) {
 			if (!(await pageTest(browser, '', 'hih.wasm'))) failed++;
 			if (modules.includes('hih-legacy.wasm') && !(await pageTest(browser, '?eh=legacy', 'hih-legacy.wasm'))) failed++;
 		}
+		if (existsSync(path.join(dir, 'gfx/triangle.wasm')) && !(await triangleTest(browser, name === 'chromium'))) failed++;
 	} catch (e) {
 		console.log(`== ${label}: ${e.message.split('\n')[0]}`);
 		failed++;
