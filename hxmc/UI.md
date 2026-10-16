@@ -278,6 +278,12 @@ Since the design above (October 2026), in this order:
   `Button`, `Checkbox`). `packages/ui/examples/Todo.hx` is a todo app in
   markup, tested natively and in Chromium (WebGPU and WebGL2) with real
   input events.
+- Then the visual details: clipping moved into the shader (each vertex
+  carries its clip rectangle and corner radius: rounded clips, and a frame
+  is one draw call), box shadows (`Style.shadow`), scrollbar thumbs that
+  drag, a focus ring when the keyboard moves the focus, and cursors
+  (`hxmc.os.Window.cursor` on X11, Win32, Cocoa and the browser;
+  `Style.cursor`).
 
 Where this departs from section 6:
 
@@ -294,8 +300,8 @@ Where this departs from section 6:
   shrink below their content, so text is not squashed (a container that
   must shrink sets `minHeight: 0`, as in CSS).
 - **Not yet**: accessibility (the AccessKit-shaped tree), IME composition
-  (characters arrive, preedit text does not), images, clipboard, rounded
-  clips (clips are rectangles), native controls.
+  (characters arrive, preedit text does not), images, clipboard, native
+  controls.
 
 ## Sources
 
