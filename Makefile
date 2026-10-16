@@ -104,7 +104,7 @@ endef
 .DEFAULT_GOAL := help
 .PHONY: help std deps rt rt-build rt-target rt-layouts hxmc tool bootstrap fixpoint stage0 crosshost port dev release wasm npm site fuzz \
 	lix lix-release lix-dist reference bench test test-fuzz test-display test-server test-jsonrpc test-unit-targets test-interp \
-	test-haxelib test-eval-debugger test-node-libs smoke hxmc-test corpus-stage gfx-programs gfx-check gfx-web-check gfx-shader-check esx-check text-check ui-check ui-draw-check portcheck measure quick check full clean distclean
+	test-haxelib test-eval-debugger test-node-libs smoke hxmc-test corpus-stage gfx-programs gfx-check gfx-web-check gfx-shader-check esx-check text-check ui-check ui-draw-check ui-web-check portcheck measure quick check full clean distclean
 
 help:
 	@sed -n '/^# --- Targets/,$$p' $(MAKEFILE_LIST) | sed -n 's/^## \{0,1\}//p'
@@ -171,6 +171,8 @@ help:
 ## ui-draw-check  packages/ui's GPU renderer (hxmc.ui.draw): the sample UI headless against
 ##             packages/ui/test/draw.png, then the todo example (markup, signals, widgets) driven
 ##             through its Ui and drawn against todo.png (Linux: Mesa, DejaVu Sans; BLESS=1 rewrites them)
+## ui-web-check  the todo example as wasm32-wasi in headless Chromium, on WebGPU and WebGL2, driven by
+##             real pointer and keyboard events, against todo.png (packages/ui/test/web.mjs; DejaVu Sans)
 ## portcheck   the port built by hxmc self-compiles to the reference's HXB (hxmc/test/Selfcheck.hx)
 ## bench       the HaxeBenchmarks cases on hxmc (native, wasm under node), C++, JVM, JS, HL/C and
 ##             HL, built by hxmc and the port: times, peak RSS, sizes (hxmc/test/Bench.hx; BENCH_ARGS)
@@ -500,6 +502,10 @@ ui-draw-check: $(TOOL) $(STD) $(HOST_RT)
 	$(call hxmc,bin/ui/$(GFX_TARGET)/TodoTest$(call EXE,$(GFX_TARGET)),$(UI_CP) -main TodoTest $(HXMC_ARGS) $(GFX_ARGS))
 	LIBGL_ALWAYS_SOFTWARE=1 env -u DISPLAY bin/ui/$(GFX_TARGET)/UiDrawTest packages/ui/test/draw.png bin/ui/$(GFX_TARGET)/draw.png $(if $(BLESS),--bless)
 	LIBGL_ALWAYS_SOFTWARE=1 env -u DISPLAY bin/ui/$(GFX_TARGET)/TodoTest packages/ui/test/todo.png bin/ui/$(GFX_TARGET)/todo.png $(if $(BLESS),--bless)
+
+ui-web-check: $(TOOL) $(STD)
+	$(call hxmc,bin/ui/WebTodo.wasm,$(UI_CP) -main WebTodo $(HXMC_ARGS) -D hxmc.target=wasm32-wasi)
+	$(NODE) packages/ui/test/web.mjs bin/ui/WebTodo.wasm bin/ui
 
 portcheck: $(TOOL) $(STD) $(HOST_RT) $(REFERENCE)
 	$(SCRIPT) Selfcheck --local --small
