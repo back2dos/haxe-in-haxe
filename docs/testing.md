@@ -87,6 +87,25 @@ wasm32-wasi, headless and in a canvas, in headless Chromium (SwiftShader;
 WebGL2 in Chromium, WebGL2 in Firefox, under Xvfb, and in WebKit).
 `make gfx-shader-check`: the shader macro on Eval (shaders run on the CPU, the
 emitted sources, the programs it rejects: `packages/gfx/test/ShaderTest.hx`).
+`gfx-check` and `gfx-web-check` also draw `FeatureScene` (buffer and texture
+writes, R8 and RGBA8 textures, blending, scissor) against
+`packages/gfx/test/features.png`.
+
+## UI
+
+On Eval: `make esx-check` (markup literals: templates, values, components,
+HTML, the programs the macro rejects), `make text-check` (the rasterizer,
+DejaVu Sans' tables and outlines, line layout, a text sample through the
+atlas against `packages/text/test/sample.png`: the same pixels on every
+machine with that font), `make ui-check` (the flexbox layout against
+Chromium's on 60 cases, `packages/ui/test/layout-expected.json`, which
+`layout-ref.mjs` writes from `layout-cases.mjs`; text wrapping, events and
+focus; then signals and markup rendered into nodes). Natively: `make
+ui-draw-check` (the sample UI and the todo example, driven through its Ui,
+drawn headless against `draw.png` and `todo.png`; Linux: llvmpipe, DejaVu
+Sans). In the browser: `make ui-web-check` (the todo example for
+wasm32-wasi in headless Chromium on WebGPU and WebGL2, driven by real pointer
+and keyboard events, against `todo.png`). CI runs all five in the `gfx` job.
 
 ## CI
 

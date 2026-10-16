@@ -26,7 +26,9 @@
 #   - site: the website; gfx: packages/gfx on Linux (make gfx-check; on
 #     ARM64 the cross-built programs, gfx-arm64; on Windows x86-64 and arm64
 #     the cross-built programs on D3D11's WARP, gfx-windows; on macOS built
-#     from the npm packages after npm-pack, gfx-macos).
+#     from the npm packages after npm-pack, gfx-macos), then packages/esx,
+#     text and ui (their checks on Eval, the sample UI and the todo example
+#     drawn on llvmpipe, the todo example in Chromium on WebGPU and WebGL2).
 # - conformance: the port against the reference: HXB of the upstream suites
 #   and macro cases, display requests, the compilation server and its
 #   JSON-RPC methods, upstream's target suites compiled by both and compared
@@ -574,13 +576,24 @@ jobs:
       - name: System packages
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -qqy --no-install-recommends libegl1 libegl-mesa0 libgl1-mesa-dri libgles2 xvfb xauth
+          sudo apt-get install -qqy --no-install-recommends libegl1 libegl-mesa0 libgl1-mesa-dri libgles2 xvfb xauth fonts-dejavu-core
       - name: gfx (Mesa llvmpipe, Xvfb)
         run: |
           set -ex
           make rt && touch bin/hxmc/rt/*/*.o
           make gfx-shader-check
           make gfx-check GFX_TARGET=linux-x86_64
+      - name: esx, text and ui (Eval; Mesa llvmpipe; Chromium)
+        run: |
+          set -ex
+          make esx-check text-check ui-check
+          make ui-draw-check GFX_TARGET=linux-x86_64
+          npm install --no-save --silent playwright@1.56.1
+          npx playwright install --with-deps chromium > /dev/null
+          make ui-web-check
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with: {name: ui-images-linux-x86_64, path: "bin/ui/**/*.png", retention-days: 7, if-no-files-found: ignore}
       - name: The ARM64 programs
         run: |
           set -ex

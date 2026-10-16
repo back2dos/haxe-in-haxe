@@ -1,4 +1,4 @@
-# hxmc: UI (survey and design, nothing built)
+# hxmc: UI (survey, design, and what is built)
 
 How to build the low level of `@hxmc/ui`, and whether to abstract over the
 platforms' native controls or to draw everything with the GPU (the
@@ -247,6 +247,55 @@ value (AppKit geometry); GTK 4 and Pango bindings in glibc mode; a child
 The first milestone mirrors gfx's: one form (label, text field, button,
 list) on all four backends, laid out by our flexbox, with a GPU child
 view in it, checked headless where the backend allows.
+
+## 7. Built
+
+Since the design above (October 2026), in this order:
+
+- `@hxmc/gfx` gained what a drawn UI needs: buffer writes, R8 and RGBA8
+  textures (`Texture2D` parameters in shaders), blending and scissor, on
+  all five back ends (PLANS.md, "Graphics").
+- `@hxmc/ui`'s core (`hxmc.ui`): `Node`, `TextNode`, `Style` (setters
+  mark layout or paint), `Layout` (flexbox after CSS section 9, checked
+  against Chromium's on 60 cases), `Ui` (hit testing, hover, press and
+  click, bubbling, focus and Tab, wheel scrolling), `Canvas` and
+  `TextEngine` interfaces. It runs on Eval: its tests need no GPU.
+- `@hxmc/text` (`hxmc.text`): TrueType parsing, a rasterizer after
+  font-rs, shaping by cmap and kerning with fallback fonts, line breaking,
+  a glyph atlas, the system's fonts on Linux, Windows and macOS, the page's
+  fonts in a browser.
+- The drawn backend (`hxmc.ui.draw`): one shader for rounded rectangles
+  with borders (signed distance) and atlas glyphs, a renderer batching by
+  clip, `UiWindow` on an `hxmc.os` window. `hxmc.os` gained modifiers and
+  text input events on all four platforms.
+- `@hxmc/esx` (`hxmc.esx`): markup literals after WebReflection's ESX
+  proposal: one static `Template` per literal (its identity a cache key)
+  and its dynamic values; components compile to calls whose props Haxe
+  checks. It works on every Haxe target.
+- `hxmc.ui.reactive`: signals, memos and effects (Reactively's algorithm,
+  an ownership tree) and `Render`, which mounts ESX into nodes once and
+  binds what they read, Solid's way; `For`, `Show`; widgets (`TextField`,
+  `Button`, `Checkbox`). `packages/ui/examples/Todo.hx` is a todo app in
+  markup, tested natively and in Chromium (WebGPU and WebGL2) with real
+  input events.
+
+Where this departs from section 6:
+
+- **The drawn backend came first**, ahead of native controls: markup with
+  a Solid-like framework on drawn components was the goal, and it needs no
+  per-platform widget code. Native controls stay the plan for tools that
+  want the platform's look; the core and `Canvas` interface keep that open.
+- **Text starts with a built-in rasterizer** rather than the platforms'
+  shapers: the same pixels on every machine and target (golden images in
+  CI, the browser without font files). Its limits are the shapers' reasons
+  to come next: no ligatures or mark positioning (GSUB, GPOS), no bidi, no
+  hinting or subpixel rendering, glyf outlines only (no CFF).
+- **Layout uses CSS's automatic minimum size**, not Yoga's 0: items do not
+  shrink below their content, so text is not squashed (a container that
+  must shrink sets `minHeight: 0`, as in CSS).
+- **Not yet**: accessibility (the AccessKit-shaped tree), IME composition
+  (characters arrive, preedit text does not), images, clipboard, rounded
+  clips (clips are rectangles), native controls.
 
 ## Sources
 

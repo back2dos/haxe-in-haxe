@@ -782,12 +782,12 @@ setjmp/longjmp do not unwind, but debuggers and SEH-based tools would.
   `FfiStruct` (against zig cc). Left: x86-64 (System V's classification,
   memory arguments, the hidden result pointer; Win64's by-reference
   copies) and wasm32 (by address), which reject such calls for now.
-- Later: `@hxmc/ui`: one core (tree, flexbox layout, style, accessibility
-  tree, text API) with a native-controls backend first (comctl32, AppKit,
-  GTK 4 through the glibc mode, DOM) and a drawn backend on gfx second,
-  plus `hxmc.text` (the platforms' shapers and rasterizers into an atlas)
-  and a GPU view on a child `Surface`; the survey and the design are in
-  [UI.md](UI.md).
+- `@hxmc/ui` (started 2026-10-16; the survey, the design and what is built
+  in [UI.md](UI.md)): the core (tree, flexbox layout, events, focus), the
+  drawn backend on gfx, `@hxmc/text` (pure Haxe fonts and layout),
+  `@hxmc/esx` (markup) and signals with a Solid-like renderer, tested on
+  Eval, natively and in Chromium. Next: native controls, accessibility,
+  the platforms' shapers.
 - Engines: a compatibility layer for HashLink's natives (`sdl.hdll`,
   `directx.hdll`, `fmt`) on top of os and gfx would run heaps unchanged.
 
