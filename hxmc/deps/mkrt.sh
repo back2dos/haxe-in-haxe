@@ -188,4 +188,3 @@ undef="-u _setjmp"
 for f in $libc $(nm -u $(ls "$out/ssl.o" "$out/uv.o" 2>/dev/null) | awk '{print $2}' | grep -v '^hx\|^haxe_' | sort -u); do undef="$undef -u $f"; done
 ld.lld -r --strip-debug -o "$out/rt.o" $undef "$crt1" --start-group $libs --end-group
 ls -l "$out/rt.o" "$out/ssl.o" "$out/uv.o"
-# (CI test: a new hash of hxmc/deps; reverted)
