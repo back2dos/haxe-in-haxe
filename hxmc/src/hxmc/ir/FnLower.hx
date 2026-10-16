@@ -1539,7 +1539,27 @@ class FnLower {
 	function intrinsicStatic(name:String, cargs:Array<TExpr>, e:TExpr):Null<Ex> {
 		return switch name {
 			case "Std_int" if (cargs.length == 1):
+				var mm = intMinMax(cargs[0]);
+				if (mm != null) return coerce(mm, TI32, tyOf(e));
 				coerce(EConv(F2I, coerce(value(cargs[0]), tyOf(cargs[0]), TF64)), TI32, tyOf(e));
+			case _: null;
+		}
+	}
+
+	// Std.int(Math.min(a, b)) (or max) of two Ints: the smaller (larger) Int,
+	// which is what the Float operation gives back exactly
+	function intMinMax(x:TExpr):Null<Ex> {
+		return switch strip(x).eexpr {
+			case TCall({eexpr: TField(_, FStatic(c, cf))}, [a, b])
+				if (c.clPath.pack.length == 0 && c.clPath.name == "Math" && (cf.cfName == "min" || cf.cfName == "max")
+					&& tyOf(a) == TI32 && tyOf(b) == TI32):
+				var xa = newLocal("mm", TI32);
+				out.push(SSet(xa, value(a))); // (a copy: evaluating b may change it)
+				var xb = asLocal(value(b), TI32);
+				var r = newLocal("mm", TI32);
+				out.push(SSet(r, ELocal(xb)));
+				out.push(SIf(EBin(cf.cfName == "min" ? Lt : Gt, ELocal(xa), ELocal(xb)), [SSet(r, ELocal(xa))], []));
+				ELocal(r);
 			case _: null;
 		}
 	}
