@@ -444,5 +444,3 @@ API and C interop design: [hxmc/LOWLEVEL.md](hxmc/LOWLEVEL.md).
 
 GPL-2.0-or-later, like the Haxe compiler it is ported from; hxmc's runtime and
 std, which end up in compiled programs, are MIT. Details: [LICENSE](LICENSE).
-
-<!-- CI path selection test: a docs-only change (reverted) -->
