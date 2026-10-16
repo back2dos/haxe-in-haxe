@@ -135,8 +135,10 @@ class CppReferences {
 						follow(other);
 				}
 			}
-			if (!Lambda.exists(visited, function(t2) return core.TUnification.fastEq(inType, t2))) {
-				visited = [inType].concat(visited);
+			// port: visited is a stack with its head last (pushed and popped in place
+			// instead of copied); only searched as a whole
+			if (!core.ds.ArrayTools.exists(visited, function(t2) return core.TUnification.fastEq(inType, t2))) {
+				visited.push(inType);
 				switch followWithCoro(inType) {
 					case Coro(sig):
 						var expanded = context.Common.expandCoroType(ctx.ctxCommon.basic, sig.args, sig.ret);
@@ -181,7 +183,7 @@ class CppReferences {
 				}
 				// port: List.tl raises Failure "tl" on an empty list.
 				if (visited.length == 0) throw new core.ds.Failure("tl");
-				visited = visited.slice(1);
+				visited.pop();
 			}
 		}
 		function visitParams(expression:TExpr):Void {
