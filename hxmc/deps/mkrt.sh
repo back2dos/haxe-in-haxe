@@ -1,5 +1,5 @@
 #!/bin/sh
-# Builds the runtime objects of an hxmc target (README.md, "hxmc"): the
+# Builds the runtime objects of an hxmc target (docs/hxmc.md): the
 # runtime is Haxe (hxmc/std/hxmc/rt); rt.o is the parts of the C library
 # that generated code and the runtime's Haxe code call (musl's members and
 # its startup object on Linux; glibc's import table and libc_nonshared's

@@ -2,7 +2,7 @@ package hxmc.ir;
 
 // The typed IR between the typed AST and hxmc's code generator (MirBuild):
 // hxc's IR, copied with its lowering (Lower, FnLower) when hxmc separated
-// from hxc (README.md, "Origin"). Statements are
+// from hxc (docs/hxmc.md, "Origin"). Statements are
 // structured (no gotos); expressions are pure except as the right-hand side
 // of SSet/SExpr, so evaluation order and GC points are explicit.
 

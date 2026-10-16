@@ -1,6 +1,6 @@
 #!/bin/sh
 # Which parts of build.yml a run needs (its `changes` job), from the files
-# that changed since the last commit CI checked (README.md, "CI"):
+# that changed since the last commit CI checked (docs/testing.md, "CI"):
 #   all       everything: anything outside the cases below (haxe/, hxmc/src,
 #             hxmc/std, hxmc/deps, hxmc/test, the workflows, the Makefile, ...);
 #             always on main, on tags, nightly (schedule) and on dispatch

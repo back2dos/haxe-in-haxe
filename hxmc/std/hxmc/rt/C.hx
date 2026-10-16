@@ -7,7 +7,7 @@ import hxmc.unsafe.Ptr;
 // hxmc/c's; their implementations are Haxe now: Lower binds the calls to
 // them, or, for the safe region's markers, keeps the calls by symbol so that
 // Facts tells the functions that enter one). Rt's may collect (GC points, as
-// generated code's calls of the runtime); Leaf's never do (README.md,
+// generated code's calls of the runtime); Leaf's never do (docs/hxmc.md,
 // "Runtime in Haxe").
 @:hxmc.rt extern class Rt {
 	static function rt_throw(v:Dynamic):Void; // (does not return; Start)

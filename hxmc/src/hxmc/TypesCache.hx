@@ -4,7 +4,7 @@ import haxe.io.Path;
 import sys.FileSystem;
 import sys.io.File;
 
-// The runtime's typed modules, cached (README.md, "Runtime in Haxe"): the
+// The runtime's typed modules, cached (docs/hxmc.md, "Runtime in Haxe"): the
 // modules of hxmc's own package of the std (the runtime, hxmc.unsafe, the
 // natives: about 15k lines a program would otherwise type every time) are
 // typed once per tool and configuration by a separate run of the tool

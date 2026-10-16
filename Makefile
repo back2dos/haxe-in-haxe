@@ -1,6 +1,6 @@
 # hxmc: the Haxe compiler ported to Haxe (haxe/src) and hxmc, its machine-code
 # and WebAssembly target (hxmc/). GNU make, from the repository root; needs
-# node (and git), zig only to build the runtime objects (README.md).
+# node (and git), zig only to build the runtime objects (README.md, docs/development.md).
 #
 #   make help                 the targets and variables below
 #   make hxmc                 bin/hxmc/hxmc, the tool (from the committed stage0 on first use)
@@ -411,7 +411,7 @@ $(REFERENCE): bin/lix/lix
 	ln -sf lix/versions/$(UPSTREAM_REV)/haxe $@
 	$@ -version
 
-# --- Tests (README.md, "Testing") ---
+# --- Tests (docs/testing.md) ---
 
 CASES_FILE ?= haxe/test/conformance-cases.txt
 TEST_ENV = HAXE_REFERENCE=$(abspath $(REFERENCE)) HAXE_IN_HAXE_PORT=$(abspath $(PORT_BIN))

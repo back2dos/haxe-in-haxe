@@ -1,4 +1,4 @@
-// The npm packages (README.md, "Using hxmc"; `make npm`, CI). Each folder of
+// The npm packages (docs/using.md; `make npm`, CI). Each folder of
 // packages/ is one package, or for `platform` the template of six:
 //   node packages/pack.mjs <version> <natives dir> <out dir>
 // <natives dir>/<target>/haxe[.exe] are the native compilers and
