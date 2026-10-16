@@ -166,7 +166,8 @@ help:
 ## text-check  packages/text on Eval: the rasterizer, DejaVu Sans (metrics, cmap, kerning, outlines),
 ##             line layout, and a text sample through the atlas against packages/text/test/sample.png
 ## ui-check    packages/ui on Eval: the layout against Chromium's flexbox (layout-expected.json,
-##             from packages/ui/test/layout-ref.mjs), text wrapping, events and focus (UiTest.hx)
+##             from packages/ui/test/layout-ref.mjs), text wrapping, events and focus (UiTest.hx);
+##             signals and markup rendered into nodes (ReactiveTest.hx)
 ## ui-draw-check  packages/ui's GPU renderer (hxmc.ui.draw): the sample UI headless against
 ##             packages/ui/test/draw.png (Linux: Mesa, DejaVu Sans; BLESS=1 rewrites it)
 ## portcheck   the port built by hxmc self-compiles to the reference's HXB (hxmc/test/Selfcheck.hx)
@@ -490,6 +491,7 @@ text-check: $(TOOL)
 
 ui-check: $(TOOL)
 	ulimit -s unlimited 2>/dev/null || true; $(TOOL) -cp packages/ui/src -cp packages/ui/test --run UiTest
+	ulimit -s unlimited 2>/dev/null || true; $(TOOL) -cp packages/esx/src -cp packages/ui/src -cp packages/ui/test --run ReactiveTest
 
 UI_CP := -cp packages/os/src -cp packages/gfx/src -cp packages/gfx/test -cp packages/text/src -cp packages/ui/src -cp packages/ui/test
 ui-draw-check: $(TOOL) $(STD) $(HOST_RT)
