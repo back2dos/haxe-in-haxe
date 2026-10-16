@@ -7,7 +7,9 @@ import sys.net.Socket;
 using StringTools;
 
 // Eval debugger conformance (`-D eval-debugger=host:port`):
-//   <haxe> -cp haxe/test --run EvalDebugger [--keep] [--summary <file>] [scenario ...]
+//   <haxe> -cp haxe/test --run EvalDebugger [--keep] [--summary <file>] [--shard <i>/<n>] [scenario ...]
+// --shard i/n runs every n-th scenario from the i-th (1-based): CI's n jobs
+// together run them all.
 // The Eval debugger is a JSON-RPC client: the compiler connects to the
 // debugger (here this script) at host:port, waits for a `continue`, and
 // answers requests while the program runs or stands at a breakpoint. Frames:
@@ -30,14 +32,20 @@ class EvalDebugger {
 	static var cases:String;
 
 	static function main() {
-		var a = parseArgs(Sys.args(), ["--summary"]);
+		var a = parseArgs(Sys.args(), ["--summary", "--shard"]);
 		var ref = FileSystem.fullPath(Sys.getEnv("HAXE_REFERENCE") ?? "bin/reference/haxe");
 		var port = FileSystem.fullPath(Sys.getEnv("HAXE_IN_HAXE_PORT") ?? "bin/port/haxe");
 		Sys.putEnv("HAXE_STD_PATH", root + "/haxe/upstream/std");
 		cases = root + "/haxe/test/eval-debugger";
 		var out = "bin/test/eval-debugger";
 		mkdirs(out);
-		var names = [for (s in SCENARIOS) if (a.rest.length == 0 || a.rest.contains(s.name)) s];
+		var shard = a.has("--shard") ? a.get("--shard").split("/").map(Std.parseInt) : [1, 1];
+		if (shard.length != 2 || shard[0] == null || shard[1] == null || shard[0] < 1 || shard[0] > shard[1])
+			throw "--shard: <i>/<n> with 1 <= i <= n";
+		var names = [
+			for (i => s in SCENARIOS)
+				if ((a.rest.length == 0 || a.rest.contains(s.name)) && i % shard[1] == shard[0] - 1) s
+		];
 		var failed = 0, lines = [];
 		for (s in names) {
 			var r = normalize(run(ref, s)), p = normalize(run(port, s));
@@ -52,7 +60,8 @@ class EvalDebugger {
 		}
 		var total = '${names.length - failed}/${names.length} scenarios identical';
 		Sys.println(total);
-		summary(a.get("--summary"), '### Eval debugger\n\n$total\n\n```\n${lines.join("\n")}\n```\n\n');
+		var title = shard[1] > 1 ? 'Eval debugger (shard ${shard[0]}/${shard[1]})' : "Eval debugger";
+		summary(a.get("--summary"), '### $title\n\n$total\n\n```\n${lines.join("\n")}\n```\n\n');
 		Sys.exit(failed > 0 ? 1 : 0);
 	}
 

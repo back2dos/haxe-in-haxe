@@ -28,6 +28,12 @@ TARGET ?= $(HOST)
 TARGETS := linux-x86_64 linux-arm64 windows-x86_64 windows-arm64 macos-x86_64 macos-arm64
 # the runtime objects: the six targets, and Linux in the dynamic glibc mode (-D hxmc.libc=glibc)
 RT_TARGETS := $(TARGETS) linux-x86_64-glibc linux-arm64-glibc
+# `make rt-target`: one of RT_TARGETS
+RT_TARGET ?= $(HOST)
+# `make corpus-stage`: the six targets, wasm32-wasi, wasm32-wasi-legacy, linux-x86_64-glibc, linux-arm64-glibc
+CORPUS_TARGETS ?= $(TARGETS) wasm32-wasi wasm32-wasi-legacy linux-x86_64-glibc linux-arm64-glibc
+# `make gfx-programs`: linux-x86_64, linux-arm64 (CI cross-builds those), or the Mac's own target
+GFX_TARGET ?= $(HOST)
 # extra arguments of the port's build (e.g. HXFLAGS="-D retain")
 HXFLAGS ?=
 # the port the tests check
@@ -48,6 +54,8 @@ LIX_DIR ?=
 BENCH_DATA ?=
 # `make bench`: the arguments of hxmc/test/Bench.hx (e.g. "-n 3 -c nbody -t hxmc,js")
 BENCH_ARGS ?=
+# `make crosshost`: the arguments of hxmc/test/Crosshost.hx (CI splits the targets: "--targets a,b")
+CROSSHOST_ARGS ?= --tool
 
 # --- Sources ---
 
@@ -94,9 +102,9 @@ ulimit -s unlimited 2>/dev/null || true; $(TOOL) $(1) $(2) > $(1).log 2>&1 || { 
 endef
 
 .DEFAULT_GOAL := help
-.PHONY: help std deps rt rt-build hxmc tool bootstrap fixpoint stage0 crosshost port dev release wasm npm site fuzz \
-	lix lix-release reference bench test test-fuzz test-display test-server test-jsonrpc test-unit-targets test-interp \
-	test-haxelib test-eval-debugger test-node-libs smoke hxmc-test gfx-check gfx-web-check portcheck measure quick check full clean distclean
+.PHONY: help std deps rt rt-build rt-target rt-layouts hxmc tool bootstrap fixpoint stage0 crosshost port dev release wasm npm site fuzz \
+	lix lix-release lix-dist reference bench test test-fuzz test-display test-server test-jsonrpc test-unit-targets test-interp \
+	test-haxelib test-eval-debugger test-node-libs smoke hxmc-test corpus-stage gfx-programs gfx-check gfx-web-check portcheck measure quick check full clean distclean
 
 help:
 	@sed -n '/^# --- Targets/,$$p' $(MAKEFILE_LIST) | sed -n 's/^## \{0,1\}//p'
@@ -112,6 +120,9 @@ help:
 ## rt          the runtime objects (bin/hxmc/rt/<target>/{rt,ssl,uv}.o): the release
 ##             rt-<hash of hxmc/deps> (hxmc/bootstrap/rt.mjs), else rt-build
 ## rt-build    the runtime objects with zig: mbedtls and libuv (hxmc/deps/deps.sh), hxmc/deps/mkrt.sh
+## rt-target   RT_TARGET's objects alone (and linux-x86_64's, the tool's); rt-layouts then checks
+##             the committed layouts against every target's headers and writes bin/hxmc/rt/HASH
+##             (CI builds the eight targets in parallel)
 ## crosshost   the tool as a WebAssembly module (under node) builds the corpus for every target
 ##             and the tool itself byte-identical to the native tool (hxmc/test/Crosshost.hx)
 ## port        PORT_BIN (bin/port/haxe): the port for the host, built by hxmc (alias: dev)
@@ -126,6 +137,7 @@ help:
 ## fuzz        bin/fuzz/fuzz: the differential fuzzer, built by hxmc
 ## lix         bin/lix/lix (+ haxe, haxelib, neko links): lix (tools/lix) for the host
 ## lix-release bin/release/TARGET/lix[.exe]: lix cross-built for TARGET
+## lix-dist    bin/lix-dist/lix-<target>[.exe]: lix for the six targets (the release, the site's tools/)
 ## reference   REFERENCE (bin/reference/haxe): the nightly of the pinned upstream commit, by lix
 ## test        HXB conformance of PORT_BIN against the reference (haxe/test/Conformance.hx;
 ##             CASES_FILE=haxe/test/conformance-macro-cases.txt for the macro cases)
@@ -136,7 +148,11 @@ help:
 ## test-unit-targets   upstream's unit suite compiled for each target by both, compared
 ## smoke       hxmc/test/smoke.sh on PORT_BIN: --interp, HXB, JS, sys.ssl, eval.luv
 ## hxmc-test   hxmc's corpus against its golden files (hxmc/test/Corpus.hx)
+## corpus-stage  bin/corpus/<target>: hxmc's corpus cross-built for each of CORPUS_TARGETS, to run on
+##             the target's machine (Check; CI's test and wasm jobs): wasm32-wasi-legacy with legacy
+##             exception handling, linux-*-glibc in the glibc mode (checked with readelf: ElfCheck)
 ## test-node-libs  -lib from node_modules with the npm package's compiler for the host (hxmc/test/NodeLibs.hx)
+## gfx-programs  bin/gfx/GFX_TARGET/{GfxTest,Triangle}: packages/gfx's test programs (Linux: glibc mode)
 ## gfx-check   packages/gfx: the triangle example headless and in a window, against a golden
 ##             image (packages/gfx/test/check.sh; Linux: Mesa, Xvfb; macOS: Metal, Cocoa)
 ## gfx-web-check  packages/gfx on WebGPU (wasm32-wasi): the same, headless and in a canvas, in
@@ -156,8 +172,8 @@ help:
 ## clean       remove the build outputs (keeps the tool, the runtime objects and the reference)
 ## distclean   also remove bin/ entirely
 ##
-## Variables: JOBS, NODE, ZIG, HOST, TARGET, HXFLAGS, PORT_BIN, REFERENCE, LANE, N, CASES, PORT,
-## LIX_DIR, BENCH_DATA, BENCH_ARGS (defaults and meaning: the top of the Makefile).
+## Variables: JOBS, NODE, ZIG, HOST, TARGET, RT_TARGET, GFX_TARGET, HXFLAGS, PORT_BIN, REFERENCE, LANE, N, CASES, PORT,
+## LIX_DIR, BENCH_DATA, BENCH_ARGS, CROSSHOST_ARGS, CORPUS_TARGETS (defaults and meaning: the top of the Makefile).
 
 std: $(STD)
 $(STD): hxmc/src/hxmc/MkStd.hx $(STD_SRC)
@@ -184,6 +200,16 @@ rt-build: deps
 	sh hxmc/deps/mkrt.sh linux-x86_64
 	$(MAKE) $(TOOL)
 	for t in $(filter-out linux-x86_64,$(RT_TARGETS)); do HXMC=$(CURDIR)/$(TOOL) sh hxmc/deps/mkrt.sh $$t || exit 1; done
+	$(MAKE) --no-print-directory rt-layouts
+
+# one target's objects (with linux-x86_64's, which the tool that assembles the
+# others links)
+rt-target: bin/hxmc/deps/linux-x86_64/VERSIONS bin/hxmc/deps/$(RT_TARGET)/VERSIONS
+	sh hxmc/deps/mkrt.sh linux-x86_64
+	if [ $(RT_TARGET) != linux-x86_64 ]; then $(MAKE) --no-print-directory $(TOOL) && HXMC=$(CURDIR)/$(TOOL) sh hxmc/deps/mkrt.sh $(RT_TARGET); fi
+
+# the committed layouts are what every target's headers give (bin/hxmc/deps/<target>/include)
+rt-layouts: $(TOOL)
 	$(TOOL) -cp hxmc/deps --run Layouts --check
 	$(NODE) hxmc/bootstrap/rt.mjs hash > bin/hxmc/rt/HASH
 
@@ -231,7 +257,7 @@ stage0: $(TOOL)
 	@ls -l $(STAGE0)
 
 crosshost: $(TOOL) $(STD) $(HOST_RT)
-	$(SCRIPT) Crosshost --tool $(CASES)
+	$(SCRIPT) Crosshost $(CROSSHOST_ARGS) $(CASES)
 
 # --- The port ---
 
@@ -361,6 +387,11 @@ bin/release/%/lix: $(LIX_DEPS)
 bin/release/%/lix.exe: $(LIX_DEPS)
 	$(call hxmc,$@,$(LIX_ARGS) -D hxmc.target=$*)
 
+lix-dist: $(foreach t,$(TARGETS),bin/release/$(t)/lix$(call EXE,$(t)))
+	mkdir -p bin/lix-dist
+	for t in $(TARGETS); do e=; case $$t in windows-*) e=.exe ;; esac; cp bin/release/$$t/lix$$e bin/lix-dist/lix-$$t$$e || exit 1; done
+	@ls -l bin/lix-dist
+
 # --- The reference compiler ---
 
 # the official nightly (build.haxe.org) of the pinned upstream commit,
@@ -407,14 +438,27 @@ test-node-libs: bin/npm/native/$(HOST)/haxe
 hxmc-test: $(TOOL) $(STD) $(HOST_RT)
 	$(SCRIPT) Corpus -v $(CASES)
 
+corpus-stage: $(TOOL) $(STD) $(HOST_RT)
+	for t in $(CORPUS_TARGETS); do \
+		case $$t in \
+			wasm32-wasi-legacy) a="--target wasm32-wasi --wasm-eh legacy" ;; \
+			*-glibc) a="--target $${t%-glibc} --libc glibc" ;; \
+			*) a="--target $$t" ;; \
+		esac; \
+		rm -rf bin/corpus/$$t; \
+		$(SCRIPT) Corpus -v $$a --stage bin/corpus/$$t || exit 1; \
+		case $$t in *-glibc) $(SCRIPT) ElfCheck bin/corpus/$$t || exit 1 ;; esac; \
+	done
+
 # the os and gfx packages' sources (`-lib hxmc.gfx` once the launcher resolves packages/)
 GFX_CP := -cp packages/os/src -cp packages/gfx/src -cp packages/gfx/examples -cp packages/gfx/test
 # (Linux: the dynamic glibc mode, which loads the GPU drivers)
-GFX_ARGS := $(if $(filter linux-%,$(HOST)),-D hxmc.libc=glibc)
-gfx-check: $(TOOL) $(STD) $(HOST_RT)
-	$(call hxmc,bin/gfx/GfxTest,$(GFX_CP) -main GfxTest $(HXMC_ARGS) $(GFX_ARGS))
-	$(call hxmc,bin/gfx/Triangle,$(GFX_CP) -main Triangle $(HXMC_ARGS) $(GFX_ARGS))
-	sh packages/gfx/test/check.sh bin/gfx
+GFX_ARGS = $(if $(filter linux-%,$(GFX_TARGET)),-D hxmc.libc=glibc) -D hxmc.target=$(GFX_TARGET)
+gfx-programs: $(TOOL) $(STD) $(HOST_RT)
+	$(call hxmc,bin/gfx/$(GFX_TARGET)/GfxTest,$(GFX_CP) -main GfxTest $(HXMC_ARGS) $(GFX_ARGS))
+	$(call hxmc,bin/gfx/$(GFX_TARGET)/Triangle,$(GFX_CP) -main Triangle $(HXMC_ARGS) $(GFX_ARGS))
+gfx-check: gfx-programs
+	sh packages/gfx/test/check.sh bin/gfx/$(GFX_TARGET)
 
 gfx-web-check: $(TOOL) $(STD)
 	$(call hxmc,bin/gfx/WebTest.wasm,$(GFX_CP) -main WebTest $(HXMC_ARGS) -D hxmc.target=wasm32-wasi)
@@ -426,8 +470,9 @@ portcheck: $(TOOL) $(STD) $(HOST_RT) $(REFERENCE)
 bench: $(TOOL) $(STD) $(HOST_RT) $(PORT_BIN) bin/lix/lix
 	$(SCRIPT) Bench $(BENCH_ARGS)
 
-measure: $(TOOL) $(STD) $(HOST_RT) $(REFERENCE)
-	$(SCRIPT) Measure
+# (the self-compile of PORT_BIN; the npm package's WebAssembly compiler)
+measure: $(TOOL) $(STD) $(HOST_RT) $(REFERENCE) $(PORT_BIN) bin/npm/native/wasm32-wasi/haxe.wasm
+	$(SCRIPT) Measure --port $(PORT_BIN)
 
 quick: $(TOOL) $(STD) $(HOST_RT)
 	$(SCRIPT) Tiers quick $(CASES)
@@ -439,7 +484,7 @@ full: $(TOOL) $(STD) $(HOST_RT)
 	$(SCRIPT) Tiers full $(CASES)
 
 clean:
-	rm -rf bin/port bin/release bin/site bin/wasm bin/fuzz bin/lix bin/npm bin/stage0 bin/test bin/gfx \
+	rm -rf bin/port bin/release bin/lix-dist bin/site bin/wasm bin/fuzz bin/lix bin/npm bin/stage0 bin/test bin/gfx bin/corpus \
 		bin/hxmc/boot bin/hxmc/fix bin/hxmc-t bin/hxmc-fuzz $(CLI_BOOT)/hxmc-std $(CLI_BOOT)/rt
 
 distclean: clean
