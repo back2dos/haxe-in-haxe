@@ -23,7 +23,8 @@
 #     itself byte-identical; peak memory and times (haxe/test/Measure.hx) in
 #     the job summary;
 #   - npm-pack: the npm packages (with the compiler as a WebAssembly module);
-#   - site: the website; gfx: packages/gfx on Linux (make gfx-check).
+#   - site: the website; gfx: packages/gfx on Linux (make gfx-check; on
+#     ARM64 the cross-built programs, gfx-arm64).
 # - conformance: the port against the reference: HXB of the upstream suites
 #   and macro cases, display requests, the compilation server and its
 #   JSON-RPC methods, upstream's target suites compiled by both and compared
@@ -248,6 +249,7 @@ jobs:
       - name: Package the release binaries
         run: |
           set -ex
+          mkdir -p dist
           for t in $TARGETS; do
             os=${t%-*}
             case $t in *-arm64) arch=aarch64 ;; *) arch=x86_64 ;; esac
@@ -534,18 +536,13 @@ jobs:
           path: bin/site
 
   # packages/gfx: the triangle headless and in an X11 window, on Mesa's
-  # llvmpipe (no GPU), against the golden image, on Linux x86-64 and ARM64
-  # (make gfx-check: the test programs in the glibc mode, packages/gfx/test/check.sh)
+  # llvmpipe (no GPU), against the golden image (make gfx-check: the test
+  # programs in the glibc mode, packages/gfx/test/check.sh), here on Linux
+  # x86-64; the ARM64 programs cross-built for gfx-arm64
   gfx:
     needs: [changes, rt]
     if: ${{ !cancelled() && needs.changes.result == 'success' && (needs.rt.result == 'success' || needs.rt.result == 'skipped') && (needs.changes.outputs.all == 'true' || needs.changes.outputs.libs == 'true') }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - {target: linux-x86_64, os: ubuntu-24.04}
-          - {target: linux-arm64, os: ubuntu-24.04-arm}
-    runs-on: ${{ matrix.os }}
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
         with:
@@ -564,10 +561,40 @@ jobs:
         run: |
           set -ex
           make rt && touch bin/hxmc/rt/*/*.o
-          make gfx-check
+          make gfx-check GFX_TARGET=linux-x86_64
+      - name: The ARM64 programs
+        run: |
+          set -ex
+          make gfx-programs GFX_TARGET=linux-arm64
+          tar czf bin/gfx-linux-arm64.tar.gz -C bin/gfx/linux-arm64 GfxTest Triangle
+      - uses: actions/upload-artifact@v7
+        with: {name: gfx-linux-arm64, path: bin/gfx-linux-arm64.tar.gz, retention-days: 3}
       - uses: actions/upload-artifact@v7
         if: always()
-        with: {name: 'gfx-images-${{ matrix.target }}', path: bin/gfx/*.png, retention-days: 7}
+        with: {name: gfx-images-linux-x86_64, path: bin/gfx/linux-x86_64/*.png, retention-days: 7}
+
+  gfx-arm64:
+    needs: [changes, gfx]
+    if: ${{ !cancelled() && needs.gfx.result == 'success' }}
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          sparse-checkout: |
+            packages/gfx/test
+      - uses: actions/download-artifact@v8
+        with: {name: gfx-linux-arm64, path: dl}
+      - name: gfx (Mesa llvmpipe, Xvfb)
+        run: |
+          set -ex
+          sudo apt-get update -qq
+          sudo apt-get install -qqy --no-install-recommends libegl1 libegl-mesa0 libgl1-mesa-dri libgles2 xvfb xauth
+          mkdir -p gfx
+          tar xzf dl/gfx-linux-arm64.tar.gz -C gfx
+          sh packages/gfx/test/check.sh gfx
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with: {name: gfx-images-linux-arm64, path: gfx/*.png, retention-days: 7}
 
   # the port against the reference compiler (README.md, "Testing"); the Eval
   # debugger in shards (EvalDebugger --shard), the fuzzer's diff lanes (the
@@ -1107,7 +1134,7 @@ jobs:
   # (dist-tag latest, next for a prerelease); never from other branches.
   # After every check (the full npm set on all six machines: npm_full).
   publish-npm:
-    needs: [changes, build, corpus, crosshost, npm-pack, site, gfx, conformance, test, wasm, playground, npm]
+    needs: [changes, build, corpus, crosshost, npm-pack, site, gfx, gfx-arm64, conformance, test, wasm, playground, npm]
     if: ${{ !cancelled() && !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled') && !contains(needs.*.result, 'skipped') && github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')) }}
     runs-on: ubuntu-24.04
     permissions:
@@ -1155,7 +1182,7 @@ jobs:
 
   # nightly on main, a release on v* tags
   release:
-    needs: [changes, build, corpus, crosshost, npm-pack, site, gfx, conformance, test, wasm, playground, npm]
+    needs: [changes, build, corpus, crosshost, npm-pack, site, gfx, gfx-arm64, conformance, test, wasm, playground, npm]
     if: ${{ !cancelled() && !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled') && !contains(needs.*.result, 'skipped') && github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')) }}
     runs-on: ubuntu-24.04
     permissions:
@@ -1201,7 +1228,7 @@ jobs:
           fi
 
   pages:
-    needs: [changes, build, corpus, crosshost, npm-pack, site, gfx, wasm, playground]
+    needs: [changes, build, corpus, crosshost, npm-pack, site, gfx, gfx-arm64, wasm, playground]
     if: ${{ !cancelled() && !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled') && !contains(needs.*.result, 'skipped') && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
     runs-on: ubuntu-24.04
     permissions:

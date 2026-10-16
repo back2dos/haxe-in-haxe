@@ -25,11 +25,13 @@ export ZIG
 HOST ?= $(if $(filter Darwin,$(shell uname -s)),macos,linux)-$(if $(filter aarch64 arm64,$(shell uname -m)),arm64,x86_64)
 # `make release`, `make lix-release`: one of the six targets
 TARGET ?= $(HOST)
-# `make rt-target`: one of RT_TARGETS
 TARGETS := linux-x86_64 linux-arm64 windows-x86_64 windows-arm64 macos-x86_64 macos-arm64
 # the runtime objects: the six targets, and Linux in the dynamic glibc mode (-D hxmc.libc=glibc)
 RT_TARGETS := $(TARGETS) linux-x86_64-glibc linux-arm64-glibc
+# `make rt-target`: one of RT_TARGETS
 RT_TARGET ?= $(HOST)
+# `make gfx-programs`: linux-x86_64 or linux-arm64 (CI cross-builds the ARM64 ones)
+GFX_TARGET ?= $(HOST)
 # extra arguments of the port's build (e.g. HXFLAGS="-D retain")
 HXFLAGS ?=
 # the port the tests check
@@ -98,7 +100,7 @@ endef
 .DEFAULT_GOAL := help
 .PHONY: help std deps rt rt-build rt-target rt-layouts hxmc tool bootstrap fixpoint stage0 crosshost port dev release wasm npm site fuzz \
 	lix lix-release lix-dist reference bench test test-fuzz test-display test-server test-jsonrpc test-unit-targets test-interp \
-	test-haxelib test-eval-debugger test-node-libs smoke hxmc-test gfx-check portcheck measure quick check full clean distclean
+	test-haxelib test-eval-debugger test-node-libs smoke hxmc-test gfx-programs gfx-check portcheck measure quick check full clean distclean
 
 help:
 	@sed -n '/^# --- Targets/,$$p' $(MAKEFILE_LIST) | sed -n 's/^## \{0,1\}//p'
@@ -143,6 +145,7 @@ help:
 ## smoke       hxmc/test/smoke.sh on PORT_BIN: --interp, HXB, JS, sys.ssl, eval.luv
 ## hxmc-test   hxmc's corpus against its golden files (hxmc/test/Corpus.hx)
 ## test-node-libs  -lib from node_modules with the npm package's compiler for the host (hxmc/test/NodeLibs.hx)
+## gfx-programs  bin/gfx/GFX_TARGET/{GfxTest,Triangle}: packages/gfx's test programs (Linux, glibc mode)
 ## gfx-check   packages/gfx: the triangle example headless and in an X11 window under Xvfb,
 ##             against a golden image (packages/gfx/test/check.sh; Linux, Mesa, Xvfb)
 ## portcheck   the port built by hxmc self-compiles to the reference's HXB (hxmc/test/Selfcheck.hx)
@@ -160,7 +163,7 @@ help:
 ## clean       remove the build outputs (keeps the tool, the runtime objects and the reference)
 ## distclean   also remove bin/ entirely
 ##
-## Variables: JOBS, NODE, ZIG, HOST, TARGET, HXFLAGS, PORT_BIN, REFERENCE, LANE, N, CASES, PORT,
+## Variables: JOBS, NODE, ZIG, HOST, TARGET, RT_TARGET, GFX_TARGET, HXFLAGS, PORT_BIN, REFERENCE, LANE, N, CASES, PORT,
 ## LIX_DIR, BENCH_DATA, BENCH_ARGS (defaults and meaning: the top of the Makefile).
 
 std: $(STD)
@@ -419,10 +422,11 @@ hxmc-test: $(TOOL) $(STD) $(HOST_RT)
 
 # the os and gfx packages' sources (`-lib hxmc.gfx` once the launcher resolves packages/)
 GFX_CP := -cp packages/os/src -cp packages/gfx/src -cp packages/gfx/examples -cp packages/gfx/test
-gfx-check: $(TOOL) $(STD) $(HOST_RT)
-	$(call hxmc,bin/gfx/GfxTest,$(GFX_CP) -main GfxTest $(HXMC_ARGS) -D hxmc.libc=glibc)
-	$(call hxmc,bin/gfx/Triangle,$(GFX_CP) -main Triangle $(HXMC_ARGS) -D hxmc.libc=glibc)
-	sh packages/gfx/test/check.sh bin/gfx
+gfx-programs: $(TOOL) $(STD) $(HOST_RT)
+	$(call hxmc,bin/gfx/$(GFX_TARGET)/GfxTest,$(GFX_CP) -main GfxTest $(HXMC_ARGS) -D hxmc.libc=glibc -D hxmc.target=$(GFX_TARGET))
+	$(call hxmc,bin/gfx/$(GFX_TARGET)/Triangle,$(GFX_CP) -main Triangle $(HXMC_ARGS) -D hxmc.libc=glibc -D hxmc.target=$(GFX_TARGET))
+gfx-check: gfx-programs
+	sh packages/gfx/test/check.sh bin/gfx/$(GFX_TARGET)
 
 portcheck: $(TOOL) $(STD) $(HOST_RT) $(REFERENCE)
 	$(SCRIPT) Selfcheck --local --small

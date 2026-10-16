@@ -177,8 +177,8 @@ bootstrap cannot do. They are keyed by a hash of `hxmc/deps` (scripts, pinned
 versions, flags, the zig version) and published as the GitHub release
 `rt-<hash>` (`node hxmc/bootstrap/rt.mjs hash|fetch|pack`); `make rt` downloads
 them and falls back to `make rt-build` (zig) when the release is missing. CI
-builds them only then, publishes the release from pushes to main and hxmc,
-and passes them to its other jobs as an artifact.
+builds them only then (one job per target), publishes the release from
+pushes to main and hxmc, and passes them to its other jobs as an artifact.
 
 The reference compiler is the official nightly of the pinned upstream commit
 (build.haxe.org), downloaded by lix: `make reference` (`bin/reference/haxe`,
@@ -250,29 +250,50 @@ writes the same bytes as the native tool, for every target, itself included.
 allocations and missed roots show at once. `make gfx-check`: the triangle of
 `packages/gfx` rendered by Mesa's llvmpipe headless (an EGL pbuffer) and in an
 X11 window under Xvfb, compared with `packages/gfx/test/triangle.png` (CI: the
-Linux test runners).
+`gfx` and `gfx-arm64` jobs).
 
-CI (`.github/workflows/build.yml`): `rt` (the runtime objects), `build` (the
-bootstrap from the stage0, the fixpoint, releases, lix, the npm packages, the
-site, the corpus for every target, crosshost, the reference, memory and
-times), `conformance` (the harnesses above and the fuzzer's diff lanes),
+CI (`.github/workflows/build.yml`) runs as parallel jobs, each waiting only
+for what it uses: `changes` (what the run needs, `.github/select.sh`, and
+whether the runtime objects' release exists), `rt-build` and `rt` (only when
+it is missing: one job per target, `make rt-target`, then `make rt-layouts`
+and the release), `build` (the bootstrap from the stage0, the fixpoint, the
+release binaries and lix for the six targets) and next to it, each with a
+tool of its own from the stage0: `corpus` (the corpus for every target, the
+port as a WebAssembly module, the reference's self-compile), `crosshost,
+memory and time` (crosshost, then `make measure`), `npm-pack` (the npm
+packages), `site` and `gfx` (`make gfx-check` on Linux x86-64, and the
+programs cross-built for `gfx-arm64` to check on ARM64).
+Then `conformance` (the harnesses above; the Eval debugger in three shards,
+`EvalDebugger --shard i/n`, and the fuzzer's diff lanes in three jobs),
 `test` (on each of the six machines: the release binary's smoke test with a
 TLS handshake and libuv, lix, the corpus, the self-compile), `wasm` (the
 corpus and the self-compile under node and wasmtime, both also with legacy
-exception handling under node, the playground in three browser engines with
-both modules and its fallback to the legacy one in a Chromium without
-exnref), `npm` (the nine packages in fresh projects on each of the six
-machines: native at once through the platform package, `-lib` from
-node_modules (`hxmc/test/NodeLibs.hx`, also by the WebAssembly compiler), `--ignore-scripts`,
-lix with `dist/`, the WebAssembly fallback, downloaded (from the local
-tarball: `HXMC_WASM_TARBALL`, a path or URL in place of the registry's) and
-installed, and `hxmc-rebuild` with `--reset`), `upstream-tests`, and
-`publish-npm` (all nine at one version, skipping those published already: the
-six platform packages, `@hxmc/wasm`, `@hxmc/source`, then `@hxmc/cli`,
-with provenance: on `v*` tags as `latest`, from main as a nightly prerelease
+exception handling under node), `playground` (the playground in three
+browser engines with both modules and its fallback to the legacy one in a
+Chromium without exnref), `npm` (the nine packages in fresh projects on each
+of the six machines: native at once through the platform package, `-lib`
+from node_modules (`hxmc/test/NodeLibs.hx`), `--ignore-scripts`; and on
+linux-x64, or on all six on main, tags and the nightly run, lix with
+`dist/`, the WebAssembly fallback, downloaded (from the local tarball:
+`HXMC_WASM_TARBALL`, a path or URL in place of the registry's) and installed
+(with `-lib` by the WebAssembly compiler), and `hxmc-rebuild` with
+`--reset`), `upstream-tests`, and `publish-npm` (after every check; all nine
+at one version, skipping those published already: the six platform
+packages, `@hxmc/wasm`, `@hxmc/source`, then `@hxmc/cli`, with provenance:
+on `v*` tags as `latest`, from main as a nightly prerelease
 `<version>-nightly.<date>.<commit>` tagged `next`; then the source-only
 packages of `packages/` at their own versions when those are not on npm yet;
 never from other branches), the nightly release and the website.
+
+Main, tags, the nightly schedule (02:41 UTC) and dispatches run everything.
+On other branches a push runs only what its changes need, since the last
+commit whose run succeeded (else since the merge base with main): only
+`*.md`, nothing beyond `changes`; only `hxmc/web`, `site` and `playground`;
+only source-only packages (`packages/os`, `packages/gfx`: a version of their
+own), `build`, `gfx` and `npm-pack`; anything else (`haxe/`, `hxmc/src`,
+`hxmc/std`, `hxmc/deps`, `hxmc/test`, the workflows, the Makefile, the
+compiler's npm packages), everything. A newer push to a branch cancels its
+run; runs on main, hxmc and tags always finish.
 
 Benchmarks (`make bench`, `hxmc/test/Bench.hx`): the
 [HaxeBenchmarks](https://github.com/HaxeBenchmarks/benchmark-runner) cases
