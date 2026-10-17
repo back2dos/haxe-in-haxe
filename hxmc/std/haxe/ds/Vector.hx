@@ -38,6 +38,7 @@ private typedef VectorData<T> = hxmc.NativeArray<T>;
 	typed one from Dynamic or from generic code must have that element type,
 	or an error is thrown there (as on HL and the JVM). A vector made in
 	generic code takes the type of its first typed view (hxmc.NativeArray).
+	Empty vectors are shared, one per element type.
 **/
 abstract Vector<T>(VectorData<T>) {
 	/** Creates a vector initialized with zero, false or null elements. **/

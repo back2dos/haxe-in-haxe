@@ -219,6 +219,13 @@ storage to its kind if needed and the wrapper keeps pointing at the result,
 so generic code and typed code share it (HL's `ArrayDyn` does the same); a
 view of another kind later throws.
 
+An array of no elements cannot change: typed code that makes one gets the
+program's empty array of its kind (`MirBuild.EMPTY_ARRAY`, static data as
+string literals are, defined by `DataGen.emptyArrays`), so `new Vector(0)`
+allocates nothing; the runtime does not refer to those, so that a tool that
+does not define them can still build it. A copy of an empty array is itself,
+and any empty array serves as the view of any kind.
+
 `hxmc/std/haxe/ds/Vector.hx` shadows the reference standard library on the
 hxmc target and implements `haxe.ds.Vector<T>` as an abstract over
 `hxmc.NativeArray<T>`. Indexing, length and construction inline to the same

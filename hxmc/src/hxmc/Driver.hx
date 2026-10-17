@@ -375,6 +375,7 @@ class Driver {
 		dg.allocStubs(objs, demit);
 		dg.stubs(objs, demit);
 		dg.cstrLiterals(objs);
+		dg.emptyArrays(objs);
 		if (o.stats) Sys.println('hxmc: data: ' + [for (x in dg.sizes) '${x.part} ${x.bytes} bytes'].join(", "));
 		var t3 = haxe.Timer.stamp();
 		if (abi.wasm) {

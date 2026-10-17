@@ -2031,15 +2031,25 @@ class MirBuild {
 			if (name == "hxmc_narray_new") {
 				var k = intLiteral(args[0], "NativeArray kind");
 				var n = xs[1];
-				var valid = newBlock(), invalid = newBlock();
-				invalid.cold = true;
-				br(cmp(CULe, n, iconst(k == Abi.AK_BOOL ? 0x7FFFFFE8 : k == Abi.AK_I32 ? 0x1FFFFFFA : 0x0FFFFFFD)), valid, invalid);
+				var res = newVar(I64);
+				// (1 to the most elements a header can count, by one unsigned
+				// test; none: the empty array of the kind, EMPTY_ARRAY)
+				var valid = newBlock(), other = newBlock(), empty = newBlock(), invalid = newBlock(), join = newBlock();
+				other.cold = true;
+				br(cmp(CULt, op2(Sub, I32, n, iconst(1)), iconst(k == Abi.AK_BOOL ? 0x7FFFFFE8 : k == Abi.AK_I32 ? 0x1FFFFFFA : 0x0FFFFFFD)), valid, other);
+				seal(other);
+				cur = other;
+				br(cmp(CEq, n, iconst(0)), empty, invalid);
 				seal(invalid);
 				cur = invalid;
 				var invalidSp = spillOpen(coldList, 0);
 				call("hx_narray_bad_length", [], Void);
 				spillClose(coldList, invalidSp);
-				jmp(valid);
+				jmp(empty);
+				seal(empty);
+				cur = empty;
+				writeVar(res, cur, symAddr(EMPTY_ARRAY + k, 8));
+				jmp(join);
 				seal(valid);
 				cur = valid;
 				// One metadata word plus the elements; the header counts 8-byte slots.
@@ -2048,7 +2058,11 @@ class MirBuild {
 				var a = allocDyn(op2(Add, I32, words, iconst(1)), iconst(Abi.T_NATIVE_ARRAY), iconst(k == Abi.AK_PTR ? Abi.K_PARR : Abi.K_RAW), true);
 				storeM(Opt.MInit, 4, a, 0, n);
 				storeM(Opt.MInit, 4, a, 4, iconst(k));
-				return a;
+				writeVar(res, cur, a);
+				jmp(join);
+				seal(join);
+				cur = join;
+				return readVar(res, cur);
 			}
 			if (name == "hxmc_narray_length") return loadM(Opt.MConst, I32, 4, xs[0], 0);
 			if (name == "hxmc_narray_dget" || name == "hxmc_narray_dset") return narrayDyn(name, xs);
@@ -2433,6 +2447,11 @@ class MirBuild {
 		var b = haxe.io.Bytes.ofString(s);
 		return CSTR + b.toHex();
 	}
+
+	// the empty NativeArray of an element kind, its symbol: the kind after
+	// EMPTY_ARRAY (DataGen.emptyArrays defines it in .data, once per program):
+	// every array made with no elements is that one, which cannot change
+	public static inline var EMPTY_ARRAY = "hxmc$narray_empty$";
 
 	// the symbol of Mem.words' data: its bytes in hexadecimal after WORDS
 	// (DataGen.cstrLiterals defines it in .rodata, 8-byte aligned, once per

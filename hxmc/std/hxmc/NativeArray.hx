@@ -13,6 +13,7 @@ package hxmc;
 	error is thrown there otherwise. Made for an erased type parameter, its
 	storage holds references until the first typed view converts it to its
 	own type, shared with the generic code from then on.
+	Arrays of no elements are shared, one per element type.
 	Conversions to and from Array copy the elements.
 **/
 @:final extern class NativeArray<T> implements ArrayAccess<T> {

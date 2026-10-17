@@ -18,6 +18,11 @@ import hxmc.unsafe.LibC;
 // fixes the wrapper (AK_WRAP) on it: the generic code that holds the wrapper
 // sees what the typed code writes, and the other way round. A later view of
 // another kind is an error.
+//
+// An array of no elements cannot change: one made by typed code is the empty
+// array of its kind (MirBuild.EMPTY_ARRAY, static data; not referred to here,
+// so that a tool that does not define it can build the runtime), and any
+// serves as a copy of itself, and as the view of any kind.
 @:keep
 class NArray {
 	static inline function kindOf(a:Dynamic):Int
@@ -44,6 +49,7 @@ class NArray {
 
 	@:hxmc.host("hx_narray_open") static function open(n:Int):Dynamic {
 		if (n < 0 || n > 0x0FFFFFFD) badLength();
+		if (n == 0) return alloc(AK_PTR, 0);
 		var s = alloc(AK_PTR, n);
 		var w = alloc(AK_PTR, 1);
 		Mem.setI32(Mem.addr(w), 0, n);
@@ -53,6 +59,7 @@ class NArray {
 	}
 
 	@:hxmc.host("hxmc_NativeArray_copy") static function copy(a:Dynamic):Dynamic {
+		if (lengthOf(a) == 0) return a;
 		if (kindOf(a) != AK_OPEN) return copyStorage(storage(a));
 		// (an open wrapper's copy is open too)
 		var w = open(lengthOf(a));
@@ -80,6 +87,7 @@ class NArray {
 		if (tindex(a) != T_NATIVE_ARRAY) throw "Invalid cast to NativeArray";
 		var ak = kindOf(a);
 		if (ak == k) return a;
+		if (lengthOf(a) == 0) return alloc(k, 0);
 		if (ak == AK_OPEN) {
 			var s = storage(a);
 			if (k != AK_PTR) {
