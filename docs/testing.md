@@ -124,7 +124,10 @@ nodes, the popup widgets driven by pointer and keys, a VirtualList of
 `GuideTest.hx`). Natively: `make
 ui-draw-check` (the sample UI, the todo example and the widget gallery,
 the last two driven through their Ui, drawn headless against `draw.png`,
-`todo.png` and `gallery.png`; Linux: llvmpipe, DejaVu
+`todo.png` and `gallery.png`; `TransformTest`, boxes turned, scaled,
+skewed and nested against Chromium's `transform.png` (`transform-ref.mjs`
+from `transforms.json`), a text under `scale(2)` against the same text
+twice the size; Linux: llvmpipe, DejaVu
 Sans; the sample in a window under Xvfb, whose loop must sleep once it has
 nothing to draw; `StressTest`, a list of 1000 rows: the time of each step,
 mounting, layout, frames, a change to one row, a scroll; `ClipboardTest`,
