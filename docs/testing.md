@@ -111,7 +111,9 @@ Sans; the sample in a window under Xvfb, whose loop must sleep once it has
 nothing to draw; `StressTest`, a list of 1000 rows: the time of each step,
 mounting, layout, frames, a change to one row, a scroll; `ClipboardTest`,
 the clipboard between two windows under Xvfb, through X11's selection
-protocol; also on Windows and macOS in CI). In the browser: `make ui-web-check` (the native form on the DOM's own
+protocol; also on Windows and macOS in CI; `TextInputTest`, key presses
+typed through X11's input method under Xvfb, keys given other symbols: a
+Cyrillic letter, a dead key composed with the next). In the browser: `make ui-web-check` (the native form on the DOM's own
 controls, `native-web.mjs`; the todo example for
 wasm32-wasi in headless Chromium on WebGPU and WebGL2, driven by real pointer
 and keyboard events, against `todo.png`). CI runs all five in the `gfx` job.

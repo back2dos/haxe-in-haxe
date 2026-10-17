@@ -168,7 +168,7 @@ help:
 ## ui-check    packages/ui on Eval: the layout against Chromium's flexbox (layout-expected.json,
 ##             from packages/ui/test/layout-ref.mjs), text wrapping, events and focus (UiTest.hx);
 ##             signals and markup rendered into nodes (ReactiveTest.hx)
-## ui-programs  bin/ui/GFX_TARGET/{UiDrawTest,TodoTest,GalleryTest,StressTest,ClipboardTest}[.exe], NativeTest (GTK 3, Win32, AppKit): packages/ui's test programs (Linux: glibc mode)
+## ui-programs  bin/ui/GFX_TARGET/{UiDrawTest,TodoTest,GalleryTest,StressTest,ClipboardTest}[.exe], NativeTest (GTK 3, Win32, AppKit), TextInputTest (X11): packages/ui's test programs (Linux: glibc mode)
 ## ui-draw-check  packages/ui's GPU renderer (hxmc.ui.draw): the sample UI headless against
 ##             packages/ui/test/draw.png (also in a window, under Xvfb), then the todo example (markup, signals, widgets) driven
 ##             through its Ui and drawn against todo.png (Linux: Mesa, DejaVu Sans; BLESS=1 rewrites them)
@@ -505,6 +505,7 @@ ui-programs: $(TOOL) $(STD) $(HOST_RT)
 	$(call hxmc,bin/ui/$(GFX_TARGET)/StressTest$(call EXE,$(GFX_TARGET)),$(UI_CP) -main StressTest $(HXMC_ARGS) $(GFX_ARGS))
 	$(call hxmc,bin/ui/$(GFX_TARGET)/ClipboardTest$(call EXE,$(GFX_TARGET)),$(UI_CP) -main ClipboardTest $(HXMC_ARGS) $(GFX_ARGS))
 	$(call hxmc,bin/ui/$(GFX_TARGET)/NativeTest$(call EXE,$(GFX_TARGET)),$(UI_CP) -main NativeTest $(HXMC_ARGS) $(GFX_ARGS))
+	$(if $(filter linux-%,$(GFX_TARGET)),$(call hxmc,bin/ui/$(GFX_TARGET)/TextInputTest,$(UI_CP) -main TextInputTest $(HXMC_ARGS) $(GFX_ARGS)))
 ui-draw-check: ui-programs
 	LIBGL_ALWAYS_SOFTWARE=1 env -u DISPLAY bin/ui/$(GFX_TARGET)/UiDrawTest packages/ui/test/draw.png bin/ui/$(GFX_TARGET)/draw.png $(if $(BLESS),--bless)
 	LIBGL_ALWAYS_SOFTWARE=1 xvfb-run -a -s "-screen 0 640x480x24" bin/ui/$(GFX_TARGET)/UiDrawTest packages/ui/test/draw.png bin/ui/$(GFX_TARGET)/window.png --window
@@ -512,6 +513,7 @@ ui-draw-check: ui-programs
 	LIBGL_ALWAYS_SOFTWARE=1 env -u DISPLAY bin/ui/$(GFX_TARGET)/GalleryTest packages/ui/test/gallery.png bin/ui/$(GFX_TARGET)/gallery.png $(if $(BLESS),--bless)
 	LIBGL_ALWAYS_SOFTWARE=1 env -u DISPLAY bin/ui/$(GFX_TARGET)/StressTest
 	xvfb-run -a -s "-screen 0 640x480x24" bin/ui/$(GFX_TARGET)/ClipboardTest
+	xvfb-run -a -s "-screen 0 640x480x24" bin/ui/$(GFX_TARGET)/TextInputTest
 	xvfb-run -a -s "-screen 0 640x480x24" bin/ui/$(GFX_TARGET)/NativeTest bin/ui/$(GFX_TARGET)/native.png
 
 ui-web-check: $(TOOL) $(STD)
