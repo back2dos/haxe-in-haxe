@@ -327,7 +327,9 @@ Since the design above (October 2026), in this order:
   checked in CI through the platform's own client side.
 - Right-to-left text: the bidi algorithm (levels, visual order, mirrored
   brackets), Arabic's joining forms and required ligatures from GSUB,
-  carets and hits by direction.
+  carets and hits by direction; marks on their bases (GPOS anchors) and
+  canonical compositions; CJK and other scripts' fallback faces loaded
+  when first needed.
 
 Where this departs from section 6:
 
@@ -338,11 +340,11 @@ Where this departs from section 6:
 - **Text starts with a built-in rasterizer** rather than the platforms'
   shapers: the same pixels on every machine and target (golden images in
   CI, the browser without font files). Its limits are the shapers' reasons
-  to come next: no mark positioning (GPOS's marks), no optional
-  ligatures or Indic shaping (GSUB beyond Arabic's forms and required
-  ligatures), no explicit bidi embeddings, no hinting or subpixel
-  rendering, no variable fonts' CFF2. Bidi ordering and Arabic's joining
-  match Chromium's widths on the test strings.
+  to come next: no optional ligatures or Indic shaping (GSUB beyond
+  Arabic's forms and required ligatures), no explicit bidi embeddings,
+  no hinting or subpixel rendering, no variable fonts' CFF2. Bidi
+  ordering, Arabic's joining and marks on their bases match Chromium's
+  widths and ink on the test strings.
 - **Layout uses CSS's automatic minimum size**, not Yoga's 0: items do not
   shrink below their content, so text is not squashed (a container that
   must shrink sets `minHeight: 0`, as in CSS).
