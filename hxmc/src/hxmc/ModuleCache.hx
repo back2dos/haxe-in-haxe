@@ -82,7 +82,7 @@ import hxmc.ModuleStore;
 // variants: its modules first, then the variants it did not use, at most
 // MAX_VARIANTS per module. Module and variable ids continue from the
 // store's (the server keeps the ids of the modules and variables it
-// restores). The tool directories, the indexes and the blobs no index names
+// restores). The tool directories, the indexes and the packs no index names
 // are trimmed by last use and size (CacheDir.trim).
 class ModuleCache {
 	static inline var ID_LIMIT = 1 << 30;

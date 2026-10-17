@@ -30,7 +30,7 @@
 #     the cross-built programs on D3D11's WARP, gfx-windows; on macOS built
 #     from the npm packages after npm-pack, gfx-macos), packages/os's audio
 #     in the same jobs (make audio-check, audio-web-check), then
-#     packages/esx, text and ui (their checks on Eval, the sample UI and the
+#     packages/view, text and ui (their checks on Eval, the sample UI and the
 #     todo example drawn on llvmpipe, the todo example in Chromium on WebGPU
 #     and WebGL2).
 # - conformance: the port against the reference: HXB of the upstream suites
@@ -609,10 +609,10 @@ jobs:
           make gfx-web-check
       - name: audio (WebAudio in Chromium)
         run: make audio-web-check
-      - name: esx, text and ui (Eval; Mesa llvmpipe; Chromium)
+      - name: view, text and ui (Eval, natively; Mesa llvmpipe; Chromium)
         run: |
           set -ex
-          make esx-check text-check ui-check
+          make view-check text-check ui-check
           make ui-draw-check GFX_TARGET=linux-x86_64
           make ui-web-check
       - uses: actions/upload-artifact@v7
@@ -754,7 +754,7 @@ jobs:
           # (a nightly, <version>-nightly.<date>.<commit>, is a prerelease, which
           # the packages' peer range ">=0.1.0" of @hxmc/cli does not take)
           peer=; case "$v" in *-nightly.*) peer=--legacy-peer-deps ;; esac
-          npm install --no-audit --no-fund $peer "$GITHUB_WORKSPACE/dl/hxmc-cli-$v.tgz" "$GITHUB_WORKSPACE/dl/hxmc-darwin-arm64-$v.tgz" $(find "$GITHUB_WORKSPACE/dl" -name 'hxmc-os-*.tgz' -o -name 'hxmc-gfx-*.tgz' -o -name 'hxmc-text-*.tgz' -o -name 'hxmc-esx-*.tgz' -o -name 'hxmc-ui-*.tgz')
+          npm install --no-audit --no-fund $peer "$GITHUB_WORKSPACE/dl/hxmc-cli-$v.tgz" "$GITHUB_WORKSPACE/dl/hxmc-darwin-arm64-$v.tgz" $(find "$GITHUB_WORKSPACE/dl" -name 'hxmc-os-*.tgz' -o -name 'hxmc-gfx-*.tgz' -o -name 'hxmc-text-*.tgz' -o -name 'hxmc-view-*.tgz' -o -name 'hxmc-ui-*.tgz')
           g="$GITHUB_WORKSPACE/repo/packages/gfx"
           npx haxe -lib hxmc.gfx -cp "$g/examples" -cp "$g/test" -main GfxTest --custom-target hxmc=gfx/GfxTest
           npx haxe -lib hxmc.gfx -cp "$g/examples" -main Triangle --custom-target hxmc=gfx/Triangle

@@ -13,7 +13,8 @@ and in which order: [ROADMAP.md](../../ROADMAP.md). What is built:
 | [targets.md](targets.md) | WebAssembly (and WasmGC), Android, iOS, shared libraries, Linux and macOS items |
 | [graphics.md](graphics.md) | `@hxmc/os`, `@hxmc/gfx`, shaders, audio, UI pointers |
 | [ui.md](ui.md) | `@hxmc/ui`: native controls or a drawn UI, the survey, the design and what is built |
-| [web.md](web.md) | `@hxmc/view`, `@hxmc/web`, the site |
+| [view.md](view.md) | `@hxmc/view`: signals, markup and the renderer contract; what was looked at, chosen and rejected |
+| [web.md](web.md) | `@hxmc/view`'s renderers, `@hxmc/web`, the site |
 | [packaging.md](packaging.md) | npm, haxelib, verifying native builds |
 | [math.md](math.md) | LibM and the libm branch |
 | [lowlevel.md](lowlevel.md) | C interop, native memory, manual memory, struct values |
