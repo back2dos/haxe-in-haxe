@@ -151,7 +151,15 @@ class ModuleCacheCheck {
 				"}"
 			].join("\n") + "\n"
 		];
+		// (full DCE and a class used through a structure: Main's typing marks
+		// Bag.iterator as maybe used, which keeps it; edited not to, the build
+		// without the cache drops it, so must the cache, Bag restored)
+		var dcefull = [
+			"src/Main.hx" => "class Main {\n\tstatic function count<T>(it:Iterable<T>):Int {\n\t\tvar n = 0;\n\t\tfor (_ in it) n++;\n\t\treturn n;\n\t}\n\n\tstatic function main() {\n\t\tvar b = new Bag();\n\t\ttrace(b.size());\n\t\ttrace(count(b));\n\t}\n}\n",
+			"src/Bag.hx" => "class Bag {\n\tpublic var items:Array<Int>;\n\n\tpublic function new() items = [1, 2];\n\n\tpublic function iterator():Iterator<Int> return items.iterator();\n\n\tpublic function size():Int return items.length;\n}\n"
+		];
 		return [
+			{name: "dcefull", files: dcefull, args: ["-cp", "src", "-main", "Main", "-dce", "full"], edit: "src/Main.hx", run: "dcefull"},
 			{name: "registry", files: registry, args: ["-cp", "src", "-main", "Main"], edit: "src/Impl.hx", run: "registry"},
 			{name: "cutoff", files: cutoff, args: ["-cp", "src", "-main", "Main"], edit: "src/User.hx", run: "cutoff"},
 			{name: "lossy", files: lossy, args: ["-cp", "src", "-main", "Main"], edit: "src/Other.hx", run: "lossy"},
@@ -269,6 +277,7 @@ class ModuleCacheCheck {
 				File.saveContent(t, switch name {
 					case "cutoff": orig.replace("10, 20", "10, 21");
 					case "registry": orig.replace("return 7", "return 8");
+					case "dcefull": orig.replace("trace(count(b));", "trace(0);");
 					case "hello": orig.replace("hello ", "hello again ");
 					case "multi": orig.replace("\"v\" + 1", "\"v\" + 2");
 					case "lossy": orig.replace("3", "4");

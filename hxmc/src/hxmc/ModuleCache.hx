@@ -106,6 +106,155 @@ class ModuleCache {
 		ServerCache.dependencyDirtyHook = onDependencyDirty;
 		ServerCache.loadDirtyModuleHook = loadDirty;
 		typing.TypeloadModule.typeFromSourceHook = onTypeFromSource;
+		core.TUnification.maybeUsedHook = onMaybeUsed;
+		// (a lazy typing continues the typing of the module that made it)
+		Common.lazyHook = function(f:Void->T):Void->T {
+			var s = state;
+			if (s == null || s.typingStack.length == 0) return f;
+			var maker = s.typingStack[s.typingStack.length - 1];
+			return function() {
+				if (state != s) return f();
+				s.typingStack.push(maker);
+				var r = try f() catch (x:Dynamic) {
+					s.typingStack.pop();
+					throw x;
+				}
+				s.typingStack.pop();
+				return r;
+			};
+		};
+		// (a delayed task continues the typing of the module that delayed it)
+		context.Typecore.delayHook = function(f:Void->Void):Void->Void {
+			var s = state;
+			if (s == null || s.typingStack.length == 0) return f;
+			var maker = s.typingStack[s.typingStack.length - 1];
+			return function() {
+				var s2 = state;
+				if (s2 != s) {
+					f();
+					return;
+				}
+				s.typingStack.push(maker);
+				try f() catch (x:Dynamic) {
+					s.typingStack.pop();
+					throw x;
+				}
+				s.typingStack.pop();
+			};
+		};
+		wrapTypeExpr();
+	}
+
+	// Typecore.typeExprRef, wrapped to know the module whose code is being
+	// typed (the maker of the structural marks); again after each typer's
+	// creation, which sets the reference anew (Typer.initialize)
+	static var typeExprWrapper:Null<Dynamic> = null;
+
+	static function wrapTypeExpr() {
+		if (typeExprWrapper != null && Reflect.compareMethods(context.Typecore.typeExprRef, typeExprWrapper)) return;
+		var typeExpr = context.Typecore.typeExprRef;
+		var w = function(ctx:context.Typecore.Typer, e:core.Ast.Expr, withType:core.WithType.WithTypeValue, ?mode:context.Typecore.AccessMode):TExpr {
+			var s = state;
+			if (s == null) return typeExpr(ctx, e, withType, mode);
+			s.typingStack.push(ctx.m.curmod);
+			var r = try typeExpr(ctx, e, withType, mode) catch (x:Dynamic) {
+				s.typingStack.pop();
+				throw x;
+			}
+			s.typingStack.pop();
+			return r;
+		}
+		typeExprWrapper = w;
+		context.Typecore.typeExprRef = w;
+	}
+
+	// TUnification.maybeUsedHook: a class field marked as maybe used through
+	// a structure (CfMaybeUsed, which DCE reads), and its accessors, by the
+	// module being typed
+	static function onMaybeUsed(cl:Null<TClass>, f1:TClassField, f2:Null<TClassField>) {
+		var s = state;
+		if (s == null) return;
+		var maker = s.typingStack.length > 0 ? s.typingStack[s.typingStack.length - 1] : null;
+		mutex.acquire();
+		s.liveMarks.push({maker: maker, cf: f1});
+		if (cl != null && f2 != null)
+			switch f2.cfKind {
+				case Var(v):
+					var names = [];
+					switch v.vRead {
+						case AccCall | AccPrivateCall: names.push("get_" + f1.cfName);
+						case _:
+					}
+					switch v.vWrite {
+						case AccCall | AccPrivateCall: names.push("set_" + f1.cfName);
+						case _:
+					}
+					for (n in names) {
+						var f = try core.TFunctions.rawClassField(cf -> cf.cfType, cl, [for (_ in cl.clParams) core.TFunctions.tDynamic], n).field catch (_:Dynamic) null;
+						if (f != null) s.liveMarks.push({maker: maker, cf: f});
+					}
+				case _:
+			}
+		mutex.release();
+	}
+
+	// the build's structural marks made exact (before DCE reads them): a
+	// restored module's fields lose the marks its HXB kept (its users' typing
+	// in an earlier build) and get those of this build's users: the ones
+	// typed now marked them again, the restored ones replay theirs
+	static function fixMarks(s:ModuleCacheState, coms:Array<CommonContext>) {
+		var refs = new haxe.ds.ObjectMap<TClassField, String>();
+		var byRef = new Map<String, TClassField>();
+		var restored = [];
+		for (role in 0...coms.length)
+			for (m in coms[role].modules) {
+				var r = s.restored(m) != null;
+				if (r) restored.push(m);
+				for (t in m.mTypes)
+					switch t {
+						case TClassDecl(c):
+							var base = role + "|" + key(m.mPath) + "|" + c.clPath.name + "|";
+							inline function add(cf:TClassField, k:String) {
+								if (cf == null) return;
+								refs.set(cf, base + k + cf.cfName);
+								byRef.set(base + k + cf.cfName, cf);
+								if (r) core.TFunctions.removeClassFieldFlag(cf, CfMaybeUsed);
+							}
+							add(c.clConstructor, "c|");
+							for (cf in c.clOrderedFields)
+								add(cf, "f|");
+							for (cf in c.clOrderedStatics)
+								add(cf, "s|");
+						case _:
+					}
+			}
+		var unattributed = 0;
+		for (lm in s.liveMarks) {
+			core.TFunctions.addClassFieldFlag(lm.cf, CfMaybeUsed);
+			var ref = refs.get(lm.cf);
+			if (ref == null) continue;
+			var maker:Null<ModuleDef> = lm.maker == null ? null : Std.isOfType(lm.maker, core.TType.ModuleDef) ? lm.maker : {
+				var x:{com:CommonContext, path:GlobalTypePath} = lm.maker;
+				x.com.moduleLut.findOpt(x.path);
+			};
+			if (maker == null) {
+				if (s.log) Sys.println("hxmc: module cache: a structural mark on " + ref + " outside the typing of a module");
+				unattributed++;
+				continue;
+			}
+			var l = s.madeMarks.get(maker);
+			if (l == null) s.madeMarks.set(maker, l = []);
+			if (l.indexOf(ref) < 0) l.push(ref);
+		}
+		for (m in restored)
+			for (ref in s.restored(m).marks) {
+				var cf = byRef.get(ref);
+				if (cf != null) core.TFunctions.addClassFieldFlag(cf, CfMaybeUsed);
+			}
+		for (l in s.madeMarks)
+			l.sort(Reflect.compare);
+		s.unattributedMarks = unattributed;
+		if (unattributed > 0 && s.log) Sys.println("hxmc: module cache: " + unattributed + " structural marks made outside the typing of a module");
 	}
 
 	// TypeloadModule.typeFromSourceHook: while a module of the store is typed
@@ -117,8 +266,11 @@ class ModuleCache {
 		if (s == null) return;
 		if (!start) {
 			s.creating.pop();
+			s.typingStack.pop();
 			return;
 		}
+		// (a module being typed from its source: its ModuleDef found later)
+		s.typingStack.push({com: com, path: path});
 		var v = s.variantOf(context.CommonCache.getCacheSign(com), path);
 		s.creating.push(v == null ? -1 : s.sccOf(v));
 	}
@@ -267,6 +419,7 @@ class ModuleCache {
 	// has now)
 	static function onTyper(ctx:context.Typecore.Typer) {
 		typers.push({com: ctx.com, g: ctx.g});
+		wrapTypeExpr();
 		var s = state;
 		if (s == null) return;
 		if (ctx.com == s.com && s.macroPending) {
@@ -473,12 +626,6 @@ class ModuleCache {
 		// or their whole content
 		for (d in v.deps)
 			if (s.depHash(d) != d.expect) return DependencyDirty(d.path, FileChanged(d.eligible ? "(interface)" : "(content)"));
-		// (a dependency whose fields its users' typing marks: restored only with
-		// its cycle and its users, its marks being theirs)
-		for (d in v.deps) {
-			var w = s.chosen[d.role].get(d.key);
-			if (w != null && w.structUsed && !s.sccClean(w)) return DependencyDirty(d.path, FileChanged("(typed again, its fields used through structures)"));
-		}
 		if (mExtra.mKind != MImport && !s.load(v)) return LibraryChanged;
 		return null;
 	}
@@ -489,6 +636,12 @@ class ModuleCache {
 		var s = state;
 		if (s == null) return;
 		s.captured = true;
+		{
+			var mcom = com.getMacros();
+			fixMarks(s, mcom != null && context.CommonCache.getCacheSign(mcom) == s.signs[1] ? [com, mcom] : [com]);
+		}
+		// (a mark the store could not give back to its maker)
+		if (s.unattributedMarks > 0 && s.volatileReason == null) s.volatileReason = s.unattributedMarks + " structural marks made outside the typing of a module";
 		if (s.volatileReason != null) return;
 		if (Common.hasErrorToReport(com)) {
 			s.volatileReason = "errors";
@@ -624,18 +777,9 @@ class ModuleCache {
 					if (s.log && v.ifacePk == null && (x.mKind == MCode || x.mKind == MMacro))
 						Sys.println("hxmc: module cache: " + core.Globals.sTypePath(m.mPath) + " kept whole (" + (!ifaceMode ? (macroDefines ? "macro-defined" : mr != null ? "macro reads" : optimize ? "analyzer-optimize" : macroBuilt(m) ? "built by a macro" : "file") : "no interface") + ")");
 				}
-				for (t in m.mTypes)
-					switch t {
-						case TClassDecl(c):
-							inline function marked(cf:TClassField)
-								return cf != null && core.TFunctions.hasClassFieldFlag(cf, CfMaybeUsed);
-							if (marked(c.clConstructor)) v.structUsed = true;
-							for (cf in c.clOrderedFields)
-								if (marked(cf)) v.structUsed = true;
-							for (cf in c.clOrderedStatics)
-								if (marked(cf)) v.structUsed = true;
-						case _:
-					}
+				// (the structural marks its typing made: Marks)
+				var made = s.madeMarks.get(m);
+				v.marks = old != null ? old.marks : made == null ? [] : made;
 				v.macroBuilt = (x.mKind == MCode || x.mKind == MMacro) && macroBuilt(m);
 				all.push(v);
 				byKey[role].set(v.key, v);
@@ -1039,6 +1183,13 @@ class ModuleCacheState {
 	}
 
 	public var macroPending = true;
+	// the modules whose code is being typed (Typecore.typeExprRef), the
+	// structural marks made (by the module being typed, null outside), per
+	// module the marks it made (Marks)
+	public var typingStack:Array<Dynamic> = [];
+	public var liveMarks:Array<{maker:Null<Dynamic>, cf:TClassField}> = [];
+	public var madeMarks = new haxe.ds.ObjectMap<ModuleDef, Array<String>>();
+	public var unattributedMarks = 0;
 	// the cycles (Closure.scc) of the modules being typed from their source
 	public var creating:Array<Int> = [];
 	public var cycleTyped = 0;

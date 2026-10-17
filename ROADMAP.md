@@ -32,7 +32,6 @@ in [docs/plans/](docs/plans/README.md); what is built is in
 - `@hxmc/web`: DOM bindings via `imports.mjs`, a DOM renderer, a static renderer, hydration islands ([web.md](docs/plans/web.md#hxmcweb))
 - `site/` replacing `hxmc/web`: built with web, docs generated from the sources (narrative docs, package READMEs, an API reference extracted with the compiler), an examples gallery from each package's `examples/` ([web.md](docs/plans/web.md#the-site-site))
 - Nondeterministic macros in the module cache: volatile modules, file and environment dependencies ([compiler.md](docs/plans/compiler.md#cached-modules))
-- The module cache's structural marks attributed to the modules that make them, so a restored module's DCE marks are never stale ([compiler.md](docs/plans/compiler.md#cached-modules))
 - Android, step 1: GPU only, `NativeActivity`, the APK writer ([targets.md](docs/plans/targets.md#android))
 - Android, step 2: native controls through JNI ([targets.md](docs/plans/targets.md#android))
 - Android, step 3: mixing GPU and native views, as on the desktop ([targets.md](docs/plans/targets.md#android))

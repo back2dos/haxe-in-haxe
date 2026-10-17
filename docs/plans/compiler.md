@@ -52,8 +52,13 @@ archives, without it.
   types before they are ready); the rest of the cycle stays restored.
   Coupling found on the way: the typing of a module marks fields of its
   dependencies as maybe used through structures (`CfMaybeUsed`, which DCE
-  reads); a dependency with such marks is restored only together with its
-  cycle, so its marks stay those of its users.
+  reads). The marks are attributed to the module whose typing made them
+  (`TUnification.maybeUsedHook`; the module being typed known through
+  `Typecore.typeExprRef`, the tasks it delays, its lazy typings and its
+  creation) and stored with its variant; a restored module's fields lose
+  the marks its HXB kept, and get this build's: those of the modules typed
+  again, made again, and those the restored modules replay. A build where
+  a mark has no maker writes nothing.
   A module a build macro makes (`@:build`, `@:genericBuild`, `@:autoBuild`
   from what it extends or implements) is typed again every build: its
   macro may keep something other macros read (the gfx package's shaders:
@@ -114,14 +119,6 @@ Open:
   - Gate cases: a macro using `Date.now` runs every build, one reading a
     file only when the file changes, one reading an environment variable
     when its value changes.
-- **Structural marks** (`CfMaybeUsed`): a restored module keeps the marks
-  its users' typing made on its fields in the build that typed it; a user
-  typed again that no longer uses it through a structure leaves a stale
-  mark, and DCE keeps a field the build without the cache drops (seen with
-  `-dce full` on a user class, or on the std; the upstream server's HXB
-  cache has the same). Fix: attribute each mark to the module whose typing
-  made it (a current module in the typer) and replay them on restore
-  instead of keeping them in the HXB.
 - **Modules build macros make**: typed every build (their macros may keep
   what other macros read). Restoring them needs that state recorded: what
   a build macro leaves in the macros' statics, or a declared contract

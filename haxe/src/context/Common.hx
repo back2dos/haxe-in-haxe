@@ -1220,7 +1220,12 @@ class Common {
 		return {args: args, ret: TInst(basic.tcoro.suspensionResultClass.force(), [ret])};
 	}
 
+	// port: hxmc's persistent module cache (hxmc/src/hxmc/ModuleCache.hx) wraps the lazy typings here, to know
+	// ... which module's typing one continues; always null in the compiler itself.
+	public static var lazyHook:Null<(Void->T)->(Void->T)> = null;
+
 	public static function makeUnforcedLazy(tProc:T, f:Void->T, where:String):TLazy {
+		if (lazyHook != null) f = lazyHook(f);
 		var r = new TLazy(lazyAvailable(tDynamic));
 		r.value = lazyWait(function() {
 			try {
