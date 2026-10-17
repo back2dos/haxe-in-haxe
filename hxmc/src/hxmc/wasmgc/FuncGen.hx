@@ -772,9 +772,17 @@ class FuncGen {
 			case EArrLen(a):
 				exprAs(a, m.arrBaseType);
 				gc(0x02, m.arrBaseType, 0);
-			case EArrGet(t, a, i) | EArrGetU(t, a, i):
-				// (a Vector's too: generic code, Vector<T>'s, reads one of any kind)
+			case EArrGet(t, a, i):
 				arrGet(GcModule.elemKind(t), a, i);
+			case EArrGetU(t, a, i):
+				// (unchecked: a Vector's; of references as an array's, for generic code, Vector<T>'s, reads one of any kind)
+				var k = GcModule.elemKind(t);
+				if (k == "p") arrGet(k, a, i) else {
+					exprAs(a, m.arrType(k));
+					gc(0x02, m.arrType(k), 1);
+					expr(i);
+					gc(0x0B, m.dataType(k));
+				}
 			case EBoxGet(t, x):
 				exprAs(x, m.boxType(t));
 				gc(0x02, m.boxType(t), 0);

@@ -20,9 +20,20 @@ class GcBytes {
 
 	@:hxmc.host("haxe_io_Bytes_compare") static function compare(b:Bytes, other:Bytes):Int {
 		var na = W.bytesLen(b), nb = W.bytesLen(other);
-		for (i in 0...(na < nb ? na : nb)) {
+		var n = na < nb ? na : nb, i = 0;
+		// (eight bytes a step while they are the same: an array of bytes has no wider reads)
+		while (i + 8 <= n) {
+			var d = (W.bytesGet(b, i) ^ W.bytesGet(other, i)) | (W.bytesGet(b, i + 1) ^ W.bytesGet(other, i + 1))
+				| (W.bytesGet(b, i + 2) ^ W.bytesGet(other, i + 2)) | (W.bytesGet(b, i + 3) ^ W.bytesGet(other, i + 3))
+				| (W.bytesGet(b, i + 4) ^ W.bytesGet(other, i + 4)) | (W.bytesGet(b, i + 5) ^ W.bytesGet(other, i + 5))
+				| (W.bytesGet(b, i + 6) ^ W.bytesGet(other, i + 6)) | (W.bytesGet(b, i + 7) ^ W.bytesGet(other, i + 7));
+			if (d != 0) break;
+			i += 8;
+		}
+		while (i < n) {
 			var x = W.bytesGet(b, i), y = W.bytesGet(other, i);
 			if (x != y) return x - y;
+			i++;
 		}
 		return na - nb;
 	}
