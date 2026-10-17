@@ -170,22 +170,24 @@ class DebugCheck {
 		var re = ~/(?:in |#\d+\s+|`)([\w.$]+)(?: \([^)]*\))? at \S*?Lines\.hx:(\d+)/;
 		for (l in r.out.split("\n"))
 			if ((l.indexOf("#") >= 0 || l.indexOf("frame") >= 0) && re.match(l)) got.push({func: re.matched(1), line: Std.parseInt(re.matched(2))});
-		// (the stop: from where the backtrace starts)
+		// (the backtrace: from a frame of the breakpoint followed by the others;
+		// lldb also shows the stop's frame before it)
 		var at = -1;
-		for (k in 0...got.length)
-			if (got[k].func == expect[0].func && got[k].line == expect[0].line) {
+		for (k in 0...got.length) {
+			var all = true;
+			for (j in 0...expect.length)
+				if (k + j >= got.length || got[k + j].func != expect[j].func || got[k + j].line != expect[j].line) all = false;
+			if (all) {
 				at = k;
 				break;
 			}
+		}
 		// (a debugger the system does not let start a process: reported, not a failure)
 		if (at < 0 && ~/attach failed|not allowed|Operation not permitted|ptrace: /i.match(r.out)) {
 			skip(which + ": the breakpoint and the backtrace", "(the system refused: " + tail(r.out, 300).replace("\n", " ") + ")");
 			return;
 		}
 		var ok = at >= 0;
-		if (ok)
-			for (k in 0...expect.length)
-				if (at + k >= got.length || got[at + k].func != expect[k].func || got[at + k].line != expect[k].line) ok = false;
 		check(which + ": the breakpoint and the backtrace", ok, ok ? [for (f in expect) f.func + ":" + f.line].join(" < ") : "\n" + r.out);
 		if (ok) Sys.println("    " + [for (l in r.out.split("\n")) if (l.startsWith("#") || l.indexOf("frame #") >= 0 || l.startsWith("Breakpoint")) l].join("\n    "));
 	}
