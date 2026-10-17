@@ -257,7 +257,7 @@ Since the design above (October 2026), in this order:
   all five back ends (PLANS.md, "Graphics").
 - `@hxmc/ui`'s core (`hxmc.ui`): `Node`, `TextNode`, `Style` (setters
   mark layout or paint), `Layout` (flexbox after CSS section 9, checked
-  against Chromium's on 60 cases), `Ui` (hit testing, hover, press and
+  against Chromium's on 60 cases; CSS grid came later, 26 more), `Ui` (hit testing, hover, press and
   click, bubbling, focus and Tab, wheel scrolling), `Canvas` and
   `TextEngine` interfaces. It runs on Eval: its tests need no GPU.
 - `@hxmc/text` (`hxmc.text`): TrueType parsing, a rasterizer after
@@ -326,6 +326,8 @@ Since the design above (October 2026), in this order:
 - Accessibility on every platform: NSAccessibility (macOS), UI Automation
   (Windows: COM providers made in Haxe), AT-SPI over D-Bus (Linux), each
   checked in CI through the platform's own client side.
+- CSS grid layout (tracks with fr, minmax() and repeat(), placement by
+  lines and spans, auto-placement), every box as Chromium lays it out.
 - Right-to-left text: the bidi algorithm (levels, visual order, mirrored
   brackets), Arabic's joining forms and required ligatures from GSUB,
   carets and hits by direction; marks on their bases (GPOS anchors) and
