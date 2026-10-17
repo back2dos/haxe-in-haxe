@@ -23,6 +23,8 @@ class Driver {
 	function new(prog:Program, out:String, o:Options) {
 		this.o = o;
 		this.out = out;
+		// (-D hxmc.jit: every function stays, for the native macros the compiler loads)
+		if (!o.jit) hxmc.ir.Reach.run(prog, o.stats);
 		prep = new Prep(prog);
 		abi = Abi.get(o.target);
 		abi.setLibc(o.libc);
@@ -370,6 +372,7 @@ class Driver {
 		dg.allocStubs(objs, demit);
 		dg.stubs(objs, demit);
 		dg.cstrLiterals(objs);
+		if (o.stats) Sys.println('hxmc: data: ' + [for (x in dg.sizes) '${x.part} ${x.bytes} bytes'].join(", "));
 		var t3 = haxe.Timer.stamp();
 		if (abi.wasm) {
 			var stack = Sys.getEnv("HXMC_WASM_STACK_KB");

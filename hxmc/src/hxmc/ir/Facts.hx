@@ -271,6 +271,7 @@ class Facts {
 				for (name => m in k.methods)
 					if (!seen.exists(name)) {
 						seen.set(name, true);
+						if (!p.isLive(m)) continue;
 						var sig = p.sig([for (i in 1...m.args.length) m.args[i].ty], m.ret);
 						var d = m.dfltEntry;
 						if (d == null) ms.push({name: name, fn: symbol(m), sig: sig.id}) else

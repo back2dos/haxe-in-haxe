@@ -6,7 +6,7 @@ hxmc turns a typed Haxe program into a native executable with its own code
 generator and linker: no C compiler, assembler or system linker at build time.
 
 ```
-typed AST --(ir.Lower)--> hxmc IR --(Prep: ir.Facts)--> --(MirBuild)--> Mir (SSA) --(Inline, Sroa, Opt)-->
+typed AST --(ir.Lower)--> hxmc IR --(ir.Reach)--> --(Prep: ir.Facts)--> --(MirBuild)--> Mir (SSA) --(Inline, Sroa, Opt)-->
     --(x64|a64 Isel)--> LIR --(Regalloc, Emit)--> Obj (per module, cached) | --(wasm/WasmGen)--> wasm
     --(DataGen: tables, strings)--> Obj --(Link: ELF | LinkPE | LinkMachO | LinkWasm)--> executable
 ```
@@ -16,6 +16,7 @@ typed AST --(ir.Lower)--> hxmc IR --(Prep: ir.Facts)--> --(MirBuild)--> Mir (SSA
 | `Main.hx`, `Options.hx`, `Driver.hx` | the tool: runs the port's compiler with a generate hook, compiles every module (in parallel, cached) and links; `--server` keeps the compilation server resident |
 | `HaxeMain.hx` | `haxe` with hxmc built in (the npm package): `--custom-target hxmc=<out>` |
 | `ir/Ir.hx`, `Lower.hx`, `FnLower.hx` | the IR (structured statements in A-normal form, explicit GC points) and the lowering of the filtered typed AST |
+| `ir/Reach.hx` | the functions the program can run (Reachability, below): the others are not compiled |
 | `ir/Facts.hx`, `Prep.hx` | the program-wide facts: names, layouts, type indices, field ids, no-GC functions, cold sites, GC points, as symbols |
 | `UpToDate.hx`, `Fingerprint.hx`, `LowerCache.hx` | rebuilds: the whole build skipped when nothing changed, each module's object reused when its fingerprint is unchanged, lowered bodies reused by the server |
 | `Mir.hx`, `MirBuild.hx`, `Opt.hx`, `Inline.hx`, `Sroa.hx` | the SSA IR, its construction, inlining, scalar replacement of frame slots (struct values), value numbering, store forwarding, LICM, dead code |
@@ -154,6 +155,34 @@ parallel phases get a larger one, so their threads stop for fewer
 collections. `RT_STATS=1` prints the resizes and what was promoted. A change of the runtime's
 interface or of the IR's conventions needs a tool that knows it: build once
 against the previous runtime first, or bootstrap again.
+
+## Reachability
+
+Haxe's default DCE (`-dce std`) keeps every field of a user class, and the
+lowering makes every method of each class it sees (method tables reach them
+by name: structural and Dynamic access, `Reflect`). `hxmc/src/hxmc/ir/Reach.hx`
+then keeps what the program can run, a rapid type analysis over the IR before
+anything is compiled: from `main`, the exported functions and `@:keep` methods,
+a function is live when live code calls it or makes a closure of it, a static
+initializer when live code uses a static it sets (as the lowering already
+initializes only the classes whose statics it meets), and a method when live
+code instantiates its class or a subclass and either dispatches on its
+selector or can look its name up. Names looked up: those of structural and
+Dynamic access, literals passed to the runtime's lookups or to functions
+passing them on (`Reflect.field(o, "x")`, `Reflect.getProperty`'s
+`"get_" + field`), and names from the runtime's own tables (`Reflect.fields`,
+`Type.getInstanceFields`), which name only what the tables keep; a name
+computed any other way keeps every method of the instantiated classes.
+Dropped: the functions, their entries in the method tables (so
+`Type.getInstanceFields` lists the methods kept, as with `-dce full`), the
+dispatch rows of selectors no live code calls, the types of dead closures.
+The dispatch rows themselves (DataGen: a row per selector, indexed by type)
+are laid over each other, as a call reads only the entries of the classes
+implementing the selector. The tool: 17.9 MB instead of 18.4; ui's counter
+example: 1.50 MB instead of 1.85. `HXMC_STATS=1` prints the live
+functions (and where a name is computed) and the data's parts;
+`HXMC_REACH_WHY=<pack.Class.method>` the chain that keeps a function;
+`HXMC_REACH=0` keeps everything.
 
 ## Module cache
 

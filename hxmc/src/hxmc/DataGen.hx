@@ -120,14 +120,22 @@ class DataGen {
 
 	// ---- everything
 
+	// the bytes of each part (HXMC_STATS)
+	public var sizes:Array<{part:String, bytes:Int}> = [];
+
 	public function run() {
+		function part(name:String, f:() -> Void) {
+			var at = data.buf.len + rodata.buf.len;
+			f();
+			sizes.push({part: name, bytes: data.buf.len + rodata.buf.len - at});
+		}
 		ids();
-		strings();
-		fieldNames();
-		signatures();
+		part('${e.strOrder.length} strings', strings);
+		part('${e.fieldNames.length} field names', fieldNames);
+		part('${p.sigs.length} signatures', signatures);
 		globals();
-		types();
-		dispatch();
+		part('${e.types.length} types', types);
+		part('${p.selectors.length} dispatch rows', dispatch);
 		mainBody();
 	}
 
@@ -248,7 +256,8 @@ class DataGen {
 			var ss = staticsOf.get(i);
 			var ssSym = null, pmSym = null, fsSym = null, msSym = null, ifSym = null, ctSym = null;
 			if (ss != null) {
-				ss = ss.copy();
+				// (a static function no live code can reach through the class value: left out, Reach)
+				ss = [for (x in ss) if (x.clos == null || p.isLive(x.clos.fn)) x];
 				ss.sort((a, b) -> e.fid(a.name) - e.fid(b.name));
 				ssSym = local(data, "ss", 8);
 				for (x in ss) {
@@ -370,14 +379,61 @@ class DataGen {
 		int32Global("rt_ntypes", types.length);
 	}
 
+	// A dispatch row per selector, indexed by a class's type index - T_FIRST
+	// (MirBuild's ECallDispatch): the implementation the class runs. A call
+	// reads only the entries of the classes implementing the selector, so the
+	// rows are laid over each other, each where its entries find free slots
+	// (or the same function), its symbol at its first slot (the slots before
+	// another row's): a fraction of the classes times the selectors. -D
+	// hxmc.jit: whole rows (the native macros' types come after).
 	function dispatch() {
+		var rows = [];
 		for (s in 0...p.selectors.length) {
-			begin(data, e.selNames[s], 8, true);
-			for (c in p.classes) {
-				var m = c.findMethod(p.selectors[s].name);
-				if (m != null && m.dispatchSel == s) ptr(data, e.symbol(m)) else data.buf.u64(0, 0);
+			// (a selector no live code dispatches on: no row, Reach)
+			if (p.liveSelectors != null && !p.liveSelectors[s]) continue;
+			var row = [];
+			for (k in 0...p.classes.length) {
+				var m = p.classes[k].findMethod(p.selectors[s].name);
+				if (m != null && m.dispatchSel == s && p.isLive(m)) row.push({k: k, sym: e.symbol(m)});
 			}
+			rows.push({s: s, row: row});
 		}
+		if (spareTypes > 0) {
+			for (r in rows) {
+				begin(data, e.selNames[r.s], 8, true);
+				var k = 0;
+				for (x in r.row) {
+					data.buf.zeros(8 * (x.k - k));
+					ptr(data, x.sym);
+					k = x.k + 1;
+				}
+				data.buf.zeros(8 * (p.classes.length - k));
+			}
+			return;
+		}
+		// (the largest rows first, each at the first place it fits)
+		var order = [for (i in 0...rows.length) i];
+		order.sort((a, b) -> rows[b].row.length - rows[a].row.length != 0 ? rows[b].row.length - rows[a].row.length : a - b);
+		var slots:Array<Null<String>> = [];
+		var at = [for (_ in rows) 0];
+		for (i in order) {
+			var row = rows[i].row;
+			var d = 0;
+			while (Lambda.exists(row, x -> d + x.k < slots.length && slots[d + x.k] != null && slots[d + x.k] != x.sym))
+				d++;
+			for (x in row) {
+				while (slots.length <= d + x.k)
+					slots.push(null);
+				slots[d + x.k] = x.sym;
+			}
+			at[i] = d;
+		}
+		data.buf.align(8);
+		var base = data.buf.len;
+		for (x in slots)
+			if (x != null) ptr(data, x) else data.buf.u64(0, 0);
+		for (i in 0...rows.length)
+			obj.define(e.selNames[rows[i].s], data, base + 8 * at[i], 0, true);
 	}
 
 	// the allocation stubs the program's code calls (MirBuild.ALLOC_STUB):
