@@ -8,26 +8,45 @@ import sys.io.File;
 import core.Globals.GlobalTypePath;
 import core.TType;
 import compiler.hxb.HxbData;
+import compiler.server.ServerCache;
 import context.Common;
 import core.Message.CompilerMessageKind;
 import core.Message.WarningMode;
-import core.Json.JsonValue;
+import hxmc.ModuleStore;
 
 // The compilation server's module cache made durable (hxmc/PLANS.md, "Cached
 // modules"): a build writes the typed modules it ends with, as the server
 // keeps them in its HXB mode (each module's HXB chunks, its dependencies,
-// kind, file and check policy), into a store in the user's cache directory;
-// the next build with the same key puts them back in the server's cache
-// before typing, and the server's own checks decide, module by module and
-// only for the modules the build loads, which are still good (the module's
-// file, its dependencies: a dirty one makes its dependents dirty); the HXB is
-// decoded on demand. What a cache from an earlier process needs beyond those
-// checks is ServerCache.checkModuleHook's (check below): the file's content
+// kind, file and check policy), into a store in the user's cache directory
+// (ModuleStore.hx); the next build puts them back in the server's cache
+// before typing, and the server's checks decide, module by module and only
+// for the modules the build loads, which are still good; the HXB is read
+// and decoded on demand.
+//
+// Defines: a module is kept with the defines it read (its file's conditions,
+// its macros' Context.defined and getDefines) and those the compiler read
+// in the build that typed it (Define.readHook: the typer's and filters'
+// options, the target's); a build restores the variant whose reads have its
+// values, so a define only some modules read leaves the others (the std)
+// good, in a store shared by every signature. The macros' context, when it
+// does not exist yet, gets the defines it will have (predicted as
+// MacroContext does it, checked when it is created).
+//
+// Validity (ServerCache.checkModuleHook, check below): the module's file
 // (a content hash where the date or size differ: a fresh checkout changes
 // every date; a date within RACY seconds of the parse is not trusted), the
-// file the module's path resolves to now (a module shadowed by a new file
-// earlier in the class path is typed again), and dependencies the store does
-// not have. A build from the cache writes the same output as one without it
+// file its path resolves to now (a module shadowed by a new file earlier in
+// the class path is typed again), its defines, and its dependencies by hash:
+// each dependency's interface (ModuleInterface: its declarations without
+// the bodies its users cannot see, and its own dependencies' interfaces,
+// per strongly connected component) as it was when the module was typed, or
+// its whole content (its source and everything it depends on) for a macro's
+// module and modules typed with macros. A dependency typed again whose
+// interface did not change leaves its dependents good (early cutoff:
+// ServerCache.dependencyDirtyHook; it is typed from its source where the
+// server expects it cached, loadDirtyModuleHook).
+//
+// A build from the cache writes the same output as one without it
 // (hxmc/test/ModuleCacheCheck.hx), which takes two things the server's HXB
 // cache does not keep: the modifiers of unbound monomorphs (Null<Unknown>:
 // CheckingHxbWriter, given back to the reader's monomorphs through
@@ -41,26 +60,22 @@ import core.Json.JsonValue;
 // (the build types everything from source): display requests, the
 // compilation server and its clients (already in memory), builds of several
 // parts (--next, --each), init macros (--macro: their effects are not in the
-// key yet), HXB libraries or output, native libraries, WASI. A build in
-// which a macro registers a callback (Context.onGenerate, onAfterTyping,
-// onAfterGenerate) while typing writes nothing: a module restored later
-// would not register it again. HXMC_STATS=1 prints what the cache did,
-// HXMC_MODULE_CACHE_LOG=1 each module checked and each one not kept.
+// key yet), deprecated defines, HXB libraries or output, native libraries,
+// WASI. A build in which a macro registers a callback (Context.onGenerate,
+// onAfterTyping, onAfterGenerate) or defines something while typing writes
+// nothing: a module restored later would not do it again. HXMC_STATS=1
+// prints what the cache did, HXMC_MODULE_CACHE_LOG=1 each module checked
+// and each one not kept.
 //
-// Store: <cache>/modules/<tool>/<key>-<signature>.pack, one pack per server
-// context (the program's and its macros', each with its signature: the
-// defines), <key> the working directory, the class paths and the std; a
-// pack is an index (the files with their date, size and content hash; per
-// module its path, id, ModuleDefExtra, HXB chunks, monomorph modifiers and
-// skeletons) written whole beside and renamed into place. A build rewrites
-// the packs it changed: its modules, and the modules of the old pack it did
-// not load, except those that depend on a module it typed again or found
-// dirty. Module and variable ids continue from the store's (the server keeps
-// the ids of the modules and variables it restores). The tool directories
+// A build rewrites its key's index when it typed modules or restored other
+// variants: its modules first, then the variants it did not use, at most
+// MAX_VARIANTS per module. Module and variable ids continue from the
+// store's (the server keeps the ids of the modules and variables it
+// restores). The tool directories, the indexes and the blobs no index names
 // are trimmed by last use and size (CacheDir.trim).
 class ModuleCache {
-	public static inline var MAGIC = "hxmc-modules 4";
 	static inline var ID_LIMIT = 1 << 30;
+	static inline var MAX_VARIANTS = 4;
 	static final noMonos = {
 		var o = new BytesOutput();
 		o.writeInt32(0);
@@ -71,12 +86,41 @@ class ModuleCache {
 	static var hookCalls = 0;
 	static var parseHookInstalled = false;
 	static var start = haxe.Timer.stamp();
+	static final mutex = new sys.thread.Mutex();
+	static var mainThread:Null<sys.thread.Thread> = null;
+	// the defines read before the cache opened, per defines context
+	static var early:Array<{ctx:core.Define.DefineContext, keys:Map<String, Bool>}> = [];
+	// each context's typer (to type a module from its source)
+	static var typers:Array<{com:CommonContext, g:context.Typecore.TyperGlobals}> = [];
 
 	public static function current():Null<ModuleCacheState>
 		return state;
 
 	public static function install() {
 		compiler.Compiler.beforeTypingHook = hook;
+		if (Sys.systemName() == "Wasi") return;
+		mainThread = sys.thread.Thread.current();
+		core.Define.readHook = onRead;
+		Common.externalDefinesHook = onExternal;
+		typing.TyperEntry.createdHook = onTyper;
+		ServerCache.dependencyDirtyHook = onDependencyDirty;
+		ServerCache.loadDirtyModuleHook = loadDirty;
+		typing.TypeloadModule.typeFromSourceHook = onTypeFromSource;
+	}
+
+	// TypeloadModule.typeFromSourceHook: while a module of the store is typed
+	// from its source, the restored modules of its cycle it loads are typed
+	// from theirs too (decoded then, they would refer to its types before they
+	// are ready); the others of its cycle stay restored
+	static function onTypeFromSource(com:CommonContext, path:GlobalTypePath, start:Bool) {
+		var s = state;
+		if (s == null) return;
+		if (!start) {
+			s.creating.pop();
+			return;
+		}
+		var v = s.variantOf(context.CommonCache.getCacheSign(com), path);
+		s.creating.push(v == null ? -1 : s.sccOf(v));
 	}
 
 	static function wanted(com:CommonContext):Bool {
@@ -93,41 +137,45 @@ class ModuleCache {
 		if (actx.hxbLibs.length > 0 || actx.nativeLibs.length > 0) return "libraries";
 		if (actx.hxbOut != null) return "HXB output";
 		if (Sys.systemName() == "Wasi") return "WASI";
+		for (k in com.defines.values.keys())
+			if (core.Define.deprecationLut.exists(k)) return "deprecated define " + k;
 		return null;
 	}
 
 	static function hook(com:CommonContext, actx:compiler.ParsedArg.ArgContext) {
 		hookCalls++;
 		state = null;
-		compiler.server.ServerCache.checkModuleHook = null;
+		ServerCache.checkModuleHook = null;
 		typing.Finalization.sortExprHook = null;
 		var why = wanted(com) ? unusable(com, actx) : "off";
 		var s = why == null ? open(com) : null;
+		early = [];
 		if (s == null) {
 			if (why == null) why = "no cache directory";
-			if (why != "off" && Sys.getEnv("HXMC_STATS") == "1") Sys.println('hxmc: module cache not used ($why)');
+			if (why != "off" && stats()) Sys.println('hxmc: module cache not used ($why)');
 			return;
 		}
 		state = s;
-		s.com = com;
-		compiler.server.ServerCache.checkModuleHook = check;
+		ServerCache.checkModuleHook = check;
 		typing.Finalization.sortExprHook = Skeletons.sortExpr;
 		// (what the sort of the types walks, of every class typed: before the
 		// filters change it)
 		com.callbacks.addAfterTyping(_ -> Skeletons.computeAll(com));
 		if (!parseHookInstalled) {
 			parseHookInstalled = true;
-			// (the modifiers of a restored module's monomorphs, once the
-			// server has read it)
-			compiler.server.ServerCache.readerCreatedHook = function(com, path, reader) {
+			// (the blob of a restored module and the modifiers of its
+			// monomorphs, once the server has read it)
+			ServerCache.readerCreatedHook = function(com, path, reader) {
 				var s = state;
 				if (s == null) return;
-				var p = s.packs.get(context.CommonCache.getCacheSign(com));
-				var e = p == null ? null : p.modules.get(key(path));
-				if (e != null && e.monos.length > 4) s.readers.push({com: com, reader: reader, monos: e.monos});
+				var v = s.variantOf(context.CommonCache.getCacheSign(com), path);
+				if (v == null || !s.load(v)) return;
+				if (v.monos.length > 4) s.readers.push({com: com, reader: reader, monos: v.monos});
 			}
 			var typeModule = typing.TypeloadCacheHook.typeModuleHook;
 			typing.TypeloadCacheHook.typeModuleHook = function(com, delay, path, p) {
+				var s = state;
+				if (s != null && s.creating.length > 0) s.cycleGuard(com, path);
 				var r = typeModule(com, delay, path, p);
 				var s = state;
 				if (s != null) s.restoreMonos();
@@ -136,8 +184,29 @@ class ModuleCache {
 			var inner = typing.TypeloadParse.parseHook;
 			typing.TypeloadParse.parseHook = function(com, rfile, p) {
 				var s = state;
-				if (s != null) s.note(core.Path.getFullPath(rfile.file));
-				return inner(com, rfile, p);
+				if (s == null) return inner(com, rfile, p);
+				var file = core.Path.getFullPath(rfile.file);
+				s.note(file);
+				var pk = (com.isMacroContext ? 1 : 0) + "\x00" + file;
+				var main = sys.thread.Thread.current() == mainThread;
+				var prev = s.parsing;
+				if (main) s.parsing = pk;
+				var r = try inner(com, rfile, p) catch (e:Dynamic) {
+					if (main) s.parsing = prev;
+					throw e;
+				}
+				if (main) s.parsing = prev;
+				// (its interface hashed when needed: the build's in parallel when it
+				// writes the store)
+				if (!s.decls.exists(pk)) {
+					mutex.acquire();
+					s.decls.set(pk, switch r {
+						case ParseSuccess(data, _): data.declarations;
+						case _: null;
+					});
+					mutex.release();
+				}
+				return r;
 			}
 		}
 		// (before the compiler's own: registrations from now until typing is
@@ -152,7 +221,132 @@ class ModuleCache {
 	static function ms(t:Float):Int
 		return Std.int((haxe.Timer.stamp() - t) * 1000);
 
-	// the store for this build: its packs read and put in the server's cache
+	// Define.readHook: a define read (by the compiler, or by a macro through
+	// Common.externalDefinesHook first)
+	static function onRead(ctx:core.Define.DefineContext, key:String) {
+		var s = state;
+		if (s == null) {
+			if (hookCalls > 0) return;
+			mutex.acquire();
+			var e = null;
+			for (x in early)
+				if (x.ctx == ctx) e = x;
+			if (e == null) early.push(e = {ctx: ctx, keys: new Map()});
+			e.keys.set(key, true);
+			mutex.release();
+			return;
+		}
+		s.read(ctx, key);
+	}
+
+	// Common.externalDefinesHook: a macro reads (a null key: all) or writes a define
+	static function onExternal(com:CommonContext, name:Null<String>, write:Bool) {
+		var s = state;
+		if (s == null) return;
+		if (write) {
+			if (!s.captured && s.volatileReason == null) s.volatileReason = "a macro defines " + name;
+			return;
+		}
+		var m = try macros.eval.EvalContext.getCtx().curapi.currentModule() catch (_:Dynamic) null;
+		if (m == null) return;
+		var role = s.roleOfSign(m.mExtra.mSign);
+		if (role < 0) return;
+		var role0 = com == s.com ? 0 : 1;
+		mutex.acquire();
+		var rk = role + "|" + key(m.mPath);
+		var l = s.moduleReads.get(rk);
+		if (l == null) s.moduleReads.set(rk, l = new Map());
+		l.set(role0 + "\x00" + (name == null ? "*" : name), true);
+		s.skipKey = name;
+		mutex.release();
+	}
+
+	// TyperEntry.createdHook (before the typer loads anything): the
+	// program's typer, then the macros' context's modules (the context its
+	// macros run in, or the one it will create, with the defines the program
+	// has now)
+	static function onTyper(ctx:context.Typecore.Typer) {
+		typers.push({com: ctx.com, g: ctx.g});
+		var s = state;
+		if (s == null) return;
+		if (ctx.com == s.com && s.macroPending) {
+			s.macroPending = false;
+			var macros = ctx.g.macros;
+			if (macros != null) {
+				s.signs[1] = context.CommonCache.getCacheSign(macros.typer.com);
+				s.defs[1] = macros.typer.com.defines.values;
+			} else {
+				var p = try predictMacroDefines(s.com) catch (_:Dynamic) null;
+				if (p != null) {
+					s.signs[1] = p.sign;
+					s.defs[1] = p.values;
+				}
+			}
+			var t0 = haxe.Timer.stamp();
+			s.loaded = s.register(0);
+			if (s.signs[1] != null) s.loaded += s.register(1);
+			if (stats())
+				Sys.println('hxmc: module cache: ${s.loaded} modules of ${s.index.variants.length} variants read (${Std.int((s.openTime + haxe.Timer.stamp() - t0) * 1000)} ms)');
+			return;
+		}
+		if (ctx.com.isMacroContext && ctx.com == s.com.getMacros() && !s.macroPending) {
+			var sign = context.CommonCache.getCacheSign(ctx.com);
+			if (sign != s.signs[1]) {
+				if (s.volatileReason == null) s.volatileReason = "the macros' context has other defines than predicted";
+				if (stats()) Sys.println("hxmc: module cache: the macros' context's signature " + sign + " is not the predicted " + s.signs[1]);
+				if (s.log) {
+					var a = ctx.com.defines.values, p = s.defs[1];
+					for (k in a.keys())
+						if (p == null || p.get(k) != a.get(k)) Sys.println("hxmc: module cache:   " + k + "=" + a.get(k) + " predicted " + (p == null ? null : p.get(k)));
+					if (p != null)
+						for (k in p.keys())
+							if (!a.exists(k)) Sys.println("hxmc: module cache:   " + k + " predicted " + p.get(k) + ", absent");
+				}
+			}
+		}
+	}
+
+	static function typerOf(com:CommonContext):Null<context.Typecore.TyperGlobals> {
+		var i = typers.length;
+		while (i-- > 0)
+			if (typers[i].com == com) return typers[i].g;
+		return null;
+	}
+
+	// ServerCache.loadDirtyModuleHook: a module typed again under one restored
+	static function loadDirty(com:CommonContext, path:GlobalTypePath, p:core.Globals.Pos):Null<ModuleDef> {
+		var s = state;
+		if (s == null) return null;
+		var g = typerOf(com);
+		if (g == null) return null;
+		s.typedUnder++;
+		if (s.log) Sys.println("hxmc: module cache: " + core.Globals.sTypePath(path) + " typed again under a restored module");
+		return typing.TypeloadModule.loadModulePrime(com, g, path, p);
+	}
+
+	// ServerCache.dependencyDirtyHook: a module checked good by its
+	// dependencies' hashes stays good
+	static function onDependencyDirty(com:CommonContext, mPath:GlobalTypePath, mExtra:ModuleDefExtra, dep:ModuleDep, reason:ModuleSkipReason):Bool {
+		var s = state;
+		if (s == null) return false;
+		var role = s.roleOfSign(mExtra.mSign);
+		return role >= 0 && s.approved.exists(role + "|" + key(mPath));
+	}
+
+	// the macros' context's defines, as MacroContext.createMacroContext
+	// makes them
+	static function predictMacroDefines(com:CommonContext):{sign:String, values:haxe.ds.StringMap<String>} {
+		var c = Common.clone(com, true);
+		var d = Common.adaptDefinesToMacroContext(c.defines);
+		c.defines.values = d.values;
+		c.defines.definesSignature = null;
+		c.platform = core.Globals.Platform.Eval;
+		Common.initPlatform(c);
+		return {sign: core.Define.getSignature(c.defines), values: c.defines.values};
+	}
+
+	// the store for this build: its index read, the variants that match put
+	// in the server's cache
 	static function open(com:CommonContext):Null<ModuleCacheState> {
 		var root = CacheDir.root();
 		if (root == null) return null;
@@ -162,62 +356,36 @@ class ModuleCache {
 		var used = dir + "used";
 		if (!FileSystem.exists(used) || CacheDir.now() - CacheDir.mtime(used) > CacheDir.USED_REFRESH)
 			if (!CacheDir.touch(used)) return null;
-		CacheDir.trim(modules, dir);
+		CacheDir.trim(modules, dir, ModuleStore.sweep);
 		var key = Fingerprint.hash(["hxmc-modules", Sys.getCwd(), Sys.getEnv("HAXE_STD_PATH"), com.classPaths.asStringList().join("\n")].join("\x00"));
-		var s = new ModuleCacheState(dir, dir + key + "-");
-		var prefix = key + "-";
-		var names = try FileSystem.readDirectory(dir) catch (_:Dynamic) [];
-		names.sort(Reflect.compare);
-		for (n in names)
-			if (StringTools.startsWith(n, prefix) && StringTools.endsWith(n, ".pack")) {
-				var p = try ModulePack.read(dir + n) catch (e:Dynamic) {
-					if (stats()) Sys.println('hxmc: module cache: $n unreadable ($e)');
-					null;
-				}
-				if (p != null && dir + prefix + p.sign + ".pack" == dir + n) {
-					s.packs.set(p.sign, p);
-					CacheDir.used(dir + n);
-				}
-			}
-		// ids continue from the store's (restored modules and variables keep theirs)
-		var midHigh = 0, varHigh = 0;
-		for (p in s.packs) {
-			if (p.moduleHigh > midHigh) midHigh = p.moduleHigh;
-			if (p.varHigh > varHigh) varHigh = p.varHigh;
+		var s = new ModuleCacheState(dir, dir + key + ".idx", com);
+		s.signs[0] = context.CommonCache.getCacheSign(com);
+		s.defs[0] = com.defines.values;
+		var mcom = com.getMacros();
+		// the defines read so far
+		for (e in early) {
+			var role = e.ctx == com.defines ? 0 : mcom != null && e.ctx == mcom.defines ? 1 : -1;
+			if (role >= 0)
+				for (k in e.keys.keys())
+					s.global.set(role + "\x00" + k, true);
 		}
-		// (ids only grow from build to build: far from the 32-bit limit the
-		// store starts again from nothing)
-		if (midHigh > ID_LIMIT || varHigh > ID_LIMIT) {
-			s.packs.clear();
-			midHigh = varHigh = 0;
+		var ix = try ModuleStore.readIndex(s.indexPath) catch (e:Dynamic) {
+			if (stats()) Sys.println('hxmc: module cache: ${s.indexPath} unreadable ($e)');
+			null;
 		}
+		if (ix != null) {
+			// (ids only grow from build to build: far from the 32-bit limit the
+			// store starts again from nothing)
+			if (ix.moduleHigh > ID_LIMIT || ix.varHigh > ID_LIMIT) ix = null;
+		}
+		if (ix == null) ix = new StoreIndex();
+		s.index = ix;
+		if (ix.variants.length > 0) CacheDir.used(s.indexPath);
 		@:privateAccess {
-			if (core.TFunctions.moduleUid.load() < midHigh) core.TFunctions.moduleUid.store(midHigh);
-			if (core.TFunctions.varUid.load() < varHigh) core.TFunctions.varUid.store(varHigh);
+			if (core.TFunctions.moduleUid.load() < ix.moduleHigh) core.TFunctions.moduleUid.store(ix.moduleHigh);
+			if (core.TFunctions.varUid.load() < ix.varHigh) core.TFunctions.varUid.store(ix.varHigh);
 		}
-		var n = 0;
-		for (p in s.packs) {
-			var cc = com.cs.getContext(p.sign);
-			var hxb = cc.getHxb();
-			for (e in p.modules) {
-				var x = ModulePack.readExtra(e.extra);
-				if (x.mKind == MImport) {
-					// (an import.hx: no types, kept as a module in memory, as the server does)
-					cc.cacheModuleInMemory(e.path, ({mId: e.id, mPath: e.path, mTypes: [], mStatics: null, mExtra: x} : ModuleDef));
-				} else {
-					var mc:compiler.hxb.HxbData.ModuleCache = {
-						mcPath: e.path,
-						mcId: e.id,
-						mcChunks: e.chunks,
-						mcExtra: x
-					};
-					hxb.replace(e.path, mc);
-				}
-				n++;
-			}
-		}
-		s.loaded = n;
-		if (stats()) Sys.println('hxmc: module cache: $n modules in ${Lambda.count(s.packs)} packs read (${ms(t0)} ms)');
+		s.openTime = haxe.Timer.stamp() - t0;
 		return s;
 	}
 
@@ -232,22 +400,17 @@ class ModuleCache {
 		return null;
 	}
 
+	// the file a module's path resolves to in this com (null: none)
+	public static function resolve(com:CommonContext, path:GlobalTypePath):Null<core.ClassPaths.ResolvedFile>
+		return try typing.TypeloadParse.resolveModuleFile(com, path, {value: path.pack.copy()}, core.Globals.nullPos) catch (_:Dynamic) null;
+
 	// whether the module's path resolves to its file in this com
 	static function resolvesTo(com:CommonContext, path:GlobalTypePath, fileKey:String):Bool {
-		var r = try typing.TypeloadParse.resolveModuleFile(com, path, {value: path.pack.copy()}, core.Globals.nullPos) catch (_:Dynamic) null;
+		var r = resolve(com, path);
 		return r != null && com.partScope.fileKeys.get(core.Path.getFullPath(r.file)) == fileKey;
 	}
 
-	static function fileHash(s:ModuleCacheState, file:String):Null<String> {
-		var h = s.hashes.get(file);
-		if (h == null) {
-			h = try haxe.crypto.Md5.make(File.getBytes(file)).toHex() catch (_:Dynamic) null;
-			if (h != null) s.hashes.set(file, h);
-		}
-		return h;
-	}
-
-	static function size(file:String):Float
+	public static function size(file:String):Float
 		return try FileSystem.stat(file).size catch (_:Dynamic) -1;
 
 	// ServerCache.checkModuleHook: a module from the store, before the
@@ -255,21 +418,22 @@ class ModuleCache {
 	static function check(com:CommonContext, mPath:GlobalTypePath, mExtra:ModuleDefExtra):Null<ModuleSkipReason> {
 		var s = state;
 		if (s == null) return null;
-		var p = s.packs.get(mExtra.mSign);
-		if (p == null) return null;
-		var e = p.modules.get(key(mPath));
-		if (e == null) return null;
+		var role = s.roleOfSign(mExtra.mSign);
+		if (role < 0) return null;
+		var v = s.chosen[role].get(key(mPath));
+		if (v == null) return null;
 		var t0 = haxe.Timer.stamp();
-		var r = verify(com, s, p, e, mPath, mExtra);
+		var r = verify(com, s, v, mPath, mExtra);
 		s.checked++;
-		if (r != null) s.dirty.set(mExtra.mSign + "\x00" + key(mPath), true);
+		if (r == null) s.approved.set(v.roleKey(), true);
 		if (s.log) Sys.println("hxmc: module cache: " + core.Globals.sTypePath(mPath) + (r == null ? " good" : " dirty: " + core.TPrinting.Printer.sModuleSkipReason(r)));
 		s.checkTime += haxe.Timer.stamp() - t0;
 		return r;
 	}
 
-	static function verify(com:CommonContext, s:ModuleCacheState, p:ModulePack, e:StoredModule, mPath:GlobalTypePath, mExtra:ModuleDefExtra):Null<ModuleSkipReason> {
+	static function verify(com:CommonContext, s:ModuleCacheState, v:Variant, mPath:GlobalTypePath, mExtra:ModuleDefExtra):Null<ModuleSkipReason> {
 		var file = core.Path.UniqueKey.lazyPath(mExtra.mFile);
+		if (!v.matched) return FileChanged(file + " (defines)");
 		switch mExtra.mKind {
 			case MCode | MMacro:
 				// (a module of the macros' context checked from the program's
@@ -284,11 +448,11 @@ class ModuleCache {
 		var time = Common.fileTime(file);
 		if (time == 0 && !FileSystem.exists(file)) {
 			// (a @:generic instance: a type path for a file, checked by its dependencies)
-			if (!(mExtra.mKind == MFake && e.mtime == 0)) return FileChanged(file);
+			if (!(mExtra.mKind == MFake && v.mtime == 0)) return FileChanged(file);
 		} else {
-			var f = p.files.get(file);
+			var f = v.fileRec;
 			if (f == null) return FileChanged(file);
-			if (!(f.mtime == time && f.size == size(file)) && fileHash(s, file) != f.hash) return FileChanged(file);
+			if (!(f.mtime == time && f.size == size(file)) && s.fileHash(file) != f.hash) return FileChanged(file);
 			mExtra.mTime = time;
 		}
 		// (dependencies the store did not keep: the server could not find them)
@@ -299,6 +463,17 @@ class ModuleCache {
 			} catch (_:core.ds.NotFound) false;
 			if (!found) return DependencyDirty(d.mdPath, LibraryChanged);
 		}
+		// the dependencies as they were when it was typed: their interface,
+		// or their whole content
+		for (d in v.deps)
+			if (s.depHash(d) != d.expect) return DependencyDirty(d.path, FileChanged(d.eligible ? "(interface)" : "(content)"));
+		// (a dependency whose fields its users' typing marks: restored only with
+		// its cycle and its users, its marks being theirs)
+		for (d in v.deps) {
+			var w = s.chosen[d.role].get(d.key);
+			if (w != null && w.structUsed && !s.sccClean(w)) return DependencyDirty(d.path, FileChanged("(typed again, its fields used through structures)"));
+		}
+		if (mExtra.mKind != MImport && !s.load(v)) return LibraryChanged;
 		return null;
 	}
 
@@ -306,25 +481,41 @@ class ModuleCache {
 	// program): the modules of the build as the server would cache them
 	static function capture(com:CommonContext) {
 		var s = state;
-		if (s == null || s.volatileReason != null) return;
+		if (s == null) return;
+		s.captured = true;
+		if (s.volatileReason != null) return;
 		if (Common.hasErrorToReport(com)) {
 			s.volatileReason = "errors";
 			return;
 		}
 		var t0 = haxe.Timer.stamp();
-		var coms = [com];
+		// (and the macros' context's, when it is the one predicted: not a
+		// context only an init macro used)
 		var mcom = com.getMacros();
-		if (mcom != null) coms.push(mcom);
-		var jobs:Array<{out:CapturedModule, f:Void->CachedChunks}> = [];
-		for (c in coms) {
+		var coms = [com];
+		if (mcom != null && context.CommonCache.getCacheSign(mcom) == s.signs[1]) coms.push(mcom);
+		// the defines the compiler read in this build, with their values
+		var buildReads:Array<Read> = [];
+		for (k in s.global.keys()) {
+			var i = k.indexOf("\x00");
+			var role = Std.parseInt(k.substr(0, i));
+			var name = k.substr(i + 1);
+			buildReads.push({role: role, name: name, value: s.value(role, name)});
+		}
+		buildReads.sort((a, b) -> Reflect.compare(a.role + a.name, b.role + b.name));
+		var jobs:Array<{v:Variant, f:Void->{chunks:CachedChunks, monos:Bytes}}> = [];
+		var all:Array<Variant> = [];
+		var byKey = [new Map<String, Variant>(), new Map<String, Variant>()];
+		for (role in 0...coms.length) {
+			var c = coms[role];
 			var config:compiler.hxb.HxbWriterConfig.WriterTargetConfig = switch c.hxbWriterConfig {
 				case null: new compiler.hxb.HxbWriterConfig.WriterTargetConfig();
 				case config: c.isMacroContext ? config.macroConfig : config.targetConfig;
 			}
 			function warn(w:core.Message.WarningCode, msg:String, p:core.Globals.Pos):Void c.warning(w, c.warningOptions, msg, p);
+			var optimize = c.defines.values.exists(core.Define.AnalyzerOptimize);
 			for (m in c.modules) {
 				var x = m.mExtra;
-				s.seen.set(x.mSign + "\x00" + key(m.mPath), true);
 				inline function skip(why:String)
 					if (s.log) Sys.println("hxmc: module cache: " + core.Globals.sTypePath(m.mPath) + " not kept (" + why + ")");
 				if (x.mKind == MExtern) {
@@ -350,196 +541,455 @@ class ModuleCache {
 						continue;
 					}
 					// (the content as parsed, else as the store has it, else now)
-					rec = s.parsed.get(file);
-					if (rec == null) {
-						var p = s.packs.get(x.mSign);
-						var old = p == null ? null : p.files.get(file);
-						if (old != null && old.mtime == time && old.size == size(file)) rec = old else rec = s.record(file);
-					}
+					rec = s.parsed.get(core.Path.getFullPath(file));
+					var old = s.restored(m);
+					if (rec == null && old != null && old.fileRec != null && old.fileRec.mtime == time && old.fileRec.size == size(file))
+						rec = old.fileRec;
+					if (rec == null) rec = s.record(file);
 					if (rec == null) {
 						skip("unreadable");
 						continue;
 					}
 				}
-				var out:CapturedModule = {
-					sign: x.mSign,
-					path: m.mPath,
-					id: m.mId,
-					file: rec == null ? null : file,
-					rec: rec,
-					extra: ModulePack.writeExtra(x),
-					chunks: null,
-					monos: null,
-					skeletons: null,
-					fresh: true
-				};
-				s.captured.push(out);
-				// restored and not processed again: the stored chunks
-				var p = s.packs.get(x.mSign);
-				var e = p == null ? null : p.modules.get(key(m.mPath));
-				out.skeletons = e != null && e.id == m.mId ? e.skeletons : Skeletons.encode(s, x.mSign, m.mPath);
-				if (e != null && e.id == m.mId && x.mProcessed == e.processed) {
-					out.chunks = e.chunks;
-					out.monos = e.monos;
-					out.fresh = false;
+				var v = new Variant();
+				v.role = role;
+				v.path = m.mPath;
+				v.key = key(m.mPath);
+				v.id = m.mId;
+				v.extra = ModuleStore.writeExtra(x);
+				v.signs = s.signs.copy();
+				v.kind = x.mKind;
+				v.processed = x.mProcessed != 0 ? -1 : 0;
+				v.mtime = x.mTime;
+				v.file = file;
+				v.fileRec = rec;
+				v.matched = true;
+				v.deps = [];
+				var macroDefines = false;
+				var ok = true;
+				for (d in x.mDeps) {
+					var r = s.signs.indexOf(d.mdSign);
+					if (r < 0) {
+						ok = false;
+						break;
+					}
+					switch d.mdOrigin {
+						case MDepFromMacroInclude | MDepFromMacroDefine: macroDefines = true;
+						case _:
+					}
+					// (in the same context its interface stands for it, also for a
+					// macro that looked at it; across contexts, a macro's module, its
+					// whole content: its code runs)
+					var eligible = r == role;
+					v.deps.push({role: r, path: d.mdPath, key: key(d.mdPath), eligible: eligible, expect: ""});
+				}
+				if (!ok) {
+					skip("a dependency of another context");
 					continue;
 				}
+				v.deps.sort((a, b) -> Reflect.compare(a.role + "|" + a.key, b.role + "|" + b.key));
+				var old = s.restored(m);
+				if (old != null) {
+					v.reads = old.reads;
+					v.buildReads = old.buildReads;
+					v.iface = old.iface;
+				} else {
+					var pk = role + "\x00" + core.Path.getFullPath(file);
+					var reads:Array<Read> = [];
+					var names = s.fileReads.get(pk);
+					if (names != null)
+						for (n in names.keys())
+							reads.push({role: role, name: n, value: s.value(role, n)});
+					var mr = s.moduleReads.get(role + "|" + v.key);
+					if (mr != null)
+						for (k in mr.keys()) {
+							var i = k.indexOf("\x00");
+							var r = Std.parseInt(k.substr(0, i));
+							var n = k.substr(i + 1);
+							reads.push({role: r, name: n, value: s.value(r, n)});
+						}
+					reads.sort((a, b) -> Reflect.compare(a.role + a.name, b.role + b.name));
+					v.reads = reads;
+					v.buildReads = buildReads;
+					var ifaceMode = (x.mKind == MCode || x.mKind == MMacro) && StringTools.endsWith(file, ".hx") && !macroDefines && mr == null
+						&& !optimize && !macroBuilt(m);
+					v.iface = null;
+					v.ifacePk = ifaceMode ? pk : null;
+					if (s.log && v.ifacePk == null && (x.mKind == MCode || x.mKind == MMacro))
+						Sys.println("hxmc: module cache: " + core.Globals.sTypePath(m.mPath) + " kept whole (" + (!ifaceMode ? (macroDefines ? "macro-defined" : mr != null ? "macro reads" : optimize ? "analyzer-optimize" : macroBuilt(m) ? "built by a macro" : "file") : "no interface") + ")");
+				}
+				for (t in m.mTypes)
+					switch t {
+						case TClassDecl(c):
+							inline function marked(cf:TClassField)
+								return cf != null && core.TFunctions.hasClassFieldFlag(cf, CfMaybeUsed);
+							if (marked(c.clConstructor)) v.structUsed = true;
+							for (cf in c.clOrderedFields)
+								if (marked(cf)) v.structUsed = true;
+							for (cf in c.clOrderedStatics)
+								if (marked(cf)) v.structUsed = true;
+						case _:
+					}
+				all.push(v);
+				byKey[role].set(v.key, v);
+				// restored and not processed again: the stored blob
+				if (old != null && x.mProcessed == old.processed) {
+					v.blob = old.blob;
+					v.blobSize = old.blobSize;
+					continue;
+				}
+				v.fresh = true;
+				var skeletons = old != null && old.skeletons != null ? old.skeletons : Skeletons.encode(s, x.mSign, m.mPath);
 				if (x.mKind == MImport) {
-					out.chunks = [];
-					out.monos = noMonos;
+					v.blobBytes = ModuleStore.encodeBlob([], noMonos, skeletons);
 					continue;
 				}
-				if (s.log && e != null) Sys.println("hxmc: module cache: " + core.Globals.sTypePath(m.mPath) + " encoded again (id " + m.mId + "/" + e.id + ", processed " + x.mProcessed + ")");
+				if (s.log && old != null) Sys.println("hxmc: module cache: " + core.Globals.sTypePath(m.mPath) + " encoded again (processed " + x.mProcessed + ")");
 				// (as ContextCache.cacheHxbModule, with a writer that keeps what
 				// HXB does not)
+				v.skeletons = skeletons;
 				jobs.push({
-					out: out,
+					v: v,
 					f: function() {
 						var w = new CheckingHxbWriter(config, warn, new typing.TanonIdentification<Dynamic>());
 						w.writeModule(m);
-						out.monos = w.monoModifiers();
-						return (w.getChunks() : CachedChunks);
+						return {chunks: (w.getChunks() : CachedChunks), monos: w.monoModifiers()};
 					}
 				});
 			}
 		}
-		var none:{out:CapturedModule, chunks:CachedChunks} = {out: null, chunks: []};
+		// the fresh modules' interfaces (v.iface held their file's key), hashed in parallel
+		var t1 = haxe.Timer.stamp();
+		var pks = [];
+		for (v in all)
+			if (v.ifacePk != null && !s.ifaces.exists(v.ifacePk) && pks.indexOf(v.ifacePk) < 0) pks.push(v.ifacePk);
+		var hashed = context.Parallel.runWithPool(com.sctx.pool, function(pool) {
+			return context.Parallel.ParallelArray.map(pool, function(pk:String) {
+				var d = s.decls.get(pk);
+				return d == null ? null : try ModuleInterface.hash(d) catch (_:Dynamic) null;
+			}, pks, null);
+		});
+		for (i in 0...pks.length)
+			s.ifaces.set(pks[i], hashed[i]);
+		s.ifaceTime += haxe.Timer.stamp() - t1;
+		for (v in all)
+			if (v.ifacePk != null) v.iface = s.ifaces.get(v.ifacePk);
+		var none:{v:Variant, r:{chunks:CachedChunks, monos:Bytes}} = {v: null, r: null};
 		var done = context.Parallel.runWithPool(com.sctx.pool, function(pool) {
-			return context.Parallel.ParallelArray.map(pool, function(j:{out:CapturedModule, f:Void->CachedChunks}) return {out: j.out, chunks: j.f()}, jobs, none);
+			return context.Parallel.ParallelArray.map(pool, function(j:{v:Variant, f:Void->{chunks:CachedChunks, monos:Bytes}}) return {v: j.v, r: j.f()}, jobs,
+				none);
 		});
 		for (d in done)
-			d.out.chunks = d.chunks;
+			d.v.blobBytes = ModuleStore.encodeBlob(d.r.chunks, d.r.monos, d.v.skeletons);
+		// (each new blob named uniquely: this build's nonce and a counter)
+		var nonce = CacheDir.nonce(), count = 0;
+		for (v in all)
+			if (v.blobBytes != null) {
+				v.blob = nonce + "-" + (count++);
+				v.blobSize = v.blobBytes.length;
+			}
+		// (the modules of the store this build did not load, as they are)
+		for (role in 0...2)
+			for (k => v in s.chosen[role])
+				if (!byKey[role].exists(k)) byKey[role].set(k, v);
+		// the modules whose dependencies are all kept, with the hashes of
+		// their dependencies
+		var dropped = true;
+		while (dropped) {
+			dropped = false;
+			for (v in all) {
+				if (byKey[v.role].get(v.key) != v) continue;
+				for (d in v.deps)
+					if (!byKey[d.role].exists(d.key)) {
+						byKey[v.role].remove(v.key);
+						dropped = true;
+						if (s.log) Sys.println("hxmc: module cache: " + core.Globals.sTypePath(v.path) + " not kept (a dependency is not: " + d.role + " " + d.key + ")");
+						break;
+					}
+			}
+		}
+		var kept = [for (v in all) if (byKey[v.role].get(v.key) == v) v];
+		var closure = new Closure(s, (role, k) -> byKey[role].get(k), "!");
+		for (v in kept)
+			for (d in v.deps) {
+				var w = byKey[d.role].get(d.key);
+				d.expect = d.eligible ? closure.di(w) : closure.df(w);
+			}
+		s.kept = kept;
 		s.written = jobs.length;
 		s.captureTime = haxe.Timer.stamp() - t0;
 	}
 
-	// the end of a build (code: its exit code): the packs it changed written
+	// whether a build macro made a type of the module (@:build, @:genericBuild,
+	// or @:autoBuild on a class it extends or implements): its fields may
+	// depend on its whole source (the macro reads the bodies)
+	static function macroBuilt(m:ModuleDef):Bool {
+		inline function has(meta:core.Ast.Metadata, l:Array<core.MetaList.StrictMeta>):Bool {
+			var r = false;
+			for (x in l)
+				if (core.Meta.has(x, meta)) r = true;
+			return r;
+		}
+		function inherited(c:Null<TClass>, depth:Int):Bool {
+			if (c == null || depth > 64) return false;
+			if (core.Meta.has(AutoBuild, c.clMeta)) return true;
+			if (c.clSuper != null && inherited(c.clSuper.cls, depth + 1)) return true;
+			for (i in c.clImplements)
+				if (inherited(i.cls, depth + 1)) return true;
+			return false;
+		}
+		for (t in m.mTypes)
+			switch t {
+				case TClassDecl(c):
+					if (has(c.clMeta, [Build, AutoBuild, GenericBuild]) || inherited(c, 0)) return true;
+				case TEnumDecl(e):
+					if (has(e.eMeta, [Build])) return true;
+				case TAbstractDecl(a):
+					if (has(a.aMeta, [Build, GenericBuild])) return true;
+				case TTypeDecl(_):
+			}
+		return false;
+	}
+
+	// the end of a build (code: its exit code): the index written when it changed
 	public static function finish(code:Int) {
 		var s = state;
 		state = null;
-		compiler.server.ServerCache.checkModuleHook = null;
+		ServerCache.checkModuleHook = null;
 		typing.Finalization.sortExprHook = null;
 		if (s == null) return;
 		var t0 = haxe.Timer.stamp();
-		var wrote = 0;
-		if (code == 0 && s.volatileReason == null && s.captured.length > 0) {
-			// the stored modules this build did not end with: kept unless
-			// found dirty, or depending (in any pack) on a module the build
-			// typed again or did not keep
-			var changed = new Map<String, Bool>();
-			for (k in s.dirty.keys()) changed.set(k, true);
-			var kept = new Map<String, Bool>();
-			for (c in s.captured)
-				if (c.fresh) changed.set(c.sign + "\x00" + key(c.path), true) else kept.set(c.sign + "\x00" + key(c.path), true);
-			for (k in s.seen.keys())
-				if (!kept.exists(k)) changed.set(k, true);
-			var old:Array<{k:String, sign:String, e:StoredModule}> = [];
-			for (p in s.packs)
-				for (mk => e in p.modules) {
-					var k = p.sign + "\x00" + mk;
-					if (!s.seen.exists(k) && !changed.exists(k)) old.push({k: k, sign: p.sign, e: e});
-				}
-			var more = true;
-			while (more) {
-				more = false;
-				for (o in old)
-					if (!changed.exists(o.k))
-						for (d in o.e.deps)
-							if (changed.exists(d)) {
-								changed.set(o.k, true);
-								more = true;
-								break;
-							}
+		var blobs = 0;
+		var wrote = false;
+		if (code == 0 && s.volatileReason == null && s.kept != null && s.kept.length > 0) {
+			// the build's modules, then the other variants (not those it
+			// superseded: the same module with the same reads), at most
+			// MAX_VARIANTS per module
+			var list = s.kept.copy();
+			var count = new Map<String, Int>();
+			var same = new Map<String, Bool>();
+			for (v in list) {
+				count.set(v.roleKey(), 1);
+				same.set(v.roleKey() + "\x00" + ModuleStore.readsKey(v.reads.concat(v.buildReads)), true);
 			}
-			// per signature: the build's modules, then the old ones kept
-			var bySign = new Map<String, Array<CapturedModule>>();
-			var dirtySigns = new Map<String, Bool>();
-			for (c in s.captured) {
-				var l = bySign.get(c.sign);
-				if (l == null) bySign.set(c.sign, l = []);
-				l.push(c);
-				if (c.fresh) dirtySigns.set(c.sign, true);
+			for (v in s.index.variants) {
+				var k = v.roleKey();
+				if (same.exists(k + "\x00" + ModuleStore.readsKey(v.reads.concat(v.buildReads)))) continue;
+				var n = count.exists(k) ? count.get(k) : 0;
+				if (n >= MAX_VARIANTS) continue;
+				count.set(k, n + 1);
+				list.push(v);
 			}
-			// (and the packs that lose modules)
-			for (p in s.packs) {
-				if (!bySign.exists(p.sign)) bySign.set(p.sign, []);
-				for (mk in p.modules.keys()) {
-					var k = p.sign + "\x00" + mk;
-					if (s.seen.exists(k) ? !kept.exists(k) : changed.exists(k)) dirtySigns.set(p.sign, true);
-				}
-			}
-			var midHigh = @:privateAccess core.TFunctions.moduleUid.load();
-			var varHigh = @:privateAccess core.TFunctions.varUid.load();
-			for (sign => list in bySign) {
-				if (!dirtySigns.exists(sign)) continue;
-				var keep = [for (o in old) if (o.sign == sign && !changed.exists(o.k)) o.e];
-				var path = s.base + sign + ".pack";
-				var tmp = path + "." + CacheDir.nonce() + ".tmp";
-				var ok = try {
-					File.saveBytes(tmp, ModulePack.write(sign, midHigh, varHigh, list, keep, s.packs.get(sign)));
-					CacheDir.replace(tmp, path);
-				} catch (e:Dynamic) {
-					try FileSystem.deleteFile(tmp) catch (_:Dynamic) {}
-					false;
-				}
-				if (ok) wrote++;
+			var changed = list.length != s.index.variants.length;
+			if (!changed)
+				for (i in 0...list.length)
+					if (list[i].fresh || list[i].roleKey() != s.index.variants[i].roleKey() || list[i].blob != s.index.variants[i].blob) {
+						changed = true;
+						break;
+					}
+			if (changed) {
+				var ok = true;
+				for (v in list)
+					if (v.blobBytes != null) {
+						if (!ModuleStore.saveBlob(s.dir, v.blob, v.blobBytes)) ok = false;
+						blobs++;
+					}
+				var ix = new StoreIndex();
+				ix.moduleHigh = @:privateAccess core.TFunctions.moduleUid.load();
+				ix.varHigh = @:privateAccess core.TFunctions.varUid.load();
+				ix.variants = list;
+				var tmp = s.indexPath + "." + CacheDir.nonce() + ".tmp";
+				if (ok)
+					wrote = try {
+						File.saveBytes(tmp, ModuleStore.writeIndex(ix));
+						CacheDir.replace(tmp, s.indexPath);
+					} catch (e:Dynamic) {
+						try FileSystem.deleteFile(tmp) catch (_:Dynamic) {}
+						false;
+					}
 			}
 		}
 		if (stats())
 			Sys.println('hxmc: module cache: ${s.checked} checked (${Std.int(s.checkTime * 1000)} ms), ${s.written} modules encoded (${Std.int(s.captureTime * 1000)} ms), '
-				+ '$wrote packs written (${ms(t0)} ms)' + (s.volatileReason != null ? ' (not written: ${s.volatileReason})' : ''));
+				+ '${s.typedUnder} typed again under restored ones, ${s.cycleTyped} with their cycle, interfaces ${Std.int(s.ifaceTime * 1000)} ms, $blobs blobs, index ${wrote ? "written" : "unchanged"} (${ms(t0)} ms)'
+				+ (s.volatileReason != null ? ' (not written: ${s.volatileReason})' : ''));
 	}
 }
 
-@:structInit class StoredFile {
-	public var mtime:Float;
-	public var size:Float;
-	public var hash:String;
-}
+// the hashes of modules' interfaces (di) and whole contents (df), with
+// their dependencies', per strongly connected component (Tarjan's): over
+// the variants a build restores (their files and defines now), or over the
+// modules a build ends with (when it writes them)
+class Closure {
+	final s:ModuleCacheState;
+	final node:(Int, String) -> Null<Variant>;
+	final memo = new Map<String, {di:String, df:String, clean:Bool, scc:Int}>();
+	var sccs = 0;
+	final index = new Map<String, Int>();
+	final low = new Map<String, Int>();
+	final onStack = new Map<String, Bool>();
+	final stack:Array<Variant> = [];
+	var counter = 0;
 
-@:structInit class StoredModule {
-	public var path:GlobalTypePath;
-	public var id:Int;
-	public var mtime:Float;
-	// mProcessed as restored (-1: processed in an earlier compilation)
-	public var processed:Int;
-	// the module's ModuleDefExtra as written (ModulePack.writeExtra)
-	public var extra:Bytes;
-	public var chunks:CachedChunks;
-	// CheckingHxbWriter.monoModifiers
-	public var monos:Bytes;
-	// Skeletons.encode (decoded on demand)
-	public var skeletons:Bytes;
-	public var skeletonMap:Null<Map<String, Bytes>> = null;
-	// the dependencies' keys (signature, path)
-	public var deps:Array<String>;
-}
+	// what stands for a module the store does not have (never the same in
+	// a check as when the hashes were written)
+	final missing:String;
 
-@:structInit class CapturedModule {
-	public var sign:String;
-	public var path:GlobalTypePath;
-	public var id:Int;
-	public var file:Null<String>;
-	public var rec:Null<StoredFile>;
-	public var extra:Bytes;
-	public var chunks:Null<CachedChunks>;
-	// CheckingHxbWriter.monoModifiers
-	public var monos:Null<Bytes>;
-	// Skeletons.encode
-	public var skeletons:Null<Bytes>;
-	// typed (or processed) by this build
-	public var fresh:Bool;
+	public function new(s:ModuleCacheState, node:(Int, String) -> Null<Variant>, missing:String) {
+		this.s = s;
+		this.node = node;
+		this.missing = missing;
+	}
+
+	public function di(v:Null<Variant>):String
+		return v == null ? missing : get(v).di;
+
+	public function df(v:Null<Variant>):String
+		return v == null ? missing : get(v).df;
+
+	// whether every module of its strongly connected component has the file
+	// and defines it was typed with (a module typed again in a cycle with
+	// restored ones would be referenced by them while it is typed: a cycle
+	// is restored whole or typed again whole)
+	public function clean(v:Variant):Bool
+		return get(v).clean;
+
+	// its strongly connected component's number
+	public function scc(v:Variant):Int
+		return get(v).scc;
+
+	function get(v:Variant):{di:String, df:String, clean:Bool, scc:Int} {
+		var h = memo.get(v.roleKey());
+		if (h == null) {
+			connect(v);
+			h = memo.get(v.roleKey());
+		}
+		return h;
+	}
+
+	function connect(v:Variant) {
+		var k = v.roleKey();
+		index.set(k, counter);
+		low.set(k, counter);
+		counter++;
+		stack.push(v);
+		onStack.set(k, true);
+		for (d in v.deps) {
+			var w = node(d.role, d.key);
+			if (w == null) continue;
+			var wk = w.roleKey();
+			if (memo.exists(wk)) continue;
+			if (!index.exists(wk)) {
+				connect(w);
+				if (low.get(wk) < low.get(k)) low.set(k, low.get(wk));
+			} else if (onStack.exists(wk)) {
+				if (index.get(wk) < low.get(k)) low.set(k, index.get(wk));
+			}
+		}
+		if (low.get(k) != index.get(k)) return;
+		var members = [];
+		while (true) {
+			var w = stack.pop();
+			onStack.remove(w.roleKey());
+			members.push(w);
+			if (w == v) break;
+		}
+		members.sort((a, b) -> Reflect.compare(a.roleKey(), b.roleKey()));
+		var inside = new Map<String, Bool>();
+		for (m in members)
+			inside.set(m.roleKey(), true);
+		var f = new StringBuf(), i = new StringBuf();
+		var ineligibleInside = false;
+		var clean = true;
+		for (m in members) {
+			if (clean && !s.ownClean(m)) clean = false;
+			f.add(m.roleKey());
+			f.add("\n");
+			f.add(s.sFull(m));
+			i.add(m.roleKey());
+			i.add("\n");
+			i.add(s.sIface(m));
+			for (d in m.deps) {
+				var w = node(d.role, d.key);
+				if (w == null) {
+					f.add("\n" + missing);
+					i.add("\n" + missing);
+				} else if (inside.exists(w.roleKey())) {
+					f.add("\n~" + w.roleKey());
+					i.add("\n~" + w.roleKey());
+					if (!d.eligible) ineligibleInside = true;
+				} else {
+					var h = memo.get(w.roleKey());
+					f.add("\n" + h.df);
+					i.add("\n" + (d.eligible ? h.di : h.df));
+				}
+			}
+			f.add("\n;");
+			i.add("\n;");
+		}
+		var dfh = haxe.crypto.Md5.encode("F" + f.toString());
+		var dih = ineligibleInside ? dfh : haxe.crypto.Md5.encode("I" + i.toString());
+		// (and each member's dependencies as they were when it was typed: a
+		// member typed again for its dependencies makes the cycle typed again)
+		if (clean)
+			for (m in members) {
+				for (d in m.deps) {
+					var w = node(d.role, d.key);
+					var actual = w == null ? missing : inside.exists(w.roleKey()) ? (d.eligible ? dih : dfh) : {
+						var h = memo.get(w.roleKey());
+						d.eligible ? h.di : h.df;
+					};
+					if (actual != d.expect) {
+						clean = false;
+						break;
+					}
+				}
+				if (!clean) break;
+			}
+		var n = sccs++;
+		for (m in members)
+			memo.set(m.roleKey(), {di: dih, df: dfh, clean: clean, scc: n});
+	}
 }
 
 class ModuleCacheState {
 	public var dir:String;
-	public var base:String;
-	public var packs = new Map<String, ModulePack>();
+	public var indexPath:String;
+	public var com:CommonContext;
+	public var index:StoreIndex;
+	// per role (0: the program's context, 1: the macros'), its signature and
+	// defines (the macros': predicted while that context does not exist)
+	public var signs:Array<Null<String>> = [null, null];
+	public var defs:Array<Null<haxe.ds.StringMap<String>>> = [null, null];
+	// per role, the variant restored for each module (ModuleCache.key)
+	public var chosen = [new Map<String, Variant>(), new Map<String, Variant>()];
+	public var approved = new Map<String, Bool>();
 	public var hashes = new Map<String, String>();
-	public var dirty = new Map<String, Bool>();
-	public var seen = new Map<String, Bool>();
-	public var captured:Array<CapturedModule> = [];
-	public var com:Null<CommonContext> = null;
+	public var closure:Null<Closure> = null;
+	// the defines read: by the compiler (role and name), while parsing a file
+	// (role and file: names), by a module's macros (role|key: role and name)
+	public var global = new Map<String, Bool>();
+	public var fileReads = new Map<String, Map<String, Bool>>();
+	public var moduleReads = new Map<String, Map<String, Bool>>();
+	// the file being parsed (role and file), and the read a macro makes
+	// through Common.externalDefinesHook (not the compiler's)
+	public var parsing:Null<String> = null;
+	public var skipKey:Null<String> = null;
+	// per role and file, its interface as parsed (ModuleInterface; null: none)
+	public var ifaces = new Map<String, Null<String>>();
+	// per role and file, its declarations as parsed (null: a parse error)
+	public var decls = new Map<String, Null<Array<core.Ast.TypeDecl>>>();
+
+	// a file's interface as parsed in this build (null: not parsed, or none)
+	public function iface(pk:String):Null<String> {
+		if (ifaces.exists(pk)) return ifaces.get(pk);
+		var d = decls.get(pk);
+		var t0 = haxe.Timer.stamp();
+		var h = d == null ? null : try ModuleInterface.hash(d) catch (_:Dynamic) null;
+		ifaceTime += haxe.Timer.stamp() - t0;
+		ifaces.set(pk, h);
+		return h;
+	}
 	// per module (signature and path), what the sort of the types walks of
 	// its classes' fields, as typed in this build (Skeletons)
 	public var skeletons = new Map<String, Map<String, Bytes>>();
@@ -547,17 +997,297 @@ class ModuleCacheState {
 	// the readers of restored modules whose monomorphs have modifiers
 	public var readers:Array<{com:CommonContext, reader:compiler.hxb.HxbReader, monos:Bytes}> = [];
 	public var volatileReason:Null<String> = null;
+	public var captured = false;
+	public var kept:Null<Array<Variant>> = null;
 	// HXMC_MODULE_CACHE_LOG=1: each module checked, each not kept, each encoded again
 	public var log = Sys.getEnv("HXMC_MODULE_CACHE_LOG") == "1";
 	public var loaded = 0;
 	public var checked = 0;
 	public var written = 0;
+	public var typedUnder = 0;
 	public var checkTime = 0.0;
+	public var ifaceTime = 0.0;
 	public var captureTime = 0.0;
 
 	// the files parsed, as the parser read them (their date, size and
 	// content hash)
 	public var parsed = new Map<String, StoredFile>();
+
+	public function new(dir:String, indexPath:String, com:CommonContext) {
+		this.dir = dir;
+		this.indexPath = indexPath;
+		this.com = com;
+	}
+
+	public var macroPending = true;
+	// the cycles (Closure.scc) of the modules being typed from their source
+	public var creating:Array<Int> = [];
+	public var cycleTyped = 0;
+
+	public function sccOf(v:Variant):Int {
+		if (closure == null) closure = new Closure(this, (role, k) -> chosen[role].get(k), "?");
+		return closure.scc(v);
+	}
+
+	// a restored module about to be loaded while a module of its cycle is
+	// typed from its source: typed from its source too
+	public function cycleGuard(com:CommonContext, path:GlobalTypePath) {
+		var v = variantOf(context.CommonCache.getCacheSign(com), path);
+		if (v == null || v.mc == null) return;
+		// (the server's copy for this compilation)
+		var mc = try context.CommonCache.getCache(com).getHxbModule(path) catch (_:Dynamic) null;
+		if (mc == null) return;
+		switch mc.mcExtra.mCacheState {
+			case MSBad(_): return;
+			case _:
+		}
+		if (creating.indexOf(sccOf(v)) < 0) return;
+		mc.mcExtra.mCacheState = MSBad(FileChanged(v.file + " (typed with a module of its cycle)"));
+		cycleTyped++;
+		if (log) Sys.println("hxmc: module cache: " + core.Globals.sTypePath(path) + " typed again with a module of its cycle");
+	}
+	public var openTime = 0.0;
+
+	// the variants of a role that match the build's defines put in the
+	// server's cache: per module, the newest whose reads match (of those,
+	// one whose file has the content it has now: a file edited back), else
+	// the newest (checked dirty); the number of modules
+	public function register(role:Int):Int {
+		var first = new Map<String, Variant>();
+		var more = new Map<String, Array<Variant>>();
+		var c = chosen[role];
+		for (v in index.variants) {
+			if (v.role != role) continue;
+			if (!first.exists(v.key)) first.set(v.key, v);
+			if (!matches(v)) continue;
+			v.matched = true;
+			if (!c.exists(v.key)) c.set(v.key, v) else {
+				var l = more.get(v.key);
+				if (l == null) more.set(v.key, l = []);
+				l.push(v);
+			}
+		}
+		for (k => l in more) {
+			var v = c.get(k);
+			if (v.file == null || v.fileRec == null) continue;
+			var time = Common.fileTime(v.file);
+			if (v.fileRec.mtime == time && v.fileRec.size == ModuleCache.size(v.file)) continue;
+			var h = fileHash(v.file);
+			if (h == null || h == v.fileRec.hash) continue;
+			for (w in l)
+				if (w.fileRec != null && w.fileRec.hash == h) {
+					c.set(k, w);
+					break;
+				}
+		}
+		for (k => v in first)
+			if (!c.exists(k)) c.set(k, v);
+		var cc = com.cs.getContext(signs[role]);
+		var hxb = cc.getHxb();
+		var n = 0;
+		for (v in c) {
+			var x = ModuleStore.readExtra(v.extra);
+			x.mSign = signs[role];
+			for (d in x.mDeps) {
+				var r = v.signs.indexOf(d.mdSign);
+				if (r >= 0 && signs[r] != null) d.mdSign = signs[r];
+			}
+			v.x = x;
+			if (x.mKind == MImport) {
+				// (an import.hx: no types, kept as a module in memory, as the server does)
+				cc.cacheModuleInMemory(v.path, ({mId: v.id, mPath: v.path, mTypes: [], mStatics: null, mExtra: x} : ModuleDef));
+			} else {
+				var mc:compiler.hxb.HxbData.ModuleCache = {
+					mcPath: v.path,
+					mcId: v.id,
+					mcChunks: [],
+					mcExtra: x
+				};
+				v.mc = mc;
+				hxb.replace(v.path, mc);
+			}
+			n++;
+		}
+		return n;
+	}
+
+	public function roleOfSign(sign:String):Int
+		return sign == signs[0] ? 0 : sign != null && sign == signs[1] ? 1 : -1;
+
+	public function comOf(role:Int):Null<CommonContext> {
+		if (role == 0) return com;
+		var m = com.getMacros();
+		return m != null && context.CommonCache.getCacheSign(m) == signs[1] ? m : null;
+	}
+
+	// the variant restored for a module of the context with this signature
+	public function variantOf(sign:String, path:GlobalTypePath):Null<Variant> {
+		var role = roleOfSign(sign);
+		return role < 0 ? null : chosen[role].get(ModuleCache.key(path));
+	}
+
+	// the variant a module of the build was restored from (null: typed)
+	public function restored(m:ModuleDef):Null<Variant> {
+		var v = variantOf(m.mExtra.mSign, m.mPath);
+		return v != null && v.id == m.mId && (v.mc != null || v.kind == MImport) ? v : null;
+	}
+
+	// a define read in a defines context (Define.readHook)
+	public function read(ctx:core.Define.DefineContext, key:String) {
+		var role = ctx == com.defines ? 0 : -1;
+		if (role < 0) {
+			var m = com.getMacros();
+			if (m != null && ctx == m.defines) role = 1 else return;
+		}
+		@:privateAccess ModuleCache.mutex.acquire();
+		if (skipKey != null && skipKey == key) {
+			skipKey = null;
+		} else if (parsing != null && sys.thread.Thread.current() == @:privateAccess ModuleCache.mainThread) {
+			var l = fileReads.get(parsing);
+			if (l == null) fileReads.set(parsing, l = new Map());
+			l.set(key, true);
+		} else
+			global.set(role + "\x00" + key, true);
+		@:privateAccess ModuleCache.mutex.release();
+	}
+
+	// a role's defines now (the macros': their context's once it exists)
+	function defsNow(role:Int):Null<haxe.ds.StringMap<String>> {
+		if (role == 0) return com.defines.values;
+		var m = com.getMacros();
+		if (m != null && m.defines.values != defs[1]) {
+			if (context.CommonCache.getCacheSign(m) == signs[1]) defs[1] = m.defines.values;
+		}
+		return defs[1];
+	}
+
+	// a define's value in a role now (null: not defined); "*": all of them
+	public function value(role:Int, name:String):Null<String> {
+		var d = defsNow(role);
+		if (d == null) return "?";
+		if (name == "*") {
+			var ks = [for (k in d.keys()) k];
+			ks.sort(Reflect.compare);
+			return haxe.crypto.Md5.encode([for (k in ks) k + "=" + d.get(k)].join("\n"));
+		}
+		return d.get(name);
+	}
+
+	final buildMatch = new haxe.ds.ObjectMap<Array<Read>, Bool>();
+	final buildValues = new haxe.ds.ObjectMap<Array<Read>, String>();
+
+	function readsMatch(l:Array<Read>):Bool {
+		for (r in l)
+			if (value(r.role, r.name) != r.value) return false;
+		return true;
+	}
+
+	public function matches(v:Variant):Bool {
+		if (!readsMatch(v.reads)) return false;
+		var m = buildMatch.get(v.buildReads);
+		if (m == null) buildMatch.set(v.buildReads, m = readsMatch(v.buildReads));
+		return m;
+	}
+
+	function readsValues(l:Array<Read>):String {
+		var b = new StringBuf();
+		for (r in l) {
+			b.add(r.role);
+			b.add(r.name);
+			b.add("=");
+			var x = value(r.role, r.name);
+			b.add(x == null ? "!" : x);
+			b.add("\n");
+		}
+		return b.toString();
+	}
+
+	// (the values of a build's reads, hashed once)
+	function buildValuesOf(l:Array<Read>):String {
+		var h = buildValues.get(l);
+		if (h == null) buildValues.set(l, h = haxe.crypto.Md5.encode(readsValues(l)));
+		return h;
+	}
+
+	public function fileHash(file:String):Null<String> {
+		var h = hashes.get(file);
+		if (h == null) {
+			h = try haxe.crypto.Md5.make(File.getBytes(file)).toHex() catch (_:Dynamic) null;
+			if (h != null) hashes.set(file, h);
+		}
+		return h;
+	}
+
+	// what stands for something not known now (never equal to anything)
+	var unknowns = 0;
+
+	function unknown():String
+		return "?" + (unknowns++);
+
+	// the content hash of a variant's file now ("-": none, "?": missing)
+	function curFileHash(v:Variant):String {
+		var file = v.file;
+		if (file == null || file == "") return "-";
+		var time = Common.fileTime(file);
+		if (time == 0 && !FileSystem.exists(file)) return v.kind == MFake && v.mtime == 0 ? "-" : unknown();
+		var f = v.fileRec;
+		if (f != null && f.mtime == time && f.size == ModuleCache.size(file)) return f.hash;
+		var h = fileHash(file);
+		return h == null ? unknown() : h;
+	}
+
+	// a variant's interface now (its file parsed again where it changed or
+	// its defines differ)
+	function curIface(v:Variant):String {
+		if (v.fileRec != null && v.matched && curFileHash(v) == v.fileRec.hash) return v.iface;
+		var c = comOf(v.role);
+		if (c == null) return unknown();
+		var r = ModuleCache.resolve(c, v.path);
+		if (r == null || core.Path.getFullPath(r.file) != core.Path.getFullPath(v.file)) return unknown();
+		var pk = v.role + "\x00" + core.Path.getFullPath(v.file);
+		if (!decls.exists(pk)) try typing.TypeloadParse.parseHook(c, r, core.Globals.nullPos) catch (_:Dynamic) {}
+		var h = iface(pk);
+		return h == null ? unknown() : h;
+	}
+
+	// what stands for a variant's whole content (with the defines the build
+	// that typed it read: a macro's module runs its code), and for its
+	// interface (its file's declarations as parsed now, or its content and
+	// its own defines for a module typed with macros: not the build's, which
+	// would make the same interface typed in two builds two)
+	public function sFull(v:Variant):String
+		return haxe.crypto.Md5.encode("full\n" + curFileHash(v) + "\n" + readsValues(v.reads) + buildValuesOf(v.buildReads));
+
+	public function sIface(v:Variant):String {
+		if (v.iface == null) return haxe.crypto.Md5.encode("own\n" + curFileHash(v) + "\n" + readsValues(v.reads));
+		return haxe.crypto.Md5.encode("iface\n" + curIface(v));
+	}
+
+	// whether a variant can be restored as it is: its defines and its file's content
+	public function ownClean(v:Variant):Bool
+		return v.matched && (v.fileRec == null ? curFileHash(v) == "-" : curFileHash(v) == v.fileRec.hash);
+
+	public function sccClean(v:Variant):Bool {
+		if (closure == null) closure = new Closure(this, (role, k) -> chosen[role].get(k), "?");
+		return closure.clean(v);
+	}
+
+	// a dependency's hash now (its interface or its content)
+	public function depHash(d:StoredDep):String {
+		if (closure == null) closure = new Closure(this, (role, k) -> chosen[role].get(k), "?");
+		var w = chosen[d.role].get(d.key);
+		return d.eligible ? closure.di(w) : closure.df(w);
+	}
+
+	// a variant's blob read, its chunks given to the server's copy
+	public function load(v:Variant):Bool {
+		if (v.loaded) return true;
+		if (!ModuleStore.loadBlob(dir, v)) return false;
+		if (v.mc != null && v.mc.mcChunks.length == 0)
+			for (c in v.chunks)
+				v.mc.mcChunks.push(c);
+		return true;
+	}
 
 	public function note(file:String)
 		if (!parsed.exists(file)) {
@@ -583,343 +1313,6 @@ class ModuleCacheState {
 		readers = [];
 		for (r in l)
 			CheckingHxbWriter.restore(r.com, r.reader, r.monos);
-	}
-
-	public function new(dir:String, base:String) {
-		this.dir = dir;
-		this.base = base;
-	}
-}
-
-// a pack: one server context's modules
-class ModulePack {
-	public var sign:String;
-	public var moduleHigh:Int;
-	public var varHigh:Int;
-	public var files = new Map<String, StoredFile>();
-	public var modules = new Map<String, StoredModule>();
-
-	function new() {}
-
-	// (the constructors in declaration order, written by index; the
-	// compiler compares them with ==)
-	static final chunkKinds:Array<ChunkKind> = [
-		STR, DOC, MDF, MTF, IMP, CLR, ENR, ABR, TDR, OFR, OFD, OBD, CLD, END, ABD, TDD, EOT, EFR, CFR, CFD, EFD, AFD, EOF, EXD, EOM
-	];
-	static final moduleKinds:Array<ModuleKind> = [MCode, MMacro, MFake, MExtern, MImport];
-	static final policies:Array<ModuleCheckPolicy> = [NoFileSystemCheck, CheckFileModificationTime, CheckFileContentModification];
-	static final diagnosticsKinds:Array<core.Message.MessageKind> = [
-		DKUnusedImport, DKUnresolvedIdentifier, DKCompilerMessage, DKReplacableCode, DKParserError, DKDeprecationWarning, DKInactiveBlock, DKMissingFields
-	];
-	static final origins:Array<ModuleDepOrigin> = [MDepFromTyping, MDepFromImport, MDepFromMacro, MDepFromMacroInclude, MDepFromMacroDefine];
-
-	public static function str(o:BytesOutput, s:String) {
-		var b = Bytes.ofString(s);
-		o.writeInt32(b.length);
-		o.write(b);
-	}
-
-	public static function rstr(i:BytesInput):String {
-		var n = i.readInt32();
-		return i.readString(n);
-	}
-
-	public static function path(o:BytesOutput, p:GlobalTypePath) {
-		o.writeInt32(p.pack.length);
-		for (s in p.pack)
-			str(o, s);
-		str(o, p.name);
-	}
-
-	public static function rpath(i:BytesInput):GlobalTypePath {
-		var pack = [for (_ in 0...i.readInt32()) rstr(i)];
-		return {pack: pack, name: rstr(i)};
-	}
-
-	static function json(o:BytesOutput, j:JsonValue)
-		switch j {
-			case JString(v):
-				o.writeByte(0);
-				str(o, v);
-			case JFloat(v):
-				o.writeByte(1);
-				o.writeDouble(v);
-			case JInt(v):
-				o.writeByte(2);
-				o.writeInt32(v);
-			case JObject(fields):
-				o.writeByte(3);
-				o.writeInt32(fields.length);
-				for (f in fields) {
-					str(o, f.name);
-					json(o, f.value);
-				}
-			case JArray(values):
-				o.writeByte(4);
-				o.writeInt32(values.length);
-				for (v in values)
-					json(o, v);
-			case JBool(v):
-				o.writeByte(v ? 6 : 5);
-			case JNull:
-				o.writeByte(7);
-		}
-
-	static function rjson(i:BytesInput):JsonValue
-		return switch i.readByte() {
-			case 0: JString(rstr(i));
-			case 1: JFloat(i.readDouble());
-			case 2: JInt(i.readInt32());
-			case 3: JObject([
-					for (_ in 0...i.readInt32()) {
-						var name = rstr(i);
-						({name: name, value: rjson(i)} : core.Json.JsonField);
-					}
-				]);
-			case 4: JArray([for (_ in 0...i.readInt32()) rjson(i)]);
-			case 5: JBool(false);
-			case 6: JBool(true);
-			case _: JNull;
-		}
-
-	static function depKey(sign:String, p:GlobalTypePath):String
-		return sign + "\x00" + p.pack.join("/") + "|" + p.name;
-
-	// a module's ModuleDefExtra (what the server's binary cache keeps of it;
-	// mProcessed only as processed or not)
-	public static function writeExtra(x:ModuleDefExtra):Bytes {
-		var o = new BytesOutput();
-		str(o, core.Path.UniqueKey.lazyPath(x.mFile));
-		str(o, x.mSign);
-		o.writeDouble(x.mTime);
-		o.writeByte(x.mKind.getIndex());
-		o.writeByte(x.mProcessed != 0 ? 1 : 0);
-		o.writeByte(x.mCheckPolicy.length);
-		for (p in x.mCheckPolicy)
-			o.writeByte(p.getIndex());
-		var ids = [for (k in x.mDeps.keys()) k];
-		ids.sort((a, b) -> a - b);
-		o.writeInt32(ids.length);
-		for (id in ids) {
-			var d = x.mDeps.get(id);
-			o.writeInt32(id);
-			str(o, d.mdSign);
-			o.writeByte(d.mdKind.getIndex());
-			path(o, d.mdPath);
-			o.writeByte(d.mdOrigin.getIndex());
-		}
-		var objs = x.mCacheBoundObjects;
-		o.writeInt32(objs.length);
-		for (c in objs)
-			switch c {
-				case Resource(name, data):
-					o.writeByte(0);
-					str(o, name);
-					o.writeInt32(data.length);
-					o.write(data);
-				case IncludeFile(file, contents):
-					o.writeByte(1);
-					str(o, file);
-					str(o, contents);
-				case Message(cm):
-					o.writeByte(2);
-					str(o, cm.cmMessage);
-					str(o, cm.cmPos.pfile);
-					o.writeInt32(cm.cmPos.pmin);
-					o.writeInt32(cm.cmPos.pmax);
-					o.writeInt32(cm.cmDepth);
-					o.writeByte(cm.cmFromMacro ? 1 : 0);
-					switch cm.cmMessageKind {
-						case MKError:
-							o.writeByte(0);
-						case MKInfo:
-							o.writeByte(2);
-						case MKWarning(w, options):
-							o.writeByte(1);
-							str(o, w);
-							o.writeInt32(options.length);
-							for (l in options) {
-								o.writeInt32(l.length);
-								for (wo in l) {
-									str(o, wo.woWarning);
-									o.writeByte(wo.woMode.getIndex());
-								}
-							}
-					}
-					o.writeByte(cm.cmDiagnosticsKind.getIndex());
-					json(o, cm.cmJson);
-			}
-		var fs = [for (k in x.mFeatures.keys()) k];
-		fs.sort(Reflect.compare);
-		o.writeInt32(fs.length);
-		for (f in fs) {
-			str(o, f);
-			o.writeByte(x.mFeatures.get(f) ? 1 : 0);
-		}
-		return o.getBytes();
-	}
-
-	public static function readExtra(b:Bytes):ModuleDefExtra {
-		var i = new BytesInput(b);
-		var file = rstr(i);
-		var sign = rstr(i);
-		var time = i.readDouble();
-		var kind = moduleKinds[i.readByte()];
-		// (processed in an earlier compilation: below every compilation step)
-		var processed = i.readByte() == 1 ? -1 : 0;
-		var policy = [for (_ in 0...i.readByte()) policies[i.readByte()]];
-		var x = core.TFunctions.moduleExtra(file, sign, time, kind, 0, policy);
-		x.mProcessed = processed;
-		for (_ in 0...i.readInt32()) {
-			var id = i.readInt32();
-			var dsign = rstr(i);
-			var dkind = moduleKinds[i.readByte()];
-			var dpath = rpath(i);
-			var origin = origins[i.readByte()];
-			x.mDeps.set(id, ({mdSign: dsign, mdKind: dkind, mdPath: dpath, mdOrigin: origin} : ModuleDep));
-		}
-		for (_ in 0...i.readInt32())
-			switch i.readByte() {
-				case 0:
-					var name = rstr(i);
-					var data = i.read(i.readInt32());
-					x.mCacheBoundObjects.push(Resource(name, data));
-				case 1:
-					var f = rstr(i);
-					x.mCacheBoundObjects.push(IncludeFile(f, rstr(i)));
-				case _:
-					var msg = rstr(i);
-					var pfile = rstr(i);
-					var pmin = i.readInt32();
-					var pmax = i.readInt32();
-					var depth = i.readInt32();
-					var fromMacro = i.readByte() == 1;
-					var kind = switch i.readByte() {
-						case 0: MKError;
-						case 2: MKInfo;
-						case _:
-							var w:core.Message.WarningCode = rstr(i);
-							var options = [
-								for (_ in 0...i.readInt32()) [
-									for (_ in 0...i.readInt32()) {
-										var ww:core.Message.WarningCode = rstr(i);
-										({woWarning: ww, woMode: i.readByte() == 0 ? WMEnable : WMDisable} : core.Message.WarningOption);
-									}
-								]
-							];
-							MKWarning(w, options);
-					}
-					var dk = diagnosticsKinds[i.readByte()];
-					x.mCacheBoundObjects.push(Message(({
-						cmMessage: msg,
-						cmPos: {pfile: pfile, pmin: pmin, pmax: pmax},
-						cmDepth: depth,
-						cmFromMacro: fromMacro,
-						cmMessageKind: kind,
-						cmDiagnosticsKind: dk,
-						cmJson: rjson(i)
-					} : core.Message.CompilerMessage)));
-			}
-		for (_ in 0...i.readInt32()) {
-			var f = rstr(i);
-			x.mFeatures.set(f, i.readByte() == 1);
-		}
-		return x;
-	}
-
-	static function extraDeps(b:Bytes):{mtime:Float, processed:Int, deps:Array<String>} {
-		var x = readExtra(b);
-		return {mtime: x.mTime, processed: x.mProcessed, deps: [for (d in x.mDeps) depKey(d.mdSign, d.mdPath)]};
-	}
-
-	public static function write(sign:String, midHigh:Int, varHigh:Int, list:Array<CapturedModule>, keep:Array<StoredModule>, old:Null<ModulePack>):Bytes {
-		var o = new BytesOutput();
-		str(o, ModuleCache.MAGIC);
-		str(o, sign);
-		o.writeInt32(midHigh);
-		o.writeInt32(varHigh);
-		var files = new Map<String, StoredFile>();
-		for (c in list)
-			if (c.file != null) files.set(c.file, c.rec);
-		if (old != null)
-			for (e in keep) {
-				var f = readExtra(e.extra);
-				var file = core.Path.UniqueKey.lazyPath(f.mFile);
-				if (!files.exists(file) && old.files.exists(file)) files.set(file, old.files.get(file));
-			}
-		var names = [for (k in files.keys()) k];
-		names.sort(Reflect.compare);
-		o.writeInt32(names.length);
-		for (n in names) {
-			var f = files.get(n);
-			str(o, n);
-			o.writeDouble(f.mtime);
-			o.writeDouble(f.size);
-			str(o, f.hash);
-		}
-		o.writeInt32(list.length + keep.length);
-		function module(p:GlobalTypePath, id:Int, extra:Bytes, chunks:CachedChunks, monos:Bytes, skeletons:Bytes) {
-			path(o, p);
-			o.writeInt32(id);
-			o.writeInt32(extra.length);
-			o.write(extra);
-			o.writeInt32(chunks.length);
-			for (c in chunks) {
-				o.writeByte(c.kind.getIndex());
-				o.writeInt32(c.data.length);
-				o.write(c.data);
-			}
-			o.writeInt32(monos.length);
-			o.write(monos);
-			o.writeInt32(skeletons.length);
-			o.write(skeletons);
-		}
-		for (c in list)
-			module(c.path, c.id, c.extra, c.chunks, c.monos, c.skeletons);
-		for (e in keep)
-			module(e.path, e.id, e.extra, e.chunks, e.monos, e.skeletons);
-		return o.getBytes();
-	}
-
-	public static function read(file:String):Null<ModulePack> {
-		var b = File.getBytes(file);
-		var i = new BytesInput(b);
-		if (rstr(i) != ModuleCache.MAGIC) return null;
-		var p = new ModulePack();
-		p.sign = rstr(i);
-		p.moduleHigh = i.readInt32();
-		p.varHigh = i.readInt32();
-		for (_ in 0...i.readInt32()) {
-			var n = rstr(i);
-			var mtime = i.readDouble();
-			var size = i.readDouble();
-			p.files.set(n, {mtime: mtime, size: size, hash: rstr(i)});
-		}
-		for (_ in 0...i.readInt32()) {
-			var mp = rpath(i);
-			var id = i.readInt32();
-			var extra = i.read(i.readInt32());
-			var chunks:CachedChunks = [];
-			for (_ in 0...i.readInt32()) {
-				var kind = chunkKinds[i.readByte()];
-				chunks.push({kind: kind, data: i.read(i.readInt32())});
-			}
-			var monos = i.read(i.readInt32());
-			var skeletons = i.read(i.readInt32());
-			var x = extraDeps(extra);
-			p.modules.set(mp.pack.join("/") + "|" + mp.name, {
-				path: mp,
-				id: id,
-				mtime: x.mtime,
-				processed: x.processed,
-				extra: extra,
-				chunks: chunks,
-				monos: monos,
-				skeletons: skeletons,
-				deps: x.deps
-			});
-		}
-		return p;
 	}
 }
 
@@ -1066,15 +1459,12 @@ class Skeletons {
 	static function moduleKey(sign:String, p:GlobalTypePath):String
 		return sign + "\x00" + ModuleCache.key(p);
 
-	static function restoredEntry(s:ModuleCacheState, m:ModuleDef):Null<StoredModule> {
-		var p = s.packs.get(m.mExtra.mSign);
-		var e = p == null ? null : p.modules.get(ModuleCache.key(m.mPath));
-		return e != null && e.id == m.mId ? e : null;
-	}
+	static function restoredEntry(s:ModuleCacheState, m:ModuleDef):Null<ModuleStore.Variant>
+		return s.restored(m);
 
 	static function typeRef(o:BytesOutput, m:ModuleDef, name:String) {
-		ModulePack.path(o, m.mPath);
-		ModulePack.str(o, name);
+		ModuleStore.path(o, m.mPath);
+		ModuleStore.str(o, name);
 	}
 
 	static function record(e:TExpr):Bytes {
@@ -1099,7 +1489,7 @@ class Skeletons {
 					rec(e1);
 					o.writeByte(2);
 					typeRef(o, c.clModule, c.clPath.name);
-					ModulePack.str(o, cf.cfName);
+					ModuleStore.str(o, cf.cfName);
 				case _:
 					core.Texpr.iter(rec, e);
 			}
@@ -1146,7 +1536,10 @@ class Skeletons {
 		if (com != null) computeAll(com);
 		var entry = restoredEntry(s, c.clModule);
 		if (entry == null) return e;
-		if (entry.skeletonMap == null) entry.skeletonMap = decode(entry.skeletons);
+		if (entry.skeletonMap == null) {
+			if (entry.skeletons == null) return e;
+			entry.skeletonMap = decode(entry.skeletons);
+		}
 		var b = entry.skeletonMap.get(c.clPath.name + "\x00" + (cf == null ? "" : cf == c.clConstructor ? "new" : cf.cfName));
 		var r = b == null || com == null ? null : play(com, b);
 		if (r == null) {
@@ -1157,8 +1550,8 @@ class Skeletons {
 	}
 
 	static function findType(com:CommonContext, i:BytesInput):Null<ModuleType> {
-		var mp = ModulePack.rpath(i);
-		var name = ModulePack.rstr(i);
+		var mp = ModuleStore.rpath(i);
+		var name = ModuleStore.rstr(i);
 		var m = com.moduleLut.findOpt(mp);
 		if (m == null) return null;
 		for (t in m.mTypes)
@@ -1187,7 +1580,7 @@ class Skeletons {
 					}
 				case _:
 					var mt = findType(com, i);
-					var f = ModulePack.rstr(i);
+					var f = ModuleStore.rstr(i);
 					switch mt {
 						case TClassDecl(c) if (c.clStatics.exists(f)):
 							nodes.push(mk(TField(mk(TConst(TNull)), FStatic(c, c.clStatics.get(f)))));
@@ -1205,7 +1598,7 @@ class Skeletons {
 		keys.sort(Reflect.compare);
 		o.writeInt32(keys.length);
 		for (k in keys) {
-			ModulePack.str(o, k);
+			ModuleStore.str(o, k);
 			var b = map.get(k);
 			o.writeInt32(b.length);
 			o.write(b);
@@ -1217,7 +1610,7 @@ class Skeletons {
 		var i = new BytesInput(b);
 		var m = new Map<String, Bytes>();
 		for (_ in 0...i.readInt32()) {
-			var k = ModulePack.rstr(i);
+			var k = ModuleStore.rstr(i);
 			m.set(k, i.read(i.readInt32()));
 		}
 		return m;

@@ -108,7 +108,7 @@ class CacheDir {
 	// MAX_UNUSED, then the least recently used ones beyond MAX_SIZE, at most
 	// once every TRIM_INTERVAL (two builds trimming at once remove the same
 	// ones)
-	public static function trim(dir:String, mine:String) {
+	public static function trim(dir:String, mine:String, ?sweep:String->Void) {
 		var t = now();
 		var last = try Std.parseFloat(File.getContent(dir + "trim.txt")) catch (_:Dynamic) Math.NaN;
 		if (last <= t && t - last < TRIM_INTERVAL) return;
@@ -124,6 +124,7 @@ class CacheDir {
 			var names = try FileSystem.readDirectory(d) catch (_:Dynamic) [];
 			if (d == mine) {
 				for (f in names) {
+					if (FileSystem.isDirectory(d + f)) continue;
 					var sz = size(d + f);
 					total += sz;
 					// (the leftovers of runs that did not finish)
@@ -142,14 +143,19 @@ class CacheDir {
 				}
 				continue;
 			}
+			var files = [];
+			function walk(p:String)
+				for (f in try FileSystem.readDirectory(p) catch (_:Dynamic) [])
+					if (FileSystem.isDirectory(p + f)) walk(p + f + "/") else files.push(p + f);
+			walk(d);
 			var sz = 0.0;
-			for (f in names)
-				sz += size(d + f);
+			for (f in files)
+				sz += size(f);
 			total += sz;
 			// (`used` last: a removal that fails keeps its date)
-			names.sort((a, b) -> (a == "used" ? 1 : 0) - (b == "used" ? 1 : 0));
+			files.sort((a, b) -> (a == d + "used" ? 1 : 0) - (b == d + "used" ? 1 : 0));
 			entries.push({
-				files: [for (f in names) d + f],
+				files: files,
 				dir: d,
 				used: FileSystem.exists(d + "used") ? mtime(d + "used") : mtime(d),
 				size: sz
@@ -161,8 +167,17 @@ class CacheDir {
 				total -= e.size;
 				for (f in e.files)
 					try FileSystem.deleteFile(f) catch (_:Dynamic) {}
-				if (e.dir != null) try FileSystem.deleteDirectory(e.dir) catch (_:Dynamic) {}
+				if (e.dir != null) rmdirs(e.dir);
 			}
+		// (what the entries of mine that remain no longer name)
+		if (sweep != null) try sweep(mine) catch (_:Dynamic) {}
+	}
+
+	// the empty directories of a tree removed, then the tree's root
+	static function rmdirs(d:String) {
+		for (f in try FileSystem.readDirectory(d) catch (_:Dynamic) [])
+			if (FileSystem.isDirectory(d + f)) rmdirs(d + f + "/");
+		try FileSystem.deleteDirectory(d) catch (_:Dynamic) {}
 	}
 
 	// the last use of a file of the cache (its <file>.used), refreshed at
