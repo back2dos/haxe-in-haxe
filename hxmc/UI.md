@@ -308,14 +308,21 @@ Since the design above (October 2026), in this order:
   by our flexbox, placed absolutely (section 6's plan), a `NativeBackend`
   interface and its GTK 3 and DOM implementations (GtkFixed and Pango;
   absolutely placed elements in a container), driven by the same markup
-  and signals: one example runs on both.
+  and signals: one example runs on both; then Win32's common controls
+  and AppKit's (`NSButton`, `NSTextField`, `NSSlider`...), each driven by
+  the same test through `NativeDriver`.
+- Text input: X11's input method (layouts, dead keys, compose sequences),
+  and input methods' compositions shown in the text fields, underlined,
+  until committed: in the browser through a transparent textarea at the
+  caret, on macOS through a text view at the caret (`NSTextInputClient`),
+  on Windows with the IME's windows placed at the caret.
 
 Where this departs from section 6:
 
 - **The drawn backend came first**, ahead of native controls: markup with
   a Solid-like framework on drawn components was the goal, and it needs no
-  per-platform widget code. The native backend followed on GTK 3 and the
-  DOM; Win32 and AppKit are its next backends.
+  per-platform widget code. The native backend followed on GTK 3, the
+  DOM, Win32 and AppKit.
 - **Text starts with a built-in rasterizer** rather than the platforms'
   shapers: the same pixels on every machine and target (golden images in
   CI, the browser without font files). Its limits are the shapers' reasons
@@ -325,9 +332,9 @@ Where this departs from section 6:
   shrink below their content, so text is not squashed (a container that
   must shrink sets `minHeight: 0`, as in CSS).
 - **Not yet**: the native accessibility adapters (UI Automation,
-  NSAccessibility, AT-SPI: the tree and its updates are ready), IME composition
-  (characters arrive, preedit text does not), JPEG and other image formats,
-  native controls; on X11 a clipboard over about 256 KB (sent in parts,
+  NSAccessibility, AT-SPI: the tree and its updates are ready), Windows'
+  compositions drawn in the field (its IME draws its own), JPEG and other
+  image formats; on X11 a clipboard over about 256 KB (sent in parts,
   INCR) is not read.
 
 ## Sources
