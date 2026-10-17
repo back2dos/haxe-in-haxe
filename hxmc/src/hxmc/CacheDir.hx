@@ -198,6 +198,33 @@ class CacheDir {
 
 	// a name for temporary files (builds may write the same file at the same
 	// time, and rand() is the same sequence in every process)
+	// a 64-bit hash of bytes (two 32-bit lanes, four bytes a step), as 16
+	// hex digits: the store's content hashes (files, blobs), much cheaper
+	// than MD5 in the tool's code
+	public static function hashBytes(b:haxe.io.Bytes):String {
+		var h1 = 0x811c9dc5, h2 = 0x2545f491;
+		var n = b.length, i = 0;
+		while (i + 4 <= n) {
+			var w = b.getInt32(i);
+			h1 = (h1 ^ w) * 0x01000193;
+			h1 ^= h1 >>> 15;
+			h2 = (h2 ^ w) * 0x5bd1e995;
+			h2 ^= h2 >>> 13;
+			i += 4;
+		}
+		while (i < n) {
+			var c = b.get(i++);
+			h1 = (h1 ^ c) * 0x01000193;
+			h2 = (h2 ^ c) * 0x5bd1e995;
+		}
+		h1 ^= n;
+		h1 = (h1 ^ (h1 >>> 16)) * 0x85ebca6b;
+		h2 = (h2 ^ (h2 >>> 13)) * 0xc2b2ae35;
+		h1 ^= h1 >>> 16;
+		h2 ^= h2 >>> 16;
+		return StringTools.hex(h1 ^ (h2 >>> 7), 8) + StringTools.hex(h2 ^ (h1 >>> 11), 8);
+	}
+
 	public static function nonce():String
 		return Fingerprint.hash(Sys.args().join("\x00") + "|" + Sys.time() + "|" + haxe.Timer.stamp() + "|" + Sys.programPath()).substr(0, 16);
 }

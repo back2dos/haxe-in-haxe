@@ -436,14 +436,20 @@ class ModuleCache {
 					throw e;
 				}
 				if (main) s.parsing = prev;
-				// (its interface hashed when needed: the build's in parallel when it
-				// writes the store)
-				if (!s.decls.exists(pk)) {
-					mutex.acquire();
-					s.decls.set(pk, switch r {
-						case ParseSuccess(data, _): data.declarations;
+				// (its interface hashed now: the declarations are not kept, a
+				// large part of the build's memory until the store is written)
+				mutex.acquire();
+				var known = s.ifaces.exists(pk);
+				mutex.release();
+				if (!known) {
+					var t0 = haxe.Timer.stamp();
+					var h = switch r {
+						case ParseSuccess(data, _): try ModuleInterface.hash(data.declarations) catch (_:Dynamic) null;
 						case _: null;
-					});
+					};
+					mutex.acquire();
+					s.ifaces.set(pk, h);
+					s.ifaceTime += haxe.Timer.stamp() - t0;
 					mutex.release();
 				}
 				return r;
@@ -735,6 +741,21 @@ class ModuleCache {
 		return null;
 	}
 
+	// the compiler's pool, also under -D disable-parallelism (the capture
+	// only reads the typed program; each module's encoding is its own)
+	static function parallel<A>(com:CommonContext, f:Null<core.ds.TaskPool>->A):A {
+		var was = context.Parallel.enable;
+		context.Parallel.enable = true;
+		return try {
+			var r = context.Parallel.runWithPool(com.sctx.pool, f);
+			context.Parallel.enable = was;
+			r;
+		} catch (e:Dynamic) {
+			context.Parallel.enable = was;
+			throw e;
+		}
+	}
+
 	// after the state is saved (before DCE and generation change the typed
 	// program): the modules of the build as the server would cache them
 	static function capture(com:CommonContext) {
@@ -910,6 +931,7 @@ class ModuleCache {
 				// restored and not processed again: the stored blob
 				if (old != null && x.mProcessed == old.processed) {
 					v.blob = old.blob;
+					v.blobOff = old.blobOff;
 					v.blobSize = old.blobSize;
 					continue;
 				}
@@ -917,7 +939,7 @@ class ModuleCache {
 				v.prev = old;
 				var skeletons = old != null && old.skeletons != null ? old.skeletons : Skeletons.encode(s, x.mSign, m.mPath);
 				if (x.mKind == MImport) {
-					v.blobBytes = ModuleStore.encodeBlob([], noMonos, skeletons);
+					v.blobData = {chunks: [], monos: noMonos, skeletons: skeletons};
 					continue;
 				}
 				if (s.log && old != null) Sys.println("hxmc: module cache: " + core.Globals.sTypePath(m.mPath) + " encoded again (processed " + x.mProcessed + ")");
@@ -934,46 +956,35 @@ class ModuleCache {
 				});
 			}
 		}
-		// the fresh modules' interfaces (v.iface held their file's key), hashed in parallel
-		var t1 = haxe.Timer.stamp();
-		var pks = [];
-		for (v in all)
-			if (v.ifacePk != null && !s.ifaces.exists(v.ifacePk) && pks.indexOf(v.ifacePk) < 0) pks.push(v.ifacePk);
-		var hashed = context.Parallel.runWithPool(com.sctx.pool, function(pool) {
-			return context.Parallel.ParallelArray.map(pool, function(pk:String) {
-				var d = s.decls.get(pk);
-				return d == null ? null : try ModuleInterface.hash(d) catch (_:Dynamic) null;
-			}, pks, null);
-		});
-		for (i in 0...pks.length)
-			s.ifaces.set(pks[i], hashed[i]);
-		s.ifaceTime += haxe.Timer.stamp() - t1;
+		// the fresh modules' interfaces (hashed as their files were parsed)
 		for (v in all)
 			if (v.ifacePk != null) v.iface = s.ifaces.get(v.ifacePk);
 		var none:{v:Variant, r:{chunks:CachedChunks, monos:Bytes}} = {v: null, r: null};
-		var done = context.Parallel.runWithPool(com.sctx.pool, function(pool) {
+		var done = parallel(com, function(pool) {
 			return context.Parallel.ParallelArray.map(pool, function(j:{v:Variant, f:Void->{chunks:CachedChunks, monos:Bytes}}) return {v: j.v, r: j.f()}, jobs,
 				none);
 		});
 		for (d in done) {
-			d.v.blobBytes = ModuleStore.encodeBlob(d.r.chunks, d.r.monos, d.v.skeletons);
+			d.v.blobData = {chunks: d.r.chunks, monos: d.r.monos, skeletons: d.v.skeletons};
 			// (a restored module processed again, the same as stored: its blob)
 			var o = d.v.prev;
-			if (o != null && o.loaded && d.v.blobBytes.length == o.blobSize
-				&& ModuleStore.encodeBlob(o.chunks, o.monos, o.skeletons).compare(d.v.blobBytes) == 0) {
+			if (o != null && o.loaded && ModuleStore.blobLength(d.v.blobData) == o.blobSize
+				&& ModuleStore.sameBlob({chunks: o.chunks, monos: o.monos, skeletons: o.skeletons}, d.v.blobData)) {
 				d.v.blob = o.blob;
+				d.v.blobOff = o.blobOff;
 				d.v.blobSize = o.blobSize;
-				d.v.blobBytes = null;
+				d.v.blobData = null;
 				d.v.fresh = false;
 				s.written--;
 			}
 		}
-		// (each new blob named uniquely: this build's nonce and a counter)
-		var nonce = CacheDir.nonce(), count = 0;
+		// (the new blobs: in this build's pack, named by a nonce, their
+		// offsets set as it is written)
+		var nonce = CacheDir.nonce();
 		for (v in all)
-			if (v.blobBytes != null) {
-				v.blob = nonce + "-" + (count++);
-				v.blobSize = v.blobBytes.length;
+			if (v.blobData != null) {
+				v.blob = nonce;
+				v.blobSize = ModuleStore.blobLength(v.blobData);
 			}
 		// (the modules of the store this build did not load, as they are)
 		for (role in 0...2)
@@ -1004,6 +1015,23 @@ class ModuleCache {
 			}
 		s.kept = kept;
 		s.written += jobs.length;
+		// the new blobs written in this build's pack beside the rest of the
+		// build (finish waits for it before the index names them), their bytes
+		// let go once written
+		var fresh = [for (v in kept) if (v.blobData != null) v];
+		s.packBlobs = fresh.length;
+		if (fresh.length > 0) {
+			var lock = new sys.thread.Lock();
+			s.packLock = lock;
+			var dir = s.dir;
+			sys.thread.Thread.create(function() {
+				var ok = try ModuleStore.savePack(dir, nonce, fresh) catch (_:Dynamic) false;
+				for (v in fresh)
+					v.blobData = null;
+				s.packOk = ok;
+				lock.release();
+			});
+		}
 		s.captureTime = haxe.Timer.stamp() - t0;
 	}
 
@@ -1046,6 +1074,8 @@ class ModuleCache {
 		typing.Finalization.sortExprHook = null;
 		if (s == null) return;
 		var t0 = haxe.Timer.stamp();
+		ModuleStore.closePacks();
+		if (s.packLock != null) s.packLock.wait();
 		var blobs = 0;
 		var wrote = false;
 		if (code == 0 && s.volatileReason == null && s.kept != null && s.kept.length > 0) {
@@ -1075,12 +1105,8 @@ class ModuleCache {
 						break;
 					}
 			if (changed) {
-				var ok = true;
-				for (v in list)
-					if (v.blobBytes != null) {
-						if (!ModuleStore.saveBlob(s.dir, v.blob, v.blobBytes)) ok = false;
-						blobs++;
-					}
+				var ok = s.packOk;
+				blobs = s.packBlobs;
 				var ix = new StoreIndex();
 				ix.moduleHigh = @:privateAccess core.TFunctions.moduleUid.load();
 				ix.varHigh = @:privateAccess core.TFunctions.varUid.load();
@@ -1214,8 +1240,8 @@ class Closure {
 			f.add("\n;");
 			i.add("\n;");
 		}
-		var dfh = haxe.crypto.Md5.encode("F" + f.toString());
-		var dih = ineligibleInside ? dfh : haxe.crypto.Md5.encode("I" + i.toString());
+		var dfh = Fingerprint.hash("F" + f.toString());
+		var dih = ineligibleInside ? dfh : Fingerprint.hash("I" + i.toString());
 		// (and each member's dependencies as they were when it was typed: a
 		// member typed again for its dependencies makes the cycle typed again)
 		if (clean)
@@ -1264,17 +1290,11 @@ class ModuleCacheState {
 	public var skipKey:Null<String> = null;
 	// per role and file, its interface as parsed (ModuleInterface; null: none)
 	public var ifaces = new Map<String, Null<String>>();
-	// per role and file, its declarations as parsed (null: a parse error)
-	public var decls = new Map<String, Null<Array<core.Ast.TypeDecl>>>();
-
 	// a file's interface as parsed in this build (null: not parsed, or none)
 	public function iface(pk:String):Null<String> {
-		if (ifaces.exists(pk)) return ifaces.get(pk);
-		var d = decls.get(pk);
-		var t0 = haxe.Timer.stamp();
-		var h = d == null ? null : try ModuleInterface.hash(d) catch (_:Dynamic) null;
-		ifaceTime += haxe.Timer.stamp() - t0;
-		ifaces.set(pk, h);
+		@:privateAccess ModuleCache.mutex.acquire();
+		var h = ifaces.get(pk);
+		@:privateAccess ModuleCache.mutex.release();
 		return h;
 	}
 	// per module (signature and path), what the sort of the types walks of
@@ -1295,6 +1315,10 @@ class ModuleCacheState {
 	public var checkTime = 0.0;
 	public var ifaceTime = 0.0;
 	public var captureTime = 0.0;
+	// the pack of the build's new blobs, written beside the rest of the build
+	public var packLock:Null<sys.thread.Lock> = null;
+	public var packOk = true;
+	public var packBlobs = 0;
 
 	// the files parsed, as the parser read them (their date, size and
 	// content hash)
@@ -1471,6 +1495,10 @@ class ModuleCacheState {
 	}
 
 	// a define read in a defines context (Define.readHook)
+	// (the build's reads per role, as global has them: a define read again
+	// costs a lookup)
+	final seen = [new Map<String, Bool>(), new Map<String, Bool>()];
+
 	public function read(ctx:core.Define.DefineContext, key:String) {
 		var role = ctx == com.defines ? 0 : -1;
 		if (role < 0) {
@@ -1484,8 +1512,10 @@ class ModuleCacheState {
 			var l = fileReads.get(parsing);
 			if (l == null) fileReads.set(parsing, l = new Map());
 			l.set(key, true);
-		} else
+		} else if (!seen[role].exists(key)) {
+			seen[role].set(key, true);
 			global.set(role + "\x00" + key, true);
+		}
 		@:privateAccess ModuleCache.mutex.release();
 	}
 
@@ -1506,7 +1536,7 @@ class ModuleCacheState {
 		if (name == "*") {
 			var ks = [for (k in d.keys()) k];
 			ks.sort(Reflect.compare);
-			return haxe.crypto.Md5.encode([for (k in ks) k + "=" + d.get(k)].join("\n"));
+			return Fingerprint.hash([for (k in ks) k + "=" + d.get(k)].join("\n"));
 		}
 		return d.get(name);
 	}
@@ -1543,14 +1573,14 @@ class ModuleCacheState {
 	// (the values of a build's reads, hashed once)
 	function buildValuesOf(l:Array<Read>):String {
 		var h = buildValues.get(l);
-		if (h == null) buildValues.set(l, h = haxe.crypto.Md5.encode(readsValues(l)));
+		if (h == null) buildValues.set(l, h = Fingerprint.hash(readsValues(l)));
 		return h;
 	}
 
 	public function fileHash(file:String):Null<String> {
 		var h = hashes.get(file);
 		if (h == null) {
-			h = try haxe.crypto.Md5.make(File.getBytes(file)).toHex() catch (_:Dynamic) null;
+			h = try CacheDir.hashBytes(File.getBytes(file)) catch (_:Dynamic) null;
 			if (h != null) hashes.set(file, h);
 		}
 		return h;
@@ -1583,7 +1613,10 @@ class ModuleCacheState {
 		var r = ModuleCache.resolve(c, v.path);
 		if (r == null || core.Path.getFullPath(r.file) != core.Path.getFullPath(v.file)) return unknown();
 		var pk = v.role + "\x00" + core.Path.getFullPath(v.file);
-		if (!decls.exists(pk)) try typing.TypeloadParse.parseHook(c, r, core.Globals.nullPos) catch (_:Dynamic) {}
+		@:privateAccess ModuleCache.mutex.acquire();
+		var known = ifaces.exists(pk);
+		@:privateAccess ModuleCache.mutex.release();
+		if (!known) try typing.TypeloadParse.parseHook(c, r, core.Globals.nullPos) catch (_:Dynamic) {}
 		var h = iface(pk);
 		return h == null ? unknown() : h;
 	}
@@ -1594,11 +1627,11 @@ class ModuleCacheState {
 	// its own defines for a module typed with macros: not the build's, which
 	// would make the same interface typed in two builds two)
 	public function sFull(v:Variant):String
-		return haxe.crypto.Md5.encode("full\n" + curFileHash(v) + "\n" + readsValues(v.reads) + buildValuesOf(v.buildReads));
+		return Fingerprint.hash("full\n" + curFileHash(v) + "\n" + readsValues(v.reads) + buildValuesOf(v.buildReads));
 
 	public function sIface(v:Variant):String {
-		if (v.iface == null) return haxe.crypto.Md5.encode("own\n" + curFileHash(v) + "\n" + readsValues(v.reads));
-		return haxe.crypto.Md5.encode("iface\n" + curIface(v));
+		if (v.iface == null) return Fingerprint.hash("own\n" + curFileHash(v) + "\n" + readsValues(v.reads));
+		return Fingerprint.hash("iface\n" + curIface(v));
 	}
 
 	// whether a variant can be restored as it is: its defines and its file's content
@@ -1640,7 +1673,7 @@ class ModuleCacheState {
 		var st = try FileSystem.stat(file) catch (_:Dynamic) return null;
 		var b = try File.getBytes(file) catch (_:Dynamic) return null;
 		var mtime = st.mtime.getTime() / 1000.0;
-		return {mtime: CacheDir.now() - mtime < RACY ? -1 : mtime, size: b.length, hash: haxe.crypto.Md5.make(b).toHex()};
+		return {mtime: CacheDir.now() - mtime < RACY ? -1 : mtime, size: b.length, hash: CacheDir.hashBytes(b)};
 	}
 
 	static inline var RACY = 3.0;
@@ -1856,14 +1889,31 @@ class Skeletons {
 		var key = "com:" + context.CommonCache.getCacheSign(com);
 		if (s.walked.exists(key)) return;
 		s.walked.set(key, true);
+		// (the walks recorded in parallel: each reads its own expression)
+		var work:Array<{map:Map<String, Bytes>, name:String, e:TExpr}> = [];
 		com.moduleLut.iter(function(_, m) {
 			if (restoredEntry(s, m) != null) return;
 			for (t in m.mTypes)
 				switch t {
-					case TClassDecl(c): computeClass(s, c);
+					case TClassDecl(c):
+						var mk = moduleKey(c.clModule.mExtra.mSign, c.clModule.mPath);
+						var ck = mk + "\x00" + c.clPath.name;
+						if (s.walked.exists(ck)) continue;
+						s.walked.set(ck, true);
+						var map = s.skeletons.get(mk);
+						if (map == null) s.skeletons.set(mk, map = new Map());
+						var init = core.TOther.TClassTools.getClInit(c);
+						if (init != null) work.push({map: map, name: c.clPath.name + "\x00", e: init});
+						for (cf in c.clStatics)
+							if (cf.cfExpr != null) work.push({map: map, name: c.clPath.name + "\x00" + cf.cfName, e: cf.cfExpr});
+						if (c.clConstructor != null && c.clConstructor.cfExpr != null)
+							work.push({map: map, name: c.clPath.name + "\x00new", e: c.clConstructor.cfExpr});
 					case _:
 				}
 		});
+		var recorded = @:privateAccess ModuleCache.parallel(com, pool -> context.Parallel.ParallelArray.map(pool, w -> record(w.e), work, null));
+		for (i in 0...work.length)
+			work[i].map.set(work[i].name, recorded[i]);
 	}
 
 	// Finalization.sortExprHook
@@ -1954,3 +2004,4 @@ class Skeletons {
 		return m;
 	}
 }
+

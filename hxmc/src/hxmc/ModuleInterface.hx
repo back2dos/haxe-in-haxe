@@ -21,22 +21,6 @@ class ModuleInterface {
 
 	function new() {}
 
-	// (a class's fields, once per class: the same order for every instance)
-	static final classFields = new Map<String, Array<String>>();
-	static final classFieldsMutex = new sys.thread.Mutex();
-
-	static function fieldsOf(c:Class<Dynamic>):Array<String> {
-		var n = Type.getClassName(c);
-		classFieldsMutex.acquire();
-		var l = classFields.get(n);
-		if (l == null) {
-			l = Type.getInstanceFields(c);
-			classFields.set(n, l);
-		}
-		classFieldsMutex.release();
-		return l;
-	}
-
 	public static function hash(decls:Array<TypeDecl>):String {
 		var w = new ModuleInterface();
 		for (d in decls)
@@ -59,14 +43,41 @@ class ModuleInterface {
 			case EClass(c):
 				b.add("C");
 				typeHead(c.name, c.params, c.meta);
-				value(c.flags);
+				b.add("[");
+				for (f in c.flags)
+					switch f {
+						case HExtends(p):
+							b.add("x");
+							placedTypePath(p);
+						case HImplements(p):
+							b.add("m");
+							placedTypePath(p);
+						case _:
+							index(f);
+					}
+				b.add("]");
 				var strip = !hasMeta(c.meta, BUILD);
 				for (f in c.data)
 					field(f.cffName.name, [for (a in f.cffAccess) a.access], f.cffMeta, f.cffKind, strip);
 			case EAbstract(a):
 				b.add("A");
 				typeHead(a.name, a.params, a.meta);
-				value(a.flags);
+				b.add("[");
+				for (f in a.flags)
+					switch f {
+						case AbFrom(t):
+							b.add("f");
+							typeHint(t);
+						case AbTo(t):
+							b.add("t");
+							typeHint(t);
+						case AbOver(t):
+							b.add("o");
+							typeHint(t);
+						case _:
+							index(f);
+					}
+				b.add("]");
 				var strip = !hasMeta(a.meta, BUILD);
 				for (f in a.data)
 					field(f.cffName.name, [for (x in f.cffAccess) x.access], f.cffMeta, f.cffKind, strip);
@@ -74,48 +85,94 @@ class ModuleInterface {
 				b.add("S");
 				typeHead(s.name, s.params, s.meta);
 				field(s.name.name, [for (x in s.flags) x.access], s.meta, s.data, true);
-			case _:
+			case EEnum(e):
 				// (enums, typedefs, imports, usings: all of it)
-				b.add("D");
-				value(d.definition);
+				b.add("E");
+				placedName(e.name);
+				typeParams(e.params);
+				metadata(e.meta);
+				b.add("[");
+				for (f in e.flags)
+					index(f);
+				b.add("]");
+				for (c in e.data) {
+					b.add("\n|");
+					placedName(c.ecName);
+					metadata(c.ecMeta);
+					b.add("(");
+					for (a in c.ecArgs) {
+						str(a.name);
+						bool(a.optional);
+						typeHint(a.type);
+					}
+					b.add(")");
+					pos(c.ecPos);
+					typeParams(c.ecParams);
+					typeHint(c.ecType);
+				}
+			case ETypedef(t):
+				b.add("T");
+				placedName(t.name);
+				typeParams(t.params);
+				metadata(t.meta);
+				b.add("[");
+				for (f in t.flags)
+					index(f);
+				b.add("]");
+				typeHint(t.data);
+			case EImport(i):
+				b.add("I");
+				placedNames(i.path);
+				switch i.mode {
+					case INormal:
+						b.add("n");
+					case IAsName(n):
+						b.add("a");
+						placedName(n);
+					case IAll:
+						b.add("*");
+				}
+			case EUsing(path):
+				b.add("U");
+				placedNames(path);
 		}
 		b.add(";\n");
 	}
 
 	function typeHead(name:PlacedName, params:Array<TypeParam>, meta:Metadata) {
 		b.add(name.name);
-		value(params);
-		value(meta);
+		typeParams(params);
+		metadata(meta);
 	}
 
 	function field(name:String, access:Array<Access>, meta:Metadata, kind:ClassFieldKind, strip:Bool) {
 		b.add("\n.");
 		b.add(name);
-		value(access);
-		value(meta);
+		accesses(access);
+		metadata(meta);
 		switch kind {
 			case FFun(f) if (f.fExpr != null && strip && strippable(name, access, meta, f)):
 				b.add("F");
-				value(f.fParams);
-				value(f.fArgs);
-				value(f.fType);
+				typeParams(f.fParams);
+				funcArgs(f.fArgs);
+				typeHint(f.fType);
 				b.add("{}");
 			case FFun(f):
 				b.add("F");
-				value(f.fParams);
-				value(f.fArgs);
-				value(f.fType);
-				expr(f.fExpr);
+				typeParams(f.fParams);
+				funcArgs(f.fArgs);
+				typeHint(f.fType);
+				kept(f.fExpr);
 			case FVar(t, e):
 				b.add("V");
-				value(t);
-				expr(e);
+				typeHint(t);
+				kept(e);
 			case FProp(get, set, t, e):
 				b.add("P");
-				value(get);
-				value(set);
-				value(t);
-				expr(e);
+				placedName(get);
+				placedName(set);
+				typeHint(t);
+				kept(e);
 		}
 	}
 
@@ -129,72 +186,390 @@ class ModuleInterface {
 	}
 
 	// an expression it keeps: with its positions
-	function expr(e:Null<Expr>) {
+	function kept(e:Null<Expr>) {
 		var k = keepPos;
 		keepPos = true;
-		value(e);
+		expr(e);
 		keepPos = k;
 	}
 
-	// a value of the syntax tree (enums, structures, arrays, strings and
-	// numbers), positions only where they are kept, no documentation
-	function value(v:Dynamic) {
-		switch Type.typeof(v) {
-			case TNull:
-				b.add("n");
-			case TEnum(_):
-				b.add("e");
-				b.add(Type.enumConstructor(v));
+	// the syntax tree, positions only where they are kept, no documentation
+
+	inline function index(e:EnumValue) {
+		b.add("e");
+		b.add(e.getIndex());
+	}
+
+	inline function bool(x:Bool)
+		b.add(x ? "t" : "f");
+
+	function str(s:String) {
+		b.add("s");
+		b.add(s.length);
+		b.add(":");
+		b.add(s);
+	}
+
+	function optStr(s:Null<String>)
+		if (s == null) b.add("n") else str(s);
+
+	function pos(p:core.Globals.Pos)
+		if (keepPos) {
+			b.add("@");
+			b.add(p.pmin);
+			b.add("-");
+			b.add(p.pmax);
+		}
+
+	function placedName(n:PlacedName) {
+		str(n.name);
+		pos(n.pos);
+	}
+
+	function placedNames(l:Array<PlacedName>) {
+		b.add("[");
+		for (n in l)
+			placedName(n);
+		b.add("]");
+	}
+
+	function accesses(l:Array<Access>) {
+		b.add("[");
+		for (a in l)
+			index(a);
+		b.add("]");
+	}
+
+	function placedAccesses(l:Array<PlacedAccess>) {
+		b.add("[");
+		for (a in l) {
+			index(a.access);
+			pos(a.pos);
+		}
+		b.add("]");
+	}
+
+	function metadata(ml:Metadata) {
+		b.add("[");
+		for (m in ml) {
+			b.add("#");
+			switch (m.meta : core.MetaList.StrictMeta) {
+				case Custom(s):
+					str(s);
+				case x:
+					index(x);
+			}
+			exprs(m.exprs);
+			pos(m.pos);
+		}
+		b.add("]");
+	}
+
+	function typePath(t:TypePath) {
+		b.add("[");
+		for (p in t.tpackage)
+			str(p);
+		b.add("]");
+		str(t.tname);
+		b.add("<");
+		for (p in t.tparams)
+			switch p {
+				case TPType(t):
+					b.add("t");
+					typeHint(t);
+				case TPExpr(e):
+					b.add("x");
+					expr(e);
+			}
+		b.add(">");
+		optStr(t.tsub);
+	}
+
+	function placedTypePath(p:PlacedTypePath) {
+		typePath(p.path);
+		pos(p.posFull);
+		pos(p.posPath);
+	}
+
+	function typeHint(t:Null<TypeHint>) {
+		if (t == null) {
+			b.add("n");
+			return;
+		}
+		complexType(t.type);
+		pos(t.pos);
+	}
+
+	function typeHints(l:Array<TypeHint>) {
+		b.add("[");
+		for (t in l)
+			typeHint(t);
+		b.add("]");
+	}
+
+	function complexType(ct:ComplexType) {
+		switch ct {
+			case CTPath(p):
+				b.add("P");
+				placedTypePath(p);
+			case CTFunction(args, ret):
+				b.add("F");
+				typeHints(args);
+				typeHint(ret);
+			case CTAnonymous(fields):
+				b.add("A");
+				classFields(fields);
+			case CTParent(t):
 				b.add("(");
-				for (x in Type.enumParameters(v))
-					value(x);
-				b.add(")");
-			case TClass(c) if (c == std.String):
-				var s:String = v;
-				b.add("s");
-				b.add(s.length);
-				b.add(":");
-				b.add(s);
-			case TClass(c) if (c == cast std.Array):
-				var a:Array<Dynamic> = v;
-				b.add("[");
-				for (x in a)
-					value(x);
+				typeHint(t);
+			case CTExtend(paths, fields):
+				b.add("X[");
+				for (p in paths)
+					placedTypePath(p);
 				b.add("]");
-			case TClass(c) if (c == core.Globals.Pos):
-				if (keepPos) {
-					var p:core.Globals.Pos = v;
-					b.add("@");
-					b.add(p.pmin);
-					b.add("-");
-					b.add(p.pmax);
-				}
-			case TClass(c) if (c == DocBlock):
-			case TClass(c):
-				b.add("{");
-				for (f in fieldsOf(c)) {
-					var x = Reflect.field(v, f);
-					if (Reflect.isFunction(x)) continue;
-					value(x);
-				}
-				b.add("}");
-			case TObject:
-				var fs = Reflect.fields(v);
-				fs.sort(Reflect.compare);
-				b.add("{");
-				for (f in fs) {
-					b.add(f);
-					b.add("=");
-					value(Reflect.field(v, f));
-				}
-				b.add("}");
-			case TBool:
-				b.add(v ? "t" : "f");
-			case TInt | TFloat:
-				b.add("i");
-				b.add(Std.string(v));
-			case _:
+				classFields(fields);
+			case CTOptional(t):
 				b.add("?");
+				typeHint(t);
+			case CTNamed(n, t):
+				b.add("N");
+				placedName(n);
+				typeHint(t);
+			case CTIntersection(l):
+				b.add("&");
+				typeHints(l);
 		}
 	}
+
+	// (a structure's fields: all of them)
+	function classFields(l:Array<ClassField>) {
+		b.add("{");
+		for (f in l) {
+			placedName(f.cffName);
+			pos(f.cffPos);
+			metadata(f.cffMeta);
+			placedAccesses(f.cffAccess);
+			switch f.cffKind {
+				case FFun(fn):
+					b.add("F");
+					func(fn);
+				case FVar(t, e):
+					b.add("V");
+					typeHint(t);
+					expr(e);
+				case FProp(get, set, t, e):
+					b.add("P");
+					placedName(get);
+					placedName(set);
+					typeHint(t);
+					expr(e);
+			}
+		}
+		b.add("}");
+	}
+
+	function typeParams(l:Array<TypeParam>) {
+		b.add("<");
+		for (p in l) {
+			placedName(p.tpName);
+			typeParams(p.tpParams);
+			typeHint(p.tpConstraints);
+			typeHint(p.tpDefault);
+			metadata(p.tpMeta);
+		}
+		b.add(">");
+	}
+
+	function funcArgs(l:Array<FuncArg>) {
+		b.add("(");
+		for (a in l) {
+			placedName(a.name);
+			bool(a.optional);
+			metadata(a.meta);
+			typeHint(a.type);
+			expr(a.expr);
+		}
+		b.add(")");
+	}
+
+	function func(f:Func) {
+		typeParams(f.fParams);
+		funcArgs(f.fArgs);
+		typeHint(f.fType);
+		expr(f.fExpr);
+	}
+
+	function constant(c:Constant) {
+		switch c {
+			case Int(v, s):
+				b.add("I");
+				str(v);
+				optStr(s);
+			case Float(v, s):
+				b.add("F");
+				str(v);
+				optStr(s);
+			case String(v, k):
+				b.add("S");
+				str(v);
+				index(k);
+			case Ident(v):
+				b.add("D");
+				str(v);
+			case Regexp(r, o):
+				b.add("R");
+				str(r);
+				str(o);
+		}
+	}
+
+	function exprs(l:Array<Expr>) {
+		b.add("[");
+		for (e in l)
+			expr(e);
+		b.add("]");
+	}
+
+	function expr(e:Null<Expr>) {
+		if (e == null) {
+			b.add("n");
+			return;
+		}
+		b.add("(");
+		var d = e.expr;
+		b.add(d.getIndex());
+		switch d {
+			case EConst(c):
+				constant(c);
+			case EArray(a, i):
+				expr(a);
+				expr(i);
+			case EBinop(op, l, r):
+				binop(op);
+				expr(l);
+				expr(r);
+			case EField(x, f, k):
+				expr(x);
+				str(f);
+				index(k);
+			case EParenthesis(x) | EUntyped(x) | EThrow(x):
+				expr(x);
+			case EObjectDecl(fields):
+				b.add("{");
+				for (f in fields) {
+					str(f.key.name);
+					pos(f.key.pos);
+					index(f.key.quote);
+					expr(f.expr);
+				}
+				b.add("}");
+			case EArrayDecl(l) | EBlock(l):
+				exprs(l);
+			case ECall(x, args):
+				expr(x);
+				exprs(args);
+			case ENew(p, args):
+				placedTypePath(p);
+				exprs(args);
+			case EUnop(op, flag, x):
+				index(op);
+				index(flag);
+				expr(x);
+			case EVars(vars):
+				b.add("[");
+				for (v in vars) {
+					placedName(v.evName);
+					bool(v.evFinal);
+					bool(v.evStatic);
+					typeHint(v.evType);
+					expr(v.evExpr);
+					metadata(v.evMeta);
+				}
+				b.add("]");
+			case EFunction(kind, f):
+				switch kind {
+					case FKAnonymous:
+						b.add("a");
+					case FKNamed(n, inl):
+						b.add("n");
+						placedName(n);
+						bool(inl);
+					case FKArrow:
+						b.add("r");
+				}
+				func(f);
+			case EFor(it, body):
+				expr(it);
+				expr(body);
+			case EIf(c, t, el):
+				expr(c);
+				expr(t);
+				expr(el);
+			case EWhile(c, body, flag):
+				expr(c);
+				expr(body);
+				index(flag);
+			case ESwitch(x, cases, def):
+				expr(x);
+				b.add("[");
+				for (c in cases) {
+					exprs(c.values);
+					expr(c.guard);
+					expr(c.expr);
+					pos(c.pos);
+				}
+				b.add("]");
+				if (def == null) b.add("n") else {
+					b.add("d");
+					expr(def.expr);
+					pos(def.pos);
+				}
+			case ETry(x, catches):
+				expr(x);
+				b.add("[");
+				for (c in catches) {
+					placedName(c.name);
+					typeHint(c.type);
+					expr(c.expr);
+					pos(c.pos);
+				}
+				b.add("]");
+			case EReturn(x):
+				expr(x);
+			case EBreak | EContinue:
+			case ECast(x, t):
+				expr(x);
+				typeHint(t);
+			case EIs(x, t) | ECheckType(x, t):
+				expr(x);
+				typeHint(t);
+			case EDisplay(x, k):
+				expr(x);
+				switch k {
+					case DKPattern(o):
+						b.add("p");
+						bool(o);
+					case _:
+						index(k);
+				}
+			case ETernary(c, t, el):
+				expr(c);
+				expr(t);
+				expr(el);
+			case EMeta(m, x):
+				metadata([m]);
+				expr(x);
+		}
+		pos(e.pos);
+		b.add(")");
+	}
+
+	function binop(op:Binop)
+		switch op {
+			case OpAssignOp(o):
+				b.add("=");
+				binop(o);
+			case _:
+				index(op);
+		}
 }

@@ -59,42 +59,57 @@ archives, without it.
   the marks its HXB kept, and get this build's: those of the modules typed
   again, made again, and those the restored modules replay. A build where
   a mark has no maker writes nothing.
-  A module a build macro makes (`@:build`, `@:genericBuild`, `@:autoBuild`
-  from what it extends or implements) is typed again every build: its
-  macro may keep something other macros read (the gfx package's shaders:
-  an `@:autoBuild` registers each shader class, a shader's macro looks it
-  up); its interface hash (its whole content) still leaves its dependents
-  restored. The macros' context's modules a macro run processes again are
-  kept as they were when their encoding has not changed.
-- Measured (one 4-core VM shared with other builds; time to the start of
-  lowering, then the whole build with the objects cached,
-  and the modules typed or processed again; before: the signature-keyed
-  packs of the previous step):
+  Modules build macros make are restored too (built). What macros keep
+  between calls is tracked: the static variables of macro classes (not
+  the std's) that the macros run in a module's typing read or write
+  (`EvalJit.staticVarHook`) are kept with its variant (the gfx shaders'
+  `@:autoBuild` registry, json2object's counter naming generated parsers).
+  Such a module is restored while no macro of the build uses that state.
+  A macro that uses it after such a module was restored makes the build run
+  again, with those modules typed (`HXMC_MODULE_CACHE_RETYPE`). An edited
+  module whose macros keep state has the others that keep state in the same
+  class typed from the start, so a shader edit does not run the build twice.
+  A callback registered while a module is typed (`onGenerate`...) makes
+  that module typed every build. The macros' context's modules restored as
+  processed get their exception constructors patched once
+  (`MacroContext.processedTypeHook`). Without it, `SaveStacks` added a
+  `__skipStack++` each build, so blobs grew and were rewritten. A build
+  whose modules are all restored skips the capture.
+- Cold runs (built): the interface hash walks the syntax tree directly
+  and runs as each file is parsed, so no declarations are kept. File
+  and closure hashes are a 64-bit two-lane hash instead of MD5. A build's
+  new blobs go in one pack (`b/<name>.pk`), written on a thread beside the
+  rest of the build. The capture and the skeletons use the pool even under
+  `-D disable-parallelism`. A define read again costs a lookup. The tool's
+  first old-space limit is 3 GB, up from 2 GB: the port's cold build with
+  the cache promotes just over 2 GB, which cost a major collection of
+  about a second.
+- Measured (one 4-core VM shared with other builds). Each entry gives the
+  time to the start of lowering, the whole build with the objects cached,
+  and the number of modules typed or processed again. Before is main's tool,
+  measured in the same session:
 
   | | before | after |
   | --- | --- | --- |
-  | hello, cold | 381 ms, 0.46 s | 434 ms, 0.53 s |
-  | hello, warm | 95 ms, 0.16 s | 119 ms, 0.20 s |
-  | hello, after `-D unrelated` | 375 ms, 0.44 s, 94 | 122 ms, 0.22 s, 0 |
-  | hello, a body edited, then undone | 96 ms, 0.17 s, 1; 1 | 110 ms, 0.19 s, 1; 0 |
-  | formatter, cold | 952 ms, 1.31 s | 1219 ms, 1.75 s |
-  | formatter, warm | 182 ms, 0.36 s, 0 | 468 ms, 0.75 s, 54 |
-  | formatter, after `-D unrelated` | 1015 ms, 1.22 s, 334 | 504 ms, 0.74 s, 54 |
-  | formatter, a body edited (tokentree.TokenTree) | 535 ms, 0.81 s, 173 | 458 ms, 0.76 s, 60 |
-  | formatter, an interface edited | 528 ms, 0.75 s, 173 | 588 ms, 0.86 s, 123 |
-  | the port, cold | 8.3 s, 13.6 s | 9.0 s, 16.1 s |
-  | the port, warm | 1.29 s, 3.31 s | 1.30 s, 3.39 s |
-  | the port, after `-D unrelated` | 8.5 s, 10.9 s, 563 | 1.33 s, 3.45 s, 0 |
-  | the port, a body edited (core.TFunctions) | 6.9 s, 9.4 s, 274 | 1.36 s, 3.54 s, 3 |
-  | the port, the edit undone | 7.2 s, 9.6 s, 274 | 1.34 s, 3.78 s, 0 |
-  | the port, an interface edited | 6.9 s, 9.5 s, 274 | 7.0 s, 9.3 s, 230 |
+  | hello, cold | 408 ms, 0.51 s | 406 ms, 0.49 s |
+  | hello, warm | 96 ms, 0.17 s | 101 ms, 0.18 s |
+  | hello, after `-D unrelated` | 383 ms, 0.45 s, 94 | 100 ms, 0.17 s, 0 |
+  | hello, a body edited, then undone | 97 ms, 0.18 s, 1; 1 | 106 ms, 0.19 s, 1; 0 |
+  | formatter, cold | 1043 ms, 1.42 s | 1017 ms, 1.39 s |
+  | formatter, warm | 187 ms, 0.39 s, 0 | 205 ms, 0.40 s, 0 |
+  | formatter, after `-D unrelated` | 1193 ms, 1.41 s, 334 | 196 ms, 0.41 s, 0 |
+  | formatter, a body edited (tokentree.TokenTree) | 565 ms, 0.84 s, 173 | 244 ms, 0.52 s, 6 |
+  | formatter, an interface edited | 566 ms, 0.78 s, 173 | 609 ms, 0.84 s, 118 |
+  | the port, cold | 8.5 s, 14.1 s | 8.0 s, 13.6 s |
+  | the port, warm | 1.33 s, 3.48 s | 1.28 s, 3.45 s |
+  | the port, after `-D unrelated` | 8.4 s, 10.7 s, 563 | 1.34 s, 3.52 s, 0 |
+  | the port, a body edited (core.TFunctions) | 6.7 s, 9.0 s, 274 | 1.58 s, 3.91 s, 1 |
+  | the port, the edit undone | 6.7 s, 9.1 s, 274 | 1.39 s, 3.73 s, 0 |
+  | the port, an interface edited | 7.1 s, 9.5 s, 274 | 6.7 s, 8.9 s, 228 |
 
-  The formatter's warm builds type its six modules json2object's build
-  macros make again every build (and the macros' context's modules that
-  run processes again): the price of the rule above. The cold runs pay the
-  interfaces (the port: 0.19 s, reflective over the
-  syntax tree, in the encoding's parallel step), the define reads and a
-  blob per module.
+  Cold builds still pay for encoding the modules (the port: about 0.33 s
+  on four threads) and the skeletons, so the gain on the port's cold build
+  comes from the 3 GB old-space limit.
 
 Open:
 
@@ -119,16 +134,16 @@ Open:
   - Gate cases: a macro using `Date.now` runs every build, one reading a
     file only when the file changes, one reading an environment variable
     when its value changes.
-- **Modules build macros make**: typed every build (their macros may keep
-  what other macros read). Restoring them needs that state recorded: what
-  a build macro leaves in the macros' statics, or a declared contract
-  (`@:hxmc.cacheBuild` on a macro that keeps nothing).
+- **Macro state**: the tracking sees static variables, not state a macro
+  keeps elsewhere (a file it writes, a std class's statics, the macro
+  API's own registries beyond the callbacks). A conflict found late costs
+  a second run of the build.
 - **Interface edits undone**: an undone edit of a module restores its
   earlier variant but not its dependents' (the newest variant of each is
   chosen by its own file); choosing among a module's variants by its
   dependencies' hashes would restore them too.
-- **Cold runs**: the interface hash walks the syntax tree by reflection; a
-  direct walker, and blobs in segments rather than a file per module.
+- **Cold runs**: encoding is upstream's HXB writer. Starting it before
+  the filters end, or writing less, would lower it.
 - **Init macros**: their effects are data (`addGlobalMetadata` filters,
   `Compiler.define`, class paths); until they are in the key, builds with
   `--macro` do not use the cache. A macro registering `onGenerate`,

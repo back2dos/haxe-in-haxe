@@ -54,6 +54,8 @@ import core.Message.WarningMode;
 	public var expect:String;
 }
 
+typedef BlobData = {chunks:CachedChunks, monos:Bytes, skeletons:Bytes};
+
 class Variant {
 	public var role:Int;
 	public var path:GlobalTypePath;
@@ -80,6 +82,8 @@ class Variant {
 	public var iface:Null<String>;
 	public var blob:String;
 	public var blobSize:Int;
+	// (blob: the pack of the build that wrote it, b/<blob>.pk, at blobOff)
+	public var blobOff:Int = 0;
 	public var deps:Array<StoredDep>;
 	// the class fields its typing marked as maybe used through a structure
 	// (CfMaybeUsed, which DCE reads): role|module|class|kind|field
@@ -100,7 +104,7 @@ class Variant {
 	public var skeletons:Null<Bytes> = null;
 	public var skeletonMap:Null<Map<String, Bytes>> = null;
 	// a blob to write (encoded by this build)
-	public var blobBytes:Null<Bytes> = null;
+	public var blobData:Null<BlobData> = null;
 	// (in a capture: the key of its file's parse, whose interface it gets)
 	public var ifacePk:Null<String> = null;
 	// (in a capture: the variant it was restored from, processed again)
@@ -122,7 +126,7 @@ class StoreIndex {
 }
 
 class ModuleStore {
-	public static inline var MAGIC = "hxmc-modules 11";
+	public static inline var MAGIC = "hxmc-modules 13";
 
 	public static final chunkKinds:Array<ChunkKind> = [
 		STR, DOC, MDF, MTF, IMP, CLR, ENR, ABR, TDR, OFR, OFD, OBD, CLD, END, ABD, TDD, EOT, EFR, CFR, CFD, EFD, AFD, EOF, EXD, EOM
@@ -413,6 +417,7 @@ class ModuleStore {
 			o.writeInt32(refs[k]);
 			str(o, v.iface == null ? "" : v.iface);
 			str(o, v.blob);
+			o.writeInt32(v.blobOff);
 			o.writeInt32(v.blobSize);
 			o.writeByte(0);
 			o.writeInt32(v.macroState.length);
@@ -460,6 +465,7 @@ class ModuleStore {
 			var f = rstr(i);
 			v.iface = f == "" ? null : f;
 			v.blob = rstr(i);
+			v.blobOff = i.readInt32();
 			v.blobSize = i.readInt32();
 			i.readByte();
 			v.macroState = [for (_ in 0...i.readInt32()) rstr(i)];
@@ -483,29 +489,79 @@ class ModuleStore {
 	}
 
 	// a blob: the HXB chunks, the monomorphs' modifiers, the skeletons
-	public static function encodeBlob(chunks:CachedChunks, monos:Bytes, skeletons:Bytes):Bytes {
-		var o = new BytesOutput();
-		o.writeInt32(chunks.length);
-		for (c in chunks) {
+	// a blob's length as written (writeBlob)
+	public static function blobLength(d:BlobData):Int {
+		var n = 4;
+		for (c in d.chunks)
+			n += 5 + c.data.length;
+		return n + 4 + d.monos.length + 4 + d.skeletons.length;
+	}
+
+	public static function writeBlob(o:haxe.io.Output, d:BlobData) {
+		o.writeInt32(d.chunks.length);
+		for (c in d.chunks) {
 			o.writeByte(c.kind.getIndex());
 			o.writeInt32(c.data.length);
 			o.write(c.data);
 		}
-		o.writeInt32(monos.length);
-		o.write(monos);
-		o.writeInt32(skeletons.length);
-		o.write(skeletons);
-		return o.getBytes();
+		o.writeInt32(d.monos.length);
+		o.write(d.monos);
+		o.writeInt32(d.skeletons.length);
+		o.write(d.skeletons);
 	}
 
-	public static function blobPath(dir:String, hash:String):String
-		return dir + "b/" + hash.substr(0, 2) + "/" + hash;
+	// whether two blobs are the same
+	public static function sameBlob(a:BlobData, b:BlobData):Bool {
+		if (a.chunks.length != b.chunks.length || a.monos.compare(b.monos) != 0 || a.skeletons.compare(b.skeletons) != 0) return false;
+		for (i in 0...a.chunks.length)
+			if (a.chunks[i].kind != b.chunks[i].kind || a.chunks[i].data.compare(b.chunks[i].data) != 0) return false;
+		return true;
+	}
+
+	// a build's blobs, in one file (b/<name>.pk: one write per build, not
+	// one per module)
+	public static function packPath(dir:String, name:String):String
+		return dir + "b/" + name + ".pk";
+
+	// (the packs open in this build)
+	static final packs = new Map<String, sys.io.FileInput>();
+	static final packsMutex = new sys.thread.Mutex();
+
+	static function readRange(path:String, off:Int, size:Int):Null<Bytes> {
+		packsMutex.acquire();
+		try {
+			var f = packs.get(path);
+			if (f == null) packs.set(path, f = File.read(path, true));
+			f.seek(off, SeekBegin);
+			var b = Bytes.alloc(size);
+			var n = 0;
+			while (n < size) {
+				var r = f.readBytes(b, n, size - n);
+				if (r <= 0) throw "short";
+				n += r;
+			}
+			packsMutex.release();
+			return b;
+		} catch (_:Dynamic) {
+			packsMutex.release();
+			return null;
+		}
+	}
+
+	// the packs opened by this build, closed
+	public static function closePacks() {
+		packsMutex.acquire();
+		for (f in packs)
+			try f.close() catch (_:Dynamic) {}
+		packs.clear();
+		packsMutex.release();
+	}
 
 	// the blob into the variant (false: missing or damaged)
 	public static function loadBlob(dir:String, v:Variant):Bool {
 		if (v.loaded) return true;
-		var b = try File.getBytes(blobPath(dir, v.blob)) catch (_:Dynamic) return false;
-		if (b.length != v.blobSize) return false;
+		var b = readRange(packPath(dir, v.blob), v.blobOff, v.blobSize);
+		if (b == null) return false;
 		try {
 			var i = new BytesInput(b);
 			var chunks:CachedChunks = [];
@@ -523,22 +579,36 @@ class ModuleStore {
 		return true;
 	}
 
-	// the blob written (where it is not there yet)
-	public static function saveBlob(dir:String, hash:String, b:Bytes):Bool {
-		var p = blobPath(dir, hash);
-		if (FileSystem.exists(p)) return true;
+	// a pack written (the blobs of the variants that have their bytes,
+	// their offsets set)
+	public static function savePack(dir:String, name:String, list:Array<Variant>):Bool {
+		var p = packPath(dir, name);
+		var tmp = p + ".tmp";
 		try {
 			var d = haxe.io.Path.directory(p);
 			if (!FileSystem.exists(d)) FileSystem.createDirectory(d);
-			var tmp = p + "." + CacheDir.nonce() + ".tmp";
-			File.saveBytes(tmp, b);
+			var o = File.write(tmp, true);
+			var off = 0;
+			for (v in list)
+				if (v.blobData != null) {
+					v.blob = name;
+					v.blobOff = off;
+					v.blobSize = blobLength(v.blobData);
+					// (a blob at a time: the file's writes are not buffered)
+					var b = new BytesOutput();
+					writeBlob(b, v.blobData);
+					o.write(b.getBytes());
+					off += v.blobSize;
+				}
+			o.close();
 			return CacheDir.replace(tmp, p);
 		} catch (_:Dynamic) {
+			try FileSystem.deleteFile(tmp) catch (_:Dynamic) {}
 			return false;
 		}
 	}
 
-	// the blobs no index of dir names, written before a day ago, removed
+	// the packs no index of dir names, written before a day ago, removed
 	// (CacheDir.trim's sweep)
 	public static function sweep(dir:String) {
 		var keep = new Map<String, Bool>();
@@ -547,16 +617,19 @@ class ModuleStore {
 				var ix = readIndex(dir + n);
 				if (ix == null) continue;
 				for (v in ix.variants)
-					keep.set(v.blob, true);
+					keep.set(v.blob + ".pk", true);
 			}
 		var t = CacheDir.now();
 		var b = dir + "b/";
-		for (d in try FileSystem.readDirectory(b) catch (_:Dynamic) []) {
-			var sub = b + d + "/";
-			if (!FileSystem.isDirectory(sub)) continue;
-			for (f in try FileSystem.readDirectory(sub) catch (_:Dynamic) [])
-				if (!keep.exists(f) && t - CacheDir.mtime(sub + f) > 86400)
-					try FileSystem.deleteFile(sub + f) catch (_:Dynamic) {}
+		for (f in try FileSystem.readDirectory(b) catch (_:Dynamic) []) {
+			var p = b + f;
+			if (FileSystem.isDirectory(p)) {
+				// (a directory of single blobs, as earlier tools kept them)
+				for (x in try FileSystem.readDirectory(p) catch (_:Dynamic) [])
+					if (t - CacheDir.mtime(p + "/" + x) > 86400) try FileSystem.deleteFile(p + "/" + x) catch (_:Dynamic) {}
+				try FileSystem.deleteDirectory(p) catch (_:Dynamic) {}
+			} else if (!keep.exists(f) && t - CacheDir.mtime(p) > 86400)
+				try FileSystem.deleteFile(p) catch (_:Dynamic) {}
 		}
 	}
 }

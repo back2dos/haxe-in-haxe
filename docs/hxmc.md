@@ -166,14 +166,15 @@ cache directory (`$XDG_CACHE_HOME/hxmc` or `~/.cache/hxmc`, macOS
 `~/Library/Caches/hxmc`, Windows `%LOCALAPPDATA%\hxmc\cache`; `HXMC_CACHE`
 overrides; one that cannot be written is not used), in `modules/<tool>/`
 for each build of the tool: an index per working directory, class paths
-and std (`<key>.idx`), the modules' HXB in blobs (`b/`), read only for the
-modules a build restores, and the compiled objects (`o/`, `ObjectStore.hx`:
+and std (`<key>.idx`), the modules' HXB in blobs (one pack per build that
+writes some, `b/<name>.pk`, written beside the rest of the build), read only
+for the modules a build restores, and the compiled objects (`o/`, `ObjectStore.hx`:
 named by the hash of their lowered IR, shared by every output; per output
 the list of objects its last build used and its up-to-date record; the
 objects stay next to the output, in `<out>.hxmc/`, only where the cache
 directory cannot be written); once a day a build removes the tool
 directories, indexes and object lists unused for 14 days, the least
-recently used beyond 1 GB, and the blobs and objects nothing names (`CacheDir.hx`, checked by
+recently used beyond 1 GB, and the packs and objects nothing names (`CacheDir.hx`, checked by
 `hxmc/test/CacheCheck.hx`). An index keeps variants of each module, each
 with the defines it read (its file's conditions, its macros'
 `Context.defined`, and those the compiler read in the build that typed
@@ -189,11 +190,21 @@ expressions kept, which inlining copies), or of its whole content across
 contexts (a macro's code runs). A module typed again whose interface did
 not change leaves its dependents restored (early cutoff: a body edited in
 a central module of the port types that module again, not its
-dependents); an edit undone restores the earlier variant. Not used for
+dependents); an edit undone restores the earlier variant. Modules built by
+macros are restored too; the state macros keep between calls is tracked:
+the static variables of macro classes (not the std's) the macros run in a
+module's typing use are kept with it (a registry an `@:autoBuild` fills
+for another macro, a counter naming generated types). Such a module is
+restored while no macro of the build uses that state; a macro that uses
+it after such a module was restored makes the build run again, those
+modules typed (`HXMC_MODULE_CACHE_RETYPE`), and an edited one has the
+others that keep state there typed from the start. A callback a macro
+registers while a module is typed (`onGenerate`, `onAfterTyping`,
+`onAfterGenerate`) makes that module typed every build. Not used for
 display requests, the server itself, several compilations, init macros,
-deprecated defines, HXB libraries or output, WASI; a macro registering
-`onGenerate`, `onAfterTyping` or `onAfterGenerate`, or defining something,
-while typing makes the build write nothing. The output is the same as
+deprecated defines, HXB libraries or output, WASI; such a callback
+registered outside the typing of a module, or a macro defining something,
+makes the build write nothing. The output is the same as
 without the cache (`make test-module-cache`; `make fixpoint`: the tool
 building itself with the cache cold, warm and off): the cache also keeps
 the modifiers of unbound monomorphs and what the sort of the types walks
