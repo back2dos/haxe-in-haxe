@@ -367,6 +367,11 @@ class LinkDyn extends Link {
 			for (s in o.sections) {
 				if (!isLive(s)) continue;
 				for (r in s.relocs) {
+					// (a shared library is loaded anywhere: an absolute address in 32 bits
+					// or in instructions cannot be relocated; program-wide numbers, absolute
+					// symbols, can)
+					if (shared && (r.kind == RAbs32 || r.kind == RAbs32S || r.kind == RA64MovwG0Nc || r.kind == RA64MovwG1Nc) && target(r.sym) != null && !target(r.sym).abs)
+						throw "hxmc: link: an absolute address of " + r.sym.name + " in 32 bits, in a shared library";
 					if (shared && r.kind == RAbs64 && target(r.sym) != null && !target(r.sym).abs) {
 						// (an address in the image: R_*_RELATIVE)
 						if (s.kind == RoData) moved.set(s, true);
