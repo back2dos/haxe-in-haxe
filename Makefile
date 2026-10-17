@@ -517,6 +517,8 @@ ui-draw-check: ui-programs
 ui-web-check: $(TOOL) $(STD)
 	$(call hxmc,bin/ui/WebTodo.wasm,$(UI_CP) -main WebTodo $(HXMC_ARGS) -D hxmc.target=wasm32-wasi)
 	$(NODE) packages/ui/test/web.mjs bin/ui/WebTodo.wasm bin/ui
+	$(call hxmc,bin/ui/NativeForm.wasm,$(UI_CP) -main NativeForm $(HXMC_ARGS) -D hxmc.target=wasm32-wasi)
+	$(NODE) packages/ui/test/native-web.mjs bin/ui/NativeForm.wasm bin/ui
 
 portcheck: $(TOOL) $(STD) $(HOST_RT) $(REFERENCE)
 	$(SCRIPT) Selfcheck --local --small

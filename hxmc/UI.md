@@ -306,15 +306,16 @@ Since the design above (October 2026), in this order:
 - `hxmc.ui.native`, the native backend begun: `Control` nodes for the
   platform's widgets in the same tree, measured by the platform, laid out
   by our flexbox, placed absolutely (section 6's plan), a `NativeBackend`
-  interface and its GTK 3 implementation (GtkFixed, Pango for text),
-  driven by the same markup and signals.
+  interface and its GTK 3 and DOM implementations (GtkFixed and Pango;
+  absolutely placed elements in a container), driven by the same markup
+  and signals: one example runs on both.
 
 Where this departs from section 6:
 
 - **The drawn backend came first**, ahead of native controls: markup with
   a Solid-like framework on drawn components was the goal, and it needs no
-  per-platform widget code. The native backend followed on GTK 3; Win32,
-  AppKit and the DOM are its next backends.
+  per-platform widget code. The native backend followed on GTK 3 and the
+  DOM; Win32 and AppKit are its next backends.
 - **Text starts with a built-in rasterizer** rather than the platforms'
   shapers: the same pixels on every machine and target (golden images in
   CI, the browser without font files). Its limits are the shapers' reasons
