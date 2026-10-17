@@ -110,7 +110,7 @@ endef
 	lix lix-release lix-dist reference bench test test-fuzz test-display test-server test-jsonrpc test-unit-targets test-interp \
 	test-haxelib test-eval-debugger test-node-libs test-module-cache smoke hxmc-test corpus-stage gfx-programs gfx-check gfx-web-check gfx-shader-check \
 	android-programs android-check android-device-check shared-check \
-	audio-programs audio-check audio-web-check native-macros ui-programs view-check web-check text-check ui-check ui-layout-fuzz theme-check theme-fidelity-check theme-dom-check ui-draw-check ui-web-check portcheck measure site-check \
+	audio-programs audio-check audio-web-check native-macros ui-programs view-check web-check text-check ui-check ui-layout-fuzz theme-check theme-fidelity-check theme-dom-check web-widgets ui-draw-check ui-web-check portcheck measure site-check \
 	quick check full clean distclean wasmgc-check wasmgc-bench
 
 help:
@@ -200,6 +200,8 @@ help:
 ##             shadcn's sheet made, the classes it rejects (packages/theme/test/ThemeTest.hx)
 ## theme-fidelity-check  packages/theme's widgets drawn headless against shadcn's markup in Chromium
 ##             (packages/theme/test/ref, from ref.mjs; the cases known to differ reported, not failed)
+## web-widgets  the DOM's widgets (packages/web, hxmc.web.widgets): the gallery driven in Chromium by pointer
+##             and keys (packages/web/test/widgets.mjs), the sizes of the counter, form and gallery bundles
 ## theme-dom-check  the DOM's widgets (packages/web) under the theme's CSS in Chromium against the same
 ##             references (packages/theme/test/dom-fidelity.mjs)
 ## ui-layout-fuzz  random flex trees (SEED, COUNT) against Chromium's boxes (Playwright): differences to reduce into layout-cases.mjs
@@ -618,6 +620,16 @@ web-check: $(TOOL) $(STD) $(HOST_RT) $(PORT_BIN)
 	$(call hxmc,bin/web/demo/cube.wasm,$(GFX_CP) -main Cube $(HXMC_ARGS) -D hxmc.target=wasm32-wasi)
 	rm -rf bin/web/demo/*.hxmc bin/web/demo/*.log
 	$(NODE) packages/web/test/web.mjs bin/web
+
+# (the DOM's widgets: the theme's CSS on Eval, the examples compiled to JavaScript by the port, driven in Chromium)
+web-widgets: $(TOOL) $(PORT_BIN)
+	@mkdir -p bin/web/widgets
+	ulimit -s unlimited 2>/dev/null || true; $(TOOL) -cp packages/ui/src -cp packages/theme/src --run hxmc.theme.Css shadcn.json bin/web/widgets/shadcn.css
+	for m in counter:WidgetCounter form:WidgetForm gallery:WidgetGallery; do \
+		ulimit -s unlimited 2>/dev/null || true; $(PORT_BIN) $(DOM_CP) -cp packages/web/examples -main $${m#*:} -dce full -D js-es=6 -D analyzer-optimize -js bin/web/widgets/$${m%%:*}.js || exit 1; \
+		printf '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>%s</title><link rel="stylesheet" href="shadcn.css"></head><body><script src="%s.js"></script></body></html>\n' $${m#*:} $${m%%:*} > bin/web/widgets/$${m%%:*}.html; \
+	done
+	$(NODE) packages/web/test/widgets.mjs bin/web/widgets
 
 text-check: $(TOOL)
 	ulimit -s unlimited 2>/dev/null || true; $(TOOL) -cp packages/text/src -cp packages/text/test -cp packages/gfx/test --run TextTest $(if $(BLESS),--bless)
