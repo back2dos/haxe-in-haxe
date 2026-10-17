@@ -871,7 +871,7 @@ class MirBuild {
 
 	// replaces phis whose operands are one value (or the phi itself), until none is left
 	function removeTrivialPhis() {
-		var repl:Null<Array<Int>> = null; // phi -> its value (-1: none)
+		var repl:Null<haxe.ds.Vector<Int>> = null; // phi -> its value (-1: none)
 		inline function find(v:Int):Int {
 			if (repl != null)
 				while (v < repl.length && repl[v] >= 0)

@@ -183,8 +183,7 @@ class Inline {
 			var gmax = 0;
 			for (gb in g.blocks)
 				if (gb.id > gmax) gmax = gb.id;
-			var bmap:Array<MBlock> = [];
-			bmap.resize(gmax + 1);
+			var bmap = new haxe.ds.Vector<MBlock>(gmax + 1);
 			for (gb in g.blocks) {
 				var nb = new MBlock(nextBlock++);
 				nb.cold = gb.cold || b.cold;

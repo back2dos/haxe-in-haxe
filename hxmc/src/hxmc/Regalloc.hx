@@ -25,7 +25,7 @@ interface RegTarget {
 
 // a list of registers that keeps its storage (defsUses fills one per instruction)
 class RegList {
-	public var a:Array<Int> = Arrays.filled(64, 0);
+	public var a:Array<Int> = [for (_ in 0...64) 0];
 	public var n = 0;
 
 	public function new() {}
@@ -45,7 +45,7 @@ class Scratch {
 	public var end:Array<Int> = [];
 	public var fixedFrom:Array<Array<Int>> = [for (_ in 0...LFunc.NPHYS) []];
 	public var fixedTo:Array<Array<Int>> = [for (_ in 0...LFunc.NPHYS) []];
-	public var openFixed:Array<Int> = Arrays.filled(LFunc.NPHYS, -1);
+	public var openFixed:haxe.ds.Vector<Int> = Arrays.filled(LFunc.NPHYS, -1);
 	public var exposedHead:Array<Int> = [];
 	public var exposedBlock:Array<Int> = [];
 	public var exposedNext:Array<Int> = [];
@@ -104,8 +104,8 @@ class Scratch {
 	public var weight:Array<Float> = [];
 	// per physical register: whether a call leaves its result there; 1 for
 	// the allocatable float registers, 2 for the integer ones
-	public var isResult:Array<Bool> = [for (_ in 0...LFunc.NPHYS) false];
-	public var isFpr:Array<Int> = Arrays.filled(LFunc.NPHYS, 0);
+	public var isResult = new haxe.ds.Vector<Bool>(LFunc.NPHYS);
+	public var isFpr:haxe.ds.Vector<Int> = Arrays.filled(LFunc.NPHYS, 0);
 
 	public function new(t:RegTarget) {
 		for (r in t.callResults)

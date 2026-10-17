@@ -120,19 +120,17 @@ class LFunc {
 }
 
 class Arrays {
-	// an Int array of n copies of v (sized once, not grown element by element)
-	public static function filled(n:Int, v:Int):Array<Int> {
-		var a = new Array<Int>();
-		a.resize(n);
-		for (i in 0...n)
-			a[i] = v;
+	// an Int vector of n copies of v
+	public static function filled(n:Int, v:Int):haxe.ds.Vector<Int> {
+		var a = new haxe.ds.Vector<Int>(n);
+		if (v != 0) a.fill(v);
 		return a;
 	}
 }
 
 // a fixed-size bit set
 class Bits {
-	public var w:Array<Int>;
+	public var w:haxe.ds.Vector<Int>;
 
 	public function new(n:Int) {
 		w = Arrays.filled((n + 31) >> 5, 0);

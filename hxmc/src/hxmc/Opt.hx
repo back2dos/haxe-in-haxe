@@ -1,5 +1,6 @@
 package hxmc;
 
+import haxe.ds.Vector;
 import hxmc.Mir;
 
 // Machine-independent optimizations on MIR (target facts stay in Abi and
@@ -60,8 +61,8 @@ class Opt {
 	];
 
 	var f:MFunc;
-	var repl:Array<Int>;
-	var ver:Array<Int>; // per load: the version of its memory class
+	var repl:Vector<Int>;
+	var ver:Vector<Int>; // per load: the version of its memory class
 
 	public function new(f:MFunc) {
 		this.f = f;
@@ -357,14 +358,14 @@ class Opt {
 
 	// immediate dominators (Cooper, Harvey and Kennedy) as reverse postorder
 	// indices, and the dominator tree's children lists
-	function dominators(order:Array<MBlock>):{idom:Array<Int>, childHead:Array<Int>, childNext:Array<Int>} {
+	function dominators(order:Array<MBlock>):{idom:Vector<Int>, childHead:Vector<Int>, childNext:Vector<Int>} {
 		var n = order.length;
 		var inOrder = f.newMark();
 		for (k in 0...n) {
 			order[k].mark = inOrder;
 			order[k].tmp = k;
 		}
-		var idom = [for (_ in 0...n) -1];
+		var idom = MFunc.ints(n, -1);
 		idom[0] = 0;
 		var preds = [for (b in order) [for (p in b.preds) if (p.mark == inOrder) p.tmp]];
 		var changed = true;
@@ -391,7 +392,7 @@ class Opt {
 				}
 			}
 		}
-		var childHead = [for (_ in 0...n) -1], childNext = [for (_ in 0...n) -1];
+		var childHead = MFunc.ints(n, -1), childNext = MFunc.ints(n, -1);
 		var k = n - 1;
 		while (k >= 1) {
 			var d = idom[k];
@@ -799,16 +800,17 @@ class Opt {
 			order[k].tmp = k;
 		}
 		// per block: the classes it writes
-		var kill = [for (b in order) {
+		var kill = new Vector<Int>(n);
+		for (k in 0...n) {
 			var m = 0;
-			for (i in b.ins)
+			for (i in order[k].ins)
 				if (!i.dead) m |= killMask(i);
-			m;
-		}];
-		var outs:Array<Array<Int>> = [for (_ in 0...n) null];
+			kill[k] = m;
+		}
+		var outs = new Vector<Vector<Int>>(n);
 		for (k in 0...n) {
 			var b = order[k];
-			var v:Array<Int> = null;
+			var v:Vector<Int> = null;
 			var latch = -1;
 			var mixed = 0; // classes the forward predecessors disagree on
 			for (p in b.preds) {
@@ -824,7 +826,9 @@ class Opt {
 						if (v[c] != o[c]) mixed |= 1 << c;
 			}
 			if (v == null || b.handler) {
-				v = [for (_ in 0...NCLS) next++];
+				v = new Vector<Int>(NCLS);
+				for (c in 0...NCLS)
+					v[c] = next++;
 			} else {
 				if (latch >= 0)
 					for (q in k...latch + 1)
@@ -845,7 +849,7 @@ class Opt {
 	}
 
 	// operands compared as values: constants and addresses of the same thing are equal
-	var canon:Array<Int>;
+	var canon:Vector<Int>;
 
 	inline function cres(x:Int):Int
 		return x < 0 ? x : canon[res(x)];
@@ -905,7 +909,7 @@ class Opt {
 			order[k].tmp = k;
 		}
 		// immediate dominators (Cooper, Harvey and Kennedy), as rpo indices
-		var idom = [for (_ in 0...n) -1];
+		var idom = MFunc.ints(n, -1);
 		idom[0] = 0;
 		var preds = [for (b in order) [for (p in b.preds) if (p.mark == inOrder) p.tmp]];
 		var changed = true;
@@ -933,7 +937,7 @@ class Opt {
 			}
 		}
 		// children lists
-		var childHead = [for (_ in 0...n) -1], childNext = [for (_ in 0...n) -1];
+		var childHead = MFunc.ints(n, -1), childNext = MFunc.ints(n, -1);
 		var k = n - 1;
 		while (k >= 1) {
 			var d = idom[k];
