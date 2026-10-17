@@ -6,7 +6,8 @@ import hxmc.Obj;
 // An ELF64 relocatable file (the runtime object made by tools/mkrt.sh) as an
 // Obj: its allocated sections, symbols and relocations. Sections that are
 // not loaded (debug information, notes, address-significance tables) are
-// dropped, and so are relocations in them.
+// dropped, and so are relocations in them; hxmc's function records
+// (FuncRec.SECTION) become Obj.funcs.
 class ElfReader {
 	var b:Bytes;
 	var arm:Bool;
@@ -97,6 +98,7 @@ class ElfReader {
 		var o = new Obj();
 		var secs:Array<Null<Section>> = [];
 		var symtab = -1;
+		var funcs:Null<Section> = null;
 		for (i in 0...shnum) {
 			var h = sh(i);
 			var name = cstr(strOff + u32(h));
@@ -107,6 +109,13 @@ class ElfReader {
 			var align = i64(h + 48);
 			if (type == 2) symtab = i;
 			secs.push(null);
+			if (name == FuncRec.SECTION && type == 1) {
+				// the function records (hxmc's objects): read once the relocations are
+				funcs = new Section(name, RoData, 8);
+				funcs.buf.bytes(b, off, size);
+				secs[i] = funcs;
+				continue;
+			}
 			if ((flags & 2) == 0 || (type != 1 && type != 8 && type != 14 && type != 15 && type != 0x70000001)) continue;
 			if (StringTools.startsWith(name, ".eh_frame")) continue;
 			var kind:SecKind = if ((flags & 0x400) != 0) (type == 8 ? Tbss : Tdata) else if (type == 14) InitArray else if (type == 15) FiniArray else if ((flags & 4) != 0) Text
@@ -154,7 +163,7 @@ class ElfReader {
 				s.offset = value;
 			} else if (shndx != 0 && shndx < 0xff00) {
 				var sec = secs[shndx];
-				if (sec == null) {
+				if (sec == null || sec == funcs) {
 					// a symbol of a dropped section
 					syms.push(null);
 					continue;
@@ -182,6 +191,7 @@ class ElfReader {
 				target.relocs.push(new Reloc(i64(at), relocKind(type), sym, i64(at + 16)));
 			}
 		}
+		if (funcs != null) FuncRec.read(o, funcs);
 		return o;
 	}
 }

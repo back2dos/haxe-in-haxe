@@ -42,15 +42,17 @@ class LowerCache {
 	public function new() {}
 
 	var target = -1; // the target the bodies were lowered for (they fold its tests)
+	var lines = false; // and whether they have their positions (Lower.lines)
 
 	public function lower(main:TClass, types:Array<ModuleType>, basic:BasicTypes):Program {
 		hits = misses = 0;
 		why = null;
 		build++;
-		if (Lower.targetCode != target) {
+		if (Lower.targetCode != target || Lower.lines != lines) {
 			entries = new haxe.ds.ObjectMap();
 			lambdas = new haxe.ds.ObjectMap();
 			target = Lower.targetCode;
+			lines = Lower.lines;
 		}
 		var l = new CachedLower(this, true);
 		var prog = try Lower.program(main, types, basic, l) catch (m:Mismatch) {
@@ -779,6 +781,7 @@ class CachedLower extends Lower {
 					}
 				]);
 			case SCold(id, x): SCold(id, stmt(x));
+			case SPos(_): s;
 		}
 	}
 

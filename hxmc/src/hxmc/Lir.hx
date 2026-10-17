@@ -34,6 +34,7 @@ class LIns {
 	public var defs:Null<Array<Int>>; // calls: the result registers
 	public var f:Float = 0;
 	public var flag:Bool = false; // target specific (zero/sign extension, ...)
+	public var pos = 0; // (-debug) the source position of the Mir instruction it comes from (SrcPos)
 
 	public static inline var FRAME = -2;
 
@@ -70,6 +71,7 @@ class LFunc {
 	public var slots:Array<{size:Int, align:Int}> = []; // frame slots (MIR slots, then spills)
 	public var outArgs = 0; // bytes of outgoing stack arguments
 	public var hasCalls = false;
+	public var display:Null<String>; // (-debug) the Haxe name of the function (FuncRec.name)
 	var hints:Array<Int> = []; // vreg - NPHYS -> preferred register (physical or virtual), -1
 
 	// jump threading, before emission: a branch to a block that holds only

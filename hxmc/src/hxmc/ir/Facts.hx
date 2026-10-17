@@ -397,7 +397,7 @@ class Facts {
 					fs(x);
 			case SCold(_, x):
 				fs(x);
-			case SBreak | SContinue:
+			case SBreak | SContinue | SPos(_):
 			case SSwitch(e, cases, def):
 				fe(e);
 				for (c in cases)

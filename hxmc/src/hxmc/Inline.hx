@@ -223,6 +223,7 @@ class Inline {
 					x.c = m(i.c);
 					x.imm = i.imm;
 					x.imm2 = i.imm2;
+					x.pos = i.pos;
 					x.f = i.f;
 					x.size = i.size;
 					x.signed = i.signed;

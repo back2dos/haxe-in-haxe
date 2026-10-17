@@ -347,6 +347,7 @@ class Roots {
 	var extras:Array<Bits> = [];
 
 	function stmt(s:Stmt, out:Bits):Bits {
+		if (s.match(SPos(_))) return out;
 		var r = stmt0(s, out);
 		if (extras.length > 0) r = union(r, extras[extras.length - 1]);
 		return r;
@@ -410,6 +411,7 @@ class Roots {
 				entry;
 			case SBreak: brk[brk.length - 1];
 			case SContinue: cont[cont.length - 1];
+			case SPos(_): out;
 			case SSwitch(e, cases, def):
 				var u = seq(def, out);
 				for (c in cases)
@@ -519,7 +521,7 @@ class Roots {
 					return r;
 				case SCold(_, x):
 					return step(x, set);
-				case SBreak | SContinue:
+				case SBreak | SContinue | SPos(_):
 				case STry(body, catches):
 					// a handler may run before any assignment of the body
 					var r = seq(body, set.copy());
