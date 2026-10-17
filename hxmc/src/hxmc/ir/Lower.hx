@@ -1037,6 +1037,22 @@ class Lower {
 		return null;
 	}
 
+	// the default arguments a dispatched call passes for those left out: its
+	// implementation's (the callee's, as Haxe's static targets apply them);
+	// an interface's method has no body, so the first implementation's
+	// (read from its function, not compiled for it: it may be one this
+	// program never makes)
+	public function dispatchDefaults(c:TClass, name:String):Null<Array<Null<TExpr>>> {
+		var impl = lookupMethod(c, name);
+		if (impl != null) return defaults.get(method(impl.cls, impl.field));
+		for (d in c.clDescendants) {
+			var m = lookupMethod(d, name);
+			var tf = m == null ? null : funcOf(m.field);
+			if (tf != null) return [null].concat([for (a in tf.tfArgs) a.defaultValue]);
+		}
+		return null;
+	}
+
 	// virtual unless no known subclass overrides it
 	public function needsDispatch(c:TClass, name:String):Bool {
 		if (c.hasClassFlag(CInterface)) return true;

@@ -1668,8 +1668,7 @@ class FnLower {
 				if (l.needsDispatch(c, cf.cfName)) {
 					var sig = dispatchSig(c, cf);
 					var decl = l.rootDecl(c, cf.cfName);
-					var impl = l.lookupMethod(c, cf.cfName);
-					var ds = impl != null ? l.defaults.get(l.method(impl.cls, impl.field)) : null;
+					var ds = l.dispatchDefaults(c, cf.cfName);
 					var o = coerce(value(obj), tyOf(obj), TRef(RObj(l.rootClass())));
 					if (sig.ret.match(TStruct(_))) {
 						// (a struct result: the address of a slot here, last)
