@@ -320,7 +320,9 @@ Since the design above (October 2026), in this order:
   too) and GPOS pair kerning in `@hxmc/text`; a JPEG decoder (baseline
   and progressive, libjpeg's arithmetic: pixel-exact with Chromium's) and
   a GIF decoder (every frame composed as Chromium's ImageDecoder does,
-  played by AnimatedImage).
+  played by AnimatedImage); a WebP decoder (lossless VP8L, lossy VP8 with
+  its ALPH alpha: pixel-exact with libwebp's; animations composed as
+  libwebp composes them).
 - Popups (a layer over the tree: anchored, modal), the widgets on them
   (Select, Menu, Tooltip, Dialog), and VirtualList.
 - Accessibility on every platform: NSAccessibility (macOS), UI Automation
@@ -340,6 +342,12 @@ Since the design above (October 2026), in this order:
   canonical compositions; CJK and other scripts' fallback faces loaded
   when first needed; colour emoji (CBDT, sbix, COLR), their sequences and
   widths as Chromium's, drawn as Chromium draws Noto Color Emoji.
+- Right-to-left layout (`dir`): rows, columns' cross axis, grids'
+  columns and absolute boxes mirrored as Chromium mirrors them, text
+  aligned to its start, fields aligned and scrollers overflowing to the
+  left (scrolled by negative offsets, as Chromium's scrollLeft); `order`,
+  `zIndex`, `visibility`, `textWrap` and `textTransform`; variable fonts
+  (fvar, avar, gvar: SystemFonts' weights as instances).
 - `@hxmc/view` ([view.md](view.md)) replaced `@hxmc/esx` and
   `hxmc.ui.reactive`: markup compiled to direct calls on a renderer,
   `hxmc.ui.view.NodeRenderer` for both backends; the markup's style
@@ -363,7 +371,7 @@ Where this departs from section 6:
   shrink below their content, so text is not squashed (a container that
   must shrink sets `minHeight: 0`, as in CSS).
 - **Not yet**: Windows' compositions drawn in the field (its IME draws
-  its own), image formats beyond PNG, JPEG and GIF (WebP, AVIF).
+  its own), image formats beyond PNG, JPEG, GIF and WebP (AVIF).
 
 ## Sources
 

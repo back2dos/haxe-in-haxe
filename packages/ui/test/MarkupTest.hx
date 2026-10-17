@@ -19,6 +19,9 @@ import hxmc.ui.widgets.Toasts;
 import hxmc.ui.widgets.TextField;
 import hxmc.ui.widgets.Widgets.Menu;
 import hxmc.ui.widgets.Widgets.ContextMenu;
+import hxmc.ui.widgets.Widgets.Menubar;
+import hxmc.ui.widgets.Widgets.Tabs;
+import hxmc.ui.widgets.Widgets.Radio;
 import hxmc.ui.widgets.Widgets.Table;
 import hxmc.ui.widgets.Widgets.Tree;
 import hxmc.ui.widgets.Widgets.Split;
@@ -53,6 +56,10 @@ class MarkupTest implements Markup {
 		toasts();
 		numbers();
 		rightToLeft();
+		editMenus();
+		menubar();
+		tabs();
+		focusTips();
 		virtual();
 		table();
 		tree();
@@ -222,11 +229,12 @@ class MarkupTest implements Markup {
 
 	static function rightToLeft() {
 		var ui = new Ui(new MonoText(), 300, 200);
-		var dir = signal("rtl"), vol = signal(0.0);
+		var dir = signal("rtl"), vol = signal(0.0), name = signal("Ada");
 		Render.render(<view dir={dir} padding={10} row-gap={6}>
 			<Slider tag="vol" value={vol} width={100} step={0.1}/>
 			<view tag="row" direction="row" column-gap={4}><view tag="a" width={40} height={20}/><view tag="b" width={30} height={20}/></view>
 			<text tag="words">Hello</text>
+			<Field tag="name" value={name}/>
 		</view>, ui.root);
 		ui.update();
 		var a = ui.root.find("a"), b = ui.root.find("b"), words = ui.root.find("words");
@@ -238,6 +246,12 @@ class MarkupTest implements Markup {
 		ui.keyDown(Key.LEFT, 0);
 		ui.update();
 		check("rtl: Left raises a slider, its knob moves left", vol.value == 0.1 && knob.absX < slider.absX + 100 - 16, vol.value + " " + knob.absX);
+		// (a field's text at its right, short of the caret's pixel: a click in its middle between its letters)
+		var field:TextField = cast ui.root.find("name");
+		var p = field.laidOut(), right = field.absX + field.width - field.style.borderEdges.right - field.style.padding.right - 1;
+		ui.pointerDown(right - p.width / 2, field.absY + field.height / 2, 1);
+		ui.pointerUp(right - p.width / 2, field.absY + field.height / 2, 1);
+		check("rtl: a field's text at the right, clicked there", field.caret == 1 || field.caret == 2, "" + field.caret);
 		dir.value = "ltr";
 		ui.update();
 		check("rtl: changed back, laid out again", ui.root.find("a").absX == 10 && words.textAlign() == Left, "" + ui.root.find("a").absX);
@@ -304,6 +318,167 @@ class MarkupTest implements Markup {
 		ui.keyDown(Key.UP, 0);
 		ui.update();
 		check("number field: stepped from there", qty.value == 3.5 && field.text == "3.5", field.text);
+	}
+
+	static function tabs() {
+		var ui = new Ui(new MonoText(), 400, 300);
+		var selected = signal(1);
+		Render.render(<view padding={10}><Button tag="before" label="Before"/><Tabs tag="t" labels={["One", "Two", "Three"]} selected={selected}
+			render={i -> <text tag="panel">{"panel " + i}</text>}/><Button tag="after" label="After"/></view>, ui.root);
+		ui.update();
+		var before = ui.root.find("before");
+		ui.setFocus(before);
+		ui.keyDown(Key.TAB, 0);
+		check("tabs: one stop for Tab, the selected tab", ui.focus == ui.root.find("t-1"));
+		ui.keyDown(Key.RIGHT, 0);
+		ui.update();
+		check("tabs: Right selects the next, the focus with it", selected.value == 2 && ui.focus == ui.root.find("t-2")
+			&& (cast ui.root.find("panel") : TextNode).text == "panel 2");
+		ui.keyDown(Key.RIGHT, 0);
+		ui.keyDown(Key.END, 0);
+		ui.keyDown(Key.LEFT, 0);
+		check("tabs: wrapping, End, Left", selected.value == 1, "" + selected.value);
+		ui.keyDown(Key.TAB, 0);
+		check("tabs: Tab out of them", ui.focus == ui.root.find("after"));
+		ui.root.style.dir = Rtl;
+		ui.update();
+		ui.setFocus(ui.root.find("t-1"));
+		ui.keyDown(Key.LEFT, 0);
+		check("tabs: right to left, Left to the next", selected.value == 2, "" + selected.value);
+		// a radio group: one stop, the arrows check the next
+		var ui2 = new Ui(new MonoText(), 400, 300), size = signal("");
+		Render.render(<view padding={10}><Button tag="b" label="B"/><Radio tag="r" value={size} options={["S", "M", "L"]}/><Button tag="c" label="C"/></view>, ui2.root);
+		ui2.update();
+		ui2.setFocus(ui2.root.find("b"));
+		ui2.keyDown(Key.TAB, 0);
+		var first = ui2.focus == ui2.root.find("r-S");
+		ui2.keyDown(Key.DOWN, 0);
+		ui2.keyDown(Key.DOWN, 0);
+		ui2.keyDown(Key.DOWN, 0);
+		check("radio: one stop (the first, none checked), Down checks the next, wrapping", first && size.value == "S" && ui2.focus == ui2.root.find("r-S"),
+			size.value);
+		ui2.keyDown(Key.UP, 0);
+		ui2.keyDown(Key.TAB, 0);
+		check("radio: Up, then Tab out", size.value == "L" && ui2.focus == ui2.root.find("c"), size.value);
+	}
+
+	static function menubar() {
+		var ui = new Ui(new MonoText(), 400, 300);
+		var chosen = [];
+		Render.render(<view padding={10} align-items="start"><Menubar tag="bar" label="Main" menus={[
+			{label: "File", items: [{label: "New", onSelect: () -> chosen.push("new")}, {label: "Open", onSelect: () -> chosen.push("open")}]},
+			{label: "Edit", items: [{label: "Undo", onSelect: () -> chosen.push("undo"), shortcut: "Mod+Z"}]},
+			{label: "Help", items: [{label: "About", onSelect: () -> chosen.push("about")}]}
+		]}/></view>, ui.root);
+		ui.update();
+		var file = ui.root.find("bar-0"), edit = ui.root.find("bar-1");
+		function key(k:Int) {
+			ui.keyDown(k, 0);
+			ui.update();
+		}
+		function click(n:Node) {
+			ui.pointerDown(n.absX + 4, n.absY + 4, 1);
+			ui.pointerUp(n.absX + 4, n.absY + 4, 1);
+			ui.update();
+		}
+		check("menubar: titles in a row, a menubar role", edit.absX > file.absX && ui.root.find("bar").semantics.role == MenuBar);
+		click(file);
+		check("menubar: a click opens its menu, the first item focused", ui.overlay.find("bar-0-items") != null && ui.focus == ui.overlay.find("bar-0-0"));
+		ui.pointerMove(edit.absX + 4, edit.absY + 4);
+		ui.update();
+		check("menubar: the pointer over another title opens that one instead",
+			ui.overlay.find("bar-0-items") == null && ui.overlay.find("bar-1-items") != null && ui.focus == ui.overlay.find("bar-1-0"));
+		key(Key.RIGHT);
+		check("menubar: Right from a menu opens the next", ui.overlay.find("bar-2-items") != null && ui.overlay.children.length == 1);
+		key(Key.RIGHT);
+		check("menubar: wrapping to the first", ui.overlay.find("bar-0-items") != null && ui.focus == ui.overlay.find("bar-0-0"));
+		key(Key.DOWN);
+		key(Key.ENTER);
+		check("menubar: an item chosen, the menu closed, the focus back on its title", chosen.join(",") == "open" && ui.overlay.children.length == 0
+			&& ui.focus == file, chosen.join(",") + " " + ui.focus);
+		key(Key.RIGHT);
+		check("menubar: Right on a title moves to the next, closed", ui.focus == edit && ui.overlay.children.length == 0);
+		key(Key.DOWN);
+		key(Key.ESCAPE);
+		check("menubar: Escape closes it, the focus on its title", ui.overlay.children.length == 0 && ui.focus == edit);
+		ui.setFocus(null);
+		ui.keyDown("Z".code, Key.MOD_CONTROL);
+		check("menubar: an item's shortcut from anywhere", chosen.join(",") == "open,undo", chosen.join(","));
+		// right to left: Right to the title on the right, the one before
+		ui.root.style.dir = Rtl;
+		ui.update();
+		ui.setFocus(edit);
+		key(Key.RIGHT);
+		check("menubar: right to left, Right to the title on its right", ui.focus == file && file.absX > edit.absX);
+	}
+
+	static function editMenus() {
+		var ui = new Ui(new MonoText(), 400, 300);
+		var text = signal("hello world");
+		Render.render(<view padding={10}><Field tag="note" value={text}/></view>, ui.root);
+		ui.update();
+		var f:TextField = cast ui.root.find("note");
+		ui.setFocus(f);
+		f.select(6, 11);
+		var r = f.layoutText(ui.text, Math.NaN).caret(8);
+		var clip:hxmc.ui.ClipboardHost.MemoryClipboard = cast ui.clipboard;
+		function press(button:Int, x:Float, y:Float) {
+			ui.pointerDown(x, y, button);
+			ui.pointerUp(x, y, button);
+			ui.update();
+		}
+		press(3, f.absX + 9 + r.x, f.absY + 7 + r.y + 2);
+		var menu = ui.overlay.find("note-menu-items");
+		check("edit menu: a right click in the selection opens it, the selection kept", menu != null && f.selectionStart == 6 && f.selectionEnd == 11,
+			'${menu} ${f.selectionStart}-${f.selectionEnd}');
+		var copy = ui.overlay.find("note-menu-1");
+		press(1, copy.absX + 4, copy.absY + 4);
+		check("edit menu: Copy", clip.text == "world" && ui.overlay.children.length == 0 && ui.focus == f, clip.text);
+		ui.keyDown(Key.END, 0);
+		ui.keyDown(Key.MENU, 0);
+		ui.update();
+		var paste = ui.overlay.find("note-menu-2");
+		press(1, paste.absX + 4, paste.absY + 4);
+		check("edit menu: the menu key, Paste", text.value == "hello worldworld", text.value);
+		ui.keyDown(Key.MENU, 0);
+		ui.update();
+		var all = ui.overlay.find("note-menu-3");
+		press(1, all.absX + 4, all.absY + 4);
+		ui.keyDown(Key.MENU, 0);
+		ui.update();
+		var cut = ui.overlay.find("note-menu-0");
+		press(1, cut.absX + 4, cut.absY + 4);
+		check("edit menu: Select All, Cut", text.value == "" && clip.text == "hello worldworld", text.value);
+	}
+
+	static function focusTips() {
+		var ui = new Ui(new MonoText(), 400, 300);
+		var log = [];
+		Render.render(<view padding={20} row-gap={10} onFocusIn={e -> log.push("in " + e.target.tag)} onFocusOut={e -> log.push("out " + e.target.tag)}>
+			<Button tag="first" label="First"/>
+			<Tooltip tag="tip" text="Saves it" delay={0.5}><Button tag="save" label="Save"/></Tooltip>
+		</view>, ui.root);
+		ui.update();
+		Clock.tick(1000);
+		ui.keyDown(Key.TAB, 0);
+		ui.keyDown(Key.TAB, 0);
+		ui.update();
+		check("focus in, focus out: bubbling", log.join(",") == "in first,out first,in save", log.join(","));
+		Clock.tick(1000.1);
+		Clock.tick(1000.7);
+		ui.update();
+		check("tooltip: shown for the keyboard's focus", ui.overlay.find("tooltip") != null);
+		ui.keyDown(Key.TAB, 0);
+		ui.update();
+		check("tooltip: hidden when the focus leaves", ui.overlay.find("tooltip") == null);
+		var save = ui.root.find("save");
+		ui.pointerDown(save.absX + 4, save.absY + 4, 1);
+		ui.pointerUp(save.absX + 4, save.absY + 4, 1);
+		ui.pointerMove(390, 290);
+		Clock.tick(1001);
+		Clock.tick(1002);
+		ui.update();
+		check("tooltip: not for a click's focus", ui.focus == save && ui.overlay.find("tooltip") == null);
 	}
 
 	static function popovers() {
@@ -556,6 +731,16 @@ class MarkupTest implements Markup {
 		check("tree: a tree of items with their levels", roles.indexOf(Tree) >= 0 && levels.join(",") == "1,2,2,1,2,1", levels.join(","));
 		var item = [for (id in tree.order) if (tree.nodes.get(id).role == TreeItem) tree.nodes.get(id)][0];
 		check("tree: an item named by its text, not its triangle", item.name == "src" && item.expanded == true, item.name);
+		// right to left: Right closes, Left opens (the way they point)
+		ui.root.style.dir = Rtl;
+		ui.update();
+		ui.keyDown(Key.RIGHT, 0);
+		ui.update();
+		var closed = shown();
+		ui.keyDown(Key.LEFT, 0);
+		ui.update();
+		check("tree: right to left, Right closes, Left opens", closed == "-src,  main,  +ui,+docs,README" && shown() == "-src,  main,  +ui,-docs,  guide,README",
+			closed + " / " + shown());
 		Ui.now = haxe.Timer.stamp;
 	}
 
@@ -584,6 +769,18 @@ class MarkupTest implements Markup {
 		check("split: the keys move it (Home: min)", home == 50 && size.value == 60, home + " " + size.value);
 		var tree = ui.accessTree(), sep = [for (id in tree.order) if (tree.nodes.get(id).role == Separator) tree.nodes.get(id)];
 		check("split: a separator with the size as its value", sep.length == 1 && sep[0].valueNow == 60 && sep[0].name == "Sidebar" && sep[0].focusable);
+		// right to left: the first pane on the right; Left widens it, a drag moves the divider with the pointer
+		ui.root.style.dir = Rtl;
+		ui.update();
+		ui.keyDown(Key.LEFT, 0);
+		ui.update();
+		check("split: right to left, the first pane on the right, Left widens it", size.value == 70 && side.absX == 400 - 70 && div.absX == 400 - 70 - 6,
+			size.value + " " + side.absX);
+		var x = div.absX + 3;
+		ui.pointerDown(x, 100, 1);
+		ui.pointerMove(x - 30, 100);
+		ui.pointerUp(x - 30, 100, 1);
+		check("split: right to left, dragged left, wider", size.value == 100, "" + size.value);
 	}
 
 	static function calendar() {
@@ -624,6 +821,14 @@ class MarkupTest implements Markup {
 		var tree = ui.accessTree();
 		var sel = [for (id in tree.order) if (tree.nodes.get(id).role == Cell && tree.nodes.get(id).selected == true) tree.nodes.get(id).name];
 		check("calendar: a grid, the chosen day's cell selected and named", sel.join(",") == "3 November 2026", sel.join(","));
+
+		// right to left: Left to the next day (the week from the right)
+		ui.root.style.dir = Rtl;
+		ui.update();
+		ui.setFocus(ui.root.find("cal-grid"));
+		ui.keyDown(Key.LEFT, 0);
+		ui.keyDown(Key.ENTER, 0);
+		check("calendar: right to left, Left to the next day", picked.value.day == 4, "" + picked.value.day);
 
 		var ui2 = new Ui(new MonoText(), 400, 400);
 		ui2.root.style.alignItems = Start;

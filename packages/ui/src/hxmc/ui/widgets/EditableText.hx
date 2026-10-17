@@ -64,6 +64,11 @@ class EditableText extends TextNode {
 		onComposition = e -> compose(e.text, e.caret);
 		onPointerDown = e -> {
 			var i = indexAt(e.x, e.y), t = now();
+			// (a right click: the selection kept when it is inside it, else the caret there; no drag)
+			if (e.button == 3) {
+				if (i < selectionStart || i > selectionEnd || selectionStart == selectionEnd) select(i, i);
+				return;
+			}
 			clicks = t - clickAt < 0.45 && Math.abs(e.x - clickX) < 5 && Math.abs(e.y - clickY) < 5 ? clicks + 1 : 1;
 			clickAt = t;
 			clickX = e.x;
@@ -126,6 +131,43 @@ class EditableText extends TextNode {
 		return composition == "" ? caret : caret + compositionCaret;
 
 	// the composition's underline, line by line, in p (drawn at x, y)
+	// the width inside the borders and padding
+	function innerWidth():Float
+		return Math.max(1, width - style.borderEdges.horizontal - style.padding.horizontal);
+
+	// the text's alignment in the box: its own, else the start side (as an
+	// input's; not inherited), justified lines from the left
+	function fieldAlign():TextAlign {
+		var a = style.textAlign ?? (rtl() ? Right : Left);
+		return a == Justify ? Left : a;
+	}
+
+	// a line's offset in a box this wide for that alignment (right: room
+	// left for the caret)
+	function alignShift(lineWidth:Float, width:Float):Float
+		return switch fieldAlign() {
+			case Right: Math.max(0, width - 1 - lineWidth);
+			case Center: Math.max(0, (width - lineWidth) / 2);
+			case _: 0;
+		}
+
+	var placeholderKey:Null<String> = null;
+	var placeholderLaid:Null<Paragraph> = null;
+	var placeholderFont:Null<Font> = null;
+
+	// the placeholder laid out (in the text's direction), kept while it,
+	// the font and the width are the same
+	function placeholderParagraph(engine:TextEngine, width:Float):Paragraph {
+		var d = dir(), f = font();
+		var key = placeholder + "\u0000" + width + "\u0000" + (d == null ? -1 : d == Rtl ? 1 : 0);
+		if (placeholderLaid == null || key != placeholderKey || !f.equals(placeholderFont)) {
+			placeholderLaid = engine.layout(placeholder, f, width, null, 0, false, d == null ? -1 : d == Rtl ? 1 : 0);
+			placeholderKey = key;
+			placeholderFont = f;
+		}
+		return placeholderLaid;
+	}
+
 	function paintComposition(canvas:Canvas, p:Paragraph, x:Float, y:Float) {
 		if (composition == "") return;
 		var lh = font().size * font().lineHeight, t = Math.max(1, Math.round(font().size / 14));
@@ -190,21 +232,37 @@ class EditableText extends TextNode {
 			case "y".code if (ctrl):
 				redo();
 			case "a".code if (ctrl):
-				select(0, text.length);
-			case "c".code | "x".code if (ctrl):
-				if (selectionStart != selectionEnd && ui != null) {
-					ui.clipboard.write(text.substring(selectionStart, selectionEnd));
-					if (e.key == "x".code) replace("");
-				}
+				selectAll();
+			case "c".code if (ctrl):
+				copy();
+			case "x".code if (ctrl):
+				cut();
 			case "v".code if (ctrl):
-				// (the text may come later: typed where the selection is then)
-				if (ui != null) ui.clipboard.read(t -> if (t != null && t != "") replace(pasted(t)));
+				paste();
 			case _:
 				return;
 		}
 		// (handled: Tab still moves the focus)
 		e.stop();
 	}
+
+	// the selection to the clipboard, and out of the text
+	public function cut() {
+		if (selectionStart == selectionEnd || ui == null) return;
+		ui.clipboard.write(text.substring(selectionStart, selectionEnd));
+		replace("");
+	}
+
+	// the selection to the clipboard
+	public function copy()
+		if (selectionStart != selectionEnd && ui != null) ui.clipboard.write(text.substring(selectionStart, selectionEnd));
+
+	// the clipboard's text over the selection (it may come later: typed where the selection is then)
+	public function paste()
+		if (ui != null) ui.clipboard.read(t -> if (t != null && t != "") replace(pasted(t)));
+
+	public function selectAll()
+		select(0, text.length);
 
 	// the keys a subclass takes before the common ones: true when handled
 	function moreKeys(e:Event, shift:Bool, ctrl:Bool):Bool

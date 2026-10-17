@@ -13,6 +13,7 @@ class TextNode extends Node {
 	var paragraph:Null<Paragraph>;
 	var laidFont:Null<Font>;
 	var laidWidth = Math.NaN;
+	var laidCut = Math.NaN;
 	var laidText:Null<String>;
 	// the max-content paragraph (no width), kept apart: the layout asks for
 	// it (min-content and max-content sizes) between widths
@@ -42,16 +43,35 @@ class TextNode extends Node {
 	}
 
 	// (from the max-content paragraph, which the layout asks for too)
-	override public function minContentWidth(engine:TextEngine):Float
-		return layoutText(engine, Math.NaN).minWidth;
+	// (not wrapped: as wide as its longest line)
+	override public function minContentWidth(engine:TextEngine):Float {
+		var p = layoutText(engine, Math.NaN);
+		return wraps() ? p.minWidth : p.width;
+	}
 
 	// the text laid out and drawn (EditableText: with its composition; with spans: theirs)
 	function shownText():String
-		return children.length > 0 ? spanned().text : text;
+		return children.length > 0 ? spanned().text : transformed(text);
 
-	// the whole text: its own, or its spans'
+	// the whole text, as shown: its own, or its spans'
 	public function allText():String
-		return children.length > 0 ? spanned().text : text;
+		return children.length > 0 ? spanned().text : transformed(text);
+
+	// its text as its textTransform shows it (letter for letter: the indices kept)
+	function transformed(s:String):String
+		return switch textTransform() {
+			case Uppercase: s.toUpperCase();
+			case Lowercase: s.toLowerCase();
+			case Capitalize:
+				var b = new StringBuf(), start = true;
+				for (i in 0...s.length) {
+					var c = s.charAt(i);
+					b.add(start ? c.toUpperCase() : c);
+					start = c == " " || c == "\n" || c == "\t";
+				}
+				b.toString();
+			case _: s;
+		}
 
 	// (spans: the text, each span's place, font and colour, and a key of them all)
 	function spanned():{text:String, spans:Array<TextSpan>, colors:Array<Color>, key:String} {
@@ -64,7 +84,7 @@ class TextNode extends Node {
 					walk(t);
 					continue;
 				}
-				var s = t.text, f = t.font();
+				var s = t.transformed(t.text), f = t.font();
 				if (s.length == 0) continue;
 				b.add(s);
 				spans.push(new TextSpan(pos, pos + s.length, f));
@@ -145,15 +165,15 @@ class TextNode extends Node {
 		var rich = children.length > 0 ? spanned() : null;
 		var shown = rich != null ? rich.text : text, spans = rich != null ? rich.spans : null, clamp = style.maxLines;
 		// (spans: their fonts in the key; and the lines' limit)
-		if (rich != null) text = rich.text + "\u0000" + rich.key;
-		if (clamp > 0) text += "\u0001" + clamp;
 		var justify = textAlign() == Justify;
-		if (justify) text += "\u0002";
 		// (a direction set: its paragraphs in it)
 		var d = dir(), base = d == null ? -1 : d == Rtl ? 1 : 0;
-		if (base >= 0) text += "\u0003" + base;
-		// (to 1/64 pixel up: a width measured from this text fits it again)
-		var w = Math.isNaN(maxWidth) ? maxWidth : Math.fceil(maxWidth * 64 - 1e-6) / 64;
+		text = paragraphKey(text, rich, justify, d);
+		// (to 1/64 pixel up: a width measured from this text fits it again; not wrapped: none)
+		var box = Math.isNaN(maxWidth) ? Math.NaN : Math.fceil(maxWidth * 64 - 1e-6) / 64;
+		var w = wraps() ? box : Math.NaN;
+		// (text-overflow: ellipsis: each line wider than the box cut there)
+		var cut = style.textOverflow == Ellipsis ? box : Math.NaN;
 		var mp = maxParagraph != null && maxText == text && f.equals(maxFont) ? maxParagraph : null;
 		// (the unbounded paragraph first: the layout asks for it anyway, and a
 		// width it fits in lays it out the same)
@@ -163,17 +183,20 @@ class TextNode extends Node {
 			maxFont = f;
 			maxText = text;
 		}
-		if (Math.isNaN(w) || (mp.width <= w && mp.lineCount == 1)) {
+		if ((Math.isNaN(w) || (mp.width <= w && mp.lineCount == 1)) && (Math.isNaN(cut) || mp.width <= cut)) {
 			paragraph = mp;
 			laidFont = f;
-			laidWidth = Math.NaN;
+			laidWidth = laidCut = Math.NaN;
 			laidText = text;
 			return mp;
 		}
-		if (paragraph != null && laidText == text && f.equals(laidFont) && w == laidWidth) return paragraph;
-		paragraph = engine.layout(shown, f, w, spans, clamp, justify, base);
+		inline function same(a:Float, b:Float):Bool
+			return a == b || (Math.isNaN(a) && Math.isNaN(b));
+		if (paragraph != null && laidText == text && f.equals(laidFont) && same(w, laidWidth) && same(cut, laidCut)) return paragraph;
+		paragraph = engine.layout(shown, f, w, spans, clamp, justify, base, Math.isNaN(cut) ? -1 : cut);
 		laidFont = f;
 		laidWidth = w;
+		laidCut = cut;
 		laidText = text;
 		return paragraph;
 	}
@@ -185,21 +208,30 @@ class TextNode extends Node {
 	override public function contentInk():Null<Size>
 		return paragraph == null ? null : {width: paragraph.width, height: paragraph.height};
 
+	// (what the laid out paragraph depends on besides its font and width:
+	// the text, its spans' fonts, the lines' limit, justification, direction)
+	function paragraphKey(text:String, rich:Null<{text:String, spans:Array<TextSpan>, colors:Array<Color>, key:String}>, justify:Bool, d:Null<Dir>):String {
+		if (rich != null) text = rich.text + "\u0000" + rich.key;
+		if (style.maxLines > 0) text += "\u0001" + style.maxLines;
+		if (justify) text += "\u0002";
+		if (d != null) text += "\u0003" + (d == Rtl ? 1 : 0);
+		return text;
+	}
+
 	override public function paintContent(canvas:Canvas, x:Float, y:Float, width:Float, height:Float) {
 		var text = shownText();
 		if (ui == null || text.length == 0) return;
-		var rich = children.length > 0 ? spanned() : null;
-		if (rich != null) text = rich.text + "\u0000" + rich.key;
-		if (style.maxLines > 0) text += "\u0001" + style.maxLines;
-		if (textAlign() == Justify) text += "\u0002";
+		var rich = children.length > 0 ? spanned() : null, align = textAlign(), length = text.length;
+		text = paragraphKey(text, rich, align == Justify, dir());
 		// (the layout's paragraph: its width was the unrounded one, which
 		// rounding the box's edges may have made up to a pixel narrower)
-		var p = paragraph != null && laidText == text && font().equals(laidFont)
-			&& (Math.abs(laidWidth - width) < 1.5 || (Math.isNaN(laidWidth) && paragraph.width <= width + 1.5)) ? paragraph : layoutText(ui.text, width + 0.5);
+		// (unbounded: wider only when not wrapped and not cut; cut: at this width)
+		var fits = Math.isNaN(laidWidth) ? paragraph != null && (paragraph.width <= width + 1.5 || !wraps() && style.textOverflow != Ellipsis) : Math.abs(laidWidth - width) < 1.5;
+		if (!Math.isNaN(laidCut)) fits = Math.abs(laidCut - width) < 1.5;
+		var p = paragraph != null && laidText == text && font().equals(laidFont) && fits ? paragraph : layoutText(ui.text, width + 0.5);
 		// decorations: its ancestors' and its own over all of it, its spans' over theirs;
 		// underlines and overlines under the glyphs, line-throughs over them
-		var decos = decorations(rich != null ? rich.text.length : text.length);
-		var align = textAlign();
+		var decos = decorations(rich != null ? rich.text.length : length);
 		function draw(through:Bool)
 			for (d in decos)
 				if ((d.kind == LineThrough) == through)

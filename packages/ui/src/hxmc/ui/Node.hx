@@ -30,10 +30,12 @@ class Node {
 	public var height(default, null) = 0.0;
 	public var absX(default, null) = 0.0;
 	public var absY(default, null) = 0.0;
-	// the extent of the children past the padding box's origin (scrolling)
+	// the extent of the children past the padding box's origin (scrolling;
+	// right to left: from its right edge, what overflows on the left)
 	public var contentWidth(default, null) = 0.0;
 	public var contentHeight(default, null) = 0.0;
-	// Overflow Scroll: the children's offset (clamped by Ui to the content)
+	// Overflow Scroll: the children's offset (clamped by Ui to the content;
+	// right to left, scrollX from 0 down: Ui.scrollStart)
 	public var scrollX(default, set) = 0.0;
 	public var scrollY(default, set) = 0.0;
 
@@ -54,6 +56,9 @@ class Node {
 	public var onComposition(get, set):Null<Event->Void>;
 	public var onFocus(get, set):Null<Event->Void>;
 	public var onBlur(get, set):Null<Event->Void>;
+	// (bubbling: the focus coming into this node or one under it, or leaving)
+	public var onFocusIn(get, set):Null<Event->Void>;
+	public var onFocusOut(get, set):Null<Event->Void>;
 	// drag and drop: dragData makes it draggable (what its drag carries);
 	// the handlers of a source (start, end) and of a target (over: call
 	// preventDefault to accept; leave; drop)
@@ -356,6 +361,28 @@ class Node {
 	inline function get_onBlur():Null<Event->Void>
 		return handlers == null ? null : handlers.onBlur;
 
+	inline function get_onFocusIn():Null<Event->Void>
+		return handlers == null ? null : handlers.onFocusIn;
+
+	function set_onFocusIn(v:Null<Event->Void>):Null<Event->Void> {
+		if (handlers == null) {
+			if (v == null) return v;
+			handlers = new Handlers();
+		}
+		return handlers.onFocusIn = v;
+	}
+
+	inline function get_onFocusOut():Null<Event->Void>
+		return handlers == null ? null : handlers.onFocusOut;
+
+	function set_onFocusOut(v:Null<Event->Void>):Null<Event->Void> {
+		if (handlers == null) {
+			if (v == null) return v;
+			handlers = new Handlers();
+		}
+		return handlers.onFocusOut = v;
+	}
+
 	function set_onBlur(v:Null<Event->Void>):Null<Event->Void> {
 		if (handlers == null) {
 			if (v == null) return v;
@@ -501,6 +528,51 @@ class Node {
 			n = n.parent;
 		}
 		return Style.DEFAULT_COLOR;
+	}
+
+	// whether it is seen: its visibility, else its nearest ancestor's (Style.visibility)
+	public function visible():Bool {
+		var n = this;
+		while (n != null) {
+			var v = n.style.visibility;
+			if (v != null) return v == Visible;
+			n = n.parent;
+		}
+		return true;
+	}
+
+	// whether the pointer finds it: seen, and its pointerEvents (else its
+	// nearest ancestor's) not None
+	public function hittable():Bool {
+		var n = this;
+		while (n != null) {
+			var p = n.style.pointerEvents;
+			if (p != null) return p == Auto && visible();
+			n = n.parent;
+		}
+		return visible();
+	}
+
+	// whether its text wraps: its textWrap, else its nearest ancestor's (Style.textWrap)
+	public function wraps():Bool {
+		var n = this;
+		while (n != null) {
+			var w = n.style.textWrap;
+			if (w != null) return w == Wrap;
+			n = n.parent;
+		}
+		return true;
+	}
+
+	// how its text's letters are shown: its textTransform, else its nearest ancestor's
+	public function textTransform():TextTransform {
+		var n = this;
+		while (n != null) {
+			var t = n.style.textTransform;
+			if (t != null) return t;
+			n = n.parent;
+		}
+		return None;
 	}
 
 	public function textAlign():TextAlign {
@@ -762,7 +834,7 @@ class Node {
 				var c = order[i].hitTest(sx, sy);
 				if (c != null) return c;
 			}
-			return inside ? this : null;
+			return inside && hittable() ? this : null;
 		}
 		for (pass in 0...2) {
 			var i = children.length;
@@ -772,7 +844,7 @@ class Node {
 				if (c != null) return c;
 			}
 		}
-		return inside ? this : null;
+		return inside && hittable() ? this : null;
 	}
 
 	// the bounds of what it and its subtree draw, from its layout (window
@@ -875,6 +947,8 @@ private class Handlers {
 	public var onComposition:Null<Event->Void> = null;
 	public var onFocus:Null<Event->Void> = null;
 	public var onBlur:Null<Event->Void> = null;
+	public var onFocusIn:Null<Event->Void> = null;
+	public var onFocusOut:Null<Event->Void> = null;
 	public var dragData:Dynamic = null;
 	public var onDragStart:Null<Event->Void> = null;
 	public var onDragOver:Null<Event->Void> = null;

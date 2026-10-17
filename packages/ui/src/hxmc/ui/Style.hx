@@ -187,6 +187,31 @@ class Style {
 	// default alignment; margins, padding and offsets stay physical
 	public var dir(get, set):Null<Dir>;
 
+	// whether it is seen, inherited (null: the parent's; Visible at the
+	// root): Hidden keeps its place but draws, hits, focuses and shows
+	// nothing of it to assistive technology (its Visible descendants still are)
+	public var visibility(get, set):Null<Visibility>;
+
+	// whether the pointer finds it, inherited (null: the parent's; Auto at
+	// the root; CSS's pointer-events): None lets presses, hovers and the
+	// wheel through to what is under it (its Auto descendants still take them)
+	public var pointerEvents(get, set):Null<PointerEvents>;
+
+	// whether text wraps at its box's width, inherited (null: the parent's;
+	// Wrap at the root; CSS's text-wrap-mode): NoWrap lays each line out
+	// whole, its min-content width that wide (line breaks still break)
+	public var textWrap(get, set):Null<TextWrap>;
+
+	// its text's letters as shown, inherited (null: the parent's; None at
+	// the root; CSS's text-transform): upper or lower case, or each word's
+	// first in upper case; a text field's own text is shown as typed
+	public var textTransform(get, set):Null<TextTransform>;
+
+	// a line too wide for its box (CSS's text-overflow; not inherited):
+	// Ellipsis ends it in one within the box (with NoWrap, or a word too
+	// long to break); its intrinsic widths are the whole text's
+	public var textOverflow(get, set):TextOverflow;
+
 	// a text's lines at most (0: any), the last ending in an ellipsis when cut (CSS's line-clamp; not inherited)
 	public var maxLines(get, set):Int;
 
@@ -269,6 +294,21 @@ class Style {
 
 	inline function get_dir():Null<Dir>
 		return rare == null ? null : rare.dir;
+
+	inline function get_visibility():Null<Visibility>
+		return rare == null ? null : rare.visibility;
+
+	inline function get_pointerEvents():Null<PointerEvents>
+		return rare == null ? null : rare.pointerEvents;
+
+	inline function get_textWrap():Null<TextWrap>
+		return rare == null ? null : rare.textWrap;
+
+	inline function get_textTransform():Null<TextTransform>
+		return rare == null ? null : rare.textTransform;
+
+	inline function get_textOverflow():TextOverflow
+		return rare == null ? Clip : rare.textOverflow;
 
 	inline function get_order():Int
 		return rare == null ? 0 : rare.order;
@@ -362,6 +402,43 @@ class Style {
 		node.styleChanged(true);
 		// (inherited: every container under it lays out again)
 		@:privateAccess node.dirChanged();
+		return v;
+	}
+
+	function set_visibility(v:Null<Visibility>):Null<Visibility> {
+		if (v == visibility) return v;
+		more().visibility = v;
+		node.styleChanged(false);
+		// (what assistive technology sees changes)
+		Ui.accessEpoch++;
+		return v;
+	}
+
+	function set_pointerEvents(v:Null<PointerEvents>):Null<PointerEvents> {
+		if (v == pointerEvents) return v;
+		more().pointerEvents = v;
+		return v;
+	}
+
+	function set_textWrap(v:Null<TextWrap>):Null<TextWrap> {
+		if (v == textWrap) return v;
+		more().textWrap = v;
+		// (inherited: the text under it laid out again)
+		node.styleChanged(true);
+		return v;
+	}
+
+	function set_textOverflow(v:TextOverflow):TextOverflow {
+		if (v == textOverflow) return v;
+		more().textOverflow = v;
+		node.styleChanged(true);
+		return v;
+	}
+
+	function set_textTransform(v:Null<TextTransform>):Null<TextTransform> {
+		if (v == textTransform) return v;
+		more().textTransform = v;
+		node.styleChanged(true);
 		return v;
 	}
 
@@ -817,6 +894,11 @@ class Style {
 		if (p.wordSpacing != null) wordSpacing = p.wordSpacing;
 		if (p.textAlign != null) textAlign = p.textAlign;
 		if (p.dir != null) dir = p.dir;
+		if (p.visibility != null) visibility = p.visibility;
+		if (p.pointerEvents != null) pointerEvents = p.pointerEvents;
+		if (p.textWrap != null) textWrap = p.textWrap;
+		if (p.textTransform != null) textTransform = p.textTransform;
+		if (p.textOverflow != null) textOverflow = p.textOverflow;
 		if (p.order != null) order = p.order;
 		if (p.zIndex != null) zIndex = p.zIndex;
 		if (p.textDecoration != null) textDecoration = p.textDecoration;
@@ -860,6 +942,11 @@ private class StyleRare {
 	public var wordSpacing:Null<Float> = null;
 	public var maxLines:Int = 0;
 	public var dir:Null<Dir> = null;
+	public var visibility:Null<Visibility> = null;
+	public var pointerEvents:Null<PointerEvents> = null;
+	public var textWrap:Null<TextWrap> = null;
+	public var textTransform:Null<TextTransform> = null;
+	public var textOverflow:TextOverflow = Clip;
 	public var order:Int = 0;
 	public var zIndex:Int = 0;
 	public var textDecoration:Int = 0;

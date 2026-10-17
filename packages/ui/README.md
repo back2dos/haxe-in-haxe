@@ -48,7 +48,9 @@ and in a browser (wasm32-wasi on WebGPU or WebGL2).
     Scroll), `dir` (Rtl: rows from the right, columns' items across
     from the right, grids' columns from the right, text aligned right by
     default, paragraphs in that direction; inherited; margins and padding
-    stay physical; scrolling still starts at the left), `order` (laid out,
+    stay physical; a scroller's content overflowing to the left scrolled to
+    by negative `scrollX` from 0 at its right end, as Chromium's
+    scrollLeft, its vertical bar on the left), `order` (laid out,
     painted and hit in it; Tab keeps the tree's order), `zIndex` (painted
     and hit over or under siblings; no stacking contexts across levels).
     Sizes are border boxes. Items get CSS's automatic minimum
@@ -66,7 +68,12 @@ and in a browser (wasm32-wasi on WebGPU or WebGL2).
   - Text properties inherit: `color`, `fontFamily`, `fontSize`,
     `fontWeight`, `italic`, `lineHeight`, `letterSpacing`, `wordSpacing`,
     `textAlign` (left, center, right, justify: the room shared among the
-    spaces as Chromium shares it; spacing added as Chromium adds it). `textDecoration`
+    spaces as Chromium shares it; spacing added as Chromium adds it),
+    `textWrap` (`NoWrap`, CSS's text-wrap-mode: each line kept whole, past
+    its box, its min-content width that wide), `textTransform` (`Uppercase`,
+    `Lowercase`, `Capitalize`: letter for letter; a span its own; a text
+    field's text as typed), `textOverflow` (`Ellipsis`, not inherited: a
+    line too wide for its box ends in one within it). `textDecoration`
     (underline, line-through, overline) draws its lines with the text inside
     the node, in its colour, where Chromium draws them. `maxLines` cuts a
     text to so many lines, the last ending in an ellipsis where Chromium's
@@ -77,7 +84,12 @@ and in a browser (wasm32-wasi on WebGPU or WebGL2).
     inner corners quarter ellipses as Chromium draws them), `opacity`, `shadow`
     (CSS's box-shadow: `"0 2px 8px rgba(0, 0, 0, 0.25)"`, x, y, blur, spread,
     colour; `inset`; several, comma-separated; blurred by a Gaussian as
-    Chromium blurs them, within a few levels of its pixels), `cursor`. Colours are
+    Chromium blurs them, within a few levels of its pixels), `cursor`,
+    `visibility` (inherited; `Hidden` keeps the node's place but draws,
+    hits, focuses and shows it to assistive technology no more, while a
+    `Visible` descendant still is), `pointerEvents` (inherited; `None` lets
+    the pointer through to what is under it, an `Auto` descendant still
+    found). Colours are
     CSS's (`Color.parse`: hex, `rgb()`, `hsl()`, the 148 names, as Chromium
     computes them); `backgroundImage` (markup: `background="linear-gradient(...)"`)
     is a CSS gradient, linear or radial, repeating or not (`Gradient`: within
@@ -99,9 +111,10 @@ and in a browser (wasm32-wasi on WebGPU or WebGL2).
     Under a turning transform a clip is its bounds.
   - Images: `Image` (RGBA8 pixels; `Image.decode` reads PNG files of every
     colour type, depth and interlacing, JPEG files, baseline or
-    progressive, decoded as browsers do, the EXIF orientation applied, and
-    GIF files' first frame; `AnimatedImage` plays a GIF's frames, each
-    composed as Chromium composes it, on the clock), shown by an `ImageNode` at its own
+    progressive, decoded as browsers do, the EXIF orientation applied,
+    GIF files' first frame, and WebP files, lossless or lossy, with alpha
+    (pixel-exact with libwebp's decoding), an animation's first frame; `AnimatedImage` plays a GIF's,
+    WebP's or animated PNG's frames, each composed as Chromium composes it, on the clock), shown by an `ImageNode` at its own
     size or the style's (keeping its aspect ratio), fitted as `Fill`,
     `Contain`, `Cover` or `None`, its corners rounded with the node's.
   - SVG: `Svg.parse` reads the static subset icon sets use (shapes, all of
@@ -145,7 +158,9 @@ and in a browser (wasm32-wasi on WebGPU or WebGL2).
   `memo`, `effect`, `batch`, `untrack`, contexts), `Render` and the
   control flow components `For`, `Index`, `Show`, `Switch`,
   `ErrorBoundary` are `@hxmc/view`'s ([its README](../view/README.md)).
-- **`hxmc.ui.widgets`**: `TextField` (caret, selection, keyboard editing),
+- **`hxmc.ui.widgets`**: `TextField` (caret, selection, keyboard editing,
+  `cut`, `copy`, `paste`, `selectAll`; `Field` and `Area` add an edit menu
+  on a right click or the menu key),
   `TextArea` (lines: wrapping, Up and Down, scrolling; both on
   `EditableText`, with an input method's composition shown at the caret), and the components `Button`, `Checkbox`, `Toggle` (a switch), `Radio`, `Slider`,
   `Progress`, `Tabs`, `Field`, `Area`, `Table` (sortable columns, virtualised
@@ -156,7 +171,8 @@ and in a browser (wasm32-wasi on WebGPU or WebGL2).
   calendar in a popover; `Days`: dates as day numbers, no time zones),
   `Disclosure` and `Accordion` (sections shown and hidden), `NumberField`
   (typed or stepped, within bounds; a spin button), and the popups `Select`, `Menu`,
-  `ContextMenu` (at the pointer), `Tooltip`, `Dialog`, `Combobox` (a text
+  `ContextMenu` (at the pointer), `Menubar` (menus' titles in a row, moved
+  through by Left and Right, one open at a time), `Tooltip`, `Dialog`, `Combobox` (a text
   field whose typing filters options under it; the focus stays in the
   field), `Toaster` (`Toasts.show`: messages in a corner for a while, with
   an action); `examples/Gallery.hx` shows them all. They draw
@@ -191,7 +207,7 @@ Attributes:
   `style={...}` takes a typed `StyleProps` object;
 - events: `onClick`, `onPointerDown`, `onPointerUp`, `onPointerMove`,
   `onPointerEnter`, `onPointerLeave`, `onWheel`, `onKeyDown`, `onKeyUp`,
-  `onTextInput`, `onFocus`, `onBlur` (an `Event -> Void`);
+  `onTextInput`, `onFocus`, `onBlur`, `onFocusIn`, `onFocusOut` (bubbling) (an `Event -> Void`);
 - `focusable`, `ref={n -> ...}` (the node), `tag="name"` (for `Node.find`).
 - drag and drop: `drag-data={value}` makes a node draggable; `onDragStart`,
   `onDragEnd` (`e.dropped`) on the source, `onDragOver` (`e.preventDefault()`

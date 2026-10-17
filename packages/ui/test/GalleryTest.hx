@@ -10,11 +10,12 @@ import hxmc.view.*;
 // checkbox and switch (clicked and with the keyboard), radio
 // buttons, the slider (dragged, clicked, arrow keys, Home and End), tabs,
 // the tree opened and the table sorted in their split view,
-// the field, the combobox, the number field, the disclosure and a toast, the images' sizes; PNG files decoded natively (png/*.png,
+// the field, the combobox, the number field, the disclosure and a toast, the images' sizes; PNG and WebP files decoded natively (png/*.png, webp/*.webp,
 // as UiTest on Eval); its state checked, then its frame against gallery.png (Linux:
 // llvmpipe, DejaVu Sans) (make ui-draw-check):
-// With --dark, in Theme.DARK, against gallery-dark.png.
-//   GalleryTest <golden.png> <out.png> [--dark] [--bless]
+// With --dark, in Theme.DARK, against gallery-dark.png; with --rtl, right to
+// left, against gallery-rtl.png.
+//   GalleryTest <golden.png> <out.png> [--dark] [--rtl] [--bless]
 class GalleryTest {
 	static inline var W = 560;
 	static inline var H = 1320;
@@ -56,6 +57,13 @@ class GalleryTest {
 		}
 		function shown(tag:String):String
 			return (cast find(tag) : TextNode).text;
+		// right to left: the buttons from the right; then back
+		click("rtl");
+		var plain = find("plain");
+		check("right to left: mirrored", app.rtl.value && plain.absX + plain.width == W - 20 && find("primary").absX < plain.absX,
+			'${plain.absX} ${plain.width}');
+		click("rtl");
+		check("left to right again", find("plain").absX == 20, '${find("plain").absX}');
 		click("plain");
 		click("primary");
 		check("buttons", app.clicks.value == 11 && shown("clicks") == "clicked 11", shown("clicks"));
@@ -168,9 +176,14 @@ class GalleryTest {
 		key(Key.TAB);
 		check("Tab to the last button", ui.focus == find("notify"));
 		// Tab from there: no further focusable node, back to the first (the
-		// Plain button), its focus ring shown
+		// menu bar's first title), its focus ring shown; then the direction
+		// switch, the Plain button
 		key(Key.TAB);
-		check("Tab wraps to the first button", ui.focus == find("plain") && ui.focusVisible);
+		check("Tab wraps to the first control", ui.focus == find("app-0") && ui.focusVisible);
+		key(Key.TAB);
+		check("the menu bar one stop", ui.focus == find("rtl"));
+		key(Key.TAB);
+		check("then the first button", ui.focus == find("plain"));
 		var natural = find("natural");
 		check("an image's natural size", natural.width == 120 && natural.height == 60, '${natural.width}x${natural.height}');
 		// the PNG cases, decoded by the native build
@@ -185,6 +198,20 @@ class GalleryTest {
 				}
 			check("PNG files decoded", n >= 20 && bad.length == 0, bad.join(" "));
 		}
+		// the WebP cases (lossless, lossy, alpha), decoded by the native build
+		var dir = "packages/ui/test/webp";
+		if (sys.FileSystem.exists(dir)) {
+			var n = 0, bad = [];
+			for (f in sys.FileSystem.readDirectory(dir))
+				if (StringTools.endsWith(f, ".webp")) {
+					n++;
+					var img = try Image.decode(sys.io.File.getBytes(dir + "/" + f)) catch (e:Dynamic) null;
+					if (img == null || img.pixels.compare(sys.io.File.getBytes(dir + "/" + f.substr(0, f.length - 5) + ".rgba")) != 0) bad.push(f);
+				}
+			check("WebP files decoded", n >= 25 && bad.length == 0, bad.join(" "));
+		}
+		// (with --rtl, the frame right to left)
+		if (args.indexOf("--rtl") >= 0) click("rtl");
 		// (the frame with the select's list open over the toggles)
 		click("fruit");
 		Sys.println('GalleryTest: $checks checks' + (failed == 0 ? ", ok" : ', $failed FAILED'));

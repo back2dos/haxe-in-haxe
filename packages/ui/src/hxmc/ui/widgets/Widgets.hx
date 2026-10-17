@@ -124,37 +124,67 @@ class Widgets implements Markup {
 	}
 
 	// radio buttons bound to a signal: one per option (tag: the group's tag,
-	// "-", the option)
+	// "-", the option); one stop for Tab (the checked one, else the first),
+	// the arrows checking and focusing the next or previous (wrapping)
 	public static function Radio(props:{value:Signal<String>, options:Array<String>, ?label:String, ?tag:String}):View {
-		var tag = props.tag ?? "radio";
+		var tag = props.tag ?? "radio", options = props.options, nodes:Array<Node> = [];
+		// (the Tab stop: the checked option, else the first)
+		function stop(i:Int):Bool {
+			var k = options.indexOf(props.value.value);
+			return i == (k < 0 ? 0 : k);
+		}
+		function key(e:Event, i:Int) {
+			var n = options.length;
+			var j = switch mirrored(e) {
+				case Key.SPACE: i;
+				case Key.DOWN | Key.RIGHT: (i + 1) % n;
+				case Key.UP | Key.LEFT: (i + n - 1) % n;
+				case _: return;
+			}
+			e.preventDefault();
+			props.value.value = options[j];
+			focusIn(nodes, j);
+		}
 		return <view tag={tag} role="radiogroup" label={props.label} row-gap={6}>{[
-			for (o in props.options)
-				<view tag={tag + "-" + o} role="radio" checked={() -> props.value.value == o} direction="row" align-items="center" column-gap={8} focusable cursor="pointer" onClick={_ -> props.value.value = o}
-					onKeyDown={e -> if (e.key == Key.SPACE) {
-						e.preventDefault();
-						props.value.value = o;
-					}}>
+			for (i in 0...options.length) {
+				var o = options[i];
+				<view tag={tag + "-" + o} role="radio" ref={n -> nodes[i] = n} checked={() -> props.value.value == o} direction="row" align-items="center"
+					column-gap={8} focusable={() -> stop(i)} cursor="pointer" onClick={_ -> props.value.value = o} onKeyDown={e -> key(e, i)}>
 					<view width={16} height={16} radius={8} border-width={1.5} border-color={Motion.color(() -> props.value.value == o ? t().accentHover : t().mark)}
 						align-items="center" justify="center">
 						<view width={8} height={8} radius={4} background={Motion.color(() -> props.value.value == o ? t().accent : Theme.clear(t().accent))}/>
 					</view>
 					{o}
-				</view>
+				</view>;
+			}
 		]}</view>;
 	}
 
 	// tabs: a row of labels (tag: the tabs' tag, "-", the index), the
-	// selected one underlined, and what render gives for it below
+	// selected one underlined, and what render gives for it below. One stop
+	// for Tab, the selected one; Left and Right (the way they point, wrapping),
+	// Home and End select another and move the focus there
 	public static function Tabs(props:{labels:Array<String>, selected:Signal<Int>, render:Int->Any, ?tag:String}):View {
-		var tag = props.tag ?? "tabs";
+		var tag = props.tag ?? "tabs", count = props.labels.length, tabs:Array<Node> = [];
+		function key(e:Event, i:Int) {
+			var j = switch mirrored(e) {
+				case Key.LEFT: (i + count - 1) % count;
+				case Key.RIGHT: (i + 1) % count;
+				case Key.HOME: 0;
+				case Key.END: count - 1;
+				case Key.SPACE | Key.ENTER: i;
+				case _: return;
+			}
+			e.preventDefault();
+			props.selected.value = j;
+			focusIn(tabs, j);
+		}
 		return <view tag={tag} row-gap={10}>
 			<view role="tablist" direction="row" column-gap={4}>{[
-				for (i in 0...props.labels.length)
-					<view tag={tag + "-" + i} role="tab" selected={() -> props.selected.value == i} focusable cursor="pointer" padding="6 10 0 10" row-gap={6} align-items="center"
-						onClick={_ -> props.selected.value = i} onKeyDown={e -> if (e.key == Key.SPACE || e.key == Key.ENTER) {
-							e.preventDefault();
-							props.selected.value = i;
-						}}
+				for (i in 0...count)
+					<view tag={tag + "-" + i} role="tab" ref={n -> tabs[i] = n} selected={() -> props.selected.value == i}
+						focusable={() -> props.selected.value == i} cursor="pointer" padding="6 10 0 10" row-gap={6} align-items="center"
+						onClick={_ -> props.selected.value = i} onKeyDown={e -> key(e, i)}
 						color={Motion.color(() -> props.selected.value == i ? t().accentText : t().secondary)}>
 						{props.labels[i]}
 						<view align-self="stretch" height={2} radius={1} background={Motion.color(() -> props.selected.value == i ? t().accent : Theme.clear(t().accent))}/>
@@ -334,7 +364,7 @@ class Widgets implements Markup {
 		}
 		function key(e:Event) {
 			var rs = rows.peek(), i = indexOf(selected.peek()), j = i;
-			switch e.key {
+			switch mirrored(e) {
 				case Key.DOWN: j = i < 0 ? 0 : i + 1;
 				case Key.UP: j = i < 0 ? 0 : i - 1;
 				case Key.HOME: j = 0;
@@ -371,7 +401,7 @@ class Widgets implements Markup {
 					<view tag={tag + "-toggle"} width={14} align-items="center" cursor="pointer" onClick={e -> if (row.value != null && !row.value.leaf) {
 						setOpen(row.value.item, !row.value.open);
 						e.stop();
-					}}><text hidden color={() -> t().muted}>{() -> row.value == null || row.value.leaf ? "" : row.value.open ? "▾" : "▸"}</text></view>
+					}}>{arrow(() -> row.value == null || row.value.leaf ? "" : row.value.open ? "▾" : "▸")}</view>
 					{() -> row.value == null ? null : props.render(row.value.item)}
 				</view>;
 			}}/>
@@ -411,9 +441,13 @@ class Widgets implements Markup {
 					grab = row ? e.localX : e.localY;
 					active.value = true;
 				}} onPointerUp={_ -> active.value = false}
-				onPointerMove={e -> if (active.peek() && self != null) set((row ? self.localX(e.x, e.y) : self.localY(e.x, e.y)) - grab)}
+				onPointerMove={e -> if (active.peek() && self != null) {
+					var at = (row ? self.localX(e.x, e.y) : self.localY(e.x, e.y)) - grab;
+					// (right to left, the first pane on the right)
+					set(row && self.rtl() ? self.width - grip - at : at);
+				}}
 				onKeyDown={e -> {
-					var v = switch e.key {
+					var v = switch row ? mirrored(e) : e.key {
 						case Key.LEFT | Key.UP: size.peek() - 10;
 						case Key.RIGHT | Key.DOWN: size.peek() + 10;
 						case Key.HOME: lo;
@@ -468,7 +502,7 @@ class Widgets implements Markup {
 		}
 		function key(e:Event) {
 			var c = cursor.peek(), wd = (Days.weekday(c) - first + 7) % 7;
-			switch e.key {
+			switch mirrored(e) {
 				case Key.LEFT: cursor.value = c - 1;
 				case Key.RIGHT: cursor.value = c + 1;
 				case Key.UP: cursor.value = c - 7;
@@ -655,6 +689,69 @@ class Widgets implements Markup {
 		</view>;
 	}
 
+	// a menu bar: a row of menus' titles, each opening its items (as Menu's)
+	// under it on a click, Down, Enter or Space; while one is open, the
+	// pointer over another title opens that one instead; Left and Right move
+	// between the titles the way they point (from an open menu: the next one
+	// opened, wrapping);
+	// Escape closes it, the focus back on its title. One stop for Tab: the
+	// title last moved to. The items' shortcuts work from anywhere in the window.
+	public static function Menubar(props:{menus:Array<{label:String, items:Array<{label:String, onSelect:Void->Void, ?shortcut:String}>}>, ?label:String,
+			?tag:String}):View {
+		var tag = props.tag ?? "menubar", count = props.menus.length;
+		var opens = [for (m in props.menus) signal(false)], titles:Array<Node> = [], current = signal(0);
+		// (menu i open, the others closed; -1: none)
+		function show(i:Int)
+			batch(() -> for (j in 0...count) opens[j].value = j == i);
+		function anyOpen():Bool {
+			for (o in opens)
+				if (o.peek()) return true;
+			return false;
+		}
+		// (to the title on the right or left, its menu opened if one was: the focus there first, out of the closing menu)
+		function step(i:Int, right:Bool, open:Bool) {
+			var d = right != (titles[i] != null && titles[i].rtl()) ? 1 : -1;
+			var j = (i + d + count) % count;
+			current.value = j;
+			focusIn(titles, j);
+			if (open) show(j);
+		}
+		return <view tag={tag} role="menubar" label={props.label} direction="row" column-gap={2}>{[
+			for (i in 0...count) {
+				var m = props.menus[i], items:Array<Node> = [], hover = signal(false);
+				<view tag={tag + "-" + i} role="menuitem" ref={n -> titles[i] = n} expanded={() -> opens[i].value} focusable={() -> current.value == i}
+					cursor="pointer" onFocus={_ -> current.value = i} padding="4 10" radius={4}
+					background={() -> opens[i].value ? t().itemSelected : hover.value ? t().itemHover : Theme.clear(t().control)}
+					onPointerEnter={_ -> {
+						hover.value = true;
+						if (anyOpen() && !opens[i].peek()) {
+							current.value = i;
+							focusIn(titles, i);
+							show(i);
+						}
+					}} onPointerLeave={_ -> hover.value = false} onClick={_ -> show(opens[i].peek() ? -1 : i)}
+					onKeyDown={e -> switch e.key {
+						case Key.LEFT | Key.RIGHT:
+							step(i, e.key == Key.RIGHT, false);
+							e.stop();
+						case Key.DOWN | Key.ENTER | Key.SPACE:
+							show(i);
+							e.stop();
+						case _:
+					}}>
+					{m.label}
+					{hotkeys(m.items, false)}
+					<Popover open={opens[i]} placement="below" onDismiss={() -> if (opens[i].peek()) show(-1)} onOpen={_ -> focusIn(items, 0)}>
+						<view onKeyDown={e -> if (e.key == Key.LEFT || e.key == Key.RIGHT) {
+							step(i, e.key == Key.RIGHT, true);
+							e.stop();
+						}}>{menuItems(tag + "-" + i, m.label, m.items, opens[i], items)}</view>
+					</Popover>
+				</view>;
+			}
+		]}</view>;
+	}
+
 	// a context menu: the children, with items (as Menu's) opened by a right
 	// click on them where it was pressed, or by the menu key or Shift+F10
 	// when the focus is in them (at their top left, the first item focused);
@@ -694,6 +791,11 @@ class Widgets implements Markup {
 	// the items' shortcuts (local: while the focus is in the parent)
 	static function hotkeys(list:Array<{label:String, onSelect:Void->Void, ?shortcut:String}>, local:Bool):Array<Any>
 		return [for (it in list) if (it.shortcut != null) UiFlow.Hotkey({keys: it.shortcut, action: it.onSelect, local: local})];
+
+	// an event's key, Left and Right swapped where it is right to left (the
+	// way they point, in a mirrored row or grid)
+	static function mirrored(e:Event):Int
+		return e.key != Key.LEFT && e.key != Key.RIGHT || !e.current.rtl() ? e.key : e.key == Key.LEFT ? Key.RIGHT : Key.LEFT;
 
 	// focuses nodes[i] if it is shown
 	static function focusIn(nodes:Array<Node>, i:Int)
@@ -754,7 +856,9 @@ class Widgets implements Markup {
 			over++;
 			show.value = false;
 		}
-		return <view tag={props.tag} onPointerEnter={_ -> enter()} onPointerLeave={_ -> leave()} onPointerDown={_ -> leave()}>
+		// (also while the keyboard's focus is in it)
+		return <view tag={props.tag} onPointerEnter={_ -> enter()} onPointerLeave={_ -> leave()} onPointerDown={_ -> leave()}
+			onFocusIn={e -> if (e.current.ui != null && e.current.ui.focusVisible) enter()} onFocusOut={_ -> leave()}>
 			{props.children}
 			<Popover open={show} placement={props.placement ?? "above"} tag="tooltip">
 				<view role="tooltip" padding="4 8" radius={4} background={() -> t().tooltip} color={() -> t().onTooltip} font-size={12}>{props.text}</view>
@@ -895,7 +999,7 @@ class Widgets implements Markup {
 				e.preventDefault();
 				flip();
 			}}>
-			<text width={12} color={() -> t().muted} hidden>{() -> isOpen() ? "▾" : "▸"}</text>
+			<view width={12}>{arrow(() -> isOpen() ? "▾" : "▸")}</view>
 			{label}
 		</view>;
 
@@ -1010,8 +1114,9 @@ class Widgets implements Markup {
 		return StringTools.endsWith(s, ".0") ? s.substr(0, s.length - 2) : s;
 	}
 
-	// a text area bound to a signal (two ways), rows lines high (3)
-	public static function Area(props:{value:Signal<String>, ?rows:Int, ?placeholder:String, ?label:String, ?tag:String}):Node {
+	// a text area bound to a signal (two ways), rows lines high (3); a right
+	// click (or the menu key) opens its edit menu
+	public static function Area(props:{value:Signal<String>, ?rows:Int, ?placeholder:String, ?label:String, ?tag:String}):View {
 		var f = new TextArea(props.value.peek());
 		if (props.tag != null) f.tag = props.tag;
 		f.rows = props.rows ?? 3;
@@ -1021,10 +1126,29 @@ class Widgets implements Markup {
 		themed(f);
 		f.onChange = s -> props.value.value = s;
 		effect(() -> f.setText(props.value.value));
-		return f;
+		return editMenu(f, props.tag ?? "area");
 	}
 
+	// (a text field in a context menu of its edits: cut, copy, paste, select all)
+	static function editMenu(f:EditableText, tag:String):View
+		return <ContextMenu tag={tag + "-menu"} label="Edit" items={[
+			{label: "Cut", onSelect: () -> f.cut(), shortcut: "Mod+X"},
+			{label: "Copy", onSelect: () -> f.copy(), shortcut: "Mod+C"},
+			{label: "Paste", onSelect: () -> f.paste(), shortcut: "Mod+V"},
+			{label: "Select All", onSelect: () -> f.selectAll(), shortcut: "Mod+A"}
+		]}>{f}</ContextMenu>;
+
 	// (a text field's colours from the theme, following it)
+	// (a disclosure's arrow, a tree's or a summary's: hidden from assistive
+	// technology, muted; closed, to the line's end)
+	static function arrow(shown:Void->String):Node {
+		var n = new Arrow("");
+		n.semantics = {hidden: true};
+		effect(() -> n.text = shown());
+		effect(() -> n.style.color = Color.parse(t().muted));
+		return n;
+	}
+
 	static function themed(f:EditableText)
 		effect(() -> {
 			var th = t();
@@ -1036,8 +1160,9 @@ class Widgets implements Markup {
 			f.markDirty();
 		});
 
-	// a text field bound to a signal (two ways)
-	public static function Field(props:{value:Signal<String>, ?placeholder:String, ?label:String, ?onSubmit:String->Void, ?tag:String}):Node {
+	// a text field bound to a signal (two ways); a right click (or the menu
+	// key) opens its edit menu
+	public static function Field(props:{value:Signal<String>, ?placeholder:String, ?label:String, ?onSubmit:String->Void, ?tag:String}):View {
 		var f = new TextField(props.value.peek());
 		if (props.tag != null) f.tag = props.tag;
 		f.placeholder = props.placeholder ?? "";
@@ -1047,6 +1172,13 @@ class Widgets implements Markup {
 		f.onChange = s -> props.value.value = s;
 		f.onSubmit = props.onSubmit;
 		effect(() -> f.setText(props.value.value));
-		return f;
+		return editMenu(f, props.tag ?? "field");
 	}
+}
+
+// a disclosure's arrow: closed (▸), it points to the line's end, right to
+// left the other way (as Chromium's disclosure-closed marker)
+private class Arrow extends TextNode {
+	override function shownText():String
+		return text == "▸" && rtl() ? "◂" : text;
 }

@@ -128,6 +128,8 @@ class Ui {
 	var cullY0 = 0.0;
 	var cullX1 = 0.0;
 	var cullY1 = 0.0;
+	// (the node being drawn is hidden: Style.visibility, inherited)
+	var hidden = false;
 
 	function paintNode(n:Node, canvas:Canvas) {
 		var s = n.style;
@@ -147,6 +149,8 @@ class Ui {
 			cullX1 = cullY1 = 1e9;
 		}
 		if (s.opacity < 1) canvas.pushOpacity(s.opacity);
+		var wasHidden = hidden;
+		if (s.visibility != null) hidden = s.visibility == Hidden;
 		// (each corner's radius and each side's border, when the style gives them)
 		var cs = s.corners != null ? s.cornerRadii() : null, sides = s.borders != null ? s.borderEdges : null;
 		var be = s.borderEdges, bordered = be.top + be.right + be.bottom + be.left > 0 && s.borderColor.a > 0;
@@ -159,7 +163,7 @@ class Ui {
 		}
 		// (the shadows outside: the last one first, under the others; not
 		// under the box, as CSS clips them, unless its background hides them)
-		var shadows = s.shadow == null ? null : s.shadow.painted();
+		var shadows = s.shadow == null || hidden ? null : s.shadow.painted();
 		var opaque = s.background.a == 255 && s.backgroundImage == null;
 		if (shadows != null)
 			for (sh in shadows) {
@@ -169,7 +173,9 @@ class Ui {
 					sh.blur, cs == null ? null : new Corners(cs.topLeft > 0 ? Math.max(0, cs.topLeft + o) : 0, cs.topRight > 0 ? Math.max(0, cs.topRight + o) : 0,
 						cs.bottomRight > 0 ? Math.max(0, cs.bottomRight + o) : 0, cs.bottomLeft > 0 ? Math.max(0, cs.bottomLeft + o) : 0), opaque ? null : [sh.x, sh.y, o]);
 			}
-		if (s.backgroundImage != null && n.width > 0 && n.height > 0) {
+		if (hidden) {
+			// (nothing of its own)
+		} else if (s.backgroundImage != null && n.width > 0 && n.height > 0) {
 			// (the colour, the gradient over it, then the border over both)
 			if (s.background.a > 0) canvas.rect(n.absX, n.absY, n.width, n.height, s.radius, s.background, 0, 0, cs);
 			canvas.image(n.backgroundImage(scale), n.absX, n.absY, n.width, n.height, 0, 0, 1, 1, s.radius, cs);
@@ -183,7 +189,7 @@ class Ui {
 					canvas.insetShadow(n.absX + be.left, n.absY + be.top, n.width - be.horizontal, n.height - be.vertical, padR, sh.color, sh.blur, sh.x, sh.y,
 						sh.spread, padC);
 		var pad = s.padding;
-		if (n.hasContent())
+		if (n.hasContent() && !hidden)
 			n.paintContent(canvas, n.absX + be.left + pad.left, n.absY + be.top + pad.top, Math.max(0, n.width - be.left - be.right - pad.left - pad.right),
 				Math.max(0, n.height - be.top - be.bottom - pad.top - pad.bottom));
 		var clip = s.overflow != Visible;
@@ -219,18 +225,19 @@ class Ui {
 		cullY0 = c1;
 		cullX1 = c2;
 		cullY1 = c3;
-		if (s.overflow == Scroll) {
+		if (s.overflow == Scroll && !hidden) {
 			for (x in [false, true]) {
 				var t = thumb(n, x);
 				if (t != null) canvas.rect(t[0], t[1], t[2], t[3], SCROLLBAR / 2, drag == n && dragX == x ? scrollbarActiveColor : scrollbarColor, 0, 0);
 			}
 		}
-		if (n == focus && focusVisible && focusRingWidth > 0) {
+		if (n == focus && focusVisible && focusRingWidth > 0 && !hidden) {
 			var o = focusRingOffset + focusRingWidth;
 			canvas.rect(n.absX - o, n.absY - o, n.width + 2 * o, n.height + 2 * o, s.radius > 0 ? s.radius + o : 0, Color.TRANSPARENT, focusRingWidth,
 				focusRingColor, cs == null ? null : new Corners(cs.topLeft > 0 ? cs.topLeft + o : 0, cs.topRight > 0 ? cs.topRight + o : 0,
 					cs.bottomRight > 0 ? cs.bottomRight + o : 0, cs.bottomLeft > 0 ? cs.bottomLeft + o : 0));
 		}
+		hidden = wasHidden;
 		if (s.opacity < 1) canvas.popOpacity();
 		if (m != null) canvas.popTransform();
 	}
@@ -339,12 +346,13 @@ class Ui {
 		pointerY = y;
 		var target = hit(x, y);
 		dismissOutside(target);
-		selectAt(target, x, y, button);
-		setHover(target);
+		// (a press focuses without the ring: hidden before the focus moves)
 		if (focusVisible) {
 			focusVisible = false;
 			requestFrame();
 		}
+		selectAt(target, x, y, button);
+		setHover(target);
 		if (target == null) {
 			setFocus(null);
 			return;
@@ -551,6 +559,8 @@ class Ui {
 			return;
 		}
 		if (!e.defaultPrevented && key == Key.TAB) {
+			// (shown before the focus moves: its handlers see it)
+			focusVisible = true;
 			moveFocus(mods & Key.MOD_SHIFT != 0 ? -1 : 1);
 			focusVisible = focus != null;
 			requestFrame();
@@ -597,8 +607,8 @@ class Ui {
 	public function scrollBy(n:Node, dx:Float, dy:Float) {
 		var a = scrolls.get(n);
 		var tx = (a != null ? a[2] : n.scrollX) + dx, ty = (a != null ? a[3] : n.scrollY) + dy;
-		tx = Math.max(0, Math.min(tx, maxScroll(n, true)));
-		ty = Math.max(0, Math.min(ty, maxScroll(n, false)));
+		tx = clampTo(n, true, tx);
+		ty = clampTo(n, false, ty);
 		if (scrollDuration <= 0) {
 			scrollTo(n, tx, ty);
 			return;
@@ -671,10 +681,12 @@ class Ui {
 		if (old != null) {
 			@:privateAccess old.setState(old.hovered, old.pressed, false);
 			if (old.onBlur != null) old.onBlur(new Event(Blur, old, pointerX, pointerY));
+			bubble(new Event(FocusOut, old, pointerX, pointerY));
 		}
 		if (n != null) {
 			@:privateAccess n.setState(n.hovered, n.pressed, true);
 			if (n.onFocus != null) n.onFocus(new Event(Focus, n, pointerX, pointerY));
+			bubble(new Event(FocusIn, n, pointerX, pointerY));
 		}
 	}
 
@@ -683,7 +695,7 @@ class Ui {
 		var all:Array<Node> = [];
 		function collect(n:Node) {
 			if (n.style.display == None) return;
-			if (n.focusable) all.push(n);
+			if (n.focusable && n.visible()) all.push(n);
 			for (c in n.children)
 				collect(c);
 		}
@@ -751,7 +763,7 @@ class Ui {
 
 	static function firstFocusable(n:Node):Null<Node> {
 		if (n.style.display == None) return null;
-		if (n.focusable) return n;
+		if (n.focusable && n.visible()) return n;
 		for (c in n.children) {
 			var f = firstFocusable(c);
 			if (f != null) return f;
@@ -814,7 +826,8 @@ class Ui {
 				var g = p.gap;
 				switch p.placement {
 					case Below | Above:
-						x = ax;
+						// (right to left: their right edges lined up)
+						x = p.anchor.rtl() ? ax + a.width - w : ax;
 						var below = ay + a.height + g, above = ay - g - h;
 						y = p.placement == Below ? (below + h > height && above >= 0 ? above : below) : (above < 0 && below + h <= height ? below : above);
 					case _:
@@ -851,6 +864,8 @@ class Ui {
 				case Composition: n.onComposition;
 				case DragStart: n.onDragStart;
 				case DragEnd: n.onDragEnd;
+				case FocusIn: n.onFocusIn;
+				case FocusOut: n.onFocusOut;
 				case _: null;
 			}
 			if (h != null) h(e.at(n));
@@ -906,20 +921,31 @@ class Ui {
 
 	static function canScroll(n:Node, d:Float, x:Bool):Bool {
 		if (d == 0) return false;
-		var max = maxScroll(n, x);
-		var v = x ? n.scrollX : n.scrollY;
-		return d > 0 ? v < max : v > 0;
+		var lo = scrollStart(n, x), v = x ? n.scrollX : n.scrollY;
+		return d > 0 ? v < lo + maxScroll(n, x) : v > lo;
 	}
 
+	// how far n scrolls on the axis (from scrollStart)
 	static function maxScroll(n:Node, x:Bool):Float {
 		var s = n.style, inset = x ? s.borderEdges.horizontal + s.padding.horizontal : s.borderEdges.vertical + s.padding.vertical;
 		var view = (x ? n.width : n.height) - inset;
 		return Math.max(0, (x ? n.contentWidth : n.contentHeight) - view);
 	}
 
+	// its least offset on the axis: 0, but right to left, sideways, its
+	// content overflows to the left: scrolled from 0 (its right end) down to
+	// less maxScroll, as Chromium's scrollLeft
+	static function scrollStart(n:Node, x:Bool):Float
+		return x && n.rtl() ? -maxScroll(n, true) : 0;
+
+	static inline function clampTo(n:Node, x:Bool, v:Float):Float {
+		var lo = scrollStart(n, x);
+		return Math.max(lo, Math.min(v, lo + maxScroll(n, x)));
+	}
+
 	// a scroller's offsets back within its extent
 	function clampScroll(n:Node) {
-		var x = Math.max(0, Math.min(n.scrollX, maxScroll(n, true))), y = Math.max(0, Math.min(n.scrollY, maxScroll(n, false)));
+		var x = clampTo(n, true, n.scrollX), y = clampTo(n, false, n.scrollY);
 		if (x != n.scrollX || y != n.scrollY) {
 			n.scrollX = x;
 			n.scrollY = y;
@@ -967,8 +993,8 @@ class Ui {
 				bubble(new Event(Click, n, x, y));
 			case Focus:
 				if (!n.focusable) return false;
-				setFocus(n);
 				focusVisible = true;
+				setFocus(n);
 				requestFrame();
 			case Increment | Decrement:
 				if (n.focusable) setFocus(n);
@@ -1006,13 +1032,14 @@ class Ui {
 	}
 
 	// a scrollbar's track on axis x (horizontal) or y: its start and length
-	// along the axis (absolute), its offset across it
+	// along the axis (absolute), its offset across it; right to left, the
+	// vertical one on the left, as Chromium has it
 	static function track(n:Node, x:Bool):Array<Float> {
-		var be = n.style.borderEdges, i = SCROLLBAR_INSET;
+		var be = n.style.borderEdges, i = SCROLLBAR_INSET, rtl = n.rtl();
 		// (the other axis's bar, if any, takes the corner)
 		var corner = maxScroll(n, !x) > 0 ? SCROLLBAR + i : 0;
-		return x ? [n.absX + be.left + i, n.width - be.horizontal - 2 * i - corner, n.absY + n.height - be.bottom - i - SCROLLBAR] : [n.absY + be.top + i,
-			n.height - be.vertical - 2 * i - corner, n.absX + n.width - be.right - i - SCROLLBAR];
+		return x ? [n.absX + be.left + i + (rtl ? corner : 0), n.width - be.horizontal - 2 * i - corner, n.absY + n.height - be.bottom - i - SCROLLBAR] : [
+			n.absY + be.top + i, n.height - be.vertical - 2 * i - corner, rtl ? n.absX + be.left + i : n.absX + n.width - be.right - i - SCROLLBAR];
 	}
 
 	static function thumbLength(trackLength:Float, view:Float, content:Float):Float
@@ -1026,7 +1053,7 @@ class Ui {
 		var t = track(n, x);
 		if (t[1] <= 0) return null;
 		var len = thumbLength(t[1], viewSize(n, x), x ? n.contentWidth : n.contentHeight);
-		var at = t[0] + (t[1] - len) * (x ? n.scrollX : n.scrollY) / max;
+		var at = t[0] + (t[1] - len) * ((x ? n.scrollX : n.scrollY) - scrollStart(n, x)) / max;
 		return x ? [at, t[2], len, SCROLLBAR] : [t[2], at, SCROLLBAR, len];
 	}
 
@@ -1080,7 +1107,7 @@ class Ui {
 	}
 
 	function setScroll(n:Node, x:Bool, v:Float) {
-		v = Math.max(0, Math.min(v, maxScroll(n, x)));
+		v = clampTo(n, x, v);
 		if (v == (x ? n.scrollX : n.scrollY)) return;
 		if (x) n.scrollX = v; else n.scrollY = v;
 		if (n.onScroll != null) n.onScroll();

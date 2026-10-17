@@ -25,7 +25,8 @@ import hxmc.ui.widgets.EditableText;
 // - images: png/*.png decoded (every colour type and depth, tRNS, the
 //   filters, Adam7; png-cases.mjs writes them and the pixels expected);
 //   jpeg/*.jpg and gif/*.gif against Chromium's pixels (jpeg-cases.mjs,
-//   gif-cases.mjs)
+//   gif-cases.mjs); webp/*.webp against libwebp's (webp-cases.mjs);
+//   apng/*.png's frames against Chromium's (apng-cases.mjs)
 class UiTest {
 	static var checks = 0;
 	static var failed = 0;
@@ -46,6 +47,11 @@ class UiTest {
 		transforms();
 		sticky();
 		stacking();
+		visibility();
+		pointerEvents();
+		rtlScroll();
+		noWrap();
+		textTransform();
 		culling();
 		selection();
 		fields();
@@ -318,6 +324,160 @@ class UiTest {
 		ui2.update();
 		ui2.keyDown(Key.TAB, 0);
 		check("stacking: order moves it, Tab keeps the tree's order", y.absX == 0 && x.absX == 40 && ui2.focus == x, '${y.absX} ${x.absX} ${ui2.focus}');
+	}
+
+	// visibility: hidden keeps the place, draws, hits, focuses and shows
+	// nothing of the node, but a visible descendant still is
+	static function visibility() {
+		var ui = new Ui(new MonoText(), 200, 100);
+		ui.root.style.direction = Row;
+		var a = new Node("a"), b = new Node("b"), inner = new Node("inner");
+		for (n in [a, b]) {
+			n.style.set({width: 60, height: 40, background: Color.rgb(n == a ? 0x110000 : 0x220000)});
+			n.focusable = true;
+			n.semantics = {role: Button, label: n.tag};
+			ui.root.append(n);
+		}
+		inner.style.set({width: 20, height: 20, background: Color.rgb(0x330000)});
+		inner.focusable = true;
+		inner.semantics = {role: Button, label: "inner"};
+		a.append(inner);
+		a.style.visibility = Hidden;
+		ui.update();
+		function painted():String {
+			var rec = new Recording();
+			ui.paint(rec);
+			return [for (l in rec.calls) if (StringTools.startsWith(l, "rect")) l.split(" ")[6].substr(2, 2)].join(",");
+		}
+		function labels():String {
+			var at = ui.accessTree();
+			return [for (id in at.order) if (at.nodes.get(id).name != null && at.nodes.get(id).name != "") at.nodes.get(id).name].join(",");
+		}
+		check("visibility: hidden keeps its place, not drawn", b.absX == 60 && painted() == "22", painted());
+		check("visibility: hidden not hit, nor focused, nor seen", ui.root.hitTest(30, 30) == ui.root && labels() == "b" && {
+			ui.keyDown(Key.TAB, 0);
+			ui.focus == b;
+		}, labels());
+		// (its ring not drawn)
+		ui.setFocus(null);
+		inner.style.visibility = Visible;
+		ui.update();
+		check("visibility: a visible descendant drawn, hit, seen", painted() == "33,22" && ui.root.hitTest(10, 10) == inner && labels() == "inner,b",
+			painted() + " " + labels());
+		a.style.visibility = null;
+		ui.update();
+		check("visibility: shown again", painted() == "11,33,22" && ui.root.hitTest(30, 30) == a, painted());
+	}
+
+	// right to left, a row overflowing a scroller overflows on the left:
+	// scrolled there by negative offsets (Chromium's scrollLeft), from 0 at
+	// its right end; the vertical bar on the left
+	// pointerEvents None: the pointer through to what is under it; an Auto descendant still found
+	static function pointerEvents() {
+		var ui = new Ui(new MonoText(), 200, 100);
+		var under = new Node("under"), cover = new Node("cover"), knob = new Node("knob");
+		under.style.set({width: 100, height: 50});
+		cover.style.set({position: Absolute, left: 0, top: 0, width: 100, height: 50, pointerEvents: None});
+		knob.style.set({width: 20, height: 20, pointerEvents: Auto});
+		cover.append(knob);
+		ui.root.append(under);
+		ui.root.append(cover);
+		ui.update();
+		var clicked = 0;
+		under.onClick = _ -> clicked++;
+		ui.pointerDown(50, 30, 1);
+		ui.pointerUp(50, 30, 1);
+		check("pointer events: through a None node to the one under it", ui.root.hitTest(50, 30) == under && clicked == 1, "" + ui.root.hitTest(50, 30));
+		check("pointer events: its Auto child still found", ui.root.hitTest(10, 10) == knob);
+	}
+
+	static function rtlScroll() {
+		var ui = new Ui(new MonoText(), 200, 100);
+		ui.scrollDuration = 0;
+		var s = new Node("s");
+		s.style.set({width: 100, height: 50, overflow: Scroll, direction: Row, dir: Rtl});
+		for (i in 0...3) {
+			var c = new Node("c" + i);
+			c.style.set({width: 60, height: 20, shrink: 0});
+			s.append(c);
+		}
+		ui.root.append(s);
+		ui.update();
+		var c2 = s.children[2];
+		check("rtl scroll: the content to the left counted", s.contentWidth == 180 && s.scrollX == 0 && c2.absX == -80, s.contentWidth + " " + c2.absX);
+		ui.scrollBy(s, -1000, 0);
+		ui.update();
+		check("rtl scroll: scrolled left to its end", s.scrollX == -80 && ui.root.hitTest(5, 10) == c2, s.scrollX + " " + ui.root.hitTest(5, 10));
+		ui.scrollBy(s, 1000, 0);
+		check("rtl scroll: back to 0 at most", s.scrollX == 0, "" + s.scrollX);
+		// (a column taller than it: its bar on the left)
+		var t = new Node("t");
+		t.style.set({width: 100, height: 50, overflow: Scroll, dir: Rtl});
+		var tall = new Node("tall");
+		tall.style.set({height: 200, shrink: 0});
+		t.append(tall);
+		ui.root.append(t);
+		ui.update();
+		var bar:Array<Float> = @:privateAccess Ui.thumb(t, false);
+		check("rtl scroll: the vertical bar on the left", bar != null && bar[0] == t.absX + Ui.SCROLLBAR_INSET, "" + bar);
+	}
+
+	// textWrap NoWrap (inherited): a line kept whole past its box, its
+	// min-content as wide; Wrap again inside
+	static function noWrap() {
+		var ui = new Ui(new MonoText(), 300, 200);
+		ui.root.style.alignItems = Start;
+		var box = new Node("box"), t = new TextNode("one two three");
+		box.style.set({width: 40, textWrap: NoWrap});
+		box.append(t);
+		ui.root.append(box);
+		ui.update();
+		var p = t.laidOut(), whole = p.width;
+		check("no wrap: one line, past its box", p.lineCount == 1 && t.width == 40 && whole > 40, p.lineCount + " " + whole);
+		box.style.width = DimValue.Auto;
+		var row = new Node("row");
+		row.style.set({width: 10, direction: Row});
+		ui.root.append(row);
+		var u = new TextNode("alpha beta");
+		row.append(u);
+		row.style.textWrap = NoWrap;
+		ui.update();
+		check("no wrap: the min-content width the whole line", u.width == u.laidOut().width && u.laidOut().lineCount == 1, "" + u.width);
+		t.style.textWrap = Wrap;
+		box.style.width = 40;
+		ui.update();
+		check("no wrap: Wrap again inside", t.laidOut().lineCount > 1, "" + t.laidOut().lineCount);
+		// text-overflow: ellipsis: the line cut within its box, its intrinsic width the whole text's
+		t.style.textWrap = NoWrap;
+		t.style.textOverflow = Ellipsis;
+		ui.update();
+		var m:MonoText.MonoParagraph = cast t.laidOut();
+		check("text overflow: one line cut to its box with an ellipsis", m.lineCount == 1 && m.ellipsis && m.width <= 40 && t.minContentWidth(ui.text) > 40,
+			m.lineCount + " " + m.width);
+		box.style.width = 400;
+		ui.update();
+		check("text overflow: none where it fits", !(cast t.laidOut() : MonoText.MonoParagraph).ellipsis);
+	}
+
+	// textTransform (inherited): the letters shown, the indices kept; a span its own
+	static function textTransform() {
+		var ui = new Ui(new MonoText(), 300, 200);
+		var box = new Node("box"), t = new TextNode("hello big world");
+		box.append(t);
+		ui.root.append(box);
+		box.style.textTransform = Uppercase;
+		ui.update();
+		check("text transform: inherited, upper case", t.allText() == "HELLO BIG WORLD" && t.text == "hello big world", t.allText());
+		t.style.textTransform = Capitalize;
+		ui.update();
+		check("text transform: each word's first letter", t.allText() == "Hello Big World", t.allText());
+		var rich = new TextNode(""), a = new TextNode("one "), b = new TextNode("two");
+		rich.append(a);
+		rich.append(b);
+		b.style.textTransform = Lowercase;
+		box.append(rich);
+		ui.update();
+		check("text transform: a span its own", rich.allText() == "ONE two", rich.allText());
 	}
 
 	static function sticky() {
@@ -605,6 +765,13 @@ class UiTest {
 		clip.style.set({margin: [150.0, 0, 0, 250]});
 		ui.update();
 		check("popups: flipped above, kept in the window", p.absY == 160 - 4 - 50 && p.absX == 300 - 80, '${p.absX},${p.absY}');
+		// right to left: the anchor's right edge and the popup's lined up
+		clip.style.set({margin: [0.0, 0, 0, 100]});
+		ui.root.style.dir = Rtl;
+		ui.update();
+		var anchorRight = button.absX + button.width;
+		check("popups: right to left, their right edges lined up", p.absX + p.width == anchorRight, '${p.absX + p.width} ${anchorRight}');
+		ui.root.style.dir = null;
 		// at a point: there, flipped left and up where it does not fit
 		p.placement = Point;
 		p.atX = 20;
@@ -953,7 +1120,7 @@ class UiTest {
 		}
 		// JPEG and GIF: jpeg/*.jpg and gif/*.gif against the pixels Chromium
 		// decoded (jpeg-cases.mjs, gif-cases.mjs)
-		for (kind in [{dir: "jpeg", ext: ".jpg", least: 15}, {dir: "gif", ext: ".gif", least: 8}]) {
+		for (kind in [{dir: "jpeg", ext: ".jpg", least: 15}, {dir: "gif", ext: ".gif", least: 8}, {dir: "webp", ext: ".webp", least: 25}, {dir: "apng", ext: ".png", least: 3}]) {
 		var jdir = here + "/" + kind.dir;
 		var cases:Array<{name:String, width:Int, height:Int, ?durations:Array<Float>, ?repetition:Int}> = haxe.Json.parse(sys.io.File.getContent(jdir + "/cases.json"));
 		check(kind.dir + ": the cases", cases.length >= kind.least, '${cases.length}');
@@ -961,7 +1128,8 @@ class UiTest {
 			// (an animation: every frame as Chromium's ImageDecoder composes it, its duration, the repetitions)
 			if (c.durations != null) {
 				var want = sys.io.File.getBytes(jdir + "/" + c.name + ".frames.rgba");
-				var a = try GifDecoder.frames(sys.io.File.getBytes(jdir + "/" + c.name + kind.ext)) catch (e:Dynamic) {
+				var bytes = sys.io.File.getBytes(jdir + "/" + c.name + kind.ext);
+				var a = try kind.dir == "webp" ? WebpDecoder.frames(bytes) : kind.dir == "apng" ? PngDecoder.frames(bytes) : GifDecoder.frames(bytes) catch (e:Dynamic) {
 					check(kind.dir + ": " + c.name, false, Std.string(e));
 					continue;
 				}
@@ -971,6 +1139,9 @@ class UiTest {
 				check(kind.dir + ": " + c.name + ", its frames", a.width == c.width && a.frames.length == c.durations.length && bad.length == 0
 					&& [for (f in a.frames) f.delay].join(",") == c.durations.join(",") && a.repetitions == c.repetition,
 					'${a.frames.length} frames, wrong: ${bad.join(",")}; ' + [for (f in a.frames) f.delay].join(",") + ' ${a.repetitions}');
+				// (an APNG's default image: libpng's, whether in the animation or not)
+				if (kind.dir == "apng")
+					check("apng: " + c.name + ", its default image", Image.decode(bytes).pixels.compare(sys.io.File.getBytes(jdir + "/" + c.name + ".rgba")) == 0);
 				continue;
 			}
 			var want = sys.io.File.getBytes(jdir + "/" + c.name + ".rgba");
