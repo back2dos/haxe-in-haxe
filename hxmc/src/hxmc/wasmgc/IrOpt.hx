@@ -9,13 +9,17 @@ import hxmc.ir.Ir;
 // made when GcGen.Reach reaches it (the function itself is left as Lower made
 // it: the compilation server reuses its body).
 //
-// Inlining: a direct call to a candidate (hxmc.Inline.candidate, the IR test
-// the Mir inliner also uses; at most GC_FLAT IR nodes outside loops) is
-// replaced by the callee's statements, its locals renamed, its parameters the
-// caller's locals passed (those it never assigns) or fresh locals set to the
-// arguments; a return at the end becomes the assignment of the call's
-// result, returns elsewhere (not in a loop of the callee) jumps out of a loop
-// around the copy. Inline.DEPTH levels.
+// Inlining, for scalar replacement only (V8 inlines small functions of a
+// WasmGC module itself, but leaves their objects in the heap; inlining more
+// here made modules larger, not faster): a direct call to a candidate
+// (hxmc.Inline.candidate, the IR test the Mir inliner also uses) that makes
+// an object it returns, or is passed a local holding one made here (a
+// constructor, a method reading its fields), is replaced by the callee's
+// statements, its locals renamed, its parameters the caller's locals passed
+// (those it never assigns) or fresh locals set to the arguments; a return at
+// the end becomes the assignment of the call's result, returns elsewhere (not
+// in a loop of the callee) jumps out of a loop around the copy.
+// Inline.DEPTH levels.
 //
 // Scalar replacement: a local that only ever holds objects allocated in the
 // function (one class or one anonymous structure), and is only read through
@@ -26,17 +30,11 @@ import hxmc.ir.Ir;
 // where the native targets bump a pointer: for small objects in loops (a
 // Complex in mandelbrot) the allocation, its casts and reads are most of the time.
 class IrOpt {
-	// IR nodes of a callee inlined outside loops (inside: any candidate)
-	public static var GC_FLAT = limit(8);
-
-	static function limit(def:Int):Int {
-		var e = Sys.getEnv("HXMC_GC_INLINE");
-		return e == null ? def : Std.parseInt(e);
-	}
-
 	static var on = Sys.getEnv("HXMC_GC_OPT") != "0";
 
-	final sizes = new Map<FuncInfo, Int>(); // the inlinable functions' IR sizes (-1: not inlinable)
+	final inlinables = new Map<FuncInfo, Bool>();
+	final makers = new Map<FuncInfo, Bool>(); // functions returning an object they make
+	var made:Map<Int, Bool>; // the locals assigned an object made in the function
 	var nextId = 0;
 	var locals:Array<Local>;
 	var stack:Array<FuncInfo> = [];
@@ -53,7 +51,10 @@ class IrOpt {
 			if (l.id >= nextId) nextId = l.id + 1;
 		locals = f.locals.copy();
 		stack = [f];
-		var body = inlineAll(f.body, 0, false);
+		made = new Map();
+		for (s in f.body)
+			allocs(s, made);
+		var body = inlineAll(f.body, 0);
 		body = new Sra(this, f, body).run();
 		return {body: body, locals: locals};
 	}
@@ -69,15 +70,42 @@ class IrOpt {
 
 	// ---- inlining
 
-	function size(g:FuncInfo):Int {
-		var n = sizes.get(g);
-		if (n != null) return n;
-		n = inlinable(g) ? Inline.irSize(g) : -1;
-		sizes.set(g, n);
-		return n;
+	// the locals s assigns an object made there
+	static function allocs(s:Stmt, out:Map<Int, Bool>) {
+		switch s {
+			case SSet(l, ENewObj(_) | ENewAnon(_, _)): out.set(l.id, true);
+			case _:
+		}
+		Facts.iterStmt(x -> allocs(x, out), _ -> {}, s);
+	}
+
+	function maker(g:FuncInfo):Bool {
+		var r = makers.get(g);
+		if (r != null) return r;
+		var ls = new Map();
+		for (s in g.body)
+			allocs(s, ls);
+		r = false;
+		function st(s:Stmt) {
+			switch s {
+				case SReturn(ELocal(l)) if (ls.exists(l.id)): r = true;
+				case _:
+			}
+			Facts.iterStmt(st, _ -> {}, s);
+		}
+		for (s in g.body)
+			st(s);
+		makers.set(g, r);
+		return r;
 	}
 
 	function inlinable(g:FuncInfo):Bool {
+		var r = inlinables.get(g);
+		if (r == null) inlinables.set(g, r = canInline(g));
+		return r;
+	}
+
+	function canInline(g:FuncInfo):Bool {
 		if (!Inline.candidate(g) || g.lambda != null || g.cAbi != null || g.sret || g.body.length == 0) return false;
 		for (a in g.args)
 			if (a.ty.match(TStruct(_))) return false;
@@ -94,28 +122,29 @@ class IrOpt {
 		return ok;
 	}
 
-	function inlineAll(ss:Array<Stmt>, depth:Int, inLoop:Bool):Array<Stmt> {
+	function inlineAll(ss:Array<Stmt>, depth:Int):Array<Stmt> {
 		var out = [];
 		for (s in ss)
-			inlineStmt(s, depth, inLoop, out);
+			inlineStmt(s, depth, out);
 		return out;
 	}
 
-	function inlineStmt(s:Stmt, depth:Int, inLoop:Bool, out:Array<Stmt>) {
+	function inlineStmt(s:Stmt, depth:Int, out:Array<Stmt>) {
 		inline function sub(b:Array<Stmt>)
-			return inlineAll(b, depth, inLoop);
+			return inlineAll(b, depth);
 		switch s {
-			case SSet(l, ECall(g, args)) if (wanted(g, depth, inLoop)):
-				expand(g, args, l, depth, inLoop, out);
-			case SExpr(ECall(g, args)) if (wanted(g, depth, inLoop)):
-				expand(g, args, null, depth, inLoop, out);
+			case SSet(l, ECall(g, args)) if (wanted(g, args, depth)):
+				if (maker(g)) made.set(l.id, true);
+				expand(g, args, l, depth, out);
+			case SExpr(ECall(g, args)) if (wanted(g, args, depth)):
+				expand(g, args, null, depth, out);
 			case SCold(_, x):
 				// (cold sites are the shadow stack's: nothing here)
-				inlineStmt(x, depth, inLoop, out);
+				inlineStmt(x, depth, out);
 			case SIf(c, a, b):
 				out.push(SIf(c, sub(a), sub(b)));
 			case SLoop(body):
-				out.push(SLoop(inlineAll(body, depth, true)));
+				out.push(SLoop(sub(body)));
 			case SSwitch(e, cases, def):
 				out.push(SSwitch(e, [for (c in cases) {values: c.values, body: sub(c.body)}], sub(def)));
 			case STry(body, catches):
@@ -125,13 +154,18 @@ class IrOpt {
 		}
 	}
 
-	function wanted(g:FuncInfo, depth:Int, inLoop:Bool):Bool {
-		if (depth >= Inline.DEPTH || stack.contains(g)) return false;
-		var n = size(g);
-		return n >= 0 && (inLoop || n <= GC_FLAT);
+	function wanted(g:FuncInfo, args:Array<Ex>, depth:Int):Bool {
+		if (depth >= Inline.DEPTH || stack.contains(g) || !inlinable(g)) return false;
+		if (maker(g)) return true;
+		for (a in args)
+			switch a {
+				case ELocal(l) if (made.exists(l.id)): return true;
+				case _:
+			}
+		return false;
 	}
 
-	function expand(g:FuncInfo, args:Array<Ex>, target:Null<Local>, depth:Int, inLoop:Bool, out:Array<Stmt>) {
+	function expand(g:FuncInfo, args:Array<Ex>, target:Null<Local>, depth:Int, out:Array<Stmt>) {
 		var assigned = new Map<Int, Bool>();
 		function st(s:Stmt) {
 			switch s {
@@ -173,8 +207,10 @@ class IrOpt {
 			case s: ret(s);
 		}
 		var body = rename(g.body, map, target, !tail);
+		for (s in body)
+			allocs(s, made);
 		stack.push(g);
-		body = inlineAll(body, depth + 1, inLoop);
+		body = inlineAll(body, depth + 1);
 		stack.pop();
 		if (tail) {
 			for (s in body)

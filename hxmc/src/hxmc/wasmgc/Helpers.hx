@@ -348,7 +348,7 @@ class Helpers {
 		Enc.sleb(b, s.args.length);
 		for (i in 0...s.args.length) {
 			get(b, i + 1);
-			if (GcModule.repr(s.args[i]) != "p") m.gc(b, 0x00, m.dynType(s.args[i]));
+			m.box(b, s.args[i]);
 		}
 		m.gc(b, 0x08, m.dataType("p"), s.args.length);
 		m.gc(b, 0x00, m.arrType("p"));
@@ -448,12 +448,66 @@ class Helpers {
 	// the box of a value of kind k on the stack (p: itself)
 	static function box(m:GcModule, b:Buf, k:String)
 		switch k {
-			case "i": m.gc(b, 0x00, m.dynType(TI32));
-			case "f": m.gc(b, 0x00, m.dynType(TF64));
-			case "l": m.gc(b, 0x00, m.dynType(TI64));
-			case "b": m.gc(b, 0x00, m.dynType(TBool));
+			case "i": m.box(b, TI32);
+			case "f": m.box(b, TF64);
+			case "l": m.box(b, TI64);
+			case "b": m.box(b, TBool);
 			case _:
 		}
+
+	// an Int boxed: those of SMALL_MIN...SMALL_MAX made once each (in a table
+	// filled as they are asked for, as hxmc.rt.Boxes has them), the others new
+	static inline var SMALL_MIN = -128;
+	static inline var SMALL_MAX = 1023;
+
+	public static function boxInt(m:GcModule):Int {
+		var h = m.hasHelper("box_int");
+		if (h != null) return h;
+		var pt = m.dataType("p"), dt = m.dynType(TI32);
+		var tb = new Buf();
+		tb.u8(0x63);
+		Enc.sleb(tb, pt);
+		var ib = new Buf();
+		i32(ib, SMALL_MAX - SMALL_MIN + 1);
+		m.gc(ib, 0x07, pt);
+		ib.u8(0x0B);
+		var table = m.newGlobal(tb, ib, false);
+		var b = new Buf();
+		// (local 1: the index; local 2: the box)
+		get(b, 0);
+		i32(b, SMALL_MIN);
+		b.u8(0x6B);
+		b.u8(0x22);
+		b.u8(1);
+		i32(b, SMALL_MAX - SMALL_MIN + 1);
+		b.u8(0x49);
+		b.u8(0x04);
+		b.u8(0x40);
+		b.u8(0x23);
+		Enc.uleb(b, table);
+		get(b, 1);
+		m.gc(b, 0x0B, pt);
+		b.u8(0x22);
+		b.u8(2);
+		b.u8(0xD1);
+		b.u8(0x04);
+		b.u8(0x40);
+		b.u8(0x23);
+		Enc.uleb(b, table);
+		get(b, 1);
+		get(b, 0);
+		m.gc(b, 0x00, dt);
+		b.u8(0x22);
+		b.u8(2);
+		m.gc(b, 0x0E, pt);
+		b.u8(0x0B);
+		get(b, 2);
+		b.u8(0x0F);
+		b.u8(0x0B);
+		get(b, 0);
+		m.gc(b, 0x00, dt);
+		return m.addHelper("box_int", "i_p", b, [Enc.I32, 0x6D]);
+	}
 
 	// if local 0 is an array of kind k (then ... end)
 	static function ifKind(m:GcModule, b:Buf, k:String, result = 0x40) {

@@ -239,8 +239,7 @@ class FuncGen {
 			case SArrPush(elem, a, v):
 				arrPush(GcModule.elemKind(elem), local.get(a.id), v);
 			case SBoxSet(t, bx, v):
-				expr(bx);
-				castTo(m.boxType(t));
+				exprAs(bx, m.boxType(t));
 				expr(v);
 				gc(0x05, m.boxType(t), 0);
 			case SSetGlobal(g, v):
@@ -661,7 +660,7 @@ class FuncGen {
 				}
 			case EBox(t, x):
 				expr(x);
-				gc(0x00, m.dynType(t));
+				m.box(b, t);
 			case EUnbox(t, x):
 				expr(x);
 				call(Helpers.unbox(m, t == TBool ? "b" : repr(t)));
@@ -708,33 +707,27 @@ class FuncGen {
 					Enc.sleb(b, m.classType(c));
 				}
 			case EEnumTag(x, _):
-				expr(x);
-				castTo(m.enumType);
+				exprAs(x, m.enumType);
 				gc(0x02, m.enumType, 0);
 			case EEnumParam(c, idx, x):
-				expr(x);
-				castTo(m.ctorType(c));
+				exprAs(x, m.ctorType(c));
 				gc(0x02, m.ctorType(c), idx + 2);
 			case EArrLen(a):
-				expr(a);
-				castTo(m.arrBaseType);
+				exprAs(a, m.arrBaseType);
 				gc(0x02, m.arrBaseType, 0);
 			case EArrGet(t, a, i):
 				arrGet(GcModule.elemKind(t), a, i);
 			case EArrGetU(t, a, i):
 				var k = GcModule.elemKind(t);
-				expr(a);
-				castTo(m.arrType(k));
+				exprAs(a, m.arrType(k));
 				gc(0x02, m.arrType(k), 1);
 				expr(i);
 				gc(0x0B, m.dataType(k));
 			case EBoxGet(t, x):
-				expr(x);
-				castTo(m.boxType(t));
+				exprAs(x, m.boxType(t));
 				gc(0x02, m.boxType(t), 0);
 			case ECapture(l, idx, x):
-				expr(x);
-				castTo(m.lambdaTypeOf(l));
+				exprAs(x, m.lambdaTypeOf(l));
 				gc(0x02, m.lambdaTypeOf(l), idx + 1);
 			case EType(tr):
 				op(0x23);
@@ -746,13 +739,13 @@ class FuncGen {
 				}
 				call(m.funcOf(fn));
 			case ECallDispatch(sel, s, args):
-				var t = temp("p");
-				expr(args[0]);
+				var tk = "t" + m.objType;
+				var t = temp(tk);
+				exprAs(args[0], m.objType);
 				localTee(t);
 				for (k in 1...args.length)
 					expr(args[k]);
 				localGet(t);
-				castTo(m.objType);
 				gc(0x02, m.objType, 0);
 				i32(m.selCount);
 				op(0x6C);
@@ -761,19 +754,19 @@ class FuncGen {
 				op(0x11);
 				Enc.uleb(b, m.typeOfSig(s));
 				Enc.uleb(b, 0);
-				release("p", t);
+				release(tk, t);
 			case ECallClos(s, c, args):
-				var t = temp("p");
-				expr(c);
+				var ct = m.closTypeOf(s);
+				var t = temp("t" + ct);
+				exprAs(c, ct);
 				localTee(t);
 				for (a in args)
 					expr(a);
 				localGet(t);
-				castTo(m.closTypeOf(s));
-				gc(0x02, m.closTypeOf(s), 0);
+				gc(0x02, ct, 0);
 				op(0x14);
 				Enc.uleb(b, m.fnTypeOf(s));
-				release("p", t);
+				release("t" + ct, t);
 			case ECallAnon(name, s, o, args):
 				// a class instance's method of that name (Helpers.anonCall: by its
 				// class), else the field through the runtime, called with its arguments boxed
@@ -866,7 +859,7 @@ class FuncGen {
 
 	// the value on the stack (of type t) boxed, as Dynamic
 	function boxTop(t:Ty)
-		if (repr(t) != "p") gc(0x00, m.dynType(t));
+		m.box(b, t);
 
 	// the Dynamic on the stack as a t
 	function unboxTop(t:Ty)
@@ -1062,8 +1055,7 @@ class FuncGen {
 					all();
 					call(m.meta.enumOf());
 				case "enumIndex":
-					all();
-					castTo(m.enumType);
+					exprAs(args[0], m.enumType);
 					gc(0x02, m.enumType, 0);
 				case "enumNames":
 					all();
@@ -1089,12 +1081,10 @@ class FuncGen {
 					op(0x14);
 					Enc.sleb(b, m.typeType());
 				case "anonOverflow":
-					all();
-					castTo(m.anonBaseType);
+					exprAs(args[0], m.anonBaseType);
 					gc(0x02, m.anonBaseType, 0);
 				case "setAnonOverflow":
-					expr(args[0]);
-					castTo(m.anonBaseType);
+					exprAs(args[0], m.anonBaseType);
 					expr(args[1]);
 					gc(0x05, m.anonBaseType, 0);
 				case "dynCall":
@@ -1104,8 +1094,7 @@ class FuncGen {
 					all();
 					call(m.importOf("hxmc." + name.substr(w.length)));
 				case "arrLen":
-					all();
-					castTo(m.arrBaseType);
+					exprAs(args[0], m.arrBaseType);
 					gc(0x02, m.arrBaseType, 0);
 				case "arrKind":
 					all();
@@ -1129,32 +1118,26 @@ class FuncGen {
 					all();
 					gc(0x07, m.bytesType);
 				case "bytesLen":
-					all();
-					castTo(m.bytesType);
+					exprAs(args[0], m.bytesType);
 					gc(0x0F);
 				case "bytesGet":
-					expr(args[0]);
-					castTo(m.bytesType);
+					exprAs(args[0], m.bytesType);
 					expr(args[1]);
 					gc(0x0D, m.bytesType);
 				case "bytesSet":
-					expr(args[0]);
-					castTo(m.bytesType);
+					exprAs(args[0], m.bytesType);
 					expr(args[1]);
 					expr(args[2]);
 					gc(0x0E, m.bytesType);
 				case "bytesCopy":
-					expr(args[0]);
-					castTo(m.bytesType);
+					exprAs(args[0], m.bytesType);
 					expr(args[1]);
-					expr(args[2]);
-					castTo(m.bytesType);
+					exprAs(args[2], m.bytesType);
 					expr(args[3]);
 					expr(args[4]);
 					gc(0x11, m.bytesType, m.bytesType);
 				case "bytesFill":
-					expr(args[0]);
-					castTo(m.bytesType);
+					exprAs(args[0], m.bytesType);
 					expr(args[1]);
 					expr(args[2]);
 					expr(args[3]);
@@ -1239,17 +1222,14 @@ class FuncGen {
 				all();
 				gc(0x07, m.bytesType);
 			case "haxe_io_Bytes_get_length":
-				all();
-				castTo(m.bytesType);
+				exprAs(args[0], m.bytesType);
 				gc(0x0F);
 			case "haxe_io_Bytes_get":
-				expr(args[0]);
-				castTo(m.bytesType);
+				exprAs(args[0], m.bytesType);
 				expr(args[1]);
 				gc(0x0D, m.bytesType);
 			case "haxe_io_Bytes_set":
-				expr(args[0]);
-				castTo(m.bytesType);
+				exprAs(args[0], m.bytesType);
 				expr(args[1]);
 				expr(args[2]);
 				gc(0x0E, m.bytesType);
@@ -1325,26 +1305,25 @@ class FuncGen {
 				release("p", t);
 			case "String_charCodeAt_i":
 				// (0 past the end, as fastCodeAt)
-				var t = temp("i"), s = temp("p");
-				expr(args[0]);
+				var sk = "t" + m.stringType;
+				var t = temp("i"), s = temp(sk);
+				exprAs(args[0], m.stringType);
 				localSet(s);
 				expr(args[1]);
 				localTee(t);
 				localGet(s);
-				castTo(m.stringType);
 				gc(0x0F);
 				op(0x49);
 				op(0x04);
 				op(Enc.I32);
 				localGet(s);
-				castTo(m.stringType);
 				localGet(t);
 				gc(0x0D, m.stringType);
 				op(0x05);
 				i32(0);
 				op(0x0B);
 				release("i", t);
-				release("p", s);
+				release(sk, s);
 			case "String_length":
 				exprAs(args[0], m.stringType);
 				gc(0x0F);

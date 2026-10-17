@@ -212,6 +212,7 @@ class GcModule {
 			case TRef(RArr(_)): "t" + tArrBase;
 			case TRef(REnum(e)): "t" + (e == null ? tEnum : tEnumOf.get(e));
 			case TRef(RClos(s)): "t" + closType(s);
+			case TRef(RNative("haxe_io_Bytes")): "t" + tBytes;
 			case _: repr(t);
 		}
 
@@ -379,17 +380,21 @@ class GcModule {
 			}
 		// the start: Meta's tables, the initializers, then main
 		var start = new Buf();
-		meta.fill(start);
-		for (f in prog.inits)
-			if (funcIndex.exists(f)) {
-				start.u8(0x10);
-				Enc.uleb(start, funcIndex.get(f));
-			}
-		start.u8(0x10);
-		Enc.uleb(start, funcIndex.get(prog.main));
 		var startIdx = addHelper("_start", "_v", start, []);
 		exports.push({name: "_start", func: startIdx});
 		strHelpers();
+		var run = new Buf();
+		meta.fill(run);
+		for (f in prog.inits)
+			if (funcIndex.exists(f)) {
+				run.u8(0x10);
+				Enc.uleb(run, funcIndex.get(f));
+			}
+		run.u8(0x10);
+		Enc.uleb(run, funcIndex.get(prog.main));
+		// (the long literals first: made when every one is known)
+		lateStrings(start);
+		start.buf(run);
 		return write(tagType, codes);
 	}
 
@@ -401,7 +406,8 @@ class GcModule {
 	public function importOf(name:String):Int
 		return importIndex.get(name);
 
-	// a function written here (its body without the final end), after the program's
+	// a function written here (its body without the final end), after the program's;
+	// its locals' types (a value type's byte, or -1 - t: a (ref null t))
 	public function addHelper(name:String, key:String, body:Buf, locals:Array<Int>):Int {
 		var i = helperIndex.get(name);
 		if (i != null) return i;
@@ -689,7 +695,7 @@ class GcModule {
 					constZero(b, "p");
 				case "p":
 				case _:
-					gc(b, 0x00, dynType(s.ret));
+					box(b, s.ret);
 			}
 			b.u8(0x0F);
 			b.u8(0x0B);
@@ -728,6 +734,22 @@ class GcModule {
 	// an array's element kind in the IR: b for Bool, else its representation
 	public static function elemKind(t:Ty):String
 		return t == TBool ? "b" : repr(t);
+
+	// the scalar of type t on the stack boxed as Dynamic (Ints: Helpers.boxInt)
+	public function box(b:Buf, t:Ty)
+		switch t {
+			case TI32:
+				b.u8(0x10);
+				Enc.uleb(b, Helpers.boxInt(this));
+			case TBool | TF64 | TI64: gc(b, 0x00, dynType(t));
+			case _:
+		}
+
+	// a global of the type and constant initializer
+	public function newGlobal(type:Buf, init:Buf, mut:Bool):Int {
+		globals.push({type: type, init: init, mut: mut});
+		return globals.length - 1;
+	}
 
 	public function dynType(t:Ty):Int
 		return tDyn.get(t == TBool ? "b" : repr(t));
@@ -791,7 +813,7 @@ class GcModule {
 		var g = typeGlobal.get(key);
 		if (g != null) return g;
 		typeType();
-		var s = strLit(name);
+		var s = strLit(name, true);
 		var tb = new Buf();
 		refType(tb, tType, false);
 		var ib = new Buf();
@@ -809,10 +831,25 @@ class GcModule {
 		return g;
 	}
 
-	// a string literal: an immutable global made by array.new_fixed
-	public function strLit(s:String):Int {
+	// a string literal: a global made by array.new_fixed (immutable: constant,
+	// for other globals' initializers), or when long one _start makes from a
+	// data segment (lateStrings: 1 byte a character for Latin-1, else 2)
+	public function strLit(s:String, constant = false):Int {
 		var g = strGlobal.get(s);
-		if (g != null) return g;
+		if (g != null && (!constant || !lateStr.exists(g))) return g;
+		if (!constant && s.length >= LATE_STR) {
+			var tb = new Buf();
+			refType(tb, tString);
+			var ib = new Buf();
+			constZero(ib, "p");
+			ib.u8(0x0B);
+			g = globals.length;
+			globals.push({type: tb, init: ib, mut: true});
+			strGlobal.set(s, g);
+			lateStr.set(g, s);
+			lateOrder.push(g);
+			return g;
+		}
 		var tb = new Buf();
 		refType(tb, tString, false);
 		var ib = new Buf();
@@ -828,6 +865,89 @@ class GcModule {
 		globals.push({type: tb, init: ib, mut: false});
 		strGlobal.set(s, g);
 		return g;
+	}
+
+	static inline var LATE_STR = 24;
+	final lateStr = new Map<Int, String>();
+	final lateOrder:Array<Int> = [];
+	final dataSegs:Array<haxe.io.Bytes> = [];
+
+	// _start's code that makes the long literals (strLit) from their data segments
+	function lateStrings(b:Buf) {
+		var latin1 = -1;
+		for (g in lateOrder) {
+			var s = lateStr.get(g);
+			var narrow = true;
+			for (i in 0...s.length)
+				if (StringTools.fastCodeAt(s, i) > 255) narrow = false;
+			var d = haxe.io.Bytes.alloc(narrow ? s.length : 2 * s.length);
+			for (i in 0...s.length)
+				if (narrow) d.set(i, StringTools.fastCodeAt(s, i)) else d.setUInt16(2 * i, StringTools.fastCodeAt(s, i));
+			b.u8(0x41);
+			b.u8(0);
+			b.u8(0x41);
+			Enc.sleb(b, s.length);
+			gc(b, 0x09, narrow ? tBytes : tString, dataSegs.length);
+			dataSegs.push(d);
+			if (narrow) {
+				if (latin1 < 0) latin1 = latin1Helper();
+				b.u8(0x10);
+				Enc.uleb(b, latin1);
+				castTo(b, tString);
+			}
+			b.u8(0x24);
+			Enc.uleb(b, g);
+		}
+	}
+
+	// a string of the bytes (Latin-1)
+	function latin1Helper():Int {
+		var b = new Buf();
+		// (local 1: the string, local 2: the index)
+		b.u8(0x20);
+		b.u8(0);
+		castTo(b, tBytes);
+		gc(b, 0x0F);
+		gc(b, 0x07, tString);
+		b.u8(0x21);
+		b.u8(1);
+		b.u8(0x02);
+		b.u8(0x40);
+		b.u8(0x03);
+		b.u8(0x40);
+		b.u8(0x20);
+		b.u8(2);
+		b.u8(0x20);
+		b.u8(1);
+		gc(b, 0x0F);
+		b.u8(0x4E);
+		b.u8(0x0D);
+		b.u8(1);
+		b.u8(0x20);
+		b.u8(1);
+		b.u8(0x20);
+		b.u8(2);
+		b.u8(0x20);
+		b.u8(0);
+		castTo(b, tBytes);
+		b.u8(0x20);
+		b.u8(2);
+		gc(b, 0x0D, tBytes);
+		gc(b, 0x0E, tString);
+		b.u8(0x20);
+		b.u8(2);
+		b.u8(0x41);
+		b.u8(1);
+		b.u8(0x6A);
+		b.u8(0x21);
+		b.u8(2);
+		b.u8(0x0C);
+		b.u8(0);
+		b.u8(0x0B);
+		b.u8(0x0B);
+		b.u8(0x20);
+		b.u8(1);
+		return addHelper("str_latin1", "p_p", b, [-1 - tString, Enc.I32]);
 	}
 
 	// the reached selectors in the order of their table columns
@@ -943,6 +1063,11 @@ class GcModule {
 		Enc.uleb(el, segs);
 		el.buf(seg);
 		section(9, el);
+		if (dataSegs.length > 0) {
+			var dc = new Buf();
+			Enc.uleb(dc, dataSegs.length);
+			section(12, dc);
+		}
 		// code
 		var cs = new Buf();
 		Enc.uleb(cs, codes.length + helpers.length);
@@ -953,13 +1078,27 @@ class GcModule {
 			Enc.uleb(body, h.locals.length);
 			for (l in h.locals) {
 				body.u8(1);
-				body.u8(l);
+				if (l >= 0) body.u8(l) else {
+					body.u8(0x63);
+					Enc.sleb(body, -l - 1);
+				}
 			}
 			body.buf(h.body);
 			body.u8(0x0B);
 			Enc.sized(cs, body);
 		}
 		section(10, cs);
+		// the long literals' characters (passive segments)
+		if (dataSegs.length > 0) {
+			var ds = new Buf();
+			Enc.uleb(ds, dataSegs.length);
+			for (d in dataSegs) {
+				ds.u8(1);
+				Enc.uleb(ds, d.length);
+				ds.bytes(d);
+			}
+			section(11, ds);
+		}
 		// the functions' names (stack traces, profiles)
 		var names = new Buf();
 		Enc.name(names, "name");
