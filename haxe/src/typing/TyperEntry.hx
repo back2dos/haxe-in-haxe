@@ -221,6 +221,10 @@ class TyperEntry {
 		}
 	}
 
+	// port: hxmc's persistent module cache (hxmc/src/hxmc/ModuleCache.hx) keeps each context's typer here, to
+	// ... type a module from its source where the server expects it cached; always null in the compiler itself.
+	public static var createdHook:Null<TyperContext->Void> = null;
+
 	public static function create(com:CommonContext, macros:Null<{finalize:Void->Void, typer:TyperContext}>):TyperContext {
 		typing.Typer.initialize();
 		var ctx:TyperContext = {
@@ -272,6 +276,7 @@ class TyperEntry {
 			callArgContext: null,
 			rootTyper: ctx
 		};
+		if (createdHook != null) createdHook(ctx);
 		loadStdTypes(ctx);
 		loadString(ctx);
 		loadStd(ctx);

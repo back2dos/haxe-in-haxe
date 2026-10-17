@@ -21,7 +21,6 @@ class HaxeMain {
 	}
 
 	public static function run(args:Array<String>):Int {
-		if (args[0] == "--types-cache") return TypesCache.write(args.slice(1));
 		var failed = null;
 		// (through links to the binary, as npm's node_modules/.bin/haxe)
 		var exe = try sys.FileSystem.fullPath(Sys.programPath()) catch (_:Dynamic) Sys.programPath();
@@ -69,7 +68,6 @@ class HaxeMain {
 		}
 		// -lib from node_modules before lix and haxelib (NodeLibs.hx)
 		compiler.HighLevel.libraryHook = NodeLibs.resolve;
-		TypesCache.install();
 		ModuleCache.install();
 		hxmc.ir.CInterop.install();
 		#if hxmc.jit

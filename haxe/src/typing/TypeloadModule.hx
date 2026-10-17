@@ -822,6 +822,10 @@ class TypeloadModule {
 		throw NotFound.raise();
 	}
 
+	// port: hxmc's persistent module cache (hxmc/src/hxmc/ModuleCache.hx) learns here when a module is typed
+	// ... from its source (start, then end); always null in the compiler itself.
+	public static var typeFromSourceHook:Null<(com:CommonContext, path:GlobalTypePath, start:Bool) -> Void> = null;
+
 	public static function loadModulePrime(com:CommonContext, g:TyperGlobals, path:GlobalTypePath, p:Pos):ModuleDef {
 		Common.checkCancellation(com);
 		try {
@@ -868,7 +872,12 @@ class TypeloadModule {
 			decls = found.decls;
 			warnings = [];
 		}
-		var m = typeModule(com, g, path, file, decls, p, false, isExtern);
+		if (typeFromSourceHook != null) typeFromSourceHook(com, path, true);
+		var m = try typeModule(com, g, path, file, decls, p, false, isExtern) catch (e:Dynamic) {
+			if (typeFromSourceHook != null) typeFromSourceHook(com, path, false);
+			throw e;
+		}
+		if (typeFromSourceHook != null) typeFromSourceHook(com, path, false);
 		for (w in warnings) Common.moduleWarning(com, m, WIfDisplay, [], core.WarningList.warningObj(WIfDisplay).wDoc, w.pos);
 		return m;
 	}

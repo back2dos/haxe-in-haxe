@@ -201,7 +201,7 @@ class Compiler {
 	// port: code generators of other targets (hxmc/) receive the filtered program here; always null in the compiler itself.
 	public static var generateHook:Null<CommonContext->Void> = null;
 
-	// port: hxmc adds the HXB library of its runtime's typed modules here (hxmc/src/hxmc/TypesCache.hx); always null in the compiler itself.
+	// port: hxmc puts its persistent module cache in place here (hxmc/src/hxmc/ModuleCache.hx); always null in the compiler itself.
 	public static var beforeTypingHook:Null<(CommonContext, ArgContext) -> Void> = null;
 
 	public static function compile(com:CommonContext, actx:ArgContext, sctx:ServerCompilationContext):Void {

@@ -45,7 +45,7 @@ in [docs/plans/](docs/plans/README.md); what is built is in
 - Debugging: a Windows PDB, Mach-O `__unwind_info`, variables, DWARF for WebAssembly ([codegen.md](docs/plans/codegen.md#debugging-information))
 - The collector: incremental major marking, an aging survivor space, a memory limit ([runtime.md](docs/plans/runtime.md#the-collector-longer-term))
 - Macro-heavy builds: monomorph transactions, Eval call frames and instance layout ([compiler.md](docs/plans/compiler.md#macro-heavy-builds))
-- The central object cache and link-time DCE ([compiler.md](docs/plans/compiler.md#central-object-cache-and-quieter-builds))
+- Link-time DCE, so a module's object does not depend on the rest of the program ([compiler.md](docs/plans/compiler.md#central-object-cache-and-quieter-builds))
 - Native macros beyond the prototype ([compiler.md](docs/plans/compiler.md#native-macros-prototype))
 - C interop: methods on structs, specialized generics, value enums, allocators ([lowlevel.md](docs/plans/lowlevel.md))
 - WebAssembly threads; WasmGC as a browser-focused second path ([targets.md](docs/plans/targets.md#webassembly))
