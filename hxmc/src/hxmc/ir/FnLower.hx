@@ -421,6 +421,15 @@ class FnLower {
 		return r;
 	}
 
+	// x, lowered before the statements from `before` on (a later operand's
+	// effects): read into a local ahead of them unless constant
+	function spillBefore(x:Ex, t:Ty, before:Int):Ex {
+		if (out.length == before || isConst(x) || x.match(ELocal(_))) return x;
+		var lo = newLocal("s", t);
+		out.insert(before, SSet(lo, x));
+		return ELocal(lo);
+	}
+
 	// operands converted to the given representations (missing trailing ones: defaults)
 	function args(es:Array<TExpr>, to:Array<Ty>, defaults:Null<Array<Null<TExpr>>>, offset = 0):Array<Ex> {
 		var xs = operands(es);
@@ -1761,27 +1770,29 @@ class FnLower {
 					var decl = l.rootDecl(c, cf.cfName);
 					var impl = l.lookupMethod(c, cf.cfName);
 					var ds = impl != null ? l.defaults.get(l.method(impl.cls, impl.field)) : null;
-					var o:Ex = ELocal(asLocal(coerce(value(obj), tyOf(obj), TRef(RObj(l.rootClass()))), TRef(RObj(l.rootClass()))));
+					var rootTy = TRef(RObj(l.rootClass()));
+					var o = coerce(value(obj), tyOf(obj), rootTy);
+					var before = out.length;
+					var to = sig.ret.match(TStruct(_)) ? sig.args.slice(0, sig.args.length - 1) : sig.args;
+					var xs = args(cargs, to, ds, 1);
+					o = spillBefore(o, rootTy, before);
+					if (cargs.length + 1 < to.length && !o.match(ELocal(_))) o = ELocal(asLocal(o, rootTy)); // (the defaults may test it)
+					overrideDefaults(c, cf.cfName, o, xs, cargs.length, to, ds);
 					if (sig.ret.match(TStruct(_))) {
 						// (a struct result: the address of a slot here, last)
-						var to = sig.args.slice(0, sig.args.length - 1);
-						var xs = args(cargs, to, ds, 1);
-						overrideDefaults(c, cf.cfName, o, xs, cargs.length, to, ds);
 						var s = newSlot(sig.ret, true);
 						out.push(SExpr(ECallDispatch(l.selector(cf.cfName, sig), sig, [o].concat(xs).concat([ELocal(s)]))));
 						return coerce(ELocal(s), sig.ret, rt);
 					}
-					var xs = args(cargs, sig.args, ds, 1);
-					overrideDefaults(c, cf.cfName, o, xs, cargs.length, sig.args, ds);
 					return coerceRhs(ECallDispatch(l.selector(cf.cfName, sig), sig, [o].concat(xs)), sig.ret, rt);
 				}
 				var impl = l.lookupMethod(c, cf.cfName);
 				if (impl == null) fail("no implementation of " + cf.cfName, e);
 				var fn = l.method(impl.cls, impl.field);
 				var o = value(obj);
-				if (cargs.length > 0 && !o.match(ELocal(_))) o = ELocal(asLocal(o, tyOf(obj))); // (before the arguments' effects)
+				var before = out.length;
 				var xs = args(cargs, callTys(fn), l.defaults.get(fn), 1);
-				return callFn(fn, [o].concat(xs), rt);
+				return callFn(fn, [spillBefore(o, tyOf(obj), before)].concat(xs), rt);
 			case TField(_, FEnum(en, ef)):
 				var ci = l.ctorInfo(ef, en);
 				var xs = args(cargs, ci.params, null);
