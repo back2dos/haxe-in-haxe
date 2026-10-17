@@ -330,7 +330,8 @@ Since the design above (October 2026), in this order:
   brackets), Arabic's joining forms and required ligatures from GSUB,
   carets and hits by direction; marks on their bases (GPOS anchors) and
   canonical compositions; CJK and other scripts' fallback faces loaded
-  when first needed.
+  when first needed; colour emoji (CBDT, sbix, COLR), their sequences and
+  widths as Chromium's, drawn as Chromium draws Noto Color Emoji.
 
 Where this departs from section 6:
 

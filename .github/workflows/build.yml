@@ -576,7 +576,7 @@ jobs:
       - name: System packages
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -qqy --no-install-recommends libegl1 libegl-mesa0 libgl1-mesa-dri libgles2 xvfb xauth fonts-dejavu-core fonts-inter libgtk-3-0t64 dbus at-spi2-core
+          sudo apt-get install -qqy --no-install-recommends libegl1 libegl-mesa0 libgl1-mesa-dri libgles2 xvfb xauth fonts-dejavu-core fonts-inter libgtk-3-0t64 dbus at-spi2-core fonts-noto-color-emoji
       - name: gfx (Mesa llvmpipe, Xvfb)
         run: |
           set -ex
@@ -607,8 +607,8 @@ jobs:
           set -ex
           for t in windows-x86_64 windows-arm64; do
             make gfx-programs ui-programs GFX_TARGET=$t
-            cp bin/ui/$t/UiDrawTest.exe bin/ui/$t/ClipboardTest.exe bin/ui/$t/NativeTest.exe bin/ui/$t/WinAccessTest.exe bin/gfx/$t/
-            tar czf bin/gfx-$t.tar.gz -C bin/gfx/$t GfxTest.exe Triangle.exe UiDrawTest.exe ClipboardTest.exe NativeTest.exe WinAccessTest.exe
+            cp bin/ui/$t/UiDrawTest.exe bin/ui/$t/ClipboardTest.exe bin/ui/$t/NativeTest.exe bin/ui/$t/WinAccessTest.exe bin/ui/$t/EmojiTest.exe bin/gfx/$t/
+            tar czf bin/gfx-$t.tar.gz -C bin/gfx/$t GfxTest.exe Triangle.exe UiDrawTest.exe ClipboardTest.exe NativeTest.exe WinAccessTest.exe EmojiTest.exe
           done
       - uses: actions/upload-artifact@v7
         with: {name: gfx-windows, path: "bin/gfx-windows-*.tar.gz", retention-days: 3}
@@ -680,6 +680,8 @@ jobs:
           gfx/NativeTest.exe
           # (the accessibility tree through UI Automation: Narrator's view of it)
           HXMC_GFX_SOFTWARE=1 gfx/WinAccessTest.exe
+          # (colour emoji: Segoe UI Emoji's COLR layers)
+          HXMC_GFX_SOFTWARE=1 gfx/EmojiTest.exe none gfx/emoji.png
       - uses: actions/upload-artifact@v7
         if: always()
         with: {name: 'gfx-images-${{ matrix.target }}', path: gfx/*.png, retention-days: 7}
@@ -733,6 +735,9 @@ jobs:
           # (the accessibility tree through NSAccessibility: VoiceOver's view of it)
           npx haxe -lib hxmc.ui -cp "$u/test" -main MacAccessTest --custom-target hxmc=gfx/MacAccessTest
           gfx/MacAccessTest
+          # (colour emoji: Apple Color Emoji's sbix bitmaps)
+          npx haxe -lib hxmc.ui -cp "$g/test" -cp "$u/test" -main EmojiTest --custom-target hxmc=gfx/EmojiTest
+          gfx/EmojiTest none gfx/emoji.png
           # (hxmc.ui.native on AppKit's controls)
           npx haxe -lib hxmc.ui -cp "$u/test" -cp "$u/examples" -main NativeTest --custom-target hxmc=gfx/NativeTest
           gfx/NativeTest gfx/native-macos.png
