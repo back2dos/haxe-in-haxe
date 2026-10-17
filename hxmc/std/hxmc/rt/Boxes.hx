@@ -139,13 +139,13 @@ class Boxes {
 
 	static inline function arrCap(a:Dynamic):Int {
 		var d = arrData(a);
-		return d.isNull() ? 0 : (Mem.getI32(d, -8) & 0x0FFFFFFF) << (arrKind(a) == AK_I32 ? 1 : 0);
+		return d.isNull() ? 0 : (Mem.getI32(d, -8) & 0x0FFFFFFF) << (ak4(arrKind(a)) ? 1 : 0);
 	}
 
 	static function dataAlloc(kind:Int, cap:Int):Dynamic {
 		if (cap < 1) cap = 1;
 		return switch kind {
-			case AK_I32: Mem.alloc((cap + 1) >> 1, T_ADATA_RAW, K_RAW);
+			case AK_I32 | AK_BOOL: Mem.alloc((cap + 1) >> 1, T_ADATA_RAW, K_RAW);
 			case AK_F64 | AK_I64: Mem.alloc(cap, T_ADATA_RAW, K_RAW);
 			case _: Mem.alloc(cap, T_ADATA_P, K_PARR);
 		}
@@ -180,7 +180,7 @@ class Boxes {
 		var len = arrLen(a);
 		var d = arrData(a);
 		if (!d.isNull()) {
-			var es = kind == AK_I32 ? 4 : 8;
+			var es = ak4(kind) ? 4 : 8;
 			LibC.memcpy(Mem.addr(nd), d, es * len);
 			if (kind == AK_PTR && !inYoungObj(nd)) Gc_barrierRange(nd, len);
 		}
@@ -203,7 +203,7 @@ class Boxes {
 		for (i in 0...len) {
 			a = Mem.getRef(slot, 0);
 			var k = arrKind(a);
-			var v:Dynamic = k == AK_I32 ? boxInt(Mem.getI32At(arrData(a), 0, i)) : k == AK_I64 ? boxI64(Mem.getI64At(arrData(a), 0, i)) : boxFloat(Mem.getF64At(arrData(a), 0, i));
+			var v:Dynamic = k == AK_I32 ? boxInt(Mem.getI32At(arrData(a), 0, i)) : k == AK_BOOL ? boxBool(Mem.getI32At(arrData(a), 0, i)) : k == AK_I64 ? boxI64(Mem.getI64At(arrData(a), 0, i)) : boxFloat(Mem.getF64At(arrData(a), 0, i));
 			Mem.setRefBarrier(nd, 8 * i, v);
 		}
 		a = Mem.getRef(slot, 0);
@@ -215,7 +215,7 @@ class Boxes {
 		if (Mem.addr(a).isNull() || !Mem.ult(i, arrLen(a))) return 0;
 		var d = arrData(a);
 		return switch arrKind(a) {
-			case AK_I32: Mem.getI32At(d, 0, i);
+			case AK_I32 | AK_BOOL: Mem.getI32At(d, 0, i);
 			case AK_F64: f2i(Mem.getF64At(d, 0, i));
 			case AK_I64: Mem.getI64At(d, 0, i).toInt();
 			case _: unboxInt(Mem.getRefAt(d, 0, i));
@@ -226,7 +226,7 @@ class Boxes {
 		if (Mem.addr(a).isNull() || !Mem.ult(i, arrLen(a))) return 0;
 		var d = arrData(a);
 		return switch arrKind(a) {
-			case AK_I32: Mem.getI32At(d, 0, i);
+			case AK_I32 | AK_BOOL: Mem.getI32At(d, 0, i);
 			case AK_F64: f2l(Mem.getF64At(d, 0, i));
 			case AK_I64: Mem.getI64At(d, 0, i);
 			case _: unboxI64(Mem.getRefAt(d, 0, i));
@@ -237,7 +237,7 @@ class Boxes {
 		if (Mem.addr(a).isNull() || !Mem.ult(i, arrLen(a))) return 0;
 		var d = arrData(a);
 		return switch arrKind(a) {
-			case AK_I32: Mem.getI32At(d, 0, i);
+			case AK_I32 | AK_BOOL: Mem.getI32At(d, 0, i);
 			case AK_F64: Mem.getF64At(d, 0, i);
 			case AK_I64:
 				var f:Float = cast Mem.getI64At(d, 0, i);
@@ -250,19 +250,23 @@ class Boxes {
 		if (Mem.addr(a).isNull() || !Mem.ult(i, arrLen(a))) return null;
 		return switch arrKind(a) {
 			case AK_I32: boxInt(Mem.getI32At(arrData(a), 0, i));
+			case AK_BOOL: boxBool(Mem.getI32At(arrData(a), 0, i));
 			case AK_F64: boxFloat(Mem.getF64At(arrData(a), 0, i));
 			case AK_I64: boxI64(Mem.getI64At(arrData(a), 0, i));
 			case _: Mem.getRefAt(arrData(a), 0, i);
 		}
 	}
 
-	// store v (of kind vk; AK_PTR: v is the address of a rooted slot) at i < length
+	// store v (of kind vk; AK_PTR: v is the address of a rooted slot) at i < length;
+	// a value the array's kind cannot hold (a Bool in an Int array, an Int in a
+	// Bool array) turns it into a reference array first
 	static function storeConv(slot:Ptr, i:Int, vk:Int, v:I64):Void {
 		var a:Dynamic = Mem.getRef(slot, 0);
 		var ak = arrKind(a);
 		if (ak == AK_PTR) {
 			var p:Dynamic = switch vk {
 				case AK_I32: boxInt(v.toInt());
+				case AK_BOOL: boxBool(v.toInt());
 				case AK_F64: boxFloat(haxe.io.FPHelper.i64ToDouble(v.toInt(), (v >> 32).toInt()));
 				case AK_I64: boxI64(v);
 				case _: Mem.getRef(new Ptr(v), 0);
@@ -273,16 +277,20 @@ class Boxes {
 		}
 		if (vk == AK_PTR) {
 			var p:Dynamic = Mem.getRef(new Ptr(v), 0);
-			var t = Mem.addr(p).isNull() ? T_BOXINT : tindex(p);
-			var fits = ak == AK_I32 ? (t == T_BOXINT || t == T_BOXBOOL) : ak == AK_F64 ? (t == T_BOXINT || t == T_BOXFLOAT || t == T_BOXBOOL) : (t == T_BOXINT
-				|| t == T_BOXBOOL || t == T_BOXI64);
+			var t = Mem.addr(p).isNull() ? (ak == AK_BOOL ? T_BOXBOOL : T_BOXINT) : tindex(p);
+			var fits = switch ak {
+				case AK_I32: t == T_BOXINT;
+				case AK_BOOL: t == T_BOXBOOL;
+				case AK_F64: t == T_BOXINT || t == T_BOXFLOAT;
+				case _: t == T_BOXINT || t == T_BOXI64;
+			}
 			if (!fits) {
 				arrToPtr(slot);
 				storeConv(slot, i, vk, v);
 				return;
 			}
 			var d = arrData(a);
-			if (ak == AK_I32) Mem.setI32At(d, 0, i, unboxInt(p)) else if (ak == AK_F64) Mem.setF64At(d, 0, i, unboxFloat(p)) else
+			if (ak4(ak)) Mem.setI32At(d, 0, i, unboxInt(p)) else if (ak == AK_F64) Mem.setF64At(d, 0, i, unboxFloat(p)) else
 				Mem.setI64At(d, 0, i, unboxI64(p));
 			return;
 		}
@@ -292,7 +300,7 @@ class Boxes {
 			return;
 		}
 		var d = arrData(a);
-		if (ak == AK_I32) Mem.setI32At(d, 0, i, v.toInt()) else if (ak == AK_F64) {
+		if (ak4(ak)) Mem.setI32At(d, 0, i, v.toInt()) else if (ak == AK_F64) {
 			if (vk == AK_I32) Mem.setF64At(d, 0, i, v.toInt()) else Mem.setI64At(d, 0, i, v);
 		} else
 			Mem.setI64At(d, 0, i, vk == AK_I32 ? (v.toInt() : I64) : v);

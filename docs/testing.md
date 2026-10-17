@@ -127,7 +127,14 @@ On Eval: `make view-check` (`@hxmc/view` on two test renderers, on Eval,
 natively and in JavaScript (compiled by the port, run by node): signals,
 markup, components, text runs, reactive values, the control flow
 components, boundaries between renderers, the programs the macro
-rejects), `make text-check` (the rasterizer,
+rejects), `make web-check` (`@hxmc/web`'s static renderer on Eval and
+natively: escaping, attributes, the markers hydration reads, islands;
+then in headless Chromium: the DOM renderer, and the demo page of
+`packages/web/examples` hydrated without making a node again, reactive
+afterwards, a mismatch rendered again, a JavaScript island calling a
+wasm32-wasi module's exports, gfx's cube as a WebAssembly island fetched
+once it scrolls into view; it prints the sizes of a small island's bundle
+and of the loader), `make text-check` (the rasterizer,
 DejaVu Sans' tables and outlines, line layout, a text sample through the
 atlas against `packages/text/test/sample.png`: the same pixels on every
 machine with that font; Inter's CFF outlines and GPOS kerning against
