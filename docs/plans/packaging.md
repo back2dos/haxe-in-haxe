@@ -19,10 +19,17 @@ desktop targets: [docs/using.md](../using.md) and
 - **The `hxmc` haxelib** (`-lib hxmc`, `--custom-target hxmc=out`,
   `-D hxmc.target=<os>-<arch>`), as hxc had one, and the source-only
   packages on haxelib too.
-- **New packages**: `@hxmc/ui`, `@hxmc/text`, `@hxmc/esx` (landed with the UI toolkit),
-  then `@hxmc/view` and `@hxmc/web` ([web.md](web.md)): sources only, a
+- **New packages**: `@hxmc/ui`, `@hxmc/text` (landed with the UI toolkit),
+  `@hxmc/view` (signals and markup), then `@hxmc/web`
+  ([web.md](web.md)): sources only, a
   peer dependency on a range of `@hxmc/cli`, an `imports.mjs` each where
   they import from JavaScript.
+- **`@hxmc/esx` is superseded by `@hxmc/view`**: esx 0.1.0 was published
+  with the UI toolkit; its markup and `hxmc.ui.reactive`'s signals are
+  `@hxmc/view` now, and `@hxmc/ui` from 0.2.0 depends on that. The
+  package is no longer in the repository and gets no new versions; its
+  npm page can say so with `npm deprecate` when someone with the rights
+  does it.
 - **Using hxmc's built-in compiler**: HXB ties the user's Haxe version to
   hxmc's. hxmc contains the whole compiler port, so it (or the haxelib)
   can compile the user's sources itself; the "HXB from your own Haxe"
