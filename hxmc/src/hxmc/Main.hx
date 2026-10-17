@@ -46,7 +46,6 @@ class Main {
 			args.shift();
 			if (Sys.getEnv("RT_OLD_MB") == null && Sys.getEnv("HXMC_GC_DEFAULTS") != "0" && Sys.systemName() != "Wasi") {
 				Sys.putEnv("RT_OLD_MB", "4096");
-				if (Sys.getEnv("RT_MINOR_KB") == null) Sys.putEnv("RT_MINOR_KB", "32768");
 				Sys.exit(Sys.command(Sys.programPath(), ["--server"].concat(args)));
 			}
 			Driver.resident = true;
@@ -74,15 +73,18 @@ class Main {
 		}
 		if (key != null) UpToDate.forget(out);
 		// a whole-program build keeps most of what it makes (the typed program,
-		// then every module's code until the link): a large nursery and a large
-		// first old-space limit spare it most collections (half the GC time of
-		// a cold build of the port; 3 GB: the port's cold build with the module
-		// cache's encoding promotes about 2 GB, just past 2 GB, which cost a
-		// major collection of a second). The runtime reads them at startup, so
-		// the tool runs itself again with them set (not under WASI: no processes).
+		// then every module's code until the link): a large first old-space
+		// limit spares it major collections (3 GB: the port's cold build with
+		// the module cache's encoding promotes about 2 GB, just past 2 GB, which
+		// cost a major collection of a second). The nursery is the runtime's
+		// adaptive one: up to 16 MB for the front end, 16 MB per thread for the
+		// parallel code generation (against a fixed 32 MB that 12 threads
+		// shared: the cold self-build 11% faster with 21% less peak memory; a
+		// fixed 256 MB would triple a small build's peak memory). The runtime
+		// reads the limit at startup, so the tool runs itself again with it set
+		// (not under WASI: no processes).
 		if (Sys.getEnv("RT_OLD_MB") == null && Sys.getEnv("HXMC_GC_DEFAULTS") != "0" && Sys.systemName() != "Wasi") {
 			Sys.putEnv("RT_OLD_MB", "3072");
-			if (Sys.getEnv("RT_MINOR_KB") == null) Sys.putEnv("RT_MINOR_KB", "32768");
 			Sys.exit(Sys.command(Sys.programPath(), [out].concat(args)));
 		}
 		compiler.Compiler.generateHook = function(com) {

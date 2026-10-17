@@ -146,13 +146,17 @@ linked, only the C library, mbedtls and libuv ([plans/lowlevel.md](plans/lowleve
 `RT_MINOR_KB` fixes it; Gc.hx): it starts at 4 MB, doubles after a minor
 collection that promoted more than a 16th of what was allocated since the
 previous one and halves after 8 that promoted less than a 64th, between a
-floor of 4 MB per thread that allocated in the last cycles and a ceiling of
-16 MB plus 8 MB per other such thread, at most 32 MB. Programs whose
+floor of 4 MB per thread that allocated in the last cycles (at most 32 MB)
+and a ceiling of 16 MB per such thread (at most 256 MB). Programs whose
 objects die young keep a nursery that stays in the caches; the port typing
 or compiling macro-heavy code grows it to 16 MB, which keeps medium-lived
 objects out of the old space (6-17% faster, up to 31% less peak memory);
 parallel phases get a larger one, so their threads stop for fewer
-collections. `RT_STATS=1` prints the resizes and what was promoted. A change of the runtime's
+collections and promote less of what they are working on (the tool's
+parallel code generation: 256 MB). Threads take at most 64 KB of it at a time
+(their TLAB, zeroed while it fits in the cache; `RT_TLAB_KB`), in fresh
+pages up to a 2 MB boundary, so that no two threads fault in the same
+transparent huge page. `RT_STATS=1` prints the resizes and what was promoted. A change of the runtime's
 interface or of the IR's conventions needs a tool that knows it: build once
 against the previous runtime first, or bootstrap again.
 

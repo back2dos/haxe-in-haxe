@@ -35,13 +35,26 @@ import hxmc.unsafe.*;
 // time in the collector and a third less peak memory at 16 MB than at 4),
 // and halves after 8 collections that promoted less than a 64th; programs
 // whose objects die young keep 4 MB, which stays in the caches. Between a
-// floor of 4 MB per allocating thread and a ceiling of 16 MB, 8 MB more per
-// other thread, up to 32 MB (MINOR_MIN, MINOR_CAP, MINOR_PER_THREAD,
+// floor of 4 MB per allocating thread, at most 32 MB, and a ceiling of 16 MB
+// per allocating thread, up to 256 MB (MINOR_MIN, FLOOR_MAX, MINOR_CAP,
 // MINOR_MAX): one budget, split into TLABs; threads that fill it together
-// stop together, so each collection costs all of them a pause. A thread
-// counts when it took a TLAB since the last collection; the count grows at
-// once and shrinks after 16 collections with fewer threads (a parallel phase
-// starts and ends its workers' allocation).
+// stop together, so each collection costs all of them a pause, and what each
+// of them is working on survives it. The ceiling grows with the threads so
+// that each of them can allocate as much between two collections as a single
+// thread would (the tool's parallel code generation, 12 threads: sharing
+// 32 MB, a third of its time went to serial minor collections and it
+// promoted 1.3 GB of short-lived data); past the floor, only what survives
+// grows it, so threads whose objects die young keep a small nursery. A
+// thread counts when it took a TLAB since the last collection; the count
+// grows at once and shrinks after 16 collections with fewer threads (a
+// parallel phase starts and ends its workers' allocation).
+//
+// A TLAB is a 16th of the nursery, at most 64 KB (TLAB_MAX; RT_TLAB_KB; in
+// fresh pages, up to a 2 MB boundary: tlabRefill): zeroed when taken, it is
+// still in the L2 cache for the allocations that use it, and its refill is
+// the thread's safepoint, so a small one keeps a stop of the world from
+// waiting long for the other threads (2 MB TLABs: zeroing that missed the
+// caches, and half a second waiting for threads).
 //
 // Allocation zeroes in bulk: a TLAB is zeroed when it is taken (in the L1
 // cache, right before the allocations that use it), so every object
@@ -64,10 +77,12 @@ class Gc {
 	static inline var K_RAW = 2;
 	static inline var K_FWD = 15;
 	static inline var T_NATIVE = 16; // a native handle
-	static inline var MINOR_MAX = 32 << 20;
-	static inline var MINOR_MIN = 4 << 20;
-	static inline var MINOR_CAP = 16 << 20;
-	static inline var MINOR_PER_THREAD = 8 << 20;
+	static inline var MINOR_MAX = 256 << 20;
+	static inline var MINOR_MIN = 4 << 20; // per allocating thread
+	static inline var FLOOR_MAX = 32 << 20;
+	static inline var MINOR_CAP = 16 << 20; // per allocating thread
+	static inline var TLAB_MAX = 64 << 10;
+	static inline var HUGE_PAGE = 2 << 20;
 	static inline var FEWER_THREADS_AFTER = 16;
 	static inline var LOW_PROMOTION_AFTER = 8;
 	static inline var POISON = 0xA5;
@@ -94,7 +109,7 @@ class Gc {
 	@:hxmc.export("hxmc_young_next") static var youngNext:Ptr; // the free part: TLABs are taken from here
 	static var youngDirty:Ptr; // the nursery above this holds zeros (never used since fresh or released)
 	static var minorSize:I64;
-	static var tlabSize:I64; // with several threads (RT_TLAB_KB; default a 16th of the nursery)
+	static var tlabSize:I64; // with several threads (RT_TLAB_KB; default a 16th of the nursery, at most TLAB_MAX)
 	static var zchunk:I64; // RT_ZCHUNK_KB
 	static var minorFixed:Bool; // RT_MINOR_KB sets the nursery size
 	// the threads that took a TLAB in this cycle (a thread counts once per
@@ -686,7 +701,7 @@ class Gc {
 		}
 		minorSize = size;
 		youngEnd = youngStart.addL(minorSize);
-		if (!Os.has("RT_TLAB_KB")) tlabSize = minorSize / 16;
+		if (!Os.has("RT_TLAB_KB")) tlabSize = minorSize / 16 < (TLAB_MAX : I64) ? minorSize / 16 : TLAB_MAX;
 		if (stats) {
 			var r = new Report(Mem.stack(Report.BYTES));
 			r.str("gc: nursery ");
@@ -701,8 +716,8 @@ class Gc {
 	@:hxmc.noGc static function adaptNursery(promoted:I64, used:I64, threads:Int) {
 		adaptThreads(threads);
 		var floor:I64 = (MINOR_MIN : I64) * mutators;
-		var ceiling:I64 = (MINOR_CAP : I64) + (mutators - 1 : I64) * MINOR_PER_THREAD;
-		if (floor > (MINOR_MAX : I64)) floor = MINOR_MAX;
+		var ceiling:I64 = (MINOR_CAP : I64) * mutators;
+		if (floor > (FLOOR_MAX : I64)) floor = FLOOR_MAX;
 		if (ceiling > (MINOR_MAX : I64)) ceiling = MINOR_MAX;
 		if (promoted * 16 > used) {
 			lowFor = 0;
@@ -794,7 +809,8 @@ class Gc {
 			myEpoch = epoch;
 			Atomic.add32(Mem.sym("hxmc_allocating"), 1);
 		}
-		var want:I64 = Atomic.load32(Mem.sym("rt_nthreads")) > 1 ? tlabSize : poison ? ((1 : I64) << 62) : zchunk;
+		var many = Atomic.load32(Mem.sym("rt_nthreads")) > 1;
+		var want:I64 = many ? tlabSize : poison ? ((1 : I64) << 62) : zchunk;
 		if (want < bytes) want = bytes;
 		var cell = Mem.sym("hxmc_young_next");
 		var p = Ptr.ofI64(Atomic.load64(cell));
@@ -803,6 +819,19 @@ class Gc {
 			var avail = youngEnd.diff(s);
 			if (avail < bytes) return false;
 			var e = s.addL(want < avail ? want : avail);
+			// with several threads, a TLAB that reaches untouched memory (above
+			// youngDirty: fresh pages, after a start or a growth) ends at a 2 MB
+			// boundary, so that threads do not fault in the same 2 MB together:
+			// with transparent huge pages, each of them would get a huge page
+			// of its own, zeroed by the kernel, all but one thrown away (the
+			// tool's code generation, its nursery growing to 256 MB under 12
+			// threads: 1.5 s of kernel time). Fresh pages need no zeroing of
+			// ours, so the larger TLAB costs nothing but its share of the nursery
+			if (many && youngDirty.ult(e)) {
+				var x = e.toI64() + (HUGE_PAGE - 1);
+				e = Ptr.ofI64(x - (x & (HUGE_PAGE - 1))); // (the nursery starts 2 MB aligned)
+				if (youngEnd.ult(e)) e = youngEnd;
+			}
 			var seen = Ptr.ofI64(Atomic.cas64(cell, p.toI64(), e.toI64()));
 			if (seen == p) {
 				// (below p: the rest of the thread's TLAB, zeroed already)
@@ -1013,7 +1042,7 @@ class Gc {
 		zchunk = (Os.envInt("RT_ZCHUNK_KB", 32) : I64) << 10;
 		if (zchunk < 4096) zchunk = 4096;
 		var tk = Os.getenv("RT_TLAB_KB");
-		tlabSize = tk.isNull() ? minorSize / 16 : (Os.atoi(tk) : I64) << 10;
+		tlabSize = tk.isNull() ? (minorSize / 16 < (TLAB_MAX : I64) ? minorSize / 16 : TLAB_MAX) : (Os.atoi(tk) : I64) << 10;
 		if (tlabSize < 4096) tlabSize = 4096;
 		regionBytes = (16 : I64) << 30;
 		var rm = Os.getenv("RT_REGION_MB");
