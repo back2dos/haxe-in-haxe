@@ -43,8 +43,11 @@ class FnLower {
 		out = fi.body;
 	}
 
-	function fail(msg:String, ?e:TExpr):Dynamic
-		throw new LowerError(msg, e != null ? '${e.epos.pfile}:${e.epos.pmin}' : "");
+	// (the expression's file and line, and the function being lowered)
+	function fail(msg:String, ?e:TExpr):Dynamic {
+		var at = e != null ? where(e) : "";
+		throw new LowerError(msg, (at != "" ? at + " in " : "") + fi.name);
+	}
 
 	inline function ty(t:T):Ty
 		return l.ty(t);
@@ -367,7 +370,8 @@ class FnLower {
 	public static var NOGC = ["Math_random" => true, "hx_box_bool" => true];
 
 	public static function isPure(n:String):Bool
-		return PURE.exists(n) || MATH.exists(n) || PURE_INTRINSICS.exists(n);
+		return PURE.exists(n) || MATH.exists(n) || PURE_INTRINSICS.exists(n)
+			|| StringTools.startsWith(n, "hxmc_narray_get_") || n == "hxmc_narray_length";
 
 	// C functions declared @:hxmc.c (hxmc.unsafe.LibC): called with the C ABI,
 	// never GC points (filled while lowering)
@@ -386,7 +390,7 @@ class FnLower {
 
 	// a runtime function call that is not a GC point
 	public static function noGcHost(n:String):Bool
-		return isPure(n) || NOGC.exists(n) || C_EXTERNS.exists(n)
+		return isPure(n) || NOGC.exists(n) || C_EXTERNS.exists(n) || StringTools.startsWith(n, "hxmc_narray_set_")
 			|| (isIntrinsic(n) && n != "hxmc_unsafe_Mem_alloc" && n != "hxmc_unsafe_Mem_allocRaw" && !StringTools.startsWith(n, "hxmc_unsafe_Mem_call"));
 
 	// the layout an object literal of the structural type t gets, when the
@@ -545,6 +549,10 @@ class FnLower {
 			case _:
 		}
 		switch [from, to] {
+			case [TRef(RNativeArr(a, false)), TRef(RNativeArr(b, false))] if (nativeKind(a) != nativeKind(b)):
+				throw "hxmc: NativeArray storage types cannot be converted implicitly";
+			case [TRef(RNativeArr(_, true)), TRef(RNativeArr(b, false))]:
+				return temp(to, ECallHost(l.native("hx_narray_check"), [x, EInt(nativeKind(b))], to));
 			case [TRef(RClos(a)), TRef(RClos(b))] if (a != b):
 				if (x.match(ENull(_))) return ENull(to);
 				if (hasStruct(a) || hasStruct(b)) structFail('a function taking or returning a struct value cannot become a function of another type');
@@ -588,6 +596,20 @@ class FnLower {
 				x.match(ENull(_)) ? nullOf(to) : EUnbox(to, x);
 			case _: x;
 		}
+	}
+
+	static function nativeKind(elem:Ty):Int
+		return switch elem {
+			case TI32: 1;
+			case TBool: 4;
+			case TF64: 2;
+			case TI64: 3;
+			case _: 0;
+		};
+
+	function nativeGet(elem:Ty, erased:Bool, a:Ex, i:Ex):Ex {
+		if (erased) return coerce(temp(TRef(RAny), ECallHost(l.native("hx_narray_get"), [a, i], TRef(RAny))), TRef(RAny), elem);
+		return ECallHost("hxmc_narray_get_" + ["p", "i", "f", "l", "b"][nativeKind(elem)], [a, i], elem);
 	}
 
 	// a value converted to String (for concatenation)
@@ -1055,6 +1077,9 @@ class FnLower {
 				coerce(EEnumParam(c, i, value(e1)), c.params[i], tyOf(e));
 			case TArray(a, i):
 				switch tyOf(a) {
+					case TRef(RNativeArr(elem, erased)):
+						var xs = operands([a, i]);
+						coerce(nativeGet(elem, erased, xs[0], coerce(xs[1], tyOf(i), TI32)), elem, tyOf(e));
 					case TRef(RArr(elem)):
 						var xs = operands([a, i]);
 						var ix = coerce(xs[1], tyOf(i), TI32);
@@ -1071,6 +1096,12 @@ class FnLower {
 			case TBinop(op, a, b): binop(op, a, b, e);
 			case TUnop(op, flag, e1): unop(op, flag, e1, e);
 			case TCall(f, cargs): call(f, cargs, e);
+			case TNew(c, _, cargs) if (Lower.isNativeArray(c)):
+				var elem = switch tyOf(e) {
+					case TRef(RNativeArr(t, false)): t;
+					case _: return fail("new NativeArray<T> requires a known element type; specialize the enclosing function with @:generic", e);
+				};
+				ECallHost("hxmc_narray_new", [EInt(nativeKind(elem)), coerce(value(cargs[0]), tyOf(cargs[0]), TI32)], tyOf(e));
 			case TNew(c, _, cargs) if (Lower.isCore(c, "Array")):
 				var elem = switch tyOf(e) {
 					case TRef(RArr(t)): t;
@@ -1177,6 +1208,8 @@ class FnLower {
 					case Method(_): methodClosure(obj, c, cf, e);
 					case Var(_) if (Lower.isCore(c, "Array") && cf.cfName == "length"):
 						EArrLen(value(obj));
+					case Var(_) if (Lower.isNativeArray(c) && cf.cfName == "length"):
+						ECallHost("hxmc_narray_length", [value(obj)], TI32);
 					case Var(_) if (Lower.isCore(c, "String") && cf.cfName == "length"):
 						ECallHost("String_length", [value(obj)], TI32);
 					case Var(_) if (CInterop.isStruct(c)): structGet(obj, c, cf, e);
@@ -1657,6 +1690,13 @@ class FnLower {
 				return coerce(x, t, et);
 			case TArray(a, i):
 				switch tyOf(a) {
+					case TRef(RNativeArr(elem, erased)):
+						var al = asLocal(value(a), tyOf(a));
+						var ix = ELocal(asLocal(coerce(value(i), tyOf(i), TI32), TI32));
+						var x = pure(compute(() -> nativeGet(elem, erased, ELocal(al), ix), elem, elem), elem);
+						if (erased) out.push(SExpr(ECallHost(l.native("hx_narray_set"), [ELocal(al), ix, coerce(x, elem, TRef(RAny))], TVoid)));
+						else out.push(SExpr(ECallHost("hxmc_narray_set_" + ["p", "i", "f", "l", "b"][nativeKind(elem)], [ELocal(al), ix, x], TVoid)));
+						return coerce(x, elem, et);
 					case TRef(RArr(elem)):
 						var al = asLocal(value(a), tyOf(a));
 						var ix = ELocal(asLocal(coerce(value(i), tyOf(i), TI32), TI32));

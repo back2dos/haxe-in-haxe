@@ -215,6 +215,8 @@ class Facts {
 	function assignTypes() {
 		var rtNames = ["None", "String", "Int", "Float", "Bool", "Array", "ArrayData", "ArrayData", "haxe.io.Bytes", "haxe.io.BytesBuffer", "StringBuf", "Ref", "Ref", "Ref", "Class", "Overflow", "Native", "ArrayIterator", "haxe.Int64"];
 		var rtSlots:Array<Array<Null<Ty>>> = [[], [], [TI32], [TF64], [TBool], [TI32, TRef(RAny)], [], [], [], [TI32, TRef(RAny)], [TI32, TRef(RAny)], [TRef(RAny)], [TI32], [TF64], [TI32], [], [], [TRef(RAny), TI32], [TI64]];
+		rtNames.push("hxmc.NativeArray");
+		rtSlots.push([]);
 		for (i in 0...T_FIRST)
 			addType(entry(i < rtNames.length ? rtNames[i] : "Reserved", "TK_RUNTIME", i < rtSlots.length ? rtSlots[i] : [], "rt" + i));
 		for (c in p.classes) {
@@ -680,6 +682,8 @@ class Facts {
 					case SArrPush(_, _, v) if (gcFree(v)):
 						ss[k] = SCold(next++, st);
 					case SSet(_, e) if (e.match(ENewObj(_) | ENewEnum(_) | ENewClos(_) | ENewBox(_) | ENewAnon(_)) && !GcPoints.nestedGc(e)):
+						ss[k] = SCold(next++, st);
+					case SSet(_, ECallHost("hxmc_narray_new", args, _)) if (args.filter(a -> !gcFree(a)).length == 0):
 						ss[k] = SCold(next++, st);
 					case SIf(_, a, b):
 						mark(a);

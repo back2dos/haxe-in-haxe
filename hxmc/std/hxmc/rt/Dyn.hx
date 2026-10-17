@@ -254,6 +254,8 @@ class Dyn {
 		var t = tindex(o);
 		if (t == T_STRING && isLength(fid)) return (Str.len(o) : Dynamic);
 		if (t == T_ARRAY && isLength(fid)) return ((o : Array<Dynamic>).length : Dynamic);
+		if (t == T_NATIVE_ARRAY && isLength(fid)) return (Mem.getI32(Mem.addr(o), 0) : Dynamic);
+		if (t == T_NATIVE_ARRAY) return null;
 		var ty = ty(t);
 		var f = findField(ty, fid);
 		if (!f.isNull()) return boxSlot(o, fSlot(f), fKind(f));
@@ -266,11 +268,12 @@ class Dyn {
 	@:hxmc.export("hx_anon_set_slow") static function anonSetSlow(o:Dynamic, fid:Int, v:Dynamic):Void {
 		if (Str.isNull(o)) Rt.rt_throw("Null access");
 		if (tindex(o) == T_ARRAY && isLength(fid)) {
-			// haxe.ds.Vector's generic constructor
+			// Array length assignment resizes the array.
 			var n:Int = v;
 			(o : Array<Dynamic>).resize(n);
 			return;
 		}
+		if (tindex(o) == T_NATIVE_ARRAY) Rt.rt_throw("NativeArray fields are read-only");
 		var st = findStatic(o, fid);
 		if (!st.isNull()) {
 			staticSet(st, v);
@@ -422,6 +425,7 @@ class Dyn {
 		if (Str.len(name) == 6 && name == "length") {
 			if (t == T_STRING) return (Str.len(o) : Dynamic);
 			if (t == T_ARRAY) return ((o : Array<Dynamic>).length : Dynamic);
+			if (t == T_NATIVE_ARRAY) return (Mem.getI32(Mem.addr(o), 0) : Dynamic);
 		}
 		return anonGetSlow(o, fid(name));
 	}
@@ -524,11 +528,20 @@ class Dyn {
 	}
 
 	@:hxmc.host("hx_dyn_aget") static function dynAget(a:Dynamic, i:Int):Dynamic {
+		if (!Str.isNull(a) && tindex(a) == T_NATIVE_ARRAY) {
+			if (!Mem.ult(i, Mem.getI32(Mem.addr(a), 0))) Rt.rt_throw("Invalid NativeArray index");
+			return NArray.get(a, i);
+		}
 		if (Str.isNull(a) || tindex(a) != T_ARRAY) return null;
 		return (a : Array<Dynamic>)[i];
 	}
 
 	@:hxmc.host("hx_dyn_aset") static function dynAset(a:Dynamic, i:Int, v:Dynamic):Void {
+		if (!Str.isNull(a) && tindex(a) == T_NATIVE_ARRAY) {
+			if (!Mem.ult(i, Mem.getI32(Mem.addr(a), 0))) Rt.rt_throw("Invalid NativeArray index");
+			NArray.set(a, i, v);
+			return;
+		}
 		if (Str.isNull(a) || tindex(a) != T_ARRAY) Rt.rt_throw("Invalid array access");
 		var arr:Array<Dynamic> = a;
 		arr[i] = v;
@@ -674,7 +687,7 @@ class Dyn {
 				return f == Math.ffloor(f) && Math.abs(f) < 2147483648.0;
 			case T_BOXFLOAT:
 				return t == T_BOXINT || t == T_BOXFLOAT;
-			case T_BOXBOOL | T_STRING | T_ARRAY | T_BYTES:
+			case T_BOXBOOL | T_STRING | T_ARRAY | T_BYTES | T_NATIVE_ARRAY:
 				return t == c;
 			case _:
 		}

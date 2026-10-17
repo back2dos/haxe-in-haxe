@@ -307,6 +307,7 @@ class Gc {
 			}
 			var n = lo & 0x0FFFFFFF;
 			var i = Mem.getI32(gcStack, ((gcTop - 1) << 4) + 8);
+			if (i == 0 && k == K_PARR && Mem.getU16(o, -4) == Types.T_NATIVE_ARRAY) i = 1;
 			var pushed = false;
 			while (i < n) {
 				if (!pm.isNull() && (Mem.getI32At(pm, 0, i >> 5) >>> (i & 31)) & 1 == 0) {
@@ -382,7 +383,7 @@ class Gc {
 					w++;
 				}
 			case K_PARR:
-				for (i in 0...n) {
+				for (i in (Mem.getU16(o, -4) == Types.T_NATIVE_ARRAY ? 1 : 0)...n) {
 					var v = Mem.getPtr(o, 8 * i);
 					if (!v.isNull()) Mem.setPtr(o, 8 * i, fwdAs(v, root));
 				}
@@ -1270,6 +1271,7 @@ class Gc {
 					if (pm.isNull() || !isPtrSlot(pm, i)) continue;
 				} else if (k != K_PARR)
 					break;
+				if (i == 0 && Mem.getU16(o, -4) == Types.T_NATIVE_ARRAY) continue;
 				var c = Mem.getPtr(o, 8 * i);
 				if (!inHeap(c)) continue;
 				if (sp == cap) {

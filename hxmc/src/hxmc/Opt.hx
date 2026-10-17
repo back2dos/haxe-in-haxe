@@ -108,9 +108,10 @@ class Opt {
 
 	// A load that cannot fault wherever it moves: of a global variable (the
 	// globals table, or a scalar global's own symbol), of immutable memory
-	// at a symbol, of a thread-local variable.
+	// at a symbol, of runtime state at a symbol, or of a thread-local variable.
+	// Runtime state can move only when the loop's calls invalidate it.
 	static inline function safeLoad(i:MIns, vals:Array<MIns>):Bool
-		return i.op == TlsLoad || i.op == Load && (i.mem == MGlobal || i.mem == MConst && i.b < 0 && vals[i.a].op == SymAddr);
+		return i.op == TlsLoad || i.op == Load && (i.mem == MGlobal || (i.mem == MConst || i.mem == MCallOnly) && i.b < 0 && vals[i.a].op == SymAddr);
 
 	// One round, over the loops that hold no loop moved from in this round
 	// (the caller repeats: what left an inner loop may then leave its outer

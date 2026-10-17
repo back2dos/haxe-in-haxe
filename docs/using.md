@@ -12,6 +12,7 @@ The short version is in the [README](../README.md). This covers the npm packages
 | `-D hxmc.shared`, `-D hxmc.exports=<names>` | a shared library exporting the named `@:hxmc.export` functions (Linux in the glibc mode; Android's output always is one) |
 | `-D hxmc.pic` | a position-independent executable (refused: not written yet) |
 | `-D hxmc.jobs=<n>` | parallel module compilations (default: the cores) |
+| `-D hxmc.check-vector-access` | check Vector reads, writes and blit ranges; throw `haxe.exceptions.ArgumentException` for invalid indices/ranges (default: unchecked). Plain NativeArray access is unaffected. Also listed by `haxe --help-defines`. |
 | `-D hxmc.wasm-eh=legacy` | wasm: the legacy exception-handling instructions (`try`/`catch_all`/`rethrow`: Chrome 95+, Firefox 100+, Safari 15.2+) instead of `exnref` (Chrome 137+, Firefox 131+, Safari 18.4+) |
 | `HXMC_STATS=1` | what the build did and how long it took |
 | `HXMC_CACHE=<dir>` | the cache directory (default `~/.cache/hxmc`, macOS `~/Library/Caches/hxmc`, Windows `%LOCALAPPDATA%\hxmc\cache`; "hxmc" below) |

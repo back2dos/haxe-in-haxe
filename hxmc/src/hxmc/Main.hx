@@ -17,6 +17,7 @@ package hxmc;
 //   -D hxmc.no-frame-pointers       x86-64: no frame record in functions (the default keeps one, for
 //                                   perf -g and debuggers; HXMC_FRAME_POINTERS=0 off; arm64 always)
 //   -debug                          source lines for debuggers (DWARF on ELF and Mach-O), symbols
+//   -D hxmc.check-vector-access     bounds checks for Vector indexing and blit ranges (default: off)
 //   HXMC_RT_OBJ                     the runtime object (default: <tool dir>/rt/<target>/rt.o)
 //   HXMC_STATS=1                    print what the build did and how long it took
 class Main {
@@ -24,6 +25,7 @@ class Main {
 	static var lowerCache = new LowerCache();
 
 	static function main() {
+		Defines.install();
 		var args = Sys.args();
 		if (args[0] == "--mkrt-macho") {
 			args.shift();

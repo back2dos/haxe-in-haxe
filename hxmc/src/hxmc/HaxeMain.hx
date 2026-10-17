@@ -21,6 +21,7 @@ class HaxeMain {
 	}
 
 	public static function run(args:Array<String>):Int {
+		Defines.install();
 		var failed = null;
 		// (through links to the binary, as npm's node_modules/.bin/haxe)
 		var exe = try sys.FileSystem.fullPath(Sys.programPath()) catch (_:Dynamic) Sys.programPath();

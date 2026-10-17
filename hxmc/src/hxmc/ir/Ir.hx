@@ -24,6 +24,7 @@ enum RefTy {
 	REnum(e:Null<EnumInfo>); // enum value; null: any enum (EnumValue)
 	RCtor(c:CtorInfo); // a specific enum constructor (after a tag test)
 	RArr(elem:Ty); // the runtime array also records its element kind (Boxes.hx, arrays)
+	RNativeArr(elem:Ty, erased:Bool); // fixed storage; erased type parameters use the runtime element kind
 	RClos(s:SigInfo);
 	RBox(t:Ty); // captured mutable local
 	RNull(t:Ty); // Null<Int>, Null<Float>, Null<Bool>: a Dynamic box or null
@@ -238,7 +239,7 @@ enum Ex {
 	EEnumParam(c:CtorInfo, idx:Int, e:Ex);
 	EArrLen(a:Ex);
 	EArrGet(elem:Ty, a:Ex, i:Ex);
-	EArrGetU(elem:Ty, a:Ex, i:Ex); // haxe.ds.Vector: no bounds check (out of range is unspecified)
+	EArrGetU(elem:Ty, a:Ex, i:Ex); // an Array-backed haxe.ds.Vector (WasmGC): no bounds check (out of range is unspecified)
 	EBoxGet(t:Ty, b:Ex);
 	ECapture(l:LambdaInfo, idx:Int, clos:Ex);
 	EType(t:TypeRef); // runtime type descriptor (Class<T>, Enum<T> values)

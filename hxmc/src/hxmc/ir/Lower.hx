@@ -371,6 +371,9 @@ class Lower {
 		}
 	}
 
+	public static function isNativeArray(c:TClass):Bool
+		return c.clPath.name == "NativeArray" && c.clPath.pack.join(".") == "hxmc";
+
 	public static function isCore(c:TClass, name:String):Bool
 		return c.clPath.pack.length == 0 && c.clPath.name == name;
 
@@ -465,6 +468,10 @@ class Lower {
 					case _:
 						if (isCore(c, "String")) TRef(RStr);
 						else if (isCore(c, "Array")) TRef(RArr(boxed(ty(params[0]))));
+						else if (isNativeArray(c)) TRef(RNativeArr(boxed(ty(params[0])), switch TFunctions.follow(params[0]) {
+							case TInst(c, _): c.clKind.match(KTypeParameter(_));
+							case _: false;
+						}));
 						else if (CInterop.isStruct(c)) {
 							var n = core.Globals.sTypePath(c.clPath);
 							structClasses.set(n, c);

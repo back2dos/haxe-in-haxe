@@ -1,0 +1,14 @@
+exit 0
+int 2 true
+float 2 true
+bool 2 true
+int64 2 true
+string 2 true
+object 2 true
+nullable 2 true
+dynamic 2 true
+valid 11 3 twice=22
+compound 8,12 6 post=7 pre=12 indices=4 rhs=1
+gc 12
+blit 8,8
+other 41 3

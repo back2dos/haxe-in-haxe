@@ -193,6 +193,46 @@ functions (and where a name is computed) and the data's parts;
 `HXMC_REACH=0` keeps everything. WasmGC uses the same analysis (WasmGC
 below).
 
+## Native arrays
+
+`hxmc.NativeArray<T>` (`hxmc/std/hxmc/NativeArray.hx`) is fixed-size storage
+with a single GC allocation: a header, a length/kind word and packed
+elements. Bool uses 1 byte, Int 4, Float and Int64 8, and reference elements
+8 bytes. Nullable numbers and Dynamic use reference storage. Concrete
+indexing lowers to direct loads/stores in `MirBuild`, without bounds,
+growth or storage-kind checks; references keep the generational write
+barrier. The collectors skip the length/kind word in reference arrays.
+`rt/NArray.hx` handles erased generic access and Dynamic indexing, keeping
+the storage kind fixed. Construction with an erased element type requires
+`@:generic` on the enclosing function or class; the compiler rejects an
+unspecialized constructor. Copies preserve the runtime layout even in
+erased generic code; reference copies retain the bulk write barrier.
+Array conversions copy.
+
+`hxmc/std/haxe/ds/Vector.hx` shadows the reference standard library on the
+hxmc target and implements `haxe.ds.Vector<T>` as an abstract over
+`hxmc.NativeArray<T>`. Indexing, length and construction inline to the same
+operations as NativeArray. `toData`/`fromData` share NativeArray storage;
+`toArray`/`fromArrayCopy` copy. Generic construction has the same
+specialization requirement as NativeArray. `MkStd` keeps the upstream
+Vector for Eval and macros in the merged `bin/hxmc/std`, and for WasmGC
+(`-D hxmc.wasm-gc`), which does not implement NativeArray: there Vector is the
+original over an Array, its reads unchecked (`EArrGetU`). `make bench-arrays`
+compares Array, NativeArray and Vector
+([measurement notes](../hxmc/test/bench/README.md)).
+
+`-D hxmc.check-vector-access` enables bounds checks in the Vector override
+(off by default, including with `-debug`). An unsigned index/length
+comparison rejects both negative and too-large indices, throwing
+`haxe.exceptions.ArgumentException`. The optimizer removes repeated checks
+on the same index and length: the tested scalar read, write, compound
+assignment (`v[i] *= x`) and repeated read (`v[i] + v[i]`) each emit one
+bounds branch. `blit` checks the two ranges once, before copying, with
+overflow-safe subtraction; internal loops whose bounds are known use native
+storage directly. Plain NativeArray indexing stays unchecked. The define is
+registered for `haxe --help-defines` by `hxmc.Defines`, leaving `haxe/src`
+unchanged.
+
 ## Module cache
 
 The compilation server's HXB module cache, made durable

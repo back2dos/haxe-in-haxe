@@ -651,7 +651,7 @@ class CachedLower extends Lower {
 					case RObj(c): map.exists(c);
 					case REnum(e): e == null || map.exists(e);
 					case RCtor(c): map.exists(c);
-					case RArr(t) | RBox(t) | RNull(t): boundTy(t);
+					case RArr(t) | RNativeArr(t, _) | RBox(t) | RNull(t): boundTy(t);
 					// (a function type lowers its argument types too, normalized away in the signature)
 					case RClos(_): false;
 					case RStr | RAnon | RAny | RType | RNative(_): true;
@@ -677,6 +677,7 @@ class CachedLower extends Lower {
 			case [REnum(x), REnum(y)]: bindEnum(x, y);
 			case [RCtor(x), RCtor(y)]: bindCtor(x, y);
 			case [RArr(x), RArr(y)]: bindTy(x, y);
+			case [RNativeArr(x, a), RNativeArr(y, b)] if (a == b): bindTy(x, y);
 			case [RClos(x), RClos(y)]: bindSig(x, y);
 			case [RBox(x), RBox(y)]: bindTy(x, y);
 			case [RNull(x), RNull(y)]: bindTy(x, y);
@@ -751,6 +752,7 @@ class CachedLower extends Lower {
 			case REnum(e): REnum(obj(e));
 			case RCtor(c): RCtor(obj(c));
 			case RArr(t): RArr(mapTy(t));
+			case RNativeArr(t, erased): RNativeArr(mapTy(t), erased);
 			case RClos(s): RClos(obj(s));
 			case RBox(t): RBox(mapTy(t));
 			case RNull(t): RNull(mapTy(t));

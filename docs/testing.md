@@ -305,6 +305,11 @@ run; runs on main, hxmc and tags always finish.
 
 ## Benchmarks
 
+Array, NativeArray and Vector microbenchmark: `make bench-arrays`, with
+nine element types and read, read4, write, update and allocation workloads. The
+[benchmark notes](../hxmc/test/bench/README.md) describe the arguments,
+measurement method and native Vector backing.
+
 Benchmarks (`make bench`, `hxmc/test/Bench.hx`): the
 [HaxeBenchmarks](https://github.com/HaxeBenchmarks/benchmark-runner) cases
 built by hxmc (x86-64, and wasm under node) and by the port for C++ (hxcpp),

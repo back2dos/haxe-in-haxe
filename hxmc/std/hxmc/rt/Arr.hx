@@ -175,7 +175,7 @@ class Arr {
 		}
 		if (n == m) return;
 		#if !(hxmc.wasm_gc)
-		// past the capacity (haxe.ds.Vector's constructor: from empty), the data
+		// past the capacity (including from empty), the data
 		// allocated at the new length, the elements copied once (the new ones
 		// zero, the kind kept), unless another thread changed the array meanwhile
 		var kind = kindOf(a);
