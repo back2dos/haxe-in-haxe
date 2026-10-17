@@ -636,10 +636,10 @@ theme-check: $(TOOL)
 	ulimit -s unlimited 2>/dev/null || true; $(TOOL) -cp packages/ui/src -cp packages/theme/src -cp packages/theme/test --run ThemeTest $(TOOL)
 
 theme-fidelity-check: $(TOOL) $(STD) $(HOST_RT)
-	$(call hxmc,bin/theme/$(GFX_TARGET)/FidelityTest$(call EXE,$(GFX_TARGET)),$(UI_CP) -cp packages/theme/src -cp packages/theme/test -main FidelityTest $(HXMC_ARGS) $(GFX_ARGS))
+	$(call hxmc,bin/theme/$(GFX_TARGET)/FidelityTest$(call EXE,$(GFX_TARGET)),$(UI_CP) -cp packages/theme/test -main FidelityTest $(HXMC_ARGS) $(GFX_ARGS))
 	mkdir -p bin/theme/out && LIBGL_ALWAYS_SOFTWARE=1 env -u DISPLAY bin/theme/$(GFX_TARGET)/FidelityTest packages/theme/test/ref bin/theme/out
 
-UI_CP := -cp packages/os/src -cp packages/gfx/src -cp packages/gfx/test -cp packages/text/src $(UI_VIEW) -cp packages/ui/src -cp packages/ui/test -cp packages/ui/examples
+UI_CP := -cp packages/os/src -cp packages/gfx/src -cp packages/gfx/test -cp packages/text/src $(UI_VIEW) -cp packages/ui/src -cp packages/theme/src -cp packages/ui/test -cp packages/ui/examples
 ui-programs: $(TOOL) $(STD) $(HOST_RT)
 	$(call hxmc,bin/ui/$(GFX_TARGET)/UiDrawTest$(call EXE,$(GFX_TARGET)),$(UI_CP) -main UiDrawTest $(HXMC_ARGS) $(GFX_ARGS))
 	$(call hxmc,bin/ui/$(GFX_TARGET)/TodoTest$(call EXE,$(GFX_TARGET)),$(UI_CP) -main TodoTest $(HXMC_ARGS) $(GFX_ARGS))
@@ -661,6 +661,7 @@ ui-draw-check: ui-programs
 	LIBGL_ALWAYS_SOFTWARE=1 env -u DISPLAY bin/ui/$(GFX_TARGET)/GalleryTest packages/ui/test/gallery.png bin/ui/$(GFX_TARGET)/gallery.png $(if $(BLESS),--bless)
 	LIBGL_ALWAYS_SOFTWARE=1 env -u DISPLAY bin/ui/$(GFX_TARGET)/GalleryTest packages/ui/test/gallery-dark.png bin/ui/$(GFX_TARGET)/gallery-dark.png --dark $(if $(BLESS),--bless)
 	LIBGL_ALWAYS_SOFTWARE=1 env -u DISPLAY bin/ui/$(GFX_TARGET)/GalleryTest packages/ui/test/gallery-rtl.png bin/ui/$(GFX_TARGET)/gallery-rtl.png --rtl $(if $(BLESS),--bless)
+	LIBGL_ALWAYS_SOFTWARE=1 env -u DISPLAY bin/ui/$(GFX_TARGET)/GalleryTest packages/ui/test/gallery-unstyled.png bin/ui/$(GFX_TARGET)/gallery-unstyled.png --unstyled $(if $(BLESS),--bless)
 	LIBGL_ALWAYS_SOFTWARE=1 env -u DISPLAY bin/ui/$(GFX_TARGET)/StressTest
 	LIBGL_ALWAYS_SOFTWARE=1 env -u DISPLAY bin/ui/$(GFX_TARGET)/EmojiTest packages/ui/test/emoji.png bin/ui/$(GFX_TARGET)/emoji.png
 	LIBGL_ALWAYS_SOFTWARE=1 env -u DISPLAY bin/ui/$(GFX_TARGET)/BoxTest packages/ui/test/boxes.png bin/ui/$(GFX_TARGET)/boxes.png
