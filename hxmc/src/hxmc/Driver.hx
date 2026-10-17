@@ -28,7 +28,7 @@ class Driver {
 		abi.setLibc(o.libc);
 		if (o.segAlign > 0) abi.segAlign = o.segAlign;
 		if (o.pic) abi.reloc = Pic;
-		if (o.framePointers && !abi.wasm) abi.framePointers = true;
+		abi.framePointers = !abi.wasm && (abi.arm || o.framePointers);
 		if (o.shared) {
 			abi.reloc = Pic;
 			abi.output = SharedLibrary;
@@ -152,6 +152,7 @@ class Driver {
 			var s1 = haxe.Timer.stamp();
 			var isel = Target.selector(abi);
 			var lf = isel.select(mf, layout);
+			if (hxmc.ir.Lower.lines) lf.display = fn.display != null ? fn.display : name;
 			var s2 = haxe.Timer.stamp();
 			var ra = new Regalloc(lf, isel, ras);
 			ra.run();
@@ -222,7 +223,7 @@ class Driver {
 	function toolKey():String {
 		var p = Sys.programPath();
 		var st = try sys.FileSystem.stat(p) catch (_:Dynamic) null;
-		return "hxmc|" + abi.rtName + (o.wasmLegacyEh ? "+legacy-eh" : "") + (abi.framePointers ? "+fp" : "") + "|" +(st == null ? "?" : st.size + "@" + st.mtime.getTime()) + "|";
+		return "hxmc|" + abi.rtName + (o.wasmLegacyEh ? "+legacy-eh" : "") + (abi.framePointers ? "+fp" : "") + (hxmc.ir.Lower.lines ? "+lines" : "") + "|" +(st == null ? "?" : st.size + "@" + st.mtime.getTime()) + "|";
 	}
 
 	// the functions that may be inlined (before the keys: they are part of them)
@@ -425,7 +426,11 @@ class Driver {
 			var imp = LinkInputs.peImports(still, abi);
 			if (imp != null) all.push(imp);
 		}
-		var exe = abi.os == "windows" ? new LinkPE(all, abi.arm).link("mainCRTStartup") : abi.os == "macos" ? {
+		var exe = abi.os == "windows" ? {
+			var l = new LinkPE(all, abi.arm);
+			l.symbols = !o.strip;
+			l.link("mainCRTStartup");
+		} : abi.os == "macos" ? {
 			var l = new LinkMachO(all, abi);
 			l.symbols = !o.strip;
 			l.dylibs = dylibs;

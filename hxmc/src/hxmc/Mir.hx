@@ -123,6 +123,7 @@ class MIns {
 	public var cRet:Null<Array<CAbi.CPart>>;
 	public var dead = false;
 	public var mem = 0; // Load/Store: the memory class (Opt.MOther...)
+	public var pos = 0; // (-debug) the source position (SrcPos; 0: none)
 
 	public function new(op, ty) {
 		this.op = op;
@@ -254,4 +255,35 @@ class MFunc {
 			"shr", "neg", "not", "div", "rem", "fadd", "fsub", "fmul", "fdiv", "fneg", "fsqrt", "fabs", "cmp", "sext", "zext", "trunc", "i2f", "f2i", "bitstof",
 			"ftobits", "select", "load", "store", "call", "jmp", "br", "switch", "ret", "unreachable", "rotr"
 		][(o : Int)];
+}
+
+// The source positions of instructions (-debug: MIns.pos, LIns.pos): a file
+// and a line as one number, the same for the whole run (0: none). Positions
+// only describe the code: no pass looks at them.
+class SrcPos {
+	static var lock = new sys.thread.Mutex();
+	static var ids = new Map<String, Int>();
+	static var files:Array<String> = [""];
+	static var lines:Array<Int> = [0];
+
+	public static function id(file:String, line:Int):Int {
+		var k = line + ":" + file;
+		lock.acquire();
+		var v = ids.get(k);
+		if (v == null) {
+			v = files.length;
+			files.push(file);
+			lines.push(line);
+			ids.set(k, v);
+		}
+		lock.release();
+		return v;
+	}
+
+	public static function get(p:Int):{file:String, line:Int} {
+		lock.acquire();
+		var r = {file: files[p], line: lines[p]};
+		lock.release();
+		return r;
+	}
 }

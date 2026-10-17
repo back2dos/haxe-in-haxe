@@ -18,26 +18,40 @@ Stack-allocated objects must stay visible to the GC when they hold
 references (as roots, via the shadow stack), and must never be stored
 where a heap object or another thread can see them.
 
-## Frame pointers, unwind tables, debug info
+## Debugging information
 
-Frame pointers are built (docs/hxmc.md, "Pipeline": always on arm64,
-`-D hxmc.frame-pointers` on x86-64; `perf record -g` works). Measured as a
-default on Linux x86-64 (as Fedora and Ubuntu now build): 0.8% more code
-and no difference beyond noise in time.
+Built (docs/hxmc.md, "Debugging"): frame pointers by default on x86-64;
+unwind tables always, from the emitters' frame records (`Unwind.hx`): ELF
+`.eh_frame` and `.eh_frame_hdr` (with the runtime object's C code), Mach-O
+`__eh_frame`, Windows `.pdata`/`.xdata` for x86-64 and arm64; with
+`-debug`, DWARF 4 lines and subprograms from the typed AST's positions on
+ELF, Mach-O and PE, and a COFF symbol table on Windows. Checked by
+`UnwindTables` (the system unwinders against the frame-pointer chain) and
+`DebugCheck` (gdb/lldb, readelf, llvm-readobj, llvm-dwarfdump). Left:
 
-Not built on main: unwind tables (the debug-info branch is on it).
-
-- ELF `.eh_frame` CFI and macOS `__unwind_info` (or `__eh_frame`), for
-  `perf --call-graph dwarf`, gdb/lldb backtraces without frame-pointer
-  heuristics and profilers that do not walk frame pointers. The prologues
-  are regular (push rbp / pushes of the callee-saved registers / sub rsp;
-  stp x29, x30 / sub sp / stores), so one CIE and an FDE per function with
-  a few instructions each would do; the emitters know every offset. With
-  frame pointers on, the FDEs reduce to "CFA = rbp + 16" after the
-  prologue.
-- Windows `.pdata`/`.xdata`: nothing needs them while setjmp/longjmp do
-  not unwind, but debuggers and SEH-based tools do.
-- Source lines (DWARF) for debuggers.
+- Windows PDB (CodeView): the Visual Studio debugger and WinDbg read no
+  DWARF. A PDB is an MSF container of streams (PDB info, TPI/IPI type
+  records, DBI with a module per object, its symbols S_GPROC32 and its C13
+  line subsections, the public and global symbol hash tables, section
+  contributions) referenced by an RSDS debug directory entry; llvm's
+  `pdbutil`/`lld-link` are the references. Line tables and functions without
+  types would make breakpoints and backtraces work.
+- Mach-O `__unwind_info`: libunwind and lldb read `__eh_frame` (a linear
+  search without an index); compact unwind entries in DWARF mode (each
+  pointing to its FDE) would give the binary search table, ld64's form.
+  The frame-pointer encodings need the callee-saved pairs right below the
+  record, which the arm64 layout does not keep.
+- Variables: `DW_TAG_formal_parameter`/`variable` with locations (the
+  register allocator's intervals per value; the frame's slots; references in
+  shadow-stack slots), types (DW_TAG_base_type, structures for classes from
+  the layouts), and a language number: debuggers then print arguments and
+  locals. `DW_TAG_inlined_subroutine` for inlined calls (the inliner knows
+  the call site: Inline.run), columns (positions have them).
+- perf: `perf --call-graph dwarf` (not checked here: no usable perf in the
+  development container) and the JIT's frames (native macros: `Jit.hx`
+  could register its code's FDEs with `__register_frame`).
+- WebAssembly: DWARF in custom sections (`.debug_line` with code offsets)
+  for the browsers' and wasmtime's debuggers.
 
 ## Smaller items
 

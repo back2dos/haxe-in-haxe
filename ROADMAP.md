@@ -26,7 +26,6 @@ in [docs/plans/](docs/plans/README.md); what is built is in
 
 - The UI branch: `@hxmc/ui`, `@hxmc/text`, `@hxmc/esx`, signals (`hxmc.ui.reactive`), native controls ([graphics.md](docs/plans/graphics.md#ui))
 - The module cache on by default, replacing the types cache ([compiler.md](docs/plans/compiler.md#cached-modules))
-- Unwind tables and DWARF line info ([codegen.md](docs/plans/codegen.md#frame-pointers-unwind-tables-debug-info))
 
 ## Next
 
@@ -43,6 +42,7 @@ in [docs/plans/](docs/plans/README.md); what is built is in
 ## Later
 
 - Escape analysis ([codegen.md](docs/plans/codegen.md#escape-analysis))
+- Debugging: a Windows PDB, Mach-O `__unwind_info`, variables, DWARF for WebAssembly ([codegen.md](docs/plans/codegen.md#debugging-information))
 - The collector: incremental major marking, an aging survivor space, a memory limit ([runtime.md](docs/plans/runtime.md#the-collector-longer-term))
 - Macro-heavy builds: monomorph transactions, Eval call frames and instance layout ([compiler.md](docs/plans/compiler.md#macro-heavy-builds))
 - The central object cache and link-time DCE ([compiler.md](docs/plans/compiler.md#central-object-cache-and-quieter-builds))

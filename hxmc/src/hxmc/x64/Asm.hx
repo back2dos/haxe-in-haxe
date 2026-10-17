@@ -678,6 +678,8 @@ class Asm {
 	// moved accordingly. Returns the map old offset -> new offset (a function).
 	public function finish(start:Int):Int->Int {
 		if (fixups.length == 0) return x -> x;
+		// (this function's: the map keeps them)
+		var fixups = this.fixups;
 		fixups.sort((x, y) -> x.at - y.at);
 		// shrink: a fixup is short when its displacement fits; removing bytes only shortens distances
 		var short = [for (_ in fixups) false];
@@ -758,7 +760,7 @@ class Asm {
 		}
 		for (r in labelRefs)
 			r.at = map(r.at);
-		fixups = [];
+		this.fixups = [];
 		return map;
 	}
 }

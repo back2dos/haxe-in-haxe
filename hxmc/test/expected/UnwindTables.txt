@@ -1,0 +1,5 @@
+exit 0
+recursion: ok
+runtime callback: ok
+after catch: ok
+after throw: ok

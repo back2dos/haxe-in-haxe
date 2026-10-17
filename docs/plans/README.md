@@ -9,7 +9,7 @@ and in which order: [ROADMAP.md](../../ROADMAP.md). What is built:
 | --- | --- |
 | [compiler.md](compiler.md) | the module cache, the central object cache, macro-heavy builds, native macros and code generation at run time |
 | [runtime.md](runtime.md) | the collector, stack maps, compact strings, system calls, TLS and the event loop |
-| [codegen.md](codegen.md) | escape analysis, frame pointers, unwind tables and debug info |
+| [codegen.md](codegen.md) | escape analysis, debugging information (PDB, `__unwind_info`, variables, wasm DWARF), small codegen items |
 | [targets.md](targets.md) | WebAssembly (and WasmGC), Android, iOS, shared libraries, Linux and macOS items |
 | [graphics.md](graphics.md) | `@hxmc/os`, `@hxmc/gfx`, shaders, audio, UI pointers |
 | [web.md](web.md) | `@hxmc/view`, `@hxmc/web`, the site |
