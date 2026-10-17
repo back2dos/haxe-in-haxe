@@ -265,8 +265,13 @@ class Os {
 
 	// ---- the end of the program
 
-	@:hxmc.noGc public static function exit(code:Int)
-		C.exit(code);
+	// (Android: _exit, as PosixSys.exit)
+	@:hxmc.noGc public static function exit(code:Int) {
+		if (Mem.target() >= 9) {
+			C.fflush(Ptr.nil());
+			C._exit(code);
+		} else C.exit(code);
+	}
 
 	// ---- the runtime's own reports on stderr (bytes as they are, after
 	// whatever the C library's stdout buffers)
@@ -387,6 +392,7 @@ abstract Report(Ptr) {
 	static function pthread_create(t:Ptr, attr:Ptr, entry:Ptr, arg:Ptr):Int;
 	static function poll(fds:Ptr, n:I64, ms:Int):Int;
 	static function exit(code:Int):Void;
+	static function _exit(code:Int):Void;
 	static function fflush(f:Ptr):Int;
 	static function write(fd:Int, p:Ptr, n:I64):I64;
 	static function _write(fd:Int, p:Ptr, n:Int):Int;

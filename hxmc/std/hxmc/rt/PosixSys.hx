@@ -170,7 +170,9 @@ class PosixSys {
 
 	public static function exit(code:Int):Void {
 		Posix.fflush(Ptr.nil());
-		Posix.exit(code);
+		// (Android: the process ends without the other libraries' destructors,
+		// which the system's threads, EGL's among them, may still need)
+		if (Mem.target() >= 9) Posix._exit(code) else Posix.exit(code);
 	}
 
 	@:hxmc.noGc public static function time():Float {
