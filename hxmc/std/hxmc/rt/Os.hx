@@ -64,7 +64,7 @@ class Os {
 	// ---- errno (kept across the runtime's own calls around blocking natives)
 
 	@:hxmc.noGc static function errnoPtr():Ptr
-		return windows() ? C._errno() : mac() ? C.__error() : C.__errno_location();
+		return windows() ? C._errno() : mac() ? C.__error() : Mem.target() >= 9 ? C.__errno() : C.__errno_location();
 
 	@:hxmc.noGc public static function errno():Int
 		return Mem.getI32(errnoPtr(), 0);
@@ -356,6 +356,7 @@ abstract Report(Ptr) {
 @:hxmc.c @:hxmc.fast private extern class C {
 	static function getenv(name:Ptr):Ptr;
 	static function __errno_location():Ptr;
+	static function __errno():Ptr; // (Bionic)
 	static function __error():Ptr;
 	static function _errno():Ptr;
 	static function clock_gettime(clock:Int, ts:Ptr):Int;

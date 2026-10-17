@@ -29,8 +29,26 @@ import hxmc.Link.SecHdr;
 // and IFUNCs before main; init runs .init_array and registers .fini_array
 // with __cxa_atexit (the same on glibc before and after 2.34). Section
 // headers are written for the tools (readelf, objdump -T).
+//
+// A shared library (Abi.output SharedLibrary: Android's lib<name>.so, -D
+// hxmc.shared in the glibc mode) is the same at address 0 (ET_DYN), without
+// PT_INTERP, _start or copies: an absolute address in data is an
+// R_*_RELATIVE relocation (such read-only data moves to the writable
+// segment), a variable of a library is reached through a GOT slot (the
+// address computation that names it, adrp+add or lea, becomes a load of
+// the slot: the reverse of a linker's GOT relaxation), thread-locals through
+// TLSDESC (hxmc_tls_base: the module's block for this thread, a 16-byte
+// GOT pair with R_*_TLSDESC; Abi.tls Desc), and the names of Abi.exports are
+// defined in .dynsym (with DT_SONAME). The section headers are the loader's
+// too: Bionic finds .dynamic and .dynstr through them.
 class LinkDyn extends Link {
 	var abi:Abi;
+	var shared:Bool;
+	// a shared library's DT_SONAME (null: none)
+	public var soname:Null<String> = null;
+	// the exports left out when nothing defines them (Android's
+	// ANativeActivity_onCreate in a lib<name>.so that is not an app's)
+	public var optional:Array<String> = [];
 	// the program's imports from shared libraries (@:hxmc.lib): name -> file
 	public var libs = new Map<String, String>();
 	// DT_RUNPATH $ORIGIN: a library looked for next to the executable
@@ -44,7 +62,9 @@ class LinkDyn extends Link {
 	public function new(objs:Array<Obj>, abi:Abi) {
 		super(objs, abi);
 		this.abi = abi;
-	}
+			shared = abi.output == SharedLibrary;
+			tlsGd = abi.android && !abi.arm;
+		}
 
 	// the runtime objects' import tables (dropped from the output)
 	function readImports() {
@@ -225,6 +245,89 @@ class LinkDyn extends Link {
 		return o;
 	}
 
+	// a shared library's: __dso_handle (hidden, for __cxa_atexit), and with
+	// thread-locals hxmc_tls_base, the address of this thread's copy of the
+	// module's TLS block (generated code calls it once per function: Abi.tls
+	// Desc), through the pair .data.hxmc.tlsdesc: a TLSDESC descriptor, or
+	// on Android x86-64 (Bionic implements TLSDESC on arm64 only: its
+	// linker_relocate.cpp) the general dynamic model's tls_index (module
+	// and offset: R_X86_64_DTPMOD64, DTPOFF64) passed to __tls_get_addr
+	function sharedStartObj(tls:Bool):Obj {
+		var o = new Obj();
+		var d = new Section(".data.hxmc.dso_handle", Data, 8);
+		d.buf.u64(0, 0);
+		o.sections.push(d);
+		o.define("__dso_handle", d, 0, 8, true);
+		if (!tls) return o;
+		var pair = new Section(".data.hxmc.tlsdesc", Data, 16);
+		pair.buf.zeros(16);
+		o.sections.push(pair);
+		tlsDesc = o.define(".Ltlsdesc", pair, 0, 16, false);
+		var t = new Section(".text.hxmc.tls_base", Text, 16);
+		var b = t.buf;
+		function rel(kind:RelKind, add = 0)
+			t.relocs.push(new Reloc(b.len, kind, tlsDesc, add));
+		var ops = [];
+		var U = Unwind;
+		if (arm) {
+			b.u32(0xa9bf7bfd); // stp x29, x30, [sp, #-16]!
+			b.u32(0x910003fd); // mov x29, sp
+			rel(RA64AdrPage21); b.u32(0x90000000); // adrp x0, pair
+			rel(RA64Ldst64Lo12); b.u32(0xf9400001); // ldr x1, [x0, :lo12:pair]
+			rel(RA64AddLo12); b.u32(0x91000000); // add x0, x0, :lo12:pair
+			b.u32(0xd63f0020); // blr x1: x0 = the block's offset from the thread pointer
+			b.u32(0xd53bd041); // mrs x1, tpidr_el0
+			b.u32(0x8b000020); // add x0, x1, x0
+			b.u32(0xa8c17bfd); // ldp x29, x30, [sp], #16
+			b.u32(0xd65f03c0); // ret
+			for (x in [[U.SAVEFPLR, 4, 16, 0], [U.SETFP, 8, 0, 0], [U.ENDPROLOGUE, 8, 0, 0], [U.EPILOGUE, 32, 0, 0], [U.RESTOREFPLR, 36, 16, 0], [U.RET, 40, 0, 0]])
+				for (v in x) ops.push(v);
+		} else if (tlsGd) {
+			for (x in [0x55, 0x48, 0x89, 0xE5, 0x48, 0x8D, 0x3D]) b.u8(x); // push rbp; mov rbp, rsp; lea rdi, [rip + pair]
+			rel(RPc32, -4); b.u32(0);
+			b.u8(0xE8); // call __tls_get_addr: rax = the block's address
+			t.relocs.push(new Reloc(b.len, RCall32, o.sym("__tls_get_addr"), -4));
+			b.u32(0);
+			for (x in [0x5D, 0xC3]) b.u8(x); // pop rbp; ret
+			for (x in [[U.PUSH, 1, 5, 0], [U.SETFP, 4, 0, 0], [U.ENDPROLOGUE, 4, 0, 0], [U.EPILOGUE, 16, 0, 0], [U.POP, 17, 5, 0], [U.RET, 18, 0, 0]])
+				for (v in x) ops.push(v);
+		} else {
+			for (x in [0x55, 0x48, 0x89, 0xE5, 0x48, 0x8D, 0x05]) b.u8(x); // push rbp; mov rbp, rsp; lea rax, [rip + pair]
+			rel(RPc32, -4); b.u32(0);
+			for (x in [0xFF, 0x10]) b.u8(x); // call [rax]: rax = the block's offset from fs
+			for (x in [0x64, 0x48, 0x03, 0x04, 0x25, 0, 0, 0, 0]) b.u8(x); // add rax, fs:[0]
+			for (x in [0x5D, 0xC3]) b.u8(x); // pop rbp; ret
+			for (x in [[U.PUSH, 1, 5, 0], [U.SETFP, 4, 0, 0], [U.ENDPROLOGUE, 4, 0, 0], [U.EPILOGUE, 22, 0, 0], [U.POP, 23, 5, 0], [U.RET, 24, 0, 0]])
+				for (v in x) ops.push(v);
+		}
+		o.sections.push(t);
+		o.funcs.push(new FuncRec(o.define("hxmc_tls_base", t, 0, b.len, true), ops));
+		return o;
+	}
+
+	// the TLSDESC pair's symbol (null: no thread-locals); general dynamic instead
+	var tlsDesc:Null<Symbol> = null;
+	var tlsGd = false;
+
+	// a shared library: the address computation of a library's variable
+	// (adrp + add, lea) made a load of its GOT slot
+	function relaxToGot(s:Section, r:Reloc) {
+		switch r.kind {
+			case RA64AdrPage21:
+				r.kind = RA64GotPage21;
+			case RA64AddLo12:
+				var w = s.buf.get32(r.offset);
+				if ((w & 0xffc00000) != 0x91000000) throw "hxmc: link: the address of " + r.sym.name + ", a shared library's variable, in an instruction other than add";
+				s.buf.set32(r.offset, 0xf9400000 | (w & 0x3ff)); // ldr xd, [xn, :got_lo12:]
+				r.kind = RA64GotLo12;
+			case RPc32 if (r.offset >= 2 && s.buf.get8(r.offset - 2) == 0x8D):
+				s.buf.set8(r.offset - 2, 0x8B); // lea -> mov from the slot
+				r.kind = RGotPcRel32;
+			case _:
+				throw "hxmc: link: relocation " + r.kind + " against " + r.sym.name + ", a shared library's variable, in a shared library";
+		}
+	}
+
 	static inline function isCode(k:RelKind):Bool
 		return k == RCall32 || k == RPc32 || k == RA64Call26 || k == RA64Jump26 || k == RA64AdrPage21 || k == RA64AddLo12;
 
@@ -233,13 +336,21 @@ class LinkDyn extends Link {
 
 	override public function link(entry:String):Bytes {
 		readImports();
-		var hasFini = false;
+		var hasFini = false, hasTls = false;
 		for (o in objs)
-			for (s in o.sections)
+			for (s in o.sections) {
 				if (s.kind == FiniArray && s.size() > 0) hasFini = true;
-		var start = startObj(hasFini);
+				if (s.kind == Tdata || s.kind == Tbss) hasTls = true;
+			}
+		var start = shared ? sharedStartObj(hasTls && abi.tls == Desc) : startObj(hasFini);
 		objs.push(start);
 		resolve();
+		if (shared) {
+			roots = [];
+			for (n in abi.exports)
+				if (globals.exists(n)) roots.push(n);
+				else if (optional.indexOf(n) < 0) throw 'hxmc: link: the shared library exports $n, which nothing defines' + (n == "ANativeActivity_onCreate" ? " (an Android app's entry: hxmc.os.App, packages/os)" : "");
+		}
 		gc(entry);
 		// the imports the live code refers to, and how
 		var stubs = new Section(".text.hxmc.stubs", Text, 16);
@@ -256,15 +367,28 @@ class LinkDyn extends Link {
 			for (s in o.sections) {
 				if (!isLive(s)) continue;
 				for (r in s.relocs) {
+					if (shared && r.kind == RAbs64 && target(r.sym) != null && !target(r.sym).abs) {
+						// (an address in the image: R_*_RELATIVE)
+						if (s.kind == RoData) moved.set(s, true);
+						else if (s.kind == Text) throw "hxmc: link: an absolute address of " + r.sym.name + " in code, in a shared library";
+						continue;
+					}
 					if (target(r.sym) != null || LINKER.indexOf(r.sym.name) >= 0) continue;
 					var i = imports.get(r.sym.name);
 					if (i == null) {
 						if (r.sym.weak) continue;
+						if (abi.android && (StringTools.startsWith(r.sym.name, "mbedtls_") || StringTools.startsWith(r.sym.name, "uv_")))
+							throw 'hxmc: link: ${r.sym.name}: sys.ssl and eval.luv (mbedtls, libuv) are not supported on Android yet';
 						throw 'hxmc: link: undefined symbol ${r.sym.name} (in none of the shared libraries of the ${abi.libc} mode: a C function of another library needs @:hxmc.lib("<file>.so"))';
 					}
 					use(i);
 					if (!r.sym.weak) strong.set(i.name, true);
-					if (i.object) {
+					if (i.object && shared) {
+						if (r.kind == RAbs64) {
+							absRelocs++;
+							if (s.kind == RoData) moved.set(s, true);
+						} else if (!isGotRel(r.kind)) relaxToGot(s, r);
+					} else if (i.object) {
 						if (i.copyAt < 0) {
 							var al = i.size >= 16 ? 16 : i.size >= 8 ? 8 : 4;
 							copies.bssSize = Link.align(copies.bssSize, al);
@@ -313,10 +437,10 @@ class LinkDyn extends Link {
 		if (got != null)
 			for (r in got.relocs) {
 				var i = target(r.sym) == null ? imports.get(r.sym.name) : null;
-				if (i != null && !i.object) gotImports++;
+				if (i != null && (!i.object || shared)) gotImports++;
 			}
 		for (i in used)
-			if (i.object) {
+			if (i.object && !shared) {
 				// (the aliases: defined at the copy too)
 				for (a in i.aliases)
 					if (!imports.exists(a) || imports.get(a).index == 0) {
@@ -326,8 +450,19 @@ class LinkDyn extends Link {
 					}
 			}
 		// copy relocations: one per variable (not per alias)
-		var copyOwners = [for (i in used) if (i.object && !i.alias) i];
-		var nrela = gotImports + absRelocs + copyOwners.length;
+		var copyOwners = [for (i in used) if (i.object && !i.alias && !shared) i];
+		// a shared library's addresses in its own image (data, GOT slots of its
+		// own symbols): R_*_RELATIVE, first (DT_RELACOUNT)
+		var relatives = 0;
+		if (shared)
+			for (o in objs)
+				for (s in o.sections)
+					if (isLive(s) || s == got)
+						for (r in s.relocs)
+							if (r.kind == RAbs64 && target(r.sym) != null && !target(r.sym).abs) relatives++;
+		var nrela = relatives + gotImports + absRelocs + copyOwners.length + (tlsDesc != null ? (tlsGd ? 2 : 1) : 0);
+		// the exports: defined in .dynsym after the imports
+		var exported = shared ? [for (n in roots) globals.get(n)] : [];
 
 		// ---- the dynamic tables (contents once the layout is known)
 		var dynstr = new Buf(4096);
@@ -355,8 +490,11 @@ class LinkDyn extends Link {
 		for (l in libList)
 			str(l);
 		var runpath = origin ? str("$ORIGIN") : -1;
+		var sonameAt = soname != null ? str(soname) : -1;
 		for (i in used)
 			str(i.name);
+		for (x in exported)
+			str(x.name);
 		// the versions each library must define (vna_other from 2)
 		var vers:Array<{lib:String, names:Array<String>}> = [];
 		var nextVer = 2;
@@ -375,11 +513,13 @@ class LinkDyn extends Link {
 				}
 			if (names.length > 0) vers.push({lib: l, names: names});
 		}
-		var nsym = used.length + 1;
+		var nsym = used.length + exported.length + 1;
 		var nbucket = nsym < 8 ? 1 : nsym >> 1;
 		var interp = new Section(".interp", RoData, 1);
-		interp.buf.str(abi.interp);
-		interp.buf.u8(0);
+		if (!shared) {
+			interp.buf.str(abi.interp);
+			interp.buf.u8(0);
+		}
 		var hash = new Section(".hash", RoData, 8);
 		hash.buf.zeros(4 * (2 + nbucket + nsym));
 		var dynsym = new Section(".dynsym", RoData, 8);
@@ -395,12 +535,20 @@ class LinkDyn extends Link {
 		}
 		var rela = new Section(".rela.dyn", RoData, 8);
 		rela.buf.zeros(24 * nrela);
-		var ndyn = libList.length + (origin ? 1 : 0) + 9 + (nrela > 0 ? 3 : 0) + (vers.length > 0 ? 3 : 0);
+		var initSize = 0, finiSize = 0;
+		for (o in objs)
+			for (s in o.sections)
+				if (isLive(s)) {
+					if (s.kind == InitArray) initSize += s.size();
+					if (s.kind == FiniArray) finiSize += s.size();
+				}
+		var ndyn = shared ? libList.length + (soname != null ? 1 : 0) + (origin ? 1 : 0) + 8 + (relatives > 0 ? 1 : 0) + (nrela > 0 ? 3 : 0) + (vers.length > 0 ? 3 : 0)
+			+ (initSize > 0 ? 2 : 0) + (finiSize > 0 ? 2 : 0) : libList.length + (origin ? 1 : 0) + 9 + (nrela > 0 ? 3 : 0) + (vers.length > 0 ? 3 : 0);
 		var dynSec = new Section(".dynamic", Data, 8);
 		dynSec.buf.zeros(16 * ndyn);
 		var dynObj = new Obj();
 		for (s in [interp, hash, dynsym, dynstrSec, versym, verneed, rela, dynSec])
-			dynObj.sections.push(s);
+			if (s != interp || !shared) dynObj.sections.push(s);
 		objs.push(dynObj);
 
 		// ---- layout (as Link.link, with the dynamic tables)
@@ -417,8 +565,10 @@ class LinkDyn extends Link {
 		var fini = [for (s in all) if (s.kind == FiniArray) s];
 		var data = [for (s in all) if (s.kind == Data && s != dynSec && s != got) s].concat([for (s in all) if (moved.exists(s)) s]);
 		var bss = [for (s in all) if (s.kind == Bss) s];
-		var nph = ehFrame != null ? 9 : 8; // PHDR, INTERP, LOAD r, LOAD rx, LOAD rw, DYNAMIC, TLS, GNU_STACK, GNU_EH_FRAME
-		var BASE = Link.BASE;
+		// PHDR, INTERP, LOAD r, LOAD rx, LOAD rw, DYNAMIC, TLS, GNU_STACK, GNU_EH_FRAME (a shared library: no PHDR, no INTERP)
+		var nph = (ehFrame != null ? 9 : 8) - (shared ? 2 : 0);
+		var BASE = shared ? 0 : Link.BASE;
+		imageBase = BASE;
 		var headers = 64 + 56 * nph;
 		var pos = BASE + headers;
 		function place(list:Array<Section>) {
@@ -428,7 +578,7 @@ class LinkDyn extends Link {
 				pos += s.size();
 			}
 		}
-		place([interp, hash, dynsym, dynstrSec, versym, verneed, rela]);
+		place(shared ? [hash, dynsym, dynstrSec, versym, verneed, rela] : [interp, hash, dynsym, dynstrSec, versym, verneed, rela]);
 		var roStart = pos;
 		place(ro);
 		var roEnd = pos;
@@ -502,19 +652,43 @@ class LinkDyn extends Link {
 			rela.buf.set64(relaAt + 16, addend, addend < 0 ? -1 : 0);
 			relaAt += 24;
 		}
+		// (RELATIVE first, then the others: two cursors)
+		var relAt = 0;
+		relaAt = 24 * relatives;
 		dynReloc = function(s:Section, r:Reloc):Bool {
-			if (r.kind != RAbs64 || target(r.sym) != null) return false;
+			if (r.kind != RAbs64) return false;
+			var t = target(r.sym);
+			if (t != null) {
+				if (!shared || t.abs) return false;
+				var v = symAddr(r.sym) + r.addend;
+				s.buf.set64(r.offset, v, v < 0 ? -1 : 0);
+				rela.buf.set64(relAt, addr.get(s) + r.offset, 0);
+				rela.buf.set64(relAt + 8, arm ? 1027 : 8, 0); // R_*_RELATIVE
+				rela.buf.set64(relAt + 16, v, v < 0 ? -1 : 0);
+				relAt += 24;
+				return true;
+			}
 			var i = imports.get(r.sym.name);
-			if (i == null || i.index == 0 || i.object) return false;
+			if (i == null || i.index == 0 || (i.object && !shared)) return false;
 			s.buf.set64(r.offset, 0, 0);
 			if (s == got) addRela(addr.get(s) + r.offset, i, relType("glob"), 0) else addRela(addr.get(s) + r.offset, i, relType("abs"), r.addend);
 			return true;
 		};
 		for (i in copyOwners)
 			addRela(copyAddr + i.copyAt, i, relType("copy"), 0);
+		if (tlsDesc != null) {
+			// (the module's own block: symbol 0, as ld.bfd and lld write it for a local thread-local)
+			// R_AARCH64_TLSDESC, R_X86_64_TLSDESC; general dynamic: R_X86_64_DTPMOD64, R_X86_64_DTPOFF64
+			for (k in 0...(tlsGd ? 2 : 1)) {
+				rela.buf.set64(relaAt, addr.get(tlsDesc.section) + 8 * k, 0);
+				rela.buf.set64(relaAt + 8, tlsGd ? 16 + k : arm ? 1031 : 36, 0);
+				rela.buf.set64(relaAt + 16, 0, 0);
+				relaAt += 24;
+			}
+		}
 		for (s in all)
 			if (s.kind != Bss && s.kind != Tbss && o(dynObj, s) == false) apply(s);
-		if (relaAt != rela.buf.len) throw "hxmc: link: " + Std.int(relaAt / 24) + " dynSec relocations for " + nrela;
+		if (relaAt != rela.buf.len || relAt != 24 * relatives) throw "hxmc: link: " + Std.int(relaAt / 24) + " dynamic relocations for " + nrela;
 		fillUnwind();
 		// .dynsym, .hash, .gnu.version, .gnu.version_r
 		var buckets = [for (_ in 0...nbucket) 0];
@@ -525,7 +699,7 @@ class LinkDyn extends Link {
 			dynsym.buf.set32(at, strOf.get(i.name));
 			var weak = !i.object && !strong.exists(i.name);
 			dynsym.buf.set8(at + 4, ((weak ? 2 : 1) << 4) | (i.object ? 1 : 2));
-			if (i.object) {
+			if (i.object && !shared) {
 				dynsym.buf.set16(at + 6, bssIndex);
 				dynsym.buf.set64(at + 8, copyAddr + i.copyAt, 0);
 				dynsym.buf.set64(at + 16, i.size, 0);
@@ -533,9 +707,30 @@ class LinkDyn extends Link {
 			var h = elfHash(i.name) % nbucket;
 			chains[i.index] = buckets[h];
 			buckets[h] = i.index;
-			if (vers.length > 0) versym.buf.set16(2 * i.index, i.version != null ? i.vers : 1);
-		}
-		hash.buf.set32(0, nbucket);
+				if (vers.length > 0) versym.buf.set16(2 * i.index, i.version != null ? i.vers : 1);
+			}
+			// (a shared library's exports: functions of .text, global, in the base version)
+			var textIndex = shared ? 8 : 9;
+			for (k in 0...exported.length) {
+				var x = exported[k], index = used.length + 1 + k;
+				var at = 24 * index;
+				dynsym.buf.set32(at, strOf.get(x.name));
+				dynsym.buf.set8(at + 4, (1 << 4) | (x.section.kind == Text ? 2 : 1));
+				dynsym.buf.set16(at + 6, switch x.section.kind {
+					case Text: textIndex;
+					case RoData: moved.exists(x.section) ? textIndex + 7 : textIndex - 1;
+					case Bss: textIndex + 6;
+					case Data | InitArray | FiniArray: textIndex + 7;
+					case _: throw "hxmc: link: the export " + x.name + " is thread-local";
+				});
+				dynsym.buf.set64(at + 8, symAddr(x), 0);
+				dynsym.buf.set64(at + 16, x.size, 0);
+				var h = elfHash(x.name) % nbucket;
+				chains[index] = buckets[h];
+				buckets[h] = index;
+				if (vers.length > 0) versym.buf.set16(2 * index, 1);
+			}
+			hash.buf.set32(0, nbucket);
 		hash.buf.set32(4, nsym);
 		for (k in 0...nbucket)
 			hash.buf.set32(8 + 4 * k, buckets[k]);
@@ -570,17 +765,27 @@ class LinkDyn extends Link {
 		}
 		for (l in libList)
 			dyn(1, strOf.get(l)); // DT_NEEDED
+		if (shared && soname != null) dyn(14, sonameAt); // DT_SONAME
 		if (origin) dyn(29, runpath); // DT_RUNPATH
 		dyn(4, addr.get(hash)); // DT_HASH
 		dyn(5, addr.get(dynstrSec)); // DT_STRTAB
 		dyn(6, addr.get(dynsym)); // DT_SYMTAB
 		dyn(10, dynstr.len); // DT_STRSZ
 		dyn(11, 24); // DT_SYMENT
-		dyn(21, 0); // DT_DEBUG
+		if (!shared) dyn(21, 0); // DT_DEBUG
 		if (nrela > 0) {
 			dyn(7, addr.get(rela)); // DT_RELA
 			dyn(8, rela.buf.len); // DT_RELASZ
 			dyn(9, 24); // DT_RELAENT
+		}
+		if (shared && relatives > 0) dyn(0x6ffffff9, relatives); // DT_RELACOUNT
+		if (shared && initSize > 0) {
+			dyn(25, defined.get("__init_array_start")); // DT_INIT_ARRAY
+			dyn(27, initSize); // DT_INIT_ARRAYSZ
+		}
+		if (shared && finiSize > 0) {
+			dyn(26, defined.get("__fini_array_start")); // DT_FINI_ARRAY
+			dyn(28, finiSize); // DT_FINI_ARRAYSZ
 		}
 		dyn(30, 8); // DT_FLAGS: DF_BIND_NOW
 		dyn(0x6ffffffb, 1); // DT_FLAGS_1: DF_1_NOW
@@ -596,29 +801,32 @@ class LinkDyn extends Link {
 		out.zeros(fileEnd - BASE);
 		for (s in all)
 			if (s.kind != Bss && s.kind != Tbss) out.b.blit(addr.get(s) - BASE, s.buf.b, 0, s.buf.len);
-		// section headers (for the tools: ld.so reads none)
+		// section headers (for the tools: glibc's ld.so reads none; Bionic's
+		// linker finds .dynamic and its .dynstr through them; a shared library
+		// has no .interp, the others are one lower)
 		var secs:Array<SecHdr> = [];
 		function sec(name:String, type:Int, flags:Int, a:Int, size:Int, link = 0, info = 0, al = 1, entsize = 0)
 			secs.push({name: name, type: type, flags: flags, addr: a, off: a - BASE, size: size, link: link, info: info, align: al, entsize: entsize});
-		sec(".interp", 1, 2, addr.get(interp), interp.size()); // 1
-		sec(".hash", 5, 2, addr.get(hash), hash.size(), 3, 0, 8, 4); // 2
-		sec(".dynsym", 11, 2, addr.get(dynsym), dynsym.size(), 4, 1, 8, 24); // 3
+		var sx = shared ? 1 : 0;
+		if (!shared) sec(".interp", 1, 2, addr.get(interp), interp.size()); // 1
+		sec(".hash", 5, 2, addr.get(hash), hash.size(), 3 - sx, 0, 8, 4); // 2
+		sec(".dynsym", 11, 2, addr.get(dynsym), dynsym.size(), 4 - sx, 1, 8, 24); // 3
 		sec(".dynstr", 3, 2, addr.get(dynstrSec), dynstrSec.size()); // 4
-		sec(".gnu.version", 0x6fffffff, 2, addr.get(versym), versym.size(), 3, 0, 2, 2); // 5
-		sec(".gnu.version_r", 0x6ffffffe, 2, addr.get(verneed), verneed.size(), 4, vers.length, 4); // 6
-		sec(".rela.dyn", 4, 2, addr.get(rela), rela.size(), 3, 0, 8, 24); // 7
+		sec(".gnu.version", 0x6fffffff, 2, addr.get(versym), versym.size(), 3 - sx, 0, 2, 2); // 5
+		sec(".gnu.version_r", 0x6ffffffe, 2, addr.get(verneed), verneed.size(), 4 - sx, vers.length, 4); // 6
+		sec(".rela.dyn", 4, 2, addr.get(rela), rela.size(), 3 - sx, 0, 8, 24); // 7
 		sec(".rodata", 1, 2, roStart, roEnd - roStart); // 8
 		sec(".text", 1, 6, textStart, textEnd - textStart, 0, 0, 16); // 9
 		sec(".tdata", 1, 0x403, tlsStart, tdataEnd - tlsStart, 0, 0, tlsAlign); // 10
 		sec(".tbss", 8, 0x403, tdataEnd, tlsStart + tlsSize - tdataEnd, 0, 0, tlsAlign); // 11
 		sec(".init_array", 1, 3, initStart, addr.get(dynSec) - initStart, 0, 0, 8); // 12
-		sec(".dynamic", 6, 3, addr.get(dynSec), dynSec.size(), 4, 0, 8, 16); // 13
+		sec(".dynamic", 6, 3, addr.get(dynSec), dynSec.size(), 4 - sx, 0, 8, 16); // 13
 		sec(".got", 1, 3, gotStart, gotEnd - gotStart, 0, 0, 8, 8); // 14
 		sec(".bss", 8, 3, fileEnd, dataEnd - fileEnd, 0, 0, 16); // 15 (bssIndex)
 		sec(".data", 1, 3, gotEnd, fileEnd - gotEnd, 0, 0, 16); // 16
 		unwindHeaders(secs);
 		// (the .tbss header takes no file room: its offset is that of .tdata's end)
-		var shoff = sectionHeaders(out, secs, 9);
+		var shoff = sectionHeaders(out, secs, textIndex);
 		// ELF header
 		var h = new Buf(64 + 56 * nph);
 		h.u32(0x464c457f);
@@ -626,10 +834,10 @@ class LinkDyn extends Link {
 		h.u8(1);
 		h.u8(1);
 		h.zeros(9);
-		h.u16(2); // ET_EXEC
+		h.u16(shared ? 3 : 2); // ET_DYN, ET_EXEC
 		h.u16(arm ? 183 : 62);
 		h.u32(1);
-		h.i64(symAddr(entrySym(entry)));
+		h.i64(shared ? 0 : symAddr(entrySym(entry)));
 		h.i64(64);
 		h.i64(shoff);
 		h.u32(0);
@@ -649,8 +857,10 @@ class LinkDyn extends Link {
 			h.i64(memsz);
 			h.i64(al);
 		}
-		ph(6, 4, 64, BASE + 64, 56 * nph, 56 * nph, 8); // PT_PHDR
-		ph(3, 4, addr.get(interp) - BASE, addr.get(interp), interp.size(), interp.size(), 1); // PT_INTERP
+		if (!shared) {
+			ph(6, 4, 64, BASE + 64, 56 * nph, 56 * nph, 8); // PT_PHDR
+			ph(3, 4, addr.get(interp) - BASE, addr.get(interp), interp.size(), interp.size(), 1); // PT_INTERP
+		}
 		ph(1, 4, 0, BASE, roEnd - BASE, roEnd - BASE, PAGE);
 		ph(1, 5, textStart - BASE, textStart, textEnd - textStart, textEnd - textStart, PAGE);
 		ph(1, 6, dataStart - BASE, dataStart, fileEnd - dataStart, dataEnd - dataStart, PAGE);

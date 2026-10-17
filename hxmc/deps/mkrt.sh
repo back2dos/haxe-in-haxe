@@ -6,7 +6,8 @@
 # members in Linux's dynamic glibc mode, <target>-glibc; the C runtime's
 # startup objects, MinGW-w64's members and the UCRT's imports on Windows;
 # nothing on macOS, whose C
-# library is libSystem, bound at load time), partially linked (ld -r) into
+# library is libSystem, bound at load time; Bionic's import table and
+# compiler-rt's helpers on Android, android-*), partially linked (ld -r) into
 # one relocatable object bin/hxmc/rt/<target>/rt.o, which hxmc's linker then
 # links with the program (and lays out once, see Link.hx). Next to it, ssl.o
 # and uv.o: mbedtls and libuv (which hxmc/std/hxmc/rt/Ssl.hx and Uv.hx call),
@@ -31,6 +32,8 @@ windows-x86_64) triple=x86_64-windows-gnu ;;
 windows-arm64) triple=aarch64-windows-gnu ;;
 macos-x86_64) triple=x86_64-macos ;;
 macos-arm64) triple=aarch64-macos ;;
+android-arm64) triple=aarch64-linux-android.29 ;;
+android-x86_64) triple=x86_64-linux-android.29 ;;
 *) echo "mkrt: unknown target $target" >&2; exit 1 ;;
 esac
 out=$ROOT/bin/hxmc/rt/$target
@@ -87,9 +90,66 @@ windows-*)
 	libc="$libc pthread_condattr_init pthread_condattr_setclock pthread_cond_init pthread_cond_destroy pthread_cond_wait"
 	libc="$libc pthread_cond_timedwait pthread_cond_signal pthread_cond_broadcast pthread_attr_init pthread_attr_destroy"
 	libc="$libc pthread_attr_setstacksize pthread_attr_setdetachstate pthread_create"
-	case $target in linux-*) libc="$libc __errno_location" ;; esac ;;
+	case $target in linux-*) libc="$libc __errno_location" ;; android-*) libc="$libc __errno __cxa_atexit" ;; esac ;;
 esac
 case $target in
+android-*)
+	# Android (Abi.android: a shared library NativeActivity loads): no member
+	# of the C library; everything Bionic's libc.so, libm.so and libdl.so
+	# export to apps of API 29 (hxmc's floor) is an import, with the version
+	# of its block in Bionic's version scripts (LIBC, LIBC_N, ..., LIBC_Q;
+	# their arch and introduced= tags applied; deps.sh fetched them with the
+	# headers), bound by Bionic's linker at load time. rt.o holds the import
+	# table (.hxmc.imports) and compiler-rt's helpers that ssl.o and uv.o need
+	# (zig builds compiler-rt for the triple); its memcpy and the like become
+	# local, so that Bionic's are the ones bound
+	arch=${target#android-}
+	printf 'int hxmc_stub(void){return 0;}\n' > "$out/obj/stub.c"
+	$ZIG cc -target $triple -fPIC -c "$out/obj/stub.c" -o "$out/obj/stub.o"
+	line=$($ZIG cc -target $triple -shared -nostdlib -lcompiler_rt "$out/obj/stub.o" -o "$out/obj/stub.so" -v 2>&1 | grep 'ld.lld' | head -1)
+	libs=$(echo "$line" | tr ' ' '\n' | grep -E '/libcompiler_rt\.a$' | tr '\n' ' ')
+	[ -n "$sslar" ] && ld.lld -r --strip-debug -o "$out/ssl.o" $sslroots --start-group $sslar --end-group
+	[ -n "$uvar" ] && ld.lld -r --strip-debug -o "$out/uv.o" $uvroots --start-group $uvar --end-group
+	for m in libc libm libdl; do
+		awk -v lib=$m.so -v arch=$arch -v api=29 '
+			function tag(t, name,   i, n, w, v) { n = split(t, w, /[ \t]+/); v = ""
+				for (i = 1; i <= n; i++) if (w[i] ~ ("^" name "=")) v = substr(w[i], length(name) + 2)
+				return v }
+			# whether the tags t leave the symbol (or the block) out for arch at api
+			function out(t,   n, w, i, arches, mine, v) {
+				if (t ~ /platform-only|apex|llndk|systemapi/) return 1
+				n = split(t, w, /[ \t]+/); arches = 0; mine = 0
+				for (i = 1; i <= n; i++) if (w[i] == "arm" || w[i] == "arm64" || w[i] == "x86" || w[i] == "x86_64" || w[i] == "riscv64") { arches = 1; if (w[i] == arch) mine = 1 }
+				if (arches && !mine) return 1
+				v = tag(t, "introduced"); if (v != "" && v + 0 > api) return 1
+				v = tag(t, "introduced-" arch); if (v != "" && v + 0 > api) return 1
+				return 0 }
+			/^[A-Z_0-9]+ *\{/ { ver = $1; t = index($0, "#") ? substr($0, index($0, "#") + 1) : ""
+				if (ver == "LIBC_PRIVATE" || ver == "LIBC_PLATFORM" || ver == "LIBC_DEPRECATED" || out(t)) ver = ""; next }
+			/^\}/ { ver = ""; next }
+			ver != "" && /^[ \t]+[A-Za-z_][A-Za-z0-9_]*;/ {
+				name = $1; sub(/;$/, "", name); t = index($0, "#") ? substr($0, index($0, "#") + 1) : ""
+				if (out(t)) next
+				print lib "\t" name "\t" ver "\t" (t ~ /(^| )var( |$)/ ? "object\t8" : "func\t0") "\t" }' "$deps/bionic/$m.map.txt"
+	done | sort -u -k2,2 > "$out/obj/imports.txt"
+	cut -f2 "$out/obj/imports.txt" | sort -u > "$out/obj/shared.txt"
+	# what the runtime and generated code call must be there; what ssl.o and
+	# uv.o call beyond them comes from compiler-rt
+	# (atexit is Bionic's private one, crtbegin_so.o's elsewhere: the runtime calls __cxa_atexit)
+	missing=$(echo "$libc _setjmp" | tr ' ' '\n' | grep -v '^$\|^atexit$' | sort -u | comm -23 - "$out/obj/shared.txt")
+	[ -z "$missing" ] || { echo "mkrt: not in Bionic's libraries: $missing" >&2; exit 1; }
+	undef=
+	for f in $( (nm -u $(ls "$out/ssl.o" "$out/uv.o" 2>/dev/null) | awk 'NF == 2 {print $2}') | grep -v '^hx\|^haxe_\|^$' | sort -u | comm -23 - "$out/obj/shared.txt"); do undef="$undef -u $f"; done
+	if [ -n "$undef" ]; then
+		ld.lld -r --strip-debug -o "$out/obj/rt1.o" $undef --start-group $libs --end-group
+		nm --defined-only -g "$out/obj/rt1.o" | awk '{print $3}' | sort -u | comm -12 - "$out/obj/shared.txt" > "$out/obj/shadow.txt"
+		${OBJCOPY:-llvm-objcopy} --localize-symbols="$out/obj/shadow.txt" "$out/obj/rt1.o" "$out/obj/rt0.o"
+	fi
+	printf '\t.section .hxmc.imports,"a",@progbits\n\t.incbin "%s"\n' "$out/obj/imports.txt" > "$out/obj/imports.s"
+	$ZIG cc -target $triple -c "$out/obj/imports.s" -o "$out/obj/imports.o"
+	ld.lld -r -o "$out/rt.o" $(ls "$out/obj/rt0.o" 2>/dev/null) "$out/obj/imports.o"
+	ls -l "$out/rt.o" "$out/ssl.o" "$out/uv.o"
+	exit 0 ;;
 *-glibc)
 	# the dynamic glibc mode (-D hxmc.libc=glibc, Link.hx): no member of the C
 	# library; what the runtime, generated code, ssl.o and uv.o call in it are

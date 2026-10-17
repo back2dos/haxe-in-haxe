@@ -71,6 +71,15 @@ class Abi {
 	// mode would be /lib/ld-musl-<arch>.so.1, libc.so, unversioned.
 	public var interp:Null<String> = null;
 	public var versioned = false;
+	// Android (android-arm64, android-x86_64): a shared library (lib<name>.so)
+	// that NativeActivity loads, against Bionic: position-independent, TLS
+	// through TLSDESC (a dlopen'ed library's thread-locals), 16 KB segments,
+	// the imports of libc.so and the other system libraries with Bionic's
+	// symbol versions (the runtime objects' table: hxmc/deps/mkrt.sh)
+	public var android = false;
+	// the names a shared library exports (.dynsym): its entry points (Android:
+	// ANativeActivity_onCreate), the dead-code roots
+	public var exports:Array<String> = [];
 	// every function keeps a frame record, linked through the frame pointer
 	// (rbp; x29): arm64 always (Apple's ABI requires it, and its prologue is
 	// the record), x86-64 unless -D hxmc.no-frame-pointers (Options.framePointers)
@@ -116,14 +125,32 @@ class Abi {
 	public function setLibc(l:Null<String>) {
 		if (l == null || l == libc) return;
 		switch [os, l] {
-			case ["linux", "glibc"]:
+			case ["linux", "glibc"] if (!android):
 				libc = l;
 				rtName = name + "-glibc";
 				interp = arm ? "/lib/ld-linux-aarch64.so.1" : "/lib64/ld-linux-x86-64.so.2";
 				versioned = true;
 			case _:
-				throw "hxmc: -D hxmc.libc=" + l + " is not a C library of " + name + " (" + (os == "linux" ? "musl, the default, or glibc" : libc) + ")";
+				throw "hxmc: -D hxmc.libc=" + l + " is not a C library of " + name + " (" + (os == "linux" && !android ? "musl, the default, or glibc" : libc) + ")";
 		}
+	}
+
+	// the output is linked against shared libraries at load time (the
+	// dynamic glibc mode, Android's shared library): LinkDyn
+	public function linksDynamically():Bool
+		return interp != null || android || output == SharedLibrary;
+
+	// Android: Linux's kernel and ELF with Bionic as the C library, a shared
+	// library NativeActivity loads (Mem.os() is Linux's; Mem.target() 9 and 10)
+	function setAndroid() {
+		android = true;
+		libc = "bionic";
+		reloc = Pic;
+		output = SharedLibrary;
+		tls = Desc;
+		segAlign = 0x4000;
+		versioned = true;
+		exports = ["ANativeActivity_onCreate"];
 	}
 
 	// Mem.os(): 0 Linux, 1 macOS, 2 Windows, 3 WASI
@@ -140,7 +167,13 @@ class Abi {
 			case "windows-arm64": new Abi(target, true, "windows", 208, 192, 200, 8, "__mingw_setjmp", "");
 			// (rt_handler: no jmp_buf, the try's pad checks the handler: wasm.WasmGen)
 			case "wasm32-wasi": new Abi(target, false, "wasi", 24, 8, 16, 8, "_setjmp", "");
-			case _: throw "hxmc: unknown target " + target + " (linux-x86_64, linux-arm64, macos-arm64, macos-x86_64, windows-x86_64, windows-arm64, wasm32-wasi)";
+			// (Bionic's jmp_buf: 32 longs on arm64, 11 on x86-64)
+			case "android-arm64" | "android-x86_64":
+				var arm = target == "android-arm64";
+				var a = new Abi(target, arm, "linux", arm ? 272 : 104, arm ? 256 : 88, arm ? 264 : 96, 8, "_setjmp", "");
+				a.setAndroid();
+				a;
+			case _: throw "hxmc: unknown target " + target + " (linux-x86_64, linux-arm64, macos-arm64, macos-x86_64, windows-x86_64, windows-arm64, wasm32-wasi, android-arm64, android-x86_64)";
 		}
 }
 
@@ -157,7 +190,7 @@ enum abstract OutputKind(String) to String {
 enum abstract TlsModel(String) to String {
 	var LocalExec = "local-exec"; // static executables: thread pointer + link-time offset
 	var InitialExec = "initial-exec"; // shared libraries loaded at startup: offset from the GOT
-	var Desc = "desc"; // shared libraries loaded later (TLSDESC)
+	var Desc = "desc"; // shared libraries loaded later (TLSDESC: the module's block through hxmc_tls_base, LinkDyn)
 	var MachoTlv = "tlv"; // Mach-O thread-local variable descriptors
 	var WinTlsIndex = "win"; // ThreadLocalStoragePointer[_tls_index] + section offset
 }

@@ -26,8 +26,8 @@ HOST ?= $(if $(filter Darwin,$(shell uname -s)),macos,linux)-$(if $(filter aarch
 # `make release`, `make lix-release`: one of the six targets
 TARGET ?= $(HOST)
 TARGETS := linux-x86_64 linux-arm64 windows-x86_64 windows-arm64 macos-x86_64 macos-arm64
-# the runtime objects: the six targets, and Linux in the dynamic glibc mode (-D hxmc.libc=glibc)
-RT_TARGETS := $(TARGETS) linux-x86_64-glibc linux-arm64-glibc
+# the runtime objects: the six targets, Linux in the dynamic glibc mode (-D hxmc.libc=glibc), Android
+RT_TARGETS := $(TARGETS) linux-x86_64-glibc linux-arm64-glibc android-arm64 android-x86_64
 # `make rt-target`: one of RT_TARGETS
 RT_TARGET ?= $(HOST)
 # `make corpus-stage`: the six targets, wasm32-wasi, wasm32-wasi-legacy, linux-x86_64-glibc, linux-arm64-glibc
@@ -36,6 +36,8 @@ CORPUS_TARGETS ?= $(TARGETS) wasm32-wasi wasm32-wasi-legacy linux-x86_64-glibc l
 GFX_TARGET ?= $(HOST)
 # `make audio-programs`, `make audio-check`: the same for packages/os's audio
 AUDIO_TARGET ?= $(HOST)
+# `make android-programs`, `android-check`, `android-device-check`: android-x86_64 or android-arm64
+ANDROID_TARGET ?= android-x86_64
 # extra arguments of the port's build (e.g. HXFLAGS="-D retain")
 HXFLAGS ?=
 # the port the tests check
@@ -107,6 +109,7 @@ endef
 .PHONY: help std deps rt rt-build rt-target rt-layouts hxmc tool bootstrap fixpoint stage0 crosshost port dev release wasm npm site fuzz \
 	lix lix-release lix-dist reference bench test test-fuzz test-display test-server test-jsonrpc test-unit-targets test-interp \
 	test-haxelib test-eval-debugger test-node-libs test-module-cache smoke hxmc-test corpus-stage gfx-programs gfx-check gfx-web-check gfx-shader-check \
+	android-programs android-check android-device-check shared-check \
 	audio-programs audio-check audio-web-check native-macros ui-programs view-check text-check ui-check ui-draw-check ui-web-check portcheck measure \
 	quick check full clean distclean
 
@@ -162,6 +165,10 @@ help:
 ##             (DebugCheck: its --run on the target's machine runs gdb or lldb)
 ## test-node-libs  -lib from node_modules with the npm package's compiler for the host (hxmc/test/NodeLibs.hx)
 ## gfx-programs  bin/gfx/GFX_TARGET/{GfxTest,Triangle,Cube}[.exe]: packages/gfx's test programs (Linux: glibc mode)
+## android-programs  bin/android/ANDROID_TARGET/{AndroidTest,Cube}.apk: APKs written by hxmc (android-x86_64, android-arm64)
+## android-check  their structure (hxmc/test/ApkCheck.hx: zip, manifest, ELF, v2 signature)
+## android-device-check  AndroidTest on the device or emulator adb reaches (packages/gfx/test/android.sh)
+## shared-check  shared libraries of the glibc mode (-D hxmc.shared), loaded by an hxmc program (hxmc/test/SharedCheck.hx)
 ## gfx-check   packages/gfx: the triangle and cube examples headless and in a window, against
 ##             golden images (packages/gfx/test/check.sh; Linux: Mesa, Xvfb; macOS: Metal, Cocoa);
 ##             GFX_TARGET=windows-x86_64: D3D11 and Win32 under Wine
@@ -506,6 +513,21 @@ gfx-programs: $(TOOL) $(STD) $(HOST_RT)
 	$(call hxmc,bin/gfx/$(GFX_TARGET)/Cube$(call EXE,$(GFX_TARGET)),$(GFX_CP) -main Cube $(HXMC_ARGS) $(GFX_ARGS))
 gfx-check: gfx-programs
 	sh packages/gfx/test/check.sh bin/gfx/$(GFX_TARGET)
+
+# Android: APKs written by hxmc (hxmc/src/hxmc/android/Apk.hx), AndroidTest
+# (packages/gfx/test/AndroidTest.hx) and the cube example
+android-programs: $(TOOL) $(STD) $(HOST_RT)
+	$(call hxmc,bin/android/$(ANDROID_TARGET)/AndroidTest.apk,$(GFX_CP) -main AndroidTest $(HXMC_ARGS) -D hxmc.target=$(ANDROID_TARGET) -D hxmc.android-package=org.hxmc.gfxtest)
+	$(call hxmc,bin/android/$(ANDROID_TARGET)/Cube.apk,$(GFX_CP) -main Cube $(HXMC_ARGS) -D hxmc.target=$(ANDROID_TARGET) -D hxmc.android-package=org.hxmc.cube)
+# their structure without a device (hxmc/test/ApkCheck.hx: zip, manifest, ELF, signature; zipalign, aapt, apksigner when there)
+android-check: android-programs
+	ulimit -s unlimited 2>/dev/null || true; $(TOOL) -cp hxmc/test -cp haxe/test -cp hxmc/src --run ApkCheck bin/android/$(ANDROID_TARGET)/AndroidTest.apk bin/android/$(ANDROID_TARGET)/Cube.apk
+# shared libraries of the glibc mode loaded by an hxmc program (hxmc/test/SharedCheck.hx), Android's built
+shared-check: $(TOOL) $(STD) $(HOST_RT)
+	$(SCRIPT) SharedCheck
+# AndroidTest on the device or emulator adb reaches (packages/gfx/test/android.sh)
+android-device-check: android-programs
+	sh packages/gfx/test/android.sh bin/android/$(ANDROID_TARGET)/AndroidTest.apk bin/android/$(ANDROID_TARGET)
 
 gfx-web-check: $(TOOL) $(STD)
 	$(call hxmc,bin/gfx/WebTest.wasm,$(GFX_CP) -main WebTest $(HXMC_ARGS) -D hxmc.target=wasm32-wasi)

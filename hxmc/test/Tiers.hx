@@ -19,7 +19,8 @@ using StringTools;
 //          ThreadNatives x30 (16 KB, and with the adaptive nursery), the tool as
 //          a module building three cases for x64, arm64 and wasm32-wasi
 //          byte-identical to the native tool, the debugging information and
-//          unwind tables (DebugCheck: gdb on the host, the tools elsewhere);
+//          unwind tables (DebugCheck: gdb on the host, the tools elsewhere),
+//          shared libraries (SharedCheck) and Android's APKs (ApkCheck);
 //          --port adds the native port's self-compile: before commits
 //   full   x64, arm64 and wine at 64, 16 and 256 KB, each with RT_VERIFY=1 too;
 //          x64 and arm64 in the glibc mode, also at 16 KB with RT_VERIFY=1;
@@ -147,6 +148,11 @@ class Tiers {
 			lane('debug info $t', script(["DebugCheck", "--target", t]));
 	}
 
+	static function make(args:Array<String>) return () -> {
+		var r = exec(["make", "--no-print-directory"].concat(args), {merge: true});
+		{ok: r.code == 0, detail: lastLine(r.out)};
+	}
+
 	static function fixpoint() {
 		var r = exec(["make", "--no-print-directory", "fixpoint"], {merge: true});
 		var said = [for (l in r.out.split("\n")) if (l.startsWith("fixpoint:")) l];
@@ -173,6 +179,9 @@ class Tiers {
 			// (arm64: the cross C library's root for qemu, libc6-arm64-cross)
 			if (FileSystem.exists(Sys.getEnv("QEMU_LD_PREFIX") ?? "/usr/aarch64-linux-gnu")) lane("arm64 glibc (qemu)", corpus("linux-arm64", null, cases, GLIBC));
 			lane("glibc readelf", script(["ElfCheck", "bin/hxmc-t"]));
+			lane("shared libraries", script(["SharedCheck"]));
+			for (t in ["android-arm64", "android-x86_64"])
+				lane('APKs $t', make(["android-check", "ANDROID_TARGET=" + t]));
 			lane("wasm node legacy EH", corpus("wasm32-wasi", null, cases, LEGACY));
 			lane("ThreadNatives x30", threads(30, 16));
 			lane("ThreadNatives x30 adaptive", threads(30, 0));

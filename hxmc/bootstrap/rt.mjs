@@ -20,8 +20,8 @@ import zlib from 'node:zlib';
 import { fileURLToPath } from 'node:url';
 
 const root = path.dirname(path.dirname(path.dirname(fileURLToPath(import.meta.url))));
-// (the six targets, and Linux in the dynamic glibc mode: -D hxmc.libc=glibc)
-export const TARGETS = ['linux-x86_64', 'linux-arm64', 'windows-x86_64', 'windows-arm64', 'macos-x86_64', 'macos-arm64', 'linux-x86_64-glibc', 'linux-arm64-glibc'];
+// (the six targets, Linux in the dynamic glibc mode: -D hxmc.libc=glibc, and Android)
+export const TARGETS = ['linux-x86_64', 'linux-arm64', 'windows-x86_64', 'windows-arm64', 'macos-x86_64', 'macos-arm64', 'linux-x86_64-glibc', 'linux-arm64-glibc', 'android-arm64', 'android-x86_64'];
 const OBJECTS = ['rt.o', 'ssl.o', 'uv.o'];
 const LICENSES = ['LICENSE.mbedtls', 'LICENSE.libuv'];
 

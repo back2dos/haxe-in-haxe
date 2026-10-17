@@ -11,6 +11,9 @@ package hxmc;
 //   -D hxmc.target=linux-x86_64     the target (Target.hx, Abi.hx: six of them)
 //   -D hxmc.wasm-eh=legacy          wasm32-wasi: legacy exception handling (default: exnref)
 //   -D hxmc.libc=glibc              Linux: dynamically linked against the system's glibc (default: musl, static)
+//   -D hxmc.shared                  a shared library (Linux in the glibc mode; Android's is always one: an
+//                                   output ending in .apk is an APK holding it, hxmc.android.Apk)
+//   -D hxmc.exports=<names>         the names a shared library exports
 //   -D hxmc.no-frame-pointers       x86-64: no frame record in functions (the default keeps one, for
 //                                   perf -g and debuggers; HXMC_FRAME_POINTERS=0 off; arm64 always)
 //   -debug                          source lines for debuggers (DWARF on ELF and Mach-O), symbols

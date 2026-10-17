@@ -329,7 +329,8 @@ class Isel implements hxmc.Target.Selector {
 			var b = layout[bi];
 			cur = lb[b.id];
 			var next = bi + 1 < layout.length ? layout[bi + 1] : null;
-			var pendingBase = bi == 0 && usesTls && abi.tls == MachoTlv;
+			// (Android's TLSDESC: the module's block from hxmc_tls_base too, LinkDyn)
+			var pendingBase = bi == 0 && usesTls && (abi.tls == MachoTlv || abi.tls == Desc);
 			// after the last parameter (the call clobbers their registers;
 			// constants such as MirBuild.zeroAt's may come before them)
 			var lastParam = -1;

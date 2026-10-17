@@ -9,7 +9,13 @@ class Options {
 	public var segAlign = 0; // -D hxmc.seg-align: the alignment of loadable segments (0: the target's)
 	public var strip = true; // no symbol table unless -debug, -D hxmc.symbols or HXMC_SYMBOLS=1
 	public var pic = false; // -D hxmc.pic: position-independent executable
-	public var shared = false; // -D hxmc.shared: a shared library
+	public var shared = false; // -D hxmc.shared: a shared library (Linux in the glibc mode; Android always)
+	// -D hxmc.exports=<name>[,<name>...]: what a shared library exports (Android: ANativeActivity_onCreate too)
+	public var exports:Array<String> = [];
+	// Android's APK (hxmc.android.Apk): -D hxmc.android-package=<id>, -D
+	// hxmc.android-label=<text>, -D hxmc.android-min-sdk=<n>, -D
+	// hxmc.android-target-sdk=<n>, -D hxmc.android-version=<code>
+	public var android = new Map<String, String>();
 	public var opt = true; // MIR optimizations (HXMC_OPT=0: off)
 	public var jobs = 0; // parallel module compilations (HXMC_JOBS, -D hxmc.jobs; 0: the cores)
 	public var dump:Null<String> = null; // function names whose machine code is printed (HXMC_DUMP)
@@ -85,6 +91,14 @@ class Options {
 		o.pic = def("hxmc.pic") != null;
 		o.strip = !(def("debug") != null || def("hxmc.symbols") != null || env("HXMC_SYMBOLS") == "1");
 		o.shared = def("hxmc.shared") != null;
+		var ex = def("hxmc.exports");
+		if (ex != null)
+			for (n in ex.split(","))
+				if (StringTools.trim(n) != "") o.exports.push(StringTools.trim(n));
+		for (k in ["package", "label", "min_sdk", "target_sdk", "version", "version_name", "key"]) {
+			var v = def("hxmc.android_" + k); // (-D turns the dashes into underscores)
+			if (v != null) o.android.set(k, v);
+		}
 		o.opt = env("HXMC_OPT") != "0";
 		var eh = def("hxmc.wasm_eh"); // (-D turns the dash into an underscore)
 		if (eh != null) switch eh {

@@ -83,6 +83,12 @@ class LinkInputs {
 	// dot or a slash is used as it is (macOS: without a slash, under @rpath/)
 	public static function libFile(lib:String, abi:Abi):String {
 		var plain = lib.indexOf(".") < 0 && lib.indexOf("/") < 0;
+		// (Android: the system's libraries have no version suffix, libEGL.so.1 is libEGL.so)
+		if (abi.android) {
+			if (plain) return "lib" + lib + ".so";
+			var v = lib.indexOf(".so.");
+			return v > 0 ? lib.substr(0, v + 3) : lib;
+		}
 		return switch abi.os {
 			case "windows": plain ? lib + ".dll" : lib;
 			case "macos": plain ? "@rpath/lib" + lib + ".dylib" : lib.indexOf("/") < 0 ? "@rpath/" + lib : lib;
