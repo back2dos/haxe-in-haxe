@@ -494,8 +494,8 @@ text-check: $(TOOL)
 	ulimit -s unlimited 2>/dev/null || true; $(TOOL) -cp packages/text/src -cp packages/text/test -cp packages/gfx/test --run TextTest $(if $(BLESS),--bless)
 
 ui-check: $(TOOL)
-	ulimit -s unlimited 2>/dev/null || true; $(TOOL) -cp packages/ui/src -cp packages/ui/test --run UiTest
-	ulimit -s unlimited 2>/dev/null || true; $(TOOL) -cp packages/esx/src -cp packages/ui/src -cp packages/ui/test --run ReactiveTest
+	ulimit -s unlimited 2>/dev/null || true; $(TOOL) -cp packages/text/src -cp packages/ui/src -cp packages/ui/test --run UiTest
+	ulimit -s unlimited 2>/dev/null || true; $(TOOL) -cp packages/esx/src -cp packages/text/src -cp packages/ui/src -cp packages/ui/test --run ReactiveTest
 
 UI_CP := -cp packages/os/src -cp packages/gfx/src -cp packages/gfx/test -cp packages/text/src -cp packages/esx/src -cp packages/ui/src -cp packages/ui/test -cp packages/ui/examples
 ui-programs: $(TOOL) $(STD) $(HOST_RT)
