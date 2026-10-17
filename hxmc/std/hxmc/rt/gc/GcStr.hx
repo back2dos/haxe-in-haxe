@@ -35,7 +35,7 @@ class GcStr {
 		return true;
 	}
 
-	@:hxmc.host("hx_str_cmp") @:hxmc.noGc static function cmp(a:String, b:String):Int {
+	@:hxmc.host("hx_str_cmp") @:hxmc.noGc public static function cmp(a:String, b:String):Int {
 		if (W.isNull(a)) return W.isNull(b) ? 0 : -1;
 		if (W.isNull(b)) return 1;
 		var na = W.strLen(a), nb = W.strLen(b);
@@ -55,6 +55,10 @@ class GcStr {
 		return x == 0 ? 1 : x;
 	}
 
+	// StringMap's (the same as hx_str_hash: maps iterate in the native order)
+	public static function strHash(s:String):Int
+		return W.isNull(s) ? 0 : hash(s);
+
 	@:hxmc.host("hx_str_of_int") static function ofInt(v:Int):String {
 		if (v == 0) return "0";
 		// (digits from the end; the most negative Int has no positive counterpart)
@@ -70,6 +74,27 @@ class GcStr {
 			W.strSet(r, --i, 48 + (d < 0 ? -d : d));
 			x = Std.int(x / 10);
 		}
+		if (neg) W.strSet(r, 0, 45);
+		return r;
+	}
+
+	@:hxmc.host("hx_str_of_i64") static function ofI64(v:hxmc.I64):String {
+		// (digits of the negative value: no overflow at the minimum)
+		var neg = v < 0;
+		var m = neg ? v : -v;
+		var n = 1;
+		var t = m;
+		while (t <= -10) {
+			t = t / 10;
+			n++;
+		}
+		if (neg) n++;
+		var r = W.strNew(n), k = n;
+		do {
+			var q = m / 10;
+			W.strSet(r, --k, 48 + (q * 10 - m).toInt());
+			m = q;
+		} while (m < 0);
 		if (neg) W.strSet(r, 0, 45);
 		return r;
 	}
@@ -238,23 +263,27 @@ class GcStr {
 	@:hxmc.host("Std_parseFloat") static function parseFloat(s:String):Float
 		return W.isNull(s) ? Math.NaN : W.parseFloat(s);
 
+	@:hxmc.host("Std_random") @:hxmc.noGc static function random(max:Int):Int
+		return max <= 0 ? 0 : Std.int(W.random() * max);
+
 	static function isSpace(c:Int):Bool
 		return c == 32 || (c >= 9 && c <= 13);
 
-	@:hxmc.host("Std_string") static function string(v:Dynamic):String
+	@:hxmc.host("Std_string") public static function dynString(v:Dynamic):String
 		return switch W.kind(v) {
 			case 0: "null";
 			case 1: ofInt(W.unboxInt(v));
 			case 2: ofFloat(W.unboxFloat(v));
 			case 3: W.unboxBool(v) ? "true" : "false";
 			case 4: (v : String);
-			case 7: "[array]";
+			case 7: @:privateAccess GcArr.toString(v);
 			case 8: "<function>";
+			case 9: ofI64(W.unboxI64(v));
 			case _: "[object]";
 		}
 
 	@:hxmc.host("hx_std_string") static function stdString(v:Dynamic):String
-		return string(v);
+		return dynString(v);
 
 	// ---- StringBuf: a GcBuf
 
@@ -262,7 +291,7 @@ class GcStr {
 		return new GcBuf();
 
 	@:hxmc.host("StringBuf_add") static function sbAdd(b:Dynamic, x:Dynamic):Void
-		(b : GcBuf).add(string(x));
+		(b : GcBuf).add(dynString(x));
 
 	@:hxmc.host("StringBuf_addSub") static function sbAddSub(b:Dynamic, s:String, pos:Int, lenp:Null<Int>):Void
 		(b : GcBuf).add(substr(s, pos, lenp));
@@ -279,40 +308,5 @@ class GcStr {
 	@:hxmc.host("StringBuf_toString") static function sbToString(b:Dynamic):String {
 		var g:GcBuf = b;
 		return sub(g.chars, 0, g.len);
-	}
-}
-
-@:keep @:hxmc.wasmgc
-class GcBuf {
-	public var chars:String;
-	public var len = 0;
-
-	public function new()
-		chars = W.strNew(16);
-
-	function room(n:Int) {
-		var cap = W.strLen(chars);
-		if (len + n <= cap) return;
-		var c = cap * 2;
-		if (c < len + n) c = len + n;
-		var r = W.strNew(c);
-		W.strCopy(r, 0, chars, 0, len);
-		chars = r;
-	}
-
-	public function add(s:String) {
-		var n = W.strLen(s);
-		room(n);
-		W.strCopy(chars, len, s, 0, n);
-		len += n;
-	}
-
-	public function addChar(c:Int) {
-		if (c >= 0x10000) {
-			add(String.fromCharCode(c));
-			return;
-		}
-		room(1);
-		W.strSet(chars, len++, c);
 	}
 }

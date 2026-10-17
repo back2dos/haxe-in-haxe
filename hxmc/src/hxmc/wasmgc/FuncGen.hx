@@ -20,7 +20,8 @@ class FuncGen {
 	final f:FuncInfo;
 	final b = new Buf();
 	final local = new Map<Int, Int>();
-	final extra:Array<String> = []; // the locals after the parameters, by representation
+	final extra:Array<String> = []; // the locals after the parameters: a representation, or "t<type>" (ref null type)
+	final localKey = new Map<Int, String>(); // a local's (by id) type, as extra's
 	final free = new Map<String, Array<Int>>();
 	final frames:Array<Frame> = [];
 	var nparams = 0;
@@ -33,13 +34,39 @@ class FuncGen {
 	static function repr(t:Ty):String
 		return GcModule.repr(t);
 
+	// a reference type the IR's type proves (a class's: locals of it keep its
+	// type, so that their fields are read without a cast), else the representation
+	function keyOf(t:Ty):String
+		return switch t {
+			case TRef(RObj(c)) if (!c.isInterface): "t" + m.classType(c);
+			case _: repr(t);
+		}
+
 	public function emit():Buf {
-		for (a in f.args)
+		var shadows = [];
+		for (i in 0...f.args.length) {
+			var a = f.args[i];
 			local.set(a.id, nparams++);
+			localKey.set(a.id, repr(a.ty));
+			// (a parameter of a class type, or this: cast once into a local of its type)
+			var k = i == 0 && f.selfClass != null ? "t" + m.classType(f.selfClass) : keyOf(a.ty);
+			if (k.charAt(0) == "t") shadows.push({param: nparams - 1, id: a.id, key: k});
+		}
+		for (s in shadows) {
+			var i = nparams + extra.length;
+			extra.push(s.key);
+			localGet(s.param);
+			castTo(Std.parseInt(s.key.substr(1)));
+			localSet(i);
+			local.set(s.id, i);
+			localKey.set(s.id, s.key);
+		}
 		for (l in f.locals)
 			if (!local.exists(l.id) && repr(l.ty) != "v") {
 				local.set(l.id, nparams + extra.length);
-				extra.push(repr(l.ty));
+				var k = keyOf(l.ty);
+				extra.push(k);
+				localKey.set(l.id, k);
 			}
 		for (s in f.body)
 			stmt(s);
@@ -54,7 +81,10 @@ class FuncGen {
 				case "i": out.u8(Enc.I32);
 				case "f": out.u8(Enc.F64);
 				case "l": out.u8(Enc.I64);
-				case _: out.u8(0x6D);
+				case "p": out.u8(0x6D);
+				case _:
+					out.u8(0x63);
+					Enc.sleb(out, Std.parseInt(r.substr(1)));
 			}
 		}
 		out.buf(b);
@@ -111,6 +141,25 @@ class FuncGen {
 	function castTo(t:Int)
 		m.castTo(b, t);
 
+	// an expression's static wasm type, as extra's keys ("n": null, a subtype of all)
+	function wtype(e:Ex):String
+		return switch e {
+			case ELocal(l): localKey.exists(l.id) ? localKey.get(l.id) : repr(l.ty);
+			case ENewObj(c): "t" + m.classType(c);
+			case ECast(_, x): wtype(x);
+			case ENull(_): "n";
+			case _: rOf(e);
+		}
+
+	// the value of e on the stack as a (ref null t): cast unless its type already is one
+	function exprAs(e:Ex, t:Int) {
+		expr(e);
+		var k = wtype(e);
+		if (k == "n") return;
+		if (k.charAt(0) == "t" && m.isSubtype(Std.parseInt(k.substr(1)), t)) return;
+		castTo(t);
+	}
+
 	function gc(o:Int, ?a:Int, ?c:Int)
 		m.gc(b, o, a, c);
 
@@ -143,27 +192,32 @@ class FuncGen {
 	function stmt(s:Stmt) {
 		switch s {
 			case SSet(l, e):
-				expr(e);
+				var k = localKey.get(l.id);
+				if (k != null && k.charAt(0) == "t") exprAs(e, Std.parseInt(k.substr(1))) else expr(e);
 				if (local.exists(l.id)) localSet(local.get(l.id)) else if (rOf(e) != "v") op(0x1A);
 			case SExpr(e):
 				expr(e);
 				if (rOf(e) != "v") op(0x1A);
 			case SSetField(c, idx, o, v):
-				expr(o);
-				castTo(m.classType(c));
+				exprAs(o, m.classType(c));
 				expr(v);
 				gc(0x05, m.classType(c), idx + 1);
 			case SAnonSet(name, t, o, v):
-				unsupported("setting a field through a structural type (" + name + ")");
+				// (through the runtime: the field may be one added dynamically)
+				expr(o);
+				expr(EStr(name));
+				expr(v);
+				boxTop(t);
+				call(m.exportOf("gc_anon_set"));
 			case SArrSet(elem, a, i, v):
 				localGet(local.get(a.id));
 				expr(i);
 				expr(v);
-				call(Helpers.arrSet(m, repr(elem)));
+				call(Helpers.arrSet(m, GcModule.elemKind(elem)));
 			case SArrPush(elem, a, v):
 				localGet(local.get(a.id));
 				expr(v);
-				call(Helpers.arrPush(m, repr(elem)));
+				call(Helpers.arrPush(m, GcModule.elemKind(elem)));
 			case SBoxSet(t, bx, v):
 				expr(bx);
 				castTo(m.boxType(t));
@@ -224,7 +278,8 @@ class FuncGen {
 				if (v > hi) hi = v;
 				count++;
 			}
-		if (count == 0 || hi - lo > 4 * count + 16) {
+		// (the span in Float: string switches are on 32-bit hashes, whose difference overflows)
+		if (count == 0 || (hi : Float) - lo > 4.0 * count + 16) {
 			// sparse: tests one after the other
 			var opened = 0;
 			for (c in cases) {
@@ -419,16 +474,33 @@ class FuncGen {
 				expr(x);
 				call(Helpers.unbox(m, t == TBool ? "b" : repr(t)));
 			case EField(c, idx, o):
-				expr(o);
-				castTo(m.classType(c));
+				exprAs(o, m.classType(c));
 				gc(0x02, m.classType(c), idx + 1);
 			case EFieldAddr(_, _, _):
 				unsupported("the address of a struct field");
 			case EAnonGet(name, t, o, hint):
-				if (hint == null) unsupported("reading a field through a structural type (" + name + ")");
+				// (directly when the object has the layout of the type, else through the runtime)
+				var r = repr(t);
+				var tmp = temp("p");
 				expr(o);
-				castTo(m.shapeType(hint));
-				gc(0x02, m.shapeType(hint), hint.slot(name));
+				localTee(tmp);
+				if (hint != null) {
+					op(0xFB);
+					op(0x14);
+					Enc.sleb(b, m.shapeType(hint));
+					op(0x04);
+					blockType(r);
+					localGet(tmp);
+					castTo(m.shapeType(hint));
+					gc(0x02, m.shapeType(hint), hint.slot(name));
+					op(0x05);
+					localGet(tmp);
+				}
+				expr(EStr(name));
+				call(m.exportOf("gc_anon_get"));
+				unboxTop(t);
+				if (hint != null) op(0x0B);
+				release("p", tmp);
 			case ECast(t, x):
 				if (repr(t) != rOf(x)) unsupported("a cast from " + rOf(x) + " to " + repr(t));
 				expr(x);
@@ -454,9 +526,9 @@ class FuncGen {
 			case EArrGet(t, a, i):
 				expr(a);
 				expr(i);
-				call(Helpers.arrGet(m, repr(t)));
+				call(Helpers.arrGet(m, GcModule.elemKind(t)));
 			case EArrGetU(t, a, i):
-				var k = repr(t);
+				var k = GcModule.elemKind(t);
 				expr(a);
 				castTo(m.arrType(k));
 				gc(0x02, m.arrType(k), 1);
@@ -470,8 +542,9 @@ class FuncGen {
 				expr(x);
 				castTo(m.lambdaTypeOf(l));
 				gc(0x02, m.lambdaTypeOf(l), idx + 1);
-			case EType(_):
-				unsupported("a runtime type (Class or Enum value)");
+			case EType(tr):
+				op(0x23);
+				Enc.uleb(b, m.typeValue(tr));
 			case ECall(fn, args):
 				for (a in args)
 					expr(a);
@@ -505,8 +578,44 @@ class FuncGen {
 				op(0x14);
 				Enc.uleb(b, m.fnTypeOf(s));
 				release("p", t);
-			case ECallAnon(name, _, _, _):
-				unsupported("calling " + name + " through a structural type");
+			case ECallAnon(name, s, o, args):
+				// a class instance's method of that name (Helpers.anonCall: by its
+				// class), else the field through the runtime, called with its arguments boxed
+				var tmp = temp("p");
+				var vals = [for (k in 0...args.length) temp(repr(s.args[k]))];
+				expr(o);
+				localSet(tmp);
+				for (k in 0...args.length) {
+					expr(args[k]);
+					localSet(vals[k]);
+				}
+				localGet(tmp);
+				op(0xFB);
+				op(0x14);
+				Enc.sleb(b, m.objType);
+				op(0x04);
+				blockType(repr(s.ret));
+				localGet(tmp);
+				for (k in 0...args.length)
+					localGet(vals[k]);
+				call(Helpers.anonCall(m, name, s));
+				op(0x05);
+				localGet(tmp);
+				expr(EStr(name));
+				call(m.exportOf("gc_anon_get"));
+				i32(args.length);
+				for (k in 0...args.length) {
+					localGet(vals[k]);
+					boxTop(s.args[k]);
+				}
+				gc(0x08, m.dataType("p"), args.length);
+				gc(0x00, m.arrType("p"));
+				call(m.dynCall());
+				if (repr(s.ret) == "v") op(0x1A) else unboxTop(s.ret);
+				op(0x0B);
+				for (k in 0...args.length)
+					release(repr(s.args[k]), vals[k]);
+				release("p", tmp);
 			case ECallHost(name, args, ret):
 				host(name, args, ret);
 			case ENewObj(c):
@@ -517,13 +626,13 @@ class FuncGen {
 				gc(0x00, t);
 			case ENewEnum(c, args):
 				i32(c.tag);
-				if (c.params.length == 0) gc(0x00, m.enumType) else {
+				if (c.params.length == 0) gc(0x00, m.enumTypeOf(c.en)) else {
 					for (a in args)
 						expr(a);
 					gc(0x00, m.ctorType(c));
 				}
 			case ENewArr(t, values):
-				var k = repr(t);
+				var k = GcModule.elemKind(t);
 				i32(values.length);
 				for (v in values)
 					expr(v);
@@ -548,6 +657,23 @@ class FuncGen {
 				gc(0x00, m.shapeType(s));
 		}
 	}
+
+	function blockType(r:String)
+		switch r {
+			case "i": op(Enc.I32);
+			case "f": op(Enc.F64);
+			case "l": op(Enc.I64);
+			case "p": op(0x6D);
+			case _: op(0x40);
+		}
+
+	// the value on the stack (of type t) boxed, as Dynamic
+	function boxTop(t:Ty)
+		if (repr(t) != "p") gc(0x00, m.dynType(t));
+
+	// the Dynamic on the stack as a t
+	function unboxTop(t:Ty)
+		if (repr(t) != "p") call(Helpers.unbox(m, t == TBool ? "b" : repr(t)));
 
 	function binop(o:BinOp)
 		switch o {
@@ -699,6 +825,9 @@ class FuncGen {
 				case "isNull":
 					all();
 					op(0xD1);
+				case "same":
+					all();
+					op(0xD3);
 				case "unboxInt":
 					all();
 					call(Helpers.unbox(m, "i"));
@@ -708,6 +837,9 @@ class FuncGen {
 				case "unboxBool":
 					all();
 					call(Helpers.unbox(m, "b"));
+				case "unboxI64":
+					all();
+					call(Helpers.unbox(m, "l"));
 				case "f64Bits":
 					all();
 					op(0xBD);
@@ -719,6 +851,133 @@ class FuncGen {
 				case "fmt":
 					all();
 					call(m.importOf("hxmc.fmt"));
+				case "classOf":
+					all();
+					call(m.meta.classOf());
+				case "fieldNames":
+					all();
+					call(m.meta.fieldNames());
+				case "objGet":
+					all();
+					call(m.meta.objGet());
+				case "objSet":
+					all();
+					call(m.meta.objSet());
+				case "createEmpty":
+					all();
+					call(m.meta.createEmpty());
+				case "enumOf":
+					all();
+					call(m.meta.enumOf());
+				case "enumIndex":
+					all();
+					castTo(m.enumType);
+					gc(0x02, m.enumType, 0);
+				case "enumNames":
+					all();
+					call(m.meta.enumNamesOf());
+				case "enumParams":
+					all();
+					call(m.meta.enumParams());
+				case "enumCreate":
+					all();
+					call(m.meta.enumCreate());
+				case "typeAt":
+					all();
+					call(m.meta.typeAt());
+				case "typeKind" | "typeId" | "typeName":
+					all();
+					m.meta.typeField(b, name.substr(w.length) == "typeKind" ? 0 : name.substr(w.length) == "typeId" ? 1 : 2);
+				case "isType":
+					all();
+					op(0xFB);
+					op(0x14);
+					Enc.sleb(b, m.typeType());
+				case "anonOverflow":
+					all();
+					castTo(m.anonBaseType);
+					gc(0x02, m.anonBaseType, 0);
+				case "setAnonOverflow":
+					expr(args[0]);
+					castTo(m.anonBaseType);
+					expr(args[1]);
+					gc(0x05, m.anonBaseType, 0);
+				case "dynCall":
+					all();
+					call(m.dynCall());
+				case "sysStr" | "sysNum" | "readFile" | "writeFile" | "dateNum":
+					all();
+					call(m.importOf("hxmc." + name.substr(w.length)));
+				case "arrLen":
+					all();
+					castTo(m.arrBaseType);
+					gc(0x02, m.arrBaseType, 0);
+				case "arrKind":
+					all();
+					call(Helpers.arrKind(m));
+				case "arrGet":
+					all();
+					call(Helpers.arrGetDyn(m));
+				case "arrSet":
+					all();
+					call(Helpers.arrSetDyn(m));
+				case "arrNew":
+					all();
+					call(Helpers.arrNew(m));
+				case "arrSetLen":
+					all();
+					call(Helpers.arrSetLen(m));
+				case "arrBlit":
+					all();
+					call(Helpers.arrBlit(m));
+				case "bytesNew":
+					all();
+					gc(0x07, m.bytesType);
+				case "bytesLen":
+					all();
+					castTo(m.bytesType);
+					gc(0x0F);
+				case "bytesGet":
+					expr(args[0]);
+					castTo(m.bytesType);
+					expr(args[1]);
+					gc(0x0D, m.bytesType);
+				case "bytesSet":
+					expr(args[0]);
+					castTo(m.bytesType);
+					expr(args[1]);
+					expr(args[2]);
+					gc(0x0E, m.bytesType);
+				case "bytesCopy":
+					expr(args[0]);
+					castTo(m.bytesType);
+					expr(args[1]);
+					expr(args[2]);
+					castTo(m.bytesType);
+					expr(args[3]);
+					expr(args[4]);
+					gc(0x11, m.bytesType, m.bytesType);
+				case "bytesFill":
+					expr(args[0]);
+					castTo(m.bytesType);
+					expr(args[1]);
+					expr(args[2]);
+					expr(args[3]);
+					gc(0x10, m.bytesType);
+				case "bytesGetI32":
+					all();
+					call(Helpers.bytesGet(m, false));
+				case "bytesSetI32":
+					all();
+					call(Helpers.bytesSet(m, false));
+				case "f32Bits":
+					all();
+					op(0xB6);
+					op(0xBC);
+				case "bitsF32":
+					all();
+					op(0xBE);
+					op(0xBB);
 				case "parseFloat":
 					all();
 					call(m.importOf("hxmc.parseFloat"));
@@ -775,6 +1034,122 @@ class FuncGen {
 			case "hx_dyn_call":
 				all();
 				call(m.dynCall());
+			case "hx_dyn_aget":
+				all();
+				call(Helpers.arrGetDyn(m));
+			case "hx_dyn_aset":
+				all();
+				call(Helpers.arrSetDyn(m));
+			case "haxe_io_Bytes_alloc":
+				all();
+				gc(0x07, m.bytesType);
+			case "haxe_io_Bytes_get_length":
+				all();
+				castTo(m.bytesType);
+				gc(0x0F);
+			case "haxe_io_Bytes_get":
+				expr(args[0]);
+				castTo(m.bytesType);
+				expr(args[1]);
+				gc(0x0D, m.bytesType);
+			case "haxe_io_Bytes_set":
+				expr(args[0]);
+				castTo(m.bytesType);
+				expr(args[1]);
+				expr(args[2]);
+				gc(0x0E, m.bytesType);
+			case "haxe_io_Bytes_getInt32":
+				all();
+				call(Helpers.bytesGet(m, false));
+			case "haxe_io_Bytes_setInt32":
+				all();
+				call(Helpers.bytesSet(m, false));
+			case "haxe_io_Bytes_getDouble":
+				all();
+				call(Helpers.bytesGet(m, true));
+				op(0xBF);
+			case "haxe_io_Bytes_setDouble":
+				expr(args[0]);
+				expr(args[1]);
+				expr(args[2]);
+				op(0xBD);
+				call(Helpers.bytesSet(m, true));
+			case "haxe_io_Bytes_getFloat":
+				all();
+				call(Helpers.bytesGet(m, false));
+				op(0xBE);
+				op(0xBB);
+			case "haxe_io_Bytes_setFloat":
+				expr(args[0]);
+				expr(args[1]);
+				expr(args[2]);
+				op(0xB6);
+				op(0xBC);
+				call(Helpers.bytesSet(m, false));
+			case "Type_createEmptyInstance" if (args[0].match(EType(TRClass(_)))):
+				switch args[0] {
+					case EType(TRClass(c)): expr(ENewObj(c));
+					case _:
+				}
+			case "Std_downcast" if (args[1].match(EType(_))):
+				// (the value when of the type, else null)
+				var t = temp("p");
+				expr(args[0]);
+				localTee(t);
+				switch args[1] {
+					case EType(tr): typeTest(tr);
+					case _:
+				}
+				op(0x04);
+				op(0x6D);
+				localGet(t);
+				op(0x05);
+				m.constZero(b, "p");
+				op(0x0B);
+				release("p", t);
+			case "hx_cast" if (args[1].match(EType(_))):
+				// (null, or a value of the type: else an error)
+				var t = temp("p");
+				expr(args[0]);
+				localTee(t);
+				op(0xD1);
+				localGet(t);
+				switch args[1] {
+					case EType(tr): typeTest(tr);
+					case _:
+				}
+				op(0x72);
+				op(0x04);
+				op(0x6D);
+				localGet(t);
+				op(0x05);
+				expr(EStr("Class cast error"));
+				op(0x08);
+				op(0);
+				op(0x0B);
+				release("p", t);
+			case "String_charCodeAt_i":
+				// (0 past the end, as fastCodeAt)
+				var t = temp("i"), s = temp("p");
+				expr(args[0]);
+				localSet(s);
+				expr(args[1]);
+				localTee(t);
+				localGet(s);
+				castTo(m.stringType);
+				gc(0x0F);
+				op(0x49);
+				op(0x04);
+				op(Enc.I32);
+				localGet(s);
+				castTo(m.stringType);
+				localGet(t);
+				gc(0x0D, m.stringType);
+				op(0x05);
+				i32(0);
+				op(0x0B);
+				release("i", t);
+				release("p", s);
 			case "String_length":
 				all();
 				castTo(m.stringType);

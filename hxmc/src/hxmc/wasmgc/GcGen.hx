@@ -26,6 +26,8 @@ class Reach {
 	public final sels = new Map<Int, Bool>();
 	public final classes = new Map<ClassInfo, Bool>();
 	public final lambdas = new Map<LambdaInfo, Bool>();
+	// the names called through structural types (ECallAnon): the classes' methods of these names
+	public final anonNames = new Map<String, Bool>();
 	var queue:Array<FuncInfo> = [];
 
 	public function new(prog:Program) {
@@ -60,6 +62,17 @@ class Reach {
 
 	function pendingDispatch():Bool {
 		var more = false;
+		for (n in anonNames.keys())
+			for (c in classes.keys()) {
+				var key = n + ":" + c.id;
+				if (done.exists(key)) continue;
+				done.set(key, true);
+				var m = c.findMethod(n);
+				if (m != null && !seen.exists(m)) {
+					add(m);
+					more = true;
+				}
+			}
 		for (s in sels.keys())
 			for (c in classes.keys()) {
 				var key = s + ":" + c.id;
@@ -79,7 +92,17 @@ class Reach {
 			stmt(s);
 	}
 
+	// the runtime's function exported under the symbol
+	function export(sym:String) {
+		for (f in prog.funcs)
+			if (f.cSymbol == sym) {
+				add(f);
+				return;
+			}
+	}
+
 	function stmt(s:Stmt) {
+		if (s.match(SAnonSet(_))) export("gc_anon_set");
 		hxmc.ir.Facts.iterStmt(stmt, ex, s);
 	}
 
@@ -87,8 +110,18 @@ class Reach {
 		switch e {
 			case ECall(f, _): add(f);
 			case ECallDispatch(sel, _, _): sels.set(sel, true);
-			case ECallHost(n, _, _): hosts.set(n, (hosts.exists(n) ? hosts.get(n) : 0) + 1);
+			case ECallHost(n, args, _):
+				hosts.set(n, (hosts.exists(n) ? hosts.get(n) : 0) + 1);
+				if (n == "Type_createEmptyInstance") switch args[0] {
+					case EType(TRClass(c)): cls(c);
+					case _:
+				}
 			case ENewObj(c): cls(c);
+			case EAnonGet(_): export("gc_anon_get");
+			case ECallAnon(n, _, _, _):
+				export("gc_anon_get");
+				anonNames.set(n, true);
+			case EType(TRClass(c)) if (!c.isInterface): cls(c);
 			case ENewClos(l, _):
 				lambdas.set(l, true);
 				add(l.fn);
