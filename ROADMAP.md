@@ -30,13 +30,13 @@ in [docs/plans/](docs/plans/README.md); what is built is in
 - `site/`, replacing `hxmc/web`: built with web; docs generated from the sources (narrative docs, package READMEs, an API reference read with the compiler), an examples gallery from each package's `examples/`: landed ([web.md](docs/plans/web.md#the-site-site-built))
 - The module cache on by default, replacing the types cache ([compiler.md](docs/plans/compiler.md#cached-modules))
 - Nondeterministic macros in the module cache: volatile modules, file and environment reads, `@:hxmc.noCache`: landed ([compiler.md](docs/plans/compiler.md#cached-modules))
+- gfx: render targets, mip maps, more texture formats: landed ([packages/gfx/README.md](packages/gfx/README.md), what is left: [graphics.md](docs/plans/graphics.md#left))
 - Android, step 1: GPU only, `NativeActivity`, the APK writer: landed (`android-arm64`, `android-x86_64`; [hxmc.md](docs/hxmc.md#android), what is left: [targets.md](docs/plans/targets.md#android))
 - Android, step 2: native controls through JNI (a DEX writer for the glue, `hxmc.ui.native` on `android.widget`): landed ([hxmc.md](docs/hxmc.md#android))
 - Android, step 3: a GPU view among views (`GpuView`), the input method for a drawn window: landed (what is left: [targets.md](docs/plans/targets.md#android))
 
 ## Next
 
-- gfx: render targets, mip maps, more texture formats ([graphics.md](docs/plans/graphics.md#left))
 - Graphics programs in the playground ([graphics.md](docs/plans/graphics.md#graphics-in-the-playground))
 
 ## Later
@@ -50,7 +50,7 @@ in [docs/plans/](docs/plans/README.md); what is built is in
 - C interop: methods on structs, specialized generics, value enums, allocators ([lowlevel.md](docs/plans/lowlevel.md))
 - WebAssembly threads; WasmGC as a browser-focused second path ([targets.md](docs/plans/targets.md#webassembly))
 - iOS ([targets.md](docs/plans/targets.md#ios))
-- gfx: bind groups, compute, Vulkan, D3D12; audio input and devices ([graphics.md](docs/plans/graphics.md))
+- gfx: multisampling, bind groups, compute, Vulkan, D3D12; audio input and devices ([graphics.md](docs/plans/graphics.md))
 - Compact strings ([runtime.md](docs/plans/runtime.md#compact-strings-latin-1--utf-16))
 - Direct system calls on Linux ([runtime.md](docs/plans/runtime.md#direct-system-calls-on-linux))
 - The libm branch: correctly rounded math ([math.md](docs/plans/math.md#later-the-libm-branch))
