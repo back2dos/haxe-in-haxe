@@ -347,7 +347,13 @@ s[3].y = 2;                                  // in place
 - Scalar replacement (`Sroa.hx`, after inlining): a slot whose address
   is only the base of loads and stores at constant offsets becomes SSA
   values, so struct math in registers: `acc = acc + d * 0.5` over
-  three-double vectors compiles to three `fadd`s in the loop.
+  three-double vectors compiles to three `fadd`s in the loop. The shader
+  math types of `@hxmc/gfx` (`Vec2`..`Vec4`, `Mat4`) are struct values:
+  `packages/gfx/test/MathBench.hx` (about a million operations of each
+  kind: a running value, a function's arguments and result, objects'
+  fields, matrix products) went from 172 MB allocated in 43 minor
+  collections and about 52 ms to nothing allocated and about 33 ms (Linux
+  x86-64).
 - Boxes: where a reference is needed (`Dynamic`, a type parameter: `Map<K,
   S>`, `Array<S>`'s elements, `Null<S>`, an enum's argument, a field of a
   structural type), the value is copied into a box, an object of a class

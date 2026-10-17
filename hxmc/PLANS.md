@@ -741,8 +741,9 @@ benchmarks between -5% and +4% either way, code-layout noise).
   A class implementing `Shaders` (Haxe runs build macros from `@:build`
   or `@:autoBuild` only, so an interface rather than a `@:shader`
   metadata) holds static functions on the math types (`Vec2`, `Vec3`,
-  `Vec4`, `Mat4`: inline abstracts over immutable objects, swizzles and
-  operators written out by `VecBuild`) and `@:structInit` classes of them;
+  `Vec4`, `Mat4`: inline abstracts over immutable `@:hxmc.struct` values
+  since 2026-10-17, so CPU math allocates nothing; swizzles and operators
+  written out by `VecBuild`) and `@:structInit` classes of them;
   `ShaderMath` has GLSL's builtins as overloads (`vec4(v.xy, 0, 1)`, `mix`,
   `normalize`, ...). The same functions run on the CPU. `@:vertex` takes
   the vertex (its fields: the attributes, Float32, packed in order) and
