@@ -307,8 +307,10 @@ class DataGen {
 				for (m in ms) {
 					data.buf.u32(e.fid(m.name));
 					data.buf.u32(0);
-					ptr(data, m.fn);
-					data.buf.u32(m.sig);
+					// (a method with default values for numbers or Bools: its entry
+					// taking them nullable, FuncInfo.dfltEntry)
+					ptr(data, m.dfn != null ? m.dfn : m.fn);
+					data.buf.u32(m.dfn != null ? m.dsig : m.sig);
 					data.buf.u32(0);
 				}
 			}

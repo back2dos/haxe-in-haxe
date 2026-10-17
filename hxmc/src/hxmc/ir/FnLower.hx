@@ -212,6 +212,34 @@ class FnLower {
 		}
 	}
 
+	// the body of a method's entry for dynamic calls (Lower.defaultsEntry):
+	// its nullable arguments null take the method's defaults
+	public function forwardDefaults(f:FuncInfo) {
+		boxed = new Map();
+		var ds = l.defaults.get(f);
+		var args:Array<Ex> = [ELocal(fi.args[0])];
+		for (k in 1...fi.args.length) {
+			var a = fi.args[k], t = f.args[k].ty;
+			var d = ds != null && k < ds.length ? ds[k] : null;
+			if (a.ty == t || d == null) {
+				args.push(ELocal(a));
+				continue;
+			}
+			var v = newLocal("o", t);
+			out.push(SIf(EBin(RefEq, ELocal(a), ENull(a.ty)), block(() -> out.push(SSet(v, coerce(value(d), tyOf(d), t)))),
+				[SSet(v, coerce(ELocal(a), a.ty, t))]));
+			args.push(ELocal(v));
+		}
+		if (f.ret == TVoid) {
+			out.push(SExpr(ECall(f, args)));
+			out.push(SReturn(null));
+		} else {
+			var r = newLocal("r", f.ret);
+			out.push(SSet(r, ECall(f, args)));
+			out.push(SReturn(ELocal(r)));
+		}
+	}
+
 	// closure body calling a runtime function
 	public function forwardHost(name:String) {
 		boxed = new Map();
@@ -1797,25 +1825,14 @@ class FnLower {
 				var ci = l.ctorInfo(ef, en);
 				var xs = args(cargs, ci.params, null);
 				return coerceRhs(ENewEnum(ci, xs), TRef(RCtor(ci)), rt);
-			case TField(obj, fa = (FAnon(cf) | FInstance(_, _, cf))) if (tyOf(f).match(TRef(RClos(_)))):
+			case TField(obj, FAnon(cf) | FInstance(_, _, cf)) if (tyOf(f).match(TRef(RClos(_)))):
 				var s = switch tyOf(f) {
 					case TRef(RClos(s)): s;
 					case _: null;
 				};
-				// (an interface's method: the signature of its implementations)
-				if (fa.match(FInstance(_))) s = l.methodSig(f.etype, s);
 				if (hasStruct(s)) structFail('a struct value passed to or returned by a function of a structural type: not supported (an interface or a class)');
 				var o = asLocal(value(obj), tyOf(obj));
 				var xs = args(cargs, s.args, null);
-				switch fa {
-					case FInstance(c, _, _) if (c.hasClassFlag(CInterface)):
-						// (arguments left out: the defaults of the receiver's implementation)
-						for (i in cargs.length...s.args.length) {
-							var x = receiverDefault(c, cf.cfName, ELocal(o), i + 1, null, s.args[i], xs[i]);
-							if (x != null) xs[i] = x;
-						}
-					case _:
-				}
 				return coerceRhs(ECallAnon(cf.cfName, s, ELocal(o), xs), s.ret, rt);
 			case TField(obj, FDynamic(name)):
 				var o = coerce(value(obj), tyOf(obj), TRef(RAny));

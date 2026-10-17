@@ -72,7 +72,8 @@ keeps an Int where a Float is stored and multiplies two such Floats as Ints,
 overflowing, so portable programs never use an Int value as a Float without
 converting it (`x + 0.0`; `Types.intAsFloat`). The kept cases `exec-<seed>`
 are hxmc bugs this lane found: wrong code (a static variable read after a
-later operand's call assigned it; an override's default argument values),
+later operand's call assigned it; an override's default argument values; a
+method overridden only by a subclass of a subclass, called statically),
 and methods that failed to compile (an abstract method no class
 implements). CI's `fuzz-exec` job runs each lane on the kept cases and 400
 random programs (about a minute and a half each, beside the corpus jobs).

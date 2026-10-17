@@ -266,13 +266,15 @@ class Facts {
 		for (c in p.classes) {
 			var seen = new Map<String, Bool>();
 			var k = c;
-			var ms = [];
+			var ms:Array<{name:String, fn:String, sig:Int, ?dfn:String, ?dsig:Int}> = [];
 			while (k != null) {
 				for (name => m in k.methods)
 					if (!seen.exists(name)) {
 						seen.set(name, true);
 						var sig = p.sig([for (i in 1...m.args.length) m.args[i].ty], m.ret);
-						ms.push({name: name, fn: symbol(m), sig: sig.id});
+						var d = m.dfltEntry;
+						if (d == null) ms.push({name: name, fn: symbol(m), sig: sig.id}) else
+							ms.push({name: name, fn: symbol(m), sig: sig.id, dfn: symbol(d), dsig: p.sig([for (i in 1...d.args.length) d.args[i].ty], d.ret).id});
 					}
 				k = k.sup;
 			}
@@ -640,7 +642,8 @@ typedef TypeEntry = {
 	sup:Int,
 	slots:Array<Null<Ty>>,
 	fields:Array<{name:String, slot:Int, ty:Ty}>,
-	methods:Array<{name:String, fn:String, sig:Int}>,
+	// (dfn, dsig: the entry for dynamic calls, FuncInfo.dfltEntry)
+	methods:Array<{name:String, fn:String, sig:Int, ?dfn:String, ?dsig:Int}>,
 	ifaces:Array<Int>,
 	tag:Int,
 	ctors:Array<Int>

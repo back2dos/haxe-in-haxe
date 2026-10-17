@@ -27,6 +27,14 @@ L5lfalse
 3 2.5 true s
 5 1.5 true s
 [0.5,1]
+4atrue 2atrue 3.5 3rtrue
+3.5 3
+B7bfalse B2bfalse 4.5 B3rfalse
+4.5 2
+C9ctrue C2ctrue 4.5 C3rtrue
+4.5 2
+L5lfalse L2lfalse 3.5 L3rfalse
+3.5 3
 5.5 null
 3.5 null
 7

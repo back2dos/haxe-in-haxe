@@ -478,14 +478,6 @@ class Lower {
 	public static function optionalTy(t:Ty):Ty
 		return t == TI32 || t == TF64 || t == TBool ? TRef(RNull(t)) : t;
 
-	// the signature of a method of function type t, its optional arguments as
-	// they are declared (`s`: the closure signature of t)
-	public function methodSig(t:T, s:SigInfo):SigInfo
-		return switch followFun(t) {
-			case TFun(f) if (f.args.length == s.args.length): prog.sig([for (a in f.args) ty(a.type)], s.ret);
-			case _: s;
-		}
-
 	// an argument of a closure calling a function: nullable where the function has a default value
 	public static function closureArgTy(t:Ty, d:Null<TExpr>):Ty
 		return d != null ? optionalTy(t) : t;
@@ -805,7 +797,35 @@ class Lower {
 			}
 		} else signature(fi, tf, TRef(RObj(root)));
 		pending.push(guarded(fi, () -> lowerBody(fi, cf, () -> new FnLower(this, fi, ci, null).run(tf))));
+		defaultsEntry(fi, ci);
 		return fi;
+	}
+
+	// A method called dynamically (by name through Dynamic, Reflect) may be
+	// given fewer arguments than it has: where it has default values for
+	// numbers or Bools, its entry in the method table (DataGen.types: dynamic
+	// and structural calls) is this one, those arguments nullable
+	// (closureArgTy, as a closure of a function type with optional
+	// arguments), null meaning the default.
+	function defaultsEntry(fi:FuncInfo, ci:ClassInfo) {
+		if (fi.sret) return;
+		var ds = defaults.get(fi);
+		if (ds == null) return;
+		var tys = [for (i in 1...fi.args.length) closureArgTy(fi.args[i].ty, i < ds.length ? ds[i] : null)];
+		var differs = false;
+		for (i in 0...tys.length)
+			if (tys[i] != fi.args[i + 1].ty) differs = true;
+		if (!differs) return;
+		var w = new FuncInfo(fi.name + "__dflt", fi.module);
+		w.args.push(new Local(0, "this0", fi.args[0].ty));
+		for (i in 0...tys.length)
+			w.args.push(new Local(i + 1, fi.args[i + 1].name, tys[i]));
+		w.ret = fi.ret;
+		w.pos = fi.pos;
+		w.display = fi.display;
+		fi.dfltEntry = w;
+		prog.funcs.push(w);
+		pending.push(guarded(w, () -> lowerBody(w, null, () -> new FnLower(this, w, ci, null).forwardDefaults(fi))));
 	}
 
 	public function ctor(c:TClass):FuncInfo {
@@ -1106,10 +1126,27 @@ class Lower {
 		if (subs != null)
 			for (d in subs)
 				if (d.clFields.exists(name) && d.clFields.get(name).cfExpr != null) return true;
-		// a subclass loaded later may still override: dispatch if any descendant is known to the typer
+		// a subclass lowered later may still override: dispatch if any
+		// descendant the typer knows does (clDescendants holds the direct
+		// subclasses: their subclasses too)
+		return overriddenBelow(c, name);
+	}
+
+	var overridden = new Map<String, Bool>();
+
+	function overriddenBelow(c:TClass, name:String):Bool {
+		var key = core.Globals.sTypePath(c.clPath) + "." + name;
+		var r = overridden.get(key);
+		if (r != null) return r;
+		r = false;
 		for (d in c.clDescendants)
-			if (d.clFields.exists(name) && d.clFields.get(name).cfExpr != null) return true;
-		return false;
+			if (!d.hasClassFlag(CInterface) && d.clSuper != null && d.clSuper.cls == c
+				&& (d.clFields.exists(name) && d.clFields.get(name).cfExpr != null || overriddenBelow(d, name))) {
+				r = true;
+				break;
+			}
+		overridden.set(key, r);
+		return r;
 	}
 
 	public function selector(name:String, sig:SigInfo):Int {

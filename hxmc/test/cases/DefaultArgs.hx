@@ -7,7 +7,8 @@
 // functions, methods, dispatched and interface methods, local functions,
 // function literals, dynamic methods, bind), where a left-out number or Bool
 // is null and the closure fills in the default, as does a direct call
-// passing null for it.
+// passing null for it; and calls by name through Dynamic, Reflect and a
+// structural type (the method table's entry takes them nullable).
 interface I {
 	function m(?x:Int):Int;
 	function n(x:Int, y:Float = 2.5):Float;
@@ -114,6 +115,13 @@ class DefaultArgs {
 		var n:Null<Int> = null;
 		Sys.println(foo(n));
 		Sys.println([1, 2].map(new B().n.bind(_, 0.5)));
+		// by name
+		for (a in as) {
+			var d:Dynamic = a;
+			Sys.println(d.k() + " " + d.k(2) + " " + d.n(1) + " " + Reflect.callMethod(a, Reflect.field(a, "k"), [3, "r"]));
+			var s:{function n(x:Int, ?y:Float):Float;} = a;
+			Sys.println(s.n(1) + " " + s.n(1, 2.0));
+		}
 		local();
 	}
 }
