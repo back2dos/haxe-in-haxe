@@ -73,6 +73,7 @@ npm i -D @hxmc/gfx
 | `@hxmc/gfx` | a portable GPU API with back ends for GL/GLES (Linux), Metal (macOS), D3D11 (Windows), WebGPU and WebGL2 (browser), and shaders written in Haxe (compiled to GLSL, WGSL, MSL, HLSL); see `packages/gfx/examples/Triangle.hx` and `Cube.hx` |
 | `@hxmc/text` | TrueType fonts in pure Haxe: parsing, an anti-aliased rasterizer, shaping with kerning and fallback fonts, bidi and Arabic shaping, line layout, a glyph atlas, the system's fonts |
 | `@hxmc/view` | signals and JSX-like markup for Haxe on every target: fine-grained reactivity as Solid has it, markup compiled to direct calls on a renderer chosen at compile time; components are type-checked calls |
+| `@hxmc/web` | `@hxmc/view` on the web: a DOM renderer (JavaScript), static HTML rendered at build time, hydration, islands in JavaScript or WebAssembly with a small loader, typed calls from JavaScript into wasm32-wasi modules |
 | `@hxmc/ui` | a UI toolkit: a node tree with flexbox layout (checked against Chromium's), events and focus, drawn with the GPU on gfx or as the platform's controls, written in view's markup, widgets; see `packages/ui/examples/Todo.hx` |
 
 ## Building from source

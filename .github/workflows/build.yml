@@ -28,9 +28,9 @@
 #     the cross-built programs on D3D11's WARP, gfx-windows; on macOS built
 #     from the npm packages after npm-pack, gfx-macos), packages/os's audio
 #     in the same jobs (make audio-check, audio-web-check), then
-#     packages/view, text and ui (their checks on Eval, the sample UI and the
+#     packages/view, web, text and ui (their checks on Eval, the sample UI and the
 #     todo example drawn on llvmpipe, the todo example in Chromium on WebGPU
-#     and WebGL2).
+#     and WebGL2, web's demo page hydrated in Chromium).
 # - conformance: the port against the reference: HXB of the upstream suites
 #   and macro cases, display requests, the compilation server and its
 #   JSON-RPC methods, upstream's target suites compiled by both and compared
@@ -602,10 +602,10 @@ jobs:
           make gfx-web-check
       - name: audio (WebAudio in Chromium)
         run: make audio-web-check
-      - name: view, text and ui (Eval, natively; Mesa llvmpipe; Chromium)
+      - name: view, web, text and ui (Eval, natively; Mesa llvmpipe; Chromium)
         run: |
           set -ex
-          make view-check text-check ui-check
+          make view-check web-check text-check ui-check
           make ui-draw-check GFX_TARGET=linux-x86_64
           make ui-web-check
       - uses: actions/upload-artifact@v7

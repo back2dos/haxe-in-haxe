@@ -26,11 +26,11 @@ in [docs/plans/](docs/plans/README.md); what is built is in
 
 - `@hxmc/ui`, `@hxmc/text`, native controls: landed; follow-ups in [ui.md](docs/plans/ui.md)
 - `@hxmc/view`: signals, markup compiled to direct calls and a renderer contract, merged from `@hxmc/esx` and `hxmc.ui.reactive`; ui renders with it (drawn and native): landed ([view.md](docs/plans/view.md))
+- `@hxmc/web`: `@hxmc/view` renderers for the DOM (JavaScript) and static HTML, hydration, islands in JavaScript or WebAssembly, typed calls from JavaScript into wasm modules: landed ([web.md](docs/plans/web.md#hxmcweb-built))
 - The module cache on by default, replacing the types cache ([compiler.md](docs/plans/compiler.md#cached-modules))
 
 ## Next
 
-- `@hxmc/web`: DOM bindings via `imports.mjs`, `@hxmc/view` renderers for the DOM and static HTML, hydration islands ([web.md](docs/plans/web.md#hxmcweb))
 - `site/` replacing `hxmc/web`: built with web, docs generated from the sources (narrative docs, package READMEs, an API reference extracted with the compiler), an examples gallery from each package's `examples/` ([web.md](docs/plans/web.md#the-site-site))
 - Nondeterministic macros in the module cache: volatile modules, file and environment dependencies ([compiler.md](docs/plans/compiler.md#cached-modules))
 - Android, step 1: GPU only, `NativeActivity`, the APK writer ([targets.md](docs/plans/targets.md#android))
