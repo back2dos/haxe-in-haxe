@@ -75,7 +75,7 @@ class Options {
 		o.stats = env("HXMC_STATS") == "1";
 		o.verbose = def("hxmc.verbose") != null || env("HXMC_VERBOSE") == "1";
 		o.dump = env("HXMC_DUMP");
-		var sa = def("hxmc.seg-align");
+		var sa = def("hxmc.seg_align"); // (-D turns the dash into an underscore)
 		if (sa != null) o.segAlign = Std.parseInt(sa);
 		o.pic = def("hxmc.pic") != null;
 		o.strip = !(def("debug") != null || def("hxmc.symbols") != null || env("HXMC_SYMBOLS") == "1");
