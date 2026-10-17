@@ -225,6 +225,26 @@ its index in the exported `__indirect_function_table` (corpus case
 `WasmCallback`): `@hxmc/os`'s canvas window runs its loop from
 `requestAnimationFrame` that way, paused while the canvas is out of view.
 
+### WasmGC (-D hxmc.wasm-gc, an experiment)
+
+With `-D hxmc.wasm-gc` (and `-D hxmc.target=wasm32-wasi`) the IR after Lower
+becomes a WasmGC module instead (`hxmc/src/hxmc/wasmgc/`): objects live in the
+engine's collector, with no linear memory, shadow stack or barriers. What main and the
+initializers reach is emitted (`GcGen.Reach`); every reference is an `eqref`,
+cast to its concrete type where it is used; all types are in one recursion
+group, so the class hierarchy is wasm's subtyping (`instanceof` is
+`ref.test`); virtual and interface calls go through a funcref table indexed by
+class and selector; closures are structs whose first field is a typed
+function reference (`call_ref`); exceptions are the legacy try/catch
+instructions. The runtime is `hxmc/std/hxmc/rt/gc`: Haxe over intrinsics
+(`hxmc.rt.gc.W`, expanded by `FuncGen.host`), its `@:hxmc.wasmgc` classes the
+only ones whose `@:hxmc.host` functions are bound; Math's transcendental
+functions, float formatting and parsing are the host's (`hxmc/bootstrap/wasmgc.mjs`, which
+runs a module under node). A runtime function not covered yet fails the
+build with its name. `make wasmgc-check` compares `hxmc/test/wasmgc`'s programs
+with their native output; `make wasmgc-bench` adds the linear-memory build:
+times, peak RSS, sizes.
+
 ## Origin
 
 hxmc began as the second back end of hxc, the C target this repository had

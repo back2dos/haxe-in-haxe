@@ -1,0 +1,851 @@
+package hxmc.wasmgc;
+
+import hxmc.Buf;
+import hxmc.ir.Ir;
+import hxmc.wasm.Enc;
+
+private enum Frame {
+	FBreak; // a loop's exit
+	FLoop; // a loop's head
+	FPlain; // if, switch blocks, try
+}
+
+// One function of the IR as a WasmGC function body (GcModule). The IR's
+// statements are structured, so they map onto wasm's blocks: a loop is a
+// block (its exit) around a loop (its head), a switch nested blocks and a
+// br_table. Locals are the function's (references as eqref), plus temporaries
+// taken and given back around the code that needs them.
+class FuncGen {
+	final m:GcModule;
+	final f:FuncInfo;
+	final b = new Buf();
+	final local = new Map<Int, Int>();
+	final extra:Array<String> = []; // the locals after the parameters, by representation
+	final free = new Map<String, Array<Int>>();
+	final frames:Array<Frame> = [];
+	var nparams = 0;
+
+	public function new(m:GcModule, f:FuncInfo) {
+		this.m = m;
+		this.f = f;
+	}
+
+	static function repr(t:Ty):String
+		return GcModule.repr(t);
+
+	public function emit():Buf {
+		for (a in f.args)
+			local.set(a.id, nparams++);
+		for (l in f.locals)
+			if (!local.exists(l.id) && repr(l.ty) != "v") {
+				local.set(l.id, nparams + extra.length);
+				extra.push(repr(l.ty));
+			}
+		for (s in f.body)
+			stmt(s);
+		if (repr(f.ret) != "v") b.u8(0x00); // (a value-returning function ends with a return)
+		b.u8(0x0B);
+		// the locals' declarations in front
+		var out = new Buf();
+		Enc.uleb(out, extra.length);
+		for (r in extra) {
+			out.u8(1);
+			switch r {
+				case "i": out.u8(Enc.I32);
+				case "f": out.u8(Enc.F64);
+				case "l": out.u8(Enc.I64);
+				case _: out.u8(0x6D);
+			}
+		}
+		out.buf(b);
+		return out;
+	}
+
+	function unsupported(what:String):Dynamic
+		throw 'hxmc: -D hxmc.wasm-gc: ${f.display != null ? f.display : f.name}: $what is not supported yet';
+
+	// ---- temporaries
+
+	function temp(r:String):Int {
+		var l = free.get(r);
+		if (l != null && l.length > 0) return l.pop();
+		var i = nparams + extra.length;
+		extra.push(r);
+		return i;
+	}
+
+	function release(r:String, i:Int) {
+		var l = free.get(r);
+		if (l == null) free.set(r, l = []);
+		l.push(i);
+	}
+
+	inline function op(x:Int)
+		b.u8(x);
+
+	function localGet(i:Int) {
+		op(0x20);
+		Enc.uleb(b, i);
+	}
+
+	function localSet(i:Int) {
+		op(0x21);
+		Enc.uleb(b, i);
+	}
+
+	function localTee(i:Int) {
+		op(0x22);
+		Enc.uleb(b, i);
+	}
+
+	function i32(v:Int) {
+		op(0x41);
+		Enc.sleb(b, v);
+	}
+
+	function call(i:Int) {
+		op(0x10);
+		Enc.uleb(b, i);
+	}
+
+	function castTo(t:Int)
+		m.castTo(b, t);
+
+	function gc(o:Int, ?a:Int, ?c:Int)
+		m.gc(b, o, a, c);
+
+	// ---- statements
+
+	function block(kind:Frame, opcode:Int) {
+		op(opcode);
+		op(0x40);
+		frames.push(kind);
+	}
+
+	function end() {
+		op(0x0B);
+		frames.pop();
+	}
+
+	function depthOf(kind:Frame):Int {
+		var i = frames.length - 1;
+		while (i >= 0) {
+			if (frames[i] == kind) return frames.length - 1 - i;
+			i--;
+		}
+		throw "no enclosing loop";
+	}
+
+	function stmts(ss:Array<Stmt>)
+		for (s in ss)
+			stmt(s);
+
+	function stmt(s:Stmt) {
+		switch s {
+			case SSet(l, e):
+				expr(e);
+				if (local.exists(l.id)) localSet(local.get(l.id)) else if (rOf(e) != "v") op(0x1A);
+			case SExpr(e):
+				expr(e);
+				if (rOf(e) != "v") op(0x1A);
+			case SSetField(c, idx, o, v):
+				expr(o);
+				castTo(m.classType(c));
+				expr(v);
+				gc(0x05, m.classType(c), idx + 1);
+			case SAnonSet(name, t, o, v):
+				unsupported("setting a field through a structural type (" + name + ")");
+			case SArrSet(elem, a, i, v):
+				localGet(local.get(a.id));
+				expr(i);
+				expr(v);
+				call(Helpers.arrSet(m, repr(elem)));
+			case SArrPush(elem, a, v):
+				localGet(local.get(a.id));
+				expr(v);
+				call(Helpers.arrPush(m, repr(elem)));
+			case SBoxSet(t, bx, v):
+				expr(bx);
+				castTo(m.boxType(t));
+				expr(v);
+				gc(0x05, m.boxType(t), 0);
+			case SSetGlobal(g, v):
+				expr(v);
+				op(0x24);
+				Enc.uleb(b, m.globalOf(g));
+			case SIf(c, a, e):
+				expr(c);
+				block(FPlain, 0x04);
+				stmts(a);
+				if (e.length > 0) {
+					op(0x05);
+					stmts(e);
+				}
+				end();
+			case SLoop(body):
+				block(FBreak, 0x02);
+				block(FLoop, 0x03);
+				stmts(body);
+				op(0x0C);
+				Enc.uleb(b, 0);
+				end();
+				end();
+			case SBreak:
+				op(0x0C);
+				Enc.uleb(b, depthOf(FBreak));
+			case SContinue:
+				op(0x0C);
+				Enc.uleb(b, depthOf(FLoop));
+			case SSwitch(e, cases, def):
+				switchStmt(e, cases, def);
+			case SReturn(e):
+				if (e != null) expr(e);
+				op(0x0F);
+			case SThrow(e):
+				expr(e);
+				op(0x08);
+				op(0);
+			case STry(body, catches):
+				tryStmt(body, catches);
+			case SCold(_, x):
+				stmt(x);
+			case SPos(_, _):
+		}
+	}
+
+	function switchStmt(e:Ex, cases:Array<{values:Array<Int>, body:Array<Stmt>}>, def:Array<Stmt>) {
+		var t = temp("i");
+		expr(e);
+		localSet(t);
+		var lo = 0x7fffffff, hi = -0x7fffffff, count = 0;
+		for (c in cases)
+			for (v in c.values) {
+				if (v < lo) lo = v;
+				if (v > hi) hi = v;
+				count++;
+			}
+		if (count == 0 || hi - lo > 4 * count + 16) {
+			// sparse: tests one after the other
+			var opened = 0;
+			for (c in cases) {
+				for (k in 0...c.values.length) {
+					localGet(t);
+					i32(c.values[k]);
+					op(0x46);
+					if (k > 0) op(0x72);
+				}
+				block(FPlain, 0x04);
+				stmts(c.body);
+				op(0x05);
+				opened++;
+			}
+			stmts(def);
+			for (_ in 0...opened)
+				end();
+			release("i", t);
+			return;
+		}
+		// dense: blocks, the innermost holding the br_table; case k's body follows block k
+		var n = cases.length;
+		block(FPlain, 0x02); // the end
+		block(FPlain, 0x02); // the default
+		for (_ in 0...n)
+			block(FPlain, 0x02);
+		var targets = [for (_ in lo...hi + 1) n];
+		for (k in 0...n)
+			for (v in cases[k].values)
+				targets[v - lo] = k;
+		localGet(t);
+		if (lo != 0) {
+			i32(lo);
+			op(0x6B);
+		}
+		op(0x0E);
+		Enc.uleb(b, targets.length);
+		for (x in targets)
+			Enc.uleb(b, x);
+		Enc.uleb(b, n);
+		for (k in 0...n) {
+			end();
+			stmts(cases[k].body);
+			// (to the end: past the remaining case blocks and the default)
+			op(0x0C);
+			Enc.uleb(b, n - k);
+		}
+		end();
+		stmts(def);
+		end();
+		release("i", t);
+	}
+
+	var excCount = 0;
+
+	function tryStmt(body:Array<Stmt>, catches:Array<{test:Null<Ex->Ex>, l:Local, body:Array<Stmt>}>) {
+		block(FPlain, 0x06);
+		stmts(body);
+		op(0x07);
+		op(0);
+		var t = temp("p");
+		localSet(t);
+		var exc = new Local(-1000 - excCount++, "exc", TRef(RAny));
+		local.set(exc.id, t);
+		var opened = 0, all = false;
+		for (c in catches) {
+			if (c.test != null) {
+				expr(c.test(ELocal(exc)));
+				block(FPlain, 0x04);
+				opened++;
+			}
+			localGet(t);
+			if (local.exists(c.l.id)) localSet(local.get(c.l.id)) else op(0x1A);
+			stmts(c.body);
+			if (c.test == null) {
+				all = true;
+				break;
+			}
+			op(0x05);
+		}
+		if (!all) {
+			op(0x09);
+			Enc.uleb(b, opened);
+		}
+		for (_ in 0...opened)
+			end();
+		end();
+		release("p", t);
+	}
+
+	// ---- expressions
+
+	public static function binR(o:BinOp):String
+		return switch o {
+			case Add | Sub | Mul | Mod | And | Or | Xor | Shl | Shr | UShr: "i";
+			case Eq | Ne | Lt | Le | Gt | Ge | RefEq | RefNe: "i";
+			case FAdd | FSub | FMul | FDiv | FMod: "f";
+			case FEq | FNe | FLt | FLe | FGt | FGe: "i";
+			case LAdd | LSub | LMul | LDiv | LMod | LAnd | LOr | LXor | LShl | LShr | LUShr: "l";
+			case LEq | LNe | LLt | LLe | LGt | LGe: "i";
+		}
+
+	public static function rOf(e:Ex):String
+		return switch e {
+			case EInt(_): "i";
+			case EF64(_): "f";
+			case EStr(_): "p";
+			case ENull(t): repr(t);
+			case ELocal(l): repr(l.ty);
+			case EGlobal(_, t): repr(t);
+			case EBin(o, _, _): binR(o);
+			case ENot(_): "i";
+			case EConv(o, _):
+				switch o {
+					case I2F | FNeg | L2F: "f";
+					case F2I | L2I: "i";
+					case I2L | F2L | LNeg: "l";
+				}
+			case EBox(_, _): "p";
+			case EUnbox(t, _): repr(t);
+			case EField(c, idx, _): repr(c.fields[idx].ty);
+			case EFieldAddr(_): "l";
+			case EAnonGet(_, t, _, _): repr(t);
+			case ECast(t, _): repr(t);
+			case EInstOf(_, _) | EEnumTag(_, _) | EArrLen(_): "i";
+			case EEnumParam(c, idx, _): repr(c.params[idx]);
+			case EArrGet(t, _, _) | EArrGetU(t, _, _): repr(t);
+			case EBoxGet(t, _): repr(t);
+			case ECapture(l, idx, _): repr(l.captures[idx].ty);
+			case EType(_): "p";
+			case ECall(f, _): repr(f.ret);
+			case ECallDispatch(_, s, _) | ECallClos(s, _, _) | ECallAnon(_, s, _, _): repr(s.ret);
+			case ECallHost(_, _, t): repr(t);
+			case ENewObj(_) | ENewEnum(_, _) | ENewArr(_, _) | ENewClos(_, _) | ENewBox(_, _) | ENewAnon(_, _): "p";
+		}
+
+	function expr(e:Ex) {
+		switch e {
+			case EInt(v):
+				i32(v);
+			case EF64(v):
+				op(0x44);
+				var bs = haxe.io.Bytes.alloc(8);
+				bs.setDouble(0, v);
+				b.bytes(bs);
+			case EStr(s):
+				op(0x23);
+				Enc.uleb(b, m.strLit(s));
+			case ENull(t):
+				m.constZero(b, repr(t));
+			case ELocal(l):
+				var i = local.get(l.id);
+				if (i == null) unsupported("the local " + l.name + " (not declared)");
+				localGet(i);
+			case EGlobal(g, _):
+				op(0x23);
+				Enc.uleb(b, m.globalOf(g));
+			case EBin(o, x, y):
+				expr(x);
+				expr(y);
+				binop(o);
+			case ENot(x):
+				expr(x);
+				op(0x45);
+			case EConv(o, x):
+				expr(x);
+				switch o {
+					case I2F: op(0xB7);
+					case F2I:
+						op(0xFC);
+						op(2);
+					case FNeg: op(0x9A);
+					case I2L: op(0xAC);
+					case L2I: op(0xA7);
+					case L2F: op(0xB9);
+					case F2L:
+						op(0xFC);
+						op(6);
+					case LNeg:
+						var t = temp("l");
+						localSet(t);
+						op(0x42);
+						op(0);
+						localGet(t);
+						op(0x7D);
+						release("l", t);
+				}
+			case EBox(t, x):
+				expr(x);
+				gc(0x00, m.dynType(t));
+			case EUnbox(t, x):
+				expr(x);
+				call(Helpers.unbox(m, t == TBool ? "b" : repr(t)));
+			case EField(c, idx, o):
+				expr(o);
+				castTo(m.classType(c));
+				gc(0x02, m.classType(c), idx + 1);
+			case EFieldAddr(_, _, _):
+				unsupported("the address of a struct field");
+			case EAnonGet(name, t, o, hint):
+				if (hint == null) unsupported("reading a field through a structural type (" + name + ")");
+				expr(o);
+				castTo(m.shapeType(hint));
+				gc(0x02, m.shapeType(hint), hint.slot(name));
+			case ECast(t, x):
+				if (repr(t) != rOf(x)) unsupported("a cast from " + rOf(x) + " to " + repr(t));
+				expr(x);
+			case EInstOf(c, x):
+				expr(x);
+				if (c.isInterface) call(Helpers.implementsOf(m, c)) else {
+					op(0xFB);
+					op(0x14);
+					Enc.sleb(b, m.classType(c));
+				}
+			case EEnumTag(x, _):
+				expr(x);
+				castTo(m.enumType);
+				gc(0x02, m.enumType, 0);
+			case EEnumParam(c, idx, x):
+				expr(x);
+				castTo(m.ctorType(c));
+				gc(0x02, m.ctorType(c), idx + 1);
+			case EArrLen(a):
+				expr(a);
+				castTo(m.arrBaseType);
+				gc(0x02, m.arrBaseType, 0);
+			case EArrGet(t, a, i):
+				expr(a);
+				expr(i);
+				call(Helpers.arrGet(m, repr(t)));
+			case EArrGetU(t, a, i):
+				var k = repr(t);
+				expr(a);
+				castTo(m.arrType(k));
+				gc(0x02, m.arrType(k), 1);
+				expr(i);
+				gc(0x0B, m.dataType(k));
+			case EBoxGet(t, x):
+				expr(x);
+				castTo(m.boxType(t));
+				gc(0x02, m.boxType(t), 0);
+			case ECapture(l, idx, x):
+				expr(x);
+				castTo(m.lambdaTypeOf(l));
+				gc(0x02, m.lambdaTypeOf(l), idx + 1);
+			case EType(_):
+				unsupported("a runtime type (Class or Enum value)");
+			case ECall(fn, args):
+				for (a in args)
+					expr(a);
+				call(m.funcOf(fn));
+			case ECallDispatch(sel, s, args):
+				var t = temp("p");
+				expr(args[0]);
+				localTee(t);
+				for (k in 1...args.length)
+					expr(args[k]);
+				localGet(t);
+				castTo(m.objType);
+				gc(0x02, m.objType, 0);
+				i32(m.selCount);
+				op(0x6C);
+				i32(m.selOf(sel));
+				op(0x6A);
+				op(0x11);
+				Enc.uleb(b, m.typeOfSig(s));
+				Enc.uleb(b, 0);
+				release("p", t);
+			case ECallClos(s, c, args):
+				var t = temp("p");
+				expr(c);
+				localTee(t);
+				for (a in args)
+					expr(a);
+				localGet(t);
+				castTo(m.closTypeOf(s));
+				gc(0x02, m.closTypeOf(s), 0);
+				op(0x14);
+				Enc.uleb(b, m.fnTypeOf(s));
+				release("p", t);
+			case ECallAnon(name, _, _, _):
+				unsupported("calling " + name + " through a structural type");
+			case ECallHost(name, args, ret):
+				host(name, args, ret);
+			case ENewObj(c):
+				var t = m.classType(c);
+				i32(m.clsOf(c));
+				for (fl in c.fields)
+					m.constZero(b, repr(fl.ty));
+				gc(0x00, t);
+			case ENewEnum(c, args):
+				i32(c.tag);
+				if (c.params.length == 0) gc(0x00, m.enumType) else {
+					for (a in args)
+						expr(a);
+					gc(0x00, m.ctorType(c));
+				}
+			case ENewArr(t, values):
+				var k = repr(t);
+				i32(values.length);
+				for (v in values)
+					expr(v);
+				gc(0x08, m.dataType(k), values.length);
+				gc(0x00, m.arrType(k));
+			case ENewClos(l, captures):
+				var fi = m.funcOf(l.fn);
+				m.declare(fi);
+				op(0xD2);
+				Enc.uleb(b, fi);
+				for (c in captures)
+					expr(c);
+				gc(0x00, m.lambdaTypeOf(l));
+			case ENewBox(t, v):
+				expr(v);
+				gc(0x00, m.boxType(t));
+			case ENewAnon(s, values):
+				op(0xD0);
+				op(0x6D);
+				for (v in values)
+					expr(v);
+				gc(0x00, m.shapeType(s));
+		}
+	}
+
+	function binop(o:BinOp)
+		switch o {
+			case Add: op(0x6A);
+			case Sub: op(0x6B);
+			case Mul: op(0x6C);
+			case Mod: op(0x6F);
+			case And: op(0x71);
+			case Or: op(0x72);
+			case Xor: op(0x73);
+			case Shl: op(0x74);
+			case Shr: op(0x75);
+			case UShr: op(0x76);
+			case Eq: op(0x46);
+			case Ne: op(0x47);
+			case Lt: op(0x48);
+			case Le: op(0x4C);
+			case Gt: op(0x4A);
+			case Ge: op(0x4E);
+			case RefEq: op(0xD3);
+			case RefNe:
+				op(0xD3);
+				op(0x45);
+			case FAdd: op(0xA0);
+			case FSub: op(0xA1);
+			case FMul: op(0xA2);
+			case FDiv: op(0xA3);
+			case FMod: call(Helpers.fmod(m));
+			case FEq: op(0x61);
+			case FNe: op(0x62);
+			case FLt: op(0x63);
+			case FLe: op(0x65);
+			case FGt: op(0x64);
+			case FGe: op(0x66);
+			case LAdd: op(0x7C);
+			case LSub: op(0x7D);
+			case LMul: op(0x7E);
+			case LDiv: op(0x7F);
+			case LMod: op(0x81);
+			case LAnd: op(0x83);
+			case LOr: op(0x84);
+			case LXor: op(0x85);
+			case LShl:
+				op(0xAC);
+				op(0x86);
+			case LShr:
+				op(0xAC);
+				op(0x87);
+			case LUShr:
+				op(0xAC);
+				op(0x88);
+			case LEq: op(0x51);
+			case LNe: op(0x52);
+			case LLt: op(0x53);
+			case LLe: op(0x57);
+			case LGt: op(0x55);
+			case LGe: op(0x59);
+		}
+
+	// whether the value on the stack is of the type (Std.isOfType with a type literal, catch)
+	function typeTest(tr:TypeRef) {
+		inline function test(t:Int) {
+			op(0xFB);
+			op(0x14);
+			Enc.sleb(b, t);
+		}
+		switch tr {
+			case TRClass(c):
+				if (c.isInterface) call(Helpers.implementsOf(m, c)) else test(m.classType(c));
+			case TREnum(_):
+				test(m.enumType);
+			case TRBuiltin(n):
+				switch n {
+					case "String": test(m.stringType);
+					case "Array": test(m.arrBaseType);
+					case "Bool": test(m.dynType(TBool));
+					case "Int" | "Float" | "Dynamic":
+						call(Helpers.kind(m));
+						var t = temp("i");
+						localSet(t);
+						switch n {
+							case "Int":
+								localGet(t);
+								i32(1);
+								op(0x46);
+							case "Float":
+								localGet(t);
+								i32(1);
+								op(0x46);
+								localGet(t);
+								i32(2);
+								op(0x46);
+								op(0x72);
+							case _:
+								localGet(t);
+								i32(0);
+								op(0x47);
+						}
+						release("i", t);
+					case _:
+						unsupported("a type test against " + n);
+				}
+		}
+	}
+
+	// the runtime's intrinsics (hxmc.rt.gc.W) and the calls left to the runtime
+	function host(name:String, args:Array<Ex>, ret:Ty) {
+		inline function all()
+			for (a in args)
+				expr(a);
+		var w = "hxmc_rt_gc_W_";
+		if (StringTools.startsWith(name, w)) {
+			switch name.substr(w.length) {
+				case "strLen":
+					all();
+					castTo(m.stringType);
+					gc(0x0F);
+				case "strGet":
+					expr(args[0]);
+					castTo(m.stringType);
+					expr(args[1]);
+					gc(0x0D, m.stringType);
+				case "strNew":
+					all();
+					gc(0x07, m.stringType);
+				case "strSet":
+					expr(args[0]);
+					castTo(m.stringType);
+					expr(args[1]);
+					expr(args[2]);
+					gc(0x0E, m.stringType);
+				case "strCopy":
+					expr(args[0]);
+					castTo(m.stringType);
+					expr(args[1]);
+					expr(args[2]);
+					castTo(m.stringType);
+					expr(args[3]);
+					expr(args[4]);
+					gc(0x11, m.stringType, m.stringType);
+				case "write":
+					all();
+					call(m.importOf("hxmc.write"));
+				case "now":
+					call(m.importOf("hxmc.now"));
+				case "kind":
+					all();
+					call(Helpers.kind(m));
+				case "isNull":
+					all();
+					op(0xD1);
+				case "unboxInt":
+					all();
+					call(Helpers.unbox(m, "i"));
+				case "unboxFloat":
+					all();
+					call(Helpers.unbox(m, "f"));
+				case "unboxBool":
+					all();
+					call(Helpers.unbox(m, "b"));
+				case "f64Bits":
+					all();
+					op(0xBD);
+				case "bitsF64":
+					all();
+					op(0xBF);
+				case "trap":
+					op(0x00);
+				case "fmt":
+					all();
+					call(m.importOf("hxmc.fmt"));
+				case "parseFloat":
+					all();
+					call(m.importOf("hxmc.parseFloat"));
+				case "math":
+					all();
+					call(m.importOf("hxmc.math"));
+				case "random":
+					call(m.importOf("hxmc.random"));
+				case x:
+					unsupported("the intrinsic " + x);
+			}
+			return;
+		}
+		inline function f64(v:Float) {
+			op(0x44);
+			var bs = haxe.io.Bytes.alloc(8);
+			bs.setDouble(0, v);
+			b.bytes(bs);
+		}
+		inline function hostMath(code:Int) {
+			i32(code);
+			expr(args[0]);
+			if (args.length > 1) expr(args[1]) else f64(0);
+			call(m.importOf("hxmc.math"));
+		}
+		switch name {
+			case "Std_isOfType" | "Std_is" | "hx_is" if (args[1].match(EType(_))):
+				expr(args[0]);
+				switch args[1] {
+					case EType(tr): typeTest(tr);
+					case _:
+				}
+			case "hx_clos_of_sig" if (args[1].match(EStr(_))):
+				// (the closure when it has this signature, else null)
+				var key = switch args[1] {
+					case EStr(k): k;
+					case _: null;
+				};
+				var sig = m.sigOfKey(key);
+				var t = temp("p");
+				expr(args[0]);
+				localTee(t);
+				op(0xFB);
+				op(0x14);
+				Enc.sleb(b, m.closTypeOf(sig));
+				op(0x04);
+				op(0x6D);
+				localGet(t);
+				op(0x05);
+				op(0xD0);
+				op(0x6D);
+				op(0x0B);
+				release("p", t);
+			case "hx_dyn_call":
+				all();
+				call(m.dynCall());
+			case "String_length":
+				all();
+				castTo(m.stringType);
+				gc(0x0F);
+			case "Math_NaN": f64(Math.NaN);
+			case "Math_POSITIVE_INFINITY": f64(Math.POSITIVE_INFINITY);
+			case "Math_NEGATIVE_INFINITY": f64(Math.NEGATIVE_INFINITY);
+			case "Math_PI": f64(3.141592653589793);
+			case "Math_abs":
+				all();
+				op(0x99);
+			case "Math_sqrt":
+				all();
+				op(0x9F);
+			case "Math_ffloor":
+				all();
+				op(0x9C);
+			case "Math_fceil":
+				all();
+				op(0x9B);
+			case "Math_fround":
+				all();
+				f64(0.5);
+				op(0xA0);
+				op(0x9C);
+			case "Math_floor" | "Math_ceil" | "Math_round":
+				all();
+				if (name == "Math_round") {
+					f64(0.5);
+					op(0xA0);
+				}
+				op(name == "Math_ceil" ? 0x9B : 0x9C);
+				op(0xFC);
+				op(2);
+			case "Math_max":
+				all();
+				op(0xA5);
+			case "Math_min":
+				all();
+				op(0xA4);
+			case "Math_isNaN":
+				var t = temp("f");
+				all();
+				localTee(t);
+				localGet(t);
+				op(0x62);
+				release("f", t);
+			case "Math_isFinite":
+				var t = temp("f");
+				all();
+				localTee(t);
+				localGet(t);
+				op(0xA1);
+				f64(0);
+				op(0x61);
+				release("f", t);
+			case "Math_sin": hostMath(0);
+			case "Math_cos": hostMath(1);
+			case "Math_tan": hostMath(2);
+			case "Math_asin": hostMath(3);
+			case "Math_acos": hostMath(4);
+			case "Math_atan": hostMath(5);
+			case "Math_atan2": hostMath(6);
+			case "Math_exp": hostMath(7);
+			case "Math_log": hostMath(8);
+			case "Math_pow": hostMath(9);
+			case "Math_random":
+				call(m.importOf("hxmc.random"));
+			case "rt_blocking_enter" | "rt_blocking_leave":
+			case _:
+				unsupported("the runtime function " + name);
+		}
+	}
+}

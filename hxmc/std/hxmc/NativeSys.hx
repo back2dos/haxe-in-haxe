@@ -4,6 +4,9 @@ import hxmc.rt.PosixSys;
 #if (hxmc.target == "wasm32-wasi")
 import hxmc.rt.WasiSys;
 #end
+#if (hxmc.wasm_gc)
+import hxmc.rt.gc.GcSys;
+#end
 import hxmc.rt.WinSys;
 import hxmc.unsafe.Mem;
 
@@ -14,11 +17,11 @@ import hxmc.unsafe.Mem;
 // hxmc.target=wasm32-wasi: its runtime is typed only then).
 class NativeSys {
 	public static inline function print(s:String):Void {
-		#if (hxmc.target == "wasm32-wasi") WasiSys.print(s); #else if (Mem.os() == 2) WinSys.print(s) else PosixSys.print(s); #end
+		#if (hxmc.wasm_gc) GcSys.print(s); #elseif (hxmc.target == "wasm32-wasi") WasiSys.print(s); #else if (Mem.os() == 2) WinSys.print(s) else PosixSys.print(s); #end
 	}
 
 	public static inline function printErr(s:String):Void {
-		#if (hxmc.target == "wasm32-wasi") WasiSys.printErr(s); #else if (Mem.os() == 2) WinSys.printErr(s) else PosixSys.printErr(s); #end
+		#if (hxmc.wasm_gc) GcSys.printErr(s); #elseif (hxmc.target == "wasm32-wasi") WasiSys.printErr(s); #else if (Mem.os() == 2) WinSys.printErr(s) else PosixSys.printErr(s); #end
 	}
 
 	public static inline function args():Array<String>

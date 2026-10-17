@@ -60,6 +60,21 @@ Revisit when a concrete browser use makes module size or JavaScript
 interop matter (browser games, `@hxmc/web`). The structuring pass and the
 module writer carry over; the object model and the runtime would be new.
 
+Started (2026-10-17) behind `-D hxmc.wasm-gc` to compare the two collectors
+(docs/hxmc.md, "WasmGC"): the IR after Lower, emitted directly, with a
+runtime of its own in Haxe over intrinsics. `make wasmgc-bench` under node 22,
+median of 3 (`hxmc/test/wasmgc`):
+
+| program | native s | WasmGC s | linear s | WasmGC RSS MB | linear RSS MB | WasmGC KB | linear KB |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| Basics | 0 | 0.03 | 0.1 | 46 | 147 | 11 | 57.2 |
+| Mandelbrot | 0.07 | 0.15 | 0.18 | 52 | 147 | 2.4 | 35.9 |
+| Nbody | 0.15 | 0.13 | 0.21 | 50 | 148 | 3.8 | 35.3 |
+| Trees | 0.15 | 0.34 | 0.48 | 86 | 165 | 2.2 | 33.4 |
+
+Not yet: Dynamic field access, anonymous structures read without their
+layout, reflection, `Bytes`, maps, `Class`/`Enum` values, the std's `sys` APIs.
+
 ## Android
 
 ARM64 (and x86-64 for emulators) ELF shared library loaded through JNI or

@@ -18,6 +18,9 @@ class Options {
 	// -D hxmc.wasm-eh=legacy: wasm32-wasi with the legacy exception-handling instructions
 	// (try/catch_all/rethrow) for engines without exnref (default: exnref)
 	public var wasmLegacyEh = false;
+	// -D hxmc.wasm-gc: wasm32-wasi as a WasmGC module (objects in the engine's
+	// collector: hxmc.wasmgc), an experiment to compare with linear memory
+	public var wasmGc = false;
 	// -D hxmc.libc=glibc: Linux, a dynamically linked executable against the system's glibc (Abi.setLibc; default: musl, static)
 	public var libc:Null<String> = null;
 	// x86-64 functions keep a frame record (push rbp; mov rbp, rsp), so
@@ -93,6 +96,8 @@ class Options {
 			case _: throw "hxmc: -D hxmc.wasm-eh=" + eh + ": exnref or legacy";
 		}
 		o.libc = def("hxmc.libc");
+		o.wasmGc = def("hxmc.wasm_gc") != null;
+		if (o.wasmGc && o.target != "wasm32-wasi") throw "hxmc: -D hxmc.wasm-gc: -D hxmc.target=wasm32-wasi";
 		var fp = def("hxmc.frame_pointers"), fpEnv = env("HXMC_FRAME_POINTERS");
 		o.framePointers = fpEnv != null && fpEnv != "" ? fpEnv != "0" : def("hxmc.no_frame_pointers") != null ? false : fp == null || fp != "0";
 		o.debugLines = def("debug") != null || def("hxmc.lines") != null;
