@@ -99,14 +99,60 @@ single-thread ceiling stays 16 MB) while its parallel HXB phase likes 32
 MB; per-thread nurseries (TLABs sized per thread, not a 16th of the
 shared nursery) were not needed for these workloads.
 
+Done: **typing of generated code** (profiled with frame pointers, `perf
+record -g`, against the reference's OCaml symbols). The gap that grew
+with the code size was the port's own: `ctx.e.monomorphs` was an array
+copied on every spawned monomorph (OCaml conses), most of the
+allocation of tink_json's generated functions. It is now an immutable
+list that conses in place onto shared arrays (`Typecore.MonomorphList`;
+a linked list made the transactions' walk twice as slow, its loads
+dependent); the compiler's callback lists stopped unshifting; hxmc's
+maps share empty arrays until their first set and reserve their arrays
+when they grow. Native port, Linux x86-64, medians of interleaved runs
+(3 for 40 types, 5 otherwise), `--times`, `-D disable-parallelism`
+(tink_json: N typedefs, each with nested anonymous structures, an enum,
+a map and an array of the previous one, each stringified and parsed in
+`main`; tink_json 0.11.0, tink_typecrawler 0.7.0, tink_macro 1.0.4,
+tink_core 2.1.1):
+
+| Workload | reference | before | after | typing: ref / before / after | peak RSS before / after | allocated before / after |
+| --- | --- | --- | --- | --- | --- | --- |
+| tink_json, 12 types (JS) | 3.26 s | 3.41 s | 3.14 s | 0.67 / 0.91 / 0.77 s | 367 / 372 MB | 3.4 / 3.0 GB |
+| tink_json, 24 types (JS) | 12.71 s | 12.88 s | 11.50 s | 4.28 / 5.10 / 3.81 s | 917 / 726 MB | 14.2 / 10.0 GB |
+| tink_json, 40 types (JS) | 42.50 s | 44.18 s | 34.13 s | 20.97 / 23.49 / 13.57 s | 2098 / 1918 MB | 54.1 / 26.5 GB |
+| upstream unit suite (JS) | 3.23 s | 3.46 s | 3.17 s | 0.79 / 0.90 / 0.85 s | 424 / 422 MB | 2.70 / 2.60 GB |
+| port typing itself | 7.60 s | 6.29 s | 6.29 s | 3.29 / 2.51 / 2.38 s | 613 / 615 MB | 4.86 / 4.63 GB |
+
+(The 34.7 s against 20.0 s of the earlier measurement predates the
+adaptive nursery.) The collector's share is 17-21% (minor collections
+copying what survives one, about 12%; major ones, 4-6%), as in the
+reference (its minor heap and marking: about 20% on tink_json, 27% on
+the unit suite).
+
 Ranked by estimated payoff, each needing more than a local fix:
 
-- **Typing of generated code**: typing is 1.3x the reference on tink_json
-  and the gap grows with the code (40 types: 34.7 s against 20.0 s). One
-  cause is `ctx.e.monomorphs` as an array copied on every spawned
-  monomorph (OCaml conses): a persistent list cut the typing timer by 16%
-  on 24 types, but the total did not move (the collections moved to the
-  macro timer), so it was not kept; the collector is the other half.
+- **monomorph_transaction**: upstream snapshots every unbound monomorph
+  of the function for each optional argument passed
+  (`CallUnification`), quadratic in a function's size in the reference
+  too (its fold is the reference's top function on tink_json). 15% of
+  tink_json at 40 types, 6% at 24, little elsewhere; the walk is
+  memory-bound (each monomorph's header a cache miss). A trail of the
+  monomorphs bound or constrained since the snapshot (the 12 places that
+  set `tmType` or `tmDownConstraints`) would make it proportional to
+  the changes; a departure from upstream's algorithm. Estimate: -12% at
+  40 types.
+- **Medium-lived objects in the collector**: a minor collection
+  promotes whatever survives it (9% of what tink_json allocates, 2.5 GB
+  at 40 types), and the old space's major collections stop the world
+  (1.8 s at 40 types, charged to wherever an allocation lands: the
+  "superlinear" functions of a scaling comparison, `BasicBlock.create`,
+  `Abstract.findToFrom`, DCE's mark at 4x the reference's, are their
+  pauses). An aging survivor space, or incremental major marking ("The
+  collector, longer term"). Estimate: 5-10% on large builds.
+- **Allocation in the typer and analyzer**: the rest is spread thin
+  (texpr records, `InterferenceReport`'s four maps per expression,
+  Eval's encoding of macro arguments); escape analysis (above) is the
+  general answer.
 - **Eval call frames**: each call allocates an Env, two slot vectors and
   the argument array, and stores the frame into the long-lived Eval
   record twice (two write-barrier slow calls): a quarter of a call's cost.
@@ -120,8 +166,10 @@ Ranked by estimated payoff, each needing more than a local fix:
 - Tried and not kept: the write barrier testing the value for youth
   before its slow call (within noise, 2.6% more code); `encodeObjS`
   without its intermediate records (no measurable gain).
-- Minor: source lines for messages (a warning's excerpt) are read a byte
-  at a time, each byte a poll and a read system call.
+- Minor: `Finalization.sortTypes` and `TPrinting.sType` sort through
+  `Reflect.compare` (2% of the unit suite); source lines for messages (a
+  warning's excerpt) are read a byte at a time, each byte a poll and a
+  read system call.
 
 ### Cleanup after the runtime move (done)
 
