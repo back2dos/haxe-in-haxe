@@ -76,6 +76,12 @@ enum VarInlineKind {
 }
 
 class Inline {
+	// port: hxmc's struct values (@:hxmc.struct, hxmc/src/hxmc/ir/CInterop.hx) are copied on assignment, so an
+	// ... inline function writing through a struct parameter must not write the caller's variable: true here
+	// ... forces a temporary for the argument (v the parameter's substitute in the mapped body); always null
+	// ... in the compiler itself.
+	public static var copyArgumentHook:Null<(v:TVar, arg:TExpr, body:TExpr) -> Bool> = null;
+
 	public static function mkUntypedCall(name:String, p:Pos,
 			params:Array<TExpr>):TExpr return mk(TCall(mk(TIdent(name), tDynamic, p), params), tDynamic, p);
 
@@ -823,7 +829,16 @@ class InlineState {
 	public function finalize(e:TExpr, tl:Array<{name:String, optional:Bool, type:T}>, tret:T, hasParams:Bool, mapType:T->T, p:Pos):TExpr {
 		if (hadSideEffect) for (item in inlinedVars) if (mightBeAffected(item.expr)
 			&& !core.TOther.ExtType.hasValueSemantics(item.expr.etype)) item.local.iForceTemp = true;
+		// port: hxmc's struct values (Inline.copyArgumentHook): the temporary is a copy, not one the analyzer
+		// ... fuses back into the argument as a compiler-generated variable (VGenerated, VAbstractThis)
+		var copies = [];
+		if (Inline.copyArgumentHook != null) for (item in inlinedVars) if (!item.local.iForceTemp
+			&& Inline.copyArgumentHook(item.local.iSubst, item.expr, e)) {
+			item.local.iForceTemp = true;
+			copies.push(item.local.iSubst);
+		}
 		var substitutions = getSubstitutions(p);
+		for (v in copies) v.vKind = VInlined;
 		var vars = substitutions.vars;
 		var subst = substitutions.subst;
 		function inlineParams(inCall:Bool, inAssignment:Bool, e:TExpr):TExpr return switch e.eexpr {

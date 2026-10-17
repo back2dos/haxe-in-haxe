@@ -371,11 +371,24 @@ s[3].y = 2;                                  // in place
   inline constructors (a filter that turns objects into locals shared by
   the variables they are assigned to) are kept off struct classes: their
   constructors are ordinary functions for hxmc (`CInterop.install`), which
-  Mir inlining and `Sroa` make as cheap. A known gap: Haxe's inliner
-  passes a local argument of an inline function as itself, so assigning a
-  struct parameter's fields in an inline function changes the caller's
-  variable (copy the parameter into a local first). All seven targets
-  (WebAssembly too). Corpus: `StructValues`, `reject/Struct*`.
+  Mir inlining and `Sroa` make as cheap.
+- Inline functions: a struct argument is the function's own copy, as for
+  a call. Haxe's inliner passes a local (or field) argument into the
+  inlined body as itself; where the body writes through a struct parameter
+  (a field, a compound assignment, an increment, the parameter passed on as
+  an abstract's `this`), hxmc's hook (`Inline.copyArgumentHook`, set by
+  `CInterop.install`) has it copied into a temporary first, so `bump(a)`
+  with `inline function bump(v:V) v.x += 1` leaves `a` as it was, and so
+  does a mutating inline method of an abstract over a struct (assigning
+  `this` itself still changes the caller's variable, as Haxe's inline
+  abstracts do). Reading only, the argument is used in place: no copy (the
+  shader math types are immutable, never copied). The analyzer keeps
+  copies copies (`AnalyzerTexpr.keepCopyHook`): a struct variable
+  initialized from a place is neither fused into its use nor replaced by
+  its source (copy propagation), and `a.b.x += 1` does not bind `a.b` to a
+  temporary. Programs without struct values compile exactly as before. All
+  seven targets (WebAssembly too). Corpus: `StructValues`, `StructInline`
+  (and `StructInlineOpt`, with `@:analyzer(optimize)`), `reject/Struct*`.
 - Left: instance methods on structs, value enums, `@:generic`
   specialization for containers of structs (boxes cost an allocation per
   element), GC references inside structs, struct locals captured by
