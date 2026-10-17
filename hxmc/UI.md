@@ -284,6 +284,14 @@ Since the design above (October 2026), in this order:
   drag, a focus ring when the keyboard moves the focus, and cursors
   (`hxmc.os.Window.cursor` on X11, Win32, Cocoa and the browser;
   `Style.cursor`).
+- Windows sleep while nothing changes (`App.wait`; a frame only when the
+  UI asks for one); a stress test of 1000 rows found where layout spent its
+  time (text measured twice, a quadratic list reorder), and an hxmc bug
+  (closures in structural fields called with another signature's
+  arguments), fixed in the compiler.
+- More widgets (`Switch`, `Slider`, `Radio`, `Tabs`, `Progress`) and a
+  gallery; images: a PNG decoder, `ImageNode` with CSS's object-fit
+  modes, textures freed with `Device.destroyTexture`.
 
 Where this departs from section 6:
 
@@ -300,8 +308,8 @@ Where this departs from section 6:
   shrink below their content, so text is not squashed (a container that
   must shrink sets `minHeight: 0`, as in CSS).
 - **Not yet**: accessibility (the AccessKit-shaped tree), IME composition
-  (characters arrive, preedit text does not), images, clipboard, native
-  controls.
+  (characters arrive, preedit text does not), clipboard, JPEG and other
+  image formats, native controls.
 
 ## Sources
 

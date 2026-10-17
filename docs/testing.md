@@ -100,7 +100,10 @@ atlas against `packages/text/test/sample.png`: the same pixels on every
 machine with that font), `make ui-check` (the flexbox layout against
 Chromium's on 60 cases, `packages/ui/test/layout-expected.json`, which
 `layout-ref.mjs` writes from `layout-cases.mjs`; text wrapping, events and
-focus; then signals and markup rendered into nodes). Natively: `make
+focus; PNG files of every colour type, depth, filter and interlacing,
+`packages/ui/test/png/`, which `png-cases.mjs` writes with the pixels
+expected, checked against Chromium's decoder when written; then signals and
+markup rendered into nodes). Natively: `make
 ui-draw-check` (the sample UI, the todo example and the widget gallery,
 the last two driven through their Ui, drawn headless against `draw.png`,
 `todo.png` and `gallery.png`; Linux: llvmpipe, DejaVu
