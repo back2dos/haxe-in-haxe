@@ -71,10 +71,23 @@ extern class SDL {
 
 - hxmc emits direct calls in the target's C convention: System V, AAPCS64,
   Win64, Apple arm64 (variadic arguments on the stack, x18 reserved),
-  Windows arm64. Structs by pointer, and by value on arm64 (AAPCS64: a
-  struct argument or result is the address of its memory, a result's in
-  the caller's frame; corpus case `FfiStruct`, against zig cc); x86-64
-  later (System V's classification rules, Win64's copies).
+  Windows arm64. Structs by pointer, and by value on every ABI: a struct
+  argument or result is the address of its memory at the Haxe level (a
+  result's in the caller's frame), and the ABI's rules apply in MirBuild
+  and the instruction selections, classified in one place per ABI
+  (`hxmc/src/hxmc/CAbi.hx`). AAPCS64: aggregates of one to four floats or
+  doubles in float registers, other structs of up to 16 bytes in one or two
+  integer registers, larger ones as the address of a copy, results through
+  x8. System V x86-64 (Linux, macOS): each eightbyte of a struct of up to
+  16 bytes is SSE (floats only) or INTEGER and takes the next register of
+  its class (rax/rdx, xmm0/xmm1 for results), all of a struct's or none;
+  larger ones are MEMORY, copied onto the stack, and come back through a
+  hidden first argument. Win64: 1, 2, 4 or 8 bytes in an integer register
+  (rax for results), others as the address of a copy, results through a
+  hidden first argument. wasm32 (clang's C ABI): a struct of one scalar is
+  that scalar, others the address of a copy, results stored at a first
+  argument. Corpus cases `FfiStruct` and `FfiAbi` (against zig cc, on
+  the six targets), `WasmStruct` (a JavaScript host).
 - Static libraries: hxmc's linker reads ELF, COFF and Mach-O objects and
   archives already; per-target prebuilt objects ship in haxelibs, linked
   only when referenced.

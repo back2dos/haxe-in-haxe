@@ -126,9 +126,10 @@ class WasmGen {
 	}
 
 	// the signature of the import of a C function the program declares
-	// (hxmc.ir.CInterop): wasm32's C ABI, pointers 32-bit, float f32
+	// (hxmc.ir.CInterop): wasm32's C ABI, pointers 32-bit, float f32,
+	// structs by CAbi.wasmSig
 	public static function importSig(sym:String):String {
-		var sig = hxmc.ir.CInterop.SIGS.get(sym);
+		var sig = hxmc.CAbi.wasmSig(hxmc.ir.CInterop.SIGS.get(sym));
 		function c(t:hxmc.ir.CInterop.CTy):String
 			return switch t {
 				case CI64: "l";
@@ -1292,6 +1293,7 @@ class WasmGen {
 		}
 		var imp = i.sym != null ? hxmc.ir.CInterop.SIGS.get(i.sym) : null;
 		if (imp != null && hxmc.ir.CInterop.USER.exists(i.sym)) {
+			imp = hxmc.CAbi.wasmSig(imp);
 			// an import (LinkWasm): pointers as i32, floats as f32
 			var tys = argTys(i);
 			for (k in 0...i.args.length)

@@ -81,7 +81,6 @@ class Crosshost {
 			// a case's C companions (Corpus.nativeInputs: built with zig, or skipped)
 			var glibc = target.endsWith("-glibc");
 			if (!glibc && Corpus.GLIBC_ONLY.exists(name)) return {ok: true, detail: "skipped: " + Corpus.GLIBC_ONLY[name]};
-			if (target.indexOf("arm64") < 0 && Corpus.ARM64_ONLY.exists(name)) return {ok: true, detail: "skipped: " + Corpus.ARM64_ONLY[name]};
 			var native = Corpus.nativeInputs({name: name, cps: ["hxmc/test/cases"], main: name}, glibc ? target.substr(0, target.length - 6) : target, d, glibc ? "glibc" : null);
 			if (native.skip != null) return {ok: true, detail: "skipped: " + native.skip};
 			if (native.links.length > 0) args = args.concat(["-D", "hxmc.link=" + native.links.join(",")]);

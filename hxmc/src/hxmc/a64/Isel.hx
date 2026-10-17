@@ -1096,22 +1096,22 @@ class Isel implements hxmc.Target.Selector {
 		if (i.ty != Void) mov(reg(i.id), i.ty == F64 ? D0 : 0, 8);
 		if (i.cRet != null && i.cRet.length > 0) {
 			// a struct in x0-x1 or d0-d3 (s0-s3): out of them first, then into its memory
-			var rs = [];
-			for (k in 0...i.cRet.length) {
-				var p = i.cRet[k];
-				var r = f.newReg(p == -8);
-				if (p == -4) {
+			var rs = [], gk = 0, fk = 0;
+			for (p in i.cRet) {
+				var r = f.newReg(p.float && p.size == 8);
+				if (p.float && p.size == 4) {
 					var fm = emit(FMOVWS);
 					fm.d = r;
-					fm.s1 = D0 + k;
-				} else mov(r, p == 8 ? k : D0 + k, 8);
+					fm.s1 = D0 + fk++;
+				} else mov(r, p.float ? D0 + fk++ : gk++, 8);
 				rs.push(r);
 			}
 			for (k in 0...i.cRet.length) {
+				var p = i.cRet[k];
 				var s = emit(STORE);
-				s.size = i.cRet[k] == -4 ? 4 : 8;
+				s.size = p.float && p.size == 4 ? 4 : 8;
 				s.s1 = rs[k];
-				memOf(s, i.args[n], -1, 1, k * s.size, s.size);
+				memOf(s, i.args[n], -1, 1, p.off, s.size);
 			}
 		}
 	}

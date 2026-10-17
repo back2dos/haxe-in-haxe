@@ -112,13 +112,15 @@ class MIns {
 	public var cSizes:Null<Array<Int>>;
 	// Call of a C function taking structs by value (MirBuild.cStructArg): per
 	// argument, the number of registers of the struct whose first part it is
-	// (its parts all go in registers or all on the stack), 0 for the others
+	// (its parts all go in registers or all on the stack; negative: on the
+	// stack always, System V's MEMORY class), 0 for the others
 	public var cGroups:Null<Array<Int>>;
-	// Call of a C function returning a struct (MirBuild.cStructRet): the last
-	// argument is the address its value is stored at, not passed (except as
-	// x8 when this is empty); the result's registers in order, 8 an integer
-	// register's word, -8 a double, -4 a float
-	public var cRet:Null<Array<Int>>;
+	// Call of a C function returning a struct (MirBuild.cStructRet, CAbi):
+	// the last argument is the address its value is stored at, not passed
+	// (except as x8 on arm64 when this is empty); the parts of the result in
+	// registers (integer ones in the integer result registers in order, float
+	// ones in the float result registers)
+	public var cRet:Null<Array<CAbi.CPart>>;
 	public var dead = false;
 	public var mem = 0; // Load/Store: the memory class (Opt.MOther...)
 
