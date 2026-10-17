@@ -35,6 +35,12 @@ class ThreadApi {
 	public static function spawn(job:Dynamic):Int
 		return Threads.spawn(job);
 
+	// the calling thread, started by someone else (a system's thread calling
+	// Haxe through @:hxmc.callback functions), made a Haxe thread; call it
+	// before its first such call (from no-GC code): false when it is one already
+	@:hxmc.noGc public static function attach():Bool
+		return Threads.attach();
+
 	@:hxmc.noGc public static inline function current():Int
 		return Threads.current();
 

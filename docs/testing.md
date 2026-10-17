@@ -113,11 +113,15 @@ native tool (cached) with the WebAssembly one (never cached).
 
 ## Graphics
 
-`make gfx-check`: the examples of `packages/gfx`, the triangle and the cube
+`make gfx-check`: the examples of `packages/gfx`, the triangle, the cube
 (textured, lit, depth-tested, with a uniform block, over a blended backdrop
 shaded by the fragment position and a soft shadow, turned by a fixed
-angle), rendered headless and in a window, compared with
-`packages/gfx/test/triangle.png` and `cube.png` (a pixel matches when no
+angle), the instances, the render targets (a scene with its depth texture
+rendered into a texture shown on the cube), the mip maps (a trilinear
+floor through generated levels, levels written one by one read at given
+levels) and the texture formats (each written and rendered into, depth
+textures sampled), rendered headless and in a window, compared with
+`packages/gfx/test/<scene>.png` (a pixel matches when no
 channel differs by more than 2, and at most 0.5% may differ by more), and
 in the window the input sent to it (a key's character, the wheel) checked
 as events: on Linux by Mesa's llvmpipe (an EGL pbuffer, an X11 window under
@@ -190,7 +194,7 @@ against Chromium's (`css/`, `css-cases.mjs`);
 popups placed, hit and dismissed; then markup rendered into hxmc.ui's
 nodes (`MarkupTest.hx`: attributes from Style's properties), the popup widgets driven by pointer and keys, a VirtualList of
 100000 rows scrolled; the examples of `packages/ui/GUIDE.md`, run by
-`GuideTest.hx`). Natively: `make
+`GuideTest.hx`). `make theme-check` (`@hxmc/theme`: Tailwind's class lists read as rules, Tw's rules made at compile time, shadcn's sheet made, the classes it rejects at compile time). Natively: `make
 ui-draw-check` (the sample UI, the todo example and the widget gallery,
 the last two driven through their Ui, drawn headless against `draw.png`,
 `todo.png` and `gallery.png`; `BoxTest`, boxes with their own corners' radii

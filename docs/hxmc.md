@@ -353,14 +353,66 @@ in plain Haxe (`P256.hx`, RFC 6979's deterministic nonces, so an APK signs
 the same way each time; the self-signed certificate `Der.hx` writes) with a
 debug key kept in the user's cache directory, so reinstalls keep their
 signature. The cube's APK: 296 KB (arm64; its library 279 KB), 280 KB
-(x86-64); a hello world's library 108 KB and 92 KB. Checks:
-`hxmc/test/ApkCheck.hx` (`make android-check`: the zip, the manifest read
-back, the library's ELF, the signature's digest and signature; `zipalign`,
-`aapt`, `apksigner` where installed), `make shared-check`, and
-`packages/gfx/test/android.sh` on a device or emulator (`make
-android-device-check`; CI: an x86-64 emulator). Not yet: one ABI per APK,
-release signing (a keystore), icons and resources, the clipboard, text
-input and anything else of Java's (JNI: [plans/targets.md](plans/targets.md#android)).
+(x86-64); a hello world's library 108 KB and 92 KB.
+
+Views and Java (no Java compiler or SDK either): JNI is bound in Haxe
+(`packages/os`, `hxmc.os.android.Jni`: `JNIEnv` and `JavaVM` are function
+tables behind a pointer, bound by the same build macro as COM's vtables,
+`hxmc.os.VTable`; Java's methods called with the `*A` variants, an array
+of `jvalue`; classes found through the activity's class loader; a Java
+exception thrown again as a Haxe one with its text). Views live on Java's
+main thread, which the runtime did not start: `MainThread` hands it
+functions through a pipe its looper watches (`run` waits, handling the
+activity's commands meanwhile), the first of which makes it a Haxe thread
+(`NativeThread.attach`, `hxmc/std/hxmc/rt/Threads.hx`: a record and a
+shadow stack, safe whenever it is back in Java), and runs frames from
+Choreographer (`AChoreographer_postFrameCallback64`). Java calls back
+through a few classes in a `classes.dex` that hxmc writes
+(`hxmc/src/hxmc/android/Dex.hx`: a minimal DEX 035 writer, the pools
+sorted as the runtime requires, the map, the SHA-1 signature and Adler-32
+checksum, and a reader that checks that structure; `Glue.hx`: the classes,
+written as Dalvik instructions): `org.hxmc.Glue`, one listener for every
+kind of widget (click, text, checked, progress, editor action, layout
+change, surface holder, key), whose methods call one static native,
+registered with `RegisterNatives` (`hxmc.os.android.Glue`); and
+`org.hxmc.Activity`, a `NativeActivity` that gives back the surface and the
+input queue NativeActivity took, so that its window draws views. Apk adds
+`classes.dex` (`hasCode="true"`) when the program uses the Glue, and
+makes `org.hxmc.Activity` the activity, in the system's
+`Theme.DeviceDefault.DayNight`. `packages/ui`'s `hxmc.ui.native` has an
+Android backend on that (`AndroidBackend`: `android.widget`'s views in an
+`AbsoluteLayout`, laid out by ui's flexbox in dp, measured by the views;
+accessibility is the views'): NativeForm's APK (`AndroidNativeTest`) is
+1.91 MB (arm64), 1.81 MB (x86-64), most of it ui's core; `classes.dex`
+3 KB.
+
+Mixing GPU and native views: a GPU view among views is a `SurfaceView`
+(`hxmc.os.android.ChildSurface`) whose holder's callbacks make its surface
+the `ANativeWindow` of an `hxmc.os.Surface`, as the activity's window is in
+the GPU-only case: gfx's GL back end makes its EGL surface on it, lets go
+of it in `surfaceDestroyed` (`Surface.lost`) and makes one on the next, on
+the main thread's frames; `hxmc.ui.native.android.GpuView` is the node
+for it in a `NativeHost`, laid out like the others. A native control in a
+drawn window only for text: `Window.startTextInput` on Android
+(`hxmc.os.android.TextInput`, enabled by ui's `UiWindow`) focuses a hidden
+`EditText` in NativeActivity's window and shows the soft keyboard; what the
+input method composes comes as `TextEditing`, what it commits as
+`TextInput` (the field emptied again); keys still come through the input
+queue, which the system serves before the focused view. A program that
+never takes text keeps neither (nor `classes.dex`).
+
+Checks: `hxmc/test/ApkCheck.hx` (`make android-check`: the zip, the
+manifest read back, the library's ELF, the signature's digest and
+signature, `classes.dex` read back by `Dex.check`; `zipalign`, `aapt`,
+`apksigner`, `dexdump` where installed), `make shared-check`, and on a
+device or emulator (`make android-device-check`; CI: an x86-64 emulator)
+`packages/gfx/test/android.sh` and `packages/ui/test/android-native.sh`
+(the form's own checks on the device, uiautomator's accessibility dump,
+taps and text typed through the input method) and `android-mix.sh` (the
+cube in a `GpuView` among views, its surface taken by Home and given back;
+the soft keyboard for a drawn window, keys, a composition and a commit). Not yet: one ABI per APK,
+release signing (a keystore), icons and resources, the clipboard
+([plans/targets.md](plans/targets.md#android)).
 
 ## WebAssembly
 

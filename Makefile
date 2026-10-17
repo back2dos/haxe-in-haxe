@@ -110,7 +110,7 @@ endef
 	lix lix-release lix-dist reference bench test test-fuzz test-display test-server test-jsonrpc test-unit-targets test-interp \
 	test-haxelib test-eval-debugger test-node-libs test-module-cache smoke hxmc-test corpus-stage gfx-programs gfx-check gfx-web-check gfx-shader-check \
 	android-programs android-check android-device-check shared-check \
-	audio-programs audio-check audio-web-check native-macros ui-programs view-check web-check text-check ui-check ui-draw-check ui-web-check portcheck measure site-check \
+	audio-programs audio-check audio-web-check native-macros ui-programs view-check web-check text-check ui-check theme-check theme-fidelity-check ui-draw-check ui-web-check portcheck measure site-check \
 	quick check full clean distclean wasmgc-check wasmgc-bench
 
 help:
@@ -168,12 +168,12 @@ help:
 ##             the native targets' debugging information checked and a -debug build staged in _debug/
 ##             (DebugCheck: its --run on the target's machine runs gdb or lldb)
 ## test-node-libs  -lib from node_modules with the npm package's compiler for the host (hxmc/test/NodeLibs.hx)
-## gfx-programs  bin/gfx/GFX_TARGET/{GfxTest,Triangle,Cube,Instances}[.exe]: packages/gfx's test programs (Linux: glibc mode)
-## android-programs  bin/android/ANDROID_TARGET/{AndroidTest,Cube}.apk: APKs written by hxmc (android-x86_64, android-arm64)
-## android-check  their structure (hxmc/test/ApkCheck.hx: zip, manifest, ELF, v2 signature)
-## android-device-check  AndroidTest on the device or emulator adb reaches (packages/gfx/test/android.sh)
+## gfx-programs  bin/gfx/GFX_TARGET/{GfxTest,Triangle,Cube,Instances,Targets,Mips,Formats}[.exe]: packages/gfx's test programs (Linux: glibc mode)
+## android-programs  bin/android/ANDROID_TARGET/*.apk: APKs written by hxmc (android-x86_64, android-arm64)
+## android-check  their structure (hxmc/test/ApkCheck.hx: zip, manifest, ELF, v2 signature, classes.dex)
+## android-device-check  the Android tests on the device or emulator adb reaches (android.sh, android-native.sh, android-mix.sh)
 ## shared-check  shared libraries of the glibc mode (-D hxmc.shared), loaded by an hxmc program (hxmc/test/SharedCheck.hx)
-## gfx-check   packages/gfx: the triangle, cube and instances examples headless and in a window, against
+## gfx-check   packages/gfx: the examples (triangle, cube, instances, targets, mips, formats) headless and in a window, against
 ##             golden images (packages/gfx/test/check.sh; Linux: Mesa, Xvfb; macOS: Metal, Cocoa);
 ##             GFX_TARGET=windows-x86_64: D3D11 and Win32 under Wine
 ## gfx-web-check  packages/gfx on WebGPU and WebGL2 (wasm32-wasi): the same, headless and in a
@@ -196,6 +196,10 @@ help:
 ## ui-check    packages/ui on Eval: the layout against Chromium's flexbox (layout-expected.json,
 ##             from packages/ui/test/layout-ref.mjs), text wrapping, events and focus (UiTest.hx);
 ##             markup rendered into nodes (MarkupTest.hx); the guide's examples (GuideTest.hx)
+## theme-check  packages/theme on Eval: Tailwind's classes read as rules, Tw's rules made at compile time,
+##             shadcn's sheet made, the classes it rejects (packages/theme/test/ThemeTest.hx)
+## theme-fidelity-check  packages/theme's widgets drawn headless against shadcn's markup in Chromium
+##             (packages/theme/test/ref, from ref.mjs; the cases known to differ reported, not failed)
 ## ui-programs  bin/ui/GFX_TARGET/{UiDrawTest,TodoTest,GalleryTest,StressTest,ClipboardTest,EmojiTest,BoxTest,WindowTest}[.exe], NativeTest (GTK 3, Win32, AppKit), TextInputTest (X11), LinuxAccessTest and AtspiProbe (AT-SPI), WinAccessTest (Windows): packages/ui's test programs (Linux: glibc mode)
 ## ui-draw-check  packages/ui's GPU renderer (hxmc.ui.draw): the sample UI headless against
 ##             packages/ui/test/draw.png (also in a window, under Xvfb), then the todo example (markup, signals, widgets) driven
@@ -535,23 +539,34 @@ gfx-programs: $(TOOL) $(STD) $(HOST_RT)
 	$(call hxmc,bin/gfx/$(GFX_TARGET)/Triangle$(call EXE,$(GFX_TARGET)),$(GFX_CP) -main Triangle $(HXMC_ARGS) $(GFX_ARGS))
 	$(call hxmc,bin/gfx/$(GFX_TARGET)/Cube$(call EXE,$(GFX_TARGET)),$(GFX_CP) -main Cube $(HXMC_ARGS) $(GFX_ARGS))
 	$(call hxmc,bin/gfx/$(GFX_TARGET)/Instances$(call EXE,$(GFX_TARGET)),$(GFX_CP) -main Instances $(HXMC_ARGS) $(GFX_ARGS))
+	$(call hxmc,bin/gfx/$(GFX_TARGET)/Targets$(call EXE,$(GFX_TARGET)),$(GFX_CP) -main Targets $(HXMC_ARGS) $(GFX_ARGS))
+	$(call hxmc,bin/gfx/$(GFX_TARGET)/Mips$(call EXE,$(GFX_TARGET)),$(GFX_CP) -main Mips $(HXMC_ARGS) $(GFX_ARGS))
+	$(call hxmc,bin/gfx/$(GFX_TARGET)/Formats$(call EXE,$(GFX_TARGET)),$(GFX_CP) -main Formats $(HXMC_ARGS) $(GFX_ARGS))
 gfx-check: gfx-programs
 	sh packages/gfx/test/check.sh bin/gfx/$(GFX_TARGET)
 
 # Android: APKs written by hxmc (hxmc/src/hxmc/android/Apk.hx), AndroidTest
-# (packages/gfx/test/AndroidTest.hx) and the cube example
+# (packages/gfx/test/AndroidTest.hx), the cube example and AndroidNativeTest
+# (packages/ui/test/AndroidNativeTest.hx: views, so classes.dex), AndroidMixTest
+# (a GPU view among views) and AndroidTextTest (packages/os/test: text input
+# in a drawn window)
 android-programs: $(TOOL) $(STD) $(HOST_RT)
 	$(call hxmc,bin/android/$(ANDROID_TARGET)/AndroidTest.apk,$(GFX_CP) -main AndroidTest $(HXMC_ARGS) -D hxmc.target=$(ANDROID_TARGET) -D hxmc.android-package=org.hxmc.gfxtest)
 	$(call hxmc,bin/android/$(ANDROID_TARGET)/Cube.apk,$(GFX_CP) -main Cube $(HXMC_ARGS) -D hxmc.target=$(ANDROID_TARGET) -D hxmc.android-package=org.hxmc.cube)
-# their structure without a device (hxmc/test/ApkCheck.hx: zip, manifest, ELF, signature; zipalign, aapt, apksigner when there)
+	$(call hxmc,bin/android/$(ANDROID_TARGET)/AndroidNativeTest.apk,$(UI_CP) -main AndroidNativeTest $(HXMC_ARGS) -D hxmc.target=$(ANDROID_TARGET) -D hxmc.android-package=org.hxmc.nativetest)
+	$(call hxmc,bin/android/$(ANDROID_TARGET)/AndroidMixTest.apk,$(UI_CP) -cp packages/gfx/examples -main AndroidMixTest $(HXMC_ARGS) -D hxmc.target=$(ANDROID_TARGET) -D hxmc.android-package=org.hxmc.mixtest)
+	$(call hxmc,bin/android/$(ANDROID_TARGET)/AndroidTextTest.apk,-cp packages/os/src -cp packages/os/test -main AndroidTextTest $(HXMC_ARGS) -D hxmc.target=$(ANDROID_TARGET) -D hxmc.android-package=org.hxmc.texttest)
+# their structure without a device (hxmc/test/ApkCheck.hx: zip, manifest, ELF, signature, classes.dex; zipalign, aapt, apksigner, dexdump when there)
 android-check: android-programs
-	ulimit -s unlimited 2>/dev/null || true; $(TOOL) -cp hxmc/test -cp haxe/test -cp hxmc/src --run ApkCheck bin/android/$(ANDROID_TARGET)/AndroidTest.apk bin/android/$(ANDROID_TARGET)/Cube.apk
+	ulimit -s unlimited 2>/dev/null || true; $(TOOL) -cp hxmc/test -cp haxe/test -cp hxmc/src --run ApkCheck $(foreach a,AndroidTest Cube AndroidNativeTest AndroidMixTest AndroidTextTest,bin/android/$(ANDROID_TARGET)/$(a).apk)
 # shared libraries of the glibc mode loaded by an hxmc program (hxmc/test/SharedCheck.hx), Android's built
 shared-check: $(TOOL) $(STD) $(HOST_RT)
 	$(SCRIPT) SharedCheck
-# AndroidTest on the device or emulator adb reaches (packages/gfx/test/android.sh)
+# the Android tests on the device or emulator adb reaches (packages/gfx/test/android.sh, packages/ui/test/android-native.sh, android-mix.sh)
 android-device-check: android-programs
 	sh packages/gfx/test/android.sh bin/android/$(ANDROID_TARGET)/AndroidTest.apk bin/android/$(ANDROID_TARGET)
+	sh packages/ui/test/android-native.sh bin/android/$(ANDROID_TARGET)/AndroidNativeTest.apk bin/android/$(ANDROID_TARGET)
+	sh packages/ui/test/android-mix.sh bin/android/$(ANDROID_TARGET)/AndroidMixTest.apk bin/android/$(ANDROID_TARGET)/AndroidTextTest.apk bin/android/$(ANDROID_TARGET)
 
 gfx-web-check: $(TOOL) $(STD)
 	$(call hxmc,bin/gfx/WebTest.wasm,$(GFX_CP) -main WebTest $(HXMC_ARGS) -D hxmc.target=wasm32-wasi)
@@ -608,8 +623,15 @@ text-check: $(TOOL)
 UI_VIEW := -cp packages/view/src -D hxmc.view.renderer.ui=hxmc.ui.view.NodeRenderer
 ui-check: $(TOOL)
 	ulimit -s unlimited 2>/dev/null || true; $(TOOL) -cp packages/text/src -cp packages/ui/src -cp packages/ui/test --run UiTest
-	ulimit -s unlimited 2>/dev/null || true; $(TOOL) $(UI_VIEW) -cp packages/text/src -cp packages/ui/src -cp packages/ui/test --run MarkupTest
-	ulimit -s unlimited 2>/dev/null || true; $(TOOL) $(UI_VIEW) -cp packages/text/src -cp packages/ui/src -cp packages/ui/test --run GuideTest
+	ulimit -s unlimited 2>/dev/null || true; $(TOOL) $(UI_VIEW) -cp packages/text/src -cp packages/ui/src -cp packages/ui/test -cp packages/ui/examples --run MarkupTest
+	ulimit -s unlimited 2>/dev/null || true; $(TOOL) $(UI_VIEW) -cp packages/text/src -cp packages/ui/src -cp packages/ui/test -cp packages/ui/examples --run GuideTest
+
+theme-check: $(TOOL)
+	ulimit -s unlimited 2>/dev/null || true; $(TOOL) -cp packages/ui/src -cp packages/theme/src -cp packages/theme/test --run ThemeTest $(TOOL)
+
+theme-fidelity-check: $(TOOL) $(STD) $(HOST_RT)
+	$(call hxmc,bin/theme/$(GFX_TARGET)/FidelityTest$(call EXE,$(GFX_TARGET)),$(UI_CP) -cp packages/theme/src -cp packages/theme/test -main FidelityTest $(HXMC_ARGS) $(GFX_ARGS))
+	mkdir -p bin/theme/out && LIBGL_ALWAYS_SOFTWARE=1 env -u DISPLAY bin/theme/$(GFX_TARGET)/FidelityTest packages/theme/test/ref bin/theme/out
 
 UI_CP := -cp packages/os/src -cp packages/gfx/src -cp packages/gfx/test -cp packages/text/src $(UI_VIEW) -cp packages/ui/src -cp packages/ui/test -cp packages/ui/examples
 ui-programs: $(TOOL) $(STD) $(HOST_RT)

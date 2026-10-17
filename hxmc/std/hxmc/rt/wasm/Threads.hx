@@ -27,6 +27,10 @@ class Threads {
 	@:hxmc.noGc public static function current():Int
 		return 1;
 
+	// (no other threads call in)
+	@:hxmc.noGc public static function attach():Bool
+		return false;
+
 	@:hxmc.noGc public static function count():Int
 		return 1;
 
