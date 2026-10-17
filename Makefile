@@ -195,7 +195,9 @@ help:
 ##             line layout, and a text sample through the atlas against packages/text/test/sample.png
 ## ui-check    packages/ui on Eval: the layout against Chromium's flexbox (layout-expected.json,
 ##             from packages/ui/test/layout-ref.mjs), text wrapping, events and focus (UiTest.hx);
-##             markup rendered into nodes (MarkupTest.hx); the guide's examples (GuideTest.hx)
+##             markup rendered into nodes (MarkupTest.hx); the guide's examples (GuideTest.hx); the
+##             widgets' examples rendered and their reference complete (WidgetExamplesTest.hx; the
+##             reference written to bin/ui/widgets.json, WidgetDocs.hx)
 ## theme-check  packages/theme on Eval: Tailwind's classes read as rules, Tw's rules made at compile time,
 ##             shadcn's sheet made, the classes it rejects (packages/theme/test/ThemeTest.hx)
 ## theme-fidelity-check  packages/theme's widgets drawn headless against shadcn's markup in Chromium
@@ -626,6 +628,8 @@ ui-check: $(TOOL)
 	ulimit -s unlimited 2>/dev/null || true; $(TOOL) -cp packages/text/src -cp packages/ui/src -cp packages/ui/test --run UiTest
 	ulimit -s unlimited 2>/dev/null || true; $(TOOL) $(UI_VIEW) -cp packages/text/src -cp packages/ui/src -cp packages/ui/test -cp packages/ui/examples --run MarkupTest
 	ulimit -s unlimited 2>/dev/null || true; $(TOOL) $(UI_VIEW) -cp packages/text/src -cp packages/ui/src -cp packages/ui/test -cp packages/ui/examples --run GuideTest
+	ulimit -s unlimited 2>/dev/null || true; $(TOOL) $(UI_VIEW) -cp packages/text/src -cp packages/ui/src -cp packages/theme/src -cp packages/ui/test -cp packages/ui/examples/widgets --run WidgetExamplesTest
+	mkdir -p bin/ui; ulimit -s unlimited 2>/dev/null || true; $(TOOL) -cp packages/ui/test --run WidgetDocs packages/ui/src/hxmc/ui/widgets/Widgets.hx packages/ui/examples/widgets bin/ui/widgets.json
 
 # random flex trees against Chromium (Playwright): a tool, not a lane
 ui-layout-fuzz: $(TOOL)
