@@ -567,6 +567,11 @@ jobs:
       - name: Runtime objects
         run: make rt && touch bin/hxmc/rt/*/*.o
       - name: The website
+        # (off main and tags, the modules with their function names: a trap's
+        # stack in the browser tests names its frames; the code is the same,
+        # the names add about 8% gzipped, so the published site goes without)
+        env:
+          HXMC_SYMBOLS: ${{ (github.ref != 'refs/heads/main' && !startsWith(github.ref, 'refs/tags/')) && '1' || '' }}
         run: |
           set -ex
           [ -f /usr/share/fonts/truetype/dejavu/DejaVuSans.ttf ] || { sudo apt-get update -qq && sudo apt-get install -qqy --no-install-recommends fonts-dejavu-core > /dev/null; }
