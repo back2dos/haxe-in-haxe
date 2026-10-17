@@ -97,6 +97,15 @@ class GcModule {
 
 	static inline var EQREF = 0x6D;
 
+	// (HXMC_GC_SURVEY=1: what is not supported, by construct, the functions with it; GcGen)
+	public static var survey:Null<Map<String, Array<String>>>;
+
+	public static function note(what:String, where:String) {
+		var l = survey.get(what);
+		if (l == null) survey.set(what, l = []);
+		if (!l.contains(where)) l.push(where);
+	}
+
 	public static function repr(t:Ty):String
 		return switch t {
 			case TI32 | TBool: "i";
@@ -104,7 +113,10 @@ class GcModule {
 			case TI64: "l";
 			case TVoid: "v";
 			case TRef(_): "p";
-			case TStruct(n, _): throw 'hxmc: -D hxmc.wasm-gc: struct values ($n) are not supported';
+			case TStruct(n, _):
+				if (survey == null) throw 'hxmc: -D hxmc.wasm-gc: struct values ($n) are not supported';
+				note("struct values", n);
+				"l";
 		}
 
 	static function valType(b:Buf, r:String)
@@ -335,6 +347,13 @@ class GcModule {
 		importFunc("hxmc", "readFile", "p_p");
 		importFunc("hxmc", "writeFile", "ppi_i");
 		importFunc("hxmc", "dateNum", "ifiiiiii_f");
+		// the program's imports (@:hxmc.lib externs) that take and return numbers only
+		var foreign = [for (n in reach.hosts.keys()) n];
+		foreign.sort(Reflect.compare);
+		for (n in foreign) {
+			var key = foreignKey(n);
+			if (key != null) importFunc(hxmc.ir.CInterop.LIBS.get(n), n, key);
+		}
 		var tagType = funcType("p_v");
 		for (f in reach.funcs) {
 			funcIndex.set(f, imports.length + funcs.length);
@@ -368,7 +387,15 @@ class GcModule {
 		var codes = [
 			for (f in funcs) {
 				if (trace) Sys.println("wasm-gc: " + f.name);
-				new FuncGen(this, f).emit();
+				if (survey == null) new FuncGen(this, f).emit() else try new FuncGen(this, f).emit() catch (e:Dynamic) {
+					var s = Std.string(e), at = s.indexOf(": ", s.indexOf(f.display != null ? f.display : f.name));
+					note(at < 0 ? s : s.substr(at + 2), f.display != null ? f.display : f.name);
+					var u = new Buf();
+					u.u8(0);
+					u.u8(0x00);
+					u.u8(0x0B);
+					u;
+				}
 			}
 		];
 		if (dynCallBody != null) writeDynCall();
@@ -405,6 +432,34 @@ class GcModule {
 
 	public function importOf(name:String):Int
 		return importIndex.get(name);
+
+	// an import's signature by representation, when its C types are numbers (no pointers: no linear memory)
+	static function foreignKey(sym:String):Null<String> {
+		var lib = hxmc.ir.CInterop.LIBS.get(sym), sig = hxmc.ir.CInterop.SIGS.get(sym);
+		if (lib == null || sig == null) return null;
+		function r(t:hxmc.ir.CInterop.CTy):Null<String>
+			return switch t {
+				case CBool | CI8 | CU8 | CI16 | CU16 | CI32: "i";
+				case CI64: "l";
+				case CF64: "f";
+				case CVoid: "v";
+				case _: null;
+			}
+		var ps = "";
+		for (a in sig.args) {
+			var x = r(a);
+			if (x == null || x == "v") return null;
+			ps += x;
+		}
+		var ret = r(sig.ret);
+		return ret == null ? null : ps + "_" + ret;
+	}
+
+	// the import of a @:hxmc.lib extern (foreignKey), or null
+	public function foreignOf(sym:String):Null<Int> {
+		var lib = hxmc.ir.CInterop.LIBS.get(sym);
+		return lib == null ? null : importIndex.get(lib + "." + sym);
+	}
 
 	// a function written here (its body without the final end), after the program's;
 	// its locals' types (a value type's byte, or -1 - t: a (ref null t))

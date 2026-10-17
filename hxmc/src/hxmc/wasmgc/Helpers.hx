@@ -248,7 +248,9 @@ class Helpers {
 			m.gc(b, 0x02, m.dynType(t), 0);
 			// convert to the representation asked for
 			switch [k, t] {
-				case ["i", TF64]: b.u8(0xFC); b.u8(2);
+				case ["i", TF64]:
+					b.u8(0x10);
+					Enc.uleb(b, f2iSlow(m));
 				case ["f", TI32]: b.u8(0xB7);
 				case ["l", TI32]: b.u8(0xAC);
 				case _:
@@ -261,6 +263,41 @@ class Helpers {
 	}
 
 	// x - y * trunc(x / y)
+	// hx_f2i_slow's: a Float to an Int, NaN 0, out of range modulo 2^32
+	public static function f2iSlow(m:GcModule):Int {
+		var h = m.hasHelper("f2i_slow");
+		if (h != null) return h;
+		var b = new Buf();
+		function f64(v:Float) {
+			b.u8(0x44);
+			var bs = haxe.io.Bytes.alloc(8);
+			bs.setDouble(0, v);
+			b.bytes(bs);
+		}
+		get(b, 0);
+		f64(-2147483649.0);
+		b.u8(0x64);
+		get(b, 0);
+		f64(2147483648.0);
+		b.u8(0x63);
+		b.u8(0x71);
+		b.u8(0x04);
+		b.u8(Enc.I32);
+		get(b, 0);
+		b.u8(0xFC);
+		b.u8(2);
+		b.u8(0x05);
+		get(b, 0);
+		f64(4294967296.0);
+		b.u8(0x10);
+		Enc.uleb(b, fmod(m));
+		b.u8(0xFC);
+		b.u8(6);
+		b.u8(0xA7);
+		b.u8(0x0B);
+		return m.addHelper("f2i_slow", "f_i", b, []);
+	}
+
 	public static function fmod(m:GcModule):Int {
 		var h = m.hasHelper("fmod");
 		if (h != null) return h;
@@ -323,18 +360,29 @@ class Helpers {
 		set(b, s.args.length + 1);
 		for (c in m.classList()) {
 			var f = c.findMethod(name);
-			if (f == null || !m.reached(f)) continue;
-			// (the method's representation must be the call's)
-			if (GcModule.sigKey([for (a in f.args) a.ty], f.ret) != params + "_" + GcModule.repr(s.ret)) continue;
+			if (f == null || !m.reached(f) || f.args.length != s.args.length + 1) continue;
+			// (a representation of the method's other than the call's: Dynamic, boxed
+			// or unboxed, as Iterator<Int>'s next on a class whose next returns Dynamic)
+			var conv = true;
+			for (i in 0...s.args.length)
+				conv = conv && convertible(GcModule.repr(s.args[i]), GcModule.repr(f.args[i + 1].ty));
+			var fr = GcModule.repr(f.ret), sr = GcModule.repr(s.ret);
+			if (!conv || !(convertible(fr, sr) || sr == "v")) continue;
 			get(b, s.args.length + 1);
 			i32(b, m.clsOf(c));
 			b.u8(0x46);
 			b.u8(0x04);
 			b.u8(0x40);
-			for (i in 0...s.args.length + 1)
-				get(b, i);
+			get(b, 0);
+			for (i in 0...s.args.length) {
+				get(b, i + 1);
+				convert(m, b, s.args[i], f.args[i + 1].ty);
+			}
 			b.u8(0x10);
 			Enc.uleb(b, m.tableFunc(f));
+			if (sr == "v") {
+				if (fr != "v") b.u8(0x1A);
+			} else convert(m, b, f.ret, s.ret);
 			b.u8(0x0F);
 			b.u8(0x0B);
 		}
@@ -360,6 +408,20 @@ class Helpers {
 			Enc.uleb(b, unbox(m, s.ret == TBool ? "b" : r));
 		}
 		return idx;
+	}
+
+	// whether a value of representation a passes as one of b (the same, or Dynamic boxed or unboxed)
+	static function convertible(a:String, b:String):Bool
+		return a == b || (a == "p") != (b == "p") && a != "v" && b != "v";
+
+	// the value on the stack of type a as one of type b (convertible)
+	static function convert(m:GcModule, b:Buf, from:Ty, to:Ty) {
+		var fr = GcModule.repr(from), tr = GcModule.repr(to);
+		if (fr == tr) return;
+		if (tr == "p") m.box(b, from) else {
+			b.u8(0x10);
+			Enc.uleb(b, unbox(m, to == TBool ? "b" : tr));
+		}
 	}
 
 	// two references of enum arguments equal: the same, else both enums

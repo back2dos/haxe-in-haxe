@@ -30,6 +30,18 @@ class Library {
 		Sys.println(bytes.getInt32(0) + " " + bytes.getDouble(4) + " " + bytes.get(12) + " " + bytes.getUInt16(13) + " " + bytes.length);
 		var s = haxe.io.Bytes.ofString("héllo €");
 		Sys.println(s.length + " " + s.toHex() + " " + s.toString() + " " + s.sub(0, 1).toString());
+		var bb = new haxe.io.BytesBuffer();
+		for (i in 0...70)
+			bb.addByte(i);
+		bb.addInt32(-2);
+		bb.addDouble(1.5);
+		bb.addFloat(0.25);
+		bb.addString("é!");
+		bb.addBytes(s, 1, 2);
+		var all = bb.getBytes();
+		Sys.println(bb.length + " " + all.get(69) + " " + all.getInt32(70) + " " + all.getDouble(74) + " " + all.getFloat(82) + " " + all.sub(86, 5).toHex());
+		// a string of more than 24 characters (made from a data segment), and one beyond Latin-1
+		Sys.println("a literal long enough for a data segment, " + "and one past Latin-1: €€€€€€€€€€€€€€€€€€€€€€€".length);
 		// maps
 		var m = new Map<String, Int>();
 		m.set("one", 1);
@@ -42,6 +54,15 @@ class Library {
 		for (i in 0...50)
 			im.set(i * 7, "v" + i);
 		Sys.println(im.get(49) + " " + im.get(343) + " " + Lambda.count(im));
+		// (Vector<T>'s blit, generic, on a Vector<Float>)
+		var v = new haxe.ds.Vector<Float>(4, 0.5), w = new haxe.ds.Vector<Float>(6, 0.0);
+		v[3] = 2.5;
+		haxe.ds.Vector.blit(v, 0, w, 1, 4);
+		Sys.println(w.toArray());
+		// (Iterator<Int>'s next on a class whose next returns Dynamic)
+		var ks = [for (k in im.keys()) k];
+		ks.sort((x, y) -> x - y);
+		Sys.println(ks.slice(0, 5));
 		// Int64
 		var big = haxe.Int64.make(1, 0);
 		var prod = haxe.Int64.mul(big, haxe.Int64.ofInt(1000));

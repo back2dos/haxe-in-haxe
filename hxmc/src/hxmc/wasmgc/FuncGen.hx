@@ -639,9 +639,7 @@ class FuncGen {
 				expr(x);
 				switch o {
 					case I2F: op(0xB7);
-					case F2I:
-						op(0xFC);
-						op(2);
+					case F2I: f2i();
 					case FNeg: op(0x9A);
 					case I2L: op(0xAC);
 					case L2I: op(0xA7);
@@ -715,14 +713,9 @@ class FuncGen {
 			case EArrLen(a):
 				exprAs(a, m.arrBaseType);
 				gc(0x02, m.arrBaseType, 0);
-			case EArrGet(t, a, i):
+			case EArrGet(t, a, i) | EArrGetU(t, a, i):
+				// (a Vector's too: generic code, Vector<T>'s, reads one of any kind)
 				arrGet(GcModule.elemKind(t), a, i);
-			case EArrGetU(t, a, i):
-				var k = GcModule.elemKind(t);
-				exprAs(a, m.arrType(k));
-				gc(0x02, m.arrType(k), 1);
-				expr(i);
-				gc(0x0B, m.dataType(k));
 			case EBoxGet(t, x):
 				exprAs(x, m.boxType(t));
 				gc(0x02, m.boxType(t), 0);
@@ -846,6 +839,29 @@ class FuncGen {
 					expr(v);
 				gc(0x00, m.shapeType(s));
 		}
+	}
+
+	// the Float on the stack to an Int: truncated, out of range modulo 2^32 and NaN 0,
+	// as the native targets (hx_f2i_slow): inline when within the range
+	function f2i() {
+		var t = temp("f");
+		localTee(t);
+		op(0x99);
+		op(0x44);
+		var bs = haxe.io.Bytes.alloc(8);
+		bs.setDouble(0, 2147483648.0);
+		b.bytes(bs);
+		op(0x63);
+		op(0x04);
+		op(Enc.I32);
+		localGet(t);
+		op(0xFC);
+		op(2);
+		op(0x05);
+		localGet(t);
+		call(Helpers.f2iSlow(m));
+		op(0x0B);
+		release("f", t);
 	}
 
 	function blockType(r:String)
@@ -1355,8 +1371,7 @@ class FuncGen {
 					op(0xA0);
 				}
 				op(name == "Math_ceil" ? 0x9B : 0x9C);
-				op(0xFC);
-				op(2);
+				f2i();
 			case "Math_max":
 				all();
 				op(0xA5);
@@ -1392,6 +1407,9 @@ class FuncGen {
 			case "Math_random":
 				call(m.importOf("hxmc.random"));
 			case "rt_blocking_enter" | "rt_blocking_leave":
+			case _ if (m.foreignOf(name) != null):
+				all();
+				call(m.foreignOf(name));
 			case _:
 				unsupported("the runtime function " + name);
 		}

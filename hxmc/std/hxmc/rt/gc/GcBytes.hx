@@ -135,3 +135,67 @@ class GcBytes {
 	static inline function unhex(c:Int):Int
 		return c <= 57 ? c - 48 : (c | 32) - 87;
 }
+
+// haxe.io.BytesBuffer: its bytes, doubled when short (hxmc.rt.Bytes' natives)
+@:keep @:hxmc.wasmgc
+class GcBytesBuffer {
+	var data = Bytes.alloc(64);
+	var len = 0;
+
+	function new() {}
+
+	// room for n more bytes
+	function reserve(n:Int) {
+		if (len + n <= data.length) return;
+		var cap = data.length * 2;
+		if (cap < len + n) cap = len + n;
+		var d = Bytes.alloc(cap);
+		d.blit(0, data, 0, len);
+		data = d;
+	}
+
+	@:hxmc.host("haxe_io_BytesBuffer_new") static function bbNew():Dynamic
+		return new GcBytesBuffer();
+
+	@:hxmc.host("haxe_io_BytesBuffer_get_length") @:hxmc.noGc static function bbGetLength(bb:GcBytesBuffer):Int
+		return bb.len;
+
+	@:hxmc.host("haxe_io_BytesBuffer_addByte") static function addByte(bb:GcBytesBuffer, v:Int):Void {
+		bb.reserve(1);
+		bb.data.set(bb.len++, v);
+	}
+
+	@:hxmc.host("haxe_io_BytesBuffer_addBytes") static function addBytes(bb:GcBytesBuffer, b:Bytes, pos:Int, n:Int):Void {
+		if (pos < 0 || n < 0 || pos + n > b.length) throw haxe.io.Error.OutsideBounds;
+		bb.reserve(n);
+		bb.data.blit(bb.len, b, pos, n);
+		bb.len += n;
+	}
+
+	@:hxmc.host("haxe_io_BytesBuffer_add") static function add(bb:GcBytesBuffer, b:Bytes):Void
+		addBytes(bb, b, 0, b.length);
+
+	@:hxmc.host("haxe_io_BytesBuffer_addString") static function addString(bb:GcBytesBuffer, s:String, encoding:Dynamic):Void
+		add(bb, Bytes.ofString(s));
+
+	@:hxmc.host("haxe_io_BytesBuffer_addInt32") static function addInt32(bb:GcBytesBuffer, v:Int):Void {
+		bb.reserve(4);
+		bb.data.setInt32(bb.len, v);
+		bb.len += 4;
+	}
+
+	@:hxmc.host("haxe_io_BytesBuffer_addFloat") static function addFloat(bb:GcBytesBuffer, v:Float):Void {
+		bb.reserve(4);
+		bb.data.setFloat(bb.len, v);
+		bb.len += 4;
+	}
+
+	@:hxmc.host("haxe_io_BytesBuffer_addDouble") static function addDouble(bb:GcBytesBuffer, v:Float):Void {
+		bb.reserve(8);
+		bb.data.setDouble(bb.len, v);
+		bb.len += 8;
+	}
+
+	@:hxmc.host("haxe_io_BytesBuffer_getBytes") static function getBytes(bb:GcBytesBuffer):Bytes
+		return bb.data.sub(0, bb.len);
+}
