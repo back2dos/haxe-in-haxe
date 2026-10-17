@@ -93,9 +93,17 @@ WasmGC takes a third to a half of the memory everywhere and is as fast or
 faster on half the cases. It is slower where small objects are allocated
 and read in tight loops (mandelbrot: V8's allocation and the casts at
 function boundaries; formatter_noio: closures, arrays read through
-helpers). Left to try: typed arrays in locals (the fast path inline),
-br_on_cast instead of ref.test then ref.cast, precise types for methods
-(their signatures are shared with the dispatch table). ObjectMap has one
+helpers). Mandelbrot's gap is the allocations: the native and linear
+builds inline its small methods and replace the `Complex` that does not
+escape by locals (Driver: `Inline`, then `Sroa`, on Mir), which the WasmGC
+path, emitted from the IR before them, does not; binaryen's `wasm-opt -all
+--closed-world -O3` (inlining, then heap2local) takes its module from
+2.02 s to 1.10 s, where signature and type refining alone change nothing
+(2026-10-17, node 22). So the first thing to try is inlining and scalar
+replacement on the IR for this path. Also left to try: typed arrays in
+locals (the fast path inline), br_on_cast instead of ref.test then
+ref.cast, precise types for methods (their signatures are shared with the
+dispatch table). ObjectMap has one
 bucket (WasmGC objects have no address to hash); `sys.io.File` streams and
 processes are not supported.
 
