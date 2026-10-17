@@ -168,12 +168,12 @@ help:
 ##             the native targets' debugging information checked and a -debug build staged in _debug/
 ##             (DebugCheck: its --run on the target's machine runs gdb or lldb)
 ## test-node-libs  -lib from node_modules with the npm package's compiler for the host (hxmc/test/NodeLibs.hx)
-## gfx-programs  bin/gfx/GFX_TARGET/{GfxTest,Triangle,Cube}[.exe]: packages/gfx's test programs (Linux: glibc mode)
+## gfx-programs  bin/gfx/GFX_TARGET/{GfxTest,Triangle,Cube,Instances}[.exe]: packages/gfx's test programs (Linux: glibc mode)
 ## android-programs  bin/android/ANDROID_TARGET/{AndroidTest,Cube}.apk: APKs written by hxmc (android-x86_64, android-arm64)
 ## android-check  their structure (hxmc/test/ApkCheck.hx: zip, manifest, ELF, v2 signature)
 ## android-device-check  AndroidTest on the device or emulator adb reaches (packages/gfx/test/android.sh)
 ## shared-check  shared libraries of the glibc mode (-D hxmc.shared), loaded by an hxmc program (hxmc/test/SharedCheck.hx)
-## gfx-check   packages/gfx: the triangle and cube examples headless and in a window, against
+## gfx-check   packages/gfx: the triangle, cube and instances examples headless and in a window, against
 ##             golden images (packages/gfx/test/check.sh; Linux: Mesa, Xvfb; macOS: Metal, Cocoa);
 ##             GFX_TARGET=windows-x86_64: D3D11 and Win32 under Wine
 ## gfx-web-check  packages/gfx on WebGPU and WebGL2 (wasm32-wasi): the same, headless and in a
@@ -534,6 +534,7 @@ gfx-programs: $(TOOL) $(STD) $(HOST_RT)
 	$(call hxmc,bin/gfx/$(GFX_TARGET)/GfxTest$(call EXE,$(GFX_TARGET)),$(GFX_CP) -main GfxTest $(HXMC_ARGS) $(GFX_ARGS))
 	$(call hxmc,bin/gfx/$(GFX_TARGET)/Triangle$(call EXE,$(GFX_TARGET)),$(GFX_CP) -main Triangle $(HXMC_ARGS) $(GFX_ARGS))
 	$(call hxmc,bin/gfx/$(GFX_TARGET)/Cube$(call EXE,$(GFX_TARGET)),$(GFX_CP) -main Cube $(HXMC_ARGS) $(GFX_ARGS))
+	$(call hxmc,bin/gfx/$(GFX_TARGET)/Instances$(call EXE,$(GFX_TARGET)),$(GFX_CP) -main Instances $(HXMC_ARGS) $(GFX_ARGS))
 gfx-check: gfx-programs
 	sh packages/gfx/test/check.sh bin/gfx/$(GFX_TARGET)
 
