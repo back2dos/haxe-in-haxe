@@ -41,6 +41,10 @@ joined with spaces; entities (`&amp;`, `&#65;`, `&lbrace;`) are decoded.
 Attributes are `name="text"`, `name={expr}`, `name` alone (true) or
 `{...expr}`. Expressions inside markup are parsed at their place in the
 file, so errors point into the markup, and markup nests through them.
+Haxe's lexer finds where a literal ends by its outer tag: an element
+whose attributes hold markup of another tag (`first={<Pane/>}`) must end
+with its closing tag (`<Split first={<Pane/>}></Split>`), as a `/>` after
+the inner markup is not seen as the outer one's.
 
 Compile literals in a class that `implements Markup` (every field), or one
 at a time with `Esx.esx(<...>)`. `Esx.toHtml()` renders intrinsic trees as
