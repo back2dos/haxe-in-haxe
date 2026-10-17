@@ -296,6 +296,8 @@ Since the design above (October 2026), in this order:
   ErrorBoundary) and the clipboard (`hxmc.os.Clipboard`: X11's CLIPBOARD
   selection, Win32, NSPasteboard, the browser's paste event and
   navigator.clipboard; copy, cut and paste in text fields).
+- Animation: a `Clock` the window ticks each frame, and `Motion`'s
+  transitions, springs and colour transitions as signals.
 
 Where this departs from section 6:
 
