@@ -1,6 +1,7 @@
 package hxmc.x64;
 
 import hxmc.Lir;
+import hxmc.Mir.SrcPos;
 import hxmc.Obj;
 import hxmc.x64.Asm;
 import hxmc.x64.Isel.XOp;
@@ -9,7 +10,10 @@ import hxmc.x64.Isel.XOp;
 // prologue and epilogues, jump tables, the constant pool. With frame pointers
 // (Abi.framePointers) every function starts with push rbp; mov rbp, rsp
 // (rbp is then not allocated: Isel), so [rbp] links to the caller's record
-// and [rbp + 8] is the return address, leaf functions included.
+// and [rbp + 8] is the return address, leaf functions included. The prologue
+// and epilogues record what they do to the frame (Unwind: the unwind
+// tables), and with -debug the instructions' source lines are recorded
+// (FuncRec).
 class Emit implements hxmc.Target.Emitter {
 	var obj:Obj;
 	var text:Section;
@@ -20,6 +24,12 @@ class Emit implements hxmc.Target.Emitter {
 
 	var win:Bool;
 	var fp:Bool;
+	// this function's frame operations (Unwind; offsets in the section until
+	// the function is done) and (-debug) its rows of lines
+	var ops:Array<Int>;
+	var lines:Null<Array<Int>>;
+	var lastPos = 0;
+	var fileIndex = new Map<String, Int>();
 
 	public function new(obj:Obj, win = false, fp = false) {
 		this.obj = obj;
@@ -111,14 +121,22 @@ class Emit implements hxmc.Target.Emitter {
 		// leaf functions without slots keep rsp as it is
 		if (!f.hasCalls && f.slots.length == 0 && f.outArgs == 0 && savedX.length == 0) x = 0;
 		frameSize = x;
+		ops = [];
+		lines = f.display != null ? [] : null;
+		lastPos = 0;
 		if (fp) {
 			a.push(Asm.RBP);
+			op(Unwind.PUSH, Asm.RBP);
 			a.movRR(8, Asm.RBP, Asm.RSP);
+			op(Unwind.SETFP);
 		}
-		for (r in saved)
+		for (r in saved) {
 			a.push(r);
+			op(Unwind.PUSH, r);
+		}
 		if (win && frameSize >= 4096) {
 			// Windows commits the stack one guard page at a time: touch each page
+			// (described as one allocation at the end)
 			var left = frameSize;
 			while (left >= 4096) {
 				a.aluRI(Asm.SUB, 8, Asm.RSP, 4096);
@@ -126,9 +144,16 @@ class Emit implements hxmc.Target.Emitter {
 				left -= 4096;
 			}
 			if (left > 0) a.aluRI(Asm.SUB, 8, Asm.RSP, left);
-		} else if (frameSize > 0) a.aluRI(Asm.SUB, 8, Asm.RSP, frameSize);
-		for (k in 0...savedX.length)
+			op(Unwind.ALLOC, frameSize);
+		} else if (frameSize > 0) {
+			a.aluRI(Asm.SUB, 8, Asm.RSP, frameSize);
+			op(Unwind.ALLOC, frameSize);
+		}
+		for (k in 0...savedX.length) {
 			a.movupsMR(new Mem(Asm.RSP, savedXOff[k]), savedX[k]);
+			op(Unwind.SAVE, savedX[k], savedXOff[k]);
+		}
+		op(Unwind.ENDPROLOGUE);
 		if (sizeStats) stat("prologue", text.buf.len - start);
 		epiLabel = -1;
 		for (b in f.blocks)
@@ -170,7 +195,7 @@ class Emit implements hxmc.Target.Emitter {
 					ins(i, next, tables);
 		}
 		var tf = text.buf.len;
-		a.finish(start);
+		var map = a.finish(start);
 		if (sizeStats) {
 			stat("epilogue", epilogueBytes);
 			stat("finish (branch relaxation)", text.buf.len - tf);
@@ -186,48 +211,110 @@ class Emit implements hxmc.Target.Emitter {
 		}
 		a.patchLabelRefs();
 		var sym = obj.define(f.name, text, start, text.buf.len - start, global);
+		var k = 1;
+		while (k < ops.length) {
+			ops[k] = map(ops[k]) - start;
+			k += 4;
+		}
+		var r = new FuncRec(sym, ops);
+		if (lines != null) {
+			r.name = f.display;
+			var rows = [];
+			var k = 0;
+			while (k < lines.length) {
+				var p = SrcPos.get(lines[k + 1]);
+				var fi = fileIndex.get(p.file);
+				if (fi == null) {
+					fi = obj.files.length;
+					obj.files.push(p.file);
+					fileIndex.set(p.file, fi);
+				}
+				rows.push(map(lines[k]) - start);
+				rows.push(fi);
+				rows.push(p.line);
+				k += 2;
+			}
+			r.lines = rows;
+		}
+		obj.funcs.push(r);
 		return sym;
+	}
+
+	// a frame operation (Unwind) whose instruction ends here
+	inline function op(kind:Int, x = 0, y = 0) {
+		ops.push(kind);
+		ops.push(text.buf.len);
+		ops.push(x);
+		ops.push(y);
+	}
+
+	// a function written directly (stubs) and its frame operations
+	function define(name:String, start:Int, global = true) {
+		var sym = obj.define(name, text, start, text.buf.len - start, global);
+		var k = 1;
+		while (k < ops.length) {
+			ops[k] -= start;
+			k += 4;
+		}
+		obj.funcs.push(new FuncRec(sym, ops));
 	}
 
 	// the arguments of hxmc_alloc_slow, then a jump to it (no frame: 20 bytes)
 	public function allocStub(name:String, lo:Int, tySym:Null<String>, tyVal:Int, bytes:Int):Bool {
 		var start = text.buf.len;
+		ops = [];
 		a.movImm32(win ? 1 : 7, lo); // rcx / rdi
 		if (tySym != null) a.isym = obj.sym(tySym);
 		a.movImm32(win ? 2 : 6, tySym != null ? 0 : tyVal); // rdx / rsi
 		a.movImm32(win ? 8 : 2, bytes); // r8 / rdx
 		a.jmpSym(obj.sym("hxmc_alloc_slow"));
-		obj.define(name, text, start, text.buf.len - start, true);
+		define(name, start);
 		return true;
 	}
 
 	// the runtime's stubs (MirBuild.STUB_*), in the C convention
 	public function stub(name:String) {
 		var start = text.buf.len;
+		ops = [];
 		var arg0 = win ? Asm.RCX : Asm.RDI, arg1 = win ? Asm.RDX : Asm.RSI;
 		switch name {
 			case hxmc.MirBuild.STUB_CALL_ON_STACK:
-				// fn() with the stack pointer at top (Windows: its home area below)
+				// fn() with the stack pointer at top (Windows: its home area
+				// below); unwinders follow the frame pointer back to the old stack
 				a.push(Asm.RBP);
+				op(Unwind.PUSH, Asm.RBP);
 				a.movRR(8, Asm.RBP, Asm.RSP);
+				op(Unwind.SETFP);
+				op(Unwind.ENDPROLOGUE);
 				a.movRR(8, Asm.RSP, arg0);
 				if (win) a.aluRI(Asm.SUB, 8, Asm.RSP, 32);
 				a.callR(arg1);
+				op(Unwind.EPILOGUE);
 				a.movRR(8, Asm.RSP, Asm.RBP);
+				op(Unwind.SPFP);
 				a.pop(Asm.RBP);
+				op(Unwind.POP, Asm.RBP);
 				a.ret();
+				op(Unwind.RET);
 			case hxmc.MirBuild.STUB_ZERO:
 				// rep stosb: rdi = p, rcx = bytes, al = 0 (rdi is callee-saved on Windows)
 				if (win) {
 					a.push(Asm.RDI);
+					op(Unwind.PUSH, Asm.RDI);
+					op(Unwind.ENDPROLOGUE);
 					a.movRR(8, Asm.RDI, Asm.RCX);
 				}
 				a.movRR(8, Asm.RCX, arg1);
 				a.movImm32(Asm.RAX, 0);
 				text.buf.u8(0xF3);
 				text.buf.u8(0xAA);
-				if (win) a.pop(Asm.RDI);
+				if (win) {
+					op(Unwind.EPILOGUE);
+					a.pop(Asm.RDI);
+					op(Unwind.POP, Asm.RDI);
+				}
 				a.ret();
+				if (win) op(Unwind.RET);
 			case hxmc.MirBuild.STUB_FRAME:
 				// the caller's rbp (this stub keeps no record of its own)
 				a.movRR(8, Asm.RAX, Asm.RBP);
@@ -235,7 +322,7 @@ class Emit implements hxmc.Target.Emitter {
 			case _:
 				throw "hxmc: unknown runtime stub " + name;
 		}
-		obj.define(name, text, start, text.buf.len - start, true);
+		define(name, start);
 	}
 
 	function mem(i:LIns):Mem {
@@ -276,18 +363,33 @@ class Emit implements hxmc.Target.Emitter {
 
 	function epilogue() {
 		var at = text.buf.len;
+		op(Unwind.EPILOGUE);
 		for (k in 0...savedX.length)
 			a.movupsRM(savedX[k], new Mem(Asm.RSP, savedXOff[k]));
-		if (frameSize > 0) a.aluRI(Asm.ADD, 8, Asm.RSP, frameSize);
+		if (frameSize > 0) {
+			a.aluRI(Asm.ADD, 8, Asm.RSP, frameSize);
+			op(Unwind.FREE, frameSize);
+		}
 		var k = saved.length;
-		while (k-- > 0)
+		while (k-- > 0) {
 			a.pop(saved[k]);
-		if (fp) a.pop(Asm.RBP);
+			op(Unwind.POP, saved[k]);
+		}
+		if (fp) {
+			a.pop(Asm.RBP);
+			op(Unwind.POP, Asm.RBP);
+		}
 		a.ret();
+		op(Unwind.RET);
 		epilogueBytes += text.buf.len - at;
 	}
 
 	function ins(i:LIns, next:Null<LBlock>, tables:Array<{label:Int, entries:Array<LBlock>}>) {
+		if (lines != null && i.pos != 0 && i.pos != lastPos) {
+			lastPos = i.pos;
+			lines.push(text.buf.len);
+			lines.push(i.pos);
+		}
 		if (i.isym != null) a.isym = obj.sym(i.isym);
 		switch (i.op : XOp) {
 			case MOV:

@@ -1,14 +1,19 @@
 package hxmc.a64;
 
 import hxmc.Lir;
+import hxmc.Mir.SrcPos;
 import hxmc.Obj;
 import hxmc.a64.Asm;
 import hxmc.a64.Isel.AOp;
 
 // Allocated LIR -> AArch64 machine code: frame (x29/x30 pair, then the
-// callee-saved registers, slots and outgoing arguments below), prologue and
-// epilogues, jump tables, out-of-range immediates and offsets through the
-// scratch registers x16/x17.
+// slots, the callee-saved registers and the outgoing arguments below),
+// prologue and epilogues, jump tables, out-of-range immediates and offsets
+// through the scratch registers x16/x17. The prologue and epilogues record
+// what they do to the frame (Unwind: the unwind tables; Windows' unwind
+// codes reach saved registers up to 504 bytes above sp, which the layout
+// keeps), and with -debug the instructions' source lines are recorded
+// (FuncRec).
 class Emit implements hxmc.Target.Emitter {
 	static inline var X16 = 16;
 	static inline var X17 = 17;
@@ -35,6 +40,24 @@ class Emit implements hxmc.Target.Emitter {
 	var frameSize = 0;
 	var saved:Array<Int>;
 	var saveOff:Array<Int>;
+	// Windows, where the outgoing arguments would put the saved registers
+	// beyond the unwind codes' reach: their area (allocated last, freed first)
+	var split = 0;
+	// this function's frame operations (Unwind; offsets in the section until
+	// the function is done) and (-debug) its rows of lines
+	var ops:Array<Int>;
+	var lines:Null<Array<Int>>;
+	var lastPos = 0;
+	var fileIndex = new Map<String, Int>();
+	var start = 0;
+
+	// a frame operation (Unwind) whose instruction ends here
+	inline function op(kind:Int, x = 0, y = 0) {
+		ops.push(kind);
+		ops.push(text.buf.len - start);
+		ops.push(x);
+		ops.push(y);
+	}
 
 	public function allocStub(name:String, lo:Int, tySym:Null<String>, tyVal:Int, bytes:Int):Bool
 		return false;
@@ -42,17 +65,26 @@ class Emit implements hxmc.Target.Emitter {
 	// the runtime's stubs (MirBuild.STUB_*), in the C convention
 	public function stub(name:String) {
 		text.buf.align(4, 0);
-		var start = text.buf.len;
+		start = text.buf.len;
+		ops = [];
 		switch name {
 			case hxmc.MirBuild.STUB_CALL_ON_STACK:
-				// fn() (x1) with the stack pointer at top (x0)
+				// fn() (x1) with the stack pointer at top (x0); unwinders follow
+				// the frame pointer back to the old stack
 				a.pair(false, Asm.FP, Asm.LR, SP, -16, 1);
+				op(Unwind.SAVEFPLR, 16);
 				a.movSp(Asm.FP, SP);
+				op(Unwind.SETFP);
+				op(Unwind.ENDPROLOGUE);
 				a.movSp(SP, 0);
 				a.blr(1);
+				op(Unwind.EPILOGUE);
 				a.movSp(SP, Asm.FP);
+				op(Unwind.SPFP);
 				a.pair(true, Asm.FP, Asm.LR, SP, 16, 2);
+				op(Unwind.RESTOREFPLR, 16);
 				a.ret();
+				op(Unwind.RET);
 			case hxmc.MirBuild.STUB_ZERO:
 				// memset(p, 0, bytes)
 				a.movR(true, 2, 1);
@@ -65,7 +97,7 @@ class Emit implements hxmc.Target.Emitter {
 			case _:
 				throw "hxmc: unknown runtime stub " + name;
 		}
-		obj.define(name, text, start, text.buf.len - start, true);
+		obj.funcs.push(new FuncRec(obj.define(name, text, start, text.buf.len - start, true), ops));
 	}
 
 	public function useSection(name:Null<String>) {
@@ -76,9 +108,23 @@ class Emit implements hxmc.Target.Emitter {
 
 	public function func(f:LFunc, usedRegs:Array<Bool>, global:Bool):Symbol {
 		text.buf.align(16, 0);
-		var start = text.buf.len;
+		start = text.buf.len;
 		a.reset();
+		ops = [];
+		lines = f.display != null ? [] : null;
+		lastPos = 0;
 		var off = f.outArgs;
+		saved = [for (r in Isel.CALLEE_SAVED) if (usedRegs[r]) r];
+		split = 0;
+		if (probe && off + 8 * saved.length > 504) {
+			off = (off + 15) & ~15;
+			split = off;
+		}
+		saveOff = [];
+		for (r in saved) {
+			saveOff.push(off - split);
+			off += 8;
+		}
 		slotOff = [];
 		for (s in f.slots) {
 			var al = s.align < 8 ? 8 : s.align;
@@ -86,19 +132,19 @@ class Emit implements hxmc.Target.Emitter {
 			slotOff.push(off);
 			off += s.size;
 		}
-		saved = [for (r in Isel.CALLEE_SAVED) if (usedRegs[r]) r];
-		saveOff = [];
-		for (r in saved) {
-			saveOff.push(off);
-			off += 8;
-		}
 		frameSize = (off + 15) & ~15;
 		// prologue
 		a.pair(false, Asm.FP, Asm.LR, SP, -16, 1);
+		op(Unwind.SAVEFPLR, 16);
 		a.movSp(Asm.FP, SP);
-		subSp(frameSize);
-		for (k in 0...saved.length)
+		op(Unwind.SETFP);
+		subSp(frameSize - split);
+		for (k in 0...saved.length) {
 			ldst(false, 8, false, saved[k], SP, saveOff[k]);
+			op(Unwind.SAVE, saved[k], saveOff[k]);
+		}
+		subSp(split);
+		op(Unwind.ENDPROLOGUE);
 		for (b in f.blocks)
 			b.label = a.newLabel();
 		f.threadJumps(i -> (i.op : AOp) == B);
@@ -117,7 +163,29 @@ class Emit implements hxmc.Target.Emitter {
 				text.buf.u32(a.labelPos(e.label) - at);
 		}
 		a.finish();
-		return obj.define(f.name, text, start, text.buf.len - start, global);
+		var sym = obj.define(f.name, text, start, text.buf.len - start, global);
+		var r = new FuncRec(sym, ops);
+		if (lines != null) {
+			r.name = f.display;
+			var rows = [];
+			var k = 0;
+			while (k < lines.length) {
+				var p = SrcPos.get(lines[k + 1]);
+				var fi = fileIndex.get(p.file);
+				if (fi == null) {
+					fi = obj.files.length;
+					obj.files.push(p.file);
+					fileIndex.set(p.file, fi);
+				}
+				rows.push(lines[k]);
+				rows.push(fi);
+				rows.push(p.line);
+				k += 2;
+			}
+			r.lines = rows;
+		}
+		obj.funcs.push(r);
+		return sym;
 	}
 
 	function subSp(n:Int) {
@@ -127,7 +195,9 @@ class Emit implements hxmc.Target.Emitter {
 			var left = n;
 			while (left >= 4096) {
 				a.addSubI(2, true, SP, SP, 1, true);
+				op(Unwind.ALLOC, 4096);
 				a.ldst(false, 8, false, true, ZR, SP, 0);
+				op(Unwind.NOP);
 				left -= 4096;
 			}
 			if (left > 0) subSp0(left);
@@ -137,16 +207,36 @@ class Emit implements hxmc.Target.Emitter {
 	}
 
 	function subSp0(n:Int) {
-		if (n >= 4096) a.addSubI(2, true, SP, SP, n >> 12, true);
-		if (n & 0xfff != 0) a.addSubI(2, true, SP, SP, n & 0xfff);
+		if (n >= 4096) {
+			a.addSubI(2, true, SP, SP, n >> 12, true);
+			op(Unwind.ALLOC, n & ~0xfff);
+		}
+		if (n & 0xfff != 0) {
+			a.addSubI(2, true, SP, SP, n & 0xfff);
+			op(Unwind.ALLOC, n & 0xfff);
+		}
 	}
 
 	function epilogue() {
-		for (k in 0...saved.length)
+		op(Unwind.EPILOGUE);
+		if (split >= 4096) {
+			a.addSubI(0, true, SP, SP, split >> 12, true);
+			op(Unwind.FREE, split & ~0xfff);
+		}
+		if (split & 0xfff != 0) {
+			a.addSubI(0, true, SP, SP, split & 0xfff);
+			op(Unwind.FREE, split & 0xfff);
+		}
+		for (k in 0...saved.length) {
 			ldst(true, 8, false, saved[k], SP, saveOff[k]);
+			op(Unwind.RESTORE, saved[k], saveOff[k]);
+		}
 		a.movSp(SP, Asm.FP);
+		op(Unwind.SPFP);
 		a.pair(true, Asm.FP, Asm.LR, SP, 16, 2);
+		op(Unwind.RESTOREFPLR, 16);
 		a.ret();
+		op(Unwind.RET);
 	}
 
 	// a load or store of [n + off], through x17 when the offset does not encode
@@ -200,6 +290,11 @@ class Emit implements hxmc.Target.Emitter {
 	}
 
 	function ins(i:LIns, next:Null<LBlock>, tables:Array<{label:Int, entries:Array<LBlock>}>) {
+		if (lines != null && i.pos != 0 && i.pos != lastPos) {
+			lastPos = i.pos;
+			lines.push(text.buf.len - start);
+			lines.push(i.pos);
+		}
 		var x = i.size == 8;
 		switch (i.op : AOp) {
 			case MOV:

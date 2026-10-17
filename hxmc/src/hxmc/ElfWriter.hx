@@ -63,6 +63,9 @@ class ElfWriter {
 		strtab.u8(0);
 		// section indices: 0 null, then the sections, then their .rela, then symtab, strtab, shstrtab, note
 		var secs = o.sections;
+		// (the function records: a section nothing loads)
+		var funcs = FuncRec.section(o);
+		if (funcs != null) secs = secs.concat([funcs]);
 		for (i in 0...secs.length)
 			secs[i].index = i + 1;
 		// symbols: null, one per section (local), locals, then globals
@@ -121,6 +124,7 @@ class ElfWriter {
 					flags |= 1;
 					type = 15;
 			}
+			if (s == funcs) flags = 0;
 			out.align(s.align < 1 ? 1 : s.align);
 			var off = out.len;
 			if (type != 8) out.buf(s.buf);

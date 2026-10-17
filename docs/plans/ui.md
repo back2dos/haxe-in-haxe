@@ -4,8 +4,8 @@ How to build the low level of `@hxmc/ui`, and whether to abstract over the
 platforms' native controls or to draw everything with the GPU (the
 gpui/Makepad route). A survey of what exists as of October 2026, what is
 good enough to use or to copy, then a design. Current state of hxmc is in
-[README.md](README.md), the graphics plan in [PLANS.md](PLANS.md)
-("Graphics": `@hxmc/os`, `@hxmc/gfx`, the one line on `@hxmc/ui`).
+[README.md](../../README.md), the graphics plan in [graphics.md](graphics.md)
+(`@hxmc/os`, `@hxmc/gfx`, the UI section).
 
 What hxmc brings to the question, since it decides most of it:
 
@@ -254,7 +254,7 @@ Since the design above (October 2026), in this order:
 
 - `@hxmc/gfx` gained what a drawn UI needs: buffer writes, R8 and RGBA8
   textures (`Texture2D` parameters in shaders), blending and scissor, on
-  all five back ends (PLANS.md, "Graphics").
+  all five back ends ([graphics.md](graphics.md)).
 - `@hxmc/ui`'s core (`hxmc.ui`): `Node`, `TextNode`, `Style` (setters
   mark layout or paint), `Layout` (flexbox after CSS section 9, checked
   against Chromium's on 60 cases; CSS grid came later, 26 more), `Ui` (hit testing, hover, press and

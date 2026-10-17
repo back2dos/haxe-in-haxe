@@ -164,6 +164,10 @@ class Fingerprint {
 			case SCold(_, x):
 				b.add("cold");
 				stmt(x);
+			case SPos(file, line):
+				b.add("@");
+				str(file);
+				b.add(line);
 		}
 	}
 

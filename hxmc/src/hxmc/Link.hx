@@ -9,8 +9,10 @@ import hxmc.Abi;
 // (no dynamic section, no interpreter): symbol resolution, layout in three
 // loadable segments (read-only with the headers, code, data with TLS),
 // relocation, the symbols a C toolchain's linker defines (__init_array_*,
-// ...). LinkDyn extends it for dynamically linked executables (-D
-// hxmc.libc=glibc).
+// ...), the unwind tables of the generated code (.eh_frame and its search
+// table .eh_frame_hdr, PT_GNU_EH_FRAME: Unwind) and with -debug its DWARF
+// line information (Dwarf). LinkDyn extends it for dynamically linked
+// executables (-D hxmc.libc=glibc).
 class Link {
 	static inline var BASE = 0x400000;
 
@@ -129,6 +131,111 @@ class Link {
 		return addr.get(got) + gotSlot.get(t != null ? t : undefKey(s));
 	}
 
+	// ---- unwind tables (Unwind) and debugging information (Dwarf)
+
+	var ehFrame:Null<Section>;
+	var ehFrameHdr:Null<Section>;
+	// the search table's entries: each FDE's function (a symbol and an addend)
+	var fdes:Array<{sym:Symbol, addend:Int, at:Int}> = [];
+
+	// .eh_frame and .eh_frame_hdr of the live generated functions and of
+	// the live C code of the runtime objects (their own .eh_frame's
+	// entries): read-only sections of their own object (laid out with the
+	// others; the search table is filled once the functions have addresses:
+	// fillUnwind)
+	function unwindObj() {
+		var unwound = [];
+		for (o in objs)
+			for (r in o.funcs)
+				if (r.sym.section != null && isLive(r.sym.section)) unwound.push(r);
+		if (unwound.length == 0) return;
+		var e = Unwind.ehFrame(unwound, arm, ".eh_frame");
+		ehFrame = e.sec;
+		for (k in 0...unwound.length)
+			fdes.push({sym: unwound[k].sym, addend: 0, at: e.fdes[k]});
+		// (the terminator goes after the C code's entries)
+		ehFrame.buf.len -= 4;
+		for (o in objs)
+			if (o.ehFrame != null) importEhFrame(o.ehFrame);
+		ehFrame.buf.u32(0);
+		ehFrameHdr = new Section(".eh_frame_hdr", RoData, 4);
+		ehFrameHdr.buf.zeros(Unwind.ehFrameHdrSize(fdes.length));
+		var o = new Obj();
+		o.sections.push(ehFrameHdr);
+		o.sections.push(ehFrame);
+		if (live != null) {
+			live.set(ehFrameHdr, true);
+			live.set(ehFrame, true);
+		}
+		objs.push(o);
+	}
+
+	// the CIEs and FDEs of a C object's .eh_frame whose functions are live
+	// (their own CIEs, copied once each; the FDEs' relocations kept)
+	function importEhFrame(src:Section) {
+		var b = src.buf, out = ehFrame.buf;
+		var relocAt = new Map<Int, Reloc>();
+		for (r in src.relocs)
+			relocAt.set(r.offset, r);
+		var cieAt = new Map<Int, Int>(); // the CIE's offset in src -> in ehFrame
+		function copy(from:Int, len:Int):Int {
+			var at = out.len;
+			out.bytes(b.b, from, len);
+			for (k in from...from + len) {
+				var r = relocAt.get(k);
+				if (r != null) ehFrame.relocs.push(new Reloc(at + k - from, r.kind, r.sym, r.addend));
+			}
+			return at;
+		}
+		var pos = 0;
+		while (pos + 4 <= b.len) {
+			var len = b.get32(pos);
+			if (len == 0) break;
+			if (len == -1) throw "hxmc: link: a 64-bit .eh_frame entry";
+			var id = b.get32(pos + 4);
+			if (id != 0) {
+				// an FDE: its function's section (the relocation of its pc_begin)
+				var r = relocAt.get(pos + 8);
+				var t = r != null ? target(r.sym) : null;
+				if (t != null && t.section != null && isLive(t.section)) {
+					var cie = pos + 4 - id;
+					var to = cieAt.get(cie);
+					if (to == null) {
+						to = copy(cie, 4 + b.get32(cie));
+						cieAt.set(cie, to);
+					}
+					var at = copy(pos, 4 + len);
+					out.set32(at + 4, at + 4 - to);
+					fdes.push({sym: r.sym, addend: r.addend, at: at});
+				}
+			}
+			pos += 4 + len;
+		}
+	}
+
+	function fillUnwind() {
+		if (ehFrame == null) return;
+		var base = addr.get(ehFrame);
+		var list = [for (f in fdes) {pc: symAddr(f.sym) + f.addend, fde: base + f.at}];
+		ehFrameHdr.buf.len = 0;
+		Unwind.ehFrameHdr(addr.get(ehFrameHdr), base, list, ehFrameHdr.buf);
+	}
+
+	// the section headers of the unwind tables (for the tools: the C
+	// library's unwinder finds them through PT_GNU_EH_FRAME)
+	function unwindHeaders(secs:Array<SecHdr>) {
+		if (ehFrame == null) return;
+		for (s in [ehFrameHdr, ehFrame])
+			secs.push({name: s.name, type: s == ehFrame && !arm ? 0x70000001 : 1, flags: 2, addr: addr.get(s), off: addr.get(s) - BASE, size: s.size(), link: 0, info: 0, align: s.align, entsize: 0});
+	}
+
+	// (-debug) the DWARF sections of the live functions
+	function debugSections():Array<{name:String, data:Buf}>
+		return [
+			for (d in Dwarf.sections(objs, r -> r.sym.section != null && isLive(r.sym.section) && addr.exists(r.sym.section), r -> symAddr(r.sym), 0))
+				{name: "." + d.name, data: d.data}
+		];
+
 	public var symbols = true; // write a symbol table of the code (profilers, debuggers)
 	// -D hxmc.jit: every global symbol of the executable, "<name> <kind> <value>" per
 	// line (t code, d data, a absolute, l TLS: the thread-pointer offset), for
@@ -139,6 +246,7 @@ class Link {
 		resolve();
 		gc(entry);
 		makeGot();
+		unwindObj();
 		// linker-defined symbols, defined below once the layout is known
 		var defined = new Map<String, Int>();
 		var all:Array<Section> = [];
@@ -153,7 +261,7 @@ class Link {
 		var fini = [for (s in all) if (s.kind == FiniArray) s];
 		var data = [for (s in all) if (s.kind == Data) s];
 		var bss = [for (s in all) if (s.kind == Bss) s];
-		var nph = 5; // LOAD r, LOAD rx, LOAD rw, TLS, GNU_STACK
+		var nph = ehFrame != null ? 6 : 5; // LOAD r, LOAD rx, LOAD rw, TLS, GNU_STACK, GNU_EH_FRAME
 		var headers = 64 + 56 * nph;
 		var pos = BASE + headers;
 		function place(list:Array<Section>) {
@@ -216,6 +324,7 @@ class Link {
 		// relocations
 		for (s in all)
 			if (s.kind != Bss && s.kind != Tbss) apply(s);
+		fillUnwind();
 		if (hostSyms != null) writeHostSyms(defined);
 		// the image
 		var out = new Buf(fileEnd - BASE + 4096);
@@ -235,15 +344,17 @@ class Link {
 		h.u32(1);
 		h.i64(symAddr(entrySym(entry)));
 		h.i64(64); // phoff
-		var shoff = symbols ? symbolTable(out, all, textStart, textEnd) : 0;
+		var secs:Array<SecHdr> = [{name: ".text", type: 1, flags: 6, addr: textStart, off: textStart - BASE, size: textEnd - textStart, link: 0, info: 0, align: 16, entsize: 0}];
+		unwindHeaders(secs);
+		var shoff = sectionHeaders(out, secs, 1);
 		h.i64(shoff); // shoff
 		h.u32(0);
 		h.u16(64);
 		h.u16(56);
 		h.u16(nph);
 		h.u16(64);
-		h.u16(symbols ? 5 : 0);
-		h.u16(symbols ? 4 : 0);
+		h.u16(secs.length + 2);
+		h.u16(secs.length + 1);
 		// program headers
 		function ph(type:Int, flags:Int, off:Int, vaddr:Int, filesz:Int, memsz:Int, al:Int) {
 			h.u32(type);
@@ -259,51 +370,66 @@ class Link {
 		ph(1, 5, textStart - BASE, textStart, textEnd - textStart, textEnd - textStart, PAGE);
 		ph(1, 6, dataStart - BASE, dataStart, fileEnd - dataStart, dataEnd - dataStart, PAGE);
 		ph(7, 4, tlsStart - BASE, tlsStart, tdataEnd - tlsStart, tlsSize, tlsAlign);
+		if (ehFrameHdr != null) ph(0x6474e550, 4, addr.get(ehFrameHdr) - BASE, addr.get(ehFrameHdr), ehFrameHdr.size(), ehFrameHdr.size(), 4);
 		ph(0x6474e551, 6, 0, 0, 0, 0, 16);
 		out.b.blit(0, h.b, 0, h.len);
 		return out.toBytes();
 	}
 
-	// appends .symtab (the symbols of code), .strtab, .shstrtab and the
-	// section headers (null, .text, .symtab, .strtab, .shstrtab) to the
-	// image; returns the offset of the headers. Nothing loads them.
-	function symbolTable(out:Buf, all:Array<Section>, textStart:Int, textEnd:Int):Int {
-		var strtab = new Buf(1 << 16);
-		strtab.u8(0);
-		var symtab = new Buf(1 << 16);
-		symtab.zeros(24);
-		var locals = new Buf(1 << 16), globals = new Buf(1 << 16);
-		var nlocal = 1, nglobal = 0;
-		for (o in objs)
-			for (s in o.symbols) {
-				var sec = s.section;
-				if (sec == null || sec.kind != Text || !addr.exists(sec) || s.abs || s.name.length == 0 || StringTools.startsWith(s.name, ".L")) continue;
-				var b = s.global ? globals : locals;
-				if (s.global) nglobal++ else nlocal++;
-				b.u32(strtab.len);
-				strtab.str(s.name);
-				strtab.u8(0);
-				b.u8((s.global ? 0x10 : 0) | 2); // STT_FUNC
-				b.u8(0);
-				b.u16(1); // .text
-				b.i64(addr.get(sec) + s.offset);
-				b.i64(s.size);
-			}
-		symtab.buf(locals);
-		symtab.buf(globals);
-		var shstr = new Buf(64);
+	// appends what nothing loads to the image: (-debug) the DWARF sections,
+	// (with `symbols`) .symtab and .strtab of the code, .shstrtab and the
+	// section headers (null, `secs`, those, .shstrtab last; textIndex: the
+	// header of .text, the symbols' section); returns the headers' offset
+	function sectionHeaders(out:Buf, secs:Array<SecHdr>, textIndex:Int):Int {
+		for (d in debugSections()) {
+			var off = out.len;
+			out.buf(d.data);
+			secs.push({name: d.name, type: 1, flags: 0, addr: 0, off: off, size: d.data.len, link: 0, info: 0, align: 1, entsize: 0});
+		}
+		if (symbols) {
+			var strtab = new Buf(1 << 16);
+			strtab.u8(0);
+			var symtab = new Buf(1 << 16);
+			symtab.zeros(24);
+			var locals = new Buf(1 << 16), globals = new Buf(1 << 16);
+			var nlocal = 1;
+			for (o in objs)
+				for (s in o.symbols) {
+					var sec = s.section;
+					if (sec == null || sec.kind != Text || !addr.exists(sec) || s.abs || s.name.length == 0 || StringTools.startsWith(s.name, ".L")) continue;
+					var b = s.global ? globals : locals;
+					if (!s.global) nlocal++;
+					b.u32(strtab.len);
+					strtab.str(s.name);
+					strtab.u8(0);
+					b.u8((s.global ? 0x10 : 0) | 2); // STT_FUNC
+					b.u8(0);
+					b.u16(textIndex);
+					b.i64(addr.get(sec) + s.offset);
+					b.i64(s.size);
+				}
+			symtab.buf(locals);
+			symtab.buf(globals);
+			out.align(8);
+			var symOff = out.len;
+			out.buf(symtab);
+			var strOff = out.len;
+			out.buf(strtab);
+			var n = secs.length + 1;
+			secs.push({name: ".symtab", type: 2, flags: 0, addr: 0, off: symOff, size: symtab.len, link: n + 1, info: nlocal, align: 8, entsize: 24});
+			secs.push({name: ".strtab", type: 3, flags: 0, addr: 0, off: strOff, size: strtab.len, link: 0, info: 0, align: 1, entsize: 0});
+		}
+		var shstr = new Buf(256);
 		shstr.u8(0);
 		var names = [];
-		for (n in [".text", ".symtab", ".strtab", ".shstrtab"]) {
+		for (s in secs) {
 			names.push(shstr.len);
-			shstr.str(n);
+			shstr.str(s.name);
 			shstr.u8(0);
 		}
-		out.align(8);
-		var symOff = out.len;
-		out.buf(symtab);
-		var strOff = out.len;
-		out.buf(strtab);
+		var shName = shstr.len;
+		shstr.str(".shstrtab");
+		shstr.u8(0);
 		var shstrOff = out.len;
 		out.buf(shstr);
 		out.align(8);
@@ -321,10 +447,11 @@ class Link {
 			out.i64(entsize);
 		}
 		sh(0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
-		sh(names[0], 1, 6, textStart, textStart - BASE, textEnd - textStart, 0, 0, 16, 0);
-		sh(names[1], 2, 0, 0, symOff, symtab.len, 3, nlocal, 8, 24);
-		sh(names[2], 3, 0, 0, strOff, strtab.len, 0, 0, 1, 0);
-		sh(names[3], 3, 0, 0, shstrOff, shstr.len, 0, 0, 1, 0);
+		for (k in 0...secs.length) {
+			var s = secs[k];
+			sh(names[k], s.type, s.flags, s.addr, s.off, s.size, s.link, s.info, s.align, s.entsize);
+		}
+		sh(shName, 3, 0, 0, shstrOff, shstr.len, 0, 0, 1, 0);
 		return shoff;
 	}
 
@@ -433,3 +560,5 @@ class Link {
 		}
 	}
 }
+
+typedef SecHdr = {name:String, type:Int, flags:Int, addr:Int, off:Int, size:Int, link:Int, info:Int, align:Int, entsize:Int}

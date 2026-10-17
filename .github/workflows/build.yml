@@ -1000,6 +1000,16 @@ jobs:
         run: |
           export HAXE_STD_PATH="${{ steps.unpack.outputs.std }}"
           RT_VERIFY=1 "${{ steps.unpack.outputs.bin }}" -cp hxmc/test -cp haxe/test --run Check corpus --summary "$GITHUB_STEP_SUMMARY"
+      # a debugger on a -debug build (DebugCheck --run: a breakpoint at a Haxe
+      # line, the backtrace's Haxe functions and lines): gdb on Linux, lldb on
+      # macOS; Windows: the unwind tables through the corpus (UnwindTables)
+      - name: Debugger
+        if: always() && runner.os != 'Windows'
+        run: |
+          set -ex
+          if [ "$RUNNER_OS" = Linux ] && ! command -v gdb > /dev/null; then sudo apt-get install -qqy gdb; fi
+          export HAXE_STD_PATH="${{ steps.unpack.outputs.std }}"
+          "${{ steps.unpack.outputs.bin }}" -cp hxmc/test -cp haxe/test --run DebugCheck --run corpus/_debug
       # Linux: the corpus in the dynamic glibc mode (-D hxmc.libc=glibc) against
       # the runner's glibc, and against glibc 2.17, the floor its symbol
       # versions are pinned to (CentOS 7's, in a container; the release

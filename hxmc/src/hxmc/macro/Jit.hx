@@ -1,6 +1,6 @@
 package hxmc.macro;
 
-// Native macros (hxmc/PLANS.md, "Native macros"): macro code compiled by
+// Native macros (docs/plans/compiler.md, "Native macros"): macro code compiled by
 // hxmc and loaded into the running compiler, an hxmc executable built with
 // -D hxmc.jit (Linux x86-64). The parts:
 //   Guest         the compile of the macro modules, in a child process of the

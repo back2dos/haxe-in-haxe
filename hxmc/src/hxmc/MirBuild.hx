@@ -65,7 +65,12 @@ class MirBuild {
 
 	// ---- instruction helpers
 
+	// (-debug) the source position of the statement being built (SrcPos):
+	// the instructions it adds carry it
+	var curPos = 0;
+
 	function add(i:MIns):Int {
+		if (i.pos == 0) i.pos = curPos;
 		i.id = f.vals.length;
 		f.vals.push(i);
 		i.block = cur;
@@ -904,10 +909,20 @@ class MirBuild {
 	// ---- statements
 
 	function stmts(ss:Array<Stmt>) {
+		// (a nested list's positions end with it: the code after it, or another
+		// branch, has the position it had before)
+		var saved = curPos;
 		for (s in ss) {
+			switch s {
+				case SPos(file, line):
+					curPos = SrcPos.id(file, line);
+					continue;
+				case _:
+			}
 			if (terminated()) deadBlock();
 			stmt(s);
 		}
+		curPos = saved;
 	}
 
 	function stmt(s:Stmt) {
@@ -1038,6 +1053,8 @@ class MirBuild {
 				add(mk(Unreachable, Void));
 			case STry(body, catches):
 				tryStmt(body, catches);
+			case SPos(file, line):
+				curPos = SrcPos.id(file, line);
 		}
 	}
 

@@ -13,7 +13,7 @@ enum Ty {
 	TI64; // haxe.Int64 (hxmc.I64): an int64_t, boxed in Dynamic
 	TVoid;
 	TRef(r:RefTy);
-	// a @:hxmc.struct value (hxmc/LOWLEVEL.md, "Struct values"): the address
+	// a @:hxmc.struct value (docs/plans/lowlevel.md, "Struct values"): the address
 	// of its memory (an I64), which the lowering copies on assignment;
 	// the class's dot path and its size in bytes
 	TStruct(name:String, size:Int);
@@ -340,6 +340,10 @@ enum Stmt {
 	// allocation or array store: the references live across it are stored in
 	// the shadow stack only on that path (hxmc.Roots)
 	SCold(id:Int, s:Stmt);
+	// (-debug: Lower.lines) the code of the statements that follow comes from
+	// this line of the source (the typed AST's position); nothing else: every
+	// pass steps over it, so the code is the same as without it
+	SPos(file:String, line:Int);
 }
 
 class Program {

@@ -20,10 +20,15 @@ class Options {
 	public var wasmLegacyEh = false;
 	// -D hxmc.libc=glibc: Linux, a dynamically linked executable against the system's glibc (Abi.setLibc; default: musl, static)
 	public var libc:Null<String> = null;
-	// -D hxmc.frame-pointers (also -debug; HXMC_FRAME_POINTERS=1, =0 off): x86-64
-	// functions keep a frame record (push rbp; mov rbp, rsp), so profilers and
-	// debuggers walk the stack by frame pointer (arm64 always has them: Abi)
-	public var framePointers = false;
+	// x86-64 functions keep a frame record (push rbp; mov rbp, rsp), so
+	// profilers and debuggers walk the stack by frame pointer: the default;
+	// -D hxmc.no-frame-pointers (or HXMC_FRAME_POINTERS=0) off (arm64 always
+	// has them: Abi)
+	public var framePointers = true;
+	// -debug (or -D hxmc.lines alone): source lines (DWARF .debug_line and
+	// .debug_info on ELF and Mach-O) from the typed AST's positions
+	// (hxmc.ir.Ir.Stmt.SPos)
+	public var debugLines = false;
 	// -D hxmc.jit: a compiler that can load native macros (hxmc/src/hxmc/macro): spare
 	// type and signature table entries, every runtime function kept, the
 	// symbols written next to the executable (<out>.syms); Linux x86-64, static
@@ -89,7 +94,8 @@ class Options {
 		}
 		o.libc = def("hxmc.libc");
 		var fp = def("hxmc.frame_pointers"), fpEnv = env("HXMC_FRAME_POINTERS");
-		o.framePointers = fpEnv != null && fpEnv != "" ? fpEnv != "0" : fp != null ? fp != "0" : def("debug") != null;
+		o.framePointers = fpEnv != null && fpEnv != "" ? fpEnv != "0" : def("hxmc.no_frame_pointers") != null ? false : fp == null || fp != "0";
+		o.debugLines = def("debug") != null || def("hxmc.lines") != null;
 		o.jit = def("hxmc.jit") != null;
 		if (o.jit && (o.target != "linux-x86_64" || o.libc != null)) throw "hxmc: -D hxmc.jit: linux-x86_64 (static) only";
 		var j = def("hxmc.jobs");
