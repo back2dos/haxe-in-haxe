@@ -45,7 +45,7 @@ class FuncGen {
 			var a = f.args[i];
 			local.set(a.id, nparams++);
 			localKey.set(a.id, m.paramKey(f, i));
-			if (m.directOnly(f)) continue;
+			if (m.precise(f)) continue;
 			// (a parameter of a class type, or this: cast once into a local of its type)
 			var k = i == 0 && f.selfClass != null ? "t" + m.classType(f.selfClass) : keyOf(a.ty);
 			if (k.charAt(0) == "t") shadows.push({param: nparams - 1, id: a.id, key: k});
@@ -59,14 +59,15 @@ class FuncGen {
 			local.set(s.id, i);
 			localKey.set(s.id, s.key);
 		}
-		for (l in f.locals)
+		var code = m.reach.bodies.get(f);
+		for (l in code.locals)
 			if (!local.exists(l.id) && repr(l.ty) != "v") {
 				local.set(l.id, nparams + extra.length);
 				var k = keyOf(l.ty);
 				extra.push(k);
 				localKey.set(l.id, k);
 			}
-		for (s in f.body)
+		for (s in code.body)
 			stmt(s);
 		if (repr(f.ret) != "v") b.u8(0x00); // (a value-returning function ends with a return)
 		b.u8(0x0B);
@@ -205,21 +206,38 @@ class FuncGen {
 				if (fk.charAt(0) == "t") exprAs(v, Std.parseInt(fk.substr(1))) else expr(v);
 				gc(0x05, m.classType(c), idx + 1);
 			case SAnonSet(name, t, o, v):
-				// (through the runtime: the field may be one added dynamically)
+				// (directly into a layout made here that has the field, else through
+				// the runtime: the field may be one added dynamically)
+				var tmp = temp("p");
+				var vx = inLocal(v);
 				expr(o);
+				localSet(tmp);
+				var cands = anonCands(name, t, null);
+				block(FPlain, 0x02);
+				for (s in cands) {
+					op(0x02);
+					op(0x6D);
+					localGet(tmp);
+					castShape(s);
+					localGet(vx.l);
+					gc(0x05, m.shapeType(s), s.slot(name) + 1);
+					op(0x0C);
+					Enc.uleb(b, 1);
+					op(0x0B);
+					op(0x1A);
+				}
+				localGet(tmp);
 				expr(EStr(name));
-				expr(v);
+				localGet(vx.l);
 				boxTop(t);
 				call(m.exportOf("gc_anon_set"));
+				end();
+				vx.done();
+				release("p", tmp);
 			case SArrSet(elem, a, i, v):
-				localGet(local.get(a.id));
-				expr(i);
-				expr(v);
-				call(Helpers.arrSet(m, GcModule.elemKind(elem)));
+				arrSet(GcModule.elemKind(elem), local.get(a.id), i, v);
 			case SArrPush(elem, a, v):
-				localGet(local.get(a.id));
-				expr(v);
-				call(Helpers.arrPush(m, GcModule.elemKind(elem)));
+				arrPush(GcModule.elemKind(elem), local.get(a.id), v);
 			case SBoxSet(t, bx, v):
 				expr(bx);
 				castTo(m.boxType(t));
@@ -336,6 +354,175 @@ class FuncGen {
 		stmts(def);
 		end();
 		release("i", t);
+	}
+
+	// ---- arrays: the fast path inline (an array of the kind expected, in range),
+	// else the helper's (another kind, growing, out of range: Helpers)
+
+	// br_on_cast_fail to the enclosing block (its result an eqref): the eqref on
+	// the stack not an array of kind k; else the array, then in tmp
+	function castArr(k:String):Int {
+		op(0xFB);
+		op(0x19);
+		op(1); // (nullable eqref in, a non-null array out)
+		Enc.uleb(b, 0);
+		op(0x6D);
+		Enc.sleb(b, m.arrType(k));
+		var t = temp("t" + m.arrType(k));
+		localSet(t);
+		return t;
+	}
+
+	// the value of e in a local (a temporary unless e is one), and its release
+	function inLocal(e:Ex):{l:Int, done:Void->Void} {
+		switch e {
+			case ELocal(l) if (local.exists(l.id)):
+				return {l: local.get(l.id), done: () -> {}};
+			case _:
+				var k = rOf(e);
+				var t = temp(k);
+				expr(e);
+				localSet(t);
+				return {l: t, done: () -> release(k, t)};
+		}
+	}
+
+	function arrGet(k:String, a:Ex, i:Ex) {
+		var r = k == "b" ? "i" : k;
+		var ix = inLocal(i);
+		op(0x02); // the result
+		blockType(r);
+		frames.push(FPlain);
+		op(0x02); // the slow path: the eqref
+		op(0x6D);
+		frames.push(FPlain);
+		expr(a);
+		var t = castArr(k);
+		localGet(ix.l);
+		localGet(t);
+		gc(0x02, m.arrType(k), 0);
+		op(0x49); // i32.lt_u
+		op(0x04);
+		blockType(r);
+		localGet(t);
+		gc(0x02, m.arrType(k), 1);
+		localGet(ix.l);
+		gc(0x0B, m.dataType(k));
+		op(0x05);
+		m.constZero(b, r);
+		op(0x0B);
+		op(0x0C);
+		Enc.uleb(b, 1);
+		end();
+		localGet(ix.l);
+		call(Helpers.arrGet(m, k));
+		end();
+		release("t" + m.arrType(k), t);
+		ix.done();
+	}
+
+	function arrSet(k:String, a:Int, i:Ex, v:Ex) {
+		var ix = inLocal(i), vx = inLocal(v);
+		block(FPlain, 0x02); // the end
+		op(0x02); // the slow path: the eqref
+		op(0x6D);
+		frames.push(FPlain);
+		localGet(a);
+		var t = castArr(k);
+		localGet(ix.l);
+		localGet(t);
+		gc(0x02, m.arrType(k), 0);
+		op(0x49);
+		op(0x04);
+		op(0x40);
+		localGet(t);
+		gc(0x02, m.arrType(k), 1);
+		localGet(ix.l);
+		localGet(vx.l);
+		gc(0x0E, m.dataType(k));
+		op(0x0C);
+		Enc.uleb(b, 2);
+		op(0x0B);
+		localGet(t);
+		end();
+		localGet(ix.l);
+		localGet(vx.l);
+		call(Helpers.arrSet(m, k));
+		end();
+		release("t" + m.arrType(k), t);
+		vx.done();
+		ix.done();
+	}
+
+	function arrPush(k:String, a:Int, v:Ex) {
+		var vx = inLocal(v);
+		var n = temp("i");
+		block(FPlain, 0x02); // the end
+		op(0x02); // the slow path: the eqref
+		op(0x6D);
+		frames.push(FPlain);
+		localGet(a);
+		var t = castArr(k);
+		// (room in the storage: stored at the length, which grows by one)
+		localGet(t);
+		gc(0x02, m.arrType(k), 0);
+		localTee(n);
+		localGet(t);
+		gc(0x02, m.arrType(k), 1);
+		gc(0x0F);
+		op(0x49);
+		op(0x04);
+		op(0x40);
+		localGet(t);
+		gc(0x02, m.arrType(k), 1);
+		localGet(n);
+		localGet(vx.l);
+		gc(0x0E, m.dataType(k));
+		localGet(t);
+		localGet(n);
+		i32(1);
+		op(0x6A);
+		gc(0x05, m.arrType(k), 0);
+		op(0x0C);
+		Enc.uleb(b, 2);
+		op(0x0B);
+		localGet(t);
+		end();
+		localGet(vx.l);
+		call(Helpers.arrPush(m, k));
+		end();
+		release("i", n);
+		release("t" + m.arrType(k), t);
+		vx.done();
+	}
+
+	// ---- anonymous structures
+
+	// the layouts (of the anonymous structures made) that may hold the field, of
+	// t's representation: the type's own first; none when more than ANON_CANDS
+	static inline var ANON_CANDS = 6;
+
+	function anonCands(name:String, t:Ty, hint:Null<ShapeInfo>):Array<ShapeInfo> {
+		var r = repr(t);
+		function has(s:ShapeInfo):Bool {
+			var k = s.slot(name);
+			return k > 0 && repr(s.fields[k - 1].ty) == r;
+		}
+		var out = hint != null && has(hint) ? [hint] : [];
+		for (s in m.reach.shapes.keys())
+			if (s != hint && has(s)) out.push(s);
+		if (out.length > ANON_CANDS) out = hint != null && has(hint) ? [hint] : [];
+		return out;
+	}
+
+	// br_on_cast_fail to the enclosing block (its result an eqref) unless the eqref on the stack has the layout
+	function castShape(s:ShapeInfo) {
+		op(0xFB);
+		op(0x19);
+		op(1);
+		Enc.uleb(b, 0);
+		op(0x6D);
+		Enc.sleb(b, m.shapeType(s));
 	}
 
 	var excCount = 0;
@@ -484,27 +671,31 @@ class FuncGen {
 			case EFieldAddr(_, _, _):
 				unsupported("the address of a struct field");
 			case EAnonGet(name, t, o, hint):
-				// (directly when the object has the layout of the type, else through the runtime)
-				var r = repr(t);
+				// (directly when the object has a layout made here with the field, the
+				// type's first, else through the runtime)
 				var tmp = temp("p");
 				expr(o);
-				localTee(tmp);
-				if (hint != null) {
-					op(0xFB);
-					op(0x14);
-					Enc.sleb(b, m.shapeType(hint));
-					op(0x04);
-					blockType(r);
+				localSet(tmp);
+				var cands = anonCands(name, t, hint);
+				op(0x02);
+				blockType(repr(t));
+				frames.push(FPlain);
+				for (s in cands) {
+					op(0x02);
+					op(0x6D);
 					localGet(tmp);
-					castTo(m.shapeType(hint));
-					gc(0x02, m.shapeType(hint), hint.slot(name) + 1);
-					op(0x05);
-					localGet(tmp);
+					castShape(s);
+					gc(0x02, m.shapeType(s), s.slot(name) + 1);
+					op(0x0C);
+					Enc.uleb(b, 1);
+					op(0x0B);
+					op(0x1A);
 				}
+				localGet(tmp);
 				expr(EStr(name));
 				call(m.exportOf("gc_anon_get"));
 				unboxTop(t);
-				if (hint != null) op(0x0B);
+				end();
 				release("p", tmp);
 			case ECast(t, x):
 				if (repr(t) != rOf(x)) unsupported("a cast from " + rOf(x) + " to " + repr(t));
@@ -529,9 +720,7 @@ class FuncGen {
 				castTo(m.arrBaseType);
 				gc(0x02, m.arrBaseType, 0);
 			case EArrGet(t, a, i):
-				expr(a);
-				expr(i);
-				call(Helpers.arrGet(m, GcModule.elemKind(t)));
+				arrGet(GcModule.elemKind(t), a, i);
 			case EArrGetU(t, a, i):
 				var k = GcModule.elemKind(t);
 				expr(a);

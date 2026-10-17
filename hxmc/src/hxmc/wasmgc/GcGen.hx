@@ -7,7 +7,7 @@ import hxmc.ir.Ir;
 // "WasmGC"). Only what main and the static initializers reach is emitted.
 class GcGen {
 	public static function run(prog:Program, out:String, o:Options) {
-		var r = new Reach(prog);
+		var r = new Reach(prog, o.opt);
 		if (Sys.getEnv("HXMC_GC_SURVEY") == "1") {
 			r.report();
 			return;
@@ -26,12 +26,19 @@ class Reach {
 	public final sels = new Map<Int, Bool>();
 	public final classes = new Map<ClassInfo, Bool>();
 	public final lambdas = new Map<LambdaInfo, Bool>();
+	public final shapes = new Map<ShapeInfo, Bool>(); // the anonymous structures' layouts made
 	// the names called through structural types (ECallAnon): the classes' methods of these names
 	public final anonNames = new Map<String, Bool>();
+	// the functions' bodies and locals as emitted (IrOpt: inlined, objects scalar-replaced)
+	public final bodies = new Map<FuncInfo, {body:Array<Stmt>, locals:Array<Local>}>();
+	final opt:IrOpt;
+	final optimize:Bool;
 	var queue:Array<FuncInfo> = [];
 
-	public function new(prog:Program) {
+	public function new(prog:Program, optimize:Bool) {
 		this.prog = prog;
+		this.optimize = optimize;
+		opt = new IrOpt();
 		for (f in prog.inits)
 			add(f);
 		add(prog.main);
@@ -88,7 +95,9 @@ class Reach {
 	}
 
 	function scan(f:FuncInfo) {
-		for (s in f.body)
+		var b = opt.run(f, optimize);
+		bodies.set(f, b);
+		for (s in b.body)
 			stmt(s);
 	}
 
@@ -118,6 +127,7 @@ class Reach {
 					case _:
 				}
 			case ENewObj(c): cls(c);
+			case ENewAnon(s, _): shapes.set(s, true);
 			case EAnonGet(_): export("gc_anon_get");
 			case ECallAnon(n, _, _, _):
 				export("gc_anon_get");

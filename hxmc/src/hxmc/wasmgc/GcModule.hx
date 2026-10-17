@@ -24,7 +24,7 @@ import hxmc.wasmgc.GcGen.Reach;
 // value (node 22 runs them without flags).
 class GcModule {
 	final prog:Program;
-	final reach:Reach;
+	public final reach:Reach;
 
 	// ---- types
 	final types:Array<Buf> = []; // each subtype's encoding, in index order
@@ -133,6 +133,7 @@ class GcModule {
 		var t = newType();
 		var b = types[t];
 		b.u8(open ? 0x50 : 0x4F);
+		if (sup >= 0) superOf.set(t, sup);
 		if (sup >= 0) {
 			b.u8(1);
 			Enc.uleb(b, sup);
@@ -202,24 +203,49 @@ class GcModule {
 		return t;
 	}
 
-	// a type the IR's type proves (a class's), else the representation (as FuncGen's locals)
+	// a type the IR's type proves (a class's, an array's, an enum's, a closure's),
+	// else the representation (as FuncGen's locals)
 	public function keyOf(t:Ty):String
 		return switch t {
 			case TRef(RObj(c)) if (!c.isInterface): "t" + classType(c);
 			case TRef(RStr): "t" + tString;
+			case TRef(RArr(_)): "t" + tArrBase;
+			case TRef(REnum(e)): "t" + (e == null ? tEnum : tEnumOf.get(e));
+			case TRef(RClos(s)): "t" + closType(s);
 			case _: repr(t);
 		}
 
-	// called only directly (not a method in the dispatch table, a closure's body or
-	// an export): its signature is its own, its class-typed parameters and result typed
-	public function directOnly(f:FuncInfo):Bool
-		return f.lambda == null && f.selfClass == null && f.cSymbol == null;
+	// not a closure's body or an export: its signature is its own, its parameters
+	// (a method's this: its class) and result typed (keyOf); the dispatch table
+	// and structural calls reach a method through a wrapper of the table's
+	// signature (tableFunc)
+	public function precise(f:FuncInfo):Bool
+		return f.lambda == null && f.cSymbol == null;
 
 	public function paramKey(f:FuncInfo, i:Int):String
-		return directOnly(f) ? keyOf(f.args[i].ty) : repr(f.args[i].ty);
+		return !precise(f) ? repr(f.args[i].ty) : i == 0 && f.selfClass != null ? "t" + classType(f.selfClass) : keyOf(f.args[i].ty);
 
 	public function retKey(f:FuncInfo):String
-		return directOnly(f) ? keyOf(f.ret) : repr(f.ret);
+		return precise(f) ? keyOf(f.ret) : repr(f.ret);
+
+	// the function of f with the table's signature (by representation): f, or its wrapper
+	public function tableFunc(f:FuncInfo):Int {
+		var fi = funcOf(f);
+		if (!precise(f)) return fi;
+		var name = "table:" + fi;
+		var h = hasHelper(name);
+		if (h != null) return h;
+		var b = new Buf();
+		for (i in 0...f.args.length) {
+			b.u8(0x20);
+			Enc.uleb(b, i);
+			var k = paramKey(f, i);
+			if (k.charAt(0) == "t") castTo(b, Std.parseInt(k.substr(1)));
+		}
+		b.u8(0x10);
+		Enc.uleb(b, fi);
+		return addHelper(name, funcKey(f), b, []);
+	}
 
 	public static function sigKey(args:Array<Ty>, ret:Ty):String
 		return [for (a in args) repr(a)].join("") + "_" + repr(ret);
@@ -246,6 +272,14 @@ class GcModule {
 			tDyn.set(k, structType([{r: k == "b" ? "i" : k, mut: false}], -1, false));
 		for (k in ["i", "f", "l", "p"])
 			tBox.set(k, structType([{r: k, mut: true}], -1, false));
+		// (before the classes: their fields may be of these types)
+		for (e in prog.enums) {
+			var te = structType([{r: "i", mut: false}, {r: "i", mut: false}], tEnum, Lambda.exists(e.ctors, c -> c.params.length > 0));
+			tEnumOf.set(e, te);
+			for (c in e.ctors)
+				if (c.params.length > 0)
+					tCtor.set(c, structType([{r: "i", mut: false}, {r: "i", mut: false}].concat([for (p in c.params) {r: repr(p), mut: false}]), te, false));
+		}
 		// classes in preorder: a superclass before its subclasses
 		var cs = [for (c in reach.classes.keys()) c];
 		cs.sort((a, b) -> a.id - b.id);
@@ -254,13 +288,6 @@ class GcModule {
 			clsIndex.set(c, clsList.length);
 			clsList.push(c);
 			if (c.sup == null) tObj = tClass.get(c);
-		}
-		for (e in prog.enums) {
-			var te = structType([{r: "i", mut: false}, {r: "i", mut: false}], tEnum, true);
-			tEnumOf.set(e, te);
-			for (c in e.ctors)
-				if (c.params.length > 0)
-					tCtor.set(c, structType([{r: "i", mut: false}, {r: "i", mut: false}].concat([for (p in c.params) {r: repr(p), mut: false}]), te, false));
 		}
 		for (l in reach.lambdas.keys())
 			lambdaType(l);
@@ -344,6 +371,12 @@ class GcModule {
 			}
 		];
 		if (dynCallBody != null) writeDynCall();
+		// (the table's wrappers, before the module is written)
+		for (c in clsList)
+			for (s in reach.sels.keys()) {
+				var f = c.findMethod(prog.selectors[s].name);
+				if (f != null && funcIndex.exists(f)) tableFunc(f);
+			}
 		// the start: Meta's tables, the initializers, then main
 		var start = new Buf();
 		meta.fill(start);
@@ -498,11 +531,19 @@ class GcModule {
 	}
 
 	public function typeOfFunc(f:FuncInfo):Int
-		return directOnly(f) ? funcTypeTokens([for (i in 0...f.args.length) paramKey(f, i)], retKey(f)) : funcType(funcKey(f));
+		return precise(f) ? funcTypeTokens([for (i in 0...f.args.length) paramKey(f, i)], retKey(f)) : funcType(funcKey(f));
+
+	// the classes some class extends (the others' types are final: a cast to one compares the type alone)
+	var extended:Null<Map<ClassInfo, Bool>>;
 
 	// a class's type, made when first asked for (after its superclass's; its index
 	// taken before its fields are written: they may name classes that name it)
 	public function classType(c:ClassInfo):Int {
+		if (extended == null) {
+			extended = new Map();
+			for (k in prog.classes)
+				if (k.sup != null) extended.set(k.sup, true);
+		}
 		var t = tClass.get(c);
 		if (t != null) return t;
 		var sup = c.sup == null ? -1 : classType(c.sup);
@@ -510,9 +551,9 @@ class GcModule {
 		if (t != null) return t;
 		t = newType();
 		tClass.set(c, t);
-		classOfType.set(t, c);
+		if (sup >= 0) superOf.set(t, sup);
 		var b = types[t];
-		b.u8(0x50);
+		b.u8(extended.exists(c) ? 0x50 : 0x4F);
 		if (sup >= 0) {
 			b.u8(1);
 			Enc.uleb(b, sup);
@@ -533,17 +574,14 @@ class GcModule {
 	public function fieldKey(c:ClassInfo, idx:Int):String
 		return keyOf(c.fields[idx].ty);
 
-	// whether type a is t or a subtype (classes: by their hierarchy)
-	final classOfType = new Map<Int, ClassInfo>();
+	// whether type a is t or a subtype (by the declared supertypes)
+	final superOf = new Map<Int, Int>();
 
 	public function isSubtype(a:Int, t:Int):Bool {
-		if (a == t) return true;
-		var ca = classOfType.get(a), ct = classOfType.get(t);
-		if (ca == null || ct == null) return false;
-		var k = ca;
+		var k:Null<Int> = a;
 		while (k != null) {
-			if (k == ct) return true;
-			k = k.sup;
+			if (k == t) return true;
+			k = superOf.get(k);
 		}
 		return false;
 	}
@@ -884,7 +922,7 @@ class GcModule {
 					var m = c.findMethod(prog.selectors[s].name);
 					if (m != null && funcIndex.exists(m)) {
 						seg.u8(0xD2);
-						Enc.uleb(seg, funcIndex.get(m));
+						Enc.uleb(seg, tableFunc(m));
 					} else {
 						seg.u8(0xD0);
 						seg.u8(0x70);

@@ -334,7 +334,7 @@ class Helpers {
 			for (i in 0...s.args.length + 1)
 				get(b, i);
 			b.u8(0x10);
-			Enc.uleb(b, m.funcOf(f));
+			Enc.uleb(b, m.tableFunc(f));
 			b.u8(0x0F);
 			b.u8(0x0B);
 		}

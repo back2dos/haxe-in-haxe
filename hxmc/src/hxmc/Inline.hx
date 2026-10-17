@@ -43,8 +43,11 @@ class Inline {
 	public static inline var DEPTH = 2; // levels of inlining (Fingerprint keys callers to that depth)
 
 	// whether f may be inlined (the IR test)
-	public static function candidate(f:FuncInfo):Bool {
-		if (f.hasTry) return false;
+	public static function candidate(f:FuncInfo):Bool
+		return !f.hasTry && irSize(f) <= MAX_IR;
+
+	// f's IR nodes, counted up to one past MAX_IR (also WasmGC's test: hxmc.wasmgc.IrOpt)
+	public static function irSize(f:FuncInfo):Int {
 		var n = 0;
 		function ex(e:Ex) {
 			if (++n > MAX_IR) return;
@@ -57,9 +60,9 @@ class Inline {
 		}
 		for (s in f.body) {
 			st(s);
-			if (n > MAX_IR) return false;
+			if (n > MAX_IR) break;
 		}
-		return true;
+		return n;
 	}
 
 	// the callee's Mir when it can be inlined (built once per caller module)

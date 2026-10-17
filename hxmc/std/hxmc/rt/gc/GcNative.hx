@@ -83,8 +83,11 @@ class GcNative {
 
 	// ---- fields (a class instance's or an anonymous structure's, then those added: GcFields)
 
-	// the index of the name among the names (strings compared directly), -1
+	// the index of the name among the names, -1: by reference first (the
+	// program's names are its literals, one string each), then by content
 	public static function find(names:Array<String>, name:String):Int {
+		for (i in 0...names.length)
+			if (W.same(names[i], name)) return i;
 		for (i in 0...names.length)
 			if (names[i] == name) return i;
 		return -1;
