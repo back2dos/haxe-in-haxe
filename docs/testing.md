@@ -92,9 +92,15 @@ and arm64, `gfx-macos` from the npm packages).
 wasm32-wasi, headless and in a canvas, in headless Chromium (SwiftShader;
 `packages/gfx/test/web.mjs`; CI's `gfx` job); CI checks the site's cube the
 same way (`hxmc/web/tools/browser-test.mjs`, the `playground` job: WebGPU
-and WebGL2 in Chromium, WebGL2 in Firefox, under Xvfb, and in WebKit).
+and WebGL2 in Chromium, WebGL2 in Firefox, under Xvfb, and in WebKit),
+and in Chromium on an emulated phone (touch, a 390x844 viewport, Chromium's
+own touch input through DevTools): a horizontal touch drag turns the still
+cube (its frame read back differs), a vertical swipe starting on the canvas
+scrolls the page (`touchAction: 'pan-y'`).
 `make gfx-shader-check`: the shader macro on Eval (shaders run on the CPU, the
-emitted sources, the programs it rejects: `packages/gfx/test/ShaderTest.hx`).
+emitted sources, the programs it rejects: `packages/gfx/test/ShaderTest.hx`),
+and the tests' PNG files (`Png.hx`: written as `--bless` writes them, in
+stored blocks of 65535 bytes, and read back).
 `gfx-check` and `gfx-web-check` also draw `FeatureScene` (buffer and texture
 writes, R8 and RGBA8 textures, blending, scissor) against
 `packages/gfx/test/features.png`.
