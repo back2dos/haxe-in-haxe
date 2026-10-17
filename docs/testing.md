@@ -116,7 +116,8 @@ typed through X11's input method under Xvfb, keys given other symbols: a
 Cyrillic letter, a dead key composed with the next). In the browser: `make ui-web-check` (the native form on the DOM's own
 controls, `native-web.mjs`; the todo example for
 wasm32-wasi in headless Chromium on WebGPU and WebGL2, driven by real pointer
-and keyboard events, against `todo.png`). CI runs all five in the `gfx` job.
+and keyboard events, an input method's composition through the DevTools
+protocol, against `todo.png`). CI runs all five in the `gfx` job.
 
 ## CI
 
