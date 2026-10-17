@@ -75,6 +75,71 @@ archives, without it.
   (`MacroContext.processedTypeHook`). Without it, `SaveStacks` added a
   `__skipStack++` each build, so blobs grew and were rewritten. A build
   whose modules are all restored skips the capture.
+- **Nondeterministic macros** (built): the macro std's natives tell the
+  cache what a macro's result depends on beyond the sources
+  (`EvalStdLib.volatileHook`, `fileHook`, `envHook`: null-default hooks the
+  wrapped natives call before they run), for the module being typed when
+  the macro runs (the top of the typing stack the static-variable tracking
+  uses).
+  - Volatile: `Date.now`, `Sys.time` (and `Timer.stamp`), `Sys.cpuTime`,
+    `Math.random`, `Std.random`, sockets, `sys.net.Host`, `sys.Http`,
+    `sys.ssl`, `Sys.command`, `sys.io.Process`, `Sys.getChar`, and
+    eval.luv's network, processes, signals, time, random, file system and
+    system information: the module is typed every build (its macros run);
+    its dependents stay restored through its interface as parsed, unless
+    the call was where they copy the result (an inline or macro field, a
+    field whose type is not written out, a build macro, a lazy typing):
+    then that interface counts as new every build, so its dependents (and
+    theirs, as for an interface edit) are typed again too.
+  - Reads instead of volatility: a file (`File.getContent`, `getBytes`,
+    `read`: its content's hash; `readDirectory`: the sorted listing;
+    `exists`, `isDirectory`: what is there; `stat`: date, size and mode;
+    `fullPath`: the result) and an environment variable (`Sys.getEnv`,
+    `Sys.environment`: all of it but hxmc's own `HXMC_*`; eval.luv's `Env`)
+    are reads of the module, kept with their values like a macro's
+    `Context.defined`: a variant per value, its interface its whole content.
+    A file touched but not changed leaves it restored. A macro reading the
+    module's own file (the view package's markup) adds nothing.
+    `registerModuleDependency` keeps working; a file it names that the
+    macro reads is both.
+  - Escape hatches: `@:hxmc.noCache` on a type of the module,
+    `-D hxmc.no-cache=<package, module, or a directory of its class path's
+    path such as a library's>` (comma-separated, read without entering the
+    key; without a value every module), both typing the module and its
+    dependents every build; `HXMC_MODULE_CACHE=0`. `HXMC_MODULE_CACHE_LOG=1`
+    says why (`Clock typed every build (macro called Date.now at
+    src/Macros.hx:4)`, `Data dirty: ... (data.txt, read by a macro)`), and
+    `HXMC_STATS=1` counts the modules typed from source, those typed every
+    build and those whose macros read files or the environment.
+  - `--wait` keeps upstream's behaviour (the hooks do nothing without the
+    disk cache). Init macros already bypass the cache.
+  - Gate (`make test-module-cache`, the nondet and nethttp programs, for
+    hxmc, JS and `--interp`, against builds without the cache, with the
+    modules typed from source counted): `Date.now` in a body (typed every
+    build, its dependent restored) and in an inline variable (its dependents
+    with it), a process, a file read (typed again when it changes, not when
+    touched), an environment variable, `@:hxmc.noCache`, `-D hxmc.no-cache`,
+    the log, a failing HTTP request.
+  - Found on the way: a module of the macros' context whose types share a
+    path (`@:native` on an abstract renames its implementation class to the
+    abstract's path, eval's `mbedtls.SslAuthmode`) cannot be restored (HXB
+    names a type by its module and name; restored, "Type name ... is
+    redefined"): it is not kept, nor what depends on it, so a macro using
+    `sys.Http` has its module's dependents typed every build. What stands
+    for a hash not known in a build now has a nonce (two builds made the
+    same string, so a stored hash could match it).
+  - Measured (one 4-core VM shared with other builds, seconds, before and
+    after): no module of hello, the formatter, tink_json (24 types through
+    `tink.Json`), the port, the gfx cube or the ui Todo is volatile or
+    reads a file or the environment (the std's macros included); warm builds
+    0.17/0.17 (hello), 0.41/0.43 (formatter), 1.94/1.86 (tink_json),
+    3.9/3.9 (the port), cold builds the same within the noise (the port
+    13.8-14.0/13.3-13.9). The hooks cost a null check where the cache is
+    off; with it on, a push per expression typed through `typeExprRef`.
+  - Limits: a file a macro writes is not tracked (nor a std class's statics:
+    "Macro state"); a volatile module is encoded again each build (its new
+    module id); a read of a whole directory tree is a read per call; eval.luv
+    file handles count as volatile, not as reads.
 - Cold runs (built): the interface hash walks the syntax tree directly
   and runs as each file is parsed, so no declarations are kept. File
   and closure hashes are a 64-bit two-lane hash instead of MD5. A build's
@@ -113,27 +178,6 @@ archives, without it.
 
 Open:
 
-- **Nondeterministic macros**: the cache is on by default, and the server
-  trusts them (a macro embedding `Date.now()` keeps its value until its
-  module changes). The macro std's natives are ours, so they decide per
-  module:
-  - Volatile: date and time (`Date.now`, `Sys.time`, `Timer.stamp`),
-    randomness, the network (`Http`, sockets), processes (`Sys.command`,
-    `sys.io.Process`) mark the module being typed as not cacheable; it is
-    typed again every build (its macros run), its dependents stay cached
-    unless its interface changes.
-  - Dependencies instead of volatility: a file a macro reads becomes a
-    dependency by content hash (stricter than upstream, where only
-    `registerModuleDependency` does it); an environment variable read goes
-    into the key with its value.
-  - Escape hatches: `@:hxmc.noCache` on a class or module,
-    `-D hxmc.no-cache=<lib>`, `HXMC_MODULE_CACHE=0`; `HXMC_MODULE_CACHE_LOG=1`
-    says why a module was not cached (the call and its position).
-  - `--wait` keeps upstream's behaviour (compatibility); the rule is the
-    disk cache's.
-  - Gate cases: a macro using `Date.now` runs every build, one reading a
-    file only when the file changes, one reading an environment variable
-    when its value changes.
 - **Macro state**: the tracking sees static variables, not state a macro
   keeps elsewhere (a file it writes, a std class's statics, the macro
   API's own registries beyond the callbacks). A conflict found late costs

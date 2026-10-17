@@ -109,7 +109,7 @@ endef
 	lix lix-release lix-dist reference bench test test-fuzz test-display test-server test-jsonrpc test-unit-targets test-interp \
 	test-haxelib test-eval-debugger test-node-libs test-module-cache smoke hxmc-test corpus-stage gfx-programs gfx-check gfx-web-check gfx-shader-check \
 	audio-programs audio-check audio-web-check native-macros ui-programs view-check web-check text-check ui-check ui-draw-check ui-web-check portcheck measure \
-	quick check full clean distclean
+	quick check full clean distclean wasmgc-check wasmgc-bench
 
 help:
 	@sed -n '/^# --- Targets/,$$p' $(MAKEFILE_LIST) | sed -n 's/^## \{0,1\}//p'
@@ -207,6 +207,9 @@ help:
 ##             HL, built by hxmc and the port: times, peak RSS, sizes (hxmc/test/Bench.hx; BENCH_ARGS)
 ## measure     peak memory and time of the self-compile (ours, the reference) and of the
 ##             tool's builds (haxe/test/Measure.hx)
+## wasmgc-check  -D hxmc.wasm-gc (WasmGC, an experiment): hxmc/test/wasmgc's programs as WasmGC
+##             modules under node, their output against the native build's (hxmc/test/GcCheck.hx);
+##             wasmgc-bench adds linear-memory wasm: times, peak RSS, sizes
 ## quick       after every edit (under a minute): the tool, then the x64 corpus, again with
 ##             RT_VERIFY=1, and the wasm corpus under node (CASES restricts the corpus)
 ## check       before a local commit (a few minutes): quick + arm64 (qemu), wine, a 16 KB
@@ -634,6 +637,12 @@ measure: $(TOOL) $(STD) $(HOST_RT) $(REFERENCE) $(PORT_BIN) bin/npm/native/wasm3
 
 quick: $(TOOL) $(STD) $(HOST_RT)
 	$(SCRIPT) Tiers quick $(CASES)
+
+wasmgc-check: $(TOOL) $(STD) $(HOST_RT)
+	$(SCRIPT) GcCheck
+
+wasmgc-bench: $(TOOL) $(STD) $(HOST_RT)
+	$(SCRIPT) GcCheck --bench
 
 check: $(TOOL) $(STD) $(HOST_RT)
 	$(SCRIPT) Tiers check $(if $(PORT),--port) $(CASES)
