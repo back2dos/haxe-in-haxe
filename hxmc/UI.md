@@ -316,6 +316,9 @@ Since the design above (October 2026), in this order:
   until committed: in the browser through a transparent textarea at the
   caret, on macOS through a text view at the caret (`NSTextInputClient`),
   on Windows with the IME's windows placed at the caret.
+- Text and images: CFF outlines (OpenType `.otf`, CID-keyed CJK fonts
+  too) and GPOS pair kerning in `@hxmc/text`; a JPEG decoder (baseline
+  and progressive, libjpeg's arithmetic: pixel-exact with Chromium's).
 
 Where this departs from section 6:
 
@@ -326,15 +329,15 @@ Where this departs from section 6:
 - **Text starts with a built-in rasterizer** rather than the platforms'
   shapers: the same pixels on every machine and target (golden images in
   CI, the browser without font files). Its limits are the shapers' reasons
-  to come next: no ligatures or mark positioning (GSUB, GPOS), no bidi, no
-  hinting or subpixel rendering, glyf outlines only (no CFF).
+  to come next: no ligatures or mark positioning (GSUB, GPOS's marks), no
+  bidi, no hinting or subpixel rendering, no variable fonts' CFF2.
 - **Layout uses CSS's automatic minimum size**, not Yoga's 0: items do not
   shrink below their content, so text is not squashed (a container that
   must shrink sets `minHeight: 0`, as in CSS).
 - **Not yet**: the native accessibility adapters (UI Automation,
   NSAccessibility, AT-SPI: the tree and its updates are ready), Windows'
-  compositions drawn in the field (its IME draws its own), JPEG and other
-  image formats; on X11 a clipboard over about 256 KB (sent in parts,
+  compositions drawn in the field (its IME draws its own), image formats
+  beyond PNG and JPEG; on X11 a clipboard over about 256 KB (sent in parts,
   INCR) is not read.
 
 ## Sources
