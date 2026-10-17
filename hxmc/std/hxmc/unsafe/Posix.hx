@@ -54,6 +54,7 @@ import hxmc.I64;
 	@:native("readdir$INODE64") static function readdirInode64(d:Ptr):Ptr;
 	// errno: musl's location, libSystem's
 	static function __errno_location():Ptr;
+	static function __errno():Ptr; // (Bionic: Android)
 	static function __error():Ptr;
 	static function _NSGetEnviron():Ptr;
 	static function _NSGetExecutablePath(buf:Ptr, size:Ptr):Int;

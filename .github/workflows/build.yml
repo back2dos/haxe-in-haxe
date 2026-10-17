@@ -8,7 +8,7 @@
 #   dispatches always run everything. Also whether the release
 #   rt-<hash of hxmc/deps> exists (hxmc/bootstrap/rt.mjs).
 # - rt-build, rt: only when that release is missing: the runtime objects of
-#   the six targets and Linux's glibc mode (hxmc/deps with mbedtls and libuv,
+#   the six targets, Linux's glibc mode and Android (hxmc/deps with mbedtls and libuv,
 #   built by zig), one job per target, then assembled, their layouts checked,
 #   published as the release from pushes to main and hxmc and passed on as an
 #   artifact (the jobs below otherwise download the release: make rt).
@@ -34,6 +34,8 @@
 #     packages/view, web, text and ui (their checks on Eval, the sample UI and the
 #     todo example drawn on llvmpipe, the todo example in Chromium on WebGPU
 #     and WebGL2, web's demo page hydrated in Chromium).
+#   - android: the APKs for android-arm64 and android-x86_64 checked, then
+#     AndroidTest on an x86-64 emulator (not required yet: continue-on-error).
 # - conformance: the port against the reference: HXB of the upstream suites
 #   and macro cases, display requests, the compilation server and its
 #   JSON-RPC methods, upstream's target suites compiled by both and compared
@@ -134,7 +136,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        target: [linux-x86_64, linux-arm64, windows-x86_64, windows-arm64, macos-x86_64, macos-arm64, linux-x86_64-glibc, linux-arm64-glibc]
+        target: [linux-x86_64, linux-arm64, windows-x86_64, windows-arm64, macos-x86_64, macos-arm64, linux-x86_64-glibc, linux-arm64-glibc, android-arm64, android-x86_64]
     steps:
       - uses: actions/checkout@v7
         with:
@@ -166,7 +168,7 @@ jobs:
             bin/hxmc/deps/${{ matrix.target }}/include
           retention-days: 1
 
-  # the eight targets' objects together: the committed layouts checked
+  # the ten targets' objects together: the committed layouts checked
   # against every target's headers, published as rt-<hash> (from main and
   # hxmc), passed on as the artifact rt
   rt:
@@ -213,7 +215,7 @@ jobs:
           node hxmc/bootstrap/rt.mjs pack bin/hxmc/rt dist/rt
           gh release create "rt-${{ steps.rt.outputs.hash }}" --target "$GITHUB_SHA" --prerelease \
             --title "hxmc runtime objects ${{ steps.rt.outputs.hash }}" \
-            --notes "hxmc's runtime objects (rt.o, ssl.o, uv.o) for the six targets and the glibc mode of Linux, built by zig ${{ steps.rt.outputs.zig }} from hxmc/deps at $GITHUB_SHA; downloaded by hxmc/bootstrap/rt.mjs." dist/rt/*
+            --notes "hxmc's runtime objects (rt.o, ssl.o, uv.o) for the six targets, the glibc mode of Linux and Android, built by zig ${{ steps.rt.outputs.zig }} from hxmc/deps at $GITHUB_SHA; downloaded by hxmc/bootstrap/rt.mjs." dist/rt/*
       - uses: actions/upload-artifact@v7
         with:
           name: rt
@@ -682,6 +684,64 @@ jobs:
   # (HXMC_GFX_SOFTWARE=1, check.sh), offscreen and in a Win32 window; the
   # audio test on WASAPI's default endpoint, skipped when the runner has
   # none (audio.sh)
+  # Android (docs/hxmc.md, "Android"): the APKs hxmc writes for android-arm64
+  # and android-x86_64, checked without a device (make android-check: zip,
+  # manifest, ELF, v2 signature; the SDK's zipalign, aapt and apksigner),
+  # then AndroidTest.apk on an x86-64 emulator with KVM (android.sh: the cube
+  # headless against cube.png, frames in the window, input, Home and back,
+  # Back; the screenshot and logcat as an artifact). Not a required check yet
+  # (continue-on-error): emulators on hosted runners are slow to boot and
+  # sometimes flaky.
+  android:
+    needs: [changes, rt]
+    if: ${{ !cancelled() && needs.changes.result == 'success' && (needs.rt.result == 'success' || needs.rt.result == 'skipped') && (needs.changes.outputs.all == 'true' || needs.changes.outputs.libs == 'true') }}
+    runs-on: ubuntu-24.04
+    continue-on-error: true
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: true
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - uses: actions/download-artifact@v8
+        if: needs.changes.outputs.rt_hit != 'true'
+        with: {name: rt, path: bin/hxmc/rt}
+      - name: The APKs and their checks
+        run: |
+          set -ex
+          make rt && touch bin/hxmc/rt/*/*.o
+          export PATH="$PATH:$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)"
+          make android-check ANDROID_TARGET=android-arm64
+          make android-check ANDROID_TARGET=android-x86_64
+      - name: Shared libraries (glibc mode)
+        run: make shared-check
+      - name: KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: The cube on an emulator (x86-64, API 34)
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          arch: x86_64
+          target: default
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot -camera-back none
+          script: sh packages/gfx/test/android.sh bin/android/android-x86_64/AndroidTest.apk bin/android/android-x86_64
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: android
+          path: |
+            bin/android/android-x86_64/*.png
+            bin/android/android-x86_64/*.txt
+            bin/android/*/*.apk
+          retention-days: 7
+          if-no-files-found: ignore
+
   gfx-windows:
     needs: [changes, gfx]
     if: ${{ !cancelled() && needs.gfx.result == 'success' }}

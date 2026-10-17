@@ -25,7 +25,7 @@ class PosixSys {
 		return Mem.getI32(Mem.sym("rt_nthreads"), 0);
 
 	@:hxmc.noGc static function errno():Int
-		return Mem.getI32(mac() ? Posix.__error() : Posix.__errno_location(), 0);
+		return Mem.getI32(mac() ? Posix.__error() : Mem.target() >= 9 ? Posix.__errno() : Posix.__errno_location(), 0);
 
 	static inline var EINTR = 4;
 
@@ -98,7 +98,7 @@ class PosixSys {
 	}
 
 	public static function environ():Array<String> {
-		var env = mac() ? Mem.getPtr(Posix._NSGetEnviron(), 0) : Mem.getPtr(Mem.sym("environ"), 0);
+		var env = mac() ? Mem.getPtr(Posix._NSGetEnviron(), 0) : Mem.target() >= 9 ? Mem.getPtr(Start.environ, 0) : Mem.getPtr(Mem.sym("environ"), 0);
 		var n = 0;
 		while (!Mem.getPtr(env, 8 * n).isNull())
 			n++;
@@ -170,7 +170,9 @@ class PosixSys {
 
 	public static function exit(code:Int):Void {
 		Posix.fflush(Ptr.nil());
-		Posix.exit(code);
+		// (Android: the process ends without the other libraries' destructors,
+		// which the system's threads, EGL's among them, may still need)
+		if (Mem.target() >= 9) Os.exit(code) else Posix.exit(code);
 	}
 
 	@:hxmc.noGc public static function time():Float {

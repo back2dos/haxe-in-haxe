@@ -33,7 +33,8 @@ extern class Mem {
 	// as a single comparison of os(), arm() or target(), not a && b):
 	// 0 linux-x86_64, 1 linux-arm64, 2 macos-x86_64, 3 macos-arm64,
 	// 4 windows-x86_64, 5 windows-arm64, 6 wasm32-wasi, 7 linux-x86_64 and
-	// 8 linux-arm64 with glibc (-D hxmc.libc=glibc)
+	// 8 linux-arm64 with glibc (-D hxmc.libc=glibc), 9 android-x86_64, 10
+	// android-arm64 (Bionic, os() Linux's: `Mem.target() >= 9` is Android)
 	static function target():Int;
 	// a frame area of `bytes` (a constant), 16-byte aligned, valid while the function runs
 	static function stack(bytes:Int):Ptr;
