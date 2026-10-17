@@ -18,8 +18,9 @@ using StringTools;
 //          library) and its executables checked with readelf (ElfCheck),
 //          ThreadNatives x30 (16 KB, and with the adaptive nursery), the tool as
 //          a module building three cases for x64, arm64 and wasm32-wasi
-//          byte-identical to the native tool; --port adds the native port's
-//          self-compile: before commits
+//          byte-identical to the native tool, the debugging information and
+//          unwind tables (DebugCheck: gdb on the host, the tools elsewhere);
+//          --port adds the native port's self-compile: before commits
 //   full   x64, arm64 and wine at 64, 16 and 256 KB, each with RT_VERIFY=1 too;
 //          x64 and arm64 in the glibc mode, also at 16 KB with RT_VERIFY=1;
 //          wasm under node and wasmtime at 16, 64 and 256 KB, under node with
@@ -138,6 +139,14 @@ class Tiers {
 		return {ok: r.code == 0 && n > 0, detail: r.code == 0 ? n + " censuses" : tail(r.err, 300)};
 	}
 
+	// the debugging information and unwind tables (DebugCheck): a debugger on
+	// the host's -debug build, the tools' checks of the other targets'
+	static function debugLanes() {
+		lane("debug info (gdb)", script(["DebugCheck"]));
+		for (t in ["linux-arm64", "windows-x86_64", "windows-arm64", "macos-arm64"])
+			lane('debug info $t', script(["DebugCheck", "--target", t]));
+	}
+
 	static function fixpoint() {
 		var r = exec(["make", "--no-print-directory", "fixpoint"], {merge: true});
 		var said = [for (l in r.out.split("\n")) if (l.startsWith("fixpoint:")) l];
@@ -168,6 +177,7 @@ class Tiers {
 			lane("ThreadNatives x30", threads(30, 16));
 			lane("ThreadNatives x30 adaptive", threads(30, 0));
 			lane("cross-host", crosshost(["--targets", "linux-x86_64,linux-arm64,wasm32-wasi,linux-x86_64-glibc"].concat(cases.length > 0 ? cases : ["Unsafe", "SwitchIndex", "Regress"])));
+			debugLanes();
 			if (port) lane("port self-compile", portNative);
 		}
 		if (tier == "full") {
@@ -181,6 +191,7 @@ class Tiers {
 				lane('$t glibc 16K RT_VERIFY', corpus(t, ["RT_MINOR_KB" => "16", "RT_VERIFY" => "1"], cases, GLIBC));
 			}
 			lane("glibc readelf", script(["ElfCheck", "bin/hxmc-t"]));
+			debugLanes();
 			for (kb in ["16", "64", "256"]) {
 				lane('wasm node ${kb}K', corpus("wasm32-wasi", ["RT_MINOR_KB" => kb], cases));
 				lane('wasm wasmtime ${kb}K', corpus("wasm32-wasi", ["RT_MINOR_KB" => kb, "HXMC_WASM_RUNNER" => "wasmtime"], cases));

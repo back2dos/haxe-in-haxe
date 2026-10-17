@@ -135,22 +135,31 @@ class Link {
 
 	var ehFrame:Null<Section>;
 	var ehFrameHdr:Null<Section>;
-	var unwound:Array<FuncRec> = [];
-	var fdes:Array<Int>;
+	// the search table's entries: each FDE's function (a symbol and an addend)
+	var fdes:Array<{sym:Symbol, addend:Int, at:Int}> = [];
 
-	// .eh_frame and .eh_frame_hdr of the live generated functions: read-only
-	// sections of their own object (laid out with the others; the search
-	// table is filled once the functions have addresses: fillUnwind)
+	// .eh_frame and .eh_frame_hdr of the live generated functions and of
+	// the live C code of the runtime objects (their own .eh_frame's
+	// entries): read-only sections of their own object (laid out with the
+	// others; the search table is filled once the functions have addresses:
+	// fillUnwind)
 	function unwindObj() {
+		var unwound = [];
 		for (o in objs)
 			for (r in o.funcs)
 				if (r.sym.section != null && isLive(r.sym.section)) unwound.push(r);
 		if (unwound.length == 0) return;
 		var e = Unwind.ehFrame(unwound, arm, ".eh_frame");
 		ehFrame = e.sec;
-		fdes = e.fdes;
+		for (k in 0...unwound.length)
+			fdes.push({sym: unwound[k].sym, addend: 0, at: e.fdes[k]});
+		// (the terminator goes after the C code's entries)
+		ehFrame.buf.len -= 4;
+		for (o in objs)
+			if (o.ehFrame != null) importEhFrame(o.ehFrame);
+		ehFrame.buf.u32(0);
 		ehFrameHdr = new Section(".eh_frame_hdr", RoData, 4);
-		ehFrameHdr.buf.zeros(Unwind.ehFrameHdrSize(unwound.length));
+		ehFrameHdr.buf.zeros(Unwind.ehFrameHdrSize(fdes.length));
 		var o = new Obj();
 		o.sections.push(ehFrameHdr);
 		o.sections.push(ehFrame);
@@ -161,10 +170,53 @@ class Link {
 		objs.push(o);
 	}
 
+	// the CIEs and FDEs of a C object's .eh_frame whose functions are live
+	// (their own CIEs, copied once each; the FDEs' relocations kept)
+	function importEhFrame(src:Section) {
+		var b = src.buf, out = ehFrame.buf;
+		var relocAt = new Map<Int, Reloc>();
+		for (r in src.relocs)
+			relocAt.set(r.offset, r);
+		var cieAt = new Map<Int, Int>(); // the CIE's offset in src -> in ehFrame
+		function copy(from:Int, len:Int):Int {
+			var at = out.len;
+			out.bytes(b.b, from, len);
+			for (k in from...from + len) {
+				var r = relocAt.get(k);
+				if (r != null) ehFrame.relocs.push(new Reloc(at + k - from, r.kind, r.sym, r.addend));
+			}
+			return at;
+		}
+		var pos = 0;
+		while (pos + 4 <= b.len) {
+			var len = b.get32(pos);
+			if (len == 0) break;
+			if (len == -1) throw "hxmc: link: a 64-bit .eh_frame entry";
+			var id = b.get32(pos + 4);
+			if (id != 0) {
+				// an FDE: its function's section (the relocation of its pc_begin)
+				var r = relocAt.get(pos + 8);
+				var t = r != null ? target(r.sym) : null;
+				if (t != null && t.section != null && isLive(t.section)) {
+					var cie = pos + 4 - id;
+					var to = cieAt.get(cie);
+					if (to == null) {
+						to = copy(cie, 4 + b.get32(cie));
+						cieAt.set(cie, to);
+					}
+					var at = copy(pos, 4 + len);
+					out.set32(at + 4, at + 4 - to);
+					fdes.push({sym: r.sym, addend: r.addend, at: at});
+				}
+			}
+			pos += 4 + len;
+		}
+	}
+
 	function fillUnwind() {
 		if (ehFrame == null) return;
 		var base = addr.get(ehFrame);
-		var list = [for (k in 0...unwound.length) {pc: symAddr(unwound[k].sym), fde: base + fdes[k]}];
+		var list = [for (f in fdes) {pc: symAddr(f.sym) + f.addend, fde: base + f.at}];
 		ehFrameHdr.buf.len = 0;
 		Unwind.ehFrameHdr(addr.get(ehFrameHdr), base, list, ehFrameHdr.buf);
 	}

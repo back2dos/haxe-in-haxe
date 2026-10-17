@@ -210,6 +210,9 @@ class Obj {
 	public var sections:Array<Section> = [];
 	public var symbols:Array<Symbol> = [];
 	public var funcs:Array<FuncRec> = []; // the generated functions' (FuncRec)
+	// a C object's .eh_frame (the runtime object's: ElfReader), with its
+	// relocations; Link keeps the entries of the functions it keeps
+	public var ehFrame:Null<Section> = null;
 	public var files:Array<String> = []; // the source files FuncRec.lines name
 	var byName = new Map<String, Symbol>();
 

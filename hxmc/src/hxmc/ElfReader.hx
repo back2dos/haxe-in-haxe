@@ -7,7 +7,7 @@ import hxmc.Obj;
 // Obj: its allocated sections, symbols and relocations. Sections that are
 // not loaded (debug information, notes, address-significance tables) are
 // dropped, and so are relocations in them; hxmc's function records
-// (FuncRec.SECTION) become Obj.funcs.
+// (FuncRec.SECTION) become Obj.funcs, the C code's .eh_frame Obj.ehFrame.
 class ElfReader {
 	var b:Bytes;
 	var arm:Bool;
@@ -117,6 +117,13 @@ class ElfReader {
 				continue;
 			}
 			if ((flags & 2) == 0 || (type != 1 && type != 8 && type != 14 && type != 15 && type != 0x70000001)) continue;
+			if (name == ".eh_frame") {
+				// (the C code's unwind tables: Obj.ehFrame, not laid out as data)
+				o.ehFrame = new Section(name, RoData, align < 1 ? 1 : align);
+				o.ehFrame.buf.bytes(b, off, size);
+				secs[i] = o.ehFrame;
+				continue;
+			}
 			if (StringTools.startsWith(name, ".eh_frame")) continue;
 			var kind:SecKind = if ((flags & 0x400) != 0) (type == 8 ? Tbss : Tdata) else if (type == 14) InitArray else if (type == 15) FiniArray else if ((flags & 4) != 0) Text
 			else if (type == 8) Bss else if ((flags & 1) != 0) Data else RoData;
@@ -163,7 +170,7 @@ class ElfReader {
 				s.offset = value;
 			} else if (shndx != 0 && shndx < 0xff00) {
 				var sec = secs[shndx];
-				if (sec == null || sec == funcs) {
+				if (sec == null || sec == funcs || sec == o.ehFrame) {
 					// a symbol of a dropped section
 					syms.push(null);
 					continue;
