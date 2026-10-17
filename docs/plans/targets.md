@@ -60,6 +60,64 @@ Revisit when a concrete browser use makes module size or JavaScript
 interop matter (browser games, `@hxmc/web`). The structuring pass and the
 module writer carry over; the object model and the runtime would be new.
 
+Started (2026-10-17) behind `-D hxmc.wasm-gc` to compare the two collectors
+(docs/hxmc.md, "WasmGC"): the IR after Lower, emitted directly, with a
+runtime of its own in Haxe over intrinsics. `make wasmgc-bench` under node 22,
+median of 3 (`hxmc/test/wasmgc`):
+
+| program | native s | WasmGC s | linear s | WasmGC RSS MB | linear RSS MB | WasmGC KB | linear KB |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| Basics | 0 | 0.03 | 0.1 | 46 | 147 | 11 | 57.2 |
+| Mandelbrot | 0.07 | 0.15 | 0.18 | 52 | 147 | 2.4 | 35.9 |
+| Nbody | 0.15 | 0.13 | 0.21 | 50 | 148 | 3.8 | 35.3 |
+| Trees | 0.15 | 0.34 | 0.48 | 86 | 165 | 2.2 | 33.4 |
+
+Every HaxeBenchmarks case runs, its check identical on every target
+(`make bench`'s `hxmc-wasmgc` target). Its run here against linear memory
+(median of 3, node 22; formatter_noio and json after the last runtime fixes):
+
+| case | linear s | WasmGC s | linear MB | WasmGC MB | linear KB | WasmGC KB |
+| --- | --- | --- | --- | --- | --- | --- |
+| alloc | 2.82 | 3.27 | 1555 | 665 | 41 | 9 |
+| bcrypt | 4.23 | 3.15 | 150 | 53 | 277 | 305 |
+| binarytrees | 1.30 | 1.39 | 182 | 84 | 37 | 7 |
+| json | 0.84 | 0.94 | 336 | 189 | 116 | 29 |
+| mandelbrot | 1.09 | 2.27 | 151 | 57 | 42 | 9 |
+| mandelbrot_anon | 3.21 | 4.14 | 151 | 57 | 45 | 9 |
+| nbody | 1.37 | 1.36 | 148 | 49 | 41 | 10 |
+| sha256 | 0.42 | 0.51 | 154 | 67 | 249 | 291 |
+| sha512 | 0.18 | 0.10 | 150 | 55 | 256 | 295 |
+| formatter_noio | 8.93 | 16.9 | 257 | 152 | 1087 | 497 |
+
+WasmGC takes a third to a half of the memory everywhere and is as fast or
+faster on half the cases. It is slower where small objects are allocated
+and read in tight loops (mandelbrot: V8's allocation and the casts at
+function boundaries; formatter_noio: closures, arrays read through
+helpers). Left to try: typed arrays in locals (the fast path inline),
+br_on_cast instead of ref.test then ref.cast, precise types for methods
+(their signatures are shared with the dispatch table). ObjectMap has one
+bucket (WasmGC objects have no address to hash); `sys.io.File` streams and
+processes are not supported.
+
+What the runtime duplicates (hxmc/std/hxmc/rt/gc against hxmc/std/hxmc/rt),
+and why. The rule: reuse the Haxe source where only the memory layer
+differs; write new code where the object model forces it.
+
+| GC module | duplicates | why |
+| --- | --- | --- |
+| GcStr | Str's string natives (concat, compare, hash, substr, split, parseInt, Std.string...) | Str reads units through Mem over the string's header and chars (77 Mem calls); a WasmGC string is an i16 array. The algorithms (FNV hash, Int64 digits, parseInt) are kept the same, line for line where possible |
+| GcArr | Arr's Array methods | Arr works on the slot/data layout with element kinds in the header (30 Mem calls); here the kinds are wasm types |
+| GcDyn, GcNative | Dyn's comparison and reflection (as hxmc.Native) | Dyn reads type descriptors and slots through Mem (146 calls); here the tables are Meta's and fields are reached by generated code |
+| GcBytes | Bytes' natives | a Bytes is an i8 array, not malloc'd memory |
+| GcDate, GcSys | Date and WasiSys | the host's calendar and node's fs instead of libc/WASI over linear memory |
+| GcBuf | StringBuf's buffer | the same reason as GcStr |
+
+Not duplicated: everything above the natives (Std, Type, Reflect, the
+maps, haxe.Json, haxe.crypto...) is the same Haxe source. Sharing the
+natives themselves would need a memory layer under Str, Arr and Dyn
+(Mem calls behind an interface the GC build implements with arrays and
+structs): possible for Str and Arr, not for Dyn's descriptors.
+
 ## Android
 
 ARM64 (and x86-64 for emulators) ELF shared library loaded through JNI or

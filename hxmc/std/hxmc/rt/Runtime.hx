@@ -22,6 +22,17 @@ import hxmc.rt.wasm.Exit;
 import hxmc.rt.wasm.Wasi;
 import hxmc.rt.wasm.Libc;
 import hxmc.rt.wasm.Threads;
+// -D hxmc.wasm-gc's runtime (@:hxmc.wasmgc: the only one it binds, hxmc.wasmgc)
+#if (hxmc.wasm_gc)
+import hxmc.rt.gc.GcStr;
+import hxmc.rt.gc.GcSys;
+import hxmc.rt.gc.GcArr;
+import hxmc.rt.gc.GcDyn;
+import hxmc.rt.gc.GcBytes;
+import hxmc.rt.gc.GcBuf;
+import hxmc.rt.gc.GcNative;
+import hxmc.rt.gc.GcDate;
+#end
 #else
 // the native targets' runtime over the C library (@:hxmc.native): the
 // collector, the threads, the start
