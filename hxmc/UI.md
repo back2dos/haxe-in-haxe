@@ -340,8 +340,7 @@ Where this departs from section 6:
   shrink below their content, so text is not squashed (a container that
   must shrink sets `minHeight: 0`, as in CSS).
 - **Not yet**: Windows' compositions drawn in the field (its IME draws
-  its own), image formats beyond PNG and JPEG; on X11 a clipboard over about 256 KB (sent in parts,
-  INCR) is not read.
+  its own), image formats beyond PNG and JPEG.
 
 ## Sources
 
