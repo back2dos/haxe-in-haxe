@@ -429,7 +429,7 @@ lowered IR.
 
 ## Interop
 
-### C interop and low-level Haxe (designed, not built)
+### C interop and low-level Haxe (partly built)
 
 The design is in [LOWLEVEL.md](LOWLEVEL.md): a survey of how other
 languages do C interop; typed externs called directly in each platform's C
@@ -437,7 +437,13 @@ convention, declarations from C declaration text or generated from
 headers, an optional embedded tcc at build time; native memory with
 lifetimes after Java's FFM API (arenas, segments, `pin`, `Handle`,
 callbacks); and an opt-in manual-memory dialect after Zig (`Allocator`,
-containers, `@:hxmc.noGc` as a checked boundary). hxmc-only.
+containers, `@:hxmc.noGc` as a checked boundary). hxmc-only. Built: the
+runtime's internal subset, structs by value in C calls on every ABI, and
+struct values in the language (2026-10-17: locals, parameters, results,
+inline fields, statics, `Slice`, scalar replacement; LOWLEVEL.md,
+"Struct values"). Next there: instance methods on structs, specialized
+generics for containers of structs (`ArrayList<Particle>`), value enums,
+the `Allocator` family.
 
 ### Using hxmc's built-in compiler
 
@@ -643,8 +649,8 @@ benchmarks between -5% and +4% either way, code-layout noise).
   are imported by path (`@:hxmc.lib("/System/Library/Frameworks/Metal.framework/Metal")`,
   an `LC_LOAD_DYLIB` each, as any dylib); AppKit, whose classes are only
   found by name, through one C function (`NSApplicationLoad`). Left:
-  macOS x86-64 (structs by value in the System V convention, and
-  `objc_msgSend_stret` for results over 16 bytes), frames during a live
+  macOS x86-64 (`objc_msgSend_stret` for results over 16 bytes: structs
+  by value in the System V convention are done), frames during a live
   resize (AppKit's tracking loop runs inside `sendEvent:`: a timer in
   the event-tracking run loop mode), a menu (Cmd-Q).
 - D3D11 (done, 2026-10-16, Windows x86-64 and arm64): the same
@@ -835,17 +841,11 @@ benchmarks between -5% and +4% either way, code-layout noise).
   (fewer calls than a slot each), compute; an input method for X11
   (`XOpenIM`, `Xutf8LookupString`: variadic calls) and Cocoa
   (`NSTextInputClient`), frames during a live resize on macOS.
-- Structs by value in C calls (done for arm64, 2026-10-16): AAPCS64 on
-  macOS, Linux and Windows (MirBuild.cStructArg, cStructRet; a64 Isel):
-  homogeneous aggregates of up to four floats or doubles in v registers,
-  other structs of up to 16 bytes in x registers, larger ones by the
-  address of a copy, results the same way or through x8; a struct that no
-  longer fits in registers on the stack. A struct value is still its
-  address: a result lives in a slot of the caller's frame (a local may hold
-  it), until the caller returns or the same call runs again. Corpus case
-  `FfiStruct` (against zig cc). Left: x86-64 (System V's classification,
-  memory arguments, the hidden result pointer; Win64's by-reference
-  copies) and wasm32 (by address), which reject such calls for now.
+- Structs by value in C calls (done, 2026-10-16 for arm64, 2026-10-17 for
+  x86-64 and wasm32; hxmc/LOWLEVEL.md, "Calls and linking"): AAPCS64,
+  System V's eightbyte classes, Win64's registers and copies, clang's
+  wasm32 rules, classified in `CAbi.hx`. Corpus cases `FfiStruct`,
+  `FfiAbi` (against zig cc), `WasmStruct`.
 - Later: `@hxmc/ui`, native widgets in an os window (comctl32, AppKit,
   GTK 4 through the glibc mode, DOM), with a GPU view widget built on a
   child `Surface`; a UI drawn with the GPU is a separate package on gfx.

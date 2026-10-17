@@ -13,6 +13,10 @@ enum Ty {
 	TI64; // haxe.Int64 (hxmc.I64): an int64_t, boxed in Dynamic
 	TVoid;
 	TRef(r:RefTy);
+	// a @:hxmc.struct value (hxmc/LOWLEVEL.md, "Struct values"): the address
+	// of its memory (an I64), which the lowering copies on assignment;
+	// the class's dot path and its size in bytes
+	TStruct(name:String, size:Int);
 }
 
 enum RefTy {
@@ -168,6 +172,9 @@ class FuncInfo {
 	public var name:String;
 	public var args:Array<Local> = [];
 	public var ret:Ty = TVoid;
+	// it returns a struct (ret, TStruct): the last argument is the address
+	// the caller wants it at, which it also returns
+	public var sret = false;
 	public var locals:Array<Local> = [];
 	public var body:Array<Stmt> = [];
 	public var selfClass:Null<ClassInfo>; // instance method: args[0] is `this`, typed as the root object
@@ -210,6 +217,9 @@ enum Ex {
 	EBox(t:Ty, a:Ex); // scalar -> Dynamic box (cached for small ints)
 	EUnbox(t:Ty, a:Ex); // Dynamic or Null<T> -> scalar (null gives 0)
 	EField(c:ClassInfo, idx:Int, obj:Ex);
+	// the address of a struct field's memory in an object (a raw heap
+	// address: valid until the next GC point, Facts.checkRawAddresses)
+	EFieldAddr(c:ClassInfo, idx:Int, obj:Ex);
 	// structural field read, converted to t; hint: the layout of an object
 	// literal of the static type (read directly when the object has it)
 	EAnonGet(name:String, t:Ty, obj:Ex, hint:Null<ShapeInfo>);
@@ -379,6 +389,7 @@ class Ir {
 			case TI64: "l";
 			case TVoid: "v";
 			case TRef(_): "p";
+			case TStruct(_): "s";
 		}
 
 	public static function isRef(t:Ty):Bool

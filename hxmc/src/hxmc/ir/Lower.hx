@@ -226,6 +226,7 @@ class Lower {
 				case EBox(t, a): EBox(t, ex(a));
 				case EUnbox(t, a): EUnbox(t, ex(a));
 				case EField(c, i, a): EField(c, i, ex(a));
+				case EFieldAddr(c, i, a): EFieldAddr(c, i, ex(a));
 				case EAnonGet(n, t, a, h): EAnonGet(n, t, ex(a), h);
 				case ECast(t, a): ECast(t, ex(a));
 				case EInstOf(c, a): EInstOf(c, ex(a));
@@ -438,8 +439,9 @@ class Lower {
 					case KTypeParameter(_): TRef(RAny);
 					case _:
 						if (isCore(c, "String")) TRef(RStr);
-						else if (isCore(c, "Array")) TRef(RArr(ty(params[0])));
-						else if (CInterop.isNativeClass(c)) TI64; // the address of C memory (CInterop: through a Ptr only)
+						else if (isCore(c, "Array")) TRef(RArr(noStruct(ty(params[0]), "an Array's element")));
+						else if (CInterop.isStruct(c)) TStruct(core.Globals.sTypePath(c.clPath), CInterop.layout(c).size);
+						else if (CInterop.isOpaque(c)) TI64; // the address of C memory (CInterop: through a Ptr only)
 						else if (c.hasClassFlag(CInterface)) TRef(RObj(classInfo(c)));
 						else if (c.hasClassFlag(CExtern)) TRef(RNative(nativeName(c)));
 						else TRef(RObj(classInfo(c)));
@@ -454,6 +456,16 @@ class Lower {
 			case TDynamic(_): TRef(RAny);
 			case _: TRef(RAny);
 		}
+	}
+
+	// a struct value cannot be a GC reference's contents (an Array's element,
+	// an enum's argument): those hold references or scalars only
+	public function noStruct(t:Ty, what:String):Ty {
+		switch t {
+			case TStruct(n, _): fail('$what cannot be the struct value $n (store it in a class field, a struct field or memory behind a Ptr)');
+			case _:
+		}
+		return t;
 	}
 
 	public function classInfo(c:TClass):ClassInfo {
@@ -539,7 +551,7 @@ class Lower {
 			var ci = ei.ctors[ef.efIndex];
 			switch TFunctions.follow(ef.efType) {
 				case TFun(s):
-					ci.params = [for (a in s.args) ty(a.type)];
+					ci.params = [for (a in s.args) noStruct(ty(a.type), "an enum constructor's argument")];
 					ci.paramNames = [for (a in s.args) a.name];
 				case _:
 					ci.global = prog.globals.length;
@@ -567,6 +579,11 @@ class Lower {
 		for (a in tf.tfArgs)
 			fi.args.push(new Local(id++, a.variable.vName, ty(a.variable.vType)));
 		fi.ret = ty(tf.tfType);
+		// (a struct result: the address of the caller's memory for it, last)
+		if (fi.ret.match(TStruct(_))) {
+			fi.args.push(new Local(id++, "sret", TI64));
+			fi.sret = true;
+		}
 		var ds = [for (a in tf.tfArgs) a.defaultValue];
 		if (self != null) ds.unshift(null);
 		defaults.set(fi, ds);
@@ -599,7 +616,7 @@ class Lower {
 	function callback(fi:FuncInfo, cf:TClassField) {
 		var where = CInterop.posOf(cf.cfPos);
 		for (a in fi.args.concat([new Local(-1, "result", fi.ret)])) {
-			if (a.id == -1 && a.ty == TVoid) continue;
+			if (a.id == -1 && a.ty == TVoid || a.name == "sret" && fi.sret && a.id == fi.args.length - 1) continue;
 			var t = a.id == -1 ? funcOf(cf).tfType : funcOf(cf).tfArgs[a.id].variable.vType;
 			switch CInterop.ctype(t) {
 				case CI32 | CI64 | CF64 | CPtr:
@@ -692,6 +709,10 @@ class Lower {
 					for (a in s.args)
 						fi.args.push(new Local(id++, a.name, ty(a.type)));
 					fi.ret = ty(s.ret);
+					if (fi.ret.match(TStruct(_))) {
+						fi.args.push(new Local(id++, "sret", TI64));
+						fi.sret = true;
+					}
 					var ds:Array<Null<TExpr>> = [null];
 					for (a in tf.tfArgs) ds.push(a.defaultValue);
 					defaults.set(fi, ds);
@@ -723,6 +744,24 @@ class Lower {
 		return fi;
 	}
 
+	// the constructor of a @:hxmc.struct class: a function of the struct's
+	// address (this) and the arguments, which fills the memory (zeroed by
+	// the caller, FnLower.newStruct)
+	var structCtors = new Map<TClass, FuncInfo>();
+
+	public function structCtor(c:TClass):FuncInfo {
+		var fi = structCtors.get(c);
+		if (fi != null) return fi;
+		fi = new FuncInfo(nativeName(c) + "_new", moduleOf(c));
+		structCtors.set(c, fi);
+		prog.funcs.push(fi);
+		var tf = funcOf(c.clConstructor);
+		signature(fi, tf, TI64);
+		fi.ret = TVoid;
+		pending.push(guarded(fi, () -> lowerBody(fi, c.clConstructor, () -> new FnLower(this, fi, null, null).runStructCtor(tf))));
+		return fi;
+	}
+
 	// `name` and `module`: a name that stays the same when unrelated code changes
 	// (Lower.lambdaName for closures in a function body, else derived from what
 	// the closure forwards to) and the module whose C file holds it
@@ -751,12 +790,19 @@ class Lower {
 		ci.statics = [];
 		for (cf in c.clOrderedStatics)
 			switch cf.cfKind {
-				case Method(MethNormal | MethInline) if (funcOf(cf) != null):
+				// (a function taking or returning a struct is not reachable by name)
+				case Method(MethNormal | MethInline) if (funcOf(cf) != null && !hasStruct(staticFunc(c, cf))):
 					ci.statics.push({name: cf.cfName, clos: staticClosure(staticFunc(c, cf)), global: -1});
-				case Var(v) if (isPhysical(c, cf, v) && !v.vRead.match(AccInline)):
+				case Var(v) if (isPhysical(c, cf, v) && !v.vRead.match(AccInline) && !ty(cf.cfType).match(TStruct(_))):
 					ci.statics.push({name: cf.cfName, clos: null, global: staticVar(c, cf)});
 				case _:
 			}
+	}
+
+	static function hasStruct(f:FuncInfo):Bool {
+		for (a in f.args)
+			if (a.ty.match(TStruct(_))) return true;
+		return f.sret;
 	}
 
 	public function staticClosure(f:FuncInfo):LambdaInfo {
@@ -838,6 +884,16 @@ class Lower {
 		// @:hxmc.bss(bytes[, "symbol"]): a Ptr whose value is the address of a
 		// zeroed block of that size outside the heap (C's static arrays)
 		var bss = core.Meta.getOpt(Custom(":hxmc.bss"), cf.cfMeta);
+		// a struct static: its memory is a block outside the heap
+		switch t {
+			case TStruct(_, size):
+				if (tls != null || bss != null) throw new LowerError('a struct static (' + cf.cfName + ') cannot be @:hxmc.threadLocal or @:hxmc.bss', CInterop.posOf(cf.cfPos));
+				prog.globals.push({ty: t, init: null, name: name, bss: size, sym: "hxmc_bss_" + name});
+				staticVars.set(cf, g);
+				initClass(c);
+				return g;
+			case _:
+		}
 		if (bss != null) {
 			var where = CInterop.posOf(cf.cfPos);
 			var args = bss.exprs;

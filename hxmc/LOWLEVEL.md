@@ -287,7 +287,7 @@ function onFrame() {
 
 - `@:hxmc.struct` values: stored inline in slices, arrays and other
   structs, passed and returned by value (copies), field access through
-  pointers without copying.
+  pointers without copying (built: "Struct values" below).
 - Generics specialized per type for structs (`ArrayList<Particle>`
   storing structs by value), as Zig does with `comptime` types; Haxe's
   `@:generic` is the starting point.
@@ -295,6 +295,63 @@ function onFrame() {
   functions (they hold no GC references): faster and smaller code, and
   safe to run on threads the runtime does not know (C callbacks on
   foreign threads, audio callbacks).
+
+### Struct values (built)
+
+`@:hxmc.struct` classes are value types (2026-10-17):
+
+```haxe
+@:hxmc.struct class V2 {
+  public var x:Float; public var y:Float;
+  public inline function new(x, y) { this.x = x; this.y = y; }
+}
+class Body { public var pos:V2; ... }       // inline in the object
+
+static function mid(a:V2, b:V2):V2           // copies in, a copy out
+  return new V2((a.x + b.x) / 2, (a.y + b.y) / 2);
+
+var p = body.pos;                            // a copy
+p.x += 1;                                    // body.pos unchanged
+body.pos.x += 1;                             // in place
+var s = arena.slice(V2, 100);                // hxmc.unsafe.Slice: inline, bounds-checked
+s[3].y = 2;                                  // in place
+```
+
+- Where they live: locals, parameters and results; fields of classes
+  (inline in the object, whole slots, none a reference) and of other
+  structs; statics (a block outside the heap); elements behind a `Ptr`
+  (`p[i]`, `Arena.makeArray`) and in a `hxmc.unsafe.Slice<T>` (a
+  pointer and a length, itself a struct value). Fields are C scalars,
+  `Int`, `Float`, `Bool`, `Ptr` and other structs; GC references are
+  rejected (the collector scans no struct memory).
+- Semantics: assignment, arguments and results copy; a field access
+  through a pointer, a struct field or an object's field reads and
+  writes in place; `new S(...)` zeroes the memory and runs the
+  constructor on it (a struct has a constructor and static functions, no
+  instance methods yet: an abstract over the struct carries methods and
+  operators, as the shader math types do).
+- Representation: the address of the memory (`Ty.TStruct`, an I64 in
+  Mir), the ABI rules of C calls applied on top (CAbi). FnLower copies
+  scalar by scalar; a local or a temporary is a slot of the frame
+  (`Mem_structSlot`); an argument is a copy the callee owns; a result is
+  written to the caller's slot, whose address is a last, hidden argument
+  (`FuncInfo.sret`). An object's struct field is reached by address
+  (`EFieldAddr`) only until the next GC point, which the raw-address check
+  (Facts) enforces.
+- Scalar replacement (`Sroa.hx`, after inlining): a slot whose address
+  is only the base of loads and stores at constant offsets becomes SSA
+  values, so struct math in registers: `acc = acc + d * 0.5` over
+  three-double vectors compiles to three `fadd`s in the loop.
+- Minimal behaviour elsewhere: `==` compares field by field (floats as
+  floats); a struct value is never boxed: `Dynamic`, type parameters,
+  `Null<T>`, interfaces, structural types, `Array<S>`, enum arguments,
+  anonymous structures, string conversion and closures taking or capturing
+  one are compile errors; struct fields are invisible to reflection and
+  Dynamic access. All seven targets (WebAssembly too). Corpus:
+  `StructValues`, `reject/Struct*`.
+- Left: instance methods on structs, value enums, `@:generic`
+  specialization for containers of structs, GC references inside structs,
+  passing structs to closures.
 
 ### What it buys
 
@@ -506,10 +563,12 @@ than with the C runtime.
    trampolines, thread attach.
 3. The C declaration parser; the header-based generator.
 4. Manual memory: `Allocator` and its implementations, `Slice`, struct
-   values, specialized generics, the containers.
+   values, specialized generics, the containers (struct values and
+   `Slice` done: "Struct values").
 5. `@:hxmc.noGc` as a public, complete rule, including the raw-address
    check.
-6. Structs by value across C calls; the optional embedded tcc.
+6. Structs by value across C calls (done on every ABI: "Calls and
+   linking"); the optional embedded tcc.
 7. The runtime, and eventually the collector, rewritten in this style
    (done for the runtime's internal subset: "The runtime without C of our
    own").

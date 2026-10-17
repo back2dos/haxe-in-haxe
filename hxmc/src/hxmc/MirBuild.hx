@@ -60,7 +60,7 @@ class MirBuild {
 			case TF64: F64;
 			case TI64: I64;
 			case TVoid: Void;
-			case TRef(_): I64;
+			case TRef(_) | TStruct(_): I64;
 		};
 
 	// ---- instruction helpers
@@ -1583,6 +1583,7 @@ class MirBuild {
 			case EBox(t, x): boxFrom(t, ex(x));
 			case EUnbox(t, x): unboxTo(t, ex(x));
 			case EField(c, idx, obj): slotLoad(ex(obj), c.locs[idx], c.fields[idx].ty);
+			case EFieldAddr(c, idx, obj): op2(Add, I64, ex(obj), lconst32(8 * c.locs[idx]));
 			case EAnonGet(name, t, obj, hint): anonGet(name, t, obj, hint);
 			case ECast(_, x): ex(x);
 			case EInstOf(c, x): instOf(ex(x), c);
@@ -2341,6 +2342,8 @@ class MirBuild {
 			case "arm": iconst(abi.arm ? 1 : 0);
 			case "target": iconst(targetCode(abi));
 			case "stack": stackAddr(f.slot(intLiteral(args[0], "Mem.stack"), 16));
+			// (a struct value's memory: FnLower.newSlot)
+			case "structSlot": stackAddr(f.slot((intLiteral(args[0], "a struct slot") + 7) & ~7, intLiteral(args[1], "a struct slot")));
 			case "ult": cmp(CULt, ex(args[0]), ex(args[1]));
 			case "f64Bits": op1(FToBits, I64, ex(args[0]));
 			case "bitsF64": op1(BitsToF, F64, ex(args[0]));
