@@ -328,6 +328,9 @@ Since the design above (October 2026), in this order:
   checked in CI through the platform's own client side.
 - CSS grid layout (tracks with fr, minmax() and repeat(), placement by
   lines and spans, auto-placement), every box as Chromium lays it out.
+- Rich text: spans in a paragraph (span, b, i in markup) with their own
+  fonts, colours and handlers, line boxes as CSS computes them;
+  synthetic italic.
 - Right-to-left text: the bidi algorithm (levels, visual order, mirrored
   brackets), Arabic's joining forms and required ligatures from GSUB,
   carets and hits by direction; marks on their bases (GPOS anchors) and
