@@ -1,0 +1,57 @@
+# Roadmap
+
+Where hxmc is going and in which order. The designs behind each item are
+in [docs/plans/](docs/plans/README.md); what is built is in
+[docs/](docs/hxmc.md).
+
+## Goals
+
+- **A faithful port.** The compiler behaves exactly like the reference
+  compiler of its pinned upstream commit: byte-identical HXB and target
+  output, the same `--interp` runs, display and server answers.
+- **Native code and WebAssembly with no external toolchain.** hxmc's own
+  code generator and linkers: no C compiler, assembler, system linker or
+  SDK, on every target, cross-compiling included.
+- **Pure-Haxe packages, no C of our own.** The runtime, the collector and
+  the packages (`@hxmc/os`, `@hxmc/gfx`, the UI) are Haxe calling the
+  system's APIs directly; only third-party C (the C library, mbedtls,
+  libuv) is linked.
+- **Performance, small binaries and fast builds** are core values, measured
+  on every change: run time, peak memory, executable size, build time.
+- **One implementation of each thing.** One math library, one runtime for
+  every target, one reactive view layer for every renderer; no second
+  variant behind a define.
+
+## Now
+
+- The UI branch: `@hxmc/ui`, `@hxmc/text`, `@hxmc/esx`, signals (`hxmc.ui.reactive`), native controls ([graphics.md](docs/plans/graphics.md#ui))
+- The module cache on by default, replacing the types cache ([compiler.md](docs/plans/compiler.md#cached-modules))
+- Unwind tables and DWARF line info ([codegen.md](docs/plans/codegen.md#frame-pointers-unwind-tables-debug-info))
+
+## Next
+
+- `@hxmc/view`: signals, esx markup and a renderer contract, merged from esx and `ui.reactive`; renderers for ui, ui.native, the DOM and static HTML ([web.md](docs/plans/web.md#hxmcview))
+- `@hxmc/web`: DOM bindings via `imports.mjs`, a DOM renderer, a static renderer, hydration islands ([web.md](docs/plans/web.md#hxmcweb))
+- `site/` replacing `hxmc/web`: built with web, docs generated from the sources (narrative docs, package READMEs, an API reference extracted with the compiler), an examples gallery from each package's `examples/` ([web.md](docs/plans/web.md#the-site-site))
+- Nondeterministic macros in the module cache: volatile modules, file and environment dependencies ([compiler.md](docs/plans/compiler.md#cached-modules))
+- Android, step 1: GPU only, `NativeActivity`, the APK writer ([targets.md](docs/plans/targets.md#android))
+- Android, step 2: native controls through JNI ([targets.md](docs/plans/targets.md#android))
+- Android, step 3: mixing GPU and native views, as on the desktop ([targets.md](docs/plans/targets.md#android))
+- gfx: render targets, mip maps, more texture formats ([graphics.md](docs/plans/graphics.md#left))
+- Graphics programs in the playground ([graphics.md](docs/plans/graphics.md#graphics-in-the-playground))
+
+## Later
+
+- Escape analysis ([codegen.md](docs/plans/codegen.md#escape-analysis))
+- The collector: incremental major marking, an aging survivor space, a memory limit ([runtime.md](docs/plans/runtime.md#the-collector-longer-term))
+- Macro-heavy builds: monomorph transactions, Eval call frames and instance layout ([compiler.md](docs/plans/compiler.md#macro-heavy-builds))
+- The central object cache and link-time DCE ([compiler.md](docs/plans/compiler.md#central-object-cache-and-quieter-builds))
+- Native macros beyond the prototype ([compiler.md](docs/plans/compiler.md#native-macros-prototype))
+- C interop: methods on structs, specialized generics, value enums, allocators ([lowlevel.md](docs/plans/lowlevel.md))
+- WebAssembly threads; WasmGC as a browser-focused second path ([targets.md](docs/plans/targets.md#webassembly))
+- iOS ([targets.md](docs/plans/targets.md#ios))
+- gfx: bind groups, compute, Vulkan, D3D12; audio input and devices ([graphics.md](docs/plans/graphics.md))
+- Compact strings ([runtime.md](docs/plans/runtime.md#compact-strings-latin-1--utf-16))
+- Direct system calls on Linux ([runtime.md](docs/plans/runtime.md#direct-system-calls-on-linux))
+- The libm branch: correctly rounded math ([math.md](docs/plans/math.md#later-the-libm-branch))
+- The `hxmc` haxelib; verified native builds ([packaging.md](docs/plans/packaging.md))
