@@ -117,6 +117,20 @@ scrolls the page (`touchAction: 'pan-y'`).
 emitted sources, the programs it rejects: `packages/gfx/test/ShaderTest.hx`),
 and the tests' PNG files (`Png.hx`: written as `--bless` writes them, in
 stored blocks of 65535 bytes, and read back).
+`make android-check ANDROID_TARGET=android-arm64|android-x86_64`: the APKs
+of `AndroidTest` and the cube (`hxmc/test/ApkCheck.hx`: the zip and its
+alignment, the manifest read back, the library's ELF: a shared object, 16 KB
+segments, Bionic's imports and versions, the TLS models; the v2 signature's
+digest recomputed and its signature verified by openssl; `zipalign`, `aapt`
+and `apksigner` where installed), and RFC 6979's vector for the P-256 code;
+`make shared-check`: shared libraries of the glibc mode loaded by an hxmc
+program (`hxmc/test/SharedCheck.hx`; arm64 under qemu); `make
+android-device-check`: AndroidTest on the device or emulator adb reaches
+(`packages/gfx/test/android.sh`: the cube headless on the device's GPU
+against `cube.png` by the rule above, frames in the activity's window, a tap
+and a key as events, Home and back as Suspend and Resume, Back; a screenshot
+and the log). CI's `android` job runs them, the last on an x86-64 emulator
+with KVM (not a required check yet).
 `gfx-check` and `gfx-web-check` also draw `FeatureScene` (buffer and texture
 writes, R8 and RGBA8 textures, blending, scissor) against
 `packages/gfx/test/features.png`.

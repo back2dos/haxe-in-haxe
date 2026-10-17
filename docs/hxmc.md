@@ -222,7 +222,9 @@ imports with the symbol versions of glibc 2.17 bound at load time, a
 generated `_start` calling `__libc_start_main`; runtime objects of their own,
 `<target>-glibc`, the runtime's Haxe code the same), Windows (PE over the UCRT,
 imports written from the import libraries), macOS (Mach-O against
-libSystem, ad-hoc signed), each on x86-64 and ARM64, and wasm32-wasi (the
+libSystem, ad-hoc signed), each on x86-64 and ARM64, Android (a shared
+library of position-independent code against Bionic, in an APK hxmc writes:
+Android, below), and wasm32-wasi (the
 whole runtime in Haxe; exception handling with `exnref`, or with
 `-D hxmc.wasm-eh=legacy` the legacy `try`/`catch_all`/`rethrow`, which node 22
 runs without flags and wasmtime not at all; run with
@@ -233,6 +235,98 @@ use `sys.ssl` or `eval.luv`. Environment for development: `HXMC_OPT=0`,
 `HXMC_INLINE=<flat>,<loop>,<runtime>`, `HXMC_SYMBOLS=1`, `HXMC_SIZE_STATS=1`,
 `HXMC_DUMP=<function>`, `HXMC_MAP=<file>` (Windows), `HXMC_FRAME_POINTERS=0`,
 `RT_MINOR_KB` (a fixed nursery), `RT_TLAB_KB`, `RT_OLD_MB`, `RT_STATS`, `RT_VERIFY`.
+
+## Android
+
+`-D hxmc.target=android-arm64` (phones) or `android-x86_64` (emulators):
+Android 10 (API 29) and later, the first with ELF thread-locals in Bionic.
+The output is the program's shared library (`lib<name>.so`), or with an
+output ending in `.apk` an APK holding it as `lib/<abi>/libmain.so`, which
+the framework's `NativeActivity` loads (no Java, no `classes.dex`, no SDK or
+NDK at build time):
+
+```sh
+haxe -cp packages/os/src -cp packages/gfx/src -cp packages/gfx/examples -main Cube \
+  --custom-target hxmc=bin/cube.apk -D hxmc.target=android-arm64 -D hxmc.android-package=org.example.cube
+adb install -r bin/cube.apk
+adb shell am start -n org.example.cube/android.app.NativeActivity
+adb logcat -s hxmc        # what the app prints (stdout and stderr)
+```
+
+| Option | |
+| --- | --- |
+| `-D hxmc.android-package=<id>` | the application id (default `org.hxmc.<the output's name>`) |
+| `-D hxmc.android-label=<text>` | the launcher's label (the output's name) |
+| `-D hxmc.android-version=<n>`, `-D hxmc.android-version-name=<text>` | `versionCode` (1), `versionName` (1.0) |
+| `-D hxmc.android-min-sdk=<n>`, `-D hxmc.android-target-sdk=<n>` | 29 (the floor: ELF TLS), 35 |
+| `-D hxmc.android-key=<file>`, `HXMC_ANDROID_KEY` | the debug key's file (default `<cache>/android/debug-key`, made on first use) |
+| `-D hxmc.exports=<names>` | what the library exports besides `ANativeActivity_onCreate` |
+
+The shared library (`LinkDyn.hx`, shared with `-D hxmc.shared` in the glibc
+mode, `hxmc/test/SharedCheck.hx`): ET_DYN at address 0; the code was
+pc-relative already (program-wide numbers are absolute symbols, not
+addresses), so an address in data becomes an `R_*_RELATIVE` relocation (the
+read-only data holding one moves to the writable segment), an import a GOT
+slot bound at load time (`BIND_NOW`; calls through a stub), a library's
+variable its slot too (the address computation that names it, adrp+add or
+lea, made a load of the slot; the runtime takes `environ`'s address once,
+`Start.hx`, since a load cannot be rewritten so); thread-locals as on macOS:
+generated code calls `hxmc_tls_base` once per function, a stub the linker
+writes that returns the module's TLS block for the thread (TLSDESC on arm64,
+the general dynamic model's `__tls_get_addr` on x86-64, where Bionic has no
+TLSDESC; initial-exec is refused for a dlopen'ed library); 16 KB segments
+(Android 15's pages); `DT_HASH`, `DT_SONAME`, the exports (`Abi.exports`:
+`ANativeActivity_onCreate`) in `.dynsym`, every other symbol hidden; section
+headers (Bionic's linker reads `.dynamic` and `.dynstr` through them).
+
+Bionic: the runtime's C library calls are imports of `libc.so`, `libm.so`
+and `libdl.so` with Bionic's symbol versions (`LIBC`, `LIBC_N`, ... `LIBC_Q`):
+the runtime objects `android-arm64` and `android-x86_64` hold the table of
+everything those libraries export to API 29 apps, made by `mkrt.sh` from
+Bionic's version scripts (their arch and `introduced=` tags), and
+compiler-rt's helpers; `deps.sh` fetches Bionic's headers at a pinned AOSP
+commit, against which mbedtls and libuv are compiled (`sys.ssl` and
+`eval.luv` link; not exercised on a device yet) and `Layouts.hx` reads the layouts (Bionic's pthread types,
+`_SC_PAGESIZE` 39). The runtime's differences: `__errno`, `__cxa_atexit` with
+the library's `__dso_handle` (Bionic's `atexit` is crtbegin's), `environ`'s
+address (`Mem.target()` 9 and 10: `Mem.target() >= 9` is Android, `Mem.os()`
+is Linux's). Other libraries (`libandroid.so`, `liblog.so`, `libEGL.so`) are
+imported unversioned; `@:hxmc.lib("libEGL.so.1")` names `libEGL.so` there.
+
+The app (`packages/os`, `hxmc.os.android`): the export
+`ANativeActivity_onCreate` (no-GC Haxe, `Activity.hx`, what the NDK's
+`android_native_app_glue` does in C) sets the activity's callbacks, sends
+stdout and stderr to logcat (tag `hxmc`) and starts the program's thread,
+where the runtime starts (the generated `main`) with an `ALooper` watching
+a pipe of the callbacks' commands; the callbacks run on the UI thread, which
+the runtime does not know, and wait for the ones whose state the program
+must take (a window created or going, an input queue, pause, destroy).
+`AndroidWindow` is the activity's window behind `Window`, `App.run` polls
+the looper (input queue: touches as the left button, their drags also as
+`Scroll`, keys as X11 KeySyms), draws only with a window and not paused,
+and sleeps in the looper otherwise; a window taken by the system is
+`Surface.lost` (gfx lets go of its EGL surface first) and a `Suspend`
+event, a new one `Resume`. `packages/gfx`'s GL back end is EGL's default
+display on the `ANativeWindow`, GLES 3.0 from `libGLESv3.so`.
+
+The APK (`hxmc/src/hxmc/android/Apk.hx`): `AndroidManifest.xml` in binary
+XML (`Axml.hx`: `hasCode="false"`, `NativeActivity` with
+`android.app.lib_name`, `extractNativeLibs="false"`, the configuration
+changes the activity keeps, a framework theme; no `resources.arsc`), the
+library stored and aligned to 16 KB (the rest to 4 bytes: what `zipalign -P
+16` does), then the APK Signature Scheme v2 block, ECDSA P-256 with SHA-256
+in plain Haxe (`P256.hx`, RFC 6979's deterministic nonces, so an APK signs
+the same way each time; the self-signed certificate `Der.hx` writes) with a
+debug key kept in the user's cache directory, so reinstalls keep their
+signature. The cube's APK: 296 KB (arm64; its library 279 KB), 280 KB
+(x86-64); a hello world's library 108 KB and 92 KB. Checks:
+`hxmc/test/ApkCheck.hx` (`make android-check`: the zip, the manifest read
+back, the library's ELF, the signature's digest and signature; `zipalign`,
+`aapt`, `apksigner` where installed), `make shared-check`, and
+`packages/gfx/test/android.sh` on a device or emulator (`make
+android-device-check`; CI: an x86-64 emulator). Not yet: one ABI per APK,
+release signing (a keystore), icons and resources, the clipboard, text
+input and anything else of Java's (JNI: [plans/targets.md](plans/targets.md#android)).
 
 ## WebAssembly
 
