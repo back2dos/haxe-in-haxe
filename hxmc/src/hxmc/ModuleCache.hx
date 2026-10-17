@@ -830,10 +830,7 @@ class ModuleCache {
 		var used = dir + "used";
 		if (!FileSystem.exists(used) || CacheDir.now() - CacheDir.mtime(used) > CacheDir.USED_REFRESH)
 			if (!CacheDir.touch(used)) return null;
-		CacheDir.trim(modules, dir, d -> {
-			ModuleStore.sweep(d);
-			ObjectStore.sweep(d);
-		});
+		CacheDir.trim(modules, dir);
 		var key = Fingerprint.hash(["hxmc-modules", Sys.getCwd(), Sys.getEnv("HAXE_STD_PATH"), com.classPaths.asStringList().join("\n")].join("\x00"));
 		var s = new ModuleCacheState(dir, dir + key + ".idx", com);
 		s.signs[0] = context.CommonCache.getCacheSign(com);
@@ -1353,7 +1350,10 @@ class ModuleCache {
 		state = null;
 		ServerCache.checkModuleHook = null;
 		typing.Finalization.sortExprHook = null;
-		if (s == null) return;
+		if (s == null) {
+			CacheDir.settle();
+			return;
+		}
 		var t0 = haxe.Timer.stamp();
 		ModuleStore.closePacks();
 		if (s.packLock != null) s.packLock.wait();
@@ -1395,8 +1395,13 @@ class ModuleCache {
 				var tmp = s.indexPath + "." + CacheDir.nonce() + ".tmp";
 				if (ok)
 					wrote = try {
-						File.saveBytes(tmp, ModuleStore.writeIndex(ix));
-						CacheDir.replace(tmp, s.indexPath);
+						var b = ModuleStore.writeIndex(ix);
+						var was = try FileSystem.stat(s.indexPath).size catch (_:Dynamic) 0;
+						File.saveBytes(tmp, b);
+						if (CacheDir.replace(tmp, s.indexPath)) {
+							CacheDir.wrote(b.length - was);
+							true;
+						} else false;
 					} catch (e:Dynamic) {
 						try FileSystem.deleteFile(tmp) catch (_:Dynamic) {}
 						false;
@@ -1408,6 +1413,7 @@ class ModuleCache {
 				+ '${s.typedUnder} typed again under restored ones, ${s.cycleTyped} with their cycle, interfaces ${Std.int(s.ifaceTime * 1000)} ms, $blobs blobs, index ${wrote ? "written" : "unchanged"} (${ms(t0)} ms), '
 				+ '${s.typedCount} typed from source, ${s.volatileCount} every build, ${s.readingCount} reading files or the environment'
 				+ (s.volatileReason != null ? ' (not written: ${s.volatileReason})' : ''));
+		CacheDir.settle();
 	}
 }
 

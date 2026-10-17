@@ -104,7 +104,8 @@ longer (its field dropped as without the cache), and a second output
 sharing every object, for
 hxmc (the tool and `haxe`), JS and Eval. `CacheCheck` (`make quick`): its
 store (tool directories, the trim of indexes, packs of blobs, objects and
-tool directories, a cache that cannot be written). The cache is on by default, so builds from
+tool directories, a tiny cap held as builds write past it, a cache that
+cannot be written). The cache is on by default, so builds from
 source use it (the corpus builds from HXB archives and does not); CI's
 npm-pack job builds with it off (`HXMC_MODULE_CACHE=0`), the fixpoint
 builds the tool with it cold, warm and off, and `Crosshost` compares the
