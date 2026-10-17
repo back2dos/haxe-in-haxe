@@ -124,9 +124,10 @@ nodes, the popup widgets driven by pointer and keys, a VirtualList of
 `GuideTest.hx`). Natively: `make
 ui-draw-check` (the sample UI, the todo example and the widget gallery,
 the last two driven through their Ui, drawn headless against `draw.png`,
-`todo.png` and `gallery.png`; `TransformTest`, boxes turned, scaled,
-skewed and nested against Chromium's `transform.png` (`transform-ref.mjs`
-from `transforms.json`), a text under `scale(2)` against the same text
+`todo.png` and `gallery.png`; `BoxTest`, boxes with their own corners' radii
+and sides' borders, a clip to rounded corners, boxes turned, scaled, skewed
+and nested, against Chromium's `boxes.png` (`box-ref.mjs` from
+`boxes.json`), a text under `scale(2)` against the same text
 twice the size; `BLESS=1` writes the goldens again, uncompressed, and
 `node packages/gfx/test/png-deflate.mjs` compresses them before a commit; Linux: llvmpipe, DejaVu
 Sans; the sample in a window under Xvfb, whose loop must sleep once it has
