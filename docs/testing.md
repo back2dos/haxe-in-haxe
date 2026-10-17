@@ -253,11 +253,7 @@ its islands hydrated, no errors and no horizontal scrolling; the menu, the
 theme, the examples running, the triangle and the cube against their
 golden images, web's Counter and Lab islands, the tone; the playground's
 compiler with both modules and its fallback to the legacy one in a
-Chromium without exnref; WebKit without its optimizing wasm tier,
-`JSC_useOMGJIT=0`: in the WebKit of Playwright 1.56, 26.0, modules running
-for a while, compiled by OMG, at times trap where the program cannot, hang
-or crash the page, which neither OMG off nor the WebKit of Playwright 1.63
-do), `npm` (the nine packages in fresh projects on each of the six
+Chromium without exnref), `npm` (the nine packages in fresh projects on each of the six
 machines: native at once through the platform package, `-lib` from
 node_modules (`hxmc/test/NodeLibs.hx`), `--ignore-scripts`; and on linux-x64,
 or on all six on main, tags and the nightly run, lix with `dist/`, the
