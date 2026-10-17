@@ -14,31 +14,109 @@ module cache is that cache made durable on disk, not a new unit of
 caching: no library boundaries, so the std, haxelib, lix and node_modules
 libraries and the user's code are all modules alike.
 
-Built (docs/hxmc.md, "Module cache"; `hxmc/src/hxmc/ModuleCache.hx`): the
-store, lazy validation (content hashes where dates or sizes differ,
-shadowing, missing dependencies), what HXB does not keep (the modifiers of
-unbound monomorphs, the sort's walk of each module; also an anonymous
-structure's fields are now in name order, which showed only in hxmc), and
-the gate (`make test-module-cache`, docs/testing.md). Measured when it was
-built (one 4-core VM; time to the start of lowering, then the whole build
-with the objects cached, and peak RSS):
+Built (docs/hxmc.md, "Module cache"; `hxmc/src/hxmc/ModuleCache.hx`,
+`ModuleStore.hx`, `ModuleInterface.hx`), on by default since 2026-10-17
+(it replaced the types cache, an HXB archive of hxmc's own package typed by
+a separate run of the tool): the store, lazy validation (content hashes
+where dates or sizes differ, shadowing, missing dependencies), what HXB
+does not keep (the modifiers of unbound monomorphs, the sort's walk of each
+module; also an anonymous structure's fields are now in name order, which
+showed only in hxmc), and the gate (`make test-module-cache`,
+docs/testing.md). CI keeps the source path tested: the npm-pack job builds
+the packages' compilers with the cache off, the fixpoint builds the tool
+cold, warm and off, and crosshost compares the native tool (cached) with
+the WebAssembly one (WASI: never cached). The corpus builds from HXB
+archives, without it.
 
-| | no cache | types cache | module cache cold | module cache warm |
-| --- | --- | --- | --- | --- |
-| hello world | 306 ms | 158 ms, 0.21 s, 75 MB | 367 ms | 85 ms, 0.14 s, 70 MB |
-| haxe-formatter | 848 ms | 704 ms, 0.86 s, 143 MB | 885 ms | 171 ms, 0.35 s, 105 MB |
-| the port | 6.4 s | 6.2 s, 8.4 s, 1013 MB | 7.6 s | 1.14 s, 3.3 s, 782 MB |
+- **Keys** (built): an index per working directory, class paths and std,
+  of module variants, each with the defines it read: its file's conditions
+  (recorded while parsing), its macros' `Context.defined`/`getDefines`
+  (attributed to the module whose macro runs), and those the compiler read
+  in the build that typed it (`Define.readHook`: the typer's and filters'
+  options, the target's). A build restores the variant whose reads have
+  its values, so a define one module reads leaves the others alone. The
+  macros' context's defines are predicted as `MacroContext` makes them when
+  it does not exist yet (checked when it is created). An edit undone
+  restores the earlier variant (chosen by its file's content).
+- **Early cutoff** (built): each variant keeps, per dependency, the hash
+  of its interface as it was when the variant was typed: the parsed
+  declarations without the bodies of functions whose type is written out
+  (not inline, macro, @:generic, nor in a class a build macro makes),
+  positions only for the expressions it keeps (inlining copies them), with
+  its own dependencies' interfaces per strongly connected component; across
+  contexts (a macro's module), the whole content. A module typed again
+  whose interface did not change leaves its dependents restored; it is
+  typed from its source where the server expects it cached. In a cycle,
+  the restored modules a module typed from source loads while it is being
+  created are typed from source too (decoded then, they would reach its
+  types before they are ready); the rest of the cycle stays restored.
+  Coupling found on the way: the typing of a module marks fields of its
+  dependencies as maybe used through structures (`CfMaybeUsed`, which DCE
+  reads). The marks are attributed to the module whose typing made them
+  (`TUnification.maybeUsedHook`; the module being typed known through
+  `Typecore.typeExprRef`, the tasks it delays, its lazy typings and its
+  creation) and stored with its variant; a restored module's fields lose
+  the marks its HXB kept, and get this build's: those of the modules typed
+  again, made again, and those the restored modules replay. A build where
+  a mark has no maker writes nothing.
+  Modules build macros make are restored too (built). What macros keep
+  between calls is tracked: the static variables of macro classes (not
+  the std's) that the macros run in a module's typing read or write
+  (`EvalJit.staticVarHook`) are kept with its variant (the gfx shaders'
+  `@:autoBuild` registry, json2object's counter naming generated parsers).
+  Such a module is restored while no macro of the build uses that state.
+  A macro that uses it after such a module was restored makes the build run
+  again, with those modules typed (`HXMC_MODULE_CACHE_RETYPE`). An edited
+  module whose macros keep state has the others that keep state in the same
+  class typed from the start, so a shader edit does not run the build twice.
+  A callback registered while a module is typed (`onGenerate`...) makes
+  that module typed every build. The macros' context's modules restored as
+  processed get their exception constructors patched once
+  (`MacroContext.processedTypeHook`). Without it, `SaveStacks` added a
+  `__skipStack++` each build, so blobs grew and were rewritten. A build
+  whose modules are all restored skips the capture.
+- Cold runs (built): the interface hash walks the syntax tree directly
+  and runs as each file is parsed, so no declarations are kept. File
+  and closure hashes are a 64-bit two-lane hash instead of MD5. A build's
+  new blobs go in one pack (`b/<name>.pk`), written on a thread beside the
+  rest of the build. The capture and the skeletons use the pool even under
+  `-D disable-parallelism`. A define read again costs a lookup. The tool's
+  first old-space limit is 3 GB, up from 2 GB: the port's cold build with
+  the cache promotes just over 2 GB, which cost a major collection of
+  about a second.
+- Measured (one 4-core VM shared with other builds). Each entry gives the
+  time to the start of lowering, the whole build with the objects cached,
+  and the number of modules typed or processed again. Before is main's tool,
+  measured in the same session:
 
-A cold run pays the HXB encoding (the port: 0.86 s of 7.6 s). The port's
-warm front half: reading its 28 MB pack 0.1 s, decoding 0.54 s, DCE
-0.26 s, typing what is left and the sort 0.26 s; validation 15 ms.
+  | | before | after |
+  | --- | --- | --- |
+  | hello, cold | 408 ms, 0.51 s | 406 ms, 0.49 s |
+  | hello, warm | 96 ms, 0.17 s | 101 ms, 0.18 s |
+  | hello, after `-D unrelated` | 383 ms, 0.45 s, 94 | 100 ms, 0.17 s, 0 |
+  | hello, a body edited, then undone | 97 ms, 0.18 s, 1; 1 | 106 ms, 0.19 s, 1; 0 |
+  | formatter, cold | 1043 ms, 1.42 s | 1017 ms, 1.39 s |
+  | formatter, warm | 187 ms, 0.39 s, 0 | 205 ms, 0.40 s, 0 |
+  | formatter, after `-D unrelated` | 1193 ms, 1.41 s, 334 | 196 ms, 0.41 s, 0 |
+  | formatter, a body edited (tokentree.TokenTree) | 565 ms, 0.84 s, 173 | 244 ms, 0.52 s, 6 |
+  | formatter, an interface edited | 566 ms, 0.78 s, 173 | 609 ms, 0.84 s, 118 |
+  | the port, cold | 8.5 s, 14.1 s | 8.0 s, 13.6 s |
+  | the port, warm | 1.33 s, 3.48 s | 1.28 s, 3.45 s |
+  | the port, after `-D unrelated` | 8.4 s, 10.7 s, 563 | 1.34 s, 3.52 s, 0 |
+  | the port, a body edited (core.TFunctions) | 6.7 s, 9.0 s, 274 | 1.58 s, 3.91 s, 1 |
+  | the port, the edit undone | 6.7 s, 9.1 s, 274 | 1.39 s, 3.73 s, 0 |
+  | the port, an interface edited | 7.1 s, 9.5 s, 274 | 6.7 s, 8.9 s, 228 |
+
+  Cold builds still pay for encoding the modules (the port: about 0.33 s
+  on four threads) and the skeletons, so the gain on the port's cold build
+  comes from the 3 GB old-space limit.
 
 Open:
 
-- **Nondeterministic macros**, needed before the cache can be trusted by
-  default (the server trusts them: a macro embedding `Date.now()` keeps its
-  value until its module changes; on by default, plain builds inherit
-  that). The macro std's natives are ours, so they decide per module:
+- **Nondeterministic macros**: the cache is on by default, and the server
+  trusts them (a macro embedding `Date.now()` keeps its value until its
+  module changes). The macro std's natives are ours, so they decide per
+  module:
   - Volatile: date and time (`Date.now`, `Sys.time`, `Timer.stamp`),
     randomness, the network (`Http`, sockets), processes (`Sys.command`,
     `sys.io.Process`) mark the module being typed as not cacheable; it is
@@ -56,23 +134,25 @@ Open:
   - Gate cases: a macro using `Date.now` runs every build, one reading a
     file only when the file changes, one reading an environment variable
     when its value changes.
-- **Key**: today the server's coarse signature (the defines) plus the
-  class paths, the working directory and the std. Next: the defines each
-  module's conditions read (recorded while parsing), so a define touching
-  user code leaves the std's modules alone; then interface hashes of
-  dependencies for early cutoff (a dependency typed again with the same
-  signatures, types, inline bodies and constants leaves its dependents
-  valid).
+- **Macro state**: the tracking sees static variables, not state a macro
+  keeps elsewhere (a file it writes, a std class's statics, the macro
+  API's own registries beyond the callbacks). A conflict found late costs
+  a second run of the build.
+- **Interface edits undone**: an undone edit of a module restores its
+  earlier variant but not its dependents' (the newest variant of each is
+  chosen by its own file); choosing among a module's variants by its
+  dependencies' hashes would restore them too.
+- **Cold runs**: encoding is upstream's HXB writer. Starting it before
+  the filters end, or writing less, would lower it.
 - **Init macros**: their effects are data (`addGlobalMetadata` filters,
   `Compiler.define`, class paths); until they are in the key, builds with
   `--macro` do not use the cache. A macro registering `onGenerate`,
-  `onAfterTyping` or `onAfterGenerate` while typing makes the build write
-  nothing (a restored module would not register it again).
-- **Storage**: one pack per server context, written whole. Later:
-  content-addressed blobs shared across keys, and a trim per pack.
-- **Back half**: per-module objects move to the same central store, keyed
-  by the hash of the lowered IR (`Fingerprint`), shared by every output
-  and target ("Central object cache" below). DCE is whole-program: move it
+  `onAfterTyping` or `onAfterGenerate`, or defining something, while
+  typing makes the build write nothing (a restored module would not do it
+  again).
+- **Back half**: the per-module objects are in the same store, keyed by
+  the hash of the lowered IR (`Fingerprint`), shared by every output
+  ("Central object cache" below). Next: DCE is whole-program: move it
   to link time (reachability over symbols with Haxe's rules: `@:keep`,
   implemented interfaces, overrides of reachable fields, reflection roots;
   reflection tables generated from the live set), so a module's object
@@ -84,8 +164,11 @@ Open:
 - **Typing order**: some Haxe behaviour depends on it (monomorph
   resolution, anonymous type numbering, build macro order, static
   initialization), and restoring changes it; the gate covers it.
-- **Then**: the `npm` postinstall warming the std's modules, builds with
-  init macros, `-lib` HXB archives as one more source of modules.
+- **Then**: builds with init macros, `-lib` HXB archives as one more
+  source of modules. The `npm` postinstall warming the std's modules does
+  not pay while an index is per working directory and class paths (a
+  warm-up in the package's directory serves no project): it needs the
+  std's variants shared across keys.
 - Decided against: shipping the std as HXB in the distribution. There is
   no single typed std (per target, per define, again for the macro
   context), the sources have to ship anyway, init macros cannot change
@@ -94,14 +177,17 @@ Open:
 
 ## Central object cache and quieter builds
 
-Today every executable gets `<out>.hxmc/` next to it (per-module objects
-keyed by code, tool and target, plus `build.key` for the up-to-date check;
-`Driver.hx`, `UpToDate.hx`), and the Makefile's build rule writes
-`<out>.log` (shown only on failure). Plan: one cache directory instead, the
-user cache directory where the typed modules already live (same trim),
-overridable with `-D hxmc.cache=<dir>`, keyed by the hash of the lowered IR
-so different outputs and targets share it; logs only on request. Keeps
-users' output directories and `bin/` clean.
+Done for the objects (2026-10-17, `ObjectStore.hx`): the per-module
+objects live in the module cache's store (`<cache>/modules/<tool>/o/`),
+named by the hash of their lowered IR with the tool and the target
+(`Fingerprint`) and the module, so every output and project compiling the
+same code for the same target shares them; per output, `<hash>.objs` names
+the objects its last build used (the trim removes the objects no `.objs`
+names after a day, the `.objs` with their last use) and `<hash>.key` is the
+up-to-date record (`UpToDate.hx`). `<out>.hxmc/` remains only where the
+cache directory cannot be written (and under WASI). Left: logs only on
+request (the Makefile's build rule still writes `<out>.log`, shown on
+failure); `-D hxmc.cache=<dir>` beside `HXMC_CACHE`.
 
 ## Faster rebuilds, smaller outputs
 

@@ -70,7 +70,23 @@ allocations and missed roots show at once. `ModuleCacheCheck` (`make
 test-module-cache`; `PORT=1` adds the port): the persistent module cache
 gives the same outputs, byte for byte, as a build without it, cold, warm,
 after a new date, after an edit of a module and of a std override, after a
-new file shadows a module, for hxmc (the tool and `haxe`) and JS.
+new file shadows a module, after a define no module reads (nothing typed
+again) and one a single module reads (that module only), a body edited in
+a dependency (only it typed again), an inline function edited (its
+dependents typed again), a body edited in a cycle, an edit undone (the
+earlier variant restored), a build macro keeping no state (its module
+restored), one keeping what an expression macro reads (an `@:autoBuild`
+registry: restored while nothing reads it; a define typing the reader
+again runs the build again with the registering module typed), a class used through a structure under `-dce full` and then no
+longer (its field dropped as without the cache), and a second output
+sharing every object, for
+hxmc (the tool and `haxe`), JS and Eval. `CacheCheck` (`make quick`): its
+store (tool directories, the trim of indexes, packs of blobs, objects and
+tool directories, a cache that cannot be written). The cache is on by default, so builds from
+source use it (the corpus builds from HXB archives and does not); CI's
+npm-pack job builds with it off (`HXMC_MODULE_CACHE=0`), the fixpoint
+builds the tool with it cold, warm and off, and `Crosshost` compares the
+native tool (cached) with the WebAssembly one (never cached).
 
 ## Graphics
 

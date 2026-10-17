@@ -151,44 +151,68 @@ objects die young keep a nursery that stays in the caches; the port typing
 or compiling macro-heavy code grows it to 16 MB, which keeps medium-lived
 objects out of the old space (6-17% faster, up to 31% less peak memory);
 parallel phases get a larger one, so their threads stop for fewer
-collections. `RT_STATS=1` prints the resizes and what was promoted. The
-modules of hxmc's own package
-of the std (the runtime, `hxmc.unsafe`, the natives) are typed once per
-tool and configuration and cached as an HXB archive (`hxmc/src/hxmc/TypesCache.hx`;
-`HXMC_TYPES_CACHE=0` turns it off): a build loads them instead of typing
-them, and its executable is the same (`make fixpoint` checks it). The cache
-is the user's (`$XDG_CACHE_HOME/hxmc` or `~/.cache/hxmc`, macOS
-`~/Library/Caches/hxmc`, Windows `%LOCALAPPDATA%\hxmc\cache`; `HXMC_CACHE`
-overrides; one that cannot be written is not used), shared by every build
-of the tool, each in its own `types/<tool>/`; once a day a build removes
-those unused for 14 days, and the least recently used beyond 1 GB
-(`hxmc/test/CacheCheck.hx` checks it). A change of the runtime's
+collections. `RT_STATS=1` prints the resizes and what was promoted. A change of the runtime's
 interface or of the IR's conventions needs a tool that knows it: build once
 against the previous runtime first, or bootstrap again.
 
 ## Module cache
 
 The compilation server's HXB module cache, made durable
-(`hxmc/src/hxmc/ModuleCache.hx`; opt-in: `HXMC_MODULE_CACHE=1` or
-`-D hxmc.module-cache`, `HXMC_MODULE_CACHE=0` or `-D hxmc.no-module-cache`
-off; through `haxe` and the tool, for every target): a successful build
-writes its typed modules (HXB chunks, dependencies, file and check policy)
-into a store in the user cache directory (`modules/<tool>/`, beside
-`types/`, with the same trim), one pack per server context (the program's,
-its macros'), keyed by the defines (the server's signature), the class
-paths, the working directory and the std. The next build puts them in the
-server's cache, and the server's checks decide which are good, lazily, for
-the modules the build loads; beyond them, a module's file is compared by
-content hash where its date or size changed, its path must still resolve
-to it (shadowing), and the dependencies must be in the store. Not used for
+(`hxmc/src/hxmc/ModuleCache.hx`, `ModuleStore.hx`; on by default,
+`HXMC_MODULE_CACHE=0` or `-D hxmc.no-module-cache` off; through `haxe` and
+the tool, for every target): a successful build writes its typed modules
+(HXB chunks, dependencies, file and check policy) into a store in the user
+cache directory (`$XDG_CACHE_HOME/hxmc` or `~/.cache/hxmc`, macOS
+`~/Library/Caches/hxmc`, Windows `%LOCALAPPDATA%\hxmc\cache`; `HXMC_CACHE`
+overrides; one that cannot be written is not used), in `modules/<tool>/`
+for each build of the tool: an index per working directory, class paths
+and std (`<key>.idx`), the modules' HXB in blobs (one pack per build that
+writes some, `b/<name>.pk`, written beside the rest of the build), read only
+for the modules a build restores, and the compiled objects (`o/`, `ObjectStore.hx`:
+named by the hash of their lowered IR, shared by every output; per output
+the list of objects its last build used and its up-to-date record; the
+objects stay next to the output, in `<out>.hxmc/`, only where the cache
+directory cannot be written); once a day a build removes the tool
+directories, indexes and object lists unused for 14 days, the least
+recently used beyond 1 GB, and the packs and objects nothing names (`CacheDir.hx`, checked by
+`hxmc/test/CacheCheck.hx`). An index keeps variants of each module, each
+with the defines it read (its file's conditions, its macros'
+`Context.defined`, and those the compiler read in the build that typed
+it): a build restores the variant whose reads have its values, so a define
+only some modules read leaves the others (the std) good. The server's
+checks decide which modules are good, lazily, for the modules the build
+loads; beyond them, a module's file is compared by content hash where its
+date or size changed, its path must still resolve to it (shadowing), and
+each dependency must have the hash it had when the module was typed: the
+hash of its interface (`ModuleInterface.hx`: its declarations without the
+bodies of functions whose type is written out; positions only for the
+expressions kept, which inlining copies), or of its whole content across
+contexts (a macro's code runs). A module typed again whose interface did
+not change leaves its dependents restored (early cutoff: a body edited in
+a central module of the port types that module again, not its
+dependents); an edit undone restores the earlier variant. Modules built by
+macros are restored too; the state macros keep between calls is tracked:
+the static variables of macro classes (not the std's) the macros run in a
+module's typing use are kept with it (a registry an `@:autoBuild` fills
+for another macro, a counter naming generated types). Such a module is
+restored while no macro of the build uses that state; a macro that uses
+it after such a module was restored makes the build run again, those
+modules typed (`HXMC_MODULE_CACHE_RETYPE`), and an edited one has the
+others that keep state there typed from the start. A callback a macro
+registers while a module is typed (`onGenerate`, `onAfterTyping`,
+`onAfterGenerate`) makes that module typed every build. Not used for
 display requests, the server itself, several compilations, init macros,
-HXB libraries or output; a macro registering `onGenerate`, `onAfterTyping`
-or `onAfterGenerate` while typing makes the build write nothing. The
-output is the same as without the cache (`make test-module-cache`): the
-cache also keeps the modifiers of unbound monomorphs and what the sort of
-the types walks of each module before the filters, which HXB does not keep.
-When it is on, the types cache is not used. Plans: [plans/compiler.md](plans/compiler.md),
-"Cached modules".
+deprecated defines, HXB libraries or output, WASI; such a callback
+registered outside the typing of a module, or a macro defining something,
+makes the build write nothing. The output is the same as
+without the cache (`make test-module-cache`; `make fixpoint`: the tool
+building itself with the cache cold, warm and off): the cache also keeps
+the modifiers of unbound monomorphs and what the sort of the types walks
+of each module before the filters, which HXB does not keep. Macros are
+trusted as the server trusts them: a macro whose result changes without
+its inputs changing (the date, randomness, a file not registered with
+`Context.registerModuleDependency`) keeps its earlier result until its
+module changes. Plans: [plans/compiler.md](plans/compiler.md)
 
 ## Targets
 

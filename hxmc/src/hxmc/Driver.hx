@@ -6,10 +6,10 @@ import hxmc.Abi;
 import hxmc.MirBuild.Unsupported;
 
 // One run of the tool. Functions are compiled per Haxe module (the unit of
-// the object cache): each module becomes an object of its own, cached in
-// <out>.hxmc/ under a key hashing its Fingerprint (with the tool and the
-// target), so a rebuild after an edit compiles only the modules whose code
-// can change. The program's data (DataGen) is regenerated every time, and
+// the object cache): each module becomes an object of its own, cached under
+// a key hashing its Fingerprint (with the tool and the target) in the store
+// (ObjectStore: shared by every output; else in <out>.hxmc/), so a rebuild
+// after an edit compiles only the modules whose code can change. The program's data (DataGen) is regenerated every time, and
 // everything is linked with the runtime object (Link).
 class Driver {
 	var prep:Prep;
@@ -255,11 +255,13 @@ class Driver {
 			}
 			fs.push(f);
 		}
+		// the objects: in the store (ObjectStore), else next to the output
+		var store = ObjectStore.open(out);
 		var dir = out + ".hxmc";
-		if (!sys.FileSystem.exists(dir)) sys.FileSystem.createDirectory(dir);
+		if (store == null && !sys.FileSystem.exists(dir)) sys.FileSystem.createDirectory(dir);
 		var index = new Map<String, String>();
 		var indexPath = dir + "/index";
-		if (sys.FileSystem.exists(indexPath))
+		if (store == null && sys.FileSystem.exists(indexPath))
 			for (l in sys.io.File.getContent(indexPath).split("\n")) {
 				var sp = l.indexOf(" ");
 				if (sp > 0) index.set(l.substr(0, sp), l.substr(sp + 1));
@@ -274,6 +276,7 @@ class Driver {
 		// string literals they found are registered and the index written
 		var nm = order.length;
 		var paths = [for (m in order) dir + "/" + moduleFile(m)];
+		var memPaths = paths.copy();
 		var keys = [for (_ in 0...nm) ""];
 		var lits:Array<Array<String>> = [for (_ in 0...nm) null];
 		var objs:Array<Obj> = [for (_ in 0...nm) null];
@@ -287,9 +290,13 @@ class Driver {
 			var key = Fingerprint.hash(text.toString());
 			keys[mi] = key;
 			lits[mi] = fp.newStrings;
-			var mem = resident ? memObjs.get(paths[mi]) : null;
+			var mem = resident ? memObjs.get(memPaths[mi]) : null;
+			if (store != null) paths[mi] = store.objectPath(key, moduleFile(order[mi]));
 			if (mem != null && mem.key == key) objs[mi] = mem.obj;
-			else if (!abi.wasm && index.get(moduleFile(order[mi])) == key && sys.FileSystem.exists(paths[mi])) objs[mi] = ElfReader.read(sys.io.File.getBytes(paths[mi]));
+			else if (!abi.wasm && (store != null || index.get(moduleFile(order[mi])) == key) && sys.FileSystem.exists(paths[mi])) {
+				var o = try ElfReader.read(sys.io.File.getBytes(paths[mi])) catch (_:Dynamic) null;
+				if (o != null) objs[mi] = o;
+			}
 		});
 		var tKey = haxe.Timer.stamp() - s0;
 		var newIndex = new StringBuf();
@@ -325,16 +332,23 @@ class Driver {
 			for (f in byModule.get(order[mi]))
 				compileFunc(f, obj, emit, ras);
 			// (WebAssembly objects are not cached: ElfWriter has no relocations for them)
-			if (!abi.wasm) sys.io.File.saveBytes(paths[mi], ElfWriter.write(obj, abi.arm));
+			if (!abi.wasm) {
+				var b = ElfWriter.write(obj, abi.arm);
+				if (store != null) store.save(paths[mi], b) else sys.io.File.saveBytes(paths[mi], b);
+			}
 			objs[mi] = obj;
 		});
-		sys.io.File.saveContent(indexPath, newIndex.toString());
+		if (store != null) {
+			if (!abi.wasm) store.record([for (p in paths) haxe.io.Path.withoutDirectory(p)]);
+		} else
+			sys.io.File.saveContent(indexPath, newIndex.toString());
 		// (LinkPE drops sections from the objects it links: not kept)
 		if (resident && abi.os != "windows")
 			for (mi in 0...nm)
-				memObjs.set(paths[mi], {key: keys[mi], obj: objs[mi]});
-		for (f in sys.FileSystem.readDirectory(dir))
-			if (StringTools.endsWith(f, ".o") && !keep.exists(f)) sys.FileSystem.deleteFile(dir + "/" + f);
+				memObjs.set(memPaths[mi], {key: keys[mi], obj: objs[mi]});
+		if (store == null)
+			for (f in sys.FileSystem.readDirectory(dir))
+				if (StringTools.endsWith(f, ".o") && !keep.exists(f)) sys.FileSystem.deleteFile(dir + "/" + f);
 		var t2 = haxe.Timer.stamp();
 		stats(t0, t1, t2);
 		var data = new Obj();
