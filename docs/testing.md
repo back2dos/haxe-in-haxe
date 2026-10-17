@@ -194,7 +194,7 @@ against Chromium's (`css/`, `css-cases.mjs`);
 popups placed, hit and dismissed; then markup rendered into hxmc.ui's
 nodes (`MarkupTest.hx`: attributes from Style's properties), the popup widgets driven by pointer and keys, a VirtualList of
 100000 rows scrolled; the examples of `packages/ui/GUIDE.md`, run by
-`GuideTest.hx`). `make theme-check` (`@hxmc/theme`: Tailwind's class lists read as rules, Tw's rules made at compile time, shadcn's sheet compiled, the classes it rejects at compile time). Natively: `make
+`GuideTest.hx`). `make theme-check` (`@hxmc/theme`: Tailwind's class lists read as rules, Tw's rules made at compile time, shadcn's sheet made, the classes it rejects at compile time). Natively: `make
 ui-draw-check` (the sample UI, the todo example and the widget gallery,
 the last two driven through their Ui, drawn headless against `draw.png`,
 `todo.png` and `gallery.png`; `BoxTest`, boxes with their own corners' radii
