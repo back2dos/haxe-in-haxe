@@ -54,6 +54,13 @@ archives, without it.
   dependencies as maybe used through structures (`CfMaybeUsed`, which DCE
   reads); a dependency with such marks is restored only together with its
   cycle, so its marks stay those of its users.
+  A module a build macro makes (`@:build`, `@:genericBuild`, `@:autoBuild`
+  from what it extends or implements) is typed again every build: its
+  macro may keep something other macros read (the gfx package's shaders:
+  an `@:autoBuild` registers each shader class, a shader's macro looks it
+  up); its interface hash (its whole content) still leaves its dependents
+  restored. The macros' context's modules a macro run processes again are
+  kept as they were when their encoding has not changed.
 - Measured (one 4-core VM shared with other builds; time to the start of
   lowering, then the whole build with the objects cached,
   and the modules typed or processed again; before: the signature-keyed

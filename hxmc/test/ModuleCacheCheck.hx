@@ -23,7 +23,8 @@ using StringTools;
 // dependency (only it typed again, its dependents restored), an inline
 // function edited (its dependents typed again), a body edited in a cycle
 // (only that module). The warm runs must restore every module (none typed
-// again), an edit undone restores the earlier variant. Copies of the std (hxmc's and upstream's) are edited, never the
+// again; a module a build macro makes is typed every build), an edit undone
+// restores the earlier variant. Copies of the std (hxmc's and upstream's) are edited, never the
 // repository's. In bin/hxmc-t/module-cache (removed when every check passes):
 //   bin/hxmc/hxmc -cp hxmc/test -cp haxe/test --run ModuleCacheCheck [--port] [--haxe <haxe>]
 // --port adds the port itself (haxe/src: a large program) for the hxmc target;
@@ -125,7 +126,33 @@ class ModuleCacheCheck {
 			"src/Ping.hx" => "class Ping {\n\tpublic static function ping(n:Int):Int return n <= 0 ? 0 : 1 + Pong.pong(n - 1);\n}\n",
 			"src/Pong.hx" => "class Pong {\n\tpublic static function pong(n:Int):Int return n <= 0 ? 0 : 10 + Ping.ping(n - 1);\n}\n"
 		];
+		// (a build macro keeping what other macros read: the classes an
+		// @:autoBuild registers, checked by an expression macro of Main, which a
+		// define typed again; the gfx package's shaders work so)
+		var registry = [
+			"src/Main.hx" => "class Main {\n\tstatic function main() {\n\t\t#if again trace(1); #end\n\t\ttrace(RegMacro.registered(Impl));\n\t\ttrace(new Impl().f());\n\t}\n}\n",
+			"src/Reg.hx" => "@:autoBuild(RegMacro.build())\ninterface Reg {}\n",
+			"src/Impl.hx" => "class Impl implements Reg {\n\tpublic function new() {}\n\n\tpublic function f():Int return 7;\n}\n",
+			"src/RegMacro.hx" => [
+				"import haxe.macro.Context;",
+				"import haxe.macro.Expr;",
+				"class RegMacro {",
+				"\tstatic var names:Array<String> = [];",
+				"\tpublic static macro function build():Array<Field> {",
+				"\t\tnames.push(Context.getLocalClass().get().name);",
+				"\t\treturn null;",
+				"\t}",
+				"\tpublic static macro function registered(e:Expr):Expr {",
+				"\t\tvar n = haxe.macro.ExprTools.toString(e);",
+				"\t\tContext.getType(n);",
+				"\t\tif (names.indexOf(n) < 0) Context.error(n + \" is not registered\", e.pos);",
+				"\t\treturn macro $v{n};",
+				"\t}",
+				"}"
+			].join("\n") + "\n"
+		];
 		return [
+			{name: "registry", files: registry, args: ["-cp", "src", "-main", "Main"], edit: "src/Impl.hx", run: "registry"},
 			{name: "cutoff", files: cutoff, args: ["-cp", "src", "-main", "Main"], edit: "src/User.hx", run: "cutoff"},
 			{name: "lossy", files: lossy, args: ["-cp", "src", "-main", "Main"], edit: "src/Other.hx", run: "lossy"},
 			{name: "hello", files: hello, args: ["-cp", "src", "-main", "Main"], edit: "src/Main.hx", run: "hello"},
@@ -225,9 +252,13 @@ class ModuleCacheCheck {
 				rmrf(dir + "/cache");
 				var cold = gate('$name cold', target, pdir, p.args);
 				check('$target: $name cold: nothing read', cold.read == 0 && cold.encoded > 0);
-				// warm: every module restored
-				var warm = gate('$name warm', target, pdir, p.args, 0);
-				var again = 0;
+				// warm: every module restored (but a module a build macro makes:
+				// Main of the macros program, typed every build, its macro run, the
+				// macros' context's modules processed again: as many each warm build)
+				var macros = name == "macros" || name == "registry";
+				var warm = gate('$name warm', target, pdir, p.args, macros ? null : 0);
+				var again = macros ? warm.encoded : 0;
+				if (macros) check('$target: $name warm: the modules build macros make typed again, the others restored', warm.encoded >= 1 && warm.encoded < cold.encoded / 4);
 				check('$target: $name warm: read from the store', warm.read > 0);
 				// a new date, the same content
 				var t = pdir + "/" + p.edit;
@@ -237,6 +268,7 @@ class ModuleCacheCheck {
 				var orig = File.getContent(t);
 				File.saveContent(t, switch name {
 					case "cutoff": orig.replace("10, 20", "10, 21");
+					case "registry": orig.replace("return 7", "return 8");
 					case "hello": orig.replace("hello ", "hello again ");
 					case "multi": orig.replace("\"v\" + 1", "\"v\" + 2");
 					case "lossy": orig.replace("3", "4");
@@ -248,6 +280,10 @@ class ModuleCacheCheck {
 				// back to the original (an older entry's content again)
 				File.saveContent(t, orig);
 				gate('$name, ${p.edit} back', target, pdir, p.args);
+				if (name == "registry") {
+					// a define Main reads: Main typed again, its macro finds Impl registered
+					gate('registry, -D again', target, pdir, p.args.concat(["-D", "again"]));
+				}
 				if (name == "cutoff") {
 					// a define no module reads: nothing typed again
 					gate('cutoff, -D unrelated', target, pdir, p.args.concat(["-D", "unrelated"]), 0);

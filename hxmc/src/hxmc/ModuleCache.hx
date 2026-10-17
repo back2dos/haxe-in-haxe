@@ -437,6 +437,9 @@ class ModuleCache {
 	static function verify(com:CommonContext, s:ModuleCacheState, v:Variant, mPath:GlobalTypePath, mExtra:ModuleDefExtra):Null<ModuleSkipReason> {
 		var file = core.Path.UniqueKey.lazyPath(mExtra.mFile);
 		if (!v.matched) return FileChanged(file + " (defines)");
+		// (a build macro's module: typed again every build, so that the macro
+		// runs, also for what it keeps for other modules' macros)
+		if (v.macroBuilt) return FileChanged(file + " (built by a macro)");
 		switch mExtra.mKind {
 			case MCode | MMacro:
 				// (a module of the macros' context checked from the program's
@@ -633,6 +636,7 @@ class ModuleCache {
 								if (marked(cf)) v.structUsed = true;
 						case _:
 					}
+				v.macroBuilt = (x.mKind == MCode || x.mKind == MMacro) && macroBuilt(m);
 				all.push(v);
 				byKey[role].set(v.key, v);
 				// restored and not processed again: the stored blob
@@ -642,6 +646,7 @@ class ModuleCache {
 					continue;
 				}
 				v.fresh = true;
+				v.prev = old;
 				var skeletons = old != null && old.skeletons != null ? old.skeletons : Skeletons.encode(s, x.mSign, m.mPath);
 				if (x.mKind == MImport) {
 					v.blobBytes = ModuleStore.encodeBlob([], noMonos, skeletons);
@@ -682,8 +687,19 @@ class ModuleCache {
 			return context.Parallel.ParallelArray.map(pool, function(j:{v:Variant, f:Void->{chunks:CachedChunks, monos:Bytes}}) return {v: j.v, r: j.f()}, jobs,
 				none);
 		});
-		for (d in done)
+		for (d in done) {
 			d.v.blobBytes = ModuleStore.encodeBlob(d.r.chunks, d.r.monos, d.v.skeletons);
+			// (a restored module processed again, the same as stored: its blob)
+			var o = d.v.prev;
+			if (o != null && o.loaded && d.v.blobBytes.length == o.blobSize
+				&& ModuleStore.encodeBlob(o.chunks, o.monos, o.skeletons).compare(d.v.blobBytes) == 0) {
+				d.v.blob = o.blob;
+				d.v.blobSize = o.blobSize;
+				d.v.blobBytes = null;
+				d.v.fresh = false;
+				s.written--;
+			}
+		}
 		// (each new blob named uniquely: this build's nonce and a counter)
 		var nonce = CacheDir.nonce(), count = 0;
 		for (v in all)
@@ -719,7 +735,7 @@ class ModuleCache {
 				d.expect = d.eligible ? closure.di(w) : closure.df(w);
 			}
 		s.kept = kept;
-		s.written = jobs.length;
+		s.written += jobs.length;
 		s.captureTime = haxe.Timer.stamp() - t0;
 	}
 

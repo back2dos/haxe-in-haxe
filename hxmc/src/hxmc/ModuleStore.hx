@@ -84,6 +84,9 @@ class Variant {
 	// whether a field of its classes is marked as maybe used through a
 	// structure (CfMaybeUsed: the typing of its users marks it, DCE reads it)
 	public var structUsed = false;
+	// whether a build macro made one of its types (typed every build: the
+	// macro runs, with what it does beside the module)
+	public var macroBuilt = false;
 
 	// in a build: whether its reads match the build's defines, the server's
 	// copy, the blob once read
@@ -99,6 +102,8 @@ class Variant {
 	public var blobBytes:Null<Bytes> = null;
 	// (in a capture: the key of its file's parse, whose interface it gets)
 	public var ifacePk:Null<String> = null;
+	// (in a capture: the variant it was restored from, processed again)
+	public var prev:Null<Variant> = null;
 	public var fresh = false;
 
 	public function new() {}
@@ -116,7 +121,7 @@ class StoreIndex {
 }
 
 class ModuleStore {
-	public static inline var MAGIC = "hxmc-modules 8";
+	public static inline var MAGIC = "hxmc-modules 9";
 
 	public static final chunkKinds:Array<ChunkKind> = [
 		STR, DOC, MDF, MTF, IMP, CLR, ENR, ABR, TDR, OFR, OFD, OBD, CLD, END, ABD, TDD, EOT, EFR, CFR, CFD, EFD, AFD, EOF, EXD, EOM
@@ -408,7 +413,7 @@ class ModuleStore {
 			str(o, v.iface == null ? "" : v.iface);
 			str(o, v.blob);
 			o.writeInt32(v.blobSize);
-			o.writeByte(v.structUsed ? 1 : 0);
+			o.writeByte((v.structUsed ? 1 : 0) | (v.macroBuilt ? 2 : 0));
 			o.writeInt32(v.deps.length);
 			for (d in v.deps) {
 				o.writeByte(d.role + 1);
@@ -449,7 +454,9 @@ class ModuleStore {
 			v.iface = f == "" ? null : f;
 			v.blob = rstr(i);
 			v.blobSize = i.readInt32();
-			v.structUsed = i.readByte() == 1;
+			var flags = i.readByte();
+			v.structUsed = flags & 1 != 0;
+			v.macroBuilt = flags & 2 != 0;
 			v.deps = [
 				for (_ in 0...i.readInt32()) {
 					var role = i.readByte() - 1;
