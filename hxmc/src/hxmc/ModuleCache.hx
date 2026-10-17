@@ -434,9 +434,10 @@ class ModuleCache {
 	}
 
 	// -D hxmc.no-cache=<entries> (comma-separated: a package or module path,
-	// or a directory named so in the path of the class path the module's file
-	// is in, such as a library's; without a value, every module): whether it names the module. Read
-	// without Define.readHook (not a read of the build's)
+	// or a directory named so in the path of the class path the module's
+	// file is in, such as a library's; without a value, every module):
+	// whether it names the module. Read without Define.readHook (not a read
+	// of the build's)
 	static function noCache(s:ModuleCacheState, path:GlobalTypePath, file:Null<String>):Bool {
 		var l = s.noCacheList;
 		if (l == null) {
