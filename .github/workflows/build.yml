@@ -28,8 +28,11 @@
 #   - site: the website; gfx: packages/gfx on Linux (make gfx-check; on
 #     ARM64 the cross-built programs, gfx-arm64; on Windows x86-64 and arm64
 #     the cross-built programs on D3D11's WARP, gfx-windows; on macOS built
-#     from the npm packages after npm-pack, gfx-macos), and packages/os's
-#     audio in the same jobs (make audio-check, audio-web-check).
+#     from the npm packages after npm-pack, gfx-macos), packages/os's audio
+#     in the same jobs (make audio-check, audio-web-check), then
+#     packages/esx, text and ui (their checks on Eval, the sample UI and the
+#     todo example drawn on llvmpipe, the todo example in Chromium on WebGPU
+#     and WebGL2).
 # - conformance: the port against the reference: HXB of the upstream suites
 #   and macro cases, display requests, the compilation server and its
 #   JSON-RPC methods, upstream's target suites compiled by both and compared
@@ -589,7 +592,7 @@ jobs:
       - name: System packages
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -qqy --no-install-recommends libegl1 libegl-mesa0 libgl1-mesa-dri libgles2 xvfb xauth libasound2t64
+          sudo apt-get install -qqy --no-install-recommends libegl1 libegl-mesa0 libgl1-mesa-dri libgles2 xvfb xauth libasound2t64 fonts-dejavu-core fonts-inter libgtk-3-0t64 dbus at-spi2-core fonts-noto-color-emoji
       - name: gfx (Mesa llvmpipe, Xvfb)
         run: |
           set -ex
@@ -606,23 +609,32 @@ jobs:
           make gfx-web-check
       - name: audio (WebAudio in Chromium)
         run: make audio-web-check
+      - name: esx, text and ui (Eval; Mesa llvmpipe; Chromium)
+        run: |
+          set -ex
+          make esx-check text-check ui-check
+          make ui-draw-check GFX_TARGET=linux-x86_64
+          make ui-web-check
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with: {name: ui-images-linux-x86_64, path: "bin/ui/**/*.png", retention-days: 7, if-no-files-found: ignore}
       - name: The ARM64 programs
         run: |
           set -ex
-          make gfx-programs GFX_TARGET=linux-arm64
+          make gfx-programs ui-programs GFX_TARGET=linux-arm64
           make audio-programs AUDIO_TARGET=linux-arm64
-          cp bin/audio/linux-arm64/AudioTest bin/gfx/linux-arm64/
-          tar czf bin/gfx-linux-arm64.tar.gz -C bin/gfx/linux-arm64 GfxTest Triangle Cube AudioTest
+          cp bin/audio/linux-arm64/AudioTest bin/ui/linux-arm64/UiDrawTest bin/ui/linux-arm64/TodoTest bin/ui/linux-arm64/GalleryTest bin/gfx/linux-arm64/
+          tar czf bin/gfx-linux-arm64.tar.gz -C bin/gfx/linux-arm64 GfxTest Triangle Cube AudioTest UiDrawTest TodoTest GalleryTest
       - uses: actions/upload-artifact@v7
         with: {name: gfx-linux-arm64, path: bin/gfx-linux-arm64.tar.gz, retention-days: 3}
       - name: The Windows programs
         run: |
           set -ex
           for t in windows-x86_64 windows-arm64; do
-            make gfx-programs GFX_TARGET=$t
+            make gfx-programs ui-programs GFX_TARGET=$t
             make audio-programs AUDIO_TARGET=$t
-            cp bin/audio/$t/AudioTest.exe bin/gfx/$t/
-            tar czf bin/gfx-$t.tar.gz -C bin/gfx/$t GfxTest.exe Triangle.exe Cube.exe AudioTest.exe
+            cp bin/audio/$t/AudioTest.exe bin/ui/$t/UiDrawTest.exe bin/ui/$t/ClipboardTest.exe bin/ui/$t/NativeTest.exe bin/ui/$t/WinAccessTest.exe bin/ui/$t/EmojiTest.exe bin/ui/$t/WindowTest.exe bin/gfx/$t/
+            tar czf bin/gfx-$t.tar.gz -C bin/gfx/$t GfxTest.exe Triangle.exe Cube.exe AudioTest.exe UiDrawTest.exe ClipboardTest.exe NativeTest.exe WinAccessTest.exe EmojiTest.exe WindowTest.exe
           done
       - uses: actions/upload-artifact@v7
         with: {name: gfx-windows, path: "bin/gfx-windows-*.tar.gz", retention-days: 3}
@@ -639,6 +651,7 @@ jobs:
         with:
           sparse-checkout: |
             packages/gfx/test
+            packages/ui/test
             packages/os/test
       - uses: actions/download-artifact@v8
         with: {name: gfx-linux-arm64, path: dl}
@@ -646,10 +659,14 @@ jobs:
         run: |
           set -ex
           sudo apt-get update -qq
-          sudo apt-get install -qqy --no-install-recommends libegl1 libegl-mesa0 libgl1-mesa-dri libgles2 xvfb xauth libasound2t64
+          sudo apt-get install -qqy --no-install-recommends libegl1 libegl-mesa0 libgl1-mesa-dri libgles2 xvfb xauth libasound2t64 fonts-dejavu-core
           mkdir -p gfx
           tar xzf dl/gfx-linux-arm64.tar.gz -C gfx
           sh packages/gfx/test/check.sh gfx
+          export LIBGL_ALWAYS_SOFTWARE=1
+          env -u DISPLAY gfx/UiDrawTest packages/ui/test/draw.png gfx/draw.png
+          env -u DISPLAY gfx/TodoTest packages/ui/test/todo.png gfx/todo.png
+          env -u DISPLAY gfx/GalleryTest packages/ui/test/gallery.png gfx/gallery.png
       - name: audio (ALSA's null and file devices)
         run: sh packages/os/test/audio.sh gfx
       - uses: actions/upload-artifact@v7
@@ -687,6 +704,18 @@ jobs:
           mkdir -p gfx
           tar xzf dl/gfx-${{ matrix.target }}.tar.gz -C gfx
           sh packages/gfx/test/check.sh gfx
+          # (the UI's sample with the system's fonts: no golden image)
+          HXMC_GFX_SOFTWARE=1 gfx/UiDrawTest.exe none gfx/ui-smoke.png --smoke
+          # (the clipboard between two windows: Win32's CF_UNICODETEXT)
+          gfx/ClipboardTest.exe
+          # (hxmc.ui.native on Win32's controls)
+          gfx/NativeTest.exe
+          # (the accessibility tree through UI Automation: Narrator's view of it)
+          HXMC_GFX_SOFTWARE=1 gfx/WinAccessTest.exe
+          # (colour emoji: Segoe UI Emoji's COLR layers)
+          HXMC_GFX_SOFTWARE=1 gfx/EmojiTest.exe none gfx/emoji.png
+          # (a window's title, size and minimum size, read back)
+          gfx/WindowTest.exe
       - name: audio (WASAPI)
         run: sh packages/os/test/audio.sh gfx
       - uses: actions/upload-artifact@v7
@@ -714,6 +743,7 @@ jobs:
           path: repo
           sparse-checkout: |
             packages/gfx
+            packages/ui
             packages/os/test
       - name: gfx (Metal, Cocoa)
         run: |
@@ -724,7 +754,7 @@ jobs:
           # (a nightly, <version>-nightly.<date>.<commit>, is a prerelease, which
           # the packages' peer range ">=0.1.0" of @hxmc/cli does not take)
           peer=; case "$v" in *-nightly.*) peer=--legacy-peer-deps ;; esac
-          npm install --no-audit --no-fund $peer "$GITHUB_WORKSPACE/dl/hxmc-cli-$v.tgz" "$GITHUB_WORKSPACE/dl/hxmc-darwin-arm64-$v.tgz" $(find "$GITHUB_WORKSPACE/dl" -name 'hxmc-os-*.tgz' -o -name 'hxmc-gfx-*.tgz')
+          npm install --no-audit --no-fund $peer "$GITHUB_WORKSPACE/dl/hxmc-cli-$v.tgz" "$GITHUB_WORKSPACE/dl/hxmc-darwin-arm64-$v.tgz" $(find "$GITHUB_WORKSPACE/dl" -name 'hxmc-os-*.tgz' -o -name 'hxmc-gfx-*.tgz' -o -name 'hxmc-text-*.tgz' -o -name 'hxmc-esx-*.tgz' -o -name 'hxmc-ui-*.tgz')
           g="$GITHUB_WORKSPACE/repo/packages/gfx"
           npx haxe -lib hxmc.gfx -cp "$g/examples" -cp "$g/test" -main GfxTest --custom-target hxmc=gfx/GfxTest
           npx haxe -lib hxmc.gfx -cp "$g/examples" -main Triangle --custom-target hxmc=gfx/Triangle
@@ -732,6 +762,28 @@ jobs:
           ls -l gfx/GfxTest gfx/Triangle gfx/Cube
           otool -L gfx/Triangle
           sh "$g/test/check.sh" gfx
+          # the UI's sample built from the npm packages, with the system's fonts (no golden image)
+          u="$GITHUB_WORKSPACE/repo/packages/ui"
+          npx haxe -lib hxmc.ui -cp "$g/test" -cp "$u/test" -main UiDrawTest --custom-target hxmc=gfx/UiDrawTest
+          gfx/UiDrawTest none gfx/ui-smoke.png --smoke
+          # (the clipboard between two windows: NSPasteboard)
+          npx haxe -lib hxmc.os -cp "$u/test" -main ClipboardTest --custom-target hxmc=gfx/ClipboardTest
+          gfx/ClipboardTest
+          # (text input through the window's text view: a key, a composition)
+          npx haxe -lib hxmc.os -cp "$u/test" -main TextInputTest --custom-target hxmc=gfx/TextInputTest
+          gfx/TextInputTest
+          # (the accessibility tree through NSAccessibility: VoiceOver's view of it)
+          npx haxe -lib hxmc.ui -cp "$u/test" -main MacAccessTest --custom-target hxmc=gfx/MacAccessTest
+          gfx/MacAccessTest
+          # (colour emoji: Apple Color Emoji's sbix bitmaps)
+          npx haxe -lib hxmc.ui -cp "$g/test" -cp "$u/test" -main EmojiTest --custom-target hxmc=gfx/EmojiTest
+          gfx/EmojiTest none gfx/emoji.png
+          # (a window's title, size and minimum size, read back)
+          npx haxe -lib hxmc.os -cp "$u/test" -main WindowTest --custom-target hxmc=gfx/WindowTest
+          gfx/WindowTest
+          # (hxmc.ui.native on AppKit's controls)
+          npx haxe -lib hxmc.ui -cp "$u/test" -cp "$u/examples" -main NativeTest --custom-target hxmc=gfx/NativeTest
+          gfx/NativeTest gfx/native-macos.png
       - name: audio (CoreAudio)
         run: |
           set -ex

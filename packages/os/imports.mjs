@@ -7,12 +7,21 @@
 // checked before each frame (a Resize event when it changes); a canvas the
 // page does not size is given the window's size in CSS pixels. Events are
 // queued as they come and polled at the start of the next frame, as the
-// native loops poll theirs: keys (as X11 KeySyms, Event.key) and their
-// characters (a keydown's key, when it is one: Text) once the canvas has
-// the focus (a click gives it), the mouse over the canvas in buffer pixels
-// from the top left, the wheel (in notches: 100 pixels or 3 lines one), a
-// change of devicePixelRatio (ScaleChange, checked before each frame). Frames pause while no window's canvas is in
-// view (as requestAnimationFrame pauses in a hidden tab).
+// native loops poll theirs: keys (as X11 KeySyms, Event.key) once the canvas
+// has the focus (a click gives it), the mouse over the canvas in buffer
+// pixels from the top left, a change of devicePixelRatio (ScaleChange,
+// checked before each frame). Frames pause while no window's canvas is in
+// view (as requestAnimationFrame pauses in a hidden tab). host.os.redraw()
+// asks every window for a frame (a Redraw event): the page wants its pixels
+// (host.gfx.readPixels) while the program has nothing new to draw. The
+// clipboard: writes go to navigator.clipboard; a read takes the text of the
+// paste event the key press that asked for it brought (no permission
+// needed), else navigator.clipboard.readText, and comes back as an event.
+// Text input (Window.startTextInput): keys go to a transparent textarea of
+// the page placed at the caret, focused instead of the canvas, so that
+// input methods work: their compositions come as TextEditing events, their
+// commits (and text inserted without keys: an emoji picker, dictation) as
+// TextInput.
 //
 // Audio (hxmc.os.audio.WebAudioOutput): an AudioContext at the rate asked
 // for, and an AudioWorklet node (PROCESSOR, loaded from a blob) that plays
@@ -28,14 +37,17 @@
 // node is connected and has those chunks (then startRendering).
 
 // EventKind (src/hxmc/os/Event.hx)
-const RESIZE = 2, KEY_DOWN = 3, KEY_UP = 4, MOUSE_MOVE = 5, MOUSE_DOWN = 6, MOUSE_UP = 7, TEXT = 8, WHEEL = 9, SCALE_CHANGE = 10;
+const RESIZE = 2, KEY_DOWN = 3, KEY_UP = 4, MOUSE_MOVE = 5, MOUSE_DOWN = 6, MOUSE_UP = 7, TEXT_INPUT = 8, REDRAW = 9, TEXT_EDITING = 10, SCROLL = 11,
+	SCALE_CHANGE = 12;
+// (not an EventKind: CanvasWindow hands the text to Clipboard.read's callback)
+const CLIPBOARD = 100;
 
 // KeyboardEvent.key to an X11 KeySym: Latin-1 characters are their
 // (unshifted) code, the others from this table
 const KEYS = {
 	Escape: 0xff1b, Enter: 0xff0d, Tab: 0xff09, Backspace: 0xff08, Delete: 0xffff, Insert: 0xff63, Home: 0xff50, End: 0xff57,
 	PageUp: 0xff55, PageDown: 0xff56, ArrowLeft: 0xff51, ArrowUp: 0xff52, ArrowRight: 0xff53, ArrowDown: 0xff54,
-	Shift: 0xffe1, Control: 0xffe3, Alt: 0xffe9, Meta: 0xffe7, CapsLock: 0xffe5,
+	Shift: 0xffe1, Control: 0xffe3, Alt: 0xffe9, Meta: 0xffe7, CapsLock: 0xffe5, ContextMenu: 0xff67,
 };
 for (let i = 1; i <= 12; i++) KEYS['F' + i] = 0xffbd + i;
 
@@ -94,12 +106,22 @@ export default function (host) {
 	const queue = [];
 	const windows = new Set();
 	let first = true, ratio = devicePixelRatio;
+	// the last paste event's text, and when
+	let pasted = null;
+	host.os = { redraw: () => { for (const h of windows) push([h, REDRAW, 0, 0, 0, 0, 0]); } };
 
 	function push(ev) {
-		// (moves between two frames: the last one)
+		// (moves between two frames, compositions: the last one)
 		const last = queue[queue.length - 1];
-		if (ev[1] === MOUSE_MOVE && last && last[1] === MOUSE_MOVE && last[0] === ev[0]) queue[queue.length - 1] = ev;
-		else queue.push(ev);
+		// (scrolls between two frames: added up, at the last position)
+		if (ev[1] === SCROLL && last && last[1] === SCROLL && last[0] === ev[0] && last[6] === ev[6]) {
+			queue[queue.length - 1] = [ev[0], SCROLL, last[2] + ev[2], ev[3], ev[4], last[5] + ev[5], ev[6]];
+			return;
+		}
+		if ((ev[1] === MOUSE_MOVE || ev[1] === TEXT_EDITING) && last && last[1] === ev[1] && last[0] === ev[0]) {
+			if (last[1] === TEXT_EDITING && last[2]) host.handles.remove(last[2]);
+			queue[queue.length - 1] = ev;
+		} else queue.push(ev);
 	}
 
 	function sync(h) {
@@ -117,25 +139,137 @@ export default function (host) {
 		const pos = (e) => [Math.round(e.offsetX * c.width / Math.max(1, c.clientWidth)), Math.round(e.offsetY * c.height / Math.max(1, c.clientHeight))];
 		const off = new AbortController();
 		const on = (type, f, o = {}) => c.addEventListener(type, f, { ...o, signal: off.signal });
-		on('keydown', (e) => {
-			push([h, KEY_DOWN, keysym(e), 0, 0, 0, 0, 0]);
-			// (a character: one code point; not with Ctrl or Cmd, which make shortcuts)
-			const c = [...e.key];
-			if (c.length === 1 && !e.ctrlKey && !e.metaKey && c[0].codePointAt(0) >= 0x20) push([h, TEXT, c[0].codePointAt(0), 0, 0, 0, 0, 0]);
+		// (Event.mods: Shift 1, Control 2, Alt 4, Meta 8)
+		const mods = (e) => (e.shiftKey ? 1 : 0) | (e.ctrlKey ? 2 : 0) | (e.altKey ? 4 : 0) | (e.metaKey ? 8 : 0);
+		// the text input's element (text_input)
+		const ta = document.createElement('textarea');
+		for (const [k, v] of [['autocomplete', 'off'], ['autocapitalize', 'off'], ['spellcheck', 'false'], ['tabindex', '-1']]) ta.setAttribute(k, v);
+		ta.style.cssText = 'position:fixed;left:0;top:0;width:1px;height:1px;opacity:0;pointer-events:none;resize:none;border:0;padding:0;margin:0;outline:none;overflow:hidden;white-space:pre;';
+		document.body.appendChild(ta);
+		c.hxmcInput = ta;
+		const onInput = (type, f) => ta.addEventListener(type, f, { signal: off.signal });
+		const keydown = (e) => {
+			// (an input method's keys: its composition's)
+			if (e.isComposing || e.keyCode === 229) return;
+			push([h, KEY_DOWN, keysym(e), 0, 0, 0, mods(e)]);
+			// then its character (one code point: not a named key), as the native windows type them
+			const cp = e.key.codePointAt(0);
+			if (!e.ctrlKey && !e.metaKey && e.key.length === String.fromCodePoint(cp).length && cp >= 0x20) {
+				push([h, TEXT_INPUT, cp, 0, 0, 0, mods(e)]);
+				// (not typed into the textarea too)
+				if (e.currentTarget === ta) e.preventDefault();
+			}
+			// (Tab stays in the canvas: the program moves its own focus)
+			if (e.key === 'Tab' || e.key === 'Backspace') e.preventDefault();
+		};
+		const keyup = (e) => {
+			if (!e.isComposing && e.keyCode !== 229) push([h, KEY_UP, keysym(e), 0, 0, 0, mods(e)]);
+		};
+		on('keydown', keydown);
+		on('keyup', keyup);
+		onInput('keydown', keydown);
+		onInput('keyup', keyup);
+		// the composition: the textarea's text from where it started to what
+		// followed it then, the caret in it
+		let composing = false, start = 0, tail = 0;
+		const editing = (t, caret) => push([h, TEXT_EDITING, t ? host.handles.add(t) : 0, Math.max(0, Math.min(t.length, caret)), 0, 0, 0]);
+		onInput('compositionstart', () => {
+			composing = true;
+			start = ta.selectionStart;
+			tail = ta.value.length - ta.selectionEnd;
 		});
-		on('keyup', (e) => push([h, KEY_UP, keysym(e), 0, 0, 0, 0, 0]));
-		on('mousemove', (e) => push([h, MOUSE_MOVE, 0, ...pos(e), 0, 0, 0]));
+		// (before the textarea changes: its caret at the end, until the input event)
+		onInput('compositionupdate', (e) => editing(e.data ?? '', (e.data ?? '').length));
+		onInput('compositionend', (e) => {
+			composing = false;
+			editing('', 0);
+			for (const ch of e.data ?? '') push([h, TEXT_INPUT, ch.codePointAt(0), 0, 0, 0, 0]);
+			setTimeout(() => composing || (ta.value = ''));
+		});
+		onInput('input', (e) => {
+			if (composing) {
+				const t = ta.value.slice(start, ta.value.length - tail);
+				return editing(t, ta.selectionEnd - start);
+			}
+			// (text inserted without its keys; not a composition's, which compositionend gave)
+			if ((e.inputType === 'insertText' || e.inputType === 'insertReplacementText') && e.data)
+				for (const ch of e.data) push([h, TEXT_INPUT, ch.codePointAt(0), 0, 0, 0, 0]);
+			ta.value = '';
+		});
+		on('mousemove', (e) => push([h, MOUSE_MOVE, 0, ...pos(e), 0, mods(e)]));
 		on('mousedown', (e) => {
-			c.focus();
-			push([h, MOUSE_DOWN, 0, ...pos(e), e.button + 1, 0, 0]);
+			// (typing: the focus stays the textarea's)
+			if (c.hxmcTyping) {
+				e.preventDefault();
+				ta.focus({ preventScroll: true });
+			} else c.focus();
+			push([h, MOUSE_DOWN, 0, ...pos(e), e.button + 1, mods(e)]);
 		});
-		on('mouseup', (e) => push([h, MOUSE_UP, 0, ...pos(e), e.button + 1, 0, 0]));
+		on('mouseup', (e) => push([h, MOUSE_UP, 0, ...pos(e), e.button + 1, mods(e)]));
+		// (the deltas in canvas pixels, in 1/256ths: in key and button; lines 40 pixels, pages the canvas)
 		on('wheel', (e) => {
-			// (in 120ths of a notch, as integers)
-			const k = 120 * (e.deltaMode === 1 ? 1 / 3 : e.deltaMode === 2 ? 1 : 1 / 100);
-			push([h, WHEEL, 0, ...pos(e), 0, Math.round(e.deltaX * k), Math.round(-e.deltaY * k)]);
+			const k = (e.deltaMode === 1 ? 40 : e.deltaMode === 2 ? c.clientHeight : 1) * devicePixelRatio * 256;
+			push([h, SCROLL, Math.round(e.deltaX * k), ...pos(e), Math.round(e.deltaY * k), mods(e)]);
 		}, { passive: true });
+		// touch: a drag scrolls what is under where it started (the content
+		// follows the finger, then glides when let go moving), a tap clicks
+		// (no mouse events of the browser's own for either)
+		c.style.touchAction = 'none';
+		let touch = null, glide = 0;
+		const scrollBy = (x, y, dx, dy) => push([h, SCROLL, Math.round(dx * 256), x, y, Math.round(dy * 256), 0]);
+		on('pointerdown', (e) => {
+			if (e.pointerType !== 'touch' || touch) return;
+			e.preventDefault();
+			cancelAnimationFrame(glide);
+			const [x, y] = pos(e);
+			touch = { id: e.pointerId, x, y, lx: x, ly: y, t: performance.now(), vx: 0, vy: 0, drag: false };
+			c.setPointerCapture?.(e.pointerId);
+		});
+		on('pointermove', (e) => {
+			if (!touch || e.pointerId !== touch.id) return;
+			const [x, y] = pos(e), now = performance.now();
+			if (!touch.drag && Math.hypot(x - touch.x, y - touch.y) > 8 * devicePixelRatio) touch.drag = true;
+			if (!touch.drag) return;
+			const dx = touch.lx - x, dy = touch.ly - y, dt = Math.max(1, now - touch.t);
+			scrollBy(touch.x, touch.y, dx, dy);
+			// (pixels per millisecond, smoothed)
+			touch.vx = 0.8 * (dx / dt) + 0.2 * touch.vx;
+			touch.vy = 0.8 * (dy / dt) + 0.2 * touch.vy;
+			Object.assign(touch, { lx: x, ly: y, t: now });
+		});
+		const lift = (e) => {
+			if (!touch || e.pointerId !== touch.id) return;
+			const t = touch;
+			touch = null;
+			if (!t.drag) {
+				if (c.hxmcTyping) ta.focus({ preventScroll: true });
+				else c.focus();
+				push([h, MOUSE_MOVE, 0, t.x, t.y, 0, 0]);
+				push([h, MOUSE_DOWN, 0, t.x, t.y, 1, 0]);
+				push([h, MOUSE_UP, 0, t.x, t.y, 1, 0]);
+				return;
+			}
+			// (let go moving: on at that speed, slowing 5% a frame)
+			if (e.type !== 'pointerup' || performance.now() - t.t > 100) return;
+			let vx = t.vx * 16, vy = t.vy * 16;
+			const step = () => {
+				vx *= 0.95;
+				vy *= 0.95;
+				if (Math.hypot(vx, vy) < 0.5) return;
+				scrollBy(t.x, t.y, vx, vy);
+				glide = requestAnimationFrame(step);
+			};
+			glide = requestAnimationFrame(step);
+		};
+		on('pointerup', lift);
+		on('pointercancel', lift);
 		on('contextmenu', (e) => e.preventDefault());
+		const paste = (e) => {
+			pasted = { text: e.clipboardData ? e.clipboardData.getData('text/plain') : '', at: performance.now() };
+			e.preventDefault();
+		};
+		on('paste', paste);
+		onInput('paste', paste);
 		return off;
 	}
 
@@ -251,6 +385,7 @@ export default function (host) {
 			const c = host.handles.get(h);
 			c.hxmcOff.abort();
 			c.hxmcSeen.disconnect();
+			c.hxmcInput.remove();
 			if (c.hxmcMade) c.remove();
 			windows.delete(h);
 			host.handles.remove(h);
@@ -262,10 +397,65 @@ export default function (host) {
 		width: (h) => host.handles.get(h).width,
 		height: (h) => host.handles.get(h).height,
 		scale: () => devicePixelRatio,
+		prefers_dark: () => (matchMedia('(prefers-color-scheme: dark)').matches ? 1 : 0),
+		clipboard_write(p) {
+			const s = host.string(p);
+			navigator.clipboard?.writeText(s).catch(() => {});
+		},
+		clipboard_read() {
+			const deliver = (s) => queue.push([0, CLIPBOARD, s == null ? 0 : host.handles.add(String(s)), 0, 0, 0, 0]);
+			if (pasted && performance.now() - pasted.at < 1000) {
+				const t = pasted.text;
+				pasted = null;
+				deliver(t);
+			} else if (navigator.clipboard?.readText) navigator.clipboard.readText().then(deliver, () => deliver(null));
+			else deliver(null);
+		},
+		// a string handle's UTF-8 length, then its bytes into p (the handle freed)
+		text_length: (h) => new TextEncoder().encode(host.handles.get(h)).length,
+		text_take(h, p) {
+			const b = new TextEncoder().encode(host.handles.get(h));
+			new Uint8Array(host.memory().buffer, p, b.length).set(b);
+			host.handles.remove(h);
+		},
+		// text input on: the textarea at that area of the canvas (buffer
+		// pixels), focused while the focus is the canvas's (or its fallback
+		// content's: hxmc.ui's accessibility mirror); off: the canvas focused again
+		text_input(h, on, x, y, w, ht) {
+			const c = host.handles.get(h), ta = c.hxmcInput;
+			c.hxmcTyping = !!on;
+			const a = document.activeElement;
+			if (on) {
+				const r = c.getBoundingClientRect();
+				const kx = c.clientWidth / Math.max(1, c.width), ky = c.clientHeight / Math.max(1, c.height);
+				const s = ta.style;
+				s.left = r.left + c.clientLeft + x * kx + 'px';
+				s.top = r.top + c.clientTop + y * ky + 'px';
+				s.width = Math.max(1, w * kx) + 'px';
+				s.height = s.lineHeight = Math.max(1, ht * ky) + 'px';
+				if (a === c || c.contains(a)) ta.focus({ preventScroll: true });
+			} else if (a === ta) c.focus({ preventScroll: true });
+		},
+		set_title(p) {
+			document.title = host.string(p);
+		},
+		set_size(h, w, ht, min) {
+			const st = host.handles.get(h).style;
+			if (min) {
+				st.minWidth = w + 'px';
+				st.minHeight = ht + 'px';
+			} else {
+				st.width = w + 'px';
+				st.height = ht + 'px';
+			}
+		},
+		set_cursor(h, c) {
+			host.handles.get(h).style.cursor = ['default', 'pointer', 'text', 'crosshair', 'move', 'not-allowed', 'ew-resize', 'ns-resize'][c] ?? 'default';
+		},
 		next_event(p) {
 			const ev = queue.shift();
 			if (!ev) return 0;
-			new Int32Array(host.memory().buffer, p, 8).set(ev);
+			new Int32Array(host.memory().buffer, p, 7).set([...ev, 0, 0].slice(0, 7));
 			return 1;
 		},
 		start(frame) {
@@ -273,9 +463,9 @@ export default function (host) {
 				if (windows.size > 0 && [...windows].every((h) => host.handles.get(h).hxmcShown === false)) return requestAnimationFrame(tick);
 				if (devicePixelRatio !== ratio) {
 					ratio = devicePixelRatio;
-					for (const h of windows) push([h, SCALE_CHANGE, 0, 0, 0, 0, 0, 0]);
+					for (const h of windows) push([h, SCALE_CHANGE, 0, 0, 0, 0, 0]);
 				}
-				for (const h of windows) if (sync(h)) push([h, RESIZE, 0, host.handles.get(h).width, host.handles.get(h).height, 0, 0, 0]);
+				for (const h of windows) if (sync(h)) push([h, RESIZE, 0, host.handles.get(h).width, host.handles.get(h).height, 0, 0]);
 				if (host.call(frame)) requestAnimationFrame(tick);
 			};
 			requestAnimationFrame(tick);

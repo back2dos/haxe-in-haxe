@@ -1,9 +1,9 @@
 # View, web and the site
 
-The direction after the UI branch lands: one reactive view layer with
+The direction now that the UI toolkit has landed: one reactive view layer with
 several renderers, a web package built on it, and the project's site
 rebuilt with both. Nothing here is built yet; the pieces it starts from
-are the UI branch's `@hxmc/esx` (JSX-like markup after the ESX proposal)
+are `@hxmc/ui`'s companions: `@hxmc/esx` (JSX-like markup after the ESX proposal)
 and `hxmc.ui.reactive` (signals and a Solid-like renderer for ESX markup),
 and the current site, `hxmc/web`.
 

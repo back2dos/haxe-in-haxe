@@ -91,6 +91,8 @@ class GfxTest {
 		var draw = Scene.make(name, device);
 		var back = Bytes.alloc(WIDTH * HEIGHT * 4);
 		var n = 0, tries = 0, events = 0, closed = false;
+		// (typing on: the characters come as TextInput on every platform)
+		w.startTextInput(0, 0, 1, 1);
 		var text:Array<Int> = [], wheel = 0.0;
 		App.run(() -> {
 			if (++tries > frames + 1000) App.quit();
@@ -104,8 +106,11 @@ class GfxTest {
 			if (n == frames) Mem.os() == 1 ? CocoaTest.close(w) : Mem.os() == 2 ? WinTest.close(w) : sendClose(w);
 		}, e -> {
 			events++;
-			if (e.kind == Text) text.push(e.char);
-			if (e.kind == Wheel) wheel += e.dy;
+			if (e.kind == TextInput)
+				for (c in new haxe.iterators.StringIteratorUnicode(e.text))
+					text.push(c);
+			// (in notches up: a notch is 40 pixels at the window's scale)
+			if (e.kind == Scroll) wheel -= e.deltaY / (40 * w.scale);
 			if (e.kind == Close && e.window == w) {
 				closed = true;
 				App.quit();

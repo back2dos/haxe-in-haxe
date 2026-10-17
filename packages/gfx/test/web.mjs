@@ -4,7 +4,7 @@
 // headless (on WebGL2 also Device.readPixels, whose checksum must be the
 // harness's), then in a 256x192 canvas, whose frames come from the
 // browser's loop after main returned; then the canvas is resized (a Resize
-// event), characters are typed and the wheel turned (Text and Wheel events)
+// event), characters are typed and the wheel turned (TextInput and Scroll events)
 // and Escape closes the window. A page served here loads the module
 // with packages/os/browser.mjs and the packages' imports.mjs; Chromium
 // renders with WebGPU on SwiftShader and WebGL2 on ANGLE's SwiftShader (no
@@ -96,10 +96,10 @@ for (const [scene, gfx, mode] of ['triangle', 'cube'].flatMap((s) => [[s, 'webgp
 		// (characters and a notch of the wheel up)
 		await p.keyboard.type('aZ');
 		await p.mouse.wheel(0, -100);
-		await p.waitForFunction(() => window.log.some((l) => l.startsWith('WebTest: wheel')), null, { timeout: 10000 }).catch(() => {});
+		await p.waitForFunction(() => window.log.some((l) => l.startsWith('WebTest: scroll')), null, { timeout: 10000 }).catch(() => {});
 		await p.keyboard.press('Escape');
 		await p.waitForFunction(() => window.log.some((l) => l.startsWith('WebTest: Escape')), null, { timeout: 10000 }).catch(() => {});
-		expect.push(`WebTest: window: 256x192, App.run returned (${api})`, 'WebTest: resized to 128x96 (128x96)', 'WebTest: text 61', 'WebTest: text 5A', 'WebTest: wheel 0 1', 'WebTest: Escape after');
+		expect.push(`WebTest: window: 256x192, App.run returned (${api})`, 'WebTest: resized to 128x96 (128x96)', 'WebTest: text 61', 'WebTest: text 5A', 'WebTest: scroll 0 -100', 'WebTest: Escape after');
 	} else expect.push(`WebTest: headless: 256x192 (${api})`);
 	const log = await p.evaluate(() => window.log);
 	if (out) {

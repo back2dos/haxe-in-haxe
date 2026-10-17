@@ -57,8 +57,16 @@ abstract Impl(Any) {
 	public inline function createTexture(d:TextureDesc):Int
 		return Mem.os() == 1 ? mtl().createTexture(d) : Mem.os() == 2 ? d3d().createTexture(d) : Mem.os() != 3 ? gl().createTexture(d) : webgl() ? gl().createTexture(d) : wgpu().createTexture(d);
 
-	public inline function writeTexture(id:Int, data:haxe.io.Bytes)
-		Mem.os() == 1 ? mtl().writeTexture(id, data) : Mem.os() == 2 ? d3d().writeTexture(id, data) : Mem.os() != 3 ? gl().writeTexture(id, data) : webgl() ? gl().writeTexture(id, data) : wgpu().writeTexture(id, data);
+	public inline function writeTexture(id:Int, data:haxe.io.Bytes, x:Int, y:Int, w:Int, h:Int, dataOffset:Int)
+		Mem.os() == 1 ? mtl().writeTexture(id, data, x, y, w, h, dataOffset) : Mem.os() == 2 ? d3d().writeTexture(id, data, x, y, w, h,
+			dataOffset) : Mem.os() != 3 ? gl().writeTexture(id, data, x, y, w, h, dataOffset) : webgl() ? gl().writeTexture(id, data, x, y, w, h,
+			dataOffset) : wgpu().writeTexture(id, data, x, y, w, h, dataOffset);
+
+	public inline function destroyBuffer(id:Int)
+		Mem.os() == 1 ? mtl().destroyBuffer(id) : Mem.os() == 2 ? d3d().destroyBuffer(id) : Mem.os() != 3 ? gl().destroyBuffer(id) : webgl() ? gl().destroyBuffer(id) : wgpu().destroyBuffer(id);
+
+	public inline function destroyTexture(id:Int)
+		Mem.os() == 1 ? mtl().destroyTexture(id) : Mem.os() == 2 ? d3d().destroyTexture(id) : Mem.os() != 3 ? gl().destroyTexture(id) : webgl() ? gl().destroyTexture(id) : wgpu().destroyTexture(id);
 
 	public inline function createSampler(d:SamplerDesc):Int
 		return Mem.os() == 1 ? mtl().createSampler(d) : Mem.os() == 2 ? d3d().createSampler(d) : Mem.os() != 3 ? gl().createSampler(d) : webgl() ? gl().createSampler(d) : wgpu().createSampler(d);

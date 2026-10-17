@@ -1,0 +1,11 @@
+exit 0
+true true
+42 43
+1.5
+42
+x7
+identity kept
+field: true
+return: 42
+anon: 1.5
+null stays null

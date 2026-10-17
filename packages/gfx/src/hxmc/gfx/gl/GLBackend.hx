@@ -181,10 +181,34 @@ class GLBackend {
 		return textures.length;
 	}
 
-	public function writeTexture(id:Int, data:haxe.io.Bytes) {
-		var w = textureSizes[2 * id - 2], h = textureSizes[2 * id - 1];
-		if (data.length < w * h * 4) throw "hxmc.gfx: writeTexture: data has fewer than width * height * 4 bytes";
-		upload(textures[id - 1], w, h, data, false);
+	public function writeTexture(id:Int, data:haxe.io.Bytes, x:Int, y:Int, w:Int, h:Int, dataOffset:Int) {
+		var tw = textureSizes[2 * id - 2], th = textureSizes[2 * id - 1];
+		if (w < 0) {
+			w = tw;
+			h = th;
+		}
+		if (x + w > tw || y + h > th) throw "hxmc.gfx: writeTexture: outside the texture";
+		if (dataOffset + w * h * 4 > data.length) throw "hxmc.gfx: writeTexture: data has fewer than w * h * 4 bytes";
+		GL.glActiveTexture(GL.TEXTURE0);
+		GL.glBindTexture(GL.TEXTURE_2D, textures[id - 1]);
+		GL.glPixelStorei(GL.UNPACK_ALIGNMENT, 4);
+		// (a fast call: the Bytes cannot move during it)
+		GL.glTexSubImage2D(GL.TEXTURE_2D, 0, x, y, w, h, GL.RGBA, GL.UNSIGNED_BYTE, Mem.addr(data).add(8 + dataOffset));
+		GL.glBindTexture(GL.TEXTURE_2D, units[0]);
+	}
+
+	public function destroyBuffer(id:Int) {
+		if (buffers[id - 1] == 0) return;
+		scratch.value = buffers[id - 1];
+		GL.glDeleteBuffers(1, scratch);
+		buffers[id - 1] = 0;
+	}
+
+	public function destroyTexture(id:Int) {
+		if (textures[id - 1] == 0) return;
+		scratch.value = textures[id - 1];
+		GL.glDeleteTextures(1, scratch);
+		textures[id - 1] = 0;
 	}
 
 	// the texels (none: undefined) of a new texture or all of one, through unit

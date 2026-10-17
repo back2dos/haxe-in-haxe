@@ -12,18 +12,26 @@ import hxmc.unsafe.*;
 // display link would call back on another thread, and the GPU layer is main
 // thread only. A delegate class made at run time turns the close button into
 // a Close event, resizes into Resize events and a new backing scale (another
-// display) into ScaleChange (from inside sendEvent:). Characters: the
-// content view is made of a subclass, made at run time, whose insertText:
-// interpretKeyEvents: calls (AppKit's key bindings: dead keys; not yet
-// NSTextInputClient, for input methods). The wheel and trackpads:
-// scrollingDeltaX and Y (a trackpad's precise deltas, in points, a tenth).
+// display) into ScaleChange (from inside sendEvent:).
+// The content view holds the layer's view and, under it, a text view of a
+// class made at run time (HxmcTextView): while text input is on
+// (Window.startTextInput) it is the first responder, placed at the caret,
+// and the keys go through it (interpretKeyEvents:), so that input methods
+// and dead keys compose in it: its marked text comes as TextEditing events,
+// what it is given to insert as TextInput (and not kept), its commands
+// (moves, deletions: KeyDown's) ignored.
+// The application has the menu bar Mac apps have: its own menu (Hide,
+// Hide Others, Show All, Quit) and a Window menu (Minimize, Zoom, Close,
+// the windows), their shortcuts taken before the keys are ours. Quit (and
+// the Dock's) asks every window to close: a Close event each, as their
+// close buttons; the app ends when it closes them.
 // Sizes and positions are in pixels (points times the backing scale), y down.
 @:allow(hxmc.os)
 class CocoaWindow {
 	static var app = Ptr.nil();
 	static var delegate = Ptr.nil();
-	static var viewClass = Ptr.nil(); // the content views' subclass
 	static var mode = Ptr.nil(); // the run loop's default mode, an NSString
+	static var textViewClass = Ptr.nil();
 	static final event = new Event();
 	static final open:Array<CocoaWindow> = [];
 	// the App.run callback, for the delegate's events
@@ -31,10 +39,15 @@ class CocoaWindow {
 
 	final owner:Window;
 	final window:Ptr; // NSWindow*
-	final view:Ptr; // its content view
+	final view:Ptr; // the layer's view, filling the content view
+	final textView:Ptr; // HxmcTextView, under it
+	// text input on; the composition last told (TextEditing)
+	var typing = false;
+	var marked = "";
 	final layer:Ptr; // CAMetalLayer*
 	final surface:Surface;
 	var scale = 1.0;
+	var cursor:Cursor = Default;
 	// (an NSRect and a CGSize to pass by value)
 	final rect:Ptr<CGRect>;
 	final size:Ptr<CGSize>;
@@ -59,15 +72,13 @@ class CocoaWindow {
 		Msg.vBool(window, ObjC.sel("setAcceptsMouseMovedEvents:"), true);
 		// (no line under the title bar: it would hide the content's top pixels)
 		Msg.vInt(window, ObjC.sel("setTitlebarSeparatorStyle:"), 1);
-		view = Msg.id(window, ObjC.sel("contentView"));
-		// (of the subclass that takes the typed text)
-		if (viewClass.isNull()) {
-			viewClass = Runtime.objc_allocateClassPair(Runtime.object_getClass(view), Mem.cstr("HxmcContentView"), 0);
-			Runtime.class_addMethod(viewClass, ObjC.sel("insertText:"), Callback.addr(insertText), Mem.cstr("v@:@"));
-			Runtime.class_addMethod(viewClass, ObjC.sel("doCommandBySelector:"), Callback.addr(doCommand), Mem.cstr("v@::"));
-			Runtime.objc_registerClassPair(viewClass);
-		}
-		Runtime.object_setClass(view, viewClass);
+		var content = Msg.id(window, ObjC.sel("contentView"));
+		textView = Msg.idRect(Msg.id(textViewClass, ObjC.sel("alloc")), ObjC.sel("initWithFrame:"), rect.value);
+		Msg.vBool(textView, ObjC.sel("setRichText:"), false);
+		Msg.vPtr(content, ObjC.sel("addSubview:"), textView);
+		view = Msg.idRect(Msg.id(ObjC.cls("NSView"), ObjC.sel("alloc")), ObjC.sel("initWithFrame:"), rect.value);
+		Msg.vInt(view, ObjC.sel("setAutoresizingMask:"), 18); // (width and height sizable)
+		Msg.vPtr(content, ObjC.sel("addSubview:"), view);
 		// a layer-hosting view: the layer first, then wantsLayer
 		layer = Runtime.objc_retain(Msg.id(ObjC.cls("CAMetalLayer"), ObjC.sel("layer")));
 		Msg.vPtr(view, ObjC.sel("setLayer:"), layer);
@@ -91,8 +102,67 @@ class CocoaWindow {
 		Runtime.class_addMethod(cls, ObjC.sel("windowShouldClose:"), Callback.addr(shouldClose), Mem.cstr("c@:@"));
 		Runtime.class_addMethod(cls, ObjC.sel("windowDidResize:"), Callback.addr(didResize), Mem.cstr("v@:@"));
 		Runtime.class_addMethod(cls, ObjC.sel("windowDidChangeBackingProperties:"), Callback.addr(didChangeScale), Mem.cstr("v@:@"));
+		// (the application's delegate too)
+		Runtime.class_addMethod(cls, ObjC.sel("applicationShouldTerminate:"), Callback.addr(shouldTerminate), Mem.cstr("Q@:@"));
 		Runtime.objc_registerClassPair(cls);
 		delegate = Msg.id(Msg.id(cls, ObjC.sel("alloc")), ObjC.sel("init"));
+		Msg.vPtr(app, ObjC.sel("setDelegate:"), delegate);
+		menus();
+		// (an NSRange by value after the text: not read)
+		var t = Runtime.objc_allocateClassPair(ObjC.cls("NSTextView"), Mem.cstr("HxmcTextView"), 0);
+		Runtime.class_addMethod(t, ObjC.sel("insertText:replacementRange:"), Callback.addr(insertText), Mem.cstr("v@:@{_NSRange=QQ}"));
+		Runtime.class_addMethod(t, ObjC.sel("insertText:"), Callback.addr(insertText), Mem.cstr("v@:@"));
+		Runtime.class_addMethod(t, ObjC.sel("doCommandBySelector:"), Callback.addr(doCommand), Mem.cstr("v@::"));
+		Runtime.objc_registerClassPair(t);
+		textViewClass = t;
+	}
+
+	// the menu bar: the application's menu and the Window menu
+	static function menus() {
+		var name = ObjC.string(Msg.id(Msg.id(ObjC.cls("NSProcessInfo"), ObjC.sel("processInfo")), ObjC.sel("processName")));
+		function menu(title:String):Ptr {
+			var t = ObjC.str(title);
+			var m = Msg.idPtr(Msg.id(ObjC.cls("NSMenu"), ObjC.sel("alloc")), ObjC.sel("initWithTitle:"), t);
+			ObjC.release(t);
+			return m;
+		}
+		// (modifiers: NSEventModifierFlagOption, Command)
+		function item(m:Ptr, title:String, action:Ptr, key:String, ?mods:Int) {
+			var t = ObjC.str(title), k = ObjC.str(key);
+			var it = Msg.idPtrPtrPtr(Msg.id(ObjC.cls("NSMenuItem"), ObjC.sel("alloc")), ObjC.sel("initWithTitle:action:keyEquivalent:"), t, action, k);
+			if (mods != null) Msg.vInt(it, ObjC.sel("setKeyEquivalentModifierMask:"), mods);
+			Msg.vPtr(m, ObjC.sel("addItem:"), it);
+			ObjC.release(it);
+			ObjC.release(t);
+			ObjC.release(k);
+		}
+		function separator(m:Ptr)
+			Msg.vPtr(m, ObjC.sel("addItem:"), Msg.id(ObjC.cls("NSMenuItem"), ObjC.sel("separatorItem")));
+		function submenu(bar:Ptr, m:Ptr) {
+			var it = Msg.id(Msg.id(ObjC.cls("NSMenuItem"), ObjC.sel("alloc")), ObjC.sel("init"));
+			Msg.vPtr(it, ObjC.sel("setSubmenu:"), m);
+			Msg.vPtr(bar, ObjC.sel("addItem:"), it);
+			ObjC.release(it);
+		}
+		var bar = menu("");
+		var own = menu(name);
+		item(own, "Hide " + name, ObjC.sel("hide:"), "h");
+		item(own, "Hide Others", ObjC.sel("hideOtherApplications:"), "h", (1 << 19) | (1 << 20));
+		item(own, "Show All", ObjC.sel("unhideAllApplications:"), "");
+		separator(own);
+		item(own, "Quit " + name, ObjC.sel("terminate:"), "q");
+		submenu(bar, own);
+		var windows = menu("Window");
+		item(windows, "Minimize", ObjC.sel("performMiniaturize:"), "m");
+		item(windows, "Zoom", ObjC.sel("performZoom:"), "");
+		item(windows, "Close", ObjC.sel("performClose:"), "w");
+		separator(windows);
+		submenu(bar, windows);
+		Msg.vPtr(app, ObjC.sel("setMainMenu:"), bar);
+		Msg.vPtr(app, ObjC.sel("setWindowsMenu:"), windows);
+		ObjC.release(own);
+		ObjC.release(windows);
+		ObjC.release(bar);
 	}
 
 	// the size in pixels and the backing scale, from the content view; the
@@ -116,8 +186,167 @@ class CocoaWindow {
 		Msg.v(window, ObjC.sel("close"));
 		Runtime.objc_release(window);
 		Runtime.objc_release(layer);
+		Runtime.objc_release(view);
+		Runtime.objc_release(textView);
 		LibC.free(rect);
 		LibC.free(size);
+	}
+
+	function setTitle(t:String) {
+		var s = ObjC.str(t);
+		Msg.vPtr(window, ObjC.sel("setTitle:"), s);
+		ObjC.release(s);
+	}
+
+	function resize(w:Int, h:Int) {
+		size.value.width = w;
+		size.value.height = h;
+		Msg.vSize(window, ObjC.sel("setContentSize:"), size.value);
+		if (measure()) resized();
+	}
+
+	function setMinSize(w:Int, h:Int) {
+		size.value.width = w;
+		size.value.height = h;
+		Msg.vSize(window, ObjC.sel("setContentMinSize:"), size.value);
+		if (measure()) resized();
+	}
+
+	// a resize told: as a Resize event, or at the next poll when there is
+	// no loop yet (a size set before App.run: setContentSize: tells the
+	// delegate at once)
+	var pending = false;
+
+	function resized() {
+		if (onEvent == null) {
+			pending = true;
+			return;
+		}
+		pending = false;
+		var e = event;
+		e.kind = Resize;
+		e.window = owner;
+		e.x = surface.width;
+		e.y = surface.height;
+		dispatch(e);
+	}
+
+	function setCursor(c:Cursor) {
+		cursor = c;
+		applyCursor();
+	}
+
+	// (AppKit puts the arrow back as the pointer enters the window: set again on each move)
+	function applyCursor() {
+		var cls = ObjC.cls("NSCursor");
+		var ns = switch cursor {
+			case Pointer: Msg.id(cls, ObjC.sel("pointingHandCursor"));
+			case Text: Msg.id(cls, ObjC.sel("IBeamCursor"));
+			case Crosshair: Msg.id(cls, ObjC.sel("crosshairCursor"));
+			case Move: Msg.id(cls, ObjC.sel("openHandCursor"));
+			case NotAllowed: Msg.id(cls, ObjC.sel("operationNotAllowedCursor"));
+			case ResizeEW: Msg.id(cls, ObjC.sel("resizeLeftRightCursor"));
+			case ResizeNS: Msg.id(cls, ObjC.sel("resizeUpDownCursor"));
+			case _: Msg.id(cls, ObjC.sel("arrowCursor"));
+		}
+		Msg.v(ns, ObjC.sel("set"));
+	}
+
+	// text input on: the text view at that area (pixels from the top left)
+	// and the first responder; off: neither, its composition dropped
+	function textInput(on:Bool, x:Int, y:Int, width:Int, height:Int) {
+		if (!on) {
+			if (!typing) return;
+			typing = false;
+			if (marked != "") Msg.v(Msg.id(textView, ObjC.sel("inputContext")), ObjC.sel("discardMarkedText"));
+			marked = "";
+			clearText(textView);
+			Msg.bPtr(window, ObjC.sel("makeFirstResponder:"), Ptr.nil());
+			return;
+		}
+		var b = Msg.rect(view, ObjC.sel("bounds"));
+		rect.value.origin.x = x / scale;
+		rect.value.origin.y = b.size.height - (y + height) / scale;
+		rect.value.size.width = Math.max(1, width / scale);
+		rect.value.size.height = Math.max(1, height / scale);
+		Msg.vRect(textView, ObjC.sel("setFrame:"), rect.value);
+		if (!typing) {
+			typing = true;
+			Msg.bPtr(window, ObjC.sel("makeFirstResponder:"), textView);
+		}
+		Msg.v(Msg.id(textView, ObjC.sel("inputContext")), ObjC.sel("invalidateCharacterCoordinates"));
+	}
+
+	static function clearText(tv:Ptr) {
+		var e = ObjC.str("");
+		Msg.vPtr(tv, ObjC.sel("setString:"), e);
+		ObjC.release(e);
+	}
+
+	// the text view's marked text, told when it changed (TextEditing: the caret at its end)
+	function composition() {
+		if (!typing) return;
+		var now = Msg.b(textView, ObjC.sel("hasMarkedText")) ? ObjC.string(Msg.id(textView, ObjC.sel("string"))) ?? "" : "";
+		if (now == marked) return;
+		marked = now;
+		var e = event;
+		e.kind = TextEditing;
+		e.window = owner;
+		e.text = now;
+		e.x = now.length;
+		dispatch(e);
+	}
+
+	// the text view is given text (an NSString or NSAttributedString): typed,
+	// not kept; the composition it commits ends
+	@:hxmc.callback static function insertText(self:Ptr, cmd:Ptr, text:Ptr):Void {
+		var w:Null<CocoaWindow> = null;
+		for (o in open)
+			if (o.textView == self) w = o;
+		if (w == null || text.isNull()) return;
+		var s = Msg.bPtr(text, ObjC.sel("isKindOfClass:"), ObjC.cls("NSAttributedString")) ? Msg.id(text, ObjC.sel("string")) : text;
+		var str = ObjC.string(s) ?? "";
+		clearText(self);
+		var e = event;
+		e.window = w.owner;
+		if (w.marked != "") {
+			w.marked = "";
+			e.kind = TextEditing;
+			e.text = "";
+			e.x = 0;
+			dispatch(e);
+		}
+		var typed = new StringBuf();
+		for (cp in new haxe.iterators.StringIteratorUnicode(str))
+			if (cp >= 0x20 && cp != 0x7F && (cp < 0xF700 || cp > 0xF8FF)) typed.addChar(cp);
+		if (typed.length == 0) return;
+		e.kind = TextInput;
+		e.text = typed.toString();
+		e.mods = 0;
+		dispatch(e);
+	}
+
+	// (its commands are the keys': KeyDown events)
+	@:hxmc.callback static function doCommand(self:Ptr, cmd:Ptr, command:Ptr):Void {}
+
+	// the general pasteboard's string (NSPasteboardTypeString: public.utf8-plain-text)
+	static function writeClipboard(text:String) {
+		var pb = Msg.id(ObjC.cls("NSPasteboard"), ObjC.sel("generalPasteboard"));
+		Msg.i(pb, ObjC.sel("clearContents"));
+		var s = ObjC.str(text), type = ObjC.str("public.utf8-plain-text");
+		Msg.idPtrPtr(pb, ObjC.sel("setString:forType:"), s, type);
+		ObjC.release(s);
+		ObjC.release(type);
+	}
+
+	static function readClipboard():Null<String> {
+		var pool = Runtime.objc_autoreleasePoolPush();
+		var pb = Msg.id(ObjC.cls("NSPasteboard"), ObjC.sel("generalPasteboard"));
+		var type = ObjC.str("public.utf8-plain-text");
+		var text = ObjC.string(Msg.idPtr(pb, ObjC.sel("stringForType:"), type));
+		ObjC.release(type);
+		Runtime.objc_autoreleasePoolPop(pool);
+		return text;
 	}
 
 	static function find(window:Ptr):Null<CocoaWindow> {
@@ -141,67 +370,50 @@ class CocoaWindow {
 		return 0;
 	}
 
+	// Quit: each window asked to close; NSTerminateCancel (the loop is ours)
+	@:hxmc.callback static function shouldTerminate(self:Ptr, cmd:Ptr, sender:Ptr):Int64 {
+		for (w in open.copy()) {
+			var e = event;
+			e.kind = Close;
+			e.window = w.owner;
+			dispatch(e);
+		}
+		return 0;
+	}
+
+	// another display: a new scale (ScaleChange), and a Resize when the pixels changed
 	@:hxmc.callback static function didChangeScale(self:Ptr, cmd:Ptr, note:Ptr):Void {
 		var w = find(Msg.id(note, ObjC.sel("object")));
 		if (w == null) return;
 		var scale = w.scale, resized = w.measure();
-		var e = event;
-		e.window = w.owner;
 		if (w.scale != scale) {
+			var e = event;
 			e.kind = ScaleChange;
+			e.window = w.owner;
 			dispatch(e);
 		}
-		if (resized) {
-			e.kind = Resize;
-			e.x = w.surface.width;
-			e.y = w.surface.height;
-			dispatch(e);
-		}
+		if (resized) w.resized();
 	}
-
-	// the text of a key (interpretKeyEvents:): an NSString or NSAttributedString
-	@:hxmc.callback static function insertText(self:Ptr, cmd:Ptr, text:Ptr):Void {
-		var w:Null<CocoaWindow> = null;
-		for (o in open)
-			if (o.view == self) w = o;
-		if (w == null) return;
-		var s = (Msg.iPtr(text, ObjC.sel("isKindOfClass:"), ObjC.cls("NSAttributedString")) & 0xFF) != 0 ? Msg.id(text, ObjC.sel("string")) : text;
-		var e = event;
-		e.kind = Text;
-		e.window = w.owner;
-		var n = Msg.i(s, ObjC.sel("length")).toInt(), i = 0;
-		while (i < n) {
-			var c:Int = Msg.u16Int(s, ObjC.sel("characterAtIndex:"), i++);
-			if (c >= 0xD800 && c < 0xDC00 && i < n) {
-				var d:Int = Msg.u16Int(s, ObjC.sel("characterAtIndex:"), i++);
-				c = 0x10000 + ((c - 0xD800) << 10) + (d - 0xDC00);
-			}
-			// (not the control characters, nor the function keys' private use ones)
-			if (c >= 0x20 && c != 0x7F && !(c >= 0xF700 && c < 0xF900)) {
-				e.char = c;
-				dispatch(e);
-			}
-		}
-	}
-
-	// (a key binding's command, Return or an arrow: the KeyDown has it; without
-	// this method AppKit would beep)
-	@:hxmc.callback static function doCommand(self:Ptr, cmd:Ptr, sel:Ptr):Void {}
 
 	@:hxmc.callback static function didResize(self:Ptr, cmd:Ptr, note:Ptr):Void {
 		var w = find(Msg.id(note, ObjC.sel("object")));
-		if (w == null || !w.measure()) return;
-		var e = event;
-		e.kind = Resize;
-		e.window = w.owner;
-		e.x = w.surface.width;
-		e.y = w.surface.height;
-		dispatch(e);
+		if (w != null && w.measure()) w.resized();
+	}
+
+	// waits for an event (left in the queue for poll), or seconds
+	static function wait(seconds:Float) {
+		if (app.isNull()) return;
+		var pool = Runtime.objc_autoreleasePoolPush();
+		var until = Msg.idFloat(ObjC.cls("NSDate"), ObjC.sel("dateWithTimeIntervalSinceNow:"), seconds);
+		Msg.idIntPtrPtrBool(app, ObjC.sel("nextEventMatchingMask:untilDate:inMode:dequeue:"), -1, until, mode, false);
+		Runtime.objc_autoreleasePoolPop(pool);
 	}
 
 	// dispatches the pending events
 	static function poll(onEvent:Event->Void) {
 		CocoaWindow.onEvent = onEvent;
+		for (w in open.copy())
+			if (w.pending) w.resized();
 		var past = Msg.id(ObjC.cls("NSDate"), ObjC.sel("distantPast"));
 		while (!app.isNull()) {
 			var ev = Msg.idIntPtrPtrBool(app, ObjC.sel("nextEventMatchingMask:untilDate:inMode:dequeue:"), -1, past, mode, true);
@@ -209,10 +421,17 @@ class CocoaWindow {
 			var w = find(Msg.id(ev, ObjC.sel("window")));
 			var type = Msg.i(ev, ObjC.sel("type")).toInt();
 			var key = type == NS.KeyDown || type == NS.KeyUp;
+			// (the menus' shortcuts first: Command and a key one of them has)
+			if (type == NS.KeyDown && Msg.i(ev, ObjC.sel("modifierFlags")).toInt() & (1 << 20) != 0
+				&& Msg.bPtr(Msg.id(app, ObjC.sel("mainMenu")), ObjC.sel("performKeyEquivalent:"), ev)) continue;
 			if (w != null) w.translate(ev, type);
+			if (w != null) w.composition();
 			// (keys stay ours: unhandled, AppKit would beep at each)
 			if (!key || w == null) Msg.vPtr(app, ObjC.sel("sendEvent:"), ev);
 		}
+		// (a composition changed outside a key: the input method's own window, a message)
+		for (w in open.copy())
+			w.composition();
 	}
 
 	function translate(ev:Ptr, type:Int) {
@@ -223,8 +442,34 @@ class CocoaWindow {
 			case NS.KeyDown | NS.KeyUp:
 				e.kind = type == NS.KeyDown ? KeyDown : KeyUp;
 				e.key = keySym(ev);
+				e.mods = mods(ev);
+				if (type == NS.KeyDown && typing && e.mods & (Mods.CONTROL | Mods.META) == 0) {
+					// (while an input method composes, its keys are its own)
+					if (marked == "") dispatch(e);
+					var pool = Runtime.objc_autoreleasePoolPush();
+					Msg.vPtr(textView, ObjC.sel("interpretKeyEvents:"), Msg.idPtr(ObjC.cls("NSArray"), ObjC.sel("arrayWithObject:"), ev));
+					Runtime.objc_autoreleasePoolPop(pool);
+					return;
+				}
+				if (type == NS.KeyDown) {
+					dispatch(e);
+					// then its characters (not with Command or Control; not the function keys' private-use ones)
+					if (e.mods & (Mods.CONTROL | Mods.META) != 0) return;
+					var s = Msg.id(ev, ObjC.sel("characters"));
+					if (s.isNull()) return;
+					var str = ObjC.string(s);
+					if (str == null) return;
+					for (cp in new haxe.iterators.StringIteratorUnicode(str)) {
+						if (cp < 0x20 || cp == 0x7F || (cp >= 0xF700 && cp <= 0xF8FF)) continue;
+						e.kind = TextInput;
+						e.text = String.fromCharCode(cp);
+						dispatch(e);
+					}
+					return;
+				}
 			case NS.LeftMouseDown | NS.RightMouseDown | NS.OtherMouseDown:
 				e.kind = MouseDown;
+				e.mods = mods(ev);
 				e.button = button(ev, type);
 			case NS.LeftMouseUp | NS.RightMouseUp | NS.OtherMouseUp:
 				e.kind = MouseUp;
@@ -232,12 +477,17 @@ class CocoaWindow {
 			case NS.MouseMoved | NS.LeftMouseDragged | NS.RightMouseDragged | NS.OtherMouseDragged:
 				e.kind = MouseMove;
 				e.button = 0;
+				if (cursor != Default) applyCursor();
 			case NS.ScrollWheel:
-				var k = (Msg.i(ev, ObjC.sel("hasPreciseScrollingDeltas")) & 0xFF) != 0 ? 0.1 : 1.0;
-				e.dx = -Msg.f(ev, ObjC.sel("scrollingDeltaX")) * k;
-				e.dy = Msg.f(ev, ObjC.sel("scrollingDeltaY")) * k;
-				if (e.dx == 0 && e.dy == 0) return;
-				e.kind = Wheel;
+				var dx = Msg.f(ev, ObjC.sel("scrollingDeltaX")), dy = Msg.f(ev, ObjC.sel("scrollingDeltaY"));
+				if (dx == 0 && dy == 0) return;
+				// (a trackpad's points, exact; a wheel's lines, 40 pixels each; the
+				// content follows the fingers, so the view scrolls the other way)
+				var k = Msg.b(ev, ObjC.sel("hasPreciseScrollingDeltas")) ? scale : 40 * scale;
+				e.kind = Scroll;
+				e.mods = mods(ev);
+				e.deltaX = -dx * k;
+				e.deltaY = -dy * k;
 			case _:
 				return;
 		}
@@ -248,8 +498,13 @@ class CocoaWindow {
 			e.y = Math.floor((b.size.height - p.y) * scale);
 		}
 		dispatch(e);
-		// (the key's text: insertText:)
-		if (type == NS.KeyDown) Msg.vPtr(view, ObjC.sel("interpretKeyEvents:"), Msg.idPtr(ObjC.cls("NSArray"), ObjC.sel("arrayWithObject:"), ev));
+	}
+
+	// NSEventModifierFlags: Shift 1 << 17, Control 1 << 18, Option 1 << 19, Command 1 << 20
+	static function mods(ev:Ptr):Int {
+		var f = Msg.i(ev, ObjC.sel("modifierFlags")).toInt();
+		return (f & (1 << 17) != 0 ? Mods.SHIFT : 0) | (f & (1 << 18) != 0 ? Mods.CONTROL : 0) | (f & (1 << 19) != 0 ? Mods.ALT : 0)
+			| (f & (1 << 20) != 0 ? Mods.META : 0);
 	}
 
 	static function button(ev:Ptr, type:Int):Int
@@ -272,6 +527,24 @@ class CocoaWindow {
 			case 124: return 0xFF53; // Right
 			case 125: return 0xFF54; // Down
 			case 126: return 0xFF52; // Up
+			case 115: return 0xFF50; // Home
+			case 119: return 0xFF57; // End
+			case 116: return 0xFF55; // Page Up
+			case 121: return 0xFF56; // Page Down
+			case 110: return 0xFF67; // Menu (kVK_ContextualMenu)
+			// (F1 to F12: their key codes; their characters are private ones)
+			case 122: return 0xFFBE;
+			case 120: return 0xFFBF;
+			case 99: return 0xFFC0;
+			case 118: return 0xFFC1;
+			case 96: return 0xFFC2;
+			case 97: return 0xFFC3;
+			case 98: return 0xFFC4;
+			case 100: return 0xFFC5;
+			case 101: return 0xFFC6;
+			case 109: return 0xFFC7;
+			case 103: return 0xFFC8;
+			case 111: return 0xFFC9;
 			case _:
 		}
 		var s = Msg.id(ev, ObjC.sel("charactersIgnoringModifiers"));

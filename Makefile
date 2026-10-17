@@ -108,7 +108,8 @@ endef
 .PHONY: help std deps rt rt-build rt-target rt-layouts hxmc tool bootstrap fixpoint stage0 crosshost port dev release wasm npm site fuzz \
 	lix lix-release lix-dist reference bench test test-fuzz test-display test-server test-jsonrpc test-unit-targets test-interp \
 	test-haxelib test-eval-debugger test-node-libs test-module-cache smoke hxmc-test corpus-stage gfx-programs gfx-check gfx-web-check gfx-shader-check \
-	audio-programs audio-check audio-web-check native-macros portcheck measure quick check full clean distclean
+	audio-programs audio-check audio-web-check native-macros ui-programs esx-check text-check ui-check ui-draw-check ui-web-check portcheck measure \
+	quick check full clean distclean
 
 help:
 	@sed -n '/^# --- Targets/,$$p' $(MAKEFILE_LIST) | sed -n 's/^## \{0,1\}//p'
@@ -170,6 +171,19 @@ help:
 ## gfx-shader-check  packages/gfx's shader macro on Eval: shaders run on the CPU, the emitted
 ##             GLSL, WGSL, MSL and HLSL against packages/gfx/test/shader/, the programs it must
 ##             reject (packages/gfx/test/ShaderTest.hx; BLESS=1 rewrites the sources)
+## esx-check   packages/esx on Eval: markup literals' templates, values, whitespace, components and
+##             HTML, and the programs the macro rejects (packages/esx/test/EsxTest.hx)
+## text-check  packages/text on Eval: the rasterizer, DejaVu Sans (metrics, cmap, kerning, outlines),
+##             line layout, and a text sample through the atlas against packages/text/test/sample.png
+## ui-check    packages/ui on Eval: the layout against Chromium's flexbox (layout-expected.json,
+##             from packages/ui/test/layout-ref.mjs), text wrapping, events and focus (UiTest.hx);
+##             signals and markup rendered into nodes (ReactiveTest.hx); the guide's examples (GuideTest.hx)
+## ui-programs  bin/ui/GFX_TARGET/{UiDrawTest,TodoTest,GalleryTest,StressTest,ClipboardTest,EmojiTest,TransformTest,WindowTest}[.exe], NativeTest (GTK 3, Win32, AppKit), TextInputTest (X11), LinuxAccessTest and AtspiProbe (AT-SPI), WinAccessTest (Windows): packages/ui's test programs (Linux: glibc mode)
+## ui-draw-check  packages/ui's GPU renderer (hxmc.ui.draw): the sample UI headless against
+##             packages/ui/test/draw.png (also in a window, under Xvfb), then the todo example (markup, signals, widgets) driven
+##             through its Ui and drawn against todo.png (Linux: Mesa, DejaVu Sans; BLESS=1 rewrites them)
+## ui-web-check  the todo example as wasm32-wasi in headless Chromium, on WebGPU and WebGL2, driven by
+##             real pointer and keyboard events, against todo.png (packages/ui/test/web.mjs; DejaVu Sans)
 ## audio-programs  bin/audio/AUDIO_TARGET/{AudioTest,Tone}[.exe]: packages/os's audio test and example
 ## audio-check  packages/os's audio through each back end without speakers (packages/os/test/audio.sh):
 ##             ALSA's null and file devices (Linux), CoreAudio's generic output (macOS), WASAPI
@@ -518,6 +532,53 @@ audio-web-check: $(TOOL) $(STD)
 gfx-shader-check: $(TOOL)
 	ulimit -s unlimited 2>/dev/null || true; $(TOOL) -cp packages/gfx/src -cp packages/gfx/examples -cp packages/gfx/test --run ShaderTest $(TOOL) $(if $(BLESS),--bless)
 
+esx-check: $(TOOL)
+	ulimit -s unlimited 2>/dev/null || true; $(TOOL) -cp packages/esx/src -cp packages/esx/test --run EsxTest $(TOOL)
+
+text-check: $(TOOL)
+	ulimit -s unlimited 2>/dev/null || true; $(TOOL) -cp packages/text/src -cp packages/text/test -cp packages/gfx/test --run TextTest $(if $(BLESS),--bless)
+
+ui-check: $(TOOL)
+	ulimit -s unlimited 2>/dev/null || true; $(TOOL) -cp packages/text/src -cp packages/ui/src -cp packages/ui/test --run UiTest
+	ulimit -s unlimited 2>/dev/null || true; $(TOOL) -cp packages/esx/src -cp packages/text/src -cp packages/ui/src -cp packages/ui/test --run ReactiveTest
+	ulimit -s unlimited 2>/dev/null || true; $(TOOL) -cp packages/esx/src -cp packages/text/src -cp packages/ui/src -cp packages/ui/test --run GuideTest
+
+UI_CP := -cp packages/os/src -cp packages/gfx/src -cp packages/gfx/test -cp packages/text/src -cp packages/esx/src -cp packages/ui/src -cp packages/ui/test -cp packages/ui/examples
+ui-programs: $(TOOL) $(STD) $(HOST_RT)
+	$(call hxmc,bin/ui/$(GFX_TARGET)/UiDrawTest$(call EXE,$(GFX_TARGET)),$(UI_CP) -main UiDrawTest $(HXMC_ARGS) $(GFX_ARGS))
+	$(call hxmc,bin/ui/$(GFX_TARGET)/TodoTest$(call EXE,$(GFX_TARGET)),$(UI_CP) -main TodoTest $(HXMC_ARGS) $(GFX_ARGS))
+	$(call hxmc,bin/ui/$(GFX_TARGET)/GalleryTest$(call EXE,$(GFX_TARGET)),$(UI_CP) -main GalleryTest $(HXMC_ARGS) $(GFX_ARGS))
+	$(call hxmc,bin/ui/$(GFX_TARGET)/StressTest$(call EXE,$(GFX_TARGET)),$(UI_CP) -main StressTest $(HXMC_ARGS) $(GFX_ARGS))
+	$(call hxmc,bin/ui/$(GFX_TARGET)/ClipboardTest$(call EXE,$(GFX_TARGET)),$(UI_CP) -main ClipboardTest $(HXMC_ARGS) $(GFX_ARGS))
+	$(call hxmc,bin/ui/$(GFX_TARGET)/NativeTest$(call EXE,$(GFX_TARGET)),$(UI_CP) -main NativeTest $(HXMC_ARGS) $(GFX_ARGS))
+	$(call hxmc,bin/ui/$(GFX_TARGET)/EmojiTest$(call EXE,$(GFX_TARGET)),$(UI_CP) -main EmojiTest $(HXMC_ARGS) $(GFX_ARGS))
+	$(call hxmc,bin/ui/$(GFX_TARGET)/TransformTest$(call EXE,$(GFX_TARGET)),$(UI_CP) -main TransformTest $(HXMC_ARGS) $(GFX_ARGS))
+	$(call hxmc,bin/ui/$(GFX_TARGET)/WindowTest$(call EXE,$(GFX_TARGET)),$(UI_CP) -main WindowTest $(HXMC_ARGS) $(GFX_ARGS))
+	$(if $(filter linux-%,$(GFX_TARGET)),$(call hxmc,bin/ui/$(GFX_TARGET)/TextInputTest,$(UI_CP) -main TextInputTest $(HXMC_ARGS) $(GFX_ARGS)))
+	$(if $(filter linux-%,$(GFX_TARGET)),$(call hxmc,bin/ui/$(GFX_TARGET)/LinuxAccessTest,$(UI_CP) -main LinuxAccessTest $(HXMC_ARGS) $(GFX_ARGS)))
+	$(if $(filter linux-%,$(GFX_TARGET)),$(call hxmc,bin/ui/$(GFX_TARGET)/AtspiProbe,$(UI_CP) -main AtspiProbe $(HXMC_ARGS) $(GFX_ARGS)))
+	$(if $(filter windows-%,$(GFX_TARGET)),$(call hxmc,bin/ui/$(GFX_TARGET)/WinAccessTest.exe,$(UI_CP) -main WinAccessTest $(HXMC_ARGS) $(GFX_ARGS)))
+ui-draw-check: ui-programs
+	LIBGL_ALWAYS_SOFTWARE=1 env -u DISPLAY bin/ui/$(GFX_TARGET)/UiDrawTest packages/ui/test/draw.png bin/ui/$(GFX_TARGET)/draw.png $(if $(BLESS),--bless)
+	LIBGL_ALWAYS_SOFTWARE=1 xvfb-run -a -s "-screen 0 640x480x24" bin/ui/$(GFX_TARGET)/UiDrawTest packages/ui/test/draw.png bin/ui/$(GFX_TARGET)/window.png --window
+	LIBGL_ALWAYS_SOFTWARE=1 env -u DISPLAY bin/ui/$(GFX_TARGET)/TodoTest packages/ui/test/todo.png bin/ui/$(GFX_TARGET)/todo.png $(if $(BLESS),--bless)
+	LIBGL_ALWAYS_SOFTWARE=1 env -u DISPLAY bin/ui/$(GFX_TARGET)/GalleryTest packages/ui/test/gallery.png bin/ui/$(GFX_TARGET)/gallery.png $(if $(BLESS),--bless)
+	LIBGL_ALWAYS_SOFTWARE=1 env -u DISPLAY bin/ui/$(GFX_TARGET)/GalleryTest packages/ui/test/gallery-dark.png bin/ui/$(GFX_TARGET)/gallery-dark.png --dark $(if $(BLESS),--bless)
+	LIBGL_ALWAYS_SOFTWARE=1 env -u DISPLAY bin/ui/$(GFX_TARGET)/StressTest
+	LIBGL_ALWAYS_SOFTWARE=1 env -u DISPLAY bin/ui/$(GFX_TARGET)/EmojiTest packages/ui/test/emoji.png bin/ui/$(GFX_TARGET)/emoji.png
+	LIBGL_ALWAYS_SOFTWARE=1 env -u DISPLAY bin/ui/$(GFX_TARGET)/TransformTest packages/ui/test/transform.png bin/ui/$(GFX_TARGET)/transform.png
+	xvfb-run -a -s "-screen 0 640x480x24" bin/ui/$(GFX_TARGET)/ClipboardTest
+	xvfb-run -a -s "-screen 0 640x480x24" bin/ui/$(GFX_TARGET)/TextInputTest
+	xvfb-run -a -s "-screen 0 640x480x24" bin/ui/$(GFX_TARGET)/WindowTest
+	# (AT-SPI: the window's tree read by another process through libatspi, in a D-Bus session)
+	LIBGL_ALWAYS_SOFTWARE=1 xvfb-run -a -s "-screen 0 640x480x24" dbus-run-session -- sh -c 'bin/ui/$(GFX_TARGET)/LinuxAccessTest & p=$$!; bin/ui/$(GFX_TARGET)/AtspiProbe; s=$$?; wait $$p && exit $$s'
+	xvfb-run -a -s "-screen 0 640x480x24" bin/ui/$(GFX_TARGET)/NativeTest bin/ui/$(GFX_TARGET)/native.png
+
+ui-web-check: $(TOOL) $(STD)
+	$(call hxmc,bin/ui/WebTodo.wasm,$(UI_CP) -main WebTodo $(HXMC_ARGS) -D hxmc.target=wasm32-wasi)
+	$(NODE) packages/ui/test/web.mjs bin/ui/WebTodo.wasm bin/ui
+	$(call hxmc,bin/ui/NativeForm.wasm,$(UI_CP) -main NativeForm $(HXMC_ARGS) -D hxmc.target=wasm32-wasi)
+	$(NODE) packages/ui/test/native-web.mjs bin/ui/NativeForm.wasm bin/ui
 # (each macro class compiled in a child of bin/jit/haxe; the engine's report in each
 # case's port.log)
 MACROS ?= verify

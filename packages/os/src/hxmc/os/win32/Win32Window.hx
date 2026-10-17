@@ -13,7 +13,7 @@ import hxmc.unsafe.*;
 // loop stays App.run's: each frame drains the thread's queue without
 // waiting (PeekMessage); the pace comes from the swap chain's Present.
 // Characters come from WM_CHAR (TranslateMessage: UTF-16, surrogate pairs
-// joined), the wheels from WM_MOUSEWHEEL and WM_MOUSEHWHEEL; WM_DPICHANGED
+// joined: TextInput), the wheels from WM_MOUSEWHEEL and WM_MOUSEHWHEEL; WM_DPICHANGED
 // moves the window to the size Windows suggests and is a ScaleChange.
 // While the user drags the window's edge or title bar, DispatchMessage runs
 // Windows' own loop until the drag ends: a timer then draws the frames
@@ -27,8 +27,11 @@ class Win32Window {
 	static final open:Array<Win32Window> = [];
 	// the App.run callbacks, for the window procedure's events and frames
 	static var onEvent:Null<Event->Void>;
+	// WM_GETOBJECT's answer (an accessibility provider: hxmc.ui's UI
+	// Automation adapter), given the window and the message's parameters;
+	// 0: DefWindowProc's
+	public static var getObject:Null<(hwnd:Ptr, wParam:Int64, lParam:Int64) -> Int64> = null;
 	static var onFrame:Null<Void->Void>;
-	static var surrogate = 0; // the high surrogate of the next WM_CHAR
 	static inline var SIZING_TIMER = 1;
 
 	static inline var STYLE = WM.WS_OVERLAPPEDWINDOW;
@@ -37,6 +40,8 @@ class Win32Window {
 	final hwnd:Ptr;
 	final surface:Surface;
 	var scale = 1.0;
+	// the cursor over the client area (WM_SETCURSOR sets it)
+	var cursor = Ptr.nil();
 
 	function new(owner:Window, title:String, width:Int, height:Int) {
 		this.owner = owner;
@@ -101,6 +106,111 @@ class Win32Window {
 		User32.DestroyWindow(hwnd);
 	}
 
+	function setTitle(t:String)
+		Arena.scoped(a -> User32.SetWindowTextW(hwnd, a.wstring(t)));
+
+	// (the outer size of a client area of w x h points)
+	function outer(w:Int, h:Int):{w:Int, h:Int}
+		return Arena.scopedValue(a -> {
+			var r = a.make(RECT);
+			r.value.right = Math.round(w * scale);
+			r.value.bottom = Math.round(h * scale);
+			User32.AdjustWindowRectEx(r, STYLE, 0, 0);
+			{w: r.value.right - r.value.left, h: r.value.bottom - r.value.top};
+		});
+
+	// (SWP_NOMOVE, SWP_NOZORDER, SWP_NOACTIVATE)
+	function resize(w:Int, h:Int) {
+		var o = outer(w, h);
+		User32.SetWindowPos(hwnd, Ptr.nil(), 0, 0, o.w, o.h, 0x2 | 0x4 | 0x10);
+	}
+
+	// a Resize not told yet (before the loop)
+	var pending = false;
+
+	// (answered at WM_GETMINMAXINFO)
+	var minW = 0;
+	var minH = 0;
+
+	function setMinSize(w:Int, h:Int) {
+		minW = w;
+		minH = h;
+	}
+
+	// (IDC_ARROW, IDC_HAND, IDC_IBEAM, IDC_CROSS, IDC_SIZEALL, IDC_NO, IDC_SIZEWE, IDC_SIZENS)
+	function setCursor(c:Cursor) {
+		cursor = User32.LoadCursorW(Ptr.nil(), Ptr.ofI64([32512, 32649, 32513, 32515, 32646, 32648, 32644, 32645][(c : Int)]));
+		User32.SetCursor(cursor);
+	}
+
+	// the IME's composition at the caret, its candidates below it (CFS_POINT;
+	// CFS_EXCLUDE: not over the caret's area)
+	function textInputArea(x:Int, y:Int, width:Int, height:Int) {
+		var imc = Imm32.ImmGetContext(hwnd);
+		if (imc.isNull()) return;
+		Arena.scoped(a -> {
+			var f:Ptr<Int32> = a.alloc(32);
+			f[0] = 2;
+			f[1] = x;
+			f[2] = y;
+			f[3] = x;
+			f[4] = y;
+			f[5] = x + width;
+			f[6] = y + height;
+			Imm32.ImmSetCompositionWindow(imc, f);
+			f[0] = 0;
+			f[1] = 0x80;
+			f[2] = x;
+			f[3] = y + height;
+			f[4] = x;
+			f[5] = y;
+			f[6] = x + width;
+			f[7] = y + height;
+			Imm32.ImmSetCandidateWindow(imc, f);
+		});
+		Imm32.ImmReleaseContext(hwnd, imc);
+	}
+
+	// the clipboard's text: UTF-16 in movable global memory (CF_UNICODETEXT),
+	// which the clipboard owns once set
+	function writeClipboard(text:String) {
+		if (User32.OpenClipboard(hwnd) == 0) throw "hxmc.os: OpenClipboard failed (error " + Kernel32.GetLastError() + ")";
+		User32.EmptyClipboard();
+		var n = text.length;
+		var mem = Kernel32.GlobalAlloc(2, (2 * n + 2 : Int64)); // GMEM_MOVEABLE
+		if (mem.isNull()) {
+			User32.CloseClipboard();
+			throw "hxmc.os: GlobalAlloc failed";
+		}
+		var p:Ptr<UInt16> = Kernel32.GlobalLock(mem);
+		for (i in 0...n)
+			p[i] = StringTools.fastCodeAt(text, i);
+		p[n] = 0;
+		Kernel32.GlobalUnlock(mem);
+		if (User32.SetClipboardData(13, mem).isNull()) Kernel32.GlobalFree(mem);
+		User32.CloseClipboard();
+	}
+
+	function readClipboard():Null<String> {
+		if (User32.OpenClipboard(hwnd) == 0) return null;
+		var mem = User32.GetClipboardData(13);
+		var text:Null<String> = null;
+		if (!mem.isNull()) {
+			var p:Ptr<UInt16> = Kernel32.GlobalLock(mem);
+			if (!p.isNull()) {
+				var max = Kernel32.GlobalSize(mem).toInt() >> 1, b = new StringBuf(), i = 0;
+				while (i < max && p[i] != 0) {
+					b.addChar(p[i]);
+					i++;
+				}
+				text = b.toString();
+				Kernel32.GlobalUnlock(mem);
+			}
+		}
+		User32.CloseClipboard();
+		return text;
+	}
+
 	static function find(hwnd:Ptr):Null<Win32Window> {
 		for (w in open)
 			if (w.hwnd == hwnd) return w;
@@ -111,11 +221,32 @@ class Win32Window {
 	static function poll(onFrame:Void->Void, onEvent:Event->Void) {
 		Win32Window.onFrame = onFrame;
 		Win32Window.onEvent = onEvent;
+		for (w in open.copy())
+			if (w.pending) {
+				w.pending = false;
+				var e = event;
+				e.kind = Resize;
+				e.window = w.owner;
+				e.x = w.surface.width;
+				e.y = w.surface.height;
+				dispatch(e);
+			}
 		while (User32.PeekMessageW(msg, Ptr.nil(), 0, 0, WM.PM_REMOVE) != 0) {
 			User32.TranslateMessage(msg);
 			User32.DispatchMessageW(msg);
 		}
 	}
+
+	// waits for a message in the thread's queue, or seconds
+	static function wait(seconds:Float)
+		User32.MsgWaitForMultipleObjects(0, Ptr.nil(), 0, Std.int(seconds * 1000), WM.QS_ALLINPUT);
+
+	static var highSurrogate = 0;
+
+	// the modifiers held (VK_SHIFT, VK_CONTROL, VK_MENU: Alt, VK_LWIN, VK_RWIN)
+	static function mods():Int
+		return (User32.GetKeyState(0x10) < 0 ? Mods.SHIFT : 0) | (User32.GetKeyState(0x11) < 0 ? Mods.CONTROL : 0) | (User32.GetKeyState(0x12) < 0 ? Mods.ALT : 0)
+			| (User32.GetKeyState(0x5B) < 0 || User32.GetKeyState(0x5C) < 0 ? Mods.META : 0);
 
 	@:hxmc.callback static function wndProc(hwnd:Ptr, message:Int, wParam:Int64, lParam:Int64):Int64 {
 		var w = find(hwnd);
@@ -124,19 +255,55 @@ class Win32Window {
 		e.kind = None;
 		e.window = w.owner;
 		switch message {
+			case WM.GETOBJECT if (getObject != null):
+				var r = getObject(hwnd, wParam, lParam);
+				var none:Int64 = 0;
+				if (r != none) return r;
+			case WM.GETMINMAXINFO if (w.minW > 0 || w.minH > 0):
+				// (MINMAXINFO's ptMinTrackSize, at 24: the outer size)
+				var o = w.outer(w.minW, w.minH), p:Ptr = Ptr.ofI64(lParam);
+				(p.add(24) : Ptr<Int32>).value = o.w;
+				(p.add(28) : Ptr<Int32>).value = o.h;
+				return 0;
+			case WM.SETCURSOR if (lParam.toInt() & 0xFFFF == WM.HTCLIENT && !w.cursor.isNull()):
+				User32.SetCursor(w.cursor);
+				return 1;
 			case WM.CLOSE:
 				e.kind = Close;
 				dispatch(e);
 				return 0;
+			case WM.PAINT:
+				// (DefWindowProc validates the window)
+				e.kind = Redraw;
 			case WM.SIZE:
+				// (no loop yet, a size set before App.run: told at its first poll)
 				if (w.measure()) {
-					e.kind = Resize;
-					e.x = w.surface.width;
-					e.y = w.surface.height;
+					if (onEvent == null) w.pending = true else {
+						e.kind = Resize;
+						e.x = w.surface.width;
+						e.y = w.surface.height;
+					}
 				}
 			case WM.KEYDOWN | WM.KEYUP | WM.SYSKEYDOWN | WM.SYSKEYUP:
 				e.kind = message == WM.KEYDOWN || message == WM.SYSKEYDOWN ? KeyDown : KeyUp;
 				e.key = keySym(wParam.toInt());
+				e.mods = mods();
+			case WM.CHAR:
+				// (UTF-16: a surrogate pair comes as two messages)
+				var c = wParam.toInt() & 0xFFFF;
+				if (c >= 0xD800 && c < 0xDC00) {
+					highSurrogate = c;
+					return 0;
+				}
+				if (c >= 0xDC00 && c < 0xE000 && highSurrogate != 0) c = 0x10000 + ((highSurrogate - 0xD800) << 10) + (c - 0xDC00);
+				highSurrogate = 0;
+				if (c >= 0x20 && c != 0x7F) {
+					e.kind = TextInput;
+					e.text = String.fromCharCode(c);
+					e.mods = mods();
+					dispatch(e);
+				}
+				return 0;
 			case WM.MOUSEMOVE | WM.LBUTTONDOWN | WM.LBUTTONUP | WM.RBUTTONDOWN | WM.RBUTTONUP | WM.MBUTTONDOWN | WM.MBUTTONUP:
 				e.kind = switch message {
 					case WM.MOUSEMOVE: MouseMove;
@@ -149,11 +316,13 @@ class Win32Window {
 					case WM.RBUTTONDOWN | WM.RBUTTONUP: 3;
 					case _: 0;
 				}
+				e.mods = mods();
 				// (signed 16-bit client coordinates)
 				e.x = lParam.toInt() << 16 >> 16;
 				e.y = lParam.toInt() >> 16;
 			case WM.MOUSEWHEEL | WM.MOUSEHWHEEL:
-				// (120 a notch; the position in screen coordinates)
+				// (WHEEL_DELTA, 120, a notch: 40 pixels, a precision touchpad's
+				// part of one in proportion; the position in screen coordinates)
 				var delta = wParam.toInt() >> 16;
 				if (delta != 0) {
 					Arena.scoped(a -> {
@@ -164,28 +333,15 @@ class Win32Window {
 						e.x = p.value.x;
 						e.y = p.value.y;
 					});
-					e.kind = Wheel;
-					e.dx = message == WM.MOUSEHWHEEL ? delta / 120 : 0;
-					e.dy = message == WM.MOUSEWHEEL ? delta / 120 : 0;
+					e.kind = Scroll;
+					e.mods = mods();
+					var px = delta / 120 * 40 * w.scale;
+					// (the vertical wheel up is positive, the horizontal one right)
+					e.deltaX = message == WM.MOUSEHWHEEL ? px : 0;
+					e.deltaY = message == WM.MOUSEWHEEL ? -px : 0;
 					dispatch(e);
 					return 0;
 				}
-			case WM.CHAR:
-				var c = wParam.toInt() & 0xFFFF;
-				if (c >= 0xD800 && c < 0xDC00) {
-					surrogate = c;
-					return 0;
-				}
-				if (c >= 0xDC00 && c < 0xE000) {
-					c = surrogate == 0 ? 0 : 0x10000 + ((surrogate - 0xD800) << 10) + (c - 0xDC00);
-					surrogate = 0;
-				}
-				if (c >= 0x20 && c != 0x7F) {
-					e.kind = Text;
-					e.char = c;
-					dispatch(e);
-				}
-				return 0;
 			case WM.DPICHANGED:
 				// (the new DPI, then the size Windows suggests for it: a Resize from WM_SIZE)
 				w.scale = (wParam.toInt() & 0xFFFF) / 96;
@@ -230,6 +386,13 @@ class Win32Window {
 			case 0x10: 0xFFE1; // Shift_L
 			case 0x11: 0xFFE3; // Control_L
 			case 0x12: 0xFFE9; // Alt_L
+			case 0x24: 0xFF50; // Home
+			case 0x23: 0xFF57; // End
+			case 0x21: 0xFF55; // Prior (Page Up)
+			case 0x22: 0xFF56; // Next (Page Down)
+			case 0x2D: 0xFF63; // Insert
+			case 0x5D: 0xFF67; // Menu (VK_APPS)
+			case v if (v >= 0x70 && v <= 0x7B): 0xFFBE + v - 0x70; // F1 to F12
 			case _: 0;
 		}
 	}

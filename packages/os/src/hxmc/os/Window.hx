@@ -14,7 +14,8 @@ import hxmc.unsafe.Mem;
 // (hxmc.os.x11.X11Window); Wayland comes in behind the same class.
 class Window {
 	public final surface:Surface;
-	public var title(default, null):String;
+	// its title bar's text (the browser: the page's title)
+	public var title(default, set):String;
 	public var closed(default, null) = false;
 
 	// the native window, the target's (Mem.os() is known when compiling: the
@@ -46,6 +47,60 @@ class Window {
 
 	function get_scale():Float
 		return Mem.os() == 1 ? (cast native : CocoaWindow).scale : Mem.os() == 2 ? (cast native : Win32Window).scale : Mem.os() == 3 ? (cast native : CanvasWindow).scale : 1;
+
+	// the pointer's shape over the window
+	public var cursor(default, set):Cursor = Default;
+
+	function set_cursor(c:Cursor):Cursor {
+		if (c == cursor || closed) return c;
+		cursor = c;
+		if (Mem.os() == 1) (cast native : CocoaWindow).setCursor(c) else if (Mem.os() == 2) (cast native : Win32Window).setCursor(c) else if (Mem.os() == 3)
+			(cast native : CanvasWindow).setCursor(c) else (cast native : X11Window).setCursor(c);
+		return c;
+	}
+
+	// where text is typed now (a text field's caret: x, y, width, height in
+	// pixels from the top left), until stopTextInput: an input method shows
+	// its composition and candidates there. In the browser keys then reach an
+	// input element of the page, on macOS through a text view (NSTextInputClient)
+	// at the caret: their compositions as TextEditing events; Windows places
+	// the IME's windows (imm32); X11's input method keeps its own place
+	public function startTextInput(x:Int, y:Int, width:Int, height:Int) {
+		if (closed) return;
+		if (Mem.os() == 3) (cast native : CanvasWindow).textInput(true, x, y, width, height) else if (Mem.os() == 2)
+			(cast native : Win32Window).textInputArea(x, y, width, height) else if (Mem.os() == 1) (cast native : CocoaWindow).textInput(true, x, y,
+				width, height);
+	}
+
+	public function stopTextInput() {
+		if (closed) return;
+		if (Mem.os() == 3) (cast native : CanvasWindow).textInput(false, 0, 0, 0, 0) else if (Mem.os() == 1)
+			(cast native : CocoaWindow).textInput(false, 0, 0, 0, 0);
+	}
+
+	function set_title(v:String):String {
+		if (v == title) return v;
+		title = v;
+		if (native == null || closed) return v;
+		if (Mem.os() == 1) (cast native : CocoaWindow).setTitle(v) else if (Mem.os() == 2) (cast native : Win32Window).setTitle(v) else if (Mem.os() == 3)
+			(cast native : CanvasWindow).setTitle(v) else (cast native : X11Window).setTitle(v);
+		return v;
+	}
+
+	// its content made width x height points (pixels on X11; the browser: the
+	// canvas's CSS size); a Resize event follows
+	public function resize(width:Int, height:Int) {
+		if (closed) return;
+		if (Mem.os() == 1) (cast native : CocoaWindow).resize(width, height) else if (Mem.os() == 2) (cast native : Win32Window).resize(width,
+			height) else if (Mem.os() == 3) (cast native : CanvasWindow).resize(width, height) else (cast native : X11Window).resize(width, height);
+	}
+
+	// the smallest content the user may resize it to, in points (the browser: the canvas's CSS minimum)
+	public function setMinSize(width:Int, height:Int) {
+		if (closed) return;
+		if (Mem.os() == 1) (cast native : CocoaWindow).setMinSize(width, height) else if (Mem.os() == 2) (cast native : Win32Window).setMinSize(width,
+			height) else if (Mem.os() == 3) (cast native : CanvasWindow).setMinSize(width, height) else (cast native : X11Window).setMinSize(width, height);
+	}
 
 	public function close() {
 		if (closed) return;

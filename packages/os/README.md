@@ -23,8 +23,9 @@ App.run(() -> {
 X11 on Linux (the glibc mode, `-D hxmc.libc=glibc`), Cocoa on macOS,
 Win32 on Windows, a canvas in the browser (wasm32-wasi: `App.run` returns
 and `requestAnimationFrame` runs the loop). `Event` is one object, refilled
-for each event: keys as X11 KeySyms, `Text` characters, the mouse in
-pixels from the top left, the wheel in notches, `Resize`, `ScaleChange`.
+for each event: keys as X11 KeySyms, `TextInput` characters (and an input
+method's `TextEditing`), the mouse in
+pixels from the top left, `Scroll` in pixels, `Resize`, `ScaleChange`.
 
 ## Audio
 

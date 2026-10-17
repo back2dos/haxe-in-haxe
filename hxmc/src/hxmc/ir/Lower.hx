@@ -924,6 +924,19 @@ class Lower {
 		return li;
 	}
 
+	// a closure of signature `to` calling a Dynamic value through the dynamic
+	// call (hx_dyn_call: the arguments boxed, the result converted)
+	var dynAdapters = new Map<String, LambdaInfo>();
+
+	public function dynAdapter(to:SigInfo):LambdaInfo {
+		var li = dynAdapters.get(to.key);
+		if (li != null) return li;
+		var inner = new Local(-1, "inner", TRef(RAny));
+		li = newLambda(to, [inner], fl -> fl.adaptDynamic(), "dynadapt__" + to.key, "_closures");
+		dynAdapters.set(to.key, li);
+		return li;
+	}
+
 	var staticVars = new Map<TClassField, Int>();
 
 	// a class static variable: a global, initialized by the static initializer

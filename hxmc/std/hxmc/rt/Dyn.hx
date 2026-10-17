@@ -288,6 +288,20 @@ class Dyn {
 		return k == TK_CLOSURE || k == TK_BOUND ? sup(t) : -1;
 	}
 
+	// c when it is a closure of the signature key (as rt_sig_keys has it), else
+	// null: a Dynamic converted to a function type keeps such a closure and
+	// wraps any other value in an adapter that calls it dynamically
+	// (FnLower.coerce)
+	@:hxmc.host("hx_clos_of_sig") static function closOfSig(c:Dynamic, key:String):Dynamic {
+		var s = closureSig(c);
+		if (s < 0) return null;
+		var k = Mem.getPtr(Mem.sym("rt_sig_keys"), 8 * s);
+		var n = key.length;
+		for (i in 0...n)
+			if (Mem.getU8At(k, 0, i) != StringTools.fastCodeAt(key, i)) return null;
+		return Mem.getU8At(k, 0, n) == 0 ? c : null;
+	}
+
 	// the argument count of signature s: the characters of its key before '_'
 	static function sigArgs(s:Int):Int {
 		var k = Mem.getPtr(Mem.sym("rt_sig_keys"), 8 * s);

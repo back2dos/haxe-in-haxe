@@ -97,7 +97,7 @@ class FnLower {
 			if (d != null && Ir.isRef(a.ty) && !strip(d).eexpr.match(TConst(TNull)))
 				out.push(SIf(EBin(RefEq, ELocal(a), ENull(a.ty)), block(() -> out.push(SSet(a, coerceRhs(rhs(d), tyOf(d), a.ty)))), []));
 			var x:Ex = ELocal(a);
-			if (Ir.repr(t) != Ir.repr(a.ty) || a.ty.match(TRef(RClos(_))) && t.match(TRef(RClos(_)))) {
+			if (Ir.repr(t) != Ir.repr(a.ty) || closureConversion(a.ty, t)) {
 				var lo = newLocal(v.vName, t);
 				out.push(SSet(lo, coerce(x, a.ty, t)));
 				x = ELocal(lo);
@@ -231,6 +231,25 @@ class FnLower {
 			var r = newLocal("r", from.ret);
 			out.push(SSet(r, call));
 			out.push(SReturn(coerce(ELocal(r), from.ret, fi.ret)));
+		}
+	}
+
+	// closure body calling a Dynamic value (its capture) with the arguments
+	// boxed (hx_dyn_call), its result converted to this signature's
+	public function adaptDynamic() {
+		boxed = new Map();
+		var inner = newLocal("inner", TRef(RAny));
+		out.push(SSet(inner, ECapture(lambda, 0, ELocal(fi.args[0]))));
+		var xs = [for (i in 1...fi.args.length) coerce(ELocal(fi.args[i]), fi.args[i].ty, TRef(RAny))];
+		var arr = temp(TRef(RArr(TRef(RAny))), ENewArr(TRef(RAny), xs));
+		var call = ECallHost(l.native("hx_dyn_call"), [ELocal(inner), arr], TRef(RAny));
+		if (fi.ret == TVoid) {
+			out.push(SExpr(call));
+			out.push(SReturn(null));
+		} else {
+			var r = newLocal("r", TRef(RAny));
+			out.push(SSet(r, call));
+			out.push(SReturn(coerce(ELocal(r), TRef(RAny), fi.ret)));
 		}
 	}
 
@@ -450,6 +469,18 @@ class FnLower {
 				var r = newLocal("adapted", to);
 				out.push(SIf(EBin(RefEq, ELocal(c), ENull(from)), [SSet(r, ENull(to))], [SSet(r, ENewClos(li, [ELocal(c)]))]));
 				return ELocal(r);
+			case [TRef(RAny), TRef(RClos(b))]:
+				// a Dynamic as a function: kept when it is a closure of this
+				// signature, else called through an adapter (its signature may
+				// differ: a () -> Bool's result is not boxed)
+				if (x.match(ENull(_))) return ENull(to);
+				var c = asLocal(x, from);
+				var r = newLocal("closure", to), same = newLocal("same", from);
+				out.push(SIf(EBin(RefEq, ELocal(c), ENull(from)), [SSet(r, ENull(to))], [
+					SSet(same, ECallHost(l.native("hx_clos_of_sig"), [ELocal(c), EStr(b.key)], TRef(RAny))),
+					SIf(EBin(RefEq, ELocal(same), ENull(from)), [SSet(r, ENewClos(l.dynAdapter(b), [ELocal(c)]))], [SSet(r, ECast(to, ELocal(same)))])
+				]));
+				return ELocal(r);
 			case _:
 		}
 		var fr = Ir.repr(from), tr = Ir.repr(to);
@@ -637,8 +668,13 @@ class FnLower {
 	}
 
 	// value of an SSet: calls stay at the top, converted afterwards if needed
+	// a conversion to a closure type that may need an adapter: from another
+	// closure type, or from Dynamic (coerce)
+	static function closureConversion(from:Ty, to:Ty):Bool
+		return to.match(TRef(RClos(_))) && (from.match(TRef(RClos(_))) || from.match(TRef(RAny)));
+
 	function coerceRhs(x:Ex, from:Ty, to:Ty):Ex {
-		if (Ir.repr(from) == Ir.repr(to) && !(from.match(TRef(RClos(_))) && to.match(TRef(RClos(_))))) return x;
+		if (Ir.repr(from) == Ir.repr(to) && !closureConversion(from, to)) return x;
 		if (isImpure(x)) x = temp(from, x);
 		return coerce(x, from, to);
 	}
@@ -983,9 +1019,16 @@ class FnLower {
 				var fields = [for (i in 0...fs.length) {name: fs[i].key.name, ty: l.boxed(tyOf(fs[i].expr))}];
 				var sh = l.getProgram().shape(fields);
 				var vals = [];
+				// (a shape is its fields' names and representations, its types
+				// those of the first object of that shape: a reference is stored
+				// as it is, a closure with its own signature, not converted to
+				// another object's (anonGet adapts it where it is read))
 				for (sf in sh.fields)
 					for (i in 0...fs.length)
-						if (fs[i].key.name == sf.name) vals.push(coerce(xs[i], tyOf(fs[i].expr), sf.ty));
+						if (fs[i].key.name == sf.name) {
+							var from = tyOf(fs[i].expr);
+							vals.push(Ir.isRef(from) && Ir.isRef(sf.ty) ? xs[i] : coerce(xs[i], from, sf.ty));
+						}
 				ENewAnon(sh, vals);
 			case TFunction(tf): closure(tf, e);
 			case TBlock(es):
@@ -1103,7 +1146,7 @@ class FnLower {
 			case FClosure(cl, cf):
 				if (cl == null) {
 					// a closure of a structural field: just the field's value
-					EAnonGet(cf.cfName, tyOf(e), value(obj), anonHint(obj.etype, cf.cfName, tyOf(e)));
+					anonGet(cf.cfName, obj, e);
 				} else if (cf.cfKind.match(Method(MethDynamic)) && isDynMethod(cl.cls, cf)) {
 					coerce(dynMethod(obj, cl.cls, cf, e), dynSlotTy(cl.cls, cf), tyOf(e));
 				} else methodClosure(obj, cl.cls, cf, e);
@@ -2126,9 +2169,18 @@ class FnLower {
 		return ELocal(s);
 	}
 
-	// a field of a structural type (or an interface's variable): a struct's box
+	// a field of a structural type (or an interface's variable): a struct's box.
+	// A closure is stored with the signature of the value put there, which
+	// the field's type at the read may not have (a (Int) -> X in an object
+	// passed where a type parameter makes it a (T) -> X, its argument boxed):
+	// it is read as Dynamic and kept when its signature is the one wanted,
+	// else wrapped in an adapter (coerce)
 	function anonGet(name:String, obj:TExpr, e:TExpr):Ex {
 		var t = l.boxed(tyOf(e));
+		if (t.match(TRef(RClos(_)))) {
+			var x = temp(TRef(RAny), EAnonGet(name, TRef(RAny), value(obj), anonHint(obj.etype, name, TRef(RAny))));
+			return coerce(x, TRef(RAny), tyOf(e));
+		}
 		var x = EAnonGet(name, t, value(obj), anonHint(obj.etype, name, t));
 		return t == tyOf(e) ? x : coerce(temp(t, x), t, tyOf(e));
 	}

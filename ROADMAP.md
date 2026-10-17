@@ -24,7 +24,7 @@ in [docs/plans/](docs/plans/README.md); what is built is in
 
 ## Now
 
-- The UI branch: `@hxmc/ui`, `@hxmc/text`, `@hxmc/esx`, signals (`hxmc.ui.reactive`), native controls ([graphics.md](docs/plans/graphics.md#ui))
+- `@hxmc/ui`, `@hxmc/text`, `@hxmc/esx`, signals (`hxmc.ui.reactive`), native controls: landed; follow-ups in [ui.md](docs/plans/ui.md)
 
 ## Next
 

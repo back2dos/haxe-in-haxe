@@ -18,13 +18,24 @@ import hxmc.unsafe.*;
 	static function TranslateMessage(msg:Ptr<MSG>):Int;
 	static function DispatchMessageW(msg:Ptr<MSG>):Int64;
 	static function PostMessageW(hwnd:Ptr, msg:Int, wParam:Int64, lParam:Int64):Int;
+	static function SendMessageW(hwnd:Ptr, msg:Int, wParam:Int64, lParam:Int64):Int64;
 	static function PostQuitMessage(code:Int):Void;
 	static function GetClientRect(hwnd:Ptr, r:Ptr<RECT>):Int;
 	static function AdjustWindowRectEx(r:Ptr<RECT>, style:Int, menu:Int, exStyle:Int):Int;
 	static function ScreenToClient(hwnd:Ptr, p:Ptr<POINT>):Int;
+	static function GetKeyState(key:Int):Int;
 	static function ClientToScreen(hwnd:Ptr, p:Ptr<POINT>):Int;
 	static function LoadCursorW(instance:Ptr, name:Ptr):Ptr;
+	static function SetCursor(cursor:Ptr):Ptr;
+	// the clipboard (CF_UNICODETEXT: 13)
+	static function OpenClipboard(hwnd:Ptr):Int;
+	static function CloseClipboard():Int;
+	static function EmptyClipboard():Int;
+	static function SetClipboardData(format:Int, data:Ptr):Ptr;
+	static function GetClipboardData(format:Int):Ptr;
+	static function MsgWaitForMultipleObjects(count:Int, handles:Ptr, waitAll:Int, ms:Int, wakeMask:Int):Int;
 	static function SetWindowTextW(hwnd:Ptr, text:Ptr):Int;
+	static function GetWindowTextW(hwnd:Ptr, text:Ptr, max:Int):Int;
 	static function SetWindowPos(hwnd:Ptr, after:Ptr, x:Int, y:Int, width:Int, height:Int, flags:Int):Int;
 	static function SetTimer(hwnd:Ptr, id:Int64, ms:Int, fn:Ptr):Int64;
 	static function KillTimer(hwnd:Ptr, id:Int64):Int;
@@ -37,9 +48,23 @@ import hxmc.unsafe.*;
 	static function PrintWindow(hwnd:Ptr, dc:Ptr, flags:Int):Int;
 }
 
+// the IME's windows: where they show (COMPOSITIONFORM, CANDIDATEFORM: raw Int32s)
+@:hxmc.c @:hxmc.lib("imm32") extern class Imm32 {
+	static function ImmGetContext(hwnd:Ptr):Ptr;
+	static function ImmReleaseContext(hwnd:Ptr, imc:Ptr):Int;
+	static function ImmSetCompositionWindow(imc:Ptr, form:Ptr<Int32>):Int;
+	static function ImmSetCandidateWindow(imc:Ptr, form:Ptr<Int32>):Int;
+}
+
 @:hxmc.c @:hxmc.fast @:hxmc.lib("kernel32") extern class Kernel32 {
 	static function GetModuleHandleW(name:Ptr):Ptr;
 	static function GetLastError():Int;
+	// movable global memory (the clipboard's)
+	static function GlobalAlloc(flags:Int, bytes:Int64):Ptr;
+	static function GlobalLock(mem:Ptr):Ptr;
+	static function GlobalUnlock(mem:Ptr):Int;
+	static function GlobalFree(mem:Ptr):Ptr;
+	static function GlobalSize(mem:Ptr):Int64;
 }
 
 // a window's pixels (GfxTest's capture)
@@ -58,6 +83,7 @@ class WM {
 	public static inline var DESTROY = 0x0002;
 	public static inline var SIZE = 0x0005;
 	public static inline var CLOSE = 0x0010;
+	public static inline var GETMINMAXINFO = 0x0024;
 	public static inline var KEYDOWN = 0x0100;
 	public static inline var KEYUP = 0x0101;
 	public static inline var CHAR = 0x0102;
@@ -87,6 +113,11 @@ class WM {
 	public static inline var SW_SHOW = 5;
 	public static inline var PM_REMOVE = 1;
 	public static inline var IDC_ARROW = 32512;
+	public static inline var SETCURSOR = 0x0020;
+	public static inline var GETOBJECT = 0x003D;
+	public static inline var PAINT = 0x000F;
+	public static inline var QS_ALLINPUT = 0x04FF;
+	public static inline var HTCLIENT = 1;
 	public static inline var PW_CLIENTONLY = 1;
 	public static inline var PW_RENDERFULLCONTENT = 2;
 	public static inline var SRCCOPY = 0x00CC0020;
@@ -143,4 +174,9 @@ class WM {
 	var biYPelsPerMeter:Int32;
 	var biClrUsed:UInt32;
 	var biClrImportant:UInt32;
+}
+
+// the registry (the system's appearance)
+@:hxmc.c @:hxmc.lib("advapi32") extern class Advapi32 {
+	static function RegGetValueW(key:Ptr, subKey:Ptr, value:Ptr, flags:Int, type:Ptr, data:Ptr, size:Ptr):Int;
 }

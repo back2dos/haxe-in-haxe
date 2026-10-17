@@ -7,8 +7,7 @@ layer and the shader macro) are built: their APIs are in
 [docs/testing.md](../testing.md), "Graphics". Back ends: GL/GLES 3 through
 EGL on Linux (the glibc mode), Metal on macOS arm64, D3D11 on Windows,
 WebGPU and WebGL2 in the browser; audio on ALSA, CoreAudio, WASAPI and
-WebAudio. The UI toolkit is on the UI branch (its design: `hxmc/UI.md`
-there); the web packages built on it are in [web.md](web.md).
+WebAudio. The UI toolkit is `@hxmc/ui` (its design: [ui.md](ui.md)); the web packages built on it are in [web.md](web.md).
 
 ## Principles
 
@@ -127,10 +126,18 @@ module).
 
 ## UI
 
-`@hxmc/ui` (started 2026-10-16, on the UI branch with `@hxmc/text` and
-`@hxmc/esx`): the core (tree, flexbox and grid layout, events, focus), a
-drawn backend on gfx, native controls (`hxmc.ui.native`), the platforms'
-accessibility. Its survey and design are in `hxmc/UI.md` on that branch.
+`@hxmc/ui` (with `@hxmc/text`, pure Haxe fonts and layout, and `@hxmc/esx`,
+markup with Solid-like signals): the core (tree, flexbox and grid layout,
+events, focus), a drawn backend on gfx, native controls
+(`hxmc.ui.native`), the platforms' accessibility, tested on Eval, natively
+and in Chromium. Its survey and design: [ui.md](ui.md). What the renderer
+needs from gfx is on main's API: `Device.writeTexture` of a region (a
+glyph atlas uploads the part that changed), `destroyBuffer` and
+`destroyTexture`; its atlas is RGBA8 (coverage in red, read at the nearest
+texel), its clips in the shader (no scissor), its colours premultiplied
+(`Blend.Premultiplied`). os's events were merged with ui's: characters are
+`TextInput` events (strings, an input method's commits), the wheel
+`Scroll` (pixels, as a browser's wheel event).
 What comes after it: [web.md](web.md) (`@hxmc/view`, `@hxmc/web`, the
 site) and Android's native controls ([targets.md](targets.md)).
 

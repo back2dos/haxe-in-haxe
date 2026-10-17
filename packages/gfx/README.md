@@ -19,7 +19,8 @@ var vb = device.createBuffer({size: bytes.length, usage: Vertex, data: bytes});
 var ib = device.createBuffer({size: indices.length, usage: Index, data: indices});
 device.writeBuffer(vb, 0, newBytes);                  // later updates
 var tex = device.createTexture({width: 64, height: 64, format: RGBA8, data: texels});
-device.writeTexture(tex, texels);
+device.writeTexture(tex, texels);                     // all of it, or a region: (tex, bytes, x, y, w, h)
+device.destroyTexture(tex);                           // (and destroyBuffer)
 var smp = device.createSampler({filter: Linear, wrap: Repeat});
 var pipeline = device.createPipeline(CubeShader.pipeline({
 	cull: Back, depthCompare: Less, depthWrite: true, blend: Opaque // or Alpha, Additive, Premultiplied

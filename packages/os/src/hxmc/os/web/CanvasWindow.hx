@@ -21,6 +21,9 @@ class CanvasWindow {
 	static var onFrame:Null<Void->Void>;
 	static var onEvent:Null<Event->Void>;
 
+	// Clipboard.read's callbacks, in order
+	static final clipboardReads:Array<Null<String>->Void> = [];
+
 	final owner:Window;
 	final canvas:Int;
 	final surface:Surface;
@@ -37,6 +40,29 @@ class CanvasWindow {
 
 	inline function get_scale():Float
 		return Dom.scale();
+
+	static function writeClipboard(text:String)
+		Arena.scoped(a -> Dom.clipboard_write(a.cstring(text)));
+
+	static function readClipboard(callback:Null<String>->Void) {
+		clipboardReads.push(callback);
+		Dom.clipboard_read();
+	}
+
+	function setCursor(c:Cursor)
+		Dom.set_cursor(canvas, c);
+
+	function setTitle(t:String)
+		Arena.scoped(a -> Dom.set_title(a.cstring(t)));
+
+	function resize(w:Int, h:Int)
+		Dom.set_size(canvas, w, h, 0);
+
+	function setMinSize(w:Int, h:Int)
+		Dom.set_size(canvas, w, h, 1);
+
+	function textInput(on:Bool, x:Int, y:Int, width:Int, height:Int)
+		Dom.text_input(canvas, on ? 1 : 0, x, y, width, height);
 
 	function destroy() {
 		open.remove(this);
@@ -59,23 +85,56 @@ class CanvasWindow {
 
 	// dispatches the pending events
 	static function poll(onEvent:Event->Void) {
-		if (ev.isNull()) ev = LibC.malloc(32);
+		if (ev.isNull()) ev = LibC.malloc(28);
 		while (Dom.next_event(ev) != 0) {
+			if (ev[1] == 100) {
+				var h = ev[2], text:Null<String> = h == 0 ? null : take(h);
+				var cb = clipboardReads.shift();
+				if (cb != null) cb(text);
+				continue;
+			}
 			var w = find(ev[0]);
 			if (w == null) continue;
 			var e = event;
 			e.window = w.owner;
 			e.kind = cast ev[1];
 			e.key = ev[2];
-			e.char = ev[2];
 			e.x = ev[3];
 			e.y = ev[4];
 			e.button = ev[5];
-			e.dx = ev[6] / 120;
-			e.dy = ev[7] / 120;
+			e.mods = ev[6];
+			// (TextInput: the code point in key)
+			if (e.kind == TextInput) {
+				e.text = String.fromCharCode(ev[2]);
+				e.key = 0;
+			}
+			// (Scroll: the deltas in 1/256 pixels, in key and button)
+			if (e.kind == Scroll) {
+				e.deltaX = ev[2] / 256;
+				e.deltaY = ev[5] / 256;
+				e.key = 0;
+				e.button = 0;
+			}
+			// (TextEditing: the composition's string handle in key)
+			if (e.kind == TextEditing) {
+				e.text = ev[2] == 0 ? "" : take(ev[2]);
+				e.key = 0;
+			}
 			if (e.kind == Resize) w.surface.resized(e.x, e.y);
 			onEvent(e);
 		}
+	}
+
+	// a string handle's text (the handle freed)
+	static function take(h:Int):String {
+		var n = Dom.text_length(h);
+		var b = haxe.io.Bytes.alloc(n);
+		Arena.scoped(a -> {
+			var p = a.alloc(n + 1, 1);
+			Dom.text_take(h, p);
+			LibC.memcpy(Mem.addr(b).add(8), p, (n : Int64));
+		});
+		return b.toString();
 	}
 
 	static function find(canvas:Int):Null<CanvasWindow> {

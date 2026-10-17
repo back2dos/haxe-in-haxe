@@ -163,22 +163,41 @@ class MetalBackend {
 		Runtime.objc_release(desc);
 		if (t.isNull()) throw "hxmc.gfx: cannot create a " + d.width + "x" + d.height + " texture";
 		textures.push(t);
-		if (d.data != null) writeTexture(textures.length, d.data);
+		if (d.data != null) writeTexture(textures.length, d.data, 0, 0, -1, -1, 0);
 		return textures.length;
 	}
 
-	public function writeTexture(id:Int, data:haxe.io.Bytes) {
+	public function writeTexture(id:Int, data:haxe.io.Bytes, x:Int, y:Int, w:Int, h:Int, dataOffset:Int) {
 		var t = textures[id - 1];
-		var w = Msg.i(t, S.width).toInt(), h = Msg.i(t, S.height).toInt();
-		if (data.length < w * h * 4) throw "hxmc.gfx: writeTexture: data has fewer than width * height * 4 bytes";
-		region.value.origin.x = 0;
-		region.value.origin.y = 0;
+		var tw = Msg.i(t, S.width).toInt(), th = Msg.i(t, S.height).toInt();
+		if (w < 0) {
+			w = tw;
+			h = th;
+		}
+		if (x + w > tw || y + h > th) throw "hxmc.gfx: writeTexture: outside the texture";
+		if (dataOffset + w * h * 4 > data.length) throw "hxmc.gfx: writeTexture: data has fewer than w * h * 4 bytes";
+		region.value.origin.x = x;
+		region.value.origin.y = y;
 		region.value.origin.z = 0;
 		region.value.size.width = w;
 		region.value.size.height = h;
 		region.value.size.depth = 1;
 		// (a copy first: the Bytes may move during a message)
-		Arena.scoped(a -> MtlMsg.vRegionIntPtrInt(t, ObjC.sel("replaceRegion:mipmapLevel:withBytes:bytesPerRow:"), region.value, 0, a.copyBytes(data, 0, w * h * 4), w * 4));
+		Arena.scoped(a -> MtlMsg.vRegionIntPtrInt(t, ObjC.sel("replaceRegion:mipmapLevel:withBytes:bytesPerRow:"), region.value, 0, a.copyBytes(data, dataOffset, w * h * 4), w * 4));
+	}
+
+	public function destroyBuffer(id:Int) {
+		var b = buffers[id - 1];
+		if (b.isNull()) return;
+		Runtime.objc_release(b);
+		buffers[id - 1] = Ptr.nil();
+	}
+
+	public function destroyTexture(id:Int) {
+		var t = textures[id - 1];
+		if (t.isNull()) return;
+		Runtime.objc_release(t);
+		textures[id - 1] = Ptr.nil();
 	}
 
 	public function createSampler(d:SamplerDesc):Int {

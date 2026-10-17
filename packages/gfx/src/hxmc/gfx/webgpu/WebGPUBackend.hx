@@ -63,9 +63,20 @@ class WebGPUBackend {
 		return t;
 	}
 
-	public function writeTexture(id:Int, data:haxe.io.Bytes) {
-		if (data.length < textureSizes.get(id) * 4) throw "hxmc.gfx: writeTexture: data has fewer than width * height * 4 bytes";
-		WebGPU.write_texture(id, Mem.addr(data).add(8));
+	public function writeTexture(id:Int, data:haxe.io.Bytes, x:Int, y:Int, w:Int, h:Int, dataOffset:Int) {
+		if (w < 0 && data.length < textureSizes.get(id) * 4) throw "hxmc.gfx: writeTexture: data has fewer than width * height * 4 bytes";
+		// (w < 0: all of it, the JavaScript side knows its size)
+		WebGPU.write_texture(id, x, y, w, h, Mem.addr(data).add(8 + dataOffset));
+	}
+
+	public function destroyBuffer(id:Int) {
+		if (!handles.remove(id)) return;
+		WebGPU.release(id);
+	}
+
+	public function destroyTexture(id:Int) {
+		textureSizes.remove(id);
+		destroyBuffer(id);
 	}
 
 	public function createSampler(d:SamplerDesc):Int {

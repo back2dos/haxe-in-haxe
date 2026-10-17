@@ -76,6 +76,7 @@ class GL {
 	static function glClear(mask:Int):Void;
 	static function glGenBuffers(n:Int, buffers:Ptr<Int32>):Void;
 	static function glDeleteBuffers(n:Int, buffers:Ptr<Int32>):Void;
+	static function glDeleteTextures(n:Int, textures:Ptr<Int32>):Void;
 	static function glBindBuffer(target:Int, buffer:Int):Void;
 	static function glBufferData(target:Int, size:Int64, data:Ptr, usage:Int):Void;
 	static function glBufferSubData(target:Int, offset:Int64, size:Int64, data:Ptr):Void;

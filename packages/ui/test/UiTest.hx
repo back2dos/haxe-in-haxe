@@ -1,0 +1,1343 @@
+import hxmc.ui.*;
+import hxmc.ui.DimValue;
+import hxmc.ui.widgets.TextField;
+import hxmc.ui.widgets.TextArea;
+import hxmc.ui.widgets.EditableText;
+
+// hxmc.ui's tests, on Eval (make ui-check):
+//
+//   <tool> -cp packages/ui/src -cp packages/ui/test --run UiTest
+//
+// - layout: layout-cases.json laid out by Layout against Chromium's
+//   flexbox (layout-expected.json, from layout-ref.mjs), every box exact
+// - text: TextNode measured and wrapped by MonoText
+// - events: hit testing, hover, press and click, bubbling, focus and Tab,
+//   the wheel scrolling an Overflow Scroll node, relayout after changes
+// - paint: what Ui draws on a Canvas, in order (shadows under backgrounds,
+//   rounded clips inside borders), and Shadow.parse
+// - fields: TextField's editing (words, undo and redo, double and triple
+//   clicks, Shift+click) and the clipboard (copy, cut, paste), an
+//   input method's composition (shown, then committed);
+//   TextArea's lines (wrapping, Enter, Up and Down, Home and End, scrolling)
+// - popups: placed by their anchors (flipped, kept in the window), drawn
+//   and hit over the tree, dismissed by outside presses and Escape, a
+//   modal one keeping the focus
+// - images: png/*.png decoded (every colour type and depth, tRNS, the
+//   filters, Adam7; png-cases.mjs writes them and the pixels expected);
+//   jpeg/*.jpg and gif/*.gif against Chromium's pixels (jpeg-cases.mjs,
+//   gif-cases.mjs)
+class UiTest {
+	static var checks = 0;
+	static var failed = 0;
+
+	static function main() {
+		var here = haxe.io.Path.directory(haxe.macro.Compiler.getDefine("UiTest") ?? Sys.programPath() ?? "packages/ui/test/UiTest.hx");
+		if (!sys.FileSystem.exists(here + "/layout-cases.json")) here = "packages/ui/test";
+		layouts(here);
+		texts();
+		events();
+		dirty();
+		paint();
+		images(here);
+		svgs(here);
+		svgApi();
+		css(here);
+		decorations();
+		transforms();
+		selection();
+		fields();
+		popups();
+		shortcuts();
+		Sys.println('UiTest: $checks checks' + (failed == 0 ? ", ok" : ', $failed FAILED'));
+		Sys.exit(failed == 0 ? 0 : 1);
+	}
+
+	static function check(what:String, ok:Bool, ?detail:String) {
+		checks++;
+		if (!ok) {
+			failed++;
+			Sys.println('UiTest: FAIL: $what' + (detail == null ? "" : ": " + detail));
+		}
+	}
+
+	// --- svg ---
+
+	// svg/*.svg drawn by Svg.render against Chromium's pixels (svg-cases.mjs):
+	// compared premultiplied. Edge pixels differ by their anti-aliasing
+	// (Skia's approximates; ours is the exact area, within a few levels of
+	// a 16x16 supersampling of the true curves, where Skia's strokes of
+	// quadratic curves are off by up to 80, its clips' edges by 25), so the
+	// shapes must agree: a small mean difference, few pixels far apart.
+	static function svgs(here:String) {
+		var dir = here + "/svg";
+		var cases:Array<{name:String, width:Int, height:Int}> = haxe.Json.parse(sys.io.File.getContent(dir + "/cases.json"));
+		check("svg: the cases", cases.length >= 20, '${cases.length}');
+		// (SVG_STATS=1: each case's differences; SVG_OUT=dir: our pixels into dir/<case>.rgba)
+		var stats = Sys.getEnv("SVG_STATS") != null, dump = Sys.getEnv("SVG_OUT");
+		for (c in cases) {
+			var img = Svg.parse(sys.io.File.getContent(dir + "/" + c.name + ".svg")).render(c.width, c.height);
+			if (dump != null) sys.io.File.saveBytes(dump + "/" + c.name + ".rgba", img.pixels);
+			var ref = PngDecoder.decode(sys.io.File.getBytes(dir + "/" + c.name + ".png"));
+			var total = 0.0, worst = 0, far = 0, a = img.pixels, b = ref.rgba;
+			for (i in 0...c.width * c.height) {
+				var o = i * 4, aa = a.get(o + 3), ba = b.get(o + 3), d = Std.int(Math.abs(aa - ba));
+				for (k in 0...3) {
+					var e = Std.int(Math.abs(a.get(o + k) * aa / 255 - b.get(o + k) * ba / 255));
+					if (e > d) d = e;
+				}
+				total += d;
+				if (d > worst) worst = d;
+				if (d > 64) far++;
+			}
+			var mean = total / (c.width * c.height);
+			if (stats) Sys.println('svg ${c.name}: mean ${Math.round(mean * 100) / 100} worst $worst far $far');
+			check("svg: " + c.name + " as Chromium draws it", mean < 5 && far <= c.width * c.height / 50, 'mean $mean, worst $worst, $far pixels off by more than 64');
+		}
+	}
+
+	// Svg's own behaviour, and an svg in an ImageNode
+	static function svgApi() {
+		var icon = Svg.parse('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><rect width="24" height="24" fill="currentColor"/></svg>');
+		check("svg: the viewBox's size by itself", icon.width == 24 && icon.height == 24);
+		var img = icon.render(4, 4, 0xFF2563EB);
+		check("svg: currentColor painted render's colour", img.pixels.get(0) == 0x25 && img.pixels.get(1) == 0x63 && img.pixels.get(2) == 0xEB && img.pixels.get(3) == 255);
+		var none = 0;
+		try Svg.parse("<html/>") catch (_:Dynamic) none++;
+		check("svg: no svg element throws", none == 1);
+		var nums = Svg.SvgParse.numbers("1,2 3-4.5.5e1 -.5");
+		check("svg: number lists as SVG splits them", nums.join(" ") == "1 2 3 -4.5 5 -0.5", nums.join(" "));
+		var p = Svg.SvgParse.pathData("M1 1 L2 2 X 3 3");
+		check("svg: path data up to an error", p.length == 6, '$p');
+		var ui = new Ui(new MonoText(), 200, 100);
+		ui.root.style.alignItems = Start;
+		ui.root.style.color = Color.rgb(0xFF0000);
+		var n = new ImageNode();
+		n.svg = icon;
+		ui.root.append(n);
+		ui.scale = 2;
+		ui.update();
+		var rec = new Recording();
+		ui.paint(rec);
+		var drawn = [for (c in rec.calls) if (StringTools.startsWith(c, "image")) c];
+		check("svg: an ImageNode its size, drawn at the window's pixels", n.width == 24 && n.height == 24 && drawn.length == 1 && StringTools.startsWith(drawn[0], "image 48x48 0 0 24 24")
+			&& n.image.pixels.get(0) == 255 && n.image.pixels.get(2) == 0, drawn.join("|"));
+		n.style.width = 40;
+		ui.root.style.color = Color.rgb(0x0000FF);
+		ui.update();
+		rec = new Recording();
+		ui.paint(rec);
+		drawn = [for (c in rec.calls) if (StringTools.startsWith(c, "image")) c];
+		check("svg: drawn again at a new size and colour", n.height == 40 && StringTools.startsWith(drawn[0], "image 80x80") && n.image.pixels.get(2) == 255, drawn.join("|"));
+	}
+
+	// --- css ---
+
+	// css/: colours against Chromium's computed ones (within 1 a channel),
+	// gradients against its backgrounds (within 2 levels)
+	static function css(here:String) {
+		var dir = here + "/css";
+		var colors:Array<{css:String, rgba:Array<Int>}> = haxe.Json.parse(sys.io.File.getContent(dir + "/colors.json"));
+		var bad = [];
+		for (c in colors) {
+			var v = Color.tryParse(c.css);
+			if (v == null || Math.abs(v.r - c.rgba[0]) > 1 || Math.abs(v.g - c.rgba[1]) > 1 || Math.abs(v.b - c.rgba[2]) > 1 || Math.abs(v.a - c.rgba[3]) > 1)
+				bad.push(c.css + " " + (v == null ? "null" : v.toHex()) + " vs " + c.rgba.join(","));
+		}
+		check("css: colours as Chromium computes them (" + colors.length + ")", bad.length == 0, bad.join("; "));
+		check("css: not a colour", Color.tryParse("bluish") == null && Color.tryParse("rgb(1, 2)") == null && Color.tryParse("#12345") == null);
+		var stats = Sys.getEnv("CSS_STATS") != null;
+		var cases:Array<{name:String, css:String, width:Int, height:Int}> = haxe.Json.parse(sys.io.File.getContent(dir + "/gradients.json"));
+		for (c in cases) {
+			var img = Gradient.parse(c.css).render(c.width, c.height);
+			var ref = PngDecoder.decode(sys.io.File.getBytes(dir + "/" + c.name + ".png"));
+			var total = 0.0, worst = 0, a = img.pixels, b = ref.rgba;
+			for (i in 0...c.width * c.height) {
+				var o = i * 4, aa = a.get(o + 3), ba = b.get(o + 3), d = Std.int(Math.abs(aa - ba));
+				for (k in 0...3) {
+					var e = Std.int(Math.abs(a.get(o + k) * aa / 255 - b.get(o + k) * ba / 255));
+					if (e > d) d = e;
+				}
+				total += d;
+				if (d > worst) worst = d;
+			}
+			var mean = total / (c.width * c.height);
+			if (stats) Sys.println('css ${c.name}: mean ${Math.round(mean * 100) / 100} worst $worst');
+			check("css: " + c.name + " as Chromium draws it", mean < 1 && worst <= 2, 'mean $mean, worst $worst');
+		}
+		// a node's gradient: over its colour, under its border, at the window's pixels
+		var ui = new Ui(new MonoText(), 200, 100);
+		ui.root.style.alignItems = Start;
+		var n = new Node("card");
+		n.style.set({width: 40, height: 20, radius: 4, background: Color.rgb(0xFFFFFF), borderWidth: 1, borderColor: Color.rgb(0x000000),
+			backgroundImage: Gradient.parse("linear-gradient(to right, red, blue)")});
+		ui.root.append(n);
+		ui.scale = 2;
+		ui.update();
+		var rec = new Recording();
+		ui.paint(rec);
+		var calls = [for (c in rec.calls) if (StringTools.startsWith(c, "rect") || StringTools.startsWith(c, "image")) c.split(" ").slice(0, 2).join(" ")];
+		check("css: a node's gradient between its colour and its border", calls.join(",") == "rect 0,image 80x40,rect 0", calls.join(","));
+		var img = n.backgroundImage(2);
+		check("css: kept while the node's size stays", n.backgroundImage(2) == img && img.pixels.get(0) > 200 && img.pixels.get((79) * 4 + 2) > 200);
+	}
+
+	// CSS transforms: parsed and composed as CSS composes them, about the
+	// origin; drawn by pushing the matrix around the subtree; hit and
+	// pointed at through the inverse
+	static function transforms() {
+		function near(a:Array<Float>, b:Array<Float>):Bool {
+			for (i in 0...6)
+				if (Math.abs(a[i] - b[i]) > 1e-9) return false;
+			return true;
+		}
+		var m = Transform.parse("translate(10px, 50%) rotate(90deg) scale(2)").toMatrix(100, 40);
+		check("transform: composed left to right", near(m, [0, 2, -2, 0, 10, 20]), "" + m);
+		var t2 = Transform.parse("skewX(45deg) matrix(1, 0, 0, 1, 5, 6) rotate(0.25turn)").toMatrix(10, 10);
+		check("transform: skew, matrix and turns", near(t2, [1, 1, -1, 0, 11, 6]), "" + t2);
+		check("transform: none", Transform.parse("none").isIdentity());
+		var bad = try {
+			Transform.parse("spin(3deg)");
+			false;
+		} catch (e:Dynamic) true;
+		check("transform: an unknown function is an error", bad);
+		var inv = Transform.invert(m);
+		check("transform: inverted", inv != null && near(Transform.multiply(m, inv), [1, 0, 0, 1, 0, 0]));
+		var o = Transform.origin("left top");
+		check("transform origin: keywords", o[0].resolve(80) == 0 && o[1].resolve(40) == 0);
+		var o2 = Transform.origin("bottom");
+		check("transform origin: one keyword, the other centred", o2[0].resolve(80) == 40 && o2[1].resolve(40) == 40);
+
+		var ui = new Ui(new MonoText(), 300, 300);
+		ui.root.style.alignItems = Start;
+		var box = new Node("box");
+		box.style.set({width: 100, height: 20, margin: 50, background: Color.rgb(0xFF0000)});
+		var inner = new Node("inner");
+		inner.style.set({width: 10, height: 10, background: Color.rgb(0x0000FF)});
+		box.append(inner);
+		ui.root.append(box);
+		ui.update();
+		// (rotated a quarter about its centre (100, 60): 100 wide becomes 100 high)
+		box.style.transform = Transform.rotate(90);
+		ui.update();
+		var rec = new Recording();
+		ui.paint(rec);
+		var calls = [for (c in rec.calls) if (!StringTools.startsWith(c, "text")) c];
+		var first = calls.length > 0 ? calls[0].split(" ") : [];
+		var drawn = first.length == 7 && first[0] == "transform" && Math.abs(Std.parseFloat(first[1])) < 1e-9 && Std.parseFloat(first[2]) == 1
+			&& Std.parseFloat(first[3]) == -1 && Math.abs(Std.parseFloat(first[5]) - 160) < 1e-9 && Math.abs(Std.parseFloat(first[6]) - (-40)) < 1e-9;
+		check("transform: pushed around the subtree", drawn && calls[calls.length - 1] == "popTransform", calls.join(" | "));
+		var hitTop = ui.root.hitTest(100, 15), hitOld = ui.root.hitTest(140, 60);
+		var wb = box.windowBounds();
+		check("transform: its bounds where it is drawn", Math.abs(wb.x - 90) < 1e-9 && Math.abs(wb.y - 10) < 1e-9 && Math.abs(wb.width - 20) < 1e-9
+			&& Math.abs(wb.height - 100) < 1e-9, wb.x + "," + wb.y + " " + wb.width + "x" + wb.height);
+		inner.focusable = true;
+		var at = ui.accessTree(), ids = [for (id in at.order) if (at.node(id) == inner) id], an = ids.length == 1 ? at.nodes.get(ids[0]) : null;
+		check("transform: the accessibility tree's box through it", an != null && Math.abs(an.x - 100) < 1e-9 && Math.abs(an.y - 10) < 1e-9,
+			an == null ? "none" : an.x + "," + an.y);
+		inner.focusable = false;
+		check("transform: hit through it", hitTop == box && hitOld == ui.root, hitTop + " " + hitOld);
+		// (the inner box's top left (50, 50) turns to (110, 10): its 10x10 at x 100...110)
+		var hitInner = ui.root.hitTest(105, 15);
+		check("transform: children hit through their ancestor's", hitInner == inner, "" + hitInner);
+		check("transform: local coordinates through it", Math.abs(box.localX(100, 15) - 5) < 1e-9 && Math.abs(box.localY(100, 15) - 10) < 1e-9,
+			box.localX(100, 15) + "," + box.localY(100, 15));
+		var at = [];
+		box.onPointerDown = e -> at.push(e.localX + "," + e.localY);
+		ui.pointerDown(102, 15, 1);
+		ui.pointerUp(102, 15, 1);
+		check("transform: events' local coordinates through it", at.length == 1 && at[0] == "5,8", at.join(" "));
+		box.style.transformOrigin = Transform.origin("left top");
+		box.style.transform = Transform.parse("scale(2)");
+		ui.update();
+		check("transform: about its origin", ui.root.hitTest(240, 85) == box && ui.root.hitTest(45, 55) == ui.root);
+		box.style.transform = Transform.parse("scale(0)");
+		ui.update();
+		check("transform: flattened, it hits nothing", ui.root.hitTest(50, 50) == ui.root && box.hitTest(50, 50) == null);
+		ui.root.remove(box);
+	}
+
+	// an ancestor's decorations over a text: the underline before it, the
+	// line-through after, both moved with its centred lines, in its colour
+	static function decorations() {
+		var ui = new Ui(new MonoText(), 200, 100);
+		ui.root.style.fontSize = 10;
+		var box = new Node("box");
+		box.style.set({textDecoration: (TextDecoration.Underline : Int) | (TextDecoration.LineThrough : Int), color: Color.rgb(0xAA0000), textAlign: Center, width: 100});
+		var t = new TextNode("abcd");
+		t.style.color = Color.rgb(0x0000AA);
+		box.append(t);
+		ui.root.append(box);
+		ui.update();
+		var rec = new Recording();
+		ui.paint(rec);
+		var calls = [for (c in rec.calls) if (StringTools.startsWith(c, "rect") || StringTools.startsWith(c, "text")) c.split(" ").slice(0, 6).join(" ")];
+		// (MonoText at 10: 5 a character, lines 12.5 high; "abcd" 20 wide, centred in 100 at 40)
+		var spaced = new TextNode("abcd");
+		spaced.style.letterSpacing = 1;
+		ui.root.append(spaced);
+		ui.update();
+		check("letter spacing: in the text's font", spaced.laidOut() != null && spaced.laidOut().width == 24 && spaced.font().letterSpacing == 1, spaced.laidOut() == null ? "none" : "" + spaced.laidOut().width);
+		ui.root.remove(spaced);
+		var just = new TextNode("one two three four five six");
+		just.style.set({width: 60, textAlign: Justify});
+		ui.root.append(just);
+		ui.update();
+		var jp:MonoText.MonoParagraph = cast just.laidOut();
+		var asked = jp != null && jp.justified;
+		just.style.textAlign = Left;
+		ui.update();
+		jp = cast just.laidOut();
+		check("justify: asked of the engine, laid out again when it changes", asked && jp != null && !jp.justified);
+		ui.root.remove(just);
+		ui.update();
+		check("decorations: an ancestor's, around the text, aligned, in its colour",
+			calls.join("|") == "rect 40 11.25 20 1 0|text 0 0 100|rect 40 6.25 20 1 0" && rec.calls.filter(c -> c.indexOf("ffaa0000") >= 0).length == 2, calls.join("|"));
+	}
+
+	// selectable text: a drag, a double click, a triple, copied, dropped
+	static function selection() {
+		var ui = new Ui(new MonoText(), 300, 100);
+		ui.root.style.fontSize = 10;
+		ui.root.style.alignItems = Start;
+		var t = new TextNode("hello world foo");
+		t.selectable = true;
+		ui.root.append(t);
+		var other = new Node("other");
+		other.style.set({width: 50, height: 20});
+		ui.root.append(other);
+		ui.update();
+		var time = 0.0;
+		Ui.now = () -> time;
+		// (MonoText at 10: 5 pixels a character, the line 12.5 high)
+		ui.pointerDown(t.absX + 1, t.absY + 5, 1);
+		ui.pointerMove(t.absX + 26, t.absY + 5);
+		ui.pointerUp(t.absX + 26, t.absY + 5, 1);
+		check("selection: a drag selects", ui.selectedText() == "hello" && t.style.cursor == Text, ui.selectedText());
+		var rec = new Recording();
+		ui.paint(rec);
+		var calls = [for (c in rec.calls) if (StringTools.startsWith(c, "rect") || StringTools.startsWith(c, "text")) c.split(" ").slice(0, 5).join(" ")];
+		check("selection: painted under the text", calls.join("|") == "rect 0 0 25 12.5|text 0 0 75", calls.join("|"));
+		ui.keyDown("c".code, Key.MOD_CONTROL);
+		var copied:Null<String> = null;
+		ui.clipboard.read(s -> copied = s);
+		check("selection: Control+C copies it", copied == "hello", copied);
+		time = 10;
+		ui.pointerDown(t.absX + 33, t.absY + 5, 1);
+		ui.pointerUp(t.absX + 33, t.absY + 5, 1);
+		time = 10.2;
+		ui.pointerDown(t.absX + 33, t.absY + 5, 1);
+		ui.pointerUp(t.absX + 33, t.absY + 5, 1);
+		check("selection: a double click, the word", ui.selectedText() == "world", ui.selectedText());
+		time = 10.4;
+		ui.pointerDown(t.absX + 33, t.absY + 5, 1);
+		ui.pointerUp(t.absX + 33, t.absY + 5, 1);
+		check("selection: a triple click, all of it", ui.selectedText() == "hello world foo", ui.selectedText());
+		time = 20;
+		ui.pointerDown(other.absX + 5, other.absY + 5, 1);
+		check("selection: a press elsewhere drops it", ui.textSelection == null);
+		// (centred in 300: the line of 75 starts at 112.5)
+		t.style.width = 300;
+		t.style.textAlign = Center;
+		ui.update();
+		time = 30;
+		ui.pointerDown(t.absX + 113, t.absY + 5, 1);
+		ui.pointerMove(t.absX + 113 + 25, t.absY + 5);
+		ui.pointerUp(t.absX + 113 + 25, t.absY + 5, 1);
+		check("selection: on a centred line", ui.selectedText() == "hello", ui.selectedText());
+		Ui.now = haxe.Timer.stamp;
+	}
+
+	// --- shortcuts ---
+
+	static function shortcuts() {
+		var s = Shortcut.parse("Mod+Shift+S");
+		check("shortcuts: Mod with Control or Command, Shift's capital", s.matches("s".code, Key.MOD_CONTROL | Key.MOD_SHIFT) && s.matches("S".code, Key.MOD_META | Key.MOD_SHIFT)
+			&& !s.matches("s".code, Key.MOD_CONTROL) && !s.matches("s".code, Key.MOD_CONTROL | Key.MOD_META | Key.MOD_SHIFT) && !s.matches("s".code, Key.MOD_SHIFT));
+		check("shortcuts: keys by name", Shortcut.parse("F5").matches(0xFFC2, 0) && Shortcut.parse("Ctrl+PageDown").matches(Key.PAGE_DOWN, Key.MOD_CONTROL)
+			&& Shortcut.parse("Mod++").matches("+".code, Key.MOD_CONTROL) && Shortcut.parse("alt+enter").matches(Key.ENTER, Key.MOD_ALT));
+		var labels = [s.label(), Shortcut.parse("Alt+F4").label(), Shortcut.parse("Escape").label()].join(" ");
+		Shortcut.mac = true;
+		var mac = [s.label(), Shortcut.parse("Ctrl+Alt+Delete").label(), Shortcut.parse("Mod+Enter").label()].join(" ");
+		Shortcut.mac = false;
+		check("shortcuts: labels", labels == "Ctrl+Shift+S Alt+F4 Esc" && mac == "⇧⌘S ⌃⌥⌦ ⌘↩", labels + " / " + mac);
+		var bad = 0;
+		for (t in ["Hyper+S", "Ctrl+", "Ctrl+Nope", "F99"])
+			try Shortcut.parse(t) catch (_:Dynamic) bad++;
+		check("shortcuts: what is not one throws", bad == 4, '$bad');
+		var ui = new Ui(new MonoText(), 300, 200);
+		var panel = new Node("panel"), button = new Node("button"), field = new TextField(""), other = new Node("other");
+		button.focusable = other.focusable = true;
+		panel.append(button);
+		panel.append(field);
+		ui.root.append(panel);
+		ui.root.append(other);
+		ui.update();
+		var log = [];
+		var removeSave = ui.shortcut("Mod+S", () -> log.push("save"));
+		ui.shortcut("Delete", () -> log.push("delete"), panel);
+		ui.shortcut("n", () -> log.push("n"));
+		ui.keyDown("s".code, Key.MOD_CONTROL);
+		ui.keyDown(Key.DELETE, 0);
+		check("shortcuts: a global one; a scoped one not with the focus outside", log.join(",") == "save", log.join(","));
+		ui.setFocus(button);
+		ui.keyDown(Key.DELETE, 0);
+		ui.keyDown("n".code, 0);
+		check("shortcuts: scoped, with the focus inside; a plain key", log.join(",") == "save,delete,n", log.join(","));
+		ui.setFocus(field);
+		ui.keyDown("n".code, 0);
+		ui.keyDown(Key.DELETE, 0);
+		ui.keyDown("s".code, Key.MOD_META);
+		check("shortcuts: not a typed key or one the field takes; Mod+S in a field", log.join(",") == "save,delete,n,save", log.join(","));
+		ui.shortcut("Mod+S", () -> log.push("later"));
+		ui.setFocus(other);
+		ui.keyDown("s".code, Key.MOD_CONTROL);
+		removeSave();
+		check("shortcuts: the latest added wins", log[log.length - 1] == "later");
+		var stopper = new Node("stopper");
+		stopper.focusable = true;
+		stopper.onKeyDown = e -> e.preventDefault();
+		ui.root.append(stopper);
+		ui.update();
+		ui.setFocus(stopper);
+		var n = log.length;
+		ui.keyDown("s".code, Key.MOD_CONTROL);
+		check("shortcuts: not a key the focused node took", log.length == n);
+		var d = new Popup("dialog");
+		d.modal = true;
+		var inside = new Node("inside");
+		inside.focusable = true;
+		d.append(inside);
+		ui.open(d);
+		ui.update();
+		ui.shortcut("Enter", () -> log.push("ok"), d);
+		ui.setFocus(inside);
+		ui.keyDown("s".code, Key.MOD_CONTROL);
+		ui.keyDown(Key.ENTER, 0);
+		check("shortcuts: under a modal popup, only its own", log.slice(n).join(",") == "ok", log.slice(n).join(","));
+	}
+
+	// --- popups ---
+
+	static function popups() {
+		var ui = new Ui(new MonoText(), 300, 200);
+		ui.root.style.alignItems = Start;
+		ui.root.style.padding = 10;
+		var clip = new Node("clip");
+		clip.style.set({width: 100, height: 30, overflow: Hidden});
+		var button = new Node("button");
+		button.style.set({width: 60, height: 20});
+		button.focusable = true;
+		clip.append(button);
+		ui.root.append(clip);
+		var p = new Popup("menu");
+		p.anchor = button;
+		p.style.set({width: 80, height: 50, background: Color.WHITE});
+		var item = new Node("item");
+		item.style.set({width: 80, height: 20});
+		item.focusable = true;
+		p.append(item);
+		var dismissed = 0;
+		p.onDismiss = () -> dismissed++;
+		ui.update();
+		ui.open(p);
+		ui.update();
+		check("popups: below the anchor, out of its clip", p.absX == 10 && p.absY == 34 && p.parent == ui.overlay, '${p.absX},${p.absY}');
+		check("popups: hit over the tree", @:privateAccess ui.hit(15, 40) == item && @:privateAccess ui.hit(15, 15) == button);
+		var rec = new Recording();
+		ui.paint(rec);
+		check("popups: drawn after the tree", rec.calls[rec.calls.length - 1].indexOf("80 50") >= 0, rec.calls.join("|"));
+		var at = ui.accessTree();
+		check("popups: in the accessibility tree", at.order.length > 0 && at.node(at.order[at.order.length - 1]) == item || [for (id in at.order) at.node(id)].contains(item));
+		// flipped above near the bottom, kept inside on the right
+		clip.style.set({margin: [150.0, 0, 0, 250]});
+		ui.update();
+		check("popups: flipped above, kept in the window", p.absY == 160 - 4 - 50 && p.absX == 300 - 80, '${p.absX},${p.absY}');
+		// at a point: there, flipped left and up where it does not fit
+		p.placement = Point;
+		p.atX = 20;
+		p.atY = 30;
+		ui.update();
+		var there = p.absX == 20 && p.absY == 30;
+		p.atX = 290;
+		p.atY = 190;
+		ui.update();
+		check("popups: at a point, flipped where it does not fit", there && p.absX == 290 - 80 && p.absY == 190 - 50, '${p.absX},${p.absY}');
+		p.placement = Below;
+		ui.update();
+		// dismissed by a press outside, not on the anchor or inside
+		ui.pointerDown(p.absX + 5, p.absY + 5, 1);
+		ui.pointerUp(p.absX + 5, p.absY + 5, 1);
+		ui.pointerDown(button.absX + 5, button.absY + 5, 1);
+		ui.pointerUp(button.absX + 5, button.absY + 5, 1);
+		check("popups: not dismissed inside or on the anchor", dismissed == 0, '$dismissed');
+		ui.pointerDown(5, 5, 1);
+		ui.pointerUp(5, 5, 1);
+		check("popups: dismissed by a press outside", dismissed == 1, '$dismissed');
+		ui.keyDown(Key.ESCAPE, 0);
+		check("popups: dismissed by Escape", dismissed == 2, '$dismissed');
+		ui.close(p);
+		ui.update();
+		check("popups: closed", p.parent == null && ui.overlay.children.length == 0);
+		// a modal dialog: the focus inside, Tab cycling in it, the tree covered
+		ui.setFocus(button);
+		var d = new Popup("dialog");
+		d.modal = true;
+		var box = new Node("box");
+		box.style.set({width: 120, height: 60});
+		var a = new Node("a"), b = new Node("b");
+		for (n in [a, b]) {
+			n.style.set({width: 40, height: 20});
+			n.focusable = true;
+			box.append(n);
+		}
+		d.append(box);
+		var closed = 0;
+		d.onDismiss = () -> closed++;
+		ui.open(d);
+		ui.update();
+		check("popups: a modal covers the window, its content centred", d.width == 300 && d.height == 200 && box.absX == 90 && box.absY == 70, '${d.width}x${d.height} ${box.absX},${box.absY}');
+		check("popups: a modal takes the focus", ui.focus == a);
+		ui.keyDown(Key.TAB, 0);
+		ui.keyDown(Key.TAB, 0);
+		check("popups: Tab cycles inside it", ui.focus == a, '${ui.focus}');
+		check("popups: the tree under it covered", @:privateAccess ui.hit(button.absX + 2, button.absY + 2) == d);
+		ui.pointerDown(box.absX + 2, box.absY + 2, 1);
+		ui.pointerUp(box.absX + 2, box.absY + 2, 1);
+		ui.pointerDown(2, 2, 1);
+		ui.pointerUp(2, 2, 1);
+		check("popups: its backdrop dismisses it, its content does not", closed == 1, '$closed');
+		ui.close(d);
+		check("popups: closing gives the focus back", ui.focus == button, '${ui.focus}');
+	}
+
+	// --- fields ---
+
+	static function fields() {
+		var ui = new Ui(new MonoText(), 300, 100);
+		var f = new TextField("");
+		var changes = 0;
+		f.onChange = _ -> changes++;
+		ui.root.append(f);
+		ui.update();
+		ui.setFocus(f);
+		function type(t:String)
+			for (c in new haxe.iterators.StringIteratorUnicode(t)) {
+				ui.keyDown(c, 0);
+				ui.textInput(String.fromCharCode(c));
+			}
+		function key(k:Int, mods = 0)
+			ui.keyDown(k, mods);
+		type("hello world");
+		check("fields: typing", f.text == "hello world" && f.caret == 11 && changes == 11, f.text);
+		key(Key.LEFT, Key.MOD_SHIFT);
+		key(Key.LEFT, Key.MOD_SHIFT);
+		key(Key.LEFT, Key.MOD_SHIFT);
+		key(Key.LEFT, Key.MOD_SHIFT);
+		key(Key.LEFT, Key.MOD_SHIFT);
+		key("c".code, Key.MOD_CONTROL);
+		var clip:ClipboardHost.MemoryClipboard = cast ui.clipboard;
+		check("fields: copy", clip.text == "world" && f.text == "hello world", clip.text);
+		key("x".code, Key.MOD_CONTROL);
+		check("fields: cut", clip.text == "world" && f.text == "hello " && f.caret == 6, f.text);
+		key(Key.HOME);
+		key("v".code, Key.MOD_META);
+		check("fields: paste (Command too)", f.text == "worldhello " && f.caret == 5, f.text);
+		clip.text = "two\nlines\r\nhere";
+		key("a".code, Key.MOD_CONTROL);
+		key("v".code, Key.MOD_CONTROL);
+		check("fields: a paste over the selection, on one line", f.text == "two lines here", f.text);
+		key(Key.BACKSPACE);
+		key(Key.BACKSPACE);
+		key(Key.BACKSPACE);
+		key(Key.BACKSPACE);
+		check("fields: Backspace", f.text == "two lines ", f.text);
+		key("c".code, Key.MOD_CONTROL);
+		check("fields: copy without a selection leaves the clipboard", clip.text == "two\nlines\r\nhere");
+		// a clipboard that answers later
+		var lc = new LaterClipboard();
+		var later = lc.waiting;
+		ui.clipboard = lc;
+		key("v".code, Key.MOD_CONTROL);
+		check("fields: a paste waits for the text", f.text == "two lines " && later.length == 1);
+		later[0]("later");
+		check("fields: then types it", f.text == "two lines later", f.text);
+		// words, undo and redo, clicks in a row
+		var ui = new Ui(new MonoText(), 300, 100);
+		ui.root.style.fontSize = 10;
+		ui.root.style.alignItems = Start;
+		var h = new TextField("");
+		h.style.width = 200;
+		ui.root.append(h);
+		ui.update();
+		ui.setFocus(h);
+		function typeH(t:String)
+			for (c in new haxe.iterators.StringIteratorUnicode(t))
+				ui.textInput(String.fromCharCode(c));
+		typeH("hello big world");
+		ui.keyDown(Key.LEFT, Key.MOD_CONTROL);
+		check("words: Control+Left to the word's start", h.caret == 10, '${h.caret}');
+		ui.keyDown(Key.LEFT, Key.MOD_ALT);
+		check("words: Alt+Left (Option) too", h.caret == 6, '${h.caret}');
+		ui.keyDown(Key.RIGHT, Key.MOD_CONTROL | Key.MOD_SHIFT);
+		check("words: Shift selects to the word's end", h.selectionStart == 6 && h.selectionEnd == 9, '${h.selectionStart}-${h.selectionEnd}');
+		ui.keyDown(Key.END, 0);
+		ui.keyDown(Key.BACKSPACE, Key.MOD_CONTROL);
+		check("words: Control+Backspace deletes a word", h.text == "hello big ", h.text);
+		ui.keyDown(Key.LEFT, Key.MOD_META);
+		check("words: Command+Left to the start", h.caret == 0);
+		check("undo: a word deleted, undone", { ui.keyDown("z".code, Key.MOD_CONTROL); h.text == "hello big world"; }, h.text);
+		ui.keyDown("z".code, Key.MOD_META);
+		check("undo: typing undone as runs (words apart)", h.text == "hello big ", h.text);
+		ui.keyDown("z".code, Key.MOD_CONTROL | Key.MOD_SHIFT);
+		check("redo: Control+Shift+Z", h.text == "hello big world", h.text);
+		ui.keyDown("y".code, Key.MOD_CONTROL);
+		check("redo: Control+Y", h.text == "hello big ", h.text);
+		for (_ in 0...10)
+			ui.keyDown("z".code, Key.MOD_CONTROL);
+		check("undo: back to empty", h.text == "", h.text);
+		ui.keyDown("y".code, Key.MOD_CONTROL);
+		typeH("x");
+		ui.keyDown("y".code, Key.MOD_CONTROL);
+		check("redo: an edit clears what was undone", StringTools.endsWith(h.text, "x"), h.text);
+		h.setText("one two three");
+		ui.update();
+		ui.paint(new Recording());
+		var t = 0.0;
+		EditableText.now = () -> t;
+		var cx = h.absX + h.style.borderWidth + h.style.padding.left + 5.5 * 5; // (within "two")
+		var cy = h.absY + h.height / 2;
+		function clickH(x:Float, at:Float, mods = 0) {
+			t = at;
+			if (mods != 0) ui.keyDown(Key.SHIFT, mods);
+			ui.pointerDown(x, cy, 1);
+			ui.pointerUp(x, cy, 1);
+			if (mods != 0) ui.keyUp(Key.SHIFT, 0);
+		}
+		clickH(cx, 10);
+		clickH(cx, 10.2);
+		check("clicks: a double click selects a word", h.selectionStart == 4 && h.selectionEnd == 7, '${h.selectionStart}-${h.selectionEnd}');
+		clickH(cx, 10.4);
+		check("clicks: a triple click the line", h.selectionStart == 0 && h.selectionEnd == 13, '${h.selectionStart}-${h.selectionEnd}');
+		clickH(cx, 20);
+		clickH(h.absX + h.style.borderWidth + h.style.padding.left + 1, 30, Key.MOD_SHIFT);
+		check("clicks: Shift+click extends the selection", h.selectionStart == 0 && h.selectionEnd == 6, '${h.selectionStart}-${h.selectionEnd}');
+		EditableText.now = haxe.Timer.stamp;
+		// the focus moved by Tab: its node scrolled into view; a press does not scroll
+		var sui = new Ui(new MonoText(), 200, 100);
+		var box = new Node("scroller");
+		box.style.overflow = Scroll;
+		box.style.height = 60;
+		box.style.padding = 5;
+		sui.root.append(box);
+		var rows = [for (i in 0...10) {
+			var r = new Node("row" + i);
+			r.style.height = 20;
+			r.focusable = true;
+			box.append(r);
+			r;
+		}];
+		sui.update();
+		sui.setFocus(rows[0]);
+		for (_ in 0...4)
+			sui.keyDown(Key.TAB, 0);
+		check("focus: Tab scrolls the focused row into view", sui.focus == rows[4] && box.scrollY == 4 * 20 + 20 - 50, '${box.scrollY}');
+		sui.keyDown(Key.TAB, Key.MOD_SHIFT);
+		sui.keyDown(Key.TAB, Key.MOD_SHIFT);
+		sui.keyDown(Key.TAB, Key.MOD_SHIFT);
+		check("focus: and back up", sui.focus == rows[1] && box.scrollY == 20, '${box.scrollY}');
+		// grapheme clusters: a letter and its marks, an emoji with its modifier, a flag move as one; Backspace takes a mark at a time
+		var q = "e\u0301\u{1F44D}\u{1F3FD}\u{1F1E7}\u{1F1EA}";
+		var units = "\u{1F600}".length;
+		h.setText(q);
+		h.select(0, 0);
+		var steps = [];
+		for (_ in 0...4) {
+			ui.keyDown(Key.RIGHT, 0);
+			steps.push(h.caret);
+		}
+		check("graphemes: Right steps over clusters", steps.join(",") == [2, 2 + 2 * units, 2 + 4 * units, 2 + 4 * units].join(","), steps.join(","));
+		ui.keyDown(Key.LEFT, 0);
+		check("graphemes: Left too", h.caret == 2 + 2 * units, '${h.caret}');
+		h.select(2, 2);
+		ui.keyDown(Key.BACKSPACE, 0);
+		check("graphemes: Backspace takes a mark", h.text == "e\u{1F44D}\u{1F3FD}\u{1F1E7}\u{1F1EA}" && h.caret == 1, h.text);
+		h.select(1 + 2 * units, 1 + 2 * units);
+		ui.keyDown(Key.BACKSPACE, 0);
+		check("graphemes: Backspace takes an emoji with its modifier", h.text == "e\u{1F1E7}\u{1F1EA}", h.text);
+		h.select(1, 1);
+		ui.keyDown(Key.DELETE, 0);
+		check("graphemes: Delete takes a flag", h.text == "e", h.text);
+		// Left and Right in right-to-left text move the caret as it looks (real fonts: DrawText, with DejaVu Sans)
+		var dejavu = hxmc.text.SystemFonts.get().match("DejaVu Sans");
+		if (dejavu != null && dejavu.family == "DejaVu Sans") {
+			var rui = new Ui(new hxmc.ui.draw.DrawText(), 300, 100);
+			rui.root.style.fontFamily = "DejaVu Sans";
+			rui.root.style.alignItems = Start;
+			var r = new TextField("ab \u05D0\u05D1\u05D2");
+			r.style.width = 200;
+			rui.root.append(r);
+			rui.update();
+			rui.setFocus(r);
+			r.select(2, 2);
+			var seq = [];
+			for (_ in 0...5) {
+				rui.keyDown(Key.RIGHT, 0);
+				seq.push(r.caret);
+			}
+			check("bidi: Right goes rightward through Hebrew, then stays", seq.join(",") == "6,5,4,3,3", seq.join(","));
+			r.setText("\u05D0\u05D1\u05D2");
+			r.select(0, 0);
+			var back = [];
+			for (_ in 0...4) {
+				rui.keyDown(Key.LEFT, 0);
+				back.push(r.caret);
+			}
+			rui.keyDown(Key.RIGHT, 0);
+			check("bidi: Left in Hebrew goes forward, Right back", back.join(",") == "1,2,3,3" && r.caret == 2, back.join(",") + " " + r.caret);
+		}
+		// an input method's composition: shown at the caret, underlined, typed when committed
+		var ui = new Ui(new MonoText(), 300, 100);
+		ui.root.style.fontSize = 10;
+		ui.root.style.alignItems = Start;
+		var g = new TextField("ab");
+		g.style.width = 100;
+		var gc = 0;
+		g.onChange = _ -> gc++;
+		ui.root.append(g);
+		ui.update();
+		ui.paint(new Recording());
+		check("composition: no text input without the focus", ui.textInputArea() == null);
+		ui.setFocus(g);
+		ui.update();
+		ui.paint(new Recording());
+		var at = ui.textInputArea();
+		check("composition: the caret's area", at != null && at.height == 12.5 && at.width == 1, '$at');
+		var x0 = at == null ? 0.0 : at.x;
+		g.select(1, 2);
+		ui.composition("にほん", 3);
+		check("composition: the selection goes, the text waits", g.text == "a" && g.composition == "にほん" && gc == 1, g.text + "|" + g.composition);
+		ui.update();
+		var rec = new Recording();
+		ui.paint(rec);
+		check("composition: drawn in the text", rec.calls.filter(s -> StringTools.startsWith(s, "text")).map(s -> s.split(" ")[3]).join(",") == "20", rec.calls.join("|"));
+		check("composition: underlined", rec.calls.filter(s -> StringTools.startsWith(s, "rect") && s.split(" ")[3] == "15" && s.split(" ")[4] == "1").length == 1, rec.calls.join("|"));
+		at = ui.textInputArea();
+		check("composition: the caret in it", at != null && at.x == x0 - 5 + 15, '$at $x0');
+		ui.composition("日本", 1);
+		ui.update();
+		ui.paint(new Recording());
+		at = ui.textInputArea();
+		check("composition: its caret moves", at != null && at.x == x0 - 5 + 5 && g.text == "a", '$at');
+		ui.composition("", 0);
+		ui.textInput("日本");
+		check("composition: committed", g.text == "a日本" && g.composition == "" && g.caret == 3 && gc == 2, g.text);
+		ui.composition("x", 1);
+		ui.setFocus(null);
+		check("composition: dropped on blur", g.composition == "" && g.text == "a日本" && ui.textInputArea() == null);
+		// a text area: 100 wide, 20 characters a line (MonoText at 10: 5 each, lines of 12.5)
+		var ui = new Ui(new MonoText(), 300, 200);
+		ui.root.style.fontSize = 10;
+		ui.root.style.alignItems = Start;
+		var a = new TextArea("");
+		a.style.width = 100;
+		a.rows = 2;
+		ui.root.append(a);
+		ui.update();
+		check("area: rows high", a.height == 25 && a.width == 100, '${a.width}x${a.height}');
+		ui.setFocus(a);
+		function typeIn(t:String)
+			for (c in new haxe.iterators.StringIteratorUnicode(t)) {
+				ui.keyDown(c, 0);
+				ui.textInput(String.fromCharCode(c));
+			}
+		typeIn("first line");
+		ui.keyDown(Key.ENTER, 0);
+		typeIn("second");
+		check("area: Enter types a line", a.text == "first line\nsecond" && a.caret == 17, a.text);
+		ui.keyDown(Key.UP, 0);
+		check("area: Up keeps the column", a.caret == 6, '${a.caret}');
+		ui.keyDown(Key.END, 0);
+		check("area: End of the line", a.caret == 10, '${a.caret}');
+		ui.keyDown(Key.DOWN, 0);
+		check("area: Down to a shorter line: its end", a.caret == 17, '${a.caret}');
+		ui.keyDown(Key.HOME, 0);
+		check("area: Home of the line", a.caret == 11, '${a.caret}');
+		ui.keyDown(Key.UP, Key.MOD_SHIFT);
+		check("area: Shift+Up selects", a.selectionStart == 0 && a.selectionEnd == 11, '${a.selectionStart}-${a.selectionEnd}');
+		ui.keyDown(Key.END, Key.MOD_CONTROL);
+		typeIn(" and a third line that wraps");
+		ui.update();
+		var c = new Recording();
+		ui.paint(c);
+		check("area: wrapped and scrolled to the caret (three lines in two)", c.calls.filter(s -> StringTools.startsWith(s, "text")).join("") == "text 0 -12.5 100", c.calls.join("|"));
+		var clip:ClipboardHost.MemoryClipboard = cast ui.clipboard;
+		clip.text = "x\ny";
+		ui.keyDown("v".code, Key.MOD_CONTROL);
+		check("area: a paste keeps its lines", StringTools.endsWith(a.text, "wrapsx\ny"), a.text);
+	}
+
+	// --- images ---
+
+	static function images(here:String) {
+		var dir = here + "/png";
+		var names = [for (f in sys.FileSystem.readDirectory(dir)) if (StringTools.endsWith(f, ".png")) f.substr(0, f.length - 4)];
+		names.sort(Reflect.compare);
+		check("images: the cases", names.length >= 20, '${names.length}');
+		for (n in names) {
+			var want = sys.io.File.getBytes(dir + "/" + n + ".rgba");
+			var img = try Image.decode(sys.io.File.getBytes(dir + "/" + n + ".png")) catch (e:Dynamic) {
+				check("images: " + n, false, Std.string(e));
+				continue;
+			}
+			var first = -1;
+			for (i in 0...want.length)
+				if (img.pixels.get(i) != want.get(i)) {
+					first = i;
+					break;
+				}
+			check("images: " + n, img.width == 13 && img.height == 11 && first < 0,
+				first < 0 ? '${img.width}x${img.height}' : 'pixel ${first >> 2} channel ${first & 3}: ${img.pixels.get(first)}, not ${want.get(first)}');
+		}
+		// JPEG and GIF: jpeg/*.jpg and gif/*.gif against the pixels Chromium
+		// decoded (jpeg-cases.mjs, gif-cases.mjs)
+		for (kind in [{dir: "jpeg", ext: ".jpg", least: 15}, {dir: "gif", ext: ".gif", least: 8}]) {
+		var jdir = here + "/" + kind.dir;
+		var cases:Array<{name:String, width:Int, height:Int, ?durations:Array<Float>, ?repetition:Int}> = haxe.Json.parse(sys.io.File.getContent(jdir + "/cases.json"));
+		check(kind.dir + ": the cases", cases.length >= kind.least, '${cases.length}');
+		for (c in cases) {
+			// (an animation: every frame as Chromium's ImageDecoder composes it, its duration, the repetitions)
+			if (c.durations != null) {
+				var want = sys.io.File.getBytes(jdir + "/" + c.name + ".frames.rgba");
+				var a = try GifDecoder.frames(sys.io.File.getBytes(jdir + "/" + c.name + kind.ext)) catch (e:Dynamic) {
+					check(kind.dir + ": " + c.name, false, Std.string(e));
+					continue;
+				}
+				var size = c.width * c.height * 4, bad = [];
+				for (k in 0...a.frames.length)
+					if (k * size + size > want.length || a.frames[k].rgba.compare(want.sub(k * size, size)) != 0) bad.push(k);
+				check(kind.dir + ": " + c.name + ", its frames", a.width == c.width && a.frames.length == c.durations.length && bad.length == 0
+					&& [for (f in a.frames) f.delay].join(",") == c.durations.join(",") && a.repetitions == c.repetition,
+					'${a.frames.length} frames, wrong: ${bad.join(",")}; ' + [for (f in a.frames) f.delay].join(",") + ' ${a.repetitions}');
+				continue;
+			}
+			var want = sys.io.File.getBytes(jdir + "/" + c.name + ".rgba");
+			var img = try Image.decode(sys.io.File.getBytes(jdir + "/" + c.name + kind.ext)) catch (e:Dynamic) {
+				check(kind.dir + ": " + c.name, false, Std.string(e));
+				continue;
+			}
+			var differ = 0, most = 0, first = -1;
+			if (img.pixels.length == want.length)
+				for (i in 0...want.length) {
+					var d = img.pixels.get(i) - want.get(i);
+					if (d != 0) {
+						if (first < 0) first = i;
+						differ++;
+						if (d < 0) d = -d;
+						if (d > most) most = d;
+					}
+				}
+			check(kind.dir + ": " + c.name, img.width == c.width && img.height == c.height && differ == 0,
+				'${img.width}x${img.height}' + (differ > 0 ? ': $differ values differ, by at most $most (first: pixel ${first >> 2} channel ${first & 3})' : ""));
+		}
+		}
+		// an animation played on the Clock: frames by their delays, three plays (two repetitions), then the last frame stays
+		var anim = AnimatedImage.decode(sys.io.File.getBytes(here + "/gif/anim-background.gif"));
+		var shown = [];
+		anim.play();
+		for (t in [10.0, 10.1, 10.2, 10.35, 10.5, 11.1, 11.4, 12.0]) {
+			Clock.tick(t);
+			shown.push(anim.frame);
+		}
+		check("animation: frames by their delays, played three times", shown.join(",") == "0,0,1,2,0,1,2,2" && !anim.playing && !Clock.active, shown.join(","));
+		check("animation: the image shows the frame", anim.image.pixels.compare(anim.frames[2].rgba) == 0 && anim.image.version > 0);
+		var zero = AnimatedImage.decode(sys.io.File.getBytes(here + "/gif/anim-transparent.gif"));
+		zero.play();
+		var z = [];
+		for (t in [20.0, 20.05, 20.15, 20.25]) {
+			Clock.tick(t);
+			z.push(zero.frame);
+		}
+		zero.stop();
+		check("animation: a delay of 0 shows for 100 ms, forever", z.join(",") == "0,0,1,0" && !zero.playing, z.join(","));
+		Clock.tick(21);
+		check("animation: stopped, nothing more animates", !Clock.active);
+		var threw = try {
+			Image.decode(haxe.io.Bytes.ofString("GIF89a"));
+			false;
+		} catch (e:Dynamic) true;
+		check("images: not a PNG file", threw);
+		// ImageNode: its size from the image's, its placement by fit
+		var ui = new Ui(new MonoText(), 300, 200);
+		ui.root.style.alignItems = Start;
+		var img = new Image(40, 20);
+		var natural = new ImageNode(img), wide = new ImageNode(img), box = new ImageNode(img);
+		wide.style.width = 100;
+		box.style.set({width: 100, height: 100, radius: 12});
+		for (n in [natural, wide, box])
+			ui.root.append(n);
+		ui.update();
+		check("images: the natural size", natural.width == 40 && natural.height == 20, '${natural.width}x${natural.height}');
+		check("images: the aspect ratio kept", wide.width == 100 && wide.height == 50, '${wide.width}x${wide.height}');
+		check("images: Fill", box.placement(0, 0, 100, 100).join(",") == "0,0,100,100,0,0,1,1");
+		box.fit = Contain;
+		check("images: Contain", box.placement(0, 0, 100, 100).join(",") == "0,25,100,50,0,0,1,1", box.placement(0, 0, 100, 100).join(","));
+		box.fit = Cover;
+		check("images: Cover", box.placement(0, 0, 100, 100).join(",") == "0,0,100,100,0.25,0,0.75,1", box.placement(0, 0, 100, 100).join(","));
+		box.fit = ImageFit.None;
+		check("images: None", box.placement(0, 0, 100, 100).join(",") == "30,40,40,20,0,0,1,1", box.placement(0, 0, 100, 100).join(","));
+		var c = new Recording();
+		ui.paint(c);
+		check("images: painted", c.calls.join("|") == "image 40x20 0 0 40 20 0 0 1 1 0|image 40x20 0 20 100 50 0 0 1 1 0|image 40x20 30 110 40 20 0 0 1 1 12", c.calls.join("|"));
+	}
+
+	// --- paint ---
+
+	static function paint() {
+		var ui = new Ui(new MonoText(), 200, 100);
+		var a = new Node();
+		a.style.set({width: 100, height: 50, radius: 8, borderWidth: 2, background: Color.WHITE, borderColor: Color.BLACK,
+			overflow: Hidden, shadow: Shadow.parse("1px 2px 6px 3 #00000080")});
+		a.style.margin = 10;
+		ui.root.append(a);
+		var b = new Node();
+		b.style.set({height: 10, background: Color.rgb(0xFF0000)});
+		a.append(b);
+		ui.update();
+		var c = new Recording();
+		ui.paint(c);
+		var want = [
+			"shadow 8 9 106 56 11 80000000 6",
+			"rect 10 10 100 50 8 ffffffff 2 ff000000",
+			"clip 12 12 96 46 6",
+			"rect 12 12 96 10 0 ffff0000 0 0",
+			"pop"
+		];
+		check("paint: calls", c.calls.join("|") == want.join("|"), c.calls.join("|"));
+		var sh = Shadow.parse("0 4");
+		check("paint: Shadow.parse defaults", sh.x == 0 && sh.y == 4 && sh.blur == 0 && sh.spread == 0 && sh.color == 0x40000000);
+		var threw = try {
+			Shadow.parse("4");
+			false;
+		} catch (e:Dynamic) true;
+		check("paint: Shadow.parse rejects one length", threw);
+		// the focus ring: shown when Tab moves the focus, hidden by a press
+		a.focusable = true;
+		ui.keyDown(Key.TAB, 0);
+		var c = new Recording();
+		ui.paint(c);
+		check("paint: the focus ring", ui.focus == a && c.calls[c.calls.length - 1] == "rect 6 6 108 58 12 0 2 ff3b82f6", c.calls[c.calls.length - 1]);
+		ui.pointerDown(50, 30, 1);
+		ui.pointerUp(50, 30, 1);
+		var c = new Recording();
+		ui.paint(c);
+		check("paint: no ring after a press", ui.focus == a && !ui.focusVisible && c.calls.length == want.length);
+		// the cursor: the hovered node's, Auto taking the parent's
+		check("cursor: Default by default", ui.cursor() == Default);
+		a.style.cursor = Pointer;
+		ui.pointerMove(50, 15);
+		check("cursor: inherited from the parent", ui.hover == b && ui.cursor() == Pointer);
+		b.style.cursor = Text;
+		check("cursor: the node's own", ui.cursor() == Text);
+		ui.pointerMove(190, 90);
+		check("cursor: outside", ui.cursor() == Default);
+	}
+
+	// --- layout against Chromium ---
+
+	static function layouts(here:String) {
+		var cases:Array<Dynamic> = haxe.Json.parse(sys.io.File.getContent(here + "/layout-cases.json"));
+		var expected:Dynamic = haxe.Json.parse(sys.io.File.getContent(here + "/layout-expected.json"));
+		for (c in cases) {
+			var ui = new Ui(new MonoText(), c.width, c.height);
+			build(ui.root, c.tree);
+			ui.update();
+			var want:Array<Array<Int>> = Reflect.field(expected, c.name);
+			var got = [];
+			function walk(n:Node) {
+				got.push([Std.int(n.absX), Std.int(n.absY), Std.int(n.width), Std.int(n.height)]);
+				for (ch in n.children)
+					walk(ch);
+			}
+			walk(ui.root);
+			var same = want.length == got.length;
+			var detail = [];
+			for (i in 0...Std.int(Math.min(want.length, got.length)))
+				if (want[i].join(",") != got[i].join(",")) {
+					same = false;
+					detail.push('box $i: [${got[i].join(", ")}], Chromium [${want[i].join(", ")}]');
+				}
+			check('layout: ${c.name}', same, detail.join("; "));
+		}
+	}
+
+	static function build(n:Node, d:Dynamic) {
+		var style:Dynamic = d.style;
+		if (style != null)
+			for (k in Reflect.fields(style))
+				setStyle(n.style, k, Reflect.field(style, k));
+		var children:Array<Dynamic> = d.children;
+		if (children != null)
+			for (c in children) {
+				var ch = new Node();
+				n.append(ch);
+				build(ch, c);
+			}
+	}
+
+	static function dim(v:Dynamic):Dim {
+		if (Std.isOfType(v, String)) {
+			var s:String = v;
+			return s == "auto" ? Auto : Percent(Std.parseFloat(s.substr(0, s.length - 1)));
+		}
+		return Px(v);
+	}
+
+	static function setStyle(s:Style, k:String, v:Dynamic) {
+		switch k {
+			case "width": s.width = dim(v);
+			case "height": s.height = dim(v);
+			case "minWidth": s.minWidth = dim(v);
+			case "minHeight": s.minHeight = dim(v);
+			case "maxWidth": s.maxWidth = dim(v);
+			case "maxHeight": s.maxHeight = dim(v);
+			case "basis": s.basis = dim(v);
+			case "left": s.left = dim(v);
+			case "top": s.top = dim(v);
+			case "right": s.right = dim(v);
+			case "bottom": s.bottom = dim(v);
+			case "grow": s.grow = v;
+			case "shrink": s.shrink = v;
+			case "aspectRatio": s.aspectRatio = v;
+			case "wrap": s.wrap = v;
+			case "rowGap": s.rowGap = v;
+			case "columnGap": s.columnGap = v;
+			case "borderWidth": s.borderWidth = v;
+			case "padding": s.padding = Std.isOfType(v, Array) ? (v : Array<Float>) : (v : Float);
+			case "margin": s.margin = Std.isOfType(v, Array) ? (v : Array<Float>) : (v : Float);
+			case "direction": s.direction = switch (v : String) {
+					case "Row": Row;
+					case "RowReverse": RowReverse;
+					case "ColumnReverse": ColumnReverse;
+					case _: Column;
+				}
+			case "justify": s.justify = switch (v : String) {
+					case "End": End;
+					case "Center": Center;
+					case "SpaceBetween": SpaceBetween;
+					case "SpaceAround": SpaceAround;
+					case "SpaceEvenly": SpaceEvenly;
+					case _: Start;
+				}
+			case "alignItems" | "alignSelf" | "justifyItems" | "justifySelf":
+				var a:Align = switch (v : String) {
+					case "Start": Start;
+					case "End": End;
+					case "Center": Center;
+					case "Stretch": Stretch;
+					case _: Auto;
+				}
+				switch k {
+					case "alignItems": s.alignItems = a;
+					case "alignSelf": s.alignSelf = a;
+					case "justifyItems": s.justifyItems = a;
+					case _: s.justifySelf = a;
+				}
+			case "gridTemplateColumns": s.gridTemplateColumns = Grid.tracks(v);
+			case "gridTemplateRows": s.gridTemplateRows = Grid.tracks(v);
+			case "gridAutoColumns": s.gridAutoColumns = Grid.tracks(v)[0];
+			case "gridAutoRows": s.gridAutoRows = Grid.tracks(v)[0];
+			case "gridAutoFlow": s.gridAutoFlow = v == "Column" ? Grid.GridFlow.Column : Grid.GridFlow.Row;
+			case "gridColumn": s.gridColumn = Grid.GridPlacement.parse(Std.string(v));
+			case "gridRow": s.gridRow = Grid.GridPlacement.parse(Std.string(v));
+			case "gridArea": s.gridArea = Std.string(v);
+			case "gridTemplateAreas": s.gridTemplateAreas = Grid.GridAreas.parse(v);
+			case "alignContent": s.alignContent = switch (v : String) {
+					case "End": End;
+					case "Center": Center;
+					case "Stretch": Stretch;
+					case "SpaceBetween": SpaceBetween;
+					case "SpaceAround": SpaceAround;
+					case "SpaceEvenly": SpaceEvenly;
+					case _: Start;
+				}
+			case "position": s.position = v == "Absolute" ? Absolute : Relative;
+			case "display": s.display = v == "None" ? None : v == "Grid" ? Grid : Flex;
+			case "overflow": s.overflow = v == "Hidden" ? Hidden : v == "Scroll" ? Scroll : Visible;
+			case _: throw "UiTest: no style " + k;
+		}
+	}
+
+	// --- text ---
+
+	static function texts() {
+		var ui = new Ui(new MonoText(), 200, 200);
+		ui.root.style.fontSize = 16;
+		ui.root.style.lineHeight = 1.5;
+		ui.root.style.alignItems = Start;
+		var t = new TextNode("hello world");
+		ui.root.append(t);
+		ui.update();
+		check("text: one line", t.width == 88 && t.height == 24, '$t');
+		t.text = "the quick brown fox jumps over the lazy dog";
+		ui.update();
+		// (25 characters a line at 8 pixels: three lines)
+		check("text: wrapped to the parent", t.width == 200 && t.height == 48, '$t');
+		var row = new Node();
+		row.style.direction = Row;
+		row.style.width = 100;
+		row.style.alignItems = Start;
+		var a = new TextNode("aaa bbb");
+		var b = new TextNode("cc");
+		a.style.fontSize = 8;
+		row.append(a);
+		row.append(b);
+		ui.root.append(row);
+		ui.update();
+		check("text: inherited and own font sizes", a.width == 28 && a.height == 12 && b.x == 28 && b.width == 16 && b.height == 24, '$a $b');
+		var p = a.laidOut();
+		check("text: paragraph", p != null && p.lineCount == 1 && p.caret(3).x == 12);
+		check("text: font resolves", b.font().size == 16 && b.font().lineHeight == 1.5 && a.font().size == 8);
+		// a long word in a narrow column: cut
+		var narrow = new TextNode("abcdefghij");
+		narrow.style.width = 40;
+		ui.root.append(narrow);
+		ui.update();
+		check("text: a word cut to the width", narrow.height == 48, '$narrow');
+	}
+
+	// --- events ---
+
+	static function events() {
+		var ui = new Ui(new MonoText(), 300, 200);
+		var log = [];
+		var panel = new Node("panel");
+		panel.style.direction = Row;
+		panel.style.padding = 10;
+		panel.style.columnGap = 10;
+		var a = new Node("a"), b = new Node("b"), inner = new Node("inner");
+		for (n in [a, b]) {
+			n.style.width = 100;
+			n.style.height = 50;
+			n.focusable = true;
+			panel.append(n);
+		}
+		inner.style.width = 20;
+		inner.style.height = 20;
+		b.append(inner);
+		ui.root.append(panel);
+		for (n in [ui.root, panel, a, b, inner]) {
+			var name = n.tag;
+			n.onPointerDown = e -> log.push('down $name<-${e.target.tag}');
+			n.onClick = e -> log.push('click $name');
+			n.onPointerEnter = e -> log.push('enter $name');
+			n.onPointerLeave = e -> log.push('leave $name');
+			n.onFocus = e -> log.push('focus $name');
+			n.onBlur = e -> log.push('blur $name');
+			n.onKeyDown = e -> log.push('key $name ${e.key}');
+		}
+		ui.update();
+		check("events: hit test", ui.root.hitTest(15, 15) == a && ui.root.hitTest(125, 15) == inner && ui.root.hitTest(150, 40) == b
+			&& ui.root.hitTest(5, 5) == panel && ui.root.hitTest(250, 150) == ui.root);
+		ui.pointerMove(130, 15);
+		check("events: enter, outermost first", log.join("|") == "enter root|enter panel|enter b|enter inner", log.join("|"));
+		log.resize(0);
+		ui.pointerMove(150, 40);
+		check("events: leave the child only", log.join("|") == "leave inner" && b.hovered && !inner.hovered, log.join("|"));
+		log.resize(0);
+		inner.onClick = e -> {
+			log.push("click inner (stopped)");
+			e.stop();
+		};
+		ui.pointerDown(125, 15, 1);
+		// (inner is entered again: the pointer moved onto it)
+		check("events: down bubbles, then focus", log.join("|") == "enter inner|down inner<-inner|down b<-inner|down panel<-inner|down root<-inner|focus b"
+			&& ui.focus == b && b.focused && inner.pressed && b.pressed, log.join("|"));
+		log.resize(0);
+		ui.pointerUp(126, 16, 1);
+		check("events: click stopped at the target", log.join("|") == "click inner (stopped)" && !inner.pressed, log.join("|"));
+		log.resize(0);
+		// released elsewhere: no click
+		ui.pointerDown(20, 20, 1);
+		ui.pointerUp(250, 150, 1);
+		check("events: no click when released outside", log.indexOf("click a") < 0 && ui.focus == a, log.join("|"));
+		log.resize(0);
+		ui.keyDown(Key.TAB, 0);
+		check("events: Tab moves the focus", log.join("|") == "key a 65289|key panel 65289|key root 65289|blur a|focus b" && ui.focus == b, log.join("|"));
+		ui.keyDown(Key.TAB, 0);
+		check("events: Tab wraps", ui.focus == a);
+		ui.keyDown(Key.TAB, Key.MOD_SHIFT);
+		check("events: Shift+Tab goes back", ui.focus == b);
+		log.resize(0);
+		ui.pointerDown(250, 150, 1);
+		check("events: a click outside focusables blurs", ui.focus == null && log.indexOf("blur b") >= 0, log.join("|"));
+		ui.pointerUp(250, 150, 1);
+		// removing the hovered node
+		ui.pointerMove(125, 15);
+		b.remove(inner);
+		check("events: a removed node is no longer hovered", ui.hover == null || ui.hover != inner);
+
+		// scrolling
+		var ui = new Ui(new MonoText(), 100, 100);
+		var list = new Node("list");
+		list.style.height = 100;
+		list.style.overflow = Scroll;
+		for (i in 0...10) {
+			var item = new Node("item" + i);
+			item.style.height = 30;
+			item.style.shrink = 0;
+			list.append(item);
+		}
+		ui.root.append(list);
+		ui.update();
+		check("scroll: content height", list.contentHeight == 300, '${list.contentHeight}');
+		ui.wheel(50, 50, 0, 50);
+		check("scroll: by the wheel", list.scrollY == 50);
+		check("scroll: hit test follows", ui.root.hitTest(50, 15).tag == "item2", ui.root.hitTest(50, 15).tag);
+		ui.wheel(50, 50, 0, 1000);
+		check("scroll: clamped", list.scrollY == 200);
+		ui.wheel(50, 50, 0, -5000);
+		check("scroll: back to the top", list.scrollY == 0);
+		// the keys, when the focus takes none of them: arrows by 40, pages by seven eighths, the ends; eased on the clock
+		var item1 = list.children[1];
+		item1.focusable = true;
+		ui.setFocus(item1, false);
+		ui.keyDown(Key.DOWN, 0);
+		var mid = -1.0;
+		Clock.tick(Clock.now + ui.scrollDuration / 2);
+		mid = list.scrollY;
+		Clock.finish();
+		check("scroll keys: an arrow, eased", list.scrollY == 40 && mid > 0 && mid < 40, mid + " " + list.scrollY);
+		ui.keyDown(Key.DOWN, 0);
+		ui.keyDown(Key.DOWN, 0);
+		Clock.finish();
+		check("scroll keys: twice before it ends, twice as far", list.scrollY == 120, "" + list.scrollY);
+		ui.keyDown(Key.PAGE_UP, 0);
+		Clock.finish();
+		check("scroll keys: a page up", list.scrollY == 120 - 87.5, "" + list.scrollY);
+		ui.keyDown(Key.END, 0);
+		Clock.finish();
+		var end = list.scrollY;
+		ui.keyDown(Key.SPACE, Key.MOD_SHIFT);
+		Clock.finish();
+		var shiftSpace = list.scrollY;
+		ui.keyDown(Key.HOME, 0);
+		Clock.finish();
+		check("scroll keys: the end, Shift+Space up a page, home", end == 200 && shiftSpace == 112.5 && list.scrollY == 0, end + " " + shiftSpace + " " + list.scrollY);
+		item1.onKeyDown = e -> if (e.key == Key.DOWN) e.preventDefault();
+		ui.keyDown(Key.DOWN, 0);
+		ui.keyDown(Key.DOWN, Key.MOD_CONTROL);
+		Clock.finish();
+		check("scroll keys: not a key the focus took, nor with Control", list.scrollY == 0, "" + list.scrollY);
+		item1.onKeyDown = null;
+		ui.scrollDuration = 0;
+		ui.keyDown(Key.PAGE_DOWN, 0);
+		check("scroll keys: at once without easing", list.scrollY == 87.5 && !Clock.active, "" + list.scrollY);
+		ui.scrollDuration = 0.15;
+		ui.scrollTo(list, 0, 0);
+		ui.setFocus(null, false);
+		// the scrollbar: a track from y 2 of 96 px at x 92, its thumb 96 * 100 / 300 = 32 px
+		var clicks = 0;
+		for (c in list.children)
+			c.onClick = e -> clicks++;
+		ui.pointerDown(95, 10, 1);
+		ui.pointerMove(95, 42);
+		check("scroll: dragging the thumb", list.scrollY == 100, '${list.scrollY}');
+		ui.pointerMove(95, 500);
+		check("scroll: the drag clamped", list.scrollY == 200, '${list.scrollY}');
+		ui.pointerMove(95, 42);
+		ui.pointerUp(95, 42, 1);
+		ui.pointerDown(95, 90, 1);
+		ui.pointerUp(95, 90, 1);
+		check("scroll: a press on the track pages", list.scrollY == 200, '${list.scrollY}');
+		ui.pointerDown(95, 5, 1);
+		ui.pointerUp(95, 5, 1);
+		check("scroll: and back", list.scrollY == 100, '${list.scrollY}');
+		check("scroll: the scrollbar takes the presses", clicks == 0 && ui.capture == null);
+		var c = new Recording();
+		ui.paint(c);
+		check("scroll: the thumb painted", c.calls[c.calls.length - 1] == "rect 92 34 6 32 3 59000000 0 0", c.calls[c.calls.length - 1]);
+	}
+
+	// --- relayout ---
+
+	static function dirty() {
+		var ui = new Ui(new MonoText(), 200, 200);
+		var a = new Node(), b = new Node();
+		a.style.height = 50;
+		b.style.height = 50;
+		ui.root.append(a);
+		ui.root.append(b);
+		ui.update();
+		check("dirty: first layout", b.y == 50);
+		a.style.height = 80;
+		check("dirty: marked", @:privateAccess ui.root.dirty);
+		ui.update();
+		check("dirty: relaid", b.y == 80 && !@:privateAccess ui.root.dirty);
+		ui.resize(100, 300);
+		ui.update();
+		check("dirty: resized", a.width == 100);
+		var c = new Node();
+		c.style.height = 10;
+		ui.root.insert(c, 0);
+		ui.update();
+		check("dirty: insert", a.y == 10 && b.y == 90);
+		ui.root.insert(c, 3);
+		ui.update();
+		check("dirty: move to the end", a.y == 0 && c.y == 130);
+	}
+}
+
+// a Canvas that records its calls (UiTest's paint)
+class Recording implements Canvas {
+	public final calls:Array<String> = [];
+
+	public function new() {}
+
+	static function hex(c:Color):String
+		return c == 0 ? "0" : StringTools.hex(c, 8).toLowerCase();
+
+	public function translate(dx:Float, dy:Float)
+		calls.push('translate $dx $dy');
+
+	public function pushClip(x:Float, y:Float, w:Float, h:Float, radius:Float)
+		calls.push('clip $x $y $w $h $radius');
+
+	public function popClip()
+		calls.push("pop");
+
+	public function pushOpacity(a:Float)
+		calls.push('opacity $a');
+
+	public function popOpacity()
+		calls.push("popOpacity");
+
+	public function pushTransform(a:Float, b:Float, c:Float, d:Float, e:Float, f:Float)
+		calls.push('transform $a $b $c $d $e $f');
+
+	public function popTransform()
+		calls.push("popTransform");
+
+	public function rect(x:Float, y:Float, w:Float, h:Float, radius:Float, fill:Color, borderWidth:Float, border:Color)
+		calls.push('rect $x $y $w $h $radius ${hex(fill)} $borderWidth ${hex(border)}');
+
+	public function shadow(x:Float, y:Float, w:Float, h:Float, radius:Float, color:Color, blur:Float)
+		calls.push('shadow $x $y $w $h $radius ${hex(color)} $blur');
+
+	public function text(p:Paragraph, x:Float, y:Float, width:Float, align:TextAlign, color:Color, ?colors:Array<Color>)
+		calls.push('text $x $y $width' + (colors == null ? "" : " colors " + [for (c in colors) hex(c)].join(",")));
+
+	public function image(img:Image, x:Float, y:Float, w:Float, h:Float, u0:Float, v0:Float, u1:Float, v1:Float, radius:Float)
+		calls.push('image ${img.width}x${img.height} $x $y $w $h $u0 $v0 $u1 $v1 $radius');
+}
+
+// a clipboard whose reads are answered by the test, later (UiTest's fields)
+class LaterClipboard implements ClipboardHost {
+	public final waiting:Array<Null<String>->Void> = [];
+
+	public function new() {}
+
+	public function write(text:String) {}
+
+	public function read(callback:Null<String>->Void)
+		waiting.push(callback);
+}

@@ -42,9 +42,21 @@ final class Device {
 		return new Texture(impl.createTexture(d));
 	}
 
-	// all of the texture's texels (width * height * 4 bytes, rows top to bottom)
-	public function writeTexture(t:Texture, data:haxe.io.Bytes)
-		impl.writeTexture(t.id(), data);
+	// texels into the texture, rows top to bottom: all of them (width *
+	// height * 4 bytes), or the region w x h at x, y (w * h * 4 bytes from
+	// dataOffset), as a glyph atlas updates the part that changed
+	public function writeTexture(t:Texture, data:haxe.io.Bytes, x = 0, y = 0, w = -1, h = -1, dataOffset = 0) {
+		if (x < 0 || y < 0 || dataOffset < 0) throw "hxmc.gfx: writeTexture: a negative offset";
+		if (w >= 0 && dataOffset + w * Math.max(h, 0) * 4 > data.length) throw "hxmc.gfx: writeTexture: data has fewer than w * h * 4 bytes";
+		impl.writeTexture(t.id(), data, x, y, w, h, dataOffset);
+	}
+
+	// frees a buffer or a texture (its handle is not used again)
+	public function destroyBuffer(b:Buffer)
+		impl.destroyBuffer(b.id());
+
+	public function destroyTexture(t:Texture)
+		impl.destroyTexture(t.id());
 
 	public function createSampler(d:SamplerDesc):Sampler
 		return new Sampler(impl.createSampler(d));

@@ -22,7 +22,7 @@ import hxmc.unsafe.*;
 	static function write_buffer(buffer:Int, offset:Int, data:Ptr, size:Int):Void;
 	// an RGBA8 texture (rgba8unorm), its texels at data (width * height * 4 bytes, or none)
 	static function texture(width:Int, height:Int, data:Ptr):Int;
-	static function write_texture(texture:Int, data:Ptr):Void;
+	static function write_texture(texture:Int, x:Int, y:Int, width:Int, height:Int, data:Ptr):Void;
 	// a sampler: Filter, Wrap
 	static function sampler(filter:Int, wrap:Int):Int;
 	// WGSL; errors are reported asynchronously, on the console

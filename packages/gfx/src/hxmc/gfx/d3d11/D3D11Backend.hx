@@ -273,10 +273,38 @@ class D3D11Backend {
 		return textures.length;
 	}
 
-	public function writeTexture(id:Int, data:haxe.io.Bytes) {
+	public function writeTexture(id:Int, data:haxe.io.Bytes, x:Int, y:Int, w:Int, h:Int, dataOffset:Int) {
 		var t = textures[id - 1];
-		if (data.length < t.width * t.height * 4) throw "hxmc.gfx: writeTexture: data has fewer than width * height * 4 bytes";
-		Arena.scoped(a -> ID3D11DeviceContext.UpdateSubresource(context, t.texture, 0, Ptr.nil(), a.copyBytes(data, 0, t.width * t.height * 4), t.width * 4, 0));
+		if (w < 0) {
+			w = t.width;
+			h = t.height;
+		}
+		if (x + w > t.width || y + h > t.height) throw "hxmc.gfx: writeTexture: outside the texture";
+		if (dataOffset + w * h * 4 > data.length) throw "hxmc.gfx: writeTexture: data has fewer than w * h * 4 bytes";
+		Arena.scoped(a -> {
+			var box = a.make(D3D11_BOX);
+			box.value.left = x;
+			box.value.top = y;
+			box.value.front = 0;
+			box.value.right = x + w;
+			box.value.bottom = y + h;
+			box.value.back = 1;
+			ID3D11DeviceContext.UpdateSubresource(context, t.texture, 0, box, a.copyBytes(data, dataOffset, w * h * 4), w * 4, 0);
+		});
+	}
+
+	public function destroyBuffer(id:Int) {
+		if (buffers[id - 1].isNull()) return;
+		Com.release(buffers[id - 1]);
+		buffers[id - 1] = Ptr.nil();
+	}
+
+	public function destroyTexture(id:Int) {
+		var t = textures[id - 1];
+		if (t == null) return;
+		Com.release(t.view);
+		Com.release(t.texture);
+		textures[id - 1] = null;
 	}
 
 	public function createSampler(d:SamplerDesc):Int {

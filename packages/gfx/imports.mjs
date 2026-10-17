@@ -159,9 +159,10 @@ export default async function (host) {
 			if (data) device.queue.writeTexture({ texture }, host.bytes(data, width * height * 4), { bytesPerRow: width * 4 }, [width, height]);
 			return handles.add({ texture, view: texture.createView() });
 		},
-		write_texture(t, data) {
+		write_texture(t, x, y, w, h, data) {
 			const { texture } = handles.get(t);
-			device.queue.writeTexture({ texture }, host.bytes(data, texture.width * texture.height * 4), { bytesPerRow: texture.width * 4 }, [texture.width, texture.height]);
+			if (w < 0) [x, y, w, h] = [0, 0, texture.width, texture.height];
+			device.queue.writeTexture({ texture, origin: [x, y] }, host.bytes(data, w * h * 4), { bytesPerRow: w * 4 }, [w, h]);
 		},
 		sampler(filter, wrap) {
 			const f = filter ? 'linear' : 'nearest', w = WRAPS[wrap];
@@ -372,6 +373,7 @@ export default async function (host) {
 		glClear: (mask) => gl.clear(mask),
 		glGenBuffers: (n, p) => gen(n, p, () => gl.createBuffer()),
 		glDeleteBuffers: (n, p) => del(n, p, (b) => gl.deleteBuffer(b)),
+		glDeleteTextures: (n, p) => del(n, p, (t) => gl.deleteTexture(t)),
 		glBindBuffer: (target, b) => gl.bindBuffer(target, get(b)),
 		// (GLsizeiptr, GLintptr: Int64, a BigInt)
 		glBufferData(target, size, data, usage) {

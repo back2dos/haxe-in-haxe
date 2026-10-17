@@ -12,6 +12,7 @@ and in which order: [ROADMAP.md](../../ROADMAP.md). What is built:
 | [codegen.md](codegen.md) | escape analysis, debugging information (PDB, `__unwind_info`, variables, wasm DWARF), small codegen items |
 | [targets.md](targets.md) | WebAssembly (and WasmGC), Android, iOS, shared libraries, Linux and macOS items |
 | [graphics.md](graphics.md) | `@hxmc/os`, `@hxmc/gfx`, shaders, audio, UI pointers |
+| [ui.md](ui.md) | `@hxmc/ui`: native controls or a drawn UI, the survey, the design and what is built |
 | [web.md](web.md) | `@hxmc/view`, `@hxmc/web`, the site |
 | [packaging.md](packaging.md) | npm, haxelib, verifying native builds |
 | [math.md](math.md) | LibM and the libm branch |

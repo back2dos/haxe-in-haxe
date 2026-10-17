@@ -87,7 +87,7 @@ Order:
    `RegisterNatives`: a minimal DEX written by hxmc. Views live on the
    Java main thread: `App.run` driven by `Choreographer` callbacks posted
    there.
-3. Mixing, as on the desktop (the UI design, `UI.md` on the UI branch): a
+3. Mixing, as on the desktop (the UI design, [ui.md](ui.md)): a
    GPU view inside native controls (`SurfaceView`/`TextureView` giving an
    `ANativeWindow`) is the supported direction; a native control inside a
    drawn tree only for text input (a hidden or overlaid `EditText` for the

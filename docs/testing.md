@@ -106,6 +106,59 @@ same way (`hxmc/web/tools/browser-test.mjs`, the `playground` job: WebGPU
 and WebGL2 in Chromium, WebGL2 in Firefox, under Xvfb, and in WebKit).
 `make gfx-shader-check`: the shader macro on Eval (shaders run on the CPU, the
 emitted sources, the programs it rejects: `packages/gfx/test/ShaderTest.hx`).
+`gfx-check` and `gfx-web-check` also draw `FeatureScene` (buffer and texture
+writes, R8 and RGBA8 textures, blending, scissor) against
+`packages/gfx/test/features.png`.
+
+## UI
+
+On Eval: `make esx-check` (markup literals: templates, values, components,
+HTML, the programs the macro rejects), `make text-check` (the rasterizer,
+DejaVu Sans' tables and outlines, line layout, a text sample through the
+atlas against `packages/text/test/sample.png`: the same pixels on every
+machine with that font; Inter's CFF outlines and GPOS kerning against
+`sample-cff.png`, when fonts-inter is installed, as in CI; Arabic, Hebrew and marks against Chromium's widths and ink, grapheme clusters against `Intl.Segmenter`), `make ui-check` (the flexbox layout against
+Chromium's on 89 cases (29 of them CSS grids), `packages/ui/test/layout-expected.json`, which
+`layout-ref.mjs` writes from `layout-cases.mjs`; text wrapping, events and
+focus; PNG files of every colour type, depth, filter and interlacing,
+`packages/ui/test/png/`, which `png-cases.mjs` writes with the pixels
+expected, checked against Chromium's decoder when written; JPEG files of
+every kind the decoder reads, `packages/ui/test/jpeg/`, which
+`jpeg-cases.mjs` writes with the pixels Chromium decodes, matched exactly,
+and GIF files the same way (`gif/`, `gif-cases.mjs`); SVG documents drawn
+by `Svg` against Chromium's pixels (`svg/`, `svg-cases.mjs`; the shapes
+must agree, edge anti-aliasing may differ); CSS colours and gradients
+against Chromium's (`css/`, `css-cases.mjs`);
+popups placed, hit and dismissed; then signals and markup rendered into
+nodes, the popup widgets driven by pointer and keys, a VirtualList of
+100000 rows scrolled; the examples of `packages/ui/GUIDE.md`, run by
+`GuideTest.hx`). Natively: `make
+ui-draw-check` (the sample UI, the todo example and the widget gallery,
+the last two driven through their Ui, drawn headless against `draw.png`,
+`todo.png` and `gallery.png`; `TransformTest`, boxes turned, scaled,
+skewed and nested against Chromium's `transform.png` (`transform-ref.mjs`
+from `transforms.json`), a text under `scale(2)` against the same text
+twice the size; `BLESS=1` writes the goldens again, uncompressed, and
+`node packages/gfx/test/png-deflate.mjs` compresses them before a commit; Linux: llvmpipe, DejaVu
+Sans; the sample in a window under Xvfb, whose loop must sleep once it has
+nothing to draw; `StressTest`, a list of 1000 rows: the time of each step,
+mounting, layout, frames, a change to one row, a scroll; `ClipboardTest`,
+the clipboard between two windows under Xvfb, through X11's selection
+protocol; also on Windows and macOS in CI; `TextInputTest`, key presses
+typed through X11's input method under Xvfb, keys given other symbols: a
+Cyrillic letter, a dead key composed with the next; `LinuxAccessTest`
+and `AtspiProbe`, a window's accessibility tree read and pressed by
+another process through libatspi, in a D-Bus session with AT-SPI's bus
+(at-spi2-core); on macOS in CI
+`TextInputTest` types through the window's text view and composes in it,
+`MacAccessTest` reads the accessibility tree through NSAccessibility and
+performs its actions; on Windows `WinAccessTest` calls the UI Automation
+providers through their COM interfaces and asks UI Automation for the
+window's element). In the browser: `make ui-web-check` (the native form on the DOM's own
+controls, `native-web.mjs`; the todo example for
+wasm32-wasi in headless Chromium on WebGPU and WebGL2, driven by real pointer
+and keyboard events, an input method's composition through the DevTools
+protocol, against `todo.png`). CI runs all five in the `gfx` job.
 
 ## CI
 
