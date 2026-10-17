@@ -477,7 +477,7 @@ class Driver {
 		if (abi.os == "windows" && !StringTools.endsWith(out, ".exe")) out += ".exe";
 		// Android: the shared library alone (lib<name>.so), or in an APK
 		if (abi.android && StringTools.endsWith(out, ".apk")) {
-			hxmc.android.Apk.write(out, exe, abi, o.android, hxmc.android.Apk.keyFile(o.android, TypesCache.cacheRoot()));
+			hxmc.android.Apk.write(out, exe, abi, o.android, hxmc.android.Apk.keyFile(o.android, CacheDir.root()));
 			return;
 		}
 		sys.io.File.saveBytes(out, exe);
