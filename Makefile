@@ -190,7 +190,7 @@ help:
 ##             that reach the API against the signal, the callbacks' count and rate
 ## audio-web-check  packages/os's audio on WebAudio (wasm32-wasi) in headless Chromium: realtime
 ##             and in an OfflineAudioContext (packages/os/test/web.mjs; Playwright with Chromium)
-## native-macros  the native macros prototype (hxmc/PLANS.md, "Native macros"): bin/jit/haxe, the
+## native-macros  the native macros prototype (docs/plans/compiler.md, "Native macros"): bin/jit/haxe, the
 ##             npm compiler built with -D hxmc.jit (Linux x86-64), runs the macro cases with
 ##             -D hxmc.macros=verify (MACROS=native: native only, the HXB compared)
 ## portcheck   the port built by hxmc self-compiles to the reference's HXB (hxmc/test/Selfcheck.hx)

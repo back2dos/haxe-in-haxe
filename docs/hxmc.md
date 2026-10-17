@@ -24,8 +24,8 @@ typed AST --(ir.Lower)--> hxmc IR --(Prep: ir.Facts)--> --(MirBuild)--> Mir (SSA
 | `Obj.hx`, `ElfWriter.hx`, `*Reader.hx`, `Link*.hx`, `MkRt.hx`, `DataGen.hx` | objects, the linkers (static ELF, `LinkDyn.hx` dynamic ELF against glibc; PE with imports written directly; Mach-O with an ad-hoc signature), the runtime-object builder, the program's data |
 | `wasm/` | wasm32-wasi: structured code from Mir, the linker, exception handling with `exnref` (or the legacy instructions) |
 | `Target.hx`, `Abi.hx`, `CAbi.hx` | per-target facts; how each C ABI passes structs by value |
-| `MkStd.hx` | hxmc's std merged with the Eval originals (the macro context shares the program's class paths) |
-| `macro/` | native macros, a prototype (`haxe` built with `-D hxmc.jit`, Linux x86-64; `-D hxmc.macros=native\|verify`): macro classes compiled by hxmc and linked into the running compiler, behind the macro engine seam `haxe/src/macros/MacroEngine.hx` ([PLANS.md](../hxmc/PLANS.md), "Native macros") |
+| `MkStd.hx` | hxmc's std merged with the Eval originals (the macro context shares the program's class paths; a custom target gets no `_std` directory in the reference compiler) |
+| `macro/` | native macros, a prototype (`haxe` built with `-D hxmc.jit`, Linux x86-64; `-D hxmc.macros=native\|verify`): macro classes compiled by hxmc and linked into the running compiler, behind the macro engine seam `haxe/src/macros/MacroEngine.hx` ([plans/compiler.md](plans/compiler.md), "Native macros") |
 
 Conventions: references live across a GC point are shadow-stack slots
 (cold sites spill only on the slow path); `try` is `rt_handler` with the C
@@ -33,7 +33,7 @@ library's `_setjmp`; calls follow the target's C ABI; a `@:hxmc.struct`
 value is the address of its memory (a frame slot, an object's inline
 field, memory behind a `Ptr`), copied on assignment (also through Haxe's
 inliner and analyzer: hooks set by `ir/CInterop.install`), its result written
-where a hidden last argument says ([hxmc/LOWLEVEL.md](../hxmc/LOWLEVEL.md),
+where a hidden last argument says ([plans/lowlevel.md](plans/lowlevel.md),
 "Struct values"); thread-locals use
 local-exec TLS on Linux, `_tls_index` on Windows, the TLV template on macOS;
 program-wide numbers (type indices, field ids, offsets) are absolute symbols
@@ -92,7 +92,7 @@ subprogram per function named by its Haxe name (`pack.Class.field`), and
 `.debug_aranges`/`.debug_ranges`; in ELF files, in Mach-O files' `__DWARF`
 segment, and in PE files as MinGW's toolchain writes them (with a COFF
 symbol table: gdb, lldb and llvm-symbolizer read them; no PDB, so not the
-Visual Studio debugger or WinDbg: PLANS.md). Every pass steps over the
+Visual Studio debugger or WinDbg: [plans/codegen.md](plans/codegen.md)). Every pass steps over the
 positions, so the code is the same with and without them (DebugCheck
 compares the code of both builds); they add 2.7 MB (15.6%) to the tool.
 `-debug` also writes the symbol table (`-D hxmc.symbols` or
@@ -136,10 +136,11 @@ small internal API (`hxmc.unsafe`: `Ptr`, `Mem` loads, stores, allocation
 and symbols, `Atomic`; `@:hxmc.c` and `@:hxmc.rt` externs of C functions,
 `@:hxmc.noGc` functions, `@:hxmc.export`/`@:hxmc.host` implementations of
 runtime functions, `@:hxmc.callback` functions C calls,
-`@:hxmc.threadLocal` statics). The collector, threads and the stop-the-world
+`@:hxmc.threadLocal` statics; the compiler rejects an address from `Mem.addr`
+live across a GC point outside `@:hxmc.noGc` code, `Facts.checkRawAddresses`). The collector, threads and the stop-the-world
 handshake, startup and `rt_throw` are Haxe too (`Gc.hx`, `Threads.hx`,
 `Start.hx`; the heap census with `-D hxmc.census`): no C of hxmc's own is
-linked, only the C library, mbedtls and libuv ([hxmc/LOWLEVEL.md](../hxmc/LOWLEVEL.md),
+linked, only the C library, mbedtls and libuv ([plans/lowlevel.md](plans/lowlevel.md),
 "The runtime without C of our own"). The nursery's size adapts (unless
 `RT_MINOR_KB` fixes it; Gc.hx): it starts at 4 MB, doubles after a minor
 collection that promoted more than a 16th of what was allocated since the
@@ -186,7 +187,7 @@ or `onAfterGenerate` while typing makes the build write nothing. The
 output is the same as without the cache (`make test-module-cache`): the
 cache also keeps the modifiers of unbound monomorphs and what the sort of
 the types walks of each module before the filters, which HXB does not keep.
-When it is on, the types cache is not used. Plans: [hxmc/PLANS.md](../hxmc/PLANS.md),
+When it is on, the types cache is not used. Plans: [plans/compiler.md](plans/compiler.md),
 "Cached modules".
 
 ## Targets
@@ -211,11 +212,22 @@ use `sys.ssl` or `eval.luv`. Environment for development: `HXMC_OPT=0`,
 
 ## WebAssembly
 
-WebAssembly is the seventh target, described with the others under Targets above; the playground and the npm fallback run the port as a wasm32-wasi module. The browser runner for programs (`packages/os/browser.mjs`) and the `imports.mjs` convention are in [hxmc/PLANS.md](../hxmc/PLANS.md), "Graphics".
+WebAssembly is the seventh target, described with the others under Targets above; the playground and the npm fallback run the port as a wasm32-wasi module.
+
+Programs in the browser: a package whose externs are imports of a module
+(`@:hxmc.lib("hxmc_gfx")`) ships an `imports.mjs`, whose default export maps
+a host to import objects, possibly asynchronously (gfx requests the WebGPU
+adapter and device before `main`); `packages/os/browser.mjs` merges them,
+gives WASI preview 1 without a file system and runs `_start`. JavaScript
+objects live in its handle table, Haxe sees integers. The runtime stays
+intact after `_start` returns, and JavaScript calls a `@:hxmc.callback` by
+its index in the exported `__indirect_function_table` (corpus case
+`WasmCallback`): `@hxmc/os`'s canvas window runs its loop from
+`requestAnimationFrame` that way, paused while the canvas is out of view.
 
 ## Origin
 
 hxmc began as the second back end of hxc, the C target this repository had
 until 2026-10-14; its IR, runtime and std came from there, and its corpus's
-golden files are hxc's outputs. Plans: [hxmc/PLANS.md](../hxmc/PLANS.md); the low-level
-API and C interop design: [hxmc/LOWLEVEL.md](../hxmc/LOWLEVEL.md).
+golden files are hxc's outputs. Plans: [ROADMAP.md](../ROADMAP.md) and
+[plans/](plans/README.md); the low-level API and C interop design: [plans/lowlevel.md](plans/lowlevel.md).

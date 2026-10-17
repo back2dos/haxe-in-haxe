@@ -13,7 +13,7 @@ import hxmc.Obj;
 // as RtlLookupFunctionEntry searches it). With `symbols` (-debug, -D
 // hxmc.symbols), a COFF symbol table of the code and, with -debug's lines,
 // DWARF sections (Dwarf), as MinGW's toolchain writes them for gdb and lldb
-// (no PDB: PLANS.md).
+// (no PDB: docs/plans/codegen.md).
 class LinkPE {
 	// the image base: x86-64 a fixed 0x400000 (addresses are kept absolute);
 	// arm64 0x140000000, relocatable (addresses are kept as RVAs, BASE 0, and

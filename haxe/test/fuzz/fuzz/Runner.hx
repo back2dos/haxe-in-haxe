@@ -349,7 +349,7 @@ class Runner {
 		Program outputs compared, where printed floats may differ in the last
 		places: the math functions (glibc's in the reference; in the port
 		hxmc builds, hxmc's port of musl's, hxmc/std/hxmc/rt/LibM.hx) round
-		some results an ulp apart (hxmc/PLANS.md, "Math"), and the arithmetic
+		some results an ulp apart (docs/plans/math.md), and the arithmetic
 		after them can widen that: `100 * Math.sin(-2.5)` is 2 ulps apart
 		(cases/interp-108625377). Two floats at the same place of a line match
 		when at most `MAX_ULPS` apart (both finite, same sign); everything else
