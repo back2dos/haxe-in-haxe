@@ -110,7 +110,7 @@ endef
 	lix lix-release lix-dist reference bench test test-fuzz test-display test-server test-jsonrpc test-unit-targets test-interp \
 	test-haxelib test-eval-debugger test-node-libs test-module-cache smoke hxmc-test corpus-stage gfx-programs gfx-check gfx-web-check gfx-shader-check \
 	android-programs android-check android-device-check shared-check \
-	audio-programs audio-check audio-web-check native-macros ui-programs view-check web-check text-check ui-check ui-layout-fuzz theme-check theme-fidelity-check ui-draw-check ui-web-check portcheck measure site-check \
+	audio-programs audio-check audio-web-check native-macros ui-programs view-check web-check text-check ui-check ui-layout-fuzz theme-check theme-fidelity-check theme-dom-check ui-draw-check ui-web-check portcheck measure site-check \
 	quick check full clean distclean wasmgc-check wasmgc-bench
 
 help:
@@ -200,6 +200,8 @@ help:
 ##             shadcn's sheet made, the classes it rejects (packages/theme/test/ThemeTest.hx)
 ## theme-fidelity-check  packages/theme's widgets drawn headless against shadcn's markup in Chromium
 ##             (packages/theme/test/ref, from ref.mjs; the cases known to differ reported, not failed)
+## theme-dom-check  the DOM's widgets (packages/web) under the theme's CSS in Chromium against the same
+##             references (packages/theme/test/dom-fidelity.mjs)
 ## ui-layout-fuzz  random flex trees (SEED, COUNT) against Chromium's boxes (Playwright): differences to reduce into layout-cases.mjs
 ## ui-programs  bin/ui/GFX_TARGET/{UiDrawTest,TodoTest,GalleryTest,StressTest,ClipboardTest,EmojiTest,BoxTest,WindowTest}[.exe], NativeTest (GTK 3, Win32, AppKit), TextInputTest (X11), LinuxAccessTest and AtspiProbe (AT-SPI), WinAccessTest (Windows): packages/ui's test programs (Linux: glibc mode)
 ## ui-draw-check  packages/ui's GPU renderer (hxmc.ui.draw): the sample UI headless against
@@ -634,6 +636,15 @@ ui-layout-fuzz: $(TOOL)
 
 theme-check: $(TOOL)
 	ulimit -s unlimited 2>/dev/null || true; $(TOOL) -cp packages/ui/src -cp packages/theme/src -cp packages/theme/test --run ThemeTest $(TOOL)
+	ulimit -s unlimited 2>/dev/null || true; $(TOOL) -cp packages/ui/src -cp packages/theme/src -cp packages/theme/test --run CssTest
+
+# (the theme's CSS on Eval, the DOM's widgets compiled to JavaScript by the port, in Chromium)
+DOM_CP := -cp packages/view/src -cp packages/web/src -cp packages/ui/src -D hxmc.view.renderer.dom=hxmc.web.DomRenderer
+theme-dom-check: $(TOOL) $(PORT_BIN)
+	@mkdir -p bin/theme/dom
+	ulimit -s unlimited 2>/dev/null || true; $(TOOL) -cp packages/ui/src -cp packages/theme/src --run hxmc.theme.Css shadcn.json bin/theme/dom/shadcn.css
+	ulimit -s unlimited 2>/dev/null || true; $(PORT_BIN) $(DOM_CP) -cp packages/theme/test -main DomFidelity -dce full -D js-es=6 -js bin/theme/dom/domfidelity.js
+	$(NODE) packages/theme/test/dom-fidelity.mjs bin/theme/dom bin/theme/dom/out
 
 theme-fidelity-check: $(TOOL) $(STD) $(HOST_RT)
 	$(call hxmc,bin/theme/$(GFX_TARGET)/FidelityTest$(call EXE,$(GFX_TARGET)),$(UI_CP) -cp packages/theme/src -cp packages/theme/test -main FidelityTest $(HXMC_ARGS) $(GFX_ARGS))
