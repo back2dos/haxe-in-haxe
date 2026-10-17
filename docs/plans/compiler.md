@@ -68,22 +68,26 @@ archives, without it.
 
   | | before | after |
   | --- | --- | --- |
-  | hello, cold | 381 ms, 0.46 s | 461-580 ms, 0.56-0.67 s |
-  | hello, warm | 95 ms, 0.16 s | 97-131 ms, 0.17-0.21 s |
-  | hello, after `-D unrelated` | 375 ms, 0.44 s, 94 | 99-138 ms, 0.17-0.22 s, 0 |
-  | formatter, cold | 952 ms, 1.31 s | 1176-1401 ms, 1.75-1.85 s |
-  | formatter, warm | 182 ms, 0.36 s | 207-300 ms, 0.39-0.52 s |
-  | formatter, after `-D unrelated` | 1015 ms, 1.22 s, 334 | 207-278 ms, 0.42-0.51 s, 0 |
-  | formatter, a body edited (tokentree.TokenTree) | 535 ms, 0.81 s, 173 | 264-329 ms, 0.53-0.60 s, 6 |
-  | formatter, an interface edited | 528 ms, 0.75 s, 173 | 622-710 ms, 0.89-0.96 s, 173 |
-  | the port, cold | 8.3 s, 13.6 s | 9.2-9.8 s, 14.7-16.1 s |
-  | the port, warm | 1.29 s, 3.31 s | 1.28-1.63 s, 3.4-4.0 s |
-  | the port, after `-D unrelated` | 8.5 s, 10.9 s, 563 | 1.33-1.58 s, 3.5-3.9 s, 0 |
-  | the port, a body edited (core.TFunctions) | 6.9 s, 9.4 s, 274 | 1.37-1.85 s, 3.5-4.1 s, 47 |
-  | the port, an interface edited | 6.9 s, 9.5 s, 274 | 6.9-7.5 s, 9.1-10.3 s, 274 |
-  | the port, the edit undone | 7.2 s, 9.6 s, 274 | 1.24-1.36 s, 3.5-3.6 s, 0 |
+  | hello, cold | 381 ms, 0.46 s | 434 ms, 0.53 s |
+  | hello, warm | 95 ms, 0.16 s | 119 ms, 0.20 s |
+  | hello, after `-D unrelated` | 375 ms, 0.44 s, 94 | 122 ms, 0.22 s, 0 |
+  | hello, a body edited, then undone | 96 ms, 0.17 s, 1; 1 | 110 ms, 0.19 s, 1; 0 |
+  | formatter, cold | 952 ms, 1.31 s | 1219 ms, 1.75 s |
+  | formatter, warm | 182 ms, 0.36 s, 0 | 468 ms, 0.75 s, 54 |
+  | formatter, after `-D unrelated` | 1015 ms, 1.22 s, 334 | 504 ms, 0.74 s, 54 |
+  | formatter, a body edited (tokentree.TokenTree) | 535 ms, 0.81 s, 173 | 458 ms, 0.76 s, 60 |
+  | formatter, an interface edited | 528 ms, 0.75 s, 173 | 588 ms, 0.86 s, 123 |
+  | the port, cold | 8.3 s, 13.6 s | 9.0 s, 16.1 s |
+  | the port, warm | 1.29 s, 3.31 s | 1.30 s, 3.39 s |
+  | the port, after `-D unrelated` | 8.5 s, 10.9 s, 563 | 1.33 s, 3.45 s, 0 |
+  | the port, a body edited (core.TFunctions) | 6.9 s, 9.4 s, 274 | 1.36 s, 3.54 s, 3 |
+  | the port, the edit undone | 7.2 s, 9.6 s, 274 | 1.34 s, 3.78 s, 0 |
+  | the port, an interface edited | 6.9 s, 9.5 s, 274 | 7.0 s, 9.3 s, 230 |
 
-  The cold runs pay the interfaces (the port: 0.19 s, reflective over the
+  The formatter's warm builds type its six modules json2object's build
+  macros make again every build (and the macros' context's modules that
+  run processes again): the price of the rule above. The cold runs pay the
+  interfaces (the port: 0.19 s, reflective over the
   syntax tree, in the encoding's parallel step), the define reads and a
   blob per module.
 
@@ -118,6 +122,10 @@ Open:
   cache has the same). Fix: attribute each mark to the module whose typing
   made it (a current module in the typer) and replay them on restore
   instead of keeping them in the HXB.
+- **Modules build macros make**: typed every build (their macros may keep
+  what other macros read). Restoring them needs that state recorded: what
+  a build macro leaves in the macros' statics, or a declared contract
+  (`@:hxmc.cacheBuild` on a macro that keeps nothing).
 - **Interface edits undone**: an undone edit of a module restores its
   earlier variant but not its dependents' (the newest variant of each is
   chosen by its own file); choosing among a module's variants by its
