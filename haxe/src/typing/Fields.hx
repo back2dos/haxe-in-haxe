@@ -423,11 +423,9 @@ class Fields {
 					case CTypes(tl): byList(pair -> byET(byType, e, pair.type), tl);
 					case CUnknown if (!cfg.allowOpenMono): throw NotFound.raise();
 					case CUnknown:
-						if (!core.ds.ArrayTools.exists(ctx.e.monomorphs, pair -> pair.mono == r)
-							&& !(ctx.f.isUntyped && ctx.com.platform == Neko)) ctx.e.monomorphs.unshift({
-								mono: r,
-								pos: p
-							});
+						if (!context.Typecore.MonomorphList.exists(ctx.e.monomorphs, r)
+							&& !(ctx.f.isUntyped && ctx.com.platform == Neko)) ctx.e.monomorphs = context.Typecore.MonomorphList.cons(r, p,
+								ctx.e.monomorphs);
 						var f = makeField();
 						Monomorph.addDownConstraint(r, MField(f));
 						Monomorph.addModifier(r, MOpenStructure);

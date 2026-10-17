@@ -243,6 +243,50 @@ enum FunctionMode {
 	};
 }
 
+// port: (tmono * pos) list, immutable (null is []): spawn_monomorph conses and
+// the transactions keep the list they started from, which an array copied per
+// spawned monomorph made quadratic in a function's size. A list is the first
+// `length` entries of arrays it may share with longer lists (oldest first, its
+// head last): a cons onto the longest list sharing them appends in place, any
+// other copies its entries first. The transactions walk the entries without
+// a cons cell's dependent loads.
+class MonomorphList {
+	final monos:Array<TMono>;
+	final poss:Array<Pos>;
+
+	public final length:Int;
+
+	inline function new(monos:Array<TMono>, poss:Array<Pos>, length:Int) {
+		this.monos = monos;
+		this.poss = poss;
+		this.length = length;
+	}
+
+	public static function cons(mono:TMono, pos:Pos, l:Null<MonomorphList>):MonomorphList {
+		if (l == null) return new MonomorphList([mono], [pos], 1);
+		var monos = l.monos, poss = l.poss, n = l.length;
+		if (monos.length != n) {
+			monos = monos.slice(0, n);
+			poss = poss.slice(0, n);
+		}
+		monos.push(mono);
+		poss.push(pos);
+		return new MonomorphList(monos, poss, n + 1);
+	}
+
+	/** the i-th element of the list (0: its head) **/
+	public inline function mono(i:Int):TMono return monos[length - 1 - i];
+
+	public inline function pos(i:Int):Pos return poss[length - 1 - i];
+
+	public static inline function size(l:Null<MonomorphList>):Int return l == null ? 0 : l.length;
+
+	public static function exists(l:Null<MonomorphList>, m:TMono):Bool {
+		if (l != null) for (i in 0...l.length) if (l.monos[i] == m) return true;
+		return false;
+	}
+}
+
 // typer_expr holds information that is specific to a (function) expresssion, whereas typer_field
 // is shared by local TFunctions.
 @:structInit class TyperExpr {
@@ -250,7 +294,7 @@ enum FunctionMode {
 	public var functionMode:FunctionMode;
 	public var ret:T;
 	public var opened:Array<TAnon>;
-	public var monomorphs:Array<{mono:TMono, pos:Pos}>;
+	public var monomorphs:Null<MonomorphList>;
 	public var inLoop:Bool;
 	public var bypassAccessor:Int;
 	public var withTypeStack:Array<core.WithType.WithTypeValue>;
@@ -258,7 +302,7 @@ enum FunctionMode {
 	public var macroDepth:Int;
 
 	public inline function new(curfun:CurrentFun, functionMode:FunctionMode, ret:T, opened:Array<TAnon>,
-			monomorphs:Array<{mono:TMono, pos:Pos}>, inLoop:Bool, bypassAccessor:Int, withTypeStack:Array<core.WithType.WithTypeValue>,
+			monomorphs:Null<MonomorphList>, inLoop:Bool, bypassAccessor:Int, withTypeStack:Array<core.WithType.WithTypeValue>,
 			callArgumentStack:Array<Array<Expr>>, macroDepth:Int) {
 		this.curfun = curfun;
 		this.functionMode = functionMode;
@@ -475,7 +519,7 @@ class TyperManager {
 		functionMode: functionMode,
 		ret: core.TFunctions.tDynamic,
 		opened: [],
-		monomorphs: [],
+		monomorphs: null,
 		inLoop: false,
 		bypassAccessor: 0,
 		withTypeStack: [],
@@ -522,7 +566,7 @@ class TyperManager {
 				// ctx.e is cloned, so they have to be absorbed here. A better fix might
 				// be to clone ctx.e earlier, but that comes with its own challenges.
 				e.monomorphs = ctx.e.monomorphs;
-				ctx.e.monomorphs = [];
+				ctx.e.monomorphs = null;
 			case FunMemberAbstractLocal, FunMemberClassLocal:
 				// We don't need to do this for local functions because the cloning happens
 				// earlier there.
@@ -607,7 +651,7 @@ class Typecore {
 
 	public static function spawnMonomorphRaw(ctx:Typer, p:Pos):TMono {
 		var mono = Monomorph.create();
-		ctx.e.monomorphs = [{mono: mono, pos: p}].concat(ctx.e.monomorphs);
+		ctx.e.monomorphs = MonomorphList.cons(mono, p, ctx.e.monomorphs);
 		return mono;
 	}
 
@@ -619,9 +663,12 @@ class Typecore {
 		// (upstream's fold builds it reversed; unshift would make this quadratic)
 		var knownMonos:Array<TMono> = [];
 		var knownConstraints:Array<Array<TMonoConstraint>> = [];
-		for (entry in current) if (entry.mono.tmType == null) {
-			knownMonos.push(entry.mono);
-			knownConstraints.push(entry.mono.tmDownConstraints);
+		for (i in 0...MonomorphList.size(current)) {
+			var mono = current.mono(i);
+			if (mono.tmType == null) {
+				knownMonos.push(mono);
+				knownConstraints.push(mono.tmDownConstraints);
+			}
 		}
 		return function() {
 			var i = knownMonos.length;
