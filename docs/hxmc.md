@@ -30,7 +30,8 @@ Conventions: references live across a GC point are shadow-stack slots
 (cold sites spill only on the slow path); `try` is `rt_handler` with the C
 library's `_setjmp`; calls follow the target's C ABI; a `@:hxmc.struct`
 value is the address of its memory (a frame slot, an object's inline
-field, memory behind a `Ptr`), copied on assignment, its result written
+field, memory behind a `Ptr`), copied on assignment (also through Haxe's
+inliner and analyzer: hooks set by `ir/CInterop.install`), its result written
 where a hidden last argument says ([hxmc/LOWLEVEL.md](../hxmc/LOWLEVEL.md),
 "Struct values"); thread-locals use
 local-exec TLS on Linux, `_tls_index` on Windows, the TLV template on macOS;

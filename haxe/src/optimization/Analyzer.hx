@@ -552,6 +552,9 @@ class CopyPropagationImpl implements DataFlowApi<CopyLattice, haxe.ds.IntMap<Cop
 					switch getCell(ctx, v.vId) {
 						case Local(w):
 							if (!typeChangeOk(actx.com, w.vType, v.vType)) leave();
+							// port: hxmc's struct values (AnalyzerTexpr.keepCopyHook)
+							if (AnalyzerTexpr.keepCopyHook != null && !v.vKind.match(VGenerated)
+								&& AnalyzerTexpr.keepCopyHook(v.vType, withExpr(e, TLocal(w)))) leave();
 							// This restriction is in place due to how we currently reconstruct the AST. Multiple SSA-vars may be turned back to
 							// the same origin var, which creates interference that is not tracked in the analysis. We address this by only
 							// considering variables whose origin-variables are assigned to at most once.
