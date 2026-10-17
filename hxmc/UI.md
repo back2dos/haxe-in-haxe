@@ -292,6 +292,10 @@ Since the design above (October 2026), in this order:
 - More widgets (`Switch`, `Slider`, `Radio`, `Tabs`, `Progress`) and a
   gallery; images: a PNG decoder, `ImageNode` with CSS's object-fit
   modes, textures freed with `Device.destroyTexture`.
+- Solid's remaining pieces (context, onMount, Index, Switch and Match,
+  ErrorBoundary) and the clipboard (`hxmc.os.Clipboard`: X11's CLIPBOARD
+  selection, Win32, NSPasteboard, the browser's paste event and
+  navigator.clipboard; copy, cut and paste in text fields).
 
 Where this departs from section 6:
 
@@ -308,8 +312,9 @@ Where this departs from section 6:
   shrink below their content, so text is not squashed (a container that
   must shrink sets `minHeight: 0`, as in CSS).
 - **Not yet**: accessibility (the AccessKit-shaped tree), IME composition
-  (characters arrive, preedit text does not), clipboard, JPEG and other
-  image formats, native controls.
+  (characters arrive, preedit text does not), JPEG and other image formats,
+  native controls; on X11 a clipboard over about 256 KB (sent in parts,
+  INCR) is not read.
 
 ## Sources
 
