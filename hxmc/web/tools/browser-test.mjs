@@ -20,7 +20,9 @@
 // through WebGL2. Headless Firefox on Linux has no WebGL (no GL driver it
 // accepts): with an X display (xvfb-run, as on CI) its cube runs in a
 // headed Firefox there, on Mesa's llvmpipe; without one, the page must say
-// that neither API is available.
+// that neither API is available. In Chromium, the cube on an emulated
+// phone: a horizontal touch drag turns it, a vertical swipe over it scrolls
+// the page (touchTest).
 //   node hxmc/web/tools/browser-test.mjs bin/site [chromium firefox webkit]
 // (Playwright from npm, with its browsers: npx playwright install)
 import { createServer } from 'node:http';
@@ -247,6 +249,69 @@ async function cubeTest(browser, label, expect, query = '') {
 	return ok;
 }
 
+// the cube on a phone (touch emulated, a 390x844 viewport): a horizontal
+// touch drag on its canvas turns it (the frame read back before and after
+// differs, the page does not scroll), and a vertical swipe that starts on
+// it scrolls the page (the canvas's touch-action is pan-y: cube.mjs). The
+// touches are Chromium's own input (DevTools' Input.dispatchTouchEvent), so
+// that the browser decides what it pans as on a phone; Playwright has no
+// touch drag elsewhere.
+async function touchTest(browser, label) {
+	const context = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
+	const page = await context.newPage();
+	const errors = [];
+	page.on('pageerror', (e) => errors.push(e.message));
+	page.on('console', (m) => m.type() === 'error' && /^(cube|hxmc\.gfx)/.test(m.text()) && errors.push(m.text()));
+	await page.route(/^https:\/\/cdn\.jsdelivr\.net\//, (r) => r.abort());
+	let r = {}, ok = false;
+	try {
+		// (still: only a drag turns it)
+		await page.goto(`http://localhost:${port}/index.html?cube-angle=0.6`);
+		await page.evaluate(() => document.getElementById('cube').scrollIntoView({ block: 'center' }));
+		await page.waitForFunction(() => document.getElementById('cube').hxmc || !document.getElementById('cube-state').hidden, null, { timeout: 60000 });
+		const cdp = await context.newCDPSession(page);
+		const frames = (n) => page.evaluate((n) => new Promise((ok) => { const f = () => (n-- > 0 ? requestAnimationFrame(f) : ok()); f(); }), n);
+		const touch = async (from, to, steps = 12) => {
+			await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: from[0], y: from[1] }] });
+			for (let i = 1; i <= steps; i++) {
+				const x = from[0] + (to[0] - from[0]) * i / steps, y = from[1] + (to[1] - from[1]) * i / steps;
+				await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x, y }] });
+				await page.waitForTimeout(16);
+			}
+			await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+		};
+		const state = () => page.evaluate(async () => {
+			const c = document.getElementById('cube'), px = await c.hxmc.gfx.readPixels(), b = c.getBoundingClientRect();
+			return { scrollY: Math.round(scrollY), box: [b.left, b.top, b.width, b.height], width: px.width, height: px.height, data: Array.from(px.data) };
+		});
+		if (!(await page.evaluate(() => document.getElementById('cube-state').hidden))) throw new Error(await page.textContent('#cube-state'));
+		await frames(2);
+		const before = await state();
+		const [x, y, w, h] = before.box;
+		// a drag to the right across half the canvas, then its glide
+		await touch([x + w * 0.25, y + h / 2], [x + w * 0.75, y + h / 2 + 4]);
+		await page.waitForTimeout(500);
+		await frames(2);
+		const turned = await state();
+		let differ = 0;
+		for (let p = 0; p < before.data.length; p += 4)
+			if (Math.max(...[0, 1, 2].map((k) => Math.abs(before.data[p + k] - turned.data[p + k]))) > 8) differ++;
+		r.turned = `${differ} of ${before.width * before.height} pixels changed`;
+		r.dragScroll = turned.scrollY - before.scrollY;
+		// a swipe up from the canvas's centre: the page scrolls down
+		await touch([x + w / 2, y + h / 2], [x + w / 2 + 4, y + h / 2 - 300]);
+		await page.waitForTimeout(500);
+		const swiped = await state();
+		r.swipeScroll = swiped.scrollY - turned.scrollY;
+		ok = differ > 0.02 * before.width * before.height && Math.abs(r.dragScroll) <= 1 && r.swipeScroll > 100 && errors.length === 0;
+	} catch (e) {
+		r.error = e.message.split('\n')[0];
+	}
+	await context.close();
+	console.log(`  cube, touch (${label}) ${ok ? 'ok' : 'FAILED'}: ${JSON.stringify(r)}${errors.length ? '; errors: ' + errors.join('; ') : ''}`);
+	return ok;
+}
+
 let failed = 0;
 // (Chromium: WebGPU on SwiftShader's Vulkan, as packages/gfx/test/web.mjs)
 const WEBGPU = ['--enable-unsafe-webgpu', '--enable-features=Vulkan', '--use-vulkan=swiftshader', '--use-angle=swiftshader'];
@@ -295,6 +360,7 @@ for (const { name, label, opts, noExnref } of launches) {
 				await headed?.close();
 			} else if (!(await cubeTest(browser, name, name === 'chromium' ? 'webgpu' : 'webgl2'))) failed++;
 			if (name === 'chromium' && !(await cubeTest(browser, name, 'webgl2', '&gfx=webgl2'))) failed++;
+			if (name === 'chromium' && !(await touchTest(browser, name))) failed++;
 		}
 	} catch (e) {
 		console.log(`== ${label}: ${e.message.split('\n')[0]}`);
