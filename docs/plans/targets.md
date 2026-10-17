@@ -156,14 +156,23 @@ Order:
    (PKCS#12, v3 for key rotation), icons and a `resources.arsc`, the `.aab`
    for Google Play, `DT_RELR` (API 30+) or Android's packed relocations to
    shrink the RELATIVE table, RELRO for the data that holds addresses.
-2. Native controls: JNI bindings in Haxe (`JNIEnv` is a function table,
-   bound like COM's vtables), an Android backend for `hxmc.ui.native`'s
-   `NativeHost` (`android.widget.*` laid out by our flexbox). Callbacks
-   from Java (click listeners, text watchers, `Runnable`s for the UI
-   thread) need small classes with `native` methods registered with
-   `RegisterNatives`: a minimal DEX written by hxmc. Views live on the
-   Java main thread: `App.run` driven by `Choreographer` callbacks posted
-   there.
+2. Native controls (done, [hxmc.md](../hxmc.md#android)): JNI bound in
+   Haxe (`JNIEnv` and `JavaVM` through `hxmc.os.VTable`, COM's macro),
+   a minimal DEX writer in hxmc (`Dex.hx`) for the glue (`org.hxmc.Glue`,
+   one listener class whose methods call a static native registered with
+   `RegisterNatives`; `org.hxmc.Activity`, a `NativeActivity` whose window
+   draws views), `hxmc.ui.native`'s Android backend (`android.widget`'s
+   button, label, field, checkbox, slider, progress bar in an
+   `AbsoluteLayout`, laid out by our flexbox). Views live on Java's main
+   thread: the runtime attaches it (`NativeThread.attach`), the program's
+   thread hands it work through its looper, and `NativeHost.run` is
+   driven by Choreographer's frames there (`AChoreographer`: no Java
+   `Runnable`s needed). CI: the form's checks on the emulator, taps,
+   text through the input method, uiautomator's accessibility dump. Left:
+   lists and scrolling (no backend of `hxmc.ui.native` has them yet),
+   edge-to-edge insets on Android 15 (the root fits the system bars), the
+   theme following a dark mode change while running (the activity keeps
+   `uiMode` changes).
 3. Mixing, as on the desktop (the UI design, [ui.md](ui.md)): a
    GPU view inside native controls (`SurfaceView`/`TextureView` giving an
    `ANativeWindow`) is the supported direction; a native control inside a
