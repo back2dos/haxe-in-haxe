@@ -99,6 +99,25 @@ br_on_cast instead of ref.test then ref.cast, precise types for methods
 bucket (WasmGC objects have no address to hash); `sys.io.File` streams and
 processes are not supported.
 
+What the runtime duplicates (hxmc/std/hxmc/rt/gc against hxmc/std/hxmc/rt),
+and why. The rule: reuse the Haxe source where only the memory layer
+differs; write new code where the object model forces it.
+
+| GC module | duplicates | why |
+| --- | --- | --- |
+| GcStr | Str's string natives (concat, compare, hash, substr, split, parseInt, Std.string...) | Str reads units through Mem over the string's header and chars (77 Mem calls); a WasmGC string is an i16 array. The algorithms (FNV hash, Int64 digits, parseInt) are kept the same, line for line where possible |
+| GcArr | Arr's Array methods | Arr works on the slot/data layout with element kinds in the header (30 Mem calls); here the kinds are wasm types |
+| GcDyn, GcNative | Dyn's comparison and reflection (as hxmc.Native) | Dyn reads type descriptors and slots through Mem (146 calls); here the tables are Meta's and fields are reached by generated code |
+| GcBytes | Bytes' natives | a Bytes is an i8 array, not malloc'd memory |
+| GcDate, GcSys | Date and WasiSys | the host's calendar and node's fs instead of libc/WASI over linear memory |
+| GcBuf | StringBuf's buffer | the same reason as GcStr |
+
+Not duplicated: everything above the natives (Std, Type, Reflect, the
+maps, haxe.Json, haxe.crypto...) is the same Haxe source. Sharing the
+natives themselves would need a memory layer under Str, Arr and Dyn
+(Mem calls behind an interface the GC build implements with arrays and
+structs): possible for Str and Arr, not for Dyn's descriptors.
+
 ## Android
 
 ARM64 (and x86-64 for emulators) ELF shared library loaded through JNI or
