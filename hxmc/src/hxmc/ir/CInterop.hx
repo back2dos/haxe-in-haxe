@@ -163,6 +163,7 @@ class CInterop {
 		if (inProgress.exists(c)) throw new LowerError('@:hxmc.struct $where contains itself (use a Ptr)', posOf(c.clPos));
 		if (c.clParams.length > 0) throw new LowerError('@:hxmc.struct $where cannot have type parameters', posOf(c.clPos));
 		if (c.clSuper != null) throw new LowerError('@:hxmc.struct $where cannot extend a class', posOf(c.clPos));
+		if (c.clImplements.length > 0) throw new LowerError('@:hxmc.struct $where cannot implement an interface (its values are not objects)', posOf(c.clPos));
 		inProgress.set(c, true);
 		var off = 0, align = 1;
 		var fields:Array<CField> = [];

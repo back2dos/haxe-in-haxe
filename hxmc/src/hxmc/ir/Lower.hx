@@ -843,7 +843,7 @@ class Lower {
 
 	// the class is used as a value: its statics become reachable dynamically
 	public function reflectStatics(c:TClass) {
-		if (c.hasClassFlag(CExtern) || c.hasClassFlag(CInterface)) return;
+		if (c.hasClassFlag(CExtern) || c.hasClassFlag(CInterface) || CInterop.isNativeClass(c)) return;
 		var ci = classInfo(c);
 		if (ci.statics != null) return;
 		ci.statics = [];

@@ -30,6 +30,7 @@ class FnLower {
 	// copy): whoever takes one keeps it as its own memory
 	var freshSlots = new Map<Local, Bool>();
 	var curExpr:Null<TExpr> = null; // (the expression being lowered: errors)
+	var structCtor = false; // (lowering a struct's constructor)
 	var out:Array<Stmt>;
 	var nextLocal = 0;
 
@@ -81,6 +82,7 @@ class FnLower {
 	public function runStructCtor(tf:TFunc) {
 		boxed = Boxing.analyze(tf.tfExpr, tf.tfArgs.map(a -> a.variable));
 		thisLocal = fi.args[0];
+		structCtor = true;
 		bindArgs(tf, 1);
 		stmt(tf.tfExpr);
 	}
@@ -807,7 +809,7 @@ class FnLower {
 			case TDynamic(_) | TMono(_): null;
 			case TAbstract(a, _) if (a.aPath.name == "Any"): null;
 			case TInst(c, _) if (!c.hasClassFlag(CExtern) && !c.hasClassFlag(CInterface) && !c.clKind.match(KTypeParameter(_))):
-				var ci = l.classInfo(c);
+				var ci = classOrBox(c);
 				x -> EInstOf(ci, x);
 			case _:
 				var tr = typeRefOfType(t);
@@ -818,17 +820,25 @@ class FnLower {
 	function typeRefOfType(t:T):Null<TypeRef> {
 		return switch TFunctions.follow(t) {
 			case TInst(c, _):
-				if (c.hasClassFlag(CExtern) || c.clKind.match(KTypeParameter(_))) TRBuiltin(Lower.nativeName(c)) else TRClass(l.classInfo(c));
+				if (c.hasClassFlag(CExtern) || c.clKind.match(KTypeParameter(_))) TRBuiltin(Lower.nativeName(c)) else TRClass(classOrBox(c));
 			case TEnum(e, _): TREnum(l.enumInfo(e));
 			case TAbstract(a, _): TRBuiltin(Lower.ident(a.aPath.pack, a.aPath.name));
 			case _: null;
 		}
 	}
 
+	// a class, or for a @:hxmc.struct class its box's (Std.isOfType, casts,
+	// the class as a value)
+	function classOrBox(c:TClass):ClassInfo
+		return switch ty(TInst(c, [])) {
+			case TStruct(n, _): l.structBox(n);
+			case _: l.classInfo(c);
+		}
+
 	function typeRef(mt:ModuleType):TypeRef {
 		return switch mt {
 			case TClassDecl(c):
-				if (c.hasClassFlag(CExtern)) TRBuiltin(Lower.nativeName(c)) else TRClass(l.classInfo(c));
+				if (c.hasClassFlag(CExtern)) TRBuiltin(Lower.nativeName(c)) else TRClass(classOrBox(c));
 			case TEnumDecl(e): TREnum(l.enumInfo(e));
 			case TAbstractDecl(a): TRBuiltin(Lower.ident(a.aPath.pack, a.aPath.name));
 			case TTypeDecl(d): typeRefOfType(d.tType);
@@ -2116,6 +2126,7 @@ class FnLower {
 		for (v in free) {
 			if (v == null) {
 				if (thisLocal == null) continue;
+				if (structCtor) cfail('a closure cannot capture this in the constructor of a struct (its memory is the caller\'s)', e);
 				caps.push({id: -1, ty: thisLocal.ty});
 				capVals.push(ELocal(thisLocal));
 				captureLocals.push(new Local(-1, "this", thisLocal.ty));

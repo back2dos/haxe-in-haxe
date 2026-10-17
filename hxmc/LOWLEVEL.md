@@ -361,7 +361,8 @@ s[3].y = 2;                                  // in place
   taking it back copies it out (null gives zeros; another type fails as a
   cast). Assigning a field of such a copy (`arr[i].x = 1`) is a compile
   error, as in C#: copy it into a variable, change that, store it back.
-  `Std.string` of a box is the struct's name.
+  `Std.string` of a box is the struct's name; `Std.isOfType`, casts and
+  `Type` see the box's class. A struct implements no interface.
 - Closures may take and return struct values (by address, as calls do);
   one cannot become `Dynamic` or a function of another type, nor capture a
   struct local (its memory is in the frame).

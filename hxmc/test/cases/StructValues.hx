@@ -262,6 +262,8 @@ class StructValues {
 		var n:Null<V2> = null;
 		var n2:Null<V2> = back;
 		trace(show(back), n == null, n2 == null, show(n2), Std.string(d) != "");
+		var o:Dynamic = "not a V2";
+		trace(Std.isOfType(d, V2), Std.isOfType(o, V2), Type.getClassName(Type.getClass(d)), show(cast(d, V2)));
 		var m = new Map<String, V2>();
 		m.set("a", new V2(9, 10));
 		var got:V2 = m.get("a");

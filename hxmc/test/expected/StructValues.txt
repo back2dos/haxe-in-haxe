@@ -18,6 +18,7 @@ StructValues.hx:239: 8, 12, 11, 11
 StructValues.hx:249: (5, -9)
 StructValues.hx:259: 3, (1, 2), (50, 2), (5.5, 2), 56.5, (1, 2)
 StructValues.hx:264: (7, 8), true, false, (7, 8), true
-StructValues.hx:269: (9, 10), (9, 0), false
-StructValues.hx:278: (6.25, 1.75), p, (4, 5), true
-StructValues.hx:287: (7, 3), (2, 0), (3, 5), (7, -1.5)
+StructValues.hx:266: true, false, V2, (7, 8)
+StructValues.hx:271: (9, 10), (9, 0), false
+StructValues.hx:280: (6.25, 1.75), p, (4, 5), true
+StructValues.hx:289: (7, 3), (2, 0), (3, 5), (7, -1.5)
