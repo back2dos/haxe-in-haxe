@@ -383,7 +383,7 @@ makes `org.hxmc.Activity` the activity, in the system's
 Android backend on that (`AndroidBackend`: `android.widget`'s views in an
 `AbsoluteLayout`, laid out by ui's flexbox in dp, measured by the views;
 accessibility is the views'): NativeForm's APK (`AndroidNativeTest`) is
-1.79 MB (arm64), 1.69 MB (x86-64), most of it ui's core; `classes.dex`
+1.91 MB (arm64), 1.81 MB (x86-64), most of it ui's core; `classes.dex`
 3 KB.
 
 Mixing GPU and native views: a GPU view among views is a `SurfaceView`
