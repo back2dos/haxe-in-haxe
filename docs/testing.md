@@ -181,7 +181,7 @@ atlas against `packages/text/test/sample.png`: the same pixels on every
 machine with that font; Inter's CFF outlines and GPOS kerning against
 `sample-cff.png`, when fonts-inter is installed, as in CI; Arabic, Hebrew and marks against Chromium's widths and ink, grapheme clusters against `Intl.Segmenter`), `make ui-check` (the flexbox layout against
 Chromium's on 89 cases (29 of them CSS grids), `packages/ui/test/layout-expected.json`, which
-`layout-ref.mjs` writes from `layout-cases.mjs`; text wrapping, events and
+`layout-ref.mjs` writes from `layout-cases.mjs` (`make ui-layout-fuzz SEED=n COUNT=n`, a tool and not a lane: random flex trees against Chromium's boxes, a difference reduced by hand into a case there); text wrapping, events and
 focus; PNG files of every colour type, depth, filter and interlacing,
 `packages/ui/test/png/`, which `png-cases.mjs` writes with the pixels
 expected, checked against Chromium's decoder when written; JPEG files of
