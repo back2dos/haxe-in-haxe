@@ -130,6 +130,10 @@ class Link {
 	}
 
 	public var symbols = true; // write a symbol table of the code (profilers, debuggers)
+	// -D hxmc.jit: every global symbol of the executable, "<name> <kind> <value>" per
+	// line (t code, d data, a absolute, l TLS: the thread-pointer offset), for
+	// the native macros the executable loads (hxmc.macro.Loader)
+	public var hostSyms:Null<StringBuf> = null;
 
 	public function link(entry:String):Bytes {
 		resolve();
@@ -212,6 +216,7 @@ class Link {
 		// relocations
 		for (s in all)
 			if (s.kind != Bss && s.kind != Tbss) apply(s);
+		if (hostSyms != null) writeHostSyms(defined);
 		// the image
 		var out = new Buf(fileEnd - BASE + 4096);
 		out.zeros(fileEnd - BASE);
@@ -321,6 +326,26 @@ class Link {
 		sh(names[2], 3, 0, 0, strOff, strtab.len, 0, 0, 1, 0);
 		sh(names[3], 3, 0, 0, shstrOff, shstr.len, 0, 0, 1, 0);
 		return shoff;
+	}
+
+	function writeHostSyms(defined:Map<String, Int>) {
+		var names = [for (n in globals.keys()) n].concat([for (n in defined.keys()) if (!globals.exists(n)) n]);
+		names.sort((a, b) -> a < b ? -1 : a > b ? 1 : 0);
+		for (n in names) {
+			var s = globals.get(n);
+			if (s == null) {
+				hostSyms.add(n + " d " + defined.get(n) + "\n");
+				continue;
+			}
+			if (!s.abs && !isLive(s.section)) continue;
+			var v = symAddr(s);
+			var k = s.abs ? "a" : switch s.section.kind {
+				case Text: "t";
+				case Tdata | Tbss: v = tpoff(v); "l";
+				case _: "d";
+			};
+			hostSyms.add(n + " " + k + " " + v + "\n");
+		}
 	}
 
 	function entrySym(name:String):Symbol {

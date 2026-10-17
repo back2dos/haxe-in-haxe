@@ -107,6 +107,8 @@ enum LCall {
 	CStatic(c:TClass, cf:TClassField, r:FuncInfo);
 	CMethod(c:TClass, cf:TClassField, r:FuncInfo);
 	CCtor(c:TClass, r:FuncInfo);
+	CStructCtor(c:TClass, r:FuncInfo);
+	CStructBox(name:String, r:ClassInfo);
 	CStaticVar(c:TClass, cf:TClassField, r:Int);
 	CReflect(c:TClass);
 	CStaticClos(f:FuncInfo, r:LambdaInfo);
@@ -329,6 +331,22 @@ class CachedLower extends Lower {
 		return r;
 	}
 
+	override public function structBox(name:String):ClassInfo {
+		depth++;
+		var r = super.structBox(name);
+		depth--;
+		log(CStructBox(name, r));
+		return r;
+	}
+
+	override public function structCtor(c:TClass):FuncInfo {
+		depth++;
+		var r = super.structCtor(c);
+		depth--;
+		log(CStructCtor(c, r));
+		return r;
+	}
+
 	override public function staticVar(c:TClass, cf:TClassField):Int {
 		depth++;
 		var r = super.staticVar(c, cf);
@@ -463,6 +481,10 @@ class CachedLower extends Lower {
 				bindFunc(r, method(k, cf));
 			case CCtor(k, r):
 				bindFunc(r, ctor(k));
+			case CStructCtor(k, r):
+				bindFunc(r, structCtor(k));
+			case CStructBox(name, r):
+				bindClass(r, structBox(name));
 			case CStaticVar(k, cf, r):
 				bindGlobal(r, staticVar(k, cf));
 			case CReflect(k):
@@ -625,6 +647,7 @@ class CachedLower extends Lower {
 			case [TRef(a), TRef(b)]:
 				bindRef(a, b);
 			case [TI32, TI32] | [TBool, TBool] | [TF64, TF64] | [TI64, TI64] | [TVoid, TVoid]:
+			case [TStruct(a, x), TStruct(b, y)] if (a == b && x == y):
 			case _:
 				mismatch("type changed");
 		}
@@ -777,6 +800,7 @@ class CachedLower extends Lower {
 			case EBox(t, a): EBox(t, s(a));
 			case EUnbox(t, a): EUnbox(t, s(a));
 			case EField(c, idx, o): EField(c, idx, s(o));
+			case EFieldAddr(c, idx, o): EFieldAddr(c, idx, s(o));
 			case EAnonGet(name, t, o, hint): EAnonGet(name, t, s(o), hint);
 			case ECast(t, a): ECast(t, s(a));
 			case EInstOf(c, a): EInstOf(c, s(a));
@@ -812,6 +836,7 @@ class CachedLower extends Lower {
 			case EBox(t, a): EBox(mapTy(t), ex(a));
 			case EUnbox(t, a): EUnbox(mapTy(t), ex(a));
 			case EField(c, idx, o): EField(obj(c), idx, ex(o));
+			case EFieldAddr(c, idx, o): EFieldAddr(obj(c), idx, ex(o));
 			case EAnonGet(name, t, o, hint): EAnonGet(name, mapTy(t), ex(o), obj(hint));
 			case ECast(t, a): ECast(mapTy(t), ex(a));
 			case EInstOf(c, a): EInstOf(obj(c), ex(a));

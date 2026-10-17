@@ -28,6 +28,7 @@ class Driver {
 		abi.setLibc(o.libc);
 		if (o.segAlign > 0) abi.segAlign = o.segAlign;
 		if (o.pic) abi.reloc = Pic;
+		if (o.framePointers && !abi.wasm) abi.framePointers = true;
 		if (o.shared) {
 			abi.reloc = Pic;
 			abi.output = SharedLibrary;
@@ -78,6 +79,7 @@ class Driver {
 		}
 		if (failure != null) throw failure;
 	}
+	static var sroa = Sys.getEnv("HXMC_SROA") != "0";
 	var raRounds = 0;
 	var raInsns = 0;
 	var raFuncs = 0;
@@ -126,6 +128,7 @@ class Driver {
 				}
 				mb.icaches = ic.count;
 			}
+			if (o.opt && sroa) new Sroa(mf).run();
 			if (o.opt) new Opt(mf).run();
 			if (dumpSet != null && dumpSet.exists(name)) Sys.println(mf.dump());
 			if (abi.wasm) {
@@ -219,7 +222,7 @@ class Driver {
 	function toolKey():String {
 		var p = Sys.programPath();
 		var st = try sys.FileSystem.stat(p) catch (_:Dynamic) null;
-		return "hxmc|" + abi.rtName + (o.wasmLegacyEh ? "+legacy-eh" : "") + "|" +(st == null ? "?" : st.size + "@" + st.mtime.getTime()) + "|";
+		return "hxmc|" + abi.rtName + (o.wasmLegacyEh ? "+legacy-eh" : "") + (abi.framePointers ? "+fp" : "") + "|" +(st == null ? "?" : st.size + "@" + st.mtime.getTime()) + "|";
 	}
 
 	// the functions that may be inlined (before the keys: they are part of them)
@@ -336,6 +339,10 @@ class Driver {
 		var data = new Obj();
 		var demit = Target.emitter(abi, data);
 		var dg = new DataGen(prep, abi, data, mf -> compileMir(mf, demit, data));
+		if (o.jit) {
+			dg.spareTypes = hxmc.macro.Jit.SPARE_TYPES;
+			dg.spareSigs = hxmc.macro.Jit.SPARE_SIGS;
+		}
 		dg.run();
 		dg.allocStubs(objs, demit);
 		dg.stubs(objs, demit);
@@ -432,8 +439,12 @@ class Driver {
 				d;
 			} else new Link(all, abi);
 			l.symbols = !o.strip;
-			if (Sys.getEnv("HXMC_NOGC") != "1") l.collect = rts;
-			l.link("_start");
+			// (-D hxmc.jit: every runtime function stays, for the native macros it loads)
+			if (Sys.getEnv("HXMC_NOGC") != "1" && !o.jit) l.collect = rts;
+			if (o.jit) l.hostSyms = new StringBuf();
+			var exe = l.link("_start");
+			if (o.jit) sys.io.File.saveContent(out + ".syms", l.hostSyms.toString());
+			exe;
 		};
 		if (abi.os == "windows" && !StringTools.endsWith(out, ".exe")) out += ".exe";
 		sys.io.File.saveBytes(out, exe);

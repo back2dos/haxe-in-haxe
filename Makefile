@@ -34,6 +34,8 @@ RT_TARGET ?= $(HOST)
 CORPUS_TARGETS ?= $(TARGETS) wasm32-wasi wasm32-wasi-legacy linux-x86_64-glibc linux-arm64-glibc
 # `make gfx-programs`: any of the six targets, or the host's (`make gfx-check GFX_TARGET=windows-x86_64`: under Wine)
 GFX_TARGET ?= $(HOST)
+# `make audio-programs`, `make audio-check`: the same for packages/os's audio
+AUDIO_TARGET ?= $(HOST)
 # extra arguments of the port's build (e.g. HXFLAGS="-D retain")
 HXFLAGS ?=
 # the port the tests check
@@ -104,7 +106,9 @@ endef
 .DEFAULT_GOAL := help
 .PHONY: help std deps rt rt-build rt-target rt-layouts hxmc tool bootstrap fixpoint stage0 crosshost port dev release wasm npm site fuzz \
 	lix lix-release lix-dist reference bench test test-fuzz test-display test-server test-jsonrpc test-unit-targets test-interp \
-	test-haxelib test-eval-debugger test-node-libs smoke hxmc-test corpus-stage gfx-programs gfx-check gfx-web-check gfx-shader-check ui-programs esx-check text-check ui-check ui-draw-check ui-web-check portcheck measure quick check full clean distclean
+	test-haxelib test-eval-debugger test-node-libs test-module-cache smoke hxmc-test corpus-stage gfx-programs gfx-check gfx-web-check gfx-shader-check \
+	audio-programs audio-check audio-web-check native-macros ui-programs esx-check text-check ui-check ui-draw-check ui-web-check portcheck measure \
+	quick check full clean distclean
 
 help:
 	@sed -n '/^# --- Targets/,$$p' $(MAKEFILE_LIST) | sed -n 's/^## \{0,1\}//p'
@@ -148,13 +152,16 @@ help:
 ## test-unit-targets   upstream's unit suite compiled for each target by both, compared
 ## smoke       hxmc/test/smoke.sh on PORT_BIN: --interp, HXB, JS, sys.ssl, eval.luv
 ## hxmc-test   hxmc's corpus against its golden files (hxmc/test/Corpus.hx)
+## test-module-cache  the persistent module cache's gate: the same outputs with and without it,
+##             cold, warm, after edits, for hxmc and JS (hxmc/test/ModuleCacheCheck.hx; with
+##             bin/npm/native/HOST/haxe; PORT=1 adds the port itself)
 ## corpus-stage  bin/corpus/<target>: hxmc's corpus cross-built for each of CORPUS_TARGETS, to run on
 ##             the target's machine (Check; CI's test and wasm jobs): wasm32-wasi-legacy with legacy
 ##             exception handling, linux-*-glibc in the glibc mode (checked with readelf: ElfCheck)
 ## test-node-libs  -lib from node_modules with the npm package's compiler for the host (hxmc/test/NodeLibs.hx)
-## gfx-programs  bin/gfx/GFX_TARGET/{GfxTest,Triangle}[.exe]: packages/gfx's test programs (Linux: glibc mode)
-## gfx-check   packages/gfx: the triangle example headless and in a window, against a golden
-##             image (packages/gfx/test/check.sh; Linux: Mesa, Xvfb; macOS: Metal, Cocoa);
+## gfx-programs  bin/gfx/GFX_TARGET/{GfxTest,Triangle,Cube}[.exe]: packages/gfx's test programs (Linux: glibc mode)
+## gfx-check   packages/gfx: the triangle and cube examples headless and in a window, against
+##             golden images (packages/gfx/test/check.sh; Linux: Mesa, Xvfb; macOS: Metal, Cocoa);
 ##             GFX_TARGET=windows-x86_64: D3D11 and Win32 under Wine
 ## gfx-web-check  packages/gfx on WebGPU and WebGL2 (wasm32-wasi): the same, headless and in a
 ##             canvas, in headless Chromium (packages/gfx/test/web.mjs; Playwright with Chromium)
@@ -174,6 +181,16 @@ help:
 ##             through its Ui and drawn against todo.png (Linux: Mesa, DejaVu Sans; BLESS=1 rewrites them)
 ## ui-web-check  the todo example as wasm32-wasi in headless Chromium, on WebGPU and WebGL2, driven by
 ##             real pointer and keyboard events, against todo.png (packages/ui/test/web.mjs; DejaVu Sans)
+## audio-programs  bin/audio/AUDIO_TARGET/{AudioTest,Tone}[.exe]: packages/os's audio test and example
+## audio-check  packages/os's audio through each back end without speakers (packages/os/test/audio.sh):
+##             ALSA's null and file devices (Linux), CoreAudio's generic output (macOS), WASAPI
+##             (Windows; AUDIO_TARGET=windows-x86_64: under Wine, to an ALSA file); the samples
+##             that reach the API against the signal, the callbacks' count and rate
+## audio-web-check  packages/os's audio on WebAudio (wasm32-wasi) in headless Chromium: realtime
+##             and in an OfflineAudioContext (packages/os/test/web.mjs; Playwright with Chromium)
+## native-macros  the native macros prototype (hxmc/PLANS.md, "Native macros"): bin/jit/haxe, the
+##             npm compiler built with -D hxmc.jit (Linux x86-64), runs the macro cases with
+##             -D hxmc.macros=verify (MACROS=native: native only, the HXB compared)
 ## portcheck   the port built by hxmc self-compiles to the reference's HXB (hxmc/test/Selfcheck.hx)
 ## bench       the HaxeBenchmarks cases on hxmc (native, wasm under node), C++, JVM, JS, HL/C and
 ##             HL, built by hxmc and the port: times, peak RSS, sizes (hxmc/test/Bench.hx; BENCH_ARGS)
@@ -189,7 +206,7 @@ help:
 ## clean       remove the build outputs (keeps the tool, the runtime objects and the reference)
 ## distclean   also remove bin/ entirely
 ##
-## Variables: JOBS, NODE, ZIG, HOST, TARGET, RT_TARGET, GFX_TARGET, HXFLAGS, PORT_BIN, REFERENCE, LANE, N, CASES, PORT,
+## Variables: JOBS, NODE, ZIG, HOST, TARGET, RT_TARGET, GFX_TARGET, AUDIO_TARGET, HXFLAGS, PORT_BIN, REFERENCE, LANE, N, CASES, PORT,
 ## LIX_DIR, BENCH_DATA, BENCH_ARGS, CROSSHOST_ARGS, CORPUS_TARGETS (defaults and meaning: the top of the Makefile).
 
 std: $(STD)
@@ -332,10 +349,10 @@ npm: $(NPM_GEN) $(NPM_NATIVES)
 
 # the pages, their scripts (hxmc/web/src, compiled by the port), the std
 # subset the playground's compiler reads (hxmc/web/MkBundle.hx), the measured
-# results (hxmc/web/data), the Graphics section's triangle (gfx/: the example
+# results (hxmc/web/data), the Graphics section's cube (gfx/: the example
 # built for wasm32-wasi with legacy exception handling, which every browser
 # with WebGPU has and those with WebGL2 since 2021, with packages/os's
-# browser.mjs and the packages' imports.mjs; hxmc/web/triangle.mjs) and the
+# browser.mjs and the packages' imports.mjs; hxmc/web/cube.mjs) and the
 # build facts
 mb = awk '{printf "%.1f MB", $$1 / 1048576}'
 # the site's build in the addresses of the files its pages fetch (Version.hx)
@@ -344,13 +361,13 @@ site: wasm $(PORT_BIN) $(WEB_SRC)
 	mkdir -p bin/site
 	cp bin/wasm/hih.wasm bin/wasm/hih-legacy.wasm hxmc/web/index.html hxmc/web/story.html hxmc/web/style.css bin/site/
 	$(PORT_BIN) -D site_version=$(SITE_VERSION) hxmc/web/build.hxml
-	$(call hxmc,bin/gfx/triangle.wasm,$(GFX_CP) -main Triangle $(HXMC_ARGS) -D hxmc.target=wasm32-wasi -D hxmc.wasm-eh=legacy)
+	$(call hxmc,bin/gfx/cube.wasm,$(GFX_CP) -main Cube $(HXMC_ARGS) -D hxmc.target=wasm32-wasi -D hxmc.wasm-eh=legacy)
 	mkdir -p bin/site/gfx
-	cp bin/gfx/triangle.wasm packages/os/browser.mjs bin/site/gfx/
+	cp bin/gfx/cube.wasm packages/os/browser.mjs bin/site/gfx/
 	cp packages/os/imports.mjs bin/site/gfx/os.mjs
 	cp packages/gfx/imports.mjs bin/site/gfx/gfx.mjs
-	cp hxmc/web/triangle.mjs bin/site/
-	sed -i -e 's/\(src\|href\)="\(playground\.js\|tables\.js\|triangle\.mjs\|style\.css\)"/\1="\2?v=$(SITE_VERSION)"/g' bin/site/index.html bin/site/story.html
+	cp hxmc/web/cube.mjs bin/site/
+	sed -i -e 's/\(src\|href\)="\(playground\.js\|tables\.js\|cube\.mjs\|style\.css\)"/\1="\2?v=$(SITE_VERSION)"/g' bin/site/index.html bin/site/story.html
 	$(RUN) -cp hxmc/web --run MkBundle $(HAXE_STD_PATH) bin/site/std.bundle
 	cp hxmc/web/data/*.json bin/site/
 	rm -rf bin/site/examples && cp -r hxmc/web/examples bin/site/examples
@@ -358,14 +375,14 @@ site: wasm $(PORT_BIN) $(WEB_SRC)
 	if [ -n "$(LIX_DIR)" ]; then mkdir -p bin/site/tools && cp $(LIX_DIR)/lix-* bin/site/tools/; fi
 	rm -rf bin/site/bench
 	if [ -n "$(BENCH_DATA)" ] && [ -f "$(BENCH_DATA)/history.json" ]; then mkdir -p bin/site/bench && cp $(BENCH_DATA)/history.json bin/site/bench/ && { cp $(BENCH_DATA)/latest.json bin/site/bench/ 2>/dev/null || true; }; fi
-	printf '{\n\t"date": "%s",\n\t"commit": "%s",\n\t"wasmSize": "%s",\n\t"wasmGz": "%s",\n\t"wasmLegacyGz": "%s",\n\t"dataGz": "%s",\n\t"lixSize": "%s",\n\t"triangleSize": "%s"\n}\n' \
+	printf '{\n\t"date": "%s",\n\t"commit": "%s",\n\t"wasmSize": "%s",\n\t"wasmGz": "%s",\n\t"wasmLegacyGz": "%s",\n\t"dataGz": "%s",\n\t"lixSize": "%s",\n\t"cubeSize": "%s"\n}\n' \
 		"$$(date -u +%Y-%m-%d)" "$$(git rev-parse --short HEAD)" \
 		"$$(wc -c < bin/site/hih.wasm | $(mb))" \
 		"$$(gzip -9c bin/site/hih.wasm | wc -c | $(mb))" \
 		"$$(gzip -9c bin/site/hih-legacy.wasm | wc -c | $(mb))" \
 		"$$(gzip -9c bin/site/std.bundle | wc -c | $(mb))" \
 		"$$(if [ -f bin/site/tools/lix-linux-x86_64 ]; then wc -c < bin/site/tools/lix-linux-x86_64 | $(mb); else echo -; fi)" \
-		"$$(wc -c < bin/site/gfx/triangle.wasm | awk '{printf "%d KB", $$1 / 1024}')" > bin/site/build-info.json
+		"$$(wc -c < bin/site/gfx/cube.wasm | awk '{printf "%d KB", $$1 / 1024}')" > bin/site/build-info.json
 	cat bin/site/build-info.json
 
 # --- Other programs ---
@@ -455,6 +472,9 @@ smoke:
 test-node-libs: bin/npm/native/$(HOST)/haxe
 	$(SCRIPT) NodeLibs
 
+test-module-cache: $(TOOL) $(STD) $(HOST_RT) bin/npm/native/$(HOST)/haxe
+	$(SCRIPT) ModuleCacheCheck --haxe bin/npm/native/$(HOST)/haxe $(if $(PORT),--port)
+
 hxmc-test: $(TOOL) $(STD) $(HOST_RT)
 	$(SCRIPT) Corpus -v $(CASES)
 
@@ -477,12 +497,26 @@ GFX_ARGS = $(if $(filter linux-%,$(GFX_TARGET)),-D hxmc.libc=glibc) -D hxmc.targ
 gfx-programs: $(TOOL) $(STD) $(HOST_RT)
 	$(call hxmc,bin/gfx/$(GFX_TARGET)/GfxTest$(call EXE,$(GFX_TARGET)),$(GFX_CP) -main GfxTest $(HXMC_ARGS) $(GFX_ARGS))
 	$(call hxmc,bin/gfx/$(GFX_TARGET)/Triangle$(call EXE,$(GFX_TARGET)),$(GFX_CP) -main Triangle $(HXMC_ARGS) $(GFX_ARGS))
+	$(call hxmc,bin/gfx/$(GFX_TARGET)/Cube$(call EXE,$(GFX_TARGET)),$(GFX_CP) -main Cube $(HXMC_ARGS) $(GFX_ARGS))
 gfx-check: gfx-programs
 	sh packages/gfx/test/check.sh bin/gfx/$(GFX_TARGET)
 
 gfx-web-check: $(TOOL) $(STD)
 	$(call hxmc,bin/gfx/WebTest.wasm,$(GFX_CP) -main WebTest $(HXMC_ARGS) -D hxmc.target=wasm32-wasi)
 	$(NODE) packages/gfx/test/web.mjs bin/gfx/WebTest.wasm bin/gfx
+
+# packages/os's audio (Linux: the glibc mode, which loads libasound.so.2)
+OS_CP := -cp packages/os/src -cp packages/os/examples -cp packages/os/test
+AUDIO_ARGS = $(if $(filter linux-%,$(AUDIO_TARGET)),-D hxmc.libc=glibc) -D hxmc.target=$(AUDIO_TARGET)
+audio-programs: $(TOOL) $(STD) $(HOST_RT)
+	$(call hxmc,bin/audio/$(AUDIO_TARGET)/AudioTest$(call EXE,$(AUDIO_TARGET)),$(OS_CP) -main AudioTest $(HXMC_ARGS) $(AUDIO_ARGS))
+	$(call hxmc,bin/audio/$(AUDIO_TARGET)/Tone$(call EXE,$(AUDIO_TARGET)),$(OS_CP) -main Tone $(HXMC_ARGS) $(AUDIO_ARGS))
+audio-check: audio-programs
+	sh packages/os/test/audio.sh bin/audio/$(AUDIO_TARGET)
+
+audio-web-check: $(TOOL) $(STD)
+	$(call hxmc,bin/audio/AudioTest.wasm,$(OS_CP) -main AudioTest $(HXMC_ARGS) -D hxmc.target=wasm32-wasi)
+	$(NODE) packages/os/test/web.mjs bin/audio/AudioTest.wasm
 
 gfx-shader-check: $(TOOL)
 	ulimit -s unlimited 2>/dev/null || true; $(TOOL) -cp packages/gfx/src -cp packages/gfx/examples -cp packages/gfx/test --run ShaderTest $(TOOL) $(if $(BLESS),--bless)
@@ -532,6 +566,13 @@ ui-web-check: $(TOOL) $(STD)
 	$(NODE) packages/ui/test/web.mjs bin/ui/WebTodo.wasm bin/ui
 	$(call hxmc,bin/ui/NativeForm.wasm,$(UI_CP) -main NativeForm $(HXMC_ARGS) -D hxmc.target=wasm32-wasi)
 	$(NODE) packages/ui/test/native-web.mjs bin/ui/NativeForm.wasm bin/ui
+# (each macro class compiled in a child of bin/jit/haxe; the engine's report in each
+# case's port.log)
+MACROS ?= verify
+native-macros: $(TOOL) $(STD) $(HOST_RT) $(REFERENCE)
+	$(call hxmc,bin/jit/haxe,$(PKG_ARGS) -D hxmc.jit)
+	export HXMC_STD=$(abspath bin/hxmc/std) HXMC_RT_DIR=$(abspath bin/hxmc/rt) HAXE_REFERENCE=$(abspath $(REFERENCE)) HAXE_IN_HAXE_PORT="$(abspath bin/jit/haxe) -D hxmc.macros=$(MACROS)"; $(SCRIPT) Conformance -j $(JOBS) --cases haxe/test/conformance-macro-cases.txt
+	@cat bin/test/conformance/*/port.log | grep -h "^hxmc.macros: [0-9]* macro calls" | awk '{c+=$$2; n+=$$5; m+=substr($$7,2); mm+=$$9; e+=$$11} END {print "native macros: " c " calls, " n " native (" m " matched, " mm " mismatched), " e " on Eval"}'
 
 portcheck: $(TOOL) $(STD) $(HOST_RT) $(REFERENCE)
 	$(SCRIPT) Selfcheck --local --small
@@ -553,7 +594,7 @@ full: $(TOOL) $(STD) $(HOST_RT)
 	$(SCRIPT) Tiers full $(CASES)
 
 clean:
-	rm -rf bin/port bin/release bin/lix-dist bin/site bin/wasm bin/fuzz bin/lix bin/npm bin/stage0 bin/test bin/gfx bin/corpus \
+	rm -rf bin/port bin/release bin/lix-dist bin/site bin/wasm bin/fuzz bin/lix bin/npm bin/stage0 bin/test bin/gfx bin/audio bin/corpus \
 		bin/hxmc/boot bin/hxmc/fix bin/hxmc-t bin/hxmc-fuzz $(CLI_BOOT)/hxmc-std $(CLI_BOOT)/rt
 
 distclean: clean

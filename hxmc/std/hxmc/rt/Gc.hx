@@ -26,6 +26,23 @@ import hxmc.unsafe.*;
 // works on their records. With one thread a TLAB is a chunk of 32 KB
 // (RT_ZCHUNK_KB).
 //
+// The nursery's size (unless RT_MINOR_KB fixes it) follows what survives
+// it and the threads that allocate (adaptNursery): it doubles after a minor
+// collection that promoted more than a 16th of what was allocated since the
+// last one (objects that live a little longer than a cycle, e.g. a tree
+// being built, are copied fewer times, and fewer of them reach the old
+// space and its major collections: the port typing itself, a third less
+// time in the collector and a third less peak memory at 16 MB than at 4),
+// and halves after 8 collections that promoted less than a 64th; programs
+// whose objects die young keep 4 MB, which stays in the caches. Between a
+// floor of 4 MB per allocating thread and a ceiling of 16 MB, 8 MB more per
+// other thread, up to 32 MB (MINOR_MIN, MINOR_CAP, MINOR_PER_THREAD,
+// MINOR_MAX): one budget, split into TLABs; threads that fill it together
+// stop together, so each collection costs all of them a pause. A thread
+// counts when it took a TLAB since the last collection; the count grows at
+// once and shrinks after 16 collections with fewer threads (a parallel phase
+// starts and ends its workers' allocation).
+//
 // Allocation zeroes in bulk: a TLAB is zeroed when it is taken (in the L1
 // cache, right before the allocations that use it), so every object
 // allocated in the nursery starts zeroed and no allocation zeroes its own
@@ -48,6 +65,11 @@ class Gc {
 	static inline var K_FWD = 15;
 	static inline var T_NATIVE = 16; // a native handle
 	static inline var MINOR_MAX = 32 << 20;
+	static inline var MINOR_MIN = 4 << 20;
+	static inline var MINOR_CAP = 16 << 20;
+	static inline var MINOR_PER_THREAD = 8 << 20;
+	static inline var FEWER_THREADS_AFTER = 16;
+	static inline var LOW_PROMOTION_AFTER = 8;
 	static inline var POISON = 0xA5;
 
 	// ---- the running thread's state (Threads.publish copies what the
@@ -75,6 +97,17 @@ class Gc {
 	static var tlabSize:I64; // with several threads (RT_TLAB_KB; default a 16th of the nursery)
 	static var zchunk:I64; // RT_ZCHUNK_KB
 	static var minorFixed:Bool; // RT_MINOR_KB sets the nursery size
+	// the threads that took a TLAB in this cycle (a thread counts once per
+	// epoch, which each collection advances), the count the size follows,
+	// and the collections since a cycle had as many
+	@:hxmc.export("hxmc_allocating") static var allocating:Int;
+	static var epoch:Int;
+	@:hxmc.threadLocal static var myEpoch:Int;
+	static var mutators:Int;
+	static var fewerFor:Int;
+	static var fewerMax:Int;
+	static var promotionSize:I64; // the size what survives asks for
+	static var lowFor:Int; // collections in a row that promoted little
 	static var hugePages:Bool; // RT_HUGE
 	// RT_VERIFY=1: the free nursery is filled with a byte pattern at startup
 	// and after every collection, so that an allocation that is not
@@ -106,6 +139,8 @@ class Gc {
 	static var minors:Int;
 	static var majors:Int;
 	static var minorSecs:Float; // RT_STATS
+	static var youngBytes:I64; // RT_STATS: allocated in the nursery, and promoted from it
+	static var promotedBytes:I64;
 	static var majorSecs:Float;
 
 	// ---- finalisers (Gc.finalise in Eval): OCaml's Gc.finalise semantics. A
@@ -143,11 +178,6 @@ class Gc {
 	static var gcCap:Int;
 	static var gcBfs:Bool;
 	static var major:Bool; // which forwarding runs
-
-	// nursery growth
-	static var grownFrom:I64;
-	static var survivedBefore:I64;
-	static var growthOff:Bool;
 
 	// ---- objects (the header word at -8; slot count bits 0..27, kind
 	// 28..31, type index 32..47)
@@ -643,14 +673,11 @@ class Gc {
 		return p;
 	}
 
-	// After a minor collection where much of the nursery survived (objects
-	// that live a little longer than a nursery cycle, e.g. a tree being
-	// built), a larger nursery copies them fewer times: double it. It is empty
-	// now. It pays only when the survivors stay about the same with a larger
-	// nursery (they are copied once per collection); when they grow with it
-	// (everything lives long), the growth is undone and not tried again.
+	// (the nursery is empty: between collections)
 	@:hxmc.noGc static function resizeNursery(size:I64) {
-		if (size < minorSize && Os.decommit(youngStart.addL(size), minorSize - size)) {
+		// (macOS: MADV_DONTNEED may leave the pages as they were, so they stay
+		// dirty: the nursery grows again into them)
+		if (size < minorSize && Os.decommit(youngStart.addL(size), minorSize - size) && Mem.os() != 1) {
 			// zeros again above (pages are released whole: the partial page below
 			// the next 64 KB boundary stays dirty)
 			var z = youngStart.addL((size + 0xFFFF) - ((size + 0xFFFF) & 0xFFFF));
@@ -668,17 +695,43 @@ class Gc {
 		}
 	}
 
-	@:hxmc.noGc static function adaptNursery(survived:I64) {
-		if (grownFrom > 0) {
-			if (survived > survivedBefore + (survivedBefore >> 1)) {
-				resizeNursery(grownFrom);
-				growthOff = true;
+	// after a minor collection that promoted `promoted` of `used` bytes, by
+	// `threads` threads (the policy above)
+	@:hxmc.noGc static function adaptNursery(promoted:I64, used:I64, threads:Int) {
+		adaptThreads(threads);
+		var floor:I64 = (MINOR_MIN : I64) * mutators;
+		var ceiling:I64 = (MINOR_CAP : I64) + (mutators - 1 : I64) * MINOR_PER_THREAD;
+		if (floor > (MINOR_MAX : I64)) floor = MINOR_MAX;
+		if (ceiling > (MINOR_MAX : I64)) ceiling = MINOR_MAX;
+		if (promoted * 16 > used) {
+			lowFor = 0;
+			if (promotionSize < ceiling) promotionSize *= 2;
+		} else if (promoted * 64 < used) {
+			if (++lowFor >= LOW_PROMOTION_AFTER && promotionSize > (MINOR_MIN : I64)) {
+				promotionSize = promotionSize / 2;
+				lowFor = 0;
 			}
-			grownFrom = 0;
-		} else if (!growthOff && minorSize < (MINOR_MAX : I64) && survived * 8 > minorSize) {
-			grownFrom = minorSize;
-			survivedBefore = survived;
-			resizeNursery(minorSize * 2);
+		} else
+			lowFor = 0;
+		var size = promotionSize < floor ? floor : promotionSize > ceiling ? ceiling : promotionSize;
+		if (size != minorSize) resizeNursery(size);
+	}
+
+	// the threads that allocated in the cycle that ended: more at once, fewer
+	// after FEWER_THREADS_AFTER collections (then the most of those cycles)
+	@:hxmc.noGc static function adaptThreads(n:Int) {
+		if (n < 1) n = 1;
+		if (n >= mutators) {
+			mutators = n;
+			fewerFor = 0;
+			fewerMax = 0;
+		} else {
+			if (n > fewerMax) fewerMax = n;
+			if (++fewerFor >= FEWER_THREADS_AFTER) {
+				mutators = fewerMax;
+				fewerFor = 0;
+				fewerMax = 0;
+			}
 		}
 	}
 
@@ -696,9 +749,16 @@ class Gc {
 		if (full) majorAndTime(need) else {
 			var before = oldPtr;
 			var m0 = majors;
+			var used = youngNext.diff(youngStart);
 			minor();
-			if (!minorFixed && majors == m0) adaptNursery(oldPtr.diff(before));
+			if (majors == m0) {
+				youngBytes += used;
+				promotedBytes += oldPtr.diff(before);
+				if (!minorFixed) adaptNursery(oldPtr.diff(before), used, allocating);
+			}
 		}
+		allocating = 0;
+		epoch++;
 		youngNext = youngStart;
 		if (poison) LibC.memset(youngStart, POISON, minorSize);
 		// the nursery is empty again: every thread takes a new TLAB at its next allocation
@@ -729,6 +789,10 @@ class Gc {
 	// always: the free nursery stays contiguous). youngDirty changes only
 	// while the world is stopped.
 	@:hxmc.noGc static function tlabRefill(bytes:Int):Bool {
+		if (myEpoch != epoch) {
+			myEpoch = epoch;
+			Atomic.add32(Mem.sym("hxmc_allocating"), 1);
+		}
 		var want:I64 = Atomic.load32(Mem.sym("rt_nthreads")) > 1 ? tlabSize : poison ? ((1 : I64) << 62) : zchunk;
 		if (want < bytes) want = bytes;
 		var cell = Mem.sym("hxmc_young_next");
@@ -925,8 +989,11 @@ class Gc {
 
 	@:hxmc.noGc static function init(ng:Int):Ptr {
 		var m = Os.getenv("RT_MINOR_KB");
-		minorSize = (m.isNull() ? 4096 : Os.atoi(m) : I64) << 10;
 		minorFixed = !m.isNull();
+		minorSize = minorFixed ? (Os.atoi(m) : I64) << 10 : (MINOR_MIN : I64);
+		promotionSize = minorSize;
+		mutators = 1;
+		epoch = 1;
 		stats = Os.has("RT_STATS");
 		#if hxmc.census
 		census = Os.envInt("RT_CENSUS", 0);
@@ -1071,7 +1138,11 @@ class Gc {
 			r.fixed(majorSecs, 2, 0);
 			r.str("s), old ");
 			r.int(oldPtr.diff(oldStart) >> 20, 0);
-			r.str(" MB used\n");
+			r.str(" MB used; promoted ");
+			r.int(promotedBytes >> 20, 0);
+			r.str(" of ");
+			r.int(youngBytes >> 20, 0);
+			r.str(" MB\n");
 			r.flush();
 		}
 	}

@@ -180,9 +180,9 @@ class TypeloadFunction {
 			Sys.println("BEFORE:");
 			var monos = [];
 			var values = ctx.e.monomorphs;
-			for (i in 0...values.length) {
-				var m = values[i].mono,
-					mp = values[i].pos,
+			for (i in 0...context.Typecore.MonomorphList.size(values)) {
+				var m = values.mono(i),
+					mp = values.pos(i),
 					s = printMono(i, m);
 				var spos = "unknown";
 				if (mp.pmin != -1) {
@@ -203,7 +203,10 @@ class TypeloadFunction {
 				var s = printMono(m.index, m.mono);
 				if (s != m.text) Sys.println(s);
 			}
-		} else for (m in ctx.e.monomorphs) safeMonoClose(ctx, m.mono, m.pos);
+		} else {
+			var l = ctx.e.monomorphs;
+			for (i in 0...context.Typecore.MonomorphList.size(l)) safeMonoClose(ctx, l.mono(i), l.pos(i));
+		}
 		if (positionDebug) Sys.println("typing:\n" + Texpr.dumpWithPos("", e));
 		return e;
 	}

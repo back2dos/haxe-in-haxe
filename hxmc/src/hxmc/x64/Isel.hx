@@ -113,6 +113,8 @@ class Isel implements hxmc.Target.Selector {
 			gprs = [1, 2, 6, 7, 8, 9, 10, 11, 0, 3, 12, 13, 14, 15, 5];
 			callerSaved = CALLER_SAVED;
 		}
+		// (rbp holds the frame record's address: Emit)
+		if (abi.framePointers) gprs.remove(5);
 		fprs = [for (i in 16...32) i];
 	}
 
@@ -133,6 +135,28 @@ class Isel implements hxmc.Target.Selector {
 			}
 		if (params[k] == F64) return fi < 8 ? XMM0 + fi : -1 - si;
 		return gi < 6 ? ARG_GPRS[gi] : -1 - si;
+	}
+
+	// argLoc for each of the first n arguments, with the parts of structs
+	// (MIns.cGroups; null: none): System V places a struct's parts in
+	// registers when enough of both kinds are left, else all on the stack
+	// (its memory, in 8-byte words), as it does with a MEMORY struct's
+	function argLocs(params:Array<MTy>, groups:Null<Array<Int>>, n:Int):Array<Int> {
+		if (win || groups == null) return [for (k in 0...n) argLoc(params, k)];
+		var r = [];
+		var gi = 0, fi = 0, si = 0, k = 0;
+		while (k < n) {
+			var g = groups[k];
+			var cnt = g < 0 ? -g : g > 0 ? g : 1;
+			var ni = 0, nf = 0;
+			for (j in k...k + cnt)
+				if (params[j] == F64) nf++ else ni++;
+			var regs = g > 0 && gi + ni <= 6 && fi + nf <= 8;
+			for (j in k...k + cnt)
+				r.push(!regs ? -1 - si++ : params[j] == F64 ? XMM0 + fi++ : ARG_GPRS[gi++]);
+			k += cnt;
+		}
+		return r;
 	}
 
 	// ---- RegTarget
@@ -226,7 +250,7 @@ class Isel implements hxmc.Target.Selector {
 	public function isMove(i:LIns):Bool
 		return i.op == MOV;
 
-	public var callResults(default, null):Array<Int> = [0, 16];
+	public var callResults(default, null):Array<Int> = [0, 2, 16, 17];
 
 	public function isCall(i:LIns):Bool
 		return i.op == CALL;
@@ -752,7 +776,7 @@ class Isel implements hxmc.Target.Selector {
 		switch i.op {
 			case Phi:
 			case Param:
-				var loc = argLoc(m.params, i.imm);
+				var loc = m.cParams != null ? argLocs(m.params, m.cParams, i.imm + 1)[i.imm] : argLoc(m.params, i.imm);
 				var d = reg(i.id);
 				if (loc >= 0) mov(d, loc) else {
 					var x = emit(LOAD);
@@ -1093,6 +1117,27 @@ class Isel implements hxmc.Target.Selector {
 				}
 			case Switch:
 				switchIns(i, b, next);
+			case Ret if (i.a >= 0 && m.cRet != null):
+				// a struct in rax-rdx and xmm0-xmm1, from its memory (whole words)
+				var rs = [];
+				for (p in m.cRet) {
+					var r = f.newReg(p.float);
+					var l = emit(LOAD);
+					l.d = r;
+					l.size = 8;
+					memOf(l, i.a, -1, 1, p.off);
+					rs.push(r);
+				}
+				var x = new LIns(RET);
+				x.uses = [];
+				var gk = 0, fk = 0;
+				for (k in 0...rs.length) {
+					var d = m.cRet[k].float ? XMM0 + fk++ : gk++ == 0 ? RAX : RDX;
+					mov(d, rs[k], 8);
+					x.uses.push(d);
+				}
+				flush();
+				push(x);
 			case Ret:
 				var x = new LIns(RET);
 				if (i.a >= 0) {
@@ -1261,10 +1306,14 @@ class Isel implements hxmc.Target.Selector {
 		var stack = 0;
 		var uses = [];
 		var moves:Array<{d:Int, s:Int, size:Int}> = [];
-		for (k in 0...i.args.length) {
+		// (a struct result in registers: its address is the last argument, not
+		// passed, MirBuild.cStructRet)
+		var n = i.cRet != null ? i.args.length - 1 : i.args.length;
+		var locs = argLocs(i.argTys, i.cGroups, n);
+		for (k in 0...n) {
 			var a = i.args[k];
 			var t = i.argTys[k];
-			var loc = argLoc(i.argTys, k);
+			var loc = locs[k];
 			if (loc >= 0) {
 				moves.push({d: loc, s: a, size: t == F64 ? 8 : sz(t)});
 				uses.push(loc);
@@ -1281,7 +1330,7 @@ class Isel implements hxmc.Target.Selector {
 				continue;
 			}
 			// stack argument
-			stack = -loc;
+			if (-loc > stack) stack = -loc;
 			var imm = immOf(a);
 			var x = emit(imm != null && t != F64 ? STOREI : STORE);
 			x.base = -4; // outgoing argument area
@@ -1319,6 +1368,22 @@ class Isel implements hxmc.Target.Selector {
 		if (i.ty != Void) {
 			var r = i.ty == F64 ? XMM0 : RAX;
 			mov(reg(i.id), r, 8);
+		}
+		if (i.cRet != null) {
+			// a struct in rax-rdx and xmm0-xmm1: out of them first, then into
+			// its memory (whole words: the slot is rounded up to them)
+			var rs = [], gk = 0, fk = 0;
+			for (p in i.cRet) {
+				var r = f.newReg(p.float);
+				mov(r, p.float ? XMM0 + fk++ : gk++ == 0 ? RAX : RDX, 8);
+				rs.push(r);
+			}
+			for (k in 0...i.cRet.length) {
+				var s = emit(STORE);
+				s.size = 8;
+				s.s1 = rs[k];
+				memOf(s, i.args[n], -1, 1, i.cRet[k].off);
+			}
 		}
 	}
 }

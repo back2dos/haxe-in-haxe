@@ -11,6 +11,8 @@ package hxmc;
 //   -D hxmc.target=linux-x86_64     the target (Target.hx, Abi.hx: six of them)
 //   -D hxmc.wasm-eh=legacy          wasm32-wasi: legacy exception handling (default: exnref)
 //   -D hxmc.libc=glibc              Linux: dynamically linked against the system's glibc (default: musl, static)
+//   -D hxmc.frame-pointers          x86-64: a frame record in every function, for perf -g and debuggers
+//                                   (also -debug; HXMC_FRAME_POINTERS=1, =0 off; arm64 always)
 //   HXMC_RT_OBJ                     the runtime object (default: <tool dir>/rt/<target>/rt.o)
 //   HXMC_STATS=1                    print what the build did and how long it took
 class Main {
@@ -40,6 +42,7 @@ class Main {
 				Sys.exit(Sys.command(Sys.programPath(), ["--server"].concat(args)));
 			}
 			Driver.resident = true;
+			hxmc.ir.CInterop.install();
 			compiler.Compiler.generateHook = function(com) {
 				try {
 					start = haxe.Timer.stamp();
@@ -80,7 +83,10 @@ class Main {
 			}
 		}
 		TypesCache.install();
+		ModuleCache.install();
+		hxmc.ir.CInterop.install();
 		var code = haxe.Main.run(args.concat(["--no-output"]));
+		ModuleCache.finish(failed == null ? code : 1);
 		if (failed != null) {
 			Sys.stderr().writeString("hxmc: " + failed + "\n");
 			Sys.exit(1);

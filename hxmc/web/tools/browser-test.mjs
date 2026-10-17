@@ -10,14 +10,15 @@
 // the Programs tables (run time, compile time) with the "Over time" charts
 // hidden, and with ?bench-history one chart per case with a hover tooltip, in
 // light and dark mode, and at a phone's width (screenshots into $SCREENSHOTS
-// when set). The Graphics section's triangle (gfx/): its canvas resized to
-// 256x192 and a frame read back against packages/gfx/test/triangle.png
-// (packages/gfx/test/compare.mjs), the caption naming the API it drew with:
+// when set). The Graphics section's cube (gfx/, still: ?cube-angle=0.6): its
+// canvas resized to 256x192 and a frame read back against
+// packages/gfx/test/cube.png (packages/gfx/test/compare.mjs), the caption
+// naming the API it drew with:
 // in Chromium with WebGPU on SwiftShader, through WebGPU and, with
 // ?gfx=webgl2, through WebGL2; in the browsers without WebGPU (Firefox and
 // WebKit here, and the Chromium without exnref, launched without it)
 // through WebGL2. Headless Firefox on Linux has no WebGL (no GL driver it
-// accepts): with an X display (xvfb-run, as on CI) its triangle runs in a
+// accepts): with an X display (xvfb-run, as on CI) its cube runs in a
 // headed Firefox there, on Mesa's llvmpipe; without one, the page must say
 // that neither API is available.
 //   node hxmc/web/tools/browser-test.mjs bin/site [chromium firefox webkit]
@@ -36,7 +37,7 @@ const dir = process.argv[2];
 const names = process.argv.length > 3 ? process.argv.slice(3) : ['chromium', 'firefox', 'webkit'];
 const types = { '.js': 'text/javascript', '.wasm': 'application/wasm', '.html': 'text/html', '.css': 'text/css', '.json': 'application/json' };
 const modules = ['hih.wasm', 'hih-legacy.wasm'].filter((m) => existsSync(path.join(dir, m)));
-// (/gfx-test/: packages/gfx/test, the triangle's golden image and comparison)
+// (/gfx-test/: packages/gfx/test, the cube's golden image and comparison)
 const gfxTest = path.join(path.dirname(fileURLToPath(import.meta.url)), '../../../packages/gfx/test');
 types['.mjs'] = 'text/javascript';
 types['.png'] = 'image/png';
@@ -104,7 +105,7 @@ async function inPage([code, wasm]) {
 async function pageTest(browser, query, expect) {
 	const page = await browser.newPage();
 	const fetched = [];
-	// (the compiler's modules: not the Graphics section's triangle)
+	// (the compiler's modules: not the Graphics section's cube)
 	page.on('request', (r) => { const p = new URL(r.url()).pathname; if (p.endsWith('.wasm') && !p.includes('/gfx/')) fetched.push(path.basename(p)); });
 	await page.route(/^https:\/\/cdn\.jsdelivr\.net\//, (r) => r.abort());
 	await page.goto(`http://localhost:${port}/index.html${query}`);
@@ -206,33 +207,33 @@ async function benchTest(browser, name) {
 	return ok;
 }
 
-// the Graphics section: the triangle through the API expected (webgpu,
+// the Graphics section: the cube through the API expected (webgpu,
 // webgl2), against the golden image, the caption naming it; expect null: the
 // message that neither is available
 const APIS = { webgpu: 'WebGPU', webgl2: 'WebGL2' };
-async function triangleTest(browser, label, expect, query = '') {
+async function cubeTest(browser, label, expect, query = '') {
 	const page = await browser.newPage({ viewport: { width: 1100, height: 900 } });
 	const errors = [];
 	page.on('pageerror', (e) => errors.push(e.message));
-	// (the triangle's and hxmc.gfx's errors: not the editor's, which is blocked)
-	page.on('console', (m) => m.type() === 'error' && /^(triangle|hxmc\.gfx)/.test(m.text()) && errors.push(m.text()));
+	// (the cube's and hxmc.gfx's errors: not the editor's, which is blocked)
+	page.on('console', (m) => m.type() === 'error' && /^(cube|hxmc\.gfx)/.test(m.text()) && errors.push(m.text()));
 	await page.route(/^https:\/\/cdn\.jsdelivr\.net\//, (r) => r.abort());
-	await page.goto(`http://localhost:${port}/index.html${query}`);
+	await page.goto(`http://localhost:${port}/index.html?cube-angle=0.6${query}`);
 	await page.evaluate(() => document.getElementById('graphics').scrollIntoView());
 	let r;
 	try {
-		await page.waitForFunction(() => document.getElementById('triangle').hxmc || !document.getElementById('triangle-state').hidden, null, { timeout: 60000 });
+		await page.waitForFunction(() => document.getElementById('cube').hxmc || !document.getElementById('cube-state').hidden, null, { timeout: 60000 });
 		r = await page.evaluate(async () => {
-			const c = document.getElementById('triangle'), state = document.getElementById('triangle-state');
+			const c = document.getElementById('cube'), state = document.getElementById('cube-state');
 			if (!state.hidden) return { drawn: false, text: state.textContent };
-			const backend = c.hxmc.gfx.backend, caption = document.getElementById('triangle-api').textContent;
+			const backend = c.hxmc.gfx.backend, caption = document.getElementById('cube-api').textContent;
 			// (a frame at the golden image's size: the buffer follows the displayed size)
 			c.style.boxSizing = 'content-box';
 			c.style.width = '256px';
 			c.style.height = '192px';
 			await new Promise((ok) => requestAnimationFrame(() => requestAnimationFrame(ok)));
 			const [{ decode, compare }, px] = await Promise.all([import('/gfx-test/compare.mjs'), c.hxmc.gfx.readPixels()]);
-			return { drawn: true, backend, caption, ...compare('triangle', px, await decode('/gfx-test/triangle.png')) };
+			return { drawn: true, backend, caption, ...compare('cube', px, await decode('/gfx-test/cube.png')) };
 		});
 	} catch (e) {
 		r = { drawn: false, text: e.message.split('\n')[0] };
@@ -242,7 +243,7 @@ async function triangleTest(browser, label, expect, query = '') {
 	const ok = !expect
 		? !r.drawn && /^Neither WebGPU nor WebGL2/.test(r.text) && errors.every((e) => /neither WebGPU nor WebGL2/.test(e))
 		: errors.length === 0 && r.drawn && r.ok && r.backend === expect && r.caption === APIS[expect];
-	console.log(`  triangle${query} ${ok ? 'ok' : 'FAILED'}: ${r.backend ? 'through ' + r.backend + ' (caption: ' + r.caption + '), ' : ''}${r.text}${errors.length ? '; errors: ' + errors.join('; ') : ''}`);
+	console.log(`  cube${query} ${ok ? 'ok' : 'FAILED'}: ${r.backend ? 'through ' + r.backend + ' (caption: ' + r.caption + '), ' : ''}${r.text}${errors.length ? '; errors: ' + errors.join('; ') : ''}`);
 	return ok;
 }
 
@@ -269,7 +270,7 @@ for (const { name, label, opts, noExnref } of launches) {
 			console.log(`  hih.wasm: ${err}`);
 			if (err === 'compiled') failed++;
 			if (!(await pageTest(browser, '', 'hih-legacy.wasm'))) failed++;
-			if (existsSync(path.join(dir, 'gfx/triangle.wasm')) && !(await triangleTest(browser, 'chromium-no-exnref', 'webgl2'))) failed++;
+			if (existsSync(path.join(dir, 'gfx/cube.wasm')) && !(await cubeTest(browser, 'chromium-no-exnref', 'webgl2'))) failed++;
 			continue;
 		}
 		for (const wasm of modules) {
@@ -286,14 +287,14 @@ for (const { name, label, opts, noExnref } of launches) {
 			if (!(await pageTest(browser, '', 'hih.wasm'))) failed++;
 			if (modules.includes('hih-legacy.wasm') && !(await pageTest(browser, '?eh=legacy', 'hih-legacy.wasm'))) failed++;
 		}
-		if (existsSync(path.join(dir, 'gfx/triangle.wasm'))) {
+		if (existsSync(path.join(dir, 'gfx/cube.wasm'))) {
 			if (name === 'firefox') {
 				const headed = process.env.DISPLAY ? await pw.firefox.launch({ headless: false }) : null;
-				if (headed) console.log('  (the triangle in a headed Firefox on DISPLAY ' + process.env.DISPLAY + ')');
-				if (!(await triangleTest(headed ?? browser, headed ? 'firefox-headed' : name, headed ? 'webgl2' : null))) failed++;
+				if (headed) console.log('  (the cube in a headed Firefox on DISPLAY ' + process.env.DISPLAY + ')');
+				if (!(await cubeTest(headed ?? browser, headed ? 'firefox-headed' : name, headed ? 'webgl2' : null))) failed++;
 				await headed?.close();
-			} else if (!(await triangleTest(browser, name, name === 'chromium' ? 'webgpu' : 'webgl2'))) failed++;
-			if (name === 'chromium' && !(await triangleTest(browser, name, 'webgl2', '?gfx=webgl2'))) failed++;
+			} else if (!(await cubeTest(browser, name, name === 'chromium' ? 'webgpu' : 'webgl2'))) failed++;
+			if (name === 'chromium' && !(await cubeTest(browser, name, 'webgl2', '&gfx=webgl2'))) failed++;
 		}
 	} catch (e) {
 		console.log(`== ${label}: ${e.message.split('\n')[0]}`);

@@ -49,6 +49,7 @@ editors, lix and rebuilding the compiler from source:
 | `-D hxmc.wasm-eh=legacy` | wasm: legacy exception handling, for older browsers and runtimes |
 | `HXMC_STATS=1` | what the build did and how long it took |
 | `HXMC_CACHE=<dir>` | the cache directory (default: the user's cache folder) |
+| `HXMC_MODULE_CACHE=1`, `-D hxmc.module-cache` | keep typed modules between builds (experimental): a rebuild types only what changed |
 
 Rebuilds only recompile changed modules; `haxe --wait 6000` plus
 `haxe --connect 6000 build.hxml` keeps everything in memory.
@@ -69,7 +70,7 @@ npm i -D @hxmc/gfx
 | Package | |
 | --- | --- |
 | `@hxmc/os` | windows, input and the app loop: X11, Cocoa, Win32 and the browser canvas |
-| `@hxmc/gfx` | a portable GPU API with back ends for GL/GLES (Linux), Metal (macOS), D3D11 (Windows), WebGPU and WebGL2 (browser), and shaders written in Haxe (compiled to GLSL, WGSL, MSL, HLSL); see `packages/gfx/examples/Triangle.hx` |
+| `@hxmc/gfx` | a portable GPU API with back ends for GL/GLES (Linux), Metal (macOS), D3D11 (Windows), WebGPU and WebGL2 (browser), and shaders written in Haxe (compiled to GLSL, WGSL, MSL, HLSL); see `packages/gfx/examples/Triangle.hx` and `Cube.hx` |
 | `@hxmc/text` | TrueType fonts in pure Haxe: parsing, an anti-aliased rasterizer, shaping with kerning and fallback fonts, bidi and Arabic shaping, line layout, a glyph atlas, the system's fonts |
 | `@hxmc/esx` | JSX-like markup for Haxe on every target, after the ESX proposal: a static template per literal and its dynamic values; components are type-checked calls |
 | `@hxmc/ui` | a UI toolkit: a node tree with flexbox layout (checked against Chromium's), events and focus, drawn with the GPU on gfx, signals and a Solid-like renderer for markup, widgets; see `packages/ui/examples/Todo.hx` |

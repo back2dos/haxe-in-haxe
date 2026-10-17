@@ -24,6 +24,10 @@ class DataGen {
 	var cstrs = new Map<String, Symbol>();
 	var ncstr = 0;
 	var nlocal = 0;
+	// -D hxmc.jit: zeroed entries after rt_types and the signature tables, filled
+	// at run time by the types and signatures of native macros (hxmc.macro.Loader)
+	public var spareTypes = 0;
+	public var spareSigs = 0;
 
 	public function new(prep:Prep, abi:Abi, obj:Obj, compile:MFunc->Void) {
 		this.prep = prep;
@@ -139,10 +143,10 @@ class DataGen {
 		bss.bssSize = (bss.bssSize + 15) & ~15;
 		typeObjs = bss.bssSize;
 		var n = e.types.length;
-		obj.define("rt_type_objs", bss, typeObjs, 8 * 2 * n, true);
+		obj.define("rt_type_objs", bss, typeObjs, 8 * 2 * (n + spareTypes), true);
 		for (t in 0...n)
 			obj.define(prep.typeObjSym(t), bss, typeObjs + 8 * (2 * t + 1), 8, true);
-		bss.bssSize += 8 * 2 * n;
+		bss.bssSize += 8 * 2 * (n + spareTypes);
 	}
 
 	var typeObjs = 0;
@@ -181,18 +185,23 @@ class DataGen {
 		begin(data, "rt_dyncalls", 8, true);
 		for (s in p.sigs)
 			ptr(data, "DYN" + s.id);
+		data.buf.zeros(8 * spareSigs);
 		var keys = [for (s in p.sigs) cstr(s.key)];
 		begin(data, "rt_sig_keys", 8, true);
 		for (k in keys)
 			ptrSym(data, k);
+		data.buf.zeros(8 * spareSigs);
 		int32Global("rt_nsigs", p.sigs.length);
 		begin(data, "rt_bound_tramps", 8, true);
 		for (s in p.sigs)
 			ptr(data, "BT" + s.id);
-		rodata.buf.align(4);
-		obj.define("rt_bound_types", rodata, rodata.buf.len, 4 * p.sigs.length, true);
+		data.buf.zeros(8 * spareSigs);
+		var bt = spareSigs > 0 ? data : rodata;
+		bt.buf.align(4);
+		obj.define("rt_bound_types", bt, bt.buf.len, 4 * (p.sigs.length + spareSigs), true);
 		for (s in p.sigs)
-			rodata.buf.u32(e.boundTypes.get(s.id));
+			bt.buf.u32(e.boundTypes.get(s.id));
+		bt.buf.zeros(4 * spareSigs);
 	}
 
 	// DYN<s>(c, args): calls closure c with the boxed arguments args[i], boxes the result
@@ -355,6 +364,7 @@ class DataGen {
 			if (x.ssSym != null) ptrSym(data, x.ssSym) else data.buf.u64(0, 0); // 104 statics
 			if (data.buf.len - at != Abi.TYPE_SIZE) throw "hxmc: rt_type layout";
 		}
+		data.buf.zeros(Abi.TYPE_SIZE * spareTypes);
 		int32Global("rt_ntypes", types.length);
 	}
 
@@ -415,7 +425,7 @@ class DataGen {
 
 	// the runtime's machine-code stubs the program refers to (MirBuild.STUB_*)
 	public function stubs(objs:Array<Obj>, emit:Target.Emitter) {
-		for (n in [MirBuild.STUB_CALL_ON_STACK, MirBuild.STUB_ZERO]) {
+		for (n in [MirBuild.STUB_CALL_ON_STACK, MirBuild.STUB_ZERO, MirBuild.STUB_FRAME]) {
 			var used = false;
 			for (o in objs.concat([obj]))
 				for (s in o.symbols)

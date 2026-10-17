@@ -20,6 +20,14 @@ class Options {
 	public var wasmLegacyEh = false;
 	// -D hxmc.libc=glibc: Linux, a dynamically linked executable against the system's glibc (Abi.setLibc; default: musl, static)
 	public var libc:Null<String> = null;
+	// -D hxmc.frame-pointers (also -debug; HXMC_FRAME_POINTERS=1, =0 off): x86-64
+	// functions keep a frame record (push rbp; mov rbp, rsp), so profilers and
+	// debuggers walk the stack by frame pointer (arm64 always has them: Abi)
+	public var framePointers = false;
+	// -D hxmc.jit: a compiler that can load native macros (hxmc/src/hxmc/macro): spare
+	// type and signature table entries, every runtime function kept, the
+	// symbols written next to the executable (<out>.syms); Linux x86-64, static
+	public var jit = false;
 
 	public function new() {}
 
@@ -67,7 +75,7 @@ class Options {
 		o.stats = env("HXMC_STATS") == "1";
 		o.verbose = def("hxmc.verbose") != null || env("HXMC_VERBOSE") == "1";
 		o.dump = env("HXMC_DUMP");
-		var sa = def("hxmc.seg-align");
+		var sa = def("hxmc.seg_align"); // (-D turns the dash into an underscore)
 		if (sa != null) o.segAlign = Std.parseInt(sa);
 		o.pic = def("hxmc.pic") != null;
 		o.strip = !(def("debug") != null || def("hxmc.symbols") != null || env("HXMC_SYMBOLS") == "1");
@@ -80,6 +88,10 @@ class Options {
 			case _: throw "hxmc: -D hxmc.wasm-eh=" + eh + ": exnref or legacy";
 		}
 		o.libc = def("hxmc.libc");
+		var fp = def("hxmc.frame_pointers"), fpEnv = env("HXMC_FRAME_POINTERS");
+		o.framePointers = fpEnv != null && fpEnv != "" ? fpEnv != "0" : fp != null ? fp != "0" : def("debug") != null;
+		o.jit = def("hxmc.jit") != null;
+		if (o.jit && (o.target != "linux-x86_64" || o.libc != null)) throw "hxmc: -D hxmc.jit: linux-x86_64 (static) only";
 		var j = def("hxmc.jobs");
 		if (j == null) j = env("HXMC_JOBS");
 		if (j != null) o.jobs = Std.parseInt(j);

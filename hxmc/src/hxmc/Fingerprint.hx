@@ -223,6 +223,10 @@ class Fingerprint {
 				b.add("ub");
 				ty(t);
 				ex(x);
+			case EFieldAddr(c, idx, o):
+				b.add("fa");
+				b.add(c.locs[idx]);
+				ex(o);
 			case EField(c, idx, o):
 				b.add("fd");
 				b.add(c.locs[idx]);

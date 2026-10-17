@@ -194,6 +194,11 @@ class Facts {
 						locs.push(2 * half);
 						slots.push(TI32);
 					}
+				case TStruct(_, size):
+					// (a struct's memory: whole slots, none a reference)
+					locs.push(slots.length);
+					for (_ in 0...(size + 7) >> 3)
+						slots.push(TI64);
 				case _:
 					locs.push(slots.length);
 					slots.push(t);
@@ -216,7 +221,8 @@ class Facts {
 			c.locs = layout(slots, [for (f in c.fields) f.ty]);
 			c.nslots = slots.length;
 			var t = entry(c.name, "TK_CLASS", slots, c.name);
-			t.fields = [for (i in 0...c.fields.length) {name: c.fields[i].name, slot: c.locs[i], ty: c.fields[i].ty}];
+			// (a struct field is not reachable by name: Dynamic access and reflection skip it)
+			t.fields = [for (i in 0...c.fields.length) if (!c.fields[i].ty.match(TStruct(_))) {name: c.fields[i].name, slot: c.locs[i], ty: c.fields[i].ty}];
 			c.tindex = addType(t);
 		}
 		for (c in p.classes)
@@ -352,7 +358,7 @@ class Facts {
 			case EBin(_, a, b):
 				f(a);
 				f(b);
-			case ENot(a) | EConv(_, a) | EBox(_, a) | EUnbox(_, a) | EField(_, _, a) | EAnonGet(_, _, a, _) | ECast(_, a) | EInstOf(_, a) | EEnumTag(a, _) | EEnumParam(_, _, a) | EArrLen(a) | EBoxGet(_, a) | ECapture(_, _, a) | ENewBox(_, a):
+			case ENot(a) | EConv(_, a) | EBox(_, a) | EUnbox(_, a) | EField(_, _, a) | EFieldAddr(_, _, a) | EAnonGet(_, _, a, _) | ECast(_, a) | EInstOf(_, a) | EEnumTag(a, _) | EEnumParam(_, _, a) | EArrLen(a) | EBoxGet(_, a) | ECapture(_, _, a) | ENewBox(_, a):
 				f(a);
 			case EArrGet(_, a, i) | EArrGetU(_, a, i):
 				f(a);
@@ -580,7 +586,7 @@ class Facts {
 		var r = false;
 		function ex(e:Ex) {
 			if (r) return;
-			if (e.match(ECallHost("hxmc_unsafe_Mem_addr", _, _))) r = true else Facts.iterEx(ex, e);
+			if (e.match(ECallHost("hxmc_unsafe_Mem_addr", _, _) | EFieldAddr(_))) r = true else Facts.iterEx(ex, e);
 		}
 		function st(s:Stmt)
 			if (!r) Facts.iterStmt(st, ex, s);

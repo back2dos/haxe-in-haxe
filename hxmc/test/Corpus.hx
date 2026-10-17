@@ -14,8 +14,9 @@ using StringTools;
 // cached, rewritten when a source is newer); the tool compiles it and the
 // output ("exit <code>" and stdout) must equal hxmc/test/expected/<case>.txt.
 // The golden files are frozen: a new case gets one with --bless (written from
-// hxmc's own output, to be checked by hand). --target cross-builds for another
-// target (linux-arm64 runs under qemu-aarch64-static, windows-x86_64 under
+// hxmc's own output, to be checked by hand). A `// define: <name>[=<value>]`
+// line of a case's source adds that -D to its build. --target cross-builds
+// for another target (linux-arm64 runs under qemu-aarch64-static, windows-x86_64 under
 // wine64, wasm32-wasi under node or, with HXMC_WASM_RUNNER=wasmtime,
 // wasmtime; --wasm-eh legacy: built with -D hxmc.wasm-eh=legacy, run under
 // node without exnref; --libc glibc: Linux, dynamically linked against the
@@ -36,8 +37,6 @@ class Corpus {
 	static final WASM_EXCLUDED = ["ThreadNatives" => "no threads on wasm32-wasi", "ThreadLocal" => "no threads on wasm32-wasi", "NetNatives" => "no sockets on wasm32-wasi"];
 	// the cases of the dynamic glibc mode only (shared libraries of the system)
 	public static final GLIBC_ONLY = ["SharedLibs" => "shared libraries: the dynamic glibc mode only (--libc glibc)"];
-	// the cases of the arm64 targets only
-	public static final ARM64_ONLY = ["FfiStruct" => "structs by value in C calls: arm64 only for now"];
 
 	static var tool:String;
 	static var target:Null<String>;
@@ -113,7 +112,6 @@ class Corpus {
 		var wasm = target != null && target.startsWith("wasm");
 		if (c.name.startsWith("reject-")) return stage != null || libc != null ? {name: c.name, status: "excluded", detail: "a compile error"} : rejectCase(c);
 		var t = target != null ? target : hostTarget();
-		if (!t.endsWith("arm64") && ARM64_ONLY.exists(c.name)) return {name: c.name, status: "excluded", detail: ARM64_ONLY[c.name]};
 		var native = nativeInputs(c, t, d);
 		if (native.skip != null) return {name: c.name, status: "excluded", detail: native.skip};
 		if (wasm && WASM_EXCLUDED.exists(c.name)) return {name: c.name, status: "excluded", detail: WASM_EXCLUDED[c.name]};
@@ -142,6 +140,10 @@ class Corpus {
 		if (libc != null) cmd = cmd.concat(["-D", "hxmc.libc=" + libc]);
 		if (native.links.length > 0) cmd = cmd.concat(["-D", "hxmc.link=" + native.links.join(",")]);
 		if (wasm && wasmEh != null) cmd = cmd.concat(["-D", "hxmc.wasm-eh=" + wasmEh]);
+		var src = c.cps[0] + "/" + c.main + ".hx";
+		if (FileSystem.exists(src))
+			for (l in File.getContent(src).split("\n"))
+				if (l.trim().startsWith("// define: ")) cmd = cmd.concat(["-D", l.trim().substr(11)]);
 		var r = exec(cmd, {env: ["HXMC_STATS" => "1"]});
 		File.saveContent(d + "/hxmc.log", r.out + r.err);
 		if (r.code != 0) return {name: c.name, status: "hxmc-fail", detail: tail(r.out + r.err, 2000)};

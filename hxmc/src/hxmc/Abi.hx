@@ -71,11 +71,16 @@ class Abi {
 	// mode would be /lib/ld-musl-<arch>.so.1, libc.so, unversioned.
 	public var interp:Null<String> = null;
 	public var versioned = false;
+	// every function keeps a frame record, linked through the frame pointer
+	// (rbp; x29): arm64 always (Apple's ABI requires it, and its prologue is
+	// the record), x86-64 with -D hxmc.frame-pointers (Options.framePointers)
+	public var framePointers = false;
 
 	function new(name, arm, os, size, prev, sp, align, setjmp, prefix) {
 		this.name = name;
 		this.arm = arm;
 		this.os = os;
+		framePointers = arm;
 		handlerSize = size;
 		handlerPrev = prev;
 		handlerSp = sp;

@@ -453,8 +453,11 @@ class CallUnification {
 		}
 		function attempts(list:Array<TClassField>):CallAttempts {
 			if (list.length == 0) return {candidates: [], failures: []};
-			var cf = list[0], current = ctx.e.monomorphs,
-				known = current.map(pair -> {mono: pair.mono, type: pair.mono.tmType, constraints: pair.mono.tmDownConstraints});
+			var cf = list[0], current = ctx.e.monomorphs, known = [];
+			for (i in 0...context.Typecore.MonomorphList.size(current)) {
+				var mono = current.mono(i);
+				known.push({mono: mono, type: mono.tmType, constraints: mono.tmDownConstraints});
+			}
 			try {
 				var candidate = attempt(cf, true);
 				ctx.e.monomorphs = current;

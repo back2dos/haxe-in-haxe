@@ -1,0 +1,24 @@
+exit 0
+StructValues.hx:149: (1, 2), (10, 2), 3, 0
+StructValues.hx:150: 101, (1, 2)
+StructValues.hx:152: (5.5, 2), (3, 0.75)
+StructValues.hx:155: (5.5, 2), (5.5, 99), false, true, true, false
+StructValues.hx:159: [(5.5, 2) (10, 2) 7 true], [(5, 1.5) (10.5, 2.5) 7 true]
+StructValues.hx:162: [(5.5, 2) (10, -1) 7 true], [(10, 2) (10.5, 2.5) 7 true], false, true
+StructValues.hx:163: (6765, 10946)
+StructValues.hx:172: (5.5, 2), (5, 10.8125)
+StructValues.hx:174: (0.5, -0.5)
+StructValues.hx:178: (11, 0), [(4.5, 1) (11, 0) 7 true]
+StructValues.hx:198: 35960.5, 420790.5, (23, -3), [(1, -2.5) (13, 359.5) 2 true], true
+StructValues.hx:200: 784, (4, 8)
+StructValues.hx:212: [(2, 42) (10, -1) 7 true], (2, 42), (3, -3), (77, -3)
+StructValues.hx:220: -4, 65535, 1.5, 1048576, -5, false
+StructValues.hx:234: 8, (2, 104), (-1, 6), (-1, 0), 3, (4, 8), Slice index out of range
+StructValues.hx:239: 8, 12, 11, 11
+StructValues.hx:249: (5, -9)
+StructValues.hx:259: 3, (1, 2), (50, 2), (5.5, 2), 56.5, (1, 2)
+StructValues.hx:264: (7, 8), true, false, (7, 8), true
+StructValues.hx:266: true, false, V2, (7, 8)
+StructValues.hx:271: (9, 10), (9, 0), false
+StructValues.hx:280: (6.25, 1.75), p, (4, 5), true
+StructValues.hx:289: (7, 3), (2, 0), (3, 5), (7, -1.5)
