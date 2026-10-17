@@ -43,17 +43,25 @@ class Widgets implements Markup {
 		</view>;
 	}
 
-	// a checkbox bound to a signal, with its label
-	public static function Checkbox(props:{checked:Signal<Bool>, ?label:String, ?tag:String}):View {
-		var toggle = () -> props.checked.value = !props.checked.value;
-		return <view tag={props.tag ?? "checkbox"} role="checkbox" checked={() -> props.checked.value} direction="row" align-items="center" column-gap={8} focusable cursor="pointer" onClick={_ -> toggle()}
+	// a checkbox bound to a signal, with its label; while mixed is true,
+	// neither checked nor not (a dash; ARIA's mixed), checked when clicked
+	public static function Checkbox(props:{checked:Signal<Bool>, ?mixed:Signal<Bool>, ?label:String, ?tag:String}):View {
+		var mixed = () -> props.mixed != null && props.mixed.value;
+		// (mixed: checked once clicked)
+		var toggle = () -> batch(() -> {
+			var was = props.mixed != null && props.mixed.peek();
+			if (was) props.mixed.value = false;
+			props.checked.value = was || !props.checked.peek();
+		});
+		return <view tag={props.tag ?? "checkbox"} role="checkbox" checked={() -> mixed() ? ("mixed" : Dynamic) : props.checked.value} direction="row" align-items="center" column-gap={8} focusable cursor="pointer" onClick={_ -> toggle()}
 			onKeyDown={e -> if (e.key == Key.SPACE) {
 				e.preventDefault();
 				toggle();
 			}}>
-			<view width={16} height={16} radius={4} border-width={1.5} border-color={Motion.color(() -> props.checked.value ? t().accentHover : t().mark)}
-				background={Motion.color(() -> props.checked.value ? t().accent : t().control)} align-items="center" justify="center">
-				<view width={8} height={8} radius={2} background={Motion.color(() -> props.checked.value ? t().onAccent : Theme.clear(t().onAccent))}/>
+			<view width={16} height={16} radius={4} border-width={1.5} border-color={Motion.color(() -> props.checked.value || mixed() ? t().accentHover : t().mark)}
+				background={Motion.color(() -> props.checked.value || mixed() ? t().accent : t().control)} align-items="center" justify="center">
+				<view width={8} height={() -> mixed() ? 2 : 8} radius={() -> mixed() ? 1 : 2}
+					background={Motion.color(() -> props.checked.value || mixed() ? t().onAccent : Theme.clear(t().onAccent))}/>
 			</view>
 			{props.label}
 		</view>;
@@ -199,7 +207,9 @@ class Widgets implements Markup {
 	// which), then the rows (a VirtualList: only those in view are made),
 	// each column's cell for each; a click selects a row (selected), a
 	// double click or Enter activates it (onActivate); Up, Down, Page Up,
-	// Page Down, Home and End move the selection, the view following.
+	// Page Down, Home and End move the selection, the view following. A
+	// column's edge in the header dragged sets its width (a double click
+	// there: its own again).
 	// columns: a title, a width (a grid track: "1fr" by default, "120px",
 	// "auto"), what a row's cell shows (cell), compare (sortable). rows: an
 	// array, or a signal or function of one; height: the whole table's.
@@ -208,7 +218,9 @@ class Widgets implements Markup {
 		var tag = props.tag ?? "table", rh = props.rowHeight ?? 28.0, h = props.height ?? 240.0;
 		var selected:Signal<Null<T>> = props.selected ?? signal(null);
 		var sortBy = signal(-1), descending = signal(false);
-		var template = [for (c in props.columns) c.width ?? "1fr"].join(" ");
+		// (a column dragged to a width: pixels, else its own track)
+		var widths:Array<Signal<Null<Float>>> = [for (c in props.columns) signal(null)];
+		var template = () -> [for (k in 0...props.columns.length) widths[k].value != null ? widths[k].value + "px" : props.columns[k].width ?? "1fr"].join(" ");
 		var sorted = memo(() -> {
 			var rows:Array<T> = Render.read(props.rows);
 			var k = sortBy.value;
@@ -270,15 +282,29 @@ class Widgets implements Markup {
 			<view tag={tag + "-head"} role="row" display="grid" grid-template-columns={template} column-gap={12} padding="0 10" height={rh} align-items="center"
 				font-weight={600} color={() -> t().secondary} background={() -> t().background}>{[
 				for (k in 0...props.columns.length) {
-					var c = props.columns[k];
-					<view tag={tag + "-head-" + k} role="columnheader" direction="row" column-gap={4} align-items="center" focusable={c.compare != null}
-						cursor={c.compare != null ? "pointer" : "auto"} onClick={_ -> sort(k)}
+					var c = props.columns[k], cell:Null<Node> = null, from = 0.0, start = 0.0, dragging = false, clicked = -1e9;
+					<view tag={tag + "-head-" + k} role="columnheader" ref={n -> cell = n} direction="row" column-gap={4} align-items="center"
+						focusable={c.compare != null} cursor={c.compare != null ? "pointer" : "auto"} onClick={_ -> sort(k)}
 						onKeyDown={e -> if (e.key == Key.ENTER || e.key == Key.SPACE) {
 							sort(k);
 							e.stop();
 						}}>
 						{c.title}
 						<text hidden color={() -> t().muted}>{() -> sortBy.value == k ? (descending.value ? "▼" : "▲") : ""}</text>
+						{k == props.columns.length - 1 ? null : <view tag={tag + "-resize-" + k} position="absolute" top={0} bottom={0}
+							left={() -> cell != null && cell.rtl() ? -10 : null} right={() -> cell != null && cell.rtl() ? null : -10} width={8} cursor="ew-resize"
+							onPointerDown={e -> {
+								dragging = true;
+								from = e.x;
+								start = cell.width;
+								e.stop();
+							}} onPointerMove={e -> if (dragging) widths[k].value = Math.round(Math.max(24, start + (cell.rtl() ? from - e.x : e.x - from)))}
+							onPointerUp={_ -> dragging = false} onClick={e -> {
+								var now = Ui.now();
+								if (now - clicked < 0.45) widths[k].value = null;
+								clicked = now;
+								e.stop();
+							}}></view>}
 					</view>;
 				}
 			]}</view>
@@ -307,8 +333,9 @@ class Widgets implements Markup {
 	// the selection, Right opens an item or moves to its first child, Left
 	// closes it or moves to its parent, Home and End, the view following.
 	// roots: an array, or a signal or function of one; expanded: the open
-	// items (none by default); height: the whole tree's.
-	public static function Tree<T>(props:{roots:Dynamic, children:T->Null<Array<T>>, render:T->Any, ?expanded:Signal<Array<T>>,
+	// items (none by default); height: the whole tree's; text: an item's
+	// text, for type-ahead (letters typed to the row they start).
+	public static function Tree<T>(props:{roots:Dynamic, children:T->Null<Array<T>>, render:T->Any, ?text:T->String, ?expanded:Signal<Array<T>>,
 			?selected:Signal<Null<T>>, ?onActivate:T->Void, ?height:Float, ?rowHeight:Float, ?label:String, ?tag:String}):View {
 		var tag = props.tag ?? "tree", rh = props.rowHeight ?? 26.0, h = props.height ?? 240.0;
 		var selected:Signal<Null<T>> = props.selected ?? signal(null);
@@ -362,6 +389,7 @@ class Widgets implements Markup {
 			lastAt = now;
 			selected.value = r.item;
 		}
+		var typed = new TypeAhead();
 		function key(e:Event) {
 			var rs = rows.peek(), i = indexOf(selected.peek()), j = i;
 			switch mirrored(e) {
@@ -379,7 +407,9 @@ class Widgets implements Markup {
 					}
 				case Key.ENTER:
 					if (i >= 0) activate(rs[i]);
-				case _: return;
+				case _:
+					j = props.text == null ? -1 : typed.find(e, [for (r in rs) props.text(r.item)], i);
+					if (j < 0) return;
 			}
 			e.stop();
 			if (rs.length == 0 || j == i) return;
@@ -585,14 +615,32 @@ class Widgets implements Markup {
 		</view>;
 	}
 
-	// a progress bar: value from 0 to 1 (a signal, a function or a number)
+	// a progress bar: value from 0 to 1 (a signal, a function or a number);
+	// null: not known (indeterminate: a bar sliding across, every 1.5
+	// seconds, on the Clock; no value for assistive technology)
 	public static function Progress(props:{value:Dynamic, ?width:Float, ?label:String, ?tag:String}):View {
+		var known = () -> Render.read(props.value) != null;
 		var frac = () -> {
-			var v:Float = Render.read(props.value);
-			v < 0 ? 0.0 : v > 1 ? 1.0 : v;
+			var v:Null<Float> = Render.read(props.value);
+			v == null ? 0.0 : v < 0 ? 0.0 : v > 1 ? 1.0 : v;
 		};
-		return <view tag={props.tag ?? "progress"} role="progressbar" label={props.label} value-now={frac} value-min={0} value-max={1} width={props.width ?? 160} height={8} radius={4} overflow="hidden" direction="row" background={() -> t().subtle}>
+		var phase = signal(0.0), running = false, stopped = false;
+		effect(() -> if (!known() && !running) {
+			running = true;
+			var start = -1.0;
+			Clock.add(now -> {
+				if (stopped || untrack(known)) return running = false;
+				if (start < 0) start = now;
+				phase.value = ((now - start) % 1.5) / 1.5;
+				return true;
+			});
+		});
+		onCleanup(() -> stopped = true);
+		return <view tag={props.tag ?? "progress"} role="progressbar" label={props.label} value-now={() -> known() ? frac() : null} value-min={0} value-max={1}
+			width={props.width ?? 160} height={8} radius={4} overflow="hidden" direction="row" background={() -> t().subtle}>
 			<view width={() -> (frac() * 100) + "%"} background={() -> t().accent}/>
+			{() -> known() ? null : <view tag="progress-slide" position="absolute" top={0} bottom={0} width="40%" left={() -> ((phase.value * 1.4 - 0.4) * 100) + "%"}
+				background={() -> t().accent}/>}
 		</view>;
 	}
 
@@ -619,6 +667,7 @@ class Widgets implements Markup {
 			var i = props.options.indexOf(props.value.peek()) + d;
 			if (i >= 0 && i < props.options.length) props.value.value = props.options[i];
 		}
+		var typed = new TypeAhead(), shown = [for (i in 0...props.options.length) props.labels != null ? props.labels[i] : props.options[i]];
 		return <view tag={tag} role="combobox" label={props.label} expanded={() -> open.value} focusable cursor="pointer" direction="row" align-items="center"
 			justify="space-between" column-gap={8} width={w} padding="6 10" radius={6} border-width={1} border-color={() -> t().border} background={() -> t().control}
 			onClick={_ -> open.value = !open.value}
@@ -633,6 +682,12 @@ class Widgets implements Markup {
 					e.preventDefault();
 					step(-1);
 				case _:
+					// (typed: the option it starts, chosen)
+					var j = typed.find(e, shown, props.options.indexOf(props.value.peek()));
+					if (j >= 0) {
+						props.value.value = props.options[j];
+						e.stop();
+					}
 			}}>
 			{() -> labelOf(props.value.value)}
 			<text color={() -> t().muted} hidden>▾</text>
@@ -656,6 +711,11 @@ class Widgets implements Markup {
 									e.stop();
 								case Key.TAB: open.value = false;
 								case _:
+									var j = typed.find(e, shown, i);
+									if (j >= 0) {
+										focusItem(j);
+										e.stop();
+									}
 							}}>
 							{props.labels != null ? props.labels[i] : o}
 						</view>;
@@ -802,9 +862,10 @@ class Widgets implements Markup {
 		if (i >= 0 && i < nodes.length && nodes[i].ui != null) nodes[i].ui.setFocus(nodes[i]);
 
 	// a menu's panel of items (their nodes into nodes): Up and Down move
-	// through them, a click, Enter or Space chooses one (and sets open to
-	// false), Tab closes
-	static function menuItems(tag:String, label:Null<String>, list:Array<{label:String, onSelect:Void->Void, ?shortcut:String}>, open:Signal<Bool>, nodes:Array<Node>):View
+	// through them, letters typed to the one they start, a click, Enter or
+	// Space chooses one (and sets open to false), Tab closes
+	static function menuItems(tag:String, label:Null<String>, list:Array<{label:String, onSelect:Void->Void, ?shortcut:String}>, open:Signal<Bool>, nodes:Array<Node>):View {
+		var typed = new TypeAhead(), labels = [for (it in list) it.label];
 		return <view tag={tag + "-items"} role="menu" label={label} min-width={140} padding={4} radius={6} border-width={1} border-color={() -> t().borderMuted}
 			background={() -> t().control} color={() -> t().text} shadow="0 4 12 #00000026">{[
 			for (i in 0...list.length) {
@@ -829,15 +890,22 @@ class Widgets implements Markup {
 							e.stop();
 						case Key.TAB: open.value = false;
 						case _:
+							var j = typed.find(e, labels, i);
+							if (j >= 0) {
+								focusIn(nodes, j);
+								e.stop();
+							}
 					}}>
 					{it.label}
 					{it.shortcut == null ? null : <text color={() -> t().muted}>{Shortcut.parse(it.shortcut).label()}</text>}
 				</view>;
 			}
 		]}</view>;
+	}
 
 	// a tooltip: text shown by the children (above them) once the pointer
-	// has rested on them for delay seconds (0.5), hidden when it leaves or presses
+	// has rested on them for delay seconds (0.5), hidden when it leaves or
+	// presses, or by Escape
 	public static function Tooltip(props:{text:String, ?delay:Float, ?placement:String, ?tag:String, ?children:Any}):View {
 		var show = signal(false), over = 0;
 		var delay = props.delay ?? 0.5;
@@ -860,7 +928,7 @@ class Widgets implements Markup {
 		return <view tag={props.tag} onPointerEnter={_ -> enter()} onPointerLeave={_ -> leave()} onPointerDown={_ -> leave()}
 			onFocusIn={e -> if (e.current.ui != null && e.current.ui.focusVisible) enter()} onFocusOut={_ -> leave()}>
 			{props.children}
-			<Popover open={show} placement={props.placement ?? "above"} tag="tooltip">
+			<Popover open={show} placement={props.placement ?? "above"} tag="tooltip" onDismiss={leave}>
 				<view role="tooltip" padding="4 8" radius={4} background={() -> t().tooltip} color={() -> t().onTooltip} font-size={12}>{props.text}</view>
 			</Popover>
 		</view>;
@@ -1181,4 +1249,31 @@ class Widgets implements Markup {
 private class Arrow extends TextNode {
 	override function shownText():String
 		return text == "▸" && rtl() ? "◂" : text;
+}
+
+// type-ahead in a list (a select's, a menu's): letters and digits typed
+// within a second of each other make a prefix, the item it starts found
+// from the one after (the same letter again: the next with it), case aside
+private class TypeAhead {
+	var prefix = "";
+	var at = -1e9;
+
+	public function new() {}
+
+	// the item's index for a key typed at item from, else -1
+	public function find(e:Event, labels:Array<String>, from:Int):Int {
+		if (e.mods & (Key.MOD_CONTROL | Key.MOD_META | Key.MOD_ALT) != 0) return -1;
+		var k = e.key;
+		if (k >= "A".code && k <= "Z".code) k += 32;
+		if (!(k >= "a".code && k <= "z".code || k >= "0".code && k <= "9".code)) return -1;
+		var now = Ui.now(), c = String.fromCharCode(k);
+		prefix = now - at < 1 && prefix != c ? prefix + c : c;
+		at = now;
+		var n = labels.length, start = prefix.length > 1 ? from : from + 1;
+		for (j in 0...n) {
+			var i = ((start + j) % n + n) % n;
+			if (StringTools.startsWith(labels[i].toLowerCase(), prefix)) return i;
+		}
+		return -1;
+	}
 }

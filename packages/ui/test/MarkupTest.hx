@@ -22,6 +22,7 @@ import hxmc.ui.widgets.Widgets.ContextMenu;
 import hxmc.ui.widgets.Widgets.Menubar;
 import hxmc.ui.widgets.Widgets.Tabs;
 import hxmc.ui.widgets.Widgets.Radio;
+import hxmc.ui.widgets.Widgets.Progress;
 import hxmc.ui.widgets.Widgets.Table;
 import hxmc.ui.widgets.Widgets.Tree;
 import hxmc.ui.widgets.Widgets.Split;
@@ -59,6 +60,9 @@ class MarkupTest implements Markup {
 		editMenus();
 		menubar();
 		tabs();
+		mixedCheckbox();
+		indeterminate();
+		typeAhead();
 		focusTips();
 		virtual();
 		table();
@@ -320,6 +324,79 @@ class MarkupTest implements Markup {
 		check("number field: stepped from there", qty.value == 3.5 && field.text == "3.5", field.text);
 	}
 
+	static function typeAhead() {
+		var ui = new Ui(new MonoText(), 400, 300);
+		var fruit = signal("Apple"), chosen = [];
+		var t = 50.0;
+		Ui.now = () -> t;
+		Render.render(<view padding={10} row-gap={10} align-items="start"><Select tag="f" value={fruit} options={["Apple", "Banana", "Blueberry", "Cherry"]}/>
+			<Menu tag="m" label="Edit" items={[{label: "Copy", onSelect: () -> chosen.push("copy")}, {label: "Cut", onSelect: () -> chosen.push("cut")},
+				{label: "Paste", onSelect: () -> chosen.push("paste")}]}/></view>, ui.root);
+		ui.update();
+		function type(c:String) {
+			ui.keyDown(c.charCodeAt(0), 0);
+			ui.update();
+		}
+		ui.setFocus(ui.root.find("f"));
+		type("c");
+		check("type-ahead: a select's option chosen by its first letter", fruit.value == "Cherry", fruit.value);
+		ui.keyDown(Key.ENTER, 0);
+		ui.update();
+		t = 52;
+		type("b");
+		t = 52.3;
+		type("l");
+		check("type-ahead: letters typed together, the option they start", ui.focus == ui.overlay.find("f-Blueberry"), "" + ui.focus);
+		t = 54;
+		type("b");
+		check("type-ahead: the same letter again, the next with it", ui.focus == ui.overlay.find("f-Banana"), "" + ui.focus);
+		ui.keyDown(Key.ESCAPE, 0);
+		ui.setFocus(ui.root.find("m"));
+		ui.keyDown(Key.ENTER, 0);
+		ui.update();
+		t = 56;
+		type("p");
+		ui.keyDown(Key.ENTER, 0);
+		check("type-ahead: in a menu", chosen.join(",") == "paste", chosen.join(","));
+		Ui.now = haxe.Timer.stamp;
+	}
+
+	static function indeterminate() {
+		var ui = new Ui(new MonoText(), 400, 300);
+		var v:Signal<Null<Float>> = signal(null);
+		Render.render(<view padding={10}><Progress tag="p" value={v} width={100}/></view>, ui.root);
+		ui.update();
+		Clock.tick(100);
+		Clock.tick(100.75);
+		ui.update();
+		var slide = ui.root.find("progress-slide"), bar = ui.root.find("p");
+		var t = ui.accessTree(), node = [for (id in t.order) if (t.nodes.get(id).role == ProgressIndicator) t.nodes.get(id)][0];
+		check("progress: not known, a bar sliding across, no value", slide != null && slide.absX == bar.absX + 30 && slide.width == 40 && node.valueNow == null,
+			slide == null ? "none" : slide.absX + " " + slide.width);
+		v.value = 0.5;
+		ui.update();
+		check("progress: known again, the bar its value, the clock left", ui.root.find("progress-slide") == null && !Clock.tick(101) && node != null);
+	}
+
+	static function mixedCheckbox() {
+		var ui = new Ui(new MonoText(), 400, 300);
+		var on = signal(false), some = signal(true);
+		Render.render(<view padding={10}><Checkbox tag="all" checked={on} mixed={some} label="All"/></view>, ui.root);
+		ui.update();
+		function json():Dynamic {
+			var t = ui.accessTree();
+			for (id in t.order)
+				if (t.nodes.get(id).role == CheckBox) return t.nodes.get(id).toJson();
+			return null;
+		}
+		var before:Dynamic = json().checked;
+		var box = ui.root.find("all");
+		ui.pointerDown(box.absX + 4, box.absY + 4, 1);
+		ui.pointerUp(box.absX + 4, box.absY + 4, 1);
+		ui.update();
+		check("checkbox: mixed (ARIA's), checked once clicked", before == "mixed" && on.value && !some.value && json().checked == true, Std.string(before));
+	}
+
 	static function tabs() {
 		var ui = new Ui(new MonoText(), 400, 300);
 		var selected = signal(1);
@@ -468,6 +545,14 @@ class MarkupTest implements Markup {
 		Clock.tick(1000.7);
 		ui.update();
 		check("tooltip: shown for the keyboard's focus", ui.overlay.find("tooltip") != null);
+		ui.keyDown(Key.ESCAPE, 0);
+		ui.update();
+		check("tooltip: Escape hides it, the focus kept", ui.overlay.find("tooltip") == null && ui.focus == ui.root.find("save"));
+		ui.keyDown(Key.TAB, 0);
+		ui.keyDown(Key.TAB, Key.MOD_SHIFT);
+		Clock.tick(1001);
+		Clock.tick(1001.7);
+		ui.update();
 		ui.keyDown(Key.TAB, 0);
 		ui.update();
 		check("tooltip: hidden when the focus leaves", ui.overlay.find("tooltip") == null);
@@ -673,6 +758,24 @@ class MarkupTest implements Markup {
 		check("table: a double click activates", opened.join(",") == "file188,file199", opened.join(","));
 		var tree = ui.accessTree(), roles = [for (id in tree.order) tree.nodes.get(id).role];
 		check("table: a grid of rows, column headers and cells", roles.indexOf(Table) >= 0 && roles.indexOf(ColumnHeader) >= 0 && roles.indexOf(Row) >= 0 && roles.indexOf(Cell) >= 0);
+		// a column's edge dragged: its width, the rows' cells with it; not sorted by it; a double click its own again
+		var head = ui.root.find("t-head-1"), grip = ui.root.find("t-resize-1"), sorted = names().join(",");
+		var was = head.width, x = grip.absX + 4, y = grip.absY + 4;
+		ui.pointerDown(x, y, 1);
+		ui.pointerMove(x + 30, y);
+		ui.pointerUp(x + 30, y, 1);
+		ui.update();
+		var cell = rowNodes()[0].children[1];
+		check("table: a column dragged wider, its cells too, the order kept", head.width == was + 30 && cell.width == was + 30 && names().join(",") == sorted,
+			head.width + " " + cell.width);
+		t = 20;
+		ui.pointerDown(grip.absX + 4, y, 1);
+		ui.pointerUp(grip.absX + 4, y, 1);
+		t = 20.2;
+		ui.pointerDown(grip.absX + 4, y, 1);
+		ui.pointerUp(grip.absX + 4, y, 1);
+		ui.update();
+		check("table: a double click on its edge, its own width again", head.width == was, "" + head.width);
 		Ui.now = haxe.Timer.stamp;
 	}
 
@@ -682,7 +785,7 @@ class MarkupTest implements Markup {
 		var kids = ["src" => ["main", "ui"], "ui" => ["Node", "Style"], "docs" => ["guide"]];
 		var picked:Signal<Null<String>> = signal(null), open:Signal<Array<String>> = signal([]), opened = [];
 		Render.render(<view padding={10}><Tree tag="tr" roots={["src", "docs", "README"]} children={(s:String) -> kids.get(s)} render={(s:String) -> s}
-			expanded={open} selected={picked} height={200} rowHeight={20} label="Files" onActivate={s -> opened.push(s)}/></view>, ui.root);
+			text={(s:String) -> s} expanded={open} selected={picked} height={200} rowHeight={20} label="Files" onActivate={s -> opened.push(s)}/></view>, ui.root);
 		ui.update();
 		var list = ui.root.find("tr-rows");
 		function items():Array<Node>
@@ -741,6 +844,9 @@ class MarkupTest implements Markup {
 		ui.update();
 		check("tree: right to left, Right closes, Left opens", closed == "-src,  main,  +ui,+docs,README" && shown() == "-src,  main,  +ui,-docs,  guide,README",
 			closed + " / " + shown());
+		t = 30;
+		ui.keyDown("g".code, 0);
+		check("tree: type-ahead to the row its text starts", picked.value == "guide", "" + picked.value);
 		Ui.now = haxe.Timer.stamp;
 	}
 
