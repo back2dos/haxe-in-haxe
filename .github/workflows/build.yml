@@ -607,8 +607,8 @@ jobs:
           set -ex
           for t in windows-x86_64 windows-arm64; do
             make gfx-programs ui-programs GFX_TARGET=$t
-            cp bin/ui/$t/UiDrawTest.exe bin/ui/$t/ClipboardTest.exe bin/ui/$t/NativeTest.exe bin/ui/$t/WinAccessTest.exe bin/ui/$t/EmojiTest.exe bin/gfx/$t/
-            tar czf bin/gfx-$t.tar.gz -C bin/gfx/$t GfxTest.exe Triangle.exe UiDrawTest.exe ClipboardTest.exe NativeTest.exe WinAccessTest.exe EmojiTest.exe
+            cp bin/ui/$t/UiDrawTest.exe bin/ui/$t/ClipboardTest.exe bin/ui/$t/NativeTest.exe bin/ui/$t/WinAccessTest.exe bin/ui/$t/EmojiTest.exe bin/ui/$t/WindowTest.exe bin/gfx/$t/
+            tar czf bin/gfx-$t.tar.gz -C bin/gfx/$t GfxTest.exe Triangle.exe UiDrawTest.exe ClipboardTest.exe NativeTest.exe WinAccessTest.exe EmojiTest.exe WindowTest.exe
           done
       - uses: actions/upload-artifact@v7
         with: {name: gfx-windows, path: "bin/gfx-windows-*.tar.gz", retention-days: 3}
@@ -682,6 +682,8 @@ jobs:
           HXMC_GFX_SOFTWARE=1 gfx/WinAccessTest.exe
           # (colour emoji: Segoe UI Emoji's COLR layers)
           HXMC_GFX_SOFTWARE=1 gfx/EmojiTest.exe none gfx/emoji.png
+          # (a window's title, size and minimum size, read back)
+          gfx/WindowTest.exe
       - uses: actions/upload-artifact@v7
         if: always()
         with: {name: 'gfx-images-${{ matrix.target }}', path: gfx/*.png, retention-days: 7}
@@ -738,6 +740,9 @@ jobs:
           # (colour emoji: Apple Color Emoji's sbix bitmaps)
           npx haxe -lib hxmc.ui -cp "$g/test" -cp "$u/test" -main EmojiTest --custom-target hxmc=gfx/EmojiTest
           gfx/EmojiTest none gfx/emoji.png
+          # (a window's title, size and minimum size, read back)
+          npx haxe -lib hxmc.os -cp "$u/test" -main WindowTest --custom-target hxmc=gfx/WindowTest
+          gfx/WindowTest
           # (hxmc.ui.native on AppKit's controls)
           npx haxe -lib hxmc.ui -cp "$u/test" -cp "$u/examples" -main NativeTest --custom-target hxmc=gfx/NativeTest
           gfx/NativeTest gfx/native-macos.png

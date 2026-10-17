@@ -328,6 +328,9 @@ Since the design above (October 2026), in this order:
   checked in CI through the platform's own client side.
 - CSS grid layout (tracks with fr, minmax() and repeat(), placement by
   lines and spans, auto-placement), every box as Chromium lays it out.
+- Windows given a title, a size and a minimum size on every platform;
+  dark mode (the widgets' themes following the system's appearance);
+  touch scrolling in the browser.
 - Rich text: spans in a paragraph (span, b, i in markup) with their own
   fonts, colours and handlers, line boxes as CSS computes them;
   synthetic italic.
