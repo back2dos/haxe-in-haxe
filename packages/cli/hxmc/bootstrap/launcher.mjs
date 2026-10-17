@@ -34,7 +34,7 @@ export function hostTarget() {
 	return arch && plat ? `${plat}-${arch}` : null;
 }
 
-// the user's cache directory, as the types cache's (hxmc/src/hxmc/TypesCache.hx):
+// the user's cache directory, as the module cache's (hxmc/src/hxmc/CacheDir.hx):
 // HXMC_CACHE, else $XDG_CACHE_HOME/hxmc or ~/.cache/hxmc, ~/Library/Caches/hxmc,
 // %LOCALAPPDATA%\hxmc\cache
 export function cacheBase() {

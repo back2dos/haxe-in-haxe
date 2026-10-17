@@ -82,7 +82,6 @@ class Main {
 				failed = Std.string(e) + "\n" + haxe.CallStack.toString(haxe.CallStack.exceptionStack());
 			}
 		}
-		TypesCache.install();
 		ModuleCache.install();
 		hxmc.ir.CInterop.install();
 		var code = haxe.Main.run(args.concat(["--no-output"]));

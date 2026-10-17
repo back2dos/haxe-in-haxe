@@ -249,8 +249,9 @@ externs and callbacks (thread entries, `atexit`, Windows fibers). What
 stays native: the C library (musl's members, the UCRT and MinGW-w64,
 libSystem), mbedtls and libuv. Details: LOWLEVEL.md, "The runtime without
 C of our own". The collector runs as fast as the C one did (the
-benchmarks, the port's self-compile); the runtime's typed modules are
-cached (TypesCache), so builds are faster than with the C runtime.
+benchmarks, the port's self-compile); typed modules are cached between
+builds (the module cache, "Cached modules"), so builds are faster than
+with the C runtime.
 
 ### Direct system calls on Linux
 
@@ -358,16 +359,17 @@ that cache made durable on disk, not a new unit of caching: no library
 boundaries, so the std, haxelib, lix and node_modules libraries and the
 user's code are all modules alike.
 
-- Step 1 (built, opt-in: `HXMC_MODULE_CACHE=1` or `-D hxmc.module-cache`;
-  `hxmc/src/hxmc/ModuleCache.hx`): a successful build writes the modules it
+- Step 1 (built; on by default since 2026-10-17, `HXMC_MODULE_CACHE=0` or
+  `-D hxmc.no-module-cache` off; `hxmc/src/hxmc/ModuleCache.hx`): a
+  successful build writes the modules it
   ends with as the server keeps them (HXB chunks, dependencies, kind, file,
-  check policy) into a store in the user cache directory (the types cache's
+  check policy) into a store in the user cache directory (`CacheDir.hx`:
   location, atomic writes and trim); the next build with the same key puts
   them in the server's cache before typing, and the server's checks decide.
 - Measured (one 4-core VM shared with other builds; time to the start of
   lowering, then the whole build with the objects cached, and peak RSS):
 
-  | | no cache | types cache | module cache cold | module cache warm |
+  | | no cache | types cache (removed) | module cache cold | module cache warm |
   | --- | --- | --- | --- | --- |
   | hello world | 306 ms | 158 ms, 0.21 s, 75 MB | 367 ms | 85 ms, 0.14 s, 70 MB |
   | haxe-formatter | 848 ms | 704 ms, 0.86 s, 143 MB | 885 ms | 171 ms, 0.35 s, 105 MB |
@@ -435,9 +437,9 @@ user's code are all modules alike.
   std (per target, per define, again for the macro context), the sources
   have to ship anyway, init macros cannot change pre-typed modules, and an
   edited compiler (`hxmc-rebuild`) invalidates it.
-- Nondeterministic macros, before the cache is on by default (the server
-  trusts them: a macro embedding `Date.now()` keeps its value until its
-  module changes; on by default, plain builds would inherit that). The
+- Nondeterministic macros (the server trusts them: a macro embedding
+  `Date.now()` keeps its value until its module changes; with the cache on
+  by default, plain builds inherit that until this is built). The
   macro std's natives are ours, so they decide per module:
   - Volatile: date and time (`Date.now`, `Sys.time`, `Timer.stamp`),
     randomness, the network (`Http`, sockets), processes (`Sys.command`,
@@ -456,9 +458,17 @@ user's code are all modules alike.
   - Gate cases: a macro using `Date.now` runs every build, one reading a
     file only when the file changes, one reading an environment variable
     when its value changes.
-- Then: on by default (replacing the types cache), the `npm` postinstall
-  warming the std's modules, builds with init macros, `-lib` HXB archives
-  as one more source of modules.
+- On by default (done, 2026-10-17): it replaced the cache of the runtime's
+  typed modules (TypesCache, an HXB archive of hxmc's own package typed by a
+  separate run of the tool). CI keeps the source path tested: the npm-pack
+  job builds the packages' compilers with it off (other jobs test them),
+  the fixpoint builds the tool cold, warm and off, and crosshost compares
+  the native tool (cached) with the WebAssembly one (WASI: never cached).
+  The corpus builds from HXB archives (`--hxb-lib`), so it does not use it. Next: the `npm`
+  postinstall warming the std's modules (useful once the store is shared
+  across keys: today a pack is keyed by the working directory and the class
+  paths, so a warm-up in the package's directory serves no project), builds
+  with init macros, `-lib` HXB archives as one more source of modules.
 
 ### Central object cache and quieter builds
 
@@ -471,11 +481,10 @@ directory), overridable with `-D hxmc.cache=<dir>`, keyed so different
 outputs and targets can share it, with size-bounded cleanup; logs only on
 request. Keeps users' output directories and `bin/` clean.
 
-Done for the cache of the runtime's typed modules (`TypesCache.hx`): it
-lives in the user cache directory (`HXMC_CACHE` overrides), one directory
-per tool build, entries written by rename with the `.deps` last, tool
-directories pruned by last use (14 days, 1 GB) at most once a day; the
-module cache ("Cached modules") uses the same location and trim. The
+Done for the module cache ("Cached modules", `CacheDir.hx`): it lives in
+the user cache directory (`HXMC_CACHE` overrides), one directory per tool
+build, packs written by rename, tool directories pruned by last use (14
+days, 1 GB) at most once a day. The
 per-module object cache (`<out>.hxmc/`) and the logs still live next to
 the outputs; the objects move to that store, keyed by the hash of the
 lowered IR.
@@ -1027,7 +1036,7 @@ advance the native statics too; native mode: output differs, not
 investigated).
 
 Time: compiling a macro class takes about 0.4 s (the child, typing with the
-types cache); the macro cases' native execution is 3 ms against Eval's 11
+types cache of the time); the macro cases' native execution is 3 ms against Eval's 11
 ms, compiles 32 s. A compute-bound macro (a sieve) runs 20x faster
 natively (16 ms against 346 ms for 3 calls); an API-bound one (2000
 `makeExpr` calls per call) as fast as Eval: the conversions at the boundary

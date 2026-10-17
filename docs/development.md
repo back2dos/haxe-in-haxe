@@ -61,7 +61,7 @@ cached by CI). Nothing builds OCaml.
 | --- | --- |
 | `make hxmc` | the tool after an edit of hxmc or the port: about 11 s (8 s of it typing the port; unchanged modules come from `bin/hxmc/hxmc.hxmc/`) |
 | `make port` | the port after an edit: about 13 s (an edit of a central module such as the typer recompiles every module: 26 s) |
-| `make quick` | after every edit of hxmc: the x64 corpus, again with `RT_VERIFY=1`, the wasm corpus under node, the types cache (about 20 s; `CASES="Int64Gc Bench"` restricts it) |
+| `make quick` | after every edit of hxmc: the x64 corpus, again with `RT_VERIFY=1`, the wasm corpus under node, the module cache's store (about 20 s; `CASES="Int64Gc Bench"` restricts it) |
 | `make check` | before a commit: quick, arm64 (qemu), x64 Windows (wine), a 16 KB nursery, the wasm corpus with legacy exception handling, ThreadNatives x30, crosshost on three cases (`PORT=1`: the port's self-compile) |
 | `make full` | before a push: every nursery and `RT_VERIFY`, wasmtime, the port's self-compile natively and as a module, crosshost on everything, the fixpoint |
 | `make test` | HXB conformance of the port against the reference (seconds per 100 cases) |

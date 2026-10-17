@@ -10,7 +10,8 @@ using StringTools;
 // (an empty cache), a warm run, a run after a file's date changes (the same
 // content), after an edit of one module, after an edit of a std override,
 // after a new file shadows a module, and back. For the hxmc target (the tool,
-// and `haxe` with hxmc built in for the hello world) and JS (`haxe`), on a
+// and `haxe` with hxmc built in for the hello world), JS and Eval (`haxe
+// --interp`: what the program prints), on a
 // hello world, a program of several modules (interfaces, a @:generic class,
 // inline functions across modules, enums, abstracts, static
 // initialization), one with macros (a build macro, an expression macro
@@ -123,7 +124,6 @@ class ModuleCacheCheck {
 			"HXMC_MODULE_CACHE" => cache ? "1" : "0",
 			"HXMC_MODULE_CACHE_LOG" => null,
 			"HXMC_STATS" => "1",
-			"HXMC_TYPES_CACHE" => null,
 			"HXMC_RT_DIR" => FileSystem.fullPath("bin/hxmc/rt"),
 			"HAXE_STD_PATH" => dir + "/upstream-std"
 		];
@@ -137,6 +137,7 @@ class ModuleCacheCheck {
 			rmrf(f);
 		var cmd = switch target {
 			case "js": [haxeBin, "--js", out].concat(args);
+			case "interp": [haxeBin, "--interp"].concat(args);
 			case "haxe-hxmc": [haxeBin].concat(args).concat(["-cp", dir + "/std", "--custom-target", "hxmc=" + out]);
 			case _: [tool, out].concat(args).concat(["-cp", dir + "/std", "--custom-target", "hxmc"]);
 		}
@@ -146,6 +147,10 @@ class ModuleCacheCheck {
 		if (re.match(r.out)) read = Std.parseInt(re.matched(1));
 		var re2 = ~/module cache: \d+ checked \(\d+ ms\), (\d+) modules encoded/;
 		if (re2.match(r.out)) encoded = Std.parseInt(re2.matched(1));
+		else if (cache && r.code == 0) Sys.println("(no module cache summary in the build's output)\n" + tail(r.out, 3000));
+		// (--interp: what the program prints)
+		if (target == "interp" && r.code == 0)
+			File.saveContent(out, [for (l in r.out.split("\n")) if (!l.startsWith("hxmc:")) l].join("\n"));
 		if (r.code != 0 || !FileSystem.exists(out)) {
 			Sys.println(tail(r.out, 2000));
 			return {out: null, read: read, encoded: encoded, log: r.out};
@@ -190,7 +195,7 @@ class ModuleCacheCheck {
 		mkdirs(dir);
 		copyTree("bin/hxmc/std", dir + "/std");
 		copyTree("haxe/upstream/std", dir + "/upstream-std");
-		for (target in ["hxmc", "js", "haxe-hxmc"]) {
+		for (target in ["hxmc", "js", "interp", "haxe-hxmc"]) {
 			for (p in programs()) {
 				// (through haxe for hxmc: the hello program)
 				if (target == "haxe-hxmc" && p.name != "hello") continue;
@@ -234,7 +239,7 @@ class ModuleCacheCheck {
 				}
 				if (name == "hello") {
 					// a std override edited (hxmc's std for hxmc, upstream's for JS)
-					var std = target == "js" ? dir + "/upstream-std/StringTools.hx" : dir + "/std/StringTools.hx";
+					var std = target == "js" || target == "interp" ? dir + "/upstream-std/StringTools.hx" : dir + "/std/StringTools.hx";
 					var s = File.getContent(std);
 					File.saveContent(std, s.replace("public static function lpad(s:String, c:String, l:Int):String {",
 						"public static function lpad(s:String, c:String, l:Int):String {\n\t\tif (l == 4) l = 5;"));
@@ -252,9 +257,12 @@ class ModuleCacheCheck {
 			var r = exec([tool, pdir + "/out.off", "-cp", "src", "-main", "Main", "-D", "hxmc.module-cache", "-cp", dir + "/std", "--custom-target", "hxmc"],
 				{cwd: pdir, env: env(false), merge: true});
 			check("HXMC_MODULE_CACHE=0 wins over -D hxmc.module-cache", r.code == 0 && r.out.indexOf("module cache") < 0);
-			var r = exec([tool, pdir + "/out.def", "-cp", "src", "-main", "Main", "-D", "hxmc.module-cache", "-cp", dir + "/std", "--custom-target", "hxmc"],
+			var r = exec([tool, pdir + "/out.def", "-cp", "src", "-main", "Main", "-cp", dir + "/std", "--custom-target", "hxmc"],
 				{cwd: pdir, env: [for (k => v in env(false)) k => k == "HXMC_MODULE_CACHE" ? null : v], merge: true});
-			check("-D hxmc.module-cache turns it on", r.code == 0 && r.out.indexOf("modules in") >= 0);
+			check("on by default", r.code == 0 && r.out.indexOf("modules in") >= 0);
+			var r = exec([tool, pdir + "/out.nodef", "-cp", "src", "-main", "Main", "-D", "hxmc.no-module-cache", "-cp", dir + "/std", "--custom-target", "hxmc"],
+				{cwd: pdir, env: [for (k => v in env(false)) k => k == "HXMC_MODULE_CACHE" ? null : v], merge: true});
+			check("-D hxmc.no-module-cache turns it off", r.code == 0 && r.out.indexOf("module cache") < 0);
 			// a display request: no cache, an answer
 			var r = exec([tool, "-cp", "src", "--display", "src/Main.hx@0@diagnostics"], {cwd: pdir, env: env(true), merge: true});
 			check("a display request does not use it", r.out.indexOf("modules in") < 0);

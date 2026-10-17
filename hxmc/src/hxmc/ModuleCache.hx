@@ -35,10 +35,10 @@ import core.Json.JsonValue;
 // restored module, whose expressions are the filtered ones (Skeletons,
 // through Finalization.sortExprHook).
 //
-// Opt-in: HXMC_MODULE_CACHE=1 or -D hxmc.module-cache; HXMC_MODULE_CACHE=0
-// or -D hxmc.no-module-cache turns it off (also when the define is given).
+// On by default; HXMC_MODULE_CACHE=0 or -D hxmc.no-module-cache turns it
+// off (HXMC_MODULE_CACHE=0 also when -D hxmc.module-cache is given).
 // Through `haxe` (HaxeMain) and the tool alike, for every target. Not used
-// (the build types as usual, TypesCache included): display requests, the
+// (the build types everything from source): display requests, the
 // compilation server and its clients (already in memory), builds of several
 // parts (--next, --each), init macros (--macro: their effects are not in the
 // key yet), HXB libraries or output, native libraries, WASI. A build in
@@ -57,7 +57,7 @@ import core.Json.JsonValue;
 // not load, except those that depend on a module it typed again or found
 // dirty. Module and variable ids continue from the store's (the server keeps
 // the ids of the modules and variables it restores). The tool directories
-// are trimmed with the types cache's rules (TypesCache.trim).
+// are trimmed by last use and size (CacheDir.trim).
 class ModuleCache {
 	public static inline var MAGIC = "hxmc-modules 4";
 	static inline var ID_LIMIT = 1 << 30;
@@ -67,7 +67,6 @@ class ModuleCache {
 		o.getBytes();
 	}
 
-	static var previousHook:Null<(CommonContext, compiler.ParsedArg.ArgContext) -> Void>;
 	static var state:Null<ModuleCacheState> = null;
 	static var hookCalls = 0;
 	static var parseHookInstalled = false;
@@ -77,14 +76,12 @@ class ModuleCache {
 		return state;
 
 	public static function install() {
-		previousHook = compiler.Compiler.beforeTypingHook;
 		compiler.Compiler.beforeTypingHook = hook;
 	}
 
 	static function wanted(com:CommonContext):Bool {
 		var env = Sys.getEnv("HXMC_MODULE_CACHE");
-		if (env == "0" || TypesCache.define(com, "hxmc.no-module-cache") != null) return false;
-		return env == "1" || TypesCache.define(com, "hxmc.module-cache") != null;
+		return env != "0" && CacheDir.define(com, "hxmc.no-module-cache") == null;
 	}
 
 	// why a build that wants the cache cannot use it (null: it can)
@@ -109,7 +106,6 @@ class ModuleCache {
 		if (s == null) {
 			if (why == null) why = "no cache directory";
 			if (why != "off" && Sys.getEnv("HXMC_STATS") == "1") Sys.println('hxmc: module cache not used ($why)');
-			if (previousHook != null) previousHook(com, actx);
 			return;
 		}
 		state = s;
@@ -158,15 +154,15 @@ class ModuleCache {
 
 	// the store for this build: its packs read and put in the server's cache
 	static function open(com:CommonContext):Null<ModuleCacheState> {
-		var root = TypesCache.cacheRoot();
+		var root = CacheDir.root();
 		if (root == null) return null;
 		var t0 = haxe.Timer.stamp();
 		var modules = root + "modules/";
-		var dir = modules + TypesCache.toolStamp() + "/";
+		var dir = modules + CacheDir.toolStamp() + "/";
 		var used = dir + "used";
-		if (!FileSystem.exists(used) || TypesCache.now() - TypesCache.mtime(used) > TypesCache.USED_REFRESH)
-			if (!TypesCache.touch(used)) return null;
-		TypesCache.trim(modules, dir);
+		if (!FileSystem.exists(used) || CacheDir.now() - CacheDir.mtime(used) > CacheDir.USED_REFRESH)
+			if (!CacheDir.touch(used)) return null;
+		CacheDir.trim(modules, dir);
 		var key = Fingerprint.hash(["hxmc-modules", Sys.getCwd(), Sys.getEnv("HAXE_STD_PATH"), com.classPaths.asStringList().join("\n")].join("\x00"));
 		var s = new ModuleCacheState(dir, dir + key + "-");
 		var prefix = key + "-";
@@ -178,7 +174,10 @@ class ModuleCache {
 					if (stats()) Sys.println('hxmc: module cache: $n unreadable ($e)');
 					null;
 				}
-				if (p != null && dir + prefix + p.sign + ".pack" == dir + n) s.packs.set(p.sign, p);
+				if (p != null && dir + prefix + p.sign + ".pack" == dir + n) {
+					s.packs.set(p.sign, p);
+					CacheDir.used(dir + n);
+				}
 			}
 		// ids continue from the store's (restored modules and variables keep theirs)
 		var midHigh = 0, varHigh = 0;
@@ -475,10 +474,10 @@ class ModuleCache {
 				if (!dirtySigns.exists(sign)) continue;
 				var keep = [for (o in old) if (o.sign == sign && !changed.exists(o.k)) o.e];
 				var path = s.base + sign + ".pack";
-				var tmp = path + "." + TypesCache.nonce() + ".tmp";
+				var tmp = path + "." + CacheDir.nonce() + ".tmp";
 				var ok = try {
 					File.saveBytes(tmp, ModulePack.write(sign, midHigh, varHigh, list, keep, s.packs.get(sign)));
-					TypesCache.replace(tmp, path);
+					CacheDir.replace(tmp, path);
 				} catch (e:Dynamic) {
 					try FileSystem.deleteFile(tmp) catch (_:Dynamic) {}
 					false;
@@ -573,7 +572,7 @@ class ModuleCacheState {
 		var st = try FileSystem.stat(file) catch (_:Dynamic) return null;
 		var b = try File.getBytes(file) catch (_:Dynamic) return null;
 		var mtime = st.mtime.getTime() / 1000.0;
-		return {mtime: TypesCache.now() - mtime < RACY ? -1 : mtime, size: b.length, hash: haxe.crypto.Md5.make(b).toHex()};
+		return {mtime: CacheDir.now() - mtime < RACY ? -1 : mtime, size: b.length, hash: haxe.crypto.Md5.make(b).toHex()};
 	}
 
 	static inline var RACY = 3.0;

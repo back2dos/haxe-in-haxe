@@ -49,7 +49,7 @@ editors, lix and rebuilding the compiler from source:
 | `-D hxmc.wasm-eh=legacy` | wasm: legacy exception handling, for older browsers and runtimes |
 | `HXMC_STATS=1` | what the build did and how long it took |
 | `HXMC_CACHE=<dir>` | the cache directory (default: the user's cache folder) |
-| `HXMC_MODULE_CACHE=1`, `-D hxmc.module-cache` | keep typed modules between builds (experimental): a rebuild types only what changed |
+| `HXMC_MODULE_CACHE=0`, `-D hxmc.no-module-cache` | turn off the module cache (on by default: typed modules are kept between builds, a rebuild types only what changed) |
 
 Rebuilds only recompile changed modules; `haxe --wait 6000` plus
 `haxe --connect 6000 build.hxml` keeps everything in memory.
