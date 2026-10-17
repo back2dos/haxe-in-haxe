@@ -16,7 +16,11 @@ using StringTools;
 //   library's data at a multiple of 16 KB, the rest of 4 bytes (zipalign -c
 //   -p 4 too, when there);
 // - the manifest read back from its binary XML (Axml.dump, aapt dump
-//   xmltree when there): NativeActivity, its library, no code;
+//   xmltree when there): NativeActivity, its library, no code; or, for an
+//   app with views, org.hxmc.Activity and code;
+// - classes.dex (an app with views): Dex.check's structure (header,
+//   checksum, signature, the map, the order of the ids, class data, code),
+//   Glue's classes and methods in it, dexdump when there;
 // - the library (readelf): a shared object of the APK's ABI, 16 KB
 //   segments, DT_NEEDED only of the system's libraries, its SONAME, the
 //   export ANativeActivity_onCreate, no text relocations, the module's
@@ -91,21 +95,25 @@ class ApkCheck {
 		}
 		if (has("zipalign")) check("zipalign -c -p 4", exec(["zipalign", "-c", "-p", "4", apk]).code == 0);
 		var lib = [for (k in entries.keys()) if (k.startsWith("lib/")) k];
-		check("zip: AndroidManifest.xml and one library", entries.exists("AndroidManifest.xml") && lib.length == 1, lib.join(" "));
+		var views = entries.exists("classes.dex");
+		check("zip: AndroidManifest.xml and one library" + (views ? ", classes.dex" : ""),
+			entries.exists("AndroidManifest.xml") && lib.length == 1 && Lambda.count([for (k in entries.keys()) k]) == (views ? 3 : 2), lib.join(" "));
 		if (lib.length != 1 || !entries.exists("AndroidManifest.xml")) return;
 		var abi = lib[0].split("/")[1];
 		check("zip: the library is lib/<abi>/libmain.so", lib[0] == 'lib/$abi/libmain.so' && (abi == "arm64-v8a" || abi == "x86_64"), lib[0]);
 		// the manifest
 		var xml = Axml.dump(entries.get("AndroidManifest.xml").data);
-		check("manifest: NativeActivity", xml.indexOf('android:name(0x01010003)="android.app.NativeActivity"') >= 0);
+		var activity = views ? Glue.ACTIVITY : "android.app.NativeActivity";
+		check("manifest: " + activity, xml.indexOf('android:name(0x01010003)="' + activity + '"') >= 0);
 		check("manifest: android.app.lib_name main", xml.indexOf('"android.app.lib_name"') >= 0 && xml.indexOf('android:value(0x01010024)="main"') >= 0);
-		check("manifest: hasCode false, extractNativeLibs false", xml.indexOf("android:hasCode(0x0101000c)=false") >= 0
+		check("manifest: hasCode " + views + ", extractNativeLibs false", xml.indexOf("android:hasCode(0x0101000c)=" + views) >= 0
 			&& xml.indexOf("android:extractNativeLibs(0x010104ea)=false") >= 0, [for (l in xml.split("\n")) if (l.indexOf("<application") >= 0) l.trim()].join(""));
 		check("manifest: the launcher's intent filter", xml.indexOf('"android.intent.action.MAIN"') >= 0 && xml.indexOf('"android.intent.category.LAUNCHER"') >= 0);
 		if (has("aapt")) {
 			var r = exec(["aapt", "dump", "badging", apk]);
-			check("aapt dump badging", r.code == 0 && r.out.indexOf("launchable-activity: name='android.app.NativeActivity'") >= 0, r.out.split("\n")[0]);
+			check("aapt dump badging", r.code == 0 && r.out.indexOf("launchable-activity: name='" + activity + "'") >= 0, r.out.split("\n")[0]);
 		}
+		if (views) dex(entries.get("classes.dex").data);
 		// the library
 		var dir = "bin/hxmc-apk";
 		mkdirs(dir);
@@ -118,6 +126,27 @@ class ApkCheck {
 			var r = exec(["apksigner", "verify", "--verbose", apk], {merge: true});
 			check("apksigner verify (v2)", r.code == 0 && r.out.indexOf("Verified using v2 scheme (APK Signature Scheme v2): true") >= 0,
 				r.code == 0 ? "" : r.out.trim().split("\n").pop());
+		}
+	}
+
+	// Glue's classes.dex: its structure, and what Java calls in it
+	static function dex(b:Bytes) {
+		var methods = [];
+		var errors = Dex.check(b, methods);
+		check("classes.dex: structure (Dex.check)", errors.length == 0, errors.slice(0, 3).join("; "));
+		var want = [
+			"Lorg/hxmc/Activity; onCreate(Landroid/os/Bundle;)V", "Lorg/hxmc/Glue; <init>(I)V", "Lorg/hxmc/Glue; event(IILjava/lang/Object;II)I",
+			"Lorg/hxmc/Glue; onClick(Landroid/view/View;)V", "Lorg/hxmc/Glue; afterTextChanged(Landroid/text/Editable;)V",
+			"Lorg/hxmc/Glue; onCheckedChanged(Landroid/widget/CompoundButton;Z)V", "Lorg/hxmc/Glue; onProgressChanged(Landroid/widget/SeekBar;IZ)V",
+			"Lorg/hxmc/Glue; onLayoutChange(Landroid/view/View;IIIIIIII)V", "Lorg/hxmc/Glue; surfaceChanged(Landroid/view/SurfaceHolder;III)V"
+		];
+		var missing = [for (m in want) if (methods.indexOf(m) < 0) m];
+		check("classes.dex: Glue's classes and methods", missing.length == 0, missing.join(" "));
+		if (has("dexdump")) {
+			var dir = "bin/hxmc-apk";
+			File.saveBytes('$dir/classes.dex', b);
+			var r = exec(["dexdump", "-d", '$dir/classes.dex'], {merge: true});
+			check("dexdump -d", r.code == 0 && r.out.indexOf("Class descriptor  : 'Lorg/hxmc/Glue;'") >= 0, r.code == 0 ? "" : r.out.trim().split("\n").pop());
 		}
 	}
 

@@ -35,7 +35,8 @@
 #     todo example drawn on llvmpipe, the todo example in Chromium on WebGPU
 #     and WebGL2, web's demo page hydrated in Chromium).
 #   - android: the APKs for android-arm64 and android-x86_64 checked, then
-#     AndroidTest on an x86-64 emulator (not required yet: continue-on-error).
+#     AndroidTest and AndroidNativeTest (views, real input, accessibility)
+#     on an x86-64 emulator (not required yet: continue-on-error).
 # - conformance: the port against the reference: HXB of the upstream suites
 #   and macro cases, display requests, the compilation server and its
 #   JSON-RPC methods, upstream's target suites compiled by both and compared
@@ -725,7 +726,7 @@ jobs:
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
-      - name: The cube on an emulator (x86-64, API 34)
+      - name: The cube and the native views on an emulator (x86-64, API 34)
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 34
@@ -733,7 +734,9 @@ jobs:
           target: default
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot -camera-back none
-          script: sh packages/gfx/test/android.sh bin/android/android-x86_64/AndroidTest.apk bin/android/android-x86_64
+          script: |
+            sh packages/gfx/test/android.sh bin/android/android-x86_64/AndroidTest.apk bin/android/android-x86_64
+            sh packages/ui/test/android-native.sh bin/android/android-x86_64/AndroidNativeTest.apk bin/android/android-x86_64
       - uses: actions/upload-artifact@v7
         if: always()
         with:
@@ -741,6 +744,7 @@ jobs:
           path: |
             bin/android/android-x86_64/*.png
             bin/android/android-x86_64/*.txt
+            bin/android/android-x86_64/*.xml
             bin/android/*/*.apk
           retention-days: 7
           if-no-files-found: ignore

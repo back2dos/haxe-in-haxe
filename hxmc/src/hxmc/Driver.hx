@@ -480,7 +480,9 @@ class Driver {
 		if (abi.os == "windows" && !StringTools.endsWith(out, ".exe")) out += ".exe";
 		// Android: the shared library alone (lib<name>.so), or in an APK
 		if (abi.android && StringTools.endsWith(out, ".apk")) {
-			hxmc.android.Apk.write(out, exe, abi, o.android, hxmc.android.Apk.keyFile(o.android, CacheDir.root()));
+			// (classes.dex: Glue's classes, for a program with views)
+			var views = Lambda.exists(prep.p.funcs, f -> f.name == hxmc.android.Glue.USED_BY);
+			hxmc.android.Apk.write(out, exe, views ? hxmc.android.Glue.dex() : null, abi, o.android, hxmc.android.Apk.keyFile(o.android, CacheDir.root()));
 			return;
 		}
 		sys.io.File.saveBytes(out, exe);
