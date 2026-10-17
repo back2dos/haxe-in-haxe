@@ -22,9 +22,11 @@ using StringTools;
 // condition reads in a body (that module only), a body edited in a
 // dependency (only it typed again, its dependents restored), an inline
 // function edited (its dependents typed again), a body edited in a cycle
-// (only that module). The warm runs must restore every module (none typed
-// again; a module a build macro makes is typed every build), an edit undone
-// restores the earlier variant. Copies of the std (hxmc's and upstream's) are edited, never the
+// (only that module), and one whose build macro keeps state another macro
+// reads (restored while no macro of the build uses that state, else the
+// build runs again with those modules typed). The warm runs must restore
+// every module (none typed again), an edit undone restores the earlier
+// variant. Copies of the std (hxmc's and upstream's) are edited, never the
 // repository's. In bin/hxmc-t/module-cache (removed when every check passes):
 //   bin/hxmc/hxmc -cp hxmc/test -cp haxe/test --run ModuleCacheCheck [--port] [--haxe <haxe>]
 // --port adds the port itself (haxe/src: a large program) for the hxmc target;
@@ -128,7 +130,8 @@ class ModuleCacheCheck {
 		];
 		// (a build macro keeping what other macros read: the classes an
 		// @:autoBuild registers, checked by an expression macro of Main, which a
-		// define typed again; the gfx package's shaders work so)
+		// define types again, Impl restored: the build runs again; the gfx
+		// package's shaders work so)
 		var registry = [
 			"src/Main.hx" => "class Main {\n\tstatic function main() {\n\t\t#if again trace(1); #end\n\t\ttrace(RegMacro.registered(Impl));\n\t\ttrace(new Impl().f());\n\t}\n}\n",
 			"src/Reg.hx" => "@:autoBuild(RegMacro.build())\ninterface Reg {}\n",
@@ -214,7 +217,7 @@ class ModuleCacheCheck {
 		return a != null && b != null && a.compare(b) == 0;
 
 	// the build with the cache against the build without it
-	static function gate(what:String, target:String, pdir:String, args:Array<String>, ?expectEncoded:Int):{read:Int, encoded:Int} {
+	static function gate(what:String, target:String, pdir:String, args:Array<String>, ?expectEncoded:Int):{read:Int, encoded:Int, log:String} {
 		var ref = build(target, pdir, args, false);
 		var got = build(target, pdir, args, true);
 		var ok = same(ref.out, got.out);
@@ -224,7 +227,7 @@ class ModuleCacheCheck {
 			extra += ' expected $expectEncoded encoded';
 		}
 		check('$target: $what: the same output$extra', ok);
-		return {read: got.read, encoded: got.encoded};
+		return {read: got.read, encoded: got.encoded, log: got.log};
 	}
 
 	static function edit(path:String, f:String->String)
@@ -260,13 +263,11 @@ class ModuleCacheCheck {
 				rmrf(dir + "/cache");
 				var cold = gate('$name cold', target, pdir, p.args);
 				check('$target: $name cold: nothing read', cold.read == 0 && cold.encoded > 0);
-				// warm: every module restored (but a module a build macro makes:
-				// Main of the macros program, typed every build, its macro run, the
-				// macros' context's modules processed again: as many each warm build)
-				var macros = name == "macros" || name == "registry";
-				var warm = gate('$name warm', target, pdir, p.args, macros ? null : 0);
-				var again = macros ? warm.encoded : 0;
-				if (macros) check('$target: $name warm: the modules build macros make typed again, the others restored', warm.encoded >= 1 && warm.encoded < cold.encoded / 4);
+				// warm: every module restored (Main of the macros program too, its
+				// build macro keeping no state; Impl of the registry program too,
+				// its macro's state used by no macro of the build)
+				var warm = gate('$name warm', target, pdir, p.args, 0);
+				var again = 0;
 				check('$target: $name warm: read from the store', warm.read > 0);
 				// a new date, the same content
 				var t = pdir + "/" + p.edit;
@@ -290,8 +291,13 @@ class ModuleCacheCheck {
 				File.saveContent(t, orig);
 				gate('$name, ${p.edit} back', target, pdir, p.args);
 				if (name == "registry") {
-					// a define Main reads: Main typed again, its macro finds Impl registered
-					gate('registry, -D again', target, pdir, p.args.concat(["-D", "again"]));
+					// a define Main reads: Main typed again, its macro uses the state
+					// Impl's macro kept, Impl restored: the build again, Impl typed,
+					// Main's macro finds it registered
+					var d = gate('registry, -D again', target, pdir, p.args.concat(["-D", "again"]));
+					check('$target: registry, -D again: the build again, the modules whose macros keep that state typed', d.log.indexOf("the build again") >= 0);
+					var d2 = gate('registry, -D again, warm', target, pdir, p.args.concat(["-D", "again"]), 0);
+					check('$target: registry, -D again, warm: restored, not again', d2.log.indexOf("the build again") < 0);
 				}
 				if (name == "cutoff") {
 					// a define no module reads: nothing typed again

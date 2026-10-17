@@ -61,9 +61,20 @@ import hxmc.ModuleStore;
 // compilation server and its clients (already in memory), builds of several
 // parts (--next, --each), init macros (--macro: their effects are not in the
 // key yet), deprecated defines, HXB libraries or output, native libraries,
-// WASI. A build in which a macro registers a callback (Context.onGenerate,
-// onAfterTyping, onAfterGenerate) or defines something while typing writes
-// nothing: a module restored later would not do it again. HXMC_STATS=1
+// WASI. A callback a macro registers while a module is typed
+// (Context.onGenerate, onAfterTyping, onAfterGenerate) makes that module
+// typed every build; outside the typing of a module, the build writes
+// nothing (a module restored later would not do it again).
+//
+// Macro state: the static variables of macro classes (not the std's) the
+// macros run in a module's typing use are kept with its variant
+// (EvalJit.staticVarHook: state such as a registry an @:autoBuild fills
+// for another macro, or a counter naming generated types). The module is
+// restored while no macro of the build uses that state; one that does
+// after the module was restored runs the build again, with the modules
+// whose macros keep state there typed from their source
+// (HXMC_MODULE_CACHE_RETYPE); an edited module whose macros keep state has
+// the others that keep it there typed from the start. HXMC_STATS=1
 // prints what the cache did, HXMC_MODULE_CACHE_LOG=1 each module checked
 // and each one not kept.
 //
@@ -107,6 +118,9 @@ class ModuleCache {
 		ServerCache.loadDirtyModuleHook = loadDirty;
 		typing.TypeloadModule.typeFromSourceHook = onTypeFromSource;
 		core.TUnification.maybeUsedHook = onMaybeUsed;
+		macros.eval.EvalJit.staticVarHook = onStaticVar;
+		// (a module of the macros' context restored as processed: -1, ModuleStore.readExtra)
+		typing.MacroContext.processedTypeHook = mt -> state != null && core.TFunctions.tModule(mt).mExtra.mProcessed < 0;
 		// (a lazy typing continues the typing of the module that made it)
 		Common.lazyHook = function(f:Void->T):Void->T {
 			var s = state;
@@ -198,6 +212,74 @@ class ModuleCache {
 		mutex.release();
 	}
 
+	// EvalJit.staticVarHook: a macro used a static variable of a macro class
+	// (state kept between macro calls), in the typing of a module or not; the
+	// std's classes left out (their variables are constant tables, caches of
+	// the platform: none a library's macros keep their state in)
+	static function onStaticVar(c:TClass, write:Bool) {
+		var s = state;
+		if (s == null) return;
+		var maker = s.typingStack.length == 0 ? null : s.typingStack[s.typingStack.length - 1];
+		if (maker == s.lastStateMaker && c == s.lastStateClass) return;
+		s.lastStateMaker = maker;
+		s.lastStateClass = c;
+		mutex.acquire();
+		var std = s.stdClass.get(c);
+		if (std == null) s.stdClass.set(c, std = s.isStdFile(core.Path.UniqueKey.lazyPath(c.clModule.mExtra.mFile)));
+		if (std) {
+			mutex.release();
+			return;
+		}
+		var name = core.Globals.sTypePath(c.clPath);
+		if (maker != null) s.liveState.push({maker: maker, path: name});
+		s.touched.set(name, true);
+		var r = s.restoredState.get(name);
+		mutex.release();
+		// (restored modules' macros kept state there, which they did not make
+		// again in this build: the build again, the modules typed)
+		if (r != null && r.length > 0) again(s, name, r);
+	}
+
+	// the build run again, with the modules whose macros keep state in the
+	// class typed from their source (HXMC_MODULE_CACHE_RETYPE), as soon as
+	// a macro of this build uses it after such a module was restored
+	static function again(s:ModuleCacheState, name:String, restored:Array<String>) {
+		var prev = Sys.getEnv(RETYPE);
+		var l = prev == null || prev == "" ? [] : prev.split(",");
+		if (l.indexOf(name) >= 0 || l.length >= 64) Sys.putEnv("HXMC_MODULE_CACHE", "0") else {
+			l.push(name);
+			Sys.putEnv(RETYPE, l.join(","));
+		}
+		if (stats() || s.log)
+			Sys.println("hxmc: module cache: " + name + " keeps state of restored modules' macros (" + restored.join(", ") + "), which this build's macros use: the build again, those typed");
+		try Sys.stdout().flush() catch (_:Dynamic) {}
+		try Sys.stderr().flush() catch (_:Dynamic) {}
+		Sys.exit(Sys.command(Sys.programPath(), Sys.args()));
+	}
+
+	static inline var RETYPE = "HXMC_MODULE_CACHE_RETYPE";
+
+	// per module, the macro classes whose state its macros used (Variant.macroState)
+	static function stateMakers(s:ModuleCacheState):haxe.ds.ObjectMap<ModuleDef, Array<String>> {
+		var r = new haxe.ds.ObjectMap<ModuleDef, Array<String>>();
+		for (ls in s.liveState) {
+			var maker:Null<ModuleDef> = Std.isOfType(ls.maker, core.TType.ModuleDef) ? ls.maker : {
+				var x:{com:CommonContext, path:GlobalTypePath} = ls.maker;
+				x.com.moduleLut.findOpt(x.path);
+			};
+			if (maker == null) {
+				if (s.volatileReason == null) s.volatileReason = "macro state (" + ls.path + ") kept outside the typing of a module";
+				continue;
+			}
+			var l = r.get(maker);
+			if (l == null) r.set(maker, l = []);
+			if (l.indexOf(ls.path) < 0) l.push(ls.path);
+		}
+		for (l in r)
+			l.sort(Reflect.compare);
+		return r;
+	}
+
 	// the build's structural marks made exact (before DCE reads them): a
 	// restored module's fields lose the marks its HXB kept (its users' typing
 	// in an earlier build) and get those of this build's users: the ones
@@ -273,6 +355,12 @@ class ModuleCache {
 		s.typingStack.push({com: com, path: path});
 		var v = s.variantOf(context.CommonCache.getCacheSign(com), path);
 		s.creating.push(v == null ? -1 : s.sccOf(v));
+		// (a module whose state was restored, typed after all: its macros make it again)
+		if (v != null)
+			for (c in v.macroState) {
+				var l = s.restoredState.get(c);
+				if (l != null) l.remove(v.roleKey());
+			}
 	}
 
 	static function wanted(com:CommonContext):Bool {
@@ -364,7 +452,15 @@ class ModuleCache {
 		// (before the compiler's own: registrations from now until typing is
 		// done are the macros')
 		com.callbacks.addAfterSave(() -> capture(com));
-		com.callbacks = new WatchedCallbacks(com.callbacks, com, what -> if (s.volatileReason == null) s.volatileReason = what);
+		// (registered by a macro run in the typing of a module: state that
+		// module's macros keep, typed every build; else the build is not kept)
+		com.callbacks = new WatchedCallbacks(com.callbacks, com, what -> {
+			if (s.typingStack.length > 0) {
+				mutex.acquire();
+				s.liveState.push({maker: s.typingStack[s.typingStack.length - 1], path: "Context." + what});
+				mutex.release();
+			} else if (s.volatileReason == null) s.volatileReason = what;
+		});
 	}
 
 	static function stats():Bool
@@ -581,7 +677,14 @@ class ModuleCache {
 		var t0 = haxe.Timer.stamp();
 		var r = verify(com, s, v, mPath, mExtra);
 		s.checked++;
-		if (r == null) s.approved.set(v.roleKey(), true);
+		if (r == null) {
+			s.approved.set(v.roleKey(), true);
+			for (c in v.macroState) {
+				var l = s.restoredState.get(c);
+				if (l == null) s.restoredState.set(c, l = []);
+				l.push(v.roleKey());
+			}
+		}
 		if (s.log) Sys.println("hxmc: module cache: " + core.Globals.sTypePath(mPath) + (r == null ? " good" : " dirty: " + core.TPrinting.Printer.sModuleSkipReason(r)));
 		s.checkTime += haxe.Timer.stamp() - t0;
 		return r;
@@ -590,9 +693,11 @@ class ModuleCache {
 	static function verify(com:CommonContext, s:ModuleCacheState, v:Variant, mPath:GlobalTypePath, mExtra:ModuleDefExtra):Null<ModuleSkipReason> {
 		var file = core.Path.UniqueKey.lazyPath(mExtra.mFile);
 		if (!v.matched) return FileChanged(file + " (defines)");
-		// (a build macro's module: typed again every build, so that the macro
-		// runs, also for what it keeps for other modules' macros)
-		if (v.macroBuilt) return FileChanged(file + " (built by a macro)");
+		// (its macros kept state, for other modules' macros too: restored
+		// while no macro of this build uses that state, else typed again)
+		for (c in v.macroState)
+			if (StringTools.startsWith(c, "Context.") || s.retype.exists(c) || s.touched.exists(c))
+				return FileChanged(file + " (its macros keep state in " + c + ", " + (StringTools.startsWith(c, "Context.") ? "every build" : "used by this build's macros") + ")");
 		switch mExtra.mKind {
 			case MCode | MMacro:
 				// (a module of the macros' context checked from the program's
@@ -636,23 +741,41 @@ class ModuleCache {
 		var s = state;
 		if (s == null) return;
 		s.captured = true;
+		var t0 = haxe.Timer.stamp();
 		{
 			var mcom = com.getMacros();
 			fixMarks(s, mcom != null && context.CommonCache.getCacheSign(mcom) == s.signs[1] ? [com, mcom] : [com]);
 		}
 		// (a mark the store could not give back to its maker)
 		if (s.unattributedMarks > 0 && s.volatileReason == null) s.volatileReason = s.unattributedMarks + " structural marks made outside the typing of a module";
+		var stateful = stateMakers(s);
 		if (s.volatileReason != null) return;
 		if (Common.hasErrorToReport(com)) {
 			s.volatileReason = "errors";
 			return;
 		}
-		var t0 = haxe.Timer.stamp();
 		// (and the macros' context's, when it is the one predicted: not a
 		// context only an init macro used)
 		var mcom = com.getMacros();
 		var coms = [com];
 		if (mcom != null && context.CommonCache.getCacheSign(mcom) == s.signs[1]) coms.push(mcom);
+		// (every module restored, none processed again: the variants the
+		// store has, the index as it is)
+		var same = true;
+		for (c in coms) {
+			for (m in c.modules) {
+				var old = m.mExtra.mKind == MExtern ? null : s.restored(m);
+				if (m.mExtra.mKind != MExtern && (old == null || m.mExtra.mProcessed != old.processed)) {
+					same = false;
+					break;
+				}
+			}
+			if (!same) break;
+		}
+		if (same) {
+			s.captureTime = haxe.Timer.stamp() - t0;
+			return;
+		}
 		// the defines the compiler read in this build, with their values
 		var buildReads:Array<Read> = [];
 		for (k in s.global.keys()) {
@@ -780,7 +903,8 @@ class ModuleCache {
 				// (the structural marks its typing made: Marks)
 				var made = s.madeMarks.get(m);
 				v.marks = old != null ? old.marks : made == null ? [] : made;
-				v.macroBuilt = (x.mKind == MCode || x.mKind == MMacro) && macroBuilt(m);
+				var st = old != null ? null : stateful.get(m);
+				v.macroState = old != null ? old.macroState : st == null ? [] : st;
 				all.push(v);
 				byKey[role].set(v.key, v);
 				// restored and not processed again: the stored blob
@@ -1190,6 +1314,40 @@ class ModuleCacheState {
 	public var liveMarks:Array<{maker:Null<Dynamic>, cf:TClassField}> = [];
 	public var madeMarks = new haxe.ds.ObjectMap<ModuleDef, Array<String>>();
 	public var unattributedMarks = 0;
+	// the static variables of macro classes used by the macros run in the
+	// typing of a module (Variant.macroState)
+	public var liveState:Array<{maker:Dynamic, path:String}> = [];
+	public var lastStateMaker:Null<Dynamic> = null;
+	public var lastStateClass:Null<TClass> = null;
+	// the macro classes this build's macros used, the restored modules whose
+	// macros kept state in each, the classes whose modules are typed
+	// (HXMC_MODULE_CACHE_RETYPE, and those of edited modules)
+	public var touched = new Map<String, Bool>();
+	public var restoredState = new Map<String, Array<String>>();
+	public var retype:Map<String, Bool> = {
+		var m = new Map<String, Bool>();
+		var e = Sys.getEnv("HXMC_MODULE_CACHE_RETYPE");
+		if (e != null)
+			for (c in e.split(","))
+				if (c != "") m.set(c, true);
+		m;
+	};
+	public var stdClass = new haxe.ds.ObjectMap<TClass, Bool>();
+	var stdDirs:Null<Array<String>> = null;
+
+	// whether the file is one of the std's (its class paths)
+	public function isStdFile(file:String):Bool {
+		if (stdDirs == null) {
+			stdDirs = [];
+			for (cp in com.classPaths.getStdPaths())
+				if (cp.path != "")
+					stdDirs.push(haxe.io.Path.addTrailingSlash(haxe.io.Path.normalize(try FileSystem.absolutePath(cp.path) catch (_:Dynamic) cp.path)));
+		}
+		var f = haxe.io.Path.normalize(try FileSystem.absolutePath(file) catch (_:Dynamic) file);
+		for (d in stdDirs)
+			if (StringTools.startsWith(f, d)) return true;
+		return false;
+	}
 	// the cycles (Closure.scc) of the modules being typed from their source
 	public var creating:Array<Int> = [];
 	public var cycleTyped = 0;
@@ -1252,6 +1410,16 @@ class ModuleCacheState {
 		}
 		for (k => v in first)
 			if (!c.exists(k)) c.set(k, v);
+		// (a module whose macros keep state, edited: typed, its macros use
+		// that state, so the others whose macros keep it there are typed too)
+		for (v in c)
+			if (v.macroState.length > 0 && v.file != null && v.fileRec != null) {
+				var time = Common.fileTime(v.file);
+				if (v.fileRec.mtime == time && v.fileRec.size == ModuleCache.size(v.file)) continue;
+				if (fileHash(v.file) == v.fileRec.hash) continue;
+				for (x in v.macroState)
+					retype.set(x, true);
+			}
 		var cc = com.cs.getContext(signs[role]);
 		var hxb = cc.getHxb();
 		var n = 0;

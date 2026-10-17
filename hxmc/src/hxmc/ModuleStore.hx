@@ -84,9 +84,10 @@ class Variant {
 	// the class fields its typing marked as maybe used through a structure
 	// (CfMaybeUsed, which DCE reads): role|module|class|kind|field
 	public var marks:Array<String> = [];
-	// whether a build macro made one of its types (typed every build: the
-	// macro runs, with what it does beside the module)
-	public var macroBuilt = false;
+	// the macro classes whose static variables the macros run in its typing
+	// used (state kept between macro calls, for other modules' macros too):
+	// typed every build then, so that the macros run again
+	public var macroState:Array<String> = [];
 
 	// in a build: whether its reads match the build's defines, the server's
 	// copy, the blob once read
@@ -121,7 +122,7 @@ class StoreIndex {
 }
 
 class ModuleStore {
-	public static inline var MAGIC = "hxmc-modules 10";
+	public static inline var MAGIC = "hxmc-modules 11";
 
 	public static final chunkKinds:Array<ChunkKind> = [
 		STR, DOC, MDF, MTF, IMP, CLR, ENR, ABR, TDR, OFR, OFD, OBD, CLD, END, ABD, TDD, EOT, EFR, CFR, CFD, EFD, AFD, EOF, EXD, EOM
@@ -413,7 +414,10 @@ class ModuleStore {
 			str(o, v.iface == null ? "" : v.iface);
 			str(o, v.blob);
 			o.writeInt32(v.blobSize);
-			o.writeByte(v.macroBuilt ? 2 : 0);
+			o.writeByte(0);
+			o.writeInt32(v.macroState.length);
+			for (c in v.macroState)
+				str(o, c);
 			o.writeInt32(v.marks.length);
 			for (m in v.marks)
 				str(o, m);
@@ -457,8 +461,8 @@ class ModuleStore {
 			v.iface = f == "" ? null : f;
 			v.blob = rstr(i);
 			v.blobSize = i.readInt32();
-			var flags = i.readByte();
-			v.macroBuilt = flags & 2 != 0;
+			i.readByte();
+			v.macroState = [for (_ in 0...i.readInt32()) rstr(i)];
 			v.marks = [for (_ in 0...i.readInt32()) rstr(i)];
 			v.deps = [
 				for (_ in 0...i.readInt32()) {
