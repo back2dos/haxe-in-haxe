@@ -13,8 +13,9 @@
 #   published as the release from pushes to main and hxmc and passed on as an
 #   artifact (the jobs below otherwise download the release: make rt).
 # - build: the committed stage0 module under node builds the tool, which
-#   rebuilds itself (the fixpoint), and its types cache is checked; then the
-#   port's release binaries and lix for the six targets.
+#   rebuilds itself (the fixpoint: with the module cache cold, warm and off),
+#   the module cache's store and gate are checked; then the port's release
+#   binaries and lix for the six targets.
 #   Next to it, each with its own tool from the stage0 (make hxmc):
 #   - corpus: hxmc's corpus for every target (in three jobs), the port as a
 #     WebAssembly module, the reference's self-compile (lix downloads the
@@ -22,15 +23,16 @@
 #   - crosshost (two jobs): the tool as a WebAssembly module building the
 #     corpus and itself byte-identical;
 #   - measure: peak memory and times (haxe/test/Measure.hx) in the job summary;
-#   - npm-pack: the npm packages (with the compiler as a WebAssembly module);
+#   - npm-pack: the npm packages (with the compiler as a WebAssembly module;
+#     built with the module cache off);
 #   - site: the website; gfx: packages/gfx on Linux (make gfx-check; on
 #     ARM64 the cross-built programs, gfx-arm64; on Windows x86-64 and arm64
 #     the cross-built programs on D3D11's WARP, gfx-windows; on macOS built
 #     from the npm packages after npm-pack, gfx-macos), packages/os's audio
 #     in the same jobs (make audio-check, audio-web-check), then
-#     packages/view, text and ui (their checks on Eval, the sample UI and the
+#     packages/view, web, text and ui (their checks on Eval, the sample UI and the
 #     todo example drawn on llvmpipe, the todo example in Chromium on WebGPU
-#     and WebGL2).
+#     and WebGL2, web's demo page hydrated in Chromium).
 #   - android: the APKs for android-arm64 and android-x86_64 checked, then
 #     AndroidTest on an x86-64 emulator (not required yet: continue-on-error).
 # - conformance: the port against the reference: HXB of the upstream suites
@@ -243,8 +245,9 @@ jobs:
         run: make rt && touch bin/hxmc/rt/*/*.o && ls -l bin/hxmc/rt/*
       - name: Bootstrap from the stage0
         run: make bootstrap
-      # the cache of the runtime's typed modules (hxmc/src/hxmc/TypesCache.hx)
-      - name: Types cache
+      # the module cache's store (hxmc/src/hxmc/CacheDir.hx): tool
+      # directories, the trim, a cache that cannot be written
+      - name: Module cache store
         run: bin/hxmc/hxmc -cp hxmc/test -cp haxe/test --run CacheCheck
       # the persistent module cache: the same outputs with and without it
       # (hxmc/src/hxmc/ModuleCache.hx, hxmc/test/ModuleCacheCheck.hx)
@@ -510,7 +513,11 @@ jobs:
           set -ex
           make rt && touch bin/hxmc/rt/*/*.o
           make hxmc
+      # (with the module cache off: the compilers of the packages typed from
+      # source, the path the other jobs' builds no longer take)
       - name: The npm packages
+        env:
+          HXMC_MODULE_CACHE: '0'
         run: |
           set -ex
           v=$(node -p "require('./packages/cli/package.json').version")
@@ -604,10 +611,10 @@ jobs:
           make gfx-web-check
       - name: audio (WebAudio in Chromium)
         run: make audio-web-check
-      - name: view, text and ui (Eval, natively; Mesa llvmpipe; Chromium)
+      - name: view, web, text and ui (Eval, natively; Mesa llvmpipe; Chromium)
         run: |
           set -ex
-          make view-check text-check ui-check
+          make view-check web-check text-check ui-check
           make ui-draw-check GFX_TARGET=linux-x86_64
           make ui-web-check
       - uses: actions/upload-artifact@v7

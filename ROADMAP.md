@@ -26,11 +26,11 @@ in [docs/plans/](docs/plans/README.md); what is built is in
 
 - `@hxmc/ui`, `@hxmc/text`, native controls: landed; follow-ups in [ui.md](docs/plans/ui.md)
 - `@hxmc/view`: signals, markup compiled to direct calls and a renderer contract, merged from `@hxmc/esx` and `hxmc.ui.reactive`; ui renders with it (drawn and native): landed ([view.md](docs/plans/view.md))
+- `@hxmc/web`: `@hxmc/view` renderers for the DOM (JavaScript) and static HTML, hydration, islands in JavaScript or WebAssembly, typed calls from JavaScript into wasm modules: landed ([web.md](docs/plans/web.md#hxmcweb-built))
 - The module cache on by default, replacing the types cache ([compiler.md](docs/plans/compiler.md#cached-modules))
 
 ## Next
 
-- `@hxmc/web`: DOM bindings via `imports.mjs`, `@hxmc/view` renderers for the DOM and static HTML, hydration islands ([web.md](docs/plans/web.md#hxmcweb))
 - `site/` replacing `hxmc/web`: built with web, docs generated from the sources (narrative docs, package READMEs, an API reference extracted with the compiler), an examples gallery from each package's `examples/` ([web.md](docs/plans/web.md#the-site-site))
 - Nondeterministic macros in the module cache: volatile modules, file and environment dependencies ([compiler.md](docs/plans/compiler.md#cached-modules))
 - Android, step 1: GPU only, `NativeActivity`, the APK writer ([targets.md](docs/plans/targets.md#android))
@@ -45,7 +45,7 @@ in [docs/plans/](docs/plans/README.md); what is built is in
 - Debugging: a Windows PDB, Mach-O `__unwind_info`, variables, DWARF for WebAssembly ([codegen.md](docs/plans/codegen.md#debugging-information))
 - The collector: incremental major marking, an aging survivor space, a memory limit ([runtime.md](docs/plans/runtime.md#the-collector-longer-term))
 - Macro-heavy builds: monomorph transactions, Eval call frames and instance layout ([compiler.md](docs/plans/compiler.md#macro-heavy-builds))
-- The central object cache and link-time DCE ([compiler.md](docs/plans/compiler.md#central-object-cache-and-quieter-builds))
+- Link-time DCE, so a module's object does not depend on the rest of the program ([compiler.md](docs/plans/compiler.md#central-object-cache-and-quieter-builds))
 - Native macros beyond the prototype ([compiler.md](docs/plans/compiler.md#native-macros-prototype))
 - C interop: methods on structs, specialized generics, value enums, allocators ([lowlevel.md](docs/plans/lowlevel.md))
 - WebAssembly threads; WasmGC as a browser-focused second path ([targets.md](docs/plans/targets.md#webassembly))

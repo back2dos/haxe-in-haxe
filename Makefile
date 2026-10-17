@@ -8,8 +8,9 @@
 #   make quick|check|full     the tiered checks (hxmc/test/Tiers.hx)
 #   make release TARGET=macos-arm64   bin/release/<TARGET>/haxe[.exe]
 #
-# Outputs go to bin/ (ignored by Git). hxmc keeps an object per module next to
-# each output (<out>.hxmc/) and recompiles only the modules that changed.
+# Outputs go to bin/ (ignored by Git). hxmc keeps the typed modules and an
+# object per module in the user cache directory (HXMC_CACHE overrides) and
+# types and compiles again only what changed.
 
 # --- Variables (override on the command line: make release TARGET=windows-arm64) ---
 
@@ -110,7 +111,7 @@ endef
 	lix lix-release lix-dist reference bench test test-fuzz test-display test-server test-jsonrpc test-unit-targets test-interp \
 	test-haxelib test-eval-debugger test-node-libs test-module-cache smoke hxmc-test corpus-stage gfx-programs gfx-check gfx-web-check gfx-shader-check \
 	android-programs android-check android-device-check shared-check \
-	audio-programs audio-check audio-web-check native-macros ui-programs view-check text-check ui-check ui-draw-check ui-web-check portcheck measure \
+	audio-programs audio-check audio-web-check native-macros ui-programs view-check web-check text-check ui-check ui-draw-check ui-web-check portcheck measure \
 	quick check full clean distclean
 
 help:
@@ -181,6 +182,12 @@ help:
 ##             (elements, attributes, whitespace, components, text runs, reactive values), the control
 ##             flow components, on two test renderers with boundaries between them, and the programs
 ##             the macro rejects (packages/view/test/ViewTest.hx)
+## web-check   packages/web: the static renderer on Eval and natively (escaping, markers, islands:
+##             packages/web/test/StaticTest.hx), then in headless Chromium (packages/web/test/web.mjs;
+##             Playwright): the DOM renderer (DomTest.hx), the demo page (packages/web/examples)
+##             hydrated without making nodes again, reactive after, a mismatch rendered again, a
+##             JavaScript island calling a wasm module, gfx's cube as a wasm island loaded once in view;
+##             the sizes of a small island's bundle and of the loader
 ## text-check  packages/text on Eval: the rasterizer, DejaVu Sans (metrics, cmap, kerning, outlines),
 ##             line layout, and a text sample through the atlas against packages/text/test/sample.png
 ## ui-check    packages/ui on Eval: the layout against Chromium's flexbox (layout-expected.json,
@@ -285,14 +292,20 @@ bootstrap:
 	$(MAKE) --no-print-directory $(TOOL)
 	$(MAKE) --no-print-directory fixpoint
 
-# (the second build types everything from source: the cache of the runtime's
-# typed modules, hxmc/src/hxmc/TypesCache.hx, must not change the executable)
+# (the tool rebuilt by itself three times, the same executable each time:
+# with the module cache cold, warm, and off, hxmc/src/hxmc/ModuleCache.hx;
+# the cache in bin/hxmc/fix/cache)
 fixpoint: $(TOOL)
-	@mkdir -p bin/hxmc/fix
+	@rm -rf bin/hxmc/fix; mkdir -p bin/hxmc/fix
 	ulimit -s unlimited 2>/dev/null || true; \
 	$(TOOL) bin/hxmc/fix/a $(TOOL_ARGS) > bin/hxmc/fix/a.log 2>&1 || { cat bin/hxmc/fix/a.log; exit 1; }; \
-	HXMC_TYPES_CACHE=0 bin/hxmc/fix/a bin/hxmc/fix/b $(TOOL_ARGS) > bin/hxmc/fix/b.log 2>&1 || { cat bin/hxmc/fix/b.log; exit 1; }
-	cmp bin/hxmc/fix/a bin/hxmc/fix/b && cmp $(TOOL) bin/hxmc/fix/a && echo "fixpoint: the tool rebuilt by itself is byte-identical"
+	for b in cold warm; do \
+		HXMC_CACHE=bin/hxmc/fix/cache HXMC_STATS=1 bin/hxmc/fix/a bin/hxmc/fix/$$b $(TOOL_ARGS) > bin/hxmc/fix/$$b.log 2>&1 || { cat bin/hxmc/fix/$$b.log; exit 1; }; \
+		grep "module cache:" bin/hxmc/fix/$$b.log; \
+	done; \
+	HXMC_MODULE_CACHE=0 bin/hxmc/fix/a bin/hxmc/fix/off $(TOOL_ARGS) > bin/hxmc/fix/off.log 2>&1 || { cat bin/hxmc/fix/off.log; exit 1; }
+	cmp bin/hxmc/fix/a bin/hxmc/fix/cold && cmp bin/hxmc/fix/a bin/hxmc/fix/warm && cmp bin/hxmc/fix/a bin/hxmc/fix/off && cmp $(TOOL) bin/hxmc/fix/a \
+		&& echo "fixpoint: the tool rebuilt by itself is byte-identical (the module cache cold, warm and off)"
 	rm -rf bin/hxmc/fix
 
 # a new stage0 (deliberate: commit it when the sources need it)
@@ -557,6 +570,25 @@ view-check: $(TOOL) $(STD) $(HOST_RT) $(PORT_BIN)
 	bin/view/ViewTest
 	ulimit -s unlimited 2>/dev/null || true; $(PORT_BIN) $(VIEW_CP) -main ViewTest -js bin/view/ViewTest.js
 	$(NODE) bin/view/ViewTest.js
+
+# (packages/web: the static renderer on Eval and natively; the demo page rendered on Eval, its
+# islands compiled to JavaScript by the port, lab.wasm and gfx's cube for wasm32-wasi)
+WEB_CP := -cp packages/view/src -cp packages/web/src -cp packages/web/test -cp packages/web/examples
+WEB_STATIC := $(WEB_CP) -D hxmc.view.renderer.html=hxmc.web.StaticRenderer
+WEB_DOM := $(WEB_CP) -D hxmc.view.renderer.dom=hxmc.web.DomRenderer
+web-check: $(TOOL) $(STD) $(HOST_RT) $(PORT_BIN)
+	ulimit -s unlimited 2>/dev/null || true; $(TOOL) $(WEB_STATIC) --run StaticTest
+	$(call hxmc,bin/web/StaticTest,$(WEB_STATIC) -main StaticTest $(HXMC_ARGS))
+	bin/web/StaticTest
+	rm -rf bin/web/demo
+	ulimit -s unlimited 2>/dev/null || true; $(TOOL) $(WEB_STATIC) --run DemoPage bin/web/demo
+	$(PORT_BIN) $(WEB_DOM) -D hxmc.view.renderer.html=hxmc.web.StaticRenderer -main DomTest -debug -js bin/web/domtest.js
+	$(PORT_BIN) $(WEB_DOM) -main DemoBundle -dce full -debug -js bin/web/demo/islands.js
+	$(PORT_BIN) $(WEB_DOM) -main Counter -dce full -D js-es=6 -D analyzer-optimize -js bin/web/demo/counter.js
+	$(call hxmc,bin/web/demo/lab.wasm,-cp packages/web/src -cp packages/web/examples -main Lab $(HXMC_ARGS) -D hxmc.target=wasm32-wasi)
+	$(call hxmc,bin/web/demo/cube.wasm,$(GFX_CP) -main Cube $(HXMC_ARGS) -D hxmc.target=wasm32-wasi)
+	rm -rf bin/web/demo/*.hxmc bin/web/demo/*.log
+	$(NODE) packages/web/test/web.mjs bin/web
 
 text-check: $(TOOL)
 	ulimit -s unlimited 2>/dev/null || true; $(TOOL) -cp packages/text/src -cp packages/text/test -cp packages/gfx/test --run TextTest $(if $(BLESS),--bless)

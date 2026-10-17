@@ -44,6 +44,20 @@ using macros.eval.EvalValue.EvalValueTools;
 //   `{jit, f}` for upstream's `(jit, f)` pair.
 // - `ctx.overrides` is keyed by `"<dot path>.<field>"`.
 class EvalJit {
+	// port: hook (not upstream): called, when set, by the code of a static
+	// variable's read or write (its class) as the macro runs; for the tool's
+	// module cache, which finds the modules whose macros keep state
+	public static var staticVarHook:Null<(c:TClass, write:Bool) -> Void> = null;
+
+	static function hookStatic(c:TClass, cf:Null<TClassField>, write:Bool, exec:EvalEmitter.Emitter):EvalEmitter.Emitter {
+		var h = staticVarHook;
+		if (h == null || (cf != null && !cf.cfKind.match(Var(_)))) return exec;
+		return env -> {
+			h(c, write);
+			exec(env);
+		}
+	}
+
 	// Helper
 	public static function ropePath(t:T):String {
 		return switch follow(t) {
@@ -123,7 +137,10 @@ class EvalJit {
 				switch fa {
 					case FInstance({clPath: {pack: ["haxe", "io"], name: "Bytes"}}, _, {cfName: "length"}):
 						return EvalEmitter.emitBytesLengthWrite(exec1, exec2);
-					case FStatic({clPath: path}, _) | FEnum({ePath: path}, _):
+					case FStatic(c = {clPath: path}, _):
+						var proto = EvalContext.getStaticPrototype(jit.ctx, EvalHash.pathHash(path), ef.epos);
+						return hookStatic(c, null, true, EvalEmitter.emitProtoFieldWrite(proto, EvalContext.getProtoFieldIndex(proto, name), exec2));
+					case FEnum({ePath: path}, _):
 						var proto = EvalContext.getStaticPrototype(jit.ctx, EvalHash.pathHash(path), ef.epos);
 						return EvalEmitter.emitProtoFieldWrite(proto, EvalContext.getProtoFieldIndex(proto, name), exec2);
 					case FInstance(c, _, _) if (!hasClassFlag(c, CInterface)):
@@ -173,9 +190,9 @@ class EvalJit {
 				var exec1 = jitExprRec(jit, false, ef);
 				var exec2 = jitExprRec(jit, false, e2);
 				switch fa {
-					case FStatic({clPath: path}, _):
+					case FStatic(c = {clPath: path}, _):
 						var proto = EvalContext.getStaticPrototype(jit.ctx, EvalHash.pathHash(path), ef.epos);
-						return EvalEmitter.emitProtoFieldReadWrite(proto, EvalContext.getProtoFieldIndex(proto, name), exec2, op, prefix);
+						return hookStatic(c, null, true, EvalEmitter.emitProtoFieldReadWrite(proto, EvalContext.getProtoFieldIndex(proto, name), exec2, op, prefix));
 					case FInstance(c, _, _) if (!hasClassFlag(c, CInterface)):
 						var proto = EvalContext.getInstancePrototype(jit.ctx, EvalHash.pathHash(c.clPath), ef.epos);
 						var i = EvalContext.getInstanceFieldIndex(proto, name, ef.epos);
@@ -508,6 +525,9 @@ class EvalJit {
 							return EvalEmitter.emitVectorLengthRead(jitExprRec(jit, false, e1), e1.epos);
 						case FInstance({clPath: {pack: ["haxe", "io"], name: "Bytes"}}, _, {cfName: "length"}):
 							return EvalEmitter.emitBytesLengthRead(jitExprRec(jit, false, e1), e1.epos);
+						case FStatic(c = {clPath: path}, cf) if (staticVarHook != null && cf.cfKind.match(Var(_))):
+							var proto = EvalContext.getStaticPrototype(ctx, EvalHash.pathHash(path), e1.epos);
+							return hookStatic(c, cf, false, EvalEmitter.emitProtoFieldRead(proto, EvalContext.getProtoFieldIndex(proto, name)));
 						case FStatic({clPath: path}, _) | FEnum({ePath: path}, _) |
 							FInstance({clPath: path}, _, {cfKind: Method(MethNormal | MethInline)}):
 							var proto = EvalContext.getStaticPrototype(ctx, EvalHash.pathHash(path), e1.epos);

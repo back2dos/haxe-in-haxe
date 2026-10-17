@@ -600,8 +600,8 @@ Cost, measured against the C runtime (the benchmarks, the port compiling
 itself, a hello world): collection times, thread handshakes and run times
 within noise, executables as small or smaller on all six targets. Typing
 the runtime's modules with every program would make builds slower; they
-are typed once per tool instead and cached as an HXB archive
-(`hxmc/src/hxmc/TypesCache.hx`), which makes a hello world build faster
+are kept between builds instead, typed (the module cache,
+`hxmc/src/hxmc/ModuleCache.hx`), which makes a hello world build faster
 than with the C runtime.
 
 ## Order

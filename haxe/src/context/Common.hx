@@ -559,10 +559,19 @@ class Common {
 
 	public static function failFast(com:CommonContext):Bool return defined(com, Define.FailFast);
 
-	public static function externalDefined(com:CommonContext, k:String):Bool return Define.rawDefined(com.defines, convertDefine(k));
+	// port: hxmc's persistent module cache (hxmc/src/hxmc/ModuleCache.hx) records here the defines macros
+	// ... read (a null key: all of them) and write; always null in the compiler itself.
+	public static var externalDefinesHook:Null<(com:CommonContext, key:Null<String>, write:Bool) -> Void> = null;
 
-	public static function externalDefinedValue(com:CommonContext,
-			k:String):String return Define.rawDefinedValue(com.defines, convertDefine(k));
+	public static function externalDefined(com:CommonContext, k:String):Bool {
+		if (externalDefinesHook != null) externalDefinesHook(com, convertDefine(k), false);
+		return Define.rawDefined(com.defines, convertDefine(k));
+	}
+
+	public static function externalDefinedValue(com:CommonContext, k:String):String {
+		if (externalDefinesHook != null) externalDefinesHook(com, convertDefine(k), false);
+		return Define.rawDefinedValue(com.defines, convertDefine(k));
+	}
 
 	public static final reservedFlags = [
 		"true", "false", "null", "cross", "js", "lua", "neko", "flash", "php", "cpp", "java", "jvm", "python", "hl", "hlc", "swc",
@@ -581,14 +590,23 @@ class Common {
 		return converted;
 	}
 
-	public static function externalDefineValue(com:CommonContext, k:String,
-			v:String):Void Define.rawDefineValue(com.defines, convertAndValidate(k), v);
+	public static function externalDefineValue(com:CommonContext, k:String, v:String):Void {
+		if (externalDefinesHook != null) externalDefinesHook(com, k, true);
+		Define.rawDefineValue(com.defines, convertAndValidate(k), v);
+	}
 
-	public static function externalDefine(com:CommonContext, k:String):Void Define.rawDefine(com.defines, convertAndValidate(k));
+	public static function externalDefine(com:CommonContext, k:String):Void {
+		if (externalDefinesHook != null) externalDefinesHook(com, k, true);
+		Define.rawDefine(com.defines, convertAndValidate(k));
+	}
 
-	public static function externalUndefine(com:CommonContext, k:String):Void Define.rawUndefine(com.defines, convertAndValidate(k));
+	public static function externalUndefine(com:CommonContext, k:String):Void {
+		if (externalDefinesHook != null) externalDefinesHook(com, k, true);
+		Define.rawUndefine(com.defines, convertAndValidate(k));
+	}
 
 	public static function definesForExternal(com:CommonContext):haxe.ds.StringMap<String> {
+		if (externalDefinesHook != null) externalDefinesHook(com, null, false);
 		var result = new haxe.ds.StringMap<String>();
 		var names:Array<String> = [for (k in com.defines.values.keys()) k];
 		names.sort(Reflect.compare);
@@ -1202,7 +1220,12 @@ class Common {
 		return {args: args, ret: TInst(basic.tcoro.suspensionResultClass.force(), [ret])};
 	}
 
+	// port: hxmc's persistent module cache (hxmc/src/hxmc/ModuleCache.hx) wraps the lazy typings here, to know
+	// ... which module's typing one continues; always null in the compiler itself.
+	public static var lazyHook:Null<(Void->T)->(Void->T)> = null;
+
 	public static function makeUnforcedLazy(tProc:T, f:Void->T, where:String):TLazy {
+		if (lazyHook != null) f = lazyHook(f);
 		var r = new TLazy(lazyAvailable(tDynamic));
 		r.value = lazyWait(function() {
 			try {

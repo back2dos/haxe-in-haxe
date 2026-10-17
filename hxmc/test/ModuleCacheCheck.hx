@@ -10,14 +10,23 @@ using StringTools;
 // (an empty cache), a warm run, a run after a file's date changes (the same
 // content), after an edit of one module, after an edit of a std override,
 // after a new file shadows a module, and back. For the hxmc target (the tool,
-// and `haxe` with hxmc built in for the hello world) and JS (`haxe`), on a
+// and `haxe` with hxmc built in for the hello world), JS and Eval (`haxe
+// --interp`: what the program prints), on a
 // hello world, a program of several modules (interfaces, a @:generic class,
 // inline functions across modules, enums, abstracts, static
 // initialization), one with macros (a build macro, an expression macro
-// reading a file through Context with its dependency registered) and one
+// reading a file through Context with its dependency registered), one
 // whose typed program keeps a Null<Unknown> (a monomorph's modifier, which
-// HXB does not keep). The warm runs must restore every module (none typed
-// again). Copies of the std (hxmc's and upstream's) are edited, never the
+// HXB does not keep), and one for the finer keys and the early cutoff: a
+// define no module reads (nothing typed again), a define one module's
+// condition reads in a body (that module only), a body edited in a
+// dependency (only it typed again, its dependents restored), an inline
+// function edited (its dependents typed again), a body edited in a cycle
+// (only that module), and one whose build macro keeps state another macro
+// reads (restored while no macro of the build uses that state, else the
+// build runs again with those modules typed). The warm runs must restore
+// every module (none typed again), an edit undone restores the earlier
+// variant. Copies of the std (hxmc's and upstream's) are edited, never the
 // repository's. In bin/hxmc-t/module-cache (removed when every check passes):
 //   bin/hxmc/hxmc -cp hxmc/test -cp haxe/test --run ModuleCacheCheck [--port] [--haxe <haxe>]
 // --port adds the port itself (haxe/src: a large program) for the hxmc target;
@@ -109,7 +118,53 @@ class ModuleCacheCheck {
 			"src/Other.hx" => "class Other {\n\tpublic static var x = 3;\n}\n",
 			"src/Lossy.hx" => "class Lossy {\n\tstatic function time<A, R>(f:A->R, arg:A):R return f(arg);\n\tpublic static function run() trace(time(function(_) return 1, null));\n}\n"
 		];
+		// (early cutoff and defines: a body edited, an interface edited, a
+		// define one module reads, a cycle)
+		var cutoff = [
+			"src/Main.hx" => "class Main {\n\tstatic function main() {\n\t\ttrace(Calc.add(1, 2) + Calc.twice(3));\n\t\ttrace(Flags.mode());\n\t\ttrace(new User().run());\n\t\ttrace(Ping.ping(3));\n\t}\n}\n",
+			"src/Calc.hx" => "class Calc {\n\tpublic static inline function twice(x:Int):Int return x * 2;\n\n\tpublic static function add(a:Int, b:Int):Int return a + b;\n}\n",
+			"src/User.hx" => "class User {\n\tpublic function new() {}\n\n\tpublic function run():Int return Calc.add(10, 20);\n}\n",
+			"src/Flags.hx" => "class Flags {\n\tpublic static function mode():String {\n\t\t#if fast\n\t\treturn \"fast\";\n\t\t#else\n\t\treturn \"safe\";\n\t\t#end\n\t}\n}\n",
+			"src/Ping.hx" => "class Ping {\n\tpublic static function ping(n:Int):Int return n <= 0 ? 0 : 1 + Pong.pong(n - 1);\n}\n",
+			"src/Pong.hx" => "class Pong {\n\tpublic static function pong(n:Int):Int return n <= 0 ? 0 : 10 + Ping.ping(n - 1);\n}\n"
+		];
+		// (a build macro keeping what other macros read: the classes an
+		// @:autoBuild registers, checked by an expression macro of Main, which a
+		// define types again, Impl restored: the build runs again; the gfx
+		// package's shaders work so)
+		var registry = [
+			"src/Main.hx" => "class Main {\n\tstatic function main() {\n\t\t#if again trace(1); #end\n\t\ttrace(RegMacro.registered(Impl));\n\t\ttrace(new Impl().f());\n\t}\n}\n",
+			"src/Reg.hx" => "@:autoBuild(RegMacro.build())\ninterface Reg {}\n",
+			"src/Impl.hx" => "class Impl implements Reg {\n\tpublic function new() {}\n\n\tpublic function f():Int return 7;\n}\n",
+			"src/RegMacro.hx" => [
+				"import haxe.macro.Context;",
+				"import haxe.macro.Expr;",
+				"class RegMacro {",
+				"\tstatic var names:Array<String> = [];",
+				"\tpublic static macro function build():Array<Field> {",
+				"\t\tnames.push(Context.getLocalClass().get().name);",
+				"\t\treturn null;",
+				"\t}",
+				"\tpublic static macro function registered(e:Expr):Expr {",
+				"\t\tvar n = haxe.macro.ExprTools.toString(e);",
+				"\t\tContext.getType(n);",
+				"\t\tif (names.indexOf(n) < 0) Context.error(n + \" is not registered\", e.pos);",
+				"\t\treturn macro $v{n};",
+				"\t}",
+				"}"
+			].join("\n") + "\n"
+		];
+		// (full DCE and a class used through a structure: Main's typing marks
+		// Bag.iterator as maybe used, which keeps it; edited not to, the build
+		// without the cache drops it, so must the cache, Bag restored)
+		var dcefull = [
+			"src/Main.hx" => "class Main {\n\tstatic function count<T>(it:Iterable<T>):Int {\n\t\tvar n = 0;\n\t\tfor (_ in it) n++;\n\t\treturn n;\n\t}\n\n\tstatic function main() {\n\t\tvar b = new Bag();\n\t\ttrace(b.size());\n\t\ttrace(count(b));\n\t}\n}\n",
+			"src/Bag.hx" => "class Bag {\n\tpublic var items:Array<Int>;\n\n\tpublic function new() items = [1, 2];\n\n\tpublic function iterator():Iterator<Int> return items.iterator();\n\n\tpublic function size():Int return items.length;\n}\n"
+		];
 		return [
+			{name: "dcefull", files: dcefull, args: ["-cp", "src", "-main", "Main", "-dce", "full"], edit: "src/Main.hx", run: "dcefull"},
+			{name: "registry", files: registry, args: ["-cp", "src", "-main", "Main"], edit: "src/Impl.hx", run: "registry"},
+			{name: "cutoff", files: cutoff, args: ["-cp", "src", "-main", "Main"], edit: "src/User.hx", run: "cutoff"},
 			{name: "lossy", files: lossy, args: ["-cp", "src", "-main", "Main"], edit: "src/Other.hx", run: "lossy"},
 			{name: "hello", files: hello, args: ["-cp", "src", "-main", "Main"], edit: "src/Main.hx", run: "hello"},
 			{name: "multi", files: multi, args: ["-cp", "src", "-cp", "src2", "-main", "Main"], edit: "src/util/Util.hx", run: "multi"},
@@ -119,11 +174,11 @@ class ModuleCacheCheck {
 
 	static function env(cache:Bool):Map<String, Null<String>>
 		return [
-			"HXMC_CACHE" => dir + "/cache",
+			// (the builds without the cache keep their objects apart)
+			"HXMC_CACHE" => dir + (cache ? "/cache" : "/refcache"),
 			"HXMC_MODULE_CACHE" => cache ? "1" : "0",
 			"HXMC_MODULE_CACHE_LOG" => null,
 			"HXMC_STATS" => "1",
-			"HXMC_TYPES_CACHE" => null,
 			"HXMC_RT_DIR" => FileSystem.fullPath("bin/hxmc/rt"),
 			"HAXE_STD_PATH" => dir + "/upstream-std"
 		];
@@ -137,15 +192,20 @@ class ModuleCacheCheck {
 			rmrf(f);
 		var cmd = switch target {
 			case "js": [haxeBin, "--js", out].concat(args);
+			case "interp": [haxeBin, "--interp"].concat(args);
 			case "haxe-hxmc": [haxeBin].concat(args).concat(["-cp", dir + "/std", "--custom-target", "hxmc=" + out]);
 			case _: [tool, out].concat(args).concat(["-cp", dir + "/std", "--custom-target", "hxmc"]);
 		}
 		var r = exec(cmd, {cwd: pdir, env: env(cache), merge: true});
 		var read = 0, encoded = -1;
-		var re = ~/module cache: (\d+) modules in \d+ packs read/;
+		var re = ~/module cache: (\d+) modules of \d+ variants read/;
 		if (re.match(r.out)) read = Std.parseInt(re.matched(1));
 		var re2 = ~/module cache: \d+ checked \(\d+ ms\), (\d+) modules encoded/;
 		if (re2.match(r.out)) encoded = Std.parseInt(re2.matched(1));
+		else if (cache && r.code == 0) Sys.println("(no module cache summary in the build's output)\n" + tail(r.out, 3000));
+		// (--interp: what the program prints)
+		if (target == "interp" && r.code == 0)
+			File.saveContent(out, [for (l in r.out.split("\n")) if (!l.startsWith("hxmc:")) l].join("\n"));
 		if (r.code != 0 || !FileSystem.exists(out)) {
 			Sys.println(tail(r.out, 2000));
 			return {out: null, read: read, encoded: encoded, log: r.out};
@@ -157,7 +217,7 @@ class ModuleCacheCheck {
 		return a != null && b != null && a.compare(b) == 0;
 
 	// the build with the cache against the build without it
-	static function gate(what:String, target:String, pdir:String, args:Array<String>, ?expectEncoded:Int):{read:Int, encoded:Int} {
+	static function gate(what:String, target:String, pdir:String, args:Array<String>, ?expectEncoded:Int):{read:Int, encoded:Int, log:String} {
 		var ref = build(target, pdir, args, false);
 		var got = build(target, pdir, args, true);
 		var ok = same(ref.out, got.out);
@@ -167,7 +227,7 @@ class ModuleCacheCheck {
 			extra += ' expected $expectEncoded encoded';
 		}
 		check('$target: $what: the same output$extra', ok);
-		return {read: got.read, encoded: got.encoded};
+		return {read: got.read, encoded: got.encoded, log: got.log};
 	}
 
 	static function edit(path:String, f:String->String)
@@ -190,7 +250,7 @@ class ModuleCacheCheck {
 		mkdirs(dir);
 		copyTree("bin/hxmc/std", dir + "/std");
 		copyTree("haxe/upstream/std", dir + "/upstream-std");
-		for (target in ["hxmc", "js", "haxe-hxmc"]) {
+		for (target in ["hxmc", "js", "interp", "haxe-hxmc"]) {
 			for (p in programs()) {
 				// (through haxe for hxmc: the hello program)
 				if (target == "haxe-hxmc" && p.name != "hello") continue;
@@ -203,7 +263,9 @@ class ModuleCacheCheck {
 				rmrf(dir + "/cache");
 				var cold = gate('$name cold', target, pdir, p.args);
 				check('$target: $name cold: nothing read', cold.read == 0 && cold.encoded > 0);
-				// warm: every module restored
+				// warm: every module restored (Main of the macros program too, its
+				// build macro keeping no state; Impl of the registry program too,
+				// its macro's state used by no macro of the build)
 				var warm = gate('$name warm', target, pdir, p.args, 0);
 				var again = 0;
 				check('$target: $name warm: read from the store', warm.read > 0);
@@ -214,6 +276,9 @@ class ModuleCacheCheck {
 				// one module edited
 				var orig = File.getContent(t);
 				File.saveContent(t, switch name {
+					case "cutoff": orig.replace("10, 20", "10, 21");
+					case "registry": orig.replace("return 7", "return 8");
+					case "dcefull": orig.replace("trace(count(b));", "trace(0);");
 					case "hello": orig.replace("hello ", "hello again ");
 					case "multi": orig.replace("\"v\" + 1", "\"v\" + 2");
 					case "lossy": orig.replace("3", "4");
@@ -225,6 +290,53 @@ class ModuleCacheCheck {
 				// back to the original (an older entry's content again)
 				File.saveContent(t, orig);
 				gate('$name, ${p.edit} back', target, pdir, p.args);
+				if (name == "registry") {
+					// a define Main reads: Main typed again, its macro uses the state
+					// Impl's macro kept, Impl restored: the build again, Impl typed,
+					// Main's macro finds it registered
+					var d = gate('registry, -D again', target, pdir, p.args.concat(["-D", "again"]));
+					check('$target: registry, -D again: the build again, the modules whose macros keep that state typed', d.log.indexOf("the build again") >= 0);
+					var d2 = gate('registry, -D again, warm', target, pdir, p.args.concat(["-D", "again"]), 0);
+					check('$target: registry, -D again, warm: restored, not again', d2.log.indexOf("the build again") < 0);
+				}
+				if (name == "cutoff") {
+					// a define no module reads: nothing typed again
+					gate('cutoff, -D unrelated', target, pdir, p.args.concat(["-D", "unrelated"]), 0);
+					// a define one module's condition reads: that module typed again,
+					// its dependents restored (the condition is in a body)
+					gate('cutoff, -D fast (read by Flags only)', target, pdir, p.args.concat(["-D", "fast"]), 1);
+					gate('cutoff, -D fast, warm', target, pdir, p.args.concat(["-D", "fast"]), 0);
+					gate('cutoff, without -D fast again', target, pdir, p.args, 0);
+					// a body of a dependency edited (its type written out): only it typed
+					// again, its dependents (Main, User) restored
+					var calc = pdir + "/src/Calc.hx";
+					var c0 = File.getContent(calc);
+					File.saveContent(calc, c0.replace("return a + b;", "return a + b + 100;"));
+					gate('cutoff, a body of Calc edited', target, pdir, p.args, 1);
+					// its interface edited (an inline function): its dependents typed again
+					File.saveContent(calc, c0.replace("return a + b;", "return a + b + 100;").replace("x * 2", "x * 3"));
+					var i = gate('cutoff, an inline function of Calc edited', target, pdir, p.args);
+					check('$target: cutoff, an inline function of Calc edited: Calc, Main and User typed again', i.encoded == 3);
+					File.saveContent(calc, c0);
+					gate('cutoff, Calc back', target, pdir, p.args);
+					// a body in a cycle (Ping, Pong): Ping typed again, Pong restored
+					var ping = pdir + "/src/Ping.hx";
+					var p0 = File.getContent(ping);
+					File.saveContent(ping, p0.replace("1 + Pong", "2 + Pong"));
+					gate('cutoff, a body of Ping edited (a cycle with Pong)', target, pdir, p.args, 1);
+					File.saveContent(ping, p0);
+					gate('cutoff, Ping back', target, pdir, p.args);
+				}
+				if (name == "multi" && target == "hxmc") {
+					// a second output of the same program: every object from the store
+					var o2 = pdir + "/out2.hxmc";
+					rmrf(o2);
+					var r = exec([tool, o2].concat(p.args).concat(["-cp", dir + "/std", "--custom-target", "hxmc"]), {cwd: pdir, env: env(true), merge: true});
+					var re = ~/hxmc: modules (\d+): (\d+) cached, (\d+) compiled/;
+					var shared = r.code == 0 && re.match(r.out) && re.matched(3) == "0" && re.matched(1) == re.matched(2);
+					var first = build(target, pdir, p.args, true);
+					check('hxmc: multi, a second output shares the objects (${re.matched(0)})', shared && same(first.out, File.getBytes(o2)));
+				}
 				if (name == "multi") {
 					// a new file shadows a module (src2, given last, comes first)
 					write(pdir + "/src2/util/Util.hx", File.getContent(pdir + "/src/util/Util.hx").replace("\"v\" + 1", "\"shadow\""));
@@ -234,7 +346,7 @@ class ModuleCacheCheck {
 				}
 				if (name == "hello") {
 					// a std override edited (hxmc's std for hxmc, upstream's for JS)
-					var std = target == "js" ? dir + "/upstream-std/StringTools.hx" : dir + "/std/StringTools.hx";
+					var std = target == "js" || target == "interp" ? dir + "/upstream-std/StringTools.hx" : dir + "/std/StringTools.hx";
 					var s = File.getContent(std);
 					File.saveContent(std, s.replace("public static function lpad(s:String, c:String, l:Int):String {",
 						"public static function lpad(s:String, c:String, l:Int):String {\n\t\tif (l == 4) l = 5;"));
@@ -252,12 +364,15 @@ class ModuleCacheCheck {
 			var r = exec([tool, pdir + "/out.off", "-cp", "src", "-main", "Main", "-D", "hxmc.module-cache", "-cp", dir + "/std", "--custom-target", "hxmc"],
 				{cwd: pdir, env: env(false), merge: true});
 			check("HXMC_MODULE_CACHE=0 wins over -D hxmc.module-cache", r.code == 0 && r.out.indexOf("module cache") < 0);
-			var r = exec([tool, pdir + "/out.def", "-cp", "src", "-main", "Main", "-D", "hxmc.module-cache", "-cp", dir + "/std", "--custom-target", "hxmc"],
+			var r = exec([tool, pdir + "/out.def", "-cp", "src", "-main", "Main", "-cp", dir + "/std", "--custom-target", "hxmc"],
 				{cwd: pdir, env: [for (k => v in env(false)) k => k == "HXMC_MODULE_CACHE" ? null : v], merge: true});
-			check("-D hxmc.module-cache turns it on", r.code == 0 && r.out.indexOf("modules in") >= 0);
+			check("on by default", r.code == 0 && r.out.indexOf("variants read") >= 0);
+			var r = exec([tool, pdir + "/out.nodef", "-cp", "src", "-main", "Main", "-D", "hxmc.no-module-cache", "-cp", dir + "/std", "--custom-target", "hxmc"],
+				{cwd: pdir, env: [for (k => v in env(false)) k => k == "HXMC_MODULE_CACHE" ? null : v], merge: true});
+			check("-D hxmc.no-module-cache turns it off", r.code == 0 && r.out.indexOf("module cache") < 0);
 			// a display request: no cache, an answer
 			var r = exec([tool, "-cp", "src", "--display", "src/Main.hx@0@diagnostics"], {cwd: pdir, env: env(true), merge: true});
-			check("a display request does not use it", r.out.indexOf("modules in") < 0);
+			check("a display request does not use it", r.out.indexOf("variants read") < 0);
 		}
 		if (withPort) {
 			var pdir = FileSystem.fullPath(".");
