@@ -319,6 +319,11 @@ Since the design above (October 2026), in this order:
 - Text and images: CFF outlines (OpenType `.otf`, CID-keyed CJK fonts
   too) and GPOS pair kerning in `@hxmc/text`; a JPEG decoder (baseline
   and progressive, libjpeg's arithmetic: pixel-exact with Chromium's).
+- Popups (a layer over the tree: anchored, modal), the widgets on them
+  (Select, Menu, Tooltip, Dialog), and VirtualList.
+- Accessibility on every platform: NSAccessibility (macOS), UI Automation
+  (Windows: COM providers made in Haxe), AT-SPI over D-Bus (Linux), each
+  checked in CI through the platform's own client side.
 
 Where this departs from section 6:
 
@@ -334,10 +339,8 @@ Where this departs from section 6:
 - **Layout uses CSS's automatic minimum size**, not Yoga's 0: items do not
   shrink below their content, so text is not squashed (a container that
   must shrink sets `minHeight: 0`, as in CSS).
-- **Not yet**: Linux's accessibility adapter (AT-SPI; macOS's
-  NSAccessibility and Windows' UI Automation are written), Windows'
-  compositions drawn in the field (its IME draws its own), image formats
-  beyond PNG and JPEG; on X11 a clipboard over about 256 KB (sent in parts,
+- **Not yet**: Windows' compositions drawn in the field (its IME draws
+  its own), image formats beyond PNG and JPEG; on X11 a clipboard over about 256 KB (sent in parts,
   INCR) is not read.
 
 ## Sources

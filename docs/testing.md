@@ -118,7 +118,10 @@ mounting, layout, frames, a change to one row, a scroll; `ClipboardTest`,
 the clipboard between two windows under Xvfb, through X11's selection
 protocol; also on Windows and macOS in CI; `TextInputTest`, key presses
 typed through X11's input method under Xvfb, keys given other symbols: a
-Cyrillic letter, a dead key composed with the next; on macOS in CI
+Cyrillic letter, a dead key composed with the next; `LinuxAccessTest`
+and `AtspiProbe`, a window's accessibility tree read and pressed by
+another process through libatspi, in a D-Bus session with AT-SPI's bus
+(at-spi2-core); on macOS in CI
 `TextInputTest` types through the window's text view and composes in it,
 `MacAccessTest` reads the accessibility tree through NSAccessibility and
 performs its actions; on Windows `WinAccessTest` calls the UI Automation
