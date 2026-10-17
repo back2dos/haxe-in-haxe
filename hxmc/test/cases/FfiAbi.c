@@ -77,3 +77,24 @@ void *a_fnptr(void) { return (void *)a_dl_twice; }
 // called in a safe region (not @:hxmc.fast)
 DL a_dl_slow(DL v) { return a_dl_twice(v); }
 B40 a_b40_slow(B40 v) { return a_b40_twice(v); }
+
+// callbacks (@:hxmc.callback) taking and returning structs by value
+double a_cb_f2(F2 (*f)(F2, double)) { F2 v = {1.5f, -2}; F2 r = f(v, 3); return r.x + 10 * r.y; }
+double a_cb_d4(D4 (*f)(D4)) { D4 v = {1, 2, 3, 4}; D4 r = f(v); return a_d4_sum(r); }
+double a_cb_if(IF (*f)(int32_t, IF)) { IF v = {-7, 0.25f}; IF r = f(5, v); return r.i + 10 * r.f; }
+int32_t a_cb_c3(C3 (*f)(C3)) { C3 v = {1, 2, 3}; C3 r = f(v); return a_c3_sum(r); }
+double a_cb_dl(DL (*f)(DL, LD)) { DL v = {0.5, 9}; LD w = {4, 0.25}; DL r = f(v, w); return r.d + 10 * r.l; }
+double a_cb_f3(F3 (*f)(F3, F3)) { F3 a = {1, 2, 3}, b = {0.5f, 0.25f, 0.125f}; F3 r = f(a, b); return a_f3_sum(r); }
+double a_cb_df(DF (*f)(DF)) { DF v = {1.25, 2.5f}; DF r = f(v); return r.d + 10 * r.f; }
+double a_cb_b40(B40 (*f)(B40, double)) { B40 v = {0.5, 3, -4, 1.5, 7}; B40 r = f(v, 2); return a_b40_sum(r); }
+int32_t a_cb_s6(S6 (*f)(S6)) { S6 v = {1, -2, 3}; S6 r = f(v); return a_s6_sum(r); }
+int64_t a_cb_l3(L3 (*f)(L3, L3)) { L3 a = {1, 2, 3}, b = {10, 20, 30}; L3 r = f(a, b); return a_l3_sum(r); }
+// the registers run out before the structs
+double a_cb_spill(double (*f)(int32_t, int32_t, int32_t, int32_t, int32_t, LD, double, double, double, double, double, double, double, DF, F2, DL, I3)) {
+	LD x = {2, 3};
+	DF w = {4, 5};
+	F2 v = {6, 7};
+	DL y = {8, 9};
+	I3 z = {10, 11, 12};
+	return f(1, 2, 3, 4, 5, x, 1, 1, 1, 1, 1, 1, 1, w, v, y, z);
+}

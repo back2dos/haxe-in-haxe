@@ -3,7 +3,9 @@ import hxmc.unsafe.*;
 // Structs by value in calls of a WebAssembly module's imports, clang's C
 // ABI for wasm32 (hxmc/src/hxmc/CAbi.hx): the host (WasmStruct.cjs) reads
 // a struct argument at the address it gets, stores a result at the address
-// given first; structs of one scalar travel as that scalar. WebAssembly only.
+// given first; structs of one scalar travel as that scalar. A callback the
+// host calls takes a struct by address and stores its result at an address
+// given first (hxmc's convention for callbacks). WebAssembly only.
 @:hxmc.struct @:publicFields class Pt {
 	var x:Float;
 	var y:Float;
@@ -30,9 +32,17 @@ import hxmc.unsafe.*;
 	@:hxmc.c("w_one_f") static function oneF(v:OneF, k:Float32):OneF;
 	@:hxmc.c("w_one_l") static function oneL(v:OneL):OneL;
 	@:hxmc.c("w_mix") static function mix(k:Int, m:Mix, z:Int):Int;
+	@:hxmc.c("w_call") static function call(fn:Ptr, buf:Ptr):Float;
 }
 
 class WasmStruct {
+	@:hxmc.callback static function scaled(p:Pt, k:Int):Pt {
+		var r = p;
+		r.x *= k;
+		r.y -= k;
+		return r;
+	}
+
 	static function main() {
 		var p = Host.ptMake(1.5, -2);
 		var q = Host.ptSwap(p);
@@ -48,6 +58,7 @@ class WasmStruct {
 			m.value.b = 200;
 			m.value.c = 3;
 			trace(g.f, haxe.Int64.toStr(Host.oneL(l.value).l), Host.mix(1, m.value, 2));
+			trace(Host.call(Callback.addr(scaled), a.alloc(32)));
 		});
 	}
 }

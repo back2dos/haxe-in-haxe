@@ -721,11 +721,12 @@ class MirBuild {
 		seal(entry);
 		cur = entry;
 		var params = [];
-		for (i in 0...fn.args.length) {
-			var pi = mk(Param, f.params[i]);
-			pi.imm = i;
-			params.push(add(pi));
-		}
+		if (fn.cAbi != null) params = cEntry() else
+			for (i in 0...fn.args.length) {
+				var pi = mk(Param, f.params[i]);
+				pi.imm = i;
+				params.push(add(pi));
+			}
 		if (nslots > 0) {
 			fr = push(nslots);
 			// (the other slots hold null or a valid reference already: rt_sp_hw)
@@ -1021,6 +1022,12 @@ class MirBuild {
 			case SReturn(null):
 				unwindTo(0);
 				retFrom(-1);
+			case SReturn(e) if (cSret >= 0):
+				// (a callback's struct result, through the memory its caller gave)
+				var v = ex(e);
+				copyBytes(cSret, v, cSretSize);
+				unwindTo(0);
+				retFrom(f.ret == Void ? -1 : cSret);
 			case SReturn(e):
 				var v = ex(e);
 				unwindTo(0);
@@ -2143,6 +2150,101 @@ class MirBuild {
 				sizes.push(8);
 				groups.push(1);
 		}
+	}
+
+	// A function entered from C with structs by value (FuncInfo.cAbi: a
+	// callback's wrapper): its parameters by the ABI's rules (CAbi), each
+	// struct's parts stored in a slot whose address is the argument (or the
+	// address of the caller's copy); a struct result returned in registers
+	// from its memory (MFunc.cRet), or copied to the memory the caller gives
+	// (cSret: a first argument, x8 on arm64). WebAssembly (hxmc's own
+	// convention for callbacks, which JavaScript calls): structs by address,
+	// a result stored at a first argument.
+	var cSret = -1;
+	var cSretSize = 0;
+
+	function cEntry():Array<Int> {
+		var sig = fn.cAbi;
+		var tys:Array<MTy> = [], groups = [], sizes = [];
+		var plan:Array<{at:Int, pass:Null<CAbi.CPass>}> = [];
+		var rc = switch sig.ret {
+			case CStruct(c): c;
+			case _: null;
+		};
+		var rr = rc == null ? null : abi.wasm ? CAbi.CRet.RSret : CAbi.ret(abi, rc);
+		var first = rr != null && rr.match(RSret) && !abi.arm;
+		if (first) {
+			tys.push(I64);
+			groups.push(1);
+			sizes.push(8);
+		}
+		for (ct in sig.args) {
+			var at = tys.length;
+			switch ct {
+				case CStruct(c):
+					var p = abi.wasm ? CAbi.CPass.PCopy : CAbi.arg(abi, c);
+					switch p {
+						case PRegs(ps) | PStack(ps):
+							for (k in 0...ps.length) {
+								tys.push(ps[k].float ? F64 : I64);
+								sizes.push(ps[k].float ? ps[k].size : 8);
+								groups.push(k > 0 ? 0 : p.match(PStack(_)) ? -ps.length : ps.length);
+							}
+						case PCopy | PScalar(_):
+							tys.push(I64);
+							sizes.push(8);
+							groups.push(1);
+					}
+					plan.push({at: at, pass: p});
+				case _:
+					tys.push(ct == CF64 ? F64 : ct == CI32 ? I32 : I64);
+					sizes.push(hxmc.ir.CInterop.sizeOf(ct));
+					groups.push(1);
+					plan.push({at: at, pass: null});
+			}
+		}
+		f.params = tys;
+		f.cParams = groups;
+		f.cParamSizes = sizes;
+		var ps = [];
+		for (i in 0...tys.length) {
+			var pi = mk(Param, tys[i]);
+			pi.imm = i;
+			ps.push(add(pi));
+		}
+		if (rc != null) {
+			cSretSize = hxmc.ir.CInterop.layout(rc).size;
+			switch rr {
+				case RSret if (first): cSret = ps[0];
+				case RSret:
+					var pi = mk(Param, I64);
+					pi.imm = -1;
+					cSret = add(pi);
+				case RRegs(parts): f.cRet = parts;
+				case _:
+			}
+			if (abi.wasm) f.ret = Void;
+		}
+		var vals = [];
+		for (k in 0...sig.args.length) {
+			var p = plan[k];
+			switch p.pass {
+				case PRegs(parts) | PStack(parts):
+					var c = switch sig.args[k] {
+						case CStruct(c): c;
+						case _: null;
+					};
+					var s = stackAddr(f.slot((hxmc.ir.CInterop.layout(c).size + 7) & ~7, 8));
+					for (j in 0...parts.length) {
+						var v = ps[p.at + j];
+						if (parts[j].float && parts[j].size == 4) store(4, s, parts[j].off, special("freg_to_f32bits", [v], I32))
+						else store(8, s, parts[j].off, v);
+					}
+					vals.push(s);
+				case _: vals.push(ps[p.at]);
+			}
+		}
+		return vals;
 	}
 
 	// n bytes from src to dst, in the largest accesses that fit

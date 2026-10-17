@@ -610,22 +610,58 @@ class Lower {
 	// is the function itself: it may run on any thread, in any state. Any
 	// other is reached through a wrapper that leaves the safe region the
 	// calling thread is in (a call of C that is not @:hxmc.fast, the only
-	// kind that may call back) and enters it again on return.
+	// kind that may call back) and enters it again on return. One taking or
+	// returning structs by value always has a wrapper (FuncInfo.cAbi).
 	public var callbackSyms = new Map<TClassField, String>();
 
 	function callback(fi:FuncInfo, cf:TClassField) {
 		var where = CInterop.posOf(cf.cfPos);
+		var tf = funcOf(cf);
+		var cargs = [], structs = false;
 		for (a in fi.args.concat([new Local(-1, "result", fi.ret)])) {
 			if (a.id == -1 && a.ty == TVoid || a.name == "sret" && fi.sret && a.id == fi.args.length - 1) continue;
-			var t = a.id == -1 ? funcOf(cf).tfType : funcOf(cf).tfArgs[a.id].variable.vType;
-			switch CInterop.ctype(t) {
+			var t = a.id == -1 ? tf.tfType : tf.tfArgs[a.id].variable.vType;
+			var ct = CInterop.ctype(t);
+			switch ct {
 				case CI32 | CI64 | CF64 | CPtr:
-				case ct:
-					throw new LowerError('@:hxmc.callback ${cf.cfName}: ${a.id == -1 ? "the result" : "parameter " + a.name} has the type ${CInterop.name(ct)}, which a callback cannot take yet (Int, Int64, Float, Ptr)', where);
+				case CStruct(_): structs = true;
+				case _:
+					throw new LowerError('@:hxmc.callback ${cf.cfName}: ${a.id == -1 ? "the result" : "parameter " + a.name} has the type ${CInterop.name(ct)}, which a callback cannot take yet (Int, Int64, Float, Ptr, a struct)', where);
 			}
+			if (a.id != -1) cargs.push(ct);
 		}
 		var sym = "hxmc_cb_" + fi.name;
 		callbackSyms.set(cf, sym);
+		if (structs) {
+			// structs by value: a wrapper receives them by the C ABI's rules
+			// (MirBuild.cEntry) and passes their addresses; a struct result
+			// comes back in a slot of its frame
+			if (fi.cSymbol != null) throw new LowerError('@:hxmc.callback ${cf.cfName} is also @:hxmc.export', where);
+			var w = new FuncInfo(fi.name + "__callback", fi.module);
+			w.cSymbol = sym;
+			w.display = fi.display;
+			w.pos = fi.pos;
+			w.cAbi = {args: cargs, ret: CInterop.ctype(tf.tfType)};
+			var n = fi.sret ? fi.args.length - 1 : fi.args.length;
+			w.args = [for (k in 0...n) new Local(fi.args[k].id, fi.args[k].name, fi.args[k].ty)];
+			w.ret = fi.ret;
+			var xs:Array<Ex> = [for (a in w.args) ELocal(a)];
+			var gc = !fi.declNoGc && targetOs != 3;
+			if (gc) w.body.push(SExpr(ECallHost("rt_blocking_leave", [], TVoid)));
+			var r = new Local(w.args.length, "r", fi.ret == TVoid ? TI32 : fi.ret);
+			if (fi.sret) {
+				w.locals.push(r);
+				w.body.push(SSet(r, ECallHost("hxmc_unsafe_Mem_structSlot", [EInt(switch fi.ret { case TStruct(_, s): s; case _: 8; }), EInt(8)], TI64)));
+				w.body.push(SExpr(ECall(fi, xs.concat([ELocal(r)]))));
+			} else if (fi.ret != TVoid) {
+				w.locals.push(r);
+				w.body.push(SSet(r, ECall(fi, xs)));
+			} else w.body.push(SExpr(ECall(fi, xs)));
+			if (gc) w.body.push(SExpr(ECallHost("rt_blocking_enter", [], TVoid)));
+			w.body.push(SReturn(fi.ret == TVoid ? null : ELocal(r)));
+			prog.funcs.push(w);
+			return;
+		}
 		if (fi.declNoGc || targetOs == 3) {
 			// (WebAssembly: one thread, no safe region)
 			if (fi.cSymbol != null) throw new LowerError('@:hxmc.callback ${cf.cfName} is also @:hxmc.export', where);

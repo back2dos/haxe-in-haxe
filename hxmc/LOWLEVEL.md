@@ -86,8 +86,14 @@ extern class SDL {
   (rax for results), others as the address of a copy, results through a
   hidden first argument. wasm32 (clang's C ABI): a struct of one scalar is
   that scalar, others the address of a copy, results stored at a first
-  argument. Corpus cases `FfiStruct` and `FfiAbi` (against zig cc, on
-  the six targets), `WasmStruct` (a JavaScript host).
+  argument. A `@:hxmc.callback` takes and returns structs by the same
+  rules (a wrapper stores the parts it receives in its frame and returns
+  the result's parts or copies it through the hidden address:
+  MirBuild.cEntry); on WebAssembly, where JavaScript calls callbacks with
+  hxmc's own convention, a struct is the address of its memory and a
+  result is stored at an address given first. Corpus cases `FfiStruct`
+  and `FfiAbi` (against zig cc, on the six targets), `WasmStruct` (a
+  JavaScript host).
 - Static libraries: hxmc's linker reads ELF, COFF and Mach-O objects and
   archives already; per-target prebuilt objects ship in haxelibs, linked
   only when referenced.
@@ -567,8 +573,8 @@ than with the C runtime.
    `Slice` done: "Struct values").
 5. `@:hxmc.noGc` as a public, complete rule, including the raw-address
    check.
-6. Structs by value across C calls (done on every ABI: "Calls and
-   linking"); the optional embedded tcc.
+6. Structs by value across C calls (done on every ABI, callbacks
+   included: "Calls and linking"); the optional embedded tcc.
 7. The runtime, and eventually the collector, rewritten in this style
    (done for the runtime's internal subset: "The runtime without C of our
    own").

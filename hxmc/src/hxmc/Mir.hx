@@ -162,6 +162,14 @@ class MFunc {
 	public var vals:Array<MIns> = [];
 	public var slots:Array<{size:Int, align:Int}> = []; // frame slots (StackAddr)
 	public var blocksHere = false; // FuncInfo.blocksHere (Inline: its calls never keep the frame)
+	// entered from C with structs by value (MirBuild.cEntry): the parameters'
+	// groups (MIns.cGroups) and C sizes (MIns.cSizes); a Param of index -1
+	// is x8 on arm64 (the address of a struct result)
+	public var cParams:Null<Array<Int>>;
+	public var cParamSizes:Null<Array<Int>>;
+	// returning a struct in registers: Ret's value is its address, these its
+	// parts (MIns.cRet)
+	public var cRet:Null<Array<CAbi.CPart>>;
 	public var entry:MBlock;
 	var marks = 0;
 

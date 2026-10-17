@@ -1,3 +1,4 @@
 exit 0
-WasmStruct.hx:39: 1.5, -2, -2, 1.5, -18.5, 13
-WasmStruct.hx:50: 10, 21, 49998
+WasmStruct.hx:49: 1.5, -2, -2, 1.5, -18.5, 13
+WasmStruct.hx:60: 10, 21, 49998
+WasmStruct.hx:61: -40

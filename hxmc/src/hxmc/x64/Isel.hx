@@ -776,7 +776,7 @@ class Isel implements hxmc.Target.Selector {
 		switch i.op {
 			case Phi:
 			case Param:
-				var loc = argLoc(m.params, i.imm);
+				var loc = m.cParams != null ? argLocs(m.params, m.cParams, i.imm + 1)[i.imm] : argLoc(m.params, i.imm);
 				var d = reg(i.id);
 				if (loc >= 0) mov(d, loc) else {
 					var x = emit(LOAD);
@@ -1117,6 +1117,27 @@ class Isel implements hxmc.Target.Selector {
 				}
 			case Switch:
 				switchIns(i, b, next);
+			case Ret if (i.a >= 0 && m.cRet != null):
+				// a struct in rax-rdx and xmm0-xmm1, from its memory (whole words)
+				var rs = [];
+				for (p in m.cRet) {
+					var r = f.newReg(p.float);
+					var l = emit(LOAD);
+					l.d = r;
+					l.size = 8;
+					memOf(l, i.a, -1, 1, p.off);
+					rs.push(r);
+				}
+				var x = new LIns(RET);
+				x.uses = [];
+				var gk = 0, fk = 0;
+				for (k in 0...rs.length) {
+					var d = m.cRet[k].float ? XMM0 + fk++ : gk++ == 0 ? RAX : RDX;
+					mov(d, rs[k], 8);
+					x.uses.push(d);
+				}
+				flush();
+				push(x);
 			case Ret:
 				var x = new LIns(RET);
 				if (i.a >= 0) {

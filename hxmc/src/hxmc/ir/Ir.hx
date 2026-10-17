@@ -175,6 +175,11 @@ class FuncInfo {
 	// it returns a struct (ret, TStruct): the last argument is the address
 	// the caller wants it at, which it also returns
 	public var sret = false;
+	// entered from C with these C types (a @:hxmc.callback's wrapper taking
+	// or returning structs by value, Lower.callback): MirBuild receives the
+	// arguments and returns the result by the ABI's rules (CAbi); a struct
+	// argument is then the address of its memory, as is the result
+	public var cAbi:Null<hxmc.ir.CInterop.CSig>;
 	public var locals:Array<Local> = [];
 	public var body:Array<Stmt> = [];
 	public var selfClass:Null<ClassInfo>; // instance method: args[0] is `this`, typed as the root object
