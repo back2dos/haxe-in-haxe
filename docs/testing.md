@@ -220,7 +220,10 @@ another process through libatspi, in a D-Bus session with AT-SPI's bus
 performs its actions; on Windows `WinAccessTest` calls the UI Automation
 providers through their COM interfaces and asks UI Automation for the
 window's element). In the browser: `make ui-web-check` (the native form on the DOM's own
-controls, `native-web.mjs`; the todo example for
+controls, `native-web.mjs`; native text editors over a drawn window,
+the page's input and textarea, typed in, submitted, tabbed between drawn
+widgets and hidden under a popup, `web-field.mjs`; the todo example (its
+fields drawn) for
 wasm32-wasi in headless Chromium on WebGPU and WebGL2, driven by real pointer
 and keyboard events, an input method's composition through the DevTools
 protocol, against `todo.png`). CI runs all five in the `gfx` job.

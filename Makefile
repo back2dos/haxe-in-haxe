@@ -208,7 +208,8 @@ help:
 ##             packages/ui/test/draw.png (also in a window, under Xvfb), then the todo example (markup, signals, widgets) driven
 ##             through its Ui and drawn against todo.png (Linux: Mesa, DejaVu Sans; BLESS=1 rewrites them)
 ## ui-web-check  the todo example as wasm32-wasi in headless Chromium, on WebGPU and WebGL2, driven by
-##             real pointer and keyboard events, against todo.png (packages/ui/test/web.mjs; DejaVu Sans)
+##             real pointer and keyboard events, against todo.png (packages/ui/test/web.mjs; DejaVu Sans);
+##             the native form (native-web.mjs); native text editors in a drawn window (web-field.mjs)
 ## audio-programs  bin/audio/AUDIO_TARGET/{AudioTest,Tone}[.exe]: packages/os's audio test and example
 ## audio-check  packages/os's audio through each back end without speakers (packages/os/test/audio.sh):
 ##             ALSA's null and file devices (Linux), CoreAudio's generic output (macOS), WASAPI
@@ -681,6 +682,8 @@ ui-web-check: $(TOOL) $(STD)
 	$(NODE) packages/ui/test/web.mjs bin/ui/WebTodo.wasm bin/ui
 	$(call hxmc,bin/ui/NativeForm.wasm,$(UI_CP) -main NativeForm $(HXMC_ARGS) -D hxmc.target=wasm32-wasi)
 	$(NODE) packages/ui/test/native-web.mjs bin/ui/NativeForm.wasm bin/ui
+	$(call hxmc,bin/ui/WebField.wasm,$(UI_CP) -main WebField $(HXMC_ARGS) -D hxmc.target=wasm32-wasi)
+	$(NODE) packages/ui/test/web-field.mjs bin/ui/WebField.wasm
 # (each macro class compiled in a child of bin/jit/haxe; the engine's report in each
 # case's port.log)
 MACROS ?= verify
