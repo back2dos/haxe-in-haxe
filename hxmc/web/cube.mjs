@@ -31,7 +31,7 @@ try {
 	else if (host.exitCode !== null && host.exitCode !== 0) show('The cube stopped (exit ' + host.exitCode + '): see the console.');
 	else {
 		api.textContent = name;
-		canvas.setAttribute('aria-label', 'A rotating textured cube under a translucent panel, drawn with ' + name);
+		canvas.setAttribute('aria-label', 'A rotating textured cube casting a soft shadow, drawn with ' + name);
 	}
 } catch (e) {
 	console.error(e);

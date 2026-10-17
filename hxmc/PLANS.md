@@ -852,9 +852,9 @@ benchmarks between -5% and +4% either way, code-layout noise).
   SPIR-V, caching emitted code across compilations (the compilation
   server).
 - Usable for a real program (done, 2026-10-16): `examples/Cube.hx`, a
-  textured, lit, depth-tested cube turning under a translucent panel, on
-  every back end and on the site (in place of the triangle, which stays the
-  package's simplest example). Uniforms at draw time
+  textured, lit, depth-tested cube turning over a blended backdrop and a
+  soft shadow, on every back end and on the site (in place of the
+  triangle, which stays the package's simplest example). Uniforms at draw time
   (`Encoder.setUniforms(slot, bytes)`, the bytes from the shader class's
   `write<Block>`): a per-frame ring of 256-byte aligned blocks
   (`UNIFORM_RING`, 256 KB): GL two buffers (frames in flight) bound by
