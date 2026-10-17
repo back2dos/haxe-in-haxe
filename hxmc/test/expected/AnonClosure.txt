@@ -1,0 +1,12 @@
+exit 0
+2.5 qq
+ww
+#1,#2,#3
+3,5
+false,true
+aa,bb
+3.5
+i42
+true
+42
+true

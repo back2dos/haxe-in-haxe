@@ -299,6 +299,17 @@ class FnLower {
 
 	// the layout an object literal of the structural type t gets, when the
 	// field `name` has the representation rt there
+	// a structural field's value. A closure is stored with the signature of
+	// the value put there, which the field's type at the read may not have
+	// (a (Int) -> X in an object passed where a type parameter makes it a
+	// (T) -> X, its argument boxed): it is read as Dynamic and kept when its
+	// signature is the one wanted, else wrapped in an adapter (coerce)
+	function anonGet(name:String, t:Ty, obj:TExpr):Ex {
+		if (!t.match(TRef(RClos(_)))) return EAnonGet(name, t, value(obj), anonHint(obj.etype, name, t));
+		var x = temp(TRef(RAny), EAnonGet(name, TRef(RAny), value(obj), anonHint(obj.etype, name, TRef(RAny))));
+		return coerce(x, TRef(RAny), t);
+	}
+
 	function anonHint(t:T, name:String, rt:Ty):Null<ShapeInfo> {
 		switch TFunctions.follow(t) {
 			case TAnon(an) if (an.aStatus.match(Closed | Const)):
@@ -906,9 +917,16 @@ class FnLower {
 				var fields = [for (i in 0...fs.length) {name: fs[i].key.name, ty: tyOf(fs[i].expr)}];
 				var sh = l.getProgram().shape(fields);
 				var vals = [];
+				// (a shape is its fields' names and representations, its types
+				// those of the first object of that shape: a reference is stored
+				// as it is, a closure with its own signature, not converted to
+				// another object's (anonGet adapts it where it is read))
 				for (sf in sh.fields)
 					for (i in 0...fs.length)
-						if (fs[i].key.name == sf.name) vals.push(coerce(xs[i], tyOf(fs[i].expr), sf.ty));
+						if (fs[i].key.name == sf.name) {
+							var from = tyOf(fs[i].expr);
+							vals.push(Ir.isRef(from) && Ir.isRef(sf.ty) ? xs[i] : coerce(xs[i], from, sf.ty));
+						}
 				ENewAnon(sh, vals);
 			case TFunction(tf): closure(tf, e);
 			case TBlock(es):
@@ -977,7 +995,7 @@ class FnLower {
 						var x = temp(t, ECallHost(l.native(Lower.nativeName(c) + "_get_" + cf.cfName), [value(obj)], t));
 						coerce(x, t, tyOf(e));
 					case Var(_) if (c.hasClassFlag(CInterface)):
-						EAnonGet(cf.cfName, tyOf(e), value(obj), anonHint(obj.etype, cf.cfName, tyOf(e)));
+						anonGet(cf.cfName, tyOf(e), obj);
 					case Var(_):
 						var ci = l.classInfo(c);
 						var idx = ci.fieldIndex(cf.cfName);
@@ -1010,7 +1028,7 @@ class FnLower {
 						coerce(x, TRef(RClos(li.sig)), tyOf(e));
 				}
 			case FAnon(cf):
-				EAnonGet(cf.cfName, tyOf(e), value(obj), anonHint(obj.etype, cf.cfName, tyOf(e)));
+				anonGet(cf.cfName, tyOf(e), obj);
 			case FDynamic(name):
 				var o = coerce(value(obj), tyOf(obj), TRef(RAny));
 				var r = temp(TRef(RAny), ECallHost(l.native("hx_dyn_get"), [o, EStr(name)], TRef(RAny)));
@@ -1018,7 +1036,7 @@ class FnLower {
 			case FClosure(cl, cf):
 				if (cl == null) {
 					// a closure of a structural field: just the field's value
-					EAnonGet(cf.cfName, tyOf(e), value(obj), anonHint(obj.etype, cf.cfName, tyOf(e)));
+					anonGet(cf.cfName, tyOf(e), obj);
 				} else if (cf.cfKind.match(Method(MethDynamic)) && isDynMethod(cl.cls, cf)) {
 					coerce(dynMethod(obj, cl.cls, cf, e), dynSlotTy(cl.cls, cf), tyOf(e));
 				} else methodClosure(obj, cl.cls, cf, e);
