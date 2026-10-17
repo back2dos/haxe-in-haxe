@@ -1,0 +1,12 @@
+exit 0
+dynamic blocks: 62585 bytes, adler D8BE815F, the same byte by byte
+the text: true
+in 32 KiB reads: 62585 bytes, adler D8BE815F, the same byte by byte
+Uncompress.run: 62585 bytes, adler D8BE815F
+stored blocks: 60000 bytes, adler 16B85114, the same byte by byte
+stored, the text: true
+raw: 5000 bytes, then AB; byte by byte 5000, then AB, same true
+wrong checksum: Invalid CRC
+wrong checksum: Invalid CRC
+cut: Eof
+cut: Eof
