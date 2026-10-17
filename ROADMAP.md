@@ -37,6 +37,7 @@ in [docs/plans/](docs/plans/README.md); what is built is in
 
 ## Next
 
+- Unstyled widgets and one theme, `@hxmc/theme`, based on shadcn/ui: its tokens, slots, variants and class lists ([theme.md](docs/plans/theme.md))
 - Graphics programs in the playground ([graphics.md](docs/plans/graphics.md#graphics-in-the-playground))
 
 ## Later
