@@ -117,6 +117,7 @@ class Corpus {
 		if (wasm && WASM_EXCLUDED.exists(c.name)) return {name: c.name, status: "excluded", detail: WASM_EXCLUDED[c.name]};
 		if (libc != "glibc" && GLIBC_ONLY.exists(c.name)) return {name: c.name, status: "excluded", detail: GLIBC_ONLY[c.name]};
 		var hxb = d + "/" + (wasm ? 'prog-$target.hxb.zip' : "prog.hxb.zip");
+		var defines = caseDefines(c.cps[0] + "/" + c.main + ".hx");
 		var t0 = now();
 		// (WebAssembly: the program is typed for it, with its runtime)
 		if (!FileSystem.exists(hxb) || mtime(hxb) < Math.max(newest(c.cps), mtime(STD + "/.stamp"))) {
@@ -125,7 +126,7 @@ class Corpus {
 			for (cp in c.cps) cmd = cmd.concat(["-cp", FileSystem.fullPath(cp)]);
 			cmd = cmd.concat(["-cp", FileSystem.fullPath(STD), "-main", c.main, "--custom-target", 'hxmc=$d/x', "--hxb", hxb, "-D", "disable-parallelism", "--no-output"]);
 			if (wasm) cmd = cmd.concat(["-D", "hxmc.target=" + target]);
-			var r = exec(cmd);
+			var r = exec(cmd.concat(defines));
 			if (r.code != 0) return {name: c.name, status: "hxb-fail", detail: tail(r.out + r.err, 1500)};
 		}
 		var expected = EXPECTED + "/" + c.name + ".txt";
@@ -140,11 +141,7 @@ class Corpus {
 		if (libc != null) cmd = cmd.concat(["-D", "hxmc.libc=" + libc]);
 		if (native.links.length > 0) cmd = cmd.concat(["-D", "hxmc.link=" + native.links.join(",")]);
 		if (wasm && wasmEh != null) cmd = cmd.concat(["-D", "hxmc.wasm-eh=" + wasmEh]);
-		var src = c.cps[0] + "/" + c.main + ".hx";
-		if (FileSystem.exists(src))
-			for (l in File.getContent(src).split("\n"))
-				if (l.trim().startsWith("// define: ")) cmd = cmd.concat(["-D", l.trim().substr(11)]);
-		var r = exec(cmd, {env: ["HXMC_STATS" => "1"]});
+		var r = exec(cmd.concat(defines), {env: ["HXMC_STATS" => "1"]});
 		File.saveContent(d + "/hxmc.log", r.out + r.err);
 		if (r.code != 0) return {name: c.name, status: "hxmc-fail", detail: tail(r.out + r.err, 2000)};
 		var re = ~/hxmc: ([0-9]+) functions/;
@@ -181,6 +178,15 @@ class Corpus {
 			return {name: c.name, status: "differs", detail: 'diff $expected $d/got.txt\n' + tail(r.err, 800)};
 		}
 		return {name: c.name, status: "ok", detail: '${fixed(now() - t0)}s $nf'};
+	}
+
+	// Per-case defines must apply to typing as well as code generation.
+	public static function caseDefines(src:String):Array<String> {
+		var result = [];
+		if (FileSystem.exists(src))
+			for (l in File.getContent(src).split("\n"))
+				if (l.trim().startsWith("// define: ")) result = result.concat(["-D", l.trim().substr(11)]);
+		return result;
 	}
 
 	// A case the compiler must reject: every `// expect: <text>` line of its
