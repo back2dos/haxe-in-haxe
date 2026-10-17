@@ -607,8 +607,8 @@ jobs:
           set -ex
           for t in windows-x86_64 windows-arm64; do
             make gfx-programs ui-programs GFX_TARGET=$t
-            cp bin/ui/$t/UiDrawTest.exe bin/ui/$t/ClipboardTest.exe bin/gfx/$t/
-            tar czf bin/gfx-$t.tar.gz -C bin/gfx/$t GfxTest.exe Triangle.exe UiDrawTest.exe ClipboardTest.exe
+            cp bin/ui/$t/UiDrawTest.exe bin/ui/$t/ClipboardTest.exe bin/ui/$t/NativeTest.exe bin/gfx/$t/
+            tar czf bin/gfx-$t.tar.gz -C bin/gfx/$t GfxTest.exe Triangle.exe UiDrawTest.exe ClipboardTest.exe NativeTest.exe
           done
       - uses: actions/upload-artifact@v7
         with: {name: gfx-windows, path: "bin/gfx-windows-*.tar.gz", retention-days: 3}
@@ -676,6 +676,8 @@ jobs:
           HXMC_GFX_SOFTWARE=1 gfx/UiDrawTest.exe none gfx/ui-smoke.png --smoke
           # (the clipboard between two windows: Win32's CF_UNICODETEXT)
           gfx/ClipboardTest.exe
+          # (hxmc.ui.native on Win32's controls)
+          gfx/NativeTest.exe
       - uses: actions/upload-artifact@v7
         if: always()
         with: {name: 'gfx-images-${{ matrix.target }}', path: gfx/*.png, retention-days: 7}
