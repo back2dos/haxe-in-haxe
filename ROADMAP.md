@@ -37,11 +37,14 @@ in [docs/plans/](docs/plans/README.md); what is built is in
 
 ## Next
 
+- A Canvas ready for documents: paths, gradients, glyph runs, images with their source, host apart from canvas ([document.md](docs/plans/document.md))
+- Native or drawn per widget: native text fields by default, platform views in drawn trees, a DOM renderer for the widgets in the browser ([native-or-drawn.md](docs/plans/native-or-drawn.md))
 - Unstyled widgets and one theme, `@hxmc/theme`, based on shadcn/ui: its tokens, slots, variants and class lists ([theme.md](docs/plans/theme.md))
 - Graphics programs in the playground ([graphics.md](docs/plans/graphics.md#graphics-in-the-playground))
 
 ## Later
 
+- Documents: paged layout and `@hxmc/pdf` (PDF, SVG, images) ([document.md](docs/plans/document.md))
 - Escape analysis ([codegen.md](docs/plans/codegen.md#escape-analysis))
 - Debugging: a Windows PDB, Mach-O `__unwind_info`, variables, DWARF for WebAssembly ([codegen.md](docs/plans/codegen.md#debugging-information))
 - The collector: incremental major marking, an aging survivor space, a memory limit ([runtime.md](docs/plans/runtime.md#the-collector-longer-term))
