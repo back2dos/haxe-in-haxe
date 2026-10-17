@@ -82,6 +82,8 @@ class Stats {
 	};
 }
 
+// port: the list is kept oldest first (OCaml conses each callback onto the front,
+// and run walks it reversed): unshift per registration was quadratic
 @:structInit class CallbackList {
 	public var value:Array<Void->Void>;
 
@@ -107,28 +109,26 @@ class CompilerCallbacks {
 
 	public function new() {}
 
-	public function addBeforeTyperCreate(f:Void->Void):Void beforeTyperCreate.value.unshift(f);
+	public function addBeforeTyperCreate(f:Void->Void):Void beforeTyperCreate.value.push(f);
 
-	public function addAfterInitMacros(f:Void->Void):Void afterInitMacros.value.unshift(f);
+	public function addAfterInitMacros(f:Void->Void):Void afterInitMacros.value.push(f);
 
 	public function addAfterTyping(f:Array<ModuleType>->Void):Void afterTyping.unshift(f);
 
-	public function addBeforeSave(f:Void->Void):Void beforeSave.value.unshift(f);
+	public function addBeforeSave(f:Void->Void):Void beforeSave.value.push(f);
 
-	public function addAfterSave(f:Void->Void):Void afterSave.value.unshift(f);
+	public function addAfterSave(f:Void->Void):Void afterSave.value.push(f);
 
-	public function addAfterFilters(f:Void->Void):Void afterFilters.value.unshift(f);
+	public function addAfterFilters(f:Void->Void):Void afterFilters.value.push(f);
 
-	public function addAfterGeneration(f:Void->Void):Void afterGeneration.value.unshift(f);
+	public function addAfterGeneration(f:Void->Void):Void afterGeneration.value.push(f);
 
 	public function addNullSafetyReport(f:NullSafetyReportCallback):Void nullSafetyReport.unshift(f);
 
 	public function run(handleError:CompilerError->Void, r:CallbackList):Void {
 		while (r.value.length > 0) {
-			var l = r.value;
+			var ordered = r.value;
 			r.value = [];
-			var ordered = l.copy();
-			ordered.reverse();
 			for (f in ordered) try f()
 			catch (e:core.Error.TypingError) handleError(e.error);
 		}
