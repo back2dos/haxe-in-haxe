@@ -725,6 +725,9 @@ jobs:
           # (the clipboard between two windows: NSPasteboard)
           npx haxe -lib hxmc.os -cp "$u/test" -main ClipboardTest --custom-target hxmc=gfx/ClipboardTest
           gfx/ClipboardTest
+          # (hxmc.ui.native on AppKit's controls)
+          npx haxe -lib hxmc.ui -cp "$u/test" -cp "$u/examples" -main NativeTest --custom-target hxmc=gfx/NativeTest
+          gfx/NativeTest gfx/native-macos.png
       - uses: actions/upload-artifact@v7
         if: always()
         with: {name: gfx-images-macos-arm64, path: "${{ runner.temp }}/app/gfx/*.png", retention-days: 7, if-no-files-found: ignore}
