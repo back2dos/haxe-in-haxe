@@ -106,7 +106,9 @@ focus; PNG files of every colour type, depth, filter and interlacing,
 expected, checked against Chromium's decoder when written; JPEG files of
 every kind the decoder reads, `packages/ui/test/jpeg/`, which
 `jpeg-cases.mjs` writes with the pixels Chromium decodes, matched exactly,
-and GIF files the same way (`gif/`, `gif-cases.mjs`);
+and GIF files the same way (`gif/`, `gif-cases.mjs`); SVG documents drawn
+by `Svg` against Chromium's pixels (`svg/`, `svg-cases.mjs`; the shapes
+must agree, edge anti-aliasing may differ);
 popups placed, hit and dismissed; then signals and markup rendered into
 nodes, the popup widgets driven by pointer and keys, a VirtualList of
 100000 rows scrolled; the examples of `packages/ui/GUIDE.md`, run by
