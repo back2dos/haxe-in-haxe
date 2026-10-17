@@ -229,7 +229,8 @@ exists, the status, the full path), as an environment variable it reads
 module is restored while they are the same (a file touched but not changed
 leaves it), its interface is its whole content (they may change it), and a
 variant per value is kept (`registerModuleDependency` keeps working, the
-file then both a dependency and a read). `@:hxmc.noCache` on a type, or
+file then both a dependency and a read; a macro reading its module's own
+file adds nothing). `@:hxmc.noCache` on a type, or
 `-D hxmc.no-cache=<package, module or library directory,...>` (read without
 entering the key), makes a module typed every build, its dependents with
 it; `HXMC_MODULE_CACHE_LOG=1` says why a module was typed (`Clock typed

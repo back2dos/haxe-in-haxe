@@ -74,9 +74,19 @@ import hxmc.ModuleStore;
 // after the module was restored runs the build again, with the modules
 // whose macros keep state there typed from their source
 // (HXMC_MODULE_CACHE_RETYPE); an edited module whose macros keep state has
-// the others that keep it there typed from the start. HXMC_STATS=1
-// prints what the cache did, HXMC_MODULE_CACHE_LOG=1 each module checked
-// and each one not kept.
+// the others that keep it there typed from the start.
+//
+// Nondeterministic macros (EvalStdLib.volatileHook, fileHook, envHook: the
+// macro std's natives, for the module being typed when the macro runs): a
+// call whose result changes from run to run (the time, randomness, the
+// network, processes) makes the module typed every build ("!" in its
+// macroState, "!!" when its dependents can copy the result: then what
+// stands for it in their hashes is new every build); a file or an
+// environment variable a macro reads is a read of the module (roles 3 and
+// 2 beside the defines' 0 and 1), kept with its value. @:hxmc.noCache and
+// -D hxmc.no-cache type a module every build, its dependents with it.
+// HXMC_STATS=1 prints what the cache did, HXMC_MODULE_CACHE_LOG=1 each
+// module checked, each one not kept and why one is typed every build.
 //
 // A build rewrites its key's index when it typed modules or restored other
 // variants: its modules first, then the variants it did not use, at most
@@ -174,13 +184,16 @@ class ModuleCache {
 			var s = state;
 			if (s == null) return typeExpr(ctx, e, withType, mode);
 			s.typingStack.push(ctx.m.curmod);
-			s.typerStack.push({ctx: ctx, depth: s.typingStack.length});
+			s.typerStack.push(ctx);
+			s.typerDepths.push(s.typingStack.length);
 			var r = try typeExpr(ctx, e, withType, mode) catch (x:Dynamic) {
 				s.typerStack.pop();
+				s.typerDepths.pop();
 				s.typingStack.pop();
 				throw x;
 			}
 			s.typerStack.pop();
+			s.typerDepths.pop();
 			s.typingStack.pop();
 			return r;
 		}
@@ -323,10 +336,9 @@ class ModuleCache {
 	static function leakyCall(s:ModuleCacheState):Bool {
 		var n = s.typerStack.length;
 		if (n == 0) return true;
-		var t = s.typerStack[n - 1];
 		// (a build macro, a lazy typing: not an expression of a field)
-		if (t.depth != s.typingStack.length) return true;
-		var cf = t.ctx.f.curfield;
+		if (s.typerDepths[n - 1] != s.typingStack.length) return true;
+		var cf = s.typerStack[n - 1].f.curfield;
 		if (cf == null) return true;
 		switch cf.cfKind {
 			case Method(MethInline | MethMacro): return true;
@@ -1143,15 +1155,33 @@ class ModuleCache {
 						for (n in names.keys())
 							reads.push({role: role, name: n, value: s.value(role, n)});
 					var mr = s.moduleReads.get(role + "|" + v.key);
-					if (mr != null)
+					// (its macros reading its own file, as the view package's markup
+					// does: already what the module is checked by)
+					var own = haxe.io.Path.normalize(core.Path.getFullPath(file));
+					if (mr != null) {
+						var any = false;
 						for (k in mr.keys()) {
 							var i = k.indexOf("\x00");
 							var r = Std.parseInt(k.substr(0, i));
 							var n = k.substr(i + 1);
+							if (r == 3 && n.substr(n.indexOf(":") + 1) == own) continue;
+							any = true;
 							reads.push({role: r, name: n, value: s.value(r, n)});
 						}
+						if (!any) mr = null;
+					}
 					reads.sort((a, b) -> Reflect.compare(a.role + a.name, b.role + b.name));
 					v.reads = reads;
+					// (files and environment variables its macros read)
+					var outside = false;
+					for (r in reads)
+						if (r.role >= 2) {
+							outside = true;
+							if (s.log)
+								Sys.println("hxmc: module cache: " + core.Globals.sTypePath(m.mPath) + " reads "
+									+ (r.role == 2 ? "environment variable " + r.name : r.name) + " (its macros)");
+						}
+					if (outside) s.readingCount++;
 					v.buildReads = buildReads;
 					var ifaceMode = (x.mKind == MCode || x.mKind == MMacro) && StringTools.endsWith(file, ".hx") && !macroDefines && mr == null
 						&& !optimize && !macroBuilt(m);
@@ -1375,7 +1405,7 @@ class ModuleCache {
 		if (stats())
 			Sys.println('hxmc: module cache: ${s.checked} checked (${Std.int(s.checkTime * 1000)} ms), ${s.written} modules encoded (${Std.int(s.captureTime * 1000)} ms), '
 				+ '${s.typedUnder} typed again under restored ones, ${s.cycleTyped} with their cycle, interfaces ${Std.int(s.ifaceTime * 1000)} ms, $blobs blobs, index ${wrote ? "written" : "unchanged"} (${ms(t0)} ms), '
-				+ '${s.typedCount} typed from source, ${s.volatileCount} every build'
+				+ '${s.typedCount} typed from source, ${s.volatileCount} every build, ${s.readingCount} reading files or the environment'
 				+ (s.volatileReason != null ? ' (not written: ${s.volatileReason})' : ''));
 	}
 }
@@ -1592,9 +1622,10 @@ class ModuleCacheState {
 	// the static variables of macro classes used by the macros run in the
 	// typing of a module (Variant.macroState)
 	public var liveState:Array<{maker:Dynamic, path:String}> = [];
-	// the typers of the expressions being typed, each with the depth of the
-	// typing stack its expression is at (ModuleCache.leakyCall)
-	public var typerStack:Array<{ctx:context.Typecore.Typer, depth:Int}> = [];
+	// the typers of the expressions being typed through typeExprRef, and the
+	// depth of the typing stack each is at (ModuleCache.leakyCall)
+	public var typerStack:Array<context.Typecore.Typer> = [];
+	public var typerDepths:Array<Int> = [];
 	// per module (role and key) whose macros' results change from run to run,
 	// whether its dependents can copy them (ModuleCache.onVolatile)
 	public var volatileMakers = new Map<String, Bool>();
@@ -1605,6 +1636,8 @@ class ModuleCacheState {
 	// the modules typed from their source, those typed every build
 	public var typedCount = 0;
 	public var volatileCount = 0;
+	// the modules typed in this build whose macros read files or the environment
+	public var readingCount = 0;
 	public var lastStateMaker:Null<Dynamic> = null;
 	public var lastStateClass:Null<TClass> = null;
 	// the macro classes this build's macros used, the restored modules whose
